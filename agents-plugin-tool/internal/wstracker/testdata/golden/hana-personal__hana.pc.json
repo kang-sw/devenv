@@ -1,0 +1,1046 @@
+{
+ "store": "hana-personal",
+ "viewer": "hana.pc",
+ "now": "2026-11-06T09:00:00Z",
+ "staleDays": 3,
+ "genesis": {
+  "admins": [
+   "hana"
+  ],
+  "priority": {
+   "names": [
+    "알림",
+    "업무",
+    "긴급"
+   ],
+   "default": 1
+  },
+  "members": [
+   {
+    "id": "hana",
+    "name": "Hana Seo",
+    "keys": [
+     "hana-k1"
+    ],
+    "leads": []
+   }
+  ]
+ },
+ "events": [
+  {
+   "member": "hana",
+   "clone": "pc",
+   "seq": 1,
+   "ts": "2026-11-02T09:00:00Z",
+   "type": "item.create",
+   "payload": {
+    "kind": "task",
+    "title": "Write talk proposal",
+    "project": "conf-2027",
+    "body": "Outline, abstract, bio.",
+    "due": "2026-11-20",
+    "priority": 2
+   },
+   "seen": {},
+   "verdict": "valid"
+  },
+  {
+   "member": "hana",
+   "clone": "pc",
+   "seq": 2,
+   "ts": "2026-11-02T09:00:00Z",
+   "type": "item.assign",
+   "payload": {
+    "item": "hana.pc#1",
+    "mode": "chosen",
+    "completion": "assignee",
+    "people": [
+     "hana"
+    ]
+   },
+   "seen": {},
+   "verdict": "valid"
+  },
+  {
+   "member": "hana",
+   "clone": "pc",
+   "seq": 3,
+   "ts": "2026-11-02T09:10:00Z",
+   "type": "item.create",
+   "payload": {
+    "kind": "topic",
+    "title": "Reading list",
+    "body": "Event sourcing, CRDT survey, git internals."
+   },
+   "seen": {},
+   "verdict": "valid"
+  },
+  {
+   "member": "hana",
+   "clone": "pc",
+   "seq": 4,
+   "ts": "2026-11-02T09:20:00Z",
+   "type": "item.create",
+   "payload": {
+    "kind": "todo",
+    "title": "Renew passport",
+    "due": "2026-11-15",
+    "priority": 1
+   },
+   "seen": {},
+   "verdict": "valid"
+  },
+  {
+   "member": "hana",
+   "clone": "pc",
+   "seq": 5,
+   "ts": "2026-11-02T09:20:00Z",
+   "type": "item.assign",
+   "payload": {
+    "item": "hana.pc#4",
+    "mode": "chosen",
+    "completion": "assignee",
+    "people": [
+     "hana"
+    ]
+   },
+   "seen": {},
+   "verdict": "valid"
+  },
+  {
+   "member": "hana",
+   "clone": "pc",
+   "seq": 6,
+   "ts": "2026-11-02T09:30:00Z",
+   "type": "item.create",
+   "payload": {
+    "kind": "todo",
+    "title": "Try the tracker mockup",
+    "priority": 0
+   },
+   "seen": {},
+   "verdict": "valid"
+  },
+  {
+   "member": "hana",
+   "clone": "pc",
+   "seq": 7,
+   "ts": "2026-11-02T09:30:00Z",
+   "type": "item.assign",
+   "payload": {
+    "item": "hana.pc#6",
+    "mode": "chosen",
+    "completion": "assignee",
+    "people": [
+     "hana"
+    ]
+   },
+   "seen": {},
+   "verdict": "valid"
+  },
+  {
+   "member": "hana",
+   "clone": "pc",
+   "seq": 8,
+   "ts": "2026-11-02T10:00:00Z",
+   "type": "item.status",
+   "payload": {
+    "item": "hana.pc#1",
+    "status": "doing",
+    "note": "outline done"
+   },
+   "seen": {},
+   "verdict": "valid",
+   "origin": "agent-auto"
+  },
+  {
+   "member": "hana",
+   "clone": "pc",
+   "seq": 9,
+   "ts": "2026-11-02T10:30:00Z",
+   "type": "item.close",
+   "payload": {
+    "item": "hana.pc#4"
+   },
+   "seen": {},
+   "verdict": "valid"
+  },
+  {
+   "member": "hana",
+   "clone": "pc",
+   "seq": 10,
+   "ts": "2026-11-02T11:00:00Z",
+   "type": "comment.add",
+   "payload": {
+    "item": "hana.pc#3",
+    "body": "Add: Designing Data-Intensive Applications, chapter 5."
+   },
+   "seen": {},
+   "verdict": "valid"
+  },
+  {
+   "member": "hana",
+   "clone": "pc",
+   "seq": 11,
+   "ts": "2026-11-02T11:10:00Z",
+   "type": "item.edit",
+   "payload": {
+    "item": "hana.pc#1",
+    "title": "Write talk proposal (event-sourced trackers)"
+   },
+   "seen": {},
+   "verdict": "valid"
+  },
+  {
+   "member": "hana",
+   "clone": "pc",
+   "seq": 12,
+   "ts": "2026-11-02T11:20:00Z",
+   "type": "item.create",
+   "payload": {
+    "kind": "task",
+    "title": "Abstract",
+    "parent": "hana.pc#1",
+    "due": "2026-11-12",
+    "priority": 1
+   },
+   "seen": {},
+   "verdict": "valid"
+  },
+  {
+   "member": "hana",
+   "clone": "pc",
+   "seq": 13,
+   "ts": "2026-11-02T11:20:00Z",
+   "type": "item.assign",
+   "payload": {
+    "item": "hana.pc#12",
+    "mode": "chosen",
+    "completion": "assignee",
+    "people": [
+     "hana"
+    ]
+   },
+   "seen": {},
+   "verdict": "valid"
+  },
+  {
+   "member": "hana",
+   "clone": "pc",
+   "seq": 14,
+   "ts": "2026-11-02T11:20:00Z",
+   "type": "item.status",
+   "payload": {
+    "item": "hana.pc#12",
+    "status": "blocked",
+    "note": "waiting for the CFP topic list"
+   },
+   "seen": {},
+   "verdict": "valid"
+  }
+ ],
+ "expected": {
+  "viewer": {
+   "member": "hana",
+   "stream": "hana.pc",
+   "name": "Hana Seo",
+   "admin": true,
+   "lead": null,
+   "followers": [],
+   "reach": {},
+   "isMember": true
+  },
+  "priority": {
+   "names": [
+    "알림",
+    "업무",
+    "긴급"
+   ],
+   "default": 1
+  },
+  "members": {
+   "hana": {
+    "id": "hana",
+    "name": "Hana Seo",
+    "leads": [],
+    "keys": [
+     "hana-k1"
+    ],
+    "revoked": [],
+    "removed": null,
+    "joined": null,
+    "admin": true,
+    "children": [],
+    "depth": null,
+    "role": "root"
+   }
+  },
+  "admins": [
+   "hana"
+  ],
+  "rolesProblems": [],
+  "items": {
+   "hana.pc#1": {
+    "id": "hana.pc#1",
+    "alias": "hana.pc-1",
+    "kind": "task",
+    "title": "Write talk proposal (event-sourced trackers)",
+    "body": "Outline, abstract, bio.",
+    "project": "conf-2027",
+    "due": "2026-11-20",
+    "priority": 2,
+    "priorityLevel": 2,
+    "priorityName": "긴급",
+    "parent": null,
+    "author": "hana",
+    "ts": "2026-11-02T09:00:00Z",
+    "hidden": false,
+    "edited": {
+     "id": "hana.pc#11",
+     "ts": "2026-11-02T11:10:00Z"
+    },
+    "status": "doing",
+    "counted": true,
+    "rollup": {
+     "total": 1,
+     "counts": {
+      "blocked": 1
+     },
+     "blocked": [
+      "hana.pc#12"
+     ]
+    },
+    "lastActivity": "2026-11-02T11:10:00Z",
+    "started": "2026-11-02T10:00:00Z",
+    "children": [
+     "hana.pc#12"
+    ],
+    "assignments": [
+     "hana.pc#2>hana"
+    ],
+    "pending": [],
+    "thread": [
+     "hana.pc#1",
+     "hana.pc#2",
+     "hana.pc#8",
+     "hana.pc#11",
+     "hana.pc#12"
+    ],
+    "concurrent": 0,
+    "depth": 0,
+    "chain": [
+     "hana"
+    ]
+   },
+   "hana.pc#3": {
+    "id": "hana.pc#3",
+    "alias": "hana.pc-3",
+    "kind": "topic",
+    "title": "Reading list",
+    "body": "Event sourcing, CRDT survey, git internals.",
+    "project": "",
+    "due": null,
+    "priority": 1,
+    "priorityLevel": 1,
+    "priorityName": "업무",
+    "parent": null,
+    "author": "hana",
+    "ts": "2026-11-02T09:10:00Z",
+    "hidden": false,
+    "edited": null,
+    "status": null,
+    "counted": false,
+    "rollup": {
+     "total": 0,
+     "counts": {},
+     "blocked": []
+    },
+    "lastActivity": "2026-11-02T11:00:00Z",
+    "started": null,
+    "children": [],
+    "assignments": [],
+    "pending": [],
+    "thread": [
+     "hana.pc#3",
+     "hana.pc#10"
+    ],
+    "concurrent": 0,
+    "depth": 0,
+    "chain": [
+     "hana"
+    ]
+   },
+   "hana.pc#4": {
+    "id": "hana.pc#4",
+    "alias": "hana.pc-4",
+    "kind": "todo",
+    "title": "Renew passport",
+    "body": "",
+    "project": "",
+    "due": "2026-11-15",
+    "priority": 1,
+    "priorityLevel": 1,
+    "priorityName": "업무",
+    "parent": null,
+    "author": "hana",
+    "ts": "2026-11-02T09:20:00Z",
+    "hidden": false,
+    "edited": null,
+    "status": "done",
+    "counted": true,
+    "rollup": {
+     "total": 0,
+     "counts": {},
+     "blocked": []
+    },
+    "lastActivity": "2026-11-02T10:30:00Z",
+    "started": null,
+    "children": [],
+    "assignments": [
+     "hana.pc#5>hana"
+    ],
+    "pending": [],
+    "thread": [
+     "hana.pc#4",
+     "hana.pc#5",
+     "hana.pc#9"
+    ],
+    "concurrent": 0,
+    "depth": 0,
+    "chain": [
+     "hana"
+    ]
+   },
+   "hana.pc#6": {
+    "id": "hana.pc#6",
+    "alias": "hana.pc-6",
+    "kind": "todo",
+    "title": "Try the tracker mockup",
+    "body": "",
+    "project": "",
+    "due": null,
+    "priority": 0,
+    "priorityLevel": 0,
+    "priorityName": "알림",
+    "parent": null,
+    "author": "hana",
+    "ts": "2026-11-02T09:30:00Z",
+    "hidden": false,
+    "edited": null,
+    "status": "todo",
+    "counted": true,
+    "rollup": {
+     "total": 0,
+     "counts": {},
+     "blocked": []
+    },
+    "lastActivity": "2026-11-02T09:30:00Z",
+    "started": null,
+    "children": [],
+    "assignments": [
+     "hana.pc#7>hana"
+    ],
+    "pending": [],
+    "thread": [
+     "hana.pc#6",
+     "hana.pc#7"
+    ],
+    "concurrent": 0,
+    "depth": 0,
+    "chain": [
+     "hana"
+    ]
+   },
+   "hana.pc#12": {
+    "id": "hana.pc#12",
+    "alias": "hana.pc-12",
+    "kind": "task",
+    "title": "Abstract",
+    "body": "",
+    "project": "",
+    "due": "2026-11-12",
+    "priority": 1,
+    "priorityLevel": 1,
+    "priorityName": "업무",
+    "parent": "hana.pc#1",
+    "author": "hana",
+    "ts": "2026-11-02T11:20:00Z",
+    "hidden": false,
+    "edited": null,
+    "status": "blocked",
+    "counted": true,
+    "rollup": {
+     "total": 0,
+     "counts": {},
+     "blocked": []
+    },
+    "lastActivity": "2026-11-02T11:20:00Z",
+    "started": null,
+    "children": [],
+    "assignments": [
+     "hana.pc#13>hana"
+    ],
+    "pending": [],
+    "thread": [
+     "hana.pc#12",
+     "hana.pc#13",
+     "hana.pc#14"
+    ],
+    "concurrent": 0,
+    "depth": 1,
+    "chain": [
+     "hana",
+     "hana"
+    ]
+   }
+  },
+  "itemOrder": [
+   "hana.pc#1",
+   "hana.pc#12",
+   "hana.pc#3",
+   "hana.pc#4",
+   "hana.pc#6"
+  ],
+  "assignments": {
+   "hana.pc#2>hana": {
+    "id": "hana.pc#2>hana",
+    "item": "hana.pc#1",
+    "to": "hana",
+    "by": "hana",
+    "sender": "hana",
+    "completion": "assignee",
+    "state": "live",
+    "forced": true,
+    "status": "doing",
+    "note": "outline done",
+    "noteBy": "hana",
+    "via": "hana.pc#2",
+    "ts": "2026-11-02T09:00:00Z",
+    "inherited": false,
+    "ruleLevels": null,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": null,
+    "restored": null,
+    "restores": null,
+    "accepted": null,
+    "leadAtAccept": null,
+    "ended": null,
+    "depth": 0,
+    "statusOrigin": "agent-auto",
+    "statusBy": "hana",
+    "lastUpdate": "2026-11-02T10:00:00Z",
+    "stale": true
+   },
+   "hana.pc#5>hana": {
+    "id": "hana.pc#5>hana",
+    "item": "hana.pc#4",
+    "to": "hana",
+    "by": "hana",
+    "sender": "hana",
+    "completion": "assignee",
+    "state": "live",
+    "forced": true,
+    "status": "done",
+    "note": null,
+    "noteBy": "hana",
+    "via": "hana.pc#5",
+    "ts": "2026-11-02T09:20:00Z",
+    "inherited": false,
+    "ruleLevels": null,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": null,
+    "restored": null,
+    "restores": null,
+    "accepted": null,
+    "leadAtAccept": null,
+    "ended": null,
+    "depth": 0,
+    "statusOrigin": "human",
+    "statusBy": "hana",
+    "lastUpdate": "2026-11-02T10:30:00Z",
+    "stale": false
+   },
+   "hana.pc#7>hana": {
+    "id": "hana.pc#7>hana",
+    "item": "hana.pc#6",
+    "to": "hana",
+    "by": "hana",
+    "sender": "hana",
+    "completion": "assignee",
+    "state": "live",
+    "forced": true,
+    "status": "todo",
+    "note": null,
+    "noteBy": null,
+    "via": "hana.pc#7",
+    "ts": "2026-11-02T09:30:00Z",
+    "inherited": false,
+    "ruleLevels": null,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": null,
+    "restored": null,
+    "restores": null,
+    "accepted": null,
+    "leadAtAccept": null,
+    "ended": null,
+    "depth": 0,
+    "statusOrigin": null,
+    "statusBy": null,
+    "lastUpdate": "2026-11-02T09:30:00Z",
+    "stale": false
+   },
+   "hana.pc#13>hana": {
+    "id": "hana.pc#13>hana",
+    "item": "hana.pc#12",
+    "to": "hana",
+    "by": "hana",
+    "sender": "hana",
+    "completion": "assignee",
+    "state": "live",
+    "forced": true,
+    "status": "blocked",
+    "note": "waiting for the CFP topic list",
+    "noteBy": "hana",
+    "via": "hana.pc#13",
+    "ts": "2026-11-02T11:20:00Z",
+    "inherited": false,
+    "ruleLevels": null,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": null,
+    "restored": null,
+    "restores": null,
+    "accepted": null,
+    "leadAtAccept": null,
+    "ended": null,
+    "depth": 0,
+    "statusOrigin": "human",
+    "statusBy": "hana",
+    "lastUpdate": "2026-11-02T11:20:00Z",
+    "stale": true
+   }
+  },
+  "comments": {
+   "hana.pc#10": {
+    "id": "hana.pc#10",
+    "item": "hana.pc#3",
+    "author": "hana",
+    "body": "Add: Designing Data-Intensive Applications, chapter 5.",
+    "reply_to": null,
+    "ts": "2026-11-02T11:00:00Z",
+    "edited": null,
+    "hidden": null
+   }
+  },
+  "events": [
+   {
+    "id": "hana.pc#1",
+    "alias": "hana.pc-1",
+    "stream": "hana.pc",
+    "member": "hana",
+    "seq": 1,
+    "ts": "2026-11-02T09:00:00Z",
+    "type": "item.create",
+    "origin": "human",
+    "payload": {
+     "kind": "task",
+     "title": "Write talk proposal",
+     "project": "conf-2027",
+     "body": "Outline, abstract, bio.",
+     "due": "2026-11-20",
+     "priority": 2
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "hana.pc#1",
+    "parentThread": null,
+    "local": true,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "hana.pc#2",
+    "alias": "hana.pc-2",
+    "stream": "hana.pc",
+    "member": "hana",
+    "seq": 2,
+    "ts": "2026-11-02T09:00:00Z",
+    "type": "item.assign",
+    "origin": "human",
+    "payload": {
+     "item": "hana.pc#1",
+     "mode": "chosen",
+     "completion": "assignee",
+     "people": [
+      "hana"
+     ]
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "hana.pc#1",
+    "parentThread": null,
+    "local": true,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "hana.pc#3",
+    "alias": "hana.pc-3",
+    "stream": "hana.pc",
+    "member": "hana",
+    "seq": 3,
+    "ts": "2026-11-02T09:10:00Z",
+    "type": "item.create",
+    "origin": "human",
+    "payload": {
+     "kind": "topic",
+     "title": "Reading list",
+     "body": "Event sourcing, CRDT survey, git internals."
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "hana.pc#3",
+    "parentThread": null,
+    "local": true,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "hana.pc#4",
+    "alias": "hana.pc-4",
+    "stream": "hana.pc",
+    "member": "hana",
+    "seq": 4,
+    "ts": "2026-11-02T09:20:00Z",
+    "type": "item.create",
+    "origin": "human",
+    "payload": {
+     "kind": "todo",
+     "title": "Renew passport",
+     "due": "2026-11-15",
+     "priority": 1
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "hana.pc#4",
+    "parentThread": null,
+    "local": true,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "hana.pc#5",
+    "alias": "hana.pc-5",
+    "stream": "hana.pc",
+    "member": "hana",
+    "seq": 5,
+    "ts": "2026-11-02T09:20:00Z",
+    "type": "item.assign",
+    "origin": "human",
+    "payload": {
+     "item": "hana.pc#4",
+     "mode": "chosen",
+     "completion": "assignee",
+     "people": [
+      "hana"
+     ]
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "hana.pc#4",
+    "parentThread": null,
+    "local": true,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "hana.pc#6",
+    "alias": "hana.pc-6",
+    "stream": "hana.pc",
+    "member": "hana",
+    "seq": 6,
+    "ts": "2026-11-02T09:30:00Z",
+    "type": "item.create",
+    "origin": "human",
+    "payload": {
+     "kind": "todo",
+     "title": "Try the tracker mockup",
+     "priority": 0
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "hana.pc#6",
+    "parentThread": null,
+    "local": true,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "hana.pc#7",
+    "alias": "hana.pc-7",
+    "stream": "hana.pc",
+    "member": "hana",
+    "seq": 7,
+    "ts": "2026-11-02T09:30:00Z",
+    "type": "item.assign",
+    "origin": "human",
+    "payload": {
+     "item": "hana.pc#6",
+     "mode": "chosen",
+     "completion": "assignee",
+     "people": [
+      "hana"
+     ]
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "hana.pc#6",
+    "parentThread": null,
+    "local": true,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "hana.pc#8",
+    "alias": "hana.pc-8",
+    "stream": "hana.pc",
+    "member": "hana",
+    "seq": 8,
+    "ts": "2026-11-02T10:00:00Z",
+    "type": "item.status",
+    "origin": "agent-auto",
+    "payload": {
+     "item": "hana.pc#1",
+     "status": "doing",
+     "note": "outline done"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "hana.pc#1",
+    "parentThread": null,
+    "local": true,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "hana.pc#9",
+    "alias": "hana.pc-9",
+    "stream": "hana.pc",
+    "member": "hana",
+    "seq": 9,
+    "ts": "2026-11-02T10:30:00Z",
+    "type": "item.close",
+    "origin": "human",
+    "payload": {
+     "item": "hana.pc#4"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "hana.pc#4",
+    "parentThread": null,
+    "local": true,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "hana.pc#10",
+    "alias": "hana.pc-10",
+    "stream": "hana.pc",
+    "member": "hana",
+    "seq": 10,
+    "ts": "2026-11-02T11:00:00Z",
+    "type": "comment.add",
+    "origin": "human",
+    "payload": {
+     "item": "hana.pc#3",
+     "body": "Add: Designing Data-Intensive Applications, chapter 5."
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "hana.pc#3",
+    "parentThread": null,
+    "local": true,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "hana.pc#11",
+    "alias": "hana.pc-11",
+    "stream": "hana.pc",
+    "member": "hana",
+    "seq": 11,
+    "ts": "2026-11-02T11:10:00Z",
+    "type": "item.edit",
+    "origin": "human",
+    "payload": {
+     "item": "hana.pc#1",
+     "title": "Write talk proposal (event-sourced trackers)"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "hana.pc#1",
+    "parentThread": null,
+    "local": true,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "hana.pc#12",
+    "alias": "hana.pc-12",
+    "stream": "hana.pc",
+    "member": "hana",
+    "seq": 12,
+    "ts": "2026-11-02T11:20:00Z",
+    "type": "item.create",
+    "origin": "human",
+    "payload": {
+     "kind": "task",
+     "title": "Abstract",
+     "parent": "hana.pc#1",
+     "due": "2026-11-12",
+     "priority": 1
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "hana.pc#12",
+    "parentThread": "hana.pc#1",
+    "local": true,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "hana.pc#13",
+    "alias": "hana.pc-13",
+    "stream": "hana.pc",
+    "member": "hana",
+    "seq": 13,
+    "ts": "2026-11-02T11:20:00Z",
+    "type": "item.assign",
+    "origin": "human",
+    "payload": {
+     "item": "hana.pc#12",
+     "mode": "chosen",
+     "completion": "assignee",
+     "people": [
+      "hana"
+     ]
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "hana.pc#12",
+    "parentThread": null,
+    "local": true,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "hana.pc#14",
+    "alias": "hana.pc-14",
+    "stream": "hana.pc",
+    "member": "hana",
+    "seq": 14,
+    "ts": "2026-11-02T11:20:00Z",
+    "type": "item.status",
+    "origin": "human",
+    "payload": {
+     "item": "hana.pc#12",
+     "status": "blocked",
+     "note": "waiting for the CFP topic list"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "hana.pc#12",
+    "parentThread": null,
+    "local": true,
+    "open": false,
+    "late": false
+   }
+  ],
+  "notices": [],
+  "my": {
+   "assignments": [
+    "hana.pc#13>hana",
+    "hana.pc#2>hana",
+    "hana.pc#7>hana",
+    "hana.pc#5>hana"
+   ],
+   "today": {
+    "work": [
+     "hana.pc#2>hana",
+     "hana.pc#13>hana",
+     "hana.pc#7>hana"
+    ],
+    "pending": [],
+    "confirms": []
+   },
+   "received": {
+    "pending": [],
+    "answered": [],
+    "sent": []
+   },
+   "given": [],
+   "created": [],
+   "team": [],
+   "badge": []
+  },
+  "stats": {
+   "events": 14,
+   "commits": 9,
+   "flagged": 0,
+   "concurrent": 0
+  },
+  "heads": {
+   "hana.pc": 14
+  },
+  "now": "2026-11-06T09:00:00Z"
+ }
+}

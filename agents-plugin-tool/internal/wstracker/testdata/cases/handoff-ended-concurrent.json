@@ -1,0 +1,395 @@
+{
+ "name": "handoff-ended-concurrent",
+ "comment": "(295) concurrent: an unassign, removal, or return of the original concurrent with an accept of its handoff wins. A: unassign folds first. B, C, D, E: the accept folds first and the ending event reverses it (B unassign, C removal, D return, E unassign-all).",
+ "viewers": [
+  "ada.pc",
+  "bo.pc"
+ ],
+ "now": "2026-11-02T09:00:00Z",
+ "genesis": {
+  "admins": [
+   "ada",
+   "bo"
+  ],
+  "members": [
+   {
+    "id": "ada",
+    "name": "Ada",
+    "keys": [
+     "ada-k1"
+    ],
+    "leads": []
+   },
+   {
+    "id": "maya",
+    "name": "Maya",
+    "keys": [
+     "maya-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "raj",
+    "name": "Raj",
+    "keys": [
+     "raj-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "bo",
+    "name": "Bo",
+    "keys": [
+     "bo-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "lena",
+    "name": "Lena",
+    "keys": [
+     "lena-k1"
+    ],
+    "leads": [
+     "maya"
+    ]
+   },
+   {
+    "id": "omar",
+    "name": "Omar",
+    "keys": [
+     "omar-k1"
+    ],
+    "leads": [
+     "maya"
+    ]
+   },
+   {
+    "id": "sven",
+    "name": "Sven",
+    "keys": [
+     "sven-k1"
+    ],
+    "leads": [
+     "raj"
+    ]
+   }
+  ]
+ },
+ "commits": {
+  "maya.pc": [
+   {
+    "ts": "2026-11-01T09:00:00Z",
+    "seen": {},
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "A"
+      }
+     ],
+     [
+      "item.assign",
+      {
+       "item": "maya.pc#1",
+       "mode": "chosen",
+       "people": [
+        "lena"
+       ]
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "B"
+      }
+     ],
+     [
+      "item.assign",
+      {
+       "item": "maya.pc#3",
+       "mode": "chosen",
+       "people": [
+        "lena"
+       ]
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "C"
+      }
+     ],
+     [
+      "item.assign",
+      {
+       "item": "maya.pc#5",
+       "mode": "chosen",
+       "people": [
+        "omar"
+       ]
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "E"
+      }
+     ],
+     [
+      "item.assign",
+      {
+       "item": "maya.pc#7",
+       "mode": "chosen",
+       "people": [
+        "lena"
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:20:00Z",
+    "seen": {
+     "sven.pc": 2,
+     "lena.pc": 5,
+     "omar.pc": 1
+    },
+    "events": [
+     [
+      "item.unassign",
+      {
+       "item": "maya.pc#1",
+       "assignee": "lena"
+      }
+     ],
+     [
+      "item.unassign",
+      {
+       "item": "maya.pc#3",
+       "assignee": "lena"
+      }
+     ],
+     [
+      "item.return",
+      {
+       "item": "sven.pc#1",
+       "assignee": "lena",
+       "note": "not now"
+      }
+     ],
+     [
+      "item.unassign",
+      {
+       "item": "maya.pc#7"
+      }
+     ]
+    ]
+   }
+  ],
+  "sven.pc": [
+   {
+    "ts": "2026-11-01T09:01:00Z",
+    "seen": {},
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "D"
+      }
+     ],
+     [
+      "item.assign",
+      {
+       "item": "sven.pc#1",
+       "mode": "chosen",
+       "people": [
+        "lena"
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:15:00Z",
+    "seen": {
+     "maya.pc": 8,
+     "lena.pc": 5
+    },
+    "events": [
+     [
+      "item.accept",
+      {
+       "item": "maya.pc#7"
+      }
+     ]
+    ]
+   }
+  ],
+  "lena.pc": [
+   {
+    "ts": "2026-11-01T09:02:00Z",
+    "seen": {
+     "maya.pc": 8,
+     "sven.pc": 2
+    },
+    "events": [
+     [
+      "item.accept",
+      {
+       "item": "sven.pc#1"
+      }
+     ],
+     [
+      "item.handoff",
+      {
+       "item": "maya.pc#1",
+       "to": "raj"
+      }
+     ],
+     [
+      "item.handoff",
+      {
+       "item": "maya.pc#3",
+       "to": "bo"
+      }
+     ],
+     [
+      "item.handoff",
+      {
+       "item": "sven.pc#1",
+       "to": "bo"
+      }
+     ],
+     [
+      "item.handoff",
+      {
+       "item": "maya.pc#7",
+       "to": "sven"
+      }
+     ]
+    ]
+   }
+  ],
+  "omar.pc": [
+   {
+    "ts": "2026-11-01T09:03:00Z",
+    "seen": {
+     "maya.pc": 8
+    },
+    "events": [
+     [
+      "item.handoff",
+      {
+       "item": "maya.pc#5",
+       "to": "raj"
+      }
+     ]
+    ]
+   }
+  ],
+  "bo.pc": [
+   {
+    "ts": "2026-11-01T09:15:00Z",
+    "seen": {
+     "maya.pc": 8,
+     "sven.pc": 2,
+     "lena.pc": 5
+    },
+    "events": [
+     [
+      "item.accept",
+      {
+       "item": "maya.pc#3"
+      }
+     ],
+     [
+      "item.status",
+      {
+       "item": "maya.pc#3",
+       "status": "doing",
+       "note": "on it"
+      }
+     ],
+     [
+      "item.accept",
+      {
+       "item": "sven.pc#1"
+      }
+     ]
+    ]
+   }
+  ],
+  "raj.pc": [
+   {
+    "ts": "2026-11-01T09:15:00Z",
+    "seen": {
+     "maya.pc": 8,
+     "lena.pc": 5,
+     "omar.pc": 1
+    },
+    "events": [
+     [
+      "item.accept",
+      {
+       "item": "maya.pc#5"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:30:00Z",
+    "seen": {
+     "maya.pc": 8,
+     "lena.pc": 5,
+     "omar.pc": 1
+    },
+    "events": [
+     [
+      "item.accept",
+      {
+       "item": "maya.pc#1"
+      }
+     ],
+     [
+      "item.status",
+      {
+       "item": "maya.pc#1",
+       "status": "doing"
+      }
+     ]
+    ]
+   }
+  ],
+  "ada.pc": [
+   {
+    "ts": "2026-11-01T09:20:00Z",
+    "seen": {
+     "maya.pc": 8,
+     "sven.pc": 2,
+     "lena.pc": 5,
+     "omar.pc": 1
+    },
+    "events": [
+     [
+      "roles.remove_member",
+      {
+       "member": "omar"
+      }
+     ]
+    ]
+   }
+  ]
+ }
+}

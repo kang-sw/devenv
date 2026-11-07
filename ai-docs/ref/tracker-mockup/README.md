@@ -175,7 +175,7 @@ folded in causal order.
 | `item.hide` | `item` | Creator only; an admin may also hide an item whose creator was removed (292). A tombstone: the content stays in history. Flagged while someone else holds an open (live or pending) assignment on the item. |
 | `item.assign` | `item`, `mode` (`all`/`chosen`), `levels` (all), `people` (chosen), `completion` (`assignee`/`assigner`, default `assignee`) | Creator only; an admin may also assign an item whose creator was removed. `chosen` may target anyone in the store: the author, or someone the author reaches (the author is in their lead chain, any depth), is a **forced** assignment, live at once; anyone else gets a **pending** assignment. `all` targets everyone within N levels below the author, forced only, and stays live: anyone who later enters the range inherits it. Flagged when every chosen person already holds a live or pending assignment. Not allowed on topics. |
 | `item.handoff` | `item`, `to`, `assignee?`, `note?` | The holder of a live assignment hands it to anyone; an admin may hand off any member's live assignment by naming its holder in `assignee` (286), so open work can be taken over before the member is removed. It makes a pending assignment to `to` with the original's assigner and completion mode; on accept the original assignment ends (`handed`) and the new one starts with the original's status and note (290). Flagged on a done assignment, when `to` is the holder or already holds one, or while another handoff of it is pending. |
-| `item.accept` / `item.decline` | `item`, `note?` | The target of a pending assignment, on it. Accept makes it live; for a handoff it also ends the original (flagged if the original already ended). Decline ends it as `declined`. |
+| `item.accept` / `item.decline` | `item`, `note?` | The target of a pending assignment, on it. Accept makes it live; for a handoff it also ends the original. Decline ends it as `declined`. A pending handoff whose original ends another way is withdrawn with it (295), so a later accept or decline finds no pending assignment. |
 | `item.return` | `item`, `assignee`, `note?` | Only the assignee's direct lead, on an accepted (formerly pending) live assignment. Ends it as `returned`; the assigner may send again. Returning an accepted handoff restores the original assignment with its prior status (291), unless its holder was removed or holds another assignment on the item by then. |
 | `item.unassign` | `item`, `assignee?` | By the assigner; the sender of a pending assignment may also withdraw it. An admin may also unassign when the assignee or assigner was removed. Without `assignee`, it withdraws all of the author's assignments on the item and ends the live rule. |
 | `item.status` | `item`, `status` (`todo`/`doing`/`blocked`), `note?` | Assignee only (live). The creator self-assigns first. Allowed while awaiting confirmation, which withdraws the close. Not allowed on done. |
@@ -205,7 +205,7 @@ it: the assigner, or the handing-off assignee), a completion mode, and a state:
 pending --accept--> live --unassign / member removed--> unassigned
    |                  |--return-----> returned   (accepted ones only, by the assignee's direct lead)
    |--decline--> declined               |--handoff accepted--> handed --that handoff returned--> live (restored)
-   |--withdraw / member removed--> withdrawn
+   |--withdraw / member removed / handoff's original ended--> withdrawn
 forced (author, or someone the author reaches) starts live
 ```
 
@@ -355,8 +355,8 @@ Flagged reasons, as the engine words them:
   every chosen person already assigned
 - a handoff of a done or someone else's assignment, to a holder, or while one
   is pending
-- accept or decline without a pending assignment, or accepting a handoff whose
-  original already ended
+- accept or decline without a pending assignment (a handoff whose original
+  ended is withdrawn, so it is no longer pending)
 - return by anyone but the assignee's direct lead, or of a forced assignment
 - status, close, or reopen by a non-assignee, before acceptance, or after the
   assignment ended
@@ -509,9 +509,13 @@ creation, and it has a topic and a blocked subtask.
 ## Open questions
 
 The model snags the scenario walk found are resolved by (284)-(292); see
-[SCENARIOS.md](SCENARIOS.md). Still open: a pending handoff whose original
-assignment ended some other way (unassign, removal) stays pending and can
-only be declined or withdrawn, since accept is flagged.
+[SCENARIOS.md](SCENARIOS.md). (295) settled the last one: when the original of
+a pending handoff ends another way (unassign, removal, return, or another
+handoff accepted), the pending handoff ends as `withdrawn` with no event, its
+`ended` pointing at the event that ended the original. An unassign, removal,
+or return of the original concurrent with an accept of its handoff wins, as
+removal beats writes (213): the accepted handoff ends `withdrawn`, the original
+takes the ending event's state, and both events are marked. None is open now.
 
 ## Not modeled in v3
 
