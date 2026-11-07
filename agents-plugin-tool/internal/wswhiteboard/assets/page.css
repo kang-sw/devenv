@@ -112,6 +112,8 @@ a { color: var(--wb-primary); }
 .cbar .btn[aria-pressed="true"] { background: currentColor; }
 .cbar .btn[aria-pressed="true"] .i { color: var(--wb-assumed); }
 .cbody { padding: 8px 10px 10px; }
+.card.assumed { cursor: pointer; }
+.card.assumed a, .card.assumed .note { cursor: auto; }
 .new { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--wb-primary); flex: none; align-self: center; }
 .cbar .new { background: currentColor; }
 .ctx { margin: 0 0 8px; color: var(--wb-muted-fg); font-size: 13px; overflow-wrap: anywhere; }
