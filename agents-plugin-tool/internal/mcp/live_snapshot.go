@@ -37,10 +37,13 @@ import (
 // dashboard.enabled off, nothing is written at all.
 //
 // The snapshot's repo fields (the session root's folder, branch, and
-// upstream standing) are read here, not sent by the adapter: a few git ref
-// reads, cached per session and refreshed at most once per heartbeat
-// interval from the timer goroutine, outside writeMu, so neither a change
-// snapshot nor an intake call ever waits on git.
+// upstream standing, and working-tree counts) are read here, not sent by the
+// adapter: a few git reads, cached per session and refreshed at most once per
+// heartbeat interval. The refresh runs on the timer goroutine, outside
+// writeMu, so an intake call never waits on git; the snapshot write that
+// finds the cache missing or a heartbeat interval old does wait (up to
+// repoReadTimeout): a session's first snapshot, and at most one write per
+// heartbeat interval after it, change or heartbeat alike.
 
 const dashboardIntakeTool = "dashboard.intake"
 

@@ -79,8 +79,10 @@ tools never depend on it. Its state lives under `<cache root>/dashboard/`:
 - `sessions/<reply-id>/snapshot.json` and `sessions/<reply-id>/ring/` - the
   session's live snapshot (current lead and subagent activity, rewritten
   debounced and on a 30-second heartbeat, stale after 3 missed heartbeats by
-  its `updatedAt`) and its conversation ring (the last 50 finished messages,
-  one file each). ws-mcp writes them from host adapter events
+  its `updatedAt`) and its conversation ring (finished messages, one
+  owner-only file each; the newest 2000 are kept on disk, the page shows the
+  newest 50 and pages older ones in through the session's history route).
+  ws-mcp writes them from host adapter events
   (`dashboard.intake`) and from its mailbox send and recv path, only for a
   registered session; `internal/wslive` holds the schema and readers. An
   intake result carries an `accepts: status` line naming the optional event
@@ -90,15 +92,18 @@ tools never depend on it. Its state lives under `<cache root>/dashboard/`:
   the "dashboard off" result names none. The snapshot's `repo` fields (the
   root's folder, branch, upstream, ahead and behind, and the counts of
   modified, staged, and untracked working-tree entries) come from ws-mcp's own
-  `rev-parse`, `rev-list --left-right --count`, and `status --porcelain`
-  reads, cached per session and refreshed at most once per heartbeat interval
-  from the writer's timer, never per change snapshot; there is no automatic
-  fetch, so behind reflects the last one. The status read takes no optional
+  `rev-parse`, `symbolic-ref`, `rev-list --left-right --count`, and
+  `status --porcelain` reads, cached per session and refreshed at most once
+  per heartbeat interval from the writer's timer, never on an intake call; the
+  snapshot write that finds the cache missing or stale (a session's first,
+  then at most one per heartbeat interval, change or heartbeat alike) waits
+  for the refresh, up to its 5 s timeout. There is no automatic fetch, so
+  behind reflects the last one. The status read takes no optional
   lock and shares the 5 s timeout; when it fails the counts stay zero, which
   the page shows as no change chip, and branch and sync still show.
 - `sessions/<reply-id>/inbox/` - the board-answer inbox (`internal/wsinbox`):
   held messages the user sent from the page, one file each; `drained/` keeps
-  the newest 20 as sent records. The adapter-only `dashboard.inbox_drain` tool
+  the newest 50 as sent records. The adapter-only `dashboard.inbox_drain` tool
   drains it, and `mailbox wait --board-inbox` also wakes on it (peek only). A
   message promoted to steering is rewritten with `steer: true` and is no
   longer a merge target; `dashboard.inbox_drain steer_only: true` claims only
