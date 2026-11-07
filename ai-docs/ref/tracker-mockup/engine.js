@@ -1,30 +1,48 @@
-// Tracker mockup v2 data layer: validate and fold the per-member commit lists on
-// top of the roles file. No DOM here; app.js is the view. Exposes
-// window.TrackerEngine. The rules are the ones settled on the board (README.md).
+// Tracker mockup v3 data layer: validate and fold the per-clone commit lists on top
+// of the roles file, and simulate the per-clone journal and sync. No DOM here;
+// app.js is the view. Exposes window.TrackerEngine. The rules are the ones settled
+// on the board (README.md), and this file is the reference the Go port follows.
 //
-// Shape: store = { roles, commits: { owner: [commit] } }, commit = { author, ts,
-// signer, seen: { member: lastSeq }, events: [ { seq, type, origin?, payload } ] }.
-// Event id = author#seq (displayed as author-seq). Fields starting with "_" on a
-// commit are mock-only bookkeeping of app.js (local / arrived late), not model.
+// Shape: input = { roles, commits: { stream: [commit] } }, stream = "<member>.<clone>"
+// (ref refs/heads/tracker/m/<member>/<clone>), commit = { stream, ts, signer,
+// seen: { stream: lastSeq }, events: [ { seq, ts, type, origin?, payload } ] }.
+// Event id = <member>.<clone>#<seq> (displayed as member.clone-seq). Fields starting
+// with "_" on a commit are mock bookkeeping (_local, _open, _late), not model.
 //
-// Replay: (1) every event gets a causal past = its own earlier events plus what
+// Replay: (1) every event gets a causal past = its stream's earlier events plus what
 // its commit's `seen` names, closed transitively; (2) the events are put in one
-// order that respects that past (ties: ts, author, seq); (3) each event is checked
-// against the state folded from its causal past only, so a late arrival can never
-// change an earlier verdict; (4) the revocation rule may then ignore events signed
-// with a revoked key that the revoker had not seen; (5) a final fold builds the
-// shown state and marks concurrent changes.
+// order that respects that past (ties: ts, member, clone, seq); (3) each event is
+// checked against the state folded from its causal past only, so a late arrival can
+// never change an earlier verdict; (4) the revocation rule may then ignore events
+// signed with a revoked key that the revoker had not seen; (5) a final fold builds
+// the shown state and marks concurrent changes.
+//
+// Public surface (the future backend API shape, see README "View state"):
+//   openStore(def)                  -> store handle (journal, clones, sync)
+//   store.view(stream, now)         -> deriveViewState(...) plus sync info, plain JSON
+//   store.dispatch(stream, events, ts) -> per-event verdicts; the only write path
+//   store.sync / fetch / setOnline / raw / setRaw / reset / nextEventId
+//   deriveViewState(input, { stream, now }) -> plain JSON, no engine objects
 (function () {
   'use strict';
 
   var KINDS = ['task', 'todo', 'topic'];
   var SETTABLE = ['todo', 'doing', 'blocked'];
   var ORIGINS = ['human', 'agent', 'agent-auto'];
+  var ITEM_FIELDS = ['title', 'body', 'project', 'due', 'priority'];
+  // Priority levels are store configuration (roles file, roles.set_priority_levels).
+  // Codes are integers 0..n-1, larger = more urgent; names are display names only.
+  var DEFAULT_PRIORITY = { names: ['알림', '업무', '긴급'], default: 1 };
+  var STALE_DAYS = 3; // doing/blocked with no status update for this long counts as stale
+  var DUE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-  function clone(x) { return JSON.parse(JSON.stringify(x)); }
+  function clone(x) { return x === undefined ? undefined : JSON.parse(JSON.stringify(x)); }
   function alias(id) { return String(id).replace('#', '-'); }
   function has(o, k) { return Object.prototype.hasOwnProperty.call(o, k); }
   function vals(o) { return Object.keys(o).map(function (k) { return o[k]; }); }
+  function memberOf(stream) { var s = String(stream), i = s.indexOf('.'); return i < 0 ? s : s.slice(0, i); }
+  function cloneOf(stream) { var s = String(stream), i = s.indexOf('.'); return i < 0 ? '' : s.slice(i + 1); }
+  function refOf(stream) { return 'refs/heads/tracker/m/' + memberOf(stream) + '/' + cloneOf(stream); }
   function Rej(m) { this.reason = m; }
   function rej(m) { throw new Rej(m); }
 
@@ -51,6 +69,8 @@
     }
     return out;
   }
+  // The forced-assignment rule: `by` reaches `to` when `by` is in `to`'s lead chain.
+  function below(members, by, to) { return to in reach(members, by, 99); }
 
   function wouldCycle(members, id, lead) {
     var cur = lead, n = 0;
@@ -61,25 +81,37 @@
     return false;
   }
 
+  function normPriority(p) {
+    if (!p || !Array.isArray(p.names) || !p.names.length) return clone(DEFAULT_PRIORITY);
+    var d = Number.isInteger(p.default) && p.default >= 0 && p.default < p.names.length ? p.default : Math.min(1, p.names.length - 1);
+    return { names: p.names.slice(), default: d };
+  }
+  // A stored value outside the current range displays as the top level.
+  function priorityLevel(prio, v) {
+    var top = prio.names.length - 1;
+    return Number.isInteger(v) && v >= 0 && v <= top ? v : top;
+  }
+
   // ------------------------------------------------------ flatten + causality
 
   function flatten(st) {
     var nodes = [], byId = {};
-    Object.keys(st.commits || {}).forEach(function (owner) {
+    Object.keys(st.commits || {}).forEach(function (ref) {
       var last = 0;
-      (st.commits[owner] || []).forEach(function (c, ci) {
+      (st.commits[ref] || []).forEach(function (c, ci) {
         (c.events || []).forEach(function (ev, ei) {
-          var n = { author: c.author, owner: owner, seq: ev.seq, ts: c.ts, commit: c, ci: ci, ei: ei, ev: ev,
-            type: ev.type, p: ev.payload || {}, origin: ev.origin || 'human',
+          var stream = String(c.stream || '');
+          var n = { stream: stream, author: memberOf(stream), clone: cloneOf(stream), ref: ref, seq: ev.seq, ts: ev.ts || c.ts,
+            commit: c, ci: ci, ei: ei, ev: ev, type: ev.type, p: ev.payload || {}, origin: ev.origin || 'human',
             status: 'applied', reason: null, markers: [], causal: true, preds: [] };
-          n.id = c.author + '#' + ev.seq;
-          n.alias = (c.author !== owner ? owner + ':' : '') + alias(n.id);
+          n.id = stream + '#' + ev.seq;
+          n.alias = (stream !== ref ? ref + ':' : '') + alias(n.id);
           var pre = null;
-          if (c.author !== owner) pre = 'commit author "' + c.author + '" does not own the ref "' + owner + '" (an event sits only in its author\'s ref)';
+          if (stream !== ref) pre = 'commit stream "' + stream + '" does not match the ref ' + refOf(ref) + ' (a clone writes only its own ref)';
           else if (ev.seq !== last + 1) pre = 'seq ' + ev.seq + ' after ' + last + ' (expected ' + (last + 1) + ')';
           else last = ev.seq;
           // A broken event consumes neither a seq nor an id: it stays visible, flagged, outside causality.
-          if (pre) { n.causal = false; n.status = 'flagged'; n.reason = pre; n.id = '!' + nodes.length + ':' + owner + ':' + n.id; }
+          if (pre) { n.causal = false; n.status = 'flagged'; n.reason = pre; n.id = '!' + nodes.length + ':' + ref + ':' + n.id; }
           byId[n.id] = n; nodes.push(n);
         });
       });
@@ -87,23 +119,23 @@
     return { nodes: nodes, byId: byId };
   }
 
-  // Closed vector clock: member -> highest seq in the event's causal past.
+  // Closed vector clock: stream -> highest seq in the event's causal past.
   function causalize(nodes, byId) {
     function cv(n) {
       if (n.cv) return n.cv;
       if (n.busy) { n.cycle = true; return {}; }
       n.busy = true;
       var v = {}, seen = n.commit.seen || {}, ids = [];
-      if (n.seq > 1) ids.push(n.author + '#' + (n.seq - 1));
-      Object.keys(seen).forEach(function (m) { if (m !== n.author && seen[m] > 0) ids.push(m + '#' + seen[m]); });
+      if (n.seq > 1) ids.push(n.stream + '#' + (n.seq - 1));
+      Object.keys(seen).forEach(function (s) { if (s !== n.stream && seen[s] > 0) ids.push(s + '#' + seen[s]); });
       ids.forEach(function (pid) {
         var x = byId[pid];
         if (!x || !x.causal) { n.waitOn = n.waitOn || pid; return; }
         var xv = cv(x);
         if (x.cycle) n.cycle = true;
         if (x.waitOn) n.waitOn = n.waitOn || x.waitOn;
-        Object.keys(xv).forEach(function (m) { if ((v[m] || 0) < xv[m]) v[m] = xv[m]; });
-        if ((v[x.author] || 0) < x.seq) v[x.author] = x.seq;
+        Object.keys(xv).forEach(function (s) { if ((v[s] || 0) < xv[s]) v[s] = xv[s]; });
+        if ((v[x.stream] || 0) < x.seq) v[x.stream] = x.seq;
         n.preds.push(x);
       });
       n.busy = false; n.cv = v;
@@ -113,11 +145,14 @@
   }
 
   // x happened before y: x is in y's causal past.
-  function hb(x, y) { return x !== y && x.causal && !!y.cv && (y.cv[x.author] || 0) >= x.seq; }
+  function hb(x, y) { return x !== y && x.causal && !!y.cv && (y.cv[x.stream] || 0) >= x.seq; }
 
-  function later(x, y) { // display-winner order for concurrent writes: later ts, then author id, then seq
+  // Display-winner order for concurrent writes (and the fold tie-break): later ts,
+  // then member id, then clone id, then seq.
+  function later(x, y) {
     if (x.ts !== y.ts) return String(x.ts) > String(y.ts);
     if (x.author !== y.author) return x.author > y.author;
+    if (x.clone !== y.clone) return x.clone > y.clone;
     return x.seq > y.seq;
   }
 
@@ -140,7 +175,7 @@
   // ------------------------------------------------------------------ state
 
   function genesis(roles) {
-    var S = { members: {}, admins: {}, items: {}, asg: {}, rules: {}, comments: {}, reg: {} };
+    var S = { members: {}, admins: {}, items: {}, asg: {}, rules: {}, comments: {}, reg: {}, prio: normPriority(roles.priority) };
     (roles.members || []).forEach(function (m) {
       S.members[m.id] = { id: m.id, name: m.name || m.id, keys: (m.keys || []).slice(), revoked: {}, leads: (m.leads || []).slice(), removed: null, joined: null };
     });
@@ -148,10 +183,16 @@
     return S;
   }
 
-  function activeRecs(S, item) { return vals(S.asg).filter(function (r) { return r.item === item && !r.removed; }); }
-  function activeRec(S, item, who) { return activeRecs(S, item).filter(function (r) { return r.to === who; })[0] || null; }
-  function lastRemovedRec(S, item, who) {
-    var rs = vals(S.asg).filter(function (r) { return r.item === item && r.to === who && r.removed; });
+  // Assignment records. state: pending -> live (accept) | declined | withdrawn;
+  // live -> unassigned | returned | handed (a handoff was accepted).
+  function recsOn(S, item) { return vals(S.asg).filter(function (r) { return r.item === item; }); }
+  function liveRecs(S, item) { return recsOn(S, item).filter(function (r) { return r.state === 'live'; }); }
+  function openRecs(S, item) { return recsOn(S, item).filter(function (r) { return r.state === 'live' || r.state === 'pending'; }); }
+  function liveRec(S, item, who) { return liveRecs(S, item).filter(function (r) { return r.to === who; })[0] || null; }
+  function pendingRec(S, item, who) { return recsOn(S, item).filter(function (r) { return r.to === who && r.state === 'pending'; })[0] || null; }
+  function openRec(S, item, who) { return openRecs(S, item).filter(function (r) { return r.to === who; })[0] || null; }
+  function lastEndedRec(S, item, who) {
+    var rs = recsOn(S, item).filter(function (r) { return r.to === who && r.ended; });
     return rs[rs.length - 1] || null;
   }
   function liveRules(S, item) { return vals(S.rules).filter(function (r) { return r.item === item && !r.ended; }); }
@@ -181,21 +222,24 @@
       if (l === id || wouldCycle(S.members, id, l)) rej('cycle: ' + l + ' is already below ' + id);
     });
   }
+  function checkFields(S, p) {
+    if (has(p, 'title') && !p.title) rej('title cannot be empty');
+    if (p.project != null && typeof p.project !== 'string') rej('project is one optional free-text string');
+    if (p.due != null && !(typeof p.due === 'string' && DUE_RE.test(p.due) && !isNaN(Date.parse(p.due)))) rej('due is an optional YYYY-MM-DD date');
+    if (p.priority != null && !(Number.isInteger(p.priority) && p.priority >= 0 && p.priority < S.prio.names.length))
+      rej('priority must be a level 0..' + (S.prio.names.length - 1) + ' (' + S.prio.names.join(' / ') + ')');
+  }
   function notAssignee(S, it, who) {
-    var gone = lastRemovedRec(S, it.id, who);
-    if (gone) return who + ' was unassigned from ' + it.alias + ' (' + alias(gone.removed.id) + ')';
+    if (pendingRec(S, it.id, who)) return who + ' has not accepted the pending assignment on ' + it.alias;
+    var gone = lastEndedRec(S, it.id, who);
+    if (gone) return who + '\'s assignment on ' + it.alias + ' ended (' + gone.state + ', ' + alias(gone.ended.id) + ')';
     if (it.author === who) return who + ' created ' + it.alias + ' but is not assigned to it (self-assign first)';
     return who + ' is not an assignee of ' + it.alias;
   }
   function needRec(S, item, who) {
-    var r = activeRec(S, item, who);
+    var r = liveRec(S, item, who);
     if (!r) rej(notAssignee(S, S.items[item], who));
     return r;
-  }
-  function needRequest(S, p) {
-    var it = needItem(S, p.item);
-    if (!it.request) rej(it.alias + ' is not a request');
-    return it;
   }
 
   function check(S, n) {
@@ -206,7 +250,8 @@
     if (m.revoked[c.signer]) rej('signed with ' + c.signer + ', already revoked in its own causal past (' + alias(m.revoked[c.signer]) + ')');
     if (m.keys.indexOf(c.signer) < 0) rej('signer key "' + c.signer + '" is not a key of ' + a);
     if (ORIGINS.indexOf(n.origin) < 0) rej('origin must be human, agent or agent-auto');
-    if (n.origin === 'agent-auto' && /^request\./.test(n.type)) rej('an agent never accepts, declines or returns a request on its own (agent-auto is invalid here)');
+    if (n.origin === 'agent-auto' && /^item\.(accept|decline|return|handoff)$/.test(n.type))
+      rej('an agent never accepts, declines, returns or hands off an assignment on its own (agent-auto is invalid here)');
     if (n.origin === 'agent-auto' && n.type !== 'item.status' && n.type !== 'item.close')
       rej('agent-auto is limited to item.status and item.close on the author\'s own assignment');
 
@@ -214,16 +259,11 @@
       case 'item.create':
         if (!p.title) rej('title required');
         if (KINDS.indexOf(p.kind) < 0) rej('kind must be task, todo or topic');
-        if (p.project != null && typeof p.project !== 'string') rej('project is one optional free-text string');
+        checkFields(S, p);
         if (p.parent) {
           var par = needItem(S, p.parent, 'parent');
           if (par.hidden) rej('parent ' + par.alias + ' is hidden');
-          if (par.author !== a && !activeRec(S, p.parent, a)) rej('parent ' + par.alias + ' is neither assigned to nor created by ' + a);
-        }
-        if (p.request != null) {
-          if (p.kind === 'topic') rej('a topic cannot be a request');
-          if (p.request === a) rej('a request names someone else (self-assign instead)');
-          needMember(S, p.request);
+          if (par.author !== a && !liveRec(S, p.parent, a)) rej('parent ' + par.alias + ' is neither assigned to nor created by ' + a);
         }
         break;
 
@@ -231,15 +271,16 @@
         it = needItem(S, p.item);
         if (it.author !== a) rej('only the creator (' + it.author + ') edits ' + it.alias);
         if (it.hidden) rej(it.alias + ' is hidden');
-        if (!['title', 'body', 'project'].some(function (f) { return has(p, f); })) rej('nothing to edit (title, body or project)');
-        if (has(p, 'title') && !p.title) rej('title cannot be empty');
+        if (!ITEM_FIELDS.some(function (f) { return has(p, f); })) rej('nothing to edit (' + ITEM_FIELDS.join(', ') + ')');
+        if (has(p, 'priority') && p.priority == null) rej('priority cannot be cleared; set a level');
+        checkFields(S, p);
         break;
 
       case 'item.hide': {
         it = needItem(S, p.item);
         if (it.author !== a) rej('only the creator (' + it.author + ') hides ' + it.alias);
         if (it.hidden) rej(it.alias + ' is already hidden');
-        var open = activeRecs(S, it.id).filter(function (x) { return x.to !== a && x.status !== 'done'; });
+        var open = openRecs(S, it.id).filter(function (x) { return x.to !== a && x.status !== 'done'; });
         if (open.length) rej('unassign the open assignments first (' + open.map(function (x) { return x.to; }).join(', ') + ')');
         break;
       }
@@ -248,40 +289,71 @@
         it = needItem(S, p.item);
         if (it.hidden) rej(it.alias + ' is hidden');
         if (it.kind === 'topic') rej('topics have no assignment');
-        if (it.request) rej('a request becomes an assignment only when its recipient accepts it');
         var cr = S.members[it.author];
-        if (it.author !== a && !(S.admins[a] && cr && cr.removed)) rej('only the creator (' + it.author + ') assigns ' + it.alias);
+        if (it.author !== a && !(S.admins[a] && cr && cr.removed))
+          rej('only the creator (' + it.author + ') assigns ' + it.alias + '; an assignee hands off their own assignment with item.handoff');
         var completion = p.completion || 'assignee';
         if (completion !== 'assignee' && completion !== 'assigner') rej('completion must be assignee or assigner');
-        var levels = Number(p.levels || 0), R, all = reach(S.members, a, 99);
-        if (p.mode === 'all') {
+        if (p.mode === 'all') { // live and forced-only: everyone within N levels below the author
+          var levels = Number(p.levels || 0);
           if (!(levels >= 1)) rej('levels must be >= 1');
-          R = reach(S.members, a, levels);
-          if (!Object.keys(R).length) rej('nobody is within ' + levels + ' levels below ' + a);
+          if (!Object.keys(reach(S.members, a, levels)).length) rej('nobody is within ' + levels + ' levels below ' + a);
           var cov = liveRules(S, it.id).filter(function (x) { return x.by === a && x.levels >= levels; })[0];
           if (cov) rej('already assigned to everyone within ' + cov.levels + ' levels (' + alias(cov.id) + ')');
-        } else if (p.mode === 'chosen') {
+        } else if (p.mode === 'chosen') { // anyone: below the author = forced (live), anyone else = pending
           var ppl = p.people || [];
           if (!ppl.length) rej('choose at least one person');
-          R = levels >= 1 ? reach(S.members, a, levels) : {};
-          ppl.forEach(function (x) {
-            if (x === a) return; // self-assignment
-            if (!S.members[x] || S.members[x].removed) rej(x + ' is not a member');
-            if (!(x in R)) rej('outside reach: ' + x + (x in all ? ' is ' + all[x] + ' levels below ' + a + ', limit ' + levels : ' is not below ' + a));
-          });
-          if (!ppl.some(function (x) { return !activeRec(S, it.id, x); })) rej('everyone chosen is already assigned');
+          ppl.forEach(function (x) { if (x !== a && (!S.members[x] || S.members[x].removed)) rej(x + ' is not a member'); });
+          if (!ppl.some(function (x) { return !openRec(S, it.id, x); })) rej('everyone chosen already holds a live or pending assignment');
         } else rej('mode must be all or chosen');
+        break;
+      }
+
+      case 'item.handoff': {
+        it = needItem(S, p.item);
+        if (it.hidden) rej(it.alias + ' is hidden');
+        r = needRec(S, it.id, a);
+        if (r.status === 'done') rej('assignment is done; nothing to hand off');
+        if (!p.to) rej('to required');
+        if (p.to === a) rej('hand off to someone else');
+        needMember(S, p.to);
+        if (openRec(S, it.id, p.to)) rej(p.to + ' already holds a live or pending assignment on ' + it.alias);
+        var pend = vals(S.asg).filter(function (x) { return x.handoffOf === r.id && x.state === 'pending'; })[0];
+        if (pend) rej('a handoff of this assignment to ' + pend.to + ' is already pending (' + alias(pend.via) + ')');
+        break;
+      }
+
+      case 'item.accept':
+      case 'item.decline':
+        it = needItem(S, p.item);
+        r = pendingRec(S, it.id, a);
+        if (!r) rej(liveRec(S, it.id, a) ? a + '\'s assignment on ' + it.alias + ' is already live' : a + ' has no pending assignment on ' + it.alias);
+        if (n.type === 'item.accept' && r.handoffOf) {
+          var orig = S.asg[r.handoffOf];
+          if (!orig || orig.state !== 'live') rej('the handed-off assignment of ' + (orig ? orig.to : '?') + ' already ended');
+        }
+        break;
+
+      case 'item.return': {
+        it = needItem(S, p.item);
+        r = liveRec(S, it.id, p.assignee);
+        if (!r) rej((p.assignee || '?') + ' has no live assignment on ' + it.alias);
+        var lead = ((S.members[r.to] || {}).leads || [])[0];
+        if (lead !== a) rej('only ' + r.to + '\'s direct lead (' + (lead || 'none: ' + r.to + ' is a root') + ') returns an accepted assignment');
+        if (!r.accepted) rej(r.to + '\'s assignment was forced by ' + r.by + ' (their lead chain); only an accepted one is returnable');
         break;
       }
 
       case 'item.unassign':
         it = needItem(S, p.item);
         if (p.assignee) {
-          r = activeRec(S, it.id, p.assignee);
-          if (!r) rej(p.assignee + ' has no active assignment on ' + it.alias);
+          r = openRec(S, it.id, p.assignee);
+          if (!r) rej(p.assignee + ' has no live or pending assignment on ' + it.alias);
           var departed = (S.members[r.to] || {}).removed || (S.members[r.by] || {}).removed;
-          if (r.by !== a && !(S.admins[a] && departed)) rej('only the assigner (' + r.by + ') unassigns');
-        } else if (!activeRecs(S, it.id).some(function (x) { return x.by === a; }) && !liveRules(S, it.id).some(function (x) { return x.by === a; }))
+          if (r.by !== a && !(r.state === 'pending' && r.sender === a) && !(S.admins[a] && departed))
+            rej('only the assigner (' + r.by + ') unassigns' + (r.state === 'pending' && r.sender !== r.by ? ' (or ' + r.sender + ' withdraws)' : ''));
+        } else if (!openRecs(S, it.id).some(function (x) { return x.by === a || (x.state === 'pending' && x.sender === a); }) &&
+          !liveRules(S, it.id).some(function (x) { return x.by === a; }))
           rej(a + ' has no assignments to withdraw on ' + it.alias);
         break;
 
@@ -302,8 +374,8 @@
       case 'item.confirm':
       case 'item.reject':
         it = needItem(S, p.item);
-        r = activeRec(S, it.id, p.assignee);
-        if (!r) rej('no active assignment of ' + it.alias + ' to ' + p.assignee);
+        r = liveRec(S, it.id, p.assignee);
+        if (!r) rej('no live assignment of ' + it.alias + ' to ' + p.assignee);
         if (r.by !== a) rej('only the assigner (' + r.by + ') ' + (n.type === 'item.confirm' ? 'confirms' : 'rejects'));
         if (r.completion !== 'assigner') rej('this assignment does not require confirmation');
         if (r.status !== 'awaiting') rej('assignment is ' + r.status + ', not awaiting confirmation');
@@ -311,26 +383,11 @@
 
       case 'item.reopen':
         it = needItem(S, p.item);
-        r = activeRec(S, it.id, p.assignee || a);
+        r = liveRec(S, it.id, p.assignee || a);
         if (!r) rej(notAssignee(S, it, p.assignee || a));
         if (r.by !== a && r.to !== a) rej('only the assigner (' + r.by + ') or the assignee (' + r.to + ') reopens');
         if (r.status !== 'done') rej('assignment is ' + r.status + ', not done');
         break;
-
-      case 'request.accept':
-      case 'request.decline':
-        it = needRequest(S, p);
-        if (it.request.to !== a) rej('only the recipient (' + it.request.to + ') ' + (n.type === 'request.accept' ? 'accepts' : 'declines'));
-        if (it.request.state !== 'pending') rej('request is already ' + it.request.state);
-        break;
-
-      case 'request.return': {
-        it = needRequest(S, p);
-        var to = it.request.to, lead = ((S.members[to] || {}).leads || [])[0];
-        if (lead !== a) rej('only ' + to + '\'s direct lead (' + (lead || 'none: ' + to + ' is a root') + ') returns an accepted request');
-        if (it.request.state !== 'accepted') rej('request is ' + it.request.state + ', not accepted');
-        break;
-      }
 
       case 'comment.add':
         it = needItem(S, p.item);
@@ -357,6 +414,7 @@
         needAdmin(S, a);
         var nm = p.member || {};
         if (!nm.id) rej('member.id required');
+        if (String(nm.id).indexOf('.') >= 0) rej('member ids cannot contain "." (it separates member and clone in a stream id)');
         if (S.members[nm.id]) rej('member "' + nm.id + '" already exists' + (S.members[nm.id].removed ? ' (removed; ids are not reused)' : ''));
         if (!nm.keys || !nm.keys.length) rej('member.keys required');
         nm.keys.forEach(function (k) { if (keyInUse(S, k)) rej('key "' + k + '" is already in use'); });
@@ -393,6 +451,15 @@
         if (S.admins[p.member]) rej('remove the admin role first');
         break;
       }
+      case 'roles.set_priority_levels': {
+        needAdmin(S, a);
+        var names = p.names;
+        if (!Array.isArray(names) || !names.length) rej('names must be a non-empty list (lowest to highest)');
+        if (names.length > 9) rej('at most 9 priority levels');
+        names.forEach(function (x) { if (typeof x !== 'string' || !x.trim()) rej('every level needs a display name'); });
+        if (p.default == null || !Number.isInteger(p.default) || p.default < 0 || p.default >= names.length) rej('default must be a level 0..' + (names.length - 1));
+        break;
+      }
 
       default: rej('unknown event type "' + n.type + '"');
     }
@@ -404,7 +471,11 @@
   // concurrent-change markers.
 
   function show(v) {
-    if (v && typeof v === 'object' && !Array.isArray(v)) return v.status + (v.note ? ' ("' + v.note + '")' : '');
+    if (v === null || v === undefined) return '(none)';
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      if (v.names) return v.names.join(' / ') + ' (default ' + v.names[v.default] + ')';
+      return v.status + (v.note ? ' ("' + v.note + '")' : '');
+    }
     if (Array.isArray(v)) return v.join(', ') || 'nobody';
     if (v === true) return 'hidden';
     var s = String(v);
@@ -417,13 +488,16 @@
 
   // Multi-value register: heads are the writes no later write has seen. One head
   // = no conflict. Several = concurrent writes; the shown value is the display
-  // winner (later ts, then author id) and every head stays visible in the thread.
+  // winner (later ts, then member, clone, seq) and every head stays in history.
+  // Concurrent writes by one member from two of their clones get no marker (271):
+  // the later ts simply wins and the losing write stays in the thread.
   function write(S, key, label, n, v, C) {
     var heads = (S.reg[key] || []).filter(function (h) { return !hb(h.n, n); }), conc = heads.slice();
     heads.push({ n: n, v: v });
     S.reg[key] = heads;
     var w = heads.reduce(function (b, h) { return !b || later(h.n, b.n) ? h : b; }, null);
     if (C) conc.forEach(function (h) {
+      if (h.n.author === n.author) return;
       mark(h.n, n, 'field', label, { winner: w.n.id, mine: show(h.v), theirs: show(v) });
       mark(n, h.n, 'field', label, { winner: w.n.id, mine: show(v), theirs: show(h.v) });
     });
@@ -432,12 +506,13 @@
 
   function addRec(S, via, item, to, by, completion, extra) {
     var id = via.id + '>' + to;
-    if (S.asg[id]) return;
-    var r = { id: id, item: item, to: to, by: by, completion: completion, via: via.id, ts: via.ts,
-      depth: to === by ? 0 : (reach(S.members, by, 99)[to] || null),
-      status: 'todo', note: null, noteBy: null, last: via, removed: null, writes: [], inherited: null, request: false };
+    if (S.asg[id]) return null;
+    var r = { id: id, item: item, to: to, by: by, sender: by, completion: completion, via: via.id, ts: via.ts,
+      state: 'live', forced: true, accepted: null, leadAtAccept: null, ended: null, handoffOf: null, answerNote: null,
+      status: 'todo', note: null, noteBy: null, last: via, writes: [], inherited: null };
     if (extra) Object.keys(extra).forEach(function (k) { r[k] = extra[k]; });
     S.asg[id] = r;
+    return r;
   }
 
   // Live "everyone within N": whoever enters the reach later inherits the assignment.
@@ -445,14 +520,16 @@
     vals(S.rules).forEach(function (rule) {
       if (rule.ended) return;
       Object.keys(reach(S.members, rule.by, rule.levels)).forEach(function (t) {
-        if (rule.excluded[t] || activeRec(S, rule.item, t) || S.asg[rule.id + '>' + t]) return;
+        if (rule.excluded[t] || openRec(S, rule.item, t) || S.asg[rule.id + '>' + t]) return;
         addRec(S, { id: rule.id, ts: n.ts }, rule.item, t, rule.by, rule.completion, { inherited: n.id, last: n });
       });
     });
   }
 
-  function removeRec(S, r, n, C) {
-    r.removed = n;
+  // End a record. Unassign, return, withdraw and an accepted handoff beat any
+  // concurrent status write on it: the writes are marked, valid but not in effect.
+  function endRec(S, r, n, state, C) {
+    r.state = state; r.ended = n;
     if (!C) return;
     var label = r.to + '\'s assignment on ' + alias(r.item);
     r.writes.forEach(function (w) {
@@ -467,19 +544,30 @@
       mark(n, it.node, 'subtask', 'subtask under ' + alias(r.item), { winner: n.id });
     });
   }
+  // A write folded onto a record a concurrent event already ended.
+  function onEnded(S, item, who, n, C) {
+    var gone = lastEndedRec(S, item, who);
+    if (!gone) return;
+    gone.writes.push(n);
+    if (C && !hb(gone.ended, n)) {
+      var lb = who + '\'s assignment on ' + alias(item);
+      mark(n, gone.ended, 'removed', lb, { winner: gone.ended.id });
+      mark(gone.ended, n, 'removed', lb, { winner: gone.ended.id });
+    }
+  }
 
   function apply(S, n, C) {
     var p = n.p, a = n.author, it, q, m, r;
     switch (n.type) {
       case 'item.create':
         S.items[n.id] = { id: n.id, alias: n.alias, kind: p.kind, title: p.title, body: p.body || '', project: p.project || '',
-          parent: p.parent || null, author: a, ts: n.ts, hidden: false, edited: null, node: n,
-          request: p.request ? { to: p.request, by: a, state: 'pending', node: n, done: null, returned: null, note: null } : null };
+          due: p.due || null, priority: p.priority != null ? p.priority : S.prio.default,
+          parent: p.parent || null, author: a, ts: n.ts, hidden: false, edited: null, node: n };
         break;
       case 'item.edit':
         it = S.items[p.item]; if (!it) break;
-        ['title', 'body', 'project'].forEach(function (f) {
-          if (has(p, f)) it[f] = write(S, 'it:' + it.id + ':' + f, f + ' of ' + it.alias, n, p[f], C);
+        ITEM_FIELDS.forEach(function (f) {
+          if (has(p, f)) it[f] = write(S, 'it:' + it.id + ':' + f, f + ' of ' + it.alias, n, p[f] == null ? (f === 'due' ? null : '') : p[f], C);
         });
         it.edited = n;
         break;
@@ -488,42 +576,55 @@
         it.hidden = write(S, 'it:' + it.id + ':hidden', it.alias + ' hidden', n, true, C);
         break;
       case 'item.assign': {
-        var completion = p.completion || 'assignee', targets;
+        var completion = p.completion || 'assignee';
         if (!S.items[p.item]) break;
         if (p.mode === 'all') {
-          targets = Object.keys(reach(S.members, a, Number(p.levels)));
+          Object.keys(reach(S.members, a, Number(p.levels))).forEach(function (t) {
+            if (!openRec(S, p.item, t)) addRec(S, n, p.item, t, a, completion);
+          });
           S.rules[n.id] = { id: n.id, item: p.item, by: a, levels: Number(p.levels), completion: completion, excluded: {}, ended: null };
-        } else targets = p.people || [];
-        targets.forEach(function (t) {
-          if (S.members[t] && !activeRec(S, p.item, t)) addRec(S, n, p.item, t, a, completion);
+        } else (p.people || []).forEach(function (t) {
+          if (!S.members[t] || openRec(S, p.item, t)) return;
+          var forced = t === a || below(S.members, a, t);
+          addRec(S, n, p.item, t, a, completion, { forced: forced, state: forced ? 'live' : 'pending' });
         });
         break;
       }
+      case 'item.handoff':
+        r = liveRec(S, p.item, a);
+        if (!r || !S.members[p.to] || openRec(S, p.item, p.to)) break;
+        addRec(S, n, p.item, p.to, r.by, r.completion, { forced: false, state: 'pending', sender: a, handoffOf: r.id, answerNote: null, handoffNote: p.note || null });
+        break;
+      case 'item.accept':
+        r = pendingRec(S, p.item, a);
+        if (!r) { onEnded(S, p.item, a, n, C); break; }
+        r.state = 'live'; r.accepted = n; r.answerNote = p.note || null; r.last = n;
+        r.leadAtAccept = ((S.members[a] || {}).leads || [])[0] || null;
+        if (r.handoffOf && S.asg[r.handoffOf] && S.asg[r.handoffOf].state === 'live') endRec(S, S.asg[r.handoffOf], n, 'handed', C);
+        break;
+      case 'item.decline':
+        r = pendingRec(S, p.item, a);
+        if (r) { r.state = 'declined'; r.ended = n; r.answerNote = p.note || null; }
+        break;
+      case 'item.return':
+        r = liveRec(S, p.item, p.assignee);
+        if (r) { endRec(S, r, n, 'returned', C); r.answerNote = p.note || null; }
+        break;
       case 'item.unassign':
         if (p.assignee) {
-          r = activeRec(S, p.item, p.assignee);
+          r = openRec(S, p.item, p.assignee);
           liveRules(S, p.item).forEach(function (rule) { if (rule.by === (r ? r.by : a)) rule.excluded[p.assignee] = true; });
-          if (r) removeRec(S, r, n, C);
+          if (r) endRec(S, r, n, r.state === 'pending' ? 'withdrawn' : 'unassigned', C);
         } else {
           liveRules(S, p.item).forEach(function (rule) { if (rule.by === a) rule.ended = n.id; });
-          activeRecs(S, p.item).filter(function (x) { return x.by === a; }).forEach(function (x) { removeRec(S, x, n, C); });
+          openRecs(S, p.item).filter(function (x) { return x.by === a || (x.state === 'pending' && x.sender === a); })
+            .forEach(function (x) { endRec(S, x, n, x.state === 'pending' ? 'withdrawn' : 'unassigned', C); });
         }
         break;
       case 'item.status': case 'item.close': case 'item.confirm': case 'item.reject': case 'item.reopen': {
         var who = (n.type === 'item.status' || n.type === 'item.close') ? a : (p.assignee || a);
-        r = activeRec(S, p.item, who);
-        if (!r) { // folded onto an assignment that a concurrent event removed
-          var gone = lastRemovedRec(S, p.item, who);
-          if (gone) {
-            gone.writes.push(n);
-            if (C && !hb(gone.removed, n)) {
-              var lb = who + '\'s assignment on ' + alias(p.item);
-              mark(n, gone.removed, 'removed', lb, { winner: gone.removed.id });
-              mark(gone.removed, n, 'removed', lb, { winner: gone.removed.id });
-            }
-          }
-          break;
-        }
+        r = liveRec(S, p.item, who);
+        if (!r) { onEnded(S, p.item, who, n, C); break; } // folded onto an assignment a concurrent event ended
         r.writes.push(n);
         var v = n.type === 'item.status' ? p.status : n.type === 'item.close' ? (r.completion === 'assigner' ? 'awaiting' : 'done') :
           n.type === 'item.confirm' ? 'done' : 'doing';
@@ -531,21 +632,6 @@
         r.status = w.status; r.note = w.note; r.noteBy = w.by; r.last = w.n;
         break;
       }
-      case 'request.accept':
-        it = S.items[p.item]; if (!it || !it.request) break;
-        it.request.state = 'accepted'; it.request.done = n;
-        addRec(S, n, it.id, a, a, 'assignee', { request: true });
-        break;
-      case 'request.decline':
-        it = S.items[p.item]; if (!it || !it.request) break;
-        it.request.state = 'declined'; it.request.done = n; it.request.note = p.note || null;
-        break;
-      case 'request.return':
-        it = S.items[p.item]; if (!it || !it.request) break;
-        it.request.state = 'returned'; it.request.returned = n; it.request.note = p.note || null;
-        r = activeRec(S, it.id, it.request.to);
-        if (r) removeRec(S, r, n, C);
-        break;
       case 'comment.add':
         S.comments[n.id] = { id: n.id, alias: n.alias, item: p.item, author: a, body: p.body, reply_to: p.reply_to || null,
           hidden: false, edited: null, ts: n.ts, node: n };
@@ -579,6 +665,9 @@
       case 'roles.remove_member':
         m = S.members[p.member]; if (m) { m.removed = n.id; delete S.admins[p.member]; }
         break;
+      case 'roles.set_priority_levels':
+        S.prio = write(S, 'prio', 'priority levels', n, { names: (p.names || []).slice(), default: p.default }, C);
+        break;
     }
     if (/^roles\./.test(n.type) || n.type === 'item.assign') refreshLive(S, n);
   }
@@ -610,10 +699,11 @@
       var more = false;
       order.forEach(function (r) {
         if (r.status !== 'applied' || r.type !== 'roles.revoke_key') return;
-        var who = r.p.member, key = r.p.key, cut = r.cv[who] || 0;
-        order.forEach(function (n) {
+        var who = r.p.member, key = r.p.key;
+        order.forEach(function (n) { // the cut is per stream: what the revoker had seen of each of that member's clones
+          var cut = r.cv[n.stream] || 0;
           if (n.author !== who || n.commit.signer !== key || n.seq <= cut || ignored[n.id] || n.status !== 'applied') return;
-          ignored[n.id] = 'signed with ' + key + ', which ' + r.alias + ' revoked having seen ' + who + ' only up to seq ' + cut +
+          ignored[n.id] = 'signed with ' + key + ', which ' + r.alias + ' revoked having seen ' + n.stream + ' only up to seq ' + cut +
             '; events from a revoked key that the revoker had not seen are ignored, whatever their seen claims';
           more = true;
         });
@@ -641,15 +731,15 @@
       log.splice(i, 0, n);
     });
 
-    return { members: S.members, admins: S.admins, items: S.items, asg: S.asg, rules: S.rules, comments: S.comments,
+    return { S: S, members: S.members, admins: S.admins, items: S.items, asg: S.asg, rules: S.rules, comments: S.comments, prio: S.prio,
       log: log, byId: byId, children: childrenMap(S.members), heads: headSeqs(nodes) };
   }
 
-  // Highest valid seq received per member: the `seen` of a commit written now, and
+  // Highest valid seq received per stream: the `seen` of a commit written now, and
   // (for the writer) the seq its next event continues from.
   function headSeqs(nodes) {
     var out = {};
-    nodes.forEach(function (n) { if (n.causal && n.seq > (out[n.author] || 0)) out[n.author] = n.seq; });
+    nodes.forEach(function (n) { if (n.causal && n.seq > (out[n.stream] || 0)) out[n.stream] = n.seq; });
     return out;
   }
 
@@ -661,68 +751,351 @@
     if (!(roles.admins || []).length) out.push('no admins');
     (roles.members || []).forEach(function (m) {
       var l = m.leads || [];
+      if (String(m.id).indexOf('.') >= 0) out.push(m.id + ': member ids cannot contain "."');
       if (l.length > 1) out.push(m.id + ': leads must have length at most 1 (got ' + l.length + ')');
       l.forEach(function (x) { if (!ids[x]) out.push(m.id + ': lead "' + x + '" is not a member'); });
       if (!m.keys || !m.keys.length) out.push(m.id + ': no keys');
     });
+    if (roles.priority && (!Array.isArray(roles.priority.names) || !roles.priority.names.length)) out.push('priority.names must be a non-empty list');
     return out;
   }
 
-  // ----------------------------------------------------------- derived data
+  // ----------------------------------------------------------- derived state
 
-  function itemList(g) { return vals(g.items); }
-  function recsOf(g, item, withRemoved) {
-    return vals(g.asg).filter(function (r) { return r.item === item && (withRemoved || !r.removed); });
-  }
-  function subtasksOf(g, id, withHidden) {
-    return itemList(g).filter(function (i) { return i.parent === id && (withHidden || !i.hidden); });
-  }
-  // The item's own status from its assignments (manual by its assignees); requests
-  // that are not accepted show their request state instead; topics have none.
   function itemStatus(g, it) {
     if (it.kind === 'topic') return null;
-    if (it.request && it.request.state !== 'accepted') return it.request.state;
-    var s = recsOf(g, it.id).map(function (r) { return r.status; });
-    if (!s.length) return 'unassigned';
+    var recs = recsOn(g.S, it.id), live = recs.filter(function (r) { return r.state === 'live'; });
+    if (!live.length) {
+      if (recs.some(function (r) { return r.state === 'pending'; })) return 'pending';
+      var last = recs.filter(function (r) { return r.ended; }).sort(function (x, y) { return later(x.ended, y.ended) ? 1 : -1; }).pop();
+      return last && (last.state === 'declined' || last.state === 'returned') ? last.state : 'unassigned';
+    }
+    var s = live.map(function (r) { return r.status; });
     if (s.every(function (x) { return x === 'done'; })) return 'done';
     if (s.indexOf('blocked') >= 0) return 'blocked';
     if (s.indexOf('awaiting') >= 0) return 'awaiting';
     if (s.some(function (x) { return x === 'doing' || x === 'done'; })) return 'doing';
     return 'todo';
   }
-  function counted(it) { return it.kind !== 'topic' && !(it.request && it.request.state !== 'accepted'); }
-  // Children by status (topics and requests not accepted are not counted) and
-  // every blocked descendant down the tree.
+  // Pending assignments are excluded from status and roll-up: an item whose only
+  // assignments are pending (or declined / returned) is not counted.
+  function counted(g, it) {
+    var s = itemStatus(g, it);
+    return it.kind !== 'topic' && s !== 'pending' && s !== 'declined' && s !== 'returned';
+  }
+  function subtasksOf(g, id) { return vals(g.items).filter(function (i) { return i.parent === id && !i.hidden; }); }
   function rollup(g, it) {
-    var kids = subtasksOf(g, it.id).filter(counted), counts = {}, blocked = [];
+    var kids = subtasksOf(g, it.id).filter(function (k) { return counted(g, k); }), counts = {}, blocked = [];
     kids.forEach(function (k) { var s = itemStatus(g, k); counts[s] = (counts[s] || 0) + 1; });
     (function walk(id, depth) {
       if (depth > 30) return;
       subtasksOf(g, id).forEach(function (k) {
-        if (counted(k) && itemStatus(g, k) === 'blocked') blocked.push(k.id);
+        if (counted(g, k) && itemStatus(g, k) === 'blocked') blocked.push(k.id);
         walk(k.id, depth + 1);
       });
     })(it.id, 0);
     return { total: kids.length, counts: counts, blocked: blocked };
   }
-  function chain(g, it) { // authors from the item up to the root item
-    var out = [], cur = it, n = 0;
-    while (cur && n++ < 50) { out.push(cur.author); cur = cur.parent && g.items[cur.parent]; }
-    return out;
+  function daysBetween(a, b) { return (Date.parse(b) - Date.parse(a)) / 86400000; }
+
+  // The one read path for a view: everything a viewer's page shows, as plain JSON
+  // (no engine objects, no functions). `input` is what the viewer's clone holds.
+  function deriveViewState(input, opts) {
+    var g = replay(input), stream = opts.stream, v = memberOf(stream), now = opts.now || '', S = g.S;
+    var me = S.members[v] || null, R = reach(S.members, v, 99);
+
+    var events = g.log.map(function (n) {
+      return { id: n.id, alias: n.alias, stream: n.stream, member: n.author, seq: n.seq, ts: n.ts, type: n.type, origin: n.origin,
+        payload: clone(n.p), status: n.status, reason: n.reason, ignored: !!n.revokedLate,
+        markers: n.markers.map(function (m) {
+          var o = g.byId[m.other];
+          return { kind: m.kind, field: m.field, other: m.other, otherMember: o ? o.author : null, winner: m.winner, mine: m.mine || null, theirs: m.theirs || null };
+        }),
+        thread: n.thread, parentThread: n.parentThread, local: !!n.commit._local, open: !!n.commit._open, late: !!n.commit._late };
+    });
+
+    var assignments = {};
+    vals(S.asg).forEach(function (r) {
+      var last = r.last ? r.last.ts : r.ts, live = r.state === 'live';
+      assignments[r.id] = { id: r.id, item: r.item, to: r.to, by: r.by, sender: r.sender, completion: r.completion, state: r.state,
+        forced: r.forced, status: r.status, note: r.note, noteBy: r.noteBy, via: r.via, ts: r.ts,
+        inherited: !!r.inherited, ruleLevels: g.rules[r.via] ? g.rules[r.via].levels : null,
+        handoffOf: r.handoffOf, handoffNote: r.handoffNote || null, answerNote: r.answerNote,
+        accepted: r.accepted ? { id: r.accepted.id, ts: r.accepted.ts } : null, leadAtAccept: r.leadAtAccept,
+        ended: r.ended ? { id: r.ended.id, type: r.ended.type, ts: r.ended.ts, by: r.ended.author } : null,
+        depth: r.to === r.by ? 0 : (reach(S.members, r.by, 99)[r.to] || null),
+        lastUpdate: last,
+        stale: !!(live && now && (r.status === 'doing' || r.status === 'blocked') && daysBetween(last, now) >= STALE_DAYS) };
+    });
+
+    var lastAct = {}, threads = {};
+    g.log.forEach(function (n) {
+      if (n.status === 'applied' && n.thread && String(n.ts) > (lastAct[n.thread] || '')) lastAct[n.thread] = String(n.ts);
+      [n.thread, n.parentThread].forEach(function (t) { if (t) (threads[t] = threads[t] || []).push(n.id); });
+    });
+    var items = {};
+    vals(S.items).forEach(function (it) {
+      var recs = recsOn(S, it.id), d = 0, cur = it, chain = [];
+      while (cur && d < 50) { chain.push(cur.author); cur = cur.parent && S.items[cur.parent]; d++; }
+      var started = null;
+      recs.forEach(function (r) { r.writes.forEach(function (w) { if (w.type === 'item.status' && w.p.status === 'doing' && (!started || String(w.ts) < started)) started = String(w.ts); }); });
+      items[it.id] = { id: it.id, alias: it.alias, kind: it.kind, title: it.title, body: it.body, project: it.project,
+        due: it.due, priority: it.priority, priorityLevel: priorityLevel(S.prio, it.priority), priorityName: S.prio.names[priorityLevel(S.prio, it.priority)],
+        parent: it.parent && S.items[it.parent] ? it.parent : null, author: it.author, ts: it.ts, hidden: !!it.hidden,
+        edited: it.edited ? { id: it.edited.id, ts: it.edited.ts } : null, status: itemStatus(g, it), counted: counted(g, it),
+        rollup: rollup(g, it), lastActivity: lastAct[it.id] || it.ts, started: started,
+        children: vals(S.items).filter(function (k) { return k.parent === it.id; }).map(function (k) { return k.id; }),
+        assignments: recs.map(function (r) { return r.id; }),
+        pending: recs.filter(function (r) { return r.state === 'pending'; }).map(function (r) { return r.id; }),
+        thread: threads[it.id] || [], concurrent: (threads[it.id] || []).filter(function (id) { return g.byId[id].markers.length; }).length,
+        depth: chain.length - 1, chain: chain.slice().reverse() };
+    });
+    var comments = {};
+    vals(S.comments).forEach(function (q) {
+      comments[q.id] = { id: q.id, item: q.item, author: q.author, body: q.body, reply_to: q.reply_to, ts: q.ts,
+        edited: q.edited ? { id: q.edited.id, ts: q.edited.ts } : null, hidden: q.hiddenBy ? q.hiddenBy.id : null };
+    });
+    var itemOrder = [];
+    (function walk(parent) {
+      Object.keys(items).forEach(function (id) { if (items[id].parent === parent) { itemOrder.push(id); walk(id); } });
+    })(null);
+
+    var members = {};
+    Object.keys(S.members).forEach(function (id) {
+      var m = S.members[id];
+      members[id] = { id: id, name: m.name, leads: m.leads.slice(), keys: m.keys.slice(),
+        revoked: Object.keys(m.revoked).map(function (k) { return { key: k, by: m.revoked[k] }; }),
+        removed: m.removed, joined: m.joined, admin: !!S.admins[id], children: (g.children[id] || []).slice(), depth: R[id] || null,
+        role: (m.leads || []).length ? ((g.children[id] || []).length ? 'lead' : 'member') : 'root' };
+    });
+
+    // ---- viewer-specific lists
+    var A = vals(assignments), RANK = { blocked: 0, doing: 1, todo: 2, awaiting: 3, done: 4 };
+    function visible(r) { return items[r.item] && !items[r.item].hidden; }
+    function byRank(x, y) { return RANK[x.status] - RANK[y.status]; }
+    function byUrgency(x, y) { // priority desc, then due asc (none last), then status
+      var ix = items[x.item], iy = items[y.item];
+      if (ix.priorityLevel !== iy.priorityLevel) return iy.priorityLevel - ix.priorityLevel;
+      var dx = ix.due || '9999', dy = iy.due || '9999';
+      return dx < dy ? -1 : dx > dy ? 1 : byRank(x, y);
+    }
+    var ids = function (l) { return l.map(function (r) { return r.id; }); };
+    var mine = A.filter(function (r) { return r.to === v && r.state === 'live' && visible(r); });
+    var pendingToMe = A.filter(function (r) { return r.to === v && r.state === 'pending' && visible(r); });
+    var answered = A.filter(function (r) { return r.to === v && !r.forced && r.state !== 'pending' && (r.accepted || r.state === 'declined') && visible(r); });
+    var sent = A.filter(function (r) { return r.sender === v && r.to !== v && !r.forced && visible(r); });
+    var confirms = A.filter(function (r) { return r.by === v && r.to !== v && r.state === 'live' && r.status === 'awaiting'; });
+    var given = Object.keys(items).filter(function (id) {
+      return !items[id].hidden && A.some(function (r) { return r.item === id && (r.by === v || r.sender === v) && r.to !== v && (r.state === 'live' || r.state === 'pending'); });
+    });
+    var created = Object.keys(items).filter(function (id) {
+      var it = items[id];
+      return it.author === v && !it.hidden && it.kind !== 'topic' && !A.some(function (r) { return r.item === id && (r.state === 'live' || r.state === 'pending'); });
+    });
+
+    var notices = [];
+    A.forEach(function (r) {
+      if (!r.accepted) return;
+      var base = { assignment: r.id, item: r.item, to: r.to, by: r.by, sender: r.sender, ts: r.accepted.ts, state: r.state };
+      if (r.leadAtAccept === v) notices.push(Object.assign({ key: 'acc:' + r.id, kind: 'accepted' }, base));
+      else if (r.handoffOf && assignments[r.handoffOf] && assignments[r.handoffOf].by === v) notices.push(Object.assign({ key: 'ho:' + r.id, kind: 'handoff', from: assignments[r.handoffOf].to }, base));
+    });
+
+    var R3 = reach(S.members, v, 3), team = [];
+    (function walk(lead) {
+      (g.children[lead] || []).forEach(function (id) {
+        if (!(id in R3)) return;
+        var recs = A.filter(function (r) { return r.to === id && visible(r); });
+        var open = recs.filter(function (r) { return r.state === 'live' && r.status !== 'done'; }).sort(byRank);
+        var pend = recs.filter(function (r) { return r.state === 'pending'; });
+        team.push({ id: id, depth: R3[id], open: ids(open), pending: ids(pend),
+          done: recs.filter(function (r) { return r.state === 'live' && r.status === 'done'; }).length,
+          blocked: open.filter(function (r) { return r.status === 'blocked'; }).length,
+          stale: open.filter(function (r) { return r.stale; }).length,
+          last: recs.map(function (r) { return r.lastUpdate; }).sort().pop() || null });
+        if (R3[id] < 3) walk(id);
+      });
+    })(v);
+
+    var badge = [];
+    mine.forEach(function (r) { if (r.by !== v && r.forced && r.status === 'todo') badge.push('a:' + r.id); });
+    pendingToMe.forEach(function (r) { badge.push('p:' + r.id); });
+    notices.forEach(function (x) { badge.push(x.key); });
+
+    var commits = 0;
+    Object.keys(input.commits || {}).forEach(function (k) { commits += input.commits[k].length; });
+
+    return {
+      viewer: { member: v, stream: stream, name: me ? me.name : v, admin: !!S.admins[v], lead: me ? (me.leads || [])[0] || null : null,
+        followers: (g.children[v] || []).slice(), reach: R, isMember: !!(me && !me.removed) },
+      priority: clone(S.prio),
+      members: members, admins: Object.keys(S.admins), rolesProblems: rolesProblems(input.roles),
+      items: items, itemOrder: itemOrder, assignments: assignments, comments: comments, events: events, notices: notices,
+      my: {
+        assignments: ids(mine.sort(byRank)),
+        today: { work: ids(mine.filter(function (r) { return r.status !== 'done' && r.status !== 'awaiting'; }).sort(byUrgency)), pending: ids(pendingToMe.sort(byUrgency)), confirms: ids(confirms) },
+        received: { pending: ids(pendingToMe), answered: ids(answered), sent: ids(sent) },
+        given: given, created: created, team: team, badge: badge
+      },
+      stats: { events: events.length, commits: commits,
+        flagged: events.filter(function (e) { return e.status !== 'applied'; }).length,
+        concurrent: events.filter(function (e) { return e.markers.length; }).length },
+      heads: clone(g.heads), now: now
+    };
   }
-  function threadOf(g, id) {
-    return g.log.filter(function (n) { return n.thread === id || n.parentThread === id; });
-  }
-  function lastActivity(g, id) { // ts of the newest applied event in the thread
-    var t = '';
-    g.log.forEach(function (n) { if (n.status === 'applied' && n.thread === id && String(n.ts) > t) t = String(n.ts); });
-    return t;
+
+  // ------------------------------------------------------- store (protocol mock)
+  // Remote = pushed commits per stream. Each clone holds what it fetched (`have`,
+  // a commit count per stream), its own unpushed commits (`local`), and the open
+  // batch (the last local commit with _open). Writes batch in the open batch; it
+  // closes into one commit when the clone's `seen` would change (it receives new
+  // events) or at push (227). The view of a clone is a replay of what it holds.
+
+  function openStore(def) {
+    var state;
+    var hasRemote = !!(def.sync && def.sync.remote);
+
+    function reset() {
+      state = { roles: clone(def.roles), remote: {}, clones: {} };
+      var streams = {};
+      [def.commits, def.late, def.local].forEach(function (o) { Object.keys(o || {}).forEach(function (s) { streams[s] = true; }); });
+      (def.clones || []).forEach(function (s) { streams[s] = true; });
+      (def.roles.members || []).forEach(function (m) {
+        if (!Object.keys(streams).some(function (s) { return memberOf(s) === m.id; })) streams[m.id + '.pc'] = true;
+      });
+      Object.keys(streams).forEach(function (s) {
+        state.clones[s] = { online: (def.offline || []).indexOf(s) < 0, syncedAt: (def.sync && def.sync.syncedAt) || null, have: {}, late: {}, local: [] };
+      });
+      if (hasRemote) {
+        Object.keys(def.commits || {}).forEach(function (s) { state.remote[s] = clone(def.commits[s]); });
+        Object.keys(state.clones).forEach(function (c) {
+          Object.keys(state.remote).forEach(function (s) { state.clones[c].have[s] = state.remote[s].length; });
+        });
+        // late: pushed by their writer, fetched by no other clone yet
+        Object.keys(def.late || {}).forEach(function (s) {
+          state.remote[s] = (state.remote[s] || []).concat(clone(def.late[s]));
+          state.clones[s].have[s] = state.remote[s].length;
+        });
+      } else {
+        Object.keys(def.commits || {}).forEach(function (s) { state.clones[s].local = clone(def.commits[s]); });
+      }
+      Object.keys(def.local || {}).forEach(function (s) { state.clones[s].local = state.clones[s].local.concat(clone(def.local[s])); });
+    }
+
+    function input(s) {
+      var c = state.clones[s], commits = {};
+      Object.keys(state.remote).forEach(function (ref) {
+        var n = ref === s ? state.remote[ref].length : (c.have[ref] || 0);
+        commits[ref] = state.remote[ref].slice(0, n).map(function (cm, i) { return c.late[ref + '/' + i] ? Object.assign({}, cm, { _late: true }) : cm; });
+      });
+      if (c.local.length) commits[s] = (commits[s] || []).concat(c.local.map(function (cm) { return Object.assign({}, cm, { _local: true }); }));
+      return { roles: state.roles, commits: commits };
+    }
+    function seenFor(g, s) {
+      var seen = {};
+      Object.keys(g.heads).sort().forEach(function (k) { if (k !== s) seen[k] = g.heads[k]; });
+      return seen;
+    }
+    function closeBatch(c, ts) {
+      var last = c.local[c.local.length - 1];
+      if (last && last._open) { delete last._open; last.ts = ts || last.ts; }
+    }
+    function upstream(s) {
+      var c = state.clones[s], n = 0;
+      Object.keys(state.remote).forEach(function (ref) { if (ref !== s) n += Math.max(0, state.remote[ref].length - (c.have[ref] || 0)); });
+      return n;
+    }
+    function receive(s) {
+      var c = state.clones[s], got = 0;
+      Object.keys(state.remote).forEach(function (ref) {
+        if (ref === s) return;
+        var all = state.remote[ref];
+        for (var i = c.have[ref] || 0; i < all.length; i++) {
+          // "arrived late": written before this clone's previous sync, received only now
+          if (c.syncedAt && String(all[i].ts) < String(c.syncedAt)) c.late[ref + '/' + i] = true;
+          got++;
+        }
+        c.have[ref] = all.length;
+      });
+      return got;
+    }
+    function need(s) { if (!state.clones[s]) throw new Error('unknown clone stream "' + s + '"'); return state.clones[s]; }
+
+    var api = {
+      name: def.name, label: def.label, remote: hasRemote ? def.sync.remote : null,
+      reset: reset,
+      streams: function () { return Object.keys(state.clones); },
+      clonesOf: function (member) { return Object.keys(state.clones).filter(function (s) { return memberOf(s) === member; }); },
+      nextEventId: function (s) { need(s); return s + '#' + ((replay(input(s)).heads[s] || 0) + 1); },
+      // The only write path: append events to the clone's open batch. events =
+      // [{ type, payload, origin? }]; ts = the write time (every event keeps its own).
+      dispatch: function (s, evs, ts) {
+        var c = need(s), g = replay(input(s)), seen = seenFor(g, s), seq = g.heads[s] || 0;
+        var last = c.local[c.local.length - 1];
+        if (last && last._open && JSON.stringify(last.seen) !== JSON.stringify(seen)) { closeBatch(c, ts); last = null; }
+        if (!last || !last._open) {
+          var m = g.members[memberOf(s)];
+          last = { stream: s, ts: ts, signer: (m && m.keys[0]) || (m && Object.keys(m.revoked)[0]) || 'unsigned', seen: seen, events: [], _open: true };
+          c.local.push(last);
+        }
+        var out = evs.map(function (e) {
+          var ev = { seq: ++seq, ts: ts, type: e.type };
+          if (e.origin && e.origin !== 'human') ev.origin = e.origin;
+          ev.payload = clone(e.payload || {});
+          last.events.push(ev);
+          return s + '#' + ev.seq;
+        });
+        var g2 = replay(input(s));
+        return out.map(function (id) { var n = g2.byId[id]; return { id: id, alias: alias(id), type: n.type, status: n.status, reason: n.reason }; });
+      },
+      // Apply path: close the batch, push, fetch. No remote = close only (same path as a long offline).
+      sync: function (s, now) {
+        var c = need(s);
+        closeBatch(c, now);
+        if (!hasRemote) return { noRemote: true, pushed: 0, fetched: 0, unpushed: c.local.length };
+        if (!c.online) return { offline: true, pushed: 0, fetched: 0, unpushed: c.local.length };
+        var pushed = c.local.length;
+        c.local.forEach(function (cm) { delete cm._open; (state.remote[s] = state.remote[s] || []).push(cm); });
+        c.local = [];
+        var got = receive(s);
+        c.syncedAt = now;
+        return { pushed: pushed, fetched: got, unpushed: 0 };
+      },
+      // Receive only (drawer open, poll): closes the open batch first when new events arrive.
+      fetch: function (s, now) {
+        var c = need(s);
+        if (!hasRemote || !c.online) return { fetched: 0 };
+        if (upstream(s)) closeBatch(c, now);
+        var got = receive(s);
+        c.syncedAt = now;
+        return { fetched: got };
+      },
+      setOnline: function (s, on) { need(s).online = !!on; },
+      view: function (s, now) {
+        var c = need(s), vs = deriveViewState(input(s), { stream: s, now: now });
+        vs.store = { name: def.name, label: def.label, remote: hasRemote ? def.sync.remote : null };
+        vs.sync = { online: c.online, syncedAt: c.syncedAt, upstream: hasRemote ? upstream(s) : 0,
+          unpushed: c.local.map(function (cm) { return { open: !!cm._open, ts: cm.ts, events: cm.events.map(function (e) { return s + '#' + e.seq; }) }; }) };
+        vs.clones = {};
+        Object.keys(state.clones).forEach(function (k) { (vs.clones[memberOf(k)] = vs.clones[memberOf(k)] || []).push({ stream: k, online: state.clones[k].online, unpushed: state.clones[k].local.length }); });
+        return vs;
+      },
+      raw: function () { return clone(state); },
+      setRaw: function (r) {
+        if (!r || !r.roles || !Array.isArray(r.roles.members)) throw new Error('roles file needs a "members" list');
+        state = { roles: r.roles, remote: r.remote || {}, clones: r.clones || {} };
+        Object.keys(state.remote).concat(Object.keys(state.clones)).forEach(function (s) {
+          if (!state.clones[s]) state.clones[s] = { online: true, syncedAt: null, have: {}, late: {}, local: [] };
+        });
+      }
+    };
+    reset();
+    return api;
   }
 
   window.TrackerEngine = {
-    KINDS: KINDS, SETTABLE: SETTABLE, ORIGINS: ORIGINS,
-    clone: clone, alias: alias, replay: replay, rolesProblems: rolesProblems, reach: reach, hb: hb,
-    itemList: itemList, recsOf: recsOf, subtasksOf: subtasksOf, itemStatus: itemStatus, rollup: rollup,
-    chain: chain, threadOf: threadOf, lastActivity: lastActivity
+    KINDS: KINDS, SETTABLE: SETTABLE, ORIGINS: ORIGINS, DEFAULT_PRIORITY: DEFAULT_PRIORITY, STALE_DAYS: STALE_DAYS,
+    alias: alias, memberOf: memberOf, cloneOf: cloneOf, refOf: refOf, reach: reach,
+    openStore: openStore, deriveViewState: deriveViewState
   };
 })();

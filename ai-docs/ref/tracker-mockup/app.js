@@ -1,25 +1,27 @@
-// Tracker mockup v2: the view. A dashboard-like frame (header, conversation
+// Tracker mockup v3: the view. A dashboard-like frame (header, conversation
 // placeholder, pull-down drawer with one handle per store) around the tracker
-// cards, a thread side sheet, and small action dialogs. All state is computed in
-// the browser by TrackerEngine (engine.js) from fixtures.js; no build, no fetch.
+// views, a thread side sheet, and small action dialogs. The view reads only the
+// plain view-state object a store handle returns (store.view) and writes only by
+// dispatching events (store.dispatch); it never touches engine internals.
 (function () {
   'use strict';
 
-  var E = window.TrackerEngine;
-  var replay = E.replay, reach = E.reach, alias = E.alias, itemList = E.itemList, recsOf = E.recsOf;
-  var subtasksOf = E.subtasksOf, itemStatus = E.itemStatus, rollup = E.rollup, chain = E.chain;
+  var E = window.TrackerEngine, alias = E.alias, memberOf = E.memberOf;
 
-  var stores = {}, order = [], gs = {};
+  var stores = {}, defs = {}, order = [], vss = {}, EV = {};
   var ui = {
     store: null,          // the store the header control and the sheet refer to
     open: null,           // the store whose drawer is open, or null
-    viewers: {},          // store -> member id the page is viewed as
-    seen: {},             // "store|viewer" -> { badge key: true } already shown to that viewer
+    viewers: {},          // store -> clone stream the page is viewed as ("<member>.<clone>")
+    clock: {},            // store -> mock "now"; each write advances it by a minute
+    seen: {},             // "store|stream" -> { badge key: true } already shown to that viewer
     fresh: {},            // badge keys that were new when the drawer last opened
-    sync: {},             // store -> { online, lastSynced }
     item: null, sheet: false, last: null, replyTo: null,
-    flaggedOnly: false, concOnly: false, kind: 'all', status: 'open', dataOpen: false, openLogs: {}
+    mode: 'cards', kscope: 'my', calMonth: null,
+    act: { family: 'all', member: 'all', flagged: false, conc: false },
+    kind: 'all', status: 'open', dataOpen: false, openLogs: {}
   };
+  var MODES = [['cards', 'cards'], ['kanban', 'kanban'], ['activity', 'activity timeline'], ['gantt', 'due timeline'], ['calendar', 'calendar']];
 
   function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
@@ -27,23 +29,36 @@
     });
   }
   function $(id) { return document.getElementById(id); }
-  function clone(x) { return JSON.parse(JSON.stringify(x)); }
   function attr(k, v) { return ' data-' + k + '="' + esc(v) + '"'; }
+  function vals(o) { return Object.keys(o).map(function (k) { return o[k]; }); }
 
   // ------------------------------------------------------------- small views
 
-  function nm(g, id) { return g.members[id] ? g.members[id].name : id; }
+  var VS = null; // the view state being rendered
+  function nm(id) { return VS.members[id] ? VS.members[id].name : id; }
   function fmtTs(ts) { return ts ? String(ts).slice(5, 16).replace('T', ' ') : '-'; }
+  function today() { return String(ui.clock[ui.store] || '').slice(0, 10); }
   function itemRef(id) { return '<a href="#"' + attr('item', id) + '>' + esc(alias(id)) + '</a>'; }
-  function titleRef(g, id) {
-    var it = g.items[id];
+  function titleRef(id) {
+    var it = VS.items[id];
     return '<a class="title" href="#"' + attr('item', id) + '>' + esc(it ? it.title : alias(id)) + '</a>';
   }
   var ST_LABEL = { todo: 'todo', doing: 'doing', blocked: 'blocked', awaiting: 'awaiting confirm', done: 'done',
-    unassigned: 'unassigned', pending: 'pending request', declined: 'declined', returned: 'returned' };
+    unassigned: 'unassigned', pending: 'pending', declined: 'declined', returned: 'returned', handed: 'handed off', withdrawn: 'withdrawn' };
   function stChip(s) { return s ? '<span class="chip st-' + esc(s) + '">' + esc(ST_LABEL[s] || s) + '</span>' : ''; }
+  function recChip(r) { return r.state === 'live' ? stChip(r.status) : stChip(r.state); }
+  function prChip(it) {
+    if (!it || it.kind === 'topic') return '';
+    return '<span class="chip pr pr-' + it.priorityLevel + '" title="priority ' + it.priorityLevel + ' of ' + (VS.priority.names.length - 1) +
+      (it.priority !== it.priorityLevel ? ' (stored ' + esc(it.priority) + ', outside the current range: shown as the top level)' : '') + '">' + esc(it.priorityName) + '</span>';
+  }
+  function dueChip(it) {
+    if (!it || !it.due) return '';
+    var over = it.due < today() && it.status !== 'done';
+    return '<span class="chip due' + (over ? ' over' : '') + '" title="due ' + esc(it.due) + (over ? ', overdue' : '') + '">due ' + esc(it.due.slice(5)) + '</span>';
+  }
   function kindChip(it) {
-    return '<span class="chip kind">' + esc(it.kind) + '</span>' + (it.request ? '<span class="chip req">request</span>' : '') +
+    return '<span class="chip kind">' + esc(it.kind) + '</span>' + (it.pending.length ? '<span class="chip req">pending assignment</span>' : '') +
       (it.hidden ? '<span class="chip hid">hidden</span>' : '');
   }
   function originChip(o) {
@@ -51,70 +66,60 @@
       o === 'agent' ? '<span class="chip agent">agent</span>' : '';
   }
   function complText(c) { return c === 'assigner' ? 'assigner confirms' : 'assignee closes'; }
-  function rollupHtml(g, it) {
-    var r = rollup(g, it), h = '';
+  function rollupHtml(it) {
+    var r = it.rollup, h = '';
     if (r.total) h += '<span class="chip roll" title="children by status (manual status stays with the assignee)">done ' + (r.counts.done || 0) + '/' + r.total +
       (r.counts.blocked ? ' &middot; blocked ' + r.counts.blocked : '') + '</span>';
-    if (r.blocked.length) h += '<span class="chip warn" title="blocked below: ' + esc(r.blocked.map(function (id) { return alias(id) + ' ' + g.items[id].title; }).join('; ')) + '">&#9888; blocked below</span>';
+    if (r.blocked.length) h += '<span class="chip warn" title="blocked below: ' + esc(r.blocked.map(function (id) { return alias(id) + ' ' + VS.items[id].title; }).join('; ')) + '">&#9888; blocked below</span>';
     return h;
   }
-  function source(g, r) {
-    if (r.request) return 'request from <b>' + esc(nm(g, g.items[r.item].request.by)) + '</b>, accepted';
-    if (r.by === r.to) return 'self-assigned';
-    return 'from <b>' + esc(nm(g, r.by)) + '</b>' + (r.inherited ? ' (inherited: everyone within L' + ((g.rules[r.via] || {}).levels || '?') + ', reached later)' : '');
+  var END_TEXT = { declined: 'declined', returned: 'returned by the lead', handed: 'handed on', unassigned: 'unassigned', withdrawn: 'withdrawn' };
+  function source(r) {
+    if (r.handoffOf) return 'handoff from <b>' + esc(nm(r.sender)) + '</b> (assigner ' + esc(nm(r.by)) + ')' + (r.state === 'pending' ? ', not accepted yet' : r.accepted ? ', accepted' : '');
+    if (r.to === r.by) return 'self-assigned';
+    if (!r.forced) return 'sent by <b>' + esc(nm(r.by)) + '</b>, ' + (r.state === 'pending' ? 'not accepted yet' : r.accepted ? 'accepted' + (r.state !== 'live' ? ', then ' + END_TEXT[r.state] : '') : END_TEXT[r.state] || r.state);
+    return 'from <b>' + esc(nm(r.by)) + '</b> (forced: their lead chain)' + (r.inherited ? ' (inherited: everyone within L' + (r.ruleLevels || '?') + ', reached later)' : '');
   }
   function btn(act, label, data, cls) {
     var d = '';
     Object.keys(data || {}).forEach(function (k) { d += attr(k, data[k]); });
     return '<button class="btn mini' + (cls ? ' ' + cls : '') + '"' + attr('act', act) + d + '>' + label + '</button>';
   }
-  function card(title, chip, body, extra) {
-    return '<section class="card"><header><h2>' + title + '</h2>' + (chip ? '<span class="chip">' + chip + '</span>' : '') +
+  function card(title, chip, body, extra, id) {
+    return '<section class="card"' + (id ? ' id="' + id + '"' : '') + '><header><h2>' + title + '</h2>' + (chip ? '<span class="chip">' + chip + '</span>' : '') +
       '<span class="grow"></span>' + (extra || '') + '</header><div class="cbody">' + body + '</div></section>';
-  }
-  function itemDepth(g, it) {
-    var d = 0, cur = it;
-    while (cur && cur.parent && g.items[cur.parent] && d < 20) { d++; cur = g.items[cur.parent]; }
-    return d;
-  }
-  function itemsInTreeOrder(g) {
-    var out = [];
-    (function walk(parent) {
-      itemList(g).forEach(function (it) {
-        if ((it.parent && g.items[it.parent] ? it.parent : null) !== parent) return;
-        out.push(it); walk(it.id);
-      });
-    })(null);
-    return out;
   }
   var RANK = { blocked: 0, doing: 1, todo: 2, awaiting: 3, done: 4 };
   function byRank(a, b) { return RANK[a.status] - RANK[b.status]; }
+  function A(id) { return VS.assignments[id]; }
 
-  function describe(g, n, inThread) {
-    var p = n.p, ref = function (id) { return inThread ? '' : ' ' + itemRef(id); };
+  var EDIT_FIELDS = ['title', 'body', 'project', 'due', 'priority'];
+  function describe(n, inThread) {
+    var p = n.payload, ref = function (id) { return inThread ? '' : ' ' + itemRef(id); };
     switch (n.type) {
       case 'item.create':
-        if (inThread === 'parent') return 'opened subtask thread ' + itemRef(n.id) + ' <b>' + esc(p.title) + '</b> ' + (g.items[n.id] ? stChip(itemStatus(g, g.items[n.id])) : '');
-        return 'created ' + esc(p.kind) + (p.request ? ' as a <b>request to ' + esc(p.request) + '</b>' : '') + ' <b>' + esc(p.title) + '</b>' +
-          (inThread ? '' : ' (' + itemRef(n.id) + ')') + (p.parent && !inThread ? ' under ' + itemRef(p.parent) : '');
+        if (inThread === 'parent') return 'opened subtask thread ' + itemRef(n.id) + ' <b>' + esc(p.title) + '</b> ' + (VS.items[n.id] ? stChip(VS.items[n.id].status) : '');
+        return 'created ' + esc(p.kind) + ' <b>' + esc(p.title) + '</b>' + (inThread ? '' : ' (' + itemRef(n.id) + ')') + (p.parent && !inThread ? ' under ' + itemRef(p.parent) : '') +
+          (p.due ? ', due ' + esc(p.due) : '') + (p.priority != null ? ', priority ' + esc(VS.priority.names[p.priority] || p.priority) : '');
       case 'item.edit':
-        return 'edited' + ref(p.item) + ' ' + ['title', 'body', 'project'].filter(function (f) { return f in p; }).map(function (f) {
-          return f + ' &rarr; "' + esc(String(p[f]).slice(0, 80)) + '"';
+        return 'edited' + ref(p.item) + ' ' + EDIT_FIELDS.filter(function (f) { return f in p; }).map(function (f) {
+          var v = f === 'priority' ? (VS.priority.names[p[f]] || p[f]) : p[f];
+          return f + ' &rarr; "' + esc(v == null ? '(none)' : String(v).slice(0, 80)) + '"';
         }).join(', ');
       case 'item.hide': return 'hid' + ref(p.item) + ' (tombstone; history stays)';
       case 'item.assign':
-        return 'assigned' + ref(p.item) + ' to ' + (p.mode === 'all' ? '<b>everyone within L' + esc(p.levels) + '</b> (live: later followers inherit)' :
-          '<b>' + esc((p.people || []).map(function (x) { return x === n.author ? 'self' : x; }).join(', ')) + '</b>' + (p.levels ? ' (within L' + esc(p.levels) + ')' : '')) +
-          ', ' + complText(p.completion);
+        return 'assigned' + ref(p.item) + ' to ' + (p.mode === 'all' ? '<b>everyone within L' + esc(p.levels) + '</b> (forced, live: later followers inherit)' :
+          '<b>' + esc((p.people || []).map(function (x) { return x === n.member ? 'self' : x; }).join(', ')) + '</b>') + ', ' + complText(p.completion);
+      case 'item.handoff': return 'handed off their assignment' + ref(p.item) + ' to <b>' + esc(p.to) + '</b> (pending until accepted)' + (p.note ? ': ' + esc(p.note) : '');
+      case 'item.accept': return 'accepted the assignment' + ref(p.item) + (p.note ? ': ' + esc(p.note) : '');
+      case 'item.decline': return 'declined the assignment' + ref(p.item) + (p.note ? ': ' + esc(p.note) : '');
+      case 'item.return': return 'returned ' + esc(p.assignee) + '\'s accepted assignment' + ref(p.item) + ' (ends it)' + (p.note ? ': ' + esc(p.note) : '');
       case 'item.unassign': return 'unassigned ' + esc(p.assignee || 'all of their assignees') + ref(p.item);
       case 'item.status': return 'set status ' + stChip(p.status) + ref(p.item) + (p.note ? ': ' + esc(p.note) : '');
       case 'item.close': return 'closed' + ref(p.item) + (p.note ? ': ' + esc(p.note) : '');
-      case 'item.confirm': return 'confirmed ' + esc(p.assignee) + '\'s close' + ref(p.item);
+      case 'item.confirm': return 'confirmed ' + esc(p.assignee) + '\'s close' + ref(p.item) + (p.note ? ': ' + esc(p.note) : '');
       case 'item.reject': return 'rejected ' + esc(p.assignee) + '\'s close (back to doing)' + ref(p.item) + (p.note ? ': ' + esc(p.note) : '');
-      case 'item.reopen': return 'reopened ' + esc(p.assignee || n.author) + '\'s assignment' + ref(p.item) + (p.note ? ': ' + esc(p.note) : '');
-      case 'request.accept': return 'accepted the request' + ref(p.item) + ' (now their own assignment)';
-      case 'request.decline': return 'declined the request' + ref(p.item) + (p.note ? ': ' + esc(p.note) : '');
-      case 'request.return': return 'returned the accepted request' + ref(p.item) + ' (cancels the assignment)' + (p.note ? ': ' + esc(p.note) : '');
+      case 'item.reopen': return 'reopened ' + esc(p.assignee || n.member) + '\'s assignment' + ref(p.item) + (p.note ? ': ' + esc(p.note) : '');
       case 'comment.add': return 'commented' + ref(p.item) + (inThread ? '' : ': ' + esc(String(p.body || '').slice(0, 90)));
       case 'comment.edit': return 'edited comment ' + esc(alias(p.comment)) + (inThread ? '' : ref(n.thread || ''));
       case 'comment.hide': return 'hid comment ' + esc(alias(p.comment)) + ' (tombstone; history stays)';
@@ -125,55 +130,48 @@
       case 'roles.add_key': return 'added key <code>' + esc(p.key) + '</code> for ' + esc(p.member);
       case 'roles.revoke_key': return 'revoked key <code>' + esc(p.key) + '</code> of ' + esc(p.member);
       case 'roles.remove_member': return 'removed member <b>' + esc(p.member) + '</b>';
+      case 'roles.set_priority_levels': return 'set priority levels to <b>' + esc((p.names || []).join(' / ')) + '</b>, default ' + esc((p.names || [])[p.default]);
       default: return esc(n.type);
     }
   }
-  function markerHtml(g, n) {
+  function markerHtml(n) {
     return n.markers.map(function (m) {
-      var o = g.byId[m.other], oa = esc(alias(m.other)) + ' (' + esc(o ? o.author : '?') + ')';
+      var oa = esc(alias(m.other)) + ' (' + esc(m.otherMember || '?') + ')';
       if (m.kind === 'field') {
         return '<div class="conc"><b>concurrent change</b> to ' + esc(m.field) + ': this wrote <i>' + esc(m.mine) + '</i>, ' + oa + ' wrote <i>' + esc(m.theirs) +
-          '</i> without seeing it. Shown: <b>' + esc(alias(m.winner)) + '</b> (later ts, then author id).</div>';
+          '</i> without seeing it. Shown: <b>' + esc(alias(m.winner)) + '</b> (later ts, then member, clone, seq).</div>';
       }
       if (m.kind === 'removed') {
         return n.id === m.winner ?
-          '<div class="conc"><b>concurrent change</b>: ' + oa + ' wrote to ' + esc(m.field) + ' without seeing this removal; that write is not in effect.</div>' :
-          '<div class="conc"><b>concurrent change</b>: ' + oa + ' removed ' + esc(m.field) + ' without seeing this; valid when written, not in effect now.</div>';
+          '<div class="conc"><b>concurrent change</b>: ' + oa + ' wrote to ' + esc(m.field) + ' without seeing this; that write is not in effect.</div>' :
+          '<div class="conc"><b>concurrent change</b>: ' + oa + ' ended ' + esc(m.field) + ' without seeing this; valid when written, not in effect now.</div>';
       }
       return '<div class="conc"><b>concurrent change</b>: ' + esc(m.field) + ' was created while ' + oa + ' concurrently removed the parent assignment.</div>';
     }).join('');
   }
   function flags(n) {
-    var c = n.commit, h = '';
-    if (c._received === 'late') h += '<span class="chip late" title="reached this client after events written later">arrived late</span>';
-    if (c._local) h += '<span class="chip local" title="written on this machine, not pushed yet">not pushed</span>';
-    if (n.status === 'flagged') h += '<span class="chip flag">' + (n.revokedLate ? 'ignored' : 'flagged') + '</span>';
+    var h = '';
+    if (n.late) h += '<span class="chip late" title="reached this clone after events written later">arrived late</span>';
+    if (n.open) h += '<span class="chip local" title="in the open batch of the local journal; not committed yet">open batch</span>';
+    else if (n.local) h += '<span class="chip local" title="committed on this clone, not pushed yet">not pushed</span>';
+    if (n.status === 'flagged') h += '<span class="chip flag">' + (n.ignored ? 'ignored' : 'flagged') + '</span>';
     if (n.status === 'waiting') h += '<span class="chip">waiting</span>';
     if (n.markers.length) h += '<span class="chip conc-c">concurrent</span>';
     return h;
   }
-  function evLine(g, n, inThread) {
-    return '<li class="ev' + (n.status !== 'applied' ? ' ' + n.status : '') + (n.markers.length ? ' concm' : '') + (n.origin !== 'human' ? ' agent' : '') + '">' +
-      '<span class="when">' + esc(fmtTs(n.ts)) + '</span><span class="al">' + esc(n.alias) + '</span> <b>' + esc(nm(g, n.author)) + '</b> ' + originChip(n.origin) +
-      ' ' + describe(g, n, inThread) + ' ' + flags(n) + (n.reason ? '<span class="reason">' + esc(n.reason) + '</span>' : '') + markerHtml(g, n) + '</li>';
+  function evLine(n, inThread) {
+    return '<li class="ev' + (n.status !== 'applied' ? ' ' + n.status : '') + (n.markers.length ? ' concm' : '') + (n.origin !== 'human' ? ' agent' : '') + '"' + attr('ev', n.id) + '>' +
+      '<span class="when">' + esc(fmtTs(n.ts)) + '</span><span class="al">' + esc(n.alias) + '</span> <b>' + esc(nm(n.member)) + '</b> ' + originChip(n.origin) +
+      ' ' + describe(n, inThread) + ' ' + flags(n) + (n.reason ? '<span class="reason">' + esc(n.reason) + '</span>' : '') + markerHtml(n) + '</li>';
   }
 
   // ------------------------------------------------------- viewer / badge state
 
   function viewerOf(name) { return ui.viewers[name]; }
   function seenKey(name) { return name + '|' + viewerOf(name); }
-  function badgeKeys(name) {
-    var g = gs[name], v = viewerOf(name), out = [];
-    Object.keys(g.asg).forEach(function (k) {
-      var r = g.asg[k];
-      if (r.to === v && !r.removed && r.status === 'todo' && r.by !== v) out.push(r.id);
-    });
-    itemList(g).forEach(function (it) { if (it.request && it.request.to === v && it.request.state === 'pending') out.push('req:' + it.id); });
-    return out;
-  }
   function newKeys(name) {
     var seen = ui.seen[seenKey(name)] || {};
-    return badgeKeys(name).filter(function (k) { return !seen[k]; });
+    return vss[name].my.badge.filter(function (k) { return !seen[k]; });
   }
   // Opening a store (or switching viewer inside an open drawer) shows what is new
   // once, then clears the handle badge, like the mailbox badge.
@@ -182,335 +180,474 @@
     ui.fresh = {};
     newKeys(name).forEach(function (k) { ui.fresh[k] = true; seen[k] = true; });
   }
+  function isNew(key) { return ui.fresh[key] ? '<span class="chip new">new</span>' : ''; }
 
   // ------------------------------------------------------------------ cards
 
-  function workRow(g, r, withActs) {
-    var it = g.items[r.item], ch = chain(g, it);
-    var chainTxt = ch.length > 1 ? ' &middot; chain ' + esc(ch.slice().reverse().join(' > ')) : '';
+  function workRow(r, withActs) {
+    var it = VS.items[r.item];
+    var chainTxt = it.chain.length > 1 ? ' &middot; chain ' + esc(it.chain.join(' > ')) : '';
     var acts = '';
     if (withActs && r.status !== 'done') {
       if (r.status !== 'doing') acts += btn('q-status', 'doing', { item: r.item, status: 'doing' });
       if (r.status !== 'blocked') acts += btn('q-status', 'blocked', { item: r.item, status: 'blocked' });
       acts += btn('status', 'Status...', { item: r.item });
       if (r.status !== 'awaiting') acts += btn('close', 'Close', { item: r.item });
-      acts += btn('split', 'Split', { item: r.item });
+      acts += btn('split', 'Split', { item: r.item }) + btn('handoff', 'Hand off...', { item: r.item });
     }
-    return '<div class="row click"' + attr('item', r.item) + '><div class="r1">' + stChip(r.status) + (ui.fresh[r.id] ? '<span class="chip new">new</span>' : '') +
-      titleRef(g, r.item) + rollupHtml(g, it) + '<span class="grow"></span><span class="muted ts">' + esc(fmtTs(E.lastActivity(g, r.item))) + '</span></div>' +
-      '<div class="r2">' + source(g, r) + ' &middot; ' + complText(r.completion) + chainTxt + (it.project ? ' &middot; ' + esc(it.project) : '') +
+    return '<div class="row click"' + attr('item', r.item) + attr('rec', r.id) + '><div class="r1">' + recChip(r) + isNew('a:' + r.id) + prChip(it) +
+      titleRef(r.item) + dueChip(it) + rollupHtml(it) + (r.stale ? '<span class="chip warn" title="no status update for ' + E.STALE_DAYS + '+ days">stale</span>' : '') +
+      '<span class="grow"></span><span class="muted ts">' + esc(fmtTs(it.lastActivity)) + '</span></div>' +
+      '<div class="r2">' + source(r) + ' &middot; ' + complText(r.completion) + chainTxt + (it.project ? ' &middot; ' + esc(it.project) : '') +
       (r.note ? '<br>&ldquo;' + esc(r.note) + '&rdquo; <span class="muted">(' + esc(r.noteBy) + ')</span>' : '') + '</div>' +
       (acts ? '<div class="r3">' + acts + '</div>' : '') + '</div>';
   }
+  function pendRow(r, acts) {
+    var it = VS.items[r.item];
+    return '<div class="row click"' + attr('item', r.item) + attr('rec', r.id) + '><div class="r1">' + recChip(r) + isNew('p:' + r.id) + prChip(it) + titleRef(r.item) + dueChip(it) +
+      '<span class="grow"></span><span class="muted ts">' + esc(fmtTs(r.ts)) + '</span></div>' +
+      '<div class="r2">' + source(r) + ' &middot; ' + complText(r.completion) + (r.handoffNote ? ' &middot; &ldquo;' + esc(r.handoffNote) + '&rdquo;' : '') +
+      (r.answerNote ? ' &middot; &ldquo;' + esc(r.answerNote) + '&rdquo;' : '') + '</div>' + (acts ? '<div class="r3">' + acts + '</div>' : '') + '</div>';
+  }
+  function answerBtns(r) {
+    return btn('accept', 'Accept', { item: r.item }, 'primary') + btn('note', 'Decline', { item: r.item, op: 'item.decline' }) + btn('open', 'Discuss', { item: r.item });
+  }
 
-  function cardMine(g, v) {
-    var mine = Object.keys(g.asg).map(function (k) { return g.asg[k]; }).filter(function (r) { return r.to === v && !r.removed && !g.items[r.item].hidden; }).sort(byRank);
+  // Morning check: my open work by priority and due, what waits for my answer, what waits for my confirm.
+  function cardToday() {
+    var t = VS.my.today, h = '';
+    h += '<div class="sub">my open work (priority, then due)</div>' + (t.work.length ? t.work.map(function (id) {
+      var r = A(id), it = VS.items[r.item];
+      return '<div class="row click"' + attr('item', r.item) + '><div class="r1">' + prChip(it) + recChip(r) + titleRef(r.item) + dueChip(it) +
+        (r.stale ? '<span class="chip warn">stale</span>' : '') + '<span class="grow"></span><span class="muted">' + esc(nm(r.by)) + '</span></div></div>';
+    }).join('') : '<p class="muted">Nothing open.</p>');
+    if (t.pending.length) h += '<div class="sub">waiting for my answer</div>' + t.pending.map(function (id) { return pendRow(A(id), answerBtns(A(id))); }).join('');
+    if (t.confirms.length) h += '<div class="sub">waiting for my confirm</div>' + t.confirms.map(function (id) {
+      var r = A(id);
+      return '<div class="row click"' + attr('item', r.item) + '><div class="r1">' + stChip('awaiting') + prChip(VS.items[r.item]) + titleRef(r.item) + '<span class="muted">' + esc(nm(r.to)) + '</span>' +
+        '<span class="grow"></span>' + btn('confirm', 'Confirm', { item: r.item, who: r.to }, 'primary') + btn('note', 'Reject', { item: r.item, who: r.to, op: 'item.reject' }) + '</div>' +
+        (r.note ? '<div class="r2">&ldquo;' + esc(r.note) + '&rdquo;</div>' : '') + '</div>';
+    }).join('');
+    return card('Today', t.work.length + ' open, ' + t.pending.length + ' to answer, ' + t.confirms.length + ' to confirm', h, '', 'card-today');
+  }
+
+  function cardMine(v) {
+    var mine = VS.my.assignments.map(A);
     var openR = mine.filter(function (r) { return r.status !== 'done'; }), done = mine.filter(function (r) { return r.status === 'done'; });
-    var own = itemList(g).filter(function (i) { return i.author === v && !i.hidden && i.kind !== 'topic' && !i.request && !recsOf(g, i.id).length; });
-    var h = openR.length ? openR.map(function (r) { return workRow(g, r, true); }).join('') : '<p class="muted">Nothing open is assigned to you.</p>';
+    var h = openR.length ? openR.map(function (r) { return workRow(r, true); }).join('') : '<p class="muted">Nothing open is assigned to you.</p>';
     if (done.length) h += '<div class="sub">done</div>' + done.map(function (r) {
-      return '<div class="row click"' + attr('item', r.item) + '><div class="r1">' + stChip('done') + titleRef(g, r.item) + '<span class="grow"></span><span class="muted">' + source(g, r) + '</span></div></div>';
+      return '<div class="row click"' + attr('item', r.item) + '><div class="r1">' + stChip('done') + titleRef(r.item) + '<span class="grow"></span><span class="muted">' + source(r) + '</span></div></div>';
     }).join('');
-    if (own.length) h += '<div class="sub">created by me, not assigned</div>' + own.map(function (it) {
-      return '<div class="row click"' + attr('item', it.id) + '><div class="r1">' + kindChip(it) + titleRef(g, it.id) + '<span class="grow"></span>' +
-        btn('assign', 'Assign', { item: it.id }) + '</div></div>';
+    if (VS.my.created.length) h += '<div class="sub">created by me, not assigned</div>' + VS.my.created.map(function (id) {
+      var it = VS.items[id];
+      return '<div class="row click"' + attr('item', id) + '><div class="r1">' + stChip(it.status) + kindChip(it) + titleRef(id) + '<span class="grow"></span>' +
+        btn('assign', 'Assign', { item: id }) + '</div></div>';
     }).join('');
-    return card('My assignments', openR.length + ' open', h);
+    return card('My assignments', openR.length + ' open', h, '', 'card-mine');
   }
 
-  function cardRequests(g, v) {
-    var reqs = itemList(g).filter(function (i) { return i.request && !i.hidden; });
-    var inbox = reqs.filter(function (i) { return i.request.to === v; }), sent = reqs.filter(function (i) { return i.request.by === v; });
-    if (!inbox.length && !sent.length) return '';
-    var pend = inbox.filter(function (i) { return i.request.state === 'pending'; }), past = inbox.filter(function (i) { return i.request.state !== 'pending'; });
-    function row(it, who, acts) {
-      return '<div class="row click"' + attr('item', it.id) + '><div class="r1">' + stChip(itemStatus(g, it)) + (ui.fresh['req:' + it.id] ? '<span class="chip new">new</span>' : '') +
-        titleRef(g, it.id) + '<span class="grow"></span><span class="muted ts">' + esc(fmtTs(it.ts)) + '</span></div>' +
-        '<div class="r2">' + who + (it.request.note ? ' &middot; &ldquo;' + esc(it.request.note) + '&rdquo;' : '') + '</div>' + (acts ? '<div class="r3">' + acts + '</div>' : '') + '</div>';
-    }
-    var h = pend.length ? pend.map(function (it) {
-      return row(it, 'from <b>' + esc(nm(g, it.request.by)) + '</b> &middot; not counted in any roll-up until accepted',
-        btn('req-accept', 'Accept', { item: it.id }, 'primary') + btn('note', 'Decline', { item: it.id, op: 'request.decline' }) + btn('open', 'Discuss', { item: it.id }));
-    }).join('') : '<p class="muted">No pending requests to you.</p>';
-    if (past.length) h += '<div class="sub">answered</div>' + past.map(function (it) { return row(it, 'from ' + esc(nm(g, it.request.by))); }).join('');
-    if (sent.length) h += '<div class="sub">sent by me</div>' + sent.map(function (it) { return row(it, 'to <b>' + esc(nm(g, it.request.to)) + '</b>'); }).join('');
-    return card('Received requests', pend.length + ' pending', h);
+  function cardRequests() {
+    var R = VS.my.received;
+    if (!R.pending.length && !R.answered.length && !R.sent.length) return '';
+    var h = R.pending.length ? R.pending.map(function (id) { return pendRow(A(id), answerBtns(A(id))); }).join('') : '<p class="muted">No pending assignments to you.</p>';
+    if (R.answered.length) h += '<div class="sub">answered</div>' + R.answered.map(function (id) { return pendRow(A(id)); }).join('');
+    if (R.sent.length) h += '<div class="sub">sent by me (pending until accepted)</div>' + R.sent.map(function (id) {
+      var r = A(id);
+      return pendRow(r, r.state === 'pending' ? '<span class="muted">to <b>' + esc(nm(r.to)) + '</b></span>' + btn('unassign', 'Withdraw', { item: r.item, who: r.to }) : '<span class="muted">to <b>' + esc(nm(r.to)) + '</b></span>');
+    }).join('');
+    return card('Received requests', R.pending.length + ' pending', '<p class="r2" style="margin:0 0 6px">Pending assignments: someone outside your lead chain, or a handoff. Not counted in any roll-up until accepted.</p>' + h, '', 'card-received');
   }
 
-  // Lead perspective: what each follower (down to 3 levels) works on, whoever assigned it.
-  function cardMyTeam(g, v) {
-    var R = reach(g.members, v, 3), ids = Object.keys(R);
-    if (!ids.length) return '';
-    var all = Object.keys(g.asg).map(function (k) { return g.asg[k]; });
-    var totals = { open: 0, blocked: 0, pending: 0 };
-    function person(id) {
-      var recs = all.filter(function (r) { return r.to === id && !r.removed && !g.items[r.item].hidden; }).sort(byRank);
-      var openR = recs.filter(function (r) { return r.status !== 'done'; }), done = recs.length - openR.length;
-      var pend = itemList(g).filter(function (i) { return i.request && i.request.to === id && i.request.state === 'pending' && !i.hidden; });
-      var last = recs.map(function (r) { return E.lastActivity(g, r.item); }).sort().pop() || '';
-      var blocked = openR.filter(function (r) { return r.status === 'blocked'; }).length;
-      totals.open += openR.length; totals.blocked += blocked; totals.pending += pend.length;
-      var m = g.members[id];
-      var h = '<div class="tm-person" style="--d:' + (R[id] - 1) + '"><div class="tm-head"><b>' + esc(m.name) + '</b><span class="nid">' + esc(id) + '</span>' +
-        '<span class="chip">L' + R[id] + '</span>' + ((g.children[id] || []).length ? '<span class="chip">lead</span>' : '') +
-        '<span class="muted">' + openR.length + ' open' + (done ? ', ' + done + ' done' : '') + '</span>' +
-        (blocked ? '<span class="chip st-blocked">' + blocked + ' blocked</span>' : '') +
-        (pend.length ? '<span class="chip st-pending">' + pend.length + ' pending request' + (pend.length > 1 ? 's' : '') + '</span>' : '') +
-        '<span class="grow"></span><span class="muted ts" title="last update on their work">' + esc(fmtTs(last)) + '</span></div>';
-      h += openR.map(function (r) {
-        var it = g.items[r.item];
-        return '<div class="tm-work click"' + attr('item', r.item) + '>' + stChip(r.status) + titleRef(g, r.item) + rollupHtml(g, it) +
-          '<span class="muted">' + source(g, r) + (r.note ? ' &middot; &ldquo;' + esc(r.note) + '&rdquo;' : '') + '</span>' +
-          '<span class="grow"></span><span class="muted ts">' + esc(fmtTs(E.lastActivity(g, r.item))) + '</span></div>';
+  // Lead perspective: notices, then what each follower (down to 3 levels) works on, whoever assigned it.
+  function cardMyTeam(v) {
+    var team = VS.my.team, notices = VS.notices;
+    if (!team.length && !notices.length) return '';
+    var totals = { open: 0, blocked: 0, pending: 0, stale: 0 }, h = '';
+    if (notices.length) h += '<div class="sub">for reference: accepted assignments</div>' + notices.map(function (x) {
+      var r = A(x.assignment);
+      var txt = x.kind === 'accepted' ? '<b>' + esc(nm(x.to)) + '</b> accepted ' + (r.handoffOf ? 'a handoff from ' + esc(nm(r.sender)) : 'an assignment from ' + esc(nm(x.by))) + ' (you are their lead)' :
+        '<b>' + esc(nm(x.to)) + '</b> took over ' + esc(nm(x.from)) + '\'s assignment you gave (handoff accepted)';
+      return '<div class="tm-work click notice"' + attr('item', x.item) + attr('notice', x.key) + '>' + isNew(x.key) + recChip(r) + titleRef(x.item) + '<span class="muted">' + txt + ', ' + esc(fmtTs(x.ts)) + '</span>' +
+        '<span class="grow"></span>' + (x.kind === 'accepted' && r.state === 'live' ? btn('note', 'Return', { item: x.item, who: x.to, op: 'item.return' }) : '') + '</div>';
+    }).join('');
+    h += team.map(function (p) {
+      var m = VS.members[p.id];
+      totals.open += p.open.length; totals.blocked += p.blocked; totals.pending += p.pending.length; totals.stale += p.stale;
+      var x = '<div class="tm-person" style="--d:' + (p.depth - 1) + '"' + attr('person', p.id) + '><div class="tm-head"><b>' + esc(m.name) + '</b><span class="nid">' + esc(p.id) + '</span>' +
+        '<span class="chip">L' + p.depth + '</span>' + (m.children.length ? '<span class="chip">lead</span>' : '') +
+        '<span class="muted">' + p.open.length + ' open' + (p.done ? ', ' + p.done + ' done' : '') + '</span>' +
+        (p.blocked ? '<span class="chip st-blocked">' + p.blocked + ' blocked</span>' : '') +
+        (p.stale ? '<span class="chip warn">' + p.stale + ' stale</span>' : '') +
+        (p.pending.length ? '<span class="chip st-pending">' + p.pending.length + ' unaccepted</span>' : '') +
+        '<span class="grow"></span><span class="muted ts" title="last update on their work">' + esc(fmtTs(p.last)) + '</span></div>';
+      x += p.open.map(function (id) {
+        var r = A(id), it = VS.items[r.item];
+        return '<div class="tm-work click"' + attr('item', r.item) + '>' + recChip(r) + prChip(it) + titleRef(r.item) + dueChip(it) + rollupHtml(it) +
+          (r.stale ? '<span class="chip warn">stale</span>' : '') +
+          '<span class="muted">' + source(r) + (r.note ? ' &middot; &ldquo;' + esc(r.note) + '&rdquo;' : '') + '</span>' +
+          '<span class="grow"></span><span class="muted ts">' + esc(fmtTs(r.lastUpdate)) + '</span></div>';
       }).join('');
-      h += pend.map(function (it) {
-        return '<div class="tm-work click pend"' + attr('item', it.id) + '>' + stChip('pending') + titleRef(g, it.id) +
-          '<span class="muted">from ' + esc(nm(g, it.request.by)) + ', not accepted yet</span><span class="grow"></span><span class="muted ts">' + esc(fmtTs(it.ts)) + '</span></div>';
+      x += p.pending.map(function (id) {
+        var r = A(id);
+        return '<div class="tm-work click pend"' + attr('item', r.item) + '>' + stChip('pending') + titleRef(r.item) +
+          '<span class="muted">' + source(r) + '</span><span class="grow"></span><span class="muted ts">' + esc(fmtTs(r.ts)) + '</span></div>';
       }).join('');
-      return h + '</div>' + (R[id] < 3 ? (g.children[id] || []).filter(function (k) { return k in R; }).map(person).join('') : '');
-    }
-    var body = (g.children[v] || []).filter(function (k) { return k in R; }).map(person).join('');
-    return card('My team', ids.length + ' below you, ' + totals.open + ' open' + (totals.blocked ? ', ' + totals.blocked + ' blocked' : '') +
-      (totals.pending ? ', ' + totals.pending + ' pending' : ''), '<p class="r2" style="margin:0 0 6px">Everything your followers (down to 3 levels) are working on, whoever assigned it.</p>' + body);
+      return x + '</div>';
+    }).join('');
+    return card('My team', team.length + ' below you, ' + totals.open + ' open' + (totals.blocked ? ', ' + totals.blocked + ' blocked' : '') +
+      (totals.stale ? ', ' + totals.stale + ' stale' : '') + (totals.pending ? ', ' + totals.pending + ' unaccepted' : ''),
+      '<p class="r2" style="margin:0 0 6px">Everything your followers (down to 3 levels) are working on, whoever assigned it. Stale: doing or blocked with no status update for ' + E.STALE_DAYS + '+ days.</p>' + h, '', 'card-team');
   }
 
-  function cardGiven(g, v) {
-    var items = itemList(g).filter(function (i) { return recsOf(g, i.id).some(function (r) { return r.by === v && r.to !== v; }); });
-    var h = items.length ? items.map(function (it) {
-      var as = recsOf(g, it.id).filter(function (r) { return r.by === v && r.to !== v; }).sort(byRank);
-      return '<div class="row click"' + attr('item', it.id) + '><div class="r1">' + stChip(itemStatus(g, it)) + titleRef(g, it.id) + rollupHtml(g, it) + '</div>' +
+  function cardGiven(v) {
+    var h = VS.my.given.length ? VS.my.given.map(function (id) {
+      var it = VS.items[id];
+      var as = it.assignments.map(A).filter(function (r) { return (r.by === v || r.sender === v) && r.to !== v && (r.state === 'live' || r.state === 'pending'); }).sort(byRank);
+      return '<div class="row click"' + attr('item', id) + '><div class="r1">' + stChip(it.status) + prChip(it) + titleRef(id) + dueChip(it) + rollupHtml(it) + '</div>' +
         as.map(function (r) {
-          return '<div class="assignee-line"><b>' + esc(nm(g, r.to)) + '</b>' + (r.depth ? '<span class="muted">L' + r.depth + '</span>' : '') + stChip(r.status) +
+          return '<div class="assignee-line"><b>' + esc(nm(r.to)) + '</b>' + (r.depth ? '<span class="muted">L' + r.depth + '</span>' : '') + recChip(r) +
+            (r.forced ? '' : '<span class="muted">' + (r.handoffOf ? 'handoff' : 'sent') + '</span>') +
             (r.note ? '<span class="muted">&ldquo;' + esc(r.note) + '&rdquo;</span>' : '') +
-            (r.status === 'awaiting' ? btn('confirm', 'Confirm', { item: r.item, who: r.to }, 'primary') + btn('note', 'Reject', { item: r.item, who: r.to, op: 'item.reject' }) : '') + '</div>';
+            (r.state === 'live' && r.status === 'awaiting' && r.by === v ? btn('confirm', 'Confirm', { item: r.item, who: r.to }, 'primary') + btn('note', 'Reject', { item: r.item, who: r.to, op: 'item.reject' }) : '') + '</div>';
         }).join('') + '</div>';
     }).join('') : '<div class="empty">You have not assigned anything to others.</div>';
-    var waiting = Object.keys(g.asg).filter(function (k) { var r = g.asg[k]; return r.by === v && r.to !== v && !r.removed && r.status === 'awaiting'; }).length;
-    return card('Assigned by me', items.length + (items.length === 1 ? ' item' : ' items') + (waiting ? ', ' + waiting + ' to confirm' : ''), h);
+    return card('Assigned by me', VS.my.given.length + (VS.my.given.length === 1 ? ' item' : ' items') + (VS.my.today.confirms.length ? ', ' + VS.my.today.confirms.length + ' to confirm' : ''), h, '', 'card-given');
   }
 
-  function cardTeam(st, g, v) {
-    var probs = E.rolesProblems(st.roles), r = reach(g.members, v, 99), seen = {};
-    var lead = (g.members[v].leads || [])[0], levels = {};
-    Object.keys(r).forEach(function (k) { levels[r[k]] = (levels[r[k]] || 0) + 1; });
-    var summary = 'Admins: ' + esc(Object.keys(g.admins).join(', ')) + '. You: ' + (lead ? 'lead <b>' + esc(lead) + '</b>' : 'no lead (root)') + ', ' +
-      (Object.keys(r).length ? 'reach ' + Object.keys(levels).map(function (d) { return levels[d] + ' at L' + d; }).join(', ') : 'no followers') + '.';
+  function cardTeam(v) {
+    var me = VS.members[v] || {}, R = VS.viewer.reach, levels = {}, seen = {};
+    Object.keys(R).forEach(function (k) { levels[R[k]] = (levels[R[k]] || 0) + 1; });
+    var summary = 'Admins: ' + esc(VS.admins.join(', ')) + '. You: ' + (VS.viewer.lead ? 'lead <b>' + esc(VS.viewer.lead) + '</b>' : 'no lead (root)') + ', ' +
+      (Object.keys(R).length ? 'reach ' + Object.keys(levels).map(function (d) { return levels[d] + ' at L' + d; }).join(', ') : 'no followers') +
+      '. Priority levels: ' + VS.priority.names.map(function (x, i) { return esc(x) + (i === VS.priority.default ? ' (default)' : ''); }).join(' &lt; ') + '.';
     function node(id) {
       if (seen[id]) return '<li>' + esc(id) + ' (cycle guard)</li>';
       seen[id] = true;
-      var m = g.members[id], kids = g.children[id] || [], rev = Object.keys(m.revoked);
-      var chips = (id === v ? '<span class="chip you">you</span>' : '') + (g.admins[id] ? '<span class="chip admin">admin</span>' : '') +
-        (id === lead ? '<span class="chip">your lead</span>' : '') + (r[id] ? '<span class="chip" title="levels below you">L' + r[id] + '</span>' : '') +
+      var m = VS.members[id];
+      var chips = (id === v ? '<span class="chip you">you</span>' : '') + (m.admin ? '<span class="chip admin">admin</span>' : '') +
+        (id === VS.viewer.lead ? '<span class="chip">your lead</span>' : '') + (R[id] ? '<span class="chip" title="levels below you">L' + R[id] + '</span>' : '') +
         (m.joined ? '<span class="chip" title="added by ' + esc(alias(m.joined)) + '">joined</span>' : '') +
-        (rev.length ? '<span class="chip flag" title="revoked keys">revoked ' + esc(rev.join(', ')) + '</span>' : '');
+        (m.revoked.length ? '<span class="chip flag" title="revoked keys">revoked ' + esc(m.revoked.map(function (x) { return x.key; }).join(', ')) + '</span>' : '') +
+        ((VS.clones[id] || []).length > 1 ? '<span class="chip" title="clones (one ref each)">' + VS.clones[id].length + ' clones</span>' : '');
       return '<li><div class="node' + (id === v ? ' me' : '') + '"><span class="nm">' + esc(m.name) + '</span><span class="nid">' + esc(id) + '</span>' + chips +
-        '<span class="nid">' + esc(m.keys.join(', ')) + '</span></div>' + (kids.length ? '<ul>' + kids.map(node).join('') + '</ul>' : '') + '</li>';
+        '<span class="nid">' + esc(m.keys.join(', ')) + '</span></div>' + (m.children.length ? '<ul>' + m.children.map(node).join('') + '</ul>' : '') + '</li>';
     }
-    var roots = Object.keys(g.members).filter(function (id) { var m = g.members[id], l = m.leads || []; return !m.removed && (!l.length || !g.members[l[0]] || g.members[l[0]].removed); });
+    var roots = Object.keys(VS.members).filter(function (id) { var m = VS.members[id], l = m.leads; return !m.removed && (!l.length || !VS.members[l[0]] || VS.members[l[0]].removed); });
     var h = '<p class="r2" style="margin:0 0 6px">' + summary + '</p>';
-    if (probs.length) h += '<p class="err">roles file problems: ' + esc(probs.join('; ')) + '</p>';
+    if (VS.rolesProblems.length) h += '<p class="err">roles file problems: ' + esc(VS.rolesProblems.join('; ')) + '</p>';
     h += '<ul class="tree">' + roots.map(node).join('') + '</ul>';
-    var gone = Object.keys(g.members).filter(function (id) { return g.members[id].removed; });
+    var gone = Object.keys(VS.members).filter(function (id) { return VS.members[id].removed; });
     if (gone.length) h += '<p class="r2">removed: ' + esc(gone.join(', ')) + '</p>';
-    var lost = Object.keys(g.members).filter(function (id) { return !seen[id] && !g.members[id].removed; });
+    var lost = Object.keys(VS.members).filter(function (id) { return !seen[id] && !VS.members[id].removed; });
     if (lost.length) h += '<p class="err">unreachable from any root: ' + esc(lost.join(', ')) + '</p>';
     h += '<div class="toolbar" style="margin-top:8px">' + btn('admin', 'Admin: roles event', {}) +
-      '<span class="muted">' + (g.admins[v] ? 'you are an admin' : 'flagged unless you are an admin') + '</span></div>';
-    var nMem = Object.keys(g.members).filter(function (id) { return !g.members[id].removed; }).length;
-    return card('Team', nMem + (nMem === 1 ? ' member' : ' members'), h);
+      '<span class="muted">' + (me.admin ? 'you are an admin' : 'flagged unless you are an admin') + '</span></div>';
+    var nMem = Object.keys(VS.members).filter(function (id) { return !VS.members[id].removed; }).length;
+    return card('Team', nMem + (nMem === 1 ? ' member' : ' members'), h, '', 'card-org');
   }
 
-  function cardItems(g) {
-    var rows = itemsInTreeOrder(g).filter(function (it) {
-      if (ui.kind === 'request' ? !it.request : ui.kind !== 'all' && it.kind !== ui.kind) return false;
-      var s = itemStatus(g, it);
-      if (ui.status === 'hidden') return it.hidden;
-      if (it.hidden) return false;
-      if (ui.status === 'open') return s !== 'done' && s !== 'declined' && s !== 'returned';
-      if (ui.status === 'done') return s === 'done';
-      if (ui.status === 'blocked') return s === 'blocked' || rollup(g, it).blocked.length;
-      return true;
-    });
-    function sel(id, val, list) {
-      return '<select id="' + id + '">' + list.map(function (x) { return '<option' + (x === val ? ' selected' : '') + '>' + x + '</option>'; }).join('') + '</select>';
-    }
-    var h = '<div class="toolbar">kind ' + sel('f-kind', ui.kind, ['all', 'task', 'todo', 'topic', 'request']) +
-      ' status ' + sel('f-status', ui.status, ['all', 'open', 'blocked', 'done', 'hidden']) + '</div>';
+  function itemFilter(it) {
+    if (ui.kind === 'request' ? !it.pending.length : ui.kind !== 'all' && it.kind !== ui.kind) return false;
+    var s = it.status;
+    if (ui.status === 'hidden') return it.hidden;
+    if (it.hidden) return false;
+    if (ui.status === 'open') return s !== 'done' && s !== 'declined' && s !== 'returned';
+    if (ui.status === 'done') return s === 'done';
+    if (ui.status === 'blocked') return s === 'blocked' || it.rollup.blocked.length;
+    return true;
+  }
+  function sel(id, val, list) {
+    return '<select id="' + id + '">' + list.map(function (x) {
+      var k = Array.isArray(x) ? x[0] : x, l = Array.isArray(x) ? x[1] : x;
+      return '<option value="' + esc(k) + '"' + (k === val ? ' selected' : '') + '>' + esc(l) + '</option>';
+    }).join('') + '</select>';
+  }
+  function itemFilterBar() {
+    return 'kind ' + sel('f-kind', ui.kind, [['all', 'all'], ['task', 'task'], ['todo', 'todo'], ['topic', 'topic'], ['request', 'request (pending assignment)']]) +
+      ' status ' + sel('f-status', ui.status, ['all', 'open', 'blocked', 'done', 'hidden']);
+  }
+  function cardItems() {
+    var rows = VS.itemOrder.map(function (id) { return VS.items[id]; }).filter(itemFilter);
+    var h = '<div class="toolbar">' + itemFilterBar() + '</div>';
     h += rows.length ? rows.map(function (it) {
-      var as = recsOf(g, it.id), d = itemDepth(g, it), nc = E.threadOf(g, it.id).filter(function (n) { return n.markers.length; }).length;
-      var who = it.request ? '<span class="muted">&rarr; ' + esc(it.request.to) + '</span>' :
-        as.length ? '<span class="muted">&rarr; ' + esc(as.length > 4 ? as.length + ' people' : as.map(function (a) { return a.to; }).join(', ')) + '</span>' : '';
-      return '<div class="row click"' + attr('item', it.id) + ' style="padding-left:' + d * 14 + 'px"><div class="r1">' + (d ? '<span class="muted">&#8627;</span>' : '') +
-        stChip(itemStatus(g, it)) + titleRef(g, it.id) + who + rollupHtml(g, it) + (nc ? '<span class="chip conc-c">concurrent ' + nc + '</span>' : '') +
+      var as = it.assignments.map(A).filter(function (r) { return r.state === 'live' || r.state === 'pending'; });
+      var who = as.length ? '<span class="muted">&rarr; ' + esc(as.length > 4 ? as.length + ' people' : as.map(function (a) { return a.to + (a.state === 'pending' ? '?' : ''); }).join(', ')) + '</span>' : '';
+      return '<div class="row click"' + attr('item', it.id) + ' style="padding-left:' + it.depth * 14 + 'px"><div class="r1">' + (it.depth ? '<span class="muted">&#8627;</span>' : '') +
+        stChip(it.status) + prChip(it) + titleRef(it.id) + dueChip(it) + who + rollupHtml(it) + (it.concurrent ? '<span class="chip conc-c">concurrent ' + it.concurrent + '</span>' : '') +
         '<span class="grow"></span>' + kindChip(it) + '</div>' +
-        '<div class="r2">' + esc(it.alias) + ' by ' + esc(nm(g, it.author)) + (it.project ? ' &middot; ' + esc(it.project) : '') + ' &middot; ' + esc(fmtTs(E.lastActivity(g, it.id))) + '</div></div>';
+        '<div class="r2">' + esc(it.alias) + ' by ' + esc(nm(it.author)) + (it.project ? ' &middot; ' + esc(it.project) : '') + ' &middot; ' + esc(fmtTs(it.lastActivity)) + '</div></div>';
     }).join('') : '<div class="empty">No items match.</div>';
-    return card('Items', rows.length + ' of ' + Object.keys(g.items).length, h);
+    return card('Items', rows.length + ' of ' + Object.keys(VS.items).length, h, '', 'card-items');
   }
 
-  function cardActivity(g) {
-    var rows = g.log.filter(function (n) {
-      return (!ui.flaggedOnly || n.status !== 'applied') && (!ui.concOnly || n.markers.length);
-    }), cap = 50, shown = rows.slice(-cap).reverse();
-    var flagged = g.log.filter(function (n) { return n.status !== 'applied'; }).length, conc = g.log.filter(function (n) { return n.markers.length; }).length;
-    var h = '';
-    if (ui.last) {
-      h += '<div class="lastact">Last write (one commit): ' + ui.last.map(function (n) {
-        return esc(n.alias) + ' ' + esc(n.type) + ' ' + (n.status === 'applied' ? '<span class="chip st-done">applied</span>' : '<span class="chip flag">' + esc(n.status) + '</span> ' + esc(n.reason));
-      }).join('; ') + '</div>';
-    }
-    h += '<div class="toolbar"><label><input type="checkbox" id="flagged-only"' + (ui.flaggedOnly ? ' checked' : '') + '> flagged only</label>' +
-      '<label><input type="checkbox" id="conc-only"' + (ui.concOnly ? ' checked' : '') + '> concurrent only</label>' +
+  function cardActivity() {
+    var rows = VS.events.filter(function (n) { return (!ui.act.flagged || n.status !== 'applied') && (!ui.act.conc || n.markers.length); }), cap = 50, shown = rows.slice(-cap).reverse();
+    var h = lastWrite();
+    h += '<div class="toolbar"><label><input type="checkbox" id="flagged-only"' + (ui.act.flagged ? ' checked' : '') + '> flagged only</label>' +
+      '<label><input type="checkbox" id="conc-only"' + (ui.act.conc ? ' checked' : '') + '> concurrent only</label>' +
       '<span class="grow"></span><span class="muted">newest first, ' + shown.length + ' of ' + rows.length + '</span></div>';
-    h += shown.length ? '<ul class="plain">' + shown.map(function (n) { return evLine(g, n, false); }).join('') + '</ul>' : '<div class="empty">Nothing to show.</div>';
-    return card('Activity', g.log.length + ' events, ' + flagged + ' flagged' + (conc ? ', ' + conc + ' concurrent' : ''), h);
+    h += shown.length ? '<ul class="plain">' + shown.map(function (n) { return evLine(n, false); }).join('') + '</ul>' : '<div class="empty">Nothing to show.</div>';
+    return card('Activity', VS.stats.events + ' events, ' + VS.stats.flagged + ' flagged' + (VS.stats.concurrent ? ', ' + VS.stats.concurrent + ' concurrent' : ''), h, '', 'card-activity');
+  }
+  function lastWrite() {
+    if (!ui.last) return '';
+    return '<div class="lastact">Last write (journal): ' + ui.last.map(function (n) {
+      return esc(n.alias) + ' ' + esc(n.type) + ' ' + (n.status === 'applied' ? '<span class="chip st-done">applied</span>' : '<span class="chip flag">' + esc(n.status) + '</span> ' + esc(n.reason));
+    }).join('; ') + '</div>';
   }
 
-  function fmtCommits(a) { return '[\n' + a.map(function (e) { return '  ' + JSON.stringify(e); }).join(',\n') + '\n]'; }
+  function fmtList(a) { return '[\n' + a.map(function (e) { return '  ' + JSON.stringify(e); }).join(',\n') + '\n]'; }
   function fmtRoles(r) {
-    return '{\n  "admins": ' + JSON.stringify(r.admins || []) + ',\n  "members": [\n' +
+    return '{\n  "admins": ' + JSON.stringify(r.admins || []) + ',\n' + (r.priority ? '  "priority": ' + JSON.stringify(r.priority) + ',\n' : '') + '  "members": [\n' +
       r.members.map(function (m) { return '    ' + JSON.stringify(m); }).join(',\n') + '\n  ]\n}';
   }
-  function cardData(st) {
-    var owners = st.roles.members.map(function (m) { return m.id; });
-    Object.keys(st.commits).forEach(function (k) { if (owners.indexOf(k) < 0) owners.push(k); });
+  function cardData() {
+    var raw = stores[ui.store].raw();
     var h = '<details class="data" id="data-details"' + (ui.dataOpen ? ' open' : '') + '><summary>data (raw JSON, editable)</summary>' +
-      '<p class="r2">Roles file (genesis) plus one commit list per member ref, and the commits still upstream. Edit, then apply; edits live in memory until reload.</p>' +
+      '<p class="r2">Roles file (genesis), the pushed commits of every clone ref (the remote), and each clone\'s local state (what it fetched, its unpushed commits and open batch). Edit, then apply; edits live in memory until reload.</p>' +
       '<div class="toolbar"><button class="btn mini primary" data-act="apply">apply</button><button class="btn mini" data-act="reset">reset store to fixtures</button></div>' +
-      '<div class="sub">roles file</div><textarea id="raw-roles" rows="12" spellcheck="false">' + esc(fmtRoles(st.roles)) + '</textarea>';
-    owners.forEach(function (o) {
-      var cs = st.commits[o] || [];
-      h += '<details' + attr('owner', o) + (ui.openLogs[o] ? ' open' : '') + '><summary>ref of ' + esc(o) + ' (' + cs.length + ' commits)</summary>' +
-        '<textarea' + attr('owner', o) + ' rows="' + Math.min(18, cs.length + 3) + '" spellcheck="false">' + esc(fmtCommits(cs)) + '</textarea></details>';
+      '<div class="sub">roles file</div><textarea id="raw-roles" rows="12" spellcheck="false">' + esc(fmtRoles(raw.roles)) + '</textarea>';
+    Object.keys(raw.remote).forEach(function (o) {
+      var cs = raw.remote[o];
+      h += '<details' + attr('owner', o) + (ui.openLogs[o] ? ' open' : '') + '><summary>remote ' + esc(E.refOf(o)) + ' (' + cs.length + ' commits)</summary>' +
+        '<textarea' + attr('owner', o) + ' rows="' + Math.min(18, cs.length + 3) + '" spellcheck="false">' + esc(fmtList(cs)) + '</textarea></details>';
     });
-    h += '<details' + attr('owner', '@late') + (ui.openLogs['@late'] ? ' open' : '') + '><summary>upstream, not received yet (' + nLate(st) + ' commits)</summary>' +
-      '<textarea id="raw-late" rows="8" spellcheck="false">' + esc(JSON.stringify(st.late, null, 1)) + '</textarea></details>';
-    return card('Data', 'debug', h + '</details>');
+    h += '<details' + attr('owner', '@clones') + (ui.openLogs['@clones'] ? ' open' : '') + '><summary>clone state (fetched counts, local commits, online)</summary>' +
+      '<textarea id="raw-clones" rows="14" spellcheck="false">' + esc(JSON.stringify(raw.clones, null, 1)) + '</textarea></details>';
+    return card('Data', 'debug', h + '</details>', '', 'card-data');
+  }
+
+  // ------------------------------------------------------------- view modes
+
+  // Kanban: columns by status. My/Team: cards are assignments; Items: cards are
+  // items. Dragging moves only the viewer's own live assignment (item.status, or
+  // item.close on the done column).
+  var KCOLS = { my: ['pending', 'todo', 'doing', 'blocked', 'awaiting', 'done'], team: ['pending', 'todo', 'doing', 'blocked', 'awaiting', 'done'],
+    items: ['unassigned', 'pending', 'todo', 'doing', 'blocked', 'awaiting', 'done', 'declined', 'returned'] };
+  function viewKanban(v) {
+    var cols = KCOLS[ui.kscope], buckets = {};
+    cols.forEach(function (c) { buckets[c] = []; });
+    if (ui.kscope === 'items') {
+      VS.itemOrder.forEach(function (id) {
+        var it = VS.items[id];
+        if (it.hidden || it.kind === 'topic' || !buckets[it.status]) return;
+        var mineR = it.assignments.map(A).filter(function (r) { return r.to === v && r.state === 'live'; })[0];
+        buckets[it.status].push({ item: id, drag: mineR && mineR.status !== 'done' ? id : null,
+          sub: (it.assignments.map(A).filter(function (r) { return r.state === 'live' || r.state === 'pending'; }).map(function (r) { return r.to + (r.state === 'pending' ? '?' : ''); }).join(', ') || 'nobody') });
+      });
+    } else {
+      var recs = ui.kscope === 'my' ? VS.my.assignments.concat(VS.my.received.pending).map(A) :
+        [].concat.apply([], VS.my.team.map(function (p) { return p.open.concat(p.pending); })).map(A);
+      recs.forEach(function (r) {
+        var col = r.state === 'pending' ? 'pending' : r.status;
+        if (!buckets[col]) return;
+        buckets[col].push({ item: r.item, rec: r, drag: r.to === v && r.state === 'live' && r.status !== 'done' ? r.item : null,
+          sub: (ui.kscope === 'team' ? nm(r.to) + ' &middot; ' : '') + source(r) });
+      });
+    }
+    Object.keys(buckets).forEach(function (c) {
+      buckets[c].sort(function (x, y) { var a = VS.items[x.item], b = VS.items[y.item]; return b.priorityLevel - a.priorityLevel || ((a.due || '9') < (b.due || '9') ? -1 : 1); });
+    });
+    var h = '<div class="toolbar">scope ' + sel('k-scope', ui.kscope, [['my', 'my assignments'], ['team', 'my team'], ['items', 'items']]) +
+      '<span class="muted">drag a card to change the status of your own assignment (done = close)</span></div><div class="kanban">';
+    h += cols.map(function (c) {
+      return '<div class="kcol"' + attr('kcol', c) + '><div class="khead">' + stChip(c) + ' <span class="muted">' + buckets[c].length + '</span></div>' +
+        buckets[c].map(function (x) {
+          var it = VS.items[x.item];
+          return '<div class="kcard' + (x.drag ? ' drag' : '') + '"' + (x.drag ? ' draggable="true"' + attr('drag', x.drag) : '') + attr('item', x.item) + '>' +
+            '<div class="r1">' + prChip(it) + titleRef(x.item) + dueChip(it) + '</div><div class="r2">' + x.sub + '</div></div>';
+        }).join('') + '</div>';
+    }).join('');
+    return card('Kanban', ui.kscope, h + '</div>' + lastWrite(), '', 'view-kanban');
+  }
+
+  var FAMILIES = [['all', 'all events'], ['item', 'item fields and status'], ['assign', 'assignment (assign, accept, decline, return, handoff, unassign)'], ['comment', 'comments'], ['roles', 'roles']];
+  function family(t) {
+    if (/^roles\./.test(t)) return 'roles';
+    if (/^comment\./.test(t)) return 'comment';
+    if (/^item\.(assign|accept|decline|return|handoff|unassign)$/.test(t)) return 'assign';
+    return 'item';
+  }
+  function viewActivity() {
+    var f = ui.act, rows = VS.events.filter(function (n) {
+      return (f.family === 'all' || family(n.type) === f.family) && (f.member === 'all' || n.member === f.member) &&
+        (!f.flagged || n.status !== 'applied') && (!f.conc || n.markers.length);
+    }).slice().sort(function (a, b) { return String(b.ts) < String(a.ts) ? -1 : String(b.ts) > String(a.ts) ? 1 : 0; });
+    var people = [['all', 'everyone']].concat(Object.keys(VS.members).map(function (id) { return [id, VS.members[id].name]; }));
+    var h = '<div class="toolbar">' + sel('a-family', f.family, FAMILIES) + sel('a-member', f.member, people) +
+      '<label><input type="checkbox" id="flagged-only"' + (f.flagged ? ' checked' : '') + '> flagged only</label>' +
+      '<label><input type="checkbox" id="conc-only"' + (f.conc ? ' checked' : '') + '> concurrent only</label><span class="grow"></span><span class="muted">' + rows.length + ' events, by time, newest first</span></div>';
+    var day = null;
+    h += '<ul class="plain atl">' + rows.map(function (n) {
+      var d = String(n.ts).slice(0, 10), x = '';
+      if (d !== day) { day = d; x = '<li class="day">' + esc(d) + '</li>'; }
+      return x + evLine(n, false);
+    }).join('') + '</ul>';
+    return card('Activity timeline', 'events by write time', lastWrite() + h, '', 'view-activity');
+  }
+
+  function dayNum(d) { return Math.floor(Date.parse(String(d).slice(0, 10) + 'T00:00:00Z') / 86400000); }
+  function dayStr(n) { return new Date(n * 86400000).toISOString().slice(0, 10); }
+  // Due-date timeline: one bar per item with a due date, from its start (first
+  // doing, else creation) to its due day.
+  function viewGantt() {
+    var rows = VS.itemOrder.map(function (id) { return VS.items[id]; }).filter(function (it) { return it.due && !it.hidden && it.kind !== 'topic' && itemFilter(it); });
+    if (!rows.length) return card('Due timeline', '0 items', '<div class="toolbar">' + itemFilterBar() + '</div><div class="empty">No items with a due date match.</div>', '', 'view-gantt');
+    var t0 = dayNum(today()), lo = t0, hi = t0;
+    rows.forEach(function (it) { lo = Math.min(lo, dayNum(it.started || it.ts), dayNum(it.due)); hi = Math.max(hi, dayNum(it.due)); });
+    hi += 1;
+    var span = hi - lo, pct = function (d) { return ((d - lo) / span * 100).toFixed(2) + '%'; };
+    var axis = '';
+    for (var d = lo; d < hi; d++) axis += '<span class="gtick' + (d === t0 ? ' now' : '') + '" style="left:' + pct(d) + '">' + (new Date(d * 86400000).getUTCDay() === 1 || d === lo ? esc(dayStr(d).slice(5)) : '') + '</span>';
+    var h = '<div class="toolbar">' + itemFilterBar() + '<span class="muted">bar: start (first doing, else creation) to due; the line is today (' + esc(today()) + ')</span></div>' +
+      '<div class="gantt"><div class="grow-axis"><div class="glabel"></div><div class="gtrack axis">' + axis + '</div></div>';
+    h += rows.map(function (it) {
+      var s = dayNum(it.started || it.ts), e = dayNum(it.due) + 1, over = it.due < today() && it.status !== 'done';
+      return '<div class="grow-row click"' + attr('item', it.id) + '><div class="glabel">' + prChip(it) + stChip(it.status) + titleRef(it.id) + '</div>' +
+        '<div class="gtrack"><span class="gnow" style="left:' + pct(t0) + '"></span><span class="gbar st-' + esc(it.status) + (over ? ' over' : '') + '" style="left:' + pct(Math.min(s, e - 1)) + ';width:' + ((Math.max(1, e - Math.min(s, e - 1))) / span * 100).toFixed(2) + '%" title="' +
+        esc((it.started ? 'started ' : 'created ') + String(it.started || it.ts).slice(0, 10) + ' - due ' + it.due) + '">' + esc(it.due.slice(5)) + '</span></div></div>';
+    }).join('');
+    return card('Due timeline', rows.length + ' items with a due date', h + '</div>', '', 'view-gantt');
+  }
+
+  function viewCalendar() {
+    var m = ui.calMonth || today().slice(0, 7), first = dayNum(m + '-01'), dow = (new Date(first * 86400000).getUTCDay() + 6) % 7;
+    var y = Number(m.slice(0, 4)), mo = Number(m.slice(5, 7)), days = new Date(Date.UTC(y, mo, 0)).getUTCDate();
+    var byDay = {};
+    VS.itemOrder.forEach(function (id) { var it = VS.items[id]; if (it.due && !it.hidden && itemFilter(it)) (byDay[it.due] = byDay[it.due] || []).push(it); });
+    var prev = new Date(Date.UTC(y, mo - 2, 1)).toISOString().slice(0, 7), next = new Date(Date.UTC(y, mo, 1)).toISOString().slice(0, 7);
+    var h = '<div class="toolbar">' + btn('cal', '&lsaquo;', { month: prev }) + '<b>' + esc(m) + '</b>' + btn('cal', '&rsaquo;', { month: next }) + btn('cal', 'today', { month: today().slice(0, 7) }) +
+      itemFilterBar() + '</div><div class="cal">' + ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(function (d) { return '<div class="cdow">' + d + '</div>'; }).join('');
+    for (var i = 0; i < dow; i++) h += '<div class="cday off"></div>';
+    for (var d = 1; d <= days; d++) {
+      var ds = m + '-' + (d < 10 ? '0' : '') + d, list = byDay[ds] || [];
+      h += '<div class="cday' + (ds === today() ? ' now' : '') + '"' + attr('day', ds) + '><div class="cnum">' + d + '</div>' + list.map(function (it) {
+        return '<div class="citem click"' + attr('item', it.id) + '>' + stChip(it.status) + prChip(it) + titleRef(it.id) + '</div>';
+      }).join('') + '</div>';
+    }
+    var n = Object.keys(byDay).filter(function (k) { return k.slice(0, 7) === m; }).reduce(function (s, k) { return s + byDay[k].length; }, 0);
+    return card('Calendar', n + ' due in ' + m, h + '</div>', '', 'view-calendar');
   }
 
   // --------------------------------------------------------------- sync state
 
-  function nLate(st) { return Object.keys(st.late || {}).reduce(function (s, k) { return s + st.late[k].length; }, 0); }
-  function unpushed(st, v) { return (st.commits[v] || []).filter(function (c) { return c._local; }).length; }
   function syncHtml(name) {
-    var st = stores[name], s = ui.sync[name], v = viewerOf(name), n = unpushed(st, v), up = nLate(st);
-    var remote = st.def.sync && st.def.sync.remote;
+    var vs = vss[name], s = vs.sync, remote = vs.store.remote, events = s.unpushed.reduce(function (a, c) { return a + c.events.length; }, 0);
     var h = '<div class="sync' + (remote && s.online ? '' : ' off') + '">';
+    h += '<span class="muted">clone <code>' + esc(E.refOf(vs.viewer.stream)) + '</code></span> &middot; ';
     if (!remote) h += '<span class="sdot"></span><b>no remote</b> &middot; local only (same path as a long offline)';
-    else h += '<span class="sdot"></span><b>' + (s.online ? 'online' : 'offline') + '</b> &middot; last synced ' + esc(fmtTs(s.lastSynced)) + (s.online ? '' : ' &middot; will retry');
-    h += ' &middot; <span' + (n ? ' class="unp"' : '') + '>' + n + ' of my writes not yet pushed</span>';
-    if (remote && up) h += ' &middot; <span class="muted" title="mock: commits other members pushed while this client was not looking">' + up + ' upstream commits not fetched</span>';
+    else h += '<span class="sdot"></span><b>' + (s.online ? 'online' : 'offline') + '</b> &middot; last synced ' + esc(fmtTs(s.syncedAt)) + (s.online ? '' : ' &middot; will retry');
+    h += ' &middot; <span' + (events ? ' class="unp"' : '') + '>' + events + ' of my writes not yet pushed</span>';
+    if (remote && s.upstream) h += ' &middot; <span class="muted" title="commits other clones pushed that this clone has not fetched">' + s.upstream + ' upstream commits not fetched</span>';
     if (remote) h += btn('sync', 'Sync now', {}) + btn(s.online ? 'go-offline' : 'go-online', s.online ? 'Go offline' : 'Come back online', {}, s.online ? '' : 'primary');
-    return h + '</div>';
-  }
-  function nowTs(st) {
-    var m = '';
-    Object.keys(st.commits).forEach(function (k) { st.commits[k].forEach(function (c) { if (String(c.ts) > m) m = String(c.ts); }); });
-    var now = new Date().toISOString().slice(0, 19) + 'Z';
-    return now > m ? now : new Date(Date.parse(m) + 60000).toISOString().slice(0, 19) + 'Z';
-  }
-  // Sync: push my local commits, fetch what is upstream (the fixture's late commits).
-  function doSync(name) {
-    var st = stores[name], s = ui.sync[name];
-    if (!st.def.sync.remote) return toast('No remote configured: writes stay local, exactly like a long offline.');
-    if (!s.online) return toast('Offline: the sync is retried when you come back online (not an error).');
-    var pushed = 0, got = 0;
-    Object.keys(st.commits).forEach(function (k) { st.commits[k].forEach(function (c) { if (c._local) { delete c._local; pushed++; } }); });
-    Object.keys(st.late).forEach(function (o) {
-      st.late[o].forEach(function (c) { c._received = 'late'; (st.commits[o] = st.commits[o] || []).push(c); got++; });
-    });
-    st.late = {};
-    s.lastSynced = nowTs(st);
-    render();
-    toast('Synced: pushed ' + pushed + ', fetched ' + got + ' commit' + (got === 1 ? '' : 's') + (got ? '. Late arrivals are checked against what their authors had seen; no earlier verdict changes.' : '.'));
+    else h += btn('sync', 'Close batch', {});
+    h += '</div>';
+    if (s.unpushed.length) {
+      h += '<details class="unpushed"><summary>unpushed: ' + s.unpushed.map(function (c) { return c.open ? 'open batch (' + c.events.length + ')' : 'commit (' + c.events.length + ')'; }).join(', ') + '</summary><ul class="plain">' +
+        s.unpushed.map(function (c) {
+          return '<li><b>' + (c.open ? 'open batch' : 'closed commit') + '</b> <span class="muted">' + esc(fmtTs(c.ts)) + '</span>: ' + c.events.map(function (id) {
+            var n = EV[id]; return esc(alias(id)) + (n ? ' ' + esc(n.type) : '');
+          }).join(', ') + '</li>';
+        }).join('') + '</ul><p class="r2">The open batch closes into one signed commit when this clone receives new events (its seen would change) or at push.</p></details>';
+    }
+    return h;
   }
 
-  function drawerHtml(st, g, v) {
-    var flagged = g.log.filter(function (n) { return n.status !== 'applied'; }).length;
-    var nMem = Object.keys(g.members).filter(function (id) { return !g.members[id].removed; }).length;
-    return '<div class="dr-title"><b>' + esc(st.def.label) + '</b><span>' + nMem + ' members, ' + g.log.length + ' events from ' +
-      Object.keys(st.commits).reduce(function (s, k) { return s + st.commits[k].length; }, 0) + ' commits, ' + flagged + ' flagged</span><span class="grow"></span>' +
-      '<button class="btn primary" data-act="create"><svg class="i"><use href="#i-plus"/></svg>New</button></div>' + syncHtml(st.def.name) +
-      '<div class="dr-cols"><div class="dr-col">' + cardMine(g, v) + cardRequests(g, v) + cardGiven(g, v) + '</div>' +
-      '<div class="dr-col">' + cardMyTeam(g, v) + cardItems(g) + '</div>' +
-      '<div class="dr-col">' + cardTeam(st, g, v) + cardActivity(g) + cardData(st) + '</div></div>';
+  function drawerHtml(name, v) {
+    var vs = VS, nMem = Object.keys(vs.members).filter(function (id) { return !vs.members[id].removed; }).length;
+    var modes = MODES.map(function (m) { return '<button class="btn mini' + (ui.mode === m[0] ? ' primary' : '') + '"' + attr('act', 'mode') + attr('mode', m[0]) + '>' + m[1] + '</button>'; }).join('');
+    var h = '<div class="dr-title"><b>' + esc(vs.store.label) + '</b><span>' + nMem + ' members, ' + vs.stats.events + ' events from ' + vs.stats.commits + ' commits, ' +
+      vs.stats.flagged + ' flagged</span><span class="grow"></span><span class="modes">' + modes + '</span>' +
+      '<button class="btn primary" data-act="create"><svg class="i"><use href="#i-plus"/></svg>New</button></div>' + syncHtml(name);
+    if (!vs.viewer.isMember) h += '<p class="err">' + esc(v) + ' is not a member of this store (removed or never joined): writes are flagged.</p>';
+    if (ui.mode === 'kanban') return h + viewKanban(v);
+    if (ui.mode === 'activity') return h + viewActivity();
+    if (ui.mode === 'gantt') return h + viewGantt();
+    if (ui.mode === 'calendar') return h + viewCalendar();
+    return h + '<div class="dr-cols"><div class="dr-col">' + cardToday() + cardMine(v) + cardRequests() + cardGiven(v) + '</div>' +
+      '<div class="dr-col">' + cardMyTeam(v) + cardItems() + '</div>' +
+      '<div class="dr-col">' + cardTeam(v) + cardActivity() + cardData() + '</div></div>';
   }
 
   // ------------------------------------------------------------ thread sheet
 
-  function commentHtml(g, n, v, it) {
-    var c = g.comments[n.id], p = n.p, body = c ? c.body : p.body, reply = '';
+  function commentHtml(n, v, it) {
+    var p = n.payload, c = VS.comments[n.id] || {}, body = c.body != null ? c.body : p.body, reply = '';
     if (p.reply_to) {
-      var q = g.comments[p.reply_to] || (g.byId[p.reply_to] && { author: g.byId[p.reply_to].author, body: g.byId[p.reply_to].p.body, hidden: false });
+      var q = VS.comments[p.reply_to] || (EV[p.reply_to] && { author: EV[p.reply_to].member, body: EV[p.reply_to].payload.body });
       reply = '<div class="quote">&#8617; ' + esc(alias(p.reply_to)) + ' ' + (q ? '<b>' + esc(q.author) + '</b>: ' + (q.hidden ? '<i>hidden comment</i>' : esc(String(q.body).slice(0, 90))) : '') + '</div>';
     }
     var acts = '';
-    if (n.status === 'applied' && c && !c.hidden && !it.hidden) {
+    if (n.status === 'applied' && !c.hidden && !it.hidden) {
       acts += btn('reply', 'Reply', { cid: n.id });
-      if (c.author === v) acts += btn('cedit', 'Edit', { cid: n.id }) + btn('chide', 'Hide', { cid: n.id });
+      if (n.member === v) acts += btn('cedit', 'Edit', { cid: n.id }) + btn('chide', 'Hide', { cid: n.id });
     }
-    var txt = c && c.hidden ? '<div class="hiddenc">comment hidden by its author (' + esc(alias(c.hiddenBy.id)) + ')<details><summary>history keeps the text</summary>' + esc(body) + '</details></div>' :
+    var txt = c.hidden ? '<div class="hiddenc">comment hidden by its author (' + esc(alias(c.hidden)) + ')<details><summary>history keeps the text</summary>' + esc(body) + '</details></div>' :
       '<div class="ctext">' + esc(body) + '</div>';
-    return '<li class="cmt' + (n.status !== 'applied' ? ' ' + n.status : '') + (n.markers.length ? ' concm' : '') + (c && c.author === v ? ' mine' : '') + '">' +
-      '<div class="ch"><b>' + esc(nm(g, n.author)) + '</b>' + originChip(n.origin) + '<span class="when">' + esc(fmtTs(n.ts)) + '</span><span class="al">' + esc(n.alias) + '</span>' +
-      (c && c.edited ? '<span class="chip">edited</span>' : '') + flags(n) + '<span class="grow"></span>' + acts + '</div>' + reply + txt +
-      (n.reason ? '<span class="reason">' + esc(n.reason) + '</span>' : '') + markerHtml(g, n) + '</li>';
+    return '<li class="cmt' + (n.status !== 'applied' ? ' ' + n.status : '') + (n.markers.length ? ' concm' : '') + (n.member === v ? ' mine' : '') + '"' + attr('ev', n.id) + '>' +
+      '<div class="ch"><b>' + esc(nm(n.member)) + '</b>' + originChip(n.origin) + '<span class="when">' + esc(fmtTs(n.ts)) + '</span><span class="al">' + esc(n.alias) + '</span>' +
+      (c.edited ? '<span class="chip">edited</span>' : '') + flags(n) + '<span class="grow"></span>' + acts + '</div>' + reply + txt +
+      (n.reason ? '<span class="reason">' + esc(n.reason) + '</span>' : '') + markerHtml(n) + '</li>';
   }
 
-  function sheetHtml(g, v, it) {
-    var recs = recsOf(g, it.id, true), active = recs.filter(function (r) { return !r.removed; }), mineR = active.filter(function (r) { return r.to === v; })[0];
-    var req = it.request, lead = req && ((g.members[req.to] || {}).leads || [])[0];
+  function sheetHtml(v, it) {
+    var recs = it.assignments.map(A), mineR = recs.filter(function (r) { return r.to === v && r.state === 'live'; })[0];
+    var minePend = recs.filter(function (r) { return r.to === v && r.state === 'pending'; })[0];
     var acts = '';
-    if (req && req.state === 'pending' && req.to === v) acts += btn('req-accept', 'Accept request', { item: it.id }, 'primary') + btn('note', 'Decline', { item: it.id, op: 'request.decline' });
-    if (req && req.state === 'accepted') acts += btn('note', 'Return (lead of ' + esc(req.to) + ')', { item: it.id, op: 'request.return' }, lead === v ? '' : 'ghost');
+    if (minePend) acts += btn('accept', 'Accept assignment', { item: it.id }, 'primary') + btn('note', 'Decline', { item: it.id, op: 'item.decline' });
     if (it.author === v && !it.hidden) acts += btn('edit', 'Edit', { item: it.id });
-    if (it.author === v && it.kind !== 'topic' && !req && !it.hidden) acts += btn('assign', 'Assign', { item: it.id });
+    if (it.author === v && it.kind !== 'topic' && !it.hidden) acts += btn('assign', 'Assign', { item: it.id });
+    if (mineR && mineR.status !== 'done' && !it.hidden) acts += btn('handoff', 'Hand off...', { item: it.id });
     if ((mineR || it.author === v) && it.kind !== 'topic' && !it.hidden) acts += btn('split', 'Split into subtask', { item: it.id });
     if (it.author === v && !it.hidden) acts += btn('ihide', 'Hide item', { item: it.id });
 
     var h = '<div class="sh-top"><div class="sh-head"><div>' + kindChip(it) + '</div><h2>' + esc(it.title) + '</h2>' +
       '<button class="btn mini" data-act="sheet-close" title="close (Esc)"><svg class="i"><use href="#i-x"/></svg></button></div>';
     h += '<dl class="sh-meta"><dt>id</dt><dd><code>' + esc(it.alias) + '</code> <span class="muted">(' + esc(it.id) + ')</span></dd>' +
-      '<dt>status</dt><dd>' + (it.kind === 'topic' ? '<span class="muted">topic: discussion only</span>' : stChip(itemStatus(g, it)) + ' ' + rollupHtml(g, it)) + '</dd>' +
-      (req ? '<dt>request</dt><dd>' + esc(req.by) + ' &rarr; <b>' + esc(req.to) + '</b> ' + (req.state === 'accepted' ? '<span class="chip st-doing">accepted</span>' : stChip(req.state)) + '</dd>' : '') +
-      '<dt>creator</dt><dd>' + esc(nm(g, it.author)) + (g.admins[it.author] ? ' <span class="chip admin">admin</span>' : '') + '</dd>' +
+      '<dt>status</dt><dd>' + (it.kind === 'topic' ? '<span class="muted">topic: discussion only</span>' : stChip(it.status) + ' ' + rollupHtml(it)) + '</dd>' +
+      (it.kind !== 'topic' ? '<dt>priority</dt><dd>' + prChip(it) + '</dd><dt>due</dt><dd>' + (it.due ? dueChip(it) + ' ' + esc(it.due) : '<span class="muted">-</span>') + '</dd>' : '') +
+      '<dt>creator</dt><dd>' + esc(nm(it.author)) + (VS.members[it.author] && VS.members[it.author].admin ? ' <span class="chip admin">admin</span>' : '') + '</dd>' +
       '<dt>project</dt><dd>' + (it.project ? esc(it.project) : '<span class="muted">-</span>') + '</dd>' +
-      '<dt>parent</dt><dd>' + (it.parent ? itemRef(it.parent) + ' ' + esc((g.items[it.parent] || {}).title || '') : '<span class="muted">-</span>') + '</dd>' +
+      '<dt>parent</dt><dd>' + (it.parent ? itemRef(it.parent) + ' ' + esc((VS.items[it.parent] || {}).title || '') : '<span class="muted">-</span>') + '</dd>' +
       '<dt>created</dt><dd>' + esc(fmtTs(it.ts)) + (it.edited ? ' &middot; edited ' + esc(fmtTs(it.edited.ts)) : '') + '</dd></dl>';
     h += it.body ? '<div class="sh-body">' + esc(it.body) + '</div>' : '';
-    h += '<div class="sh-actions">' + (acts || '<span class="muted">No item actions for ' + esc(nm(g, v)) + '.</span>') + '</div>';
+    h += '<div class="sh-actions">' + (acts || '<span class="muted">No item actions for ' + esc(nm(v)) + '.</span>') + '</div>';
 
     if (it.kind !== 'topic') {
       h += '<h3>Assignees</h3>';
-      if (!recs.length) h += '<div class="empty">' + (req ? 'Request ' + esc(req.state) + '; it becomes ' + esc(req.to) + '\'s own assignment on acceptance.' : 'Not assigned.') + '</div>';
+      if (!recs.length) h += '<div class="empty">Not assigned.</div>';
       else h += '<table class="atable">' + recs.map(function (r) {
-        var b = '';
-        if (!r.removed) {
+        var b = '', lead = VS.members[r.to] && VS.members[r.to].leads[0];
+        if (r.state === 'live') {
           if (r.by === v && r.status === 'awaiting') b += btn('confirm', 'Confirm', { item: r.item, who: r.to }, 'primary') + btn('note', 'Reject', { item: r.item, who: r.to, op: 'item.reject' });
           if ((r.by === v || r.to === v) && r.status === 'done') b += btn('note', 'Reopen', { item: r.item, who: r.to, op: 'item.reopen' });
-          if (r.by === v && !r.request) b += btn('unassign', 'Unassign', { item: r.item, who: r.to });
+          if (r.by === v) b += btn('unassign', 'Unassign', { item: r.item, who: r.to });
+          if (r.accepted && lead === v) b += btn('note', 'Return (lead of ' + esc(r.to) + ')', { item: r.item, who: r.to, op: 'item.return' });
+        } else if (r.state === 'pending') {
+          if (r.to === v) b += btn('accept', 'Accept', { item: r.item }, 'primary') + btn('note', 'Decline', { item: r.item, op: 'item.decline' });
+          if (r.by === v || r.sender === v) b += btn('unassign', 'Withdraw', { item: r.item, who: r.to });
         }
-        return '<tr class="' + (r.removed ? 'gone' : '') + '"><td><b>' + esc(nm(g, r.to)) + '</b><br><span class="muted">' + source(g, r) + '</span></td><td>' +
-          (r.removed ? '<span class="chip">' + (r.removed.type === 'request.return' ? 'returned' : 'unassigned') + ' ' + esc(alias(r.removed.id)) + '</span>' : stChip(r.status)) +
-          '<br><span class="muted">' + complText(r.completion) + '</span></td><td>' + (r.note ? '&ldquo;' + esc(r.note) + '&rdquo;' : '<span class="muted">no note</span>') +
+        return '<tr class="' + (r.state !== 'live' && r.state !== 'pending' ? 'gone' : '') + '"' + attr('rec', r.id) + '><td><b>' + esc(nm(r.to)) + '</b><br><span class="muted">' + source(r) + '</span></td><td>' +
+          recChip(r) + (r.ended ? ' <span class="muted">' + esc(alias(r.ended.id)) + '</span>' : '') +
+          '<br><span class="muted">' + complText(r.completion) + '</span></td><td>' + (r.note ? '&ldquo;' + esc(r.note) + '&rdquo;' : r.answerNote ? '&ldquo;' + esc(r.answerNote) + '&rdquo;' : '<span class="muted">no note</span>') +
           '<div class="tb">' + b + '</div></td></tr>';
       }).join('') + '</table>';
     }
-    var kids = subtasksOf(g, it.id, true);
-    if (kids.length) {
-      h += '<h3>Subtask threads</h3><div class="stree">' + kids.map(function (k) {
-        return '<div class="click"' + attr('item', k.id) + '>' + stChip(itemStatus(g, k)) + titleRef(g, k.id) + ' <span class="muted">' + esc(k.author) +
-          (recsOf(g, k.id).length ? ' &rarr; ' + esc(recsOf(g, k.id).map(function (a) { return a.to; }).join(', ')) : '') + '</span>' + rollupHtml(g, k) + kindChip(k) + '</div>';
+    if (it.children.length) {
+      h += '<h3>Subtask threads</h3><div class="stree">' + it.children.map(function (k) {
+        var ki = VS.items[k], who = ki.assignments.map(A).filter(function (r) { return r.state === 'live'; }).map(function (r) { return r.to; });
+        return '<div class="click"' + attr('item', k) + '>' + stChip(ki.status) + prChip(ki) + titleRef(k) + ' <span class="muted">' + esc(ki.author) +
+          (who.length ? ' &rarr; ' + esc(who.join(', ')) : '') + '</span>' + rollupHtml(ki) + kindChip(ki) + '</div>';
       }).join('') + '</div>';
     }
-    var evs = E.threadOf(g, it.id);
+    var evs = it.thread.map(function (id) { return EV[id]; });
     h += '<h3>Thread (' + evs.length + ' events)</h3></div><ul class="timeline">' + evs.map(function (n) {
-      if (n.type === 'comment.add' && n.thread === it.id) return commentHtml(g, n, v, it);
-      return evLine(g, n, n.parentThread === it.id ? 'parent' : true);
+      if (n.type === 'comment.add' && n.thread === it.id) return commentHtml(n, v, it);
+      return evLine(n, n.parentThread === it.id ? 'parent' : true);
     }).join('') + '</ul>';
 
     // composer: comment (optionally a quote reply) plus quick status actions on my own assignment
-    var rt = ui.replyTo && g.comments[ui.replyTo] && g.comments[ui.replyTo].item === it.id ? g.comments[ui.replyTo] : null;
+    var rt = ui.replyTo && VS.comments[ui.replyTo] && VS.comments[ui.replyTo].item === it.id ? VS.comments[ui.replyTo] : null;
     var quick = '';
     if (mineR && mineR.status !== 'done') {
       quick = '<span class="muted">my status ' + stChip(mineR.status) + ' set:</span>' +
@@ -518,9 +655,9 @@
         (mineR.status !== 'awaiting' ? btn('q-close', 'Close', { item: it.id }) : '') + '<span class="muted">(text below becomes the note)</span>';
     }
     h += '<div class="composer2">' + (it.hidden ? '<span class="muted">thread hidden; comments are flagged</span>' : '') +
-      (rt ? '<div class="replying">replying to ' + esc(rt.alias) + ' <b>' + esc(rt.author) + '</b>: ' + esc(String(rt.body).slice(0, 70)) + ' ' + btn('reply-x', 'x', {}) + '</div>' : '') +
+      (rt ? '<div class="replying">replying to ' + esc(alias(rt.id)) + ' <b>' + esc(rt.author) + '</b>: ' + esc(String(rt.body).slice(0, 70)) + ' ' + btn('reply-x', 'x', {}) + '</div>' : '') +
       (quick ? '<div class="quick">' + quick + '</div>' : '') +
-      '<div class="crow"><textarea id="cbox" rows="2" placeholder="Comment as ' + esc(nm(g, v)) + '..."></textarea><div class="ccol">' +
+      '<div class="crow"><textarea id="cbox" rows="2" placeholder="Comment as ' + esc(nm(v)) + '..."></textarea><div class="ccol">' +
       '<select id="corigin" title="origin"><option value="human">human</option><option value="agent">agent</option><option value="agent-auto">agent-auto</option></select>' +
       btn('comment', 'Post', { item: it.id }, 'primary') + '</div></div></div>';
     return h;
@@ -528,19 +665,20 @@
 
   // --------------------------------------------------------- dialog forms
 
-  function curr() { var st = stores[ui.store]; return { st: st, g: replay(st), v: viewerOf(ui.store) }; }
-  function optsHtml(list, empty, sel) {
+  function optsHtml(list, empty, cur) {
     if (!list.length) return '<option value="">(' + empty + ')</option>';
-    return list.map(function (x) { return '<option value="' + esc(x[0]) + '"' + (x[0] === sel ? ' selected' : '') + '>' + esc(x[1]) + '</option>'; }).join('');
+    return list.map(function (x) { return '<option value="' + esc(x[0]) + '"' + (String(x[0]) === String(cur) ? ' selected' : '') + '>' + esc(x[1]) + '</option>'; }).join('');
   }
-  function memberOpts(g, sel, filter) {
-    return optsHtml(Object.keys(g.members).filter(function (id) { return !filter || filter(g.members[id]); }).map(function (id) { return [id, g.members[id].name + ' (' + id + ')']; }), 'nobody', sel);
+  function memberOpts(cur, filter) {
+    return optsHtml(Object.keys(VS.members).filter(function (id) { return !filter || filter(VS.members[id]); }).map(function (id) { return [id, VS.members[id].name + ' (' + id + ')']; }), 'nobody', cur);
   }
-  function peopleHtml(g, v) {
-    var r = reach(g.members, v, 99);
-    var ids = Object.keys(r).sort(function (a, b) { return r[a] - r[b] || (a < b ? -1 : 1); });
-    return '<label><input type="checkbox" name="people" value="' + esc(v) + '" data-level="0"> myself</label>' + ids.map(function (id) {
-      return '<label><input type="checkbox" name="people" value="' + esc(id) + '" data-level="' + r[id] + '"> ' + esc(nm(g, id)) + ' <span class="muted">L' + r[id] + '</span></label>';
+  function reachTag(v, id) { return id === v ? 'self' : VS.viewer.reach[id] ? 'forced, L' + VS.viewer.reach[id] : 'pending'; }
+  // Anyone in the store: below me = forced (live at once); anyone else = pending until accepted.
+  function peopleHtml(v) {
+    var R = VS.viewer.reach, ids = Object.keys(VS.members).filter(function (id) { return id !== v && !VS.members[id].removed; });
+    ids.sort(function (a, b) { return (R[a] || 99) - (R[b] || 99) || (a < b ? -1 : 1); });
+    return '<label><input type="checkbox" name="people" value="' + esc(v) + '"> myself</label>' + ids.map(function (id) {
+      return '<label><input type="checkbox" name="people" value="' + esc(id) + '"> ' + esc(nm(id)) + ' <span class="muted">' + reachTag(v, id) + '</span></label>';
     }).join('');
   }
   function levelSel() { return '<select name="levels"><option>1</option><option>2</option><option>3</option></select>'; }
@@ -548,39 +686,49 @@
     return '<div class="opts"><label><input type="radio" name="completion" value="assignee" checked> assignee closes</label>' +
       '<label><input type="radio" name="completion" value="assigner"> assigner confirms</label></div>';
   }
+  function prioSel(cur) {
+    return '<select name="priority">' + VS.priority.names.map(function (x, i) { return '<option value="' + i + '"' + (i === cur ? ' selected' : '') + '>' + i + ' ' + esc(x) + '</option>'; }).join('') + '</select>';
+  }
   function originSel() { return '<select name="origin"><option value="human">human</option><option value="agent">agent (on request)</option><option value="agent-auto">agent-auto (unprompted)</option></select>'; }
   function fld(label, inner) { return '<div class="fld"><span>' + label + '</span>' + inner + '</div>'; }
-  var ROLE_TYPES = ['roles.add_member', 'roles.set_lead', 'roles.add_admin', 'roles.remove_admin', 'roles.add_key', 'roles.revoke_key', 'roles.remove_member'];
+  var ROLE_TYPES = ['roles.add_member', 'roles.set_lead', 'roles.add_admin', 'roles.remove_admin', 'roles.add_key', 'roles.revoke_key', 'roles.remove_member', 'roles.set_priority_levels'];
 
   function dialogHtml(kind, d) {
-    var c = curr(), g = c.g, v = c.v, it = d.item && g.items[d.item];
-    var mineOpen = Object.keys(g.asg).map(function (k) { return g.asg[k]; }).filter(function (r) { return r.to === v && !r.removed && r.status !== 'done'; })
-      .map(function (r) { return [r.item, alias(r.item) + ' ' + g.items[r.item].title]; });
+    var v = memberOf(viewerOf(ui.store)), it = d.item && VS.items[d.item];
+    var mineOpen = VS.my.assignments.map(A).filter(function (r) { return r.status !== 'done'; }).map(function (r) { return [r.item, alias(r.item) + ' ' + VS.items[r.item].title]; });
     var T;
     switch (kind) {
       case 'create':
-        T = ['New item', 'One commit in ' + nm(g, v) + '\'s ref: item.create, plus item.assign to yourself when checked.',
+        T = ['New item', 'One write to ' + esc(viewerOf(ui.store)) + '\'s journal: item.create, plus item.assign when someone is chosen. Someone below you is a forced assignment; anyone else gets a pending assignment (a request) they accept or decline.',
           fld('kind', '<select name="kind"><option>task</option><option>todo</option><option>topic</option></select>') +
           fld('title', '<input type="text" name="title" required>') + fld('body', '<textarea name="body" rows="3"></textarea>') +
           fld('project reference (free text, optional)', '<input type="text" name="project">') +
-          fld('request to (optional: anyone in the store; they accept or decline)', '<select name="request"><option value="">(not a request)</option>' + memberOpts(g, '', function (m) { return m.id !== v && !m.removed; }) + '</select>') +
-          '<label class="fld inline"><input type="checkbox" name="self" checked> assign to myself (ignored for topics and requests)</label>', 'Create'];
+          '<div class="fld inline">' + fld('due (optional)', '<input type="date" name="due">') + fld('priority', prioSel(VS.priority.default)) + '</div>' +
+          fld('assign to (ignored for topics)', '<select name="assignee"><option value="">(nobody)</option><option value="' + esc(v) + '" selected>myself</option>' +
+            Object.keys(VS.members).filter(function (id) { return id !== v && !VS.members[id].removed; }).map(function (id) { return '<option value="' + esc(id) + '">' + esc(nm(id)) + ' (' + reachTag(v, id) + ')</option>'; }).join('') + '</select>') +
+          fld('completion', complRadios()), 'Create'];
         break;
       case 'edit':
-        T = ['Edit ' + it.alias, 'item.edit by the creator; the thread keeps the old text.',
+        T = ['Edit ' + it.alias, 'item.edit by the creator only; the thread keeps the old text. Others comment instead.',
           fld('title', '<input type="text" name="title" value="' + esc(it.title) + '">') + fld('body', '<textarea name="body" rows="4">' + esc(it.body) + '</textarea>') +
-          fld('project', '<input type="text" name="project" value="' + esc(it.project) + '">'), 'Save'];
+          fld('project', '<input type="text" name="project" value="' + esc(it.project) + '">') +
+          '<div class="fld inline">' + fld('due', '<input type="date" name="due" value="' + esc(it.due || '') + '">') + fld('priority', prioSel(it.priority)) + '</div>', 'Save'];
         break;
       case 'assign':
-        T = ['Assign ' + it.alias, 'item.assign. Only the creator assigns; targets within N levels below you (or yourself). "Everyone" stays live: later followers inherit it.',
-          fld('who', '<div class="opts"><label><input type="radio" name="mode" value="all" checked> everyone within N levels</label><label><input type="radio" name="mode" value="chosen"> chosen people</label></div>') +
-          fld('N levels below me', levelSel()) + fld('completion', complRadios()) +
-          fld('chosen people', '<div class="people" id="people">' + peopleHtml(g, v) + '</div>') + '<div class="hint" id="hint"></div>', 'Assign'];
+        T = ['Assign ' + it.alias, 'item.assign by the creator. Chosen people below you are forced (live at once); anyone else gets a pending assignment. "Everyone within N" is forced-only and stays live: later followers inherit it.',
+          fld('who', '<div class="opts"><label><input type="radio" name="mode" value="chosen" checked> chosen people</label><label><input type="radio" name="mode" value="all"> everyone within N levels</label></div>') +
+          fld('N levels below me (everyone only)', levelSel()) + fld('completion', complRadios()) +
+          fld('chosen people', '<div class="people" id="people">' + peopleHtml(v) + '</div>') + '<div class="hint" id="hint"></div>', 'Assign'];
         break;
       case 'split':
-        T = ['Split ' + it.alias + ' into a subtask', 'One commit: item.create (parent ' + it.alias + ') plus item.assign. Delegating down always goes through a subtask under your name.',
-          fld('subtask title', '<input type="text" name="title" required>') + fld('N levels below me', levelSel()) + fld('completion', complRadios()) +
-          fld('assign to', '<div class="people" id="people">' + peopleHtml(g, v) + '</div>') + '<div class="hint" id="hint"></div>', 'Split'];
+        T = ['Split ' + it.alias + ' into a subtask', 'One write: item.create (parent ' + it.alias + ') plus item.assign. Delegating down goes through a subtask under your name.',
+          fld('subtask title', '<input type="text" name="title" required>') +
+          '<div class="fld inline">' + fld('due (optional)', '<input type="date" name="due" value="' + esc(it.due || '') + '">') + fld('priority', prioSel(it.priorityLevel)) + '</div>' +
+          fld('completion', complRadios()) + fld('assign to', '<div class="people" id="people">' + peopleHtml(v) + '</div>') + '<div class="hint" id="hint"></div>', 'Split'];
+        break;
+      case 'handoff':
+        T = ['Hand off ' + it.alias, 'item.handoff: a pending assignment to the new person. When they accept, your assignment ends and the assigner (' + esc(nm((VS.my.assignments.map(A).filter(function (r) { return r.item === it.id; })[0] || {}).by)) + ') is notified.',
+          fld('to', '<select name="to">' + memberOpts('', function (m) { return m.id !== v && !m.removed; }) + '</select>') + fld('note (optional)', '<input type="text" name="note">'), 'Hand off'];
         break;
       case 'status':
         T = ['Set status', 'item.status on your own assignment (done goes through Close).',
@@ -596,24 +744,26 @@
       case 'note': {
         var L = { 'item.reject': ['Reject ' + (d.who || '') + '\'s close', 'Back to doing; the note says why.'],
           'item.reopen': ['Reopen ' + (d.who || '') + '\'s assignment', 'A done assignment goes back to doing.'],
-          'request.decline': ['Decline request', 'Closes the request as declined. Questions belong in the thread as comments.'],
-          'request.return': ['Return accepted request', 'Only the recipient\'s direct lead may return it; it cancels the resulting assignment.'] }[d.op];
+          'item.decline': ['Decline the assignment', 'Ends the pending assignment as declined. Questions belong in the thread as comments.'],
+          'item.return': ['Return ' + (d.who || '') + '\'s accepted assignment', 'Only the assignee\'s direct lead returns an accepted assignment; it ends it. The assigner may send again.'] }[d.op];
         T = [L[0] + ' (' + it.alias + ')', d.op + ': ' + L[1], fld('note', '<input type="text" name="note">') + '<input type="hidden" name="op" value="' + esc(d.op) + '">' +
           '<input type="hidden" name="who" value="' + esc(d.who || '') + '">', 'Send'];
         break;
       }
       case 'cedit': {
-        var cm = g.comments[d.cid];
-        T = ['Edit comment ' + cm.alias, 'comment.edit; only its author edits it.', fld('text', '<textarea name="body" rows="4">' + esc(cm.body) + '</textarea>'), 'Save'];
+        var cm = VS.comments[d.cid];
+        T = ['Edit comment ' + alias(d.cid), 'comment.edit; only its author edits it.', fld('text', '<textarea name="body" rows="4">' + esc(cm.body) + '</textarea>'), 'Save'];
         break;
       }
       case 'admin':
-        T = ['Roles event', 'Admin-only. Appended to ' + nm(g, v) + '\'s own ref; replay applies it to the roles file in causal order.',
+        T = ['Roles event', 'Admin-only. Written to ' + esc(viewerOf(ui.store)) + '\'s own journal; replay applies it to the roles file in causal order.',
           fld('type', '<select name="rtype">' + ROLE_TYPES.map(function (t) { return '<option>' + t + '</option>'; }).join('') + '</select>') +
-          fld('member (existing)', '<select name="member">' + memberOpts(g, '') + '</select>') +
-          fld('lead (set_lead, add_member)', '<select name="lead"><option value="">(none: root)</option>' + memberOpts(g, v) + '</select>') +
+          fld('member (existing)', '<select name="member">' + memberOpts('') + '</select>') +
+          fld('lead (set_lead, add_member)', '<select name="lead"><option value="">(none: root)</option>' + memberOpts(v) + '</select>') +
           fld('key (add_key, revoke_key, add_member)', '<input type="text" name="key" placeholder="e.g. jon-k3">') +
-          fld('new member id and name (add_member)', '<div class="fld inline"><input type="text" name="nid" placeholder="id"><input type="text" name="nname" placeholder="name"></div>'), 'Append'];
+          fld('new member id and name (add_member)', '<div class="fld inline"><input type="text" name="nid" placeholder="id"><input type="text" name="nname" placeholder="name"></div>') +
+          fld('priority level names, lowest first (set_priority_levels)', '<input type="text" name="pnames" value="' + esc(VS.priority.names.join(', ')) + '">') +
+          fld('default level (set_priority_levels)', '<input type="number" name="pdefault" min="0" value="' + VS.priority.default + '">'), 'Append'];
         break;
     }
     return '<form' + attr('kind', kind) + attr('fitem', d.item || '') + attr('fcid', d.cid || '') + '><h2>' + T[0] + '</h2><p>' + T[1] + '</p>' + T[2] +
@@ -623,22 +773,21 @@
   function updateHint(form) {
     var hint = form.querySelector('#hint'), people = form.querySelector('#people');
     if (!hint) return;
-    var c = curr(), g = c.g, v = c.v, kind = form.getAttribute('data-kind');
-    var n = Number(form.elements.levels.value), mode = kind === 'split' ? 'chosen' : form.elements.mode.value;
-    var r = reach(g.members, v, n), msg, warn = false;
+    var v = memberOf(viewerOf(ui.store)), kind = form.getAttribute('data-kind');
+    var mode = kind === 'split' ? 'chosen' : form.elements.mode.value, msg, warn = false;
     var chosen = Array.prototype.map.call(form.querySelectorAll('input[name="people"]:checked'), function (e) { return e.value; });
     Array.prototype.forEach.call(form.querySelectorAll('input[name="people"]'), function (e) { e.disabled = mode === 'all'; });
     people.classList.toggle('off', mode === 'all');
     if (mode === 'all') {
-      var ids = Object.keys(r);
-      msg = ids.length ? 'Assigns to ' + ids.length + ' people within L' + n + ' now, and to whoever joins that range later.' : 'Nobody is within L' + n + ' below you; the event will be flagged.';
+      var n = Number(form.elements.levels.value), ids = Object.keys(VS.viewer.reach).filter(function (id) { return VS.viewer.reach[id] <= n; });
+      msg = ids.length ? 'Forced on ' + ids.length + ' people within L' + n + ' now, and on whoever joins that range later.' : 'Nobody is within L' + n + ' below you; the event will be flagged.';
       warn = !ids.length;
     } else if (!chosen.length) {
       msg = 'Choose at least one person; an empty selection is flagged.'; warn = true;
     } else {
-      var beyond = chosen.filter(function (x) { return x !== v && !(x in r); });
-      msg = 'Assigns to ' + chosen.map(function (i) { return i === v ? 'yourself' : nm(g, i); }).join(', ') + '.';
-      if (beyond.length) { msg += ' ' + beyond.join(', ') + ' is beyond L' + n + '; the event will be flagged.'; warn = true; }
+      var forced = chosen.filter(function (x) { return x === v || VS.viewer.reach[x]; }), pend = chosen.filter(function (x) { return forced.indexOf(x) < 0; });
+      msg = (forced.length ? 'Forced (live now): ' + forced.map(function (i) { return i === v ? 'yourself' : nm(i); }).join(', ') + '. ' : '') +
+        (pend.length ? 'Pending until accepted: ' + pend.map(nm).join(', ') + ' (not below you).' : '');
     }
     hint.textContent = msg; hint.classList.toggle('warn', warn);
   }
@@ -663,56 +812,46 @@
     clearTimeout(toastTimer);
     toastTimer = setTimeout(function () { t.hidden = true; }, 6000);
   }
+  function tick(name, minutes) {
+    ui.clock[name] = new Date(Date.parse(ui.clock[name]) + minutes * 60000).toISOString().slice(0, 19) + 'Z';
+  }
 
   function applyRaw() {
     var st = stores[ui.store], ta = $('raw-roles');
     if (!ta) return true;
-    var roles, commits = {}, late;
-    try { roles = JSON.parse(ta.value); } catch (e) { toast('JSON error in roles file: ' + esc(e.message)); return false; }
-    if (!roles || !Array.isArray(roles.members)) { toast('roles file needs a "members" list'); return false; }
+    var raw = { roles: null, remote: {}, clones: null };
+    try { raw.roles = JSON.parse(ta.value); } catch (e) { toast('JSON error in roles file: ' + esc(e.message)); return false; }
     var tas = document.querySelectorAll('textarea[data-owner]');
     for (var i = 0; i < tas.length; i++) {
       var o = tas[i].getAttribute('data-owner'), a;
-      try { a = JSON.parse(tas[i].value); } catch (e2) { toast('JSON error in ref of ' + esc(o) + ': ' + esc(e2.message)); return false; }
-      if (!Array.isArray(a)) { toast('ref of ' + esc(o) + ' must be a JSON list'); return false; }
-      commits[o] = a;
+      try { a = JSON.parse(tas[i].value); } catch (e2) { toast('JSON error in ' + esc(o) + ': ' + esc(e2.message)); return false; }
+      if (!Array.isArray(a)) { toast(esc(o) + ' must be a JSON list'); return false; }
+      raw.remote[o] = a;
     }
-    try { late = JSON.parse($('raw-late').value); } catch (e3) { toast('JSON error in upstream commits: ' + esc(e3.message)); return false; }
-    st.roles = roles; st.commits = commits; st.late = late || {};
+    try { raw.clones = JSON.parse($('raw-clones').value); } catch (e3) { toast('JSON error in clone state: ' + esc(e3.message)); return false; }
+    try { st.setRaw(raw); } catch (e4) { toast(esc(e4.message)); return false; }
     return true;
   }
 
-  // One write = one commit in the viewer's ref holding one or more events. Events
-  // are not pre-validated, so a form can deliberately produce a flagged event.
+  // One write: events go to the viewer clone's journal (open batch). Events are not
+  // pre-validated, so a form can deliberately produce a flagged event.
   function commit(events) {
-    var st = stores[ui.store], g = replay(st), v = viewerOf(ui.store);
-    var ref = (st.commits[v] = st.commits[v] || []), seq = g.heads[v] || 0, seen = {};
-    Object.keys(g.heads).sort().forEach(function (m) { if (m !== v) seen[m] = g.heads[m]; });
-    var m = g.members[v];
-    var c = { author: v, ts: nowTs(st), signer: m && m.keys[0] || (m && Object.keys(m.revoked)[0]) || 'unsigned', seen: seen, events: [] };
-    events.forEach(function (e) {
-      var ev = { seq: ++seq, type: e[0] };
-      if (e[2] && e[2] !== 'human') ev.origin = e[2];
-      ev.payload = e[1];
-      c.events.push(ev);
-    });
-    var s = ui.sync[ui.store];
-    if (!st.def.sync.remote || !s.online) c._local = true;
-    ref.push(c);
-    var g2 = replay(st);
-    ui.last = c.events.map(function (e) { return g2.byId[v + '#' + e.seq]; });
+    var name = ui.store, s = viewerOf(name), ts = ui.clock[name];
+    var res = stores[name].dispatch(s, events.map(function (e) { return { type: e[0], payload: e[1], origin: e[2] || 'human' }; }), ts);
+    tick(name, 1);
+    ui.last = res;
     closeDialog();
     render();
-    toast(ui.last.map(function (n) {
+    toast(res.map(function (n) {
       return esc(n.alias) + ' ' + esc(n.type) + ': ' + (n.status === 'applied' ? 'applied' : '<span class="tf">' + esc(n.status.toUpperCase()) + '</span> ' + esc(n.reason));
-    }).join('<br>') + (c._local ? '<br><span class="muted">held locally (not pushed)</span>' : ''));
-    return ui.last;
+    }).join('<br>') + '<br><span class="muted">in the open batch; pushed at Sync, panel collapse, or viewer switch</span>');
+    return res;
   }
-  function nextId() { var v = viewerOf(ui.store); return v + '#' + ((replay(stores[ui.store]).heads[v] || 0) + 1); }
+  function nextId() { return stores[ui.store].nextEventId(viewerOf(ui.store)); }
 
   function submit(form) {
     if (!applyRaw()) return;
-    var kind = form.getAttribute('data-kind'), item = form.getAttribute('data-fitem'), el = form.elements, v = viewerOf(ui.store);
+    var kind = form.getAttribute('data-kind'), item = form.getAttribute('data-fitem'), el = form.elements, v = memberOf(viewerOf(ui.store));
     function val(n) { return el[n] ? el[n].value : ''; }
     function people() { return Array.prototype.map.call(form.querySelectorAll('input[name="people"]:checked'), function (e) { return e.value; }); }
     var evs = [], open = null;
@@ -721,29 +860,40 @@
         var pl = { kind: val('kind'), title: val('title') };
         if (val('body')) pl.body = val('body');
         if (val('project')) pl.project = val('project');
-        if (val('request')) pl.request = val('request');
+        if (pl.kind !== 'topic') { if (val('due')) pl.due = val('due'); pl.priority = Number(val('priority')); }
         open = nextId();
         evs.push(['item.create', pl]);
-        if (el.self.checked && pl.kind !== 'topic' && !pl.request) evs.push(['item.assign', { item: open, mode: 'chosen', people: [v], completion: 'assignee' }]);
+        if (val('assignee') && pl.kind !== 'topic') evs.push(['item.assign', { item: open, mode: 'chosen', people: [val('assignee')], completion: val('completion') }]);
         break;
       }
       case 'edit': {
-        var it = curr().g.items[item], ep = { item: item };
+        var it = VS.items[item], ep = { item: item };
         ['title', 'body', 'project'].forEach(function (f) { if (val(f) !== it[f]) ep[f] = val(f); });
+        if ((val('due') || null) !== it.due) ep.due = val('due') || null;
+        if (Number(val('priority')) !== it.priority) ep.priority = Number(val('priority'));
         evs.push(['item.edit', ep]);
         break;
       }
       case 'assign': {
-        var ap = { item: item, mode: val('mode'), levels: Number(val('levels')), completion: val('completion') };
-        if (ap.mode === 'chosen') ap.people = people();
+        var ap = { item: item, mode: val('mode'), completion: val('completion') };
+        if (ap.mode === 'chosen') ap.people = people(); else ap.levels = Number(val('levels'));
         evs.push(['item.assign', ap]);
         break;
       }
-      case 'split':
+      case 'split': {
         open = nextId();
-        evs.push(['item.create', { kind: 'task', title: val('title'), parent: item }]);
-        evs.push(['item.assign', { item: open, mode: 'chosen', levels: Number(val('levels')), people: people(), completion: val('completion') }]);
+        var sp0 = { kind: 'task', title: val('title'), parent: item, priority: Number(val('priority')) };
+        if (val('due')) sp0.due = val('due');
+        evs.push(['item.create', sp0]);
+        evs.push(['item.assign', { item: open, mode: 'chosen', people: people(), completion: val('completion') }]);
         break;
+      }
+      case 'handoff': {
+        var hp = { item: item, to: val('to') };
+        if (val('note')) hp.note = val('note');
+        evs.push(['item.handoff', hp]);
+        break;
+      }
       case 'status': {
         if (!val('target')) return toast('Nothing to set.');
         var sp = { item: val('target'), status: val('status') };
@@ -760,7 +910,7 @@
       }
       case 'note': {
         var np = { item: item };
-        if (val('who')) np.assignee = val('who');
+        if (val('who') && val('op') !== 'item.decline') np.assignee = val('who');
         if (val('note')) np.note = val('note');
         evs.push([val('op'), np]);
         break;
@@ -771,6 +921,7 @@
       case 'admin': {
         var t = val('rtype'), rp = {};
         if (t === 'roles.add_member') rp.member = { id: val('nid'), name: val('nname') || val('nid'), keys: val('key') ? [val('key')] : [], leads: val('lead') ? [val('lead')] : [] };
+        else if (t === 'roles.set_priority_levels') { rp.names = val('pnames').split(',').map(function (x) { return x.trim(); }).filter(Boolean); rp.default = Number(val('pdefault')); }
         else {
           rp.member = val('member');
           if (t === 'roles.set_lead') rp.leads = val('lead') ? [val('lead')] : [];
@@ -799,7 +950,7 @@
       case 'q-close': commit([['item.close', note ? { item: item, note: note } : { item: item }, origin]]); break;
       case 'confirm': commit([['item.confirm', { item: item, assignee: who }]]); break;
       case 'unassign': commit([['item.unassign', { item: item, assignee: who }]]); break;
-      case 'req-accept': commit([['request.accept', { item: item }]]); break;
+      case 'accept': commit([['item.accept', { item: item }]]); break;
       case 'ihide': commit([['item.hide', { item: item }]]); break;
       case 'chide': commit([['comment.hide', { comment: cid }]]); break;
       case 'comment': {
@@ -813,6 +964,40 @@
     }
   }
 
+  // Kanban drop: only the viewer's own live assignment moves.
+  function dropOn(item, col) {
+    var v = memberOf(viewerOf(ui.store)), r = VS.items[item] && VS.items[item].assignments.map(A).filter(function (x) { return x.to === v && x.state === 'live'; })[0];
+    if (!r) return toast('Only your own assignment moves on the board.');
+    if (col === r.status) return;
+    if (col === 'todo' || col === 'doing' || col === 'blocked') return commit([['item.status', { item: item, status: col }]]);
+    if (col === 'done') return commit([['item.close', { item: item }]]);
+    toast('"' + esc(ST_LABEL[col] || col) + '" is not a status you set (todo, doing, blocked; done closes).');
+  }
+
+  // --------------------------------------------------------------- sync actions
+
+  function syncNow(name, quiet) {
+    var r = stores[name].sync(viewerOf(name), ui.clock[name]);
+    if (!quiet) {
+      if (r.noRemote) toast('No remote: the open batch is closed into a local commit; writes stay local, exactly like a long offline.');
+      else if (r.offline) toast('Offline: the open batch is closed into a local commit; the sync is retried when you come back online (not an error).');
+      else toast('Synced: pushed ' + r.pushed + ', fetched ' + r.fetched + ' commit' + (r.fetched === 1 ? '' : 's') + (r.fetched ? '. Late arrivals are checked against what their authors had seen; no earlier verdict changes.' : '.'));
+    }
+    return r;
+  }
+  function fetchNow(name) { return stores[name].fetch(viewerOf(name), ui.clock[name]); }
+  // Switching viewer = the previous clone collapses its panel (push, 241) and the
+  // new one opens the drawer (immediate check: fetch). Offline clones do neither.
+  function switchViewer(stream) {
+    var name = ui.store, prev = viewerOf(name);
+    if (prev && prev !== stream) stores[name].sync(prev, ui.clock[name]);
+    ui.viewers[name] = stream; ui.last = null;
+    if (ui.open) fetchNow(name);
+    vss[name] = stores[name].view(stream, ui.clock[name]);
+    if (ui.open) markSeen(name);
+    render();
+  }
+
   // ------------------------------------------------------------------ render
 
   function measure() {
@@ -824,40 +1009,43 @@
 
   function renderHandles() {
     order.forEach(function (name) {
-      var b = $('handle-' + name), n = newKeys(name).length, badge = b.querySelector('.dr-badge'), s = ui.sync[name], st = stores[name];
+      var b = $('handle-' + name), n = newKeys(name).length, badge = b.querySelector('.dr-badge'), vs = vss[name];
       b.className = 'dr-handle' + (ui.store === name ? ' on' : '') + (ui.open === name ? ' open' : '');
       b.setAttribute('aria-expanded', String(ui.open === name));
       badge.hidden = !n; badge.textContent = n;
-      b.querySelector('.hoff').hidden = !!(st.def.sync.remote && s.online);
-      b.title = st.def.label + (n ? ': ' + n + ' new (assignments or requests)' : '') + (st.def.sync.remote ? (s.online ? '' : ' - offline') : ' - no remote');
+      b.querySelector('.hoff').hidden = !!(vs.store.remote && vs.sync.online);
+      b.title = vs.store.label + (n ? ': ' + n + ' new (assignments, pending assignments, notices)' : '') + (vs.store.remote ? (vs.sync.online ? '' : ' - offline') : ' - no remote');
     });
   }
 
   function render() {
-    order.forEach(function (n) {
-      gs[n] = replay(stores[n]);
-      if (!gs[n].members[ui.viewers[n]]) ui.viewers[n] = Object.keys(gs[n].members)[0];
-    });
-    var st = stores[ui.store], g = gs[ui.store], v = viewerOf(ui.store);
-    if (ui.item && !g.items[ui.item]) { ui.item = null; ui.sheet = false; }
+    order.forEach(function (n) { vss[n] = stores[n].view(ui.viewers[n], ui.clock[n]); });
+    var name = ui.store, s = viewerOf(name), v = memberOf(s);
+    VS = vss[name]; EV = {};
+    VS.events.forEach(function (e) { EV[e.id] = e; });
+    if (ui.item && !VS.items[ui.item]) { ui.item = null; ui.sheet = false; }
 
-    $('viewer').innerHTML = Object.keys(g.members).map(function (k) {
-      var m = g.members[k], r = reach(g.members, k, 3), role = (m.leads || []).length ? (Object.keys(r).length ? 'lead' : 'member') : 'root';
-      return '<option value="' + esc(k) + '"' + (k === v ? ' selected' : '') + '>' + esc(m.name + ' (' + k + ', ' + role + ')') + '</option>';
+    $('viewer').innerHTML = Object.keys(VS.members).map(function (k) {
+      var m = VS.members[k];
+      return '<option value="' + esc(k) + '"' + (k === v ? ' selected' : '') + '>' + esc(m.name + ' (' + k + ', ' + (m.removed ? 'removed' : m.role) + ')') + '</option>';
     }).join('');
-    $('vstore').textContent = ui.store;
+    $('vclone').innerHTML = (VS.clones[v] || []).map(function (c) {
+      return '<option value="' + esc(c.stream) + '"' + (c.stream === s ? ' selected' : '') + '>' + esc(E.cloneOf(c.stream)) + (c.online ? '' : ' (offline)') + (c.unpushed ? ' *' : '') + '</option>';
+    }).join('');
+    $('vstore').textContent = name;
+    $('vclock').textContent = fmtTs(ui.clock[name]);
     renderHandles();
     $('drawer').classList.toggle('open', !!ui.open);
 
     var body = $('drbody'), sb = $('sheet').firstElementChild, top1 = body.scrollTop, top2 = sb.scrollTop;
     var draft = $('cbox') ? $('cbox').value : '';
-    body.innerHTML = drawerHtml(st, g, v);
+    body.innerHTML = drawerHtml(name, v);
     body.scrollTop = top1;
     var open = ui.sheet && ui.item;
     $('sheet').classList.toggle('open', !!open);
     $('sheet').setAttribute('aria-hidden', String(!open));
     if (open) {
-      sb.innerHTML = sheetHtml(g, v, g.items[ui.item]);
+      sb.innerHTML = sheetHtml(v, VS.items[ui.item]);
       if (!ui.itemChanged && !ui.clearDraft && $('cbox')) $('cbox').value = draft;
       sb.scrollTop = ui.itemChanged ? 0 : top2;
     }
@@ -866,25 +1054,28 @@
   }
 
   function resetStore(name) {
-    var d = stores[name].def;
-    stores[name].roles = clone(d.roles); stores[name].commits = clone(d.commits); stores[name].late = clone(d.late || {});
-    ui.sync[name] = { online: true, lastSynced: d.sync && d.sync.syncedAt };
+    var d = defs[name];
+    stores[name].reset();
+    ui.clock[name] = d.now || new Date().toISOString().slice(0, 19) + 'Z';
   }
 
   function openStore(name) {
-    if (ui.open === name) { ui.open = null; render(); return; }
+    if (ui.open === name) { ui.open = null; syncNow(name, true); render(); return; } // panel collapse pushes (241)
     if (ui.store !== name) { ui.item = null; ui.sheet = false; ui.last = null; ui.itemChanged = true; $('drbody').scrollTop = 0; }
     ui.store = name; ui.open = name;
+    fetchNow(name); // immediate check when the drawer opens
+    vss[name] = stores[name].view(viewerOf(name), ui.clock[name]);
     markSeen(name);
     render();
   }
   function showItem(id) { ui.item = id; ui.sheet = true; ui.itemChanged = true; ui.replyTo = null; render(); }
 
-  var QUICK = { 'q-status': 1, 'q-close': 1, confirm: 1, unassign: 1, 'req-accept': 1, ihide: 1, chide: 1, comment: 1 };
+  var QUICK = { 'q-status': 1, 'q-close': 1, confirm: 1, unassign: 1, accept: 1, ihide: 1, chide: 1, comment: 1 };
 
   function init() {
-    window.TRACKER_FIXTURES.stores.forEach(function (s) {
-      stores[s.name] = { def: s }; order.push(s.name); resetStore(s.name); ui.viewers[s.name] = s.defaultViewer;
+    window.TRACKER_FIXTURES.stores.forEach(function (d) {
+      defs[d.name] = d;
+      stores[d.name] = E.openStore(d); order.push(d.name); ui.viewers[d.name] = d.defaultViewer; resetStore(d.name);
     });
     ui.store = order[0];
 
@@ -910,9 +1101,12 @@
         else if (k === 'sheet-close') { ui.sheet = false; render(); }
         else if (k === 'dlg-cancel') closeDialog();
         else if (k === 'open') showItem(d.item);
-        else if (k === 'sync') doSync(ui.store);
-        else if (k === 'go-offline') { ui.sync[ui.store].online = false; render(); toast('Offline: new writes are held locally and counted as not pushed.'); }
-        else if (k === 'go-online') { ui.sync[ui.store].online = true; doSync(ui.store); }
+        else if (k === 'mode') { ui.mode = a.getAttribute('data-mode'); render(); }
+        else if (k === 'cal') { ui.calMonth = a.getAttribute('data-month'); render(); }
+        else if (k === 'clock') { tick(ui.store, Number(a.getAttribute('data-min'))); render(); }
+        else if (k === 'sync') { syncNow(ui.store); render(); }
+        else if (k === 'go-offline') { stores[ui.store].setOnline(viewerOf(ui.store), false); render(); toast('This clone is offline: new writes stay in its journal, and it fetches nothing.'); }
+        else if (k === 'go-online') { stores[ui.store].setOnline(viewerOf(ui.store), true); syncNow(ui.store); render(); }
         else if (k === 'reply') { ui.replyTo = d.cid; render(); if ($('cbox')) $('cbox').focus(); }
         else if (k === 'reply-x') { ui.replyTo = null; render(); }
         else if (QUICK[k]) { if (k === 'comment' || a.getAttribute('data-note')) ui.clearDraft = true; quick(k, a); }
@@ -929,15 +1123,30 @@
     });
     document.addEventListener('change', function (e) {
       var t = e.target;
-      if (t.id === 'viewer') {
-        ui.viewers[ui.store] = t.value; ui.last = null;
-        if (ui.open) markSeen(ui.store);
-        render();
-      } else if (t.id === 'f-kind') { ui.kind = t.value; render(); }
+      if (t.id === 'viewer') switchViewer(stores[ui.store].clonesOf(t.value)[0]);
+      else if (t.id === 'vclone') switchViewer(t.value);
+      else if (t.id === 'f-kind') { ui.kind = t.value; render(); }
       else if (t.id === 'f-status') { ui.status = t.value; render(); }
-      else if (t.id === 'flagged-only') { ui.flaggedOnly = t.checked; render(); }
-      else if (t.id === 'conc-only') { ui.concOnly = t.checked; render(); }
+      else if (t.id === 'k-scope') { ui.kscope = t.value; render(); }
+      else if (t.id === 'a-family') { ui.act.family = t.value; render(); }
+      else if (t.id === 'a-member') { ui.act.member = t.value; render(); }
+      else if (t.id === 'flagged-only') { ui.act.flagged = t.checked; render(); }
+      else if (t.id === 'conc-only') { ui.act.conc = t.checked; render(); }
       else if (t.closest && t.closest('#dlg form')) updateHint(t.closest('form'));
+    });
+    document.addEventListener('dragstart', function (e) {
+      var c = e.target.closest && e.target.closest('[data-drag]');
+      if (!c) return;
+      e.dataTransfer.setData('text/plain', c.getAttribute('data-drag'));
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    document.addEventListener('dragover', function (e) { if (e.target.closest && e.target.closest('[data-kcol]')) e.preventDefault(); });
+    document.addEventListener('drop', function (e) {
+      var col = e.target.closest && e.target.closest('[data-kcol]');
+      if (!col) return;
+      e.preventDefault();
+      var item = e.dataTransfer.getData('text/plain');
+      if (item) dropOn(item, col.getAttribute('data-kcol'));
     });
     document.addEventListener('toggle', function (e) {
       var t = e.target;
@@ -947,7 +1156,7 @@
     }, true);
     document.addEventListener('keydown', function (e) {
       if (e.key !== 'Escape' || $('dlg').open) return;
-      if (ui.sheet) { ui.sheet = false; render(); } else if (ui.open) { ui.open = null; render(); }
+      if (ui.sheet) { ui.sheet = false; render(); } else if (ui.open) { var n = ui.open; ui.open = null; syncNow(n, true); render(); }
     });
     window.addEventListener('resize', measure);
     render();
@@ -956,5 +1165,5 @@
   window.addEventListener('error', function (e) { var t = $('toast'); if (t) { t.hidden = false; t.textContent = 'script error: ' + e.message; } });
   init();
   // read-only hook for scripted checks (headless verification); not part of the model
-  window.__tracker = { ui: ui, stores: stores, g: function () { return gs[ui.store]; } };
+  window.__tracker = { ui: ui, vs: function () { return VS; } };
 })();
