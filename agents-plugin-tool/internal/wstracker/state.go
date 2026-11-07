@@ -186,7 +186,7 @@ func parseGenesis(raw json.RawMessage) *genesis {
 	if p, ok := g.raw["priority"].(map[string]any); ok {
 		g.prio = normPriority(obj(p))
 	}
-	seen := map[string]bool{}
+	seen, used := map[string]bool{}, map[string]bool{}
 	ml, _ := g.raw.list("members")
 	for _, x := range ml {
 		mo, ok := x.(map[string]any)
@@ -205,6 +205,14 @@ func parseGenesis(raw json.RawMessage) *genesis {
 			mem.name = id
 		}
 		for _, k := range m.strList("keys") {
+			// As in the protocol, an SSH key an earlier member holds is not held again.
+			if norm, fp, err := wsledger.KeyFingerprint(k); err == nil {
+				if !used[fp] {
+					used[fp] = true
+					mem.keys = append(mem.keys, memberKey{norm, fp})
+				}
+				continue
+			}
 			mem.keys = append(mem.keys, keyOf(k))
 		}
 		mem.leads = m.strList("leads")

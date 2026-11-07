@@ -101,13 +101,24 @@ type replayed struct {
 
 	rolesPos, assignPos   []int
 	threadPos, commentPos map[string][]int
+	rolesOnly             bool // judge and fold only roles and identity events
 }
 
 // replay validates and folds the events one clone holds. conc is the
 // source's Concurrent.
 func replay(events []wsledger.Event, genesisRaw json.RawMessage, conc func(a, b wsledger.EventID) bool) *replayed {
+	return replayWith(events, genesisRaw, conc, false)
+}
+
+// replayRoles is replay folding only the org: members, admins, and leads.
+// Every event still takes its place in the fold order.
+func replayRoles(events []wsledger.Event, genesisRaw json.RawMessage, conc func(a, b wsledger.EventID) bool) *replayed {
+	return replayWith(events, genesisRaw, conc, true)
+}
+
+func replayWith(events []wsledger.Event, genesisRaw json.RawMessage, conc func(a, b wsledger.EventID) bool, rolesOnly bool) *replayed {
 	r := &replayed{g: parseGenesis(genesisRaw), byID: map[string]*node{}, heads: map[string]int{},
-		threadPos: map[string][]int{}, commentPos: map[string][]int{}}
+		threadPos: map[string][]int{}, commentPos: map[string][]int{}, rolesOnly: rolesOnly}
 	r.hb = func(x, y *node) bool {
 		if y.synthetic {
 			return !x.synthetic || x.pos < y.pos
@@ -223,7 +234,7 @@ func (r *replayed) linearize(all []*node, streams map[string]map[int]*node) {
 	}
 	for _, n := range r.order {
 		switch {
-		case strings.HasPrefix(n.typ, "roles.") || n.typ == wsledger.TypeMemberJoin:
+		case isRoles(n.typ):
 			r.rolesPos = append(r.rolesPos, n.pos)
 		case n.typ == TypeItemAssign:
 			r.assignPos = append(r.assignPos, n.pos)
@@ -246,6 +257,10 @@ func (r *replayed) linearize(all []*node, streams map[string]map[int]*node) {
 // folded from its causal past.
 func (r *replayed) verdicts(all []*node) {
 	for _, n := range r.order {
+		if r.rolesOnly && !isRoles(n.typ) {
+			n.status = "skipped"
+			continue
+		}
 		switch n.ev.Verdict {
 		case wsledger.Valid:
 			n.status = "applied"
@@ -333,6 +348,12 @@ func (r *replayed) stateBefore(n *node) *state {
 		}
 	}
 	return S
+}
+
+// isRoles reports a roles.* or member.join event: the events the org (and
+// every rule reading it) folds from.
+func isRoles(t string) bool {
+	return strings.HasPrefix(t, "roles.") || t == wsledger.TypeMemberJoin
 }
 
 // threads assigns each event its thread: the item it names, and for a child

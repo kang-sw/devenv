@@ -34,4 +34,11 @@
 // events, the threads the event names, the comments it names, and every
 // item.assign (which re-applies live "everyone within N" rules everywhere).
 // That equals folding the whole causal past, at a fraction of the cost.
+//
+// # Writing
+//
+// Tracker caches one clone's events, refreshes them through the Events
+// cursor, and writes through Dispatch, which refuses an event that would be
+// flagged instead of appending it. Open opens a wsledger store with Veto,
+// the protocol hook that flags removing a member who still leads someone.
 package wstracker
