@@ -184,7 +184,7 @@ Whiteboard: <full> - (102), (103)
 When the host's instructions give an embed syntax, emit the host's embed line
 for the returned `embed:` in place of the `Whiteboard:` line.
 
-**Never repeat in the terminal or chat what the update wrote on the board; the turn's terminal output is only that pointer (or embed) line plus any fixed-format lines a playbook mandates.**
+**Never repeat in the terminal or chat what the update wrote on the board: items and topic bodies stay on the board, and the terminal or chat carries only progress, explanations, that pointer (or embed) line, and any fixed-format lines a playbook mandates.**
 
 ## Host embed folder
 

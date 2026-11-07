@@ -1026,7 +1026,11 @@ func TestWhiteboardWorkflowTextFollowsKnob(t *testing.T) {
 	manualOn := read("lead-workflow-manual")
 	for _, want := range []string{
 		"### Whiteboard",
-		"The whiteboard is your primary channel to the user.",
+		"The whiteboard is your primary channel for what you ask the user.",
+		// Explanations moved to chat with the Now slot; the mandate and the
+		// playbook's each-turn rule must agree on it.
+		"Progress and explanations stay in the terminal or chat, which never repeats what the board holds.",
+		"the terminal or chat carries only progress, explanations, that pointer (or embed) line,",
 		"#### Commands",
 		"`commands` is one string of flat commands.",
 		"write `{{12}}` in an item field",
@@ -1038,8 +1042,8 @@ func TestWhiteboardWorkflowTextFollowsKnob(t *testing.T) {
 			t.Fatalf("knob on: manual missing %q", want)
 		}
 	}
-	for _, gone := range []string{"#### Payload", "whiteboard.update payload:", "now_path", "now_file"} {
-		if strings.Contains(manualOn, gone) {
+	for _, gone := range []string{"#### Payload", "whiteboard.update payload:", "now_path", "now_file", "every explanation goes on the whiteboard", "the turn's terminal output is only"} {
+		if strings.Contains(collapseSpace(manualOn), gone) {
 			t.Fatalf("knob on: manual still carries the retired %q", gone)
 		}
 	}

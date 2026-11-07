@@ -39,13 +39,14 @@ const (
 		"  answer to the store through `wb:answer` as well as to the ticket."
 
 	whiteboardManualMandate = "### Whiteboard\n\n" +
-		"The whiteboard is your primary channel to the user. Every item you ask of\n" +
-		"the user (discussion items and Open Decision Queue items) and every\n" +
-		"explanation goes on the whiteboard through `{{ns}}/whiteboard.update`,\n" +
-		"replacing terminal text; the terminal or chat carries only the pointer line,\n" +
-		"or the embed line when the host's instructions give an embed syntax.\n\n" +
+		"The whiteboard is your primary channel for what you ask the user. Every item\n" +
+		"you ask of the user (discussion items and Open Decision Queue items) goes on\n" +
+		"the whiteboard through `{{ns}}/whiteboard.update`, and context that outlasts\n" +
+		"a reply goes in its topic's body. Progress and explanations stay in the\n" +
+		"terminal or chat, which never repeats what the board holds.\n\n" +
 		"- Each turn: one `{{ns}}/whiteboard.update` with the turn's changes, then the\n" +
-		"  pointer or embed line.\n" +
+		"  pointer line, or the embed line when the host's instructions give an embed\n" +
+		"  syntax.\n" +
 		"- The user answers by ID in the terminal or chat, typed or pasted from the\n" +
 		"  page's copy-answers button.\n" +
 		"- Asks a skill or the project reserves for the user (the next-step handoff\n" +
