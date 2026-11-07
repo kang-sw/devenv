@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
 
 // LAN access. With LAN mode off the daemon binds loopback only and every
@@ -77,7 +79,7 @@ func (d *Daemon) lanToken() (string, error) {
 // lanGuard is LAN mode's access guard (see the file comment).
 func (d *Daemon) lanGuard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if localViewer(r) {
+		if localViewer(r) || publicAsset(r) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -106,6 +108,17 @@ func (d *Daemon) lanGuard(next http.Handler) http.Handler {
 		w.Header().Set("Cache-Control", "no-store")
 		http.Error(w, "this dashboard needs its LAN access token: on the machine it runs on, open its index page at http://localhost:"+strconv.Itoa(d.endpoint.Port)+"/ for the address that carries the token", http.StatusUnauthorized)
 	})
+}
+
+// publicAsset reports a read of the shared mermaid script, the one route
+// LAN mode serves without the token. A board's Now renders in a sandboxed
+// frame whose opaque origin sends no cookie (wswhiteboard framedNow), and a
+// mermaid block there loads this script itself. The script is the vendored
+// library under a content-hash name, so serving it reveals nothing about any
+// session.
+func publicAsset(r *http.Request) bool {
+	name, _ := wswhiteboard.MermaidAsset()
+	return (r.Method == http.MethodGet || r.Method == http.MethodHead) && r.URL.Path == "/s/"+name
 }
 
 func tokenMatches(got, token string) bool {

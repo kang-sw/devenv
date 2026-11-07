@@ -48,7 +48,7 @@
     target[edge] = nearest;
     p.hidden = !list.length;
     if (!list.length) return;
-    p.textContent = (edge === "top" ? "↑" : "↓") + " 열린 질문 " + list.length;
+    p.textContent = (edge === "top" ? "↑ " : "↓ ") + list.length + " open";
     p.title = edge === "top" ? "scroll to the nearest open item above" : "scroll to the nearest open item below";
   }
   function update() {

@@ -282,8 +282,13 @@ func TestNowRendersMarkdownWithInlineHTML(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !regions.Mermaid || !strings.Contains(string(regions.Board), "<h1>Plan</h1>") || !strings.Contains(string(regions.Board), sampleNow) {
-		t.Errorf("served board regions render Now differently: mermaid=%v\n%s", regions.Mermaid, regions.Board)
+	// The served board renders the same Now inside its frame, which loads
+	// mermaid itself, so the host page need not.
+	doc := frameDoc(t, string(regions.Board))
+	mermaid, _ := MermaidAsset()
+	wantAll(t, doc, "<h1>Plan</h1>", sampleNow, `<pre class="mermaid">`, `<script src="`+mermaid+`"></script>`)
+	if regions.Mermaid {
+		t.Errorf("a mermaid block inside the Now frame makes the host page load mermaid")
 	}
 }
 

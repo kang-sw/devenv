@@ -15,12 +15,12 @@ import (
 
 // The page assets: one template set, the shared stylesheet, the answer-form
 // script both layouts run, the change-signal script only the full page runs,
-// the mermaid theme script a page with a mermaid block runs, and the icon
-// sprite. Everything is inlined, so a page needs no other file beyond the
-// full page's stamp script and, when it holds a mermaid block, the shared
-// mermaid script (MermaidAsset).
+// the mermaid theme script a page with a mermaid block runs, the script a
+// served page's Now frame runs, and the icon sprite. Everything is inlined,
+// so a page needs no other file beyond the full page's stamp script and,
+// when it holds a mermaid block, the shared mermaid script (MermaidAsset).
 //
-//go:embed assets/page.tmpl assets/page.css assets/form.js assets/live.js assets/pill.js assets/mermaid-init.js assets/sprite.svg
+//go:embed assets/page.tmpl assets/page.css assets/form.js assets/live.js assets/pill.js assets/mermaid-init.js assets/now-frame.js assets/sprite.svg
 var assetFS embed.FS
 
 type pageAssets struct {
@@ -32,8 +32,10 @@ type pageAssets struct {
 	pill string
 	// mermaidInit themes and runs mermaid after the shared script loads.
 	mermaidInit template.JS
-	sprite      template.HTML
-	icons       map[string]bool
+	// nowFrame runs inside a served page's Now frame (framedNow).
+	nowFrame string
+	sprite   template.HTML
+	icons    map[string]bool
 }
 
 var (
@@ -69,6 +71,7 @@ func loadAssets() (*pageAssets, error) {
 			live:        read("live.js"),
 			pill:        read("pill.js"),
 			mermaidInit: template.JS(read("mermaid-init.js")),
+			nowFrame:    read("now-frame.js"),
 			sprite:      template.HTML(strings.TrimSpace(read("sprite.svg"))),
 			icons:       map[string]bool{},
 		}
@@ -118,7 +121,7 @@ func RenderPage(view View) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("whiteboard page assets: %w", err)
 	}
-	data := newPageData(view, a)
+	data := newPageData(view, a, false)
 	var buf bytes.Buffer
 	if err := a.tmpl.ExecuteTemplate(&buf, "page", data); err != nil {
 		return "", fmt.Errorf("whiteboard page: %w", err)
@@ -134,15 +137,19 @@ type Regions struct {
 	Board template.HTML
 	// Panels is every panel, in order.
 	Panels template.HTML
-	// Mermaid reports that Board holds a mermaid block, so the page loads
-	// the shared mermaid script (MermaidAsset) and MermaidInitScript.
+	// Mermaid reports that Board holds a mermaid block outside the Now
+	// frame, so the page loads the shared mermaid script (MermaidAsset) and
+	// MermaidInitScript; the frame loads them itself for a block in Now.
 	Mermaid bool
 	// CountPolicy, CountAssumed, and CountAcks are the header's counts.
 	CountPolicy, CountAssumed, CountAcks int
 }
 
 // RenderRegions renders view's board and panels as fragments, as the full
-// page shows them; build view with LayoutFull.
+// page shows them, with one difference: the Now slot renders inside a
+// sandboxed frame (framedNow), since the page that hosts the fragments is
+// served from the dashboard daemon's origin, and Now's raw HTML and scripts
+// must not run there. Build view with LayoutFull.
 func RenderRegions(view View) (Regions, error) {
 	a, err := loadAssets()
 	if err != nil {
@@ -150,7 +157,7 @@ func RenderRegions(view View) (Regions, error) {
 	}
 	view.Layout = LayoutFull
 	view.StampFile = ""
-	data := newPageData(view, a)
+	data := newPageData(view, a, true)
 	var board, panels bytes.Buffer
 	if err := a.tmpl.ExecuteTemplate(&board, "board", data); err != nil {
 		return Regions{}, fmt.Errorf("whiteboard board: %w", err)
@@ -199,8 +206,14 @@ type pageData struct {
 	CSS         template.CSS
 	Script      template.JS
 	Sprite      template.HTML
-	// NowHTML is view.Now rendered by renderNow on every page render.
+	// NowHTML is view.Now rendered by renderNow on every page render, or,
+	// with NowFramed, the sandboxed frame that holds that rendering.
 	NowHTML template.HTML
+	// NowFramed renders Now inside a sandboxed frame (framedNow).
+	NowFramed bool
+	// framing is set while a framed Now renders, so its file images take
+	// NowImageSrc.
+	framing bool
 
 	CountPolicy, CountAssumed, CountAcks, CountFresh int
 	// CountBulk is how many items the bulk checkbox answers.
@@ -234,7 +247,9 @@ func (p *pageData) MermaidFile() string {
 	return name
 }
 
-func newPageData(view View, a *pageAssets) *pageData {
+// newPageData builds the data a page renders from; framed renders the Now
+// slot inside a sandboxed frame (framedNow).
+func newPageData(view View, a *pageAssets, framed bool) *pageData {
 	full := view.Layout != LayoutEmbed
 	script := a.form
 	if full {
@@ -250,6 +265,7 @@ func newPageData(view View, a *pageAssets) *pageData {
 		MermaidInit: a.mermaidInit,
 		icons:       a.icons,
 		onPage:      map[int]bool{},
+		NowFramed:   framed,
 	}
 	if !full {
 		// The embed has no change-signal loader, so it carries no stamp.
@@ -270,9 +286,55 @@ func newPageData(view View, a *pageAssets) *pageData {
 	// After onPage is complete, so a reference in Now links like one in an
 	// item; a mermaid block in Now sets Mermaid before the template runs.
 	if view.Now != "" {
+		p.framing = framed
 		p.NowHTML = p.renderNow(view.Now)
+		p.framing = false
+		if framed {
+			// The frame loads mermaid for its own blocks; the page loads it
+			// only for a block outside Now.
+			p.NowHTML = p.framedNow(p.NowHTML, p.Mermaid, a)
+			p.Mermaid = false
+		}
 	}
 	return p
+}
+
+// frameCSS is what a Now frame adds to the page stylesheet: a transparent
+// page, so the Now card shows through, that never scrolls, since the host
+// sizes the frame to its content.
+const frameCSS = "html, body { background: transparent; overflow: hidden; }"
+
+// framedNow wraps a rendered Now in the sandboxed frame a served page shows
+// it in. The page lives in the dashboard daemon's origin, whose routes post
+// messages and steers to sessions, so Now's raw HTML must not run there:
+// the frame's srcdoc document gets allow-scripts, so an inline canvas script
+// still draws, but no allow-same-origin, so it runs in an opaque origin that
+// can neither read the host page nor reach the daemon's routes with the
+// viewer's credentials. allow-popups and allow-popups-to-escape-sandbox let
+// a plain link open its new tab (<base target="_blank">) as an ordinary
+// page; there is no allow-forms, allow-top-navigation, or allow-modals.
+//
+// The document carries the page stylesheet, so Now keeps the page's theme
+// variables and light/dark switch, and now-frame.js, which posts the
+// content height and hands the host its marked-link and item-reference
+// clicks (the host's half lives in the dashboard script). mermaid tells the
+// frame to load the shared mermaid script beside the page for its own
+// blocks. An image reaches the frame as whatever src ImageSrc (or
+// NowImageSrc) gave it: the frame's requests carry no cookie, so a served
+// page inlines Now images rather than pointing at a route that needs one.
+func (p *pageData) framedNow(body template.HTML, mermaid bool, a *pageAssets) template.HTML {
+	var doc strings.Builder
+	doc.WriteString(`<!DOCTYPE html><html><head><meta charset="utf-8"><base target="_blank"><style>`)
+	doc.WriteString(string(a.css))
+	doc.WriteString("\n" + frameCSS + `</style></head><body class="now-frame"><div class="now-body md">`)
+	doc.WriteString(string(body))
+	doc.WriteString(`</div><script>` + a.nowFrame + `</script>`)
+	if mermaid {
+		doc.WriteString(`<script src="` + template.HTMLEscapeString(p.MermaidFile()) + `"></script><script>wbNowMermaid(function () {` + string(a.mermaidInit) + `});</script>`)
+	}
+	doc.WriteString(`</body></html>`)
+	return template.HTML(`<iframe class="now-frame" title="now" sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox" srcdoc="` +
+		template.HTMLEscapeString(doc.String()) + `"></iframe>`)
 }
 
 // topicData is one topic block with the page it sits on.

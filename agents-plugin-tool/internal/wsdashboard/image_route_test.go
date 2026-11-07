@@ -144,3 +144,37 @@ func TestImageSrcMapsBoardImagesToTheRoute(t *testing.T) {
 		t.Errorf("ImageSrc without a root = %q", got)
 	}
 }
+
+// TestImageDataURLInlinesContainedImages pins the Now frame's image source:
+// an image the route would serve comes back as a data: URL of its bytes with
+// the route's content type; one the route refuses (outside the root, not an
+// image, a symlink escaping the root) or one above imageDataMax comes back
+// empty, so the page falls back to the route's URL.
+func TestImageDataURLInlinesContainedImages(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	writeFile(t, filepath.Join(root, "shots", "a.png"), "ABC")
+	writeFile(t, filepath.Join(root, "d.svg"), "<svg/>")
+	writeFile(t, filepath.Join(root, "notes.txt"), "TEXT")
+	writeFile(t, filepath.Join(outside, "secret.png"), "SECRET")
+	writeFile(t, filepath.Join(root, "big.png"), strings.Repeat("x", imageDataMax+1))
+	escape := os.Symlink(filepath.Join(outside, "secret.png"), filepath.Join(root, "escape.png")) == nil
+	for in, want := range map[string]string{
+		"shots/a.png": "data:image/png;base64,QUJD",
+		filepath.ToSlash(filepath.Join(root, "d.svg")): "data:image/svg+xml;base64,PHN2Zy8+",
+		"notes.txt":   "",
+		"big.png":     "",
+		"missing.png": "",
+		filepath.ToSlash(filepath.Join(outside, "secret.png")): "",
+		"../" + filepath.Base(outside) + "/secret.png":         "",
+	} {
+		if got := ImageDataURL(root, in); got != want {
+			t.Errorf("ImageDataURL(%q) = %.60q, want %q", in, got, want)
+		}
+	}
+	if escape {
+		if got := ImageDataURL(root, "escape.png"); got != "" {
+			t.Errorf("ImageDataURL through a symlink leaving the root = %.60q", got)
+		}
+	}
+}

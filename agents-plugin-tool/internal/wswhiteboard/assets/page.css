@@ -222,16 +222,20 @@ details.now.stale > summary { background: var(--wb-muted); color: var(--wb-muted
 .now-body table { border-collapse: collapse; font-size: 13px; }
 .now-body th, .now-body td { padding: 3px 8px; border-bottom: 1px solid var(--wb-muted); text-align: left; vertical-align: top; }
 .now-body pre { background: var(--wb-muted); border-radius: 8px; padding: 8px 10px; overflow-x: auto; font-size: 12.5px; }
-/* drawing kit for Now fragments: theme-aware classes for inline SVG */
-details.now .box { fill: var(--wb-muted); }
-details.now .box.store { fill: var(--wb-now); }
-details.now svg text { fill: var(--wb-fg); font: 12px system-ui, sans-serif; }
-details.now svg text.on { fill: var(--wb-on-now); }
-details.now svg text.sub { fill: var(--wb-muted-fg); font-size: 10.5px; }
-details.now svg text.sub.on { fill: var(--wb-on-now); opacity: .8; }
-details.now .edge { stroke: var(--wb-muted-fg); fill: none; stroke-width: 1.4; }
-details.now .edge.dash { stroke-dasharray: 4 3; }
-details.now .arrow { fill: var(--wb-muted-fg); }
+/* a served page's Now: a sandboxed frame sized to its content, which pads itself */
+.now-body.framed { padding: 0; }
+iframe.now-frame { display: block; width: 100%; height: 0; border: 0; }
+/* drawing kit for Now fragments: theme-aware classes for inline SVG (the
+   selectors key on .now-body, which a Now frame's document holds too) */
+.now-body .box { fill: var(--wb-muted); }
+.now-body .box.store { fill: var(--wb-now); }
+.now-body svg text { fill: var(--wb-fg); font: 12px system-ui, sans-serif; }
+.now-body svg text.on { fill: var(--wb-on-now); }
+.now-body svg text.sub { fill: var(--wb-muted-fg); font-size: 10.5px; }
+.now-body svg text.sub.on { fill: var(--wb-on-now); opacity: .8; }
+.now-body .edge { stroke: var(--wb-muted-fg); fill: none; stroke-width: 1.4; }
+.now-body .edge.dash { stroke-dasharray: 4 3; }
+.now-body .arrow { fill: var(--wb-muted-fg); }
 
 /* side panels: tonal title bar */
 details.panel { background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); overflow: hidden; }

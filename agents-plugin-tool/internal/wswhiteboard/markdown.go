@@ -303,12 +303,18 @@ func (p *pageData) resolveTarget(dest string, image bool) (target, bool) {
 	return target{}, false
 }
 
-// fileTarget resolves a file path: for an image on a page with ImageSrc, as
-// the src ImageSrc returns (the destination's own query and fragment are
+// fileTarget resolves a file path: for an image in a framed Now, as the src
+// NowImageSrc returns, when that is non-empty; for an image on a page with
+// ImageSrc, as the src ImageSrc returns (the destination's own query and fragment are
 // dropped), when that is non-empty; else as path text on a page with
 // FileText, with the FileActions action when the page has them, else as the
 // href fileHref builds.
 func (p *pageData) fileTarget(path, suffix string, image bool) target {
+	if image && p.framing && p.NowImageSrc != nil {
+		if src := p.NowImageSrc(path); src != "" {
+			return target{href: src}
+		}
+	}
 	if image && p.ImageSrc != nil {
 		if src := p.ImageSrc(path); src != "" {
 			return target{href: src}
