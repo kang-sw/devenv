@@ -123,6 +123,77 @@
     q("#gmenu [data-layout]").forEach(function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-layout") === v)); });
     revealPanes();
   }
+  // The tree and the conversation share their column at a fixed ratio; the
+  // saved value is the tree's share. The grid reads it as two fr shares, so a
+  // region swap (which only rewrites a pane's contents) never moves it.
+  var SPLIT_KEY = "ws.dashboard.split", SPLIT_DEF = 0.25, SPLIT_MIN = 0.05, SPLIT_MAX = 0.95;
+  var splitter = $("splitter"), splitShare = SPLIT_DEF;
+  function clampShare(f) { return Math.min(SPLIT_MAX, Math.max(SPLIT_MIN, f)); }
+  function setSplit(f) {
+    splitShare = isFinite(f) ? clampShare(f) : SPLIT_DEF;
+    // fr shares summing below 1 would leave the column short, so scale up
+    grid.style.setProperty("--sa", (splitShare * 1000).toFixed(1) + "fr");
+    grid.style.setProperty("--sb", ((1 - splitShare) * 1000).toFixed(1) + "fr");
+  }
+  function savedSplit() { var v = parseFloat(load(SPLIT_KEY)); return isFinite(v) ? v : SPLIT_DEF; }
+  // shareAt turns a pointer's y into the tree's share of the room the two
+  // panes divide (their span less the splitter), with the same pixel floors
+  // the stylesheet sets.
+  function shareAt(y) {
+    var t = $("r-tree"), c = $("r-conversation");
+    if (!visible(t) || !visible(c) || !splitter) return null;
+    var top = t.getBoundingClientRect().top, room = c.getBoundingClientRect().bottom - top - splitter.offsetHeight;
+    if (room <= 0) return null;
+    var f = (y - top - splitter.offsetHeight / 2) / room, lo = 56 / room, hi = 1 - 96 / room;
+    if (lo < hi) f = Math.min(hi, Math.max(lo, f));
+    return f;
+  }
+  if (splitter) {
+    var dragging = false;
+    splitter.addEventListener("pointerdown", function (e) {
+      if (e.button !== undefined && e.button !== 0) return;
+      dragging = true;
+      splitter.classList.add("drag");
+      try { splitter.setPointerCapture(e.pointerId); } catch (x) { /* no capture: the move still lands */ }
+      e.preventDefault();
+    });
+    splitter.addEventListener("pointermove", function (e) {
+      if (!dragging) return;
+      var f = shareAt(e.clientY);
+      if (f !== null) setSplit(f);
+    });
+    function endDrag() {
+      if (!dragging) return;
+      dragging = false;
+      splitter.classList.remove("drag");
+      save(SPLIT_KEY, splitShare.toFixed(4));
+    }
+    splitter.addEventListener("pointerup", endDrag);
+    splitter.addEventListener("pointercancel", endDrag);
+    splitter.addEventListener("dblclick", function () { setSplit(SPLIT_DEF); save(SPLIT_KEY, null); });
+    splitter.addEventListener("keydown", function (e) {
+      var d = e.key === "ArrowUp" ? -0.03 : e.key === "ArrowDown" ? 0.03 : 0;
+      if (!d) return;
+      e.preventDefault();
+      setSplit(splitShare + d);
+      save(SPLIT_KEY, splitShare.toFixed(4));
+    });
+  }
+
+  // Input mode: which key sends. "enter" (the default) sends on Enter and
+  // adds a line on Shift+Enter; "mod" sends on Ctrl/Cmd+Enter and Enter adds
+  // a line. The placeholder tells which one is on.
+  var INPUT_KEY = "ws.dashboard.input", inputMode = "enter";
+  var HINT = {
+    enter: "Message this session. Enter sends, Shift+Enter adds a line. Board answers attach.",
+    mod: "Message this session. Ctrl/Cmd+Enter sends, Enter adds a line. Board answers attach."
+  };
+  function setInput(v) {
+    inputMode = v === "mod" ? "mod" : "enter";
+    q("#gmenu [data-input]").forEach(function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-input") === inputMode)); });
+    var t = $("ctext");
+    if (t) t.placeholder = HINT[inputMode];
+  }
   function setTab(t) {
     grid.setAttribute("data-tab", t);
     q("#tabbar [data-tab]").forEach(function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-tab") === t)); });
@@ -236,7 +307,7 @@
   // answer chip per board item. Clicking an option, ok/no, or an
   // acknowledgement on a card attaches (or replaces) that item's chip; the
   // chips live here, so a chip outlives its card leaving the board.
-  var ctext = $("ctext"), ccopy = $("ccopy"), cnote = $("cnote"), csend = $("csend"), cchips = $("cchips");
+  var ctext = $("ctext"), cnote = $("cnote"), cchips = $("cchips");
   var chips = {}, chipOrder = [];
   function chipList() { return chipOrder.map(function (id) { return chips[id]; }); }
   function putChip(c) { if (!chips[c.id]) chipOrder.push(c.id); chips[c.id] = c; }
@@ -328,31 +399,9 @@
   }
   function syncNote(text) {
     if (!cnote) return;
-    cnote.textContent = text || (!csend && boardAnswers() ? "The board answers are copied with the message." : "");
+    cnote.textContent = text || "";
   }
   function grow() { ctext.style.height = "auto"; ctext.style.height = Math.min(160, ctext.scrollHeight) + "px"; }
-  // execCommand first: it works without a secure context or a permission;
-  // the async clipboard API is the fallback.
-  function copyText(s, done) {
-    var prev = doc.activeElement, tmp = doc.createElement("textarea"), ok = false;
-    tmp.value = s;
-    tmp.setAttribute("readonly", "");
-    tmp.style.position = "fixed"; tmp.style.top = "0"; tmp.style.opacity = "0";
-    doc.body.appendChild(tmp);
-    tmp.select();
-    try { ok = doc.execCommand("copy"); } catch (e) { ok = false; }
-    doc.body.removeChild(tmp);
-    if (prev && prev.focus) prev.focus();
-    if (ok || !navigator.clipboard) { done(ok); return; }
-    navigator.clipboard.writeText(s).then(function () { done(true); }, function () { done(false); });
-  }
-  function copyMessage() {
-    var t = ctext.value.trim(), a = boardAnswers(), s = t + (t && a ? "\n\n" : "") + a;
-    if (!s) { syncNote("Nothing to copy: write a message or answer the board."); return; }
-    copyText(s, function (ok) {
-      syncNote(ok ? (a ? "Copied the message and the board answers." : "Copied.") : "Copy failed: select the text and copy it by hand.");
-    });
-  }
   // post sends a write route's JSON body; done(ok, answer) gets the parsed
   // answer, or the server's refusal text.
   function post(route, body, done) {
@@ -375,10 +424,8 @@
     var t = ctext.value.trim(), list = chipList();
     if (!t && !list.length) { syncNote("Nothing to send: write a message or answer the board."); return; }
     sending = true;
-    csend.disabled = true;
     post("message", { text: t, chips: list }, function (ok, res) {
       sending = false;
-      csend.disabled = false;
       if (!ok) { syncNote("Not sent: " + res); return; }
       if (ctext.value.trim() === t) { ctext.value = ""; grow(); }
       // Compare by value: a board event during the send, or clearing one
@@ -423,12 +470,16 @@
       head.insertBefore(m, id ? id.nextSibling : head.firstChild);
     });
   }
-  if (ctext && ccopy) {
-    ccopy.addEventListener("click", copyMessage);
-    if (csend) csend.addEventListener("click", sendMessage);
+  if (ctext) {
     ctext.addEventListener("input", function () { grow(); syncNote(); });
     ctext.addEventListener("keydown", function (e) {
-      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); if (csend) sendMessage(); else copyMessage(); }
+      if (e.key !== "Enter") return;
+      // An Enter that confirms an IME composition (Korean, Japanese,
+      // Chinese) must never send: browsers report it as isComposing, and
+      // Safari reports the first keydown after compositionend as keyCode 229.
+      if (e.isComposing || e.keyCode === 229) return;
+      var mod = e.ctrlKey || e.metaKey;
+      if (inputMode === "enter" ? !e.shiftKey && !e.altKey : mod) { e.preventDefault(); sendMessage(); }
     });
     // The form script's own listeners have rebuilt the reply line by the
     // time an event bubbles here.
@@ -451,7 +502,9 @@
     u = t.closest("#r-conversation [data-cancel]");
     if (u) { if (!u.disabled) cancelHeld(u); return; }
     if (!live) return;
-    var b = t.closest("#gmenu [data-layout]");
+    var b = t.closest("#gmenu [data-input]");
+    if (b) { save(INPUT_KEY, b.getAttribute("data-input")); setInput(b.getAttribute("data-input")); return; }
+    b = t.closest("#gmenu [data-layout]");
     if (b) { save(LAYOUT_KEY, b.getAttribute("data-layout")); setLayout(b.getAttribute("data-layout")); return; }
     b = t.closest("#tabbar [data-tab]");
     if (b) { setTab(b.getAttribute("data-tab")); return; }
@@ -512,6 +565,8 @@
 
   if (live) {
     setLayout(load(LAYOUT_KEY));
+    setSplit(savedSplit());
+    setInput(load(INPUT_KEY));
     setTab("convo");
   }
   restoreOpen(doc);
