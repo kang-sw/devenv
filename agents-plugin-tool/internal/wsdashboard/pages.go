@@ -32,7 +32,6 @@ var dashboardFS embed.FS
 // Region names. The session page's regions in order; the index page has one.
 const (
 	regionHead         = "head"
-	regionLead         = "lead"
 	regionTree         = "tree"
 	regionConversation = "conversation"
 	regionBoard        = "board"
@@ -46,7 +45,7 @@ const (
 // sessionRegions lists the regions a session page in mode holds.
 func sessionRegions(mode string) []string {
 	if mode == modeLive {
-		return []string{regionHead, regionLead, regionTree, regionConversation, regionBoard, regionPanels}
+		return []string{regionHead, regionTree, regionConversation, regionBoard, regionPanels}
 	}
 	return []string{regionHead, regionBoard, regionPanels}
 }
@@ -120,6 +119,8 @@ func loadDashboardAssets() (*dashboardAssets, error) {
 			"region":   renderRegionElement,
 			"clock":    clockText,
 			"spanText": spanText,
+			"toolName": toolName,
+			"shortID":  shortID,
 		}
 		a.tmpl, dashboardAssetsErr = template.New("dashboard").Funcs(funcs).ParseFS(dashboardFS, "assets/dashboard.tmpl")
 		if dashboardAssetsErr == nil {
@@ -137,6 +138,27 @@ func clockText(ms int64) string {
 		return ""
 	}
 	return time.UnixMilli(ms).UTC().Format("15:04:05Z")
+}
+
+// toolName is a tool's display name: an MCP tool, mcp__<server>__<tool>, shows
+// as <tool> (the server name may itself hold single underscores). The full
+// name stays in a title attribute where the page shows it.
+func toolName(name string) string {
+	if rest, ok := strings.CutPrefix(name, "mcp__"); ok {
+		if _, tool, found := strings.Cut(rest, "__"); found && tool != "" {
+			return tool
+		}
+	}
+	return name
+}
+
+// shortID is the leading part of an agent or reply id, enough to tell rows
+// apart without a 17-character hex string taking the row.
+func shortID(id string) string {
+	if r := []rune(id); len(r) > 6 {
+		return string(r[:6])
+	}
+	return id
 }
 
 // spanText is a duration's text.

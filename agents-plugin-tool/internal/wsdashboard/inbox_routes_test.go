@@ -90,7 +90,7 @@ func TestMessageRouteWritesThenMergesTheHeldEntry(t *testing.T) {
 		`data-cancel="` + second + `"`,
 		`<i data-id="03" data-answer="b" data-note="changed my mind" data-state="held">`,
 		`<i data-id="04" data-answer="ok" data-note="" data-state="held">`,
-		`id="csend"`, `id="cchips"`,
+		`id="cchips"`,
 	} {
 		if !strings.Contains(page, want) {
 			t.Errorf("session page lacks %q", want)

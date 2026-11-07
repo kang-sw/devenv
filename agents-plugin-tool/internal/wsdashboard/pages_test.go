@@ -130,8 +130,9 @@ func TestSessionPageRendersLiveRegions(t *testing.T) {
 		t.Fatalf("GET /s/livesession = %d: %s", code, body)
 	}
 	for _, want := range []string{
-		`data-region="lead"`, `data-region="tree"`, `data-region="conversation"`, `data-region="board"`, `data-region="panels"`,
+		`data-region="tree"`, `data-region="conversation"`, `data-region="board"`, `data-region="panels"`,
 		`id="composer"`, `id="gear"`, "live board text",
+		`id="splitter"`, `data-input="enter"`, `data-input="mod"`,
 		`<span class="src wb">whiteboard</span>`, `<span class="src">terminal</span>`,
 		"streamed &lt;partial&gt; reply",
 		// The mail whose history entry exists expands to its body; the
@@ -165,11 +166,22 @@ func TestSessionPagesCarryScriptHooks(t *testing.T) {
 		`<div id="bcol" class="bcol"><div id="r-board" class="region r-board" data-region="board"`,
 		`id="tabbar"`, `data-tab="convo"`, `data-tab="board"`, `<span class="tdot"></span>`,
 		`id="gmenu"`, `data-layout="auto"`, `data-layout="split"`, `data-layout="tabs"`,
-		`id="ctext"`, `id="ccopy"`, `id="cnote"`, `class="sse-label"`, `id="dash-banner"`,
+		`id="ctext"`, `id="cnote"`, `class="sse-label"`, `id="dash-banner"`,
 	} {
 		if !strings.Contains(live, want) {
 			t.Errorf("live session page lacks %q", want)
 		}
+	}
+	// The composer sends on a key; the copy and send buttons and the lead
+	// strip are gone, and the splitter sits between the tree and the
+	// conversation.
+	for _, gone := range []string{`id="ccopy"`, `id="csend"`, `data-region="lead"`} {
+		if strings.Contains(live, gone) {
+			t.Errorf("live session page still carries %q", gone)
+		}
+	}
+	if i, j, k := strings.Index(live, `data-region="tree"`), strings.Index(live, `id="splitter"`), strings.Index(live, `data-region="conversation"`); i < 0 || j < i || k < j {
+		t.Errorf("splitter is not between the tree and the conversation regions")
 	}
 	// The board column holds the panels region too.
 	if i, j := strings.Index(live, `id="bcol"`), strings.Index(live, `data-region="panels"`); i < 0 || j < i {
@@ -190,7 +202,7 @@ func TestBoardFirstPageHasNoLayoutControl(t *testing.T) {
 	if !strings.Contains(body, "only the board") || !strings.Contains(body, `data-mode="board"`) {
 		t.Errorf("board-first page lacks its board")
 	}
-	for _, absent := range []string{`id="gear"`, `id="composer"`, `data-region="lead"`, `data-region="conversation"`, `id="tabbar"`} {
+	for _, absent := range []string{`id="gear"`, `id="composer"`, `id="splitter"`, `data-region="conversation"`, `id="tabbar"`} {
 		if strings.Contains(body, absent) {
 			t.Errorf("board-first page carries %q", absent)
 		}
@@ -436,11 +448,11 @@ func TestRegionHashIgnoresRenderTime(t *testing.T) {
 	}
 	time.Sleep(5 * time.Millisecond)
 	b, _ := renderSessionRegions(view)
-	if a[regionLead].Hash != b[regionLead].Hash {
-		t.Fatal("lead hash changed between identical renders")
+	if a[regionTree].Hash != b[regionTree].Hash {
+		t.Fatal("tree hash changed between identical renders")
 	}
-	if !strings.Contains(string(a[regionLead].HTML), `data-f="since"`) {
-		t.Errorf("lead has no client-formatted time: %s", a[regionLead].HTML)
+	if !strings.Contains(string(a[regionTree].HTML), `data-f="since"`) {
+		t.Errorf("tree has no client-formatted time: %s", a[regionTree].HTML)
 	}
 }
 
@@ -453,11 +465,21 @@ func TestRenderedPermissionWaitAndEndedSessions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{regionLead, regionConversation} {
-		html := string(set[name].HTML)
-		if !strings.Contains(html, "waiting for approval in the terminal") || !strings.Contains(html, "rm -rf &lt;build&gt;") {
-			t.Errorf("%s region lacks the escaped permission wait: %s", name, html)
+	// The conversation says it in words; the tree's one-line lead row shows
+	// the approval phase with the tool and its arguments. No lead region
+	// exists to say it a third time.
+	conv := string(set[regionConversation].HTML)
+	if !strings.Contains(conv, "waiting for approval in the terminal") || !strings.Contains(conv, "rm -rf &lt;build&gt;") {
+		t.Errorf("conversation region lacks the escaped permission wait: %s", conv)
+	}
+	tree := string(set[regionTree].HTML)
+	for _, want := range []string{`class="phase permission"`, `<span class="tn" title="Bash">Bash</span>`, "rm -rf &lt;build&gt;"} {
+		if !strings.Contains(tree, want) {
+			t.Errorf("tree region lacks %q in the permission phase: %s", want, tree)
 		}
+	}
+	if _, ok := set["lead"]; ok {
+		t.Error("a lead region is still rendered")
 	}
 
 	old := liveSession("oldend", "/a", now.Add(-48*time.Hour))
@@ -478,5 +500,60 @@ func TestRenderedPermissionWaitAndEndedSessions(t *testing.T) {
 	}
 	if strings.Contains(html, "oldend") {
 		t.Errorf("a session ended two days ago is listed")
+	}
+}
+
+func TestToolNameAndShortID(t *testing.T) {
+	for in, want := range map[string]string{
+		"mcp__plugin_ws_ws__tickets_create_empty": "tickets_create_empty",
+		"mcp__srv__do": "do",
+		"mcp__broken":  "mcp__broken",
+		"Bash":         "Bash",
+	} {
+		if got := toolName(in); got != want {
+			t.Errorf("toolName(%q) = %q, want %q", in, got, want)
+		}
+	}
+	if got := shortID("0123456789abcdef0"); got != "012345" {
+		t.Errorf("shortID = %q", got)
+	}
+	if got := shortID("abc"); got != "abc" {
+		t.Errorf("shortID short = %q", got)
+	}
+}
+
+// TestTreeRowsAreDense pins the compact tree: the lead's tool shows with its
+// MCP prefix stripped (full name in the title) on the one summary row, a
+// subagent's caption sits on its own row, a thinking agent has no live row
+// repeating its pill, and a lone call reads "1 call".
+func TestTreeRowsAreDense(t *testing.T) {
+	now := testNow
+	lead := wslive.Lead{Activity: wslive.Activity{Phase: wslive.PhaseTool, Batches: []wslive.BatchView{
+		{Running: &wslive.RunningView{ToolName: "mcp__plugin_ws_ws__tickets_create_empty", ArgsPreview: "title x", StartedAt: now.UnixMilli()}},
+		{ToolNames: []string{"Read"}, CallCount: 1, EndedAt: now.UnixMilli()},
+	}}}
+	agent := wslive.Agent{ID: "0123456789abcdef0", Status: wslive.StatusRunning, StartedAt: now.UnixMilli(),
+		Activity: wslive.Activity{Phase: wslive.PhaseThinking, PhaseStartedAt: now.UnixMilli(), Caption: "ws:effort-high"}}
+	view := buildSessionView(pageInputs{Session: liveSession("self", "/p", now), Snapshot: liveSnap(now, lead, agent), Now: now})
+	set, err := renderSessionRegions(view)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tree := string(set[regionTree].HTML)
+	for _, want := range []string{
+		`<span class="tn" title="mcp__plugin_ws_ws__tickets_create_empty">tickets_create_empty</span>`,
+		`<span class="acap" title="ws:effort-high">ws:effort-high</span>`,
+		`>agent 012345</span>`, "1 call ",
+	} {
+		if !strings.Contains(tree, want) {
+			t.Errorf("tree lacks %q: %s", want, tree)
+		}
+	}
+	if strings.Contains(tree, "1 calls") || strings.Contains(tree, "writing") {
+		t.Errorf("tree carries a plural or a live row repeating the phase: %s", tree)
+	}
+	// The thinking agent's live list stays empty.
+	if !strings.Contains(tree, `<ol class="brows live"></ol>`) {
+		t.Errorf("thinking agent has a live row: %s", tree)
 	}
 }
