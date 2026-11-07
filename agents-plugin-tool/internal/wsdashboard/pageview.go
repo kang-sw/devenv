@@ -168,6 +168,9 @@ type ConversationView struct {
 	Permission *wslive.Permission
 	Running    *wslive.RunningView
 	Generating *wslive.GeneratingView
+	// ToolGap is the lead's finished tool calls since its last conversation
+	// entry, shown as a live tools row until the ring takes it.
+	ToolGap *wslive.ToolSummary
 	// Users and Mails count the user messages and mail lines.
 	Users, Mails int
 	// Held lists the messages sent from the page that the session has not
@@ -487,6 +490,7 @@ func conversation(lead wslive.Lead, ring []wslive.RingRecord, bodies map[string]
 		cv.ReplyHTML = render.streaming(lead.Reply.Text)
 	}
 	_, cv.Running, cv.Generating = splitBatches(lead.Batches)
+	cv.ToolGap = lead.ToolGap
 	for _, r := range ring {
 		e := ConvEntry{RingEntry: r.RingEntry, Key: r.Name, At: r.At.UnixMilli()}
 		switch r.Kind {

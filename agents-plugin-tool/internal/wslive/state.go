@@ -140,6 +140,10 @@ type State struct {
 	compactStartedAt int64
 	compactTrigger   string
 
+	// gap holds the lead's batches finished since its last conversation
+	// entry (toolGap); flushTools moves it to the ring.
+	gap toolGap
+
 	agents map[string]*agentState
 	usage  *Usage
 	// evicted names the finished subagents retain dropped, oldest first (at
@@ -202,6 +206,7 @@ func (st *State) Apply(ev Event, now int64) (Result, error) {
 			return Result{}, err
 		}
 		if st.reply != nil {
+			st.flushTools(&res)
 			res.Ring = append(res.Ring, st.finishReply(""))
 		}
 		st.turnStartedAt, st.turnOrigin = at, origin
@@ -213,10 +218,12 @@ func (st *State) Apply(ev Event, now int64) (Result, error) {
 		res.Changed = true
 	case KindTurnEnd:
 		if st.reply != nil {
+			st.flushTools(&res)
 			res.Ring = append(res.Ring, st.finishReply(""))
 		}
-		closeBatches(&st.lead, at)
+		st.gapAdd(closeBatches(&st.lead, at))
 		st.lead.permission = nil
+		st.flushTools(&res)
 		if st.turnStartedAt > 0 {
 			duration := max(at-st.turnStartedAt, 0)
 			done, failed := st.lead.totals()
@@ -256,6 +263,7 @@ func (st *State) Apply(ev Event, now int64) (Result, error) {
 		}
 		if ev.Final {
 			if ev.Text != "" || st.reply != nil {
+				st.flushTools(&res)
 				res.Ring = append(res.Ring, st.finishReply(ev.Text))
 			}
 		} else {
@@ -277,6 +285,7 @@ func (st *State) Apply(ev Event, now int64) (Result, error) {
 			return Result{}, fmt.Errorf("user origin must be %q or %q", OriginTerminal, OriginWhiteboard)
 		}
 		text, truncated := capText(st.scrub.scrub(ev.Text))
+		st.flushTools(&res)
 		res.Ring = append(res.Ring, RingEntry{Kind: RingUser, Origin: origin, Text: text, Truncated: truncated})
 	case KindStatus:
 		if ev.AgentID != "" {
@@ -302,6 +311,7 @@ func (st *State) Apply(ev Event, now int64) (Result, error) {
 			if trigger == "" {
 				trigger = st.compactTrigger
 			}
+			st.flushTools(&res)
 			res.Ring = append(res.Ring, RingEntry{Kind: RingCompact, Trigger: trigger, CompactFailed: ev.Phase == CompactFailed})
 			st.compactStartedAt, st.compactTrigger = 0, ""
 		default:
@@ -426,7 +436,10 @@ func (st *State) applyAgent(ev Event, at int64) error {
 
 func (st *State) setActivity(act *activityState, ev Event, batches []BatchView) {
 	if ev.Batches != nil {
-		act.setBatches(batches)
+		fresh := act.setBatches(batches)
+		if act == &st.lead {
+			st.gapAdd(fresh)
+		}
 	}
 	if ev.Caption != nil {
 		act.caption = cleanLine(st.scrub.scrub(*ev.Caption), CaptionRunes)
@@ -438,13 +451,40 @@ func batchKey(b BatchView) string {
 }
 
 // setBatches replaces the batch list, adding every newly finished batch to
-// the done and failed totals once.
-func (act *activityState) setBatches(batches []BatchView) {
+// the done and failed totals once, and returns those batches.
+func (act *activityState) setBatches(batches []BatchView) []BatchView {
 	act.batches = batches
-	act.countFinished()
+	return act.countFinished()
 }
 
-func (act *activityState) countFinished() {
+// gapAdd adds the lead's newly finished batches to the open tool gap.
+func (st *State) gapAdd(fresh []BatchView) {
+	for _, b := range fresh {
+		st.gap.add(b)
+	}
+}
+
+// flushTools ends the open tool gap into res.Ring, ahead of the
+// conversation entry the caller writes next. An empty gap adds nothing.
+func (st *State) flushTools(res *Result) {
+	if e := st.gap.flush(); e != nil {
+		res.Ring = append(res.Ring, *e)
+	}
+}
+
+// FlushTools ends the open tool gap into a ring entry, for a conversation
+// entry the state does not write itself (a mail line): the caller appends it
+// before that entry. It returns nil when the gap is empty.
+func (st *State) FlushTools() []RingEntry {
+	var res Result
+	st.flushTools(&res)
+	return res.Ring
+}
+
+// countFinished counts each newly finished batch once and returns them in
+// list order.
+func (act *activityState) countFinished() []BatchView {
+	var fresh []BatchView
 	if act.counted == nil {
 		act.counted = map[string]bool{}
 	}
@@ -456,6 +496,7 @@ func (act *activityState) countFinished() {
 			act.counted[key] = true
 			act.done += b.CallCount - b.Failed
 			act.failed += b.Failed
+			fresh = append(fresh, b)
 		}
 	}
 	for key := range act.counted {
@@ -463,6 +504,7 @@ func (act *activityState) countFinished() {
 			delete(act.counted, key)
 		}
 	}
+	return fresh
 }
 
 // totals is done and failed including the running batch's finished calls.
@@ -479,8 +521,8 @@ func (act *activityState) totals() (int, int) {
 
 // closeBatches ends a running batch and drops a generating message, as the
 // host batch model does at a turn's or an agent's end: calls still
-// unfinished count as failed.
-func closeBatches(act *activityState, at int64) {
+// unfinished count as failed. It returns the batches it newly finished.
+func closeBatches(act *activityState, at int64) []BatchView {
 	kept := act.batches[:0]
 	for _, b := range act.batches {
 		if b.Generating != nil {
@@ -493,7 +535,7 @@ func closeBatches(act *activityState, at int64) {
 		kept = append(kept, b)
 	}
 	act.batches = kept
-	act.countFinished()
+	return act.countFinished()
 }
 
 // refreshPhases recomputes each phase, restarting its clock on a change.
@@ -618,6 +660,7 @@ func (st *State) Snapshot(now int64) Snapshot {
 		reply := *st.reply
 		snap.Lead.Reply = &reply
 	}
+	snap.Lead.ToolGap = st.gap.summary()
 	snap.Usage = st.usage.clone()
 	for _, a := range st.agents {
 		snap.Agents = append(snap.Agents, Agent{
