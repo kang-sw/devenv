@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 1e676c1a6b0f890a
 sage-review-completeness-reviewed: 1e676c1a6b0f890a
+completed: 2026-11-08
 ---
 
 # ws tracker ledger protocol: payload-agnostic signed multi-writer event log over git refs
@@ -456,6 +457,62 @@ Build `internal/wsledger` against local repositories only, with no remote.
   signature check), and a verdict flip behind a caller's cursor (a
   revocation cutoff, a filled gap) reaching that caller.
 
+### Result (d930018ff) - 2026-11-08
+
+Landed `agents-plugin-tool/internal/wsledger` (b9bf6f14b, d2593632d,
+d930018ff): `Create` / `Join` / `Open`, the journal with batch close on
+receive or `Sync`, re-issue, and a pure verification core (`verify.go`)
+that never touches git. The package doc (`doc.go`) documents the ref
+layout, commit format, `roles.json`, identity payloads, verdict rules,
+journal, and cursor.
+
+Verification: `go build ./...`, `go vet ./internal/wsledger/`, and
+`go test -count=1 ./internal/wsledger/` pass with real git 2.50.1 and
+`ssh-keygen`. The tests cover every Phase 1 scenario plus a `parsePatch`
+table; `-race` passes on the concurrent-append and veto tests.
+
+Decisions taken:
+- A signature that does not verify cryptographically, or no signature, is
+  an envelope break (no seq). A good signature from a key the author did
+  not hold in the commit's causal past is a Flagged verdict, and its seq
+  counts. git reports the signer fingerprint even when the allowed-signers
+  file does not list the key, so verdicts are a pure function of the commit
+  and are cached by oid. The allowed-signers file is still derived from the
+  identity keys.
+- Each revocation's validity is computed in its own scoped pass over its
+  causal past, using only the cuts of revocations inside that past. This
+  well-founded reading follows "judged against its own causal past only".
+  The mockup's grow-only ignored set can keep cuts from a revocation that
+  later turns invalid.
+- Commit contents are read with one nonce-delimited `git log -p
+  --unified=0` per moved ref. A commit counts only when it is a single
+  pure append that starts at the tracked line count. A commit that is not
+  marks the rest of its ref malformed, because later diffs no longer prove
+  what each commit added.
+- `Event` gained `Pending`: the open batch's events appear as a virtual
+  commit with a provisional verdict, so the domain sees its own writes
+  before the batch closes.
+- `seen` records only the resolved (non-waiting) prefix of each stream. A
+  writer's own events therefore never wait on its own view, and honest
+  writers cannot form causal cycles.
+- When an admin adds this clone's key, a batch whose causal past lacks the
+  key takes the current `seen` before it closes. Without that it could
+  never verify.
+- The join exception applies when `member.join` is the first event of its
+  commit. `Join` refuses a clone that already has commits, because a claim
+  commit must be the root of its stream.
+- `ssh-keygen` is run directly only to generate the key. Every git call
+  goes through `wsgit.Runner`, and `wsgit` itself is unchanged.
+
+#### Edition (4fbcaf8f0) - 2026-11-08
+
+`verify.go` closed a gap in the signer check. A revocation's memoized
+verdict used to be returned before its commit's signer result was set.
+`Valid` is the zero verdict, so the events after a forged revocation in
+the same commit skipped the signer check and verified Valid.
+`TestRevocationFirstInCommitKeepsSignerCheck` reproduced this before the
+fix.
+
 ### Phase 2: Remote sync, registration, and rewind refusal
 
 Add remotes on top of Phase 1's commit and verify paths.
@@ -494,6 +551,69 @@ Add remotes on top of Phase 1's commit and verify paths.
   clone's own ref it did not write, a poll through `Fetch` that pushes
   nothing, a push delay that restarts
   on each write under a fake clock, and a pending journal surviving reopen.
+
+### Result (acf2ff17a) - 2026-11-08
+
+Landed `remote.go` (1f804457d, b95429231, 4fbcaf8f0, acf2ff17a):
+- `Register`.
+- Remote-aware `Sync` and `Fetch`.
+- The persisted idle push deadline.
+- Rewind refusal, with `Restore` and `MoveToFreshClone`.
+- A per-stream journal (`journal.<member>.<clone>.jsonl`).
+
+The package doc's `# Remote` section covers all of these.
+
+Verification: `go build ./...`, `go vet ./internal/...`, and
+`go test -count=1 ./internal/wsledger/ ./internal/wsgit/` pass. Each
+Phase 2 scenario has a test against temporary bare remotes. The tests
+also cover:
+- a Sync before any Fetch not undoing an own-ref deletion or rewind;
+- a refused push failing Sync and Register;
+- Restore refusing a remote that moved ahead, or one that moved after
+  its own fetch.
+
+The genesis and claim races are forced deterministically by a test
+`Runner` hook that completes the rival's registration just before the
+contested push.
+
+Decisions taken:
+- **Three ref namespaces.** Fetched refs land in `refs/ledger/remote/`. A
+  never-pruned `refs/ledger/known/` records the last value seen on or
+  pushed to the remote. A deletion, which has a known value, therefore
+  stays distinct from a ref that never reached the remote.
+- **Create-once refs.** A genesis or claim this clone wrote but never
+  pushed is replaced by the remote's after a lost push. That is how a lost
+  genesis race continues as a joiner and a lost claim race becomes
+  `IDTaken`. Any value once known on the remote is protected.
+- **Leased own-ref push.** The own ref is pushed on a lease of its
+  last-known remote value rather than as a plain fast-forward. A Sync run
+  by the push-delay timer before any fetch therefore cannot undo a remote
+  deletion or rewind. The fetch that follows every push classifies the
+  rejection and warns. Leased pushes carry no `+` refspec prefix, because
+  git lets `+` override the lease.
+- **Push refusals.** Only a client-side `[rejected]` counts as a lost race.
+  A `[remote rejected]` (hook, branch protection, permission) or a
+  transport failure is an error, and the writes stay pending.
+- **Push deadline.** The deadline is one file per stream, so processes
+  sharing a store directory agree. A write or an open only moves it later.
+- **`MoveToFreshClone`.** It renames the old stream's journal to `.moved`.
+  Reopening the old clone id therefore cannot publish the moved events
+  twice.
+
+Lite review: two Important findings, both fixed in acf2ff17a:
+- a remote-rejected push passed for a lost race;
+- `Restore` could rewind a remote that had moved ahead.
+
+Minor findings, left as follow-ups:
+- `credential.interactive=false` is not a core git option. An HTTPS remote
+  with no credential helper can still reach a terminal prompt; the runner
+  has no environment hook to set `GIT_TERMINAL_PROMPT=0`.
+- No test moves or deletes a genesis or claim ref after it was pushed, and
+  no test covers a forked member ref.
+- `Events`, `Identity`, and `Pending` wait on the store mutex while `Sync`
+  holds it across network calls.
+- The two-process seq test uses two instances in one process, separated
+  only by the file lock.
 
 ## Verification
 
