@@ -646,6 +646,9 @@
           "branch": "impl/develop/gore-pod-grunt"
         }
       }
+    },
+    "261108-bug-pi-esc-drops-queued-mail-batches": {
+      "registered_at": "2026-11-07T15:11:11Z"
     }
   }
 }
