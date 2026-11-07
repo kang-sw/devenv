@@ -530,7 +530,8 @@ func (r *mdRenderer) fencedCode(w util.BufWriter, source []byte, node ast.Node, 
 	}
 	n := node.(*ast.FencedCodeBlock)
 	lang := string(n.Language(source))
-	if strings.EqualFold(lang, "mermaid") {
+	mermaid := strings.EqualFold(lang, "mermaid") && !r.page.noMermaid
+	if mermaid {
 		r.page.Mermaid = true
 		_, _ = w.WriteString(`<pre class="mermaid">`)
 	} else {
@@ -546,7 +547,7 @@ func (r *mdRenderer) fencedCode(w util.BufWriter, source []byte, node ast.Node, 
 		segment := n.Lines().At(i)
 		_, _ = w.Write(util.EscapeHTML(segment.Value(source)))
 	}
-	if strings.EqualFold(lang, "mermaid") {
+	if mermaid {
 		_, _ = w.WriteString("</pre>\n")
 	} else {
 		_, _ = w.WriteString("</code></pre>\n")

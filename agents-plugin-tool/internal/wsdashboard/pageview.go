@@ -9,6 +9,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wsinbox"
 	"github.com/kang-sw/devenv/internal/wslive"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
+	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
 
 // The session page's view model: everything the page templates read, built
@@ -148,7 +149,9 @@ type PeerRow struct {
 type ConversationView struct {
 	Entries []ConvEntry
 	// Reply is the lead's reply text still streaming; nil when none.
-	Reply *wslive.Reply
+	// ReplyHTML is its text rendered as markdown.
+	Reply     *wslive.Reply
+	ReplyHTML template.HTML
 	// Phase and Permission drive the trailing activity or approval line.
 	Phase      string
 	Permission *wslive.Permission
@@ -171,6 +174,9 @@ type ConvEntry struct {
 	Key string
 	// At is the entry's time (epoch ms).
 	At int64
+	// HTML is a lead reply's text rendered as markdown; user messages, mail
+	// bodies, and turn lines stay plain text.
+	HTML template.HTML
 	// Body is a mail line's full message from the mailbox history; HasBody
 	// is false once the message has left that ring, and the line then shows
 	// only its first line.
@@ -243,7 +249,7 @@ func buildSessionView(in pageInputs) SessionView {
 	}
 	contacts := resolvedContacts(in.Page.Contacts, reg.ReplyID)
 	v.Tree.Peers = peerGroup(contacts, lookup, in.Now)
-	v.Conversation = conversation(in.Snapshot.Lead, in.Ring, in.Page.MailBodies, contacts, lookup)
+	v.Conversation = conversation(in.Snapshot.Lead, in.Ring, in.Page.MailBodies, contacts, lookup, replyMarkdown(reg.Project, reg.ReplyID))
 	v.Conversation.Held = heldViews(in.Held)
 	v.Conversation.Sent = sentMarks(in.Drained, in.Held)
 	return v
@@ -404,10 +410,26 @@ func hasReplyIDPrefix(address string) bool {
 	return len(address) >= len(wsmailbox.ReplyIDPrefix) && address[:len(wsmailbox.ReplyIDPrefix)] == wsmailbox.ReplyIDPrefix
 }
 
+// replyMarkdown renders a lead reply as markdown under the served page's
+// link rule, the board's: a file link or a file image outside root is path
+// text, and an image inside root is the image route's URL.
+func replyMarkdown(root, replyID string) func(string) template.HTML {
+	targets := wswhiteboard.TextTargets{
+		FileText: func(path string) string {
+			if rel, ok := relativeInside(root, path); ok {
+				return filepath.ToSlash(rel)
+			}
+			return filepath.ToSlash(path)
+		},
+		ImageSrc: func(path string) string { return ImageSrc(root, replyID, path) },
+	}
+	return func(s string) template.HTML { return wswhiteboard.RenderText(s, targets) }
+}
+
 // conversation turns the ring into the page's stream: each mail line gets
 // its body while the mailbox history still holds it and a link to its peer's
-// page when this daemon serves the peer.
-func conversation(lead wslive.Lead, ring []wslive.RingRecord, bodies map[string]string, contacts []Contact, lookup func(string) (Session, *wslive.Snapshot, bool)) ConversationView {
+// page when this daemon serves the peer, and each lead reply its markdown.
+func conversation(lead wslive.Lead, ring []wslive.RingRecord, bodies map[string]string, contacts []Contact, lookup func(string) (Session, *wslive.Snapshot, bool), render func(string) template.HTML) ConversationView {
 	byAddress := map[string]string{}
 	for _, c := range contacts {
 		if c.ReplyID != "" {
@@ -415,12 +437,17 @@ func conversation(lead wslive.Lead, ring []wslive.RingRecord, bodies map[string]
 		}
 	}
 	cv := ConversationView{Reply: lead.Reply, Phase: lead.Phase, Permission: lead.Permission}
+	if lead.Reply != nil {
+		cv.ReplyHTML = render(lead.Reply.Text)
+	}
 	_, cv.Running, cv.Generating = splitBatches(lead.Batches)
 	for _, r := range ring {
 		e := ConvEntry{RingEntry: r.RingEntry, Key: r.Name, At: r.At.UnixMilli()}
 		switch r.Kind {
 		case wslive.RingUser:
 			cv.Users++
+		case wslive.RingReply:
+			e.HTML = render(r.Text)
 		case wslive.RingMail:
 			cv.Mails++
 			if r.HistoryKey != "" {
