@@ -288,13 +288,14 @@ func writeAttachments(attachDir string, images []decodedImage) ([]string, error)
 		return nil, err
 	}
 	uploadID := hex.EncodeToString(buf)
-	if err := os.MkdirAll(attachDir, 0o755); err != nil {
+	// Owner-only: a pasted screenshot is more private than an entry.
+	if err := os.MkdirAll(attachDir, 0o700); err != nil {
 		return nil, err
 	}
 	var written []string
 	for i, img := range images {
 		path := filepath.Join(attachDir, fmt.Sprintf("%s-%d.%s", uploadID, i+1, img.ext))
-		f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 		if err != nil {
 			removeFiles(written)
 			return nil, err

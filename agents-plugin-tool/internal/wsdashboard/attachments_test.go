@@ -136,6 +136,17 @@ func TestMessageRouteRefusesBadImages(t *testing.T) {
 		t.Fatalf("refused sends wrote %v", names)
 	}
 
+	// A refusal after the files were written (Send's own text cap) deletes
+	// them.
+	before := len(f.attachments(t))
+	huge := strings.Repeat("y", 70<<10)
+	if code, raw := f.postMessage(t, `{"text":"`+huge+`","images":`+imagesJSON("z.png", pngBytes)+`}`); code != http.StatusBadRequest {
+		t.Fatalf("over-long text with an image = %d (%s), want 400", code, raw)
+	}
+	if after := len(f.attachments(t)); after != before {
+		t.Fatalf("a refused send left %d new files", after-before)
+	}
+
 	// The merged cap: six held, three more refused before any file is
 	// written; two more fill the entry to eight.
 	six := []string{}

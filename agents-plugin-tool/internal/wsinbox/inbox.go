@@ -130,8 +130,14 @@ func Dir(sessionDir string) string { return filepath.Join(sessionDir, dirName) }
 func DrainedDir(inboxDir string) string { return filepath.Join(inboxDir, drainedDirName) }
 
 // AttachmentsDir is where the images attached to the inbox at inboxDir live.
+// It is absolute, as the paths an entry lists are, so a caller that named
+// the inbox by a relative path still matches them.
 func AttachmentsDir(inboxDir string) string {
-	return filepath.Join(inboxDir, attachmentsDirName)
+	dir := filepath.Join(inboxDir, attachmentsDirName)
+	if abs, err := filepath.Abs(dir); err == nil {
+		return abs
+	}
+	return dir
 }
 
 // ValidAttachmentName reports whether name is an attachment file name
