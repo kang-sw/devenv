@@ -1,9 +1,20 @@
-import type { HookStream, ProcessSpawnChunk, ProcessSpawnResult, Register, ToolCallResult } from 'claude-code'
+import type { HookStream, ProcessSpawnChunk, ProcessSpawnResult, Register, SessionUsage, ToolCallResult } from 'claude-code'
 
 import { createBand, drawBand, readGit, type Mailbox } from './band'
 import { appendOwn, createCaptions, drawCall, drawEmpty, drawRun, groupUnit, submitOwn, toolUseUnit, type OwnDeliveryEdges } from './captions'
 import { createCompaction } from './compaction'
-import { callArgs, createDashboard, INBOX_DRAIN_TOOL, INTAKE_TOOL, labelWhiteboard, parseInboxDrain, userPrompt, type DashboardEvent } from './dashboard'
+import {
+  callArgs,
+  createDashboard,
+  INBOX_DRAIN_TOOL,
+  INTAKE_TOOL,
+  labelWhiteboard,
+  parseInboxDrain,
+  statusFigures,
+  userPrompt,
+  type DashboardEvent,
+  type IntakeResult,
+} from './dashboard'
 import { createManual, type ReadFamily } from './manual'
 import { expandPreload } from './preload'
 import { createReconnect, reconnectDescription, TOOL_NAME as RECONNECT_TOOL } from './reconnect'
@@ -137,9 +148,10 @@ export const KNOB = {
   dashboard: 'claude.dashboard_enabled',
 } as const
 
-/** Whether an intake result was delivered: not an error result. */
-export function intakeDelivered(res: { isError?: boolean } | undefined): boolean {
-  return res?.isError !== true
+/** An intake result's outcome: delivered unless an error result, with its text blocks joined. */
+export function intakeResult(res: { isError?: boolean; content?: readonly { type: string; text?: string }[] } | undefined): IntakeResult {
+  const text = (res?.content ?? []).flatMap((b) => (b.type === 'text' && typeof b.text === 'string' ? [b.text] : [])).join('\n')
+  return { ok: res?.isError !== true, text }
 }
 
 /**
@@ -517,7 +529,12 @@ export const register: Register = (on) => {
   /** The conversation's key from the manual feature, the dashboard feed's first choice; cleared at session.end. */
   let manualKey: string | undefined
   /** The intake call for the latest session.start; undefined before, which reads as a failed call. */
-  let dashCall: ((args: { session_key: string; adapter: string; events: DashboardEvent[] }) => Promise<boolean>) | undefined
+  let dashCall: ((args: { session_key: string; adapter: string; events: DashboardEvent[] }) => Promise<IntakeResult>) | undefined
+  /** The usage read for the feed's status, set at session.start; undefined before. */
+  let dashUsage: (() => Promise<SessionUsage>) | undefined
+  /** The feed's usage read: one at a time, a request during it leaving one trailing read. */
+  let dashUsageBusy = false
+  let dashUsageAgain = false
   let dashLog: (text: string) => void = () => {}
   let dashAfter: ((ms: number, fn: () => void) => { cancel: () => void }) | undefined
   /** Whether the latest session.start's dashboard knob read on: the push's wait then wakes on board messages too. */
@@ -605,6 +622,30 @@ export const register: Register = (on) => {
     epoch: () => Math.random().toString(36).slice(2, 10).padEnd(8, '0'),
     log: (text) => dashLog(text),
   })
+
+  /** Reads the usage and hands its figures to the feed, while the feed runs. */
+  const feedStatus = () => {
+    const read = dashUsage
+    if (!read || !dashboard.active()) return
+    if (dashUsageBusy) {
+      dashUsageAgain = true
+      return
+    }
+    dashUsageBusy = true
+    void (async () => {
+      try {
+        do {
+          dashUsageAgain = false
+          const figures = statusFigures(await read())
+          if (dashboard.active()) dashboard.status(figures)
+        } while (dashUsageAgain && dashboard.active())
+      } catch (err) {
+        dashLog(`usage read failed: ${String(err)}`)
+      } finally {
+        dashUsageBusy = false
+      }
+    })()
+  }
 
   on('session.start', async ($, e, next) => {
     const label = mailboxLabel($.plugin.name)
@@ -871,15 +912,19 @@ export const register: Register = (on) => {
     dashCall = async (args) => {
       await serverResolved
       if (!server) throw new Error('MCP server not resolved')
-      return intakeDelivered(await $.mcp.call(server, INTAKE_TOOL, args))
+      return intakeResult(await $.mcp.call(server, INTAKE_TOOL, args))
     }
+    dashUsage = () => $.session.usage({ breakdown: 'summary' })
     boardOn = false
     void readKnob(KNOB.dashboard)
       .then((value) => {
         if (startSeq !== starts) return
         boardOn = value === true
-        if (value === true) dashboard.start()
-        else dashboard.stop()
+        if (value === true) {
+          dashboard.start()
+          // Figures from the start, not only after the first measure.
+          feedStatus()
+        } else dashboard.stop()
         // A wait armed before the read settled takes the board flag now.
         watcher?.boardChanged()
       })
@@ -1291,6 +1336,7 @@ export const register: Register = (on) => {
   // fresh usage read once the main thread is idle. The plain figures cost
   // nothing, and the breakdown is read only when the feature's cache is empty
   // (session start or end, a landed compaction) or the window changed.
+  // The band and the dashboard feed each read the usage afresh on every one.
   on('session.measure', async ($, e, next) => {
     const res = await next(e)
     try {
@@ -1303,6 +1349,7 @@ export const register: Register = (on) => {
     } catch (err) {
       $.ui.log(`${$.plugin.name} band: usage observation failed: ${String(err)}`, { to: 'debug' })
     }
+    feedStatus()
     return res
   })
 
