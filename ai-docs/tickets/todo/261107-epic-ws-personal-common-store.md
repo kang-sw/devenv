@@ -46,6 +46,15 @@ repository sized for 50-60 people, reached from the dashboard.
   refusal), planned ahead of the data structures by board (235) a, since the
   data structures do not affect it. The data-structure layer stays behind the
   mockup.
+- Mockup v3 (`ai-docs/ref/tracker-mockup/`, merged 2026-11-08) settled the
+  data structures: README Settled rows through (293) and a nine-scenario walk
+  in `SCENARIOS.md`.
+- `261108-feat-ws-tracker-data-structure`: the Go domain layer over
+  `wsledger` (event types, validation, fold, view state JSON in the mockup's
+  View state shape), ported from the mockup engine with golden parity tests
+  (board (283) a). No caller surface.
+- Next (unplanned): the caller child, covering MCP and skill exposure
+  ((115)), the dashboard drawer, sync triggers, and config.
 
 ## Cross-Child Decisions
 
@@ -89,6 +98,13 @@ repository sized for 50-60 people, reached from the dashboard.
     followers, and subtask progress rolls up to the parent.
   - Completion is chosen per task at assignment time: either the assignee
     closes it, or the assigner must confirm. The default is assignee closes.
+  - Amended 2026-11-08 (board (273) b, (279) a, (280) a): assignment is
+    unified. Chosen people may be anyone in the store; a target within the
+    author's lead chain is forced and live, anyone else gets a pending
+    assignment until accept or decline, and on accept the accepter's direct
+    lead is notified and may return it. An assignee may hand off its
+    assignment. "Everyone within N" stays forced-only. Detail: the mockup
+    README.
 - **Agent recording** (user, board (123) b): an agent automatically records
   progress and completion only for tasks assigned to its user; anything else
   is recorded on request. Rejected: recording only on request; automatic
