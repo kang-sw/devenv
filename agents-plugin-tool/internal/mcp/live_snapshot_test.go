@@ -500,7 +500,10 @@ func TestDashboardRepoReadOncePerHeartbeat(t *testing.T) {
 	var reads, writes atomic.Int32
 	orig := currentLiveSeams()
 	setLiveSeams(func(s *liveSeams) {
-		s.readRepo = func(root string) wslive.Repo { reads.Add(1); return wslive.Repo{Folder: filepath.Base(root), Branch: "main"} }
+		s.readRepo = func(root string) wslive.Repo {
+			reads.Add(1)
+			return wslive.Repo{Folder: filepath.Base(root), Branch: "main"}
+		}
 		s.writeSnapshot = func(path string, data []byte) error { writes.Add(1); return orig.writeSnapshot(path, data) }
 	})
 	for i := 0; i < 4; i++ {

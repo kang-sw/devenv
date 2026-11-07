@@ -78,7 +78,7 @@ type LimitChip struct {
 	// ResetsAt is the reset (epoch ms; 0 unknown) and ResetFormat the page's
 	// format for it: a clock time for the 5-hour limit, a weekday for the
 	// weekly one. ResetText is its fallback text (UTC).
-	ResetsAt              int64
+	ResetsAt               int64
 	ResetFormat, ResetText string
 	// WindowSec is the limit's window, which the page's pace reads.
 	WindowSec int64
