@@ -36,11 +36,15 @@ var dashboardFS embed.FS
 // finished messages of the live view, which the page merges by entry name
 // and never re-renders) and convlive (the streaming reply, the approval or
 // activity line, the held messages), which a streaming tick changes alone.
+// The status band is two regions inside the composer: ctx (the context bar
+// above the message box) and sline (the line below it).
 const (
 	regionHead     = "head"
 	regionTree     = "tree"
 	regionEntries  = "entries"
 	regionConvLive = "convlive"
+	regionCtx      = "ctx"
+	regionSLine    = "sline"
 	regionBoard    = "board"
 	regionPanels   = "panels"
 	regionSessions = "sessions"
@@ -52,7 +56,7 @@ const (
 // sessionRegions lists the regions a session page in mode holds.
 func sessionRegions(mode string) []string {
 	if mode == modeLive {
-		return []string{regionHead, regionTree, regionEntries, regionConvLive, regionBoard, regionPanels}
+		return []string{regionHead, regionTree, regionEntries, regionConvLive, regionCtx, regionSLine, regionBoard, regionPanels}
 	}
 	return []string{regionHead, regionBoard, regionPanels}
 }

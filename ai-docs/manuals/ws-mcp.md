@@ -82,7 +82,17 @@ tools never depend on it. Its state lives under `<cache root>/dashboard/`:
   its `updatedAt`) and its conversation ring (the last 50 finished messages,
   one file each). ws-mcp writes them from host adapter events
   (`dashboard.intake`) and from its mailbox send and recv path, only for a
-  registered session; `internal/wslive` holds the schema and readers.
+  registered session; `internal/wslive` holds the schema and readers. An
+  intake result carries an `accepts: status` line naming the optional event
+  kinds this ws-mcp takes; an adapter sends a `status` event (the session's
+  context, usage limits, and cost for the page's status band) only while the
+  latest result names it, since an older ws-mcp skips the kind per event, and
+  the "dashboard off" result names none. The snapshot's `repo` fields (the
+  root's folder, branch, upstream, ahead and behind) come from ws-mcp's own
+  `rev-parse` and `rev-list --left-right --count` reads, cached per session
+  and refreshed at most once per heartbeat interval from the writer's timer,
+  never per change snapshot; there is no automatic fetch, so behind reflects
+  the last one.
 - `sessions/<reply-id>/inbox/` - the board-answer inbox (`internal/wsinbox`):
   held messages the user sent from the page, one file each; `drained/` keeps
   the newest 20 as sent records. The adapter-only `dashboard.inbox_drain` tool
@@ -100,7 +110,14 @@ The daemon serves its pages with no CORS: `/` lists sessions by project
 `/s/<reply-id>/events` are their SSE streams, which send only the page regions
 whose hash changed. A session with a fresh adapter snapshot gets the live
 layout (lead, agent tree, conversation, board); one without gets the
-board-first page. On the served board and in the conversation's lead
+board-first page. The live layout's composer carries the status band: the
+context bar (percent, tokens of the window, the last response's cache hit
+rate) above the message box, and below it the folder, branch, upstream
+standing, the 5-hour and weekly usage limits (each with its reset and its
+pace, which the page computes), and the cost (`~$` for an estimate, a
+trailing `+` when calls of unknown price were left out). A part with no
+figure is left out; context and limits warn at 80% and turn critical at 95%;
+below a 360px band only the limit under more pressure stays. On the served board and in the conversation's lead
 replies, a file link renders as an action link (`data-wl="file"`, titled with
 its repo-relative path) and an http(s) link is marked `data-wl="url"`: a
 click opens a menu (open in new tab, open in system browser, copy relative or
