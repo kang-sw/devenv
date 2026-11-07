@@ -351,8 +351,10 @@ func (ls *liveSession) currentRepo() *wslive.Repo {
 // repoReadTimeout bounds one session's git reads.
 const repoReadTimeout = 5 * time.Second
 
-// readSessionRepo reads root's folder and branch standing; a root that is
-// not a repository has the folder alone.
+// readSessionRepo reads root's folder, branch standing, and working-tree
+// counts; a root that is not a repository has the folder alone. A failed
+// working-tree read leaves the counts zero, so the page shows no change chip
+// while the branch and sync still show.
 func readSessionRepo(root string) wslive.Repo {
 	repo := wslive.Repo{Folder: filepath.Base(root)}
 	if root == "" {
@@ -368,6 +370,9 @@ func readSessionRepo(root string) wslive.Repo {
 	repo.Branch, repo.Upstream, repo.Ahead, repo.Behind = st.Head, st.Upstream, st.Ahead, st.Behind
 	if st.Head == "" {
 		repo.Branch, repo.Detached = st.OID, true
+	}
+	if c, ok := wsgit.WorkingTreeCounts(ctx, nil, root); ok {
+		repo.Modified, repo.Staged, repo.Untracked = c.Modified, c.Staged, c.Untracked
 	}
 	return repo
 }

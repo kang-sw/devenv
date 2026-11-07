@@ -148,6 +148,51 @@ func BranchSync(ctx context.Context, runner Runner, root string) (status BranchS
 	return status, true
 }
 
+// TreeCounts counts a working tree's entries by kind. A file changed in both
+// the index and the working tree counts as Staged and as Modified; an
+// unmerged path counts as Modified alone; an untracked directory counts once.
+type TreeCounts struct {
+	Modified  int
+	Staged    int
+	Untracked int
+}
+
+// WorkingTreeCounts reads root's working-tree standing with one `git status
+// --porcelain`, untracked files included and ignored ones not. It takes no
+// optional lock, so a periodic read never makes a concurrent git command of
+// the user's fail on index.lock. ok is false when git fails (not a
+// repository, a canceled or timed-out read).
+func WorkingTreeCounts(ctx context.Context, runner Runner, root string) (counts TreeCounts, ok bool) {
+	if runner == nil {
+		runner = ExecRunner{}
+	}
+	out, err := runner.RunGit(ctx, root, "--no-optional-locks", "status", "--porcelain")
+	if err != nil {
+		return TreeCounts{}, false
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		if len(line) < 2 {
+			continue
+		}
+		x, y := line[0], line[1]
+		switch {
+		case x == '?' && y == '?':
+			counts.Untracked++
+		case x == '!' && y == '!':
+		case x == 'U' || y == 'U' || (x == 'A' && y == 'A') || (x == 'D' && y == 'D'):
+			counts.Modified++
+		default:
+			if x != ' ' {
+				counts.Staged++
+			}
+			if y != ' ' {
+				counts.Modified++
+			}
+		}
+	}
+	return counts, true
+}
+
 type FileStatus struct {
 	Path           string `json:"path"`
 	OldPath        string `json:"old_path,omitempty"`

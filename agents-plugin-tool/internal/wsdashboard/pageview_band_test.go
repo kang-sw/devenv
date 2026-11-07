@@ -102,6 +102,18 @@ func TestBandRepoStates(t *testing.T) {
 	contains(t, "not a repository", sline, `<span>scratch</span>`)
 	lacks(t, "not a repository", sline, "sb-br", "sb-sync")
 
+	// The working-tree chip: each non-zero count with its glyph and a title
+	// spelling the counts; a clean tree shows no chip.
+	_, sline = bandRegions(t, nil, &wslive.Repo{Folder: "d", Branch: "b", Upstream: "origin/b", Modified: 3, Staged: 1, Untracked: 2})
+	contains(t, "dirty chip", sline, `class="sb-diff"`, `<b class="mod">~3</b>`, `<b class="add">+1</b>`, `<b class="unt">?2</b>`, "working tree: 3 modified 1 staged 2 untracked")
+	_, sline = bandRegions(t, nil, &wslive.Repo{Folder: "d", Branch: "b", Untracked: 4})
+	contains(t, "untracked only", sline, `<b class="unt">?4</b>`, "working tree: 4 untracked")
+	lacks(t, "untracked only", sline, `class="mod"`, `class="add"`)
+	_, sline = bandRegions(t, nil, &wslive.Repo{Folder: "d", Branch: "1a2b3c4", Detached: true, Modified: 1})
+	contains(t, "detached dirty", sline, `<b class="mod">~1</b>`)
+	_, sline = bandRegions(t, nil, &wslive.Repo{Folder: "d", Branch: "b", Upstream: "origin/b"})
+	lacks(t, "clean tree", sline, "sb-diff")
+
 	// Branch names reach the page escaped.
 	_, sline = bandRegions(t, nil, &wslive.Repo{Folder: "d", Branch: "<b>x"})
 	contains(t, "escaped branch", sline, "&lt;b&gt;x")
