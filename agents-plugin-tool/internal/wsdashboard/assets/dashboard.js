@@ -386,7 +386,8 @@
   if (convo) convo.addEventListener("scroll", nearTop);
 
   // mermaid draws every undrawn mermaid block, loading the shared script
-  // once; a call while it loads is covered by the draw its onload runs.
+  // once; a call while it loads is covered by the draw its onload runs, and
+  // a failed load (daemon restarting) is retried by the next call.
   var mermaidLoading = false;
   function mermaid() {
     if (!q("pre.mermaid:not([data-processed])").length || !window.wbMermaidFile) return;
@@ -396,6 +397,7 @@
     var s = doc.createElement("script");
     s.src = window.wbMermaidFile; // relative: the server serves it beside the page
     s.onload = function () { window.wbMermaid(); };
+    s.onerror = function () { mermaidLoading = false; s.parentNode.removeChild(s); };
     doc.head.appendChild(s);
   }
 
