@@ -471,6 +471,8 @@
     });
   }
   if (ctext) {
+    var csend = $("csend");
+    if (csend) csend.addEventListener("click", function () { sendMessage(); ctext.focus(); });
     ctext.addEventListener("input", function () { grow(); syncNote(); });
     ctext.addEventListener("keydown", function (e) {
       if (e.key !== "Enter") return;
