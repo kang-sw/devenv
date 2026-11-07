@@ -21,7 +21,7 @@ shows HTML inline. Workers and subagents do not use it.
   session's dashboard page URL while the dashboard daemon serves the session,
   else the full page path relative to the session root), and
   `embed:` (the new snapshot's path, or its bare file name while `embed_dir`
-  is set).
+  is set), and `now_file:` (the absolute path of the session's Now file).
 - `{{.McpNamespace}}/whiteboard.query(session_key, payload)` returns stored
   items, settled ones included, and changes nothing. Query before adding, so
   a question the board already holds is patched or reused rather than added
@@ -44,8 +44,7 @@ whiteboard.update payload: {
   answer?:       [{id, answer, answer_quote, assumed?}],
   patch?:        [{id, title?, options?, recommendation?, rationale?, links?, status?}],
   close_topics?: [topic],
-  now?:          markdown,         "" clears the Now slot
-  now_path?:     .md file path,    exclusive with now
+  now_path?:     .md file path,    "" clears the Now slot
   id_floor?:     number,
   embed_dir?:    absolute path,    "" clears
 }
@@ -68,7 +67,7 @@ whiteboard.query payload: {topic?, status?, id?}
   `options`, `rationale`, and `recommendation` take block markdown with
   line breaks kept: lists, code blocks, tables, images, and a
   `` ```mermaid `` fenced block drawn as a diagram. Raw HTML shows as text in
-  every field but `now`. A link or image path is relative to the session
+  every field but the Now file. A link or image path is relative to the session
   root or absolute; images are local files only, links may also be
   http(s). An open technical or announced item shows its `rationale` inline,
   one line per reason.
@@ -76,7 +75,7 @@ whiteboard.query payload: {topic?, status?, id?}
   policy item's context.
 - `links`: strings such as a ticket stem, a commit, or `supersedes {{12}}`.
 - Item references: write `{{12}}` in `title`, `options`, `recommendation`,
-  `rationale`, `links`, the markdown text of `now` (never inside its HTML),
+  `rationale`, `links`, the markdown text of the Now file (never inside its HTML),
   or the reading part of an `answer` to cite item `(12)`. The page shows it
   as `(12)`, linked when that item is on the page, and leaves it verbatim
   when the store holds no such item; a reference is never refused. A plain
@@ -97,15 +96,23 @@ whiteboard.query payload: {topic?, status?, id?}
   an option letter. `query.status` takes any of the five statuses.
 - `close_topics`: collapses the topics' settled items at once; adding an item
   to a closed topic reopens it.
-- `now`: block markdown as in `options`, with inline HTML written as is,
-  never a full HTML document, for explanations and drawings: inline SVG, or
-  canvas 2D drawn by an inline script, with no external `src`, `href`, or
-  fetch. It stays until a later `now` replaces it or `""` clears it, always
-  above the topics: open on the update that changed it, collapsed and greyed
-  after. `now_path` names a markdown file holding it, relative to the session
-  root or absolute, read once at that update. A large standalone visual goes
-  to a `{{.McpNamespace}}/path.generate` file linked from it.
-- HTML in `now`: a line that starts with a block tag such as `<div>` or
+- Now slot: the `now_file` path is the session's one Now file; the server
+  never creates it. Write the Now markdown there with the host's file tool and
+  pass the path as `now_path`, which is read once at that update. Change the
+  Now by editing that file in place with the host's edit tool and passing
+  `now_path` again, never by rewriting the whole text; the same text is no
+  change. `now_path: ""` clears the slot, and an update without `now_path`
+  leaves it as stored. Any other markdown file works the same way, relative to
+  the session root or absolute, such as a Now that must exist before the
+  first update has returned `now_file`. The file is block markdown as in
+  `options`, with inline HTML written as is, never a full HTML document, for
+  explanations and drawings: inline SVG, or canvas 2D drawn by an inline
+  script, with no external `src`, `href`, or fetch. The slot stays until a
+  later `now_path` replaces it or `""` clears it, always above the topics:
+  open on the update that changed it, collapsed and greyed after. A large
+  standalone visual goes to a `{{.McpNamespace}}/path.generate` file linked
+  from it.
+- HTML in the Now file: a line that starts with a block tag such as `<div>` or
   `<details>`, or holds a lone tag such as `<svg ...>`, starts raw HTML that
   runs to the next blank line, so put a blank line between HTML and the
   markdown after it, and keep blank lines out of HTML, since an indented line
@@ -117,7 +124,7 @@ whiteboard.query payload: {topic?, status?, id?}
 - A batch is validated whole: any problem refuses all of it, and the refusal
   lists every problem and repeats this schema. An accepted batch applies in
   the order `embed_dir`, `id_floor`, `add`, `answer`, `patch`,
-  `close_topics`, then `now` or `now_path`.
+  `close_topics`, then `now_path`.
 
 ## Each turn
 

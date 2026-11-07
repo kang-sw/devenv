@@ -399,15 +399,27 @@ func TestApplyNowRules(t *testing.T) {
 	}
 	mustApply(t, st, `{"id_floor":1}`)
 	if st.NowFresh() {
-		t.Fatalf("an update without now must leave Now stale")
+		t.Fatalf("an update without now_path must leave Now stale")
 	}
-	if _, problems := Apply(st, payload(t, `{"now":"<p>x</p>","now_path":"/tmp/now.html"}`), env); !hasProblem(problems, "now and now_path are exclusive") {
-		t.Fatalf("now+now_path problems = %v", problems)
+	// The inline field is gone: refused with a pointer at now_path, and
+	// nothing else in the batch applies.
+	for _, raw := range []string{`{"now":"<p>x</p>"}`, `{"now":"<p>x</p>","now_path":"/tmp/now.md"}`, `{"now":""}`} {
+		before := st.Now
+		_, problems := Apply(st, payload(t, raw), env)
+		if !hasProblem(problems, "payload.now: no longer accepted") || !hasProblem(problems, "now_path") {
+			t.Fatalf("%s problems = %v", raw, problems)
+		}
+		if hasProblem(problems, "unknown field") {
+			t.Fatalf("%s: the removed field must not also read as an unknown field: %v", raw, problems)
+		}
+		if st.Now != before {
+			t.Fatalf("%s: a refused batch changed Now to %q", raw, st.Now)
+		}
 	}
 	for _, doc := range []string{`<!DOCTYPE html><p>x</p>`, `<html><body>x</body></html>`, `<HTML lang=en>`,
 		"# Title\n\n<!DOCTYPE html>\n<p>x</p>", "<!doctype html>\n<html><body>x</body></html>", "Some text <html lang=en> inline."} {
-		raw, _ := json.Marshal(map[string]any{"now": doc})
-		if _, problems := Apply(st, payload(t, string(raw)), env); !hasProblem(problems, "markdown with inline HTML, not a full document") {
+		content["/tmp/doc.md"] = doc
+		if _, problems := Apply(st, payload(t, `{"now_path":"/tmp/doc.md"}`), env); !hasProblem(problems, "markdown with inline HTML, not a full document") {
 			t.Fatalf("full document %q problems = %v", doc, problems)
 		}
 	}
@@ -418,23 +430,30 @@ func TestApplyNowRules(t *testing.T) {
 		"Example:\n\n```html\n<!DOCTYPE html>\n<html lang=en><body></body></html>\n```\n",
 		"Indented:\n\n    <html>\n", "Text <!doctype html> escaped."} {
 		other := &State{}
-		raw, _ := json.Marshal(map[string]any{"now": doc})
-		if _, problems := Apply(other, payload(t, string(raw)), env); len(problems) > 0 || other.Now != doc {
+		content["/tmp/doc.md"] = doc
+		if _, problems := Apply(other, payload(t, `{"now_path":"/tmp/doc.md"}`), env); len(problems) > 0 || other.Now != doc {
 			t.Fatalf("code-only mention %q: problems %v, Now %q", doc, problems, other.Now)
 		}
-	}
-	// Setting the same content again is not a change.
-	mustApply(t, st, `{"now":"<p>from file</p>"}`)
-	if st.NowFresh() {
-		t.Fatalf("identical Now must not count as changed")
-	}
-	mustApply(t, st, `{"now":""}`)
-	if st.Now != "" {
-		t.Fatalf("empty now must clear the slot")
 	}
 	// now_path names a markdown file, stored verbatim like any Now text.
 	if _, problems := Apply(st, payload(t, `{"now_path":"/tmp/now.md"}`), env); len(problems) > 0 || st.Now != "# Status\n\n- <b>green</b>\n" {
 		t.Fatalf("now_path .md file: %v %q", problems, st.Now)
+	}
+	// Reading the same text again is not a change.
+	mustApply(t, st, `{"id_floor":2}`)
+	if _, problems := Apply(st, payload(t, `{"now_path":"/tmp/now.md"}`), env); len(problems) > 0 {
+		t.Fatalf("now_path refused: %v", problems)
+	}
+	if st.NowFresh() {
+		t.Fatalf("identical Now must not count as changed")
+	}
+	// An empty now_path clears the slot, without reading any file.
+	mustApply(t, st, `{"now_path":""}`)
+	if st.Now != "" || st.NowSeq != 0 {
+		t.Fatalf("empty now_path must clear the slot: %q seq %d", st.Now, st.NowSeq)
+	}
+	if _, problems := Apply(st, payload(t, `{"now_path":"/tmp/absent.md"}`), env); !hasProblem(problems, "payload.now_path: cannot read /tmp/absent.md") {
+		t.Fatalf("unreadable now_path problems = %v", problems)
 	}
 }
 

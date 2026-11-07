@@ -3,6 +3,7 @@ package mcp
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -505,6 +506,67 @@ func TestWhiteboardQueryAndNowPathThroughTools(t *testing.T) {
 	}
 }
 
+func TestWhiteboardNowFileIsStablePerSession(t *testing.T) {
+	f := newWhiteboardFixture(t)
+	nowFile := func(result string) string {
+		t.Helper()
+		m := regexp.MustCompile(`(?m)^now_file: (.+)$`).FindStringSubmatch(result)
+		if m == nil {
+			t.Fatalf("update result has no now_file line:\n%s", result)
+		}
+		return m[1]
+	}
+	first := nowFile(f.update(t, `{}`))
+	want := filepath.Join(f.dir(), f.replyID()+".now.md")
+	if first != want {
+		t.Fatalf("now_file = %q, want %q", first, want)
+	}
+	if strings.Contains(first, f.key) {
+		t.Fatalf("now_file %q must not contain the session key", first)
+	}
+	if _, err := os.Stat(first); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the server must not create the Now file itself (stat err %v)", err)
+	}
+	// The lead writes the file, passes it back, and the path stays put.
+	if err := os.WriteFile(first, []byte("**plan** now-file-marker"), 0o644); err != nil {
+		t.Fatalf("write now file: %v", err)
+	}
+	second := nowFile(f.update(t, fmt.Sprintf(`{"now_path":%q}`, first)))
+	if second != first {
+		t.Fatalf("now_file moved between updates: %q then %q", first, second)
+	}
+	page, _ := os.ReadFile(filepath.Join(f.dir(), f.replyID()+".html"))
+	if !strings.Contains(string(page), "now-file-marker") {
+		t.Fatalf("the page must show the Now file's text")
+	}
+	if third := nowFile(f.update(t, `{"now_path":""}`)); third != first {
+		t.Fatalf("now_file moved after a clear: %q then %q", first, third)
+	}
+	page, _ = os.ReadFile(filepath.Join(f.dir(), f.replyID()+".html"))
+	if strings.Contains(string(page), "now-file-marker") {
+		t.Fatalf("an empty now_path must clear the Now slot")
+	}
+
+	// Another session of the same root gets its own file.
+	key2, root2 := parseLoginResponse(t, callLogin(t, f.s, 910001, f.root, nil))
+	other := &whiteboardFixture{s: f.s, key: key2, root: root2, id: 100}
+	if other.key == f.key {
+		t.Fatalf("second login minted the same key")
+	}
+	if got := nowFile(other.update(t, `{}`)); got == first || filepath.Dir(got) != filepath.Dir(first) {
+		t.Fatalf("a second session's now_file = %q, first = %q", got, first)
+	}
+}
+
+func TestWhiteboardNowInlineIsRefused(t *testing.T) {
+	f := newWhiteboardFixture(t)
+	resp := f.call(t, "whiteboard.update", map[string]any{"payload": map[string]any{"now": "<p>n</p>"}})
+	text := toolText(t, resp)
+	if !isToolError(resp) || !strings.Contains(text, "payload.now: no longer accepted") || !strings.Contains(text, "now_path") {
+		t.Fatalf("inline now must be refused with a pointer at now_path: %s", text)
+	}
+}
+
 func TestWhiteboardNowStaysFreshAcrossImplicitRenders(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	pagePath := filepath.Join(f.dir(), f.replyID()+".html")
@@ -517,7 +579,8 @@ func TestWhiteboardNowStaysFreshAcrossImplicitRenders(t *testing.T) {
 		return regexp.MustCompile(`<details class="now[^>]*>`).FindString(string(page))
 	}
 	const fresh, stale = `<details class="now" id="wb-now" open>`, `<details class="now stale" id="wb-now">`
-	f.update(t, `{"add":[{"class":"technical","topic":"t","title":"x"}],"now":"<p>n</p>"}`)
+	mustWrite(t, f.root, "tmp/n.md", "<p>n</p>")
+	f.update(t, `{"add":[{"class":"technical","topic":"t","title":"x"}],"now_path":"tmp/n.md"}`)
 	if got := nowTag(); got != fresh {
 		t.Fatalf("after the update that set Now: %q, want %q", got, fresh)
 	}
@@ -889,18 +952,19 @@ func TestWhiteboardGarbageCollection(t *testing.T) {
 	}
 	f.update(t, `{}`)
 	live := f.embeds(t, f.dir())
-	orphans := []string{"deadorphanid.html", "deadorphanid.stamp.js", "deadorphanid-0123abcd.html"}
+	orphans := []string{"deadorphanid.html", "deadorphanid.stamp.js", "deadorphanid-0123abcd.html", "deadorphanid.now.md"}
 	for _, name := range orphans {
 		mustWrite(t, f.dir(), name, "x")
 	}
 	mustWrite(t, f.dir(), "notes.txt", "kept: not a whiteboard file")
+	mustWrite(t, f.dir(), f.replyID()+".now.md", "kept: a live session's Now file")
 	manual()
 	for _, name := range orphans {
 		if _, err := os.Stat(filepath.Join(f.dir(), name)); !errors.Is(err, os.ErrNotExist) {
 			t.Fatalf("orphan %s must be deleted", name)
 		}
 	}
-	for _, name := range append(live, f.replyID()+".html", f.replyID()+".stamp.js", "notes.txt", whiteboardGCMarker) {
+	for _, name := range append(live, f.replyID()+".html", f.replyID()+".stamp.js", f.replyID()+".now.md", "notes.txt", whiteboardGCMarker) {
 		if _, err := os.Stat(filepath.Join(f.dir(), name)); err != nil {
 			t.Fatalf("%s must be kept: %v", name, err)
 		}

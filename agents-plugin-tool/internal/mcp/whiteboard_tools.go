@@ -45,9 +45,10 @@ const (
 var (
 	errWhiteboardRefused = errors.New("whiteboard batch refused")
 	errNoWhiteboard      = errors.New("session has no whiteboard")
-	// whiteboardFilePattern matches the files a session's board writes:
-	// <reply-id>.html, <reply-id>.stamp.js, <reply-id>-<hash>.html.
-	whiteboardFilePattern = regexp.MustCompile(`^([a-z0-9]+)(?:\.html|\.stamp\.js|-[0-9a-f]+\.html)$`)
+	// whiteboardFilePattern matches the files a session's board writes, and
+	// the Now file its lead writes: <reply-id>.html, <reply-id>.stamp.js,
+	// <reply-id>-<hash>.html, <reply-id>.now.md.
+	whiteboardFilePattern = regexp.MustCompile(`^([a-z0-9]+)(?:\.html|\.stamp\.js|\.now\.md|-[0-9a-f]+\.html)$`)
 )
 
 // Test seams for the rename retry (technical decision 119): a browser polling
@@ -199,12 +200,13 @@ func (s *Server) handleWhiteboardUpdate(id json.RawMessage, args map[string]any)
 		problems []string
 		outcome  wswhiteboard.Outcome
 		render   whiteboardRender
+		root     string
 	)
 	err = s.sessions.mutateRecord(key, func(rec *sessionRecord) error {
 		if rec.Whiteboard == nil {
 			rec.Whiteboard = &wswhiteboard.State{}
 		}
-		root := rec.Root
+		root = rec.Root
 		env := wswhiteboard.Env{
 			Now: time.Now(),
 			ReadFile: func(path string) ([]byte, error) {
@@ -248,6 +250,7 @@ func (s *Server) handleWhiteboardUpdate(id json.RawMessage, args map[string]any)
 	}
 	sb.WriteString("full: " + full + "\n")
 	sb.WriteString("embed: " + render.embed + "\n")
+	sb.WriteString("now_file: " + whiteboardNowFile(root, key) + "\n")
 	return toolTextResponse(id, sb.String(), nil)
 }
 
@@ -474,6 +477,15 @@ func ensureWhiteboardMermaid(dir, html string) error {
 		return fmt.Errorf("write %s: %w", name, err)
 	}
 	return nil
+}
+
+// whiteboardNowFile is the session's stable Now file, an absolute path inside
+// the whiteboard folder: the lead writes its Now markdown there and passes
+// the path as now_path. The name carries the reply id, never the session key,
+// so the folder listing leaks no credential; the orphan scan deletes the file
+// with the rest of a dead session's board. The server never creates it.
+func whiteboardNowFile(root, sessionKey string) string {
+	return filepath.Join(root, filepath.FromSlash(whiteboardDirRel), wsmailbox.ReplyID(sessionKey)+".now.md")
 }
 
 // whiteboardRender is one render's outcome. Its file side effects settle
