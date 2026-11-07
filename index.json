@@ -632,7 +632,14 @@
       "registered_at": "2026-11-07T05:11:56Z"
     },
     "261107-feat-ws-dashboard-interrupt-badge": {
-      "registered_at": "2026-11-07T14:51:39Z"
+      "registered_at": "2026-11-07T14:51:39Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-07T15:17:56Z"
+      }
     },
     "261107-feat-ws-tracker-ledger-protocol": {
       "registered_at": "2026-11-07T14:35:26Z",
