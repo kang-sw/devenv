@@ -4,6 +4,7 @@ related:
   260902-feat-ws-pi-native-mvp: the motivating case — an early Pi acceptance probe required a real interactive TTY that no non-interactive driver could reach
 related-mental-model:
   - workflow-skills
+dropped: 2026-11-08
 ---
 
 # Human-relay interactive gate: package TTY-only test scenarios for one-shot human execution
@@ -67,3 +68,8 @@ the human run attributed as first-hand evidence (as the Phase 4 Result now does)
 - Replacing agent-driven gates where non-interactive driving already works.
 - Building the skill in this ticket — this is capture + design intent only;
   construction waits on an explicit go-ahead.
+
+
+## Resolution (2026-11-08)
+
+Unclear: no such skill exists and the motivating Pi MVP case is long done with no recurrence. Board (458) b triage.

@@ -1,5 +1,6 @@
 ---
 title: Pi cannot resume a settled execute-worker when its owned session home is unavailable
+dropped: 2026-11-08
 ---
 
 # Pi cannot resume a settled execute-worker when its owned session home is unavailable
@@ -15,3 +16,8 @@ This forced the lead to spawn a replacement execute-worker for the second half o
 ### Phase 1: Restore or correct execute-worker continuation
 
 Reproduce the settled execute-worker continuation failure, identify the lifetime mismatch, and either make dormant execute-workers resumable as documented or narrow the exposed contract consistently. Add regression coverage for the chosen behavior.
+
+
+## Resolution (2026-11-08)
+
+No repro and no recurrence; execute-worker resume is explicitly supported. Board (458) b triage.

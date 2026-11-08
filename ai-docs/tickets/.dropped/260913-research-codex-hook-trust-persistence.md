@@ -2,6 +2,7 @@
 title: Codex hook-trust persistence mechanism (dogfood gap from the mailbox wake Codex adapter)
 related:
   260913-feat-cross-session-mailbox-wake: prior-art — Phase 2's Codex Stop-hook adapter assumed a persistable hook-trust deployment step; this ticket investigates whether one currently exists
+dropped: 2026-11-08
 ---
 
 # Codex hook-trust persistence mechanism
@@ -79,3 +80,8 @@ with the missing key.
 ### Rejected Alternatives
 
 (none yet)
+
+
+## Resolution (2026-11-08)
+
+Needs an interactive Codex run; the gap is already recorded at ai-docs/manuals/codex-integration.md. Board (458) b triage.

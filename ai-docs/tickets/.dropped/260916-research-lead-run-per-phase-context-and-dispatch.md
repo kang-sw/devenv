@@ -4,6 +4,7 @@ related:
   260831-research-ai-phase-over-granularity-review-load: same axis — phase granularity and review/dispatch load
   260611-bug-agent-context-exhaustion-opaque-failure: the size pressure that forces coupled phases to split into phases
   260915-feat-ws-rationale-query-and-prior-decisions: dogfood session that surfaced this; its Phase 2 populator writes a bounded prior-decisions section into the ticket, a candidate durable home for per-phase state
+dropped: 2026-11-08
 ---
 
 # lead-run per-phase context savings and dispatch discipline
@@ -79,3 +80,8 @@ direction only.
   the Result, or the lead infers it.
 - How this composes with the phase-over-granularity work (they may share one
   fix).
+
+
+## Resolution (2026-11-08)
+
+Direction-only, needs owner agreement; dispatch model reshaped by mini-lead and defer-phase-merge work. Board (458) b triage.

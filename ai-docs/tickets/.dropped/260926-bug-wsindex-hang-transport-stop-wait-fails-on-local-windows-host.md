@@ -1,5 +1,6 @@
 ---
 title: Hang-transport stop wait fails on the local Windows test host
+dropped: 2026-11-08
 ---
 
 # Hang-transport stop wait fails on the local Windows test host
@@ -41,3 +42,8 @@ timeout.
   file appears (the poll loop, the background `cat`, or git's own ssh child),
   and should the Windows wait kill the transports' processes instead of
   relying on the script to notice the stop file?
+
+
+## Resolution (2026-11-08)
+
+Host-specific (Git for Windows 2.38.1); CI windows-latest passes. Board (458) b triage.

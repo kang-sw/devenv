@@ -8,6 +8,7 @@ related-mental-model:
   - documentation-system
   - mcp-runtime
   - workflow-skills
+dropped: 2026-11-08
 ---
 
 # api namespace documentation and hierarchical memory tooling
@@ -72,3 +73,8 @@ Candidate product areas:
   ticket.
 - Deferred: downstream project-specific documentation stores and application
   memory systems leave through downstream tickets.
+
+
+## Resolution (2026-11-08)
+
+Unclear, no children ever filed; only api.list survives and layered memory is now note.*. Board (458) b triage.

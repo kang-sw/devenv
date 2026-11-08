@@ -5,6 +5,7 @@ related:
   260625-bug-wsflow-rsrc-mirror-regen-missed-after-shipped-edit: adjacent staleness class — that one is a missed regen, this one is a render path that ignores the tree
   260611-bug-rsrc-manifest-regen-missed-after-shipped-edit: same class
 sage-review-design: required
+dropped: 2026-11-08
 ---
 
 # playbook.render serves pre-edit prompt text, so subagent runs are not reproducible against the tree
@@ -103,3 +104,8 @@ Verification boundary: the diagnosis names the resolved source root, the reason 
 won over the working tree, and whether `playbook.print` shares the behavior —
 reproduced at least twice, with the second run after touching the source file so
 mtime-based caching is excluded as the explanation.
+
+
+## Resolution (2026-11-08)
+
+Unclear, no repro: cause never diagnosed and the cited wsagent/agent.go is retired mercenary code. Board (458) b triage.

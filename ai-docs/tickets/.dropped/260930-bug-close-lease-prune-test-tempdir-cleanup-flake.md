@@ -2,6 +2,7 @@
 title: TestCloseLeaseAndPruneOnLanding flakes on TempDir cleanup of origin.git/objects
 related:
   260925-bug-windows-remote-timeout-leaves-child-processes: possibly the same leaked git child writing after its parent returns
+dropped: 2026-11-08
 ---
 
 # TestCloseLeaseAndPruneOnLanding flakes on TempDir cleanup of origin.git/objects
@@ -38,3 +39,8 @@ Since d9982cd38 CI shards pass `-count=1`, so every run exercises it.
 - Is the fix in the product (reap or wait for every git child) or in the test
   harness (disable auto gc/maintenance for the fixture repos, or wait for
   quiescence before cleanup)? Only a product-side leak matters to users.
+
+
+## Resolution (2026-11-08)
+
+One CI observation, no fix or recurrence found. Board (458) b triage.
