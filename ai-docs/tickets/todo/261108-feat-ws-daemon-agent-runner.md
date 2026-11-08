@@ -5,6 +5,8 @@ related:
   260908-feat-ws-pi-claude-code-lead-provider: prior billing finding (system prompt content routed to extra usage)
   261002-chore-ws-pi-retire-ws-claude-and-soften-compaction-advisory: prior headless claude delegate, retired as unstable
   261106-feat-ws-dashboard-claude-adapter: live dashboard Claude stream-json adapter
+sage-review-design: blocked
+sage-review-completeness: blocked
 ---
 
 # ws daemon agent runner: profile-driven headless agents (claude, pi) hosted by the dashboard daemon
@@ -77,15 +79,27 @@ renderer shows it.
   the Pi spawner's launch shape (`--no-extensions`, an explicit `--extension`
   only when the profile names one, `--tools <allowlist>`; see
   `agents-plugin-pi/src/spawner.ts`, search `--no-extensions`).
-- **Profiles are config knobs** (board (306) ok): a profile family
-  `agent.profile.<name>.*` holding at least backend, model, effort, tool
-  allowlist, MCP servers allowed (default none), plugins/skills/extensions
-  (default off), instruction file, and idle timeout. The ws and wsflow
-  config manifests carry the same keys and differ only in defaults
-  (epic `261107-epic-ws-personal-common-store` Config decision, (138)).
+- **Profiles are a built-in structured config family** (board (306) ok,
+  (329) a): `agent.profile.<name>`, one object per profile read by ws-mcp
+  code, following the `worktree.profile.<name>` precedent
+  (`internal/mcp/worktree_profile.go`, structured overrides in
+  `config_registry.go`). A profile holds at least backend, model, effort,
+  tool allowlist (built-in and ws tools), MCP servers allowed (default
+  none), plugins/skills/extensions (default off), instruction file, idle
+  timeout, and the session-index listing knob. No profile ships by default;
+  each consumer ticket ships its own profile, and users override or add
+  profiles through config. Rejected: declaring the family in the ws and
+  wsflow adapter config manifests with per-package defaults (the original
+  (306) wording), because the manifest schema declares exact keys only, one
+  namespace per file (`internal/mcp/config_manifest.go`), and a
+  parameterized family would change a contract downstream adapters see.
 - **Output through `internal/wslive`** (user direction, board topic): each
   agent conversation gets its own dashboard session directory and the runner
-  writes its snapshot and ring with the `wslive` writers, so the existing
+  writes its snapshot and ring through `wslive` (the reducer `wslive.NewState`
+  and `State.Snapshot`, and `wslive.AppendRing`; `wslive` has no snapshot file
+  writer, the only one today is `writeLiveSnapshot` in
+  `agents-plugin-tool/internal/mcp/live_snapshot.go#L450-L456`, so the runner
+  writes `wslive.SnapshotPath(dir)` itself), so the existing
   conversation renderer and SSE serve it unchanged.
 - **Control through the daemon's REST API** (user direction): consumers
   start, send to, interrupt, and stop agent conversations over daemon routes.
@@ -94,7 +108,8 @@ renderer shows it.
   ok): loopback, plus the LAN token when LAN is on, the same gate every
   dashboard route uses. Rejected: a separate auth scheme for agent routes.
 - **One minted reply-id session directory per conversation** (board (315)
-  ok): the runner mints a reply-id and writes under `wslive.SessionDir`
+  ok): the runner mints a reply-id and writes under `wsdashboard.SessionDir`
+  (`agents-plugin-tool/internal/wsdashboard/registry.go#L101-L103`, not a `wslive` symbol)
   in the daemon state, like a lead session's, so `wslive` readers, paging,
   and SSE work unchanged. Rejected: a new store for agent output.
 - **Hidden from the session index by default** (board (316) a): a consumer
@@ -120,6 +135,27 @@ renderer shows it.
   a turn is billed as extra usage; Phase 2 is the pi backend. Rejected: one
   phase, since the billing outcome gates everything built on the claude
   path.
+- **A conversation is bound to a working root** (board (330) a): the
+  create route carries a working root; the profile resolves through that
+  root's config layers (project when present, else the global ones), the
+  child runs with that root as cwd, a relative instruction-file path
+  resolves against it, and the attached ws-mcp serves that root. The
+  tracker chat passes the store's local clone; an indexing agent passes its
+  project. Rejected: global-only profiles that each name a working
+  directory. One machine-wide daemon serves every session and reads no
+  config today (`cmd/ws-mcp/dashboard.go` takes only port, LAN, and build
+  time), so resolution must never depend on which harness started it.
+- **Sends during a running turn are held** (board (327) ok): a send while a
+  turn runs is held and submitted as the next turn when the running turn
+  ends, several held sends merging into one; never rejected and never
+  injected into the live turn. This matches the dashboard composer's
+  mid-turn behaviour for lead sessions, which the chat card reuses.
+- **`stop` and `close` are separate** (board (328) a): `stop` ends the
+  process only, and the conversation resumes lazily on the next send like
+  an idle exit; `close` ends the conversation for good, later sends are
+  refused, and the session directory stays readable. A consumer's "new
+  conversation" is `close` plus create. Rejected: a single `stop` meaning
+  either one.
 - **ws-mcp attached with the profile's allowlist as a surface filter**
   (board (326) ok, user: "새로 열리는 에이전트 세션에 ws-mcp를 제한된
   프로필로 붙이는 방식"): a profile that allows ws tools gets ws-mcp over
@@ -128,7 +164,7 @@ renderer shows it.
   ws tool names; ws-mcp advertises (`tools/list`) and accepts
   (`tools/call`) only those. The agent profile is the single source of the
   restriction. Precedent: the env-gated surface filter `NoAgentMode` with
-  `noAgentHiddenTool` in `internal/mcp/server.go`. The filter is what lets
+  `noAgentHiddenTool` in `internal/mcp/server.go` (`WS_MCP_NO_AGENT`, `server.go#L508-L516`, `server.go#L5467-L5480`). The filter is what lets
   the init-message check (Constraints) pass, since `--allowedTools` denies
   calls but leaves tools visible. Rejected: named toolsets defined in
   ws-mcp code (two places to edit per new agent); a daemon-hosted MCP
@@ -138,8 +174,8 @@ renderer shows it.
 
 - Read `ai-docs/manuals/shipped-surface-boundary.md` before editing under
   `agents-plugin-tool/`, `agents-plugin/`, or `agents-plugin-wsflow/`;
-  `ai-docs/manuals/wsflow-mirroring.md` for the wsflow config manifest; and
-  `ai-docs/manuals/ws-mcp.md` if `internal/mcp/` is touched.
+  `ai-docs/manuals/wsflow-mirroring.md` if a wsflow package surface is
+  touched; and `ai-docs/manuals/ws-mcp.md` if `internal/mcp/` is touched.
 - The runner lives in the dashboard daemon (`agents-plugin-tool/internal/wsdashboard`
   or a new package it owns); no consumer UI is in scope here.
 - Prior lessons to honor (`260908-research-ws-pi-claude-code-lead-provider`):
@@ -148,6 +184,36 @@ renderer shows it.
   servers and fail the launch otherwise (the ws-claude profile check).
 - Rejected earlier, do not revive: running Claude Code with another
   harness's system prompt; `--bare`.
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for agents-plugin/, agents-plugin-wsflow/, agents-plugin-tool/)
+- Convention: ai-docs/manuals/wsflow-mirroring.md (declared for agents-plugin/rsrc/, agents-plugin/skills/, agents-plugin/hooks/, agents-plugin-wsflow/)
+- Convention: ai-docs/manuals/ws-mcp.md (declared for agents-plugin-tool/internal/mcp/)
+
+## Prior Decisions
+
+- 260908-research-ws-pi-claude-code-lead-provider (2026-09-09, Resolution): "Owner approved closing the concluded provider investigation. The positive isolated spike was superseded by the recorded real-Pi subscription-path failure and implementation revert." — bearing: constrains
+- 28f43259 (2026-11-08, commit): "Git-history research found the discarded Pi claude-code provider (98a5306f0, reverted 238f2ce3b) hit extra-usage billing because of the system prompt's content (Pi harness prompt), not a flag" — bearing: constrains
+- 70bd5f21 (2026-11-08, commit): "Runner phase 1 puts the live billing probe first so nothing is built on the claude path if the subscription refuses the turn" — bearing: supports
+- 261106-feat-ws-dashboard-claude-adapter (2026-11-06, ticket Result): "The user prompt row is `session.append` with `door: \"prompt\"`; headless it carries `origin.kind: \"unclassified\"`" — bearing: supports
+- 261030-bug-claude-mod-headless-compaction-and-captions (2026-10-31, ticket Result): "Headless streaming input (`claude -p --input-format stream-json --output-format stream-json`, stdin held open, `isInteractive=false`): the step fired 1 s after the turn end" — bearing: supports
+- 260908-feat-ws-pi-claude-delegate-tool (2026-09-13, 0efb4fad): "Persist the canonical design-review task frame alongside the private Claude session ID because the SDK rebuilds the system-prompt append on each resumed process." — bearing: supports
+- 260505-feat-claude-named-agent-runner (2026-05-05, ticket Decisions): "Use the legacy Claude script only for verified CLI details: output JSON shape, `--session-id`, `--resume`, `--system-prompt`, and hook settings." — bearing: supports
+- 260512-feat-gemini-named-agent-backend (2026-05-12, ticket Decisions): "Use Gemini CLI headless `stream-json` output, not final `json`, so the runner matches the Codex-style streaming parser direction." — bearing: supports
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin-tool/internal/mcp config registry (agent.profile structured family), agents-plugin-tool/internal/wsdashboard (or a new package), agents-plugin-tool/internal/mcp/server.go, agents-plugin-pi (Phase 2) |
+| scope.surface | cross-module | new daemon REST routes, the agent.profile structured config family, ws-mcp env-gated tools/list and tools/call filter |
+| scope.new_public_symbol | yes | agent.profile.<name> structured config family, runner REST routes, backend interface, allowlist environment variable |
+| scope.new_type_contract | yes | backend interface (start, send turn, interrupt, stop, resume) and the profile schema; neither exists yet |
+| scope.test_surface | new-files | no runner test exists (search for agent runner under agents-plugin-tool/internal/wsdashboard found none); existing wsdashboard and mcp test files host only adjacent coverage |
+| complexity.reuse_points | confirmed | wslive.NewState/AppendRing/SnapshotPath, wsdashboard.SessionDir, NoAgentMode filter precedent in internal/mcp/server.go, Pi spawner launch shape |
+| complexity.side_effect_risk | high | spawns long-lived child processes, holds stdin streams, daemon shutdown and idle timers, ws-mcp startup side effects in agent role |
+| risk.correctness | high | sustained stream-json process lifecycle, lazy resume, turn-boundary restart, init-message permission verification |
+| risk.fit | moderate | wslive has no snapshot writer outside internal/mcp, so snapshot writing needs a new home in the daemon |
+| risk.test | high | live billing probe and live runs on the subscription cannot be unit tested; other paths depend on recorded fixtures |
+| risk.security_or_contract | high | headless process with tool access, allowlist-only permissions, REST routes that start agents, ws-mcp surface restriction |
 
 ## Phases
 
@@ -157,26 +223,38 @@ renderer shows it.
    headless with the Phase 1 flag set (stream-json in and out,
    `--append-system-prompt-file` with a short task-instruction file,
    `--disable-slash-commands`, `--strict-mcp-config --mcp-config` with an
-   empty server set, `--permission-mode dontAsk`, plugins off through
-   `--settings`) on the user's subscription login, run one turn, and resume
-   it once with `--resume`. If any turn is billed as extra usage or refused
-   for usage, stop and report with the raw error; nothing below is built.
-   Also record whether `--settings` turns plugins off and whether an
-   in-stream model or effort control exists ((319)).
-2. **Profiles.** Add the `agent.profile.<name>.*` family to the ws and
-   wsflow config manifests (same keys, defaults differ only where the
-   packages already differ): backend, model, effort, tool allowlist, MCP
-   servers (default none), plugins/skills/extensions (default off),
-   instruction file, idle timeout (`0` = never), and the session-index
-   listing knob ((316)). Unknown backend or a missing instruction file fails
-   the launch with a clear error.
+   empty server set, `--tools` with the profile's built-in tool list
+   (`--tools ""` disables all built-ins) so the visible set matches the
+   allowlist, `--permission-mode dontAsk` with `--allowedTools`, an explicit
+   `--setting-sources` that keeps user, project, and local settings files
+   (and their `permissions.allow` rules and hooks) out, and plugins off
+   through `--settings`) on the user's subscription login, run one turn, and
+   resume it once with `--resume`. Read an explicit billing signal, not only
+   a refusal: the stream-json result and rate-limit events' overage or
+   extra-usage fields, or, when the stream carries none, confirm that extra
+   usage is off on the account for the probe so a third-party
+   classification surfaces as a refusal. If any turn is billed as extra
+   usage or refused for usage, stop and report with the raw output; nothing
+   below is built. Also record whether `--settings` turns plugins off,
+   whether subscription auth survives the chosen `--setting-sources`, and
+   whether an in-stream model or effort control exists ((319)).
+2. **Profiles.** Add the built-in structured family `agent.profile.<name>`
+   ((329)), modelled on `worktree.profile.<name>`, with the fields of the
+   profiles decision (idle timeout `0` = never; the session-index listing
+   knob of (316)), resolved through the conversation's working root
+   ((330)). No profile ships in this ticket; tests define their own. An
+   unknown profile or backend, or a missing instruction file, fails the
+   launch with a clear error.
 3. **Runner core** in the dashboard daemon: a backend interface (start,
    send turn, interrupt, stop, resume by backend session id) designed for
    both claude and pi; one sustained process per conversation with the idle
    timer; a minted reply-id session directory per conversation ((315));
    lazy resume on the next input after an idle exit or a daemon restart
    ((318)); model/effort changes at the turn boundary ((319)); clean child
-   shutdown with the daemon.
+   shutdown with the daemon. Each conversation's record (backend, backend
+   session id, profile name, current model and effort, its ws session key)
+   is persisted in its session directory beside the `wslive` files, so
+   resume and turn-boundary restarts survive a daemon restart.
 4. **Claude backend**: the flag set from step 1; parse the stream-json
    output into `wslive` snapshot and ring entries (user, reply, turn, tools)
    so the existing conversation renderer shows them; verify the child's init
@@ -187,15 +265,25 @@ renderer shows it.
    claude backend adds ws-mcp to `--mcp-config` when the profile allows any
    ws tool. Check ws-mcp's startup side effects in this role (dashboard
    ensure, session registration) and suppress the ones an agent session must
-   not trigger. Read `ai-docs/manuals/ws-mcp.md` first.
+   not trigger. The runner mints one ws session key per conversation, kept
+   in the conversation record so it survives resume, and hands it to the
+   attached ws-mcp and the agent (environment variable or the appended
+   instruction file); the implementer picks the key's role (lead-only tools
+   such as `config.*` stay out unless the role allows them), with the
+   allowlist filter carrying the restriction. Read
+   `ai-docs/manuals/ws-mcp.md` first.
 6. **REST control** behind the existing access control ((314)): create a
-   conversation from a profile, send a turn, interrupt, stop, change model or
-   effort, and read state (the session directory key, running or idle).
+   conversation from a profile and a working root ((330)), send a turn
+   (held while a turn runs, (327)), interrupt, `stop` and `close` ((328)),
+   change model or effort, and read state (the session directory key;
+   running, idle, or closed).
    Runner conversations stay out of the session index unless the profile
-   lists them.
+   lists them. Route paths, payload fields, and the allowlist environment
+   variable name are the implementer's choice and are recorded in
+   `### Result`, since the consumer ticket builds on them.
 
 Verification: unit tests for profile parsing, the idle timer, the
-lazy-resume path, stream-json-to-`wslive` mapping (with recorded
+lazy-resume path, held sends, `stop` versus `close`, stream-json-to-`wslive` mapping (with recorded
 stream-json fixtures), and the ws-mcp allowlist filter; a fake backend
 drives the REST routes end to end in tests; one live run of the claude backend through the REST routes on the
 subscription login, recorded in `### Result` with the billing observation.
@@ -206,7 +294,33 @@ Implement the backend interface for Pi following the Pi spawner's launch
 shape (`agents-plugin-pi/src/spawner.ts`: RPC mode, `--session`,
 `--session-dir`, `--append-system-prompt`, `--no-extensions`, an explicit
 `--extension` only when the profile names one, `--tools <allowlist>`), map
-its RPC events to `wslive` entries, and resume by Pi session. Verification:
+its RPC events to `wslive` entries, and resume by Pi session. A profile
+that allows ws tools attaches ws-mcp with the same allowlist filter and
+session key as Phase 1 (through the extension path), and the launch fails
+unless the child's reported tool set holds only the profile's tools.
+Verification:
 the Phase 1 test suite runs against the pi backend through the same fake and
 recorded-event fixtures, plus one live Pi run through the REST routes,
 recorded in `### Result`.
+
+## Blocked (2026-11-08)
+
+### Design Reviewer — block
+
+| # | Title | Severity | Resolution |
+|---|-------|----------|------------|
+| 1 | agent.profile.<name>.* cannot be declared in the config manifests | important | missing |
+| 2 | No project binding for a conversation in a machine-wide, sessionless daemon | important | missing |
+| 3 | The init-message tool check cannot pass with the stated claude flag set | important | autonomous |
+| 4 | The attached ws-mcp has no session key for the agent | important | autonomous |
+| 5 | The billing probe only detects a refusal, not a turn silently billed as extra usage | minor | autonomous |
+| 6 | Lazy-resume state is never said to be persisted | minor | autonomous |
+
+### Completeness Reviewer — block
+
+| # | Title | Severity |
+|---|-------|----------|
+| 1 | REST control semantics for send-during-turn and stop are undefined | important |
+| 2 | Phase 2 omits the ws-mcp attachment and init-message verification for pi | minor |
+| 3 | REST route paths, payload shapes, and the allowlist env var name are unspecified | minor |
+| 4 | Board-number references are opaque to a fresh reader | minor |

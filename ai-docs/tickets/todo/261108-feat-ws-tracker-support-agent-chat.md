@@ -64,6 +64,12 @@ agent runner (`261108-feat-ws-daemon-agent-runner`).
   the dashboard daemon already knows (roots that have run a ws session) plus
   extra roots from a config knob, and refuses any other path. Rejected: knob
   roots only; any git repository on the machine.
+- **Ships its own support profile** (runner (329) a, (330) a): the runner
+  ships no profile, so this ticket adds the support agent's
+  `agent.profile.<name>` default (tools: the tracker tools of the caller
+  child and the read-only git search tool) and creates its conversations
+  with the store's local clone as the working root. "New conversation"
+  ((322)) is the runner's `close` plus create (runner (328) a).
 
 ## Constraints
 
