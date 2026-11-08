@@ -450,3 +450,89 @@ func TestGitRefreshRouteAndStream(t *testing.T) {
 		t.Fatalf("reads = %d, want 2", n)
 	}
 }
+
+// TestGitBadgeFollowsTheSnapshot pins follow on the watcher: a snapshot whose
+// repo figures differ from the badge's read asks for a read, the same
+// snapshot again asks for nothing even while the two still disagree, one
+// that agrees with the read asks for nothing, and neither does a snapshot
+// without a branch or of a root no page watches.
+func TestGitBadgeFollowsTheSnapshot(t *testing.T) {
+	f := newFakeGit()
+	g, _ := newTestWatcher(t, f)
+	g.gap = 0
+	repo := func(ahead int) wslive.Repo {
+		return wslive.Repo{Folder: "repo", Branch: "main", Upstream: "origin/main", Ahead: ahead}
+	}
+	// Before the first read lands nothing is asked for: that read is fresh.
+	f.gate = make(chan struct{})
+	release := g.watch("/repo")
+	defer release()
+	g.follow("/repo", "s1", repo(1))
+	f.gate <- struct{}{}
+	expectRead(t, f, "/repo") // the first read: ahead 1
+	f.gate = nil
+	expectNoRead(t, f)
+
+	g.follow("/repo", "s1", repo(17))
+	expectRead(t, f, "/repo") // ahead 2
+	g.follow("/repo", "s1", repo(17))
+	expectNoRead(t, f)
+
+	waitFor(t, "the read to be stored", func() bool { return g.badge("/repo").Ahead == 2 })
+	g.follow("/repo", "s1", repo(2)) // changed, but agrees with the read
+	expectNoRead(t, f)
+
+	g.follow("/repo", "s1", wslive.Repo{Folder: "repo"})
+	g.follow("/other", "s1", repo(5))
+	expectNoRead(t, f)
+
+	g.follow("/repo", "s1", wslive.Repo{Folder: "repo", Branch: "main", Upstream: "origin/main", Ahead: 2, Modified: 1})
+	expectRead(t, f, "/repo")
+}
+
+// TestGitBadgeFollowsTheStreamedSnapshot: a session page's stream hands its
+// snapshot's repo figures to follow, so a snapshot change reads the badge
+// again, and a snapshot that changed elsewhere does not.
+func TestGitBadgeFollowsTheStreamedSnapshot(t *testing.T) {
+	git := newFakeGit()
+	f := startPageFixture(t, gitBadgeOn(git))
+	f.d.git.gap = 0
+	snapshot := func(reply string, ahead int) {
+		writeSnapshot(t, f.dir, "livesession", &wslive.Snapshot{SchemaVersion: 1, Adapter: "pi", UpdatedAt: time.Now().UnixMilli(), HeartbeatMs: 30000,
+			Lead: wslive.Lead{Activity: wslive.Activity{Phase: wslive.PhaseReplying}, Reply: &wslive.Reply{Text: reply}},
+			Repo: &wslive.Repo{Folder: "p", Branch: "main", Upstream: "origin/main", Ahead: ahead}})
+		f.d.broker.wake("livesession")
+	}
+	snapshot("first reply", 1)
+	_, page := get(t, f.base+"/s/livesession")
+	client := &http.Client{Transport: &http.Transport{Proxy: nil}}
+	resp, err := client.Get(f.base + "/s/livesession/events?h=" + heldOf(page) + ",mode." + newRegion(modeLive).Hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	events := make(chan sseEvent, 64)
+	go readEvents(t, bufio.NewReader(resp.Body), events)
+	waitRegion := func(name, want string) {
+		t.Helper()
+		for {
+			ev, ok := nextRegion(t, events, 5*time.Second)
+			if !ok {
+				t.Fatalf("no %s region carrying %q", name, want)
+			}
+			if ev.Name == name && strings.Contains(ev.HTML, want) {
+				return
+			}
+		}
+	}
+	expectRead(t, git, f.project)
+	waitRegion(regionGit, `↑1<`)
+
+	snapshot("first reply", 17)
+	expectRead(t, git, f.project)
+	waitRegion(regionGit, `↑2<`)
+
+	snapshot("second reply", 17)
+	waitRegion("convlive", "second reply")
+	expectNoRead(t, git)
+}

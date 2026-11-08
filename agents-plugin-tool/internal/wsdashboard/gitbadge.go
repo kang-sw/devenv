@@ -27,6 +27,12 @@ import (
 // every read, so pages sharing a root share one read and a burst of refresh
 // requests never runs git concurrently for one root. No read ever fetches, so
 // behind reflects the last fetch.
+//
+// The badge follows the band: when a session's live snapshot brings repo
+// figures that differ from the ones it brought before and from the badge's
+// last read, the stream that rendered it asks for a read (follow), so the
+// two agree once the badge's read lands. The interval stays the fallback for
+// a root whose session is gone.
 
 const (
 	// gitReadInterval is the period between a watched root's reads.
@@ -162,6 +168,9 @@ type gitRoot struct {
 	wake chan struct{}
 	// badge is the last read; nil before the first.
 	badge *GitBadge
+	// seen is the repo figures each session's snapshot last brought (by
+	// reply-id), in comparable form (followRepo).
+	seen map[string]wslive.Repo
 }
 
 func newGitWatcher(read func(string) GitBadge, changed func(string), stop <-chan struct{}) *gitWatcher {
@@ -217,6 +226,45 @@ func (g *gitWatcher) refresh(root string) bool {
 	}
 	signal(r.wake)
 	return true
+}
+
+// follow tells the watcher the repo figures replyID's live snapshot holds
+// for root. It asks for a read of root, as refresh does, when they differ
+// both from what that snapshot held before and from the last read; an
+// unchanged snapshot asks for nothing, so a badge and a band that keep
+// disagreeing never make the root read in a loop. A root no page watches, a
+// root whose first read is still to land, and a snapshot without a branch
+// ask for nothing.
+func (g *gitWatcher) follow(root, replyID string, repo wslive.Repo) {
+	if g == nil || root == "" || repo.Branch == "" {
+		return
+	}
+	repo = followRepo(repo)
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	r := g.roots[gitKey(root)]
+	if r == nil || r.viewers == 0 {
+		return
+	}
+	if seen, ok := r.seen[replyID]; ok && seen == repo {
+		return
+	}
+	if r.seen == nil {
+		r.seen = map[string]wslive.Repo{}
+	}
+	r.seen[replyID] = repo
+	if r.badge == nil || (r.badge.State == gitOK && followRepo(r.badge.Repo) == repo) {
+		return
+	}
+	signal(r.wake)
+}
+
+// followRepo is r in the form follow compares: as a snapshot keeps it, and
+// without the folder, which the badge never reads.
+func followRepo(r wslive.Repo) wslive.Repo {
+	r = wslive.CleanRepo(r)
+	r.Folder = ""
+	return r
 }
 
 // badge is root's badge: its last read, or pending before the first; nil

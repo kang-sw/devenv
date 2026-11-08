@@ -117,6 +117,11 @@ func (d *Daemon) handleSessionEvents(w http.ResponseWriter, r *http.Request, rep
 		}
 		view.Lang, view.Theme = lang, theme
 		view.Git = d.git.badge(view.Project)
+		// The band's repo figures come from the session's live snapshot;
+		// the badge reads again when they changed (follow).
+		if view.Band.Repo != nil {
+			d.git.follow(view.Project, replyID, *view.Band.Repo)
+		}
 		regions, err := renderSessionRegions(view, d.entries)
 		if err != nil {
 			fmt.Fprintf(d.log, "dashboard: render session %s: %v\n", replyID, err)
