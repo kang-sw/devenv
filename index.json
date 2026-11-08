@@ -639,6 +639,9 @@
     },
     "261108-feat-ws-daemon-agent-runner": {
       "registered_at": "2026-11-08T00:25:09Z"
+    },
+    "261108-feat-ws-tracker-support-agent-chat": {
+      "registered_at": "2026-11-08T00:25:15Z"
     }
   }
 }
