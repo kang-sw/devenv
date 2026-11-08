@@ -637,6 +637,9 @@
     "261108-bug-pi-esc-drops-queued-mail-batches": {
       "registered_at": "2026-11-07T15:11:11Z"
     },
+    "261108-bug-ws-git-merge-directory-rename-misplaces-tickets": {
+      "registered_at": "2026-11-08T05:47:25Z"
+    },
     "261108-bug-ws-whiteboard-item-raw-html": {
       "registered_at": "2026-11-08T04:42:23Z"
     },
@@ -650,19 +653,6 @@
         "touched_at": "2026-11-08T05:35:41Z",
         "impl": {
           "branch": "impl/develop/payer-oops-haunt"
-        }
-      }
-    },
-    "261108-feat-ws-manual-shared-command-syntax": {
-      "registered_at": "2026-11-08T04:46:30Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-08T05:09:55Z",
-        "impl": {
-          "branch": "impl/develop/churn-wipe-equal"
         }
       }
     },
