@@ -237,6 +237,28 @@ func validateToolEntry(entry string) error {
 	return nil
 }
 
+// CheckProfileScope refuses a committed (repo-scope) profile that starts
+// programs. The repo file comes with a checkout anyone with push access
+// writes, and a conversation at that root runs as the daemon's user, so the
+// fields that run a command without the model (MCP servers, plugin
+// directories with their hooks) belong to the machine-local scopes.
+func CheckProfileScope(p Profile, scope wsconfig.Scope) error {
+	if scope != wsconfig.ScopeRepo {
+		return nil
+	}
+	var fields []string
+	if len(p.MCPServers) > 0 {
+		fields = append(fields, "mcp_servers")
+	}
+	if len(p.Plugins) > 0 {
+		fields = append(fields, "plugins")
+	}
+	if len(fields) == 0 {
+		return nil
+	}
+	return fmt.Errorf("a repo-scope profile may not set %s: a committed profile may not start programs; define it in project or global scope", strings.Join(fields, " or "))
+}
+
 // ValidateProfileName enforces the family's name rule.
 func ValidateProfileName(name string) error {
 	if !profileNamePattern.MatchString(name) {
@@ -309,6 +331,9 @@ func resolvedValue(v wsconfig.StructuredValue) (ResolvedProfile, error) {
 		return ResolvedProfile{}, fmt.Errorf("invalid agent profile key %q in %s: %w", v.Key, where, err)
 	}
 	p, err := ParseProfile(v.Value)
+	if err == nil {
+		err = CheckProfileScope(p, v.Scope)
+	}
 	if err != nil {
 		return ResolvedProfile{}, fmt.Errorf("invalid agent profile key %q in %s: %w", v.Key, where, err)
 	}
@@ -335,10 +360,10 @@ func ProfileValueSchema() map[string]any {
 			"ws_tools":    stringList("ws tool allowlist by ws tool name (tickets.query). Any entry attaches ws-mcp, which advertises and accepts only these."),
 			"mcp_servers": map[string]any{
 				"type":                 "object",
-				"description":          "Further MCP servers the agent may use, by name (not \"ws\"); each value is the harness's server object. Absent allows none.",
+				"description":          "Further MCP servers the agent may use, by name (not \"ws\"); each value is the harness's server object. Absent allows none. Not allowed in a repo-scope profile.",
 				"additionalProperties": map[string]any{"type": "object"},
 			},
-			"plugins":              stringList("Plugin directories (claude) or extension paths (pi) to load; relative paths resolve against the working root. Absent loads none."),
+			"plugins":              stringList("Plugin directories (claude) or extension paths (pi) to load; relative paths resolve against the working root. Absent loads none. Not allowed in a repo-scope profile."),
 			"skills":               map[string]any{"type": "boolean", "description": "Keep the harness's skills and slash commands on; off by default."},
 			"instructions":         map[string]any{"type": "string", "minLength": 1, "description": "Task instruction file appended to the harness's own system prompt; a relative path resolves against the working root."},
 			"idle_timeout_seconds": map[string]any{"type": "integer", "minimum": 0, "description": "End the sustained process after this many seconds with no running turn and no input; 0 never ends it; absent is 600."},

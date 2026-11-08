@@ -216,7 +216,15 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 		d.index = NewIndex(IndexOptions{Dir: opts.Dir, Source: d.source, Log: logw, OnChange: d.sessionChanged})
 	}
 	d.server = &http.Server{Handler: d.Handler(), ReadHeaderTimeout: 10 * time.Second}
+	// The runner takes its change hook before the first request can reach
+	// it.
+	if d.agents != nil {
+		d.agents.Start(d.agentChanged)
+	}
 	if err := writeEndpoint(opts.Dir, d.endpoint); err != nil {
+		if d.agents != nil {
+			d.agents.Close()
+		}
 		_ = listener.Close()
 		_ = lock.Unlock()
 		return nil, fmt.Errorf("write endpoint file: %w", err)
@@ -229,9 +237,6 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 	}()
 	if d.index != nil {
 		go d.poll(opts.PollInterval)
-	}
-	if d.agents != nil {
-		d.agents.Start(d.agentChanged)
 	}
 	fmt.Fprintf(d.log, "dashboard: version %s listening on %s (lan %v, pid %d)\n", d.endpoint.Version, listener.Addr(), d.lan, d.endpoint.PID)
 	return d, nil

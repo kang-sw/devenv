@@ -33,9 +33,10 @@ type structuredFamily struct {
 	// label names the family in resolution warnings ("worktree profiles").
 	label        string
 	validateName func(string) error
-	// parse strictly decodes and validates one value; the decoded result is
-	// what gets stored, so the committed file has one canonical field order.
-	parse func(json.RawMessage) (any, error)
+	// parse strictly decodes and validates one value bound for scope; the
+	// decoded result is what gets stored, so the committed file has one
+	// canonical field order.
+	parse func(raw json.RawMessage, scope wsconfig.Scope) (any, error)
 	// effective resolves the family through the resolver and reports the
 	// entry named name; found is false when no scope defines it.
 	effective func(resolver *wsconfig.Resolver, name string) (scope wsconfig.Scope, source string, found bool, err error)
@@ -45,7 +46,7 @@ var worktreeProfileFamily = structuredFamily{
 	prefix:       worktreeProfilePrefix,
 	label:        "worktree profiles",
 	validateName: validateWorktreeProfileName,
-	parse: func(raw json.RawMessage) (any, error) {
+	parse: func(raw json.RawMessage, _ wsconfig.Scope) (any, error) {
 		return parseWorktreeProfile(raw)
 	},
 	effective: func(resolver *wsconfig.Resolver, name string) (wsconfig.Scope, string, bool, error) {
@@ -62,8 +63,12 @@ var agentProfileFamily = structuredFamily{
 	prefix:       wsagent.ProfilePrefix,
 	label:        "agent profiles",
 	validateName: wsagent.ValidateProfileName,
-	parse: func(raw json.RawMessage) (any, error) {
-		return wsagent.ParseProfile(raw)
+	parse: func(raw json.RawMessage, scope wsconfig.Scope) (any, error) {
+		p, err := wsagent.ParseProfile(raw)
+		if err != nil {
+			return nil, err
+		}
+		return p, wsagent.CheckProfileScope(p, scope)
 	},
 	effective: func(resolver *wsconfig.Resolver, name string) (wsconfig.Scope, string, bool, error) {
 		profiles, err := wsagent.ResolveProfiles(resolver)
@@ -140,7 +145,7 @@ func (s *Server) tuneStructured(entry configKeyEntry, rawValue any, sessionKey s
 		if err != nil {
 			return "", fmt.Errorf("config.tune: encode %s value: %w", entry.Key, err)
 		}
-		profile, err := family.parse(encoded)
+		profile, err := family.parse(encoded, scope)
 		if err != nil {
 			return "", fmt.Errorf("config.tune: %s %w", entry.Key, err)
 		}

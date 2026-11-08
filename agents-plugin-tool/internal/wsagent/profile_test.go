@@ -144,6 +144,39 @@ func TestResolveProfileThroughWorkingRoot(t *testing.T) {
 	}
 }
 
+// TestRepoProfileMayNotStartPrograms: a committed profile that sets MCP
+// servers or plugin directories never resolves, so no conversation launches
+// from it; the same profile in a machine-local scope does.
+func TestRepoProfileMayNotStartPrograms(t *testing.T) {
+	opts := testConfig(t)
+	root := t.TempDir()
+	repoFile := filepath.Join(root, ".ws-workflow", "config.json")
+	writeStructured(t, repoFile, map[string]string{
+		ProfilePrefix + "servers": `{"backend":"claude","mcp_servers":{"docs":{"command":"docs-mcp"}}}`,
+		ProfilePrefix + "plugins": `{"backend":"pi","plugins":["ext.ts"]}`,
+		ProfilePrefix + "plain":   `{"backend":"claude","tools":["Read"],"ws_tools":["tickets.query"]}`,
+	})
+	for name, field := range map[string]string{"servers": "mcp_servers", "plugins": "plugins"} {
+		_, err := ResolveProfile(opts, root, name)
+		if err == nil || !strings.Contains(err.Error(), field) || !strings.Contains(err.Error(), repoFile) || !strings.Contains(err.Error(), "may not start programs") {
+			t.Fatalf("repo profile %s should be refused naming %s and the file, got %v", name, field, err)
+		}
+	}
+	if _, err := ResolveProfile(opts, root, "plain"); err != nil {
+		t.Fatalf("a repo profile without executable fields resolves: %v", err)
+	}
+
+	writeStructured(t, filepath.Join(opts.ConfigHome, "config.json"), map[string]string{
+		ProfilePrefix + "docs": `{"backend":"claude","mcp_servers":{"docs":{"command":"docs-mcp"}},"plugins":["plug"]}`,
+	})
+	if got, err := ResolveProfile(opts, t.TempDir(), "docs"); err != nil || got.Scope != wsconfig.ScopeGlobal {
+		t.Fatalf("a global profile may set mcp_servers and plugins: %+v, %v", got, err)
+	}
+	if err := CheckProfileScope(Profile{Backend: BackendClaude, Plugins: []string{"p"}}, wsconfig.ScopeProject); err != nil {
+		t.Fatalf("project scope may set plugins: %v", err)
+	}
+}
+
 func TestIdleTimeoutUnits(t *testing.T) {
 	n := 90
 	if (Profile{IdleTimeoutSeconds: &n}).IdleTimeout() != 90*time.Second {

@@ -35,6 +35,8 @@ func TestConfigTuneAgentProfile(t *testing.T) {
 		{map[string]any{"key": "agent.profile.triage", "value": map[string]any{"description": "no backend"}, "scope": "repo"}, "backend is required"},
 		{map[string]any{"key": "agent.profile.triage", "value": map[string]any{"backend": "claude", "bogus": true}, "scope": "repo"}, "unknown field"},
 		{map[string]any{"key": "agent.profile.triage", "value": map[string]any{"backend": "claude", "mcp_servers": map[string]any{"ws": map[string]any{}}}, "scope": "repo"}, "may not name"},
+		{map[string]any{"key": "agent.profile.triage", "value": map[string]any{"backend": "claude", "mcp_servers": map[string]any{"docs": map[string]any{"command": "d"}}}, "scope": "repo"}, "may not start programs"},
+		{map[string]any{"key": "agent.profile.triage", "value": map[string]any{"backend": "pi", "plugins": []any{"ext.ts"}}, "scope": "repo"}, "may not start programs"},
 		{map[string]any{"key": "agent.profile.triage", "value": "{}", "scope": "repo"}, "must be a profile object"},
 		{map[string]any{"key": "agent.profile.triage", "scope": "repo"}, "value is required"},
 	}
