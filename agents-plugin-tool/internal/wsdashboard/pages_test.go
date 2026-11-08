@@ -210,6 +210,17 @@ func TestSessionPagesCarryScriptHooks(t *testing.T) {
 			t.Errorf("%s page: the panels region is not in the drawer ahead of the board column", name)
 		}
 	}
+	// Both pages run the image viewer once, outside any region, and style it.
+	for name, page := range map[string]string{"live": live, "board-first": board} {
+		if n := strings.Count(page, "wbviewerclose"); n != 1 {
+			t.Errorf("%s page carries the image viewer %d times, want once", name, n)
+		}
+		for _, want := range []string{`.wbv-stage`, `.thumbs img, .bub img { cursor: zoom-in; }`, `id="i-zoom-in"`} {
+			if !strings.Contains(page, want) {
+				t.Errorf("%s page lacks viewer hook %q", name, want)
+			}
+		}
+	}
 	// Both pages run the open-question pill beside the answer form.
 	for name, page := range map[string]string{"live": live, "board-first": board} {
 		if !strings.Contains(page, "data-wb-title") {

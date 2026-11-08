@@ -18,7 +18,7 @@
   var banner = doc.getElementById("wb-banner");
   function formBusy() {
     var a = doc.activeElement;
-    return (dirty && !copied) || (a && (a.classList.contains("note") || a.id === "reply-text"));
+    return (dirty && !copied) || (a && (a.classList.contains("note") || a.id === "reply-text")) || !!doc.querySelector(".wbv:not([hidden])");
   }
   function reloadNow() {
     if (store) store.setItem("wb-scroll", String(window.scrollY));
@@ -29,6 +29,8 @@
     else reloadNow();
   }
   onCopied = function () { if (pending) reloadNow(); };
+  // The image viewer holds a reload off while it is open (formBusy), and lets it go on close.
+  doc.addEventListener("wbviewerclose", function () { if (pending && !formBusy()) reloadNow(); });
   if (banner) banner.addEventListener("click", reloadNow);
   var stampSrc = doc.documentElement.getAttribute("data-stamp");
   var ownSeq = doc.documentElement.getAttribute("data-seq");

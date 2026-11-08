@@ -376,3 +376,20 @@ details.panel .body { container-type: inline-size; }
   from { outline: 2px solid var(--wb-primary); outline-offset: -2px; }
   to { outline: 2px solid transparent; outline-offset: -2px; }
 }
+
+/* image viewer (viewer.js): a modal over the whole page. The chrome is dark in
+   both themes; the content sits on the card colour, so a diagram drawn in the
+   theme's ink stays readable. */
+.md img, .doc-body img, .md svg:not(.i), .doc-body svg:not(.i), .md pre.mermaid svg { cursor: zoom-in; }
+.wbv { position: fixed; inset: 0; z-index: 100000; background: rgb(8 9 11 / .88); color: #fff; outline: 0; }
+.wbv[hidden] { display: none; }
+.wbv-stage { position: absolute; inset: 0; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; cursor: grab; overscroll-behavior: contain; }
+.wbv-stage.drag { cursor: grabbing; }
+.wbv-content { position: absolute; left: 0; top: 0; max-width: none; max-height: none; margin: 0; border-radius: 6px; background: var(--wb-card); box-shadow: 0 8px 40px rgb(0 0 0 / .5); -webkit-user-drag: none; }
+.wbv-bar { position: absolute; top: 12px; right: 12px; display: flex; align-items: center; gap: 2px; padding: 4px; border-radius: 10px; background: rgb(28 30 34 / .9); box-shadow: 0 2px 12px rgb(0 0 0 / .4); }
+.wbv-btn { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: #fff; cursor: pointer; text-decoration: none; }
+.wbv-btn:hover { background: rgb(255 255 255 / .16); }
+.wbv-btn:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }
+.wbv-btn[hidden] { display: none; }
+.wbv-btn .i { width: 16px; height: 16px; }
+.wbv-pct { min-width: 46px; text-align: center; font: 600 12px/1 system-ui, sans-serif; font-variant-numeric: tabular-nums; opacity: .85; }

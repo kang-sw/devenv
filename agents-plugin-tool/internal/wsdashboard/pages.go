@@ -90,6 +90,7 @@ type pageAssetsData struct {
 	FormScript       template.JS
 	MermaidInit      template.JS
 	MermaidFile      string
+	ViewerScript     template.JS
 }
 
 var (
@@ -124,6 +125,7 @@ func loadDashboardAssets() (*dashboardAssets, error) {
 			FormScript:       wb.FormScript,
 			MermaidInit:      wb.MermaidInit,
 			MermaidFile:      mermaidName,
+			ViewerScript:     wb.ViewerScript,
 		}}
 		if dashboardAssetsErr != nil {
 			return
