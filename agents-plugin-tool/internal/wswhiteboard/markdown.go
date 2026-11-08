@@ -148,7 +148,8 @@ func blockMarkdown(p *pageData, refs util.PrioritizedValue, rawHTML bool) goldma
 	)
 }
 
-// inlineParsers is goldmark's default inline set plus refs, with the raw
+// inlineParsers is goldmark's default inline set plus refs and the bare URL
+// and path parsers (bare_links.go), with the raw
 // HTML parser when rawHTML and the allowlisted inline tags (inline_tags.go)
 // when inlineTags.
 func inlineParsers(refs util.PrioritizedValue, rawHTML, inlineTags bool) []util.PrioritizedValue {
@@ -159,6 +160,7 @@ func inlineParsers(refs util.PrioritizedValue, rawHTML, inlineTags bool) []util.
 		util.Prioritized(parser.NewEmphasisParser(), 500),
 		refs,
 	}
+	list = append(list, bareLinkParsers()...)
 	if rawHTML {
 		list = append(list, util.Prioritized(parser.NewRawHTMLParser(), 400))
 	}
@@ -528,8 +530,9 @@ func (r *mdRenderer) link(w util.BufWriter, source []byte, node ast.Node, enteri
 	}
 	if t.text != "" {
 		// A file link on a served page: the label, then the path as text
-		// unless the label already is that path.
-		if !entering && plainText(source, n) != t.text {
+		// unless the label already is that path or the link is a bare path,
+		// whose label is the path as written.
+		if !entering && !isBarePath(n) && plainText(source, n) != t.text {
 			writePathText(w, t.text)
 		}
 		return ast.WalkContinue, nil

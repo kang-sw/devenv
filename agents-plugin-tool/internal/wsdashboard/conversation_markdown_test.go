@@ -1,6 +1,7 @@
 package wsdashboard
 
 import (
+	"html/template"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -174,6 +175,32 @@ func TestLeadReplyLinksAreActionLinks(t *testing.T) {
 	user := leadMarkdownView(t, []wslive.RingEntry{{Kind: wslive.RingUser, Text: text}}, "")
 	if strings.Contains(user, "data-wl") {
 		t.Errorf("user message carries an action link: %s", user)
+	}
+}
+
+// TestLeadReplyBareLinksAreActionLinks pins bare URLs and file paths in a
+// lead reply, finished or streaming: each renders exactly as the markdown
+// link to the same destination does (a path's ":line" suffix stays in the
+// label only), and a URL or path in a code span stays text.
+func TestLeadReplyBareLinksAreActionLinks(t *testing.T) {
+	render := replyMarkdown("/proj", "self")
+	bare := "open http://127.0.0.1:29417/s/self/x, docs/a.md:12 and /etc/hosts. `docs/b.md` `https://code.example/`"
+	written := "open [http://127.0.0.1:29417/s/self/x](http://127.0.0.1:29417/s/self/x), [docs/a.md:12](docs/a.md) and [/etc/hosts](/etc/hosts). `docs/b.md` `https://code.example/`"
+	for name, r := range map[string]func(string) template.HTML{"finished": render.finished, "streaming": render.streaming} {
+		got, want := string(r(bare)), string(r(written))
+		if got != want {
+			t.Errorf("%s reply:\nbare    %s\nwritten %s", name, got, want)
+		}
+		for _, w := range []string{
+			`<a href="http://127.0.0.1:29417/s/self/x" target="_blank" rel="noopener noreferrer" data-wl="url">http://127.0.0.1:29417/s/self/x</a>,`,
+			`<a href="/s/self/file?path=docs%2Fa.md" data-wl="file" data-rel="docs/a.md" data-abs="` + filepath.Join("/proj", "docs", "a.md") + `" title="docs/a.md">docs/a.md:12</a>`,
+			`<a tabindex="0" data-wl="file" data-abs="` + filepath.FromSlash("/etc/hosts") + `" title="/etc/hosts">/etc/hosts</a>.`,
+			`<code>docs/b.md</code> <code>https://code.example/</code>`,
+		} {
+			if !strings.Contains(got, w) {
+				t.Errorf("%s reply lacks %q:\n%s", name, w, got)
+			}
+		}
 	}
 }
 
