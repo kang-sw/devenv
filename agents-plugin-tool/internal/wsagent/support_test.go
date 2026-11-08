@@ -312,6 +312,8 @@ type listingStub struct {
 	args  []string
 	out   string
 	err   error
+	// during, when set, runs inside each listing (a listing that takes time).
+	during func()
 }
 
 func stubListing(t *testing.T, out string, err error) *listingStub {
@@ -323,6 +325,9 @@ func stubListing(t *testing.T, out string, err error) *listingStub {
 		defer s.mu.Unlock()
 		s.calls++
 		s.args = append([]string{command}, args...)
+		if s.during != nil {
+			s.during()
+		}
 		if err := ctx.Err(); err != nil {
 			return nil, err // as an exec under a done context fails
 		}
@@ -451,6 +456,27 @@ func TestSupportChoicesListingErrorIsPerHarness(t *testing.T) {
 	now = now.Add(choicesFailTTL)
 	if pi := harnessByName(t, s.Choices(context.Background()), BackendPi); pi.Error != "" || len(pi.Models) != 3 || listing.count() != 2 {
 		t.Fatalf("pi after the listing recovered = %+v after %d listings", pi, listing.count())
+	}
+}
+
+// TestSupportChoicesFailureWindowStartsWhenTheListingEnds: a failed listing
+// that hangs until choicesTimeout is cached for choicesFailTTL from when it
+// ended, not from when it began.
+func TestSupportChoicesFailureWindowStartsWhenTheListingEnds(t *testing.T) {
+	stubLookPath(t)
+	listing := stubListing(t, "", errors.New("exit status 1"))
+	now := time.Now()
+	listing.during = func() { now = now.Add(choicesTimeout) }
+	s := realChoices(t, &now)
+	if pi := harnessByName(t, s.Choices(context.Background()), BackendPi); !strings.Contains(pi.Error, "exit status 1") {
+		t.Fatalf("pi with a failed listing = %+v", pi)
+	}
+	listing.mu.Lock()
+	listing.during = nil
+	listing.mu.Unlock()
+	now = now.Add(choicesFailTTL - time.Second)
+	if pi := harnessByName(t, s.Choices(context.Background()), BackendPi); !strings.Contains(pi.Error, "exit status 1") || listing.count() != 1 {
+		t.Fatalf("pi just inside the failure window = %+v after %d listings", pi, listing.count())
 	}
 }
 
