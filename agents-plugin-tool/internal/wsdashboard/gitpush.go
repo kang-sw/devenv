@@ -3,6 +3,7 @@ package wsdashboard
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -13,19 +14,28 @@ import (
 	"github.com/kang-sw/devenv/internal/wsi18n"
 )
 
-// The push action: a press on the ahead count (↑N) of the git badge or the
-// status band, confirmed in the page's popover, asks the daemon to push the
-// session root's current branch to its configured upstream, and nothing
-// else: never a force-like option, never another branch or remote. The
-// daemon re-reads the branch first and refuses a detached HEAD, a branch
-// without an upstream, and one with nothing to push.
+// The git drawer's actions, each a POST from its action panel that runs on
+// the session root's current branch and nothing else, never a force-like
+// option, never another branch:
+//
+//   - push sends the branch to its configured upstream; the daemon re-reads
+//     the branch first and refuses a detached HEAD, a branch without an
+//     upstream, and one with nothing to push.
+//   - pull fast-forwards the branch to its upstream and never merges: it
+//     refuses a detached HEAD, a branch without an upstream, and a working
+//     tree with uncommitted changes to tracked files before it fetches, and a
+//     branch that has diverged from its upstream once the fetch landed.
+//   - fetch runs a plain `git fetch` (the branch's remote, else origin).
+//
+// One action of a root runs at a time.
 
 const (
-	// gitPushTimeout bounds one push, network included.
-	gitPushTimeout = 60 * time.Second
-	// gitPushWaitDelay bounds the wait for git's output pipes once the push
-	// is killed, which a helper git started (ssh) may still hold open.
-	gitPushWaitDelay = 5 * time.Second
+	// gitActionTimeout bounds one action, network included.
+	gitActionTimeout = 60 * time.Second
+	// gitActionWaitDelay bounds the wait for git's output pipes once an
+	// action's git is killed, which a helper git started (ssh) may still
+	// hold open.
+	gitActionWaitDelay = 5 * time.Second
 )
 
 // pushRefusal is why the daemon refused a push before git ran.
@@ -42,15 +52,12 @@ const (
 // with a nil error; err is a failure of the re-read or of the push, its
 // message git's first meaningful line, bounded.
 func pushGit(root string) (pushRefusal, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), gitPushTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), gitActionTimeout)
 	defer cancel()
 	run := &gitBadgeRunner{}
 	st, ok := wsgit.BranchSync(ctx, run, root)
 	if !ok {
-		if run.err == nil {
-			return pushRan, fmt.Errorf("HEAD names no commit")
-		}
-		return pushRan, fmt.Errorf("%s", gitErrText(run.err))
+		return pushRan, branchErr(run)
 	}
 	switch {
 	case st.Head == "":
@@ -64,19 +71,100 @@ func pushGit(root string) (pushRefusal, error) {
 	if !ok {
 		return pushNoUpstream, nil
 	}
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", root}, gitPushArgs(remote, st.Head, merge)...)...)
-	// A credential prompt fails instead of waiting on a terminal the daemon
-	// does not have; the C locale keeps git's messages comparable.
+	return pushRan, runGitAction(ctx, root, gitPushArgs(remote, st.Head, merge)...)
+}
+
+// pullOutcome is how a pull ended short of a failure.
+type pullOutcome int
+
+const (
+	pullRan        pullOutcome = iota // the branch was fast-forwarded
+	pullCurrent                       // nothing to pull: not behind its upstream
+	pullDetached                      // HEAD names no branch
+	pullNoUpstream                    // the branch has no usable upstream
+	pullDirty                         // tracked files have uncommitted changes
+	pullDiverged                      // ahead of and behind its upstream
+)
+
+// pullGit fast-forwards root's current branch to its upstream: it refuses
+// before the fetch when the branch cannot pull or the tree is dirty, fetches
+// the upstream's remote (none for a local upstream), and merges only when the
+// branch is behind and not ahead, with --ff-only so git refuses any other
+// merge too. Untracked files do not make the tree dirty: git's own merge
+// refuses one the fast-forward would overwrite.
+func pullGit(root string) (pullOutcome, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), gitActionTimeout)
+	defer cancel()
+	run := &gitBadgeRunner{}
+	st, ok := wsgit.BranchSync(ctx, run, root)
+	if !ok {
+		return pullRan, branchErr(run)
+	}
+	switch {
+	case st.Head == "":
+		return pullDetached, nil
+	case st.Upstream == "":
+		return pullNoUpstream, nil
+	}
+	remote, _, ok := upstreamOf(ctx, run, root, st.Head)
+	if !ok {
+		return pullNoUpstream, nil
+	}
+	counts, ok := wsgit.WorkingTreeCounts(ctx, run, root)
+	if !ok {
+		return pullRan, branchErr(run)
+	}
+	if counts.Modified > 0 || counts.Staged > 0 {
+		return pullDirty, nil
+	}
+	if remote != "." {
+		if err := runGitAction(ctx, root, "fetch", "--", remote); err != nil {
+			return pullRan, err
+		}
+	}
+	if st, ok = wsgit.BranchSync(ctx, run, root); !ok {
+		return pullRan, branchErr(run)
+	}
+	switch {
+	case st.Behind == 0:
+		return pullCurrent, nil
+	case st.Ahead > 0:
+		return pullDiverged, nil
+	}
+	return pullRan, runGitAction(ctx, root, "merge", "--ff-only", "--quiet", "@{upstream}")
+}
+
+// fetchGit runs a plain fetch in root.
+func fetchGit(root string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), gitActionTimeout)
+	defer cancel()
+	return runGitAction(ctx, root, "fetch")
+}
+
+// branchErr is a failed branch read's error.
+func branchErr(run *gitBadgeRunner) error {
+	if run.err == nil {
+		return fmt.Errorf("HEAD names no commit")
+	}
+	return fmt.Errorf("%s", gitErrText(run.err))
+}
+
+// runGitAction runs one git command of an action in root. A credential
+// prompt fails instead of waiting on a terminal the daemon does not have; the
+// C locale keeps git's messages comparable. Its error is git's first
+// meaningful line, bounded.
+func runGitAction(ctx context.Context, root string, args ...string) error {
+	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", root}, args...)...)
 	cmd.Env = append(os.Environ(), "LC_ALL=C", "GIT_TERMINAL_PROMPT=0")
-	cmd.WaitDelay = gitPushWaitDelay
+	cmd.WaitDelay = gitActionWaitDelay
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		if ctx.Err() != nil {
-			return pushRan, fmt.Errorf("timed out after %s", gitPushTimeout)
+			return fmt.Errorf("timed out after %s", gitActionTimeout)
 		}
-		return pushRan, fmt.Errorf("%s", gitPushErrText(string(out), err))
+		return fmt.Errorf("%s", gitActionErrText(string(out), err))
 	}
-	return pushRan, nil
+	return nil
 }
 
 // upstreamOf is branch's configured upstream: its remote and the remote
@@ -106,13 +194,14 @@ func gitPushArgs(remote, branch, merge string) []string {
 	return []string{"push", "--", remote, "refs/heads/" + branch + ":" + merge}
 }
 
-// gitPushErrText is a failed push's message for the popover: the first line
-// of git's output that says what went wrong, skipping the destination line,
-// hints, and blank lines, with its runs of spaces folded, bounded.
-func gitPushErrText(out string, err error) string {
+// gitActionErrText is a failed action's message for the drawer: the first
+// line of git's output that says what went wrong, skipping the destination
+// or source line, hints, and blank lines, with its runs of spaces folded,
+// bounded.
+func gitActionErrText(out string, err error) string {
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.Join(strings.Fields(line), " ")
-		if line == "" || strings.HasPrefix(line, "To ") || strings.HasPrefix(line, "hint:") {
+		if line == "" || strings.HasPrefix(line, "To ") || strings.HasPrefix(line, "From ") || strings.HasPrefix(line, "hint:") {
 			continue
 		}
 		return gitErrText(fmt.Errorf("%s", line))
@@ -120,34 +209,38 @@ func gitPushErrText(out string, err error) string {
 	return gitErrText(err)
 }
 
-// beginPush claims root's one push slot; false while another push of it
-// runs. The release returned with true frees it.
-func (d *Daemon) beginPush(root string) (release func(), ok bool) {
+// beginGitAction claims root's one action slot; false while another action
+// of it runs. The release returned with true frees it.
+func (d *Daemon) beginGitAction(root string) (release func(), ok bool) {
 	key := gitKey(root)
-	d.pushMu.Lock()
-	defer d.pushMu.Unlock()
-	if d.pushing[key] {
+	d.gitActMu.Lock()
+	defer d.gitActMu.Unlock()
+	if d.gitActing[key] {
 		return nil, false
 	}
-	if d.pushing == nil {
-		d.pushing = map[string]bool{}
+	if d.gitActing == nil {
+		d.gitActing = map[string]bool{}
 	}
-	d.pushing[key] = true
+	d.gitActing[key] = true
 	return func() {
-		d.pushMu.Lock()
-		delete(d.pushing, key)
-		d.pushMu.Unlock()
+		d.gitActMu.Lock()
+		delete(d.gitActing, key)
+		d.gitActMu.Unlock()
 	}, true
 }
 
-// handleGitPush serves POST /s/<reply-id>/git/push: a push of the session
-// root's current branch to its upstream. It needs the daemon's own Origin,
-// as the refresh route does, and answers once the push ended: 204 when it
-// succeeded (the badge's re-read then lands through the stream), 409 with
-// the reason when the daemon refused it or another push of the root runs,
-// and 502 with git's first meaningful line when it failed. Every answer's
-// text is for the popover.
-func (d *Daemon) handleGitPush(w http.ResponseWriter, r *http.Request, replyID string) {
+// gitActions are the action routes' names, as in /s/<reply-id>/git/<name>.
+var gitActions = map[string]bool{"push": true, "pull": true, "fetch": true}
+
+// handleGitAction serves POST /s/<reply-id>/git/<action>: push, pull, or
+// fetch on the session root. It needs the daemon's own Origin, as the
+// refresh route does, and answers once the action ended: 204 when it
+// succeeded (the handle's re-read then lands through the stream), 200 with
+// a note when a pull found nothing to pull, 409 with the reason when the
+// daemon refused it or another action of the root runs, and 502 with git's
+// first meaningful line when it failed. Every answer's text is for the
+// drawer.
+func (d *Daemon) handleGitAction(w http.ResponseWriter, r *http.Request, replyID, action string) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -156,7 +249,7 @@ func (d *Daemon) handleGitPush(w http.ResponseWriter, r *http.Request, replyID s
 		http.Error(w, "cross-origin request refused", http.StatusForbidden)
 		return
 	}
-	if d.index == nil || !ValidReplyID(replyID) {
+	if d.index == nil || !ValidReplyID(replyID) || !gitActions[action] {
 		http.Error(w, "unknown session", http.StatusNotFound)
 		return
 	}
@@ -166,29 +259,67 @@ func (d *Daemon) handleGitPush(w http.ResponseWriter, r *http.Request, replyID s
 		return
 	}
 	lang, _ := requestLang(r)
-	release, ok := d.beginPush(s.Project)
+	release, ok := d.beginGitAction(s.Project)
 	if !ok {
-		http.Error(w, wsi18n.T(lang, "git.push.refused.busy"), http.StatusConflict)
+		http.Error(w, wsi18n.T(lang, "git.busy"), http.StatusConflict)
 		return
 	}
-	refusal, err := pushGit(s.Project)
+	code, text := gitActionAnswer(lang, action, s.Project)
 	release()
-	// Whatever the outcome, the badge reads the root again: a refusal or a
-	// failure says the badge's figures are out of date as much as a success
-	// changes them.
+	// Whatever the outcome, the handle reads the root again: a refusal or a
+	// failure says its figures are out of date as much as a success changes
+	// them.
 	if d.git != nil {
 		d.git.refresh(s.Project)
 	}
-	switch {
-	case err != nil:
-		http.Error(w, err.Error(), http.StatusBadGateway)
-	case refusal == pushDetached:
-		http.Error(w, wsi18n.T(lang, "git.push.refused.detached"), http.StatusConflict)
-	case refusal == pushNoUpstream:
-		http.Error(w, wsi18n.T(lang, "git.push.refused.noupstream"), http.StatusConflict)
-	case refusal == pushNothing:
-		http.Error(w, wsi18n.T(lang, "git.push.refused.nothing"), http.StatusConflict)
-	default:
-		w.WriteHeader(http.StatusNoContent)
+	if code == http.StatusNoContent {
+		w.WriteHeader(code)
+		return
 	}
+	if code == http.StatusOK {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		_, _ = io.WriteString(w, text)
+		return
+	}
+	http.Error(w, text, code)
+}
+
+// gitActionAnswer runs action on root and is its answer's status and text.
+func gitActionAnswer(lang, action, root string) (int, string) {
+	switch action {
+	case "push":
+		refusal, err := pushGit(root)
+		switch {
+		case err != nil:
+			return http.StatusBadGateway, err.Error()
+		case refusal == pushDetached:
+			return http.StatusConflict, wsi18n.T(lang, "git.push.refused.detached")
+		case refusal == pushNoUpstream:
+			return http.StatusConflict, wsi18n.T(lang, "git.push.refused.noupstream")
+		case refusal == pushNothing:
+			return http.StatusConflict, wsi18n.T(lang, "git.push.refused.nothing")
+		}
+	case "pull":
+		outcome, err := pullGit(root)
+		switch {
+		case err != nil:
+			return http.StatusBadGateway, err.Error()
+		case outcome == pullCurrent:
+			return http.StatusOK, wsi18n.T(lang, "git.pull.current")
+		case outcome == pullDetached:
+			return http.StatusConflict, wsi18n.T(lang, "git.pull.refused.detached")
+		case outcome == pullNoUpstream:
+			return http.StatusConflict, wsi18n.T(lang, "git.pull.refused.noupstream")
+		case outcome == pullDirty:
+			return http.StatusConflict, wsi18n.T(lang, "git.pull.refused.dirty")
+		case outcome == pullDiverged:
+			return http.StatusConflict, wsi18n.T(lang, "git.pull.refused.diverged")
+		}
+	case "fetch":
+		if err := fetchGit(root); err != nil {
+			return http.StatusBadGateway, err.Error()
+		}
+	}
+	return http.StatusNoContent, ""
 }

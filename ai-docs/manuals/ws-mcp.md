@@ -136,8 +136,9 @@ tools never depend on it. Its state lives under `<cache root>/dashboard/`:
   then at most one per heartbeat interval, change or heartbeat alike) waits
   for the refresh, up to its 5 s timeout. There is no automatic fetch, so
   behind reflects the last one. The status read takes no optional
-  lock and shares the 5 s timeout; when it fails the counts stay zero, which
-  the page shows as no change chip, and branch and sync still show.
+  lock and shares the 5 s timeout; when it fails the counts stay zero. The
+  page's status band shows only the folder; the git handle reads the rest
+  itself (below).
 - `sessions/<reply-id>/inbox/` - the board-answer inbox (`internal/wsinbox`):
   held messages the user sent from the page, one file each; `drained/` keeps
   the newest 50 as sent records. The adapter-only `dashboard.inbox_drain` tool
@@ -175,31 +176,54 @@ whose hash changed. A session with a fresh adapter snapshot gets the live
 layout (lead, agent tree, conversation, board); one without gets the
 board-first page. The live layout's composer carries the status band: the
 context bar (percent, tokens of the window, the last response's cache hit
-rate) above the message box, and below it the folder, branch, upstream
-standing, the 5-hour and weekly usage limits (each with its reset and its
+rate) above the message box, and below it the folder, the 5-hour and
+weekly usage limits (each with its reset and its
 pace, which the page computes), and the cost (`~$` for an estimate, a
 trailing `+` when calls of unknown price were left out). A part with no
 figure is left out; context and limits warn at 80% and turn critical at 95%;
 below a 360px band only the limit under more pressure stays.
 
-The session page's top bar (not the `/` hub) carries a git badge between
-the live mark and the gear: the session root's branch, upstream standing, and
-working-tree counts in the status band's grammar and classes, which the
-daemon reads itself (`internal/wsdashboard/gitbadge.go`) rather than from the
-snapshot. It reads a root only while at least one session page under it holds
-its SSE stream open: once when the first stream opens, every 3 minutes while
-one stays, and at once on `POST /s/<reply-id>/git` (the badge's click; it
-needs an `Origin` equal to the daemon's own, answers 204, and 409 when no
-open page watches the root). One goroutine per watched root runs every read,
-so pages sharing a root share one read and no two reads of a root overlap; a
-refresh inside 2 seconds of the last read waits for that gap's end, and
-requests arriving meanwhile fold into that one read. The last stream's close
-ends the root's reads and drops its value. A read is `rev-parse`,
-`symbolic-ref`, `rev-list --left-right --count`, and `status --porcelain`
-with no optional lock (`wsgit.BranchSync`, `wsgit.WorkingTreeCounts`), in the
-C locale, bounded by 10 s together, with no daemon-wide lock held; it never
-fetches. A non-repository root or a failed read shows the badge dimmed, with
-the reason (git's message) in its title.
+The session page's drawer frame (not the `/` hub) carries a git handle left
+of the panels handle: the session root's branch, abbreviated (an
+`impl/<parent>/<stem>` branch as a hammer and the stem, a `goal/...` one as a
+gold trophy and the stem, a branch naming both kinds as both icons; any
+other branch whole, ellipsized; a detached HEAD as its short id), its ahead
+and behind counts, and a dot for uncommitted changes. Its title spells the
+whole branch and, for an impl or goal stem, the title of the ticket
+`<root>/ai-docs/tickets/*/<stem>.md` names (front matter `title:`, else the
+first `# ` heading; 16 KB read, cached a minute). The daemon reads it itself
+(`internal/wsdashboard/gitbadge.go`) rather than from the snapshot. It reads
+a root only while at least one session page under it holds its SSE stream
+open: once when the first stream opens, every 3 minutes while one stays, and
+at once on `POST /s/<reply-id>/git` (sent when the git drawer opens; it needs
+an `Origin` equal to the daemon's own, answers 204, and 409 when no open page
+watches the root). One goroutine per watched root runs every read, so pages
+sharing a root share one read and no two reads of a root overlap; a refresh
+inside 2 seconds of the last read waits for that gap's end, and requests
+arriving meanwhile fold into that one read. The last stream's close ends the
+root's reads and drops its value. A read is `rev-parse`, `symbolic-ref`,
+`rev-list --left-right --count`, and `status --porcelain` with no optional
+lock (`wsgit.BranchSync`, `wsgit.WorkingTreeCounts`), in the C locale,
+bounded by 10 s together, with no daemon-wide lock held; it never fetches. A
+non-repository root shows no handle; a failed read shows it dimmed, with the
+reason (git's message) in its title.
+
+The handle opens the git drawer (`internal/wsdashboard/gitdrawer.go`,
+`gitpush.go`), which shares the panels drawer's frame. Its right panel lists
+the changed files from `GET /s/<reply-id>/git/status` (JSON: the branch
+standing and the staged, unstaged, and untracked files, each with its status
+letter and `diff --numstat` line delta, at most 300 per group; read when the
+drawer opens and after each action, with no optional lock and no fetch) and
+carries three actions, each a `POST /s/<reply-id>/git/<push|pull|fetch>`
+under the same rules (POST only, the daemon's own `Origin`, the session's
+root, one action per root at a time, 60 s): push sends the branch to its
+upstream; pull fetches the upstream's remote and fast-forwards only,
+refusing a detached HEAD, a branch with no upstream, modified or staged
+tracked files (untracked ones do not count), and a branch that has
+diverged; fetch is a plain `git fetch`. An action answers 204, 200 with a
+note (nothing to pull), 409 with the refusal's reason, or 502 with git's
+message, which the panel shows inline; each re-reads the handle. The wide
+left area is reserved for a future commit graph. There is no commit action.
 
 On the served board and in the conversation's lead
 replies, a file link renders as an action link (`data-wl="file"`, titled with

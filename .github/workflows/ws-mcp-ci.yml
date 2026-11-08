@@ -1,8 +1,10 @@
 name: ws-mcp CI
 
-# Runs `go test ./...` on both Linux and Windows for every develop push and pull
-# request that touches the Go tree, so a Windows-specific failure is caught at
-# merge time instead of at release. It is also the release's only test run: the
+# Runs `go test ./...` on both Linux and Windows for pull requests that touch
+# the Go tree, and for a develop push only when its head commit message carries
+# the `[ci]` tag (a develop push lands often, and a run per push was more than
+# the maintainer wanted), so a Windows-specific failure is caught before
+# release. It is also the release's only test run: the
 # tagged release workflow does not re-run the suite and instead refuses to
 # publish unless this workflow succeeded on the tagged commit. It publishes
 # nothing; the release workflow remains the sole path that builds and uploads
@@ -26,6 +28,11 @@ permissions:
 jobs:
   test:
     name: go test (${{ matrix.os }}, ${{ matrix.shard }})
+    # A develop push runs only when its head commit message carries `[ci]`;
+    # pull requests and manual dispatch always run. Before tagging a release,
+    # push a `[ci]` commit or dispatch this workflow on the commit to tag: the
+    # release's CI gate needs a green run on it.
+    if: github.event_name != 'push' || contains(github.event.head_commit.message, '[ci]')
     strategy:
       # Surface every leg's result; a Linux failure must not cancel the Windows
       # run, which is the one this workflow exists to catch early.

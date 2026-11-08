@@ -239,13 +239,16 @@ func TestGitWatcherEndsWithTheDaemon(t *testing.T) {
 	expectNoRead(t, f)
 }
 
-// TestGitBadgeRendersEachState pins the badge's markup: the band's branch,
-// sync, and change chips for a read repository, the detached form, and the
-// dimmed forms with their reasons. The badge is a span whose branch chip is
-// the refresh button, and its ahead count, where a push can go, the push
-// popover's.
-func TestGitBadgeRendersEachState(t *testing.T) {
+// TestGitHandleRendersEachState pins the git handle's markup: the branch
+// abbreviated (a hammer for an impl branch, a gold trophy for a goal one,
+// both for a branch that is both, each with the stem), the ahead and behind
+// counts, the dirty dot, the detached form, the dimmed forms with their
+// reasons, and no handle for a root that is no repository. Its title spells
+// the whole branch and the ticket title the stem resolved to.
+func TestGitHandleRendersEachState(t *testing.T) {
 	repo := func(r wslive.Repo) *GitBadge { return &GitBadge{State: gitOK, Root: "/p", Repo: r, At: 42} }
+	impl := repo(wslive.Repo{Branch: "impl/develop/261108-feat-x", Upstream: "origin/impl/develop/261108-feat-x"})
+	impl.Ticket = "Feature <x>"
 	cases := []struct {
 		name  string
 		badge *GitBadge
@@ -253,29 +256,38 @@ func TestGitBadgeRendersEachState(t *testing.T) {
 		not   []string
 	}{
 		{"clean, in sync", repo(wslive.Repo{Branch: "main", Upstream: "origin/main"}),
-			[]string{`<span class="btn sb gitb ok"`, `data-at="42"`, `title="git status of /p: click to read it again now"`, `<button type="button" class="sb-br" title="branch: main"`, `<span>main</span>`, `class="sb-sync ok" title="in sync with origin/main as of the last fetch"`},
-			[]string{"sb-diff", "gitpush", `<button type="button" class="btn`}},
+			[]string{`<button type="button" class="gh ok" id="ghandle" aria-controls="drsheet" aria-expanded="false" data-at="42" title="main">`, `#i-branch`, `<span class="gh-br">main</span>`},
+			[]string{"gh-ab", "gh-dirty", "gh-impl", "gh-goal"}},
 		{"dirty", repo(wslive.Repo{Branch: "main", Upstream: "origin/main", Modified: 2, Staged: 1, Untracked: 3}),
-			[]string{`class="sb-diff" title="working tree: 2 modified 1 staged 3 untracked"`, `<b class="mod">~2</b><b class="add">+1</b><b class="unt">?3</b>`},
+			[]string{`title="main&#10;uncommitted changes"`, `<span class="gh-dirty"></span>`},
 			nil},
 		{"ahead and behind", repo(wslive.Repo{Branch: "topic", Upstream: "origin/topic", Ahead: 2, Behind: 1}),
-			[]string{`<button type="button" class="up gitpush" data-br="topic" data-up="origin/topic" data-n="2 commits to push" aria-haspopup="dialog" title="push to origin/topic…">↑2</button><span class="dn">↓1</span>`, "2 to push", "1 to pull"},
-			[]string{"sb-sync ok", "sb-diff"}},
-		{"no upstream", repo(wslive.Repo{Branch: "topic"}),
-			[]string{`class="sb-sync none" title="no upstream branch is set"`, ">no upstream<"},
-			[]string{"gitpush"}},
+			[]string{`<span class="gh-ab"><b class="up">↑2</b><b class="dn">↓1</b></span>`},
+			[]string{"gh-dirty"}},
+		{"behind only", repo(wslive.Repo{Branch: "topic", Upstream: "origin/topic", Behind: 4}),
+			[]string{`<span class="gh-ab"><b class="dn">↓4</b></span>`},
+			[]string{`class="up"`}},
+		{"impl branch with its ticket", impl,
+			[]string{`<span class="gh-impl"><svg class="i" aria-hidden="true"><use href="#i-hammer"/></svg></span><span class="gh-br">261108-feat-x</span>`, `title="impl/develop/261108-feat-x&#10;Feature &lt;x&gt;"`},
+			[]string{"gh-goal", "#i-branch"}},
+		{"goal branch", repo(wslive.Repo{Branch: "goal/main/ship-it"}),
+			[]string{`<span class="gh-goal"><svg class="i" aria-hidden="true"><use href="#i-trophy"/></svg></span><span class="gh-br">ship-it</span>`, `title="goal/main/ship-it"`},
+			[]string{"gh-impl", "#i-branch"}},
+		{"goal and impl branch", repo(wslive.Repo{Branch: "goal/main/g/impl/x/fix-it"}),
+			[]string{`<span class="gh-goal">`, `<span class="gh-impl">`, `<span class="gh-br">fix-it</span>`},
+			[]string{"#i-branch"}},
 		{"detached", repo(wslive.Repo{Branch: "abc1234", Detached: true, Modified: 1}),
-			[]string{`title="detached HEAD at abc1234"`, `<span>abc1234</span>`, `<b class="mod">~1</b>`},
-			[]string{"sb-sync", "gitpush"}},
-		{"not a repository", &GitBadge{State: gitNoRepo, Root: "/p", At: 42},
-			[]string{`class="btn sb gitb norepo"`, `title="/p is not a git repository"`, "<span>no repo</span>"},
-			[]string{"sb-sync", "sb-diff"}},
+			[]string{`title="detached HEAD at abc1234&#10;uncommitted changes"`, `<span class="gh-br">abc1234</span>`, `class="gh-dirty"`},
+			[]string{"gh-ab"}},
+		{"escaped branch", repo(wslive.Repo{Branch: "<b>x"}),
+			[]string{`<span class="gh-br">&lt;b&gt;x</span>`},
+			[]string{"<b>x"}},
 		{"read failure", &GitBadge{State: gitFailed, Root: "/p", Err: "timed out after 10s", At: 42},
-			[]string{`class="btn sb gitb failed"`, `title="git status could not be read: timed out after 10s"`, "<span>git error</span>"},
-			[]string{"sb-sync", "sb-diff"}},
+			[]string{`class="gh failed"`, `title="git status could not be read: timed out after 10s"`, `<span class="gh-br">git error</span>`},
+			[]string{"gh-ab"}},
 		{"pending", &GitBadge{State: gitPending, Root: "/p"},
-			[]string{`class="btn sb gitb pending"`, `title="reading the git status…"`, `data-at="0"`},
-			[]string{"sb-sync"}},
+			[]string{`class="gh pending"`, `title="reading the git status…"`, `data-at="0"`, `<span class="gh-br">…</span>`},
+			nil},
 	}
 	for _, c := range cases {
 		for _, adapter := range []bool{false, true} {
@@ -296,18 +308,22 @@ func TestGitBadgeRendersEachState(t *testing.T) {
 			}
 		}
 	}
-	regions, err := renderSessionRegions(SessionView{ReplyID: "x"}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if html := regions[regionGit].HTML; html != "" {
-		t.Errorf("no badge renders %q, want nothing", html)
+	for _, view := range []SessionView{{ReplyID: "x"}, {ReplyID: "x", Git: &GitBadge{State: gitNoRepo, Root: "/p", At: 42}}} {
+		regions, err := renderSessionRegions(view, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if html := regions[regionGit].HTML; html != "" {
+			t.Errorf("git %+v renders %q, want nothing", view.Git, html)
+		}
 	}
 }
 
-// TestGitBadgeSitsBetweenTheLiveMarkAndTheQuickSwitcher pins the badge's
-// place in the session page's top bar.
-func TestGitBadgeSitsBetweenTheLiveMarkAndTheQuickSwitcher(t *testing.T) {
+// TestGitHandleSitsLeftOfThePanelsHandle pins the handle's place: in the
+// drawer frame after the panels handle (the stylesheet hangs it left of
+// it), with the git sheet beside the panels in the drawer's sheet, and no
+// git badge in the top bar. A page without a git read has neither.
+func TestGitHandleSitsLeftOfThePanelsHandle(t *testing.T) {
 	view := SessionView{ReplyID: "x", Git: &GitBadge{State: gitPending, Root: "/p"}}
 	regions, err := renderSessionRegions(view, nil)
 	if err != nil {
@@ -317,9 +333,37 @@ func TestGitBadgeSitsBetweenTheLiveMarkAndTheQuickSwitcher(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sse, git, qs := strings.Index(page, `id="sse"`), strings.Index(page, `id="r-git"`), strings.Index(page, `id="qsslot"`)
-	if sse < 0 || git < sse || qs < git {
-		t.Fatalf("top bar order: sse %d, git %d, quick switcher %d", sse, git, qs)
+	drbody, gbody, drhandle, git := strings.Index(page, `id="drbody"`), strings.Index(page, `id="gbody"`), strings.Index(page, `id="drhandle"`), strings.Index(page, `id="r-git"`)
+	if drbody < 0 || gbody < drbody || drhandle < gbody || git < drhandle {
+		t.Fatalf("drawer order: panels %d, git sheet %d, panels handle %d, git handle %d", drbody, gbody, drhandle, git)
+	}
+	top := page[strings.Index(page, `<div class="top">`):strings.Index(page, `<div class="drawer"`)]
+	for _, n := range []string{"r-git", "gitb", "ghandle"} {
+		if strings.Contains(top, n) {
+			t.Errorf("the top bar carries %q: %s", n, top)
+		}
+	}
+	for _, w := range []string{`data-git="fetch"`, `data-git="pull"`, `data-git="push"`, `class="gleft"`, "The commit graph will appear here.", `data-lost="the dashboard did not answer"`} {
+		if !strings.Contains(page, w) {
+			t.Errorf("the git sheet lacks %q", w)
+		}
+	}
+	for _, n := range []string{`data-git="commit"`, "gitpop"} {
+		if strings.Contains(page, n) {
+			t.Errorf("the page carries %q", n)
+		}
+	}
+
+	view.Git = nil
+	regions, err = renderSessionRegions(view, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page, err = renderSessionPage(view, regions, false); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(page, `id="gbody"`) || strings.Contains(page, `id="ghandle"`) {
+		t.Error("a page without a git read carries the git sheet or handle")
 	}
 }
 
@@ -396,8 +440,8 @@ func TestGitRefreshRouteAndStream(t *testing.T) {
 	route := f.base + "/s/livesession/git"
 
 	_, page := get(t, f.base+"/s/livesession")
-	if !strings.Contains(page, `class="btn sb gitb pending"`) {
-		t.Fatalf("page lacks the pending badge")
+	if !strings.Contains(page, `class="gh pending"`) {
+		t.Fatalf("page lacks the pending handle")
 	}
 	// No page watches the root yet: nothing is read.
 	if code, _, raw := postJSON(t, route, f.base, ""); code != http.StatusConflict {
@@ -439,12 +483,12 @@ func TestGitRefreshRouteAndStream(t *testing.T) {
 			}
 		}
 	}
-	gitEvent(`>↑1</button>`)
+	gitEvent(`>↑1</b>`)
 
 	if code, _, raw := postJSON(t, route, f.base, ""); code != http.StatusNoContent {
 		t.Fatalf("refresh = %d %s, want 204", code, raw)
 	}
-	gitEvent(`>↑2</button>`)
+	gitEvent(`>↑2</b>`)
 
 	resp.Body.Close()
 	waitFor(t, "the root to be dropped", func() bool { return watched(f.d.git) == 0 })

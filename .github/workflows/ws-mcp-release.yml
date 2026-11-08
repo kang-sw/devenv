@@ -57,14 +57,21 @@ jobs:
       # The release does not re-run `go test`: ws-mcp CI already ran the full
       # ubuntu + windows suite on this exact commit (the ship flow waits for it
       # before tagging), and the Windows leg alone costs ~30 min. A tag whose
-      # commit has no green ws-mcp CI run publishes nothing.
+      # commit has no green ws-mcp CI run publishes nothing. A develop push
+      # without `[ci]` in its head commit still creates a ws-mcp CI run whose
+      # test jobs are all skipped, so a run counts only when every one of its
+      # jobs concluded `success`.
       - name: Require green ws-mcp CI on the tagged commit
         if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          green=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ws-mcp-ci.yml/runs?head_sha=${GITHUB_SHA}&status=success" --jq '.total_count')
-          if [ "${green:-0}" -lt 1 ]; then
+          green=0
+          for id in $(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ws-mcp-ci.yml/runs?head_sha=${GITHUB_SHA}&status=success" --jq '.workflow_runs[].id'); do
+            ran=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${id}/jobs" --jq '[.jobs[].conclusion] | length > 0 and all(. == "success")')
+            if [ "$ran" = "true" ]; then green=1; break; fi
+          done
+          if [ "$green" -lt 1 ]; then
             echo "::error::No successful ws-mcp CI run for ${GITHUB_SHA}; run ws-mcp CI on this commit (gh workflow run ws-mcp-ci.yml --ref develop) before tagging."
             exit 1
           fi

@@ -15,20 +15,23 @@ import (
 	"github.com/kang-sw/devenv/internal/wslive"
 )
 
-// The session page's git badge: the top bar shows the session root's branch,
-// its standing against its upstream, and its working-tree counts, which the
-// daemon reads itself, separately from the status band's figures (those come
-// from the session's own ws-mcp, through the snapshot).
+// The session page's git handle: the drawer handle left of the side-panel
+// handle shows the session root's branch (abbreviated, see GitHandle), its
+// standing against its upstream, and whether its working tree is dirty, which
+// the daemon reads itself, apart from the session's own ws-mcp figures (the
+// snapshot's repo, which the status band's folder comes from). The handle
+// opens the git drawer (gitdrawer.go); the badge type below is what the
+// handle draws.
 //
 // The daemon reads a root only while some page of a session under it holds
 // its SSE stream open (gitWatcher): once when the first such stream opens,
 // then every gitReadInterval until the last one closes, and at once when a
-// page asks (POST /s/<reply-id>/git). One goroutine per watched root runs
-// every read, so pages sharing a root share one read and a burst of refresh
-// requests never runs git concurrently for one root. No read ever fetches, so
-// behind reflects the last fetch.
+// page asks (POST /s/<reply-id>/git, which the drawer sends as it opens). One
+// goroutine per watched root runs every read, so pages sharing a root share
+// one read and a burst of refresh requests never runs git concurrently for
+// one root. No read ever fetches, so behind reflects the last fetch.
 //
-// The badge follows the band: when a session's live snapshot brings repo
+// The badge follows the snapshot: when a session's live snapshot brings repo
 // figures that differ from the ones it brought before and from the badge's
 // last read, the stream that rendered it asks for a read (follow), so the
 // two agree once the badge's read lands. The interval stays the fallback for
@@ -42,7 +45,7 @@ const (
 	gitRefreshGap = 2 * time.Second
 	// gitReadTimeout bounds one read's git commands together.
 	gitReadTimeout = 10 * time.Second
-	// gitErrMax bounds a failed read's message, which the badge's title
+	// gitErrMax bounds a failed read's message, which the handle's title
 	// shows.
 	gitErrMax = 240
 )
@@ -55,7 +58,7 @@ const (
 	gitFailed  = "failed"
 )
 
-// GitBadge is the top bar's git badge for one session root.
+// GitBadge is the git handle's read of one session root.
 type GitBadge struct {
 	// State is gitPending, gitOK, gitNoRepo, or gitFailed.
 	State string
@@ -63,6 +66,9 @@ type GitBadge struct {
 	Root string
 	// Repo holds the branch fields of an ok read; Folder stays empty.
 	wslive.Repo
+	// Ticket is the title of the ticket an impl or goal branch's stem
+	// names, empty when none resolves.
+	Ticket string
 	// Err is a failed read's git message.
 	Err string
 	// At is when the read finished (epoch ms; 0 before the first). It is in
@@ -93,6 +99,8 @@ func readGitBadge(root string) GitBadge {
 	badge.Branch, badge.Upstream, badge.Ahead, badge.Behind = st.Head, st.Upstream, st.Ahead, st.Behind
 	if st.Head == "" {
 		badge.Branch, badge.Detached = st.OID, true
+	} else if h := branchHandle(st.Head, false); h.Impl || h.Goal {
+		badge.Ticket = ticketTitles.title(root, h.Text, time.Now())
 	}
 	run.err = nil
 	counts, ok := wsgit.WorkingTreeCounts(ctx, run, root)
@@ -355,7 +363,7 @@ func signal(ch chan struct{}) {
 }
 
 // handleGitRefresh serves POST /s/<reply-id>/git: an immediate re-read of
-// the session root's git badge. It needs the daemon's own Origin, as the
+// the session root's git handle. It needs the daemon's own Origin, as the
 // other browser writes do, and answers 204 once the read is asked for (it
 // lands on the page through the stream), 409 when no page watches the root.
 func (d *Daemon) handleGitRefresh(w http.ResponseWriter, r *http.Request, replyID string) {

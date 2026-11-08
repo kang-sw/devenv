@@ -45,7 +45,7 @@ func revParse(t *testing.T, dir, rev string) string {
 }
 
 // TestPushGitPushesTheBranchToItsUpstream: a branch two ahead lands on the
-// upstream, and the badge's read then shows it in sync.
+// upstream, and the handle's read then shows it in sync.
 func TestPushGitPushesTheBranchToItsUpstream(t *testing.T) {
 	work := filepath.Join(t.TempDir(), "work")
 	origin := pushRepos(t, work, 2)
@@ -143,38 +143,38 @@ func TestGitPushArgsCarryNoForce(t *testing.T) {
 
 func TestGitPushErrText(t *testing.T) {
 	out := "To /tmp/origin.git\n ! [rejected]        main -> main (fetch first)\nerror: failed to push some refs to '/tmp/origin.git'\nhint: Updates were rejected\n"
-	if got, want := gitPushErrText(out, errors.New("exit status 1")), "! [rejected] main -> main (fetch first)"; got != want {
+	if got, want := gitActionErrText(out, errors.New("exit status 1")), "! [rejected] main -> main (fetch first)"; got != want {
 		t.Errorf("rejection = %q, want %q", got, want)
 	}
-	if got := gitPushErrText("fatal: could not read Username for 'https://example.com': terminal prompts disabled\n", nil); !strings.HasPrefix(got, "fatal: could not read Username") {
+	if got := gitActionErrText("fatal: could not read Username for 'https://example.com': terminal prompts disabled\n", nil); !strings.HasPrefix(got, "fatal: could not read Username") {
 		t.Errorf("credential failure = %q", got)
 	}
-	if got := gitPushErrText("\nhint: x\n", errors.New("exit status 128")); got != "exit status 128" {
+	if got := gitActionErrText("\nhint: x\n", errors.New("exit status 128")); got != "exit status 128" {
 		t.Errorf("no meaningful line = %q", got)
 	}
-	if got := gitPushErrText(strings.Repeat("x", 3*gitErrMax), nil); len([]rune(got)) != gitErrMax+1 {
+	if got := gitActionErrText(strings.Repeat("x", 3*gitErrMax), nil); len([]rune(got)) != gitErrMax+1 {
 		t.Errorf("long line = %d runes", len([]rune(got)))
 	}
 }
 
-// TestBeginPushHoldsOnePushPerRoot: a second push of a root waits for the
-// first to end; another root is free.
-func TestBeginPushHoldsOnePushPerRoot(t *testing.T) {
+// TestBeginGitActionHoldsOnePerRoot: a second action of a root waits for
+// the first to end; another root is free.
+func TestBeginGitActionHoldsOnePerRoot(t *testing.T) {
 	d := &Daemon{}
-	release, ok := d.beginPush("/repo")
+	release, ok := d.beginGitAction("/repo")
 	if !ok {
 		t.Fatal("first push refused")
 	}
-	if _, ok := d.beginPush("/repo/"); ok {
+	if _, ok := d.beginGitAction("/repo/"); ok {
 		t.Fatal("a second push of the same root was let through")
 	}
-	other, ok := d.beginPush("/other")
+	other, ok := d.beginGitAction("/other")
 	if !ok {
 		t.Fatal("a push of another root was refused")
 	}
 	other()
 	release()
-	if again, ok := d.beginPush("/repo"); !ok {
+	if again, ok := d.beginGitAction("/repo"); !ok {
 		t.Fatal("a push after the first ended was refused")
 	} else {
 		again()
@@ -184,7 +184,7 @@ func TestBeginPushHoldsOnePushPerRoot(t *testing.T) {
 // TestGitPushRoute pins the route end to end on real repositories: it needs
 // the daemon's own Origin and POST, refuses with the reason when there is
 // nothing to push, and a push of a branch two ahead lands on the upstream and
-// re-reads the badge, whose next swap shows the branch in sync.
+// re-reads the handle, whose next swap shows the branch in sync.
 func TestGitPushRoute(t *testing.T) {
 	f := startPageFixture(t, func(o *DaemonOptions) { o.noGitBadge = false })
 	f.d.git.gap = 0
@@ -210,8 +210,8 @@ func TestGitPushRoute(t *testing.T) {
 	}
 
 	_, page := get(t, f.base+"/s/livesession")
-	if !strings.Contains(page, `id="gitpop"`) {
-		t.Fatal("the session page lacks the push popover")
+	if !strings.Contains(page, `data-git="push"`) {
+		t.Fatal("the session page lacks the git sheet's push button")
 	}
 	client := &http.Client{Transport: &http.Transport{Proxy: nil}}
 	resp, err := client.Get(f.base + "/s/livesession/events?h=" + heldOf(page) + ",mode." + newRegion(modeLive).Hash)
@@ -221,19 +221,19 @@ func TestGitPushRoute(t *testing.T) {
 	defer resp.Body.Close()
 	events := make(chan sseEvent, 16)
 	go readEvents(t, bufio.NewReader(resp.Body), events)
-	gitEvent := func(want string) {
+	gitEvent := func(what string, match func(string) bool) {
 		t.Helper()
 		for {
 			ev, ok := nextRegion(t, events, 5*time.Second)
 			if !ok {
-				t.Fatalf("no git region carrying %q", want)
+				t.Fatalf("no git region %s", what)
 			}
-			if ev.Name == regionGit && strings.Contains(ev.HTML, want) {
+			if ev.Name == regionGit && match(ev.HTML) {
 				return
 			}
 		}
 	}
-	gitEvent(`data-n="2 commits to push"`)
+	gitEvent("two ahead", func(h string) bool { return strings.Contains(h, `<b class="up">↑2</b>`) })
 
 	if code, _, raw := postJSON(t, route, f.base, ""); code != http.StatusNoContent {
 		t.Fatalf("push = %d %s, want 204", code, raw)
@@ -241,7 +241,7 @@ func TestGitPushRoute(t *testing.T) {
 	if got, want := revParse(t, origin, "main"), revParse(t, work, "HEAD"); got != want {
 		t.Fatalf("origin main = %s, want %s", got, want)
 	}
-	gitEvent(`class="sb-sync ok"`)
+	gitEvent("in sync", func(h string) bool { return strings.Contains(h, `class="gh ok"`) && !strings.Contains(h, "gh-ab") })
 
 	code, _, raw := postJSON(t, route, f.base, "")
 	if code != http.StatusConflict || !strings.Contains(raw, "nothing to push") {
