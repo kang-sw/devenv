@@ -65,7 +65,14 @@
       "registered_at": "2026-09-24T10:38:33Z"
     },
     "260730-refactor-retire-goal-fan-out-step-and-session-note": {
-      "registered_at": "2026-09-24T10:38:33Z"
+      "registered_at": "2026-09-24T10:38:33Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "delegate/remove-orphan-surfaces",
+        "phase": "closed",
+        "touched_at": "2026-11-08T08:31:15Z"
+      }
     },
     "260812-research-reload-plugins-keeps-stale-mcp-binary": {
       "registered_at": "2026-09-24T10:38:33Z"
