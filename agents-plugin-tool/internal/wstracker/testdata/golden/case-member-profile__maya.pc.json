@@ -261,9 +261,9 @@
   },
   "priority": {
    "names": [
-    "알림",
-    "업무",
-    "긴급"
+    "Notice",
+    "Task",
+    "Urgent"
    ],
    "default": 1
   },

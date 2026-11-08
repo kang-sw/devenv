@@ -32,7 +32,7 @@
   var ITEM_FIELDS = ['title', 'body', 'project', 'due', 'priority'];
   // Priority levels are store configuration (roles file, roles.set_priority_levels).
   // Codes are integers 0..n-1, larger = more urgent; names are display names only.
-  var DEFAULT_PRIORITY = { names: ['알림', '업무', '긴급'], default: 1 };
+  var DEFAULT_PRIORITY = { names: ['Notice', 'Task', 'Urgent'], default: 1 };
   // Stale (284): a live assignment in doing or blocked with no status write for this
   // many days by the viewer's clock. A client-side constant, not shared data; a
   // view may pass its own as deriveViewState(input, {staleDays}).

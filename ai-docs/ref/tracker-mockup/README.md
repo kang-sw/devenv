@@ -366,7 +366,7 @@ build, no server, no dependencies.
 
 ```json
 { "admins": ["ada", "bo"],
-  "priority": { "names": ["알림", "업무", "긴급"], "default": 1 },
+  "priority": { "names": ["Notice", "Task", "Urgent"], "default": 1 },
   "attachments": { "max_bytes": 10485760 },
   "members": [ { "id": "maya", "profile": { "org": "Search", "family": "Ortiz", "given": "Maya" },
                  "keys": ["maya-k1"], "leads": ["ada"] } ] }
@@ -386,7 +386,7 @@ cannot contain `.`, which separates member and clone in a stream id.
 `priority` is the store's priority configuration: level codes are the integers
 `0..n-1` (larger = more urgent), `names` are display names only, and `default`
 is the level new items start at. Without it the store uses three levels named
-알림 / 업무 / 긴급 with default 1. `attachments.max_bytes` is the largest
+Notice / Task / Urgent with default 1. `attachments.max_bytes` is the largest
 attachment the store accepts, in bytes (339); without it the limit is 10 MiB
 (10485760). Later changes are admin `roles.*` events, folded in causal order.
 
@@ -822,7 +822,7 @@ creation, and it has a topic and a blocked subtask.
 | 247 | Genesis is the single commit of `refs/heads/tracker/genesis`, never updated. |
 | 268 | v3 models the Settled rows v2 still showed as v2: per-clone refs and streams (212, 230, 237) with a clone picker, "assigner confirms" for requests (214), and journal batching with an unpushed list (227). |
 | 271 | One member's concurrent writes from two clones: the later ts wins by the (203) rule, the losing write stays in history, and no conflict marker is shown. |
-| 272 c, 277 c | Items carry an optional `due` date and one integer `priority`, edited by the creator and merged by (203). Priority levels are store configuration in the roles file (`priority.names`, `priority.default`), changed by `roles.set_priority_levels`; default 알림 / 업무 / 긴급, default level 1. Larger is more urgent; a stored value outside the range shows as the top level. |
+| 272 c, 277 c | Items carry an optional `due` date and one integer `priority`, edited by the creator and merged by (203). Priority levels are store configuration in the roles file (`priority.names`, `priority.default`), changed by `roles.set_priority_levels`; default Notice / Task / Urgent, default level 1. Larger is more urgent; a stored value outside the range shows as the top level. |
 | 274 a | Only the creator edits an item, due and priority included; others comment. |
 | 278 a | No labels or tags in v1; the `project` string stays the only grouping. |
 | 273 b, 279 a, 280 a | Assignment is unified. `item.assign` may target anyone: someone the author reaches (lead chain) is forced and live; anyone else is pending until accept or decline. Pending assignments are excluded from status and roll-ups. On accept the accepter's direct lead gets a reference notice and may return it (`item.return`). A request is an item created with a pending assignment in the same write; `request.*` became `item.accept` / `item.decline` / `item.return`. An assignee hands off with `item.handoff` (pending to the new person; on accept the original ends and its assigner is notified). `all` stays forced-only. Completion mode stays per assignment. An agent never accepts or declines. |

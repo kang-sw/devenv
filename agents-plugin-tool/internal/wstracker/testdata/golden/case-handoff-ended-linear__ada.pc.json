@@ -371,9 +371,9 @@
   },
   "priority": {
    "names": [
-    "알림",
-    "업무",
-    "긴급"
+    "Notice",
+    "Task",
+    "Urgent"
    ],
    "default": 1
   },
@@ -565,7 +565,7 @@
     "due": null,
     "priority": 1,
     "priorityLevel": 1,
-    "priorityName": "업무",
+    "priorityName": "Task",
     "parent": null,
     "author": "maya",
     "ts": "2026-11-01T09:00:00Z",
@@ -611,7 +611,7 @@
     "due": null,
     "priority": 1,
     "priorityLevel": 1,
-    "priorityName": "업무",
+    "priorityName": "Task",
     "parent": null,
     "author": "maya",
     "ts": "2026-11-01T09:00:00Z",
@@ -656,7 +656,7 @@
     "due": null,
     "priority": 1,
     "priorityLevel": 1,
-    "priorityName": "업무",
+    "priorityName": "Task",
     "parent": null,
     "author": "sven",
     "ts": "2026-11-01T09:01:00Z",
