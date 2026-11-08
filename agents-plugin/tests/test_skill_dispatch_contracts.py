@@ -362,7 +362,6 @@ class SkillDispatchContractsTest(unittest.TestCase):
         self.assertIn("A ticket named in the invocation wins.", select)
         self.assertIn("Otherwise render `ticket-selector`", select)
         self.assertIn("use its one `selection:` result", select)
-        self.assertNotIn("session.note", run)
         self.assertNotIn("session.children", run)
         # (d) the continue verdict variant is emitted, distinct from the generic
         # ready-queue line, and the finished/complete/done ban stays intact.

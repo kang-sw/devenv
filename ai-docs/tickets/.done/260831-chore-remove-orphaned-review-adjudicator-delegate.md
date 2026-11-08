@@ -3,6 +3,7 @@ title: Remove the orphaned review-adjudicator delegate once the graded relay lan
 related:
   260831-refactor-severity-graded-per-slice-review-relay: prerequisite — that ticket revives implementer-elevated but leaves review-adjudicator with no reachable trigger, making it the deletion candidate
   260828-refactor-per-slice-review-relay: first made both delegates dormant; retained them as an explicit deletion-is-later decision
+completed: 2026-11-08
 ---
 
 # Remove the orphaned review-adjudicator delegate once the graded relay lands
@@ -45,3 +46,8 @@ Verify no reachable reference remains, remove the playbook + manifest entry,
 regenerate mirrors/manifests, and update the mental-model. Verification: build/
 vet/test green, wsflow tests pass, and a repo-wide `review-adjudicator` search
 returns only historical/ticket references.
+
+
+## Resolution (2026-11-08)
+
+review-adjudicator (with implementer-relay and implementer-elevated, orphaned by the two-round review model) removed in 34d2fd0e7.

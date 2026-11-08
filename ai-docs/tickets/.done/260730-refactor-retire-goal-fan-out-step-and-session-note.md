@@ -6,6 +6,7 @@ related:
   260725-research-goal-loop-restart-starved-by-background-delegation: names the fan-out dispatch model as the worst case for the Stop-hook starvation that drives the goal loop
   260630-epic-skill-playbook-diet: same direction — remove machinery that does not earn its cost
   260730-refactor-drain-ready-queue-rename-and-prefer-subagent-splice: sibling; this ticket must land first so the fan-out transclusion hook is gone before drain's surface is reshaped
+completed: 2026-11-08
 ---
 
 # Retire lead-goal-fan-out-step and the orphaned session.note surface
@@ -143,3 +144,8 @@ No new caller-visible behavior is introduced.
 - `session.children`. Retained.
 - Any replacement parallel-execution mechanism. Deferred to the preserved
   `idea/` ticket, gated on `260725`.
+
+
+## Resolution (2026-11-08)
+
+Fan-out skill already retired; session.note tool, handler, write path, and runtime gates removed in 9d4d20439 (sessionRecord.Note kept because session.children still reads it).

@@ -68,10 +68,10 @@ type sessionRecord struct {
 	// Todos is the ordered step-level checklist for the session. Added as an
 	// additive field; older records parse with a nil slice. See session_state.go.
 	Todos []todoItem `json:"todos,omitempty"`
-	// Note is a free-form one-line annotation a lead attaches to this child's own
-	// record via session.note. Empty is the same as absent (omitempty) so a
-	// "clear the note" write is just writing an empty string, not a separate
-	// verb. See session_state.go's handleSessionNote.
+	// Note is a free-form one-line annotation on this child's own record,
+	// surfaced and filtered (unnoted_only) by session.children. Its writer,
+	// session.note, is retired; the field stays so records that already carry a
+	// note keep reading back through session.children unchanged.
 	Note string `json:"note,omitempty"`
 	// ReviewTrackNudgeShown marks that the review-track config nudge (see
 	// review_track_alarm.go) has already fired once for this session. Added as
@@ -350,24 +350,9 @@ func (s *sessionStore) children(parentKey string, maxDepth int) ([]sessionChild,
 	return children, nil
 }
 
-// setNote writes a free-form note onto targetKey's own session record via the
-// shared atomic read-modify-write primitive (mutateRecord, session_state.go).
-// It is the on-disk half of session.note: the caller's session_key only
-// authorizes the call (gated lead-only by the existing session.* prefix
-// block); the note itself lands on targetKey's record, not the caller's, so a
-// later session.children read of targetKey's parent surfaces it directly. An
-// empty text is a legitimate "clear the note" write, made possible purely by
-// the Note field's omitempty JSON tag.
-func (s *sessionStore) setNote(targetKey, text string) error {
-	return s.mutateRecord(targetKey, func(r *sessionRecord) error {
-		r.Note = text
-		return nil
-	})
-}
-
 // setReviewTrackNudgeShown marks the review-track config nudge as already
 // fired for targetKey's own session record, via the same atomic
-// read-modify-write primitive as setNote. Called by the workflow_manual
+// read-modify-write primitive (mutateRecord). Called by the workflow_manual
 // wiring sites (review_track_alarm.go) immediately after a non-empty nudge is
 // injected, so a later same-session call does not repeat it.
 func (s *sessionStore) setReviewTrackNudgeShown(targetKey string) error {
