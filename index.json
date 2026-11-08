@@ -637,24 +637,14 @@
     "261108-bug-pi-esc-drops-queued-mail-batches": {
       "registered_at": "2026-11-07T15:11:11Z"
     },
-    "261108-feat-ws-daemon-agent-runner": {
-      "registered_at": "2026-11-08T00:25:09Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-08T00:56:14Z",
-        "impl": {
-          "branch": "impl/develop/dork-gamma-cable"
-        }
-      }
-    },
     "261108-feat-ws-tracker-ledger-attachments": {
       "registered_at": "2026-11-08T01:19:47Z"
     },
     "261108-feat-ws-tracker-support-agent-chat": {
       "registered_at": "2026-11-08T00:25:15Z"
+    },
+    "261108-feat-ws-tracker-wiki-git-branch": {
+      "registered_at": "2026-11-08T03:56:55Z"
     }
   }
 }
