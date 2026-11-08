@@ -10,6 +10,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: a7394381ca3a5da1
 sage-review-completeness-reviewed: a7394381ca3a5da1
+completed: 2026-11-08
 ---
 
 # Tracker drawer UI - per-store handles, shared renderer, daemon endpoints, local UI state, join dialog
@@ -256,6 +257,92 @@ All confirmed on the session board, 2026-11-08.
   an edited profile saving as a new entry); endpoint tests also cover
   credential redaction in responses and the daemon's existing local access
   gating on the new write endpoints; light and dark screenshots.
+
+### Result (e85b2200d) - 2026-11-08
+
+- `wstrackerhost` (`55e7a3c59`): `Seen` / `MarkSeen` over
+  `<root>/<store>/ui-seen.json` (`{"version":1,"badge","read"}`, sorted,
+  union only, host-level mutex, never the store lock);
+  `DispatchBatch` resolves `"$N"` in `item` / `parent` / `comment` /
+  `reply_to` inside `DispatchWith` (an invalid or forward reference writes
+  nothing); `StartPoll(interval, onRound)`; `RedactCredentials` and
+  `(*StoreView).Redact` moved here from `internal/mcp`.
+- `wsdashboard` (`057a2ab05`): `DaemonOptions.Tracker TrackerHost` with
+  JSON-level types (the package still imports no tracker or ledger
+  package); `/tracker/stores`, `/stores/<id>/{view,dispatch,check,sync,seen}`,
+  `/tracker/profiles`, `/tracker/register` behind the access guard, every
+  POST same-origin and size-limited, origin forced to `human`, a refusal
+  409, a host that could not be created 503; `TrackerChanged` bumps a
+  revision that every page stream (index and session) sends as
+  `event: tracker` on connect and on change. All routes are in
+  `guardedRoutes`.
+- `cmd/ws-mcp` (`bdca53624`): one Host created before `StartDaemon`, an
+  adapter that returns the redacted creation error from every method when
+  `New` fails, the poll's `onRound` = `daemon.TrackerChanged`, the Host
+  closed on every exit path; manual paragraph in `ws-mcp.md`.
+- Product page (`dec03b29d`, `f4f448316`): tracker assets inlined on the
+  session AND index pages; the HTTP adapter in `dashboard.js` (view cache,
+  coalesced reload on the SSE nudge, dispatch results built from the
+  refreshed view, keepalive sync); mutual exclusion with the session
+  drawer through `tk:drawer-open` / `ws:drawer-open`; header padding for
+  both handle rows; `body.tk-paged` hides host content; CSS leak guards in
+  `tracker.css` for the shared class names (whiteboard `.btn` sizing,
+  `code`, `.new`, `.kcard`, `.arow`, dashboard `.tdot`, `.crow`, `.empty`;
+  `.agent + .agent` narrowed in `dashboard.css`); the "+ store" handle and
+  register / join dialog in the renderer (shown when the adapter has
+  `register`, also with zero stores and with a host error).
+- Fixes from acceptance and review: `1ea61bdea` (what the opening check
+  brings in is marked new and seen on that showing - the async adapter
+  otherwise brought it back as a badge); `e85b2200d` (redaction of a
+  password holding `@`; the offline label's tooltip shows `sync.error`).
+- Verification: `go test` for `wstrackerhost`, `wsdashboard`,
+  `cmd/ws-mcp`, `wsi18n`, `internal/mcp` pass; `gofmt`, `go vet` clean;
+  `go list -deps ./internal/wsdashboard` has no tracker or ledger package;
+  `node --check` on `dashboard.js`, `tracker.js`, the mockup scripts.
+  Browser acceptance (Decision 10; ad hoc Playwright on the cached
+  install, daemons built from the branch with `WS_CACHE_HOME` /
+  `WS_CONFIG_HOME` isolated under `/tmp`, a fake lead session for the
+  session page; scripts and shots under `/tmp/tkv-c1`, `/tmp/tkv-c2`,
+  `/tmp/tkv-d`):
+  - two stores on local bare remotes give two handles on both pages;
+  - machine B joins store 1; A's drawer write is absent from B until A's
+    collapse (`POST .../sync`) and B's open (`POST .../check`), then shows
+    in B's drawer;
+  - a `tracker.update` through a separate `ws-mcp serve --stdio` process
+    on A's clone reached A's open drawer at the next poll round (93 s)
+    with no reload;
+  - seen marks (badge on open, read on click) survive a reload, a daemon
+    restart, and a fresh browser context; `ui-seen.json` holds them and
+    localStorage holds none;
+  - view mode, store panel height, and the closed fold survive a reload
+    under `ws.tracker.*` keys and reset in a fresh context;
+    `ws.dashboard.drawer*` untouched;
+  - "+ store" with zero stores on both pages; a blank-remote and an
+    empty-bare-repository store each get their own handle and open; a
+    real join from a second machine toasts "joined"; the dialog defaults
+    to the last profile and an edited profile becomes a new last entry;
+    a refused register keeps the dialog values; a 503 host error shows in
+    the dialog with only Close;
+  - mutual exclusion, header clearance at 600-1760px, the `#/<store>`
+    page, the mockup unchanged from `file://`; no page errors; light and
+    dark screenshots of both pages.
+- Decisions: the tracker also mounts on the index page (Decision 6's
+  first-run surface is the page a first run lands on); an unreachable
+  remote is the offline report without an error field (the renderer shows
+  a report error as a failure toast), the reason reaching the page as the
+  offline label's tooltip; the route's boolean `pushed` becomes a commit
+  count in the HTTP adapter from the view it held; the adapter contract
+  gained `hostError()`, `check(id, done)`, and `creator` in `register`'s
+  answer; the store page back button reads "Back" and the sync toasts
+  count "new arrivals" (the daemon counts events, the mockup commits);
+  the index page sets the renderer's `--tkmaxw` to its 1080px width.
+- Lite review: the one Important (redaction) is fixed. Minors left open:
+  a non-network failure of Check / Sync on a remote store also reads as
+  offline; a bad `"$N"` answers 500 rather than 400; `resolveBatchRefs`
+  re-marshals with HTML escaping (same decoded value); `View` waits behind
+  a store's network lock and the reload is single-flight, so one slow
+  store delays every handle's refresh, and each poll round re-reads every
+  view; the single-pass `wsT` fill has only a browser check, no Go test.
 
 ## Sage Review Round 1 (2026-11-08)
 
