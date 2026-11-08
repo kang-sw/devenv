@@ -31,6 +31,8 @@ const (
 	TypeCommentHide       = "comment.hide"
 	TypeSetLead           = "roles.set_lead"
 	TypeSetPriorityLevels = "roles.set_priority_levels"
+	// TypeSetAttachmentLimit changes the store's attachments.max_bytes.
+	TypeSetAttachmentLimit = "roles.set_attachment_limit"
 )
 
 // Origins. An empty origin is human.
@@ -44,15 +46,28 @@ const (
 // reference engine does): a field of the wrong type fails the event's rule
 // with the rule's own reason rather than a decode error.
 
-// ItemCreate is the payload of item.create.
+// Attachment is the metadata of one attached file; OID is the sha256 of
+// its content. Only metadata is carried: the content itself is stored apart
+// from the events.
+type Attachment struct {
+	OID  string `json:"oid"`
+	Name string `json:"name"`
+	Size int64  `json:"size"`
+	Mime string `json:"mime"`
+}
+
+// ItemCreate is the payload of item.create. Mentions lists member ids (the
+// body keeps @name for display); Mentions and Attachments ride with the body.
 type ItemCreate struct {
-	Kind     string `json:"kind"` // task, todo, topic
-	Title    string `json:"title"`
-	Body     string `json:"body,omitempty"`
-	Project  string `json:"project,omitempty"`
-	Due      string `json:"due,omitempty"` // YYYY-MM-DD
-	Priority *int   `json:"priority,omitempty"`
-	Parent   string `json:"parent,omitempty"`
+	Kind        string       `json:"kind"` // task, todo, topic
+	Title       string       `json:"title"`
+	Body        string       `json:"body,omitempty"`
+	Project     string       `json:"project,omitempty"`
+	Due         string       `json:"due,omitempty"` // YYYY-MM-DD
+	Priority    *int         `json:"priority,omitempty"`
+	Parent      string       `json:"parent,omitempty"`
+	Mentions    []string     `json:"mentions,omitempty"`
+	Attachments []Attachment `json:"attachments,omitempty"`
 }
 
 // ItemAssign is the payload of item.assign.
@@ -89,20 +104,26 @@ type ItemStatus struct {
 }
 
 // ItemEdit is the payload of item.edit: a raw object, because a present
-// null clears due and an absent field is untouched.
+// null clears due and an absent field is untouched. mentions and
+// attachments go only with a body, and replace the body's lists.
 type ItemEdit map[string]any
 
 // CommentAdd is the payload of comment.add.
 type CommentAdd struct {
-	Item    string `json:"item"`
-	Body    string `json:"body"`
-	ReplyTo string `json:"reply_to,omitempty"`
+	Item        string       `json:"item"`
+	Body        string       `json:"body"`
+	ReplyTo     string       `json:"reply_to,omitempty"`
+	Mentions    []string     `json:"mentions,omitempty"`
+	Attachments []Attachment `json:"attachments,omitempty"`
 }
 
-// CommentRef is the payload of comment.edit (Body) and comment.hide.
+// CommentRef is the payload of comment.edit (Body, Mentions, Attachments)
+// and comment.hide.
 type CommentRef struct {
-	Comment string `json:"comment"`
-	Body    string `json:"body,omitempty"`
+	Comment     string       `json:"comment"`
+	Body        string       `json:"body,omitempty"`
+	Mentions    []string     `json:"mentions,omitempty"`
+	Attachments []Attachment `json:"attachments,omitempty"`
 }
 
 // SetLead is the payload of roles.set_lead.
@@ -115,6 +136,11 @@ type SetLead struct {
 type SetPriorityLevels struct {
 	Names   []string `json:"names"`
 	Default int      `json:"default"`
+}
+
+// SetAttachmentLimit is the payload of roles.set_attachment_limit.
+type SetAttachmentLimit struct {
+	MaxBytes int64 `json:"max_bytes"`
 }
 
 // obj is a decoded payload. Missing and null differ, as in JSON.

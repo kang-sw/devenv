@@ -258,6 +258,9 @@
    ],
    "default": 1
   },
+  "attachments": {
+   "max_bytes": 10485760
+  },
   "members": {
    "hana": {
     "id": "hana",
@@ -330,7 +333,9 @@
     "depth": 0,
     "chain": [
      "hana"
-    ]
+    ],
+    "mentions": [],
+    "attachments": []
    },
    "hana.pc#3": {
     "id": "hana.pc#3",
@@ -368,7 +373,9 @@
     "depth": 0,
     "chain": [
      "hana"
-    ]
+    ],
+    "mentions": [],
+    "attachments": []
    },
    "hana.pc#4": {
     "id": "hana.pc#4",
@@ -409,7 +416,9 @@
     "depth": 0,
     "chain": [
      "hana"
-    ]
+    ],
+    "mentions": [],
+    "attachments": []
    },
    "hana.pc#6": {
     "id": "hana.pc#6",
@@ -449,7 +458,9 @@
     "depth": 0,
     "chain": [
      "hana"
-    ]
+    ],
+    "mentions": [],
+    "attachments": []
    },
    "hana.pc#12": {
     "id": "hana.pc#12",
@@ -491,7 +502,9 @@
     "chain": [
      "hana",
      "hana"
-    ]
+    ],
+    "mentions": [],
+    "attachments": []
    }
   },
   "itemOrder": [
@@ -636,7 +649,9 @@
     "reply_to": null,
     "ts": "2026-11-02T11:00:00Z",
     "edited": null,
-    "hidden": null
+    "hidden": null,
+    "mentions": [],
+    "attachments": []
    }
   },
   "events": [

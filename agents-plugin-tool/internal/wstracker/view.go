@@ -16,6 +16,7 @@ import (
 type View struct {
 	Viewer        Viewer                 `json:"viewer"`
 	Priority      PriorityLevels         `json:"priority"`
+	Attachments   AttachmentLimit        `json:"attachments"`
 	Members       map[string]MemberView  `json:"members"`
 	Admins        []string               `json:"admins"`
 	RolesProblems []string               `json:"rolesProblems"`
@@ -47,6 +48,20 @@ type Viewer struct {
 type PriorityLevels struct {
 	Names   []string `json:"names"`
 	Default int      `json:"default"`
+}
+
+// AttachmentLimit is the store's attachments.max_bytes setting.
+type AttachmentLimit struct {
+	MaxBytes int `json:"max_bytes"`
+}
+
+// AttachmentView is the metadata of one attachment; OID is the content's
+// sha256.
+type AttachmentView struct {
+	OID  string `json:"oid"`
+	Name string `json:"name"`
+	Size int64  `json:"size"`
+	Mime string `json:"mime"`
 }
 
 type MemberView struct {
@@ -102,6 +117,9 @@ type ItemView struct {
 	Concurrent    int      `json:"concurrent"`
 	Depth         int      `json:"depth"`
 	Chain         []string `json:"chain"`
+	// Mentions and Attachments follow the shown body write.
+	Mentions    []string         `json:"mentions"`
+	Attachments []AttachmentView `json:"attachments"`
 }
 
 type Rollup struct {
@@ -160,6 +178,9 @@ type CommentView struct {
 	TS      string  `json:"ts"`
 	Edited  *Ref    `json:"edited"`
 	Hidden  *string `json:"hidden"` // the comment.hide event id
+	// Mentions and Attachments follow the shown text write.
+	Mentions    []string         `json:"mentions"`
+	Attachments []AttachmentView `json:"attachments"`
 }
 
 type Marker struct {
@@ -504,7 +525,8 @@ func (r *replayed) view(stream string, now time.Time, staleDays int) *View {
 			Due: it.due, Priority: it.priority, PriorityLevel: lv, PriorityName: S.prio.names[lv], Author: it.author,
 			TS: ts(it.ts), Hidden: it.hidden, Edited: ref(it.edited), Status: nz(status[id]),
 			Counted: r.counted(it, status[id]), Children: []string{}, Assignments: orEmpty(recIDs), Pending: orEmpty(pend),
-			Thread: orEmpty(threads[id]), Depth: len(chain) - 1}
+			Thread: orEmpty(threads[id]), Depth: len(chain) - 1,
+			Mentions: append([]string{}, it.mentions...), Attachments: attachmentViews(it.attachments)}
 		if it.parent != "" && S.items[it.parent] != nil {
 			iv.Parent = &it.parent
 		}
@@ -572,7 +594,7 @@ func (r *replayed) view(stream string, now time.Time, staleDays int) *View {
 	for _, id := range S.corder {
 		q := S.comments[id]
 		cv := CommentView{ID: id, Item: q.item, Author: q.author, Body: q.body, ReplyTo: nz(q.replyTo), TS: ts(q.ts),
-			Edited: ref(q.edited)}
+			Edited: ref(q.edited), Mentions: append([]string{}, q.mentions...), Attachments: attachmentViews(q.attachments)}
 		if q.hiddenBy != nil {
 			cv.Hidden = &q.hiddenBy.id
 		}
@@ -617,6 +639,7 @@ func (r *replayed) view(stream string, now time.Time, staleDays int) *View {
 		vw.Viewer.Lead = nz(me.lead())
 	}
 	vw.Priority = PriorityLevels{Names: append([]string(nil), S.prio.names...), Default: S.prio.def}
+	vw.Attachments = AttachmentLimit{MaxBytes: S.attMax}
 	vw.Admins = append([]string{}, S.aorder...)
 
 	r.viewerLists(vw, A, v, children)
@@ -631,6 +654,14 @@ func (r *replayed) view(stream string, now time.Time, staleDays int) *View {
 		}
 	}
 	return vw
+}
+
+func attachmentViews(l []attachment) []AttachmentView {
+	out := make([]AttachmentView, len(l))
+	for i, a := range l {
+		out[i] = AttachmentView{OID: a.oid, Name: a.name, Size: a.size, Mime: a.mime}
+	}
+	return out
 }
 
 func orEmpty(l []string) []string {

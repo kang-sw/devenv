@@ -16,6 +16,9 @@
    ],
    "default": 1
   },
+  "attachments": {
+   "max_bytes": 10485760
+  },
   "members": [
    {
     "id": "ada",
@@ -3093,6 +3096,192 @@
    },
    "verdict": "valid",
    "origin": "agent-auto"
+  },
+  {
+   "member": "lena",
+   "clone": "pc",
+   "seq": 6,
+   "ts": "2026-11-05T19:00:00Z",
+   "type": "comment.add",
+   "payload": {
+    "item": "maya.pc#1",
+    "body": "@maya the v2 layout diagram is attached. @omar the shard section changed; please re-read it before you pick the docs up again.",
+    "mentions": [
+     "maya",
+     "omar"
+    ],
+    "attachments": [
+     {
+      "oid": "d853e46c1f8147fc3d2cee370833c643dcf46e45bf764ad2a53b33cc5dbcecd9",
+      "name": "index-layout-v2.png",
+      "size": 482133,
+      "mime": "image/png"
+     }
+    ]
+   },
+   "seen": {
+    "ada.pc": 14,
+    "bo.pc": 8,
+    "ivy.pc": 8,
+    "jon.pc": 8,
+    "kai.pc": 4,
+    "mallory.pc": 1,
+    "maya.lap": 4,
+    "maya.pc": 21,
+    "noa.pc": 4,
+    "omar.pc": 3,
+    "pia.pc": 2,
+    "raj.pc": 10,
+    "sven.pc": 5,
+    "tia.pc": 5,
+    "uma.pc": 5
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "lena",
+   "clone": "pc",
+   "seq": 7,
+   "ts": "2026-11-05T19:00:00Z",
+   "type": "comment.add",
+   "payload": {
+    "item": "maya.pc#1",
+    "body": "Bench trace from last night attached.",
+    "attachments": [
+     {
+      "oid": "31757a75573f011d3272fb2177b6ffd2b021b3ace7058ca09119fee280003f32",
+      "name": "bench-trace.tar.zst",
+      "size": 52428800,
+      "mime": "application/zstd"
+     }
+    ]
+   },
+   "seen": {
+    "ada.pc": 14,
+    "bo.pc": 8,
+    "ivy.pc": 8,
+    "jon.pc": 8,
+    "kai.pc": 4,
+    "mallory.pc": 1,
+    "maya.lap": 4,
+    "maya.pc": 21,
+    "noa.pc": 4,
+    "omar.pc": 3,
+    "pia.pc": 2,
+    "raj.pc": 10,
+    "sven.pc": 5,
+    "tia.pc": 5,
+    "uma.pc": 5
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "bo",
+   "clone": "pc",
+   "seq": 9,
+   "ts": "2026-11-05T20:00:00Z",
+   "type": "item.create",
+   "payload": {
+    "kind": "topic",
+    "title": "Retro notes: search v2 sprint",
+    "body": "@maya @raj please add your part's notes before Monday. The board export is attached.",
+    "mentions": [
+     "maya",
+     "raj"
+    ],
+    "attachments": [
+     {
+      "oid": "9e9d38f9fabce1ba588426da4ad16b6fae2eb99c9f5257bbd9f56a21e740c2f5",
+      "name": "retro-board.pdf",
+      "size": 1203311,
+      "mime": "application/pdf"
+     }
+    ]
+   },
+   "seen": {
+    "ada.pc": 14,
+    "ivy.pc": 8,
+    "jon.pc": 8,
+    "kai.pc": 4,
+    "lena.pc": 7,
+    "mallory.pc": 1,
+    "maya.lap": 4,
+    "maya.pc": 21,
+    "noa.pc": 4,
+    "omar.pc": 3,
+    "pia.pc": 2,
+    "raj.pc": 10,
+    "sven.pc": 5,
+    "tia.pc": 5,
+    "uma.pc": 5
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "uma",
+   "clone": "pc",
+   "seq": 6,
+   "ts": "2026-11-05T20:30:00Z",
+   "type": "comment.add",
+   "payload": {
+    "item": "bo.pc#9",
+    "body": "@zed can you join the retro?",
+    "mentions": [
+     "zed"
+    ]
+   },
+   "seen": {
+    "ada.pc": 14,
+    "bo.pc": 9,
+    "ivy.pc": 8,
+    "jon.pc": 8,
+    "kai.pc": 4,
+    "lena.pc": 7,
+    "mallory.pc": 1,
+    "maya.lap": 4,
+    "maya.pc": 21,
+    "noa.pc": 4,
+    "omar.pc": 3,
+    "pia.pc": 2,
+    "raj.pc": 10,
+    "sven.pc": 5,
+    "tia.pc": 5
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "maya",
+   "clone": "pc",
+   "seq": 22,
+   "ts": "2026-11-06T08:30:00Z",
+   "type": "comment.add",
+   "payload": {
+    "item": "maya.pc#1",
+    "body": "Thanks @lena, the layout looks right. @ivy the tokenizer section needs your range table.",
+    "reply_to": "lena.pc#6",
+    "mentions": [
+     "lena",
+     "ivy"
+    ]
+   },
+   "seen": {
+    "ada.pc": 14,
+    "bo.pc": 9,
+    "ivy.pc": 8,
+    "jon.pc": 8,
+    "kai.pc": 4,
+    "lena.pc": 7,
+    "mallory.pc": 1,
+    "maya.lap": 4,
+    "noa.pc": 4,
+    "omar.pc": 3,
+    "pia.pc": 2,
+    "raj.pc": 10,
+    "sven.pc": 5,
+    "tia.pc": 5,
+    "uma.pc": 6
+   },
+   "verdict": "valid"
   }
  ],
  "expected": {
@@ -3113,6 +3302,9 @@
     "긴급"
    ],
    "default": 1
+  },
+  "attachments": {
+   "max_bytes": 10485760
   },
   "members": {
    "ada": {
@@ -3440,7 +3632,9 @@
     "depth": 0,
     "chain": [
      "ada"
-    ]
+    ],
+    "mentions": [],
+    "attachments": []
    },
    "ada.pc#3": {
     "id": "ada.pc#3",
@@ -3482,7 +3676,9 @@
     "depth": 0,
     "chain": [
      "ada"
-    ]
+    ],
+    "mentions": [],
+    "attachments": []
    },
    "maya.pc#1": {
     "id": "maya.pc#1",
@@ -3515,7 +3711,7 @@
       "maya.pc#7"
      ]
     },
-    "lastActivity": "2026-11-04T21:30:00Z",
+    "lastActivity": "2026-11-06T08:30:00Z",
     "started": "2026-11-02T11:20:00Z",
     "children": [
      "maya.pc#5",
@@ -3540,14 +3736,19 @@
      "maya.pc#16",
      "lena.pc#5",
      "maya.lap#1",
-     "maya.pc#20"
+     "maya.pc#20",
+     "lena.pc#6",
+     "lena.pc#7",
+     "maya.pc#22"
     ],
     "concurrent": 2,
     "depth": 1,
     "chain": [
      "ada",
      "maya"
-    ]
+    ],
+    "mentions": [],
+    "attachments": []
    },
    "raj.pc#1": {
     "id": "raj.pc#1",
@@ -3598,7 +3799,9 @@
     "chain": [
      "ada",
      "raj"
-    ]
+    ],
+    "mentions": [],
+    "attachments": []
    },
    "maya.pc#5": {
     "id": "maya.pc#5",
@@ -3657,7 +3860,9 @@
      "ada",
      "maya",
      "maya"
-    ]
+    ],
+    "mentions": [],
+    "attachments": []
    },
    "maya.pc#7": {
     "id": "maya.pc#7",
@@ -3703,7 +3908,9 @@
      "ada",
      "maya",
      "maya"
-    ]
+    ],
+    "mentions": [],
+    "attachments": []
    },
    "bo.pc#1": {
     "id": "bo.pc#1",
@@ -3747,7 +3954,9 @@
     "depth": 0,
     "chain": [
      "bo"
-    ]
+    ],
+    "mentions": [],
+    "attachments": []
    },
    "ada.pc#6": {
     "id": "ada.pc#6",
@@ -3804,7 +4013,9 @@
     "depth": 0,
     "chain": [
      "ada"
-    ]
+    ],
+    "mentions": [],
+    "attachments": []
    },
    "ada.pc#8": {
     "id": "ada.pc#8",
@@ -3845,7 +4056,9 @@
     "depth": 0,
     "chain": [
      "ada"
-    ]
+    ],
+    "mentions": [],
+    "attachments": []
    },
    "kai.pc#2": {
     "id": "kai.pc#2",
@@ -3888,7 +4101,9 @@
     "depth": 0,
     "chain": [
      "kai"
-    ]
+    ],
+    "mentions": [],
+    "attachments": []
    },
    "lena.pc#2": {
     "id": "lena.pc#2",
@@ -3932,7 +4147,9 @@
     "depth": 0,
     "chain": [
      "lena"
-    ]
+    ],
+    "mentions": [],
+    "attachments": []
    },
    "sven.pc#3": {
     "id": "sven.pc#3",
@@ -3976,7 +4193,9 @@
     "depth": 0,
     "chain": [
      "sven"
-    ]
+    ],
+    "mentions": [],
+    "attachments": []
    },
    "raj.pc#7": {
     "id": "raj.pc#7",
@@ -4021,7 +4240,9 @@
      "ada",
      "raj",
      "raj"
-    ]
+    ],
+    "mentions": [],
+    "attachments": []
    },
    "tia.pc#3": {
     "id": "tia.pc#3",
@@ -4063,7 +4284,9 @@
     "depth": 0,
     "chain": [
      "tia"
-    ]
+    ],
+    "mentions": [],
+    "attachments": []
    },
    "noa.pc#3": {
     "id": "noa.pc#3",
@@ -4106,7 +4329,9 @@
     "depth": 0,
     "chain": [
      "noa"
-    ]
+    ],
+    "mentions": [],
+    "attachments": []
    },
    "maya.lap#2": {
     "id": "maya.lap#2",
@@ -4146,7 +4371,9 @@
     "depth": 0,
     "chain": [
      "maya"
-    ]
+    ],
+    "mentions": [],
+    "attachments": []
    },
    "ivy.pc#6": {
     "id": "ivy.pc#6",
@@ -4188,6 +4415,58 @@
     "depth": 0,
     "chain": [
      "ivy"
+    ],
+    "mentions": [],
+    "attachments": []
+   },
+   "bo.pc#9": {
+    "id": "bo.pc#9",
+    "alias": "bo.pc-9",
+    "kind": "topic",
+    "title": "Retro notes: search v2 sprint",
+    "body": "@maya @raj please add your part's notes before Monday. The board export is attached.",
+    "project": "",
+    "due": null,
+    "priority": 1,
+    "priorityLevel": 1,
+    "priorityName": "업무",
+    "parent": null,
+    "author": "bo",
+    "ts": "2026-11-05T20:00:00Z",
+    "hidden": false,
+    "edited": null,
+    "status": null,
+    "counted": false,
+    "rollup": {
+     "total": 0,
+     "counts": {},
+     "blocked": []
+    },
+    "lastActivity": "2026-11-05T20:00:00Z",
+    "started": null,
+    "children": [],
+    "assignments": [],
+    "pending": [],
+    "thread": [
+     "bo.pc#9",
+     "uma.pc#6"
+    ],
+    "concurrent": 0,
+    "depth": 0,
+    "chain": [
+     "bo"
+    ],
+    "mentions": [
+     "maya",
+     "raj"
+    ],
+    "attachments": [
+     {
+      "oid": "9e9d38f9fabce1ba588426da4ad16b6fae2eb99c9f5257bbd9f56a21e740c2f5",
+      "name": "retro-board.pdf",
+      "size": 1203311,
+      "mime": "application/pdf"
+     }
     ]
    }
   },
@@ -4208,7 +4487,8 @@
    "tia.pc#3",
    "noa.pc#3",
    "maya.lap#2",
-   "ivy.pc#6"
+   "ivy.pc#6",
+   "bo.pc#9"
   ],
   "assignments": {
    "ada.pc#2>maya": {
@@ -5307,7 +5587,9 @@
     "reply_to": null,
     "ts": "2026-11-02T09:45:00Z",
     "edited": null,
-    "hidden": null
+    "hidden": null,
+    "mentions": [],
+    "attachments": []
    },
    "raj.pc#3": {
     "id": "raj.pc#3",
@@ -5317,7 +5599,9 @@
     "reply_to": null,
     "ts": "2026-11-02T10:10:00Z",
     "edited": null,
-    "hidden": null
+    "hidden": null,
+    "mentions": [],
+    "attachments": []
    },
    "ada.pc#4": {
     "id": "ada.pc#4",
@@ -5327,7 +5611,9 @@
     "reply_to": "raj.pc#3",
     "ts": "2026-11-02T10:30:00Z",
     "edited": null,
-    "hidden": null
+    "hidden": null,
+    "mentions": [],
+    "attachments": []
    },
    "raj.pc#4": {
     "id": "raj.pc#4",
@@ -5337,7 +5623,9 @@
     "reply_to": null,
     "ts": "2026-11-02T10:50:00Z",
     "edited": null,
-    "hidden": "raj.pc#5"
+    "hidden": "raj.pc#5",
+    "mentions": [],
+    "attachments": []
    },
    "uma.pc#4": {
     "id": "uma.pc#4",
@@ -5347,7 +5635,9 @@
     "reply_to": null,
     "ts": "2026-11-03T11:40:00Z",
     "edited": null,
-    "hidden": null
+    "hidden": null,
+    "mentions": [],
+    "attachments": []
    },
    "maya.pc#14": {
     "id": "maya.pc#14",
@@ -5357,7 +5647,9 @@
     "reply_to": null,
     "ts": "2026-11-03T15:10:00Z",
     "edited": null,
-    "hidden": null
+    "hidden": null,
+    "mentions": [],
+    "attachments": []
    },
    "ivy.pc#4": {
     "id": "ivy.pc#4",
@@ -5367,7 +5659,9 @@
     "reply_to": null,
     "ts": "2026-11-03T17:00:00Z",
     "edited": null,
-    "hidden": null
+    "hidden": null,
+    "mentions": [],
+    "attachments": []
    },
    "omar.pc#6": {
     "id": "omar.pc#6",
@@ -5377,7 +5671,9 @@
     "reply_to": null,
     "ts": "2026-11-04T09:00:00Z",
     "edited": null,
-    "hidden": null
+    "hidden": null,
+    "mentions": [],
+    "attachments": []
    },
    "maya.pc#16": {
     "id": "maya.pc#16",
@@ -5387,7 +5683,9 @@
     "reply_to": null,
     "ts": "2026-11-04T10:00:00Z",
     "edited": null,
-    "hidden": null
+    "hidden": null,
+    "mentions": [],
+    "attachments": []
    },
    "jon.pc#7": {
     "id": "jon.pc#7",
@@ -5397,7 +5695,9 @@
     "reply_to": null,
     "ts": "2026-11-04T11:30:00Z",
     "edited": null,
-    "hidden": null
+    "hidden": null,
+    "mentions": [],
+    "attachments": []
    },
    "maya.pc#19": {
     "id": "maya.pc#19",
@@ -5407,7 +5707,9 @@
     "reply_to": null,
     "ts": "2026-11-04T16:00:00Z",
     "edited": null,
-    "hidden": null
+    "hidden": null,
+    "mentions": [],
+    "attachments": []
    },
    "ada.pc#13": {
     "id": "ada.pc#13",
@@ -5417,7 +5719,9 @@
     "reply_to": "maya.pc#3",
     "ts": "2026-11-05T09:00:00Z",
     "edited": null,
-    "hidden": null
+    "hidden": null,
+    "mentions": [],
+    "attachments": []
    },
    "tia.pc#5": {
     "id": "tia.pc#5",
@@ -5427,7 +5731,9 @@
     "reply_to": null,
     "ts": "2026-11-05T10:30:00Z",
     "edited": null,
-    "hidden": null
+    "hidden": null,
+    "mentions": [],
+    "attachments": []
    },
    "bo.pc#8": {
     "id": "bo.pc#8",
@@ -5437,7 +5743,46 @@
     "reply_to": "tia.pc#5",
     "ts": "2026-11-05T11:00:00Z",
     "edited": null,
-    "hidden": null
+    "hidden": null,
+    "mentions": [],
+    "attachments": []
+   },
+   "lena.pc#6": {
+    "id": "lena.pc#6",
+    "item": "maya.pc#1",
+    "author": "lena",
+    "body": "@maya the v2 layout diagram is attached. @omar the shard section changed; please re-read it before you pick the docs up again.",
+    "reply_to": null,
+    "ts": "2026-11-05T19:00:00Z",
+    "edited": null,
+    "hidden": null,
+    "mentions": [
+     "maya",
+     "omar"
+    ],
+    "attachments": [
+     {
+      "oid": "d853e46c1f8147fc3d2cee370833c643dcf46e45bf764ad2a53b33cc5dbcecd9",
+      "name": "index-layout-v2.png",
+      "size": 482133,
+      "mime": "image/png"
+     }
+    ]
+   },
+   "maya.pc#22": {
+    "id": "maya.pc#22",
+    "item": "maya.pc#1",
+    "author": "maya",
+    "body": "Thanks @lena, the layout looks right. @ivy the tokenizer section needs your range table.",
+    "reply_to": "lena.pc#6",
+    "ts": "2026-11-06T08:30:00Z",
+    "edited": null,
+    "hidden": null,
+    "mentions": [
+     "lena",
+     "ivy"
+    ],
+    "attachments": []
    }
   },
   "events": [
@@ -8326,6 +8671,167 @@
     "local": false,
     "open": false,
     "late": false
+   },
+   {
+    "id": "lena.pc#6",
+    "alias": "lena.pc-6",
+    "stream": "lena.pc",
+    "member": "lena",
+    "seq": 6,
+    "ts": "2026-11-05T19:00:00Z",
+    "type": "comment.add",
+    "origin": "human",
+    "payload": {
+     "item": "maya.pc#1",
+     "body": "@maya the v2 layout diagram is attached. @omar the shard section changed; please re-read it before you pick the docs up again.",
+     "mentions": [
+      "maya",
+      "omar"
+     ],
+     "attachments": [
+      {
+       "oid": "d853e46c1f8147fc3d2cee370833c643dcf46e45bf764ad2a53b33cc5dbcecd9",
+       "name": "index-layout-v2.png",
+       "size": 482133,
+       "mime": "image/png"
+      }
+     ]
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "maya.pc#1",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "lena.pc#7",
+    "alias": "lena.pc-7",
+    "stream": "lena.pc",
+    "member": "lena",
+    "seq": 7,
+    "ts": "2026-11-05T19:00:00Z",
+    "type": "comment.add",
+    "origin": "human",
+    "payload": {
+     "item": "maya.pc#1",
+     "body": "Bench trace from last night attached.",
+     "attachments": [
+      {
+       "oid": "31757a75573f011d3272fb2177b6ffd2b021b3ace7058ca09119fee280003f32",
+       "name": "bench-trace.tar.zst",
+       "size": 52428800,
+       "mime": "application/zstd"
+      }
+     ]
+    },
+    "status": "flagged",
+    "reason": "attachment \"bench-trace.tar.zst\" is 52428800 bytes, above the store limit of 10485760 bytes (attachments.max_bytes)",
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "maya.pc#1",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "bo.pc#9",
+    "alias": "bo.pc-9",
+    "stream": "bo.pc",
+    "member": "bo",
+    "seq": 9,
+    "ts": "2026-11-05T20:00:00Z",
+    "type": "item.create",
+    "origin": "human",
+    "payload": {
+     "kind": "topic",
+     "title": "Retro notes: search v2 sprint",
+     "body": "@maya @raj please add your part's notes before Monday. The board export is attached.",
+     "mentions": [
+      "maya",
+      "raj"
+     ],
+     "attachments": [
+      {
+       "oid": "9e9d38f9fabce1ba588426da4ad16b6fae2eb99c9f5257bbd9f56a21e740c2f5",
+       "name": "retro-board.pdf",
+       "size": 1203311,
+       "mime": "application/pdf"
+      }
+     ]
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "bo.pc#9",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "uma.pc#6",
+    "alias": "uma.pc-6",
+    "stream": "uma.pc",
+    "member": "uma",
+    "seq": 6,
+    "ts": "2026-11-05T20:30:00Z",
+    "type": "comment.add",
+    "origin": "human",
+    "payload": {
+     "item": "bo.pc#9",
+     "body": "@zed can you join the retro?",
+     "mentions": [
+      "zed"
+     ]
+    },
+    "status": "flagged",
+    "reason": "mentioned \"zed\" is not a member",
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "bo.pc#9",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "maya.pc#22",
+    "alias": "maya.pc-22",
+    "stream": "maya.pc",
+    "member": "maya",
+    "seq": 22,
+    "ts": "2026-11-06T08:30:00Z",
+    "type": "comment.add",
+    "origin": "human",
+    "payload": {
+     "item": "maya.pc#1",
+     "body": "Thanks @lena, the layout looks right. @ivy the tokenizer section needs your range table.",
+     "reply_to": "lena.pc#6",
+     "mentions": [
+      "lena",
+      "ivy"
+     ]
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "maya.pc#1",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
    }
   ],
   "notices": [],
@@ -8355,17 +8861,17 @@
    ]
   },
   "stats": {
-   "events": 112,
-   "commits": 90,
-   "flagged": 15,
+   "events": 117,
+   "commits": 94,
+   "flagged": 17,
    "concurrent": 4
   },
   "heads": {
    "ada.pc": 14,
-   "maya.pc": 21,
+   "maya.pc": 22,
    "raj.pc": 10,
-   "bo.pc": 8,
-   "lena.pc": 5,
+   "bo.pc": 9,
+   "lena.pc": 7,
    "omar.pc": 6,
    "ivy.pc": 8,
    "jon.pc": 8,
@@ -8373,7 +8879,7 @@
    "sven.pc": 5,
    "tia.pc": 5,
    "noa.pc": 4,
-   "uma.pc": 5,
+   "uma.pc": 6,
    "pia.pc": 2,
    "mallory.pc": 1,
    "maya.lap": 4

@@ -13,12 +13,14 @@
 // signer and membership flags, and the revocation cut. An event the protocol
 // marks Waiting, Flagged, or Ignored keeps that verdict here. A
 // protocol-Valid domain event (roles.set_lead, roles.set_priority_levels,
-// item.*, comment.*) then gets the domain verdict, judged against the state
-// folded from its causal past only, so a late arrival never changes it.
+// roles.set_attachment_limit, item.*, comment.*) then gets the domain
+// verdict, judged against the state folded from its causal past only, so a
+// late arrival never changes it.
 //
 // The domain folds the identity events itself from each event's causal
-// past (admins, removal, keys, joins); genesis leads and priority come from
-// the roles.json passthrough (IdentityState.Genesis). A joined member is a
+// past (admins, removal, keys, joins); genesis leads, priority, and
+// attachments.max_bytes come from the roles.json passthrough
+// (IdentityState.Genesis). A joined member is a
 // root with no lead.
 //
 // # Reading

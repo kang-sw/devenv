@@ -1,6 +1,7 @@
 package wstracker
 
 import (
+	"math"
 	"strconv"
 	"strings"
 
@@ -86,6 +87,77 @@ func (s *state) checkFields(p obj) rejection {
 	return ""
 }
 
+// isOID mirrors /^[0-9a-f]{64}$/: the sha256 of an attachment's content.
+func isOID(v any) bool {
+	o, ok := v.(string)
+	if !ok || len(o) != 64 {
+		return false
+	}
+	for _, c := range o {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+// checkExtras (335, 338): mentions is an explicit list of member ids (the
+// text keeps @name for display); attachments is metadata only, each within
+// attachments.max_bytes. Both ride with a body.
+func (s *state) checkExtras(p obj) rejection {
+	if !p.null("mentions") {
+		l, ok := p.list("mentions")
+		if !ok {
+			return "mentions must be a list of member ids"
+		}
+		for _, x := range l {
+			id, ok := x.(string)
+			if !ok {
+				return "mentions must be a list of member ids"
+			}
+			m := s.members[id]
+			if m == nil {
+				return rejection(`mentioned "` + id + `" is not a member`)
+			}
+			if m.removed != nil {
+				return rejection("mentioned " + id + " was removed (" + m.removed.alias + ")")
+			}
+		}
+	}
+	if !p.null("attachments") {
+		const shape = "attachments must be a list of {oid, name, size, mime}"
+		l, ok := p.list("attachments")
+		if !ok {
+			return shape
+		}
+		for _, x := range l {
+			m, ok := x.(map[string]any)
+			if !ok {
+				return shape
+			}
+			a := obj(m)
+			if !isOID(a["oid"]) {
+				return "attachment oid must be the sha256 of the content (64 lowercase hex digits)"
+			}
+			if !a.truthy("name") || a.str("name") == "" {
+				return "attachment name required"
+			}
+			size, ok := a["size"].(float64)
+			if !ok || size != math.Trunc(size) || math.IsInf(size, 0) || size < 0 {
+				return "attachment size must be a byte count"
+			}
+			if !a.truthy("mime") || a.str("mime") == "" {
+				return "attachment mime type required"
+			}
+			if size > float64(s.attMax) {
+				return rejection(`attachment "` + a.str("name") + `" is ` + jsNum(size) + " bytes, above the store limit of " +
+					itoa(s.attMax) + " bytes (attachments.max_bytes)")
+			}
+		}
+	}
+	return ""
+}
+
 func (s *state) notAssignee(it *item, who string) rejection {
 	if s.pendingRec(it.id, who) != nil {
 		return rejection(who + " has not accepted the pending assignment on " + it.alias)
@@ -137,6 +209,9 @@ func (s *state) check(n *node) rejection {
 		if r := s.checkFields(p); r != "" {
 			return r
 		}
+		if r := s.checkExtras(p); r != "" {
+			return r
+		}
 		if p.truthy("parent") {
 			par, r := s.needItem(p.disp("parent"), "parent")
 			if r != "" {
@@ -171,7 +246,13 @@ func (s *state) check(n *node) rejection {
 		if p.has("priority") && p.null("priority") {
 			return "priority cannot be cleared; set a level"
 		}
-		return s.checkFields(p)
+		if r := s.checkFields(p); r != "" {
+			return r
+		}
+		if (!p.null("mentions") || !p.null("attachments")) && !p.has("body") {
+			return "mentions and attachments go with a body edit"
+		}
+		return s.checkExtras(p)
 
 	case TypeItemHide:
 		it, r := needIt()
@@ -450,6 +531,9 @@ func (s *state) check(n *node) rejection {
 		if !p.truthy("body") {
 			return "body required"
 		}
+		if r := s.checkExtras(p); r != "" {
+			return r
+		}
 		if p.truthy("reply_to") {
 			q := s.comments[p.disp("reply_to")]
 			if q == nil {
@@ -481,6 +565,9 @@ func (s *state) check(n *node) rejection {
 		if n.typ == TypeCommentEdit && !p.truthy("body") {
 			return "body required"
 		}
+		if n.typ == TypeCommentEdit {
+			return s.checkExtras(p)
+		}
 
 	case TypeSetLead:
 		if r := s.needAdmin(a); r != "" {
@@ -509,6 +596,14 @@ func (s *state) check(n *node) rejection {
 		}
 		if d, ok := p.intOf("default"); !ok || d < 0 || d >= len(names) {
 			return rejection("default must be a level 0.." + itoa(len(names)-1))
+		}
+
+	case TypeSetAttachmentLimit:
+		if r := s.needAdmin(a); r != "" {
+			return r
+		}
+		if v, ok := p.intOf("max_bytes"); !ok || v <= 0 {
+			return "max_bytes must be a positive integer (bytes)"
 		}
 
 	default:

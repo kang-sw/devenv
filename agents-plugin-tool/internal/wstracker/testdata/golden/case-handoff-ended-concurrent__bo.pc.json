@@ -538,6 +538,9 @@
    ],
    "default": 1
   },
+  "attachments": {
+   "max_bytes": 10485760
+  },
   "members": {
    "ada": {
     "id": "ada",
@@ -714,7 +717,9 @@
     "depth": 0,
     "chain": [
      "maya"
-    ]
+    ],
+    "mentions": [],
+    "attachments": []
    },
    "maya.pc#3": {
     "id": "maya.pc#3",
@@ -759,7 +764,9 @@
     "depth": 0,
     "chain": [
      "maya"
-    ]
+    ],
+    "mentions": [],
+    "attachments": []
    },
    "maya.pc#5": {
     "id": "maya.pc#5",
@@ -802,7 +809,9 @@
     "depth": 0,
     "chain": [
      "maya"
-    ]
+    ],
+    "mentions": [],
+    "attachments": []
    },
    "maya.pc#7": {
     "id": "maya.pc#7",
@@ -846,7 +855,9 @@
     "depth": 0,
     "chain": [
      "maya"
-    ]
+    ],
+    "mentions": [],
+    "attachments": []
    },
    "sven.pc#1": {
     "id": "sven.pc#1",
@@ -891,7 +902,9 @@
     "depth": 0,
     "chain": [
      "sven"
-    ]
+    ],
+    "mentions": [],
+    "attachments": []
    }
   },
   "itemOrder": [
