@@ -21,9 +21,10 @@
 //                        exactly once, possibly synchronously: {ok: true, results:
 //                        [{id, alias, type, status, reason}]} or {ok: false, error,
 //                        refusal: {index, type, reason} | null}
-//   check(id)            the immediate check when a store's drawer opens or its
-//                        page is entered; fire and forget, a change arrives through
-//                        onChange
+//   check(id, done)      the immediate check when a store's drawer opens or its
+//                        page is entered; a change arrives through onChange.
+//                        done() exactly once, possibly synchronously, after the
+//                        check landed and view(id) shows what it brought
 //   sync(id, done)       the apply path: panel collapse, leaving the page, switching
 //                        to another store while one is open, the Sync button.
 //                        done(report), report = {noRemote, offline, closed, pushed,
@@ -434,10 +435,11 @@
     return vss[name].my.badge.filter(function (k) { return !seen[k]; });
   }
   // Opening a store (or switching viewer inside an open drawer) shows what is new
-  // once, then clears the handle badge, like the mailbox badge.
-  function markSeen(name) {
+  // once, then clears the handle badge, like the mailbox badge. `add` keeps the keys
+  // already fresh on this showing (a check that landed after it began).
+  function markSeen(name, add) {
     var keys = newKeys(name);
-    ui.fresh = {};
+    if (!add) ui.fresh = {};
     keys.forEach(function (k) { ui.fresh[k] = true; });
     if (keys.length) AD.markSeen(name, { badge: keys, read: [] });
   }
@@ -1941,8 +1943,9 @@
     });
   }
   // The immediate check when a store comes on screen (its drawer opens, its page is entered,
-  // its viewer changes); what it brings arrives through onChange.
-  function checkNow(name) { AD.check(name); }
+  // its viewer changes); what it brings arrives through onChange, and done() runs once it
+  // landed.
+  function checkNow(name, done) { AD.check(name, done); }
 
   // ------------------------------------------------------------------ render
 
@@ -2117,11 +2120,23 @@
     measure();
   }
 
-  // A store comes on screen: the immediate check, then what is new is shown once.
+  // A store comes on screen: the immediate check, then what is new is shown once. What
+  // the check brings in is new on this showing too: when the check lands after this
+  // returns (a network round trip), those keys join the fresh set and are marked seen
+  // then, so they do not come back as a badge on the next open. A check that lands
+  // synchronously is already in the view read below.
   function bringUp(name) {
-    checkNow(name);
+    var now = true, shown;
+    checkNow(name, function () {
+      if (now || ui.store !== name || ui.fresh !== shown || !viewing()) return;
+      vss[name] = AD.view(name);
+      markSeen(name, true);
+      render();
+    });
+    now = false;
     vss[name] = AD.view(name);
     markSeen(name);
+    shown = ui.fresh;
   }
   // Collapsing the open drawer pushes (the apply path).
   function collapse() { var n = ui.open; ui.open = null; syncNow(n, true); render(); }

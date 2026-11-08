@@ -1595,8 +1595,10 @@
         });
       });
     },
-    check: function (id) {
-      tkFetch(tkUrl(id, "check"), {}, function () { tkLoadView(id, tkNotify); });
+    check: function (id, done) {
+      tkFetch(tkUrl(id, "check"), {}, function () {
+        tkLoadView(id, function () { tkNotify(); if (done) done(); });
+      });
     },
     // The route's pushed is a yes/no; the renderer counts commits, so a push
     // counts what the view listed as unpushed (the open batch as one).

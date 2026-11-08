@@ -205,7 +205,7 @@
       if (err) return done({ ok: false, error: err, refusal: null });
       done({ ok: true, results: write(id, viewers[id], events) });
     },
-    check: function (id) { stores[id].fetch(viewers[id], clock[id]); },
+    check: function (id, done) { stores[id].fetch(viewers[id], clock[id]); if (done) done(); },
     sync: function (id, done) {
       var r = stores[id].sync(viewers[id], clock[id]);
       done({ noRemote: !!r.noRemote, offline: !!r.offline, closed: true, pushed: r.pushed, received: r.fetched, unpushed: r.unpushed, error: null });
