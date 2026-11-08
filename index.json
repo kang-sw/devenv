@@ -341,7 +341,14 @@
       "registered_at": "2026-11-08T01:19:47Z"
     },
     "261108-feat-ws-tracker-support-agent-chat": {
-      "registered_at": "2026-11-08T00:25:15Z"
+      "registered_at": "2026-11-08T00:25:15Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-08T12:29:50Z"
+      }
     },
     "261108-feat-ws-tracker-wiki-git-branch": {
       "registered_at": "2026-11-08T03:56:55Z"
