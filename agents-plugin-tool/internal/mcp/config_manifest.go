@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/kang-sw/devenv/internal/wsagent"
 	"github.com/kang-sw/devenv/internal/wsconfig"
 )
 
@@ -42,8 +43,9 @@ var (
 	manifestKeySuffixPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_.-]*$`)
 	// reservedConfigPrefixes are built-in key families a manifest namespace
 	// may not claim: prompt.<pointId> overrides, the agents.tier writer, and
-	// the worktree.* knobs (the worktree.profile.<name> family included).
-	reservedConfigPrefixes = []string{"prompt.", "agents.", "worktree."}
+	// the worktree.* knobs (the worktree.profile.<name> family included), and
+	// the agent.profile.<name> family.
+	reservedConfigPrefixes = []string{"prompt.", "agents.", "worktree.", "agent."}
 )
 
 // configManifestFile is the on-disk adapter key manifest:
@@ -522,6 +524,19 @@ func (s *Server) resolveConfigGet(sessionKey, key string) (configGetResult, erro
 		}
 		return configGetResult{Key: key, Scope: configGetUnsetScope}, nil
 	}
+	if strings.HasPrefix(key, wsagent.ProfilePrefix) {
+		profiles, err := wsagent.ResolveProfiles(&resolver)
+		if err != nil {
+			return configGetResult{}, err
+		}
+		name := strings.TrimPrefix(key, wsagent.ProfilePrefix)
+		for _, profile := range profiles {
+			if profile.Name == name {
+				return configGetResult{Key: key, Value: profile.Definition, Scope: string(profile.Scope)}, nil
+			}
+		}
+		return configGetResult{Key: key, Scope: configGetUnsetScope}, nil
+	}
 	var rv wsconfig.ResolvedValue
 	var err error
 	if entry, ok := resolveConfigEntryForKey(key); ok && entry.Key == key && entry.HarnessBucketed() {
@@ -559,7 +574,8 @@ func formatConfigGet(result configGetResult) string {
 		fmt.Fprintf(&b, "%s: <unset>\n", result.Key)
 	} else {
 		value := result.Value
-		if _, isProfile := value.(worktreeProfile); isProfile {
+		switch value.(type) {
+		case worktreeProfile, wsagent.Profile:
 			if raw, err := json.Marshal(value); err == nil {
 				value = string(raw)
 			}

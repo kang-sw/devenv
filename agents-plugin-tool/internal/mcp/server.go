@@ -2932,6 +2932,8 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 	}
 	appendKnob(profileEntry, profileKnob)
 
+	appendKnob(agentProfileTuningKnob(resolver))
+
 	for _, k := range []declaredConfigKey{worktreeNudgeStaleDaysKey, worktreeNudgePreservedGBKey} {
 		entry := k.entry()
 		appendKnob(entry, tuningKnob{
