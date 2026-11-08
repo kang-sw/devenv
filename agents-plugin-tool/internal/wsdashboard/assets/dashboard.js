@@ -147,7 +147,7 @@
   function setLayout(v) {
     if (v !== "split" && v !== "tabs") v = "auto";
     grid.setAttribute("data-layout", v);
-    q("#gmenu [data-layout]").forEach(function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-layout") === v)); });
+    q(".gmenu [data-layout]").forEach(function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-layout") === v)); });
     revealPanes();
   }
   // The tree and the conversation share their column at a fixed ratio; the
@@ -214,7 +214,7 @@
   var HINT = { enter: wsT("js.hint.enter"), mod: wsT("js.hint.mod") };
   function setInput(v) {
     inputMode = v === "mod" ? "mod" : "enter";
-    q("#gmenu [data-input]").forEach(function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-input") === inputMode)); });
+    q(".gmenu [data-input]").forEach(function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-input") === inputMode)); });
     var t = $("ctext");
     if (t) t.placeholder = HINT[inputMode];
   }
@@ -227,9 +227,11 @@
     // "auto" crosses its breakpoint on a resize without a click.
     window.addEventListener("resize", revealPanes);
   }
-  // The gear menu is on every page (the list and board-first pages hold only
-  // its language item), so its Escape and its language setting do not wait
-  // for a live layout.
+  // The settings are on every page (the index page's gear menu, a session
+  // page's drawer card; the index and board-first pages hold only the theme
+  // and language items), so the gear menu's Escape and the language setting
+  // do not wait for a live layout. The item selectors read .gmenu, which
+  // both carry.
   if (gmenu) doc.addEventListener("keydown", function (e) { if (e.key === "Escape" && !gmenu.hidden) gmenu.hidden = true; });
   // Language: the choice lives in a cookie the server reads, so every page,
   // its stream, and its history render in it from the first byte. An empty
@@ -259,7 +261,7 @@
   var THEME_COOKIE = "ws_dashboard_theme";
   function markTheme() {
     var cur = root.getAttribute("data-theme") || "";
-    q("#gmenu [data-theme-set]").forEach(function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-theme-set") === cur)); });
+    q(".gmenu [data-theme-set]").forEach(function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-theme-set") === cur)); });
   }
   function setTheme(v) {
     if (v !== "light" && v !== "dark") v = "";
@@ -1056,12 +1058,12 @@
     if (ibadge && t.closest("#ibadge")) { if (!ibadge.disabled) interruptTurn(); return; }
     if (gmenu && t.closest("#gear")) { gmenu.hidden = !gmenu.hidden; return; }
     if (gmenu && !gmenu.hidden && !t.closest("#gmenu")) gmenu.hidden = true;
-    var th = t.closest("#gmenu [data-theme-set]");
+    var th = t.closest(".gmenu [data-theme-set]");
     if (th) { setTheme(th.getAttribute("data-theme-set")); return; }
     if (!live) return;
-    var b = t.closest("#gmenu [data-input]");
+    var b = t.closest(".gmenu [data-input]");
     if (b) { save(INPUT_KEY, b.getAttribute("data-input")); setInput(b.getAttribute("data-input")); return; }
-    b = t.closest("#gmenu [data-layout]");
+    b = t.closest(".gmenu [data-layout]");
     if (b) { save(LAYOUT_KEY, b.getAttribute("data-layout")); setLayout(b.getAttribute("data-layout")); return; }
     b = t.closest("#tabbar [data-tab]");
     if (b) { setTab(b.getAttribute("data-tab")); return; }
@@ -1206,6 +1208,7 @@
   var DR_OPEN = "ws.dashboard.drawer", DR_H = "ws.dashboard.drawer.h";
   var DR_MIN = 160, DR_DEF = 320, DR_SHUT = 80;
   var drRoomW = -1, drEntries = [], drWant = false, drOpen = false, drHas = false, drH = DR_DEF, drTop = 0;
+  var drWasOpen = false;
   var drBadge = false, drSwap = false; // the handle's dot: a section badge, or a panels change while closed
   function drawerTab(entry) { drEntries.push(entry); }
   // panelTab registers a panel of the panels region (#p-<id>) as an entry: its
@@ -1235,6 +1238,25 @@
     var m = /^\D*(\d+)/.exec(count), n = m ? +m[1] : 0;
     return n > 0 ? { n: n, title: wsT("js.drawer.unread", n) } : null;
   });
+
+  // cardTab registers one of the drawer's own cards (#p-<id>, drcards):
+  // no region swap touches them.
+  function cardTab(id) {
+    drawerTab({
+      id: id,
+      title: function () {
+        var h = $("p-" + id), sm = h && h.querySelector("summary");
+        return sm ? Array.prototype.filter.call(sm.childNodes, function (n) { return n.nodeType === 3; }).map(function (n) { return n.nodeValue; }).join("").trim() : id;
+      },
+      count: function () { return ""; },
+      content: function () { return $("p-" + id); }
+    });
+  }
+  cardTab("worktrees");
+  cardTab("settings");
+  // The worktrees card's nodes (wtLoad, below): set here, ahead of the
+  // drawer's first drApply, which a drawer left open calls on load.
+  var wtlist = $("wtlist"), wtcount = $("wtcount"), wtnote = $("wtnote"), wtclean = $("wtclean"), wtSeq = 0;
 
   function drPresent() { return drEntries.filter(function (t) { return !!t.content(); }); }
   // drawerSync re-reads the entries: each card kept open, the handle's
@@ -1324,6 +1346,9 @@
     drhandle.style.top = (drOpen ? drTop + h : 0) + "px";
     drhandle.setAttribute("aria-expanded", String(drOpen));
     drTitle();
+    // Each opening reads the worktree pool again.
+    if (drOpen && !drWasOpen) wtLoad();
+    drWasOpen = drOpen;
   }
   // The session drawer and a tracker store's drawer never show at once:
   // opening this one tells the tracker (which collapses its open store), and
@@ -1500,6 +1525,121 @@
       if (Object.prototype.hasOwnProperty.call(h, k)) f.style.height = h[k];
     });
   }
+
+  // --- pooled worktrees: the drawer card over the worktrees route ---------
+  // Each drawer opening reads the pool (worktrees.go): the list draws at
+  // once, and while sizes are still measured a second read waits for them.
+  // Leased worktrees come first, shown active; idle ones group by profile.
+  // The cleanup button asks the session to clean the pool up, then closes
+  // the drawer. The dashboard itself never removes a worktree.
+  function wtGet(wait, done) {
+    if (!window.fetch) { done(false, wsT("js.post.nobrowser")); return; }
+    fetch("/s/" + rid + "/worktrees" + (wait ? "?wait=1" : ""), { credentials: "same-origin", cache: "no-store" }).then(function (r) {
+      return r.text().then(function (s) {
+        if (!r.ok) { done(false, s.trim() || "HTTP " + r.status); return; }
+        try { done(true, JSON.parse(s)); } catch (e) { done(false, "malformed answer"); }
+      });
+    }, function () { done(false, wsT("js.post.unreachable")); });
+  }
+  function wtLoad() {
+    if (!wtlist) return;
+    var seq = ++wtSeq;
+    if (!wtlist.firstChild) wtlist.textContent = wsT("js.wt.loading");
+    wtGet(false, function (ok, pool) {
+      if (seq !== wtSeq) return;
+      if (!ok) { wtFail(pool); return; }
+      wtDraw(pool);
+      if (pool.sizing) wtGet(true, function (ok2, sized) { if (seq === wtSeq && ok2) wtDraw(sized); });
+    });
+  }
+  function wtFail(msg) {
+    wtlist.textContent = "";
+    wtlist.appendChild(mk("div", "wtempty", wsT("js.wt.fail", msg)));
+  }
+  // mk makes an element of class cls holding text.
+  function mk(tag, cls, text) {
+    var e = doc.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+  // wtSize is a byte count in decimal units, as the cleanup message gives it.
+  function wtSize(n) {
+    if (n < 1000) return n + " B";
+    var v = n / 1000, i = 0;
+    while (v >= 1000 && i < 3) { v /= 1000; i++; }
+    return v.toFixed(1) + " " + "kMGT".charAt(i) + "B";
+  }
+  // wtAge is a coarse age: its largest unit only.
+  function wtAge(ms) {
+    var m = Math.max(0, Math.floor((Date.now() - ms) / 60000));
+    if (m < 60) return m + "m";
+    if (m < 48 * 60) return Math.floor(m / 60) + "h";
+    return Math.floor(m / 1440) + "d";
+  }
+  function wtStamp(ms) { return new Date(ms).toLocaleString(wsI18n.lang); }
+  function wtRow(w) {
+    var row = mk("div", "wtrow" + (w.leased ? " on" : "") + (w.quarantined ? " quar" : ""));
+    row.title = w.path + (w.quarantined ? "\n" + wsT("js.wt.quarantined") : "");
+    row.appendChild(mk("span", "wtdot"));
+    row.appendChild(mk("b", "wtname", w.name));
+    if (w.leased) {
+      row.appendChild(mk("span", "wtbr", w.detached ? wsT("js.wt.detached") : w.branch));
+      if (w.holder) {
+        var who = mk("span", "wtwho", w.holder);
+        who.title = wsT("js.wt.holder", w.holder);
+        row.appendChild(who);
+      }
+    }
+    var at = w.leased ? w.acquired_at || w.active_at : w.active_at;
+    if (at) {
+      var age = mk("span", "wtage", wtAge(at));
+      age.title = wsT(w.leased ? "js.wt.held" : "js.wt.unused", wtStamp(at));
+      row.appendChild(age);
+    }
+    row.appendChild(mk("span", "wtsize", w.size == null ? "…" : wtSize(w.size)));
+    return row;
+  }
+  function wtDraw(pool) {
+    var list = pool.worktrees || [], leased = [], groups = {}, order = [];
+    list.forEach(function (w) {
+      if (w.leased) { leased.push(w); return; }
+      var p = w.profile || "?";
+      if (!groups[p]) { groups[p] = []; order.push(p); }
+      groups[p].push(w);
+    });
+    wtlist.textContent = "";
+    wtlist.title = wsT("js.wt.pool", pool.pool || "");
+    if (!list.length) wtlist.appendChild(mk("div", "wtempty", wsT("js.wt.empty")));
+    if (leased.length) {
+      var sec = mk("div", "wtsec on");
+      leased.forEach(function (w) { sec.appendChild(wtRow(w)); });
+      wtlist.appendChild(sec);
+    }
+    order.sort().forEach(function (p) {
+      var sec = mk("div", "wtsec"), head = mk("div", "wtgrp");
+      head.appendChild(mk("span", "wtprof", p));
+      head.appendChild(mk("span", "chip", String(groups[p].length)));
+      sec.appendChild(head);
+      groups[p].forEach(function (w) { sec.appendChild(wtRow(w)); });
+      wtlist.appendChild(sec);
+    });
+    if (wtcount) {
+      wtcount.hidden = !list.length;
+      wtcount.textContent = leased.length + "/" + list.length;
+      wtcount.title = wsT("js.wt.count", leased.length, list.length);
+    }
+  }
+  if (wtclean) wtclean.addEventListener("click", function () {
+    if (wtclean.disabled) return;
+    wtclean.disabled = true;
+    if (wtnote) wtnote.textContent = "";
+    post("worktrees/cleanup", {}, function (ok, res) {
+      wtclean.disabled = false;
+      if (!ok) { if (wtnote) wtnote.textContent = wsT("js.wt.cleanfail", res); return; }
+      drSetOpen(false);
+    });
+  });
 
   // --- tracker: the store drawers over the daemon's /tracker routes ---------
   // The tracker renderer (tracker.js, window.WsTracker) draws one drawer
@@ -1782,7 +1922,7 @@
   var sseOn = true;
   function connected(on) {
     sseOn = on;
-    q(".top .sse").forEach(function (el) {
+    q(".dwrap > .top .sse").forEach(function (el) {
       el.classList.toggle("off", !on);
       el.title = wsT(on ? "js.sse.title.on" : "js.sse.title.off");
     });

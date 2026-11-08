@@ -74,6 +74,9 @@ type SessionView struct {
 	// request from the daemon's own read (gitbadge.go), never by the
 	// builders.
 	Git *GitBadge
+	// Worktrees reports that the daemon reads worktree pools, which adds
+	// the drawer's pooled-worktree card. Set per request, like Git.
+	Worktrees bool
 }
 
 // Mode is the page mode, modeLive or modeBoard.
