@@ -166,11 +166,43 @@ func TestSessionPageRendersLiveRegions(t *testing.T) {
 	}
 }
 
+// TestSessionHeadLeadsWithTheProjectAndLightsTheHarnessBadge pins the top
+// bar's head: the project's folder name first, then the reply-id, then the
+// harness badge, which carries the stream indicator's dot and tooltip with
+// no text label; a page without a harness keeps the bare dot alone.
+func TestSessionHeadLeadsWithTheProjectAndLightsTheHarnessBadge(t *testing.T) {
+	f := startPageFixture(t)
+	_, page := get(t, f.base+"/s/livesession")
+	name := filepath.Base(f.project)
+	head := `<span class="meta">` + name + `</span><span class="meta">livesession · #3</span><span class="host sse" title="live updates"><span class="dot"></span>claude</span>`
+	if !strings.Contains(page, head) {
+		t.Errorf("session head lacks %q", head)
+	}
+	if !strings.Contains(page, `<span class="sse" id="sse" title="live updates"><span class="dot"></span></span>`) {
+		t.Errorf("session page lacks the bare stream dot")
+	}
+	if strings.Contains(page, "sse-label") {
+		t.Errorf("session page still carries the stream indicator's text label")
+	}
+
+	reg := register(t, f.dir, "noharness", f.project, time.Now())
+	reg.Harness = ""
+	if err := WriteRegistration(f.dir, reg); err != nil {
+		t.Fatal(err)
+	}
+	f.src.setPage("noharness", PageContent{HasBoard: true, Seq: 1, Board: boardRegions(t, "plain")})
+	f.d.Index().Refresh()
+	_, plain := get(t, f.base+"/s/noharness")
+	if strings.Contains(plain, `class="host`) || !strings.Contains(plain, `id="sse"`) {
+		t.Errorf("a page without a harness should keep the bare dot and no badge")
+	}
+}
+
 // TestSessionPagesCarryScriptHooks pins the elements and attributes the page
 // script and stylesheet read: the board column, the drawer that holds the
 // panels, the tab bar and its dots, the layout menu, the composer and its
-// interrupt badge, the lead's phase on the convlive region, the live
-// indicator's label, and the banner.
+// interrupt badge, the lead's phase on the convlive region, the stream
+// indicators, and the banner.
 func TestSessionPagesCarryScriptHooks(t *testing.T) {
 	f := startPageFixture(t)
 	code, live := get(t, f.base+"/s/livesession")
@@ -181,7 +213,7 @@ func TestSessionPagesCarryScriptHooks(t *testing.T) {
 		`<div id="bcol" class="bcol"><div id="r-board" class="region r-board" data-region="board"`,
 		`id="tabbar"`, `data-tab="convo"`, `data-tab="board"`, `<span class="tdot"></span>`,
 		`id="gmenu"`, `data-layout="auto"`, `data-layout="split"`, `data-layout="tabs"`,
-		`id="ctext"`, `id="cnote"`, `id="csend"`, `aria-label="send"`, `class="sse-label"`, `id="dash-banner"`,
+		`id="ctext"`, `id="cnote"`, `id="csend"`, `aria-label="send"`, `id="sse"`, `id="dash-banner"`,
 		`<div id="composer" class="composer"><button type="button" class="ibadge" id="ibadge"`, `<span class="ilabel">Interrupt</span>`,
 		`<div class="conv clive" data-phase="replying">`,
 	} {

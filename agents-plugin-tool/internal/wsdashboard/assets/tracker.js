@@ -237,6 +237,13 @@
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
     });
   }
+  // An item body or comment text as a block of class cls: the markdown the daemon rendered
+  // for it in safe mode (view html.<kind>[id]), marked md for the shared markdown styles,
+  // else the escaped plain text (a view without html, as the mockup's).
+  function textBlock(cls, kind, id, text, attrs) {
+    var h = VS.html && VS.html[kind] && VS.html[kind][id];
+    return '<div class="' + cls + (h != null ? ' md' : '') + '"' + (attrs || '') + '>' + (h != null ? h : esc(text)) + '</div>';
+  }
   function $(id) { return document.getElementById(id); }
   function attr(k, v) { return ' data-' + k + '="' + esc(v) + '"'; }
   function vals(o) { return Object.keys(o).map(function (k) { return o[k]; }); }
@@ -1445,7 +1452,7 @@
     // an own comment being edited in place (ui.cedit): Cmd/Ctrl+Enter saves, Esc cancels
     var txt = ed ? '<div class="cedit"><textarea id="tkcedit" data-keep rows="3" aria-label="' + wsT("js.tk.cmt.edit") + '">' + esc(ui.cedit.body) + '</textarea><div class="tb">' +
       btn('cedit-save', wsT("js.tk.dlg.save"), {}, 'primary') + btn('cedit-x', wsT("js.tk.dlg.cancel"), {}) + '<span class="muted">' + wsT("js.tk.cedit.hint", MAC ? '⌘Enter' : 'Ctrl+Enter') + '</span></div></div>' + mentionChips(c.mentions) + attChips(c.attachments, true) : c.hidden ? '<div class="hiddenc">' + wsT("js.tk.cmt.hidden", esc(alias(c.hidden))) + '<details><summary>' + wsT("js.tk.cmt.history") + '</summary>' + esc(body) + '</details></div>' :
-      '<div class="ctext">' + esc(body) + '</div>' + mentionChips(live ? c.mentions : p.mentions) + attChips(live ? c.attachments : p.attachments, live);
+      textBlock('ctext', 'comments', n.id, body) + mentionChips(live ? c.mentions : p.mentions) + attChips(live ? c.attachments : p.attachments, live);
     return '<li class="cmt' + (n.status !== 'applied' ? ' ' + n.status : '') + (n.markers.length ? ' concm' : '') + (n.member === v ? ' mine' : '') + '"' + attr('ev', n.id) + tipAttr(n.alias) + '>' +
       '<div class="ch"><b>' + whoName(n.member) + '</b>' + originChip(n.origin) + '<span class="when">' + esc(fmtTs(n.ts)) + '</span>' +
       (c.edited ? '<span class="chip">' + wsT("js.tk.cmt.edited") + '</span>' : '') + flags(n) + '<span class="grow"></span>' + acts + '</div>' + reply + txt +
@@ -1596,7 +1603,7 @@
       '<input type="text" id="iw-eproj" data-keep autocomplete="off" value="' + esc(ed.project) + '" placeholder="' + wsT("js.tk.form.project") + '" aria-label="' + wsT("js.tk.form.project") + '">' +
       '<div class="tb">' + btn('iedit-save', wsT("js.tk.dlg.save"), {}, 'primary') + btn('iedit-x', wsT("js.tk.dlg.cancel"), {}) + '<span class="muted">' + wsT("js.tk.edit.hint") + '</span></div></div>';
     else if (it.body || it.mentions.length || it.attachments.length)
-      h += '<div class="iw-body">' + (it.body ? '<div class="sh-body"' + attr('focus', 'body') + '>' + esc(it.body) + '</div>' : '') + mentionChips(it.mentions) + attChips(it.attachments, true) + '</div>';
+      h += '<div class="iw-body">' + (it.body ? textBlock('sh-body', 'items', it.id, it.body, attr('focus', 'body')) : '') + mentionChips(it.mentions) + attChips(it.attachments, true) + '</div>';
     h += subtasksHtml(it);
     var evs = it.thread.map(function (id) { return EV[id]; });
     h += '<section class="iw-thread"><h3 class="prom">' + wsT("js.tk.win.thread") + ' <span class="cnt">' + evs.length + '</span></h3><ul class="timeline">' + evs.map(function (n) {
@@ -2954,6 +2961,10 @@
       var it = t.closest('[data-item]');
       if (it && !t.closest('select, textarea, input, #tkdlg')) { e.preventDefault(); showItem(it.getAttribute('data-item'), t, nk && nk.getAttribute('data-nev')); return; }
       if (t.closest('a[href="#"]')) e.preventDefault();
+      // a footnote link in rendered text scrolls to its note; following it would set the
+      // hash, which is the store-page route (applyRoute)
+      var fn = t.closest('.md a[href^="#"]');
+      if (fn) { e.preventDefault(); var to = document.getElementById(decodeURIComponent(fn.getAttribute('href').slice(1))); if (to) to.scrollIntoView({ block: 'nearest' }); }
     });
     document.addEventListener('submit', function (e) {
       var f = e.target;

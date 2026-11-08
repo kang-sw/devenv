@@ -383,6 +383,7 @@
     if (name === "panels") drawerSwapped();
     if (name === "tree" || name === "convlive") drawerWait();
     if (name === "convlive") syncBadge();
+    if (name === "head" && !sseOn) connected(false);
   }
 
   // --- conversation entries: merged by key, never re-rendered ----------------
@@ -953,15 +954,19 @@
     });
   }
   // applySent marks each board item the session was sent an answer for, or
-  // holds one for, from the inbox records the conversation region carries.
+  // holds one for, from the inbox records the conversation region carries,
+  // and dims the item's answer area (sent-sent, sent-held) until the board
+  // re-renders it answered; each run recomputes both from scratch.
   function applySent() {
     var b = region("board");
     if (!b) return;
     q(".sentmark", b).forEach(function (m) { m.parentNode.removeChild(m); });
+    q(".sent-sent, .sent-held", b).forEach(function (el) { el.classList.remove("sent-sent", "sent-held"); });
     q(".sentdata i[data-id]").forEach(function (i) {
       var item = boardItem(i.getAttribute("data-id")), head = item && item.querySelector(".head");
       if (!head) return;
       var state = i.getAttribute("data-state"), m = doc.createElement("span");
+      item.classList.add(state === "held" ? "sent-held" : "sent-sent");
       m.className = "sentmark " + state;
       m.textContent = state + " · " + (i.getAttribute("data-answer") || "note");
       var note = i.getAttribute("data-note");
@@ -1674,13 +1679,13 @@
   function trackerLost() { tkLastRev = null; }
 
   // --- git badge -------------------------------------------------------------
-  // A click on the top bar's git badge asks the daemon to read the root's git
-  // status at once. The answer arrives as the git region's next swap, which
-  // replaces the busy button; a refused request, or one that never answers,
-  // drops busy on its own.
+  // A click on the top bar's git badge, but on its ahead count, asks the
+  // daemon to read the root's git status at once. The answer arrives as the
+  // git region's next swap, which replaces the busy badge; a refused request,
+  // or one that never answers, drops busy on its own.
   doc.addEventListener("click", function (e) {
     var b = e.target.closest && e.target.closest("#gitb");
-    if (!b || b.classList.contains("busy") || !window.fetch) return;
+    if (!b || e.target.closest(".gitpush") || b.classList.contains("busy") || !window.fetch) return;
     b.classList.add("busy");
     function idle() { b.classList.remove("busy"); }
     fetch("/s/" + rid + "/git", { method: "POST", credentials: "same-origin", cache: "no-store" })
@@ -1688,13 +1693,99 @@
     setTimeout(idle, 15000);
   });
 
+  // --- git push ----------------------------------------------------------------
+  // A press on an ahead count (badge or band) opens the push popover anchored
+  // to it: branch, upstream, and count from the count's data attributes. Push
+  // asks the daemon to push (it re-reads the branch and may refuse); success
+  // closes the popover, and the badge's re-read arrives through the stream.
+  // A failure shows the daemon's one-line reason. Escape, Cancel, and a click
+  // outside close it; a push already asked for still runs.
+  var gpop = $("gitpop"), gpFrom = null, gpBusy = false;
+  function gpPart(sel) { return gpop.querySelector(sel); }
+  function gpErr(text) {
+    var el = gpPart(".gp-err");
+    el.textContent = text || "";
+    el.hidden = !text;
+  }
+  function gpSetBusy(on) {
+    var go = gpPart(".gp-go");
+    gpBusy = on;
+    go.disabled = on;
+    if (!go.getAttribute("data-idle")) go.setAttribute("data-idle", go.textContent);
+    go.textContent = on ? go.getAttribute("data-busy") : go.getAttribute("data-idle");
+  }
+  // gpPlace anchors the popover below the count, or above it when the count
+  // sits in the page's lower half (the band), kept inside the viewport.
+  function gpPlace(btn) {
+    var r = btn.getBoundingClientRect(), w = gpop.offsetWidth, h = gpop.offsetHeight;
+    var vw = doc.documentElement.clientWidth, vh = window.innerHeight;
+    var left = Math.max(8, Math.min(r.left + r.width / 2 - w / 2, vw - w - 8));
+    var top = r.top > vh / 2 ? r.top - h - 6 : r.bottom + 6;
+    gpop.style.left = Math.round(left) + "px";
+    gpop.style.top = Math.round(Math.max(8, Math.min(top, vh - h - 8))) + "px";
+  }
+  function gpOpen(btn) {
+    gpFrom = btn.closest("#gitb") ? "#gitb .gitpush" : ".sb-foot .gitpush";
+    gpPart(".gp-br").textContent = btn.getAttribute("data-br") || "";
+    gpPart(".gp-up").textContent = btn.getAttribute("data-up") || "";
+    gpPart(".gp-n").textContent = btn.getAttribute("data-n") || "";
+    gpErr("");
+    gpSetBusy(false);
+    gpop.hidden = false;
+    btn.setAttribute("aria-expanded", "true");
+    gpPlace(btn);
+    gpPart(".gp-go").focus();
+  }
+  // gpClose hides the popover and returns focus to the count it came from,
+  // looked up again: a stream swap may have replaced it meanwhile.
+  function gpClose(refocus) {
+    if (!gpop || gpop.hidden) return;
+    gpop.hidden = true;
+    q(".gitpush[aria-expanded]").forEach(function (b) { b.removeAttribute("aria-expanded"); });
+    var back = refocus && gpFrom && doc.querySelector(gpFrom);
+    if (back) back.focus();
+  }
+  function gpPush() {
+    if (gpBusy || !window.fetch) return;
+    gpErr("");
+    gpSetBusy(true);
+    fetch("/s/" + rid + "/git/push", { method: "POST", credentials: "same-origin", cache: "no-store" })
+      .then(function (r) {
+        if (r.ok) { gpSetBusy(false); gpClose(true); return; }
+        return r.text().then(function (t) { gpSetBusy(false); gpErr((t || "").trim() || String(r.status)); });
+      }, function () { gpSetBusy(false); gpErr(gpop.getAttribute("data-lost")); });
+  }
+  if (gpop) {
+    doc.addEventListener("click", function (e) {
+      var t = e.target;
+      if (!t.closest) return;
+      var btn = t.closest(".gitpush");
+      if (btn) {
+        if (!gpop.hidden && btn.getAttribute("aria-expanded") === "true") gpClose(false);
+        else gpOpen(btn);
+        return;
+      }
+      if (t.closest(".gp-go")) { gpPush(); return; }
+      if (t.closest(".gp-cancel")) { gpClose(true); return; }
+      if (!gpop.hidden && !t.closest("#gitpop")) gpClose(false);
+    });
+    doc.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && !gpop.hidden) { e.preventDefault(); gpClose(true); }
+    });
+    window.addEventListener("resize", function () { gpClose(false); });
+  }
+
   // --- stream ----------------------------------------------------------------
-  var sse = $("sse"), sseLabel = sse && sse.querySelector(".sse-label");
+  // The stream state shows on every indicator in the top bar: the bare dot,
+  // and the harness badge's LED, which a head region swap redraws lit, so
+  // the swap reapplies the state (swap above).
+  var sseOn = true;
   function connected(on) {
-    if (!sse) return;
-    sse.classList.toggle("off", !on);
-    if (sseLabel) sseLabel.textContent = wsT(on ? "js.sse.live" : "js.sse.offline");
-    sse.title = wsT(on ? "js.sse.title.on" : "js.sse.title.off");
+    sseOn = on;
+    q(".top .sse").forEach(function (el) {
+      el.classList.toggle("off", !on);
+      el.title = wsT(on ? "js.sse.title.on" : "js.sse.title.off");
+    });
   }
   function connect() {
     if (!window.EventSource) return;

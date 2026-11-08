@@ -697,3 +697,21 @@ body.tk-menuon .tk .ir-more { visibility: hidden !important; }
 .tk .nrow select { font: inherit; font-size: 11.5px; height: 22px; border-radius: 6px; border: 1px solid var(--wb-line); background: var(--wb-card); color: var(--wb-fg); }
 .tk .srows > .subrow { margin: 4px 0; }
 .tk .grow-row + .subrow { margin-left: 0; }
+
+/* Rendered markdown in an item body or a comment (textBlock in tracker.js). The host's
+   shared .md rules give block spacing, lists, code, tables, and quotes; here the text
+   flows as HTML rather than pre-wrap, wide blocks scroll inside the box, headings stay
+   below the item title and clear the window's section-label h3 rule, and a comment is
+   more compact than a body. */
+.tk .sh-body.md, .tk .timeline .cmt .ctext.md { white-space: normal; overflow-wrap: anywhere; }
+.tk .sh-body.md :is(h1, h2, h3, h4, h5, h6), .tk .ctext.md :is(h1, h2, h3, h4, h5, h6) {
+  margin: 8px 0 4px; font-size: 13px; font-weight: 700; line-height: 1.35; color: inherit; text-transform: none; letter-spacing: normal; }
+.tk .sh-body.md h1 { font-size: 15px; }
+.tk .sh-body.md h2 { font-size: 14px; }
+.tk .sh-body.md > :is(h1, h2, h3, h4, h5, h6):first-child, .tk .ctext.md > :is(h1, h2, h3, h4, h5, h6):first-child { margin-top: 0; }
+.tk .ctext.md :is(h1, h2, h3, h4, h5, h6) { margin: 4px 0 2px; }
+.tk .ctext.md :is(p, ul, ol, pre, table, blockquote) { margin-bottom: 4px; }
+.tk .md pre { max-width: 100%; overflow-x: auto; white-space: pre; overflow-wrap: normal; }
+.tk .md table { display: block; width: fit-content; max-width: 100%; overflow-x: auto; }
+.tk .md hr { border: 0; border-top: 1px solid var(--wb-line); margin: 8px 0; }
+.tk .sh-body.md > :last-child, .tk .ctext.md > :last-child { margin-bottom: 0; }

@@ -51,9 +51,14 @@
 .host.sm { font-size: 10px; padding: 0 5px; flex: none; }
 .nolive, .ended-chip { font-size: 11.5px; color: var(--wb-muted-fg); border: 1px dashed var(--wb-muted-fg); border-radius: 999px; padding: 0 8px; white-space: nowrap; }
 .ended-chip { border-style: solid; }
-.sse { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--wb-muted-fg); white-space: nowrap; }
+.sse { display: inline-flex; align-items: center; white-space: nowrap; }
 .sse .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--wb-ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--wb-ok) 25%, transparent); }
 .sse.off .dot { background: var(--wb-muted-fg); box-shadow: 0 0 0 3px color-mix(in srgb, var(--wb-muted-fg) 20%, transparent); }
+/* the harness badge carries the stream's LED; the bare dot then steps aside */
+.host.sse { gap: 5px; }
+.host.sse .dot { width: 6px; height: 6px; box-shadow: 0 0 0 2px color-mix(in srgb, var(--wb-ok) 25%, transparent); }
+.host.sse.off .dot { box-shadow: 0 0 0 2px color-mix(in srgb, var(--wb-muted-fg) 20%, transparent); }
+.top:has(.host.sse) > #sse { display: none; }
 .dash.index .sse { margin-left: auto; }
 /* the git badge: a status band line in a button, read by the daemon */
 .r-git { display: contents; }
@@ -66,6 +71,28 @@
 .gitb.pending .sb-br, .gitb.norepo .sb-br { color: var(--wb-muted-fg); font-family: inherit; font-weight: 600; }
 .gitb.failed .sb-br { color: var(--wb-warn-ink); font-family: inherit; }
 .gitb.busy { opacity: .5; cursor: progress; }
+/* the badge is a span holding buttons (the ahead count is one); its branch chip is the refresh button, plain like the band's chip */
+.gitb > .sb-br { background: transparent; border: 0; padding: 0; cursor: inherit; }
+.gitb > .sb-br:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: 3px; border-radius: 3px; }
+/* the ahead count where a push can go (badge and band): the count as it was, with a hover and focus mark */
+.gitpush { font: inherit; color: inherit; background: transparent; border: 0; padding: 1px 3px; margin: -1px -3px; border-radius: 4px; cursor: pointer; }
+.gitpush:hover, .gitpush:focus-visible, .gitpush[aria-expanded="true"] { background: color-mix(in srgb, var(--wb-primary) 16%, transparent); }
+.gitpush:focus-visible { outline: 1.5px solid var(--wb-primary); }
+/* the push popover, anchored by dashboard.js to the pressed count */
+.gitpop { position: fixed; z-index: 60; width: max-content; min-width: 220px; max-width: min(380px, calc(100vw - 16px)); background: var(--wb-card); color: var(--wb-fg); border-radius: 10px; box-shadow: var(--wb-shadow-hi); padding: 10px 12px; display: grid; gap: 8px; font-size: 13px; }
+.gitpop[hidden] { display: none; }
+.gp-ref { display: flex; align-items: center; gap: 6px; min-width: 0; font: 700 12px/1.3 var(--wb-mono); }
+.gp-ref b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gp-br { color: var(--wb-primary); }
+.gp-to { color: var(--wb-muted-fg); flex: none; }
+.gp-n { color: var(--wb-muted-fg); font-size: 12.5px; }
+.gp-err { color: var(--wb-warn-ink); font-size: 12.5px; overflow-wrap: anywhere; }
+.gp-err[hidden] { display: none; }
+.gp-btns { display: flex; justify-content: flex-end; gap: 6px; }
+.gp-btns .btn { height: 26px; padding: 0 12px; }
+.gp-btns .btn:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: 1px; }
+.gitpop .gp-go { background: var(--wb-now); color: var(--wb-on-now); font-weight: 700; }
+.gitpop .gp-go:disabled { opacity: .6; cursor: progress; }
 .gearwrap { position: relative; }
 .gear { height: 28px; width: 32px; padding: 0; }
 .gear .i { width: 17px; height: 17px; }
@@ -331,6 +358,10 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .hchips .achip { padding-right: 9px; }
 .sentmark { font-size: 10px; font-weight: 800; letter-spacing: .03em; padding: 0 6px; border-radius: 4px; white-space: nowrap; background: var(--wb-muted); color: var(--wb-muted-fg); }
 .sentmark.held { background: var(--wb-ph-perm); color: var(--wb-on-ph-perm); }
+/* an item whose answer was sent (or is held) grays its answer area until the board records the answer; the head and its mark stay readable, and focusing a control in it (to revise the answer) brings the area back */
+.card.sent-sent > .cbody > :not(.note), .arow.sent-sent .why, .arow.sent-sent input { opacity: .4; transition: opacity .15s; }
+.card.sent-held > .cbody > :not(.note), .arow.sent-held .why, .arow.sent-held input { opacity: .65; transition: opacity .15s; }
+.card:is(.sent-sent, .sent-held):focus-within > .cbody > *, .arow:is(.sent-sent, .sent-held):focus-within :is(.why, input) { opacity: 1; }
 /* status band: the context bar above the message box (ctx), the folder,
    branch, upstream, usage limits, and cost below it (sline). An empty region
    collapses. sline is a size container inside the composer's 10px padding:
