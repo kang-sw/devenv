@@ -153,7 +153,28 @@ standing, the 5-hour and weekly usage limits (each with its reset and its
 pace, which the page computes), and the cost (`~$` for an estimate, a
 trailing `+` when calls of unknown price were left out). A part with no
 figure is left out; context and limits warn at 80% and turn critical at 95%;
-below a 360px band only the limit under more pressure stays. On the served board and in the conversation's lead
+below a 360px band only the limit under more pressure stays.
+
+The session page's top bar (not the `/` hub) carries a git badge between
+the live mark and the gear: the session root's branch, upstream standing, and
+working-tree counts in the status band's grammar and classes, which the
+daemon reads itself (`internal/wsdashboard/gitbadge.go`) rather than from the
+snapshot. It reads a root only while at least one session page under it holds
+its SSE stream open: once when the first stream opens, every 3 minutes while
+one stays, and at once on `POST /s/<reply-id>/git` (the badge's click; it
+needs an `Origin` equal to the daemon's own, answers 204, and 409 when no
+open page watches the root). One goroutine per watched root runs every read,
+so pages sharing a root share one read and no two reads of a root overlap; a
+refresh inside 2 seconds of the last read waits for that gap's end, and
+requests arriving meanwhile fold into that one read. The last stream's close
+ends the root's reads and drops its value. A read is `rev-parse`,
+`symbolic-ref`, `rev-list --left-right --count`, and `status --porcelain`
+with no optional lock (`wsgit.BranchSync`, `wsgit.WorkingTreeCounts`), in the
+C locale, bounded by 10 s together, with no daemon-wide lock held; it never
+fetches. A non-repository root or a failed read shows the badge dimmed, with
+the reason (git's message) in its title.
+
+On the served board and in the conversation's lead
 replies, a file link renders as an action link (`data-wl="file"`, titled with
 its repo-relative path) and an http(s) link is marked `data-wl="url"`: a
 click opens a menu (open in new tab, open in system browser, copy relative or

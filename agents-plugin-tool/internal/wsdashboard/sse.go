@@ -95,9 +95,16 @@ func (d *Daemon) handleSessionEvents(w http.ResponseWriter, r *http.Request, rep
 	lang, _ := requestLang(r)
 	theme := requestTheme(r)
 	pages := d.pagesIn(lang)
-	if _, ok := pages.session(replyID); !ok {
+	first, ok := pages.session(replyID)
+	if !ok {
 		http.Error(w, "unknown session", http.StatusNotFound)
 		return
+	}
+	// The stream is the page's presence: the git badge's root is read while
+	// some stream watches it.
+	if d.git != nil && first.Project != "" {
+		release := d.git.watch(first.Project)
+		defer release()
 	}
 	d.stream(w, r, func() (regionSet, bool) {
 		view, ok := pages.session(replyID)
@@ -105,6 +112,7 @@ func (d *Daemon) handleSessionEvents(w http.ResponseWriter, r *http.Request, rep
 			return nil, false
 		}
 		view.Lang, view.Theme = lang, theme
+		view.Git = d.git.badge(view.Project)
 		regions, err := renderSessionRegions(view, d.entries)
 		if err != nil {
 			fmt.Fprintf(d.log, "dashboard: render session %s: %v\n", replyID, err)

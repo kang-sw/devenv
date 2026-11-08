@@ -114,6 +114,9 @@ func startPageFixture(t *testing.T, options ...func(*DaemonOptions)) *pageFixtur
 	}); err != nil {
 		t.Fatal(err)
 	}
+	// The git badge is off unless a test turns it on: its first read would
+	// swap a region the tests that pin a stream's regions do not expect.
+	options = append([]func(*DaemonOptions){func(o *DaemonOptions) { o.noGitBadge = true }}, options...)
 	f.d = startIndexedDaemon(t, f.dir, f.src, time.Hour, options...)
 	f.base = endpointURL(f.d.Endpoint(), "")
 	// The daemon's first index refresh runs beside its start; a page asked

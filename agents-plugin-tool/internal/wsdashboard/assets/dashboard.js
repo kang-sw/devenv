@@ -1471,6 +1471,21 @@
     });
   }
 
+  // --- git badge -------------------------------------------------------------
+  // A click on the top bar's git badge asks the daemon to read the root's git
+  // status at once. The answer arrives as the git region's next swap, which
+  // replaces the busy button; a refused request, or one that never answers,
+  // drops busy on its own.
+  doc.addEventListener("click", function (e) {
+    var b = e.target.closest && e.target.closest("#gitb");
+    if (!b || b.classList.contains("busy") || !window.fetch) return;
+    b.classList.add("busy");
+    function idle() { b.classList.remove("busy"); }
+    fetch("/s/" + rid + "/git", { method: "POST", credentials: "same-origin", cache: "no-store" })
+      .then(function (r) { if (!r.ok) idle(); }, idle);
+    setTimeout(idle, 15000);
+  });
+
   // --- stream ----------------------------------------------------------------
   var sse = $("sse"), sseLabel = sse && sse.querySelector(".sse-label");
   function connected(on) {

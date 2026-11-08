@@ -70,6 +70,10 @@ type SessionView struct {
 	Conversation ConversationView
 	// Band is the status band around the composer.
 	Band BandView
+	// Git is the top bar's git badge for Project; nil shows none. Set per
+	// request from the daemon's own read (gitbadge.go), never by the
+	// builders.
+	Git *GitBadge
 }
 
 // Mode is the page mode, modeLive or modeBoard.
