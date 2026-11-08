@@ -144,3 +144,64 @@ func TestTruncatedClosingTagEndsReading(t *testing.T) {
 		}
 	}
 }
+
+func TestDecode(t *testing.T) {
+	for name, tc := range map[string]struct{ in, want string }{
+		"lt":                     {"&lt;", "<"},
+		"gt":                     {"&gt;", ">"},
+		"amp":                    {"&amp;", "&"},
+		"quot":                   {"&quot;", `"`},
+		"apos":                   {"&apos;", "'"},
+		"decimal":                {"&#60;&#233;", "<é"},
+		"hex":                    {"&#x3c;&#X3E;&#x1F600;", "<>😀"},
+		"one pass":               {"&amp;lt;", "&lt;"},
+		"in text":                {"a &lt;key&gt; b", "a <key> b"},
+		"unknown entity kept":    {"&nbsp;&foo;&LT;", "&nbsp;&foo;&LT;"},
+		"bare & kept":            {"a && b & c", "a && b & c"},
+		"no semicolon kept":      {"&lt &amp", "&lt &amp"},
+		"zero kept":              {"&#0;&#x0;", "&#0;&#x0;"},
+		"surrogate kept":         {"&#xD800;&#57343;", "&#xD800;&#57343;"},
+		"out of range kept":      {"&#x110000;&#99999999999999999999;", "&#x110000;&#99999999999999999999;"},
+		"malformed numeric kept": {"&#;&#x;&#-1;&#+60;&#xg;&# 60;", "&#;&#x;&#-1;&#+60;&#xg;&# 60;"},
+		"kept then decoded":      {"&foo &lt;", "&foo <"},
+		"empty":                  {"", ""},
+	} {
+		if got := Decode(tc.in); got != tc.want {
+			t.Errorf("%s: Decode(%q) = %q, want %q", name, tc.in, got, tc.want)
+		}
+	}
+}
+
+// Attributes are always decoded; a body only where the grammar marks it,
+// and never inside CDATA.
+func TestGrammarDecidesWhichBodiesDecode(t *testing.T) {
+	g := Grammar{
+		Prefix: "tr:",
+		Commands: map[string]Spec{
+			"note": {Kind: Leaf, Attrs: []string{"id"}, DecodeBody: true},
+			"raw":  {Kind: Leaf, Attrs: []string{"id"}},
+			"set":  {Kind: Container, Fields: []string{"name", "tag"}, DecodeFields: []string{"name"}},
+		},
+	}
+	cmds, problems := parse(g, `<tr:note id="&lt;1&gt;">a &lt;b&gt; <![CDATA[&lt;c&gt;]]> &amp;d</tr:note>`+
+		`<tr:raw id="x &amp; y">a &lt;b&gt;</tr:raw>`+
+		`<tr:set><tr:name>&lt;n&gt;</tr:name><tr:tag>&lt;t&gt;</tr:tag></tr:set>`+
+		"<tr:note>\n&#10;x&#10;\n</tr:note>")
+	if len(problems) > 0 {
+		t.Fatalf("problems: %q", problems)
+	}
+	if id, _ := cmds[0].Attr("id"); id != "<1>" || cmds[0].Body != "a <b> &lt;c&gt; &d" {
+		t.Errorf("decoded leaf = %+v", cmds[0])
+	}
+	if id, _ := cmds[1].Attr("id"); id != "x & y" || cmds[1].Body != "a &lt;b&gt;" {
+		t.Errorf("verbatim leaf = %+v", cmds[1])
+	}
+	if name, tag := cmds[2].FieldsOf("tr:name"), cmds[2].FieldsOf("tr:tag"); name[0] != "<n>" || tag[0] != "&lt;t&gt;" {
+		t.Errorf("fields = %+v", cmds[2].Fields)
+	}
+	// The body's own newlines are stripped before decoding, so a decoded
+	// newline at either end stays.
+	if cmds[3].Body != "\nx\n" {
+		t.Errorf("decoded newlines = %q", cmds[3].Body)
+	}
+}
