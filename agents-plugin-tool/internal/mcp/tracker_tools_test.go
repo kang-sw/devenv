@@ -579,6 +579,10 @@ func TestTrackerRedactsRemoteCredentials(t *testing.T) {
 		"git@github.com:o/r.git":                               "git@github.com:o/r.git",
 		"ssh://git@github.com/o/r.git":                         "ssh://git@github.com/o/r.git",
 		"https://github.com/o/r.git":                           "https://github.com/o/r.git",
+		"https://host/r.git?private_token=glpat-x&ref=main":    "https://host/r.git?private_token=***&ref=***",
+		"fetch 'https://u:p@host/r?access_token=abc' failed":   "fetch 'https://***@host/r?access_token=***' failed",
+		"https://host/r.git?sigsecret#frag":                    "https://host/r.git?***#frag",
+		"see https://host/docs?q=1 and ssh://h/r?x=1":          "see https://host/docs?q=*** and ssh://h/r?x=1",
 	} {
 		if got := redactRemoteCredentials(in); got != want {
 			t.Fatalf("redact(%q) = %q, want %q", in, got, want)

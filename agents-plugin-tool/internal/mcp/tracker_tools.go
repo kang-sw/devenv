@@ -974,10 +974,28 @@ func trackerManualSection(s *Server, rsrcRoot string) (string, error) {
 // or password sits; an ssh user (git@host) carries none.
 var remoteCredentials = regexp.MustCompile(`(?i)(https?://)[^/@\s]+@`)
 
-// redactRemoteCredentials hides the userinfo of every http(s) URL in s, so
-// a token in a store's remote URL never reaches the agent's context.
+// remoteQuery matches the query string of an http(s) URL, where a token can
+// sit too (private_token=, access_token=): group 1 is everything up to the
+// "?", group 2 the query, which ends at a fragment, whitespace, or quote.
+var remoteQuery = regexp.MustCompile(`(?i)(https?://[^\s?#'"]*\?)([^\s#'"]*)`)
+
+// redactRemoteCredentials hides the userinfo and every query value of each
+// http(s) URL in s, so a token in a store's remote URL never reaches the
+// agent's context. Query names stay, so the reader can tell what was there.
 func redactRemoteCredentials(s string) string {
-	return remoteCredentials.ReplaceAllString(s, "${1}***@")
+	s = remoteCredentials.ReplaceAllString(s, "${1}***@")
+	return remoteQuery.ReplaceAllStringFunc(s, func(url string) string {
+		m := remoteQuery.FindStringSubmatch(url)
+		params := strings.Split(m[2], "&")
+		for i, p := range params {
+			if name, _, ok := strings.Cut(p, "="); ok {
+				params[i] = name + "=***"
+			} else if p != "" {
+				params[i] = "***"
+			}
+		}
+		return m[1] + strings.Join(params, "&")
+	})
 }
 
 // redactStoreView redacts the view's remote URL and sync error in place.
