@@ -259,7 +259,7 @@ body.tk-paged .tk-drawer { display: none; }
 .tk .wicon.flag { color: var(--tk-fail); }
 .tk .udot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--wb-primary); }
 .tk .subn { font-weight: 600; letter-spacing: 0; }
-.tk.tk-tip { position: fixed; z-index: 95; max-width: 340px; padding: 4px 8px; border-radius: 6px; background: var(--wb-fg); color: var(--wb-card); font-size: 12px; line-height: 1.4; pointer-events: none; box-shadow: var(--wb-shadow-hi); }
+.tk.tk-tip { position: fixed; z-index: 95; max-width: 340px; white-space: pre-line; padding: 4px 8px; border-radius: 6px; background: var(--wb-fg); color: var(--wb-card); font-size: 12px; line-height: 1.4; pointer-events: none; box-shadow: var(--wb-shadow-hi); }
 .tk.tk-tip[hidden] { display: none; }
 
 /* Items panel header: scope presets and the scope's view modes */
@@ -307,6 +307,21 @@ body.tk-paged .tk-drawer { display: none; }
 .tk .csum:focus-visible { outline: 1.5px solid var(--wb-primary); }
 .tk .csum .i { width: 12px; height: 12px; transition: transform .15s; }
 .tk .csum .subn { font-weight: 700; }
+/* context trees: the fold control (a spacer on a node without children), the folded "N subtasks"
+   chip, the greyed context rows (ancestors of a match), and the "… N more" row */
+.tk .tw { flex: none; width: 16px; height: 18px; margin-right: -3px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--wb-muted-fg); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+.tk span.tw { cursor: default; }
+.tk button.tw:hover { color: var(--wb-fg); background: var(--wb-muted); }
+.tk button.tw:focus-visible, .tk .tsub:focus-visible, .tk .tmore:focus-visible { outline: 1.5px solid var(--wb-primary); }
+.tk .tw .i { width: 12px; height: 12px; transition: transform .15s; }
+.tk .tw[aria-expanded="false"] .i { transform: rotate(-90deg); }
+.tk .tsub { flex: none; height: 18px; padding: 0 7px; border: 0; border-radius: 999px; background: transparent; box-shadow: inset 0 0 0 1px var(--wb-line); color: var(--wb-muted-fg); font: inherit; font-size: 11px; font-weight: 600; white-space: nowrap; cursor: pointer; }
+.tk .tsub:hover { color: var(--wb-fg); box-shadow: inset 0 0 0 1px var(--wb-muted-fg); }
+.tk .irow.ctx > .ir-main .title { font-weight: 400; color: var(--wb-muted-fg); }
+.tk .irow.ctx > .ir-main > .sti, .tk .irow.ctx > .ir-main > .who, .tk .irow.ctx > .ir-main > .pri, .tk .irow.ctx > .ir-main > .due2 { opacity: .55; }
+.tk .tmore { display: flex; align-items: center; width: 100%; min-height: 24px; padding: 1px 4px 1px calc(24px + var(--ind, 0) * 16px); border: 0; background: transparent; color: var(--wb-muted-fg); font: inherit; font-size: 12px; cursor: pointer; text-align: left; border-radius: 6px; }
+.tk .tmore:hover { background: color-mix(in srgb, var(--wb-muted) 60%, transparent); color: var(--wb-fg); }
+.tk .tmore + .irow, .tk .csum + .irow { border-top: 0; }
 
 /* Today chips: one pill under the Items header (in the narrow layout, under the tab bar) */
 .tk .todaybar { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; margin: 6px 10px 0; padding: 2px 4px 2px 10px; width: fit-content; max-width: calc(100% - 20px);
@@ -464,13 +479,20 @@ dialog.tk-dlg p { margin: 0; font-size: 12.5px; color: var(--wb-muted-fg); }
 .tk .grow-row.ended .glabel, .tk .grow-row.ended .gbar { opacity: .55; } /* timeline and calendar keep ended items, muted */
 .tk .citem.ended { opacity: .55; }
 .tk .grow-axis, .tk .grow-row { display: grid; grid-template-columns: minmax(180px, 34%) 1fr; gap: 8px; align-items: center; padding: 2px 0; border-top: 1px solid var(--wb-muted); }
-.tk .glabel { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; min-width: 0; }
+.tk .glabel { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; min-width: 0; padding-left: calc(var(--ind, 0) * 14px); }
+.tk .glabel .tmore { padding-left: 20px; }
+.tk .grow-row.ctx .glabel .title { font-weight: 400; color: var(--wb-muted-fg); }
+.tk .grow-row.ctx .gbar { opacity: .55; }
+/* a parent's summary bar: thin, under its own bar, spanning every dated item below it */
+.tk .gsum { position: absolute; bottom: 0; height: 3px; border-radius: 2px; background: var(--wb-fg); opacity: .45; }
+.tk .gsum::before, .tk .gsum::after { content: ""; position: absolute; bottom: 0; width: 2px; height: 7px; background: inherit; }
+.tk .gsum::before { left: 0; } .tk .gsum::after { right: 0; }
 .tk .gtrack { position: relative; height: 18px; }
 .tk .gtrack.axis { height: 16px; }
 .tk .gtick { position: absolute; top: 0; font-size: 10.5px; color: var(--wb-muted-fg); border-left: 1px solid var(--wb-line); padding-left: 2px; height: 16px; }
 .tk .gtick.now, .tk .gnow { border-left: 2px solid var(--wb-primary); }
 .tk .gnow { position: absolute; top: -2px; bottom: -2px; }
-.tk .gbar { position: absolute; top: 3px; height: 12px; border-radius: 3px; background: color-mix(in srgb, var(--wb-primary) 35%, var(--wb-card)); font-size: 9.5px; line-height: 12px; text-align: right; padding-right: 2px; overflow: hidden; color: var(--wb-fg); }
+.tk .gbar { position: absolute; top: 2px; height: 11px; border-radius: 3px; background: color-mix(in srgb, var(--wb-primary) 35%, var(--wb-card)); font-size: 9.5px; line-height: 12px; text-align: right; padding-right: 2px; overflow: hidden; color: var(--wb-fg); }
 .tk .gbar.st-done { background: color-mix(in srgb, var(--tk-ok) 35%, var(--wb-card)); }
 .tk .gbar.st-blocked, .tk .gbar.over { background: color-mix(in srgb, var(--tk-fail) 40%, var(--wb-card)); }
 .tk .gbar.st-pending, .tk .gbar.st-unassigned { background: var(--wb-muted); }
@@ -480,7 +502,11 @@ dialog.tk-dlg p { margin: 0; font-size: 12.5px; color: var(--wb-muted-fg); }
 .tk .cday.off { background: transparent; box-shadow: none; }
 .tk .cday.now { box-shadow: inset 0 0 0 2px var(--wb-primary); }
 .tk .cnum { font-size: 11px; color: var(--wb-muted-fg); }
-.tk .citem { display: flex; gap: 3px; align-items: center; flex-wrap: wrap; margin: 2px 0; cursor: pointer; }
+.tk .citem { display: flex; gap: 3px; align-items: center; flex-wrap: wrap; margin: 2px 0; cursor: pointer; border-radius: 4px; }
+/* kanban and calendar: the hovered or focused card's direct parent (solid) and children (dashed) */
+.tk .kcard.lk-par, .tk .citem.lk-par { outline: 2px solid var(--tk-teal); outline-offset: 1px; }
+.tk .kcard.lk-kid, .tk .citem.lk-kid { outline: 2px dashed var(--tk-teal); outline-offset: 1px; }
+.tk .citem.lk-on { background: color-mix(in srgb, var(--wb-muted) 60%, transparent); }
 
 .tk .sup { margin: 2px 0; font-size: 12px; }
 
@@ -535,7 +561,8 @@ dialog.tk-dlg p { margin: 0; font-size: 12.5px; color: var(--wb-muted-fg); }
 .tk .pcard dt { color: var(--wb-muted-fg); }
 .tk .pcard dd { margin: 0; overflow-wrap: anywhere; }
 .tk .srows { background: var(--wb-card); border-radius: 10px; box-shadow: var(--wb-shadow); padding: 2px 10px; }
-.tk .srow { display: flex; gap: 8px; align-items: center; padding: 6px 0; font-size: 13px; cursor: pointer; }
+.tk .srow { display: flex; gap: 8px; align-items: center; padding: 6px 0 6px calc(var(--ind, 0) * 18px); font-size: 13px; cursor: pointer; }
+.tk .srow .tw { margin-right: -4px; }
 .tk .srow + .srow { border-top: 1px solid var(--wb-muted); }
 .tk .srow .title { font-weight: 600; color: var(--wb-fg); text-decoration: none; overflow-wrap: anywhere; }
 .tk .srow:hover .title, .tk .srow .title:focus-visible { color: var(--wb-primary); text-decoration: underline; }

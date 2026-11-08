@@ -140,6 +140,20 @@ build, no server, no dependencies.
   UI state, remembered per store in memory (they survive a viewer switch within
   the store), never an event (360). The panel is already wide, so no mode
   spans rows any more (supersedes (304)).
+- **Context trees** (467). No scope list is flat: every scope's list (and
+  each sub-section of *received requests*, and each person's group in *my
+  team*) is a tree of its matching rows. Each match's ancestor chain stands
+  above it as greyed **context rows**: they are not matches (the scope's count
+  leaves them out), carry no hover actions, and open their item on click. A
+  context node's other children, unrelated to any match, fold into one
+  "… N more" row (a click shows them). A match's own subtree starts folded,
+  shown as an "N subtasks" chip after its title. Every node with children
+  carries a ▸/▾ fold control left of its status icon (ArrowRight / ArrowLeft
+  on a focused row do the same). The fold state per node is display state in
+  browser storage per device, keyed by store + item id, and shared by the list
+  and the due timeline. A list with no nesting at all draws no fold column.
+  Roots keep the scope's own order (by their first match), children the item
+  order. The *recently closed* section stays a flat list.
 - **Panel header, view icons, and search** (384), (385). The header has two
   rows: row 1 is the title, the scope presets, and the scope's count chip;
   row 2 is the **view icons**, then a **search box** that takes the remaining
@@ -175,9 +189,11 @@ build, no server, no dependencies.
   the tree, greyed. A closed parent whose whole subtree is closed moves, with
   that subtree, as one unit to *recently closed* (when its parent is not on
   screen; under a shown parent it is part of that parent's "closed N" row).
-  The parent's roll-up (done 3/5) still counts the closed children. While a
-  search or a Today chip is on, the tree shows the plain matches in tree order
-  instead (open and greyed ones in the list, closed ones in the section).
+  The parent's roll-up (done 3/5) still counts the closed children. A node
+  folds with ▸/▾ like any context-tree node. While a search or a Today chip is
+  on, or another status filter is chosen, the tree shows the matches as a
+  context tree instead (open and greyed ones in the list, closed ones in the
+  section).
 - **Today chips** (366), in the Items panel header (in the narrow layout, at
   the top of the tab pane): *my work N · answer N · confirm N*, that is my
   open work, pending assignments waiting for my answer, and closes waiting for
@@ -266,16 +282,24 @@ build, no server, no dependencies.
     offers kind alone. Cards are quiet like rows (title, initials, priority,
     due), with the source on hover. Dragging moves a card only for the
     viewer's own live assignment and dispatches `item.status` (todo / doing /
-    blocked) or `item.close` (done).
+    blocked) or `item.close` (done). Cards stay independent tasks (469):
+    hovering or focusing one outlines its direct parent's card (solid) and its
+    direct children's cards (dashed), and when the parent's card is not on
+    screen its tooltip adds "Parent: <title>". The calendar does the same.
   - *Activity timeline* (the Activity card): every event by write time,
     grouped by day, filterable by event family, member, flagged, and
     concurrent.
-  - *Due timeline*: one bar per dated row of the scope (an item on *all*, an
-    assignment record on an assignment scope, showing its own state), from
-    the item's start (first `doing`, else creation) to its due day, with a
-    today line; overdue bars are marked.
+  - *Due timeline* (468): the scope's dated rows (an item on *all*, an
+    assignment record on an assignment scope, showing its own state) as the
+    same context tree the list draws, sharing its fold state. A row's bar runs
+    from the item's start (first `doing`, else creation) to its due day, with
+    a today line; overdue bars are marked. A node with children also draws a
+    thin summary bar spanning the range of every dated item below it; folded,
+    the children's rows go and the summary bar stays. A parent without a due
+    date of its own is placed by its summary bar alone.
   - *Calendar*: a month grid of the scope's dated rows by due day, with month
-    navigation per scope.
+    navigation per scope; hover and focus mark parent and children as on the
+    kanban.
 - **Support agent card** (chat placeholder, (300), (302)). A placeholder for
   the support-agent chat child, the future daemon-side local support agent:
   placement and a static sample only, with no working chat, no responder, and
@@ -327,11 +351,13 @@ build, no server, no dependencies.
     reached later)"), and the per-assignee actions the action bar does not
     already offer (Reopen, Unassign, *Hand off (admin)* on any member's live
     assignment). A single row has nothing to share and shows its own text.
-  - *Subtasks* (427): the item's direct children, one row each: status icon,
-    title (opens that item, so the window walks down; the breadcrumb walks up),
-    the child's own roll-up when it has children, and holder avatars; a done
-    child is greyed. Absent when the item has none. Nested levels are reached by
-    opening the child, not drawn inline.
+  - *Subtasks* (427), (470): the item's whole subtree, one row each: a ▸/▾
+    fold control on a node with children, status icon, title (opens that item,
+    so the window walks down; the breadcrumb walks up), the node's own roll-up
+    when it has children, and holder avatars; a done one is greyed. The first
+    level (the item's children) starts open, so their children show; deeper
+    levels start folded (an "N subtasks" chip). The fold state lasts the page.
+    Absent when the item has none.
   The thread is one chronological timeline of comments (quote
   reply, edit, hide), status changes, assignments and answers, edits, agent
   records with `agent` / `auto` chips, subtask lines, flagged and waiting
@@ -896,6 +922,10 @@ creation, and it has a topic and a blocked subtask.
 | 425 | Assignees shows at most 4 rows, highest in the hierarchy first (shallowest lead-chain depth; then live before ended, display name, assignment order), then an "N more" toggle (local state). The provenance text and the close rule that at least two rows share are written once in the section header; a row keeps its name, status, note, and only what differs (e.g. "inherited: everyone within L2, reached later"). A notification target in the hidden rows expands the fold. |
 | 426 c | The item window is two columns on a wide window (window width 820px or more): the main column has the header, body, subtasks, and thread with the composer; the narrow side column has the property card and Assignees. Below 820px it is one column: header, property card, body, subtasks, Assignees, thread, composer. Status, subtasks, and the thread are the prominent parts. |
 | 427 | The fixtures carry hierarchical tasks of mixed depth with childless tasks among them: besides "Ship search v2" (depth 3 under "Index builder", and "Cache layer" under "Query path rewrite"), "Infra capacity plan" (three subtasks, one of which has its own blocked subtask, one done), "Refresh onboarding docs" (a single child), and the childless "Renew TLS certificates". The item window lists the children as a Subtasks section and shows the ancestors as a breadcrumb. Existing ids are unchanged. |
+| 467 a | Every scope list (mine / received requests / assigned by me / team / all) is a context tree: each match's ancestor chain shows above it as greyed context rows (not counted, a click opens the item), unrelated siblings collapse into one "… N more" row, and the match's own subtree starts folded ("N subtasks"). Each node folds with ▸/▾; the fold state is browser storage per device, keyed by store + item id. Received-request sub-sections each draw their own tree; closed children keep the "closed N" fold. |
+| 468 a | The due timeline uses the same tree rows: a parent draws its own bar and a thin summary bar spanning its children's range; folded, only the summary bar is left for the subtree; a parent without its own due is placed by its children's range. |
+| 469 | Kanban and calendar cards stay independent tasks; hover or keyboard focus on a card highlights its direct parent and direct children cards, and a tooltip names the parent when its card is not on screen. |
+| 470 | The item window's Subtasks section shows the whole subtree with ▸/▾ folding, first level open and deeper levels folded; supersedes (427)'s direct-children-only list. |
 
 ## Open questions
 

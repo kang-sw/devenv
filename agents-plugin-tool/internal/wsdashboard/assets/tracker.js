@@ -88,7 +88,7 @@
 //                    body carries the class tk-paged and the host's CSS hides its
 //                    own conversation column and session drawer
 //   storagePrefix    browser-storage key prefix for display state (view modes, drawer
-//                    height, recently-closed fold); default "ws.tracker."
+//                    height, recently-closed fold, tree folds); default "ws.tracker."
 //
 // The renderer creates its own nodes (tkdrawer, tkclip, tkbody, tkhandles, tkpage,
 // tkwin, tkdlg, tktoast, tktip, tkqs, ...); each root carries the class tk, which
@@ -203,6 +203,8 @@
     cmodes: {}, calMonth: {}, // store -> { card key -> view mode } (display state, stored); card or scope key -> calendar month
     pmodes: {}, closedOpen: {}, // store -> { scope -> view mode } and store -> "recently closed" expanded (display state, stored)
     panel: {},            // store -> { scope, modes: { scope -> view mode }, today: Today chip filter or null, q: search text, closedOpen: "recently closed" expanded, treeOpen: { parent id -> its "closed N" row expanded } } of the Items panel
+    tfold: {},            // "store|item id" -> 'o' | 'f': a context-tree node unfolded in full or folded (display state, stored; absent: the default, see ctxTree)
+    wfold: {},            // "store|item id" -> true | false: a node of the item window's subtree open or folded (page lifetime; absent: the default)
     focus: null,          // { ev: event id, flash: true until its first paint } the item window scrolls to and marks; null: nothing
     sel: null,            // the row selected by a tap: it shows the same actions and details a hover shows
     act: { family: 'all', member: 'all', flagged: false, conc: false },
@@ -561,12 +563,14 @@
       (r ? ' &middot; ' + wsT("js.tk.row.updated", esc(fmtTs(r.lastUpdate || r.ts))) : '') + (f ? ' &middot; ' + wsT("js.tk.row.nflagged", f) : '') + (it.concurrent ? ' &middot; ' + wsT("js.tk.row.nconcurrent", it.concurrent) : '') + '</span>');
     return d.map(function (x) { return '<div>' + x + '</div>'; }).join('');
   }
-  // o: { rk (unique row key in the drawer), item, rec?, more?, depth?, acts?, closed? (greyed: done, in the "recently closed" section or kept in the tree) }
+  // o: { rk (unique row key in the drawer), item, rec?, more?, depth?, acts?, closed? (greyed: done, in the "recently closed" section or kept in the tree),
+  //      ctx? (a context row of a tree: an ancestor of a match, not a match itself), tw? (the tree's fold control, in place of the depth arrow), tsub? (the folded "N subtasks" chip) }
+  // The row is the one row component every list and tree draws; data-item carries the item id.
   function irow(o) {
     var it = VS.items[o.item], r = o.rec, st = stKey(it, r), acts = o.acts != null ? o.acts : actsFor(it);
-    return '<div class="irow' + (ui.sel === o.rk ? ' sel' : '') + (o.closed ? ' closed' : '') + '" tabindex="0"' + attr('item', it.id) + attr('rk', o.rk) + (r ? attr('rec', r.id) : '') +
-      (o.depth ? ' style="--ind:' + o.depth + '"' : '') + '><div class="ir-main">' + (o.depth ? '<span class="ind">&#8627;</span>' : '') + stIcon(st) +
-      '<a class="title" href="#" tabindex="-1"' + attr('item', it.id) + '>' + esc(it.title) + '</a>' + warnHtml(it) + dotHtml(it) + '<span class="grow"></span>' +
+    return '<div class="irow' + (ui.sel === o.rk ? ' sel' : '') + (o.closed ? ' closed' : '') + (o.ctx ? ' ctx' : '') + '" tabindex="0"' + attr('item', it.id) + attr('rk', o.rk) + (r ? attr('rec', r.id) : '') +
+      (o.depth ? ' style="--ind:' + o.depth + '"' : '') + '><div class="ir-main">' + (o.tw != null ? o.tw : o.depth ? '<span class="ind">&#8627;</span>' : '') + stIcon(st) +
+      '<a class="title" href="#" tabindex="-1"' + attr('item', it.id) + '>' + esc(it.title) + '</a>' + (o.tsub || '') + warnHtml(it) + dotHtml(it) + '<span class="grow"></span>' +
       (acts ? '<span class="ir-acts">' + acts + '</span>' : '') + whoHtml(it) + priHtml(it) + dueHtml(it, st) + '</div>' +
       '<div class="ir-more">' + detailsHtml(it, r, o.more) + '</div></div>';
   }
@@ -765,13 +769,87 @@
       (on ? '<div class="pc-rows">' + (rows || '<p class="muted">' + wsT("js.tk.closed.none") + '</p>') + '</div>' : '') + '</section>';
   }
 
+  // Context trees: every scope list (and each sub-section of one) draws its matching rows as
+  // a tree. Each match's ancestors stand above it as greyed context rows (not matches: the
+  // scope counts leave them out, a click opens the item); a context node's children that are
+  // in no match's chain fold into one "… N more" row; a match's own children show folded
+  // ("N subtasks"). The tree is the matches plus their ancestors (the spine). A node is in one
+  // of three fold states, kept per device in browser storage by store + item id (ui.tfold):
+  //   default  the spine children show; the others are the "… N more" row, or, when no
+  //            spine child shows, the folded "N subtasks" chip;
+  //   'o'      every child shows;
+  //   'f'      no child shows.
+  // The "all" tree passes opt.rest, which draws a node's non-spine children (its closed units)
+  // as the "closed N" row instead; there a node toggles between the default and 'f' only.
+  // The kids of a node are its non-hidden children (opt.kids replaces that), in item order.
+  function kidsShown(id) { var it = VS.items[id]; return it ? it.children.filter(function (k) { return VS.items[k] && !VS.items[k].hidden; }) : []; }
+  function foldOf(id) { return ui.tfold[ui.store + '|' + id] || ''; }
+  // rows: the scope's matches in its own order, each an irow option object ({ rk, item, rec?, more?, closed? }).
+  // Returns the entries in display order: { k: 'node', id, depth, rows (the node's matches; none for a context
+  // row), n (children it can show), open (they show: the fold control reads ▾), to (the fold state a click on
+  // the control sets) }, { k: 'more', id, depth, n } (the "… N more" row), { k: 'html', html } (opt.rest's).
+  // Roots are ordered by their first match in `rows`, children by item order.
+  function ctxTree(rows, opt) {
+    opt = opt || {};
+    var kidsOf = opt.kids || kidsShown, byItem = {}, rank = {}, pos = {}, spine = {}, out = [];
+    VS.itemOrder.forEach(function (id, i) { pos[id] = i; });
+    rows.forEach(function (r, i) {
+      (byItem[r.item] = byItem[r.item] || []).push(r);
+      for (var cur = r.item, n = 0; cur && VS.items[cur] && n < 50; cur = VS.items[cur].parent, n++) if (!(cur in rank)) rank[cur] = i;
+    });
+    function inItemOrder(a, b) { return (pos[a] || 0) - (pos[b] || 0); }
+    Object.keys(rank).forEach(function (id) { var p = VS.items[id].parent; if (p && p in rank) (spine[p] = spine[p] || []).push(id); });
+    function walk(id, depth) {
+      var S = (spine[id] || []).sort(inItemOrder), U = kidsOf(id).filter(function (k) { return !(k in rank); }), f = foldOf(id);
+      var n = S.length + U.length, open = n > 0 && f !== 'f' && (f === 'o' || !!S.length || !!opt.rest);
+      out.push({ k: 'node', id: id, depth: depth, rows: byItem[id] || [], n: n, open: open, to: open ? 'f' : opt.rest ? '' : 'o' });
+      if (!open) return;
+      (f === 'o' && !opt.rest ? S.concat(U).sort(inItemOrder) : S).forEach(function (k) { walk(k, depth + 1); });
+      if (U.length && (opt.rest || f !== 'o')) out.push(opt.rest ? { k: 'html', html: opt.rest(id, U, depth + 1) } : { k: 'more', id: id, depth: depth + 1, n: U.length });
+    }
+    Object.keys(rank).filter(function (id) { var p = VS.items[id].parent; return !(p && p in rank); })
+      .sort(function (a, b) { return rank[a] - rank[b] || inItemOrder(a, b); }).forEach(function (id) { walk(id, 0); });
+    return out;
+  }
+  // A node's fold control (`tw`, left of the status icon; a spacer on a node without children) and, while
+  // folded, its "N subtasks" chip after the title; both carry the same toggle. act: the data-act
+  // (tfold in the lists and the timeline, wfold in the item window); fk: the focus key prefix.
+  function foldCtl(e, act, fk) {
+    if (!e.n) return { tw: '<span class="tw"></span>', sub: '' };
+    var t = VS.items[e.id].title;
+    function b(cls, inner, tab) {
+      return '<button type="button" class="' + cls + '"' + attr('act', act) + attr('node', e.id) + attr('to', e.to) + attr('fk', cls + ':' + fk + e.id) +
+        ' aria-expanded="' + e.open + '" aria-label="' + esc(wsT(e.open ? "js.tk.tree.fold" : "js.tk.tree.unfold", t)) + '"' + tipAttr(wsT(e.open ? "js.tk.tree.fold" : "js.tk.tree.unfold", t)) + (tab ? '' : ' tabindex="-1"') + '>' + inner + '</button>';
+    }
+    return { tw: b('tw', '<svg class="i"><use href="#tki-chev"/></svg>', true), sub: e.open ? '' : b('tsub', esc(wsTn("js.tk.tree.subtasks", e.n))) };
+  }
+  function moreRow(e, fk) {
+    return '<button type="button" class="tmore" style="--ind:' + e.depth + '"' + attr('act', 'tfold') + attr('node', e.id) + attr('to', 'o') + attr('fk', 'tm:' + fk + e.id) +
+      tipAttr(wsT("js.tk.tree.more.tip", e.n, VS.items[e.id].title)) + '>' + esc(wsT("js.tk.tree.more", e.n)) + '</button>';
+  }
+  // A context tree as item rows. pre: the section's row-key prefix (context rows get pre + 'ctx:' + id).
+  // A tree with no nesting at all draws no fold column, so a flat list keeps its plain rows.
+  function treeHtml(ents, pre) {
+    var flat = ents.every(function (e) { return e.k === 'node' && !e.n && !e.depth; });
+    return ents.map(function (e) {
+      if (e.k === 'html') return e.html;
+      if (e.k === 'more') return moreRow(e, pre);
+      var c = flat ? { tw: null, sub: '' } : foldCtl(e, 'tfold', pre);
+      if (!e.rows.length) return irow({ rk: pre + 'ctx:' + e.id, item: e.id, depth: e.depth, ctx: true, acts: '', tw: c.tw, tsub: c.sub, more: wsT("js.tk.tree.ctx") });
+      return e.rows.map(function (r, i) {
+        return irow({ rk: r.rk, item: r.item, rec: r.rec, more: r.more, closed: r.closed, depth: e.depth, tw: flat ? null : i ? '<span class="tw"></span>' : c.tw, tsub: i ? '' : c.sub });
+      }).join('');
+    }).join('');
+  }
+  function treeRows(rows, pre) { return treeHtml(ctxTree(rows), pre); }
+
   function listMine() {
     var mine = VS.my.assignments.map(A).filter(keepRec), open = mine.filter(function (r) { return r.status !== 'done'; }), done = mine.filter(function (r) { return r.status === 'done'; });
     var created = VS.my.created.filter(keepItem);
     done.forEach(function (r) { addClosed(String(r.lastUpdate), 1, irow({ rk: 'mine:' + r.id, item: r.item, rec: r, closed: true })); });
     if (FILT && !mine.length && !created.length) return filterEmpty();
-    var h = open.length ? open.map(function (r) { return irow({ rk: 'mine:' + r.id, item: r.item, rec: r }); }).join('') : TF ? '' : SQ ? (created.length ? '' : '<p class="muted">' + wsT("js.tk.list.nomatch") + '</p>') : '<p class="muted">' + wsT("js.tk.list.mine.none") + '</p>';
-    if (created.length) h += sub(wsT("js.tk.list.mine.created"), created.length) + created.map(function (id) { return irow({ rk: 'mine:c:' + id, item: id }); }).join('');
+    var h = open.length ? treeRows(open.map(function (r) { return { rk: 'mine:' + r.id, item: r.item, rec: r }; }), 'mine:') : TF ? '' : SQ ? (created.length ? '' : '<p class="muted">' + wsT("js.tk.list.nomatch") + '</p>') : '<p class="muted">' + wsT("js.tk.list.mine.none") + '</p>';
+    if (created.length) h += sub(wsT("js.tk.list.mine.created"), created.length) + treeRows(created.map(function (id) { return { rk: 'mine:c:' + id, item: id }; }), 'mine:c:');
     return h;
   }
   function answerTxt(x) {
@@ -787,15 +865,16 @@
     function only(ids) { return ids.filter(function (id) { return keepRec(A(id)); }); }
     var pend = only(R.pending), answered = only(R.answered), sent = only(R.sent);
     if (FILT && !ans.length && !pend.length && !answered.length && !sent.length) return filterEmpty();
-    function rows(ids, pre, more) { return ids.map(function (id) { var r = A(id); return irow({ rk: pre + id, item: r.item, rec: r, more: more && more(r) }); }).join(''); }
-    if (ans.length) h += sub(wsT("js.tk.list.rcv.answers"), ans.length) + ans.map(function (x) { return irow({ rk: 'rcv:a:' + x.key, item: x.item, rec: A(x.assignment), more: answerTxt(x) }); }).join('');
+    // each sub-section draws its own tree
+    function rows(ids, pre, more) { return treeRows(ids.map(function (id) { var r = A(id); return { rk: pre + id, item: r.item, rec: r, more: more && more(r) }; }), pre); }
+    if (ans.length) h += sub(wsT("js.tk.list.rcv.answers"), ans.length) + treeRows(ans.map(function (x) { return { rk: 'rcv:a:' + x.key, item: x.item, rec: A(x.assignment), more: answerTxt(x) }; }), 'rcv:a:');
     if (pend.length || !FILT) h += sub(wsT("js.tk.today.pending.what"), pend.length) + (pend.length ? rows(pend, 'rcv:p:') : '<p class="muted">' + wsT("js.tk.list.rcv.none") + '</p>');
     if (answered.length) h += sub(wsT("js.tk.list.rcv.answered"), answered.length) + rows(answered, 'rcv:d:');
     if (sent.length) h += sub(wsT("js.tk.list.rcv.sent"), sent.length) + rows(sent, 'rcv:s:', function (r) { return wsT("js.tk.list.rcv.sentto", esc(nm(r.to))); });
     return h;
   }
   function listGiven() {
-    var v = VS.viewer.member, given = VS.my.given.filter(keepItem), h = '';
+    var v = VS.viewer.member, given = VS.my.given.filter(keepItem), open = [];
     if (!VS.my.given.length) return '<div class="empty">' + wsT("js.tk.list.given.never") + '</div>';
     if (!given.length) return filterEmpty();
     given.forEach(function (id) {
@@ -804,9 +883,9 @@
           (r.note ? ' &ldquo;' + esc(r.note) + '&rdquo;' : '');
       });
       if (VS.items[id].status === 'done') return addClosed(closeTs(VS.items[id]), 1, irow({ rk: 'given:' + id, item: id, more: lines.join('<br>'), closed: true }));
-      h += irow({ rk: 'given:' + id, item: id, more: lines.join('<br>') });
+      open.push({ rk: 'given:' + id, item: id, more: lines.join('<br>') });
     });
-    return h || '<p class="muted">' + wsT("js.tk.list.given.none") + '</p>';
+    return open.length ? treeRows(open, 'given:') : '<p class="muted">' + wsT("js.tk.list.given.none") + '</p>';
   }
   // My team as a group-by-person view: each group header carries that person's roll-up counts.
   // Under a Today filter a group with no matching row is left out.
@@ -823,11 +902,11 @@
       var g = '<div class="tg" style="--d:' + (p.depth - 1) + '"' + attr('person', p.id) + '><div class="tg-head"><i class="av">' + esc(initials(p.id)) + '</i><b>' + whoName(p.id) + '</b>' +
         '<span class="nid">' + esc(p.id) + ' L' + p.depth + (m.children.length ? wsT("js.tk.team.islead") : '') + '</span><span class="cnt">' + c.join(' &middot; ') + '</span><span class="grow"></span>' +
         '<span class="muted ts"' + tipAttr(wsT("js.tk.team.last.tip")) + '>' + esc(fmtTs(p.last)) + '</span></div>';
-      g += work.map(function (id) { var r = A(id); return irow({ rk: 'team:' + id, item: r.item, rec: r }); }).join('');
-      g += wait.map(function (id) {
+      // one tree per person
+      g += treeRows(work.map(function (id) { var r = A(id); return { rk: 'team:' + id, item: r.item, rec: r }; }).concat(wait.map(function (id) {
         var r = A(id);
-        return irow({ rk: 'team:w:' + id, item: r.item, rec: r, more: r.handoffOf ? wsT("js.tk.team.sent.handoff", esc(nm(p.id)), esc(nm(r.to))) : wsT("js.tk.team.sent", esc(nm(p.id)), esc(nm(r.to))) });
-      }).join('');
+        return { rk: 'team:w:' + id, item: r.item, rec: r, more: r.handoffOf ? wsT("js.tk.team.sent.handoff", esc(nm(p.id)), esc(nm(r.to))) : wsT("js.tk.team.sent", esc(nm(p.id)), esc(nm(r.to))) };
+      })), 'team:' + p.id + ':');
       return g + '</div>';
     }).join('');
     return h || (FILT && VS.my.team.length ? filterEmpty() : '<div class="empty">' + wsT("js.tk.team.nobody") + '</div>');
@@ -838,13 +917,14 @@
   // row under its parent (a click expands it); a closed parent with an open descendant stays in
   // the tree, greyed; a closed parent whose whole subtree is closed moves, as one unit, to the
   // "recently closed" section (the parent's own roll-up, done 3/5, still counts the children).
-  // While a search or the Today filter is on, the rows are the plain matches instead: the open
-  // and greyed ones in tree order, the closed ones in the section, every age.
+  // While a search or the Today filter is on, the rows are the matches instead: the open and greyed
+  // ones as a context tree, the closed ones in the section, every age. Another status filter draws
+  // its matches as a context tree too.
   function listAll() {
     var bar = '<div class="toolbar">' + itemFilterBar() + '</div>';
     if (ui.status !== 'open') {
       var rows = allRows().filter(function (it) { return keepItem(it.id); });
-      return bar + (rows.length ? rows.map(function (it) { return irow({ rk: 'all:' + it.id, item: it.id, depth: it.depth }); }).join('') : FILT ? filterEmpty() : '<div class="empty">' + wsT("js.tk.list.all.nomatch") + '</div>');
+      return bar + (rows.length ? treeRows(rows.map(function (it) { return { rk: 'all:' + it.id, item: it.id }; }), 'all:') : FILT ? filterEmpty() : '<div class="empty">' + wsT("js.tk.list.all.nomatch") + '</div>');
     }
     var base = {}, order = [], kids = {}, openBelow = {};
     VS.itemOrder.forEach(function (id) { var it = VS.items[id]; if (!it.hidden && kindFilter(it)) { base[id] = it; order.push(id); } });
@@ -858,31 +938,27 @@
     function parentOf(id) { var par = base[id].parent; return par && base[par] ? par : null; }
     function size(id) { return 1 + kidsOf(id).reduce(function (a, k) { return a + size(k); }, 0); }
     function latest(id) { return kidsOf(id).reduce(function (a, k) { var t = latest(k); return t > a ? t : a; }, isClosed(id) ? closeTs(base[id]) : ''); }
-    function unitRows(id, off) {
-      return irow({ rk: 'all:' + id, item: id, depth: base[id].depth - off, closed: true }) + kidsOf(id).map(function (k) { return unitRows(k, off); }).join('');
+    function unitRows(id, depth) {
+      return irow({ rk: 'all:' + id, item: id, depth: depth, closed: true }) + kidsOf(id).map(function (k) { return unitRows(k, depth + 1); }).join('');
     }
     if (FILT) {
       var main = order.filter(function (id) { return inTree(id) && keepItem(id); }), shut = order.filter(function (id) { return isUnit(id) && keepItem(id); });
       shut.forEach(function (id) { addClosed(closeTs(base[id]), 1, irow({ rk: 'all:' + id, item: id, closed: true })); });
-      return bar + (main.length ? main.map(function (id) { return irow({ rk: 'all:' + id, item: id, depth: base[id].depth, closed: isClosed(id) }); }).join('') : shut.length ? '<p class="muted">' + wsT("js.tk.list.nomatch") + '</p>' : filterEmpty());
+      return bar + (main.length ? treeRows(main.map(function (id) { return { rk: 'all:' + id, item: id, closed: isClosed(id) }; }), 'all:') : shut.length ? '<p class="muted">' + wsT("js.tk.list.nomatch") + '</p>' : filterEmpty());
     }
-    function node(id) {
-      var it = base[id], h = irow({ rk: 'all:' + id, item: id, depth: it.depth, closed: isClosed(id) });
-      kidsOf(id).forEach(function (k) { if (inTree(k)) h += node(k); });
-      var cu = kidsOf(id).filter(isUnit);
-      if (cu.length) {
-        var on = !!panelState().treeOpen[id], n = cu.reduce(function (a, k) { return a + size(k); }, 0), r = it.rollup;
-        h += '<button type="button" class="csum' + (on ? ' open' : '') + '" style="--ind:' + (it.depth + 1) + '" aria-expanded="' + on + '"' + attr('act', 'tree-closed') + attr('parent', id) + attr('fk', 'csum:' + id) +
-          tipAttr(wsT(on ? "js.tk.list.csum.fold" : "js.tk.list.csum.show", it.title + (r.total ? ' ' + wsT("js.tk.list.csum.done", r.counts.done || 0, r.total) : ''))) + '><svg class="i"><use href="#tki-chev"/></svg>' + wsT("js.tk.closed") + ' <span class="subn">' + n + '</span></button>' +
-          (on ? cu.map(function (k) { return unitRows(k, 0); }).join('') : '');
-      }
-      return h;
+    // the tree's matches are the open items and the greyed closed parents; a node's closed units are its "closed N" row
+    function closedRow(id, cu, depth) {
+      var it = base[id], on = !!panelState().treeOpen[id], n = cu.reduce(function (a, k) { return a + size(k); }, 0), r = it.rollup;
+      return '<button type="button" class="csum' + (on ? ' open' : '') + '" style="--ind:' + depth + '" aria-expanded="' + on + '"' + attr('act', 'tree-closed') + attr('parent', id) + attr('fk', 'csum:' + id) +
+        tipAttr(wsT(on ? "js.tk.list.csum.fold" : "js.tk.list.csum.show", it.title + (r.total ? ' ' + wsT("js.tk.list.csum.done", r.counts.done || 0, r.total) : ''))) + '><svg class="i"><use href="#tki-chev"/></svg>' + wsT("js.tk.closed") + ' <span class="subn">' + n + '</span></button>' +
+        (on ? cu.map(function (k) { return unitRows(k, depth); }).join('') : '');
     }
-    var roots = order.filter(function (id) { return inTree(id) && !(parentOf(id) && inTree(parentOf(id))); });
+    var tree = order.filter(inTree).map(function (id) { return { rk: 'all:' + id, item: id, closed: isClosed(id) }; });
     order.forEach(function (id) {
-      if (isUnit(id) && !(parentOf(id) && (isUnit(parentOf(id)) || inTree(parentOf(id))))) addClosed(latest(id), size(id), unitRows(id, base[id].depth));
+      if (isUnit(id) && !(parentOf(id) && (isUnit(parentOf(id)) || inTree(parentOf(id))))) addClosed(latest(id), size(id), unitRows(id, 0));
     });
-    return bar + (roots.length ? roots.map(node).join('') : '<div class="empty">' + wsT("js.tk.list.all.none") + '</div>');
+    return bar + (tree.length ? treeHtml(ctxTree(tree, { kids: function (id) { return base[id] ? kidsOf(id).filter(function (k) { return inTree(k) || isUnit(k); }) : []; }, rest: closedRow }), 'all:') :
+      '<div class="empty">' + wsT("js.tk.list.all.none") + '</div>');
   }
   function scopeChip(s) {
     if (s === 'mine') return wsT("js.tk.team.open", VS.my.assignments.map(A).filter(function (r) { return r.status !== 'done'; }).length);
@@ -1112,24 +1188,48 @@
     });
   }
   function whoTag(x) { return x.who ? '<span class="muted">' + esc(x.who) + '</span>' : ''; }
-  // Due-date timeline: one bar per row, from the item's start (first doing, else
-  // creation) to its due day.
+  // Due-date timeline: the scope's dated rows as the same context tree the list draws (the
+  // fold state is shared with it). A row's bar runs from the item's start (first doing, else
+  // creation) to its due day. A node with children also draws a thin summary bar spanning the
+  // range of every dated item below it, whether they show or are folded away; a parent without
+  // a due date of its own (a context row, say) is placed by that summary bar alone.
   function ganttBody(key, rows) {
     var bar = key === 'all' ? itemFilterBar() : '';
     if (!rows.length) return '<div class="toolbar">' + bar + '</div><div class="empty">' + wsT("js.tk.gantt.empty") + '</div>';
-    var t0 = dayNum(today()), lo = t0, hi = t0;
-    rows.forEach(function (x) { var it = VS.items[x.item]; lo = Math.min(lo, dayNum(it.started || it.ts), dayNum(it.due)); hi = Math.max(hi, dayNum(it.due)); });
-    hi += 1;
-    var span = hi - lo, pct = function (d) { return ((d - lo) / span * 100).toFixed(2) + '%'; };
+    var ents = ctxTree(rows), below = {};
+    // [first day, day after the last] of an item's own bar, or null without a due date
+    function own(id) {
+      var it = VS.items[id];
+      if (!it.due || it.kind === 'topic') return null;
+      var e = dayNum(it.due) + 1;
+      return [Math.min(dayNum(it.started || it.ts), e - 1), e];
+    }
+    function join(a, b) { return !a ? b : !b ? a : [Math.min(a[0], b[0]), Math.max(a[1], b[1])]; }
+    function sub(id) { // the range of every dated item below id
+      if (!(id in below)) below[id] = kidsShown(id).reduce(function (r, k) { return join(join(r, own(k)), sub(k)); }, null);
+      return below[id];
+    }
+    var t0 = dayNum(today()), lo = t0, hi = t0 + 1;
+    ents.forEach(function (e) { var r = e.k === 'node' && join(own(e.id), sub(e.id)); if (r) { lo = Math.min(lo, r[0]); hi = Math.max(hi, r[1]); } });
+    var span = hi - lo, pct = function (d) { return ((d - lo) / span * 100).toFixed(2) + '%'; }, wid = function (r) { return (Math.max(1, r[1] - r[0]) / span * 100).toFixed(2) + '%'; };
     var axis = '';
     for (var d = lo; d < hi; d++) axis += '<span class="gtick' + (d === t0 ? ' now' : '') + '" style="left:' + pct(d) + '">' + (new Date(d * 86400000).getUTCDay() === 1 || d === lo ? esc(dayStr(d).slice(5)) : '') + '</span>';
     var h = '<div class="toolbar">' + bar + '<span class="muted">' + wsT("js.tk.gantt.hint", rows.length, esc(today())) + '</span></div>' +
       '<div class="gantt"><div class="grow-axis"><div class="glabel"></div><div class="gtrack axis">' + axis + '</div></div>';
-    h += rows.map(function (x) {
-      var it = VS.items[x.item], s = dayNum(it.started || it.ts), e = dayNum(it.due) + 1, over = it.due < today() && x.status !== 'done';
-      return '<div class="grow-row click' + (ENDED[x.status] ? ' ended' : '') + '"' + attr('item', it.id) + '><div class="glabel">' + x.chip + titleRef(it.id) + whoTag(x) + priHtml(it) + '</div>' +
-        '<div class="gtrack"><span class="gnow" style="left:' + pct(t0) + '"></span><span class="gbar st-' + esc(x.status) + (over ? ' over' : '') + '" style="left:' + pct(Math.min(s, e - 1)) + ';width:' + ((Math.max(1, e - Math.min(s, e - 1))) / span * 100).toFixed(2) + '%" title="' +
-        esc(wsT(it.started ? "js.tk.gantt.bar.started" : "js.tk.gantt.bar.created", String(it.started || it.ts).slice(0, 10), it.due)) + '">' + esc(it.due.slice(5)) + '</span></div></div>';
+    // x: the dueRows entry of a match, null for a context row; c: the fold control; sm: draw the summary bar
+    function row(e, x, c, sm) {
+      var it = VS.items[e.id], st = x ? x.status : stKey(it), r = own(e.id), s = sm && e.n ? sub(e.id) : null, over = it.due && it.due < today() && st !== 'done';
+      return '<div class="grow-row click' + (ENDED[st] ? ' ended' : '') + (x ? '' : ' ctx') + '"' + attr('item', it.id) + '><div class="glabel" style="--ind:' + e.depth + '">' + c.tw + (x ? x.chip : stIcon(st)) + titleRef(it.id) + c.sub + (x ? whoTag(x) : '') + priHtml(it) + '</div>' +
+        '<div class="gtrack"><span class="gnow" style="left:' + pct(t0) + '"></span>' +
+        (r ? '<span class="gbar st-' + esc(st) + (over ? ' over' : '') + '" style="left:' + pct(r[0]) + ';width:' + wid(r) + '" title="' +
+          esc(wsT(it.started ? "js.tk.gantt.bar.started" : "js.tk.gantt.bar.created", String(it.started || it.ts).slice(0, 10), it.due)) + '">' + esc(it.due.slice(5)) + '</span>' : '') +
+        (s ? '<span class="gsum" style="left:' + pct(s[0]) + ';width:' + wid(s) + '" title="' + esc(wsT("js.tk.gantt.sum", dayStr(s[0]), dayStr(s[1] - 1))) + '"></span>' : '') + '</div></div>';
+    }
+    h += ents.map(function (e) {
+      if (e.k === 'more') return '<div class="grow-row"><div class="glabel" style="--ind:' + e.depth + '">' + moreRow({ id: e.id, n: e.n, depth: 0 }, 'g:') + '</div><div class="gtrack"></div></div>';
+      var c = foldCtl(e, 'tfold', 'g:');
+      if (!e.rows.length) return row(e, null, c, true);
+      return e.rows.map(function (x, i) { return row(e, x, i ? { tw: '<span class="tw"></span>', sub: '' } : c, !i); }).join('');
     }).join('');
     return h + '</div>';
   }
@@ -1425,15 +1525,21 @@
       '<ul class="alist' + (open ? '' : ' folded') + '">' + list + '</ul>' +
       (hid > 0 ? '<div class="a-fold">' + btn('afold', open ? wsT("js.tk.asg.fewer") : wsT("js.tk.asg.more", hid), {}) + '</div>' : '') + '</section>';
   }
-  // Subtasks: the item's direct children, each opening that item. A child with children of its own
-  // carries its roll-up, so the depth shows without a nested list.
+  // Subtasks: the item's whole subtree, each row opening that item. Every node with children folds
+  // with ▸/▾: the first level (the item's children) starts open, so their children show, and deeper
+  // levels start folded. The fold state is the page's (ui.wfold), apart from the lists' stored one.
+  // A node with children also carries its roll-up.
   function subtasksHtml(it) {
     if (!it.children.length) return '';
-    return '<section class="iw-sub"><h3 class="prom">' + wsT("js.tk.win.subtasks") + ' <span class="cnt">' + it.children.length + '</span>' + rollupHtml(it) + '</h3><div class="srows">' + it.children.map(function (k) {
-      var ki = VS.items[k];
-      return '<div class="srow' + (ki.status === 'done' ? ' gone' : '') + '"' + attr('item', k) + '>' + stIcon(stKey(ki)) + titleRef(k) + (ki.hidden ? '<span class="chip hid">' + wsT("js.tk.chip.hidden") + '</span>' : '') +
-        '<span class="grow"></span>' + rollupHtml(ki) + whoHtml(ki) + '</div>';
-    }).join('') + '</div></section>';
+    function rows(id, depth) {
+      return VS.items[id].children.map(function (k) {
+        var ki = VS.items[k], key = ui.store + '|' + k, open = !!ki.children.length && (key in ui.wfold ? ui.wfold[key] : depth === 0);
+        var c = foldCtl({ id: k, n: ki.children.length, open: open, to: '' }, 'wfold', 'w:');
+        return '<div class="srow' + (ki.status === 'done' ? ' gone' : '') + '"' + attr('item', k) + ' style="--ind:' + depth + '">' + c.tw + stIcon(stKey(ki)) + titleRef(k) + c.sub + (ki.hidden ? '<span class="chip hid">' + wsT("js.tk.chip.hidden") + '</span>' : '') +
+          '<span class="grow"></span>' + rollupHtml(ki) + whoHtml(ki) + '</div>' + (open ? rows(k, depth + 1) : '');
+      }).join('');
+    }
+    return '<section class="iw-sub"><h3 class="prom">' + wsT("js.tk.win.subtasks") + ' <span class="cnt">' + it.children.length + '</span>' + rollupHtml(it) + '</h3><div class="srows">' + rows(it.id, 0) + '</div></section>';
   }
   function windowHtml(v, it) {
     var recs = it.assignments.map(A), mineR = recs.filter(function (r) { return r.to === v && r.state === 'live'; })[0];
@@ -2085,7 +2191,7 @@
     var scrolls = {}, fa = document.activeElement, focusRk = fa && fa.closest && body.contains(fa) && fa.closest('[data-rk]');
     focusRk = focusRk && focusRk.getAttribute('data-rk');
     var focusSearch = fa && fa.id === 'psearch' ? [fa.selectionStart, fa.selectionEnd] : null;
-    var focusFk = fa && fa.closest && body.contains(fa) && fa.closest('[data-fk]'); // the fold buttons keep keyboard focus across their re-render
+    var focusFk = fa && fa.closest && (body.contains(fa) || sb.contains(fa)) && fa.closest('[data-fk]'); // the fold buttons keep keyboard focus across their re-render
     focusFk = focusFk && focusFk.getAttribute('data-fk');
     Array.prototype.forEach.call(body.querySelectorAll('.card[id] > .cbody'), function (c) { scrolls[c.parentNode.id] = c.scrollTop; });
     hideTip();
@@ -2116,6 +2222,8 @@
         if (ui.focus.flash) { fx.classList.add('fx-flash'); fx.scrollIntoView({ block: 'center' }); }
       }
       if (ui.focus) ui.focus.flash = false;
+      var wf = focusFk && lastInput === 'key' && sb.querySelector('[data-fk="' + CSS.escape(focusFk) + '"]');
+      if (wf) wf.focus({ preventScroll: true });
     } else sb.innerHTML = '';
     ui.itemChanged = false; ui.clearDraft = false;
     if (X.rendered) X.rendered(name, VS, H);
@@ -2287,14 +2395,43 @@
   // the pointer or keyboard focus is on (the browser's title waits ~1s).
   var tipFor = null;
   function showTip(el) {
-    var t = $('tktip');
-    tipFor = el; t.textContent = el.getAttribute('data-tip'); t.hidden = false;
+    var t = $('tktip'), up = el.matches('.kcard, .citem') ? parentTip(el) : '';
+    tipFor = el; t.textContent = el.getAttribute('data-tip') + (up ? '\n' + up : ''); t.hidden = false;
     var r = el.getBoundingClientRect(), w = t.offsetWidth, h = t.offsetHeight;
     var x = Math.max(6, Math.min(r.left + r.width / 2 - w / 2, window.innerWidth - w - 6)), y = r.bottom + 6;
     if (y + h > window.innerHeight - 6) y = r.top - h - 6;
     t.style.left = Math.round(x) + 'px'; t.style.top = Math.round(y) + 'px';
   }
   function hideTip() { tipFor = null; $('tktip').hidden = true; }
+  // Kanban and calendar cards stay independent tasks. Hovering or focusing one marks its direct
+  // parent's and direct children's cards in the same view (lk-par, lk-kid); the card's tooltip
+  // names the parent when its card is not on screen (another month, or scrolled out of view).
+  var LK = null; // the card whose links are marked
+  function linkCards(box, id) { return id ? box.querySelectorAll('.kcard[data-item="' + CSS.escape(id) + '"], .citem[data-item="' + CSS.escape(id) + '"]') : []; }
+  function linkHi(card) {
+    if (card === LK) return;
+    if (LK && LK.isConnected) Array.prototype.forEach.call(LK.closest('.kanban, .cal').querySelectorAll('.lk-on, .lk-par, .lk-kid'), function (n) { n.classList.remove('lk-on', 'lk-par', 'lk-kid'); });
+    LK = card || null;
+    var box = card && card.closest('.kanban, .cal'), it = box && VS && VS.items[card.getAttribute('data-item')];
+    if (!it) return;
+    card.classList.add('lk-on');
+    Array.prototype.forEach.call(linkCards(box, it.parent), function (n) { n.classList.add('lk-par'); });
+    it.children.forEach(function (k) { Array.prototype.forEach.call(linkCards(box, k), function (n) { if (n !== card) n.classList.add('lk-kid'); }); });
+  }
+  function onScreen(n) {
+    var r = n.getBoundingClientRect(), v = { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight };
+    for (var p = n.parentElement; p && !p.classList.contains('card'); p = p.parentElement) {
+      if (getComputedStyle(p).overflow === 'visible') continue;
+      var q = p.getBoundingClientRect();
+      v = { left: Math.max(v.left, q.left), top: Math.max(v.top, q.top), right: Math.min(v.right, q.right), bottom: Math.min(v.bottom, q.bottom) };
+    }
+    return r.right > v.left && r.left < v.right && r.bottom > v.top && r.top < v.bottom;
+  }
+  function parentTip(card) {
+    var box = card.closest('.kanban, .cal'), it = box && VS && VS.items[card.getAttribute('data-item')], par = it && VS.items[it.parent];
+    if (!par || Array.prototype.some.call(linkCards(box, par.id), onScreen)) return '';
+    return wsT("js.tk.link.parent", par.title);
+  }
   // A row's detail overlay (the quick preview; the item window holds the full view) is
   // fixed-positioned so a short, content-height card does not clip it: below the row, or
   // above when below would leave the open drawer and above has more room.
@@ -2315,7 +2452,7 @@
 
   // ------------------------------------------------------------- display state
 
-  // Per-card view modes, the drawer height, and the recently-closed fold persist under
+  // Per-card view modes, the drawer height, the recently-closed fold, and the tree folds persist under
   // opts.storagePrefix; everything else lasts the page. Storage may throw (a locked-down
   // browser): then the values last the page.
   function dsLoad(k) {
@@ -2426,6 +2563,8 @@
         else if (k === 'pmode') { panelState().modes[scopeOf()] = a.getAttribute('data-mode'); dsSave('panel.modes', ui.pmodes); render(); }
         else if (k === 'closed-toggle') { var cps = panelState(); cps.closedOpen = !cps.closedOpen; ui.closedOpen[ui.store] = cps.closedOpen; dsSave('closed', ui.closedOpen); render(); }
         else if (k === 'tree-closed') { var to = panelState().treeOpen, pid = a.getAttribute('data-parent'); to[pid] = !to[pid]; render(); }
+        else if (k === 'tfold') { var fk = ui.store + '|' + a.getAttribute('data-node'), fto = a.getAttribute('data-to'); if (fto) ui.tfold[fk] = fto; else delete ui.tfold[fk]; dsSave('tree.fold', ui.tfold); render(); }
+        else if (k === 'wfold') { ui.wfold[ui.store + '|' + a.getAttribute('data-node')] = a.getAttribute('aria-expanded') !== 'true'; render(); }
         else if (k === 'psearch-clear') { panelState().q = ''; render(); if ($('psearch')) $('psearch').focus(); }
         else if (k === 'cmode') { (ui.cmodes[ui.store] = ui.cmodes[ui.store] || {})[a.getAttribute('data-card')] = a.getAttribute('data-mode'); dsSave('card.modes', ui.cmodes); render(); }
         else if (k === 'cal') { ui.calMonth[a.getAttribute('data-card')] = a.getAttribute('data-month'); render(); }
@@ -2530,11 +2669,13 @@
       if (tt && tt !== tipFor) showTip(tt); else if (!tt && tipFor) hideTip();
       var row = own(e.target) && e.target.closest('.irow');
       if (row && !row.contains(e.relatedTarget)) placeMore(row);
+      linkHi(own(e.target) && e.target.closest('.kcard, .citem'));
     });
     document.addEventListener('focusin', function (e) {
-      var row = own(e.target) && e.target.closest('.irow');
+      var row = own(e.target) && e.target.closest('.irow'), card = own(e.target) && e.target.closest('.kcard, .citem');
       if (row) placeMore(row);
-      if (own(e.target) && e.target.matches('button[data-tip]')) showTip(e.target); else if (tipFor) hideTip();
+      linkHi(card);
+      if (own(e.target) && e.target.matches('button[data-tip]')) showTip(e.target); else if (card) showTip(card); else if (tipFor) hideTip();
     });
     document.addEventListener('scroll', function () { if (tipFor) hideTip(); placeShownMore(); }, true);
     document.addEventListener('mouseout', function (e) { if (!e.relatedTarget && tipFor) hideTip(); });
@@ -2554,6 +2695,12 @@
       if (e.key === 'Escape' && e.target.id === 'psearch' && e.target.value && own(e.target)) { e.preventDefault(); panelState().q = ''; render(); if ($('psearch')) $('psearch').focus(); return; }
       // keyboard: a focused row shows its actions and details; Enter opens its item window
       if (e.key === 'Enter' && e.target.classList && e.target.classList.contains('irow') && own(e.target)) { e.preventDefault(); showItem(e.target.getAttribute('data-item')); return; }
+      // ArrowRight unfolds a focused tree row, ArrowLeft folds it
+      if ((e.key === 'ArrowRight' || e.key === 'ArrowLeft') && e.target.classList && e.target.classList.contains('irow') && own(e.target)) {
+        var tw = e.target.querySelector(':scope > .ir-main > .tw[data-act]');
+        if (tw && (tw.getAttribute('aria-expanded') === 'true') === (e.key === 'ArrowLeft')) { e.preventDefault(); tw.click(); }
+        return;
+      }
       // a host that handled this Esc itself (its own menu, say) marks it defaultPrevented
       if (e.key !== 'Escape' || e.defaultPrevented || $('tkdlg').open) return;
       if (ui.win) closeItemWindow(); else if (ui.open) collapse();
@@ -2571,7 +2718,7 @@
     if (api) return api;
     AD = adapter; CAPS = adapter.caps || {}; X = adapter.ext || {}; O = opts || {};
     PFX = O.storagePrefix || 'ws.tracker.';
-    ui.drh = dsLoad('drawer.h'); ui.cmodes = dsLoad('card.modes'); ui.pmodes = dsLoad('panel.modes'); ui.closedOpen = dsLoad('closed');
+    ui.drh = dsLoad('drawer.h'); ui.cmodes = dsLoad('card.modes'); ui.pmodes = dsLoad('panel.modes'); ui.closedOpen = dsLoad('closed'); ui.tfold = dsLoad('tree.fold');
     mergeTabs();
     H = { esc: esc, attr: attr, btn: btn, card: card, fld: fld, fmtTs: fmtTs, fmtSize: fmtSize, nm: nm, nmo: nmo, memberOpts: memberOpts,
       profileFields: profileFields, profileText: profileText, asciiId: asciiId, crefHtml: crefHtml,
