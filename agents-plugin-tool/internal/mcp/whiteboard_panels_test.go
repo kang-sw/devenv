@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wsdoc"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
 )
@@ -257,6 +258,89 @@ func TestWhiteboardEmbedTodoPanelShowsUnfinished(t *testing.T) {
 	}
 	if strings.Contains(embed, "folded") {
 		t.Fatalf("embed todo panel must not fold done rows: %s", embed)
+	}
+}
+
+// agendaPanelHTML returns the agenda panel of a page up to the next panel or
+// the panel column's end: its tree nests details, which panelHTML's
+// first-</details> match would cut short. "" when absent.
+func agendaPanelHTML(page string) string {
+	start := strings.Index(page, `<details class="panel" id="p-agenda"`)
+	if start < 0 {
+		return ""
+	}
+	rest := page[start+1:]
+	end := len(rest)
+	for _, stop := range []string{`<details class="panel"`, `</aside>`, `</div></body>`} {
+		if i := strings.Index(rest, stop); i >= 0 && i < end {
+			end = i
+		}
+	}
+	return page[start : start+1+end]
+}
+
+// TestWhiteboardAgendaPanelTree pins the agenda panel: the full page, on
+// disk and served, lays each blob out as a tree (root open, nested
+// containers folded, a long string folded to its whole value); the embed
+// keeps one summary row per key; agenda.clear drops the key from the
+// rewritten page and the served page alike, and clearing the last key drops
+// the panel.
+func TestWhiteboardAgendaPanelTree(t *testing.T) {
+	f := newWhiteboardFixture(t)
+	src := dashboardPageSource(t, nil)
+	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
+	served := func() string {
+		page := readPageOK(t, src, reg)
+		return string(page.Board.Panels)
+	}
+	long := strings.Repeat("long text ", 10)
+	f.call(t, "agenda.set", map[string]any{"key": "round2", "value": map[string]any{"notes": "masonry memo"}})
+	f.call(t, "agenda.set", map[string]any{"key": "overnight", "value": map[string]any{
+		"run":   map[string]any{"branch": "delegate/x", "phases": []any{map[string]any{"n": 1, "done": true}}},
+		"story": long,
+		"flaky": []any{},
+	}})
+	embed := agendaPanelHTML(readPage(t, filepath.Join(f.root, resultLine(t, f.update(t, ``), "embed: "))))
+	if got := panelRows(embed); strings.Join(got, "\n") != "overnight | {flaky, run, story}\nround2 | {notes}" {
+		t.Fatalf("embed agenda rows = %q\n%s", got, embed)
+	}
+	if strings.Contains(embed, `class="tree"`) || strings.Contains(embed, "masonry memo") {
+		t.Fatalf("the embed must stay compact: %s", embed)
+	}
+	for name, page := range map[string]string{"disk": agendaPanelHTML(f.fullPage(t)), "served": served()} {
+		for _, want := range []string{
+			`<details class="tnode" data-key="agenda/overnight" open>`,
+			`<details class="tnode" data-key="agenda/overnight/run"><summary><span class="tk">run</span><span class="tsum">{branch, phases}</span>`,
+			`<details class="tnode" data-key="agenda/overnight/run/phases">`,
+			`<details class="tnode tlong" data-key="agenda/overnight/story">`,
+			`<span class="tk">flaky</span><span class="tv arr">[]</span>`,
+			`<details class="tnode" data-key="agenda/round2" open>`,
+			`<span class="tk">notes</span><span class="tv str">masonry memo</span>`,
+		} {
+			if !strings.Contains(page, want) {
+				t.Errorf("%s agenda panel lacks %s\n%s", name, want, page)
+			}
+		}
+		if strings.Index(page, "agenda/overnight") > strings.Index(page, "agenda/round2") {
+			t.Errorf("%s agenda panel must list keys in order", name)
+		}
+	}
+
+	if resp := f.call(t, "agenda.clear", map[string]any{"key": "round2"}); isToolError(resp) {
+		t.Fatalf("agenda.clear: %s", resp)
+	}
+	for name, page := range map[string]string{"disk": agendaPanelHTML(f.fullPage(t)), "served": served()} {
+		if strings.Contains(page, "round2") || !strings.Contains(page, "agenda/overnight") || !strings.Contains(page, `<span class="chip">1</span>`) {
+			t.Errorf("%s agenda panel after clearing round2:\n%s", name, page)
+		}
+	}
+	if resp := f.call(t, "agenda.clear", map[string]any{"all": true}); isToolError(resp) {
+		t.Fatalf("agenda.clear all: %s", resp)
+	}
+	for name, page := range map[string]string{"disk": f.fullPage(t), "served": served()} {
+		if strings.Contains(page, `id="p-agenda"`) {
+			t.Errorf("%s page keeps an agenda panel with no agenda", name)
+		}
 	}
 }
 

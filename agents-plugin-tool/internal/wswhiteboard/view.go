@@ -191,6 +191,9 @@ type Panel struct {
 	// Lanes render before Rows as kanban lanes: side by side when the panel
 	// is wide enough, stacked otherwise. A lane's rows render as cards.
 	Lanes []PanelLane
+	// Tree renders after Rows as foldable nodes, one root each (see
+	// JSONTree).
+	Tree []TreeNode
 }
 
 // PanelLane is one kanban lane of a panel: a header and a vertical stack of
