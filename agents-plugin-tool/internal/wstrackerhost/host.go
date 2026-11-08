@@ -308,6 +308,12 @@ func (h *Host) Register(ctx context.Context, req RegisterRequest) (RegisterResul
 			l, err = wstracker.Register(ctx, opts, entry.Remote)
 		}
 		if err != nil {
+			// A failure after the push still leaves the remote holding it.
+			var held *wsledger.PushedError
+			if errors.As(err, &held) {
+				pushed = true
+				res.Creator = genesisLists(held.Genesis, req.Member)
+			}
 			return err
 		}
 		// wsledger.Register has pushed the genesis or the join by now.

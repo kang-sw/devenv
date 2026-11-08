@@ -262,3 +262,20 @@ func TestBodyWrittenInTheAnswerBatchRanksAsUnread(t *testing.T) {
 		t.Fatalf("a body written with the answer should outrank a settled topic: %v", topicNames(st))
 	}
 }
+
+// With no answer on the board (answered 0), a body that carries a change
+// sequence is unread, but a legacy body stored without one (Changed 0) is
+// read: it ranks with the expanded topics, below an unread body, and by
+// recency among them.
+func TestLegacyBodyWithoutAChangeIsReadOnAnUnansweredBoard(t *testing.T) {
+	st := &State{}
+	mustApply(t, st, topicXML("legacy", "old notes"))
+	mustApply(t, st, addXML(ClassTechnical, "withdrawn", "w"))
+	mustApply(t, st, `<wb:patch id="1" status="withdrawn"/>`)
+	mustApply(t, st, topicXML("fresh", "new notes"))
+	st.Topics[st.topicDocIndex("legacy")].Changed = 0
+	if st.LastAnswerSeq() != 0 {
+		t.Fatalf("precondition: the board has an answer at %d", st.LastAnswerSeq())
+	}
+	wantTopicOrder(t, st, "fresh", "withdrawn", "legacy")
+}

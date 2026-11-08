@@ -409,10 +409,12 @@ func BuildView(state *State, in ViewInput) View {
 	newestFirst := func(list []ItemView) {
 		sort.SliceStable(list, func(i, j int) bool { return settledOrder[list[i].ID] > settledOrder[list[j].ID] })
 	}
-	// A body changed since the user's latest answer is unread like an open
-	// acknowledgement; one written in the batch that records that answer
-	// (same sequence number) was never seen by the user, so it counts: any answer on the board counts as the user having
-	// seen it, so the topic settles back without a dedicated confirm.
+	// A body changed since the user's latest answer is unread and ranks like
+	// an open acknowledgement. Any answer on the board counts as the user
+	// having seen it, so the topic settles back without a dedicated confirm.
+	// A body written in the batch that records that answer (the same
+	// sequence number) was never seen, so it stays unread. A body with no
+	// change sequence (Changed 0, stored before bodies carried one) is read.
 	answered := state.LastAnswerSeq()
 	docChanged := map[string]int{}
 	for _, doc := range state.Topics {
@@ -437,7 +439,7 @@ func BuildView(state *State, in ViewInput) View {
 	}
 	rank := func(t *TopicView) int {
 		r := visible(t)
-		if r > 2 && t.Doc != "" && !t.Closed && docChanged[t.Name] >= answered {
+		if r > 2 && t.Doc != "" && !t.Closed && docChanged[t.Name] > 0 && docChanged[t.Name] >= answered {
 			return 2
 		}
 		return r

@@ -73,6 +73,27 @@ func topicMarks(t *testing.T, st *State) []BlockMark {
 	return topicEntry(t, st, "t").Marks
 }
 
+// Edits in one batch that bring a body back to the one the batch began with
+// change nothing: the topic keeps that body's Changed and marks, so it does
+// not turn new or unread.
+func TestBatchRestoringItsStartBodyIsNoChange(t *testing.T) {
+	st := &State{}
+	mustApply(t, st, topicXML("t", "one\n\ntwo"))
+	mustApply(t, st, topicXML("t", "one\n\ntwo\n\nthree"))
+	before := topicEntry(t, st, "t")
+	mustApply(t, st, `<wb:floor id="1"/>`) // an update that touches nothing else
+	mustApply(t, st, `<wb:topic name="t"><wb:edit><wb:old>two</wb:old><wb:new>TWO</wb:new></wb:edit></wb:topic>`+"\n"+
+		`<wb:topic name="t"><wb:edit><wb:old>TWO</wb:old><wb:new>two</wb:new></wb:edit></wb:topic>`)
+	if got := topicEntry(t, st, "t"); got.Changed != before.Changed || !reflect.DeepEqual(got.Marks, before.Marks) || got.Body != before.Body {
+		t.Fatalf("a restoring batch left %+v, was %+v", got, before)
+	}
+	// A body cleared and set back in one batch is no change either.
+	mustApply(t, st, `<wb:topic name="t"><wb:body></wb:body></wb:topic>`+"\n"+topicXML("t", "one\n\ntwo\n\nthree"))
+	if got := topicEntry(t, st, "t"); got.Changed != before.Changed || !reflect.DeepEqual(got.Marks, before.Marks) {
+		t.Fatalf("a clear-and-restore batch left %+v, was %+v", got, before)
+	}
+}
+
 func TestTopicMarksFollowOnlyBodyEdits(t *testing.T) {
 	st := &State{}
 	mustApply(t, st, topicXML("t", "one\n\ntwo"))

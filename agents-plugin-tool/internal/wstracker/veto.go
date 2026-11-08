@@ -73,9 +73,25 @@ func Join(ctx context.Context, opts wsledger.Options) (*wsledger.Ledger, error) 
 }
 
 // Register creates or joins the store at url (wsledger.Register) and
-// returns it reopened with the Veto hook installed, as Open does.
+// returns it reopened with the Veto hook installed, as Open does. A failure
+// of the reopen comes after wsledger.Register pushed, so it is a
+// *wsledger.PushedError too.
 func Register(ctx context.Context, opts wsledger.Options, url string) (*wsledger.Ledger, error) {
-	return withVeto(ctx, opts, func(o wsledger.Options) (*wsledger.Ledger, error) { return wsledger.Register(ctx, o, url) })
+	var genesis json.RawMessage
+	l, err := withVeto(ctx, opts, func(o wsledger.Options) (*wsledger.Ledger, error) {
+		l, err := wsledger.Register(ctx, o, url)
+		if err == nil {
+			genesis = l.Identity().Genesis
+		}
+		return l, err
+	})
+	if err != nil && genesis != nil {
+		var pushed *wsledger.PushedError
+		if !errors.As(err, &pushed) {
+			err = &wsledger.PushedError{Err: err, Genesis: genesis}
+		}
+	}
+	return l, err
 }
 
 // withVeto runs first (Open, or a constructor that writes no removal)
