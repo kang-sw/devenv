@@ -1,0 +1,223 @@
+{
+ "name": "mentions-attachments",
+ "comment": "(335) (338) mentions and attachments ride with the body write that wins: concurrent body edits from two clones keep the winner's lists, a comment edit replaces them, and an admin lowers attachments.max_bytes from the genesis value.",
+ "viewers": [
+  "ada.pc",
+  "maya.lap"
+ ],
+ "now": "2026-11-02T09:00:00Z",
+ "genesis": {
+  "admins": [
+   "ada",
+   "bo"
+  ],
+  "members": [
+   {
+    "id": "ada",
+    "name": "Ada",
+    "keys": [
+     "ada-k1"
+    ],
+    "leads": []
+   },
+   {
+    "id": "maya",
+    "name": "Maya",
+    "keys": [
+     "maya-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "raj",
+    "name": "Raj",
+    "keys": [
+     "raj-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "bo",
+    "name": "Bo",
+    "keys": [
+     "bo-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "lena",
+    "name": "Lena",
+    "keys": [
+     "lena-k1"
+    ],
+    "leads": [
+     "maya"
+    ]
+   },
+   {
+    "id": "omar",
+    "name": "Omar",
+    "keys": [
+     "omar-k1"
+    ],
+    "leads": [
+     "maya"
+    ]
+   },
+   {
+    "id": "sven",
+    "name": "Sven",
+    "keys": [
+     "sven-k1"
+    ],
+    "leads": [
+     "raj"
+    ]
+   }
+  ],
+  "attachments": {
+   "max_bytes": 5000
+  }
+ },
+ "commits": {
+  "maya.pc": [
+   {
+    "ts": "2026-11-01T09:00:00Z",
+    "seen": {},
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "topic",
+       "title": "Design",
+       "body": "draft @lena",
+       "mentions": [
+        "lena"
+       ],
+       "attachments": [
+        {
+         "oid": "1111111111111111111111111111111111111111111111111111111111111111",
+         "name": "v1.png",
+         "size": 4000,
+         "mime": "image/png"
+        }
+       ]
+      }
+     ],
+     [
+      "comment.add",
+      {
+       "item": "maya.pc#1",
+       "body": "see @omar",
+       "mentions": [
+        "omar"
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T11:00:00Z",
+    "seen": {
+     "ada.pc": 1
+    },
+    "events": [
+     [
+      "item.edit",
+      {
+       "item": "maya.pc#1",
+       "body": "v2 @raj",
+       "mentions": [
+        "raj"
+       ],
+       "attachments": [
+        {
+         "oid": "2222222222222222222222222222222222222222222222222222222222222222",
+         "name": "v2.png",
+         "size": 4100,
+         "mime": "image/png"
+        }
+       ]
+      }
+     ],
+     [
+      "comment.edit",
+      {
+       "comment": "maya.pc#2",
+       "body": "see @sven instead",
+       "mentions": [
+        "sven"
+       ]
+      }
+     ]
+    ]
+   }
+  ],
+  "maya.lap": [
+   {
+    "ts": "2026-11-01T12:00:00Z",
+    "seen": {
+     "maya.pc": 2
+    },
+    "events": [
+     [
+      "item.edit",
+      {
+       "item": "maya.pc#1",
+       "body": "v2 from the laptop, no mentions"
+      }
+     ]
+    ]
+   }
+  ],
+  "ada.pc": [
+   {
+    "ts": "2026-11-01T10:00:00Z",
+    "seen": {
+     "maya.pc": 2
+    },
+    "events": [
+     [
+      "roles.set_attachment_limit",
+      {
+       "max_bytes": 4200
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T13:00:00Z",
+    "seen": {
+     "maya.pc": 4,
+     "maya.lap": 1
+    },
+    "events": [
+     [
+      "comment.add",
+      {
+       "item": "maya.pc#1",
+       "body": "ok @maya",
+       "mentions": [
+        "maya"
+       ],
+       "attachments": [
+        {
+         "oid": "3333333333333333333333333333333333333333333333333333333333333333",
+         "name": "notes.txt",
+         "size": 4200,
+         "mime": "text/plain"
+        }
+       ]
+      }
+     ]
+    ]
+   }
+  ]
+ }
+}

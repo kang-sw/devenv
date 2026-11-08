@@ -23,6 +23,9 @@ const DefaultStaleDays = 3
 // defaultPriority applies when genesis has no priority (272 c, 277 c).
 var defaultPriority = priority{names: []string{"알림", "업무", "긴급"}, def: 1}
 
+// DefaultAttachmentMax is attachments.max_bytes when genesis sets none.
+const DefaultAttachmentMax = 10 << 20
+
 func contains(l []string, s string) bool {
 	for _, x := range l {
 		if x == s {
@@ -107,6 +110,14 @@ type item struct {
 	hidden               bool
 	edited               *node
 	node                 *node
+	mentions             []string
+	attachments          []attachment
+}
+
+// attachment is attachment metadata as folded; oid is the content's sha256.
+type attachment struct {
+	oid, name, mime string
+	size            int64
 }
 
 // rec is one assignment record: "<assign or handoff event id>><member>".
@@ -138,6 +149,8 @@ type comment struct {
 	ts                                     time.Time
 	hidden                                 bool
 	hiddenBy, edited                       *node
+	mentions                               []string
+	attachments                            []attachment
 }
 
 // head is one value of a multi-value register.
@@ -171,6 +184,7 @@ type state struct {
 	corder   []string
 	reg      map[string][]head
 	prio     priority
+	attMax   int // attachments.max_bytes
 }
 
 // genesis is the parsed roles.json the fold starts from.
@@ -179,12 +193,18 @@ type genesis struct {
 	members []*member
 	admins  []string
 	prio    priority
+	attMax  int
 }
 
 func parseGenesis(raw json.RawMessage) *genesis {
-	g := &genesis{raw: parsePayload(raw), prio: normPriority(nil)}
+	g := &genesis{raw: parsePayload(raw), prio: normPriority(nil), attMax: DefaultAttachmentMax}
 	if p, ok := g.raw["priority"].(map[string]any); ok {
 		g.prio = normPriority(obj(p))
+	}
+	if a, ok := g.raw["attachments"].(map[string]any); ok {
+		if v, ok := obj(a).intOf("max_bytes"); ok && v > 0 {
+			g.attMax = v
+		}
 	}
 	seen, used := map[string]bool{}, map[string]bool{}
 	ml, _ := g.raw.list("members")
@@ -285,6 +305,12 @@ func rolesProblems(r obj) []string {
 			out = append(out, "priority.names must be a non-empty list")
 		}
 	}
+	if a := r["attachments"]; truthy(a) {
+		ao, _ := a.(map[string]any)
+		if v, ok := obj(ao).intOf("max_bytes"); !ok || v <= 0 {
+			out = append(out, "attachments.max_bytes must be a positive integer")
+		}
+	}
 	return out
 }
 
@@ -294,7 +320,8 @@ func newState(g *genesis, hb func(x, y *node) bool, marks bool) *state {
 		members: map[string]*member{}, admins: map[string]bool{},
 		items: map[string]*item{}, asg: map[string]*rec{}, byItem: map[string][]*rec{},
 		comments: map[string]*comment{}, reg: map[string][]head{},
-		prio: priority{names: append([]string(nil), g.prio.names...), def: g.prio.def},
+		prio:   priority{names: append([]string(nil), g.prio.names...), def: g.prio.def},
+		attMax: g.attMax,
 	}
 	for _, m := range g.members {
 		cp := *m
@@ -641,6 +668,33 @@ func (s *state) write(key, label string, n *node, v any) any {
 	return w.v
 }
 
+// regWinner is the shown write of a register: mentions and attachments
+// follow the body write that won.
+func (s *state) regWinner(key string) *node { return winner(s.reg[key]).n }
+
+func mentionsOf(p obj) []string {
+	l, _ := p.list("mentions")
+	out := make([]string, 0, len(l))
+	for _, x := range l {
+		out = append(out, jsString(x))
+	}
+	return out
+}
+
+func attachmentsOf(p obj) []attachment {
+	l, _ := p.list("attachments")
+	out := make([]attachment, 0, len(l))
+	for _, x := range l {
+		a := obj(nil)
+		if m, ok := x.(map[string]any); ok {
+			a = obj(m)
+		}
+		size, _ := a["size"].(float64)
+		out = append(out, attachment{oid: a.str("oid"), name: a.str("name"), mime: a.str("mime"), size: int64(size)})
+	}
+	return out
+}
+
 // ---------------------------------------------------------------- endings
 
 // endRec ends a record. A pending handoff of it ends with it, as withdrawn
@@ -753,6 +807,7 @@ func (s *state) apply(n *node) {
 		if v, ok := p.intOf("priority"); ok {
 			it.priority = v
 		}
+		it.mentions, it.attachments = mentionsOf(p), attachmentsOf(p)
 		if s.items[n.id] == nil {
 			s.iorder = append(s.iorder, n.id)
 		}
@@ -794,6 +849,10 @@ func (s *state) apply(n *node) {
 				v, _ := p.intOf(f)
 				it.priority = s.write(key, label, n, v).(int)
 			}
+		}
+		if p.has("body") {
+			w := s.regWinner("it:" + it.id + ":body")
+			it.mentions, it.attachments = mentionsOf(w.p), attachmentsOf(w.p)
 		}
 		it.edited = n
 	case TypeItemHide:
@@ -927,7 +986,7 @@ func (s *state) apply(n *node) {
 		r.status, r.note, r.noteBy, r.last = w.status, w.note, w.by, w.n
 	case TypeCommentAdd:
 		c := &comment{id: n.id, alias: n.alias, item: p.str("item"), author: a, body: jsString(p["body"]),
-			replyTo: p.str("reply_to"), ts: n.ts}
+			replyTo: p.str("reply_to"), ts: n.ts, mentions: mentionsOf(p), attachments: attachmentsOf(p)}
 		if s.comments[n.id] == nil {
 			s.corder = append(s.corder, n.id)
 		}
@@ -936,6 +995,8 @@ func (s *state) apply(n *node) {
 		if c := s.comments[p.str("comment")]; c != nil {
 			c.body = s.write("cm:"+c.id, "text of comment "+c.alias, n, jsString(p["body"])).(string)
 			c.edited = n
+			w := s.regWinner("cm:" + c.id)
+			c.mentions, c.attachments = mentionsOf(w.p), attachmentsOf(w.p)
 		}
 	case TypeCommentHide:
 		if c := s.comments[p.str("comment")]; c != nil {
@@ -1009,6 +1070,9 @@ func (s *state) apply(n *node) {
 	case TypeSetPriorityLevels:
 		d, _ := n.p.intOf("default")
 		s.prio = s.write("prio", "priority levels", n, priority{names: p.strList("names"), def: d}).(priority)
+	case TypeSetAttachmentLimit:
+		v, _ := p.intOf("max_bytes")
+		s.attMax = s.write("att", "attachment limit", n, v).(int)
 	}
 	if strings.HasPrefix(n.typ, "roles.") || n.typ == TypeItemAssign || n.typ == wsledger.TypeMemberJoin {
 		s.refreshLive(n)

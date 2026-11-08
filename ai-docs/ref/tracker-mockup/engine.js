@@ -38,6 +38,11 @@
   // view may pass its own as deriveViewState(input, {staleDays}).
   var STALE_DAYS = 3;
   var DUE_RE = /^\d{4}-\d{2}-\d{2}$/;
+  // Attachments (337)-(339): only metadata is modelled. `oid` is the sha256 of the
+  // content; the store limit is the roles setting attachments.max_bytes (default
+  // 10 MiB), changed by roles.set_attachment_limit.
+  var DEFAULT_ATTACHMENT_MAX = 10 * 1024 * 1024;
+  var OID_RE = /^[0-9a-f]{64}$/;
 
   function clone(x) { return x === undefined ? undefined : JSON.parse(JSON.stringify(x)); }
   function alias(id) { return String(id).replace('#', '-'); }
@@ -88,6 +93,10 @@
     if (!p || !Array.isArray(p.names) || !p.names.length) return clone(DEFAULT_PRIORITY);
     var d = Number.isInteger(p.default) && p.default >= 0 && p.default < p.names.length ? p.default : Math.min(1, p.names.length - 1);
     return { names: p.names.slice(), default: d };
+  }
+  function normAttachments(a) {
+    var m = a && a.max_bytes;
+    return { max_bytes: Number.isInteger(m) && m > 0 ? m : DEFAULT_ATTACHMENT_MAX };
   }
   // A stored value outside the current range displays as the top level.
   function priorityLevel(prio, v) {
@@ -178,7 +187,8 @@
   // ------------------------------------------------------------------ state
 
   function genesis(roles) {
-    var S = { members: {}, admins: {}, items: {}, asg: {}, rules: {}, comments: {}, reg: {}, prio: normPriority(roles.priority) };
+    var S = { members: {}, admins: {}, items: {}, asg: {}, rules: {}, comments: {}, reg: {}, prio: normPriority(roles.priority),
+      att: normAttachments(roles.attachments) };
     (roles.members || []).forEach(function (m) {
       S.members[m.id] = { id: m.id, name: m.name || m.id, keys: (m.keys || []).slice(), revoked: {}, leads: (m.leads || []).slice(), removed: null, joined: null };
     });
@@ -234,6 +244,30 @@
     if (p.priority != null && !(Number.isInteger(p.priority) && p.priority >= 0 && p.priority < S.prio.names.length))
       rej('priority must be a level 0..' + (S.prio.names.length - 1) + ' (' + S.prio.names.join(' / ') + ')');
   }
+  // (335) `mentions` is an explicit list of member ids (the text keeps @name for
+  // display); (338) `attachments` is metadata only. Both ride with a body: item.create,
+  // item.edit with a body, comment.add, comment.edit.
+  function checkExtras(S, p) {
+    if (p.mentions != null) {
+      if (!Array.isArray(p.mentions)) rej('mentions must be a list of member ids');
+      p.mentions.forEach(function (x) {
+        if (typeof x !== 'string') rej('mentions must be a list of member ids');
+        if (!S.members[x]) rej('mentioned "' + x + '" is not a member');
+        if (S.members[x].removed) rej('mentioned ' + x + ' was removed (' + alias(S.members[x].removed) + ')');
+      });
+    }
+    if (p.attachments != null) {
+      if (!Array.isArray(p.attachments)) rej('attachments must be a list of {oid, name, size, mime}');
+      p.attachments.forEach(function (x) {
+        if (!x || typeof x !== 'object' || Array.isArray(x)) rej('attachments must be a list of {oid, name, size, mime}');
+        if (typeof x.oid !== 'string' || !OID_RE.test(x.oid)) rej('attachment oid must be the sha256 of the content (64 lowercase hex digits)');
+        if (typeof x.name !== 'string' || !x.name) rej('attachment name required');
+        if (!Number.isInteger(x.size) || x.size < 0) rej('attachment size must be a byte count');
+        if (typeof x.mime !== 'string' || !x.mime) rej('attachment mime type required');
+        if (x.size > S.att.max_bytes) rej('attachment "' + x.name + '" is ' + x.size + ' bytes, above the store limit of ' + S.att.max_bytes + ' bytes (attachments.max_bytes)');
+      });
+    }
+  }
   function notAssignee(S, it, who) {
     if (pendingRec(S, it.id, who)) return who + ' has not accepted the pending assignment on ' + it.alias;
     var gone = lastEndedRec(S, it.id, who);
@@ -265,6 +299,7 @@
         if (!p.title) rej('title required');
         if (KINDS.indexOf(p.kind) < 0) rej('kind must be task, todo or topic');
         checkFields(S, p);
+        checkExtras(S, p);
         if (p.parent) {
           var par = needItem(S, p.parent, 'parent');
           if (par.hidden) rej('parent ' + par.alias + ' is hidden');
@@ -279,6 +314,8 @@
         if (!ITEM_FIELDS.some(function (f) { return has(p, f); })) rej('nothing to edit (' + ITEM_FIELDS.join(', ') + ')');
         if (has(p, 'priority') && p.priority == null) rej('priority cannot be cleared; set a level');
         checkFields(S, p);
+        if ((p.mentions != null || p.attachments != null) && !has(p, 'body')) rej('mentions and attachments go with a body edit');
+        checkExtras(S, p);
         break;
 
       case 'item.hide': {
@@ -395,6 +432,7 @@
         it = needItem(S, p.item);
         if (it.hidden) rej('thread ' + it.alias + ' is hidden');
         if (!p.body) rej('body required');
+        checkExtras(S, p);
         if (p.reply_to) {
           q = S.comments[p.reply_to];
           if (!q) rej('reply_to ' + alias(p.reply_to) + ' is not a comment its author had seen');
@@ -410,6 +448,7 @@
         if (q.author !== a) rej('only the comment author (' + q.author + ') ' + (n.type === 'comment.edit' ? 'edits' : 'hides') + ' it');
         if (q.hidden) rej('comment is already hidden');
         if (n.type === 'comment.edit' && !p.body) rej('body required');
+        if (n.type === 'comment.edit') checkExtras(S, p);
         break;
 
       case 'roles.add_member': {
@@ -462,6 +501,10 @@
         if (p.default == null || !Number.isInteger(p.default) || p.default < 0 || p.default >= names.length) rej('default must be a level 0..' + (names.length - 1));
         break;
       }
+      case 'roles.set_attachment_limit':
+        needAdmin(S, a);
+        if (!Number.isInteger(p.max_bytes) || p.max_bytes <= 0) rej('max_bytes must be a positive integer (bytes)');
+        break;
 
       default: rej('unknown event type "' + n.type + '"');
     }
@@ -523,6 +566,13 @@
     }
     return w.v;
   }
+
+  function mentionsOf(p) { return Array.isArray(p.mentions) ? p.mentions.slice() : []; }
+  function attachmentsOf(p) {
+    return Array.isArray(p.attachments) ? p.attachments.map(function (x) { return { oid: x.oid, name: x.name, size: x.size, mime: x.mime }; }) : [];
+  }
+  // The register's shown write: mentions and attachments follow the body write that won.
+  function regWinner(S, key) { return winner(S.reg[key]).n; }
 
   function addRec(S, via, item, to, by, completion, extra) {
     var id = via.id + '>' + to;
@@ -604,13 +654,15 @@
       case 'item.create':
         S.items[n.id] = { id: n.id, alias: n.alias, kind: p.kind, title: p.title, body: p.body || '', project: p.project || '',
           due: p.due || null, priority: p.priority != null ? p.priority : S.prio.default,
-          parent: p.parent || null, author: a, ts: n.ts, hidden: false, edited: null, node: n };
+          parent: p.parent || null, author: a, ts: n.ts, hidden: false, edited: null, node: n,
+          mentions: mentionsOf(p), attachments: attachmentsOf(p) };
         break;
       case 'item.edit':
         it = S.items[p.item]; if (!it) break;
         ITEM_FIELDS.forEach(function (f) {
           if (has(p, f)) it[f] = write(S, 'it:' + it.id + ':' + f, f + ' of ' + it.alias, n, p[f] == null ? (f === 'due' ? null : '') : p[f], C);
         });
+        if (has(p, 'body')) { var bw = regWinner(S, 'it:' + it.id + ':body'); it.mentions = mentionsOf(bw.p); it.attachments = attachmentsOf(bw.p); }
         it.edited = n;
         break;
       case 'item.hide':
@@ -690,11 +742,12 @@
       }
       case 'comment.add':
         S.comments[n.id] = { id: n.id, alias: n.alias, item: p.item, author: a, body: p.body, reply_to: p.reply_to || null,
-          hidden: false, edited: null, ts: n.ts, node: n };
+          hidden: false, edited: null, ts: n.ts, node: n, mentions: mentionsOf(p), attachments: attachmentsOf(p) };
         break;
       case 'comment.edit':
         q = S.comments[p.comment]; if (!q) break;
         q.body = write(S, 'cm:' + q.id, 'text of comment ' + q.alias, n, p.body, C); q.edited = n;
+        var cw = regWinner(S, 'cm:' + q.id); q.mentions = mentionsOf(cw.p); q.attachments = attachmentsOf(cw.p);
         break;
       case 'comment.hide':
         q = S.comments[p.comment]; if (q) { q.hidden = true; q.hiddenBy = n; }
@@ -728,6 +781,9 @@
         break;
       case 'roles.set_priority_levels':
         S.prio = write(S, 'prio', 'priority levels', n, { names: (p.names || []).slice(), default: p.default }, C);
+        break;
+      case 'roles.set_attachment_limit':
+        S.att = { max_bytes: write(S, 'att', 'attachment limit', n, p.max_bytes, C) };
         break;
     }
     if (/^roles\./.test(n.type) || n.type === 'item.assign') refreshLive(S, n);
@@ -792,7 +848,7 @@
       log.splice(i, 0, n);
     });
 
-    return { S: S, members: S.members, admins: S.admins, items: S.items, asg: S.asg, rules: S.rules, comments: S.comments, prio: S.prio,
+    return { S: S, members: S.members, admins: S.admins, items: S.items, asg: S.asg, rules: S.rules, comments: S.comments, prio: S.prio, att: S.att,
       log: log, byId: byId, children: childrenMap(S.members), heads: headSeqs(nodes) };
   }
 
@@ -818,6 +874,7 @@
       if (!m.keys || !m.keys.length) out.push(m.id + ': no keys');
     });
     if (roles.priority && (!Array.isArray(roles.priority.names) || !roles.priority.names.length)) out.push('priority.names must be a non-empty list');
+    if (roles.attachments && !(Number.isInteger(roles.attachments.max_bytes) && roles.attachments.max_bytes > 0)) out.push('attachments.max_bytes must be a positive integer');
     return out;
   }
 
@@ -914,12 +971,13 @@
         assignments: recs.map(function (r) { return r.id; }),
         pending: recs.filter(function (r) { return r.state === 'pending'; }).map(function (r) { return r.id; }),
         thread: threads[it.id] || [], concurrent: (threads[it.id] || []).filter(function (id) { return g.byId[id].markers.length; }).length,
-        depth: chain.length - 1, chain: chain.slice().reverse() };
+        depth: chain.length - 1, chain: chain.slice().reverse(), mentions: it.mentions.slice(), attachments: clone(it.attachments) };
     });
     var comments = {};
     vals(S.comments).forEach(function (q) {
       comments[q.id] = { id: q.id, item: q.item, author: q.author, body: q.body, reply_to: q.reply_to, ts: q.ts,
-        edited: q.edited ? { id: q.edited.id, ts: q.edited.ts } : null, hidden: q.hiddenBy ? q.hiddenBy.id : null };
+        edited: q.edited ? { id: q.edited.id, ts: q.edited.ts } : null, hidden: q.hiddenBy ? q.hiddenBy.id : null,
+        mentions: q.mentions.slice(), attachments: clone(q.attachments) };
     });
     var itemOrder = [];
     (function walk(parent) {
@@ -1005,7 +1063,7 @@
     return {
       viewer: { member: v, stream: stream, name: me ? me.name : v, admin: !!S.admins[v], lead: me ? (me.leads || [])[0] || null : null,
         followers: (g.children[v] || []).slice(), reach: R, isMember: !!(me && !me.removed) },
-      priority: clone(S.prio),
+      priority: clone(S.prio), attachments: clone(S.att),
       members: members, admins: Object.keys(S.admins), rolesProblems: rolesProblems(input.roles),
       items: items, itemOrder: itemOrder, assignments: assignments, comments: comments, events: events, notices: notices,
       my: {
@@ -1172,6 +1230,7 @@
 
   window.TrackerEngine = {
     KINDS: KINDS, SETTABLE: SETTABLE, ORIGINS: ORIGINS, DEFAULT_PRIORITY: DEFAULT_PRIORITY, STALE_DAYS: STALE_DAYS,
+    DEFAULT_ATTACHMENT_MAX: DEFAULT_ATTACHMENT_MAX,
     alias: alias, memberOf: memberOf, cloneOf: cloneOf, refOf: refOf, reach: reach,
     openStore: openStore, deriveViewState: deriveViewState
   };
