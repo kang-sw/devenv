@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"html/template"
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wsledger"
 	"github.com/kang-sw/devenv/internal/wstracker"
 	"github.com/kang-sw/devenv/internal/wstrackerhost"
+	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
 
 // dashboardRegisterTimeout bounds a registration from the dashboard: the
@@ -61,7 +63,7 @@ func (t *dashboardTracker) View(ctx context.Context, id string) (wsdashboard.Tra
 		return wsdashboard.TrackerView{}, redacted(err)
 	}
 	v.Redact()
-	raw, err := json.Marshal(v)
+	raw, err := json.Marshal(dashboardView{StoreView: v, HTML: renderViewHTML(v)})
 	if err != nil {
 		return wsdashboard.TrackerView{}, err
 	}
@@ -70,6 +72,53 @@ func (t *dashboardTracker) View(ctx context.Context, id string) (wsdashboard.Tra
 		return wsdashboard.TrackerView{}, redacted(err)
 	}
 	return wsdashboard.TrackerView{View: raw, Seen: wsdashboard.TrackerSeen{Badge: seen.Badge, Read: seen.Read}}, nil
+}
+
+// dashboardView is the view JSON the tracker drawer reads: the store view
+// plus html, its item bodies and comment texts rendered as markdown. The
+// rendering is added here, not in wstrackerhost's view state, whose shape
+// the mockup README and wstracker's golden tests pin and which the MCP
+// tools also serve, and not in wsdashboard, which knows the view only as
+// JSON; the page falls back to the plain text when html is absent (the
+// mockup).
+type dashboardView struct {
+	*wstrackerhost.StoreView
+	HTML viewHTML `json:"html"`
+}
+
+// viewHTML maps an item id to its rendered body and a comment id to its
+// rendered text. An empty text, and a hidden comment's, has no entry.
+type viewHTML struct {
+	Items    map[string]template.HTML `json:"items"`
+	Comments map[string]template.HTML `json:"comments"`
+}
+
+func renderViewHTML(v *wstrackerhost.StoreView) viewHTML {
+	out := viewHTML{Items: map[string]template.HTML{}, Comments: map[string]template.HTML{}}
+	if v == nil || v.View == nil {
+		return out
+	}
+	for id, it := range v.Items {
+		if it.Body != "" {
+			out.Items[id] = trackerText(it.Body)
+		}
+	}
+	for id, c := range v.Comments {
+		if c.Body != "" && c.Hidden == nil {
+			out.Comments[id] = trackerText(c.Body)
+		}
+	}
+	return out
+}
+
+// trackerText renders tracker text as markdown. The text is any store
+// member's, so it renders under the zero TextTargets: a tag the author
+// types is escaped text, a file path or local image is path text, a
+// network image is its alt text, only an http(s) link (opening in a new
+// tab, rel="noopener noreferrer") or an in-page fragment is an anchor, and
+// item references and mermaid fences stay literal.
+func trackerText(s string) template.HTML {
+	return wswhiteboard.RenderText(s, wswhiteboard.TextTargets{})
 }
 
 func (t *dashboardTracker) Dispatch(ctx context.Context, id string, events []wsdashboard.TrackerEvent) ([]string, error) {
