@@ -578,7 +578,14 @@
       "registered_at": "2026-09-24T10:38:33Z"
     },
     "260901-research-enter-tool-direct-call-affordance-rename": {
-      "registered_at": "2026-09-24T10:38:33Z"
+      "registered_at": "2026-09-24T10:38:33Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "delegate/idea-triage-close",
+        "phase": "closed",
+        "touched_at": "2026-11-08T08:10:45Z"
+      }
     },
     "260903-feat-human-relay-interactive-gate": {
       "registered_at": "2026-09-24T10:38:33Z"
