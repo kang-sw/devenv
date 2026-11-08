@@ -110,7 +110,7 @@ build, no server, no dependencies.
 - **Store page** (371). The route `#/<storeId>` shows that store full-page, in
   place of the conversation and the drawer, with the same Items panel and tab
   pane layout (A, D, or narrow by width) filling the page. *Open as page* in
-  the drawer's header goes there; *Back to session*, clearing the hash, or the
+  the drawer's header goes there; *Back*, clearing the hash, or the
   browser back button returns to the session view, and reloading on the route
   restores the page. Entering the page fetches and shows what is new, like
   opening the drawer; leaving it pushes, like a collapse. An unknown store in

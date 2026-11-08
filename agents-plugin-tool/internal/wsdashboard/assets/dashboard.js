@@ -1618,9 +1618,10 @@
       });
     },
     saveProfile: function (p) { tkFetch("/tracker/profiles", p, function () {}); },
+    // done comes after the reload, so the store list already holds the new store.
     register: function (req, done) {
       tkFetch("/tracker/register", req, function (status, v) {
-        if (status === 200) tkReload(function () { done({ ok: true, store: v.store }); });
+        if (status === 200) tkReload(function () { done({ ok: true, store: v.store, creator: !!v.creator }); });
         else done({ ok: false, error: tkErrText(status, v) });
       });
     },

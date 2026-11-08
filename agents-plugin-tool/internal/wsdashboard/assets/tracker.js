@@ -39,10 +39,17 @@
 //   saveProfile(profile) saves one {org, family, given}
 //   register(req, done)  optional, for the "+ store" handle and its dialog, which
 //                        an adapter without it does not get: req = {id, label,
-//                        remote, member, profile: {org, family, given}};
-//                        done({ok: true, store: <id>} | {ok: false, error})
+//                        remote, member, profile: {org, family, given}} (remote may
+//                        be empty: a store on this machine only). It creates the
+//                        store (no remote, or an empty repository) or joins the one
+//                        the remote holds, and saves the profile as the one used
+//                        last. done({ok: true, store: <id>, creator: <bool>} | {ok:
+//                        false, error}); creator: this registration created the
+//                        store (false: it joined). done comes after stores() holds
+//                        the new store, which the renderer then opens
 //   hostError()       -> optional: the reason the store list could not be read (the
 //                        host is unavailable), or null; the "+ store" dialog shows it
+//                        and offers nothing else
 //   onChange(fn)         the renderer subscribes once; the adapter calls fn()
 //                        whenever stores(), a view(), or seen() changed
 //   caps                 {origin, attach, addMember} booleans, false when absent:
@@ -1535,6 +1542,7 @@
   // the dialog kinds a data-act opens (a host adds its own through ext.dialogs)
   var DIALOGS = { create: 1, edit: 1, assign: 1, split: 1, handoff: 1, status: 1, close: 1, note: 1, cedit: 1, profile: 1, admin: 1 };
   function dialogHtml(kind, d) {
+    if (kind === 'register') return formHtml(kind, d, registerT(d)); // needs no store
     var v = memberOf(viewerOf(ui.store)), it = d.item && VS.items[d.item];
     var mineOpen = VS.my.assignments.map(A).filter(function (r) { return r.status !== 'done'; }).map(function (r) { return [r.item, alias(r.item) + ' ' + VS.items[r.item].title]; });
     var T;
@@ -1623,8 +1631,76 @@
         T = [xd.title, xd.intro, xd.body || '', xd.submit];
       }
     }
+    return formHtml(kind, d, T);
+  }
+  // T = [title, intro, body, submit label]; no submit label leaves only a Close button.
+  function formHtml(kind, d, T) {
+    var btns = T[3] ? '<button type="button" class="btn" data-act="dlg-cancel">' + wsT("js.tk.dlg.cancel") + '</button><button type="submit" class="btn primary">' + T[3] + '</button>'
+      : '<button type="button" class="btn primary" data-act="dlg-cancel">' + wsT("js.tk.dlg.close") + '</button>';
     return '<form' + attr('kind', kind) + attr('fitem', d.item || '') + attr('fcid', d.cid || '') + '><h2>' + T[0] + '</h2><p>' + T[1] + '</p>' + T[2] +
-      '<div class="btns"><button type="button" class="btn" data-act="dlg-cancel">' + wsT("js.tk.dlg.cancel") + '</button><button type="submit" class="btn primary">' + T[3] + '</button></div></form>';
+      '<div class="btns">' + btns + '</div></form>';
+  }
+
+  // The register dialog ("+ store"): create a store (no remote, or an empty repository) or
+  // join the store a remote holds. d = {profiles: {last, profiles}} as adapter.profiles
+  // reads them, or {hostErr} when the host is unavailable (then it only says why). The
+  // member profile defaults to the saved one used last; the host saves what is submitted
+  // as the one used last (an edited profile becomes a new entry), so the dialog saves
+  // nothing itself. No lead field: a self-join cannot set relations.
+  var ID_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+  function registerT(d) {
+    if (d.hostErr) return [wsT("js.tk.dlg.reg.title"), wsT("js.tk.dlg.reg.unavailable"), '<div class="hint warn">' + esc(d.hostErr) + '</div>', null];
+    var ps = (d.profiles && d.profiles.profiles) || [], last = d.profiles && ps[d.profiles.last] ? d.profiles.last : -1;
+    var p0 = last >= 0 ? ps[last] : { org: '', family: '', given: '' };
+    var saved = '<select name="saved">' + ps.map(function (x, i) {
+      var t = profileText(x);
+      return '<option value="' + i + '" data-p="' + esc(JSON.stringify({ org: x.org || '', family: x.family || '', given: x.given || '' })) + '"' + (i === last ? ' selected' : '') + '>' + esc(i === last ? wsT("js.tk.dlg.reg.saved.last", t) : t) + '</option>';
+    }).join('') + '<option value=""' + (last < 0 ? ' selected' : '') + '>' + (ps.length ? wsT("js.tk.dlg.reg.saved.edited") : wsT("js.tk.dlg.reg.saved.none")) + '</option></select>';
+    return [wsT("js.tk.dlg.reg.title"), wsT("js.tk.dlg.reg.intro"),
+      '<div class="fld inline">' + fld(wsT("js.tk.dlg.reg.id"), '<input type="text" name="sid" autocomplete="off" spellcheck="false">') +
+        fld(wsT("js.tk.dlg.reg.label"), '<input type="text" name="label" autocomplete="off">') + '</div>' +
+      fld(wsT("js.tk.dlg.reg.remote"), '<input type="text" name="remote" autocomplete="off" spellcheck="false" placeholder="' + esc(wsT("js.tk.dlg.reg.remote.ph")) + '">') +
+      fld(wsT("js.tk.dlg.reg.saved"), saved) + profileFields(p0) +
+      fld(wsT("js.tk.dlg.reg.member"), '<input type="text" name="nid" data-auto="1" autocomplete="off" spellcheck="false" value="' + esc(asciiId(p0.given)) + '">') +
+      '<div class="hint" id="regmsg" role="status" hidden></div>',
+      wsT("js.tk.dlg.reg.submit")];
+  }
+  function openRegister() {
+    var he = AD.hostError && AD.hostError();
+    if (he) { openDialog('register', { hostErr: he }); return; }
+    if (!AD.profiles) { openDialog('register', {}); return; }
+    AD.profiles(function (p) { openDialog('register', { profiles: p }); });
+  }
+  function regMsg(form, text, warn) {
+    var m = form.querySelector('#regmsg');
+    m.textContent = text; m.hidden = !text; m.classList.toggle('warn', !!warn);
+  }
+  function submitRegister(form) {
+    var el = form.elements, bt = form.querySelector('button[type="submit"]');
+    if (!bt || bt.disabled) return;
+    function val(n) { return el[n] ? el[n].value.trim() : ''; }
+    var req = { id: val('sid'), label: val('label'), remote: val('remote'), member: val('nid'), profile: { org: val('org'), family: val('family'), given: val('given') } };
+    var bad = !ID_RE.test(req.id) ? ['sid', wsT("js.tk.dlg.reg.bad.id")] : req.id === 'keys' ? ['sid', wsT("js.tk.dlg.reg.bad.keys")]
+      : !req.profile.given ? ['given', wsT("js.tk.dlg.reg.bad.given")] : !ID_RE.test(req.member) ? ['nid', wsT("js.tk.dlg.reg.bad.member")] : null;
+    if (bad) { regMsg(form, bad[1], true); el[bad[0]].focus(); return; }
+    // a join clones the remote, which can take a while: the button says so until the answer
+    var label = bt.textContent;
+    bt.disabled = true; bt.textContent = wsT("js.tk.dlg.reg.busy");
+    regMsg(form, wsT("js.tk.dlg.reg.wait"), false);
+    AD.register(req, function (res) {
+      var here = form.isConnected && $('tkdlg').open; // the dialog may have been closed (Escape) meanwhile
+      if (!res || !res.ok) {
+        if (!here) { toast(esc((res && res.error) || wsT("js.tk.toast.refused"))); return; }
+        bt.disabled = false; bt.textContent = label;
+        regMsg(form, (res && res.error) || wsT("js.tk.toast.refused"), true);
+        return;
+      }
+      if (here) closeDialog();
+      var id = res.store || req.id;
+      toast(res.creator ? wsT("js.tk.toast.reg.created", esc(id)) : wsT("js.tk.toast.reg.joined", esc(id), esc(req.member)));
+      // the adapter answers after its store list holds the new store
+      if (!ui.page && ui.open !== id && (AD.stores() || []).indexOf(id) >= 0) openStore(id);
+    });
   }
 
   function updateHint(form) {
@@ -1696,6 +1772,7 @@
   }
 
   function submit(form) {
+    if (form.getAttribute('data-kind') === 'register') return submitRegister(form);
     var kind = form.getAttribute('data-kind'), item = form.getAttribute('data-fitem'), el = form.elements, v = memberOf(viewerOf(ui.store));
     function val(n) { return el[n] ? el[n].value : ''; }
     function people() { return Array.prototype.map.call(form.querySelectorAll('input[name="people"]:checked'), function (e) { return e.value; }); }
@@ -1928,8 +2005,9 @@
     fitDrawer();
   }
 
-  // One handle per store, stacking leftward from the host's handle in stores() order;
-  // the row is rebuilt when the store list changes.
+  // One handle per store, stacking leftward from the host's handle in stores() order, then
+  // (with adapter.register) the "+ store" handle, also with no store at all; the row is
+  // rebuilt when the store list changes.
   var handleSig = null;
   function syncHandles() {
     order = (AD.stores() || []).slice();
@@ -1939,7 +2017,7 @@
     $('tkhandles').innerHTML = order.map(function (n) {
       return '<button class="tk-handle" id="tkh-' + esc(n) + '"' + attr('handle', n) + ' aria-controls="tkbody"><svg class="i"><use href="#tki-tasks"/></svg><span class="hl">' + esc(n) +
         '</span><span class="hoff" title="' + wsT("js.tk.handle.off") + '" hidden>&#8856;</span><span class="tk-badge" hidden></span><svg class="i"><use href="#tki-chev"/></svg></button>';
-    }).join('');
+    }).join('') + (AD.register ? '<button class="tk-handle tk-add" id="tkadd" data-act="register" aria-haspopup="dialog" title="' + esc(wsT("js.tk.reg.handle.tip")) + '"><svg class="i"><use href="#tki-plus"/></svg><span class="hl">' + wsT("js.tk.reg.handle") + '</span></button>' : '');
   }
   function renderHandles() {
     order.forEach(function (name) {
@@ -2104,7 +2182,7 @@
   // route the renderer owns (no item routes: an item URL would point at the viewer's own
   // daemon, so sharing it across people does not work). Entering a page checks and shows
   // what is new, like opening the drawer; leaving it pushes, like a collapse. Clearing the
-  // hash, the browser back button, or "Back to session" returns to the session view. A
+  // hash, the browser back button, or "Back" returns to the host's own view. A
   // hash that is not a #/ route is the host page's and is left alone.
   function routeStore() {
     var m = /^#\/([^/]+)$/.exec(location.hash), id = m && decodeURIComponent(m[1]);
@@ -2345,6 +2423,7 @@
           ui.adraft.push({ oid: mockOid(an + '|' + asz), name: an, size: Number(asz), mime: mimeOf(an) }); render();
         }
         else if (k === 'att-x') { ui.adraft.splice(Number(a.getAttribute('data-idx')), 1); render(); }
+        else if (k === 'register') openRegister();
         else if (QUICK[k]) quick(k, a);
         else if (DIALOGS[k] || (X.dialogs && X.dialogs[k])) openDialog(k, d);
         else if (X.action) X.action(k, a, H);
@@ -2402,7 +2481,12 @@
     document.addEventListener('input', function (e) {
       var t = e.target, df = t.closest && t.closest('#tkdlg form');
       if (!df || !df.elements.given) return;
-      if (df.elements.saved && t.name !== 'saved' && t.name !== 'nid' && t.name !== 'lead') df.elements.saved.value = '';
+      if (df.elements.saved && PROFILE_FIELDS.indexOf(t.name) >= 0) df.elements.saved.value = '';
+      // the register dialog's member id follows the given name until it is typed in
+      if (df.getAttribute('data-kind') === 'register' && df.elements.nid) {
+        if (t.name === 'nid') df.elements.nid.removeAttribute('data-auto');
+        else if (t.name === 'given' && df.elements.nid.hasAttribute('data-auto')) df.elements.nid.value = asciiId(t.value);
+      }
       profileView(df);
     });
     document.addEventListener('dragstart', function (e) {
