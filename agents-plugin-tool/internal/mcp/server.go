@@ -794,8 +794,6 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		return s.handleTicketsIndexInit(req.ID, params.Arguments, params.Meta)
 	case "route.resolve_implement":
 		return s.handleEnterImplement(req.ID, params.Arguments)
-	case "route.resolve_proceed":
-		return s.handleEnterProceed(req.ID, params.Arguments)
 	case "todo.add":
 		return s.handleTodoAdd(req.ID, params.Arguments)
 	case "todo.check":
@@ -4322,25 +4320,6 @@ func tools() []map[string]any {
 					"params": map[string]any{
 						"type":        "object",
 						"description": "Opaque implementation-routing input, constructed by the ticket-worker playbook. Inner step of that playbook; not a direct entry point — see its route step for the full field set.",
-					},
-				},
-				// Open top level: the unwrapped typed call shape (target,
-				// policy, facts, format as bare arguments) is a live caller
-				// form, so names outside properties are the handler's to judge.
-				"additionalProperties": true,
-				"required":             []string{"session_key"},
-			},
-		},
-		{
-			"name":        "route.resolve_proceed",
-			"description": "Inner routing step; not a direct entry point — params are constructed by the calling skill. Resolves deterministic proceed facts into one route verdict, stores the 'proceed' agenda blob, and replaces the todo list with the derived proceed checklist.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
-					"params": map[string]any{
-						"type":        "object",
-						"description": "Opaque routing input, constructed by the calling skill. Inner step of that skill; not a direct entry point — see its Fact Contract for the full field set.",
 					},
 				},
 				// Open top level: the unwrapped typed call shape (target,

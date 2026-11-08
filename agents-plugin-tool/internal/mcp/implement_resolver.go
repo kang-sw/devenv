@@ -191,7 +191,7 @@ type normalizedImplementFacts struct {
 }
 
 func parseImplementInput(args map[string]any) (implementInput, error) {
-	format, err := parseProceedFormat(args["format"])
+	format, err := parseRouteFormat(args["format"])
 	if err != nil {
 		return implementInput{}, err
 	}

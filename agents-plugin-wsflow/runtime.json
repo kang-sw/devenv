@@ -23,7 +23,6 @@
     "agenda.clear": ">=0.48.10-dev <0.49.0",
     "agenda.list": ">=0.48.10-dev <0.49.0",
     "route.resolve_implement": ">=0.48.10-dev <0.49.0",
-    "route.resolve_proceed": ">=0.48.10-dev <0.49.0",
     "todo.add": ">=0.48.10-dev <0.49.0",
     "todo.check": ">=0.48.10-dev <0.49.0",
     "todo.erase": ">=0.48.10-dev <0.49.0",

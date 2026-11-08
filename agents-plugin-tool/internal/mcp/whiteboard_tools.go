@@ -111,12 +111,12 @@ type whiteboardMailbox struct {
 var whiteboardProviders = []whiteboardSectionProvider{
 	{
 		id:        "todo",
-		dirtiedBy: []string{"todo.add", "todo.check", "todo.erase", "todo.clear", "todo.reorder", "route.resolve_implement", "route.resolve_proceed"},
+		dirtiedBy: []string{"todo.add", "todo.check", "todo.erase", "todo.clear", "todo.reorder", "route.resolve_implement"},
 		panel:     todoPanel,
 	},
 	{
 		id:        "agenda",
-		dirtiedBy: []string{"agenda.set", "agenda.clear", "route.resolve_implement", "route.resolve_proceed"},
+		dirtiedBy: []string{"agenda.set", "agenda.clear", "route.resolve_implement"},
 		panel:     agendaPanel,
 	},
 	{

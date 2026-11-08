@@ -578,15 +578,6 @@ func joinHumanList(items []string) string {
 	}
 }
 
-// deriveProceedTodos mirrors the proceed route sequence: build route context,
-// then resolve the MCP verdict with an executable Next instruction.
-func deriveProceedTodos() []todoItem {
-	return withPendingStatus([]todoItem{
-		{Key: "route-context", Title: "Build route context"},
-		{Key: "resolve-verdict", Title: "Resolve MCP verdict"},
-	})
-}
-
 // withPendingStatus stamps every item with pending status. Derivation builders
 // leave Status empty for brevity.
 func withPendingStatus(items []todoItem) []todoItem {
@@ -1073,56 +1064,6 @@ func (s *Server) handleEnterImplement(id json.RawMessage, args map[string]any) r
 		raw += "review-watermark: " + reviewNudge + "\n"
 	}
 	return toolTextResponse(id, raw, nil)
-}
-
-func (s *Server) handleEnterProceed(id json.RawMessage, args map[string]any) response {
-	const tool = "route.resolve_proceed"
-	sessionKey, err := sessionStateKey(tool, args)
-	if err != nil {
-		return toolTextResponse(id, "", err)
-	}
-	typedArgs, _, err := routeEnvelope(tool, args)
-	if err != nil {
-		return toolTextResponse(id, "", err)
-	}
-	input, err := parseProceedInput(typedArgs)
-	if err != nil {
-		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
-	}
-	// Read session state before resolving so the binding-anchor gate reflects
-	// whether this project declares a `### Binding Anchor`; when it does not,
-	// resolveProceed normalizes the anchor fact to n/a regardless of the
-	// supplied facts.gates.binding_anchor value. The same record feeds the
-	// review-watermark nudge below (no duplicate read).
-	record, haveRecord := s.sessions.readState(sessionKey)
-	if haveRecord {
-		input.AnchorDeclared = wsreview.ReadAgentsBindingAnchor(record.Root).Declared
-	}
-	result := resolveProceed(input)
-	rawAgenda, err := json.Marshal(result.Agenda)
-	if err != nil {
-		return toolTextResponse(id, "", fmt.Errorf("%s: agenda is not JSON-encodable: %w", tool, err))
-	}
-	todos := deriveProceedTodos()
-	if err := s.sessions.enterMode(sessionKey, "proceed", rawAgenda, todos); err != nil {
-		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
-	}
-	// Append the review-watermark nudge to result.Raw before branching on
-	// format, so the JSON result's Raw field mirrors the text output exactly
-	// (TestEnterProceedJSONIncludesRawVerdict). Appending only in the text
-	// branch left the two formats out of parity whenever the nudge is
-	// non-empty — latent until 260830 made the baseline arm reachable on
-	// trackless repos.
-	if haveRecord {
-		if reviewNudge := wsreview.CheckpointNudge(context.Background(), record.Root); reviewNudge != "" {
-			result.Raw += "review-watermark: " + reviewNudge + "\n"
-		}
-	}
-	if input.Format == "json" {
-		text, err := proceedResultJSON(result)
-		return toolTextResponse(id, text, err)
-	}
-	return toolTextResponse(id, result.Raw, nil)
 }
 
 func (s *Server) handleTodoAdd(id json.RawMessage, args map[string]any) response {

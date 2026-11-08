@@ -24,7 +24,7 @@ func (s *Server) handleResolveImplBranch(id json.RawMessage, args map[string]any
 	if !stemOK || stem == "" || !baseOK || !validObservedBranch(base) || base == "HEAD" {
 		return toolTextResponse(id, "", fmt.Errorf("ticket_stem and base must be nonempty strings; base must name a branch, not detached HEAD"))
 	}
-	format, err := parseProceedFormat(args["format"])
+	format, err := parseRouteFormat(args["format"])
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}

@@ -59,7 +59,7 @@ func reviewNudgeRestamp(t *testing.T, root string) {
 }
 
 // TestServeStdioTicketsCloseReviewWatermarkNudgeSurfacesAndQuiets covers the
-// first of the four cheap-checkpoint call sites: tickets.close must carry a
+// first of the three cheap-checkpoint call sites: tickets.close must carry a
 // "review-watermark:" advisory when the track (here, local "main" fallback)
 // is stale past the ledger marker by more than the size threshold, and must
 // stay silent right after the ledger is restamped to the current tip.
@@ -109,7 +109,7 @@ func TestServeStdioWorkflowManualReviewWatermarkNudgeSurfacesAndQuiets(t *testin
 	s := NewServer(root, "test")
 
 	// workflow_manual injects the raw CheckpointNudge text directly (no
-	// "review-watermark:" label prefix, unlike the other three call sites),
+	// "review-watermark:" label prefix, unlike the other two call sites),
 	// mirroring the computeManuals injection shape.
 	const nudgeMarker = "review watermark is"
 
@@ -160,32 +160,6 @@ func TestServeStdioEnterImplementReviewWatermarkNudgeSurfacesAndQuiets(t *testin
 	freshText := callToolWithKey(t, server, 3, key, "route.resolve_implement", implementReadyArgs("text"))
 	if strings.Contains(freshText, "review-watermark:") {
 		t.Fatalf("route.resolve_implement should stay silent right after the ledger was restamped: %s", freshText)
-	}
-}
-
-// TestServeStdioEnterProceedReviewWatermarkNudgeSurfacesAndQuiets covers the
-// fourth call site (handleEnterProceed).
-func TestServeStdioEnterProceedReviewWatermarkNudgeSurfacesAndQuiets(t *testing.T) {
-	useLeadProfile(t)
-	root := t.TempDir()
-	reviewNudgeTestRepo(t, root)
-	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
-
-	server := NewServer(root, "test")
-	key, _ := parseLoginResponse(t, callLogin(t, server, 1, root, nil))
-
-	reviewNudgeSeedStaleMarker(t, root, wsreview.SizeThresholdCommits+2)
-
-	staleText := callToolWithKey(t, server, 2, key, "route.resolve_proceed", proceedReadyArgs("text"))
-	if !strings.Contains(staleText, "review-watermark:") {
-		t.Fatalf("route.resolve_proceed should carry the review-watermark nudge for a stale range: %s", staleText)
-	}
-
-	reviewNudgeRestamp(t, root)
-
-	freshText := callToolWithKey(t, server, 3, key, "route.resolve_proceed", proceedReadyArgs("text"))
-	if strings.Contains(freshText, "review-watermark:") {
-		t.Fatalf("route.resolve_proceed should stay silent right after the ledger was restamped: %s", freshText)
 	}
 }
 

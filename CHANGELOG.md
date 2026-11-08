@@ -50,6 +50,9 @@
 - **The `session.note` MCP tool.** Its only caller was the retired fan-out
   skill and it never shipped in a release. `session.children` still reads and
   filters (`unnoted_only`) a note already stored on a child record.
+- **The `route.resolve_proceed` MCP tool and its resolver.** Its only entry
+  point was the retired routing skill, and no shipped skill or playbook calls
+  it. `route.resolve_implement` keeps the shared fact-parsing helpers.
 
 ## v0.42.0 - 2026-08-23
 
