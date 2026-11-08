@@ -125,3 +125,13 @@ func TestScriptEscapesAndDefaults(t *testing.T) {
 		t.Fatal("an unsupported language scripts as English")
 	}
 }
+
+func TestSubsetScriptHoldsOnlyThePrefixKeys(t *testing.T) {
+	js := string(SubsetScript("en", "js.img."))
+	if !strings.Contains(js, `"js.img.remove"`) || !strings.Contains(js, "window.wsTn") {
+		t.Fatalf("SubsetScript(en, js.img.) = %.200s", js)
+	}
+	if strings.Contains(js, `"js.ago"`) {
+		t.Fatal("SubsetScript must leave out keys outside its prefix")
+	}
+}
