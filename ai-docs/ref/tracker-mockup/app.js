@@ -775,9 +775,10 @@
     return h;
   }
 
-  // The drawer has one layout, the cards layout (303). A card in a wide mode leaves its
-  // column and spans the full row above the columns; the remaining cards flow below (304).
-  var LAYOUT = [['notify', 'today', 'mine', 'received', 'given'], ['myteam', 'items'], ['chat', 'org', 'activity', 'data']];
+  // The drawer has one layout, the cards layout (303). A card in a wide mode leaves the
+  // masonry and spans the full row above it; the remaining cards flow below (304).
+  // LAYOUT is the cards' reading order; packMasonry() places them.
+  var LAYOUT = ['notify', 'today', 'mine', 'received', 'given', 'myteam', 'items', 'chat', 'org', 'activity', 'data'];
   function drawerHtml(name, v) {
     var vs = VS, nMem = Object.keys(vs.members).filter(function (id) { return !vs.members[id].removed; }).length;
     var CARDS = { notify: cardNotify, today: cardToday, mine: cardMine, received: cardRequests, given: cardGiven, myteam: cardMyTeam, items: cardItems,
@@ -786,15 +787,38 @@
       vs.stats.flagged + ' flagged</span><span class="grow"></span>' +
       '<button class="btn primary" data-act="create"><svg class="i"><use href="#i-plus"/></svg>New</button></div>' + syncHtml(name);
     if (!vs.viewer.isMember) h += '<p class="err">' + esc(v) + ' is not a member of this store (removed or never joined): writes are flagged.</p>';
-    var wide = '', cols = LAYOUT.map(function (col) {
-      return col.map(function (k) {
-        var html = CARDS[k](v);
-        if (html && isWide(k)) { wide += html; return ''; }
-        return html;
-      }).join('');
-    }).filter(Boolean);
-    return h + (wide ? '<div class="dr-wide">' + wide + '</div>' : '') +
-      '<div class="dr-cols' + (cols.length < LAYOUT.length ? ' n' + cols.length : '') + '">' + cols.map(function (c) { return '<div class="dr-col">' + c + '</div>'; }).join('') + '</div>';
+    var wide = '', rest = LAYOUT.map(function (k) {
+      var html = CARDS[k](v);
+      if (html && isWide(k)) { wide += html; return ''; }
+      return html;
+    }).join('');
+    return h + (wide ? '<div class="dr-wide">' + wide + '</div>' : '') + '<div class="dr-mason">' + rest + '</div>';
+  }
+
+  // Masonry (board (347) c): each card, in LAYOUT order, goes to the currently shortest of
+  // N equal columns, N following the body's width, so cards keep their natural height and
+  // the first N cards read left to right across the top. Chosen over CSS columns, which
+  // read top to bottom then left to right and rebalance every card when one grows, and
+  // over CSS masonry, which is not shipped. Packed on every render and resize; a card that
+  // grows in place (an opened <details>) keeps its column until the next render.
+  var MASON_MIN = 360, MASON_GAP = 10;
+  function packMasonry() {
+    var box = document.querySelector('#drbody .dr-mason');
+    if (!box) return;
+    // a fresh render holds the cards directly, in reading order; a repack (resize) reuses that order
+    var cards = box.__cards && box.querySelector(':scope > .dr-mcol') ? box.__cards : Array.prototype.slice.call(box.children);
+    box.__cards = cards;
+    var n = Math.max(1, Math.floor((box.clientWidth + MASON_GAP) / (MASON_MIN + MASON_GAP)));
+    var cols = [];
+    box.textContent = '';
+    for (var i = 0; i < n; i++) { var c = document.createElement('div'); c.className = 'dr-mcol'; box.appendChild(c); cols.push(c); }
+    cards.forEach(function (card) {
+      var low = cols[0];
+      cols.forEach(function (c) { if (c.offsetHeight < low.offsetHeight) low = c; });
+      low.appendChild(card);
+    });
+    var chat = box.querySelector('.chat-log');
+    if (chat) chat.scrollTop = chat.scrollHeight; // newest message at the bottom; a move resets the scroll
   }
 
   // ------------------------------------------------------------ thread sheet
@@ -1314,9 +1338,8 @@
     var body = $('drbody'), sb = $('sheet').firstElementChild, top1 = body.scrollTop, top2 = sb.scrollTop;
     var draft = $('cbox') ? $('cbox').value : '';
     body.innerHTML = drawerHtml(name, v);
+    packMasonry();
     body.scrollTop = top1;
-    var chat = body.querySelector('.chat-log');
-    if (chat) chat.scrollTop = chat.scrollHeight; // newest message at the bottom
     var open = ui.sheet && ui.item;
     $('sheet').classList.toggle('open', !!open);
     $('sheet').setAttribute('aria-hidden', String(!open));
@@ -1346,6 +1369,18 @@
   }
   function showItem(id) { ui.item = id; ui.sheet = true; ui.itemChanged = true; ui.replyTo = null; ui.mdraft = []; ui.adraft = []; render(); }
 
+  // Theme (board (347) a): auto / light / dark, local UI state in localStorage. Applied as
+  // data-theme="light|dark" on the root, absent for auto, matching the dashboard's gear menu;
+  // index.html applies the saved value before first paint.
+  var THEME_KEY = 'tracker-mockup-theme';
+  function themeOf() { try { var t = localStorage.getItem(THEME_KEY); return t === 'light' || t === 'dark' ? t : 'auto'; } catch (e) { return 'auto'; } }
+  function setTheme(t) {
+    try { if (t === 'auto') localStorage.removeItem(THEME_KEY); else localStorage.setItem(THEME_KEY, t); } catch (e) { /* storage off: the choice lasts this page */ }
+    if (t === 'auto') document.documentElement.removeAttribute('data-theme'); else document.documentElement.setAttribute('data-theme', t);
+    Array.prototype.forEach.call(document.querySelectorAll('#gmenu [data-theme-set]'), function (b) { b.setAttribute('aria-pressed', String(b.getAttribute('data-theme-set') === t)); });
+  }
+  function gearMenu(open) { $('gmenu').hidden = !open; $('gear').setAttribute('aria-expanded', String(open)); }
+
   var QUICK = { 'q-status': 1, 'q-close': 1, confirm: 1, unassign: 1, accept: 1, ihide: 1, chide: 1, comment: 1 };
 
   function init() {
@@ -1363,8 +1398,13 @@
     });
     $('drhandles').innerHTML = hh;
 
+    setTheme(themeOf());
     document.addEventListener('click', function (e) {
       var t = e.target, h = t.closest('[data-handle]');
+      if (t.closest('#gear')) { gearMenu($('gmenu').hidden); return; }
+      var th = t.closest('[data-theme-set]');
+      if (th) { setTheme(th.getAttribute('data-theme-set')); return; }
+      if (!$('gmenu').hidden && !t.closest('#gmenu')) gearMenu(false);
       if (h) { if (h.getAttribute('data-handle') === 'panels') toast('The side panels handle is a stub in this mockup.'); else openStore(h.getAttribute('data-handle')); return; }
       var os = t.closest('[data-open-store]');
       if (os) { if (ui.open !== os.getAttribute('data-open-store')) openStore(os.getAttribute('data-open-store')); return; }
@@ -1448,9 +1488,10 @@
     }, true);
     document.addEventListener('keydown', function (e) {
       if (e.key !== 'Escape' || $('dlg').open) return;
+      if (!$('gmenu').hidden) { gearMenu(false); return; }
       if (ui.sheet) { ui.sheet = false; render(); } else if (ui.open) { var n = ui.open; ui.open = null; syncNow(n, true); render(); }
     });
-    window.addEventListener('resize', measure);
+    window.addEventListener('resize', function () { measure(); packMasonry(); });
     render();
   }
 
