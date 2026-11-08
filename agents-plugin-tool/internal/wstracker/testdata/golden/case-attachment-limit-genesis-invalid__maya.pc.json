@@ -1,0 +1,311 @@
+{
+ "store": "case-attachment-limit-genesis-invalid",
+ "viewer": "maya.pc",
+ "now": "2026-11-02T09:00:00Z",
+ "staleDays": 3,
+ "genesis": {
+  "admins": [
+   "ada"
+  ],
+  "members": [
+   {
+    "id": "ada",
+    "name": "Ada",
+    "keys": [
+     "ada-k1"
+    ],
+    "leads": []
+   },
+   {
+    "id": "maya",
+    "name": "Maya",
+    "keys": [
+     "maya-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   }
+  ],
+  "attachments": {
+   "max_bytes": -5
+  }
+ },
+ "events": [
+  {
+   "member": "maya",
+   "clone": "pc",
+   "seq": 1,
+   "ts": "2026-11-01T09:00:00Z",
+   "type": "item.create",
+   "payload": {
+    "kind": "topic",
+    "title": "T1",
+    "body": "b",
+    "attachments": [
+     {
+      "oid": "1111111111111111111111111111111111111111111111111111111111111111",
+      "name": "at.bin",
+      "size": 10485760,
+      "mime": "application/octet-stream"
+     }
+    ]
+   },
+   "seen": {},
+   "verdict": "valid"
+  },
+  {
+   "member": "maya",
+   "clone": "pc",
+   "seq": 2,
+   "ts": "2026-11-01T09:10:00Z",
+   "type": "item.create",
+   "payload": {
+    "kind": "topic",
+    "title": "T2",
+    "body": "b",
+    "attachments": [
+     {
+      "oid": "2222222222222222222222222222222222222222222222222222222222222222",
+      "name": "over.bin",
+      "size": 10485761,
+      "mime": "application/octet-stream"
+     }
+    ]
+   },
+   "seen": {},
+   "verdict": "valid"
+  }
+ ],
+ "expected": {
+  "viewer": {
+   "member": "maya",
+   "stream": "maya.pc",
+   "name": "Maya",
+   "profile": {
+    "org": "",
+    "family": "",
+    "given": "Maya"
+   },
+   "admin": false,
+   "lead": "ada",
+   "followers": [],
+   "reach": {},
+   "isMember": true
+  },
+  "priority": {
+   "names": [
+    "알림",
+    "업무",
+    "긴급"
+   ],
+   "default": 1
+  },
+  "attachments": {
+   "max_bytes": 10485760
+  },
+  "members": {
+   "ada": {
+    "id": "ada",
+    "name": "Ada",
+    "profile": {
+     "org": "",
+     "family": "",
+     "given": "Ada"
+    },
+    "avatar": "AD",
+    "leads": [],
+    "keys": [
+     "ada-k1"
+    ],
+    "revoked": [],
+    "removed": null,
+    "joined": null,
+    "admin": true,
+    "children": [
+     "maya"
+    ],
+    "depth": null,
+    "role": "root"
+   },
+   "maya": {
+    "id": "maya",
+    "name": "Maya",
+    "profile": {
+     "org": "",
+     "family": "",
+     "given": "Maya"
+    },
+    "avatar": "MA",
+    "leads": [
+     "ada"
+    ],
+    "keys": [
+     "maya-k1"
+    ],
+    "revoked": [],
+    "removed": null,
+    "joined": null,
+    "admin": false,
+    "children": [],
+    "depth": null,
+    "role": "member"
+   }
+  },
+  "admins": [
+   "ada"
+  ],
+  "rolesProblems": [
+   "attachments.max_bytes must be a positive integer"
+  ],
+  "items": {
+   "maya.pc#1": {
+    "id": "maya.pc#1",
+    "alias": "maya.pc-1",
+    "kind": "topic",
+    "title": "T1",
+    "body": "b",
+    "project": "",
+    "due": null,
+    "priority": 1,
+    "priorityLevel": 1,
+    "priorityName": "업무",
+    "parent": null,
+    "author": "maya",
+    "ts": "2026-11-01T09:00:00Z",
+    "hidden": false,
+    "edited": null,
+    "status": null,
+    "counted": false,
+    "rollup": {
+     "total": 0,
+     "counts": {},
+     "blocked": []
+    },
+    "lastActivity": "2026-11-01T09:00:00Z",
+    "started": null,
+    "children": [],
+    "assignments": [],
+    "pending": [],
+    "thread": [
+     "maya.pc#1"
+    ],
+    "concurrent": 0,
+    "depth": 0,
+    "chain": [
+     "maya"
+    ],
+    "mentions": [],
+    "attachments": [
+     {
+      "oid": "1111111111111111111111111111111111111111111111111111111111111111",
+      "name": "at.bin",
+      "size": 10485760,
+      "mime": "application/octet-stream"
+     }
+    ]
+   }
+  },
+  "itemOrder": [
+   "maya.pc#1"
+  ],
+  "assignments": {},
+  "comments": {},
+  "events": [
+   {
+    "id": "maya.pc#1",
+    "alias": "maya.pc-1",
+    "stream": "maya.pc",
+    "member": "maya",
+    "seq": 1,
+    "ts": "2026-11-01T09:00:00Z",
+    "type": "item.create",
+    "origin": "human",
+    "payload": {
+     "kind": "topic",
+     "title": "T1",
+     "body": "b",
+     "attachments": [
+      {
+       "oid": "1111111111111111111111111111111111111111111111111111111111111111",
+       "name": "at.bin",
+       "size": 10485760,
+       "mime": "application/octet-stream"
+      }
+     ]
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "maya.pc#1",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "maya.pc#2",
+    "alias": "maya.pc-2",
+    "stream": "maya.pc",
+    "member": "maya",
+    "seq": 2,
+    "ts": "2026-11-01T09:10:00Z",
+    "type": "item.create",
+    "origin": "human",
+    "payload": {
+     "kind": "topic",
+     "title": "T2",
+     "body": "b",
+     "attachments": [
+      {
+       "oid": "2222222222222222222222222222222222222222222222222222222222222222",
+       "name": "over.bin",
+       "size": 10485761,
+       "mime": "application/octet-stream"
+      }
+     ]
+    },
+    "status": "flagged",
+    "reason": "attachment \"over.bin\" is 10485761 bytes, above the store limit of 10485760 bytes (attachments.max_bytes)",
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "maya.pc#2",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   }
+  ],
+  "notices": [],
+  "my": {
+   "assignments": [],
+   "today": {
+    "work": [],
+    "pending": [],
+    "confirms": []
+   },
+   "received": {
+    "pending": [],
+    "answered": [],
+    "sent": []
+   },
+   "given": [],
+   "created": [],
+   "team": [],
+   "badge": []
+  },
+  "stats": {
+   "events": 2,
+   "commits": 2,
+   "flagged": 1,
+   "concurrent": 0
+  },
+  "heads": {
+   "maya.pc": 2
+  },
+  "now": "2026-11-02T09:00:00Z"
+ }
+}
