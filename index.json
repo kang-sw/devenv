@@ -198,7 +198,14 @@
       "registered_at": "2026-09-24T10:38:33Z"
     },
     "260723-research-spec-collocator-subagent": {
-      "registered_at": "2026-09-24T10:38:33Z"
+      "registered_at": "2026-09-24T10:38:33Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "delegate/idea-triage-close",
+        "phase": "closed",
+        "touched_at": "2026-11-08T08:08:07Z"
+      }
     },
     "260724-bug-ws-git-commit-verify-fails-on-staged-rename": {
       "registered_at": "2026-09-24T10:38:33Z",
@@ -370,16 +377,6 @@
     "260812-research-reload-plugins-keeps-stale-mcp-binary": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
-    "260814-bug-release-workflow-duplicate-runs-race-asset-upload": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/small-live-bugs",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:06:16Z"
-      }
-    },
     "260823-bug-testmain-ws-skills-root-default": {
       "registered_at": "2026-09-24T10:38:33Z",
       "lease": {
@@ -550,26 +547,6 @@
     },
     "260912-research-september-active-ticket-inventory-triage": {
       "registered_at": "2026-09-24T10:38:33Z"
-    },
-    "260913-bug-mailbox-tests-read-ambient-ws-mailbox-env": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/small-live-bugs",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:06:38Z"
-      }
-    },
-    "260913-bug-plugin-json-migration-vocab-uncovered": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/small-live-bugs",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:06:32Z"
-      }
     },
     "260913-bug-ticket-guardrails-dont-enforce-category-enum": {
       "registered_at": "2026-09-24T10:38:33Z"
