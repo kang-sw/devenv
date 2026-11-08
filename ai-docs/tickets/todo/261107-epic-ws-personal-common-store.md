@@ -61,7 +61,7 @@ repository sized for 50-60 people, reached from the dashboard.
 - `261108-feat-ws-tracker-drawer-ui` (todo): the dashboard side, blocked by
   the core - per-store handles, the mockup renderer shared between the
   mockup and the dashboard, a disk-assets dev mode, daemon endpoints and
-  SSE, local UI state on disk, the join dialog (board (408) b, (412) c).
+  SSE, local UI state (seen-state on disk, display state per browser), the join dialog (board (408) b, (412) c).
 - `261108-feat-ws-manual-shared-command-syntax` (todo, outside the epic):
   one shared parser and manual section for the XML command syntax, which the
   core's Phase 2 needs (board (414), (415)).
@@ -151,11 +151,13 @@ repository sized for 50-60 people, reached from the dashboard.
   surface, active only where a store is configured. It is off by default in
   both ws and wsflow. This supersedes the earlier "no skill, playbook, or MCP
   tool mentions it" decision.
-- **Local UI state** (user, board (332) a, (340)): per-viewer UI state such
-  as notification read state, the handle badge's seen marks, and each card's
-  chosen view mode lives per clone on the local filesystem outside git, read
-  and written by the daemon; it is never an event and never browser storage.
-  The mockup simulates it in memory.
+- **Local UI state** (user, board (332) a, (340); revised by (451) a): what
+  a viewer has seen - notification read state and the handle badge's seen
+  marks - lives per clone on the local filesystem outside git, read and
+  written by the daemon; it is never an event and never browser storage.
+  Display state (each card's chosen view mode, panel height, the
+  recently-closed fold) stays in browser storage per device. The mockup
+  simulates both in memory.
 - **Only human- or agent-authored content is tracked** (user, (66) ok,
   carried over): indexes and embeddings are a local cache outside git.
 - **Personal store** (board (136) ok): a personal store is a repository
