@@ -2,6 +2,7 @@ package wsagent
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -457,5 +458,80 @@ func TestPiProcessCommands(t *testing.T) {
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("commands = %q, want %q", got, want)
+	}
+}
+
+// TestPiBackendStart drives Start against a stand-in pi that records its
+// command line, working directory, and environment.
+func TestPiBackendStart(t *testing.T) {
+	out := t.TempDir()
+	fake := filepath.Join(t.TempDir(), "pi")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > " + out + "/args\npwd -P > " + out + "/cwd\nenv > " + out + "/env\ncat > /dev/null\n"
+	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	root, dir := t.TempDir(), t.TempDir()
+	spec := piSpec(t, `{"backend":"pi","tools":["read"],"ws_tools":["tickets.query"]}`)
+	spec.Root, spec.Dir = root, dir
+	spec.WSMCP = &MCPCommand{Command: "/bin/ws-mcp"}
+	spec.Env = []string{"PATH=" + os.Getenv("PATH"), "WS_PI_ROLE=lead"}
+	proc, err := PiBackend{Command: fake}.Start(context.Background(), spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proc.Close()
+
+	read := func(name string) string {
+		raw, err := os.ReadFile(filepath.Join(out, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(raw)
+	}
+	args := strings.Split(strings.TrimSpace(read("args")), "\n")
+	bridge := filepath.Join(dir, "pi", piBridgeFile)
+	if got, _ := flagValue(args, "--tools"); got != "read,mcp__ws__tickets_query" || !slices.Contains(args, bridge) {
+		t.Fatalf("args = %v", args)
+	}
+	if info, err := os.Stat(bridge); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("bridge: %v %v", info, err)
+	}
+	wantRoot, _ := filepath.EvalSymlinks(root)
+	if cwd := strings.TrimSpace(read("cwd")); cwd != wantRoot {
+		t.Fatalf("pi runs at the working root: %q, want %q", cwd, wantRoot)
+	}
+	if env := read("env"); !strings.Contains(env, "PI_SKIP_VERSION_CHECK=1") || strings.Contains(env, "WS_PI_ROLE") {
+		t.Fatalf("child env:\n%s", env)
+	}
+
+	// No MCP server allowed: no bridge, no MCP extension.
+	plain := piSpec(t, `{"backend":"pi","tools":["read"]}`)
+	plain.Root, plain.Dir, plain.Env = root, t.TempDir(), spec.Env
+	proc, err = PiBackend{Command: fake}.Start(context.Background(), plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proc.Close()
+	if args := read("args"); strings.Contains(args, "builtin:mcp") {
+		t.Fatalf("no MCP server, no MCP extension: %s", args)
+	}
+	if _, err := os.Stat(filepath.Join(plain.Dir, "pi", piBridgeFile)); !os.IsNotExist(err) {
+		t.Fatalf("no bridge is written without a server: %v", err)
+	}
+
+	rule := piSpec(t, `{"backend":"pi","tools":["bash(git status)"]}`)
+	rule.Root, rule.Dir = root, t.TempDir()
+	if _, err := (PiBackend{Command: fake}).Start(context.Background(), rule); err == nil || !strings.Contains(err.Error(), "permission rule") {
+		t.Fatalf("a permission rule is refused before launch, got %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(rule.Dir, "pi")); !os.IsNotExist(err) {
+		t.Fatalf("a refused launch leaves no session state: %v", err)
+	}
+
+	restore := lookPath
+	lookPath = func(string) (string, error) { return "", exec.ErrNotFound }
+	t.Cleanup(func() { lookPath = restore })
+	if _, err := (PiBackend{}).Start(context.Background(), plain); err == nil || !strings.Contains(err.Error(), "pi backend") {
+		t.Fatalf("a missing pi names the backend, got %v", err)
 	}
 }
