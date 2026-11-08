@@ -34,20 +34,29 @@ host that shows HTML inline. Workers and subagents do not use it.
 Write board text (titles, options, rationale, recommendations, answer readings, and topic bodies) in the conversation language, the `workflow.lang` value when set; IDs, class and status tags, `ok`/`no` answers, and option letters stay as written.
 
 Every tag carries the prefix `wb:` and follows the command syntax rules.
+`wb:topic` is the group: its `name` names the topic once for the
+`wb:body`, `wb:edit`, `wb:add`, and `wb:close` inside it. A batch may hold
+several `wb:topic` groups.
 
 | command | attributes | content |
 |---|---|---|
-| `wb:add` | `id?`, `class`, `topic` | fields `wb:title`, `wb:option`..., `wb:recommend?`, `wb:why?`, `wb:link`... |
+| `wb:topic` | `name` | group of `wb:body`, `wb:edit`, `wb:add`, `wb:close` |
+| `wb:body` | none | the topic's body, replaced whole; empty clears it |
+| `wb:edit` | `replace_all?` | fields `wb:old`, `wb:new` |
+| `wb:add` | `id?`, `class` | fields `wb:title`, `wb:option`..., `wb:recommend?`, `wb:why?`, `wb:link`... |
+| `wb:close` | `result` | none |
 | `wb:answer` | `id` or `ids`, `value`, `assumed?` | the user's verbatim words |
 | `wb:patch` | `id`, `status?`, `clear?` | any `wb:add` field, each replacing that field |
-| `wb:topic` | `name` | the topic's body, replaced whole; empty clears it |
-| `wb:edit` | `topic`, `replace_all?` | fields `wb:old`, `wb:new` |
-| `wb:close` | `topic`, `result` | none |
 | `wb:floor` | `id` | none |
 | `wb:embed-dir` | `path` | none |
 
 ```xml
-<wb:add class="policy" topic="Rollout">
+<wb:topic name="Rollout">
+<wb:body>
+## Context
+Markdown up to the closing tag.
+</wb:body>
+<wb:add class="policy">
 <wb:title>Ship the <code>parser</code> before the renderer?</wb:title>
 <wb:option>Parser first</wb:option>
 <wb:option>Both at once</wb:option>
@@ -55,18 +64,17 @@ Every tag carries the prefix `wb:` and follows the command syntax rules.
 <wb:why>A body may hold <details>, & and <option> as is.</wb:why>
 <wb:link>supersedes {{12}}</wb:link>
 </wb:add>
+</wb:topic>
 <wb:answer ids="14 15" value="ok">(14), (15) ok</wb:answer>
 <wb:patch id="16" status="withdrawn"/>
-<wb:topic name="Rollout">
-## Context
-Markdown up to the closing tag.
+<wb:topic name="Old scope">
+<wb:close result="Folded into Rollout."/>
 </wb:topic>
-<wb:close topic="Old scope" result="Folded into Rollout."/>
 ```
 
 - `class`: `policy`, `technical`, or `announced`, the classes of the workflow
-  manual's `### Asking the user`. `topic` groups items on the page;
-  `wb:title` is one line.
+  manual's `### Asking the user`. An item belongs to its group's topic,
+  which groups items on the page; `wb:title` is one line.
 - `id` on `wb:add`: omitted, the server mints one past the highest ID it has
   minted, adopted, or been floored to; a number adopts an ID from outside the
   board, such as a ticket queue's. An ID the store holds is refused.
@@ -117,7 +125,7 @@ Markdown up to the closing tag.
   rest on request and the file page and embed print how many are left out.
 - Topic body: one per topic, rendered above its items, for context that
   outlasts a chat reply: background, the shape of a decision, a diagram; a
-  topic may hold a body and no items. `wb:topic` replaces the body whole,
+  topic may hold a body and no items. `wb:body` replaces the body whole,
   an empty one clears it, and the same body again is no change. `wb:edit`
   replaces the one exact match of `wb:old` with `wb:new` (an empty `wb:new`
   deletes it), or every match with `replace_all="true"`; no match, or

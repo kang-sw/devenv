@@ -81,13 +81,14 @@ const (
 
 // trackerEventAttrs are the attributes every event command takes besides
 // its own.
-var trackerEventAttrs = []string{"store", "origin"}
+var trackerEventAttrs = []string{"origin"}
 
-// trackerEventSpec is an event command. Its body (an item body, a comment,
+// trackerEventSpec is an event command: scoped, so it sits in the batch's
+// tk:store group, which names its store. Its body (an item body, a comment,
 // or a note) is shown as plain text, never as raw HTML, and matched against
 // nothing, so an escaped body is decoded like the attributes.
 func trackerEventSpec(kind wsxmlcmd.Kind, attrs ...string) wsxmlcmd.Spec {
-	return wsxmlcmd.Spec{Kind: kind, Attrs: append(append([]string{}, trackerEventAttrs...), attrs...), DecodeBody: true}
+	return wsxmlcmd.Spec{Kind: kind, Attrs: append(append([]string{}, trackerEventAttrs...), attrs...), DecodeBody: true, Scoped: true}
 }
 
 // trackerCommands is the command table, keyed by name without the prefix:
@@ -170,8 +171,11 @@ var trackerCommands = map[string]trackerCommandDef{
 	trackerSync:     {spec: wsxmlcmd.Spec{Kind: wsxmlcmd.Empty, Attrs: []string{"store"}}},
 }
 
+// trackerGrammar is the tk: language: the command table, and the tk:store
+// group that names the store of the event commands inside it, so a batch
+// names its one store once.
 var trackerGrammar = func() wsxmlcmd.Grammar {
-	g := wsxmlcmd.Grammar{Prefix: trackerPrefix, Commands: map[string]wsxmlcmd.Spec{}}
+	g := wsxmlcmd.Grammar{Prefix: trackerPrefix, Commands: map[string]wsxmlcmd.Spec{}, Group: &wsxmlcmd.Group{Name: "store", Attr: "name"}}
 	for name, def := range trackerCommands {
 		g.Commands[name] = def.spec
 	}
@@ -476,12 +480,12 @@ func planTrackerBatch(p *wsxmlcmd.Problems, commands string, registered []wstrac
 		known[e.ID] = true
 		ids = append(ids, e.ID)
 	}
-	unknownStore := func(cmd wsxmlcmd.Command, store string) {
+	unknownStore := func(at, store string) {
 		if len(ids) == 0 {
-			p.Add("%s: no store is registered; register one with <%s%s>", cmd.At("store"), trackerPrefix, trackerRegister)
+			p.Add("%s: no store is registered; register one with <%s%s>", at, trackerPrefix, trackerRegister)
 			return
 		}
-		p.Add("%s: %q is not a registered store (registered: %s)", cmd.At("store"), store, strings.Join(ids, ", "))
+		p.Add("%s: %q is not a registered store (registered: %s)", at, store, strings.Join(ids, ", "))
 	}
 	// Number the event commands first, so a $N can name a later-parsed
 	// command's event index while it is planned.
@@ -492,6 +496,7 @@ func planTrackerBatch(p *wsxmlcmd.Problems, commands string, registered []wstrac
 			b.eventOf[cmd.Pos] = len(b.eventOf)
 		}
 	}
+	groups := map[*wsxmlcmd.Scope]bool{}
 	for i := range b.cmds {
 		cmd := b.cmds[i]
 		name := strings.TrimPrefix(cmd.Tag, trackerPrefix)
@@ -510,7 +515,7 @@ func planTrackerBatch(p *wsxmlcmd.Problems, commands string, registered []wstrac
 			case trackerSync:
 				if store, ok := cmd.Attr("store"); ok {
 					if !known[store] {
-						unknownStore(cmd, store)
+						unknownStore(cmd.At("store"), store)
 					}
 				} else if len(ids) == 0 {
 					p.Add("%s: no store is registered", cmd.Label())
@@ -519,15 +524,19 @@ func planTrackerBatch(p *wsxmlcmd.Problems, commands string, registered []wstrac
 			continue
 		}
 		ev := &trackerEvent{cmd: cmd, typ: name, origin: wstracker.OriginAgent, payload: map[string]any{}, refs: map[string]int{}}
-		if store, ok := wsxmlcmd.RequiredAttr(p, cmd, "store"); ok {
+		// The parser has refused a command outside a group and a group
+		// with no name; each group is checked once, at its first command.
+		if scope := cmd.Scope; scope != nil && !groups[scope] {
 			switch {
-			case !known[store]:
-				unknownStore(cmd, store)
-			case b.store == "":
-				b.store = store
-			case store != b.store:
-				p.Add("%s: %q; this batch writes to %q, and one batch writes to one store", cmd.At("store"), store, b.store)
+			case len(groups) > 0:
+				p.Add("%s: a second <%sstore> group; one batch writes to one store, so it holds one group", scope.Label(), trackerPrefix)
+			case scope.Value == "":
+			case !known[scope.Value]:
+				unknownStore(scope.At(), scope.Value)
+			default:
+				b.store = scope.Value
 			}
+			groups[scope] = true
 		}
 		if _, ok := cmd.Attr("origin"); ok {
 			if v, ok := wsxmlcmd.EnumAttr(p, cmd, "origin", trackerOrigins); ok {

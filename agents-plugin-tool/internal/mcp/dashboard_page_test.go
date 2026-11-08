@@ -73,7 +73,7 @@ func TestDashboardReadPageServesTheBoard(t *testing.T) {
 	// A board without file targets: the regions are what the static full
 	// page shows.
 	f.call(t, "todo.add", map[string]any{"key": "step", "title": "a step"})
-	f.update(t, `<wb:add class="technical" topic="t"><wb:title>a question</wb:title><wb:why>plain reason</wb:why></wb:add>`)
+	f.update(t, `<wb:topic name="t"><wb:add class="technical"><wb:title>a question</wb:title><wb:why>plain reason</wb:why></wb:add></wb:topic>`)
 	page = readPageOK(t, src, reg)
 	if !page.HasBoard || page.Seq == 0 || page.Board.Board == "" || page.Board.Panels == "" {
 		t.Fatalf("board page = %+v", page)
@@ -91,7 +91,7 @@ func TestDashboardReadPageServesTheBoard(t *testing.T) {
 	writeTicket(t, f.root, "todo", "261102-feat-todo-one", "Todo one")
 	inside := filepath.ToSlash(filepath.Join(f.root, "docs", "inside.md"))
 	outside := filepath.ToSlash(filepath.Join(t.TempDir(), "out.png"))
-	f.update(t, fmt.Sprintf(`<wb:add class="policy" topic="t"><wb:title>files</wb:title><wb:option>a</wb:option><wb:option>b</wb:option><wb:why>see [the plan](./ai-docs/plan.md) and [inside](%s) and ![shot](shots/a.png) and ![away](%s)</wb:why></wb:add>`, inside, outside))
+	f.update(t, fmt.Sprintf(`<wb:topic name="t"><wb:add class="policy"><wb:title>files</wb:title><wb:option>a</wb:option><wb:option>b</wb:option><wb:why>see [the plan](./ai-docs/plan.md) and [inside](%s) and ![shot](shots/a.png) and ![away](%s)</wb:why></wb:add></wb:topic>`, inside, outside))
 	page = readPageOK(t, src, reg)
 	html := string(page.Board.Board) + string(page.Board.Panels)
 	for _, want := range []string{
@@ -149,9 +149,9 @@ func TestDashboardServedPageRendersTopicBodyInAFrame(t *testing.T) {
 	src := dashboardPageSource(t, &now)
 	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
 	mustWrite(t, f.root, "shots/a.png", "not-really-a-png")
-	f.update(t, "<wb:add class=\"technical\" topic=\"Rollout\"><wb:title>an item</wb:title></wb:add>\n"+
-		"<wb:topic name=\"Rollout\">\n## 배경\n본문 body-marker <details><summary>more</summary>raw</details>\n\n![shot](shots/a.png)\n</wb:topic>\n"+
-		"<wb:topic name=\"Body only\">\nsecond-marker\n</wb:topic>")
+	f.update(t, "<wb:topic name=\"Rollout\"><wb:add class=\"technical\"><wb:title>an item</wb:title></wb:add></wb:topic>\n"+
+		"<wb:topic name=\"Rollout\"><wb:body>\n## 배경\n본문 body-marker <details><summary>more</summary>raw</details>\n\n![shot](shots/a.png)\n</wb:body></wb:topic>\n"+
+		"<wb:topic name=\"Body only\"><wb:body>\nsecond-marker\n</wb:body></wb:topic>")
 	html := string(readPageOK(t, src, reg).Board.Board)
 
 	if strings.Contains(html, `id="wb-now"`) || strings.Contains(html, `class="now`) {
@@ -353,7 +353,7 @@ func TestDashboardFingerprintCoversPageStores(t *testing.T) {
 	now := time.Now()
 	src := dashboardPageSource(t, &now)
 	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
-	f.update(t, `<wb:add class="technical" topic="t"><wb:title>a question</wb:title></wb:add>`)
+	f.update(t, `<wb:topic name="t"><wb:add class="technical"><wb:title>a question</wb:title></wb:add></wb:topic>`)
 
 	fp := readFingerprint(t, src, reg)
 	if again := readFingerprint(t, src, reg); again != fp {
@@ -470,7 +470,7 @@ func TestDashboardReadPageLangTranslatesBoardAndPanelText(t *testing.T) {
 	src := dashboardPageSource(t, nil)
 	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
 	f.call(t, "todo.add", map[string]any{"key": "step", "title": "a step"})
-	f.update(t, `<wb:add class="technical" topic="t"><wb:title>a question</wb:title><wb:why>plain reason</wb:why></wb:add>`)
+	f.update(t, `<wb:topic name="t"><wb:add class="technical"><wb:title>a question</wb:title><wb:why>plain reason</wb:why></wb:add></wb:topic>`)
 	writeTicket(t, f.root, "ready", "261101-feat-ready-one", "Ready one")
 	writeTicket(t, f.root, "todo", "261102-feat-todo-one", "Todo one")
 
@@ -517,7 +517,7 @@ func TestDashboardReadClosedTopicsPastTheCap(t *testing.T) {
 
 	var cmds strings.Builder
 	for i := 1; i <= 32; i++ {
-		fmt.Fprintf(&cmds, `<wb:topic name="c%d">see [the plan](./ai-docs/plan.md)</wb:topic><wb:close topic="c%d" result="Ending %d."/>`, i, i, i)
+		fmt.Fprintf(&cmds, `<wb:topic name="c%d"><wb:body>see [the plan](./ai-docs/plan.md)</wb:body></wb:topic><wb:topic name="c%d"><wb:close result="Ending %d."/></wb:topic>`, i, i, i)
 	}
 	f.update(t, cmds.String())
 

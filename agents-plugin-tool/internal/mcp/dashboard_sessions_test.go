@@ -221,7 +221,7 @@ func TestDashboardKeyOffAndKeyOnServersOnOneRoot(t *testing.T) {
 	}
 
 	// A board write is seen on the next re-read of that session.
-	resp := dashCall(t, sOn, "whiteboard.update", map[string]any{"session_key": keyOn, "commands": `<wb:add class="technical" topic="t"><wb:title>a question</wb:title></wb:add>`})
+	resp := dashCall(t, sOn, "whiteboard.update", map[string]any{"session_key": keyOn, "commands": `<wb:topic name="t"><wb:add class="technical"><wb:title>a question</wb:title></wb:add></wb:topic>`})
 	if isToolError(resp) {
 		t.Fatalf("whiteboard.update: %s", resp)
 	}

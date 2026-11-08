@@ -425,8 +425,8 @@ func Apply(state *State, commands string, env Env) (Outcome, []string) {
 			applyAnswer(p, work, cmd, mark, env.Now)
 		case "wb:patch":
 			applyPatch(p, work, cmd, mark)
-		case "wb:topic":
-			applyTopic(p, work, state, cmd, mark)
+		case "wb:body":
+			applyBody(p, work, state, cmd, mark)
 		case "wb:edit":
 			applyEdit(p, work, state, cmd, mark)
 		case "wb:close":
@@ -469,13 +469,13 @@ func Apply(state *State, commands string, env Env) (Outcome, []string) {
 // applyClose closes a topic with its result. Closing a closed topic again
 // replaces its result and keeps its place in the close order.
 func applyClose(p *problems, work *State, cmd command) {
-	topic, topicOK := wsxmlcmd.RequiredAttr(p, cmd, "topic")
+	topic, topicOK := cmd.Scoped()
 	result, resultOK := wsxmlcmd.RequiredAttr(p, cmd, "result")
 	if !topicOK || !resultOK {
 		return
 	}
 	if !work.topicKnown(topic) {
-		p.Add("%s: no item or topic body has topic %q", cmd.At("topic"), topic)
+		p.Add("%s: no item or topic body has topic %q", cmd.Label(), topic)
 		return
 	}
 	if !work.topicClosed(topic) {
@@ -542,7 +542,8 @@ func applyAdd(p *problems, work *State, cmd command, mark int) int {
 		}
 	}
 	item.Class, _ = wsxmlcmd.EnumAttr(p, cmd, "class", classValues)
-	item.Topic, _ = wsxmlcmd.RequiredAttr(p, cmd, "topic")
+	topic, topicOK := cmd.Scoped()
+	item.Topic = topic
 	f := readItemFields(p, cmd)
 	if f.title == nil {
 		p.Add("%s: required", cmd.At("<wb:title>"))
@@ -558,7 +559,7 @@ func applyAdd(p *problems, work *State, cmd command, mark int) int {
 		item.Rationale = *f.why
 	}
 	checkPolicyShape(p, cmd.Label(), item)
-	if len(p.List) > before {
+	if len(p.List) > before || !topicOK {
 		return item.ID
 	}
 	if item.ID == 0 {
@@ -728,10 +729,10 @@ func applyPatch(p *problems, work *State, cmd command, mark int) {
 	work.Items[idx] = next
 }
 
-// applyTopic replaces a topic's body whole; an empty (or blank) body clears
+// applyBody replaces a topic's body whole; an empty (or blank) body clears
 // it. The same body again is no change.
-func applyTopic(p *problems, work, base *State, cmd command, mark int) {
-	name, ok := wsxmlcmd.RequiredAttr(p, cmd, "name")
+func applyBody(p *problems, work, base *State, cmd command, mark int) {
+	name, ok := cmd.Scoped()
 	if !ok {
 		return
 	}
@@ -750,7 +751,7 @@ func applyTopic(p *problems, work, base *State, cmd command, mark int) {
 // applyEdit replaces one exact match of old in a topic's body with new, or
 // every match with replace_all="true".
 func applyEdit(p *problems, work, base *State, cmd command, mark int) {
-	name, nameOK := wsxmlcmd.RequiredAttr(p, cmd, "topic")
+	name, nameOK := cmd.Scoped()
 	all, _ := wsxmlcmd.BoolAttr(p, cmd, "replace_all")
 	old, hasOld := cmd.Single(p, "wb:old")
 	repl, hasNew := cmd.Single(p, "wb:new")
@@ -767,7 +768,7 @@ func applyEdit(p *problems, work, base *State, cmd command, mark int) {
 	}
 	i := work.topicDocIndex(name)
 	if i < 0 {
-		p.Add("%s: topic %q has no body; set one with <wb:topic>", cmd.Label(), name)
+		p.Add("%s: topic %q has no body; set one with <wb:body>", cmd.Label(), name)
 		return
 	}
 	body := work.Topics[i].Body

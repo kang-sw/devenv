@@ -16,14 +16,14 @@ import (
 func TestCloseRequiresAResult(t *testing.T) {
 	st := &State{}
 	mustApply(t, st, addXML(ClassTechnical, "a", "x")+addXML(ClassTechnical, "b", "y"))
-	wantProblems(t, refused(t, st, `<wb:close topic="a"/>`), `command 1 <wb:close> (line 1) result: required`)
-	wantProblems(t, refused(t, st, `<wb:close topic="a" result="  "/>`), `result: must be non-empty`)
+	wantProblems(t, refused(t, st, `<wb:topic name="a"><wb:close/></wb:topic>`), `command 1 <wb:close> (line 1) result: required`)
+	wantProblems(t, refused(t, st, `<wb:topic name="a"><wb:close result="  "/></wb:topic>`), `result: must be non-empty`)
 
-	mustApply(t, st, `<wb:close topic="a" result="Shipped as planned."/><wb:close topic="b" result="Dropped."/>`)
+	mustApply(t, st, `<wb:topic name="a"><wb:close result="Shipped as planned."/></wb:topic><wb:topic name="b"><wb:close result="Dropped."/></wb:topic>`)
 	if st.CloseResults["a"] != "Shipped as planned." || st.CloseResults["b"] != "Dropped." {
 		t.Fatalf("close results = %v", st.CloseResults)
 	}
-	mustApply(t, st, `<wb:close topic="a" result="Shipped, then patched."/>`)
+	mustApply(t, st, `<wb:topic name="a"><wb:close result="Shipped, then patched."/></wb:topic>`)
 	if st.CloseResults["a"] != "Shipped, then patched." || strings.Join(st.ClosedTopics, ",") != "a,b" {
 		t.Fatalf("a second close: results %v, close order %v", st.CloseResults, st.ClosedTopics)
 	}
@@ -32,7 +32,7 @@ func TestCloseRequiresAResult(t *testing.T) {
 	if st.topicClosed("a") || st.CloseResults["a"] != "Shipped, then patched." {
 		t.Fatalf("a reopen: closed %v, results %v", st.topicClosed("a"), st.CloseResults)
 	}
-	mustApply(t, st, `<wb:close topic="a" result="Closed for good."/>`)
+	mustApply(t, st, `<wb:topic name="a"><wb:close result="Closed for good."/></wb:topic>`)
 	if st.CloseResults["a"] != "Closed for good." || strings.Join(st.ClosedTopics, ",") != "b,a" {
 		t.Fatalf("a re-close: results %v, close order %v", st.CloseResults, st.ClosedTopics)
 	}
@@ -45,7 +45,7 @@ func TestCloseRequiresAResult(t *testing.T) {
 func TestCloseResultRendersBesideTheName(t *testing.T) {
 	const result = `<span class="tresult" title="how the topic ended">`
 	st := &State{}
-	mustApply(t, st, addXML(ClassTechnical, "t", "x")+`<wb:answer id="1" value="ok">ok</wb:answer>`+`<wb:close topic="t" result="Went with **plan b**."/>`)
+	mustApply(t, st, addXML(ClassTechnical, "t", "x")+`<wb:answer id="1" value="ok">ok</wb:answer>`+`<wb:topic name="t"><wb:close result="Went with **plan b**."/></wb:topic>`)
 	for _, layout := range layouts() {
 		out := render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r"}))
 		wantAll(t, out, `<span class="tname" title="closed">t</span>`+result+`Went with <strong>plan b</strong>.</span>`)
@@ -55,7 +55,7 @@ func TestCloseResultRendersBesideTheName(t *testing.T) {
 	out := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
 	wantNone(t, out, result, "plan b")
 
-	mustApply(t, st, `<wb:answer id="2" value="ok">ok</wb:answer><wb:close topic="t" result="Second ending."/>`)
+	mustApply(t, st, `<wb:answer id="2" value="ok">ok</wb:answer><wb:topic name="t"><wb:close result="Second ending."/></wb:topic>`)
 	out = render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
 	wantAll(t, out, result+`Second ending.</span>`)
 	wantNone(t, out, "plan b")
@@ -108,7 +108,7 @@ func TestTopicBarShowsItsLatestChange(t *testing.T) {
 // answer, and the form script builds the "[topic] text" line from it.
 func TestTopicBarCarriesANotePen(t *testing.T) {
 	st := &State{}
-	mustApply(t, st, `<wb:topic name='say "hi"'>body</wb:topic>`+addXML(ClassTechnical, "asks", "x"))
+	mustApply(t, st, `<wb:topic name='say "hi"'><wb:body>body</wb:body></wb:topic>`+addXML(ClassTechnical, "asks", "x"))
 	for name, layout := range layouts() {
 		out := render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r"}))
 		pen := `<button class="btn mini tnote-toggle" title="note on this topic"><svg class="i" aria-hidden="true"><use href="#i-pen"/></svg></button></div>`
@@ -145,9 +145,9 @@ func closedBoard(t *testing.T, n int) *State {
 	mustApply(t, st, `<wb:answer ids="`+strings.Join(ids, " ")+`" value="ok">ok</wb:answer>`)
 	cmds.Reset()
 	for i := 1; i <= n; i++ {
-		fmt.Fprintf(&cmds, `<wb:close topic="c%d" result="Ending %d."/>`, i, i)
+		fmt.Fprintf(&cmds, `<wb:topic name="c%d"><wb:close result="Ending %d."/></wb:topic>`, i, i)
 	}
-	cmds.WriteString(addXML(ClassTechnical, "closed waiting", "still asks") + `<wb:close topic="closed waiting" result="Closed early."/>`)
+	cmds.WriteString(addXML(ClassTechnical, "closed waiting", "still asks") + `<wb:topic name="closed waiting"><wb:close result="Closed early."/></wb:topic>`)
 	mustApply(t, st, cmds.String())
 	return st
 }

@@ -59,7 +59,7 @@ func TestTopicsOrderByRecencyWithinRank(t *testing.T) {
 	wantTopicOrder(t, st, "older", "newer")
 	mustApply(t, st, `<wb:patch id="3"><wb:title>b1 again</wb:title></wb:patch>`)
 	wantTopicOrder(t, st, "newer", "older")
-	mustApply(t, st, `<wb:edit topic="older"><wb:old>notes</wb:old><wb:new>more notes</wb:new></wb:edit>`)
+	mustApply(t, st, `<wb:topic name="older"><wb:edit><wb:old>notes</wb:old><wb:new>more notes</wb:new></wb:edit></wb:topic>`)
 	wantTopicOrder(t, st, "older", "newer")
 	// The same body again is no activity.
 	mustApply(t, st, `<wb:patch id="3"><wb:title>b1 third</wb:title></wb:patch>`)
@@ -131,7 +131,7 @@ func TestChangedBodyRanksLikeAnOpenAcknowledgement(t *testing.T) {
 		t.Fatalf("a body changed after the last answer should outrank a settled topic: %v", topicNames(st))
 	}
 	// A closed topic's body never ranks.
-	mustApply(t, st, `<wb:close topic="notes" result="done"/>`)
+	mustApply(t, st, `<wb:topic name="notes"><wb:close result="done"/></wb:topic>`)
 	if rankedAbove(t, st, "notes", "settled") {
 		t.Fatalf("a closed topic's body ranked: %v", topicNames(st))
 	}
@@ -183,7 +183,7 @@ func TestContentOnlyTopicInTheView(t *testing.T) {
 	if notes.Name != "notes" || notes.Doc != "just notes" || notes.Quiet || notes.Closed || !notes.DocOpen(false) || notes.SettledCount() != 0 {
 		t.Fatalf("notes = %+v", notes)
 	}
-	mustApply(t, st, `<wb:close topic="notes" result="done"/>`)
+	mustApply(t, st, `<wb:topic name="notes"><wb:close result="done"/></wb:topic>`)
 	notes = topicView(t, st, LayoutFull, "notes")
 	if !notes.Quiet || !notes.Closed || notes.Doc != "just notes" || notes.DocOpen(false) || notes.DocOpen(true) {
 		t.Fatalf("closed notes = %+v", notes)
@@ -196,7 +196,7 @@ func TestBodyOpenOnTheFullPageUnlessClosed(t *testing.T) {
 	if tv := topicView(t, st, LayoutFull, "t"); !tv.DocOpen(false) || tv.DocNew {
 		t.Fatalf("full page topic = %+v", tv)
 	}
-	mustApply(t, st, `<wb:close topic="t" result="done"/>`)
+	mustApply(t, st, `<wb:topic name="t"><wb:close result="done"/></wb:topic>`)
 	if tv := topicView(t, st, LayoutFull, "t"); tv.DocOpen(false) || tv.Doc != "body" {
 		t.Fatalf("closed topic on the full page = %+v", tv)
 	}
@@ -218,7 +218,7 @@ func TestEmbedShowsABodyOpenOnlyWhenChanged(t *testing.T) {
 	}
 	st.LastEmbedSeq = st.Seq
 	// Change only b's body.
-	mustApply(t, st, `<wb:edit topic="b"><wb:old>body b</wb:old><wb:new>body b2</wb:new></wb:edit>`)
+	mustApply(t, st, `<wb:topic name="b"><wb:edit><wb:old>body b</wb:old><wb:new>body b2</wb:new></wb:edit></wb:topic>`)
 	a, b := topicView(t, st, LayoutEmbed, "a"), topicView(t, st, LayoutEmbed, "b")
 	if a.DocNew || a.DocOpen(true) || !b.DocNew || !b.DocOpen(true) {
 		t.Fatalf("embed a = %+v b = %+v", a, b)
@@ -240,7 +240,7 @@ func TestEmbedShowsABodyOpenOnlyWhenChanged(t *testing.T) {
 		t.Fatalf("an unchanged body on the embed = %+v", tv)
 	}
 	// A closed topic never opens its body, changed or not.
-	mustApply(t, st, `<wb:close topic="a" result="done"/>`)
+	mustApply(t, st, `<wb:topic name="a"><wb:close result="done"/></wb:topic>`)
 	if tv := topicView(t, st, LayoutEmbed, "a"); tv.DocOpen(true) || !tv.Closed {
 		t.Fatalf("closed topic on the embed = %+v", tv)
 	}

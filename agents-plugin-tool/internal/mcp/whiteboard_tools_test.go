@@ -239,16 +239,16 @@ func TestWhiteboardUpdateRendersPageEmbedAndStampInOrder(t *testing.T) {
 	}
 	defer func() { whiteboardRename = orig }()
 
-	text := f.update(t, `<wb:add class="policy" topic="layout">
+	text := f.update(t, `<wb:topic name="layout"><wb:add class="policy">
 <wb:title>Two columns?</wb:title>
 <wb:option>yes</wb:option>
 <wb:option>no</wb:option>
 <wb:recommend>a: reads faster</wb:recommend>
-</wb:add>
-<wb:add class="technical" topic="layout">
+</wb:add></wb:topic>
+<wb:topic name="layout"><wb:add class="technical">
 <wb:title>Sticky sidebar</wb:title>
 <wb:why>keeps todos visible</wb:why>
-</wb:add>`)
+</wb:add></wb:topic>`)
 	if got := resultLine(t, text, "ids: "); got != "(01), (02)" {
 		t.Fatalf("ids line = %q", got)
 	}
@@ -403,7 +403,7 @@ func TestWhiteboardRenameRetriesSharingViolation(t *testing.T) {
 				}
 				return origRename(from, to)
 			}
-			f.update(t, `<wb:add class="policy" topic="t"><wb:title>x</wb:title></wb:add>`)
+			f.update(t, `<wb:topic name="t"><wb:add class="policy"><wb:title>x</wb:title></wb:add></wb:topic>`)
 			if failures != 0 || f.stamp(t) != "wbStamp(\"1\");\n" {
 				t.Fatalf("the %s rename must succeed after retries; failures left %d", target, failures)
 			}
@@ -419,7 +419,7 @@ func TestWhiteboardRenameRetriesSharingViolation(t *testing.T) {
 				}
 				return origRename(from, to)
 			}
-			resp := f.call(t, "whiteboard.update", map[string]any{"commands": `<wb:add class="policy" topic="t"><wb:title>y</wb:title></wb:add>`})
+			resp := f.call(t, "whiteboard.update", map[string]any{"commands": `<wb:topic name="t"><wb:add class="policy"><wb:title>y</wb:title></wb:add></wb:topic>`})
 			if !isToolError(resp) || !strings.Contains(toolText(t, resp), "write "+map[string]string{"page": "full page", "stamp": "stamp"}[target]) {
 				t.Fatalf("persistent sharing violation must fail the render: %s", resp)
 			}
@@ -462,7 +462,7 @@ func TestWhiteboardExcludeFailureLeavesNoFolder(t *testing.T) {
 func TestWhiteboardRefusalsCarryProblemsAndGrammar(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	resp := f.call(t, "whiteboard.update", map[string]any{"commands": `<wb:answer id="9" value="a">a</wb:answer>
-<wb:add class="policy" topic="t" color="red"><wb:title>x</wb:title></wb:add>
+<wb:topic name="t"><wb:add class="policy" color="red"><wb:title>x</wb:title></wb:add></wb:topic>
 <wb:mystery/>`})
 	text := toolText(t, resp)
 	if !isToolError(resp) {
@@ -474,7 +474,7 @@ func TestWhiteboardRefusalsCarryProblemsAndGrammar(t *testing.T) {
 		"command 2 <wb:add> (line 2): unknown attribute color",
 		"command 3 <wb:mystery> (line 3): unknown command",
 		"## Commands",
-		"`commands` is one string of flat commands.",
+		"`commands` is one string of commands.",
 		// The rsrc renderer substitutes only {{.Name}} placeholders, so the
 		// item-reference example survives rendering.
 		"`supersedes {{12}}`",
@@ -529,7 +529,7 @@ func TestWhiteboardUpdateRefusesTheRetiredPayloadArgument(t *testing.T) {
 				"payload: no longer accepted; whiteboard.update takes commands",
 				"nothing was applied",
 				"## Commands",
-				"`commands` is one string of flat commands.",
+				"`commands` is one string of commands.",
 			} {
 				if !strings.Contains(text, want) {
 					t.Fatalf("payload refusal missing %q:\n%s", want, text)
@@ -577,10 +577,10 @@ func TestWhiteboardUpdateRefusesNonStringCommands(t *testing.T) {
 
 func TestWhiteboardQueryAndTopicBodyThroughTools(t *testing.T) {
 	f := newWhiteboardFixture(t)
-	f.update(t, `<wb:add class="technical" topic="t"><wb:title>settle me</wb:title></wb:add>
-<wb:topic name="t">
+	f.update(t, `<wb:topic name="t"><wb:add class="technical"><wb:title>settle me</wb:title></wb:add></wb:topic>
+<wb:topic name="t"><wb:body>
 background body-marker line
-</wb:topic>`)
+</wb:body></wb:topic>`)
 	pagePath := filepath.Join(f.dir(), f.replyID()+".html")
 	page, _ := os.ReadFile(pagePath)
 	if body, item := strings.Index(string(page), "body-marker"), strings.Index(string(page), "settle me"); body < 0 || body > item {
@@ -609,7 +609,7 @@ background body-marker line
 		t.Fatalf("query with no payload must list every item:\n%s", text)
 	}
 	// wb:edit changes the stored body, and the next query shows the change.
-	f.update(t, `<wb:edit topic="t"><wb:old>body-marker</wb:old><wb:new>edited-marker</wb:new></wb:edit>`)
+	f.update(t, `<wb:topic name="t"><wb:edit><wb:old>body-marker</wb:old><wb:new>edited-marker</wb:new></wb:edit></wb:topic>`)
 	text = toolText(t, f.call(t, "whiteboard.query", map[string]any{"payload": map[string]any{"topic": "t"}}))
 	if !strings.Contains(text, "background edited-marker line") || strings.Contains(text, "body-marker") {
 		t.Fatalf("query after wb:edit:\n%s", text)
@@ -637,7 +637,7 @@ func TestWhiteboardUpdateResultCarriesStaleTopicNudge(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	var bodies strings.Builder
 	for _, name := range []string{"alpha", "beta", "gamma", "delta", "epsilon"} {
-		bodies.WriteString(`<wb:topic name="` + name + `">notes on ` + name + "</wb:topic>\n")
+		bodies.WriteString(`<wb:topic name="` + name + `"><wb:body>notes on ` + name + "</wb:body></wb:topic>\n")
 	}
 	if text := f.update(t, bodies.String()); strings.Contains(text, "info: ") {
 		t.Fatalf("fresh topics must not nudge:\n%s", text)
@@ -999,7 +999,7 @@ func TestWhiteboardFirstUpdateTurnsSessionKnobOn(t *testing.T) {
 	if f.manualHasWhiteboard(t, f.key) {
 		t.Fatalf("whiteboard.query must not turn the knob on")
 	}
-	f.update(t, `<wb:add class="policy" topic="t"><wb:title>q?</wb:title></wb:add>`)
+	f.update(t, `<wb:topic name="t"><wb:add class="policy"><wb:title>q?</wb:title></wb:add></wb:topic>`)
 	if v, ok := f.s.sessions.getOverride(f.key, "workflow.whiteboard_enabled.claude"); !ok || v != "on" {
 		t.Fatalf("session claude bucket = %q, %v; want on", v, ok)
 	}
@@ -1014,7 +1014,7 @@ func TestWhiteboardFirstUpdateTurnsSessionKnobOn(t *testing.T) {
 func TestWhiteboardUpdateLeavesExplicitSessionOff(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	f.tune(t, map[string]any{"value": "off", "scope": "session"})
-	f.update(t, `<wb:add class="policy" topic="t"><wb:title>q?</wb:title></wb:add>`)
+	f.update(t, `<wb:topic name="t"><wb:add class="policy"><wb:title>q?</wb:title></wb:add></wb:topic>`)
 	if f.manualHasWhiteboard(t, f.key) {
 		t.Fatalf("an explicit session off must stand after a whiteboard update")
 	}
@@ -1022,7 +1022,7 @@ func TestWhiteboardUpdateLeavesExplicitSessionOff(t *testing.T) {
 	g := newWhiteboardFixture(t)
 	g.tune(t, map[string]any{"value": "off", "harness": "claude"})
 	g.tune(t, map[string]any{"value": "off", "harness": "*", "scope": "session"})
-	g.update(t, `<wb:add class="policy" topic="t"><wb:title>q?</wb:title></wb:add>`)
+	g.update(t, `<wb:topic name="t"><wb:add class="policy"><wb:title>q?</wb:title></wb:add></wb:topic>`)
 	if g.manualHasWhiteboard(t, g.key) {
 		t.Fatalf("a session all off must stand after a whiteboard update")
 	}
@@ -1031,7 +1031,7 @@ func TestWhiteboardUpdateLeavesExplicitSessionOff(t *testing.T) {
 func TestWhiteboardUpdateOverridesNonSessionOffAtSessionScope(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	f.tune(t, map[string]any{"value": "off", "harness": "claude"})
-	f.update(t, `<wb:add class="policy" topic="t"><wb:title>q?</wb:title></wb:add>`)
+	f.update(t, `<wb:topic name="t"><wb:add class="policy"><wb:title>q?</wb:title></wb:add></wb:topic>`)
 	if !f.manualHasWhiteboard(t, f.key) {
 		t.Fatalf("a global off must be overridden at session scope by the first update")
 	}
@@ -1146,7 +1146,7 @@ func TestWhiteboardWorkflowTextFollowsKnob(t *testing.T) {
 		"Progress and explanations stay in the terminal or chat, which never repeats what the board holds.",
 		"the terminal or chat carries only progress, explanations, that pointer (or embed) line,",
 		"#### Commands",
-		"`commands` is one string of flat commands.",
+		"`commands` is one string of commands.",
 		"write `{{12}}` in an item field",
 		"Whiteboard: <full> - (102), (103)",
 		"session's dashboard page URL while the dashboard daemon serves the session,",
@@ -1183,7 +1183,7 @@ func TestWhiteboardWorkflowTextFollowsKnob(t *testing.T) {
 		t.Fatalf("knob off: the manual must carry no command syntax section (%d headings)", n)
 	}
 	for name, text := range map[string]string{"playbook.read": manualOn, "workflow_manual": injected} {
-		if n := syntaxHeadings(text); n != 1 || strings.Count(text, "`commands` is one string of flat commands.") != 1 {
+		if n := syntaxHeadings(text); n != 1 || strings.Count(text, "`commands` is one string of commands.") != 1 {
 			t.Fatalf("knob on, %s: the command syntax section must appear exactly once, found %d", name, n)
 		}
 		if !strings.Contains(text, "\n### Command syntax\n") || strings.Index(text, "### Command syntax") > strings.Index(text, "### Whiteboard") {
@@ -1241,7 +1241,7 @@ func TestWhiteboardPlaybookReadAppendsCommandSyntax(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	text := toolText(t, f.call(t, "playbook.read", map[string]any{"name": "whiteboard"}))
 	if strings.Count(text, "## Command syntax") != 1 || strings.Index(text, "## Command syntax") < strings.Index(text, "## Answers") ||
-		!strings.Contains(text, "`commands` is one string of flat commands.") {
+		!strings.Contains(text, "`commands` is one string of commands.") {
 		t.Fatalf("the whiteboard playbook must end with the command syntax section once:\n%s", text)
 	}
 	if resp := f.call(t, "playbook.read", map[string]any{"name": "command-syntax"}); !isToolError(resp) && !strings.Contains(toolText(t, resp), "not found") {

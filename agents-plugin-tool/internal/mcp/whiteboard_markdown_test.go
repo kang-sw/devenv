@@ -27,13 +27,13 @@ func readWhiteboardPage(t *testing.T, path string) string {
 func TestWhiteboardMarkdownFileLinks(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	abs := filepath.Join(f.root, "docs", "notes.md")
-	f.update(t, `<wb:add class="policy" topic="t">
+	f.update(t, `<wb:topic name="t"><wb:add class="policy">
 <wb:title>see [notes](`+filepath.ToSlash(abs)+`)</wb:title>
 <wb:option>x</wb:option>
 <wb:option>y</wb:option>
 <wb:why>![shot](img/shot%20one.png)
 [web](https://example.com/)</wb:why>
-</wb:add>`)
+</wb:add></wb:topic>`)
 	full := readWhiteboardPage(t, filepath.Join(f.dir(), f.replyID()+".html"))
 	for _, want := range []string{
 		`<img src="../../img/shot%20one.png" alt="shot">`,
@@ -71,13 +71,13 @@ func TestWhiteboardMarkdownFileLinks(t *testing.T) {
 func TestWhiteboardMarkdownFileLinkNeverYieldsAScheme(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	embed := resultLine(t, f.update(t, embedDirCommand(f.root)+`
-<wb:add class="policy" topic="t">
+<wb:topic name="t"><wb:add class="policy">
 <wb:title>[a](./ai-docs/whiteboards/javascript:alert(1)) [b](ai-docs/whiteboards/javascript%3Aalert%282%29)</wb:title>
 <wb:option>x</wb:option>
 <wb:option>y</wb:option>
 <wb:why>[c](./javascript:alert(3))
 ![d](javascript%3Ax.png)</wb:why>
-</wb:add>`), "embed: ")
+</wb:add></wb:topic>`), "embed: ")
 	full := readWhiteboardPage(t, filepath.Join(f.dir(), f.replyID()+".html"))
 	inRepo := readWhiteboardPage(t, filepath.Join(f.root, embed))
 	for name, page := range map[string]string{"full": full, "embed in the repository root": inRepo} {
@@ -107,13 +107,13 @@ func TestWhiteboardMermaidAssetWrittenOnce(t *testing.T) {
 	name, data := wswhiteboard.MermaidAsset()
 
 	plain := newWhiteboardFixture(t)
-	plain.update(t, `<wb:add class="technical" topic="t"><wb:title>no diagram</wb:title></wb:add>`)
+	plain.update(t, `<wb:topic name="t"><wb:add class="technical"><wb:title>no diagram</wb:title></wb:add></wb:topic>`)
 	if _, err := os.Stat(filepath.Join(plain.dir(), name)); !os.IsNotExist(err) {
 		t.Fatalf("a board without a mermaid block wrote the mermaid script: %v", err)
 	}
 
 	f := newWhiteboardFixture(t)
-	embed := resultLine(t, f.update(t, "<wb:add class=\"policy\" topic=\"t\">\n<wb:title>diagram</wb:title>\n<wb:option>x</wb:option>\n<wb:option>y</wb:option>\n<wb:why>\n```mermaid\ngraph LR\nA-->B\n```\n</wb:why>\n</wb:add>"), "embed: ")
+	embed := resultLine(t, f.update(t, "<wb:topic name=\"t\"><wb:add class=\"policy\">\n<wb:title>diagram</wb:title>\n<wb:option>x</wb:option>\n<wb:option>y</wb:option>\n<wb:why>\n```mermaid\ngraph LR\nA-->B\n```\n</wb:why>\n</wb:add></wb:topic>"), "embed: ")
 	asset := filepath.Join(f.dir(), name)
 	got, err := os.ReadFile(asset)
 	if err != nil || len(got) != len(data) {

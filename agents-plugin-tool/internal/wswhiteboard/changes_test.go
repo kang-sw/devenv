@@ -100,24 +100,24 @@ func TestTopicMarksFollowOnlyBodyEdits(t *testing.T) {
 	// The same body again is no change and keeps them.
 	mustApply(t, st, topicXML("t", "one\n\ntwo\n\nthree"))
 	if got := topicMarks(t, st); !reflect.DeepEqual(got, want) {
-		t.Fatalf("an identical wb:topic changed the marks: %v, want %v", got, want)
+		t.Fatalf("an identical wb:body changed the marks: %v, want %v", got, want)
 	}
 
 	// A second body edit replaces them, wb:edit included.
-	mustApply(t, st, `<wb:edit topic="t"><wb:old>two</wb:old><wb:new>TWO</wb:new></wb:edit>`)
+	mustApply(t, st, `<wb:topic name="t"><wb:edit><wb:old>two</wb:old><wb:new>TWO</wb:new></wb:edit></wb:topic>`)
 	want = marks(1, MarkMod)
 	if got := topicMarks(t, st); !reflect.DeepEqual(got, want) {
 		t.Fatalf("after wb:edit: %v, want %v", got, want)
 	}
 
 	// An edit that changes no block drops them: the latest edit marked nothing.
-	mustApply(t, st, `<wb:edit topic="t"><wb:old>one</wb:old><wb:new>one </wb:new></wb:edit>`)
+	mustApply(t, st, `<wb:topic name="t"><wb:edit><wb:old>one</wb:old><wb:new>one </wb:new></wb:edit></wb:topic>`)
 	if got := topicMarks(t, st); got != nil {
 		t.Fatalf("a block-neutral edit must leave no marks, got %v", got)
 	}
 
 	// Clearing the body and setting one again is a first body.
-	mustApply(t, st, `<wb:topic name="t"></wb:topic>`)
+	mustApply(t, st, `<wb:topic name="t"><wb:body></wb:body></wb:topic>`)
 	mustApply(t, st, topicXML("t", "fresh"))
 	if got := topicMarks(t, st); got != nil {
 		t.Fatalf("a body set after a clear is a first body, got %v", got)
@@ -126,7 +126,7 @@ func TestTopicMarksFollowOnlyBodyEdits(t *testing.T) {
 
 func TestTopicMarksArePerBatch(t *testing.T) {
 	edit := func(old, repl string) string {
-		return `<wb:edit topic="t"><wb:old>` + old + `</wb:old><wb:new>` + repl + `</wb:new></wb:edit>`
+		return `<wb:topic name="t"><wb:edit><wb:old>` + old + `</wb:old><wb:new>` + repl + `</wb:new></wb:edit></wb:topic>`
 	}
 
 	// Several edits to different blocks in one batch keep every block's mark.

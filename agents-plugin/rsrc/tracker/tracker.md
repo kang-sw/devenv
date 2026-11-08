@@ -52,12 +52,15 @@ tracker.query payload: {store?, scope?, item?, kind?, status?, project?, text?}
 ## Commands
 
 Every tag carries the prefix `tk:` and follows the command syntax rules.
-Every command except `tk:register` and `tk:sync` names its store with
-`store`, and a batch writes to one store. `tk:register` and `tk:sync` reach
-the network, so each stands alone in its batch.
+`tk:store` is the group: its `name` names the store for every command
+inside it, which is every command except `tk:register` and `tk:sync`. A
+batch writes to one store, so it holds one `tk:store` group. `tk:register`
+and `tk:sync` reach the network, so each stands alone in its batch, outside
+any group.
 
 | command | attributes | content |
 |---|---|---|
+| `tk:store` | `name` | group of every command below but `tk:register` and `tk:sync` |
 | `tk:item.create` | `kind`, `title`, `project?`, `due?`, `priority?`, `parent?`, `mentions?` | the body |
 | `tk:item.edit` | `item`, `title?`, `project?`, `due?`, `priority?`, `mentions?`, `clear?` | a new body |
 | `tk:item.hide` | `item` | none |
@@ -83,11 +86,13 @@ the network, so each stands alone in its batch.
 | `tk:sync` | `store?` | none |
 
 ```xml
-<tk:item.create store="team" kind="task" title="Parser" due="2026-11-20">
+<tk:store name="team">
+<tk:item.create kind="task" title="Parser" due="2026-11-20">
 Body text, markdown, written as is.
 </tk:item.create>
-<tk:item.assign store="team" item="$1" people="maya"/>
-<tk:item.status store="team" item="ada.pc-4" status="doing" origin="agent-auto">Started</tk:item.status>
+<tk:item.assign item="$1" people="maya"/>
+<tk:item.status item="ada.pc-4" status="doing" origin="agent-auto">Started</tk:item.status>
+</tk:store>
 ```
 
 - `item`, `parent`, `reply_to`, `comment`: an ID as the query or an update

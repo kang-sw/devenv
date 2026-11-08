@@ -194,7 +194,7 @@ func TestTrackerRegisterFailureAfterPushNamesWhatTheRemoteHolds(t *testing.T) {
 
 func TestTrackerCallsTurnTheKnobOnOnlyWhenTheySucceed(t *testing.T) {
 	f := newTrackerLeadFixture(t)
-	text := f.trackerRefused(t, "tracker.update", map[string]any{"commands": `<tk:item.create store="me" kind="task" title="x"/>`})
+	text := f.trackerRefused(t, "tracker.update", map[string]any{"commands": `<tk:store name="me"><tk:item.create kind="task" title="x"/></tk:store>`})
 	if !strings.Contains(text, "no store is registered") {
 		t.Fatalf("an event command with no store registered must say so: %s", text)
 	}
@@ -274,7 +274,7 @@ func TestTrackerToolsRefuseUnknownKeys(t *testing.T) {
 			t.Fatalf("%s with an unknown key must be refused as an unknown session: %s", tool, text)
 		}
 	}
-	text := f.trackerRefused(t, "tracker.update", map[string]any{"session_key": "bogus", "commands": `<tk:item.create store="me" kind="task" title="smuggled"/>`})
+	text := f.trackerRefused(t, "tracker.update", map[string]any{"session_key": "bogus", "commands": `<tk:store name="me"><tk:item.create kind="task" title="smuggled"/></tk:store>`})
 	if !strings.Contains(text, "unknown_session") {
 		t.Fatalf("an event write with an unknown key must be refused: %s", text)
 	}
@@ -292,14 +292,16 @@ func TestTrackerUpdateWritesRawBodiesAndBatchReferences(t *testing.T) {
 	f := newTrackerLeadFixture(t)
 	f.trackerUpdate(t, trackerPersonal)
 	body := "## 배경\n\n파서가 `<a href=\"x\">` 태그와 \"따옴표\", 'quote', & 기호를 그대로 둔다.\n- 첫째\n- 둘째"
-	out := f.trackerUpdate(t, `<tk:item.create store="me" kind="task" title="파서 정리" due="2026-11-20" project="ws">
+	out := f.trackerUpdate(t, `<tk:store name="me">
+<tk:item.create kind="task" title="파서 정리" due="2026-11-20" project="ws">
 `+body+`
 </tk:item.create>
-<tk:item.assign store="me" item="$1" people="ada"/>
-<tk:comment.add store="me" item="$1">첫 댓글
+<tk:item.assign item="$1" people="ada"/>
+<tk:comment.add item="$1">첫 댓글
 두 줄</tk:comment.add>
-<tk:comment.add store="me" item="$1" reply_to="$3">답글</tk:comment.add>
-<tk:item.status store="me" item="$1" status="doing" origin="agent-auto">시작</tk:item.status>`)
+<tk:comment.add item="$1" reply_to="$3">답글</tk:comment.add>
+<tk:item.status item="$1" status="doing" origin="agent-auto">시작</tk:item.status>
+</tk:store>`)
 	if !strings.Contains(out, "me: wrote 5 events") {
 		t.Fatalf("update output: %s", out)
 	}
@@ -387,10 +389,11 @@ func TestTrackerUpdateIsAllOrNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 	beforeEvents := len(before.Events)
-	text := f.trackerRefused(t, "tracker.update", map[string]any{"commands": `<tk:item.create store="me" kind="task" title="kept out"/>
+	text := f.trackerRefused(t, "tracker.update", map[string]any{"commands": `<tk:store name="me"><tk:item.create kind="task" title="kept out"/>
 
-<tk:item.hide store="me" item="$1"/>
-<tk:item.hide store="me" item="$1"/>`})
+<tk:item.hide item="$1"/>
+<tk:item.hide item="$1"/>
+</tk:store>`})
 	if !strings.Contains(text, "command 3 <tk:item.hide> (line 4): the store would flag this write:") || !strings.Contains(text, "nothing was applied") {
 		t.Fatalf("the refusal must cite the flagged command and its line:\n%s", text)
 	}
@@ -420,22 +423,28 @@ func TestTrackerUpdateListsEveryProblem(t *testing.T) {
 	f := newTrackerLeadFixture(t)
 	f.trackerUpdate(t, trackerPersonal)
 	text := f.trackerRefused(t, "tracker.update", map[string]any{"commands": `<tk:register store="x" member="a"/>
-<tk:item.create store="me" kind="epic" title="t" origin="human"/>
-<tk:item.assign store="other" item="$1" people="a" levels="2"/>
-<tk:comment.add store="me" item="$9"></tk:comment.add>
-<tk:item.edit store="me" item="$3"/>
-<tk:item.close store="me" item="maya"/>`})
+<tk:store name="me">
+<tk:item.create kind="epic" title="t" origin="human"/>
+<tk:item.assign item="$1" people="a" levels="2"/>
+<tk:comment.add item="$9"></tk:comment.add>
+<tk:item.edit item="$3"/>
+<tk:item.close item="maya"/>
+</tk:store>
+<tk:store name="other"><tk:item.hide store="me" item="$1"/></tk:store>
+<tk:item.hide item="$1"/>`})
 	for _, want := range []string{
 		"command 1 <tk:register> (line 1): reaches the network and cannot be rolled back, so it stands alone in its batch",
-		"command 2 <tk:item.create> (line 2) kind: must be one of task, todo, topic",
-		"command 2 <tk:item.create> (line 2) origin: must be one of agent, agent-auto",
-		`command 3 <tk:item.assign> (line 3) store: "other" is not a registered store (registered: me)`,
-		"command 3 <tk:item.assign> (line 3): takes people or levels, one of the two",
-		"command 4 <tk:comment.add> (line 4) item: $N names an earlier command of this batch by position",
-		"command 4 <tk:comment.add> (line 4) body: must be non-empty",
-		"command 5 <tk:item.edit> (line 5) item: $3 names command 3, which creates no item; $N must name a <tk:item.create>",
-		"command 5 <tk:item.edit> (line 5): changes nothing",
-		"command 6 <tk:item.close> (line 6) item: must be an item ID such as maya.pc-5, or $N",
+		"command 2 <tk:item.create> (line 3) kind: must be one of task, todo, topic",
+		"command 2 <tk:item.create> (line 3) origin: must be one of agent, agent-auto",
+		"command 3 <tk:item.assign> (line 4): takes people or levels, one of the two",
+		"command 4 <tk:comment.add> (line 5) item: $N names an earlier command of this batch by position",
+		"command 4 <tk:comment.add> (line 5) body: must be non-empty",
+		"command 5 <tk:item.edit> (line 6) item: $3 names command 3, which creates no item; $N must name a <tk:item.create>",
+		"command 5 <tk:item.edit> (line 6): changes nothing",
+		"command 6 <tk:item.close> (line 7) item: must be an item ID such as maya.pc-5, or $N",
+		"<tk:store> (line 9): a second <tk:store> group; one batch writes to one store, so it holds one group",
+		"command 7 <tk:item.hide> (line 9): unknown attribute store (known: origin, item)",
+		`command 8 <tk:item.hide> (line 10): goes inside a <tk:store name="..."> group`,
 		"## Commands", "`tk:item.create`",
 	} {
 		if !strings.Contains(text, want) {
@@ -444,6 +453,16 @@ func TestTrackerUpdateListsEveryProblem(t *testing.T) {
 	}
 	if strings.Count(text, "## Command syntax") != 1 || strings.Index(text, "## Command syntax") > strings.Index(text, "## Commands") {
 		t.Fatalf("the refusal must carry the syntax once, ahead of the command table:\n%s", text)
+	}
+	// The group names a registered store, once for all its commands; the
+	// network commands stay at the root.
+	text = f.trackerRefused(t, "tracker.update", map[string]any{"commands": `<tk:store name="other"><tk:item.hide item="ada.pc-1"/><tk:item.hide item="ada.pc-2"/></tk:store>`})
+	if want := `- <tk:store> (line 1) name: "other" is not a registered store (registered: me)` + "\n"; strings.Count(text, want) != 1 {
+		t.Fatalf("refusal must name the unregistered store once:\n%s", text)
+	}
+	text = f.trackerRefused(t, "tracker.update", map[string]any{"commands": `<tk:store name="me"><tk:sync/></tk:store>`})
+	if !strings.Contains(text, "command 1 <tk:sync> (line 1): goes at the root, outside <tk:store> (line 1)") {
+		t.Fatalf("refusal must keep tk:sync at the root:\n%s", text)
 	}
 	text = f.trackerRefused(t, "tracker.update", map[string]any{"commands": map[string]any{"x": 1}})
 	if !strings.Contains(text, "commands: must be a string") {
@@ -474,7 +493,7 @@ func TestTrackerSyncCommandPushesAndQueryFetches(t *testing.T) {
 	if _, err := bo.Register(ctx, wstrackerhost.RegisterRequest{ID: "team", Remote: remote, Member: "bo", Profile: &wstracker.Profile{Given: "Bo"}}); err != nil {
 		t.Fatalf("bo joins: %v", err)
 	}
-	ids := trackerWrote(t, f.trackerUpdate(t, `<tk:item.create store="team" kind="task" title="for bo"/>`))
+	ids := trackerWrote(t, f.trackerUpdate(t, `<tk:store name="team"><tk:item.create kind="task" title="for bo"/></tk:store>`))
 	if out := f.trackerUpdate(t, `<tk:sync store="team"/>`); !strings.Contains(out, "team: pushed") {
 		t.Fatalf("tk:sync must push the write: %s", out)
 	}
@@ -583,7 +602,7 @@ func TestTrackerPlaybookReadAppendsCommandSyntax(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	text := toolText(t, f.call(t, "playbook.read", map[string]any{"name": trackerPlaybookName}))
 	if strings.Count(text, "## Command syntax") != 1 || strings.Index(text, "## Command syntax") < strings.Index(text, "## Sync") ||
-		!strings.Contains(text, "`commands` is one string of flat commands.") {
+		!strings.Contains(text, "`commands` is one string of commands.") {
 		t.Fatalf("the tracker playbook must end with the command syntax section once:\n%s", text)
 	}
 	if strings.Contains(text, "{{") {
@@ -619,12 +638,12 @@ func TestParseTrackerID(t *testing.T) {
 // literal.
 func TestTrackerUpdateDecodesEscapedText(t *testing.T) {
 	var problems wsxmlcmd.Problems
-	b := planTrackerBatch(&problems, `<tk:item.create store="team" kind="task" title="Parse &lt;key&gt; &amp; value" project="a&#38;b">body &lt;b&gt;</tk:item.create>`+
-		`<tk:item.edit store="team" item="$1" title="&quot;t&quot;">new &lt;b&gt;</tk:item.edit>`+
-		`<tk:item.status store="team" item="$1" status="doing">waiting on &lt;key&gt;</tk:item.status>`+
-		`<tk:item.close store="team" item="$1">done &amp; dusted <![CDATA[&lt;kept&gt;]]></tk:item.close>`+
-		`<tk:comment.add store="team" item="$1">see &lt;b&gt;</tk:comment.add>`+
-		`<tk:comment.edit store="team" comment="$5">edit &lt;b&gt;</tk:comment.edit>`,
+	b := planTrackerBatch(&problems, `<tk:store name="team"><tk:item.create kind="task" title="Parse &lt;key&gt; &amp; value" project="a&#38;b">body &lt;b&gt;</tk:item.create>`+
+		`<tk:item.edit item="$1" title="&quot;t&quot;">new &lt;b&gt;</tk:item.edit>`+
+		`<tk:item.status item="$1" status="doing">waiting on &lt;key&gt;</tk:item.status>`+
+		`<tk:item.close item="$1">done &amp; dusted <![CDATA[&lt;kept&gt;]]></tk:item.close>`+
+		`<tk:comment.add item="$1">see &lt;b&gt;</tk:comment.add>`+
+		`<tk:comment.edit comment="$5">edit &lt;b&gt;</tk:comment.edit></tk:store>`,
 		[]wstrackerhost.StoreEntry{{ID: "team"}})
 	if len(problems.List) > 0 {
 		t.Fatalf("problems: %q", problems.List)

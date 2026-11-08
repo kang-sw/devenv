@@ -2,25 +2,31 @@ package wswhiteboard
 
 import "github.com/kang-sw/devenv/internal/wsxmlcmd"
 
-// The whiteboard.update input is one string of flat commands in the shared
+// The whiteboard.update input is one string of commands in the shared
 // XML-like command language (package wsxmlcmd states its rules); this file
-// is the whiteboard's grammar for it: the "wb:" prefix and the command table.
+// is the whiteboard's grammar for it: the "wb:" prefix, the wb:topic group,
+// and the command table.
 
 var itemFieldNames = []string{"title", "option", "recommend", "why", "link"}
 
 // grammar is the whiteboard's command language; the commands follow the
-// order of the playbook's table. Item fields are plain text, so an escaped
+// order of the playbook's table. A wb:topic group names the topic its
+// commands (wb:body, wb:edit, wb:add, wb:close) act on, so a topic's long
+// name is written once per batch. Item fields are plain text, so an escaped
 // one is decoded; a topic body (raw HTML), wb:edit's old and new (matched
 // against a stored body), and an answer (the user's verbatim words) are not.
 var grammar = wsxmlcmd.Grammar{
 	Prefix: "wb:",
+	// wb:topic once took the body itself; the hint shows the form that
+	// replaced it to a caller still writing the old one.
+	Group: &wsxmlcmd.Group{Name: "topic", Attr: "name", Hint: `a topic body goes in <wb:body> inside the group, and an empty <wb:body/> clears it: <wb:topic name="..."><wb:body>...</wb:body></wb:topic>`},
 	Commands: map[string]wsxmlcmd.Spec{
-		"add":       {Kind: wsxmlcmd.Container, Attrs: []string{"id", "class", "topic"}, Fields: itemFieldNames, DecodeFields: itemFieldNames},
+		"body":      {Kind: wsxmlcmd.Leaf, Scoped: true},
+		"edit":      {Kind: wsxmlcmd.Container, Attrs: []string{"replace_all"}, Fields: []string{"old", "new"}, Scoped: true},
+		"add":       {Kind: wsxmlcmd.Container, Attrs: []string{"id", "class"}, Fields: itemFieldNames, DecodeFields: itemFieldNames, Scoped: true},
+		"close":     {Kind: wsxmlcmd.Empty, Attrs: []string{"result"}, Scoped: true},
 		"answer":    {Kind: wsxmlcmd.Leaf, Attrs: []string{"id", "ids", "value", "assumed"}},
 		"patch":     {Kind: wsxmlcmd.Container, Attrs: []string{"id", "status", "clear"}, Fields: itemFieldNames, DecodeFields: itemFieldNames},
-		"topic":     {Kind: wsxmlcmd.Leaf, Attrs: []string{"name"}},
-		"edit":      {Kind: wsxmlcmd.Container, Attrs: []string{"topic", "replace_all"}, Fields: []string{"old", "new"}},
-		"close":     {Kind: wsxmlcmd.Empty, Attrs: []string{"topic", "result"}},
 		"floor":     {Kind: wsxmlcmd.Empty, Attrs: []string{"id"}},
 		"embed-dir": {Kind: wsxmlcmd.Empty, Attrs: []string{"path"}},
 	},

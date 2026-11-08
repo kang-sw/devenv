@@ -205,3 +205,97 @@ func TestGrammarDecidesWhichBodiesDecode(t *testing.T) {
 		t.Errorf("decoded newlines = %q", cmds[3].Body)
 	}
 }
+
+// groupGrammar declares a group: tr:in passes name to the scoped tr:note and
+// tr:set; tr:drop stays at the root.
+var groupGrammar = Grammar{
+	Prefix: "tr:",
+	Group:  &Group{Name: "in", Attr: "name", Hint: `write <tr:in name="..."><tr:note>...</tr:note></tr:in>`},
+	Commands: map[string]Spec{
+		"note": {Kind: Leaf, Attrs: []string{"id"}, Scoped: true},
+		"set":  {Kind: Container, Attrs: []string{"flag"}, Fields: []string{"name"}, Scoped: true},
+		"drop": {Kind: Empty, Attrs: []string{"id"}},
+	},
+}
+
+// A group passes its attribute to the commands inside it and takes no
+// position; a batch may hold several groups, root commands between them.
+func TestGroupPassesItsAttributeToItsCommands(t *testing.T) {
+	cmds, problems := parse(groupGrammar, "<tr:in name=\"a\"><tr:note id=\"1\">x</tr:note><tr:set><tr:name>n</tr:name></tr:set></tr:in>\n"+
+		"<tr:drop id=\"2\"/><tr:in name='b &amp; c'>\n<tr:note>y</tr:note>\n</tr:in>")
+	if len(problems) > 0 {
+		t.Fatalf("problems: %q", problems)
+	}
+	if len(cmds) != 4 {
+		t.Fatalf("commands = %+v", cmds)
+	}
+	for i, want := range []struct {
+		tag, scope string
+		scoped     bool
+	}{{"tr:note", "a", true}, {"tr:set", "a", true}, {"tr:drop", "", false}, {"tr:note", "b & c", true}} {
+		got, ok := cmds[i].Scoped()
+		if cmds[i].Pos != i+1 || cmds[i].Tag != want.tag || got != want.scope || ok != want.scoped {
+			t.Errorf("command %d = %+v, scope %q %v", i, cmds[i], got, ok)
+		}
+	}
+	if cmds[0].Scope != cmds[1].Scope || cmds[3].Scope.Line != 2 || cmds[3].Line != 3 || cmds[0].Body != "x" {
+		t.Fatalf("scopes = %+v / %+v", cmds[0].Scope, cmds[3].Scope)
+	}
+	if got := cmds[3].Scope.At(); got != "<tr:in> (line 2) name" {
+		t.Fatalf("scope label = %q", got)
+	}
+}
+
+func TestGroupRules(t *testing.T) {
+	for name, tc := range map[string]struct {
+		in   string
+		want []string
+	}{
+		"scoped command outside its group": {`<tr:note id="1">x</tr:note>`, []string{
+			`command 1 <tr:note> (line 1): goes inside a <tr:in name="..."> group`,
+		}},
+		"root-only command inside a group": {`<tr:in name="a"><tr:note>x</tr:note><tr:drop id="1"/></tr:in>`, []string{
+			"command 2 <tr:drop> (line 1): goes at the root, outside <tr:in> (line 1)",
+		}},
+		"nested group": {"<tr:in name=\"a\">\n<tr:in name=\"b\"><tr:note>x</tr:note></tr:in><tr:note>y</tr:note></tr:in>", []string{
+			"line 2: <tr:in> inside <tr:in> (line 1); groups do not nest",
+		}},
+		"group attribute on an inner command": {`<tr:in name="a"><tr:note name="b">x</tr:note></tr:in>`, []string{
+			"command 1 <tr:note> (line 1): unknown attribute name (known: id)",
+		}},
+		"text between commands": {"<tr:in name=\"a\"><tr:note>x</tr:note>\nloose\n<tr:note>y</tr:note></tr:in>", []string{
+			`line 2: text inside <tr:in> (line 1) between its commands: "loose"`,
+		}},
+		"group attribute missing, blank, unknown": {`<tr:in><tr:note>x</tr:note></tr:in><tr:in name=" " mode="x"><tr:note>y</tr:note></tr:in>`, []string{
+			"<tr:in> (line 1) name: required",
+			"<tr:in> (line 1): unknown attribute mode (known: name)",
+			"<tr:in> (line 1) name: must be non-empty",
+		}},
+		"empty groups": {`<tr:in name="a"/><tr:in name="b"> </tr:in>`, []string{
+			`<tr:in> (line 1): holds no commands; write <tr:in name="..."><tr:note>...</tr:note></tr:in>`,
+			`<tr:in> (line 1): holds no commands; write <tr:in name="..."><tr:note>...</tr:note></tr:in>`,
+		}},
+		// A body where the group takes commands is one problem, with the
+		// hint, and reading resumes after the group.
+		"body text in a group": {"<tr:in name=\"a\">\n## Body <b>bold</b> & <br>\n</tr:in><tr:drop id=\"x\" mode=\"y\"/>", []string{
+			`<tr:in> (line 1): text before its first command: "## Body <b>bold</b> & <br>"; write <tr:in name="..."><tr:note>...</tr:note></tr:in>`,
+			"command 1 <tr:drop> (line 3): unknown attribute mode (known: id)",
+		}},
+		"unprefixed tag first in a group": {`<tr:in name="a"><div>x</div></tr:in>`, []string{
+			`<tr:in> (line 1): text before its first command: "<div>x</div>"; write <tr:in name="..."><tr:note>...</tr:note></tr:in>`,
+		}},
+		"unterminated group": {"<tr:in name=\"a\">\n<tr:note>x</tr:note>\n", []string{
+			"line 3: <tr:in> from line 1 has no closing </tr:in>",
+		}},
+	} {
+		_, problems := parse(groupGrammar, tc.in)
+		if !slices.Equal(problems, tc.want) {
+			t.Errorf("%s: problems =\n%s\nwant\n%s", name, strings.Join(problems, "\n"), strings.Join(tc.want, "\n"))
+		}
+	}
+	// The unknown-command list names the group with the commands.
+	_, problems := parse(groupGrammar, `<tr:nope/>`)
+	if want := []string{"command 1 <tr:nope> (line 1): unknown command (commands: tr:drop, tr:in, tr:note, tr:set)"}; !slices.Equal(problems, want) {
+		t.Fatalf("problems = %q", problems)
+	}
+}
