@@ -1324,10 +1324,17 @@
       drclip.style.height = ext + "px";
       drhandle.style.top = (ext > 0 ? drTop + ext : Math.max(0, Math.min(y, drTop))) + "px";
     });
-    function drEnd() {
+    function drEnd(e) {
       var d = drDrag;
       drDrag = null;
-      if (!d || !d.moved) return;
+      // The pressed icon belongs to a click that follows a press that stayed
+      // put; a drag, or a cancelled press that sends no click, would leave it
+      // for a later keyboard activation to reveal as a stale entry.
+      if (!d || !d.moved) {
+        if (e && e.type === "pointercancel") drIcon = null;
+        return;
+      }
+      drIcon = null;
       drawer.classList.remove("drag");
       drDragged = true;
       setTimeout(function () { drDragged = false; }, 0);
