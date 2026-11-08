@@ -3,6 +3,7 @@
 <symbol id="i-clock" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.8"/><path d="M8 4.8V8l2.2 1.4"/></symbol>
 <symbol id="i-agents" viewBox="0 0 16 16"><rect x="3" y="5.6" width="10" height="7.4" rx="2"/><path d="M8 5.6V3.4M1.6 8.6v2M14.4 8.6v2M6.2 11h3.6"/><circle cx="8" cy="2.6" r="0.8"/><circle cx="6" cy="8.6" r="0.7"/><circle cx="10" cy="8.6" r="0.7"/></symbol>
 <symbol id="i-chev" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></symbol>
+<symbol id="i-menu" viewBox="0 0 16 16"><path d="M2.8 4.2h10.4M2.8 8h10.4M2.8 11.8h10.4"/></symbol>
 <symbol id="i-back" viewBox="0 0 16 16"><path d="M10 3.5L5.5 8l4.5 4.5"/></symbol>
 <symbol id="i-image" viewBox="0 0 16 16"><rect x="2" y="3" width="12" height="10" rx="1.6"/><circle cx="6" cy="6.6" r="1.2"/><path d="M2.5 12l3.6-3.4 2.4 2.2 2-1.8 3 3"/></symbol>
 <symbol id="i-lock" viewBox="0 0 16 16"><rect x="3" y="7" width="10" height="7" rx="1.6"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/></symbol>

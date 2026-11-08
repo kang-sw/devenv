@@ -89,6 +89,7 @@
 .tk .btn { font: inherit; font-size: 12.5px; background: var(--wb-muted); color: var(--wb-fg); border: 0; border-radius: 999px; padding: 2px 11px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
 .tk .btn:hover { background: color-mix(in srgb, var(--wb-muted) 70%, var(--wb-fg) 14%); }
 .tk .btn.primary { background: var(--wb-primary); color: var(--wb-primary-fg); }
+.tk .btn.ib { padding: 4px 7px; }
 .tk .btn.mini { font-size: 11.5px; padding: 0 9px; }
 .tk .btn:focus-visible, .tk select:focus-visible, .tk input:focus-visible, .tk textarea:focus-visible { outline: 1.5px solid var(--wb-primary); }
 .tk input[type=checkbox], .tk input[type=radio] { accent-color: var(--wb-primary); }
@@ -145,8 +146,6 @@
 .tk .tk-handle.on { color: var(--wb-fg); box-shadow: inset 0 -2px 0 var(--wb-primary), var(--wb-shadow-hi); }
 .tk .tk-handle.open { transform: translateY(calc(var(--tktop) + var(--tkext))); }
 .tk.tk-drawer.drag .tk-dr-clip, .tk.tk-drawer.drag .tk-handle { transition: none; }
-.tk .tk-handle .i:last-child { transition: transform .15s; }
-.tk .tk-handle.open .i:last-child { transform: rotate(180deg); }
 /* "+ store": an icon-only square (34px, the handle height) at the row's left end */
 .tk .tk-handle.tk-add { width: 34px; padding: 2px 0 0; justify-content: center; touch-action: auto; }
 .tk .tk-handle.tk-add .i { width: 14px; height: 14px; }
@@ -183,12 +182,20 @@ body.tk-paged .tk-drawer { display: none; }
   .tk .tk-handle .hl { display: none; }
 }
 
-/* store sync line */
-.tk .sync { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: -2px 2px 10px; font-size: 12px; color: var(--wb-muted-fg); }
-.tk .sync b { color: var(--wb-fg); }
-.tk .sync .sdot { width: 7px; height: 7px; border-radius: 50%; background: var(--tk-ok); }
-.tk .sync.off .sdot { background: var(--wb-muted-fg); }
-.tk .sync .unp { color: var(--tk-warn); font-weight: 700; }
+/* the store's sync ribbon at the bottom of the Items card; it dims with nothing to push */
+.tk .ribbon { flex: none; display: flex; align-items: center; gap: 6px; min-height: 24px; padding: 1px 8px 1px 4px; border-top: 1px solid var(--wb-muted); font-size: 11.5px; color: var(--wb-muted-fg); }
+.tk .ribbon.idle { opacity: .7; }
+.tk .ribbon.idle:hover, .tk .ribbon:focus-within { opacity: 1; }
+.tk .rib-main { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 6px; height: 20px; padding: 0 6px; border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.tk .rib-main:hover { background: var(--wb-muted); color: var(--wb-fg); }
+.tk .rib-main:focus-visible { outline: 1.5px solid var(--wb-primary); }
+.tk .rib-main .rt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tk .sdot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--tk-ok); }
+.tk .r-pend .sdot { background: var(--tk-warn); }
+.tk .r-pend .rt { color: var(--tk-warn); font-weight: 700; }
+.tk .r-off .sdot { background: var(--tk-fail); }
+.tk .r-local .sdot { background: var(--wb-muted-fg); }
+.tk .unp { color: var(--tk-warn); font-weight: 700; }
 .tk .hoff { font-size: 12px; color: var(--tk-warn); }
 
 /* ===== cards ===== */
@@ -391,12 +398,15 @@ body.tk-paged .tk-drawer { display: none; }
 .tk .iw-top { position: sticky; top: 0; z-index: 2; margin: 0 -18px; padding: 14px 18px 10px; background: var(--wb-bg); box-shadow: 0 1px 0 var(--wb-line); display: flex; flex-direction: column; gap: 6px; }
 .tk .iw-head { display: flex; gap: 8px; align-items: flex-start; }
 .tk .iw-head .sti { margin-top: 3px; }
+.tk .iw-head .ia { flex: none; }
 .tk .iw-head h2 { margin: 0; font-size: 18px; line-height: 1.3; flex: 1; overflow-wrap: anywhere; }
 .tk .iw-chips { display: flex; gap: 5px; align-items: center; flex-wrap: wrap; }
-.tk .sh-actions .btn .i { width: 13px; height: 13px; }
+.tk .idcopy { font: inherit; font-size: 11.5px; display: inline-flex; align-items: center; gap: 3px; padding: 1px 7px 1px 5px; border: 0; border-radius: 999px; background: transparent; color: var(--wb-muted-fg); cursor: pointer; box-shadow: inset 0 0 0 1px var(--wb-line); }
+.tk .idcopy:hover, .tk .idcopy:focus-visible { color: var(--wb-primary); outline: none; background: var(--wb-card); }
+.tk .idcopy.done { color: var(--tk-ok); }
+.tk .idcopy .i { width: 12px; height: 12px; }
 .tk .iwin h3 { margin: 4px 0 0; font-size: 12px; font-weight: 800; color: var(--wb-muted-fg); text-transform: uppercase; letter-spacing: .04em; }
 .tk .sh-body { white-space: pre-wrap; background: var(--wb-card); border-radius: 10px; padding: 8px 10px; box-shadow: var(--wb-shadow); font-size: 13px; }
-.tk .sh-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .tk .timeline { list-style: none; margin: 0; padding: 4px 10px; background: var(--wb-card); border-radius: 10px; box-shadow: var(--wb-shadow); }
 .tk .timeline .ev { padding: 6px 0 6px 12px; border-left: 2px solid var(--wb-muted); margin-left: 4px; position: relative; }
 .tk .timeline .ev::before { content: ""; position: absolute; left: -5px; top: 11px; width: 8px; height: 8px; border-radius: 50%; background: var(--wb-muted-fg); }
@@ -416,12 +426,20 @@ body.tk-paged .tk-drawer { display: none; }
 .tk .hiddenc { font-size: 12px; font-style: italic; color: var(--wb-muted-fg); }
 .tk .hiddenc summary { cursor: pointer; font-style: normal; }
 .tk .composer2 { position: sticky; bottom: 0; margin: 4px -18px 0; padding: 8px 18px 14px; background: var(--wb-bg); box-shadow: 0 -4px 10px rgb(0 0 0 / .06); display: flex; flex-direction: column; gap: 6px; }
-.tk .composer2 .quick { display: flex; gap: 5px; align-items: center; flex-wrap: wrap; font-size: 12px; }
 .tk .composer2 .replying { font-size: 12px; background: var(--wb-muted); border-radius: 8px; padding: 3px 8px; }
-.tk .composer2 .crow { display: flex; gap: 8px; align-items: stretch; }
-.tk .composer2 textarea { flex: 1; font: inherit; font-size: 13px; border: 1px solid var(--wb-line); border-radius: 10px; padding: 6px 9px; resize: vertical; background: var(--wb-card); color: var(--wb-fg); }
-.tk .composer2 .ccol { display: flex; flex-direction: column; gap: 4px; justify-content: space-between; }
-.tk .composer2 select { font: inherit; font-size: 11.5px; border-radius: 6px; border: 1px solid var(--wb-line); background: var(--wb-card); color: var(--wb-fg); }
+/* the comment box follows the dashboard chat input: the field and its bottom bar in one box,
+   the @ picker at the bottom left, the paper-plane send button at the bottom right */
+.tk .cbox { display: flex; flex-direction: column; border-radius: 12px; background: var(--wb-muted); }
+.tk .cbox:focus-within { box-shadow: inset 0 0 0 1.5px var(--wb-primary); }
+.tk .cbox textarea { font: inherit; font-size: 13px; border: 0; outline: 0; border-radius: 12px 12px 0 0; padding: 8px 11px 2px; resize: vertical; min-height: 44px; background: transparent; color: var(--wb-fg); }
+.tk .cbar { display: flex; align-items: center; gap: 6px; padding: 2px 6px 6px; }
+.tk .cbar select { font: inherit; font-size: 11.5px; border-radius: 6px; border: 0; background: var(--wb-card); color: var(--wb-fg); height: 24px; }
+.tk .cbar select.cat { width: 30px; padding: 0; text-align: center; text-align-last: center; font-weight: 700; color: var(--wb-muted-fg); appearance: none; -webkit-appearance: none; cursor: pointer; }
+.tk .cbar select.cat:hover { color: var(--wb-primary); }
+.tk .csend { flex: none; width: 34px; height: 28px; border: 0; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; padding: 0; cursor: pointer; color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 14%, var(--wb-card)); }
+.tk .csend:hover { background: color-mix(in srgb, var(--wb-primary) 24%, var(--wb-card)); }
+.tk .csend:focus-visible { outline: 1.5px solid var(--wb-primary); }
+.tk .csend .i { width: 16px; height: 16px; }
 
 /* ===== dialog forms ===== */
 dialog.tk-dlg { border: 0; border-radius: var(--wb-radius); box-shadow: var(--wb-shadow-hi); padding: 0; width: min(560px, 94vw); background: var(--wb-card); color: var(--wb-fg); max-height: 92vh; }
@@ -458,14 +476,12 @@ dialog.tk-dlg p { margin: 0; font-size: 12.5px; color: var(--wb-muted-fg); }
 .tk .card > header .cmodes .btn { font-weight: 400; }
 .tk .card > header:has(.cmodes) { flex-wrap: wrap; row-gap: 2px; }
 .tk .card > header h2 { white-space: nowrap; }
-.tk details.unpushed { margin: -6px 2px 10px; font-size: 12px; }
-.tk details.unpushed summary { cursor: pointer; color: var(--tk-warn); }
 .tk .atl .day { margin-top: 8px; font-size: 11.5px; font-weight: 800; color: var(--wb-muted-fg); border-bottom: 1px solid var(--wb-line); }
 /* kanban lanes and cards follow page.css's ticket lanes */
 .tk .kanban { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(150px, 1fr); gap: 10px; overflow-x: auto; align-items: start; }
 .tk .kcol { background: color-mix(in srgb, var(--wb-muted) 45%, var(--wb-card)); border-radius: 10px; padding: 8px; min-height: 120px; }
 .tk .khead { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; font-size: 12px; }
-.tk .kcard { background: var(--wb-card); border-radius: 8px; padding: 6px 8px; margin-bottom: 6px; box-shadow: var(--wb-shadow); cursor: pointer; font-size: 12px; }
+.tk .kcard { position: relative; background: var(--wb-card); border-radius: 8px; padding: 6px 8px; margin-bottom: 6px; box-shadow: var(--wb-shadow); cursor: pointer; font-size: 12px; }
 .tk .kc-t .title { font-weight: 600; color: var(--wb-fg); overflow-wrap: anywhere; }
 .tk .kc-m { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; margin-top: 4px; }
 .tk .kc-m .who { width: auto; }
@@ -550,7 +566,13 @@ dialog.tk-dlg p { margin: 0; font-size: 12.5px; color: var(--wb-muted-fg); }
 .tk .iw-crumb { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--wb-muted-fg); min-width: 0; overflow: hidden; white-space: nowrap; }
 .tk .iw-crumb a { color: var(--wb-muted-fg); text-decoration: none; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .tk .iw-crumb a:hover, .tk .iw-crumb a:focus-visible { color: var(--wb-primary); text-decoration: underline; }
-.tk .iw-body { display: flex; flex-direction: column; gap: 4px; }
+.tk .iw-body { display: flex; flex-direction: column; gap: 4px; margin: .6em 0; }
+.tk .iw-edit textarea, .tk .iw-edit input, .tk .iw-edt input, .tk .cedit textarea { font: inherit; font-size: 13px; border: 1px solid var(--wb-line); border-radius: 8px; padding: 6px 9px; background: var(--wb-card); color: var(--wb-fg); }
+.tk .iw-edit textarea, .tk .cedit textarea { resize: vertical; width: 100%; box-sizing: border-box; }
+.tk .iw-edt { display: flex; }
+.tk .iw-edt input { flex: 1; min-width: 0; font-size: 17px; font-weight: 700; padding: 2px 8px; }
+.tk .iw-edit .tb, .tk .cedit .tb { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 12px; }
+.tk .cedit { display: flex; flex-direction: column; gap: 4px; }
 .tk .iwin h3 .cnt { font-weight: 600; letter-spacing: 0; margin-left: 4px; }
 .tk .iwin h3.prom { display: flex; align-items: center; gap: 6px; margin: 2px 0 0; font-size: 14px; color: var(--wb-fg); text-transform: none; letter-spacing: 0; }
 .tk .iw-sub, .tk .iw-thread, .tk .iw-asg { display: flex; flex-direction: column; gap: 6px; }
@@ -592,6 +614,89 @@ dialog.tk-dlg p { margin: 0; font-size: 12.5px; color: var(--wb-muted-fg); }
   .tk .iw-main > .composer2 { margin: auto 0 0 -18px; padding: 8px 8px 14px 18px; }
 }
 .tk .iw-side { padding-bottom: 14px; }
+
+/* The "⋯" menu button: on hover or focus of its row, card, or entry; always on the item window
+   header and on touch layouts (no hover). */
+.tk .mbtn { opacity: 0; }
+.tk .irow:is(:hover, :focus-within, .sel) .mbtn, .tk .kcard:is(:hover, :focus-within) .mbtn, .tk .citem:is(:hover, :focus-within) .mbtn,
+.tk .grow-row:is(:hover, :focus-within) .mbtn, .tk .mbtn:focus-visible, .tk .mbtn[aria-expanded="true"], .tk .iw-head .mbtn { opacity: 1; }
+.tk .kcard .kmore { position: absolute; top: 3px; right: 3px; background: var(--wb-card); }
+.tk .kcard .kc-t { padding-right: 18px; }
+.tk .citem .cmore, .tk .glabel .gmore { width: 20px; height: 18px; margin-left: auto; }
+.tk .citem .cmore .i, .tk .glabel .gmore .i { width: 13px; height: 13px; }
+@media (hover: none) {
+  .tk .mbtn { opacity: 1; }
+  .tk .ir-acts { display: inline-flex; }
+  .tk .ir-main .title { min-width: 4em; }
+}
+/* a status icon the viewer can set opens the menu's status part */
+.tk button.stb { border: 0; padding: 0; background: transparent; color: inherit; cursor: pointer; border-radius: 50%; }
+.tk button.stb:hover { box-shadow: 0 0 0 3px color-mix(in srgb, var(--wb-primary) 20%, transparent); }
+.tk button.stb:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: 1px; }
+
+/* the context menu and the status popover: one fixed panel over everything, the item window included */
+.tk.tk-menu { position: fixed; z-index: 90; min-width: 220px; max-width: min(340px, calc(100vw - 12px)); max-height: calc(100vh - 12px); overflow: auto; padding: 4px; border-radius: 10px;
+  background: var(--wb-card); color: var(--wb-fg); box-shadow: var(--wb-shadow-hi), inset 0 0 0 1px var(--wb-line); font-size: 13px; }
+.tk.tk-menu[hidden] { display: none; }
+.tk.tk-menu.wide { width: min(380px, calc(100vw - 12px)); max-width: none; }
+.tk.tk-menu.spopw { width: min(360px, calc(100vw - 12px)); max-width: none; }
+.tk-menu .mh { display: flex; align-items: baseline; gap: 6px; padding: 4px 8px 6px; font-size: 12px; color: var(--wb-muted-fg); min-width: 0; }
+.tk-menu .mh b { color: var(--wb-fg); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.tk-menu .mi { width: 100%; display: flex; align-items: center; gap: 8px; min-height: 28px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: var(--wb-fg); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.tk-menu .mi:hover, .tk-menu .mi:focus-visible { background: color-mix(in srgb, var(--wb-primary) 12%, var(--wb-card)); outline: none; }
+.tk-menu .mi .i { width: 15px; height: 15px; color: var(--wb-muted-fg); flex: none; }
+.tk-menu .mi .ml { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tk-menu .mi .mv { flex: none; font-size: 11.5px; color: var(--wb-muted-fg); }
+.tk-menu .mi .mch { transform: rotate(-90deg); }
+.tk-menu .mi.go { color: var(--wb-primary); font-weight: 700; }
+.tk-menu .mi.go .i { color: var(--wb-primary); }
+.tk-menu .mi.danger, .tk-menu .mi.danger .i { color: var(--tk-fail); }
+.tk-menu .mi .av { margin-left: 0; width: 18px; height: 18px; font-size: 8.5px; }
+.tk-menu .msep { height: 1px; margin: 4px 2px; background: var(--wb-line); }
+.tk-menu .mst { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2px; padding: 2px; }
+.tk-menu .mst .mr { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 5px 2px 4px; border: 0; border-radius: 8px; background: transparent; color: var(--wb-muted-fg); font: inherit; font-size: 11.5px; cursor: pointer; }
+.tk-menu .mst .mr span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.tk-menu .mst .mr:hover, .tk-menu .mst .mr:focus-visible { background: var(--wb-muted); color: var(--wb-fg); outline: none; }
+.tk-menu .mst .mr[aria-checked="true"] { background: color-mix(in srgb, var(--wb-primary) 16%, var(--wb-card)); color: var(--wb-primary); font-weight: 700; }
+.tk-menu .mst .mr:focus-visible { box-shadow: inset 0 0 0 1.5px var(--wb-primary); }
+.tk-menu .mst .mr:disabled { opacity: .45; cursor: default; }
+.tk-menu .mst .mr.pick { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--wb-primary) 55%, transparent); color: var(--wb-fg); }
+/* the row's hover preview stays out of the way while a menu is open */
+body.tk-menuon .tk .ir-more { visibility: hidden !important; }
+.tk-menu .mr .rdo { flex: none; width: 12px; height: 12px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--wb-muted-fg); }
+.tk-menu .mr[aria-checked="true"] .rdo { box-shadow: inset 0 0 0 4px var(--wb-primary); }
+.tk-menu .mnote { display: flex; align-items: center; gap: 4px; margin: 2px 4px 4px; padding: 0 6px 0 8px; border-radius: 8px; background: var(--wb-muted); flex: 1 1 auto; }
+.tk-menu .mnote:focus-within { box-shadow: inset 0 0 0 1.5px var(--wb-primary); }
+.tk-menu .mnote input { flex: 1 1 auto; min-width: 0; height: 26px; border: 0; outline: 0; background: transparent; color: var(--wb-fg); font: inherit; font-size: 12.5px; }
+.tk-menu .mnote .mk { color: var(--wb-muted-fg); font-size: 12px; }
+.tk-menu .mrow { display: flex; align-items: center; gap: 6px; padding: 2px 4px 4px; }
+.tk-menu .mrow .mnote { margin: 0; }
+.tk-menu .mrow input[type=date], .tk-menu .mrow input[type=text]:not(#tkmnote) { flex: 1 1 auto; min-width: 0; font: inherit; font-size: 12.5px; height: 26px; padding: 0 8px; border: 1px solid var(--wb-line); border-radius: 8px; background: var(--wb-bg); color: var(--wb-fg); }
+.tk-menu .mtitle { padding: 2px 8px 0; font-weight: 700; font-size: 13px; }
+.tk-menu .mintro { margin: 2px 8px 6px; font-size: 12px; color: var(--wb-muted-fg); }
+.tk-menu .mempty { margin: 4px 8px 6px; font-size: 12px; color: var(--wb-muted-fg); }
+.tk-menu .mlist { max-height: 220px; overflow: auto; }
+.tk-menu form { display: flex; flex-direction: column; gap: 8px; padding: 2px 6px 6px; }
+.tk-menu form .mtitle, .tk-menu form .mintro { padding: 0; margin: 0; }
+.tk-menu .fld { font-size: 12px; }
+.tk-menu .btns { display: flex; justify-content: flex-end; gap: 6px; }
+.tk-menu .spop { display: grid; gap: 4px; padding: 0 8px 6px; font-size: 12px; color: var(--wb-muted-fg); overflow-wrap: anywhere; }
+.tk-menu .spop b { color: var(--wb-fg); }
+.tk-menu .spop code { font-family: var(--wb-mono); font-size: 11px; color: var(--wb-fg); }
+.tk-menu .spop .err { color: var(--tk-fail); }
+.tk-menu .spop ul.plain { margin: 2px 0; padding-left: 16px; }
+.tk-menu .spop p { margin: 2px 0 0; }
+.tk-menu .mtools { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; padding: 4px 8px 6px; border-top: 1px solid var(--wb-line); }
+
+/* the inline input rows: "+ New" atop the Items list, "add subtask" one level under its row */
+.tk .nrow, .tk .subrow { display: flex; align-items: center; gap: 6px; min-height: 30px; padding: 2px 4px 2px calc(6px + var(--ind, 0) * 16px); border-radius: 6px; background: color-mix(in srgb, var(--wb-primary) 7%, var(--wb-card)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-primary) 30%, transparent); margin: 2px 0; }
+.tk .nrow:focus-within, .tk .subrow:focus-within { box-shadow: inset 0 0 0 1.5px var(--wb-primary); }
+.tk .nrow .i { color: var(--wb-primary); }
+.tk .subrow .ind { color: var(--wb-muted-fg); }
+.tk .nrow input, .tk .subrow input { flex: 1 1 auto; min-width: 0; height: 24px; border: 0; outline: 0; background: transparent; color: var(--wb-fg); font: inherit; font-size: 13px; }
+.tk .nrow select { font: inherit; font-size: 11.5px; height: 22px; border-radius: 6px; border: 1px solid var(--wb-line); background: var(--wb-card); color: var(--wb-fg); }
+.tk .srows > .subrow { margin: 4px 0; }
+.tk .grow-row + .subrow { margin-left: 0; }
 
 /* Rendered markdown in an item body or a comment (textBlock in tracker.js). The host's
    shared .md rules give block spacing, lists, code, tables, and quotes; here the text

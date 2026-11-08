@@ -35,7 +35,7 @@ build, no server, no dependencies.
 - `../../../agents-plugin-tool/internal/wsdashboard/assets/tracker.js` and
   `tracker.css` beside it are the view, a shipped dashboard asset:
   `window.WsTracker.mount(adapter, opts)` draws the drawer, store page, item
-  window, quick switcher, and dialogs, including the status icon set. It reads
+  window, quick switcher, context menu, and dialogs, including the status icon set. It reads
   only the view state the adapter serves and writes only by dispatching events
   through it.
 - `mock-adapter.js` is that adapter over `engine.js` and `fixtures.js`, plus
@@ -62,10 +62,20 @@ build, no server, no dependencies.
   reference notices; opening the store clears it (the notification card below
   does not change what it counts). A handle shows ⊘ when the
   viewer's clone is offline or the store has no remote.
-- **Store header.** The viewer's clone ref, online or offline, last synced, "N of
-  my writes not yet pushed" with a list of the open batch and the closed
-  unpushed commits, and upstream commits this clone has not fetched. The
-  buttons are `Sync now` and `Go offline` / `Come back online`. The personal
+- **Store header** (500). One row: the store name, then two icon-only
+  buttons, `Open as page` and `+ New` (their names in the tooltip and aria-label;
+  `+ New` shows the inline new-item row atop the Items list: title + Enter creates,
+  with a small kind picker; the row stays for the next one and Esc closes
+  it; priority, due, and assignees come afterwards from the new row's menu).
+  The sync state is a thin **ribbon** at the bottom of the Items card: a
+  status dot, a short text ("local only", "4 to push", "offline", "synced 3 min
+  ago"), and the apply button (`Sync now`, or `Close batch` without a remote)
+  only while writes are pending; with nothing to push it dims to a quiet
+  line. A click on it opens a popover with the diagnostics: the viewer's
+  clone ref, online or offline, last synced, the member / event / commit /
+  flagged counts, "N of my writes not yet pushed" with the open batch and the
+  closed unpushed commits, upstream commits this clone has not fetched,
+  `Sync now`, and the mock's `Go offline` / `Come back online`. The personal
   store has no remote, which is the same path as a long offline; its button
   only closes the batch.
 - **Drawer layout** (366). The layout follows the window width:
@@ -144,7 +154,7 @@ build, no server, no dependencies.
   each sub-section of *received requests*, and each person's group in *my
   team*) is a tree of its matching rows. Each match's ancestor chain stands
   above it as greyed **context rows**: they are not matches (the scope's count
-  leaves them out), carry no hover actions, and open their item on click. A
+  leaves them out), carry no status button, and open their item on click. A
   context node's other children, unrelated to any match, fold into one
   "… N more" row (a click shows them). A match's own subtree starts folded,
   shown as an "N subtasks" chip after its title. Every node with children
@@ -224,20 +234,40 @@ build, no server, no dependencies.
   preview** (it is how touch and keyboard reach the details, (354)); the item
   window holds the full view. It is placed next to the row in the viewport, so
   a short, content-height card does not clip it.
-- **Hover actions** (354), (357). A row's actions appear as icons on hover,
-  each with its label in the tooltip: every action the viewer may take on that
-  item, read from the view state. These are Accept / Decline / Discuss on a
-  pending assignment to me; Status / Close / Split / Hand off on my live
-  assignment; Confirm / Reject on a close I must confirm; Return on a
-  follower's accepted assignment (direct lead only); Withdraw on a pending
-  assignment I sent; and Assign on an unassigned item I created. They dispatch
-  through the same dialogs and quick writes the item window uses. Hover has
-  non-hover equivalents with the same CSS state: **keyboard** focus on a row
-  (Tab) shows its actions and details, Tab moves into the action buttons, and
-  Enter opens the item window; on **touch**, a tap selects a row and shows its
-  actions and details, and a tap on the selected row (or on any title) opens
-  the item window. A click on a row opens it with a mouse. The selection is
-  local UI state.
+- **Context menu** (473), (471 a), (472 b), (474). One menu serves every
+  item: list and tree rows, kanban cards, calendar entries, due-timeline rows,
+  and the item window header open it alike, by right-click, a "⋯" button
+  (shown on hover or focus, always on touch layouts and in the window
+  header), or Shift+F10 / the menu key on a focused row. A click on a status
+  icon the viewer can set opens the same menu showing only its status part.
+  It shows only what the viewer's role and the item's state allow:
+  - *status* radios (todo / doing / blocked / done; done reads "request done"
+    when the assigner confirms) that apply on click, with a note field under
+    them: a note + Enter applies the status together with the note (arrowing
+    over the radios picks one without applying it, for the note's Enter);
+  - Accept / Decline on a pending assignment to me, Confirm / Reject on a
+    close I must confirm, Return on a follower's accepted assignment (direct
+    lead only), Withdraw on a pending assignment I sent, Reopen on my done
+    assignment; a note-taking one opens a note step inside the menu;
+  - *Add subtask*: an input row one level in, right under the row (in the
+    item window's Subtasks for a kanban card, a calendar entry, or the window
+    header); title + Enter creates an unassigned task with the default
+    completion and keeps the row for the next sibling, Esc closes it;
+  - *Priority ▸* (radios) and *Due date ▸* (a date) for the creator;
+    *Hand off ▸* (a searchable people list, with an optional note) on my live
+    assignment; *Assign ▸* for the creator (an anchored popover: chosen
+    people or everyone within N levels, and the completion mode);
+  - *Edit* (title, body, and project in place in the item window), *Open*,
+    and *Hide item*, with an admin's Edit / Hide on a removed creator's item.
+  Submenus are steps inside the same panel with a Back row. Arrow keys move,
+  Enter applies, ArrowRight opens a step and ArrowLeft goes back, Esc steps
+  back and then closes, Tab stays inside, and focus returns to the opener.
+  Only the store-wide forms stay modal (profile, admin, join, "+ store").
+  Keyboard focus on a row (Tab) shows its details as a hover does, and Enter
+  opens the item window; on **touch**, a tap selects a row and shows its
+  details and "⋯", and a tap on the selected row (or on any title) opens the
+  item window. A click on a row opens it with a mouse. The selection is local
+  UI state.
 - **Status icons** (355). Each status differs by shape as well as colour: todo
   ring, doing half-filled, blocked slashed ring, awaiting confirm hourglass,
   done filled check, pending dashed ring with `?`, unassigned dotted ring,
@@ -257,8 +287,8 @@ build, no server, no dependencies.
     to my comments, my live assignments due today or overdue, and mentions of
     me. Every entry is derived from the view state and only opens the item
     window, at what it refers to (390, see the item window below); the actions
-    it refers to (Accept, Return, Confirm, ...) are hover actions on the item's
-    row in the Items panel. Unread entries are
+    it refers to (Accept, Return, Confirm, ...) are in the item's context menu
+    (its row in the Items panel, or the window header). Unread entries are
     highlighted; clicking one, or *Mark all read*, marks it read, which also
     clears the row's unread dot. Read state is local UI state per viewer
     clone, kept in memory like the handle badge's `seen`, and writes no
@@ -268,8 +298,10 @@ build, no server, no dependencies.
     per member, revoked keys, the priority levels, an admin roles-event
     dialog, "Edit profile" (on yourself; an admin on any member) and "Join a
     store..." ((393); the quick switcher offers it too).
-  - *Activity*: the merged log in causal order, newest first, with filters
-    for flagged-only and concurrent-only; or the activity timeline.
+  - *Activity*: the merged log in causal order, newest first, with
+    "flagged only" and "concurrent only" toggle chips (498, the same look as
+    the list / activity timeline chips, accent when on); or the activity
+    timeline.
   - *Data*: the raw roles file, each ref's pushed commits (the remote), and
     the clone state (fetched counts, local commits, online), all editable.
     `apply` recomputes everything and `reset` restores the fixtures.
@@ -322,12 +354,15 @@ build, no server, no dependencies.
   holds what the sheet and the row detail overlay held. **Layout** (424)-(427):
   a header over two columns. The header (full width, sticky) carries the
   parent breadcrumb (every ancestor, root first, each a link; none on a root
-  item), the title with the status icon, the chips (kind, id, status,
-  priority, due, roll-up), and the row's actions as labelled buttons followed
-  by the item actions a row does not carry (Edit, Assign, Split, Hide item; an
-  admin also gets Edit / Hide on a removed creator's item; Discuss focuses the
-  composer). Under it the **main column** holds the body with mentions and
-  attachments, the **Subtasks** section, and the thread with the composer; the
+  item), the title with the status icon, the chips (kind, a small "⧉ <kind> ID"
+  button that copies the item id, shown in its tooltip, and says "Copied" for a
+  moment, status, priority, due, roll-up), and one quiet "⋯" next to the close button that
+  opens the item's context menu (as a right-click on the header or the status
+  icon does); no button row stands between the header and the body, which
+  keeps a little margin above and below. Under it the **main column** holds the body with mentions and
+  attachments, the **Subtasks** section, and the thread with the composer
+  (a thread row names the person, org in small text, not the member or event
+  id; the event alias is the row's tooltip); the
   narrow **side column** holds the **property card** and **Assignees**. Below
   820px of window width (the window, by a container query, not the page) it
   falls back to one column in the order header -> property card -> body ->
@@ -348,24 +383,28 @@ build, no server, no dependencies.
     "assignee closes") is written once under the heading; a row shows the
     person (avatar, org, name), the state chip, and the note, plus only what
     differs from the shared text (for example "(inherited: everyone within L2,
-    reached later)"), and the per-assignee actions the action bar does not
-    already offer (Reopen, Unassign, *Hand off (admin)* on any member's live
-    assignment). A single row has nothing to share and shows its own text.
+    reached later)"), and the per-assignee actions (Confirm, Reject, Reopen,
+    Unassign, *Hand off (admin)* on any member's live assignment; a note or
+    handoff opens the menu step anchored to the button). A single row has
+    nothing to share and shows its own text.
   - *Subtasks* (427), (470): the item's whole subtree, one row each: a ▸/▾
     fold control on a node with children, status icon, title (opens that item,
     so the window walks down; the breadcrumb walks up), the node's own roll-up
     when it has children, and holder avatars; a done one is greyed. The first
     level (the item's children) starts open, so their children show; deeper
     levels start folded (an "N subtasks" chip). The fold state lasts the page.
-    Absent when the item has none.
+    Absent when the item has none (unless an "Add subtask" input row is open there).
   The thread is one chronological timeline of comments (quote
   reply, edit, hide), status changes, assignments and answers, edits, agent
   records with `agent` / `auto` chips, subtask lines, flagged and waiting
   events with their reason, amber "concurrent change" boxes, and quiet
   "superseded by" notes on a member's losing write from another clone. The
-  composer, pinned at the window's bottom, posts a comment, as a reply when one is chosen, with an origin; with
-  an own assignment on the thread, quick status buttons use the composer text
-  as the note. Mentions on the body and on each comment show as chips (335).
+  composer (499), pinned at the window's bottom, posts a comment, as a reply when one is chosen, with an origin.
+  It follows the dashboard chat input: one box with a paper-plane send button
+  at its bottom right and a small `@` picker at its bottom left; Cmd+Enter
+  (macOS) / Ctrl+Enter sends and Enter is a newline. The status moved to the
+  context menu, so the composer has no status line. An own comment is edited
+  in place (Cmd/Ctrl+Enter saves, Esc cancels). Mentions on the body and on each comment show as chips (335).
   Attachments show as chips with name and size and a simulated "not loaded /
   loaded" state: a click toggles it, as local UI state per viewer clone
   (338). An attachment on a flagged write shows struck through. The composer
@@ -390,8 +429,8 @@ build, no server, no dependencies.
   (a due notice, or an event the window does not show) the window just opens.
   A later URL route reuses the same `focus` option.
 - **Actions** append events to the viewer clone's open batch, then report each
-  event as applied or flagged. The actions are create (any kind, with due,
-  priority, and an optional assignee in the same write), edit, comment, reply,
+  event as applied or flagged. The actions are create (any kind, from the
+  inline new-item row; a todo self-assigns in the same write), edit, comment, reply,
   edit or hide own comment (each with mentions and attachments), assign (chosen people or everyone within N),
   split into a subtask, hand off, status, close, confirm, reject, unassign or
   withdraw, reopen, hide item, accept / decline / return, and every `roles.*`
@@ -926,6 +965,13 @@ creation, and it has a topic and a blocked subtask.
 | 468 a | The due timeline uses the same tree rows: a parent draws its own bar and a thin summary bar spanning its children's range; folded, only the summary bar is left for the subtree; a parent without its own due is placed by its children's range. |
 | 469 | Kanban and calendar cards stay independent tasks; hover or keyboard focus on a card highlights its direct parent and direct children cards, and a tooltip names the parent when its card is not on screen. |
 | 470 | The item window's Subtasks section shows the whole subtree with ▸/▾ folding, first level open and deeper levels folded; supersedes (427)'s direct-children-only list. |
+| 471 a | Status applies on click: the menu's status radios (todo / doing / blocked / done, done reading "request done" when the assigner confirms) write at once; a note field under them applies status + note together on Enter. |
+| 472 b | The item modals become menu steps or inline inputs: status, close, subtask, priority, due, handoff, the reject / reopen / decline / return notes, comment edit, and item edit. Assign is an anchored popover from the menu; a new item is an inline input row atop the list (title + Enter, the rest from its menu). Only the store-wide forms (profile, admin) stay modal. Supersedes the action dialogs of (357) and the labelled window buttons of (366 note). |
+| 473 | One context menu for list rows, kanban cards, calendar entries, timeline rows, and the item window header; opened by right-click, a "⋯" button (visible without hover on touch layouts), and Shift+F10 / the menu key; a click on a status icon opens only its status part. It shows only the actions the viewer's role and the item's state allow; submenus are steps in the same panel; arrows, Enter, and Esc work, and focus returns to the opener. Supersedes the row hover action icons of (354) / (357). |
+| 474 | Inline subtask: an input row one level in under the row (in the item window's Subtasks for a kanban card, a calendar entry, or the window header); title + Enter creates an unassigned task with the default completion, Enter again adds a sibling, Esc closes it. |
+| 498 | The Activity tab's "flagged only" and "concurrent only" are toggle chips like the list / activity timeline chips (accent when on); no native checkbox remains in the drawer outside forms. |
+| 499 | The comment composer follows the dashboard chat input: a paper-plane send button inside the box at the bottom right, Cmd+Enter / Ctrl+Enter sends and Enter is a newline, a small `@` picker at the bottom left; the composer's status line is gone (the status is the menu's). Supersedes the quick status of (166). |
+| 500 | The store's sync rows under its name become a thin ribbon at the bottom of the Items card (status dot, short text, the apply button only while writes are pending, dimmed when idle); a click opens a popover with the clone ref, counts, and batch contents. The store header keeps one row: the name and the icon-only `Open as page` and `+ New`. |
 
 ## Open questions
 
