@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gofrs/flock"
@@ -69,6 +70,9 @@ type DaemonOptions struct {
 	// Agents is the agent runner the daemon hosts; nil serves no agent
 	// routes.
 	Agents AgentHost
+	// Tracker is the tracker host the tracker routes serve (tracker_routes.go);
+	// nil serves no tracker route and sends no tracker stream event.
+	Tracker TrackerHost
 
 	// bindHost overrides the address the daemon binds, so a test runs LAN
 	// mode on loopback; empty derives it from LAN.
@@ -102,6 +106,10 @@ type Daemon struct {
 	source   SessionSource
 	agents   AgentHost
 	broker   *broker
+	// tracker is the tracker host, nil without one; trackerRev is the
+	// revision TrackerChanged bumps and the streams send.
+	tracker    TrackerHost
+	trackerRev atomic.Int64
 	// entries caches rendered conversation entries per session.
 	entries *entryCache
 	// inboxMu serializes the daemon's own inbox writes (sends and cancels).
@@ -185,6 +193,7 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 		lock:       lock,
 		log:        logw,
 		agents:     opts.Agents,
+		tracker:    opts.Tracker,
 		broker:     newBroker(),
 		entries:    newEntryCache(),
 		lan:        opts.LAN,
@@ -363,7 +372,8 @@ func (d *Daemon) Close() {
 // the LAN token; access.go); the daemon sends no CORS headers. The pages (/,
 // /s/<reply-id>, their SSE streams, and a session's image, file view, and
 // history routes) are read-only; a session's message, cancel, steer, and interrupt
-// routes (inbox_routes.go) are the only browser writes, and its system-open
+// routes (inbox_routes.go) and, with a tracker host, the tracker POST routes
+// (tracker_routes.go) are the only browser writes, and its system-open
 // route (sysopen_route.go) the only route that runs a host command.
 func (d *Daemon) Handler() http.Handler {
 	mux := http.NewServeMux()
@@ -372,6 +382,9 @@ func (d *Daemon) Handler() http.Handler {
 	mux.HandleFunc("/nudge", d.handleNudge)
 	mux.HandleFunc("/events", d.handleIndexEvents)
 	mux.HandleFunc("/s/", d.handleSessionRoutes)
+	if d.tracker != nil {
+		mux.HandleFunc("/tracker/", d.handleTracker)
+	}
 	if d.agents != nil {
 		agents := d.agents.Handler()
 		mux.Handle(AgentRoutePrefix, agents)
