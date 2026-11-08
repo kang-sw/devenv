@@ -328,6 +328,34 @@ details.folded .rows li { color: var(--wb-muted-fg); }
 .rows a { color: inherit; text-decoration: underline; text-decoration-color: var(--wb-muted); }
 .rows a:hover { color: var(--wb-primary); }
 
+/* panel tree (agendas): each root is a tinted block, its fields nest under a
+   guide line; a container's summary shows its folded preview only while
+   folded, and a long string folds to one line and opens in full */
+.rows + .tree { margin-top: 8px; }
+.tree, .tree ul { list-style: none; margin: 0; padding: 0; }
+.tree ul { margin-left: 5px; padding-left: 9px; border-left: 1px solid var(--wb-line); }
+.tree > li + li { margin-top: 6px; }
+.tree > li > details, .tree > li > .tleaf { background: color-mix(in srgb, var(--wb-muted) 45%, var(--wb-card)); border-radius: 8px; padding: 4px 8px; }
+.tree summary, .tree .tleaf { display: flex; gap: 6px; align-items: baseline; min-width: 0; padding: 1px 0; font-size: 12.5px; line-height: 1.45; }
+.tree summary { list-style: none; cursor: pointer; border-radius: 4px; }
+.tree summary::-webkit-details-marker { display: none; }
+.tree summary:hover { background: var(--wb-wash); }
+.tree summary::before { content: ""; flex: none; align-self: center; width: 0; height: 0; margin: 0 2px 0 1px; border-left: 5px solid var(--wb-muted-fg); border-top: 4px solid transparent; border-bottom: 4px solid transparent; transition: transform .12s; }
+.tree details[open] > summary::before { transform: rotate(90deg); }
+.tree .tleaf::before { content: ""; flex: none; width: 8px; }
+.tk { flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 12px/1.45 var(--wb-mono); color: var(--wb-muted-fg); }
+.tree > li > details > summary > .tk, .tree > li > .tleaf > .tk { max-width: none; color: var(--wb-primary); }
+.tsum, .tv { flex: 1 1 auto; min-width: 0; }
+.tsum { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 11.5px/1.45 var(--wb-mono); color: var(--wb-muted-fg); }
+.tree details[open] > summary > .tsum { display: none; }
+.tv { overflow-wrap: anywhere; }
+.tv.num, .tv.bool { font: 12px/1.45 var(--wb-mono); color: var(--wb-primary); }
+.tv.null, .tv.obj, .tv.arr { font: 12px/1.45 var(--wb-mono); color: var(--wb-muted-fg); }
+.tv.null { font-style: italic; }
+.tlong > summary > .tv { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--wb-muted-fg); }
+.tree .tlong[open] > summary > .tv { display: none; }
+.tfull { margin: 2px 0 4px 14px; padding: 4px 8px; border-radius: 6px; background: var(--wb-wash); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12.5px; line-height: 1.45; }
+
 /* kanban lanes (tickets panel): side by side once the panel body is wide
    enough, stacked otherwise; the container query follows the panel's own
    width, which differs between the side column, a narrow page, and the embed */

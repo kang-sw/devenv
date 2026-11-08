@@ -152,9 +152,12 @@ func todoPanel(in whiteboardPanelInput) (wswhiteboard.Panel, bool) {
 	return wswhiteboard.Panel{ID: "todo", Title: wsi18n.T(in.lang, "panel.todo"), Icon: "todo", Count: fmt.Sprintf("%d/%d", count, len(todos)), Rows: rows, Folded: folded}, true
 }
 
-// agendaPanel shows each agenda blob as its key and the one-line summary
-// agenda.list produces, never the blob body: agendas are the lead's working
-// notes and may hold unconfirmed reasoning. Both pages show the same rows.
+// agendaPanel shows the agenda blobs in key order. The full page (on disk
+// and served) lays each blob out whole as a foldable tree: the user asked to
+// read the agendas there, which reverses the earlier rule that the panel
+// never shows a blob body. The embed, a frozen snapshot kept in chat
+// history, stays compact: one row per key with the one-line summary
+// agenda.list produces.
 func agendaPanel(in whiteboardPanelInput) (wswhiteboard.Panel, bool) {
 	agenda := in.rec.Agenda
 	if len(agenda) == 0 {
@@ -165,11 +168,15 @@ func agendaPanel(in whiteboardPanelInput) (wswhiteboard.Panel, bool) {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	rows := make([]wswhiteboard.PanelRow, 0, len(keys))
+	panel := wswhiteboard.Panel{ID: "agenda", Title: wsi18n.T(in.lang, "panel.agenda"), Icon: "agenda", Count: fmt.Sprint(len(keys))}
 	for _, k := range keys {
-		rows = append(rows, wswhiteboard.PanelRow{Label: k, Text: agendaSummary(agenda[k])})
+		if in.layout == wswhiteboard.LayoutEmbed {
+			panel.Rows = append(panel.Rows, wswhiteboard.PanelRow{Label: k, Text: agendaSummary(agenda[k])})
+		} else {
+			panel.Tree = append(panel.Tree, wswhiteboard.JSONTree("agenda/", k, agenda[k]))
+		}
 	}
-	return wswhiteboard.Panel{ID: "agenda", Title: wsi18n.T(in.lang, "panel.agenda"), Icon: "agenda", Count: fmt.Sprint(len(keys)), Rows: rows}, true
+	return panel, true
 }
 
 func whiteboardPanels(in whiteboardPanelInput) []wswhiteboard.Panel {
