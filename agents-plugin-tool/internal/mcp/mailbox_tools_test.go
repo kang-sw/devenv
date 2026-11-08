@@ -15,9 +15,13 @@ import (
 // test, mirroring setupNoteTestEnv/setupWorkflowManualNoteEnv, so mailbox
 // storage and the workflow_manual render path never touch the real user
 // home directory and self-address-surface tests can render the manual body.
+// It also blanks WS_MAILBOX and WS_MAILBOX_AUTO so the inert-by-default and
+// self-address expectations do not depend on the caller's shell.
 func setupMailboxTestEnv(t *testing.T) {
 	t.Helper()
 	useLeadProfile(t)
+	t.Setenv("WS_MAILBOX", "")
+	t.Setenv("WS_MAILBOX_AUTO", "")
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
 	t.Setenv("WS_RSRC_ROOT", filepath.Join("..", "..", "..", "agents-plugin", "rsrc"))
