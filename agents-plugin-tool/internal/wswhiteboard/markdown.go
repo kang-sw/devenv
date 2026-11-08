@@ -171,9 +171,13 @@ func (p *pageData) rawMarkdown() goldmark.Markdown {
 
 // renderDoc renders a topic body: block markdown with raw HTML written as
 // is, neither balanced nor filtered, so an inline script still runs. Item
-// references resolve in its markdown text, never inside its HTML.
-func (p *pageData) renderDoc(s string) template.HTML {
-	return p.convert(p.rawMarkdown(), s)
+// references resolve in its markdown text, never inside its HTML. marks are
+// the body's change marks, written into the HTML as comments (applyMarks).
+func (p *pageData) renderDoc(s string, marks []BlockMark) template.HTML {
+	if len(marks) == 0 {
+		return p.convert(p.rawMarkdown(), s)
+	}
+	return p.convertWith(p.rawMarkdown(), s, func(doc ast.Node, src []byte) { applyMarks(doc, src, marks) })
 }
 
 // Inline renders s as inline markdown: emphasis, code, links, and item
@@ -235,11 +239,26 @@ func footnoteIDPrefix(s string) string {
 
 // convert renders s through md, one of the page's pipelines.
 func (p *pageData) convert(md goldmark.Markdown, s string) template.HTML {
+	return p.convertWith(md, s, nil)
+}
+
+// convertWith is convert with a step between parsing and rendering: prepare
+// may edit the parsed document.
+func (p *pageData) convertWith(md goldmark.Markdown, s string, prepare func(doc ast.Node, src []byte)) template.HTML {
 	// Rendering is sequential per page; the footnote renderer reads the prefix
 	// through its closure (blockMarkdown).
 	p.footnotePrefix = footnoteIDPrefix(s)
 	var buf bytes.Buffer
-	if err := md.Convert([]byte(s), &buf); err != nil {
+	var err error
+	if prepare == nil {
+		err = md.Convert([]byte(s), &buf)
+	} else {
+		src := []byte(s)
+		doc := md.Parser().Parse(text.NewReader(src))
+		prepare(doc, src)
+		err = md.Renderer().Render(&buf, src, doc)
+	}
+	if err != nil {
 		// Convert fails only on a writer error, which a bytes.Buffer never
 		// returns; escaped text is the safe fallback all the same.
 		return template.HTML(template.HTMLEscapeString(s))
@@ -448,6 +467,7 @@ func (r *mdRenderer) RegisterFuncs(reg renderer.NodeRendererFuncRegisterer) {
 	reg.Register(ast.KindImage, r.image)
 	reg.Register(ast.KindFencedCodeBlock, r.fencedCode)
 	reg.Register(kindItemRef, r.itemRef)
+	reg.Register(kindChange, renderChange)
 }
 
 // paragraph drops the <p> wrapper around a document's only paragraph, and
