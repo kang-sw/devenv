@@ -50,6 +50,8 @@ type Server struct {
 	// dashboard is the dashboard session registry and nudge state
 	// (dashboard_sessions.go).
 	dashboard dashboardLink
+	// tracker is this process's tracker host (tracker_host.go).
+	tracker trackerLink
 }
 
 // gitStatusResult keeps the generic git observation intact while allowing the
@@ -2288,6 +2290,11 @@ func (s *Server) handleLeadLogin(id json.RawMessage, arguments map[string]any) r
 	// key. A parent-carrying mint, or a parent-less delegate/leaf mint (a
 	// child launched without its lead's key), never touches it.
 	s.rebindMailboxOwnerAtFerrule(key, parentKey, scope, canonical)
+	// The same top-lead mint is the manual's documented session start, so it
+	// runs the tracker's session-start check as the FRESH manual path does.
+	if parentKey == "" && scope == roleLead {
+		s.startTrackerSessionCheck()
+	}
 	return s.leadLoginResponse(id, arguments, key, canonical)
 }
 

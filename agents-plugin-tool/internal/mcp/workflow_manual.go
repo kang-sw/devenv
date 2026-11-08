@@ -379,6 +379,7 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 			// promise a channel this session was never actually bound to.
 			s.rebindMailboxOwnerAtFerrule(mintedKey, "", roleLead, canonical)
 			s.maybeCollectWhiteboards(canonical)
+			s.startTrackerSessionCheck()
 			body = stripModeGatedRegion(body, false)
 			body = injectWorktreeProfiles(body, profilesBlock)
 			body = injectSessionKeyLine(body, mintedKey)
@@ -447,6 +448,9 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 			// about the branch it owns.
 			if rec.Parent == "" {
 				body = injectBootstrapStalenessWarning(body, occupiedRootAnnouncement(rec.Root))
+				// A revive is a lead session start too; the check's throttle
+				// keeps a quick revive from fetching again.
+				s.startTrackerSessionCheck()
 			}
 			body = injectBootstrapStalenessWarning(body, mailboxAddressAnnouncement(s, key, rec.Root))
 			// Only a top-level lead renders and consumes the clone's daily
