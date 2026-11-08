@@ -3,6 +3,8 @@ package wsagent
 import (
 	"errors"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"testing"
@@ -97,8 +99,23 @@ func awaitLine(t *testing.T, p *streamProcess, want string) {
 	}
 }
 
+// holdOn is a stand-in's last command, which runs until it is killed. MSYS
+// sh on Windows emulates exec with a child process, so a sleep there would
+// outlive the killed sh and hold stdout open; a builtin loop dies with sh.
+func holdOn() string {
+	if runtime.GOOS == "windows" {
+		return "while :; do :; done"
+	}
+	return "exec sleep 30"
+}
+
 func signalOf(t *testing.T, p *streamProcess) (syscall.Signal, bool) {
 	t.Helper()
+	if runtime.GOOS == "windows" {
+		// Kill is TerminateProcess there; the wait status holds only an exit
+		// code, so there is no signal to check.
+		t.Skip("no signals on Windows")
+	}
 	ws, ok := p.cmd.ProcessState.Sys().(syscall.WaitStatus)
 	if !ok {
 		t.Skip("no wait status on this platform")
@@ -106,18 +123,23 @@ func signalOf(t *testing.T, p *streamProcess) (syscall.Signal, bool) {
 	return ws.Signal(), ws.Signaled()
 }
 
+// commandName is how a Fatal names p's command: "sh", or "sh.exe" on Windows.
+func commandName(p *streamProcess) string { return filepath.Base(p.cmd.Path) }
+
 func TestNonZeroExitIsFatalWithStderrTail(t *testing.T) {
-	evs := collect(t, startScript(t, "head -c 5000 /dev/zero | tr '\\0' a >&2; echo boom >&2; exit 3"))
+	p := startScript(t, "head -c 5000 /dev/zero | tr '\\0' a >&2; echo boom >&2; exit 3")
+	evs := collect(t, p)
 	if len(evs) != 1 || evs[0].Fatal == nil {
 		t.Fatalf("events = %+v, want one Fatal", evs)
 	}
 	msg := evs[0].Fatal.Error()
-	if !strings.HasPrefix(msg, "sh exited: a") || !strings.HasSuffix(msg, "aboom") || len(msg) > len("sh exited: ")+4<<10 {
-		t.Fatalf("Fatal = %.80q... (%d bytes), want the stderr tail (at most 4 KiB) after \"sh exited: \"", msg, len(msg))
+	prefix := commandName(p) + " exited: "
+	if !strings.HasPrefix(msg, prefix+"a") || !strings.HasSuffix(msg, "aboom") || len(msg) > len(prefix)+4<<10 {
+		t.Fatalf("Fatal = %.80q... (%d bytes), want the stderr tail (at most 4 KiB) after %q", msg, len(msg), prefix)
 	}
 
 	evs = collect(t, startScript(t, "exit 3"))
-	if len(evs) != 1 || evs[0].Fatal == nil || evs[0].Fatal.Error() != "sh exited: exit status 3" {
+	if len(evs) != 1 || evs[0].Fatal == nil || evs[0].Fatal.Error() != prefix+"exit status 3" {
 		t.Fatalf("no stderr: events = %+v, want the exit status", evs)
 	}
 }
@@ -125,7 +147,7 @@ func TestNonZeroExitIsFatalWithStderrTail(t *testing.T) {
 // A mapper's Fatal (a refused launch) kills the child at once rather than
 // waiting for it to exit.
 func TestFatalKillsTheChild(t *testing.T) {
-	p := startScript(t, "echo 'fatal launch refused'; exec sleep 30")
+	p := startScript(t, "echo 'fatal launch refused'; "+holdOn())
 	evs := collect(t, p)
 	if len(evs) == 0 || evs[0].Fatal == nil || evs[0].Fatal.Error() != "launch refused" {
 		t.Fatalf("events = %+v, want the mapper's Fatal first", evs)
@@ -142,12 +164,12 @@ func TestScannerErrorIsFatal(t *testing.T) {
 	restore := maxLineBytes
 	maxLineBytes = 1 << 10
 	t.Cleanup(func() { maxLineBytes = restore })
-	p := startScript(t, "head -c 4096 /dev/zero | tr '\\0' a; echo; exec sleep 30")
+	p := startScript(t, "head -c 4096 /dev/zero | tr '\\0' a; echo; "+holdOn())
 	evs := collect(t, p)
 	if len(evs) == 0 || evs[0].Fatal == nil || !strings.Contains(evs[0].Fatal.Error(), "token too long") {
 		t.Fatalf("events = %+v, want a read Fatal first", evs)
 	}
-	if !strings.HasPrefix(evs[0].Fatal.Error(), "reading sh output: ") {
+	if !strings.HasPrefix(evs[0].Fatal.Error(), "reading "+commandName(p)+" output: ") {
 		t.Fatalf("Fatal = %q, want it to name the command", evs[0].Fatal)
 	}
 	if sig, ok := signalOf(t, p); !ok || sig != syscall.SIGKILL {
@@ -170,6 +192,21 @@ func TestCloseEscalates(t *testing.T) {
 		{"ignores EOF and SIGTERM", "trap '' TERM; echo ready; exec sleep 30", syscall.SIGKILL},
 	} {
 		t.Run(c.name, func(t *testing.T) {
+			if runtime.GOOS == "windows" && c.signal != 0 {
+				// Windows has no SIGTERM: Close goes from input EOF straight to
+				// TerminateProcess, so a child ignoring EOF ends killed, and
+				// there is no SIGTERM to ignore.
+				if c.signal == syscall.SIGKILL {
+					t.Skip("no SIGTERM to ignore on Windows")
+				}
+				p := startScript(t, "echo ready; "+holdOn())
+				awaitLine(t, p, "ready")
+				p.Close()
+				if p.cmd.ProcessState.Success() {
+					t.Fatalf("a child ignoring EOF should end killed, got %v", p.cmd.ProcessState)
+				}
+				return
+			}
 			p := startScript(t, c.script)
 			awaitLine(t, p, "ready")
 			p.Close()

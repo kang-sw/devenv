@@ -31,7 +31,7 @@ func TestCreateWritesRecordRegistrationAndSnapshot(t *testing.T) {
 	}
 	dir := wsdashboard.SessionDir(h.dir, st.ID)
 	info, err := os.Stat(recordPath(dir))
-	if err != nil || info.Mode().Perm() != 0o600 {
+	if err != nil || !isPrivate(info) {
 		t.Fatalf("the record should be private: %v %v", info, err)
 	}
 	rec, err := readRecord(dir)
