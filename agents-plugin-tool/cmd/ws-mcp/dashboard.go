@@ -58,6 +58,7 @@ func dashboardCommand(args []string) {
 			_ = tracker.Close()
 		}
 	}
+	sessions := mcp.NewDashboardSessionSource()
 	daemon, err := wsdashboard.StartDaemon(wsdashboard.DaemonOptions{
 		Dir:       dir,
 		Port:      *port,
@@ -66,7 +67,8 @@ func dashboardCommand(args []string) {
 		BuildTime: *buildTime,
 		LockWait:  *lockWait,
 		Log:       logw,
-		Sessions:  mcp.NewDashboardSessionSource(),
+		Sessions:  sessions,
+		Worktrees: sessions,
 		Agents:    newAgentRunner(dir, logw),
 		Tracker:   &dashboardTracker{h: tracker, err: trackerErr},
 	})

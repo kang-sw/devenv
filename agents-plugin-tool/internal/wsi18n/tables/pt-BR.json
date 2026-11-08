@@ -160,8 +160,6 @@
   "js.send.reading": "Ainda lendo uma imagem: envie novamente em instantes.",
   "js.sent.held.title": "retida até o fim do turno da sessão",
   "js.sent.sent.title": "enviada à sessão",
-  "js.sse.live": "ao vivo",
-  "js.sse.offline": "offline",
   "js.sse.title.off": "desconectado, tentando novamente",
   "js.sse.title.on": "atualizações ao vivo",
   "js.steer.fail": "Não promovido: {0}",

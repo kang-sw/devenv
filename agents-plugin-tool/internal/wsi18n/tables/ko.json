@@ -160,8 +160,6 @@
   "js.send.reading": "이미지를 아직 읽는 중입니다: 잠시 후 다시 보내세요.",
   "js.sent.held.title": "세션의 턴이 끝날 때까지 보류됨",
   "js.sent.sent.title": "세션에 전송됨",
-  "js.sse.live": "실시간",
-  "js.sse.offline": "오프라인",
   "js.sse.title.off": "연결 끊김, 재시도 중",
   "js.sse.title.on": "실시간 업데이트",
   "js.steer.fail": "전환하지 못함: {0}",
@@ -860,5 +858,6 @@
   "wb.settled.older": "이전 완료 항목",
   "wb.title": "화이트보드",
   "wb.topic.note": "이 주제에 대한 메모",
-  "wb.updated": "마지막 변경"
+  "wb.updated": "마지막 변경",
+  "worktree.cleanup.ask": "사용자가 사용하지 않는 워크트리 정리를 요청합니다."
 }

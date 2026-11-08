@@ -34,7 +34,10 @@ window.wbMermaidFile = {{.Assets.MermaidFile}};</script>
 search button and popup here when the page mounts it (dashboard.js). */}}
 {{define "qsslot"}}<span class="qsslot" id="qsslot"></span>{{end}}
 
-{{define "sse"}}<span class="sse" id="sse" title="{{t "js.sse.title.on"}}"><span class="dot"></span><span class="sse-label">{{t "js.sse.live"}}</span></span>{{end}}
+{{/* The stream indicator: a bare dot the page script turns off while the
+stream is down. A session page whose head has a harness badge lights the
+dot inside the badge instead (r-head), and the stylesheet hides this one. */}}
+{{define "sse"}}<span class="sse" id="sse" title="{{t "js.sse.title.on"}}"><span class="dot"></span></span>{{end}}
 
 {{/* The gear menu. It always holds the language item; full says the page has
 a live adapter, which adds the layout and input items. The language options
@@ -49,7 +52,7 @@ right side clear of it), holds one icon per present panel, and rides the
 sheet's bottom edge while open. */}}
 {{define "drawer"}}<div class="drawer" id="drawer"><div class="dr-in"><div class="dr-clip" id="drclip"><div class="dr-sheet" id="drsheet" role="region" aria-label="{{t "drawer.panels"}}"><div class="dr-body" id="drbody">{{region . "panels"}}</div></div></div><button type="button" class="dr-handle" id="drhandle" aria-controls="drsheet" aria-expanded="false" title="{{t "js.drawer.open"}}" hidden><span class="dr-wait" title="{{t "js.drawer.waiting"}}">{{icon "lock"}}</span><span class="dr-icons" id="dricons"></span><span class="tdot"></span>{{icon "chev"}}</button></div></div>{{end}}
 
-{{define "r-head"}}<span class="meta">{{.ReplyID}}{{if .HasBoard}} · #{{.Seq}}{{end}}</span>{{with .Harness}}<span class="host">{{.}}</span>{{end}}<span class="meta">{{.ProjectName}}</span>{{if not .Live}}<span class="ended-chip" title="{{t "head.ended.title"}}">{{t "head.ended"}}</span>{{end}}{{if not .Adapter}}<span class="nolive" title="{{t "head.stores.title"}}">{{t "head.stores"}}</span>{{end}}<span class="counts">{{with .CountPolicy}}<span class="chip policy" title="{{t "chip.answer"}}">{{icon "ask"}}{{.}}</span>{{end}}{{with .CountAssumed}}<span class="chip assumed" title="{{t "chip.assumed"}}">{{icon "arrow"}}{{.}}</span>{{end}}{{with .CountAcks}}<span class="chip ok" title="{{t "chip.ack"}}">{{icon "check"}}{{.}}</span>{{end}}</span>{{end}}
+{{define "r-head"}}<span class="meta">{{.ProjectName}}</span><span class="meta">{{.ReplyID}}{{if .HasBoard}} · #{{.Seq}}{{end}}</span>{{with .Harness}}<span class="host sse" title="{{t "js.sse.title.on"}}"><span class="dot"></span>{{.}}</span>{{end}}{{if not .Live}}<span class="ended-chip" title="{{t "head.ended.title"}}">{{t "head.ended"}}</span>{{end}}{{if not .Adapter}}<span class="nolive" title="{{t "head.stores.title"}}">{{t "head.stores"}}</span>{{end}}<span class="counts">{{with .CountPolicy}}<span class="chip policy" title="{{t "chip.answer"}}">{{icon "ask"}}{{.}}</span>{{end}}{{with .CountAssumed}}<span class="chip assumed" title="{{t "chip.assumed"}}">{{icon "arrow"}}{{.}}</span>{{end}}{{with .CountAcks}}<span class="chip ok" title="{{t "chip.ack"}}">{{icon "check"}}{{.}}</span>{{end}}</span>{{end}}
 
 {{define "r-board"}}{{if .HasBoard}}{{.ThemedBoard}}{{else}}<div class="empty">{{t "board.empty"}}</div>{{end}}{{end}}
 

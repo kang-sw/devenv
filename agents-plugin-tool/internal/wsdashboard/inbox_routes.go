@@ -131,29 +131,57 @@ func sameOrigin(r *http.Request) bool {
 	return strings.EqualFold(u.Host, r.Host)
 }
 
-// handleInboxWrite serves the message, cancel, steer, and interrupt routes
-// of one session.
-func (d *Daemon) handleInboxWrite(w http.ResponseWriter, r *http.Request, replyID, route string) {
+// inboxSession runs the write routes' shared checks on a request for the
+// session replyID: a POST, the daemon's own Origin, a known session, and a
+// live host adapter. On a refusal it has answered the request and ok is
+// false.
+func (d *Daemon) inboxSession(w http.ResponseWriter, r *http.Request, replyID string, now time.Time) (s Session, ok bool) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
+		return s, false
 	}
 	if !sameOrigin(r) {
 		http.Error(w, "cross-origin request refused", http.StatusForbidden)
-		return
+		return s, false
 	}
 	if d.index == nil || !ValidReplyID(replyID) {
 		http.Error(w, "unknown session", http.StatusNotFound)
-		return
+		return s, false
 	}
-	s, ok := d.index.Session(replyID)
-	if !ok {
+	if s, ok = d.index.Session(replyID); !ok {
 		http.Error(w, "unknown session", http.StatusNotFound)
-		return
+		return s, false
 	}
-	now := time.Now()
 	if !adapterPresent(d.pages().readSnapshot(replyID), now) {
 		http.Error(w, "this session has no live host adapter: copy the answers into its terminal instead", http.StatusConflict)
+		return s, false
+	}
+	return s, true
+}
+
+// inboxAnswered answers a write route with its inbox write's outcome, and
+// on success tells the index, the session's streams, and the agent runner
+// (for a conversation it hosts) that the inbox changed.
+func (d *Daemon) inboxAnswered(w http.ResponseWriter, s Session, status int, answer any) {
+	if status == http.StatusOK {
+		d.index.Nudge(s.ReplyID, s.Project)
+		d.broker.wake(s.ReplyID)
+		if s.Agent && d.agents != nil {
+			d.agents.InboxChanged(s.ReplyID)
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		writeJSON(w, status, answer)
+		return
+	}
+	http.Error(w, fmt.Sprint(answer), status)
+}
+
+// handleInboxWrite serves the message, cancel, steer, and interrupt routes
+// of one session.
+func (d *Daemon) handleInboxWrite(w http.ResponseWriter, r *http.Request, replyID, route string) {
+	now := time.Now()
+	s, ok := d.inboxSession(w, r, replyID, now)
+	if !ok {
 		return
 	}
 	limit := inboxBodyLimit
@@ -184,18 +212,7 @@ func (d *Daemon) handleInboxWrite(w http.ResponseWriter, r *http.Request, replyI
 		status, answer = d.inboxWrite(dir, route, raw, now)
 		d.inboxMu.Unlock()
 	}
-
-	if status == http.StatusOK {
-		d.index.Nudge(replyID, s.Project)
-		d.broker.wake(replyID)
-		if s.Agent && d.agents != nil {
-			d.agents.InboxChanged(replyID)
-		}
-		w.Header().Set("Cache-Control", "no-store")
-		writeJSON(w, status, answer)
-		return
-	}
-	http.Error(w, fmt.Sprint(answer), status)
+	d.inboxAnswered(w, s, status, answer)
 }
 
 // messageWrite performs the message route against the inbox at dir. It

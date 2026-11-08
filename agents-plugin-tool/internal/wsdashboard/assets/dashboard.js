@@ -383,6 +383,7 @@
     if (name === "panels") drawerSwapped();
     if (name === "tree" || name === "convlive") drawerWait();
     if (name === "convlive") syncBadge();
+    if (name === "head" && !sseOn) connected(false);
   }
 
   // --- conversation entries: merged by key, never re-rendered ----------------
@@ -953,15 +954,19 @@
     });
   }
   // applySent marks each board item the session was sent an answer for, or
-  // holds one for, from the inbox records the conversation region carries.
+  // holds one for, from the inbox records the conversation region carries,
+  // and dims the item's answer area (sent-sent, sent-held) until the board
+  // re-renders it answered; each run recomputes both from scratch.
   function applySent() {
     var b = region("board");
     if (!b) return;
     q(".sentmark", b).forEach(function (m) { m.parentNode.removeChild(m); });
+    q(".sent-sent, .sent-held", b).forEach(function (el) { el.classList.remove("sent-sent", "sent-held"); });
     q(".sentdata i[data-id]").forEach(function (i) {
       var item = boardItem(i.getAttribute("data-id")), head = item && item.querySelector(".head");
       if (!head) return;
       var state = i.getAttribute("data-state"), m = doc.createElement("span");
+      item.classList.add(state === "held" ? "sent-held" : "sent-sent");
       m.className = "sentmark " + state;
       m.textContent = state + " · " + (i.getAttribute("data-answer") || "note");
       var note = i.getAttribute("data-note");
@@ -1819,12 +1824,16 @@
   }
 
   // --- stream ----------------------------------------------------------------
-  var sse = $("sse"), sseLabel = sse && sse.querySelector(".sse-label");
+  // The stream state shows on every indicator in the top bar: the bare dot,
+  // and the harness badge's LED, which a head region swap redraws lit, so
+  // the swap reapplies the state (swap above).
+  var sseOn = true;
   function connected(on) {
-    if (!sse) return;
-    sse.classList.toggle("off", !on);
-    if (sseLabel) sseLabel.textContent = wsT(on ? "js.sse.live" : "js.sse.offline");
-    sse.title = wsT(on ? "js.sse.title.on" : "js.sse.title.off");
+    sseOn = on;
+    q(".top .sse").forEach(function (el) {
+      el.classList.toggle("off", !on);
+      el.title = wsT(on ? "js.sse.title.on" : "js.sse.title.off");
+    });
   }
   function connect() {
     if (!window.EventSource) return;

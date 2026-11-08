@@ -73,6 +73,9 @@ type DaemonOptions struct {
 	// Tracker is the tracker host the tracker routes serve (tracker_routes.go);
 	// nil serves no tracker route and sends no tracker stream event.
 	Tracker TrackerHost
+	// Worktrees reads a session's project worktree pool for the
+	// pooled-worktree routes (worktrees.go); nil serves none.
+	Worktrees WorktreeSource
 
 	// bindHost overrides the address the daemon binds, so a test runs LAN
 	// mode on loopback; empty derives it from LAN.
@@ -133,6 +136,10 @@ type Daemon struct {
 	// per root; pushMu guards it.
 	pushMu  sync.Mutex
 	pushing map[string]bool
+	// worktrees reads worktree pools, nil without the routes; sizes
+	// measures their worktrees' disk use (worktrees.go).
+	worktrees WorktreeSource
+	sizes     *sizeCache
 
 	closeOnce sync.Once
 	stop      chan struct{}
@@ -211,6 +218,8 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 		lan:        opts.LAN,
 		buildTime:  opts.BuildTime,
 		openSystem: opts.openSystem,
+		worktrees:  opts.Worktrees,
+		sizes:      newSizeCache(),
 		stop:       make(chan struct{}),
 		done:       make(chan struct{}),
 		endpoint: Endpoint{

@@ -160,8 +160,6 @@
   "js.send.reading": "仍在讀取圖片：請稍後再次傳送。",
   "js.sent.held.title": "暫存至工作階段回合結束",
   "js.sent.sent.title": "已傳送給工作階段",
-  "js.sse.live": "即時",
-  "js.sse.offline": "離線",
   "js.sse.title.off": "未連線，正在重試",
   "js.sse.title.on": "即時更新",
   "js.steer.fail": "未能提升：{0}",
