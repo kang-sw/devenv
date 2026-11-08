@@ -51,9 +51,14 @@
 .host.sm { font-size: 10px; padding: 0 5px; flex: none; }
 .nolive, .ended-chip { font-size: 11.5px; color: var(--wb-muted-fg); border: 1px dashed var(--wb-muted-fg); border-radius: 999px; padding: 0 8px; white-space: nowrap; }
 .ended-chip { border-style: solid; }
-.sse { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--wb-muted-fg); white-space: nowrap; }
+.sse { display: inline-flex; align-items: center; white-space: nowrap; }
 .sse .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--wb-ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--wb-ok) 25%, transparent); }
 .sse.off .dot { background: var(--wb-muted-fg); box-shadow: 0 0 0 3px color-mix(in srgb, var(--wb-muted-fg) 20%, transparent); }
+/* the harness badge carries the stream's LED; the bare dot then steps aside */
+.host.sse { gap: 5px; }
+.host.sse .dot { width: 6px; height: 6px; box-shadow: 0 0 0 2px color-mix(in srgb, var(--wb-ok) 25%, transparent); }
+.host.sse.off .dot { box-shadow: 0 0 0 2px color-mix(in srgb, var(--wb-muted-fg) 20%, transparent); }
+.top:has(.host.sse) > #sse { display: none; }
 .dash.index .sse { margin-left: auto; }
 /* the git badge: a status band line in a button, read by the daemon */
 .r-git { display: contents; }

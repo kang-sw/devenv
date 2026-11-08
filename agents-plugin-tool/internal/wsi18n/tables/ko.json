@@ -160,8 +160,6 @@
   "js.send.reading": "이미지를 아직 읽는 중입니다: 잠시 후 다시 보내세요.",
   "js.sent.held.title": "세션의 턴이 끝날 때까지 보류됨",
   "js.sent.sent.title": "세션에 전송됨",
-  "js.sse.live": "실시간",
-  "js.sse.offline": "오프라인",
   "js.sse.title.off": "연결 끊김, 재시도 중",
   "js.sse.title.on": "실시간 업데이트",
   "js.steer.fail": "전환하지 못함: {0}",

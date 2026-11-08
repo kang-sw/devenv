@@ -160,8 +160,6 @@
   "js.send.reading": "Lecture d'une image en cours : renvoyez dans un instant.",
   "js.sent.held.title": "en attente jusqu'à la fin du tour de la session",
   "js.sent.sent.title": "envoyé à la session",
-  "js.sse.live": "en direct",
-  "js.sse.offline": "hors ligne",
   "js.sse.title.off": "non connecté, nouvelle tentative",
   "js.sse.title.on": "mises à jour en direct",
   "js.steer.fail": "Non promu : {0}",

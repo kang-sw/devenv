@@ -383,6 +383,7 @@
     if (name === "panels") drawerSwapped();
     if (name === "tree" || name === "convlive") drawerWait();
     if (name === "convlive") syncBadge();
+    if (name === "head" && !sseOn) connected(false);
   }
 
   // --- conversation entries: merged by key, never re-rendered ----------------
@@ -1819,12 +1820,16 @@
   }
 
   // --- stream ----------------------------------------------------------------
-  var sse = $("sse"), sseLabel = sse && sse.querySelector(".sse-label");
+  // The stream state shows on every indicator in the top bar: the bare dot,
+  // and the harness badge's LED, which a head region swap redraws lit, so
+  // the swap reapplies the state (swap above).
+  var sseOn = true;
   function connected(on) {
-    if (!sse) return;
-    sse.classList.toggle("off", !on);
-    if (sseLabel) sseLabel.textContent = wsT(on ? "js.sse.live" : "js.sse.offline");
-    sse.title = wsT(on ? "js.sse.title.on" : "js.sse.title.off");
+    sseOn = on;
+    q(".top .sse").forEach(function (el) {
+      el.classList.toggle("off", !on);
+      el.title = wsT(on ? "js.sse.title.on" : "js.sse.title.off");
+    });
   }
   function connect() {
     if (!window.EventSource) return;

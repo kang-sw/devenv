@@ -160,8 +160,6 @@
   "js.send.reading": "Un'immagine è ancora in lettura: invia di nuovo tra un attimo.",
   "js.sent.held.title": "in sospeso fino al termine del turno della sessione",
   "js.sent.sent.title": "inviato alla sessione",
-  "js.sse.live": "live",
-  "js.sse.offline": "offline",
   "js.sse.title.off": "non connesso, nuovo tentativo in corso",
   "js.sse.title.on": "aggiornamenti live",
   "js.steer.fail": "Non anticipato: {0}",
