@@ -147,9 +147,9 @@
 .tk.tk-drawer.drag .tk-dr-clip, .tk.tk-drawer.drag .tk-handle { transition: none; }
 .tk .tk-handle .i:last-child { transition: transform .15s; }
 .tk .tk-handle.open .i:last-child { transform: rotate(180deg); }
-/* "+ store": a compact sibling at the row's left end */
-.tk .tk-handle.tk-add { padding: 2px 8px 0; gap: 4px; font-size: 11.5px; font-weight: 600; touch-action: auto; }
-.tk .tk-handle.tk-add .i { width: 12px; height: 12px; }
+/* "+ store": an icon-only square (34px, the handle height) at the row's left end */
+.tk .tk-handle.tk-add { width: 34px; padding: 2px 0 0; justify-content: center; touch-action: auto; }
+.tk .tk-handle.tk-add .i { width: 14px; height: 14px; }
 .tk .tk-badge { min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--wb-primary); color: var(--wb-primary-fg); font-size: 10.5px; line-height: 16px; text-align: center; font-weight: 800; }
 
 /* the store page #/<storeId>: the store full-page in place of the conversation and the drawer */
@@ -181,7 +181,6 @@ body.tk-paged .tk-drawer { display: none; }
 @media (max-width: 640px) {
   .tk .tk-handle { padding: 2px 7px 0; gap: 5px; }
   .tk .tk-handle .hl { display: none; }
-  .tk .tk-handle.tk-add { padding: 2px 7px 0; }
 }
 
 /* store sync line */

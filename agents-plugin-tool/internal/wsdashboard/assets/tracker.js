@@ -2128,7 +2128,7 @@
     $('tkhandles').innerHTML = order.map(function (n) {
       return '<button class="tk-handle" id="tkh-' + esc(n) + '"' + attr('handle', n) + ' aria-controls="tkbody"><svg class="i"><use href="#tki-tasks"/></svg><span class="hl">' + esc(n) +
         '</span><span class="hoff" title="' + wsT("js.tk.handle.off") + '" hidden>&#8856;</span><span class="tk-badge" hidden></span><svg class="i"><use href="#tki-chev"/></svg></button>';
-    }).join('') + (AD.register ? '<button class="tk-handle tk-add" id="tkadd" data-act="register" aria-haspopup="dialog" title="' + esc(wsT("js.tk.reg.handle.tip")) + '"><svg class="i"><use href="#tki-plus"/></svg><span class="hl">' + wsT("js.tk.reg.handle") + '</span></button>' : '');
+    }).join('') + (AD.register ? '<button class="tk-handle tk-add" id="tkadd" data-act="register" aria-haspopup="dialog" title="' + esc(wsT("js.tk.reg.handle.tip")) + '" aria-label="' + esc(wsT("js.tk.reg.handle.tip")) + '"><svg class="i"><use href="#tki-plus"/></svg></button>' : '');
   }
   function renderHandles() {
     order.forEach(function (name) {

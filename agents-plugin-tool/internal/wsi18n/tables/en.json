@@ -569,7 +569,6 @@
   "js.tk.qs.results": "results",
   "js.tk.qs.stores": "Stores",
   "js.tk.qs.tip": "search stores and items",
-  "js.tk.reg.handle": "store",
   "js.tk.reg.handle.tip": "Add a tracker store: create one, or join the store a remote holds",
   "js.tk.roll.below": "blocked below",
   "js.tk.roll.below.tip": "blocked below: {0}",
