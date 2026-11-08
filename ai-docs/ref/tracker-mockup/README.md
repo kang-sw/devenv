@@ -18,8 +18,9 @@ reference implementation the Go data-structure child ports, and
 Open `index.html` from the file system (double-click, or a `file://` URL). No
 build, no server, no dependencies.
 
-- `index.html` holds the frame and mount points. `style.css` holds the neutral
-  layout styling, with the dashboard's variables and drawer geometry.
+- `index.html` holds the frame and mount points. `style.css` holds the
+  dashboard's look (variables and component rules copied from the dashboard
+  stylesheets), light and dark, with the gear menu's auto / light / dark theme.
 - `engine.js` is the data layer (`window.TrackerEngine`). It computes causality
   from `seen`, validates each event against what its author had seen, folds the
   state, marks concurrent changes, derives the view state, and simulates the

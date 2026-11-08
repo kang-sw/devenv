@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>tracker mockup v3 - ws dashboard frame</title>
 <link rel="stylesheet" href="style.css">
+<!-- theme before first paint (no flash): data-theme="light|dark" on the root, absent for auto, as in the dashboard -->
+<script>try { var t = localStorage.getItem('tracker-mockup-theme'); if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t); } catch (e) {}</script>
 </head>
 <body>
 <!-- icon sprite, same stroke style as the dashboard's -->
@@ -16,6 +18,10 @@
   <symbol id="i-plus" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></symbol>
   <symbol id="i-x" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></symbol>
   <symbol id="i-send" viewBox="0 0 16 16"><path d="M2.5 8L13.5 2.8 10.6 13.4 7.6 9.1z"/><path d="M7.6 9.1l5.9-6.3"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.1"/><circle cx="8" cy="8" r="4.6"/><path d="M8 1.5v1.9M8 12.6v1.9M1.5 8h1.9M12.6 8h1.9M3.4 3.4l1.3 1.3M11.3 11.3l1.3 1.3M3.4 12.6l1.3-1.3M11.3 4.7l1.3-1.3"/></symbol>
+  <symbol id="i-auto" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.2"/><path d="M8 2.8v10.4A5.2 5.2 0 0 0 8 2.8z" fill="currentColor"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.8"/><path d="M8 1.6v1.6M8 12.8v1.6M1.6 8h1.6M12.8 8h1.6M3.5 3.5l1.1 1.1M11.4 11.4l1.1 1.1M3.5 12.5l1.1-1.1M11.4 4.6l1.1-1.1"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 16 16"><path d="M12.8 10.1A5.4 5.4 0 0 1 5.9 3.2a5.4 5.4 0 1 0 6.9 6.9z"/></symbol>
 </svg>
 
 <div class="dwrap">
@@ -34,6 +40,16 @@
       <button class="btn mini" data-act="clock" data-min="60">+1h</button><button class="btn mini" data-act="clock" data-min="1440">+1d</button>
     </span>
     <span class="sse" title="live updates"><span class="dot"></span>live</span>
+    <!-- the dashboard's gear menu, holding only the theme setting here (local UI state, localStorage) -->
+    <span class="gearwrap"><button class="btn gear" id="gear" title="settings" aria-haspopup="true" aria-expanded="false"><svg class="i"><use href="#i-gear"/></svg></button>
+      <span class="gmenu" id="gmenu" hidden>
+        <span class="gt">Theme</span>
+        <button data-theme-set="auto" aria-pressed="false"><span class="gk"><svg class="i"><use href="#i-auto"/></svg></span><span>Auto<span class="gs">follow the system setting</span></span></button>
+        <button data-theme-set="light" aria-pressed="false"><span class="gk"><svg class="i"><use href="#i-sun"/></svg></span><span>Light</span></button>
+        <button data-theme-set="dark" aria-pressed="false"><span class="gk"><svg class="i"><use href="#i-moon"/></svg></span><span>Dark</span></button>
+        <span class="gn">Mockup setting, saved in this browser.</span>
+      </span>
+    </span>
   </div>
 
   <!-- static stand-in for the conversation column -->
