@@ -47,6 +47,9 @@
   delegate playbooks.** The two-round worker-owned review model left all three
   with no caller; only their own render tests kept them alive. They are gone
   from the `ws`, `wsflow`, and Pi rsrc trees and manifests.
+- **The `session.note` MCP tool.** Its only caller was the retired fan-out
+  skill and it never shipped in a release. `session.children` still reads and
+  filters (`unnoted_only`) a note already stored on a child record.
 
 ## v0.42.0 - 2026-08-23
 

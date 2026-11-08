@@ -69,7 +69,7 @@ const BUNDLED_RUNTIME = JSON.parse(readFileSync(join(TEST_DIR, "..", "runtime.js
 // to the bundled contract below; it is not an independent hand-maintained
 // contract source.
 const LIVE_TOOL_NAMES = [
-  "runtime.read", "runtime.debug_events", "session.children", "session.note",
+  "runtime.read", "runtime.debug_events", "session.children",
   "mailbox.send", "mailbox.recv", "mailbox.lookup_peers",
   "ferrule", "agenda.set", "agenda.clear", "agenda.list",
   "route.resolve_implement", "route.resolve_proceed", "todo.add", "todo.check",
@@ -87,7 +87,7 @@ const LIVE_TOOL_NAMES = [
 ];
 const RETIRED_TOOL_NAMES = [
   "specs.query", "mental_models.list", "mental_models.query", "mental_models.status",
-  "references.trace", "spec_index.verify", "spec_stem.generate",
+  "references.trace", "spec_index.verify", "spec_stem.generate", "session.note",
 ];
 const EXPECTED_COMMAND_NAMES = [
   "runtime.info", "runtime.capabilities", "smoke", "config.list", "config.tune",
