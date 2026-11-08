@@ -13,8 +13,10 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/kang-sw/devenv/internal/wsdevassets"
 	"github.com/kang-sw/devenv/internal/wsi18n"
 	"github.com/kang-sw/devenv/internal/wsinbox"
 	"github.com/kang-sw/devenv/internal/wslive"
@@ -101,56 +103,87 @@ var (
 	symbolPattern = regexp.MustCompile(`<symbol id="i-([a-z0-9-]+)"`)
 )
 
+// loadDashboardAssets returns the dashboard assets. The embedded copy is
+// built once; with dev assets on (SetDevAssets) every call rebuilds from the
+// working tree, so an edit shows on the next request and a failed build is
+// never kept.
 func loadDashboardAssets() (*dashboardAssets, error) {
-	dashboardAssetsOnce.Do(func() {
-		read := func(name string) string {
-			raw, err := dashboardFS.ReadFile("assets/" + name)
-			if err != nil && dashboardAssetsErr == nil {
-				dashboardAssetsErr = err
-			}
-			return string(raw)
-		}
-		wb, err := wswhiteboard.PageAssets()
-		if err != nil {
-			dashboardAssetsErr = err
-			return
-		}
-		mermaidName, _ := wswhiteboard.MermaidAsset()
-		a := &dashboardAssets{data: pageAssetsData{
-			CSS:              template.CSS(read("dashboard.css")),
-			Script:           template.JS(read("dashboard.js")),
-			Sprite:           template.HTML(strings.TrimSpace(read("sprite.svg"))),
-			WhiteboardCSS:    wb.CSS,
-			WhiteboardSprite: wb.Sprite,
-			FormScript:       wb.FormScript,
-			MermaidInit:      wb.MermaidInit,
-			MermaidFile:      mermaidName,
-			ViewerScript:     wb.ViewerScript,
-		}}
-		if dashboardAssetsErr != nil {
-			return
-		}
-		icons := map[string]bool{}
-		for _, sprite := range []string{string(a.data.Sprite), string(wb.Sprite)} {
-			for _, m := range symbolPattern.FindAllStringSubmatch(sprite, -1) {
-				icons[m[1]] = true
-			}
-		}
-		a.tmpls = map[string]*template.Template{}
-		for _, l := range wsi18n.Languages() {
-			t, err := template.New("dashboard").Funcs(pageFuncs(l.Code, icons)).ParseFS(dashboardFS, "assets/dashboard.tmpl")
-			if err != nil {
-				dashboardAssetsErr = err
-				break
-			}
-			a.tmpls[l.Code] = t
-		}
-		a.tmpl = a.tmpls[wsi18n.Default]
-		if dashboardAssetsErr == nil {
-			loadedDashboard = a
-		}
-	})
+	if root := devAssets.Load(); root != nil {
+		return buildDashboardAssets(func(name string) ([]byte, error) { return root.ReadFile(devAssetDir + "/" + name) })
+	}
+	dashboardAssetsOnce.Do(func() { loadedDashboard, dashboardAssetsErr = buildDashboardAssets(embeddedDashboardAsset) })
 	return loadedDashboard, dashboardAssetsErr
+}
+
+func embeddedDashboardAsset(name string) ([]byte, error) {
+	return dashboardFS.ReadFile("assets/" + name)
+}
+
+// devAssets, when set, is the source root loadDashboardAssets reads from
+// instead of the embedded copy.
+var devAssets atomic.Pointer[wsdevassets.Root]
+
+// devAssetDir is where the dashboard assets live under a dev source root.
+const devAssetDir = "internal/wsdashboard/assets"
+
+// SetDevAssets turns dev assets on for this process, for the dashboard pages
+// and the whiteboard page assets they inline, or off with nil. The daemon
+// calls it at startup; the mermaid bundle stays embedded.
+func SetDevAssets(root *wsdevassets.Root) {
+	devAssets.Store(root)
+	wswhiteboard.SetDevAssets(root)
+}
+
+// buildDashboardAssets reads every dashboard asset by file name through read
+// and parses the template for each language.
+func buildDashboardAssets(read func(name string) ([]byte, error)) (*dashboardAssets, error) {
+	var err error
+	get := func(name string) string {
+		if err != nil {
+			return ""
+		}
+		var raw []byte
+		raw, err = read(name)
+		return string(raw)
+	}
+	wb, werr := wswhiteboard.PageAssets()
+	if werr != nil {
+		return nil, werr
+	}
+	mermaidName, _ := wswhiteboard.MermaidAsset()
+	a := &dashboardAssets{data: pageAssetsData{
+		CSS:              template.CSS(get("dashboard.css")),
+		Script:           template.JS(get("dashboard.js")),
+		Sprite:           template.HTML(strings.TrimSpace(get("sprite.svg"))),
+		WhiteboardCSS:    wb.CSS,
+		WhiteboardSprite: wb.Sprite,
+		FormScript:       wb.FormScript,
+		MermaidInit:      wb.MermaidInit,
+		MermaidFile:      mermaidName,
+		ViewerScript:     wb.ViewerScript,
+	}}
+	source := get("dashboard.tmpl")
+	if err != nil {
+		return nil, err
+	}
+	icons := map[string]bool{}
+	for _, sprite := range []string{string(a.data.Sprite), string(wb.Sprite)} {
+		for _, m := range symbolPattern.FindAllStringSubmatch(sprite, -1) {
+			icons[m[1]] = true
+		}
+	}
+	a.tmpls = map[string]*template.Template{}
+	for _, l := range wsi18n.Languages() {
+		// The file's template is "dashboard.tmpl" under the root
+		// "dashboard", as ParseFS names it.
+		t := template.New("dashboard").Funcs(pageFuncs(l.Code, icons))
+		if _, err := t.New("dashboard.tmpl").Parse(source); err != nil {
+			return nil, err
+		}
+		a.tmpls[l.Code] = t
+	}
+	a.tmpl = a.tmpls[wsi18n.Default]
+	return a, nil
 }
 
 // pageFuncs is the template FuncMap for one language: the page helpers and

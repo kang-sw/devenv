@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"html/template"
 	"io"
 	"net/http"
@@ -238,6 +239,7 @@ const fileMarkdownCSP = "default-src 'none'; style-src 'unsafe-inline'; img-src 
 func (d *Daemon) writeFilePage(w http.ResponseWriter, name string, page fileViewPage) {
 	a, err := loadDashboardAssets()
 	if err != nil {
+		fmt.Fprintf(d.log, "dashboard: render %s: %v\n", name, err)
 		http.Error(w, "render failed", http.StatusInternalServerError)
 		return
 	}

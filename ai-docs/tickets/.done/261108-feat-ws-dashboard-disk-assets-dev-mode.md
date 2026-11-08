@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 3dc739715b20b2bd
 sage-review-completeness-reviewed: 3dc739715b20b2bd
+completed: 2026-11-08
 ---
 
 # Dashboard disk-assets dev mode - serve dashboard and whiteboard assets from a working tree
@@ -154,3 +155,62 @@ covering the whiteboard assets as well.
     `page.css` in the worktree, reload the session page, and see the change
     (screenshots before/after to `/tmp/disk-assets-dev-mode/`).
 - Report how the user turns it on (exact command or config line).
+
+### Result (7993f83dd) - 2026-11-08
+
+Landed: `WS_MCP_DASHBOARD_DEV_SOURCE=<agents-plugin-tool root>` turns dev assets
+on for `ws-mcp dashboard`; the daemon then reads the dashboard and whiteboard
+templates, CSS, JS, and sprites from the working tree on every request and
+re-parses the templates. Off when unset (embedded path built once, as before).
+
+- New `internal/wsdevassets` (`Open`, `Root.ReadFile`): resolves the source root,
+  requires both asset directories, refuses a file whose `EvalSymlinks` real path
+  leaves the root.
+- `wswhiteboard.SetDevAssets` and `wsdashboard.SetDevAssets` (the latter sets
+  both) are the process-level switch; `loadAssets` / `loadDashboardAssets`
+  bypass their `sync.Once` caches only when it is on. Both build functions
+  read through one `read(name)` function (embedded or disk) and parse the
+  template under the `ParseFS` names. Mermaid and the MCP server's renders stay
+  embedded.
+- `cmd/ws-mcp/dashboard.go` reads the variable at startup, before serving; the
+  "dev assets on" log line is written after `StartDaemon` (the lazy log
+  truncates on first write, which only the lock holder may do).
+
+Decisions:
+- Setting: environment variable, not a config key. The daemon reads no config
+  (serve passes flags), a key would need three manifests (ws, wsflow, Pi) and a
+  /health mode match to replace a running daemon, and its description would
+  ship downstream for a maintainer-only aid. The manifest parity test is
+  unaffected (no manifest change).
+- A missing source root or asset directory fails the daemon at startup (fatal,
+  names the variable) instead of falling back to embedded silently.
+- A dev read or parse failure is never cached; pages answer 500 "render
+  failed" and the cause goes to `dashboard.log`; the next request retries.
+  `writeFilePage` now logs an asset-load failure too.
+- Documented in `ai-docs/manuals/ws-mcp.md` (Dashboard daemon, Dev assets; env
+  table).
+
+How to turn it on: shut the running daemon down (`POST /shutdown` with
+`Authorization: Bearer <token from endpoint.json>`), then run
+`WS_MCP_DASHBOARD_DEV_SOURCE=$PWD/agents-plugin-tool ws-mcp dashboard` (from a
+build of this tree). Reload the browser after each asset edit. A daemon
+started by `serve` inherits the variable only when `serve` has it in its
+environment, and a running same-version daemon is not replaced on this
+setting.
+
+Verification:
+- `cd agents-plugin-tool && go vet ./...`: clean; `gofmt -l .`: clean.
+- `go test -count=1 ./internal/wsdashboard/ ./internal/wswhiteboard/ ./internal/wsdevassets/ ./cmd/...`: all ok.
+  New tests: off by default and parity with embedded; changed CSS and template
+  show on the next request for the whiteboard (`RenderPage`, `RenderRegions`,
+  `PageAssets`) and the dashboard (session page, index) with no restart; a
+  broken template reports its error and recovers once fixed; a symlinked asset
+  outside the root is refused; mermaid stays embedded; `EnableDevAssets`.
+- Live check (isolated cache, `/tmp/disk-assets-dev-mode/`): a daemon with dev
+  mode on, `page.css` edited in the worktree, reload of `/s/livecheck`:
+  `.card` outline `none 3px` (before.png) became `solid 4px` (after.png) with no
+  restart. The edit was reverted. The daemon used a throwaway fake-source main
+  (not committed) because the real session source needs a real session record.
+- Lite review (one pass): clean, no findings.
+- `internal/mcp` tests not run: no mcp or manifest file changed (a concurrent run
+  from another session saturated the machine).

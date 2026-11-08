@@ -11,7 +11,9 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 
+	"github.com/kang-sw/devenv/internal/wsdevassets"
 	"github.com/kang-sw/devenv/internal/wsi18n"
 )
 
@@ -64,67 +66,92 @@ var (
 // fallbackIcon is the sprite symbol a panel gets when it names an unknown one.
 const fallbackIcon = "list"
 
+// loadAssets returns the page assets. The embedded copy is built once; with
+// dev assets on (SetDevAssets) every call rebuilds from the working tree, so
+// an edit shows on the next request and a failed build is never kept.
 func loadAssets() (*pageAssets, error) {
-	assetsOnce.Do(func() {
-		read := func(name string) string {
-			if assetsErr != nil {
-				return ""
-			}
-			data, err := assetFS.ReadFile("assets/" + name)
-			if err != nil {
-				assetsErr = err
-			}
-			return string(data)
-		}
-		svgView := read("svg-view.js")
-		chg := read("chg.js")
-		a := &pageAssets{
-			css:         template.CSS(read("page.css")),
-			form:        read("form.js"),
-			live:        read("live.js"),
-			pill:        read("pill.js"),
-			mermaidInit: template.JS(read("mermaid-init.js")),
-			docFrame:    svgView + "\n" + chg + "\n" + read("doc-frame.js"),
-			chg:         chg,
-			viewer:      "(function () {\n" + svgView + "\n" + read("viewer.js") + "})();\n",
-			sprite:      template.HTML(strings.TrimSpace(read("sprite.svg"))),
-			icons:       map[string]bool{},
-		}
-		if assetsErr != nil {
-			return
-		}
-		for _, match := range spriteSymbolPattern.FindAllStringSubmatch(string(a.sprite), -1) {
-			a.icons[match[1]] = true
-		}
-		a.tmpls = map[string]*template.Template{}
-		for _, l := range wsi18n.Languages() {
-			lang := l.Code
-			funcs := template.FuncMap{
-				"icon": func(name string) (template.HTML, error) {
-					if !a.icons[name] {
-						return "", fmt.Errorf("whiteboard page: no sprite symbol %q", name)
-					}
-					return template.HTML(`<svg class="i" aria-hidden="true"><use href="#i-` + name + `"/></svg>`), nil
-				},
-				"lines":       rationaleLines,
-				"box":         rowBox,
-				"href":        rowHref,
-				"actionAttrs": panelActionAttrs,
-				"t":           func(key string, args ...any) string { return wsi18n.T(lang, key, args...) },
-				"i18n":        func() template.JS { return wsi18n.Script(lang) },
-			}
-			var t *template.Template
-			if t, assetsErr = template.New("page").Funcs(funcs).ParseFS(assetFS, "assets/page.tmpl"); assetsErr != nil {
-				break
-			}
-			a.tmpls[lang] = t
-		}
-		a.tmpl = a.tmpls[wsi18n.Default]
-		if assetsErr == nil {
-			loadedAssets = a
-		}
-	})
+	if root := devAssets.Load(); root != nil {
+		return buildAssets(func(name string) ([]byte, error) { return root.ReadFile(devAssetDir + "/" + name) })
+	}
+	assetsOnce.Do(func() { loadedAssets, assetsErr = buildAssets(embeddedAsset) })
 	return loadedAssets, assetsErr
+}
+
+// embeddedAsset reads an asset file from the embedded copy.
+func embeddedAsset(name string) ([]byte, error) { return assetFS.ReadFile("assets/" + name) }
+
+// devAssets, when set, is the source root loadAssets reads from instead of
+// the embedded copy. The daemon sets it at startup; the MCP server never
+// does, so the pages it writes keep the embedded assets.
+var devAssets atomic.Pointer[wsdevassets.Root]
+
+// SetDevAssets turns dev assets on for this process, or off with nil. The
+// mermaid bundle stays embedded either way (MermaidAsset names it by hash).
+func SetDevAssets(root *wsdevassets.Root) { devAssets.Store(root) }
+
+// devAssetDir is where the whiteboard assets live under a dev source root.
+const devAssetDir = "internal/wswhiteboard/assets"
+
+// buildAssets reads every asset by file name through read and parses the
+// template set.
+func buildAssets(read func(name string) ([]byte, error)) (*pageAssets, error) {
+	var err error
+	get := func(name string) string {
+		if err != nil {
+			return ""
+		}
+		var data []byte
+		data, err = read(name)
+		return string(data)
+	}
+	svgView := get("svg-view.js")
+	chg := get("chg.js")
+	a := &pageAssets{
+		css:         template.CSS(get("page.css")),
+		form:        get("form.js"),
+		live:        get("live.js"),
+		pill:        get("pill.js"),
+		mermaidInit: template.JS(get("mermaid-init.js")),
+		docFrame:    svgView + "\n" + chg + "\n" + get("doc-frame.js"),
+		chg:         chg,
+		viewer:      "(function () {\n" + svgView + "\n" + get("viewer.js") + "})();\n",
+		sprite:      template.HTML(strings.TrimSpace(get("sprite.svg"))),
+		icons:       map[string]bool{},
+	}
+	source := get("page.tmpl")
+	if err != nil {
+		return nil, err
+	}
+	for _, match := range spriteSymbolPattern.FindAllStringSubmatch(string(a.sprite), -1) {
+		a.icons[match[1]] = true
+	}
+	a.tmpls = map[string]*template.Template{}
+	for _, l := range wsi18n.Languages() {
+		lang := l.Code
+		funcs := template.FuncMap{
+			"icon": func(name string) (template.HTML, error) {
+				if !a.icons[name] {
+					return "", fmt.Errorf("whiteboard page: no sprite symbol %q", name)
+				}
+				return template.HTML(`<svg class="i" aria-hidden="true"><use href="#i-` + name + `"/></svg>`), nil
+			},
+			"lines":       rationaleLines,
+			"box":         rowBox,
+			"href":        rowHref,
+			"actionAttrs": panelActionAttrs,
+			"t":           func(key string, args ...any) string { return wsi18n.T(lang, key, args...) },
+			"i18n":        func() template.JS { return wsi18n.Script(lang) },
+		}
+		// The file's template is "page.tmpl" under the root "page", as
+		// ParseFS names it.
+		t := template.New("page").Funcs(funcs)
+		if _, err := t.New("page.tmpl").Parse(source); err != nil {
+			return nil, err
+		}
+		a.tmpls[lang] = t
+	}
+	a.tmpl = a.tmpls[wsi18n.Default]
+	return a, nil
 }
 
 // templateFor is the template set that renders in lang; an unsupported or
