@@ -212,7 +212,7 @@ func TestTrackerUpdateWritesEveryEventCommand(t *testing.T) {
 	}})
 	v := w.view(t)
 	if !reflect.DeepEqual(v.Priority, wstracker.PriorityLevels{Names: []string{"low", "mid", "high", "top"}, Default: 1}) || v.Attachments.MaxBytes != 2048 {
-		t.Fatalf("settings: priority %+v, attachment limit %d", v.Priority, v.Attachments.MaxBytes)
+		t.Fatalf("settings: priority %+v, attachment limit %v", v.Priority, v.Attachments.MaxBytes)
 	}
 	if v.Members["ada"].Profile != (wstracker.Profile{Org: "Acme", Family: "Kim", Given: "Ada"}) || v.Members["bo"].Profile.Given != "Bobby" {
 		t.Fatalf("profiles: ada %+v, bo %+v", v.Members["ada"].Profile, v.Members["bo"].Profile)
