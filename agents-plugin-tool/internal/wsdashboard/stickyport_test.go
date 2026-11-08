@@ -48,20 +48,41 @@ func recordedPort(t *testing.T, dir string) int {
 }
 
 func TestStickyFallbackPort(t *testing.T) {
-	dir := t.TempDir()
+	// A released port can be taken by another process before the test binds it
+	// again, and the scenario needs the same port free across daemon restarts,
+	// so a collision restarts the scenario on a fresh port.
+	for attempt := 0; attempt < 10; attempt++ {
+		if stickyFallbackScenario(t, t.TempDir()) {
+			return
+		}
+	}
+	t.Fatal("no free preferred port held steady across 10 attempts")
+}
+
+// stickyFallbackScenario runs the sticky-fallback checks and reports false
+// when a port collision with another process, not a product fault, cut it short.
+func stickyFallbackScenario(t *testing.T, dir string) bool {
+	t.Helper()
 	preferred, release := holdPort(t)
 	release()
 
 	// Free preferred port: bound and recorded.
-	if got := startAt(t, dir, preferred); got != preferred || recordedPort(t, dir) != preferred {
-		t.Fatalf("free preferred: bound %d, record %d, want %d", got, recordedPort(t, dir), preferred)
+	got := startAt(t, dir, preferred)
+	if got != preferred {
+		// Another process took the port between release and bind: the daemon
+		// fell back, which is the behaviour under test, not a fault here.
+		return false
+	}
+	if rec := recordedPort(t, dir); rec != preferred {
+		t.Fatalf("free preferred: bound %d, record %d, want %d", got, rec, preferred)
 	}
 
 	// Preferred port held by a foreign listener: falls back and records it.
 	l, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(preferred)))
 	if err != nil {
-		t.Fatal(err)
+		return false
 	}
+	defer l.Close()
 	fallback := startAt(t, dir, preferred)
 	if fallback == preferred || fallback == 0 || recordedPort(t, dir) != fallback {
 		t.Fatalf("held preferred: bound %d, record %d", fallback, recordedPort(t, dir))
@@ -69,14 +90,24 @@ func TestStickyFallbackPort(t *testing.T) {
 
 	// Restart with the preferred port still held: the recorded port returns.
 	if got := startAt(t, dir, preferred); got != fallback {
+		// The recorded port itself can be taken by another process meanwhile.
+		probe, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(fallback)))
+		if err != nil {
+			return false
+		}
+		_ = probe.Close()
 		t.Fatalf("restart with preferred held: bound %d, want recorded %d", got, fallback)
 	}
 
 	// Preferred port free again: it wins and the record follows.
 	_ = l.Close()
-	if got := startAt(t, dir, preferred); got != preferred || recordedPort(t, dir) != preferred {
-		t.Fatalf("preferred freed: bound %d, record %d, want %d", got, recordedPort(t, dir), preferred)
+	if got := startAt(t, dir, preferred); got != preferred {
+		return false
 	}
+	if rec := recordedPort(t, dir); rec != preferred {
+		t.Fatalf("preferred freed: bound %d, record %d, want %d", got, rec, preferred)
+	}
+	return true
 }
 
 func TestStickyFallbackSkippedWhenRecordedPortAlsoHeld(t *testing.T) {

@@ -466,9 +466,28 @@ func TestPiProcessCommands(t *testing.T) {
 func TestPiBackendStart(t *testing.T) {
 	out := t.TempDir()
 	fake := filepath.Join(t.TempDir(), "pi")
-	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > " + out + "/args\npwd -P > " + out + "/cwd\nenv > " + out + "/env\ncat > /dev/null\n"
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > " + out + "/args\npwd -P > " + out + "/cwd\nenv > " + out + "/env\ntouch " + out + "/ready\ncat > /dev/null\n"
 	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
+	}
+	// Close SIGTERMs a child that outlives closeGrace, so under load it could
+	// kill the script before it wrote its records. Close only once the script
+	// reports it finished writing.
+	ready := filepath.Join(out, "ready")
+	closeWhenWritten := func(proc Process) {
+		t.Helper()
+		deadline := time.Now().Add(30 * time.Second)
+		for {
+			if _, err := os.Stat(ready); err == nil {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("the stand-in pi never finished writing its records")
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		_ = os.Remove(ready)
+		proc.Close()
 	}
 	root, dir := t.TempDir(), t.TempDir()
 	spec := piSpec(t, `{"backend":"pi","tools":["read"],"ws_tools":["tickets.query"]}`)
@@ -479,7 +498,7 @@ func TestPiBackendStart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	proc.Close()
+	closeWhenWritten(proc)
 
 	read := func(name string) string {
 		raw, err := os.ReadFile(filepath.Join(out, name))
@@ -511,7 +530,7 @@ func TestPiBackendStart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	proc.Close()
+	closeWhenWritten(proc)
 	if args := read("args"); strings.Contains(args, "builtin:mcp") {
 		t.Fatalf("no MCP server, no MCP extension: %s", args)
 	}
