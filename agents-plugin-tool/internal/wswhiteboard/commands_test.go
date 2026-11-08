@@ -2,7 +2,9 @@ package wswhiteboard
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
+	"time"
 )
 
 func parse(s string) ([]command, []string) {
@@ -254,4 +256,33 @@ func TestRefusalListsEveryProblemSoFar(t *testing.T) {
 	}
 	// The retired JSON payload text is no command at all.
 	wantProblems(t, refused(t, st, `{"add":[{"class":"policy"}]}`), "text outside a command")
+}
+
+// A closing tag cut short inside a container once looped forever and grew
+// the problem list; parsing must return and report the cut tag once.
+func TestTruncatedClosingTagInContainerTerminates(t *testing.T) {
+	for _, in := range []string{
+		"<wb:add class=\"policy\" topic=\"T\">\n<wb:title>x</wb:title>\n</wb:add",
+		"<wb:edit topic=\"x\"><wb:old>a</wb:old></wb:",
+	} {
+		done := make(chan []string, 1)
+		go func() {
+			_, problems := parse(in)
+			done <- problems
+		}()
+		select {
+		case problems := <-done:
+			n := 0
+			for _, p := range problems {
+				if strings.Contains(p, "a closing tag is not closed with '>'") {
+					n++
+				}
+			}
+			if n != 1 {
+				t.Errorf("parse(%q) problems %q: want the cut closing tag reported once", in, problems)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("parse(%q) did not return", in)
+		}
+	}
 }

@@ -387,7 +387,9 @@ func (t *tokenizer) skipUnknown(tag openTag) {
 }
 
 // strayClosing records and steps past a closing tag at t.i that closes
-// nothing open; it reports false when t.i holds no closing tag.
+// nothing open; it reports false when t.i holds no closing tag. A closing
+// tag with no '>' anywhere after it is fatal, and t.i moves to the end so no
+// caller re-reads the same text.
 func (t *tokenizer) strayClosing() bool {
 	if !strings.HasPrefix(t.s[t.i:], "</") {
 		return false
@@ -395,6 +397,7 @@ func (t *tokenizer) strayClosing() bool {
 	end := strings.IndexByte(t.s[t.i:], '>')
 	if end < 0 {
 		t.fail(t.i, "a closing tag is not closed with '>'")
+		t.i = len(t.s)
 		return true
 	}
 	t.p.Add("line %d: %s closes nothing open", t.lineAt(t.i), t.s[t.i:t.i+end+1])
@@ -462,6 +465,9 @@ func (t *tokenizer) readFields(cmd *Command, fields []string) bool {
 			continue
 		}
 		if t.strayClosing() {
+			if t.fatal {
+				return false
+			}
 			continue
 		}
 		tag, ok := t.readOpen()
