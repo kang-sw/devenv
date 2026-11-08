@@ -288,12 +288,24 @@ func Script(lang string) template.JS {
 // for a static page that loads one renderer and its strings from a file
 // instead of from a dashboard page.
 func SubsetScript(lang, prefix string) template.JS {
+	return filteredScript(lang, func(k string) bool { return strings.HasPrefix(k, prefix) })
+}
+
+// ScriptExcept is Script without the client keys that start with prefix,
+// for a page that never loads the script those keys belong to, so their
+// text neither weighs on the page nor shows in its source.
+func ScriptExcept(lang, prefix string) template.JS {
+	return filteredScript(lang, func(k string) bool { return !strings.HasPrefix(k, prefix) })
+}
+
+// filteredScript is Script over the client keys keep accepts.
+func filteredScript(lang string, keep func(key string) bool) template.JS {
 	if !Supported(lang) {
 		lang = Default
 	}
 	table := map[string]string{}
 	for k, v := range ClientTable(lang) {
-		if strings.HasPrefix(k, prefix) {
+		if keep(k) {
 			table[k] = v
 		}
 	}

@@ -135,3 +135,13 @@ func TestSubsetScriptHoldsOnlyThePrefixKeys(t *testing.T) {
 		t.Fatal("SubsetScript must leave out keys outside its prefix")
 	}
 }
+
+func TestScriptExceptLeavesOutOnlyThePrefixKeys(t *testing.T) {
+	js := string(ScriptExcept("en", "js.img."))
+	if !strings.Contains(js, `"js.ago`) || !strings.Contains(js, "window.wsTn") {
+		t.Fatalf("ScriptExcept(en, js.img.) = %.200s", js)
+	}
+	if strings.Contains(js, `"js.img.`) {
+		t.Fatal("ScriptExcept must leave out the keys under its prefix")
+	}
+}

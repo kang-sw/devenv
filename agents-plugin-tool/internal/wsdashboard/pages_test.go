@@ -257,6 +257,11 @@ func TestPagesCarryTheTracker(t *testing.T) {
 		if i18n < 0 || tracker < i18n || script < tracker {
 			t.Errorf("%s page: the tracker script is missing or not between the string table and the page script", name)
 		}
+		// The whiteboard's own pages leave the tracker strings out; the
+		// dashboard pages that mount the tracker must keep them.
+		if !strings.Contains(page, `"js.tk.`) {
+			t.Errorf("%s page: the string table lacks the tracker strings (js.tk.*)", name)
+		}
 		if strings.Count(page, `<span class="qsslot" id="qsslot"></span>`) != 1 {
 			t.Errorf("%s page lacks the quick-switcher slot", name)
 		}
