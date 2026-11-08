@@ -858,5 +858,6 @@
   "wb.settled.older": "이전 완료 항목",
   "wb.title": "화이트보드",
   "wb.topic.note": "이 주제에 대한 메모",
-  "wb.updated": "마지막 변경"
+  "wb.updated": "마지막 변경",
+  "worktree.cleanup.ask": "사용자가 사용하지 않는 워크트리 정리를 요청합니다."
 }

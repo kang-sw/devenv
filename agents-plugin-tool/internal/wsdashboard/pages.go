@@ -706,9 +706,10 @@ func (d *Daemon) handleIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleSessionRoutes serves everything under /s/: a session page, its SSE
-// stream, its image, file view, history, closed-topic, and attachment routes, its message,
-// cancel, steer, interrupt, system-open, git refresh, and git push routes, and the
-// shared assets a page loads by relative path.
+// stream, its image, file view, history, closed-topic, worktree pool, and
+// attachment routes, its message, cancel, steer, interrupt, system-open, git
+// refresh, git push, and worktree cleanup routes, and the shared assets a page
+// loads by relative path.
 func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 	rest := strings.TrimPrefix(r.URL.Path, "/s/")
 	if replyID, sub, _ := strings.Cut(rest, "/"); sub == "message" || sub == "cancel" || sub == "steer" || sub == "interrupt" {
@@ -722,6 +723,9 @@ func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 		return
 	} else if sub == "git/push" {
 		d.handleGitPush(w, r, replyID)
+		return
+	} else if sub == "worktrees/cleanup" {
+		d.handleWorktreeCleanup(w, r, replyID)
 		return
 	}
 	if !readMethod(w, r) {
@@ -749,6 +753,8 @@ func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 		d.handleHistory(w, r, replyID)
 	case sub == "closed":
 		d.handleClosedTopics(w, r, replyID)
+	case sub == "worktrees":
+		d.handleWorktrees(w, r, replyID)
 	case strings.HasPrefix(sub, "attachment/"):
 		d.handleAttachment(w, r, replyID, strings.TrimPrefix(sub, "attachment/"))
 	default:

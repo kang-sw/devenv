@@ -867,5 +867,6 @@
   "wb.settled.older": "older settled items",
   "wb.title": "Whiteboard",
   "wb.topic.note": "note on this topic",
-  "wb.updated": "last change"
+  "wb.updated": "last change",
+  "worktree.cleanup.ask": "The user asks to clean up unused worktrees."
 }
