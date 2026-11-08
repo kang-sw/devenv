@@ -246,8 +246,11 @@
   }
   // (335) `mentions` is an explicit list of member ids (the text keeps @name for
   // display); (338) `attachments` is metadata only. Both ride with a body: item.create,
-  // item.edit with a body, comment.add, comment.edit.
-  function checkExtras(S, p) {
+  // item.edit with a body, comment.add, comment.edit. `prior` is the target's shown
+  // attachments in the author's seen state (none on create and comment.add): an oid
+  // already there is exempt from the size limit, so only an attachment the write
+  // adds is held to a limit an admin may since have lowered.
+  function checkExtras(S, p, prior) {
     if (p.mentions != null) {
       if (!Array.isArray(p.mentions)) rej('mentions must be a list of member ids');
       p.mentions.forEach(function (x) {
@@ -264,7 +267,8 @@
         if (typeof x.name !== 'string' || !x.name) rej('attachment name required');
         if (!Number.isInteger(x.size) || x.size < 0) rej('attachment size must be a byte count');
         if (typeof x.mime !== 'string' || !x.mime) rej('attachment mime type required');
-        if (x.size > S.att.max_bytes) rej('attachment "' + x.name + '" is ' + x.size + ' bytes, above the store limit of ' + S.att.max_bytes + ' bytes (attachments.max_bytes)');
+        var kept = (prior || []).some(function (o) { return o.oid === x.oid; });
+        if (x.size > S.att.max_bytes && !kept) rej('attachment "' + x.name + '" is ' + x.size + ' bytes, above the store limit of ' + S.att.max_bytes + ' bytes (attachments.max_bytes)');
       });
     }
   }
@@ -299,7 +303,7 @@
         if (!p.title) rej('title required');
         if (KINDS.indexOf(p.kind) < 0) rej('kind must be task, todo or topic');
         checkFields(S, p);
-        checkExtras(S, p);
+        checkExtras(S, p, null);
         if (p.parent) {
           var par = needItem(S, p.parent, 'parent');
           if (par.hidden) rej('parent ' + par.alias + ' is hidden');
@@ -315,7 +319,7 @@
         if (has(p, 'priority') && p.priority == null) rej('priority cannot be cleared; set a level');
         checkFields(S, p);
         if ((p.mentions != null || p.attachments != null) && !has(p, 'body')) rej('mentions and attachments go with a body edit');
-        checkExtras(S, p);
+        checkExtras(S, p, it.attachments);
         break;
 
       case 'item.hide': {
@@ -432,7 +436,7 @@
         it = needItem(S, p.item);
         if (it.hidden) rej('thread ' + it.alias + ' is hidden');
         if (!p.body) rej('body required');
-        checkExtras(S, p);
+        checkExtras(S, p, null);
         if (p.reply_to) {
           q = S.comments[p.reply_to];
           if (!q) rej('reply_to ' + alias(p.reply_to) + ' is not a comment its author had seen');
@@ -448,7 +452,7 @@
         if (q.author !== a) rej('only the comment author (' + q.author + ') ' + (n.type === 'comment.edit' ? 'edits' : 'hides') + ' it');
         if (q.hidden) rej('comment is already hidden');
         if (n.type === 'comment.edit' && !p.body) rej('body required');
-        if (n.type === 'comment.edit') checkExtras(S, p);
+        if (n.type === 'comment.edit') checkExtras(S, p, q.attachments);
         break;
 
       case 'roles.add_member': {

@@ -246,7 +246,7 @@ attachment the store accepts, in bytes (339); without it the limit is 10 MiB
 | `roles.add_key` / `roles.revoke_key` | `member`, `key` | Admin. Revocation rule below. |
 | `roles.remove_member` | `member` | Admin. The member must lead nobody and must not be an admin. Their earlier events stay valid. Their live assignments end as `unassigned` and their pending ones as `withdrawn` (287), so nothing stays counted under a removed member; like an unassign, this beats a concurrent status write. |
 | `roles.set_priority_levels` | `names` (1-9 display names, lowest first), `default` | Admin. Changes the level count and names; a field write, so concurrent changes merge by (203). |
-| `roles.set_attachment_limit` | `max_bytes` (a positive integer) | Admin. Changes `attachments.max_bytes`; a field write, merged by (203). Attachments already written stay; later writes are checked against the new limit in their author's causal past. |
+| `roles.set_attachment_limit` | `max_bytes` (a positive integer) | Admin. Changes `attachments.max_bytes`; a field write, merged by (203). Attachments already written stay; a later write is checked against the new limit in its author's causal past, but only for the attachments it adds. |
 
 **Mentions and attachments** ((335), (338)). A body (an item's on
 `item.create` / `item.edit`, a comment's on `comment.add` / `comment.edit`)
@@ -254,8 +254,13 @@ may carry `mentions`, a list of member ids, and `attachments`, a list of
 `{oid, name, size, mime}`. The text keeps `@name` for display; the list is
 what notifies. Each id must be a member, not removed, in the author's causal
 past. `oid` is the sha256 of the content (64 lowercase hex digits), `size` is
-a byte count no larger than `attachments.max_bytes` in the author's causal
-past, and `name` and `mime` are required. Both lists ride with the body: a
+a byte count, and `name` and `mime` are required. A write may add only
+attachments no larger than `attachments.max_bytes` in the author's causal
+past (345 b): an attachment whose `oid` is already on the same item body's or
+the same comment's shown attachments, as the author had seen them, is exempt,
+so an edit that keeps an older, larger attachment survives a lowered limit,
+while an oid the author had not yet seen there counts as new.
+`item.create` and `comment.add` check every attachment. Both lists ride with the body: a
 body write replaces them (absent means empty), and the shown lists are the
 winning body write's, so concurrent edits follow the (203) / (271) winner.
 Only metadata is modelled; storing and fetching the content is a later
@@ -442,8 +447,8 @@ Flagged reasons, as the engine words them:
 - a mention that is not a list of ids, or names someone who is not a member
   or was removed; mentions or attachments on an item edit without a body
 - an attachment list that is malformed, an oid that is not a sha256, a
-  missing name or mime type, a size that is not a byte count, or a size
-  above `attachments.max_bytes`
+  missing name or mime type, a size that is not a byte count, or a newly
+  added attachment above `attachments.max_bytes`
 - `roles.*` by a non-admin, a lead list over length 1, a cycle, an unknown
   member, a key in use, removing the last admin, invalid priority levels, or
   an attachment limit that is not a positive integer
@@ -605,6 +610,8 @@ creation, and it has a topic and a blocked subtask.
 | 338 a, 339 a | Item bodies and comments carry `attachments: [{oid, name, size, mime}]` with `oid` the content's sha256. The roles file's `attachments.max_bytes` (default 10 MiB) is changed by the admin `roles.set_attachment_limit`; an attachment above it is flagged with a reason. The thread shows a chip with name and size and a simulated loaded state (local UI only). |
 | 340 | In the product the notification read state lives per clone on the local filesystem outside git, read and written by the daemon; the mockup keeps it in memory. |
 | 341 | Tests keep local bare remotes (`file://` with `uploadpack.allowFilter=true` exercises a partial clone); a hosted private repository is used only at live acceptance (the caller child and the attachment ledger ticket), where HTTPS auth, host filter support, and latency show. |
+| 343, 344 | A body-less `item.edit` that carries `mentions` or `attachments` stays flagged ("go with a body edit"); a removed member stays unmentionable (the mention is flagged), even where the text still shows `@name`. |
+| 345 b | `attachments.max_bytes` is checked only against attachments a write adds. On `item.edit` and `comment.edit`, an `oid` already on the target's shown attachments in the author's seen state is exempt from the size check; one the author had not seen there is new. `item.create` and `comment.add` check every attachment; the shape checks apply to all. |
 
 ## Open questions
 
