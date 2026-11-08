@@ -674,7 +674,7 @@
   "js.tk.team.sent": "{0} envió esto a <b>{1}</b>; aún sin aceptar",
   "js.tk.team.sent.handoff": "{0} envió esto a <b>{1}</b> (traspaso); aún sin aceptar",
   "js.tk.team.stale": "{0} obsoletos",
-  "js.tk.team.summary": "Admins: {0}. Tú: {1}, {2}. Niveles de prioridad: {3}. Límite de adjuntos: {4} (attachments.max_bytes {5}).",
+  "js.tk.team.summary": "Admins: {0}. Tú: {1}, {2}. Niveles de prioridad: {3}. Límite de adjuntos: {4}.",
   "js.tk.team.unaccepted": "{0} sin aceptar",
   "js.tk.team.unreachable": "inalcanzable desde cualquier raíz: {0}",
   "js.tk.team.waiting": "{0} esperando a otros",

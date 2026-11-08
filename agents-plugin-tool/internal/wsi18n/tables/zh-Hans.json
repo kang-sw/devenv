@@ -674,7 +674,7 @@
   "js.tk.team.sent": "{0} 把这项发给了 <b>{1}</b>；尚未接受",
   "js.tk.team.sent.handoff": "{0} 把这项发给了 <b>{1}</b> (转交)；尚未接受",
   "js.tk.team.stale": "{0} 停滞",
-  "js.tk.team.summary": "管理员：{0}。你：{1}，{2}。优先级层级：{3}。附件上限：{4} (attachments.max_bytes {5})。",
+  "js.tk.team.summary": "管理员：{0}。你：{1}，{2}。优先级层级：{3}。附件上限：{4}。",
   "js.tk.team.unaccepted": "{0} 未接受",
   "js.tk.team.unreachable": "从任何根都无法到达：{0}",
   "js.tk.team.waiting": "{0} 在等别人",

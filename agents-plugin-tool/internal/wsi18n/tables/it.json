@@ -674,7 +674,7 @@
   "js.tk.team.sent": "{0} l'ha inviato a <b>{1}</b>; non ancora accettato",
   "js.tk.team.sent.handoff": "{0} l'ha inviato a <b>{1}</b> (passaggio); non ancora accettato",
   "js.tk.team.stale": "{0} fermi",
-  "js.tk.team.summary": "Admin: {0}. Tu: {1}, {2}. Livelli di priorità: {3}. Limite degli allegati: {4} (attachments.max_bytes {5}).",
+  "js.tk.team.summary": "Admin: {0}. Tu: {1}, {2}. Livelli di priorità: {3}. Limite degli allegati: {4}.",
   "js.tk.team.unaccepted": "{0} non accettati",
   "js.tk.team.unreachable": "irraggiungibile da qualsiasi radice: {0}",
   "js.tk.team.waiting": "{0} in attesa di altri",
