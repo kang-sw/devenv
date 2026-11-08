@@ -205,7 +205,7 @@ func TestImplMergeReleaseRawDiagnosticAndFinalRecheck(t *testing.T) {
 			}
 			mutated, merged := false, false
 			runner := mergeInterceptRunner{intercept: func(ctx context.Context, root string, args []string) ([]byte, error, bool) {
-				if args[0] == "merge" {
+				if isGitMergeArgs(args) {
 					merged = true
 				}
 				if fault == "count" && args[0] == "rev-list" {
@@ -339,7 +339,7 @@ func TestImplMergeRequiresExactLocalRefsDespiteTagShadows(t *testing.T) {
 				}
 				merged := false
 				runner := mergeInterceptRunner{intercept: func(ctx context.Context, root string, args []string) ([]byte, error, bool) {
-					if args[0] == "merge" {
+					if isGitMergeArgs(args) {
 						merged = true
 					}
 					if missing == "source-at-checkout" && args[0] == "switch" {
@@ -720,6 +720,61 @@ func TestImplMergeTolerantWorktree(t *testing.T) {
 	})
 }
 
+// isGitMergeArgs reports whether args invoke `git merge`, with or without the
+// leading `-c key=value` config pair the tool passes.
+func isGitMergeArgs(args []string) bool {
+	if len(args) >= 3 && args[0] == "-c" {
+		args = args[2:]
+	}
+	return len(args) > 0 && args[0] == "merge"
+}
+
+// A source branch that moves the last file out of ready/ looks to git like a
+// ready/ -> .done/ directory rename; the target's new ready/ file must stay put.
+func TestImplMergeIgnoresDirectoryRenameHeuristic(t *testing.T) {
+	root := initGitRepo(t)
+	runGit(t, root, "switch", "-C", "develop")
+	write := func(rel, body string) {
+		t.Helper()
+		path := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("ai-docs/tickets/ready/old.md", "old ticket\n")
+	runGit(t, root, "add", ".")
+	runGit(t, root, "commit", "-m", "base")
+	branch := "impl/develop/close-old"
+	runGit(t, root, "switch", "-c", branch)
+	if err := os.MkdirAll(filepath.Join(root, "ai-docs/tickets/.done"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "mv", "ai-docs/tickets/ready/old.md", "ai-docs/tickets/.done/old.md")
+	runGit(t, root, "commit", "-m", "close old")
+	runGit(t, root, "switch", "develop")
+	write("ai-docs/tickets/ready/new.md", "new ticket\n")
+	runGit(t, root, "add", ".")
+	runGit(t, root, "commit", "-m", "promote new")
+	r, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, "develop", mergeMessage(), implMergeAcknowledgement{}, nil)
+	if err != nil || r.Status != "merged" {
+		t.Fatalf("result=%+v err=%v", r, err)
+	}
+	for rel, want := range map[string]bool{
+		"ai-docs/tickets/ready/new.md": true,
+		"ai-docs/tickets/.done/new.md": false,
+		"ai-docs/tickets/.done/old.md": true,
+		"ai-docs/tickets/ready/old.md": false,
+	} {
+		_, statErr := os.Stat(filepath.Join(root, rel))
+		if (statErr == nil) != want {
+			t.Errorf("%s exists=%v, want %v", rel, statErr == nil, want)
+		}
+	}
+}
+
 func TestImplMergeConflictAdvisory(t *testing.T) {
 	for _, tc := range []struct{ target, source string }{
 		{"develop", ""}, {"main", ""}, {"develop", "goal/develop/topic"},
@@ -897,7 +952,7 @@ func TestGenericMergeRefusals(t *testing.T) {
 			}
 			merged := false
 			runner := mergeInterceptRunner{intercept: func(ctx context.Context, root string, args []string) ([]byte, error, bool) {
-				if args[0] == "merge" {
+				if isGitMergeArgs(args) {
 					merged = true
 				}
 				if scenario == "changed-at-checkout" && args[0] == "switch" {

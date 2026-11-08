@@ -338,7 +338,10 @@ func mergeImplBranch(ctx context.Context, root string, runner wsgit.Runner, bran
 	if len(result.Diagnostics) > 0 {
 		return blocked()
 	}
-	if _, err := run("merge", "--no-ff", "--no-squash", "--commit", "-m", wsgit.CommitMessage(message), result.SourceOID); err != nil {
+	// directoryRenames=false: moving the last file out of a status directory
+	// (ready/ -> .done/) reads as a whole-directory rename and would drag the
+	// target's new files along; ticket moves are always explicit.
+	if _, err := run("-c", "merge.directoryRenames=false", "merge", "--no-ff", "--no-squash", "--commit", "-m", wsgit.CommitMessage(message), result.SourceOID); err != nil {
 		unmerged, checkErr := run("diff", "--name-only", "--diff-filter=U")
 		if checkErr == nil && unmerged != "" {
 			result.Status = "conflict"

@@ -1,5 +1,6 @@
 ---
 title: "ws/git.merge: git directory-rename detection moves unrelated tickets between status directories"
+dropped: 2026-11-08
 ---
 
 # ws/git.merge: git directory-rename detection moves unrelated tickets between status directories
@@ -24,3 +25,7 @@ single ticket can hit this on every worker merge.
 Have `ws/git.merge` run the merge with `-c merge.directoryRenames=false`
 (file-level rename detection stays), or at least detect a merge result that
 moves a ticket the source branch never touched and refuse with a diagnostic.
+
+## Resolution
+
+Duplicate of 261108-bug-ws-git-merge-directory-rename-misplaces-tickets

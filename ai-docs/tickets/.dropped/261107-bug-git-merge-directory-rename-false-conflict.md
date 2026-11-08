@@ -1,5 +1,6 @@
 ---
 title: "git.merge: directory-rename detection reports a false conflict on ticket status directories"
+dropped: 2026-11-08
 ---
 
 ## Background
@@ -26,3 +27,7 @@ moved one file at a time and are never renamed as a whole. Alternatively, it
 could pass the flag only when the conflict is confined to
 `ai-docs/tickets/<status>/`. This is likely to recur whenever the last ticket
 leaves a status directory on one branch while another branch adds to it.
+
+## Resolution
+
+Duplicate of 261108-bug-ws-git-merge-directory-rename-misplaces-tickets
