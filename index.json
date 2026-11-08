@@ -522,7 +522,14 @@
       "registered_at": "2026-09-24T10:38:33Z"
     },
     "260915-bug-ws-ticket-facts-new-public-symbol-likely-enum": {
-      "registered_at": "2026-09-24T10:38:33Z"
+      "registered_at": "2026-09-24T10:38:33Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "delegate/idea-triage-close",
+        "phase": "closed",
+        "touched_at": "2026-11-08T08:05:40Z"
+      }
     },
     "260915-bug-ws-tickets-close-operates-on-server-cwd-not-worktree": {
       "registered_at": "2026-09-24T10:38:33Z"
