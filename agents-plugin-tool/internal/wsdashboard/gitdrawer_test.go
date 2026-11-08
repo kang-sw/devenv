@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"path/filepath"
 	"reflect"
@@ -302,9 +303,18 @@ func TestGitDrawerRoutes(t *testing.T) {
 	origin := pushRepos(t, work, 0)
 	other := filepath.Join(base, "other")
 	gitRun(t, base, "clone", "-q", origin, other)
+	// The status, fetch and pull handlers run git, which outlasts
+	// testClient's 500 ms on a loaded Windows runner (seen on CI).
+	gitClient := &http.Client{Timeout: 30 * time.Second, Transport: &http.Transport{Proxy: nil}}
 	status := func() GitChanges {
 		t.Helper()
-		code, raw := get(t, f.base+"/s/livesession/git/status")
+		resp, err := gitClient.Get(f.base + "/s/livesession/git/status")
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		code, raw := resp.StatusCode, string(body)
 		if code != http.StatusOK {
 			t.Fatalf("status = %d %s", code, raw)
 		}
@@ -316,7 +326,7 @@ func TestGitDrawerRoutes(t *testing.T) {
 	}
 	post := func(action string) (int, string) {
 		t.Helper()
-		code, _, raw := postJSON(t, f.base+"/s/livesession/git/"+action, f.base, "")
+		code, _, raw := postJSONWith(t, gitClient, f.base+"/s/livesession/git/"+action, f.base, "")
 		return code, strings.TrimSpace(raw)
 	}
 
