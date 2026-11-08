@@ -1,5 +1,6 @@
 ---
 title: ws git.merge lets directory-rename detection move tickets into the wrong status directory
+completed: 2026-11-08
 ---
 
 # ws git.merge lets directory-rename detection move tickets into the wrong status directory
@@ -23,3 +24,7 @@ Ticket status directories are exactly the shape this heuristic misfires on
 `merge.directoryRenames=false`, since ticket moves are always explicit.
 Needs a test with a one-file `ready/` on the source branch and a new
 `ready/` file on the target.
+
+## Result
+
+Fixed in bcc267066: `ws/git.merge` runs its merge with `-c merge.directoryRenames=false`; regression test `TestImplMergeIgnoresDirectoryRenameHeuristic`.

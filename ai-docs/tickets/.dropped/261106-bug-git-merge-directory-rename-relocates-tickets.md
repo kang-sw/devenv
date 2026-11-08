@@ -1,5 +1,6 @@
 ---
 title: "git.merge: directory-rename detection relocates tickets into .done/"
+dropped: 2026-11-08
 ---
 
 # git.merge: directory-rename detection relocates tickets into .done/
@@ -28,3 +29,7 @@ relocation would happen silently.
   tracked placeholder, so a branch never empties one.
 - Either way, a test merges a branch that empties `ready/` against a target that added
   to `ready/`.
+
+## Resolution
+
+Duplicate of 261108-bug-ws-git-merge-directory-rename-misplaces-tickets
