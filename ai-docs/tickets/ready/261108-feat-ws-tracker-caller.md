@@ -235,6 +235,104 @@ All confirmed on the session board, 2026-11-08.
   it. Whether it is throttled is the worker's call, recorded; an unreachable
   remote takes the same path as offline (ledger protocol decision).
 
+### Result (dcd9d44d8) - 2026-11-08
+
+Landed in a6f978470, 99e25f7ba, 12db25a14, and dcd9d44d8:
+- `wsledger.Ledger.Reload` (a Fetch without the network).
+- The `wstracker` `Create` / `Join` / `Register` wrappers with `Veto`.
+- The new `agents-plugin-tool/internal/wstrackerhost` package: registry,
+  saved profiles, non-interactive git runner, `Register`, `Dispatch`,
+  `View` with the caller fields, and every sync trigger.
+- The `workflow.tracker_enabled` knob with `trackerEnabled` /
+  `enableTrackerKnobForSession`.
+- The MCP session-start check and the dashboard daemon's poll.
+
+Entry points the later tickets call, all on `wstrackerhost.Host`:
+- drawer open: `Check`
+- panel collapse or explicit apply: `Sync`
+- pre-read: `PreRead`
+- read: `View`, returning `StoreView`, the README view-state JSON
+- write: `Dispatch`
+- MCP reaches the host through `Server.trackerHost()`.
+
+Verification: `go build ./...` and the Windows cross-build of
+`wstrackerhost` and `cmd/ws-mcp` succeed. `go vet` and `gofmt` are clean.
+`go test -count=1` passes for `wsledger`, `wstracker`, `wstrackerhost`
+(also under `-race`), `wsconfig`, `mcp`, and `cmd/ws-mcp`. The tests run
+over local bare remotes with a fake clock and cover:
+- register: create and join, including a join with a saved Korean profile
+- registry and profile round trip
+- two-clone sync through the poll
+- the no-daemon pre-read check, throttled, and leaving the network to a
+  poll-lock holder
+- the drawer-open check (unthrottled) and the panel-collapse push
+- the idle push without the daemon
+- an unreachable remote reading as offline
+- the session-start check on the FRESH manual, the ferrule mint, and a
+  top-lead revive, with the knob off; skipped for spawned keys; never
+  failing the manual
+- the daemon holding the poll lock on a first run
+- the runner timeout killing a transport child that holds the pipes
+
+Decisions taken:
+- Root is `filepath.Dir(wsconfig.GlobalPath)/tracker`, so it **follows
+  `$WS_CONFIG_HOME`**, like the machine note layer (default
+  `~/.ws/tracker`).
+  - Keys are passed explicitly as `<root>/keys`, and `keys` is a
+    reserved store id.
+  - The registry is `stores.json` (`{version, stores: [{id, label, remote,
+    dir, member}]}`).
+  - Saved profiles are `profiles.json` (`{version, last, profiles}`). An
+    edited profile becomes a new entry.
+  - Each store keeps its last check outcome in `<store>/host-sync.json`,
+    shared by every process.
+- `Reload` is a read-side wsledger API addition, not a protocol change.
+  An open Ledger read only its own last refresh, so the daemon and other
+  sessions sharing a clone never saw each other's writes, and Dispatch
+  judged against a stale view. It can close the open batch into a local
+  commit, as Fetch does.
+- Join with a profile needs no wsledger change. The join uses
+  `Name = given`, and a `member.profile` event then carries only the
+  differing fields. The creator path is the same.
+- Throttling:
+  - The session-start and pre-read checks are throttled: 30 s per store
+    from the last attempt by any process, so an offline remote costs one
+    timeout per interval.
+  - The drawer-open check and the poll are not throttled.
+  - The pre-read check does nothing while some process holds
+    `<root>/poll.lock`. The daemon takes that lock at start and holds it
+    until exit.
+- Session-start triggers:
+  - The check runs on the CONTINUE (revive) path too, gated on
+    `isTopLevelLead`.
+  - It also runs on a parent-less lead ferrule mint. That is the manual's
+    documented session start (a rootless sentinel call, then
+    `ferrule(root)`), which never reaches the FRESH-with-root branch.
+  - It always runs in the background, with recover, and fails silently.
+- View fields:
+  - `stats.commits` is `rev-list --count` over
+    `refs/heads/tracker/m/*`, plus one for an open batch.
+  - Unpushed commits are grouped by consecutive equal `seen`, which is a
+    display approximation.
+  - Other clones' `online` is null (unknown).
+  - `upstream` is always 0, because a check takes everything.
+  - `sync.online` is false with no remote.
+- The runner applies only to fetch and push. It mirrors the ticket
+  index's settings:
+  - remote environment: no prompt or askpass, and BatchMode appended to
+    the user's ssh command
+  - hard timeout: WaitDelay plus a process-group kill
+- The poll runs in `cmd/ws-mcp` beside `StartDaemon`, so `wsdashboard`
+  stays tracker-free. Neither the poll nor the session-start check reads
+  the knob.
+
+Lite review (one pass) found one Important issue: the runner's timeout
+did not bound a hung transport child. It is fixed in dcd9d44d8, with the
+cheap Minors. Three Minors were left as recorded:
+- Dispatch's reload and append take the lock in two separate steps.
+- A read waits out a running attempt.
+- Credential redaction in remote URLs is deferred to Phase 2.
+
 ### Phase 2: MCP surface, guidance, and live acceptance
 
 Blocked by `261108-feat-ws-manual-shared-command-syntax` (the shared parser
