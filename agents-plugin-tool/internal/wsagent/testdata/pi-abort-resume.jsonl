@@ -1,0 +1,25 @@
+{"id":"p1","type":"response","command":"prompt","success":true,"data":{"disposition":"started"}}
+{"type":"agent_start"}
+{"type":"turn_start"}
+{"type":"message_end","message":{"role":"system","content":"","sections":{"tools":"<section>","rules":"<section>","addendum":null},"timestamp":1794101936319,"toolsAdded":[{"name":"bash"}],"toolsRemoved":[{"name":"mcp__ws__runtime_read"},{"name":"mcp__ws__project_tree"}]}}
+{"type":"message_end","message":{"role":"user","content":[{"type":"text","text":"Run the bash command `sleep 30; echo hi` and tell me its output."}],"timestamp":1794101936318}}
+{"type":"message_end","message":{"role":"assistant","content":[{"type":"toolCall","id":"call_2e70f77ff25641398eb822814df9ef00|fc_0d7b2c782f92fe3a016aefd2b22a0087d0aa3d5d94820ee9a9","name":"bash","arguments":{"command":"sleep 30; echo hi","timeout":40}}],"api":"openai-codex-responses","provider":"openai-codex","model":"gpt-6.1-sol","usage":{"input":1039,"output":27,"cacheRead":0,"cacheWrite":0,"reasoning":0,"totalTokens":1066,"cost":{"input":0.002078,"output":0.00027,"cacheRead":0,"cacheWrite":0,"total":0.002348}},"stopReason":"toolUse","timestamp":1794101936334,"rawStopReason":"completed","thinkingLevel":"high"}}
+{"type":"tool_execution_start","toolCallId":"call_2e70f77ff25641398eb822814df9ef00|fc_0d7b2c782f92fe3a016aefd2b22a0087d0aa3d5d94820ee9a9","toolName":"bash","args":{"command":"sleep 30; echo hi","timeout":40}}
+{"type":"tool_execution_end","toolCallId":"call_2e70f77ff25641398eb822814df9ef00|fc_0d7b2c782f92fe3a016aefd2b22a0087d0aa3d5d94820ee9a9","toolName":"bash","result":{"content":[{"type":"text","text":"Command aborted"}],"details":{}},"isError":true}
+{"type":"message_end","message":{"role":"toolResult","toolCallId":"call_2e70f77ff25641398eb822814df9ef00|fc_0d7b2c782f92fe3a016aefd2b22a0087d0aa3d5d94820ee9a9","toolName":"bash","content":[{"type":"text","text":"Command aborted"}],"details":{},"isError":true,"timestamp":1794101948322}}
+{"type":"turn_end","message":{"role":"assistant"},"toolResults":[]}
+{"type":"turn_start"}
+{"type":"message_end","message":{"role":"assistant","content":[],"api":"openai-codex-responses","provider":"openai-codex","model":"gpt-6.1-sol","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"error","errorMessage":"This operation was aborted","timestamp":1794101948324,"thinkingLevel":"high"}}
+{"type":"turn_end","message":{"role":"assistant"},"toolResults":[]}
+{"type":"agent_end","messages":[],"willRetry":false}
+{"type":"agent_settled"}
+{"id":"ab","type":"response","command":"abort","success":true}
+{"id":"p2","type":"response","command":"prompt","success":true,"data":{"disposition":"started"}}
+{"type":"agent_start"}
+{"type":"turn_start"}
+{"type":"message_end","message":{"role":"user","content":[{"type":"text","text":"What was the first line of notes.txt you reported earlier? Answer from memory, no tools."}],"timestamp":1794101948326}}
+{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"alpha"}],"api":"openai-codex-responses","provider":"openai-codex","model":"gpt-6.1-sol","usage":{"input":1102,"output":5,"cacheRead":0,"cacheWrite":0,"reasoning":0,"totalTokens":1107,"cost":{"input":0.002204,"output":5e-05,"cacheRead":0,"cacheWrite":0,"total":0.002254}},"stopReason":"stop","timestamp":1794101948328,"rawStopReason":"completed","thinkingLevel":"high"}}
+{"type":"turn_end","message":{"role":"assistant"},"toolResults":[]}
+{"type":"agent_end","messages":[],"willRetry":false}
+{"type":"agent_settled"}
+{"id":"ss","type":"response","command":"get_session_stats","success":true,"data":{"sessionFile":"/sess/pi/session.jsonl","sessionId":"01a1b8ce-7aa7-7047-86e9-1abee8a00288","userMessages":3,"assistantMessages":7,"toolCalls":4,"toolResults":4,"totalMessages":16,"tokens":{"input":5312,"output":108,"cacheRead":0,"cacheWrite":0,"total":5420},"cost":0.011703999999999999,"contextUsage":{"tokens":1107,"contextWindow":500000,"percent":0.22139999999999999}}}

@@ -615,6 +615,9 @@ func (r pageReader) indexView() IndexView {
 	var inputs []indexInput
 	if r.index != nil {
 		for _, s := range r.index.Sessions() {
+			if s.Unlisted {
+				continue
+			}
 			page, ok := r.readPage(s)
 			if !ok {
 				continue

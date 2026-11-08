@@ -663,3 +663,35 @@ func TestEnsureReportsASpawnFailure(t *testing.T) {
 		t.Fatalf("Ensure = %s, %v", outcome, err)
 	}
 }
+
+// startOrderAgents is an agent host that records, at Start, whether the
+// daemon could already be reached.
+type startOrderAgents struct {
+	dir       string
+	reachable bool
+	started   bool
+}
+
+func (a *startOrderAgents) Handler() http.Handler { return http.NotFoundHandler() }
+func (a *startOrderAgents) Start(func(replyID, project string)) {
+	_, err := ReadEndpoint(a.dir)
+	a.started, a.reachable = true, err == nil
+}
+func (a *startOrderAgents) InboxChanged(string) {}
+func (a *startOrderAgents) Close()              {}
+
+// TestAgentHostStartsBeforeTheDaemonIsReachable: the agent host takes its
+// change hook before the endpoint file advertises the daemon, so no agent
+// request can arrive at a host that has not started.
+func TestAgentHostStartsBeforeTheDaemonIsReachable(t *testing.T) {
+	dir := t.TempDir()
+	agents := &startOrderAgents{dir: dir}
+	d, err := StartDaemon(DaemonOptions{Dir: dir, Port: 0, Version: "1.0.0", LockWait: 200 * time.Millisecond, Agents: agents})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(d.Close)
+	if !agents.started || agents.reachable {
+		t.Fatalf("agent host start: started %v, endpoint already written %v", agents.started, agents.reachable)
+	}
+}

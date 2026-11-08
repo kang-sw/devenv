@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/kang-sw/devenv/internal/wsagent"
 	"github.com/kang-sw/devenv/internal/wsconfig"
 )
 
@@ -466,6 +467,9 @@ func resolveConfigEntryForKey(key string) (configKeyEntry, bool) {
 	}
 	if strings.HasPrefix(key, worktreeProfilePrefix) {
 		return worktreeProfileKnobEntry(strings.TrimPrefix(key, worktreeProfilePrefix)), true
+	}
+	if strings.HasPrefix(key, wsagent.ProfilePrefix) {
+		return agentProfileKnobEntry(strings.TrimPrefix(key, wsagent.ProfilePrefix)), true
 	}
 	for _, k := range []declaredConfigKey{worktreeNudgeStaleDaysKey, worktreeNudgePreservedGBKey} {
 		if k.Key == key {
