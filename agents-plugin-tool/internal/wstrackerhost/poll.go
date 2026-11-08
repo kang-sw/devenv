@@ -2,6 +2,7 @@ package wstrackerhost
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -39,8 +40,11 @@ func (h *Host) checkThrottled(ctx context.Context, st *store, timeout time.Durat
 	if st.entry.Remote == "" {
 		return
 	}
-	if s := readSyncState(st.entry.Dir); !s.AttemptedAt.IsZero() && h.now().Sub(s.AttemptedAt) < h.checkInterval {
-		return
+	// A last attempt in the future (the clock stepped back) does not throttle.
+	if s := readSyncState(st.entry.Dir); !s.AttemptedAt.IsZero() {
+		if since := h.now().Sub(s.AttemptedAt); since >= 0 && since < h.checkInterval {
+			return
+		}
 	}
 	_ = h.attempt(ctx, st, timeout, func(ctx context.Context) error {
 		_, err := st.ledger.Fetch(ctx)
@@ -103,11 +107,12 @@ func (h *Host) forEachStore(ctx context.Context, fn func(*store)) {
 	}
 }
 
-// StartPoll runs the background poll in this process: it takes the poll
-// lock (waiting a tick at a time while another process holds it) and then
-// runs PollOnce every interval, re-reading the registry each round. stop
-// ends it and releases the lock. The dashboard daemon runs it, so while the
-// daemon runs, PreRead leaves the network to it.
+// StartPoll runs the background poll in this process: it creates the root,
+// takes the poll lock (retrying each tick while another process holds it),
+// and runs PollOnce every interval while it holds the lock, re-reading the
+// registry each round. stop ends it and releases the lock. The dashboard
+// daemon runs it, so while the daemon runs, PreRead leaves the network to
+// it.
 func (h *Host) StartPoll(interval time.Duration) (stop func()) {
 	if interval <= 0 {
 		interval = DefaultPollInterval
@@ -116,6 +121,7 @@ func (h *Host) StartPoll(interval time.Duration) (stop func()) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
+		_ = os.MkdirAll(h.root, 0o700) // so the lock can be taken before the first registration
 		fl := flock.New(filepath.Join(h.root, pollLockFile))
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
@@ -125,18 +131,21 @@ func (h *Host) StartPoll(interval time.Duration) (stop func()) {
 				_ = fl.Unlock()
 			}
 		}()
-		for {
+		take := func() {
 			if !held {
-				// Fails while another process polls, or before the first
-				// registration creates the root.
+				// Fails while another process polls.
 				if locked, err := fl.TryLock(); err == nil && locked {
 					held = true
 				}
 			}
+		}
+		take()
+		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
+				take()
 				if held {
 					h.PollOnce(ctx)
 				}

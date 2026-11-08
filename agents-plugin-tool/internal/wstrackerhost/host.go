@@ -255,7 +255,25 @@ func (h *Host) Register(ctx context.Context, req RegisterRequest) (RegisterResul
 		}
 		return res, err
 	}
+	// The store enters this process's map, locked, before anything is
+	// written, so a concurrent check that finds the new registry entry waits
+	// for this registration instead of opening a second ledger on the
+	// directory.
 	st := &store{entry: entry}
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	h.mu.Lock()
+	if h.closed || h.stores[entry.ID] != nil {
+		closed := h.closed
+		h.mu.Unlock()
+		os.Remove(entry.Dir)
+		if closed {
+			return res, errors.New("tracker: host closed")
+		}
+		return res, fmt.Errorf("tracker: store %q is already registered", req.ID)
+	}
+	h.stores[entry.ID] = st
+	h.mu.Unlock()
 	err = func() error {
 		opts := h.ledgerOptions(entry, profile.Given)
 		var l *wsledger.Ledger
@@ -278,8 +296,14 @@ func (h *Host) Register(ctx context.Context, req RegisterRequest) (RegisterResul
 	if err != nil {
 		if st.ledger != nil {
 			st.ledger.Close()
+			st.ledger, st.tracker = nil, nil
 		}
 		os.RemoveAll(entry.Dir)
+		h.mu.Lock()
+		if h.stores[entry.ID] == st {
+			delete(h.stores, entry.ID)
+		}
+		h.mu.Unlock()
 		return RegisterResult{}, err
 	}
 	if entry.Remote != "" {
@@ -288,14 +312,6 @@ func (h *Host) Register(ctx context.Context, req RegisterRequest) (RegisterResul
 	}
 	res.Entry = entry
 	_ = h.SaveProfile(profile) // the store is registered; a lost profile save costs only the default
-	h.mu.Lock()
-	if h.closed {
-		h.mu.Unlock()
-		st.ledger.Close()
-		return res, nil
-	}
-	h.stores[entry.ID] = st
-	h.mu.Unlock()
 	return res, nil
 }
 

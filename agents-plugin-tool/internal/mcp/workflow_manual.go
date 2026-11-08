@@ -448,8 +448,10 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 			// about the branch it owns.
 			if rec.Parent == "" {
 				body = injectBootstrapStalenessWarning(body, occupiedRootAnnouncement(rec.Root))
-				// A revive is a lead session start too; the check's throttle
-				// keeps a quick revive from fetching again.
+			}
+			// A top-level lead's revive is a session start too; the check's
+			// throttle keeps a quick revive from fetching again.
+			if (sessionEntry{scope: toolRole(rec.Scope), parent: rec.Parent}).isTopLevelLead() {
 				s.startTrackerSessionCheck()
 			}
 			body = injectBootstrapStalenessWarning(body, mailboxAddressAnnouncement(s, key, rec.Root))

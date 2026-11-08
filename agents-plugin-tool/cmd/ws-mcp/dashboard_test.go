@@ -178,8 +178,9 @@ func TestDashboardSubcommandHoldsTheLockUntilAnAuthenticatedShutdown(t *testing.
 }
 
 // TestDashboardDaemonRunsTheTrackerPoll: the daemon holds the tracker poll
-// lock under its config home while it runs, with no tracker knob set, so a
-// ws-mcp's pre-read check leaves the network to it; shutdown releases it.
+// lock under its config home while it runs, with no tracker knob set and no
+// tracker root yet (a first run), so a ws-mcp's pre-read check leaves the
+// network to it; shutdown releases it.
 func TestDashboardDaemonRunsTheTrackerPoll(t *testing.T) {
 	bin := buildDashboardTestBin(t, "")
 	env, dir := dashboardTestEnv(t)
@@ -190,9 +191,6 @@ func TestDashboardDaemonRunsTheTrackerPoll(t *testing.T) {
 		}
 	}
 	root := filepath.Join(configHome, "tracker")
-	if err := os.MkdirAll(root, 0o700); err != nil {
-		t.Fatal(err)
-	}
 	host, err := wstrackerhost.New(wstrackerhost.Options{Root: root})
 	if err != nil {
 		t.Fatal(err)

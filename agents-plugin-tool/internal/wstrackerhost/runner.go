@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // batchRunner is the wsledger git runner for every store: the user's git,
@@ -18,7 +19,7 @@ import (
 type batchRunner struct{}
 
 func (batchRunner) RunGit(ctx context.Context, root string, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", root}, args...)...)
+	cmd := gitCommand(ctx, root, args...)
 	if isRemoteCommand(args) {
 		cmd.Env = append(os.Environ(), batchRemoteEnv(ctx, root)...)
 	}
@@ -27,6 +28,18 @@ func (batchRunner) RunGit(ctx context.Context, root string, args ...string) ([]b
 		return nil, fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
 	}
 	return out, nil
+}
+
+// gitCommand is git in root, bounded by ctx: the context's end kills git's
+// whole process group, and WaitDelay bounds the wait for a child that still
+// holds the pipes, so a hung transport cannot outlast the check's timeout
+// (and keep the store's lock) the way a plain CommandContext lets it. The
+// same bound as the ticket index's runner (internal/wsindex ExecRunner).
+func gitCommand(ctx context.Context, root string, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", root}, args...)...)
+	cmd.WaitDelay = 300 * time.Millisecond
+	configureKill(cmd)
+	return cmd
 }
 
 // isRemoteCommand reports whether args run a git subcommand that reaches the
@@ -61,7 +74,7 @@ func batchRemoteEnv(ctx context.Context, root string) []string {
 func batchSSHCommand(ctx context.Context, root string) string {
 	base := strings.TrimSpace(os.Getenv("GIT_SSH_COMMAND"))
 	if base == "" {
-		if out, err := exec.CommandContext(ctx, "git", "-C", root, "config", "--get", "core.sshCommand").Output(); err == nil {
+		if out, err := gitCommand(ctx, root, "config", "--get", "core.sshCommand").Output(); err == nil {
 			base = strings.TrimSpace(string(out))
 		}
 	}

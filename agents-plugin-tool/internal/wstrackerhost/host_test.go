@@ -393,6 +393,18 @@ func TestPreReadWithoutDaemon(t *testing.T) {
 	if !hasItem(view(t, b, "team"), second) {
 		t.Fatal("a pre-read past the check interval must fetch")
 	}
+
+	// A clock stepped back leaves the last attempt in the future, which
+	// must not throttle until real time catches up.
+	third := createItem(t, a, "team", "three")
+	syncStore(t, a, "team")
+	w.clock.Advance(-time.Hour)
+	if err := b.PreRead(ctx, "team"); err != nil {
+		t.Fatal(err)
+	}
+	if !hasItem(view(t, b, "team"), third) {
+		t.Fatal("a pre-read after the clock stepped back must fetch")
+	}
 }
 
 // TestPreReadLeavesNetworkToPoller: while another process holds the poll
