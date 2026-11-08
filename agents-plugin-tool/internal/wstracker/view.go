@@ -51,18 +51,20 @@ type PriorityLevels struct {
 	Default int      `json:"default"`
 }
 
-// AttachmentLimit is the store's attachments.max_bytes setting.
+// AttachmentLimit is the store's attachments.max_bytes setting. MaxBytes is
+// a float64 because the reference engine accepts any positive integer
+// number, including one beyond the int range.
 type AttachmentLimit struct {
-	MaxBytes int `json:"max_bytes"`
+	MaxBytes float64 `json:"max_bytes"`
 }
 
 // AttachmentView is the metadata of one attachment; OID is the content's
 // sha256.
 type AttachmentView struct {
-	OID  string `json:"oid"`
-	Name string `json:"name"`
-	Size int64  `json:"size"`
-	Mime string `json:"mime"`
+	OID  string  `json:"oid"`
+	Name string  `json:"name"`
+	Size float64 `json:"size"` // a byte count; float64 as in AttachmentLimit
+	Mime string  `json:"mime"`
 }
 
 type MemberView struct {

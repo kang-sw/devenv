@@ -14,7 +14,7 @@ import (
 
 // recordFileName is the conversation record's file in its session
 // directory, beside the wslive snapshot and ring.
-const recordFileName = "agent.json"
+const recordFileName = wsdashboard.AgentRecordFileName
 
 const recordSchemaVersion = 1
 

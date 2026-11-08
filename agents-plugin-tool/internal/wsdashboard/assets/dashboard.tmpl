@@ -44,7 +44,7 @@ sheet's bottom edge while open. */}}
 
 {{define "r-head"}}<span class="meta">{{.ReplyID}}{{if .HasBoard}} · #{{.Seq}}{{end}}</span>{{with .Harness}}<span class="host">{{.}}</span>{{end}}<span class="meta">{{.ProjectName}}</span>{{if not .Live}}<span class="ended-chip" title="{{t "head.ended.title"}}">{{t "head.ended"}}</span>{{end}}{{if not .Adapter}}<span class="nolive" title="{{t "head.stores.title"}}">{{t "head.stores"}}</span>{{end}}<span class="counts">{{with .CountPolicy}}<span class="chip policy" title="{{t "chip.answer"}}">{{icon "ask"}}{{.}}</span>{{end}}{{with .CountAssumed}}<span class="chip assumed" title="{{t "chip.assumed"}}">{{icon "arrow"}}{{.}}</span>{{end}}{{with .CountAcks}}<span class="chip ok" title="{{t "chip.ack"}}">{{icon "check"}}{{.}}</span>{{end}}</span>{{end}}
 
-{{define "r-board"}}{{if .HasBoard}}{{.Board}}{{else}}<div class="empty">{{t "board.empty"}}</div>{{end}}{{end}}
+{{define "r-board"}}{{if .HasBoard}}{{.ThemedBoard}}{{else}}<div class="empty">{{t "board.empty"}}</div>{{end}}{{end}}
 
 {{define "r-panels"}}{{.Panels}}{{end}}
 

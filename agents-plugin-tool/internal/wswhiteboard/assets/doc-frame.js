@@ -15,8 +15,10 @@
   // The frame's mermaid blocks draw through this once the frame is laid
   // out: inside a collapsed body the frame has no width, and mermaid would
   // measure every label as empty. Until then mermaid's own draw on page
-  // load is turned off.
+  // load is turned off. A theme switch draws through it again.
+  var redraw = null;
   window.wbDocMermaid = function (draw) {
+    redraw = draw;
     if (window.innerWidth) { draw(); return; }
     if (window.mermaid) window.mermaid.initialize({ startOnLoad: false });
     window.addEventListener("resize", function once() {
@@ -40,9 +42,24 @@
   if (window.ResizeObserver) new ResizeObserver(size).observe(body);
   window.addEventListener("load", size);
   // The host page may register its listener after this frame first posts;
-  // it then asks for the height again.
+  // it then asks for the height again. It also posts its pinned theme
+  // ({wbDoc: "theme"}: "light", "dark", or "" for the OS) on a switch and in
+  // answer to each height, since this document follows only its own root:
+  // the server pins the theme current when it rendered the frame, and a
+  // switch since then reaches the frame only this way. The frame's drawn
+  // diagrams redraw in the new theme.
+  function theme(v) {
+    var root = d.documentElement;
+    if (v !== "light" && v !== "dark") v = "";
+    if ((root.getAttribute("data-theme") || "") === v) return;
+    if (v) root.setAttribute("data-theme", v);
+    else root.removeAttribute("data-theme");
+    if (redraw && d.querySelector("pre.mermaid[data-processed]")) window.wbDocMermaid(redraw);
+  }
   window.addEventListener("message", function (e) {
-    if (e.source === window.parent && e.data && e.data.wbDoc === "size") { last = -1; size(); }
+    if (e.source !== window.parent || !e.data) return;
+    if (e.data.wbDoc === "size") { last = -1; size(); }
+    else if (e.data.wbDoc === "theme") theme(e.data.theme);
   });
   size();
 

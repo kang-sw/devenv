@@ -1,0 +1,84 @@
+{
+ "name": "attachment-limit-genesis-invalid",
+ "comment": "An invalid genesis attachments.max_bytes is a roles problem and the limit falls back to the default (10485760): an attachment of exactly the default limit applies, one byte more is flagged.",
+ "viewers": [
+  "maya.pc"
+ ],
+ "now": "2026-11-02T09:00:00Z",
+ "genesis": {
+  "admins": [
+   "ada"
+  ],
+  "members": [
+   {
+    "id": "ada",
+    "name": "Ada",
+    "keys": [
+     "ada-k1"
+    ],
+    "leads": []
+   },
+   {
+    "id": "maya",
+    "name": "Maya",
+    "keys": [
+     "maya-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   }
+  ],
+  "attachments": {
+   "max_bytes": -5
+  }
+ },
+ "commits": {
+  "maya.pc": [
+   {
+    "ts": "2026-11-01T09:00:00Z",
+    "seen": {},
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "topic",
+       "title": "T1",
+       "body": "b",
+       "attachments": [
+        {
+         "oid": "1111111111111111111111111111111111111111111111111111111111111111",
+         "name": "at.bin",
+         "size": 10485760,
+         "mime": "application/octet-stream"
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:10:00Z",
+    "seen": {},
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "topic",
+       "title": "T2",
+       "body": "b",
+       "attachments": [
+        {
+         "oid": "2222222222222222222222222222222222222222222222222222222222222222",
+         "name": "over.bin",
+         "size": 10485761,
+         "mime": "application/octet-stream"
+        }
+       ]
+      }
+     ]
+    ]
+   }
+  ]
+ }
+}

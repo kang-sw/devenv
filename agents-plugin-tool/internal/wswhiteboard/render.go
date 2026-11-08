@@ -423,7 +423,7 @@ const frameCSS = "html, body { background: transparent; overflow: hidden; }"
 // frame's height across a board swap.
 func (p *pageData) framedDoc(topic string, body template.HTML, mermaid bool, a *pageAssets) template.HTML {
 	var doc strings.Builder
-	doc.WriteString(`<!DOCTYPE html><html><head><meta charset="utf-8"><base target="_blank"><style>`)
+	doc.WriteString(frameDocStart + `<head><meta charset="utf-8"><base target="_blank"><style>`)
 	doc.WriteString(string(a.css))
 	doc.WriteString("\n" + frameCSS + `</style></head><body class="doc-frame"><div class="doc-body md">`)
 	doc.WriteString(string(body))
@@ -434,6 +434,27 @@ func (p *pageData) framedDoc(topic string, body template.HTML, mermaid bool, a *
 	doc.WriteString(`</body></html>`)
 	return template.HTML(`<iframe class="doc-frame" title="` + template.HTMLEscapeString(topic) + `" data-doc="` + template.HTMLEscapeString(topic) + `" sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox" srcdoc="` +
 		template.HTMLEscapeString(doc.String()) + `"></iframe>`)
+}
+
+// frameDocStart opens every topic-body frame's document (framedDoc), the
+// root ThemeFrames pins a theme on.
+const frameDocStart = `<!DOCTYPE html><html>`
+
+// ThemeFrames pins theme ("light" or "dark") on the root of every topic-body
+// frame in board, as the host page pins it on its own root: a frame is a
+// separate document whose stylesheet otherwise follows the OS, under a
+// transparent background that shows the host's pinned card. Any other theme
+// returns board unchanged (the frames follow the OS, as the page does). The
+// daemon applies it per request, from the request's theme cookie, so the
+// board itself renders theme-free; the page script carries a later switch
+// to the frames (doc-frame.js).
+func ThemeFrames(board template.HTML, theme string) template.HTML {
+	if theme != "light" && theme != "dark" {
+		return board
+	}
+	from := `srcdoc="` + template.HTMLEscapeString(frameDocStart)
+	to := `srcdoc="` + template.HTMLEscapeString(`<!DOCTYPE html><html data-theme="`+theme+`">`)
+	return template.HTML(strings.ReplaceAll(string(board), from, to))
 }
 
 // topicData is one topic block with the page it sits on.

@@ -161,9 +161,9 @@ func (s *state) checkExtras(p obj, prior []attachment) rejection {
 			if !a.truthy("mime") || a.str("mime") == "" {
 				return "attachment mime type required"
 			}
-			if size > float64(s.attMax) && !hasOID(prior, a.str("oid")) {
+			if size > s.attMax && !hasOID(prior, a.str("oid")) {
 				return rejection(`attachment "` + a.str("name") + `" is ` + jsNum(size) + " bytes, above the store limit of " +
-					itoa(s.attMax) + " bytes (attachments.max_bytes)")
+					jsNum(s.attMax) + " bytes (attachments.max_bytes)")
 			}
 		}
 	}
@@ -629,7 +629,7 @@ func (s *state) check(n *node) rejection {
 		if r := s.needAdmin(a); r != "" {
 			return r
 		}
-		if v, ok := p.intOf("max_bytes"); !ok || v <= 0 {
+		if _, ok := p.posIntOf("max_bytes"); !ok {
 			return "max_bytes must be a positive integer (bytes)"
 		}
 

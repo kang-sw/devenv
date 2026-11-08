@@ -45,12 +45,11 @@ func (s agentSessions) ReadSession(reg Registration) (SessionData, bool) {
 	if !reg.Agent {
 		return s.inner.ReadSession(reg)
 	}
-	sessionDir := SessionDir(s.dir, reg.ReplyID)
-	if _, err := os.Stat(sessionDir); err != nil {
+	if _, err := os.Stat(SessionDir(s.dir, reg.ReplyID)); err != nil {
 		return SessionData{}, false
 	}
 	h := sha256.New()
-	updatedAt := hashLiveStores(h, sessionDir, s.now())
+	updatedAt := HashLiveStores(h, s.dir, reg.ReplyID, s.now())
 	return SessionData{Fingerprint: hex.EncodeToString(h.Sum(nil)[:16]), SnapshotUpdatedAt: updatedAt}, true
 }
 
@@ -71,11 +70,17 @@ func (s agentSessions) ReadPageLang(reg Registration, lang string) (PageContent,
 	return PageContent{}, true
 }
 
-// hashLiveStores folds a session's live stores into h, as ws-mcp's source
-// does for a lead session: the snapshot without updatedAt but with its
-// staleness, and the ring and inbox entry names (entry files are never
-// rewritten). It returns the snapshot's updatedAt.
-func hashLiveStores(h io.Writer, sessionDir string, now time.Time) time.Time {
+// HashLiveStores folds the live stores of session replyID under stateDir
+// into h and returns the snapshot's updatedAt. It is the change detector both
+// session kinds share: ws-mcp's source for a lead session and agentSessions
+// for an agent conversation. The snapshot is hashed without updatedAt but
+// with its staleness at now, so a heartbeat rewrite is no change while a
+// writer that stopped is one; the ring and the board-answer inbox (held and
+// drained) are hashed by their entry names, since an entry file is never
+// rewritten, so held and drained names tell a send (a new held name, or a
+// merge replacing one) and a drain apart.
+func HashLiveStores(h io.Writer, stateDir, replyID string, now time.Time) time.Time {
+	sessionDir := SessionDir(stateDir, replyID)
 	var updatedAt time.Time
 	if raw, err := os.ReadFile(wslive.SnapshotPath(sessionDir)); err == nil {
 		var doc map[string]any
