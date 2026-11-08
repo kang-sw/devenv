@@ -489,11 +489,11 @@ func (s *Server) publishReplyID(callerSessionKey, root, ownNamed string, contact
 // otherwise-unrelated session (Decision 1's zero-overhead contract). A
 // no-op when already set, avoiding a redundant disk write on every send.
 func (s *Server) markMailboxReplyOpened(sessionKey string) {
-	rec, ok := s.sessions.readState(sessionKey)
+	rec, ok := s.sessions.readState(sessionKey, partKey)
 	if !ok || rec.MailboxReplyOpened {
 		return
 	}
-	_ = s.sessions.mutateRecord(sessionKey, func(r *sessionRecord) error {
+	_ = s.sessions.mutateRecord(sessionKey, partKey, func(r *sessionRecord) error {
 		r.MailboxReplyOpened = true
 		return nil
 	})

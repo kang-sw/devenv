@@ -808,16 +808,16 @@ func TestStoreConcurrentTodoWrites(t *testing.T) {
 	}
 	wg.Wait()
 
-	record, ok := store.readState(key)
+	record, ok := store.readState(key, partAll)
 	if !ok {
 		t.Fatal("readState after concurrent writes failed")
 	}
 	if len(record.Todos) != n {
 		t.Fatalf("expected %d todos after concurrent writes, got %d", n, len(record.Todos))
 	}
-	// The on-disk file must remain a complete, parseable record.
-	dir, _ := store.keysDir()
-	if _, parseOK := store.readRecord(dir, key); !parseOK {
+	// The on-disk files must remain a complete, parseable record.
+	d, _ := store.dirs()
+	if _, parseOK := store.readRecord(d, key, partAll); !parseOK {
 		t.Fatal("on-disk record not parseable after concurrent writes")
 	}
 }
@@ -828,7 +828,7 @@ func TestStoreAgendaRoundTrip(t *testing.T) {
 	if err := store.setAgenda(key, "implement", blob); err != nil {
 		t.Fatal(err)
 	}
-	record, ok := store.readState(key)
+	record, ok := store.readState(key, partAll)
 	if !ok || record.Agenda == nil {
 		t.Fatal("agenda not stored")
 	}
@@ -843,7 +843,7 @@ func TestStoreAgendaRoundTrip(t *testing.T) {
 	if err := store.clearAgenda(key, "implement"); err != nil {
 		t.Fatal(err)
 	}
-	record, _ = store.readState(key)
+	record, _ = store.readState(key, partAll)
 	if len(record.Agenda) != 0 {
 		t.Fatalf("agenda not cleared: %v", record.Agenda)
 	}
@@ -857,7 +857,7 @@ func TestStoreMergeAgendaKeepsUntouchedNumbers(t *testing.T) {
 	if _, err := store.mergeAgendaNote(key, "w", json.RawMessage(`{"x":1}`)); err != nil {
 		t.Fatalf("mergeAgendaNote: %v", err)
 	}
-	record, _ := store.readState(key)
+	record, _ := store.readState(key, partAll)
 	if got := string(record.Agenda["w"]); got != `{"big":12345678901234567,"f":1.10,"x":1}` {
 		t.Fatalf("merge rewrote untouched numbers: %s", got)
 	}
@@ -871,14 +871,14 @@ func TestStoreClearAllAgenda(t *testing.T) {
 	if err := store.setAgenda(key, "sprint", json.RawMessage(`{"b":2}`)); err != nil {
 		t.Fatal(err)
 	}
-	record, ok := store.readState(key)
+	record, ok := store.readState(key, partAll)
 	if !ok || len(record.Agenda) != 2 {
 		t.Fatalf("expected 2 agenda blobs before clear-all: %v", record.Agenda)
 	}
 	if err := store.clearAllAgenda(key); err != nil {
 		t.Fatal(err)
 	}
-	record, _ = store.readState(key)
+	record, _ = store.readState(key, partAll)
 	if len(record.Agenda) != 0 {
 		t.Fatalf("clearAllAgenda did not remove every blob: %v", record.Agenda)
 	}
@@ -897,7 +897,7 @@ func TestEnterModeReplacesTodos(t *testing.T) {
 	if err := store.enterMode(key, "implement", json.RawMessage(`{"x":1}`), deriveImplementTodosFromVerdict(implementTodoVerdict{NeedReview: true})); err != nil {
 		t.Fatal(err)
 	}
-	record, _ := store.readState(key)
+	record, _ := store.readState(key, partAll)
 	if !eqKeys(keysOf(record.Todos), "route", "prep", "edit", "review", "final-action-gate", "merge") {
 		t.Fatalf("enter did not replace todo list: %v", keysOf(record.Todos))
 	}
@@ -983,7 +983,7 @@ func TestRouteResolveImplementSchemaIsOpaque(t *testing.T) {
 
 func routeStateSnapshot(t *testing.T, server *Server, key string) string {
 	t.Helper()
-	record, ok := server.sessions.readState(key)
+	record, ok := server.sessions.readState(key, partAll)
 	if !ok {
 		t.Fatalf("session record not found for %q", key)
 	}
@@ -1354,7 +1354,7 @@ func TestEnterImplementNewSchemaReturnsVerdictAndStoresAgenda(t *testing.T) {
 		t.Fatalf("unexpected verdict: %+v", result.Verdict)
 	}
 
-	record, ok := server.sessions.readState(key)
+	record, ok := server.sessions.readState(key, partAll)
 	if !ok {
 		t.Fatal("session record not found")
 	}
@@ -1409,7 +1409,7 @@ func TestEnterImplementTicketTargetTodosCarryNoPlanningStage(t *testing.T) {
 	writeImplementReadyTicket(t, root, implementReadyFacts())
 	callToolWithKey(t, server, 2, key, "route.resolve_implement", implementReadyArgs("text"))
 
-	record, ok := server.sessions.readState(key)
+	record, ok := server.sessions.readState(key, partAll)
 	if !ok {
 		t.Fatal("session record not found")
 	}
@@ -1620,7 +1620,7 @@ func TestEnterImplementUnbornRepositoryUsesStandardCreatePath(t *testing.T) {
 	if result.Verdict.BranchPlan.Action != "create" || result.Verdict.BranchPlan.StartCommit != "(initial)" {
 		t.Fatalf("unborn repository branch plan = %+v, want standard create with observed marker", result.Verdict.BranchPlan)
 	}
-	record, ok := server.sessions.readState(key)
+	record, ok := server.sessions.readState(key, partAll)
 	if !ok {
 		t.Fatal("session record not found")
 	}
@@ -1676,7 +1676,7 @@ func TestEnterImplementNearMissesPreserveStandardBranchAndMergeTodos(t *testing.
 			if result.Verdict.BranchPlan.Action != tc.wantAction {
 				t.Fatalf("branch action = %q, want %q; verdict=%+v", result.Verdict.BranchPlan.Action, tc.wantAction, result.Verdict)
 			}
-			record, ok := server.sessions.readState(key)
+			record, ok := server.sessions.readState(key, partAll)
 			if !ok {
 				t.Fatal("session record not found")
 			}
@@ -2545,7 +2545,7 @@ func TestServeStdioTodoAddErrorBranches(t *testing.T) {
 
 	// None of the error paths above should have mutated the list beyond the
 	// one valid-title control item.
-	if rec, ok := server.sessions.readState(key); !ok || len(rec.Todos) != 1 || rec.Todos[0].Key != "valid-title" || rec.Todos[0].Title != "Valid title" {
+	if rec, ok := server.sessions.readState(key, partAll); !ok || len(rec.Todos) != 1 || rec.Todos[0].Key != "valid-title" || rec.Todos[0].Title != "Valid title" {
 		t.Fatalf("error paths must not mutate the todo list: %+v", rec.Todos)
 	}
 
@@ -2623,7 +2623,7 @@ func TestServeStdioTodoAddReproducesOldPlacements(t *testing.T) {
 	}); !strings.Contains(got, "todo added: c") {
 		t.Fatalf("add(end) c unexpected: %s", got)
 	}
-	if rec, ok := server.sessions.readState(key); !ok || !eqKeys(keysOf(rec.Todos), "a", "c") {
+	if rec, ok := server.sessions.readState(key, partAll); !ok || !eqKeys(keysOf(rec.Todos), "a", "c") {
 		t.Fatalf("post-append order wrong: %v", keysOf(rec.Todos))
 	}
 
@@ -2633,7 +2633,7 @@ func TestServeStdioTodoAddReproducesOldPlacements(t *testing.T) {
 	}); !strings.Contains(got, "todo added: b") {
 		t.Fatalf("add(before) b unexpected: %s", got)
 	}
-	if rec, ok := server.sessions.readState(key); !ok || !eqKeys(keysOf(rec.Todos), "a", "b", "c") {
+	if rec, ok := server.sessions.readState(key, partAll); !ok || !eqKeys(keysOf(rec.Todos), "a", "b", "c") {
 		t.Fatalf("post-insert_before order wrong: %v", keysOf(rec.Todos))
 	}
 
@@ -2643,7 +2643,7 @@ func TestServeStdioTodoAddReproducesOldPlacements(t *testing.T) {
 	}); !strings.Contains(got, "todo added: a2") {
 		t.Fatalf("add(after) a2 unexpected: %s", got)
 	}
-	rec, ok := server.sessions.readState(key)
+	rec, ok := server.sessions.readState(key, partAll)
 	if !ok || !eqKeys(keysOf(rec.Todos), "a", "a2", "b", "c") {
 		t.Fatalf("post-insert_after order wrong: %v", keysOf(rec.Todos))
 	}
@@ -2877,7 +2877,7 @@ func TestServeStdioTodoReorderHandler(t *testing.T) {
 	}); !strings.Contains(got, "todo span reordered") {
 		t.Fatalf("reorder(after) unexpected: %s", got)
 	}
-	if rec, ok := server.sessions.readState(key); !ok || !eqKeys(keysOf(rec.Todos), "c", "d", "a", "b") {
+	if rec, ok := server.sessions.readState(key, partAll); !ok || !eqKeys(keysOf(rec.Todos), "c", "d", "a", "b") {
 		t.Fatalf("reorder(after) on-disk order wrong: %v", keysOf(rec.Todos))
 	}
 
@@ -2888,7 +2888,7 @@ func TestServeStdioTodoReorderHandler(t *testing.T) {
 	}); !strings.Contains(got, "todo span reordered") {
 		t.Fatalf("reorder(before) unexpected: %s", got)
 	}
-	if rec, ok := server.sessions.readState(key); !ok || !eqKeys(keysOf(rec.Todos), "a", "b", "c", "d") {
+	if rec, ok := server.sessions.readState(key, partAll); !ok || !eqKeys(keysOf(rec.Todos), "a", "b", "c", "d") {
 		t.Fatalf("reorder(before) on-disk order wrong: %v", keysOf(rec.Todos))
 	}
 
@@ -2912,7 +2912,7 @@ func TestServeStdioTodoReorderHandler(t *testing.T) {
 		t.Fatalf("empty-position error expected, got: %s", got)
 	}
 	// List must still be intact after the error paths.
-	if rec, ok := server.sessions.readState(key); !ok || !eqKeys(keysOf(rec.Todos), "a", "b", "c", "d") {
+	if rec, ok := server.sessions.readState(key, partAll); !ok || !eqKeys(keysOf(rec.Todos), "a", "b", "c", "d") {
 		t.Fatalf("list mutated by error paths: %v", keysOf(rec.Todos))
 	}
 }
@@ -2933,7 +2933,7 @@ func TestServeStdioAgendaHandler(t *testing.T) {
 	}); !strings.Contains(got, "agenda set: notes") {
 		t.Fatalf("agenda.set unexpected: %s", got)
 	}
-	rec, ok := server.sessions.readState(key)
+	rec, ok := server.sessions.readState(key, partAll)
 	if !ok || rec.Agenda["notes"] == nil {
 		t.Fatalf("agenda blob not persisted via handler")
 	}
@@ -2958,7 +2958,7 @@ func TestServeStdioAgendaHandler(t *testing.T) {
 	}); !strings.Contains(got, "agenda cleared: notes") {
 		t.Fatalf("agenda.clear unexpected: %s", got)
 	}
-	rec, _ = server.sessions.readState(key)
+	rec, _ = server.sessions.readState(key, partAll)
 	if len(rec.Agenda) != 0 {
 		t.Fatalf("agenda not cleared via handler: %v", rec.Agenda)
 	}
@@ -3029,7 +3029,7 @@ func TestServeStdioAgendaListHandler(t *testing.T) {
 	}); !strings.Contains(got, "agenda cleared: all") {
 		t.Fatalf("agenda.clear(all) unexpected: %s", got)
 	}
-	rec, ok := server.sessions.readState(key)
+	rec, ok := server.sessions.readState(key, partAll)
 	if !ok || len(rec.Agenda) != 0 {
 		t.Fatalf("agenda.clear(all) did not clear every blob: %v", rec.Agenda)
 	}
@@ -3056,7 +3056,7 @@ func TestServeStdioAgendaSetMerge(t *testing.T) {
 	}
 	stored := func(blobKey string) string {
 		t.Helper()
-		rec, ok := server.sessions.readState(key)
+		rec, ok := server.sessions.readState(key, partAll)
 		if !ok {
 			t.Fatalf("session record missing")
 		}
@@ -3641,12 +3641,11 @@ func TestWorkflowManualUnknownKey(t *testing.T) {
 	if !strings.Contains(resp, "lead-revive") {
 		t.Errorf("unknown key: fail-loud notice should point to lead-revive recovery:\n%s", resp)
 	}
-	// Must NOT have minted a key file. Use os.Stat on the specific record path so
-	// the check is meaningful even when the keys/ directory was never created.
-	keysDir := filepath.Join(cacheDir, "keys")
-	_, statErr := os.Stat(filepath.Join(keysDir, badKey+".json"))
+	// Must NOT have minted a key record. Use os.Stat on the specific record path so
+	// the check is meaningful even when the sessions/ directory was never created.
+	_, statErr := os.Stat(filepath.Join(cacheDir, sessionsDirName, badKey))
 	if !os.IsNotExist(statErr) {
-		t.Errorf("unknown key: key file was minted (stat: %v)", statErr)
+		t.Errorf("unknown key: key record was minted (stat: %v)", statErr)
 	}
 }
 
@@ -3972,11 +3971,10 @@ func TestWorkflowStateUnknownKeySameFailLoudAsWorkflowManual(t *testing.T) {
 		t.Errorf("unknown key: workflow_state must not leak manual body / ferrule mention:\n%s", stateResp)
 	}
 
-	// Must NOT have minted a key file.
-	keysDir := filepath.Join(cacheDir, "keys")
-	_, statErr := os.Stat(filepath.Join(keysDir, badKey+".json"))
+	// Must NOT have minted a key record.
+	_, statErr := os.Stat(filepath.Join(cacheDir, sessionsDirName, badKey))
 	if !os.IsNotExist(statErr) {
-		t.Errorf("unknown key: key file was minted (stat: %v)", statErr)
+		t.Errorf("unknown key: key record was minted (stat: %v)", statErr)
 	}
 }
 

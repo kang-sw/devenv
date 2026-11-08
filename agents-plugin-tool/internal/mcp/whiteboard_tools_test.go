@@ -310,7 +310,7 @@ func TestWhiteboardEmbedRetentionAndDistinctNames(t *testing.T) {
 	}
 	// Age is the render sequence, not mtime: make the oldest-by-sequence
 	// embed the newest on disk, and it is still the one evicted.
-	rec, _ := f.s.sessions.readState(f.key)
+	rec, _ := f.s.sessions.readState(f.key, partAll)
 	oldest := rec.Whiteboard.Embeds[0].Name
 	future := time.Now().Add(time.Hour)
 	if err := os.Chtimes(filepath.Join(f.dir(), oldest), future, future); err != nil {
@@ -423,7 +423,7 @@ func TestWhiteboardRenameRetriesSharingViolation(t *testing.T) {
 			if !isToolError(resp) || !strings.Contains(toolText(t, resp), "write "+map[string]string{"page": "full page", "stamp": "stamp"}[target]) {
 				t.Fatalf("persistent sharing violation must fail the render: %s", resp)
 			}
-			rec, _ := f.s.sessions.readState(f.key)
+			rec, _ := f.s.sessions.readState(f.key, partAll)
 			if len(rec.Whiteboard.Items) != 1 {
 				t.Fatalf("a failed render must not persist its batch: %d items", len(rec.Whiteboard.Items))
 			}
@@ -643,7 +643,7 @@ func TestWhiteboardUpdateResultCarriesStaleTopicNudge(t *testing.T) {
 		t.Fatalf("fresh topics must not nudge:\n%s", text)
 	}
 	old := time.Now().Add(-2 * time.Hour).UTC().Format(time.RFC3339)
-	if err := f.s.sessions.mutateRecord(f.key, func(rec *sessionRecord) error {
+	if err := f.s.sessions.mutateRecord(f.key, partWhiteboard, func(rec *sessionRecord) error {
 		for i := range rec.Whiteboard.Topics {
 			rec.Whiteboard.Topics[i].ChangedAt = old
 		}

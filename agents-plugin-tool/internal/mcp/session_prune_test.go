@@ -40,11 +40,7 @@ func TestLookupTouchesStaleRecordAndGuardsRepeat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mint: %v", err)
 	}
-	dir, err := s.keysDir()
-	if err != nil {
-		t.Fatalf("keysDir: %v", err)
-	}
-	path := s.keyPath(dir, key)
+	path := splitKeyPath(t, s, key)
 	backdateMtime(t, path, touchGuardWindow+time.Minute)
 	staleMtime := mtimeOf(t, path)
 
@@ -77,12 +73,11 @@ func TestReadStateTouchesRecord(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mint: %v", err)
 	}
-	dir, _ := s.keysDir()
-	path := s.keyPath(dir, key)
+	path := splitKeyPath(t, s, key)
 	backdateMtime(t, path, touchGuardWindow+time.Minute)
 	staleMtime := mtimeOf(t, path)
 
-	if _, ok := s.readState(key); !ok {
+	if _, ok := s.readState(key, partAll); !ok {
 		t.Fatalf("readState(%q) failed", key)
 	}
 	refreshed := mtimeOf(t, path)
@@ -115,8 +110,7 @@ func TestGetOverrideAndListOverrideKeysTouchRecord(t *testing.T) {
 	if err := s.setOverride(key, "some.item", "value"); err != nil {
 		t.Fatalf("setOverride: %v", err)
 	}
-	dir, _ := s.keysDir()
-	path := s.keyPath(dir, key)
+	path := splitKeyPath(t, s, key)
 
 	// getOverride
 	backdateMtime(t, path, touchGuardWindow+time.Minute)
@@ -155,9 +149,8 @@ func TestChildrenTouchesOnlyParentKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mint child: %v", err)
 	}
-	dir, _ := s.keysDir()
-	parentPath := s.keyPath(dir, parentKey)
-	childPath := s.keyPath(dir, childKey)
+	parentPath := splitKeyPath(t, s, parentKey)
+	childPath := splitKeyPath(t, s, childKey)
 
 	backdateMtime(t, parentPath, touchGuardWindow+time.Minute)
 	backdateMtime(t, childPath, touchGuardWindow+time.Minute)
@@ -192,8 +185,8 @@ func TestFerruleDoesNotDoubleScanWithinCadence(t *testing.T) {
 	if toolIsError(t, resp1) {
 		t.Fatalf("first ws.ferrule returned isError: %s", resp1)
 	}
-	dir, _ := server.sessions.keysDir()
-	markerPath := filepath.Join(dir, pruneMarkerName)
+	d, _ := server.sessions.dirs()
+	markerPath := filepath.Join(d.sessions, pruneMarkerName)
 	firstMarker := mtimeOf(t, markerPath)
 
 	resp2 := callLogin(t, server, 2, root, nil)
@@ -228,8 +221,7 @@ func TestMaybePruneDeletesStaleKeyRecords(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mint stale: %v", err)
 	}
-	dir, _ := s.keysDir()
-	stalePath := s.keyPath(dir, staleKey)
+	stalePath := splitKeyPath(t, s, staleKey)
 	backdateMtime(t, stalePath, keyRetentionAge+time.Hour)
 
 	s.maybePrune()
@@ -250,8 +242,7 @@ func TestMaybePruneRetainsRecentlyTouchedRecords(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mint fresh: %v", err)
 	}
-	dir, _ := s.keysDir()
-	freshPath := s.keyPath(dir, freshKey)
+	freshPath := splitKeyPath(t, s, freshKey)
 	// Freshly minted: mtime is "now", well within retention.
 
 	s.maybePrune()
@@ -262,20 +253,13 @@ func TestMaybePruneRetainsRecentlyTouchedRecords(t *testing.T) {
 }
 
 // TestMaybePruneToleratesMalformedFiles drops a non-JSON-parseable .json file
-// into keys/ and confirms a forced prune scan neither crashes nor special-
-// cases it: it is pruned/kept purely by mtime like any other file, since the
-// scan never parses record contents.
+// into the legacy keys/ and confirms a forced prune scan neither crashes nor
+// special-cases it: it is pruned/kept purely by mtime like any other file,
+// since the scan never parses record contents.
 func TestMaybePruneToleratesMalformedFiles(t *testing.T) {
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 	s := newSessionStore()
-	dir, err := s.keysDir()
-	if err != nil {
-		t.Fatalf("keysDir: %v", err)
-	}
-	malformedPath := filepath.Join(dir, "not-valid-json.json")
-	if err := os.WriteFile(malformedPath, []byte("{not valid json"), 0o644); err != nil {
-		t.Fatalf("write malformed file: %v", err)
-	}
+	malformedPath := writeRawLegacyRecordForTest(t, s, "not-valid-json", "{not valid json")
 	backdateMtime(t, malformedPath, keyRetentionAge+time.Hour)
 
 	func() {
@@ -302,8 +286,7 @@ func TestMaybePruneSkipsWithinCadence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mint stale: %v", err)
 	}
-	dir, _ := s.keysDir()
-	stalePath := s.keyPath(dir, staleKey)
+	stalePath := splitKeyPath(t, s, staleKey)
 
 	// First call claims the marker without anything to prune yet.
 	s.maybePrune()

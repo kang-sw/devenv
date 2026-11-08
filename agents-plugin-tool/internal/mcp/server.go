@@ -364,7 +364,7 @@ func appendDebugEvent(event string, fields map[string]any) {
 
 // crashLogPath resolves the always-on, cross-platform panic-trace sink under
 // the shared cache root (WS_CACHE_HOME or ~/.cache/ws@...), the same
-// root-independent seam sessionStore.keysDir uses for the keys/ dir: a
+// root-independent seam sessionStore.dirs uses for the session key store: a
 // panicking request may not know which project root it belonged to, so the
 // crash file lives in a flat top-level dir under CacheRoot(), not under any
 // per-project layout. It creates the directory (0o755) if needed and returns
@@ -1634,7 +1634,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		commitKey, _ := params.Arguments["session_key"].(string)
 		commitKey = strings.TrimSpace(commitKey)
 		if commitKey != "" {
-			if rec, ok := s.sessions.readState(commitKey); ok && len(rec.Todos) > 0 {
+			if rec, ok := s.sessions.readState(commitKey, partTodos); ok && len(rec.Todos) > 0 {
 				commitText += fmt.Sprintf("\n## TODO(%s reminder: update this if stale)\n%s\n", RuntimeNamespace(), renderTodos(rec.Todos, false))
 			}
 		}

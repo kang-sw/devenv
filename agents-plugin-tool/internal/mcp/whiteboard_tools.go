@@ -229,7 +229,7 @@ func (s *Server) handleWhiteboardUpdate(id json.RawMessage, args map[string]any)
 		outcome  wswhiteboard.Outcome
 		render   whiteboardRender
 	)
-	err = s.sessions.mutateRecord(key, func(rec *sessionRecord) error {
+	err = s.sessions.mutateRecordParts(key, partAll, partWhiteboard, func(rec *sessionRecord) error {
 		if rec.Whiteboard == nil {
 			rec.Whiteboard = &wswhiteboard.State{}
 		}
@@ -285,7 +285,7 @@ func (s *Server) handleWhiteboardQuery(id json.RawMessage, args map[string]any) 
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
-	rec, ok := s.sessions.readState(key)
+	rec, ok := s.sessions.readState(key, partWhiteboard)
 	if !ok {
 		return toolTextResponse(id, "", fmt.Errorf("%s: session key not found: %s", tool, key))
 	}
@@ -374,7 +374,7 @@ func (s *Server) refreshWhiteboardAfter(args map[string]any, resp response) {
 	if key == "" {
 		return
 	}
-	err := s.sessions.mutateRecord(key, func(rec *sessionRecord) error {
+	err := s.sessions.mutateRecordParts(key, partAll, partWhiteboard, func(rec *sessionRecord) error {
 		if rec.Whiteboard == nil {
 			return errNoWhiteboard
 		}
@@ -669,29 +669,22 @@ func (s *Server) maybeCollectWhiteboards(root string) {
 	}
 }
 
-// liveReplyIDs returns the reply id of every session key record on disk.
-// ok is false when the key store cannot be read.
+// liveReplyIDs returns the reply id of every session key on disk, in either
+// layout. ok is false when the key store cannot be read.
 func (s *sessionStore) liveReplyIDs() (map[string]bool, bool) {
-	dir, err := s.keysDir()
+	d, err := s.dirs()
 	if err != nil {
 		return nil, false
 	}
 	s.mu.Lock()
-	entries, err := os.ReadDir(dir)
+	keys, err := s.listKeys(d)
 	s.mu.Unlock()
 	if err != nil {
 		return nil, false
 	}
 	live := map[string]bool{}
-	for _, entry := range entries {
-		name := entry.Name()
-		if entry.IsDir() || !strings.HasSuffix(name, ".json") {
-			continue
-		}
-		key := strings.TrimSuffix(name, ".json")
-		if sessionKeyFilenamePattern.MatchString(key) {
-			live[wsmailbox.ReplyID(key)] = true
-		}
+	for _, key := range keys {
+		live[wsmailbox.ReplyID(key)] = true
 	}
 	return live, true
 }
