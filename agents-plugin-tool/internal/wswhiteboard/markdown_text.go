@@ -38,7 +38,7 @@ func RenderText(s string, t TextTargets) template.HTML {
 	if fileText == nil {
 		fileText = func(string) string { return "" }
 	}
-	p := &pageData{View: View{FileText: fileText, ImageSrc: t.ImageSrc, FileActions: t.FileActions}, noMermaid: !t.Mermaid}
+	p := &pageData{View: View{FileText: fileText, ImageSrc: t.ImageSrc, FileActions: t.FileActions}, noMermaid: !t.Mermaid, noInlineTags: true}
 	if !t.HTML {
 		return p.Block(s)
 	}

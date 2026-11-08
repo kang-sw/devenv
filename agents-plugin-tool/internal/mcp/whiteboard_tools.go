@@ -287,21 +287,18 @@ func (s *Server) handleWhiteboardQuery(id json.RawMessage, args map[string]any) 
 }
 
 // whiteboardRefusal lists every problem and then the tool's own input
-// grammar, read from the whiteboard playbook so the grammar has one source,
-// so that one retry can fix the call: the "## Commands" section for
-// whiteboard.update, the "## Query" section for whiteboard.query. The central
-// precheck cannot do this: it sees only the advertised argument names.
+// grammar, read from the rsrc playbooks so the grammar has one source, so
+// that one retry can fix the call: for whiteboard.update the shared command
+// syntax and the whiteboard's "## Commands" section (commandRefusal), for
+// whiteboard.query the "## Query" section. The central precheck cannot do
+// this: it sees only the advertised argument names.
 func (s *Server) whiteboardRefusal(tool string, problems []string) string {
+	if tool != "whiteboard.query" {
+		return commandRefusal(tool, problems, s.whiteboardPlaybookSection("## Commands"), whiteboardPlaybookName)
+	}
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "%s refused; nothing was applied. Problems:\n", tool)
-	for _, problem := range problems {
-		sb.WriteString("- " + problem + "\n")
-	}
-	heading := "## Commands"
-	if tool == "whiteboard.query" {
-		heading = "## Query"
-	}
-	if grammar := s.whiteboardPlaybookSection(heading); grammar != "" {
+	writeRefusalProblems(&sb, tool, problems)
+	if grammar := s.whiteboardPlaybookSection("## Query"); grammar != "" {
 		sb.WriteString("\n" + grammar + "\n")
 	} else {
 		fmt.Fprintf(&sb, "\nRead the %s playbook with %s/playbook.read for the input format.\n", whiteboardPlaybookName, RuntimeNamespace())

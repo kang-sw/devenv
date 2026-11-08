@@ -1,6 +1,7 @@
 package wsrsrc
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -109,4 +110,28 @@ func TestRegenerateShippedManifest(t *testing.T) {
 		t.Fatalf("WriteManifest(%s): %v", root, err)
 	}
 	t.Logf("regenerated %s/manifest.json with %d files", root, len(m.Files))
+}
+
+// TestLoadPartReadsAVerifiedPartThatIsNoPlaybook pins the shipped
+// command-syntax part: LoadPart reads it hash-verified, and neither Load nor
+// a flat fallback resolves it as a playbook of its own.
+func TestLoadPartReadsAVerifiedPartThatIsNoPlaybook(t *testing.T) {
+	root := shippedRsrcRoot()
+	body, err := LoadPart(root, "lead-workflow-manual", "command-syntax")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(body, "## Command syntax\n") {
+		t.Fatalf("part body = %q", body)
+	}
+	var notFound ErrPlaybookNotFound
+	if _, err := Load(root, "command-syntax", "", nil); !errors.As(err, &notFound) {
+		t.Fatalf("Load(command-syntax) = %v, want ErrPlaybookNotFound", err)
+	}
+	if _, err := LoadPart(root, "lead-workflow-manual", "missing"); err == nil {
+		t.Fatal("a part outside the manifest must not load")
+	}
+	if _, err := LoadPart(root, "lead-workflow-manual", "../whiteboard/whiteboard"); err == nil {
+		t.Fatal("a part name must be a bare stem")
+	}
 }

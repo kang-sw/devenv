@@ -147,6 +147,28 @@ func Load(root, name, harness string, vars map[string]string) (LoadedPlaybook, e
 	}, nil
 }
 
+// LoadPart reads a playbook-local part, <root>/<playbook>/<part>.md, that the
+// MCP layer composes into its own output instead of a playbook's includes
+// (the workflow manual's shared command-syntax section). Its manifest hash is
+// verified and its frontmatter stripped; it gets no variable substitution, so
+// a part holds no {{.Name}} placeholder. A part is not loadable through Load:
+// neither <root>/<part>/<part>.md nor a flat <root>/<part>.md names it.
+func LoadPart(root, playbook, part string) (string, error) {
+	if !isBareStem(playbook) || !isBareStem(part) {
+		return "", fmt.Errorf("invalid part %q of playbook %q: both must be bare stems", part, playbook)
+	}
+	manifest, err := ReadManifest(root)
+	if err != nil {
+		return "", err
+	}
+	data, err := loadAndVerify(root, filepath.Join(root, playbook, part+".md"), manifest)
+	if err != nil {
+		return "", err
+	}
+	_, body := parseFrontmatter(string(data))
+	return strings.TrimSpace(body), nil
+}
+
 // resolvePlaybookPath returns (absoluteFilePath, isOverlay, error).
 // If harness is set and the overlay file exists, returns the overlay path.
 // Otherwise returns the base file path.

@@ -80,20 +80,66 @@ func TestMarkdownBlockFields(t *testing.T) {
 // types reaches the page as markup, inline or at the start of a line, and a
 // leading tag does not swallow the markdown after it.
 func TestMarkdownRawHTMLIsEscaped(t *testing.T) {
-	out := mdBoard(t, LayoutFull, Item{ID: 1, Class: ClassPolicy, Topic: "t", Title: "Option<T> <b>bold</b>",
+	out := mdBoard(t, LayoutFull, Item{ID: 1, Class: ClassPolicy, Topic: "t", Title: "Option<T> <u>bold</u>",
 		Options:        []string{`<img src=x onerror=alert(1)>`, "<script>o()</script>"},
 		Recommendation: "a: <iframe src=x></iframe>",
 		Rationale:      "<div onclick=x>block</div>\n**after**\n<!-- comment -->",
 		Status:         StatusOpen})
 	wantAll(t, out,
-		"Option&lt;T&gt; &lt;b&gt;bold&lt;/b&gt;",
+		"Option&lt;T&gt; &lt;u&gt;bold&lt;/u&gt;",
 		"&lt;img src=x onerror=alert(1)&gt;",
 		"&lt;script&gt;o()&lt;/script&gt;",
 		"&lt;iframe src=x&gt;&lt;/iframe&gt;",
 		"&lt;div onclick=x&gt;block&lt;/div&gt;<br>\n<strong>after</strong>",
 		"&lt;!-- comment --&gt;",
 	)
-	wantNone(t, out, "<img src=x", "<script>o()", "<iframe", "<div onclick", "<b>bold", "<!-- comment", "raw HTML omitted")
+	wantNone(t, out, "<img src=x", "<script>o()", "<iframe", "<div onclick", "<u>bold", "<!-- comment", "raw HTML omitted")
+}
+
+// TestMarkdownInlineTagAllowlist pins the inline tags item fields render:
+// <code>, <b>/<strong>, <i>/<em>, <kbd>, and <br>, written without
+// attributes, become the markdown nodes they name (so they render as their
+// markdown forms do), in any case; <code> content is literal and the others'
+// content is inline markdown. Any other tag, an allowlisted tag carrying an
+// attribute, an unclosed tag, and a mismatched closing tag stay escaped
+// text. A topic body is untouched: it renders HTML as is.
+func TestMarkdownInlineTagAllowlist(t *testing.T) {
+	for name, layout := range layouts() {
+		t.Run(name, func(t *testing.T) {
+			out := mdBoard(t, layout,
+				Item{ID: 1, Class: ClassTechnical, Topic: "t", Title: "use <code>x</code> and <a href=\"https://e.example/\">y</a>", Status: StatusOpen},
+				Item{ID: 2, Class: ClassTechnical, Topic: "t", Title: "<b>x *y*</b> <code>*lit* {{90}} <b></code> <STRONG>s</strong> <i>i</i> <Em>e</EM> <kbd>Ctrl</kbd>", Status: StatusOpen},
+				Item{ID: 3, Class: ClassTechnical, Topic: "t", Title: "one<BR/>two<br>three<br />four", Status: StatusOpen},
+				Item{ID: 4, Class: ClassTechnical, Topic: "t", Title: "<code class=x>c</code> <b style=\"x\">s</b> <i>m</b> </kbd> <b>open <code>never closed", Status: StatusOpen},
+				Item{ID: 5, Class: ClassTechnical, Topic: "t", Title: "<b>see {{90}}</b> <kbd onclick=x>k</kbd> <u>u</u>", Status: StatusOpen},
+			)
+			wantAll(t, out,
+				`<span class="title">use <code>x</code> and &lt;a href=&quot;https://e.example/&quot;&gt;y&lt;/a&gt;</span>`,
+				`<span class="title"><strong>x <em>y</em></strong> <code>*lit* {{90}} &lt;b&gt;</code> <strong>s</strong> <em>i</em> <em>e</em> <kbd>Ctrl</kbd></span>`,
+				`<span class="title">one<br>`+"\n"+`two<br>`+"\n"+`three<br>`+"\n"+`four</span>`,
+				`<span class="title">&lt;code class=x&gt;c&lt;/code&gt; &lt;b style=&quot;x&quot;&gt;s&lt;/b&gt; &lt;i&gt;m&lt;/b&gt; &lt;/kbd&gt; &lt;b&gt;open &lt;code&gt;never closed</span>`,
+				`<span class="title"><strong>see <a href="#item-90">(90)</a></strong> &lt;kbd onclick=x&gt;k&lt;/kbd&gt; &lt;u&gt;u&lt;/u&gt;</span>`,
+			)
+			wantNone(t, out, `<a href="https://e.example`, "<b>", "<b ", "<u>", "onclick=x>", "class=x>", "<kbd onclick")
+		})
+	}
+
+	// Block fields read the same tags, a <br> included; a topic body keeps
+	// its own raw HTML.
+	st := &State{Seq: 2, Topics: []TopicDoc{{Name: "t", Body: `<b class="keep">raw</b>`}}}
+	st.Items = []Item{{ID: 1, Class: ClassPolicy, Topic: "t", Title: "q",
+		Options:        []string{"<code>a</code><br>next", "- <em>item</em>"},
+		Recommendation: "a: <strong>why</strong>",
+		Rationale:      "<i>context</i> <span style=\"x\">s</span>",
+		Status:         StatusOpen}}
+	out := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
+	wantAll(t, out,
+		"<code>a</code><br>\nnext",
+		"<li><em>item</em></li>",
+		"<strong>why</strong>",
+		`<em>context</em> &lt;span style=&quot;x&quot;&gt;s&lt;/span&gt;`,
+		`<b class="keep">raw</b>`,
+	)
 }
 
 // TestMarkdownItemReferences pins {{nn}} inside markdown: it resolves in
