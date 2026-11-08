@@ -3,12 +3,16 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/kang-sw/devenv/internal/wsconfig"
+	"github.com/kang-sw/devenv/internal/wsgit"
 	"github.com/kang-sw/devenv/internal/wsledger"
 	"github.com/kang-sw/devenv/internal/wstracker"
 	"github.com/kang-sw/devenv/internal/wstrackerhost"
@@ -142,6 +146,48 @@ func TestTrackerUpdateRegistersAndJoinsWithSavedProfile(t *testing.T) {
 	}
 	if strings.Contains(f.trackerQuery(t, nil), "team2") {
 		t.Fatalf("a failed register must leave no registry entry")
+	}
+}
+
+// trackerCorruptAfterPush breaks the tracker registry once, after the
+// first push succeeds, so a registration fails after it reached the remote.
+type trackerCorruptAfterPush struct {
+	registry string
+	done     bool
+}
+
+func (r *trackerCorruptAfterPush) RunGit(ctx context.Context, root string, args ...string) ([]byte, error) {
+	out, err := wsgit.ExecRunner{}.RunGit(ctx, root, args...)
+	if err == nil && !r.done && slices.Contains(args, "push") {
+		r.done = true
+		if werr := os.WriteFile(r.registry, []byte("not json"), 0o600); werr != nil {
+			return nil, werr
+		}
+	}
+	return out, err
+}
+
+// A register that fails after its push says what the remote already holds
+// and how to finish, instead of claiming nothing was registered; sending
+// the same command again finishes it.
+func TestTrackerRegisterFailureAfterPushNamesWhatTheRemoteHolds(t *testing.T) {
+	f := newTrackerLeadFixture(t)
+	root, err := wstrackerhost.Root(wsconfig.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := filepath.Join(root, "stores.json")
+	f.s.tracker.opts.Runner = &trackerCorruptAfterPush{registry: registry}
+	register := `<tk:register store="team" member="ada" given="Ada" remote="` + initTrackerRemote(t) + `"/>`
+	text := f.trackerRefused(t, "tracker.update", map[string]any{"commands": register})
+	if !strings.Contains(text, "Nothing was registered on this machine, but the remote already holds the new store, with member ada as its sole admin; send the same tk:register again to finish") {
+		t.Fatalf("a failure after the push must name what the remote holds: %s", text)
+	}
+	if err := os.Remove(registry); err != nil {
+		t.Fatal(err)
+	}
+	if out := f.trackerUpdate(t, register); !strings.Contains(out, "registered team: created, member ada") {
+		t.Fatalf("sending the register again must finish it: %s", out)
 	}
 }
 

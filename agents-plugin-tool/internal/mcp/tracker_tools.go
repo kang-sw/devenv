@@ -633,7 +633,8 @@ func (s *Server) trackerSucceeded(key, text string) string {
 }
 
 // trackerRegisterCommand registers a store from a tk:register command; a
-// failure leaves nothing registered.
+// failure leaves nothing registered on this machine, and says so, and what
+// the remote already holds when the failure came after the push.
 func trackerRegisterCommand(ctx context.Context, h *wstrackerhost.Host, cmd wsxmlcmd.Command) (string, error) {
 	req := wstrackerhost.RegisterRequest{Origin: wstracker.OriginAgent}
 	req.ID, _ = cmd.Attr("store")
@@ -654,6 +655,14 @@ func trackerRegisterCommand(ctx context.Context, h *wstrackerhost.Host, cmd wsxm
 	res, err := h.Register(ctx, req)
 	if errors.Is(err, wsledger.ErrIDTaken) {
 		return "", fmt.Errorf("%s: member %q is taken in that store; register under another member id. Nothing was registered", cmd.Label(), req.Member)
+	}
+	var held *wstrackerhost.RemoteHeldError
+	if errors.As(err, &held) {
+		what := fmt.Sprintf("member %s's join", req.Member)
+		if held.Creator {
+			what = fmt.Sprintf("the new store, with member %s as its sole admin", req.Member)
+		}
+		return "", fmt.Errorf("%s: %w. Nothing was registered on this machine, but the remote already holds %s; send the same tk:register again to finish (this machine's key is already that member, so no new join is written)", cmd.Label(), err, what)
 	}
 	if err != nil {
 		return "", fmt.Errorf("%s: %w. Nothing was registered", cmd.Label(), err)
