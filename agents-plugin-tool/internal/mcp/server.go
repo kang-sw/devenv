@@ -2119,6 +2119,11 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
+		if name == whiteboardPlaybookName {
+			if body, err = appendCommandSyntax(rsrcRoot, body); err != nil {
+				return toolTextResponse(req.ID, "", err)
+			}
+		}
 		autoAck, err := s.ticketReviewAutoAckEnabled(keyStr)
 		if err != nil {
 			return toolTextResponse(req.ID, "", fmt.Errorf("resolve %s: %w", wsconfig.ItemTicketReviewAutoAck, err))
