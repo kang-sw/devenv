@@ -154,8 +154,8 @@ links resolved against the file's own directory, other UTF-8 text as
 copies. A file outside the root offers the copies only. A board image inside
 the root loads through `GET /s/<reply-id>/image?path=<root-relative path>`,
 which serves only an image-extension file under the same containment, and
-any other image renders as its path. On a served page a board's Now field
-renders in a sandboxed `srcdoc` frame (`allow-scripts allow-popups
+any other image renders as its path. On a served page each topic body on the board
+renders in its own sandboxed `srcdoc` frame (`allow-scripts allow-popups
 allow-popups-to-escape-sandbox`, an opaque origin that sends no cookie), so
 its images are inlined as `data:` URLs up to 2 MiB under the same containment
 (`wsdashboard.ImageDataURL`); a larger image falls back to the image route,
@@ -195,6 +195,18 @@ and a session without a fresh adapter snapshot gets 409. `whiteboard.update`'s `
 `http://127.0.0.1:<port>/s/<reply-id>` once the session's last nudge was
 answered, and the page path otherwise.
 
+Pages render in one language end to end, chosen by the server from the first
+byte: the `ws_dashboard_lang` cookie when it names an available language (the
+gear menu's language `<select>` writes it; no cookie, or the empty choice,
+follows the browser), else the best `Accept-Language` match, else English. A
+language is one table file, `internal/wsi18n/tables/<code>.json`, embedded in
+the binary: the file name is the code (matched case-insensitively), its
+`lang.name` key is the name the menu shows, and a new file adds the language
+with no code change. English is the fallback and the key set: another table
+may hold only keys English has, and `internal/wsi18n`'s key sweep fails on a
+key a source names that English lacks or an English key nothing uses. Keys
+that start with `js.` ship to the page scripts as the page's own table.
+
 By default the daemon binds loopback and every route requires a loopback
 Host. LAN mode (`dashboard.lan_enabled`, read from the global config layer
 only and passed as `dashboard --lan`) binds every interface: a request whose
@@ -203,7 +215,7 @@ other request, on every route, needs the LAN access token, which is separate
 from the endpoint file's shutdown token, with one exception: GET and HEAD of
 the shared mermaid script (`/s/<content-hash>.js`, the vendored library under
 a hash name, so it reveals nothing of any session) pass without it, because
-the Now frame's opaque origin loads it with no cookie. The token arrives as `?token=` on the
+a topic body's sandboxed frame, an opaque origin, loads it with no cookie. The token arrives as `?token=` on the
 address the index page shows to a viewer on this machine only; that answer
 sets an HttpOnly cookie, which the page's links, SSE stream, images, and posts
 then carry, so no rendered URL holds it. `/health` reports the mode as `lan`,

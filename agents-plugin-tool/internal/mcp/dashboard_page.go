@@ -16,7 +16,8 @@ import (
 // the served-page link rule (a file link is an action link for the page's
 // link menu, opening the file view inside the session's project root; a
 // board image inside the root is the image route's URL, inlined as a data:
-// URL in the sandboxed Now frame, and path text otherwise), the mail correspondents, and the mailbox history bodies.
+// URL in a topic body's sandboxed frame, and path text otherwise), the mail
+// correspondents, and the mailbox history bodies.
 // Everything here reaches a browser, so no returned field may carry the
 // session key.
 
