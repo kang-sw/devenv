@@ -87,7 +87,11 @@ func assertLinksResolve(t *testing.T, name, pageDir string, links []panelLink, w
 			if err != nil || u.Scheme != "file" {
 				t.Fatalf("%s: link %q is not a file: URL", name, l.href)
 			}
-			target = filepath.FromSlash(u.Path)
+			path := u.Path
+			if len(path) > 2 && path[0] == '/' && path[2] == ':' {
+				path = path[1:] // file:///C:/x names the drive path C:/x
+			}
+			target = filepath.FromSlash(path)
 		} else {
 			if strings.Contains(l.href, ":") || filepath.IsAbs(l.href) {
 				t.Fatalf("%s: link %q is not a relative path", name, l.href)

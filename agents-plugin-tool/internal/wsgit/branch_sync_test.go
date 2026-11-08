@@ -181,8 +181,10 @@ func TestWorkingTreeCountsUnmerged(t *testing.T) {
 		t.Fatal(err)
 	}
 	gitIn(t, work, "commit", "-q", "-am", "main")
+	// gitIn's identity env is needed here too: without a committer identity
+	// git refuses the merge before it writes any conflict.
 	cmd := exec.Command("git", "-C", work, "merge", "other")
-	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null")
+	cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.com", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.com", "GIT_CONFIG_GLOBAL=/dev/null")
 	_ = cmd.Run() // conflicts by design
 	c, ok := WorkingTreeCounts(context.Background(), nil, work)
 	if want := (TreeCounts{Modified: 1}); !ok || c != want {

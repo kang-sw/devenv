@@ -235,7 +235,10 @@ func TestGitPushRoute(t *testing.T) {
 	}
 	gitEvent("two ahead", func(h string) bool { return strings.Contains(h, `<b class="up">↑2</b>`) })
 
-	if code, _, raw := postJSON(t, route, f.base, ""); code != http.StatusNoContent {
+	// The push runs git in the handler, which outlasts testClient's 500 ms
+	// on a loaded Windows runner (seen on CI).
+	pushClient := &http.Client{Timeout: 30 * time.Second, Transport: &http.Transport{Proxy: nil}}
+	if code, _, raw := postJSONWith(t, pushClient, route, f.base, ""); code != http.StatusNoContent {
 		t.Fatalf("push = %d %s, want 204", code, raw)
 	}
 	if got, want := revParse(t, origin, "main"), revParse(t, work, "HEAD"); got != want {
@@ -243,7 +246,7 @@ func TestGitPushRoute(t *testing.T) {
 	}
 	gitEvent("in sync", func(h string) bool { return strings.Contains(h, `class="gh ok"`) && !strings.Contains(h, "gh-ab") })
 
-	code, _, raw := postJSON(t, route, f.base, "")
+	code, _, raw := postJSONWith(t, pushClient, route, f.base, "")
 	if code != http.StatusConflict || !strings.Contains(raw, "nothing to push") {
 		t.Fatalf("push with nothing ahead = %d %q, want 409 nothing to push", code, raw)
 	}

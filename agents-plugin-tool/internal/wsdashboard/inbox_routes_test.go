@@ -17,6 +17,13 @@ import (
 // returns the status, the response, and its body.
 func postJSON(t *testing.T, url, origin, body string) (int, http.Header, string) {
 	t.Helper()
+	return postJSONWith(t, testClient(), url, origin, body)
+}
+
+// postJSONWith is postJSON through client, for a route whose handler does
+// slow work (a real git push) that testClient's timeout would cut short.
+func postJSONWith(t *testing.T, client *http.Client, url, origin, body string) (int, http.Header, string) {
+	t.Helper()
 	req, err := http.NewRequest(http.MethodPost, url, strings.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
@@ -25,7 +32,7 @@ func postJSON(t *testing.T, url, origin, body string) (int, http.Header, string)
 	if origin != "" {
 		req.Header.Set("Origin", origin)
 	}
-	resp, err := testClient().Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}

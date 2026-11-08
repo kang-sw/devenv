@@ -85,7 +85,7 @@ func TestClaudeArgsFromProfile(t *testing.T) {
 	if got, _ := flagValue(args, "--tools"); got != "Read,Bash" {
 		t.Fatalf("--tools should hold each base tool once: %q", got)
 	}
-	for flag, want := range map[string]string{"--append-system-prompt-file": "/sess/instructions.md", "--model": "sonnet", "--effort": "high", "--resume": "sess-1", "--plugin-dir": "/work/plug"} {
+	for flag, want := range map[string]string{"--append-system-prompt-file": "/sess/instructions.md", "--model": "sonnet", "--effort": "high", "--resume": "sess-1", "--plugin-dir": filepath.Join("/work", "plug")} {
 		if got, _ := flagValue(args, flag); got != want {
 			t.Fatalf("%s = %q, want %q", flag, got, want)
 		}
@@ -310,19 +310,14 @@ func TestClaudeMapperTurnError(t *testing.T) {
 // its command line (NUL-separated: the setting-sources value is empty),
 // working directory, and environment.
 func TestClaudeBackendStart(t *testing.T) {
-	out := t.TempDir()
-	fake := filepath.Join(t.TempDir(), "claude")
-	script := "#!/bin/sh\nprintf '%s\\0' \"$@\" > " + out + "/args\npwd -P > " + out + "/cwd\nenv > " + out + "/env\ntouch " + out + "/ready\ncat > /dev/null\n"
-	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	fake, out, outEnv := standin(t)
 	root := t.TempDir()
 	spec := claudeSpec(t, `{"backend":"claude","tools":["Read","Bash(git status)"],"ws_tools":["tickets.query"]}`)
 	spec.Root, spec.Dir = root, t.TempDir()
 	spec.Model, spec.SessionID, spec.Instructions = "opus", "sess-1", filepath.Join(spec.Dir, "instructions.md")
 	spec.WSMCP = &MCPCommand{Command: "/bin/ws-mcp"}
 	spec.Env = []string{"PATH=" + os.Getenv("PATH"), "CLAUDECODE=1", "CLAUDE_CODE_ENTRYPOINT=cli",
-		"CLAUDE_CONFIG_DIR=/cfg", "WS_MAILBOX_ADDRESS=lead", "HOME=/home/u"}
+		"CLAUDE_CONFIG_DIR=/cfg", "WS_MAILBOX_ADDRESS=lead", "HOME=/home/u", outEnv}
 	proc, err := ClaudeBackend{Command: fake}.Start(context.Background(), spec)
 	if err != nil {
 		t.Fatal(err)
@@ -351,7 +346,7 @@ func TestClaudeBackendStart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := strings.Split(strings.TrimSuffix(read("args"), "\x00"), "\x00")
+	got := strings.Split(read("args"), "\x00")
 	if !slices.Equal(got, want) {
 		t.Fatalf("args = %q, want %q", got, want)
 	}
@@ -364,9 +359,8 @@ func TestClaudeBackendStart(t *testing.T) {
 	if got[0] != "-p" || !slices.Contains(got, "--strict-mcp-config") {
 		t.Errorf("print mode with a strict MCP config: %q", got)
 	}
-	wantRoot, _ := filepath.EvalSymlinks(root)
-	if cwd := strings.TrimSpace(read("cwd")); cwd != wantRoot {
-		t.Fatalf("claude runs at the working root: %q, want %q", cwd, wantRoot)
+	if cwd := read("cwd"); !sameDir(cwd, root) {
+		t.Fatalf("claude runs at the working root: %q, want %q", cwd, root)
 	}
 	env := strings.Split(read("env"), "\n")
 	for _, kv := range []string{"CLAUDE_CONFIG_DIR=/cfg", "HOME=/home/u"} {
@@ -394,7 +388,7 @@ func TestClaudeBackendStart(t *testing.T) {
 // answers every control_request: success, except set_model "bogus" (a
 // plain error) and set_model "legacy" (an unsupported subtype).
 const claudeResponder = `import sys, json
-log = open(sys.argv[1], "a")
+log = open(sys.argv[1], "a", newline="")
 for line in sys.stdin:
     log.write(line); log.flush()
     d = json.loads(line)
@@ -413,10 +407,7 @@ for line in sys.stdin:
 // the interrupt and set_model control requests, and how an error answer maps
 // (an unsupported one to ErrUnsupported, which makes the runner restart).
 func TestClaudeProcessControls(t *testing.T) {
-	python, err := exec.LookPath("python3")
-	if err != nil {
-		t.Skip("python3 not available")
-	}
+	python := lookPython(t)
 	logPath := filepath.Join(t.TempDir(), "input.jsonl")
 	sp, err := startStreamProcess(exec.Command(python, "-I", "-c", claudeResponder, logPath),
 		newClaudeMapper(claudeSpec(t, `{"backend":"claude"}`)), claudeProtocol{})

@@ -3,6 +3,7 @@ package wsdashboard
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -413,13 +414,14 @@ func TestNudgeRoute(t *testing.T) {
 		d.Handler().ServeHTTP(rec, req)
 		return rec.Code
 	}
-	if code := post("127.0.0.1", `{"reply_id": "alpha", "project": "`+project+`", "extra": [1]}`); code != http.StatusNoContent {
+	projectJSON, _ := json.Marshal(project) // a Windows path's backslashes need escaping
+	if code := post("127.0.0.1", `{"reply_id": "alpha", "project": `+string(projectJSON)+`, "extra": [1]}`); code != http.StatusNoContent {
 		t.Fatalf("nudge with an unknown field = %d, want 204", code)
 	}
 	if code := post("127.0.0.1", `{not json`); code != http.StatusBadRequest {
 		t.Fatalf("malformed nudge = %d, want 400", code)
 	}
-	if code := post("evil.example", `{"reply_id": "alpha", "project": "`+project+`"}`); code != http.StatusForbidden {
+	if code := post("evil.example", `{"reply_id": "alpha", "project": `+string(projectJSON)+`}`); code != http.StatusForbidden {
 		t.Fatalf("non-loopback Host nudge = %d, want 403", code)
 	}
 	req := httptest.NewRequest(http.MethodGet, "/nudge", nil)

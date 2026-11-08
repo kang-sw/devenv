@@ -49,7 +49,11 @@ func TestWhiteboardMarkdownFileLinks(t *testing.T) {
 	embed := resultLine(t, f.update(t, embedDirCommand(host)), "embed: ")
 	page := readWhiteboardPage(t, filepath.Join(host, embed))
 	fileURL := func(p string) string {
-		return (&url.URL{Scheme: "file", Path: filepath.ToSlash(p)}).String()
+		p = filepath.ToSlash(p)
+		if !strings.HasPrefix(p, "/") {
+			p = "/" + p // a Windows drive path: file:///C:/...
+		}
+		return (&url.URL{Scheme: "file", Path: p}).String()
 	}
 	for _, want := range []string{
 		`<img src="` + fileURL(filepath.Join(f.root, "img", "shot one.png")) + `" alt="shot">`,
