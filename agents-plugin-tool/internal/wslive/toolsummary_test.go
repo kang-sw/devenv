@@ -137,9 +137,9 @@ func TestToolsRowIsTheLeadsAndCountsEachBatchOnce(t *testing.T) {
 func TestToolsRowCountsCallsPerTool(t *testing.T) {
 	st := NewState(ownerKey)
 	mustApply(t, st, Event{Kind: KindAgent, Batches: batchesJSON(t,
-		finishedAt(1, 0, 10, 4, 0, "Bash"),
-		finishedAt(2, 10, 20, 5, 1, "Read", "Bash"),
-		finishedAt(3, 20, 30, 2, 0),
+		finishedAt(1, 100, 110, 4, 0, "Bash"),
+		finishedAt(2, 110, 120, 5, 1, "Read", "Bash"),
+		finishedAt(3, 120, 130, 2, 0),
 	)}, 40)
 	got := st.Snapshot(41).Lead.ToolGap
 	want := &ToolSummary{
@@ -341,5 +341,28 @@ func TestFinishedBatchesPastTheWindowCountOnce(t *testing.T) {
 	mustApply(t, st, Event{Kind: KindAgent, Batches: batchesJSON(t, huge...)}, 130)
 	if got := st.Snapshot(131).Lead.ToolGap.Calls; got != 10+BatchWireCap {
 		t.Fatalf("gap calls after an oversized list = %d, want %d", got, 10+BatchWireCap)
+	}
+}
+
+// A batch whose start is unknown (zero) has no measurable duration: it must
+// not become an epoch-to-end span, in the batch or the gap, and the ring keeps
+// what the snapshot showed.
+func TestToolsRowTreatsAZeroStartAsUnknown(t *testing.T) {
+	st := NewState(ownerKey)
+	unknown := finishedAt(1, 0, 5_000_000, 1, 0, "Bash")
+	mustApply(t, st, Event{Kind: KindAgent, Batches: batchesJSON(t, unknown)}, 20)
+	gap := st.Snapshot(21).Lead.ToolGap
+	if gap == nil || gap.DurationMs != 0 || gap.Batches[0].DurationMs != 0 {
+		t.Fatalf("gap with an unknown start = %+v", gap)
+	}
+	// A known start in a later batch still bounds the group from there.
+	mustApply(t, st, Event{Kind: KindAgent, Batches: batchesJSON(t, unknown, finishedAt(2, 1000, 1400, 1, 0, "Bash"))}, 30)
+	gap = st.Snapshot(31).Lead.ToolGap
+	if gap.DurationMs != 5_000_000-1000 || gap.Batches[0].DurationMs != 0 || gap.Batches[1].DurationMs != 400 {
+		t.Fatalf("gap with one known start = %+v", gap)
+	}
+	res := mustApply(t, st, Event{Kind: KindUser, Text: "x"}, 40)
+	if got := res.Ring[0].Tools.DurationMs; got != 5_000_000-1000 {
+		t.Fatalf("persisted duration = %d", got)
 	}
 }

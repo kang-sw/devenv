@@ -1,6 +1,9 @@
 package wswhiteboard
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 func topicNames(st *State) []string {
 	var names []string
@@ -240,5 +243,22 @@ func TestEmbedShowsABodyOpenOnlyWhenChanged(t *testing.T) {
 	mustApply(t, st, `<wb:close topic="a"/>`)
 	if tv := topicView(t, st, LayoutEmbed, "a"); tv.DocOpen(true) || !tv.Closed {
 		t.Fatalf("closed topic on the embed = %+v", tv)
+	}
+}
+
+// One update that records the user's answer and writes a topic body shares one
+// sequence number; the user answered before the body existed, so the body is
+// still unread and ranks like an open acknowledgement. The settled topic is
+// touched in the same batch so only the rank, not recency, can put the body
+// above it.
+func TestBodyWrittenInTheAnswerBatchRanksAsUnread(t *testing.T) {
+	st := &State{}
+	out := mustApply(t, st, addXML(ClassTechnical, "settled", "q"))
+	mustApply(t, st, fmt.Sprintf(`<wb:answer id="%d" value="ok">fine</wb:answer>`+"\n"+topicXML("notes", "new context"), out.IDs[0]))
+	if st.AnswerSeq != st.Seq {
+		t.Fatalf("AnswerSeq = %d, want the batch's render %d", st.AnswerSeq, st.Seq)
+	}
+	if !rankedAbove(t, st, "notes", "settled") {
+		t.Fatalf("a body written with the answer should outrank a settled topic: %v", topicNames(st))
 	}
 }

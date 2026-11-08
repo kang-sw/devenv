@@ -4,6 +4,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The whiteboard's commands_test.go pins the language rules through the
@@ -100,5 +101,46 @@ func TestValueChecks(t *testing.T) {
 	}
 	if !slices.Equal(p.List, want) {
 		t.Fatalf("problems =\n%s\nwant\n%s", strings.Join(p.List, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// parseWithin fails the test rather than hanging it when Parse does not
+// return: the loop this guards against never ends and grows the problem list.
+func parseWithin(t *testing.T, s string) []string {
+	t.Helper()
+	type result struct{ problems []string }
+	done := make(chan result, 1)
+	go func() {
+		p := &Problems{}
+		Parse(p, testGrammar, s)
+		done <- result{p.List}
+	}()
+	select {
+	case r := <-done:
+		return r.problems
+	case <-time.After(2 * time.Second):
+		t.Fatalf("Parse(%q) did not return", s)
+		return nil
+	}
+}
+
+// A closing tag cut short (no '>') is reported once, with its line, and
+// reading ends, whether the cut tag closes a container or sits at top level.
+func TestTruncatedClosingTagEndsReading(t *testing.T) {
+	for name, in := range map[string]string{
+		"container closing without >":     "<tr:set id=\"1\">\n<tr:name>x</tr:name>\n</tr:set",
+		"container closing cut at prefix": "<tr:set id=\"1\">\n<tr:name>x</tr:name>\n</tr:",
+		"top-level closing without >":     "<tr:drop id=\"1\"/></tr:set",
+	} {
+		problems := parseWithin(t, in)
+		var cut []string
+		for _, p := range problems {
+			if strings.Contains(p, "a closing tag is not closed with '>'") {
+				cut = append(cut, p)
+			}
+		}
+		if len(cut) != 1 || !strings.HasPrefix(cut[0], "line ") {
+			t.Errorf("%s: problems = %q, want the unclosed closing tag reported once with its line", name, problems)
+		}
 	}
 }
