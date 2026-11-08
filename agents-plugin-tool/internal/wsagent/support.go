@@ -231,7 +231,6 @@ func (s *Support) harnesses() []SupportHarness {
 func (s *Support) listChoices(ctx context.Context, hs []SupportHarness) {
 	s.choicesMu.Lock()
 	defer s.choicesMu.Unlock()
-	now := s.opts.Now()
 	for i := range hs {
 		h := &hs[i]
 		if !h.Available {
@@ -241,13 +240,17 @@ func (s *Support) listChoices(ctx context.Context, hs []SupportHarness) {
 		if !ok {
 			continue
 		}
-		if c, ok := s.cache[h.Harness]; ok && c.fresh(now) {
+		if c, ok := s.cache[h.Harness]; ok && c.fresh(s.opts.Now()) {
 			h.Models, h.Efforts, h.Error = c.models, c.efforts, c.err
 			continue
 		}
 		lctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), choicesTimeout)
 		models, efforts, err := cl.Choices(lctx)
 		cancel()
+		// Stamped when the listing ended, not when it began: a listing that
+		// hung until choicesTimeout would otherwise cache an entry already
+		// that old.
+		now := s.opts.Now()
 		if efforts != nil {
 			h.Efforts = efforts
 		}

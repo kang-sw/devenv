@@ -179,8 +179,6 @@ func TestReadersIgnoreUnknownFieldsAndStrayFiles(t *testing.T) {
 	}
 }
 
-// TestDrainAndCancelRaceHasOneWinner runs a drain and a cancel against one
-// held entry many times: exactly one of them gets it, never both.
 // TestConcurrentClaimHasOneWinner races claimers on one entry directly, the
 // exclusive rename every state change starts with: exactly one holds it, its
 // claim file keeps the entry whole, and every other claimer gets ErrGone.
@@ -231,6 +229,8 @@ func TestConcurrentClaimHasOneWinner(t *testing.T) {
 	}
 }
 
+// TestDrainAndCancelRaceHasOneWinner runs a drain and a cancel against one
+// held entry many times: exactly one of them gets it, never both.
 func TestDrainAndCancelRaceHasOneWinner(t *testing.T) {
 	for i := 0; i < 300; i++ {
 		dir := Dir(t.TempDir())

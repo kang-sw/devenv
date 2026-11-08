@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kang-sw/devenv/internal/wsgit"
 )
 
 // pushRepos makes a bare origin and a clone of it whose main is ahead by
@@ -85,6 +87,77 @@ func TestPushGitRefuses(t *testing.T) {
 	}
 	if _, err := pushGit(t.TempDir()); err == nil || !strings.Contains(err.Error(), "not a git repository") {
 		t.Errorf("non-repository: err = %v", err)
+	}
+}
+
+// treeUpstream points root's main at a local upstream whose ref names a tree:
+// git resolves the upstream's name, but `rev-list HEAD...@{upstream}` fails,
+// and with remote "." no fetch repairs the ref.
+func treeUpstream(t *testing.T, root string) {
+	t.Helper()
+	gitRun(t, root, "update-ref", "refs/remotes/origin/main", revParse(t, root, "HEAD^{tree}"))
+	gitRun(t, root, "config", "branch.main.remote", ".")
+	gitRun(t, root, "config", "branch.main.merge", "refs/remotes/origin/main")
+}
+
+// TestGitActionsSurfaceAFailedCount: a failed ahead/behind count leaves both
+// counts 0; push and pull fail with git's reason rather than reading it as
+// nothing to push or nothing to pull.
+func TestGitActionsSurfaceAFailedCount(t *testing.T) {
+	work := filepath.Join(t.TempDir(), "work")
+	pushRepos(t, work, 1)
+	treeUpstream(t, work)
+	if refusal, err := pushGit(work); refusal != pushRan || err == nil || !strings.Contains(err.Error(), "symmetric difference") {
+		t.Errorf("push: pushGit = %v, %v; want git's count failure", refusal, err)
+	}
+	if outcome, err := pullGit(work); outcome != pullRan || err == nil || !strings.Contains(err.Error(), "symmetric difference") {
+		t.Errorf("pull: pullGit = %v, %v; want git's count failure", outcome, err)
+	}
+}
+
+// deadlineReads records how far off each branch read's deadline was.
+type deadlineReads struct {
+	inner wsgit.Runner
+	left  []time.Duration
+}
+
+func (r *deadlineReads) RunGit(ctx context.Context, root string, args ...string) ([]byte, error) {
+	if d, ok := ctx.Deadline(); ok {
+		r.left = append(r.left, time.Until(d))
+	} else {
+		r.left = append(r.left, -1)
+	}
+	return r.inner.RunGit(ctx, root, args...)
+}
+
+// TestGitActionsRunUnderTheActionTimeout: push's and pull's branch reads run
+// under a context bounded by gitActionTimeout, not the badge's read bound.
+func TestGitActionsRunUnderTheActionTimeout(t *testing.T) {
+	work := filepath.Join(t.TempDir(), "work")
+	pushRepos(t, work, 0)
+	var seen *deadlineReads
+	old := actionReads
+	actionReads = func(run *gitBadgeRunner) wsgit.Runner {
+		seen = &deadlineReads{inner: run}
+		return seen
+	}
+	t.Cleanup(func() { actionReads = old })
+	for name, action := range map[string]func() error{
+		"push": func() error { _, err := pushGit(work); return err },
+		"pull": func() error { _, err := pullGit(work); return err },
+	} {
+		seen = nil
+		if err := action(); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if seen == nil || len(seen.left) == 0 {
+			t.Fatalf("%s ran no branch read", name)
+		}
+		for _, left := range seen.left {
+			if left <= gitReadTimeout || left > gitActionTimeout {
+				t.Fatalf("%s: a read had %v left, want just under %v", name, left, gitActionTimeout)
+			}
+		}
 	}
 }
 

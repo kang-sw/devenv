@@ -253,7 +253,8 @@ func (d *Daemon) handleWorktreeCleanup(w http.ResponseWriter, r *http.Request, r
 
 // text is the pool as the cleanup message carries it: plain text for the
 // session, in the shape of worktree.list's text, at most limit bytes plus a
-// last "... N more worktrees" line for the worktrees it leaves out.
+// last "... N more worktrees" line (singular for one) for the worktrees it
+// leaves out.
 func (p WorktreePool) text(limit int) string {
 	var out strings.Builder
 	fmt.Fprintf(&out, "pool: %s\n", p.Pool)
@@ -299,7 +300,11 @@ func (p WorktreePool) text(limit int) string {
 			b.WriteString("  size: unknown\n")
 		}
 		if out.Len()+b.Len() > limit {
-			fmt.Fprintf(&out, "\n... %d more worktrees\n", len(p.Worktrees)-i)
+			if n := len(p.Worktrees) - i; n == 1 {
+				out.WriteString("\n... 1 more worktree\n")
+			} else {
+				fmt.Fprintf(&out, "\n... %d more worktrees\n", n)
+			}
 			break
 		}
 		out.WriteString(b.String())

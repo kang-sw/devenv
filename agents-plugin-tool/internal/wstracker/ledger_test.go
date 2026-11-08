@@ -8,9 +8,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/kang-sw/devenv/internal/wsgit"
 	"github.com/kang-sw/devenv/internal/wsledger"
 )
 
@@ -268,5 +270,53 @@ func TestRefreshAfterMoveToFreshCloneHoldsNoDuplicate(t *testing.T) {
 		if strings.HasPrefix(id, "bo.c1#") {
 			t.Fatalf("the view still holds the dropped old-stream item %s", id)
 		}
+	}
+}
+
+// failSecondOpen fails the second `git version`: every ledger open checks
+// the git version once, so the first open (wsledger.Register) runs and the
+// reopen that installs the veto fails.
+type failSecondOpen struct {
+	mu       sync.Mutex
+	versions int
+}
+
+func (r *failSecondOpen) RunGit(ctx context.Context, root string, args ...string) ([]byte, error) {
+	if len(args) == 1 && args[0] == "version" {
+		r.mu.Lock()
+		r.versions++
+		n := r.versions
+		r.mu.Unlock()
+		if n == 2 {
+			return nil, errors.New("reopen broke")
+		}
+	}
+	return wsgit.ExecRunner{}.RunGit(ctx, root, args...)
+}
+
+// TestRegisterReopenFailureIsPushed: wsledger.Register succeeds, so its push
+// landed; a failure of the reopen with the veto installed is then a
+// *wsledger.PushedError carrying the store's genesis.
+func TestRegisterReopenFailureIsPushed(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	remote := filepath.Join(root, "remote.git")
+	if out, err := exec.Command("git", "init", "--quiet", "--bare", remote).CombinedOutput(); err != nil {
+		t.Fatalf("init remote: %v: %s", err, out)
+	}
+	clock := &ledgerClock{now: time.Date(2026, 11, 8, 9, 0, 0, 0, time.UTC)}
+	opts := wsledger.Options{Dir: filepath.Join(root, "stores", "ada"), Member: "ada", Name: "ada",
+		KeyDir: filepath.Join(root, "keys", "ada"), CloneID: "c1", Clock: clock, Runner: &failSecondOpen{}}
+	l, err := Register(ctx, opts, remote)
+	if err == nil {
+		l.Close()
+		t.Fatal("Register with a failing reopen returned no error")
+	}
+	var pushed *wsledger.PushedError
+	if !errors.As(err, &pushed) || !strings.Contains(err.Error(), "reopen broke") {
+		t.Fatalf("a reopen failure after the push = %v, want a PushedError", err)
+	}
+	if len(pushed.Genesis) == 0 {
+		t.Fatal("the PushedError carries no genesis")
 	}
 }

@@ -12,7 +12,8 @@
 // depends on a count has a ".one" and an ".other" form (Plural); a language
 // without plural forms gives both the same text. A key a non-English table
 // lacks falls back to the English table; a key the English table lacks
-// renders as the key itself, which keys_test.go keeps from shipping.
+// renders as the key itself. keys_test.go keeps both from shipping: every
+// table holds every English key.
 package wsi18n
 
 import (
