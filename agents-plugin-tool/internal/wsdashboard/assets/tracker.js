@@ -1,6 +1,7 @@
 // Tracker renderer: the shared view of tracker stores - a pull-down drawer with
 // one handle per store, the store page (route #/<storeId>), the item window, the
-// quick switcher, and the action dialogs. It renders nothing until the host page
+// quick switcher, the item context menu with its inline inputs, and the store-wide
+// dialogs (profile, admin, "+ store"). It renders nothing until the host page
 // calls WsTracker.mount(adapter, opts). The adapter is its only data source: the
 // renderer reads the plain view-state object a store serves and writes only by
 // dispatching events, so the same file runs over any data layer serving that JSON.
@@ -26,7 +27,8 @@
 //                        done() exactly once, possibly synchronously, after the
 //                        check landed and view(id) shows what it brought
 //   sync(id, done)       the apply path: panel collapse, leaving the page, switching
-//                        to another store while one is open, the Sync button.
+//                        to another store while one is open, the status ribbon's
+//                        apply button.
 //                        done(report), report = {noRemote, offline, closed, pushed,
 //                        received, unpushed, error}; absent fields read as
 //                        false / 0 / empty
@@ -63,7 +65,8 @@
 //                        side tabs. icon is an SVG <use> href resolving in the host
 //                        page; after is the tab key it follows (absent: last); make
 //                        returns a card spec (h.card)
-//     syncTools(id, view, h)  -> extra HTML at the end of the sync line
+//     syncTools(id, view, h)  -> extra HTML at the end of the store status popover
+//                        (opened from the Items card's status ribbon)
 //     teamTools(id, view, h)  -> extra HTML in the Team tab's toolbar
 //     qsActions(id, view, q)  -> [{key, icon, title, hint, tag}]: quick-switcher
 //                        actions for query q; picking one opens dialogs[key], else
@@ -91,7 +94,7 @@
 //                    height, recently-closed fold, tree folds); default "ws.tracker."
 //
 // The renderer creates its own nodes (tkdrawer, tkclip, tkbody, tkhandles, tkpage,
-// tkwin, tkdlg, tktoast, tktip, tkqs, ...); each root carries the class tk, which
+// tkwin, tkdlg, tkmenu, tktoast, tktip, tkqs, ...); each root carries the class tk, which
 // scopes tracker.css. Its handle row sits at the top right, left of the host's own
 // handle: right = --dpad + --drhw (the host's handle width) + 6px. The renderer sets
 // --tkhw on the root element to the row's width plus that gap (0 when the row is
@@ -147,6 +150,8 @@
   // Live, doing or blocked, and no status write for this many days: "stale" (the
   // view state carries the flag; the number is for the text).
   var STALE_DAYS = 3;
+  // the send / save chord's name: Cmd+Enter on Apple platforms, else Ctrl+Enter
+  var MAC = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || '');
 
   // Status icons: every status differs by shape as well as colour, so it reads
   // without colour too, and carries one short description for the tooltip. Shapes
@@ -207,6 +212,10 @@
     wfold: {},            // "store|item id" -> true | false: a node of the item window's subtree open or folded (page lifetime; absent: the default)
     focus: null,          // { ev: event id, flash: true until its first paint } the item window scrolls to and marks; null: nothing
     sel: null,            // the row selected by a tap: it shows the same actions and details a hover shows
+    nrow: {},             // store -> { val, kind } while the Items list shows its "+ New" input row
+    sub: null,            // { item: parent, rk: the row it sits under, val } while an "add subtask" input row shows
+    iedit: null,          // { item, title, body, project } while the item window edits the item in place
+    cedit: null,          // { cid, body } while an own comment is edited in place
     act: { family: 'all', member: 'all', flagged: false, conc: false },
     kind: 'all', status: 'open'
   };
@@ -508,9 +517,8 @@
   }
 
   // Row actions: every action the viewer may take on the item, from the view state, as
-  // descriptors [act, icon, label, data, go]. A row draws them as icon buttons; the item
-  // window draws the same list as labelled buttons. Each dispatches through the
-  // same data-act handlers.
+  // descriptors [act, icon, label, data, go]. The context menu (menuHtml) draws them; each
+  // dispatches through the same data-act handlers.
   function dataAttrs(data) {
     var d = '';
     Object.keys(data || {}).forEach(function (k) { d += attr(k, data[k]); });
@@ -523,14 +531,8 @@
     var out = [];
     if (!it || it.hidden) return out;
     var v = VS.viewer.member, recs = it.assignments.map(A), id = it.id;
-    var mineR = recs.filter(function (r) { return r.to === v && r.state === 'live'; })[0];
     if (recs.some(function (r) { return r.to === v && r.state === 'pending'; }))
-      out.push(['accept', 'accept', wsT("js.tk.act.accept"), { item: id }, 1], ['note', 'decline', wsT("js.tk.act.decline"), { item: id, op: 'item.decline' }], ['open', 'chat', wsT("js.tk.act.discuss"), { item: id }]);
-    if (mineR && mineR.status !== 'done') {
-      out.push(['status', 'status', wsT("js.tk.act.status"), { item: id }]);
-      if (mineR.status !== 'awaiting') out.push(['close', 'close', wsT("js.tk.act.close"), { item: id }]);
-      out.push(['split', 'split', wsT("js.tk.act.split"), { item: id }], ['handoff', 'handoff', wsT("js.tk.act.handoff"), { item: id }]);
-    }
+      out.push(['accept', 'accept', wsT("js.tk.act.accept"), { item: id }, 1], ['note', 'decline', wsT("js.tk.act.decline"), { item: id, op: 'item.decline' }]);
     recs.forEach(function (r) {
       var lead = VS.members[r.to] && VS.members[r.to].leads[0];
       if (r.state === 'live' && r.by === v && r.status === 'awaiting')
@@ -538,10 +540,30 @@
       if (r.state === 'live' && r.accepted && lead === v) out.push(['note', 'return', wsT("js.tk.act.return", nm(r.to)), { item: id, who: r.to, op: 'item.return' }]);
       if (r.state === 'pending' && (r.by === v || r.sender === v) && r.to !== v) out.push(['unassign', 'withdraw', wsT("js.tk.act.withdraw", nm(r.to)), { item: id, who: r.to }]);
     });
-    if (it.author === v && it.kind !== 'topic' && !holders(it).length) out.push(['assign', 'assign', wsT("js.tk.act.assign"), { item: id }]);
     return out;
   }
-  function actsFor(it) { return actList(it).map(function (x) { return ia(x[0], x[1], x[2], x[3], x[4] ? 'go' : ''); }).join(''); }
+  // The viewer's own live assignment on the item, if any.
+  function mineLive(it) { var v = VS.viewer.member; return it.assignments.map(A).filter(function (r) { return r.to === v && r.state === 'live'; })[0]; }
+  // The creator edits and hides an item; an admin may too once the creator was removed.
+  function canEdit(it) {
+    var v = VS.viewer.member, gone = VS.viewer.admin && VS.members[it.author] && VS.members[it.author].removed;
+    return (it.author === v || !!gone) && !it.hidden;
+  }
+  // A subtask's parent is assigned to or created by its author.
+  function canSplit(it) { return (!!mineLive(it) || it.author === VS.viewer.member) && it.kind !== 'topic' && !it.hidden; }
+  function canStatus(it) { var r = !it.hidden && mineLive(it); return !!r && r.status !== 'done'; }
+  // The "⋯" button every menu-capable row, card, entry, and the item window header carries.
+  function moreBtn(id, cls, tab) {
+    return '<button type="button" class="ia mbtn' + (cls ? ' ' + cls : '') + '"' + attr('act', 'menu') + attr('item', id) + ' aria-haspopup="menu" aria-label="' + esc(wsT("js.tk.menu.more")) + '"' +
+      tipAttr(wsT("js.tk.menu.more")) + (tab ? '' : ' tabindex="-1"') + '><svg class="i"><use href="#tki-more"/></svg></button>';
+  }
+  // A status icon: a button opening the menu's status part when the viewer can set the
+  // item's status, else the plain icon.
+  // rec: the assignment record a row shows; another member's record keeps the plain icon.
+  function stBtn(s, it, rec) {
+    if (!it || !canStatus(it) || (rec && rec.to !== VS.viewer.member)) return stIcon(s);
+    return '<button type="button" class="sti stb"' + attr('act', 'mstatus') + attr('item', it.id) + ' tabindex="-1" aria-haspopup="menu" aria-label="' + esc(stDesc(s)) + '"' + tipAttr(stDesc(s)) + '>' + SI.svg(s) + '</button>';
+  }
 
   // The detail overlay: what the row leaves out by default.
   function detailsHtml(it, r, extra) {
@@ -563,15 +585,15 @@
       (r ? ' &middot; ' + wsT("js.tk.row.updated", esc(fmtTs(r.lastUpdate || r.ts))) : '') + (f ? ' &middot; ' + wsT("js.tk.row.nflagged", f) : '') + (it.concurrent ? ' &middot; ' + wsT("js.tk.row.nconcurrent", it.concurrent) : '') + '</span>');
     return d.map(function (x) { return '<div>' + x + '</div>'; }).join('');
   }
-  // o: { rk (unique row key in the drawer), item, rec?, more?, depth?, acts?, closed? (greyed: done, in the "recently closed" section or kept in the tree),
+  // o: { rk (unique row key in the drawer), item, rec?, more?, depth?, closed? (greyed: done, in the "recently closed" section or kept in the tree),
   //      ctx? (a context row of a tree: an ancestor of a match, not a match itself), tw? (the tree's fold control, in place of the depth arrow), tsub? (the folded "N subtasks" chip) }
   // The row is the one row component every list and tree draws; data-item carries the item id.
   function irow(o) {
-    var it = VS.items[o.item], r = o.rec, st = stKey(it, r), acts = o.acts != null ? o.acts : actsFor(it);
+    var it = VS.items[o.item], r = o.rec, st = stKey(it, r);
     return '<div class="irow' + (ui.sel === o.rk ? ' sel' : '') + (o.closed ? ' closed' : '') + (o.ctx ? ' ctx' : '') + '" tabindex="0"' + attr('item', it.id) + attr('rk', o.rk) + (r ? attr('rec', r.id) : '') +
-      (o.depth ? ' style="--ind:' + o.depth + '"' : '') + '><div class="ir-main">' + (o.tw != null ? o.tw : o.depth ? '<span class="ind">&#8627;</span>' : '') + stIcon(st) +
+      (o.depth ? ' style="--ind:' + o.depth + '"' : '') + '><div class="ir-main">' + (o.tw != null ? o.tw : o.depth ? '<span class="ind">&#8627;</span>' : '') + stBtn(st, it, r) +
       '<a class="title" href="#" tabindex="-1"' + attr('item', it.id) + '>' + esc(it.title) + '</a>' + (o.tsub || '') + warnHtml(it) + dotHtml(it) + '<span class="grow"></span>' +
-      (acts ? '<span class="ir-acts">' + acts + '</span>' : '') + whoHtml(it) + priHtml(it) + dueHtml(it, st) + '</div>' +
+      '<span class="ir-acts">' + moreBtn(it.id, '', true) + '</span>' + whoHtml(it) + priHtml(it) + dueHtml(it, st) + '</div>' +
       '<div class="ir-more">' + detailsHtml(it, r, o.more) + '</div></div>';
   }
   function sub(label, n) { return '<div class="sub">' + label + (n != null ? ' <span class="subn">' + n + '</span>' : '') + '</div>'; }
@@ -835,7 +857,7 @@
       if (e.k === 'html') return e.html;
       if (e.k === 'more') return moreRow(e, pre);
       var c = flat ? { tw: null, sub: '' } : foldCtl(e, 'tfold', pre);
-      if (!e.rows.length) return irow({ rk: pre + 'ctx:' + e.id, item: e.id, depth: e.depth, ctx: true, acts: '', tw: c.tw, tsub: c.sub, more: wsT("js.tk.tree.ctx") });
+      if (!e.rows.length) return irow({ rk: pre + 'ctx:' + e.id, item: e.id, depth: e.depth, ctx: true, tw: c.tw, tsub: c.sub, more: wsT("js.tk.tree.ctx") });
       return e.rows.map(function (r, i) {
         return irow({ rk: r.rk, item: r.item, rec: r.rec, more: r.more, closed: r.closed, depth: e.depth, tw: flat ? null : i ? '<span class="tw"></span>' : c.tw, tsub: i ? '' : c.sub });
       }).join('');
@@ -990,13 +1012,13 @@
     }).join('') + '</span>' : '';
     var search = '<span class="psearch"><svg class="i"><use href="#tki-search"/></svg><input id="psearch" type="text" role="searchbox" autocomplete="off" spellcheck="false" value="' + esc(q) + '" placeholder="' + wsT("js.tk.panel.search") + '" aria-label="' + wsT("js.tk.panel.search.aria") + '">' +
       (q ? '<button type="button" class="psx"' + attr('act', 'psearch-clear') + ' aria-label="' + wsT("js.tk.panel.clearsearch") + '"' + tipAttr(wsT("js.tk.panel.clearsearch.tip")) + '><svg class="i"><use href="#tki-x"/></svg></button>' : '') + '</span>';
-    var body = panelBody(s, m, v), closed = closedHtml();
+    var body = newRowHtml() + panelBody(s, m, v), closed = closedHtml();
     TF = null; SQ = ''; FILT = false; CLOSED = null;
     return { title: wsT("js.tk.tab.items"), tools: scopes + '<span class="chip">' + esc(scopeChip(s)) + '</span><div class="prow2">' + modes + search + '</div>', body: '<div class="plist">' + body + '</div>' + closed, id: 'card-items', cls: 'panel',
       attrs: attr('scope', s) + attr('view', m) };
   }
   function panelHtml(p, withToday) {
-    return '<section class="card panel" id="card-items"' + p.attrs + '><header><h2>' + wsT("js.tk.tab.items") + '</h2>' + p.tools + '</header>' + (withToday ? todayBar() : '') + '<div class="cbody">' + p.body + '</div></section>';
+    return '<section class="card panel" id="card-items"' + p.attrs + '><header><h2>' + wsT("js.tk.tab.items") + '</h2>' + p.tools + '</header>' + (withToday ? todayBar() : '') + '<div class="cbody">' + p.body + '</div>' + ribbonHtml() + '</section>';
   }
   // Does the given scope and mode show any row under the Today filter `key`? (a chip click moves to TODAY_HOME when not)
   // The search is left out: typing in the box never moves the panel to another scope.
@@ -1068,11 +1090,17 @@
     if (m !== 'list') return card(wsT("js.tk.tab.activity"), chip, modeBody('activity', m), picker('activity'), 'card-activity', m);
     var rows = VS.events.filter(function (n) { return (!ui.act.flagged || n.status !== 'applied') && (!ui.act.conc || n.markers.length); }), cap = 50, shown = rows.slice(-cap).reverse();
     var h = lastWrite();
-    h += '<div class="toolbar"><label><input type="checkbox" id="flagged-only"' + (ui.act.flagged ? ' checked' : '') + '> ' + wsT("js.tk.activity.flagged") + '</label>' +
-      '<label><input type="checkbox" id="conc-only"' + (ui.act.conc ? ' checked' : '') + '> ' + wsT("js.tk.activity.conc") + '</label>' +
-      '<span class="grow"></span><span class="muted">' + wsT("js.tk.activity.shown", shown.length, rows.length) + '</span></div>';
+    h += '<div class="toolbar">' + actChips() + '<span class="grow"></span><span class="muted">' + wsT("js.tk.activity.shown", shown.length, rows.length) + '</span></div>';
     h += shown.length ? '<ul class="plain">' + shown.map(function (n) { return evLine(n, false); }).join('') + '</ul>' : '<div class="empty">' + wsT("js.tk.activity.empty") + '</div>';
     return card(wsT("js.tk.tab.activity"), chip, h, picker('activity'), 'card-activity', m);
+  }
+  // The Activity filters "flagged only" and "concurrent only": toggle chips with the look of the
+  // card's mode chips (list / activity timeline), the accent when on.
+  function actChips() {
+    return [['flagged', "js.tk.activity.flagged"], ['conc', "js.tk.activity.conc"]].map(function (x) {
+      var on = !!ui.act[x[0]];
+      return '<button type="button" class="btn mini' + (on ? ' primary' : '') + '" aria-pressed="' + on + '"' + attr('act', 'actf') + attr('f', x[0]) + attr('fk', 'actf:' + x[0]) + '>' + wsT(x[1]) + '</button>';
+    }).join('');
   }
   function lastWrite() {
     if (!ui.last) return '';
@@ -1141,8 +1169,8 @@
         buckets[c].map(function (x) {
           // quiet cards: title, then initials (the record's assignee off "mine"), priority, due; the source on hover
           var it = VS.items[x.item];
-          return '<div class="kcard' + (x.drag ? ' drag' : '') + '"' + (x.drag ? ' draggable="true"' + attr('drag', x.drag) : '') + attr('item', x.item) + tipHtml(x.sub) + '>' +
-            '<div class="kc-t">' + titleRef(x.item) + '</div><div class="kc-m">' + warnHtml(it) + dotHtml(it) + (x.who ? '<span class="who"><i class="av">' + esc(initials(x.who)) + '</i></span>' : whoHtml(it)) +
+          return '<div class="kcard' + (x.drag ? ' drag' : '') + '"' + (x.drag ? ' draggable="true"' + attr('drag', x.drag) : '') + attr('item', x.item) + attr('rk', 'k:' + c + ':' + (x.rec ? x.rec.id : x.item)) + tipHtml(x.sub) + '>' +
+            '<div class="kc-t">' + titleRef(x.item) + '</div>' + moreBtn(x.item, 'kmore', true) + '<div class="kc-m">' + warnHtml(it) + dotHtml(it) + (x.who ? '<span class="who"><i class="av">' + esc(initials(x.who)) + '</i></span>' : whoHtml(it)) +
             '<span class="grow"></span>' + priHtml(it) + dueHtml(it, x.rec ? stKey(it, x.rec) : c) + '</div></div>';
         }).join('') + '</div>';
     }).join('');
@@ -1163,8 +1191,7 @@
     }).slice().sort(function (a, b) { return String(b.ts) < String(a.ts) ? -1 : String(b.ts) > String(a.ts) ? 1 : 0; });
     var people = [['all', wsT("js.tk.activity.everyone")]].concat(Object.keys(VS.members).map(function (id) { return [id, nmo(id)]; }));
     var h = '<div class="toolbar">' + sel('a-family', f.family, FAMILIES.map(function (x) { return [x[0], wsT(x[1])]; })) + sel('a-member', f.member, people) +
-      '<label><input type="checkbox" id="flagged-only"' + (f.flagged ? ' checked' : '') + '> ' + wsT("js.tk.activity.flagged") + '</label>' +
-      '<label><input type="checkbox" id="conc-only"' + (f.conc ? ' checked' : '') + '> ' + wsT("js.tk.activity.conc") + '</label><span class="grow"></span><span class="muted">' + wsT("js.tk.activity.count", rows.length) + '</span></div>';
+      actChips() + '<span class="grow"></span><span class="muted">' + wsT("js.tk.activity.count", rows.length) + '</span></div>';
     var day = null;
     h += '<ul class="plain atl">' + rows.map(function (n) {
       var d = String(n.ts).slice(0, 10), x = '';
@@ -1182,9 +1209,9 @@
   function dueRows(key, v) {
     function dated(it) { return it && it.due && !it.hidden && it.kind !== 'topic'; }
     if (key === 'all') return VS.itemOrder.map(function (id) { return VS.items[id]; }).filter(function (it) { return dated(it) && itemFilter(it) && keepItem(it.id); })
-      .map(function (it) { return { item: it.id, status: it.status, chip: stIcon(it.status), who: '' }; });
+      .map(function (it) { return { item: it.id, status: it.status, rec: null, who: '' }; });
     return assignRecs(key, v).filter(function (r) { return dated(VS.items[r.item]); }).map(function (r) {
-      return { item: r.item, status: stKey(null, r), chip: stIcon(stKey(null, r)), who: key === 'mine' ? '' : nm(r.to) };
+      return { item: r.item, status: stKey(null, r), rec: r, who: key === 'mine' ? '' : nm(r.to) };
     });
   }
   function whoTag(x) { return x.who ? '<span class="muted">' + esc(x.who) + '</span>' : ''; }
@@ -1219,7 +1246,7 @@
     // x: the dueRows entry of a match, null for a context row; c: the fold control; sm: draw the summary bar
     function row(e, x, c, sm) {
       var it = VS.items[e.id], st = x ? x.status : stKey(it), r = own(e.id), s = sm && e.n ? sub(e.id) : null, over = it.due && it.due < today() && st !== 'done';
-      return '<div class="grow-row click' + (ENDED[st] ? ' ended' : '') + (x ? '' : ' ctx') + '"' + attr('item', it.id) + '><div class="glabel" style="--ind:' + e.depth + '">' + c.tw + (x ? x.chip : stIcon(st)) + titleRef(it.id) + c.sub + (x ? whoTag(x) : '') + priHtml(it) + '</div>' +
+      return '<div class="grow-row click' + (ENDED[st] ? ' ended' : '') + (x ? '' : ' ctx') + '"' + attr('item', it.id) + attr('rk', 'g:' + it.id) + '><div class="glabel" style="--ind:' + e.depth + '">' + c.tw + stBtn(st, it, x && x.rec) + titleRef(it.id) + c.sub + (x ? whoTag(x) : '') + priHtml(it) + moreBtn(it.id, 'gmore', true) + '</div>' +
         '<div class="gtrack"><span class="gnow" style="left:' + pct(t0) + '"></span>' +
         (r ? '<span class="gbar st-' + esc(st) + (over ? ' over' : '') + '" style="left:' + pct(r[0]) + ';width:' + wid(r) + '" title="' +
           esc(wsT(it.started ? "js.tk.gantt.bar.started" : "js.tk.gantt.bar.created", String(it.started || it.ts).slice(0, 10), it.due)) + '">' + esc(it.due.slice(5)) + '</span>' : '') +
@@ -1248,7 +1275,8 @@
     for (var d = 1; d <= days; d++) {
       var ds = m + '-' + (d < 10 ? '0' : '') + d, list = byDay[ds] || [];
       h += '<div class="cday' + (ds === today() ? ' now' : '') + '"' + attr('day', ds) + '><div class="cnum">' + d + '</div>' + list.map(function (x) {
-        return '<div class="citem click' + (ENDED[x.status] ? ' ended' : '') + '"' + attr('item', x.item) + tipHtml(SI.info(x.status).label + ' · ' + VS.items[x.item].priorityName + (x.who ? ' · ' + esc(x.who) : '')) + '>' + x.chip + titleRef(x.item) + '</div>';
+        return '<div class="citem click' + (ENDED[x.status] ? ' ended' : '') + '"' + attr('item', x.item) + attr('rk', 'c:' + ds + ':' + x.item) + tipHtml(SI.info(x.status).label + ' · ' + VS.items[x.item].priorityName + (x.who ? ' · ' + esc(x.who) : '')) + '>' +
+          stBtn(x.status, VS.items[x.item], x.rec) + titleRef(x.item) + moreBtn(x.item, 'cmore', true) + '</div>';
       }).join('') + '</div>';
     }
     return h + '</div>';
@@ -1268,29 +1296,50 @@
 
   // --------------------------------------------------------------- sync state
 
-  function syncHtml(name) {
-    var vs = vss[name], s = vs.sync, remote = vs.store.remote, events = s.unpushed.reduce(function (a, c) { return a + c.events.length; }, 0);
-    var tools = X.syncTools ? X.syncTools(name, vs, H) || '' : '';
-    var h = '<div class="sync' + (remote && s.online ? '' : ' off') + '">';
-    h += '<span class="muted">' + wsT("js.tk.sync.clone", '<code>' + esc(refOf(vs.viewer.stream)) + '</code>') + '</span> &middot; ';
-    if (!remote) h += '<span class="sdot"></span>' + wsT("js.tk.sync.noremote");
-    // the last attempt's error (view state sync.error, when the data layer has one) is the
-    // offline label's tooltip
-    else h += '<span class="sdot"></span><b' + (!s.online && s.error ? tipAttr(s.error) : '') + '>' + (s.online ? wsT("js.tk.sync.online") : wsT("js.tk.sync.offline")) + '</b> &middot; ' + wsT("js.tk.sync.synced", esc(fmtTs(s.syncedAt))) + (s.online ? '' : ' &middot; ' + wsT("js.tk.sync.retry"));
-    h += ' &middot; <span' + (events ? ' class="unp"' : '') + '>' + wsT("js.tk.sync.unpushed", events) + '</span>';
-    if (remote && s.upstream) h += ' &middot; <span class="muted" title="' + wsT("js.tk.sync.upstream.tip") + '">' + wsT("js.tk.sync.upstream", s.upstream) + '</span>';
-    if (remote) h += btn('sync', wsT("js.tk.sync.now"), {}) + tools;
-    else h += btn('sync', wsT("js.tk.sync.closebatch"), {}) + tools;
-    h += '</div>';
+  // The store's sync state is one slim ribbon at the bottom of the Items card: a status dot,
+  // a short text, and the apply button only while writes are pending; with nothing to do it
+  // dims to a quiet line. A click opens the status popover (syncPopHtml) with the diagnostics.
+  function unpushedN(vs) { return vs.sync.unpushed.reduce(function (a, c) { return a + c.events.length; }, 0); }
+  // "synced N min ago" against the view state's clock
+  function syncedAgo(ts) {
+    if (!ts) return wsT("js.tk.rib.never");
+    var m = Math.floor((Date.parse(VS.now) - Date.parse(ts)) / 60000);
+    if (!(m >= 1)) return wsT("js.tk.rib.now");
+    return m < 60 ? wsTn("js.tk.rib.min", m) : m < 1440 ? wsTn("js.tk.rib.hour", Math.floor(m / 60)) : wsTn("js.tk.rib.day", Math.floor(m / 1440));
+  }
+  function ribbonHtml() {
+    var s = VS.sync, remote = VS.store.remote, n = unpushedN(VS), tone, txt;
+    if (!remote) { tone = n ? 'pend' : 'local'; txt = wsT("js.tk.rib.local") + (n ? ' &middot; ' + wsTn("js.tk.rib.pending", n) : ''); }
+    else if (!s.online) { tone = 'off'; txt = wsT("js.tk.sync.offline") + (n ? ' &middot; ' + wsTn("js.tk.rib.topush", n) : ''); }
+    else if (n) { tone = 'pend'; txt = wsTn("js.tk.rib.topush", n); }
+    else { tone = 'ok'; txt = esc(syncedAgo(s.syncedAt)); }
+    var open = !!(MN && MN.kind === 'sync');
+    return '<div class="ribbon r-' + tone + (n ? '' : ' idle') + '"><button type="button" class="rib-main"' + attr('act', 'rib') + attr('fk', 'rib') + ' aria-haspopup="dialog" aria-expanded="' + open + '"' +
+      tipAttr(wsT("js.tk.rib.tip") + (!s.online && remote && s.error ? ' (' + s.error + ')' : '')) + '><span class="sdot"></span><span class="rt">' + txt + '</span></button>' +
+      (n ? btn('sync', remote ? wsT("js.tk.sync.now") : wsT("js.tk.sync.closebatch"), {}, 'primary') : '') + '</div>';
+  }
+  // The status popover: the clone ref, the remote state, the store's counts, the unpushed
+  // batch contents, the host's syncTools, and the apply button.
+  function syncPopHtml() {
+    var vs = VS, s = vs.sync, remote = vs.store.remote, events = unpushedN(vs), tools = X.syncTools ? X.syncTools(ui.store, vs, H) || '' : '';
+    var nMem = Object.keys(vs.members).filter(function (id) { return !vs.members[id].removed; }).length;
+    var h = '<div class="mh"><b>' + esc(vs.store.label) + '</b></div><div class="spop">';
+    h += '<div>' + wsT("js.tk.sync.clone", '<code>' + esc(refOf(vs.viewer.stream)) + '</code>') + '</div>';
+    h += '<div>' + (remote ? '<b' + (!s.online && s.error ? tipAttr(s.error) : '') + '>' + (s.online ? wsT("js.tk.sync.online") : wsT("js.tk.sync.offline")) + '</b> &middot; ' +
+      wsT("js.tk.sync.synced", esc(fmtTs(s.syncedAt))) + (s.online ? '' : ' &middot; ' + wsT("js.tk.sync.retry")) : wsT("js.tk.sync.noremote")) + '</div>';
+    if (!s.online && remote && s.error) h += '<div class="err">' + esc(s.error) + '</div>';
+    h += '<div class="muted">' + wsT("js.tk.drawer.stats", nMem, vs.stats.events, vs.stats.commits, vs.stats.flagged) + '</div>';
+    h += '<div' + (events ? ' class="unp"' : '') + '>' + wsT("js.tk.sync.unpushed", events) + '</div>';
+    if (remote && s.upstream) h += '<div class="muted"' + tipAttr(wsT("js.tk.sync.upstream.tip")) + '>' + wsT("js.tk.sync.upstream", s.upstream) + '</div>';
     if (s.unpushed.length) {
-      h += '<details class="unpushed"><summary>' + wsT("js.tk.sync.list", s.unpushed.map(function (c) { return c.open ? wsT("js.tk.sync.openn", c.events.length) : wsT("js.tk.sync.commitn", c.events.length); }).join(', ')) + '</summary><ul class="plain">' +
+      h += '<div class="sbatch"><b>' + wsT("js.tk.sync.list", s.unpushed.map(function (c) { return c.open ? wsT("js.tk.sync.openn", c.events.length) : wsT("js.tk.sync.commitn", c.events.length); }).join(', ')) + '</b><ul class="plain">' +
         s.unpushed.map(function (c) {
           return '<li><b>' + (c.open ? wsT("js.tk.flag.open") : wsT("js.tk.sync.closed")) + '</b> <span class="muted">' + esc(fmtTs(c.ts)) + '</span>: ' + c.events.map(function (id) {
             var n = EV[id]; return esc(alias(id)) + (n ? ' ' + esc(n.type) : '');
           }).join(', ') + '</li>';
-        }).join('') + '</ul><p class="r2">' + wsT("js.tk.sync.batchnote") + '</p></details>';
+        }).join('') + '</ul><p class="muted">' + wsT("js.tk.sync.batchnote") + '</p></div>';
     }
-    return h;
+    return h + '</div><div class="mtools">' + btn('sync', remote ? wsT("js.tk.sync.now") : wsT("js.tk.sync.closebatch"), {}, events ? 'primary' : '') + tools + '</div>';
   }
 
   // The drawer layout, switched by the window width (layoutOf):
@@ -1351,16 +1400,16 @@
     var tools = c.tools != null ? c.tools : (c.chip ? '<span class="chip">' + c.chip + '</span>' : '') + '<span class="grow"></span>' + c.extra;
     tabShown(active, v);
     return '<section class="card pane' + (c.cls ? ' ' + c.cls : '') + '" id="' + c.id + '"' + attr('tab', active) + (c.attrs || '') + (c.mode ? attr('view', c.mode) : '') + '><header>' + nav + '</header>' +
-      (narrow ? todayBar() : '') + '<div class="ptools">' + tools + '</div><div class="cbody">' + c.body + '</div></section>';
+      (narrow ? todayBar() : '') + '<div class="ptools">' + tools + '</div><div class="cbody">' + c.body + '</div>' + (active === 'items' ? ribbonHtml() : '') + '</section>';
   }
   function drawerHtml(name, v) {
-    var vs = VS, nMem = Object.keys(vs.members).filter(function (id) { return !vs.members[id].removed; }).length;
+    var vs = VS;
     var MAKE = { items: cardPanel, notify: cardNotify, org: cardTeam, activity: cardActivity };
-    var h = '<div class="tk-title"><b>' + esc(vs.store.label) + '</b><span>' + wsT("js.tk.drawer.stats", nMem, vs.stats.events, vs.stats.commits, vs.stats.flagged) + '</span><span class="grow"></span>' +
+    var h = '<div class="tk-title"><b>' + esc(vs.store.label) + '</b><span class="grow"></span>' +
       // the drawer links to the store page; the page links back to the session view
       (ui.page ? '<button class="btn" data-act="page-back"' + tipAttr(wsT("js.tk.drawer.back.tip")) + '><svg class="i"><use href="#tki-back"/></svg>' + wsT("js.tk.drawer.back") + '</button>' :
         '<a class="btn" href="#/' + esc(encodeURIComponent(name)) + '"' + tipAttr(wsT("js.tk.drawer.page.tip", name)) + '><svg class="i"><use href="#tki-page"/></svg>' + wsT("js.tk.drawer.page") + '</a>') +
-      '<button class="btn primary" data-act="create"><svg class="i"><use href="#tki-plus"/></svg>' + wsT("js.tk.drawer.new") + '</button></div>' + syncHtml(name);
+      '<button class="btn primary" data-act="create"><svg class="i"><use href="#tki-plus"/></svg>' + wsT("js.tk.drawer.new") + '</button></div>';
     if (!vs.viewer.isMember) h += '<p class="err">' + wsT("js.tk.drawer.notmember", esc(v)) + '</p>';
     var L = ui.layout = layoutOf(), ts = tabState(), specs = {};
     function make(k) { return (specs[k] = specs[k] || (MAKE[k] ? MAKE[k](v) : XTAB[k].make(name, VS, H))); }
@@ -1390,8 +1439,11 @@
       acts += btn('reply', wsT("js.tk.cmt.reply"), { cid: n.id });
       if (n.member === v) acts += btn('cedit', wsT("js.tk.cmt.edit"), { cid: n.id }) + btn('chide', wsT("js.tk.cmt.hide"), { cid: n.id });
     }
-    var live = n.status === 'applied' && !!VS.comments[n.id];
-    var txt = c.hidden ? '<div class="hiddenc">' + wsT("js.tk.cmt.hidden", esc(alias(c.hidden))) + '<details><summary>' + wsT("js.tk.cmt.history") + '</summary>' + esc(body) + '</details></div>' :
+    var live = n.status === 'applied' && !!VS.comments[n.id], ed = ui.cedit && ui.cedit.cid === n.id && live && !c.hidden;
+    if (ed) acts = '';
+    // an own comment being edited in place (ui.cedit): Cmd/Ctrl+Enter saves, Esc cancels
+    var txt = ed ? '<div class="cedit"><textarea id="tkcedit" data-keep rows="3" aria-label="' + wsT("js.tk.cmt.edit") + '">' + esc(ui.cedit.body) + '</textarea><div class="tb">' +
+      btn('cedit-save', wsT("js.tk.dlg.save"), {}, 'primary') + btn('cedit-x', wsT("js.tk.dlg.cancel"), {}) + '<span class="muted">' + wsT("js.tk.cedit.hint", MAC ? '⌘Enter' : 'Ctrl+Enter') + '</span></div></div>' + mentionChips(c.mentions) + attChips(c.attachments, true) : c.hidden ? '<div class="hiddenc">' + wsT("js.tk.cmt.hidden", esc(alias(c.hidden))) + '<details><summary>' + wsT("js.tk.cmt.history") + '</summary>' + esc(body) + '</details></div>' :
       '<div class="ctext">' + esc(body) + '</div>' + mentionChips(live ? c.mentions : p.mentions) + attChips(live ? c.attachments : p.attachments, live);
     return '<li class="cmt' + (n.status !== 'applied' ? ' ' + n.status : '') + (n.markers.length ? ' concm' : '') + (n.member === v ? ' mine' : '') + '"' + attr('ev', n.id) + '>' +
       '<div class="ch"><b>' + esc(nm(n.member)) + '</b>' + originChip(n.origin) + '<span class="when">' + esc(fmtTs(n.ts)) + '</span><span class="al">' + esc(n.alias) + '</span>' +
@@ -1400,10 +1452,9 @@
   }
 
   // The item window: what the thread sheet and the row detail overlay held, in a
-  // centred window over the page. The row's actions come first as labelled buttons
-  // (actList), then the item actions a row does not carry (edit, hide, and assign or
-  // split where the row has none). The assignees table keeps only the per-assignee
-  // actions the action bar does not already offer.
+  // centred window over the page. Its actions are the header's context menu (the "⋯"
+  // button, a right-click on the header, the status icon); no button row stands between
+  // the header and the body. The assignees table keeps its per-assignee actions.
   // What an event refers to inside the open item window, found by the event's type:
   // a comment (added, edited, or hidden) -> that comment; a status, close, confirm, reject,
   // or reopen -> that assignee's row in Assignees; an assignment or handoff -> the holders
@@ -1436,19 +1487,6 @@
       if (tg) tg.textContent = wsT("js.tk.asg.fewer");
     }
     return el;
-  }
-  function windowActs(v, it) {
-    var recs = it.assignments.map(A), mineR = recs.filter(function (r) { return r.to === v && r.state === 'live'; })[0];
-    var gone = VS.viewer.admin && VS.members[it.author] && VS.members[it.author].removed;
-    var list = actList(it).map(function (x) { return x[0] === 'open' ? ['win-discuss', 'chat', wsT("js.tk.act.discuss.win"), {}] : x; }), have = {};
-    list.forEach(function (x) { have[x[0]] = true; });
-    if ((it.author === v || gone) && !it.hidden) list.push(['edit', 'tasks', it.author === v ? wsT("js.tk.act.edit") : wsT("js.tk.act.edit.admin"), { item: it.id }]);
-    if (!have.assign && it.author === v && it.kind !== 'topic' && !it.hidden) list.push(['assign', 'assign', wsT("js.tk.act.assign"), { item: it.id }]);
-    if (!have.split && (mineR || it.author === v) && it.kind !== 'topic' && !it.hidden) list.push(['split', 'split', wsT("js.tk.act.split"), { item: it.id }]);
-    if ((it.author === v || gone) && !it.hidden) list.push(['ihide', 'x', it.author === v ? wsT("js.tk.act.hide") : wsT("js.tk.act.hide.admin"), { item: it.id }]);
-    return list.map(function (x) {
-      return '<button type="button" class="btn' + (x[4] ? ' primary' : '') + '"' + attr('act', x[0]) + dataAttrs(x[3]) + '><svg class="i"><use href="#tki-' + x[1] + '"/></svg>' + esc(x[2]) + '</button>';
-    }).join('');
   }
   // The item window's parts. The window is a header (title, chips, actions) over two
   // columns: the main one (body, subtasks, thread, composer) and a narrow side one (the property
@@ -1530,27 +1568,33 @@
   // levels start folded. The fold state is the page's (ui.wfold), apart from the lists' stored one.
   // A node with children also carries its roll-up.
   function subtasksHtml(it) {
-    if (!it.children.length) return '';
+    var add = ui.sub && ui.sub.rk === 'iw:' + it.id ? subRowHtml(0) : ''; // "add subtask" from the window header: the input row tops the list
+    if (!it.children.length && !add) return '';
     function rows(id, depth) {
       return VS.items[id].children.map(function (k) {
         var ki = VS.items[k], key = ui.store + '|' + k, open = !!ki.children.length && (key in ui.wfold ? ui.wfold[key] : depth === 0);
         var c = foldCtl({ id: k, n: ki.children.length, open: open, to: '' }, 'wfold', 'w:');
-        return '<div class="srow' + (ki.status === 'done' ? ' gone' : '') + '"' + attr('item', k) + ' style="--ind:' + depth + '">' + c.tw + stIcon(stKey(ki)) + titleRef(k) + c.sub + (ki.hidden ? '<span class="chip hid">' + wsT("js.tk.chip.hidden") + '</span>' : '') +
+        return '<div class="srow' + (ki.status === 'done' ? ' gone' : '') + '"' + attr('item', k) + attr('rk', 'w:' + k) + ' style="--ind:' + depth + '">' + c.tw + stBtn(stKey(ki), ki) + titleRef(k) + c.sub + (ki.hidden ? '<span class="chip hid">' + wsT("js.tk.chip.hidden") + '</span>' : '') +
           '<span class="grow"></span>' + rollupHtml(ki) + whoHtml(ki) + '</div>' + (open ? rows(k, depth + 1) : '');
       }).join('');
     }
-    return '<section class="iw-sub"><h3 class="prom">' + wsT("js.tk.win.subtasks") + ' <span class="cnt">' + it.children.length + '</span>' + rollupHtml(it) + '</h3><div class="srows">' + rows(it.id, 0) + '</div></section>';
+    return '<section class="iw-sub"><h3 class="prom">' + wsT("js.tk.win.subtasks") + ' <span class="cnt">' + it.children.length + '</span>' + rollupHtml(it) + '</h3><div class="srows">' + add + rows(it.id, 0) + '</div></section>';
   }
+  // The edit mode (ui.iedit) turns the title and the body into fields in place: Enter in the
+  // title or Cmd/Ctrl+Enter in the body saves, Esc cancels.
   function windowHtml(v, it) {
-    var recs = it.assignments.map(A), mineR = recs.filter(function (r) { return r.to === v && r.state === 'live'; })[0];
-    var acts = windowActs(v, it), up = ancestorsOf(it);
+    var recs = it.assignments.map(A), up = ancestorsOf(it), ed = ui.iedit && ui.iedit.item === it.id ? ui.iedit : null;
     var h = '<div class="iw-top">' + (up.length ? '<nav class="iw-crumb" aria-label="' + wsT("js.tk.win.parents") + '">' + up.map(function (k) { return '<a href="#"' + attr('item', k) + '>' + esc(VS.items[k].title) + '</a>'; }).join('<span aria-hidden="true">&rsaquo;</span>') + '</nav>' : '') +
-      '<div class="iw-head">' + stIcon(stKey(it)) + '<h2 id="iw-title">' + esc(it.title) + '</h2>' +
+      '<div class="iw-head"' + attr('mitem', it.id) + attr('rk', 'iw:' + it.id) + '>' + stBtn(stKey(it), it) +
+      (ed ? '<h2 id="iw-title" class="iw-edt"><input type="text" id="iw-etitle" data-keep autocomplete="off" value="' + esc(ed.title) + '" aria-label="' + wsT("js.tk.form.title") + '"></h2>' : '<h2 id="iw-title">' + esc(it.title) + '</h2>') +
+      moreBtn(it.id, 'iw-more', true) +
       '<button type="button" class="ia iw-x" data-act="win-close" aria-label="' + wsT("js.tk.win.close") + '"' + tipAttr(wsT("js.tk.win.close")) + '><svg class="i"><use href="#tki-x"/></svg></button></div>' +
       '<div class="iw-chips">' + kindChip(it) + '<code class="al">' + esc(it.alias) + '</code>' + (it.kind === 'topic' ? '' : stChip(it.status) + prChip(it) + dueChip(it) + rollupHtml(it)) + warnHtml(it) + '</div></div>';
-    h += '<div class="sh-actions">' + (acts || '<span class="muted">' + wsT("js.tk.win.noacts", esc(nm(v))) + '</span>') + '</div>';
     h += '<div class="iw-grid"><div class="iw-main">';
-    if (it.body || it.mentions.length || it.attachments.length)
+    if (ed) h += '<div class="iw-body iw-edit"><textarea id="iw-ebody" data-keep rows="5" aria-label="' + wsT("js.tk.form.body") + '">' + esc(ed.body) + '</textarea>' +
+      '<input type="text" id="iw-eproj" data-keep autocomplete="off" value="' + esc(ed.project) + '" placeholder="' + wsT("js.tk.form.project") + '" aria-label="' + wsT("js.tk.form.project") + '">' +
+      '<div class="tb">' + btn('iedit-save', wsT("js.tk.dlg.save"), {}, 'primary') + btn('iedit-x', wsT("js.tk.dlg.cancel"), {}) + '<span class="muted">' + wsT("js.tk.edit.hint") + '</span></div></div>';
+    else if (it.body || it.mentions.length || it.attachments.length)
       h += '<div class="iw-body">' + (it.body ? '<div class="sh-body"' + attr('focus', 'body') + '>' + esc(it.body) + '</div>' : '') + mentionChips(it.mentions) + attChips(it.attachments, true) + '</div>';
     h += subtasksHtml(it);
     var evs = it.thread.map(function (id) { return EV[id]; });
@@ -1559,25 +1603,21 @@
       return evLine(n, n.parentThread === it.id ? 'parent' : true);
     }).join('') + '</ul></section>';
 
-    // composer: comment (optionally a quote reply) plus quick status actions on my own assignment
+    // composer: a comment (optionally a quote reply); the status moved to the header's menu.
+    // The box carries the @ picker (bottom left) and the send button (bottom right); Cmd/Ctrl+Enter sends.
     var rt = ui.replyTo && VS.comments[ui.replyTo] && VS.comments[ui.replyTo].item === it.id ? VS.comments[ui.replyTo] : null;
-    var quick = '';
-    if (mineR && mineR.status !== 'done') {
-      quick = '<span class="muted">' + wsT("js.tk.composer.mystatus", stChip(mineR.status)) + '</span>' +
-        ['todo', 'doing', 'blocked'].filter(function (s) { return s !== mineR.status; }).map(function (s) { return btn('q-status', esc(stLabel(s)), { item: it.id, status: s, note: 1 }); }).join('') +
-        (mineR.status !== 'awaiting' ? btn('q-close', wsT("js.tk.composer.close"), { item: it.id }) : '') + '<span class="muted">' + wsT("js.tk.composer.notehint") + '</span>';
-    }
+    var send = wsT("js.tk.composer.send", MAC ? '⌘Enter' : 'Ctrl+Enter');
     h += '<div class="composer2">' + (it.hidden ? '<span class="muted">' + wsT("js.tk.composer.hidden") + '</span>' : '') +
       (rt ? '<div class="replying">' + wsT("js.tk.composer.replying", esc(alias(rt.id)), esc(rt.author), esc(String(rt.body).slice(0, 70))) + ' ' + btn('reply-x', 'x', {}) + '</div>' : '') +
-      (quick ? '<div class="quick">' + quick + '</div>' : '') + draftHtml() +
-      '<div class="crow"><textarea id="cbox" rows="2" placeholder="' + wsT("js.tk.composer.placeholder", esc(nm(v))) + '"></textarea><div class="ccol">' +
+      draftHtml() +
+      '<div class="cbox"><textarea id="cbox" data-keep rows="2" placeholder="' + wsT("js.tk.composer.placeholder", esc(nm(v))) + '"></textarea><div class="cbar">' +
+      '<select id="cmention" class="cat" aria-label="' + wsT("js.tk.composer.mention") + '"' + tipAttr(wsT("js.tk.composer.mention.tip")) + '><option value="">@</option>' +
+      Object.keys(VS.members).filter(function (id) { return !VS.members[id].removed; }).map(function (id) { return '<option value="' + esc(id) + '">@' + esc(id) + ' ' + esc(nmo(id)) + '</option>'; }).join('') + '</select>' +
       (CAPS.origin ? '<select id="corigin" title="' + wsT("js.tk.origin") + '"><option value="human">' + wsT("js.tk.origin.human") + '</option><option value="agent">' + wsT("js.tk.origin.agent") + '</option><option value="agent-auto">' + wsT("js.tk.origin.auto") + '</option></select>' : '') +
-      btn('comment', wsT("js.tk.composer.post"), { item: it.id }, 'primary') + '</div></div>' +
-      // a simple @ picker; with caps.attach, attachment metadata typed in by hand (a stand-in oid is computed)
-      '<div class="cextra"><select id="cmention" title="' + wsT("js.tk.composer.mention.tip") + '"><option value="">' + wsT("js.tk.composer.mention") + '</option>' +
-      Object.keys(VS.members).filter(function (id) { return !VS.members[id].removed; }).map(function (id) { return '<option value="' + esc(id) + '">@' + esc(id) + ' ' + esc(nmo(id)) + '</option>'; }).join('') +
-      '</select>' + (CAPS.attach ? '<input id="catt-name" type="text" placeholder="' + wsT("js.tk.composer.attname") + '"><input id="catt-size" type="number" min="0" placeholder="' + wsT("js.tk.composer.attsize") + '">' +
-      btn('att-add', wsT("js.tk.composer.attach"), {}) + '<span class="muted">' + wsT("js.tk.composer.limit", fmtSize(VS.attachments.max_bytes)) + '</span>' : '') + '</div></div>';
+      '<span class="grow"></span><button type="button" class="csend" id="tkcsend"' + attr('act', 'comment') + attr('item', it.id) + ' aria-label="' + esc(send) + '"' + tipAttr(send) + '><svg class="i"><use href="#tki-send"/></svg></button></div></div>' +
+      // with caps.attach, attachment metadata typed in by hand (a stand-in oid is computed)
+      (CAPS.attach ? '<div class="cextra"><input id="catt-name" type="text" placeholder="' + wsT("js.tk.composer.attname") + '"><input id="catt-size" type="number" min="0" placeholder="' + wsT("js.tk.composer.attsize") + '">' +
+      btn('att-add', wsT("js.tk.composer.attach"), {}) + '<span class="muted">' + wsT("js.tk.composer.limit", fmtSize(VS.attachments.max_bytes)) + '</span></div>' : '') + '</div>';
     h += '</div><div class="iw-side">' + propertyCard(it) + (it.kind !== 'topic' ? assigneesHtml(v, it, recs) : '') + '</div></div>';
     return h;
   }
@@ -1622,10 +1662,6 @@
     return '<div class="opts"><label><input type="radio" name="completion" value="assignee" checked> ' + wsT("js.tk.compl.assignee") + '</label>' +
       '<label><input type="radio" name="completion" value="assigner"> ' + wsT("js.tk.compl.assigner") + '</label></div>';
   }
-  function prioSel(cur) {
-    return '<select name="priority">' + VS.priority.names.map(function (x, i) { return '<option value="' + i + '"' + (i === cur ? ' selected' : '') + '>' + i + ' ' + esc(x) + '</option>'; }).join('') + '</select>';
-  }
-  function originSel() { return !CAPS.origin ? '' : '<select name="origin"><option value="human">' + wsT("js.tk.origin.human") + '</option><option value="agent">' + wsT("js.tk.origin.agent.req") + '</option><option value="agent-auto">' + wsT("js.tk.origin.auto.unprompted") + '</option></select>'; }
   function fld(label, inner) { return '<div class="fld"><span>' + label + '</span>' + inner + '</div>'; }
   // A person's earlier profiles are machine-local, never in the ledger: the adapter keeps
   // them (profiles / saveProfile). Editing your own profile saves the result as one.
@@ -1649,74 +1685,20 @@
   }
   var ROLE_TYPES = ['roles.add_member', 'roles.set_lead', 'roles.add_admin', 'roles.remove_admin', 'roles.add_key', 'roles.revoke_key', 'roles.remove_member', 'roles.set_priority_levels', 'roles.set_attachment_limit'];
 
-  // the dialog kinds a data-act opens (a host adds its own through ext.dialogs)
-  var DIALOGS = { create: 1, edit: 1, assign: 1, split: 1, handoff: 1, status: 1, close: 1, note: 1, cedit: 1, profile: 1, admin: 1 };
+  // the dialog kinds a data-act opens (a host adds its own through ext.dialogs); every item
+  // action is the context menu's or inline, so only the store-wide forms stay modal
+  var DIALOGS = { profile: 1, admin: 1 };
+  // The assign form: the context menu's assign step (an anchored popover), submitted through submit().
+  function assignBody(v) {
+    return fld(wsT("js.tk.form.who"), '<div class="opts"><label><input type="radio" name="mode" value="chosen" checked> ' + wsT("js.tk.form.chosen") + '</label><label><input type="radio" name="mode" value="all"> ' + wsT("js.tk.form.everyone") + '</label></div>') +
+      fld(wsT("js.tk.form.levels"), levelSel()) + fld(wsT("js.tk.form.completion"), complRadios()) +
+      fld(wsT("js.tk.form.chosen"), '<div class="people" id="people">' + peopleHtml(v) + '</div>') + '<div class="hint" id="hint"></div>';
+  }
   function dialogHtml(kind, d) {
     if (kind === 'register') return formHtml(kind, d, registerT(d)); // needs no store
-    var v = memberOf(viewerOf(ui.store)), it = d.item && VS.items[d.item];
-    var mineOpen = VS.my.assignments.map(A).filter(function (r) { return r.status !== 'done'; }).map(function (r) { return [r.item, alias(r.item) + ' ' + VS.items[r.item].title]; });
+    var v = memberOf(viewerOf(ui.store));
     var T;
     switch (kind) {
-      case 'create':
-        T = [wsT("js.tk.dlg.create.title"), wsT("js.tk.dlg.create.intro", esc(viewerOf(ui.store))),
-          fld(wsT("js.tk.form.kind"), '<select name="kind">' + ['task', 'todo', 'topic'].map(function (k) { return '<option value="' + k + '">' + esc(kindName(k)) + '</option>'; }).join('') + '</select>') +
-          fld(wsT("js.tk.form.title"), '<input type="text" name="title" required>') + fld(wsT("js.tk.form.body"), '<textarea name="body" rows="3"></textarea>') +
-          fld(wsT("js.tk.form.project.ref"), '<input type="text" name="project">') +
-          '<div class="fld inline">' + fld(wsT("js.tk.form.due.opt"), '<input type="date" name="due">') + fld(wsT("js.tk.form.priority"), prioSel(VS.priority.default)) + '</div>' +
-          fld(wsT("js.tk.form.assignto.create"), '<select name="assignee"><option value="">(' + wsT("js.tk.common.nobody") + ')</option><option value="' + esc(v) + '" selected>' + wsT("js.tk.dlg.myself") + '</option>' +
-            Object.keys(VS.members).filter(function (id) { return id !== v && !VS.members[id].removed; }).map(function (id) { return '<option value="' + esc(id) + '">' + esc(nmo(id)) + ' (' + reachTag(v, id) + ')</option>'; }).join('') + '</select>') +
-          fld(wsT("js.tk.form.completion"), complRadios()), wsT("js.tk.dlg.create.submit")];
-        break;
-      case 'edit':
-        T = [wsT("js.tk.dlg.edit.title", it.alias), wsT("js.tk.dlg.edit.intro"),
-          fld(wsT("js.tk.form.title"), '<input type="text" name="title" value="' + esc(it.title) + '">') + fld(wsT("js.tk.form.body"), '<textarea name="body" rows="4">' + esc(it.body) + '</textarea>') +
-          fld(wsT("js.tk.form.project"), '<input type="text" name="project" value="' + esc(it.project) + '">') +
-          '<div class="fld inline">' + fld(wsT("js.tk.form.due"), '<input type="date" name="due" value="' + esc(it.due || '') + '">') + fld(wsT("js.tk.form.priority"), prioSel(it.priority)) + '</div>', wsT("js.tk.dlg.save")];
-        break;
-      case 'assign':
-        T = [wsT("js.tk.dlg.assign.title", it.alias), wsT("js.tk.dlg.assign.intro"),
-          fld(wsT("js.tk.form.who"), '<div class="opts"><label><input type="radio" name="mode" value="chosen" checked> ' + wsT("js.tk.form.chosen") + '</label><label><input type="radio" name="mode" value="all"> ' + wsT("js.tk.form.everyone") + '</label></div>') +
-          fld(wsT("js.tk.form.levels"), levelSel()) + fld(wsT("js.tk.form.completion"), complRadios()) +
-          fld(wsT("js.tk.form.chosen"), '<div class="people" id="people">' + peopleHtml(v) + '</div>') + '<div class="hint" id="hint"></div>', wsT("js.tk.dlg.assign.submit")];
-        break;
-      case 'split':
-        T = [wsT("js.tk.dlg.split.title", it.alias), wsT("js.tk.dlg.split.intro", it.alias),
-          fld(wsT("js.tk.form.subtitle"), '<input type="text" name="title" required>') +
-          '<div class="fld inline">' + fld(wsT("js.tk.form.due.opt"), '<input type="date" name="due" value="' + esc(it.due || '') + '">') + fld(wsT("js.tk.form.priority"), prioSel(it.priorityLevel)) + '</div>' +
-          fld(wsT("js.tk.form.completion"), complRadios()) + fld(wsT("js.tk.form.assignto"), '<div class="people" id="people">' + peopleHtml(v) + '</div>') + '<div class="hint" id="hint"></div>', wsT("js.tk.dlg.split.submit")];
-        break;
-      case 'handoff':
-        var hfrom = d.who || v, hrec = it.assignments.map(A).filter(function (r) { return r.to === hfrom && r.state === 'live'; })[0] || {};
-        T = [hfrom === v ? wsT("js.tk.dlg.handoff.title", it.alias) : wsT("js.tk.dlg.handoff.title.admin", esc(nm(hfrom)), it.alias),
-          hfrom === v ? wsT("js.tk.dlg.handoff.intro", esc(nm(hrec.by))) : wsT("js.tk.dlg.handoff.intro.admin", esc(nm(hfrom)), esc(nm(hrec.by))),
-          fld(wsT("js.tk.form.to"), '<select name="to">' + memberOpts('', function (m) { return m.id !== hfrom && !m.removed; }) + '</select>') + fld(wsT("js.tk.form.note.opt"), '<input type="text" name="note">') +
-          '<input type="hidden" name="who" value="' + esc(d.who || '') + '">', wsT("js.tk.dlg.handoff.submit")];
-        break;
-      case 'status':
-        T = [wsT("js.tk.dlg.status.title"), wsT("js.tk.dlg.status.intro"),
-          fld(wsT("js.tk.form.item"), '<select name="target">' + optsHtml(mineOpen, wsT("js.tk.form.item.none"), d.item) + '</select>') +
-          fld(wsT("js.tk.form.status"), '<select name="status">' + ['doing', 'blocked', 'todo'].map(function (s) { return '<option value="' + s + '">' + esc(stLabel(s)) + '</option>'; }).join('') + '</select>') +
-          fld(wsT("js.tk.form.note.opt"), '<input type="text" name="note">') + (CAPS.origin ? fld(wsT("js.tk.origin"), originSel()) : ''), wsT("js.tk.dlg.status.submit")];
-        break;
-      case 'close':
-        T = [wsT("js.tk.dlg.close.title"), wsT("js.tk.dlg.close.intro"),
-          fld(wsT("js.tk.form.item"), '<select name="target">' + optsHtml(mineOpen, wsT("js.tk.form.item.none"), d.item) + '</select>') +
-          fld(wsT("js.tk.form.note.opt"), '<input type="text" name="note">') + (CAPS.origin ? fld(wsT("js.tk.origin"), originSel()) : ''), wsT("js.tk.dlg.close.title")];
-        break;
-      case 'note': {
-        var L = { 'item.reject': ["js.tk.dlg.reject.title", "js.tk.dlg.reject.intro"],
-          'item.reopen': ["js.tk.dlg.reopen.title", "js.tk.dlg.reopen.intro"],
-          'item.decline': ["js.tk.dlg.decline.title", "js.tk.dlg.decline.intro"],
-          'item.return': ["js.tk.dlg.return.title", "js.tk.dlg.return.intro"] }[d.op];
-        T = [wsT(L[0], d.who || '', it.alias), wsT("js.tk.dlg.note.intro", d.op, wsT(L[1])), fld(wsT("js.tk.form.note"), '<input type="text" name="note">') + '<input type="hidden" name="op" value="' + esc(d.op) + '">' +
-          '<input type="hidden" name="who" value="' + esc(d.who || '') + '">', wsT("js.tk.dlg.note.submit")];
-        break;
-      }
-      case 'cedit': {
-        var cm = VS.comments[d.cid];
-        T = [wsT("js.tk.dlg.cedit.title", alias(d.cid)), wsT("js.tk.dlg.cedit.intro"), fld(wsT("js.tk.form.text"), '<textarea name="body" rows="4">' + esc(cm.body) + '</textarea>'), wsT("js.tk.dlg.save")];
-        break;
-      }
       case 'profile': {
         var pw = d.who || v, pm = VS.members[pw];
         T = [pw === v ? wsT("js.tk.dlg.profile.title") : wsT("js.tk.dlg.profile.title.admin", esc(nm(pw))),
@@ -1860,7 +1842,7 @@
   // pre-validated, so a form can deliberately produce a flagged event. An event of
   // the batch names an earlier one's id as "$N" (its 1-based position); the adapter
   // resolves it. `then(results)` runs after a written batch; a refused one keeps the
-  // dialog open and toasts why.
+  // dialog, the menu, or the inline input open and toasts why.
   // `prep()` runs on success before the re-render (the composer drafts clear only then).
   function commit(events, then, prep) {
     AD.dispatch(ui.store, events.map(function (e) { return { type: e[0], payload: e[1], origin: e[2] || 'human' }; }), function (res) {
@@ -1870,12 +1852,17 @@
       if (then) then(res.results || []);
     });
   }
-  // A written batch: the last-write line, the dialog closed, a re-render, and one toast
-  // line per event (a host write, such as a simulated join, reports through this too).
+  // A written batch: the last-write line, the dialog or the item menu closed, a re-render, and
+  // one toast line per event (a host write, such as a simulated join, reports through this too).
   function wrote(results) {
     ui.last = results;
     closeDialog();
+    var mb = MN && MN.kind === 'item' ? MN.back : null; // an item menu closes; focus goes back to its row once redrawn
+    if (MN && MN.kind === 'item') closeMenu(false);
     render();
+    var me = mb && document.querySelector(mb);
+    if (me && !me.matches('a[href], button, input, [tabindex]')) me = me.querySelector('button, a[href], [tabindex]');
+    if (me && !(document.activeElement && document.activeElement.hasAttribute('data-keep'))) me.focus({ preventScroll: true });
     toast(results.map(function (n) {
       return esc(n.alias) + ' ' + esc(n.type) + ': ' + (n.status === 'applied' ? wsT("js.tk.activity.applied") : '<span class="tf">' + esc(String(n.status).toUpperCase()) + '</span> ' + esc(n.reason));
     }).join('<br>') + '<br><span class="muted">' + wsT("js.tk.toast.batch") + '</span>');
@@ -1886,7 +1873,7 @@
     var kind = form.getAttribute('data-kind'), item = form.getAttribute('data-fitem'), el = form.elements, v = memberOf(viewerOf(ui.store));
     function val(n) { return el[n] ? el[n].value : ''; }
     function people() { return Array.prototype.map.call(form.querySelectorAll('input[name="people"]:checked'), function (e) { return e.value; }); }
-    var evs = [], open = null;
+    var evs = [];
     switch (kind) {
       case 'profile': {
         var who = val('who') || v, pm = VS.members[who].profile, pp = {};
@@ -1898,77 +1885,10 @@
         evs.push(['member.profile', pe]);
         break;
       }
-      case 'create': {
-        var pl = { kind: val('kind'), title: val('title') };
-        if (val('body')) pl.body = val('body');
-        if (val('project')) pl.project = val('project');
-        if (pl.kind !== 'topic') { if (val('due')) pl.due = val('due'); pl.priority = Number(val('priority')); }
-        open = '$1';
-        evs.push(['item.create', pl]);
-        if (val('assignee') && pl.kind !== 'topic') evs.push(['item.assign', { item: open, mode: 'chosen', people: [val('assignee')], completion: val('completion') }]);
-        break;
-      }
-      case 'edit': {
-        var it = VS.items[item], ep = { item: item };
-        ['title', 'body', 'project'].forEach(function (f) { if (val(f) !== it[f]) ep[f] = val(f); });
-        if ('body' in ep) {
-          var km = keptMentions(it.mentions, ep.body);
-          if (km.length) ep.mentions = km;
-          if (it.attachments.length) ep.attachments = it.attachments;
-        }
-        if ((val('due') || null) !== it.due) ep.due = val('due') || null;
-        if (Number(val('priority')) !== it.priority) ep.priority = Number(val('priority'));
-        evs.push(['item.edit', ep]);
-        break;
-      }
       case 'assign': {
         var ap = { item: item, mode: val('mode'), completion: val('completion') };
         if (ap.mode === 'chosen') ap.people = people(); else ap.levels = Number(val('levels'));
         evs.push(['item.assign', ap]);
-        break;
-      }
-      case 'split': {
-        open = '$1';
-        var sp0 = { kind: 'task', title: val('title'), parent: item, priority: Number(val('priority')) };
-        if (val('due')) sp0.due = val('due');
-        evs.push(['item.create', sp0]);
-        evs.push(['item.assign', { item: open, mode: 'chosen', people: people(), completion: val('completion') }]);
-        break;
-      }
-      case 'handoff': {
-        var hp = { item: item, to: val('to') };
-        if (val('who') && val('who') !== viewerOf(ui.store).split('.')[0]) hp.assignee = val('who');
-        if (val('note')) hp.note = val('note');
-        evs.push(['item.handoff', hp]);
-        break;
-      }
-      case 'status': {
-        if (!val('target')) return toast(wsT("js.tk.toast.noset"));
-        var sp = { item: val('target'), status: val('status') };
-        if (val('note')) sp.note = val('note');
-        evs.push(['item.status', sp, val('origin')]);
-        break;
-      }
-      case 'close': {
-        if (!val('target')) return toast(wsT("js.tk.toast.noclose"));
-        var cp = { item: val('target') };
-        if (val('note')) cp.note = val('note');
-        evs.push(['item.close', cp, val('origin')]);
-        break;
-      }
-      case 'note': {
-        var np = { item: item };
-        if (val('who') && val('op') !== 'item.decline') np.assignee = val('who');
-        if (val('note')) np.note = val('note');
-        evs.push([val('op'), np]);
-        break;
-      }
-      case 'cedit': {
-        var ocm = VS.comments[form.getAttribute('data-fcid')], cep = { comment: form.getAttribute('data-fcid'), body: val('body') };
-        var ckm = keptMentions(ocm.mentions, cep.body);
-        if (ckm.length) cep.mentions = ckm;
-        if (ocm.attachments.length) cep.attachments = ocm.attachments;
-        evs.push(['comment.edit', cep]);
         break;
       }
       case 'admin': {
@@ -1987,24 +1907,15 @@
       }
       default: if (X.dialogs && X.dialogs[kind]) X.dialogs[kind].submit(ui.store, form, H); return;
     }
-    commit(evs, open ? function (res) { if (res[0] && VS.items[res[0].id]) showItem(res[0].id); } : null);
+    commit(evs);
   }
 
   function quick(k, a) {
     var item = a.getAttribute('data-item'), who = a.getAttribute('data-who'), cid = a.getAttribute('data-cid');
-    var box = $('cbox'), note = box && a.getAttribute('data-note') ? box.value.trim() : '';
-    var origin = CAPS.origin && $('corigin') ? $('corigin').value : 'human';
-    // a write that used the composer's text (a comment, a status with a note) clears it once written
-    var clear = k === 'comment' || !!a.getAttribute('data-note');
-    function put(evs, extra) { commit(evs, null, function () { if (clear) ui.clearDraft = true; if (extra) extra(); }); }
+    var box = $('cbox'), origin = CAPS.origin && $('corigin') ? $('corigin').value : 'human';
+    // a comment clears the composer once written
+    function put(evs, extra) { commit(evs, null, extra); }
     switch (k) {
-      case 'q-status': {
-        var p = { item: item, status: a.getAttribute('data-status') };
-        if (note) p.note = note;
-        put([['item.status', p, a.getAttribute('data-note') ? origin : 'human']]);
-        break;
-      }
-      case 'q-close': put([['item.close', note ? { item: item, note: note } : { item: item }, origin]]); break;
       case 'confirm': put([['item.confirm', { item: item, assignee: who }]]); break;
       case 'unassign': put([['item.unassign', { item: item, assignee: who }]]); break;
       case 'accept': put([['item.accept', { item: item }]]); break;
@@ -2017,10 +1928,382 @@
         var ms = keptMentions(ui.mdraft, cp.body);
         if (ms.length) cp.mentions = ms;
         if (ui.adraft.length) cp.attachments = ui.adraft;
-        put([['comment.add', cp, origin]], function () { ui.replyTo = null; ui.mdraft = []; ui.adraft = []; });
+        put([['comment.add', cp, origin]], function () { ui.clearDraft = true; ui.replyTo = null; ui.mdraft = []; ui.adraft = []; });
         break;
       }
     }
+  }
+
+  // ------------------------------------------------------------ context menu
+
+  // One context menu serves every item: list rows, kanban cards, calendar entries, gantt rows,
+  // and the item window header open it alike, by right-click, the "⋯" button, or Shift+F10 /
+  // the menu key on a focused row; a click on a status icon opens its status part alone. It is
+  // one fixed panel (#tkmenu) over everything, the item window included. MN is its state:
+  //   { kind: 'item' | 'sync', item, step, op, who, from (the step it came from, for Back),
+  //     statusOnly, back (selector of the opener) and backEl (the opener), rk (the opener's row key,
+  //     where "add subtask" puts its input row), pt (the pointer, for a right-click) or rect, pick }
+  // The item menu's steps: 'main' (status radios, note, and the actions the viewer may take),
+  // 'pri' and 'due' (priority radios, a date), 'handoff' (a people list), 'note' (decline,
+  // reject, reopen, return with a note), 'assign' (the assign form: the anchored assign
+  // popover). 'sync' is the Items card ribbon's status popover. Arrow keys move, Enter or
+  // Space applies, ArrowRight opens a step, ArrowLeft or Esc goes back, Esc on the first step
+  // closes it, and focus returns to the opener; Tab cycles inside it.
+  var MN = null;
+  function openMenu(o, anchor, pt) {
+    MN = o; MN.step = MN.step || 'main';
+    MN.backEl = anchor || null; MN.back = anchor ? returnSel(anchor) : null;
+    var rk = anchor && anchor.closest('[data-rk]');
+    MN.rk = rk ? rk.getAttribute('data-rk') : null;
+    MN.pt = pt || null; MN.rect = anchor ? anchor.getBoundingClientRect() : null;
+    hideTip();
+    if (anchor && anchor.hasAttribute('aria-haspopup')) anchor.setAttribute('aria-expanded', 'true');
+    document.body.classList.add('tk-menuon');
+    drawMenu();
+  }
+  // opts: { step, op, who, statusOnly }; a step opened from inside the menu keeps its place
+  function itemMenu(id, anchor, pt, opts) {
+    if (!VS || !VS.items[id]) return;
+    opts = opts || {};
+    if (MN && MN.kind === 'item' && anchor && $('tkmenu').contains(anchor)) {
+      MN.from = MN.step; MN.step = opts.step || 'main'; MN.op = opts.op || null; MN.who = opts.who || null; MN.q = '';
+      drawMenu(); return;
+    }
+    openMenu({ kind: 'item', item: id, step: opts.step || 'main', op: opts.op || null, who: opts.who || null, statusOnly: !!opts.statusOnly, from: null, q: '' }, anchor, pt);
+  }
+  function closeMenu(refocus) {
+    if (!MN) return;
+    var m = MN, el = m.backEl && m.backEl.isConnected ? m.backEl : m.back && document.querySelector(m.back);
+    MN = null;
+    $('tkmenu').hidden = true; $('tkmenu').innerHTML = '';
+    document.body.classList.remove('tk-menuon');
+    if (m.backEl && m.backEl.hasAttribute('aria-haspopup')) m.backEl.setAttribute('aria-expanded', 'false');
+    if (refocus && el) {
+      if (!el.matches('a[href], button, input, [tabindex]')) el = el.querySelector('a[href], button, [tabindex]');
+      if (el) el.focus({ preventScroll: true });
+    }
+  }
+  function menuBack() {
+    if (!MN.from) { closeMenu(true); return; }
+    MN.step = MN.from; MN.from = null; MN.op = null; MN.who = null; MN.q = '';
+    drawMenu();
+  }
+  function drawMenu() {
+    var m = $('tkmenu');
+    m.innerHTML = MN.kind === 'sync' ? syncPopHtml() : menuHtml();
+    m.className = 'tk tk-menu' + (MN.kind === 'sync' ? ' spopw' : MN.step === 'assign' ? ' wide' : '');
+    m.setAttribute('role', MN.kind === 'sync' ? 'dialog' : 'menu');
+    m.setAttribute('aria-label', MN.kind === 'sync' ? wsT("js.tk.rib.tip") : wsT("js.tk.menu.aria", VS.items[MN.item] ? VS.items[MN.item].title : ''));
+    m.hidden = false;
+    var f = m.querySelector('form');
+    if (f) updateHint(f);
+    placeMenu();
+    var first = m.querySelector('[data-autofocus]') || m.querySelector('[data-mi]:not([disabled]), button:not([disabled]), input');
+    if (first) first.focus({ preventScroll: true });
+  }
+  // At the pointer for a right-click, else under the opener (above it when below does not fit),
+  // kept inside the window.
+  function placeMenu() {
+    var m = $('tkmenu'), w = m.offsetWidth, h = m.offsetHeight, W = window.innerWidth, Hh = window.innerHeight, x, y;
+    if (MN.pt) { x = MN.pt.x; y = MN.pt.y; if (y + h > Hh - 6) y = Math.max(6, MN.pt.y - h); }
+    else if (MN.rect) {
+      var r = MN.rect;
+      x = r.left; y = r.bottom + 4;
+      if (y + h > Hh - 6) y = r.top - h - 4 >= 6 ? r.top - h - 4 : Math.max(6, Hh - h - 6);
+    } else { x = (W - w) / 2; y = (Hh - h) / 2; }
+    x = Math.max(6, Math.min(x, W - w - 6));
+    m.style.left = Math.round(x) + 'px'; m.style.top = Math.round(Math.max(6, y)) + 'px';
+  }
+  function mi(act, label, data, o) {
+    o = o || {};
+    return '<button type="button" class="mi' + (o.cls ? ' ' + o.cls : '') + '" role="menuitem" data-mi' + attr('act', act) + dataAttrs(data) + (o.sub ? ' data-sub aria-haspopup="menu"' : '') + '>' +
+      (o.icon ? '<svg class="i"><use href="#tki-' + o.icon + '"/></svg>' : '<span class="i"></span>') + '<span class="ml">' + label + '</span>' +
+      (o.val ? '<span class="mv">' + o.val + '</span>' : '') + (o.sub ? '<svg class="i mch"><use href="#tki-chev"/></svg>' : '') + '</button>';
+  }
+  function msep() { return '<div class="msep" role="separator"></div>'; }
+  function noteField(ph) {
+    return '<label class="mnote"><input type="text" id="tkmnote" data-mi autocomplete="off" placeholder="' + esc(ph) + '" aria-label="' + esc(wsT("js.tk.form.note.opt")) + '"><span class="mk" aria-hidden="true">&#9166;</span></label>';
+  }
+  function menuHtml() {
+    var it = VS.items[MN.item], v = VS.viewer.member, h = '';
+    if (!it) return '';
+    h += '<div class="mh"><code class="al">' + esc(it.alias) + '</code><b>' + esc(it.title) + '</b></div>';
+    var back = MN.from ? mi('m-back', wsT("js.tk.menu.back"), {}, { icon: 'back', cls: 'mback' }) + msep() : '';
+    var mineR = mineLive(it), step = MN.step;
+    if (step === 'pri') {
+      return h + back + '<div role="group" aria-label="' + wsT("js.tk.menu.pri") + '">' + VS.priority.names.map(function (x, i) {
+        var on = i === it.priority;
+        return '<button type="button" class="mi mr" role="menuitemradio" aria-checked="' + on + '" data-mi' + attr('act', 'm-pri') + attr('p', i) + (on ? ' data-autofocus' : '') + '><span class="rdo"></span><span class="ml">' + esc(x) + '</span>' +
+          (i === VS.priority.default ? '<span class="mv">' + wsT("js.tk.menu.default") + '</span>' : '') + '</button>';
+      }).join('') + '</div>';
+    }
+    if (step === 'due') {
+      return h + back + '<div class="mrow"><input type="date" id="tkmdue" data-mi data-autofocus value="' + esc(it.due || '') + '" aria-label="' + wsT("js.tk.menu.due") + '">' +
+        btn('m-due-set', wsT("js.tk.menu.due.set"), {}, 'primary') + '</div>' + (it.due ? mi('m-due-clear', wsT("js.tk.menu.due.clear"), {}, { icon: 'x' }) : '');
+    }
+    if (step === 'handoff') {
+      var hfrom = MN.who || v, hrec = it.assignments.map(A).filter(function (r) { return r.to === hfrom && r.state === 'live'; })[0] || {};
+      return h + back + '<div class="mtitle">' + (hfrom === v ? wsT("js.tk.dlg.handoff.title", esc(it.alias)) : wsT("js.tk.dlg.handoff.title.admin", esc(nm(hfrom)), esc(it.alias))) + '</div>' +
+        '<p class="mintro">' + (hfrom === v ? wsT("js.tk.dlg.handoff.intro", esc(nm(hrec.by))) : wsT("js.tk.dlg.handoff.intro.admin", esc(nm(hfrom)), esc(nm(hrec.by)))) + '</p>' +
+        '<div class="mrow"><input type="text" id="tkmq" data-mi data-autofocus autocomplete="off" spellcheck="false" placeholder="' + wsT("js.tk.menu.search") + '" aria-label="' + wsT("js.tk.menu.search") + '" value="' + esc(MN.q || '') + '"></div>' +
+        '<div class="mlist" role="group">' + handoffList(it, hfrom) + '</div>' + noteField(wsT("js.tk.form.note.opt"));
+    }
+    if (step === 'note') {
+      var L = { 'item.reject': ["js.tk.dlg.reject.title", "js.tk.dlg.reject.intro"], 'item.reopen': ["js.tk.dlg.reopen.title", "js.tk.dlg.reopen.intro"],
+        'item.decline': ["js.tk.dlg.decline.title", "js.tk.dlg.decline.intro"], 'item.return': ["js.tk.dlg.return.title", "js.tk.dlg.return.intro"] }[MN.op];
+      return h + back + '<div class="mtitle">' + wsT(L[0], esc(nm(MN.who || v)), esc(it.alias)) + '</div><p class="mintro">' + wsT(L[1]) + '</p>' +
+        '<div class="mrow">' + noteField(wsT("js.tk.form.note")) + btn('m-note-send', wsT("js.tk.dlg.note.submit"), {}, 'primary') + '</div>';
+    }
+    if (step === 'assign') {
+      return h + back + '<form' + attr('kind', 'assign') + attr('fitem', it.id) + '><div class="mtitle">' + wsT("js.tk.dlg.assign.title", esc(it.alias)) + '</div><p class="mintro">' + wsT("js.tk.dlg.assign.intro") + '</p>' +
+        assignBody(v) + '<div class="btns"><button type="submit" class="btn primary">' + wsT("js.tk.dlg.assign.submit") + '</button></div></form>';
+    }
+    // the main step: the status part (radios that apply on click, a note that rides along), then the actions
+    var parts = [];
+    if (mineR && mineR.status !== 'done' && !it.hidden) {
+      var cur = mineR.status === 'awaiting' ? 'done' : mineR.status, pick = MN.pick || cur;
+      parts.push('<div class="mst" role="group" aria-label="' + wsT("js.tk.prop.status") + '">' + ['todo', 'doing', 'blocked', 'done'].map(function (s) {
+        var on = s === cur, label = s === 'done' && mineR.completion === 'assigner' ? wsT("js.tk.menu.reqdone") : stLabel(s), dis = s === 'done' && mineR.status === 'awaiting';
+        return '<button type="button" class="mr' + (s === pick && !on ? ' pick' : '') + '" role="menuitemradio" aria-checked="' + on + '" data-mi' + attr('act', 'm-status') + attr('status', s) + (dis ? ' disabled' : '') + (on ? ' data-autofocus' : '') + '>' +
+          SI.svg(s) + '<span>' + esc(label) + '</span></button>';
+      }).join('') + '</div>' + noteField(wsT("js.tk.menu.note")));
+    }
+    if (MN.statusOnly) return h + (parts.join('') || '<p class="mempty">' + wsT("js.tk.win.noacts", esc(nm(v))) + '</p>');
+    var acts = actList(it).map(function (x) {
+      return mi(x[0], esc(x[2]), x[3], { icon: x[1], cls: x[4] ? 'go' : '' });
+    });
+    if (mineR && mineR.status === 'done' && !it.hidden) acts.push(mi('note', esc(wsT("js.tk.asg.reopen")), { item: it.id, who: v, op: 'item.reopen' }, { icon: 'return' }));
+    if (acts.length) parts.push(acts.join(''));
+    var edit = canEdit(it), task = it.kind !== 'topic', more = [];
+    if (canSplit(it)) more.push(mi('m-sub', wsT("js.tk.menu.sub"), { item: it.id }, { icon: 'plus' }));
+    if (edit && task) {
+      more.push(mi('pri', wsT("js.tk.menu.pri"), { item: it.id }, { icon: 'flag', sub: 1, val: esc(it.priorityName) }));
+      more.push(mi('due', wsT("js.tk.menu.due"), { item: it.id }, { icon: 'calendar', sub: 1, val: it.due ? esc(it.due) : '' }));
+    }
+    if (mineR && mineR.status !== 'done' && !it.hidden) more.push(mi('handoff', esc(wsT("js.tk.act.handoff")), { item: it.id }, { icon: 'handoff', sub: 1 }));
+    if (it.author === v && task && !it.hidden) more.push(mi('assign', esc(wsT("js.tk.act.assign")), { item: it.id }, { icon: 'assign', sub: 1 }));
+    if (more.length) parts.push(more.join(''));
+    var last = [];
+    if (edit) last.push(mi('edit', esc(it.author === v ? wsT("js.tk.act.edit") : wsT("js.tk.act.edit.admin")), { item: it.id }, { icon: 'pen' }));
+    if (!(ui.win && ui.item === it.id)) last.push(mi('m-open', esc(wsT("js.tk.menu.open")), { item: it.id }, { icon: 'page' }));
+    if (edit) last.push(mi('ihide', esc(it.author === v ? wsT("js.tk.act.hide") : wsT("js.tk.act.hide.admin")), { item: it.id }, { icon: 'x', cls: 'danger' }));
+    if (last.length) parts.push(last.join(''));
+    return h + (parts.length ? parts.join(msep()) : '<p class="mempty">' + wsT("js.tk.win.noacts", esc(nm(v))) + '</p>');
+  }
+  // The handoff step's people: anyone but the holder and removed members, filtered by the search.
+  function handoffList(it, from) {
+    var q = String(MN.q || '').trim().toLowerCase();
+    var ids = Object.keys(VS.members).filter(function (id) { var m = VS.members[id]; return id !== from && !m.removed && (!q || (id + ' ' + nmo(id)).toLowerCase().indexOf(q) >= 0); });
+    if (!ids.length) return '<p class="mempty">' + wsT("js.tk.menu.nobody") + '</p>';
+    return ids.map(function (id) {
+      return '<button type="button" class="mi" role="menuitem" data-mi' + attr('act', 'm-handoff') + attr('to', id) + '><i class="av">' + esc(initials(id)) + '</i><span class="ml">' + whoName(id) + '</span><span class="mv">' + esc(id) + '</span></button>';
+    }).join('');
+  }
+  function menuNote() { var n = $('tkmnote'); return n ? n.value.trim() : ''; }
+  // A status from the menu: done closes (it waits for the assigner when the completion says so).
+  function applyStatus(s) {
+    var it = VS.items[MN.item], note = menuNote(), origin = CAPS.origin && $('corigin') ? $('corigin').value : 'human';
+    var r = it && mineLive(it);
+    if (!r) return;
+    if (s === (r.status === 'awaiting' ? 'done' : r.status) && !note) { closeMenu(true); return; }
+    var p = { item: it.id };
+    if (note) p.note = note;
+    if (s === 'done') commit([['item.close', p, origin]]);
+    else { p.status = s; commit([['item.status', p, origin]]); }
+  }
+  // The menu's own acts (m-*); the rest of a menu item's data-act goes through the shared handlers.
+  function menuAct(k, a) {
+    var id = MN.item, it = VS.items[id];
+    if (k === 'm-back') return menuBack();
+    if (!it) return closeMenu(true);
+    switch (k) {
+      case 'm-status': return applyStatus(a.getAttribute('data-status'));
+      case 'm-pri': {
+        var pv = Number(a.getAttribute('data-p'));
+        if (pv === it.priority) return menuBack();
+        return commit([['item.edit', { item: id, priority: pv }]]);
+      }
+      case 'm-due-set': {
+        var dv = $('tkmdue').value || null;
+        if (dv === it.due) return menuBack();
+        return commit([['item.edit', { item: id, due: dv }]]);
+      }
+      case 'm-due-clear': return commit([['item.edit', { item: id, due: null }]]);
+      case 'm-handoff': {
+        var hp = { item: id, to: a.getAttribute('data-to') }, note = menuNote();
+        if (MN.who && MN.who !== VS.viewer.member) hp.assignee = MN.who;
+        if (note) hp.note = note;
+        return commit([['item.handoff', hp]]);
+      }
+      case 'm-note-send': {
+        var np = { item: id }, nt = menuNote();
+        if (MN.who && MN.op !== 'item.decline') np.assignee = MN.who;
+        if (nt) np.note = nt;
+        return commit([[MN.op, np]]);
+      }
+      case 'm-sub': {
+        // under a list, tree, gantt, or subtask row; a kanban card or a calendar entry has no room
+        // for an input row under it, so those (and the window header) use the item window's Subtasks
+        var rk = MN.rk && !/^(iw|k|c):/.test(MN.rk) && document.querySelector('.tk [data-rk="' + CSS.escape(MN.rk) + '"]') ? MN.rk : 'iw:' + id;
+        closeMenu(false);
+        if (rk === 'iw:' + id && !(ui.win && ui.item === id)) showItem(id);
+        ui.sub = { item: id, rk: rk, val: '' };
+        render();
+        if ($('tksub')) $('tksub').focus();
+        return;
+      }
+      case 'm-open': closeMenu(false); return showItem(id);
+    }
+  }
+  // Keys inside the menu (see MN).
+  function menuKey(e) {
+    var m = $('tkmenu'), t = e.target, k = e.key, field = t.matches('input[type="text"], input[type="date"], input:not([type]), textarea, select');
+    if (k === 'Escape') { e.preventDefault(); e.stopPropagation(); if (MN.from) menuBack(); else closeMenu(true); return; }
+    if (k === 'Tab') {
+      var fs = Array.prototype.filter.call(m.querySelectorAll('button:not([disabled]), input:not([disabled]), select'), function (x) { return x.offsetParent !== null; });
+      if (!fs.length) return;
+      var i = fs.indexOf(t);
+      e.preventDefault();
+      fs[(i + (e.shiftKey ? fs.length - 1 : 1)) % fs.length].focus();
+      return;
+    }
+    if (k === 'Enter' && !e.isComposing) {
+      if (t.id === 'tkmnote' && MN.step === 'main') { e.preventDefault(); applyStatus(MN.pick || (VS.items[MN.item] && (function (r) { return r ? (r.status === 'awaiting' ? 'done' : r.status) : ''; })(mineLive(VS.items[MN.item])))); return; }
+      if (t.id === 'tkmnote' && MN.step === 'note') { e.preventDefault(); menuAct('m-note-send', t); return; }
+      if (t.id === 'tkmdue') { e.preventDefault(); menuAct('m-due-set', t); return; }
+      if (t.id === 'tkmq') { e.preventDefault(); var p1 = m.querySelector('[data-act="m-handoff"]'); if (p1) p1.click(); return; }
+      return; // a button: its click; a form field: the form's submit
+    }
+    if (t.closest('form')) return; // the assign form keeps its own keys
+    var items = Array.prototype.filter.call(m.querySelectorAll('[data-mi]'), function (x) { return !x.disabled; }), at = items.indexOf(t);
+    if ((k === 'ArrowDown' || k === 'ArrowUp') && t.type !== 'date') {
+      e.preventDefault();
+      if (!items.length) return;
+      var n = at < 0 ? (k === 'ArrowDown' ? 0 : items.length - 1) : (at + (k === 'ArrowDown' ? 1 : items.length - 1)) % items.length;
+      items[n].focus();
+      return;
+    }
+    if (field) return;
+    if (k === 'ArrowRight' || k === 'ArrowLeft') {
+      if (t.classList.contains('mr') && t.parentNode.classList.contains('mst')) {
+        e.preventDefault();
+        // arrowing over the radios picks without applying: the note's Enter then applies the picked status
+        var rs = Array.prototype.filter.call(t.parentNode.children, function (x) { return !x.disabled; }), j = rs.indexOf(t), nx = rs[(j + (k === 'ArrowRight' ? 1 : rs.length - 1)) % rs.length];
+        MN.pick = nx.getAttribute('data-status');
+        rs.forEach(function (x) { x.classList.toggle('pick', x === nx && x.getAttribute('aria-checked') !== 'true'); });
+        nx.focus();
+      } else if (k === 'ArrowRight' && t.hasAttribute('data-sub')) { e.preventDefault(); t.click(); }
+      else if (k === 'ArrowLeft' && MN.from) { e.preventDefault(); menuBack(); }
+      return;
+    }
+    if (k === 'Home' || k === 'End') { e.preventDefault(); if (items.length) items[k === 'Home' ? 0 : items.length - 1].focus(); }
+  }
+
+  // ------------------------------------------------------------ inline writes
+
+  // "+ New": an input row at the top of the Items list (ui.nrow[store] = { val, kind } while it
+  // shows). Title + Enter creates the item (a todo is self-assigned in the same write, as
+  // todos are); the row stays for the next one; Esc closes it. Priority, due, and assignees
+  // are set afterwards from the new row's menu.
+  function newRowHtml() {
+    var n = ui.nrow[ui.store];
+    if (!n) return '';
+    return '<div class="nrow"><svg class="i"><use href="#tki-plus"/></svg><input type="text" id="tknew" data-keep autocomplete="off" value="' + esc(n.val) + '" placeholder="' + wsT("js.tk.new.ph") + '" aria-label="' + wsT("js.tk.new.aria") + '">' +
+      '<select id="tknewkind" aria-label="' + wsT("js.tk.form.kind") + '">' + ['task', 'todo', 'topic'].map(function (k) { return '<option value="' + k + '"' + (k === n.kind ? ' selected' : '') + '>' + esc(kindName(k)) + '</option>'; }).join('') + '</select>' +
+      '<button type="button" class="ia"' + attr('act', 'new-x') + ' aria-label="' + wsT("js.tk.dlg.cancel") + '"' + tipAttr(wsT("js.tk.new.close")) + '><svg class="i"><use href="#tki-x"/></svg></button></div>';
+  }
+  function openNewRow() {
+    if (!VS) return;
+    ui.nrow[ui.store] = ui.nrow[ui.store] || { val: '', kind: 'task' };
+    if (ui.layout === 'narrow') tabState().narrow = 'items';
+    render();
+    if ($('tknew')) $('tknew').focus();
+  }
+  function closeNewRow() { delete ui.nrow[ui.store]; render(); var b = document.querySelector('.tk [data-act="create"]'); if (b) b.focus(); }
+  function createNew() {
+    var n = ui.nrow[ui.store], title = $('tknew').value.trim(), v = VS.viewer.member;
+    if (!n || !title) return;
+    var evs = [['item.create', { kind: n.kind, title: title }]];
+    if (n.kind === 'todo') evs.push(['item.assign', { item: '$1', mode: 'chosen', people: [v], completion: 'assignee' }]);
+    commit(evs, null, function () { n.val = ''; });
+  }
+  // "Add subtask": an input row one level in, right under the row the menu opened from (or atop
+  // the item window's Subtasks for the window header); ui.sub = { item: parent, rk: that row's
+  // key, val }. Title + Enter creates an unassigned task under the parent and keeps the row for
+  // the next sibling; Esc closes it and returns to the row.
+  function subRowHtml(ind) {
+    var it = VS.items[ui.sub.item];
+    return '<div class="subrow" style="--ind:' + ind + '"><span class="ind">&#8627;</span><input type="text" id="tksub" data-keep autocomplete="off" value="' + esc(ui.sub.val) + '" placeholder="' + wsT("js.tk.sub.ph") + '" aria-label="' + esc(wsT("js.tk.sub.aria", it ? it.title : '')) + '">' +
+      '<button type="button" class="ia"' + attr('act', 'sub-x') + ' aria-label="' + wsT("js.tk.dlg.cancel") + '"' + tipAttr(wsT("js.tk.dlg.cancel")) + '><svg class="i"><use href="#tki-x"/></svg></button></div>';
+  }
+  // after a render: the subtask row goes under its anchor (the item window draws its own)
+  function placeSub() {
+    if (!ui.sub) return;
+    if (!VS.items[ui.sub.item]) { ui.sub = null; return; }
+    if (ui.sub.rk === 'iw:' + ui.sub.item) return;
+    var at = document.querySelector('.tk:not(#tkmenu) [data-rk="' + CSS.escape(ui.sub.rk) + '"]');
+    if (!at) return;
+    var ie = at.style.getPropertyValue('--ind') ? at : at.querySelector('[style*="--ind"]');
+    at.insertAdjacentHTML('afterend', subRowHtml((ie ? Number(ie.style.getPropertyValue('--ind')) || 0 : 0) + 1));
+  }
+  function closeSub() {
+    var rk = ui.sub && ui.sub.rk;
+    ui.sub = null; render();
+    var el = rk && document.querySelector('.tk [data-rk="' + CSS.escape(rk) + '"]');
+    if (el && !el.matches('[tabindex], button, a[href]')) el = el.querySelector('[tabindex], button, a[href]');
+    if (el) el.focus();
+  }
+  function createSub() {
+    var s = ui.sub, title = $('tksub').value.trim();
+    if (!s || !title) return;
+    commit([['item.create', { kind: 'task', title: title, parent: s.item }]], null, function () { s.val = ''; });
+  }
+  // The item window's edit mode and a comment's edit in place.
+  function startEdit(id) {
+    var it = VS.items[id];
+    if (!it) return;
+    if (!(ui.win && ui.item === id)) showItem(id);
+    ui.iedit = { item: id, title: it.title, body: it.body || '', project: it.project || '' };
+    render();
+    if ($('iw-etitle')) $('iw-etitle').focus();
+  }
+  function endEdit() { ui.iedit = null; render(); var b = $('tkwinbody').querySelector('.iw-more'); if (b) b.focus(); }
+  function saveEdit() {
+    var e = ui.iedit, it = e && VS.items[e.item];
+    if (!it) return;
+    var ep = { item: it.id }, cur = { title: $('iw-etitle').value, body: $('iw-ebody').value, project: $('iw-eproj').value };
+    ['title', 'body', 'project'].forEach(function (f) { if (cur[f] !== (it[f] || '')) ep[f] = cur[f]; });
+    if (!('title' in ep) && !('body' in ep) && !('project' in ep)) { toast(wsT("js.tk.toast.unchanged")); return endEdit(); }
+    if ('body' in ep) {
+      var km = keptMentions(it.mentions, ep.body);
+      if (km.length) ep.mentions = km;
+      if (it.attachments.length) ep.attachments = it.attachments;
+    }
+    commit([['item.edit', ep]], null, function () { ui.iedit = null; });
+  }
+  function startCedit(cid) {
+    var c = VS.comments[cid];
+    if (!c) return;
+    ui.cedit = { cid: cid, body: c.body };
+    render();
+    var t = $('tkcedit');
+    if (t) { t.focus(); t.setSelectionRange(t.value.length, t.value.length); }
+  }
+  function endCedit() {
+    var cid = ui.cedit && ui.cedit.cid;
+    ui.cedit = null; render();
+    var b = cid && $('tkwinbody').querySelector('[data-act="cedit"][data-cid="' + CSS.escape(cid) + '"]');
+    if (b) b.focus();
+  }
+  function saveCedit() {
+    var e = ui.cedit, ocm = e && VS.comments[e.cid];
+    if (!ocm) return;
+    var cep = { comment: e.cid, body: $('tkcedit').value };
+    if (cep.body === ocm.body) { toast(wsT("js.tk.toast.unchanged")); return endCedit(); }
+    var ckm = keptMentions(ocm.mentions, cep.body);
+    if (ckm.length) cep.mentions = ckm;
+    if (ocm.attachments.length) cep.attachments = ocm.attachments;
+    commit([['comment.edit', cep]], null, function () { ui.cedit = null; });
   }
 
   // Kanban drop: only the viewer's own live assignment moves.
@@ -2148,7 +2431,7 @@
   function setInert(on) {
     if (!on) { inerted.forEach(function (el) { el.inert = false; }); inerted = []; return; }
     if (inerted.length) return;
-    var keep = [$('tkwin'), $('tkdlg'), $('tktoast'), $('tktip')];
+    var keep = [$('tkwin'), $('tkdlg'), $('tktoast'), $('tktip'), $('tkmenu')];
     Array.prototype.forEach.call(document.body.children, function (el) {
       if (keep.indexOf(el) < 0 && !el.inert) { el.inert = true; inerted.push(el); }
     });
@@ -2191,11 +2474,14 @@
     var scrolls = {}, fa = document.activeElement, focusRk = fa && fa.closest && body.contains(fa) && fa.closest('[data-rk]');
     focusRk = focusRk && focusRk.getAttribute('data-rk');
     var focusSearch = fa && fa.id === 'psearch' ? [fa.selectionStart, fa.selectionEnd] : null;
+    // an inline input (new item, subtask, in-place edit, the composer) keeps focus and its caret
+    var focusKeep = fa && fa.id && fa.hasAttribute('data-keep') ? [fa.id, fa.selectionStart, fa.selectionEnd] : null;
     var focusFk = fa && fa.closest && (body.contains(fa) || sb.contains(fa)) && fa.closest('[data-fk]'); // the fold buttons keep keyboard focus across their re-render
     focusFk = focusFk && focusFk.getAttribute('data-fk');
     Array.prototype.forEach.call(body.querySelectorAll('.card[id] > .cbody'), function (c) { scrolls[c.parentNode.id] = c.scrollTop; });
     hideTip();
     body.innerHTML = drawerHtml(name, v);
+    placeSub();
     if (!ui.page) fitDrawer();
     Array.prototype.forEach.call(body.querySelectorAll('.card[id] > .cbody'), function (c) { if (scrolls[c.parentNode.id]) c.scrollTop = scrolls[c.parentNode.id]; });
     body.scrollTop = top1;
@@ -2225,6 +2511,15 @@
       var wf = focusFk && lastInput === 'key' && sb.querySelector('[data-fk="' + CSS.escape(focusFk) + '"]');
       if (wf) wf.focus({ preventScroll: true });
     } else sb.innerHTML = '';
+    if (open) placeSub();
+    var fk2 = focusKeep && $(focusKeep[0]);
+    if (fk2) { fk2.focus({ preventScroll: true }); try { fk2.setSelectionRange(focusKeep[1], focusKeep[2]); } catch (x) { /* not a text field */ } }
+    // the menu stays over the redraw: the status popover follows the store, an item menu closes with its item
+    if (MN && MN.kind === 'sync') {
+      var mIn = $('tkmenu').contains(document.activeElement);
+      $('tkmenu').innerHTML = syncPopHtml(); placeMenu();
+      if (mIn) { var mf = $('tkmenu').querySelector('button'); if (mf) mf.focus({ preventScroll: true }); }
+    } else if (MN && !VS.items[MN.item]) closeMenu(false);
     ui.itemChanged = false; ui.clearDraft = false;
     if (X.rendered) X.rendered(name, VS, H);
     measure();
@@ -2278,6 +2573,8 @@
       ui.store = storeId; ui.last = null; ui.sel = null;
     }
     if (!ui.win) ui.winReturn = returnSel(opener || document.activeElement);
+    if (ui.item !== itemId) { ui.iedit = null; ui.cedit = null; if (ui.sub && ui.sub.rk.indexOf('iw:') === 0) ui.sub = null; }
+    if (MN) closeMenu(false);
     ui.item = itemId; ui.win = true; ui.itemChanged = true; ui.aopen = null; ui.replyTo = null; ui.mdraft = []; ui.adraft = [];
     ui.focus = focus ? { ev: focus, flash: true } : null;
     render();
@@ -2295,7 +2592,9 @@
   }
   function closeItemWindow() {
     var back = ui.winReturn;
-    ui.win = false; ui.winReturn = null; ui.focus = null; ui.replyTo = null; ui.mdraft = []; ui.adraft = [];
+    ui.win = false; ui.winReturn = null; ui.focus = null; ui.replyTo = null; ui.mdraft = []; ui.adraft = []; ui.iedit = null; ui.cedit = null;
+    if (ui.sub && ui.sub.rk.indexOf('iw:') === 0) ui.sub = null;
+    if (MN) closeMenu(false);
     render();
     var el = back && document.querySelector(back);
     if (el && !el.matches('a[href], button, [tabindex]')) el = el.querySelector('a[href], button, [tabindex]'); // a feed entry: its title link
@@ -2448,7 +2747,9 @@
   function placeShownMore() { Array.prototype.forEach.call(document.querySelectorAll('.tk .irow:hover, .tk .irow:focus-within, .tk .irow.sel'), placeMore); }
   var lastPointer = 'mouse', lastInput = 'pointer'; // the focused row is restored after a re-render only for keyboard use
 
-  var QUICK = { 'q-status': 1, 'q-close': 1, confirm: 1, unassign: 1, accept: 1, ihide: 1, chide: 1, comment: 1 };
+  var QUICK = { confirm: 1, unassign: 1, accept: 1, ihide: 1, chide: 1, comment: 1 };
+  // the item menu's steps an action button opens (in the menu, or a menu anchored to the button)
+  var STEPS = { note: 1, handoff: 1, assign: 1, pri: 1, due: 1 };
 
   // ------------------------------------------------------------- display state
 
@@ -2491,6 +2792,10 @@
     '<symbol id="tki-bell" viewBox="0 0 16 16"><path d="M8 2.6a3.6 3.6 0 0 0-3.6 3.6v2.4L3 10.8h10l-1.4-2.2V6.2A3.6 3.6 0 0 0 8 2.6zM6.6 12.8a1.5 1.5 0 0 0 2.8 0"/></symbol>' +
     '<symbol id="tki-team" viewBox="0 0 16 16"><circle cx="5.6" cy="5.4" r="2.1"/><path d="M1.8 13c.3-2.4 1.8-3.6 3.8-3.6s3.5 1.2 3.8 3.6"/><circle cx="11.2" cy="6" r="1.7"/><path d="M10.6 9.6c1.8-.1 3.2.9 3.6 3"/></symbol>' +
     '<symbol id="tki-activity" viewBox="0 0 16 16"><path d="M1.8 8h3l1.6-4.6 3 9 1.6-4.4h3.2"/></symbol>' +
+    '<symbol id="tki-more" viewBox="0 0 16 16"><circle cx="3.4" cy="8" r="1.3" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.3" fill="currentColor" stroke="none"/><circle cx="12.6" cy="8" r="1.3" fill="currentColor" stroke="none"/></symbol>' +
+    '<symbol id="tki-send" viewBox="0 0 16 16"><path d="M2.5 8L13.5 2.8 10.6 13.4 7.6 9.1z"/><path d="M7.6 9.1l5.9-6.3"/></symbol>' +
+    '<symbol id="tki-flag" viewBox="0 0 16 16"><path d="M3.6 14V2.6M3.6 3h8.4l-1.8 3 1.8 3H3.6"/></symbol>' +
+    '<symbol id="tki-pen" viewBox="0 0 16 16"><path d="M10.6 2.8l2.6 2.6-7.6 7.6-3.2.6.6-3.2z"/></symbol>' +
     '<symbol id="tki-page" viewBox="0 0 16 16"><path d="M9.5 2.5h4v4M13.5 2.5L8 8M11.5 9.5v3.2a.8.8 0 0 1-.8.8H3.3a.8.8 0 0 1-.8-.8V5.3a.8.8 0 0 1 .8-.8h3.2"/></symbol>' +
     '</svg>';
 
@@ -2511,6 +2816,7 @@
     b.appendChild(el('dialog', { class: 'tk tk-dlg', id: 'tkdlg' }));
     b.appendChild(el('div', { class: 'tk tk-toast', id: 'tktoast', hidden: '' }));
     b.appendChild(el('div', { class: 'tk tk-tip', id: 'tktip', role: 'tooltip', hidden: '' }));
+    b.appendChild(el('div', { class: 'tk tk-menu', id: 'tkmenu', role: 'menu', hidden: '' }));
     O.qsSlot.appendChild(el('span', { class: 'tk tk-qswrap' },
       '<button class="btn tk-qsbtn" id="tkqs" title="' + wsT("js.tk.qs.tip") + '" aria-haspopup="dialog" aria-expanded="false"><svg class="i"><use href="#tki-search"/></svg></button>' +
       '<span class="tk-qpop" id="tkqpop" role="dialog" aria-label="' + wsT("js.tk.qs.tip") + '" hidden>' +
@@ -2534,6 +2840,12 @@
     document.addEventListener('click', function (e) {
       var t = e.target;
       if (qs.open && !(t.closest && t.closest('#tkqpop, #tkqs'))) qClose(true);
+      // a click outside the menu closes it; a click on its own opener toggles it shut
+      if (MN && !(t.closest && t.closest('#tkmenu'))) {
+        var mOpener = MN.backEl && MN.backEl.contains(t);
+        closeMenu(mOpener || t === $('tkwin'));
+        if (mOpener || t === $('tkwin')) { e.preventDefault(); return; }
+      }
       if (!own(t)) return;
       if (t === $('tkwin')) { closeItemWindow(); return; } // the backdrop
       if (t.closest('#tkqs')) { if (qs.open) qClose(); else qOpen(); return; }
@@ -2548,7 +2860,21 @@
         if (k === 'win-close') closeItemWindow();
         else if (k === 'page-back') leavePage();
         else if (k === 'afold') { ui.aopen = ui.aopen === ui.item ? null : ui.item; render(); }
-        else if (k === 'win-discuss') { if ($('cbox')) $('cbox').focus(); }
+        else if (k === 'menu') itemMenu(d.item, a);
+        else if (k === 'mstatus') itemMenu(d.item, a, null, { statusOnly: true });
+        else if (k.indexOf('m-') === 0) { if (MN) menuAct(k, a); }
+        else if (STEPS[k]) itemMenu(d.item, a, null, { step: k, op: d.op, who: d.who });
+        else if (k === 'edit') { closeMenu(false); startEdit(d.item); }
+        else if (k === 'iedit-save') saveEdit();
+        else if (k === 'iedit-x') endEdit();
+        else if (k === 'cedit') startCedit(d.cid);
+        else if (k === 'cedit-save') saveCedit();
+        else if (k === 'cedit-x') endCedit();
+        else if (k === 'create') openNewRow();
+        else if (k === 'new-x') closeNewRow();
+        else if (k === 'sub-x') closeSub();
+        else if (k === 'rib') openMenu({ kind: 'sync' }, a);
+        else if (k === 'actf') { var af = a.getAttribute('data-f'); ui.act[af] = !ui.act[af]; render(); }
         else if (k === 'tab') { tabState()[ui.layout === 'narrow' ? 'narrow' : 'side'] = a.getAttribute('data-tab'); ui.sel = null; render(); }
         else if (k === 'today') {
           var ps = panelState(), set = a.getAttribute('data-set');
@@ -2599,7 +2925,7 @@
     });
     document.addEventListener('submit', function (e) {
       var f = e.target;
-      if (f.closest && f.closest('#tkdlg')) { e.preventDefault(); submit(f); }
+      if (f.closest && f.closest('#tkdlg, #tkmenu')) { e.preventDefault(); submit(f); }
     });
     // the search box filters as you type; the render rebuilds the panel, so focus and the caret are put back (see render),
     // and an IME composition (Korean, Japanese) is left alone until it commits
@@ -2616,8 +2942,6 @@
       else if (t.id === 'f-status') { ui.status = t.value; render(); }
       else if (t.id === 'a-family') { ui.act.family = t.value; render(); }
       else if (t.id === 'a-member') { ui.act.member = t.value; render(); }
-      else if (t.id === 'flagged-only') { ui.act.flagged = t.checked; render(); }
-      else if (t.id === 'conc-only') { ui.act.conc = t.checked; render(); }
       else if (t.id === 'cmention') {
         var box = $('cbox'), id = t.value;
         if (!id || !box) return;
@@ -2625,6 +2949,8 @@
         if (ui.mdraft.indexOf(id) < 0) ui.mdraft.push(id);
         render();
       }
+      else if (t.id === 'tknewkind') { if (ui.nrow[ui.store]) ui.nrow[ui.store].kind = t.value; }
+      else if (t.closest('#tkmenu form')) updateHint(t.closest('form'));
       else if (t.closest('#tkdlg form')) {
         var df = t.closest('form');
         if (t.name === 'saved') { // picking a saved profile fills the fields
@@ -2633,6 +2959,16 @@
         }
         updateHint(df); profileView(df);
       }
+    });
+    // the inline inputs keep their text in ui, so a re-render draws it back
+    document.addEventListener('input', function (e) {
+      var t = e.target;
+      if (!own(t)) return;
+      if (t.id === 'tknew' && ui.nrow[ui.store]) ui.nrow[ui.store].val = t.value;
+      else if (t.id === 'tksub' && ui.sub) ui.sub.val = t.value;
+      else if (t.id === 'tkcedit' && ui.cedit) ui.cedit.body = t.value;
+      else if (/^iw-e(title|body|proj)$/.test(t.id) && ui.iedit) ui.iedit[{ 'iw-etitle': 'title', 'iw-ebody': 'body', 'iw-eproj': 'project' }[t.id]] = t.value;
+      else if (t.id === 'tkmq' && MN) { MN.q = t.value; var ml = $('tkmenu').querySelector('.mlist'); if (ml) ml.innerHTML = handoffList(VS.items[MN.item], MN.who || VS.viewer.member); }
     });
     document.addEventListener('input', function (e) {
       var t = e.target, df = t.closest && t.closest('#tkdlg form');
@@ -2677,7 +3013,19 @@
       linkHi(card);
       if (own(e.target) && e.target.matches('button[data-tip]')) showTip(e.target); else if (card) showTip(card); else if (tipFor) hideTip();
     });
-    document.addEventListener('scroll', function () { if (tipFor) hideTip(); placeShownMore(); }, true);
+    document.addEventListener('scroll', function (e) {
+      if (tipFor) hideTip(); placeShownMore();
+      if (MN && MN.kind === 'item' && !(e.target.nodeType === 1 && $('tkmenu').contains(e.target))) closeMenu(false); // an item menu does not follow a scrolled row
+    }, true);
+    // a right-click on a row, card, entry, or the item window header opens its menu at the pointer
+    document.addEventListener('contextmenu', function (e) {
+      var t = e.target;
+      if (!own(t) || t.closest('#tkmenu, #tkdlg, input, textarea, select, a[href]:not([href="#"])')) return;
+      var m = t.closest('[data-mitem], [data-item]');
+      if (!m) return;
+      e.preventDefault();
+      itemMenu(m.getAttribute('data-mitem') || m.getAttribute('data-item'), m, { x: e.clientX, y: e.clientY });
+    });
     document.addEventListener('mouseout', function (e) { if (!e.relatedTarget && tipFor) hideTip(); });
     $('tkqin').addEventListener('input', function () { qs.idx = 0; qRender(); });
     $('tkqin').addEventListener('keydown', function (e) {
@@ -2691,6 +3039,24 @@
     });
     document.addEventListener('keydown', function (e) {
       lastInput = 'key';
+      var t = e.target, id = t.id, chord = e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.isComposing, plain = e.key === 'Enter' && !e.isComposing && !e.shiftKey && !e.metaKey && !e.ctrlKey;
+      if (MN && $('tkmenu').contains(t)) { menuKey(e); return; }
+      // Shift+F10 or the menu key opens the focused row's menu under it
+      if ((e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) && own(t) && !t.closest('#tkdlg, input, textarea, select')) {
+        var mk = t.closest('[data-mitem], [data-item]');
+        if (mk) { e.preventDefault(); itemMenu(mk.getAttribute('data-mitem') || mk.getAttribute('data-item'), t.closest('[data-rk]') && !t.matches('button') ? t.closest('[data-rk]') : t); }
+        return;
+      }
+      // the inline inputs: Enter (or Cmd/Ctrl+Enter in a multi-line field) writes, Esc leaves
+      if (own(t) && t.hasAttribute && t.hasAttribute('data-keep')) {
+        var esc1 = e.key === 'Escape';
+        if (id === 'tknew') { if (plain) { e.preventDefault(); createNew(); } else if (esc1) { e.preventDefault(); closeNewRow(); } return; }
+        if (id === 'tksub') { if (plain) { e.preventDefault(); createSub(); } else if (esc1) { e.preventDefault(); closeSub(); } return; }
+        if (id === 'iw-etitle' || id === 'iw-eproj') { if (plain || chord) { e.preventDefault(); saveEdit(); } else if (esc1) { e.preventDefault(); endEdit(); } return; }
+        if (id === 'iw-ebody') { if (chord) { e.preventDefault(); saveEdit(); } else if (esc1) { e.preventDefault(); endEdit(); } return; }
+        if (id === 'tkcedit') { if (chord) { e.preventDefault(); saveCedit(); } else if (esc1) { e.preventDefault(); endCedit(); } return; }
+        if (id === 'cbox' && chord) { e.preventDefault(); if ($('tkcsend')) quick('comment', $('tkcsend')); return; }
+      }
       // Esc in the search box clears it first; with it empty, Esc goes on to close the window or the drawer
       if (e.key === 'Escape' && e.target.id === 'psearch' && e.target.value && own(e.target)) { e.preventDefault(); panelState().q = ''; render(); if ($('psearch')) $('psearch').focus(); return; }
       // keyboard: a focused row shows its actions and details; Enter opens its item window
@@ -2706,7 +3072,7 @@
       if (ui.win) closeItemWindow(); else if (ui.open) collapse();
     });
     // the layout follows the width: re-render when it crosses a breakpoint, else refit
-    window.addEventListener('resize', function () { if (layoutOf() !== ui.layout) render(); else { if (!ui.page) fitDrawer(); measure(); } });
+    window.addEventListener('resize', function () { if (MN) closeMenu(false); if (layoutOf() !== ui.layout) render(); else { if (!ui.page) fitDrawer(); measure(); } });
     // the store page route: reload on #/<storeId> restores the page; back and forward follow the hash
     window.addEventListener('hashchange', applyRoute);
     window.addEventListener('popstate', function () { if (routeStore() !== ui.page) applyRoute(); });
