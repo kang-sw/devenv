@@ -35,12 +35,9 @@
   sections.** Its emitted instruction pointed at "Reviewer prompt frame",
   "Review relay dispatch", and "Re-review prompt" — headings that lived in the
   retired implementation skill. It now names the surviving mechanisms: the
-  rendered reviewer path, the `implementer-relay` playbook, and a fresh
-  reviewer render. The relay and review-round budgets are unchanged.
-- **`route.resolve_proceed` has no shipped caller.** Its only entry point was
-  the retired routing skill. The tool, its verdict set, and its tests are
-  retained; its routes now name `lead-run` and `lead-ticket` instead of the
-  retired skills.
+  rendered reviewer path with a generated findings path, the worker fixing
+  the findings itself (there is no relay delegate), and a fresh reviewer
+  render for round two of a two-round budget (one pass for lite review).
 
 ### Removed
 - **The `review-adjudicator`, `implementer-relay`, and `implementer-elevated`

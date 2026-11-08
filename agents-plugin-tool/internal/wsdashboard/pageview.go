@@ -79,10 +79,10 @@ type SessionView struct {
 	Worktrees bool
 }
 
-// Mode is the page mode, modeLive or modeBoard.
 // ThemedBoard is Board with its topic-body frames pinned to Theme.
 func (v SessionView) ThemedBoard() template.HTML { return wswhiteboard.ThemeFrames(v.Board, v.Theme) }
 
+// Mode is the page mode, modeLive or modeBoard.
 func (v SessionView) Mode() string {
 	if v.Adapter {
 		return modeLive

@@ -181,6 +181,56 @@ func TestReadersIgnoreUnknownFieldsAndStrayFiles(t *testing.T) {
 
 // TestDrainAndCancelRaceHasOneWinner runs a drain and a cancel against one
 // held entry many times: exactly one of them gets it, never both.
+// TestConcurrentClaimHasOneWinner races claimers on one entry directly, the
+// exclusive rename every state change starts with: exactly one holds it, its
+// claim file keeps the entry whole, and every other claimer gets ErrGone.
+func TestConcurrentClaimHasOneWinner(t *testing.T) {
+	const claimers = 4
+	for i := 0; i < 200; i++ {
+		dir := Dir(t.TempDir())
+		name, _ := send(t, dir, "hello")
+		want, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var (
+			wg      sync.WaitGroup
+			start   = make(chan struct{})
+			claimed [claimers]string
+			errs    [claimers]error
+		)
+		for c := range claimers {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				claimed[c], errs[c] = claim(dir, name, "test")
+			}()
+		}
+		close(start)
+		wg.Wait()
+		winners := 0
+		for c := range claimers {
+			switch {
+			case errs[c] == nil:
+				winners++
+				got, err := os.ReadFile(claimed[c])
+				if err != nil || string(got) != string(want) {
+					t.Fatalf("run %d: the winner's claim file = %q, %v; want the entry", i, got, err)
+				}
+			case !errors.Is(errs[c], ErrGone):
+				t.Fatalf("run %d: a losing claim = %v, want ErrGone", i, errs[c])
+			}
+		}
+		if winners != 1 {
+			t.Fatalf("run %d: %d claimers won, want exactly one", i, winners)
+		}
+		if _, err := os.Stat(filepath.Join(dir, name)); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("run %d: the entry is still held after its claim: %v", i, err)
+		}
+	}
+}
+
 func TestDrainAndCancelRaceHasOneWinner(t *testing.T) {
 	for i := 0; i < 300; i++ {
 		dir := Dir(t.TempDir())

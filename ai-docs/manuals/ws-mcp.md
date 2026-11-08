@@ -192,7 +192,10 @@ and behind counts, and a dot for uncommitted changes. Its title spells the
 whole branch and, for an impl or goal stem, the title of the ticket
 `<root>/ai-docs/tickets/*/<stem>.md` names (front matter `title:`, else the
 first `# ` heading; 16 KB read, cached a minute). The daemon reads it itself
-(`internal/wsdashboard/gitbadge.go`) rather than from the snapshot. It reads
+(`internal/wsdashboard/gitbadge.go`) rather than from the snapshot, but
+follows it: when a session's live snapshot brings repo figures that differ
+from the ones it brought before and from the handle's last read, the stream
+asks for a read as a refresh would, so the two agree once it lands. It reads
 a root only while at least one session page under it holds its SSE stream
 open: once when the first stream opens, every 3 minutes while one stays, and
 at once on `POST /s/<reply-id>/git` (sent when the git drawer opens; it needs
@@ -216,21 +219,46 @@ letter and `diff --numstat` line delta, at most 300 per group; read when the
 drawer opens and after each action, with no optional lock and no fetch) and
 carries three actions, each a `POST /s/<reply-id>/git/<push|pull|fetch>`
 under the same rules (POST only, the daemon's own `Origin`, the session's
-root, one action per root at a time, 60 s): push sends the branch to its
-upstream; pull fetches the upstream's remote and fast-forwards only,
-refusing a detached HEAD, a branch with no upstream, modified or staged
-tracked files (untracked ones do not count), and a branch that has
-diverged; fetch is a plain `git fetch`. An action answers 204, 200 with a
-note (nothing to pull), 409 with the refusal's reason, or 502 with git's
-message, which the panel shows inline; each re-reads the handle. The wide
-left area is reserved for a future commit graph. There is no commit action.
+root, one action per root at a time, 60 s): push re-reads the branch,
+refuses a detached HEAD, a branch with no upstream, and one with nothing to
+push, and runs `git push -- <remote> refs/heads/<branch>:<merge ref>` with
+no option, so the remote moves by fast-forward only; pull fetches the
+upstream's remote and fast-forwards only, refusing a detached HEAD, a branch
+with no upstream (also one the fetch pruned), modified or staged tracked
+files (untracked ones do not count), and a branch that has diverged; fetch
+is a plain `git fetch`. An action answers 204, 200 with a note (nothing to
+pull), 409 with the refusal's reason, or 502 with git's message (a ref's
+`! [rejected]` line first, then an `error:` or `fatal:` line, over a hook's
+`remote:` lines), which the panel shows inline; each re-reads the handle.
+The drawer's reads parse git's stdout alone, so a warning on stderr (CRLF
+conversion) never corrupts them. The wide left area is reserved for a
+future commit graph. There is no commit action.
+
+The panels drawer's pooled-worktree card (`internal/wsdashboard/worktrees.go`,
+served when the daemon has a `WorktreeSource`, else 404) reads `GET
+/s/<reply-id>/worktrees`: JSON `{pool, worktrees, sizing}`, the session
+project's `worktree_pool` and the pooled worktrees `worktree.list` owns
+(path, profile, branch or detached, lease with holder and parent reply-ids,
+acquire and last-activity times, quarantine, disk size), read when the
+drawer opens. Sizes are measured off the request path (two walks at once,
+cached 2 minutes); an answer with a size still unmeasured says `sizing`, and
+`?wait=1` holds it until those sizes land (20 s at most). `POST
+/s/<reply-id>/worktrees/cleanup` (body ignored) follows the composer's send
+rules below and holds one message: a line in the page's language asking the
+session to clean up unused worktrees, then the pool as text, cut at 48 KiB
+with a `... N more worktrees` line. The dashboard never removes or releases
+a worktree itself.
 
 On the served board and in the conversation's lead
 replies, a file link renders as an action link (`data-wl="file"`, titled with
 its repo-relative path) and an http(s) link is marked `data-wl="url"`: a
 click opens a menu (open in new tab, open in system browser, copy relative or
 absolute path; copy URL for an http(s) link), and Cmd/Ctrl+click opens a new
-tab. A file inside the session's project root links `GET
+tab. Every markdown renderer (the board, lead replies, tracker text) also
+links a bare http(s) URL (a loopback or LAN host included) and a bare file
+path (absolute or drive, two segments or more, or relative with a `/` and a
+file extension; optional `:line[:col]`) outside code and raw anchors,
+rendered as a written link to the same target would be. A file inside the session's project root links `GET
 /s/<reply-id>/file?path=<root-relative path>`, the file view, which serves a
 regular, non-symlink file that still resolves inside the root after every
 symlink (404 otherwise), to a loopback viewer and a LAN token holder alike:
@@ -292,7 +320,9 @@ never a second; a host that could not be created still goes in, so every
 tracker route answers 503 with its (redacted) error and the page's "+ store"
 dialog shows it. The routes, JSON in and out with errors as `{"error"}`:
 `GET /tracker/stores` (`{stores, rev}`), `GET /tracker/stores/<id>/view`
-(`{view, seen}`), `POST /tracker/stores/<id>/dispatch {events}` (origin forced
+(`{view, seen}`; the view adds `html {items, comments}`, item bodies and
+comment texts rendered as markdown under untrusted-text rules: only http(s)
+links and in-page fragments become anchors, tags stay text), `POST /tracker/stores/<id>/dispatch {events}` (origin forced
 to `human`, `"$N"` names the batch's Nth event; a refusal is 409 with
 `refusal {index, type, reason}`), `POST .../check` and `.../sync` (a report; an
 unreachable remote is `offline: true`, not an error), `POST .../seen {badge,

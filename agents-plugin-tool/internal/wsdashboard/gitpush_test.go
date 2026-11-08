@@ -1,8 +1,8 @@
 package wsdashboard
 
 import (
-	"context"
 	"bufio"
+	"context"
 	"errors"
 	"net/http"
 	"os/exec"
