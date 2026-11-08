@@ -53,21 +53,24 @@ repository sized for 50-60 people, reached from the dashboard.
   `wsledger` (event types, validation, fold, view state JSON in the mockup's
   View state shape), ported from the mockup engine with golden parity tests
   (board (283) a). No caller surface.
-- `261108-feat-ws-tracker-caller` (todo): the caller core - enable key,
+- `261108-feat-ws-tracker-caller` (done, merge `a656a34b5`): the caller core - enable key,
   machine store registry, sync triggers, `wstracker` wrappers, two MCP
   tools (`tracker.query` and a whiteboard-syntax `tracker.update`), a manual
   section, and live acceptance on a private GitHub repository (board
   (395)-(423)).
-- `261108-feat-ws-tracker-drawer-ui` (todo): the dashboard side, blocked by
-  the core - per-store handles, the mockup renderer shared between the
-  mockup and the dashboard, a disk-assets dev mode, daemon endpoints and
+- `261108-feat-ws-tracker-drawer-ui` (ready): the dashboard side on the
+  core - per-store handles, the mockup renderer shared between the
+  mockup and the dashboard, daemon endpoints and
   SSE, local UI state (seen-state on disk, display state per browser), the join dialog (board (408) b, (412) c).
-- `261108-feat-ws-manual-shared-command-syntax` (todo, outside the epic):
+- `261108-feat-ws-manual-shared-command-syntax` (done, outside the epic):
   one shared parser and manual section for the XML command syntax, which the
-  core's Phase 2 needs (board (414), (415)).
-- `261108-feat-ws-tracker-support-agent-chat` (draft): the support-agent
+  core's Phase 2 needed (board (414), (415)).
+- `261108-feat-ws-dashboard-disk-assets-dev-mode` (done, outside the epic):
+  the disk-assets dev mode split out of the drawer child, serving dashboard
+  assets from a source tree for UI tuning.
+- `261108-feat-ws-tracker-support-agent-chat` (todo): the support-agent
   chat card in the drawer, on the standalone agent runner
-  `261108-feat-ws-daemon-agent-runner` (board (300)-(312)). The mockup's
+  `261108-feat-ws-daemon-agent-runner` (done; board (300)-(312)). The mockup's
   per-card view modes and chat placement merged as `1d7fbce0a`.
 - `261108-feat-ws-tracker-ledger-attachments` (todo): attachment content as
   content-addressed blobs under `attachments/<sha256>` in the member's ledger
