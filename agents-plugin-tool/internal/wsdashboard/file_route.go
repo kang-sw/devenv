@@ -161,8 +161,9 @@ type fileViewPage struct {
 	HTML template.HTML
 	// Reason says why a file is not viewable, in the page's language.
 	Reason string
-	// Lang is the page's language (wsi18n).
-	Lang string
+	// Lang is the page's language (wsi18n); Theme the pinned theme (empty
+	// follows the OS).
+	Lang, Theme string
 	// Nonce admits the not-viewable page's one inline script.
 	Nonce         string
 	WhiteboardCSS template.CSS
@@ -196,7 +197,7 @@ func (d *Daemon) handleFile(w http.ResponseWriter, r *http.Request, replyID stri
 		return
 	}
 	lang, _ := requestLang(r)
-	page := fileViewPage{Rel: filepath.ToSlash(rel), Abs: filepath.Join(filepath.Clean(s.Project), rel), Lang: lang}
+	page := fileViewPage{Rel: filepath.ToSlash(rel), Abs: filepath.Join(filepath.Clean(s.Project), rel), Lang: lang, Theme: requestTheme(r)}
 	if info.Size() > fileViewMax {
 		page.Reason = wsi18n.T(lang, "file.reason.large", fileViewMax>>20)
 		d.writeFilePage(w, "file-none", page)

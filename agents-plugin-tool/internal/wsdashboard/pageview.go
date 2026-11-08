@@ -54,6 +54,9 @@ type SessionView struct {
 	// is the language the browser chose in the gear menu, empty when it
 	// follows the browser. Both are set per request, never by the builders.
 	Lang, LangPref string
+	// Theme is the theme the gear menu pinned ("light" or "dark"), empty
+	// when the page follows the OS. Set per request, like Lang.
+	Theme string
 
 	HasBoard bool
 	Seq      int
@@ -526,10 +529,10 @@ func conversation(lead wslive.Lead, ring []wslive.RingRecord, bodies map[string]
 
 // IndexView is what / renders.
 type IndexView struct {
-	// Lang and LangPref are SessionView's.
-	Lang, LangPref string
-	Version        string
-	Projects       []ProjectGroup
+	// Lang, LangPref, and Theme are SessionView's.
+	Lang, LangPref, Theme string
+	Version               string
+	Projects              []ProjectGroup
 	// Live and Busy count the live sessions and those not idle.
 	Live, Busy int
 }

@@ -13,8 +13,9 @@
   --wb-ok: #1d7348; --wb-fail: #c0262d;
   --wb-warn: #c27a00; --wb-warn-ink: #a35f00;
 }
+/* Dark variants: the same OS-or-pinned rule as the whiteboard sheet. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --wb-ph-think: #3d2f6b;  --wb-on-ph-think: #ddd3fb;
     --wb-ph-reply: #1b4a4f;  --wb-on-ph-reply: #c5ecef;
     --wb-ph-tool: #26385e;   --wb-on-ph-tool: #d2dcf6;
@@ -25,6 +26,17 @@
     --wb-ok: #6cc39a; --wb-fail: #f0797e;
     --wb-warn: #e0a36c; --wb-warn-ink: #e0a36c;
   }
+}
+:root[data-theme="dark"] {
+  --wb-ph-think: #3d2f6b;  --wb-on-ph-think: #ddd3fb;
+  --wb-ph-reply: #1b4a4f;  --wb-on-ph-reply: #c5ecef;
+  --wb-ph-tool: #26385e;   --wb-on-ph-tool: #d2dcf6;
+  --wb-ph-perm: #55400f;   --wb-on-ph-perm: #f6dfae;
+  --wb-ph-compact: #4f2342; --wb-on-ph-compact: #f5d2e7;
+  --wb-perm-ink: var(--wb-on-ph-perm);
+  --wb-compact-ink: var(--wb-on-ph-compact);
+  --wb-ok: #6cc39a; --wb-fail: #f0797e;
+  --wb-warn: #e0a36c; --wb-warn-ink: #e0a36c;
 }
 
 .dwrap { margin: 0 auto; padding: 12px 16px; max-width: 1680px; }

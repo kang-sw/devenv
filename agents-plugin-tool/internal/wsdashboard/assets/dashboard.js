@@ -251,6 +251,24 @@
   markLang();
   if ($("glang")) $("glang").addEventListener("change", function () { setLang(this.value); });
 
+  // Theme: the choice lives in a cookie the server reads, so the root's
+  // data-theme is right from the first byte; no cookie (auto) follows the OS.
+  // A change only sets the attribute and the cookie: the stylesheets do the
+  // rest, with no reload.
+  var THEME_COOKIE = "ws_dashboard_theme";
+  function markTheme() {
+    var cur = root.getAttribute("data-theme") || "";
+    q("#gmenu [data-theme-set]").forEach(function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-theme-set") === cur)); });
+  }
+  function setTheme(v) {
+    if (v !== "light" && v !== "dark") v = "";
+    doc.cookie = THEME_COOKIE + "=" + v + "; Path=/; SameSite=Lax; Max-Age=" + (v ? 31536000 : 0);
+    if (v) root.setAttribute("data-theme", v);
+    else root.removeAttribute("data-theme");
+    markTheme();
+  }
+  markTheme();
+
   // --- board answers --------------------------------------------------------
   // A board swap replaces the answer form; picks, notes, and checked
   // acknowledgements carry over by item number to the items still on the new
@@ -966,6 +984,8 @@
     if (ibadge && t.closest("#ibadge")) { if (!ibadge.disabled) interruptTurn(); return; }
     if (gmenu && t.closest("#gear")) { gmenu.hidden = !gmenu.hidden; return; }
     if (gmenu && !gmenu.hidden && !t.closest("#gmenu")) gmenu.hidden = true;
+    var th = t.closest("#gmenu [data-theme-set]");
+    if (th) { setTheme(th.getAttribute("data-theme-set")); return; }
     if (!live) return;
     var b = t.closest("#gmenu [data-input]");
     if (b) { save(INPUT_KEY, b.getAttribute("data-input")); setInput(b.getAttribute("data-input")); return; }

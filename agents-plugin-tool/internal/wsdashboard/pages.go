@@ -647,7 +647,7 @@ func (d *Daemon) handleIndex(w http.ResponseWriter, r *http.Request) {
 	}
 	lang, pref := requestLang(r)
 	view := d.pagesIn(lang).indexView()
-	view.Lang, view.LangPref = lang, pref
+	view.Lang, view.LangPref, view.Theme = lang, pref, requestTheme(r)
 	regions, err := renderIndexRegions(view)
 	if err == nil {
 		var html string
@@ -710,7 +710,7 @@ func (d *Daemon) handleSessionPage(w http.ResponseWriter, r *http.Request, reply
 		http.Error(w, "unknown session", http.StatusNotFound)
 		return
 	}
-	view.Lang, view.LangPref = lang, pref
+	view.Lang, view.LangPref, view.Theme = lang, pref, requestTheme(r)
 	regions, err := renderSessionRegions(view, d.entries)
 	if err == nil {
 		var html string
