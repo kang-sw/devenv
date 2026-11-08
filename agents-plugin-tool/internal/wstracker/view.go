@@ -23,6 +23,7 @@ type View struct {
 	Items         map[string]ItemView    `json:"items"`
 	ItemOrder     []string               `json:"itemOrder"`
 	Assignments   map[string]Assignment  `json:"assignments"`
+	Rules         map[string]RuleView    `json:"rules"`
 	Comments      map[string]CommentView `json:"comments"`
 	Events        []EventView            `json:"events"`
 	Notices       []Notice               `json:"notices"`
@@ -122,9 +123,13 @@ type ItemView struct {
 	Concurrent    int      `json:"concurrent"`
 	Depth         int      `json:"depth"`
 	Chain         []string `json:"chain"`
-	// Mentions and Attachments follow the shown body write.
+	// Mentions, Attachments, and Refs follow the shown body write.
 	Mentions    []string         `json:"mentions"`
 	Attachments []AttachmentView `json:"attachments"`
+	Refs        []string         `json:"refs"`
+	// Backrefs are the shown items, then the shown comments on shown items,
+	// that reference this item, in fold order; its own thread is excluded.
+	Backrefs []string `json:"backrefs"`
 }
 
 type Rollup struct {
@@ -156,6 +161,8 @@ type Assignment struct {
 	TS           string   `json:"ts"`
 	Inherited    bool     `json:"inherited"`
 	RuleLevels   *float64 `json:"ruleLevels"`
+	Rule         *string  `json:"rule"`        // the rule that made it, or the rule a request asks for
+	RuleRequest  bool     `json:"ruleRequest"` // the request a rule rooted outside reach sends its root
 	HandoffOf    *string  `json:"handoffOf"`
 	HandoffFrom  *string  `json:"handoffFrom"`
 	HandoffNote  *string  `json:"handoffNote"`
@@ -174,6 +181,23 @@ type Assignment struct {
 	lastUpdate time.Time
 }
 
+// RuleView is an assignment rule (490)-(492). Levels nil is the whole
+// subtree; State is live, pending (Request is open), or ended.
+type RuleView struct {
+	ID          string   `json:"id"`
+	Item        string   `json:"item"`
+	Via         string   `json:"via"`
+	By          string   `json:"by"`
+	Root        string   `json:"root"`
+	IncludeRoot bool     `json:"includeRoot"`
+	Levels      *float64 `json:"levels"`
+	Completion  string   `json:"completion"`
+	State       string   `json:"state"`
+	Request     *string  `json:"request"`
+	Ended       *string  `json:"ended"`
+	TS          string   `json:"ts"`
+}
+
 type CommentView struct {
 	ID      string  `json:"id"`
 	Item    string  `json:"item"`
@@ -183,9 +207,10 @@ type CommentView struct {
 	TS      string  `json:"ts"`
 	Edited  *Ref    `json:"edited"`
 	Hidden  *string `json:"hidden"` // the comment.hide event id
-	// Mentions and Attachments follow the shown text write.
+	// Mentions, Attachments, and Refs follow the shown text write.
 	Mentions    []string         `json:"mentions"`
 	Attachments []AttachmentView `json:"attachments"`
+	Refs        []string         `json:"refs"`
 }
 
 type Marker struct {
@@ -442,11 +467,8 @@ func (r *replayed) view(stream string, now time.Time, staleDays int) *View {
 			TS: ts(x.ts), Inherited: x.inherited != "", HandoffOf: nz(x.handoffOf), HandoffNote: nz(x.handoffNote),
 			AnswerNote: nz(x.answerNote), Restored: ref(x.restored), Restores: nz(x.restores), Accepted: ref(x.accepted),
 			LeadAtAccept: nz(x.leadAtAccept), StatusBy: nz(x.noteBy), LastUpdate: ts(last), lastUpdate: last}
-		for _, ru := range S.rules {
-			if ru.id == x.via {
-				l := ru.levels
-				a.RuleLevels = &l
-			}
+		if ru := S.ruleByID[x.rule]; ru != nil {
+			a.Rule, a.RuleRequest, a.RuleLevels = &ru.id, x.ruleRequest, ruleLevels(ru)
 		}
 		if q := S.asg[x.handoffOf]; x.handoffOf != "" && q != nil {
 			a.HandoffFrom = &q.to
@@ -487,6 +509,67 @@ func (r *replayed) view(stream string, now time.Time, staleDays int) *View {
 			}
 		}
 	}
+	// (528) Sibling order: each item, in fold order, goes right after its
+	// after anchor, first for "", last when the field is absent (every item
+	// created before it existed) or the anchor is not a sibling placed so
+	// far. A hidden anchor keeps its place, so hiding a row moves no other
+	// row. Concurrent inserts after one anchor: the later in fold order lands
+	// nearer the anchor.
+	sib := map[string][]string{}
+	for _, id := range S.iorder {
+		it := S.items[id]
+		key := ""
+		if it.parent != "" && S.items[it.parent] != nil {
+			key = it.parent
+		}
+		l, at := sib[key], -1
+		if it.afterSet && it.after != "" {
+			for i, x := range l {
+				if x == it.after {
+					at = i
+					break
+				}
+			}
+		}
+		switch {
+		case it.afterSet && it.after == "":
+			l = append([]string{id}, l...)
+		case at < 0:
+			l = append(l, id)
+		default:
+			l = append(l[:at+1], append([]string{id}, l[at+1:]...)...)
+		}
+		sib[key] = l
+	}
+	// (531) Backlinks: the shown items, then the shown comments on shown
+	// items, that reference an item, each once, in fold order; an item's own
+	// thread excluded.
+	backrefs := map[string][]string{}
+	backref := func(t, from string) {
+		if !contains(backrefs[t], from) {
+			backrefs[t] = append(backrefs[t], from)
+		}
+	}
+	for _, id := range S.iorder {
+		if it := S.items[id]; !it.hidden {
+			for _, t := range it.refs {
+				if t != id && S.items[t] != nil {
+					backref(t, id)
+				}
+			}
+		}
+	}
+	for _, id := range S.corder {
+		q := S.comments[id]
+		if host := S.items[q.item]; !q.hidden && host != nil && !host.hidden {
+			for _, t := range q.refs {
+				if t != q.item && S.items[t] != nil {
+					backref(t, id)
+				}
+			}
+		}
+	}
+
 	vw.Items = map[string]ItemView{}
 	status := map[string]string{}
 	for _, id := range S.iorder {
@@ -531,7 +614,8 @@ func (r *replayed) view(stream string, now time.Time, staleDays int) *View {
 			TS: ts(it.ts), Hidden: it.hidden, Edited: ref(it.edited), Status: nz(status[id]),
 			Counted: r.counted(it, status[id]), Children: []string{}, Assignments: orEmpty(recIDs), Pending: orEmpty(pend),
 			Thread: orEmpty(threads[id]), Depth: len(chain) - 1,
-			Mentions: append([]string{}, it.mentions...), Attachments: attachmentViews(it.attachments)}
+			Mentions: append([]string{}, it.mentions...), Attachments: attachmentViews(it.attachments),
+			Refs: append([]string{}, it.refs...), Backrefs: orEmpty(backrefs[id])}
 		if it.parent != "" && S.items[it.parent] != nil {
 			iv.Parent = &it.parent
 		}
@@ -543,11 +627,7 @@ func (r *replayed) view(stream string, now time.Time, staleDays int) *View {
 			s := ts(*started)
 			iv.Started = &s
 		}
-		for _, k := range S.iorder {
-			if S.items[k].parent == id {
-				iv.Children = append(iv.Children, k)
-			}
-		}
+		iv.Children = append(iv.Children, sib[id]...)
 		// roll-up
 		iv.Rollup = Rollup{Counts: map[string]int{}, Blocked: []string{}}
 		for _, k := range subtasks(id) {
@@ -582,24 +662,29 @@ func (r *replayed) view(stream string, now time.Time, staleDays int) *View {
 	vw.ItemOrder = []string{}
 	var walkOrder func(parent string)
 	walkOrder = func(parent string) {
-		for _, id := range S.iorder {
-			p := ""
-			if pp := vw.Items[id].Parent; pp != nil {
-				p = *pp
-			}
-			if p == parent {
-				vw.ItemOrder = append(vw.ItemOrder, id)
-				walkOrder(id)
-			}
+		for _, id := range sib[parent] {
+			vw.ItemOrder = append(vw.ItemOrder, id)
+			walkOrder(id)
 		}
 	}
 	walkOrder("")
+
+	vw.Rules = map[string]RuleView{}
+	for _, ru := range S.rules {
+		rv := RuleView{ID: ru.id, Item: ru.item, Via: ru.via, By: ru.by, Root: ru.root, IncludeRoot: ru.includeRoot,
+			Levels: ruleLevels(ru), Completion: ru.completion, State: ru.state, Request: nz(ru.request), Ended: nz(ru.ended), TS: ts(ru.ts)}
+		if ru.ended != "" {
+			rv.State = "ended"
+		}
+		vw.Rules[ru.id] = rv
+	}
 
 	vw.Comments = map[string]CommentView{}
 	for _, id := range S.corder {
 		q := S.comments[id]
 		cv := CommentView{ID: id, Item: q.item, Author: q.author, Body: q.body, ReplyTo: nz(q.replyTo), TS: ts(q.ts),
-			Edited: ref(q.edited), Mentions: append([]string{}, q.mentions...), Attachments: attachmentViews(q.attachments)}
+			Edited: ref(q.edited), Mentions: append([]string{}, q.mentions...), Attachments: attachmentViews(q.attachments),
+			Refs: append([]string{}, q.refs...)}
 		if q.hiddenBy != nil {
 			cv.Hidden = &q.hiddenBy.id
 		}
@@ -661,6 +746,15 @@ func (r *replayed) view(stream string, now time.Time, staleDays int) *View {
 		}
 	}
 	return vw
+}
+
+// ruleLevels is a rule's levels for the view: nil for the whole subtree.
+func ruleLevels(ru *rule) *float64 {
+	if ru.levels == 0 {
+		return nil
+	}
+	l := ru.levels
+	return &l
 }
 
 func attachmentViews(l []attachment) []AttachmentView {

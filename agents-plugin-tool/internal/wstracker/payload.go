@@ -57,7 +57,9 @@ type Attachment struct {
 }
 
 // ItemCreate is the payload of item.create. Mentions lists member ids (the
-// body keeps @name for display); Mentions and Attachments ride with the body.
+// body keeps @name for display), Refs the item ids the body references with
+// #ID; Mentions, Attachments, and Refs ride with the body. After is the
+// sibling the item follows: nil leaves it last, "" puts it first.
 type ItemCreate struct {
 	Kind        string       `json:"kind"` // task, todo, topic
 	Title       string       `json:"title"`
@@ -66,17 +68,47 @@ type ItemCreate struct {
 	Due         string       `json:"due,omitempty"` // YYYY-MM-DD
 	Priority    *int         `json:"priority,omitempty"`
 	Parent      string       `json:"parent,omitempty"`
+	After       *string      `json:"after,omitempty"`
 	Mentions    []string     `json:"mentions,omitempty"`
 	Attachments []Attachment `json:"attachments,omitempty"`
+	Refs        []string     `json:"refs,omitempty"`
 }
 
-// ItemAssign is the payload of item.assign.
+// ItemAssign is the payload of item.assign: Targets, or the older Mode with
+// Levels (all) or People (chosen).
 type ItemAssign struct {
-	Item       string   `json:"item"`
-	Mode       string   `json:"mode"` // all, chosen
-	Levels     int      `json:"levels,omitempty"`
-	People     []string `json:"people,omitempty"`
-	Completion string   `json:"completion,omitempty"` // assignee (default), assigner
+	Item       string         `json:"item"`
+	Targets    []AssignTarget `json:"targets,omitempty"`
+	Mode       string         `json:"mode,omitempty"` // all, chosen
+	Levels     int            `json:"levels,omitempty"`
+	People     []string       `json:"people,omitempty"`
+	Completion string         `json:"completion,omitempty"` // assignee (default), assigner
+}
+
+// AssignTarget is one item.assign target: a member (Person), or a subtree
+// rule rooted at Root covering Root itself with IncludeRoot and everyone up
+// to Levels below it (0: the whole subtree).
+type AssignTarget struct {
+	Person      string
+	Root        string
+	IncludeRoot bool
+	Levels      int
+}
+
+// MarshalJSON writes a person as its member id and a rule as {root,
+// include_root?, levels?}.
+func (t AssignTarget) MarshalJSON() ([]byte, error) {
+	if t.Root == "" {
+		return json.Marshal(t.Person)
+	}
+	m := map[string]any{"root": t.Root}
+	if t.IncludeRoot {
+		m["include_root"] = true
+	}
+	if t.Levels > 0 {
+		m["levels"] = t.Levels
+	}
+	return json.Marshal(m)
 }
 
 // ItemHandoff is the payload of item.handoff.
@@ -89,10 +121,12 @@ type ItemHandoff struct {
 
 // ItemRef is the payload of item.hide, item.accept, item.decline,
 // item.close, item.unassign, item.return, item.confirm, item.reject, and
-// item.reopen (Assignee and Note where the event takes them).
+// item.reopen (Assignee and Note where the event takes them; Root, the root
+// of the rules to end, on item.unassign only).
 type ItemRef struct {
 	Item     string `json:"item"`
 	Assignee string `json:"assignee,omitempty"`
+	Root     string `json:"root,omitempty"`
 	Note     string `json:"note,omitempty"`
 }
 
@@ -104,8 +138,8 @@ type ItemStatus struct {
 }
 
 // ItemEdit is the payload of item.edit: a raw object, because a present
-// null clears due and an absent field is untouched. mentions and
-// attachments go only with a body, and replace the body's lists.
+// null clears due and an absent field is untouched. mentions, attachments,
+// and refs go only with a body, and replace the body's lists.
 type ItemEdit map[string]any
 
 // CommentAdd is the payload of comment.add.
@@ -115,15 +149,17 @@ type CommentAdd struct {
 	ReplyTo     string       `json:"reply_to,omitempty"`
 	Mentions    []string     `json:"mentions,omitempty"`
 	Attachments []Attachment `json:"attachments,omitempty"`
+	Refs        []string     `json:"refs,omitempty"`
 }
 
-// CommentRef is the payload of comment.edit (Body, Mentions, Attachments)
-// and comment.hide.
+// CommentRef is the payload of comment.edit (Body, Mentions, Attachments,
+// Refs) and comment.hide.
 type CommentRef struct {
 	Comment     string       `json:"comment"`
 	Body        string       `json:"body,omitempty"`
 	Mentions    []string     `json:"mentions,omitempty"`
 	Attachments []Attachment `json:"attachments,omitempty"`
+	Refs        []string     `json:"refs,omitempty"`
 }
 
 // SetLead is the payload of roles.set_lead.

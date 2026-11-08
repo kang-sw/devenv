@@ -228,17 +228,47 @@
 
   // Assignment records. state: pending -> live (accept) | declined | withdrawn;
   // live -> unassigned | returned | handed (a handoff was accepted).
+  // A rule request (ruleRequest, id = the rule id) is the pending record a rule
+  // rooted outside its author's reach sends to the root: pending -> accepted (the
+  // rule goes live) | declined | withdrawn; accepted -> returned | unassigned. It
+  // never holds the item, so holder lookups (openRec) skip it.
   function recsOn(S, item) { return vals(S.asg).filter(function (r) { return r.item === item; }); }
   function liveRecs(S, item) { return recsOn(S, item).filter(function (r) { return r.state === 'live'; }); }
   function openRecs(S, item) { return recsOn(S, item).filter(function (r) { return r.state === 'live' || r.state === 'pending'; }); }
   function liveRec(S, item, who) { return liveRecs(S, item).filter(function (r) { return r.to === who; })[0] || null; }
   function pendingRec(S, item, who) { return recsOn(S, item).filter(function (r) { return r.to === who && r.state === 'pending'; })[0] || null; }
-  function openRec(S, item, who) { return openRecs(S, item).filter(function (r) { return r.to === who; })[0] || null; }
+  function openRec(S, item, who) { return openRecs(S, item).filter(function (r) { return r.to === who && !r.ruleRequest; })[0] || null; }
   function lastEndedRec(S, item, who) {
     var rs = recsOn(S, item).filter(function (r) { return r.to === who && r.ended; });
     return rs[rs.length - 1] || null;
   }
-  function liveRules(S, item) { return vals(S.rules).filter(function (r) { return r.item === item && !r.ended; }); }
+  // An accepted rule request to `who` whose rule is still live: what item.return ends.
+  function acceptedReq(S, item, who) {
+    return recsOn(S, item).filter(function (r) { return r.ruleRequest && r.to === who && r.state === 'accepted' && S.rules[r.rule] && !S.rules[r.rule].ended; })[0] || null;
+  }
+
+  // Assignment rules (490)-(492): a rule {root, includeRoot, levels} covers the root
+  // (with includeRoot) and everyone up to `levels` below it; levels null = the whole
+  // subtree. The older "everyone within N" is a rule rooted at its author. state:
+  // live (its author reaches the root, or the root accepted its request) | pending
+  // (the request is open); ended = the event id that ended it.
+  var WHOLE = 99;
+  function ruleDepth(rule) { return rule.levels == null ? WHOLE : rule.levels; }
+  function openRules(S, item) { return vals(S.rules).filter(function (r) { return r.item === item && !r.ended; }); }
+  function liveRules(S, item) { return openRules(S, item).filter(function (r) { return r.state === 'live'; }); }
+  function coveredBy(S, rule) {
+    var out = [], root = S.members[rule.root];
+    if (rule.includeRoot && root && !root.removed) out.push(rule.root);
+    return out.concat(Object.keys(reach(S.members, rule.root, ruleDepth(rule))));
+  }
+  // Rule y covers rule x by shape: everything x reaches, y reaches.
+  function ruleCovers(S, y, x) {
+    var d = y.root === x.root ? 0 : reach(S.members, y.root, WHOLE)[x.root];
+    if (d == null) return false;
+    if (x.includeRoot && !(d === 0 ? y.includeRoot : y.levels == null || d <= y.levels)) return false;
+    if (y.levels == null) return true;
+    return x.levels != null && d + x.levels <= y.levels;
+  }
 
   // ------------------------------------------------------------------ checks
 
@@ -288,8 +318,9 @@
       rej('priority must be a level 0..' + (S.prio.names.length - 1) + ' (' + S.prio.names.join(' / ') + ')');
   }
   // (335) `mentions` is an explicit list of member ids (the text keeps @name for
-  // display); (338) `attachments` is metadata only. Both ride with a body: item.create,
-  // item.edit with a body, comment.add, comment.edit. `prior` is the target's shown
+  // display); (338) `attachments` is metadata only; (531) `refs` is the item ids the
+  // text references with #ID. All three ride with a body: item.create, item.edit with
+  // a body, comment.add, comment.edit. `prior` is the target's shown
   // attachments in the author's seen state (none on create and comment.add): an oid
   // already there is exempt from the size limit, so only an attachment the write
   // adds is held to a limit an admin may since have lowered.
@@ -314,6 +345,40 @@
         if (x.size > S.att.max_bytes && !kept) rej('attachment "' + x.name + '" is ' + x.size + ' bytes, above the store limit of ' + S.att.max_bytes + ' bytes (attachments.max_bytes)');
       });
     }
+    if (p.refs != null) {
+      if (!Array.isArray(p.refs)) rej('refs must be a list of item ids');
+      p.refs.forEach(function (x) {
+        if (typeof x !== 'string') rej('refs must be a list of item ids');
+        if (!S.items[x]) rej('referenced ' + alias(x) + ' is not an item its author had seen');
+      });
+    }
+  }
+  // item.assign targets (490)-(492): member ids and rules {root, include_root?,
+  // levels?}, mixed, one rule per root. A rule is checked like the older
+  // "everyone within N": someone must be in it, and the author's live rules must
+  // not already cover it.
+  var TARGET_SHAPE = 'a target is a member id or a rule {root, include_root?, levels?}';
+  function checkTargets(S, it, a, targets) {
+    if (!Array.isArray(targets) || !targets.length) rej('choose at least one person or rule');
+    var roots = {}, rules = 0;
+    targets.forEach(function (x) {
+      if (typeof x === 'string') {
+        if (x !== a && (!S.members[x] || S.members[x].removed)) rej(x + ' is not a member');
+        return;
+      }
+      if (!x || typeof x !== 'object' || Array.isArray(x) || typeof x.root !== 'string' || !x.root) rej(TARGET_SHAPE);
+      if (x.include_root != null && typeof x.include_root !== 'boolean') rej(TARGET_SHAPE);
+      if (x.levels != null && !(Number.isInteger(x.levels) && x.levels >= 1)) rej('rule levels must be a whole number >= 1');
+      if (!S.members[x.root] || S.members[x.root].removed) rej(x.root + ' is not a member');
+      if (roots[x.root]) rej('one rule per root in an assign (' + x.root + ')');
+      roots[x.root] = true; rules++;
+      var rule = { root: x.root, includeRoot: !!x.include_root, levels: x.levels == null ? null : x.levels };
+      if (!coveredBy(S, rule).length) rej('nobody is ' + (rule.levels == null ? '' : 'within ' + rule.levels + ' levels ') + 'below ' + x.root);
+      var cov = liveRules(S, it.id).filter(function (y) { return y.by === a && ruleCovers(S, y, rule); })[0];
+      if (cov) rej('the rule rooted at ' + x.root + ' is already covered by ' + alias(cov.id));
+    });
+    if (!rules && !targets.some(function (x) { return !openRec(S, it.id, x); }))
+      rej('everyone chosen already holds a live or pending assignment');
   }
   function notAssignee(S, it, who) {
     if (pendingRec(S, it.id, who)) return who + ' has not accepted the pending assignment on ' + it.alias;
@@ -352,6 +417,9 @@
           if (par.hidden) rej('parent ' + par.alias + ' is hidden');
           if (par.author !== a && !liveRec(S, p.parent, a)) rej('parent ' + par.alias + ' is neither assigned to nor created by ' + a);
         }
+        // (528) the sibling it follows; null or "" = first. An anchor that is not a
+        // sibling when the view is built falls back to the end (deriveViewState).
+        if (p.after != null && typeof p.after !== 'string') rej('after must be a sibling item id');
         break;
 
       case 'item.edit':
@@ -362,6 +430,7 @@
         if (has(p, 'priority') && p.priority == null) rej('priority cannot be cleared; set a level');
         checkFields(S, p);
         if ((p.mentions != null || p.attachments != null) && !has(p, 'body')) rej('mentions and attachments go with a body edit');
+        if (p.refs != null && !has(p, 'body')) rej('refs go with a body edit');
         checkExtras(S, p, it.attachments);
         break;
 
@@ -382,12 +451,16 @@
           rej('only the creator (' + it.author + ') assigns ' + it.alias + '; an assignee hands off their own assignment with item.handoff');
         var completion = p.completion || 'assignee';
         if (completion !== 'assignee' && completion !== 'assigner') rej('completion must be assignee or assigner');
-        if (p.mode === 'all') { // live and forced-only: everyone within N levels below the author
+        if (p.targets != null) {
+          if (p.mode != null) rej('item.assign takes targets or mode, not both');
+          checkTargets(S, it, a, p.targets);
+        } else if (p.mode === 'all') { // the older form of a rule rooted at the author
           var levels = Number(p.levels || 0);
           if (!(levels >= 1)) rej('levels must be >= 1');
           if (!Object.keys(reach(S.members, a, levels)).length) rej('nobody is within ' + levels + ' levels below ' + a);
-          var cov = liveRules(S, it.id).filter(function (x) { return x.by === a && x.levels >= levels; })[0];
-          if (cov) rej('already assigned to everyone within ' + cov.levels + ' levels (' + alias(cov.id) + ')');
+          var cov = liveRules(S, it.id).filter(function (x) { return x.by === a && ruleCovers(S, x, { root: a, includeRoot: false, levels: levels }); })[0];
+          if (cov && cov.root === a && cov.levels != null) rej('already assigned to everyone within ' + cov.levels + ' levels (' + alias(cov.id) + ')');
+          if (cov) rej('the rule rooted at ' + a + ' is already covered by ' + alias(cov.id));
         } else if (p.mode === 'chosen') { // anyone: below the author = forced (live), anyone else = pending
           var ppl = p.people || [];
           if (!ppl.length) rej('choose at least one person');
@@ -420,26 +493,31 @@
         if (!r) rej(liveRec(S, it.id, a) ? a + '\'s assignment on ' + it.alias + ' is already live' : a + ' has no pending assignment on ' + it.alias);
         break;
 
-      case 'item.return': {
+      case 'item.return': { // an accepted assignment, and an accepted rule rooted at the assignee
         it = needItem(S, p.item);
         r = liveRec(S, it.id, p.assignee);
-        if (!r) rej((p.assignee || '?') + ' has no live assignment on ' + it.alias);
-        var lead = ((S.members[r.to] || {}).leads || [])[0];
-        if (lead !== a) rej('only ' + r.to + '\'s direct lead (' + (lead || 'none: ' + r.to + ' is a root') + ') returns an accepted assignment');
-        if (!r.accepted) rej(r.to + '\'s assignment was forced by ' + r.by + ' (their lead chain); only an accepted one is returnable');
+        q = acceptedReq(S, it.id, p.assignee);
+        if (!r && !q) rej((p.assignee || '?') + ' has no live assignment on ' + it.alias);
+        var to = (r || q).to, lead = ((S.members[to] || {}).leads || [])[0];
+        if (lead !== a) rej('only ' + to + '\'s direct lead (' + (lead || 'none: ' + to + ' is a root') + ') returns an accepted assignment');
+        if (!q && !r.accepted) rej(r.to + '\'s assignment was forced by ' + r.by + ' (their lead chain); only an accepted one is returnable');
         break;
       }
 
       case 'item.unassign':
         it = needItem(S, p.item);
-        if (p.assignee) {
+        if (p.root != null) { // the author's rules rooted at `root`, with their requests and records
+          if (p.assignee) rej('item.unassign takes assignee or root, not both');
+          if (!openRules(S, it.id).some(function (x) { return x.by === a && x.root === p.root; }))
+            rej(a + ' has no rule rooted at ' + p.root + ' on ' + it.alias);
+        } else if (p.assignee) {
           r = openRec(S, it.id, p.assignee);
           if (!r) rej(p.assignee + ' has no live or pending assignment on ' + it.alias);
           var departed = (S.members[r.to] || {}).removed || (S.members[r.by] || {}).removed;
           if (r.by !== a && !(r.state === 'pending' && r.sender === a) && !(S.admins[a] && departed))
             rej('only the assigner (' + r.by + ') unassigns' + (r.state === 'pending' && r.sender !== r.by ? ' (or ' + r.sender + ' withdraws)' : ''));
         } else if (!openRecs(S, it.id).some(function (x) { return x.by === a || (x.state === 'pending' && x.sender === a); }) &&
-          !liveRules(S, it.id).some(function (x) { return x.by === a; }))
+          !openRules(S, it.id).some(function (x) { return x.by === a; }))
           rej(a + ' has no assignments to withdraw on ' + it.alias);
         break;
 
@@ -623,32 +701,63 @@
   }
 
   function mentionsOf(p) { return Array.isArray(p.mentions) ? p.mentions.slice() : []; }
+  function refsOf(p) { return Array.isArray(p.refs) ? p.refs.slice() : []; }
   function attachmentsOf(p) {
     return Array.isArray(p.attachments) ? p.attachments.map(function (x) { return { oid: x.oid, name: x.name, size: x.size, mime: x.mime }; }) : [];
   }
-  // The register's shown write: mentions and attachments follow the body write that won.
+  // The register's shown write: mentions, attachments and refs follow the body write that won.
   function regWinner(S, key) { return winner(S.reg[key]).n; }
 
+  // A record's id is "<via>><member>" unless extra.id names it (a rule's records
+  // and its request).
   function addRec(S, via, item, to, by, completion, extra) {
-    var id = via.id + '>' + to;
+    var id = (extra && extra.id) || via.id + '>' + to;
     if (S.asg[id]) return null;
     var r = { id: id, item: item, to: to, by: by, sender: by, completion: completion, via: via.id, ts: via.ts,
       state: 'live', forced: true, accepted: null, leadAtAccept: null, ended: null, handoffOf: null, answerNote: null,
-      status: 'todo', note: null, noteBy: null, last: via, writes: [], inherited: null };
+      status: 'todo', note: null, noteBy: null, last: via, writes: [], inherited: null, rule: null, ruleRequest: false };
     if (extra) Object.keys(extra).forEach(function (k) { r[k] = extra[k]; });
     S.asg[id] = r;
     return r;
   }
 
-  // Live "everyone within N": whoever enters the reach later inherits the assignment.
-  function refreshLive(S, n) {
-    vals(S.rules).forEach(function (rule) {
-      if (rule.ended) return;
-      Object.keys(reach(S.members, rule.by, rule.levels)).forEach(function (t) {
-        if (rule.excluded[t] || openRec(S, rule.item, t) || S.asg[rule.id + '>' + t]) return;
-        addRec(S, { id: rule.id, ts: n.ts }, rule.item, t, rule.by, rule.completion, { inherited: n.id, last: n });
-      });
+  // A rule's records: "<rule id>><member>", via the assign event, for everyone it
+  // covers who holds nothing on the item and was not unassigned from it.
+  function extendRule(S, rule, n, inherited) {
+    coveredBy(S, rule).forEach(function (t) {
+      if (rule.excluded[t] || openRec(S, rule.item, t) || S.asg[rule.id + '>' + t]) return;
+      addRec(S, { id: rule.via, ts: n.ts }, rule.item, t, rule.by, rule.completion,
+        { id: rule.id + '>' + t, rule: rule.id, inherited: inherited ? n.id : null, last: n });
     });
+  }
+  // Live rules: whoever enters the coverage later inherits the assignment.
+  function refreshLive(S, n) {
+    vals(S.rules).forEach(function (rule) { if (!rule.ended && rule.state === 'live') extendRule(S, rule, n, true); });
+  }
+  // A rule ends with the live records it made; a handoff its holder accepted stays.
+  function endRule(S, rule, n, C) {
+    if (!rule) return;
+    if (!rule.ended) rule.ended = n.id;
+    recsOn(S, rule.item).forEach(function (x) {
+      if (x.rule === rule.id && !x.ruleRequest && x.state === 'live') endRec(S, x, n, 'unassigned', C);
+    });
+  }
+  function assignPerson(S, n, item, t, a, completion) { // (273) below the author = forced (live), anyone else = pending
+    if (!S.members[t] || openRec(S, item, t)) return;
+    var forced = t === a || below(S.members, a, t);
+    addRec(S, n, item, t, a, completion, { forced: forced, state: forced ? 'live' : 'pending' });
+  }
+  // (491) A rule the author reaches the root of is live at once; one rooted outside
+  // that reach sends the root a request and waits for its accept.
+  function addRule(S, n, item, x, a, completion) {
+    var id = n.id + '~' + x.root;
+    if (S.rules[id] || !S.members[x.root]) return;
+    var live = x.root === a || below(S.members, a, x.root);
+    var rule = S.rules[id] = { id: id, via: n.id, item: item, by: a, root: x.root, includeRoot: !!x.include_root,
+      levels: x.levels == null ? null : Number(x.levels), completion: completion, excluded: {}, ended: null,
+      state: live ? 'live' : 'pending', request: null, ts: n.ts };
+    if (live) { extendRule(S, rule, n, false); return; }
+    rule.request = addRec(S, n, item, x.root, a, completion, { id: id, rule: id, ruleRequest: true, forced: false, state: 'pending' }).id;
   }
 
   // End a record. Unassign, return, withdraw and an accepted handoff beat any
@@ -657,6 +766,7 @@
   // the same event: there is nothing left to hand on.
   function endRec(S, r, n, state, C) {
     r.state = state; r.ended = n;
+    if (r.ruleRequest && S.rules[r.rule] && !S.rules[r.rule].ended) S.rules[r.rule].ended = n.id; // a withdrawn request ends its rule
     vals(S.asg).forEach(function (x) {
       if (x.handoffOf === r.id && x.state === 'pending') { x.state = 'withdrawn'; x.ended = n; }
     });
@@ -709,15 +819,15 @@
       case 'item.create':
         S.items[n.id] = { id: n.id, alias: n.alias, kind: p.kind, title: p.title, body: p.body || '', project: p.project || '',
           due: p.due || null, priority: p.priority != null ? p.priority : S.prio.default,
-          parent: p.parent || null, author: a, ts: n.ts, hidden: false, edited: null, node: n,
-          mentions: mentionsOf(p), attachments: attachmentsOf(p) };
+          parent: p.parent || null, after: has(p, 'after') ? (p.after || null) : undefined, author: a, ts: n.ts, hidden: false, edited: null, node: n,
+          mentions: mentionsOf(p), attachments: attachmentsOf(p), refs: refsOf(p) };
         break;
       case 'item.edit':
         it = S.items[p.item]; if (!it) break;
         ITEM_FIELDS.forEach(function (f) {
           if (has(p, f)) it[f] = write(S, 'it:' + it.id + ':' + f, f + ' of ' + it.alias, n, p[f] == null ? (f === 'due' ? null : '') : p[f], C);
         });
-        if (has(p, 'body')) { var bw = regWinner(S, 'it:' + it.id + ':body'); it.mentions = mentionsOf(bw.p); it.attachments = attachmentsOf(bw.p); }
+        if (has(p, 'body')) { var bw = regWinner(S, 'it:' + it.id + ':body'); it.mentions = mentionsOf(bw.p); it.attachments = attachmentsOf(bw.p); it.refs = refsOf(bw.p); }
         it.edited = n;
         break;
       case 'item.hide':
@@ -727,16 +837,15 @@
       case 'item.assign': {
         var completion = p.completion || 'assignee';
         if (!S.items[p.item]) break;
-        if (p.mode === 'all') {
-          Object.keys(reach(S.members, a, Number(p.levels))).forEach(function (t) {
-            if (!openRec(S, p.item, t)) addRec(S, n, p.item, t, a, completion);
-          });
-          S.rules[n.id] = { id: n.id, item: p.item, by: a, levels: Number(p.levels), completion: completion, excluded: {}, ended: null };
-        } else (p.people || []).forEach(function (t) {
-          if (!S.members[t] || openRec(S, p.item, t)) return;
-          var forced = t === a || below(S.members, a, t);
-          addRec(S, n, p.item, t, a, completion, { forced: forced, state: forced ? 'live' : 'pending' });
+        if (p.targets != null) (Array.isArray(p.targets) ? p.targets : []).forEach(function (x) {
+          if (typeof x === 'string') assignPerson(S, n, p.item, x, a, completion);
+          else if (x && typeof x.root === 'string') addRule(S, n, p.item, x, a, completion);
         });
+        else if (p.mode === 'all') { // the older form: a rule rooted at the author, its id the event's
+          var rule = S.rules[n.id] = { id: n.id, via: n.id, item: p.item, by: a, root: a, includeRoot: false, levels: Number(p.levels),
+            completion: completion, excluded: {}, ended: null, state: 'live', request: null, ts: n.ts };
+          extendRule(S, rule, n, false);
+        } else (p.people || []).forEach(function (t) { assignPerson(S, n, p.item, t, a, completion); });
         break;
       }
       case 'item.handoff':
@@ -744,41 +853,71 @@
         if (!r || !S.members[p.to] || openRec(S, p.item, p.to)) break;
         addRec(S, n, p.item, p.to, r.by, r.completion, { forced: false, state: 'pending', sender: a, handoffOf: r.id, answerNote: null, handoffNote: p.note || null });
         break;
-      case 'item.accept':
-        r = pendingRec(S, p.item, a);
-        if (!r) { onEnded(S, p.item, a, n, C); break; }
-        r.state = 'live'; r.accepted = n; r.answerNote = p.note || null; r.last = n;
-        r.leadAtAccept = ((S.members[a] || {}).leads || [])[0] || null;
-        q = r.handoffOf && S.asg[r.handoffOf];
-        if (q && q.state === 'live') { // (290) the new assignment starts with the original's status and note
-          endRec(S, q, n, 'handed', C);
-          r.status = q.status; r.note = q.note; r.noteBy = q.noteBy;
-        }
+      case 'item.accept': { // answers every pending assignment of the author on the item
+        var acc = recsOn(S, p.item).filter(function (x) { return x.to === a && x.state === 'pending'; });
+        if (!acc.length) { onEnded(S, p.item, a, n, C); break; }
+        acc.forEach(function (r) {
+          r.accepted = n; r.answerNote = p.note || null; r.last = n;
+          r.leadAtAccept = ((S.members[a] || {}).leads || [])[0] || null;
+          if (r.ruleRequest) { // (491) the rule goes live, forced from here on
+            r.state = 'accepted';
+            var rule = S.rules[r.rule];
+            if (rule && !rule.ended) { rule.state = 'live'; extendRule(S, rule, n, false); }
+            return;
+          }
+          r.state = 'live';
+          var o = r.handoffOf && S.asg[r.handoffOf];
+          if (o && o.state === 'live') { // (290) the new assignment starts with the original's status and note
+            endRec(S, o, n, 'handed', C);
+            r.status = o.status; r.note = o.note; r.noteBy = o.noteBy;
+          }
+        });
         break;
+      }
       case 'item.decline':
-        r = pendingRec(S, p.item, a);
-        if (r) { r.state = 'declined'; r.ended = n; r.answerNote = p.note || null; }
+        recsOn(S, p.item).forEach(function (r) {
+          if (r.to !== a || r.state !== 'pending') return;
+          r.state = 'declined'; r.ended = n; r.answerNote = p.note || null;
+          if (r.ruleRequest && S.rules[r.rule] && !S.rules[r.rule].ended) S.rules[r.rule].ended = n.id;
+        });
         break;
-      case 'item.return':
+      case 'item.return': {
+        var rq = acceptedReq(S, p.item, p.assignee);
         r = liveRec(S, p.item, p.assignee);
         if (!r) { q = handedRec(S, p.item, p.assignee, n); r = q && reverseHanded(S, q, n, C); }
-        if (!r) break;
-        endRec(S, r, n, 'returned', C); r.answerNote = p.note || null;
-        // (291) returning an accepted handoff restores the original assignment with
-        // its prior status, unless its holder was removed or holds another one now
-        q = r.handoffOf && S.asg[r.handoffOf];
-        if (q && q.state === 'handed' && q.ended === r.accepted && S.members[q.to] && !S.members[q.to].removed && !openRec(S, q.item, q.to)) {
-          q.state = 'live'; q.ended = null; q.restored = n; r.restores = q.id;
+        if (r && (r.accepted || !rq)) {
+          endRec(S, r, n, 'returned', C); r.answerNote = p.note || null;
+          // (291) returning an accepted handoff restores the original assignment with
+          // its prior status, unless its holder was removed or holds another one now
+          q = r.handoffOf && S.asg[r.handoffOf];
+          if (q && q.state === 'handed' && q.ended === r.accepted && S.members[q.to] && !S.members[q.to].removed && !openRec(S, q.item, q.to)) {
+            q.state = 'live'; q.ended = null; q.restored = n; r.restores = q.id;
+          }
         }
+        if (rq) { rq.state = 'returned'; rq.ended = n; rq.answerNote = p.note || null; endRule(S, S.rules[rq.rule], n, C); }
         break;
+      }
       case 'item.unassign':
-        if (p.assignee) {
+        if (p.root != null) {
+          openRules(S, p.item).forEach(function (rule) {
+            if (rule.by !== a || rule.root !== p.root) return;
+            q = rule.request && S.asg[rule.request];
+            if (q && q.state === 'pending') endRec(S, q, n, 'withdrawn', C);
+            else if (q && q.state === 'accepted') { q.state = 'unassigned'; q.ended = n; }
+            endRule(S, rule, n, C);
+          });
+        } else if (p.assignee) {
           r = openRec(S, p.item, p.assignee);
           if (!r) { q = handedRec(S, p.item, p.assignee, n); r = q && reverseHanded(S, q, n, C); }
-          liveRules(S, p.item).forEach(function (rule) { if (rule.by === (r ? r.by : a)) rule.excluded[p.assignee] = true; });
+          openRules(S, p.item).forEach(function (rule) { if (rule.by === (r ? r.by : a)) rule.excluded[p.assignee] = true; });
           if (r) endRec(S, r, n, r.state === 'pending' ? 'withdrawn' : 'unassigned', C);
         } else {
-          liveRules(S, p.item).forEach(function (rule) { if (rule.by === a) rule.ended = n.id; });
+          openRules(S, p.item).forEach(function (rule) {
+            if (rule.by !== a) return;
+            rule.ended = n.id;
+            q = rule.request && S.asg[rule.request];
+            if (q && q.state === 'accepted') { q.state = 'unassigned'; q.ended = n; }
+          });
           recsOn(S, p.item).filter(function (x) { return x.by === a && handedConc(x, n); }).forEach(function (x) { reverseHanded(S, x, n, C); });
           openRecs(S, p.item).filter(function (x) { return x.by === a || (x.state === 'pending' && x.sender === a); })
             .forEach(function (x) { endRec(S, x, n, x.state === 'pending' ? 'withdrawn' : 'unassigned', C); });
@@ -797,12 +936,12 @@
       }
       case 'comment.add':
         S.comments[n.id] = { id: n.id, alias: n.alias, item: p.item, author: a, body: p.body, reply_to: p.reply_to || null,
-          hidden: false, edited: null, ts: n.ts, node: n, mentions: mentionsOf(p), attachments: attachmentsOf(p) };
+          hidden: false, edited: null, ts: n.ts, node: n, mentions: mentionsOf(p), attachments: attachmentsOf(p), refs: refsOf(p) };
         break;
       case 'comment.edit':
         q = S.comments[p.comment]; if (!q) break;
         q.body = write(S, 'cm:' + q.id, 'text of comment ' + q.alias, n, p.body, C); q.edited = n;
-        var cw = regWinner(S, 'cm:' + q.id); q.mentions = mentionsOf(cw.p); q.attachments = attachmentsOf(cw.p);
+        var cw = regWinner(S, 'cm:' + q.id); q.mentions = mentionsOf(cw.p); q.attachments = attachmentsOf(cw.p); q.refs = refsOf(cw.p);
         break;
       case 'comment.hide':
         q = S.comments[p.comment]; if (q) { q.hidden = true; q.hiddenBy = n; }
@@ -947,7 +1086,8 @@
     var recs = recsOn(g.S, it.id), live = recs.filter(function (r) { return r.state === 'live'; });
     if (!live.length) {
       if (recs.some(function (r) { return r.state === 'pending'; })) return 'pending';
-      var last = recs.filter(function (r) { return r.ended; }).sort(function (x, y) { return later(x.ended, y.ended) ? 1 : -1; }).pop();
+      // the latest ended one; among ties (one event ended several) the first
+      var last = recs.reduce(function (b, r) { return r.ended && (!b || later(r.ended, b.ended)) ? r : b; }, null);
       return last && (last.state === 'declined' || last.state === 'returned') ? last.state : 'unassigned';
     }
     var s = live.map(function (r) { return r.status; });
@@ -1001,7 +1141,8 @@
       var last = r.last ? r.last.ts : r.ts, live = r.state === 'live';
       assignments[r.id] = { id: r.id, item: r.item, to: r.to, by: r.by, sender: r.sender, completion: r.completion, state: r.state,
         forced: r.forced, status: r.status, note: r.note, noteBy: r.noteBy, via: r.via, ts: r.ts,
-        inherited: !!r.inherited, ruleLevels: g.rules[r.via] ? g.rules[r.via].levels : null,
+        inherited: !!r.inherited, ruleLevels: g.rules[r.rule] ? g.rules[r.rule].levels : null,
+        rule: r.rule, ruleRequest: !!r.ruleRequest,
         handoffOf: r.handoffOf, handoffFrom: r.handoffOf && S.asg[r.handoffOf] ? S.asg[r.handoffOf].to : null,
         handoffNote: r.handoffNote || null, answerNote: r.answerNote,
         restored: r.restored ? { id: r.restored.id, ts: r.restored.ts } : null, restores: r.restores || null,
@@ -1018,6 +1159,30 @@
       if (n.status === 'applied' && n.thread && String(n.ts) > (lastAct[n.thread] || '')) lastAct[n.thread] = String(n.ts);
       [n.thread, n.parentThread].forEach(function (t) { if (t) (threads[t] = threads[t] || []).push(n.id); });
     });
+    // (528) Sibling order: each item, in fold order, goes right after its `after`
+    // anchor, first for null, last when the field is absent (every item created
+    // before it existed) or the anchor is not a sibling placed so far. A hidden
+    // anchor keeps its place, so hiding a row moves no other row. Concurrent
+    // inserts after one anchor: the later in fold order lands nearer the anchor.
+    var sib = {};
+    vals(S.items).forEach(function (it) {
+      var key = it.parent && S.items[it.parent] ? it.parent : '', l = sib[key] = sib[key] || [];
+      var at = it.after == null ? -1 : l.indexOf(it.after);
+      if (it.after === null) l.unshift(it.id);
+      else if (at < 0) l.push(it.id);
+      else l.splice(at + 1, 0, it.id);
+    });
+    // (531) Backlinks: the shown items, then the shown comments on shown items, that
+    // reference an item, each once, in fold order; an item's own thread excluded.
+    var backrefs = {};
+    function backref(t, from) { var l = backrefs[t] = backrefs[t] || []; if (l.indexOf(from) < 0) l.push(from); }
+    vals(S.items).forEach(function (it) {
+      if (!it.hidden) it.refs.forEach(function (t) { if (t !== it.id && S.items[t]) backref(t, it.id); });
+    });
+    vals(S.comments).forEach(function (q) {
+      var host = S.items[q.item];
+      if (!q.hidden && host && !host.hidden) q.refs.forEach(function (t) { if (t !== q.item && S.items[t]) backref(t, q.id); });
+    });
     var items = {};
     vals(S.items).forEach(function (it) {
       var recs = recsOn(S, it.id), d = 0, cur = it, chain = [];
@@ -1029,22 +1194,26 @@
         parent: it.parent && S.items[it.parent] ? it.parent : null, author: it.author, ts: it.ts, hidden: !!it.hidden,
         edited: it.edited ? { id: it.edited.id, ts: it.edited.ts } : null, status: itemStatus(g, it), counted: counted(g, it),
         rollup: rollup(g, it), lastActivity: lastAct[it.id] || it.ts, started: started,
-        children: vals(S.items).filter(function (k) { return k.parent === it.id; }).map(function (k) { return k.id; }),
+        children: (sib[it.id] || []).slice(),
         assignments: recs.map(function (r) { return r.id; }),
         pending: recs.filter(function (r) { return r.state === 'pending'; }).map(function (r) { return r.id; }),
         thread: threads[it.id] || [], concurrent: (threads[it.id] || []).filter(function (id) { return g.byId[id].markers.length; }).length,
-        depth: chain.length - 1, chain: chain.slice().reverse(), mentions: it.mentions.slice(), attachments: clone(it.attachments) };
+        depth: chain.length - 1, chain: chain.slice().reverse(), mentions: it.mentions.slice(), attachments: clone(it.attachments),
+        refs: it.refs.slice(), backrefs: backrefs[it.id] || [] };
     });
     var comments = {};
     vals(S.comments).forEach(function (q) {
       comments[q.id] = { id: q.id, item: q.item, author: q.author, body: q.body, reply_to: q.reply_to, ts: q.ts,
         edited: q.edited ? { id: q.edited.id, ts: q.edited.ts } : null, hidden: q.hiddenBy ? q.hiddenBy.id : null,
-        mentions: q.mentions.slice(), attachments: clone(q.attachments) };
+        mentions: q.mentions.slice(), attachments: clone(q.attachments), refs: q.refs.slice() };
     });
     var itemOrder = [];
-    (function walk(parent) {
-      Object.keys(items).forEach(function (id) { if (items[id].parent === parent) { itemOrder.push(id); walk(id); } });
-    })(null);
+    (function walk(parent) { (sib[parent] || []).forEach(function (id) { itemOrder.push(id); walk(id); }); })('');
+    var rules = {};
+    vals(S.rules).forEach(function (u) {
+      rules[u.id] = { id: u.id, item: u.item, via: u.via, by: u.by, root: u.root, includeRoot: u.includeRoot, levels: u.levels,
+        completion: u.completion, state: u.ended ? 'ended' : u.state, request: u.request, ended: u.ended, ts: u.ts };
+    });
 
     var members = {};
     Object.keys(S.members).forEach(function (id) {
@@ -1127,7 +1296,7 @@
         followers: (g.children[v] || []).slice(), reach: R, isMember: !!(me && !me.removed) },
       priority: clone(S.prio), attachments: clone(S.att),
       members: members, admins: Object.keys(S.admins), rolesProblems: rolesProblems(input.roles),
-      items: items, itemOrder: itemOrder, assignments: assignments, comments: comments, events: events, notices: notices,
+      items: items, itemOrder: itemOrder, assignments: assignments, rules: rules, comments: comments, events: events, notices: notices,
       my: {
         assignments: ids(mine.sort(byRank)),
         today: { work: ids(mine.filter(function (r) { return r.status !== 'done' && r.status !== 'awaiting'; }).sort(byUrgency)), pending: ids(pendingToMe.sort(byUrgency)), confirms: ids(confirms) },

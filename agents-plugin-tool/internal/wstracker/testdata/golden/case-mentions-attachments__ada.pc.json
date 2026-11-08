@@ -484,13 +484,16 @@
      "maya"
     ],
     "mentions": [],
-    "attachments": []
+    "attachments": [],
+    "refs": [],
+    "backrefs": []
    }
   },
   "itemOrder": [
    "maya.pc#1"
   ],
   "assignments": {},
+  "rules": {},
   "comments": {
    "maya.pc#2": {
     "id": "maya.pc#2",
@@ -507,7 +510,8 @@
     "mentions": [
      "sven"
     ],
-    "attachments": []
+    "attachments": [],
+    "refs": []
    },
    "ada.pc#2": {
     "id": "ada.pc#2",
@@ -528,7 +532,8 @@
       "size": 4200,
       "mime": "text/plain"
      }
-    ]
+    ],
+    "refs": []
    }
   },
   "events": [

@@ -107,12 +107,17 @@ type item struct {
 	due                  *string
 	priority             int
 	parent, author       string
-	ts                   time.Time
-	hidden               bool
-	edited               *node
-	node                 *node
-	mentions             []string
-	attachments          []attachment
+	// after is the sibling anchor (528) when afterSet: "" = first. Unset
+	// (every item created before the field) = last.
+	after       string
+	afterSet    bool
+	ts          time.Time
+	hidden      bool
+	edited      *node
+	node        *node
+	mentions    []string
+	attachments []attachment
+	refs        []string
 }
 
 // attachment is attachment metadata as folded; oid is the content's sha256.
@@ -121,9 +126,14 @@ type attachment struct {
 	size            float64 // the engine's number; never converted to int (see posIntOf)
 }
 
-// rec is one assignment record: "<assign or handoff event id>><member>".
+// rec is one assignment record: "<assign or handoff event id>><member>",
+// or "<rule id>><member>" for a rule's records (rule set).
 // state: pending -> live (accept) | declined | withdrawn;
 // live -> unassigned | returned | handed (a handoff was accepted).
+// A rule request (ruleRequest, id = the rule id) is the pending record a
+// rule rooted outside its author's reach sends to the root: pending ->
+// accepted (the rule goes live) | declined | withdrawn; accepted ->
+// returned | unassigned. It never holds the item, so openRec skips it.
 type rec struct {
 	id, item, to, by, sender, completion, via string
 	ts                                        time.Time
@@ -136,13 +146,35 @@ type rec struct {
 	status, note, noteBy                      string
 	writes                                    []*node
 	inherited                                 string
+	rule                                      string
+	ruleRequest                               bool
 }
 
+// rule is an assignment rule (490)-(492): it covers root (with
+// includeRoot) and everyone up to levels below it, levels 0 meaning the
+// whole subtree. The older "everyone within N" is a rule rooted at its
+// author, its id the assign event's; a newer rule's id is
+// "<event id>~<root>". state: live (the author reaches the root, or the
+// root accepted request) | pending; ended is the event that ended it.
 type rule struct {
-	id, item, by, completion string
-	levels                   float64
-	excluded                 map[string]bool
-	ended                    string
+	id, via, item, by, root, completion string
+	includeRoot                         bool
+	levels                              float64
+	excluded                            map[string]bool
+	ended                               string
+	state                               string
+	request                             string
+	ts                                  time.Time
+}
+
+// wholeSubtree is the reach depth of a rule with no levels.
+const wholeSubtree = 99
+
+func (ru *rule) depth() float64 {
+	if ru.levels == 0 {
+		return wholeSubtree
+	}
+	return ru.levels
 }
 
 type comment struct {
@@ -152,6 +184,7 @@ type comment struct {
 	hiddenBy, edited                       *node
 	mentions                               []string
 	attachments                            []attachment
+	refs                                   []string
 }
 
 // head is one value of a multi-value register.
@@ -181,6 +214,7 @@ type state struct {
 	recs     []*rec
 	byItem   map[string][]*rec
 	rules    []*rule
+	ruleByID map[string]*rule
 	comments map[string]*comment
 	corder   []string
 	reg      map[string][]head
@@ -322,7 +356,7 @@ func newState(g *genesis, hb func(x, y *node) bool, marks bool) *state {
 	s := &state{
 		hb: hb, marks: marks,
 		members: map[string]*member{}, admins: map[string]bool{},
-		items: map[string]*item{}, asg: map[string]*rec{}, byItem: map[string][]*rec{},
+		items: map[string]*item{}, asg: map[string]*rec{}, byItem: map[string][]*rec{}, ruleByID: map[string]*rule{},
 		comments: map[string]*comment{}, reg: map[string][]head{},
 		prio:   priority{names: append([]string(nil), g.prio.names...), def: g.prio.def},
 		attMax: g.attMax,
@@ -466,9 +500,22 @@ func (s *state) pendingRec(item, who string) *rec {
 
 func isOpen(r *rec) bool { return r.state == "live" || r.state == "pending" }
 
+// openRec is who's live or pending holding on item; a rule request holds
+// nothing.
 func (s *state) openRec(item, who string) *rec {
 	for _, r := range s.byItem[item] {
-		if isOpen(r) && r.to == who {
+		if isOpen(r) && r.to == who && !r.ruleRequest {
+			return r
+		}
+	}
+	return nil
+}
+
+// acceptedReq is an accepted rule request to who whose rule is still live:
+// what item.return ends.
+func (s *state) acceptedReq(item, who string) *rec {
+	for _, r := range s.byItem[item] {
+		if ru := s.ruleByID[r.rule]; r.ruleRequest && r.to == who && r.state == "accepted" && ru != nil && ru.ended == "" {
 			return r
 		}
 	}
@@ -495,7 +542,8 @@ func (s *state) lastEndedRec(item, who string) *rec {
 	return last
 }
 
-func (s *state) liveRules(item string) []*rule {
+// openRules are item's rules not ended, live or pending.
+func (s *state) openRules(item string) []*rule {
 	var out []*rule
 	for _, r := range s.rules {
 		if r.item == item && r.ended == "" {
@@ -505,19 +553,66 @@ func (s *state) liveRules(item string) []*rule {
 	return out
 }
 
+func (s *state) liveRules(item string) []*rule {
+	var out []*rule
+	for _, r := range s.openRules(item) {
+		if r.state == "live" {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
 func (s *state) hasLiveRule() bool {
 	for _, r := range s.rules {
-		if r.ended == "" {
+		if r.ended == "" && r.state == "live" {
 			return true
 		}
 	}
 	return false
 }
 
-// addRec adds a record unless one with the same id exists. It starts live
-// and forced; set adjusts it before it is stored.
+// coveredBy lists who ru covers now: the root (with includeRoot, while a
+// member), then its reach.
+func (s *state) coveredBy(ru *rule) []string {
+	var out []string
+	if ru.includeRoot && s.liveMember(ru.root) {
+		out = append(out, ru.root)
+	}
+	for _, t := range s.reach(ru.root, ru.depth()) {
+		out = append(out, t.id)
+	}
+	return out
+}
+
+// ruleCovers reports that rule y covers rule x by shape: everything x
+// reaches, y reaches.
+func (s *state) ruleCovers(y, x *rule) bool {
+	d, ok := 0, y.root == x.root
+	if !ok {
+		d, ok = reachMap(s.reach(y.root, wholeSubtree))[x.root]
+	}
+	if !ok {
+		return false
+	}
+	if x.includeRoot {
+		if d == 0 && !y.includeRoot || d > 0 && y.levels != 0 && float64(d) > y.levels {
+			return false
+		}
+	}
+	if y.levels == 0 {
+		return true
+	}
+	return x.levels != 0 && float64(d)+x.levels <= y.levels
+}
+
+// addRec adds a record "<viaID>><to>" unless one with the same id exists.
+// It starts live and forced; set adjusts it before it is stored.
 func (s *state) addRec(viaID string, viaTS time.Time, last *node, item, to, by, completion string, set func(*rec)) *rec {
-	id := viaID + ">" + to
+	return s.addRecID(viaID+">"+to, viaID, viaTS, last, item, to, by, completion, set)
+}
+
+func (s *state) addRecID(id, viaID string, viaTS time.Time, last *node, item, to, by, completion string, set func(*rec)) *rec {
 	if s.asg[id] != nil {
 		return nil
 	}
@@ -532,20 +627,91 @@ func (s *state) addRec(viaID string, viaTS time.Time, last *node, item, to, by, 
 	return r
 }
 
-// refreshLive re-applies the live "everyone within N" rules: whoever entered
-// the reach since inherits the assignment.
-func (s *state) refreshLive(n *node) {
-	for _, ru := range s.rules {
-		if ru.ended != "" {
+// extendRule adds ru's records, "<rule id>><member>" via the assign event,
+// for everyone it covers who holds nothing on the item and was not
+// unassigned from it.
+func (s *state) extendRule(ru *rule, n *node, inherited bool) {
+	for _, t := range s.coveredBy(ru) {
+		if ru.excluded[t] || s.openRec(ru.item, t) != nil || s.asg[ru.id+">"+t] != nil {
 			continue
 		}
-		for _, t := range s.reach(ru.by, ru.levels) {
-			if ru.excluded[t.id] || s.openRec(ru.item, t.id) != nil || s.asg[ru.id+">"+t.id] != nil {
-				continue
+		s.addRecID(ru.id+">"+t, ru.via, n.ts, n, ru.item, t, ru.by, ru.completion, func(r *rec) {
+			r.rule = ru.id
+			if inherited {
+				r.inherited = n.id
 			}
-			s.addRec(ru.id, n.ts, n, ru.item, t.id, ru.by, ru.completion, func(r *rec) { r.inherited = n.id })
+		})
+	}
+}
+
+// refreshLive re-applies the live rules: whoever entered a coverage since
+// inherits the assignment.
+func (s *state) refreshLive(n *node) {
+	for _, ru := range s.rules {
+		if ru.ended == "" && ru.state == "live" {
+			s.extendRule(ru, n, true)
 		}
 	}
+}
+
+// endRule ends ru with the live records it made; a handoff its holder
+// accepted stays.
+func (s *state) endRule(ru *rule, n *node) {
+	if ru == nil {
+		return
+	}
+	if ru.ended == "" {
+		ru.ended = n.id
+	}
+	for _, x := range append([]*rec(nil), s.byItem[ru.item]...) {
+		if x.rule == ru.id && !x.ruleRequest && x.state == "live" {
+			s.endRec(x, n, "unassigned")
+		}
+	}
+}
+
+// assignPerson (273): below the author is forced (live), anyone else
+// pending.
+func (s *state) assignPerson(n *node, item, t, completion string) {
+	a := n.member
+	if s.members[t] == nil || s.openRec(item, t) != nil {
+		return
+	}
+	forced := t == a || s.below(a, t)
+	s.addRec(n.id, n.ts, n, item, t, a, completion, func(r *rec) {
+		r.forced = forced
+		if !forced {
+			r.state = "pending"
+		}
+	})
+}
+
+// addRule (491): a rule whose root the author reaches is live at once; one
+// rooted outside that reach sends the root a request and waits for its
+// accept.
+func (s *state) addRule(n *node, item string, x obj, completion string) {
+	a, root := n.member, x.str("root")
+	id := n.id + "~" + root
+	if s.ruleByID[id] != nil || s.members[root] == nil {
+		return
+	}
+	ru := &rule{id: id, via: n.id, item: item, by: a, root: root, includeRoot: x["include_root"] == true,
+		completion: completion, excluded: map[string]bool{}, state: "live", ts: n.ts}
+	ru.levels, _ = x["levels"].(float64)
+	s.addRuleRec(ru)
+	if root == a || s.below(a, root) {
+		s.extendRule(ru, n, false)
+		return
+	}
+	ru.state, ru.request = "pending", id
+	s.addRecID(id, n.id, n.ts, n, item, root, a, completion, func(r *rec) {
+		r.rule, r.ruleRequest, r.forced, r.state = id, true, false, "pending"
+	})
+}
+
+func (s *state) addRuleRec(ru *rule) {
+	s.rules = append(s.rules, ru)
+	s.ruleByID[ru.id] = ru
 }
 
 // ---------------------------------------------------------------- markers
@@ -672,12 +838,21 @@ func (s *state) write(key, label string, n *node, v any) any {
 	return w.v
 }
 
-// regWinner is the shown write of a register: mentions and attachments
-// follow the body write that won.
+// regWinner is the shown write of a register: mentions, attachments, and
+// refs follow the body write that won.
 func (s *state) regWinner(key string) *node { return winner(s.reg[key]).n }
 
 func mentionsOf(p obj) []string {
 	l, _ := p.list("mentions")
+	out := make([]string, 0, len(l))
+	for _, x := range l {
+		out = append(out, jsString(x))
+	}
+	return out
+}
+
+func refsOf(p obj) []string {
+	l, _ := p.list("refs")
 	out := make([]string, 0, len(l))
 	for _, x := range l {
 		out = append(out, jsString(x))
@@ -707,6 +882,9 @@ func attachmentsOf(p obj) []attachment {
 // effect (213).
 func (s *state) endRec(r *rec, n *node, st string) {
 	r.state, r.ended = st, n
+	if ru := s.ruleByID[r.rule]; r.ruleRequest && ru != nil && ru.ended == "" {
+		ru.ended = n.id // a withdrawn request ends its rule
+	}
 	for _, x := range s.byItem[r.item] {
 		if x.handoffOf == r.id && x.state == "pending" {
 			x.state, x.ended = "withdrawn", n
@@ -811,7 +989,8 @@ func (s *state) apply(n *node) {
 		if v, ok := p.intOf("priority"); ok {
 			it.priority = v
 		}
-		it.mentions, it.attachments = mentionsOf(p), attachmentsOf(p)
+		it.mentions, it.attachments, it.refs = mentionsOf(p), attachmentsOf(p), refsOf(p)
+		it.after, it.afterSet = p.str("after"), p.has("after")
 		if s.items[n.id] == nil {
 			s.iorder = append(s.iorder, n.id)
 		}
@@ -856,7 +1035,7 @@ func (s *state) apply(n *node) {
 		}
 		if p.has("body") {
 			w := s.regWinner("it:" + it.id + ":body")
-			it.mentions, it.attachments = mentionsOf(w.p), attachmentsOf(w.p)
+			it.mentions, it.attachments, it.refs = mentionsOf(w.p), attachmentsOf(w.p), refsOf(w.p)
 		}
 		it.edited = n
 	case TypeItemHide:
@@ -879,47 +1058,89 @@ func (s *state) apply(n *node) {
 			x.forced, x.state, x.sender, x.handoffOf, x.handoffNote = false, "pending", a, r.id, p.str("note")
 		})
 	case TypeItemAccept:
-		r := s.pendingRec(p.str("item"), a)
-		if r == nil {
+		// answers every pending assignment of the author on the item
+		var acc []*rec
+		for _, r := range s.byItem[p.str("item")] {
+			if r.to == a && r.state == "pending" {
+				acc = append(acc, r)
+			}
+		}
+		if len(acc) == 0 {
 			s.onEnded(p.str("item"), a, n)
 			break
 		}
-		r.state, r.accepted, r.answerNote, r.last = "live", n, p.str("note"), n
-		if m := s.members[a]; m != nil {
-			r.leadAtAccept = m.lead()
-		}
-		if q := s.asg[r.handoffOf]; r.handoffOf != "" && q != nil && q.state == "live" {
-			// (290) the new assignment starts with the original's status and note
-			s.endRec(q, n, "handed")
-			r.status, r.note, r.noteBy = q.status, q.note, q.noteBy
+		for _, r := range acc {
+			r.accepted, r.answerNote, r.last = n, p.str("note"), n
+			if m := s.members[a]; m != nil {
+				r.leadAtAccept = m.lead()
+			}
+			if r.ruleRequest { // (491) the rule goes live, forced from here on
+				r.state = "accepted"
+				if ru := s.ruleByID[r.rule]; ru != nil && ru.ended == "" {
+					ru.state = "live"
+					s.extendRule(ru, n, false)
+				}
+				continue
+			}
+			r.state = "live"
+			if q := s.asg[r.handoffOf]; r.handoffOf != "" && q != nil && q.state == "live" {
+				// (290) the new assignment starts with the original's status and note
+				s.endRec(q, n, "handed")
+				r.status, r.note, r.noteBy = q.status, q.note, q.noteBy
+			}
 		}
 	case TypeItemDecline:
-		if r := s.pendingRec(p.str("item"), a); r != nil {
+		for _, r := range s.byItem[p.str("item")] {
+			if r.to != a || r.state != "pending" {
+				continue
+			}
 			r.state, r.ended, r.answerNote = "declined", n, p.str("note")
+			if ru := s.ruleByID[r.rule]; r.ruleRequest && ru != nil && ru.ended == "" {
+				ru.ended = n.id
+			}
 		}
 	case TypeItemReturn:
 		item, who := p.str("item"), p.str("assignee")
+		rq := s.acceptedReq(item, who)
 		r := s.liveRec(item, who)
 		if r == nil {
 			if q := s.handedRec(item, who, n); q != nil {
 				r = s.reverseHanded(q, n)
 			}
 		}
-		if r == nil {
-			break
+		if r != nil && (r.accepted != nil || rq == nil) {
+			s.endRec(r, n, "returned")
+			r.answerNote = p.str("note")
+			// (291) returning an accepted handoff restores the original
+			// assignment with its prior status, unless its holder was removed or
+			// holds another one now.
+			if q := s.asg[r.handoffOf]; r.handoffOf != "" && q != nil && q.state == "handed" && q.ended == r.accepted &&
+				s.liveMember(q.to) && s.openRec(q.item, q.to) == nil {
+				q.state, q.ended, q.restored, r.restores = "live", nil, n, q.id
+			}
 		}
-		s.endRec(r, n, "returned")
-		r.answerNote = p.str("note")
-		// (291) returning an accepted handoff restores the original assignment
-		// with its prior status, unless its holder was removed or holds another
-		// one now.
-		if q := s.asg[r.handoffOf]; r.handoffOf != "" && q != nil && q.state == "handed" && q.ended == r.accepted &&
-			s.liveMember(q.to) && s.openRec(q.item, q.to) == nil {
-			q.state, q.ended, q.restored, r.restores = "live", nil, n, q.id
+		if rq != nil {
+			rq.state, rq.ended, rq.answerNote = "returned", n, p.str("note")
+			s.endRule(s.ruleByID[rq.rule], n)
 		}
 	case TypeItemUnassign:
 		item := p.str("item")
-		if p.truthy("assignee") {
+		if !p.null("root") {
+			for _, ru := range s.openRules(item) {
+				if ru.by != a || ru.root != p.str("root") {
+					continue
+				}
+				if q := s.asg[ru.request]; ru.request != "" && q != nil {
+					switch q.state {
+					case "pending":
+						s.endRec(q, n, "withdrawn")
+					case "accepted":
+						q.state, q.ended = "unassigned", n
+					}
+				}
+				s.endRule(ru, n)
+			}
+		} else if p.truthy("assignee") {
 			who := p.str("assignee")
 			r := s.openRec(item, who)
 			if r == nil {
@@ -931,7 +1152,7 @@ func (s *state) apply(n *node) {
 			if r != nil {
 				by = r.by
 			}
-			for _, ru := range s.liveRules(item) {
+			for _, ru := range s.openRules(item) {
 				if ru.by == by {
 					if ru.excluded == nil {
 						ru.excluded = map[string]bool{}
@@ -943,9 +1164,13 @@ func (s *state) apply(n *node) {
 				s.endRec(r, n, endState(r))
 			}
 		} else {
-			for _, ru := range s.liveRules(item) {
-				if ru.by == a {
-					ru.ended = n.id
+			for _, ru := range s.openRules(item) {
+				if ru.by != a {
+					continue
+				}
+				ru.ended = n.id
+				if q := s.asg[ru.request]; ru.request != "" && q != nil && q.state == "accepted" {
+					q.state, q.ended = "unassigned", n
 				}
 			}
 			for _, x := range append([]*rec(nil), s.byItem[item]...) {
@@ -990,7 +1215,7 @@ func (s *state) apply(n *node) {
 		r.status, r.note, r.noteBy, r.last = w.status, w.note, w.by, w.n
 	case TypeCommentAdd:
 		c := &comment{id: n.id, alias: n.alias, item: p.str("item"), author: a, body: jsString(p["body"]),
-			replyTo: p.str("reply_to"), ts: n.ts, mentions: mentionsOf(p), attachments: attachmentsOf(p)}
+			replyTo: p.str("reply_to"), ts: n.ts, mentions: mentionsOf(p), attachments: attachmentsOf(p), refs: refsOf(p)}
 		if s.comments[n.id] == nil {
 			s.corder = append(s.corder, n.id)
 		}
@@ -1000,7 +1225,7 @@ func (s *state) apply(n *node) {
 			c.body = s.write("cm:"+c.id, "text of comment "+c.alias, n, jsString(p["body"])).(string)
 			c.edited = n
 			w := s.regWinner("cm:" + c.id)
-			c.mentions, c.attachments = mentionsOf(w.p), attachmentsOf(w.p)
+			c.mentions, c.attachments, c.refs = mentionsOf(w.p), attachmentsOf(w.p), refsOf(w.p)
 		}
 	case TypeCommentHide:
 		if c := s.comments[p.str("comment")]; c != nil {
@@ -1108,26 +1333,30 @@ func (s *state) applyAssign(n *node) {
 	if !p.truthy("completion") {
 		completion = "assignee"
 	}
-	if p.str("mode") == "all" {
-		levels, _ := p["levels"].(float64)
-		for _, t := range s.reach(a, levels) {
-			if s.openRec(item, t.id) == nil {
-				s.addRec(n.id, n.ts, n, item, t.id, a, completion, nil)
+	if !p.null("targets") {
+		l, _ := p.list("targets")
+		for _, x := range l {
+			switch t := x.(type) {
+			case string:
+				s.assignPerson(n, item, t, completion)
+			case map[string]any:
+				if _, ok := t["root"].(string); ok {
+					s.addRule(n, item, obj(t), completion)
+				}
 			}
 		}
-		s.rules = append(s.rules, &rule{id: n.id, item: item, by: a, levels: levels, completion: completion, excluded: map[string]bool{}})
+		return
+	}
+	if p.str("mode") == "all" {
+		// the older form: a rule rooted at the author, its id the event's
+		levels, _ := p["levels"].(float64)
+		ru := &rule{id: n.id, via: n.id, item: item, by: a, root: a, levels: levels, completion: completion,
+			excluded: map[string]bool{}, state: "live", ts: n.ts}
+		s.addRuleRec(ru)
+		s.extendRule(ru, n, false)
 		return
 	}
 	for _, t := range p.strList("people") {
-		if s.members[t] == nil || s.openRec(item, t) != nil {
-			continue
-		}
-		forced := t == a || s.below(a, t)
-		s.addRec(n.id, n.ts, n, item, t, a, completion, func(r *rec) {
-			r.forced = forced
-			if !forced {
-				r.state = "pending"
-			}
-		})
+		s.assignPerson(n, item, t, completion)
 	}
 }

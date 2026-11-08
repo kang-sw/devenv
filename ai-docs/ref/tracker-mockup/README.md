@@ -507,20 +507,20 @@ attachment the store accepts, in bytes (339); without it the limit is 10 MiB
 
 | type | payload | rule |
 |---|---|---|
-| `item.create` | `kind` (`task`/`todo`/`topic`), `title`, `body?`, `project?`, `due?`, `priority?`, `parent?`, `mentions?`, `attachments?` | A `parent` must be assigned to or created by the author. `project` is one free-text string, the only grouping (no labels or tags). `due` is a `YYYY-MM-DD` date. `priority` is a level in the author's current range; omitted, the item starts at the store's default level. |
-| `item.edit` | `item`, any of `title`/`body`/`project`/`due`/`priority`; `mentions?` and `attachments?` with `body` | Creator only; an admin may also edit an item whose creator was removed (292). `due: null` clears the date; priority cannot be cleared. Each field merges by the (203) rule. `mentions` or `attachments` without `body` is flagged. |
+| `item.create` | `kind` (`task`/`todo`/`topic`), `title`, `body?`, `project?`, `due?`, `priority?`, `parent?`, `after?`, `mentions?`, `attachments?`, `refs?` | A `parent` must be assigned to or created by the author. `project` is one free-text string, the only grouping (no labels or tags). `due` is a `YYYY-MM-DD` date. `priority` is a level in the author's current range; omitted, the item starts at the store's default level. `after` places it among its siblings (528), below. |
+| `item.edit` | `item`, any of `title`/`body`/`project`/`due`/`priority`; `mentions?`, `attachments?` and `refs?` with `body` | Creator only; an admin may also edit an item whose creator was removed (292). `due: null` clears the date; priority cannot be cleared. Each field merges by the (203) rule. `mentions` or `attachments` without `body` is flagged, and so is `refs`. |
 | `item.hide` | `item` | Creator only; an admin may also hide an item whose creator was removed (292). A tombstone: the content stays in history. Flagged while someone else holds an open (live or pending) assignment on the item. |
-| `item.assign` | `item`, `mode` (`all`/`chosen`), `levels` (all), `people` (chosen), `completion` (`assignee`/`assigner`, default `assignee`) | Creator only; an admin may also assign an item whose creator was removed. `chosen` may target anyone in the store: the author, or someone the author reaches (the author is in their lead chain, any depth), is a **forced** assignment, live at once; anyone else gets a **pending** assignment. `all` targets everyone within N levels below the author, forced only, and stays live: anyone who later enters the range inherits it. Flagged when every chosen person already holds a live or pending assignment. Not allowed on topics. |
+| `item.assign` | `item`, `targets` (a list of member ids and rules `{root, include_root?, levels?}`) or the older `mode` (`all`/`chosen`), `levels` (all), `people` (chosen); `completion` (`assignee`/`assigner`, default `assignee`) | Creator only; an admin may also assign an item whose creator was removed. A person may be anyone in the store: the author, or someone the author reaches (the author is in their lead chain, any depth), is a **forced** assignment, live at once; anyone else gets a **pending** assignment. A rule (490)-(492) targets everyone below `root` (within `levels`, absent = the whole subtree; `root` too with `include_root`), forced, and stays live: anyone who later enters the range inherits it. A rule rooted at the author or below is live at once; one rooted elsewhere is a **rule request** pending to `root`. The older `chosen` is `targets` of people and `all` is one rule `{root: author, levels}`, with the event id as the rule id. Flagged: both `targets` and `mode`, an empty list, a malformed target, two rules on one root, a rule with nobody in it, a rule another live rule of the author's on the item already covers, or every person chosen (with no rule) already holding a live or pending assignment. Not allowed on topics. |
 | `item.handoff` | `item`, `to`, `assignee?`, `note?` | The holder of a live assignment hands it to anyone; an admin may hand off any member's live assignment by naming its holder in `assignee` (286), so open work can be taken over before the member is removed. It makes a pending assignment to `to` with the original's assigner and completion mode; on accept the original assignment ends (`handed`) and the new one starts with the original's status and note (290). Flagged on a done assignment, when `to` is the holder or already holds one, or while another handoff of it is pending. |
 | `item.accept` / `item.decline` | `item`, `note?` | The target of a pending assignment, on it. Accept makes it live; for a handoff it also ends the original. Decline ends it as `declined`. A pending handoff whose original ends another way is withdrawn with it (295), so a later accept or decline finds no pending assignment. |
 | `item.return` | `item`, `assignee`, `note?` | Only the assignee's direct lead, on an accepted (formerly pending) live assignment. Ends it as `returned`; the assigner may send again. Returning an accepted handoff restores the original assignment with its prior status (291), unless its holder was removed or holds another assignment on the item by then. |
-| `item.unassign` | `item`, `assignee?` | By the assigner; the sender of a pending assignment may also withdraw it. An admin may also unassign when the assignee or assigner was removed. Without `assignee`, it withdraws all of the author's assignments on the item and ends the live rule. |
+| `item.unassign` | `item`, `assignee?` or `root?` | By the assigner; the sender of a pending assignment may also withdraw it. An admin may also unassign when the assignee or assigner was removed. With `root`, it ends the author's open rule rooted there (a pending rule request is withdrawn). Without either, it withdraws all of the author's assignments on the item and ends their rules. |
 | `item.status` | `item`, `status` (`todo`/`doing`/`blocked`), `note?` | Assignee only (live). The creator self-assigns first. Allowed while awaiting confirmation, which withdraws the close. Not allowed on done. |
 | `item.close` | `item`, `note?` | Assignee. Moves to `done`, or to `awaiting` when completion is `assigner`. |
 | `item.confirm` / `item.reject` | `item`, `assignee`, `note?` | Assigner, on an `awaiting` assignment. Moves to `done` / back to `doing`. |
 | `item.reopen` | `item`, `assignee?`, `note?` | The assigner or the assignee reopens a `done` assignment, back to `doing`. |
-| `comment.add` | `item`, `body`, `reply_to?`, `mentions?`, `attachments?` | Anyone in the store. `reply_to` is one comment in the same thread (flat timeline, quote reply). |
-| `comment.edit` / `comment.hide` | `comment`, `body`, `mentions?`, `attachments?` (edit) | Comment author only. Hide is a tombstone. |
+| `comment.add` | `item`, `body`, `reply_to?`, `mentions?`, `attachments?`, `refs?` | Anyone in the store. `reply_to` is one comment in the same thread (flat timeline, quote reply). |
+| `comment.edit` / `comment.hide` | `comment`, `body`, `mentions?`, `attachments?`, `refs?` (edit) | Comment author only. Hide is a tombstone. |
 | `member.profile` | `profile` (any of `org`, `family`, `given`: strings), `member?` | (392 b) The author's own profile, or with `member` another member's: only an admin may write that, anyone else's write is flagged. Each field present is its own register, so concurrent changes merge by (203), and a write only carries the fields it changes. `given` is required and non-empty whenever it is present; a profile with an unknown or non-string field, or with none of the three, is flagged. The member must exist and not be removed. Shows in Activity with the writer, the admin when an admin made it. |
 | `roles.add_member` | `member` (`id`, `profile` (`org?`, `family?`, `given`), `keys`, `leads`) | Admin. Stands in for the self-join (`member.join`, (231)), whose payload carries the same `profile`. Flagged without `profile.given` (391). |
 | `roles.set_lead` | `member`, `leads` | Admin. Length at most 1, no cycle. |
@@ -530,10 +530,10 @@ attachment the store accepts, in bytes (339); without it the limit is 10 MiB
 | `roles.set_priority_levels` | `names` (1-9 display names, lowest first), `default` | Admin. Changes the level count and names; a field write, so concurrent changes merge by (203). |
 | `roles.set_attachment_limit` | `max_bytes` (a positive integer) | Admin. Changes `attachments.max_bytes`; a field write, merged by (203). Attachments already written stay; a later write is checked against the new limit in its author's causal past, but only for the attachments it adds. |
 
-**Mentions and attachments** ((335), (338)). A body (an item's on
+**Mentions, attachments, and refs** ((335), (338), (531)). A body (an item's on
 `item.create` / `item.edit`, a comment's on `comment.add` / `comment.edit`)
-may carry `mentions`, a list of member ids, and `attachments`, a list of
-`{oid, name, size, mime}`. The text keeps `@name` for display; the list is
+may carry `mentions`, a list of member ids, `attachments`, a list of
+`{oid, name, size, mime}`, and `refs`, a list of item ids. The text keeps `@name` for display; the list is
 what notifies. Each id must be a member, not removed, in the author's causal
 past. `oid` is the sha256 of the content (64 lowercase hex digits), `size` is
 a byte count, and `name` and `mime` are required. A write may add only
@@ -542,11 +542,27 @@ past (345 b): an attachment whose `oid` is already on the same item body's or
 the same comment's shown attachments, as the author had seen them, is exempt,
 so an edit that keeps an older, larger attachment survives a lowered limit,
 while an oid the author had not yet seen there counts as new.
-`item.create` and `comment.add` check every attachment. Both lists ride with the body: a
+`item.create` and `comment.add` check every attachment. The text keeps
+`#<alias>` for display; each `refs` id must be an item in the author's causal
+past (a hidden one included). The writer derives `refs` from the text, so an
+edit keeps a ref only while its `#<alias>` (or `#<id>`) stays in the text as
+a whole token. All three lists ride with the body: a
 body write replaces them (absent means empty), and the shown lists are the
 winning body write's, so concurrent edits follow the (203) / (271) winner.
 Only metadata is modelled; storing and fetching the content is a later
 ledger ticket (337). Agent-authored writes may mention.
+
+**Sibling order** (528). `after` on `item.create` names the sibling the new
+item goes right after: absent appends it after the siblings placed so far
+(every item created before the field existed, so old stores keep their
+creation order), `""` or `null` puts it first. The view places items in fold
+order, each under its parent (or at the root); an anchor that is missing, not
+a sibling, or not placed yet appends. A hidden anchor keeps its slot, so
+hiding a row moves no other row. Two inserts after one anchor that do not see
+each other order by the fold: the later one lands nearer the anchor. A
+non-string `after` is flagged; nothing else is. Reorder and reparent are not
+modelled; a later `item.move {item, parent?, after}` can carry the same
+anchor, its latest write winning like a field.
 
 `agent-auto` is valid only on `item.status` and `item.close` for the author's
 own assignment. It is always invalid on accept, decline, return, and handoff:
@@ -590,6 +606,25 @@ forced (author, or someone the author reaches) starts live
   records, never events.
 - `returned` and `declined` are terminal: the assigner may assign again.
 - Completion mode (assignee closes / assigner confirms) stays per assignment.
+- **Rules** ((490)-(492)). A rule's id is `<assign event id>~<root>` (the
+  older `all` form: the assign event id). Each member it covers gets a
+  forced, live record `<rule id>><member>` carrying `rule`; a member who
+  later enters the range inherits one (`inherited`). A rule rooted outside
+  the author's reach first sends its root a **rule request**, a record with
+  the rule's id and `ruleRequest: true`, pending to the root; nobody else
+  holds a record yet. The root's accept makes the rule live (its records
+  appear) and notifies the root's direct lead, who may return the request:
+  that ends the rule and its records as `unassigned`. A decline ends it, and
+  `item.unassign` with `root` (or without a target) withdraws it while
+  pending. Accept and decline answer every pending record the author holds
+  on the item. A request is neither live work nor counted in the item status
+  while pending.
+
+```text
+rule rooted at the author or below:  live at once --unassign root / all--> ended
+rule rooted elsewhere:  request pending --accept--> live --request returned / unassign--> ended
+                                        |--decline / withdraw--> ended
+```
 
 ### Derived state
 
@@ -629,15 +664,18 @@ items        { id: { id, alias, kind, title, body, project, due, priority, prior
                      parent, children[], author, ts, hidden, edited{id, ts}, status, counted,
                      rollup{total, counts{status: n}, blocked[]}, lastActivity, started,
                      assignments[], pending[], thread[eventId], concurrent, depth, chain[],
-                     mentions[memberId], attachments[{oid, name, size, mime}] } }
-itemOrder[]  item ids in tree order
+                     mentions[memberId], attachments[{oid, name, size, mime}],
+                     refs[itemId], backrefs[itemId|commentId] } }
+itemOrder[]  item ids in tree order, siblings by their after anchors
 assignments  { id: { id, item, to, by, sender, completion, state, forced, status, note, noteBy, via, ts,
-                     inherited, ruleLevels, handoffOf, handoffFrom, handoffNote, answerNote,
+                     inherited, ruleLevels, rule, ruleRequest, handoffOf, handoffFrom, handoffNote, answerNote,
                      restored{id, ts}, restores, accepted{id, ts},
                      leadAtAccept, ended{id, type, ts, by}, depth, statusOrigin, statusBy,
                      lastUpdate, stale } }
+rules        { id: { id, item, via, by, root, includeRoot, levels (null: whole subtree), completion,
+                     state (live|pending|ended), request, ended, ts } }
 comments     { id: { id, item, author, body, reply_to, ts, edited{id, ts}, hidden,
-                     mentions[memberId], attachments[{oid, name, size, mime}] } }
+                     mentions[memberId], attachments[{oid, name, size, mime}], refs[itemId] } }
 events[]     display order: { id, alias, stream, member, seq, ts, type, origin, payload, status
                      (applied|flagged|waiting), reason, ignored, markers[{kind, field, other,
                      otherMember, winner, mine, theirs}], superseded[{field, by, why (later|human)}],
@@ -654,6 +692,11 @@ store        { name, label, remote }
 sync         { online, syncedAt, upstream, unpushed[{open, ts, events[]}] }   the viewer's clone
 clones       { member: [{ stream, online, unpushed }] }
 ```
+
+`backrefs` lists the shown items, then the shown comments on shown items,
+that reference the item, each once, in fold order; the item's own thread is
+left out. A view reads the referencing item of a comment through
+`comments[id].item`.
 
 `name` is derived from the profile, never stored: kept in the view state so a
 view reads one string where it names a person. **Display rules** ((383 b),
@@ -969,9 +1012,12 @@ creation, and it has a topic and a blocked subtask.
 | 472 b | The item modals become menu steps or inline inputs: status, close, subtask, priority, due, handoff, the reject / reopen / decline / return notes, comment edit, and item edit. Assign is an anchored popover from the menu; a new item is an inline input row atop the list (title + Enter, the rest from its menu). Only the store-wide forms (profile, admin) stay modal. Supersedes the action dialogs of (357) and the labelled window buttons of (366 note). |
 | 473 | One context menu for list rows, kanban cards, calendar entries, timeline rows, and the item window header; opened by right-click, a "⋯" button (visible without hover on touch layouts), and Shift+F10 / the menu key; a click on a status icon opens only its status part. It shows only the actions the viewer's role and the item's state allow; submenus are steps in the same panel; arrows, Enter, and Esc work, and focus returns to the opener. Supersedes the row hover action icons of (354) / (357). |
 | 474 | Inline subtask: an input row one level in under the row (in the item window's Subtasks for a kanban card, a calendar entry, or the window header); title + Enter creates an unassigned task with the default completion, Enter again adds a sibling, Esc closes it. |
+| 490 a, 491 a, 492 a | "Everyone within N" generalizes to a subtree rule `{root, include_root, levels?}` (levels absent: the whole subtree), and one `item.assign` carries `targets`, a list mixing member ids and rules; the older `mode` forms stay valid, `all` reading as a rule rooted at the author. A rule rooted at the author or below is live and forced at once, inherited by later joiners. A rule rooted outside the author's reach is a rule request pending to its root; the root's accept makes the rule live with forced records and notifies the root's direct lead, who may return it, ending the rule. `item.unassign` gains `root` to end one rule. Rule ids `<event>~<root>`, records `<rule>><member>`; the view adds `rules` and each record's `rule` / `ruleRequest`. |
 | 498 | The Activity tab's "flagged only" and "concurrent only" are toggle chips like the list / activity timeline chips (accent when on); no native checkbox remains in the drawer outside forms. |
 | 499 | The comment composer follows the dashboard chat input: a paper-plane send button inside the box at the bottom right, Cmd+Enter / Ctrl+Enter sends and Enter is a newline, a small `@` picker at the bottom left; the composer's status line is gone (the status is the menu's). Supersedes the quick status of (166). |
 | 500 | The store's sync rows under its name become a thin ribbon at the bottom of the Items card (status dot, short text, the apply button only while writes are pending, dimmed when idle); a click opens a popover with the clone ref, counts, and batch contents. The store header keeps one row: the name and the icon-only `Open as page` and `+ New`. |
+| 528 a | Items carry a sibling position: `item.create` takes `after`, a sibling id (`""` / `null`: first; absent: append, so old events keep creation order). The view's `itemOrder` and each `children` list follow the anchors in fold order; a missing, other-parent, or not-yet-placed anchor appends, a hidden one keeps its slot, and of two unseen inserts after one anchor the later lands nearer it. A later `item.move` extends the same field. |
+| 531 a | Items and comments carry `refs`, the item ids their text references with `#<alias>`, riding with the body like mentions (the writer keeps a ref only while its token stays in the text). Each ref must be an item in the author's causal past. The view shows `refs` on items and comments, and `backrefs` on items: shown items, then shown comments on shown items, own thread excluded. |
 
 ## Open questions
 
