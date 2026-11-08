@@ -95,8 +95,9 @@
   // The panes that scroll on their own; the page itself scrolls on / and on
   // the board-first page. A pane hidden by the tabs view loses its offset, so
   // each pane's last visible offset is kept and put back when it shows again.
-  // The drawer's body (drbody) is never display:none, only clipped, so a
-  // panels swap keeps its offset whether the drawer is open or closed.
+  // The drawer's body (drbody) is only clipped while the drawer is closed
+  // (hidden only while the frame shows the git sheet), so a panels swap
+  // keeps its offset whether the drawer is open or closed.
   var PANES = ["bcol", "r-tree", "convo", "drbody"];
   var paneScroll = {};
   PANES.forEach(function (id) {
@@ -376,6 +377,7 @@
     }
     if (board || name === "convlive") applySent();
     if (name === "panels") drawerSync();
+    if (name === "git") gitSwapped();
     restoreScroll(scroll);
     if (pin) pinConvo();
     if (live && TAB[name] && !tabShown(TAB[name])) {
@@ -1203,12 +1205,21 @@
   // reworking the frame. The sheet shows every present entry's card at once
   // and the handle holds one icon per present entry. Open state and height
   // are this browser's (ws.dashboard.drawer*).
+  //
+  // The git handle (the git region, left of the handle) opens the same frame
+  // on the git drawer's sheet (#gbody) instead of the panels: drMode is the
+  // sheet the frame shows, "panels" or "git", and only the handle of the
+  // shown sheet rides its bottom edge. The git sheet's open state is never
+  // kept, and it shares the panels' height; only the panels handle drags.
   var drawer = $("drawer"), drclip = $("drclip"), drsheet = $("drsheet"), drbody = $("drbody");
   var drhandle = $("drhandle"), drheader = doc.querySelector(".dwrap > .top");
+  var gbody = $("gbody"), gitRegion = region("git");
   var DR_OPEN = "ws.dashboard.drawer", DR_H = "ws.dashboard.drawer.h";
   var DR_MIN = 160, DR_DEF = 320, DR_SHUT = 80;
-  var drRoomW = -1, drEntries = [], drWant = false, drOpen = false, drHas = false, drH = DR_DEF, drTop = 0;
-  var drWasOpen = false;
+  var drRoomW = -1, drGhOff = -1, drEntries = [], drWant = false, drOpen = false, drHas = false, drH = DR_DEF, drTop = 0;
+  var drMode = "panels", drShown = "";
+  // ghandle is the git handle now: a region swap replaces it.
+  function ghandle() { return $("ghandle"); }
   var drBadge = false, drSwap = false; // the handle's dot: a section badge, or a panels change while closed
   function drawerTab(entry) { drEntries.push(entry); }
   // panelTab registers a panel of the panels region (#p-<id>) as an entry: its
@@ -1281,9 +1292,10 @@
     if (has !== drHas) {
       drHas = has;
       drhandle.hidden = !has;
-      if (drheader) drheader.classList.toggle("dr-room", has);
-      drOpen = has && drWant;
-      drApply(false);
+      if (drMode === "panels") {
+        drOpen = has && drWant;
+        drApply(false);
+      }
     }
     drRoom();
   }
@@ -1291,17 +1303,24 @@
     var d = drhandle.querySelector(".tdot");
     if (d) d.classList.toggle("on", drBadge || drSwap);
   }
-  // drRoom keeps the header clear of the handle; the header's own padding
-  // reads --drhw.
+  // drRoom keeps the header and the tracker's handle row clear of both
+  // handles: --drhw is their width together (the header's padding and the
+  // tracker row read it), --ghr the git handle's offset from the right edge
+  // (the panels handle's width and the gap, 0 without that handle).
   function drRoom() {
     var w = drHas ? Math.ceil(drhandle.getBoundingClientRect().width) : 0;
-    if (w !== drRoomW) {
-      drRoomW = w;
-      doc.documentElement.style.setProperty("--drhw", w + "px");
+    var gw = ghandle() ? Math.ceil(gitRegion.getBoundingClientRect().width) : 0;
+    var off = w && gw ? w + 6 : 0, all = gw ? off + gw : w;
+    if (all !== drRoomW || off !== drGhOff) {
+      drRoomW = all;
+      drGhOff = off;
+      doc.documentElement.style.setProperty("--drhw", all + "px");
+      doc.documentElement.style.setProperty("--ghr", off + "px");
     }
+    if (drheader) drheader.classList.toggle("dr-room", all > 0);
   }
   function drTitle() {
-    var t = wsT(drOpen ? "js.drawer.close" : "js.drawer.open"), tip = drhandle.getAttribute("data-tip");
+    var t = wsT(drOpen && drMode === "panels" ? "js.drawer.close" : "js.drawer.open"), tip = drhandle.getAttribute("data-tip");
     if (tip) t += " (" + tip + ")";
     if (drhandle.classList.contains("wait")) t += "; " + wsT("js.drawer.waiting");
     drhandle.title = t;
@@ -1338,29 +1357,58 @@
   function drApply(anim) {
     if (!drawer) return;
     drMeasure();
-    var h = drClamp(drH);
+    var h = drClamp(drH), git = drMode === "git";
     drawer.classList.toggle("anim", !!anim);
     drawer.classList.toggle("open", drOpen);
+    drbody.hidden = git;
+    if (gbody) gbody.hidden = !git;
     drsheet.style.height = h + "px";
     drclip.style.height = (drOpen ? h : 0) + "px";
-    drhandle.style.top = (drOpen ? drTop + h : 0) + "px";
-    drhandle.setAttribute("aria-expanded", String(drOpen));
+    drhandle.style.top = (drOpen && !git ? drTop + h : 0) + "px";
+    if (gitRegion) gitRegion.style.top = (drOpen && git ? drTop + h : 0) + "px";
+    drhandle.setAttribute("aria-expanded", String(drOpen && !git));
+    ghSync();
     drTitle();
-    // Each opening reads the worktree pool again.
-    if (drOpen && !drWasOpen) wtLoad();
-    drWasOpen = drOpen;
+    // Each opening of a sheet reads its data again: the worktree pool for
+    // the panels, the changed files for the git sheet.
+    var shown = drOpen ? drMode : "";
+    if (shown !== drShown) {
+      drShown = shown;
+      if (shown === "panels") wtLoad();
+      else if (shown === "git") gitOpened();
+    }
+  }
+  // ghSync marks the git handle open or closed; a swap draws it closed.
+  function ghSync() {
+    var g = ghandle(), on = drOpen && drMode === "git";
+    if (!g) return;
+    g.setAttribute("aria-expanded", String(on));
+    g.classList.toggle("open", on);
+  }
+  // gitSwapped follows a git region swap: the new handle's open mark and
+  // width, and a closed git sheet when the handle went away.
+  function gitSwapped() {
+    if (!drawer) return;
+    ghSync();
+    drRoom();
+    if (drOpen && drMode === "git" && !ghandle()) drSetOpen(false);
   }
   // The session drawer and a tracker store's drawer never show at once:
   // opening this one tells the tracker (which collapses its open store), and
   // the tracker opening a store closes this one (tk:drawer-open, below).
   function drAnnounce() { doc.dispatchEvent(new CustomEvent("ws:drawer-open")); }
-  function drSetOpen(open) {
-    if (!drHas) return;
+  // drSetOpen opens the frame on mode's sheet (the shown one when omitted),
+  // or closes it. Only the panels sheet's open state is kept.
+  function drSetOpen(open, mode) {
+    mode = mode || drMode;
+    if (open && !(mode === "git" ? ghandle() : drHas)) return;
     if (open && !drOpen) drAnnounce();
-    if (!open && drsheet.contains(doc.activeElement)) drhandle.focus();
-    drWant = drOpen = open;
-    save(DR_OPEN, open ? "1" : null);
-    if (open) { drSwap = false; drDot(); }
+    if (!open && drsheet.contains(doc.activeElement)) (drMode === "git" && ghandle() || drhandle).focus();
+    drMode = mode;
+    drOpen = open;
+    drWant = open && mode === "panels";
+    save(DR_OPEN, drWant ? "1" : null);
+    if (drWant) { drSwap = false; drDot(); }
     drApply(true);
   }
   if (drawer) {
@@ -1383,6 +1431,9 @@
       if (!drDrag) return;
       if (!drDrag.moved && Math.abs(e.clientY - drDrag.y0) < 5) return;
       if (!drDrag.moved && !drOpen) drAnnounce();
+      // Dragging the panels handle over the open git sheet brings the
+      // panels in its place.
+      if (!drDrag.moved && drMode !== "panels") { drMode = "panels"; drApply(false); }
       drDrag.moved = true;
       var y = e.clientY - drDrag.off, max = drMax(), ext = Math.max(0, Math.min(max, y - drTop));
       drDrag.ext = ext;
@@ -1411,7 +1462,13 @@
     drhandle.addEventListener("pointercancel", drEnd);
     drhandle.addEventListener("click", function () {
       if (drDragged) return;
-      drSetOpen(!drOpen);
+      drSetOpen(!(drOpen && drMode === "panels"), "panels");
+    });
+    // The git handle toggles the git sheet, or brings it in place of the
+    // panels; it is looked up per click, since a swap replaces it.
+    doc.addEventListener("click", function (e) {
+      if (!e.target.closest || !e.target.closest("#ghandle")) return;
+      drSetOpen(!(drOpen && drMode === "git"), "git");
     });
     // A card's title bar is not a toggle: every card stays open.
     drbody.addEventListener("click", function (e) {
@@ -1438,22 +1495,27 @@
     doc.addEventListener("click", function (e) {
       var t = e.target;
       if (!drOpen || drDragged || !t || !t.closest) return;
-      if (t.closest("#drclip, #drhandle, .lmenu")) return;
+      if (t.closest("#drclip, #drhandle, #r-git, .lmenu")) return;
       drSetOpen(false);
     }, true);
     // The header can wrap or change height (a chip appears): the sheet
     // follows its bottom edge. A resize re-clamps the height without saving.
     window.addEventListener("resize", function () { drApply(false); });
     if (window.ResizeObserver && drheader) new ResizeObserver(function () { drApply(false); }).observe(drheader);
-    // The handle's width follows its icons; the header pads clear of it.
-    if (window.ResizeObserver) new ResizeObserver(drRoom).observe(drhandle);
+    // The handles' widths follow their contents; the header pads clear of
+    // them.
+    if (window.ResizeObserver) {
+      var drRo = new ResizeObserver(drRoom);
+      drRo.observe(drhandle);
+      if (gitRegion) drRo.observe(gitRegion);
+    }
     // The board-first page scrolls the document, and the header with it: the
     // sheet follows the header's bottom (the live layout never scrolls, so
     // this never fires there). Once a frame, and only when the bottom moved,
     // so a click's animation is not cut short.
     var drScrollFrame = 0;
     window.addEventListener("scroll", function () {
-      if (drScrollFrame || !drHas) return;
+      if (drScrollFrame || !(drHas || ghandle())) return;
       drScrollFrame = requestAnimationFrame(function () {
         drScrollFrame = 0;
         if (!drDrag && drHeaderBottom() !== drTop) drApply(false);
@@ -1584,7 +1646,9 @@
     row.appendChild(mk("span", "wtdot"));
     row.appendChild(mk("b", "wtname", w.name));
     if (w.leased) {
-      row.appendChild(mk("span", "wtbr", w.detached ? wsT("js.wt.detached") : w.branch));
+      var br = mk("span", "wtbr", w.detached ? wsT("js.wt.detached") : w.branch);
+      if (!w.detached) br.title = w.branch; // a long branch ellipsizes
+      row.appendChild(br);
       if (w.holder) {
         var who = mk("span", "wtwho", w.holder);
         who.title = wsT("js.wt.holder", w.holder);
@@ -1639,6 +1703,118 @@
       if (!ok) { if (wtnote) wtnote.textContent = wsT("js.wt.cleanfail", res); return; }
       drSetOpen(false);
     });
+  });
+
+  // --- git drawer: the action panel over the git routes ---------------------
+  // Each opening of the git sheet asks the daemon to read the handle again
+  // and reads the changed files (gitdrawer.go): the standing line, then the
+  // staged, unstaged, and untracked groups, each file with its status and
+  // line delta. Fetch, pull, and push post to their routes (gitpush.go), one
+  // at a time: the pressed button shows busy and the others wait; the
+  // daemon's refusal or git's failure shows on the panel's message line, a
+  // pull's "nothing to pull" as a plain note. Every answer reads the files
+  // again; the handle's own re-read arrives through the stream.
+  var gref = $("gref"), gfiles = $("gfiles"), gmsg = $("gmsg"), gSeq = 0, gBusy = false;
+  function gitOpened() {
+    if (!gbody || !window.fetch) return;
+    fetch("/s/" + rid + "/git", { method: "POST", credentials: "same-origin", cache: "no-store" }).catch(function () {});
+    gitLoad();
+  }
+  function gitLoad() {
+    var seq = ++gSeq;
+    if (!gfiles.firstChild) gfiles.appendChild(mk("div", "gempty", wsT("js.git.loading")));
+    fetch("/s/" + rid + "/git/status", { credentials: "same-origin", cache: "no-store" }).then(function (r) {
+      return r.text().then(function (s) {
+        if (seq !== gSeq) return;
+        if (!r.ok) { gitFail(s.trim() || "HTTP " + r.status); return; }
+        try { gitDraw(JSON.parse(s)); } catch (e) { gitFail("malformed answer"); }
+      });
+    }, function () { if (seq === gSeq) gitFail(wsT("js.post.unreachable")); });
+  }
+  function gitFail(msg) {
+    gfiles.textContent = "";
+    gfiles.appendChild(mk("div", "gempty err", wsT("js.git.fail", msg)));
+  }
+  // gitRef draws the standing line: branch, upstream, and the counts.
+  function gitRef(v) {
+    gref.textContent = "";
+    if (v.detached) { gref.appendChild(mk("b", "gbr", wsT("js.git.detached", v.branch))); return; }
+    gref.appendChild(mk("b", "gbr", v.branch));
+    if (!v.upstream) { gref.appendChild(mk("span", "gnoup", wsT("js.git.noupstream"))); return; }
+    gref.appendChild(mk("span", "gto", "\u2192"));
+    gref.appendChild(mk("span", "gup", v.upstream));
+    if (v.ahead) gref.appendChild(mk("b", "up", "\u2191" + v.ahead));
+    if (v.behind) gref.appendChild(mk("b", "dn", "\u2193" + v.behind));
+  }
+  function gitRow(f) {
+    var row = mk("div", "gf"), slash = f.path.lastIndexOf("/");
+    row.title = f.path;
+    row.appendChild(mk("b", "gst st-" + (f.status === "?" ? "q" : f.status), f.status));
+    var p = mk("span", "gp");
+    if (slash >= 0) p.appendChild(mk("span", "gdir", f.path.slice(0, slash + 1)));
+    p.appendChild(mk("span", "gname", f.path.slice(slash + 1)));
+    row.appendChild(p);
+    var d = mk("span", "gd");
+    if (f.add < 0) d.appendChild(mk("i", "bin", "bin"));
+    else if (f.status !== "?") {
+      if (f.add) d.appendChild(mk("i", "add", "+" + f.add));
+      if (f.del) d.appendChild(mk("i", "del", "\u2212" + f.del));
+    }
+    row.appendChild(d);
+    return row;
+  }
+  function gitDraw(v) {
+    gitRef(v);
+    gfiles.textContent = "";
+    var groups = [["staged", "js.git.staged"], ["unstaged", "js.git.unstaged"], ["untracked", "js.git.untracked"]], any = false;
+    groups.forEach(function (g) {
+      var list = v[g[0]] || [];
+      if (!list.length) return;
+      any = true;
+      var sec = mk("div", "gsec"), head = mk("div", "ggrp");
+      head.appendChild(mk("span", "", wsT(g[1])));
+      head.appendChild(mk("span", "chip", String(list.length)));
+      sec.appendChild(head);
+      list.forEach(function (f) { sec.appendChild(gitRow(f)); });
+      gfiles.appendChild(sec);
+    });
+    if (!any) gfiles.appendChild(mk("div", "gempty", wsT("js.git.clean")));
+    if (v.truncated) gfiles.appendChild(mk("div", "gempty", wsT("js.git.truncated", 300)));
+  }
+  function gitMsg(text, err) {
+    gmsg.textContent = text || "";
+    gmsg.classList.toggle("err", !!err);
+    gmsg.hidden = !text;
+  }
+  // gitAct runs one action from its button.
+  function gitAct(btn) {
+    if (gBusy || !window.fetch) return;
+    var label = btn.querySelector("span"), idle = label.textContent;
+    gBusy = true;
+    q(".gact", gbody).forEach(function (b) { b.disabled = true; });
+    btn.classList.add("busy");
+    label.textContent = btn.getAttribute("data-busy");
+    gitMsg("");
+    function done(text, err) {
+      gBusy = false;
+      q(".gact", gbody).forEach(function (b) { b.disabled = false; });
+      btn.classList.remove("busy");
+      label.textContent = idle;
+      gitMsg(text, err);
+      gitLoad();
+    }
+    fetch("/s/" + rid + "/git/" + btn.getAttribute("data-git"), { method: "POST", credentials: "same-origin", cache: "no-store" }).then(function (r) {
+      return r.text().then(function (t) {
+        t = (t || "").trim();
+        if (r.status === 204) done("", false);
+        else if (r.ok) done(t, false);
+        else done(t || "HTTP " + r.status, true);
+      });
+    }, function () { done(gmsg.getAttribute("data-lost"), true); });
+  }
+  if (gbody) gbody.addEventListener("click", function (e) {
+    var b = e.target.closest && e.target.closest(".gact");
+    if (b && !b.disabled) gitAct(b);
   });
 
   // --- tracker: the store drawers over the daemon's /tracker routes ---------
@@ -1817,103 +1993,6 @@
     tkReload();
   }
   function trackerLost() { tkLastRev = null; }
-
-  // --- git badge -------------------------------------------------------------
-  // A click on the top bar's git badge, but on its ahead count, asks the
-  // daemon to read the root's git status at once. The answer arrives as the
-  // git region's next swap, which replaces the busy badge; a refused request,
-  // or one that never answers, drops busy on its own.
-  doc.addEventListener("click", function (e) {
-    var b = e.target.closest && e.target.closest("#gitb");
-    if (!b || e.target.closest(".gitpush") || b.classList.contains("busy") || !window.fetch) return;
-    b.classList.add("busy");
-    function idle() { b.classList.remove("busy"); }
-    fetch("/s/" + rid + "/git", { method: "POST", credentials: "same-origin", cache: "no-store" })
-      .then(function (r) { if (!r.ok) idle(); }, idle);
-    setTimeout(idle, 15000);
-  });
-
-  // --- git push ----------------------------------------------------------------
-  // A press on an ahead count (badge or band) opens the push popover anchored
-  // to it: branch, upstream, and count from the count's data attributes. Push
-  // asks the daemon to push (it re-reads the branch and may refuse); success
-  // closes the popover, and the badge's re-read arrives through the stream.
-  // A failure shows the daemon's one-line reason. Escape, Cancel, and a click
-  // outside close it; a push already asked for still runs.
-  var gpop = $("gitpop"), gpFrom = null, gpBusy = false;
-  function gpPart(sel) { return gpop.querySelector(sel); }
-  function gpErr(text) {
-    var el = gpPart(".gp-err");
-    el.textContent = text || "";
-    el.hidden = !text;
-  }
-  function gpSetBusy(on) {
-    var go = gpPart(".gp-go");
-    gpBusy = on;
-    go.disabled = on;
-    if (!go.getAttribute("data-idle")) go.setAttribute("data-idle", go.textContent);
-    go.textContent = on ? go.getAttribute("data-busy") : go.getAttribute("data-idle");
-  }
-  // gpPlace anchors the popover below the count, or above it when the count
-  // sits in the page's lower half (the band), kept inside the viewport.
-  function gpPlace(btn) {
-    var r = btn.getBoundingClientRect(), w = gpop.offsetWidth, h = gpop.offsetHeight;
-    var vw = doc.documentElement.clientWidth, vh = window.innerHeight;
-    var left = Math.max(8, Math.min(r.left + r.width / 2 - w / 2, vw - w - 8));
-    var top = r.top > vh / 2 ? r.top - h - 6 : r.bottom + 6;
-    gpop.style.left = Math.round(left) + "px";
-    gpop.style.top = Math.round(Math.max(8, Math.min(top, vh - h - 8))) + "px";
-  }
-  function gpOpen(btn) {
-    gpFrom = btn.closest("#gitb") ? "#gitb .gitpush" : ".sb-foot .gitpush";
-    gpPart(".gp-br").textContent = btn.getAttribute("data-br") || "";
-    gpPart(".gp-up").textContent = btn.getAttribute("data-up") || "";
-    gpPart(".gp-n").textContent = btn.getAttribute("data-n") || "";
-    gpErr("");
-    gpSetBusy(false);
-    gpop.hidden = false;
-    btn.setAttribute("aria-expanded", "true");
-    gpPlace(btn);
-    gpPart(".gp-go").focus();
-  }
-  // gpClose hides the popover and returns focus to the count it came from,
-  // looked up again: a stream swap may have replaced it meanwhile.
-  function gpClose(refocus) {
-    if (!gpop || gpop.hidden) return;
-    gpop.hidden = true;
-    q(".gitpush[aria-expanded]").forEach(function (b) { b.removeAttribute("aria-expanded"); });
-    var back = refocus && gpFrom && doc.querySelector(gpFrom);
-    if (back) back.focus();
-  }
-  function gpPush() {
-    if (gpBusy || !window.fetch) return;
-    gpErr("");
-    gpSetBusy(true);
-    fetch("/s/" + rid + "/git/push", { method: "POST", credentials: "same-origin", cache: "no-store" })
-      .then(function (r) {
-        if (r.ok) { gpSetBusy(false); gpClose(true); return; }
-        return r.text().then(function (t) { gpSetBusy(false); gpErr((t || "").trim() || String(r.status)); });
-      }, function () { gpSetBusy(false); gpErr(gpop.getAttribute("data-lost")); });
-  }
-  if (gpop) {
-    doc.addEventListener("click", function (e) {
-      var t = e.target;
-      if (!t.closest) return;
-      var btn = t.closest(".gitpush");
-      if (btn) {
-        if (!gpop.hidden && btn.getAttribute("aria-expanded") === "true") gpClose(false);
-        else gpOpen(btn);
-        return;
-      }
-      if (t.closest(".gp-go")) { gpPush(); return; }
-      if (t.closest(".gp-cancel")) { gpClose(true); return; }
-      if (!gpop.hidden && !t.closest("#gitpop")) gpClose(false);
-    });
-    doc.addEventListener("keydown", function (e) {
-      if (e.key === "Escape" && !gpop.hidden) { e.preventDefault(); gpClose(true); }
-    });
-    window.addEventListener("resize", function () { gpClose(false); });
-  }
 
   // --- stream ----------------------------------------------------------------
   // The stream state shows on every indicator in the top bar: the bare dot,
