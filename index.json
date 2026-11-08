@@ -1177,7 +1177,14 @@
       "registered_at": "2026-10-28T06:25:12Z"
     },
     "261029-bug-sage-stamp-restamp-repeats-fix-instruction": {
-      "registered_at": "2026-10-29T01:19:07Z"
+      "registered_at": "2026-10-29T01:19:07Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "delegate/idea-triage-close",
+        "phase": "closed",
+        "touched_at": "2026-11-08T08:13:30Z"
+      }
     },
     "261029-bug-ws-mcp-git-lookup-per-spawn-slow-path-head": {
       "registered_at": "2026-10-29T08:57:09Z"
