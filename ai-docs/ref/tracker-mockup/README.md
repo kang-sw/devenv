@@ -62,11 +62,19 @@ build, no server, no dependencies.
   reference notices; opening the store clears it (the notification card below
   does not change what it counts). A handle shows ⊘ when the
   viewer's clone is offline or the store has no remote.
-- **Store header** (500). One row: the store name, then two icon-only
-  buttons, `Open as page` and `+ New` (their names in the tooltip and aria-label;
-  `+ New` shows the inline new-item row atop the Items list: title + Enter creates,
-  with a small kind picker; the row stays for the next one and Esc closes
-  it; priority, due, and assignees come afterwards from the new row's menu).
+- **Store header** (500). One row: the store name, then the icon-only
+  `Open as page` (its name in the tooltip and aria-label).
+- **New items** (528 UI). In the list view, hovering the left gutter near a
+  row edge shows a `+` badge between rows with a guide line; the mouse's x
+  picks the depth among the gap's choices (root, sibling of the row above or
+  of one of its ancestors, child of the row above), shown by the badge's
+  indent. A click opens the inline new-item row at that spot, creating with
+  `parent` and `after`. A quiet `+` ends every Items list (also an empty one)
+  for a new root item at the end; it is the keyboard path. The row is title +
+  Enter with a small kind picker; it stays for the next one, which goes after
+  the one just made, and Esc closes it; priority, due, and assignees come
+  afterwards from the new row's menu. A task or todo created there is
+  assigned to its creator in the same batch (529).
   The sync state is a thin **ribbon** at the bottom of the Items card: a
   status dot, a short text ("local only", "4 to push", "offline", "synced 3 min
   ago"), and the apply button (`Sync now`, or `Close batch` without a remote)
@@ -251,12 +259,13 @@ build, no server, no dependencies.
     assignment; a note-taking one opens a note step inside the menu;
   - *Add subtask*: an input row one level in, right under the row (in the
     item window's Subtasks for a kanban card, a calendar entry, or the window
-    header); title + Enter creates an unassigned task with the default
-    completion and keeps the row for the next sibling, Esc closes it;
+    header); title + Enter creates a task assigned to its creator (529) with
+    the default completion and keeps the row for the next sibling, Esc
+    closes it;
   - *Priority ▸* (radios) and *Due date ▸* (a date) for the creator;
     *Hand off ▸* (a searchable people list, with an optional note) on my live
-    assignment; *Assign ▸* for the creator (an anchored popover: chosen
-    people or everyone within N levels, and the completion mode);
+    assignment; *Assign ▸* for the creator (the search popover of (530):
+    people and subtree rules as chips, and the completion mode);
   - *Edit* (title, body, and project in place in the item window), *Open*,
     and *Hide item*, with an admin's Edit / Hide on a removed creator's item.
   Submenus are steps inside the same panel with a Back row. Arrow keys move,
@@ -430,8 +439,8 @@ build, no server, no dependencies.
   A later URL route reuses the same `focus` option.
 - **Actions** append events to the viewer clone's open batch, then report each
   event as applied or flagged. The actions are create (any kind, from the
-  inline new-item row; a todo self-assigns in the same write), edit, comment, reply,
-  edit or hide own comment (each with mentions and attachments), assign (chosen people or everyone within N),
+  inline new-item row; a task or todo self-assigns in the same write), edit, comment, reply,
+  edit or hide own comment (each with mentions, refs, and attachments), assign (people and subtree rules),
   split into a subtask, hand off, status, close, confirm, reject, unassign or
   withdraw, reopen, hide item, accept / decline / return, and every `roles.*`
   event. Actions are not pre-validated, so you can produce flagged events on
@@ -1015,9 +1024,13 @@ creation, and it has a topic and a blocked subtask.
 | 490 a, 491 a, 492 a | "Everyone within N" generalizes to a subtree rule `{root, include_root, levels?}` (levels absent: the whole subtree), and one `item.assign` carries `targets`, a list mixing member ids and rules; the older `mode` forms stay valid, `all` reading as a rule rooted at the author. A rule rooted at the author or below is live and forced at once, inherited by later joiners. A rule rooted outside the author's reach is a rule request pending to its root; the root's accept makes the rule live with forced records and notifies the root's direct lead, who may return it, ending the rule. `item.unassign` gains `root` to end one rule. Rule ids `<event>~<root>`, records `<rule>><member>`; the view adds `rules` and each record's `rule` / `ruleRequest`. |
 | 498 | The Activity tab's "flagged only" and "concurrent only" are toggle chips like the list / activity timeline chips (accent when on); no native checkbox remains in the drawer outside forms. |
 | 499 | The comment composer follows the dashboard chat input: a paper-plane send button inside the box at the bottom right, Cmd+Enter / Ctrl+Enter sends and Enter is a newline, a small `@` picker at the bottom left; the composer's status line is gone (the status is the menu's). Supersedes the quick status of (166). |
-| 500 | The store's sync rows under its name become a thin ribbon at the bottom of the Items card (status dot, short text, the apply button only while writes are pending, dimmed when idle); a click opens a popover with the clone ref, counts, and batch contents. The store header keeps one row: the name and the icon-only `Open as page` and `+ New`. |
+| 500 | The store's sync rows under its name become a thin ribbon at the bottom of the Items card (status dot, short text, the apply button only while writes are pending, dimmed when idle); a click opens a popover with the clone ref, counts, and batch contents. The store header keeps one row: the name and the icon-only `Open as page` (its `+ New` left with (528 UI)). |
 | 528 a | Items carry a sibling position: `item.create` takes `after`, a sibling id (`""` / `null`: first; absent: append, so old events keep creation order). The view's `itemOrder` and each `children` list follow the anchors in fold order; a missing, other-parent, or not-yet-placed anchor appends, a hidden one keeps its slot, and of two unseen inserts after one anchor the later lands nearer it. A later `item.move` extends the same field. |
+| 528 UI | The store header's `+ New` goes. In the list view, hovering the left gutter near a row edge shows a `+` badge between rows with a guide line; the mouse's x picks the depth among the gap's choices (root, sibling of the row above or of one of its ancestors, child of the row above; a child only where the row may be split, so never under a topic), shown by the badge's indent. A click opens the inline new-item row in that gap, creating with `parent` and `after`; the row stays, and the next item goes after the one just made. A quiet `+` ends every Items list, an empty one too: a new root item at the end, and the keyboard path (there was no shortcut). The Subtasks section's `+` stays. |
+| 529 | A `task` or `todo` created from the dashboard is assigned to its creator in the same batch (`item.assign` on `$1`, people = the creator, assignee closes); a `topic` is not. This covers the inline subtask row too, superseding (474)'s "unassigned task". |
+| 530 a | Assign is a search popover anchored at its trigger (the assignee card's `+`, the menu's *Assign ▸*), replacing the checkbox grid: chips for the picked people and rules (each with ×); a search field; with no query, "My team" rule rows (within L1, within L2 when the team is that deep, the whole subtree), each with its head count; with a query, the whole-subtree rule of each matching member who leads anyone, marked pending when outside the viewer's reach; member rows with avatar, name, id, and a forced/pending mark; the completion mode; an apply button disabled while nothing is picked, replacing the "select at least one" message. Already held people and rules a live rule of the viewer's already covers are greyed. Arrows move, Enter toggles, Cmd/Ctrl+Enter applies, Esc closes. It writes `targets`, popover rules without `include_root`. |
 | 531 a | Items and comments carry `refs`, the item ids their text references with `#<alias>`, riding with the body like mentions (the writer keeps a ref only while its token stays in the text). Each ref must be an item in the author's causal past. The view shows `refs` on items and comments, and `backrefs` on items: shown items, then shown comments on shown items, own thread excluded. |
+| 531 UI | The composer's `#` opens the `@` popup's twin, searching shown items by alias and title (alias prefix, title prefix, then contains); a pick inserts `#<alias> `. `refs` are derived from the `#<alias>` / `#<id>` tokens in the text at write time (comment, comment edit, body edit), not kept from the picks. `#<alias>` in bodies and comments renders as a link to the item, its title on hover. The item window shows "Referenced by" (참조됨) under Subtasks when the item has backrefs: items, then comments with their author and a snippet; a comment row opens its item at the comment. |
 
 ## Open questions
 
