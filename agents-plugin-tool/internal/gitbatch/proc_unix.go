@@ -1,6 +1,6 @@
 //go:build !windows
 
-package wsindex
+package gitbatch
 
 import (
 	"os/exec"
@@ -8,7 +8,8 @@ import (
 )
 
 // configureKill puts git in its own process group and kills the whole group
-// on timeout, so an ssh child dies with it instead of lingering.
+// when the context ends, so a transport child (ssh, git-remote-https) dies
+// with it instead of holding the pipes open.
 func configureKill(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {
