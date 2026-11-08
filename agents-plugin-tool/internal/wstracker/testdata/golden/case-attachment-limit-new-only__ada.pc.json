@@ -512,13 +512,16 @@
       "size": 4500,
       "mime": "image/png"
      }
-    ]
+    ],
+    "refs": [],
+    "backrefs": []
    }
   },
   "itemOrder": [
    "maya.pc#1"
   ],
   "assignments": {},
+  "rules": {},
   "comments": {},
   "events": [
    {

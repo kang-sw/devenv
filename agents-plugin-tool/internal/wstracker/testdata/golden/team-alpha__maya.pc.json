@@ -4467,7 +4467,9 @@
      "ada"
     ],
     "mentions": [],
-    "attachments": []
+    "attachments": [],
+    "refs": [],
+    "backrefs": []
    },
    "ada.pc#3": {
     "id": "ada.pc#3",
@@ -4511,7 +4513,9 @@
      "ada"
     ],
     "mentions": [],
-    "attachments": []
+    "attachments": [],
+    "refs": [],
+    "backrefs": []
    },
    "maya.pc#1": {
     "id": "maya.pc#1",
@@ -4577,7 +4581,9 @@
      "maya"
     ],
     "mentions": [],
-    "attachments": []
+    "attachments": [],
+    "refs": [],
+    "backrefs": []
    },
    "raj.pc#1": {
     "id": "raj.pc#1",
@@ -4630,7 +4636,9 @@
      "raj"
     ],
     "mentions": [],
-    "attachments": []
+    "attachments": [],
+    "refs": [],
+    "backrefs": []
    },
    "maya.pc#5": {
     "id": "maya.pc#5",
@@ -4691,7 +4699,9 @@
      "maya"
     ],
     "mentions": [],
-    "attachments": []
+    "attachments": [],
+    "refs": [],
+    "backrefs": []
    },
    "maya.pc#7": {
     "id": "maya.pc#7",
@@ -4738,7 +4748,9 @@
      "maya"
     ],
     "mentions": [],
-    "attachments": []
+    "attachments": [],
+    "refs": [],
+    "backrefs": []
    },
    "bo.pc#1": {
     "id": "bo.pc#1",
@@ -4784,7 +4796,9 @@
      "bo"
     ],
     "mentions": [],
-    "attachments": []
+    "attachments": [],
+    "refs": [],
+    "backrefs": []
    },
    "ada.pc#6": {
     "id": "ada.pc#6",
@@ -4843,7 +4857,9 @@
      "ada"
     ],
     "mentions": [],
-    "attachments": []
+    "attachments": [],
+    "refs": [],
+    "backrefs": []
    },
    "ada.pc#8": {
     "id": "ada.pc#8",
@@ -4886,7 +4902,9 @@
      "ada"
     ],
     "mentions": [],
-    "attachments": []
+    "attachments": [],
+    "refs": [],
+    "backrefs": []
    },
    "kai.pc#2": {
     "id": "kai.pc#2",
@@ -4931,7 +4949,9 @@
      "kai"
     ],
     "mentions": [],
-    "attachments": []
+    "attachments": [],
+    "refs": [],
+    "backrefs": []
    },
    "lena.pc#2": {
     "id": "lena.pc#2",
@@ -4977,7 +4997,9 @@
      "lena"
     ],
     "mentions": [],
-    "attachments": []
+    "attachments": [],
+    "refs": [],
+    "backrefs": []
    },
    "sven.pc#3": {
     "id": "sven.pc#3",
@@ -5023,7 +5045,9 @@
      "sven"
     ],
     "mentions": [],
-    "attachments": []
+    "attachments": [],
+    "refs": [],
+    "backrefs": []
    },
    "raj.pc#7": {
     "id": "raj.pc#7",
@@ -5070,7 +5094,9 @@
      "raj"
     ],
     "mentions": [],
-    "attachments": []
+    "attachments": [],
+    "refs": [],
+    "backrefs": []
    },
    "tia.pc#3": {
     "id": "tia.pc#3",
@@ -5114,7 +5140,9 @@
      "tia"
     ],
     "mentions": [],
-    "attachments": []
+    "attachments": [],
+    "refs": [],
+    "backrefs": []
    },
    "noa.pc#3": {
     "id": "noa.pc#3",
@@ -5159,7 +5187,9 @@
      "noa"
     ],
     "mentions": [],
-    "attachments": []
+    "attachments": [],
+    "refs": [],
+    "backrefs": []
    },
    "maya.lap#2": {
     "id": "maya.lap#2",
@@ -5201,7 +5231,9 @@
      "maya"
     ],
     "mentions": [],
-    "attachments": []
+    "attachments": [],
+    "refs": [],
+    "backrefs": []
    },
    "ivy.pc#6": {
     "id": "ivy.pc#6",
@@ -5245,7 +5277,9 @@
      "ivy"
     ],
     "mentions": [],
-    "attachments": []
+    "attachments": [],
+    "refs": [],
+    "backrefs": []
    },
    "raj.pc#11": {
     "id": "raj.pc#11",
@@ -5301,7 +5335,9 @@
      "raj"
     ],
     "mentions": [],
-    "attachments": []
+    "attachments": [],
+    "refs": [],
+    "backrefs": []
    },
    "raj.pc#13": {
     "id": "raj.pc#13",
@@ -5345,7 +5381,9 @@
      "raj"
     ],
     "mentions": [],
-    "attachments": []
+    "attachments": [],
+    "refs": [],
+    "backrefs": []
    },
    "raj.pc#15": {
     "id": "raj.pc#15",
@@ -5395,7 +5433,9 @@
      "raj"
     ],
     "mentions": [],
-    "attachments": []
+    "attachments": [],
+    "refs": [],
+    "backrefs": []
    },
    "raj.pc#17": {
     "id": "raj.pc#17",
@@ -5439,7 +5479,9 @@
      "raj"
     ],
     "mentions": [],
-    "attachments": []
+    "attachments": [],
+    "refs": [],
+    "backrefs": []
    },
    "sven.pc#6": {
     "id": "sven.pc#6",
@@ -5485,7 +5527,9 @@
      "sven"
     ],
     "mentions": [],
-    "attachments": []
+    "attachments": [],
+    "refs": [],
+    "backrefs": []
    },
    "raj.pc#20": {
     "id": "raj.pc#20",
@@ -5527,7 +5571,9 @@
      "raj"
     ],
     "mentions": [],
-    "attachments": []
+    "attachments": [],
+    "refs": [],
+    "backrefs": []
    },
    "ada.pc#16": {
     "id": "ada.pc#16",
@@ -5575,7 +5621,9 @@
      "ada"
     ],
     "mentions": [],
-    "attachments": []
+    "attachments": [],
+    "refs": [],
+    "backrefs": []
    },
    "ada.pc#18": {
     "id": "ada.pc#18",
@@ -5618,7 +5666,9 @@
      "ada"
     ],
     "mentions": [],
-    "attachments": []
+    "attachments": [],
+    "refs": [],
+    "backrefs": []
    },
    "bo.pc#9": {
     "id": "bo.pc#9",
@@ -5668,7 +5718,9 @@
       "size": 1203311,
       "mime": "application/pdf"
      }
-    ]
+    ],
+    "refs": [],
+    "backrefs": []
    }
   },
   "itemOrder": [
@@ -5716,6 +5768,8 @@
     "ts": "2026-11-02T09:00:00Z",
     "inherited": false,
     "ruleLevels": 1,
+    "rule": "ada.pc#2",
+    "ruleRequest": false,
     "handoffOf": null,
     "handoffFrom": null,
     "handoffNote": null,
@@ -5747,6 +5801,8 @@
     "ts": "2026-11-02T09:00:00Z",
     "inherited": false,
     "ruleLevels": 1,
+    "rule": "ada.pc#2",
+    "ruleRequest": false,
     "handoffOf": null,
     "handoffFrom": null,
     "handoffNote": null,
@@ -5778,6 +5834,8 @@
     "ts": "2026-11-02T09:00:00Z",
     "inherited": false,
     "ruleLevels": 1,
+    "rule": "ada.pc#2",
+    "ruleRequest": false,
     "handoffOf": null,
     "handoffFrom": null,
     "handoffNote": null,
@@ -5809,6 +5867,8 @@
     "ts": "2026-11-02T09:40:00Z",
     "inherited": false,
     "ruleLevels": null,
+    "rule": null,
+    "ruleRequest": false,
     "handoffOf": null,
     "handoffFrom": null,
     "handoffNote": null,
@@ -5840,6 +5900,8 @@
     "ts": "2026-11-02T09:40:00Z",
     "inherited": false,
     "ruleLevels": null,
+    "rule": null,
+    "ruleRequest": false,
     "handoffOf": null,
     "handoffFrom": null,
     "handoffNote": null,
@@ -5876,6 +5938,8 @@
     "ts": "2026-11-02T10:00:00Z",
     "inherited": false,
     "ruleLevels": null,
+    "rule": null,
+    "ruleRequest": false,
     "handoffOf": null,
     "handoffFrom": null,
     "handoffNote": null,
@@ -5907,6 +5971,8 @@
     "ts": "2026-11-02T10:00:00Z",
     "inherited": false,
     "ruleLevels": null,
+    "rule": null,
+    "ruleRequest": false,
     "handoffOf": null,
     "handoffFrom": null,
     "handoffNote": null,
@@ -5938,6 +6004,8 @@
     "ts": "2026-11-02T11:10:00Z",
     "inherited": false,
     "ruleLevels": null,
+    "rule": null,
+    "ruleRequest": false,
     "handoffOf": null,
     "handoffFrom": null,
     "handoffNote": null,
@@ -5969,6 +6037,8 @@
     "ts": "2026-11-02T11:10:00Z",
     "inherited": false,
     "ruleLevels": null,
+    "rule": null,
+    "ruleRequest": false,
     "handoffOf": null,
     "handoffFrom": null,
     "handoffNote": null,
@@ -6000,6 +6070,8 @@
     "ts": "2026-11-02T11:15:00Z",
     "inherited": false,
     "ruleLevels": null,
+    "rule": null,
+    "ruleRequest": false,
     "handoffOf": null,
     "handoffFrom": null,
     "handoffNote": null,
@@ -6031,6 +6103,8 @@
     "ts": "2026-11-02T15:00:00Z",
     "inherited": false,
     "ruleLevels": null,
+    "rule": null,
+    "ruleRequest": false,
     "handoffOf": null,
     "handoffFrom": null,
     "handoffNote": null,
@@ -6062,6 +6136,8 @@
     "ts": "2026-11-02T17:00:00Z",
     "inherited": false,
     "ruleLevels": 2,
+    "rule": "ada.pc#7",
+    "ruleRequest": false,
     "handoffOf": null,
     "handoffFrom": null,
     "handoffNote": null,
@@ -6093,6 +6169,8 @@
     "ts": "2026-11-02T17:00:00Z",
     "inherited": false,
     "ruleLevels": 2,
+    "rule": "ada.pc#7",
+    "ruleRequest": false,
     "handoffOf": null,
     "handoffFrom": null,
     "handoffNote": null,
@@ -6124,6 +6202,8 @@
     "ts": "2026-11-02T17:00:00Z",
     "inherited": false,
     "ruleLevels": 2,
+    "rule": "ada.pc#7",
+    "ruleRequest": false,
     "handoffOf": null,
     "handoffFrom": null,
     "handoffNote": null,
@@ -6155,6 +6235,8 @@
     "ts": "2026-11-02T17:00:00Z",
     "inherited": false,
     "ruleLevels": 2,
+    "rule": "ada.pc#7",
+    "ruleRequest": false,
     "handoffOf": null,
     "handoffFrom": null,
     "handoffNote": null,
@@ -6186,6 +6268,8 @@
     "ts": "2026-11-02T17:00:00Z",
     "inherited": false,
     "ruleLevels": 2,
+    "rule": "ada.pc#7",
+    "ruleRequest": false,
     "handoffOf": null,
     "handoffFrom": null,
     "handoffNote": null,
@@ -6217,6 +6301,8 @@
     "ts": "2026-11-02T17:00:00Z",
     "inherited": false,
     "ruleLevels": 2,
+    "rule": "ada.pc#7",
+    "ruleRequest": false,
     "handoffOf": null,
     "handoffFrom": null,
     "handoffNote": null,
@@ -6248,6 +6334,8 @@
     "ts": "2026-11-02T17:00:00Z",
     "inherited": false,
     "ruleLevels": 2,
+    "rule": "ada.pc#7",
+    "ruleRequest": false,
     "handoffOf": null,
     "handoffFrom": null,
     "handoffNote": null,
@@ -6279,6 +6367,8 @@
     "ts": "2026-11-02T17:00:00Z",
     "inherited": false,
     "ruleLevels": 2,
+    "rule": "ada.pc#7",
+    "ruleRequest": false,
     "handoffOf": null,
     "handoffFrom": null,
     "handoffNote": null,
@@ -6310,6 +6400,8 @@
     "ts": "2026-11-02T17:00:00Z",
     "inherited": false,
     "ruleLevels": 2,
+    "rule": "ada.pc#7",
+    "ruleRequest": false,
     "handoffOf": null,
     "handoffFrom": null,
     "handoffNote": null,
@@ -6341,6 +6433,8 @@
     "ts": "2026-11-02T17:00:00Z",
     "inherited": false,
     "ruleLevels": 2,
+    "rule": "ada.pc#7",
+    "ruleRequest": false,
     "handoffOf": null,
     "handoffFrom": null,
     "handoffNote": null,
@@ -6372,6 +6466,8 @@
     "ts": "2026-11-02T17:00:00Z",
     "inherited": false,
     "ruleLevels": 2,
+    "rule": "ada.pc#7",
+    "ruleRequest": false,
     "handoffOf": null,
     "handoffFrom": null,
     "handoffNote": null,
@@ -6403,6 +6499,8 @@
     "ts": "2026-11-02T17:00:00Z",
     "inherited": false,
     "ruleLevels": 2,
+    "rule": "ada.pc#7",
+    "ruleRequest": false,
     "handoffOf": null,
     "handoffFrom": null,
     "handoffNote": null,
@@ -6434,6 +6532,8 @@
     "ts": "2026-11-02T17:30:00Z",
     "inherited": false,
     "ruleLevels": null,
+    "rule": null,
+    "ruleRequest": false,
     "handoffOf": null,
     "handoffFrom": null,
     "handoffNote": null,
@@ -6465,6 +6565,8 @@
     "ts": "2026-11-02T18:45:00Z",
     "inherited": false,
     "ruleLevels": null,
+    "rule": null,
+    "ruleRequest": false,
     "handoffOf": null,
     "handoffFrom": null,
     "handoffNote": null,
@@ -6499,6 +6601,8 @@
     "ts": "2026-11-02T20:20:00Z",
     "inherited": false,
     "ruleLevels": null,
+    "rule": null,
+    "ruleRequest": false,
     "handoffOf": null,
     "handoffFrom": null,
     "handoffNote": null,
@@ -6538,6 +6642,8 @@
     "ts": "2026-11-03T09:00:00Z",
     "inherited": true,
     "ruleLevels": 2,
+    "rule": "ada.pc#7",
+    "ruleRequest": false,
     "handoffOf": null,
     "handoffFrom": null,
     "handoffNote": null,
@@ -6569,6 +6675,8 @@
     "ts": "2026-11-03T09:15:00Z",
     "inherited": false,
     "ruleLevels": null,
+    "rule": null,
+    "ruleRequest": false,
     "handoffOf": null,
     "handoffFrom": null,
     "handoffNote": null,
@@ -6608,6 +6716,8 @@
     "ts": "2026-11-03T09:30:00Z",
     "inherited": false,
     "ruleLevels": null,
+    "rule": null,
+    "ruleRequest": false,
     "handoffOf": null,
     "handoffFrom": null,
     "handoffNote": null,
@@ -6639,6 +6749,8 @@
     "ts": "2026-11-03T11:05:00Z",
     "inherited": false,
     "ruleLevels": null,
+    "rule": null,
+    "ruleRequest": false,
     "handoffOf": null,
     "handoffFrom": null,
     "handoffNote": null,
@@ -6675,6 +6787,8 @@
     "ts": "2026-11-03T12:00:00Z",
     "inherited": false,
     "ruleLevels": null,
+    "rule": null,
+    "ruleRequest": false,
     "handoffOf": null,
     "handoffFrom": null,
     "handoffNote": null,
@@ -6706,6 +6820,8 @@
     "ts": "2026-11-05T08:00:00Z",
     "inherited": false,
     "ruleLevels": null,
+    "rule": null,
+    "ruleRequest": false,
     "handoffOf": null,
     "handoffFrom": null,
     "handoffNote": null,
@@ -6737,6 +6853,8 @@
     "ts": "2026-11-05T13:30:00Z",
     "inherited": false,
     "ruleLevels": null,
+    "rule": null,
+    "ruleRequest": false,
     "handoffOf": "lena.pc#3>raj",
     "handoffFrom": "raj",
     "handoffNote": "sven owns the bench rig now",
@@ -6771,6 +6889,8 @@
     "ts": "2026-11-05T15:00:00Z",
     "inherited": false,
     "ruleLevels": null,
+    "rule": null,
+    "ruleRequest": false,
     "handoffOf": null,
     "handoffFrom": null,
     "handoffNote": null,
@@ -6802,6 +6922,8 @@
     "ts": "2026-11-05T15:00:00Z",
     "inherited": false,
     "ruleLevels": null,
+    "rule": null,
+    "ruleRequest": false,
     "handoffOf": null,
     "handoffFrom": null,
     "handoffNote": null,
@@ -6833,6 +6955,8 @@
     "ts": "2026-11-05T15:10:00Z",
     "inherited": false,
     "ruleLevels": null,
+    "rule": null,
+    "ruleRequest": false,
     "handoffOf": null,
     "handoffFrom": null,
     "handoffNote": null,
@@ -6864,6 +6988,8 @@
     "ts": "2026-11-05T15:20:00Z",
     "inherited": false,
     "ruleLevels": null,
+    "rule": null,
+    "ruleRequest": false,
     "handoffOf": null,
     "handoffFrom": null,
     "handoffNote": null,
@@ -6895,6 +7021,8 @@
     "ts": "2026-11-05T15:30:00Z",
     "inherited": false,
     "ruleLevels": null,
+    "rule": null,
+    "ruleRequest": false,
     "handoffOf": null,
     "handoffFrom": null,
     "handoffNote": null,
@@ -6926,6 +7054,8 @@
     "ts": "2026-11-05T16:00:00Z",
     "inherited": false,
     "ruleLevels": null,
+    "rule": null,
+    "ruleRequest": false,
     "handoffOf": null,
     "handoffFrom": null,
     "handoffNote": null,
@@ -6957,6 +7087,8 @@
     "ts": "2026-11-05T18:00:00Z",
     "inherited": false,
     "ruleLevels": null,
+    "rule": null,
+    "ruleRequest": false,
     "handoffOf": null,
     "handoffFrom": null,
     "handoffNote": null,
@@ -6988,6 +7120,8 @@
     "ts": "2026-11-05T18:30:00Z",
     "inherited": false,
     "ruleLevels": null,
+    "rule": null,
+    "ruleRequest": false,
     "handoffOf": null,
     "handoffFrom": null,
     "handoffNote": null,
@@ -7019,6 +7153,8 @@
     "ts": "2026-11-05T18:40:00Z",
     "inherited": false,
     "ruleLevels": null,
+    "rule": null,
+    "ruleRequest": false,
     "handoffOf": null,
     "handoffFrom": null,
     "handoffNote": null,
@@ -7035,6 +7171,36 @@
     "stale": false
    }
   },
+  "rules": {
+   "ada.pc#2": {
+    "id": "ada.pc#2",
+    "item": "ada.pc#1",
+    "via": "ada.pc#2",
+    "by": "ada",
+    "root": "ada",
+    "includeRoot": false,
+    "levels": 1,
+    "completion": "assigner",
+    "state": "live",
+    "request": null,
+    "ended": null,
+    "ts": "2026-11-02T09:00:00Z"
+   },
+   "ada.pc#7": {
+    "id": "ada.pc#7",
+    "item": "ada.pc#6",
+    "via": "ada.pc#7",
+    "by": "ada",
+    "root": "ada",
+    "includeRoot": false,
+    "levels": 2,
+    "completion": "assignee",
+    "state": "live",
+    "request": null,
+    "ended": null,
+    "ts": "2026-11-02T17:00:00Z"
+   }
+  },
   "comments": {
    "maya.pc#3": {
     "id": "maya.pc#3",
@@ -7046,7 +7212,8 @@
     "edited": null,
     "hidden": null,
     "mentions": [],
-    "attachments": []
+    "attachments": [],
+    "refs": []
    },
    "raj.pc#3": {
     "id": "raj.pc#3",
@@ -7058,7 +7225,8 @@
     "edited": null,
     "hidden": null,
     "mentions": [],
-    "attachments": []
+    "attachments": [],
+    "refs": []
    },
    "ada.pc#4": {
     "id": "ada.pc#4",
@@ -7070,7 +7238,8 @@
     "edited": null,
     "hidden": null,
     "mentions": [],
-    "attachments": []
+    "attachments": [],
+    "refs": []
    },
    "raj.pc#4": {
     "id": "raj.pc#4",
@@ -7082,7 +7251,8 @@
     "edited": null,
     "hidden": "raj.pc#5",
     "mentions": [],
-    "attachments": []
+    "attachments": [],
+    "refs": []
    },
    "uma.pc#4": {
     "id": "uma.pc#4",
@@ -7094,7 +7264,8 @@
     "edited": null,
     "hidden": null,
     "mentions": [],
-    "attachments": []
+    "attachments": [],
+    "refs": []
    },
    "maya.pc#14": {
     "id": "maya.pc#14",
@@ -7106,7 +7277,8 @@
     "edited": null,
     "hidden": null,
     "mentions": [],
-    "attachments": []
+    "attachments": [],
+    "refs": []
    },
    "ivy.pc#4": {
     "id": "ivy.pc#4",
@@ -7118,7 +7290,8 @@
     "edited": null,
     "hidden": null,
     "mentions": [],
-    "attachments": []
+    "attachments": [],
+    "refs": []
    },
    "maya.pc#16": {
     "id": "maya.pc#16",
@@ -7130,7 +7303,8 @@
     "edited": null,
     "hidden": null,
     "mentions": [],
-    "attachments": []
+    "attachments": [],
+    "refs": []
    },
    "jon.pc#7": {
     "id": "jon.pc#7",
@@ -7142,7 +7316,8 @@
     "edited": null,
     "hidden": null,
     "mentions": [],
-    "attachments": []
+    "attachments": [],
+    "refs": []
    },
    "maya.pc#19": {
     "id": "maya.pc#19",
@@ -7154,7 +7329,8 @@
     "edited": null,
     "hidden": null,
     "mentions": [],
-    "attachments": []
+    "attachments": [],
+    "refs": []
    },
    "ada.pc#13": {
     "id": "ada.pc#13",
@@ -7166,7 +7342,8 @@
     "edited": null,
     "hidden": null,
     "mentions": [],
-    "attachments": []
+    "attachments": [],
+    "refs": []
    },
    "tia.pc#5": {
     "id": "tia.pc#5",
@@ -7178,7 +7355,8 @@
     "edited": null,
     "hidden": null,
     "mentions": [],
-    "attachments": []
+    "attachments": [],
+    "refs": []
    },
    "bo.pc#8": {
     "id": "bo.pc#8",
@@ -7190,7 +7368,8 @@
     "edited": null,
     "hidden": null,
     "mentions": [],
-    "attachments": []
+    "attachments": [],
+    "refs": []
    },
    "raj.pc#19": {
     "id": "raj.pc#19",
@@ -7202,7 +7381,8 @@
     "edited": null,
     "hidden": null,
     "mentions": [],
-    "attachments": []
+    "attachments": [],
+    "refs": []
    },
    "lena.pc#6": {
     "id": "lena.pc#6",
@@ -7224,7 +7404,8 @@
       "size": 482133,
       "mime": "image/png"
      }
-    ]
+    ],
+    "refs": []
    },
    "maya.pc#22": {
     "id": "maya.pc#22",
@@ -7239,7 +7420,8 @@
      "lena",
      "ivy"
     ],
-    "attachments": []
+    "attachments": [],
+    "refs": []
    }
   },
   "events": [

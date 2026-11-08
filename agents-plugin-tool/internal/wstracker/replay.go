@@ -293,15 +293,20 @@ func (r *replayed) verdicts(all []*node) {
 }
 
 // stateBefore folds the part of n's causal past that n's rules read: the
-// roles and identity events, the threads and comments n names, and every
-// item.assign as a trigger of the live rules on those threads. Nothing else
-// can change what check reads, so this equals folding the whole past.
+// roles and identity events, the threads and comments n names (its refs
+// included), and every item.assign as a trigger of the live rules on those
+// threads. Nothing else can change what check reads, so this equals folding
+// the whole past.
 func (r *replayed) stateBefore(n *node) *state {
 	rel := map[string]bool{}
 	var lists [][]int
 	lists = append(lists, r.rolesPos, r.assignPos)
-	for _, k := range []string{"item", "parent"} {
-		if id := n.p.str(k); id != "" && !rel[id] {
+	ids := []string{n.p.str("item"), n.p.str("parent")}
+	for _, x := range n.p.strList("refs") {
+		ids = append(ids, x)
+	}
+	for _, id := range ids {
+		if id != "" && !rel[id] {
 			rel[id] = true
 			lists = append(lists, r.threadPos[id])
 		}

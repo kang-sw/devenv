@@ -478,11 +478,6 @@ dialog.tk-dlg p { margin: 0; font-size: 12.5px; color: var(--wb-muted-fg); }
 .tk .fld > span { color: var(--wb-muted-fg); font-size: 11.5px; }
 .tk .fld select, .tk .fld input[type=text], .tk .fld input[type=number], .tk .fld input[type=date], .tk .fld textarea { font: inherit; font-weight: 400; padding: 5px 8px; border-radius: 8px; border: 1px solid var(--wb-line); background: var(--wb-card); color: var(--wb-fg); width: 100%; }
 .tk .fld.inline { flex-direction: row; align-items: center; gap: 8px; font-weight: 400; }
-.tk .opts { display: flex; gap: 12px; flex-wrap: wrap; font-weight: 400; }
-.tk .opts label { display: inline-flex; gap: 4px; align-items: center; font-size: 13px; }
-.tk .people { display: flex; gap: 4px 12px; flex-wrap: wrap; font-weight: 400; max-height: 130px; overflow: auto; padding: 4px 6px; border: 1px solid var(--wb-line); border-radius: 8px; }
-.tk .people label { display: inline-flex; gap: 4px; align-items: center; font-size: 12.5px; }
-.tk .people.off { opacity: .45; }
 .tk .hint { padding: 6px 8px; border-radius: 8px; background: var(--wb-muted); font-size: 12px; }
 .tk .hint.warn { background: color-mix(in srgb, var(--tk-fail) 10%, var(--wb-card)); color: var(--tk-fail); }
 .tk .btns { display: flex; gap: 8px; justify-content: flex-end; }
@@ -589,7 +584,7 @@ dialog.tk-dlg p { margin: 0; font-size: 12.5px; color: var(--wb-muted-fg); }
    assignees -> thread -> composer. */
 .tk .iw-grid { display: flex; flex-direction: column; gap: 10px; flex: 1 0 auto; }
 .tk .iw-main, .tk .iw-side { display: contents; }
-.tk .pcard { order: 1; } .tk .iw-body { order: 2; } .tk .iw-sub { order: 3; } .tk .iw-asg { order: 4; } .tk .iw-thread { order: 5; } .tk .iw-main > .composer2 { order: 6; }
+.tk .pcard { order: 1; } .tk .iw-body { order: 2; } .tk .iw-sub, .tk .iw-brefs { order: 3; } .tk .iw-asg { order: 4; } .tk .iw-thread { order: 5; } .tk .iw-main > .composer2 { order: 6; }
 .tk .iw-crumb { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--wb-muted-fg); min-width: 0; overflow: hidden; white-space: nowrap; }
 .tk .iw-crumb a { color: var(--wb-muted-fg); text-decoration: none; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .tk .iw-crumb a:hover, .tk .iw-crumb a:focus-visible { color: var(--wb-primary); text-decoration: underline; }
@@ -602,7 +597,7 @@ dialog.tk-dlg p { margin: 0; font-size: 12.5px; color: var(--wb-muted-fg); }
 .tk .cedit { display: flex; flex-direction: column; gap: 4px; }
 .tk .iwin h3 .cnt { font-weight: 600; letter-spacing: 0; margin-left: 4px; }
 .tk .iwin h3.prom { display: flex; align-items: center; gap: 6px; margin: 2px 0 0; font-size: 14px; color: var(--wb-fg); text-transform: none; letter-spacing: 0; }
-.tk .iw-sub, .tk .iw-thread, .tk .iw-asg { display: flex; flex-direction: column; gap: 6px; }
+.tk .iw-sub, .tk .iw-brefs, .tk .iw-thread, .tk .iw-asg { display: flex; flex-direction: column; gap: 6px; }
 .tk .pcard { background: color-mix(in srgb, var(--wb-muted) 55%, var(--wb-card)); border: 1px solid var(--wb-line); border-radius: var(--wb-radius); padding: 8px 12px 10px; min-width: 0; }
 .tk .pcard h3 { margin: 0 0 6px; }
 .tk .pcard dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 5px 12px; margin: 0; font-size: 12.5px; }
@@ -710,10 +705,43 @@ body.tk-menuon .tk .ir-more { visibility: hidden !important; }
 .tk-menu .mintro { margin: 2px 8px 6px; font-size: 12px; color: var(--wb-muted-fg); }
 .tk-menu .mempty { margin: 4px 8px 6px; font-size: 12px; color: var(--wb-muted-fg); }
 .tk-menu .mlist { max-height: 220px; overflow: auto; }
-.tk-menu form { display: flex; flex-direction: column; gap: 8px; padding: 2px 6px 6px; }
-.tk-menu form .mtitle, .tk-menu form .mintro { padding: 0; margin: 0; }
-.tk-menu .fld { font-size: 12px; }
-.tk-menu .btns { display: flex; justify-content: flex-end; gap: 6px; }
+/* the assign popover (asgHtml): chips, the search field, the people and rule rows, then completion and apply */
+.tk-menu .ap { display: grid; gap: 6px; padding: 0 4px 4px; }
+.tk-menu .ap-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.tk-menu .ap-chips:empty { display: none; }
+.tk-menu .achip { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; height: 22px; padding: 0 1px 0 4px; border-radius: 11px; background: color-mix(in srgb, var(--wb-primary) 13%, var(--wb-card)); font-size: 12px; }
+.tk-menu .achip > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.tk-menu .achip .av { margin-left: 0; width: 16px; height: 16px; font-size: 7.5px; }
+.tk-menu .achip > .i { width: 13px; height: 13px; color: var(--wb-primary); flex: none; }
+.tk-menu .achip .ax { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--wb-muted-fg); cursor: pointer; }
+.tk-menu .achip .ax:hover, .tk-menu .achip .ax:focus-visible { background: var(--wb-muted); color: var(--wb-fg); outline: none; }
+.tk-menu .achip .ax .i { width: 11px; height: 11px; }
+.tk-menu .ap-q { display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px; border-radius: 8px; background: var(--wb-muted); }
+.tk-menu .ap-q:focus-within { box-shadow: inset 0 0 0 1.5px var(--wb-primary); }
+.tk-menu .ap-q .i { width: 14px; height: 14px; color: var(--wb-muted-fg); flex: none; }
+.tk-menu .ap-q input { flex: 1 1 auto; min-width: 0; height: 26px; border: 0; outline: 0; background: transparent; color: var(--wb-fg); font: inherit; font-size: 12.5px; }
+.tk-menu .ap-list { list-style: none; margin: 0; padding: 0; max-height: 250px; overflow: auto; }
+.tk-menu .agrp { padding: 6px 8px 2px; font-size: 11px; font-weight: 700; color: var(--wb-muted-fg); }
+.tk-menu .aopt { display: flex; align-items: center; gap: 7px; min-height: 28px; padding: 0 8px; border-radius: 6px; cursor: pointer; font-size: 13px; min-width: 0; }
+.tk-menu .aopt.on { background: color-mix(in srgb, var(--wb-primary) 12%, var(--wb-card)); }
+.tk-menu .aopt.off { opacity: .55; cursor: default; }
+.tk-menu .aopt .ack { flex: none; width: 14px; height: 14px; border-radius: 4px; box-shadow: inset 0 0 0 1.5px var(--wb-muted-fg); }
+.tk-menu .aopt[aria-selected="true"] .ack { background: var(--wb-primary); box-shadow: none; }
+.tk-menu .aopt[aria-selected="true"] .ack::after { content: ''; display: block; width: 4px; height: 8px; margin: 1.5px 0 0 4.5px; border: solid var(--wb-primary-fg); border-width: 0 2px 2px 0; transform: rotate(45deg); }
+.tk-menu .aopt .av { margin-left: 0; width: 18px; height: 18px; font-size: 8.5px; }
+.tk-menu .aopt > .i { width: 15px; height: 15px; color: var(--wb-muted-fg); flex: none; }
+.tk-menu .aopt .an { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tk-menu .aopt .aid { flex: none; font-size: 11px; color: var(--wb-muted-fg); }
+.tk-menu .aopt code.aid { font-family: var(--wb-mono); }
+.tk-menu .aopt .amk { margin-left: auto; flex: none; font-size: 11px; color: var(--wb-muted-fg); }
+.tk-menu .aopt .amk.pend { color: var(--tk-teal); }
+.tk-menu .ap-foot { display: flex; align-items: center; gap: 6px; padding-top: 6px; border-top: 1px solid var(--wb-line); }
+.tk-menu .ap-cm { display: inline-flex; gap: 2px; padding: 2px; border-radius: 8px; background: var(--wb-muted); }
+.tk-menu .ap-cm button { border: 0; border-radius: 6px; padding: 2px 8px; background: transparent; color: var(--wb-muted-fg); font: inherit; font-size: 11.5px; cursor: pointer; }
+.tk-menu .ap-cm button[aria-checked="true"] { background: var(--wb-card); color: var(--wb-fg); font-weight: 700; box-shadow: 0 1px 2px rgba(0, 0, 0, .12); }
+.tk-menu .ap-cm button:focus-visible { outline: none; box-shadow: inset 0 0 0 1.5px var(--wb-primary); }
+.tk-menu .ap-foot .btn { margin-left: auto; padding: 3px 14px; }
+.tk-menu .ap-foot .btn:disabled { opacity: .45; cursor: default; }
 .tk-menu .spop { display: grid; gap: 4px; padding: 0 8px 6px; font-size: 12px; color: var(--wb-muted-fg); overflow-wrap: anywhere; }
 .tk-menu .spop b { color: var(--wb-fg); }
 .tk-menu .spop code { font-family: var(--wb-mono); font-size: 11px; color: var(--wb-fg); }
@@ -722,7 +750,8 @@ body.tk-menuon .tk .ir-more { visibility: hidden !important; }
 .tk-menu .spop p { margin: 2px 0 0; }
 .tk-menu .mtools { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; padding: 4px 8px 6px; border-top: 1px solid var(--wb-line); }
 
-/* the inline input rows: "+ New" atop the Items list, "add subtask" one level under its row */
+/* the inline input rows: a new item (at the end of the Items list, or in a gap the hover insert
+   picked, at its depth), "add subtask" one level under its row */
 .tk .nrow, .tk .subrow { display: flex; align-items: center; gap: 6px; min-height: 30px; padding: 2px 4px 2px calc(6px + var(--ind, 0) * 16px); border-radius: 6px; background: color-mix(in srgb, var(--wb-primary) 7%, var(--wb-card)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-primary) 30%, transparent); margin: 2px 0; }
 .tk .nrow:focus-within, .tk .subrow:focus-within { box-shadow: inset 0 0 0 1.5px var(--wb-primary); }
 .tk .nrow .i { color: var(--wb-primary); }
@@ -731,6 +760,31 @@ body.tk-menuon .tk .ir-more { visibility: hidden !important; }
 .tk .nrow select { font: inherit; font-size: 11.5px; height: 22px; border-radius: 6px; border: 1px solid var(--wb-line); background: var(--wb-card); color: var(--wb-fg); }
 .tk .srows > .subrow { margin: 4px 0; }
 .tk .grow-row + .subrow { margin-left: 0; }
+/* the "+" that ends the Items list (a new root item; the keyboard path) */
+.tk .nadd { display: flex; align-items: center; justify-content: center; width: 18px; height: 18px; margin: 4px 0 2px 5px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--wb-muted-fg); cursor: pointer; opacity: .7; }
+.tk .nadd:hover, .tk .nadd:focus-visible { opacity: 1; background: var(--wb-primary); color: var(--wb-primary-fg); outline: none; }
+.tk .nadd .i { width: 12px; height: 12px; }
+/* the hover insert between list rows: a badge at the depth's indent, a guide line on to the right
+   edge, and a hit strip over the left gutter (width set by the renderer's insWidth) */
+.tk .plist { position: relative; }
+.tk .hins { position: absolute; left: 0; right: 0; height: 10px; z-index: 4; pointer-events: none; }
+.tk .hins[hidden] { display: none; }
+.tk .hins .hl { position: absolute; top: 4px; height: 2px; left: calc(4px + var(--ind, 0) * 16px + 8px); right: 4px; border-radius: 1px; background: var(--wb-primary); }
+.tk .hins .hb { position: absolute; top: -3px; left: calc(4px + var(--ind, 0) * 16px); width: 16px; height: 16px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: var(--wb-primary); color: var(--wb-primary-fg); box-shadow: 0 0 0 2px var(--wb-card); }
+.tk .hins .hb .i { width: 11px; height: 11px; stroke-width: 2.2; }
+.tk .hins .hhit { position: absolute; top: 0; left: 0; height: 10px; padding: 0; border: 0; background: transparent; cursor: copy; pointer-events: auto; }
+.tk .plist.hins-on .ir-more { visibility: hidden !important; }
+
+/* item references: a #<alias> token in a body or a comment (refLinks), and "Referenced by" */
+.tk .iref { color: var(--wb-primary); text-decoration: none; font-family: var(--wb-mono); font-size: .92em; }
+.tk .iref:hover { text-decoration: underline; }
+.tk .brows { display: grid; gap: 1px; }
+.tk .brow { display: flex; align-items: center; gap: 7px; min-width: 0; min-height: 28px; padding: 2px 6px; border-radius: 6px; color: var(--wb-fg); text-decoration: none; font-size: 13px; }
+.tk .brow:hover, .tk .brow:focus-visible { background: color-mix(in srgb, var(--wb-muted) 60%, transparent); outline: none; }
+.tk .brow .sti .i { width: 14px; height: 14px; color: var(--wb-muted-fg); }
+.tk .brow .bt { font-weight: 600; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tk .brow .bs { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--wb-muted-fg); }
+.tk .brow .al { margin-left: auto; flex: none; }
 
 /* Rendered markdown in an item body or a comment (textBlock in tracker.js). The host's
    shared .md rules give block spacing, lists, code, tables, and quotes; here the text

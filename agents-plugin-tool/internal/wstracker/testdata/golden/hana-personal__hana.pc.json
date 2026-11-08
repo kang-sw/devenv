@@ -350,7 +350,9 @@
      "hana"
     ],
     "mentions": [],
-    "attachments": []
+    "attachments": [],
+    "refs": [],
+    "backrefs": []
    },
    "hana.pc#3": {
     "id": "hana.pc#3",
@@ -390,7 +392,9 @@
      "hana"
     ],
     "mentions": [],
-    "attachments": []
+    "attachments": [],
+    "refs": [],
+    "backrefs": []
    },
    "hana.pc#4": {
     "id": "hana.pc#4",
@@ -433,7 +437,9 @@
      "hana"
     ],
     "mentions": [],
-    "attachments": []
+    "attachments": [],
+    "refs": [],
+    "backrefs": []
    },
    "hana.pc#6": {
     "id": "hana.pc#6",
@@ -475,7 +481,9 @@
      "hana"
     ],
     "mentions": [],
-    "attachments": []
+    "attachments": [],
+    "refs": [],
+    "backrefs": []
    },
    "hana.pc#12": {
     "id": "hana.pc#12",
@@ -519,7 +527,9 @@
      "hana"
     ],
     "mentions": [],
-    "attachments": []
+    "attachments": [],
+    "refs": [],
+    "backrefs": []
    }
   },
   "itemOrder": [
@@ -546,6 +556,8 @@
     "ts": "2026-11-02T09:00:00Z",
     "inherited": false,
     "ruleLevels": null,
+    "rule": null,
+    "ruleRequest": false,
     "handoffOf": null,
     "handoffFrom": null,
     "handoffNote": null,
@@ -577,6 +589,8 @@
     "ts": "2026-11-02T09:20:00Z",
     "inherited": false,
     "ruleLevels": null,
+    "rule": null,
+    "ruleRequest": false,
     "handoffOf": null,
     "handoffFrom": null,
     "handoffNote": null,
@@ -608,6 +622,8 @@
     "ts": "2026-11-02T09:30:00Z",
     "inherited": false,
     "ruleLevels": null,
+    "rule": null,
+    "ruleRequest": false,
     "handoffOf": null,
     "handoffFrom": null,
     "handoffNote": null,
@@ -639,6 +655,8 @@
     "ts": "2026-11-02T11:20:00Z",
     "inherited": false,
     "ruleLevels": null,
+    "rule": null,
+    "ruleRequest": false,
     "handoffOf": null,
     "handoffFrom": null,
     "handoffNote": null,
@@ -655,6 +673,7 @@
     "stale": true
    }
   },
+  "rules": {},
   "comments": {
    "hana.pc#10": {
     "id": "hana.pc#10",
@@ -666,7 +685,8 @@
     "edited": null,
     "hidden": null,
     "mentions": [],
-    "attachments": []
+    "attachments": [],
+    "refs": []
    }
   },
   "events": [

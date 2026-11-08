@@ -1,0 +1,243 @@
+{
+ "name": "sibling-order",
+ "comment": "Sibling order (528): an item goes right after its after anchor (null or \"\" = first, absent = last). A missing or other-parent anchor falls back to the end; a hidden anchor keeps its place (C2 stays after the hidden C); two concurrent inserts after B land with the later in fold order (N) nearer the anchor.",
+ "viewers": [
+  "ada.pc",
+  "maya.pc"
+ ],
+ "now": "2026-11-02T09:00:00Z",
+ "genesis": {
+  "admins": [
+   "ada"
+  ],
+  "members": [
+   {
+    "id": "ada",
+    "name": "Ada",
+    "keys": [
+     "ada-k1"
+    ],
+    "leads": []
+   },
+   {
+    "id": "maya",
+    "name": "Maya",
+    "keys": [
+     "maya-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "raj",
+    "name": "Raj",
+    "keys": [
+     "raj-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "bo",
+    "name": "Bo",
+    "keys": [
+     "bo-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "lena",
+    "name": "Lena",
+    "keys": [
+     "lena-k1"
+    ],
+    "leads": [
+     "maya"
+    ]
+   },
+   {
+    "id": "omar",
+    "name": "Omar",
+    "keys": [
+     "omar-k1"
+    ],
+    "leads": [
+     "maya"
+    ]
+   },
+   {
+    "id": "sven",
+    "name": "Sven",
+    "keys": [
+     "sven-k1"
+    ],
+    "leads": [
+     "raj"
+    ]
+   }
+  ]
+ },
+ "commits": {
+  "ada.pc": [
+   {
+    "ts": "2026-11-01T09:00:00Z",
+    "seen": {},
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "A"
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "B"
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "C"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:05:00Z",
+    "seen": {},
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "A2",
+       "after": "ada.pc#1"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:06:00Z",
+    "seen": {},
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "First",
+       "after": null
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:07:00Z",
+    "seen": {},
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Fallback",
+       "after": "zed.pc#9"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:08:00Z",
+    "seen": {},
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "A.1",
+       "parent": "ada.pc#1"
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "A.0",
+       "parent": "ada.pc#1",
+       "after": ""
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Cross",
+       "parent": "ada.pc#1",
+       "after": "ada.pc#2"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:11:00Z",
+    "seen": {},
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "N",
+       "after": "ada.pc#2"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:12:00Z",
+    "seen": {
+     "maya.pc": 1
+    },
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "C2",
+       "after": "ada.pc#3"
+      }
+     ],
+     [
+      "item.hide",
+      {
+       "item": "ada.pc#3"
+      }
+     ]
+    ]
+   }
+  ],
+  "maya.pc": [
+   {
+    "ts": "2026-11-01T09:10:00Z",
+    "seen": {
+     "ada.pc": 9
+    },
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "M",
+       "after": "ada.pc#2"
+      }
+     ]
+    ]
+   }
+  ]
+ }
+}

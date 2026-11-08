@@ -203,13 +203,16 @@
       "size": 10485760,
       "mime": "application/octet-stream"
      }
-    ]
+    ],
+    "refs": [],
+    "backrefs": []
    }
   },
   "itemOrder": [
    "maya.pc#1"
   ],
   "assignments": {},
+  "rules": {},
   "comments": {},
   "events": [
    {

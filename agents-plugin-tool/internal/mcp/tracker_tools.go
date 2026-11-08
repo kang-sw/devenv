@@ -119,20 +119,23 @@ func trackerEventSpec(kind wsxmlcmd.Kind, attrs ...string) wsxmlcmd.Spec {
 // register and sync. A body is the event's text field: the item body, the
 // comment, or the note.
 var trackerCommands = map[string]trackerCommandDef{
-	wstracker.TypeItemCreate: {trackerEventSpec(wsxmlcmd.Leaf, "kind", "title", "project", "due", "priority", "parent", "mentions"), buildItemCreate},
-	wstracker.TypeItemEdit:   {trackerEventSpec(wsxmlcmd.Leaf, "item", "title", "project", "due", "priority", "mentions", "clear"), buildItemEdit},
+	wstracker.TypeItemCreate: {trackerEventSpec(wsxmlcmd.Leaf, "kind", "title", "project", "due", "priority", "parent", "after", "mentions", "refs"), buildItemCreate},
+	wstracker.TypeItemEdit:   {trackerEventSpec(wsxmlcmd.Leaf, "item", "title", "project", "due", "priority", "mentions", "refs", "clear"), buildItemEdit},
 	wstracker.TypeItemHide:   {trackerEventSpec(wsxmlcmd.Empty, "item"), buildItemOnly},
-	wstracker.TypeItemAssign: {trackerEventSpec(wsxmlcmd.Empty, "item", "people", "levels", "completion"), buildItemAssign},
+	wstracker.TypeItemAssign: {trackerEventSpec(wsxmlcmd.Empty, "item", "people", "rules", "levels", "completion"), buildItemAssign},
 	wstracker.TypeItemHandoff: {trackerEventSpec(wsxmlcmd.Leaf, "item", "to", "assignee"), func(b *trackerBatch, cmd wsxmlcmd.Command, ev *trackerEvent) {
 		b.itemRef(cmd, ev, "item")
 		b.required(cmd, ev, "to")
 		b.optional(cmd, ev, "assignee")
 		b.note(cmd, ev)
 	}},
-	wstracker.TypeItemAccept:   {trackerEventSpec(wsxmlcmd.Leaf, "item"), buildItemNote},
-	wstracker.TypeItemDecline:  {trackerEventSpec(wsxmlcmd.Leaf, "item"), buildItemNote},
-	wstracker.TypeItemReturn:   {trackerEventSpec(wsxmlcmd.Leaf, "item", "assignee"), buildItemAssigneeNote},
-	wstracker.TypeItemUnassign: {trackerEventSpec(wsxmlcmd.Empty, "item", "assignee"), buildItemOptionalAssignee},
+	wstracker.TypeItemAccept:  {trackerEventSpec(wsxmlcmd.Leaf, "item"), buildItemNote},
+	wstracker.TypeItemDecline: {trackerEventSpec(wsxmlcmd.Leaf, "item"), buildItemNote},
+	wstracker.TypeItemReturn:  {trackerEventSpec(wsxmlcmd.Leaf, "item", "assignee"), buildItemAssigneeNote},
+	wstracker.TypeItemUnassign: {trackerEventSpec(wsxmlcmd.Empty, "item", "assignee", "root"), func(b *trackerBatch, cmd wsxmlcmd.Command, ev *trackerEvent) {
+		buildItemOptionalAssignee(b, cmd, ev)
+		b.optional(cmd, ev, "root")
+	}},
 	wstracker.TypeItemStatus: {trackerEventSpec(wsxmlcmd.Leaf, "item", "status"), func(b *trackerBatch, cmd wsxmlcmd.Command, ev *trackerEvent) {
 		b.itemRef(cmd, ev, "item")
 		if v, ok := wsxmlcmd.EnumAttr(b.p, cmd, "status", []string{"todo", "doing", "blocked"}); ok {
@@ -147,17 +150,19 @@ var trackerCommands = map[string]trackerCommandDef{
 		buildItemOptionalAssignee(b, cmd, ev)
 		b.note(cmd, ev)
 	}},
-	wstracker.TypeCommentAdd: {trackerEventSpec(wsxmlcmd.Leaf, "item", "reply_to", "mentions"), func(b *trackerBatch, cmd wsxmlcmd.Command, ev *trackerEvent) {
+	wstracker.TypeCommentAdd: {trackerEventSpec(wsxmlcmd.Leaf, "item", "reply_to", "mentions", "refs"), func(b *trackerBatch, cmd wsxmlcmd.Command, ev *trackerEvent) {
 		b.itemRef(cmd, ev, "item")
 		if _, ok := cmd.Attr("reply_to"); ok {
 			b.commentRef(cmd, ev, "reply_to")
 		}
 		b.list(cmd, ev, "mentions")
+		b.itemRefList(cmd, ev, "refs")
 		b.text(cmd, ev, "body", true)
 	}},
-	wstracker.TypeCommentEdit: {trackerEventSpec(wsxmlcmd.Leaf, "comment", "mentions"), func(b *trackerBatch, cmd wsxmlcmd.Command, ev *trackerEvent) {
+	wstracker.TypeCommentEdit: {trackerEventSpec(wsxmlcmd.Leaf, "comment", "mentions", "refs"), func(b *trackerBatch, cmd wsxmlcmd.Command, ev *trackerEvent) {
 		b.commentRef(cmd, ev, "comment")
 		b.list(cmd, ev, "mentions")
+		b.itemRefList(cmd, ev, "refs")
 		b.text(cmd, ev, "body", true)
 	}},
 	wstracker.TypeCommentHide: {trackerEventSpec(wsxmlcmd.Empty, "comment"), func(b *trackerBatch, cmd wsxmlcmd.Command, ev *trackerEvent) {
@@ -218,7 +223,16 @@ func buildItemCreate(b *trackerBatch, cmd wsxmlcmd.Command, ev *trackerEvent) {
 	if _, ok := cmd.Attr("parent"); ok {
 		b.itemRef(cmd, ev, "parent")
 	}
+	// after="" puts the item first among its siblings; absent, last.
+	if v, ok := cmd.Attr("after"); ok {
+		if strings.TrimSpace(v) == "" {
+			ev.payload["after"] = ""
+		} else {
+			b.itemRef(cmd, ev, "after")
+		}
+	}
 	b.list(cmd, ev, "mentions")
+	b.itemRefList(cmd, ev, "refs")
 	b.text(cmd, ev, "body", false)
 }
 
@@ -240,6 +254,7 @@ func buildItemEdit(b *trackerBatch, cmd wsxmlcmd.Command, ev *trackerEvent) {
 		ev.payload["priority"] = n
 	}
 	b.list(cmd, ev, "mentions")
+	b.itemRefList(cmd, ev, "refs")
 	if cmd.Body != "" {
 		ev.payload["body"] = cmd.Body
 	}
@@ -261,7 +276,7 @@ func buildItemEdit(b *trackerBatch, cmd wsxmlcmd.Command, ev *trackerEvent) {
 			}
 		}
 	}
-	changed := len(ev.payload)
+	changed := len(ev.payload) + len(ev.refLists)
 	if _, ok := ev.payload["item"]; ok {
 		changed--
 	}
@@ -290,28 +305,70 @@ func buildItemOptionalAssignee(b *trackerBatch, cmd wsxmlcmd.Command, ev *tracke
 	b.optional(cmd, ev, "assignee")
 }
 
-// buildItemAssign maps people onto mode chosen and levels onto mode all.
+// buildItemAssign maps people alone onto mode chosen and levels onto mode
+// all; rules, with or without people, become a targets list: the people,
+// then the rules.
 func buildItemAssign(b *trackerBatch, cmd wsxmlcmd.Command, ev *trackerEvent) {
 	b.itemRef(cmd, ev, "item")
 	people, hasPeople := cmd.Attr("people")
+	rules, hasRules := cmd.Attr("rules")
 	_, hasLevels := cmd.Attr("levels")
 	switch {
-	case hasPeople == hasLevels:
-		b.p.Add("%s: takes people or levels, one of the two", cmd.Label())
+	case hasLevels && (hasPeople || hasRules):
+		b.p.Add("%s: levels stands alone; beside people or rules, write it as the rule rules=\"<your id>:N\"", cmd.Label())
+	case hasLevels:
+		if n, ok := wsxmlcmd.IntAttr(b.p, cmd, "levels", true); ok {
+			ev.payload["mode"], ev.payload["levels"] = "all", n
+		}
+	case hasRules:
+		targets := []any{}
+		for _, person := range strings.Fields(people) {
+			targets = append(targets, person)
+		}
+		if wsxmlcmd.NonEmpty(b.p, cmd.At("rules"), rules) {
+			for _, tok := range strings.Fields(rules) {
+				if rule, ok := parseTrackerRule(tok); ok {
+					targets = append(targets, rule)
+				} else {
+					b.p.Add("%s: %q must be member:N (everyone within N levels below member) or member:* (the whole subtree), with member+ to include the member", cmd.At("rules"), tok)
+				}
+			}
+		}
+		ev.payload["targets"] = targets
 	case hasPeople:
 		if wsxmlcmd.NonEmpty(b.p, cmd.At("people"), people) {
 			ev.payload["mode"], ev.payload["people"] = "chosen", strings.Fields(people)
 		}
 	default:
-		if n, ok := wsxmlcmd.IntAttr(b.p, cmd, "levels", true); ok {
-			ev.payload["mode"], ev.payload["levels"] = "all", n
-		}
+		b.p.Add("%s: takes people, rules, or both", cmd.Label())
 	}
 	if _, ok := cmd.Attr("completion"); ok {
 		if v, ok := wsxmlcmd.EnumAttr(b.p, cmd, "completion", []string{"assignee", "assigner"}); ok {
 			ev.payload["completion"] = v
 		}
 	}
+}
+
+// parseTrackerRule reads one rule of the rules grammar: root, + to include
+// the root, then :N for N levels below it or :* for the whole subtree.
+func parseTrackerRule(tok string) (map[string]any, bool) {
+	root, depth, ok := strings.Cut(tok, ":")
+	root, include := strings.CutSuffix(root, "+")
+	if !ok || root == "" || strings.ContainsAny(root, "+:") {
+		return nil, false
+	}
+	rule := map[string]any{"root": root}
+	if include {
+		rule["include_root"] = true
+	}
+	if depth != "*" {
+		n, err := strconv.Atoi(depth)
+		if err != nil || n < 1 {
+			return nil, false
+		}
+		rule["levels"] = n
+	}
+	return rule, true
 }
 
 // buildMemberProfile writes the profile fields present; org and family may
@@ -368,6 +425,16 @@ type trackerEvent struct {
 	// refs maps a payload field to the event index (in the batch) of the
 	// event it names.
 	refs map[string]int
+	// refLists maps a list field to its entries in order: a stored id, or
+	// the event index of the event it names.
+	refLists map[string][]trackerListRef
+}
+
+// trackerListRef is one entry of an ID list: id when given, else the batch
+// event index event.
+type trackerListRef struct {
+	id    string
+	event int
 }
 
 // trackerBatch is one tracker.update batch as planned.
@@ -423,6 +490,22 @@ func (b *trackerBatch) itemRef(cmd wsxmlcmd.Command, ev *trackerEvent, name stri
 	b.ref(cmd, ev, name, wstracker.TypeItemCreate, "item")
 }
 
+// itemRefList reads an optional space-separated list of item IDs, each in
+// either form or $N; an empty list writes an empty field.
+func (b *trackerBatch) itemRefList(cmd wsxmlcmd.Command, ev *trackerEvent, name string) {
+	v, ok := cmd.Attr(name)
+	if !ok {
+		return
+	}
+	list := []trackerListRef{}
+	for _, tok := range strings.Fields(v) {
+		if id, idx, ok := b.parseRef(cmd, name, tok, wstracker.TypeItemCreate, "item"); ok {
+			list = append(list, trackerListRef{id: id, event: idx})
+		}
+	}
+	ev.refLists[name] = list
+}
+
 func (b *trackerBatch) commentRef(cmd wsxmlcmd.Command, ev *trackerEvent, name string) {
 	b.ref(cmd, ev, name, wstracker.TypeCommentAdd, "comment")
 }
@@ -435,28 +518,39 @@ func (b *trackerBatch) ref(cmd wsxmlcmd.Command, ev *trackerEvent, name, creator
 	if !ok {
 		return
 	}
-	v = strings.TrimSpace(v)
+	id, idx, ok := b.parseRef(cmd, name, strings.TrimSpace(v), creator, noun)
+	switch {
+	case !ok:
+	case idx >= 0:
+		ev.refs[name] = idx
+	default:
+		ev.payload[name] = id
+	}
+}
+
+// parseRef reads one reference v of attribute name: the stored id, or for
+// $N the event index of the event command N creates (idx -1 otherwise).
+func (b *trackerBatch) parseRef(cmd wsxmlcmd.Command, name, v, creator, noun string) (id string, idx int, ok bool) {
 	if rest, isRef := strings.CutPrefix(v, "$"); isRef {
 		n, err := strconv.Atoi(rest)
 		if err != nil || n < 1 || n >= cmd.Pos {
 			b.p.Add("%s: $N names an earlier command of this batch by position; got %q", cmd.At(name), v)
-			return
+			return "", -1, false
 		}
 		target, known := b.byPos[n]
 		idx, isEvent := b.eventOf[n]
 		if !known || !isEvent || strings.TrimPrefix(target.Tag, trackerPrefix) != creator {
 			b.p.Add("%s: %s names command %d, which creates no %s; $N must name a <%s%s>", cmd.At(name), v, n, noun, trackerPrefix, creator)
-			return
+			return "", -1, false
 		}
-		ev.refs[name] = idx
-		return
+		return "", idx, true
 	}
 	id, err := parseTrackerID(v)
 	if err != nil {
 		b.p.Add("%s: must be an %s ID such as maya.pc-5, or $N; got %q", cmd.At(name), noun, v)
-		return
+		return "", -1, false
 	}
-	ev.payload[name] = id
+	return id, -1, true
 }
 
 // parseTrackerID returns the stored form of an event id given in either
@@ -546,7 +640,7 @@ func planTrackerBatch(p *wsxmlcmd.Problems, commands string, registered []wstrac
 			}
 			continue
 		}
-		ev := &trackerEvent{cmd: cmd, typ: name, origin: wstracker.OriginAgent, payload: map[string]any{}, refs: map[string]int{}}
+		ev := &trackerEvent{cmd: cmd, typ: name, origin: wstracker.OriginAgent, payload: map[string]any{}, refs: map[string]int{}, refLists: map[string][]trackerListRef{}}
 		// The parser has refused a command outside a group and a group
 		// with no name; each group is checked once, at its first command.
 		if scope := cmd.Scope; scope != nil && !groups[scope] {
@@ -577,14 +671,27 @@ func planTrackerBatch(p *wsxmlcmd.Problems, commands string, registered []wstrac
 func (b *trackerBatch) newEvents(next wsledger.EventID) ([]wsledger.NewEvent, error) {
 	out := make([]wsledger.NewEvent, len(b.events))
 	for i, ev := range b.events {
-		payload := make(map[string]any, len(ev.payload)+len(ev.refs))
+		payload := make(map[string]any, len(ev.payload)+len(ev.refs)+len(ev.refLists))
 		for k, v := range ev.payload {
 			payload[k] = v
 		}
-		for field, idx := range ev.refs {
+		at := func(idx int) string {
 			id := next
 			id.Seq += idx
-			payload[field] = id.String()
+			return id.String()
+		}
+		for field, idx := range ev.refs {
+			payload[field] = at(idx)
+		}
+		for field, list := range ev.refLists {
+			ids := make([]string, len(list))
+			for i, r := range list {
+				ids[i] = r.id
+				if r.id == "" {
+					ids[i] = at(r.event)
+				}
+			}
+			payload[field] = ids
 		}
 		raw, err := json.Marshal(payload)
 		if err != nil {

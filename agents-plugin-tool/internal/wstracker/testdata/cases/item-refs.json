@@ -1,0 +1,247 @@
+{
+ "name": "item-refs",
+ "comment": "Item refs (531): refs ride with the body like mentions; an edit's body replaces them (ada.pc#5 drops its ref, maya.pc#1 moves to its own thread). Backlinks list shown items, then shown comments on shown items, excluding the target's own thread, a hidden comment (maya.pc#3) and a hidden item (ada.pc#7).",
+ "viewers": [
+  "ada.pc",
+  "maya.pc"
+ ],
+ "now": "2026-11-02T09:00:00Z",
+ "genesis": {
+  "admins": [
+   "ada"
+  ],
+  "members": [
+   {
+    "id": "ada",
+    "name": "Ada",
+    "keys": [
+     "ada-k1"
+    ],
+    "leads": []
+   },
+   {
+    "id": "maya",
+    "name": "Maya",
+    "keys": [
+     "maya-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "raj",
+    "name": "Raj",
+    "keys": [
+     "raj-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "bo",
+    "name": "Bo",
+    "keys": [
+     "bo-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "lena",
+    "name": "Lena",
+    "keys": [
+     "lena-k1"
+    ],
+    "leads": [
+     "maya"
+    ]
+   },
+   {
+    "id": "omar",
+    "name": "Omar",
+    "keys": [
+     "omar-k1"
+    ],
+    "leads": [
+     "maya"
+    ]
+   },
+   {
+    "id": "sven",
+    "name": "Sven",
+    "keys": [
+     "sven-k1"
+    ],
+    "leads": [
+     "raj"
+    ]
+   }
+  ]
+ },
+ "commits": {
+  "ada.pc": [
+   {
+    "ts": "2026-11-01T09:00:00Z",
+    "seen": {},
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Target"
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Other"
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "topic",
+       "title": "Holder",
+       "body": "see #ada.pc-1",
+       "refs": [
+        "ada.pc#1"
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:10:00Z",
+    "seen": {
+     "maya.pc": 4
+    },
+    "events": [
+     [
+      "item.edit",
+      {
+       "item": "ada.pc#3",
+       "body": "see #ada.pc-1 and #ada.pc-2",
+       "refs": [
+        "ada.pc#1",
+        "ada.pc#2"
+       ]
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Dropper",
+       "body": "#ada.pc-2",
+       "refs": [
+        "ada.pc#2"
+       ]
+      }
+     ],
+     [
+      "item.edit",
+      {
+       "item": "ada.pc#5",
+       "body": "nothing now"
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Hidden ref",
+       "body": "#ada.pc-1",
+       "refs": [
+        "ada.pc#1"
+       ]
+      }
+     ],
+     [
+      "item.hide",
+      {
+       "item": "ada.pc#7"
+      }
+     ]
+    ]
+   }
+  ],
+  "maya.pc": [
+   {
+    "ts": "2026-11-01T09:05:00Z",
+    "seen": {
+     "ada.pc": 3
+    },
+    "events": [
+     [
+      "comment.add",
+      {
+       "item": "ada.pc#2",
+       "body": "relates to #ada.pc-1",
+       "refs": [
+        "ada.pc#1"
+       ]
+      }
+     ],
+     [
+      "comment.add",
+      {
+       "item": "ada.pc#1",
+       "body": "self #ada.pc-1",
+       "refs": [
+        "ada.pc#1"
+       ]
+      }
+     ],
+     [
+      "comment.add",
+      {
+       "item": "ada.pc#2",
+       "body": "hidden #ada.pc-1",
+       "refs": [
+        "ada.pc#1"
+       ]
+      }
+     ],
+     [
+      "comment.hide",
+      {
+       "comment": "maya.pc#3"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:15:00Z",
+    "seen": {
+     "ada.pc": 8
+    },
+    "events": [
+     [
+      "comment.edit",
+      {
+       "comment": "maya.pc#1",
+       "body": "now about #ada.pc-2",
+       "refs": [
+        "ada.pc#2"
+       ]
+      }
+     ],
+     [
+      "comment.add",
+      {
+       "item": "ada.pc#3",
+       "body": "cf #ada.pc-1",
+       "refs": [
+        "ada.pc#1"
+       ]
+      }
+     ]
+    ]
+   }
+  ]
+ }
+}

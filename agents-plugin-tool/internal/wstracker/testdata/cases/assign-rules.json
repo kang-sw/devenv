@@ -1,0 +1,368 @@
+{
+ "name": "assign-rules",
+ "comment": "Assignment rules (490)-(492). Within reach: maya's rule rooted at herself and ada's mixed bo + {maya, include_root} are live at once, and pia, set under lena later, inherits ada's rule. Outside reach: maya's whole-subtree rule rooted at raj is a pending request to raj; raj's accept makes it live (sven, and kai who joins under sven later), notifies ada, raj's lead, and ada returns it, ending the rule and its records. The older levels form (maya.pc#6) folds as before; bo declines a request; maya withdraws one with unassign root.",
+ "viewers": [
+  "ada.pc",
+  "maya.pc",
+  "raj.pc"
+ ],
+ "now": "2026-11-02T09:00:00Z",
+ "genesis": {
+  "admins": [
+   "ada"
+  ],
+  "members": [
+   {
+    "id": "ada",
+    "name": "Ada",
+    "keys": [
+     "ada-k1"
+    ],
+    "leads": []
+   },
+   {
+    "id": "maya",
+    "name": "Maya",
+    "keys": [
+     "maya-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "raj",
+    "name": "Raj",
+    "keys": [
+     "raj-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "bo",
+    "name": "Bo",
+    "keys": [
+     "bo-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "lena",
+    "name": "Lena",
+    "keys": [
+     "lena-k1"
+    ],
+    "leads": [
+     "maya"
+    ]
+   },
+   {
+    "id": "omar",
+    "name": "Omar",
+    "keys": [
+     "omar-k1"
+    ],
+    "leads": [
+     "maya"
+    ]
+   },
+   {
+    "id": "sven",
+    "name": "Sven",
+    "keys": [
+     "sven-k1"
+    ],
+    "leads": [
+     "raj"
+    ]
+   },
+   {
+    "id": "pia",
+    "name": "Pia",
+    "keys": [
+     "pia-k1"
+    ],
+    "leads": []
+   },
+   {
+    "id": "kai",
+    "name": "Kai",
+    "keys": [
+     "kai-k1"
+    ],
+    "leads": []
+   }
+  ]
+ },
+ "commits": {
+  "maya.pc": [
+   {
+    "ts": "2026-11-01T09:00:00Z",
+    "seen": {},
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Rollout"
+      }
+     ],
+     [
+      "item.assign",
+      {
+       "item": "maya.pc#1",
+       "targets": [
+        {
+         "root": "maya",
+         "levels": 1
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:05:00Z",
+    "seen": {
+     "ada.pc": 3
+    },
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Cross-team"
+      }
+     ],
+     [
+      "item.assign",
+      {
+       "item": "maya.pc#3",
+       "targets": [
+        {
+         "root": "raj"
+        }
+       ],
+       "completion": "assigner"
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Legacy"
+      }
+     ],
+     [
+      "item.assign",
+      {
+       "item": "maya.pc#5",
+       "mode": "all",
+       "levels": 1
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:21:00Z",
+    "seen": {
+     "ada.pc": 5,
+     "raj.pc": 1,
+     "sven.pc": 1
+    },
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Ask bo"
+      }
+     ],
+     [
+      "item.assign",
+      {
+       "item": "maya.pc#7",
+       "targets": [
+        {
+         "root": "bo",
+         "include_root": true
+        }
+       ]
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Withdraw"
+      }
+     ],
+     [
+      "item.assign",
+      {
+       "item": "maya.pc#9",
+       "targets": [
+        {
+         "root": "raj",
+         "levels": 1
+        }
+       ]
+      }
+     ],
+     [
+      "item.unassign",
+      {
+       "item": "maya.pc#9",
+       "root": "raj"
+      }
+     ]
+    ]
+   }
+  ],
+  "ada.pc": [
+   {
+    "ts": "2026-11-01T09:01:00Z",
+    "seen": {
+     "maya.pc": 2
+    },
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Audit"
+      }
+     ],
+     [
+      "item.assign",
+      {
+       "item": "ada.pc#1",
+       "targets": [
+        "bo",
+        {
+         "root": "maya",
+         "include_root": true
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:02:00Z",
+    "seen": {
+     "maya.pc": 2
+    },
+    "events": [
+     [
+      "roles.set_lead",
+      {
+       "member": "pia",
+       "leads": [
+        "lena"
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:14:00Z",
+    "seen": {
+     "maya.pc": 6,
+     "raj.pc": 1,
+     "sven.pc": 1
+    },
+    "events": [
+     [
+      "roles.set_lead",
+      {
+       "member": "kai",
+       "leads": [
+        "sven"
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:20:00Z",
+    "seen": {
+     "maya.pc": 6,
+     "raj.pc": 1,
+     "sven.pc": 1
+    },
+    "events": [
+     [
+      "item.return",
+      {
+       "item": "maya.pc#3",
+       "assignee": "raj",
+       "note": "raj is busy"
+      }
+     ]
+    ]
+   }
+  ],
+  "raj.pc": [
+   {
+    "ts": "2026-11-01T09:10:00Z",
+    "seen": {
+     "maya.pc": 6,
+     "ada.pc": 3
+    },
+    "events": [
+     [
+      "item.accept",
+      {
+       "item": "maya.pc#3",
+       "note": "ok"
+      }
+     ]
+    ]
+   }
+  ],
+  "sven.pc": [
+   {
+    "ts": "2026-11-01T09:12:00Z",
+    "seen": {
+     "maya.pc": 6,
+     "ada.pc": 3,
+     "raj.pc": 1
+    },
+    "events": [
+     [
+      "item.status",
+      {
+       "item": "maya.pc#3",
+       "status": "doing"
+      }
+     ]
+    ]
+   }
+  ],
+  "bo.pc": [
+   {
+    "ts": "2026-11-01T09:25:00Z",
+    "seen": {
+     "maya.pc": 11,
+     "ada.pc": 5,
+     "raj.pc": 1,
+     "sven.pc": 1
+    },
+    "events": [
+     [
+      "item.decline",
+      {
+       "item": "maya.pc#7",
+       "note": "not mine"
+      }
+     ]
+    ]
+   }
+  ]
+ }
+}

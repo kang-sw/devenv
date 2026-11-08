@@ -110,9 +110,10 @@ func isOID(v any) bool {
 	return true
 }
 
-// checkExtras (335, 338): mentions is an explicit list of member ids (the
-// text keeps @name for display); attachments is metadata only, each within
-// attachments.max_bytes. Both ride with a body. prior is the target's shown
+// checkExtras (335, 338, 531): mentions is an explicit list of member ids
+// (the text keeps @name for display); attachments is metadata only, each
+// within attachments.max_bytes; refs is the item ids the text references
+// with #ID. All three ride with a body. prior is the target's shown
 // attachments in the author's seen state (nil on create and comment.add): an
 // oid already there is exempt from the size check, so only an attachment the
 // write adds is held to a limit an admin may since have lowered.
@@ -166,6 +167,90 @@ func (s *state) checkExtras(p obj, prior []attachment) rejection {
 					jsNum(s.attMax) + " bytes (attachments.max_bytes)")
 			}
 		}
+	}
+	if !p.null("refs") {
+		l, ok := p.list("refs")
+		if !ok {
+			return "refs must be a list of item ids"
+		}
+		for _, x := range l {
+			id, ok := x.(string)
+			if !ok {
+				return "refs must be a list of item ids"
+			}
+			if s.items[id] == nil {
+				return rejection("referenced " + alias(id) + " is not an item its author had seen")
+			}
+		}
+	}
+	return ""
+}
+
+const targetShape = "a target is a member id or a rule {root, include_root?, levels?}"
+
+// checkTargets checks item.assign targets (490)-(492): member ids and rules
+// {root, include_root?, levels?}, mixed, one rule per root. A rule is
+// checked like the older "everyone within N": someone must be in it, and
+// the author's live rules must not already cover it.
+func (s *state) checkTargets(it *item, a string, p obj) rejection {
+	targets, ok := p.list("targets")
+	if !ok || len(targets) == 0 {
+		return "choose at least one person or rule"
+	}
+	roots := map[string]bool{}
+	rules := 0
+	for _, x := range targets {
+		if id, ok := x.(string); ok {
+			if id != a && !s.liveMember(id) {
+				return rejection(id + " is not a member")
+			}
+			continue
+		}
+		m, ok := x.(map[string]any)
+		root, _ := m["root"].(string)
+		if !ok || root == "" {
+			return targetShape
+		}
+		t := obj(m)
+		if _, ok := t["include_root"].(bool); !ok && !t.null("include_root") {
+			return targetShape
+		}
+		ru := &rule{root: root, includeRoot: t["include_root"] == true}
+		if !t.null("levels") {
+			l, ok := t["levels"].(float64)
+			if !ok || l != math.Trunc(l) || l < 1 || math.IsInf(l, 0) {
+				return "rule levels must be a whole number >= 1"
+			}
+			ru.levels = l
+		}
+		if !s.liveMember(root) {
+			return rejection(root + " is not a member")
+		}
+		if roots[root] {
+			return rejection("one rule per root in an assign (" + root + ")")
+		}
+		roots[root] = true
+		rules++
+		if len(s.coveredBy(ru)) == 0 {
+			within := ""
+			if ru.levels != 0 {
+				within = "within " + jsNum(ru.levels) + " levels "
+			}
+			return rejection("nobody is " + within + "below " + root)
+		}
+		for _, y := range s.liveRules(it.id) {
+			if y.by == a && s.ruleCovers(y, ru) {
+				return rejection("the rule rooted at " + root + " is already covered by " + alias(y.id))
+			}
+		}
+	}
+	if rules == 0 {
+		for _, x := range targets {
+			if s.openRec(it.id, jsString(x)) == nil {
+				return ""
+			}
+		}
+		return "everyone chosen already holds a live or pending assignment"
 	}
 	return ""
 }
@@ -236,6 +321,11 @@ func (s *state) check(n *node) rejection {
 				return rejection("parent " + par.alias + " is neither assigned to nor created by " + a)
 			}
 		}
+		// (528) the sibling it follows; null or "" = first. An anchor that is
+		// not a sibling when the view is built falls back to the end.
+		if _, ok := p["after"].(string); !ok && !p.null("after") {
+			return "after must be a sibling item id"
+		}
 
 	case TypeItemEdit:
 		it, r := needIt()
@@ -263,6 +353,9 @@ func (s *state) check(n *node) rejection {
 		}
 		if (!p.null("mentions") || !p.null("attachments")) && !p.has("body") {
 			return "mentions and attachments go with a body edit"
+		}
+		if !p.null("refs") && !p.has("body") {
+			return "refs go with a body edit"
 		}
 		return s.checkExtras(p, it.attachments)
 
@@ -308,8 +401,14 @@ func (s *state) check(n *node) rejection {
 		if completion != "assignee" && completion != "assigner" {
 			return "completion must be assignee or assigner"
 		}
+		if !p.null("targets") {
+			if !p.null("mode") {
+				return "item.assign takes targets or mode, not both"
+			}
+			return s.checkTargets(it, a, p)
+		}
 		switch p["mode"] {
-		case "all": // live and forced-only: everyone within N levels below the author
+		case "all": // the older form of a rule rooted at the author
 			levels, _ := p["levels"].(float64)
 			if !(levels >= 1) {
 				return "levels must be >= 1"
@@ -318,9 +417,13 @@ func (s *state) check(n *node) rejection {
 				return rejection("nobody is within " + jsNum(levels) + " levels below " + a)
 			}
 			for _, x := range s.liveRules(it.id) {
-				if x.by == a && x.levels >= levels {
+				if x.by != a || !s.ruleCovers(x, &rule{root: a, levels: levels}) {
+					continue
+				}
+				if x.root == a && x.levels != 0 {
 					return rejection("already assigned to everyone within " + jsNum(x.levels) + " levels (" + alias(x.id) + ")")
 				}
+				return rejection("the rule rooted at " + a + " is already covered by " + alias(x.id))
 			}
 		case "chosen": // anyone: below the author = forced (live), anyone else = pending
 			ppl := p.strList("people")
@@ -401,26 +504,32 @@ func (s *state) check(n *node) rejection {
 		if r != "" {
 			return r
 		}
+		// an accepted assignment, and an accepted rule rooted at the assignee
 		who := p.disp("assignee")
 		rc := s.liveRec(it.id, who)
-		if rc == nil {
+		rq := s.acceptedReq(it.id, who)
+		if rc == nil && rq == nil {
 			if !p.truthy("assignee") {
 				who = "?"
 			}
 			return rejection(who + " has no live assignment on " + it.alias)
 		}
+		to := who
+		if rc != nil {
+			to = rc.to
+		}
 		lead := ""
-		if m := s.members[rc.to]; m != nil {
+		if m := s.members[to]; m != nil {
 			lead = m.lead()
 		}
 		if lead != a {
 			l := lead
 			if l == "" {
-				l = "none: " + rc.to + " is a root"
+				l = "none: " + to + " is a root"
 			}
-			return rejection("only " + rc.to + "'s direct lead (" + l + ") returns an accepted assignment")
+			return rejection("only " + to + "'s direct lead (" + l + ") returns an accepted assignment")
 		}
-		if rc.accepted == nil {
+		if rq == nil && rc.accepted == nil {
 			return rejection(rc.to + "'s assignment was forced by " + rc.by + " (their lead chain); only an accepted one is returnable")
 		}
 
@@ -429,7 +538,18 @@ func (s *state) check(n *node) rejection {
 		if r != "" {
 			return r
 		}
-		if p.truthy("assignee") {
+		if !p.null("root") { // the author's rules rooted at root, with their requests and records
+			if p.truthy("assignee") {
+				return "item.unassign takes assignee or root, not both"
+			}
+			has := false
+			for _, x := range s.openRules(it.id) {
+				has = has || x.by == a && x.root == p.str("root")
+			}
+			if !has {
+				return rejection(a + " has no rule rooted at " + p.disp("root") + " on " + it.alias)
+			}
+		} else if p.truthy("assignee") {
 			who := p.disp("assignee")
 			rc := s.openRec(it.id, who)
 			if rc == nil {
@@ -448,7 +568,7 @@ func (s *state) check(n *node) rejection {
 			for _, x := range s.openRecs(it.id) {
 				has = has || x.by == a || (x.state == "pending" && x.sender == a)
 			}
-			for _, x := range s.liveRules(it.id) {
+			for _, x := range s.openRules(it.id) {
 				has = has || x.by == a
 			}
 			if !has {

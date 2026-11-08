@@ -436,7 +436,7 @@ func TestTrackerUpdateListsEveryProblem(t *testing.T) {
 		"command 1 <tk:register> (line 1): reaches the network and cannot be rolled back, so it stands alone in its batch",
 		"command 2 <tk:item.create> (line 3) kind: must be one of task, todo, topic",
 		"command 2 <tk:item.create> (line 3) origin: must be one of agent, agent-auto",
-		"command 3 <tk:item.assign> (line 4): takes people or levels, one of the two",
+		"command 3 <tk:item.assign> (line 4): levels stands alone; beside people or rules",
 		"command 4 <tk:comment.add> (line 5) item: $N names an earlier command of this batch by position",
 		"command 4 <tk:comment.add> (line 5) body: must be non-empty",
 		"command 5 <tk:item.edit> (line 6) item: $3 names command 3, which creates no item; $N must name a <tk:item.create>",

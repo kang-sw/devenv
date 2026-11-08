@@ -64,20 +64,20 @@ any group.
 | command | attributes | content |
 |---|---|---|
 | `tk:store` | `name` | group of every command below but `tk:register` and `tk:sync` |
-| `tk:item.create` | `kind`, `title`, `project?`, `due?`, `priority?`, `parent?`, `mentions?` | the body |
-| `tk:item.edit` | `item`, `title?`, `project?`, `due?`, `priority?`, `mentions?`, `clear?` | a new body |
+| `tk:item.create` | `kind`, `title`, `project?`, `due?`, `priority?`, `parent?`, `after?`, `mentions?`, `refs?` | the body |
+| `tk:item.edit` | `item`, `title?`, `project?`, `due?`, `priority?`, `mentions?`, `refs?`, `clear?` | a new body |
 | `tk:item.hide` | `item` | none |
-| `tk:item.assign` | `item`, `people` or `levels`, `completion?` | none |
+| `tk:item.assign` | `item`, `people?` and `rules?` (one or both), or `levels`; `completion?` | none |
 | `tk:item.handoff` | `item`, `to`, `assignee?` | a note |
 | `tk:item.accept`, `tk:item.decline` | `item` | a note |
 | `tk:item.return` | `item`, `assignee` | a note |
-| `tk:item.unassign` | `item`, `assignee?` | none |
+| `tk:item.unassign` | `item`, `assignee?` or `root?` | none |
 | `tk:item.status` | `item`, `status` | a note |
 | `tk:item.close` | `item` | a note |
 | `tk:item.confirm`, `tk:item.reject` | `item`, `assignee` | a note |
 | `tk:item.reopen` | `item`, `assignee?` | a note |
-| `tk:comment.add` | `item`, `reply_to?`, `mentions?` | the comment |
-| `tk:comment.edit` | `comment`, `mentions?` | the new text |
+| `tk:comment.add` | `item`, `reply_to?`, `mentions?`, `refs?` | the comment |
+| `tk:comment.edit` | `comment`, `mentions?`, `refs?` | the new text |
 | `tk:comment.hide` | `comment` | none |
 | `tk:member.profile` | `org?`, `family?`, `given?`, `member?` | none |
 | `tk:roles.set_lead` | `member`, `leads` | none |
@@ -98,24 +98,34 @@ Body text, markdown, written as is.
 </tk:store>
 ```
 
-- `item`, `parent`, `reply_to`, `comment`: an ID as the query or an update
-  prints it, or `$N` for the item or comment that command `N` (counting from
-  1) of the same batch creates.
+- `item`, `parent`, `after`, `reply_to`, `comment`, and each `refs` entry: an
+  ID as the query or an update prints it, or `$N` for the item or comment
+  that command `N` (counting from 1) of the same batch creates.
+- `after`: the sibling (same parent) the new item goes right after;
+  `after=""` puts it first; without `after` it goes last.
+- `refs`: the items the text references, each written `#<ID>` in the text.
+  `mentions` and `refs` ride with the body: a new body replaces both, so an
+  edit that keeps them repeats them.
 - `kind`: `task` (work to assign and track), `todo` (a personal checklist
   entry), or `topic` (a discussion with no status; it cannot be assigned).
   `due`: `YYYY-MM-DD`. `priority`: a level number from the store view's
   priority line, larger is more urgent; without one an item gets the store
   default. A note is optional.
-- People are member IDs; `people`, `mentions`, `leads`, `names`, and `clear`
-  are space-separated.
+- People are member IDs; `people`, `rules`, `mentions`, `refs`, `leads`,
+  `names`, and `clear` are space-separated.
 - Members form a lead tree; each member has at most one lead.
   `tk:roles.set_lead` sets `member`'s lead (`leads=""` for none).
 - Assignment lifecycle:
   - `tk:item.assign` (the item's creator): `people` assigns those members,
     live at once for the user and the members the user leads at any depth,
     and pending for anyone else until they `tk:item.accept` or
-    `tk:item.decline`. `levels="N"` assigns everyone up to N levels below the
-    user, including anyone who later joins that range.
+    `tk:item.decline`. `rules` assigns subtrees: `member:N` is everyone up to
+    N levels below `member`, `member:*` everyone below, and `member+:`
+    includes `member` (`rules="maya+:1 raj:*"`). A rule covers anyone who
+    later joins its range. One rooted at the user or someone the user leads
+    is live at once; one rooted at anyone else is a rule request pending to
+    that member, live once they accept. `levels="N"` alone is the rule
+    `<user>:N`.
   - The holder of a live assignment sets its `tk:item.status` and closes it
     with `tk:item.close`. With `completion="assigner"` (the default is
     `assignee`) a close waits until the assigner sends `tk:item.confirm` or
@@ -123,9 +133,11 @@ Body text, markdown, written as is.
   - `tk:item.handoff` passes the user's live assignment to `to`, pending
     until `to` accepts; an admin hands off another member's by naming them as
     `assignee`.
-  - `tk:item.return` (the holder's direct lead) ends an accepted assignment.
-    `tk:item.unassign` (the assigner) withdraws `assignee`'s assignment, or,
-    without it, all of the user's assignments on the item.
+  - `tk:item.return` (the holder's direct lead) ends an accepted assignment;
+    returning an accepted rule request ends its rule.
+    `tk:item.unassign` (the assigner) withdraws `assignee`'s assignment, ends
+    the user's rule rooted at `root`, or, without either, withdraws all of the
+    user's assignments and rules on the item.
     `tk:item.reopen` (the assigner or the holder) reopens a done one.
 - `clear` on `tk:item.edit`: `body`, `due`, or `clear="body due"`; an absent
   body leaves the body as it is.

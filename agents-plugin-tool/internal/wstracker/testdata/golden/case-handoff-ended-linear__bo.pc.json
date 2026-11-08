@@ -589,7 +589,9 @@
      "maya"
     ],
     "mentions": [],
-    "attachments": []
+    "attachments": [],
+    "refs": [],
+    "backrefs": []
    },
    "maya.pc#3": {
     "id": "maya.pc#3",
@@ -634,7 +636,9 @@
      "maya"
     ],
     "mentions": [],
-    "attachments": []
+    "attachments": [],
+    "refs": [],
+    "backrefs": []
    },
    "sven.pc#1": {
     "id": "sven.pc#1",
@@ -681,7 +685,9 @@
      "sven"
     ],
     "mentions": [],
-    "attachments": []
+    "attachments": [],
+    "refs": [],
+    "backrefs": []
    }
   },
   "itemOrder": [
@@ -706,6 +712,8 @@
     "ts": "2026-11-01T09:00:00Z",
     "inherited": false,
     "ruleLevels": null,
+    "rule": null,
+    "ruleRequest": false,
     "handoffOf": null,
     "handoffFrom": null,
     "handoffNote": null,
@@ -742,6 +750,8 @@
     "ts": "2026-11-01T09:00:00Z",
     "inherited": false,
     "ruleLevels": null,
+    "rule": null,
+    "ruleRequest": false,
     "handoffOf": null,
     "handoffFrom": null,
     "handoffNote": null,
@@ -778,6 +788,8 @@
     "ts": "2026-11-01T09:01:00Z",
     "inherited": false,
     "ruleLevels": null,
+    "rule": null,
+    "ruleRequest": false,
     "handoffOf": null,
     "handoffFrom": null,
     "handoffNote": null,
@@ -817,6 +829,8 @@
     "ts": "2026-11-01T09:02:00Z",
     "inherited": false,
     "ruleLevels": null,
+    "rule": null,
+    "ruleRequest": false,
     "handoffOf": "maya.pc#2>lena",
     "handoffFrom": "lena",
     "handoffNote": null,
@@ -853,6 +867,8 @@
     "ts": "2026-11-01T09:02:00Z",
     "inherited": false,
     "ruleLevels": null,
+    "rule": null,
+    "ruleRequest": false,
     "handoffOf": "sven.pc#2>lena",
     "handoffFrom": "lena",
     "handoffNote": null,
@@ -889,6 +905,8 @@
     "ts": "2026-11-01T09:03:00Z",
     "inherited": false,
     "ruleLevels": null,
+    "rule": null,
+    "ruleRequest": false,
     "handoffOf": "maya.pc#4>omar",
     "handoffFrom": "omar",
     "handoffNote": null,
@@ -910,6 +928,7 @@
     "stale": false
    }
   },
+  "rules": {},
   "comments": {},
   "events": [
    {
