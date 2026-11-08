@@ -644,7 +644,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-08T00:55:42Z"
+        "touched_at": "2026-11-08T00:56:14Z",
+        "impl": {
+          "branch": "impl/develop/dork-gamma-cable"
+        }
       }
     },
     "261108-feat-ws-tracker-support-agent-chat": {
