@@ -489,7 +489,14 @@
       "registered_at": "2026-09-24T10:38:33Z"
     },
     "260913-bug-mailbox-tests-read-ambient-ws-mailbox-env": {
-      "registered_at": "2026-09-24T10:38:33Z"
+      "registered_at": "2026-09-24T10:38:33Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "delegate/small-live-bugs",
+        "phase": "closed",
+        "touched_at": "2026-11-08T08:06:38Z"
+      }
     },
     "260913-bug-plugin-json-migration-vocab-uncovered": {
       "registered_at": "2026-09-24T10:38:33Z",
