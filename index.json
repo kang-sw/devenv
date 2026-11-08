@@ -647,7 +647,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-08T05:09:21Z"
+        "touched_at": "2026-11-08T05:09:55Z",
+        "impl": {
+          "branch": "impl/develop/churn-wipe-equal"
+        }
       }
     },
     "261108-feat-ws-tracker-caller": {
