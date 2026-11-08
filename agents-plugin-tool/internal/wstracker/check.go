@@ -87,6 +87,15 @@ func (s *state) checkFields(p obj) rejection {
 	return ""
 }
 
+func hasOID(l []attachment, oid string) bool {
+	for _, x := range l {
+		if x.oid == oid {
+			return true
+		}
+	}
+	return false
+}
+
 // isOID mirrors /^[0-9a-f]{64}$/: the sha256 of an attachment's content.
 func isOID(v any) bool {
 	o, ok := v.(string)
@@ -103,8 +112,11 @@ func isOID(v any) bool {
 
 // checkExtras (335, 338): mentions is an explicit list of member ids (the
 // text keeps @name for display); attachments is metadata only, each within
-// attachments.max_bytes. Both ride with a body.
-func (s *state) checkExtras(p obj) rejection {
+// attachments.max_bytes. Both ride with a body. prior is the target's shown
+// attachments in the author's seen state (nil on create and comment.add): an
+// oid already there is exempt from the size check, so only an attachment the
+// write adds is held to a limit an admin may since have lowered.
+func (s *state) checkExtras(p obj, prior []attachment) rejection {
 	if !p.null("mentions") {
 		l, ok := p.list("mentions")
 		if !ok {
@@ -149,7 +161,7 @@ func (s *state) checkExtras(p obj) rejection {
 			if !a.truthy("mime") || a.str("mime") == "" {
 				return "attachment mime type required"
 			}
-			if size > float64(s.attMax) {
+			if size > float64(s.attMax) && !hasOID(prior, a.str("oid")) {
 				return rejection(`attachment "` + a.str("name") + `" is ` + jsNum(size) + " bytes, above the store limit of " +
 					itoa(s.attMax) + " bytes (attachments.max_bytes)")
 			}
@@ -209,7 +221,7 @@ func (s *state) check(n *node) rejection {
 		if r := s.checkFields(p); r != "" {
 			return r
 		}
-		if r := s.checkExtras(p); r != "" {
+		if r := s.checkExtras(p, nil); r != "" {
 			return r
 		}
 		if p.truthy("parent") {
@@ -252,7 +264,7 @@ func (s *state) check(n *node) rejection {
 		if (!p.null("mentions") || !p.null("attachments")) && !p.has("body") {
 			return "mentions and attachments go with a body edit"
 		}
-		return s.checkExtras(p)
+		return s.checkExtras(p, it.attachments)
 
 	case TypeItemHide:
 		it, r := needIt()
@@ -531,7 +543,7 @@ func (s *state) check(n *node) rejection {
 		if !p.truthy("body") {
 			return "body required"
 		}
-		if r := s.checkExtras(p); r != "" {
+		if r := s.checkExtras(p, nil); r != "" {
 			return r
 		}
 		if p.truthy("reply_to") {
@@ -566,7 +578,7 @@ func (s *state) check(n *node) rejection {
 			return "body required"
 		}
 		if n.typ == TypeCommentEdit {
-			return s.checkExtras(p)
+			return s.checkExtras(p, q.attachments)
 		}
 
 	case TypeSetLead:

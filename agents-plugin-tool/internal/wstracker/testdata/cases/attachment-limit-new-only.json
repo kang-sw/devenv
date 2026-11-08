@@ -1,0 +1,253 @@
+{
+ "name": "attachment-limit-new-only",
+ "comment": "(345) b: attachments.max_bytes holds only the attachments a write adds. maya edits her topic to add b.png before the limit drops; ada, who saw only the create, lowers it to 1000; maya.pc, which saw both, keeps a.png and b.png (applied) but is flagged for adding the 2000-byte c.png; maya.lap saw the drop but not the b.png edit, so b.png is new to it and is flagged while its kept a.png passes.",
+ "viewers": [
+  "ada.pc",
+  "maya.lap"
+ ],
+ "now": "2026-11-02T09:00:00Z",
+ "genesis": {
+  "admins": [
+   "ada",
+   "bo"
+  ],
+  "members": [
+   {
+    "id": "ada",
+    "name": "Ada",
+    "keys": [
+     "ada-k1"
+    ],
+    "leads": []
+   },
+   {
+    "id": "maya",
+    "name": "Maya",
+    "keys": [
+     "maya-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "raj",
+    "name": "Raj",
+    "keys": [
+     "raj-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "bo",
+    "name": "Bo",
+    "keys": [
+     "bo-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "lena",
+    "name": "Lena",
+    "keys": [
+     "lena-k1"
+    ],
+    "leads": [
+     "maya"
+    ]
+   },
+   {
+    "id": "omar",
+    "name": "Omar",
+    "keys": [
+     "omar-k1"
+    ],
+    "leads": [
+     "maya"
+    ]
+   },
+   {
+    "id": "sven",
+    "name": "Sven",
+    "keys": [
+     "sven-k1"
+    ],
+    "leads": [
+     "raj"
+    ]
+   }
+  ],
+  "attachments": {
+   "max_bytes": 5000
+  }
+ },
+ "commits": {
+  "maya.pc": [
+   {
+    "ts": "2026-11-01T09:00:00Z",
+    "seen": {},
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "topic",
+       "title": "Design",
+       "body": "draft",
+       "attachments": [
+        {
+         "oid": "1111111111111111111111111111111111111111111111111111111111111111",
+         "name": "a.png",
+         "size": 4000,
+         "mime": "image/png"
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:30:00Z",
+    "seen": {},
+    "events": [
+     [
+      "item.edit",
+      {
+       "item": "maya.pc#1",
+       "body": "v2",
+       "attachments": [
+        {
+         "oid": "1111111111111111111111111111111111111111111111111111111111111111",
+         "name": "a.png",
+         "size": 4000,
+         "mime": "image/png"
+        },
+        {
+         "oid": "2222222222222222222222222222222222222222222222222222222222222222",
+         "name": "b.png",
+         "size": 4500,
+         "mime": "image/png"
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T11:00:00Z",
+    "seen": {
+     "ada.pc": 1
+    },
+    "events": [
+     [
+      "item.edit",
+      {
+       "item": "maya.pc#1",
+       "body": "v3 keeps both",
+       "attachments": [
+        {
+         "oid": "1111111111111111111111111111111111111111111111111111111111111111",
+         "name": "a.png",
+         "size": 4000,
+         "mime": "image/png"
+        },
+        {
+         "oid": "2222222222222222222222222222222222222222222222222222222222222222",
+         "name": "b.png",
+         "size": 4500,
+         "mime": "image/png"
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T11:30:00Z",
+    "seen": {
+     "ada.pc": 1
+    },
+    "events": [
+     [
+      "item.edit",
+      {
+       "item": "maya.pc#1",
+       "body": "v4 adds c",
+       "attachments": [
+        {
+         "oid": "1111111111111111111111111111111111111111111111111111111111111111",
+         "name": "a.png",
+         "size": 4000,
+         "mime": "image/png"
+        },
+        {
+         "oid": "2222222222222222222222222222222222222222222222222222222222222222",
+         "name": "b.png",
+         "size": 4500,
+         "mime": "image/png"
+        },
+        {
+         "oid": "3333333333333333333333333333333333333333333333333333333333333333",
+         "name": "c.png",
+         "size": 2000,
+         "mime": "image/png"
+        }
+       ]
+      }
+     ]
+    ]
+   }
+  ],
+  "ada.pc": [
+   {
+    "ts": "2026-11-01T10:00:00Z",
+    "seen": {
+     "maya.pc": 1
+    },
+    "events": [
+     [
+      "roles.set_attachment_limit",
+      {
+       "max_bytes": 1000
+      }
+     ]
+    ]
+   }
+  ],
+  "maya.lap": [
+   {
+    "ts": "2026-11-01T12:00:00Z",
+    "seen": {
+     "maya.pc": 1,
+     "ada.pc": 1
+    },
+    "events": [
+     [
+      "item.edit",
+      {
+       "item": "maya.pc#1",
+       "body": "v2 from the laptop",
+       "attachments": [
+        {
+         "oid": "1111111111111111111111111111111111111111111111111111111111111111",
+         "name": "a.png",
+         "size": 4000,
+         "mime": "image/png"
+        },
+        {
+         "oid": "2222222222222222222222222222222222222222222222222222222222222222",
+         "name": "b.png",
+         "size": 4500,
+         "mime": "image/png"
+        }
+       ]
+      }
+     ]
+    ]
+   }
+  ]
+ }
+}
