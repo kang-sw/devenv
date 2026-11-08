@@ -246,7 +246,7 @@ func TestPeerWorktreeCompactAndOrder(t *testing.T) {
 		}
 	}
 	// Its one running subagent shows as the spinner label, not the total.
-	if !strings.Contains(row, `class="prun"`) || !strings.Contains(row, "1 subagent<") {
+	if !strings.Contains(row, `class="prun"`) || !strings.Contains(row, `title="1 subagent"`) || !strings.Contains(row, `class="spin"></span><svg`) {
 		t.Errorf("compact row lacks the running-subagent label: %s", row)
 	}
 	for _, not := range []string{"ptool", "ptree", "pline"} {
@@ -284,7 +284,7 @@ func TestPeerRunningSubagentSpinner(t *testing.T) {
 		if row.RunningAgents != 2 {
 			t.Errorf("%s: RunningAgents = %d, want 2 (finished agents excluded)", name, row.RunningAgents)
 		}
-		if html := render(row); !strings.Contains(html, `class="prun"`) || !strings.Contains(html, "2 subagents<") {
+		if html := render(row); !strings.Contains(html, `class="prun"`) || !strings.Contains(html, `title="2 subagents"`) || !strings.Contains(html, "</svg>2</span>") || !strings.Contains(html, `class="spin"></span><svg`) {
 			t.Errorf("%s: no running label: %s", name, html)
 		}
 		// Zero running: finished agents leave no spinner label.
@@ -296,7 +296,7 @@ func TestPeerRunningSubagentSpinner(t *testing.T) {
 			t.Errorf("%s: spinner label with nothing running: %s", name, html)
 		}
 	}
-	if html := render(build("/p", agents[0])); !strings.Contains(html, "1 subagent<") || strings.Contains(html, "1 subagents") {
+	if html := render(build("/p", agents[0])); !strings.Contains(html, `title="1 subagent"`) || strings.Contains(html, "1 subagents") {
 		t.Errorf("singular form: %s", html)
 	}
 }
