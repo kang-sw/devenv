@@ -90,23 +90,36 @@ renderer shows it.
 - **Control through the daemon's REST API** (user direction): consumers
   start, send to, interrupt, and stop agent conversations over daemon routes.
 
-## Open Decision Queue
-
-Last ID: (319)
-
-(313) [open] [technical] Two phases: Phase 1 runner core, profiles, REST control, wslive output, and the claude backend with a live billing probe that stops the ticket if a turn is billed as extra usage; Phase 2 the pi backend - over one phase, because the billing outcome gates everything built on the claude path.
-(314) [open] [technical] REST routes sit behind the daemon's existing access control (loopback, and the LAN token when LAN is on) - over a separate auth scheme, since the dashboard already gates every route that way.
-(315) [open] [technical] An agent conversation's session directory is keyed by a minted reply-id under the daemon state, like a lead session's - over a new store, so `wslive` readers and paging work unchanged.
-(316) [open] [policy] Runner-hosted conversations are not listed in the dashboard session index by default; a consumer embeds them where it shows them, and a profile knob can list them.
-- Context: the session index lists lead sessions; a support or indexing agent listed there is noise for most users.
-- Alternative: always list them as sessions; never list them.
-> Not listed by default with a knob: consumers own their placement, and debugging can still list them.
-(317) [open] [policy] Tool permissions are allowlist-only: tools the profile allows run, everything else is denied without a prompt (claude `--permission-mode dontAsk` with `--allowedTools`; pi `--tools`).
-- Context: a headless process has no terminal to answer a permission prompt; the prior ws-claude delegate used `dontAsk`.
-- Alternative: route permission prompts to the dashboard for the user to answer.
-> Allowlist-only for v1: no prompt plumbing, a predictable failure mode, and routing prompts can be added later.
-(318) [open] [technical] On daemon restart, sustained processes end with the daemon and each conversation restarts lazily on its next input with the backend's resume - over re-spawning every conversation at daemon start, which would wake idle agents for nothing.
-(319) [open] [technical] A model or effort change from a consumer applies at the next turn boundary by restarting the process on the same backend session - over in-stream switching, which `claude --help` does not document (unverified; Phase 1 checks for an in-stream control first).
+- **REST routes behind the daemon's existing access control** (board (314)
+  ok): loopback, plus the LAN token when LAN is on, the same gate every
+  dashboard route uses. Rejected: a separate auth scheme for agent routes.
+- **One minted reply-id session directory per conversation** (board (315)
+  ok): the runner mints a reply-id and writes under `wslive.SessionDir`
+  in the daemon state, like a lead session's, so `wslive` readers, paging,
+  and SSE work unchanged. Rejected: a new store for agent output.
+- **Hidden from the session index by default** (board (316) a): a consumer
+  embeds its conversations where it shows them; a profile knob lists them in
+  the dashboard session index (for debugging). Rejected: always listed;
+  never listed.
+- **Allowlist-only tool permissions** (board (317) a): tools the profile
+  allows run, everything else is denied without a prompt (claude
+  `--permission-mode dontAsk` with `--allowedTools`; pi `--tools`). A
+  headless process has no terminal to answer a prompt. Rejected for v1:
+  routing permission prompts to the dashboard.
+- **Lazy resume after a daemon restart** (board (318) ok): sustained
+  processes end with the daemon; each conversation restarts on its next
+  input with the backend's resume. Rejected: re-spawning every conversation
+  at daemon start, which wakes idle agents for nothing.
+- **Model or effort change at a turn boundary** (board (319) ok): a change
+  applies at the next turn boundary by restarting the process on the same
+  backend session. Phase 1 first checks for an in-stream control and uses it
+  if one exists. Rejected: assuming in-stream switching, which
+  `claude --help` (2.1.319) does not document.
+- **Two phases, billing-gated** (board (313) ok): Phase 1 is the runner core
+  and the claude backend with a live billing probe that stops the ticket if
+  a turn is billed as extra usage; Phase 2 is the pi backend. Rejected: one
+  phase, since the billing outcome gates everything built on the claude
+  path.
 
 ## Constraints
 
@@ -127,8 +140,54 @@ Last ID: (319)
 
 ### Phase 1: runner core and the claude backend
 
-To be written once the queue settles.
+1. **Billing probe first.** Before building the runner, launch Claude Code
+   headless with the Phase 1 flag set (stream-json in and out,
+   `--append-system-prompt-file` with a short task-instruction file,
+   `--disable-slash-commands`, `--strict-mcp-config --mcp-config` with an
+   empty server set, `--permission-mode dontAsk`, plugins off through
+   `--settings`) on the user's subscription login, run one turn, and resume
+   it once with `--resume`. If any turn is billed as extra usage or refused
+   for usage, stop and report with the raw error; nothing below is built.
+   Also record whether `--settings` turns plugins off and whether an
+   in-stream model or effort control exists ((319)).
+2. **Profiles.** Add the `agent.profile.<name>.*` family to the ws and
+   wsflow config manifests (same keys, defaults differ only where the
+   packages already differ): backend, model, effort, tool allowlist, MCP
+   servers (default none), plugins/skills/extensions (default off),
+   instruction file, idle timeout (`0` = never), and the session-index
+   listing knob ((316)). Unknown backend or a missing instruction file fails
+   the launch with a clear error.
+3. **Runner core** in the dashboard daemon: a backend interface (start,
+   send turn, interrupt, stop, resume by backend session id) designed for
+   both claude and pi; one sustained process per conversation with the idle
+   timer; a minted reply-id session directory per conversation ((315));
+   lazy resume on the next input after an idle exit or a daemon restart
+   ((318)); model/effort changes at the turn boundary ((319)); clean child
+   shutdown with the daemon.
+4. **Claude backend**: the flag set from step 1; parse the stream-json
+   output into `wslive` snapshot and ring entries (user, reply, turn, tools)
+   so the existing conversation renderer shows them; verify the child's init
+   message lists only the profile's tools and MCP servers and fail the
+   launch otherwise.
+5. **REST control** behind the existing access control ((314)): create a
+   conversation from a profile, send a turn, interrupt, stop, change model or
+   effort, and read state (the session directory key, running or idle).
+   Runner conversations stay out of the session index unless the profile
+   lists them.
+
+Verification: unit tests for profile parsing, the idle timer, the
+lazy-resume path, and stream-json-to-`wslive` mapping (with recorded
+stream-json fixtures); a fake backend drives the REST routes end to end in
+tests; one live run of the claude backend through the REST routes on the
+subscription login, recorded in `### Result` with the billing observation.
 
 ### Phase 2: pi backend
 
-To be written once the queue settles.
+Implement the backend interface for Pi following the Pi spawner's launch
+shape (`agents-plugin-pi/src/spawner.ts`: RPC mode, `--session`,
+`--session-dir`, `--append-system-prompt`, `--no-extensions`, an explicit
+`--extension` only when the profile names one, `--tools <allowlist>`), map
+its RPC events to `wslive` entries, and resume by Pi session. Verification:
+the Phase 1 test suite runs against the pi backend through the same fake and
+recorded-event fixtures, plus one live Pi run through the REST routes,
+recorded in `### Result`.
