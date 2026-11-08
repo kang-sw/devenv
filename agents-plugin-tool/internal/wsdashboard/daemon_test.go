@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -178,6 +179,28 @@ func TestNonLoopbackHostIsRefused(t *testing.T) {
 				t.Errorf("%s Host %q sent a CORS header", path, host)
 			}
 		}
+	}
+}
+
+// Close releases the port before it returns, even when it runs before the
+// serve goroutine has been scheduled, so a restart can rebind the port.
+func TestCloseReleasesThePort(t *testing.T) {
+	// With one P, Close usually runs before the serve goroutine is
+	// scheduled, the order a loaded CI runner hits; no test in this package
+	// runs in parallel.
+	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(1))
+	for i := 0; i < 20; i++ {
+		d, err := StartDaemon(DaemonOptions{Dir: t.TempDir(), Version: "1.0.0", LockWait: 100 * time.Millisecond})
+		if err != nil {
+			t.Fatal(err)
+		}
+		port := d.Endpoint().Port
+		d.Close()
+		l, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+		if err != nil {
+			t.Fatalf("port %d still bound after Close: %v", port, err)
+		}
+		_ = l.Close()
 	}
 }
 

@@ -112,6 +112,7 @@ type Daemon struct {
 	dir      string
 	lock     *flock.Flock
 	server   *http.Server
+	listener net.Listener
 	endpoint Endpoint
 	log      io.Writer
 	index    *Index
@@ -216,6 +217,7 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 	d := &Daemon{
 		dir:        opts.Dir,
 		lock:       lock,
+		listener:   listener,
 		log:        logw,
 		agents:     opts.Agents,
 		tracker:    opts.Tracker,
@@ -392,6 +394,11 @@ func (d *Daemon) Close() {
 		ctx, cancel := context.WithTimeout(context.Background(), shutdownDeadline)
 		_ = d.server.Shutdown(ctx)
 		cancel()
+		// Shutdown closes only the listeners Serve has registered, and Serve
+		// runs on its own goroutine: a Close before that goroutine is
+		// scheduled would leave the port bound past Close, so a restart could
+		// not rebind it. Closing it here makes Close release the port.
+		_ = d.listener.Close()
 		if d.agents != nil {
 			d.agents.Close()
 		}
