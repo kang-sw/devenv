@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/kang-sw/devenv/internal/wstracker"
@@ -46,7 +47,7 @@ func formatTrackerScope(v *wstrackerhost.StoreView, q trackerQuery) string {
 			if withAssignments {
 				for _, aid := range it.Assignments {
 					if a, ok := v.Assignments[aid]; ok && a.Ended == nil {
-						sb.WriteString("  - " + formatTrackerAssignment(a) + "\n")
+						sb.WriteString("  - " + formatTrackerAssignment(v, a) + "\n")
 					}
 				}
 			}
@@ -222,7 +223,7 @@ func formatTrackerItemRow(it wstracker.ItemView) string {
 // alias and title, then the assignment.
 func formatTrackerAssignmentRow(v *wstrackerhost.StoreView, a wstracker.Assignment) string {
 	it := v.Items[a.Item]
-	s := fmt.Sprintf("%s P%d %s: %s", it.Alias, it.PriorityLevel, it.Title, formatTrackerAssignment(a))
+	s := fmt.Sprintf("%s P%d %s: %s", it.Alias, it.PriorityLevel, it.Title, formatTrackerAssignment(v, a))
 	if it.Due != nil {
 		s += ", due " + *it.Due
 	}
@@ -230,13 +231,22 @@ func formatTrackerAssignmentRow(v *wstrackerhost.StoreView, a wstracker.Assignme
 }
 
 // formatTrackerAssignment is one assignment: holder, state and status, who
-// assigned it, and its notes.
-func formatTrackerAssignment(a wstracker.Assignment) string {
+// assigned it, the rule it comes from or asks for, and its notes.
+func formatTrackerAssignment(v *wstrackerhost.StoreView, a wstracker.Assignment) string {
 	state := a.State
 	if a.State == "live" {
 		state = a.Status
 	}
 	s := fmt.Sprintf("%s %s (by %s", a.To, state, a.By)
+	if a.Rule != nil {
+		if r, ok := v.Rules[*a.Rule]; ok {
+			if a.RuleRequest {
+				s += ", rule request " + trackerRuleLabel(r)
+			} else {
+				s += ", rule " + trackerRuleLabel(r)
+			}
+		}
+	}
 	if a.Completion == "assigner" {
 		s += ", assigner closes"
 	}
@@ -257,6 +267,35 @@ func formatTrackerAssignment(a wstracker.Assignment) string {
 		s += fmt.Sprintf(", answer %q", *a.AnswerNote)
 	}
 	return s
+}
+
+// trackerRuleLabel is a rule as tk:item.assign's rules attribute writes
+// it: root, + when it includes the root, then :N or :* (whole subtree).
+func trackerRuleLabel(r wstracker.RuleView) string {
+	s := r.Root
+	if r.IncludeRoot {
+		s += "+"
+	}
+	if r.Levels == nil {
+		return s + ":*"
+	}
+	return s + ":" + strconv.FormatFloat(*r.Levels, 'f', -1, 64)
+}
+
+// trackerRefRow is a referenced or referencing item or comment on one
+// line: an item's row, or a comment's alias and author with its item.
+func trackerRefRow(v *wstrackerhost.StoreView, id string) string {
+	if it, ok := v.Items[id]; ok {
+		return formatTrackerItemRow(it)
+	}
+	if c, ok := v.Comments[id]; ok {
+		on := trackerAlias(c.Item)
+		if it, ok := v.Items[c.Item]; ok {
+			on += " " + it.Title
+		}
+		return fmt.Sprintf("comment %s by %s on %s", trackerAlias(id), c.Author, on)
+	}
+	return trackerAlias(id)
 }
 
 // trackerPerson is a member id with its display name.
@@ -301,6 +340,17 @@ func formatTrackerItem(v *wstrackerhost.StoreView, id string) string {
 	if len(it.Mentions) > 0 {
 		fmt.Fprintf(&sb, "mentions: %s\n", strings.Join(it.Mentions, " "))
 	}
+	for _, refs := range []struct {
+		label string
+		ids   []string
+	}{{"refs", it.Refs}, {"referenced by", it.Backrefs}} {
+		if len(refs.ids) > 0 {
+			sb.WriteString(refs.label + ":\n")
+			for _, rid := range refs.ids {
+				sb.WriteString("- " + trackerRefRow(v, rid) + "\n")
+			}
+		}
+	}
 	if strings.TrimSpace(it.Body) != "" {
 		sb.WriteString("body:\n" + strings.TrimRight(it.Body, "\n") + "\n")
 	}
@@ -308,7 +358,7 @@ func formatTrackerItem(v *wstrackerhost.StoreView, id string) string {
 		sb.WriteString("assignments:\n")
 		for _, aid := range it.Assignments {
 			if a, ok := v.Assignments[aid]; ok {
-				sb.WriteString("- " + formatTrackerAssignment(a) + "\n")
+				sb.WriteString("- " + formatTrackerAssignment(v, a) + "\n")
 			}
 		}
 	}
@@ -341,6 +391,13 @@ func formatTrackerItem(v *wstrackerhost.StoreView, id string) string {
 		}
 		if c.Edited != nil {
 			head += ", edited"
+		}
+		if len(c.Refs) > 0 {
+			aliases := make([]string, len(c.Refs))
+			for i, r := range c.Refs {
+				aliases[i] = trackerAlias(r)
+			}
+			head += ", refs " + strings.Join(aliases, " ")
 		}
 		body := strings.ReplaceAll(strings.TrimRight(c.Body, "\n"), "\n", "\n  ")
 		sb.WriteString(head + ":\n  " + body + "\n")

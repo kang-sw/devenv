@@ -13,6 +13,7 @@ import (
 
 	"github.com/kang-sw/devenv/internal/wsledger"
 	"github.com/kang-sw/devenv/internal/wstracker"
+	"github.com/kang-sw/devenv/internal/wstrackerhost"
 )
 
 // trackerWriteStep is one tracker.update call of the command walk: the
@@ -386,5 +387,116 @@ func TestTrackerUpdateWritesEveryEventCommand(t *testing.T) {
 		if def.build != nil && !covered[name] {
 			t.Errorf("tk:%s is never written by this walk", name)
 		}
+	}
+}
+
+// trackerRoots is the top-level part of a view's item order.
+func trackerRoots(v *wstrackerhost.StoreView) []string {
+	var out []string
+	for _, id := range v.ItemOrder {
+		if v.Items[id].Parent == nil {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// TestTrackerUpdateWritesStructureAttributes writes after, refs (with $N in
+// the list), rules beside people, and unassign root through tracker.update,
+// and checks the exact payloads, the folded view, and the item query text.
+func TestTrackerUpdateWritesStructureAttributes(t *testing.T) {
+	w := &trackerWalk{trackerSessionFixture: newTrackerSessionFixture(t), ids: map[string]string{}}
+	w.adaSync(t) // ada learns bo's join
+
+	w.ada(t, trackerWriteStep{`<tk:store name="team">
+<tk:item.create kind="task" title="A"/>
+<tk:item.create kind="task" title="C" after="$1"/>
+<tk:item.create kind="task" title="B" after="$1" refs="$1 $2">see #A and #C</tk:item.create>
+<tk:item.create kind="task" title="First" after=""/>
+<tk:comment.add item="$1" refs="$3">cf B</tk:comment.add>
+<tk:item.edit item="$1" refs="$3">now cites B</tk:item.edit>
+</tk:store>`, []trackerWantEvent{
+		{typ: wstracker.TypeItemCreate, name: "a", payload: map[string]any{"kind": "task", "title": "A"}},
+		{typ: wstracker.TypeItemCreate, name: "c", payload: map[string]any{"kind": "task", "title": "C", "after": "{a}"}},
+		{typ: wstracker.TypeItemCreate, name: "b", payload: map[string]any{"kind": "task", "title": "B", "after": "{a}", "refs": []any{"{a}", "{c}"}, "body": "see #A and #C"}},
+		{typ: wstracker.TypeItemCreate, name: "first", payload: map[string]any{"kind": "task", "title": "First", "after": ""}},
+		{typ: wstracker.TypeCommentAdd, name: "cm", payload: map[string]any{"item": "{a}", "refs": []any{"{b}"}, "body": "cf B"}},
+		{typ: wstracker.TypeItemEdit, payload: map[string]any{"item": "{a}", "refs": []any{"{b}"}, "body": "now cites B"}},
+	}})
+	v := w.view(t)
+	if got, want := strings.Join(trackerRoots(v), " "), strings.Join([]string{w.ids["first"], w.ids["a"], w.ids["b"], w.ids["c"]}, " "); got != want {
+		t.Fatalf("root order = %s, want %s", got, want)
+	}
+	if got := v.Items[w.ids["b"]].Backrefs; !reflect.DeepEqual(got, []string{w.ids["a"], w.ids["cm"]}) {
+		t.Fatalf("B's backrefs = %v", got)
+	}
+	full := w.trackerQuery(t, map[string]any{"store": "team", "item": w.ids["b"]})
+	for _, want := range []string{
+		"refs:\n- " + trackerAlias(w.ids["a"]) + " [task unassigned] P", " A\n- " + trackerAlias(w.ids["c"]) + " [task unassigned] P",
+		"referenced by:\n- " + trackerAlias(w.ids["a"]) + " [task unassigned]",
+		"- comment " + trackerAlias(w.ids["cm"]) + " by ada on " + trackerAlias(w.ids["a"]) + " A\n",
+	} {
+		if !strings.Contains(full, want) {
+			t.Fatalf("item view missing %q:\n%s", want, full)
+		}
+	}
+	if a := w.trackerQuery(t, map[string]any{"store": "team", "item": w.ids["a"]}); !strings.Contains(a, trackerAlias(w.ids["cm"])+" ada at") || !strings.Contains(a, ", refs "+trackerAlias(w.ids["b"])+":\n  cf B") {
+		t.Fatalf("a comment head prints its refs:\n%s", a)
+	}
+
+	// bo is not below ada yet: the rule rooted at bo is a request to bo,
+	// beside a person target in the same event.
+	w.ada(t, trackerWriteStep{`<tk:store name="team">
+<tk:item.create kind="task" title="R"/>
+<tk:item.assign item="$1" people="ada" rules="bo+:*" completion="assigner"/>
+</tk:store>`, []trackerWantEvent{
+		{typ: wstracker.TypeItemCreate, name: "r", payload: map[string]any{"kind": "task", "title": "R"}},
+		{typ: wstracker.TypeItemAssign, name: "asg", payload: map[string]any{"item": "{r}", "targets": []any{"ada", map[string]any{"root": "bo", "include_root": true}}, "completion": "assigner"}},
+	}})
+	rid := w.ids["asg"] + "~bo"
+	v = w.view(t)
+	if ru := v.Rules[rid]; ru.State != "pending" || ru.Levels != nil || !ru.IncludeRoot {
+		t.Fatalf("rule %s = %+v, want a pending whole-subtree rule with its root", rid, ru)
+	}
+	if r := w.trackerQuery(t, map[string]any{"store": "team", "item": w.ids["r"]}); !strings.Contains(r, "bo pending (by ada, rule request bo+:*, assigner closes)") || !strings.Contains(r, "ada todo (by ada, assigner closes)") {
+		t.Fatalf("the item view prints the rule request and the person:\n%s", r)
+	}
+	w.byBo(t, "", wstracker.TypeItemAccept, map[string]any{"item": "{r}"})
+	v = w.view(t)
+	if v.Rules[rid].State != "live" || v.Assignments[rid+">bo"].State != "live" {
+		t.Fatalf("after bo accepts: rule %+v, bo's record %+v", v.Rules[rid], v.Assignments[rid+">bo"])
+	}
+	if r := w.trackerQuery(t, map[string]any{"store": "team", "item": w.ids["r"]}); !strings.Contains(r, "bo todo (by ada, rule bo+:*, assigner closes)") {
+		t.Fatalf("the item view prints the rule's record:\n%s", r)
+	}
+	w.ada(t, trackerWriteStep{`<tk:store name="team"><tk:item.unassign item="{r}" root="bo"/></tk:store>`, []trackerWantEvent{
+		{typ: wstracker.TypeItemUnassign, payload: map[string]any{"item": "{r}", "root": "bo"}},
+	}})
+	v = w.view(t)
+	if v.Rules[rid].State != "ended" || v.Assignments[rid+">bo"].State != "unassigned" || v.Assignments[w.ids["asg"]+">ada"].State != "live" {
+		t.Fatalf("unassign root ends the rule only: rule %+v, bo %+v, ada %+v", v.Rules[rid], v.Assignments[rid+">bo"], v.Assignments[w.ids["asg"]+">ada"])
+	}
+
+	text := w.trackerRefused(t, "tracker.update", map[string]any{"commands": `<tk:store name="team">
+<tk:item.assign item="ada.pc-1" rules="bo:0 :2 bo+ bo:*"/>
+<tk:item.assign item="ada.pc-1" levels="1" rules="bo:1"/>
+<tk:item.assign item="ada.pc-1" completion="assigner"/>
+<tk:item.create kind="task" title="x" refs="nope $9"/>
+</tk:store>`})
+	for _, want := range []string{
+		`command 1 <tk:item.assign> (line 2) rules: "bo:0" must be member:N`,
+		`command 1 <tk:item.assign> (line 2) rules: ":2" must be member:N`,
+		`command 1 <tk:item.assign> (line 2) rules: "bo+" must be member:N`,
+		`command 2 <tk:item.assign> (line 3): levels stands alone; beside people or rules, write it as the rule rules="<your id>:N"`,
+		"command 3 <tk:item.assign> (line 4): takes people, rules, or both",
+		`command 4 <tk:item.create> (line 5) refs: must be an item ID such as maya.pc-5, or $N; got "nope"`,
+		"command 4 <tk:item.create> (line 5) refs: $N names an earlier command of this batch by position",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("refusal missing %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, `"bo:*"`) {
+		t.Fatalf("bo:* is a valid rule:\n%s", text)
 	}
 }
