@@ -164,6 +164,41 @@ func TestPruneRegistrationsDropsOnlyExpiredSessions(t *testing.T) {
 	}
 }
 
+// An agent conversation outlives the prune window while the daemon is down:
+// its directory (agent.json, held sends, the backend session) belongs to the
+// runner, so prune spares it by registration flag or by its record file.
+func TestPruneRegistrationsSparesAgentConversations(t *testing.T) {
+	dir := t.TempDir()
+	old := testNow.Add(-RegistryRetention - time.Hour)
+	flagged := Registration{ReplyID: "agentreg", Project: "/p", HeartbeatAt: stampFor(old), Agent: true}
+	if err := WriteRegistration(dir, flagged); err != nil {
+		t.Fatal(err)
+	}
+	// A record file without a readable registration still marks the
+	// directory as the runner's.
+	recordOnly := SessionDir(dir, "agentrecord")
+	if err := os.MkdirAll(recordOnly, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(recordOnly, AgentRecordFileName), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(recordOnly, old, old); err != nil {
+		t.Fatal(err)
+	}
+	register(t, dir, "leadexpired", "/p", old)
+
+	if n := PruneRegistrations(dir, testNow, RegistryRetention); n != 1 {
+		t.Fatalf("pruned %d, want 1", n)
+	}
+	for id, want := range map[string]bool{"agentreg": true, "agentrecord": true, "leadexpired": false} {
+		_, err := os.Stat(SessionDir(dir, id))
+		if exists := err == nil; exists != want {
+			t.Errorf("%s exists = %v, want %v", id, exists, want)
+		}
+	}
+}
+
 func newTestIndex(t *testing.T, dir string, src SessionSource, now *time.Time) (*Index, *[]string) {
 	t.Helper()
 	var mu sync.Mutex
