@@ -2,6 +2,7 @@ package wsagent
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"strings"
@@ -34,7 +35,7 @@ func TestCreateWritesRecordRegistrationAndSnapshot(t *testing.T) {
 		t.Fatalf("the record should be private: %v %v", info, err)
 	}
 	rec, err := readRecord(dir)
-	if err != nil || rec.WSKey == "" || rec.Profile != "chat" || rec.Backend != BackendClaude || rec.Root != h.root {
+	if err != nil || rec.WSKey == "" || rec.Profile != "chat" || rec.Backend != suiteBackend || rec.Root != h.root {
 		t.Fatalf("record = %+v, %v", rec, err)
 	}
 	reg, err := wsdashboard.ReadRegistration(h.dir, st.ID)
@@ -51,16 +52,16 @@ func TestCreateWritesRecordRegistrationAndSnapshot(t *testing.T) {
 
 func TestCreateRefusesBadLaunch(t *testing.T) {
 	h := newHarness(t, map[string]string{
-		"pi":      `{"backend":"pi"}`,
+		"other":   `{"backend":"@other"}`,
 		"noinstr": `{"backend":"claude","instructions":"missing.md"}`,
 	})
-	for profile, want := range map[string]string{"absent": "unknown agent profile", "pi": "backend \"pi\" is not available", "noinstr": "instruction file"} {
+	for profile, want := range map[string]string{"absent": "unknown agent profile", "other": fmt.Sprintf("backend %q is not available", otherBackend()), "noinstr": "instruction file"} {
 		_, err := h.runner.Create(profile, h.root)
 		if err == nil || requestStatus(err) != http.StatusBadRequest || !strings.Contains(err.Error(), want) {
 			t.Errorf("Create(%s) = %v, want a 400 naming %q", profile, err, want)
 		}
 	}
-	if _, err := h.runner.Create("pi", "relative/root"); requestStatus(err) != http.StatusBadRequest {
+	if _, err := h.runner.Create("noinstr", "relative/root"); requestStatus(err) != http.StatusBadRequest {
 		t.Errorf("a relative root should be refused, got %v", err)
 	}
 }
@@ -207,6 +208,11 @@ func TestRecordSurvivesDaemonRestart(t *testing.T) {
 	}
 	if spec.WSMCP == nil || spec.WSMCP.Env[EnvAllowedTools] != "tickets.query" || spec.WSMCP.Env[EnvNoDashboard] != "1" {
 		t.Fatalf("ws-mcp should carry the allowlist and the dashboard off: %+v", spec.WSMCP)
+	}
+	for _, name := range []string{"WS_MAILBOX", "WS_MAILBOX_AUTO"} {
+		if v, ok := spec.WSMCP.Env[name]; !ok || v != "" {
+			t.Fatalf("ws-mcp must not inherit a mailbox identity: %s=%q (set %v)", name, v, ok)
+		}
 	}
 	if len(h.keys.ensured) != 2 || h.keys.ensured[1] != rec.WSKey {
 		t.Fatalf("every start should keep the same key usable: %v", h.keys.ensured)
@@ -392,3 +398,27 @@ func TestFailuresSurfaceInState(t *testing.T) {
 }
 
 func ptr(s string) *string { return &s }
+
+// TestRunnerSuiteOnPi runs the runner suite again with every profile on
+// the pi backend: the runner treats the backends alike through Process.
+func TestRunnerSuiteOnPi(t *testing.T) {
+	suiteBackend = BackendPi
+	t.Cleanup(func() { suiteBackend = BackendClaude })
+	for name, test := range map[string]func(*testing.T){
+		"CreateWritesRecordRegistrationAndSnapshot": TestCreateWritesRecordRegistrationAndSnapshot,
+		"CreateRefusesBadLaunch":                    TestCreateRefusesBadLaunch,
+		"SendRunsTurnAndHeldSendsMerge":             TestSendRunsTurnAndHeldSendsMerge,
+		"IdleTimerEndsProcessAndNextSendResumes":    TestIdleTimerEndsProcessAndNextSendResumes,
+		"IdleTimeoutZeroNeverExits":                 TestIdleTimeoutZeroNeverExits,
+		"RecordSurvivesDaemonRestart":               TestRecordSurvivesDaemonRestart,
+		"StopKeepsHeldAndResumes":                   TestStopKeepsHeldAndResumes,
+		"CloseEndsConversationForGood":              TestCloseEndsConversationForGood,
+		"InterruptTakesBackHeldAndStopsTurn":        TestInterruptTakesBackHeldAndStopsTurn,
+		"SettingsApplyAtTurnBoundary":               TestSettingsApplyAtTurnBoundary,
+		"FailuresSurfaceInState":                    TestFailuresSurfaceInState,
+		"RESTRoutesEndToEnd":                        TestRESTRoutesEndToEnd,
+		"RESTWritesRefuseOtherOrigins":              TestRESTWritesRefuseOtherOrigins,
+	} {
+		t.Run(name, test)
+	}
+}

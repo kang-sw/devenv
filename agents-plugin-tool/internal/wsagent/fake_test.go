@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -163,11 +164,26 @@ type harness struct {
 	runner  *Runner
 }
 
+// suiteBackend is the backend the runner suite's profiles name and the fake
+// is registered under; TestRunnerSuiteOnPi runs the suite again with pi.
+// A profile written with "backend":"@other" names the backend left
+// unregistered. Tests in this package never run in parallel.
+var suiteBackend = BackendClaude
+
+func otherBackend() string {
+	if suiteBackend == BackendClaude {
+		return BackendPi
+	}
+	return BackendClaude
+}
+
 func newHarness(t *testing.T, profiles map[string]string) *harness {
 	t.Helper()
 	h := &harness{t: t, dir: t.TempDir(), root: t.TempDir(), backend: &fakeBackend{}, keys: &fakeKeys{}}
 	values := map[string]string{}
 	for name, raw := range profiles {
+		raw = strings.ReplaceAll(raw, `"backend":"claude"`, `"backend":"`+suiteBackend+`"`)
+		raw = strings.ReplaceAll(raw, `"backend":"@other"`, `"backend":"`+otherBackend()+`"`)
 		values[ProfilePrefix+name] = raw
 	}
 	writeStructured(t, filepath.Join(h.root, ".ws-workflow", "config.json"), values)
@@ -176,7 +192,7 @@ func newHarness(t *testing.T, profiles map[string]string) *harness {
 	}
 	h.config = Options{
 		Dir:      h.dir,
-		Backends: map[string]Backend{BackendClaude: h.backend},
+		Backends: map[string]Backend{suiteBackend: h.backend},
 		Keys:     h.keys,
 		Config:   testConfig(t),
 		WSMCP: func(root string) (MCPCommand, error) {
@@ -225,3 +241,9 @@ func eventually(t *testing.T, what string, cond func() bool) {
 		time.Sleep(5 * time.Millisecond)
 	}
 }
+
+// nopReplies drops a mapper's answers and lines.
+type nopReplies struct{}
+
+func (nopReplies) answer(string, controlAnswer) {}
+func (nopReplies) send(any)                     {}

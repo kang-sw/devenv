@@ -73,7 +73,7 @@ func dashboardCommand(args []string) {
 func newAgentRunner(dir string, logw io.Writer) *wsagent.Runner {
 	return wsagent.NewRunner(wsagent.Options{
 		Dir:      dir,
-		Backends: map[string]wsagent.Backend{wsagent.BackendClaude: wsagent.ClaudeBackend{}},
+		Backends: map[string]wsagent.Backend{wsagent.BackendClaude: wsagent.ClaudeBackend{}, wsagent.BackendPi: wsagent.PiBackend{}},
 		Keys:     mcp.NewAgentKeyStore(),
 		WSMCP: func(root string) (wsagent.MCPCommand, error) {
 			exe, err := os.Executable()

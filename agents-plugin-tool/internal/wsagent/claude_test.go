@@ -114,8 +114,8 @@ func TestClaudeArgsFromProfile(t *testing.T) {
 }
 
 func TestHarnessEnvDropsParentSession(t *testing.T) {
-	env := []string{"PATH=/bin", "CLAUDECODE=1", "CLAUDE_CODE_PLUGIN_DIRS=/x", "CLAUDE_CODE_SESSION_ID=s", "CLAUDE_CONFIG_DIR=/cfg", "CLAUDE_CODE_OAUTH_TOKEN=t", "HOME=/h"}
-	got := harnessEnv(env, []string{"CLAUDE"}, claudeKeptEnv, nil)
+	env := []string{"PATH=/bin", "CLAUDECODE=1", "CLAUDE_CODE_PLUGIN_DIRS=/x", "CLAUDE_CODE_SESSION_ID=s", "CLAUDE_CONFIG_DIR=/cfg", "CLAUDE_CODE_OAUTH_TOKEN=t", "WS_MAILBOX=lead@machine", "WS_MAILBOX_AUTO=1", "HOME=/h"}
+	got := claudeEnv(env)
 	want := []string{"PATH=/bin", "CLAUDE_CONFIG_DIR=/cfg", "CLAUDE_CODE_OAUTH_TOKEN=t", "HOME=/h"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("harnessEnv = %v, want %v", got, want)
@@ -195,7 +195,7 @@ func replayClaude(t *testing.T, fixture string, spec StartSpec) (*wslive.State, 
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 1<<20), 1<<20)
 	for sc.Scan() {
-		for _, ev := range m.mapLine(sc.Bytes(), func(string, controlAnswer) {}) {
+		for _, ev := range m.mapLine(sc.Bytes(), nopReplies{}) {
 			all = append(all, ev)
 			switch {
 			case ev.Live != nil:
@@ -295,7 +295,7 @@ func TestClaudeMapperRefusesUnlistedPlugin(t *testing.T) {
 
 func TestClaudeMapperTurnError(t *testing.T) {
 	m := newClaudeMapper(claudeSpec(t, `{"backend":"claude"}`))
-	evs := m.mapLine([]byte(`{"type":"result","subtype":"success","is_error":true,"result":"You're out of extra usage"}`), nil)
+	evs := m.mapLine([]byte(`{"type":"result","subtype":"success","is_error":true,"result":"You're out of extra usage"}`), nopReplies{})
 	end := evs[len(evs)-1]
 	if !end.TurnEnd || end.TurnError != "You're out of extra usage" {
 		t.Fatalf("a refused turn should end with its error, got %+v", end)

@@ -1,19 +1,15 @@
 package wsagent
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wslive"
@@ -41,6 +37,13 @@ var claudeKeptEnv = map[string]bool{
 	"CLAUDE_CODE_OAUTH_TOKEN": true,
 	"CLAUDE_CODE_USE_BEDROCK": true,
 	"CLAUDE_CODE_USE_VERTEX":  true,
+}
+
+// claudeEnv is the child's environment: env without the parent harness
+// session's CLAUDE* variables (claudeKeptEnv aside) and without a mailbox
+// identity, which the child's ws-mcp would otherwise claim.
+func claudeEnv(env []string) []string {
+	return harnessEnv(env, []string{"CLAUDE", "WS_MAILBOX"}, claudeKeptEnv, nil)
 }
 
 // claudeArgs is the claude command line for spec, without the executable.
@@ -230,222 +233,45 @@ func (b ClaudeBackend) Start(ctx context.Context, spec StartSpec) (Process, erro
 	}
 	cmd := exec.Command(command, args...)
 	cmd.Dir = spec.Root
-	cmd.Env = harnessEnv(spec.Env, []string{"CLAUDE"}, claudeKeptEnv, nil)
-	return startStreamProcess(cmd, newClaudeMapper(spec), claudeControl{})
+	cmd.Env = claudeEnv(spec.Env)
+	p, err := startStreamProcess(cmd, newClaudeMapper(spec), claudeProtocol{})
+	if err != nil {
+		return nil, err
+	}
+	return claudeProcess{p}, nil
 }
 
-// claudeControl writes Claude Code's stream-json input lines.
-type claudeControl struct{}
+// claudeProtocol writes Claude Code's stream-json input lines.
+type claudeProtocol struct{}
 
-func (claudeControl) userLine(text string) any {
+func (claudeProtocol) userLine(text string) any {
 	return map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": text}}
 }
 
-func (claudeControl) controlLine(id string, request map[string]any) any {
+func (claudeProtocol) requestLine(id string, request map[string]any) any {
 	return map[string]any{"type": "control_request", "request_id": id, "request": request}
 }
 
-// streamProcess is a child speaking line-delimited JSON on stdin and
-// stdout, parsed by a lineMapper.
-type streamProcess struct {
-	cmd     *exec.Cmd
-	stdin   io.WriteCloser
-	mapper  lineMapper
-	control claudeControl
-	events  chan Event
-	closing chan struct{}
-	exited  chan struct{}
-	read    chan struct{}
+// claudeProcess adds Claude Code's control requests to a stream process.
+type claudeProcess struct{ *streamProcess }
 
-	writeMu sync.Mutex
-	ctlMu   sync.Mutex
-	ctlSeq  int
-	waiters map[string]chan controlAnswer
-	once    sync.Once
-}
-
-// lineMapper turns one output line into events; a control response is
-// answered through answer.
-type lineMapper interface {
-	mapLine(line []byte, answer func(id string, a controlAnswer)) []Event
-}
-
-type controlAnswer struct {
-	ok  bool
-	err string
-}
-
-func startStreamProcess(cmd *exec.Cmd, mapper lineMapper, control claudeControl) (*streamProcess, error) {
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		return nil, err
-	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, err
-	}
-	stderr := &tailBuffer{max: 4 << 10}
-	cmd.Stderr = stderr
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("start %s: %w", filepath.Base(cmd.Path), err)
-	}
-	p := &streamProcess{
-		cmd: cmd, stdin: stdin, mapper: mapper, control: control,
-		events:  make(chan Event, 256),
-		closing: make(chan struct{}),
-		exited:  make(chan struct{}),
-		read:    make(chan struct{}),
-		waiters: map[string]chan controlAnswer{},
-	}
-	go func() {
-		defer close(p.read)
-		sc := bufio.NewScanner(stdout)
-		sc.Buffer(make([]byte, 64<<10), 64<<20)
-		for sc.Scan() {
-			for _, ev := range mapper.mapLine(sc.Bytes(), p.answer) {
-				if ev.Fatal != nil {
-					// A refused launch never gets to run a tool call.
-					_ = cmd.Process.Kill()
-				}
-				select {
-				case p.events <- ev:
-				case <-p.closing:
-				}
-			}
-		}
-	}()
-	go func() {
-		<-p.read
-		err := cmd.Wait()
-		close(p.exited)
-		select {
-		case <-p.closing:
-		default:
-			if err != nil {
-				msg := strings.TrimSpace(stderr.String())
-				if msg == "" {
-					msg = err.Error()
-				}
-				select {
-				case p.events <- Event{Fatal: fmt.Errorf("%s exited: %s", filepath.Base(cmd.Path), msg)}:
-				case <-p.closing:
-				}
-			}
-		}
-		close(p.events)
-	}()
-	return p, nil
-}
-
-func (p *streamProcess) Events() <-chan Event { return p.events }
-
-func (p *streamProcess) writeLine(v any) error {
-	raw, err := json.Marshal(v)
-	if err != nil {
-		return err
-	}
-	p.writeMu.Lock()
-	defer p.writeMu.Unlock()
-	_, err = p.stdin.Write(append(raw, '\n'))
-	return err
-}
-
-func (p *streamProcess) Send(text string) error { return p.writeLine(p.control.userLine(text)) }
-
-// controlTimeout bounds the wait for a control response.
-var controlTimeout = 10 * time.Second
-
-// request sends a control request and waits for its response.
-func (p *streamProcess) request(req map[string]any) error {
-	p.ctlMu.Lock()
-	p.ctlSeq++
-	id := "ws-" + strconv.Itoa(p.ctlSeq)
-	ch := make(chan controlAnswer, 1)
-	p.waiters[id] = ch
-	p.ctlMu.Unlock()
-	defer func() {
-		p.ctlMu.Lock()
-		delete(p.waiters, id)
-		p.ctlMu.Unlock()
-	}()
-	if err := p.writeLine(p.control.controlLine(id, req)); err != nil {
-		return err
-	}
-	select {
-	case a := <-ch:
-		if !a.ok {
-			if strings.Contains(strings.ToLower(a.err), "unsupported") {
-				return fmt.Errorf("%w: %s", ErrUnsupported, a.err)
-			}
-			return errors.New(a.err)
-		}
-		return nil
-	case <-p.exited:
-		return errors.New("the process exited")
-	case <-time.After(controlTimeout):
-		return fmt.Errorf("no answer to %v within %s", req["subtype"], controlTimeout)
-	}
-}
-
-func (p *streamProcess) answer(id string, a controlAnswer) {
-	p.ctlMu.Lock()
-	ch := p.waiters[id]
-	p.ctlMu.Unlock()
-	if ch != nil {
-		ch <- a
-	}
-}
-
-func (p *streamProcess) Interrupt() error {
-	return p.request(map[string]any{"subtype": "interrupt"})
+func (p claudeProcess) Interrupt() error {
+	return p.request("interrupt", map[string]any{"subtype": "interrupt"})
 }
 
 // SetModel uses Claude Code's set_model control, which applies from the
 // next turn. Returning to the default model has no in-stream form.
-func (p *streamProcess) SetModel(model string) error {
+func (p claudeProcess) SetModel(model string) error {
 	if model == "" {
 		return ErrUnsupported
 	}
-	return p.request(map[string]any{"subtype": "set_model", "model": model})
+	return p.request("set_model", map[string]any{"subtype": "set_model", "model": model})
 }
 
 // SetEffort has no in-stream form in Claude Code (2.1.319 answers
 // set_effort with "Unsupported control request subtype"), so an effort
 // change restarts the process with --effort on the same session.
-func (p *streamProcess) SetEffort(string) error { return ErrUnsupported }
-
-func (p *streamProcess) Close() error {
-	p.once.Do(func() {
-		close(p.closing)
-		stopChild(p.cmd, p.stdin.Close, p.exited)
-	})
-	for range p.events {
-	}
-	return nil
-}
-
-// tailBuffer keeps the last max bytes written to it.
-type tailBuffer struct {
-	mu  sync.Mutex
-	max int
-	buf []byte
-}
-
-func (t *tailBuffer) Write(b []byte) (int, error) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.buf = append(t.buf, b...)
-	if len(t.buf) > t.max {
-		t.buf = t.buf[len(t.buf)-t.max:]
-	}
-	return len(b), nil
-}
-
-func (t *tailBuffer) String() string {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return string(t.buf)
-}
+func (claudeProcess) SetEffort(string) error { return ErrUnsupported }
 
 // claudeMapper maps Claude Code's stream-json output to runner events: the
 // init message to the session id (after the init check), assistant text to
@@ -453,36 +279,18 @@ func (t *tailBuffer) String() string {
 // message), rate-limit and result figures to usage, and the result to the
 // turn's end.
 type claudeMapper struct {
-	spec  StartSpec
-	now   func() time.Time
-	epoch string
-	seq   int64
+	spec    StartSpec
+	now     func() time.Time
+	batches batchTracker
 
-	batch   *claudeBatch
 	context *wslive.UsageContext
 	limits  map[string]wslive.UsageLimit
 	cost    *wslive.UsageCost
 	window  int64
 }
 
-type claudeBatch struct {
-	messageID string
-	seq       int64
-	startedAt int64
-	calls     []*claudeCall
-}
-
-type claudeCall struct {
-	id        string
-	name      string
-	args      string
-	startedAt int64
-	endedAt   int64
-	failed    bool
-}
-
 func newClaudeMapper(spec StartSpec) *claudeMapper {
-	return &claudeMapper{spec: spec, now: time.Now, epoch: "c" + strconv.FormatInt(time.Now().UnixMilli(), 36), limits: map[string]wslive.UsageLimit{}}
+	return &claudeMapper{spec: spec, now: time.Now, batches: newBatchTracker("c"), limits: map[string]wslive.UsageLimit{}}
 }
 
 type claudeLine struct {
@@ -536,7 +344,7 @@ type claudeBlock struct {
 	IsError   bool            `json:"is_error"`
 }
 
-func (m *claudeMapper) mapLine(line []byte, answer func(string, controlAnswer)) []Event {
+func (m *claudeMapper) mapLine(line []byte, replies lineReplies) []Event {
 	var l claudeLine
 	if json.Unmarshal(line, &l) != nil {
 		return nil
@@ -544,7 +352,7 @@ func (m *claudeMapper) mapLine(line []byte, answer func(string, controlAnswer)) 
 	now := m.now().UnixMilli()
 	switch l.Type {
 	case "control_response":
-		answer(l.Response.RequestID, controlAnswer{ok: l.Response.Subtype == "success", err: l.Response.Error})
+		replies.answer(l.Response.RequestID, controlAnswer{ok: l.Response.Subtype == "success", err: l.Response.Error})
 	case "system":
 		switch l.Subtype {
 		case "init":
@@ -580,7 +388,7 @@ func (m *claudeMapper) mapLine(line []byte, answer func(string, controlAnswer)) 
 		}
 	case "result":
 		var out []Event
-		if b := m.finishBatch(now, true); b != nil {
+		if b := m.batches.finish(now, true); b != nil {
 			out = append(out, *b)
 		}
 		for _, mu := range l.ModelUsage {
@@ -633,17 +441,7 @@ func (m *claudeMapper) assistant(raw json.RawMessage, now int64) []Event {
 				out = append(out, Event{Live: &wslive.Event{Kind: wslive.KindReply, Text: b.Text, Final: true}})
 			}
 		case "tool_use":
-			if m.batch != nil && m.batch.messageID != msg.ID {
-				if ev := m.finishBatch(now, true); ev != nil {
-					out = append(out, *ev)
-				}
-			}
-			if m.batch == nil {
-				m.seq++
-				m.batch = &claudeBatch{messageID: msg.ID, seq: m.seq, startedAt: now}
-			}
-			m.batch.calls = append(m.batch.calls, &claudeCall{id: b.ID, name: b.Name, args: argsPreview(b.Input), startedAt: now})
-			out = append(out, m.batchEvent())
+			out = append(out, m.batches.addCall(msg.ID, b.ID, b.Name, argsPreview(b.Input), now)...)
 		}
 	}
 	return out
@@ -651,108 +449,20 @@ func (m *claudeMapper) assistant(raw json.RawMessage, now int64) []Event {
 
 func (m *claudeMapper) toolResults(raw json.RawMessage, now int64) []Event {
 	var msg claudeMessage
-	if m.batch == nil || json.Unmarshal(raw, &msg) != nil {
+	if json.Unmarshal(raw, &msg) != nil {
 		return nil
 	}
 	var blocks []claudeBlock
 	if json.Unmarshal(msg.Content, &blocks) != nil {
 		return nil
 	}
-	changed := false
+	var out []Event
 	for _, b := range blocks {
-		if b.Type != "tool_result" {
-			continue
-		}
-		for _, c := range m.batch.calls {
-			if c.id == b.ToolUseID && c.endedAt == 0 {
-				c.endedAt, c.failed, changed = now, b.IsError, true
-			}
+		if b.Type == "tool_result" {
+			out = append(out, m.batches.endCall(b.ToolUseID, b.IsError, now)...)
 		}
 	}
-	if !changed {
-		return nil
-	}
-	for _, c := range m.batch.calls {
-		if c.endedAt == 0 {
-			return []Event{m.batchEvent()}
-		}
-	}
-	if ev := m.finishBatch(now, false); ev != nil {
-		return []Event{*ev}
-	}
-	return nil
-}
-
-// finishBatch ends the current batch (unfinished calls fail when
-// cutShort) and returns its final event.
-func (m *claudeMapper) finishBatch(now int64, cutShort bool) *Event {
-	if m.batch == nil {
-		return nil
-	}
-	for _, c := range m.batch.calls {
-		if c.endedAt == 0 {
-			c.endedAt, c.failed = now, cutShort
-		}
-	}
-	ev := m.batchEvent()
-	m.batch = nil
-	return &ev
-}
-
-type wireBatch struct {
-	Epoch     string              `json:"epoch"`
-	Seq       int64               `json:"seq"`
-	ToolNames []string            `json:"toolNames"`
-	CallCount int                 `json:"callCount"`
-	Failed    int                 `json:"failed"`
-	StartedAt int64               `json:"startedAt"`
-	EndedAt   *int64              `json:"endedAt,omitempty"`
-	Running   *wslive.RunningView `json:"running,omitempty"`
-	Calls     []wireCall          `json:"calls,omitempty"`
-}
-
-type wireCall struct {
-	Name      string `json:"name"`
-	StartedAt int64  `json:"startedAt"`
-	EndedAt   int64  `json:"endedAt,omitempty"`
-	Failed    bool   `json:"failed,omitempty"`
-}
-
-// batchEvent is the lead's batch list holding the current batch: running
-// while a call is unfinished, else ended.
-func (m *claudeMapper) batchEvent() Event {
-	b := m.batch
-	w := wireBatch{Epoch: m.epoch, Seq: b.seq, ToolNames: []string{}, CallCount: len(b.calls), StartedAt: b.startedAt}
-	var running *claudeCall
-	done, open := 0, 0
-	var ended int64
-	for _, c := range b.calls {
-		if !contains(w.ToolNames, c.name) {
-			w.ToolNames = append(w.ToolNames, c.name)
-		}
-		w.Calls = append(w.Calls, wireCall{Name: c.name, StartedAt: c.startedAt, EndedAt: c.endedAt, Failed: c.failed})
-		switch {
-		case c.endedAt == 0:
-			open++
-			if running == nil {
-				running = c
-			}
-		default:
-			done++
-			if c.failed {
-				w.Failed++
-			}
-			ended = max(ended, c.endedAt)
-		}
-	}
-	if running != nil {
-		w.Calls = nil
-		w.Running = &wslive.RunningView{ToolName: running.name, ArgsPreview: running.args, StartedAt: running.startedAt, Done: done, OthersRunning: open - 1}
-	} else {
-		w.EndedAt = &ended
-	}
-	raw, _ := json.Marshal(w)
-	return Event{Live: &wslive.Event{Kind: wslive.KindAgent, Batches: []json.RawMessage{raw}}}
+	return out
 }
 
 func (m *claudeMapper) status() Event {
@@ -768,27 +478,4 @@ func (m *claudeMapper) status() Event {
 		}
 	}
 	return Event{Live: &ev}
-}
-
-// argsPreview is a tool call's arguments as one line: the first string
-// value of a small object, else the compact JSON.
-func argsPreview(raw json.RawMessage) string {
-	var obj map[string]any
-	if json.Unmarshal(raw, &obj) == nil {
-		for _, key := range []string{"command", "file_path", "path", "pattern", "url", "query", "description"} {
-			if s, ok := obj[key].(string); ok && s != "" {
-				return s
-			}
-		}
-	}
-	return string(raw)
-}
-
-func contains(list []string, s string) bool {
-	for _, have := range list {
-		if have == s {
-			return true
-		}
-	}
-	return false
 }

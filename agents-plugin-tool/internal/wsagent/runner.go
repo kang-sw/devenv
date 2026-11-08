@@ -41,6 +41,10 @@ const (
 	EnvNoDashboard = "WS_MCP_NO_DASHBOARD"
 )
 
+// mailboxIdentityEnv are the variables that give a ws-mcp process a mailbox
+// identity of its own; the attached ws-mcp gets them blank.
+var mailboxIdentityEnv = []string{"WS_MAILBOX", "WS_MAILBOX_AUTO"}
+
 // Options configures a Runner.
 type Options struct {
 	// Dir is the dashboard daemon's state directory; conversations live in
@@ -653,6 +657,11 @@ func (c *conv) startProcess() error {
 		}
 		env[EnvAllowedTools] = strings.Join(rp.Definition.WSTools, ",")
 		env[EnvNoDashboard] = "1"
+		// The daemon may inherit a lead's mailbox identity; the agent's
+		// ws-mcp must never claim that inbox's presence. Blank is inert.
+		for _, name := range mailboxIdentityEnv {
+			env[name] = ""
+		}
 		cmd.Env = env
 		spec.WSMCP = &cmd
 	}
