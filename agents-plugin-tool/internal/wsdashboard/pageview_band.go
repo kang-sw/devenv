@@ -10,10 +10,10 @@ import (
 )
 
 // The status band around the live page's composer: the context bar above the
-// message box, and the folder, branch, upstream standing, usage limits, and
-// cost on one line below it. The figures are the snapshot's usage (what the
-// host adapter last reported) and repo (what ws-mcp read); a part with no
-// figure is left out. Times stay epoch milliseconds: the page formats a
+// message box, and the folder, usage limits, and cost on one line below it.
+// The figures are the snapshot's usage (what the host adapter last reported)
+// and repo (what ws-mcp read; the band shows only its folder, since the git
+// handle shows the branch); a part with no figure is left out. Times stay epoch milliseconds: the page formats a
 // limit's reset and computes its pace, so the band's HTML changes only when
 // a figure does.
 
@@ -28,8 +28,9 @@ const (
 type BandView struct {
 	// Context is the context bar; nil without a context figure.
 	Context *ContextBar
-	// Repo is the session root's folder and branch; nil before ws-mcp's
-	// first read.
+	// Repo is the snapshot's repo figures; nil before ws-mcp's first read.
+	// The band shows its folder; the stream hands the rest to the git
+	// handle's follow.
 	Repo *wslive.Repo
 	// Limits are the usage limit chips, the 5-hour limit first.
 	Limits []LimitChip
@@ -38,7 +39,9 @@ type BandView struct {
 }
 
 // Empty reports a band with nothing to show below the composer.
-func (b BandView) Empty() bool { return b.Repo == nil && len(b.Limits) == 0 && b.Cost == "" }
+func (b BandView) Empty() bool {
+	return (b.Repo == nil || b.Repo.Folder == "") && len(b.Limits) == 0 && b.Cost == ""
+}
 
 // ContextBar is the context usage bar.
 type ContextBar struct {

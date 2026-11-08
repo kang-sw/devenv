@@ -60,39 +60,6 @@
 .host.sse.off .dot { box-shadow: 0 0 0 2px color-mix(in srgb, var(--wb-muted-fg) 20%, transparent); }
 .top:has(.host.sse) > #sse { display: none; }
 .dash.index .sse { margin-left: auto; }
-/* the git badge: a status band line in a button, read by the daemon */
-.r-git { display: contents; }
-/* .sb.gitb: the band's .sb rule (further down) would otherwise win padding and gap at equal specificity */
-.sb.gitb { display: inline-flex; flex-wrap: nowrap; align-items: center; gap: 8px; min-width: 0; height: 28px; padding: 0 10px; font-size: 12.5px; color: var(--wb-fg); background: var(--wb-card); box-shadow: inset 0 0 0 1px var(--wb-line); }
-.gitb:hover { box-shadow: inset 0 0 0 1px var(--wb-primary); }
-/* inside the badge the sync chip is plain text: the pill, ring, and inner padding of the band's chip would nest a second capsule at the badge's right end */
-.gitb .sb-sync, .gitb .sb-sync.ok, .gitb .sb-sync.none { height: auto; padding: 0; border-radius: 0; background: transparent; box-shadow: none; }
-.gitb.pending, .gitb.norepo, .gitb.failed { opacity: .6; }
-.gitb.pending .sb-br, .gitb.norepo .sb-br { color: var(--wb-muted-fg); font-family: inherit; font-weight: 600; }
-.gitb.failed .sb-br { color: var(--wb-warn-ink); font-family: inherit; }
-.gitb.busy { opacity: .5; cursor: progress; }
-/* the badge is a span holding buttons (the ahead count is one); its branch chip is the refresh button, plain like the band's chip */
-.gitb > .sb-br { background: transparent; border: 0; padding: 0; cursor: inherit; }
-.gitb > .sb-br:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: 3px; border-radius: 3px; }
-/* the ahead count where a push can go (badge and band): the count as it was, with a hover and focus mark */
-.gitpush { font: inherit; color: inherit; background: transparent; border: 0; padding: 1px 3px; margin: -1px -3px; border-radius: 4px; cursor: pointer; }
-.gitpush:hover, .gitpush:focus-visible, .gitpush[aria-expanded="true"] { background: color-mix(in srgb, var(--wb-primary) 16%, transparent); }
-.gitpush:focus-visible { outline: 1.5px solid var(--wb-primary); }
-/* the push popover, anchored by dashboard.js to the pressed count */
-.gitpop { position: fixed; z-index: 60; width: max-content; min-width: 220px; max-width: min(380px, calc(100vw - 16px)); background: var(--wb-card); color: var(--wb-fg); border-radius: 10px; box-shadow: var(--wb-shadow-hi); padding: 10px 12px; display: grid; gap: 8px; font-size: 13px; }
-.gitpop[hidden] { display: none; }
-.gp-ref { display: flex; align-items: center; gap: 6px; min-width: 0; font: 700 12px/1.3 var(--wb-mono); }
-.gp-ref b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.gp-br { color: var(--wb-primary); }
-.gp-to { color: var(--wb-muted-fg); flex: none; }
-.gp-n { color: var(--wb-muted-fg); font-size: 12.5px; }
-.gp-err { color: var(--wb-warn-ink); font-size: 12.5px; overflow-wrap: anywhere; }
-.gp-err[hidden] { display: none; }
-.gp-btns { display: flex; justify-content: flex-end; gap: 6px; }
-.gp-btns .btn { height: 26px; padding: 0 12px; }
-.gp-btns .btn:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: 1px; }
-.gitpop .gp-go { background: var(--wb-now); color: var(--wb-on-now); font-weight: 700; }
-.gitpop .gp-go:disabled { opacity: .6; cursor: progress; }
 .gearwrap { position: relative; }
 .gear { height: 28px; width: 32px; padding: 0; }
 .gear .i { width: 17px; height: 17px; }
@@ -363,7 +330,7 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .card.sent-held > .cbody > :not(.note), .arow.sent-held .why, .arow.sent-held input { opacity: .65; transition: opacity .15s; }
 .card:is(.sent-sent, .sent-held):focus-within > .cbody > *, .arow:is(.sent-sent, .sent-held):focus-within :is(.why, input) { opacity: 1; }
 /* status band: the context bar above the message box (ctx), the folder,
-   branch, upstream, usage limits, and cost below it (sline). An empty region
+   usage limits, and cost below it (sline). An empty region
    collapses. sline is a size container inside the composer's 10px padding:
    below a 360px band (340px of sline) only the usage limit under more
    pressure (.hi) stays. */
@@ -372,21 +339,9 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .sb { display: flex; align-items: center; flex-wrap: wrap; gap: 3px 12px; min-width: 0; font-size: 12.5px; line-height: 1.3; padding: 0 2px; }
 .sb .i { width: 13px; height: 13px; }
 .sb-top { flex-wrap: nowrap; padding-top: 2px; }
-.sb-dir, .sb-br { display: inline-flex; align-items: center; gap: 4px; min-width: 0; white-space: nowrap; }
-.sb-dir { font-weight: 800; }
-.sb-dir > span, .sb-br > span { overflow: hidden; text-overflow: ellipsis; }
+.sb-dir { display: inline-flex; align-items: center; gap: 4px; min-width: 0; white-space: nowrap; font-weight: 800; }
+.sb-dir > span { overflow: hidden; text-overflow: ellipsis; }
 .sb-dir .i { color: var(--wb-muted-fg); }
-.sb-br { font-family: var(--wb-mono); font-size: 12px; font-weight: 700; color: var(--wb-primary); }
-.sb-br > span { max-width: 22ch; }
-.sb-sync { display: inline-flex; align-items: center; gap: 6px; flex: none; height: 20px; padding: 0 8px; border-radius: 999px; background: var(--wb-muted); font: 700 11.5px/1 var(--wb-mono); white-space: nowrap; }
-.sb-sync .up { color: var(--wb-primary); }
-.sb-sync .dn { color: var(--wb-warn-ink); }
-.sb-sync.ok { color: var(--wb-ok); background: color-mix(in srgb, var(--wb-ok) 14%, var(--wb-card)); font-family: inherit; }
-.sb-sync.none { background: transparent; color: var(--wb-muted-fg); box-shadow: inset 0 0 0 1px var(--wb-muted-fg); font-family: inherit; font-weight: 600; }
-.sb-diff { display: inline-flex; align-items: center; gap: 6px; flex: none; font: 700 11.5px/1 var(--wb-mono); white-space: nowrap; }
-.sb-diff .add { color: var(--wb-ok); }
-.sb-diff .mod { color: var(--wb-warn-ink); }
-.sb-diff .unt { color: var(--wb-muted-fg); }
 .sb-tail { display: inline-flex; align-items: center; gap: 12px; margin-left: auto; flex: none; }
 .sb-use { flex: none; display: inline-flex; align-items: center; font-size: 12px; color: var(--wb-muted-fg); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .sb-use .u-pct { display: inline-flex; align-items: center; font-weight: 700; color: var(--wb-fg); border-radius: 5px; }
@@ -410,7 +365,7 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .sb-ctx.warn .sb-bar, .sb-ctx.crit .sb-bar { box-shadow: 0 0 0 2px color-mix(in srgb, var(--c) 28%, transparent); }
 .sb-tok, .sb-cache { flex: none; font: 600 11.5px/1 var(--wb-mono); color: var(--wb-muted-fg); white-space: nowrap; }
 .sb-flag { flex: none; font-size: 10.5px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: var(--c); box-shadow: inset 0 0 0 1px var(--c); border-radius: 4px; padding: 1px 5px; white-space: nowrap; }
-@container (max-width: 560px) { .sb-sync .sl { display: none; } .sb { column-gap: 9px; } .sb-foot .sb-tail { margin-left: 0; } }
+@container (max-width: 560px) { .sb { column-gap: 9px; } .sb-foot .sb-tail { margin-left: 0; } }
 @container (max-width: 340px) { .sb-use.both:not(.hi) { display: none; } }
 @media (max-width: 560px) { .sb-flag { display: none; } }
 .cnote { font-size: 11.5px; color: var(--wb-muted-fg); }
@@ -543,15 +498,89 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 /* an approval is waiting: an open drawer can cover the agents tree's row */
 .dr-handle.wait { background: color-mix(in srgb, var(--wb-ph-perm) 22%, var(--wb-card)); color: var(--wb-fg); }
 .dr-handle.wait .dr-wait { display: inline-flex; }
-/* the header keeps every line it wraps to clear of the closed handle and of
-   the tracker's handle row left of it (--tkhw, set by tracker.js, includes
-   its own 6px gap); tk-room marks a page the tracker mounted on */
+/* the git handle (the git region, gitbadge.go): left of the panels handle
+   (--ghr, set by the page script, is that handle's width and the gap), in its
+   shape: the branch abbreviated (a hammer for an impl branch, a gold trophy
+   for a goal one), the ahead and behind counts, and a dot for a dirty tree.
+   It rides the sheet's bottom edge while the frame shows the git sheet. */
+:root { --gh-gold: #b8860b; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --gh-gold: #e3b341; } }
+:root[data-theme="dark"] { --gh-gold: #e3b341; }
+.dr-in > .r-git { position: absolute; top: 0; right: calc(var(--dpad) + var(--ghr, 0px)); }
+.dr-in > .r-git:empty { display: none; }
+.drawer.anim .r-git { transition: top .18s ease-out; }
+.gh { position: relative; height: 34px; max-width: min(320px, 46vw); padding: 2px 10px 0; border: 0; border-radius: 0 0 8px 8px; pointer-events: auto; cursor: pointer; display: flex; align-items: center; gap: 6px; background: var(--wb-card); color: var(--wb-muted-fg); box-shadow: var(--wb-shadow-hi); font: inherit; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.gh:hover, .gh.open { color: var(--wb-fg); }
+.gh.open { box-shadow: inset 0 -2px 0 var(--wb-primary), var(--wb-shadow-hi); }
+.gh:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: -2px; }
+.gh .i { width: 15px; height: 15px; flex: none; }
+.gh-goal, .gh-impl { display: inline-flex; flex: none; }
+.gh-goal { color: var(--gh-gold); }
+.gh-impl { color: var(--wb-primary); }
+.gh-br { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-family: var(--wb-mono); color: var(--wb-fg); }
+.gh.pending .gh-br, .gh.failed .gh-br { font-family: inherit; color: var(--wb-muted-fg); }
+.gh.failed .gh-br { color: var(--wb-warn-ink); }
+.gh-ab { display: inline-flex; gap: 4px; flex: none; font: 700 11px/1 var(--wb-mono); }
+.gh-ab .up, .gpanel .gref .up { color: var(--wb-primary); }
+.gh-ab .dn, .gpanel .gref .dn { color: var(--wb-warn-ink); }
+.gh-dirty { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--wb-warn); }
+/* the git sheet (gitbody): a wide area kept for the commit graph, and the
+   action panel, its card filling the drawer's height and its file list
+   scrolling inside; one column on a narrow screen, the panel alone */
+.dr-body[hidden] { display: none; }
+.gbody { display: grid; grid-template-columns: minmax(0, 2fr) minmax(340px, 1fr); grid-template-rows: minmax(0, 1fr); }
+.gleft { display: flex; align-items: center; justify-content: center; border: 1px dashed var(--wb-muted-fg); border-radius: var(--wb-radius); opacity: .6; }
+.gnote { font-size: 12.5px; color: var(--wb-muted-fg); }
+.gpanel { min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); overflow: hidden; }
+.ghead { flex: none; display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 4px 8px 4px 12px; background: var(--wb-muted); font-size: 13px; }
+.ghead > .i { width: 14px; height: 14px; flex: none; color: var(--wb-muted-fg); }
+.gref { display: flex; align-items: center; gap: 6px; min-width: 0; font: 700 12px/1.3 var(--wb-mono); }
+.gref > * { flex: none; }
+.gref .gbr, .gref .gup { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gref .gto, .gref .gup, .gref .gnoup { color: var(--wb-muted-fg); }
+.gref .gnoup { font-family: inherit; font-weight: 600; }
+.gacts { flex: none; display: flex; gap: 6px; padding: 8px 12px 0; }
+.gact { height: 28px; padding: 0 12px; gap: 5px; font-size: 12.5px; }
+.gact .i { width: 14px; height: 14px; }
+.gact:disabled { opacity: .55; cursor: default; }
+.gact.busy { opacity: 1; cursor: progress; background: color-mix(in srgb, var(--wb-primary) 16%, var(--wb-muted)); }
+.gact:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: 1px; }
+.gmsg { flex: none; margin: 8px 12px 0; font-size: 12.5px; color: var(--wb-muted-fg); overflow-wrap: anywhere; }
+.gmsg.err { color: var(--wb-warn-ink); }
+.gmsg[hidden] { display: none; }
+.gfiles { flex: 1 1 0; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 8px 12px 10px; display: grid; align-content: start; gap: 8px; }
+.gsec { display: grid; gap: 1px; }
+.ggrp { display: flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 800; color: var(--wb-muted-fg); padding: 0 2px 2px; }
+.gf { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; align-items: center; column-gap: 8px; padding: 2px 4px; border-radius: 5px; font-size: 12.5px; }
+.gf:hover { background: var(--wb-muted); }
+.gst { font: 800 11.5px/1 var(--wb-mono); text-align: center; color: var(--wb-warn-ink); }
+.gst.st-A, .gst.st-q { color: var(--wb-ok); }
+.gst.st-D, .gst.st-U { color: var(--wb-fail); }
+.gp { display: flex; min-width: 0; font-family: var(--wb-mono); font-size: 12px; white-space: nowrap; }
+.gdir { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--wb-muted-fg); }
+.gname { flex: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.gd { display: inline-flex; gap: 6px; font: 700 11.5px/1 var(--wb-mono); white-space: nowrap; }
+.gd i { font-style: normal; }
+.gd .add { color: var(--wb-ok); }
+.gd .del { color: var(--wb-fail); }
+.gd .bin { color: var(--wb-muted-fg); font-weight: 600; }
+.gempty { font-size: 12.5px; color: var(--wb-muted-fg); }
+.gempty.err { color: var(--wb-warn-ink); }
+@media (max-width: 759px) {
+  .gbody { grid-template-columns: minmax(0, 1fr); }
+  .gleft { display: none; }
+}
+/* the header keeps every line it wraps to clear of the closed handles and of
+   the tracker's handle row left of them (--drhw covers both handles; --tkhw,
+   set by tracker.js, includes its own 6px gap); tk-room marks a page the
+   tracker mounted on */
 .dwrap > .top.dr-room, .dwrap > .top.tk-room { padding-right: calc(var(--drhw) + var(--tkhw, 0px) + 6px); }
 /* the header's fixed items sit left after the title */
 .dwrap > .top .counts { margin-left: 0; }
 @media (max-width: 640px) {
   :root { --dpad: 10px; }
   .dr-handle { padding: 2px 7px 0; gap: 5px; }
+  .gh { padding: 2px 7px 0; gap: 5px; max-width: 42vw; }
 }
 
 /* ===== tracker (tracker.js, mounted by dashboard.js) =====

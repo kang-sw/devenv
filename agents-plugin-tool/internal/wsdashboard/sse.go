@@ -104,7 +104,7 @@ func (d *Daemon) handleSessionEvents(w http.ResponseWriter, r *http.Request, rep
 		http.Error(w, "unknown session", http.StatusNotFound)
 		return
 	}
-	// The stream is the page's presence: the git badge's root is read while
+	// The stream is the page's presence: the git handle's root is read while
 	// some stream watches it.
 	if d.git != nil && first.Project != "" {
 		release := d.git.watch(first.Project)
@@ -117,8 +117,8 @@ func (d *Daemon) handleSessionEvents(w http.ResponseWriter, r *http.Request, rep
 		}
 		view.Lang, view.Theme = lang, theme
 		view.Git = d.git.badge(view.Project)
-		// The band's repo figures come from the session's live snapshot;
-		// the badge reads again when they changed (follow).
+		// The snapshot's repo figures come from the session's ws-mcp;
+		// the handle reads again when they changed (follow).
 		if view.Band.Repo != nil {
 			d.git.follow(view.Project, replyID, *view.Band.Repo)
 		}

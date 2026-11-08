@@ -83,9 +83,9 @@ type DaemonOptions struct {
 	// openSystem replaces the system-open route's OS open command, so a
 	// test never starts a browser; nil runs systemOpen.
 	openSystem func(target string) error
-	// gitRead replaces the git badge's read, so a test never runs git; nil
-	// runs readGitBadge. noGitBadge turns the badge off: no read and no
-	// badge, for the tests that pin which regions a stream sends.
+	// gitRead replaces the git handle's read, so a test never runs git; nil
+	// runs readGitBadge. noGitBadge turns the handle off: no read and no
+	// handle, for the tests that pin which regions a stream sends.
 	gitRead    func(root string) GitBadge
 	noGitBadge bool
 }
@@ -129,13 +129,13 @@ type Daemon struct {
 	buildTime int64
 	// openSystem opens a system-open route's target (systemOpen).
 	openSystem func(target string) error
-	// git reads the git badge of the roots open session pages show
-	// (gitbadge.go); nil when the badge is off.
+	// git reads the git handle of the roots open session pages show
+	// (gitbadge.go); nil when the handle is off.
 	git *gitWatcher
-	// pushing holds the roots a push runs in (gitpush.go), one at a time
-	// per root; pushMu guards it.
-	pushMu  sync.Mutex
-	pushing map[string]bool
+	// gitActing holds the roots a git drawer action runs in (gitpush.go),
+	// one at a time per root; gitActMu guards it.
+	gitActMu  sync.Mutex
+	gitActing map[string]bool
 	// worktrees reads worktree pools, nil without the routes; sizes
 	// measures their worktrees' disk use (worktrees.go).
 	worktrees WorktreeSource
@@ -403,8 +403,10 @@ func (d *Daemon) Close() {
 // routes (inbox_routes.go) and, with a tracker host, the tracker POST routes
 // (tracker_routes.go) are the only browser writes, and its system-open
 // route (sysopen_route.go) the only route that runs a host command beside
-// git: a session stream keeps its root's git badge read, and the git route
-// (gitbadge.go) asks for a read at once, without running git itself.
+// git: a session stream keeps its root's git handle read, the git route
+// (gitbadge.go) asks for a read at once without running git itself, the git
+// status route (gitdrawer.go) reads the root's changed files, and the git
+// drawer's push, pull, and fetch routes (gitpush.go) are browser writes too.
 func (d *Daemon) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", d.handleHealth)

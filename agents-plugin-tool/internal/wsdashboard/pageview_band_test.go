@@ -73,51 +73,30 @@ func TestBandContextStates(t *testing.T) {
 	}
 }
 
-// TestBandRepoStates pins the line's git parts: no upstream, in sync, ahead
-// and behind (the ahead count the push popover's button), ahead only, a
-// detached HEAD (no sync chip), and a root that is not a repository (the
-// folder alone). They show with no usage figures at
-// all, since ws-mcp reads them itself.
-func TestBandRepoStates(t *testing.T) {
-	_, sline := bandRegions(t, nil, &wslive.Repo{Folder: "devenv", Branch: "topic/band"})
-	contains(t, "no upstream", sline, `<span>devenv</span>`, `<span>topic/band</span>`, `class="sb-sync none"`, "no upstream")
-	lacks(t, "no upstream", sline, "sb-tail", "gitpush")
-
-	_, sline = bandRegions(t, nil, &wslive.Repo{Folder: "devenv", Branch: "develop", Upstream: "origin/develop"})
-	contains(t, "in sync", sline, `class="sb-sync ok"`, "synced", "in sync with origin/develop")
-	lacks(t, "in sync", sline, "no upstream", `class="up`, `class="dn"`, "gitpush")
-
-	_, sline = bandRegions(t, nil, &wslive.Repo{Folder: "devenv", Branch: "develop", Upstream: "origin/develop", Ahead: 2, Behind: 1})
-	contains(t, "ahead and behind", sline, `<button type="button" class="up gitpush" data-br="develop" data-up="origin/develop" data-n="2 commits to push" aria-haspopup="dialog" title="push to origin/develop…">↑2</button>`, `<span class="dn">↓1</span>`, "2 to push", "1 to pull")
-	lacks(t, "ahead and behind", sline, "synced")
-
-	_, sline = bandRegions(t, nil, &wslive.Repo{Folder: "devenv", Branch: "develop", Upstream: "origin/develop", Ahead: 3})
-	contains(t, "ahead only", sline, `class="up gitpush"`, `data-n="3 commits to push"`, `>↑3</button>`)
-	lacks(t, "ahead only", sline, `class="dn"`)
-
-	_, sline = bandRegions(t, nil, &wslive.Repo{Folder: "devenv", Branch: "1a2b3c4", Detached: true})
-	contains(t, "detached", sline, "detached HEAD at 1a2b3c4")
-	lacks(t, "detached", sline, "sb-sync", "gitpush")
-
-	_, sline = bandRegions(t, nil, &wslive.Repo{Folder: "scratch"})
-	contains(t, "not a repository", sline, `<span>scratch</span>`)
-	lacks(t, "not a repository", sline, "sb-br", "sb-sync")
-
-	// The working-tree chip: each non-zero count with its glyph and a title
-	// spelling the counts; a clean tree shows no chip.
-	_, sline = bandRegions(t, nil, &wslive.Repo{Folder: "d", Branch: "b", Upstream: "origin/b", Modified: 3, Staged: 1, Untracked: 2})
-	contains(t, "dirty chip", sline, `class="sb-diff"`, `<b class="mod">~3</b>`, `<b class="add">+1</b>`, `<b class="unt">?2</b>`, "working tree: 3 modified 1 staged 2 untracked")
-	_, sline = bandRegions(t, nil, &wslive.Repo{Folder: "d", Branch: "b", Untracked: 4})
-	contains(t, "untracked only", sline, `<b class="unt">?4</b>`, "working tree: 4 untracked")
-	lacks(t, "untracked only", sline, `class="mod"`, `class="add"`)
-	_, sline = bandRegions(t, nil, &wslive.Repo{Folder: "d", Branch: "1a2b3c4", Detached: true, Modified: 1})
-	contains(t, "detached dirty", sline, `<b class="mod">~1</b>`)
-	_, sline = bandRegions(t, nil, &wslive.Repo{Folder: "d", Branch: "b", Upstream: "origin/b"})
-	lacks(t, "clean tree", sline, "sb-diff")
-
-	// Branch names reach the page escaped.
-	_, sline = bandRegions(t, nil, &wslive.Repo{Folder: "d", Branch: "<b>x"})
-	contains(t, "escaped branch", sline, "&lt;b&gt;x")
+// TestBandShowsOnlyTheFolder pins the line's repo part: the folder alone,
+// whatever branch, upstream standing, and working-tree figures the snapshot
+// brings (the git handle shows those), and no line for repo figures without
+// a folder. It shows with no usage figures at all, since ws-mcp reads it
+// itself.
+func TestBandShowsOnlyTheFolder(t *testing.T) {
+	for _, repo := range []*wslive.Repo{
+		{Folder: "devenv", Branch: "topic/band"},
+		{Folder: "devenv", Branch: "develop", Upstream: "origin/develop", Ahead: 2, Behind: 1, Modified: 3, Staged: 1, Untracked: 2},
+		{Folder: "devenv", Branch: "1a2b3c4", Detached: true},
+		{Folder: "devenv"},
+	} {
+		_, sline := bandRegions(t, nil, repo)
+		contains(t, "repo "+repo.Branch, sline, `class="sb-dir" title="folder: devenv"`, `<span>devenv</span>`)
+		lacks(t, "repo "+repo.Branch, sline, "sb-br", "sb-sync", "sb-diff", "gitpush", "#i-branch", "sb-tail")
+		if repo.Branch != "" && strings.Contains(sline, repo.Branch) {
+			t.Errorf("the band shows the branch %q: %s", repo.Branch, sline)
+		}
+	}
+	if _, sline := bandRegions(t, nil, &wslive.Repo{Branch: "main"}); sline != "" {
+		t.Errorf("repo figures without a folder rendered %q", sline)
+	}
+	_, sline := bandRegions(t, nil, &wslive.Repo{Folder: "<b>d"})
+	contains(t, "escaped folder", sline, "&lt;b&gt;d")
 }
 
 // TestBandLimitAndCostChips pins the line's tail: the 5-hour chip first and
