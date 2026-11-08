@@ -50,6 +50,7 @@
 //
 // Tracker caches one clone's events, refreshes them through the Events
 // cursor, and writes through Dispatch, which refuses an event that would be
-// flagged instead of appending it. Open opens a wsledger store with Veto,
-// the protocol hook that flags removing a member who still leads someone.
+// flagged instead of appending it. Open, Create, Join, and Register open a
+// wsledger store with Veto, the protocol hook that flags removing a member
+// who still leads someone; a caller never opens a store without it.
 package wstracker

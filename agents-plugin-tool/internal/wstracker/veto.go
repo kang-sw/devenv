@@ -33,7 +33,8 @@ func (s *state) leadsNobody(target string) rejection {
 // roles.set_lead events the domain applies in the removal's causal past.
 //
 // wsledger.VetoFunc receives no genesis, and genesis leads cannot be
-// derived from the past events alone, hence the constructor. Open sets it.
+// derived from the past events alone, hence the constructor. Open, Create,
+// Join, and Register set it.
 func Veto(genesis json.RawMessage) wsledger.VetoFunc {
 	return func(ev wsledger.Event, past []wsledger.Event) error {
 		if ev.Type != wsledger.TypeRemoveMember {
@@ -54,12 +55,36 @@ func Veto(genesis json.RawMessage) wsledger.VetoFunc {
 // Open opens an existing wsledger store with Veto set on its options (and
 // any veto the caller set run after it). The veto needs the genesis, which
 // only an open store reads, so the store is opened once without it to read
-// the genesis and then again with it. Create and Join write no removal, so a
-// caller creates or joins, closes, and opens through here.
+// the genesis and then again with it.
 func Open(ctx context.Context, opts wsledger.Options) (*wsledger.Ledger, error) {
+	return withVeto(ctx, opts, func(o wsledger.Options) (*wsledger.Ledger, error) { return wsledger.Open(ctx, o) })
+}
+
+// Create makes a new store with no remote (wsledger.Create) and returns it
+// reopened with the Veto hook installed, as Open does.
+func Create(ctx context.Context, opts wsledger.Options) (*wsledger.Ledger, error) {
+	return withVeto(ctx, opts, func(o wsledger.Options) (*wsledger.Ledger, error) { return wsledger.Create(ctx, o) })
+}
+
+// Join joins the store in opts.Dir as a new member (wsledger.Join) and
+// returns it reopened with the Veto hook installed, as Open does.
+func Join(ctx context.Context, opts wsledger.Options) (*wsledger.Ledger, error) {
+	return withVeto(ctx, opts, func(o wsledger.Options) (*wsledger.Ledger, error) { return wsledger.Join(ctx, o) })
+}
+
+// Register creates or joins the store at url (wsledger.Register) and
+// returns it reopened with the Veto hook installed, as Open does.
+func Register(ctx context.Context, opts wsledger.Options, url string) (*wsledger.Ledger, error) {
+	return withVeto(ctx, opts, func(o wsledger.Options) (*wsledger.Ledger, error) { return wsledger.Register(ctx, o, url) })
+}
+
+// withVeto runs first (Open, or a constructor that writes no removal)
+// without the veto to learn the genesis, closes it, and opens the store
+// again with Veto installed.
+func withVeto(ctx context.Context, opts wsledger.Options, first func(wsledger.Options) (*wsledger.Ledger, error)) (*wsledger.Ledger, error) {
 	probe := opts
 	probe.Veto = nil
-	l, err := wsledger.Open(ctx, probe)
+	l, err := first(probe)
 	if err != nil {
 		return nil, err
 	}
