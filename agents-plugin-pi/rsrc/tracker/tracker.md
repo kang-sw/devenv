@@ -6,8 +6,11 @@ kind: print
 
 The tracker holds the user's tasks, todos, and topics in the stores the user
 registered on this machine: personal stores, and team stores shared through a
-git repository. Only a top-level lead calls the tracker tools; workers and
-subagents report progress to their lead.
+git repository. Only a top-level lead and a store's support conversation call
+the tracker tools; workers and subagents report progress to their lead. A
+support conversation writes to its own store alone, and only what the user
+asks for in its chat: the unasked recording below is a lead's, and
+`tk:register` and `tk:sync` are refused to it.
 
 ## Calls
 

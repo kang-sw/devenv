@@ -716,7 +716,10 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			if isWhiteboardTool(params.Name) && !entry.isTopLevelLead() {
 				return errorResponse(req.ID, -32601, whiteboardLeadOnlyDenial(params.Name))
 			}
-			if isTrackerTool(params.Name) && !entry.isTopLevelLead() {
+			// A store's support conversation passes like a top-level lead for
+			// the tracker tools its profile names (its writes are pinned to its
+			// store in handleTrackerUpdate); tracker.show is its own.
+			if (isTrackerTool(params.Name) || params.Name == trackerShowTool) && !entry.isTopLevelLead() && !s.trackerSupportAdmits(keyStr, entry, params.Name) {
 				return errorResponse(req.ID, -32601, trackerLeadOnlyDenial(params.Name))
 			}
 			if entry.isTopLevelLead() {
@@ -1678,6 +1681,8 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		return s.handleWhiteboardQuery(req.ID, params.Arguments)
 	case "tracker.update":
 		return s.handleTrackerUpdate(ctx, req.ID, params.Arguments)
+	case trackerShowTool:
+		return s.handleTrackerShow(ctx, req.ID, params.Arguments)
 	case "tracker.query":
 		return s.handleTrackerQuery(ctx, req.ID, params.Arguments)
 	case "tickets.query":
@@ -2126,8 +2131,9 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			return toolTextResponse(req.ID, "", err)
 		}
 		// The tracker section is never a spawned key's (as workflow_manual
-		// renders it); its tools refuse that key.
-		if entry, found := s.sessions.lookup(keyStr); found && !entry.isTopLevelLead() {
+		// renders it); its tools refuse that key, except a store's support
+		// conversation, which the tracker gate admits.
+		if entry, found := s.sessions.lookup(keyStr); found && trackerOn && !entry.isTopLevelLead() && !s.trackerSupportReadsTracker(keyStr, entry) {
 			trackerOn = false
 		}
 		body, err = applyKnobVariants(s, rsrcRoot, name, body, whiteboardOn, trackerOn)
@@ -4867,7 +4873,7 @@ func tools() []map[string]any {
 			// with a pointer to their playbook, and a string command batch
 			// for the same \u-escape reason.
 			"name":        "tracker.update",
-			"description": "Lead-only. Read the `tracker` playbook (ws/playbook.read) before first use; it defines the commands.",
+			"description": "For a top-level lead, or a store's support conversation, whose writes go to its own store only. Read the `tracker` playbook (ws/playbook.read) before first use; it defines the commands.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -4879,7 +4885,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "tracker.query",
-			"description": "Lead-only, read-only. Read the `tracker` playbook (ws/playbook.read) before first use; it defines the payload.",
+			"description": "Read-only; for a top-level lead, or a store's support conversation. Read the `tracker` playbook (ws/playbook.read) before first use; it defines the payload.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -4888,6 +4894,18 @@ func tools() []map[string]any {
 					"format":      stringProperty("\"json\" for the store's whole view state; text when omitted."),
 				},
 				"required": []string{"session_key"},
+			},
+		},
+		{
+			"name":        trackerShowTool,
+			"description": "Show one item of your store as a card in your store's chat; the user can open it. For a store's support conversation only. An item of another store comes back as text, with no card.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's ws session key."),
+					"item":        stringProperty("The item's ID as tracker.query prints it, such as maya.pc-5."),
+				},
+				"required": []string{"session_key", "item"},
 			},
 		},
 		{
@@ -5310,6 +5328,9 @@ func LeadToolNames() []string {
 		if NoAgentMode() && noAgentHiddenTool(name) {
 			continue
 		}
+		if hiddenUnlessAllowlisted(name) && !explicitAllowedTools()[name] {
+			continue
+		}
 		if name != "" {
 			names = append(names, name)
 		}
@@ -5358,7 +5379,7 @@ func (s *Server) toolAllowed(name string) bool {
 	if allowed := explicitAllowedTools(); len(allowed) > 0 {
 		return allowed[name]
 	}
-	return true
+	return !hiddenUnlessAllowlisted(name)
 }
 
 // isNoteMutationTool reports whether name changes note state every session

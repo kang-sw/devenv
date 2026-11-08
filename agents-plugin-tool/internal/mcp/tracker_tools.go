@@ -43,22 +43,41 @@ func trackerLeadOnlyDenial(name string) string {
 }
 
 // trackerSessionKey returns the caller's session key when it names a
-// top-level lead. The call gate refuses a spawned key only when it finds the
-// key, so a key the store cannot find (made up, stale, expired) would pass
-// it; this refuses one before any registry read or write.
-func (s *Server) trackerSessionKey(tool string, args map[string]any) (string, error) {
+// top-level lead, or a store's support conversation whose profile names
+// tool; for the latter it also returns the conversation's scope, whose
+// store pins its writes. The call gate refuses a spawned key only when it
+// finds the key, so a key the store cannot find (made up, stale, expired)
+// would pass it; this refuses one before any registry read or write.
+func (s *Server) trackerSessionKey(tool string, args map[string]any) (string, *trackerSupportScope, error) {
 	key, err := sessionStateKey(tool, args)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	entry, found := s.sessions.lookup(key)
 	if !found {
-		return "", mailboxUnknownSessionError(tool)
+		return "", nil, mailboxUnknownSessionError(tool)
 	}
-	if !entry.isTopLevelLead() {
-		return "", errors.New(trackerLeadOnlyDenial(tool))
+	if entry.isTopLevelLead() {
+		return key, nil, nil
 	}
-	return key, nil
+	if scope, ok := s.trackerSupport(key, entry); ok && scope.tools[tool] {
+		return key, &scope, nil
+	}
+	return "", nil, errors.New(trackerLeadOnlyDenial(tool))
+}
+
+// supportPinProblems records what a support conversation's batch may not
+// do: reach the network (register or sync), or write to a store other than
+// the conversation's own.
+func supportPinProblems(p *wsxmlcmd.Problems, b *trackerBatch, store string) {
+	if b.network != nil {
+		p.Add("%s: a store's support conversation cannot register or sync a store; the user does that from the tracker drawer", b.network.Label())
+	}
+	for _, ev := range b.events {
+		if other, ok := ev.cmd.Attr("store"); ok && other != store {
+			p.Add("%s: %q; this conversation writes to its own store %q only, and every other store is read-only here", ev.cmd.At("store"), other, store)
+		}
+	}
 }
 
 // trackerOrigins are the origins a tracker.update write may carry: every
@@ -565,7 +584,7 @@ func (b *trackerBatch) newEvents(next wsledger.EventID) ([]wsledger.NewEvent, er
 
 func (s *Server) handleTrackerUpdate(ctx context.Context, id json.RawMessage, args map[string]any) response {
 	const tool = "tracker.update"
-	key, err := s.trackerSessionKey(tool, args)
+	key, support, err := s.trackerSessionKey(tool, args)
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
@@ -589,6 +608,9 @@ func (s *Server) handleTrackerUpdate(ctx context.Context, id json.RawMessage, ar
 	}
 	var problems wsxmlcmd.Problems
 	b := planTrackerBatch(&problems, commands, registered)
+	if support != nil {
+		supportPinProblems(&problems, b, support.store)
+	}
 	if len(problems.List) > 0 {
 		return toolErrorTextResponse(id, s.trackerRefusal(tool, problems.List))
 	}
@@ -837,7 +859,7 @@ type trackerStoreSummary struct {
 
 func (s *Server) handleTrackerQuery(ctx context.Context, id json.RawMessage, args map[string]any) response {
 	const tool = "tracker.query"
-	key, err := s.trackerSessionKey(tool, args)
+	key, _, err := s.trackerSessionKey(tool, args)
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
