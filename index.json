@@ -557,7 +557,14 @@
       "registered_at": "2026-09-24T10:38:33Z"
     },
     "260917-bug-ticket-close-checker-result-heading-level-drift": {
-      "registered_at": "2026-09-24T10:38:33Z"
+      "registered_at": "2026-09-24T10:38:33Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "delegate/idea-triage-close",
+        "phase": "closed",
+        "touched_at": "2026-11-08T08:05:52Z"
+      }
     },
     "260917-bug-windows-smoke-servestdio-exit-timing-flake": {
       "registered_at": "2026-09-24T10:38:33Z"
