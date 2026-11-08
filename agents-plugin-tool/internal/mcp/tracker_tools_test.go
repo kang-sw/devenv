@@ -499,27 +499,6 @@ func TestTrackerPlaybookReadAppendsCommandSyntax(t *testing.T) {
 	}
 }
 
-func TestTrackerRedactsRemoteCredentials(t *testing.T) {
-	for in, want := range map[string]string{
-		"https://x-access-token:ghp_secret@github.com/o/r.git": "https://***@github.com/o/r.git",
-		"fatal: could not read from HTTP://tok@host/r":         "fatal: could not read from HTTP://***@host/r",
-		"git@github.com:o/r.git":                               "git@github.com:o/r.git",
-		"ssh://git@github.com/o/r.git":                         "ssh://git@github.com/o/r.git",
-		"https://github.com/o/r.git":                           "https://github.com/o/r.git",
-	} {
-		if got := redactRemoteCredentials(in); got != want {
-			t.Fatalf("redact(%q) = %q, want %q", in, got, want)
-		}
-	}
-	remote := "https://tok@example.com/r.git"
-	v := &wstrackerhost.StoreView{View: &wstracker.View{}, Store: wstrackerhost.StoreInfo{Name: "s", Remote: &remote}}
-	v.Sync.Error = "push to https://tok@example.com/r.git failed"
-	redactStoreView(v)
-	if strings.Contains(*v.Store.Remote+v.Sync.Error, "tok") || remote != "https://tok@example.com/r.git" {
-		t.Fatalf("the view's remote and error must be redacted without touching the entry: %q %q", *v.Store.Remote, v.Sync.Error)
-	}
-}
-
 func TestParseTrackerID(t *testing.T) {
 	for in, want := range map[string]string{
 		"maya.pc-5":       "maya.pc#5",

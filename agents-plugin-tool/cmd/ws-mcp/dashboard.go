@@ -90,7 +90,7 @@ func startTrackerPoll(logw io.Writer) (stop func()) {
 		fmt.Fprintf(logw, "ws-mcp dashboard: tracker poll not started: %v\n", err)
 		return func() {}
 	}
-	stopPoll := h.StartPoll(wstrackerhost.DefaultPollInterval)
+	stopPoll := h.StartPoll(wstrackerhost.DefaultPollInterval, nil)
 	return func() {
 		stopPoll()
 		_ = h.Close()

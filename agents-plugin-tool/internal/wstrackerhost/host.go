@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -59,6 +61,10 @@ type Host struct {
 	mu     sync.Mutex
 	stores map[string]*store
 	closed bool
+
+	// seenMu serializes this process's reads and writes of the stores'
+	// ui-seen.json files (seen.go).
+	seenMu sync.Mutex
 }
 
 // store is one registered store as this process holds it. mu serializes
@@ -399,6 +405,69 @@ func (h *Host) DispatchWith(ctx context.Context, id string, build func(next wsle
 		return err
 	})
 	return ids, err
+}
+
+// DispatchBatch is DispatchWith over events whose payloads may name an
+// earlier event of the same batch: in an event's item, parent, comment, or
+// reply_to field, the string "$N" (N >= 1, the 1-based position of an
+// earlier event) is replaced by the id that event gets. The ids come from
+// the store's next id under the write lock, so a browser never computes
+// one. A "$..." string that names no earlier event is an error naming the
+// event and field, and nothing is written. Every other field, and a
+// payload that is not a JSON object, passes through untouched.
+func (h *Host) DispatchBatch(ctx context.Context, id string, events []wsledger.NewEvent) ([]wsledger.EventID, error) {
+	return h.DispatchWith(ctx, id, func(next wsledger.EventID) ([]wsledger.NewEvent, error) {
+		out := make([]wsledger.NewEvent, len(events))
+		for i, ev := range events {
+			payload, err := resolveBatchRefs(ev.Payload, i, next)
+			if err != nil {
+				return nil, err
+			}
+			ev.Payload = payload
+			out[i] = ev
+		}
+		return out, nil
+	})
+}
+
+// batchRefFields are the payload fields that may hold a "$N" reference.
+var batchRefFields = []string{"item", "parent", "comment", "reply_to"}
+
+// resolveBatchRefs resolves the "$N" references of the payload of the
+// event at 0-based index i; next is the id the batch's first event gets.
+// It returns payload itself when nothing needed resolving.
+func resolveBatchRefs(payload json.RawMessage, i int, next wsledger.EventID) (json.RawMessage, error) {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(payload, &fields) != nil || fields == nil {
+		return payload, nil // not an object: it has no reference field
+	}
+	changed := false
+	for _, field := range batchRefFields {
+		raw, ok := fields[field]
+		if !ok {
+			continue
+		}
+		var ref string
+		if json.Unmarshal(raw, &ref) != nil || !strings.HasPrefix(ref, "$") {
+			continue
+		}
+		n, err := strconv.Atoi(ref[1:])
+		if err != nil || ref[1:] != strconv.Itoa(n) || n < 1 || n >= i+1 {
+			return nil, fmt.Errorf("tracker: event %d field %q: %q is not a reference to an earlier event of the batch", i+1, field, ref)
+		}
+		target := next
+		target.Seq += n - 1
+		resolved, err := json.Marshal(target.String())
+		if err != nil {
+			return nil, err
+		}
+		fields[field] = resolved
+		changed = true
+	}
+	if !changed {
+		return payload, nil
+	}
+	return json.Marshal(fields)
 }
 
 // View returns store id's view state at the host's now, with the

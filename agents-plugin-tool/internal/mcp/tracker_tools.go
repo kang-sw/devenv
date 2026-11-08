@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -599,7 +598,7 @@ func (s *Server) handleTrackerUpdate(ctx context.Context, id json.RawMessage, ar
 		}
 	}
 	if err != nil {
-		return toolTextResponse(id, "", fmt.Errorf("%s: %s", tool, redactRemoteCredentials(err.Error())))
+		return toolTextResponse(id, "", fmt.Errorf("%s: %s", tool, wstrackerhost.RedactCredentials(err.Error())))
 	}
 	return toolTextResponse(id, s.trackerSucceeded(key, text), nil)
 }
@@ -645,7 +644,7 @@ func trackerRegisterCommand(ctx context.Context, h *wstrackerhost.Host, cmd wsxm
 	}
 	where := "no remote"
 	if res.Entry.Remote != "" {
-		where = "remote " + redactRemoteCredentials(res.Entry.Remote)
+		where = "remote " + wstrackerhost.RedactCredentials(res.Entry.Remote)
 	}
 	return fmt.Sprintf("registered %s: %s, member %s, %s\nprofile: %s\n", res.Entry.ID, how, res.Entry.Member, where, formatTrackerProfile(res.Profile)), nil
 }
@@ -668,7 +667,7 @@ func trackerSyncCommand(ctx context.Context, h *wstrackerhost.Host, cmd wsxmlcmd
 		rep, err := h.Sync(ctx, store)
 		if err != nil {
 			failed++
-			fmt.Fprintf(&sb, "%s: failed: %s\n", store, redactRemoteCredentials(err.Error()))
+			fmt.Fprintf(&sb, "%s: failed: %s\n", store, wstrackerhost.RedactCredentials(err.Error()))
 			continue
 		}
 		fmt.Fprintf(&sb, "%s: %s\n", store, formatTrackerSyncReport(rep))
@@ -860,13 +859,13 @@ func (s *Server) handleTrackerQuery(ctx context.Context, id json.RawMessage, arg
 		return toolErrorTextResponse(id, s.trackerRefusal(tool, []string{fmt.Sprintf("payload.store: %q is not a registered store (%s)", q.store, reason)}))
 	}
 	if err := h.PreRead(ctx, q.store); err != nil {
-		return toolTextResponse(id, "", fmt.Errorf("%s: %s", tool, redactRemoteCredentials(err.Error())))
+		return toolTextResponse(id, "", fmt.Errorf("%s: %s", tool, wstrackerhost.RedactCredentials(err.Error())))
 	}
 	v, err := h.View(ctx, q.store, 0)
 	if err != nil {
-		return toolTextResponse(id, "", fmt.Errorf("%s: %s", tool, redactRemoteCredentials(err.Error())))
+		return toolTextResponse(id, "", fmt.Errorf("%s: %s", tool, wstrackerhost.RedactCredentials(err.Error())))
 	}
-	redactStoreView(v)
+	v.Redact()
 	switch {
 	case q.json:
 		resp := toolJSONResponse(id, v, nil)
@@ -942,25 +941,6 @@ func trackerManualSection(s *Server, rsrcRoot string) (string, error) {
 	return strings.TrimRight(sb.String(), "\n"), nil
 }
 
-// remoteCredentials matches the userinfo of an http(s) URL, where a token
-// or password sits; an ssh user (git@host) carries none.
-var remoteCredentials = regexp.MustCompile(`(?i)(https?://)[^/@\s]+@`)
-
-// redactRemoteCredentials hides the userinfo of every http(s) URL in s, so
-// a token in a store's remote URL never reaches the agent's context.
-func redactRemoteCredentials(s string) string {
-	return remoteCredentials.ReplaceAllString(s, "${1}***@")
-}
-
-// redactStoreView redacts the view's remote URL and sync error in place.
-func redactStoreView(v *wstrackerhost.StoreView) {
-	if v.Store.Remote != nil {
-		r := redactRemoteCredentials(*v.Store.Remote)
-		v.Store.Remote = &r
-	}
-	v.Sync.Error = redactRemoteCredentials(v.Sync.Error)
-}
-
 // trackerStoreListJSON is the store list's format json shape.
 func trackerStoreListJSON(summaries []trackerStoreSummary, profiles wstrackerhost.SavedProfiles) map[string]any {
 	stores := make([]map[string]any, 0, len(summaries))
@@ -968,14 +948,14 @@ func trackerStoreListJSON(summaries []trackerStoreSummary, profiles wstrackerhos
 		e := sum.Entry
 		row := map[string]any{"id": e.ID, "label": e.DisplayLabel(), "member": e.Member, "remote": nil}
 		if e.Remote != "" {
-			row["remote"] = redactRemoteCredentials(e.Remote)
+			row["remote"] = wstrackerhost.RedactCredentials(e.Remote)
 		}
 		if sum.View != nil {
-			redactStoreView(sum.View)
+			sum.View.Redact()
 			row["sync"] = sum.View.Sync
 			row["today"] = sum.View.My.Today
 		} else if sum.Err != nil {
-			row["error"] = redactRemoteCredentials(sum.Err.Error())
+			row["error"] = wstrackerhost.RedactCredentials(sum.Err.Error())
 		}
 		stores = append(stores, row)
 	}
@@ -1000,10 +980,10 @@ func formatTrackerStoreList(summaries []trackerStoreSummary, profiles wstrackerh
 		}
 		fmt.Fprintf(&sb, ", member %s", e.Member)
 		if sum.View == nil {
-			fmt.Fprintf(&sb, ", unreadable: %s\n", redactRemoteCredentials(fmt.Sprint(sum.Err)))
+			fmt.Fprintf(&sb, ", unreadable: %s\n", wstrackerhost.RedactCredentials(fmt.Sprint(sum.Err)))
 			continue
 		}
-		redactStoreView(sum.View)
+		sum.View.Redact()
 		fmt.Fprintf(&sb, ", %s\n", formatTrackerSyncLine(sum.View))
 		t := sum.View.My.Today
 		fmt.Fprintf(&sb, "  my work %d, to answer %d, to confirm %d\n", len(t.Work), len(t.Pending), len(t.Confirms))
