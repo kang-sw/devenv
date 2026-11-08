@@ -261,7 +261,7 @@ func TestMarkdownPickedChipShowsFirstLine(t *testing.T) {
 	st.Items = []Item{{ID: 1, Class: ClassPolicy, Topic: "t", Title: "q", Options: []string{"**Keep** it\n- detail\n```go\nx\n```", "other"},
 		Status: StatusAnswered, Answer: "a", AnswerQuote: "q", Settled: 1}}
 	out := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
-	wantAll(t, out, `<span class="pick" title="picked"><span class="k">a</span><strong>Keep</strong> it</span>`)
+	wantAll(t, out, `<span class="pick" title="picked"><span class="k">a</span><span class="pt"><strong>Keep</strong> it</span></span>`)
 	wantNone(t, out, "<li>detail", "<pre>")
 }
 

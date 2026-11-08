@@ -453,7 +453,7 @@ func TestRenderPagePolicyOptionsAndPicks(t *testing.T) {
 		`<span class="opt static rec picked"><span class="k">b`,
 		`<button class="btn mini" data-v="ok" aria-pressed="false" title="confirm">`,
 		// a settled policy item shows its picked option
-		`<span class="pick" title="picked"><span class="k">a</span>ai-docs/whiteboards/</span>`,
+		`<span class="pick" title="picked"><span class="k">a</span><span class="pt">ai-docs/whiteboards/</span></span>`,
 		`<input type="checkbox" data-id="78">`,
 	} {
 		if !strings.Contains(out, want) {
@@ -463,6 +463,22 @@ func TestRenderPagePolicyOptionsAndPicks(t *testing.T) {
 	// one note button per waiting item: (77), (78), (73), (76), (80), (79)
 	if got := strings.Count(out, `<button class="btn mini note-toggle" title="note">`); got != 6 {
 		t.Errorf("%d note buttons, want one per waiting item (6)", got)
+	}
+}
+
+// A settled row's picked-option chip is a flex row; inline code and an item
+// link in the option must stay inside one text item, not become flex items of
+// their own that wrap into narrow columns.
+func TestRenderPagePickedChipKeepsInlineMarkupInOneTextItem(t *testing.T) {
+	st := &State{Counter: 9, Seq: 3, SettleSeq: 5, Items: []Item{
+		{ID: 1, Class: ClassTechnical, Topic: "t", Title: "rules", Status: StatusAnswered, Answer: "ok", Settled: 1, Changed: 2},
+		{ID: 2, Class: ClassPolicy, Topic: "t", Title: "tools", Options: []string{"two `tracker.query` tools per {{1}} rule", "b"},
+			Status: StatusAnswered, Answer: "a", Settled: 2, Changed: 2},
+	}}
+	out := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
+	want := `<span class="pick" title="picked"><span class="k">a</span><span class="pt">two <code>tracker.query</code> tools per <a href="#item-1">`
+	if !strings.Contains(out, want) {
+		t.Errorf("picked chip lacks one text container around inline markup, want %q", want)
 	}
 }
 
