@@ -191,7 +191,9 @@ a { color: var(--wb-primary); }
 .opt .k { font-family: var(--wb-mono); font-weight: 800; color: var(--wb-accent-policy); display: inline-flex; align-items: flex-start; }
 .opt .k .i { width: 8px; height: 8px; margin: 1px 0 0 1px; }
 /* selected: neon outline over the same quiet fill, not a fill swap */
-.opt[aria-pressed="true"], .opt[aria-pressed="true"]:hover, .opt.picked, .pick { box-shadow: 0 0 0 1.5px var(--wb-accent-policy), 0 0 10px 1px color-mix(in srgb, var(--wb-accent-policy) 55%, transparent); font-weight: 600; }
+.opt[aria-pressed="true"], .opt[aria-pressed="true"]:hover, .opt.picked { box-shadow: 0 0 0 1.5px var(--wb-accent-policy), 0 0 10px 1px color-mix(in srgb, var(--wb-accent-policy) 55%, transparent); font-weight: 600; }
+/* settled-row pick chip: the same choice, quieter; a thin faint ring and no glow, so a finished item reads as done. Assumed items await confirmation and keep the strong .opt.picked above. */
+.pick { box-shadow: 0 0 0 1px color-mix(in srgb, var(--wb-accent-policy) 40%, transparent); font-weight: 500; }
 .opt.static { cursor: default; }
 .opt.static:not(.picked) { box-shadow: none; opacity: .75; }
 .opt.static:hover { background: var(--wb-opt); }
@@ -209,6 +211,8 @@ a { color: var(--wb-primary); }
 .opts + .read { margin-top: 8px; }
 .quote { color: var(--wb-muted-fg); font-size: 12.5px; }
 .pick { display: inline-flex; gap: 5px; align-items: baseline; background: var(--wb-opt); border-radius: 6px; padding: 0 7px; font-size: 12.5px; margin: 0 2px; }
+/* the chip is a flex row of letter and text: the text is one item, so code spans and links stay inline in it */
+.pick .pt { min-width: 0; }
 .pick .k { font-family: var(--wb-mono); font-weight: 800; color: var(--wb-accent-policy); }
 .links { display: flex; flex-wrap: wrap; gap: 2px 12px; margin: 0 0 8px; font-size: 12.5px; color: var(--wb-muted-fg); overflow-wrap: anywhere; }
 .links .i { width: 12px; height: 12px; display: inline-block; vertical-align: -1px; margin-right: 3px; }

@@ -478,10 +478,19 @@ func TestWhiteboardRefusalsCarryProblemsAndGrammar(t *testing.T) {
 		// The rsrc renderer substitutes only {{.Name}} placeholders, so the
 		// item-reference example survives rendering.
 		"`supersedes {{12}}`",
+		// The shared syntax rules ride along, so one retry can fix quoting,
+		// CDATA, and stray text too.
+		"## Command syntax",
+		"`<![CDATA[...]]>`",
+		"so a value holding `\"` is quoted with `'`",
+		"Text between commands or between a command's fields, an unknown tag, and an unknown attribute are refused.",
 	} {
-		if !strings.Contains(text, want) {
+		if !strings.Contains(collapseSpace(text), want) {
 			t.Fatalf("update refusal missing %q:\n%s", want, text)
 		}
+	}
+	if strings.Index(text, "## Command syntax") > strings.Index(text, "## Commands") || strings.Count(text, "## Command syntax") != 1 {
+		t.Fatalf("the update refusal must carry the syntax section once, ahead of the Commands section:\n%s", text)
 	}
 	if strings.Contains(text, "## Query") {
 		t.Fatalf("the update refusal must repeat the Commands section only:\n%s", text)
@@ -495,7 +504,7 @@ func TestWhiteboardRefusalsCarryProblemsAndGrammar(t *testing.T) {
 	if !isToolError(resp) || !strings.Contains(text, "payload.status: must be one of") {
 		t.Fatalf("query refusal must carry the problem: %s", text)
 	}
-	if !strings.Contains(text, "## Query") || !strings.Contains(text, "whiteboard.query payload:") || strings.Contains(text, "## Commands") {
+	if !strings.Contains(text, "## Query") || !strings.Contains(text, "whiteboard.query payload:") || strings.Contains(text, "## Commands") || strings.Contains(text, "## Command syntax") {
 		t.Fatalf("query refusal must repeat the Query section and not the Commands section: %s", text)
 	}
 }
@@ -1116,8 +1125,31 @@ func TestWhiteboardWorkflowTextFollowsKnob(t *testing.T) {
 	if strings.Contains(manualOn, lineDiscussionNoCounter) || strings.Contains(manualOn, "\n# Whiteboard") {
 		t.Fatalf("knob on: the counter rule must be replaced and the playbook title dropped")
 	}
-	if injected := toolText(t, f.call(t, "workflow_manual", map[string]any{})); !strings.Contains(injected, "### Whiteboard") || !strings.Contains(injected, "#### Commands") {
+	injected := toolText(t, f.call(t, "workflow_manual", map[string]any{}))
+	if !strings.Contains(injected, "### Whiteboard") || !strings.Contains(injected, "#### Commands") {
 		t.Fatalf("knob on: the workflow_manual tool must carry the whiteboard section too")
+	}
+	// The shared command syntax renders exactly once, ahead of the tools'
+	// sections, and only while a command-language tool is on.
+	syntaxHeadings := func(text string) int {
+		n := 0
+		for _, line := range strings.Split(text, "\n") {
+			if strings.HasSuffix(line, "# Command syntax") {
+				n++
+			}
+		}
+		return n
+	}
+	if n := syntaxHeadings(manualOff); n != 0 || strings.Contains(manualOff, "`commands` is one string") {
+		t.Fatalf("knob off: the manual must carry no command syntax section (%d headings)", n)
+	}
+	for name, text := range map[string]string{"playbook.read": manualOn, "workflow_manual": injected} {
+		if n := syntaxHeadings(text); n != 1 || strings.Count(text, "`commands` is one string of flat commands.") != 1 {
+			t.Fatalf("knob on, %s: the command syntax section must appear exactly once, found %d", name, n)
+		}
+		if !strings.Contains(text, "\n### Command syntax\n") || strings.Index(text, "### Command syntax") > strings.Index(text, "### Whiteboard") {
+			t.Fatalf("knob on, %s: the syntax section must sit at ### ahead of the whiteboard section", name)
+		}
 	}
 	capture := withNamespace(whiteboardCaptureLine)
 	discussOn := read("lead-discuss")
@@ -1161,6 +1193,20 @@ func TestWhiteboardPlaybookStatesPointerAndEmbedDirWithoutNamingAHost(t *testing
 		if strings.Contains(lower, host) {
 			t.Fatalf("the whiteboard playbook must name no host, found %q", host)
 		}
+	}
+}
+
+// The whiteboard playbook read alone states the whole input format: it ends
+// with the shared command syntax section, which is no playbook of its own.
+func TestWhiteboardPlaybookReadAppendsCommandSyntax(t *testing.T) {
+	f := newWhiteboardFixture(t)
+	text := toolText(t, f.call(t, "playbook.read", map[string]any{"name": "whiteboard"}))
+	if strings.Count(text, "## Command syntax") != 1 || strings.Index(text, "## Command syntax") < strings.Index(text, "## Answers") ||
+		!strings.Contains(text, "`commands` is one string of flat commands.") {
+		t.Fatalf("the whiteboard playbook must end with the command syntax section once:\n%s", text)
+	}
+	if resp := f.call(t, "playbook.read", map[string]any{"name": "command-syntax"}); !isToolError(resp) && !strings.Contains(toolText(t, resp), "not found") {
+		t.Fatalf("the command syntax part must not read as a playbook: %s", toolText(t, resp))
 	}
 }
 

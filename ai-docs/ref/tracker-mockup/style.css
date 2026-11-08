@@ -416,7 +416,7 @@ details.data details > summary { cursor: pointer; font-size: 12px; color: var(--
 /* ===== item window (366): one centred window over a dimmed backdrop ===== */
 .iwin-back { position: fixed; inset: 0; z-index: 70; background: var(--backdrop); display: flex; align-items: center; justify-content: center; padding: 3vh 12px; }
 .iwin-back[hidden] { display: none; }
-.iwin { width: min(860px, 100%); max-height: 94vh; display: flex; flex-direction: column; background: var(--bg); border-radius: var(--radius); box-shadow: var(--shadow-hi); overflow: hidden; }
+.iwin { container: iw / inline-size; width: min(1040px, 100%); max-height: 94vh; display: flex; flex-direction: column; background: var(--bg); border-radius: var(--radius); box-shadow: var(--shadow-hi); overflow: hidden; }
 .iwin:focus { outline: none; }
 .iwin-in { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 0 18px; display: flex; flex-direction: column; gap: 10px; }
 .iw-top { position: sticky; top: 0; z-index: 2; margin: 0 -18px; padding: 14px 18px 10px; background: var(--bg); box-shadow: 0 1px 0 var(--line); display: flex; flex-direction: column; gap: 6px; }
@@ -424,21 +424,10 @@ details.data details > summary { cursor: pointer; font-size: 12px; color: var(--
 .iw-head .sti { margin-top: 3px; }
 .iw-head h2 { margin: 0; font-size: 18px; line-height: 1.3; flex: 1; overflow-wrap: anywhere; }
 .iw-chips { display: flex; gap: 5px; align-items: center; flex-wrap: wrap; }
-.iw-meta { display: grid; grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr); gap: 4px 12px; margin: 0; font-size: 12.5px; }
-.iw-meta dt { color: var(--muted-fg); }
-.iw-meta dd { margin: 0; overflow-wrap: anywhere; }
-.iw-meta .av { margin-left: 0; width: 18px; height: 18px; font-size: 8.5px; vertical-align: -4px; }
-@media (max-width: 640px) { .iw-meta { grid-template-columns: auto minmax(0, 1fr); } }
 .sh-actions .btn .i { width: 13px; height: 13px; }
 .iwin h3 { margin: 4px 0 0; font-size: 12px; font-weight: 800; color: var(--muted-fg); text-transform: uppercase; letter-spacing: .04em; }
 .sh-body { white-space: pre-wrap; background: var(--card); border-radius: 10px; padding: 8px 10px; box-shadow: var(--shadow); font-size: 13px; }
 .sh-actions { display: flex; gap: 6px; flex-wrap: wrap; }
-.atable { width: 100%; border-collapse: collapse; font-size: 12.5px; background: var(--card); border-radius: 10px; box-shadow: var(--shadow); overflow: hidden; }
-.atable th { text-align: left; font-size: 11px; color: var(--muted-fg); background: var(--muted); padding: 3px 8px; }
-.atable td { padding: 5px 8px; border-top: 1px solid var(--muted); vertical-align: top; }
-.stree { list-style: none; margin: 0; padding: 0; font-size: 12.5px; background: var(--card); border-radius: 10px; box-shadow: var(--shadow); padding: 4px 10px; }
-.stree ul { list-style: none; margin: 0 0 0 10px; padding-left: 8px; border-left: 2px solid var(--muted); }
-.stree li > div { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; padding: 3px 0; }
 .timeline { list-style: none; margin: 0; padding: 4px 10px; background: var(--card); border-radius: 10px; box-shadow: var(--shadow); }
 .timeline .ev { padding: 6px 0 6px 12px; border-left: 2px solid var(--muted); margin-left: 4px; position: relative; }
 .timeline .ev::before { content: ""; position: absolute; left: -5px; top: 11px; width: 8px; height: 8px; border-radius: 50%; background: var(--muted-fg); }
@@ -457,9 +446,6 @@ details.data details > summary { cursor: pointer; font-size: 12px; color: var(--
 .quote { font-size: 12px; color: var(--muted-fg); border-left: 3px solid var(--line); padding: 1px 8px; margin: 0 0 3px; }
 .hiddenc { font-size: 12px; font-style: italic; color: var(--muted-fg); }
 .hiddenc summary { cursor: pointer; font-style: normal; }
-.atable tr.gone td { opacity: .55; }
-.atable .tb { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 3px; }
-.stree > div { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; padding: 3px 0; cursor: pointer; }
 .composer2 { position: sticky; bottom: 0; margin: 4px -18px 0; padding: 8px 18px 14px; background: var(--bg); box-shadow: 0 -4px 10px rgb(0 0 0 / .06); display: flex; flex-direction: column; gap: 6px; }
 .composer2 .quick { display: flex; gap: 5px; align-items: center; flex-wrap: wrap; font-size: 12px; }
 .composer2 .replying { font-size: 12px; background: var(--muted); border-radius: 8px; padding: 3px 8px; }
@@ -582,12 +568,61 @@ details.unpushed summary { cursor: pointer; color: var(--warn); }
 .fx-mark { box-shadow: inset 3px 0 0 var(--primary); border-radius: 3px; }
 .timeline .cmt.fx-mark { box-shadow: none; border-left: 3px solid var(--primary); margin-left: 3px; }
 .timeline .cmt.fx-mark::before { left: -6px; }
-.iw-meta dd.fx-mark { padding-left: 6px; }
-.hold.fx-mark { padding: 0 4px 0 6px; }
-.atable tr.fx-mark { box-shadow: none; }
-.atable tr.fx-mark > td:first-child { box-shadow: inset 3px 0 0 var(--primary); }
-.chip.att.fx-mark { box-shadow: inset 0 0 0 1.5px var(--primary); }
+.pcard dd.fx-mark { padding-left: 6px; }
+.arow.fx-mark { border-radius: 0; }
 .fx-flash { animation: fx-flash 1.8s ease-out; }
-.atable tr.fx-flash > td { animation: fx-flash 1.8s ease-out; }
+.chip.att.fx-mark { box-shadow: inset 0 0 0 1.5px var(--primary); }
 @keyframes fx-flash { 0%, 35% { background-color: color-mix(in srgb, var(--primary) 26%, transparent); } 100% { background-color: transparent; } }
-@media (prefers-reduced-motion: reduce) { .fx-flash, .atable tr.fx-flash > td { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .fx-flash { animation: none; } }
+
+/* (424)-(427) The item window: a header over two columns (main: body, subtasks, thread, composer;
+   side: the property card and the assignees), one column below 820px of window width. In one
+   column the wrappers dissolve and `order` sets header -> properties -> body -> subtasks ->
+   assignees -> thread -> composer. */
+.iw-grid { display: flex; flex-direction: column; gap: 10px; flex: 1 0 auto; }
+.iw-main, .iw-side { display: contents; }
+.pcard { order: 1; } .iw-body { order: 2; } .iw-sub { order: 3; } .iw-asg { order: 4; } .iw-thread { order: 5; } .iw-main > .composer2 { order: 6; }
+.iw-crumb { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted-fg); min-width: 0; overflow: hidden; white-space: nowrap; }
+.iw-crumb a { color: var(--muted-fg); text-decoration: none; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.iw-crumb a:hover, .iw-crumb a:focus-visible { color: var(--primary); text-decoration: underline; }
+.iw-body { display: flex; flex-direction: column; gap: 4px; }
+.iwin h3 .cnt { font-weight: 600; letter-spacing: 0; margin-left: 4px; }
+.iwin h3.prom { display: flex; align-items: center; gap: 6px; margin: 2px 0 0; font-size: 14px; color: var(--fg); text-transform: none; letter-spacing: 0; }
+.iw-sub, .iw-thread, .iw-asg { display: flex; flex-direction: column; gap: 6px; }
+.pcard { background: color-mix(in srgb, var(--muted) 55%, var(--card)); border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 12px 10px; min-width: 0; }
+.pcard h3 { margin: 0 0 6px; }
+.pcard dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 5px 12px; margin: 0; font-size: 12.5px; }
+.pcard dt { color: var(--muted-fg); }
+.pcard dd { margin: 0; overflow-wrap: anywhere; }
+.srows { background: var(--card); border-radius: 10px; box-shadow: var(--shadow); padding: 2px 10px; }
+.srow { display: flex; gap: 8px; align-items: center; padding: 6px 0; font-size: 13px; cursor: pointer; }
+.srow + .srow { border-top: 1px solid var(--muted); }
+.srow .title { font-weight: 600; color: var(--fg); text-decoration: none; overflow-wrap: anywhere; }
+.srow:hover .title, .srow .title:focus-visible { color: var(--primary); text-decoration: underline; }
+.srow.gone { opacity: .6; }
+.srow .who { width: auto; }
+.a-common { font-size: 12px; margin: -2px 0 0; }
+.alist { list-style: none; margin: 0; padding: 0; background: var(--card); border-radius: 10px; box-shadow: var(--shadow); font-size: 12.5px; overflow: hidden; }
+.alist.folded .arow.more { display: none; }
+.arow { padding: 6px 10px; display: flex; flex-direction: column; gap: 2px; }
+.arow + .arow { border-top: 1px solid var(--muted); }
+.arow.gone { opacity: .6; }
+.arow.fx-mark { box-shadow: inset 3px 0 0 var(--primary); }
+.arow.fx-flash { animation: fx-flash 1.8s ease-out; }
+.ar-main { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.ar-main .av { margin-left: 0; width: 18px; height: 18px; font-size: 8.5px; }
+.ar-name { font-weight: 700; flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.ar-st { flex: none; display: inline-flex; gap: 4px; align-items: center; }
+.ar-note, .ar-diff { padding-left: 24px; overflow-wrap: anywhere; }
+.arow .tb { display: flex; gap: 4px; flex-wrap: wrap; margin: 2px 0 0 24px; }
+.a-fold { display: flex; }
+@container iw (min-width: 520px) and (max-width: 819px) {
+  .pcard dl { grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr); }
+}
+@container iw (min-width: 820px) {
+  .iw-grid { display: grid; grid-template-columns: minmax(0, 1fr) 292px; gap: 12px 18px; align-items: start; }
+  .iw-main, .iw-side { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+  .iw-main { align-self: stretch; }
+  .iw-main > .composer2 { margin: auto 0 0 -18px; padding: 8px 8px 14px 18px; }
+}
+.iw-side { padding-bottom: 14px; }

@@ -27,11 +27,13 @@ import (
 
 // Lead-authored item text renders as markdown: titles and ack-row reasons
 // inline only, options, rationale, and recommendations as blocks. goldmark's
-// output reaches the page template as trusted HTML, so this file is the whole
-// escaping boundary on that text: neither the block nor the inline pipeline
-// has an HTML parser, so a tag the lead types is escaped text (html.WithUnsafe
-// stays off as the backstop), and every link, autolink, and image destination
-// goes through resolveTarget's allow-list. The raw pipeline passes HTML
+// output reaches the page template as trusted HTML, so this file and
+// inline_tags.go are the whole escaping boundary on that text: neither the
+// block nor the inline pipeline has an HTML parser, so a tag the lead types
+// is escaped text unless it is one of inline_tags.go's allowlisted tags on
+// a board page, which become markdown nodes with no attribute (html.WithUnsafe
+// stays off as the backstop), and every link, autolink, and image destination goes
+// through resolveTarget's allow-list. The raw pipeline passes HTML
 // through and serves two callers only: topic bodies, written as is, and a
 // finished lead reply, which sanitize.go filters afterwards.
 
@@ -83,10 +85,14 @@ func newMarkdown(p *pageData) *markdown {
 	// Inline only: the paragraph is the one block parser, so list markers,
 	// headings, fences, and quotes stay literal text, and no paragraph
 	// transformer turns a "[x]: y" title into a link definition.
-	inlineParser := parser.NewParser(
+	inlineOptions := []parser.Option{
 		parser.WithBlockParsers(util.Prioritized(parser.NewParagraphParser(), 100)),
-		parser.WithInlineParsers(inlineParsers(refs, false)...),
-	)
+		parser.WithInlineParsers(inlineParsers(refs, false, !p.noInlineTags)...),
+	}
+	if !p.noInlineTags {
+		inlineOptions = append(inlineOptions, parser.WithASTTransformers(util.Prioritized(inlineTagTransformer{}, 100)))
+	}
+	inlineParser := parser.NewParser(inlineOptions...)
 	inline := goldmark.New(
 		goldmark.WithParser(inlineParser),
 		goldmark.WithRendererOptions(
@@ -99,7 +105,8 @@ func newMarkdown(p *pageData) *markdown {
 // blockMarkdown is the block pipeline with hard-wrapped lines. Without
 // rawHTML it has goldmark's default block parsers minus the HTML block parser,
 // which would also let a line starting with a tag swallow the markdown after
-// it up to the next blank line. With rawHTML that parser, the raw HTML inline
+// it up to the next blank line, and reads the allowlisted inline tags unless
+// the page sets noInlineTags. With rawHTML that parser, the raw HTML inline
 // parser, and html.WithUnsafe are on, so typed HTML is written as is.
 func blockMarkdown(p *pageData, refs util.PrioritizedValue, rawHTML bool) goldmark.Markdown {
 	blocks := []util.PrioritizedValue{
@@ -117,16 +124,20 @@ func blockMarkdown(p *pageData, refs util.PrioritizedValue, rawHTML bool) goldma
 		html.WithHardWraps(),
 		renderer.WithNodeRenderers(util.Prioritized(&mdRenderer{page: p}, 100)),
 	}
+	inlineTags := !rawHTML && !p.noInlineTags
+	parserOptions := []parser.Option{
+		parser.WithInlineParsers(inlineParsers(refs, rawHTML, inlineTags)...),
+		parser.WithParagraphTransformers(parser.DefaultParagraphTransformers()...),
+	}
 	if rawHTML {
 		blocks = append(blocks, util.Prioritized(parser.NewHTMLBlockParser(), 900))
 		options = append(options, html.WithUnsafe())
 	}
+	if inlineTags {
+		parserOptions = append(parserOptions, parser.WithASTTransformers(util.Prioritized(inlineTagTransformer{}, 100)))
+	}
 	return goldmark.New(
-		goldmark.WithParser(parser.NewParser(
-			parser.WithBlockParsers(blocks...),
-			parser.WithInlineParsers(inlineParsers(refs, rawHTML)...),
-			parser.WithParagraphTransformers(parser.DefaultParagraphTransformers()...),
-		)),
+		goldmark.WithParser(parser.NewParser(append(parserOptions, parser.WithBlockParsers(blocks...))...)),
 		goldmark.WithExtensions(
 			extension.Table, extension.Strikethrough, extension.TaskList,
 			extension.NewFootnote(extension.WithFootnoteIDPrefixFunction(func(ast.Node) []byte {
@@ -137,9 +148,10 @@ func blockMarkdown(p *pageData, refs util.PrioritizedValue, rawHTML bool) goldma
 	)
 }
 
-// inlineParsers is goldmark's default inline set, the raw HTML parser only
-// with rawHTML, plus refs.
-func inlineParsers(refs util.PrioritizedValue, rawHTML bool) []util.PrioritizedValue {
+// inlineParsers is goldmark's default inline set plus refs, with the raw
+// HTML parser when rawHTML and the allowlisted inline tags (inline_tags.go)
+// when inlineTags.
+func inlineParsers(refs util.PrioritizedValue, rawHTML, inlineTags bool) []util.PrioritizedValue {
 	list := []util.PrioritizedValue{
 		util.Prioritized(parser.NewCodeSpanParser(), 100),
 		util.Prioritized(parser.NewLinkParser(), 200),
@@ -149,6 +161,9 @@ func inlineParsers(refs util.PrioritizedValue, rawHTML bool) []util.PrioritizedV
 	}
 	if rawHTML {
 		list = append(list, util.Prioritized(parser.NewRawHTMLParser(), 400))
+	}
+	if inlineTags {
+		list = append(list, util.Prioritized(inlineTagParser{}, 400))
 	}
 	return list
 }
@@ -468,6 +483,9 @@ func (r *mdRenderer) RegisterFuncs(reg renderer.NodeRendererFuncRegisterer) {
 	reg.Register(ast.KindFencedCodeBlock, r.fencedCode)
 	reg.Register(kindItemRef, r.itemRef)
 	reg.Register(kindChange, renderChange)
+	reg.Register(kindInlineTag, renderInlineTag)
+	reg.Register(kindInlineBreak, renderInlineBreak)
+	reg.Register(kindKbd, renderKbd)
 }
 
 // paragraph drops the <p> wrapper around a document's only paragraph, and

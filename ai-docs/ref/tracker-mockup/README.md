@@ -283,16 +283,44 @@ build, no server, no dependencies.
   moves into the window and returns to the row or entry that opened it; the
   page behind is inert. One window at a time: opening another item (a subtask
   link inside the window) replaces it. It replaces the thread side sheet and
-  holds what the sheet and the row detail overlay held: the title with the
-  status icon, kind, id, status, priority, due, roll-up, holders, the
-  assignment path (lead chain), creator, project, parent, dates, the body with
-  mentions and attachments, and the row's actions as labelled buttons
-  followed by the item actions a row does not carry (Edit, Assign, Split,
-  Hide item; an admin also gets Edit / Hide on a removed creator's item;
-  Discuss focuses the composer). The assignees table shows each holder's
-  state, source, completion mode, and note, with the per-assignee actions the
-  action bar does not already offer (Reopen, Unassign, *Hand off (admin)* on
-  any member's live assignment). Then the subtask threads. Below that comes one chronological timeline of comments (quote
+  holds what the sheet and the row detail overlay held. **Layout** (424)-(427):
+  a header over two columns. The header (full width, sticky) carries the
+  parent breadcrumb (every ancestor, root first, each a link; none on a root
+  item), the title with the status icon, the chips (kind, id, status,
+  priority, due, roll-up), and the row's actions as labelled buttons followed
+  by the item actions a row does not carry (Edit, Assign, Split, Hide item; an
+  admin also gets Edit / Hide on a removed creator's item; Discuss focuses the
+  composer). Under it the **main column** holds the body with mentions and
+  attachments, the **Subtasks** section, and the thread with the composer; the
+  narrow **side column** holds the **property card** and **Assignees**. Below
+  820px of window width (the window, by a container query, not the page) it
+  falls back to one column in the order header -> property card -> body ->
+  Subtasks -> Assignees -> thread -> composer (the composer stays pinned at the
+  window's bottom). Status, subtasks, and the thread are the prominent parts:
+  their headings are larger, and the properties sit in a tinted, bordered card
+  apart from the body.
+  - *Property card* (424): status, kind, holders, path (the assignment path:
+    the authors down the parent chain, when longer than one), due, creator, project, parent link, id, dates.
+    Holders is one summary line, not the list: the count, then each live status
+    other than todo with its count, then pending ("13 · doing 3 · done 1").
+  - *Assignees* (425): at most 4 rows, then an "N more" toggle that expands the
+    rest (local UI state, reset when another item opens). Order: lead-chain
+    depth ascending (a root's follower is depth 1; the highest in the
+    hierarchy first), then live before ended, then display name, then
+    assignment order. What at least two rows share (the provenance text, for
+    example "from Ada Park (forced: their lead chain)", and the close rule
+    "assignee closes") is written once under the heading; a row shows the
+    person (avatar, org, name), the state chip, and the note, plus only what
+    differs from the shared text (for example "(inherited: everyone within L2,
+    reached later)"), and the per-assignee actions the action bar does not
+    already offer (Reopen, Unassign, *Hand off (admin)* on any member's live
+    assignment). A single row has nothing to share and shows its own text.
+  - *Subtasks* (427): the item's direct children, one row each: status icon,
+    title (opens that item, so the window walks down; the breadcrumb walks up),
+    the child's own roll-up when it has children, and holder avatars; a done
+    child is greyed. Absent when the item has none. Nested levels are reached by
+    opening the child, not drawn inline.
+  The thread is one chronological timeline of comments (quote
   reply, edit, hide), status changes, assignments and answers, edits, agent
   records with `agent` / `auto` chips, subtask lines, flagged and waiting
   events with their reason, amber "concurrent change" boxes, and quiet
@@ -315,8 +343,9 @@ build, no server, no dependencies.
   event it is about, and clicking it opens the window scrolled to and marking
   that target, found by the event's type: a comment or mention -> that
   comment; a status, close, confirm, reject, or reopen -> that assignee's
-  entry on the holders line; an assignment or handoff -> the holders line; an
-  accept -> the accepter's entry there; a decline or return -> the assignees
+  row in Assignees (the fold expands when the row is among the hidden ones); an
+  assignment or handoff -> the holders line of the property card; an
+  accept -> the accepter's row; a decline or return -> the assignees
   row that ended; a body edit (or a mention in the body) -> the body; an
   edit that only adds an attachment -> its chip. The target flashes briefly
   and keeps a thin left mark while the window stays open; with no target
@@ -669,6 +698,15 @@ page clock starts at 2026-11-06 09:00. The fixtures show:
 - reject (`maya.pc-12`), reopen (`maya.pc-18`), and unassign (`maya.pc-15`)
 - pia's blocked "Cache layer" raising "blocked below" on `raj.pc-1` and
   `ada.pc-1`
+- hierarchy of mixed depth (427): `ada.pc-1` > `maya.pc-1` > `maya.pc-5` /
+  `maya.pc-7` (depth 3), `raj.pc-1` > `raj.pc-7`; and, appended after the
+  other streams' events, `raj.pc-11` "Infra capacity plan" (assigned to tia,
+  doing) with three subtasks (`raj.pc-13` doing, `raj.pc-15` todo with its own
+  blocked subtask `sven.pc-6`, `raj.pc-17` done) and `ada.pc-16` "Refresh
+  onboarding docs" (uma, doing) with one child (`ada.pc-18`, bo); childless
+  tasks (`raj.pc-20` "Renew TLS certificates", "Security training", "Benchmark
+  harness" and others) sit among them. None of it touches maya's chips or
+  notifications.
 - pia, added later, inheriting ada's live "Security training, everyone within
   L2"
 - jon-k1 revoked by `bo.pc-6` after seeing jon up to seq 5. `jon.pc-6`, signed
@@ -841,7 +879,11 @@ creation, and it has a topic and a blocked subtask.
 | 386 b | Done items leave the main list and appear in a greyed, expanded-by-default "recently closed N" section at the bottom of the Items list, covering the last 14 days (by the done assignment's last write, `lastUpdate`; no field added); older ones through search. Its open state is local UI state per store. Kanban keeps its done column; the timelines keep ended items, muted. |
 | 387 a | The tree stays a tree: closed children among open siblings fold into one expandable "closed N" row under their parent; a closed parent with open descendants stays, greyed; a closed parent whose whole subtree is closed moves as one unit to *recently closed*; the parent's roll-up stays. |
 | 389 | The Items panel, the tab pane, and layout D's Notifications column always span the drawer's height whatever their content (a short list no longer leaves a short card above empty drawer); long content scrolls inside each. The drag-set drawer height of (382) a stays. |
-| 390 | Clicking a notification opens the item window and scrolls to and highlights what it refers to, found through the event id it carries (comment or mention -> the comment, with a brief flash and a thin left mark; status, close, or confirm -> the assignee's entry on the holders line; assignment or handoff -> the holders line; body edit -> the body; attachment -> its chip); `openItemWindow(storeId, itemId, {focus: eventId})` so a later URL route can reuse it; no target found just opens the window. |
+| 390 | Clicking a notification opens the item window and scrolls to and highlights what it refers to, found through the event id it carries (comment or mention -> the comment, with a brief flash and a thin left mark; status, close, or confirm -> the assignee's row in Assignees, expanding the fold when it is hidden; assignment or handoff -> the holders line of the property card; body edit -> the body; attachment -> its chip); `openItemWindow(storeId, itemId, {focus: eventId})` so a later URL route can reuse it; no target found just opens the window. |
+| 424 | The item window's properties (status, kind, holders, creator, parent, project, id, dates, due) sit in a tinted, bordered card apart from the body; holders is one summary line ("13 · doing 3 · done 1": count, then each live status other than todo, then pending) instead of the list, which Assignees carries. |
+| 425 | Assignees shows at most 4 rows, highest in the hierarchy first (shallowest lead-chain depth; then live before ended, display name, assignment order), then an "N more" toggle (local state). The provenance text and the close rule that at least two rows share are written once in the section header; a row keeps its name, status, note, and only what differs (e.g. "inherited: everyone within L2, reached later"). A notification target in the hidden rows expands the fold. |
+| 426 c | The item window is two columns on a wide window (window width 820px or more): the main column has the header, body, subtasks, and thread with the composer; the narrow side column has the property card and Assignees. Below 820px it is one column: header, property card, body, subtasks, Assignees, thread, composer. Status, subtasks, and the thread are the prominent parts. |
+| 427 | The fixtures carry hierarchical tasks of mixed depth with childless tasks among them: besides "Ship search v2" (depth 3 under "Index builder", and "Cache layer" under "Query path rewrite"), "Infra capacity plan" (three subtasks, one of which has its own blocked subtask, one done), "Refresh onboarding docs" (a single child), and the childless "Renew TLS certificates". The item window lists the children as a Subtasks section and shows the ancestors as a breadcrumb. Existing ids are unchanged. |
 
 ## Open questions
 

@@ -23,6 +23,7 @@
     mdraft: [], adraft: [], // composer drafts: member ids picked with @, attachment metadata to post
     item: null, win: false, last: null, replyTo: null,
     winReturn: null,      // selector of the element that opened the item window; focus returns there on close
+    aopen: null,          // id of the item whose assignee fold is expanded (425); the fold resets when another item opens
     drh: loadDrh(),       // store -> drawer height in px, set by dragging its handle (382), local UI state; absent: follows the content
     tab: {},              // store -> { side: tab key of the tab pane, narrow: tab key of the narrow layout } (366), local UI state
     tabSeen: {},          // "store|stream" -> { tab key -> signature last shown }: a hidden tab whose signature moved shows a dot
@@ -1137,8 +1138,8 @@
   // actions the action bar does not already offer.
   // (390) What an event refers to inside the open item window, found by the event's type:
   // a comment (added, edited, or hidden) -> that comment; a status, close, confirm, reject,
-  // or reopen -> that assignee's entry on the holders line; an assignment or handoff -> the
-  // holders line; an accept -> the accepter's entry on it; a decline, return, or unassign ->
+  // or reopen -> that assignee's row in Assignees; an assignment or handoff -> the holders
+  // line of the property card; an accept -> the accepter's row; a decline, return, or unassign ->
   // the assignees row that ended (the holders line no longer lists it); a body edit or the
   // item's creation -> the body; an edit that only adds attachments -> the first new chip.
   // Anything else falls back to its own line in the thread, and null when the window has none.
@@ -1159,7 +1160,14 @@
       var atts = listOf(p.attachments).filter(function (x) { return x && x.oid; });
       el = !('body' in p) && atts.length ? by('data-oid', atts[0].oid) : root.querySelector('[data-focus="body"]');
     }
-    return el || by('data-ev', e.id);
+    el = el || by('data-ev', e.id);
+    if (el && el.closest('.arow.more') && ui.aopen !== ui.item) { // (425) the target sits in the folded rows: expand them
+      ui.aopen = ui.item;
+      var lst = root.querySelector('.alist'), tg = root.querySelector('[data-act="afold"]');
+      if (lst) lst.classList.remove('folded');
+      if (tg) tg.textContent = 'show fewer';
+    }
+    return el;
   }
   function windowActs(v, it) {
     var recs = it.assignments.map(A), mineR = recs.filter(function (r) { return r.to === v && r.state === 'live'; })[0];
@@ -1174,56 +1182,108 @@
       return '<button type="button" class="btn' + (x[4] ? ' primary' : '') + '"' + attr('act', x[0]) + dataAttrs(x[3]) + '><svg class="i"><use href="#i-' + x[1] + '"/></svg>' + esc(x[2]) + '</button>';
     }).join('');
   }
-  function windowHtml(v, it) {
-    var recs = it.assignments.map(A), mineR = recs.filter(function (r) { return r.to === v && r.state === 'live'; })[0];
-    var acts = windowActs(v, it), hs = holders(it);
-    var h = '<div class="iw-top"><div class="iw-head">' + stIcon(stKey(it)) + '<h2 id="iw-title">' + esc(it.title) + '</h2>' +
-      '<button type="button" class="ia iw-x" data-act="win-close" aria-label="close (Esc)"' + tipAttr('close (Esc)') + '><svg class="i"><use href="#i-x"/></svg></button></div>' +
-      '<div class="iw-chips">' + kindChip(it) + '<code class="al">' + esc(it.alias) + '</code>' + (it.kind === 'topic' ? '' : stChip(it.status) + prChip(it) + dueChip(it) + rollupHtml(it)) + warnHtml(it) + '</div></div>';
-    h += '<dl class="iw-meta">' +
-      '<dt>status</dt><dd>' + (it.kind === 'topic' ? '<span class="muted">topic: discussion only</span>' : esc(SI.info(it.status).label) + ' <span class="muted">' + esc(SI.info(it.status).desc) + '</span>') + '</dd>' +
+  // (424)-(427) The item window's parts. The window is a header (title, chips, actions) over two
+  // columns: the main one (body, subtasks, thread, composer) and a narrow side one (the property
+  // card, the assignees). Below 820px of window width it is one column, in the order header ->
+  // property card -> body -> subtasks -> assignees -> thread -> composer (CSS `order`).
+  // How far up the lead chain a member is: 0 for a root, 1 for a root's follower, and so on.
+  function leadDepth(id) {
+    var d = 0, m = VS.members[id];
+    while (m && (m.leads || [])[0] && d < 50) { d++; m = VS.members[m.leads[0]]; }
+    return d;
+  }
+  var A_SHOWN = 4; // assignee rows shown before the "N more" toggle
+  // The holders in one line: the count, then the live statuses other than todo, then pending.
+  function holdersSummary(it) {
+    var hs = holders(it), c = {}, parts = [];
+    if (!hs.length) return '<span class="muted">not assigned</span>';
+    hs.forEach(function (r) { var k = r.state === 'pending' ? 'pending' : r.status; c[k] = (c[k] || 0) + 1; });
+    ['blocked', 'doing', 'awaiting', 'done', 'pending'].forEach(function (k) { if (c[k]) parts.push(esc(SI.info(k).label) + ' ' + c[k]); });
+    return '<b>' + hs.length + '</b>' + parts.map(function (x) { return ' <span class="muted">&middot;</span> ' + x; }).join('');
+  }
+  function ancestorsOf(it) {
+    var out = [], cur = it.parent;
+    while (cur && VS.items[cur] && out.length < 50) { out.unshift(cur); cur = VS.items[cur].parent; }
+    return out;
+  }
+  function propertyCard(it) {
+    var hs = holders(it), topic = it.kind === 'topic';
+    return '<section class="pcard" aria-label="properties"><h3>Properties</h3><dl>' +
+      '<dt>status</dt><dd>' + (topic ? '<span class="muted">topic: discussion only</span>' : esc(SI.info(it.status).label) + ' <span class="muted">' + esc(SI.info(it.status).desc) + '</span>') + '</dd>' +
       '<dt>kind</dt><dd>' + esc(it.kind) + (it.pending.length ? ' <span class="muted">(pending assignment)</span>' : '') + (it.hidden ? ' <span class="muted">(hidden)</span>' : '') + '</dd>' +
-      (it.kind !== 'topic' ? '<dt>holders</dt><dd' + attr('focus', 'holders') + '>' + (hs.length ? hs.map(function (r) { return '<span class="hold"' + attr('hmember', r.to) + '><i class="av' + (r.state === 'pending' ? ' pend' : '') + (r.to === v ? ' me' : '') + '">' + esc(initials(r.to)) + '</i> ' + whoName(r.to) + ' <span class="muted">' + esc(SI.info(stKey(it, r)).label) + '</span></span>'; }).join(', ') : '<span class="muted">not assigned</span>') + '</dd>' : '') +
+      (topic ? '' : '<dt>holders</dt><dd' + attr('focus', 'holders') + '>' + holdersSummary(it) + '</dd>') +
       (it.chain.length > 1 ? '<dt>path</dt><dd>' + esc(it.chain.join(' > ')) + '</dd>' : '') +
-      (it.kind !== 'topic' ? '<dt>due</dt><dd>' + (it.due ? esc(it.due) : '<span class="muted">-</span>') + '</dd>' : '') +
+      (topic ? '' : '<dt>due</dt><dd>' + (it.due ? esc(it.due) : '<span class="muted">-</span>') + '</dd>') +
       '<dt>creator</dt><dd>' + esc(nm(it.author)) + (VS.members[it.author] && VS.members[it.author].admin ? ' <span class="chip admin">admin</span>' : '') + '</dd>' +
       '<dt>project</dt><dd>' + (it.project ? esc(it.project) : '<span class="muted">-</span>') + '</dd>' +
       '<dt>parent</dt><dd>' + (it.parent ? itemRef(it.parent) + ' ' + esc((VS.items[it.parent] || {}).title || '') : '<span class="muted">-</span>') + '</dd>' +
       '<dt>id</dt><dd><code>' + esc(it.id) + '</code></dd>' +
-      '<dt>dates</dt><dd>created ' + esc(fmtTs(it.ts)) + (it.edited ? ' &middot; edited ' + esc(fmtTs(it.edited.ts)) : '') + ' &middot; last activity ' + esc(fmtTs(it.lastActivity)) + '</dd></dl>';
-    h += it.body ? '<div class="sh-body"' + attr('focus', 'body') + '>' + esc(it.body) + '</div>' : '';
-    h += mentionChips(it.mentions) + attChips(it.attachments, true);
+      '<dt>dates</dt><dd>created ' + esc(fmtTs(it.ts)) + (it.edited ? '<br>edited ' + esc(fmtTs(it.edited.ts)) : '') + '<br>last activity ' + esc(fmtTs(it.lastActivity)) + '</dd></dl></section>';
+  }
+  // Assignees: at most A_SHOWN rows, the highest in the lead chain first (shallowest lead depth;
+  // then live before ended, then display name, then assignment order). What every row shares (the
+  // provenance text and the close rule) is written once in the header; a row adds only what
+  // differs. The rows past A_SHOWN are in the markup, hidden until the "N more" toggle (ui.aopen).
+  function assigneesHtml(v, it, recs) {
+    if (!recs.length) return '<section class="iw-asg"><h3>Assignees</h3><div class="empty">Not assigned.</div></section>';
+    var rows = recs.map(function (r, i) { return { r: r, i: i, d: leadDepth(r.to), on: r.state === 'live' || r.state === 'pending', src: source(r), cm: complText(r.completion) }; });
+    rows.sort(function (a, b) { return (b.on - a.on) || (a.d - b.d) || nm(a.r.to).localeCompare(nm(b.r.to)) || (a.i - b.i); });
+    function common(key) { // the most frequent value, when at least two rows hold it
+      var n = {}, best = null;
+      rows.forEach(function (x) { n[x[key]] = (n[x[key]] || 0) + 1; if (n[x[key]] > 1 && (best === null || n[x[key]] > n[best])) best = x[key]; });
+      return best;
+    }
+    var cs = common('src'), cc = common('cm'), open = ui.aopen === it.id, hid = rows.length - A_SHOWN;
+    var head = cs !== null || cc !== null ? '<div class="a-common muted">' + [cs, cc].filter(function (x) { return x !== null; }).join(' &middot; ') + '</div>' : '';
+    var list = rows.map(function (x, k) {
+      var r = x.r, b = '';
+      if (r.state === 'live') {
+        if ((r.by === v || r.to === v) && r.status === 'done') b += btn('note', 'Reopen', { item: r.item, who: r.to, op: 'item.reopen' });
+        var departed = (VS.members[r.to] || {}).removed || (VS.members[r.by] || {}).removed;
+        if (r.by === v || (departed && VS.viewer.admin)) b += btn('unassign', r.by === v ? 'Unassign' : 'Unassign (admin, member removed)', { item: r.item, who: r.to });
+        if (VS.viewer.admin && r.to !== v && r.status !== 'done' && !it.hidden) b += btn('handoff', 'Hand off (admin)', { item: r.item, who: r.to }); // (286)
+      } else if (r.state === 'pending' && r.to === v && (r.by === v || r.sender === v)) b += btn('unassign', 'Withdraw', { item: r.item, who: r.to });
+      var note = r.note || r.answerNote, diff = [];
+      if (x.src !== cs) diff.push(cs !== null && x.src.indexOf(cs) === 0 ? x.src.slice(cs.length).trim() : x.src);
+      if (x.cm !== cc) diff.push(x.cm);
+      return '<li class="arow' + (!x.on ? ' gone' : '') + (k >= A_SHOWN ? ' more' : '') + '"' + attr('rec', r.id) + attr('hmember', r.to) + '>' +
+        '<div class="ar-main"><i class="av' + (r.state === 'pending' ? ' pend' : '') + (r.to === v ? ' me' : '') + '">' + esc(initials(r.to)) + '</i><span class="ar-name">' + whoName(r.to) + '</span>' +
+        '<span class="ar-st">' + recChip(r) + (r.ended ? ' <span class="muted">' + esc(alias(r.ended.id)) + endedBy(r) + '</span>' : '') + '</span></div>' +
+        (note ? '<div class="ar-note">&ldquo;' + esc(note) + '&rdquo;</div>' : '') +
+        (diff.length ? '<div class="ar-diff muted">' + diff.join(' &middot; ') + '</div>' : '') +
+        (b ? '<div class="tb">' + b + '</div>' : '') + '</li>';
+    }).join('');
+    return '<section class="iw-asg"><h3>Assignees <span class="cnt">' + rows.length + '</span></h3>' + head +
+      '<ul class="alist' + (open ? '' : ' folded') + '">' + list + '</ul>' +
+      (hid > 0 ? '<div class="a-fold">' + btn('afold', open ? 'show fewer' : hid + ' more', {}) + '</div>' : '') + '</section>';
+  }
+  // Subtasks: the item's direct children, each opening that item. A child with children of its own
+  // carries its roll-up, so the depth shows without a nested list.
+  function subtasksHtml(it) {
+    if (!it.children.length) return '';
+    return '<section class="iw-sub"><h3 class="prom">Subtasks <span class="cnt">' + it.children.length + '</span>' + rollupHtml(it) + '</h3><div class="srows">' + it.children.map(function (k) {
+      var ki = VS.items[k];
+      return '<div class="srow' + (ki.status === 'done' ? ' gone' : '') + '"' + attr('item', k) + '>' + stIcon(stKey(ki)) + titleRef(k) + (ki.hidden ? '<span class="chip hid">hidden</span>' : '') +
+        '<span class="grow"></span>' + rollupHtml(ki) + whoHtml(ki) + '</div>';
+    }).join('') + '</div></section>';
+  }
+  function windowHtml(v, it) {
+    var recs = it.assignments.map(A), mineR = recs.filter(function (r) { return r.to === v && r.state === 'live'; })[0];
+    var acts = windowActs(v, it), up = ancestorsOf(it);
+    var h = '<div class="iw-top">' + (up.length ? '<nav class="iw-crumb" aria-label="parents">' + up.map(function (k) { return '<a href="#"' + attr('item', k) + '>' + esc(VS.items[k].title) + '</a>'; }).join('<span aria-hidden="true">&rsaquo;</span>') + '</nav>' : '') +
+      '<div class="iw-head">' + stIcon(stKey(it)) + '<h2 id="iw-title">' + esc(it.title) + '</h2>' +
+      '<button type="button" class="ia iw-x" data-act="win-close" aria-label="close (Esc)"' + tipAttr('close (Esc)') + '><svg class="i"><use href="#i-x"/></svg></button></div>' +
+      '<div class="iw-chips">' + kindChip(it) + '<code class="al">' + esc(it.alias) + '</code>' + (it.kind === 'topic' ? '' : stChip(it.status) + prChip(it) + dueChip(it) + rollupHtml(it)) + warnHtml(it) + '</div></div>';
     h += '<div class="sh-actions">' + (acts || '<span class="muted">No item actions for ' + esc(nm(v)) + '.</span>') + '</div>';
-
-    if (it.kind !== 'topic') {
-      h += '<h3>Assignees</h3>';
-      if (!recs.length) h += '<div class="empty">Not assigned.</div>';
-      else h += '<table class="atable">' + recs.map(function (r) {
-        var b = '';
-        if (r.state === 'live') {
-          if ((r.by === v || r.to === v) && r.status === 'done') b += btn('note', 'Reopen', { item: r.item, who: r.to, op: 'item.reopen' });
-          var departed = (VS.members[r.to] || {}).removed || (VS.members[r.by] || {}).removed;
-          if (r.by === v || (departed && VS.viewer.admin)) b += btn('unassign', r.by === v ? 'Unassign' : 'Unassign (admin, member removed)', { item: r.item, who: r.to });
-          if (VS.viewer.admin && r.to !== v && r.status !== 'done' && !it.hidden) b += btn('handoff', 'Hand off (admin)', { item: r.item, who: r.to }); // (286)
-        } else if (r.state === 'pending' && r.to === v && (r.by === v || r.sender === v)) b += btn('unassign', 'Withdraw', { item: r.item, who: r.to });
-        return '<tr class="' + (r.state !== 'live' && r.state !== 'pending' ? 'gone' : '') + '"' + attr('rec', r.id) + '><td><b>' + esc(nm(r.to)) + '</b><br><span class="muted">' + source(r) + '</span></td><td>' +
-          recChip(r) + (r.ended ? ' <span class="muted">' + esc(alias(r.ended.id)) + endedBy(r) + '</span>' : '') +
-          '<br><span class="muted">' + complText(r.completion) + '</span></td><td>' + (r.note ? '&ldquo;' + esc(r.note) + '&rdquo;' : r.answerNote ? '&ldquo;' + esc(r.answerNote) + '&rdquo;' : '<span class="muted">no note</span>') +
-          (b ? '<div class="tb">' + b + '</div>' : '') + '</td></tr>';
-      }).join('') + '</table>';
-    }
-    if (it.children.length) {
-      h += '<h3>Subtask threads</h3><div class="stree">' + it.children.map(function (k) {
-        var ki = VS.items[k], who = ki.assignments.map(A).filter(function (r) { return r.state === 'live'; }).map(function (r) { return r.to; });
-        return '<div class="click"' + attr('item', k) + '>' + stChip(ki.status) + prChip(ki) + titleRef(k) + ' <span class="muted">' + esc(ki.author) +
-          (who.length ? ' &rarr; ' + esc(who.join(', ')) : '') + '</span>' + rollupHtml(ki) + kindChip(ki) + '</div>';
-      }).join('') + '</div>';
-    }
+    h += '<div class="iw-grid"><div class="iw-main">';
+    if (it.body || it.mentions.length || it.attachments.length)
+      h += '<div class="iw-body">' + (it.body ? '<div class="sh-body"' + attr('focus', 'body') + '>' + esc(it.body) + '</div>' : '') + mentionChips(it.mentions) + attChips(it.attachments, true) + '</div>';
+    h += subtasksHtml(it);
     var evs = it.thread.map(function (id) { return EV[id]; });
-    h += '<h3>Thread (' + evs.length + ' events)</h3><ul class="timeline">' + evs.map(function (n) {
+    h += '<section class="iw-thread"><h3 class="prom">Thread <span class="cnt">' + evs.length + '</span></h3><ul class="timeline">' + evs.map(function (n) {
       if (n.type === 'comment.add' && n.thread === it.id) return commentHtml(n, v, it);
       return evLine(n, n.parentThread === it.id ? 'parent' : true);
-    }).join('') + '</ul>';
+    }).join('') + '</ul></section>';
 
     // composer: comment (optionally a quote reply) plus quick status actions on my own assignment
     var rt = ui.replyTo && VS.comments[ui.replyTo] && VS.comments[ui.replyTo].item === it.id ? VS.comments[ui.replyTo] : null;
@@ -1244,6 +1304,7 @@
       Object.keys(VS.members).filter(function (id) { return !VS.members[id].removed; }).map(function (id) { return '<option value="' + esc(id) + '">@' + esc(id) + ' ' + esc(nmo(id)) + '</option>'; }).join('') +
       '</select><input id="catt-name" type="text" placeholder="attach (mock): file name"><input id="catt-size" type="number" min="0" placeholder="bytes">' +
       btn('att-add', 'Attach', {}) + '<span class="muted">limit ' + fmtSize(VS.attachments.max_bytes) + '</span></div></div>';
+    h += '</div><div class="iw-side">' + propertyCard(it) + (it.kind !== 'topic' ? assigneesHtml(v, it, recs) : '') + '</div></div>';
     return h;
   }
   function draftHtml() {
@@ -1874,7 +1935,7 @@
       ui.store = storeId; ui.last = null; ui.sel = null;
     }
     if (!ui.win) ui.winReturn = returnSel(opener || document.activeElement);
-    ui.item = itemId; ui.win = true; ui.itemChanged = true; ui.replyTo = null; ui.mdraft = []; ui.adraft = [];
+    ui.item = itemId; ui.win = true; ui.itemChanged = true; ui.aopen = null; ui.replyTo = null; ui.mdraft = []; ui.adraft = [];
     ui.focus = focus ? { ev: focus, flash: true } : null;
     render();
     $('iwin').firstElementChild.focus({ preventScroll: true });
@@ -2073,6 +2134,7 @@
         else if (k === 'reset') { resetStore(ui.store); ui.last = null; render(); toast('Store reset to fixtures.'); }
         else if (k === 'win-close') closeItemWindow();
         else if (k === 'page-back') leavePage();
+        else if (k === 'afold') { ui.aopen = ui.aopen === ui.item ? null : ui.item; render(); }
         else if (k === 'win-discuss') { if ($('cbox')) $('cbox').focus(); }
         else if (k === 'tab') { tabState()[ui.layout === 'narrow' ? 'narrow' : 'side'] = a.getAttribute('data-tab'); ui.sel = null; render(); }
         else if (k === 'today') {

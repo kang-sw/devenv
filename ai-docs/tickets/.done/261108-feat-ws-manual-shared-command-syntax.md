@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 60afcdb2bbf206ea
 sage-review-completeness-reviewed: 60afcdb2bbf206ea
+completed: 2026-11-08
 ---
 
 # Shared XML command syntax - one parser, one manual section, a trimmed whiteboard section, inline tags in item fields
@@ -176,3 +177,61 @@ All confirmed on the session board, 2026-11-08.
   refusal carries both the shared syntax rules and `## Commands`; a
   before/after line and byte count of the rendered manual with the
   whiteboard on (smaller after), reported in the Result.
+
+### Result (03b13155e) - 2026-11-08
+
+Landed in c613625eb, c0f2e43be, 89610851b, 03b13155e.
+
+- **Shared parser (Decision 2).** The new package `internal/wsxmlcmd` holds the
+  tokenizer, `Grammar{Prefix, Commands}`, `Command`/`Field` accessors, and the
+  shared value checks (`NonEmpty`, `RequiredAttr`, `EnumAttr`, `IntAttr`,
+  `BoolAttr`). `wswhiteboard` now declares only its `wb:` grammar table. Logic
+  and messages are unchanged; `commands_test.go` changed accessor names only.
+- **Shared section (Decisions 1, 8).** The section lives in
+  `rsrc/lead-workflow-manual/command-syntax.md`, a part file read through the
+  new `wsrsrc.LoadPart` (hash-verified, bare stem only). It does not load as a
+  playbook. `mcp/command_syntax.go` provides:
+  - `commandSyntaxEnabled`, the single gate where the tracker will add its
+    knob;
+  - the manual section, rendered once as `### Command syntax` ahead of
+    `### Whiteboard`;
+  - `commandRefusal`, which writes problems, then the shared section, then
+    `## Commands`, and which the next command tool can reuse.
+
+  `playbook.read("whiteboard")` appends the section.
+- **Trim (Decision 3).** No pinned rule was dropped. Two mandate bullets were
+  removed because the playbook already states them ("each turn", "answers by
+  ID"), along with a duplicated "progress goes to chat" clause, the `wb:edit`
+  example, and the tool list on the re-render bullet. Rendered manual with the
+  whiteboard on:
+  - `playbook.read`: 427 lines / 21790 bytes before, 417 / 21132 after.
+  - `workflow_manual`: 455 / 23192 before, 445 / 22528 after.
+- **Inline tags (Decisions 5, 6, 9).** `wswhiteboard/inline_tags.go` adds a
+  goldmark inline parser plus an AST transformer. No raw HTML parser was added
+  and `WithUnsafe` stays off. The item-field markdown bullet in the playbook
+  names the allowlist.
+- **Mirrors (Decision 7).** The wsflow mirror, the Pi copy, and the manifests
+  are regenerated.
+- **Verification.** These pass: `go test ./internal/mcp ./internal/wsrsrc/...
+  ./internal/wswhiteboard ./internal/wsxmlcmd ./internal/wsdashboard
+  -count=1`, the wsflow suite (`uvx pytest tests`, 20 passed), gofmt, and
+  `go vet`. New tests cover:
+  - the shared section appearing exactly once and in order with the knob on,
+    and absent with it off;
+  - the refusal's composition (shared section before `## Commands`; none on
+    `whiteboard.query`);
+  - the `playbook.read` append, and the part not loading as a playbook;
+  - `LoadPart`;
+  - the allowlist in every layout, including the Decision 9 cases.
+- **Decisions taken in implementation:**
+  - `<kbd>` content is parsed as inline markdown, the same as `<b>`/`<i>`.
+  - `RenderText` (dashboard streaming reply, `.md` file view) shares the block
+    pipeline but keeps escaping every tag, through `pageData.noInlineTags`,
+    because the allowlist is an item-field rule.
+  - The part file sits under `lead-workflow-manual/`. A root flat file would
+    load through the flat fallback, and a heading inside `whiteboard.md` would
+    make the tracker quote the whiteboard.
+- **Review.** The lite review came back clean with one minor: the trim had
+  dropped "Workers and subagents do not use it." It is restored in 03b13155e.
+- **Note.** Commit c613625eb lacks the session attribution trailers. It was
+  left unamended because history is never rewritten on this branch.

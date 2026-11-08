@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kang-sw/devenv/internal/wsxmlcmd"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/extension"
@@ -393,7 +394,7 @@ func Apply(state *State, commands string, env Env) (Outcome, []string) {
 	embedDir := false
 
 	for _, cmd := range cmds {
-		switch cmd.tag {
+		switch cmd.Tag {
 		case "wb:add":
 			out.IDs = append(out.IDs, applyAdd(p, work, cmd, mark))
 		case "wb:answer":
@@ -405,41 +406,41 @@ func Apply(state *State, commands string, env Env) (Outcome, []string) {
 		case "wb:edit":
 			applyEdit(p, work, cmd, mark)
 		case "wb:close":
-			if topic, ok := requiredAttr(p, cmd, "topic"); ok {
+			if topic, ok := wsxmlcmd.RequiredAttr(p, cmd, "topic"); ok {
 				switch {
 				case !work.topicKnown(topic):
-					p.add("%s: no item or topic body has topic %q", cmd.at("topic"), topic)
+					p.Add("%s: no item or topic body has topic %q", cmd.At("topic"), topic)
 				case !work.topicClosed(topic):
 					work.ClosedTopics = append(work.ClosedTopics, topic)
 				}
 			}
 		case "wb:floor":
-			if floor, ok := intAttr(p, cmd, "id", true); ok && floor > work.Counter {
+			if floor, ok := wsxmlcmd.IntAttr(p, cmd, "id", true); ok && floor > work.Counter {
 				work.Counter = floor
 			}
 		case "wb:embed-dir":
 			embedDir = true
-			dir, present := cmd.attr("path")
+			dir, present := cmd.Attr("path")
 			switch {
 			case !present:
-				p.add("%s: required (\"\" clears it)", cmd.at("path"))
+				p.Add("%s: required (\"\" clears it)", cmd.At("path"))
 			case dir == "":
 				work.EmbedDir = ""
 			case !env.IsAbs(dir):
-				p.add("%s: must be an absolute path; got %q", cmd.at("path"), dir)
+				p.Add("%s: must be an absolute path; got %q", cmd.At("path"), dir)
 			case !env.IsDir(dir):
-				p.add("%s: %s is not an existing directory (the server never creates it)", cmd.at("path"), dir)
+				p.Add("%s: %s is not an existing directory (the server never creates it)", cmd.At("path"), dir)
 			default:
 				work.EmbedDir = dir
 			}
 		}
 	}
 	if !embedDir && work.EmbedDir != "" && !env.IsDir(work.EmbedDir) {
-		p.add("embed_dir %s (stored for this session) is no longer an existing directory; send <wb:embed-dir path=\"...\"/> with the host's current folder, or path=\"\" to clear it", work.EmbedDir)
+		p.Add("embed_dir %s (stored for this session) is no longer an existing directory; send <wb:embed-dir path=\"...\"/> with the host's current folder, or path=\"\" to clear it", work.EmbedDir)
 	}
 
-	if len(p.list) > 0 {
-		return Outcome{}, p.list
+	if len(p.List) > 0 {
+		return Outcome{}, p.List
 	}
 	work.evictArchive()
 	*state = *work
@@ -456,20 +457,20 @@ type itemFields struct {
 
 func readItemFields(p *problems, cmd command) itemFields {
 	var f itemFields
-	if s, ok := cmd.single(p, "wb:title"); ok {
+	if s, ok := cmd.Single(p, "wb:title"); ok {
 		f.title = &s
 	}
-	if s, ok := cmd.single(p, "wb:recommend"); ok {
+	if s, ok := cmd.Single(p, "wb:recommend"); ok {
 		f.recommend = &s
 	}
-	if s, ok := cmd.single(p, "wb:why"); ok {
+	if s, ok := cmd.Single(p, "wb:why"); ok {
 		f.why = &s
 	}
-	if options := cmd.fieldsOf("wb:option"); len(options) > 0 {
+	if options := cmd.FieldsOf("wb:option"); len(options) > 0 {
 		f.hasOptions = true
 		f.options = checkOptions(p, cmd, options)
 	}
-	if links := cmd.fieldsOf("wb:link"); len(links) > 0 {
+	if links := cmd.FieldsOf("wb:link"); len(links) > 0 {
 		f.hasLinks = true
 		f.links = links
 	}
@@ -479,33 +480,33 @@ func readItemFields(p *problems, cmd command) itemFields {
 func checkOptions(p *problems, cmd command, options []string) []string {
 	for i, option := range options {
 		if strings.TrimSpace(option) == "" {
-			p.add("%s: option %s must be non-empty", cmd.at("<wb:option>"), OptionLetterFor(i))
+			p.Add("%s: option %s must be non-empty", cmd.At("<wb:option>"), OptionLetterFor(i))
 		}
 	}
 	if len(options) > 26 {
-		p.add("%s: at most 26 options (a-z); got %d", cmd.at("<wb:option>"), len(options))
+		p.Add("%s: at most 26 options (a-z); got %d", cmd.At("<wb:option>"), len(options))
 	}
 	return options
 }
 
 func applyAdd(p *problems, work *State, cmd command, mark int) int {
 	item := Item{Status: StatusOpen, Changed: mark}
-	before := len(p.list)
-	if _, present := cmd.attr("id"); present {
-		if id, ok := intAttr(p, cmd, "id", true); ok {
+	before := len(p.List)
+	if _, present := cmd.Attr("id"); present {
+		if id, ok := wsxmlcmd.IntAttr(p, cmd, "id", true); ok {
 			if work.index(id) >= 0 {
-				p.add("%s: %s is already in the store", cmd.at("id"), FormatID(id))
+				p.Add("%s: %s is already in the store", cmd.At("id"), FormatID(id))
 			} else {
 				item.ID = id
 			}
 		}
 	}
-	item.Class, _ = enumAttr(p, cmd, "class", classValues)
-	item.Topic, _ = requiredAttr(p, cmd, "topic")
+	item.Class, _ = wsxmlcmd.EnumAttr(p, cmd, "class", classValues)
+	item.Topic, _ = wsxmlcmd.RequiredAttr(p, cmd, "topic")
 	f := readItemFields(p, cmd)
 	if f.title == nil {
-		p.add("%s: required", cmd.at("<wb:title>"))
-	} else if nonEmpty(p, cmd.at("<wb:title>"), *f.title) {
+		p.Add("%s: required", cmd.At("<wb:title>"))
+	} else if wsxmlcmd.NonEmpty(p, cmd.At("<wb:title>"), *f.title) {
 		item.Title = *f.title
 	}
 	item.Options = f.options
@@ -516,8 +517,8 @@ func applyAdd(p *problems, work *State, cmd command, mark int) int {
 	if f.why != nil {
 		item.Rationale = *f.why
 	}
-	checkPolicyShape(p, cmd.label(), item)
-	if len(p.list) > before {
+	checkPolicyShape(p, cmd.Label(), item)
+	if len(p.List) > before {
 		return item.ID
 	}
 	if item.ID == 0 {
@@ -535,28 +536,28 @@ func applyAdd(p *problems, work *State, cmd command, mark int) int {
 
 func applyAnswer(p *problems, work *State, cmd command, mark int, now time.Time) {
 	ids := answerIDs(p, cmd)
-	answer, answerOK := requiredAttr(p, cmd, "value")
-	quote := cmd.body
-	quoteOK := nonEmpty(p, cmd.label()+" body (the user's verbatim words)", quote)
-	assumed, _ := boolAttr(p, cmd, "assumed")
+	answer, answerOK := wsxmlcmd.RequiredAttr(p, cmd, "value")
+	quote := cmd.Body
+	quoteOK := wsxmlcmd.NonEmpty(p, cmd.Label()+" body (the user's verbatim words)", quote)
+	assumed, _ := wsxmlcmd.BoolAttr(p, cmd, "assumed")
 	if !answerOK || !quoteOK {
 		return
 	}
 	for _, id := range ids {
-		label := cmd.label() + " " + FormatID(id)
+		label := cmd.Label() + " " + FormatID(id)
 		idx := work.index(id)
 		if idx < 0 {
-			p.add("%s: not in the store", label)
+			p.Add("%s: not in the store", label)
 			continue
 		}
 		item := &work.Items[idx]
 		switch item.Status {
 		case StatusWithdrawn, StatusSuperseded:
-			p.add("%s: is %s; patch its status to open before answering it", label, item.Status)
+			p.Add("%s: is %s; patch its status to open before answering it", label, item.Status)
 			continue
 		}
 		if item.Class == ClassPolicy && len(item.Options) > 0 && optionLetter(answer, len(item.Options)) == "" {
-			p.add("%s: a policy answer value starts with its option letter (%s); got %q", label, letterRange(len(item.Options)), answer)
+			p.Add("%s: a policy answer value starts with its option letter (%s); got %q", label, letterRange(len(item.Options)), answer)
 			continue
 		}
 		item.Answer = answer
@@ -577,19 +578,19 @@ func applyAnswer(p *problems, work *State, cmd command, mark int, now time.Time)
 // answerIDs reads an answer's id or ids attribute: exactly one of them, ids
 // being space-separated positive numbers without repeats.
 func answerIDs(p *problems, cmd command) []int {
-	_, hasID := cmd.attr("id")
-	raw, hasIDs := cmd.attr("ids")
+	_, hasID := cmd.Attr("id")
+	raw, hasIDs := cmd.Attr("ids")
 	switch {
 	case hasID && hasIDs:
-		p.add("%s: takes id or ids, not both", cmd.label())
+		p.Add("%s: takes id or ids, not both", cmd.Label())
 		return nil
 	case hasID:
-		if id, ok := intAttr(p, cmd, "id", true); ok {
+		if id, ok := wsxmlcmd.IntAttr(p, cmd, "id", true); ok {
 			return []int{id}
 		}
 		return nil
 	case !hasIDs:
-		p.add("%s: id (or ids) required", cmd.label())
+		p.Add("%s: id (or ids) required", cmd.Label())
 		return nil
 	}
 	var ids []int
@@ -597,18 +598,18 @@ func answerIDs(p *problems, cmd command) []int {
 	for _, tok := range strings.Fields(raw) {
 		id, err := strconv.Atoi(tok)
 		if err != nil || id < 1 {
-			p.add("%s: %q is not a positive number", cmd.at("ids"), tok)
+			p.Add("%s: %q is not a positive number", cmd.At("ids"), tok)
 			continue
 		}
 		if seen[id] {
-			p.add("%s: %s is listed twice", cmd.at("ids"), FormatID(id))
+			p.Add("%s: %s is listed twice", cmd.At("ids"), FormatID(id))
 			continue
 		}
 		seen[id] = true
 		ids = append(ids, id)
 	}
 	if len(ids) == 0 && len(strings.Fields(raw)) == 0 {
-		p.add("%s: must list at least one id", cmd.at("ids"))
+		p.Add("%s: must list at least one id", cmd.At("ids"))
 	}
 	return ids
 }
@@ -617,44 +618,44 @@ func answerIDs(p *problems, cmd command) []int {
 var patchClearValues = []string{"options", "links"}
 
 func applyPatch(p *problems, work *State, cmd command, mark int) {
-	before := len(p.list)
+	before := len(p.List)
 	idx := -1
-	if id, ok := intAttr(p, cmd, "id", true); ok {
+	if id, ok := wsxmlcmd.IntAttr(p, cmd, "id", true); ok {
 		if idx = work.index(id); idx < 0 {
-			p.add("%s: %s is not in the store", cmd.at("id"), FormatID(id))
+			p.Add("%s: %s is not in the store", cmd.At("id"), FormatID(id))
 		}
 	}
 	f := readItemFields(p, cmd)
 	status := ""
-	if _, present := cmd.attr("status"); present {
-		status, _ = enumAttr(p, cmd, "status", patchStatusValues)
+	if _, present := cmd.Attr("status"); present {
+		status, _ = wsxmlcmd.EnumAttr(p, cmd, "status", patchStatusValues)
 	}
 	clear := map[string]bool{}
-	if raw, present := cmd.attr("clear"); present {
+	if raw, present := cmd.Attr("clear"); present {
 		for _, tok := range strings.Fields(raw) {
 			if !slices.Contains(patchClearValues, tok) {
-				p.add("%s: must name %s; got %q", cmd.at("clear"), strings.Join(patchClearValues, " or "), tok)
+				p.Add("%s: must name %s; got %q", cmd.At("clear"), strings.Join(patchClearValues, " or "), tok)
 				continue
 			}
 			clear[tok] = true
 		}
 	}
 	if clear["options"] && f.hasOptions {
-		p.add("%s: clear=\"options\" and <wb:option> fields contradict each other", cmd.label())
+		p.Add("%s: clear=\"options\" and <wb:option> fields contradict each other", cmd.Label())
 	}
 	if clear["links"] && f.hasLinks {
-		p.add("%s: clear=\"links\" and <wb:link> fields contradict each other", cmd.label())
+		p.Add("%s: clear=\"links\" and <wb:link> fields contradict each other", cmd.Label())
 	}
 	if idx < 0 {
 		return
 	}
 	next := work.Items[idx]
-	if f.title != nil && nonEmpty(p, cmd.at("<wb:title>"), *f.title) {
+	if f.title != nil && wsxmlcmd.NonEmpty(p, cmd.At("<wb:title>"), *f.title) {
 		next.Title = *f.title
 	}
 	if f.hasOptions || clear["options"] {
 		if next.Status != StatusOpen {
-			p.add("%s: %s is %s; options change only on an open item, since its answer is stored as an option letter", cmd.at("<wb:option>"), FormatID(next.ID), next.Status)
+			p.Add("%s: %s is %s; options change only on an open item, since its answer is stored as an option letter", cmd.At("<wb:option>"), FormatID(next.ID), next.Status)
 		} else {
 			next.Options = f.options
 		}
@@ -668,8 +669,8 @@ func applyPatch(p *problems, work *State, cmd command, mark int) {
 	if f.hasLinks || clear["links"] {
 		next.Links = f.links
 	}
-	checkPolicyShape(p, cmd.label(), next)
-	if len(p.list) > before {
+	checkPolicyShape(p, cmd.Label(), next)
+	if len(p.List) > before {
 		return
 	}
 	next.Changed = mark
@@ -690,17 +691,17 @@ func applyPatch(p *problems, work *State, cmd command, mark int) {
 // applyTopic replaces a topic's body whole; an empty (or blank) body clears
 // it. The same body again is no change.
 func applyTopic(p *problems, work *State, cmd command, mark int) {
-	name, ok := requiredAttr(p, cmd, "name")
+	name, ok := wsxmlcmd.RequiredAttr(p, cmd, "name")
 	if !ok {
 		return
 	}
-	body := cmd.body
+	body := cmd.Body
 	if strings.TrimSpace(body) == "" {
 		work.clearTopicBody(name)
 		return
 	}
 	if fullDocument(body) {
-		p.add("%s: a topic body takes markdown with inline HTML, not a full document (found <!DOCTYPE or <html)", cmd.label())
+		p.Add("%s: a topic body takes markdown with inline HTML, not a full document (found <!DOCTYPE or <html)", cmd.Label())
 		return
 	}
 	work.setTopicBody(name, body, mark)
@@ -709,33 +710,33 @@ func applyTopic(p *problems, work *State, cmd command, mark int) {
 // applyEdit replaces one exact match of old in a topic's body with new, or
 // every match with replace_all="true".
 func applyEdit(p *problems, work *State, cmd command, mark int) {
-	name, nameOK := requiredAttr(p, cmd, "topic")
-	all, _ := boolAttr(p, cmd, "replace_all")
-	old, hasOld := cmd.single(p, "wb:old")
-	repl, hasNew := cmd.single(p, "wb:new")
+	name, nameOK := wsxmlcmd.RequiredAttr(p, cmd, "topic")
+	all, _ := wsxmlcmd.BoolAttr(p, cmd, "replace_all")
+	old, hasOld := cmd.Single(p, "wb:old")
+	repl, hasNew := cmd.Single(p, "wb:new")
 	if !hasOld {
-		p.add("%s: required", cmd.at("<wb:old>"))
+		p.Add("%s: required", cmd.At("<wb:old>"))
 	} else if old == "" {
-		p.add("%s: must be non-empty", cmd.at("<wb:old>"))
+		p.Add("%s: must be non-empty", cmd.At("<wb:old>"))
 	}
 	if !hasNew {
-		p.add("%s: required (empty deletes the match)", cmd.at("<wb:new>"))
+		p.Add("%s: required (empty deletes the match)", cmd.At("<wb:new>"))
 	}
 	if !nameOK || !hasOld || old == "" || !hasNew {
 		return
 	}
 	i := work.topicDocIndex(name)
 	if i < 0 {
-		p.add("%s: topic %q has no body; set one with <wb:topic>", cmd.label(), name)
+		p.Add("%s: topic %q has no body; set one with <wb:topic>", cmd.Label(), name)
 		return
 	}
 	body := work.Topics[i].Body
 	switch n := strings.Count(body, old); {
 	case n == 0:
-		p.add("%s: <wb:old> matches nothing in topic %q's body", cmd.label(), name)
+		p.Add("%s: <wb:old> matches nothing in topic %q's body", cmd.Label(), name)
 		return
 	case n > 1 && !all:
-		p.add("%s: <wb:old> matches %d places in topic %q's body; widen it to one or set replace_all=\"true\"", cmd.label(), n, name)
+		p.Add("%s: <wb:old> matches %d places in topic %q's body; widen it to one or set replace_all=\"true\"", cmd.Label(), n, name)
 		return
 	}
 	next := strings.ReplaceAll(body, old, repl)
@@ -744,7 +745,7 @@ func applyEdit(p *problems, work *State, cmd command, mark int) {
 		return
 	}
 	if fullDocument(next) {
-		p.add("%s: the edited body would hold a full document (found <!DOCTYPE or <html)", cmd.label())
+		p.Add("%s: the edited body would hold a full document (found <!DOCTYPE or <html)", cmd.Label())
 		return
 	}
 	work.setTopicBody(name, next, mark)
@@ -757,11 +758,11 @@ func checkPolicyShape(p *problems, label string, item Item) {
 		return
 	}
 	if len(item.Options) == 0 {
-		p.add("%s <wb:recommend>: names an option letter, so it needs options", label)
+		p.Add("%s <wb:recommend>: names an option letter, so it needs options", label)
 		return
 	}
 	if optionLetter(item.Recommendation, len(item.Options)) == "" {
-		p.add("%s <wb:recommend>: starts with its option letter (%s), optionally followed by \": <why>\"; got %q", label, letterRange(len(item.Options)), item.Recommendation)
+		p.Add("%s <wb:recommend>: starts with its option letter (%s), optionally followed by \": <why>\"; got %q", label, letterRange(len(item.Options)), item.Recommendation)
 	}
 }
 
@@ -820,7 +821,7 @@ func Query(state *State, payload any) ([]Item, string, []string) {
 	p := &problems{}
 	obj, ok := payloadObject(p, payload)
 	if !ok {
-		return nil, "", p.list
+		return nil, "", p.List
 	}
 	checkKnownFields(p, "payload", obj, queryFields)
 	topic, status, id := "", "", 0
@@ -833,8 +834,8 @@ func Query(state *State, payload any) ([]Item, string, []string) {
 	if raw, present := obj["id"]; present {
 		id, _ = intValue(p, "payload.id", raw)
 	}
-	if len(p.list) > 0 {
-		return nil, "", p.list
+	if len(p.List) > 0 {
+		return nil, "", p.List
 	}
 	if state == nil {
 		return nil, "", nil
@@ -892,14 +893,6 @@ func FormatItems(items []Item, body string) string {
 
 // --- problems and value checks -------------------------------------------
 
-type problems struct {
-	list []string
-}
-
-func (p *problems) add(format string, args ...any) {
-	p.list = append(p.list, fmt.Sprintf(format, args...))
-}
-
 func payloadObject(p *problems, payload any) (map[string]any, bool) {
 	switch v := payload.(type) {
 	case nil:
@@ -907,9 +900,9 @@ func payloadObject(p *problems, payload any) (map[string]any, bool) {
 	case map[string]any:
 		return v, true
 	case string:
-		p.add("payload: must be an object; got string (pass the object itself, not a JSON-encoded string)")
+		p.Add("payload: must be an object; got string (pass the object itself, not a JSON-encoded string)")
 	default:
-		p.add("payload: must be an object; got %s", typeName(payload))
+		p.Add("payload: must be an object; got %s", typeName(payload))
 	}
 	return nil, false
 }
@@ -930,14 +923,14 @@ func checkKnownFields(p *problems, field string, obj map[string]any, known []str
 	}
 	sort.Strings(unknown)
 	for _, name := range unknown {
-		p.add("%s.%s: unknown field (known: %s)", field, name, strings.Join(known, ", "))
+		p.Add("%s.%s: unknown field (known: %s)", field, name, strings.Join(known, ", "))
 	}
 }
 
 func stringValue(p *problems, field string, raw any) (string, bool) {
 	s, ok := raw.(string)
 	if !ok {
-		p.add("%s: must be a string; got %s", field, typeName(raw))
+		p.Add("%s: must be a string; got %s", field, typeName(raw))
 		return "", false
 	}
 	return s, true
@@ -945,7 +938,7 @@ func stringValue(p *problems, field string, raw any) (string, bool) {
 
 func requiredString(p *problems, field string, raw any) (string, bool) {
 	if raw == nil {
-		p.add("%s: required", field)
+		p.Add("%s: required", field)
 		return "", false
 	}
 	s, ok := stringValue(p, field, raw)
@@ -953,7 +946,7 @@ func requiredString(p *problems, field string, raw any) (string, bool) {
 		return "", false
 	}
 	if strings.TrimSpace(s) == "" {
-		p.add("%s: must be non-empty", field)
+		p.Add("%s: must be non-empty", field)
 		return "", false
 	}
 	return s, true
@@ -969,18 +962,18 @@ func requiredEnum(p *problems, field string, raw any, values []string) (string, 
 			return s, true
 		}
 	}
-	p.add("%s: must be one of %s; got %q", field, strings.Join(values, ", "), s)
+	p.Add("%s: must be one of %s; got %q", field, strings.Join(values, ", "), s)
 	return "", false
 }
 
 func intValue(p *problems, field string, raw any) (int, bool) {
 	n, ok := raw.(float64)
 	if !ok {
-		p.add("%s: must be a number; got %s", field, typeName(raw))
+		p.Add("%s: must be a number; got %s", field, typeName(raw))
 		return 0, false
 	}
 	if n != float64(int(n)) {
-		p.add("%s: must be a whole number; got %v", field, n)
+		p.Add("%s: must be a whole number; got %v", field, n)
 		return 0, false
 	}
 	return int(n), true
@@ -1004,69 +997,4 @@ func typeName(value any) string {
 	default:
 		return fmt.Sprintf("%T", value)
 	}
-}
-
-// nonEmpty reports whether s holds non-blank text, recording a problem when not.
-func nonEmpty(p *problems, label, s string) bool {
-	if strings.TrimSpace(s) == "" {
-		p.add("%s: must be non-empty", label)
-		return false
-	}
-	return true
-}
-
-// requiredAttr returns a command's non-blank attribute.
-func requiredAttr(p *problems, cmd command, name string) (string, bool) {
-	v, present := cmd.attr(name)
-	if !present {
-		p.add("%s: required", cmd.at(name))
-		return "", false
-	}
-	return v, nonEmpty(p, cmd.at(name), v)
-}
-
-func enumAttr(p *problems, cmd command, name string, values []string) (string, bool) {
-	v, ok := requiredAttr(p, cmd, name)
-	if !ok {
-		return "", false
-	}
-	if !slices.Contains(values, v) {
-		p.add("%s: must be one of %s; got %q", cmd.at(name), strings.Join(values, ", "), v)
-		return "", false
-	}
-	return v, true
-}
-
-// intAttr returns a command's positive whole-number attribute; required
-// records a problem when it is absent.
-func intAttr(p *problems, cmd command, name string, required bool) (int, bool) {
-	v, present := cmd.attr(name)
-	if !present {
-		if required {
-			p.add("%s: required", cmd.at(name))
-		}
-		return 0, false
-	}
-	n, err := strconv.Atoi(strings.TrimSpace(v))
-	if err != nil || n < 1 {
-		p.add("%s: must be a positive whole number; got %q", cmd.at(name), v)
-		return 0, false
-	}
-	return n, true
-}
-
-// boolAttr returns a command's "true"/"false" attribute, false when absent.
-func boolAttr(p *problems, cmd command, name string) (bool, bool) {
-	v, present := cmd.attr(name)
-	if !present {
-		return false, true
-	}
-	switch v {
-	case "true":
-		return true, true
-	case "false":
-		return false, true
-	}
-	p.add("%s: must be \"true\" or \"false\"; got %q", cmd.at(name), v)
-	return false, false
 }
