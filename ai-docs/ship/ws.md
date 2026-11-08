@@ -129,14 +129,17 @@ local Pre-flight `go test` cannot vouch for. The final gate precedes every push
   (`<reviewed-through-sha>..develop`) before retrying.
 - `git push origin develop` — publish the synced develop first. This claims no
   version and publishes no release.
-- **CI gate** on `<reviewed-through-sha>`:
-  1. Find its run: `gh run list --workflow ws-mcp-ci.yml --commit
-     <reviewed-through-sha> --json databaseId,headSha,event,status,conclusion`,
-     polling for up to 60 seconds after the push; take the newest entry (a run
-     from an earlier attempt on the same SHA counts).
-  2. No run: the push changed nothing under the workflow's path filter
-     (`agents-plugin-tool/**` and the workflow file itself), e.g. a docs-only
-     tip or an already-pushed develop. Dispatch one with
+- **CI gate** on `<reviewed-through-sha>`. A develop push runs the test jobs
+  only when its head commit message carries `[ci]`; any other push creates a
+  `ws-mcp CI` run whose jobs are all skipped, which proves nothing.
+  1. Reuse a run only when its tests actually ran: `gh run list --workflow
+     ws-mcp-ci.yml --commit <reviewed-through-sha> --json
+     databaseId,headSha,event,status,conclusion`, polling for up to 60 seconds
+     after the push, and take the newest entry whose jobs (`gh run view
+     <run-id> --json jobs --jq '.jobs[] | [.name, .conclusion]'`) are not
+     `skipped` (a `[ci]` push, or a dispatch from an earlier attempt on the
+     same SHA).
+  2. No such run: dispatch one with
      `gh workflow run ws-mcp-ci.yml --ref develop`, then take the newest run
      from `gh run list --workflow ws-mcp-ci.yml --event workflow_dispatch
      --json databaseId,headSha,status,conclusion` and confirm its `headSha`
@@ -146,7 +149,8 @@ local Pre-flight `go test` cannot vouch for. The final gate precedes every push
      parallel), then `gh run view <run-id> --json jobs --jq '.jobs[] |
      [.name, .conclusion]'`: every `go test (<os>, <shard>)` job — the ubuntu
      `all` leg and each Windows shard — must conclude `success`.
-- **CI red or cancelled** (any leg not `success`, including a timeout): stop.
+- **CI red, cancelled, or skipped** (any leg not `success`, including a
+  timeout): stop.
   `main` and the tag stay unpushed; the pushed `develop` stays as is. Fix
   forward on `develop`, then restart Pre-flight from the top. The version's
   tag was never pushed, so Version Strategy reuses the same version instead of
