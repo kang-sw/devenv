@@ -113,6 +113,10 @@ ul.plain { list-style: none; margin: 0; padding: 0; }
 .dr-col { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .dr-title { display: flex; align-items: center; gap: 8px; margin: 0 2px 8px; font-size: 13px; color: var(--muted-fg); }
 .dr-title b { color: var(--fg); font-size: 14px; }
+/* (304) a card in a wide mode spans the full row; the remaining cards flow below it */
+.dr-wide { display: flex; flex-direction: column; gap: 10px; margin-bottom: 10px; }
+.dr-cols.n2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.dr-cols.n1 { grid-template-columns: minmax(0, 1fr); }
 @media (max-width: 1100px) { .dr-cols { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .dr-col:last-child { grid-column: 1 / -1; } }
 @media (max-width: 760px) { .dr-cols { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 640px) {
@@ -263,7 +267,10 @@ dialog p { margin: 0; font-size: 12.5px; color: var(--muted-fg); }
 .chip.due.over { color: var(--fail); box-shadow: inset 0 0 0 1px var(--fail); }
 .chip.due.now { color: var(--warn); box-shadow: inset 0 0 0 1px var(--warn); }
 .chip.st-handed, .chip.st-withdrawn { background: var(--muted); color: var(--muted-fg); }
-.modes { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+.cmodes { display: inline-flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+.card > header .cmodes .btn { font-weight: 400; }
+.card > header:has(.cmodes) { flex-wrap: wrap; row-gap: 2px; }
+.card > header h2 { white-space: nowrap; }
 details.unpushed { margin: -6px 2px 10px; font-size: 12px; }
 details.unpushed summary { cursor: pointer; color: var(--warn); }
 .atl .day { margin-top: 8px; font-size: 11.5px; font-weight: 800; color: var(--muted-fg); border-bottom: 1px solid var(--line); }
@@ -294,3 +301,22 @@ details.unpushed summary { cursor: pointer; color: var(--warn); }
 .tm-work.notice { font-style: normal; }
 
 .sup { margin: 2px 0; font-size: 12px; }
+
+/* chat card: placeholder for the support-agent chat child; fixed height, internal scroll, newest at the bottom */
+.card.chat .cbody { height: 360px; padding: 0; display: flex; flex-direction: column; }
+.chat-log { flex: 1 1 0; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 8px; padding: 8px 10px; background: color-mix(in srgb, var(--muted) 45%, var(--bg)); }
+.chat-log .msg { max-width: 92%; }
+.chat-log .msg.user .mh { justify-content: flex-end; }
+.chat-log .sysline { font-weight: 400; text-align: center; }
+.chat-comp { flex: none; display: flex; gap: 8px; align-items: center; padding: 6px 8px; border-top: 1px solid var(--muted); }
+.chat-comp textarea { flex: 1; font: inherit; font-size: 13px; color: inherit; background: var(--muted); border: 0; border-radius: 10px; padding: 6px 9px; resize: none; }
+.toolsline { align-self: flex-start; max-width: 100%; font-size: 11px; color: var(--muted-fg); }
+.toolsline > summary { list-style: none; cursor: pointer; display: inline-flex; gap: 5px; align-items: center; box-shadow: inset 0 0 0 1px var(--line); border-radius: 999px; padding: 0 10px; }
+.toolsline > summary::-webkit-details-marker { display: none; }
+.toolsline[open] > summary .i { transform: rotate(180deg); }
+.toolsline .i { width: 10px; height: 10px; }
+.toolsline .brows { margin-top: 4px; padding: 6px 10px; background: var(--card); border-radius: 8px; box-shadow: var(--shadow); }
+.toolsline .tool { font-family: var(--mono); padding: 0 6px; border-radius: 4px; background: var(--muted); }
+.cref { margin-top: 6px; padding: 5px 8px; border-radius: 8px; background: var(--card); box-shadow: inset 0 0 0 1px var(--line); border-left: 3px solid var(--primary); cursor: pointer; }
+.cref:hover { background: color-mix(in srgb, var(--muted) 50%, var(--card)); }
+.cref .ct { font-weight: 600; margin-top: 2px; overflow-wrap: anywhere; }

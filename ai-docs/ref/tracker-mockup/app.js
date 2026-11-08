@@ -17,11 +17,15 @@
     seen: {},             // "store|stream" -> { badge key: true } already shown to that viewer
     fresh: {},            // badge keys that were new when the drawer last opened
     item: null, sheet: false, last: null, replyTo: null,
-    mode: 'cards', kscope: 'my', calMonth: null,
+    cmodes: {}, calMonth: {}, // store -> { card key -> view mode }; card key -> calendar month (local UI state, never an event)
     act: { family: 'all', member: 'all', flagged: false, conc: false },
     kind: 'all', status: 'open', dataOpen: false, openLogs: {}
   };
-  var MODES = [['cards', 'cards'], ['kanban', 'kanban'], ['activity', 'activity timeline'], ['gantt', 'due timeline'], ['calendar', 'calendar']];
+  // (303) each card offers only the view modes that fit its content; a card missing here has one layout (no picker).
+  var ASSIGN_MODES = [['list', 'list'], ['kanban', 'kanban'], ['gantt', 'due timeline'], ['calendar', 'calendar']];
+  var CARD_MODES = { items: [['list', 'tree'], ['kanban', 'kanban'], ['gantt', 'due timeline'], ['calendar', 'calendar']],
+    mine: ASSIGN_MODES, given: ASSIGN_MODES, myteam: ASSIGN_MODES, activity: [['list', 'list'], ['activity', 'activity timeline']] };
+  var WIDE = { kanban: 1, gantt: 1, calendar: 1, activity: 1 }; // (304) a card in one of these spans the full row
 
   function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
@@ -92,9 +96,17 @@
     Object.keys(data || {}).forEach(function (k) { d += attr(k, data[k]); });
     return '<button class="btn mini' + (cls ? ' ' + cls : '') + '"' + attr('act', act) + d + '>' + label + '</button>';
   }
-  function card(title, chip, body, extra, id) {
-    return '<section class="card"' + (id ? ' id="' + id + '"' : '') + '><header><h2>' + title + '</h2>' + (chip ? '<span class="chip">' + chip + '</span>' : '') +
+  function card(title, chip, body, extra, id, mode, cls) {
+    return '<section class="card' + (WIDE[mode] ? ' wide' : '') + (cls ? ' ' + cls : '') + '"' + (id ? ' id="' + id + '"' : '') + (mode ? attr('view', mode) : '') + '><header><h2>' + title + '</h2>' + (chip ? '<span class="chip">' + chip + '</span>' : '') +
       '<span class="grow"></span>' + (extra || '') + '</header><div class="cbody">' + body + '</div></section>';
+  }
+  // (305) the chosen mode is remembered per store, so it survives a viewer switch within the store
+  function modeOf(key) { var m = (ui.cmodes[ui.store] || {})[key]; return CARD_MODES[key] && m ? m : 'list'; }
+  function isWide(key) { return !!WIDE[modeOf(key)]; }
+  function picker(key) {
+    return '<span class="cmodes"' + attr('card', key) + '>' + CARD_MODES[key].map(function (m) {
+      return '<button class="btn mini' + (modeOf(key) === m[0] ? ' primary' : '') + '"' + attr('act', 'cmode') + attr('card', key) + attr('mode', m[0]) + '>' + m[1] + '</button>';
+    }).join('') + '</span>';
   }
   var RANK = { blocked: 0, doing: 1, todo: 2, awaiting: 3, done: 4 };
   function byRank(a, b) { return RANK[a.status] - RANK[b.status]; }
@@ -247,6 +259,8 @@
   function cardMine(v) {
     var mine = VS.my.assignments.map(A);
     var openR = mine.filter(function (r) { return r.status !== 'done'; }), done = mine.filter(function (r) { return r.status === 'done'; });
+    var m = modeOf('mine');
+    if (m !== 'list') return card('My assignments', openR.length + ' open', modeBody('mine', m, v), picker('mine'), 'card-mine', m);
     var h = openR.length ? openR.map(function (r) { return workRow(r, true); }).join('') : '<p class="muted">Nothing open is assigned to you.</p>';
     if (done.length) h += '<div class="sub">done</div>' + done.map(function (r) {
       return '<div class="row click"' + attr('item', r.item) + '><div class="r1">' + stChip('done') + titleRef(r.item) + '<span class="grow"></span><span class="muted">' + source(r) + '</span></div></div>';
@@ -256,7 +270,7 @@
       return '<div class="row click"' + attr('item', id) + '><div class="r1">' + stChip(it.status) + kindChip(it) + titleRef(id) + '<span class="grow"></span>' +
         btn('assign', 'Assign', { item: id }) + '</div></div>';
     }).join('');
-    return card('My assignments', openR.length + ' open', h, '', 'card-mine');
+    return card('My assignments', openR.length + ' open', h, picker('mine'), 'card-mine', m);
   }
 
   function cardRequests() {
@@ -321,12 +335,16 @@
       }).join('');
       return x + '</div>';
     }).join('');
+    var m = modeOf('myteam');
     return card('My team', team.length + ' below you, ' + totals.open + ' open' + (totals.blocked ? ', ' + totals.blocked + ' blocked' : '') +
       (totals.stale ? ', ' + totals.stale + ' stale' : '') + (totals.pending ? ', ' + totals.pending + ' unaccepted' : ''),
-      '<p class="r2" style="margin:0 0 6px">Everything your followers (down to 3 levels) are working on, whoever assigned it. Stale: doing or blocked with no status update for ' + E.STALE_DAYS + '+ days.</p>' + h, '', 'card-team');
+      m !== 'list' ? modeBody('myteam', m, v) :
+      '<p class="r2" style="margin:0 0 6px">Everything your followers (down to 3 levels) are working on, whoever assigned it. Stale: doing or blocked with no status update for ' + E.STALE_DAYS + '+ days.</p>' + h, picker('myteam'), 'card-team', m);
   }
 
   function cardGiven(v) {
+    var m = modeOf('given'), chip = VS.my.given.length + (VS.my.given.length === 1 ? ' item' : ' items') + (VS.my.today.confirms.length ? ', ' + VS.my.today.confirms.length + ' to confirm' : '');
+    if (m !== 'list') return card('Assigned by me', chip, modeBody('given', m, v), picker('given'), 'card-given', m);
     var h = VS.my.given.length ? VS.my.given.map(function (id) {
       var it = VS.items[id];
       var as = it.assignments.map(A).filter(function (r) { return (r.by === v || r.sender === v) && r.to !== v && (r.state === 'live' || r.state === 'pending'); }).sort(byRank);
@@ -338,7 +356,7 @@
             (r.state === 'live' && r.status === 'awaiting' && r.by === v ? btn('confirm', 'Confirm', { item: r.item, who: r.to }, 'primary') + btn('note', 'Reject', { item: r.item, who: r.to, op: 'item.reject' }) : '') + '</div>';
         }).join('') + '</div>';
     }).join('') : '<div class="empty">You have not assigned anything to others.</div>';
-    return card('Assigned by me', VS.my.given.length + (VS.my.given.length === 1 ? ' item' : ' items') + (VS.my.today.confirms.length ? ', ' + VS.my.today.confirms.length + ' to confirm' : ''), h, '', 'card-given');
+    return card('Assigned by me', chip, h, picker('given'), 'card-given', m);
   }
 
   function cardTeam(v) {
@@ -394,7 +412,8 @@
       ' status ' + sel('f-status', ui.status, ['all', 'open', 'blocked', 'done', 'hidden']);
   }
   function cardItems() {
-    var rows = VS.itemOrder.map(function (id) { return VS.items[id]; }).filter(itemFilter);
+    var rows = VS.itemOrder.map(function (id) { return VS.items[id]; }).filter(itemFilter), m = modeOf('items');
+    if (m !== 'list') return card('Items', rows.length + ' of ' + Object.keys(VS.items).length, modeBody('items', m), picker('items'), 'card-items', m);
     var h = '<div class="toolbar">' + itemFilterBar() + '</div>';
     h += rows.length ? rows.map(function (it) {
       var as = it.assignments.map(A).filter(function (r) { return r.state === 'live' || r.state === 'pending'; });
@@ -404,17 +423,19 @@
         '<span class="grow"></span>' + kindChip(it) + '</div>' +
         '<div class="r2">' + esc(it.alias) + ' by ' + esc(nm(it.author)) + (it.project ? ' &middot; ' + esc(it.project) : '') + ' &middot; ' + esc(fmtTs(it.lastActivity)) + '</div></div>';
     }).join('') : '<div class="empty">No items match.</div>';
-    return card('Items', rows.length + ' of ' + Object.keys(VS.items).length, h, '', 'card-items');
+    return card('Items', rows.length + ' of ' + Object.keys(VS.items).length, h, picker('items'), 'card-items', m);
   }
 
   function cardActivity() {
+    var chip = VS.stats.events + ' events, ' + VS.stats.flagged + ' flagged' + (VS.stats.concurrent ? ', ' + VS.stats.concurrent + ' concurrent' : ''), m = modeOf('activity');
+    if (m !== 'list') return card('Activity', chip, modeBody('activity', m), picker('activity'), 'card-activity', m);
     var rows = VS.events.filter(function (n) { return (!ui.act.flagged || n.status !== 'applied') && (!ui.act.conc || n.markers.length); }), cap = 50, shown = rows.slice(-cap).reverse();
     var h = lastWrite();
     h += '<div class="toolbar"><label><input type="checkbox" id="flagged-only"' + (ui.act.flagged ? ' checked' : '') + '> flagged only</label>' +
       '<label><input type="checkbox" id="conc-only"' + (ui.act.conc ? ' checked' : '') + '> concurrent only</label>' +
       '<span class="grow"></span><span class="muted">newest first, ' + shown.length + ' of ' + rows.length + '</span></div>';
     h += shown.length ? '<ul class="plain">' + shown.map(function (n) { return evLine(n, false); }).join('') + '</ul>' : '<div class="empty">Nothing to show.</div>';
-    return card('Activity', VS.stats.events + ' events, ' + VS.stats.flagged + ' flagged' + (VS.stats.concurrent ? ', ' + VS.stats.concurrent + ' concurrent' : ''), h, '', 'card-activity');
+    return card('Activity', chip, h, picker('activity'), 'card-activity', m);
   }
   function lastWrite() {
     if (!ui.last) return '';
@@ -446,36 +467,55 @@
 
   // ------------------------------------------------------------- view modes
 
-  // Kanban: columns by status. My/Team: cards are assignments; Items: cards are
-  // items. Dragging moves only the viewer's own live assignment (item.status, or
-  // item.close on the done column).
-  var KCOLS = { my: ['pending', 'todo', 'doing', 'blocked', 'awaiting', 'done'], team: ['pending', 'todo', 'doing', 'blocked', 'awaiting', 'done'],
+  // (303) The kanban, activity timeline, due timeline, and calendar renderers draw a
+  // card's body, scoped to that card's own rows and filters. A card in one of these
+  // modes spans the full row of the cards layout (304).
+  function modeBody(key, m, v) {
+    if (m === 'kanban') return kanbanBody(key, v);
+    if (m === 'gantt') return ganttBody(key, dueRows(key, v));
+    if (m === 'calendar') return calendarBody(key, dueRows(key, v));
+    if (m === 'activity') return activityBody();
+    return '';
+  }
+  // The assignment records an assignment card shows: mine (live plus pending to me),
+  // given (what I assigned or handed to others, live or pending), myteam (followers'
+  // open and unaccepted work).
+  function assignRecs(key, v) {
+    if (key === 'mine') return VS.my.assignments.concat(VS.my.received.pending).map(A);
+    if (key === 'given') return [].concat.apply([], VS.my.given.map(function (id) {
+      return VS.items[id].assignments.map(A).filter(function (r) { return (r.by === v || r.sender === v) && r.to !== v && (r.state === 'live' || r.state === 'pending'); });
+    }));
+    return [].concat.apply([], VS.my.team.map(function (p) { return p.open.concat(p.pending); })).map(A);
+  }
+
+  // Kanban: columns by status. Assignment cards: cards are assignments (with the
+  // pending column); Items: cards are items. Dragging moves only the viewer's own
+  // live assignment (item.status, or item.close on the done column).
+  var KCOLS = { assign: ['pending', 'todo', 'doing', 'blocked', 'awaiting', 'done'],
     items: ['unassigned', 'pending', 'todo', 'doing', 'blocked', 'awaiting', 'done', 'declined', 'returned'] };
-  function viewKanban(v) {
-    var cols = KCOLS[ui.kscope], buckets = {};
+  function kanbanBody(key, v) {
+    var cols = KCOLS[key === 'items' ? 'items' : 'assign'], buckets = {};
     cols.forEach(function (c) { buckets[c] = []; });
-    if (ui.kscope === 'items') {
+    if (key === 'items') {
       VS.itemOrder.forEach(function (id) {
         var it = VS.items[id];
-        if (it.hidden || it.kind === 'topic' || !buckets[it.status]) return;
+        if (it.hidden || it.kind === 'topic' || !buckets[it.status] || !itemFilter(it)) return;
         var mineR = it.assignments.map(A).filter(function (r) { return r.to === v && r.state === 'live'; })[0];
         buckets[it.status].push({ item: id, drag: mineR && mineR.status !== 'done' ? id : null,
           sub: (it.assignments.map(A).filter(function (r) { return r.state === 'live' || r.state === 'pending'; }).map(function (r) { return r.to + (r.state === 'pending' ? '?' : ''); }).join(', ') || 'nobody') });
       });
     } else {
-      var recs = ui.kscope === 'my' ? VS.my.assignments.concat(VS.my.received.pending).map(A) :
-        [].concat.apply([], VS.my.team.map(function (p) { return p.open.concat(p.pending); })).map(A);
-      recs.forEach(function (r) {
+      assignRecs(key, v).forEach(function (r) {
         var col = r.state === 'pending' ? 'pending' : r.status;
         if (!buckets[col]) return;
         buckets[col].push({ item: r.item, rec: r, drag: r.to === v && r.state === 'live' && r.status !== 'done' ? r.item : null,
-          sub: (ui.kscope === 'team' ? nm(r.to) + ' &middot; ' : '') + source(r) });
+          sub: (key !== 'mine' ? esc(nm(r.to)) + ' &middot; ' : '') + source(r) });
       });
     }
     Object.keys(buckets).forEach(function (c) {
       buckets[c].sort(function (x, y) { var a = VS.items[x.item], b = VS.items[y.item]; return b.priorityLevel - a.priorityLevel || ((a.due || '9') < (b.due || '9') ? -1 : 1); });
     });
-    var h = '<div class="toolbar">scope ' + sel('k-scope', ui.kscope, [['my', 'my assignments'], ['team', 'my team'], ['items', 'items']]) +
+    var h = '<div class="toolbar">' + (key === 'items' ? itemFilterBar() : '') +
       '<span class="muted">drag a card to change the status of your own assignment (done = close)</span></div><div class="kanban">';
     h += cols.map(function (c) {
       return '<div class="kcol"' + attr('kcol', c) + '><div class="khead">' + stChip(c) + ' <span class="muted">' + buckets[c].length + '</span></div>' +
@@ -485,7 +525,7 @@
             '<div class="r1">' + prChip(it) + titleRef(x.item) + dueChip(it) + '</div><div class="r2">' + x.sub + '</div></div>';
         }).join('') + '</div>';
     }).join('');
-    return card('Kanban', ui.kscope, h + '</div>' + lastWrite(), '', 'view-kanban');
+    return h + '</div>' + lastWrite();
   }
 
   var FAMILIES = [['all', 'all events'], ['item', 'item fields and status'], ['assign', 'assignment (assign, accept, decline, return, handoff, unassign)'], ['comment', 'comments'], ['roles', 'roles']];
@@ -495,7 +535,7 @@
     if (/^item\.(assign|accept|decline|return|handoff|unassign)$/.test(t)) return 'assign';
     return 'item';
   }
-  function viewActivity() {
+  function activityBody() {
     var f = ui.act, rows = VS.events.filter(function (n) {
       return (f.family === 'all' || family(n.type) === f.family) && (f.member === 'all' || n.member === f.member) &&
         (!f.flagged || n.status !== 'applied') && (!f.conc || n.markers.length);
@@ -503,57 +543,112 @@
     var people = [['all', 'everyone']].concat(Object.keys(VS.members).map(function (id) { return [id, VS.members[id].name]; }));
     var h = '<div class="toolbar">' + sel('a-family', f.family, FAMILIES) + sel('a-member', f.member, people) +
       '<label><input type="checkbox" id="flagged-only"' + (f.flagged ? ' checked' : '') + '> flagged only</label>' +
-      '<label><input type="checkbox" id="conc-only"' + (f.conc ? ' checked' : '') + '> concurrent only</label><span class="grow"></span><span class="muted">' + rows.length + ' events, by time, newest first</span></div>';
+      '<label><input type="checkbox" id="conc-only"' + (f.conc ? ' checked' : '') + '> concurrent only</label><span class="grow"></span><span class="muted">' + rows.length + ' events, by write time, newest first</span></div>';
     var day = null;
     h += '<ul class="plain atl">' + rows.map(function (n) {
       var d = String(n.ts).slice(0, 10), x = '';
       if (d !== day) { day = d; x = '<li class="day">' + esc(d) + '</li>'; }
       return x + evLine(n, false);
     }).join('') + '</ul>';
-    return card('Activity timeline', 'events by write time', lastWrite() + h, '', 'view-activity');
+    return lastWrite() + h;
   }
 
   function dayNum(d) { return Math.floor(Date.parse(String(d).slice(0, 10) + 'T00:00:00Z') / 86400000); }
   function dayStr(n) { return new Date(n * 86400000).toISOString().slice(0, 10); }
-  // Due-date timeline: one bar per item with a due date, from its start (first
-  // doing, else creation) to its due day.
-  function viewGantt() {
-    var rows = VS.itemOrder.map(function (id) { return VS.items[id]; }).filter(function (it) { return it.due && !it.hidden && it.kind !== 'topic' && itemFilter(it); });
-    if (!rows.length) return card('Due timeline', '0 items', '<div class="toolbar">' + itemFilterBar() + '</div><div class="empty">No items with a due date match.</div>', '', 'view-gantt');
+  // The dated rows a due timeline or calendar draws for a card: one per item on
+  // Items (its filters apply), one per assignment record on an assignment card,
+  // with the record's own state and, off "mine", the assignee.
+  function dueRows(key, v) {
+    function dated(it) { return it && it.due && !it.hidden && it.kind !== 'topic'; }
+    if (key === 'items') return VS.itemOrder.map(function (id) { return VS.items[id]; }).filter(function (it) { return dated(it) && itemFilter(it); })
+      .map(function (it) { return { item: it.id, status: it.status, chip: stChip(it.status), who: '' }; });
+    return assignRecs(key, v).filter(function (r) { return dated(VS.items[r.item]); }).map(function (r) {
+      return { item: r.item, status: r.state === 'live' ? r.status : r.state, chip: recChip(r), who: key === 'mine' ? '' : nm(r.to) };
+    });
+  }
+  function whoTag(x) { return x.who ? '<span class="muted">' + esc(x.who) + '</span>' : ''; }
+  // Due-date timeline: one bar per row, from the item's start (first doing, else
+  // creation) to its due day.
+  function ganttBody(key, rows) {
+    var bar = key === 'items' ? itemFilterBar() : '';
+    if (!rows.length) return '<div class="toolbar">' + bar + '</div><div class="empty">No items with a due date match.</div>';
     var t0 = dayNum(today()), lo = t0, hi = t0;
-    rows.forEach(function (it) { lo = Math.min(lo, dayNum(it.started || it.ts), dayNum(it.due)); hi = Math.max(hi, dayNum(it.due)); });
+    rows.forEach(function (x) { var it = VS.items[x.item]; lo = Math.min(lo, dayNum(it.started || it.ts), dayNum(it.due)); hi = Math.max(hi, dayNum(it.due)); });
     hi += 1;
     var span = hi - lo, pct = function (d) { return ((d - lo) / span * 100).toFixed(2) + '%'; };
     var axis = '';
     for (var d = lo; d < hi; d++) axis += '<span class="gtick' + (d === t0 ? ' now' : '') + '" style="left:' + pct(d) + '">' + (new Date(d * 86400000).getUTCDay() === 1 || d === lo ? esc(dayStr(d).slice(5)) : '') + '</span>';
-    var h = '<div class="toolbar">' + itemFilterBar() + '<span class="muted">bar: start (first doing, else creation) to due; the line is today (' + esc(today()) + ')</span></div>' +
+    var h = '<div class="toolbar">' + bar + '<span class="muted">' + rows.length + ' with a due date; bar: start (first doing, else creation) to due; the line is today (' + esc(today()) + ')</span></div>' +
       '<div class="gantt"><div class="grow-axis"><div class="glabel"></div><div class="gtrack axis">' + axis + '</div></div>';
-    h += rows.map(function (it) {
-      var s = dayNum(it.started || it.ts), e = dayNum(it.due) + 1, over = it.due < today() && it.status !== 'done';
-      return '<div class="grow-row click"' + attr('item', it.id) + '><div class="glabel">' + prChip(it) + stChip(it.status) + titleRef(it.id) + '</div>' +
-        '<div class="gtrack"><span class="gnow" style="left:' + pct(t0) + '"></span><span class="gbar st-' + esc(it.status) + (over ? ' over' : '') + '" style="left:' + pct(Math.min(s, e - 1)) + ';width:' + ((Math.max(1, e - Math.min(s, e - 1))) / span * 100).toFixed(2) + '%" title="' +
+    h += rows.map(function (x) {
+      var it = VS.items[x.item], s = dayNum(it.started || it.ts), e = dayNum(it.due) + 1, over = it.due < today() && x.status !== 'done';
+      return '<div class="grow-row click"' + attr('item', it.id) + '><div class="glabel">' + prChip(it) + x.chip + titleRef(it.id) + whoTag(x) + '</div>' +
+        '<div class="gtrack"><span class="gnow" style="left:' + pct(t0) + '"></span><span class="gbar st-' + esc(x.status) + (over ? ' over' : '') + '" style="left:' + pct(Math.min(s, e - 1)) + ';width:' + ((Math.max(1, e - Math.min(s, e - 1))) / span * 100).toFixed(2) + '%" title="' +
         esc((it.started ? 'started ' : 'created ') + String(it.started || it.ts).slice(0, 10) + ' - due ' + it.due) + '">' + esc(it.due.slice(5)) + '</span></div></div>';
     }).join('');
-    return card('Due timeline', rows.length + ' items with a due date', h + '</div>', '', 'view-gantt');
+    return h + '</div>';
   }
 
-  function viewCalendar() {
-    var m = ui.calMonth || today().slice(0, 7), first = dayNum(m + '-01'), dow = (new Date(first * 86400000).getUTCDay() + 6) % 7;
+  function calendarBody(key, rows) {
+    var m = ui.calMonth[key] || today().slice(0, 7), first = dayNum(m + '-01'), dow = (new Date(first * 86400000).getUTCDay() + 6) % 7;
     var y = Number(m.slice(0, 4)), mo = Number(m.slice(5, 7)), days = new Date(Date.UTC(y, mo, 0)).getUTCDate();
     var byDay = {};
-    VS.itemOrder.forEach(function (id) { var it = VS.items[id]; if (it.due && !it.hidden && itemFilter(it)) (byDay[it.due] = byDay[it.due] || []).push(it); });
+    rows.forEach(function (x) { var due = VS.items[x.item].due; (byDay[due] = byDay[due] || []).push(x); });
     var prev = new Date(Date.UTC(y, mo - 2, 1)).toISOString().slice(0, 7), next = new Date(Date.UTC(y, mo, 1)).toISOString().slice(0, 7);
-    var h = '<div class="toolbar">' + btn('cal', '&lsaquo;', { month: prev }) + '<b>' + esc(m) + '</b>' + btn('cal', '&rsaquo;', { month: next }) + btn('cal', 'today', { month: today().slice(0, 7) }) +
-      itemFilterBar() + '</div><div class="cal">' + ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(function (d) { return '<div class="cdow">' + d + '</div>'; }).join('');
+    var n = Object.keys(byDay).filter(function (k) { return k.slice(0, 7) === m; }).reduce(function (s, k) { return s + byDay[k].length; }, 0);
+    var h = '<div class="toolbar">' + btn('cal', '&lsaquo;', { month: prev, card: key }) + '<b>' + esc(m) + '</b>' + btn('cal', '&rsaquo;', { month: next, card: key }) +
+      btn('cal', 'today', { month: today().slice(0, 7), card: key }) + (key === 'items' ? itemFilterBar() : '') + '<span class="muted">' + n + ' due in ' + esc(m) + '</span></div>' +
+      '<div class="cal">' + ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(function (d) { return '<div class="cdow">' + d + '</div>'; }).join('');
     for (var i = 0; i < dow; i++) h += '<div class="cday off"></div>';
     for (var d = 1; d <= days; d++) {
       var ds = m + '-' + (d < 10 ? '0' : '') + d, list = byDay[ds] || [];
-      h += '<div class="cday' + (ds === today() ? ' now' : '') + '"' + attr('day', ds) + '><div class="cnum">' + d + '</div>' + list.map(function (it) {
-        return '<div class="citem click"' + attr('item', it.id) + '>' + stChip(it.status) + prChip(it) + titleRef(it.id) + '</div>';
+      h += '<div class="cday' + (ds === today() ? ' now' : '') + '"' + attr('day', ds) + '><div class="cnum">' + d + '</div>' + list.map(function (x) {
+        return '<div class="citem click"' + attr('item', x.item) + '>' + x.chip + prChip(VS.items[x.item]) + titleRef(x.item) + whoTag(x) + '</div>';
       }).join('') + '</div>';
     }
-    var n = Object.keys(byDay).filter(function (k) { return k.slice(0, 7) === m; }).reduce(function (s, k) { return s + byDay[k].length; }, 0);
-    return card('Calendar', n + ' due in ' + m, h + '</div>', '', 'view-calendar');
+    return h + '</div>';
+  }
+
+  // ------------------------------------------------------- chat card (placeholder)
+
+  // (300) (302) (305) A placeholder for the support-agent chat child (the future
+  // daemon-side local support agent): placement and a static sample only, with no
+  // responder and no events. Entry shapes follow the dashboard conversation view
+  // (user text, assistant text, a collapsed tool line) plus a tracker card reference
+  // that renders an item from the view state and opens its thread sheet.
+  function crefHtml(id) {
+    var it = VS.items[id];
+    var who = it.assignments.map(A).filter(function (r) { return r.state === 'live' || r.state === 'pending'; }).map(function (r) { return nm(r.to) + (r.state === 'pending' ? '?' : ''); });
+    return '<div class="cref click"' + attr('item', id) + attr('cref', id) + ' title="open the thread"><div class="r1">' + stChip(it.status) + prChip(it) + dueChip(it) +
+      '<span class="grow"></span><span class="al">' + esc(it.alias) + '</span></div><div class="ct">' + esc(it.title) + '</div>' +
+      '<div class="r2">&rarr; ' + esc(who.join(', ') || 'nobody') + '</div></div>';
+  }
+  // Real item ids from the current viewer's view state, so the references resolve:
+  // the top open work first, then what waits for an answer or confirm, then what I gave.
+  function chatRefs() {
+    var pick = [];
+    function add(id) { var it = VS.items[id]; if (it && !it.hidden && it.kind !== 'topic' && pick.indexOf(id) < 0) pick.push(id); }
+    VS.my.today.work.concat(VS.my.today.pending, VS.my.today.confirms).forEach(function (id) { add(A(id).item); });
+    VS.my.given.forEach(add);
+    VS.itemOrder.forEach(add);
+    return pick;
+  }
+  function chatMsg(who, label, html) {
+    return '<div class="msg ' + who + '"><div class="mh"><b>' + label + '</b> ' + esc(fmtTs(ui.clock[ui.store]).slice(6)) + '</div><div class="bub">' + html + '</div></div>';
+  }
+  function cardChat() {
+    var refs = chatRefs(), a = refs[0], b = refs[1];
+    var log = '<div class="sysline">placeholder: support-agent chat child, a static sample (no responder, no events)</div>' +
+      chatMsg('user', 'You', 'What should I look at first?') +
+      '<details class="toolsline"><summary><span class="tsum">2 tools &middot; tracker view, tracker items</span><svg class="i"><use href="#i-chev"/></svg></summary>' +
+      '<div class="brows"><div class="brow"><span class="tool">tracker view</span> ' + esc(nm(memberOf(viewerOf(ui.store)))) + '</div>' +
+      '<div class="brow"><span class="tool">tracker items</span> open, by priority then due</div></div></details>' +
+      chatMsg('lead', 'Support agent', a ? 'This one first, by priority and then due:' + crefHtml(a) : 'Nothing in this store involves you right now.') +
+      chatMsg('user', 'You', 'Anything else?') +
+      chatMsg('lead', 'Support agent', b ? 'This one is next:' + crefHtml(b) : 'Nothing else right now.');
+    var comp = '<div class="chat-comp"><textarea rows="1" placeholder="Ask the support agent... (placeholder)" disabled></textarea>' +
+      '<button class="csend" disabled><svg class="i"><use href="#i-send"/></svg></button></div>';
+    return card('Support agent', 'placeholder', '<div class="chat-log">' + log + '</div>' + comp, '', 'card-chat', '', 'chat');
   }
 
   // --------------------------------------------------------------- sync state
@@ -580,20 +675,26 @@
     return h;
   }
 
+  // The drawer has one layout, the cards layout (303). A card in a wide mode leaves its
+  // column and spans the full row above the columns; the remaining cards flow below (304).
+  var LAYOUT = [['today', 'mine', 'received', 'given'], ['myteam', 'items'], ['chat', 'org', 'activity', 'data']];
   function drawerHtml(name, v) {
     var vs = VS, nMem = Object.keys(vs.members).filter(function (id) { return !vs.members[id].removed; }).length;
-    var modes = MODES.map(function (m) { return '<button class="btn mini' + (ui.mode === m[0] ? ' primary' : '') + '"' + attr('act', 'mode') + attr('mode', m[0]) + '>' + m[1] + '</button>'; }).join('');
+    var CARDS = { today: cardToday, mine: cardMine, received: cardRequests, given: cardGiven, myteam: cardMyTeam, items: cardItems,
+      chat: cardChat, org: cardTeam, activity: cardActivity, data: cardData };
     var h = '<div class="dr-title"><b>' + esc(vs.store.label) + '</b><span>' + nMem + ' members, ' + vs.stats.events + ' events from ' + vs.stats.commits + ' commits, ' +
-      vs.stats.flagged + ' flagged</span><span class="grow"></span><span class="modes">' + modes + '</span>' +
+      vs.stats.flagged + ' flagged</span><span class="grow"></span>' +
       '<button class="btn primary" data-act="create"><svg class="i"><use href="#i-plus"/></svg>New</button></div>' + syncHtml(name);
     if (!vs.viewer.isMember) h += '<p class="err">' + esc(v) + ' is not a member of this store (removed or never joined): writes are flagged.</p>';
-    if (ui.mode === 'kanban') return h + viewKanban(v);
-    if (ui.mode === 'activity') return h + viewActivity();
-    if (ui.mode === 'gantt') return h + viewGantt();
-    if (ui.mode === 'calendar') return h + viewCalendar();
-    return h + '<div class="dr-cols"><div class="dr-col">' + cardToday() + cardMine(v) + cardRequests() + cardGiven(v) + '</div>' +
-      '<div class="dr-col">' + cardMyTeam(v) + cardItems() + '</div>' +
-      '<div class="dr-col">' + cardTeam(v) + cardActivity() + cardData() + '</div></div>';
+    var wide = '', cols = LAYOUT.map(function (col) {
+      return col.map(function (k) {
+        var html = CARDS[k](v);
+        if (html && isWide(k)) { wide += html; return ''; }
+        return html;
+      }).join('');
+    }).filter(Boolean);
+    return h + (wide ? '<div class="dr-wide">' + wide + '</div>' : '') +
+      '<div class="dr-cols' + (cols.length < LAYOUT.length ? ' n' + cols.length : '') + '">' + cols.map(function (c) { return '<div class="dr-col">' + c + '</div>'; }).join('') + '</div>';
   }
 
   // ------------------------------------------------------------ thread sheet
@@ -1075,6 +1176,8 @@
     var draft = $('cbox') ? $('cbox').value : '';
     body.innerHTML = drawerHtml(name, v);
     body.scrollTop = top1;
+    var chat = body.querySelector('.chat-log');
+    if (chat) chat.scrollTop = chat.scrollHeight; // newest message at the bottom
     var open = ui.sheet && ui.item;
     $('sheet').classList.toggle('open', !!open);
     $('sheet').setAttribute('aria-hidden', String(!open));
@@ -1135,8 +1238,8 @@
         else if (k === 'sheet-close') { ui.sheet = false; render(); }
         else if (k === 'dlg-cancel') closeDialog();
         else if (k === 'open') showItem(d.item);
-        else if (k === 'mode') { ui.mode = a.getAttribute('data-mode'); render(); }
-        else if (k === 'cal') { ui.calMonth = a.getAttribute('data-month'); render(); }
+        else if (k === 'cmode') { (ui.cmodes[ui.store] = ui.cmodes[ui.store] || {})[a.getAttribute('data-card')] = a.getAttribute('data-mode'); render(); }
+        else if (k === 'cal') { ui.calMonth[a.getAttribute('data-card')] = a.getAttribute('data-month'); render(); }
         else if (k === 'clock') { tick(ui.store, Number(a.getAttribute('data-min'))); render(); }
         else if (k === 'sync') { syncNow(ui.store); render(); }
         else if (k === 'go-offline') { stores[ui.store].setOnline(viewerOf(ui.store), false); render(); toast('This clone is offline: new writes stay in its journal, and it fetches nothing.'); }
@@ -1161,7 +1264,6 @@
       else if (t.id === 'vclone') switchViewer(t.value);
       else if (t.id === 'f-kind') { ui.kind = t.value; render(); }
       else if (t.id === 'f-status') { ui.status = t.value; render(); }
-      else if (t.id === 'k-scope') { ui.kscope = t.value; render(); }
       else if (t.id === 'a-family') { ui.act.family = t.value; render(); }
       else if (t.id === 'a-member') { ui.act.member = t.value; render(); }
       else if (t.id === 'flagged-only') { ui.act.flagged = t.checked; render(); }
