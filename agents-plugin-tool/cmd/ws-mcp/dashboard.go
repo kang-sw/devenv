@@ -15,6 +15,7 @@ import (
 	"github.com/kang-sw/devenv/internal/mcp"
 	"github.com/kang-sw/devenv/internal/wsagent"
 	"github.com/kang-sw/devenv/internal/wsdashboard"
+	"github.com/kang-sw/devenv/internal/wstrackerhost"
 )
 
 // dashboardCommand runs the machine-wide dashboard daemon in the foreground.
@@ -67,12 +68,32 @@ func dashboardCommand(args []string) {
 		fatal("dashboard", err)
 	}
 	wsdashboard.LogDevAssets(logw, devRoot)
+	stopPoll := startTrackerPoll(logw)
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
 	select {
 	case <-signals:
 		daemon.Close()
 	case <-daemon.Done():
+	}
+	stopPoll()
+}
+
+// startTrackerPoll runs the tracker's background poll in the daemon: every
+// wstrackerhost.DefaultPollInterval, a fetch of every registered store,
+// whatever workflow.tracker_enabled says (the knob gates only manual text).
+// While it runs, a ws-mcp's pre-read check leaves the network to it. A host
+// that cannot be created is logged, and the daemon runs without the poll.
+func startTrackerPoll(logw io.Writer) (stop func()) {
+	h, err := wstrackerhost.New(wstrackerhost.Options{})
+	if err != nil {
+		fmt.Fprintf(logw, "ws-mcp dashboard: tracker poll not started: %v\n", err)
+		return func() {}
+	}
+	stopPoll := h.StartPoll(wstrackerhost.DefaultPollInterval)
+	return func() {
+		stopPoll()
+		_ = h.Close()
 	}
 }
 

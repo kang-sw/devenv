@@ -65,19 +65,38 @@ func replaceOrAppend(body, old, replacement string) string {
 	return strings.TrimRight(body, "\n") + "\n\n" + replacement
 }
 
-// applyWhiteboardVariants applies the knob-on variants for one playbook when
-// enabled (see Server.whiteboardEnabled); a disabled knob or another playbook
-// returns body unchanged. The workflow manual also gets the shared command
-// syntax section, ahead of the whiteboard section, under its own condition
-// (commandSyntaxEnabled).
-func applyWhiteboardVariants(s *Server, rsrcRoot, name, body string, enabled bool) (string, error) {
-	if name == workflowManualPlaybookName && commandSyntaxEnabled(enabled) {
+// applyKnobVariants applies the knob-on variants of the command-language
+// tools for one playbook. The workflow manual gets the shared command syntax
+// section once (commandSyntaxEnabled), then the whiteboard section, then the
+// tracker section; another playbook gets its whiteboard variants. Off knobs
+// return body unchanged.
+func applyKnobVariants(s *Server, rsrcRoot, name, body string, whiteboardOn, trackerOn bool) (string, error) {
+	if name == workflowManualPlaybookName && commandSyntaxEnabled(whiteboardOn, trackerOn) {
 		section, err := commandSyntaxManualSection(rsrcRoot)
 		if err != nil {
 			return "", err
 		}
 		body = strings.TrimRight(body, "\n") + "\n\n" + section
 	}
+	body, err := applyWhiteboardVariants(s, rsrcRoot, name, body, whiteboardOn)
+	if err != nil {
+		return "", err
+	}
+	if name == workflowManualPlaybookName && trackerOn {
+		section, err := trackerManualSection(s, rsrcRoot)
+		if err != nil {
+			return "", err
+		}
+		body = strings.TrimRight(body, "\n") + "\n\n" + section
+	}
+	return body, nil
+}
+
+// applyWhiteboardVariants applies the whiteboard's knob-on variants for one
+// playbook when enabled (see Server.whiteboardEnabled); a disabled knob or
+// another playbook returns body unchanged. The shared command syntax section
+// ahead of it is applyKnobVariants'.
+func applyWhiteboardVariants(s *Server, rsrcRoot, name, body string, enabled bool) (string, error) {
 	if !enabled {
 		return body, nil
 	}

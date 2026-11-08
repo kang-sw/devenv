@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -38,8 +40,8 @@ func (c *ledgerClock) AfterFunc(d time.Duration, f func()) wsledger.Timer {
 }
 
 // TestRealLedgerTwoWriters is the real-ledger coverage: two writers over one
-// temporary bare repository with real ssh-keygen keys, opened through Open
-// (veto set), dispatching and syncing; both derive the same view state, and
+// temporary bare repository with real ssh-keygen keys, made through Create
+// and Join (veto set), dispatching and syncing; both derive the same view state, and
 // the protocol flags a removal the (209) veto rejects.
 func TestRealLedgerTwoWriters(t *testing.T) {
 	ctx := context.Background()
@@ -49,27 +51,21 @@ func TestRealLedgerTwoWriters(t *testing.T) {
 		return wsledger.Options{Dir: filepath.Join(root, "stores", member), RepoDir: filepath.Join(root, "shared.git"),
 			Member: member, Name: member, KeyDir: filepath.Join(root, "keys", member), CloneID: "c1", Clock: clock}
 	}
-	// Create and Join write no removal; the store is then reopened with the veto.
-	for _, w := range []struct {
-		member string
-		mk     func(context.Context, wsledger.Options) (*wsledger.Ledger, error)
-	}{{"ada", wsledger.Create}, {"bo", wsledger.Join}} {
-		l, err := w.mk(ctx, opts(w.member))
-		if err != nil {
-			t.Fatalf("%s: %v", w.member, err)
-		}
-		l.Close()
-	}
-	adaL, err := Open(ctx, opts("ada"))
+	// The wrappers install the veto the vetoed removal below relies on.
+	adaL, err := Create(ctx, opts("ada"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer adaL.Close()
-	boL, err := Open(ctx, opts("bo"))
+	boL, err := Join(ctx, opts("bo"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer boL.Close()
+	// ada's store was open while bo joined in the shared repository.
+	if _, err := adaL.Reload(ctx); err != nil {
+		t.Fatal(err)
+	}
 	ada, bo := New(adaL, "ada.c1"), New(boL, "bo.c1")
 
 	raw := func(v any) json.RawMessage { b, _ := json.Marshal(v); return b }
@@ -142,5 +138,65 @@ func TestRealLedgerTwoWriters(t *testing.T) {
 	}
 	if viewJSON(t, ada.View(now, 0)) != viewJSON(t, Derive(boL, "ada.c1", now, 0)) {
 		t.Fatal("the writers disagree after the vetoed removal")
+	}
+}
+
+// TestRegisterInstallsVeto: Register over a bare remote (one creating, one
+// joining) returns stores with the (209) veto installed, so a removal
+// written past Dispatch is flagged on both clones.
+func TestRegisterInstallsVeto(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	remote := filepath.Join(root, "remote.git")
+	if out, err := exec.Command("git", "init", "--quiet", "--bare", remote).CombinedOutput(); err != nil {
+		t.Fatalf("init remote: %v: %s", err, out)
+	}
+	clock := &ledgerClock{now: time.Date(2026, 11, 8, 9, 0, 0, 0, time.UTC)}
+	opts := func(member string) wsledger.Options {
+		return wsledger.Options{Dir: filepath.Join(root, "stores", member), Member: member, Name: member,
+			KeyDir: filepath.Join(root, "keys", member), CloneID: "c1", Clock: clock}
+	}
+	adaL, err := Register(ctx, opts("ada"), remote)
+	if err != nil {
+		t.Fatalf("register ada: %v", err)
+	}
+	defer adaL.Close()
+	boL, err := Register(ctx, opts("bo"), remote)
+	if err != nil {
+		t.Fatalf("register bo: %v", err)
+	}
+	defer boL.Close()
+	if _, err := adaL.Fetch(ctx); err != nil {
+		t.Fatal(err)
+	}
+	ada := New(adaL, "ada.c1")
+	raw := func(v any) json.RawMessage { b, _ := json.Marshal(v); return b }
+	if _, err := ada.Dispatch(ctx, []wsledger.NewEvent{{Type: TypeSetLead, Payload: raw(map[string]any{"member": "ada", "leads": []string{"bo"}})}}); err != nil {
+		t.Fatal(err)
+	}
+	ids, err := adaL.Append(ctx, []wsledger.NewEvent{{Type: wsledger.TypeRemoveMember, Payload: raw(map[string]any{"member": "bo"})}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := adaL.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := boL.Fetch(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range []*wsledger.Ledger{adaL, boL} {
+		evs, _ := l.Events(wsledger.Cursor{})
+		found := false
+		for _, e := range evs {
+			if e.ID == ids[0] {
+				found = true
+				if e.Verdict != wsledger.Flagged || !strings.Contains(e.Reason, "bo still leads ada") {
+					t.Fatalf("%s.%s: the removal is %s %q, want flagged by the veto", l.MemberID(), l.CloneID(), e.Verdict, e.Reason)
+				}
+			}
+		}
+		if !found {
+			t.Fatalf("%s.%s: the removal is not in the view", l.MemberID(), l.CloneID())
+		}
 	}
 }

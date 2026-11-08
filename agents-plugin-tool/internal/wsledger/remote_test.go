@@ -792,3 +792,61 @@ func TestRemoteRefusedPushFailsSync(t *testing.T) {
 		t.Fatalf("sync after the remote accepts again = %+v, want pushed and nothing pending", rep)
 	}
 }
+
+// noNetworkRunner fails every fetch and push, so a test proves a call never
+// reached the remote.
+type noNetworkRunner struct{ inner wsgit.Runner }
+
+func (r noNetworkRunner) RunGit(ctx context.Context, root string, args ...string) ([]byte, error) {
+	for _, a := range args {
+		if a == "fetch" || a == "push" {
+			return nil, fmt.Errorf("network call %v", args)
+		}
+	}
+	return r.inner.RunGit(ctx, root, args...)
+}
+
+// TestReloadReadsOtherProcessesWithoutNetwork: two Ledgers on one store
+// directory stand in for two processes of one clone. Reload shows the other
+// one's journal write, its fetch, and its push, and never calls the remote.
+func TestReloadReadsOtherProcessesWithoutNetwork(t *testing.T) {
+	w := newWorld(t)
+	url := w.newRemote("r")
+	oa := w.remoteOpts("ada", "c1")
+	ada := w.register(oa, url)
+	bo := w.register(w.remoteOpts("bo", "c1"), url)
+
+	ob := oa
+	ob.Runner = noNetworkRunner{inner: wsgit.ExecRunner{}}
+	reader, err := Open(context.Background(), ob)
+	if err != nil {
+		t.Fatalf("open the second instance: %v", err)
+	}
+	t.Cleanup(func() { reader.Close() })
+
+	own := appendOne(t, ada, "note", note("a1"))
+	if _, ok := eventsByID(reader)[own]; ok {
+		t.Fatal("precondition: an open Ledger must not see another instance's write before Reload")
+	}
+	if _, err := reader.Reload(context.Background()); err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if e, ok := eventsByID(reader)[own]; !ok || !e.Pending {
+		t.Fatalf("after Reload the other instance's write must show as pending: %+v %v", e, ok)
+	}
+
+	theirs := appendOne(t, bo, "note", note("b1"))
+	syncOK(t, bo)
+	syncOK(t, ada) // pushes ada's write and fetches bo's
+	rep, err := reader.Reload(context.Background())
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	wantVerdict(t, reader, theirs, Valid)
+	if e := eventsByID(reader)[own]; e.Pending {
+		t.Fatalf("after the other instance's sync the write must be committed: %+v", e)
+	}
+	if rep.Pending.Count != 0 || reader.Pending().Count != 0 {
+		t.Fatalf("pending after the other instance pushed = %+v, want nothing", rep.Pending)
+	}
+}

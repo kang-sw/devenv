@@ -17,6 +17,7 @@ import (
 
 	"github.com/kang-sw/devenv/internal/mcp"
 	"github.com/kang-sw/devenv/internal/wsdashboard"
+	"github.com/kang-sw/devenv/internal/wstrackerhost"
 )
 
 var dashboardTestClient = &http.Client{Timeout: 2 * time.Second}
@@ -173,6 +174,51 @@ func TestDashboardSubcommandHoldsTheLockUntilAnAuthenticatedShutdown(t *testing.
 	}
 	if _, err := os.Stat(filepath.Join(dir, "endpoint.json")); !os.IsNotExist(err) {
 		t.Fatalf("endpoint file after shutdown: %v", err)
+	}
+}
+
+// TestDashboardDaemonRunsTheTrackerPoll: the daemon holds the tracker poll
+// lock under its config home while it runs, with no tracker knob set and no
+// tracker root yet (a first run), so a ws-mcp's pre-read check leaves the
+// network to it; shutdown releases it.
+func TestDashboardDaemonRunsTheTrackerPoll(t *testing.T) {
+	bin := buildDashboardTestBin(t, "")
+	env, dir := dashboardTestEnv(t)
+	var configHome string
+	for _, kv := range env {
+		if v, ok := strings.CutPrefix(kv, "WS_CONFIG_HOME="); ok {
+			configHome = v
+		}
+	}
+	root := filepath.Join(configHome, "tracker")
+	host, err := wstrackerhost.New(wstrackerhost.Options{Root: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer host.Close()
+	if host.PollerRunning() {
+		t.Fatal("precondition: nothing polls")
+	}
+
+	daemon := exec.Command(bin, "dashboard", "--port", "0")
+	daemon.Env = env
+	if err := daemon.Start(); err != nil {
+		t.Fatal(err)
+	}
+	ep := waitForEndpoint(t, dir, version, 10*time.Second)
+	for end := time.Now().Add(10 * time.Second); !host.PollerRunning(); time.Sleep(50 * time.Millisecond) {
+		if time.Now().After(end) {
+			t.Fatal("the daemon never took the tracker poll lock")
+		}
+	}
+	if err := wsdashboard.RequestShutdown(context.Background(), dashboardTestClient, ep); err != nil {
+		t.Fatal(err)
+	}
+	if err := waitExit(t, daemon, 10*time.Second); err != nil {
+		t.Fatalf("daemon exit: %v", err)
+	}
+	if host.PollerRunning() {
+		t.Fatal("the daemon's exit must release the tracker poll lock")
 	}
 }
 

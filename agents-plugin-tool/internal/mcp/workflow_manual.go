@@ -343,13 +343,18 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 	if err != nil {
 		return toolTextResponse(id, "", fmt.Errorf("workflow_manual: %w", err))
 	}
-	// The whiteboard is a top-level-lead channel: callTool refuses its tools
-	// for any other key, so a spawned key (lead scope with a parent, or a
-	// leaf) reads the knob-off manual. FRESH mints a parent-less lead.
-	if key != freshBootstrapKey && !(sessionEntry{scope: toolRole(rec.Scope), parent: rec.Parent}).isTopLevelLead() {
-		whiteboardOn = false
+	trackerOn, err := s.trackerEnabled(&knobResolver, key)
+	if err != nil {
+		return toolTextResponse(id, "", fmt.Errorf("workflow_manual: %w", err))
 	}
-	body, err = applyWhiteboardVariants(s, rsrcRoot, workflowManualPlaybookName, body, whiteboardOn)
+	// The whiteboard and the tracker are top-level-lead channels: callTool
+	// refuses their tools for any other key, so a spawned key (lead scope
+	// with a parent, or a leaf) reads the knob-off manual. FRESH mints a
+	// parent-less lead.
+	if key != freshBootstrapKey && !(sessionEntry{scope: toolRole(rec.Scope), parent: rec.Parent}).isTopLevelLead() {
+		whiteboardOn, trackerOn = false, false
+	}
+	body, err = applyKnobVariants(s, rsrcRoot, workflowManualPlaybookName, body, whiteboardOn, trackerOn)
 	if err != nil {
 		return toolTextResponse(id, "", fmt.Errorf("workflow_manual: %w", err))
 	}
@@ -379,6 +384,7 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 			// promise a channel this session was never actually bound to.
 			s.rebindMailboxOwnerAtFerrule(mintedKey, "", roleLead, canonical)
 			s.maybeCollectWhiteboards(canonical)
+			s.startTrackerSessionCheck()
 			body = stripModeGatedRegion(body, false)
 			body = injectWorktreeProfiles(body, profilesBlock)
 			body = injectSessionKeyLine(body, mintedKey)
@@ -447,6 +453,11 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 			// about the branch it owns.
 			if rec.Parent == "" {
 				body = injectBootstrapStalenessWarning(body, occupiedRootAnnouncement(rec.Root))
+			}
+			// A top-level lead's revive is a session start too; the check's
+			// throttle keeps a quick revive from fetching again.
+			if (sessionEntry{scope: toolRole(rec.Scope), parent: rec.Parent}).isTopLevelLead() {
+				s.startTrackerSessionCheck()
 			}
 			body = injectBootstrapStalenessWarning(body, mailboxAddressAnnouncement(s, key, rec.Root))
 			// Only a top-level lead renders and consumes the clone's daily

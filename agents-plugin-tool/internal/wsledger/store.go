@@ -1036,6 +1036,32 @@ func (l *Ledger) Fetch(ctx context.Context) (SyncReport, error) {
 	return rep, err
 }
 
+// Reload is Fetch without the network: it re-reads the store directory,
+// which other processes sharing it move (another writer's Append or Sync on
+// this clone's journal and ref, a Fetch that took remote refs), and closes
+// the open batch into a local commit when new events arrived. An open
+// Ledger reads only its own last refresh, so a long-lived reader calls
+// Reload before reading what another process may have changed.
+func (l *Ledger) Reload(ctx context.Context) (SyncReport, error) {
+	var rep SyncReport
+	err := l.withLock(ctx, func() error {
+		if err := l.refresh(ctx); err != nil {
+			return err
+		}
+		if l.hasRemote(ctx) {
+			// Another process may have pushed this clone's ref.
+			if err := l.loadKnownOwn(ctx); err != nil {
+				return err
+			}
+		}
+		closed, err := l.receiveClose(ctx)
+		rep.Closed = closed
+		return err
+	})
+	l.finishReport(&rep)
+	return rep, err
+}
+
 func (l *Ledger) finishReport(rep *SyncReport) {
 	l.mu.Lock()
 	defer l.mu.Unlock()

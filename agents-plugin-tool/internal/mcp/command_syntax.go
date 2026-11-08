@@ -19,8 +19,8 @@ const commandSyntaxPart = "command-syntax"
 // commandSyntaxEnabled is the one condition for the manual's shared command
 // syntax section: any enabled tool whose input is the command language. A new
 // such tool adds its enable knob here.
-func commandSyntaxEnabled(whiteboardOn bool) bool {
-	return whiteboardOn
+func commandSyntaxEnabled(whiteboardOn, trackerOn bool) bool {
+	return whiteboardOn || trackerOn
 }
 
 // commandSyntaxSection is the shared section as the part holds it, headed
