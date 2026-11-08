@@ -71,7 +71,10 @@ func TestSessionPageFollowsTheLanguageChoice(t *testing.T) {
 	}
 }
 
-func TestEveryPageHasAGearWithTheLanguageItem(t *testing.T) {
+// TestEveryPageHasSettingsWithTheLanguageItem pins where the settings are:
+// the index page's gear menu, and a session page's drawer card, the gear
+// gone from its top bar.
+func TestEveryPageHasSettingsWithTheLanguageItem(t *testing.T) {
 	f := startPageFixture(t)
 	for _, c := range []struct {
 		name, path string
@@ -82,8 +85,17 @@ func TestEveryPageHasAGearWithTheLanguageItem(t *testing.T) {
 		{"adapter session", "/s/livesession", true},
 	} {
 		_, body := getLang(t, f.base+c.path, "ko", "")
-		if !strings.Contains(body, `id="gear"`) || !strings.Contains(body, `id="gmenu"`) {
-			t.Errorf("%s: no gear", c.name)
+		if c.path == "/" {
+			if !strings.Contains(body, `id="gear"`) || !strings.Contains(body, `id="gmenu"`) {
+				t.Errorf("%s: no gear", c.name)
+			}
+		} else {
+			if strings.Contains(body, `id="gear"`) || strings.Contains(body, `id="gmenu"`) {
+				t.Errorf("%s: the gear is still in the top bar", c.name)
+			}
+			if !strings.Contains(body, `<details class="panel drcard setcard" id="p-settings" open>`) || !strings.Contains(body, `<div class="gmenu gcard">`) {
+				t.Errorf("%s: no settings card in the drawer", c.name)
+			}
 		}
 		// The scripts call wsT on load; a page without the table breaks them.
 		if !strings.Contains(body, "window.wsT") {

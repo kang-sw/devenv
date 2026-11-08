@@ -305,9 +305,9 @@ func TestGitBadgeRendersEachState(t *testing.T) {
 	}
 }
 
-// TestGitBadgeSitsBetweenTheLiveMarkAndTheGear pins the badge's place in
-// the session page's top bar.
-func TestGitBadgeSitsBetweenTheLiveMarkAndTheGear(t *testing.T) {
+// TestGitBadgeSitsBetweenTheLiveMarkAndTheQuickSwitcher pins the badge's
+// place in the session page's top bar.
+func TestGitBadgeSitsBetweenTheLiveMarkAndTheQuickSwitcher(t *testing.T) {
 	view := SessionView{ReplyID: "x", Git: &GitBadge{State: gitPending, Root: "/p"}}
 	regions, err := renderSessionRegions(view, nil)
 	if err != nil {
@@ -317,9 +317,9 @@ func TestGitBadgeSitsBetweenTheLiveMarkAndTheGear(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sse, git, gear := strings.Index(page, `id="sse"`), strings.Index(page, `id="r-git"`), strings.Index(page, `id="gear"`)
-	if sse < 0 || git < sse || gear < git {
-		t.Fatalf("top bar order: sse %d, git %d, gear %d", sse, git, gear)
+	sse, git, qs := strings.Index(page, `id="sse"`), strings.Index(page, `id="r-git"`), strings.Index(page, `id="qsslot"`)
+	if sse < 0 || git < sse || qs < git {
+		t.Fatalf("top bar order: sse %d, git %d, quick switcher %d", sse, git, qs)
 	}
 }
 

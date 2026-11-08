@@ -139,7 +139,7 @@ func TestSessionPageRendersLiveRegions(t *testing.T) {
 	}
 	for _, want := range []string{
 		`data-region="tree"`, `data-region="entries"`, `data-region="convlive"`, `data-region="board"`, `data-region="panels"`,
-		`id="composer"`, `id="gear"`, "live board text",
+		`id="composer"`, `id="p-settings"`, "live board text",
 		// A topic body sits in its sandboxed frame; there is no Now slot.
 		`<iframe class="doc-frame" title="Plan" data-doc="Plan"`,
 		`id="splitter"`, `data-input="enter"`, `data-input="mod"`,
@@ -212,7 +212,7 @@ func TestSessionPagesCarryScriptHooks(t *testing.T) {
 	for _, want := range []string{
 		`<div id="bcol" class="bcol"><div id="r-board" class="region r-board" data-region="board"`,
 		`id="tabbar"`, `data-tab="convo"`, `data-tab="board"`, `<span class="tdot"></span>`,
-		`id="gmenu"`, `data-layout="auto"`, `data-layout="split"`, `data-layout="tabs"`,
+		`class="gmenu gcard"`, `data-layout="auto"`, `data-layout="split"`, `data-layout="tabs"`,
 		`id="ctext"`, `id="cnote"`, `id="csend"`, `aria-label="send"`, `id="sse"`, `id="dash-banner"`,
 		`<div id="composer" class="composer"><button type="button" class="ibadge" id="ibadge"`, `<span class="ilabel">Interrupt</span>`,
 		`<div class="conv clive" data-phase="replying">`,
@@ -297,9 +297,14 @@ func TestPagesCarryTheTracker(t *testing.T) {
 		if strings.Count(page, `<span class="qsslot" id="qsslot"></span>`) != 1 {
 			t.Errorf("%s page lacks the quick-switcher slot", name)
 		}
-		// In the header, right before the gear menu.
-		if i, j := strings.Index(page, `<div class="top">`), strings.Index(page, `id="qsslot"></span><span class="gearwrap">`); i < 0 || j < i {
-			t.Errorf("%s page: the quick-switcher slot is not in the header before the gear", name)
+		// In the header, at its end: before the gear menu on the index
+		// page, and last on a session page, whose settings are a drawer card.
+		tail := `id="qsslot"></span></div>`
+		if name == "index" {
+			tail = `id="qsslot"></span><span class="gearwrap">`
+		}
+		if i, j := strings.Index(page, `<div class="top">`), strings.Index(page, tail); i < 0 || j < i {
+			t.Errorf("%s page: the quick-switcher slot is not at the header's end", name)
 		}
 	}
 }
@@ -313,9 +318,9 @@ func TestBoardFirstPageHasNoLayoutControl(t *testing.T) {
 	if !strings.Contains(body, "only the board") || !strings.Contains(body, `data-mode="board"`) {
 		t.Errorf("board-first page lacks its board")
 	}
-	// The gear is there for the language item alone: no layout or input
-	// choice, which only a live layout has.
-	for _, present := range []string{`id="gear"`, `<option value="ko">`, `<option value="">`} {
+	// The settings card is there for the theme and language items alone:
+	// no layout or input choice, which only a live layout has.
+	for _, present := range []string{`id="p-settings"`, `<option value="ko">`, `<option value="">`} {
 		if !strings.Contains(body, present) {
 			t.Errorf("board-first page lacks %q", present)
 		}
