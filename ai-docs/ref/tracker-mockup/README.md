@@ -62,8 +62,9 @@ build, no server, no dependencies.
   reference notices; opening the store clears it (the notification card below
   does not change what it counts). A handle shows ⊘ when the
   viewer's clone is offline or the store has no remote.
-- **Store header** (500). The store name, `Open as page`, and `+ New` (which
-  shows the inline new-item row atop the Items list: title + Enter creates,
+- **Store header** (500). One row: the store name, then two icon-only
+  buttons, `Open as page` and `+ New` (their names in the tooltip and aria-label;
+  `+ New` shows the inline new-item row atop the Items list: title + Enter creates,
   with a small kind picker; the row stays for the next one and Esc closes
   it; priority, due, and assignees come afterwards from the new row's menu).
   The sync state is a thin **ribbon** at the bottom of the Items card: a
@@ -353,12 +354,15 @@ build, no server, no dependencies.
   holds what the sheet and the row detail overlay held. **Layout** (424)-(427):
   a header over two columns. The header (full width, sticky) carries the
   parent breadcrumb (every ancestor, root first, each a link; none on a root
-  item), the title with the status icon, the chips (kind, id, status,
-  priority, due, roll-up), and one quiet "⋯" next to the close button that
+  item), the title with the status icon, the chips (kind, a small "⧉ <kind> ID"
+  button that copies the item id, shown in its tooltip, and says "Copied" for a
+  moment, status, priority, due, roll-up), and one quiet "⋯" next to the close button that
   opens the item's context menu (as a right-click on the header or the status
   icon does); no button row stands between the header and the body, which
   keeps a little margin above and below. Under it the **main column** holds the body with mentions and
-  attachments, the **Subtasks** section, and the thread with the composer; the
+  attachments, the **Subtasks** section, and the thread with the composer
+  (a thread row names the person, org in small text, not the member or event
+  id; the event alias is the row's tooltip); the
   narrow **side column** holds the **property card** and **Assignees**. Below
   820px of window width (the window, by a container query, not the page) it
   falls back to one column in the order header -> property card -> body ->
@@ -967,7 +971,7 @@ creation, and it has a topic and a blocked subtask.
 | 474 | Inline subtask: an input row one level in under the row (in the item window's Subtasks for a kanban card, a calendar entry, or the window header); title + Enter creates an unassigned task with the default completion, Enter again adds a sibling, Esc closes it. |
 | 498 | The Activity tab's "flagged only" and "concurrent only" are toggle chips like the list / activity timeline chips (accent when on); no native checkbox remains in the drawer outside forms. |
 | 499 | The comment composer follows the dashboard chat input: a paper-plane send button inside the box at the bottom right, Cmd+Enter / Ctrl+Enter sends and Enter is a newline, a small `@` picker at the bottom left; the composer's status line is gone (the status is the menu's). Supersedes the quick status of (166). |
-| 500 | The store's sync rows under its name become a thin ribbon at the bottom of the Items card (status dot, short text, the apply button only while writes are pending, dimmed when idle); a click opens a popover with the clone ref, counts, and batch contents. The store header keeps the name, `Open as page`, and `+ New`. |
+| 500 | The store's sync rows under its name become a thin ribbon at the bottom of the Items card (status dot, short text, the apply button only while writes are pending, dimmed when idle); a click opens a popover with the clone ref, counts, and batch contents. The store header keeps one row: the name and the icon-only `Open as page` and `+ New`. |
 
 ## Open questions
 

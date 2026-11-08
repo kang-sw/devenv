@@ -89,6 +89,7 @@
 .tk .btn { font: inherit; font-size: 12.5px; background: var(--wb-muted); color: var(--wb-fg); border: 0; border-radius: 999px; padding: 2px 11px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
 .tk .btn:hover { background: color-mix(in srgb, var(--wb-muted) 70%, var(--wb-fg) 14%); }
 .tk .btn.primary { background: var(--wb-primary); color: var(--wb-primary-fg); }
+.tk .btn.ib { padding: 4px 7px; }
 .tk .btn.mini { font-size: 11.5px; padding: 0 9px; }
 .tk .btn:focus-visible, .tk select:focus-visible, .tk input:focus-visible, .tk textarea:focus-visible { outline: 1.5px solid var(--wb-primary); }
 .tk input[type=checkbox], .tk input[type=radio] { accent-color: var(--wb-primary); }
@@ -400,6 +401,10 @@ body.tk-paged .tk-drawer { display: none; }
 .tk .iw-head .ia { flex: none; }
 .tk .iw-head h2 { margin: 0; font-size: 18px; line-height: 1.3; flex: 1; overflow-wrap: anywhere; }
 .tk .iw-chips { display: flex; gap: 5px; align-items: center; flex-wrap: wrap; }
+.tk .idcopy { font: inherit; font-size: 11.5px; display: inline-flex; align-items: center; gap: 3px; padding: 1px 7px 1px 5px; border: 0; border-radius: 999px; background: transparent; color: var(--wb-muted-fg); cursor: pointer; box-shadow: inset 0 0 0 1px var(--wb-line); }
+.tk .idcopy:hover, .tk .idcopy:focus-visible { color: var(--wb-primary); outline: none; background: var(--wb-card); }
+.tk .idcopy.done { color: var(--tk-ok); }
+.tk .idcopy .i { width: 12px; height: 12px; }
 .tk .iwin h3 { margin: 4px 0 0; font-size: 12px; font-weight: 800; color: var(--wb-muted-fg); text-transform: uppercase; letter-spacing: .04em; }
 .tk .sh-body { white-space: pre-wrap; background: var(--wb-card); border-radius: 10px; padding: 8px 10px; box-shadow: var(--wb-shadow); font-size: 13px; }
 .tk .timeline { list-style: none; margin: 0; padding: 4px 10px; background: var(--wb-card); border-radius: 10px; box-shadow: var(--wb-shadow); }
