@@ -45,18 +45,25 @@ agent runner (`261108-feat-ws-daemon-agent-runner`).
   `tracker.show(item)`), and the renderer draws that call as the
   card-reference entry. Rejected: a text marker inside the reply, fragile to
   parse and to quote.
-
-## Open Decision Queue
-
-Last ID: (325)
-
-(320) [confirmed] [policy] The support agent may write to the open store only on the user's explicit request in the chat, as the viewer's own member identity with agent provenance (the `agent` chip); it never writes to another store, and cross-store search stays read-only. User note (board (320) a): also open a limited, read-only git search over the user's other local projects (git log, commit search, listing).
-(324) [open] [technical] Local git search is a dedicated read-only tool the support profile allows (log, show, grep, blame, ls-files over a repository path; argument-validated, no write-capable options), over Bash prefix rules such as `Bash(git log:*)` - prefix rules cannot block write options (`git log --output=<file>`, `git diff --output`), `git -C <repo>` and `cd <repo> &&` forms escape a fixed prefix, and Pi's `--tools` has no per-command granularity, while one tool behaves the same on both backends.
-(325) [open] [policy] The git search tool reaches the projects the dashboard daemon already knows (every project root that has run a ws session) plus extra roots from a config knob, and refuses any other path.
-- Context: the user wants commit search in "제 로컬의 다른 프로젝트"; the epic's local-AI rule ((114)/(122)) allows read-only search to answer the user's own query.
-- Alternative: only roots listed in a config knob (default empty).
-- Alternative: any git repository path on the machine.
-> Daemon-known projects plus a knob: zero setup for the projects the user works in, a bounded and visible set, and the knob covers repositories ws never ran in.
+- **Store writes only on request** (board (320) a): the support agent writes
+  to the open store only on the user's explicit request in the chat, as the
+  viewer's own member identity with agent provenance (the `agent` chip); it
+  never writes to another store, and cross-store search stays read-only
+  (epic (114)/(122), (123) b). Rejected: read-only everywhere; automatic
+  recording like a lead session's agent.
+- **Read-only local git search** (user note on (320); board (324) ok): the
+  agent may search the user's other local projects through one dedicated
+  read-only tool the support profile allows - log, show, grep, blame, and
+  ls-files over a repository path, argument-validated, with no
+  write-capable options (`ls` is covered by ls-files, file contents by
+  `show <rev>:<path>`). Rejected: Bash prefix rules such as
+  `Bash(git log:*)`, which cannot block `git log --output=<file>` or
+  `git diff --output`, are escaped by `git -C <repo>` and `cd <repo> &&`,
+  and have no Pi equivalent (`--tools` has no per-command granularity).
+- **Git search scope** (board (325) a): the tool reaches every project root
+  the dashboard daemon already knows (roots that have run a ws session) plus
+  extra roots from a config knob, and refuses any other path. Rejected: knob
+  roots only; any git repository on the machine.
 
 ## Constraints
 

@@ -121,6 +121,12 @@ renderer shows it.
   phase, since the billing outcome gates everything built on the claude
   path.
 
+## Open Decision Queue
+
+Last ID: (326)
+
+(326) [open] [technical] A profile that allows ws tools gets ws-mcp over stdio in its `--mcp-config`, launched with an environment variable carrying the profile's allowlisted ws tool names, and ws-mcp advertises (`tools/list`) and accepts (`tools/call`) only those - over named toolsets defined in ws-mcp code (two places to edit per new agent) and over a daemon-hosted MCP endpoint (a second transport and tool registry); the precedent is the existing env-gated surface filter (`NoAgentMode` with `noAgentHiddenTool`, `internal/mcp/server.go`), and the filter is what lets the init-message check ((Constraints)) pass, since `--allowedTools` denies calls but leaves tools visible. Unverified: ws-mcp's startup side effects (dashboard ensure, session registration) in this role, which Phase 1 checks.
+
 ## Constraints
 
 - Read `ai-docs/manuals/shipped-surface-boundary.md` before editing under
