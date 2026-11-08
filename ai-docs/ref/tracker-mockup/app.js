@@ -28,7 +28,8 @@
     tabSeen: {},          // "store|stream" -> { tab key -> signature last shown }: a hidden tab whose signature moved shows a dot
     layout: null,         // 'a' | 'd' | 'narrow', from the window width (366)
     cmodes: {}, calMonth: {}, // store -> { card key -> view mode }; card or scope key -> calendar month (local UI state, never an event)
-    panel: {},            // store -> { scope, modes: { scope -> view mode }, today: Today chip filter or null } of the Items panel (360), (366), local UI state like cmodes
+    panel: {},            // store -> { scope, modes: { scope -> view mode }, today: Today chip filter or null, q: search text, closedOpen: "recently closed" expanded, treeOpen: { parent id -> its "closed N" row expanded } } of the Items panel (360), (366), (385), (386), (387), local UI state like cmodes
+    focus: null,          // { ev: event id, flash: true until its first paint } the item window scrolls to and marks (390); null: nothing
     sel: null,            // the row selected by a tap (354): it shows the same actions and details a hover shows
     act: { family: 'all', member: 'all', flagged: false, conc: false },
     kind: 'all', status: 'open', dataOpen: false, openLogs: {}
@@ -365,10 +366,10 @@
       (r ? ' &middot; assignment updated ' + esc(fmtTs(r.lastUpdate || r.ts)) : '') + (f ? ' &middot; ' + f + ' flagged' : '') + (it.concurrent ? ' &middot; ' + it.concurrent + ' concurrent' : '') + '</span>');
     return d.map(function (x) { return '<div>' + x + '</div>'; }).join('');
   }
-  // o: { rk (unique row key in the drawer), item, rec?, more?, depth?, acts? }
+  // o: { rk (unique row key in the drawer), item, rec?, more?, depth?, acts?, closed? (greyed: done, in the "recently closed" section or kept in the tree) }
   function irow(o) {
     var it = VS.items[o.item], r = o.rec, st = stKey(it, r), acts = o.acts != null ? o.acts : actsFor(it);
-    return '<div class="irow' + (ui.sel === o.rk ? ' sel' : '') + '" tabindex="0"' + attr('item', it.id) + attr('rk', o.rk) + (r ? attr('rec', r.id) : '') +
+    return '<div class="irow' + (ui.sel === o.rk ? ' sel' : '') + (o.closed ? ' closed' : '') + '" tabindex="0"' + attr('item', it.id) + attr('rk', o.rk) + (r ? attr('rec', r.id) : '') +
       (o.depth ? ' style="--ind:' + o.depth + '"' : '') + '><div class="ir-main">' + (o.depth ? '<span class="ind">&#8627;</span>' : '') + stIcon(st) +
       '<a class="title" href="#" tabindex="-1"' + attr('item', it.id) + '>' + esc(it.title) + '</a>' + warnHtml(it) + dotHtml(it) + '<span class="grow"></span>' +
       (acts ? '<span class="ir-acts">' + acts + '</span>' : '') + whoHtml(it) + priHtml(it) + dueHtml(it, st) + '</div>' +
@@ -386,21 +387,31 @@
   var NK = { assigned: 'assigned', pending: 'pending', answer: 'answer', reference: 'for reference', done: 'done', blocked: 'blocked',
     confirm: 'confirm', reply: 'reply', due: 'due', mention: 'mention' };
   function snippet(s) { s = String(s || ''); return '&ldquo;' + esc(s.length > 80 ? s.slice(0, 77) + '...' : s) + '&rdquo;'; }
+  // (390) Every entry also carries `ev`, the event it is about (none for a due date, which has
+  // none), so a click can open the item window at what the entry refers to (focusTarget).
+  var STATUS_EV = { 'item.status': 1, 'item.close': 1, 'item.confirm': 1, 'item.reject': 1, 'item.reopen': 1 };
+  function assigneeOf(e) { return e.type === 'item.status' || e.type === 'item.close' ? e.member : e.payload.assignee || e.member; }
+  // the assignment record's latest status-side event: the one written at its lastUpdate, else the last one
+  function statusEv(r) {
+    var l = VS.events.filter(function (e) { return STATUS_EV[e.type] && e.status === 'applied' && e.payload.item === r.item && assigneeOf(e) === r.to; });
+    var at = l.filter(function (e) { return e.ts === r.lastUpdate; });
+    return (at.length ? at : l).slice(-1).map(function (e) { return e.id; })[0] || null;
+  }
   function feedEntries(v) {
     var out = [], t = today();
-    function add(key, kind, item, ts, html) {
-      if (VS.items[item] && !VS.items[item].hidden) out.push({ key: key, kind: kind, item: item, ts: String(ts || ''), html: html });
+    function add(key, kind, item, ts, html, ev) {
+      if (VS.items[item] && !VS.items[item].hidden) out.push({ key: key, kind: kind, item: item, ts: String(ts || ''), html: html, ev: ev || null });
     }
     VS.my.assignments.map(A).forEach(function (r) {
       var it = VS.items[r.item];
       // new forced assignments: the same rule as the handle badge's "a:" keys
-      if (r.by !== v && r.forced && r.status === 'todo') add('a:' + r.id, 'assigned', r.item, r.ts, '<b>' + esc(nm(r.by)) + '</b> assigned this to you' + (r.inherited ? ' (everyone within L' + esc(r.ruleLevels) + ')' : ''));
+      if (r.by !== v && r.forced && r.status === 'todo') add('a:' + r.id, 'assigned', r.item, r.ts, '<b>' + esc(nm(r.by)) + '</b> assigned this to you' + (r.inherited ? ' (everyone within L' + esc(r.ruleLevels) + ')' : ''), r.via);
       // near the due date, as the due chip computes it
       if (it.due && it.due <= t && r.status !== 'done' && it.status !== 'done')
         add('d:' + r.id + ':' + (it.due < t ? 'over' : 'today'), 'due', r.item, it.due + 'T00:00:00Z', it.due < t ? 'overdue since ' + esc(it.due) : 'due today');
     });
     VS.my.received.pending.map(A).forEach(function (r) {
-      add('p:' + r.id, 'pending', r.item, r.ts, '<b>' + esc(nm(r.sender)) + '</b> ' + (r.handoffOf ? 'hands you their assignment' : 'sent you a pending assignment') + '; answer it on its row (Items, received requests)');
+      add('p:' + r.id, 'pending', r.item, r.ts, '<b>' + esc(nm(r.sender)) + '</b> ' + (r.handoffOf ? 'hands you their assignment' : 'sent you a pending assignment') + '; answer it on its row (Items, received requests)', r.via);
     });
     VS.notices.forEach(function (x) {
       var r = A(x.assignment), txt;
@@ -408,26 +419,26 @@
       else if (x.kind === 'returned') txt = '<b>' + esc(nm(x.endedBy)) + '</b> (lead of ' + esc(nm(x.to)) + ') returned ' + esc(nm(x.to)) + '\'s accepted ' + (r.handoffOf ? 'handoff' : 'assignment');
       else if (x.kind === 'accepted') txt = '<b>' + esc(nm(x.to)) + '</b> accepted ' + (r.handoffOf ? 'a handoff' : 'an assignment from ' + esc(nm(x.by))) + ' (you are their lead)';
       else txt = '<b>' + esc(nm(x.to)) + '</b> took over ' + esc(nm(x.from)) + '\'s assignment you gave';
-      add(x.key, x.kind === 'declined' || x.kind === 'returned' ? 'answer' : 'reference', x.item, x.ts, txt + (x.note ? ': ' + snippet(x.note) : ''));
+      add(x.key, x.kind === 'declined' || x.kind === 'returned' ? 'answer' : 'reference', x.item, x.ts, txt + (x.note ? ': ' + snippet(x.note) : ''), (x.kind === 'declined' || x.kind === 'returned' ? r.ended : r.accepted).id);
     });
     vals(VS.assignments).forEach(function (r) {
       if (r.by !== v || r.to === v || r.state !== 'live' || (r.status !== 'done' && r.status !== 'blocked')) return;
       add('w:' + r.id + ':' + r.status + ':' + r.lastUpdate, r.status, r.item, r.lastUpdate,
-        '<b>' + esc(nm(r.to)) + '</b> ' + (r.status === 'done' ? 'finished work you assigned' : 'is blocked on work you assigned') + (r.note ? ': ' + snippet(r.note) : ''));
+        '<b>' + esc(nm(r.to)) + '</b> ' + (r.status === 'done' ? 'finished work you assigned' : 'is blocked on work you assigned') + (r.note ? ': ' + snippet(r.note) : ''), statusEv(r));
     });
     VS.my.today.confirms.map(A).forEach(function (r) {
-      add('c:' + r.id + ':' + r.lastUpdate, 'confirm', r.item, r.lastUpdate, '<b>' + esc(nm(r.to)) + '</b> closed this; it waits for your confirm');
+      add('c:' + r.id + ':' + r.lastUpdate, 'confirm', r.item, r.lastUpdate, '<b>' + esc(nm(r.to)) + '</b> closed this; it waits for your confirm', statusEv(r));
     });
     vals(VS.comments).forEach(function (c) {
       if (c.hidden || c.author === v) return;
       var q = c.reply_to && VS.comments[c.reply_to];
-      if (q && q.author === v) add('r:' + c.id, 'reply', c.item, c.ts, '<b>' + esc(nm(c.author)) + '</b> replied to your comment: ' + snippet(c.body));
+      if (q && q.author === v) add('r:' + c.id, 'reply', c.item, c.ts, '<b>' + esc(nm(c.author)) + '</b> replied to your comment: ' + snippet(c.body), c.id);
       var ts = c.edited ? c.edited.ts : c.ts;
-      if (c.mentions.indexOf(v) >= 0) add('m:' + c.id + ':' + ts, 'mention', c.item, ts, '<b>' + esc(nm(c.author)) + '</b> mentioned you: ' + snippet(c.body));
+      if (c.mentions.indexOf(v) >= 0) add('m:' + c.id + ':' + ts, 'mention', c.item, ts, '<b>' + esc(nm(c.author)) + '</b> mentioned you: ' + snippet(c.body), c.id);
     });
     vals(VS.items).forEach(function (it) {
       var ts = it.edited ? it.edited.ts : it.ts;
-      if (it.author !== v && it.mentions.indexOf(v) >= 0) add('m:' + it.id + ':' + ts, 'mention', it.id, ts, '<b>' + esc(nm(it.author)) + '</b> mentioned you in the item body');
+      if (it.author !== v && it.mentions.indexOf(v) >= 0) add('m:' + it.id + ':' + ts, 'mention', it.id, ts, '<b>' + esc(nm(it.author)) + '</b> mentioned you in the item body', it.edited ? it.edited.id : it.id);
     });
     return out.sort(function (a, b) { return a.ts < b.ts ? 1 : a.ts > b.ts ? -1 : a.key < b.key ? -1 : 1; });
   }
@@ -435,7 +446,7 @@
   function cardNotify(v) {
     var list = feedEntries(v), read = readMap(), unread = list.filter(function (x) { return !read[x.key]; }).length;
     var h = list.length ? list.map(function (x) {
-      return '<div class="row click nfeed' + (read[x.key] ? '' : ' unread') + '"' + attr('item', x.item) + attr('nkey', x.key) + attr('nkind', x.kind) + '><div class="r1">' +
+      return '<div class="row click nfeed' + (read[x.key] ? '' : ' unread') + '"' + attr('item', x.item) + attr('nkey', x.key) + attr('nkind', x.kind) + (x.ev ? attr('nev', x.ev) : '') + '><div class="r1">' +
         '<span class="chip nk">' + esc(NK[x.kind]) + '</span>' + isNew(x.key) + titleRef(x.item) + '<span class="grow"></span><span class="muted ts">' + esc(fmtTs(x.ts)) + '</span></div>' +
         '<div class="r2">' + x.html + '</div></div>';
     }).join('') : '<p class="muted">Nothing for you right now.</p>';
@@ -471,7 +482,7 @@
   // (SCOPE_MODES). (360) It opens on "mine"; the chosen scope and each scope's mode are
   // remembered per store in memory, like the side cards' modes, and never written.
 
-  function panelState() { return (ui.panel[ui.store] = ui.panel[ui.store] || { scope: 'mine', modes: {}, today: null }); }
+  function panelState() { return (ui.panel[ui.store] = ui.panel[ui.store] || { scope: 'mine', modes: {}, today: null, q: '', closedOpen: true, treeOpen: {} }); }
   function scopeList() { return SCOPES.filter(function (x) { return x[0] !== 'team' || VS.my.team.length; }); }
   function scopeOf() { var s = panelState().scope; return scopeList().some(function (x) { return x[0] === s; }) ? s : 'mine'; }
   function panelMode(s) { var m = panelState().modes[s]; return m && SCOPE_MODES[s].some(function (x) { return x[0] === m; }) ? m : 'list'; }
@@ -494,9 +505,17 @@
     VS.my.today[k].forEach(function (id) { f.recs[id] = true; f.items[A(id).item] = true; });
     return f;
   }
+  // (385) The search box (row 2 of the panel header) filters the current scope as you type, on
+  // the item's title, body, project, and id (the full id and the short alias), and combines
+  // with the Today filter. SQ is the lower-cased query of the render in progress, '' for none.
+  var SQ = '', FILT = false; // per render: the search query; whether the Today filter or a search is on
+  function matchItem(it) {
+    if (!SQ) return true;
+    return [it.title, it.body, it.project, it.id, it.alias].some(function (x) { return String(x == null ? '' : x).toLowerCase().indexOf(SQ) >= 0; });
+  }
   // a row with an assignment record passes on the record; an item row passes on the item
-  function keepRec(r) { return !TF || !!TF.recs[r.id]; }
-  function keepItem(id) { return !TF || !!TF.items[id]; }
+  function keepRec(r) { return (!TF || !!TF.recs[r.id]) && matchItem(VS.items[r.item]); }
+  function keepItem(id) { return (!TF || !!TF.items[id]) && matchItem(VS.items[id]); }
   function todayBar() {
     var t = VS.my.today, on = panelState().today;
     return '<div class="todaybar" role="group" aria-label="Today"><span class="tl">Today</span>' + TODAY.map(function (x, i) {
@@ -506,16 +525,45 @@
     }).join('') + (on ? '<button type="button" class="tch tclr"' + attr('act', 'today') + attr('set', on) + ' aria-label="clear the Today filter"' + tipAttr('clear the Today filter') + '><svg class="i"><use href="#i-x"/></svg></button>' : '') + '</div>';
   }
   function filterEmpty() {
-    var x = TODAY.filter(function (y) { return y[0] === TF.key; })[0];
-    return '<div class="empty">Nothing in this scope is in &ldquo;' + esc(x[2].split(':')[0]) + '&rdquo;. ' + btn('today', 'clear the filter', { set: TF.key }) + '</div>';
+    var x = TF && TODAY.filter(function (y) { return y[0] === TF.key; })[0];
+    return '<div class="empty">Nothing in this scope ' + (SQ ? 'matches &ldquo;' + esc(panelState().q.trim()) + '&rdquo;' : 'is in &ldquo;' + esc(x[2].split(':')[0]) + '&rdquo;') +
+      (SQ && TF ? ' under the &ldquo;' + esc(x[2].split(':')[0]) + '&rdquo; filter' : '') + '. ' + (SQ ? btn('psearch-clear', 'clear the search', {}) + ' ' : '') + (TF ? btn('today', 'clear the filter', { set: TF.key }) : '') + '</div>';
+  }
+
+  // (386) Recently closed: done items leave the main list for a section at the bottom of the
+  // list views, greyed, expanded by default, holding what closed in the last CLOSED_DAYS days
+  // of the page clock; a search lists every age (and every match, whatever its age). The close
+  // time is the last write of the done assignment (`lastUpdate`: the close or confirm event's
+  // ts) for a record row, and the latest of that over an item's done live assignments for an
+  // item row, `lastActivity` when the item carries none: the view state has no closedAt, and
+  // none is added. CLOSED is the section being built by the scope's list: entries with the
+  // close time, the row count, and the rows; null for a view mode with no section (kanban has
+  // its done column, the timelines mute ended rows).
+  var CLOSED_DAYS = 14, CLOSED = null;
+  function closeTs(it) {
+    var t = it.assignments.map(A).filter(function (r) { return r.state === 'live' && r.status === 'done'; }).map(function (r) { return String(r.lastUpdate); }).sort().pop();
+    return t || String(it.lastActivity);
+  }
+  function addClosed(ts, n, html) {
+    if (!CLOSED) return;
+    if (SQ || Date.parse(ui.clock[ui.store]) - Date.parse(ts) <= CLOSED_DAYS * 86400000) CLOSED.entries.push({ ts: ts, n: n, html: html });
+    else CLOSED.older += n;
+  }
+  function closedHtml() {
+    if (!CLOSED || (!CLOSED.entries.length && !CLOSED.older)) return '';
+    var on = panelState().closedOpen, n = CLOSED.entries.reduce(function (a, x) { return a + x.n; }, 0);
+    var rows = CLOSED.entries.sort(function (a, b) { return a.ts < b.ts ? 1 : a.ts > b.ts ? -1 : 0; }).map(function (x) { return x.html; }).join('');
+    return '<section class="pclosed' + (on ? ' open' : '') + '"><button type="button" class="pc-head" aria-expanded="' + on + '"' + attr('act', 'closed-toggle') + attr('fk', 'closed') + '><svg class="i"><use href="#i-chev"/></svg>' +
+      (SQ ? 'closed' : 'recently closed') + ' <span class="subn">' + n + '</span><span class="muted">' + (SQ ? 'matches of every age' : 'last ' + CLOSED_DAYS + ' days' + (CLOSED.older ? '; ' + CLOSED.older + ' older through search' : '')) + '</span></button>' +
+      (on ? '<div class="pc-rows">' + (rows || '<p class="muted">Nothing closed in this window.</p>') + '</div>' : '') + '</section>';
   }
 
   function listMine() {
     var mine = VS.my.assignments.map(A).filter(keepRec), open = mine.filter(function (r) { return r.status !== 'done'; }), done = mine.filter(function (r) { return r.status === 'done'; });
     var created = VS.my.created.filter(keepItem);
-    if (TF && !mine.length && !created.length) return filterEmpty();
-    var h = open.length ? open.map(function (r) { return irow({ rk: 'mine:' + r.id, item: r.item, rec: r }); }).join('') : TF ? '' : '<p class="muted">Nothing open is assigned to you.</p>';
-    if (done.length) h += sub('done', done.length) + done.map(function (r) { return irow({ rk: 'mine:' + r.id, item: r.item, rec: r }); }).join('');
+    done.forEach(function (r) { addClosed(String(r.lastUpdate), 1, irow({ rk: 'mine:' + r.id, item: r.item, rec: r, closed: true })); });
+    if (FILT && !mine.length && !created.length) return filterEmpty();
+    var h = open.length ? open.map(function (r) { return irow({ rk: 'mine:' + r.id, item: r.item, rec: r }); }).join('') : TF ? '' : SQ ? (created.length ? '' : '<p class="muted">No open item matches.</p>') : '<p class="muted">Nothing open is assigned to you.</p>';
     if (created.length) h += sub('created by me, not assigned', created.length) + created.map(function (id) { return irow({ rk: 'mine:c:' + id, item: id }); }).join('');
     return h;
   }
@@ -531,25 +579,27 @@
     var ans = VS.notices.filter(function (x) { return (x.kind === 'declined' || x.kind === 'returned') && keepRec(A(x.assignment)); });
     function only(ids) { return ids.filter(function (id) { return keepRec(A(id)); }); }
     var pend = only(R.pending), answered = only(R.answered), sent = only(R.sent);
-    if (TF && !ans.length && !pend.length && !answered.length && !sent.length) return filterEmpty();
+    if (FILT && !ans.length && !pend.length && !answered.length && !sent.length) return filterEmpty();
     function rows(ids, pre, more) { return ids.map(function (id) { var r = A(id); return irow({ rk: pre + id, item: r.item, rec: r, more: more && more(r) }); }).join(''); }
     if (ans.length) h += sub('answers to what I sent', ans.length) + ans.map(function (x) { return irow({ rk: 'rcv:a:' + x.key, item: x.item, rec: A(x.assignment), more: answerTxt(x) }); }).join('');
-    if (pend.length || !TF) h += sub('waiting for my answer', pend.length) + (pend.length ? rows(pend, 'rcv:p:') : '<p class="muted">No pending assignments to you.</p>');
+    if (pend.length || !FILT) h += sub('waiting for my answer', pend.length) + (pend.length ? rows(pend, 'rcv:p:') : '<p class="muted">No pending assignments to you.</p>');
     if (answered.length) h += sub('answered', answered.length) + rows(answered, 'rcv:d:');
     if (sent.length) h += sub('sent by me', sent.length) + rows(sent, 'rcv:s:', function (r) { return 'sent to <b>' + esc(nm(r.to)) + '</b>'; });
     return h;
   }
   function listGiven() {
-    var v = VS.viewer.member, given = VS.my.given.filter(keepItem);
+    var v = VS.viewer.member, given = VS.my.given.filter(keepItem), h = '';
     if (!VS.my.given.length) return '<div class="empty">You have not assigned anything to others.</div>';
     if (!given.length) return filterEmpty();
-    return given.map(function (id) {
+    given.forEach(function (id) {
       var lines = VS.items[id].assignments.map(A).filter(function (r) { return (r.by === v || r.sender === v) && r.to !== v && (r.state === 'live' || r.state === 'pending'); }).sort(byRank).map(function (r) {
         return '<b>' + esc(nm(r.to)) + '</b>' + (r.depth ? ' <span class="muted">L' + r.depth + '</span>' : '') + ' ' + esc(SI.info(stKey(null, r)).label) + (r.forced ? '' : ' <span class="muted">(' + (r.handoffOf ? 'handoff' : 'sent') + ')</span>') +
           (r.note ? ' &ldquo;' + esc(r.note) + '&rdquo;' : '');
       });
-      return irow({ rk: 'given:' + id, item: id, more: lines.join('<br>') });
-    }).join('');
+      if (VS.items[id].status === 'done') return addClosed(closeTs(VS.items[id]), 1, irow({ rk: 'given:' + id, item: id, more: lines.join('<br>'), closed: true }));
+      h += irow({ rk: 'given:' + id, item: id, more: lines.join('<br>') });
+    });
+    return h || '<p class="muted">Nothing assigned by you is open.</p>';
   }
   // (357) My team as a group-by-person view: each group header carries that person's roll-up counts.
   // Under a Today filter a group with no matching row is left out.
@@ -557,7 +607,7 @@
     var h = VS.my.team.map(function (p) {
       var m = VS.members[p.id], c = [p.open.length + ' open'];
       var work = p.open.concat(p.pending).filter(function (id) { return keepRec(A(id)); }), wait = p.waiting.filter(function (id) { return keepRec(A(id)); });
-      if (TF && !work.length && !wait.length) return '';
+      if (FILT && !work.length && !wait.length) return '';
       if (p.done) c.push(p.done + ' done');
       if (p.blocked) c.push('<span class="err">' + p.blocked + ' blocked</span>');
       if (p.stale) c.push('<span class="err">' + p.stale + ' stale</span>');
@@ -573,12 +623,59 @@
       }).join('');
       return g + '</div>';
     }).join('');
-    return h || (TF && VS.my.team.length ? filterEmpty() : '<div class="empty">Nobody below you.</div>');
+    return h || (FILT && VS.my.team.length ? filterEmpty() : '<div class="empty">Nobody below you.</div>');
   }
   function allRows(kanban) { return VS.itemOrder.map(function (id) { return VS.items[id]; }).filter(kanban ? function (it) { return !it.hidden && kindFilter(it); } : itemFilter); }
+  // (387) The tree and closed items. Under the default "open" status, a done item never
+  // leaves its place silently: a closed child among open siblings folds into one "closed N"
+  // row under its parent (a click expands it); a closed parent with an open descendant stays in
+  // the tree, greyed; a closed parent whose whole subtree is closed moves, as one unit, to the
+  // "recently closed" section (the parent's own roll-up, done 3/5, still counts the children).
+  // While a search or the Today filter is on, the rows are the plain matches instead: the open
+  // and greyed ones in tree order, the closed ones in the section, every age.
   function listAll() {
-    var rows = allRows().filter(function (it) { return keepItem(it.id); });
-    return '<div class="toolbar">' + itemFilterBar() + '</div>' + (rows.length ? rows.map(function (it) { return irow({ rk: 'all:' + it.id, item: it.id, depth: it.depth }); }).join('') : TF ? filterEmpty() : '<div class="empty">No items match.</div>');
+    var bar = '<div class="toolbar">' + itemFilterBar() + '</div>';
+    if (ui.status !== 'open') {
+      var rows = allRows().filter(function (it) { return keepItem(it.id); });
+      return bar + (rows.length ? rows.map(function (it) { return irow({ rk: 'all:' + it.id, item: it.id, depth: it.depth }); }).join('') : FILT ? filterEmpty() : '<div class="empty">No items match.</div>');
+    }
+    var base = {}, order = [], kids = {}, openBelow = {};
+    VS.itemOrder.forEach(function (id) { var it = VS.items[id]; if (!it.hidden && kindFilter(it)) { base[id] = it; order.push(id); } });
+    order.forEach(function (id) { var par = base[id].parent; if (par && base[par]) (kids[par] = kids[par] || []).push(id); });
+    function kidsOf(id) { return kids[id] || []; }
+    function isOpen(id) { return itemFilter(base[id]); }
+    function isClosed(id) { return base[id].kind !== 'topic' && base[id].status === 'done'; }
+    function hasOpen(id) { if (!(id in openBelow)) openBelow[id] = kidsOf(id).some(function (k) { return isOpen(k) || hasOpen(k); }); return openBelow[id]; }
+    function inTree(id) { return isOpen(id) || (isClosed(id) && hasOpen(id)); }   // open, or closed with something open below
+    function isUnit(id) { return isClosed(id) && !hasOpen(id); }                  // closed, and so is everything below
+    function parentOf(id) { var par = base[id].parent; return par && base[par] ? par : null; }
+    function size(id) { return 1 + kidsOf(id).reduce(function (a, k) { return a + size(k); }, 0); }
+    function latest(id) { return kidsOf(id).reduce(function (a, k) { var t = latest(k); return t > a ? t : a; }, isClosed(id) ? closeTs(base[id]) : ''); }
+    function unitRows(id, off) {
+      return irow({ rk: 'all:' + id, item: id, depth: base[id].depth - off, closed: true }) + kidsOf(id).map(function (k) { return unitRows(k, off); }).join('');
+    }
+    if (FILT) {
+      var main = order.filter(function (id) { return inTree(id) && keepItem(id); }), shut = order.filter(function (id) { return isUnit(id) && keepItem(id); });
+      shut.forEach(function (id) { addClosed(closeTs(base[id]), 1, irow({ rk: 'all:' + id, item: id, closed: true })); });
+      return bar + (main.length ? main.map(function (id) { return irow({ rk: 'all:' + id, item: id, depth: base[id].depth, closed: isClosed(id) }); }).join('') : shut.length ? '<p class="muted">No open item matches.</p>' : filterEmpty());
+    }
+    function node(id) {
+      var it = base[id], h = irow({ rk: 'all:' + id, item: id, depth: it.depth, closed: isClosed(id) });
+      kidsOf(id).forEach(function (k) { if (inTree(k)) h += node(k); });
+      var cu = kidsOf(id).filter(isUnit);
+      if (cu.length) {
+        var on = !!panelState().treeOpen[id], n = cu.reduce(function (a, k) { return a + size(k); }, 0), r = it.rollup;
+        h += '<button type="button" class="csum' + (on ? ' open' : '') + '" style="--ind:' + (it.depth + 1) + '" aria-expanded="' + on + '"' + attr('act', 'tree-closed') + attr('parent', id) + attr('fk', 'csum:' + id) +
+          tipAttr('closed items under ' + it.title + (r.total ? ' (' + (r.counts.done || 0) + '/' + r.total + ' of its children are done)' : '') + '; click to ' + (on ? 'fold' : 'show') + ' them') + '><svg class="i"><use href="#i-chev"/></svg>closed <span class="subn">' + n + '</span></button>' +
+          (on ? cu.map(function (k) { return unitRows(k, 0); }).join('') : '');
+      }
+      return h;
+    }
+    var roots = order.filter(function (id) { return inTree(id) && !(parentOf(id) && inTree(parentOf(id))); });
+    order.forEach(function (id) {
+      if (isUnit(id) && !(parentOf(id) && (isUnit(parentOf(id)) || inTree(parentOf(id))))) addClosed(latest(id), size(id), unitRows(id, base[id].depth));
+    });
+    return bar + (roots.length ? roots.map(node).join('') : '<div class="empty">No open items.</div>');
   }
   function scopeChip(s) {
     if (s === 'mine') return VS.my.assignments.map(A).filter(function (r) { return r.status !== 'done'; }).length + ' open';
@@ -593,31 +690,38 @@
   }
   var LISTS = { mine: listMine, received: listReceived, given: listGiven, team: listTeam, all: listAll };
   function panelBody(s, m, v) { return m === 'list' ? LISTS[s](v) : modeBody(s, m, v); }
-  // (366) the panel as a spec: tools (scopes, scope chip, modes) go in its header when it
-  // stands alone, or in the tool row under the tab bar in the narrow layout
+  // (366) the panel as a spec: the header is two rows (384), (385): scopes and the scope chip,
+  // then the view icons and the search box. It is the card header when the panel stands alone,
+  // or the tool area under the tab bar in the narrow layout.
+  var VIEW_ICON = { list: 'list', tree: 'tree', kanban: 'kanban', 'due timeline': 'timeline', calendar: 'calendar' };
   function cardPanel(v) {
-    var s = scopeOf(), m = panelMode(s);
-    TF = todayFilter();
+    var s = scopeOf(), m = panelMode(s), q = panelState().q;
+    TF = todayFilter(); SQ = q.trim().toLowerCase(); FILT = !!(TF || SQ);
+    CLOSED = m === 'list' ? { entries: [], older: 0 } : null;
     var scopes = '<span class="scopes" role="tablist" aria-label="scope">' + scopeList().map(function (x) {
       return '<button type="button" class="scp' + (x[0] === s ? ' on' : '') + '" role="tab" aria-selected="' + (x[0] === s) + '"' + attr('act', 'scope') + attr('scope', x[0]) + tipAttr(x[2]) + '>' + esc(x[1]) + '</button>';
     }).join('') + '</span>';
-    var modes = SCOPE_MODES[s].length > 1 ? '<span class="cmodes">' + SCOPE_MODES[s].map(function (x) {
-      return '<button class="btn mini' + (m === x[0] ? ' primary' : '') + '"' + attr('act', 'pmode') + attr('mode', x[0]) + '>' + x[1] + '</button>';
+    var modes = SCOPE_MODES[s].length > 1 ? '<span class="vmodes" role="group" aria-label="view">' + SCOPE_MODES[s].map(function (x) {
+      return '<button type="button" class="vbtn' + (m === x[0] ? ' on' : '') + '" aria-pressed="' + (m === x[0]) + '" aria-label="' + esc(x[1]) + '"' + attr('act', 'pmode') + attr('mode', x[0]) + tipAttr(x[1]) +
+        '><svg class="i"><use href="#i-' + VIEW_ICON[x[1]] + '"/></svg></button>';
     }).join('') + '</span>' : '';
-    var body = panelBody(s, m, v);
-    TF = null;
-    return { title: 'Items', tools: scopes + '<span class="chip">' + esc(scopeChip(s)) + '</span><span class="grow"></span>' + modes, body: body, id: 'card-items', cls: 'panel',
+    var search = '<span class="psearch"><svg class="i"><use href="#i-search"/></svg><input id="psearch" type="text" role="searchbox" autocomplete="off" spellcheck="false" value="' + esc(q) + '" placeholder="Search this scope (Esc clears)" aria-label="search items in this scope: title, body, project, id">' +
+      (q ? '<button type="button" class="psx"' + attr('act', 'psearch-clear') + ' aria-label="clear the search"' + tipAttr('clear the search (Esc)') + '><svg class="i"><use href="#i-x"/></svg></button>' : '') + '</span>';
+    var body = panelBody(s, m, v), closed = closedHtml();
+    TF = null; SQ = ''; FILT = false; CLOSED = null;
+    return { title: 'Items', tools: scopes + '<span class="chip">' + esc(scopeChip(s)) + '</span><div class="prow2">' + modes + search + '</div>', body: '<div class="plist">' + body + '</div>' + closed, id: 'card-items', cls: 'panel',
       attrs: attr('scope', s) + attr('view', m) };
   }
   function panelHtml(p, withToday) {
     return '<section class="card panel" id="card-items"' + p.attrs + '><header><h2>Items</h2>' + p.tools + '</header>' + (withToday ? todayBar() : '') + '<div class="cbody">' + p.body + '</div></section>';
   }
   // Does the given scope and mode show any row under the Today filter `key`? (a chip click moves to TODAY_HOME when not)
+  // The search is left out: typing in the box never moves the panel to another scope.
   function scopeHasToday(key, s, m, v) {
     var keep = panelState().today;
-    panelState().today = key; TF = todayFilter();
+    panelState().today = key; TF = todayFilter(); FILT = true; CLOSED = null;
     var has = /data-item=/.test(panelBody(s, m, v));
-    TF = null; panelState().today = keep;
+    TF = null; FILT = false; panelState().today = keep;
     return has;
   }
 
@@ -837,7 +941,7 @@
       '<div class="gantt"><div class="grow-axis"><div class="glabel"></div><div class="gtrack axis">' + axis + '</div></div>';
     h += rows.map(function (x) {
       var it = VS.items[x.item], s = dayNum(it.started || it.ts), e = dayNum(it.due) + 1, over = it.due < today() && x.status !== 'done';
-      return '<div class="grow-row click"' + attr('item', it.id) + '><div class="glabel">' + x.chip + titleRef(it.id) + whoTag(x) + priHtml(it) + '</div>' +
+      return '<div class="grow-row click' + (ENDED[x.status] ? ' ended' : '') + '"' + attr('item', it.id) + '><div class="glabel">' + x.chip + titleRef(it.id) + whoTag(x) + priHtml(it) + '</div>' +
         '<div class="gtrack"><span class="gnow" style="left:' + pct(t0) + '"></span><span class="gbar st-' + esc(x.status) + (over ? ' over' : '') + '" style="left:' + pct(Math.min(s, e - 1)) + ';width:' + ((Math.max(1, e - Math.min(s, e - 1))) / span * 100).toFixed(2) + '%" title="' +
         esc((it.started ? 'started ' : 'created ') + String(it.started || it.ts).slice(0, 10) + ' - due ' + it.due) + '">' + esc(it.due.slice(5)) + '</span></div></div>';
     }).join('');
@@ -858,7 +962,7 @@
     for (var d = 1; d <= days; d++) {
       var ds = m + '-' + (d < 10 ? '0' : '') + d, list = byDay[ds] || [];
       h += '<div class="cday' + (ds === today() ? ' now' : '') + '"' + attr('day', ds) + '><div class="cnum">' + d + '</div>' + list.map(function (x) {
-        return '<div class="citem click"' + attr('item', x.item) + tipHtml(SI.info(x.status).label + ' · ' + VS.items[x.item].priorityName + (x.who ? ' · ' + esc(x.who) : '')) + '>' + x.chip + titleRef(x.item) + '</div>';
+        return '<div class="citem click' + (ENDED[x.status] ? ' ended' : '') + '"' + attr('item', x.item) + tipHtml(SI.info(x.status).label + ' · ' + VS.items[x.item].priorityName + (x.who ? ' · ' + esc(x.who) : '')) + '>' + x.chip + titleRef(x.item) + '</div>';
       }).join('') + '</div>';
     }
     return h + '</div>';
@@ -940,7 +1044,9 @@
   // Only the shown tab is rendered. A hidden tab whose signature (tabSig) moved since it
   // was last shown carries a dot, like the dashboard's tab bar (`tdot`).
   var TABS = { items: 'Items', notify: 'Notifications', chat: 'Support agent', org: 'Team', activity: 'Activity', data: 'Data' };
+  // (384) a tab is one icon button: the name is the tooltip and the aria-label, a dot rides its corner
   var TAB_TIP = { data: 'Data (debug): the raw roles file, refs, and clone state' };
+  var TAB_ICON = { items: 'tasks', notify: 'bell', chat: 'agent', org: 'team', activity: 'activity', data: 'data' };
   var SIDE = ['notify', 'chat', 'org', 'activity', 'data'];
   function layoutOf() { var w = window.innerWidth; return w >= 1600 ? 'd' : w < 1000 ? 'narrow' : 'a'; }
   function tabState() { return (ui.tab[ui.store] = ui.tab[ui.store] || { side: 'notify', narrow: 'items' }); }
@@ -969,8 +1075,8 @@
     var c = specs[active];
     var nav = '<nav class="ptabs" role="tablist" aria-label="tracker tabs">' + tabs.map(function (k) {
       var on = k === active, dot = !on && tabDot(k, v);
-      return '<button type="button" class="ptab" role="tab" aria-selected="' + on + '"' + attr('act', 'tab') + attr('tab', k) + (TAB_TIP[k] ? tipAttr(TAB_TIP[k]) : '') + '>' + esc(TABS[k]) +
-        '<span class="tdot' + (dot ? ' on' : '') + '"' + (dot ? ' aria-label="new"' : '') + '></span></button>';
+      return '<button type="button" class="ptab" role="tab" aria-selected="' + on + '" aria-label="' + esc(TABS[k] + (dot ? ' (new)' : '')) + '"' + attr('act', 'tab') + attr('tab', k) + tipAttr(TAB_TIP[k] || TABS[k]) + '>' +
+        '<svg class="i"><use href="#i-' + TAB_ICON[k] + '"/></svg><span class="tdot' + (dot ? ' on' : '') + '" aria-hidden="true"></span></button>';
     }).join('') + '</nav>';
     var tools = c.tools != null ? c.tools : (c.chip ? '<span class="chip">' + c.chip + '</span>' : '') + '<span class="grow"></span>' + c.extra;
     tabShown(active, v);
@@ -1029,6 +1135,32 @@
   // (actList), then the item actions a row does not carry (edit, hide, and assign or
   // split where the row has none). The assignees table keeps only the per-assignee
   // actions the action bar does not already offer.
+  // (390) What an event refers to inside the open item window, found by the event's type:
+  // a comment (added, edited, or hidden) -> that comment; a status, close, confirm, reject,
+  // or reopen -> that assignee's entry on the holders line; an assignment or handoff -> the
+  // holders line; an accept -> the accepter's entry on it; a decline, return, or unassign ->
+  // the assignees row that ended (the holders line no longer lists it); a body edit or the
+  // item's creation -> the body; an edit that only adds attachments -> the first new chip.
+  // Anything else falls back to its own line in the thread, and null when the window has none.
+  function focusTarget(root, evId) {
+    var e = EV[evId];
+    if (!e) return null;
+    var p = e.payload || {}, by = function (sel, id) { return root.querySelector('[' + sel + '="' + CSS.escape(id) + '"]'); }, holders = root.querySelector('[data-focus="holders"]'), el = null;
+    if (e.type === 'comment.add') el = by('data-ev', e.id);
+    else if (e.type === 'comment.edit' || e.type === 'comment.hide') el = by('data-ev', p.comment);
+    else if (STATUS_EV[e.type]) el = by('data-hmember', assigneeOf(e)) || holders;
+    else if (e.type === 'item.assign' || e.type === 'item.handoff') el = holders;
+    else if (e.type === 'item.accept') el = by('data-hmember', e.member) || holders;
+    else if (e.type === 'item.decline' || e.type === 'item.return' || e.type === 'item.unassign') {
+      var gone = vals(VS.assignments).filter(function (r) { return r.ended && r.ended.id === e.id; })[0];
+      el = gone && by('data-rec', gone.id);
+    }
+    else if (e.type === 'item.create' || e.type === 'item.edit') {
+      var atts = listOf(p.attachments).filter(function (x) { return x && x.oid; });
+      el = !('body' in p) && atts.length ? by('data-oid', atts[0].oid) : root.querySelector('[data-focus="body"]');
+    }
+    return el || by('data-ev', e.id);
+  }
   function windowActs(v, it) {
     var recs = it.assignments.map(A), mineR = recs.filter(function (r) { return r.to === v && r.state === 'live'; })[0];
     var gone = VS.viewer.admin && VS.members[it.author] && VS.members[it.author].removed; // (292)
@@ -1051,7 +1183,7 @@
     h += '<dl class="iw-meta">' +
       '<dt>status</dt><dd>' + (it.kind === 'topic' ? '<span class="muted">topic: discussion only</span>' : esc(SI.info(it.status).label) + ' <span class="muted">' + esc(SI.info(it.status).desc) + '</span>') + '</dd>' +
       '<dt>kind</dt><dd>' + esc(it.kind) + (it.pending.length ? ' <span class="muted">(pending assignment)</span>' : '') + (it.hidden ? ' <span class="muted">(hidden)</span>' : '') + '</dd>' +
-      (it.kind !== 'topic' ? '<dt>holders</dt><dd>' + (hs.length ? hs.map(function (r) { return '<i class="av' + (r.state === 'pending' ? ' pend' : '') + (r.to === v ? ' me' : '') + '">' + esc(initials(r.to)) + '</i> ' + whoName(r.to) + ' <span class="muted">' + esc(SI.info(stKey(it, r)).label) + '</span>'; }).join(', ') : '<span class="muted">not assigned</span>') + '</dd>' : '') +
+      (it.kind !== 'topic' ? '<dt>holders</dt><dd' + attr('focus', 'holders') + '>' + (hs.length ? hs.map(function (r) { return '<span class="hold"' + attr('hmember', r.to) + '><i class="av' + (r.state === 'pending' ? ' pend' : '') + (r.to === v ? ' me' : '') + '">' + esc(initials(r.to)) + '</i> ' + whoName(r.to) + ' <span class="muted">' + esc(SI.info(stKey(it, r)).label) + '</span></span>'; }).join(', ') : '<span class="muted">not assigned</span>') + '</dd>' : '') +
       (it.chain.length > 1 ? '<dt>path</dt><dd>' + esc(it.chain.join(' > ')) + '</dd>' : '') +
       (it.kind !== 'topic' ? '<dt>due</dt><dd>' + (it.due ? esc(it.due) : '<span class="muted">-</span>') + '</dd>' : '') +
       '<dt>creator</dt><dd>' + esc(nm(it.author)) + (VS.members[it.author] && VS.members[it.author].admin ? ' <span class="chip admin">admin</span>' : '') + '</dd>' +
@@ -1059,7 +1191,7 @@
       '<dt>parent</dt><dd>' + (it.parent ? itemRef(it.parent) + ' ' + esc((VS.items[it.parent] || {}).title || '') : '<span class="muted">-</span>') + '</dd>' +
       '<dt>id</dt><dd><code>' + esc(it.id) + '</code></dd>' +
       '<dt>dates</dt><dd>created ' + esc(fmtTs(it.ts)) + (it.edited ? ' &middot; edited ' + esc(fmtTs(it.edited.ts)) : '') + ' &middot; last activity ' + esc(fmtTs(it.lastActivity)) + '</dd></dl>';
-    h += it.body ? '<div class="sh-body">' + esc(it.body) + '</div>' : '';
+    h += it.body ? '<div class="sh-body"' + attr('focus', 'body') + '>' + esc(it.body) + '</div>' : '';
     h += mentionChips(it.mentions) + attChips(it.attachments, true);
     h += '<div class="sh-actions">' + (acts || '<span class="muted">No item actions for ' + esc(nm(v)) + '.</span>') + '</div>';
 
@@ -1670,6 +1802,9 @@
     // (350) cards scroll inside; keep each card's scroll and the focused row across the re-render
     var scrolls = {}, fa = document.activeElement, focusRk = fa && fa.closest && body.contains(fa) && fa.closest('[data-rk]');
     focusRk = focusRk && focusRk.getAttribute('data-rk');
+    var focusSearch = fa && fa.id === 'psearch' ? [fa.selectionStart, fa.selectionEnd] : null; // (385)
+    var focusFk = fa && fa.closest && body.contains(fa) && fa.closest('[data-fk]'); // (386), (387) the fold buttons keep keyboard focus across their re-render
+    focusFk = focusFk && focusFk.getAttribute('data-fk');
     Array.prototype.forEach.call(body.querySelectorAll('.card[id] > .cbody'), function (c) { scrolls[c.parentNode.id] = c.scrollTop; });
     hideTip();
     body.innerHTML = drawerHtml(name, v);
@@ -1678,6 +1813,9 @@
     var chat = body.querySelector('.chat-log');
     if (chat) chat.scrollTop = chat.scrollHeight; // newest message at the bottom
     body.scrollTop = top1;
+    if (focusSearch && $('psearch')) { $('psearch').focus({ preventScroll: true }); $('psearch').setSelectionRange(focusSearch[0], focusSearch[1]); }
+    var ff = focusFk && lastInput === 'key' && body.querySelector('[data-fk="' + CSS.escape(focusFk) + '"]');
+    if (ff) ff.focus({ preventScroll: true });
     var fr = focusRk && lastInput === 'key' && body.querySelector('[data-rk="' + CSS.escape(focusRk) + '"]');
     if (fr) fr.focus({ preventScroll: true });
     var sr = ui.sel && body.querySelector('[data-rk="' + CSS.escape(ui.sel) + '"]');
@@ -1691,6 +1829,13 @@
       sb.innerHTML = windowHtml(v, VS.items[ui.item]);
       if (!ui.itemChanged && !ui.clearDraft && $('cbox')) $('cbox').value = draft;
       sb.scrollTop = ui.itemChanged ? 0 : top2;
+      // (390) the notification's target: a thin mark stays while the window is open; the flash and the scroll happen once
+      var fx = ui.focus && focusTarget(sb, ui.focus.ev);
+      if (fx) {
+        fx.classList.add('fx-mark');
+        if (ui.focus.flash) { fx.classList.add('fx-flash'); fx.scrollIntoView({ block: 'center' }); }
+      }
+      if (ui.focus) ui.focus.flash = false;
     } else sb.innerHTML = '';
     ui.itemChanged = false; ui.clearDraft = false;
     measure();
@@ -1716,7 +1861,11 @@
   // switches to the store when needed (the drawer stays as it is, or closes when it shows
   // another store), replaces any open window, and moves focus into it. Returns false
   // when the store or the item is unknown to the current viewer.
-  function openItemWindow(storeId, itemId, opener) {
+  // `opts` is { focus: eventId, opener: element } (a bare element still means the opener): the
+  // window then scrolls to and marks what the event refers to (390), and just opens when the
+  // window has nothing for it. An event URL route would reuse exactly this.
+  function openItemWindow(storeId, itemId, opts) {
+    var opener = opts && opts.nodeType ? opts : opts && opts.opener, focus = opts && !opts.nodeType && opts.focus;
     if (!stores[storeId]) return false;
     if (!stores[storeId].view(viewerOf(storeId), ui.clock[storeId]).items[itemId]) return false;
     if (ui.page && ui.page !== storeId) { history.pushState(null, '', '#/' + encodeURIComponent(storeId)); applyRoute(); } // on a store page: go to the item's store page
@@ -1726,11 +1875,12 @@
     }
     if (!ui.win) ui.winReturn = returnSel(opener || document.activeElement);
     ui.item = itemId; ui.win = true; ui.itemChanged = true; ui.replyTo = null; ui.mdraft = []; ui.adraft = [];
+    ui.focus = focus ? { ev: focus, flash: true } : null;
     render();
-    $('iwin').firstElementChild.focus();
+    $('iwin').firstElementChild.focus({ preventScroll: true });
     return true;
   }
-  function showItem(id, opener) { openItemWindow(ui.store, id, opener); }
+  function showItem(id, opener, focus) { openItemWindow(ui.store, id, { opener: opener, focus: focus }); }
   // A selector for the element focus returns to: the row, feed entry, or reference that
   // opened the window survives a re-render under the same data-rk / data-nkey / data-cref.
   function returnSel(el) {
@@ -1741,7 +1891,7 @@
   }
   function closeItemWindow() {
     var back = ui.winReturn;
-    ui.win = false; ui.winReturn = null; ui.replyTo = null; ui.mdraft = []; ui.adraft = [];
+    ui.win = false; ui.winReturn = null; ui.focus = null; ui.replyTo = null; ui.mdraft = []; ui.adraft = [];
     render();
     var el = back && document.querySelector(back);
     if (el && !el.matches('a[href], button, [tabindex]')) el = el.querySelector('a[href], button, [tabindex]'); // a feed entry: its title link
@@ -1834,7 +1984,7 @@
     qClose(true);
     if (x.kind === 'join') { openDialog('join', {}); return; }
     if (x.kind === 'store') { if (ui.page !== x.store) location.hash = '#/' + encodeURIComponent(x.store); else $('qs').focus(); }
-    else if (!openItemWindow(x.store, x.item, $('qs'))) toast('That item is not visible to this viewer.');
+    else if (!openItemWindow(x.store, x.item, { opener: $('qs') })) toast('That item is not visible to this viewer.');
   }
 
   // Theme (board (347) a): auto / light / dark, local UI state in localStorage. Applied as
@@ -1936,6 +2086,9 @@
         else if (k === 'open') showItem(d.item);
         else if (k === 'scope') { panelState().scope = a.getAttribute('data-scope'); ui.sel = null; render(); }
         else if (k === 'pmode') { panelState().modes[scopeOf()] = a.getAttribute('data-mode'); render(); }
+        else if (k === 'closed-toggle') { panelState().closedOpen = !panelState().closedOpen; render(); }
+        else if (k === 'tree-closed') { var to = panelState().treeOpen, pid = a.getAttribute('data-parent'); to[pid] = !to[pid]; render(); }
+        else if (k === 'psearch-clear') { panelState().q = ''; render(); if ($('psearch')) $('psearch').focus(); }
         else if (k === 'cmode') { (ui.cmodes[ui.store] = ui.cmodes[ui.store] || {})[a.getAttribute('data-card')] = a.getAttribute('data-mode'); render(); }
         else if (k === 'cal') { ui.calMonth[a.getAttribute('data-card')] = a.getAttribute('data-month'); render(); }
         else if (k === 'clock') { tick(ui.store, Number(a.getAttribute('data-min'))); render(); }
@@ -1965,13 +2118,21 @@
       var nk = t.closest('[data-nkey]');
       if (nk) readMap()[nk.getAttribute('data-nkey')] = true; // a feed entry is read once clicked
       var it = t.closest('[data-item]');
-      if (it && !t.closest('select, textarea, input, #dlg')) { e.preventDefault(); showItem(it.getAttribute('data-item'), t); return; }
+      if (it && !t.closest('select, textarea, input, #dlg')) { e.preventDefault(); showItem(it.getAttribute('data-item'), t, nk && nk.getAttribute('data-nev')); return; }
       if (t.closest('a[href="#"]')) e.preventDefault();
     });
     document.addEventListener('submit', function (e) {
       var f = e.target;
       if (f.closest && f.closest('#dlg')) { e.preventDefault(); submit(f); }
     });
+    // (385) the search box filters as you type; the render rebuilds the panel, so focus and the caret are put back (see render),
+    // and an IME composition (Korean, Japanese) is left alone until it commits
+    function searchInput(e) {
+      if (e.target.id !== 'psearch' || e.isComposing) return;
+      panelState().q = e.target.value; render();
+    }
+    document.addEventListener('input', searchInput);
+    document.addEventListener('compositionend', searchInput);
     document.addEventListener('change', function (e) {
       var t = e.target;
       if (t.id === 'viewer') switchViewer(stores[ui.store].clonesOf(t.value)[0]);
@@ -2051,6 +2212,8 @@
     });
     document.addEventListener('keydown', function (e) {
       lastInput = 'key';
+      // (385) Esc in the search box clears it first; with it empty, Esc goes on to close the window or the drawer
+      if (e.key === 'Escape' && e.target.id === 'psearch' && e.target.value) { e.preventDefault(); panelState().q = ''; render(); if ($('psearch')) $('psearch').focus(); return; }
       // (354) keyboard: a focused row shows its actions and details; Enter opens its item window
       if (e.key === 'Enter' && e.target.classList && e.target.classList.contains('irow')) { e.preventDefault(); showItem(e.target.getAttribute('data-item')); return; }
       if (e.key !== 'Escape' || $('dlg').open) return;

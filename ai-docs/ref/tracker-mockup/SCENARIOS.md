@@ -29,6 +29,15 @@ replaced the thread side sheet with an item window over the page. Scenarios 1,
 3, 4, 8 and 10 were walked again through it (2026-11-08) with the same
 outcomes; their steps below name the new places.
 
+The detail pass of board (384)-(390) (2026-11-08) made the pane's tabs icon
+buttons (bell, agent, people, pulse, database; the name is in the tooltip and
+the `aria-label`, so a step's "Notifications tab" means the bell), made the
+panel's view switch icon buttons, added a search box to the panel header,
+moved done items to a "recently closed" section, and made a notification
+click land on its target in the item window. Scenarios 1, 3, 8 and 10 were
+walked again through it with the same outcomes; scenario 10's step and
+outcome name the landing.
+
 ## 1. Morning check
 
 Steps: view as `maya.pc`; read the Today chips in the Items panel header;
@@ -83,7 +92,7 @@ Snags:
 
 Steps: as `lena.pc`, accept noa's pending "Explain the tokenizer API" from its
 row in the *received requests* scope; as `maya.pc` (lena's lead), read the
-reference notice on the Notifications tab, then Return with a note from the
+reference notice on the Notifications tab (the bell), then Return with a note from the
 item's row in lena's group of the *my team* scope; as `noa.pc`, open the item
 from its *received requests* row and assign it to lena again from the item
 window.
@@ -296,8 +305,8 @@ Snags:
 
 Added with the notification card ((331)-(340)), walked the same way.
 
-Steps: view as `maya.pc`; read the Notifications tab; click the mention
-entry for "Retro notes: search v2 sprint", then Esc; *Mark all read*; open
+Steps: view as `maya.pc`; read the Notifications tab (the bell icon); click
+the mention entry for "Retro notes: search v2 sprint", then Esc; *Mark all read*; open
 "Index builder" (its row in the *all* scope), load lena's attachment in the
 item window; post a comment that picks `@ivy` and attaches a 20000000-byte
 file, then one with a 2048-byte file; view as `ivy`.
@@ -306,7 +315,10 @@ Outcome: maya's tab lists ten entries, all unread, newest first: due today,
 two mentions (bo's topic body, lena's comment), a confirm, a pending
 assignment, a reply, completion and blocked of work she assigned, a
 reference notice, and a forced assignment. The click opened the item window
-(focus inside it) and cleared that entry only; Esc closed it and returned
+(focus inside it) scrolled to and marked what the entry is about (here the
+topic's body, where bo mentioned her; for a mention in a comment, that
+comment, flashing briefly and keeping a thin left mark) and cleared that entry
+only; Esc closed it and returned
 focus to the entry; *Mark all read* cleared the rest, and with them the
 unread dots on the Items panel's rows. In the item window
 `lena.pc-6` shows `@Maya Ortiz` / `@Omar Haddad` chips and an

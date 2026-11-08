@@ -201,14 +201,15 @@ body.paged .convo, body.paged .composer, body.paged .drawer { display: none; }
 
 /* drawer content (366): layout A is the Items panel (about two thirds) and one tab pane;
    D (wide) is Items | Notifications | the tab pane; narrow is one tab pane. app.js picks
-   the layout from the window width (data-layout). Each column's card follows its content
-   up to the column height (the drawer's), then scrolls inside. */
+   the layout from the window width (data-layout). Each column's card fills the column, the
+   drawer's height (389), whatever its content: a short list leaves its panel standing full
+   height, a long one scrolls inside. */
 .dr-zones { flex: 1 1 0; min-height: 0; display: grid; grid-template-rows: minmax(0, 1fr); gap: 10px; }
 .dr-zones[data-layout="a"] { grid-template-columns: minmax(0, 2fr) minmax(340px, 1fr); }
 .dr-zones[data-layout="d"] { grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr) minmax(300px, 1fr); }
 .dr-zones[data-layout="narrow"] { grid-template-columns: minmax(0, 1fr); }
 .dr-col { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
-.dr-col > .card { flex: 0 1 auto; min-height: 0; max-height: 100%; }
+.dr-col > .card { flex: 1 1 auto; min-height: 0; max-height: 100%; }
 /* fitDrawer: one synchronous layout at natural height, every cap lifted */
 .dr-measure .dr-sheet { height: auto; }
 .dr-measure .dr-body, .dr-measure .dr-zones { flex: none; }
@@ -233,10 +234,10 @@ body.paged .convo, body.paged .composer, body.paged .drawer { display: none; }
 
 /* ===== cards ===== */
 .card { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
-/* (366) a card's height follows its content up to its column (see .dr-col); the body scrolls inside */
+/* (366), (389) a card fills its column (see .dr-col); the body takes what the header leaves and scrolls inside */
 .card { display: flex; flex-direction: column; }
 .card > * { flex: none; }
-.card > .cbody { flex: 0 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.card > .cbody { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; }
 .card > header { display: flex; gap: 8px; align-items: center; padding: 4px 8px 4px 12px; min-height: 32px; background: var(--muted); font-weight: 700; font-size: 13px; }
 .card > header h2 { margin: 0; font-size: 13px; }
 .card > header .chip { background: var(--card); }
@@ -307,6 +308,45 @@ body.paged .convo, body.paged .composer, body.paged .drawer { display: none; }
 .scp:hover { color: var(--fg); }
 .scp.on { background: var(--primary); color: var(--primary-fg); }
 .card.panel > header { flex-wrap: wrap; row-gap: 4px; padding-top: 5px; padding-bottom: 5px; }
+/* (384), (385) row 2 of the panel header: the view icons, then the search box taking the rest of the row */
+.prow2 { flex: 1 0 100%; display: flex; align-items: center; gap: 8px; min-width: 0; }
+.vmodes { display: inline-flex; gap: 1px; padding: 2px; border-radius: 999px; background: var(--card); flex: none; }
+.vbtn { width: 28px; height: 24px; border: 0; border-radius: 999px; background: transparent; color: var(--muted-fg); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; padding: 0; }
+.vbtn .i { width: 15px; height: 15px; }
+.vbtn:hover { color: var(--fg); }
+.vbtn.on { background: var(--primary); color: var(--primary-fg); }
+.vbtn:focus-visible { outline: 1.5px solid var(--primary); }
+.psearch { flex: 1 1 0; min-width: 0; display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 6px 0 9px; border-radius: 999px; background: var(--card); color: var(--muted-fg); box-shadow: inset 0 0 0 1px var(--line); }
+.psearch:focus-within { box-shadow: inset 0 0 0 1.5px var(--primary); color: var(--primary); }
+.psearch input { flex: 1 1 auto; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--fg); font: inherit; font-size: 12.5px; font-weight: 400; padding: 0; }
+.psearch input::placeholder { color: var(--muted-fg); }
+.psx { width: 20px; height: 20px; border: 0; border-radius: 50%; background: transparent; color: var(--muted-fg); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; padding: 0; flex: none; }
+.psx:hover { background: var(--muted); color: var(--fg); }
+.psx .i { width: 12px; height: 12px; }
+.ptools .psearch { background: var(--muted); box-shadow: none; }
+.ptools .vmodes { background: var(--muted); }
+.ptools .psearch:focus-within { box-shadow: inset 0 0 0 1.5px var(--primary); }
+
+/* the Items panel body: the list on top, the "recently closed" section (386) pinned to the bottom of the panel's height */
+.card.panel > .cbody { display: flex; flex-direction: column; }
+.card.panel > .cbody > * { flex: none; }
+.pclosed { margin-top: auto; padding-top: 10px; }
+.pc-head { width: 100%; display: flex; align-items: center; gap: 6px; padding: 5px 4px; border: 0; border-top: 1px solid var(--line); background: transparent; color: var(--muted-fg); font: inherit; font-size: 11.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; text-align: left; cursor: pointer; }
+.pc-head .muted { font-weight: 400; text-transform: none; letter-spacing: 0; }
+.pc-head:hover { color: var(--fg); }
+.pc-head:focus-visible { outline: 1.5px solid var(--primary); }
+.pc-head .i { transition: transform .15s; }
+.pclosed:not(.open) .pc-head .i, .csum:not(.open) .i { transform: rotate(-90deg); }
+.pc-rows > p { margin: 4px; font-size: 12.5px; }
+/* closed rows (386), (387): greyed, but the actions and the detail preview stay as they are */
+.irow.closed > .ir-main > :not(.ir-acts) { opacity: .55; }
+.irow.closed > .ir-main .title { text-decoration: none; }
+/* (387) the tree's "closed N" row under a parent */
+.csum { display: flex; align-items: center; gap: 5px; width: 100%; min-height: 24px; padding: 1px 4px 1px calc(4px + var(--ind, 0) * 16px); border: 0; background: transparent; color: var(--muted-fg); font: inherit; font-size: 12px; cursor: pointer; text-align: left; border-radius: 6px; }
+.csum:hover { background: color-mix(in srgb, var(--muted) 60%, transparent); color: var(--fg); }
+.csum:focus-visible { outline: 1.5px solid var(--primary); }
+.csum .i { width: 12px; height: 12px; transition: transform .15s; }
+.csum .subn { font-weight: 700; }
 
 /* (366) Today chips: one pill under the Items header (in the narrow layout, under the tab bar) */
 .todaybar { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; margin: 6px 10px 0; padding: 2px 4px 2px 10px; width: fit-content; max-width: calc(100% - 20px);
@@ -324,13 +364,14 @@ body.paged .convo, body.paged .composer, body.paged .drawer { display: none; }
 /* (366) the tab pane: the dashboard tab bar's look (pill group, active tab raised), a dot on a hidden tab with something new */
 .card.pane > header { padding: 4px 6px; min-height: 36px; }
 .ptabs { display: flex; flex-wrap: wrap; gap: 2px; background: var(--card); border-radius: 999px; padding: 2px; }
-.ptab { position: relative; font: inherit; font-size: 12px; font-weight: 700; border: 0; background: transparent; color: var(--muted-fg); border-radius: 999px; height: 24px; padding: 0 9px; cursor: pointer;
-  display: inline-flex; align-items: center; white-space: nowrap; }
+.ptab { position: relative; font: inherit; font-size: 12px; font-weight: 700; border: 0; background: transparent; color: var(--muted-fg); border-radius: 999px; height: 26px; width: 32px; padding: 0; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; white-space: nowrap; }
+.ptab .i { width: 16px; height: 16px; }
 .ptab:hover { color: var(--fg); }
 .ptab[aria-selected="true"] { background: var(--muted); color: var(--fg); box-shadow: inset 0 0 0 1px var(--line); }
 .ptab:focus-visible { outline: 1.5px solid var(--primary); }
 /* the dot sits on the tab's corner, so it never changes the tab's width */
-.tdot { display: none; position: absolute; top: 2px; right: 1px; width: 7px; height: 7px; border-radius: 50%; background: var(--primary); box-shadow: 0 0 0 1.5px var(--card); }
+.tdot { display: none; position: absolute; top: 3px; right: 4px; width: 7px; height: 7px; border-radius: 50%; background: var(--primary); box-shadow: 0 0 0 1.5px var(--card); }
 .tdot.on { display: inline-block; }
 .ptools { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 6px 12px 0; font-size: 12.5px; }
 .ptools:empty { display: none; }
@@ -479,6 +520,8 @@ details.unpushed summary { cursor: pointer; color: var(--warn); }
 .kcard.drag { cursor: grab; box-shadow: inset 3px 0 0 var(--primary), var(--shadow); }
 .kcard.drag:hover { box-shadow: inset 3px 0 0 var(--primary), var(--shadow-hi); }
 .gantt { font-size: 12px; }
+.grow-row.ended .glabel, .grow-row.ended .gbar { opacity: .55; } /* (386) timeline and calendar keep ended items, muted */
+.citem.ended { opacity: .55; }
 .grow-axis, .grow-row { display: grid; grid-template-columns: minmax(180px, 34%) 1fr; gap: 8px; align-items: center; padding: 2px 0; border-top: 1px solid var(--muted); }
 .glabel { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; min-width: 0; }
 .gtrack { position: relative; height: 18px; }
@@ -501,7 +544,6 @@ details.unpushed summary { cursor: pointer; color: var(--warn); }
 .sup { margin: 2px 0; font-size: 12px; }
 
 /* chat card: placeholder for the support-agent chat child; fixed height, internal scroll, newest at the bottom */
-.card.chat > .cbody { flex: none; }
 .card.chat .cbody { height: 360px; padding: 0; display: flex; flex-direction: column; }
 .chat-log { flex: 1 1 0; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 8px; padding: 8px 10px; background: color-mix(in srgb, var(--muted) 45%, var(--bg)); }
 .chat-log .msg { max-width: 92%; }
@@ -535,3 +577,17 @@ details.unpushed summary { cursor: pointer; color: var(--warn); }
 .composer2 .cextra { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 12px; }
 .composer2 .cextra input { font: inherit; font-size: 11.5px; border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; background: var(--card); color: var(--fg); width: 150px; }
 .composer2 .cextra input[type=number] { width: 90px; }
+
+/* (390) a notification opens the item window at its target: a brief flash, then a thin left mark stays */
+.fx-mark { box-shadow: inset 3px 0 0 var(--primary); border-radius: 3px; }
+.timeline .cmt.fx-mark { box-shadow: none; border-left: 3px solid var(--primary); margin-left: 3px; }
+.timeline .cmt.fx-mark::before { left: -6px; }
+.iw-meta dd.fx-mark { padding-left: 6px; }
+.hold.fx-mark { padding: 0 4px 0 6px; }
+.atable tr.fx-mark { box-shadow: none; }
+.atable tr.fx-mark > td:first-child { box-shadow: inset 3px 0 0 var(--primary); }
+.chip.att.fx-mark { box-shadow: inset 0 0 0 1.5px var(--primary); }
+.fx-flash { animation: fx-flash 1.8s ease-out; }
+.atable tr.fx-flash > td { animation: fx-flash 1.8s ease-out; }
+@keyframes fx-flash { 0%, 35% { background-color: color-mix(in srgb, var(--primary) 26%, transparent); } 100% { background-color: transparent; } }
+@media (prefers-reduced-motion: reduce) { .fx-flash, .atable tr.fx-flash > td { animation: none; } }
