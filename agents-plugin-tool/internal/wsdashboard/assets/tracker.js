@@ -1551,8 +1551,19 @@
   // then live before ended, then display name, then assignment order). What every row shares (the
   // provenance text and the close rule) is written once in the header; a row adds only what
   // differs. The rows past A_SHOWN are in the markup, hidden until the "N more" toggle (ui.aopen).
+  // The assignees card's "+": who may assign sees it (the menu's rule). It opens the assign flow
+  // through openAssign, the one place a later assign UI replaces.
+  function assignAddBtn(it, v) {
+    if (it.author !== v || it.kind === 'topic' || it.hidden) return '';
+    return '<button type="button" class="ia a-add"' + attr('act', 'asg-add') + attr('item', it.id) + ' aria-haspopup="menu" aria-label="' + esc(wsT("js.tk.act.assign")) + '"' + tipAttr(wsT("js.tk.act.assign")) + '><svg class="i"><use href="#tki-plus"/></svg></button>';
+  }
+  function openAssign(id, anchor) { itemMenu(id, anchor, null, { step: 'assign' }); }
+  // A remove-a-person action on an assignee row (unassign, withdraw): a small red minus badge.
+  function rmBadge(label, r) {
+    return '<button type="button" class="rmb"' + attr('act', 'unassign') + attr('item', r.item) + attr('who', r.to) + ' aria-label="' + esc(label) + '"' + tipAttr(label) + '><svg class="i"><use href="#tki-minus"/></svg></button>';
+  }
   function assigneesHtml(v, it, recs) {
-    if (!recs.length) return '<section class="iw-asg"><h3>' + wsT("js.tk.asg.title") + '</h3><div class="empty">' + wsT("js.tk.asg.none") + '</div></section>';
+    if (!recs.length) return '<section class="iw-asg"><h3>' + wsT("js.tk.asg.title") + '<span class="grow"></span>' + assignAddBtn(it, v) + '</h3><div class="empty">' + wsT("js.tk.asg.none") + '</div></section>';
     var rows = recs.map(function (r, i) { return { r: r, i: i, d: leadDepth(r.to), on: r.state === 'live' || r.state === 'pending', src: source(r), cm: complText(r.completion) }; });
     rows.sort(function (a, b) { return (b.on - a.on) || (a.d - b.d) || nm(a.r.to).localeCompare(nm(b.r.to)) || (a.i - b.i); });
     function common(key) { // the most frequent value, when at least two rows hold it
@@ -1563,24 +1574,24 @@
     var cs = common('src'), cc = common('cm'), open = ui.aopen === it.id, hid = rows.length - A_SHOWN;
     var head = cs !== null || cc !== null ? '<div class="a-common muted">' + [cs, cc].filter(function (x) { return x !== null; }).join(' &middot; ') + '</div>' : '';
     var list = rows.map(function (x, k) {
-      var r = x.r, b = '';
+      var r = x.r, b = '', rm = '';
       if (r.state === 'live') {
         if ((r.by === v || r.to === v) && r.status === 'done') b += btn('note', wsT("js.tk.asg.reopen"), { item: r.item, who: r.to, op: 'item.reopen' });
         var departed = (VS.members[r.to] || {}).removed || (VS.members[r.by] || {}).removed;
-        if (r.by === v || (departed && VS.viewer.admin)) b += btn('unassign', r.by === v ? wsT("js.tk.asg.unassign") : wsT("js.tk.asg.unassign.admin"), { item: r.item, who: r.to });
+        if (r.by === v || (departed && VS.viewer.admin)) rm = rmBadge(r.by === v ? wsT("js.tk.asg.unassign") : wsT("js.tk.asg.unassign.admin"), r);
         if (VS.viewer.admin && r.to !== v && r.status !== 'done' && !it.hidden) b += btn('handoff', wsT("js.tk.asg.handoff.admin"), { item: r.item, who: r.to });
-      } else if (r.state === 'pending' && r.to === v && (r.by === v || r.sender === v)) b += btn('unassign', wsT("js.tk.asg.withdraw"), { item: r.item, who: r.to });
+      } else if (r.state === 'pending' && r.to === v && (r.by === v || r.sender === v)) rm = rmBadge(wsT("js.tk.asg.withdraw"), r);
       var note = r.note || r.answerNote, diff = [];
       if (x.src !== cs) diff.push(cs !== null && x.src.indexOf(cs) === 0 ? x.src.slice(cs.length).trim() : x.src);
       if (x.cm !== cc) diff.push(x.cm);
       return '<li class="arow' + (!x.on ? ' gone' : '') + (k >= A_SHOWN ? ' more' : '') + '"' + attr('rec', r.id) + attr('hmember', r.to) + '>' +
         '<div class="ar-main"><i class="av' + (r.state === 'pending' ? ' pend' : '') + (r.to === v ? ' me' : '') + '">' + esc(initials(r.to)) + '</i><span class="ar-name">' + whoName(r.to) + '</span>' +
-        '<span class="ar-st">' + recChip(r) + (r.ended ? ' <span class="muted">' + esc(alias(r.ended.id)) + endedBy(r) + '</span>' : '') + '</span></div>' +
+        '<span class="ar-st">' + recChip(r) + (r.ended ? ' <span class="muted">' + esc(alias(r.ended.id)) + endedBy(r) + '</span>' : '') + rm + '</span></div>' +
         (note ? '<div class="ar-note">&ldquo;' + esc(note) + '&rdquo;</div>' : '') +
         (diff.length ? '<div class="ar-diff muted">' + diff.join(' &middot; ') + '</div>' : '') +
         (b ? '<div class="tb">' + b + '</div>' : '') + '</li>';
     }).join('');
-    return '<section class="iw-asg"><h3>' + wsT("js.tk.asg.title") + ' <span class="cnt">' + rows.length + '</span></h3>' + head +
+    return '<section class="iw-asg"><h3>' + wsT("js.tk.asg.title") + ' <span class="cnt">' + rows.length + '</span><span class="grow"></span>' + assignAddBtn(it, v) + '</h3>' + head +
       '<ul class="alist' + (open ? '' : ' folded') + '">' + list + '</ul>' +
       (hid > 0 ? '<div class="a-fold">' + btn('afold', open ? wsT("js.tk.asg.fewer") : wsT("js.tk.asg.more", hid), {}) + '</div>' : '') + '</section>';
   }
@@ -1588,9 +1599,12 @@
   // with ▸/▾: the first level (the item's children) starts open, so their children show, and deeper
   // levels start folded. The fold state is the page's (ui.wfold), apart from the lists' stored one.
   // A node with children also carries its roll-up.
+  // The section is drawn even without children when the viewer may add one (its "+" opens the
+  // inline row here); a topic without children and without that right draws nothing.
   function subtasksHtml(it) {
-    var add = ui.sub && ui.sub.rk === 'iw:' + it.id ? subRowHtml(0) : ''; // "add subtask" from the window header: the input row tops the list
-    if (!it.children.length && !add) return '';
+    var add = ui.sub && ui.sub.rk === 'iw:' + it.id ? subRowHtml(0) : ''; // "add subtask" (header, menu, or the section's "+"): the input row tops the list
+    var can = canSplit(it);
+    if (!it.children.length && !add && !can && it.kind === 'topic') return '';
     function rows(id, depth) {
       return VS.items[id].children.map(function (k) {
         var ki = VS.items[k], key = ui.store + '|' + k, open = !!ki.children.length && (key in ui.wfold ? ui.wfold[key] : depth === 0);
@@ -1599,7 +1613,9 @@
           '<span class="grow"></span>' + rollupHtml(ki) + whoHtml(ki) + '</div>' + (open ? rows(k, depth + 1) : '');
       }).join('');
     }
-    return '<section class="iw-sub"><h3 class="prom">' + wsT("js.tk.win.subtasks") + ' <span class="cnt">' + it.children.length + '</span>' + rollupHtml(it) + '</h3><div class="srows">' + add + rows(it.id, 0) + '</div></section>';
+    var plus = can ? '<span class="grow"></span><button type="button" class="ia"' + attr('act', 'hsub') + attr('item', it.id) + ' aria-label="' + esc(wsT("js.tk.menu.sub")) + '"' + tipAttr(wsT("js.tk.menu.sub")) + '><svg class="i"><use href="#tki-plus"/></svg></button>' : '';
+    return '<section class="iw-sub"><h3 class="prom">' + wsT("js.tk.win.subtasks") + ' <span class="cnt">' + it.children.length + '</span>' + rollupHtml(it) + plus + '</h3>' +
+      (add || it.children.length ? '<div class="srows">' + add + rows(it.id, 0) + '</div>' : '') + '</section>';
   }
   // The edit mode (ui.iedit) turns the title and the body into fields in place: Enter in the
   // title or Cmd/Ctrl+Enter in the body saves, Esc cancels.
@@ -2937,6 +2953,7 @@
     '<symbol id="tki-chev" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></symbol>' +
     '<symbol id="tki-tasks" viewBox="0 0 16 16"><path d="M2.5 4.2l1.4 1.4 2.4-2.6M2.5 10.2l1.4 1.4 2.4-2.6M8.5 4.6h5M8.5 10.6h5"/></symbol>' +
     '<symbol id="tki-plus" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></symbol>' +
+    '<symbol id="tki-minus" viewBox="0 0 16 16"><path d="M4 8h8"/></symbol>' +
     '<symbol id="tki-x" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></symbol>' +
     '<symbol id="tki-accept" viewBox="0 0 16 16"><path d="M3.2 8.4l3 3 6.6-7"/></symbol>' +
     '<symbol id="tki-decline" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.6"/><path d="M5.9 5.9l4.2 4.2M10.1 5.9l-4.2 4.2"/></symbol>' +
@@ -3074,6 +3091,7 @@
         else if (k === 'mention') mentionInsert();
         else if (k === 'hstatus') setStatus(VS.items[d.item], a.getAttribute('data-status'), '');
         else if (k === 'hsub') startSub(d.item, 'iw:' + d.item);
+        else if (k === 'asg-add') openAssign(d.item, a);
         else if (k === 'nread-all') { markRead(feedEntries(memberOf(viewerOf(ui.store))).map(function (x) { return x.key; })); render(); }
         else if (k === 'att-load') { if (CAPS.attach) { var lm = (ui.loaded[seenKey(ui.store)] = ui.loaded[seenKey(ui.store)] || {}), oid = a.getAttribute('data-oid'); lm[oid] = !lm[oid]; render(); } }
         else if (k === 'att-add') {
