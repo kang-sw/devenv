@@ -258,7 +258,8 @@ tab. Every markdown renderer (the board, lead replies, tracker text) also
 links a bare http(s) URL (a loopback or LAN host included) and a bare file
 path (absolute or drive, two segments or more, or relative with a `/` and a
 file extension; optional `:line[:col]`) outside code and raw anchors,
-rendered as a written link to the same target would be. A file inside the session's project root links `GET
+rendered as a written link to the same target would be. A file inside the
+session's project root links `GET
 /s/<reply-id>/file?path=<root-relative path>`, the file view, which serves a
 regular, non-symlink file that still resolves inside the root after every
 symlink (404 otherwise), to a loopback viewer and a LAN token holder alike:
@@ -322,7 +323,8 @@ dialog shows it. The routes, JSON in and out with errors as `{"error"}`:
 `GET /tracker/stores` (`{stores, rev}`), `GET /tracker/stores/<id>/view`
 (`{view, seen}`; the view adds `html {items, comments}`, item bodies and
 comment texts rendered as markdown under untrusted-text rules: only http(s)
-links and in-page fragments become anchors, tags stay text), `POST /tracker/stores/<id>/dispatch {events}` (origin forced
+links and in-page fragments become anchors, tags stay text), `POST
+/tracker/stores/<id>/dispatch {events}` (origin forced
 to `human`, `"$N"` names the batch's Nth event; a refusal is 409 with
 `refusal {index, type, reason}`), `POST .../check` and `.../sync` (a report; an
 unreachable remote is `offline: true`, not an error), `POST .../seen {badge,

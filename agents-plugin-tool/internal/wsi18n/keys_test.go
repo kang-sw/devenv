@@ -138,6 +138,29 @@ func TestOtherTablesHoldOnlyEnglishKeysAndNames(t *testing.T) {
 	}
 }
 
+// Every table holds every English key: the fallback to English keeps a
+// missing translation readable, but a page then mixes two languages, so a
+// shipped table is complete.
+func TestOtherTablesHoldEveryEnglishKey(t *testing.T) {
+	en := Table(Default)
+	for _, l := range Languages() {
+		if l.Code == Default {
+			continue
+		}
+		table := Table(l.Code)
+		var missing []string
+		for k := range en {
+			if _, ok := table[k]; !ok {
+				missing = append(missing, k)
+			}
+		}
+		sort.Strings(missing)
+		if len(missing) > 0 {
+			t.Errorf("%s: %d English keys missing:\n%s", l.Code, len(missing), strings.Join(missing, "\n"))
+		}
+	}
+}
+
 // A translation must keep every placeholder its English text has, and add
 // none, or a call site's arguments land in the wrong place.
 func TestPlaceholdersMatchEnglish(t *testing.T) {

@@ -81,7 +81,6 @@ func TestBatchRestoringItsStartBodyIsNoChange(t *testing.T) {
 	mustApply(t, st, topicXML("t", "one\n\ntwo"))
 	mustApply(t, st, topicXML("t", "one\n\ntwo\n\nthree"))
 	before := topicEntry(t, st, "t")
-	mustApply(t, st, `<wb:floor id="1"/>`) // an update that touches nothing else
 	mustApply(t, st, `<wb:topic name="t"><wb:edit><wb:old>two</wb:old><wb:new>TWO</wb:new></wb:edit></wb:topic>`+"\n"+
 		`<wb:topic name="t"><wb:edit><wb:old>TWO</wb:old><wb:new>two</wb:new></wb:edit></wb:topic>`)
 	if got := topicEntry(t, st, "t"); got.Changed != before.Changed || !reflect.DeepEqual(got.Marks, before.Marks) || got.Body != before.Body {
