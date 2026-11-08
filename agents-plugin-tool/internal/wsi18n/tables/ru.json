@@ -178,6 +178,8 @@
   "panel.tickets.count.full": "готово: {0}, к выполнению: {1}",
   "panel.todo": "Задачи",
   "peer.lastmail": "последний обмен почтой",
+  "peer.running.one": "{0} субагент",
+  "peer.running.other": "субагентов: {0}",
   "peer.subagents": "субагенты",
   "peer.unserved": "здесь не обслуживается · нет живого состояния",
   "peers.ended": "завершён {0}",

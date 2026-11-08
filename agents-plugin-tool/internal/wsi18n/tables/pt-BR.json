@@ -178,6 +178,8 @@
   "panel.tickets.count.full": "{0} prontos, {1} a fazer",
   "panel.todo": "Tarefas",
   "peer.lastmail": "última troca de e-mail",
+  "peer.running.one": "{0} subagente",
+  "peer.running.other": "{0} subagentes",
   "peer.subagents": "subagentes",
   "peer.unserved": "não atendido aqui · sem estado ao vivo",
   "peers.ended": "encerrado {0}",

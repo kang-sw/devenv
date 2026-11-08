@@ -182,6 +182,7 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .peer .am { margin-left: auto; font-size: 11.5px; color: var(--wb-muted-fg); display: inline-flex; gap: 9px; white-space: nowrap; flex: none; font-variant-numeric: tabular-nums; }
 .peer .am span { display: inline-flex; align-items: center; gap: 3px; }
 .peer .am .i { width: 12px; height: 12px; }
+.peer .am .prun { color: var(--wb-primary); font-weight: 700; gap: 5px; }
 .peer .pdot { width: 7px; height: 7px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px currentColor; display: inline-block; }
 .peer.nophase .amk, .peer.unserved .amk, .peer.ended .amk { color: var(--wb-muted-fg); }
 .peer.ended { opacity: .55; }

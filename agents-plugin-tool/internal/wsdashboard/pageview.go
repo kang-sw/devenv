@@ -154,13 +154,19 @@ type PeerRow struct {
 	// Compact marks a live served peer in another worktree: the page draws
 	// it as one line (name, harness, phase mark, last mail) with no
 	// expansion, so Agents and AgentCount stay empty and Lead carries the
-	// phase alone.
+	// phase alone. RunningAgents is still filled: only the count is read,
+	// never the tree.
 	Compact bool
 	Lead    LeadView
 	// Agents is the peer's own subagent tree, one level deep: a peer's peer
 	// group never appears. AgentCount counts every agent it holds.
 	Agents     []AgentNode
 	AgentCount int
+	// RunningAgents counts the subagents of a live peer with a live adapter
+	// that are running (AgentNode.IsRunning's rule), compact rows included;
+	// the row shows a spinner while it is above zero. Readers judge a peer
+	// busy by whether it has subagents out.
+	RunningAgents int
 }
 
 // ConversationView is the conversation stream.
@@ -380,7 +386,7 @@ func resolvedContacts(contacts []Contact, self string) []Contact {
 // viewed session's root: only a served peer registered under the same path
 // (compared after filepath.Clean, no symlink resolution) keeps its full live
 // state; a live served peer elsewhere is a Compact row and its subagent tree
-// is never read. Live peers list same-worktree first.
+// is never read (only its running count). Live peers list same-worktree first.
 func peerGroup(contacts []Contact, project string, lookup func(string) (Session, *wslive.Snapshot, bool), now time.Time) PeerGroup {
 	type merged struct {
 		row          PeerRow
@@ -423,6 +429,13 @@ func peerGroup(contacts []Contact, project string, lookup func(string) (Session,
 				row.Compact = s.Live && !row.SameWorktree
 				if adapterPresent(snap, now) {
 					row.Adapter = true
+					if row.Live {
+						for _, a := range snap.Agents {
+							if (AgentNode{Agent: a}).IsRunning() {
+								row.RunningAgents++
+							}
+						}
+					}
 					if row.Compact {
 						row.Lead = LeadView{Lead: snap.Lead}
 					} else {

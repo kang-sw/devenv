@@ -245,10 +245,59 @@ func TestPeerWorktreeCompactAndOrder(t *testing.T) {
 			t.Errorf("compact row lacks %q: %s", want, row)
 		}
 	}
-	for _, not := range []string{"ptool", `title="subagents"`, "ptree", "pline"} {
+	// Its one running subagent shows as the spinner label, not the total.
+	if !strings.Contains(row, `class="prun"`) || !strings.Contains(row, "1 subagent<") {
+		t.Errorf("compact row lacks the running-subagent label: %s", row)
+	}
+	for _, not := range []string{"ptool", "ptree", "pline"} {
 		if strings.Contains(row, not) {
 			t.Errorf("compact row carries %q: %s", not, row)
 		}
+	}
+}
+
+func TestPeerRunningSubagentSpinner(t *testing.T) {
+	now := testNow
+	agents := []wslive.Agent{
+		{ID: "a", Status: wslive.StatusRunning},
+		{ID: "b", Status: wslive.StatusRunning, ParentID: "a"}, // nested counts too
+		{ID: "c", Status: wslive.StatusDone},
+		{ID: "d", Status: wslive.StatusFailed},
+	}
+	build := func(project string, as ...wslive.Agent) PeerRow {
+		sessions := map[string]Session{"peer": liveSession("peer", project, now)}
+		v := buildSessionView(pageInputs{Session: liveSession("self", "/p", now), Snapshot: liveSnap(now, wslive.Lead{}), Now: now,
+			Page:   PageContent{Contacts: []Contact{{Address: "id:peer", ReplyID: "peer", LastExchange: now}}},
+			Lookup: lookupOf(sessions, map[string]*wslive.Snapshot{"peer": liveSnap(now, wslive.Lead{}, as...)})})
+		return v.Tree.Peers.Live[0]
+	}
+	render := func(row PeerRow) string {
+		v := SessionView{}
+		v.Tree.Peers.Live = []PeerRow{row}
+		return renderTree(t, v)
+	}
+	for name, project := range map[string]string{"compact": "/q", "same-worktree": "/p"} {
+		row := build(project, agents...)
+		if row.Compact != (name == "compact") {
+			t.Fatalf("%s: Compact = %v", name, row.Compact)
+		}
+		if row.RunningAgents != 2 {
+			t.Errorf("%s: RunningAgents = %d, want 2 (finished agents excluded)", name, row.RunningAgents)
+		}
+		if html := render(row); !strings.Contains(html, `class="prun"`) || !strings.Contains(html, "2 subagents<") {
+			t.Errorf("%s: no running label: %s", name, html)
+		}
+		// Zero running: finished agents leave no spinner label.
+		row = build(project, agents[2:]...)
+		if row.RunningAgents != 0 {
+			t.Errorf("%s: RunningAgents = %d, want 0", name, row.RunningAgents)
+		}
+		if html := render(row); strings.Contains(html, "prun") {
+			t.Errorf("%s: spinner label with nothing running: %s", name, html)
+		}
+	}
+	if html := render(build("/p", agents[0])); !strings.Contains(html, "1 subagent<") || strings.Contains(html, "1 subagents") {
+		t.Errorf("singular form: %s", html)
 	}
 }
 
