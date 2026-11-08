@@ -21,6 +21,7 @@ import {
   whiteboardBody,
   type DashboardEvent,
   type IntakeResult,
+  type ListedAgent,
 } from './dashboard'
 
 const tick = async (n = 30) => {
@@ -47,6 +48,10 @@ function harness(opts: { key?: string | undefined } = {}) {
     accepts: false,
     logs: [] as string[],
     epochs: 0,
+    /** What the agent list answers: its agents, or the error it rejects with. */
+    list: [] as ListedAgent[] | Error,
+    /** How many times the agent list was read. */
+    listCalls: 0,
   }
   const dash = createDashboard({
     key: () => h.key,
@@ -59,6 +64,11 @@ function harness(opts: { key?: string | undefined } = {}) {
       return { ok: answer, text: answer ? `ok: 1 of 1 events applied\n${h.accepts ? 'accepts: status\n' : ''}` : 'unknown session_key' }
     },
     ownTool: (tool) => tool.startsWith(OWN),
+    agents: async () => {
+      h.listCalls += 1
+      if (h.list instanceof Error) throw h.list
+      return structuredClone(h.list)
+    },
     now: () => h.now,
     schedule: (ms, fn) => {
       const timer = { at: h.now + ms, fn, cancelled: false }
@@ -539,6 +549,90 @@ describe('subagents', () => {
     expect(h.calls.at(-1)!.events.filter((e) => e.agentId === 'ghost')).toEqual([])
     events = await after(() => dash.turnCompleted('ghost', '', 'error'))
     expect(events.filter((e) => e.agentId === 'ghost')).toEqual([])
+  })
+
+  test('an id no spawn announced but the agent list names is shown with its label, caption, parent, and what came before; a later spawn refreshes it', async () => {
+    const { h, dash, after } = await started()
+    h.list = [{ id: 'b7', description: 'Scan logs', type: 'Explore', status: 'running', parentId: 'p2' }]
+    let events = await after(() => {
+      dash.turnStarted('b7')
+      dash.stepBegan('b7', 's/0')
+      dash.stepChunk('b7', 's/0', { kind: 'tool', index: 0, id: 'w1', name: 'Grep' })
+      dash.toolBegan('b7', 'w1', 'Grep', { pattern: 'x' })
+    })
+    const shown = lastAgent(events, 'b7')
+    expect({ ...shown, batches: undefined }).toEqual({
+      kind: 'agent',
+      agentId: 'b7',
+      parentId: 'p2',
+      label: 'Scan logs',
+      caption: 'Explore',
+      status: 'running',
+      batches: undefined,
+    })
+    expect(batches(shown)[0]?.running?.toolName).toBe('Grep')
+    events = await after(() => dash.agentSpawned({ agentId: 'b7', parentId: 'p3', description: 'Scan more logs', subagentType: 'Explore' }))
+    expect(lastAgent(events, 'b7')).toMatchObject({ parentId: 'p3', label: 'Scan more logs', caption: 'Explore' })
+  })
+
+  test('an id the agent list does not name is asked about and stays held', async () => {
+    const { h, dash, after } = await started()
+    const reads = h.listCalls
+    h.list = [{ id: 'other', description: 'Other', type: 'Explore', status: 'running' }]
+    const events = await after(() => {
+      dash.turnStarted('fork1')
+      dash.toolBegan('fork1', 'g1', 'Read', { file_path: '/x' })
+    })
+    expect(h.listCalls).toBe(reads + 1)
+    expect(events.filter((e) => e.agentId === 'fork1')).toEqual([])
+  })
+
+  test('an agent list that rejects leaves the id held; its later spawn still shows it with what came before', async () => {
+    const { h, dash, after } = await started()
+    h.list = new Error('list unreadable')
+    let events = await after(() => dash.toolBegan('c3', 'v1', 'Bash', { command: 'ls' }))
+    expect(events.filter((e) => e.agentId === 'c3')).toEqual([])
+    expect(h.logs.some((l) => l.includes('list unreadable'))).toBe(true)
+    events = await after(() => dash.agentSpawned({ agentId: 'c3', description: 'Late spawn' }))
+    expect(lastAgent(events, 'c3')?.label).toBe('Late spawn')
+    expect(batches(lastAgent(events, 'c3'))[0]?.running?.toolName).toBe('Bash')
+  })
+
+  test('the start seeds the tree from the agent list: a live agent shows and its next turn needs no spawn; an idle teammate shows done; an ended one stays out', async () => {
+    const t = harness()
+    t.h.list = [
+      { id: 'r1', description: 'Long task', type: 'general-purpose', status: 'running', parentId: 'p0' },
+      { id: 'tm', description: 'Helper', type: 'teammate', status: 'idle' },
+      { id: 'old', description: 'Old task', type: 'Explore', status: 'completed' },
+    ]
+    t.dash.start()
+    await t.advance()
+    let events = t.sent()
+    expect(lastAgent(events, 'r1')).toEqual({ kind: 'agent', agentId: 'r1', parentId: 'p0', label: 'Long task', caption: 'general-purpose', status: 'running', batches: [] })
+    expect(lastAgent(events, 'tm')).toMatchObject({ label: 'Helper', status: 'done' })
+    expect(lastAgent(events, 'old')).toBeUndefined()
+    events = await t.after(() => {
+      t.dash.turnStarted('r1')
+      t.dash.stepBegan('r1', 's/1')
+      t.dash.stepChunk('r1', 's/1', { kind: 'tool', index: 0, id: 'x1', name: 'Bash' })
+      t.dash.toolBegan('r1', 'x1', 'Bash', { command: 'make' })
+    })
+    expect(lastAgent(events, 'r1')).toMatchObject({ label: 'Long task', parentId: 'p0' })
+    expect(batches(lastAgent(events, 'r1'))[0]?.running?.toolName).toBe('Bash')
+    // The seeded id is known: no lookup of its own.
+    expect(t.h.listCalls).toBe(1)
+  })
+
+  test('the agent list is read once per unknown id, not once per event', async () => {
+    const { h, dash, after } = await started()
+    const reads = h.listCalls
+    await after(() => {
+      for (let i = 0; i < 5; i++) dash.toolBegan('u1', `c${i}`, 'Read', {})
+      dash.turnStarted('u2')
+      dash.stepBegan('u2', 's/0')
+      dash.turnCompleted('u2', '', 'answer')
+    })
+    expect(h.listCalls).toBe(reads + 2)
   })
 
   test('past HELD_AGENT_CAP unannounced ids, the oldest held one is dropped', async () => {

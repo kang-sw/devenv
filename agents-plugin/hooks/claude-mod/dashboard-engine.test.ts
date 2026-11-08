@@ -85,6 +85,8 @@ function world(on: On, opts: { dashboard?: unknown; intake?: Intake } = {}) {
     logs: [] as string[],
     /** What the permission check beneath decides. */
     check: 'allow' as 'allow' | 'ask',
+    /** What `$.agent.list` answers: the session's subagents and teammates. */
+    agentList: [] as Record<string, unknown>[],
   }
   const text = (t: string, isError = false) => ({ value: { content: [{ type: 'text', text: t }], isError } })
   on('mcp.connect', ($, e) => ({ value: { isConnected: true, server: `plugin:${e.server}:${e.server}` } }))
@@ -153,6 +155,7 @@ function world(on: On, opts: { dashboard?: unknown; intake?: Intake } = {}) {
   })
   on('tool.check', () => ({ decision: w.check, reason: 'the world decides' }) as never)
   on('agent.spawn', () => ({ model: 'haiku', agentId: 'a77' }) as never)
+  on('agent.list', () => ({ value: structuredClone(w.agentList) as never }))
   on('classic.Notification', () => ({}) as never)
   on('process.run', () => ({ value: { exitCode: 0, stdout: 'Python 3.12.0\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
   on('process.spawn', async function* ($, e) {
@@ -294,6 +297,25 @@ test('a turn and a tool call under an agent id no spawn announced send no agent 
   await $.tool.call({ tool: 'Read', tool_use_id: 'g1', file_path: '/x', agentId: 'ad1ac9' } as never)
   await flush(w)
   expect(sent(w).filter((e) => e.kind === 'agent' && e.agentId !== undefined)).toEqual([])
+})
+
+test('a subagent spawned before the feed started shows from the agent list: seeded at start, and looked up at its first event', async ($, on) => {
+  const w = world(on, { dashboard: true })
+  // Spawned before a reload: no agent.spawn reaches this feed.
+  w.agentList = [{ id: 'a5', description: 'Earlier task', type: 'Explore', status: 'running' }]
+  await start($, w)
+  await flush(w)
+  expect(sent(w).filter((e) => e.kind === 'agent' && e.agentId === 'a5').at(-1)).toMatchObject({ label: 'Earlier task', caption: 'Explore', status: 'running' })
+  // Another one the list names only after the start: looked up at its first event.
+  w.agentList = [...w.agentList, { id: 'a6', description: 'Later task', type: 'general-purpose', status: 'running', parentId: 'a5' }]
+  await $.turn.start({ text: '', turnId: 's6', agentId: 'a6' })
+  await $.tool.call({ tool: 'Read', tool_use_id: 'r6', file_path: '/x', agentId: 'a6' } as never)
+  await flush(w)
+  expect(sent(w).filter((e) => e.kind === 'agent' && e.agentId === 'a6').at(-1)).toMatchObject({
+    label: 'Later task',
+    parentId: 'a5',
+    batches: [expect.objectContaining({ toolNames: ['Read'], callCount: 1 })],
+  })
 })
 
 test('a whiteboard-labelled prompt of the plugin\'s own enters as a whiteboard message, label stripped', async ($, on) => {

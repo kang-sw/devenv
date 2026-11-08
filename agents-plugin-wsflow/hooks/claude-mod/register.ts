@@ -1,4 +1,4 @@
-import type { HookStream, ProcessSpawnChunk, ProcessSpawnResult, Register, SessionUsage, ToolCallResult } from 'claude-code'
+import type { AgentInfo, HookStream, ProcessSpawnChunk, ProcessSpawnResult, Register, SessionUsage, ToolCallResult } from 'claude-code'
 
 import { createBand, drawBand, readGit, type Mailbox } from './band'
 import { appendOwn, createCaptions, drawCall, drawEmpty, drawRun, groupUnit, submitOwn, toolUseUnit, type OwnDeliveryEdges } from './captions'
@@ -554,6 +554,8 @@ export const register: Register = (on) => {
   let dashCall: ((args: { session_key: string; adapter: string; events: DashboardEvent[] }) => Promise<IntakeResult>) | undefined
   /** The usage read for the feed's status, set at session.start; undefined before. */
   let dashUsage: (() => Promise<SessionUsage>) | undefined
+  /** The session's agent list for the feed's subagent tree, set at session.start; undefined before, which reads as a failed read. */
+  let dashAgents: (() => Promise<AgentInfo[]>) | undefined
   /** The feed's usage read: one at a time, a request during it leaving one trailing read. */
   let dashUsageBusy = false
   let dashUsageAgain = false
@@ -635,6 +637,7 @@ export const register: Register = (on) => {
     key: () => manualKey ?? watcher?.current(),
     call: (args) => (dashCall ? dashCall(args) : Promise.reject(new Error('the session has not started'))),
     ownTool: (tool) => server !== undefined && tool.startsWith(mcpToolName(server, '')),
+    agents: () => (dashAgents ? dashAgents() : Promise.reject(new Error('the session has not started'))),
     now: () => Date.now(),
     schedule: (ms, fn) => {
       if (!dashAfter) return () => {}
@@ -954,6 +957,7 @@ export const register: Register = (on) => {
       return intakeResult(await $.mcp.call(server, INTAKE_TOOL, args))
     }
     dashUsage = () => $.session.usage({ breakdown: 'summary' })
+    dashAgents = () => $.agent.list()
     boardOn = false
     void readKnob(KNOB.dashboard)
       .then((value) => {
