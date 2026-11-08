@@ -640,6 +640,9 @@
     "261108-bug-ws-git-merge-directory-rename-misplaces-tickets": {
       "registered_at": "2026-11-08T05:47:25Z"
     },
+    "261108-bug-ws-route-resolve-implement-target-nesting-undocumented": {
+      "registered_at": "2026-11-08T05:50:36Z"
+    },
     "261108-bug-ws-whiteboard-item-raw-html": {
       "registered_at": "2026-11-08T04:42:23Z"
     },
