@@ -55,6 +55,10 @@ repository sized for 50-60 people, reached from the dashboard.
   (board (283) a). No caller surface.
 - Next (unplanned): the caller child, covering MCP and skill exposure
   ((115)), the dashboard drawer, sync triggers, and config.
+- `261108-feat-ws-tracker-support-agent-chat` (draft): the support-agent
+  chat card in the drawer, on the standalone agent runner
+  `261108-feat-ws-daemon-agent-runner` (board (300)-(312)). The mockup's
+  per-card view modes and chat placement merged as `1d7fbce0a`.
 
 ## Cross-Child Decisions
 
