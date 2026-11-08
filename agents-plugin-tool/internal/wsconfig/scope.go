@@ -116,6 +116,15 @@ const (
 	// about warning noise, not a per-project opt-in.
 	ItemBootstrapAlarm = "bootstrap_alarm"
 
+	// ItemAgentGitSearchRoots lists extra directories, beyond the project
+	// roots of recent sessions, that the read-only git.search tool may read:
+	// absolute paths joined with the platform path-list separator (":" POSIX,
+	// ";" Windows). Global-only: it widens what a hosted agent may read on
+	// this machine, so a project or committed repo file must not set it.
+	// Builtin default: empty. It is not an agent.profile.<name> key: that
+	// family is matched by its own longer prefix.
+	ItemAgentGitSearchRoots = "agent.git_search_roots"
+
 	// ItemTicketAssigneeAware is the opt-in project gate for ticket assignee
 	// awareness. Values: "on" or "off" (builtin default: off). It is meant to be
 	// a shared, deterministic team decision, so a downstream project sets it in
@@ -174,6 +183,7 @@ func init() {
 	}
 	RegisterGlobalOnly(ItemWorkflowSkepticalPosture)
 	RegisterGlobalOnly(ItemBootstrapAlarm)
+	RegisterGlobalOnly(ItemAgentGitSearchRoots)
 	// sage_review* keys default to project scope: they are project-level opt-ins
 	// that should persist across sessions for the same project.
 	RegisterDefaultScope(ItemSageReview, ScopeProject)

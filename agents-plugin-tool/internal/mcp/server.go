@@ -716,7 +716,10 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			if isWhiteboardTool(params.Name) && !entry.isTopLevelLead() {
 				return errorResponse(req.ID, -32601, whiteboardLeadOnlyDenial(params.Name))
 			}
-			if isTrackerTool(params.Name) && !entry.isTopLevelLead() {
+			// A store's support conversation passes like a top-level lead for
+			// the tracker tools its profile names (its writes are pinned to its
+			// store in handleTrackerUpdate); tracker.show is its own.
+			if (isTrackerTool(params.Name) || params.Name == trackerShowTool) && !entry.isTopLevelLead() && !s.trackerSupportAdmits(keyStr, entry, params.Name) {
 				return errorResponse(req.ID, -32601, trackerLeadOnlyDenial(params.Name))
 			}
 			if entry.isTopLevelLead() {
@@ -1678,6 +1681,10 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		return s.handleWhiteboardQuery(req.ID, params.Arguments)
 	case "tracker.update":
 		return s.handleTrackerUpdate(ctx, req.ID, params.Arguments)
+	case trackerShowTool:
+		return s.handleTrackerShow(ctx, req.ID, params.Arguments)
+	case gitSearchTool:
+		return s.handleGitSearch(ctx, req.ID, params.Arguments)
 	case "tracker.query":
 		return s.handleTrackerQuery(ctx, req.ID, params.Arguments)
 	case "tickets.query":
@@ -2126,8 +2133,9 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			return toolTextResponse(req.ID, "", err)
 		}
 		// The tracker section is never a spawned key's (as workflow_manual
-		// renders it); its tools refuse that key.
-		if entry, found := s.sessions.lookup(keyStr); found && !entry.isTopLevelLead() {
+		// renders it); its tools refuse that key, except a store's support
+		// conversation, which the tracker gate admits.
+		if entry, found := s.sessions.lookup(keyStr); found && trackerOn && !entry.isTopLevelLead() && !s.trackerSupportReadsTracker(keyStr, entry) {
 			trackerOn = false
 		}
 		body, err = applyKnobVariants(s, rsrcRoot, name, body, whiteboardOn, trackerOn)
@@ -2838,6 +2846,20 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 		},
 		ValueFields: bootstrapEntry.ValueFields,
 		Current:     currentWorkflowPreference(resolver, sessionKey, wsconfig.ItemBootstrapAlarm),
+	})
+
+	gitRootsEntry := registryEntryByKey(wsconfig.ItemAgentGitSearchRoots)
+	appendKnob(gitRootsEntry, tuningKnob{
+		ID:          gitRootsEntry.Key,
+		Kind:        "workflow_preference",
+		Description: "Extra directories the read-only git.search tool of a hosted agent conversation may read, beyond the project roots of the sessions the dashboard saw on this machine in the last 7 days: absolute paths joined with the platform path-list separator (: on POSIX, ; on Windows). A repository at or inside one of them is readable; a relative or missing entry is ignored, and git.search names it when it lists its roots. Unset (builtin) adds none. Global-only.",
+		Writer:      tuningWriter{Tool: gitRootsEntry.WriterTool, FixedArguments: map[string]string{"key": gitRootsEntry.Key}},
+		Reset: &tuningWriter{
+			Tool:           gitRootsEntry.ResetTool,
+			FixedArguments: map[string]string{"key": gitRootsEntry.Key, "reset": "true"},
+		},
+		ValueFields: gitRootsEntry.ValueFields,
+		Current:     currentWorkflowPreference(resolver, sessionKey, gitRootsEntry.Key),
 	})
 
 	sageReviewEntry := registryEntryByKey(wsconfig.ItemSageReview)
@@ -4867,7 +4889,7 @@ func tools() []map[string]any {
 			// with a pointer to their playbook, and a string command batch
 			// for the same \u-escape reason.
 			"name":        "tracker.update",
-			"description": "Lead-only. Read the `tracker` playbook (ws/playbook.read) before first use; it defines the commands.",
+			"description": "For a top-level lead, or a store's support conversation, whose writes go to its own store only. Read the `tracker` playbook (ws/playbook.read) before first use; it defines the commands.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -4879,13 +4901,42 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "tracker.query",
-			"description": "Lead-only, read-only. Read the `tracker` playbook (ws/playbook.read) before first use; it defines the payload.",
+			"description": "Read-only; for a top-level lead, or a store's support conversation. Read the `tracker` playbook (ws/playbook.read) before first use; it defines the payload.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
 					"payload":     objectProperty("Defined by the tracker playbook."),
 					"format":      stringProperty("\"json\" for the store's whole view state; text when omitted."),
+				},
+				"required": []string{"session_key"},
+			},
+		},
+		{
+			"name":        trackerShowTool,
+			"description": "Show one item of your store as a card in your store's chat; the user can open it. For a store's support conversation only. An item of another store comes back as text, with no card.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's ws session key."),
+					"item":        stringProperty("The item's ID as tracker.query prints it, such as maya.pc-5."),
+				},
+				"required": []string{"session_key", "item"},
+			},
+		},
+		{
+			"name":        gitSearchTool,
+			"description": "Read-only git search over the user's local repositories: log, show, grep, blame, or ls-files. Call it without repo to list the roots it may read (the project roots of the sessions the dashboard saw on this machine in the last 7 days, plus the agent.git_search_roots config knob), then pass one of them, or a directory inside one, as repo. options takes only flags from the command's allowlist, each value attached (--name=value, -n5); a refused flag's answer lists the accepted ones. Read a file's contents with show and a revision such as HEAD:path/to/file.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's ws session key."),
+					"repo":        stringProperty("Absolute path of a readable root, or of a directory inside one. Omit it to list the readable roots; the call then does nothing else."),
+					"command":     enumStringProperty("Required with repo.", gitSearchCommands),
+					"options":     stringArrayProperty("Flags for the command, each value attached (--max-count=5, -n5, -S<text>, -L10,20). No git global options (-c, -C <dir>, --git-dir, --work-tree)."),
+					"pattern":     stringProperty("grep only, and required for it: the pattern, passed as -e <pattern>."),
+					"revisions":   stringArrayProperty("Revisions such as HEAD~3, main..topic, or HEAD:path/to/file for show. None may start with -. ls-files takes none; blame at most one."),
+					"paths":       stringArrayProperty("Paths, relative to repo, that limit the command (passed after --). blame takes exactly one."),
 				},
 				"required": []string{"session_key"},
 			},
@@ -5310,6 +5361,9 @@ func LeadToolNames() []string {
 		if NoAgentMode() && noAgentHiddenTool(name) {
 			continue
 		}
+		if hiddenUnlessAllowlisted(name) && !explicitAllowedTools()[name] {
+			continue
+		}
 		if name != "" {
 			names = append(names, name)
 		}
@@ -5358,7 +5412,7 @@ func (s *Server) toolAllowed(name string) bool {
 	if allowed := explicitAllowedTools(); len(allowed) > 0 {
 		return allowed[name]
 	}
-	return true
+	return !hiddenUnlessAllowlisted(name)
 }
 
 // isNoteMutationTool reports whether name changes note state every session

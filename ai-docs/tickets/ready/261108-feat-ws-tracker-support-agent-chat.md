@@ -306,6 +306,123 @@ Verification ((444) and the review decisions above):
   `kang-sw/ws-tracker-live-test` that calls `tracker.query`,
   `tracker.show`, git search, and one requested `tracker.update` write.
 
+### Result (4c802f2b7) - 2026-11-08
+
+Landed in e9a3f557e, 592ddd994, 496d8de1c, and 4c802f2b7.
+
+- **Builtin support profiles.** `agent.profile.tracker-support-claude` and
+  `agent.profile.tracker-support-pi` form a builtin floor in wsagent, and a
+  user definition of the same name replaces one whole. Their ws_tools are
+  `tracker.query`, `tracker.update`, `tracker.show`, `git.search`, and
+  `playbook.read`. Their instructions are `builtin:tracker-support`, a text
+  embedded in the binary; the new `builtin:<name>` instructions scheme
+  resolves no file under the root.
+- **Tracker gate (521).** Both gate sites change: the central check and
+  `trackerSessionKey`. A key passes only when all of these hold:
+  - the daemon's open agent record for the key's reply-id names this exact
+    key at the key's canonical root;
+  - the record's profile, re-resolved on each call, names the tool;
+  - the root is a registered store's canonical `Dir`.
+
+  That store is the conversation's pinned store. A write naming any other
+  store is refused, and so are `tk:register` and `tk:sync`.
+  `tracker.query` stays a read across stores. The `playbook.read` tracker
+  render follows the widened gate. The tool descriptions and the `tracker`
+  playbook name who may call.
+- **`tracker.show {item}`.** Takes no store argument. An item of the pinned
+  store answers `card <store> <alias>` plus title, status, priority, due,
+  and open assignees; that first line is Phase 2's renderer hook. Another
+  store's item is answered as text with a "no card" note. A lead is refused.
+- **Hidden unless allowlisted (522).** `tracker.show` and `git.search` go
+  through `hiddenUnlessAllowlisted`, applied in `toolAllowed` (tools/list
+  and tools/call) and in `LeadToolNames`.
+- **`git.search`.**
+  - Allowlist per subcommand (log, show, grep, blame, ls-files), with no git
+    global options.
+  - `--end-of-options` and `--` placement was checked per subcommand on git
+    2.50.1. ls-files and blame need their own shapes, and a test pins all
+    five shapes.
+  - Forced `--no-ext-diff` and `--no-textconv` where the subcommand accepts
+    them. No pager, `core.fsmonitor=false`, every `GIT_*` variable dropped,
+    discovery capped at the matched root, `GIT_NO_LAZY_FETCH=1`, a 20 s
+    timeout, and a 64 KiB output cap.
+  - Scope: non-agent dashboard registrations last seen within
+    `RegistryRetention`, plus the global-only, lead-authority knob
+    `agent.git_search_roots`, both canonicalised. A relative `repo` is
+    refused.
+- **Per-store lifecycle (322, 517-520, 523).** `wsagent.Support` is mounted
+  at `/support` through `DaemonOptions.Support`.
+  - Routes: `GET /support/choices`, `GET /support/stores/<store>`, and
+    `POST .../send`, `.../new`, `.../select`.
+  - State: `<dashboard dir>/support.json` (0600) holds the machine-wide last
+    selection and the store-to-conversation map.
+  - "New conversation" is the runner's close plus create. A harness switch
+    creates on the other profile, then closes the old conversation. A model
+    or effort change on the same harness goes through
+    `Runner.SetSettings`, so it applies from the next message; the (518)
+    fallback is unused.
+  - Choices: Claude models are the version-less aliases `opus`, `sonnet`,
+    `haiku`, `fable`, passed verbatim (board (524)), and its efforts are
+    `claudeagents.Levels`. Pi's list is dynamic from
+    `pi --offline --no-approve --list-models`, cached for 5 minutes, with
+    efforts off..max. A harness whose binary is missing is listed as
+    unavailable.
+  - `modelPattern` accepts `~`.
+  - The ws-mcp runbook documents all of the above.
+
+Verification:
+
+- **Go suite.** `go test ./... -count=1` in agents-plugin-tool: 29 packages
+  ok, exit 0, including mcp (350 s), wsagent, wsdashboard, wsconfig,
+  wsrsrc, and cmd/ws-mcp. The new tests cover:
+  - every listed git-search escape, path scope, and the symlink in and out;
+  - `tracker.show`'s card, other-store, and refusal answers;
+  - the gate admitting the support key and pinning its writes;
+  - refused register and sync, and a refused ferrule-style parentless key,
+    worker key, closed record, forged record, non-store root, and profile
+    without the tool;
+  - the hidden tools absent from a lead's tools/list and capabilities;
+  - conversation keep across restart, new conversation, harness switch,
+    model and effort change, last choice as the default, the choice lists,
+    and the origin and content-type refusals.
+- **Live check.** A dev daemon ran on port 39431 with isolated
+  `WS_CACHE_HOME` and `WS_CONFIG_HOME`, and `WS_RSRC_ROOT` pointing at the
+  worktree's rsrc. `kang-sw/ws-tracker-live-test` was registered over the
+  daemon REST (member `supportcheck`, existing ssh auth).
+  - One claude conversation over `/support/stores/live/send` called
+    `tracker.query`, `tracker.show` (card of `ada.c89ca331327b-3`), and
+    `git.search` (log of this worktree).
+  - After a daemon restart, the same conversation was kept with the same
+    id. On request it wrote one comment through `tracker.update`
+    (`supportcheck.f87f9b6f489c-3`, synced and pushed). Its attempt on
+    another store was refused by the pin.
+  - The first turn's `playbook.read` failed only because a binary outside
+    the plugin bundle had no rsrc root, which was the live setup, not the
+    code.
+- **Review.** Lite review, one pass: no Critical or Important findings. The
+  first Minor finding was fixed in 4c802f2b7 (open closed `""` after a
+  refused SetSettings).
+
+Decisions taken:
+
+- **Admission.** Admission is proven from the daemon's existing agent
+  record, which already carries Profile, Root, WSKey, and ClosedAt, rather
+  than a new key-record field.
+- **Origin.** Origin is not forced to `agent`: the instruction text carries
+  "write only on request".
+- **Select baseline.** Select compares against the store's open
+  conversation, not the machine-wide last choice, so another store's choice
+  never turns a model tweak into a harness switch.
+- **Stale mapping.** A mapping whose root no longer equals the store's
+  `Dir` counts as no conversation, because the gate pins by `Dir`.
+
+#### Forward
+
+- Phase 2 reads the card line `card <store> <alias>` from the
+  `tracker.show` result and drives `/support`.
+- The review's second Minor finding is left as is: a failed `support.json`
+  save leaves the store mapped in memory until restart.
+
 ### Phase 2: Chat card
 
 `261108-feat-ws-tracker-drawer-ui` has merged (`a6f0b0ab1`). Phase 2 starts

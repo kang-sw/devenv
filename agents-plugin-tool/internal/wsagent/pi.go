@@ -29,6 +29,90 @@ type PiBackend struct {
 	Command string
 }
 
+// piEfforts are pi's thinking levels (--thinking), lowest first.
+var piEfforts = []string{"off", "minimal", "low", "medium", "high", "xhigh", "max"}
+
+// runListing runs a harness's model listing and returns its stdout; a test
+// replaces it with a fixture.
+var runListing = func(ctx context.Context, command string, args []string, env []string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, command, args...)
+	cmd.Env = env
+	return cmd.Output()
+}
+
+// Executable is the pi command availability is checked against.
+func (b PiBackend) Executable() string {
+	if b.Command != "" {
+		return b.Command
+	}
+	return "pi"
+}
+
+// Choices lists the models pi --list-models reports, offline and with
+// project-local files ignored, and pi's thinking levels. The levels come
+// back even when the listing fails.
+func (b PiBackend) Choices(ctx context.Context) ([]ModelChoice, []string, error) {
+	efforts := append([]string(nil), piEfforts...)
+	command, err := lookPath(b.Executable())
+	if err != nil {
+		return nil, efforts, fmt.Errorf("pi backend: %w", err)
+	}
+	out, err := runListing(ctx, command, []string{"--offline", "--no-approve", "--list-models"}, piEnv(environ()))
+	if err != nil {
+		return nil, efforts, fmt.Errorf("pi --list-models: %w", err)
+	}
+	models, err := parsePiModels(out)
+	return models, efforts, err
+}
+
+// parsePiModels reads pi --list-models' table: a header naming the
+// columns (provider, model, ..., thinking, ...) and one whitespace-separated
+// row per model. A model's id is provider/model, as --model takes it; a row
+// listed twice is kept once, and an id the runner would refuse is skipped.
+func parsePiModels(out []byte) ([]ModelChoice, error) {
+	var cols map[string]int
+	models := []ModelChoice{}
+	seen := map[string]bool{}
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		if cols == nil {
+			if fields[0] != "provider" {
+				continue
+			}
+			cols = map[string]int{}
+			for i, name := range fields {
+				cols[name] = i
+			}
+			if _, ok := cols["model"]; !ok {
+				return nil, fmt.Errorf("pi --list-models header has no model column: %q", strings.TrimSpace(line))
+			}
+			continue
+		}
+		if len(fields) <= cols["model"] {
+			continue
+		}
+		id := fields[cols["provider"]] + "/" + fields[cols["model"]]
+		if seen[id] || !modelPattern.MatchString(id) {
+			continue
+		}
+		seen[id] = true
+		m := ModelChoice{ID: id}
+		if i, ok := cols["thinking"]; ok && i < len(fields) {
+			thinking := fields[i] == "yes"
+			m.Thinking = &thinking
+		}
+		models = append(models, m)
+	}
+	if cols == nil && strings.TrimSpace(string(out)) != "" {
+		first, _, _ := strings.Cut(strings.TrimSpace(string(out)), "\n")
+		return nil, fmt.Errorf("pi --list-models printed no model table: %q", first)
+	}
+	return models, nil
+}
+
 // piBridgeFile is the extension the runner writes into a conversation's Pi
 // directory when the profile allows MCP servers (ws-mcp included): it
 // registers exactly those servers through Pi's built-in MCP support.

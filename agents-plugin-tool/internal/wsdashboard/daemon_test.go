@@ -695,3 +695,46 @@ func TestAgentHostStartsBeforeTheDaemonIsReachable(t *testing.T) {
 		t.Fatalf("agent host start: started %v, endpoint already written %v", agents.started, agents.reachable)
 	}
 }
+
+// TestSupportHandlerMountedUnderItsPrefix: the support handler serves
+// /support and everything under it, behind the access guard; without one
+// the prefix falls through to the index.
+func TestSupportHandlerMountedUnderItsPrefix(t *testing.T) {
+	var got []string
+	support := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = append(got, r.Method+" "+r.URL.Path)
+		w.WriteHeader(http.StatusTeapot)
+	})
+	d, err := StartDaemon(DaemonOptions{Dir: t.TempDir(), Port: 0, Version: "1.0.0", LockWait: 200 * time.Millisecond, Support: support})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(d.Close)
+	serve := func(method, path, host string) int {
+		req := httptest.NewRequest(method, path, nil)
+		req.Host = host
+		rec := httptest.NewRecorder()
+		d.Handler().ServeHTTP(rec, req)
+		return rec.Code
+	}
+	for _, path := range []string{"/support", "/support/choices", "/support/stores/a/send"} {
+		if code := serve(http.MethodGet, path, "127.0.0.1"); code != http.StatusTeapot {
+			t.Fatalf("%s answered %d, want the support handler", path, code)
+		}
+	}
+	if code := serve(http.MethodGet, "/support/choices", "evil.example"); code != http.StatusForbidden {
+		t.Fatalf("a foreign Host reached the support handler: %d", code)
+	}
+	if want := []string{"GET /support", "GET /support/choices", "GET /support/stores/a/send"}; strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("support handler saw %v, want %v", got, want)
+	}
+
+	plain := startTestDaemon(t, t.TempDir(), "1.0.0")
+	req := httptest.NewRequest(http.MethodGet, "/support/choices", nil)
+	req.Host = "127.0.0.1"
+	rec := httptest.NewRecorder()
+	plain.Handler().ServeHTTP(rec, req)
+	if rec.Code == http.StatusTeapot {
+		t.Fatal("a daemon without a support handler served /support")
+	}
+}

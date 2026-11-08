@@ -59,6 +59,7 @@ func dashboardCommand(args []string) {
 		}
 	}
 	sessions := mcp.NewDashboardSessionSource()
+	agents := newAgentRunner(dir, logw)
 	daemon, err := wsdashboard.StartDaemon(wsdashboard.DaemonOptions{
 		Dir:       dir,
 		Port:      *port,
@@ -69,8 +70,13 @@ func dashboardCommand(args []string) {
 		Log:       logw,
 		Sessions:  sessions,
 		Worktrees: sessions,
-		Agents:    newAgentRunner(dir, logw),
+		Agents:    agents,
 		Tracker:   &dashboardTracker{h: tracker, err: trackerErr},
+		Support: wsagent.NewSupport(wsagent.SupportOptions{
+			Runner:    agents,
+			Dir:       dir,
+			StoreRoot: trackerStoreRoot(tracker, trackerErr),
+		}),
 	})
 	if errors.Is(err, wsdashboard.ErrLocked) {
 		closeTracker()
@@ -106,6 +112,23 @@ func startTrackerPoll(h *wstrackerhost.Host, newErr error, onRound func(), logw 
 		return func() {}
 	}
 	return h.StartPoll(wstrackerhost.DefaultPollInterval, onRound)
+}
+
+// trackerStoreRoot returns a tracker store's working root for the support
+// conversations: the registry entry's directory on the daemon's tracker
+// host h, the same root the tracker gate pins a support conversation's
+// writes to. newErr is h's creation error; every store is unknown then.
+func trackerStoreRoot(h *wstrackerhost.Host, newErr error) func(id string) (string, error) {
+	return func(id string) (string, error) {
+		if newErr != nil {
+			return "", redacted(newErr)
+		}
+		e, err := h.Entry(id)
+		if err != nil {
+			return "", redacted(err)
+		}
+		return e.Dir, nil
+	}
 }
 
 // newAgentRunner is the daemon's agent runner: the claude and pi backends,

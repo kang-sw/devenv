@@ -681,12 +681,14 @@ func (c *conv) startProcess() error {
 }
 
 // composeInstructions writes the instruction file a process appends to the
-// harness's own system prompt: the profile's instruction file and, when the
-// profile allows ws tools, the conversation's ws session key. It returns ""
-// when there is nothing to append.
+// harness's own system prompt: the profile's instruction file or builtin
+// text and, when the profile allows ws tools, the conversation's ws session
+// key. It returns "" when there is nothing to append.
 func composeInstructions(dir string, rec Record, p Profile) (string, error) {
 	var parts []string
-	if path := p.InstructionsPath(rec.Root); path != "" {
+	if text, ok := p.BuiltinInstructions(); ok {
+		parts = append(parts, strings.TrimSpace(text))
+	} else if path := p.InstructionsPath(rec.Root); path != "" {
 		raw, err := os.ReadFile(path)
 		if err != nil {
 			return "", fmt.Errorf("agent profile %q: read instruction file: %w", rec.Profile, err)
