@@ -15,6 +15,7 @@
 //	<root>/keys/            the personal signing key, passed to wsledger as KeyDir
 //	<root>/<store id>/      one store's wsledger directory (its bare repository is repo.git)
 //	<root>/<store id>/host-sync.json  the last check's outcome, shared by every process
+//	<root>/<store id>/write.lock      held across one write's reload, build, and append
 //	<root>/poll.lock        held by the process that runs the background poll
 //
 // All of a user's registered stores are shown in every session; the

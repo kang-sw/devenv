@@ -667,3 +667,54 @@ func TestDispatchWithNamesEarlierEventsOfTheBatch(t *testing.T) {
 		t.Fatalf("a refused build must write nothing: %d items", got)
 	}
 }
+
+// Another process on this machine (here a second Host over the same root)
+// cannot append between a batch's reload and its append, so the ids the
+// batch was built against are the ids it gets.
+func TestDispatchWithHoldsTheWriteLockAcrossProcesses(t *testing.T) {
+	w := newWorld(t)
+	a := w.machine("ada")
+	w.register(a, "team", "ada", &wstracker.Profile{Given: "Ada"})
+	b, err := New(Options{Root: filepath.Join(w.dir, "ada"), Clock: w.clock})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { b.Close() })
+
+	ctx := context.Background()
+	type result struct {
+		ids []wsledger.EventID
+		err error
+	}
+	other := make(chan result, 1)
+	ids, err := a.DispatchWith(ctx, "team", func(next wsledger.EventID) ([]wsledger.NewEvent, error) {
+		go func() {
+			payload, _ := json.Marshal(map[string]any{"kind": "task", "title": "other process"})
+			ids, err := b.Dispatch(ctx, "team", []wsledger.NewEvent{{Type: wstracker.TypeItemCreate, Payload: payload}})
+			other <- result{ids, err}
+		}()
+		select {
+		case r := <-other:
+			t.Errorf("another process wrote inside the batch's write lock: %v %v", r.ids, r.err)
+			other <- r
+		case <-time.After(300 * time.Millisecond):
+		}
+		create, _ := json.Marshal(map[string]any{"kind": "task", "title": "parent"})
+		child, _ := json.Marshal(map[string]any{"kind": "task", "title": "child", "parent": next.String()})
+		return []wsledger.NewEvent{{Type: wstracker.TypeItemCreate, Payload: create}, {Type: wstracker.TypeItemCreate, Payload: child}}, nil
+	})
+	if err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	r := <-other
+	if r.err != nil {
+		t.Fatalf("the other process's write must go through after the lock: %v", r.err)
+	}
+	v := view(t, a, "team")
+	if p := v.Items[ids[1].String()].Parent; p == nil || *p != ids[0].String() || v.Items[ids[0].String()].Title != "parent" {
+		t.Fatalf("the child must name the batch's own parent: parent=%v ids=%v", p, ids)
+	}
+	if r.ids[0].Seq != ids[1].Seq+1 {
+		t.Fatalf("the other write must follow the batch: %v after %v", r.ids, ids)
+	}
+}

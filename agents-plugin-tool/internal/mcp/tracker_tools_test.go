@@ -172,6 +172,18 @@ func TestTrackerCallsTurnTheKnobOnOnlyWhenTheySucceed(t *testing.T) {
 	if !g.trackerOn(t, g.key) {
 		t.Fatalf("a successful tracker.query must turn the knob on at session scope")
 	}
+	// So does the JSON store list, whose output has no room for a warning.
+	j := newTrackerLeadFixture(t)
+	resp := j.call(t, "tracker.query", map[string]any{"format": "json"})
+	var list struct {
+		Stores []json.RawMessage `json:"stores"`
+	}
+	if isToolError(resp) || json.Unmarshal([]byte(toolText(t, resp)), &list) != nil || list.Stores == nil {
+		t.Fatalf("the JSON store list: %s", toolText(t, resp))
+	}
+	if !j.trackerOn(t, j.key) {
+		t.Fatalf("a successful JSON tracker.query must turn the knob on at session scope")
+	}
 }
 
 func TestTrackerToolsRefuseSpawnedKeys(t *testing.T) {

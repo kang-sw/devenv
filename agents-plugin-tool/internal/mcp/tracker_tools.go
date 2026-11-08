@@ -837,7 +837,10 @@ func (s *Server) handleTrackerQuery(ctx context.Context, id json.RawMessage, arg
 			summaries = append(summaries, sum)
 		}
 		if q.json {
-			return toolJSONResponse(id, trackerStoreListJSON(summaries, profiles), nil)
+			resp := toolJSONResponse(id, trackerStoreListJSON(summaries, profiles), nil)
+			// JSON output carries no warning line; the knob write is best effort.
+			_ = s.trackerSucceeded(key, "")
+			return resp
 		}
 		return toolTextResponse(id, s.trackerSucceeded(key, formatTrackerStoreList(summaries, profiles)), nil)
 	}
@@ -867,7 +870,7 @@ func (s *Server) handleTrackerQuery(ctx context.Context, id json.RawMessage, arg
 	switch {
 	case q.json:
 		resp := toolJSONResponse(id, v, nil)
-		_ = s.trackerSucceeded(key, "")
+		_ = s.trackerSucceeded(key, "") // as for the JSON store list
 		return resp
 	case q.item != "":
 		if _, ok := v.Items[q.item]; !ok {

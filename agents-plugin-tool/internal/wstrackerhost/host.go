@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gofrs/flock"
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsgit"
 	"github.com/kang-sw/devenv/internal/wsledger"
@@ -370,9 +371,22 @@ func (h *Host) Dispatch(ctx context.Context, id string, events []wsledger.NewEve
 // from next, the id the first of them gets (the i-th gets next.Seq+i), so a
 // batch can name an item or comment an earlier event of it creates. An
 // error from build writes nothing and is returned as is.
+//
+// Every process on this machine shares the store's clone, and wsledger
+// assigns seqs only inside Append, so the reload, the build, and the append
+// run under the store's write lock (writeLockFile): without it another
+// process's append in between would shift the batch's ids under its $N
+// references and leave the validation a step stale.
 func (h *Host) DispatchWith(ctx context.Context, id string, build func(next wsledger.EventID) ([]wsledger.NewEvent, error)) ([]wsledger.EventID, error) {
 	var ids []wsledger.EventID
 	err := h.with(ctx, id, func(st *store) error {
+		fl := flock.New(filepath.Join(st.entry.Dir, writeLockFile))
+		lockCtx, cancel := context.WithTimeout(ctx, writeLockWait)
+		defer cancel()
+		if locked, err := fl.TryLockContext(lockCtx, 20*time.Millisecond); err != nil || !locked {
+			return fmt.Errorf("tracker: store write lock %s not acquired: %v", fl.Path(), err)
+		}
+		defer fl.Unlock() //nolint:errcheck
 		if _, err := st.ledger.Reload(ctx); err != nil {
 			return err
 		}
@@ -463,6 +477,15 @@ type syncState struct {
 }
 
 const syncStateFile = "host-sync.json"
+
+// writeLockFile, in a store directory, serializes this machine's writes to
+// the store across processes (DispatchWith). Its holder can wait inside
+// Append for wsledger's store lock while another process syncs (a push and
+// a fetch, each up to networkTimeout), so a waiter waits that long.
+const (
+	writeLockFile = "write.lock"
+	writeLockWait = 2*networkTimeout + lockWait
+)
 
 func readSyncState(dir string) syncState {
 	var s syncState
