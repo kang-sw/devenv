@@ -5,7 +5,10 @@
   // through postMessage: the content height, so the host sizes the frame
   // (again whenever the host asks with {wbDoc: "size"}); a
   // marked link (data-wl) click, so the host opens its link menu; and an
-  // item-reference click (href="#item-nn"), so the host scrolls to the item.
+  // item-reference click (href="#item-nn"), so the host scrolls to the item; and an
+  // image or diagram click, so the host opens its viewer over the whole page
+  // ({wbDoc: "view"}: the image's source, or the diagram flattened by
+  // wbFlattenSvg, which svg-view.js defines ahead of this script).
   // A plain link needs no help: <base target="_blank"> opens it in a new tab.
   var d = document, body = d.querySelector(".doc-body");
 
@@ -54,6 +57,24 @@
       y: key ? r.bottom : e.clientY
     });
   }
+  // Ahead of the link handling below. An image in a marked link or an
+  // in-page anchor keeps that link's behavior; any other link around an image
+  // opens the viewer, whose original button then reaches the link.
+  d.addEventListener("click", function (e) {
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    var t = e.target, a = t && t.closest && t.closest("a"), img = t && t.closest && t.closest("img");
+    if (!t || !t.closest || (a && (a.hasAttribute("data-wl") || (a.getAttribute("href") || "").charAt(0) === "#"))) return;
+    if (img) {
+      if (!img.complete || !img.naturalWidth) return;
+      e.preventDefault();
+      post({ wbDoc: "view", kind: "img", src: img.currentSrc || img.src, alt: img.alt, href: a ? a.href : "" });
+      return;
+    }
+    var s = wbSvgTarget(t), flat = s && wbFlattenSvg(s);
+    if (!flat) return;
+    e.preventDefault();
+    post({ wbDoc: "view", kind: "svg", svg: flat });
+  }, true);
   d.addEventListener("click", function (e) {
     var t = e.target, a = t && t.closest && t.closest("a");
     if (!a || e.button !== 0) return;

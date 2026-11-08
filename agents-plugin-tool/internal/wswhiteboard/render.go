@@ -18,11 +18,13 @@ import (
 // The page assets: one template set, the shared stylesheet, the answer-form
 // script both layouts run, the change-signal script only the full page runs,
 // the mermaid theme script a page with a mermaid block runs, the script a
-// served page's topic-body frames run, and the icon sprite. Everything is inlined,
-// so a page needs no other file beyond the full page's stamp script and,
-// when it holds a mermaid block, the shared mermaid script (MermaidAsset).
+// served page's topic-body frames run, the image viewer script the full page
+// runs (with the SVG helpers it shares with those frames), and the icon
+// sprite. Everything is inlined, so a page needs no other file beyond the
+// full page's stamp script and, when it holds a mermaid block, the shared
+// mermaid script (MermaidAsset).
 //
-//go:embed assets/page.tmpl assets/page.css assets/form.js assets/live.js assets/pill.js assets/mermaid-init.js assets/doc-frame.js assets/sprite.svg
+//go:embed assets/page.tmpl assets/page.css assets/form.js assets/live.js assets/pill.js assets/mermaid-init.js assets/doc-frame.js assets/viewer.js assets/svg-view.js assets/sprite.svg
 var assetFS embed.FS
 
 type pageAssets struct {
@@ -39,8 +41,10 @@ type pageAssets struct {
 	mermaidInit template.JS
 	// docFrame runs inside a served page's topic-body frame (framedDoc).
 	docFrame string
-	sprite   template.HTML
-	icons    map[string]bool
+	// viewer is the image viewer, a self-contained script.
+	viewer string
+	sprite template.HTML
+	icons  map[string]bool
 }
 
 var (
@@ -70,13 +74,15 @@ func loadAssets() (*pageAssets, error) {
 			}
 			return string(data)
 		}
+		svgView := read("svg-view.js")
 		a := &pageAssets{
 			css:         template.CSS(read("page.css")),
 			form:        read("form.js"),
 			live:        read("live.js"),
 			pill:        read("pill.js"),
 			mermaidInit: template.JS(read("mermaid-init.js")),
-			docFrame:    read("doc-frame.js"),
+			docFrame:    svgView + "\n" + read("doc-frame.js"),
+			viewer:      "(function () {\n" + svgView + "\n" + read("viewer.js") + "})();\n",
 			sprite:      template.HTML(strings.TrimSpace(read("sprite.svg"))),
 			icons:       map[string]bool{},
 		}
@@ -213,6 +219,9 @@ type SharedAssets struct {
 	Sprite      template.HTML
 	FormScript  template.JS
 	MermaidInit template.JS
+	// ViewerScript is the image viewer, a self-contained script for the page
+	// to inline once, outside any region (it listens on the document).
+	ViewerScript template.JS
 }
 
 // PageAssets returns the static page's shared assets.
@@ -221,7 +230,7 @@ func PageAssets() (SharedAssets, error) {
 	if err != nil {
 		return SharedAssets{}, fmt.Errorf("whiteboard page assets: %w", err)
 	}
-	return SharedAssets{CSS: a.css, Sprite: a.sprite, FormScript: template.JS(a.form + "\n" + a.pill), MermaidInit: a.mermaidInit}, nil
+	return SharedAssets{CSS: a.css, Sprite: a.sprite, FormScript: template.JS(a.form + "\n" + a.pill), MermaidInit: a.mermaidInit, ViewerScript: template.JS(a.viewer)}, nil
 }
 
 // pageData is what the page template executes on: the view plus the inlined
@@ -283,7 +292,9 @@ func newPageData(view View, a *pageAssets, framed bool) *pageData {
 	full := view.Layout != LayoutEmbed
 	script := a.form
 	if full {
-		script += a.pill + a.live
+		// The viewer is for the standalone page; the embed is a chat
+		// snapshot with a size budget and runs only the answer form.
+		script = a.viewer + script + a.pill + a.live
 	}
 	p := &pageData{
 		View:        view,

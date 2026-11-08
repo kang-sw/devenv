@@ -221,7 +221,7 @@ func TestPanelRowPathActionLink(t *testing.T) {
 		t.Error("BuildView changed the caller's panels")
 	}
 	in.FileActions = nil
-	wantNone(t, render(t, BuildView(&State{}, in)), "data-wl")
+	wantNone(t, markup(render(t, BuildView(&State{}, in))), "data-wl")
 }
 
 // TestFileActionsZeroKeepsPathText: a zero FileAction leaves a file target
@@ -235,7 +235,7 @@ func TestFileActionsZeroKeepsPathText(t *testing.T) {
 	wantAll(t, zero, `the plan <code class="fpath">ai-docs/plan.md</code>`, `data-wl="url"`)
 	wantNone(t, zero, `data-wl="file"`)
 	plain := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r", FileText: func(p string) string { return p }}))
-	wantNone(t, plain, "data-wl")
+	wantNone(t, markup(plain), "data-wl")
 }
 
 // TestDiskBoardKeepsFileLinks: a board written to disk (FileLink, no
@@ -248,8 +248,16 @@ func TestDiskBoardKeepsFileLinks(t *testing.T) {
 		FileLink:    func(p string) string { return "file://" + p },
 		FileActions: func(string) FileAction { return FileAction{Href: "/s/r/file?path=x", Abs: "/x"} }}))
 	wantAll(t, out, `<a href="file://ai-docs/plan.md">the plan</a>`, `<a href="file:///abs/b.md">abs</a>`)
-	wantNone(t, out, "data-wl", "/s/r/file")
+	wantNone(t, markup(out), "data-wl", "/s/r/file")
 }
+
+// markup is page without its script elements: the viewer script names
+// data-wl links and data: image sources it reads, which no markup holds.
+func markup(page string) string {
+	return scriptElement.ReplaceAllString(page, "")
+}
+
+var scriptElement = regexp.MustCompile(`(?s)<script>.*?</script>`)
 
 // frameDocs returns the srcdoc document of every topic-body frame in board,
 // keyed by topic name, unescaped as a browser reads the attribute.
@@ -358,7 +366,7 @@ func TestFramedBodyImagesTakeDocImageSrc(t *testing.T) {
 	wantNone(t, string(regions.Board), `src="data:image/png;base64,QUJD" alt="item"`)
 
 	page := render(t, BuildView(st, in))
-	wantNone(t, page, "data:image")
+	wantNone(t, markup(page), "data:image")
 	wantAll(t, page, `<img src="/route/a.png" alt="a">`)
 
 	// Without DocImageSrc the frame's images take ImageSrc.
@@ -409,4 +417,32 @@ func TestRenderRegionsMermaidInBodyAndItems(t *testing.T) {
 			}
 		}
 	}
+}
+
+// TestImageViewerScriptHooks pins where the image viewer runs: the full page
+// carries it (and the SVG helpers it shares with the frames) with its overlay
+// styles and icons, the embed snapshot does not, a served page's topic-body
+// frame carries the posting side, and the dashboard reuses the script once
+// through PageAssets.
+func TestImageViewerScriptHooks(t *testing.T) {
+	full := render(t, sampleView(LayoutFull))
+	wantAll(t, full, `wbv-stage`, `function wbFlattenSvg(`, `role", "dialog"`, `aria-modal`, `.wbv-stage`, `id="i-zoom-in"`, `id="i-ext"`)
+	embed := render(t, sampleView(LayoutEmbed))
+	wantNone(t, embed, "function wbFlattenSvg(", `createObjectURL`)
+
+	st := &State{Seq: 2, Topics: []TopicDoc{{Name: "doc", Body: "![a](a.png)", Changed: 2}}}
+	regions, err := RenderRegions(BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := frameDocs(t, string(regions.Board))["doc"]
+	wantAll(t, doc, `function wbFlattenSvg(`, `wbDoc: "view"`)
+	wantNone(t, doc, `createObjectURL`)
+
+	shared, err := PageAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantAll(t, string(shared.ViewerScript), `function wbFlattenSvg(`, `wbviewerclose`, `message`)
+	wantNone(t, string(shared.FormScript), `wbFlattenSvg`)
 }

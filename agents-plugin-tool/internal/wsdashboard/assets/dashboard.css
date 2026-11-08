@@ -528,3 +528,6 @@ a[data-wl="file"]:not([href]) { color: inherit; }
 .lmenu button:hover, .lmenu button:focus-visible { background: var(--wb-muted); outline: none; }
 .ltoast { position: fixed; z-index: 61; left: 50%; bottom: 18px; transform: translateX(-50%); max-width: min(560px, calc(100vw - 32px)); background: var(--wb-fg); color: var(--wb-card); border-radius: 8px; padding: 7px 12px; font-size: 12.5px; box-shadow: var(--wb-shadow-hi); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ltoast[hidden] { display: none; }
+
+/* conversation images open in the viewer (viewer.js) */
+.thumbs img, .bub img { cursor: zoom-in; }
