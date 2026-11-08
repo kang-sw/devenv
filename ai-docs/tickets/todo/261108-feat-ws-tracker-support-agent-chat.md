@@ -74,6 +74,39 @@ agent runner (`261108-feat-ws-daemon-agent-runner`).
   with the store's local clone as the working root. "New conversation"
   ((322)) is the runner's `close` plus create (runner (328) a).
 
+- **Backend first, card second** (board (440) a): Phase 1 builds the
+  headless backend (support profile, read-only git search tool,
+  `tracker.show`, per-store conversation lifecycle over the daemon) right
+  after the tracker caller merges, in parallel with the drawer UI; Phase 2
+  builds the chat card on that verified API once the drawer UI lands.
+  Rejected: backend and card in one pass after the drawer UI; deferring the
+  phase plan to the drawer UI start.
+- **Plan now, implement after the runner live check** (board (441) a,
+  refining (365) b): this phase plan is written now; implementation starts
+  only after the user's live check of the agent runner and the round-2
+  conversation view, since this card builds on both. Rejected: live check
+  before any planning; implementing without the live check.
+- **`tracker.show` belongs to this ticket** (board (442) ok): it is added
+  here as a third tracker tool after the caller merges, not folded into the
+  caller's in-flight Phase 2. Rejected: amending the caller's two-tool
+  contract (Decision 9) mid-implementation.
+
+- **Runner-only tool listing** (board (443) ok): the git search tool and
+  `tracker.show` are ws-mcp tools listed only in a runner conversation whose
+  profile allows them, never in an ordinary lead session's tool list; a lead
+  gains nothing from them and an always-listed tool widens the agent-facing
+  contract downstream. Whether ws-mcp can gate listing per launch is
+  verified at fact population. Rejected: a tool every session lists.
+- **Phase 1 verification includes one live conversation** (board (444) ok):
+  Go tests with a fake backend (git search argument refusals and path
+  scope, `tracker.show` fields, conversation keep and "new conversation")
+  plus one live claude conversation over the daemon REST that calls
+  `tracker.query`, `tracker.show`, and git search against the live test
+  store `kang-sw/ws-tracker-live-test`. Rejected: fake-backend tests only,
+  since the runner's billing path and profile loading are proven only live.
+- **Stays in `todo/` until the runner live check** (board (445) ok): promotion
+  to `ready/` then runs fact population and the Sage gate.
+
 ## Constraints
 
 - Read `ai-docs/manuals/shipped-surface-boundary.md` before editing under
@@ -84,6 +117,30 @@ agent runner (`261108-feat-ws-daemon-agent-runner`).
 
 ## Phases
 
-### Phase 1: chat card
+### Phase 1: Headless backend
 
-To be written once the queue settles and the prerequisites are planned.
+Blocked until `261108-feat-ws-tracker-caller` merges and the user has live
+checked the agent runner ((441) a).
+
+- The support agent's `agent.profile.<name>` default (tools: the caller's
+  tracker tools, `tracker.show`, the read-only git search tool; working root
+  the store's local clone).
+- The read-only git search tool (log, show, grep, blame, ls-files; argument
+  validation with no write-capable options; scope = daemon-known project
+  roots plus the config-knob roots, any other path refused).
+- `tracker.show(item)`: the designated card-reference call, returning the
+  item's mini-card fields from the store's view state.
+- Per-store conversation lifecycle on the runner: one ongoing conversation
+  per store kept across drawer opens and days; "new conversation" = runner
+  `close` plus create.
+
+### Phase 2: Chat card
+
+Blocked by `261108-feat-ws-tracker-drawer-ui`.
+
+- The drawer card (fixed height, internal scroll, newest at the bottom)
+  rendering the conversation with the existing renderer, plus the
+  card-reference entry kind drawn from `tracker.show` calls.
+- The shared composer without its bottom badges, with the model and effort
+  modal.
+- The "new conversation" action.
