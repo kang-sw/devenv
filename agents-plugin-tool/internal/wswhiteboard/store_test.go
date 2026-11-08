@@ -82,27 +82,29 @@ func item(t *testing.T, st *State, id int) Item {
 	return st.Items[idx]
 }
 
-// addXML is a wb:add command: title, then the options when given.
+// addXML is a wb:add command in its topic's group: title, then the options
+// when given.
 func addXML(class, topic, title string, options ...string) string {
 	var sb strings.Builder
-	fmt.Fprintf(&sb, `<wb:add class=%q topic=%q><wb:title>%s</wb:title>`, class, topic, title)
+	fmt.Fprintf(&sb, `<wb:topic name=%q><wb:add class=%q><wb:title>%s</wb:title>`, topic, class, title)
 	for _, o := range options {
 		fmt.Fprintf(&sb, `<wb:option>%s</wb:option>`, o)
 	}
-	sb.WriteString(`</wb:add>`)
+	sb.WriteString(`</wb:add></wb:topic>`)
 	return sb.String()
 }
 
+// topicXML sets a topic's body.
 func topicXML(name, body string) string {
-	return `<wb:topic name="` + name + `">` + body + `</wb:topic>`
+	return `<wb:topic name="` + name + `"><wb:body>` + body + `</wb:body></wb:topic>`
 }
 
 func TestApplyBatchInOrderReturnsIDsInAddOrder(t *testing.T) {
 	st := &State{}
 	out := mustApply(t, st, `
-<wb:add class="policy" topic="t"><wb:title>first</wb:title><wb:option>x</wb:option><wb:option>y</wb:option><wb:recommend>b: safer</wb:recommend></wb:add>
-<wb:add class="technical" topic="t"><wb:title>second</wb:title><wb:why>because</wb:why></wb:add>
-<wb:add class="announced" topic="u"><wb:title>third</wb:title></wb:add>
+<wb:topic name="t"><wb:add class="policy"><wb:title>first</wb:title><wb:option>x</wb:option><wb:option>y</wb:option><wb:recommend>b: safer</wb:recommend></wb:add></wb:topic>
+<wb:topic name="t"><wb:add class="technical"><wb:title>second</wb:title><wb:why>because</wb:why></wb:add></wb:topic>
+<wb:topic name="u"><wb:add class="announced"><wb:title>third</wb:title></wb:add></wb:topic>
 <wb:answer id="2" value="ok">fine</wb:answer>`)
 	if fmt.Sprint(out.IDs) != "[1 2 3]" {
 		t.Fatalf("minted IDs = %v, want [1 2 3]", out.IDs)
@@ -129,17 +131,17 @@ func TestApplyCommandsRunInTheOrderWritten(t *testing.T) {
 
 	// Close then add: the add reopens the topic. Add then close: it stays closed.
 	mustApply(t, st, addXML(ClassTechnical, "t", "x"))
-	mustApply(t, st, `<wb:close topic="t" result="done"/>`+addXML(ClassTechnical, "t", "y"))
+	mustApply(t, st, `<wb:topic name="t"><wb:close result="done"/></wb:topic>`+addXML(ClassTechnical, "t", "y"))
 	if st.topicClosed("t") {
 		t.Fatalf("close then add must leave the topic open: %v", st.ClosedTopics)
 	}
-	mustApply(t, st, addXML(ClassTechnical, "t", "z")+`<wb:close topic="t" result="done"/>`)
+	mustApply(t, st, addXML(ClassTechnical, "t", "z")+`<wb:topic name="t"><wb:close result="done"/></wb:topic>`)
 	if !st.topicClosed("t") {
 		t.Fatalf("add then close must leave the topic closed")
 	}
 
 	// A patch that reopens an item, then one that edits its options, in one batch.
-	mustApply(t, st, `<wb:add class="policy" topic="p"><wb:title>p</wb:title><wb:option>a1</wb:option><wb:option>b1</wb:option></wb:add>
+	mustApply(t, st, `<wb:topic name="p"><wb:add class="policy"><wb:title>p</wb:title><wb:option>a1</wb:option><wb:option>b1</wb:option></wb:add></wb:topic>
 <wb:answer id="4" value="a">q</wb:answer>
 <wb:patch id="4" status="open"/>
 <wb:patch id="4"><wb:option>only</wb:option></wb:patch>`)
@@ -150,22 +152,22 @@ func TestApplyCommandsRunInTheOrderWritten(t *testing.T) {
 
 func TestApplyExplicitIDAdoptsAndRaisesCounter(t *testing.T) {
 	st := &State{}
-	out := mustApply(t, st, `<wb:add id="40" class="policy" topic="q"><wb:title>adopted</wb:title></wb:add>`+addXML(ClassTechnical, "q", "minted"))
+	out := mustApply(t, st, `<wb:topic name="q"><wb:add id="40" class="policy"><wb:title>adopted</wb:title></wb:add></wb:topic>`+addXML(ClassTechnical, "q", "minted"))
 	if fmt.Sprint(out.IDs) != "[40 41]" {
 		t.Fatalf("IDs = %v, want [40 41]", out.IDs)
 	}
 	// A lower explicit ID not yet in the store is adopted without lowering the counter.
-	out = mustApply(t, st, `<wb:add id="7" class="policy" topic="q"><wb:title>older</wb:title></wb:add>`+addXML(ClassPolicy, "q", "next"))
+	out = mustApply(t, st, `<wb:topic name="q"><wb:add id="7" class="policy"><wb:title>older</wb:title></wb:add></wb:topic>`+addXML(ClassPolicy, "q", "next"))
 	if fmt.Sprint(out.IDs) != "[7 42]" {
 		t.Fatalf("IDs = %v, want [7 42]", out.IDs)
 	}
-	problems := refused(t, st, `<wb:add id="40" class="policy" topic="q"><wb:title>dup</wb:title></wb:add>`)
+	problems := refused(t, st, `<wb:topic name="q"><wb:add id="40" class="policy"><wb:title>dup</wb:title></wb:add></wb:topic>`)
 	wantProblems(t, problems, "id: (40) is already in the store")
 	// Within one batch an adopted ID is taken for the commands after it.
-	problems = refused(t, st, `<wb:add id="50" class="policy" topic="q"><wb:title>a</wb:title></wb:add><wb:add id="50" class="policy" topic="q"><wb:title>b</wb:title></wb:add>`)
+	problems = refused(t, st, `<wb:topic name="q"><wb:add id="50" class="policy"><wb:title>a</wb:title></wb:add></wb:topic><wb:topic name="q"><wb:add id="50" class="policy"><wb:title>b</wb:title></wb:add></wb:topic>`)
 	wantProblems(t, problems, "command 2 <wb:add> (line 1) id: (50) is already in the store")
 	for _, bad := range []string{"(43)", "0", "-3", "1.5", ""} {
-		problems = refused(t, st, fmt.Sprintf(`<wb:add id=%q class="policy" topic="q"><wb:title>x</wb:title></wb:add>`, bad))
+		problems = refused(t, st, fmt.Sprintf(`<wb:topic name="q"><wb:add id=%q class="policy"><wb:title>x</wb:title></wb:add></wb:topic>`, bad))
 		wantProblems(t, problems, "id: must be a positive whole number")
 	}
 }
@@ -173,14 +175,14 @@ func TestApplyExplicitIDAdoptsAndRaisesCounter(t *testing.T) {
 func TestApplyRefusedBatchAppliesNothingAndReportsEveryProblem(t *testing.T) {
 	st := &State{}
 	mustApply(t, st, addXML(ClassPolicy, "t", "one"))
-	problems := refused(t, st, `<wb:add class="wrong" topic="t"><wb:title>x</wb:title></wb:add>
+	problems := refused(t, st, `<wb:topic name="t"><wb:add class="wrong"><wb:title>x</wb:title></wb:add></wb:topic>
 <wb:add class="policy"><wb:title>no topic</wb:title></wb:add>
 <wb:answer id="99" value="a">q</wb:answer>
 <wb:patch id="1" status="answered"/>
 <wb:bogus/>`)
 	wantProblems(t, problems,
 		`command 1 <wb:add> (line 1) class: must be one of policy, technical, announced`,
-		`command 2 <wb:add> (line 2) topic: required`,
+		`command 2 <wb:add> (line 2): goes inside a <wb:topic name="..."> group`,
 		`command 3 <wb:answer> (line 3) (99): not in the store`,
 		`command 4 <wb:patch> (line 4) status: must be one of open, withdrawn, superseded`,
 		`command 5 <wb:bogus> (line 5): unknown command`,
@@ -189,29 +191,29 @@ func TestApplyRefusedBatchAppliesNothingAndReportsEveryProblem(t *testing.T) {
 		t.Fatalf("refused batch changed the store: %+v", st)
 	}
 	// A valid command ahead of a bad one is not applied either.
-	problems = refused(t, st, addXML(ClassTechnical, "t", "fine")+"\n"+`<wb:close topic="nowhere" result="done"/>`)
-	wantProblems(t, problems, `command 2 <wb:close> (line 2) topic: no item or topic body has topic "nowhere"`)
+	problems = refused(t, st, addXML(ClassTechnical, "t", "fine")+"\n"+`<wb:topic name="nowhere"><wb:close result="done"/></wb:topic>`)
+	wantProblems(t, problems, `command 2 <wb:close> (line 2): no item or topic body has topic "nowhere"`)
 }
 
 func TestApplyAddFieldRules(t *testing.T) {
 	st := &State{}
 	for want, batch := range map[string]string{
-		"<wb:title>: required":                   `<wb:add class="policy" topic="t"/>`,
-		"<wb:title>: must be non-empty":          `<wb:add class="policy" topic="t"><wb:title> </wb:title></wb:add>`,
-		"more than one <wb:title>":               `<wb:add class="policy" topic="t"><wb:title>a</wb:title><wb:title>b</wb:title></wb:add>`,
-		"more than one <wb:why>":                 `<wb:add class="policy" topic="t"><wb:title>a</wb:title><wb:why>x</wb:why><wb:why>y</wb:why></wb:add>`,
-		"more than one <wb:recommend>":           `<wb:add class="policy" topic="t"><wb:title>a</wb:title><wb:option>x</wb:option><wb:recommend>a</wb:recommend><wb:recommend>a</wb:recommend></wb:add>`,
-		"option b must be non-empty":             `<wb:add class="policy" topic="t"><wb:title>a</wb:title><wb:option>x</wb:option><wb:option>  </wb:option></wb:add>`,
-		"class: required":                        `<wb:add topic="t"><wb:title>a</wb:title></wb:add>`,
-		"topic: must be non-empty":               `<wb:add class="policy" topic=""><wb:title>a</wb:title></wb:add>`,
-		"<wb:recommend>: names an option letter": `<wb:add class="policy" topic="t"><wb:title>a</wb:title><wb:recommend>a</wb:recommend></wb:add>`,
-		"starts with its option letter (a-b)":    `<wb:add class="policy" topic="t"><wb:title>a</wb:title><wb:option>x</wb:option><wb:option>y</wb:option><wb:recommend>c: no such</wb:recommend></wb:add>`,
-		"at most 26 options":                     `<wb:add class="policy" topic="t"><wb:title>a</wb:title>` + strings.Repeat(`<wb:option>o</wb:option>`, 27) + `</wb:add>`,
+		"<wb:title>: required":                        `<wb:topic name="t"><wb:add class="policy"/></wb:topic>`,
+		"<wb:title>: must be non-empty":               `<wb:topic name="t"><wb:add class="policy"><wb:title> </wb:title></wb:add></wb:topic>`,
+		"more than one <wb:title>":                    `<wb:topic name="t"><wb:add class="policy"><wb:title>a</wb:title><wb:title>b</wb:title></wb:add></wb:topic>`,
+		"more than one <wb:why>":                      `<wb:topic name="t"><wb:add class="policy"><wb:title>a</wb:title><wb:why>x</wb:why><wb:why>y</wb:why></wb:add></wb:topic>`,
+		"more than one <wb:recommend>":                `<wb:topic name="t"><wb:add class="policy"><wb:title>a</wb:title><wb:option>x</wb:option><wb:recommend>a</wb:recommend><wb:recommend>a</wb:recommend></wb:add></wb:topic>`,
+		"option b must be non-empty":                  `<wb:topic name="t"><wb:add class="policy"><wb:title>a</wb:title><wb:option>x</wb:option><wb:option>  </wb:option></wb:add></wb:topic>`,
+		"class: required":                             `<wb:topic name="t"><wb:add><wb:title>a</wb:title></wb:add></wb:topic>`,
+		"<wb:topic> (line 1) name: must be non-empty": `<wb:topic name=""><wb:add class="policy"><wb:title>a</wb:title></wb:add></wb:topic>`,
+		"<wb:recommend>: names an option letter":      `<wb:topic name="t"><wb:add class="policy"><wb:title>a</wb:title><wb:recommend>a</wb:recommend></wb:add></wb:topic>`,
+		"starts with its option letter (a-b)":         `<wb:topic name="t"><wb:add class="policy"><wb:title>a</wb:title><wb:option>x</wb:option><wb:option>y</wb:option><wb:recommend>c: no such</wb:recommend></wb:add></wb:topic>`,
+		"at most 26 options":                          `<wb:topic name="t"><wb:add class="policy"><wb:title>a</wb:title>` + strings.Repeat(`<wb:option>o</wb:option>`, 27) + `</wb:add></wb:topic>`,
 	} {
 		wantProblems(t, refused(t, st, batch), want)
 	}
 	// Links are repeatable and keep their order and text.
-	mustApply(t, st, `<wb:add class="technical" topic="t"><wb:title>l</wb:title><wb:link>one</wb:link><wb:link>two</wb:link></wb:add>`)
+	mustApply(t, st, `<wb:topic name="t"><wb:add class="technical"><wb:title>l</wb:title><wb:link>one</wb:link><wb:link>two</wb:link></wb:add></wb:topic>`)
 	if got := item(t, st, 1).Links; strings.Join(got, "|") != "one|two" {
 		t.Fatalf("links = %q", got)
 	}
@@ -247,7 +249,7 @@ func TestApplyPatchOptionsRefusedOnNonOpenItem(t *testing.T) {
 
 func TestApplyPatchFieldsAndStatuses(t *testing.T) {
 	st := &State{}
-	mustApply(t, st, `<wb:add class="policy" topic="t"><wb:title>p</wb:title><wb:option>x</wb:option><wb:option>y</wb:option><wb:recommend>a</wb:recommend><wb:why>old why</wb:why><wb:link>old</wb:link></wb:add>`)
+	mustApply(t, st, `<wb:topic name="t"><wb:add class="policy"><wb:title>p</wb:title><wb:option>x</wb:option><wb:option>y</wb:option><wb:recommend>a</wb:recommend><wb:why>old why</wb:why><wb:link>old</wb:link></wb:add></wb:topic>`)
 	// A patch replaces only the fields it carries.
 	mustApply(t, st, `<wb:patch id="1"><wb:title>reworded</wb:title><wb:link>n1</wb:link><wb:link>n2</wb:link></wb:patch>`)
 	got := item(t, st, 1)
@@ -286,7 +288,7 @@ func TestApplyPatchFieldsAndStatuses(t *testing.T) {
 // the same field with fields contradicts itself.
 func TestApplyPatchClearsListFields(t *testing.T) {
 	st := &State{}
-	mustApply(t, st, `<wb:add class="policy" topic="t"><wb:title>p</wb:title><wb:option>x</wb:option><wb:option>y</wb:option><wb:link>a</wb:link><wb:link>b</wb:link></wb:add>`)
+	mustApply(t, st, `<wb:topic name="t"><wb:add class="policy"><wb:title>p</wb:title><wb:option>x</wb:option><wb:option>y</wb:option><wb:link>a</wb:link><wb:link>b</wb:link></wb:add></wb:topic>`)
 	mustApply(t, st, `<wb:patch id="1" clear="links"/>`)
 	if got := item(t, st, 1); len(got.Links) != 0 || len(got.Options) != 2 {
 		t.Fatalf("clear links: %+v", got)
@@ -478,27 +480,27 @@ func TestRotationKeepsTenMostRecentSettledBoardWide(t *testing.T) {
 	}
 	// Closing a topic collapses it at once; the freed slots go to no one
 	// else here because topic b already shows all of its items.
-	mustApply(t, st, `<wb:close topic="a" result="done"/>`)
+	mustApply(t, st, `<wb:topic name="a"><wb:close result="done"/></wb:topic>`)
 	view = BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"})
 	for _, topic := range view.Topics {
 		if topic.Name == "a" && (len(topic.Expanded) != 0 || len(topic.Collapsed) != 8 || !topic.Quiet || !topic.Closed) {
 			t.Fatalf("closed topic a = %+v", topic)
 		}
 	}
-	problems := refused(t, st, `<wb:close topic="missing" result="done"/>`)
+	problems := refused(t, st, `<wb:topic name="missing"><wb:close result="done"/></wb:topic>`)
 	wantProblems(t, problems, `no item or topic body has topic "missing"`)
-	// Closing twice keeps one mark; a topic attribute is required.
-	mustApply(t, st, `<wb:close topic="a" result="done"/>`)
+	// Closing twice keeps one mark; a close sits in its topic's group.
+	mustApply(t, st, `<wb:topic name="a"><wb:close result="done"/></wb:topic>`)
 	if len(st.ClosedTopics) != 1 {
 		t.Fatalf("closed topics = %v", st.ClosedTopics)
 	}
-	wantProblems(t, refused(t, st, `<wb:close/>`), "topic: required")
+	wantProblems(t, refused(t, st, `<wb:close result="done"/>`), `command 1 <wb:close> (line 1): goes inside a <wb:topic name="..."> group`)
 }
 
 func TestClosedTopicReopensWhenAnItemIsAdded(t *testing.T) {
 	st := &State{}
 	settleItems(t, st, "a", 2)
-	mustApply(t, st, `<wb:close topic="a" result="done"/>`)
+	mustApply(t, st, `<wb:topic name="a"><wb:close result="done"/></wb:topic>`)
 	if !st.topicClosed("a") {
 		t.Fatal("topic a should be closed")
 	}
@@ -507,8 +509,8 @@ func TestClosedTopicReopensWhenAnItemIsAdded(t *testing.T) {
 		t.Fatalf("an added item reopens its topic: %v", st.ClosedTopics)
 	}
 	// A rejected add reopens nothing.
-	mustApply(t, st, `<wb:close topic="a" result="done"/>`)
-	refused(t, st, `<wb:add class="bad" topic="a"><wb:title>x</wb:title></wb:add>`)
+	mustApply(t, st, `<wb:topic name="a"><wb:close result="done"/></wb:topic>`)
+	refused(t, st, `<wb:topic name="a"><wb:add class="bad"><wb:title>x</wb:title></wb:add></wb:topic>`)
 	if !st.topicClosed("a") {
 		t.Fatalf("a refused add must not reopen the topic")
 	}
@@ -714,11 +716,11 @@ func TestApplyEmbedDir(t *testing.T) {
 func TestApplyAcceptsAnyItemReference(t *testing.T) {
 	st := &State{}
 	mustApply(t, st, addXML(ClassPolicy, "t", "old"))
-	mustApply(t, st, `<wb:add class="policy" topic="t"><wb:title>new</wb:title><wb:link>supersedes {{01}}</wb:link><wb:link>261030-feat-x</wb:link></wb:add>
+	mustApply(t, st, `<wb:topic name="t"><wb:add class="policy"><wb:title>new</wb:title><wb:link>supersedes {{01}}</wb:link><wb:link>261030-feat-x</wb:link></wb:add></wb:topic>
 <wb:patch id="1" status="superseded"><wb:link>superseded by {{02}}</wb:link></wb:patch>`)
 	// References are display only: an ID the store never held, prose
 	// parentheses, and non-digit brace tokens are all accepted.
-	mustApply(t, st, `<wb:add class="technical" topic="t"><wb:title>see {{77}} after step (2)</wb:title><wb:why>step (3) then {{my-tag}}</wb:why><wb:link>see {{77}}</wb:link><wb:link>step (2)</wb:link></wb:add>`)
+	mustApply(t, st, `<wb:topic name="t"><wb:add class="technical"><wb:title>see {{77}} after step (2)</wb:title><wb:why>step (3) then {{my-tag}}</wb:why><wb:link>see {{77}}</wb:link><wb:link>step (2)</wb:link></wb:add></wb:topic>`)
 	if got := st.Items[2].Links; len(got) != 2 || got[0] != "see {{77}}" || got[1] != "step (2)" {
 		t.Fatalf("links stored as %q", got)
 	}
@@ -805,7 +807,7 @@ func TestApplyTopicSetsReplacesAndClearsABody(t *testing.T) {
 	if got.Body != "## 첫 본문\n\n내용" || got.Changed != st.Seq {
 		t.Fatalf("topic = %+v (Seq %d)", got, st.Seq)
 	}
-	// A second wb:topic replaces the body whole.
+	// A second wb:body replaces the body whole.
 	mustApply(t, st, topicXML("notes", "replacement"))
 	if got := topicEntry(t, st, "notes"); got.Body != "replacement" || got.Changed != st.Seq || len(st.Topics) != 1 {
 		t.Fatalf("topic = %+v topics %d", got, len(st.Topics))
@@ -816,9 +818,9 @@ func TestApplyTopicSetsReplacesAndClearsABody(t *testing.T) {
 		t.Fatalf("topics = %+v", st.Topics)
 	}
 	// The name is required.
-	wantProblems(t, refused(t, st, `<wb:topic>x</wb:topic>`), "command 1 <wb:topic> (line 1) name: required")
-	wantProblems(t, refused(t, st, `<wb:topic name=" ">x</wb:topic>`), "name: must be non-empty")
-	wantProblems(t, refused(t, st, `<wb:topic name="n" mode="x">x</wb:topic>`), "unknown attribute mode (known: name)")
+	wantProblems(t, refused(t, st, `<wb:topic><wb:body>x</wb:body></wb:topic>`), "<wb:topic> (line 1) name: required")
+	wantProblems(t, refused(t, st, `<wb:topic name=" "><wb:body>x</wb:body></wb:topic>`), "name: must be non-empty")
+	wantProblems(t, refused(t, st, `<wb:topic name="n" mode="x"><wb:body>x</wb:body></wb:topic>`), "<wb:topic> (line 1): unknown attribute mode (known: name)")
 }
 
 func TestApplyTopicSameBodyIsNoChange(t *testing.T) {
@@ -831,7 +833,7 @@ func TestApplyTopicSameBodyIsNoChange(t *testing.T) {
 		t.Fatalf("the same body again bumped Changed to %d (was %d, Seq %d)", got.Changed, first, st.Seq)
 	}
 	// A no-op does not reopen a closed topic either; a real change does.
-	mustApply(t, st, `<wb:close topic="t" result="done"/>`)
+	mustApply(t, st, `<wb:topic name="t"><wb:close result="done"/></wb:topic>`)
 	mustApply(t, st, topicXML("t", "same"))
 	if !st.topicClosed("t") {
 		t.Fatal("setting the same body reopened the topic")
@@ -844,9 +846,9 @@ func TestApplyTopicSameBodyIsNoChange(t *testing.T) {
 
 func TestApplyTopicEmptyBodyClears(t *testing.T) {
 	for name, clear := range map[string]string{
-		"empty":        `<wb:topic name="t"></wb:topic>`,
-		"self-closing": `<wb:topic name="t"/>`,
-		"blank":        "<wb:topic name=\"t\">\n  \n</wb:topic>",
+		"empty":        `<wb:topic name="t"><wb:body></wb:body></wb:topic>`,
+		"self-closing": `<wb:topic name="t"><wb:body/></wb:topic>`,
+		"blank":        "<wb:topic name=\"t\"><wb:body>\n  \n</wb:body></wb:topic>",
 	} {
 		st := &State{}
 		mustApply(t, st, addXML(ClassTechnical, "t", "x")+topicXML("t", "body"))
@@ -859,7 +861,7 @@ func TestApplyTopicEmptyBodyClears(t *testing.T) {
 		}
 		// Clearing again, and clearing a topic that never had a body, is no problem.
 		mustApply(t, st, clear)
-		mustApply(t, st, `<wb:topic name="never"/>`)
+		mustApply(t, st, `<wb:topic name="never"><wb:body/></wb:topic>`)
 		if len(st.Topics) != 0 {
 			t.Fatalf("%s: topics = %+v", name, st.Topics)
 		}
@@ -867,15 +869,15 @@ func TestApplyTopicEmptyBodyClears(t *testing.T) {
 	// A topic with items stays closed when its body is cleared; a topic left
 	// with neither drops its closed mark, and is unknown again.
 	st := &State{}
-	mustApply(t, st, addXML(ClassTechnical, "has items", "x")+topicXML("has items", "b")+topicXML("only body", "b")+`<wb:close topic="has items" result="done"/><wb:close topic="only body" result="done"/>`)
-	mustApply(t, st, `<wb:topic name="has items"/><wb:topic name="only body"/>`)
+	mustApply(t, st, addXML(ClassTechnical, "has items", "x")+topicXML("has items", "b")+topicXML("only body", "b")+`<wb:topic name="has items"><wb:close result="done"/></wb:topic><wb:topic name="only body"><wb:close result="done"/></wb:topic>`)
+	mustApply(t, st, `<wb:topic name="has items"><wb:body/></wb:topic><wb:topic name="only body"><wb:body/></wb:topic>`)
 	if !st.topicClosed("has items") || st.topicClosed("only body") || len(st.ClosedTopics) != 1 {
 		t.Fatalf("closed topics = %v", st.ClosedTopics)
 	}
 	if st.topicKnown("only body") {
 		t.Fatal("a topic with neither items nor body must be gone")
 	}
-	wantProblems(t, refused(t, st, `<wb:close topic="only body" result="done"/>`), `no item or topic body has topic "only body"`)
+	wantProblems(t, refused(t, st, `<wb:topic name="only body"><wb:close result="done"/></wb:topic>`), `no item or topic body has topic "only body"`)
 	// A body set again afterwards starts open.
 	mustApply(t, st, topicXML("only body", "back"))
 	if st.topicClosed("only body") {
@@ -888,7 +890,7 @@ func TestApplyTopicRefusesAFullDocument(t *testing.T) {
 	for _, doc := range []string{`<!DOCTYPE html><p>x</p>`, `<html><body>x</body></html>`, `<HTML lang=en>`,
 		"# Title\n\n<!DOCTYPE html>\n<p>x</p>", "<!doctype html>\n<html><body>x</body></html>", "Some text <html lang=en> inline."} {
 		problems := refused(t, st, topicXML("t", "\n"+doc+"\n"))
-		wantProblems(t, problems, "command 1 <wb:topic> (line 1): a topic body takes markdown with inline HTML, not a full document")
+		wantProblems(t, problems, "command 1 <wb:body> (line 1): a topic body takes markdown with inline HTML, not a full document")
 	}
 	// A body that only mentions a document tag in code (or in text goldmark
 	// escapes, such as a lowercase doctype alone) is markdown, not a full
@@ -908,22 +910,22 @@ func TestApplyEditReplacesOneUniqueMatch(t *testing.T) {
 	st := &State{}
 	mustApply(t, st, topicXML("t", "\n## 배경\n본문은 닫는 태그까지 raw 텍스트다.\n\n## 결정\nXML로 간다.\n"))
 	before := topicEntry(t, st, "t").Changed
-	mustApply(t, st, `<wb:edit topic="t">
+	mustApply(t, st, `<wb:topic name="t"><wb:edit>
 <wb:old>## 배경</wb:old>
 <wb:new>## 배경과 동기</wb:new>
-</wb:edit>`)
+</wb:edit></wb:topic>`)
 	want := "## 배경과 동기\n본문은 닫는 태그까지 raw 텍스트다.\n\n## 결정\nXML로 간다."
 	if got := topicEntry(t, st, "t"); got.Body != want || got.Changed != st.Seq || got.Changed == before {
 		t.Fatalf("topic = %+v", got)
 	}
 	// Whole lines match as written on their own lines: the one newline at
 	// each end of wb:old and wb:new is the tag layout, the rest is text.
-	mustApply(t, st, "<wb:edit topic=\"t\"><wb:old>\nXML로 간다.\n</wb:old><wb:new>\nXML로 간다.\n\n## 후속\n</wb:new></wb:edit>")
+	mustApply(t, st, "<wb:topic name=\"t\"><wb:edit><wb:old>\nXML로 간다.\n</wb:old><wb:new>\nXML로 간다.\n\n## 후속\n</wb:new></wb:edit></wb:topic>")
 	if got := st.TopicBody("t"); !strings.HasSuffix(got, "XML로 간다.\n\n## 후속") {
 		t.Fatalf("body = %q", got)
 	}
 	// Raw text in old and new, markup included.
-	mustApply(t, st, `<wb:edit topic="t"><wb:old>## 후속</wb:old><wb:new><details><option>a & b</option></details></wb:new></wb:edit>`)
+	mustApply(t, st, `<wb:topic name="t"><wb:edit><wb:old>## 후속</wb:old><wb:new><details><option>a & b</option></details></wb:new></wb:edit></wb:topic>`)
 	if got := st.TopicBody("t"); !strings.HasSuffix(got, "<details><option>a & b</option></details>") {
 		t.Fatalf("body = %q", got)
 	}
@@ -933,11 +935,11 @@ func TestApplyEditInsertsThroughAnAnchor(t *testing.T) {
 	st := &State{}
 	mustApply(t, st, topicXML("t", "## A\n\n## C"))
 	// Insert after an anchor, then before one: the anchor sits inside wb:old.
-	mustApply(t, st, `<wb:edit topic="t"><wb:old>## A</wb:old><wb:new>## A
+	mustApply(t, st, `<wb:topic name="t"><wb:edit><wb:old>## A</wb:old><wb:new>## A
 
-## B</wb:new></wb:edit>`)
-	mustApply(t, st, `<wb:edit topic="t"><wb:old>## C</wb:old><wb:new>## C2
-## C</wb:new></wb:edit>`)
+## B</wb:new></wb:edit></wb:topic>`)
+	mustApply(t, st, `<wb:topic name="t"><wb:edit><wb:old>## C</wb:old><wb:new>## C2
+## C</wb:new></wb:edit></wb:topic>`)
 	if got := st.TopicBody("t"); got != "## A\n\n## B\n\n## C2\n## C" {
 		t.Fatalf("body = %q", got)
 	}
@@ -948,29 +950,29 @@ func TestApplyEditRefusals(t *testing.T) {
 	mustApply(t, st, addXML(ClassTechnical, "t", "x")+topicXML("t", "alpha beta alpha"))
 	before := st.TopicBody("t")
 	for want, batch := range map[string]string{
-		`command 1 <wb:edit> (line 1): <wb:old> matches nothing in topic "t"'s body`:               `<wb:edit topic="t"><wb:old>gamma</wb:old><wb:new>x</wb:new></wb:edit>`,
-		`<wb:old> matches 2 places in topic "t"'s body; widen it to one or set replace_all="true"`: `<wb:edit topic="t"><wb:old>alpha</wb:old><wb:new>x</wb:new></wb:edit>`,
-		`topic "other" has no body; set one with <wb:topic>`:                                       `<wb:edit topic="other"><wb:old>a</wb:old><wb:new>b</wb:new></wb:edit>`,
-		`topic: required`:                                   `<wb:edit><wb:old>a</wb:old><wb:new>b</wb:new></wb:edit>`,
-		`<wb:old>: required`:                                `<wb:edit topic="t"><wb:new>b</wb:new></wb:edit>`,
-		`<wb:old>: must be non-empty`:                       `<wb:edit topic="t"><wb:old></wb:old><wb:new>b</wb:new></wb:edit>`,
-		`<wb:new>: required (empty deletes the match)`:      `<wb:edit topic="t"><wb:old>alpha</wb:old></wb:edit>`,
-		`more than one <wb:old>`:                            `<wb:edit topic="t"><wb:old>a</wb:old><wb:old>b</wb:old><wb:new>b</wb:new></wb:edit>`,
-		`replace_all: must be "true" or "false"; got "yes"`: `<wb:edit topic="t" replace_all="yes"><wb:old>alpha</wb:old><wb:new>x</wb:new></wb:edit>`,
-		`the edited body would hold a full document`:        `<wb:edit topic="t"><wb:old>beta</wb:old><wb:new><!DOCTYPE html></wb:new></wb:edit>`,
+		`command 1 <wb:edit> (line 1): <wb:old> matches nothing in topic "t"'s body`:               `<wb:topic name="t"><wb:edit><wb:old>gamma</wb:old><wb:new>x</wb:new></wb:edit></wb:topic>`,
+		`<wb:old> matches 2 places in topic "t"'s body; widen it to one or set replace_all="true"`: `<wb:topic name="t"><wb:edit><wb:old>alpha</wb:old><wb:new>x</wb:new></wb:edit></wb:topic>`,
+		`topic "other" has no body; set one with <wb:body>`:                                        `<wb:topic name="other"><wb:edit><wb:old>a</wb:old><wb:new>b</wb:new></wb:edit></wb:topic>`,
+		`goes inside a <wb:topic name="..."> group`:                                                `<wb:edit><wb:old>a</wb:old><wb:new>b</wb:new></wb:edit>`,
+		`<wb:old>: required`:                                `<wb:topic name="t"><wb:edit><wb:new>b</wb:new></wb:edit></wb:topic>`,
+		`<wb:old>: must be non-empty`:                       `<wb:topic name="t"><wb:edit><wb:old></wb:old><wb:new>b</wb:new></wb:edit></wb:topic>`,
+		`<wb:new>: required (empty deletes the match)`:      `<wb:topic name="t"><wb:edit><wb:old>alpha</wb:old></wb:edit></wb:topic>`,
+		`more than one <wb:old>`:                            `<wb:topic name="t"><wb:edit><wb:old>a</wb:old><wb:old>b</wb:old><wb:new>b</wb:new></wb:edit></wb:topic>`,
+		`replace_all: must be "true" or "false"; got "yes"`: `<wb:topic name="t"><wb:edit replace_all="yes"><wb:old>alpha</wb:old><wb:new>x</wb:new></wb:edit></wb:topic>`,
+		`the edited body would hold a full document`:        `<wb:topic name="t"><wb:edit><wb:old>beta</wb:old><wb:new><!DOCTYPE html></wb:new></wb:edit></wb:topic>`,
 	} {
 		wantProblems(t, refused(t, st, batch), want)
 	}
 	// An edit on a topic that has items but no body is refused the same way.
 	mustApply(t, st, addXML(ClassTechnical, "items only", "x"))
-	wantProblems(t, refused(t, st, `<wb:edit topic="items only"><wb:old>a</wb:old><wb:new>b</wb:new></wb:edit>`), `topic "items only" has no body`)
+	wantProblems(t, refused(t, st, `<wb:topic name="items only"><wb:edit><wb:old>a</wb:old><wb:new>b</wb:new></wb:edit></wb:topic>`), `topic "items only" has no body`)
 	// A failed edit leaves the body as it was, whatever else the batch holds.
 	if st.TopicBody("t") != before {
 		t.Fatalf("body = %q", st.TopicBody("t"))
 	}
 	// An edit inside a batch sees the bodies the commands ahead of it wrote.
-	wantProblems(t, refused(t, st, `<wb:edit topic="new"><wb:old>a</wb:old><wb:new>b</wb:new></wb:edit>`+topicXML("new", "a")), `topic "new" has no body`)
-	mustApply(t, st, topicXML("new", "a")+`<wb:edit topic="new"><wb:old>a</wb:old><wb:new>b</wb:new></wb:edit>`)
+	wantProblems(t, refused(t, st, `<wb:topic name="new"><wb:edit><wb:old>a</wb:old><wb:new>b</wb:new></wb:edit></wb:topic>`+topicXML("new", "a")), `topic "new" has no body`)
+	mustApply(t, st, topicXML("new", "a")+`<wb:topic name="new"><wb:edit><wb:old>a</wb:old><wb:new>b</wb:new></wb:edit></wb:topic>`)
 	if st.TopicBody("new") != "b" {
 		t.Fatalf("body = %q", st.TopicBody("new"))
 	}
@@ -979,20 +981,20 @@ func TestApplyEditRefusals(t *testing.T) {
 func TestApplyEditReplaceAllAndDelete(t *testing.T) {
 	st := &State{}
 	mustApply(t, st, topicXML("t", "alpha beta alpha gamma alpha"))
-	mustApply(t, st, `<wb:edit topic="t" replace_all="true"><wb:old>alpha</wb:old><wb:new>A</wb:new></wb:edit>`)
+	mustApply(t, st, `<wb:topic name="t"><wb:edit replace_all="true"><wb:old>alpha</wb:old><wb:new>A</wb:new></wb:edit></wb:topic>`)
 	if got := st.TopicBody("t"); got != "A beta A gamma A" {
 		t.Fatalf("body = %q", got)
 	}
 	// replace_all="false" is the default; one match is fine either way.
-	mustApply(t, st, `<wb:edit topic="t" replace_all="false"><wb:old>gamma</wb:old><wb:new>G</wb:new></wb:edit>`)
+	mustApply(t, st, `<wb:topic name="t"><wb:edit replace_all="false"><wb:old>gamma</wb:old><wb:new>G</wb:new></wb:edit></wb:topic>`)
 	// An empty wb:new deletes the match, self-closing or not.
-	mustApply(t, st, `<wb:edit topic="t"><wb:old> beta</wb:old><wb:new/></wb:edit>`)
-	mustApply(t, st, `<wb:edit topic="t"><wb:old> G</wb:old><wb:new></wb:new></wb:edit>`)
+	mustApply(t, st, `<wb:topic name="t"><wb:edit><wb:old> beta</wb:old><wb:new/></wb:edit></wb:topic>`)
+	mustApply(t, st, `<wb:topic name="t"><wb:edit><wb:old> G</wb:old><wb:new></wb:new></wb:edit></wb:topic>`)
 	if got := st.TopicBody("t"); got != "A A A" {
 		t.Fatalf("body = %q", got)
 	}
-	// An edit that leaves nothing clears the body like an empty wb:topic.
-	mustApply(t, st, `<wb:edit topic="t" replace_all="true"><wb:old>A</wb:old><wb:new/></wb:edit>`)
+	// An edit that leaves nothing clears the body like an empty wb:body.
+	mustApply(t, st, `<wb:topic name="t"><wb:edit replace_all="true"><wb:old>A</wb:old><wb:new/></wb:edit></wb:topic>`)
 	if len(st.Topics) != 0 {
 		t.Fatalf("topics = %+v", st.Topics)
 	}
@@ -1000,22 +1002,22 @@ func TestApplyEditReplaceAllAndDelete(t *testing.T) {
 
 func TestApplyEditAndTopicReopenAClosedTopic(t *testing.T) {
 	st := &State{}
-	mustApply(t, st, addXML(ClassTechnical, "t", "x")+topicXML("t", "alpha")+`<wb:close topic="t" result="done"/>`)
-	mustApply(t, st, `<wb:edit topic="t"><wb:old>alpha</wb:old><wb:new>beta</wb:new></wb:edit>`)
+	mustApply(t, st, addXML(ClassTechnical, "t", "x")+topicXML("t", "alpha")+`<wb:topic name="t"><wb:close result="done"/></wb:topic>`)
+	mustApply(t, st, `<wb:topic name="t"><wb:edit><wb:old>alpha</wb:old><wb:new>beta</wb:new></wb:edit></wb:topic>`)
 	if st.topicClosed("t") {
 		t.Fatal("an edit that changes the body reopens the topic")
 	}
-	mustApply(t, st, `<wb:close topic="t" result="done"/>`+topicXML("t", "gamma"))
+	mustApply(t, st, `<wb:topic name="t"><wb:close result="done"/></wb:topic>`+topicXML("t", "gamma"))
 	if st.topicClosed("t") {
-		t.Fatal("a wb:topic that changes the body reopens the topic")
+		t.Fatal("a wb:body that changes the body reopens the topic")
 	}
 	// Closing after the change in the same batch keeps it closed.
-	mustApply(t, st, topicXML("t", "delta")+`<wb:close topic="t" result="done"/>`)
+	mustApply(t, st, topicXML("t", "delta")+`<wb:topic name="t"><wb:close result="done"/></wb:topic>`)
 	if !st.topicClosed("t") {
 		t.Fatal("close after a body change must stick")
 	}
 	// A body-only topic closes the same way.
-	mustApply(t, st, topicXML("doc", "x")+`<wb:close topic="doc" result="done"/>`)
+	mustApply(t, st, topicXML("doc", "x")+`<wb:topic name="doc"><wb:close result="done"/></wb:topic>`)
 	mustApply(t, st, topicXML("doc", "y"))
 	if st.topicClosed("doc") {
 		t.Fatal("a body-only topic reopens on change")
@@ -1028,7 +1030,7 @@ func TestApplyCloseAcceptsAContentOnlyTopic(t *testing.T) {
 	if len(st.Items) != 0 || !st.topicKnown("notes") {
 		t.Fatalf("state = %+v", st)
 	}
-	mustApply(t, st, `<wb:close topic="notes" result="done"/>`)
+	mustApply(t, st, `<wb:topic name="notes"><wb:close result="done"/></wb:topic>`)
 	if !st.topicClosed("notes") {
 		t.Fatal("wb:close must accept a topic that has a body and no items")
 	}

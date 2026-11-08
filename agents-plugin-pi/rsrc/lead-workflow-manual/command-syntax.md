@@ -1,9 +1,13 @@
 ## Command syntax
 
-`commands` is one string of flat commands. Every tag carries the literal
-prefix its tool's section names, with no namespace declaration and no root
-element.
+`commands` is one string of commands. Every tag carries the literal prefix
+its tool's section names, with no namespace declaration and no root element.
 
+- A tool may name one group element, whose one attribute passes to the
+  commands written inside it; those commands take it from the group and do
+  not carry it themselves. A command the tool's section lists inside the
+  group goes only inside one, every other command only outside. Groups do
+  not nest, and command positions count commands, not groups.
 - A body is raw text up to the first exact closing tag of its element, so
   `<`, `&`, HTML, and mermaid are written as is, never escaped. A body that
   must contain its own closing tag puts that text in `<![CDATA[...]]>`. A

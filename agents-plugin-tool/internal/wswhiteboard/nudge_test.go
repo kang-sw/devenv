@@ -21,7 +21,7 @@ func applyAt(t *testing.T, st *State, commands string, now time.Time) Outcome {
 func bodies(names ...string) string {
 	var sb strings.Builder
 	for _, name := range names {
-		sb.WriteString(`<wb:topic name="` + name + `">body of ` + name + "</wb:topic>\n")
+		sb.WriteString(`<wb:topic name="` + name + `"><wb:body>body of ` + name + "</wb:body></wb:topic>\n")
 	}
 	return sb.String()
 }
@@ -32,11 +32,11 @@ func bodies(names ...string) string {
 func staleBoard(t *testing.T) *State {
 	t.Helper()
 	st := &State{}
-	applyAt(t, st, `<wb:add class="technical" topic="W"><wb:title>waits</wb:title></wb:add>
-<wb:add class="technical" topic="S"><wb:title>assumed</wb:title></wb:add>`+
-		bodies("A", "B", "D", "E", "F", "X")+`<wb:close topic="X" result="done"/>`, testNow)
+	applyAt(t, st, `<wb:topic name="W"><wb:add class="technical"><wb:title>waits</wb:title></wb:add></wb:topic>
+<wb:topic name="S"><wb:add class="technical"><wb:title>assumed</wb:title></wb:add></wb:topic>`+
+		bodies("A", "B", "D", "E", "F", "X")+`<wb:topic name="X"><wb:close result="done"/></wb:topic>`, testNow)
 	applyAt(t, st, `<wb:answer id="2" value="ok" assumed="true">fine</wb:answer>`, testNow)
-	applyAt(t, st, `<wb:topic name="F">new body of F</wb:topic>`, testNow.Add(30*time.Minute))
+	applyAt(t, st, `<wb:topic name="F"><wb:body>new body of F</wb:body></wb:topic>`, testNow.Add(30*time.Minute))
 	return st
 }
 
@@ -55,12 +55,12 @@ func TestStaleNudgeNamesStaleTopicsOnly(t *testing.T) {
 
 func TestStaleNudgeNeedsFiveOpenTopics(t *testing.T) {
 	st := &State{}
-	applyAt(t, st, bodies("A", "B", "C", "D", "E")+`<wb:close topic="E" result="done"/>`, testNow)
+	applyAt(t, st, bodies("A", "B", "C", "D", "E")+`<wb:topic name="E"><wb:close result="done"/></wb:topic>`, testNow)
 	if out := applyAt(t, st, ``, testNow.Add(2*time.Hour)); out.Info != "" {
 		t.Fatalf("four open topics must not nudge; info = %q", out.Info)
 	}
 	// Reopening the fifth makes it fresh, but the four stale ones now nudge.
-	out := applyAt(t, st, `<wb:topic name="E">reopened</wb:topic>`, testNow.Add(2*time.Hour))
+	out := applyAt(t, st, `<wb:topic name="E"><wb:body>reopened</wb:body></wb:topic>`, testNow.Add(2*time.Hour))
 	if want := "4 of 5 open topics unchanged for 60+ min (A, B, C, D); if finished, close them with wb:close and a one-line result."; out.Info != want {
 		t.Fatalf("info = %q\nwant  %q", out.Info, want)
 	}

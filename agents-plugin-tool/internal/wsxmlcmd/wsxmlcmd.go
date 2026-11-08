@@ -1,9 +1,9 @@
-// Package wsxmlcmd reads the flat XML-like command language an MCP tool takes
-// as one string argument (whiteboard.update, tracker.update). Each caller
-// supplies a Grammar: its tag prefix and its command table. The package tokenizes the
-// string against that grammar and records every problem it finds, and offers
-// the shared value checks a caller's batch validation uses; what a command
-// means stays with the caller.
+// Package wsxmlcmd reads the XML-like command language an MCP tool takes as
+// one string argument (whiteboard.update, tracker.update). Each caller
+// supplies a Grammar: its tag prefix, its command table, and its group, if
+// any. The package tokenizes the string against that grammar and records
+// every problem it finds, and offers the shared value checks a caller's batch
+// validation uses; what a command means stays with the caller.
 //
 // The language is not XML: Go's encoding/xml is strict and would make every
 // `<` and `&` in a body an escape, which is the cost the format exists to
@@ -12,6 +12,10 @@
 //   - Every command and field tag carries the grammar's literal prefix
 //     ("wb:" for the whiteboard); there is no namespace declaration and no
 //     root element.
+//   - A grammar may declare one level of grouping (Group): a group element at
+//     the root passes its one attribute to the commands inside it. A scoped
+//     command sits only inside a group and every other command only outside
+//     one; groups do not nest, and a group takes no command position.
 //   - A body is raw text up to the first exact closing tag of its element
 //     (`</wb:why>`), so `<`, `&`, inline HTML, and mermaid are written as is.
 //     A CDATA section (`<![CDATA[...]]>`) passes its content through
@@ -28,7 +32,7 @@
 //     written: it may carry HTML whose entities are meant, or be an operand
 //     matched against stored text.
 //   - An unknown tag or attribute is a problem; so is text between commands
-//     or between a command's fields.
+//     (inside a group too) or between a command's fields.
 //
 // The workflow manual's shared command-syntax section states these rules to
 // the lead; a change here changes that text's contract.
@@ -69,14 +73,37 @@ type Spec struct {
 	// DecodeFields are the Container fields, without the prefix, whose
 	// bodies are plain text and decoded like a DecodeBody body.
 	DecodeFields []string
+	// Scoped marks a command that sits only inside the grammar's group and
+	// takes the group's attribute from it (Command.Scoped).
+	Scoped bool
 }
 
-// Grammar is a caller's command language: its tag prefix and its command
-// table, keyed by command name without the prefix. Parsed commands and
-// fields carry the full tag as written (prefix included).
+// Group is a grammar's one level of grouping: an element at the root whose
+// one attribute, required and non-blank, passes to the scoped commands
+// inside it.
+type Group struct {
+	// Name is the group's tag name without the prefix.
+	Name string
+	// Attr is the group's one attribute.
+	Attr string
+	// Hint, when set, follows the problem a group with no commands, or with
+	// text ahead of its first command, gets: a group that once took a body
+	// of its own points its callers at the form that replaced it.
+	Hint string
+}
+
+// Grammar is a caller's command language: its tag prefix, its command
+// table, keyed by command name without the prefix, and its group (nil for
+// none). Parsed commands and fields carry the full tag as written (prefix
+// included).
 type Grammar struct {
 	Prefix   string
 	Commands map[string]Spec
+	Group    *Group
+}
+
+func (g Grammar) isGroup(tag string) bool {
+	return g.Group != nil && tag == g.Prefix+g.Group.Name
 }
 
 func (g Grammar) lookup(tag string) (Spec, bool) {
@@ -91,6 +118,9 @@ func (g Grammar) commandNames() string {
 	names := make([]string, 0, len(g.Commands))
 	for name := range g.Commands {
 		names = append(names, g.Prefix+name)
+	}
+	if g.Group != nil {
+		names = append(names, g.Prefix+g.Group.Name)
 	}
 	sort.Strings(names)
 	return strings.Join(names, ", ")
@@ -124,15 +154,47 @@ type Field struct {
 	Body string
 }
 
-// Command is one parsed top-level command.
+// Scope is the group a command sits in.
+type Scope struct {
+	Tag  string // as written, prefix included
+	Line int
+	// Attr is the group's attribute name; Value its value, "" when the
+	// attribute is missing or blank (a problem Parse records).
+	Attr, Value string
+}
+
+// Label names the group in a problem: its tag and line.
+func (s *Scope) Label() string {
+	return fmt.Sprintf("<%s> (line %d)", s.Tag, s.Line)
+}
+
+// At names the group's attribute in a problem.
+func (s *Scope) At() string {
+	return s.Label() + " " + s.Attr
+}
+
+// Command is one parsed command, at the root or inside a group.
 type Command struct {
-	Pos   int // 1-based position in the batch
+	Pos   int // 1-based position in the batch; groups take none
 	Line  int
 	Tag   string
 	Attrs []Attr
 	// Body is a leaf command's text.
 	Body   string
 	Fields []Field
+	// Scope is the group the command sits in, nil at the root. Commands of
+	// one group share it.
+	Scope *Scope
+}
+
+// Scoped returns the attribute value of the command's group, and false at
+// the root or when the group's attribute is missing or blank; Parse has
+// recorded the problem either way.
+func (c Command) Scoped() (string, bool) {
+	if c.Scope == nil || c.Scope.Value == "" {
+		return "", false
+	}
+	return c.Scope.Value, true
 }
 
 // Label names the command in a problem: its position, tag, and line.
@@ -148,12 +210,7 @@ func (c Command) At(name string) string {
 // Attr returns the value of the attribute named name and whether the
 // command carries it.
 func (c Command) Attr(name string) (string, bool) {
-	for _, a := range c.Attrs {
-		if a.Name == name {
-			return a.Value, true
-		}
-	}
-	return "", false
+	return attrOf(c.Attrs, name)
 }
 
 // FieldsOf returns the bodies of every field tag named tag, in order.
@@ -180,6 +237,8 @@ func (c Command) Single(p *Problems, tag string) (string, bool) {
 }
 
 // Parse reads every command in s under g, recording each problem in p.
+// Commands inside a group come out in order among the root's, each carrying
+// the group as its Scope.
 //
 // A problem the tokenizer can step past (an unknown tag with a closing tag,
 // stray text) is recorded and reading continues; one it cannot (an
@@ -187,60 +246,184 @@ func (c Command) Single(p *Problems, tag string) (string, bool) {
 // still returned, so the caller's validation lists as much as it can in one
 // refusal.
 func Parse(p *Problems, g Grammar, s string) []Command {
-	t := &tokenizer{s: s, p: p}
-	var out []Command
-	pos := 0
-	for !t.fatal {
-		t.skipSpace()
-		if t.i >= len(t.s) {
+	r := &parser{tokenizer: tokenizer{s: s, p: p}, g: g}
+	for !r.fatal {
+		r.skipSpace()
+		if r.i >= len(r.s) {
 			break
 		}
-		if t.s[t.i] != '<' {
-			t.skipText("outside a command")
+		if r.s[r.i] != '<' {
+			r.skipText("outside a command")
 			continue
 		}
-		if t.strayClosing() {
+		if r.strayClosing() {
 			continue
 		}
-		tag, ok := t.readOpen()
+		tag, ok := r.readOpen()
 		if !ok {
 			break
 		}
-		pos++
-		cmd := Command{Pos: pos, Line: t.lineAt(tag.at), Tag: tag.name, Attrs: tag.attrs}
-		spec, known := g.lookup(tag.name)
-		if !known {
-			p.Add("%s: unknown command (commands: %s)", cmd.Label(), g.commandNames())
-			t.skipUnknown(tag)
+		if g.isGroup(tag.name) {
+			r.group(tag)
 			continue
 		}
-		checkAttrs(p, cmd.Label(), tag.attrs, spec.Attrs)
-		if !tag.selfClosing {
-			switch spec.Kind {
-			case Leaf:
-				body, ok := t.readBody(tag.name, tag.at, spec.DecodeBody)
-				if !ok {
-					return out
-				}
-				cmd.Body = body
-			case Empty:
-				t.skipSpace()
-				closing := "</" + tag.name + ">"
-				if strings.HasPrefix(t.s[t.i:], closing) {
-					t.i += len(closing)
-				} else {
-					p.Add("%s: takes no body; write it as <%s .../>", cmd.Label(), tag.name)
-					t.skipUnknown(tag)
-				}
-			case Container:
-				if !t.readFields(&cmd, g.fieldTags(spec), g.decodeFieldTags(spec)) {
-					return out
-				}
+		if !r.command(tag, nil) {
+			break
+		}
+	}
+	return r.out
+}
+
+// parser is one Parse call: the tokenizer, the grammar, and the commands
+// read so far.
+type parser struct {
+	tokenizer
+	g   Grammar
+	out []Command
+	pos int
+}
+
+// command reads the command whose opening tag was just read, inside scope
+// (nil at the root); it reports false when reading cannot go on.
+func (r *parser) command(tag openTag, scope *Scope) bool {
+	r.pos++
+	p := r.p
+	cmd := Command{Pos: r.pos, Line: r.lineAt(tag.at), Tag: tag.name, Attrs: tag.attrs, Scope: scope}
+	spec, known := r.g.lookup(tag.name)
+	if !known {
+		p.Add("%s: unknown command (commands: %s)", cmd.Label(), r.g.commandNames())
+		r.skipUnknown(tag)
+		return !r.fatal
+	}
+	if group := r.g.Group; group != nil {
+		switch {
+		case spec.Scoped && scope == nil:
+			p.Add("%s: goes inside a <%s%s %s=\"...\"> group", cmd.Label(), r.g.Prefix, group.Name, group.Attr)
+		case !spec.Scoped && scope != nil:
+			p.Add("%s: goes at the root, outside %s", cmd.Label(), scope.Label())
+		}
+	}
+	checkAttrs(p, cmd.Label(), tag.attrs, spec.Attrs)
+	if !tag.selfClosing {
+		switch spec.Kind {
+		case Leaf:
+			body, ok := r.readBody(tag.name, tag.at, spec.DecodeBody)
+			if !ok {
+				return false
+			}
+			cmd.Body = body
+		case Empty:
+			r.skipSpace()
+			closing := "</" + tag.name + ">"
+			if strings.HasPrefix(r.s[r.i:], closing) {
+				r.i += len(closing)
+			} else {
+				p.Add("%s: takes no body; write it as <%s .../>", cmd.Label(), tag.name)
+				r.skipUnknown(tag)
+			}
+		case Container:
+			if !r.readFields(&cmd, r.g.fieldTags(spec), r.g.decodeFieldTags(spec)) {
+				return false
 			}
 		}
-		out = append(out, cmd)
 	}
-	return out
+	r.out = append(r.out, cmd)
+	return true
+}
+
+// group reads a group whose opening tag was just read: its attribute, then
+// its commands up to its closing tag. Text or an unprefixed tag ahead of the
+// first command is read as the body the group does not take: one problem,
+// and reading steps past the whole group rather than reading that body as
+// commands.
+func (r *parser) group(tag openTag) {
+	g, p := r.g.Group, r.p
+	scope := &Scope{Tag: tag.name, Line: r.lineAt(tag.at), Attr: g.Attr}
+	checkAttrs(p, scope.Label(), tag.attrs, []string{g.Attr})
+	if v, present := attrOf(tag.attrs, g.Attr); !present {
+		p.Add("%s: required", scope.At())
+	} else if NonEmpty(p, scope.At(), v) {
+		scope.Value = v
+	}
+	hint := ""
+	if g.Hint != "" {
+		hint = "; " + g.Hint
+	}
+	if tag.selfClosing {
+		p.Add("%s: holds no commands%s", scope.Label(), hint)
+		return
+	}
+	closing := "</" + tag.name + ">"
+	commands := 0
+	for {
+		r.skipSpace()
+		if r.i >= len(r.s) {
+			r.fail(len(r.s), "<%s> from line %d has no closing %s", tag.name, scope.Line, closing)
+			return
+		}
+		rest := r.s[r.i:]
+		if strings.HasPrefix(rest, closing) {
+			r.i += len(closing)
+			break
+		}
+		if commands == 0 && (rest[0] != '<' || !strings.HasPrefix(rest[1:], r.g.Prefix) && !strings.HasPrefix(rest, "</")) {
+			end := strings.Index(rest, closing)
+			if end < 0 {
+				r.fail(tag.at, "<%s> has no closing %s", tag.name, closing)
+				return
+			}
+			p.Add("%s: text before its first command: %q%s", scope.Label(), excerpt(rest[:end]), hint)
+			r.i += end + len(closing)
+			return
+		}
+		if rest[0] != '<' {
+			r.skipText("inside " + scope.Label() + " between its commands")
+			continue
+		}
+		if r.strayClosing() {
+			if r.fatal {
+				return
+			}
+			continue
+		}
+		inner, ok := r.readOpen()
+		if !ok {
+			return
+		}
+		if r.g.isGroup(inner.name) {
+			p.Add("line %d: <%s> inside %s; groups do not nest", r.lineAt(inner.at), inner.name, scope.Label())
+			r.skipUnknown(inner)
+			if r.fatal {
+				return
+			}
+			continue
+		}
+		commands++
+		if !r.command(inner, scope) {
+			return
+		}
+	}
+	if commands == 0 {
+		p.Add("%s: holds no commands%s", scope.Label(), hint)
+	}
+}
+
+func attrOf(attrs []Attr, name string) (string, bool) {
+	for _, a := range attrs {
+		if a.Name == name {
+			return a.Value, true
+		}
+	}
+	return "", false
+}
+
+// excerpt is the start of s, trimmed, for a problem that quotes text.
+func excerpt(s string) string {
+	text := strings.TrimSpace(s)
+	if len([]rune(text)) > 40 {
+		text = string([]rune(text)[:40]) + "..."
+	}
+	return text
 }
 
 // tokenizer reads a command string; fatal is set once reading cannot go on.
@@ -551,11 +734,7 @@ func (t *tokenizer) skipText(where string) {
 	} else {
 		t.i += next
 	}
-	text := strings.TrimSpace(t.s[start:t.i])
-	if len([]rune(text)) > 40 {
-		text = string([]rune(text)[:40]) + "..."
-	}
-	t.p.Add("line %d: text %s: %q", t.lineAt(start), where, text)
+	t.p.Add("line %d: text %s: %q", t.lineAt(start), where, excerpt(t.s[start:t.i]))
 }
 
 func checkAttrs(p *Problems, label string, attrs []Attr, known []string) {

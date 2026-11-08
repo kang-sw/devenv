@@ -201,10 +201,12 @@ func TestTrackerUpdateWritesEveryEventCommand(t *testing.T) {
 	}
 
 	// Store settings and profiles.
-	step(trackerWriteStep{`<tk:roles.set_priority_levels store="team" names="low mid high top" default="1"/>
-<tk:roles.set_attachment_limit store="team" max_bytes="2048"/>
-<tk:member.profile store="team" org="Acme" family="Kim" given="Ada"/>
-<tk:member.profile store="team" member="bo" org="" given="Bobby"/>`, []trackerWantEvent{
+	step(trackerWriteStep{`<tk:store name="team">
+<tk:roles.set_priority_levels names="low mid high top" default="1"/>
+<tk:roles.set_attachment_limit max_bytes="2048"/>
+<tk:member.profile org="Acme" family="Kim" given="Ada"/>
+<tk:member.profile member="bo" org="" given="Bobby"/>
+</tk:store>`, []trackerWantEvent{
 		{typ: wstracker.TypeSetPriorityLevels, payload: map[string]any{"names": []any{"low", "mid", "high", "top"}, "default": 1}},
 		{typ: wstracker.TypeSetAttachmentLimit, payload: map[string]any{"max_bytes": 2048}},
 		{typ: wstracker.TypeMemberProfile, payload: map[string]any{"profile": map[string]any{"org": "Acme", "family": "Kim", "given": "Ada"}}},
@@ -220,12 +222,14 @@ func TestTrackerUpdateWritesEveryEventCommand(t *testing.T) {
 
 	// Create, edit with each clear, and a pending assignment the assigner
 	// confirms (bo is not below ada yet).
-	step(trackerWriteStep{`<tk:item.create store="team" kind="task" title="T1" project="p" due="2026-12-01" priority="3" mentions="bo">body one</tk:item.create>
-<tk:item.create store="team" kind="todo" title="child" parent="$1"/>
-<tk:item.edit store="team" item="$1" clear="due"/>
-<tk:item.edit store="team" item="$1" clear="body"/>
-<tk:item.edit store="team" item="$1" title="T1 renamed" priority="0"/>
-<tk:item.assign store="team" item="$1" people="bo" completion="assigner"/>`, []trackerWantEvent{
+	step(trackerWriteStep{`<tk:store name="team">
+<tk:item.create kind="task" title="T1" project="p" due="2026-12-01" priority="3" mentions="bo">body one</tk:item.create>
+<tk:item.create kind="todo" title="child" parent="$1"/>
+<tk:item.edit item="$1" clear="due"/>
+<tk:item.edit item="$1" clear="body"/>
+<tk:item.edit item="$1" title="T1 renamed" priority="0"/>
+<tk:item.assign item="$1" people="bo" completion="assigner"/>
+</tk:store>`, []trackerWantEvent{
 		{typ: wstracker.TypeItemCreate, name: "t1", payload: map[string]any{"kind": "task", "title": "T1", "project": "p", "due": "2026-12-01", "priority": 3, "mentions": []any{"bo"}, "body": "body one"}},
 		{typ: wstracker.TypeItemCreate, name: "child", payload: map[string]any{"kind": "todo", "title": "child", "parent": "{t1}"}},
 		{typ: wstracker.TypeItemEdit, payload: map[string]any{"item": "{t1}", "due": nil}},
@@ -246,7 +250,7 @@ func TestTrackerUpdateWritesEveryEventCommand(t *testing.T) {
 	}
 
 	w.byBo(t, "", wstracker.TypeItemAccept, map[string]any{"item": "{t1}"})
-	step(trackerWriteStep{`<tk:roles.set_lead store="team" member="bo" leads="ada"/>`, []trackerWantEvent{
+	step(trackerWriteStep{`<tk:store name="team"><tk:roles.set_lead member="bo" leads="ada"/></tk:store>`, []trackerWantEvent{
 		{typ: wstracker.TypeSetLead, payload: map[string]any{"member": "bo", "leads": []any{"ada"}}},
 	}})
 	if leads := w.view(t).Members["bo"].Leads; !reflect.DeepEqual(leads, []string{"ada"}) {
@@ -254,22 +258,24 @@ func TestTrackerUpdateWritesEveryEventCommand(t *testing.T) {
 	}
 
 	w.byBo(t, "", wstracker.TypeItemClose, map[string]any{"item": "{t1}"})
-	step(trackerWriteStep{`<tk:item.reject store="team" item="{t1}" assignee="bo">not yet</tk:item.reject>`, []trackerWantEvent{
+	step(trackerWriteStep{`<tk:store name="team"><tk:item.reject item="{t1}" assignee="bo">not yet</tk:item.reject></tk:store>`, []trackerWantEvent{
 		{typ: wstracker.TypeItemReject, payload: map[string]any{"item": "{t1}", "assignee": "bo", "note": "not yet"}},
 	}})
 	if got := recStates(w.view(t).Assignments, w.ids["t1"], "bo"); len(got) != 1 || strings.HasSuffix(got[0], "/awaiting") {
 		t.Fatalf("a rejected close must leave the assignment open again: %v", got)
 	}
 	w.byBo(t, "", wstracker.TypeItemClose, map[string]any{"item": "{t1}"})
-	step(trackerWriteStep{`<tk:item.confirm store="team" item="{t1}" assignee="bo">good</tk:item.confirm>`, []trackerWantEvent{
+	step(trackerWriteStep{`<tk:store name="team"><tk:item.confirm item="{t1}" assignee="bo">good</tk:item.confirm></tk:store>`, []trackerWantEvent{
 		{typ: wstracker.TypeItemConfirm, payload: map[string]any{"item": "{t1}", "assignee": "bo", "note": "good"}},
 	}})
 	if got := recStates(w.view(t).Assignments, w.ids["t1"], "bo"); !reflect.DeepEqual(got, []string{"live/done"}) {
 		t.Fatalf("a confirmed close is done: %v", got)
 	}
 	// ada is now bo's direct lead and bo accepted, so ada may return it.
-	step(trackerWriteStep{`<tk:item.reopen store="team" item="{t1}" assignee="bo">again</tk:item.reopen>
-<tk:item.return store="team" item="{t1}" assignee="bo">back to you</tk:item.return>`, []trackerWantEvent{
+	step(trackerWriteStep{`<tk:store name="team">
+<tk:item.reopen item="{t1}" assignee="bo">again</tk:item.reopen>
+<tk:item.return item="{t1}" assignee="bo">back to you</tk:item.return>
+</tk:store>`, []trackerWantEvent{
 		{typ: wstracker.TypeItemReopen, payload: map[string]any{"item": "{t1}", "assignee": "bo", "note": "again"}},
 		{typ: wstracker.TypeItemReturn, payload: map[string]any{"item": "{t1}", "assignee": "bo", "note": "back to you"}},
 	}})
@@ -279,12 +285,14 @@ func TestTrackerUpdateWritesEveryEventCommand(t *testing.T) {
 
 	// A forced assignment an admin hands off; the target accepts, sets a
 	// status, and closes.
-	step(trackerWriteStep{`<tk:item.create store="team" kind="task" title="T2"/>
-<tk:item.assign store="team" item="$1" people="bo"/>
-<tk:item.handoff store="team" item="$1" to="ada" assignee="bo">take it</tk:item.handoff>
-<tk:item.accept store="team" item="$1">mine now</tk:item.accept>
-<tk:item.status store="team" item="$1" status="blocked">waiting</tk:item.status>
-<tk:item.close store="team" item="$1">done</tk:item.close>`, []trackerWantEvent{
+	step(trackerWriteStep{`<tk:store name="team">
+<tk:item.create kind="task" title="T2"/>
+<tk:item.assign item="$1" people="bo"/>
+<tk:item.handoff item="$1" to="ada" assignee="bo">take it</tk:item.handoff>
+<tk:item.accept item="$1">mine now</tk:item.accept>
+<tk:item.status item="$1" status="blocked">waiting</tk:item.status>
+<tk:item.close item="$1">done</tk:item.close>
+</tk:store>`, []trackerWantEvent{
 		{typ: wstracker.TypeItemCreate, name: "t2", payload: map[string]any{"kind": "task", "title": "T2"}},
 		{typ: wstracker.TypeItemAssign, payload: map[string]any{"item": "{t2}", "mode": "chosen", "people": []any{"bo"}}},
 		{typ: wstracker.TypeItemHandoff, payload: map[string]any{"item": "{t2}", "to": "ada", "assignee": "bo", "note": "take it"}},
@@ -300,7 +308,7 @@ func TestTrackerUpdateWritesEveryEventCommand(t *testing.T) {
 	// bo, who is below ada, assigns ada: pending, and ada declines.
 	w.byBo(t, "t3", wstracker.TypeItemCreate, map[string]any{"kind": "task", "title": "T3"})
 	w.byBo(t, "", wstracker.TypeItemAssign, map[string]any{"item": "{t3}", "mode": "chosen", "people": []any{"ada"}})
-	step(trackerWriteStep{`<tk:item.decline store="team" item="{t3}">no time</tk:item.decline>`, []trackerWantEvent{
+	step(trackerWriteStep{`<tk:store name="team"><tk:item.decline item="{t3}">no time</tk:item.decline></tk:store>`, []trackerWantEvent{
 		{typ: wstracker.TypeItemDecline, payload: map[string]any{"item": "{t3}", "note": "no time"}},
 	}})
 	if got := recStates(w.view(t).Assignments, w.ids["t3"], "ada"); len(got) != 1 || !strings.HasPrefix(got[0], "declined/") {
@@ -308,14 +316,16 @@ func TestTrackerUpdateWritesEveryEventCommand(t *testing.T) {
 	}
 
 	// Assign by levels, withdraw it; assign one person, unassign them; hide.
-	step(trackerWriteStep{`<tk:item.create store="team" kind="task" title="T4"/>
-<tk:item.assign store="team" item="$1" levels="1" completion="assignee"/>
-<tk:item.unassign store="team" item="$1"/>
-<tk:item.create store="team" kind="task" title="T5"/>
-<tk:item.assign store="team" item="$4" people="bo"/>
-<tk:item.unassign store="team" item="$4" assignee="bo"/>
-<tk:item.create store="team" kind="topic" title="T6"/>
-<tk:item.hide store="team" item="$7"/>`, []trackerWantEvent{
+	step(trackerWriteStep{`<tk:store name="team">
+<tk:item.create kind="task" title="T4"/>
+<tk:item.assign item="$1" levels="1" completion="assignee"/>
+<tk:item.unassign item="$1"/>
+<tk:item.create kind="task" title="T5"/>
+<tk:item.assign item="$4" people="bo"/>
+<tk:item.unassign item="$4" assignee="bo"/>
+<tk:item.create kind="topic" title="T6"/>
+<tk:item.hide item="$7"/>
+</tk:store>`, []trackerWantEvent{
 		{typ: wstracker.TypeItemCreate, name: "t4", payload: map[string]any{"kind": "task", "title": "T4"}},
 		{typ: wstracker.TypeItemAssign, payload: map[string]any{"item": "{t4}", "mode": "all", "levels": 1, "completion": "assignee"}},
 		{typ: wstracker.TypeItemUnassign, payload: map[string]any{"item": "{t4}"}},
@@ -339,9 +349,11 @@ func TestTrackerUpdateWritesEveryEventCommand(t *testing.T) {
 	}
 
 	// Comments: add with mentions, edit, hide.
-	step(trackerWriteStep{`<tk:comment.add store="team" item="{t1}" mentions="bo">first</tk:comment.add>
-<tk:comment.edit store="team" comment="$1" mentions="bo">first, edited</tk:comment.edit>
-<tk:comment.hide store="team" comment="$1"/>`, []trackerWantEvent{
+	step(trackerWriteStep{`<tk:store name="team">
+<tk:comment.add item="{t1}" mentions="bo">first</tk:comment.add>
+<tk:comment.edit comment="$1" mentions="bo">first, edited</tk:comment.edit>
+<tk:comment.hide comment="$1"/>
+</tk:store>`, []trackerWantEvent{
 		{typ: wstracker.TypeCommentAdd, name: "c1", payload: map[string]any{"item": "{t1}", "mentions": []any{"bo"}, "body": "first"}},
 		{typ: wstracker.TypeCommentEdit, payload: map[string]any{"comment": "{c1}", "mentions": []any{"bo"}, "body": "first, edited"}},
 		{typ: wstracker.TypeCommentHide, payload: map[string]any{"comment": "{c1}"}},
@@ -352,11 +364,13 @@ func TestTrackerUpdateWritesEveryEventCommand(t *testing.T) {
 
 	// Identity: admin role, a key added and revoked, a member removed.
 	spare := trackerSpareKey()
-	step(trackerWriteStep{`<tk:roles.add_admin store="team" member="bo"/>
-<tk:roles.remove_admin store="team" member="bo"/>
-<tk:roles.add_key store="team" member="ada" key="` + spare + `"/>
-<tk:roles.revoke_key store="team" member="ada" key="` + spare + `"/>
-<tk:roles.remove_member store="team" member="bo"/>`, []trackerWantEvent{
+	step(trackerWriteStep{`<tk:store name="team">
+<tk:roles.add_admin member="bo"/>
+<tk:roles.remove_admin member="bo"/>
+<tk:roles.add_key member="ada" key="` + spare + `"/>
+<tk:roles.revoke_key member="ada" key="` + spare + `"/>
+<tk:roles.remove_member member="bo"/>
+</tk:store>`, []trackerWantEvent{
 		{typ: wsledger.TypeAddAdmin, payload: map[string]any{"member": "bo"}},
 		{typ: wsledger.TypeRemoveAdmin, payload: map[string]any{"member": "bo"}},
 		{typ: wsledger.TypeAddKey, payload: map[string]any{"member": "ada", "key": spare}},

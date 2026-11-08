@@ -251,7 +251,7 @@ func TestRenderPageContentOnlyTopic(t *testing.T) {
 	// Nothing to answer: the reply bar waits hidden for a topic note.
 	wantAll(t, out, `<div class="reply solo" data-idle hidden>`)
 
-	mustApply(t, st, `<wb:close topic="notes" result="done"/>`)
+	mustApply(t, st, `<wb:topic name="notes"><wb:close result="done"/></wb:topic>`)
 	out = render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
 	wantAll(t, out, `<section class="topic quiet closed has-doc"><div class="tbar"><span class="tlead"><span class="tname" title="closed">notes</span><span class="tresult" title="how the topic ended">done</span></span>`,
 		`<details class="tdoc" data-key="doc:notes"><summary`, "<h1>Plan</h1>")
@@ -415,7 +415,7 @@ func TestTopicBodyHTMLCaveats(t *testing.T) {
 
 	// The body a lead writes in the command string reaches the page as written.
 	st := &State{}
-	mustApply(t, st, addXML(ClassTechnical, "t", "x")+"<wb:topic name=\"t\">\n## 배경\n\n<details><summary>접기</summary>\n<p>1 < 2 & 3 > 2</p>\n</details>\n</wb:topic>")
+	mustApply(t, st, addXML(ClassTechnical, "t", "x")+"<wb:topic name=\"t\"><wb:body>\n## 배경\n\n<details><summary>접기</summary>\n<p>1 < 2 & 3 > 2</p>\n</details>\n</wb:body></wb:topic>")
 	page := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
 	wantAll(t, page, "<h2>배경</h2>", "<details><summary>접기</summary>\n<p>1 < 2 & 3 > 2</p>\n</details>")
 }
