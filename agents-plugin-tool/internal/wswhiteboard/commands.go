@@ -9,13 +9,15 @@ import "github.com/kang-sw/devenv/internal/wsxmlcmd"
 var itemFieldNames = []string{"title", "option", "recommend", "why", "link"}
 
 // grammar is the whiteboard's command language; the commands follow the
-// order of the playbook's table.
+// order of the playbook's table. Item fields are plain text, so an escaped
+// one is decoded; a topic body (raw HTML), wb:edit's old and new (matched
+// against a stored body), and an answer (the user's verbatim words) are not.
 var grammar = wsxmlcmd.Grammar{
 	Prefix: "wb:",
 	Commands: map[string]wsxmlcmd.Spec{
-		"add":       {Kind: wsxmlcmd.Container, Attrs: []string{"id", "class", "topic"}, Fields: itemFieldNames},
+		"add":       {Kind: wsxmlcmd.Container, Attrs: []string{"id", "class", "topic"}, Fields: itemFieldNames, DecodeFields: itemFieldNames},
 		"answer":    {Kind: wsxmlcmd.Leaf, Attrs: []string{"id", "ids", "value", "assumed"}},
-		"patch":     {Kind: wsxmlcmd.Container, Attrs: []string{"id", "status", "clear"}, Fields: itemFieldNames},
+		"patch":     {Kind: wsxmlcmd.Container, Attrs: []string{"id", "status", "clear"}, Fields: itemFieldNames, DecodeFields: itemFieldNames},
 		"topic":     {Kind: wsxmlcmd.Leaf, Attrs: []string{"name"}},
 		"edit":      {Kind: wsxmlcmd.Container, Attrs: []string{"topic", "replace_all"}, Fields: []string{"old", "new"}},
 		"close":     {Kind: wsxmlcmd.Empty, Attrs: []string{"topic", "result"}},
