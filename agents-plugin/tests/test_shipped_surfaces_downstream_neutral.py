@@ -28,18 +28,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # file under one of these directories, or an entry that is itself an exact
 # tracked file path, is scanned line by line.
 #
-# "agents-plugin/.codex-plugin/hooks.json" is listed as an exact file, not
-# the whole "agents-plugin/.codex-plugin" directory: that directory's
-# plugin.json predates this entry and already carries this-repo migration
-# vocabulary ("codex-first") unrelated to the hooks.json surface this entry
-# exists to cover (260913-feat-cross-session-mailbox-wake Phase 2). Scoping
-# to the one file it needs to cover avoids re-litigating that pre-existing,
-# separately tracked gap under this ticket.
-#
-# "agents-plugin/hooks" (Phase 3, the Claude adapter's auto-discovered
-# hooks/hooks.json) is listed as a directory prefix rather than an exact
-# file, unlike the Codex entry above: it has no pre-existing sibling file
-# with unrelated migration-vocabulary baggage to avoid re-litigating.
+# "agents-plugin/.codex-plugin" is listed as a whole directory: both the
+# plugin manifest and the Codex hooks manifest ship downstream.
 #
 # "ai-docs/ref/CLAUDE_TICKETS_WORKFLOW.md" and its one-time bootstrap
 # companion are listed as exact files, not the whole "ai-docs/ref" directory:
@@ -51,7 +41,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 TEXT_TREES = (
     "agents-plugin/rsrc",
     "agents-plugin/skills",
-    "agents-plugin/.codex-plugin/hooks.json",
+    "agents-plugin/.codex-plugin",
     "agents-plugin/hooks",
     "agents-plugin/claude-agents",
     "agents-plugin-wsflow/hooks",

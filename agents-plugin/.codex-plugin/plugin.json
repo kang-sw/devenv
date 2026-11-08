@@ -1,7 +1,7 @@
 {
   "name": "ws",
   "version": "0.48.10",
-  "description": "Codex-first ws workflow plugin candidate for host-neutral skills and project context.",
+  "description": "Workflow plugin for host-neutral skills, project context, tickets, and Git tools.",
   "author": {
     "name": "kang-sw"
   },
@@ -17,8 +17,8 @@
   "hooks": "./.codex-plugin/hooks.json",
   "interface": {
     "displayName": "ws",
-    "shortDescription": "Codex-first ws workflow skills",
-    "longDescription": "A Codex-first candidate for porting ws workflow skills before converging with the existing Claude plugin.",
+    "shortDescription": "ws workflow skills",
+    "longDescription": "ws workflow skills, project context, tickets, and Git tools for Codex and other hosts.",
     "developerName": "kang-sw",
     "category": "Productivity",
     "capabilities": [
@@ -26,7 +26,7 @@
       "Write"
     ],
     "defaultPrompt": [
-      "Use $ws:lead-discuss to explore a workflow or migration decision.",
+      "Use $ws:lead-discuss to explore a workflow decision.",
       "Use $ws:lead-run to route an accepted change into implementation."
     ]
   }
