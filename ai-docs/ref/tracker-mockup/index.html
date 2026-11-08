@@ -90,8 +90,8 @@
   </div>
 </div>
 
-<!-- item detail side sheet -->
-<aside class="sheet" id="sheet" aria-hidden="true"><div class="sheet-in" id="sheetbody"></div></aside>
+<!-- the item window (board (366)): one at a time, over a dimmed backdrop; app.js openItemWindow(storeId, itemId) opens it -->
+<div class="iwin-back" id="iwin" hidden><div class="iwin" role="dialog" aria-modal="true" tabindex="-1"><div class="iwin-in" id="iwinbody"></div></div></div>
 
 <dialog id="dlg"></dialog>
 <div id="toast" hidden></div>

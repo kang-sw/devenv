@@ -22,19 +22,29 @@ the same outcomes; their steps below name the new places. A row action is
 reached by hovering the row (or focusing it, or tapping it on touch) and
 clicking its icon.
 
+The layout change of board (366) replaced the stacked side column with a tab
+pane (Notifications, Support agent, Team, Activity, Data), turned the Today
+card into summary chips in the Items panel header that filter the panel, and
+replaced the thread side sheet with an item window over the page. Scenarios 1,
+3, 4, 8 and 10 were walked again through it (2026-11-08) with the same
+outcomes; their steps below name the new places.
+
 ## 1. Morning check
 
-Steps: view as `maya.pc`; read the Today card; accept ivy's pending review
-from its row there (Accept); confirm ivy's close of Tokenizer from its row
-there (Confirm).
+Steps: view as `maya.pc`; read the Today chips in the Items panel header;
+click *answer* and accept ivy's pending review from its row (Accept); click
+*confirm* and confirm ivy's close of Tokenizer from its row (Confirm); click
+*my work*.
 
-Outcome: Today lists my open work by priority then due ("Prepare Friday demo"
-긴급, due today; "Ship search v2" 긴급, 11-20; "Security training" 알림, 11-30),
+Outcome: the chips read *my work 3 · answer 1 · confirm 1*. *answer* moves the
+panel from *mine* (which shows none of it) to *received requests*, narrowed to
 the pending assignment waiting for my answer (ivy's "Review the emoji
-tokenizer fix", assigner confirms), and the close waiting for my confirm
-(ivy on Tokenizer). Accept made the review a live assignment that keeps ivy
-as assigner (she confirms), and it moved into my open work; Confirm moved
-Tokenizer to done. Both actions dispatch from the Today rows.
+tokenizer fix", assigner confirms). Accept made the review a live assignment
+that keeps ivy as assigner (she confirms). *confirm* moves the panel to
+*assigned by me*, narrowed to the close waiting for my confirm (ivy on
+Tokenizer); Confirm moved Tokenizer to done. *my work* moves back to *mine*
+and lists my open work ("Ship search v2", "Security training", "Prepare
+Friday demo", and now the accepted review).
 
 Snags:
 
@@ -73,13 +83,15 @@ Snags:
 
 Steps: as `lena.pc`, accept noa's pending "Explain the tokenizer API" from its
 row in the *received requests* scope; as `maya.pc` (lena's lead), read the
-reference notice on the Notifications card, then Return with a note from the
+reference notice on the Notifications tab, then Return with a note from the
 item's row in lena's group of the *my team* scope; as `noa.pc`, open the item
-and assign it to lena again.
+from its *received requests* row and assign it to lena again from the item
+window.
 
-Outcome: on accept, maya's Notifications card shows "Lena Weiss accepted an
-assignment from Noa Fisher (you are their lead)", the row in lena's group
-offers Return, and maya's handle badge counts it. The return ends lena's assignment as `returned` with maya's note;
+Outcome: on accept, maya's Notifications tab shows "Lena Weiss accepted an
+assignment from Noa Fisher (you are their lead)" marked new (it is a handle
+badge key, shown once and cleared because the drawer is open), and the row in
+lena's group offers Return. The return ends lena's assignment as `returned` with maya's note;
 the item status is `returned` and it leaves every roll-up. noa's new
 `item.assign` is valid (nothing live or pending to lena remains) and creates a
 fresh pending assignment; the returned one stays in history.
@@ -127,7 +139,8 @@ Snags:
   rule but leaves work unowned in between.
   **Resolved (286)**: `item.handoff` takes an `assignee`, allowed for an
   admin on any member's live assignment. Re-walk: ada opens "Shard writer
-  docs", clicks *Hand off (admin)* on omar's row, hands it to jon; jon's
+  docs" (its item window), clicks *Hand off (admin)* on omar's row of the
+  assignees table, hands it to jon; jon's
   *received requests* row shows "admin handoff of Omar Haddad's assignment by
   Ada Park (assigner Maya Ortiz)" in its details; jon accepts from the row and
   starts at omar's `blocked`
@@ -139,8 +152,9 @@ Snags:
   `unassigned` and pending ones as `withdrawn`, attributed to the removal
   event; history stays.
   **Resolved (287)** as recommended. Re-walk: after removal omar's remaining
-  "Security training" assignment is `unassigned` by `ada.pc-16` (the sheet
-  says "member removed"), and no live assignment of omar is left counted.
+  "Security training" assignment is `unassigned` by `ada.pc-16` (the item
+  window says "member removed"; ada removes omar from the Team tab's roles
+  dialog), and no live assignment of omar is left counted.
   Without the takeover, "Shard writer docs" becomes `unassigned` and maya
   (its creator) reassigns it.
 - V4 (view, fixed): the assignees table offered no Unassign to an admin on a
@@ -220,7 +234,7 @@ Snags:
 
 Steps: as `lena.pc`, Hand off "Index builder" to ivy with a note (the row's
 Hand off action); as `ivy.pc`, accept it from its row in the *received
-requests* scope; as `maya.pc`, read the Notifications card and ivy's group in
+requests* scope; as `maya.pc`, read the Notifications tab and ivy's group in
 the *my team* scope.
 
 Outcome: until ivy accepts, lena still holds her assignment (doing) and ivy's
@@ -228,7 +242,7 @@ is pending, shown in ivy's *received requests* scope and badge as a handoff
 from lena with maya as assigner. On accept lena's assignment ends as `handed` and
 ivy's is live with maya still the assigner (confirm and unassign stay with
 her). maya, ivy's lead and the original assigner, gets one notice ("Ivy Chen
-accepted a handoff from Lena Weiss") on the Notifications card, and the row in
+accepted a handoff (you are their lead)") on the Notifications tab, and the row in
 ivy's group of the *my team* scope offers Return.
 
 Snags:
@@ -276,29 +290,31 @@ Snags:
   **Resolved (292)** as recommended. Checked in the engine: after removing
   noa, ada's `item.edit` of `noa.pc-3` applies (a non-admin's is still
   flagged); `item.hide` still needs the open assignments ended first. The
-  sheet offers *Edit (admin: creator removed)* and *Hide item (admin)*.
+  item window offers *Edit (admin: creator removed)* and *Hide item (admin)*.
 
 ## 10. Notifications, a mention, and an attachment
 
 Added with the notification card ((331)-(340)), walked the same way.
 
-Steps: view as `maya.pc`; read the Notifications card; click the mention
-entry for "Retro notes: search v2 sprint"; *Mark all read*; open "Index
-builder", load lena's attachment; post a comment that picks `@ivy` and
-attaches a 20000000-byte file, then one with a 2048-byte file; view as `ivy`.
+Steps: view as `maya.pc`; read the Notifications tab; click the mention
+entry for "Retro notes: search v2 sprint", then Esc; *Mark all read*; open
+"Index builder" (its row in the *all* scope), load lena's attachment in the
+item window; post a comment that picks `@ivy` and attaches a 20000000-byte
+file, then one with a 2048-byte file; view as `ivy`.
 
-Outcome: maya's card lists ten entries, all unread, newest first: due today,
+Outcome: maya's tab lists ten entries, all unread, newest first: due today,
 two mentions (bo's topic body, lena's comment), a confirm, a pending
 assignment, a reply, completion and blocked of work she assigned, a
-reference notice, and a forced assignment. The click opened the thread sheet
-and cleared that entry only; *Mark all read* cleared the rest, and with them
-the unread dots on the Items panel's rows. In the thread
+reference notice, and a forced assignment. The click opened the item window
+(focus inside it) and cleared that entry only; Esc closed it and returned
+focus to the entry; *Mark all read* cleared the rest, and with them the
+unread dots on the Items panel's rows. In the item window
 `lena.pc-6` shows `@Maya Ortiz` / `@Omar Haddad` chips and an
 `index-layout-v2.png` chip that toggled from "not loaded" to "loaded";
 `lena.pc-7` shows its 50 MiB attachment struck through with the over-limit
 reason. The first post was flagged with `attachment "huge.zip" is 20000000
 bytes, above the store limit of 10485760 bytes (attachments.max_bytes)`; the
-second applied, and ivy's card then shows it as a mention.
+second applied, and ivy's Notifications tab then shows it as a mention.
 
 Snags: none.
 

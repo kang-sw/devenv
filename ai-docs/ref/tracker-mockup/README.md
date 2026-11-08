@@ -56,14 +56,32 @@ build, no server, no dependencies.
   buttons are `Sync now` and `Go offline` / `Come back online`. The personal
   store has no remote, which is the same path as a long offline; its button
   only closes the batch.
-- **Drawer layout** (359). Two zones: the **Items panel** is the main zone
-  (about two thirds of the width), and a side column stacks *Notifications*,
-  *Today*, *Support agent*, *Team*, *Activity*, and *Data (debug)*, in that
-  order. Below about 1000px the side column moves above the panel. Every card
-  has a maximum height of about 70% of the viewport and scrolls inside; the
-  *Support agent* card keeps its fixed height, and the Items panel uses the
-  main zone's full height (350). A card keeps its scroll position across
-  re-renders.
+- **Drawer layout** (366). The layout follows the window width:
+  - *A* (default, about 1000px to 1600px): the **Items panel** on the left
+    (about two thirds of the width) and one **tab pane** on the right with the
+    tabs *Notifications*, *Support agent*, *Team*, *Activity*, and *Data*
+    (debug), in that order. One tab shows at a time and uses the pane's
+    height; *Notifications* is the default tab.
+  - *D* (about 1600px and up): three columns, Items | *Notifications* (always
+    open, as a card) | the tab pane holding the remaining tabs.
+  - *Narrow* (below about 1000px): everything is one tab pane, *Items* first,
+    like the dashboard's tabs layout; the Today chips stay at the top of the
+    pane whatever tab is shown.
+
+  The switch is automatic and re-renders when the width crosses a breakpoint.
+  A hidden tab whose content moved since it was last shown carries a dot, like
+  the dashboard tab bar's `tdot`: an unread notification that was not there
+  when the tab was last shown (on first sight, any unread one), new events for
+  *Activity*, a roles change for *Team*, a new badge key for *Items* (narrow).
+  Only an open drawer records what was shown. The tab choice is local UI
+  state per store (one for A and D, one for narrow). The **drawer height
+  follows its content** up to the existing maximum (`min(66vh, 700px)`): a
+  short list gives a short drawer, and at the maximum each column's card
+  scrolls inside (the Items list, the shown tab). The drawer is as tall as its
+  tallest column, so switching tabs can change it. The *Support agent* tab
+  keeps its fixed-height chat. A card keeps its scroll position across
+  re-renders. This supersedes the stacked side column of (359), the Today
+  card of (358), and the per-card 70% cap of (350).
 - **Items panel** (357). One panel in place of the former *My assignments*,
   *Received requests*, *Assigned by me*, *My team*, and *Items* cards. A row of
   scope presets is crossed with the view modes each scope offers:
@@ -80,6 +98,18 @@ build, no server, no dependencies.
   UI state, remembered per store in memory (they survive a viewer switch within
   the store), never an event (360). The panel is already wide, so no mode
   spans rows any more (supersedes (304)).
+- **Today chips** (366), in the Items panel header (in the narrow layout, at
+  the top of the tab pane): *my work N · answer N · confirm N*, that is my
+  open work, pending assignments waiting for my answer, and closes waiting for
+  my confirm, always visible whatever scope is shown ((358) intent). A chip
+  narrows the panel to its rows as a filter on the current scope and view mode
+  (a row with an assignment record matches on the record, an item row on the
+  item); the same chip again, or its clear button, removes the filter. When
+  the current scope shows none of the chip's rows, the click also moves the
+  panel to the scope that holds them (*mine*, *received requests*, *assigned
+  by me*), so a chip never opens on an empty panel. In the narrow layout a
+  chip also switches to the *Items* tab. The filter is local UI state per
+  store, like the scope.
 - **Item rows** (356). By default a row shows only: the status icon, the title,
   the assignees' initials (pending ones dashed, the viewer's filled, more than
   three as `+N`), the priority name (always; above the default level in the
@@ -93,8 +123,11 @@ build, no server, no dependencies.
   "set by agent", roll-up and "blocked below", stale, the assignment path
   (source, completion mode, lead chain), the note, created / edited / last
   activity dates, and flagged and concurrent counts. A row on an assignment
-  scope or *Today* shows that assignment record's own state; the item's status
-  is in the details when it differs.
+  scope shows that assignment record's own state; the item's status is in the
+  details when it differs. The detail overlay stays as the row's **quick
+  preview** (it is how touch and keyboard reach the details, (354)); the item
+  window holds the full view. It is placed next to the row in the viewport, so
+  a short, content-height card does not clip it.
 - **Hover actions** (354), (357). A row's actions appear as icons on hover,
   each with its label in the tooltip: every action the viewer may take on that
   item, read from the view state. These are Accept / Decline / Discuss on a
@@ -102,12 +135,13 @@ build, no server, no dependencies.
   assignment; Confirm / Reject on a close I must confirm; Return on a
   follower's accepted assignment (direct lead only); Withdraw on a pending
   assignment I sent; and Assign on an unassigned item I created. They dispatch
-  through the same dialogs and quick writes the thread sheet uses. Hover has
+  through the same dialogs and quick writes the item window uses. Hover has
   non-hover equivalents with the same CSS state: **keyboard** focus on a row
   (Tab) shows its actions and details, Tab moves into the action buttons, and
-  Enter opens the thread; on **touch**, a tap selects a row and shows its
+  Enter opens the item window; on **touch**, a tap selects a row and shows its
   actions and details, and a tap on the selected row (or on any title) opens
-  the thread. The selection is local UI state.
+  the item window. A click on a row opens it with a mouse. The selection is
+  local UI state.
 - **Status icons** (355). Each status differs by shape as well as colour: todo
   ring, doing half-filled, blocked slashed ring, awaiting confirm hourglass,
   done filled check, pending dashed ring with `?`, unassigned dotted ring,
@@ -115,26 +149,24 @@ build, no server, no dependencies.
   a speech bubble for a topic. Icons, initials, priority, due, and action
   buttons share one immediate custom tooltip (not the browser's delayed
   `title`); the set lives in `status-icons.js`.
-- **Side cards.** Each offers only the modes that fit it: *Activity* has list /
-  activity timeline; the others have one layout.
+- **Tabs** (the tab pane, (366)). Each offers only the modes that fit it:
+  *Activity* has list / activity timeline; the others have one layout. A
+  tab's count chip, mode picker, and buttons sit in a tool row under the tab
+  bar.
   - *Notifications* ((331)-(334)): one feed of what concerns the viewer,
     newest first: new forced assignments to me, pending assignments to me,
     answer notices, reference notices (a follower accepted a pending
     assignment; a handoff of an assignment I gave was accepted), completion
     or `blocked` of work I assigned, Confirm requests waiting on me, replies
     to my comments, my live assignments due today or overdue, and mentions of
-    me. Every entry is derived from the view state and only opens the item's
-    thread sheet; the actions it refers to (Accept, Return, Confirm, ...) are
+    me. Every entry is derived from the view state and only opens the item
+    window; the actions it refers to (Accept, Return, Confirm, ...) are
     hover actions on the item's row in the Items panel. Unread entries are
     highlighted; clicking one, or *Mark all read*, marks it read, which also
     clears the row's unread dot. Read state is local UI state per viewer
     clone, kept in memory like the handle badge's `seen`, and writes no
     event. In the product the daemon keeps it per clone on the local
     filesystem, outside git (340).
-  - *Today* (358): a compact summary that stays visible whatever scope the
-    Items panel shows: my open work by priority then due, pending assignments
-    waiting for my answer, and closes waiting for my confirm, as item rows
-    with the same hover actions.
   - *Team*: the org tree, admins, clones per member, revoked keys, the
     priority levels, and an admin roles-event dialog.
   - *Activity*: the merged log in causal order, newest first, with filters
@@ -164,25 +196,37 @@ build, no server, no dependencies.
 - **Support agent card** (chat placeholder, (300), (302)). A placeholder for
   the support-agent chat child, the future daemon-side local support agent:
   placement and a static sample only, with no working chat, no responder, and
-  no new events. It is one card in the side column, fixed height with
+  no new events. It is one tab of the tab pane, fixed height with
   internal scroll, newest message at the bottom, and a disabled composer row.
   The sample mimics the dashboard conversation view's entry shapes (user
   text, assistant text, a collapsed tool line) plus one new entry kind, the
   **tracker card reference**: a mini card of an item (title, status, priority,
-  due, assignees) read from the view state, which opens that item's thread
-  sheet on click. The referenced items are real ids from the current viewer's
+  due, assignees) read from the view state, which opens that item's window
+  on click. The referenced items are real ids from the current viewer's
   view state (top open work first, then what waits for an answer or confirm,
   then what the viewer assigned), so every reference resolves.
-- **Thread view** (side sheet). Meta (status, priority, due, creator, project,
-  parent), the body, item actions (an admin also gets Edit / Hide on a removed
-  creator's item), the assignees with their state and actions (an admin also
-  gets *Hand off (admin)* on any member's live assignment), and the subtask
-  threads. Below that comes one chronological timeline of comments (quote
+- **Item window** (366). Clicking an item (row click, Enter on a focused row,
+  the second tap on touch, a notification, a chat reference, a subtask or
+  parent link) opens it in a window over the page: a dimmed backdrop and a
+  centred window; Esc, a backdrop click, or the close button closes it; focus
+  moves into the window and returns to the row or entry that opened it; the
+  page behind is inert. One window at a time: opening another item (a subtask
+  link inside the window) replaces it. It replaces the thread side sheet and
+  holds what the sheet and the row detail overlay held: the title with the
+  status icon, kind, id, status, priority, due, roll-up, holders, the
+  assignment path (lead chain), creator, project, parent, dates, the body with
+  mentions and attachments, and the row's actions as labelled buttons
+  followed by the item actions a row does not carry (Edit, Assign, Split,
+  Hide item; an admin also gets Edit / Hide on a removed creator's item;
+  Discuss focuses the composer). The assignees table shows each holder's
+  state, source, completion mode, and note, with the per-assignee actions the
+  action bar does not already offer (Reopen, Unassign, *Hand off (admin)* on
+  any member's live assignment). Then the subtask threads. Below that comes one chronological timeline of comments (quote
   reply, edit, hide), status changes, assignments and answers, edits, agent
   records with `agent` / `auto` chips, subtask lines, flagged and waiting
   events with their reason, amber "concurrent change" boxes, and quiet
   "superseded by" notes on a member's losing write from another clone. The
-  composer posts a comment, as a reply when one is chosen, with an origin; with
+  composer, pinned at the window's bottom, posts a comment, as a reply when one is chosen, with an origin; with
   an own assignment on the thread, quick status buttons use the composer text
   as the note. Mentions on the body and on each comment show as chips (335).
   Attachments show as chips with name and size and a simulated "not loaded /
@@ -192,6 +236,9 @@ build, no server, no dependencies.
   attach row (file name and byte count; the mock stands in a 64-hex oid
   because it has no content). An item or comment edit that changes the body
   keeps the attachments and the mentions whose `@id` is still in the text.
+  The window opens through one function, `openItemWindow(storeId, itemId)`
+  (also on `window`), which a later URL route will call; it switches to the
+  store when needed and returns false for an unknown store or item.
 - **Actions** append events to the viewer clone's open batch, then report each
   event as applied or flagged. The actions are create (any kind, with due,
   priority, and an optional assignee in the same write), edit, comment, reply,
@@ -528,7 +575,7 @@ page clock starts at 2026-11-06 09:00. The fixtures show:
     gets a notice), maya returns it after a flagged return by bo
   - pending, declined: `tia.pc-3` to uma, with a comment
   - pending, open: `noa.pc-3` to lena, plus a flagged `agent-auto` accept; and
-    `ivy.pc-6` to her own lead maya (on maya's Today card)
+    `ivy.pc-6` to her own lead maya (on maya's Today chips: *answer*)
   - handoff: `lena.pc-2` to raj (pending, raj accepts, ada gets a notice), raj
     hands it to sven, sven accepts (lena, the assigner, gets a notice)
   - awaiting confirm: ivy's close of "Tokenizer" waits for maya
@@ -659,6 +706,9 @@ creation, and it has a topic and a blocked subtask.
 | 358 a | *Today* stays as a compact summary card (my open work / waiting for my answer / waiting for my confirm), visible whatever scope the panel shows. |
 | 359 a | A two-zone drawer: the Items panel (about two thirds of the width) as the main zone; a side column stacking Notifications, Today, Support agent, Team, Activity, then Data (debug). At narrow widths the side column moves above the panel. The masonry packer is removed, and with the panel already wide, the wide-mode row spanning of (304) is gone too. |
 | 360 | The panel opens on "mine"; the last chosen scope and view mode are remembered per store as local UI state, like the per-card mode memory. |
+| 362 | The layout delegate's own choices are accepted: the row's unread dot means an unread *Notifications* entry for the item; pending holders' initials are dashed; the *my team* scope appears only for a viewer with followers; the row details are an overlay over the rows rather than an inline expansion (which shifted the layout under the pointer); the header's store chip is removed (the open handle already names the store). |
+| 366 b | Layout A + D: the Items panel (about two thirds) with one tab pane on the right (Notifications, Support agent, Team, Activity, Data; one at a time, full height; Notifications by default; a dot on a hidden tab with something new); from about 1600px three columns, Items \| Notifications \| the tab pane; below about 1000px everything is tabs, Items first. Today becomes summary chips in the Items header (my work / answer / confirm) that filter the panel. The drawer height follows its content up to the existing maximum. Supersedes (359)'s stacked side column and (358)'s Today card (its intent, a summary visible whatever scope, stays). |
+| 366 note | Clicking an item opens it in a window overlay (dimmed backdrop, centred window, Esc / backdrop / close button, focus in and back) instead of the thread sheet, holding the sheet's and the row overlay's content with the row's actions as labelled buttons; one window at a time. One function opens it by id (`openItemWindow(storeId, itemId)`) for later URL routes. The row's hover overlay stays as a quick preview. |
 
 ## Open questions
 

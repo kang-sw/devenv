@@ -27,7 +27,7 @@
   --shadow-hi: 0 2px 4px rgb(0 0 0 / .16), 0 6px 18px rgb(0 0 0 / .10);
   --radius: 12px;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  --dpad: 16px; --drtop: 48px; --drhw: 0px; --drh: min(66vh, 700px);
+  --dpad: 16px; --drtop: 48px; --drhw: 0px; --drh: min(66vh, 700px); /* app.js fitDrawer sets --drh to the content height, capped at this value (366) */
   color-scheme: light dark;
 }
 @media (prefers-color-scheme: dark) {
@@ -163,7 +163,8 @@ ul.plain { list-style: none; margin: 0; padding: 0; }
 .dr-clip { position: absolute; top: var(--drtop); left: var(--dpad); right: var(--dpad); height: 0; overflow: hidden; pointer-events: auto; visibility: hidden; border-radius: 0 0 var(--radius) var(--radius); box-shadow: var(--shadow-hi); transition: height .18s ease-out, visibility 0s linear .18s; }
 .drawer.open .dr-clip { height: var(--drh); visibility: visible; transition: height .18s ease-out, visibility 0s; }
 .dr-sheet { position: absolute; left: 0; right: 0; bottom: 0; height: var(--drh); background: var(--bg); border-top: 1px solid var(--muted); display: flex; flex-direction: column; }
-.dr-body { flex: 1 1 0; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 10px; }
+.dr-body { flex: 1 1 0; min-height: 0; overflow: hidden; padding: 10px; display: flex; flex-direction: column; }
+.dr-body > * { flex: none; }
 
 .dr-handles { position: absolute; top: 0; right: var(--dpad); display: flex; flex-direction: row-reverse; gap: 6px; pointer-events: none; }
 .dr-handle { height: 34px; padding: 2px 10px 0; border: 0; border-radius: 0 0 8px 8px; pointer-events: auto; cursor: pointer; display: flex; align-items: center; gap: 7px; background: var(--card); color: var(--muted-fg); box-shadow: var(--shadow-hi); font: inherit; font-size: 12px; font-weight: 700; white-space: nowrap; transition: transform .18s ease-out; }
@@ -175,16 +176,22 @@ ul.plain { list-style: none; margin: 0; padding: 0; }
 .dr-badge { min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--primary); color: var(--primary-fg); font-size: 10.5px; line-height: 16px; text-align: center; font-weight: 800; }
 .dr-handle.stub { opacity: .8; }
 
-/* drawer content (359): two zones. The Items panel is the main zone (about two thirds);
-   the side column stacks Notifications, Today, Support agent, Team, Activity, Data.
-   At narrow widths the side column moves above the panel. */
-.dr-zones { display: grid; grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr); gap: 10px; align-items: start; }
-.dr-side { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
-.dr-main { min-width: 0; }
-@media (max-width: 1000px) {
-  .dr-zones { grid-template-columns: minmax(0, 1fr); }
-  .dr-side { order: -1; display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); align-items: start; }
-}
+/* drawer content (366): layout A is the Items panel (about two thirds) and one tab pane;
+   D (wide) is Items | Notifications | the tab pane; narrow is one tab pane. app.js picks
+   the layout from the window width (data-layout). Each column's card follows its content
+   up to the column height (the drawer's), then scrolls inside. */
+.dr-zones { flex: 1 1 0; min-height: 0; display: grid; grid-template-rows: minmax(0, 1fr); gap: 10px; }
+.dr-zones[data-layout="a"] { grid-template-columns: minmax(0, 2fr) minmax(340px, 1fr); }
+.dr-zones[data-layout="d"] { grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr) minmax(300px, 1fr); }
+.dr-zones[data-layout="narrow"] { grid-template-columns: minmax(0, 1fr); }
+.dr-col { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.dr-col > .card { flex: 0 1 auto; min-height: 0; max-height: 100%; }
+/* fitDrawer: one synchronous layout at natural height, every cap lifted */
+.dr-measure .dr-sheet { height: auto; }
+.dr-measure .dr-body, .dr-measure .dr-zones { flex: none; }
+.dr-measure .dr-zones { grid-template-rows: auto; }
+.dr-measure .dr-col > .card { max-height: none; }
+.dr-measure .dr-col > .card > .cbody { overflow: visible; flex: none; }
 .dr-title { display: flex; align-items: center; gap: 8px; margin: 0 2px 8px; font-size: 13px; color: var(--muted-fg); }
 .dr-title b { color: var(--fg); font-size: 14px; }
 @media (max-width: 640px) {
@@ -203,13 +210,10 @@ ul.plain { list-style: none; margin: 0; padding: 0; }
 
 /* ===== cards ===== */
 .card { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
-/* (350) every card has a maximum height with internal scroll; the Items panel uses the main zone's full height */
-.card { display: flex; flex-direction: column; max-height: 70vh; }
-.card > header, .card > .cbody { flex: none; }
-.card > .cbody { flex: 0 1 auto; min-height: 0; overflow: auto; }
-.card.panel { max-height: none; overflow: visible; min-height: calc(var(--drh) - 110px); }
-.card.panel > .cbody { overflow: visible; }
-.card.panel > header { border-radius: var(--radius) var(--radius) 0 0; }
+/* (366) a card's height follows its content up to its column (see .dr-col); the body scrolls inside */
+.card { display: flex; flex-direction: column; }
+.card > * { flex: none; }
+.card > .cbody { flex: 0 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; }
 .card > header { display: flex; gap: 8px; align-items: center; padding: 4px 8px 4px 12px; min-height: 32px; background: var(--muted); font-weight: 700; font-size: 13px; }
 .card > header h2 { margin: 0; font-size: 13px; }
 .card > header .chip { background: var(--card); }
@@ -238,10 +242,10 @@ ul.plain { list-style: none; margin: 0; padding: 0; }
 .ir-main .title { font-weight: 600; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1 auto; }
 .ir-main .ind { color: var(--muted-fg); margin-right: -3px; }
 .ir-acts { display: none; gap: 1px; flex: none; }
-.ir-more { position: absolute; z-index: 6; top: calc(100% - 3px); left: calc(28px + var(--ind, 0) * 16px); right: 6px; visibility: hidden; pointer-events: none;
+/* the quick preview: fixed, placed by app.js placeMore so a short scrolling card does not clip it */
+.ir-more { position: fixed; z-index: 6; top: 0; left: 0; width: 320px; visibility: hidden; pointer-events: none;
   background: var(--card); border-radius: 8px; box-shadow: var(--shadow-hi), inset 0 0 0 1px var(--line); padding: 6px 10px; font-size: 12px; line-height: 1.45; display: grid; gap: 2px; }
 .ir-more .chip { height: 17px; font-size: 11px; }
-.irow.up > .ir-more { top: auto; bottom: calc(100% - 3px); }
 /* the one state for hovered, focused, and selected */
 .irow:is(:hover, :focus-within, .sel) > .ir-main { background: color-mix(in srgb, var(--muted) 60%, transparent); }
 .irow:is(:hover, :focus-within, .sel) .ir-acts { display: inline-flex; }
@@ -281,6 +285,35 @@ ul.plain { list-style: none; margin: 0; padding: 0; }
 .scp.on { background: var(--primary); color: var(--primary-fg); }
 .card.panel > header { flex-wrap: wrap; row-gap: 4px; padding-top: 5px; padding-bottom: 5px; }
 
+/* (366) Today chips: one pill under the Items header (in the narrow layout, under the tab bar) */
+.todaybar { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; margin: 6px 10px 0; padding: 2px 4px 2px 10px; width: fit-content; max-width: calc(100% - 20px);
+  border-radius: 999px; background: color-mix(in srgb, var(--primary) 10%, var(--card)); color: var(--primary); font-size: 12.5px; }
+.todaybar .tl { font-weight: 700; margin-right: 4px; }
+.todaybar .tsep { opacity: .6; }
+.tch { font: inherit; font-size: 12.5px; border: 0; background: transparent; color: var(--primary); border-radius: 999px; padding: 1px 8px; cursor: pointer; white-space: nowrap; }
+.tch b { font-variant-numeric: tabular-nums; }
+.tch:hover { background: color-mix(in srgb, var(--primary) 16%, var(--card)); }
+.tch.on { background: var(--primary); color: var(--primary-fg); }
+.tch.zero { color: var(--muted-fg); }
+.tch.tclr { padding: 1px 5px; display: inline-flex; align-items: center; }
+.tch:focus-visible { outline: 1.5px solid var(--primary); }
+
+/* (366) the tab pane: the dashboard tab bar's look (pill group, active tab raised), a dot on a hidden tab with something new */
+.card.pane > header { padding: 4px 6px; min-height: 36px; }
+.ptabs { display: flex; flex-wrap: wrap; gap: 2px; background: var(--card); border-radius: 999px; padding: 2px; }
+.ptab { position: relative; font: inherit; font-size: 12px; font-weight: 700; border: 0; background: transparent; color: var(--muted-fg); border-radius: 999px; height: 24px; padding: 0 9px; cursor: pointer;
+  display: inline-flex; align-items: center; white-space: nowrap; }
+.ptab:hover { color: var(--fg); }
+.ptab[aria-selected="true"] { background: var(--muted); color: var(--fg); box-shadow: inset 0 0 0 1px var(--line); }
+.ptab:focus-visible { outline: 1.5px solid var(--primary); }
+/* the dot sits on the tab's corner, so it never changes the tab's width */
+.tdot { display: none; position: absolute; top: 2px; right: 1px; width: 7px; height: 7px; border-radius: 50%; background: var(--primary); box-shadow: 0 0 0 1.5px var(--card); }
+.tdot.on { display: inline-block; }
+.ptools { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 6px 12px 0; font-size: 12.5px; }
+.ptools:empty { display: none; }
+.ptools .chip { background: var(--muted); }
+.card.pane > .cbody { padding-top: 6px; }
+
 /* my team scope: a group per person, its header carrying the person's roll-up counts */
 .tg { margin-left: calc(var(--d) * 16px); }
 .tg + .tg { margin-top: 4px; }
@@ -313,19 +346,26 @@ details.data textarea { width: 100%; font: 11.5px/1.4 var(--mono); border: 1px s
 details.data details { margin-top: 4px; }
 details.data details > summary { cursor: pointer; font-size: 12px; color: var(--muted-fg); }
 
-/* ===== item detail side sheet ===== */
-.sheet { position: fixed; top: 0; bottom: 0; right: 0; width: min(500px, 100vw); z-index: 60; background: var(--bg); border-left: 1px solid var(--line); box-shadow: var(--shadow-hi); transform: translateX(105%); transition: transform .18s ease-out, visibility 0s linear .18s; visibility: hidden; }
-.sheet.open { transform: none; visibility: visible; transition: transform .18s ease-out, visibility 0s; }
-.sheet-in { height: 100%; overflow: auto; padding: 12px 14px 0; display: flex; flex-direction: column; gap: 10px; }
-.sh-top { display: flex; flex-direction: column; gap: 10px; }
-.sh-head { display: flex; gap: 8px; align-items: flex-start; }
-.sh-head h2 { margin: 0; font-size: 17px; line-height: 1.3; flex: 1; overflow-wrap: anywhere; }
-.sh-meta { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; font-size: 12.5px; }
-.sh-meta dt { color: var(--muted-fg); }
-.sh-meta dd { margin: 0; }
+/* ===== item window (366): one centred window over a dimmed backdrop ===== */
+.iwin-back { position: fixed; inset: 0; z-index: 70; background: var(--backdrop); display: flex; align-items: center; justify-content: center; padding: 3vh 12px; }
+.iwin-back[hidden] { display: none; }
+.iwin { width: min(860px, 100%); max-height: 94vh; display: flex; flex-direction: column; background: var(--bg); border-radius: var(--radius); box-shadow: var(--shadow-hi); overflow: hidden; }
+.iwin:focus { outline: none; }
+.iwin-in { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 0 18px; display: flex; flex-direction: column; gap: 10px; }
+.iw-top { position: sticky; top: 0; z-index: 2; margin: 0 -18px; padding: 14px 18px 10px; background: var(--bg); box-shadow: 0 1px 0 var(--line); display: flex; flex-direction: column; gap: 6px; }
+.iw-head { display: flex; gap: 8px; align-items: flex-start; }
+.iw-head .sti { margin-top: 3px; }
+.iw-head h2 { margin: 0; font-size: 18px; line-height: 1.3; flex: 1; overflow-wrap: anywhere; }
+.iw-chips { display: flex; gap: 5px; align-items: center; flex-wrap: wrap; }
+.iw-meta { display: grid; grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr); gap: 4px 12px; margin: 0; font-size: 12.5px; }
+.iw-meta dt { color: var(--muted-fg); }
+.iw-meta dd { margin: 0; overflow-wrap: anywhere; }
+.iw-meta .av { margin-left: 0; width: 18px; height: 18px; font-size: 8.5px; vertical-align: -4px; }
+@media (max-width: 640px) { .iw-meta { grid-template-columns: auto minmax(0, 1fr); } }
+.sh-actions .btn .i { width: 13px; height: 13px; }
+.iwin h3 { margin: 4px 0 0; font-size: 12px; font-weight: 800; color: var(--muted-fg); text-transform: uppercase; letter-spacing: .04em; }
 .sh-body { white-space: pre-wrap; background: var(--card); border-radius: 10px; padding: 8px 10px; box-shadow: var(--shadow); font-size: 13px; }
 .sh-actions { display: flex; gap: 6px; flex-wrap: wrap; }
-.sheet h3 { margin: 4px 0 0; font-size: 12px; font-weight: 800; color: var(--muted-fg); text-transform: uppercase; letter-spacing: .04em; }
 .atable { width: 100%; border-collapse: collapse; font-size: 12.5px; background: var(--card); border-radius: 10px; box-shadow: var(--shadow); overflow: hidden; }
 .atable th { text-align: left; font-size: 11px; color: var(--muted-fg); background: var(--muted); padding: 3px 8px; }
 .atable td { padding: 5px 8px; border-top: 1px solid var(--muted); vertical-align: top; }
@@ -353,7 +393,7 @@ details.data details > summary { cursor: pointer; font-size: 12px; color: var(--
 .atable tr.gone td { opacity: .55; }
 .atable .tb { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 3px; }
 .stree > div { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; padding: 3px 0; cursor: pointer; }
-.composer2 { position: sticky; bottom: 0; margin: 4px -14px 0; padding: 8px 14px 12px; background: var(--bg); box-shadow: 0 -4px 10px rgb(0 0 0 / .06); display: flex; flex-direction: column; gap: 6px; }
+.composer2 { position: sticky; bottom: 0; margin: 4px -18px 0; padding: 8px 18px 14px; background: var(--bg); box-shadow: 0 -4px 10px rgb(0 0 0 / .06); display: flex; flex-direction: column; gap: 6px; }
 .composer2 .quick { display: flex; gap: 5px; align-items: center; flex-wrap: wrap; font-size: 12px; }
 .composer2 .replying { font-size: 12px; background: var(--muted); border-radius: 8px; padding: 3px 8px; }
 .composer2 .crow { display: flex; gap: 8px; align-items: stretch; }
