@@ -265,7 +265,7 @@ func TestSupportLastChoiceIsTheDefaultAndPersists(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0o600 {
+	if !isPrivate(info) {
 		t.Fatalf("support.json mode %v, want 0600", info.Mode().Perm())
 	}
 
