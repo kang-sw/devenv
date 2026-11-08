@@ -347,7 +347,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-08T12:29:50Z"
+        "touched_at": "2026-11-08T12:30:33Z",
+        "impl": {
+          "branch": "impl/develop/judo-jab-outer"
+        }
       }
     },
     "261108-feat-ws-tracker-wiki-git-branch": {
