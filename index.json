@@ -673,7 +673,14 @@
       "registered_at": "2026-09-24T10:38:33Z"
     },
     "260908-research-ws-pi-agent-driven-branch-summary-return": {
-      "registered_at": "2026-09-24T10:38:33Z"
+      "registered_at": "2026-09-24T10:38:33Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "delegate/idea-triage-close",
+        "phase": "closed",
+        "touched_at": "2026-11-08T08:11:20Z"
+      }
     },
     "260908-research-ws-pi-lifecycle-race-monitoring": {
       "registered_at": "2026-09-24T10:38:33Z"
