@@ -137,7 +137,9 @@ func TestGitActionsRunUnderTheActionTimeout(t *testing.T) {
 	pushRepos(t, work, 0)
 	var seen *deadlineReads
 	old := actionReads
+	var bound time.Duration
 	actionReads = func(run *gitBadgeRunner) wsgit.Runner {
+		bound = run.timeout
 		seen = &deadlineReads{inner: run}
 		return seen
 	}
@@ -152,6 +154,9 @@ func TestGitActionsRunUnderTheActionTimeout(t *testing.T) {
 		}
 		if seen == nil || len(seen.left) == 0 {
 			t.Fatalf("%s ran no branch read", name)
+		}
+		if bound != gitActionTimeout {
+			t.Fatalf("%s: runner names a %v bound, want %v", name, bound, gitActionTimeout)
 		}
 		for _, left := range seen.left {
 			if left <= gitReadTimeout || left > gitActionTimeout {

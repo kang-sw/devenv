@@ -246,8 +246,8 @@ cached 2 minutes); an answer with a size still unmeasured says `sizing`, and
 /s/<reply-id>/worktrees/cleanup` (body ignored) follows the composer's send
 rules below and holds one message: a line in the page's language asking the
 session to clean up unused worktrees, then the pool as text, cut at 48 KiB
-with a `... N more worktrees` line. The dashboard never removes or releases
-a worktree itself.
+with a `... N more worktrees` line (singular for one). The dashboard never
+removes or releases a worktree itself.
 
 On the served board and in the conversation's lead
 replies, a file link renders as an action link (`data-wl="file"`, titled with
