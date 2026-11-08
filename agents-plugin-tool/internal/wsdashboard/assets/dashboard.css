@@ -57,8 +57,11 @@
 .dash.index .sse { margin-left: auto; }
 /* the git badge: a status band line in a button, read by the daemon */
 .r-git { display: contents; }
-.gitb { display: inline-flex; flex-wrap: nowrap; gap: 8px; min-width: 0; height: 28px; padding: 0 10px; font-size: 12.5px; color: var(--wb-fg); background: var(--wb-card); box-shadow: inset 0 0 0 1px var(--wb-line); }
+/* .sb.gitb: the band's .sb rule (further down) would otherwise win padding and gap at equal specificity */
+.sb.gitb { display: inline-flex; flex-wrap: nowrap; align-items: center; gap: 8px; min-width: 0; height: 28px; padding: 0 10px; font-size: 12.5px; color: var(--wb-fg); background: var(--wb-card); box-shadow: inset 0 0 0 1px var(--wb-line); }
 .gitb:hover { box-shadow: inset 0 0 0 1px var(--wb-primary); }
+/* inside the badge the sync chip is plain text: the pill, ring, and inner padding of the band's chip would nest a second capsule at the badge's right end */
+.gitb .sb-sync, .gitb .sb-sync.ok, .gitb .sb-sync.none { height: auto; padding: 0; border-radius: 0; background: transparent; box-shadow: none; }
 .gitb.pending, .gitb.norepo, .gitb.failed { opacity: .6; }
 .gitb.pending .sb-br, .gitb.norepo .sb-br { color: var(--wb-muted-fg); font-family: inherit; font-weight: 600; }
 .gitb.failed .sb-br { color: var(--wb-warn-ink); font-family: inherit; }
