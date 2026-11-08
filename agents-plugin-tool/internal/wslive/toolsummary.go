@@ -90,7 +90,9 @@ func (g *toolGap) add(b BatchView) {
 	if g.counts == nil {
 		g.counts = map[string]int{}
 	}
-	if !g.any || b.StartedAt < g.startedAt {
+	// A zero start is an unknown one, not the epoch: it never sets the
+	// gap's start, so no duration is measured from it.
+	if b.StartedAt > 0 && (g.startedAt == 0 || b.StartedAt < g.startedAt) {
 		g.startedAt = b.StartedAt
 	}
 	g.endedAt = max(g.endedAt, b.EndedAt)
@@ -134,12 +136,21 @@ func (g *toolGap) add(b BatchView) {
 		g.batchesOmitted++
 		return
 	}
-	tb := ToolBatch{Names: append([]string(nil), b.ToolNames...), Tools: tallies, Calls: b.CallCount, Failed: b.Failed, DurationMs: max(b.EndedAt-b.StartedAt, 0)}
+	tb := ToolBatch{Names: append([]string(nil), b.ToolNames...), Tools: tallies, Calls: b.CallCount, Failed: b.Failed, DurationMs: spanMs(b.StartedAt, b.EndedAt)}
 	if b.Usage != nil {
 		u := *b.Usage
 		tb.Usage = &u
 	}
 	g.batches = append(g.batches, tb)
+}
+
+// spanMs is the milliseconds from start to end; 0 when the start is unknown
+// (zero) or the end precedes it.
+func spanMs(start, end int64) int64 {
+	if start <= 0 {
+		return 0
+	}
+	return max(end-start, 0)
 }
 
 // summary is the gap as a ToolSummary, nil when no batch finished in it.
@@ -150,7 +161,7 @@ func (g *toolGap) summary() *ToolSummary {
 	s := &ToolSummary{
 		Calls:          g.calls,
 		Failed:         g.failed,
-		DurationMs:     max(g.endedAt-g.startedAt, 0),
+		DurationMs:     spanMs(g.startedAt, g.endedAt),
 		OtherCalls:     g.otherCalls,
 		Batches:        cloneToolBatches(g.batches),
 		BatchesOmitted: g.batchesOmitted,
