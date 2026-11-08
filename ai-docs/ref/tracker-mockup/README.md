@@ -99,7 +99,9 @@ build, no server, no dependencies.
   - *Kanban*: columns by status, scoped to the card's own rows. On an
     assignment card the cards are that card's assignment records (with a
     pending column; *Assigned by me* and *My team* name the assignee); on
-    *Items* the cards are items, under the card's kind and status filters.
+    *Items* the cards are items under the card's kind filter only: the
+    columns already are the statuses, so the status filter is ignored there
+    (it would only empty columns) and the kanban toolbar offers kind alone.
     Dragging moves a card only for the viewer's own live assignment and
     dispatches `item.status` (todo / doing / blocked) or `item.close` (done).
   - *Activity timeline*: every event by write time, grouped by day, filterable

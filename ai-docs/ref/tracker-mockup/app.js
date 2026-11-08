@@ -391,8 +391,9 @@
     return card('Team', nMem + (nMem === 1 ? ' member' : ' members'), h, '', 'card-org');
   }
 
+  function kindFilter(it) { return ui.kind === 'request' ? !!it.pending.length : ui.kind === 'all' || it.kind === ui.kind; }
   function itemFilter(it) {
-    if (ui.kind === 'request' ? !it.pending.length : ui.kind !== 'all' && it.kind !== ui.kind) return false;
+    if (!kindFilter(it)) return false;
     var s = it.status;
     if (ui.status === 'hidden') return it.hidden;
     if (it.hidden) return false;
@@ -407,12 +408,12 @@
       return '<option value="' + esc(k) + '"' + (k === val ? ' selected' : '') + '>' + esc(l) + '</option>';
     }).join('') + '</select>';
   }
-  function itemFilterBar() {
+  function itemFilterBar(kindOnly) {
     return 'kind ' + sel('f-kind', ui.kind, [['all', 'all'], ['task', 'task'], ['todo', 'todo'], ['topic', 'topic'], ['request', 'request (pending assignment)']]) +
-      ' status ' + sel('f-status', ui.status, ['all', 'open', 'blocked', 'done', 'hidden']);
+      (kindOnly ? '' : ' status ' + sel('f-status', ui.status, ['all', 'open', 'blocked', 'done', 'hidden']));
   }
   function cardItems() {
-    var rows = VS.itemOrder.map(function (id) { return VS.items[id]; }).filter(itemFilter), m = modeOf('items');
+    var m = modeOf('items'), rows = VS.itemOrder.map(function (id) { return VS.items[id]; }).filter(m === 'kanban' ? function (it) { return !it.hidden && kindFilter(it); } : itemFilter);
     if (m !== 'list') return card('Items', rows.length + ' of ' + Object.keys(VS.items).length, modeBody('items', m), picker('items'), 'card-items', m);
     var h = '<div class="toolbar">' + itemFilterBar() + '</div>';
     h += rows.length ? rows.map(function (it) {
@@ -499,7 +500,8 @@
     if (key === 'items') {
       VS.itemOrder.forEach(function (id) {
         var it = VS.items[id];
-        if (it.hidden || it.kind === 'topic' || !buckets[it.status] || !itemFilter(it)) return;
+        // the columns already are the statuses, so the Items status filter would only empty them: kind filter only
+        if (it.hidden || it.kind === 'topic' || !buckets[it.status] || !kindFilter(it)) return;
         var mineR = it.assignments.map(A).filter(function (r) { return r.to === v && r.state === 'live'; })[0];
         buckets[it.status].push({ item: id, drag: mineR && mineR.status !== 'done' ? id : null,
           sub: (it.assignments.map(A).filter(function (r) { return r.state === 'live' || r.state === 'pending'; }).map(function (r) { return r.to + (r.state === 'pending' ? '?' : ''); }).join(', ') || 'nobody') });
@@ -515,7 +517,7 @@
     Object.keys(buckets).forEach(function (c) {
       buckets[c].sort(function (x, y) { var a = VS.items[x.item], b = VS.items[y.item]; return b.priorityLevel - a.priorityLevel || ((a.due || '9') < (b.due || '9') ? -1 : 1); });
     });
-    var h = '<div class="toolbar">' + (key === 'items' ? itemFilterBar() : '') +
+    var h = '<div class="toolbar">' + (key === 'items' ? itemFilterBar(true) : '') +
       '<span class="muted">drag a card to change the status of your own assignment (done = close)</span></div><div class="kanban">';
     h += cols.map(function (c) {
       return '<div class="kcol"' + attr('kcol', c) + '><div class="khead">' + stChip(c) + ' <span class="muted">' + buckets[c].length + '</span></div>' +
