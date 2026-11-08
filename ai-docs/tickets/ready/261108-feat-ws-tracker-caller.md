@@ -367,3 +367,138 @@ and the shared syntax section).
   its line), manual-render tests for whiteboard-only, tracker-only, both,
   and a spawned key with the tracker knob on (neither section rendered),
   and the live acceptance steps recorded in the Result.
+
+### Result (9b3721bdc) - 2026-11-08
+
+Landed in 283427ead, 166fd45f8, and 9b3721bdc:
+- `wstrackerhost.Host.DispatchWith`: Dispatch with the events built from
+  the id the first event gets. It holds a per-store file lock
+  (`<store>/write.lock`) across the reload, the build, and the append.
+- `internal/mcp/tracker_tools.go` and `tracker_render.go`: the
+  `tracker.update` and `tracker.query` tools. They are always listed and
+  top-level-lead only (`isTrackerTool`, beside the whiteboard gate).
+- The new `tracker` playbook (`agents-plugin/rsrc/tracker/tracker.md`):
+  calls, the recording rule, the query payload, the command table with the
+  assignment lifecycle, and sync. The regen mirrors it to wsflow; it is
+  copied by hand to Pi.
+- The workflow manual's tracker section. `applyKnobVariants` renders the
+  shared command syntax once (`commandSyntaxEnabled(whiteboardOn,
+  trackerOn)`), then the whiteboard section, then `### Tracker` (the
+  playbook with its title dropped and its headings demoted).
+  `playbook.read tracker` appends the syntax section.
+- `tracker.update` and `tracker.query` in the ws, wsflow, and Pi
+  `runtime.json` at `>=0.48.11-dev <0.49.0`.
+
+Live acceptance (Decision 13) against the user-approved private repository
+`git@github.com:kang-sw/ws-tracker-live-test.git` (empty before the test,
+kept after it). Auth was the machine's existing ssh key; no token was
+passed or logged. Steps:
+- Two machines, each a long-lived `ws-mcp serve --stdio` built from this
+  branch, with its own `WS_CONFIG_HOME` (so its own tracker root and
+  signing key) and `WS_CACHE_HOME` under `/tmp`. Each started a lead
+  session through `ferrule`.
+1. A: `<tk:register store="live" member="ada" remote=... given=...>`
+   printed `registered live: created`.
+2. B saved a profile by registering a personal store (`scratch`, no
+   remote). It then joined with `<tk:register store="live" member="bo"
+   remote=.../>` and no profile attributes, which printed `joined` with the
+   saved profile.
+3. B started its dashboard daemon (`ws-mcp dashboard --port 0`). The
+   daemon's tracker poll holds `poll.lock`, so B's pre-read stays off the
+   network.
+4. A wrote one `tk:item.create` with a raw multi-line Korean markdown body
+   (including `<tag>`, quotes, and `&`), then `tk:sync`: `pushed, 2 events
+   received` (B's join).
+5. B's `tracker.query` showed the item 181 s after A's sync, through the
+   3-minute poll. The body came back byte for byte.
+6. B added a two-line Korean comment with `tk:comment.add`, then
+   `tk:sync`. A, with no daemon, saw it in `tracker.query item`, through
+   its pre-read fetch.
+- The remote then held `tracker/genesis`, `tracker/id/{ada,bo}`, and one
+  `tracker/m/<member>/<clone>` ref per clone.
+- One display fix came out of the run: a store with no remote showed an
+  unpushed count. The sync line now says only `no remote` for it.
+
+Verification:
+- `go build ./...` succeeds, and so does the Windows cross-build of
+  `cmd/ws-mcp` and `wstrackerhost`. `go vet` and `gofmt` are clean.
+- `go test -count=1` passes for `mcp`, `wsrsrc`, `cmd/ws-mcp`,
+  `wstrackerhost` (also under `-race`), `wstracker`, `wsledger`, and
+  `wsxmlcmd`. The tracker MCP tests also pass under `-race`.
+- `python3 -m unittest discover agents-plugin-wsflow/tests` passes.
+- New tests cover every Phase 2 verification bullet:
+  - register (create) and join with a saved profile through
+    `tracker.update`, a taken member id registering nothing, and the
+    store list with profiles
+  - a successful update, text query, and JSON query each turning the knob
+    on; a refused call leaving it off with no manual section
+  - spawned worker and delegate keys refused on both tools
+  - a raw multi-line Korean body round-tripping, with `$N` references
+    (item, comment, reply) and `origin="agent-auto"`
+  - an all-or-nothing store refusal citing command 3 at line 4, with
+    nothing written
+  - every parse and validation problem listed at once, ahead of the
+    syntax and the command table
+  - `tk:sync` pushing and a query fetching the other clone's write
+  - the manual for whiteboard only, tracker only, both (syntax once, then
+    whiteboard, then tracker), and a spawned key with the knob on
+    (neither section, in `workflow_manual` and in `playbook.read`)
+  - `playbook.read tracker` appending the syntax
+  - credential redaction, ID parsing, and `DispatchWith` (`$N` and the
+    cross-process write lock; the lock test fails without the lock)
+
+Decisions taken:
+- Command shape:
+  - Commands carry the README event names under the `tk:` prefix, so the
+    table maps 1:1 onto `Dispatch`.
+  - A command-by-event-index slice turns `Refusal.Index` into
+    `command N <tag> (line L)` through `commandRefusal`.
+  - Every event command takes `store`, and one batch writes one store.
+    `tk:register` and `tk:sync` stand alone.
+- `$N` names an earlier `tk:item.create` (for `item` and `parent`) or
+  `tk:comment.add` (for `reply_to` and `comment`). It resolves to
+  `next.Seq + event index` inside `DispatchWith`.
+- `origin` is `agent` (the default) or `agent-auto`, never `human`. The
+  store lets a human write beat an agent's, so an agent must not claim to
+  be human.
+- `tk:register` is one create-or-join command, as `wsledger.Register`
+  decides by probing the remote. Without `given` it uses the last saved
+  profile, and it writes with origin `agent`. A separate join command was
+  rejected.
+- `tk:item.edit` clears with `clear="body due"`. A `due` cleared this way
+  is written as null. Changing the shared parser to expose self-closing
+  was rejected.
+- Query:
+  - `tracker.query` takes a `payload` object and a top-level `format`.
+  - Text output is the default. It shows the store list with today counts
+    and saved profiles; or a store header plus the rows for `mine`,
+    `received`, `assigned`, `team`, or `all`; or one item in full.
+  - `format: "json"` returns the full `StoreView`, or the store list as
+    JSON. It is refused together with `scope`, `item`, or the filters.
+  - Output IDs use the display form (`maya.pc-5`). Input accepts that form
+    or the stored form (`maya.pc#5`).
+- Credentials in http(s) remote URLs are redacted in every output and
+  error. This was the deferred Phase 1 Minor.
+- The tracker section never renders for a spawned key. This holds in
+  `workflow_manual` and also in `playbook.read`, matching the call gate.
+- The store write lock stays in `wstrackerhost`. `wsledger` assigns seqs
+  only inside `Append` and has no build-under-lock API, and the ticket
+  forbids changing `wsledger`. For writes through the host, the lock also
+  closes the Phase 1 Minor about reload and append locking separately.
+- A fresh-reader audit of the playbook found 19 points, and the fixes
+  went in before landing:
+  - added: the assignment lifecycle, the meaning of each kind, the lead
+    tree, the refusal end state, the register profile rule, `format` in
+    the call signature, and the units of the roles attributes
+  - accepted as risk: how an agent matches current work to an item, and
+    per-status meanings beyond the listed values
+
+Lite review (one pass) found two Important issues, both fixed in
+9b3721bdc:
+- `$N` ids could shift under a concurrent append from another process on
+  the same clone.
+- The JSON store list did not turn the knob on.
+
+One Minor is left as recorded: the unfiltered store list runs `PreRead`
+and `View` per store, one after another. This is the Phase 1 "a read
+waits out a running attempt" case, now reached from a query.
