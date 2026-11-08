@@ -177,6 +177,11 @@ func TestWorktreePoolTextIsBounded(t *testing.T) {
 	if small := (WorktreePool{Pool: "/p", Worktrees: pool.Worktrees[:2]}).text(worktreeTextMax); strings.Contains(small, "more worktrees") {
 		t.Errorf("a small pool is cut: %q", small)
 	}
+	two := WorktreePool{Pool: "/p", Worktrees: pool.Worktrees[:2]}
+	one := WorktreePool{Pool: "/p", Worktrees: pool.Worktrees[:1]}.text(worktreeTextMax)
+	if cut := two.text(len(one)); !strings.HasSuffix(cut, "\n... 1 more worktree\n") {
+		t.Errorf("one worktree left out: text ends %q", cut[len(cut)-30:])
+	}
 
 	f, src, _, _ := worktreeFixture(t)
 	src.mu.Lock()

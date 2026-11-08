@@ -38,6 +38,10 @@ const (
 	gitActionWaitDelay = 5 * time.Second
 )
 
+// actionReads is the runner an action's branch reads go through, given the
+// runner that records their failure; a test wraps it to see each read.
+var actionReads = func(run *gitBadgeRunner) wsgit.Runner { return run }
+
 // pushRefusal is why the daemon refused a push before git ran.
 type pushRefusal int
 
@@ -55,19 +59,25 @@ func pushGit(root string) (pushRefusal, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), gitActionTimeout)
 	defer cancel()
 	run := &gitBadgeRunner{timeout: gitActionTimeout}
-	st, ok := wsgit.BranchSync(ctx, run, root)
+	reads := actionReads(run)
+	st, ok := wsgit.BranchSync(ctx, reads, root)
 	if !ok {
 		return pushRan, branchErr(run)
 	}
+	// A failed count leaves Ahead 0, which must not read as nothing to
+	// push. With a branch and an upstream, the only failure BranchSync
+	// passes over is the count's.
 	switch {
 	case st.Head == "":
 		return pushDetached, nil
 	case st.Upstream == "":
 		return pushNoUpstream, nil
+	case run.err != nil:
+		return pushRan, branchErr(run)
 	case st.Ahead == 0:
 		return pushNothing, nil
 	}
-	remote, merge, ok := upstreamOf(ctx, run, root, st.Head)
+	remote, merge, ok := upstreamOf(ctx, reads, root, st.Head)
 	if !ok {
 		return pushNoUpstream, nil
 	}
@@ -96,7 +106,8 @@ func pullGit(root string) (pullOutcome, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), gitActionTimeout)
 	defer cancel()
 	run := &gitBadgeRunner{timeout: gitActionTimeout}
-	st, ok := wsgit.BranchSync(ctx, run, root)
+	reads := actionReads(run)
+	st, ok := wsgit.BranchSync(ctx, reads, root)
 	if !ok {
 		return pullRan, branchErr(run)
 	}
@@ -106,11 +117,11 @@ func pullGit(root string) (pullOutcome, error) {
 	case st.Upstream == "":
 		return pullNoUpstream, nil
 	}
-	remote, _, ok := upstreamOf(ctx, run, root, st.Head)
+	remote, _, ok := upstreamOf(ctx, reads, root, st.Head)
 	if !ok {
 		return pullNoUpstream, nil
 	}
-	counts, ok := wsgit.WorkingTreeCounts(ctx, run, root)
+	counts, ok := wsgit.WorkingTreeCounts(ctx, reads, root)
 	if !ok {
 		return pullRan, branchErr(run)
 	}
@@ -123,7 +134,7 @@ func pullGit(root string) (pullOutcome, error) {
 		}
 	}
 	run.err = nil
-	if st, ok = wsgit.BranchSync(ctx, run, root); !ok {
+	if st, ok = wsgit.BranchSync(ctx, reads, root); !ok {
 		return pullRan, branchErr(run)
 	}
 	// The fetch may have pruned the upstream, or the count may have failed:
