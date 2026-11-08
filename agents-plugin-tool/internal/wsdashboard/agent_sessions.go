@@ -33,6 +33,9 @@ type AgentHost interface {
 // AgentRoutePrefix is where the daemon mounts AgentHost.Handler.
 const AgentRoutePrefix = "/agents"
 
+// SupportRoutePrefix is where the daemon mounts DaemonOptions.Support.
+const SupportRoutePrefix = "/support"
+
 // agentSessions is the daemon's session source: agent registrations are
 // read from their live stores alone (no ws-mcp serves them and they have no
 // session record), and every other one from the configured source.

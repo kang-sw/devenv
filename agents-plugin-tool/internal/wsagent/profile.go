@@ -49,7 +49,7 @@ const ReservedMCPServer = "ws"
 
 var (
 	profileNamePattern = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
-	modelPattern       = regexp.MustCompile(`^[A-Za-z0-9._:/\[\]-]{1,128}$`)
+	modelPattern       = regexp.MustCompile(`^[A-Za-z0-9._:/\[\]~-]{1,128}$`)
 	effortPattern      = regexp.MustCompile(`^[a-z]{1,16}$`)
 	toolBasePattern    = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]{0,63}$`)
 	wsToolPattern      = regexp.MustCompile(`^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$`)

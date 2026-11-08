@@ -286,8 +286,13 @@ The daemon also hosts headless agent conversations (the agent runner,
 Pi process per conversation, started from a named profile in the
 `agent.profile.<name>` config family (a whole-object structured value at
 project, repo, or global scope, resolved through the conversation's working
-root; repo scope may not set `mcp_servers` or `plugins`; no profile is built
-in; `agent.` is a reserved prefix no adapter manifest may claim). Each
+root; repo scope may not set `mcp_servers` or `plugins`; `agent.` is a
+reserved prefix no adapter manifest may claim). Two profiles are built in,
+`tracker-support-claude` and `tracker-support-pi` (one per harness, since a
+profile fixes its backend; a project or global profile of the same name
+replaces one whole); their `instructions` value `builtin:tracker-support`
+names a text embedded in the binary instead of a file under the working
+root, and `builtin:<name>` accepts only the embedded names. Each
 conversation is a dashboard session (registration, snapshot, ring, inbox)
 whose page shows it like a lead session. Its routes, behind the same access
 guard: `GET /agents` (every conversation's state), `POST /agents {profile,
@@ -302,6 +307,51 @@ a daemon restart the runner re-registers each conversation with no process
 and starts one at its next send. An attached ws-mcp gets
 `WS_MCP_ALLOWED_TOOLS` (the profile's ws tools) and `WS_MCP_NO_DASHBOARD`,
 and no mailbox identity.
+
+A tracker store's support conversation is an ordinary runner conversation
+on a support profile whose working root is the store's registry `Dir`; the
+daemon keeps one per store under `/support` (`internal/wsagent/support.go`,
+mounted when `cmd/ws-mcp/dashboard.go` passes it, with store roots read from
+the daemon's own tracker host). Routes, behind the same guard and POST rule
+as `/agents`, an unknown store 404: `GET /support/choices` (`{harnesses:
+[{harness, profile, available, error?, models: [{id, thinking?}],
+efforts}], last}`: the harness is each support profile's backend resolved
+through the global and builtin layers; unavailable when the daemon lacks the
+backend or its binary is not on PATH; Claude's models are the CLI's
+version-less aliases `opus`, `sonnet`, `haiku`, `fable` and its efforts the
+Claude levels, Pi's models come from `pi --offline --no-approve
+--list-models` (`provider/model`, cached five minutes) and its efforts from
+`--thinking`; a listing failure is that harness's `error` alone), `GET
+/support/stores/<store>` (`{store, conversation: State|null, selection}`),
+`POST .../send {text}` (opens the conversation with the current selection
+first when none is open), `POST .../new` (closes the open one and opens a
+fresh one; sends nothing), and `POST .../select {harness?, model?,
+effort?}` (`{conversation, selection}`: saves the machine-wide last choice;
+a harness change replaces the open conversation with one on that harness's
+profile, resetting model and effort unless given; a model or effort change
+goes through the runner's settings, from the next message; with no open
+conversation it only saves). `<state dir>/support.json` (0600) holds `{last:
+{harness, model, effort}, stores: {<store>: <reply-id>}}`, so a store keeps
+the same conversation across restarts; with no saved choice, or one whose
+harness is unavailable, the selection is the first available harness
+(Claude, then Pi) with the profile's defaults.
+
+The tracker gate admits a support conversation's key like a top-level
+lead when the daemon holds an open agent record for the key's reply-id that
+names this key at the key's root, and that record's profile, resolved at
+call time, names the tool. Its writes are pinned to the store whose
+canonical registry `Dir` equals that root (any other `store` is refused),
+and `tk:register` and `tk:sync` stay refused; every other spawned key is
+refused as before. `tracker.show {item}` is that conversation's card call:
+an item of its own store answers `card <store> <alias>` plus the mini-card
+fields, which the chat draws as a card; another store's item is answered as
+text; a lead gets a refusal. `git.search` runs `log`, `show`, `grep`,
+`blame`, or `ls-files` read-only (a per-subcommand flag allowlist, no git
+global options, external diff and textconv off, no pager, a 20 s timeout and
+64 KiB of output) in a repository at or under an allowed root: the project
+roots of non-agent dashboard registrations seen within the registry
+retention, plus `agent.git_search_roots` (a global-only path list that needs
+lead authority); without `repo` it lists the roots.
 
 Pages render in one language end to end, chosen by the server from the first
 byte: the `ws_dashboard_lang` cookie when it names an available language (the
@@ -425,7 +475,7 @@ Current launcher inputs:
 | `WS_MCP_DASHBOARD_DEV_SOURCE` | Read by `ws-mcp dashboard`: the `agents-plugin-tool` source root the daemon serves dashboard and whiteboard page assets from instead of the embedded copies (see Dashboard daemon, Dev assets). Unset is off. |
 | `WS_MCP_NO_AGENT` | Product-mode gate for agentless distributions such as wsflow. |
 | `WS_MCP_NO_DASHBOARD` | `1`/`true`/`yes`/`on` turns the dashboard off for this ws-mcp whatever `dashboard.enabled` resolves: no daemon start, no session registration, no prune. The agent runner sets it on the ws-mcp it attaches to a conversation. |
-| `WS_MCP_ALLOWED_TOOLS` | Comma list of ws tool names; when set, `tools/list` advertises and `tools/call` accepts only these. The agent runner sets it to a profile's ws tools. |
+| `WS_MCP_ALLOWED_TOOLS` | Comma list of ws tool names; when set, `tools/list` advertises and `tools/call` accepts only these. The agent runner sets it to a profile's ws tools. `tracker.show` and `git.search` are listed and callable only when it names them. |
 | `WS_MCP_NAMESPACE` | User-facing MCP namespace text override; empty or unset defaults to `ws`. |
 | `WS_MCP_SETUP_TOOL` | Advertised setup tool name override; empty or unset defaults to `ws.setup`. |
 | `WS_MCP_CONFIG_MANIFESTS` | Adapter config key manifests, separated by the platform path-list separator (`:` POSIX, `;` Windows); `;` is accepted on every platform, which the static launcher configs use. Declared keys become `config.tune`-writable, cataloged by `config.list`, and typed in `config.get`; a rejected manifest is logged to stderr and listed by `config.list`. The ws and wsflow packages each ship their own `config-manifest.json` (namespace `claude.`; the same keys, differing only in `default`, pinned by `TestShippedClaudeManifestsDifferOnlyInDefaults`) and set it in both launch configs: `.mcp.json` (Codex) as `./config-manifest.json`, resolved against `cwd: "."` (the plugin root), and `.claude-plugin/plugin.json` as `${CLAUDE_PLUGIN_ROOT}/config-manifest.json`. Each package (ws, wsflow, Pi) also lists its `dashboard-config-manifest.json` (namespace `dashboard.`: `dashboard.enabled`, default on in ws and Pi, off in wsflow; `dashboard.port`, default 29417; `dashboard.lan_enabled`, global-only and default off in every package) beside its own manifest; the Pi bridge joins the two with the platform separator. A path that does not resolve fails nothing: the keys stay undeclared, so check `config.list` after changing either. |
