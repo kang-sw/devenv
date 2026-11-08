@@ -437,8 +437,7 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
    clip height, the sheet height, the handle's top, and --drhw (the handle's
    own width, which follows its icons). .anim animates a click's open or
    close, never a drag or a resize. The sheet shows every present panel as a
-   card: equal columns that each scroll on their own, or one stacked column
-   the body scrolls on a narrow screen. */
+   card in a wrapping grid (below), or the git sheet (gitbody). */
 :root { --drhw: 0px; --dpad: 16px; }
 .drawer { position: fixed; top: 0; left: 0; right: 0; height: 0; z-index: 40; pointer-events: none; }
 .dr-in { position: relative; max-width: 1680px; margin: 0 auto; }
@@ -447,15 +446,21 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .drawer.anim .dr-clip { transition: height .18s ease-out, visibility 0s linear .18s; }
 .drawer.anim.open .dr-clip { transition: height .18s ease-out, visibility 0s; }
 .dr-sheet { position: absolute; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; background: var(--wb-bg); border-top: 1px solid var(--wb-muted); }
-/* the panels region and the drawer's own cards (drcards) share one row of columns; the settings card takes a narrower one */
 .dr-body { flex: 1 1 0; min-height: 0; overflow: hidden; padding: 10px; display: flex; gap: 10px; }
+/* the panels drawer's body: the panels region and the drawer's own cards
+   (drcards) share one grid of cards at least 300px wide, wrapping onto
+   further rows rather than shrinking; the rows share the body's height, each
+   at least 280px, and the body scrolls when they need more. Each card
+   scrolls on its own. One stacked column on a narrow screen, which the body
+   scrolls. */
+#drbody { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); grid-auto-rows: minmax(280px, 1fr); overflow: auto; overscroll-behavior: contain; }
+#drbody[hidden] { display: none; }
 .dr-body .r-panels { display: contents; }
-.dr-body details.panel { flex: 1 1 0; min-width: 0; height: 100%; box-sizing: border-box; overflow: auto; overscroll-behavior: contain; }
+.dr-body details.panel { min-width: 0; min-height: 0; box-sizing: border-box; overflow: auto; overscroll-behavior: contain; }
 .dr-body details.panel > summary { position: sticky; top: 0; z-index: 1; cursor: default; }
-.dr-body details.setcard { flex: 0 0 280px; }
 @media (max-width: 759px) {
-  .dr-body { overflow: auto; overscroll-behavior: contain; flex-direction: column; }
-  .dr-body details.panel { height: auto; overflow: hidden; flex: none; }
+  #drbody { display: flex; flex-direction: column; }
+  .dr-body details.panel { flex: none; overflow: hidden; }
   .dr-body details.panel > summary { position: static; }
 }
 /* the settings card: the gear menu's items, laid flat in the card */
@@ -467,7 +472,15 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .wtsec { display: grid; gap: 2px; }
 .wtgrp { display: flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 800; color: var(--wb-muted-fg); padding: 0 2px; }
 .wtrow { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; column-gap: 8px; padding: 3px 6px; border-radius: 6px; font-size: 12.5px; }
-.wtrow.on { grid-template-columns: auto minmax(0, max-content) minmax(0, 1fr) auto auto auto; background: color-mix(in srgb, var(--wb-ok) 10%, var(--wb-card)); }
+/* a leased row puts its branch, holder, and age on a second line, so the
+   name keeps the card's width beside its size */
+.wtrow.on { grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-areas: "dot name name size" ". br who age"; row-gap: 1px; background: color-mix(in srgb, var(--wb-ok) 10%, var(--wb-card)); }
+.wtrow.on > .wtdot { grid-area: dot; }
+.wtrow.on > .wtname { grid-area: name; }
+.wtrow.on > .wtbr { grid-area: br; }
+.wtrow.on > .wtwho { grid-area: who; justify-self: end; max-width: 16ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wtrow.on > .wtage { grid-area: age; }
+.wtrow.on > .wtsize { grid-area: size; }
 .wtdot { width: 7px; height: 7px; border-radius: 50%; background: var(--wb-muted-fg); opacity: .5; }
 .wtrow.on .wtdot { background: var(--wb-ok); opacity: 1; box-shadow: 0 0 0 2px color-mix(in srgb, var(--wb-ok) 25%, transparent); }
 .wtrow.quar .wtdot { background: var(--wb-fail); opacity: 1; }

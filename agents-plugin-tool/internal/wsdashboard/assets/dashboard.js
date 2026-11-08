@@ -95,8 +95,9 @@
   // The panes that scroll on their own; the page itself scrolls on / and on
   // the board-first page. A pane hidden by the tabs view loses its offset, so
   // each pane's last visible offset is kept and put back when it shows again.
-  // The drawer's body (drbody) is never display:none, only clipped, so a
-  // panels swap keeps its offset whether the drawer is open or closed.
+  // The drawer's body (drbody) is only clipped while the drawer is closed
+  // (hidden only while the frame shows the git sheet), so a panels swap
+  // keeps its offset whether the drawer is open or closed.
   var PANES = ["bcol", "r-tree", "convo", "drbody"];
   var paneScroll = {};
   PANES.forEach(function (id) {
@@ -1645,7 +1646,9 @@
     row.appendChild(mk("span", "wtdot"));
     row.appendChild(mk("b", "wtname", w.name));
     if (w.leased) {
-      row.appendChild(mk("span", "wtbr", w.detached ? wsT("js.wt.detached") : w.branch));
+      var br = mk("span", "wtbr", w.detached ? wsT("js.wt.detached") : w.branch);
+      if (!w.detached) br.title = w.branch; // a long branch ellipsizes
+      row.appendChild(br);
       if (w.holder) {
         var who = mk("span", "wtwho", w.holder);
         who.title = wsT("js.wt.holder", w.holder);
