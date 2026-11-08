@@ -1608,7 +1608,7 @@
     var h = '<div class="iw-top">' + (up.length ? '<nav class="iw-crumb" aria-label="' + wsT("js.tk.win.parents") + '">' + up.map(function (k) { return '<a href="#"' + attr('item', k) + '>' + esc(VS.items[k].title) + '</a>'; }).join('<span aria-hidden="true">&rsaquo;</span>') + '</nav>' : '') +
       '<div class="iw-head"' + attr('mitem', it.id) + attr('rk', 'iw:' + it.id) + '>' + stBtn(stKey(it), it) +
       (ed ? '<h2 id="iw-title" class="iw-edt"><input type="text" id="iw-etitle" data-keep autocomplete="off" value="' + esc(ed.title) + '" aria-label="' + wsT("js.tk.form.title") + '"></h2>' : '<h2 id="iw-title">' + esc(it.title) + '</h2>') +
-      moreBtn(it.id, 'iw-more', true) +
+      headActs(it) + moreBtn(it.id, 'iw-more', true) +
       '<button type="button" class="ia iw-x" data-act="win-close" aria-label="' + wsT("js.tk.win.close") + '"' + tipAttr(wsT("js.tk.win.close")) + '><svg class="i"><use href="#tki-x"/></svg></button></div>' +
       '<div class="iw-chips">' + kindChip(it) + idCopyBtn(it) + (it.kind === 'topic' ? '' : stChip(it.status) + prChip(it) + dueChip(it) + rollupHtml(it)) + warnHtml(it) + '</div></div>';
     h += '<div class="iw-grid"><div class="iw-main">';
@@ -1641,6 +1641,23 @@
       btn('att-add', wsT("js.tk.composer.attach"), {}) + '<span class="muted">' + wsT("js.tk.composer.limit", fmtSize(VS.attachments.max_bytes)) + '</span></div>' : '') + '</div>';
     h += '</div><div class="iw-side">' + propertyCard(it) + (it.kind !== 'topic' ? assigneesHtml(v, it, recs) : '') + '</div></div>';
     return h;
+  }
+  // The header's common actions, left of the "⋯" menu: the viewer's status as a segmented control
+  // (applies on click, no note; the menu keeps the status-with-note part), then "add subtask" and
+  // "hand off" as icon buttons. Each shows under the same condition the menu uses.
+  function headActs(it) {
+    var r = canStatus(it) && mineLive(it), h = '';
+    if (r) {
+      var cur = r.status === 'awaiting' ? 'done' : r.status;
+      h += '<div class="iw-seg" role="group" aria-label="' + wsT("js.tk.prop.status") + '">' + ['todo', 'doing', 'blocked', 'done'].map(function (s) {
+        var label = s === 'done' && r.completion === 'assigner' ? wsT("js.tk.menu.reqdone") : stLabel(s), dis = s === 'done' && r.status === 'awaiting';
+        return '<button type="button" class="sg"' + attr('act', 'hstatus') + attr('item', it.id) + attr('status', s) + ' aria-pressed="' + (s === cur) + '" aria-label="' + esc(label) + '"' + tipAttr(label) + (dis ? ' disabled' : '') + '>' +
+          SI.svg(s) + '<span class="sl">' + esc(label) + '</span></button>';
+      }).join('') + '</div>';
+    }
+    if (canSplit(it)) h += '<button type="button" class="ia"' + attr('act', 'hsub') + attr('item', it.id) + ' aria-label="' + esc(wsT("js.tk.menu.sub")) + '"' + tipAttr(wsT("js.tk.menu.sub")) + '><svg class="i"><use href="#tki-plus"/></svg></button>';
+    if (r) h += '<button type="button" class="ia"' + attr('act', 'handoff') + attr('item', it.id) + ' aria-haspopup="menu" aria-label="' + esc(wsT("js.tk.act.handoff")) + '"' + tipAttr(wsT("js.tk.act.handoff")) + '><svg class="i"><use href="#tki-handoff"/></svg></button>';
+    return h ? '<div class="iw-acts">' + h + '</div>' : '';
   }
   // The item window's id button: "<kind> ID" copies the item's id (its tooltip) and says so for a moment.
   function idCopyBtn(it) {
@@ -2214,13 +2231,15 @@
     });
     if (mineR && mineR.status === 'done' && !it.hidden) acts.push(mi('note', esc(wsT("js.tk.asg.reopen")), { item: it.id, who: v, op: 'item.reopen' }, { icon: 'return' }));
     if (acts.length) parts.push(acts.join(''));
+    // the item window's own header menu: "add subtask" and "hand off" sit in the header beside it
+    var inWin = ui.win && ui.item === it.id && MN.backEl && MN.backEl.closest && !!MN.backEl.closest('.iw-head');
     var edit = canEdit(it), task = it.kind !== 'topic', more = [];
-    if (canSplit(it)) more.push(mi('m-sub', wsT("js.tk.menu.sub"), { item: it.id }, { icon: 'plus' }));
+    if (canSplit(it) && !inWin) more.push(mi('m-sub', wsT("js.tk.menu.sub"), { item: it.id }, { icon: 'plus' }));
     if (edit && task) {
       more.push(mi('pri', wsT("js.tk.menu.pri"), { item: it.id }, { icon: 'flag', sub: 1, val: esc(it.priorityName) }));
       more.push(mi('due', wsT("js.tk.menu.due"), { item: it.id }, { icon: 'calendar', sub: 1, val: it.due ? esc(it.due) : '' }));
     }
-    if (mineR && mineR.status !== 'done' && !it.hidden) more.push(mi('handoff', esc(wsT("js.tk.act.handoff")), { item: it.id }, { icon: 'handoff', sub: 1 }));
+    if (mineR && mineR.status !== 'done' && !it.hidden && !inWin) more.push(mi('handoff', esc(wsT("js.tk.act.handoff")), { item: it.id }, { icon: 'handoff', sub: 1 }));
     if (it.author === v && task && !it.hidden) more.push(mi('assign', esc(wsT("js.tk.act.assign")), { item: it.id }, { icon: 'assign', sub: 1 }));
     if (more.length) parts.push(more.join(''));
     var last = [];
@@ -2242,14 +2261,19 @@
   function menuNote() { var n = $('tkmnote'); return n ? n.value.trim() : ''; }
   // A status from the menu: done closes (it waits for the assigner when the completion says so).
   function applyStatus(s) {
-    var it = VS.items[MN.item], note = menuNote(), origin = CAPS.origin && $('corigin') ? $('corigin').value : 'human';
+    if (!setStatus(VS.items[MN.item], s, menuNote())) closeMenu(true);
+  }
+  // Writes the viewer's status on it with an optional note; false when there is nothing to write.
+  function setStatus(it, s, note) {
+    var origin = CAPS.origin && $('corigin') ? $('corigin').value : 'human';
     var r = it && mineLive(it);
-    if (!r) return;
-    if (s === (r.status === 'awaiting' ? 'done' : r.status) && !note) { closeMenu(true); return; }
+    if (!r) return false;
+    if (s === (r.status === 'awaiting' ? 'done' : r.status) && !note) return false;
     var p = { item: it.id };
     if (note) p.note = note;
     if (s === 'done') commit([['item.close', p, origin]]);
     else { p.status = s; commit([['item.status', p, origin]]); }
+    return true;
   }
   // The menu's own acts (m-*); the rest of a menu item's data-act goes through the shared handlers.
   function menuAct(k, a) {
@@ -2286,14 +2310,17 @@
         // for an input row under it, so those (and the window header) use the item window's Subtasks
         var rk = MN.rk && !/^(iw|k|c):/.test(MN.rk) && document.querySelector('.tk [data-rk="' + CSS.escape(MN.rk) + '"]') ? MN.rk : 'iw:' + id;
         closeMenu(false);
-        if (rk === 'iw:' + id && !(ui.win && ui.item === id)) showItem(id);
-        ui.sub = { item: id, rk: rk, val: '' };
-        render();
-        if ($('tksub')) $('tksub').focus();
-        return;
+        return startSub(id, rk);
       }
       case 'm-open': closeMenu(false); return showItem(id);
     }
+  }
+  // The inline "add subtask" row under rk ('iw:<id>': the item window's Subtasks section).
+  function startSub(id, rk) {
+    if (rk === 'iw:' + id && !(ui.win && ui.item === id)) showItem(id);
+    ui.sub = { item: id, rk: rk, val: '' };
+    render();
+    if ($('tksub')) $('tksub').focus();
   }
   // Keys inside the menu (see MN).
   function menuKey(e) {
@@ -3045,6 +3072,8 @@
         else if (k === 'reply') { ui.replyTo = d.cid; render(); if ($('cbox')) $('cbox').focus(); }
         else if (k === 'reply-x') { ui.replyTo = null; render(); }
         else if (k === 'mention') mentionInsert();
+        else if (k === 'hstatus') setStatus(VS.items[d.item], a.getAttribute('data-status'), '');
+        else if (k === 'hsub') startSub(d.item, 'iw:' + d.item);
         else if (k === 'nread-all') { markRead(feedEntries(memberOf(viewerOf(ui.store))).map(function (x) { return x.key; })); render(); }
         else if (k === 'att-load') { if (CAPS.attach) { var lm = (ui.loaded[seenKey(ui.store)] = ui.loaded[seenKey(ui.store)] || {}), oid = a.getAttribute('data-oid'); lm[oid] = !lm[oid]; render(); } }
         else if (k === 'att-add') {

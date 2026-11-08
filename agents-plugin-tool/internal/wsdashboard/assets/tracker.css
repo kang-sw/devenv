@@ -405,6 +405,19 @@ body.tk-paged .tk-drawer { display: none; }
 .tk .iw-head .sti { margin-top: 3px; }
 .tk .iw-head .ia { flex: none; }
 .tk .iw-head h2 { margin: 0; font-size: 18px; line-height: 1.3; flex: 1; overflow-wrap: anywhere; }
+/* the header's common actions: a status segmented control (icon + label; icons only when narrow), add subtask, hand off */
+.tk .iw-acts { flex: none; display: flex; align-items: center; gap: 4px; }
+.tk .iw-seg { display: inline-flex; gap: 1px; padding: 2px; border-radius: 8px; background: var(--wb-muted); margin-right: 2px; }
+.tk .iw-seg .sg { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 7px; border: 0; border-radius: 6px; background: transparent; color: var(--wb-muted-fg); font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer; }
+.tk .iw-seg .sg svg { width: 14px; height: 14px; flex: none; }
+.tk .iw-seg .sg:hover:not(:disabled), .tk .iw-seg .sg:focus-visible { color: var(--wb-fg); background: var(--wb-card); outline: none; }
+.tk .iw-seg .sg:focus-visible { box-shadow: inset 0 0 0 1.5px var(--wb-primary); }
+.tk .iw-seg .sg[aria-pressed="true"] { background: var(--wb-card); color: var(--wb-primary); font-weight: 700; box-shadow: 0 1px 2px rgb(0 0 0 / .12); }
+.tk .iw-seg .sg:disabled { opacity: .45; cursor: default; }
+@container iw (max-width: 759px) {
+  .tk .iw-seg .sg { padding: 0 5px; }
+  .tk .iw-seg .sl { display: none; }
+}
 .tk .iw-chips { display: flex; gap: 5px; align-items: center; flex-wrap: wrap; }
 .tk .idcopy { font: inherit; font-size: 11.5px; display: inline-flex; align-items: center; gap: 3px; padding: 1px 7px 1px 5px; border: 0; border-radius: 999px; background: transparent; color: var(--wb-muted-fg); cursor: pointer; box-shadow: inset 0 0 0 1px var(--wb-line); }
 .tk .idcopy:hover, .tk .idcopy:focus-visible { color: var(--wb-primary); outline: none; background: var(--wb-card); }
