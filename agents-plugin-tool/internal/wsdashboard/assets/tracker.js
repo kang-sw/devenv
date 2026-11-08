@@ -1551,8 +1551,19 @@
   // then live before ended, then display name, then assignment order). What every row shares (the
   // provenance text and the close rule) is written once in the header; a row adds only what
   // differs. The rows past A_SHOWN are in the markup, hidden until the "N more" toggle (ui.aopen).
+  // The assignees card's "+": who may assign sees it (the menu's rule). It opens the assign flow
+  // through openAssign, the one place a later assign UI replaces.
+  function assignAddBtn(it, v) {
+    if (it.author !== v || it.kind === 'topic' || it.hidden) return '';
+    return '<button type="button" class="ia a-add"' + attr('act', 'asg-add') + attr('item', it.id) + ' aria-haspopup="menu" aria-label="' + esc(wsT("js.tk.act.assign")) + '"' + tipAttr(wsT("js.tk.act.assign")) + '><svg class="i"><use href="#tki-plus"/></svg></button>';
+  }
+  function openAssign(id, anchor) { itemMenu(id, anchor, null, { step: 'assign' }); }
+  // A remove-a-person action on an assignee row (unassign, withdraw): a small red minus badge.
+  function rmBadge(label, r) {
+    return '<button type="button" class="rmb"' + attr('act', 'unassign') + attr('item', r.item) + attr('who', r.to) + ' aria-label="' + esc(label) + '"' + tipAttr(label) + '><svg class="i"><use href="#tki-minus"/></svg></button>';
+  }
   function assigneesHtml(v, it, recs) {
-    if (!recs.length) return '<section class="iw-asg"><h3>' + wsT("js.tk.asg.title") + '</h3><div class="empty">' + wsT("js.tk.asg.none") + '</div></section>';
+    if (!recs.length) return '<section class="iw-asg"><h3>' + wsT("js.tk.asg.title") + '<span class="grow"></span>' + assignAddBtn(it, v) + '</h3><div class="empty">' + wsT("js.tk.asg.none") + '</div></section>';
     var rows = recs.map(function (r, i) { return { r: r, i: i, d: leadDepth(r.to), on: r.state === 'live' || r.state === 'pending', src: source(r), cm: complText(r.completion) }; });
     rows.sort(function (a, b) { return (b.on - a.on) || (a.d - b.d) || nm(a.r.to).localeCompare(nm(b.r.to)) || (a.i - b.i); });
     function common(key) { // the most frequent value, when at least two rows hold it
@@ -1563,24 +1574,24 @@
     var cs = common('src'), cc = common('cm'), open = ui.aopen === it.id, hid = rows.length - A_SHOWN;
     var head = cs !== null || cc !== null ? '<div class="a-common muted">' + [cs, cc].filter(function (x) { return x !== null; }).join(' &middot; ') + '</div>' : '';
     var list = rows.map(function (x, k) {
-      var r = x.r, b = '';
+      var r = x.r, b = '', rm = '';
       if (r.state === 'live') {
         if ((r.by === v || r.to === v) && r.status === 'done') b += btn('note', wsT("js.tk.asg.reopen"), { item: r.item, who: r.to, op: 'item.reopen' });
         var departed = (VS.members[r.to] || {}).removed || (VS.members[r.by] || {}).removed;
-        if (r.by === v || (departed && VS.viewer.admin)) b += btn('unassign', r.by === v ? wsT("js.tk.asg.unassign") : wsT("js.tk.asg.unassign.admin"), { item: r.item, who: r.to });
+        if (r.by === v || (departed && VS.viewer.admin)) rm = rmBadge(r.by === v ? wsT("js.tk.asg.unassign") : wsT("js.tk.asg.unassign.admin"), r);
         if (VS.viewer.admin && r.to !== v && r.status !== 'done' && !it.hidden) b += btn('handoff', wsT("js.tk.asg.handoff.admin"), { item: r.item, who: r.to });
-      } else if (r.state === 'pending' && r.to === v && (r.by === v || r.sender === v)) b += btn('unassign', wsT("js.tk.asg.withdraw"), { item: r.item, who: r.to });
+      } else if (r.state === 'pending' && r.to === v && (r.by === v || r.sender === v)) rm = rmBadge(wsT("js.tk.asg.withdraw"), r);
       var note = r.note || r.answerNote, diff = [];
       if (x.src !== cs) diff.push(cs !== null && x.src.indexOf(cs) === 0 ? x.src.slice(cs.length).trim() : x.src);
       if (x.cm !== cc) diff.push(x.cm);
       return '<li class="arow' + (!x.on ? ' gone' : '') + (k >= A_SHOWN ? ' more' : '') + '"' + attr('rec', r.id) + attr('hmember', r.to) + '>' +
         '<div class="ar-main"><i class="av' + (r.state === 'pending' ? ' pend' : '') + (r.to === v ? ' me' : '') + '">' + esc(initials(r.to)) + '</i><span class="ar-name">' + whoName(r.to) + '</span>' +
-        '<span class="ar-st">' + recChip(r) + (r.ended ? ' <span class="muted">' + esc(alias(r.ended.id)) + endedBy(r) + '</span>' : '') + '</span></div>' +
+        '<span class="ar-st">' + recChip(r) + (r.ended ? ' <span class="muted">' + esc(alias(r.ended.id)) + endedBy(r) + '</span>' : '') + rm + '</span></div>' +
         (note ? '<div class="ar-note">&ldquo;' + esc(note) + '&rdquo;</div>' : '') +
         (diff.length ? '<div class="ar-diff muted">' + diff.join(' &middot; ') + '</div>' : '') +
         (b ? '<div class="tb">' + b + '</div>' : '') + '</li>';
     }).join('');
-    return '<section class="iw-asg"><h3>' + wsT("js.tk.asg.title") + ' <span class="cnt">' + rows.length + '</span></h3>' + head +
+    return '<section class="iw-asg"><h3>' + wsT("js.tk.asg.title") + ' <span class="cnt">' + rows.length + '</span><span class="grow"></span>' + assignAddBtn(it, v) + '</h3>' + head +
       '<ul class="alist' + (open ? '' : ' folded') + '">' + list + '</ul>' +
       (hid > 0 ? '<div class="a-fold">' + btn('afold', open ? wsT("js.tk.asg.fewer") : wsT("js.tk.asg.more", hid), {}) + '</div>' : '') + '</section>';
   }
@@ -1588,9 +1599,12 @@
   // with ▸/▾: the first level (the item's children) starts open, so their children show, and deeper
   // levels start folded. The fold state is the page's (ui.wfold), apart from the lists' stored one.
   // A node with children also carries its roll-up.
+  // The section is drawn even without children when the viewer may add one (its "+" opens the
+  // inline row here); a topic without children and without that right draws nothing.
   function subtasksHtml(it) {
-    var add = ui.sub && ui.sub.rk === 'iw:' + it.id ? subRowHtml(0) : ''; // "add subtask" from the window header: the input row tops the list
-    if (!it.children.length && !add) return '';
+    var add = ui.sub && ui.sub.rk === 'iw:' + it.id ? subRowHtml(0) : ''; // "add subtask" (header, menu, or the section's "+"): the input row tops the list
+    var can = canSplit(it);
+    if (!it.children.length && !add && !can && it.kind === 'topic') return '';
     function rows(id, depth) {
       return VS.items[id].children.map(function (k) {
         var ki = VS.items[k], key = ui.store + '|' + k, open = !!ki.children.length && (key in ui.wfold ? ui.wfold[key] : depth === 0);
@@ -1599,7 +1613,9 @@
           '<span class="grow"></span>' + rollupHtml(ki) + whoHtml(ki) + '</div>' + (open ? rows(k, depth + 1) : '');
       }).join('');
     }
-    return '<section class="iw-sub"><h3 class="prom">' + wsT("js.tk.win.subtasks") + ' <span class="cnt">' + it.children.length + '</span>' + rollupHtml(it) + '</h3><div class="srows">' + add + rows(it.id, 0) + '</div></section>';
+    var plus = can ? '<span class="grow"></span><button type="button" class="ia"' + attr('act', 'hsub') + attr('item', it.id) + ' aria-label="' + esc(wsT("js.tk.menu.sub")) + '"' + tipAttr(wsT("js.tk.menu.sub")) + '><svg class="i"><use href="#tki-plus"/></svg></button>' : '';
+    return '<section class="iw-sub"><h3 class="prom">' + wsT("js.tk.win.subtasks") + ' <span class="cnt">' + it.children.length + '</span>' + rollupHtml(it) + plus + '</h3>' +
+      (add || it.children.length ? '<div class="srows">' + add + rows(it.id, 0) + '</div>' : '') + '</section>';
   }
   // The edit mode (ui.iedit) turns the title and the body into fields in place: Enter in the
   // title or Cmd/Ctrl+Enter in the body saves, Esc cancels.
@@ -1608,7 +1624,7 @@
     var h = '<div class="iw-top">' + (up.length ? '<nav class="iw-crumb" aria-label="' + wsT("js.tk.win.parents") + '">' + up.map(function (k) { return '<a href="#"' + attr('item', k) + '>' + esc(VS.items[k].title) + '</a>'; }).join('<span aria-hidden="true">&rsaquo;</span>') + '</nav>' : '') +
       '<div class="iw-head"' + attr('mitem', it.id) + attr('rk', 'iw:' + it.id) + '>' + stBtn(stKey(it), it) +
       (ed ? '<h2 id="iw-title" class="iw-edt"><input type="text" id="iw-etitle" data-keep autocomplete="off" value="' + esc(ed.title) + '" aria-label="' + wsT("js.tk.form.title") + '"></h2>' : '<h2 id="iw-title">' + esc(it.title) + '</h2>') +
-      moreBtn(it.id, 'iw-more', true) +
+      headActs(it) + moreBtn(it.id, 'iw-more', true) +
       '<button type="button" class="ia iw-x" data-act="win-close" aria-label="' + wsT("js.tk.win.close") + '"' + tipAttr(wsT("js.tk.win.close")) + '><svg class="i"><use href="#tki-x"/></svg></button></div>' +
       '<div class="iw-chips">' + kindChip(it) + idCopyBtn(it) + (it.kind === 'topic' ? '' : stChip(it.status) + prChip(it) + dueChip(it) + rollupHtml(it)) + warnHtml(it) + '</div></div>';
     h += '<div class="iw-grid"><div class="iw-main">';
@@ -1625,15 +1641,15 @@
     }).join('') + '</ul></section>';
 
     // composer: a comment (optionally a quote reply); the status moved to the header's menu.
-    // The box carries the @ picker (bottom left) and the send button (bottom right); Cmd/Ctrl+Enter sends.
+    // The box carries the @ button (bottom left) and the send button (bottom right); Cmd/Ctrl+Enter sends.
+    // Typing @ (or the button) opens the member suggestion popup at the caret (see mentionSync).
     var rt = ui.replyTo && VS.comments[ui.replyTo] && VS.comments[ui.replyTo].item === it.id ? VS.comments[ui.replyTo] : null;
     var send = wsT("js.tk.composer.send", MAC ? '⌘Enter' : 'Ctrl+Enter');
     h += '<div class="composer2">' + (it.hidden ? '<span class="muted">' + wsT("js.tk.composer.hidden") + '</span>' : '') +
       (rt ? '<div class="replying">' + wsT("js.tk.composer.replying", esc(alias(rt.id)), esc(nm(rt.author)), esc(String(rt.body).slice(0, 70))) + ' ' + btn('reply-x', 'x', {}) + '</div>' : '') +
       draftHtml() +
-      '<div class="cbox"><textarea id="cbox" data-keep rows="2" placeholder="' + wsT("js.tk.composer.placeholder", esc(nm(v))) + '"></textarea><div class="cbar">' +
-      '<select id="cmention" class="cat" aria-label="' + wsT("js.tk.composer.mention") + '"' + tipAttr(wsT("js.tk.composer.mention.tip")) + '><option value="">@</option>' +
-      Object.keys(VS.members).filter(function (id) { return !VS.members[id].removed; }).map(function (id) { return '<option value="' + esc(id) + '">@' + esc(id) + ' ' + esc(nmo(id)) + '</option>'; }).join('') + '</select>' +
+      '<div class="cbox"><textarea id="cbox" data-keep rows="2" aria-autocomplete="list" aria-controls="tkmpop" aria-expanded="false" placeholder="' + wsT("js.tk.composer.placeholder", esc(nm(v))) + '"></textarea><div class="cbar">' +
+      '<button type="button" id="cmention" class="cat"' + attr('act', 'mention') + ' aria-label="' + wsT("js.tk.composer.mention") + '"' + tipAttr(wsT("js.tk.composer.mention.tip")) + '>@</button>' +
       (CAPS.origin ? '<select id="corigin" title="' + wsT("js.tk.origin") + '"><option value="human">' + wsT("js.tk.origin.human") + '</option><option value="agent">' + wsT("js.tk.origin.agent") + '</option><option value="agent-auto">' + wsT("js.tk.origin.auto") + '</option></select>' : '') +
       '<span class="grow"></span><button type="button" class="csend" id="tkcsend"' + attr('act', 'comment') + attr('item', it.id) + ' aria-label="' + esc(send) + '"' + tipAttr(send) + '><svg class="i"><use href="#tki-send"/></svg></button></div></div>' +
       // with caps.attach, attachment metadata typed in by hand (a stand-in oid is computed)
@@ -1641,6 +1657,23 @@
       btn('att-add', wsT("js.tk.composer.attach"), {}) + '<span class="muted">' + wsT("js.tk.composer.limit", fmtSize(VS.attachments.max_bytes)) + '</span></div>' : '') + '</div>';
     h += '</div><div class="iw-side">' + propertyCard(it) + (it.kind !== 'topic' ? assigneesHtml(v, it, recs) : '') + '</div></div>';
     return h;
+  }
+  // The header's common actions, left of the "⋯" menu: the viewer's status as a segmented control
+  // (applies on click, no note; the menu keeps the status-with-note part), then "add subtask" and
+  // "hand off" as icon buttons. Each shows under the same condition the menu uses.
+  function headActs(it) {
+    var r = canStatus(it) && mineLive(it), h = '';
+    if (r) {
+      var cur = r.status === 'awaiting' ? 'done' : r.status;
+      h += '<div class="iw-seg" role="group" aria-label="' + wsT("js.tk.prop.status") + '">' + ['todo', 'doing', 'blocked', 'done'].map(function (s) {
+        var label = s === 'done' && r.completion === 'assigner' ? wsT("js.tk.menu.reqdone") : stLabel(s), dis = s === 'done' && r.status === 'awaiting';
+        return '<button type="button" class="sg"' + attr('act', 'hstatus') + attr('item', it.id) + attr('status', s) + ' aria-pressed="' + (s === cur) + '" aria-label="' + esc(label) + '"' + tipAttr(label) + (dis ? ' disabled' : '') + '>' +
+          SI.svg(s) + '<span class="sl">' + esc(label) + '</span></button>';
+      }).join('') + '</div>';
+    }
+    if (canSplit(it)) h += '<button type="button" class="ia"' + attr('act', 'hsub') + attr('item', it.id) + ' aria-label="' + esc(wsT("js.tk.menu.sub")) + '"' + tipAttr(wsT("js.tk.menu.sub")) + '><svg class="i"><use href="#tki-plus"/></svg></button>';
+    if (r) h += '<button type="button" class="ia"' + attr('act', 'handoff') + attr('item', it.id) + ' aria-haspopup="menu" aria-label="' + esc(wsT("js.tk.act.handoff")) + '"' + tipAttr(wsT("js.tk.act.handoff")) + '><svg class="i"><use href="#tki-handoff"/></svg></button>';
+    return h ? '<div class="iw-acts">' + h + '</div>' : '';
   }
   // The item window's id button: "<kind> ID" copies the item's id (its tooltip) and says so for a moment.
   function idCopyBtn(it) {
@@ -1671,9 +1704,10 @@
       setTimeout(function () { if (a.isConnected) { span.innerHTML = was; a.classList.remove('done'); } }, 1200);
     });
   }
+  // the attachments drafted for the next post; a picked mention shows as its @id in the text itself
   function draftHtml() {
-    if (!ui.mdraft.length && !ui.adraft.length) return '';
-    return '<div class="cdraft">' + ui.mdraft.map(function (id) { return '<span class="chip mention">@' + esc(nm(id)) + '</span>'; }).join('') +
+    if (!ui.adraft.length) return '';
+    return '<div class="cdraft">' +
       ui.adraft.map(function (x, i) { return '<span class="chip att">' + wsT("js.tk.att.file", esc(x.name), fmtSize(x.size)) + '</span>' + btn('att-x', 'x', { idx: i }); }).join('') +
       '<span class="muted">' + wsT("js.tk.composer.draft") + '</span></div>';
   }
@@ -1688,6 +1722,95 @@
   function mimeOf(name) { return MIME[String(name).split('.').pop().toLowerCase()] || 'application/octet-stream'; }
   // An edit of a body keeps the mentions whose @id is still in the text and every attachment.
   function keptMentions(ids, body) { return listOf(ids).filter(function (id) { return body.indexOf('@' + id) >= 0; }); }
+
+  // ------------------------------------------------- @-mention suggestion popup
+
+  // An @ at the start or after whitespace in the comment box opens a member list anchored at the @,
+  // filtered by the text after it. It is driven by input events, which fire during an IME
+  // composition as well, so a Hangul name filters while it is still being composed.
+  var MP = null; // the open popup: { start: index of the @, q: the text after it, idx: highlighted row, ids }
+  function mentionMatches(q) {
+    q = q.toLowerCase();
+    var pre = [], sub = [];
+    Object.keys(VS.members).forEach(function (id) {
+      var m = VS.members[id], pr = m.profile || {};
+      if (m.removed) return;
+      var keys = [id, m.name, pr.given, pr.family].filter(Boolean).map(function (x) { return String(x).toLowerCase(); });
+      if (keys.some(function (x) { return x.indexOf(q) === 0; })) pre.push(id);
+      else if (keys.some(function (x) { return x.indexOf(q) >= 0; })) sub.push(id);
+    });
+    return pre.concat(sub);
+  }
+  function mentionToken(box) {
+    if (box.selectionStart !== box.selectionEnd) return null;
+    var m = /(^|\s)@([^\s@]*)$/.exec(box.value.slice(0, box.selectionStart));
+    return m ? { start: box.selectionStart - m[2].length - 1, q: m[2] } : null;
+  }
+  // Opens, refilters, re-places, or closes the popup after the box's text or caret changed.
+  function mentionSync() {
+    var box = $('cbox'), tok = box && document.activeElement === box && mentionToken(box);
+    if (!tok) return mentionClose();
+    var same = MP && MP.start === tok.start && MP.q === tok.q;
+    MP = { start: tok.start, q: tok.q, idx: same ? MP.idx : 0, ids: mentionMatches(tok.q) };
+    if (MP.idx >= MP.ids.length) MP.idx = 0;
+    mentionDraw(box); mentionPlace(box);
+  }
+  function mentionDraw(box) {
+    var p = $('tkmpop');
+    p.innerHTML = MP.ids.map(function (id, i) {
+      return '<li class="mopt' + (i === MP.idx ? ' on' : '') + '" role="option" id="tkmopt-' + i + '" aria-selected="' + (i === MP.idx) + '"' + attr('mp', i) + '>' +
+        '<i class="av">' + esc(initials(id)) + '</i><span class="mn">' + whoName(id) + '</span><span class="muted">' + esc(id) + '</span></li>';
+    }).join('') || '<li class="qnone" role="presentation">' + wsT("js.tk.mention.none") + '</li>';
+    p.hidden = false;
+    box.setAttribute('aria-expanded', 'true');
+    box.setAttribute('aria-activedescendant', MP.ids.length ? 'tkmopt-' + MP.idx : '');
+    var on = p.querySelector('.mopt.on');
+    if (on) on.scrollIntoView({ block: 'nearest' });
+  }
+  // The @'s position in the viewport, measured on a hidden copy of the box laid out alike.
+  function mentionAnchor(box) {
+    var cs = getComputedStyle(box), d = document.createElement('div'), mark = document.createElement('span');
+    ['boxSizing', 'width', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft', 'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth',
+      'fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'letterSpacing', 'lineHeight', 'textTransform', 'wordSpacing', 'tabSize'].forEach(function (k) { d.style[k] = cs[k]; });
+    d.style.cssText += ';position:absolute;visibility:hidden;top:0;left:-9999px;white-space:pre-wrap;overflow-wrap:break-word;border-style:solid';
+    d.textContent = box.value.slice(0, MP.start);
+    mark.textContent = '@'; d.appendChild(mark);
+    box.parentNode.appendChild(d);
+    var r = box.getBoundingClientRect(), x = r.left + mark.offsetLeft - box.scrollLeft, y = r.top + mark.offsetTop - box.scrollTop, lh = mark.offsetHeight;
+    d.remove();
+    return { x: x, top: y, bottom: y + lh };
+  }
+  // above the @ when it fits, so the box's text and send button stay visible; else below it
+  function mentionPlace(box) {
+    var p = $('tkmpop'), a = mentionAnchor(box), w = p.offsetWidth, h = p.offsetHeight;
+    p.style.left = Math.max(8, Math.min(a.x - 4, innerWidth - w - 8)) + 'px';
+    p.style.top = (a.top - h - 4 >= 8 ? a.top - h - 4 : Math.min(a.bottom + 4, innerHeight - h - 8)) + 'px';
+  }
+  function mentionClose() {
+    if (!MP) return;
+    MP = null; $('tkmpop').hidden = true;
+    var box = $('cbox');
+    if (box) { box.setAttribute('aria-expanded', 'false'); box.removeAttribute('aria-activedescendant'); }
+  }
+  // Picking replaces the @query token with "@<id> " at the caret and records the id for the next post.
+  function mentionPick(i) {
+    var box = $('cbox'), id = MP && MP.ids[i];
+    if (!box || !id) return;
+    var end = box.selectionStart, spaced = /\s/.test(box.value.charAt(end));
+    box.setRangeText('@' + id + (spaced ? '' : ' '), MP.start, end, 'end');
+    if (spaced) box.selectionStart = box.selectionEnd = box.selectionEnd + 1;
+    if (ui.mdraft.indexOf(id) < 0) ui.mdraft.push(id);
+    mentionClose(); box.focus();
+  }
+  // The @ button: an @ at the caret (after a space when it would touch a word), then the popup.
+  function mentionInsert() {
+    var box = $('cbox');
+    if (!box) return;
+    box.focus();
+    var s = box.selectionStart;
+    box.setRangeText((s && !/\s/.test(box.value.charAt(s - 1)) ? ' ' : '') + '@', s, box.selectionEnd, 'end');
+    mentionSync();
+  }
 
   // --------------------------------------------------------- dialog forms
 
@@ -2124,13 +2247,15 @@
     });
     if (mineR && mineR.status === 'done' && !it.hidden) acts.push(mi('note', esc(wsT("js.tk.asg.reopen")), { item: it.id, who: v, op: 'item.reopen' }, { icon: 'return' }));
     if (acts.length) parts.push(acts.join(''));
+    // the item window's own header menu: "add subtask" and "hand off" sit in the header beside it
+    var inWin = ui.win && ui.item === it.id && MN.backEl && MN.backEl.closest && !!MN.backEl.closest('.iw-head');
     var edit = canEdit(it), task = it.kind !== 'topic', more = [];
-    if (canSplit(it)) more.push(mi('m-sub', wsT("js.tk.menu.sub"), { item: it.id }, { icon: 'plus' }));
+    if (canSplit(it) && !inWin) more.push(mi('m-sub', wsT("js.tk.menu.sub"), { item: it.id }, { icon: 'plus' }));
     if (edit && task) {
       more.push(mi('pri', wsT("js.tk.menu.pri"), { item: it.id }, { icon: 'flag', sub: 1, val: esc(it.priorityName) }));
       more.push(mi('due', wsT("js.tk.menu.due"), { item: it.id }, { icon: 'calendar', sub: 1, val: it.due ? esc(it.due) : '' }));
     }
-    if (mineR && mineR.status !== 'done' && !it.hidden) more.push(mi('handoff', esc(wsT("js.tk.act.handoff")), { item: it.id }, { icon: 'handoff', sub: 1 }));
+    if (mineR && mineR.status !== 'done' && !it.hidden && !inWin) more.push(mi('handoff', esc(wsT("js.tk.act.handoff")), { item: it.id }, { icon: 'handoff', sub: 1 }));
     if (it.author === v && task && !it.hidden) more.push(mi('assign', esc(wsT("js.tk.act.assign")), { item: it.id }, { icon: 'assign', sub: 1 }));
     if (more.length) parts.push(more.join(''));
     var last = [];
@@ -2152,14 +2277,19 @@
   function menuNote() { var n = $('tkmnote'); return n ? n.value.trim() : ''; }
   // A status from the menu: done closes (it waits for the assigner when the completion says so).
   function applyStatus(s) {
-    var it = VS.items[MN.item], note = menuNote(), origin = CAPS.origin && $('corigin') ? $('corigin').value : 'human';
+    if (!setStatus(VS.items[MN.item], s, menuNote())) closeMenu(true);
+  }
+  // Writes the viewer's status on it with an optional note; false when there is nothing to write.
+  function setStatus(it, s, note) {
+    var origin = CAPS.origin && $('corigin') ? $('corigin').value : 'human';
     var r = it && mineLive(it);
-    if (!r) return;
-    if (s === (r.status === 'awaiting' ? 'done' : r.status) && !note) { closeMenu(true); return; }
+    if (!r) return false;
+    if (s === (r.status === 'awaiting' ? 'done' : r.status) && !note) return false;
     var p = { item: it.id };
     if (note) p.note = note;
     if (s === 'done') commit([['item.close', p, origin]]);
     else { p.status = s; commit([['item.status', p, origin]]); }
+    return true;
   }
   // The menu's own acts (m-*); the rest of a menu item's data-act goes through the shared handlers.
   function menuAct(k, a) {
@@ -2196,14 +2326,17 @@
         // for an input row under it, so those (and the window header) use the item window's Subtasks
         var rk = MN.rk && !/^(iw|k|c):/.test(MN.rk) && document.querySelector('.tk [data-rk="' + CSS.escape(MN.rk) + '"]') ? MN.rk : 'iw:' + id;
         closeMenu(false);
-        if (rk === 'iw:' + id && !(ui.win && ui.item === id)) showItem(id);
-        ui.sub = { item: id, rk: rk, val: '' };
-        render();
-        if ($('tksub')) $('tksub').focus();
-        return;
+        return startSub(id, rk);
       }
       case 'm-open': closeMenu(false); return showItem(id);
     }
+  }
+  // The inline "add subtask" row under rk ('iw:<id>': the item window's Subtasks section).
+  function startSub(id, rk) {
+    if (rk === 'iw:' + id && !(ui.win && ui.item === id)) showItem(id);
+    ui.sub = { item: id, rk: rk, val: '' };
+    render();
+    if ($('tksub')) $('tksub').focus();
   }
   // Keys inside the menu (see MN).
   function menuKey(e) {
@@ -2564,6 +2697,7 @@
     if (open) placeSub();
     var fk2 = focusKeep && $(focusKeep[0]);
     if (fk2) { fk2.focus({ preventScroll: true }); try { fk2.setSelectionRange(focusKeep[1], focusKeep[2]); } catch (x) { /* not a text field */ } }
+    if (MP) mentionSync(); // the composer was redrawn: the popup follows the new box, or closes with it
     // the menu stays over the redraw: the status popover follows the store, an item menu closes with its item
     if (MN && MN.kind === 'sync') {
       var mIn = $('tkmenu').contains(document.activeElement);
@@ -2819,6 +2953,7 @@
     '<symbol id="tki-chev" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></symbol>' +
     '<symbol id="tki-tasks" viewBox="0 0 16 16"><path d="M2.5 4.2l1.4 1.4 2.4-2.6M2.5 10.2l1.4 1.4 2.4-2.6M8.5 4.6h5M8.5 10.6h5"/></symbol>' +
     '<symbol id="tki-plus" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></symbol>' +
+    '<symbol id="tki-minus" viewBox="0 0 16 16"><path d="M4 8h8"/></symbol>' +
     '<symbol id="tki-x" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></symbol>' +
     '<symbol id="tki-accept" viewBox="0 0 16 16"><path d="M3.2 8.4l3 3 6.6-7"/></symbol>' +
     '<symbol id="tki-decline" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.6"/><path d="M5.9 5.9l4.2 4.2M10.1 5.9l-4.2 4.2"/></symbol>' +
@@ -2863,7 +2998,8 @@
       '<div class="tk-dr-in"><div class="tk-dr-clip" id="tkclip"><div class="tk-dr-sheet" role="region" aria-label="' + wsT("js.tk.aria.store") + '"><div class="tk-dr-body" id="tkbody"></div></div></div>' +
       '<div class="tk-handles" id="tkhandles"></div></div>'));
     O.pageParent.appendChild(el('main', { class: 'tk tk-spage', id: 'tkpage', role: 'region', 'aria-label': wsT("js.tk.aria.page"), hidden: '' }));
-    b.appendChild(el('div', { class: 'tk tk-iwin-back', id: 'tkwin', hidden: '' }, '<div class="iwin" role="dialog" aria-modal="true" tabindex="-1"><div class="iwin-in" id="tkwinbody"></div></div>'));
+    b.appendChild(el('div', { class: 'tk tk-iwin-back', id: 'tkwin', hidden: '' }, '<div class="iwin" role="dialog" aria-modal="true" tabindex="-1"><div class="iwin-in" id="tkwinbody"></div></div>' +
+      '<ul class="tk-mpop" id="tkmpop" role="listbox" aria-label="' + wsT("js.tk.composer.mention.tip") + '" hidden></ul>'));
     b.appendChild(el('dialog', { class: 'tk tk-dlg', id: 'tkdlg' }));
     b.appendChild(el('div', { class: 'tk tk-toast', id: 'tktoast', hidden: '' }));
     b.appendChild(el('div', { class: 'tk tk-tip', id: 'tktip', role: 'tooltip', hidden: '' }));
@@ -2891,6 +3027,8 @@
     document.addEventListener('click', function (e) {
       var t = e.target;
       if (qs.open && !(t.closest && t.closest('#tkqpop, #tkqs'))) qClose(true);
+      if (t.id === 'cbox' && own(t)) mentionSync(); // a click into an @token opens it, elsewhere in the box closes it
+      else if (MP && !(t.closest && t.closest('#tkmpop, #cmention'))) mentionClose();
       // a click outside the menu closes it; a click on its own opener toggles it shut
       if (MN && !(t.closest && t.closest('#tkmenu'))) {
         var mOpener = MN.backEl && MN.backEl.contains(t);
@@ -2950,6 +3088,10 @@
         else if (k === 'sync') { syncNow(ui.store, false, function () { render(); }); }
         else if (k === 'reply') { ui.replyTo = d.cid; render(); if ($('cbox')) $('cbox').focus(); }
         else if (k === 'reply-x') { ui.replyTo = null; render(); }
+        else if (k === 'mention') mentionInsert();
+        else if (k === 'hstatus') setStatus(VS.items[d.item], a.getAttribute('data-status'), '');
+        else if (k === 'hsub') startSub(d.item, 'iw:' + d.item);
+        else if (k === 'asg-add') openAssign(d.item, a);
         else if (k === 'nread-all') { markRead(feedEntries(memberOf(viewerOf(ui.store))).map(function (x) { return x.key; })); render(); }
         else if (k === 'att-load') { if (CAPS.attach) { var lm = (ui.loaded[seenKey(ui.store)] = ui.loaded[seenKey(ui.store)] || {}), oid = a.getAttribute('data-oid'); lm[oid] = !lm[oid]; render(); } }
         else if (k === 'att-add') {
@@ -2999,13 +3141,6 @@
       else if (t.id === 'f-status') { ui.status = t.value; render(); }
       else if (t.id === 'a-family') { ui.act.family = t.value; render(); }
       else if (t.id === 'a-member') { ui.act.member = t.value; render(); }
-      else if (t.id === 'cmention') {
-        var box = $('cbox'), id = t.value;
-        if (!id || !box) return;
-        box.value = box.value + (box.value && !/\s$/.test(box.value) ? ' ' : '') + '@' + id + ' ';
-        if (ui.mdraft.indexOf(id) < 0) ui.mdraft.push(id);
-        render();
-      }
       else if (t.id === 'tknewkind') { if (ui.nrow[ui.store]) ui.nrow[ui.store].kind = t.value; }
       else if (t.closest('#tkmenu form')) updateHint(t.closest('form'));
       else if (t.closest('#tkdlg form')) {
@@ -3024,6 +3159,7 @@
       if (t.id === 'tknew' && ui.nrow[ui.store]) ui.nrow[ui.store].val = t.value;
       else if (t.id === 'tksub' && ui.sub) ui.sub.val = t.value;
       else if (t.id === 'tkcedit' && ui.cedit) ui.cedit.body = t.value;
+      else if (t.id === 'cbox') mentionSync(); // also mid-composition: the popup filters on the composing text
       else if (/^iw-e(title|body|proj)$/.test(t.id) && ui.iedit) ui.iedit[{ 'iw-etitle': 'title', 'iw-ebody': 'body', 'iw-eproj': 'project' }[t.id]] = t.value;
       else if (t.id === 'tkmq' && MN) { MN.q = t.value; var ml = $('tkmenu').querySelector('.mlist'); if (ml) ml.innerHTML = handoffList(VS.items[MN.item], MN.who || VS.viewer.member); }
     });
@@ -3065,6 +3201,7 @@
       linkHi(own(e.target) && e.target.closest('.kcard, .citem'));
     });
     document.addEventListener('focusin', function (e) {
+      if (MP && e.target.id !== 'cbox') mentionClose();
       var row = own(e.target) && e.target.closest('.irow'), card = own(e.target) && e.target.closest('.kcard, .citem');
       if (row) placeMore(row);
       linkHi(card);
@@ -3072,6 +3209,7 @@
     });
     document.addEventListener('scroll', function (e) {
       if (tipFor) hideTip(); placeShownMore();
+      if (MP) mentionSync();
       if (MN && MN.kind === 'item' && !(e.target.nodeType === 1 && $('tkmenu').contains(e.target))) closeMenu(false); // an item menu does not follow a scrolled row
     }, true);
     // a right-click on a row, card, entry, or the item window header opens its menu at the pointer
@@ -3089,6 +3227,20 @@
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); var n = qs.items.length; if (n) { qs.idx = (qs.idx + (e.key === 'ArrowDown' ? 1 : n - 1)) % n; qRender(); } }
       else if (e.key === 'Enter') { e.preventDefault(); qPick(qs.idx); }
       else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); qClose(); }
+    });
+    // the caret moved without an edit (arrow keys, Home/End): the popup follows the token under it
+    document.addEventListener('keyup', function (e) {
+      if (e.target.id === 'cbox' && own(e.target) && /^(ArrowLeft|ArrowRight|Home|End)$/.test(e.key)) mentionSync();
+    });
+    // a row is picked on mousedown, so the box keeps focus and its caret
+    $('tkmpop').addEventListener('mousedown', function (e) {
+      e.preventDefault();
+      var o = e.target.closest('[data-mp]');
+      if (o) mentionPick(Number(o.getAttribute('data-mp')));
+    });
+    $('tkmpop').addEventListener('mousemove', function (e) {
+      var o = e.target.closest('[data-mp]'), i = o && Number(o.getAttribute('data-mp'));
+      if (o && MP && i !== MP.idx) { MP.idx = i; mentionDraw($('cbox')); }
     });
     $('tkqpop').addEventListener('mousemove', function (e) {
       var o = e.target.closest('[data-qi]'), i = o && Number(o.getAttribute('data-qi'));
@@ -3112,7 +3264,16 @@
         if (id === 'iw-etitle' || id === 'iw-eproj') { if (plain || chord) { e.preventDefault(); saveEdit(); } else if (esc1) { e.preventDefault(); endEdit(); } return; }
         if (id === 'iw-ebody') { if (chord) { e.preventDefault(); saveEdit(); } else if (esc1) { e.preventDefault(); endEdit(); } return; }
         if (id === 'tkcedit') { if (chord) { e.preventDefault(); saveCedit(); } else if (esc1) { e.preventDefault(); endCedit(); } return; }
-        if (id === 'cbox' && chord) { e.preventDefault(); if ($('tkcsend')) quick('comment', $('tkcsend')); return; }
+        if (id === 'cbox') {
+          // the Enter that commits an IME composition neither picks a member nor sends
+          if (e.isComposing || e.keyCode === 229) return;
+          if (MP && MP.ids.length) {
+            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); MP.idx = (MP.idx + (e.key === 'ArrowDown' ? 1 : MP.ids.length - 1)) % MP.ids.length; mentionDraw(t); return; }
+            if ((e.key === 'Enter' || e.key === 'Tab') && !e.shiftKey) { e.preventDefault(); mentionPick(MP.idx); return; }
+          }
+          if (MP && esc1) { e.preventDefault(); mentionClose(); return; }
+          if (chord) { e.preventDefault(); if ($('tkcsend')) quick('comment', $('tkcsend')); return; }
+        }
       }
       // Esc in the search box clears it first; with it empty, Esc goes on to close the window or the drawer
       if (e.key === 'Escape' && e.target.id === 'psearch' && e.target.value && own(e.target)) { e.preventDefault(); panelState().q = ''; render(); if ($('psearch')) $('psearch').focus(); return; }
@@ -3129,7 +3290,7 @@
       if (ui.win) closeItemWindow(); else if (ui.open) collapse();
     });
     // the layout follows the width: re-render when it crosses a breakpoint, else refit
-    window.addEventListener('resize', function () { if (MN) closeMenu(false); if (layoutOf() !== ui.layout) render(); else { if (!ui.page) fitDrawer(); measure(); } });
+    window.addEventListener('resize', function () { if (MN) closeMenu(false); if (MP) mentionSync(); if (layoutOf() !== ui.layout) render(); else { if (!ui.page) fitDrawer(); measure(); } });
     // the store page route: reload on #/<storeId> restores the page; back and forward follow the hash
     window.addEventListener('hashchange', applyRoute);
     window.addEventListener('popstate', function () { if (routeStore() !== ui.page) applyRoute(); });
