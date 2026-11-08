@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"html/template"
 	"path/filepath"
 	"strings"
 	"time"
@@ -56,21 +57,9 @@ func (src *DashboardSessionSource) ReadPageLang(reg wsdashboard.Registration, la
 	page.Seq = record.Whiteboard.Seq
 	// BuildView only reads the state: the served page never begins a render
 	// or writes a file, so the stored board and the static page are untouched.
-	view := wswhiteboard.BuildView(record.Whiteboard, wswhiteboard.ViewInput{
-		Layout:   wswhiteboard.LayoutFull,
-		ReplyID:  reg.ReplyID,
-		Panels:   servedWhiteboardPanels(record, key, reg.ReplyID, lang),
-		FileText: servedFileText(record.Root),
-		ImageSrc: func(path string) string {
-			return wsdashboard.ImageSrc(record.Root, reg.ReplyID, path)
-		},
-		// A topic body renders in a sandboxed frame that sends no cookie, so
-		// its images are inlined rather than loaded through the image route.
-		DocImageSrc: func(path string) string {
-			return wsdashboard.ImageDataURL(record.Root, path)
-		},
-		FileActions: wsdashboard.FileActions(record.Root, reg.ReplyID),
-	})
+	in := servedViewInput(record, reg.ReplyID)
+	in.Panels = servedWhiteboardPanels(record, key, reg.ReplyID, lang)
+	view := wswhiteboard.BuildView(record.Whiteboard, in)
 	view.Lang = lang
 	regions, err := wswhiteboard.RenderRegions(view)
 	if err != nil {
@@ -79,6 +68,47 @@ func (src *DashboardSessionSource) ReadPageLang(reg wsdashboard.Registration, la
 	}
 	page.Board = regions
 	return page, true
+}
+
+var _ wsdashboard.ClosedTopicsSource = (*DashboardSessionSource)(nil)
+
+// ReadClosedTopics renders n of the closed topics the served board leaves
+// past its cap, from index from, under the served page's link rule; false
+// when the session is gone or has no board.
+func (src *DashboardSessionSource) ReadClosedTopics(reg wsdashboard.Registration, lang string, from, n int) (template.HTML, bool) {
+	_, _, record, ok := src.lookupRecord(reg)
+	if !ok || record.Whiteboard == nil {
+		return "", false
+	}
+	in := servedViewInput(record, reg.ReplyID)
+	in.Closed = &wswhiteboard.ClosedWindow{From: from, N: n}
+	view := wswhiteboard.BuildView(record.Whiteboard, in)
+	view.Lang = lang
+	html, err := wswhiteboard.RenderClosedTopics(view)
+	if err != nil {
+		appendDebugEvent("dashboard.page_render_failed", map[string]any{"error": err.Error()})
+		return "", false
+	}
+	return html, true
+}
+
+// servedViewInput is the served page's view input for a session record,
+// without its panels: a full layout under the served page's link rule.
+func servedViewInput(record sessionRecord, replyID string) wswhiteboard.ViewInput {
+	return wswhiteboard.ViewInput{
+		Layout:   wswhiteboard.LayoutFull,
+		ReplyID:  replyID,
+		FileText: servedFileText(record.Root),
+		ImageSrc: func(path string) string {
+			return wsdashboard.ImageSrc(record.Root, replyID, path)
+		},
+		// A topic body renders in a sandboxed frame that sends no cookie, so
+		// its images are inlined rather than loaded through the image route.
+		DocImageSrc: func(path string) string {
+			return wsdashboard.ImageDataURL(record.Root, path)
+		},
+		FileActions: wsdashboard.FileActions(record.Root, replyID),
+	}
 }
 
 // servedWhiteboardPanels builds the full page's panels for the served page.

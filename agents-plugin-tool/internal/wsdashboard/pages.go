@@ -700,7 +700,7 @@ func (d *Daemon) handleIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleSessionRoutes serves everything under /s/: a session page, its SSE
-// stream, its image, file view, history, and attachment routes, its message,
+// stream, its image, file view, history, closed-topic, and attachment routes, its message,
 // cancel, steer, interrupt, system-open, and git refresh routes, and the
 // shared assets a page loads by relative path.
 func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
@@ -738,6 +738,8 @@ func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 		d.handleFile(w, r, replyID)
 	case sub == "history":
 		d.handleHistory(w, r, replyID)
+	case sub == "closed":
+		d.handleClosedTopics(w, r, replyID)
 	case strings.HasPrefix(sub, "attachment/"):
 		d.handleAttachment(w, r, replyID, strings.TrimPrefix(sub, "attachment/"))
 	default:
@@ -817,6 +819,56 @@ func (d *Daemon) handleHistory(w http.ResponseWriter, r *http.Request, replyID s
 		return
 	}
 	raw, _ := json.Marshal(historyAnswer{HTML: renderedEntries(cv.Entries), Before: page.Before, End: page.End})
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	_, _ = w.Write(raw)
+}
+
+// closedPageMax bounds one closed-topic page's n: a page that re-fetches
+// every closed topic it had shown after a board swap asks for them at once.
+const closedPageMax = 10 * wswhiteboard.ClosedCap
+
+// handleClosedTopics serves /s/<reply-id>/closed?from=<index>&n=<count>: n
+// (default wswhiteboard.ClosedCap) of the closed topics the board leaves
+// past its cap, from index from in close order, the most recently closed
+// first, rendered as the board renders them (ClosedTopicsSource), with the
+// next show-more control when more remain. It is read-only and serves what
+// the session page shows, so it takes the page's own access rule.
+func (d *Daemon) handleClosedTopics(w http.ResponseWriter, r *http.Request, replyID string) {
+	query := r.URL.Query()
+	from, err := strconv.Atoi(query.Get("from"))
+	if err != nil || from < 1 {
+		http.Error(w, "from must be a positive index", http.StatusBadRequest)
+		return
+	}
+	n := wswhiteboard.ClosedCap
+	if raw := query.Get("n"); raw != "" {
+		v, err := strconv.Atoi(raw)
+		if err != nil || v < 1 {
+			http.Error(w, "n must be a positive count", http.StatusBadRequest)
+			return
+		}
+		n = min(v, closedPageMax)
+	}
+	// The daemon's source is agentSessions, which forwards to the configured
+	// one; a source without closed topics answers not found.
+	src, hasClosed := d.source.(ClosedTopicsSource)
+	var s Session
+	ok := hasClosed && d.index != nil && ValidReplyID(replyID)
+	if ok {
+		s, ok = d.index.Session(replyID)
+	}
+	var html template.HTML
+	if ok {
+		lang, _ := requestLang(r)
+		html, ok = src.ReadClosedTopics(s.Registration, lang, from, n)
+	}
+	if !ok {
+		http.Error(w, "unknown session", http.StatusNotFound)
+		return
+	}
+	raw, _ := json.Marshal(map[string]string{"html": string(wswhiteboard.ThemeFrames(html, requestTheme(r)))})
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")

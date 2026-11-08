@@ -42,7 +42,7 @@ Every tag carries the prefix `wb:` and follows the command syntax rules.
 | `wb:patch` | `id`, `status?`, `clear?` | any `wb:add` field, each replacing that field |
 | `wb:topic` | `name` | the topic's body, replaced whole; empty clears it |
 | `wb:edit` | `topic`, `replace_all?` | fields `wb:old`, `wb:new` |
-| `wb:close` | `topic` | none |
+| `wb:close` | `topic`, `result` | none |
 | `wb:floor` | `id` | none |
 | `wb:embed-dir` | `path` | none |
 
@@ -61,7 +61,7 @@ Every tag carries the prefix `wb:` and follows the command syntax rules.
 ## Context
 Markdown up to the closing tag.
 </wb:topic>
-<wb:close topic="Old scope"/>
+<wb:close topic="Old scope" result="Folded into Rollout."/>
 ```
 
 - `class`: `policy`, `technical`, or `announced`, the classes of the workflow
@@ -109,8 +109,12 @@ Markdown up to the closing tag.
   topic's count chip. Options change only on an open item, since an answer
   is stored as an option letter.
 - `wb:close` collapses a topic's settled items and its body; the topic needs
-  an item or a body. Adding an item to a closed topic, or changing its body,
-  reopens it.
+  an item or a body. `result` is required: one sentence saying how the topic
+  ended, shown dimmed beside the closed topic's name. Adding an item to a
+  closed topic, or changing its body, reopens it and hides the result; the
+  next close replaces it. Closed topics with nothing waiting on the user go
+  last, most recently closed first; past 30, the dashboard page loads the
+  rest on request and the file page and embed print how many are left out.
 - Topic body: one per topic, rendered above its items, for context that
   outlasts a chat reply: background, the shape of a decision, a diagram; a
   topic may hold a body and no items. `wb:topic` replaces the body whole,
@@ -179,6 +183,8 @@ Record each item through `wb:answer`, its body that item's segment of the
 reply: `(64) a, note: <text>` records the value `a, <text>`, and `(44), (45)
 ok` records `ok` on both with one `ids="44 45"` command (an `assumed` policy
 item records its option letter again), quoting the whole group. A reply that
-names no ID gets your reading with `assumed="true"`.
+names no ID gets your reading with `assumed="true"`. A `[<topic>] <text>`
+line is the user's comment or question about that topic, from its note pen;
+answer it in that topic, with no item ID needed.
 
 Confirmed decisions reach a ticket only through `{{.SkillNamespace}}:lead-ticket`, once the user moves to capture; the board clears with the session key.

@@ -34,7 +34,7 @@ func staleBoard(t *testing.T) *State {
 	st := &State{}
 	applyAt(t, st, `<wb:add class="technical" topic="W"><wb:title>waits</wb:title></wb:add>
 <wb:add class="technical" topic="S"><wb:title>assumed</wb:title></wb:add>`+
-		bodies("A", "B", "D", "E", "F", "X")+`<wb:close topic="X"/>`, testNow)
+		bodies("A", "B", "D", "E", "F", "X")+`<wb:close topic="X" result="done"/>`, testNow)
 	applyAt(t, st, `<wb:answer id="2" value="ok" assumed="true">fine</wb:answer>`, testNow)
 	applyAt(t, st, `<wb:topic name="F">new body of F</wb:topic>`, testNow.Add(30*time.Minute))
 	return st
@@ -55,7 +55,7 @@ func TestStaleNudgeNamesStaleTopicsOnly(t *testing.T) {
 
 func TestStaleNudgeNeedsFiveOpenTopics(t *testing.T) {
 	st := &State{}
-	applyAt(t, st, bodies("A", "B", "C", "D", "E")+`<wb:close topic="E"/>`, testNow)
+	applyAt(t, st, bodies("A", "B", "C", "D", "E")+`<wb:close topic="E" result="done"/>`, testNow)
 	if out := applyAt(t, st, ``, testNow.Add(2*time.Hour)); out.Info != "" {
 		t.Fatalf("four open topics must not nudge; info = %q", out.Info)
 	}

@@ -164,6 +164,10 @@
   "js.viewer.original": "Abrir o original em uma nova guia",
   "js.viewer.zoomin": "Aumentar zoom",
   "js.viewer.zoomout": "Diminuir zoom",
+  "js.wb.ago.day": "há {0} d",
+  "js.wb.ago.hour": "há {0} h",
+  "js.wb.ago.min": "há {0} min",
+  "js.wb.ago.now": "agora mesmo",
   "lan.note": "Somente esta máquina vê o token. Exclua {0} para emitir um novo.",
   "lan.on": "O acesso pela LAN está ativado.",
   "lan.open": "Abra este painel em outro dispositivo desta rede com seu token de acesso:",
@@ -231,6 +235,8 @@
   "wb.assumed.title": "presumido: confirme ou corrija",
   "wb.banner": "quadro atualizado; o recarregamento foi adiado enquanto você responde",
   "wb.closed": "fechado",
+  "wb.closed.more": "mais {0} tópicos fechados não exibidos",
+  "wb.closed.showmore": "mostrar mais tópicos fechados ({0})",
   "wb.confirm": "confirmar",
   "wb.copy": "copiar respostas",
   "wb.correct": "corrigir",
@@ -243,7 +249,10 @@
   "wb.quote": "suas palavras",
   "wb.read": "a leitura do líder",
   "wb.rec": "recomendação",
+  "wb.result": "como o tópico terminou",
   "wb.settled": "resolvido",
   "wb.settled.older": "itens resolvidos anteriores",
-  "wb.title": "Quadro branco"
+  "wb.title": "Quadro branco",
+  "wb.topic.note": "nota sobre este tópico",
+  "wb.updated": "última alteração"
 }

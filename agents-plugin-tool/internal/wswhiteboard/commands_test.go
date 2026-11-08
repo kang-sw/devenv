@@ -155,7 +155,7 @@ func TestAttributeValuesAreQuotedAndNeverDecoded(t *testing.T) {
 	// A topic name with a quote or entity is the same topic everywhere.
 	st := &State{}
 	mustApply(t, st, `<wb:add class="technical" topic='say "hi" &amp; <go>'><wb:title>x</wb:title></wb:add>`+
-		`<wb:topic name='say "hi" &amp; <go>'>body</wb:topic><wb:close topic='say "hi" &amp; <go>'/>`)
+		`<wb:topic name='say "hi" &amp; <go>'>body</wb:topic><wb:close topic='say "hi" &amp; <go>' result="done"/>`)
 	if st.Items[0].Topic != `say "hi" &amp; <go>` || st.TopicBody(`say "hi" &amp; <go>`) != "body" || !st.topicClosed(`say "hi" &amp; <go>`) {
 		t.Fatalf("state = %+v", st)
 	}
@@ -200,7 +200,7 @@ func TestUnknownTagsAttributesAndStructureAreProblems(t *testing.T) {
 		"unknown command":            {`<wb:nope x="1">body</wb:nope>`, "command 1 <wb:nope> (line 1): unknown command"},
 		"unprefixed command":         {`<add class="policy" topic="t"/>`, "command 1 <add> (line 1): unknown command"},
 		"unknown self-closing":       {`<wb:nope/>`, "unknown command"},
-		"unknown attribute":          {`<wb:close topic="t" force="1"/>`, "unknown attribute force (known: topic)"},
+		"unknown attribute":          {`<wb:close topic="t" force="1"/>`, "unknown attribute force (known: topic, result)"},
 		"attribute on a field":       {`<wb:add class="technical" topic="t"><wb:title lang="ko">x</wb:title></wb:add>`, "command 1 <wb:add> (line 1) field <wb:title>: unknown attribute lang (it takes none)"},
 		"attribute given twice":      {`<wb:close topic="a" topic="b"/>`, "attribute topic given twice"},
 		"unknown field":              {`<wb:add class="technical" topic="t"><wb:subtitle>x</wb:subtitle></wb:add>`, "unknown field <wb:subtitle> (fields: "},
@@ -236,7 +236,7 @@ func TestUnknownTagsAttributesAndStructureAreProblems(t *testing.T) {
 // before it are still validated.
 func TestRefusalListsEveryProblemSoFar(t *testing.T) {
 	st := &State{}
-	problems := refused(t, st, "<wb:nope/>\nstray\n</wb:add>\n<wb:close topic=\"missing\"/>\n<wb:add class=\"bad\" topic=\"t\"><wb:title>x</wb:title></wb:add>")
+	problems := refused(t, st, "<wb:nope/>\nstray\n</wb:add>\n<wb:close topic=\"missing\" result=\"done\"/>\n<wb:add class=\"bad\" topic=\"t\"><wb:title>x</wb:title></wb:add>")
 	wantProblems(t, problems,
 		"command 1 <wb:nope> (line 1): unknown command",
 		`line 2: text outside a command: "stray"`,
@@ -244,7 +244,7 @@ func TestRefusalListsEveryProblemSoFar(t *testing.T) {
 		`command 2 <wb:close> (line 4) topic: no item or topic body has topic "missing"`,
 		"command 3 <wb:add> (line 5) class: must be one of",
 	)
-	problems = refused(t, st, "<wb:close topic=\"missing\"/>\n<wb:topic name=\"t\">never closed")
+	problems = refused(t, st, "<wb:close topic=\"missing\" result=\"done\"/>\n<wb:topic name=\"t\">never closed")
 	wantProblems(t, problems,
 		`command 1 <wb:close> (line 1) topic: no item or topic body has topic "missing"`,
 		"line 2: <wb:topic> has no closing </wb:topic>",

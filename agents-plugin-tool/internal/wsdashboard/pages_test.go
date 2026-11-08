@@ -23,10 +23,12 @@ type pageFake struct {
 	*fakeSource
 	mu    sync.Mutex
 	pages map[string]PageContent
+	// boards are the whiteboards ReadClosedTopics renders from.
+	boards map[string]*wswhiteboard.State
 }
 
 func newPageFake() *pageFake {
-	return &pageFake{fakeSource: newFakeSource(), pages: map[string]PageContent{}}
+	return &pageFake{fakeSource: newFakeSource(), pages: map[string]PageContent{}, boards: map[string]*wswhiteboard.State{}}
 }
 
 func (p *pageFake) ReadPage(reg Registration) (PageContent, bool) {
