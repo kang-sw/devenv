@@ -104,16 +104,29 @@ func relativeInside(root, path string) (string, bool) {
 		return "", false
 	}
 	root = filepath.Clean(root)
-	native := filepath.FromSlash(path)
-	if !filepath.IsAbs(native) {
-		native = filepath.Join(root, native)
-	}
-	rel, err := filepath.Rel(root, filepath.Clean(native))
+	rel, err := filepath.Rel(root, resolveAgainst(root, filepath.FromSlash(path)))
 	if err != nil || !insideRel(rel) {
 		return "", false
 	}
 	return rel, true
 }
+
+// resolveAgainst resolves the native path against root, cleaned: an
+// absolute path stays itself and any other joins root, except a rooted one
+// (\etc\hosts on Windows, absolute on the current drive rather than
+// relative), which takes root's volume. On Unix a rooted path is absolute.
+func resolveAgainst(root, native string) string {
+	switch {
+	case filepath.IsAbs(native):
+		return filepath.Clean(native)
+	case isRooted(native):
+		return filepath.Clean(filepath.VolumeName(root) + native)
+	}
+	return filepath.Join(root, native)
+}
+
+// isRooted reports whether the native path starts at a root directory.
+func isRooted(native string) bool { return native != "" && os.IsPathSeparator(native[0]) }
 
 // insideRel reports whether a filepath.Rel result names an entry strictly
 // below its base.

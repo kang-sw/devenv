@@ -322,7 +322,9 @@ func TestCancelReturnsImagesAndAResendReferencesThem(t *testing.T) {
 	for _, ref := range []string{"../../registration.json", "0123456789abcdef-1.png", "x.png", filepath.Join(f.attachDir(), ans.Images[0])} {
 		r, _ := json.Marshal([]string{ref})
 		code, raw := f.postMessage(t, `{"text":"bad ref","refs":`+string(r)+`}`)
-		if code != http.StatusBadRequest || !strings.Contains(raw, ref) {
+		// The refusal quotes the ref (%q), which doubles a Windows path's
+		// backslashes.
+		if code != http.StatusBadRequest || !strings.Contains(raw, strconv.Quote(ref)) {
 			t.Errorf("ref %q = %d (%s), want 400 naming it", ref, code, strings.TrimSpace(raw))
 		}
 	}
