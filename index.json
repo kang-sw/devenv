@@ -4,28 +4,8 @@
     "last_gc": "2026-10-26T10:43:26Z"
   },
   "registrations": {
-    "260512-research-claude-cli-stream-json": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:02:25Z"
-      }
-    },
     "260513-feat-runtime-binary-staging-copy": {
       "registered_at": "2026-09-24T10:38:33Z"
-    },
-    "260513-research-dual-mcp-startup-order": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:07:15Z"
-      }
     },
     "260513-research-streamable-http-mcp-transport": {
       "registered_at": "2026-09-24T10:38:33Z"
@@ -36,216 +16,26 @@
     "260524-epic-async-exec-job-surface": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
-    "260524-feat-exec-output-ask": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:07:21Z"
-      }
-    },
     "260605-epic-ws-playbook-factory-pivot": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
     "260605-research-ws-native-subagent-pivot": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
-    "260610-chore-wsflow-explore-playbook-mirroring": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:03:21Z"
-      }
-    },
-    "260611-bug-rsrc-manifest-regen-missed-after-shipped-edit": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:03:27Z"
-      }
-    },
-    "260611-research-ws-per-role-delegation-tuning-config": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:07:27Z"
-      }
-    },
-    "260616-epic-api-namespace-documentation-memory-tooling": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:13:48Z"
-      }
-    },
-    "260625-research-fork-posture-leak-system-guarantee": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:07:33Z"
-      }
-    },
     "260626-research-playbook-print-lead-surface-leak": {
       "registered_at": "2026-09-24T10:38:33Z"
-    },
-    "260626-research-ws-todo-stack-nesting-model": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:07:38Z"
-      }
-    },
-    "260627-research-lead-proceed-route-matrix-authoring": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:07:44Z"
-      }
-    },
-    "260629-research-fork-worker-persona-bleed": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:07:50Z"
-      }
     },
     "260703-bug-claude-plugin-cache-stuck-below-source-version-mcp-refuses-start": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
-    "260703-chore-review-delegates-true-classification": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:07:56Z"
-      }
-    },
-    "260708-feat-lead-revive-hook-replacement": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:03:33Z"
-      }
-    },
-    "260708-research-lead-revive-low-salience": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:03:38Z"
-      }
-    },
-    "260710-bug-release-downstream-plugin-layout-untested": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:03:44Z"
-      }
-    },
-    "260721-bug-codex-spawn-schema-routing-field-drift": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:03:50Z"
-      }
-    },
     "260721-bug-review-partition-empty-artifact": {
       "registered_at": "2026-09-24T10:38:33Z"
-    },
-    "260722-feat-goal-run-autonomy-posture": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:08:01Z"
-      }
     },
     "260723-research-reviewer-worktree-isolation": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
-    "260723-research-spec-collocator-subagent": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:08:07Z"
-      }
-    },
-    "260724-bug-ws-git-commit-verify-fails-on-staged-rename": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:03:56Z"
-      }
-    },
     "260724-bug-ws-mcp-local-devenv-compat-stamp-not-persisting": {
       "registered_at": "2026-09-24T10:38:33Z"
-    },
-    "260725-research-goal-loop-restart-starved-by-background-delegation": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:08:13Z"
-      }
-    },
-    "260726-bug-playbook-render-serves-stale-prompt-text": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:13:53Z"
-      }
     },
     "260726-feat-enter-verdict-scenario-output": {
       "registered_at": "2026-09-24T10:38:33Z"
@@ -259,68 +49,8 @@
     "260726-feat-ws-cli-lenient-tool-name-resolution": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
-    "260726-research-review-loop-nonclean-generator": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:08:19Z"
-      }
-    },
-    "260726-research-skill-prose-compression-ceiling": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:08:25Z"
-      }
-    },
-    "260726-research-spec-planned-marker-management-cost": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:08:30Z"
-      }
-    },
-    "260727-bug-goal-step-blocker-detection-ignores-resolution": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:04:02Z"
-      }
-    },
-    "260727-bug-review-findings-file-rewritten-on-disposition": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:08:36Z"
-      }
-    },
     "260727-bug-string-match-guards-miss-reworded-directives": {
       "registered_at": "2026-09-24T10:38:33Z"
-    },
-    "260727-refactor-implementer-delegate-shared-base": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:08:42Z"
-      }
     },
     "260728-bug-chmod-based-tests-skip-silently": {
       "registered_at": "2026-09-24T10:38:33Z"
@@ -328,207 +58,17 @@
     "260728-research-duplicate-ticket-stem-silent-resolve": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
-    "260728-research-index-ticket-table-drift": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:08:48Z"
-      }
-    },
-    "260728-research-marker-retirement-instruction-no-check": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:08:54Z"
-      }
-    },
-    "260728-research-mcp-json-surface-removal-deprecation": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:09:00Z"
-      }
-    },
-    "260728-research-parallel-workflow-guide-divergence": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:04:08Z"
-      }
-    },
-    "260728-research-presentation-artifact-convention-policy": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:09:06Z"
-      }
-    },
     "260728-research-ticket-graph-load-cost-commit-path": {
       "registered_at": "2026-09-24T10:38:33Z"
-    },
-    "260729-bug-git-commit-omits-mental-model-checkpoint": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:09:11Z"
-      }
     },
     "260729-feat-workflow-manual-submodule-detection": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
-    "260729-research-implement-router-prose-only-dimension": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:09:17Z"
-      }
-    },
-    "260729-research-survey-plan-scope-and-plan-depth-signal": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:09:23Z"
-      }
-    },
     "260730-refactor-retire-goal-fan-out-step-and-session-note": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
-    "260730-research-orca-plugin-ws-workflow-surface": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:09:29Z"
-      }
-    },
-    "260730-research-ws-dashboard-drop-for-orca": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:04:14Z"
-      }
-    },
-    "260731-bug-dashboard-drop-property-scan-implementation-branch": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:09:34Z"
-      }
-    },
-    "260731-bug-implementer-ticket-result-read-authorization": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:04:19Z"
-      }
-    },
-    "260731-bug-todo-check-parallel-response-staleness": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:09:40Z"
-      }
-    },
-    "260802-research-ws-pi-native-framework": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:04:25Z"
-      }
-    },
-    "260806-bug-drain-select-primitive-unbound": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:10:16Z"
-      }
-    },
-    "260811-bug-skills-manifest-regen-missing-from-authoring-procedure": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:04:32Z"
-      }
-    },
-    "260812-bug-wsflow-runtime-contract-missing-note-mute": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:04:37Z"
-      }
-    },
     "260812-research-reload-plugins-keeps-stale-mcp-binary": {
       "registered_at": "2026-09-24T10:38:33Z"
-    },
-    "260823-bug-testmain-ws-skills-root-default": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:04:43Z"
-      }
-    },
-    "260823-bug-workflow-manual-test-fixture-missing-prefer-subagent-skill": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:10:21Z"
-      }
     },
     "260824-epic-review-watermark-model": {
       "registered_at": "2026-09-24T10:38:33Z"
@@ -536,153 +76,30 @@
     "260827-bug-codex-plugin-cache-missing-rsrc-manifest": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
-    "260828-bug-reviewer-playbook-render-context-contract": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:10:27Z"
-      }
-    },
-    "260828-bug-sage-stamp-leaves-blocked-section": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:05:05Z"
-      }
-    },
     "260829-research-review-checkpoint-relief-valve": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
     "260829-research-review-watermark-multi-maintainer-model": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
-    "260830-bug-proceed-continuation-replays-stale-done-target": {
+    "260831-chore-remove-orphaned-review-adjudicator-delegate": {
       "registered_at": "2026-09-24T10:38:33Z",
       "lease": {
         "email": "ki6080@gmail.com",
         "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
+        "track": "delegate/remove-orphan-surfaces",
         "phase": "closed",
-        "touched_at": "2026-11-08T08:10:33Z"
+        "touched_at": "2026-11-08T08:30:55Z"
       }
-    },
-    "260831-chore-remove-orphaned-review-adjudicator-delegate": {
-      "registered_at": "2026-09-24T10:38:33Z"
     },
     "260831-research-ai-phase-over-granularity-review-load": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
-    "260901-bug-enter-proceed-misplaced-facts-silent-unknown-status": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:10:39Z"
-      }
-    },
     "260901-bug-ticket-scanner-silently-skips-noncanonical-status-dir": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
-    "260901-research-enter-tool-direct-call-affordance-rename": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:10:45Z"
-      }
-    },
-    "260903-feat-human-relay-interactive-gate": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:13:59Z"
-      }
-    },
-    "260904-bug-stale-proceed-dispatch-contract-test": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:10:51Z"
-      }
-    },
-    "260904-bug-subagent-worktree-head-detach-orphans-commits": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:05:11Z"
-      }
-    },
     "260904-refactor-cli-subcommand-verb-alignment": {
       "registered_at": "2026-09-24T10:38:33Z"
-    },
-    "260904-refactor-mental-model-doc-drift-epic-renames": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:10:57Z"
-      }
-    },
-    "260904-research-mental-models-query-reconciliation": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:11:03Z"
-      }
-    },
-    "260906-workset-ws-pi-dogfood-ux": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:05:17Z"
-      }
-    },
-    "260907-feat-ws-tickets-query-pagination-and-keyword-ranking": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:11:08Z"
-      }
-    },
-    "260907-research-ws-pi-extreme-delegation-lead-profile": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:11:14Z"
-      }
     },
     "260908-epic-ws-pi-subagent-conversation-view": {
       "registered_at": "2026-09-24T10:38:33Z"
@@ -693,16 +110,6 @@
     "260908-feat-ws-pi-down-arrow-into-agent-picker": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
-    "260908-research-ws-pi-agent-driven-branch-summary-return": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:11:20Z"
-      }
-    },
     "260908-research-ws-pi-lifecycle-race-monitoring": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
@@ -712,114 +119,14 @@
     "260910-feat-ws-agent-list-bounded-output": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
-    "260911-bug-implement-route-reuses-prior-phase-branch": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:05:29Z"
-      }
-    },
-    "260911-epic-ws-pi-refound-resync-harness-peer": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:05:23Z"
-      }
-    },
-    "260911-research-batch-promotion-cross-ticket-coherence-gap": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:11:26Z"
-      }
-    },
-    "260911-research-epic-close-on-last-child-prompt": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:11:32Z"
-      }
-    },
     "260911-research-golden-fixture-verification-gap": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
     "260911-research-impl-lifecycle-merge-authority-goal-loop-rehoming": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
-    "260911-research-lead-commit-guard-during-worker-run": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:11:37Z"
-      }
-    },
-    "260911-research-ticket-decision-state-convention-gap": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:11:43Z"
-      }
-    },
     "260912-bug-ticket-query-point-resolve-terminal-status": {
       "registered_at": "2026-09-24T10:38:33Z"
-    },
-    "260912-bug-ws-todo-concurrent-updates-lose-write": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:11:49Z"
-      }
-    },
-    "260912-research-git-merge-epic-develop-boundary": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:11:55Z"
-      }
-    },
-    "260912-research-git-merge-release-target-policy": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:12:01Z"
-      }
-    },
-    "260912-research-september-active-ticket-inventory-triage": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:12:06Z"
-      }
     },
     "260913-bug-ticket-guardrails-dont-enforce-category-enum": {
       "registered_at": "2026-09-24T10:38:33Z"
@@ -827,111 +134,11 @@
     "260913-bug-ws-pi-spawn-delegation-metadata-second-write-rejection": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
-    "260913-research-codex-hook-trust-persistence": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:14:05Z"
-      }
-    },
-    "260913-research-cross-session-mailbox": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:05:34Z"
-      }
-    },
-    "260913-research-promotion-dependency-landing-gate": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:12:15Z"
-      }
-    },
-    "260914-bug-pi-execute-worker-resume-session-home-unavailable": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:14:11Z"
-      }
-    },
-    "260915-bug-pi-bridge-bundled-tool-count": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:12:21Z"
-      }
-    },
     "260915-bug-ticket-move-parallel-index-lock-contention": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
     "260915-bug-ticket-worker-serial-route-acquires-extra-worktree": {
       "registered_at": "2026-09-24T10:38:33Z"
-    },
-    "260915-bug-ws-ticket-facts-new-public-symbol-likely-enum": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:05:40Z"
-      }
-    },
-    "260915-bug-ws-tickets-close-operates-on-server-cwd-not-worktree": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:12:27Z"
-      }
-    },
-    "260915-research-lead-run-tier-selection-qualitative": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:12:32Z"
-      }
-    },
-    "260916-bug-exec-mcp-windows-tempdir-cleanup-race": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:05:46Z"
-      }
-    },
-    "260916-research-lead-run-per-phase-context-and-dispatch": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:14:17Z"
-      }
     },
     "260916-research-pi-ts-suite-outside-release-ci-contract-rot": {
       "registered_at": "2026-09-24T10:38:33Z"
@@ -939,71 +146,11 @@
     "260916-research-rationale-query-ranking-precision": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
-    "260917-bug-ticket-close-checker-result-heading-level-drift": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:05:52Z"
-      }
-    },
-    "260917-bug-windows-smoke-servestdio-exit-timing-flake": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:05:58Z"
-      }
-    },
     "260918-chore-pi-mailbox-waiter-epoch-race-test-coverage": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
-    "260918-feat-route-implement-shared-branch-continuation-override": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:06:03Z"
-      }
-    },
     "260919-bug-tickets-close-scope-blocked-not-noop-on-old-git": {
       "registered_at": "2026-09-24T10:38:33Z"
-    },
-    "260919-research-mailbox-remote-control-target-arm-condition": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:12:38Z"
-      }
-    },
-    "260919-research-mini-lead-intra-ticket-orchestration": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:06:09Z"
-      }
-    },
-    "260920-bug-pi-nested-subagent-terminal-delivery-stall": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:13:12Z"
-      }
     },
     "260920-bug-pi-rpc-child-stderr-cascades-into-tui": {
       "registered_at": "2026-09-24T10:38:33Z"
@@ -1026,26 +173,6 @@
     "260921-refactor-pi-shared-atomic-write-util": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
-    "260923-bug-pi-execute-approval-accepted-worker-hangs": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:13:18Z"
-      }
-    },
-    "260923-bug-pi-fork-owner-thread-windows-instability": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:13:24Z"
-      }
-    },
     "260923-bug-worktree-acquire-concurrent-pool-claim": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
@@ -1054,16 +181,6 @@
     },
     "260924-bug-pi-removal-claim-abandonment-and-generation": {
       "registered_at": "2026-09-24T12:38:53Z"
-    },
-    "260924-research-origin-ticket-ownership-index": {
-      "registered_at": "2026-11-08T08:06:15Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:06:15Z"
-      }
     },
     "260925-bug-ticket-index-move-guard-silent-during-absence-ttl": {
       "registered_at": "2026-09-25T06:27:11Z"
@@ -1074,16 +191,6 @@
     "260926-bug-parallel-workers-collide-on-shared-git-stash": {
       "registered_at": "2026-09-26T04:40:03Z"
     },
-    "260926-bug-wsindex-hang-transport-stop-wait-fails-on-local-windows-host": {
-      "registered_at": "2026-09-26T02:02:01Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:14:22Z"
-      }
-    },
     "260927-bug-code-reviewer-spawn-requires-undocumented-write-scope": {
       "registered_at": "2026-09-27T01:49:52Z"
     },
@@ -1092,26 +199,6 @@
     },
     "260928-bug-pi-exec-windows-timeout-orphans-git-bash-child": {
       "registered_at": "2026-09-28T07:57:19Z"
-    },
-    "260930-bug-close-lease-prune-test-tempdir-cleanup-flake": {
-      "registered_at": "2026-11-08T08:14:28Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:14:28Z"
-      }
-    },
-    "260930-bug-lead-run-parallel-merge-before-release-orphans-branch": {
-      "registered_at": "2026-09-30T01:10:57Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:06:21Z"
-      }
     },
     "260930-bug-wsconfig-writer-replaces-symlinked-config": {
       "registered_at": "2026-09-30T02:49:06Z"
@@ -1134,28 +221,8 @@
     "261003-research-typed-decision-model-new-domains": {
       "registered_at": "2026-10-03T03:19:31Z"
     },
-    "261004-bug-pi-identical-summary-compaction-event": {
-      "registered_at": "2026-10-04T10:35:29Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:06:32Z"
-      }
-    },
     "261004-research-pi-reviewer-report-scope-discovery": {
       "registered_at": "2026-10-04T03:10:48Z"
-    },
-    "261007-bug-mailbox-tests-leak-ambient-ws-mailbox-env": {
-      "registered_at": "2026-10-07T14:15:57Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:13:42Z"
-      }
     },
     "261007-bug-pi-fork-lineage-keeps-bootstrap-key-after-adoption": {
       "registered_at": "2026-10-07T08:41:34Z"
@@ -1180,16 +247,6 @@
     },
     "261008-bug-pi-display-summary-silent-dogfood": {
       "registered_at": "2026-10-08T00:33:33Z"
-    },
-    "261008-bug-pi-native-summary-background": {
-      "registered_at": "2026-10-08T02:01:01Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:06:43Z"
-      }
     },
     "261008-bug-pi-windows-python3-store-stub-blocks-release-ws": {
       "registered_at": "2026-10-08T13:23:41Z"
@@ -1242,16 +299,6 @@
     "261028-research-claude-mod-statusline-band": {
       "registered_at": "2026-10-28T06:25:12Z"
     },
-    "261029-bug-sage-stamp-restamp-repeats-fix-instruction": {
-      "registered_at": "2026-10-29T01:19:07Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:13:30Z"
-      }
-    },
     "261029-bug-ws-mcp-git-lookup-per-spawn-slow-path-head": {
       "registered_at": "2026-10-29T08:57:09Z"
     },
@@ -1263,16 +310,6 @@
     },
     "261030-bug-workflow-manual-sentinel-mints-lead-key-for-subagents": {
       "registered_at": "2026-10-30T14:07:33Z"
-    },
-    "261105-bug-sage-stamp-move-next-instruction-loop": {
-      "registered_at": "2026-11-05T00:41:52Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/idea-triage-close",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:13:36Z"
-      }
     },
     "261105-feat-whiteboard-lead-confirmed-status": {
       "registered_at": "2026-11-05T01:20:45Z"
