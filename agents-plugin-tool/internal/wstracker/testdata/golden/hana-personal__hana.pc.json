@@ -18,7 +18,11 @@
   "members": [
    {
     "id": "hana",
-    "name": "Hana Seo",
+    "profile": {
+     "org": "",
+     "family": "Seo",
+     "given": "Hana"
+    },
     "keys": [
      "hana-k1"
     ],
@@ -244,6 +248,11 @@
    "member": "hana",
    "stream": "hana.pc",
    "name": "Hana Seo",
+   "profile": {
+    "org": "",
+    "family": "Seo",
+    "given": "Hana"
+   },
    "admin": true,
    "lead": null,
    "followers": [],
@@ -265,6 +274,12 @@
    "hana": {
     "id": "hana",
     "name": "Hana Seo",
+    "profile": {
+     "org": "",
+     "family": "Seo",
+     "given": "Hana"
+    },
+    "avatar": "HS",
     "leads": [],
     "keys": [
      "hana-k1"

@@ -37,7 +37,8 @@ type View struct {
 type Viewer struct {
 	Member    string         `json:"member"`
 	Stream    string         `json:"stream"`
-	Name      string         `json:"name"`
+	Name      string         `json:"name"` // the display name derived from the profile
+	Profile   *Profile       `json:"profile"`
 	Admin     bool           `json:"admin"`
 	Lead      *string        `json:"lead"`
 	Followers []string       `json:"followers"`
@@ -66,7 +67,9 @@ type AttachmentView struct {
 
 type MemberView struct {
 	ID       string       `json:"id"`
-	Name     string       `json:"name"`
+	Name     string       `json:"name"` // the display name derived from the profile
+	Profile  Profile      `json:"profile"`
+	Avatar   string       `json:"avatar"`
 	Leads    []string     `json:"leads"`
 	Keys     []string     `json:"keys"`
 	Revoked  []RevokedKey `json:"revoked"`
@@ -604,7 +607,7 @@ func (r *replayed) view(stream string, now time.Time, staleDays int) *View {
 	vw.Members = map[string]MemberView{}
 	for _, id := range S.morder {
 		m := S.members[id]
-		mv := MemberView{ID: id, Name: m.name, Leads: orEmpty(append([]string(nil), m.leads...)), Keys: []string{},
+		mv := MemberView{ID: id, Name: m.profile.DisplayName(), Profile: m.profile, Avatar: m.profile.Avatar(), Leads: orEmpty(append([]string(nil), m.leads...)), Keys: []string{},
 			Revoked: []RevokedKey{}, Admin: S.admins[id], Children: orEmpty(append([]string(nil), children[id]...))}
 		for _, k := range m.keys {
 			mv.Keys = append(mv.Keys, k.text)
@@ -635,7 +638,9 @@ func (r *replayed) view(stream string, now time.Time, staleDays int) *View {
 	vw.Viewer = Viewer{Member: v, Stream: stream, Name: v, Admin: S.admins[v], Followers: orEmpty(append([]string(nil), children[v]...)),
 		Reach: R, IsMember: me != nil && me.removed == nil}
 	if me != nil {
-		vw.Viewer.Name = me.name
+		vw.Viewer.Name = me.profile.DisplayName()
+		pr := me.profile
+		vw.Viewer.Profile = &pr
 		vw.Viewer.Lead = nz(me.lead())
 	}
 	vw.Priority = PriorityLevels{Names: append([]string(nil), S.prio.names...), Default: S.prio.def}

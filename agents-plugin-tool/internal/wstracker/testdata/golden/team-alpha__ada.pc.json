@@ -22,7 +22,11 @@
   "members": [
    {
     "id": "ada",
-    "name": "Ada Park",
+    "profile": {
+     "org": "Platform",
+     "family": "Park",
+     "given": "Ada"
+    },
     "keys": [
      "ada-k1"
     ],
@@ -30,7 +34,11 @@
    },
    {
     "id": "maya",
-    "name": "Maya Ortiz",
+    "profile": {
+     "org": "Search",
+     "family": "Ortiz",
+     "given": "Maya"
+    },
     "keys": [
      "maya-k1"
     ],
@@ -40,7 +48,11 @@
    },
    {
     "id": "raj",
-    "name": "Raj Rao",
+    "profile": {
+     "org": "Infra",
+     "family": "Rao",
+     "given": "Raj"
+    },
     "keys": [
      "raj-k1"
     ],
@@ -50,7 +62,11 @@
    },
    {
     "id": "bo",
-    "name": "Bo Lindqvist",
+    "profile": {
+     "org": "Platform",
+     "family": "Lindqvist",
+     "given": "Bo"
+    },
     "keys": [
      "bo-k1"
     ],
@@ -60,7 +76,11 @@
    },
    {
     "id": "lena",
-    "name": "Lena Weiss",
+    "profile": {
+     "org": "Search",
+     "family": "Weiss",
+     "given": "Lena"
+    },
     "keys": [
      "lena-k1"
     ],
@@ -70,7 +90,11 @@
    },
    {
     "id": "omar",
-    "name": "Omar Haddad",
+    "profile": {
+     "org": "Search",
+     "family": "Haddad",
+     "given": "Omar"
+    },
     "keys": [
      "omar-k1"
     ],
@@ -80,7 +104,11 @@
    },
    {
     "id": "ivy",
-    "name": "Ivy Chen",
+    "profile": {
+     "org": "Search",
+     "family": "Chen",
+     "given": "Ivy"
+    },
     "keys": [
      "ivy-k1"
     ],
@@ -90,7 +118,11 @@
    },
    {
     "id": "jon",
-    "name": "Jon Ek",
+    "profile": {
+     "org": "SW개발팀",
+     "family": "홍",
+     "given": "길동"
+    },
     "keys": [
      "jon-k1"
     ],
@@ -100,7 +132,11 @@
    },
    {
     "id": "kai",
-    "name": "Kai Mori",
+    "profile": {
+     "org": "SW개발팀",
+     "family": "김",
+     "given": "민수"
+    },
     "keys": [
      "kai-k1"
     ],
@@ -110,7 +146,11 @@
    },
    {
     "id": "sven",
-    "name": "Sven Berg",
+    "profile": {
+     "org": "Infra",
+     "family": "",
+     "given": "Sven"
+    },
     "keys": [
      "sven-k1"
     ],
@@ -120,7 +160,11 @@
    },
    {
     "id": "tia",
-    "name": "Tia Moreau",
+    "profile": {
+     "org": "Infra",
+     "family": "Moreau",
+     "given": "Tia"
+    },
     "keys": [
      "tia-k1"
     ],
@@ -130,7 +174,11 @@
    },
    {
     "id": "noa",
-    "name": "Noa Fisher",
+    "profile": {
+     "org": "Infra",
+     "family": "Fisher",
+     "given": "Noa"
+    },
     "keys": [
      "noa-k1"
     ],
@@ -140,7 +188,11 @@
    },
    {
     "id": "uma",
-    "name": "Uma Iyer",
+    "profile": {
+     "org": "SW개발팀",
+     "family": "남궁",
+     "given": "민"
+    },
     "keys": [
      "uma-k1"
     ],
@@ -150,7 +202,11 @@
    },
    {
     "id": "pia",
-    "name": "Pia Novak",
+    "profile": {
+     "org": "Infra",
+     "family": "Novak",
+     "given": "Pia"
+    },
     "keys": [
      "pia-k1"
     ],
@@ -2651,6 +2707,36 @@
    "verdict": "valid"
   },
   {
+   "member": "ada",
+   "clone": "pc",
+   "seq": 15,
+   "ts": "2026-11-05T09:45:00Z",
+   "type": "member.profile",
+   "payload": {
+    "member": "tia",
+    "profile": {
+     "org": "Platform"
+    }
+   },
+   "seen": {
+    "bo.pc": 7,
+    "ivy.pc": 5,
+    "jon.pc": 8,
+    "kai.pc": 3,
+    "lena.pc": 5,
+    "mallory.pc": 1,
+    "maya.pc": 19,
+    "noa.pc": 4,
+    "omar.pc": 3,
+    "pia.pc": 2,
+    "raj.pc": 8,
+    "sven.pc": 4,
+    "tia.pc": 4,
+    "uma.pc": 5
+   },
+   "verdict": "valid"
+  },
+  {
    "member": "kai",
    "clone": "pc",
    "seq": 4,
@@ -2689,6 +2775,35 @@
    "payload": {
     "item": "raj.pc#7",
     "body": "Escalated the redis approval to bo."
+   },
+   "seen": {
+    "ada.pc": 14,
+    "bo.pc": 7,
+    "ivy.pc": 5,
+    "jon.pc": 8,
+    "kai.pc": 3,
+    "lena.pc": 5,
+    "mallory.pc": 1,
+    "maya.pc": 19,
+    "noa.pc": 4,
+    "omar.pc": 3,
+    "pia.pc": 2,
+    "raj.pc": 8,
+    "sven.pc": 4,
+    "uma.pc": 5
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "tia",
+   "clone": "pc",
+   "seq": 6,
+   "ts": "2026-11-05T10:50:00Z",
+   "type": "member.profile",
+   "payload": {
+    "profile": {
+     "org": "Infra / SRE"
+    }
    },
    "seen": {
     "ada.pc": 14,
@@ -3203,6 +3318,11 @@
    "member": "ada",
    "stream": "ada.pc",
    "name": "Ada Park",
+   "profile": {
+    "org": "Platform",
+    "family": "Park",
+    "given": "Ada"
+   },
    "admin": true,
    "lead": null,
    "followers": [
@@ -3242,6 +3362,12 @@
    "ada": {
     "id": "ada",
     "name": "Ada Park",
+    "profile": {
+     "org": "Platform",
+     "family": "Park",
+     "given": "Ada"
+    },
+    "avatar": "AP",
     "leads": [],
     "keys": [
      "ada-k1"
@@ -3261,6 +3387,12 @@
    "maya": {
     "id": "maya",
     "name": "Maya Ortiz",
+    "profile": {
+     "org": "Search",
+     "family": "Ortiz",
+     "given": "Maya"
+    },
+    "avatar": "MO",
     "leads": [
      "ada"
     ],
@@ -3284,6 +3416,12 @@
    "raj": {
     "id": "raj",
     "name": "Raj Rao",
+    "profile": {
+     "org": "Infra",
+     "family": "Rao",
+     "given": "Raj"
+    },
+    "avatar": "RR",
     "leads": [
      "ada"
     ],
@@ -3306,6 +3444,12 @@
    "bo": {
     "id": "bo",
     "name": "Bo Lindqvist",
+    "profile": {
+     "org": "Platform",
+     "family": "Lindqvist",
+     "given": "Bo"
+    },
+    "avatar": "BL",
     "leads": [
      "ada"
     ],
@@ -3325,6 +3469,12 @@
    "lena": {
     "id": "lena",
     "name": "Lena Weiss",
+    "profile": {
+     "org": "Search",
+     "family": "Weiss",
+     "given": "Lena"
+    },
+    "avatar": "LW",
     "leads": [
      "maya"
     ],
@@ -3342,6 +3492,12 @@
    "omar": {
     "id": "omar",
     "name": "Omar Haddad",
+    "profile": {
+     "org": "Search",
+     "family": "Haddad",
+     "given": "Omar"
+    },
+    "avatar": "OH",
     "leads": [
      "maya"
     ],
@@ -3359,6 +3515,12 @@
    "ivy": {
     "id": "ivy",
     "name": "Ivy Chen",
+    "profile": {
+     "org": "Search",
+     "family": "Chen",
+     "given": "Ivy"
+    },
+    "avatar": "IC",
     "leads": [
      "maya"
     ],
@@ -3375,7 +3537,13 @@
    },
    "jon": {
     "id": "jon",
-    "name": "Jon Ek",
+    "name": "홍길동",
+    "profile": {
+     "org": "SW개발팀",
+     "family": "홍",
+     "given": "길동"
+    },
+    "avatar": "길동",
     "leads": [
      "maya"
     ],
@@ -3397,7 +3565,13 @@
    },
    "kai": {
     "id": "kai",
-    "name": "Kai Mori",
+    "name": "김민수",
+    "profile": {
+     "org": "SW개발팀",
+     "family": "김",
+     "given": "민수"
+    },
+    "avatar": "민수",
     "leads": [
      "maya"
     ],
@@ -3414,7 +3588,13 @@
    },
    "sven": {
     "id": "sven",
-    "name": "Sven Berg",
+    "name": "Sven",
+    "profile": {
+     "org": "Infra",
+     "family": "",
+     "given": "Sven"
+    },
+    "avatar": "SV",
     "leads": [
      "raj"
     ],
@@ -3432,6 +3612,12 @@
    "tia": {
     "id": "tia",
     "name": "Tia Moreau",
+    "profile": {
+     "org": "Infra / SRE",
+     "family": "Moreau",
+     "given": "Tia"
+    },
+    "avatar": "TM",
     "leads": [
      "raj"
     ],
@@ -3449,6 +3635,12 @@
    "noa": {
     "id": "noa",
     "name": "Noa Fisher",
+    "profile": {
+     "org": "Infra",
+     "family": "Fisher",
+     "given": "Noa"
+    },
+    "avatar": "NF",
     "leads": [
      "raj"
     ],
@@ -3465,7 +3657,13 @@
    },
    "uma": {
     "id": "uma",
-    "name": "Uma Iyer",
+    "name": "남궁민",
+    "profile": {
+     "org": "SW개발팀",
+     "family": "남궁",
+     "given": "민"
+    },
+    "avatar": "민",
     "leads": [
      "bo"
     ],
@@ -3483,6 +3681,12 @@
    "pia": {
     "id": "pia",
     "name": "Pia Novak",
+    "profile": {
+     "org": "Infra",
+     "family": "Novak",
+     "given": "Pia"
+    },
+    "avatar": "PN",
     "leads": [
      "raj"
     ],
@@ -8167,6 +8371,42 @@
     "late": false
    },
    {
+    "id": "ada.pc#15",
+    "alias": "ada.pc-15",
+    "stream": "ada.pc",
+    "member": "ada",
+    "seq": 15,
+    "ts": "2026-11-05T09:45:00Z",
+    "type": "member.profile",
+    "origin": "human",
+    "payload": {
+     "member": "tia",
+     "profile": {
+      "org": "Platform"
+     }
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [
+     {
+      "kind": "field",
+      "field": "org of tia",
+      "other": "tia.pc#6",
+      "otherMember": "tia",
+      "winner": "tia.pc#6",
+      "mine": "Platform",
+      "theirs": "Infra / SRE"
+     }
+    ],
+    "superseded": [],
+    "thread": null,
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
     "id": "kai.pc#4",
     "alias": "kai.pc-4",
     "stream": "kai.pc",
@@ -8210,6 +8450,41 @@
     "markers": [],
     "superseded": [],
     "thread": "raj.pc#7",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "tia.pc#6",
+    "alias": "tia.pc-6",
+    "stream": "tia.pc",
+    "member": "tia",
+    "seq": 6,
+    "ts": "2026-11-05T10:50:00Z",
+    "type": "member.profile",
+    "origin": "human",
+    "payload": {
+     "profile": {
+      "org": "Infra / SRE"
+     }
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [
+     {
+      "kind": "field",
+      "field": "org of tia",
+      "other": "ada.pc#15",
+      "otherMember": "ada",
+      "winner": "tia.pc#6",
+      "mine": "Infra / SRE",
+      "theirs": "Platform"
+     }
+    ],
+    "superseded": [],
+    "thread": null,
     "parentThread": null,
     "local": false,
     "open": false,
@@ -8862,13 +9137,13 @@
    ]
   },
   "stats": {
-   "events": 114,
-   "commits": 92,
+   "events": 116,
+   "commits": 94,
    "flagged": 17,
-   "concurrent": 0
+   "concurrent": 2
   },
   "heads": {
-   "ada.pc": 14,
+   "ada.pc": 15,
    "maya.pc": 22,
    "raj.pc": 10,
    "bo.pc": 9,
@@ -8878,7 +9153,7 @@
    "jon.pc": 8,
    "kai.pc": 4,
    "sven.pc": 5,
-   "tia.pc": 5,
+   "tia.pc": 6,
    "noa.pc": 4,
    "uma.pc": 6,
    "pia.pc": 2,

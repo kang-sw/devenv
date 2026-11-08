@@ -230,6 +230,11 @@
    "member": "ada",
    "stream": "ada.pc",
    "name": "Ada",
+   "profile": {
+    "org": "",
+    "family": "",
+    "given": "Ada"
+   },
    "admin": true,
    "lead": null,
    "followers": [
@@ -262,6 +267,12 @@
    "ada": {
     "id": "ada",
     "name": "Ada",
+    "profile": {
+     "org": "",
+     "family": "",
+     "given": "Ada"
+    },
+    "avatar": "AD",
     "leads": [],
     "keys": [
      "ada-k1"
@@ -281,6 +292,12 @@
    "maya": {
     "id": "maya",
     "name": "Maya",
+    "profile": {
+     "org": "",
+     "family": "",
+     "given": "Maya"
+    },
+    "avatar": "MA",
     "leads": [
      "ada"
     ],
@@ -301,6 +318,12 @@
    "raj": {
     "id": "raj",
     "name": "Raj",
+    "profile": {
+     "org": "",
+     "family": "",
+     "given": "Raj"
+    },
+    "avatar": "RA",
     "leads": [
      "ada"
     ],
@@ -320,6 +343,12 @@
    "bo": {
     "id": "bo",
     "name": "Bo",
+    "profile": {
+     "org": "",
+     "family": "",
+     "given": "Bo"
+    },
+    "avatar": "BO",
     "leads": [
      "ada"
     ],
@@ -337,6 +366,12 @@
    "lena": {
     "id": "lena",
     "name": "Lena",
+    "profile": {
+     "org": "",
+     "family": "",
+     "given": "Lena"
+    },
+    "avatar": "LE",
     "leads": [
      "maya"
     ],
@@ -354,6 +389,12 @@
    "omar": {
     "id": "omar",
     "name": "Omar",
+    "profile": {
+     "org": "",
+     "family": "",
+     "given": "Omar"
+    },
+    "avatar": "OM",
     "leads": [
      "maya"
     ],
@@ -371,6 +412,12 @@
    "sven": {
     "id": "sven",
     "name": "Sven",
+    "profile": {
+     "org": "",
+     "family": "",
+     "given": "Sven"
+    },
+    "avatar": "SV",
     "leads": [
      "raj"
     ],

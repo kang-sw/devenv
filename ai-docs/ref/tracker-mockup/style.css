@@ -352,6 +352,9 @@ body.paged .convo, body.paged .composer, body.paged .drawer { display: none; }
 .tree .node { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; padding: 2px 0; }
 .tree .node.me { background: color-mix(in srgb, var(--primary) 9%, var(--card)); border-radius: 6px; padding-left: 4px; }
 .tree .nm { font-weight: 600; }
+.tree .node .av { margin-left: 0; }
+/* (391) the org is a muted prefix where a person is named; it is not part of the display name */
+.org { color: var(--muted-fg); font-weight: 400; font-size: .92em; }
 .tree .nid { font-family: var(--mono); font-size: 11px; color: var(--muted-fg); }
 
 /* activity */

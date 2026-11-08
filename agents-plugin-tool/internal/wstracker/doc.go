@@ -12,8 +12,9 @@
 // in the wsledger package doc) and the envelope verdicts: broken, waiting,
 // signer and membership flags, and the revocation cut. An event the protocol
 // marks Waiting, Flagged, or Ignored keeps that verdict here. A
-// protocol-Valid domain event (roles.set_lead, roles.set_priority_levels,
-// roles.set_attachment_limit, item.*, comment.*) then gets the domain
+// protocol-Valid domain event (member.profile, roles.set_lead,
+// roles.set_priority_levels, roles.set_attachment_limit, item.*, comment.*)
+// then gets the domain
 // verdict, judged against the state folded from its causal past only, so a
 // late arrival never changes it.
 //
@@ -22,6 +23,14 @@
 // attachments.max_bytes come from the roles.json passthrough
 // (IdentityState.Genesis). A joined member is a
 // root with no lead.
+//
+// A member carries a Profile (org, family, given) in place of a name string:
+// from the genesis member's "profile" or the member.join payload's "profile",
+// else the bare "name" those carried before becomes the given name. The
+// display name and avatar are derived from it (Profile.DisplayName and
+// Profile.Avatar). The protocol layer validates neither the join's profile
+// nor its given name; member.profile, a domain event, carries the later
+// edits.
 //
 // # Reading
 //

@@ -51,8 +51,10 @@ type reasonCases struct {
 	Cases   []struct {
 		Name   string `json:"name"`
 		GoOnly bool   `json:"goOnly"`
-		Steps  []step `json:"steps"`
-		Reason string `json:"reason"`
+		// EngineOnly cases use the roles.add_member stand-in, which Go does not port.
+		EngineOnly bool   `json:"engineOnly"`
+		Steps      []step `json:"steps"`
+		Reason     string `json:"reason"`
 	} `json:"cases"`
 }
 
@@ -74,6 +76,9 @@ func loadReasonCases(t *testing.T) reasonCases {
 func TestFlaggedReasons(t *testing.T) {
 	rc := loadReasonCases(t)
 	for _, c := range rc.Cases {
+		if c.EngineOnly {
+			continue
+		}
 		t.Run(c.Name, func(t *testing.T) {
 			evs := history(append(append([]step(nil), rc.Base...), c.Steps...))
 			v := Derive(newMemSource(rc.Genesis, "ada.pc", evs), "ada.pc", time.Time{}, 0)

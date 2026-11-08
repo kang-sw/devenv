@@ -581,6 +581,21 @@ func (s *state) check(n *node) rejection {
 			return s.checkExtras(p, q.attachments)
 		}
 
+	case TypeMemberProfile:
+		who := a
+		if !p.null("member") {
+			who = p.disp("member")
+		}
+		if r := checkProfile(p["profile"], false); r != "" {
+			return r
+		}
+		if r := s.needMember(who); r != "" {
+			return r
+		}
+		if who != a && !s.admins[a] {
+			return rejection("only an admin changes another member's profile (" + a + " is not an admin)")
+		}
+
 	case TypeSetLead:
 		if r := s.needAdmin(a); r != "" {
 			return r

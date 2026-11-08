@@ -51,12 +51,13 @@ func (p priority) level(v int) int {
 }
 
 type member struct {
-	id, name string
-	keys     []memberKey
-	revoked  []revokedKey
-	leads    []string
-	removed  *node
-	joined   *node
+	id      string
+	profile Profile
+	keys    []memberKey
+	revoked []revokedKey
+	leads   []string
+	removed *node
+	joined  *node
 }
 
 // memberKey is a key in display form plus the form keys compare by: the
@@ -220,10 +221,7 @@ func parseGenesis(raw json.RawMessage) *genesis {
 			continue
 		}
 		seen[id] = true
-		mem := &member{id: id, name: m.str("name")}
-		if mem.name == "" {
-			mem.name = id
-		}
+		mem := &member{id: id, profile: profileOf(m, id)}
 		for _, k := range m.strList("keys") {
 			// As in the protocol, an SSH key an earlier member holds is not held again.
 			if norm, fp, err := wsledger.KeyFingerprint(k); err == nil {
@@ -297,6 +295,12 @@ func rolesProblems(r obj) []string {
 		}
 		if keys, _ := m.list("keys"); len(keys) == 0 {
 			out = append(out, id+": no keys")
+		}
+		if pr := m["profile"]; truthy(pr) {
+			po, _ := pr.(map[string]any)
+			if pstr(po["given"]) == "" {
+				out = append(out, id+": profile.given required")
+			}
 		}
 	}
 	if p, ok := r["priority"]; ok && p != nil {
@@ -1007,11 +1011,26 @@ func (s *state) apply(n *node) {
 		// id already holds is a no-op.
 		id := p.str("member")
 		if s.members[id] == nil {
-			s.members[id] = &member{id: id, name: p.str("name"), keys: []memberKey{keyOf(p.str("key"))}, joined: n}
-			if s.members[id].name == "" {
-				s.members[id].name = id
-			}
+			// The profile rides in the join payload; a bare name (what wsledger.Join
+			// writes today) becomes the given name.
+			s.members[id] = &member{id: id, profile: profileOf(p, id), keys: []memberKey{keyOf(p.str("key"))}, joined: n}
 			s.morder = append(s.morder, id)
+		}
+	case TypeMemberProfile:
+		// (392) each field is its own register: concurrent changes merge by (203)
+		id := a
+		if !p.null("member") {
+			id = p.disp("member")
+		}
+		m := s.members[id]
+		if m == nil {
+			break
+		}
+		pr, _ := p["profile"].(map[string]any)
+		for _, f := range profileFields {
+			if v, ok := pr[f]; ok {
+				m.profile.set(f, pstr(s.write("prof:"+id+":"+f, profileLabel[f]+" of "+id, n, pstr(v))))
+			}
 		}
 	case TypeSetLead:
 		m := s.members[p.str("member")]
