@@ -286,7 +286,14 @@
       }
     },
     "260727-bug-review-findings-file-rewritten-on-disposition": {
-      "registered_at": "2026-09-24T10:38:33Z"
+      "registered_at": "2026-09-24T10:38:33Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "delegate/idea-triage-close",
+        "phase": "closed",
+        "touched_at": "2026-11-08T08:08:36Z"
+      }
     },
     "260727-bug-string-match-guards-miss-reworded-directives": {
       "registered_at": "2026-09-24T10:38:33Z"
