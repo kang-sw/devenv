@@ -212,6 +212,33 @@ func TestTrackerToolsRefuseSpawnedKeys(t *testing.T) {
 	}
 }
 
+// A key the session store cannot find (made up, stale, or expired) passes
+// the call gate, which only refuses keys it finds; the tracker tools refuse
+// it themselves before any registry read or write.
+func TestTrackerToolsRefuseUnknownKeys(t *testing.T) {
+	f := newTrackerLeadFixture(t)
+	f.trackerUpdate(t, trackerPersonal)
+	for tool, args := range map[string]map[string]any{
+		"tracker.update": {"session_key": "not-a-real-key", "commands": `<tk:register store="mine" member="eve" given="Eve"/>`},
+		"tracker.query":  {"session_key": "not-a-real-key"},
+	} {
+		text := f.trackerRefused(t, tool, args)
+		if !strings.Contains(text, "unknown_session") {
+			t.Fatalf("%s with an unknown key must be refused as an unknown session: %s", tool, text)
+		}
+	}
+	text := f.trackerRefused(t, "tracker.update", map[string]any{"session_key": "bogus", "commands": `<tk:item.create store="me" kind="task" title="smuggled"/>`})
+	if !strings.Contains(text, "unknown_session") {
+		t.Fatalf("an event write with an unknown key must be refused: %s", text)
+	}
+	if out := f.trackerQuery(t, nil); strings.Contains(out, "mine") {
+		t.Fatalf("a refused unknown-key register must register nothing: %s", out)
+	}
+	if out := f.trackerQuery(t, map[string]any{"store": "me", "scope": "all"}); strings.Contains(out, "smuggled") {
+		t.Fatalf("a refused unknown-key write must write nothing: %s", out)
+	}
+}
+
 // A raw multi-line Korean markdown body goes in unescaped and comes back
 // byte for byte; $N names what earlier commands of the batch create.
 func TestTrackerUpdateWritesRawBodiesAndBatchReferences(t *testing.T) {

@@ -43,6 +43,25 @@ func trackerLeadOnlyDenial(name string) string {
 	return fmt.Sprintf("%s is not available to a spawned session: the tracker records the user's work through the top-level lead. Put progress in your final report; your lead records it.", name)
 }
 
+// trackerSessionKey returns the caller's session key when it names a
+// top-level lead. The call gate refuses a spawned key only when it finds the
+// key, so a key the store cannot find (made up, stale, expired) would pass
+// it; this refuses one before any registry read or write.
+func (s *Server) trackerSessionKey(tool string, args map[string]any) (string, error) {
+	key, err := sessionStateKey(tool, args)
+	if err != nil {
+		return "", err
+	}
+	entry, found := s.sessions.lookup(key)
+	if !found {
+		return "", mailboxUnknownSessionError(tool)
+	}
+	if !entry.isTopLevelLead() {
+		return "", errors.New(trackerLeadOnlyDenial(tool))
+	}
+	return key, nil
+}
+
 // trackerOrigins are the origins a tracker.update write may carry: every
 // write through this tool is an agent's, so human is not among them, and
 // agent-auto marks a write the agent made unasked.
@@ -544,7 +563,7 @@ func (b *trackerBatch) newEvents(next wsledger.EventID) ([]wsledger.NewEvent, er
 
 func (s *Server) handleTrackerUpdate(ctx context.Context, id json.RawMessage, args map[string]any) response {
 	const tool = "tracker.update"
-	key, err := sessionStateKey(tool, args)
+	key, err := s.trackerSessionKey(tool, args)
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
@@ -807,7 +826,7 @@ type trackerStoreSummary struct {
 
 func (s *Server) handleTrackerQuery(ctx context.Context, id json.RawMessage, args map[string]any) response {
 	const tool = "tracker.query"
-	key, err := sessionStateKey(tool, args)
+	key, err := s.trackerSessionKey(tool, args)
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
