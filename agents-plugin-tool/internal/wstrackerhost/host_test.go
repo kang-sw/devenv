@@ -630,3 +630,40 @@ func TestStoreWithoutRemote(t *testing.T) {
 		t.Fatalf("store %+v sync %+v member %+v", v.Store, v.Sync, v.Members["ada"])
 	}
 }
+
+// DispatchWith hands build the id the batch's first event gets, so a batch
+// can name an item an earlier event of it creates; an error from build
+// writes nothing.
+func TestDispatchWithNamesEarlierEventsOfTheBatch(t *testing.T) {
+	w := newWorld(t)
+	h := w.machine("ada")
+	w.register(h, "team", "ada", &wstracker.Profile{Given: "Ada"})
+	createItem(t, h, "team", "first")
+
+	ctx := context.Background()
+	var first wsledger.EventID
+	ids, err := h.DispatchWith(ctx, "team", func(next wsledger.EventID) ([]wsledger.NewEvent, error) {
+		first = next
+		create, _ := json.Marshal(map[string]any{"kind": "task", "title": "parent"})
+		child, _ := json.Marshal(map[string]any{"kind": "task", "title": "child", "parent": next.String()})
+		return []wsledger.NewEvent{{Type: wstracker.TypeItemCreate, Payload: create}, {Type: wstracker.TypeItemCreate, Payload: child}}, nil
+	})
+	if err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	if len(ids) != 2 || ids[0] != first || ids[1].Seq != first.Seq+1 {
+		t.Fatalf("ids = %v, want %v and the next seq", ids, first)
+	}
+	v := view(t, h, "team")
+	if p := v.Items[ids[1].String()].Parent; p == nil || *p != ids[0].String() {
+		t.Fatalf("child's parent = %v, want %s", p, ids[0])
+	}
+
+	refused := errors.New("refused by build")
+	if _, err := h.DispatchWith(ctx, "team", func(wsledger.EventID) ([]wsledger.NewEvent, error) { return nil, refused }); !errors.Is(err, refused) {
+		t.Fatalf("a build error must come back as is: %v", err)
+	}
+	if got := len(view(t, h, "team").Items); got != 3 {
+		t.Fatalf("a refused build must write nothing: %d items", got)
+	}
+}

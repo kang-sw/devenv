@@ -363,12 +363,24 @@ func genesisLists(genesis json.RawMessage, member string) bool {
 // the store directory as every process left it. A *wstracker.Refusal means
 // nothing was written. The store stays open, so the idle push fires.
 func (h *Host) Dispatch(ctx context.Context, id string, events []wsledger.NewEvent) ([]wsledger.EventID, error) {
+	return h.DispatchWith(ctx, id, func(wsledger.EventID) ([]wsledger.NewEvent, error) { return events, nil })
+}
+
+// DispatchWith is Dispatch with the events built under the store's lock
+// from next, the id the first of them gets (the i-th gets next.Seq+i), so a
+// batch can name an item or comment an earlier event of it creates. An
+// error from build writes nothing and is returned as is.
+func (h *Host) DispatchWith(ctx context.Context, id string, build func(next wsledger.EventID) ([]wsledger.NewEvent, error)) ([]wsledger.EventID, error) {
 	var ids []wsledger.EventID
 	err := h.with(ctx, id, func(st *store) error {
 		if _, err := st.ledger.Reload(ctx); err != nil {
 			return err
 		}
-		var err error
+		st.tracker.Refresh()
+		events, err := build(st.tracker.NextID())
+		if err != nil {
+			return err
+		}
 		ids, err = st.tracker.Dispatch(ctx, events)
 		return err
 	})
