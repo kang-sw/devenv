@@ -337,19 +337,6 @@
     "261108-bug-ws-whiteboard-item-raw-html": {
       "registered_at": "2026-11-08T04:42:23Z"
     },
-    "261108-feat-ws-tracker-drawer-ui": {
-      "registered_at": "2026-11-08T04:46:24Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-08T09:14:40Z",
-        "impl": {
-          "branch": "impl/develop/bribe-diner-candy"
-        }
-      }
-    },
     "261108-feat-ws-tracker-ledger-attachments": {
       "registered_at": "2026-11-08T01:19:47Z"
     },
