@@ -48,7 +48,7 @@ type DashboardSettings struct {
 // config.get does.
 func (s *Server) DashboardSettings() DashboardSettings {
 	out := DashboardSettings{Port: wsdashboard.DefaultPort}
-	if _, ok := s.declared.lookup(DashboardEnabledKey); !ok {
+	if !s.dashboardDeclared() {
 		return out
 	}
 	if got, err := s.resolveConfigGet("", DashboardEnabledKey); err == nil {

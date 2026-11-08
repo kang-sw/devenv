@@ -151,6 +151,11 @@ const leadWorkflowBootstrapMethod = "lead-workflow-bootstrap"
 const (
 	envNoAgent   = "WS_MCP_NO_AGENT"
 	envNamespace = "WS_MCP_NAMESPACE"
+	// envNoDashboard turns the dashboard off for this ws-mcp whatever its
+	// config resolves: no daemon ensure, no session registration. The
+	// dashboard daemon's agent runner sets it on the ws-mcp it attaches to
+	// an agent conversation, which the daemon itself hosts.
+	envNoDashboard = "WS_MCP_NO_DASHBOARD"
 )
 
 var debugEvents = struct {
@@ -503,6 +508,16 @@ func rawMessageString(raw json.RawMessage) string {
 		return text
 	}
 	return string(raw)
+}
+
+// NoDashboardMode reports whether envNoDashboard turns the dashboard off.
+func NoDashboardMode() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(envNoDashboard))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 func NoAgentMode() bool {

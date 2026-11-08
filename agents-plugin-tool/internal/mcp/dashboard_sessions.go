@@ -103,10 +103,20 @@ func (s *Server) dashboardSessionEnabled(sessionKey string) bool {
 	return on
 }
 
+// dashboardDeclared reports whether this ws-mcp has a dashboard at all: a
+// loaded dashboard manifest declares its keys, and NoDashboardMode is off.
+func (s *Server) dashboardDeclared() bool {
+	if NoDashboardMode() {
+		return false
+	}
+	_, ok := s.declared.lookup(DashboardEnabledKey)
+	return ok
+}
+
 // dashboardSessionResolve is dashboardSessionEnabled with the resolve error
 // kept apart: an undeclared key is off with no error.
 func (s *Server) dashboardSessionResolve(sessionKey string) (bool, error) {
-	if _, ok := s.declared.lookup(DashboardEnabledKey); !ok {
+	if !s.dashboardDeclared() {
 		return false, nil
 	}
 	got, err := s.resolveConfigGet(sessionKey, DashboardEnabledKey)
@@ -123,7 +133,7 @@ func (s *Server) dashboardSessionResolve(sessionKey string) (bool, error) {
 // off, the session's registration is removed. force re-resolves the key at
 // once (after a config.tune).
 func (s *Server) dashboardTouch(sessionKey, root string, force bool) {
-	if _, ok := s.declared.lookup(DashboardEnabledKey); !ok {
+	if !s.dashboardDeclared() {
 		return // no dashboard manifest loaded: the dashboard is off
 	}
 	d := &s.dashboard

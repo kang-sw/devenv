@@ -188,6 +188,9 @@ func (d *Daemon) handleInboxWrite(w http.ResponseWriter, r *http.Request, replyI
 	if status == http.StatusOK {
 		d.index.Nudge(replyID, s.Project)
 		d.broker.wake(replyID)
+		if s.Agent && d.agents != nil {
+			d.agents.InboxChanged(replyID)
+		}
 		w.Header().Set("Cache-Control", "no-store")
 		writeJSON(w, status, answer)
 		return

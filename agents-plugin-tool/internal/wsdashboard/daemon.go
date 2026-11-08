@@ -66,6 +66,9 @@ type DaemonOptions struct {
 	// PollInterval is the polling backstop period; zero means
 	// DefaultPollInterval.
 	PollInterval time.Duration
+	// Agents is the agent runner the daemon hosts; nil serves no agent
+	// routes.
+	Agents AgentHost
 
 	// bindHost overrides the address the daemon binds, so a test runs LAN
 	// mode on loopback; empty derives it from LAN.
@@ -97,6 +100,7 @@ type Daemon struct {
 	log      io.Writer
 	index    *Index
 	source   SessionSource
+	agents   AgentHost
 	broker   *broker
 	// entries caches rendered conversation entries per session.
 	entries *entryCache
@@ -180,7 +184,7 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 		dir:        opts.Dir,
 		lock:       lock,
 		log:        logw,
-		source:     opts.Sessions,
+		agents:     opts.Agents,
 		broker:     newBroker(),
 		entries:    newEntryCache(),
 		lan:        opts.LAN,
@@ -208,7 +212,8 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 		}
 	}
 	if opts.Sessions != nil {
-		d.index = NewIndex(IndexOptions{Dir: opts.Dir, Source: opts.Sessions, Log: logw, OnChange: d.sessionChanged})
+		d.source = agentSessions{inner: opts.Sessions, dir: opts.Dir, now: time.Now}
+		d.index = NewIndex(IndexOptions{Dir: opts.Dir, Source: d.source, Log: logw, OnChange: d.sessionChanged})
 	}
 	d.server = &http.Server{Handler: d.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	if err := writeEndpoint(opts.Dir, d.endpoint); err != nil {
@@ -224,6 +229,9 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 	}()
 	if d.index != nil {
 		go d.poll(opts.PollInterval)
+	}
+	if d.agents != nil {
+		d.agents.Start(d.agentChanged)
 	}
 	fmt.Fprintf(d.log, "dashboard: version %s listening on %s (lan %v, pid %d)\n", d.endpoint.Version, listener.Addr(), d.lan, d.endpoint.PID)
 	return d, nil
@@ -287,6 +295,15 @@ func (d *Daemon) sessionChanged(replyID string) {
 	d.broker.wake(replyID)
 }
 
+// agentChanged is the agent runner's write hook: it re-reads the one
+// conversation, as a ws-mcp's nudge does for a lead session.
+func (d *Daemon) agentChanged(replyID, project string) {
+	if d.index != nil {
+		d.index.Nudge(replyID, project)
+	}
+	d.broker.wake(replyID)
+}
+
 // poll fills the session index at once and then re-reads every registered
 // session each interval until the daemon stops.
 func (d *Daemon) poll(interval time.Duration) {
@@ -326,6 +343,9 @@ func (d *Daemon) Close() {
 		ctx, cancel := context.WithTimeout(context.Background(), shutdownDeadline)
 		_ = d.server.Shutdown(ctx)
 		cancel()
+		if d.agents != nil {
+			d.agents.Close()
+		}
 		removeEndpointIfOwned(d.dir, d.endpoint.Token)
 		_ = d.lock.Unlock()
 		fmt.Fprintf(d.log, "dashboard: stopped (pid %d)\n", d.endpoint.PID)
@@ -347,6 +367,11 @@ func (d *Daemon) Handler() http.Handler {
 	mux.HandleFunc("/nudge", d.handleNudge)
 	mux.HandleFunc("/events", d.handleIndexEvents)
 	mux.HandleFunc("/s/", d.handleSessionRoutes)
+	if d.agents != nil {
+		agents := d.agents.Handler()
+		mux.Handle(AgentRoutePrefix, agents)
+		mux.Handle(AgentRoutePrefix+"/", agents)
+	}
 	mux.HandleFunc("/", d.handleIndex)
 	if d.lan {
 		return d.lanGuard(mux)

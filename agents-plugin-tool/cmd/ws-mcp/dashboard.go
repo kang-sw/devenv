@@ -13,6 +13,7 @@ import (
 	"syscall"
 
 	"github.com/kang-sw/devenv/internal/mcp"
+	"github.com/kang-sw/devenv/internal/wsagent"
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 )
 
@@ -38,6 +39,7 @@ func dashboardCommand(args []string) {
 			*buildTime = wsdashboard.ExecutableBuildTime(exe)
 		}
 	}
+	logw := openDashboardLog(dir)
 	daemon, err := wsdashboard.StartDaemon(wsdashboard.DaemonOptions{
 		Dir:       dir,
 		Port:      *port,
@@ -45,8 +47,9 @@ func dashboardCommand(args []string) {
 		Version:   version,
 		BuildTime: *buildTime,
 		LockWait:  *lockWait,
-		Log:       openDashboardLog(dir),
+		Log:       logw,
 		Sessions:  mcp.NewDashboardSessionSource(),
+		Agents:    newAgentRunner(dir, logw),
 	})
 	if errors.Is(err, wsdashboard.ErrLocked) {
 		fmt.Fprintln(os.Stderr, "ws-mcp dashboard: another dashboard daemon is running (it holds the lock); exiting")
@@ -62,6 +65,25 @@ func dashboardCommand(args []string) {
 		daemon.Close()
 	case <-daemon.Done():
 	}
+}
+
+// newAgentRunner is the daemon's agent runner: the claude and pi backends,
+// ws-mcp's key store for conversation keys, and this executable as the
+// ws-mcp it attaches to a conversation whose profile allows ws tools.
+func newAgentRunner(dir string, logw io.Writer) *wsagent.Runner {
+	return wsagent.NewRunner(wsagent.Options{
+		Dir:      dir,
+		Backends: map[string]wsagent.Backend{wsagent.BackendClaude: wsagent.ClaudeBackend{}},
+		Keys:     mcp.NewAgentKeyStore(),
+		WSMCP: func(root string) (wsagent.MCPCommand, error) {
+			exe, err := os.Executable()
+			if err != nil {
+				return wsagent.MCPCommand{}, err
+			}
+			return wsagent.MCPCommand{Command: exe, Args: []string{"serve", "--stdio", "--root", root}}, nil
+		},
+		Log: logw,
+	})
 }
 
 // openDashboardLog returns the daemon's log writer. The file is truncated and

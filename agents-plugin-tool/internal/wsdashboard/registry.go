@@ -69,6 +69,13 @@ type Registration struct {
 	HeartbeatAt string `json:"heartbeat_at,omitempty"`
 	// EndedAt is set when the serving ws-mcp exits cleanly.
 	EndedAt string `json:"ended_at,omitempty"`
+	// Agent marks a conversation the daemon's own agent runner hosts: no
+	// ws-mcp serves it and it has no session record, so the daemon reads it
+	// from its live stores alone (agentSessions).
+	Agent bool `json:"agent,omitempty"`
+	// Unlisted keeps the session out of the index page; its own page is
+	// still served.
+	Unlisted bool `json:"unlisted,omitempty"`
 }
 
 // Live is the served-session liveness rule: a session is live while it has
