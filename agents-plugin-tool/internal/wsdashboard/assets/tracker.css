@@ -5,7 +5,9 @@
    Colours: the shared surface tokens are the host's --wb-* properties (bg, fg,
    card, muted, muted-fg, primary, primary-fg, line, shadow, shadow-hi, radius,
    mono), which the dashboard page already defines; the host also provides
-   --dpad (the page's side padding) and --drhw (its own drawer handle's width).
+   --dpad (the page's side padding) and --drhw (its own drawer handle's width),
+   and may set --tkmaxw (the page's maximum width, which the drawer and its
+   handle row align with; 1680px when unset).
    The tracker's own tones are the --tk-* properties below. Light and dark follow
    the OS (prefers-color-scheme) unless the root carries data-theme="light" or
    data-theme="dark", so the dark block is written twice: under the media query
@@ -42,6 +44,21 @@
 
 /* ===== base ===== */
 .tk, .tk * { box-sizing: border-box; }
+/* The host page's own stylesheets style generic class names this markup shares
+   (.btn, .chip, .new, .i, code, ...). Where no rule here sets a property such a
+   host rule does, these restate the browser default, so the host's value never
+   reaches the tracker; without such a host they change nothing. Every later rule
+   here still wins. */
+.tk .btn { width: auto; height: auto; justify-content: normal; }
+.tk .btn .i { width: 14px; height: 14px; }
+.tk .i { display: inline; }
+.tk code { background: none; border-radius: 0; padding: 0; }
+.tk .chip.new { width: auto; flex: 0 1 auto; align-self: auto; }
+.tk .tdot { flex: 0 1 auto; }
+.tk .kcard { display: block; flex-direction: row; align-items: normal; gap: normal; }
+.tk .crow { grid-template-columns: none; }
+.tk .arow { flex-wrap: nowrap; align-items: normal; }
+.tk .empty { margin: 0; }
 .tk-sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
 .tk code, .tk .id { font-family: var(--wb-mono); font-size: 12px; }
 .tk a { color: var(--wb-primary); text-decoration: none; }
@@ -115,7 +132,7 @@
    width plus the 6px gap, so the host header can pad clear of both. */
 .tk.tk-drawer { position: fixed; top: 0; left: 0; right: 0; height: 0; z-index: 40; pointer-events: none;
   --tktop: 48px; --tkh: 60vh; --tkext: var(--tkh); } /* the renderer sets --tktop (the header's bottom edge) and --tkh (the dragged height, else the content height, capped at 60vh); --tkext is the pointer's extent during a drag */
-.tk .tk-dr-in { position: relative; max-width: 1680px; margin: 0 auto; }
+.tk .tk-dr-in { position: relative; max-width: var(--tkmaxw, 1680px); margin: 0 auto; }
 .tk .tk-dr-clip { position: absolute; top: var(--tktop); left: var(--dpad, 16px); right: var(--dpad, 16px); height: 0; overflow: hidden; pointer-events: auto; visibility: hidden; border-radius: 0 0 var(--wb-radius) var(--wb-radius); box-shadow: var(--wb-shadow-hi); transition: height .18s ease-out, visibility 0s linear .18s; }
 .tk.tk-drawer.open .tk-dr-clip { height: var(--tkext); visibility: visible; transition: height .18s ease-out, visibility 0s; }
 .tk .tk-dr-sheet { position: absolute; left: 0; right: 0; bottom: 0; height: var(--tkh); background: var(--wb-bg); border-top: 1px solid var(--wb-muted); display: flex; flex-direction: column; }

@@ -1275,8 +1275,13 @@
     drhandle.setAttribute("aria-expanded", String(drOpen));
     drTitle();
   }
+  // The session drawer and a tracker store's drawer never show at once:
+  // opening this one tells the tracker (which collapses its open store), and
+  // the tracker opening a store closes this one (tk:drawer-open, below).
+  function drAnnounce() { doc.dispatchEvent(new CustomEvent("ws:drawer-open")); }
   function drSetOpen(open) {
     if (!drHas) return;
+    if (open && !drOpen) drAnnounce();
     if (!open && drsheet.contains(doc.activeElement)) drhandle.focus();
     drWant = drOpen = open;
     save(DR_OPEN, open ? "1" : null);
@@ -1315,6 +1320,7 @@
     drhandle.addEventListener("pointermove", function (e) {
       if (!drDrag) return;
       if (!drDrag.moved && Math.abs(e.clientY - drDrag.y0) < 5) return;
+      if (!drDrag.moved && !drOpen) drAnnounce();
       drDrag.moved = true;
       var y = e.clientY - drDrag.off, max = drMax(), ext = Math.max(0, Math.min(max, y - drTop));
       drDrag.ext = ext;
@@ -1361,6 +1367,12 @@
     // A card's title bar is not a toggle: every card stays open.
     drbody.addEventListener("click", function (e) {
       if (e.target.closest && e.target.closest("details.panel > summary")) e.preventDefault();
+    });
+    // A store drawer opened: this one closes, and a saved open state not
+    // applied yet (no panel present) is dropped, so it never opens over it.
+    doc.addEventListener("tk:drawer-open", function () {
+      if (drOpen) drSetOpen(false);
+      else drWant = false;
     });
     // Escape closes the drawer after any open menu (link menu, gear menu)
     // has had it, and never while the composer has focus: there Escape
@@ -1462,6 +1474,180 @@
     });
   }
 
+  // --- tracker: the store drawers over the daemon's /tracker routes ---------
+  // The tracker renderer (tracker.js, window.WsTracker) draws one drawer
+  // handle per tracker store, the #/<store> page, the item window, and the
+  // quick switcher; this section is its data adapter, on both pages (the
+  // adapter contract is tracker.js's header comment). The first store-list
+  // read decides whether there is a tracker at all: 404 (the daemon serves
+  // none) mounts nothing, 503 (its host is unavailable) mounts with no
+  // stores and keeps the reason for hostError, 200 mounts and then reads
+  // every store's view. The adapter's reads are synchronous over the cache
+  // below; the stream's "tracker" event reloads it, one reload in flight
+  // and at most one queued. Seen marks are only ever added, so a read unites
+  // the daemon's marks with the local copy, which may hold marks still being
+  // posted.
+  var tkApi = null, tkOrder = [], tkViews = {}, tkErrs = {}, tkSeen = {}, tkHostErr = null, tkSubs = [];
+  var tkBusy = false, tkQueued = false, tkNext = [], tkLastRev = null;
+  function tkUrl(id, op) { return "/tracker/stores/" + encodeURIComponent(id) + "/" + op; }
+  // tkFetch calls a tracker route, a POST when body is given; done(status,
+  // answer) gets the HTTP status (0: the daemon was not reached) and the
+  // parsed JSON answer ({} when there is none).
+  function tkFetch(path, body, done, keepalive) {
+    var o = { method: body === undefined ? "GET" : "POST", credentials: "same-origin", cache: "no-store" };
+    if (body !== undefined) { o.headers = { "Content-Type": "application/json" }; o.body = JSON.stringify(body); }
+    if (keepalive) o.keepalive = true;
+    fetch(path, o).then(function (r) {
+      return r.text().then(function (s) {
+        var v = null;
+        try { v = s ? JSON.parse(s) : null; } catch (e) { v = null; }
+        done(r.status, v && typeof v === "object" ? v : {});
+      });
+    }, function () { done(0, {}); });
+  }
+  function tkErrText(status, v) { return v.error ? String(v.error) : status ? "HTTP " + status : wsT("js.post.unreachable"); }
+  function tkMarks(s) { return s || { badge: {}, read: {} }; }
+  function tkAddMarks(id, badge, read) {
+    var s = tkSeen[id] || (tkSeen[id] = { badge: {}, read: {} });
+    (badge || []).forEach(function (k) { s.badge[k] = true; });
+    (read || []).forEach(function (k) { s.read[k] = true; });
+  }
+  function tkNotify() { tkSubs.forEach(function (fn) { fn(); }); }
+  // tkLoadView reads store id's view and seen marks into the cache.
+  function tkLoadView(id, done) {
+    tkFetch(tkUrl(id, "view"), undefined, function (status, v) {
+      if (status === 200 && v.view) {
+        tkViews[id] = v.view;
+        tkErrs[id] = null;
+        tkAddMarks(id, v.seen && v.seen.badge, v.seen && v.seen.read);
+      } else {
+        tkViews[id] = null;
+        tkErrs[id] = tkErrText(status, v);
+      }
+      done();
+    });
+  }
+  // tkReadAll reads the store list, calls listed(status), and with a list
+  // reads every store's view in parallel before done().
+  function tkReadAll(listed, done) {
+    tkFetch("/tracker/stores", undefined, function (status, v) {
+      if (status === 503) { tkHostErr = tkErrText(status, v); tkOrder = []; }
+      if (status === 200) {
+        tkHostErr = null;
+        if (typeof v.rev === "number") tkLastRev = v.rev;
+        tkOrder = (Array.isArray(v.stores) ? v.stores : []).map(function (s) { return String(s.id); });
+        var keep = {};
+        tkOrder.forEach(function (id) { keep[id] = true; });
+        [tkViews, tkErrs, tkSeen].forEach(function (m) { Object.keys(m).forEach(function (id) { if (!keep[id]) delete m[id]; }); });
+      }
+      listed(status);
+      var left = status === 200 ? tkOrder.length : 0;
+      if (!left) { done(); return; }
+      tkOrder.forEach(function (id) { tkLoadView(id, function () { if (--left === 0) done(); }); });
+    });
+  }
+  // tkReload re-reads everything, then tells the renderer and runs then;
+  // a call while a reload runs queues one more, which runs the thens given
+  // meanwhile. Until a first list read mounts the renderer, a reload is
+  // that first read.
+  function tkReload(then) {
+    if (then) tkNext.push(then);
+    if (tkBusy) { tkQueued = true; return; }
+    tkBusy = true;
+    tkQueued = false;
+    var thens = tkNext;
+    tkNext = [];
+    tkReadAll(function (status) {
+      if (!tkApi && (status === 200 || status === 503)) tkMount();
+    }, function () {
+      tkBusy = false;
+      if (tkApi) tkNotify();
+      thens.forEach(function (fn) { fn(); });
+      if (tkQueued) tkReload();
+    });
+  }
+  var tkAdapter = {
+    stores: function () { return tkOrder.slice(); },
+    view: function (id) { return tkViews[id] || null; },
+    error: function (id) { return tkViews[id] ? null : tkErrs[id] || null; },
+    hostError: function () { return tkHostErr; },
+    seen: function (id) { return tkMarks(tkSeen[id]); },
+    markSeen: function (id, add) {
+      var badge = (add && add.badge) || [], read = (add && add.read) || [];
+      tkAddMarks(id, badge, read);
+      if (badge.length || read.length) tkFetch(tkUrl(id, "seen"), { badge: badge, read: read }, function () {});
+    },
+    // A written batch's results come from the store's view read again: each
+    // event's alias and its applied or flagged status as the store derived it.
+    dispatch: function (id, events, done) {
+      tkFetch(tkUrl(id, "dispatch"), { events: events }, function (status, v) {
+        if (status === 409) { done({ ok: false, error: tkErrText(status, v), refusal: v.refusal || null }); return; }
+        if (status !== 200) { done({ ok: false, error: tkErrText(status, v), refusal: null }); return; }
+        var ids = Array.isArray(v.ids) ? v.ids : [];
+        tkLoadView(id, function () {
+          var byId = {};
+          ((tkViews[id] && tkViews[id].events) || []).forEach(function (e) { byId[e.id] = e; });
+          done({ ok: true, results: ids.map(function (eid, i) {
+            var e = byId[eid];
+            if (e) return { id: e.id, alias: e.alias, type: e.type, status: e.status, reason: e.reason || "" };
+            return { id: eid, alias: String(eid).replace("#", "-"), type: events[i] ? events[i].type : "", status: "applied", reason: "" };
+          }) });
+        });
+      });
+    },
+    check: function (id) {
+      tkFetch(tkUrl(id, "check"), {}, function () { tkLoadView(id, tkNotify); });
+    },
+    // The route's pushed is a yes/no; the renderer counts commits, so a push
+    // counts what the view listed as unpushed (the open batch as one).
+    // keepalive: a collapse can be the last thing the page does.
+    sync: function (id, done) {
+      var vw = tkViews[id], n = vw && vw.sync && Array.isArray(vw.sync.unpushed) ? vw.sync.unpushed.length : 0;
+      tkFetch(tkUrl(id, "sync"), {}, function (status, v) {
+        if (status !== 200) { done({ error: tkErrText(status, v) }); return; }
+        var rep = {};
+        Object.keys(v).forEach(function (k) { rep[k] = v[k]; });
+        rep.pushed = v.pushed ? n : 0;
+        done(rep);
+      }, true);
+    },
+    profiles: function (done) {
+      tkFetch("/tracker/profiles", undefined, function (status, v) {
+        if (status === 200 && Array.isArray(v.profiles)) done({ last: typeof v.last === "number" ? v.last : -1, profiles: v.profiles });
+        else done({ last: -1, profiles: [] });
+      });
+    },
+    saveProfile: function (p) { tkFetch("/tracker/profiles", p, function () {}); },
+    register: function (req, done) {
+      tkFetch("/tracker/register", req, function (status, v) {
+        if (status === 200) tkReload(function () { done({ ok: true, store: v.store }); });
+        else done({ ok: false, error: tkErrText(status, v) });
+      });
+    },
+    onChange: function (fn) { tkSubs.push(fn); },
+    caps: { origin: false, attach: false, addMember: false }
+  };
+  // The drawer hangs from the header and its handle row sits left of the
+  // session drawer's handle; the store page takes the page's place.
+  function tkMount() {
+    var header = doc.querySelector(".dwrap > .top"), slot = $("qsslot"), wrap = doc.querySelector(".dwrap");
+    if (!header || !slot || !wrap) return;
+    header.classList.add("tk-room");
+    tkApi = window.WsTracker.mount(tkAdapter, { header: header, qsSlot: slot, pageParent: wrap, storagePrefix: "ws.tracker." });
+  }
+  function trackerStart() {
+    if (window.WsTracker && window.fetch) tkReload();
+  }
+  // trackerNudge handles the stream's tracker event: a revision other than
+  // the last one handled reloads. trackerLost forgets it when the stream
+  // drops, since a restarted daemon counts from 0 again.
+  function trackerNudge(rev) {
+    if (rev === tkLastRev || !window.WsTracker || !window.fetch) return;
+    tkLastRev = rev;
+    tkReload();
+  }
+  function trackerLost() { tkLastRev = null; }
+
   // --- stream ----------------------------------------------------------------
   var sse = $("sse"), sseLabel = sse && sse.querySelector(".sse-label");
   function connected(on) {
@@ -1477,6 +1663,7 @@
     es.onopen = function () { connected(true); };
     es.onerror = function () {
       connected(false);
+      trackerLost();
       // EventSource would retry with the URL it opened; reopen with the
       // hashes held now, so a reconnect sends only what changed since.
       es.close();
@@ -1492,6 +1679,11 @@
         return;
       }
       swap(ev.name, ev.hash, ev.html);
+    });
+    es.addEventListener("tracker", function (e) {
+      var ev = null;
+      try { ev = JSON.parse(e.data); } catch (x) { return; }
+      if (ev && typeof ev.rev === "number") trackerNudge(ev.rev);
     });
     es.addEventListener("gone", function () {
       es.close();
@@ -1535,5 +1727,6 @@
   mermaid();
   pinConvo();
   nearTop();
+  trackerStart();
   connect();
 })();

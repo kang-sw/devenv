@@ -30,7 +30,7 @@ import (
 // (wswhiteboard.RenderRegions); the rest render from the view model
 // (pageview.go).
 
-//go:embed assets/dashboard.tmpl assets/dashboard.css assets/dashboard.js assets/sprite.svg
+//go:embed assets/dashboard.tmpl assets/dashboard.css assets/dashboard.js assets/sprite.svg assets/tracker.css assets/tracker.js
 var dashboardFS embed.FS
 
 // Region names. The session page's regions in order; the index page has one.
@@ -93,6 +93,10 @@ type pageAssetsData struct {
 	MermaidInit      template.JS
 	MermaidFile      string
 	ViewerScript     template.JS
+	// TrackerCSS and TrackerScript are the tracker renderer (tracker.js),
+	// which dashboard.js mounts when the daemon serves the tracker routes.
+	TrackerCSS    template.CSS
+	TrackerScript template.JS
 }
 
 var (
@@ -155,6 +159,8 @@ func buildDashboardAssets(read func(name string) ([]byte, error)) (*dashboardAss
 		CSS:              template.CSS(get("dashboard.css")),
 		Script:           template.JS(get("dashboard.js")),
 		Sprite:           template.HTML(strings.TrimSpace(get("sprite.svg"))),
+		TrackerCSS:       template.CSS(get("tracker.css")),
+		TrackerScript:    template.JS(get("tracker.js")),
 		WhiteboardCSS:    wb.CSS,
 		WhiteboardSprite: wb.Sprite,
 		FormScript:       wb.FormScript,

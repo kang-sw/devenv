@@ -41,6 +41,8 @@
 //                        an adapter without it does not get: req = {id, label,
 //                        remote, member, profile: {org, family, given}};
 //                        done({ok: true, store: <id>} | {ok: false, error})
+//   hostError()       -> optional: the reason the store list could not be read (the
+//                        host is unavailable), or null; the "+ store" dialog shows it
 //   onChange(fn)         the renderer subscribes once; the adapter calls fn()
 //                        whenever stores(), a view(), or seen() changed
 //   caps                 {origin, attach, addMember} booleans, false when absent:

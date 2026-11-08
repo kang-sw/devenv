@@ -3,9 +3,10 @@
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{.ReplyID}} - ws dashboard</title>
 <style>{{.Assets.WhiteboardCSS}}</style>
-<style>{{.Assets.CSS}}</style></head>
+<style>{{.Assets.CSS}}</style>
+<style>{{.Assets.TrackerCSS}}</style></head>
 <body class="dash {{.Mode}}">{{.Assets.WhiteboardSprite}}{{.Assets.Sprite}}<div class="dwrap">
-<div class="top"><a class="back" href="/" title="{{t "nav.sessions"}}" aria-label="{{t "nav.sessions"}}">{{icon "back"}}</a>{{region . "head"}}{{template "sse"}}{{template "gear" .Adapter}}</div>
+<div class="top"><a class="back" href="/" title="{{t "nav.sessions"}}" aria-label="{{t "nav.sessions"}}">{{icon "back"}}</a>{{region . "head"}}{{template "sse"}}{{template "qsslot"}}{{template "gear" .Adapter}}</div>
 {{template "drawer" .}}
 <div class="banner" id="dash-banner" hidden></div>
 <main id="grid" class="dgrid {{.Mode}}">
@@ -23,9 +24,14 @@ window.wbMermaid = function () {
 {{.Assets.MermaidInit}}};
 window.wbMermaidFile = {{.Assets.MermaidFile}};</script>
 <script>{{.Assets.ViewerScript}}</script>
+<script>{{.Assets.TrackerScript}}</script>
 <script>{{.Assets.Script}}</script>
 </body></html>
 {{end}}
+
+{{/* The tracker's quick-switcher slot: the tracker renderer puts its
+search button and popup here when the page mounts it (dashboard.js). */}}
+{{define "qsslot"}}<span class="qsslot" id="qsslot"></span>{{end}}
 
 {{define "sse"}}<span class="sse" id="sse" title="{{t "js.sse.title.on"}}"><span class="dot"></span><span class="sse-label">{{t "js.sse.live"}}</span></span>{{end}}
 
@@ -111,13 +117,15 @@ A part with no figure is left out; an empty region collapses. */}}
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ws dashboard</title>
 <style>{{.Assets.WhiteboardCSS}}</style>
-<style>{{.Assets.CSS}}</style></head>
+<style>{{.Assets.CSS}}</style>
+<style>{{.Assets.TrackerCSS}}</style></head>
 <body class="dash index">{{.Assets.WhiteboardSprite}}{{.Assets.Sprite}}<div class="dwrap narrow">
-<div class="top"><h1>ws dashboard</h1><span class="meta">v{{.Version}}</span>{{template "sse"}}{{template "gear" false}}</div>
+<div class="top"><h1>ws dashboard</h1><span class="meta">v{{.Version}}</span>{{template "sse"}}{{template "qsslot"}}{{template "gear" false}}</div>
 {{with .LAN}}<div class="lanbox"><b>{{t "lan.on"}}</b> {{t "lan.open"}}{{range .URLs}}<code class="lanurl">{{.}}</code>{{end}}<span class="lannote">{{tcode "lan.note" .TokenFile}}</span></div>{{end}}
 {{region . "sessions"}}
 </div>
 <script>{{i18n}}</script>
+<script>{{.Assets.TrackerScript}}</script>
 <script>{{.Assets.Script}}</script>
 </body></html>
 {{end}}
