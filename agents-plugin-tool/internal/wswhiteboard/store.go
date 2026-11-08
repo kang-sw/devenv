@@ -125,6 +125,10 @@ type Item struct {
 	// item; the embed marks an item new when it changed after the previous
 	// embed.
 	Changed int `json:"changed"`
+	// ChangedAt is the wall-clock time (RFC 3339) of that update, which the
+	// stale-topic nudge ages topics by; see stampChanges for a store written
+	// before the field.
+	ChangedAt string `json:"changed_at,omitempty"`
 	// Settled is the item's settle order (a board-wide counter), zero while
 	// the item is open or assumed. Rotation and archive eviction order by
 	// it, never by time.
@@ -146,6 +150,8 @@ type TopicDoc struct {
 	// Changed is the render sequence of the update that last changed the
 	// body; it counts toward the topic's recency like an item's Changed.
 	Changed int `json:"changed"`
+	// ChangedAt is the wall-clock time of that update, as an item's.
+	ChangedAt string `json:"changed_at,omitempty"`
 	// Marks are the change marks of the body's latest edit (diffBodies). Only
 	// a body edit replaces them: the first body has none, the same body again
 	// keeps them, and no other write touches them.
@@ -180,6 +186,10 @@ type State struct {
 	// EmbedDir is the host embed folder, empty when embeds go to the
 	// repository folder.
 	EmbedDir string `json:"embed_dir,omitempty"`
+	// LastNudgeAt is when an update result last carried the stale-topic
+	// nudge (RFC 3339); empty, as on a store written before the field, is
+	// never.
+	LastNudgeAt string `json:"last_nudge_at,omitempty"`
 }
 
 // Env carries the side effects Apply needs, so the store stays testable.
@@ -195,6 +205,9 @@ type Env struct {
 type Outcome struct {
 	// IDs holds the ID of every wb:add command, in command order.
 	IDs []int
+	// Info is the stale-topic nudge (see staleNudge), "" when the batch
+	// carries none. It is for the caller's tool result only; no page shows it.
+	Info string
 }
 
 // FormatID renders an item ID as the board shows it: (nn), three digits
@@ -447,6 +460,8 @@ func Apply(state *State, commands string, env Env) (Outcome, []string) {
 		return Outcome{}, p.List
 	}
 	work.evictArchive()
+	work.stampChanges(mark, env.Now)
+	out.Info = work.staleNudge(env.Now)
 	*state = *work
 	return out, nil
 }
