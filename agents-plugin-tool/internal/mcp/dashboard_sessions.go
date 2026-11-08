@@ -15,8 +15,6 @@ import (
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsdashboard"
-	"github.com/kang-sw/devenv/internal/wsinbox"
-	"github.com/kang-sw/devenv/internal/wslive"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
 )
 
@@ -505,10 +503,8 @@ func (src *DashboardSessionSource) clock() time.Time {
 }
 
 // hashLiveStores folds the session's live stores into h and returns the
-// snapshot's updatedAt. The snapshot is hashed without updatedAt but with
-// its staleness, so a heartbeat rewrite is no change while a writer that
-// stopped is one; the ring and the board-answer inbox (held and drained) are
-// hashed by their entry names, since an entry file is never rewritten.
+// snapshot's updatedAt (wsdashboard.HashLiveStores, under this source's state
+// dir and clock).
 func (src *DashboardSessionSource) hashLiveStores(h io.Writer, replyID string) time.Time {
 	resolve := src.stateDir
 	if resolve == nil {
@@ -518,42 +514,7 @@ func (src *DashboardSessionSource) hashLiveStores(h io.Writer, replyID string) t
 	if err != nil {
 		return time.Time{}
 	}
-	sessionDir := wsdashboard.SessionDir(dir, replyID)
-	var updatedAt time.Time
-	if raw, err := os.ReadFile(wslive.SnapshotPath(sessionDir)); err == nil {
-		var doc map[string]any
-		var snap wslive.Snapshot
-		if json.Unmarshal(raw, &doc) == nil && json.Unmarshal(raw, &snap) == nil {
-			delete(doc, "updatedAt")
-			canonical, _ := json.Marshal(doc)
-			fmt.Fprintf(h, "\x00snapshot stale=%t\x00%s", snap.Stale(src.clock()), canonical)
-			if snap.UpdatedAt > 0 {
-				updatedAt = time.UnixMilli(snap.UpdatedAt)
-			}
-		}
-	}
-	if names, err := wslive.RingNames(wslive.RingDir(sessionDir)); err == nil {
-		io.WriteString(h, "\x00ring")
-		for _, name := range names {
-			io.WriteString(h, "\x00"+name)
-		}
-	}
-	// Entry files are never rewritten, so held and drained names tell a send
-	// (a new held name, or a merge replacing one) and a drain apart.
-	inbox := wsinbox.Dir(sessionDir)
-	if names, err := wsinbox.Names(inbox); err == nil {
-		io.WriteString(h, "\x00inbox")
-		for _, name := range names {
-			io.WriteString(h, "\x00"+name)
-		}
-	}
-	if names, err := wsinbox.DrainedNames(inbox); err == nil {
-		io.WriteString(h, "\x00inbox-drained")
-		for _, name := range names {
-			io.WriteString(h, "\x00"+name)
-		}
-	}
-	return updatedAt
+	return wsdashboard.HashLiveStores(h, dir, replyID, src.clock())
 }
 
 // keysFor returns the session keys whose reply-id is replyID. A miss, or
