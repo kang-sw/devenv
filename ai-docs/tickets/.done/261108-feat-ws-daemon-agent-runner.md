@@ -9,6 +9,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 72e011e469bf168d
 sage-review-completeness-reviewed: 72e011e469bf168d
+completed: 2026-11-08
 ---
 
 # ws daemon agent runner: profile-driven headless agents (claude, pi) hosted by the dashboard daemon
