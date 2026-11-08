@@ -178,6 +178,8 @@
   "panel.tickets.count.full": "{0} ready, {1} todo",
   "panel.todo": "Todos",
   "peer.lastmail": "last mail exchange",
+  "peer.running.one": "{0} subagent",
+  "peer.running.other": "{0} subagents",
   "peer.subagents": "subagents",
   "peer.unserved": "not served here · no live state",
   "peers.ended": "ended {0}",

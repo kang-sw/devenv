@@ -178,6 +178,8 @@
   "panel.tickets.count.full": "준비됨 {0}, 할 일 {1}",
   "panel.todo": "할 일",
   "peer.lastmail": "마지막 메일 교환",
+  "peer.running.one": "서브에이전트 {0}개",
+  "peer.running.other": "서브에이전트 {0}개",
   "peer.subagents": "서브에이전트",
   "peer.unserved": "여기서 서비스하지 않음 · 실시간 상태 없음",
   "peers.ended": "종료 {0}",

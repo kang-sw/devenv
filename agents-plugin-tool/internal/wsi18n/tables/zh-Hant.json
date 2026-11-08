@@ -178,6 +178,8 @@
   "panel.tickets.count.full": "{0} 個就緒，{1} 個待辦",
   "panel.todo": "待辦",
   "peer.lastmail": "最近一次郵件往來",
+  "peer.running.one": "{0} 個子代理程式",
+  "peer.running.other": "{0} 個子代理程式",
   "peer.subagents": "子代理程式",
   "peer.unserved": "不在此處提供服務 · 無即時狀態",
   "peers.ended": "已結束 {0}",

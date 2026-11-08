@@ -1,7 +1,7 @@
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
 <symbol id="i-send" viewBox="0 0 16 16"><path d="M2.5 8L13.5 2.8 10.6 13.4 7.6 9.1z"/><path d="M7.6 9.1l5.9-6.3"/></symbol>
 <symbol id="i-clock" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.8"/><path d="M8 4.8V8l2.2 1.4"/></symbol>
-<symbol id="i-agents" viewBox="0 0 16 16"><circle cx="4.5" cy="4" r="1.8"/><circle cx="11.5" cy="8" r="1.8"/><circle cx="11.5" cy="13" r="1.4"/><path d="M4.5 5.8V13h5.6M4.5 8h5.2"/></symbol>
+<symbol id="i-agents" viewBox="0 0 16 16"><rect x="3" y="5.6" width="10" height="7.4" rx="2"/><path d="M8 5.6V3.4M1.6 8.6v2M14.4 8.6v2M6.2 11h3.6"/><circle cx="8" cy="2.6" r="0.8"/><circle cx="6" cy="8.6" r="0.7"/><circle cx="10" cy="8.6" r="0.7"/></symbol>
 <symbol id="i-chev" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></symbol>
 <symbol id="i-back" viewBox="0 0 16 16"><path d="M10 3.5L5.5 8l4.5 4.5"/></symbol>
 <symbol id="i-image" viewBox="0 0 16 16"><rect x="2" y="3" width="12" height="10" rx="1.6"/><circle cx="6" cy="6.6" r="1.2"/><path d="M2.5 12l3.6-3.4 2.4 2.2 2-1.8 3 3"/></symbol>

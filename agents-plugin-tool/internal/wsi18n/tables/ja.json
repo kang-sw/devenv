@@ -178,6 +178,8 @@
   "panel.tickets.count.full": "準備完了 {0}、ToDo {1}",
   "panel.todo": "ToDo",
   "peer.lastmail": "最後のメールのやり取り",
+  "peer.running.one": "サブエージェント {0}件",
+  "peer.running.other": "サブエージェント {0}件",
   "peer.subagents": "サブエージェント",
   "peer.unserved": "ここでは提供されていません · ライブ状態なし",
   "peers.ended": "終了 {0}",

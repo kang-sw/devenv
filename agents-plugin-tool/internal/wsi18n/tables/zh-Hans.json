@@ -178,6 +178,8 @@
   "panel.tickets.count.full": "{0} 个就绪，{1} 个待办",
   "panel.todo": "待办",
   "peer.lastmail": "最近一次邮件往来",
+  "peer.running.one": "{0} 个子智能体",
+  "peer.running.other": "{0} 个子智能体",
   "peer.subagents": "子智能体",
   "peer.unserved": "不在此处服务 · 无实时状态",
   "peers.ended": "已结束 {0}",
