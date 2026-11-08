@@ -164,6 +164,10 @@
   "js.viewer.original": "Abrir el original en una pestaña nueva",
   "js.viewer.zoomin": "Acercar",
   "js.viewer.zoomout": "Alejar",
+  "js.wb.ago.day": "hace {0} d",
+  "js.wb.ago.hour": "hace {0} h",
+  "js.wb.ago.min": "hace {0} min",
+  "js.wb.ago.now": "ahora mismo",
   "lan.note": "Solo esta máquina ve el token. Elimina {0} para emitir uno nuevo.",
   "lan.on": "El acceso por LAN está activado.",
   "lan.open": "Abre este panel en otro dispositivo de esta red con su token de acceso:",
@@ -231,6 +235,8 @@
   "wb.assumed.title": "supuesto: confirma o corrige",
   "wb.banner": "pizarra actualizada; la recarga se pospone mientras respondes",
   "wb.closed": "cerrado",
+  "wb.closed.more": "{0} temas cerrados más sin mostrar",
+  "wb.closed.showmore": "mostrar más temas cerrados ({0})",
   "wb.confirm": "confirmar",
   "wb.copy": "copiar respuestas",
   "wb.correct": "corregir",
@@ -243,7 +249,10 @@
   "wb.quote": "tus palabras",
   "wb.read": "la lectura del líder",
   "wb.rec": "recomendación",
+  "wb.result": "cómo terminó el tema",
   "wb.settled": "resuelto",
   "wb.settled.older": "elementos resueltos anteriores",
-  "wb.title": "Pizarra"
+  "wb.title": "Pizarra",
+  "wb.topic.note": "nota sobre este tema",
+  "wb.updated": "último cambio"
 }

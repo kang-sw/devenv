@@ -6,58 +6,72 @@
   var ta = doc.getElementById("reply-text"), hint = doc.getElementById("reply-hint");
 
   // --- answer form -------------------------------------------------------
-  q(".card.policy").forEach(function (card) {
-    q(".opt", card).forEach(function (btn) {
-      function pick() {
+  // bind wires the controls under root; the page binds the whole document
+  // once, and a served page binds the closed topics it fetches later
+  // (window.wbBindBoard), so no control is wired twice.
+  function bind(root) {
+    q(".card.policy", root).forEach(function (card) {
+      q(".opt", card).forEach(function (btn) {
+        function pick() {
+          var on = btn.getAttribute("aria-pressed") === "true";
+          q(".opt", card).forEach(function (b) { b.setAttribute("aria-pressed", "false"); });
+          btn.setAttribute("aria-pressed", on ? "false" : "true");
+          build();
+        }
+        // A link inside an option follows the link and picks nothing.
+        btn.addEventListener("click", function (e) { if (!e.target.closest("a")) pick(); });
+        // A stacked option card is a role="button" element, not a native
+        // button, so it takes Enter and Space itself.
+        if (btn.getAttribute("role") === "button") btn.addEventListener("keydown", function (e) {
+          if (e.target !== btn || (e.key !== "Enter" && e.key !== " ")) return;
+          e.preventDefault();
+          pick();
+        });
+      });
+    });
+    q(".card.assumed", root).forEach(function (card) {
+      function pick(btn) {
         var on = btn.getAttribute("aria-pressed") === "true";
-        q(".opt", card).forEach(function (b) { b.setAttribute("aria-pressed", "false"); });
+        q(".btn[data-v]", card).forEach(function (b) { b.setAttribute("aria-pressed", "false"); });
         btn.setAttribute("aria-pressed", on ? "false" : "true");
         build();
       }
-      // A link inside an option follows the link and picks nothing.
-      btn.addEventListener("click", function (e) { if (!e.target.closest("a")) pick(); });
-      // A stacked option card is a role="button" element, not a native
-      // button, so it takes Enter and Space itself.
-      if (btn.getAttribute("role") === "button") btn.addEventListener("keydown", function (e) {
-        if (e.target !== btn || (e.key !== "Enter" && e.key !== " ")) return;
-        e.preventDefault();
-        pick();
+      q(".btn[data-v]", card).forEach(function (btn) {
+        btn.addEventListener("click", function () { pick(btn); });
+      });
+      // A click on the card itself toggles ok, as an ack row's label toggles its
+      // checkbox; the buttons, links, and the note keep their own behavior, and
+      // a drag that selected text is not a click.
+      card.addEventListener("click", function (e) {
+        if (e.target.closest(".btn, a, textarea")) return;
+        var sel = window.getSelection && window.getSelection();
+        if (sel && !sel.isCollapsed && card.contains(sel.anchorNode)) return;
+        pick(card.querySelector(".btn[data-v=ok]"));
       });
     });
-  });
-  q(".card.assumed").forEach(function (card) {
-    function pick(btn) {
-      var on = btn.getAttribute("aria-pressed") === "true";
-      q(".btn[data-v]", card).forEach(function (b) { b.setAttribute("aria-pressed", "false"); });
-      btn.setAttribute("aria-pressed", on ? "false" : "true");
-      build();
-    }
-    q(".btn[data-v]", card).forEach(function (btn) {
-      btn.addEventListener("click", function () { pick(btn); });
+    q(".note-toggle", root).forEach(function (t) {
+      t.addEventListener("click", function () {
+        var n = t.closest(".card, .arow").querySelector(".note");
+        n.hidden = !n.hidden; if (!n.hidden) { grow(n); n.focus(); }
+      });
     });
-    // A click on the card itself toggles ok, as an ack row's label toggles its
-    // checkbox; the buttons, links, and the note keep their own behavior, and
-    // a drag that selected text is not a click.
-    card.addEventListener("click", function (e) {
-      if (e.target.closest(".btn, a, textarea")) return;
-      var sel = window.getSelection && window.getSelection();
-      if (sel && !sel.isCollapsed && card.contains(sel.anchorNode)) return;
-      pick(card.querySelector(".btn[data-v=ok]"));
+    // A topic's pen opens the note under its bar: a comment or question on
+    // the topic as a whole, which the reply carries as "[topic] text".
+    q(".tnote-toggle", root).forEach(function (t) {
+      t.addEventListener("click", function () {
+        var n = t.closest(".topic").querySelector(".tnote");
+        n.hidden = !n.hidden; if (!n.hidden) { grow(n); n.focus(); }
+      });
     });
-  });
+    q(".card.assumed .btn[data-v=no]", root).forEach(function (b) {
+      b.addEventListener("click", function () { var n = b.closest(".card").querySelector(".note"); n.hidden = false; grow(n); n.focus(); });
+    });
+    q(".note", root).forEach(function (el) { el.addEventListener("input", function () { grow(el); }); });
+    q(".note, .ack input", root).forEach(function (el) { el.addEventListener("input", build); el.addEventListener("change", build); });
+    inPageLinks(root);
+  }
   // Size a note textarea to its content; scrollHeight is 0 while hidden.
   function grow(n) { n.style.height = "auto"; if (n.scrollHeight) n.style.height = n.scrollHeight + "px"; }
-  q(".note-toggle").forEach(function (t) {
-    t.addEventListener("click", function () {
-      var n = t.closest(".card, .arow").querySelector(".note");
-      n.hidden = !n.hidden; if (!n.hidden) { grow(n); n.focus(); }
-    });
-  });
-  q(".card.assumed .btn[data-v=no]").forEach(function (b) {
-    b.addEventListener("click", function () { var n = b.closest(".card").querySelector(".note"); n.hidden = false; grow(n); n.focus(); });
-  });
-  q(".note").forEach(function (el) { el.addEventListener("input", function () { grow(el); }); });
-  q(".note, .ack input").forEach(function (el) { el.addEventListener("input", build); el.addEventListener("change", build); });
   // Bulk acknowledge: checks every ack row and confirms every assumed card;
   // an assumed card already marked "no" keeps that answer. Policy items stay manual.
   var all = doc.getElementById("ack-all");
@@ -80,7 +94,8 @@
   }
 
   // Reply grammar: "(nn) <option>[, note: <text>]" per answered item,
-  // acknowledgements grouped as "(nn), (mm) ok", parts joined by "; ".
+  // acknowledgements grouped as "(nn), (mm) ok", parts joined by "; ", then
+  // one "[topic] text" line per topic note.
   function build() {
     if (!ta) return;
     var parts = [], acked = [];
@@ -105,12 +120,25 @@
       else if (on) acked.push("(" + id + ")");
     });
     if (acked.length) parts.push(acked.join(", ") + " ok");
+    // Topic notes follow the item segments, one line each: "[topic] text".
+    var topics = q(".tnote").map(function (n) {
+      var note = n.value.trim();
+      return note ? "[" + n.getAttribute("data-topic") + "] " + note : "";
+    }).filter(Boolean);
     var text = parts.join("; ");
+    if (topics.length) text += (text ? "\n" : "") + topics.join("\n");
     // A changed reply is no longer the copied one.
     if (text !== ta.value) copied = false;
     ta.value = text;
+    // Topic note lines make the reply several lines tall.
+    ta.style.height = "";
+    if (text.indexOf("\n") >= 0) grow(ta);
     hint.textContent = "";
-    dirty = parts.length > 0;
+    dirty = text !== "";
+    // A board with nothing to answer keeps its reply bar hidden until a topic
+    // note gives it a line.
+    var bar = ta.closest(".reply");
+    if (bar.hasAttribute("data-idle")) bar.hidden = !text;
     syncAll();
   }
 
@@ -133,15 +161,19 @@
   });
 
   // --- in-page item links: open the collapsed blocks around the target ---
-  q('a[href^="#item-"]').forEach(function (a) {
-    a.addEventListener("click", function (e) {
-      var el = doc.getElementById(a.getAttribute("href").slice(1));
-      if (!el) return;
-      e.preventDefault();
-      for (var d = el.parentElement; d; d = d.parentElement) if (d.tagName === "DETAILS") d.open = true;
-      el.scrollIntoView({ block: "center" });
-      el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash");
+  function inPageLinks(root) {
+    q('a[href^="#item-"]', root).forEach(function (a) {
+      a.addEventListener("click", function (e) {
+        var el = doc.getElementById(a.getAttribute("href").slice(1));
+        if (!el) return;
+        e.preventDefault();
+        for (var d = el.parentElement; d; d = d.parentElement) if (d.tagName === "DETAILS") d.open = true;
+        el.scrollIntoView({ block: "center" });
+        el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash");
+      });
     });
-  });
+  }
 
+  bind(doc);
+  window.wbBindBoard = bind;
   build();

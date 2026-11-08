@@ -164,6 +164,10 @@
   "js.viewer.original": "Original in neuem Tab öffnen",
   "js.viewer.zoomin": "Vergrößern",
   "js.viewer.zoomout": "Verkleinern",
+  "js.wb.ago.day": "vor {0} T.",
+  "js.wb.ago.hour": "vor {0} Std.",
+  "js.wb.ago.min": "vor {0} Min.",
+  "js.wb.ago.now": "gerade eben",
   "lan.note": "Nur dieser Rechner sieht das Token. Lösche {0}, um ein neues auszustellen.",
   "lan.on": "LAN-Zugriff ist aktiviert.",
   "lan.open": "Öffne dieses Dashboard mit seinem Zugriffstoken auf einem anderen Gerät in diesem Netzwerk:",
@@ -231,6 +235,8 @@
   "wb.assumed.title": "angenommen, bestätigen oder korrigieren",
   "wb.banner": "Board aktualisiert; Neuladen aufgeschoben, solange du antwortest",
   "wb.closed": "geschlossen",
+  "wb.closed.more": "{0} weitere geschlossene Themen nicht angezeigt",
+  "wb.closed.showmore": "weitere geschlossene Themen anzeigen ({0})",
   "wb.confirm": "bestätigen",
   "wb.copy": "Antworten kopieren",
   "wb.correct": "korrigieren",
@@ -243,7 +249,10 @@
   "wb.quote": "deine Worte",
   "wb.read": "Deutung des Leads",
   "wb.rec": "Empfehlung",
+  "wb.result": "wie das Thema endete",
   "wb.settled": "entschieden",
   "wb.settled.older": "ältere entschiedene Einträge",
-  "wb.title": "Whiteboard"
+  "wb.title": "Whiteboard",
+  "wb.topic.note": "Notiz zu diesem Thema",
+  "wb.updated": "letzte Änderung"
 }

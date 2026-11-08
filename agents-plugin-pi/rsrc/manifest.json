@@ -29,7 +29,7 @@
     "lead-use-mailbox/arm-the-wait.md": "f47a20a40dc9bc072bac056d843d3deb9e2ee36ccce228e1a9994c1bc4d0a618",
     "lead-use-mailbox/arm-the-wait.pi.md": "fce77e67ab83ae06a1698df262c7f51f7f20ef662b64a90e5e1bdbe08807480a",
     "lead-use-mailbox/lead-use-mailbox.md": "bfe85d55a84ac29a45a5f053181d0b40c2362dba7d1718a348028a8111d629db",
-    "lead-workflow-manual/command-syntax.md": "e50e56ad1fb060414916d40fa5cb455cbf1c268d8425c44f23b5d2c517a58d1f",
+    "lead-workflow-manual/command-syntax.md": "d8b9861d0afc924278cab206f3300e33e45dac1166e7fad62241153f757dad85",
     "lead-workflow-manual/lead-workflow-manual.md": "b7b50e5ec2ecd142dbedb564d2dd44c9a4d8ec92856743809f33bd4d80a15f55",
     "lead-workflow-manual/native-spawn-binding.claude.md": "fc7258226abd15ad2baef2ef8a361f6777d8390868a595853f61812def0cf310",
     "lead-workflow-manual/native-spawn-binding.codex.md": "ea1977984de016a95df292c3384e93982aa67b12bbd5e8850c7ed792acbdf284",
@@ -49,7 +49,7 @@
     "ticket-worker-elevated/ticket-worker-elevated.md": "066bbca91712d90f99a686b8f7f9ba7119203a04ee61df5a70efe1cd2f1a8866",
     "ticket-worker/ticket-worker.md": "558322907db3f72affbcaf79668a37f4143ca4d71729c90f94f29a3f6b95fb9f",
     "tracker/tracker.md": "187231b308f424dc97913ae0118cf9fb26215451b20931b58e6a17782b7e6ecc",
-    "whiteboard/whiteboard.md": "87657f758cc6188f296e126a4c900766db7999bca0c5ef43b47b4ca8b0c94664",
+    "whiteboard/whiteboard.md": "ab90787d7f519ce13d4c1e00994b2dd8795194391992d0c850fc6c1d4748b8aa",
     "worker-stop-protocol.md": "a41c2a5d3ea2f4e310213e32821ac289ca51471139fb617ebd06fd27e55582a3"
   }
 }

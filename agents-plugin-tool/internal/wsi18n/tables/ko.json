@@ -164,6 +164,10 @@
   "js.viewer.original": "원본을 새 탭에서 열기",
   "js.viewer.zoomin": "확대",
   "js.viewer.zoomout": "축소",
+  "js.wb.ago.day": "{0}일 전",
+  "js.wb.ago.hour": "{0}시간 전",
+  "js.wb.ago.min": "{0}분 전",
+  "js.wb.ago.now": "방금",
   "lan.note": "이 토큰은 이 컴퓨터에서만 보입니다. 새 토큰을 발급하려면 {0} 파일을 삭제하세요.",
   "lan.on": "LAN 접근이 켜져 있습니다.",
   "lan.open": "같은 네트워크의 다른 기기에서 접근 토큰이 포함된 주소로 이 대시보드를 열 수 있습니다:",
@@ -231,6 +235,8 @@
   "wb.assumed.title": "가정함, 확인하거나 수정하세요",
   "wb.banner": "보드가 갱신되었습니다. 답변 중이라 새로고침을 미뤘습니다",
   "wb.closed": "닫힘",
+  "wb.closed.more": "표시하지 않은 닫힌 주제 {0}개",
+  "wb.closed.showmore": "닫힌 주제 더 보기 ({0})",
   "wb.confirm": "확인",
   "wb.copy": "답변 복사",
   "wb.correct": "수정",
@@ -243,7 +249,10 @@
   "wb.quote": "사용자 발언",
   "wb.read": "리드의 해석",
   "wb.rec": "추천",
+  "wb.result": "주제의 결말",
   "wb.settled": "완료됨",
   "wb.settled.older": "이전 완료 항목",
-  "wb.title": "화이트보드"
+  "wb.title": "화이트보드",
+  "wb.topic.note": "이 주제에 대한 메모",
+  "wb.updated": "마지막 변경"
 }

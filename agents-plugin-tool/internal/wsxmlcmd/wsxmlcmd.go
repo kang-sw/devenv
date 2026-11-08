@@ -13,15 +13,20 @@
 //     ("wb:" for the whiteboard); there is no namespace declaration and no
 //     root element.
 //   - A body is raw text up to the first exact closing tag of its element
-//     (`</wb:why>`). Nothing in it is decoded, so `<`, `&`, inline HTML, and
-//     mermaid are written as is. A CDATA section (`<![CDATA[...]]>`) passes
-//     its content through literally, for a body that must contain its own
-//     closing tag.
+//     (`</wb:why>`), so `<`, `&`, inline HTML, and mermaid are written as is.
+//     A CDATA section (`<![CDATA[...]]>`) passes its content through
+//     literally, for a body that must contain its own closing tag.
 //   - A body loses one newline right after its opening tag and one right
 //     before its closing tag, so a body written on its own lines keeps its
 //     text exactly; nothing else is trimmed.
 //   - An attribute value is quoted with " or ' and runs to the matching
-//     quote; nothing in it is decoded either.
+//     quote.
+//   - Escaping is never required, but an agent escapes anyway, so the
+//     entities Decode knows are decoded in every attribute value and in each
+//     body the grammar marks as plain text (Spec.DecodeBody,
+//     Spec.DecodeFields), outside CDATA. Every other body is kept exactly as
+//     written: it may carry HTML whose entities are meant, or be an operand
+//     matched against stored text.
 //   - An unknown tag or attribute is a problem; so is text between commands
 //     or between a command's fields.
 //
@@ -32,6 +37,7 @@ package wsxmlcmd
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 )
@@ -57,6 +63,12 @@ type Spec struct {
 	// Fields are a Container's field tag names without the prefix, in the
 	// order a problem lists them.
 	Fields []string
+	// DecodeBody marks a Leaf's body as plain text: its entities are
+	// decoded (Decode), outside CDATA.
+	DecodeBody bool
+	// DecodeFields are the Container fields, without the prefix, whose
+	// bodies are plain text and decoded like a DecodeBody body.
+	DecodeFields []string
 }
 
 // Grammar is a caller's command language: its tag prefix and its command
@@ -88,6 +100,14 @@ func (g Grammar) fieldTags(spec Spec) []string {
 	tags := make([]string, len(spec.Fields))
 	for i, f := range spec.Fields {
 		tags[i] = g.Prefix + f
+	}
+	return tags
+}
+
+func (g Grammar) decodeFieldTags(spec Spec) map[string]bool {
+	tags := map[string]bool{}
+	for _, f := range spec.DecodeFields {
+		tags[g.Prefix+f] = true
 	}
 	return tags
 }
@@ -198,7 +218,7 @@ func Parse(p *Problems, g Grammar, s string) []Command {
 		if !tag.selfClosing {
 			switch spec.Kind {
 			case Leaf:
-				body, ok := t.readBody(tag.name, tag.at)
+				body, ok := t.readBody(tag.name, tag.at, spec.DecodeBody)
 				if !ok {
 					return out
 				}
@@ -213,7 +233,7 @@ func Parse(p *Problems, g Grammar, s string) []Command {
 					t.skipUnknown(tag)
 				}
 			case Container:
-				if !t.readFields(&cmd, g.fieldTags(spec)) {
+				if !t.readFields(&cmd, g.fieldTags(spec), g.decodeFieldTags(spec)) {
 					return out
 				}
 			}
@@ -319,56 +339,173 @@ func (t *tokenizer) readOpen() (openTag, bool) {
 			t.fail(t.i, "<%s>: attribute %s has no closing %c", tag.name, name, quote)
 			return tag, false
 		}
-		tag.attrs = append(tag.attrs, Attr{Name: name, Value: t.s[t.i+1 : t.i+1+end]})
+		tag.attrs = append(tag.attrs, Attr{Name: name, Value: Decode(t.s[t.i+1 : t.i+1+end])})
 		t.i += end + 2
 	}
 }
 
+// bodySegment is one run of a body: text as written, or a CDATA section's
+// content.
+type bodySegment struct {
+	text  string
+	cdata bool
+}
+
 // readBody reads raw text up to the exact closing tag of name, passing CDATA
-// sections through, and strips the one newline at each end.
-func (t *tokenizer) readBody(name string, from int) (string, bool) {
+// sections through, and strips the one newline at each end; with decode, it
+// then decodes the text outside CDATA.
+func (t *tokenizer) readBody(name string, from int, decode bool) (string, bool) {
 	closing := "</" + name + ">"
-	var b strings.Builder
+	var segs []bodySegment
+	var text strings.Builder
+	flush := func() {
+		if text.Len() > 0 {
+			segs = append(segs, bodySegment{text: text.String()})
+			text.Reset()
+		}
+	}
 	for {
 		next := strings.IndexByte(t.s[t.i:], '<')
 		if next < 0 {
 			t.fail(from, "<%s> has no closing %s", name, closing)
 			return "", false
 		}
-		b.WriteString(t.s[t.i : t.i+next])
+		text.WriteString(t.s[t.i : t.i+next])
 		t.i += next
 		rest := t.s[t.i:]
 		switch {
 		case strings.HasPrefix(rest, closing):
 			t.i += len(closing)
-			return stripBodyNewlines(b.String()), true
+			flush()
+			return joinBody(segs, decode), true
 		case strings.HasPrefix(rest, "<![CDATA["):
 			end := strings.Index(rest[9:], "]]>")
 			if end < 0 {
 				t.fail(t.i, "<%s>: a CDATA section has no closing ]]>", name)
 				return "", false
 			}
-			b.WriteString(rest[9 : 9+end])
+			flush()
+			segs = append(segs, bodySegment{text: rest[9 : 9+end], cdata: true})
 			t.i += 9 + end + 3
 		default:
-			b.WriteByte('<')
+			text.WriteByte('<')
 			t.i++
 		}
 	}
 }
 
-func stripBodyNewlines(s string) string {
+// joinBody strips the body's one newline at each end before decoding, so a
+// decoded &#10; is never mistaken for the newline after the opening tag.
+func joinBody(segs []bodySegment, decode bool) string {
+	for i := range segs {
+		if segs[i].text != "" {
+			segs[i].text = stripLeadingNewline(segs[i].text)
+			break
+		}
+	}
+	for i := len(segs) - 1; i >= 0; i-- {
+		if segs[i].text != "" {
+			segs[i].text = stripTrailingNewline(segs[i].text)
+			break
+		}
+	}
+	var b strings.Builder
+	for _, seg := range segs {
+		if decode && !seg.cdata {
+			b.WriteString(Decode(seg.text))
+		} else {
+			b.WriteString(seg.text)
+		}
+	}
+	return b.String()
+}
+
+func stripLeadingNewline(s string) string {
 	if strings.HasPrefix(s, "\r\n") {
-		s = s[2:]
-	} else if strings.HasPrefix(s, "\n") {
+		return s[2:]
+	}
+	return strings.TrimPrefix(s, "\n")
+}
+
+func stripTrailingNewline(s string) string {
+	if strings.HasSuffix(s, "\r\n") {
+		return s[:len(s)-2]
+	}
+	return strings.TrimSuffix(s, "\n")
+}
+
+// Decode replaces the five predefined XML entities (&lt; &gt; &amp; &quot;
+// &apos;) and numeric character references (&#60; &#x3c;) with the
+// characters they name, in one pass, so &amp;lt; becomes &lt;. Any other &
+// sequence, and a numeric reference naming no valid character (zero, a
+// surrogate, past U+10FFFF), stays as written.
+func Decode(s string) string {
+	if !strings.Contains(s, "&") {
+		return s
+	}
+	var b strings.Builder
+	for {
+		amp := strings.IndexByte(s, '&')
+		if amp < 0 {
+			b.WriteString(s)
+			return b.String()
+		}
+		b.WriteString(s[:amp])
+		s = s[amp:]
+		semi := strings.IndexByte(s, ';')
+		if semi < 0 {
+			b.WriteString(s)
+			return b.String()
+		}
+		if r, ok := entityRune(s[1:semi]); ok {
+			b.WriteRune(r)
+			s = s[semi+1:]
+			continue
+		}
+		b.WriteByte('&')
 		s = s[1:]
 	}
-	if strings.HasSuffix(s, "\r\n") {
-		s = s[:len(s)-2]
-	} else if strings.HasSuffix(s, "\n") {
-		s = s[:len(s)-1]
+}
+
+// entityRune is the character an entity or numeric reference name (the
+// text between & and ;) stands for.
+func entityRune(name string) (rune, bool) {
+	switch name {
+	case "lt":
+		return '<', true
+	case "gt":
+		return '>', true
+	case "amp":
+		return '&', true
+	case "quot":
+		return '"', true
+	case "apos":
+		return '\'', true
 	}
-	return s
+	digits, ok := strings.CutPrefix(name, "#")
+	if !ok {
+		return 0, false
+	}
+	base := 10
+	if hex, isHex := strings.CutPrefix(digits, "x"); isHex {
+		digits, base = hex, 16
+	} else if hex, isHex := strings.CutPrefix(digits, "X"); isHex {
+		digits, base = hex, 16
+	}
+	// ParseUint takes no sign, and its 32-bit bound keeps an absurdly long
+	// reference from wrapping into range.
+	if digits == "" || digits[0] == '+' || digits[0] == '-' {
+		return 0, false
+	}
+	n, err := strconv.ParseUint(digits, base, 32)
+	if err != nil {
+		return 0, false
+	}
+	r := rune(n)
+	if n == 0 || n > utf8.MaxRune || r >= 0xD800 && r <= 0xDFFF {
+		return 0, false
+	}
+	return r, true
 }
 
 // skipUnknown steps past an unknown tag's content up to its closing tag, so
@@ -447,8 +584,8 @@ func checkAttrs(p *Problems, label string, attrs []Attr, known []string) {
 }
 
 // readFields reads a container command's field tags (fields, full tags) up
-// to its closing tag.
-func (t *tokenizer) readFields(cmd *Command, fields []string) bool {
+// to its closing tag, decoding the bodies of the tags in decode.
+func (t *tokenizer) readFields(cmd *Command, fields []string, decode map[string]bool) bool {
 	closing := "</" + cmd.Tag + ">"
 	for {
 		t.skipSpace()
@@ -493,7 +630,7 @@ func (t *tokenizer) readFields(cmd *Command, fields []string) bool {
 		checkAttrs(t.p, fmt.Sprintf("%s field <%s>", cmd.Label(), tag.name), tag.attrs, nil)
 		f := Field{Tag: tag.name, Line: line}
 		if !tag.selfClosing {
-			body, ok := t.readBody(tag.name, tag.at)
+			body, ok := t.readBody(tag.name, tag.at, decode[tag.name])
 			if !ok {
 				return false
 			}

@@ -221,7 +221,12 @@ renders in its own sandboxed `srcdoc` frame (`allow-scripts allow-popups
 allow-popups-to-escape-sandbox`, an opaque origin that sends no cookie), so
 its images are inlined as `data:` URLs up to 2 MiB under the same containment
 (`wsdashboard.ImageDataURL`); a larger image falls back to the image route,
-which a LAN viewer's frame cannot load. A finished lead reply draws its mermaid
+which a LAN viewer's frame cannot load. The served board renders the 30 most
+recently closed topics (with nothing waiting on the user) and a show-more
+control; `GET /s/<reply-id>/closed?from=<index>&n=<count>` (from at least 1,
+n default 30, at most 300) answers `{html}` with the next closed topics in
+close order, rendered and framed as on the board, through the optional
+`wsdashboard.ClosedTopicsSource`; a session without a board is 404. A finished lead reply draws its mermaid
 fences; the reply still streaming keeps them code blocks. A finished lead
 reply also keeps its inline HTML and SVG through an allow-list sanitizer: no
 script, form, embed, or fetching element or attribute survives, and a raw

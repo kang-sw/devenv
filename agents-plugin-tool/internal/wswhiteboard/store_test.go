@@ -129,11 +129,11 @@ func TestApplyCommandsRunInTheOrderWritten(t *testing.T) {
 
 	// Close then add: the add reopens the topic. Add then close: it stays closed.
 	mustApply(t, st, addXML(ClassTechnical, "t", "x"))
-	mustApply(t, st, `<wb:close topic="t"/>`+addXML(ClassTechnical, "t", "y"))
+	mustApply(t, st, `<wb:close topic="t" result="done"/>`+addXML(ClassTechnical, "t", "y"))
 	if st.topicClosed("t") {
 		t.Fatalf("close then add must leave the topic open: %v", st.ClosedTopics)
 	}
-	mustApply(t, st, addXML(ClassTechnical, "t", "z")+`<wb:close topic="t"/>`)
+	mustApply(t, st, addXML(ClassTechnical, "t", "z")+`<wb:close topic="t" result="done"/>`)
 	if !st.topicClosed("t") {
 		t.Fatalf("add then close must leave the topic closed")
 	}
@@ -189,7 +189,7 @@ func TestApplyRefusedBatchAppliesNothingAndReportsEveryProblem(t *testing.T) {
 		t.Fatalf("refused batch changed the store: %+v", st)
 	}
 	// A valid command ahead of a bad one is not applied either.
-	problems = refused(t, st, addXML(ClassTechnical, "t", "fine")+"\n"+`<wb:close topic="nowhere"/>`)
+	problems = refused(t, st, addXML(ClassTechnical, "t", "fine")+"\n"+`<wb:close topic="nowhere" result="done"/>`)
 	wantProblems(t, problems, `command 2 <wb:close> (line 2) topic: no item or topic body has topic "nowhere"`)
 }
 
@@ -478,17 +478,17 @@ func TestRotationKeepsTenMostRecentSettledBoardWide(t *testing.T) {
 	}
 	// Closing a topic collapses it at once; the freed slots go to no one
 	// else here because topic b already shows all of its items.
-	mustApply(t, st, `<wb:close topic="a"/>`)
+	mustApply(t, st, `<wb:close topic="a" result="done"/>`)
 	view = BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"})
 	for _, topic := range view.Topics {
 		if topic.Name == "a" && (len(topic.Expanded) != 0 || len(topic.Collapsed) != 8 || !topic.Quiet || !topic.Closed) {
 			t.Fatalf("closed topic a = %+v", topic)
 		}
 	}
-	problems := refused(t, st, `<wb:close topic="missing"/>`)
+	problems := refused(t, st, `<wb:close topic="missing" result="done"/>`)
 	wantProblems(t, problems, `no item or topic body has topic "missing"`)
 	// Closing twice keeps one mark; a topic attribute is required.
-	mustApply(t, st, `<wb:close topic="a"/>`)
+	mustApply(t, st, `<wb:close topic="a" result="done"/>`)
 	if len(st.ClosedTopics) != 1 {
 		t.Fatalf("closed topics = %v", st.ClosedTopics)
 	}
@@ -498,7 +498,7 @@ func TestRotationKeepsTenMostRecentSettledBoardWide(t *testing.T) {
 func TestClosedTopicReopensWhenAnItemIsAdded(t *testing.T) {
 	st := &State{}
 	settleItems(t, st, "a", 2)
-	mustApply(t, st, `<wb:close topic="a"/>`)
+	mustApply(t, st, `<wb:close topic="a" result="done"/>`)
 	if !st.topicClosed("a") {
 		t.Fatal("topic a should be closed")
 	}
@@ -507,7 +507,7 @@ func TestClosedTopicReopensWhenAnItemIsAdded(t *testing.T) {
 		t.Fatalf("an added item reopens its topic: %v", st.ClosedTopics)
 	}
 	// A rejected add reopens nothing.
-	mustApply(t, st, `<wb:close topic="a"/>`)
+	mustApply(t, st, `<wb:close topic="a" result="done"/>`)
 	refused(t, st, `<wb:add class="bad" topic="a"><wb:title>x</wb:title></wb:add>`)
 	if !st.topicClosed("a") {
 		t.Fatalf("a refused add must not reopen the topic")
@@ -831,7 +831,7 @@ func TestApplyTopicSameBodyIsNoChange(t *testing.T) {
 		t.Fatalf("the same body again bumped Changed to %d (was %d, Seq %d)", got.Changed, first, st.Seq)
 	}
 	// A no-op does not reopen a closed topic either; a real change does.
-	mustApply(t, st, `<wb:close topic="t"/>`)
+	mustApply(t, st, `<wb:close topic="t" result="done"/>`)
 	mustApply(t, st, topicXML("t", "same"))
 	if !st.topicClosed("t") {
 		t.Fatal("setting the same body reopened the topic")
@@ -867,7 +867,7 @@ func TestApplyTopicEmptyBodyClears(t *testing.T) {
 	// A topic with items stays closed when its body is cleared; a topic left
 	// with neither drops its closed mark, and is unknown again.
 	st := &State{}
-	mustApply(t, st, addXML(ClassTechnical, "has items", "x")+topicXML("has items", "b")+topicXML("only body", "b")+`<wb:close topic="has items"/><wb:close topic="only body"/>`)
+	mustApply(t, st, addXML(ClassTechnical, "has items", "x")+topicXML("has items", "b")+topicXML("only body", "b")+`<wb:close topic="has items" result="done"/><wb:close topic="only body" result="done"/>`)
 	mustApply(t, st, `<wb:topic name="has items"/><wb:topic name="only body"/>`)
 	if !st.topicClosed("has items") || st.topicClosed("only body") || len(st.ClosedTopics) != 1 {
 		t.Fatalf("closed topics = %v", st.ClosedTopics)
@@ -875,7 +875,7 @@ func TestApplyTopicEmptyBodyClears(t *testing.T) {
 	if st.topicKnown("only body") {
 		t.Fatal("a topic with neither items nor body must be gone")
 	}
-	wantProblems(t, refused(t, st, `<wb:close topic="only body"/>`), `no item or topic body has topic "only body"`)
+	wantProblems(t, refused(t, st, `<wb:close topic="only body" result="done"/>`), `no item or topic body has topic "only body"`)
 	// A body set again afterwards starts open.
 	mustApply(t, st, topicXML("only body", "back"))
 	if st.topicClosed("only body") {
@@ -1000,22 +1000,22 @@ func TestApplyEditReplaceAllAndDelete(t *testing.T) {
 
 func TestApplyEditAndTopicReopenAClosedTopic(t *testing.T) {
 	st := &State{}
-	mustApply(t, st, addXML(ClassTechnical, "t", "x")+topicXML("t", "alpha")+`<wb:close topic="t"/>`)
+	mustApply(t, st, addXML(ClassTechnical, "t", "x")+topicXML("t", "alpha")+`<wb:close topic="t" result="done"/>`)
 	mustApply(t, st, `<wb:edit topic="t"><wb:old>alpha</wb:old><wb:new>beta</wb:new></wb:edit>`)
 	if st.topicClosed("t") {
 		t.Fatal("an edit that changes the body reopens the topic")
 	}
-	mustApply(t, st, `<wb:close topic="t"/>`+topicXML("t", "gamma"))
+	mustApply(t, st, `<wb:close topic="t" result="done"/>`+topicXML("t", "gamma"))
 	if st.topicClosed("t") {
 		t.Fatal("a wb:topic that changes the body reopens the topic")
 	}
 	// Closing after the change in the same batch keeps it closed.
-	mustApply(t, st, topicXML("t", "delta")+`<wb:close topic="t"/>`)
+	mustApply(t, st, topicXML("t", "delta")+`<wb:close topic="t" result="done"/>`)
 	if !st.topicClosed("t") {
 		t.Fatal("close after a body change must stick")
 	}
 	// A body-only topic closes the same way.
-	mustApply(t, st, topicXML("doc", "x")+`<wb:close topic="doc"/>`)
+	mustApply(t, st, topicXML("doc", "x")+`<wb:close topic="doc" result="done"/>`)
 	mustApply(t, st, topicXML("doc", "y"))
 	if st.topicClosed("doc") {
 		t.Fatal("a body-only topic reopens on change")
@@ -1028,7 +1028,7 @@ func TestApplyCloseAcceptsAContentOnlyTopic(t *testing.T) {
 	if len(st.Items) != 0 || !st.topicKnown("notes") {
 		t.Fatalf("state = %+v", st)
 	}
-	mustApply(t, st, `<wb:close topic="notes"/>`)
+	mustApply(t, st, `<wb:close topic="notes" result="done"/>`)
 	if !st.topicClosed("notes") {
 		t.Fatal("wb:close must accept a topic that has a body and no items")
 	}

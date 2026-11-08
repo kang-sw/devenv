@@ -16,6 +16,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wsledger"
 	"github.com/kang-sw/devenv/internal/wstracker"
 	"github.com/kang-sw/devenv/internal/wstrackerhost"
+	"github.com/kang-sw/devenv/internal/wsxmlcmd"
 )
 
 func (f *whiteboardFixture) trackerUpdate(t *testing.T, commands string) string {
@@ -634,6 +635,38 @@ func TestParseTrackerID(t *testing.T) {
 	for _, bad := range []string{"maya", "maya-5", "maya.pc-0", "maya.pc#x", "maya.pc#5!c:1"} {
 		if _, err := parseTrackerID(bad); err == nil {
 			t.Fatalf("parseTrackerID(%q) must fail", bad)
+		}
+	}
+}
+
+// Every tk: attribute and body is plain text, so an escaped one is decoded:
+// a title and project, an item body, a note, and a comment; CDATA stays
+// literal.
+func TestTrackerUpdateDecodesEscapedText(t *testing.T) {
+	var problems wsxmlcmd.Problems
+	b := planTrackerBatch(&problems, `<tk:item.create store="team" kind="task" title="Parse &lt;key&gt; &amp; value" project="a&#38;b">body &lt;b&gt;</tk:item.create>`+
+		`<tk:item.edit store="team" item="$1" title="&quot;t&quot;">new &lt;b&gt;</tk:item.edit>`+
+		`<tk:item.status store="team" item="$1" status="doing">waiting on &lt;key&gt;</tk:item.status>`+
+		`<tk:item.close store="team" item="$1">done &amp; dusted <![CDATA[&lt;kept&gt;]]></tk:item.close>`+
+		`<tk:comment.add store="team" item="$1">see &lt;b&gt;</tk:comment.add>`+
+		`<tk:comment.edit store="team" comment="$5">edit &lt;b&gt;</tk:comment.edit>`,
+		[]wstrackerhost.StoreEntry{{ID: "team"}})
+	if len(problems.List) > 0 {
+		t.Fatalf("problems: %q", problems.List)
+	}
+	want := []map[string]any{
+		{"title": "Parse <key> & value", "project": "a&b", "body": "body <b>"},
+		{"title": `"t"`, "body": "new <b>"},
+		{"note": "waiting on <key>"},
+		{"note": "done & dusted &lt;kept&gt;"},
+		{"body": "see <b>"},
+		{"body": "edit <b>"},
+	}
+	for i, fields := range want {
+		for k, v := range fields {
+			if got := b.events[i].payload[k]; got != v {
+				t.Errorf("event %d (%s) %s = %q, want %q", i+1, b.events[i].typ, k, got, v)
+			}
 		}
 	}
 }

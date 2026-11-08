@@ -502,3 +502,43 @@ func TestDashboardReadPageLangTranslatesBoardAndPanelText(t *testing.T) {
 		t.Error("Korean page still carries English panel text")
 	}
 }
+
+// TestDashboardReadClosedTopicsPastTheCap pins the served board's closed-topic
+// cap end to end: the board ends with the show-more control, and
+// ReadClosedTopics renders the topics past the cap under the served link
+// rule, the most recently closed first.
+func TestDashboardReadClosedTopicsPastTheCap(t *testing.T) {
+	f := newWhiteboardFixture(t)
+	src := dashboardPageSource(t, nil)
+	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
+	if _, ok := src.ReadClosedTopics(reg, "", 30, 30); ok {
+		t.Fatal("ReadClosedTopics read a session without a board")
+	}
+
+	var cmds strings.Builder
+	for i := 1; i <= 32; i++ {
+		fmt.Fprintf(&cmds, `<wb:topic name="c%d">see [the plan](./ai-docs/plan.md)</wb:topic><wb:close topic="c%d" result="Ending %d."/>`, i, i, i)
+	}
+	f.update(t, cmds.String())
+
+	page := readPageOK(t, src, reg)
+	if board := string(page.Board.Board); !strings.Contains(board, `<button class="btn closed-more" data-closed-next="30">`) || strings.Contains(board, `title="c2"`) {
+		t.Errorf("the served board does not stop at the cap with a show-more control")
+	}
+	html, ok := src.ReadClosedTopics(reg, "", 30, 30)
+	if !ok {
+		t.Fatal("ReadClosedTopics found no board")
+	}
+	rest := string(html)
+	if first, last := strings.Index(rest, `>c2</span>`), strings.Index(rest, `>c1</span>`); first < 0 || last < first || strings.Count(rest, `<section class="topic`) != 2 {
+		t.Errorf("the closed topics past the cap:\n%.800s", rest)
+	}
+	for _, want := range []string{`Ending 2.`, `<iframe class="doc-frame" title="c1"`, `/s/` + reg.ReplyID + `/file?path=ai-docs%2Fplan.md`} {
+		if !strings.Contains(rest, want) {
+			t.Errorf("the closed topics past the cap lack %q", want)
+		}
+	}
+	if strings.Contains(rest, f.key) {
+		t.Error("the closed topics carry the session key")
+	}
+}

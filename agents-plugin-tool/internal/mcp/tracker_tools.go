@@ -84,8 +84,11 @@ const (
 // its own.
 var trackerEventAttrs = []string{"store", "origin"}
 
+// trackerEventSpec is an event command. Its body (an item body, a comment,
+// or a note) is shown as plain text, never as raw HTML, and matched against
+// nothing, so an escaped body is decoded like the attributes.
 func trackerEventSpec(kind wsxmlcmd.Kind, attrs ...string) wsxmlcmd.Spec {
-	return wsxmlcmd.Spec{Kind: kind, Attrs: append(append([]string{}, trackerEventAttrs...), attrs...)}
+	return wsxmlcmd.Spec{Kind: kind, Attrs: append(append([]string{}, trackerEventAttrs...), attrs...), DecodeBody: true}
 }
 
 // trackerCommands is the command table, keyed by name without the prefix:
