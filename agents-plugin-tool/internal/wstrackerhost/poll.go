@@ -109,8 +109,8 @@ func (h *Host) forEachStore(ctx context.Context, fn func(*store)) {
 
 // StartPoll runs the background poll in this process: it creates the root,
 // takes the poll lock (retrying each tick while another process holds it),
-// and runs PollOnce every interval while it holds the lock, re-reading the
-// registry each round. stop ends it and releases the lock. The dashboard
+// and runs PollOnce at once and then every interval while it holds the
+// lock, re-reading the registry each round. stop ends it and releases the lock. The dashboard
 // daemon runs it, so while the daemon runs, PreRead leaves the network to
 // it.
 func (h *Host) StartPoll(interval time.Duration) (stop func()) {
@@ -139,7 +139,13 @@ func (h *Host) StartPoll(interval time.Duration) (stop func()) {
 				}
 			}
 		}
+		// The first round runs as soon as the lock is held: holding it turns
+		// every process's PreRead into a no-op, so waiting a full interval
+		// would leave reads that stale after the daemon starts.
 		take()
+		if held {
+			h.PollOnce(ctx)
+		}
 		for {
 			select {
 			case <-ctx.Done():

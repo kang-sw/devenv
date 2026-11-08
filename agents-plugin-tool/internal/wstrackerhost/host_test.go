@@ -417,6 +417,28 @@ func TestPollSyncsTwoClones(t *testing.T) {
 	}
 }
 
+// TestPollRunsAtOnce: the poll lock turns every pre-read into a no-op, so
+// the poll fetches as soon as it takes the lock rather than one interval
+// later; otherwise reads stay stale for a whole interval after it starts.
+func TestPollRunsAtOnce(t *testing.T) {
+	w := newWorld(t)
+	a, b := w.machine("a"), w.machine("b")
+	w.register(a, "team", "ada", &wstracker.Profile{Given: "Ada"})
+	w.register(b, "team", "bo", &wstracker.Profile{Given: "Bo"})
+	item := createItem(t, a, "team", "fresh at start")
+	syncStore(t, a, "team")
+
+	stop := b.StartPoll(time.Hour)
+	defer stop()
+	deadline := time.Now().Add(20 * time.Second)
+	for !hasItem(view(t, b, "team"), item) {
+		if time.Now().After(deadline) {
+			t.Fatal("the poll must fetch when it takes the lock, not one interval later")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
 // TestPreReadWithoutDaemon: with no poller, the pre-read check fetches,
 // throttled per store by the check interval from the last attempt.
 func TestPreReadWithoutDaemon(t *testing.T) {
