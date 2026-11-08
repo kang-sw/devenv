@@ -325,6 +325,9 @@
     "261108-bug-pi-esc-drops-queued-mail-batches": {
       "registered_at": "2026-11-07T15:11:11Z"
     },
+    "261108-bug-tracker-reregister-second-member-same-machine-key": {
+      "registered_at": "2026-11-08T10:52:59Z"
+    },
     "261108-bug-ws-ledger-moved-reissued-events-lose-intra-batch-refs": {
       "registered_at": "2026-11-08T07:47:49Z"
     },
