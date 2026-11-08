@@ -751,6 +751,21 @@ func (l *Ledger) rebuild() {
 	}
 	l.view = buildView(in)
 
+	// An event can leave the view: a ref reset to a non-descendant, or the
+	// old stream MoveToFreshClone retires. A cursor cannot report a removal,
+	// so a caller that upserts by id would keep it; a new epoch makes the
+	// next Events a full re-read.
+	dropped := false
+	for id := range l.marks {
+		if l.view.byID[id] == nil {
+			delete(l.marks, id)
+			dropped = true
+		}
+	}
+	if dropped {
+		l.epoch = randomID()
+	}
+
 	next := l.gen + 1
 	changed := false
 	for _, n := range l.view.nodes {

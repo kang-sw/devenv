@@ -138,5 +138,8 @@
 // verdict or pending state changed since the generation, because a filled
 // gap or a long-offline clone's events sort before events already
 // delivered, and a revocation or a filled gap changes verdicts behind any
-// position. Callers upsert by EventID.
+// position. Callers upsert by EventID. When an event leaves the view (a
+// ref reset to a non-descendant, the stream MoveToFreshClone retires), the
+// Ledger's epoch changes, so the next call returns everything and the
+// caller replaces what it holds.
 package wsledger

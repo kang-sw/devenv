@@ -200,3 +200,73 @@ func TestRegisterInstallsVeto(t *testing.T) {
 		}
 	}
 }
+
+// TestRefreshAfterMoveToFreshCloneHoldsNoDuplicate: MoveToFreshClone drops
+// the old stream's unpushed item.create from the view and re-issues it
+// under the fresh clone id. The tracker's cursor read must not keep the
+// dropped copy, so the folded view holds the item once.
+func TestRefreshAfterMoveToFreshCloneHoldsNoDuplicate(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	remote := filepath.Join(root, "remote.git")
+	if out, err := exec.Command("git", "init", "--quiet", "--bare", remote).CombinedOutput(); err != nil {
+		t.Fatalf("init remote: %v: %s", err, out)
+	}
+	clock := &ledgerClock{now: time.Date(2026, 11, 8, 9, 0, 0, 0, time.UTC)}
+	opts := func(member, dir string) wsledger.Options {
+		return wsledger.Options{Dir: filepath.Join(root, "stores", dir), Member: member, Name: member,
+			KeyDir: filepath.Join(root, "keys", member), CloneID: "c1", Clock: clock}
+	}
+	adaL, err := Register(ctx, opts("ada", "ada"), remote)
+	if err != nil {
+		t.Fatalf("register ada: %v", err)
+	}
+	defer adaL.Close()
+	x, err := Register(ctx, opts("bo", "bo"), remote)
+	if err != nil {
+		t.Fatalf("register bo: %v", err)
+	}
+	defer x.Close()
+	// y: the same member, key, and clone id from another directory, so its
+	// push makes the remote copy of bo.c1 foreign to x.
+	y, err := Register(ctx, opts("bo", "bo-twin"), remote)
+	if err != nil {
+		t.Fatalf("register twin: %v", err)
+	}
+	defer y.Close()
+	if _, err := y.Append(ctx, []wsledger.NewEvent{{Type: "note", Payload: json.RawMessage(`{}`)}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := y.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	trk := New(x, "bo.c1")
+	raw := func(v any) json.RawMessage { b, _ := json.Marshal(v); return b }
+	if _, err := trk.Dispatch(ctx, []wsledger.NewEvent{{Type: TypeItemCreate, Payload: raw(map[string]any{"kind": "task", "title": "Ship the tracker"})}}); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := x.Sync(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Pushed || !rep.Pending.ForeignAdvance {
+		t.Fatalf("x sync = %+v, want a foreign advance and nothing pushed", rep)
+	}
+	if n := len(trk.View(clock.now, 0).Items); n != 1 {
+		t.Fatalf("items before the move = %d, want 1", n)
+	}
+
+	if _, err := x.MoveToFreshClone(ctx); err != nil {
+		t.Fatalf("MoveToFreshClone: %v", err)
+	}
+	v := trk.View(clock.now, 0)
+	if len(v.Items) != 1 {
+		t.Fatalf("items after the move = %v, want the moved item once", v.ItemOrder)
+	}
+	for id := range v.Items {
+		if strings.HasPrefix(id, "bo.c1#") {
+			t.Fatalf("the view still holds the dropped old-stream item %s", id)
+		}
+	}
+}

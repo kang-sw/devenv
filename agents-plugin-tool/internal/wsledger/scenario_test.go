@@ -878,6 +878,49 @@ func TestCursorFilledGapReachesCaller(t *testing.T) {
 	}
 }
 
+// TestCursorEventLeavingViewRotatesEpoch: a member ref reset to a
+// non-descendant drops events from the view. A cursor cannot report the
+// removal, so the epoch changes and the next read is a full re-read without
+// the dropped event; a read where nothing left keeps the epoch.
+func TestCursorEventLeavingViewRotatesEpoch(t *testing.T) {
+	w := newWorld(t)
+	ada := w.create("ada", "c1")
+	bo := w.join("bo", "c1")
+	b2 := appendOne(t, bo, "note", map[string]int{"n": 2})
+	syncOK(t, bo)
+	ref := memberRef("bo", "c1")
+	older := refTip(t, bo, ref)
+	b3 := appendOne(t, bo, "note", map[string]int{"n": 3})
+	syncOK(t, bo)
+	fetchOK(t, ada)
+
+	_, cur := ada.Events(Cursor{})
+	a2 := appendOne(t, ada, "note", map[string]int{"n": 2})
+	next, cur2 := ada.Events(cur)
+	if cur2.Epoch != cur.Epoch || len(next) != 1 || next[0].ID != a2 {
+		t.Fatalf("a read with nothing dropped = %+v (epoch %s -> %s), want only a2 under the same epoch", next, cur.Epoch, cur2.Epoch)
+	}
+
+	setRef(t, ada, ref, older, refTip(t, ada, ref))
+	if _, err := ada.Reload(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	next, cur3 := ada.Events(cur2)
+	if cur3.Epoch == cur2.Epoch {
+		t.Fatal("the epoch did not change when an event left the view")
+	}
+	got := map[EventID]bool{}
+	for _, e := range next {
+		got[e.ID] = true
+	}
+	if got[b3] {
+		t.Fatalf("the dropped event %s is still delivered: %+v", b3, next)
+	}
+	if !got[b2] || !got[a2] {
+		t.Fatalf("the read after the drop is not a full re-read: %+v", next)
+	}
+}
+
 // TestRevocationFirstInCommitKeepsSignerCheck: a revocation's verdict is
 // memoized from its own scoped pass; the events after it in the same
 // commit still take the commit's signer check.
