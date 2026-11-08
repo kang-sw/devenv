@@ -64,6 +64,10 @@ repository sized for 50-60 people, reached from the dashboard.
   tree, fetched on demand through a partial clone (board (337) a). The mockup
   and `wstracker` already model the metadata and the `attachments.max_bytes`
   limit (merge `0a80fdbfb`, board (338), (339), (345) b).
+- `261108-feat-ws-tracker-wiki-git-branch` (idea): a wiki as a native-git
+  branch in the store repository, outside the event protocol, any member
+  edits, agent-driven recovery; after the core children (board (375) a,
+  (376) b, (377) b).
 
 ## Cross-Child Decisions
 
