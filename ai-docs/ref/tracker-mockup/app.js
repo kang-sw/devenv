@@ -12,6 +12,7 @@
   var ui = {
     store: null,          // the store the header control and the item window refer to
     open: null,           // the store whose drawer is open, or null
+    page: null,           // the store shown full-page by the route #/<storeId> (371), or null
     viewers: {},          // store -> clone stream the page is viewed as ("<member>.<clone>")
     clock: {},            // store -> mock "now"; each write advances it by a minute
     seen: {},             // "store|stream" -> { badge key: true } already shown to that viewer
@@ -939,11 +940,13 @@
     return '';
   }
   function tabSeen() { return (ui.tabSeen[seenKey(ui.store)] = ui.tabSeen[seenKey(ui.store)] || {}); }
-  function tabShown(k, v) { if (ui.open === ui.store) tabSeen()[k] = tabSig(k, v); }
+  // the store's content is on screen: its drawer is open, or it is the store page (371)
+  function viewing() { return ui.page ? ui.page === ui.store : ui.open === ui.store; }
+  function tabShown(k, v) { if (viewing()) tabSeen()[k] = tabSig(k, v); }
   // Unread notifications count as new on first sight; every other tab starts as seen.
   // Only an open drawer shows or records anything (a closed one is not being looked at).
   function tabDot(k, v) {
-    if (ui.open !== ui.store) return false;
+    if (!viewing()) return false;
     var seen = tabSeen(), sig = tabSig(k, v);
     if (!(k in seen)) seen[k] = k === 'notify' ? '' : sig;
     // notifications: only an unread entry not there when last shown (reading or answering one is not news)
@@ -967,6 +970,9 @@
     var MAKE = { items: cardPanel, notify: cardNotify, chat: cardChat, org: cardTeam, activity: cardActivity, data: cardData };
     var h = '<div class="dr-title"><b>' + esc(vs.store.label) + '</b><span>' + nMem + ' members, ' + vs.stats.events + ' events from ' + vs.stats.commits + ' commits, ' +
       vs.stats.flagged + ' flagged</span><span class="grow"></span>' +
+      // (371) the drawer links to the store page; the page links back to the session view
+      (ui.page ? '<button class="btn" data-act="page-back"' + tipAttr('back to the session view (the browser back button works too)') + '><svg class="i"><use href="#i-back"/></svg>Back to session</button>' :
+        '<a class="btn" href="#/' + esc(encodeURIComponent(name)) + '"' + tipAttr('open this store as its own page (#/' + name + ')') + '><svg class="i"><use href="#i-page"/></svg>Open as page</a>') +
       '<button class="btn primary" data-act="create"><svg class="i"><use href="#i-plus"/></svg>New</button></div>' + syncHtml(name);
     if (!vs.viewer.isMember) h += '<p class="err">' + esc(v) + ' is not a member of this store (removed or never joined): writes are flagged.</p>';
     var L = ui.layout = layoutOf(), ts = tabState(), specs = {};
@@ -1463,9 +1469,9 @@
     var name = ui.store, prev = viewerOf(name);
     if (prev && prev !== stream) stores[name].sync(prev, ui.clock[name]);
     ui.viewers[name] = stream; ui.last = null;
-    if (ui.open) fetchNow(name);
+    if (viewing()) fetchNow(name);
     vss[name] = stores[name].view(stream, ui.clock[name]);
-    if (ui.open) markSeen(name);
+    if (viewing()) markSeen(name);
     render();
   }
 
@@ -1523,7 +1529,10 @@
     renderHandles();
     $('drawer').classList.toggle('open', !!ui.open);
 
-    var body = $('drbody'), sb = $('iwinbody'), top1 = body.scrollTop, top2 = sb.scrollTop;
+    // (371) the store renders into the store page or the drawer, never both (the card ids are unique)
+    var body = ui.page ? $('spage') : $('drbody'), sb = $('iwinbody'), top1 = body.scrollTop, top2 = sb.scrollTop;
+    (ui.page ? $('drbody') : $('spage')).innerHTML = '';
+    $('spage').hidden = !ui.page; document.body.classList.toggle('paged', !!ui.page);
     var draft = $('cbox') ? $('cbox').value : '';
     // (350) cards scroll inside; keep each card's scroll and the focused row across the re-render
     var scrolls = {}, fa = document.activeElement, focusRk = fa && fa.closest && body.contains(fa) && fa.closest('[data-rk]');
@@ -1531,7 +1540,7 @@
     Array.prototype.forEach.call(body.querySelectorAll('.card[id] > .cbody'), function (c) { scrolls[c.parentNode.id] = c.scrollTop; });
     hideTip();
     body.innerHTML = drawerHtml(name, v);
-    fitDrawer();
+    if (!ui.page) fitDrawer();
     Array.prototype.forEach.call(body.querySelectorAll('.card[id] > .cbody'), function (c) { if (scrolls[c.parentNode.id]) c.scrollTop = scrolls[c.parentNode.id]; });
     var chat = body.querySelector('.chat-log');
     if (chat) chat.scrollTop = chat.scrollHeight; // newest message at the bottom
@@ -1577,6 +1586,7 @@
   function openItemWindow(storeId, itemId, opener) {
     if (!stores[storeId]) return false;
     if (!stores[storeId].view(viewerOf(storeId), ui.clock[storeId]).items[itemId]) return false;
+    if (ui.page && ui.page !== storeId) { history.pushState(null, '', '#/' + encodeURIComponent(storeId)); applyRoute(); } // on a store page: go to the item's store page
     if (ui.store !== storeId) {
       if (ui.open) { syncNow(ui.open, true); ui.open = null; }
       ui.store = storeId; ui.last = null; ui.sel = null;
@@ -1603,6 +1613,91 @@
     var el = back && document.querySelector(back);
     if (el && !el.matches('a[href], button, [tabindex]')) el = el.querySelector('a[href], button, [tabindex]'); // a feed entry: its title link
     if (el) el.focus();
+  }
+
+  // (371) The store page: the route #/<storeId> shows that store full-page, with the same
+  // Items panel and tab pane layout, in place of the conversation and the drawer. It is
+  // the only route (no item routes: an item URL would point at the viewer's own daemon,
+  // so sharing it across people was rejected, (369)). Entering a page fetches and shows
+  // what is new, like opening the drawer; leaving it pushes, like a collapse. Clearing
+  // the hash, the browser back button, or "Back to session" returns to the session view.
+  function routeStore() {
+    var m = /^#\/([^/]+)$/.exec(location.hash), id = m && decodeURIComponent(m[1]);
+    return id && stores[id] ? id : null;
+  }
+  function applyRoute() {
+    var s = routeStore();
+    if (location.hash.length > 2 && !s) toast('No store named ' + esc(location.hash.slice(2)) + '; showing the session view.');
+    if (s !== ui.page) {
+      if (ui.page) syncNow(ui.page, true);
+      if (s) {
+        if (ui.open) { syncNow(ui.open, true); ui.open = null; }
+        if (ui.store !== s) { ui.item = null; ui.win = false; ui.last = null; ui.sel = null; ui.itemChanged = true; }
+        ui.store = s; fetchNow(s);
+        vss[s] = stores[s].view(viewerOf(s), ui.clock[s]);
+        markSeen(s);
+      }
+      ui.page = s;
+    }
+    render();
+  }
+  function leavePage() { history.pushState(null, '', location.pathname + location.search); applyRoute(); }
+
+  // (372) b The quick switcher: the magnifier next to the gear opens one search over the
+  // stores (by name and label) and the items of every store (by title; items hidden by a
+  // tombstone are left out, everything else is visible to every member (148)), read from
+  // each store's current view state. A store opens its page; an item opens its window.
+  // Arrow keys move, Enter picks, Esc closes, and focus returns to where it was.
+  var qs = { open: false, items: [], idx: 0, back: null };
+  function qResults(q) {
+    q = q.trim().toLowerCase();
+    var out = [];
+    order.forEach(function (n) {
+      var st = vss[n].store;
+      if (!q || n.toLowerCase().indexOf(q) >= 0 || String(st.label).toLowerCase().indexOf(q) >= 0) out.push({ kind: 'store', store: n, label: st.label });
+    });
+    if (q) order.forEach(function (n) {
+      var V = vss[n];
+      V.itemOrder.forEach(function (id) {
+        var it = V.items[id];
+        if (!it.hidden && it.title.toLowerCase().indexOf(q) >= 0) out.push({ kind: 'item', store: n, item: id, title: it.title, alias: it.alias, st: it.kind === 'topic' ? 'topic' : it.status });
+      });
+    });
+    return out.slice(0, 30);
+  }
+  function qRender() {
+    var list = qs.items = qResults($('qin').value), last = null, h = '';
+    if (qs.idx >= list.length) qs.idx = Math.max(0, list.length - 1);
+    list.forEach(function (x, i) {
+      if (x.kind !== last) { last = x.kind; h += '<li class="qgrp" role="presentation">' + (x.kind === 'store' ? 'Stores' : 'Items') + '</li>'; }
+      h += '<li class="qopt' + (i === qs.idx ? ' on' : '') + '" role="option" id="qopt-' + i + '" aria-selected="' + (i === qs.idx) + '"' + attr('qi', i) + '>' +
+        (x.kind === 'store' ? '<svg class="i"><use href="#i-tasks"/></svg><b>' + esc(x.store) + '</b><span class="muted">' + esc(x.label) + '</span><span class="grow"></span><span class="qk">open page</span>' :
+          '<span class="sti">' + SI.svg(x.st) + '</span><span class="qt">' + esc(x.title) + '</span><span class="grow"></span><code class="al">' + esc(x.alias) + '</code><span class="qk">' + esc(x.store) + '</span>') + '</li>';
+    });
+    $('qlist').innerHTML = h || '<li class="qnone" role="presentation">No store or item matches.</li>';
+    $('qin').setAttribute('aria-activedescendant', list.length ? 'qopt-' + qs.idx : '');
+    var on = $('qlist').querySelector('.qopt.on');
+    if (on) on.scrollIntoView({ block: 'nearest' });
+  }
+  function qOpen() {
+    if (qs.open) return;
+    qs.open = true; qs.idx = 0; qs.back = document.activeElement;
+    gearMenu(false);
+    $('qpop').hidden = false; $('qs').setAttribute('aria-expanded', 'true');
+    $('qin').value = ''; qRender(); $('qin').focus();
+  }
+  function qClose(keepFocus) {
+    if (!qs.open) return;
+    qs.open = false; $('qpop').hidden = true; $('qs').setAttribute('aria-expanded', 'false');
+    var b = qs.back; qs.back = null;
+    if (!keepFocus && b && b.isConnected) b.focus(); else if (!keepFocus) $('qs').focus();
+  }
+  function qPick(i) {
+    var x = qs.items[i];
+    if (!x) return;
+    qClose(true);
+    if (x.kind === 'store') { if (ui.page !== x.store) location.hash = '#/' + encodeURIComponent(x.store); else $('qs').focus(); }
+    else if (!openItemWindow(x.store, x.item, $('qs'))) toast('That item is not visible to this viewer.');
   }
 
   // Theme (board (347) a): auto / light / dark, local UI state in localStorage. Applied as
@@ -1635,7 +1730,7 @@
   function placeMore(row) {
     var m = row.querySelector(':scope > .ir-more');
     if (!m) return;
-    var r = row.getBoundingClientRect(), c = $('drclip').getBoundingClientRect(), ind = Number(row.style.getPropertyValue('--ind')) || 0;
+    var r = row.getBoundingClientRect(), c = $(ui.page ? 'spage' : 'drclip').getBoundingClientRect(), ind = Number(row.style.getPropertyValue('--ind')) || 0;
     var left = r.left + 28 + ind * 16;
     m.style.left = Math.round(left) + 'px'; m.style.width = Math.round(Math.max(220, r.right - 6 - left)) + 'px';
     var h = m.offsetHeight, lo = Math.min(c.bottom, window.innerHeight) - 4, hi = Math.max(c.top, 0) + 4;
@@ -1666,6 +1761,10 @@
     document.addEventListener('click', function (e) {
       var t = e.target, h = t.closest('[data-handle]');
       if (t === $('iwin')) { closeItemWindow(); return; } // the backdrop
+      if (t.closest('#qs')) { if (qs.open) qClose(); else qOpen(); return; }
+      var qo = t.closest('[data-qi]');
+      if (qo) { qPick(Number(qo.getAttribute('data-qi'))); return; }
+      if (qs.open && !t.closest('#qpop')) qClose(true);
       if (t.closest('#gear')) { gearMenu($('gmenu').hidden); return; }
       var th = t.closest('[data-theme-set]');
       if (th) { setTheme(th.getAttribute('data-theme-set')); return; }
@@ -1680,6 +1779,7 @@
         if (k === 'apply') { if (applyRaw()) { render(); toast('Raw data applied.'); } }
         else if (k === 'reset') { resetStore(ui.store); ui.last = null; render(); toast('Store reset to fixtures.'); }
         else if (k === 'win-close') closeItemWindow();
+        else if (k === 'page-back') leavePage();
         else if (k === 'win-discuss') { if ($('cbox')) $('cbox').focus(); }
         else if (k === 'tab') { tabState()[ui.layout === 'narrow' ? 'narrow' : 'side'] = a.getAttribute('data-tab'); ui.sel = null; render(); }
         else if (k === 'today') {
@@ -1783,6 +1883,16 @@
     });
     document.addEventListener('scroll', function () { if (tipFor) hideTip(); placeShownMore(); }, true);
     document.addEventListener('mouseout', function (e) { if (!e.relatedTarget && tipFor) hideTip(); });
+    $('qin').addEventListener('input', function () { qs.idx = 0; qRender(); });
+    $('qin').addEventListener('keydown', function (e) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); var n = qs.items.length; if (n) { qs.idx = (qs.idx + (e.key === 'ArrowDown' ? 1 : n - 1)) % n; qRender(); } }
+      else if (e.key === 'Enter') { e.preventDefault(); qPick(qs.idx); }
+      else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); qClose(); }
+    });
+    $('qpop').addEventListener('mousemove', function (e) {
+      var o = e.target.closest('[data-qi]'), i = o && Number(o.getAttribute('data-qi'));
+      if (o && i !== qs.idx) { qs.idx = i; Array.prototype.forEach.call($('qlist').querySelectorAll('.qopt'), function (x) { var on = Number(x.getAttribute('data-qi')) === i; x.classList.toggle('on', on); x.setAttribute('aria-selected', String(on)); }); $('qin').setAttribute('aria-activedescendant', 'qopt-' + i); }
+    });
     document.addEventListener('keydown', function (e) {
       lastInput = 'key';
       // (354) keyboard: a focused row shows its actions and details; Enter opens its item window
@@ -1792,8 +1902,11 @@
       if (ui.win) closeItemWindow(); else if (ui.open) { var n = ui.open; ui.open = null; syncNow(n, true); render(); }
     });
     // (366) the layout follows the width: re-render when it crosses a breakpoint, else refit
-    window.addEventListener('resize', function () { if (layoutOf() !== ui.layout) render(); else { fitDrawer(); measure(); } });
-    render();
+    window.addEventListener('resize', function () { if (layoutOf() !== ui.layout) render(); else { if (!ui.page) fitDrawer(); measure(); } });
+    // (371) the store page route: reload on #/<storeId> restores the page; back and forward follow the hash
+    window.addEventListener('hashchange', applyRoute);
+    window.addEventListener('popstate', function () { if (routeStore() !== ui.page) applyRoute(); });
+    applyRoute();
   }
 
   window.addEventListener('error', function (e) { var t = $('toast'); if (t) { t.hidden = false; t.textContent = 'script error: ' + e.message; } });

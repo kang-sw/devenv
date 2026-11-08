@@ -36,6 +36,8 @@
   <symbol id="i-assign" viewBox="0 0 16 16"><circle cx="6.4" cy="5" r="2.4"/><path d="M2 13.6c.4-2.8 2.2-4 4.4-4s4 1.2 4.4 4M12.6 4.6v4M10.6 6.6h4"/></symbol>
   <symbol id="i-withdraw" viewBox="0 0 16 16"><path d="M3.2 8h9.6M6.4 4.8L3.2 8l3.2 3.2"/></symbol>
   <symbol id="i-warn" viewBox="0 0 16 16"><path d="M8 2.4l6 10.8H2z"/><path d="M8 6.6v3M8 11.4v.05"/></symbol>
+  <symbol id="i-search" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.4"/><path d="M10.3 10.3l3.4 3.4"/></symbol>
+  <symbol id="i-page" viewBox="0 0 16 16"><path d="M9.5 2.5h4v4M13.5 2.5L8 8M11.5 9.5v3.2a.8.8 0 0 1-.8.8H3.3a.8.8 0 0 1-.8-.8V5.3a.8.8 0 0 1 .8-.8h3.2"/></symbol>
 </svg>
 
 <div class="dwrap">
@@ -50,6 +52,14 @@
       <span class="mclock" title="mockup clock: every write is stamped with it and advances it by a minute"><code id="vclock"></code><button class="btn mini" data-act="clock" data-min="60">+1h</button><button class="btn mini" data-act="clock" data-min="1440">+1d</button></span>
     </span>
     <span class="sse" title="live updates"><span class="dot"></span>live</span>
+    <!-- the quick switcher (board (372) b): one search over stores and items; a store opens its page, an item its window -->
+    <span class="qswrap"><button class="btn gear" id="qs" title="search stores and items" aria-haspopup="dialog" aria-expanded="false"><svg class="i"><use href="#i-search"/></svg></button>
+      <span class="qpop" id="qpop" role="dialog" aria-label="search stores and items" hidden>
+        <input id="qin" type="text" role="combobox" aria-controls="qlist" aria-expanded="true" aria-autocomplete="list" autocomplete="off" spellcheck="false" placeholder="Search stores and items...">
+        <ul id="qlist" role="listbox" aria-label="results"></ul>
+        <span class="qhint">&uarr;&darr; move &middot; Enter open &middot; Esc close</span>
+      </span>
+    </span>
     <!-- the dashboard's gear menu, holding only the theme setting here (local UI state, localStorage) -->
     <span class="gearwrap"><button class="btn gear" id="gear" title="settings" aria-haspopup="true" aria-expanded="false"><svg class="i"><use href="#i-gear"/></svg></button>
       <span class="gmenu" id="gmenu" hidden>
@@ -78,6 +88,8 @@
     <div class="sysline">conversation placeholder - the tracker lives in the drawer</div>
   </main>
   <div class="composer"><textarea rows="1" placeholder="Message the session..." disabled></textarea><button class="csend" disabled><svg class="i"><use href="#i-send"/></svg></button></div>
+  <!-- the store page (board (371)): #/<storeId> shows one store full-page, in place of the conversation and the drawer -->
+  <main class="spage" id="spage" role="region" aria-label="tracker store page" hidden></main>
 </div>
 
 <!-- the pull-down drawer: one handle per store, stacking leftward from the top right -->

@@ -73,7 +73,7 @@ build, no server, no dependencies.
   the dashboard tab bar's `tdot`: an unread notification that was not there
   when the tab was last shown (on first sight, any unread one), new events for
   *Activity*, a roles change for *Team*, a new badge key for *Items* (narrow).
-  Only an open drawer records what was shown. The tab choice is local UI
+  Only an open drawer (or the store page) records what was shown. The tab choice is local UI
   state per store (one for A and D, one for narrow). The **drawer height
   follows its content** up to the existing maximum (`min(66vh, 700px)`): a
   short list gives a short drawer, and at the maximum each column's card
@@ -82,6 +82,23 @@ build, no server, no dependencies.
   keeps its fixed-height chat. A card keeps its scroll position across
   re-renders. This supersedes the stacked side column of (359), the Today
   card of (358), and the per-card 70% cap of (350).
+- **Store page** (371). The route `#/<storeId>` shows that store full-page, in
+  place of the conversation and the drawer, with the same Items panel and tab
+  pane layout (A, D, or narrow by width) filling the page. *Open as page* in
+  the drawer's header goes there; *Back to session*, clearing the hash, or the
+  browser back button returns to the session view, and reloading on the route
+  restores the page. Entering the page fetches and shows what is new, like
+  opening the drawer; leaving it pushes, like a collapse. An unknown store in
+  the hash shows the session view with a notice. It is the only route: there
+  are no item routes, because an item URL would point at the viewer's own
+  daemon, so sharing one across people was rejected (369).
+- **Quick switcher** (372 b). A magnifier next to the gear opens one search
+  over the stores (by name and label) and the items of every store (by title,
+  from each store's current view state, leaving out items hidden by a
+  tombstone). An empty query lists the stores. Picking a store opens its page;
+  picking an item opens its item window (on a store page, the item's store
+  page first). Arrow keys move, Enter picks, Esc closes, and focus returns to
+  where it was (after an item pick, to the magnifier when the window closes).
 - **Items panel** (357). One panel in place of the former *My assignments*,
   *Received requests*, *Assigned by me*, *My team*, and *Items* cards. A row of
   scope presets is crossed with the view modes each scope offers:
@@ -237,7 +254,7 @@ build, no server, no dependencies.
   because it has no content). An item or comment edit that changes the body
   keeps the attachments and the mentions whose `@id` is still in the text.
   The window opens through one function, `openItemWindow(storeId, itemId)`
-  (also on `window`), which a later URL route will call; it switches to the
+  (also on `window`), which the quick switcher calls; it switches to the
   store when needed and returns false for an unknown store or item.
 - **Actions** append events to the viewer clone's open batch, then report each
   event as applied or flagged. The actions are create (any kind, with due,
@@ -709,6 +726,9 @@ creation, and it has a topic and a blocked subtask.
 | 362 | The layout delegate's own choices are accepted: the row's unread dot means an unread *Notifications* entry for the item; pending holders' initials are dashed; the *my team* scope appears only for a viewer with followers; the row details are an overlay over the rows rather than an inline expansion (which shifted the layout under the pointer); the header's store chip is removed (the open handle already names the store). |
 | 366 b | Layout A + D: the Items panel (about two thirds) with one tab pane on the right (Notifications, Support agent, Team, Activity, Data; one at a time, full height; Notifications by default; a dot on a hidden tab with something new); from about 1600px three columns, Items \| Notifications \| the tab pane; below about 1000px everything is tabs, Items first. Today becomes summary chips in the Items header (my work / answer / confirm) that filter the panel. The drawer height follows its content up to the existing maximum. Supersedes (359)'s stacked side column and (358)'s Today card (its intent, a summary visible whatever scope, stays). |
 | 366 note | Clicking an item opens it in a window overlay (dimmed backdrop, centred window, Esc / backdrop / close button, focus in and back) instead of the thread sheet, holding the sheet's and the row overlay's content with the row's actions as labelled buttons; one window at a time. One function opens it by id (`openItemWindow(storeId, itemId)`) for later URL routes. The row's hover overlay stays as a quick preview. |
+| 369 note | Item links are rejected: the URL is the viewer's own daemon address, so a link does not carry across people. The store page route stays. |
+| 371 | Each store has its own page, the route `#/<storeId>`: the same Items panel and tab pane layout full-page rather than in the pull-down drawer, reached by *Open as page* on the drawer header; back, clearing the hash, or *Back to session* returns; a reload restores it. No item routes. |
+| 372 b | A magnifier next to the gear opens a quick switcher searching stores and items by title (the viewer's visible items, from the view state); a store opens its page, an item its window; arrows, Enter, Esc, focus return. |
 
 ## Open questions
 
