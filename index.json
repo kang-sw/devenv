@@ -40,16 +40,6 @@
     "260726-feat-enter-verdict-scenario-output": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
-    "260726-feat-proceed-sage-posture-consumption-guard": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/remove-orphan-surfaces",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:31:21Z"
-      }
-    },
     "260726-feat-ws-cli-call-stdin-payload": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
@@ -71,16 +61,6 @@
     "260729-feat-workflow-manual-submodule-detection": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
-    "260730-refactor-retire-goal-fan-out-step-and-session-note": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/remove-orphan-surfaces",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:31:15Z"
-      }
-    },
     "260812-research-reload-plugins-keeps-stale-mcp-binary": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
@@ -95,16 +75,6 @@
     },
     "260829-research-review-watermark-multi-maintainer-model": {
       "registered_at": "2026-09-24T10:38:33Z"
-    },
-    "260831-chore-remove-orphaned-review-adjudicator-delegate": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "delegate/remove-orphan-surfaces",
-        "phase": "closed",
-        "touched_at": "2026-11-08T08:30:55Z"
-      }
     },
     "260831-research-ai-phase-over-granularity-review-load": {
       "registered_at": "2026-09-24T10:38:33Z"
@@ -371,7 +341,7 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-08T07:38:14Z",
+        "touched_at": "2026-11-08T09:14:40Z",
         "impl": {
           "branch": "impl/develop/bribe-diner-candy"
         }
