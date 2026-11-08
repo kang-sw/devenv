@@ -59,6 +59,11 @@ repository sized for 50-60 people, reached from the dashboard.
   chat card in the drawer, on the standalone agent runner
   `261108-feat-ws-daemon-agent-runner` (board (300)-(312)). The mockup's
   per-card view modes and chat placement merged as `1d7fbce0a`.
+- `261108-feat-ws-tracker-ledger-attachments` (todo): attachment content as
+  content-addressed blobs under `attachments/<sha256>` in the member's ledger
+  tree, fetched on demand through a partial clone (board (337) a). The mockup
+  and `wstracker` already model the metadata and the `attachments.max_bytes`
+  limit (merge `0a80fdbfb`, board (338), (339), (345) b).
 
 ## Cross-Child Decisions
 
@@ -132,6 +137,11 @@ repository sized for 50-60 people, reached from the dashboard.
   surface, active only where a store is configured. It is off by default in
   both ws and wsflow. This supersedes the earlier "no skill, playbook, or MCP
   tool mentions it" decision.
+- **Local UI state** (user, board (332) a, (340)): per-viewer UI state such
+  as notification read state, the handle badge's seen marks, and each card's
+  chosen view mode lives per clone on the local filesystem outside git, read
+  and written by the daemon; it is never an event and never browser storage.
+  The mockup simulates it in memory.
 - **Only human- or agent-authored content is tracked** (user, (66) ok,
   carried over): indexes and embeddings are a local cache outside git.
 - **Personal store** (board (136) ok): a personal store is a repository
