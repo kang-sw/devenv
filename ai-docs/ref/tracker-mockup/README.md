@@ -50,9 +50,25 @@ build, no server, no dependencies.
   buttons are `Sync now` and `Go offline` / `Come back online`. The personal
   store has no remote, which is the same path as a long offline; its button
   only closes the batch.
-- **View modes** (drawer title): cards, kanban, activity timeline, due timeline,
-  calendar.
-  - *Cards* (the v2 layout plus *Today*):
+- **Cards.** The drawer has one layout, the cards layout (303). There is no
+  drawer-level mode picker; each card has its own picker offering only the
+  modes that fit its content:
+
+  | card | modes |
+  |---|---|
+  | *Items* | tree / kanban (item cards) / due timeline / calendar |
+  | *My assignments*, *Assigned by me*, *My team* | list / kanban (assignment cards, with the pending column) / due timeline / calendar |
+  | *Activity* | list / activity timeline |
+  | *Today*, *Received requests*, *Team*, *Data* | list only (no picker) |
+  | *Support agent* (chat placeholder) | conversation only (no picker) |
+
+  A card switched to a wide mode (kanban, due timeline, calendar, activity
+  timeline) leaves its column and spans the full row of the cards layout; the
+  remaining cards flow below it (304). There is no horizontal-scroll-in-card
+  fallback and no maximize button. Each card's chosen mode is local UI state,
+  remembered per store in memory (it survives a viewer switch within the
+  store), never an event (305).
+  - *Lists* (the v2 layout plus *Today*):
     - *Today*: the morning check. My open work by priority then due, pending
       assignments waiting for my answer, and closes waiting for my confirm.
     - *My assignments*: my live assignments (forced, self-assigned, accepted,
@@ -80,16 +96,34 @@ build, no server, no dependencies.
     - *Data*: the raw roles file, each ref's pushed commits (the remote), and
       the clone state (fetched counts, local commits, online), all editable.
       `apply` recomputes everything and `reset` restores the fixtures.
-  - *Kanban*: columns by status. On *my assignments* and *my team* the cards
-    are assignments (with a pending column); on *items* the cards are items.
+  - *Kanban*: columns by status, scoped to the card's own rows. On an
+    assignment card the cards are that card's assignment records (with a
+    pending column; *Assigned by me* and *My team* name the assignee); on
+    *Items* the cards are items under the card's kind filter only: the
+    columns already are the statuses, so the status filter is ignored there
+    (it would only empty columns) and the kanban toolbar offers kind alone.
     Dragging moves a card only for the viewer's own live assignment and
     dispatches `item.status` (todo / doing / blocked) or `item.close` (done).
   - *Activity timeline*: every event by write time, grouped by day, filterable
     by event family, member, flagged, and concurrent.
-  - *Due timeline*: one bar per item with a due date, from its start (first
-    `doing`, else creation) to its due day, with a today line; overdue bars are
-    marked.
-  - *Calendar*: a month grid of items by due day, with month navigation.
+  - *Due timeline*: one bar per dated row of the card (an item on *Items*, an
+    assignment record on an assignment card, showing its own state), from the
+    item's start (first `doing`, else creation) to its due day, with a today
+    line; overdue bars are marked.
+  - *Calendar*: a month grid of the card's dated rows by due day, with month
+    navigation per card.
+- **Support agent card** (chat placeholder, (300), (302)). A placeholder for
+  the support-agent chat child, the future daemon-side local support agent:
+  placement and a static sample only, with no working chat, no responder, and
+  no new events. It is one card in the cards layout, fixed height with
+  internal scroll, newest message at the bottom, and a disabled composer row.
+  The sample mimics the dashboard conversation view's entry shapes (user
+  text, assistant text, a collapsed tool line) plus one new entry kind, the
+  **tracker card reference**: a mini card of an item (title, status, priority,
+  due, assignees) read from the view state, which opens that item's thread
+  sheet on click. The referenced items are real ids from the current viewer's
+  view state (top open work first, then what waits for an answer or confirm,
+  then what the viewer assigned), so every reference resolves.
 - **Thread view** (side sheet). Meta (status, priority, due, creator, project,
   parent), the body, item actions (an admin also gets Edit / Hide on a removed
   creator's item), the assignees with their state and actions (an admin also
@@ -505,6 +539,10 @@ creation, and it has a topic and a blocked subtask.
 | 291 | Returning an accepted handoff restores the original assignment with its prior status and notifies the original assigner. |
 | 292 | Extends (208): an admin may `item.edit` and `item.hide` an item whose creator was removed. |
 | 293 | Accepted as interpreted in v3: forced reach is any depth of the lead chain (`levels` dropped from `chosen`); (271) holds for every field; a kanban drop on done dispatches `item.close`; stale counts doing and blocked only; a viewer switch pushes the previous clone and fetches the new one; the push delay and join are not modeled. |
+| 303 | View modes move from the drawer title to each card: the drawer has one layout (the cards layout) and each card offers only the modes that fit it (the table under [What the page shows](#what-the-page-shows)). Supersedes the drawer-level picker of (276) b while keeping its four modes, now scoped to a card's own rows and filters. The kanban drag rule is unchanged. |
+| 304 a | A card in a wide mode (kanban, due timeline, calendar, activity timeline) spans the full row of the cards layout; the remaining cards flow below it. No horizontal scroll in the card and no maximize button for now. |
+| 300 a, 302 | A chat card placeholder for the future daemon-side local support agent: placement and a static sample only (fixed height, internal scroll, newest at the bottom, a disabled composer), with no working chat, no fake responder, and no new events. |
+| 305 | The chat sample mimics the dashboard conversation entries plus a tracker card reference entry that renders an item from the view state and opens its thread sheet. Each card's chosen mode is local UI state remembered per store, never an event. |
 
 ## Open questions
 
@@ -524,4 +562,5 @@ per clone); the background poll and the 5-minute push delay (push happens at
 Sync, panel collapse, and viewer switch); the self-join (stand-in:
 `roles.add_member`) and claim refs; re-issue of a revoked key's own events;
 search; the MCP surface; notifications beyond the handle badge and the
-derived notices; labels and tags (278 a); multiple leads; snapshots; styling.
+derived notices; labels and tags (278 a); multiple leads; snapshots; a
+working support-agent chat (the chat card is a static placeholder); styling.
