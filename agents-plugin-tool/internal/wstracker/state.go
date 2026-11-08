@@ -21,7 +21,7 @@ var (
 const DefaultStaleDays = 3
 
 // defaultPriority applies when genesis has no priority (272 c, 277 c).
-var defaultPriority = priority{names: []string{"알림", "업무", "긴급"}, def: 1}
+var defaultPriority = priority{names: []string{"Notice", "Task", "Urgent"}, def: 1}
 
 // DefaultAttachmentMax is attachments.max_bytes when genesis sets none.
 const DefaultAttachmentMax = 10 << 20

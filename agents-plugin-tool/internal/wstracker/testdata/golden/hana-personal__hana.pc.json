@@ -9,9 +9,9 @@
   ],
   "priority": {
    "names": [
-    "알림",
-    "업무",
-    "긴급"
+    "Notice",
+    "Task",
+    "Urgent"
    ],
    "default": 1
   },
@@ -261,9 +261,9 @@
   },
   "priority": {
    "names": [
-    "알림",
-    "업무",
-    "긴급"
+    "Notice",
+    "Task",
+    "Urgent"
    ],
    "default": 1
   },
@@ -308,7 +308,7 @@
     "due": "2026-11-20",
     "priority": 2,
     "priorityLevel": 2,
-    "priorityName": "긴급",
+    "priorityName": "Urgent",
     "parent": null,
     "author": "hana",
     "ts": "2026-11-02T09:00:00Z",
@@ -362,7 +362,7 @@
     "due": null,
     "priority": 1,
     "priorityLevel": 1,
-    "priorityName": "업무",
+    "priorityName": "Task",
     "parent": null,
     "author": "hana",
     "ts": "2026-11-02T09:10:00Z",
@@ -402,7 +402,7 @@
     "due": "2026-11-15",
     "priority": 1,
     "priorityLevel": 1,
-    "priorityName": "업무",
+    "priorityName": "Task",
     "parent": null,
     "author": "hana",
     "ts": "2026-11-02T09:20:00Z",
@@ -445,7 +445,7 @@
     "due": null,
     "priority": 0,
     "priorityLevel": 0,
-    "priorityName": "알림",
+    "priorityName": "Notice",
     "parent": null,
     "author": "hana",
     "ts": "2026-11-02T09:30:00Z",
@@ -487,7 +487,7 @@
     "due": "2026-11-12",
     "priority": 1,
     "priorityLevel": 1,
-    "priorityName": "업무",
+    "priorityName": "Task",
     "parent": "hana.pc#1",
     "author": "hana",
     "ts": "2026-11-02T11:20:00Z",

@@ -31,7 +31,7 @@
   {"name": "edit empty title", "steps": [["ada.pc", "item.edit", {"item": "ada.pc#1", "title": ""}]], "reason": "title cannot be empty"},
   {"name": "project not a string", "steps": [["maya.pc", "item.create", {"kind": "task", "title": "x", "project": 5}]], "reason": "project is one optional free-text string"},
   {"name": "due not a date", "steps": [["maya.pc", "item.create", {"kind": "task", "title": "x", "due": "2026-13-01"}]], "reason": "due is an optional YYYY-MM-DD date"},
-  {"name": "priority out of range", "steps": [["maya.pc", "item.create", {"kind": "task", "title": "x", "priority": 3}]], "reason": "priority must be a level 0..2 (알림 / 업무 / 긴급)"},
+  {"name": "priority out of range", "steps": [["maya.pc", "item.create", {"kind": "task", "title": "x", "priority": 3}]], "reason": "priority must be a level 0..2 (Notice / Task / Urgent)"},
   {"name": "parent unknown", "steps": [["maya.pc", "item.create", {"kind": "task", "title": "x", "parent": "zed.pc#9"}]], "reason": "parent zed.pc-9 is not in the state its author had seen"},
   {"name": "parent hidden", "steps": [["ada.pc", "item.hide", {"item": "ada.pc#3"}], ["maya.pc", "item.create", {"kind": "task", "title": "x", "parent": "ada.pc#3"}]], "reason": "parent ada.pc-3 is hidden"},
   {"name": "parent not assigned", "steps": [["omar.pc", "item.create", {"kind": "task", "title": "x", "parent": "ada.pc#1"}]], "reason": "parent ada.pc-1 is neither assigned to nor created by omar"},

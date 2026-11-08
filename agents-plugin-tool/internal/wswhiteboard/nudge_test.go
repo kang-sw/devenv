@@ -40,7 +40,7 @@ func staleBoard(t *testing.T) *State {
 	return st
 }
 
-const wantStaleInfo = "4 of 7 open topics unchanged for 60+ min (A, B, D, E); if finished, close them with wb:close."
+const wantStaleInfo = "4 of 7 open topics unchanged for 60+ min (A, B, D, E); if finished, close them with wb:close and a one-line result."
 
 func TestStaleNudgeNamesStaleTopicsOnly(t *testing.T) {
 	st := staleBoard(t)
@@ -61,7 +61,7 @@ func TestStaleNudgeNeedsFiveOpenTopics(t *testing.T) {
 	}
 	// Reopening the fifth makes it fresh, but the four stale ones now nudge.
 	out := applyAt(t, st, `<wb:topic name="E">reopened</wb:topic>`, testNow.Add(2*time.Hour))
-	if want := "4 of 5 open topics unchanged for 60+ min (A, B, C, D); if finished, close them with wb:close."; out.Info != want {
+	if want := "4 of 5 open topics unchanged for 60+ min (A, B, C, D); if finished, close them with wb:close and a one-line result."; out.Info != want {
 		t.Fatalf("info = %q\nwant  %q", out.Info, want)
 	}
 }
@@ -70,7 +70,7 @@ func TestStaleNudgeCapsListedNames(t *testing.T) {
 	st := &State{}
 	applyAt(t, st, bodies("A", "B", "C", "D", "E", "F", "G"), testNow)
 	out := applyAt(t, st, ``, testNow.Add(time.Hour))
-	if want := "7 of 7 open topics unchanged for 60+ min (A, B, C, D, E, ...); if finished, close them with wb:close."; out.Info != want {
+	if want := "7 of 7 open topics unchanged for 60+ min (A, B, C, D, E, ...); if finished, close them with wb:close and a one-line result."; out.Info != want {
 		t.Fatalf("info = %q\nwant  %q", out.Info, want)
 	}
 }

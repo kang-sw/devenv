@@ -1,6 +1,6 @@
 // Package wsxmlcmd reads the flat XML-like command language an MCP tool takes
-// as one string argument (whiteboard.update today). Each caller supplies a
-// Grammar: its tag prefix and its command table. The package tokenizes the
+// as one string argument (whiteboard.update, tracker.update). Each caller
+// supplies a Grammar: its tag prefix and its command table. The package tokenizes the
 // string against that grammar and records every problem it finds, and offers
 // the shared value checks a caller's batch validation uses; what a command
 // means stays with the caller.

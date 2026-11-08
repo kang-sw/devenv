@@ -19,7 +19,7 @@ window.TRACKER_FIXTURES = {
       sync: {"remote":"git@git.example.com:team-alpha/tracker.git","syncedAt":"2026-11-05T12:00:00Z"},
       roles: {
         "admins": ["ada","bo"],
-        "priority": {"names": ["알림", "업무", "긴급"], "default": 1},
+        "priority": {"names": ["Notice", "Task", "Urgent"], "default": 1},
         "attachments": {"max_bytes": 10485760},
         "members": [
           {"id":"ada","profile":{"org":"Platform","family":"Park","given":"Ada"},"keys":["ada-k1"],"leads":[]},
@@ -194,7 +194,7 @@ window.TRACKER_FIXTURES = {
       sync: {"remote":null,"syncedAt":null},
       roles: {
         "admins": ["hana"],
-        "priority": {"names": ["알림", "업무", "긴급"], "default": 1},
+        "priority": {"names": ["Notice", "Task", "Urgent"], "default": 1},
         "members": [
           {"id":"hana","profile":{"org":"","family":"Seo","given":"Hana"},"keys":["hana-k1"],"leads":[]}
         ]
