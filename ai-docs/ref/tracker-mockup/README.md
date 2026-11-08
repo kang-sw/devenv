@@ -75,11 +75,15 @@ build, no server, no dependencies.
   *Activity*, a roles change for *Team*, a new badge key for *Items* (narrow).
   Only an open drawer (or the store page) records what was shown. The tab choice is local UI
   state per store (one for A and D, one for narrow). The **drawer height
-  follows its content** up to the existing maximum (`min(66vh, 700px)`): a
-  short list gives a short drawer, and at the maximum each column's card
-  scrolls inside (the Items list, the shown tab). The drawer is as tall as its
-  tallest column, so switching tabs can change it. The *Support agent* tab
-  keeps its fixed-height chat. A card keeps its scroll position across
+  is the user's** (382 a): dragging a store's handle sets it, like the dashboard's
+  drawer, clamped between 160px and 60% of the window and saved per store as
+  local UI state (localStorage), restored on reload. Dragging a closed handle
+  opens its store; a drag released short of 80px closes it; a click still
+  toggles. Panels scroll inside that height (the Items list, the shown tab), and
+  switching tabs never changes it. Only while a store's drawer was never
+  dragged does it follow its content (366), up to the same 60% maximum, so a
+  short list gives a short first open. The *Support agent* tab keeps its
+  fixed-height chat. The store page is full-page and not affected. A card keeps its scroll position across
   re-renders. This supersedes the stacked side column of (359), the Today
   card of (358), and the per-card 70% cap of (350).
 - **Store page** (371). The route `#/<storeId>` shows that store full-page, in
@@ -729,6 +733,7 @@ creation, and it has a topic and a blocked subtask.
 | 369 note | Item links are rejected: the URL is the viewer's own daemon address, so a link does not carry across people. The store page route stays. |
 | 371 | Each store has its own page, the route `#/<storeId>`: the same Items panel and tab pane layout full-page rather than in the pull-down drawer, reached by *Open as page* on the drawer header; back, clearing the hash, or *Back to session* returns; a reload restores it. No item routes. |
 | 372 b | A magnifier next to the gear opens a quick switcher searching stores and items by title (the viewer's visible items, from the view state); a store opens its page, an item its window; arrows, Enter, Esc, focus return. |
+| 382 a | The drawer height is set by dragging its handle, like the dashboard drawer (about 160px to 60% of the window, saved per store as local UI state, restored on reload); panels scroll inside it. Only while a store's drawer was never dragged does the first open use the content-fit height, capped at the same maximum; once dragged, the user's height wins whatever the content or the active tab. Supersedes the content-height drawer of (366)'s plan (and (366 b)'s last sentence). Click-to-open/close stays; the store page is unaffected. |
 
 ## Open questions
 

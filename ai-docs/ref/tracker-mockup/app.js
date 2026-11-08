@@ -22,6 +22,7 @@
     mdraft: [], adraft: [], // composer drafts: member ids picked with @, attachment metadata to post
     item: null, win: false, last: null, replyTo: null,
     winReturn: null,      // selector of the element that opened the item window; focus returns there on close
+    drh: loadDrh(),       // store -> drawer height in px, set by dragging its handle (382), local UI state; absent: follows the content
     tab: {},              // store -> { side: tab key of the tab pane, narrow: tab key of the narrow layout } (366), local UI state
     tabSeen: {},          // "store|stream" -> { tab key -> signature last shown }: a hidden tab whose signature moved shows a dot
     layout: null,         // 'a' | 'd' | 'narrow', from the window width (366)
@@ -1483,16 +1484,59 @@
     d.setProperty('--drhw', Math.ceil($('drhandles').getBoundingClientRect().width) + 'px');
     d.setProperty('--drtop', Math.max(0, Math.round($('top').getBoundingClientRect().bottom)) + 'px');
   }
-  // (366) The drawer's height follows its content up to the existing maximum
-  // (min(66vh, 700px)): measure the sheet at its natural height (the .dr-measure rules
-  // in style.css lift every height cap for one synchronous layout, so nothing paints),
-  // then set --drh. Below the maximum nothing scrolls; at it, the columns' cards scroll inside.
+  // (382) The drawer's height is the user's: dragging a store's handle sets it, clamped
+  // between DR_MIN and 60% of the window like the dashboard drawer, kept per store as
+  // local UI state in localStorage and restored on reload. Only while a store's drawer
+  // was never dragged does it follow its content (366), up to the same maximum: the
+  // .dr-measure rules in style.css lift every height cap for one synchronous layout (so
+  // nothing paints), then --drh is set. Panels scroll inside whatever the height is.
+  var DR_MIN = 160, DR_SHUT = 80;
+  function drMax() { return Math.round(window.innerHeight * 0.6); }
+  function drClamp(h) { var hi = drMax(); return Math.max(Math.min(DR_MIN, hi), Math.min(hi, h)); }
+  function loadDrh() { // called while ui is built, so the key stays inline (a var below would still be undefined)
+    try { var m = JSON.parse(localStorage.getItem('tracker-mockup-drawer-h')); return m && typeof m === 'object' ? m : {}; } catch (e) { return {}; }
+  }
+  function saveDrh() { try { localStorage.setItem('tracker-mockup-drawer-h', JSON.stringify(ui.drh)); } catch (e) { /* storage off: the height lasts this page */ } }
   function fitDrawer() {
-    var root = document.documentElement, sheet = $('drclip').firstElementChild;
+    var root = document.documentElement, sheet = $('drclip').firstElementChild, set = ui.drh[ui.store];
+    if (set > 0) { root.style.setProperty('--drh', drClamp(set) + 'px'); return; }
     root.classList.add('dr-measure');
     var nat = Math.ceil(sheet.getBoundingClientRect().height);
     root.classList.remove('dr-measure');
-    root.style.setProperty('--drh', Math.max(120, Math.min(nat, Math.round(Math.min(window.innerHeight * 0.66, 700)))) + 'px');
+    root.style.setProperty('--drh', Math.max(120, Math.min(nat, drMax())) + 'px');
+  }
+  // The drag (382): the handle follows the pointer; the clip and the handle track the
+  // pointer's extent (--drext) while the sheet keeps at least DR_MIN, so a short drag
+  // reveals the sheet rather than squashing it. The release sets the height, or closes
+  // short of DR_SHUT. A press that never moves is a click.
+  var drDrag = null, drDragged = false;
+  function drDragStart(e) {
+    var b = e.target.closest && e.target.closest('.dr-handle[data-handle]');
+    if (!b || b.getAttribute('data-handle') === 'panels' || (e.button !== undefined && e.button !== 0)) return;
+    drDrag = { name: b.getAttribute('data-handle'), y0: e.clientY, off: e.clientY - b.getBoundingClientRect().top, moved: false, ext: 0 };
+    try { b.setPointerCapture(e.pointerId); } catch (x) { /* no capture: the moves still land */ }
+  }
+  function drDragMove(e) {
+    var d = drDrag;
+    if (!d || (!d.moved && Math.abs(e.clientY - d.y0) < 5)) return;
+    if (!d.moved) { d.moved = true; if (ui.open !== d.name) openStore(d.name); } // dragging a closed handle opens its store
+    var max = drMax(), top = Math.max(0, Math.round($('top').getBoundingClientRect().bottom)), r = document.documentElement.style;
+    d.ext = Math.max(0, Math.min(max, e.clientY - d.off - top));
+    $('drawer').classList.add('drag');
+    r.setProperty('--drh', Math.max(Math.min(DR_MIN, max), d.ext) + 'px');
+    r.setProperty('--drext', d.ext + 'px');
+  }
+  function drDragEnd() {
+    var d = drDrag;
+    drDrag = null;
+    if (!d || !d.moved) return;
+    drDragged = true;
+    setTimeout(function () { drDragged = false; }, 0);
+    $('drawer').classList.remove('drag');
+    document.documentElement.style.removeProperty('--drext');
+    if (d.ext < DR_SHUT) { fitDrawer(); if (ui.open) { var n = ui.open; ui.open = null; syncNow(n, true); render(); } return; }
+    ui.drh[d.name] = drClamp(d.ext); saveDrh();
+    fitDrawer();
   }
 
   function renderHandles() {
@@ -1756,6 +1800,12 @@
         '</span><span class="hoff" title="offline or no remote" hidden>&#8856;</span><span class="dr-badge" hidden></span><svg class="i"><use href="#i-chev"/></svg></button>';
     });
     $('drhandles').innerHTML = hh;
+    // (382) dragging a handle sets the drawer height; a drag's trailing click is swallowed
+    $('drhandles').addEventListener('pointerdown', drDragStart);
+    $('drhandles').addEventListener('pointermove', drDragMove);
+    $('drhandles').addEventListener('pointerup', drDragEnd);
+    $('drhandles').addEventListener('pointercancel', drDragEnd);
+    $('drhandles').addEventListener('click', function (e) { if (drDragged) e.stopPropagation(); }, true);
 
     setTheme(themeOf());
     document.addEventListener('click', function (e) {
