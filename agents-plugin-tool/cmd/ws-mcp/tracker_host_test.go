@@ -258,3 +258,112 @@ func TestDashboardTrackerWithoutAHostReturnsItsError(t *testing.T) {
 	_, err = dt.Register(ctx, wsdashboard.TrackerRegisterRequest{ID: "team"})
 	check("Register", err)
 }
+
+// TestDashboardTrackerViewHTML: the view JSON carries each item body and
+// each shown comment text rendered as markdown under html, beside the view
+// state's own fields, which keep their plain text.
+func TestDashboardTrackerViewHTML(t *testing.T) {
+	dt, _ := newTestTracker(t)
+	ctx := context.Background()
+
+	create, _ := json.Marshal(map[string]any{"kind": "task", "title": "md", "body": "# heading\n\n- one\n- two"})
+	bare, _ := json.Marshal(map[string]any{"kind": "task", "title": "no body"})
+	comment, _ := json.Marshal(map[string]any{"item": "$1", "body": "**bold** <script>alert(1)</script>"})
+	gone, _ := json.Marshal(map[string]any{"item": "$1", "body": "to hide"})
+	ids, err := dt.Dispatch(ctx, "team", []wsdashboard.TrackerEvent{
+		{Type: wstracker.TypeItemCreate, Payload: create},
+		{Type: wstracker.TypeItemCreate, Payload: bare},
+		{Type: wstracker.TypeCommentAdd, Payload: comment},
+		{Type: wstracker.TypeCommentAdd, Payload: gone},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hide, _ := json.Marshal(map[string]any{"comment": ids[3]})
+	if _, err := dt.Dispatch(ctx, "team", []wsdashboard.TrackerEvent{{Type: wstracker.TypeCommentHide, Payload: hide}}); err != nil {
+		t.Fatal(err)
+	}
+	v, err := dt.View(ctx, "team")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var view struct {
+		Items map[string]struct {
+			Body string `json:"body"`
+		} `json:"items"`
+		Store struct {
+			Name string `json:"name"`
+		} `json:"store"`
+		HTML struct {
+			Items    map[string]string `json:"items"`
+			Comments map[string]string `json:"comments"`
+		} `json:"html"`
+	}
+	if err := json.Unmarshal(v.View, &view); err != nil {
+		t.Fatalf("view JSON: %v\n%s", err, v.View)
+	}
+	if view.Store.Name != "team" || view.Items[ids[0]].Body != "# heading\n\n- one\n- two" {
+		t.Fatalf("the view state's own fields changed: %s", v.View)
+	}
+	if got, want := view.HTML.Items[ids[0]], "<h1>heading</h1>\n<ul>\n<li>one</li>\n<li>two</li>\n</ul>"; got != want {
+		t.Fatalf("item body html = %q, want %q", got, want)
+	}
+	if _, ok := view.HTML.Items[ids[1]]; ok {
+		t.Fatalf("an item with no body has html: %v", view.HTML.Items)
+	}
+	if got, want := view.HTML.Comments[ids[2]], "<strong>bold</strong> &lt;script&gt;alert(1)&lt;/script&gt;"; got != want {
+		t.Fatalf("comment html = %q, want %q", got, want)
+	}
+	if _, ok := view.HTML.Comments[ids[3]]; ok {
+		t.Fatalf("a hidden comment has html: %v", view.HTML.Comments)
+	}
+}
+
+// TestTrackerTextSafeMode: tracker text is other members' input, so typed
+// HTML, script URLs, local files, and images never reach the page as
+// markup; only an http(s) link is an anchor, opening in a new tab.
+func TestTrackerTextSafeMode(t *testing.T) {
+	inert := map[string]struct {
+		in      string
+		absent  []string
+		present []string
+	}{
+		"script tag":       {"<script>alert(1)</script>", []string{"<script"}, []string{"&lt;script&gt;"}},
+		"script block":     {"<script>\nalert(1)\n</script>", []string{"<script"}, []string{"&lt;script&gt;"}},
+		"img onerror":      {"<img src=x onerror=alert(1)>", []string{"<img"}, []string{"&lt;img src=x onerror=alert(1)&gt;"}},
+		"raw div":          {"<div>hi</div>", []string{"<div"}, []string{"&lt;div&gt;hi&lt;/div&gt;"}},
+		"div block":        {"<div>\nhi\n</div>", []string{"<div"}, []string{"&lt;div&gt;"}},
+		"javascript link":  {"[x](javascript:alert(1))", []string{"<a", "javascript:"}, []string{"x"}},
+		"entity scheme":    {"[x](java&#x73;cript:alert(1))", []string{"<a"}, nil},
+		"javascript auto":  {"<javascript:alert(1)>", []string{"<a"}, nil},
+		"data link":        {"[x](data:text/html,<b>x</b>)", []string{"<a"}, nil},
+		"file link":        {"[x](file:///etc/passwd)", []string{"<a", "href"}, []string{"/etc/passwd"}},
+		"path link":        {"[x](/etc/passwd)", []string{"<a", "href"}, nil},
+		"relative link":    {"[x](notes.md)", []string{"<a", "href"}, nil},
+		"bare path":        {"see /etc/passwd", []string{"<a", "href"}, []string{"/etc/passwd"}},
+		"network image":    {"![alt](https://example.com/x.png)", []string{"<img"}, []string{"alt"}},
+		"local image":      {"![alt](shot.png)", []string{"<img"}, []string{"alt"}},
+		"item reference":   {"see {{12}}", []string{"<a"}, []string{"{{12}}"}},
+		"mermaid":          {"```mermaid\ngraph TD; a-->b\n```", []string{"class=\"mermaid\""}, []string{"<pre>"}},
+		"onclick in title": {`[x](https://example.com "a\" onclick=\"alert(1)")`, []string{`" onclick`}, nil},
+	}
+	for name, c := range inert {
+		got := string(trackerText(c.in))
+		for _, s := range c.absent {
+			if strings.Contains(got, s) {
+				t.Errorf("%s: %q renders %q, which holds %q", name, c.in, got, s)
+			}
+		}
+		for _, s := range c.present {
+			if !strings.Contains(got, s) {
+				t.Errorf("%s: %q renders %q, which lacks %q", name, c.in, got, s)
+			}
+		}
+	}
+	for _, in := range []string{"[x](https://example.com/a)", "https://example.com/a"} {
+		got := string(trackerText(in))
+		if !strings.Contains(got, `<a href="https://example.com/a" target="_blank" rel="noopener noreferrer">`) {
+			t.Errorf("%q renders %q, want an anchor opening in a new tab", in, got)
+		}
+	}
+}

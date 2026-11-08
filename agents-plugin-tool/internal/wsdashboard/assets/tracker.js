@@ -228,6 +228,13 @@
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
     });
   }
+  // An item body or comment text as a block of class cls: the markdown the daemon rendered
+  // for it in safe mode (view html.<kind>[id]), marked md for the shared markdown styles,
+  // else the escaped plain text (a view without html, as the mockup's).
+  function textBlock(cls, kind, id, text, attrs) {
+    var h = VS.html && VS.html[kind] && VS.html[kind][id];
+    return '<div class="' + cls + (h != null ? ' md' : '') + '"' + (attrs || '') + '>' + (h != null ? h : esc(text)) + '</div>';
+  }
   function $(id) { return document.getElementById(id); }
   function attr(k, v) { return ' data-' + k + '="' + esc(v) + '"'; }
   function vals(o) { return Object.keys(o).map(function (k) { return o[k]; }); }
@@ -1392,7 +1399,7 @@
     }
     var live = n.status === 'applied' && !!VS.comments[n.id];
     var txt = c.hidden ? '<div class="hiddenc">' + wsT("js.tk.cmt.hidden", esc(alias(c.hidden))) + '<details><summary>' + wsT("js.tk.cmt.history") + '</summary>' + esc(body) + '</details></div>' :
-      '<div class="ctext">' + esc(body) + '</div>' + mentionChips(live ? c.mentions : p.mentions) + attChips(live ? c.attachments : p.attachments, live);
+      textBlock('ctext', 'comments', n.id, body) + mentionChips(live ? c.mentions : p.mentions) + attChips(live ? c.attachments : p.attachments, live);
     return '<li class="cmt' + (n.status !== 'applied' ? ' ' + n.status : '') + (n.markers.length ? ' concm' : '') + (n.member === v ? ' mine' : '') + '"' + attr('ev', n.id) + '>' +
       '<div class="ch"><b>' + esc(nm(n.member)) + '</b>' + originChip(n.origin) + '<span class="when">' + esc(fmtTs(n.ts)) + '</span><span class="al">' + esc(n.alias) + '</span>' +
       (c.edited ? '<span class="chip">' + wsT("js.tk.cmt.edited") + '</span>' : '') + flags(n) + '<span class="grow"></span>' + acts + '</div>' + reply + txt +
@@ -1551,7 +1558,7 @@
     h += '<div class="sh-actions">' + (acts || '<span class="muted">' + wsT("js.tk.win.noacts", esc(nm(v))) + '</span>') + '</div>';
     h += '<div class="iw-grid"><div class="iw-main">';
     if (it.body || it.mentions.length || it.attachments.length)
-      h += '<div class="iw-body">' + (it.body ? '<div class="sh-body"' + attr('focus', 'body') + '>' + esc(it.body) + '</div>' : '') + mentionChips(it.mentions) + attChips(it.attachments, true) + '</div>';
+      h += '<div class="iw-body">' + (it.body ? textBlock('sh-body', 'items', it.id, it.body, attr('focus', 'body')) : '') + mentionChips(it.mentions) + attChips(it.attachments, true) + '</div>';
     h += subtasksHtml(it);
     var evs = it.thread.map(function (id) { return EV[id]; });
     h += '<section class="iw-thread"><h3 class="prom">' + wsT("js.tk.win.thread") + ' <span class="cnt">' + evs.length + '</span></h3><ul class="timeline">' + evs.map(function (n) {
@@ -2596,6 +2603,10 @@
       var it = t.closest('[data-item]');
       if (it && !t.closest('select, textarea, input, #tkdlg')) { e.preventDefault(); showItem(it.getAttribute('data-item'), t, nk && nk.getAttribute('data-nev')); return; }
       if (t.closest('a[href="#"]')) e.preventDefault();
+      // a footnote link in rendered text scrolls to its note; following it would set the
+      // hash, which is the store-page route (applyRoute)
+      var fn = t.closest('.md a[href^="#"]');
+      if (fn) { e.preventDefault(); var to = document.getElementById(decodeURIComponent(fn.getAttribute('href').slice(1))); if (to) to.scrollIntoView({ block: 'nearest' }); }
     });
     document.addEventListener('submit', function (e) {
       var f = e.target;
