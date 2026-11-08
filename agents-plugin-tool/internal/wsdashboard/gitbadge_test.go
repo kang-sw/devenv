@@ -50,7 +50,7 @@ func (f *fakeGit) read(root string) GitBadge {
 func (f *fakeGit) readCount(root string) int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.count[root]
+	return f.count[gitKey(root)]
 }
 
 func (f *fakeGit) after(d time.Duration) <-chan time.Time {
@@ -74,8 +74,10 @@ func expectRead(t *testing.T, f *fakeGit, root string) {
 	t.Helper()
 	select {
 	case got := <-f.reads:
-		if got != root {
-			t.Fatalf("read %q, want %q", got, root)
+		// The watcher reads a root by its key, filepath.Clean's spelling
+		// ("\\repo" on Windows).
+		if got != gitKey(root) {
+			t.Fatalf("read %q, want %q", got, gitKey(root))
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatalf("no read of %q", root)
@@ -126,7 +128,7 @@ func TestGitWatcherReadsWhileViewedOnly(t *testing.T) {
 	}
 	release := g.watch("/repo")
 	expectRead(t, f, "/repo")
-	if got := <-changed; got != "/repo" {
+	if got := <-changed; got != gitKey("/repo") {
 		t.Fatalf("changed %q", got)
 	}
 	if b := g.badge("/repo"); b.State != gitOK || b.Ahead != 1 || b.At == 0 {

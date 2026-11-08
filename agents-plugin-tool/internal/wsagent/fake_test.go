@@ -22,6 +22,20 @@ type fakeBackend struct {
 	startErr error
 	// noModel makes SetModel unsupported, like an effort change.
 	noModel bool
+	// exe is the executable Executable reports (ChoiceLister); empty is
+	// "fake".
+	exe string
+}
+
+func (b *fakeBackend) Executable() string {
+	if b.exe == "" {
+		return "fake"
+	}
+	return b.exe
+}
+
+func (b *fakeBackend) Choices(context.Context) ([]ModelChoice, []string, error) {
+	return []ModelChoice{{ID: b.Executable() + "-model"}}, []string{"low", "high"}, nil
 }
 
 func (b *fakeBackend) Start(_ context.Context, spec StartSpec) (Process, error) {

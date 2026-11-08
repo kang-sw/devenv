@@ -66,11 +66,7 @@ func FileActions(root, replyID string) func(path string) wswhiteboard.FileAction
 		if rel, ok := relativeInside(root, path); ok && ValidReplyID(replyID) {
 			return wswhiteboard.FileAction{Href: FileSrc(replyID, rel), Rel: filepath.ToSlash(rel), Abs: filepath.Join(filepath.Clean(root), rel)}
 		}
-		native := filepath.FromSlash(path)
-		if !filepath.IsAbs(native) {
-			native = filepath.Join(root, native)
-		}
-		return wswhiteboard.FileAction{Abs: filepath.Clean(native)}
+		return wswhiteboard.FileAction{Abs: resolveAgainst(root, filepath.FromSlash(path))}
 	}
 }
 
@@ -98,7 +94,7 @@ func servedTargets(root, replyID string) wswhiteboard.TextTargets {
 func fileViewTargets(root, replyID, base string) wswhiteboard.TextTargets {
 	served := servedTargets(root, replyID)
 	rebase := func(path string) string {
-		if native := filepath.FromSlash(path); !filepath.IsAbs(native) {
+		if native := filepath.FromSlash(path); !filepath.IsAbs(native) && !isRooted(native) {
 			return filepath.Join(base, native)
 		}
 		return path

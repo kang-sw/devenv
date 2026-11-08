@@ -153,8 +153,18 @@ func TestConfigListAgentProfileKnob(t *testing.T) {
 	if err := json.Unmarshal(current, &profiles); err != nil {
 		t.Fatalf("current: %v\n%s", err, current)
 	}
-	if len(profiles) != 1 || profiles[0].Name != "triage" || profiles[0].Scope != wsconfig.ScopeRepo || profiles[0].Source != filepath.Join(root, ".ws-workflow", "config.json") {
-		t.Fatalf("current profiles = %+v, want only triage from the repo file (no builtin profile)", profiles)
+	byName := map[string]wsagent.ResolvedProfile{}
+	for _, p := range profiles {
+		byName[p.Name] = p
+	}
+	triage := byName["triage"]
+	if len(profiles) != 3 || triage.Scope != wsconfig.ScopeRepo || triage.Source != filepath.Join(root, ".ws-workflow", "config.json") {
+		t.Fatalf("current profiles = %+v, want triage from the repo file and the two builtin support profiles", profiles)
+	}
+	for _, name := range []string{wsagent.SupportProfileClaude, wsagent.SupportProfilePi} {
+		if byName[name].Scope != wsconfig.ScopeBuiltin {
+			t.Fatalf("current profiles = %+v, want builtin %s", profiles, name)
+		}
 	}
 
 	mustWrite(t, root, ".ws-workflow/config.json", `{"structured_overrides":{"agent.profile.triage":{"backend":"gpt"}}}`)

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kang-sw/devenv/internal/claudeagents"
 	"github.com/kang-sw/devenv/internal/wslive"
 )
 
@@ -23,6 +24,29 @@ import (
 type ClaudeBackend struct {
 	// Command is the claude executable; empty looks up "claude" on PATH.
 	Command string
+}
+
+// claudeModelAliases are the models the claude backend offers: the CLI's
+// version-less aliases, passed verbatim to --model so each always loads the
+// latest model of its family. The CLI has no model-list command, and a
+// versioned name would go stale.
+var claudeModelAliases = []string{"opus", "sonnet", "haiku", "fable"}
+
+// Executable is the claude command availability is checked against.
+func (b ClaudeBackend) Executable() string {
+	if b.Command != "" {
+		return b.Command
+	}
+	return "claude"
+}
+
+// Choices lists the model aliases and the effort levels.
+func (ClaudeBackend) Choices(context.Context) ([]ModelChoice, []string, error) {
+	models := make([]ModelChoice, 0, len(claudeModelAliases))
+	for _, id := range claudeModelAliases {
+		models = append(models, ModelChoice{ID: id})
+	}
+	return models, append([]string(nil), claudeagents.Levels...), nil
 }
 
 // claudeDisabledPlugins are Claude Code's built-in plugins that settings can

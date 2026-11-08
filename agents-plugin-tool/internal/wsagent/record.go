@@ -44,6 +44,25 @@ type Record struct {
 
 func recordPath(sessionDir string) string { return filepath.Join(sessionDir, recordFileName) }
 
+// ReadRecord reads the conversation record of reply-id replyID from the
+// dashboard state directory dir. ws-mcp reads it to recognise a
+// conversation's own key (its tracker gate); the record is the daemon's,
+// written only by the runner.
+func ReadRecord(dir, replyID string) (Record, error) {
+	if !wsdashboard.ValidReplyID(replyID) {
+		return Record{}, fmt.Errorf("invalid reply-id %q", replyID)
+	}
+	return readRecord(wsdashboard.SessionDir(dir, replyID))
+}
+
+// WriteRecordForTest writes rec as reply-id rec.ReplyID's conversation
+// record under dir, as the runner does. It exists for other packages' tests
+// of ReadRecord callers; production code never writes a record outside the
+// runner.
+func WriteRecordForTest(dir string, rec Record) error {
+	return writeRecord(wsdashboard.SessionDir(dir, rec.ReplyID), rec)
+}
+
 func readRecord(sessionDir string) (Record, error) {
 	raw, err := os.ReadFile(recordPath(sessionDir))
 	if err != nil {
@@ -96,7 +115,7 @@ func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
 		_ = os.Remove(name)
 		return err
 	}
-	if err := os.Rename(name, path); err != nil {
+	if err := replaceFile(name, path); err != nil {
 		_ = os.Remove(name)
 		return err
 	}

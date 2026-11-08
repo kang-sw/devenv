@@ -76,6 +76,10 @@ type DaemonOptions struct {
 	// Worktrees reads a session's project worktree pool for the
 	// pooled-worktree routes (worktrees.go); nil serves none.
 	Worktrees WorktreeSource
+	// Support serves the tracker support conversations under
+	// SupportRoutePrefix (the agent runner's per-store conversations); nil
+	// serves none.
+	Support http.Handler
 
 	// bindHost overrides the address the daemon binds, so a test runs LAN
 	// mode on loopback; empty derives it from LAN.
@@ -140,6 +144,8 @@ type Daemon struct {
 	// measures their worktrees' disk use (worktrees.go).
 	worktrees WorktreeSource
 	sizes     *sizeCache
+	// support serves SupportRoutePrefix, nil without the routes.
+	support http.Handler
 
 	closeOnce sync.Once
 	stop      chan struct{}
@@ -220,6 +226,7 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 		openSystem: opts.openSystem,
 		worktrees:  opts.Worktrees,
 		sizes:      newSizeCache(),
+		support:    opts.Support,
 		stop:       make(chan struct{}),
 		done:       make(chan struct{}),
 		endpoint: Endpoint{
@@ -400,13 +407,15 @@ func (d *Daemon) Close() {
 // the LAN token; access.go); the daemon sends no CORS headers. The pages (/,
 // /s/<reply-id>, their SSE streams, and a session's image, file view, and
 // history routes) are read-only; a session's message, cancel, steer, and interrupt
-// routes (inbox_routes.go) and, with a tracker host, the tracker POST routes
-// (tracker_routes.go) are the only browser writes, and its system-open
-// route (sysopen_route.go) the only route that runs a host command beside
-// git: a session stream keeps its root's git handle read, the git route
-// (gitbadge.go) asks for a read at once without running git itself, the git
-// status route (gitdrawer.go) reads the root's changed files, and the git
-// drawer's push, pull, and fetch routes (gitpush.go) are browser writes too.
+// routes (inbox_routes.go), with a tracker host the tracker POST routes
+// (tracker_routes.go), and with a support handler the support POST routes
+// (a tracker store's support conversation: send, new, select) are the only
+// browser writes besides the git drawer's push, pull, and fetch routes
+// (gitpush.go), and its system-open route (sysopen_route.go) the only route
+// that runs a host command beside git and the agent runner's harnesses: a
+// session stream keeps its root's git handle read, the git route
+// (gitbadge.go) asks for a read at once without running git itself, and the
+// git status route (gitdrawer.go) reads the root's changed files.
 func (d *Daemon) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", d.handleHealth)
@@ -421,6 +430,10 @@ func (d *Daemon) Handler() http.Handler {
 		agents := d.agents.Handler()
 		mux.Handle(AgentRoutePrefix, agents)
 		mux.Handle(AgentRoutePrefix+"/", agents)
+	}
+	if d.support != nil {
+		mux.Handle(SupportRoutePrefix, d.support)
+		mux.Handle(SupportRoutePrefix+"/", d.support)
 	}
 	mux.HandleFunc("/", d.handleIndex)
 	if d.lan {

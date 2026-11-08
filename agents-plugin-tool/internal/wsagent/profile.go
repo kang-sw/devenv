@@ -29,8 +29,8 @@ import (
 // ProfilePrefix is the config key family one agent profile lives under:
 // agent.profile.<name>. A profile is a structured value (a config file's
 // structured_overrides member), resolved through a conversation's working
-// root: project, then repo (the root's committed file), then global. No
-// profile is built in.
+// root: project, then repo (the root's committed file), then global, then
+// the builtin floor (BuiltinProfiles).
 const ProfilePrefix = "agent.profile."
 
 // Backend names a profile may select.
@@ -49,7 +49,7 @@ const ReservedMCPServer = "ws"
 
 var (
 	profileNamePattern = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
-	modelPattern       = regexp.MustCompile(`^[A-Za-z0-9._:/\[\]-]{1,128}$`)
+	modelPattern       = regexp.MustCompile(`^[A-Za-z0-9._:/\[\]~-]{1,128}$`)
 	effortPattern      = regexp.MustCompile(`^[a-z]{1,16}$`)
 	toolBasePattern    = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]{0,63}$`)
 	wsToolPattern      = regexp.MustCompile(`^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$`)
@@ -96,8 +96,10 @@ type Profile struct {
 	// Skills keeps the harness's skills and slash commands on.
 	Skills bool `json:"skills,omitempty"`
 	// Instructions is the instruction file appended to the harness's own
-	// system prompt; a relative path resolves against the working root. It
-	// holds task instructions, never a harness persona.
+	// system prompt; a relative path resolves against the working root, and
+	// "builtin:<name>" names a text embedded in the binary
+	// (BuiltinInstructionNames). It holds task instructions, never a harness
+	// persona.
 	Instructions string `json:"instructions,omitempty"`
 	// IdleTimeoutSeconds ends the sustained process after that long with no
 	// running turn and no input; 0 never ends it, and absent is
@@ -117,9 +119,23 @@ func (p Profile) IdleTimeout() time.Duration {
 }
 
 // InstructionsPath is the instruction file's absolute path under root, or
-// "" when the profile names none.
+// "" when the profile names none or names a builtin text.
 func (p Profile) InstructionsPath(root string) string {
+	if _, builtin := builtinInstructionName(p.Instructions); builtin {
+		return ""
+	}
 	return resolveUnder(root, p.Instructions)
+}
+
+// BuiltinInstructions is the embedded instruction text a builtin:
+// instructions value names, and whether the profile names one.
+func (p Profile) BuiltinInstructions() (string, bool) {
+	name, builtin := builtinInstructionName(p.Instructions)
+	if !builtin {
+		return "", false
+	}
+	text, ok := builtinInstructionTexts[name]
+	return text, ok
 }
 
 // PluginPaths are the profile's plugin paths, each absolute under root.
@@ -229,6 +245,11 @@ func (p Profile) validate() error {
 	if p.Instructions != "" && strings.TrimSpace(p.Instructions) == "" {
 		return fmt.Errorf("instructions must name a file")
 	}
+	if name, builtin := builtinInstructionName(p.Instructions); builtin {
+		if _, ok := builtinInstructionTexts[name]; !ok {
+			return fmt.Errorf("instructions %q names no builtin instruction text; known: %s", p.Instructions, strings.Join(BuiltinInstructionNames(), ", "))
+		}
+	}
 	if p.IdleTimeoutSeconds != nil && *p.IdleTimeoutSeconds < 0 {
 		return fmt.Errorf("idle_timeout_seconds must be 0 (never) or more")
 	}
@@ -293,7 +314,7 @@ type ResolvedProfile struct {
 // ResolveProfiles resolves the whole family through resolver. Any invalid
 // entry fails the resolution, naming the file and key.
 func ResolveProfiles(resolver *wsconfig.Resolver) ([]ResolvedProfile, error) {
-	values, err := resolver.ListStructured(ProfilePrefix, nil)
+	values, err := resolver.ListStructured(ProfilePrefix, BuiltinProfiles())
 	if err != nil {
 		return nil, err
 	}
@@ -318,7 +339,7 @@ func ResolveProfile(opts wsconfig.Options, root, name string) (ResolvedProfile, 
 	}
 	opts.RepoRoot = root
 	resolver := wsconfig.NewResolver(opts, nil, nil, nil)
-	values, err := resolver.ListStructured(ProfilePrefix, nil)
+	values, err := resolver.ListStructured(ProfilePrefix, BuiltinProfiles())
 	if err != nil {
 		return ResolvedProfile{}, err
 	}
@@ -379,7 +400,7 @@ func ProfileValueSchema() map[string]any {
 			},
 			"plugins":              stringList("Plugin directories (claude) or extension paths (pi) to load; relative paths resolve against the working root. Absent loads none. Not allowed in a repo-scope profile."),
 			"skills":               map[string]any{"type": "boolean", "description": "Keep the harness's skills and slash commands on; off by default."},
-			"instructions":         map[string]any{"type": "string", "minLength": 1, "description": "Task instruction file appended to the harness's own system prompt; a relative path resolves against the working root."},
+			"instructions":         map[string]any{"type": "string", "minLength": 1, "description": "Task instruction file appended to the harness's own system prompt; a relative path resolves against the working root, and builtin:<name> names an instruction text embedded in ws-mcp (" + strings.Join(BuiltinInstructionNames(), ", ") + ")."},
 			"idle_timeout_seconds": map[string]any{"type": "integer", "minimum": 0, "description": "End the sustained process after this many seconds with no running turn and no input; 0 never ends it; absent is 600."},
 			"list_in_index":        map[string]any{"type": "boolean", "description": "List this profile's conversations in the dashboard session index; hidden by default."},
 		},

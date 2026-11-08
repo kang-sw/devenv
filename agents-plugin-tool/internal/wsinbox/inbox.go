@@ -552,22 +552,22 @@ func writeEntry(dir string, entry Entry) (string, error) {
 	tmpPath := tmp.Name()
 	if _, err := tmp.Write(raw); err != nil {
 		tmp.Close()
-		os.Remove(tmpPath)
+		remove(tmpPath)
 		return "", fmt.Errorf("write inbox entry: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
-		os.Remove(tmpPath)
+		remove(tmpPath)
 		return "", fmt.Errorf("write inbox entry: %w", err)
 	}
-	if err := os.Rename(tmpPath, filepath.Join(dir, name)); err != nil {
-		os.Remove(tmpPath)
+	if err := rename(tmpPath, filepath.Join(dir, name)); err != nil {
+		remove(tmpPath)
 		return "", fmt.Errorf("commit inbox entry: %w", err)
 	}
 	return name, nil
 }
 
 func readEntry(path string) (Entry, error) {
-	raw, err := os.ReadFile(path)
+	raw, err := readFile(path)
 	if err != nil {
 		return Entry{}, err
 	}
@@ -587,7 +587,7 @@ func claim(dir, name, op string) (string, error) {
 		return "", err
 	}
 	claimed := filepath.Join(dir, "."+name+"."+op+"-"+suffix)
-	if err := os.Rename(filepath.Join(dir, name), claimed); err != nil {
+	if err := rename(filepath.Join(dir, name), claimed); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return "", ErrGone
 		}
@@ -634,17 +634,17 @@ func Send(dir string, add Entry, now time.Time) (name string, merged bool, err e
 		// Leave an unreadable entry where it was; this send stands alone. A
 		// steered one cannot be here unless it was steered after the target
 		// was chosen, and it accepts no merge either.
-		_ = os.Rename(claimed, filepath.Join(dir, target))
+		_ = rename(claimed, filepath.Join(dir, target))
 		name, err = writeEntry(dir, add)
 		return name, false, err
 	}
 	name, err = writeEntry(dir, Merge(base, add))
 	if err != nil {
 		// Put the claimed entry back so the earlier send is not lost.
-		_ = os.Rename(claimed, filepath.Join(dir, target))
+		_ = rename(claimed, filepath.Join(dir, target))
 		return "", false, err
 	}
-	_ = os.Remove(claimed)
+	_ = remove(claimed)
 	return name, true, nil
 }
 
@@ -685,12 +685,12 @@ func Steer(dir, name string) (string, error) {
 	}
 	entry, err := readEntry(claimed)
 	if err == nil && entry.Interrupt {
-		_ = os.Rename(claimed, filepath.Join(dir, name))
+		_ = rename(claimed, filepath.Join(dir, name))
 		return "", ErrGone
 	}
 	if err != nil || entry.Steer {
 		// Leave an unreadable or already steered entry held as it was.
-		_ = os.Rename(claimed, filepath.Join(dir, name))
+		_ = rename(claimed, filepath.Join(dir, name))
 		if err != nil {
 			return "", err
 		}
@@ -700,10 +700,10 @@ func Steer(dir, name string) (string, error) {
 	steered, err := writeEntry(dir, entry)
 	if err != nil {
 		// Put the claimed entry back so the message is not lost.
-		_ = os.Rename(claimed, filepath.Join(dir, name))
+		_ = rename(claimed, filepath.Join(dir, name))
 		return "", err
 	}
-	_ = os.Remove(claimed)
+	_ = remove(claimed)
 	return steered, nil
 }
 
@@ -721,14 +721,14 @@ func Cancel(dir, name string) (Entry, error) {
 	entry, err := readEntry(claimed)
 	if err != nil {
 		// Leave an unreadable entry held rather than lose it.
-		_ = os.Rename(claimed, filepath.Join(dir, name))
+		_ = rename(claimed, filepath.Join(dir, name))
 		return Entry{}, err
 	}
 	if entry.Interrupt {
-		_ = os.Rename(claimed, filepath.Join(dir, name))
+		_ = rename(claimed, filepath.Join(dir, name))
 		return Entry{}, ErrGone
 	}
-	_ = os.Remove(claimed)
+	_ = remove(claimed)
 	return entry, nil
 }
 
@@ -755,7 +755,7 @@ func Interrupt(dir string, now time.Time) (held []Record, name string, err error
 	var claims []string
 	putBack := func() {
 		for i, c := range claims {
-			_ = os.Rename(c, filepath.Join(dir, held[i].Name))
+			_ = rename(c, filepath.Join(dir, held[i].Name))
 		}
 	}
 	for _, n := range names {
@@ -769,7 +769,7 @@ func Interrupt(dir string, now time.Time) (held []Record, name string, err error
 		}
 		entry, err := readEntry(claimed)
 		if err != nil {
-			_ = os.Rename(claimed, filepath.Join(dir, n))
+			_ = rename(claimed, filepath.Join(dir, n))
 			continue
 		}
 		claims = append(claims, claimed)
@@ -781,7 +781,7 @@ func Interrupt(dir string, now time.Time) (held []Record, name string, err error
 		return nil, "", err
 	}
 	for _, c := range claims {
-		_ = os.Remove(c)
+		_ = remove(c)
 	}
 	return held, name, nil
 }
@@ -826,13 +826,13 @@ func takeInterrupts(dir string, names []string) ([]Record, error) {
 		}
 		entry, err := readEntry(claimed)
 		if err != nil || !entry.Interrupt {
-			_ = os.Rename(claimed, filepath.Join(dir, name))
+			_ = rename(claimed, filepath.Join(dir, name))
 			if err != nil && firstErr == nil {
 				firstErr = err
 			}
 			continue
 		}
-		_ = os.Remove(claimed)
+		_ = remove(claimed)
 		out = append(out, Record{Name: name, Entry: entry})
 	}
 	return out, firstErr
@@ -870,7 +870,7 @@ func drain(dir string, steerOnly bool) ([]Record, error) {
 	var out []Record
 	var firstErr error
 	for _, name := range names {
-		if err := os.Rename(filepath.Join(dir, name), filepath.Join(drained, name)); err != nil {
+		if err := rename(filepath.Join(dir, name), filepath.Join(drained, name)); err != nil {
 			if !errors.Is(err, fs.ErrNotExist) && firstErr == nil {
 				firstErr = err
 			}
@@ -879,7 +879,7 @@ func drain(dir string, steerOnly bool) ([]Record, error) {
 		entry, err := readEntry(filepath.Join(drained, name))
 		if err != nil {
 			// Put an unreadable entry back rather than lose it unreported.
-			_ = os.Rename(filepath.Join(drained, name), filepath.Join(dir, name))
+			_ = rename(filepath.Join(drained, name), filepath.Join(dir, name))
 			if firstErr == nil {
 				firstErr = err
 			}
@@ -936,7 +936,7 @@ func trimDrained(dir string) {
 				}
 			}
 		}
-		_ = os.Remove(filepath.Join(drained, name))
+		_ = remove(filepath.Join(drained, name))
 	}
 	if len(listed) == 0 {
 		return

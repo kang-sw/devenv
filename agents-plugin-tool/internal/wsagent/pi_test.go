@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -38,8 +39,8 @@ func TestPiArgsAllOffByDefault(t *testing.T) {
 	}
 	checks := map[string]string{
 		"--mode":                 "rpc",
-		"--session":              "/sess/pi/session.jsonl",
-		"--session-dir":          "/sess/pi",
+		"--session":              filepath.Join("/sess", "pi", "session.jsonl"),
+		"--session-dir":          filepath.Join("/sess", "pi"),
 		"--append-system-prompt": "",
 	}
 	for flag, want := range checks {
@@ -50,8 +51,15 @@ func TestPiArgsAllOffByDefault(t *testing.T) {
 }
 
 func TestPiArgsFromProfile(t *testing.T) {
+	// An absolute plugin path is a drive path on Windows, where "/abs" is
+	// rooted but relative to the current drive.
+	abs := "/abs/other.ts"
+	if runtime.GOOS == "windows" {
+		abs = `C:\abs\other.ts`
+	}
+	absJSON, _ := json.Marshal(abs)
 	spec := piSpec(t, `{"backend":"pi","tools":["read","bash"],"ws_tools":["tickets.query","project.tree"],
-		"mcp_servers":{"docs-x":{"command":"docs-mcp"}},"plugins":["ext.ts","/abs/other.ts"],"skills":true}`)
+		"mcp_servers":{"docs-x":{"command":"docs-mcp"}},"plugins":["ext.ts",`+string(absJSON)+`],"skills":true}`)
 	spec.Instructions = "/sess/instructions.md"
 	spec.Model, spec.Effort = "openai-codex/gpt-6.1-sol", "low"
 	spec.WSMCP = &MCPCommand{Command: "/bin/ws-mcp"}
@@ -63,7 +71,7 @@ func TestPiArgsFromProfile(t *testing.T) {
 			extensions = append(extensions, args[i+1])
 		}
 	}
-	if want := []string{"builtin:mcp", "/sess/pi/ws-agent-mcp.ts", "/work/ext.ts", "/abs/other.ts"}; !slices.Equal(extensions, want) {
+	if want := []string{"builtin:mcp", "/sess/pi/ws-agent-mcp.ts", filepath.Join("/work", "ext.ts"), abs}; !slices.Equal(extensions, want) {
 		t.Fatalf("extensions = %v, want %v", extensions, want)
 	}
 	if !slices.Contains(args, "--no-extensions") || slices.Contains(args, "--no-skills") || slices.Contains(args, "--no-tools") {
@@ -117,7 +125,7 @@ func TestPiBridgeRegistersOnlyTheProfileServers(t *testing.T) {
 		t.Fatal(err)
 	}
 	info, err := os.Stat(path)
-	if err != nil || info.Mode().Perm() != 0o600 || path != filepath.Join(dir, piBridgeFile) {
+	if err != nil || !isPrivate(info) || path != filepath.Join(dir, piBridgeFile) {
 		t.Fatalf("the bridge carries the conversation key's environment, so it is private: %s %v %v", path, info, err)
 	}
 	src, _ := os.ReadFile(path)
@@ -373,7 +381,7 @@ func TestPiMapperPromptAnswersAndDialogs(t *testing.T) {
 // piResponder is a stand-in pi that answers every command with an id and
 // logs each line it reads.
 const piResponder = `import sys, json
-log = open(sys.argv[1], "a")
+log = open(sys.argv[1], "a", newline="")
 for line in sys.stdin:
     log.write(line); log.flush()
     d = json.loads(line)
@@ -383,10 +391,7 @@ for line in sys.stdin:
 `
 
 func TestPiProcessCommands(t *testing.T) {
-	python, err := exec.LookPath("python3")
-	if err != nil {
-		t.Skip("python3 not available")
-	}
+	python := lookPython(t)
 	logPath := filepath.Join(t.TempDir(), "commands.jsonl")
 	m := newPiMapper(piSpec(t, `{"backend":"pi"}`))
 	sp, err := startStreamProcess(exec.Command(python, "-I", "-c", piResponder, logPath), m, piProtocol{})
@@ -464,15 +469,10 @@ func TestPiProcessCommands(t *testing.T) {
 // TestPiBackendStart drives Start against a stand-in pi that records its
 // command line, working directory, and environment.
 func TestPiBackendStart(t *testing.T) {
-	out := t.TempDir()
-	fake := filepath.Join(t.TempDir(), "pi")
-	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > " + out + "/args\npwd -P > " + out + "/cwd\nenv > " + out + "/env\ntouch " + out + "/ready\ncat > /dev/null\n"
-	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	fake, out, outEnv := standin(t)
 	// Close SIGTERMs a child that outlives closeGrace, so under load it could
-	// kill the script before it wrote its records. Close only once the script
-	// reports it finished writing.
+	// kill the stand-in before it wrote its records. Close only once the
+	// stand-in reports it finished writing.
 	ready := filepath.Join(out, "ready")
 	closeWhenWritten := func(proc Process) {
 		t.Helper()
@@ -493,7 +493,7 @@ func TestPiBackendStart(t *testing.T) {
 	spec := piSpec(t, `{"backend":"pi","tools":["read"],"ws_tools":["tickets.query"]}`)
 	spec.Root, spec.Dir = root, dir
 	spec.WSMCP = &MCPCommand{Command: "/bin/ws-mcp"}
-	spec.Env = []string{"PATH=" + os.Getenv("PATH"), "WS_PI_ROLE=lead"}
+	spec.Env = []string{"PATH=" + os.Getenv("PATH"), "WS_PI_ROLE=lead", outEnv}
 	proc, err := PiBackend{Command: fake}.Start(context.Background(), spec)
 	if err != nil {
 		t.Fatal(err)
@@ -507,17 +507,16 @@ func TestPiBackendStart(t *testing.T) {
 		}
 		return string(raw)
 	}
-	args := strings.Split(strings.TrimSpace(read("args")), "\n")
+	args := strings.Split(read("args"), "\x00")
 	bridge := filepath.Join(dir, "pi", piBridgeFile)
 	if got, _ := flagValue(args, "--tools"); got != "read,mcp__ws__tickets_query" || !slices.Contains(args, bridge) {
 		t.Fatalf("args = %v", args)
 	}
-	if info, err := os.Stat(bridge); err != nil || info.Mode().Perm() != 0o600 {
+	if info, err := os.Stat(bridge); err != nil || !isPrivate(info) {
 		t.Fatalf("bridge: %v %v", info, err)
 	}
-	wantRoot, _ := filepath.EvalSymlinks(root)
-	if cwd := strings.TrimSpace(read("cwd")); cwd != wantRoot {
-		t.Fatalf("pi runs at the working root: %q, want %q", cwd, wantRoot)
+	if cwd := read("cwd"); !sameDir(cwd, root) {
+		t.Fatalf("pi runs at the working root: %q, want %q", cwd, root)
 	}
 	if env := read("env"); !strings.Contains(env, "PI_SKIP_VERSION_CHECK=1") || strings.Contains(env, "WS_PI_ROLE") {
 		t.Fatalf("child env:\n%s", env)

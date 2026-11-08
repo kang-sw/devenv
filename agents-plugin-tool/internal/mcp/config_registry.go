@@ -268,6 +268,20 @@ var configRegistry = []configKeyEntry{
 		ResolverBacked:        true,
 	},
 	{
+		// A free-form path list (no Enum), so config.tune keeps it as
+		// written. Global-only, which is also what makes it lead-only.
+		Key:        wsconfig.ItemAgentGitSearchRoots,
+		WriterTool: "config.tune",
+		ResetTool:  "config.tune",
+		ValueFields: []tuningField{{
+			Name:        "value",
+			Description: "Absolute directory paths joined with the platform path-list separator (: on POSIX, ; on Windows). Omit when reset is true.",
+		}},
+		NoAgentVisible:        true,
+		RequiresLeadAuthority: wsconfig.GlobalOnly(wsconfig.ItemAgentGitSearchRoots),
+		ResolverBacked:        true,
+	},
+	{
 		Key:        wsconfig.ItemSageReview,
 		WriterTool: "config.tune",
 		ResetTool:  "config.tune",
