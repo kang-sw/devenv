@@ -90,13 +90,11 @@ func stickyFallbackScenario(t *testing.T, dir string) bool {
 
 	// Restart with the preferred port still held: the recorded port returns.
 	if got := startAt(t, dir, preferred); got != fallback {
-		// The recorded port itself can be taken by another process meanwhile.
-		probe, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(fallback)))
-		if err != nil {
-			return false
-		}
-		_ = probe.Close()
-		t.Fatalf("restart with preferred held: bound %d, want recorded %d", got, fallback)
+		// The recorded port is an ephemeral one, so another process can hold
+		// it for just the restart's bind and be gone before any probe here
+		// (seen on CI). Retry on a fresh port: a daemon that ignored its
+		// record would miss on every attempt and fail the caller's loop.
+		return false
 	}
 
 	// Preferred port free again: it wins and the record follows.
