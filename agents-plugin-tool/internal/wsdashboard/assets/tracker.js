@@ -1625,15 +1625,15 @@
     }).join('') + '</ul></section>';
 
     // composer: a comment (optionally a quote reply); the status moved to the header's menu.
-    // The box carries the @ picker (bottom left) and the send button (bottom right); Cmd/Ctrl+Enter sends.
+    // The box carries the @ button (bottom left) and the send button (bottom right); Cmd/Ctrl+Enter sends.
+    // Typing @ (or the button) opens the member suggestion popup at the caret (see mentionSync).
     var rt = ui.replyTo && VS.comments[ui.replyTo] && VS.comments[ui.replyTo].item === it.id ? VS.comments[ui.replyTo] : null;
     var send = wsT("js.tk.composer.send", MAC ? '⌘Enter' : 'Ctrl+Enter');
     h += '<div class="composer2">' + (it.hidden ? '<span class="muted">' + wsT("js.tk.composer.hidden") + '</span>' : '') +
       (rt ? '<div class="replying">' + wsT("js.tk.composer.replying", esc(alias(rt.id)), esc(nm(rt.author)), esc(String(rt.body).slice(0, 70))) + ' ' + btn('reply-x', 'x', {}) + '</div>' : '') +
       draftHtml() +
-      '<div class="cbox"><textarea id="cbox" data-keep rows="2" placeholder="' + wsT("js.tk.composer.placeholder", esc(nm(v))) + '"></textarea><div class="cbar">' +
-      '<select id="cmention" class="cat" aria-label="' + wsT("js.tk.composer.mention") + '"' + tipAttr(wsT("js.tk.composer.mention.tip")) + '><option value="">@</option>' +
-      Object.keys(VS.members).filter(function (id) { return !VS.members[id].removed; }).map(function (id) { return '<option value="' + esc(id) + '">@' + esc(id) + ' ' + esc(nmo(id)) + '</option>'; }).join('') + '</select>' +
+      '<div class="cbox"><textarea id="cbox" data-keep rows="2" aria-autocomplete="list" aria-controls="tkmpop" aria-expanded="false" placeholder="' + wsT("js.tk.composer.placeholder", esc(nm(v))) + '"></textarea><div class="cbar">' +
+      '<button type="button" id="cmention" class="cat"' + attr('act', 'mention') + ' aria-label="' + wsT("js.tk.composer.mention") + '"' + tipAttr(wsT("js.tk.composer.mention.tip")) + '>@</button>' +
       (CAPS.origin ? '<select id="corigin" title="' + wsT("js.tk.origin") + '"><option value="human">' + wsT("js.tk.origin.human") + '</option><option value="agent">' + wsT("js.tk.origin.agent") + '</option><option value="agent-auto">' + wsT("js.tk.origin.auto") + '</option></select>' : '') +
       '<span class="grow"></span><button type="button" class="csend" id="tkcsend"' + attr('act', 'comment') + attr('item', it.id) + ' aria-label="' + esc(send) + '"' + tipAttr(send) + '><svg class="i"><use href="#tki-send"/></svg></button></div></div>' +
       // with caps.attach, attachment metadata typed in by hand (a stand-in oid is computed)
@@ -1671,9 +1671,10 @@
       setTimeout(function () { if (a.isConnected) { span.innerHTML = was; a.classList.remove('done'); } }, 1200);
     });
   }
+  // the attachments drafted for the next post; a picked mention shows as its @id in the text itself
   function draftHtml() {
-    if (!ui.mdraft.length && !ui.adraft.length) return '';
-    return '<div class="cdraft">' + ui.mdraft.map(function (id) { return '<span class="chip mention">@' + esc(nm(id)) + '</span>'; }).join('') +
+    if (!ui.adraft.length) return '';
+    return '<div class="cdraft">' +
       ui.adraft.map(function (x, i) { return '<span class="chip att">' + wsT("js.tk.att.file", esc(x.name), fmtSize(x.size)) + '</span>' + btn('att-x', 'x', { idx: i }); }).join('') +
       '<span class="muted">' + wsT("js.tk.composer.draft") + '</span></div>';
   }
@@ -1688,6 +1689,95 @@
   function mimeOf(name) { return MIME[String(name).split('.').pop().toLowerCase()] || 'application/octet-stream'; }
   // An edit of a body keeps the mentions whose @id is still in the text and every attachment.
   function keptMentions(ids, body) { return listOf(ids).filter(function (id) { return body.indexOf('@' + id) >= 0; }); }
+
+  // ------------------------------------------------- @-mention suggestion popup
+
+  // An @ at the start or after whitespace in the comment box opens a member list anchored at the @,
+  // filtered by the text after it. It is driven by input events, which fire during an IME
+  // composition as well, so a Hangul name filters while it is still being composed.
+  var MP = null; // the open popup: { start: index of the @, q: the text after it, idx: highlighted row, ids }
+  function mentionMatches(q) {
+    q = q.toLowerCase();
+    var pre = [], sub = [];
+    Object.keys(VS.members).forEach(function (id) {
+      var m = VS.members[id], pr = m.profile || {};
+      if (m.removed) return;
+      var keys = [id, m.name, pr.given, pr.family].filter(Boolean).map(function (x) { return String(x).toLowerCase(); });
+      if (keys.some(function (x) { return x.indexOf(q) === 0; })) pre.push(id);
+      else if (keys.some(function (x) { return x.indexOf(q) >= 0; })) sub.push(id);
+    });
+    return pre.concat(sub);
+  }
+  function mentionToken(box) {
+    if (box.selectionStart !== box.selectionEnd) return null;
+    var m = /(^|\s)@([^\s@]*)$/.exec(box.value.slice(0, box.selectionStart));
+    return m ? { start: box.selectionStart - m[2].length - 1, q: m[2] } : null;
+  }
+  // Opens, refilters, re-places, or closes the popup after the box's text or caret changed.
+  function mentionSync() {
+    var box = $('cbox'), tok = box && document.activeElement === box && mentionToken(box);
+    if (!tok) return mentionClose();
+    var same = MP && MP.start === tok.start && MP.q === tok.q;
+    MP = { start: tok.start, q: tok.q, idx: same ? MP.idx : 0, ids: mentionMatches(tok.q) };
+    if (MP.idx >= MP.ids.length) MP.idx = 0;
+    mentionDraw(box); mentionPlace(box);
+  }
+  function mentionDraw(box) {
+    var p = $('tkmpop');
+    p.innerHTML = MP.ids.map(function (id, i) {
+      return '<li class="mopt' + (i === MP.idx ? ' on' : '') + '" role="option" id="tkmopt-' + i + '" aria-selected="' + (i === MP.idx) + '"' + attr('mp', i) + '>' +
+        '<i class="av">' + esc(initials(id)) + '</i><span class="mn">' + whoName(id) + '</span><span class="muted">' + esc(id) + '</span></li>';
+    }).join('') || '<li class="qnone" role="presentation">' + wsT("js.tk.mention.none") + '</li>';
+    p.hidden = false;
+    box.setAttribute('aria-expanded', 'true');
+    box.setAttribute('aria-activedescendant', MP.ids.length ? 'tkmopt-' + MP.idx : '');
+    var on = p.querySelector('.mopt.on');
+    if (on) on.scrollIntoView({ block: 'nearest' });
+  }
+  // The @'s position in the viewport, measured on a hidden copy of the box laid out alike.
+  function mentionAnchor(box) {
+    var cs = getComputedStyle(box), d = document.createElement('div'), mark = document.createElement('span');
+    ['boxSizing', 'width', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft', 'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth',
+      'fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'letterSpacing', 'lineHeight', 'textTransform', 'wordSpacing', 'tabSize'].forEach(function (k) { d.style[k] = cs[k]; });
+    d.style.cssText += ';position:absolute;visibility:hidden;top:0;left:-9999px;white-space:pre-wrap;overflow-wrap:break-word;border-style:solid';
+    d.textContent = box.value.slice(0, MP.start);
+    mark.textContent = '@'; d.appendChild(mark);
+    box.parentNode.appendChild(d);
+    var r = box.getBoundingClientRect(), x = r.left + mark.offsetLeft - box.scrollLeft, y = r.top + mark.offsetTop - box.scrollTop, lh = mark.offsetHeight;
+    d.remove();
+    return { x: x, top: y, bottom: y + lh };
+  }
+  // above the @ when it fits, so the box's text and send button stay visible; else below it
+  function mentionPlace(box) {
+    var p = $('tkmpop'), a = mentionAnchor(box), w = p.offsetWidth, h = p.offsetHeight;
+    p.style.left = Math.max(8, Math.min(a.x - 4, innerWidth - w - 8)) + 'px';
+    p.style.top = (a.top - h - 4 >= 8 ? a.top - h - 4 : Math.min(a.bottom + 4, innerHeight - h - 8)) + 'px';
+  }
+  function mentionClose() {
+    if (!MP) return;
+    MP = null; $('tkmpop').hidden = true;
+    var box = $('cbox');
+    if (box) { box.setAttribute('aria-expanded', 'false'); box.removeAttribute('aria-activedescendant'); }
+  }
+  // Picking replaces the @query token with "@<id> " at the caret and records the id for the next post.
+  function mentionPick(i) {
+    var box = $('cbox'), id = MP && MP.ids[i];
+    if (!box || !id) return;
+    var end = box.selectionStart, spaced = /\s/.test(box.value.charAt(end));
+    box.setRangeText('@' + id + (spaced ? '' : ' '), MP.start, end, 'end');
+    if (spaced) box.selectionStart = box.selectionEnd = box.selectionEnd + 1;
+    if (ui.mdraft.indexOf(id) < 0) ui.mdraft.push(id);
+    mentionClose(); box.focus();
+  }
+  // The @ button: an @ at the caret (after a space when it would touch a word), then the popup.
+  function mentionInsert() {
+    var box = $('cbox');
+    if (!box) return;
+    box.focus();
+    var s = box.selectionStart;
+    box.setRangeText((s && !/\s/.test(box.value.charAt(s - 1)) ? ' ' : '') + '@', s, box.selectionEnd, 'end');
+    mentionSync();
+  }
 
   // --------------------------------------------------------- dialog forms
 
@@ -2564,6 +2654,7 @@
     if (open) placeSub();
     var fk2 = focusKeep && $(focusKeep[0]);
     if (fk2) { fk2.focus({ preventScroll: true }); try { fk2.setSelectionRange(focusKeep[1], focusKeep[2]); } catch (x) { /* not a text field */ } }
+    if (MP) mentionSync(); // the composer was redrawn: the popup follows the new box, or closes with it
     // the menu stays over the redraw: the status popover follows the store, an item menu closes with its item
     if (MN && MN.kind === 'sync') {
       var mIn = $('tkmenu').contains(document.activeElement);
@@ -2863,7 +2954,8 @@
       '<div class="tk-dr-in"><div class="tk-dr-clip" id="tkclip"><div class="tk-dr-sheet" role="region" aria-label="' + wsT("js.tk.aria.store") + '"><div class="tk-dr-body" id="tkbody"></div></div></div>' +
       '<div class="tk-handles" id="tkhandles"></div></div>'));
     O.pageParent.appendChild(el('main', { class: 'tk tk-spage', id: 'tkpage', role: 'region', 'aria-label': wsT("js.tk.aria.page"), hidden: '' }));
-    b.appendChild(el('div', { class: 'tk tk-iwin-back', id: 'tkwin', hidden: '' }, '<div class="iwin" role="dialog" aria-modal="true" tabindex="-1"><div class="iwin-in" id="tkwinbody"></div></div>'));
+    b.appendChild(el('div', { class: 'tk tk-iwin-back', id: 'tkwin', hidden: '' }, '<div class="iwin" role="dialog" aria-modal="true" tabindex="-1"><div class="iwin-in" id="tkwinbody"></div></div>' +
+      '<ul class="tk-mpop" id="tkmpop" role="listbox" aria-label="' + wsT("js.tk.composer.mention.tip") + '" hidden></ul>'));
     b.appendChild(el('dialog', { class: 'tk tk-dlg', id: 'tkdlg' }));
     b.appendChild(el('div', { class: 'tk tk-toast', id: 'tktoast', hidden: '' }));
     b.appendChild(el('div', { class: 'tk tk-tip', id: 'tktip', role: 'tooltip', hidden: '' }));
@@ -2891,6 +2983,8 @@
     document.addEventListener('click', function (e) {
       var t = e.target;
       if (qs.open && !(t.closest && t.closest('#tkqpop, #tkqs'))) qClose(true);
+      if (t.id === 'cbox' && own(t)) mentionSync(); // a click into an @token opens it, elsewhere in the box closes it
+      else if (MP && !(t.closest && t.closest('#tkmpop, #cmention'))) mentionClose();
       // a click outside the menu closes it; a click on its own opener toggles it shut
       if (MN && !(t.closest && t.closest('#tkmenu'))) {
         var mOpener = MN.backEl && MN.backEl.contains(t);
@@ -2950,6 +3044,7 @@
         else if (k === 'sync') { syncNow(ui.store, false, function () { render(); }); }
         else if (k === 'reply') { ui.replyTo = d.cid; render(); if ($('cbox')) $('cbox').focus(); }
         else if (k === 'reply-x') { ui.replyTo = null; render(); }
+        else if (k === 'mention') mentionInsert();
         else if (k === 'nread-all') { markRead(feedEntries(memberOf(viewerOf(ui.store))).map(function (x) { return x.key; })); render(); }
         else if (k === 'att-load') { if (CAPS.attach) { var lm = (ui.loaded[seenKey(ui.store)] = ui.loaded[seenKey(ui.store)] || {}), oid = a.getAttribute('data-oid'); lm[oid] = !lm[oid]; render(); } }
         else if (k === 'att-add') {
@@ -2999,13 +3094,6 @@
       else if (t.id === 'f-status') { ui.status = t.value; render(); }
       else if (t.id === 'a-family') { ui.act.family = t.value; render(); }
       else if (t.id === 'a-member') { ui.act.member = t.value; render(); }
-      else if (t.id === 'cmention') {
-        var box = $('cbox'), id = t.value;
-        if (!id || !box) return;
-        box.value = box.value + (box.value && !/\s$/.test(box.value) ? ' ' : '') + '@' + id + ' ';
-        if (ui.mdraft.indexOf(id) < 0) ui.mdraft.push(id);
-        render();
-      }
       else if (t.id === 'tknewkind') { if (ui.nrow[ui.store]) ui.nrow[ui.store].kind = t.value; }
       else if (t.closest('#tkmenu form')) updateHint(t.closest('form'));
       else if (t.closest('#tkdlg form')) {
@@ -3024,6 +3112,7 @@
       if (t.id === 'tknew' && ui.nrow[ui.store]) ui.nrow[ui.store].val = t.value;
       else if (t.id === 'tksub' && ui.sub) ui.sub.val = t.value;
       else if (t.id === 'tkcedit' && ui.cedit) ui.cedit.body = t.value;
+      else if (t.id === 'cbox') mentionSync(); // also mid-composition: the popup filters on the composing text
       else if (/^iw-e(title|body|proj)$/.test(t.id) && ui.iedit) ui.iedit[{ 'iw-etitle': 'title', 'iw-ebody': 'body', 'iw-eproj': 'project' }[t.id]] = t.value;
       else if (t.id === 'tkmq' && MN) { MN.q = t.value; var ml = $('tkmenu').querySelector('.mlist'); if (ml) ml.innerHTML = handoffList(VS.items[MN.item], MN.who || VS.viewer.member); }
     });
@@ -3065,6 +3154,7 @@
       linkHi(own(e.target) && e.target.closest('.kcard, .citem'));
     });
     document.addEventListener('focusin', function (e) {
+      if (MP && e.target.id !== 'cbox') mentionClose();
       var row = own(e.target) && e.target.closest('.irow'), card = own(e.target) && e.target.closest('.kcard, .citem');
       if (row) placeMore(row);
       linkHi(card);
@@ -3072,6 +3162,7 @@
     });
     document.addEventListener('scroll', function (e) {
       if (tipFor) hideTip(); placeShownMore();
+      if (MP) mentionSync();
       if (MN && MN.kind === 'item' && !(e.target.nodeType === 1 && $('tkmenu').contains(e.target))) closeMenu(false); // an item menu does not follow a scrolled row
     }, true);
     // a right-click on a row, card, entry, or the item window header opens its menu at the pointer
@@ -3089,6 +3180,20 @@
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); var n = qs.items.length; if (n) { qs.idx = (qs.idx + (e.key === 'ArrowDown' ? 1 : n - 1)) % n; qRender(); } }
       else if (e.key === 'Enter') { e.preventDefault(); qPick(qs.idx); }
       else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); qClose(); }
+    });
+    // the caret moved without an edit (arrow keys, Home/End): the popup follows the token under it
+    document.addEventListener('keyup', function (e) {
+      if (e.target.id === 'cbox' && own(e.target) && /^(ArrowLeft|ArrowRight|Home|End)$/.test(e.key)) mentionSync();
+    });
+    // a row is picked on mousedown, so the box keeps focus and its caret
+    $('tkmpop').addEventListener('mousedown', function (e) {
+      e.preventDefault();
+      var o = e.target.closest('[data-mp]');
+      if (o) mentionPick(Number(o.getAttribute('data-mp')));
+    });
+    $('tkmpop').addEventListener('mousemove', function (e) {
+      var o = e.target.closest('[data-mp]'), i = o && Number(o.getAttribute('data-mp'));
+      if (o && MP && i !== MP.idx) { MP.idx = i; mentionDraw($('cbox')); }
     });
     $('tkqpop').addEventListener('mousemove', function (e) {
       var o = e.target.closest('[data-qi]'), i = o && Number(o.getAttribute('data-qi'));
@@ -3112,7 +3217,16 @@
         if (id === 'iw-etitle' || id === 'iw-eproj') { if (plain || chord) { e.preventDefault(); saveEdit(); } else if (esc1) { e.preventDefault(); endEdit(); } return; }
         if (id === 'iw-ebody') { if (chord) { e.preventDefault(); saveEdit(); } else if (esc1) { e.preventDefault(); endEdit(); } return; }
         if (id === 'tkcedit') { if (chord) { e.preventDefault(); saveCedit(); } else if (esc1) { e.preventDefault(); endCedit(); } return; }
-        if (id === 'cbox' && chord) { e.preventDefault(); if ($('tkcsend')) quick('comment', $('tkcsend')); return; }
+        if (id === 'cbox') {
+          // the Enter that commits an IME composition neither picks a member nor sends
+          if (e.isComposing || e.keyCode === 229) return;
+          if (MP && MP.ids.length) {
+            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); MP.idx = (MP.idx + (e.key === 'ArrowDown' ? 1 : MP.ids.length - 1)) % MP.ids.length; mentionDraw(t); return; }
+            if ((e.key === 'Enter' || e.key === 'Tab') && !e.shiftKey) { e.preventDefault(); mentionPick(MP.idx); return; }
+          }
+          if (MP && esc1) { e.preventDefault(); mentionClose(); return; }
+          if (chord) { e.preventDefault(); if ($('tkcsend')) quick('comment', $('tkcsend')); return; }
+        }
       }
       // Esc in the search box clears it first; with it empty, Esc goes on to close the window or the drawer
       if (e.key === 'Escape' && e.target.id === 'psearch' && e.target.value && own(e.target)) { e.preventDefault(); panelState().q = ''; render(); if ($('psearch')) $('psearch').focus(); return; }
@@ -3129,7 +3243,7 @@
       if (ui.win) closeItemWindow(); else if (ui.open) collapse();
     });
     // the layout follows the width: re-render when it crosses a breakpoint, else refit
-    window.addEventListener('resize', function () { if (MN) closeMenu(false); if (layoutOf() !== ui.layout) render(); else { if (!ui.page) fitDrawer(); measure(); } });
+    window.addEventListener('resize', function () { if (MN) closeMenu(false); if (MP) mentionSync(); if (layoutOf() !== ui.layout) render(); else { if (!ui.page) fitDrawer(); measure(); } });
     // the store page route: reload on #/<storeId> restores the page; back and forward follow the hash
     window.addEventListener('hashchange', applyRoute);
     window.addEventListener('popstate', function () { if (routeStore() !== ui.page) applyRoute(); });

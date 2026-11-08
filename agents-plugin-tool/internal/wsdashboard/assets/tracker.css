@@ -439,8 +439,17 @@ body.tk-paged .tk-drawer { display: none; }
 .tk .cbox textarea { font: inherit; font-size: 13px; border: 0; outline: 0; border-radius: 12px 12px 0 0; padding: 8px 11px 2px; resize: vertical; min-height: 44px; background: transparent; color: var(--wb-fg); }
 .tk .cbar { display: flex; align-items: center; gap: 6px; padding: 2px 6px 6px; }
 .tk .cbar select { font: inherit; font-size: 11.5px; border-radius: 6px; border: 0; background: var(--wb-card); color: var(--wb-fg); height: 24px; }
-.tk .cbar select.cat { width: 30px; padding: 0; text-align: center; text-align-last: center; font-weight: 700; color: var(--wb-muted-fg); appearance: none; -webkit-appearance: none; cursor: pointer; }
-.tk .cbar select.cat:hover { color: var(--wb-primary); }
+.tk .cbar .cat { flex: none; width: 28px; height: 24px; padding: 0; border: 0; border-radius: 6px; background: transparent; font: inherit; font-size: 13px; font-weight: 700; color: var(--wb-muted-fg); cursor: pointer; }
+.tk .cbar .cat:hover { color: var(--wb-primary); background: var(--wb-card); }
+.tk .cbar .cat:focus-visible { outline: 1.5px solid var(--wb-primary); }
+/* the @-mention suggestion popup, placed at the @ in the comment box (fixed, over the item window) */
+.tk .tk-mpop { position: fixed; z-index: 75; width: 270px; max-height: 240px; overflow: auto; list-style: none; margin: 0; padding: 4px; background: var(--wb-card); color: var(--wb-fg); border-radius: 10px; box-shadow: var(--wb-shadow-hi); }
+.tk .tk-mpop[hidden] { display: none; }
+.tk .mopt { display: flex; align-items: center; gap: 7px; padding: 4px 8px; border-radius: 7px; cursor: pointer; font-size: 13px; min-width: 0; }
+.tk .mopt.on { background: color-mix(in srgb, var(--wb-primary) 14%, var(--wb-card)); }
+.tk .mopt .av { margin-left: 0; }
+.tk .mopt .mn { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.tk .mopt .muted { margin-left: auto; flex: none; font-family: var(--wb-mono); font-size: 11.5px; }
 .tk .csend { flex: none; width: 34px; height: 28px; border: 0; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; padding: 0; cursor: pointer; color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 14%, var(--wb-card)); }
 .tk .csend:hover { background: color-mix(in srgb, var(--wb-primary) 24%, var(--wb-card)); }
 .tk .csend:focus-visible { outline: 1.5px solid var(--wb-primary); }

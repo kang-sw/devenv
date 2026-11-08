@@ -476,6 +476,7 @@
   "js.tk.list.rcv.sentto": "<b>{0}</b>에게 보냄",
   "js.tk.list.restored": "; {0}의 배정이 복원됨",
   "js.tk.loading": "불러오는 중...",
+  "js.tk.mention.none": "일치하는 멤버가 없습니다",
   "js.tk.mode.activity": "활동 타임라인",
   "js.tk.mode.calendar": "캘린더",
   "js.tk.mode.gantt": "마감 타임라인",

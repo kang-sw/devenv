@@ -481,6 +481,7 @@
   "js.tk.list.rcv.sentto": "sent to <b>{0}</b>",
   "js.tk.list.restored": "; {0}'s assignment is restored",
   "js.tk.loading": "Loading...",
+  "js.tk.mention.none": "No matching member",
   "js.tk.menu.aria": "Actions for {0}",
   "js.tk.menu.back": "Back",
   "js.tk.menu.default": "default",
