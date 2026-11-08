@@ -862,3 +862,55 @@ func TestReloadReadsOtherProcessesWithoutNetwork(t *testing.T) {
 		t.Fatalf("pending after the other instance pushed = %+v, want nothing", rep.Pending)
 	}
 }
+
+// failFetchRunner fails the nth fetch (1-based) and runs everything else.
+type failFetchRunner struct {
+	mu      sync.Mutex
+	fetches int
+	n       int
+}
+
+func (r *failFetchRunner) RunGit(ctx context.Context, root string, args ...string) ([]byte, error) {
+	for _, a := range args {
+		if a == "fetch" {
+			r.mu.Lock()
+			r.fetches++
+			fail := r.fetches == r.n
+			r.mu.Unlock()
+			if fail {
+				return nil, errors.New("fetch broke")
+			}
+			break
+		}
+	}
+	return wsgit.ExecRunner{}.RunGit(ctx, root, args...)
+}
+
+// TestRegisterFailureAfterAPushIsPushedErrorOnlyWhenOneLanded: a failure of
+// the fetch that follows the push is a *PushedError when the push landed (a
+// new member's join), and a plain error when nothing landed (a second clone
+// with a key the store already holds writes no join, so pushes nothing).
+func TestRegisterFailureAfterAPushIsPushedErrorOnlyWhenOneLanded(t *testing.T) {
+	w := newWorld(t)
+	url := w.newRemote("r")
+	w.register(w.remoteOpts("ada", "c1"), url)
+
+	var pushed *PushedError
+	o := w.remoteOpts("bo", "c1")
+	o.Runner = &failFetchRunner{n: 2}
+	if l, err := Register(context.Background(), o, url); err == nil {
+		l.Close()
+		t.Fatal("bo: Register with a broken second fetch returned no error")
+	} else if !errors.As(err, &pushed) || !strings.Contains(err.Error(), "fetch broke") {
+		t.Fatalf("bo: a failure after its join landed = %v, want a PushedError", err)
+	}
+
+	o = w.remoteOpts("ada", "c2")
+	o.Runner = &failFetchRunner{n: 2}
+	if l, err := Register(context.Background(), o, url); err == nil {
+		l.Close()
+		t.Fatal("ada.c2: Register with a broken second fetch returned no error")
+	} else if errors.As(err, &pushed) || !strings.Contains(err.Error(), "fetch broke") {
+		t.Fatalf("ada.c2: a failure after a push that landed nothing = %v, want a plain error", err)
+	}
+}

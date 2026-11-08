@@ -517,10 +517,17 @@ func Register(ctx context.Context, opts Options, url string) (*Ledger, error) {
 		if err := l.joinLocked(ctx, created); err != nil {
 			return err
 		}
-		if _, err := l.pushAll(ctx); err != nil {
+		landed, err := l.pushAll(ctx)
+		if err != nil {
 			return err
 		}
-		pushed = append(json.RawMessage(nil), l.genesis.raw...)
+		// pushAll reports false when its own ref did not land: nothing new
+		// (a key the store already holds), a lost or unpublished claim, or a
+		// taken id. Only a landed push leaves the remote holding this
+		// registration.
+		if landed {
+			pushed = append(json.RawMessage(nil), l.genesis.raw...)
+		}
 		if err := l.fetchRemote(ctx); err != nil {
 			return err
 		}
