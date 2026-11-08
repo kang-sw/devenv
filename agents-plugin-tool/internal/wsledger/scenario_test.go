@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -779,6 +780,79 @@ func TestImpostorJoinFlagged(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestRolesRuleVerdicts: forged identity events that break an admin rule
+// are flagged with the rule's reason and leave the identity state as it
+// was. Each case sits alone in its own clone stream with the setup's
+// causal past, so no case's verdict depends on another's.
+func TestRolesRuleVerdicts(t *testing.T) {
+	w := newWorld(t)
+	ada := w.create("ada", "c1")
+	bo := w.join("bo", "c1")
+	w.join("cy", "c1")
+	w.join("dee", "c1")
+	spare1 := w.forger(w.optsWithKey("spare", "k1", filepath.Join(w.root, "keys", "spare1"))).pubKey
+	spare2 := w.forger(w.optsWithKey("spare", "k2", filepath.Join(w.root, "keys", "spare2"))).pubKey
+	fetchOK(t, ada)
+	// Setup: cy gets and loses a second key; dee is removed. ada stays the
+	// only admin.
+	for _, id := range []EventID{
+		appendOne(t, ada, TypeAddKey, KeyPayload{Member: "cy", Key: spare1}),
+		appendOne(t, ada, TypeRevokeKey, KeyPayload{Member: "cy", Key: spare1}),
+		appendOne(t, ada, TypeRemoveMember, MemberPayload{Member: "dee"}),
+	} {
+		syncOK(t, ada)
+		wantVerdict(t, ada, id, Valid)
+	}
+	seen := map[string]int{}
+	for s, h := range ada.view.heads {
+		seen[s] = h
+	}
+	identBefore := ada.Identity()
+	ts := w.clock.Now()
+
+	cases := []struct {
+		name    string
+		author  string
+		typ     string
+		payload any
+		reason  string
+	}{
+		{"non-admin add_admin", "bo", TypeAddAdmin, MemberPayload{Member: "cy"}, "roles.add_admin is admin-only (bo is not an admin in its causal past)"},
+		{"non-admin revoke_key", "bo", TypeRevokeKey, KeyPayload{Member: "ada", Key: ada.pubKey}, "roles.revoke_key is admin-only (bo is not an admin in its causal past)"},
+		{"add_admin of an admin", "ada", TypeAddAdmin, MemberPayload{Member: "ada"}, "ada is already an admin"},
+		{"add_admin of a removed member", "ada", TypeAddAdmin, MemberPayload{Member: "dee"}, "dee was removed ("},
+		{"remove_admin of a non-admin", "ada", TypeRemoveAdmin, MemberPayload{Member: "cy"}, "cy is not an admin"},
+		{"remove_admin of the last admin", "ada", TypeRemoveAdmin, MemberPayload{Member: "ada"}, "cannot remove the last admin"},
+		{"add_key of a key in use", "ada", TypeAddKey, KeyPayload{Member: "cy", Key: bo.pubKey}, "the key is already in use"},
+		{"add_key for a removed member", "ada", TypeAddKey, KeyPayload{Member: "dee", Key: spare2}, "dee was removed ("},
+		{"revoke_key of a revoked key", "ada", TypeRevokeKey, KeyPayload{Member: "cy", Key: spare1}, "the key is already revoked ("},
+		{"revoke_key of an unheld key", "ada", TypeRevokeKey, KeyPayload{Member: "cy", Key: bo.pubKey}, "the key is not a key of cy"},
+		{"remove_member of a removed member", "ada", TypeRemoveMember, MemberPayload{Member: "dee"}, "dee was already removed ("},
+		{"remove_member of an admin", "ada", TypeRemoveMember, MemberPayload{Member: "ada"}, "remove the admin role of ada first"},
+		{"unknown member", "ada", TypeAddAdmin, MemberPayload{Member: "zed"}, `unknown member "zed"`},
+		{"malformed member id", "ada", TypeAddAdmin, json.RawMessage(`{"member":"Not An Id!"}`), "roles.add_admin payload: member"},
+		{"malformed key", "ada", TypeAddKey, json.RawMessage(`{"member":"cy","key":"not a key"}`), "roles.add_key payload: "},
+	}
+	ids := make([]EventID, len(cases))
+	for i, tc := range cases {
+		clone := "f" + strconv.Itoa(i)
+		f := w.forger(w.opts(tc.author, clone))
+		oid := forgeCommit(t, f, "", seen, ts, evLine(t, 1, ts, tc.typ, tc.payload))
+		setRef(t, f, memberRef(tc.author, clone), oid, "")
+		ids[i] = EventID{Member: tc.author, Clone: clone, Seq: 1}
+	}
+	fetchOK(t, ada)
+	for i, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e := wantVerdict(t, ada, ids[i], Flagged)
+			wantReason(t, e, tc.reason)
+		})
+	}
+	if got := ada.Identity(); !reflect.DeepEqual(got, identBefore) {
+		t.Fatalf("identity state changed:\n got  %+v\n want %+v", got, identBefore)
 	}
 }
 
