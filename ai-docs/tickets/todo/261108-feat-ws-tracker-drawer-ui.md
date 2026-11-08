@@ -3,6 +3,7 @@ title: Tracker drawer UI - per-store handles, shared renderer, daemon endpoints,
 parent: 261107-epic-ws-personal-common-store
 related:
   261108-feat-ws-tracker-caller: prerequisite (registry, sync entry points, wrappers)
+  261108-feat-ws-dashboard-disk-assets-dev-mode: prerequisite (disk-assets dev mode, Decision 4)
   261107-feat-ws-dashboard-pull-down-drawer: the drawer frame this extends (done)
   261108-feat-ws-tracker-support-agent-chat: blocked by this ticket (its card lives in the drawer)
 ---
@@ -46,12 +47,10 @@ All confirmed on the session board, 2026-11-08.
    lives once in the shipped assets; the mockup page loads that same file and
    feeds it from `engine.js` and the fixtures, the daemon feeds it over HTTP.
    The mockup and the product cannot drift, and the fixture loop stays.
-4. **Disk-assets dev mode** ((412) c, part b): the daemon can serve dashboard
-   assets from a working-tree directory instead of the embedded copy, so
-   JS/CSS changes show on reload and only Go changes need a rebuild. User:
-   "재설치 없이 계속 목업 보고 갱신할 수 있게 값싸게 ... 미세조정이 많을
-   거 같아서요". Rejected: a separate `go run` dev server with a fake store
-   (mostly redundant with this).
+4. **Disk-assets dev mode** ((412) c, part b): provided by
+   `261108-feat-ws-dashboard-disk-assets-dev-mode`, split out by board (429) a
+   to run ahead of this ticket and to cover the whiteboard assets too. This
+   ticket's UI tuning uses it; it builds no dev mode of its own.
 5. **Local UI state on disk** ((397)): notification read state, handle-badge
    seen marks, view modes, drawer height, and the recently-closed fold are
    stored per clone on the local filesystem by the daemon, never in browser
@@ -69,10 +68,6 @@ All confirmed on the session board, 2026-11-08.
   `internal/mcp/`. UI strings go through the i18n tables
   (`internal/wsi18n/tables/*.json`, coverage checked by
   `internal/wsdashboard/i18n_test.go`).
-- If the dev mode is a config key, it goes into both `claude.` dashboard
-  manifests with only defaults differing (parity test); an environment
-  variable is the alternative. The worker picks and records why. Off by
-  default; it never serves outside the given directory.
 - The mockup stays runnable from `file://` with the fixtures after the
   renderer moves.
 - Open known nit: two-character Hangul avatars (`.av`, 9px in a 20px circle)
@@ -83,16 +78,14 @@ All confirmed on the session board, 2026-11-08.
 
 ## Phases
 
-### Phase 1: Shared renderer and disk-assets dev mode
+### Phase 1: Shared renderer
 
 - Move the mockup's drawer rendering into a dashboard asset with a data
   adapter seam (Decision 3); the mockup loads it from the shipped asset path
   and keeps its engine-and-fixtures adapter.
-- The daemon's disk-assets dev mode (Decision 4).
 - Verification: `node --check` on the mockup scripts; the mockup's SCENARIOS
   walk and a headless Chromium error sweep (900, 1280, 1760px; every viewer,
-  scope, view mode) unchanged; a daemon test that the dev mode serves a
-  working-tree asset and is off by default; `go test` for `wsdashboard`.
+  scope, view mode) unchanged; `go test` for `wsdashboard`.
 
 ### Phase 2: Daemon wiring, per-store handles, local UI state, join dialog
 
