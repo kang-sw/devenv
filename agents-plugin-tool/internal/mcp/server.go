@@ -1683,6 +1683,8 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		return s.handleTrackerUpdate(ctx, req.ID, params.Arguments)
 	case trackerShowTool:
 		return s.handleTrackerShow(ctx, req.ID, params.Arguments)
+	case gitSearchTool:
+		return s.handleGitSearch(ctx, req.ID, params.Arguments)
 	case "tracker.query":
 		return s.handleTrackerQuery(ctx, req.ID, params.Arguments)
 	case "tickets.query":
@@ -2844,6 +2846,20 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 		},
 		ValueFields: bootstrapEntry.ValueFields,
 		Current:     currentWorkflowPreference(resolver, sessionKey, wsconfig.ItemBootstrapAlarm),
+	})
+
+	gitRootsEntry := registryEntryByKey(wsconfig.ItemAgentGitSearchRoots)
+	appendKnob(gitRootsEntry, tuningKnob{
+		ID:          gitRootsEntry.Key,
+		Kind:        "workflow_preference",
+		Description: "Extra directories the read-only git.search tool of a hosted agent conversation may read, beyond the project roots of the sessions the dashboard saw on this machine in the last 7 days: absolute paths joined with the platform path-list separator (: on POSIX, ; on Windows). A repository at or inside one of them is readable; a relative or missing entry is ignored, and git.search names it when it lists its roots. Unset (builtin) adds none. Global-only.",
+		Writer:      tuningWriter{Tool: gitRootsEntry.WriterTool, FixedArguments: map[string]string{"key": gitRootsEntry.Key}},
+		Reset: &tuningWriter{
+			Tool:           gitRootsEntry.ResetTool,
+			FixedArguments: map[string]string{"key": gitRootsEntry.Key, "reset": "true"},
+		},
+		ValueFields: gitRootsEntry.ValueFields,
+		Current:     currentWorkflowPreference(resolver, sessionKey, gitRootsEntry.Key),
 	})
 
 	sageReviewEntry := registryEntryByKey(wsconfig.ItemSageReview)
@@ -4906,6 +4922,23 @@ func tools() []map[string]any {
 					"item":        stringProperty("The item's ID as tracker.query prints it, such as maya.pc-5."),
 				},
 				"required": []string{"session_key", "item"},
+			},
+		},
+		{
+			"name":        gitSearchTool,
+			"description": "Read-only git search over the user's local repositories: log, show, grep, blame, or ls-files. Call it without repo to list the roots it may read (the project roots of the sessions the dashboard saw on this machine in the last 7 days, plus the agent.git_search_roots config knob), then pass one of them, or a directory inside one, as repo. options takes only flags from the command's allowlist, each value attached (--name=value, -n5); a refused flag's answer lists the accepted ones. Read a file's contents with show and a revision such as HEAD:path/to/file.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's ws session key."),
+					"repo":        stringProperty("Absolute path of a readable root, or of a directory inside one. Omit it to list the readable roots; the call then does nothing else."),
+					"command":     enumStringProperty("Required with repo.", gitSearchCommands),
+					"options":     stringArrayProperty("Flags for the command, each value attached (--max-count=5, -n5, -S<text>, -L10,20). No git global options (-c, -C <dir>, --git-dir, --work-tree)."),
+					"pattern":     stringProperty("grep only, and required for it: the pattern, passed as -e <pattern>."),
+					"revisions":   stringArrayProperty("Revisions such as HEAD~3, main..topic, or HEAD:path/to/file for show. None may start with -. ls-files takes none; blame at most one."),
+					"paths":       stringArrayProperty("Paths, relative to repo, that limit the command (passed after --). blame takes exactly one."),
+				},
+				"required": []string{"session_key"},
 			},
 		},
 		{
