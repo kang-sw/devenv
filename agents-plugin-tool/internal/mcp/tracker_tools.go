@@ -43,6 +43,25 @@ func trackerLeadOnlyDenial(name string) string {
 	return fmt.Sprintf("%s is not available to a spawned session: the tracker records the user's work through the top-level lead. Put progress in your final report; your lead records it.", name)
 }
 
+// trackerSessionKey returns the caller's session key when it names a
+// top-level lead. The call gate refuses a spawned key only when it finds the
+// key, so a key the store cannot find (made up, stale, expired) would pass
+// it; this refuses one before any registry read or write.
+func (s *Server) trackerSessionKey(tool string, args map[string]any) (string, error) {
+	key, err := sessionStateKey(tool, args)
+	if err != nil {
+		return "", err
+	}
+	entry, found := s.sessions.lookup(key)
+	if !found {
+		return "", mailboxUnknownSessionError(tool)
+	}
+	if !entry.isTopLevelLead() {
+		return "", errors.New(trackerLeadOnlyDenial(tool))
+	}
+	return key, nil
+}
+
 // trackerOrigins are the origins a tracker.update write may carry: every
 // write through this tool is an agent's, so human is not among them, and
 // agent-auto marks a write the agent made unasked.
@@ -544,7 +563,7 @@ func (b *trackerBatch) newEvents(next wsledger.EventID) ([]wsledger.NewEvent, er
 
 func (s *Server) handleTrackerUpdate(ctx context.Context, id json.RawMessage, args map[string]any) response {
 	const tool = "tracker.update"
-	key, err := sessionStateKey(tool, args)
+	key, err := s.trackerSessionKey(tool, args)
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
@@ -614,7 +633,8 @@ func (s *Server) trackerSucceeded(key, text string) string {
 }
 
 // trackerRegisterCommand registers a store from a tk:register command; a
-// failure leaves nothing registered.
+// failure leaves nothing registered on this machine, and says so, and what
+// the remote already holds when the failure came after the push.
 func trackerRegisterCommand(ctx context.Context, h *wstrackerhost.Host, cmd wsxmlcmd.Command) (string, error) {
 	req := wstrackerhost.RegisterRequest{Origin: wstracker.OriginAgent}
 	req.ID, _ = cmd.Attr("store")
@@ -635,6 +655,14 @@ func trackerRegisterCommand(ctx context.Context, h *wstrackerhost.Host, cmd wsxm
 	res, err := h.Register(ctx, req)
 	if errors.Is(err, wsledger.ErrIDTaken) {
 		return "", fmt.Errorf("%s: member %q is taken in that store; register under another member id. Nothing was registered", cmd.Label(), req.Member)
+	}
+	var held *wstrackerhost.RemoteHeldError
+	if errors.As(err, &held) {
+		what := fmt.Sprintf("member %s's join", req.Member)
+		if held.Creator {
+			what = fmt.Sprintf("the new store, with member %s as its sole admin", req.Member)
+		}
+		return "", fmt.Errorf("%s: %w. Nothing was registered on this machine, but the remote already holds %s; send the same tk:register again to finish (this machine's key is already that member, so no new join is written)", cmd.Label(), err, what)
 	}
 	if err != nil {
 		return "", fmt.Errorf("%s: %w. Nothing was registered", cmd.Label(), err)
@@ -807,7 +835,7 @@ type trackerStoreSummary struct {
 
 func (s *Server) handleTrackerQuery(ctx context.Context, id json.RawMessage, args map[string]any) response {
 	const tool = "tracker.query"
-	key, err := sessionStateKey(tool, args)
+	key, err := s.trackerSessionKey(tool, args)
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
@@ -946,10 +974,28 @@ func trackerManualSection(s *Server, rsrcRoot string) (string, error) {
 // or password sits; an ssh user (git@host) carries none.
 var remoteCredentials = regexp.MustCompile(`(?i)(https?://)[^/@\s]+@`)
 
-// redactRemoteCredentials hides the userinfo of every http(s) URL in s, so
-// a token in a store's remote URL never reaches the agent's context.
+// remoteQuery matches the query string of an http(s) URL, where a token can
+// sit too (private_token=, access_token=): group 1 is everything up to the
+// "?", group 2 the query, which ends at a fragment, whitespace, or quote.
+var remoteQuery = regexp.MustCompile(`(?i)(https?://[^\s?#'"]*\?)([^\s#'"]*)`)
+
+// redactRemoteCredentials hides the userinfo and every query value of each
+// http(s) URL in s, so a token in a store's remote URL never reaches the
+// agent's context. Query names stay, so the reader can tell what was there.
 func redactRemoteCredentials(s string) string {
-	return remoteCredentials.ReplaceAllString(s, "${1}***@")
+	s = remoteCredentials.ReplaceAllString(s, "${1}***@")
+	return remoteQuery.ReplaceAllStringFunc(s, func(url string) string {
+		m := remoteQuery.FindStringSubmatch(url)
+		params := strings.Split(m[2], "&")
+		for i, p := range params {
+			if name, _, ok := strings.Cut(p, "="); ok {
+				params[i] = name + "=***"
+			} else if p != "" {
+				params[i] = "***"
+			}
+		}
+		return m[1] + strings.Join(params, "&")
+	})
 }
 
 // redactStoreView redacts the view's remote URL and sync error in place.

@@ -28,8 +28,8 @@
 // wsledger's idle push delay, by Sync, or when the drawer panel collapses
 // (Sync). Checks run:
 //
-//   - every PollInterval in the process running StartPoll (the dashboard
-//     daemon), for every registered store;
+//   - when the process running StartPoll (the dashboard daemon) takes the
+//     poll lock, and every PollInterval after, for every registered store;
 //   - at lead session start (CheckAll), throttled per store by CheckInterval;
 //   - before a tracker read when no process holds the poll lock (PreRead),
 //     throttled the same way;

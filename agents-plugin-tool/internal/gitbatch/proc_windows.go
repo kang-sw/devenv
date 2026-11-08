@@ -1,6 +1,6 @@
 //go:build windows
 
-package wsindex
+package gitbatch
 
 import "os/exec"
 

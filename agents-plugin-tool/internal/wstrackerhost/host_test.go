@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -317,6 +318,68 @@ func TestRegisterFailureLeavesNothing(t *testing.T) {
 	w.register(b, "team", "bo", &wstracker.Profile{Given: "Bo"})
 }
 
+// corruptAfterPush is a runner that breaks the registry file once a push
+// has succeeded, so a registration fails after it reached the remote.
+type corruptAfterPush struct{ registry string }
+
+func (r corruptAfterPush) RunGit(ctx context.Context, root string, args ...string) ([]byte, error) {
+	out, err := batchRunner{}.RunGit(ctx, root, args...)
+	if err == nil && slices.Contains(args, "push") {
+		if werr := os.WriteFile(r.registry, []byte("not json"), 0o600); werr != nil {
+			return nil, werr
+		}
+	}
+	return out, err
+}
+
+// TestRegisterFailureAfterPushSaysTheRemoteHoldsIt: a registration that
+// fails after its genesis or join reached the remote leaves nothing on this
+// machine, says the remote holds what it pushed, and registering again with
+// the same member id finishes it without a new claim.
+func TestRegisterFailureAfterPushSaysTheRemoteHoldsIt(t *testing.T) {
+	w := newWorld(t)
+	p := &wstracker.Profile{Given: "Ada"}
+	for _, creator := range []bool{true, false} {
+		name, member := "creator", "ada"
+		if !creator {
+			name, member = "joiner", "jon"
+		}
+		root := filepath.Join(w.dir, name)
+		registry := filepath.Join(root, registryFile)
+		h, err := New(Options{Root: root, Clock: w.clock, Runner: corruptAfterPush{registry: registry}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = h.Register(context.Background(), RegisterRequest{ID: "team", Remote: w.remote, Member: member, Profile: p})
+		h.Close()
+		var held *RemoteHeldError
+		if !errors.As(err, &held) || held.Creator != creator {
+			t.Fatalf("%s: a failure after the push = %v, want a RemoteHeldError with Creator %v", name, err, creator)
+		}
+		if _, err := os.Stat(filepath.Join(root, "team")); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("%s: the failed registration left its directory: %v", name, err)
+		}
+		claim := w.remoteTip("refs/heads/tracker/id/" + member)
+		if claim == "" {
+			t.Fatalf("%s: the remote must hold the member's claim", name)
+		}
+		if err := os.Remove(registry); err != nil {
+			t.Fatal(err)
+		}
+		again := w.machine(name)
+		res := w.register(again, "team", member, p)
+		if res.Creator != creator {
+			t.Fatalf("%s: re-registering = %+v, want Creator %v", name, res, creator)
+		}
+		if got := w.remoteTip("refs/heads/tracker/id/" + member); got != claim {
+			t.Fatalf("%s: re-registering must write no new claim: %s, was %s", name, got, claim)
+		}
+		if got := view(t, again, "team").Members[member].Profile; got != *p {
+			t.Fatalf("%s: re-registering must finish the profile: %+v", name, got)
+		}
+	}
+}
+
 // TestPollSyncsTwoClones: the poll, which consults no tracker knob, brings
 // one clone's pushed write to the other, and holds the poll lock while it
 // runs.
@@ -351,6 +414,28 @@ func TestPollSyncsTwoClones(t *testing.T) {
 	stop()
 	if b.PollerRunning() {
 		t.Fatal("stopping the poll must release its lock")
+	}
+}
+
+// TestPollRunsAtOnce: the poll lock turns every pre-read into a no-op, so
+// the poll fetches as soon as it takes the lock rather than one interval
+// later; otherwise reads stay stale for a whole interval after it starts.
+func TestPollRunsAtOnce(t *testing.T) {
+	w := newWorld(t)
+	a, b := w.machine("a"), w.machine("b")
+	w.register(a, "team", "ada", &wstracker.Profile{Given: "Ada"})
+	w.register(b, "team", "bo", &wstracker.Profile{Given: "Bo"})
+	item := createItem(t, a, "team", "fresh at start")
+	syncStore(t, a, "team")
+
+	stop := b.StartPoll(time.Hour)
+	defer stop()
+	deadline := time.Now().Add(20 * time.Second)
+	for !hasItem(view(t, b, "team"), item) {
+		if time.Now().After(deadline) {
+			t.Fatal("the poll must fetch when it takes the lock, not one interval later")
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
 

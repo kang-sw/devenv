@@ -5,23 +5,26 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
-	"time"
+
+	"github.com/kang-sw/devenv/internal/gitbatch"
 )
 
 // batchRunner is the wsledger git runner for every store: the user's git,
-// with remote commands (fetch, push) under a non-interactive environment so
-// a background check never waits on a credential prompt. It mirrors the
-// ticket index's remote environment (internal/wsindex remoteEnv): no
-// terminal prompt or askpass helper, and BatchMode appended to whatever ssh
-// command the user configured.
+// with remote commands (fetch, push) under the non-interactive bound the
+// ticket index uses too (internal/gitbatch): no credential, terminal, or
+// askpass prompt, and BatchMode appended to whatever ssh command the user
+// configured, so a background check never waits on a prompt.
 type batchRunner struct{}
 
 func (batchRunner) RunGit(ctx context.Context, root string, args ...string) ([]byte, error) {
+	remote := isRemoteCommand(args)
+	if remote {
+		args = gitbatch.RemoteArgs(args...)
+	}
 	cmd := gitCommand(ctx, root, args...)
-	if isRemoteCommand(args) {
-		cmd.Env = append(os.Environ(), batchRemoteEnv(ctx, root)...)
+	if remote {
+		cmd.Env = append(os.Environ(), gitbatch.RemoteEnv(batchSSHCommand(ctx, root))...)
 	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -30,15 +33,11 @@ func (batchRunner) RunGit(ctx context.Context, root string, args ...string) ([]b
 	return out, nil
 }
 
-// gitCommand is git in root, bounded by ctx: the context's end kills git's
-// whole process group, and WaitDelay bounds the wait for a child that still
-// holds the pipes, so a hung transport cannot outlast the check's timeout
-// (and keep the store's lock) the way a plain CommandContext lets it. The
-// same bound as the ticket index's runner (internal/wsindex ExecRunner).
+// gitCommand is git in root, bounded by ctx (gitbatch.Bound), so a hung
+// transport cannot outlast the check's timeout and keep the store's lock.
 func gitCommand(ctx context.Context, root string, args ...string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", root}, args...)...)
-	cmd.WaitDelay = 300 * time.Millisecond
-	configureKill(cmd)
+	gitbatch.Bound(cmd)
 	return cmd
 }
 
@@ -58,36 +57,14 @@ func isRemoteCommand(args []string) bool {
 	return false
 }
 
-func batchRemoteEnv(ctx context.Context, root string) []string {
-	return []string{
-		"GIT_TERMINAL_PROMPT=0",
-		"GIT_ASKPASS=",
-		"SSH_ASKPASS=",
-		"GCM_INTERACTIVE=never",
-		"GIT_SSH_COMMAND=" + batchSSHCommand(ctx, root),
-	}
-}
-
-// batchSSHCommand keeps git's own precedence for the ssh command
-// (GIT_SSH_COMMAND, core.sshCommand, GIT_SSH, ssh) and appends the
-// non-interactive options for its variant.
+// batchSSHCommand is gitbatch.SSHCommand over the process environment and
+// the store clone's core.sshCommand.
 func batchSSHCommand(ctx context.Context, root string) string {
-	base := strings.TrimSpace(os.Getenv("GIT_SSH_COMMAND"))
-	if base == "" {
-		if out, err := gitCommand(ctx, root, "config", "--get", "core.sshCommand").Output(); err == nil {
-			base = strings.TrimSpace(string(out))
+	return gitbatch.SSHCommand(os.Getenv, func() string {
+		out, err := gitCommand(ctx, root, "config", "--get", "core.sshCommand").Output()
+		if err != nil {
+			return ""
 		}
-	}
-	if base == "" {
-		if program := strings.TrimSpace(os.Getenv("GIT_SSH")); program != "" {
-			base = "'" + strings.ReplaceAll(program, "'", `'\''`) + "'"
-		}
-	}
-	if base == "" {
-		base = "ssh"
-	}
-	if fields := strings.Fields(base); len(fields) > 0 && strings.Contains(strings.ToLower(filepath.Base(strings.Trim(fields[0], `'"`))), "plink") {
-		return base + " -batch"
-	}
-	return base + " -o BatchMode=yes -o ConnectTimeout=5"
+		return string(out)
+	})
 }
