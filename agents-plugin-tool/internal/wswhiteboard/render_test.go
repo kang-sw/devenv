@@ -294,14 +294,14 @@ func TestRenderPageEscapesItemTextButNotTopicBody(t *testing.T) {
 	st := &State{Seq: 2, Topics: []TopicDoc{{Name: "t", Body: `<b id="doc-raw">raw <i>doc</i></b>`}}}
 	st.Items = []Item{
 		{ID: 1, Class: ClassPolicy, Topic: "<script>t()</script>", Title: "<script>alert(1)</script>",
-			Options: []string{`<img src=x onerror=alert(2)>`, "b"}, Recommendation: "a: <b>why</b>",
+			Options: []string{`<img src=x onerror=alert(2)>`, "b"}, Recommendation: "a: <u>why</u>",
 			Rationale: "<script>r()</script>", Links: []string{`<a href="javascript:x">{{2}}</a>`}, Status: StatusOpen},
 		{ID: 2, Class: ClassTechnical, Topic: "t", Title: `"quoted" & <tag>`, Status: StatusAnswered, Answer: "ok", AnswerQuote: "</div><script>q()</script>", Settled: 1},
 	}
 	panels := []Panel{{ID: `x"><script>p()</script>`, Title: "<script>pt()</script>", Icon: `"><script>`, Rows: []PanelRow{{State: `"><b>`, Label: "<l>", Text: "<script>pr()</script>"}}}}
 	for name, layout := range layouts() {
 		out := render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r", Panels: panels}))
-		for _, raw := range []string{"<script>alert(1)", "<script>t()", "<img src=x", "<script>r()", "<b>why</b>", `href="javascript`, "<script>q()", "<script>p()", "<script>pt()", "<script>pr()", "<tag>"} {
+		for _, raw := range []string{"<script>alert(1)", "<script>t()", "<img src=x", "<script>r()", "<u>why</u>", `href="javascript`, "<script>q()", "<script>p()", "<script>pt()", "<script>pr()", "<tag>"} {
 			if strings.Contains(out, raw) {
 				t.Errorf("%s: item text %q is not escaped", name, raw)
 			}
@@ -668,13 +668,13 @@ func TestRenderPageItemReferences(t *testing.T) {
 func TestRenderPageItemReferenceKeepsEscaping(t *testing.T) {
 	st := &State{Seq: 2}
 	st.Items = []Item{
-		{ID: 1, Class: ClassTechnical, Topic: "t", Title: `<b>x</b>{{01}}<script>s()</script>`,
-			Rationale: `<i>r</i> {{01}}`, Links: []string{`<em>l</em>{{01}}`}, Status: StatusOpen},
+		{ID: 1, Class: ClassTechnical, Topic: "t", Title: `<u>x</u>{{01}}<script>s()</script>`,
+			Rationale: `<s>r</s> {{01}}`, Links: []string{`<em>l</em>{{01}}`}, Status: StatusOpen},
 	}
 	out := render(t, BuildView(st, ViewInput{Layout: LayoutEmbed, ReplyID: "r"}))
 	for _, want := range []string{
-		`&lt;b&gt;x&lt;/b&gt;<a href="#item-1">(01)</a>&lt;script&gt;s()&lt;/script&gt;`,
-		`&lt;i&gt;r&lt;/i&gt; <a href="#item-1">(01)</a>`,
+		`&lt;u&gt;x&lt;/u&gt;<a href="#item-1">(01)</a>&lt;script&gt;s()&lt;/script&gt;`,
+		`&lt;s&gt;r&lt;/s&gt; <a href="#item-1">(01)</a>`,
 		`&lt;em&gt;l&lt;/em&gt;<a href="#item-1">(01)</a>`,
 	} {
 		if !strings.Contains(out, want) {

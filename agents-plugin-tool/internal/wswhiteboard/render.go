@@ -267,6 +267,10 @@ type pageData struct {
 	// noMermaid renders a mermaid fence as a plain code block (RenderText
 	// without TextTargets.Mermaid).
 	noMermaid bool
+	// noInlineTags keeps the item pipelines' allowlisted inline tags
+	// (inline_tags.go) escaped text, for RenderText: they are an item-field
+	// rule, and other authors' text keeps every tag as text.
+	noInlineTags bool
 
 	icons map[string]bool
 	// onPage holds every item ID the page renders, the targets an in-page
