@@ -707,7 +707,7 @@ func (d *Daemon) handleIndex(w http.ResponseWriter, r *http.Request) {
 
 // handleSessionRoutes serves everything under /s/: a session page, its SSE
 // stream, its image, file view, history, closed-topic, and attachment routes, its message,
-// cancel, steer, interrupt, system-open, and git refresh routes, and the
+// cancel, steer, interrupt, system-open, git refresh, and git push routes, and the
 // shared assets a page loads by relative path.
 func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 	rest := strings.TrimPrefix(r.URL.Path, "/s/")
@@ -719,6 +719,9 @@ func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 		return
 	} else if sub == "git" {
 		d.handleGitRefresh(w, r, replyID)
+		return
+	} else if sub == "git/push" {
+		d.handleGitPush(w, r, replyID)
 		return
 	}
 	if !readMethod(w, r) {

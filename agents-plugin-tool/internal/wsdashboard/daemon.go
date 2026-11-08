@@ -129,6 +129,10 @@ type Daemon struct {
 	// git reads the git badge of the roots open session pages show
 	// (gitbadge.go); nil when the badge is off.
 	git *gitWatcher
+	// pushing holds the roots a push runs in (gitpush.go), one at a time
+	// per root; pushMu guards it.
+	pushMu  sync.Mutex
+	pushing map[string]bool
 
 	closeOnce sync.Once
 	stop      chan struct{}

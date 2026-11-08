@@ -17,6 +17,7 @@
 <div id="composer" class="composer"><button type="button" class="ibadge" id="ibadge" title="{{t "js.interrupt.title"}}" hidden><span class="istop"></span><span class="ilabel">{{t "js.interrupt"}}</span></button>{{region . "ctx"}}<div class="cimgs" id="cimgs"></div><div class="cchips" id="cchips"></div><div class="crow"><textarea id="ctext" rows="1" aria-description="{{t "composer.aria"}}" placeholder="{{t "js.hint.enter"}}"></textarea><button type="button" class="csend" id="csend" title="{{t "composer.send"}}" aria-label="{{t "composer.send"}}">{{icon "send"}}</button></div>{{region . "sline"}}<div class="cnote" id="cnote"></div></div>
 {{end}}<div id="bcol" class="bcol">{{region . "board"}}</div>
 </main></div>
+{{template "gitpop"}}
 <script>{{i18n}}</script>
 <script>window.wbForm = function () {
 {{.Assets.FormScript}}};
@@ -95,13 +96,23 @@ A part with no figure is left out; an empty region collapses. */}}
 
 {{define "tree"}}{{if or .Modified .Staged .Untracked}}<span class="sb-diff" title="{{t "band.tree"}}{{with .Modified}} {{t "band.modified" .}}{{end}}{{with .Staged}} {{t "band.staged" .}}{{end}}{{with .Untracked}} {{t "band.untracked" .}}{{end}}">{{with .Modified}}<b class="mod">~{{.}}</b>{{end}}{{with .Staged}}<b class="add">+{{.}}</b>{{end}}{{with .Untracked}}<b class="unt">?{{.}}</b>{{end}}</span>{{end}}{{end}}
 
-{{define "sync"}}{{if not .Upstream}}<span class="sb-sync none" title="{{t "band.noupstream.title"}}">{{t "band.noupstream"}}</span>{{else if and (eq .Ahead 0) (eq .Behind 0)}}<span class="sb-sync ok" title="{{t "band.insync" .Upstream}}">✓<span class="sl"> {{t "band.synced"}}</span></span>{{else}}<span class="sb-sync" title="{{t "band.against" .Upstream}}{{with .Ahead}} {{t "band.push" .}}{{end}}{{with .Behind}} {{t "band.pull" .}}{{end}}">{{with .Ahead}}<span class="up">↑{{.}}</span>{{end}}{{with .Behind}}<span class="dn">↓{{.}}</span>{{end}}</span>{{end}}{{end}}
+{{/* The branch's standing against its upstream, in the band and the badge.
+The ahead count is a button: it opens the push popover (gitpop). */}}
+{{define "sync"}}{{if not .Upstream}}<span class="sb-sync none" title="{{t "band.noupstream.title"}}">{{t "band.noupstream"}}</span>{{else if and (eq .Ahead 0) (eq .Behind 0)}}<span class="sb-sync ok" title="{{t "band.insync" .Upstream}}">✓<span class="sl"> {{t "band.synced"}}</span></span>{{else}}<span class="sb-sync" title="{{t "band.against" .Upstream}}{{with .Ahead}} {{t "band.push" .}}{{end}}{{with .Behind}} {{t "band.pull" .}}{{end}}">{{with .Ahead}}<button type="button" class="up gitpush" data-br="{{$.Branch}}" data-up="{{$.Upstream}}" data-n="{{tn "git.push.count" .}}" aria-haspopup="dialog" title="{{t "git.push.open" $.Upstream}}">↑{{.}}</button>{{end}}{{with .Behind}}<span class="dn">↓{{.}}</span>{{end}}</span>{{end}}{{end}}
 
 {{/* The top bar's git badge (gitbadge.go): the session root's branch,
 upstream standing, and working-tree counts, in the status band's grammar and
-classes, read by the daemon while the page is open. A click asks for a read
-at once; at carries the read's time, so every read swaps the region. */}}
-{{define "r-git"}}{{with .Git}}<button type="button" class="btn sb gitb {{.State}}" id="gitb" data-at="{{.At}}" title="{{if eq .State "norepo"}}{{t "git.norepo.title" .Root}}{{else if eq .State "failed"}}{{t "git.failed.title" .Err}}{{else if eq .State "pending"}}{{t "git.pending"}}{{else}}{{t "git.title" .Root}}{{end}}">{{if eq .State "ok"}}<span class="sb-br" title="{{if .Detached}}{{t "band.detached" .Branch}}{{else}}{{t "band.branch" .Branch}}{{end}}">{{icon "branch"}}<span>{{.Branch}}</span></span>{{if not .Detached}}{{template "sync" .Repo}}{{end}}{{template "tree" .Repo}}{{else}}<span class="sb-br">{{icon "branch"}}<span>{{if eq .State "norepo"}}{{t "git.norepo"}}{{else if eq .State "failed"}}{{t "git.failed"}}{{else}}…{{end}}</span></span>{{end}}</button>{{end}}{{end}}
+classes, read by the daemon while the page is open. A click anywhere but on
+the ahead count asks for a read at once, and the branch chip is the button
+that takes it from the keyboard; the badge itself is no button, since the
+ahead count is one of its own. at carries the read's time, so every read
+swaps the region. */}}
+{{define "r-git"}}{{with .Git}}<span class="btn sb gitb {{.State}}" id="gitb" data-at="{{.At}}" title="{{if eq .State "norepo"}}{{t "git.norepo.title" .Root}}{{else if eq .State "failed"}}{{t "git.failed.title" .Err}}{{else if eq .State "pending"}}{{t "git.pending"}}{{else}}{{t "git.title" .Root}}{{end}}">{{if eq .State "ok"}}<button type="button" class="sb-br" title="{{if .Detached}}{{t "band.detached" .Branch}}{{else}}{{t "band.branch" .Branch}}{{end}}">{{icon "branch"}}<span>{{.Branch}}</span></button>{{if not .Detached}}{{template "sync" .Repo}}{{end}}{{template "tree" .Repo}}{{else}}<button type="button" class="sb-br">{{icon "branch"}}<span>{{if eq .State "norepo"}}{{t "git.norepo"}}{{else if eq .State "failed"}}{{t "git.failed"}}{{else}}…{{end}}</span></button>{{end}}</span>{{end}}{{end}}
+
+{{/* The push popover (gitpush.go), one per page: dashboard.js fills the
+branch, upstream, and count from the pressed ahead count and anchors it
+there. */}}
+{{define "gitpop"}}<div class="gitpop" id="gitpop" role="dialog" aria-label="{{t "git.push.dialog"}}" data-lost="{{t "git.push.lost"}}" hidden><div class="gp-ref"><b class="gp-br"></b><span class="gp-to">→</span><b class="gp-up"></b></div><div class="gp-n"></div><div class="gp-err" role="alert" hidden></div><div class="gp-btns"><button type="button" class="btn gp-cancel">{{t "git.push.cancel"}}</button><button type="button" class="btn gp-go" data-busy="{{t "git.push.busy"}}">{{t "git.push.go"}}</button></div></div>{{end}}
 
 {{define "limit"}}<span class="sb-use{{with .Level}} {{.}}{{end}}{{if .Both}} both{{end}}{{if .Hi}} hi{{end}}" data-limit="{{.Kind}}" title="{{t "band.limit" (limitName .Name) .Percent}}"><span class="u-pct">{{.Percent}}%</span>{{if .ResetsAt}}/<time class="t" data-ms="{{.ResetsAt}}" data-f="{{.ResetFormat}}">{{.ResetText}}</time><em class="u-pace" data-reset="{{.ResetsAt}}" data-win="{{.WindowSec}}" data-pct="{{.Percent}}"></em>{{end}}</span>{{end}}
 

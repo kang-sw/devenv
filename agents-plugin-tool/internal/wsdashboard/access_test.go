@@ -102,6 +102,9 @@ func guardedRoutes() []struct{ method, path, body string } {
 		// OS open command.
 		{http.MethodPost, "/s/livesession/open", `{"target":"ftp://guard.test/"}`},
 		{http.MethodPost, "/s/livesession/git", ""},
+		// The fixture's root is no repository, so a passing request pushes
+		// nothing.
+		{http.MethodPost, "/s/livesession/git/push", ""},
 		// The tracker routes, served when the fixture has a tracker host.
 		{http.MethodGet, "/tracker/stores", ""},
 		{http.MethodGet, "/tracker/stores/team/view", ""},

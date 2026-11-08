@@ -241,7 +241,9 @@ func TestGitWatcherEndsWithTheDaemon(t *testing.T) {
 
 // TestGitBadgeRendersEachState pins the badge's markup: the band's branch,
 // sync, and change chips for a read repository, the detached form, and the
-// dimmed forms with their reasons.
+// dimmed forms with their reasons. The badge is a span whose branch chip is
+// the refresh button, and its ahead count, where a push can go, the push
+// popover's.
 func TestGitBadgeRendersEachState(t *testing.T) {
 	repo := func(r wslive.Repo) *GitBadge { return &GitBadge{State: gitOK, Root: "/p", Repo: r, At: 42} }
 	cases := []struct {
@@ -251,20 +253,20 @@ func TestGitBadgeRendersEachState(t *testing.T) {
 		not   []string
 	}{
 		{"clean, in sync", repo(wslive.Repo{Branch: "main", Upstream: "origin/main"}),
-			[]string{`class="btn sb gitb ok"`, `data-at="42"`, `title="git status of /p: click to read it again now"`, `class="sb-br" title="branch: main"`, `<span>main</span>`, `class="sb-sync ok" title="in sync with origin/main as of the last fetch"`},
-			[]string{"sb-diff"}},
+			[]string{`<span class="btn sb gitb ok"`, `data-at="42"`, `title="git status of /p: click to read it again now"`, `<button type="button" class="sb-br" title="branch: main"`, `<span>main</span>`, `class="sb-sync ok" title="in sync with origin/main as of the last fetch"`},
+			[]string{"sb-diff", "gitpush", `<button type="button" class="btn`}},
 		{"dirty", repo(wslive.Repo{Branch: "main", Upstream: "origin/main", Modified: 2, Staged: 1, Untracked: 3}),
 			[]string{`class="sb-diff" title="working tree: 2 modified 1 staged 3 untracked"`, `<b class="mod">~2</b><b class="add">+1</b><b class="unt">?3</b>`},
 			nil},
 		{"ahead and behind", repo(wslive.Repo{Branch: "topic", Upstream: "origin/topic", Ahead: 2, Behind: 1}),
-			[]string{`<span class="up">↑2</span><span class="dn">↓1</span>`, "2 to push", "1 to pull"},
+			[]string{`<button type="button" class="up gitpush" data-br="topic" data-up="origin/topic" data-n="2 commits to push" aria-haspopup="dialog" title="push to origin/topic…">↑2</button><span class="dn">↓1</span>`, "2 to push", "1 to pull"},
 			[]string{"sb-sync ok", "sb-diff"}},
 		{"no upstream", repo(wslive.Repo{Branch: "topic"}),
 			[]string{`class="sb-sync none" title="no upstream branch is set"`, ">no upstream<"},
-			nil},
+			[]string{"gitpush"}},
 		{"detached", repo(wslive.Repo{Branch: "abc1234", Detached: true, Modified: 1}),
 			[]string{`title="detached HEAD at abc1234"`, `<span>abc1234</span>`, `<b class="mod">~1</b>`},
-			[]string{"sb-sync"}},
+			[]string{"sb-sync", "gitpush"}},
 		{"not a repository", &GitBadge{State: gitNoRepo, Root: "/p", At: 42},
 			[]string{`class="btn sb gitb norepo"`, `title="/p is not a git repository"`, "<span>no repo</span>"},
 			[]string{"sb-sync", "sb-diff"}},
@@ -437,12 +439,12 @@ func TestGitRefreshRouteAndStream(t *testing.T) {
 			}
 		}
 	}
-	gitEvent(`<span class="up">↑1</span>`)
+	gitEvent(`>↑1</button>`)
 
 	if code, _, raw := postJSON(t, route, f.base, ""); code != http.StatusNoContent {
 		t.Fatalf("refresh = %d %s, want 204", code, raw)
 	}
-	gitEvent(`<span class="up">↑2</span>`)
+	gitEvent(`>↑2</button>`)
 
 	resp.Body.Close()
 	waitFor(t, "the root to be dropped", func() bool { return watched(f.d.git) == 0 })
