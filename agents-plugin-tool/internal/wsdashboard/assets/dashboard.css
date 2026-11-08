@@ -358,6 +358,10 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .hchips .achip { padding-right: 9px; }
 .sentmark { font-size: 10px; font-weight: 800; letter-spacing: .03em; padding: 0 6px; border-radius: 4px; white-space: nowrap; background: var(--wb-muted); color: var(--wb-muted-fg); }
 .sentmark.held { background: var(--wb-ph-perm); color: var(--wb-on-ph-perm); }
+/* an item whose answer was sent (or is held) grays its answer area until the board records the answer; the head and its mark stay readable, and focusing a control in it (to revise the answer) brings the area back */
+.card.sent-sent > .cbody > :not(.note), .arow.sent-sent .why, .arow.sent-sent input { opacity: .4; transition: opacity .15s; }
+.card.sent-held > .cbody > :not(.note), .arow.sent-held .why, .arow.sent-held input { opacity: .65; transition: opacity .15s; }
+.card:is(.sent-sent, .sent-held):focus-within > .cbody > *, .arow:is(.sent-sent, .sent-held):focus-within :is(.why, input) { opacity: 1; }
 /* status band: the context bar above the message box (ctx), the folder,
    branch, upstream, usage limits, and cost below it (sline). An empty region
    collapses. sline is a size container inside the composer's 10px padding:
