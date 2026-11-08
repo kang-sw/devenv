@@ -401,3 +401,104 @@ func TestMarkdownBoardTaskListAndFootnotes(t *testing.T) {
 		t.Errorf("want two distinct footnote ids, got %v", ids)
 	}
 }
+
+// TestMarkdownBareURLs pins bare http(s) URLs: they link in a title, an
+// option, and a topic body's markdown text, loopback addresses included,
+// without trailing sentence punctuation or an unbalanced parenthesis; they
+// stay text in a code span, a code block, a topic body's raw HTML (an
+// attribute, an HTML block, the content of a raw <a> or <code>), and as
+// www. or email text, which only an author's own link makes a link.
+func TestMarkdownBareURLs(t *testing.T) {
+	anchor := func(u string) string {
+		return `<a href="` + u + `" target="_blank" rel="noopener noreferrer">` + u + `</a>`
+	}
+	body := "Body http://127.0.0.1:29417/s/abc.\n\n" +
+		`<span title="http://attr.example/x">t</span> <a href="https://w.example/">in http://nested.example/a</a> <code>http://code.example/c</code>` +
+		"\n\n<div>\nhttp://block.example/b\n</div>"
+	st := &State{Seq: 2, Topics: []TopicDoc{{Name: "t", Body: body}}}
+	st.Items = []Item{{ID: 1, Class: ClassPolicy, Topic: "t", Title: "see https://title.example/a.", Status: StatusOpen,
+		Options:   []string{"(https://opt.example/x_(y))", "b"},
+		Rationale: "`https://span.example/` and\n\n```\nhttps://fence.example/\n```\n\nwww.www.example and a@mail.example"}}
+	out := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
+	wantAll(t, out,
+		`see `+anchor("https://title.example/a")+`.`,
+		`(`+anchor("https://opt.example/x_(y)")+`)`,
+		`Body `+anchor("http://127.0.0.1:29417/s/abc")+`.`,
+		`<code>https://span.example/</code>`,
+		"<pre><code>https://fence.example/\n</code></pre>",
+		`<span title="http://attr.example/x">t</span>`,
+		`<a href="https://w.example/">in http://nested.example/a</a>`,
+		`<code>http://code.example/c</code>`,
+		"<div>\nhttp://block.example/b\n</div>",
+		"www.www.example and a@mail.example",
+	)
+	wantNone(t, out, `href="https://span`, `href="https://fence`, `href="http://attr`, `href="http://nested`,
+		`href="http://code`, `href="http://block`, `href="http://www`, `href="mailto`)
+}
+
+// TestMarkdownBarePaths pins bare file paths: an absolute path of two
+// segments, a drive path, and a relative path with a "/" and a file
+// extension link, a ":line" or ":line:col" suffix stays in the label but
+// leaves the destination, and trailing sentence punctuation stays outside;
+// a path glued to a word, a slashed word without an extension, a path in a
+// code span or block, a home path, and a path with any other colon stay
+// text.
+func TestMarkdownBarePaths(t *testing.T) {
+	for name, layout := range layouts() {
+		t.Run(name, func(t *testing.T) {
+			out := mdBoard(t, layout,
+				Item{ID: 1, Class: ClassTechnical, Topic: "t", Title: "fix internal/a/b.go:12, then /srv/notes/x.", Status: StatusOpen},
+				Item{ID: 2, Class: ClassTechnical, Topic: "t", Status: StatusOpen,
+					Title: "and/or a/b x1.5/2.5 ~/home/a.md `ai-docs/c.md` a/b.go:note (ai-docs/x.md) docs/q.md:3:4: C:\\Users\\a.txt"},
+			)
+			wantAll(t, out,
+				`fix <a href="L/internal/a/b.go">internal/a/b.go:12</a>, then <a href="L//srv/notes/x">/srv/notes/x</a>.`,
+				`and/or a/b x1.5/2.5 ~/home/a.md <code>ai-docs/c.md</code> a/b.go:note (<a href="L/ai-docs/x.md">ai-docs/x.md</a>) <a href="L/docs/q.md">docs/q.md:3:4</a>: <a href="L/C:%5CUsers%5Ca.txt">C:\Users\a.txt</a>`,
+			)
+		})
+	}
+	out := mdBoard(t, LayoutFull, Item{ID: 1, Class: ClassPolicy, Topic: "t", Title: "q", Options: []string{"a", "b"}, Status: StatusOpen,
+		Rationale: "/abs/at/head and x/y.go\n\n```\nsrc/in/fence.go\n```"})
+	wantAll(t, out, `<a href="L//abs/at/head">/abs/at/head</a> and <a href="L/x/y.go">x/y.go</a>`, "<pre><code>src/in/fence.go\n</code></pre>")
+	wantNone(t, out, `href="L/src`, `href="L/home`, `href="L//home`)
+}
+
+// TestMarkdownBareLinksMatchWrittenLinks pins the generated link to the
+// written one: a bare URL or path renders exactly as a link the author wrote
+// to the same destination with the same label, on a board page and under
+// every served rule, so it takes the same allow-list and link markers.
+func TestMarkdownBareLinksMatchWrittenLinks(t *testing.T) {
+	cases := map[string]string{ // bare text: written link
+		"https://example.com/x?a=1&b=2": "[https://example.com/x?a=1&b=2](https://example.com/x?a=1&b=2)",
+		"http://127.0.0.1:8080/s/r":     "[http://127.0.0.1:8080/s/r](http://127.0.0.1:8080/s/r)",
+		"docs/a.md":                     "[docs/a.md](docs/a.md)",
+		"docs/a.md:12":                  "[docs/a.md:12](docs/a.md)",
+		"/etc/hosts":                    "[/etc/hosts](/etc/hosts)",
+		"C:/work/a.txt":                 "[C:/work/a.txt](C:/work/a.txt)",
+	}
+	page := &pageData{View: View{FileLink: func(p string) string { return "L/" + p }}}
+	actions := TextTargets{
+		FileText:    func(p string) string { return p },
+		FileActions: func(p string) FileAction { return FileAction{Href: "/s/r/file?path=" + p, Rel: p, Abs: "/root/" + p} },
+	}
+	finished := actions
+	finished.HTML = true
+	renders := map[string]func(string) string{
+		"board":    func(s string) string { return string(page.Block(s)) },
+		"actions":  func(s string) string { return string(RenderText(s, actions)) },
+		"finished": func(s string) string { return string(RenderText(s, finished)) },
+	}
+	for bare, written := range cases {
+		for name, render := range renders {
+			got, want := render("see "+bare+"."), render("see "+written+".")
+			if got != want || !strings.Contains(got, "<a ") {
+				t.Errorf("%s %q:\nbare    %s\nwritten %s", name, bare, got, want)
+			}
+		}
+	}
+	// A page that shows file targets as path text and has no link actions
+	// keeps a bare path as the text it was written as.
+	if got := string(RenderText("see docs/a.md:12.", TextTargets{FileText: func(p string) string { return "T:" + p }})); got != "see docs/a.md:12." {
+		t.Errorf("path text page: %s", got)
+	}
+}
