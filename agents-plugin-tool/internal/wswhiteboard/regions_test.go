@@ -315,7 +315,7 @@ func TestServedBoardFramesEveryBodySeparately(t *testing.T) {
 	st := &State{}
 	mustApply(t, st, addXML(ClassTechnical, "one", "x")+
 		`<wb:topic name='say "hi" &amp; <go>'>second body</wb:topic>`+
-		topicXML("one", "first body")+topicXML("closed", "third body")+`<wb:close topic="closed"/>`+addXML(ClassTechnical, "no body", "y"))
+		topicXML("one", "first body")+topicXML("closed", "third body")+`<wb:close topic="closed" result="done"/>`+addXML(ClassTechnical, "no body", "y"))
 	regions, err := RenderRegions(BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
 	if err != nil {
 		t.Fatal(err)

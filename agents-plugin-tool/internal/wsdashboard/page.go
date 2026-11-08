@@ -1,6 +1,7 @@
 package wsdashboard
 
 import (
+	"html/template"
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wswhiteboard"
@@ -28,6 +29,17 @@ type PageSource interface {
 type LangPageSource interface {
 	PageSource
 	ReadPageLang(reg Registration, lang string) (page PageContent, ok bool)
+}
+
+// ClosedTopicsSource is a PageSource that also renders the closed topics a
+// session's board leaves past its cap (wswhiteboard.ClosedCap), for the
+// board's show-more control: n of them from index from in close order, the
+// most recently closed first, as one fragment that ends with the next
+// show-more control when more remain. Lang is a wsi18n code, as for
+// LangPageSource; ok is false when the session no longer exists or has no
+// board.
+type ClosedTopicsSource interface {
+	ReadClosedTopics(reg Registration, lang string, from, n int) (html template.HTML, ok bool)
 }
 
 // PageContent is what a PageSource reads for one session.

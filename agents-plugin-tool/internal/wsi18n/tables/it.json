@@ -164,6 +164,10 @@
   "js.viewer.original": "Apri l'originale in una nuova scheda",
   "js.viewer.zoomin": "Ingrandisci",
   "js.viewer.zoomout": "Riduci",
+  "js.wb.ago.day": "{0} g fa",
+  "js.wb.ago.hour": "{0} h fa",
+  "js.wb.ago.min": "{0} min fa",
+  "js.wb.ago.now": "adesso",
   "lan.note": "Solo questa macchina vede il token. Elimina {0} per emetterne uno nuovo.",
   "lan.on": "L'accesso LAN è attivo.",
   "lan.open": "Apri questa dashboard su un altro dispositivo di questa rete con il suo token di accesso:",
@@ -231,6 +235,8 @@
   "wb.assumed.title": "presunto, conferma o correggi",
   "wb.banner": "lavagna aggiornata; ricarica rimandata mentre rispondi",
   "wb.closed": "chiuso",
+  "wb.closed.more": "altri {0} argomenti chiusi non mostrati",
+  "wb.closed.showmore": "mostra altri argomenti chiusi ({0})",
   "wb.confirm": "conferma",
   "wb.copy": "copia risposte",
   "wb.correct": "correggi",
@@ -243,7 +249,10 @@
   "wb.quote": "le tue parole",
   "wb.read": "lettura del lead",
   "wb.rec": "raccomandazione",
+  "wb.result": "come si è concluso l'argomento",
   "wb.settled": "deciso",
   "wb.settled.older": "elementi decisi meno recenti",
-  "wb.title": "Lavagna"
+  "wb.title": "Lavagna",
+  "wb.topic.note": "nota su questo argomento",
+  "wb.updated": "ultima modifica"
 }

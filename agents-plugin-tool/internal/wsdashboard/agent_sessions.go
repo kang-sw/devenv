@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"io"
 	"net/http"
 	"os"
@@ -68,6 +69,15 @@ func (s agentSessions) ReadPageLang(reg Registration, lang string) (PageContent,
 		return ps.ReadPage(reg)
 	}
 	return PageContent{}, true
+}
+
+// ReadClosedTopics forwards to the configured source; an agent conversation
+// has no board.
+func (s agentSessions) ReadClosedTopics(reg Registration, lang string, from, n int) (template.HTML, bool) {
+	if cs, ok := s.inner.(ClosedTopicsSource); ok && !reg.Agent {
+		return cs.ReadClosedTopics(reg, lang, from, n)
+	}
+	return "", false
 }
 
 // HashLiveStores folds the live stores of session replyID under stateDir

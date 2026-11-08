@@ -131,7 +131,7 @@ func TestChangedBodyRanksLikeAnOpenAcknowledgement(t *testing.T) {
 		t.Fatalf("a body changed after the last answer should outrank a settled topic: %v", topicNames(st))
 	}
 	// A closed topic's body never ranks.
-	mustApply(t, st, `<wb:close topic="notes"/>`)
+	mustApply(t, st, `<wb:close topic="notes" result="done"/>`)
 	if rankedAbove(t, st, "notes", "settled") {
 		t.Fatalf("a closed topic's body ranked: %v", topicNames(st))
 	}
@@ -183,7 +183,7 @@ func TestContentOnlyTopicInTheView(t *testing.T) {
 	if notes.Name != "notes" || notes.Doc != "just notes" || notes.Quiet || notes.Closed || !notes.DocOpen(false) || notes.SettledCount() != 0 {
 		t.Fatalf("notes = %+v", notes)
 	}
-	mustApply(t, st, `<wb:close topic="notes"/>`)
+	mustApply(t, st, `<wb:close topic="notes" result="done"/>`)
 	notes = topicView(t, st, LayoutFull, "notes")
 	if !notes.Quiet || !notes.Closed || notes.Doc != "just notes" || notes.DocOpen(false) || notes.DocOpen(true) {
 		t.Fatalf("closed notes = %+v", notes)
@@ -196,7 +196,7 @@ func TestBodyOpenOnTheFullPageUnlessClosed(t *testing.T) {
 	if tv := topicView(t, st, LayoutFull, "t"); !tv.DocOpen(false) || tv.DocNew {
 		t.Fatalf("full page topic = %+v", tv)
 	}
-	mustApply(t, st, `<wb:close topic="t"/>`)
+	mustApply(t, st, `<wb:close topic="t" result="done"/>`)
 	if tv := topicView(t, st, LayoutFull, "t"); tv.DocOpen(false) || tv.Doc != "body" {
 		t.Fatalf("closed topic on the full page = %+v", tv)
 	}
@@ -240,7 +240,7 @@ func TestEmbedShowsABodyOpenOnlyWhenChanged(t *testing.T) {
 		t.Fatalf("an unchanged body on the embed = %+v", tv)
 	}
 	// A closed topic never opens its body, changed or not.
-	mustApply(t, st, `<wb:close topic="a"/>`)
+	mustApply(t, st, `<wb:close topic="a" result="done"/>`)
 	if tv := topicView(t, st, LayoutEmbed, "a"); tv.DocOpen(true) || !tv.Closed {
 		t.Fatalf("closed topic on the embed = %+v", tv)
 	}

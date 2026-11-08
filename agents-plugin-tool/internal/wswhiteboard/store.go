@@ -173,9 +173,16 @@ type State struct {
 	// is not an assumption: the board's mark of the user having answered
 	// something. Zero before any such answer and on a board stored before
 	// the field; LastAnswerSeq derives a stand-in for the latter.
-	AnswerSeq    int      `json:"answer_seq,omitempty"`
-	Items        []Item   `json:"items,omitempty"`
+	AnswerSeq int    `json:"answer_seq,omitempty"`
+	Items     []Item `json:"items,omitempty"`
+	// ClosedTopics lists the closed topics in close order, the most recently
+	// closed last: a close appends, a reopen removes.
 	ClosedTopics []string `json:"closed_topics,omitempty"`
+	// CloseResults holds each topic's close result, the one sentence its
+	// latest wb:close gave on how it ended. A reopen keeps it (the page shows
+	// it only while the topic is closed) and the next close replaces it; a
+	// topic closed before the field has none.
+	CloseResults map[string]string `json:"close_results,omitempty"`
 	// Topics holds the topics that have a body, in first-set order. A store
 	// written while the board had a Now slot keeps its "now" text on disk
 	// until the next write; the field is gone, so nothing reads it.
@@ -423,14 +430,7 @@ func Apply(state *State, commands string, env Env) (Outcome, []string) {
 		case "wb:edit":
 			applyEdit(p, work, state, cmd, mark)
 		case "wb:close":
-			if topic, ok := wsxmlcmd.RequiredAttr(p, cmd, "topic"); ok {
-				switch {
-				case !work.topicKnown(topic):
-					p.Add("%s: no item or topic body has topic %q", cmd.At("topic"), topic)
-				case !work.topicClosed(topic):
-					work.ClosedTopics = append(work.ClosedTopics, topic)
-				}
-			}
+			applyClose(p, work, cmd)
 		case "wb:floor":
 			if floor, ok := wsxmlcmd.IntAttr(p, cmd, "id", true); ok && floor > work.Counter {
 				work.Counter = floor
@@ -464,6 +464,27 @@ func Apply(state *State, commands string, env Env) (Outcome, []string) {
 	out.Info = work.staleNudge(env.Now)
 	*state = *work
 	return out, nil
+}
+
+// applyClose closes a topic with its result. Closing a closed topic again
+// replaces its result and keeps its place in the close order.
+func applyClose(p *problems, work *State, cmd command) {
+	topic, topicOK := wsxmlcmd.RequiredAttr(p, cmd, "topic")
+	result, resultOK := wsxmlcmd.RequiredAttr(p, cmd, "result")
+	if !topicOK || !resultOK {
+		return
+	}
+	if !work.topicKnown(topic) {
+		p.Add("%s: no item or topic body has topic %q", cmd.At("topic"), topic)
+		return
+	}
+	if !work.topicClosed(topic) {
+		work.ClosedTopics = append(work.ClosedTopics, topic)
+	}
+	if work.CloseResults == nil {
+		work.CloseResults = map[string]string{}
+	}
+	work.CloseResults[topic] = strings.TrimSpace(result)
 }
 
 // itemFields are an add or patch command's item fields, read from its field
