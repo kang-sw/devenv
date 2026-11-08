@@ -27,12 +27,16 @@ build, no server, no dependencies.
   per-clone journal and sync.
 - `app.js` is the view. It reads only the view state (`store.view`) and writes
   only by dispatching events (`store.dispatch`).
+- `status-icons.js` is the status icon set (`window.TrackerStatusIcons`): one
+  shape, colour token, label, and description per status, kept in one file so
+  the dashboard can adopt it (355).
 - `fixtures.js` assigns `window.TRACKER_FIXTURES`, because `fetch` of local JSON
   is blocked on `file://`. Edit it to keep a data change.
 
 ## What the page shows
 
-- **Frame.** A header like the dashboard's, with three mockup controls:
+- **Frame.** A header like the dashboard's, with three mockup controls grouped
+  in one compact pill so the header stays on one line at 1280px (353):
   - *viewing as*: the member, labelled root, lead, member, or removed;
   - *clone*: which of that member's clones (one ref each) the page reads and
     writes; `*` marks a clone with unpushed writes;
@@ -52,84 +56,115 @@ build, no server, no dependencies.
   buttons are `Sync now` and `Go offline` / `Come back online`. The personal
   store has no remote, which is the same path as a long offline; its button
   only closes the batch.
-- **Cards.** The drawer has one layout, the cards layout (303). There is no
-  drawer-level mode picker; each card has its own picker offering only the
-  modes that fit its content:
+- **Drawer layout** (359). Two zones: the **Items panel** is the main zone
+  (about two thirds of the width), and a side column stacks *Notifications*,
+  *Today*, *Support agent*, *Team*, *Activity*, and *Data (debug)*, in that
+  order. Below about 1000px the side column moves above the panel. Every card
+  has a maximum height of about 70% of the viewport and scrolls inside; the
+  *Support agent* card keeps its fixed height, and the Items panel uses the
+  main zone's full height (350). A card keeps its scroll position across
+  re-renders.
+- **Items panel** (357). One panel in place of the former *My assignments*,
+  *Received requests*, *Assigned by me*, *My team*, and *Items* cards. A row of
+  scope presets is crossed with the view modes each scope offers:
 
-  | card | modes |
-  |---|---|
-  | *Items* | tree / kanban (item cards) / due timeline / calendar |
-  | *My assignments*, *Assigned by me*, *My team* | list / kanban (assignment cards, with the pending column) / due timeline / calendar |
-  | *Activity* | list / activity timeline |
-  | *Notifications*, *Today*, *Received requests*, *Team*, *Data* | list only (no picker) |
-  | *Support agent* (chat placeholder) | conversation only (no picker) |
+  | scope | rows | modes |
+  |---|---|---|
+  | *mine* | my live assignments (forced, self-assigned, accepted, or taken over by handoff), then done, then items I created and did not assign | list / kanban (assignment cards, with the pending column) / due timeline / calendar |
+  | *received requests* | answers to what I sent (declined, or returned by the accepter's lead), pending assignments to me, the ones I answered, and the ones I sent | list |
+  | *assigned by me* | what I assigned or handed to others, live or pending; each assignee's state and note in the row details | list / kanban / due timeline / calendar |
+  | *my team* (a viewer with followers) | grouped by person: each follower down to 3 levels, indented, with a group header carrying that person's open, done, blocked, stale, unaccepted, and "waiting on others" counts and last update; then their open and unaccepted work and the pending assignments they sent that nobody accepted yet | list / kanban / due timeline / calendar |
+  | *all* | the tree of threads, filtered by kind (`request` = items with a pending assignment) and status (open / blocked / done / hidden) | tree / kanban (item cards) / due timeline / calendar |
 
-  A card switched to a wide mode (kanban, due timeline, calendar, activity
-  timeline) leaves its column and spans the full row of the cards layout; the
-  remaining cards flow below it (304). There is no horizontal-scroll-in-card
-  fallback and no maximize button. Each card's chosen mode is local UI state,
-  remembered per store in memory (it survives a viewer switch within the
-  store), never an event (305).
-  - *Lists* (the v2 layout plus *Notifications* and *Today*):
-    - *Notifications* ((331)-(334)): one feed of what concerns the viewer,
-      newest first: new forced assignments to me, pending assignments to me,
-      answer notices, reference notices, completion or `blocked` of work I
-      assigned, Confirm requests waiting on me, replies to my comments, my
-      live assignments due today or overdue, and mentions of me. Every entry
-      is derived from the view state and only opens the item's thread sheet;
-      *Received requests* and *My team* keep their notices and buttons
-      (Accept / Decline / Return). Unread entries are highlighted; clicking
-      one, or *Mark all read*, marks it read. Read state is local UI state per
-      viewer clone, kept in memory like the handle badge's `seen`, and writes
-      no event. In the product the daemon keeps it per clone on the local
-      filesystem, outside git (340).
-    - *Today*: the morning check. My open work by priority then due, pending
-      assignments waiting for my answer, and closes waiting for my confirm.
-    - *My assignments*: my live assignments (forced, self-assigned, accepted,
-      or taken over by handoff), with status, source, completion mode, the
-      roll-up and blocked warning, priority, due (or "due today"), stale, a
-      "by agent" chip when an agent wrote the current status, the latest note,
-      and quick actions including *Hand off*.
-    - *Received requests*: answer notices (what I sent was declined, or
-      returned by the accepter's lead), pending assignments to me (Accept /
-      Decline / Discuss), the ones I answered, and the ones I sent (Withdraw).
-    - *Assigned by me*: what I assigned or handed to others, live or pending,
-      with each assignee's status and Confirm / Reject.
-    - *My team*: shown to a viewer with followers or notices. Reference
-      notices first (a follower accepted a pending assignment; a handoff of an
-      assignment I gave was accepted), with Return. Then each follower down to
-      3 levels as an indented tree with their open work, blocked, stale, and
-      unaccepted counts, plus the pending assignments they sent that nobody
-      accepted yet ("waiting on others").
-    - *Items*: the tree of threads, filtered by kind (`request` = items with a
-      pending assignment) and status (open / blocked / done / hidden).
-    - *Team*: the org tree, admins, clones per member, revoked keys, the
-      priority levels, and an admin roles-event dialog.
-    - *Activity*: the merged log in causal order, newest first, with filters
-      for flagged-only and concurrent-only.
-    - *Data*: the raw roles file, each ref's pushed commits (the remote), and
-      the clone state (fetched counts, local commits, online), all editable.
-      `apply` recomputes everything and `reset` restores the fixtures.
-  - *Kanban*: columns by status, scoped to the card's own rows. On an
-    assignment card the cards are that card's assignment records (with a
-    pending column; *Assigned by me* and *My team* name the assignee); on
-    *Items* the cards are items under the card's kind filter only: the
-    columns already are the statuses, so the status filter is ignored there
-    (it would only empty columns) and the kanban toolbar offers kind alone.
-    Dragging moves a card only for the viewer's own live assignment and
-    dispatches `item.status` (todo / doing / blocked) or `item.close` (done).
-  - *Activity timeline*: every event by write time, grouped by day, filterable
-    by event family, member, flagged, and concurrent.
-  - *Due timeline*: one bar per dated row of the card (an item on *Items*, an
-    assignment record on an assignment card, showing its own state), from the
-    item's start (first `doing`, else creation) to its due day, with a today
-    line; overdue bars are marked.
-  - *Calendar*: a month grid of the card's dated rows by due day, with month
-    navigation per card.
+  The panel opens on *mine*. The chosen scope and each scope's mode are local
+  UI state, remembered per store in memory (they survive a viewer switch within
+  the store), never an event (360). The panel is already wide, so no mode
+  spans rows any more (supersedes (304)).
+- **Item rows** (356). By default a row shows only: the status icon, the title,
+  the assignees' initials (pending ones dashed, the viewer's filled, more than
+  three as `+N`), the priority name (always; above the default level in the
+  danger colour), the due date (always), a warning icon when the item's thread
+  has a flagged write or a concurrent change, and an unread dot when the item
+  has an unread *Notifications* entry. The due date reads `D-N` within 7 days,
+  `D-day` today, `D+N` past due in the danger colour, and a short date
+  (`11-21`) farther away; on a done or ended row it is a muted short date.
+  Everything else is the row's detail overlay: kind chip, source clone and
+  event id (`maya.pc-5`) and creator, project, the status description and
+  "set by agent", roll-up and "blocked below", stale, the assignment path
+  (source, completion mode, lead chain), the note, created / edited / last
+  activity dates, and flagged and concurrent counts. A row on an assignment
+  scope or *Today* shows that assignment record's own state; the item's status
+  is in the details when it differs.
+- **Hover actions** (354), (357). A row's actions appear as icons on hover,
+  each with its label in the tooltip: every action the viewer may take on that
+  item, read from the view state. These are Accept / Decline / Discuss on a
+  pending assignment to me; Status / Close / Split / Hand off on my live
+  assignment; Confirm / Reject on a close I must confirm; Return on a
+  follower's accepted assignment (direct lead only); Withdraw on a pending
+  assignment I sent; and Assign on an unassigned item I created. They dispatch
+  through the same dialogs and quick writes the thread sheet uses. Hover has
+  non-hover equivalents with the same CSS state: **keyboard** focus on a row
+  (Tab) shows its actions and details, Tab moves into the action buttons, and
+  Enter opens the thread; on **touch**, a tap selects a row and shows its
+  actions and details, and a tap on the selected row (or on any title) opens
+  the thread. The selection is local UI state.
+- **Status icons** (355). Each status differs by shape as well as colour: todo
+  ring, doing half-filled, blocked slashed ring, awaiting confirm hourglass,
+  done filled check, pending dashed ring with `?`, unassigned dotted ring,
+  declined / returned / handed off / withdrawn as muted rings with a mark, and
+  a speech bubble for a topic. Icons, initials, priority, due, and action
+  buttons share one immediate custom tooltip (not the browser's delayed
+  `title`); the set lives in `status-icons.js`.
+- **Side cards.** Each offers only the modes that fit it: *Activity* has list /
+  activity timeline; the others have one layout.
+  - *Notifications* ((331)-(334)): one feed of what concerns the viewer,
+    newest first: new forced assignments to me, pending assignments to me,
+    answer notices, reference notices (a follower accepted a pending
+    assignment; a handoff of an assignment I gave was accepted), completion
+    or `blocked` of work I assigned, Confirm requests waiting on me, replies
+    to my comments, my live assignments due today or overdue, and mentions of
+    me. Every entry is derived from the view state and only opens the item's
+    thread sheet; the actions it refers to (Accept, Return, Confirm, ...) are
+    hover actions on the item's row in the Items panel. Unread entries are
+    highlighted; clicking one, or *Mark all read*, marks it read, which also
+    clears the row's unread dot. Read state is local UI state per viewer
+    clone, kept in memory like the handle badge's `seen`, and writes no
+    event. In the product the daemon keeps it per clone on the local
+    filesystem, outside git (340).
+  - *Today* (358): a compact summary that stays visible whatever scope the
+    Items panel shows: my open work by priority then due, pending assignments
+    waiting for my answer, and closes waiting for my confirm, as item rows
+    with the same hover actions.
+  - *Team*: the org tree, admins, clones per member, revoked keys, the
+    priority levels, and an admin roles-event dialog.
+  - *Activity*: the merged log in causal order, newest first, with filters
+    for flagged-only and concurrent-only; or the activity timeline.
+  - *Data*: the raw roles file, each ref's pushed commits (the remote), and
+    the clone state (fetched counts, local commits, online), all editable.
+    `apply` recomputes everything and `reset` restores the fixtures.
+- **View modes** (303), scoped to the Items panel's current scope:
+  - *Kanban*: columns by status. On an assignment scope the cards are that
+    scope's assignment records (with a pending column; off *mine* they show
+    the assignee's initials); on *all* the cards are items under the kind
+    filter only: the columns already are the statuses, so the status filter
+    is ignored there (it would only empty columns) and the kanban toolbar
+    offers kind alone. Cards are quiet like rows (title, initials, priority,
+    due), with the source on hover. Dragging moves a card only for the
+    viewer's own live assignment and dispatches `item.status` (todo / doing /
+    blocked) or `item.close` (done).
+  - *Activity timeline* (the Activity card): every event by write time,
+    grouped by day, filterable by event family, member, flagged, and
+    concurrent.
+  - *Due timeline*: one bar per dated row of the scope (an item on *all*, an
+    assignment record on an assignment scope, showing its own state), from
+    the item's start (first `doing`, else creation) to its due day, with a
+    today line; overdue bars are marked.
+  - *Calendar*: a month grid of the scope's dated rows by due day, with month
+    navigation per scope.
 - **Support agent card** (chat placeholder, (300), (302)). A placeholder for
   the support-agent chat child, the future daemon-side local support agent:
   placement and a static sample only, with no working chat, no responder, and
-  no new events. It is one card in the cards layout, fixed height with
+  no new events. It is one card in the side column, fixed height with
   internal scroll, newest message at the bottom, and a disabled composer row.
   The sample mimics the dashboard conversation view's entry shapes (user
   text, assistant text, a collapsed tool line) plus one new entry kind, the
@@ -286,15 +321,16 @@ forced (author, or someone the author reaches) starts live
 ```
 
 - A **request** is no longer a separate kind or field: it is an item created
-  with a pending assignment in the same write. *Received requests* lists
-  pending assignments to me; the Items filter `request` lists items with a
-  pending assignment.
+  with a pending assignment in the same write. The Items panel's *received
+  requests* scope lists pending assignments to me; the *all* scope's kind
+  filter `request` lists items with a pending assignment.
 - **Pending** assignments are excluded from item status and roll-ups. While
-  pending, an assignment shows on the target's Received requests card and
-  handle badge, and as "unaccepted" in their lead's My team view.
+  pending, an assignment shows in the target's *received requests* scope and
+  handle badge, and as "unaccepted" in their lead's *my team* scope.
 - **Accept** keeps the assigner and completion mode, so "assigner confirms"
   works for requests too (214). The accepter's direct lead at that moment gets
-  a reference notice (My team card and handle badge) and may return it.
+  a reference notice (Notifications card and handle badge) and may return it
+  from the row in their *my team* scope.
 - **Handoff.** On accept the original assignee's assignment ends as `handed`
   and the original assigner gets a notice like the lead. The handed-on
   assignment keeps the original assigner, so confirm and unassign stay with
@@ -613,6 +649,16 @@ creation, and it has a topic and a blocked subtask.
 | 341 | Tests keep local bare remotes (`file://` with `uploadpack.allowFilter=true` exercises a partial clone); a hosted private repository is used only at live acceptance (the caller child and the attachment ledger ticket), where HTTPS auth, host filter support, and latency show. |
 | 343, 344 | A body-less `item.edit` that carries `mentions` or `attachments` stays flagged ("go with a body edit"); a removed member stays unmentionable (the mention is flagged), even where the text still shows `@name`. |
 | 345 b | `attachments.max_bytes` is checked only against attachments a write adds. On `item.edit` and `comment.edit`, an `oid` already on the target's shown attachments in the author's seen state is exempt from the size check; one the author had not seen there is new. `item.create` and `comment.add` check every attachment; the shape checks apply to all. |
+| 350 a | Every card has a maximum height (about 70% of the viewport) with internal scroll; fixed-height cards (Support agent) stay fixed; the Items panel may use the main zone's full height. |
+| 352 a | *Notifications* stays as it is. |
+| 353 | At 1280px the header's gear does not wrap: the mockup-only controls (viewing as, clone, clock) are grouped compactly. |
+| 354 | Row actions and details shown on hover have non-hover equivalents: keyboard focus on a row shows the same, and on touch a tap selects the row and reveals them; one CSS state for hovered, focused, and selected. |
+| 355 | Status is an icon that differs by shape as well as colour, with its description in an immediate custom tooltip rather than the browser's delayed `title`. The set is kept in one place (`status-icons.js`) so the dashboard can adopt it. |
+| 356 b | An item row shows by default the status icon, title, assignee initials, priority (always), due (always), a warning icon for flagged or concurrent, and an unread dot. Due reads `D-N` within 7 days, `D-day` today, `D+N` past due in the danger colour, else a short date. Everything else (kind, source clone and event id, dates, roll-up, assignment path, notes, buttons) moves to hover. |
+| 357 a | One *Items* panel replaces My assignments, Assigned by me, My team, Received requests, and Items: scope presets (mine / received requests / assigned by me / my team / all) crossed with the existing view modes. My team is a group-by-person view with each group header carrying that person's roll-up counts. Accept / Decline / Discuss / Confirm / Reject / Return / Close / Split / Hand off / Status are hover actions on the row they act on, and My team's "for reference" notices are left to the *Notifications* card. Supersedes the part of (331)-(334) that kept the notices and buttons on Received requests and My team. |
+| 358 a | *Today* stays as a compact summary card (my open work / waiting for my answer / waiting for my confirm), visible whatever scope the panel shows. |
+| 359 a | A two-zone drawer: the Items panel (about two thirds of the width) as the main zone; a side column stacking Notifications, Today, Support agent, Team, Activity, then Data (debug). At narrow widths the side column moves above the panel. The masonry packer is removed, and with the panel already wide, the wide-mode row spanning of (304) is gone too. |
+| 360 | The panel opens on "mine"; the last chosen scope and view mode are remembered per store as local UI state, like the per-card mode memory. |
 
 ## Open questions
 

@@ -22,6 +22,20 @@
   <symbol id="i-auto" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.2"/><path d="M8 2.8v10.4A5.2 5.2 0 0 0 8 2.8z" fill="currentColor"/></symbol>
   <symbol id="i-sun" viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.8"/><path d="M8 1.6v1.6M8 12.8v1.6M1.6 8h1.6M12.8 8h1.6M3.5 3.5l1.1 1.1M11.4 11.4l1.1 1.1M3.5 12.5l1.1-1.1M11.4 4.6l1.1-1.1"/></symbol>
   <symbol id="i-moon" viewBox="0 0 16 16"><path d="M12.8 10.1A5.4 5.4 0 0 1 5.9 3.2a5.4 5.4 0 1 0 6.9 6.9z"/></symbol>
+  <!-- row actions (board (354)): icons shown on hover, focus, or tap-selection -->
+  <symbol id="i-accept" viewBox="0 0 16 16"><path d="M3.2 8.4l3 3 6.6-7"/></symbol>
+  <symbol id="i-decline" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.6"/><path d="M5.9 5.9l4.2 4.2M10.1 5.9l-4.2 4.2"/></symbol>
+  <symbol id="i-chat" viewBox="0 0 16 16"><path d="M2.8 3.8h10.4v6.8H7.4l-2.8 2.4v-2.4H2.8z"/></symbol>
+  <symbol id="i-confirm" viewBox="0 0 16 16"><path d="M1.8 8.6l2.8 2.8 5.6-6M7.6 11.2l.4.2 6.2-6.6"/></symbol>
+  <symbol id="i-reject" viewBox="0 0 16 16"><path d="M5.6 4L2.8 6.8l2.8 2.8"/><path d="M2.8 6.8h6.6a3.6 3.6 0 0 1 0 7.2H6.6"/></symbol>
+  <symbol id="i-return" viewBox="0 0 16 16"><path d="M13 13V9.4a2.8 2.8 0 0 0-2.8-2.8H3.4M6.4 3.6l-3 3 3 3"/></symbol>
+  <symbol id="i-close" viewBox="0 0 16 16"><rect x="2.4" y="2.4" width="11.2" height="11.2" rx="2.4"/><path d="M5.2 8.2l2 2 3.6-3.8"/></symbol>
+  <symbol id="i-split" viewBox="0 0 16 16"><circle cx="4" cy="3.6" r="1.6"/><circle cx="4" cy="12.4" r="1.6"/><circle cx="12" cy="8" r="1.6"/><path d="M4 5.2v5.6M4 7.2c0 1 1 1.6 2.4 1.2l4-.5"/></symbol>
+  <symbol id="i-handoff" viewBox="0 0 16 16"><circle cx="5.6" cy="5" r="2.2"/><path d="M1.8 13.4c.4-2.6 2-3.8 3.8-3.8 1 0 1.9.3 2.6 1M9.6 9.8h4.8M12.4 7.8l2 2-2 2"/></symbol>
+  <symbol id="i-status" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.6"/><path d="M8 2.4a5.6 5.6 0 0 1 0 11.2z" fill="currentColor"/></symbol>
+  <symbol id="i-assign" viewBox="0 0 16 16"><circle cx="6.4" cy="5" r="2.4"/><path d="M2 13.6c.4-2.8 2.2-4 4.4-4s4 1.2 4.4 4M12.6 4.6v4M10.6 6.6h4"/></symbol>
+  <symbol id="i-withdraw" viewBox="0 0 16 16"><path d="M3.2 8h9.6M6.4 4.8L3.2 8l3.2 3.2"/></symbol>
+  <symbol id="i-warn" viewBox="0 0 16 16"><path d="M8 2.4l6 10.8H2z"/><path d="M8 6.6v3M8 11.4v.05"/></symbol>
 </svg>
 
 <div class="dwrap">
@@ -29,15 +43,11 @@
     <a class="back" href="#" title="all sessions"><svg class="i"><use href="#i-back"/></svg>dashboard</a>
     <h1>Session</h1>
     <span class="host">CLAUDE</span>
-    <label class="viewing" title="mockup control: whose perspective the tracker is shown from">viewing as
-      <select id="viewer"></select>
-    </label>
-    <label class="viewing" title="mockup control: which clone (one ref each) the viewer reads and writes; * = unpushed writes">clone
-      <select id="vclone"></select>
-      <span class="chip" id="vstore"></span>
-    </label>
-    <span class="viewing" title="mockup clock: every write is stamped with it and advances it by a minute">now <code id="vclock"></code>
-      <button class="btn mini" data-act="clock" data-min="60">+1h</button><button class="btn mini" data-act="clock" data-min="1440">+1d</button>
+    <!-- mockup-only controls, grouped compactly so the header stays on one line at 1280px (board (353)) -->
+    <span class="mock" title="mockup controls (not part of the product)">
+      <select id="viewer" title="viewing as: whose perspective the tracker is shown from"></select>
+      <select id="vclone" title="clone: which of the viewer's clones (one ref each) the page reads and writes; * = unpushed writes"></select>
+      <span class="mclock" title="mockup clock: every write is stamped with it and advances it by a minute"><code id="vclock"></code><button class="btn mini" data-act="clock" data-min="60">+1h</button><button class="btn mini" data-act="clock" data-min="1440">+1d</button></span>
     </span>
     <span class="sse" title="live updates"><span class="dot"></span>live</span>
     <!-- the dashboard's gear menu, holding only the theme setting here (local UI state, localStorage) -->
@@ -85,9 +95,12 @@
 
 <dialog id="dlg"></dialog>
 <div id="toast" hidden></div>
+<!-- the immediate custom tooltip (board (355)): one element, placed by app.js next to whatever [data-tip] the pointer or focus is on -->
+<div id="tip" role="tooltip" hidden></div>
 
 <script src="fixtures.js"></script>
 <script src="engine.js"></script>
+<script src="status-icons.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

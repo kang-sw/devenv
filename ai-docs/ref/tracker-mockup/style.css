@@ -80,8 +80,13 @@ a:hover { text-decoration: underline; }
 .host { font-size: 11px; font-weight: 800; letter-spacing: .04em; padding: 1px 7px; border-radius: 4px; background: var(--muted); color: var(--muted-fg); }
 .sse { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--muted-fg); white-space: nowrap; }
 .sse .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 25%, transparent); }
-.viewing { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted-fg); }
-.viewing select { font: inherit; font-size: 13px; padding: 2px 6px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--fg); max-width: 190px; }
+/* mockup-only controls (viewing as, clone, clock) in one compact group, so the gear stays on the header line at 1280px (353) */
+.mock { display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px; border-radius: 999px; box-shadow: inset 0 0 0 1px var(--line); font-size: 12px; color: var(--muted-fg); white-space: nowrap; }
+.mock select { font: inherit; font-size: 12px; padding: 1px 4px; border-radius: 999px; border: 0; background: var(--muted); color: var(--fg); max-width: 170px; }
+.mock #vclone { max-width: 84px; }
+.mclock { display: inline-flex; align-items: center; gap: 3px; padding-left: 4px; }
+.mclock code { font-size: 11.5px; }
+.mclock .btn.mini { padding: 0 6px; }
 /* gear menu (dashboard.css): here it holds only the theme setting */
 .gearwrap { position: relative; margin-left: auto; }
 .gear { height: 28px; width: 32px; padding: 0; justify-content: center; }
@@ -170,15 +175,18 @@ ul.plain { list-style: none; margin: 0; padding: 0; }
 .dr-badge { min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--primary); color: var(--primary-fg); font-size: 10.5px; line-height: 16px; text-align: center; font-weight: 800; }
 .dr-handle.stub { opacity: .8; }
 
-/* drawer content: a masonry of cards (board (347) c). app.js deals the cards, in
-   reading order, each to the currently shortest of N equal columns (.dr-mcol),
-   N following the body's width; every card keeps its natural height. */
-.dr-mason { display: flex; gap: 10px; align-items: flex-start; }
-.dr-mcol { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+/* drawer content (359): two zones. The Items panel is the main zone (about two thirds);
+   the side column stacks Notifications, Today, Support agent, Team, Activity, Data.
+   At narrow widths the side column moves above the panel. */
+.dr-zones { display: grid; grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr); gap: 10px; align-items: start; }
+.dr-side { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.dr-main { min-width: 0; }
+@media (max-width: 1000px) {
+  .dr-zones { grid-template-columns: minmax(0, 1fr); }
+  .dr-side { order: -1; display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); align-items: start; }
+}
 .dr-title { display: flex; align-items: center; gap: 8px; margin: 0 2px 8px; font-size: 13px; color: var(--muted-fg); }
 .dr-title b { color: var(--fg); font-size: 14px; }
-/* (304) a card in a wide mode spans the full row; the remaining cards flow below it */
-.dr-wide { display: flex; flex-direction: column; gap: 10px; margin-bottom: 10px; }
 @media (max-width: 640px) {
   :root { --dpad: 10px; }
   .dr-handle { padding: 2px 7px 0; gap: 5px; }
@@ -195,6 +203,13 @@ ul.plain { list-style: none; margin: 0; padding: 0; }
 
 /* ===== cards ===== */
 .card { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
+/* (350) every card has a maximum height with internal scroll; the Items panel uses the main zone's full height */
+.card { display: flex; flex-direction: column; max-height: 70vh; }
+.card > header, .card > .cbody { flex: none; }
+.card > .cbody { flex: 0 1 auto; min-height: 0; overflow: auto; }
+.card.panel { max-height: none; overflow: visible; min-height: calc(var(--drh) - 110px); }
+.card.panel > .cbody { overflow: visible; }
+.card.panel > header { border-radius: var(--radius) var(--radius) 0 0; }
 .card > header { display: flex; gap: 8px; align-items: center; padding: 4px 8px 4px 12px; min-height: 32px; background: var(--muted); font-weight: 700; font-size: 13px; }
 .card > header h2 { margin: 0; font-size: 13px; }
 .card > header .chip { background: var(--card); }
@@ -215,15 +230,65 @@ ul.plain { list-style: none; margin: 0; padding: 0; }
 .r3 .next { color: var(--muted-fg); margin-right: auto; }
 .assignee-line { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 12px; margin: 3px 0 0 8px; padding-left: 8px; border-left: 2px solid var(--muted); }
 
-/* my team (lead perspective) */
-.tm-person { margin-left: calc(var(--d) * 16px); padding: 5px 0 5px 8px; border-left: 2px solid var(--muted); border-top: 1px solid var(--muted); }
-.tm-person:first-of-type { border-top: 0; }
-.tm-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12.5px; }
-.tm-head .nid { font-family: var(--mono); font-size: 11px; color: var(--muted-fg); }
-.tm-work { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; padding: 2px 0 2px 10px; cursor: pointer; }
-.tm-work:hover { background: color-mix(in srgb, var(--muted) 50%, transparent); }
-.tm-work .title { font-weight: 600; }
-.tm-work.pend { opacity: .85; font-style: italic; }
+/* ===== item rows (356): quiet by default; details and actions on hover, keyboard focus, or tap-selection (354) ===== */
+.irow { position: relative; border-top: 1px solid var(--muted); }
+.irow:first-child, .sub + .irow, .tg-head + .irow, .toolbar + .irow { border-top: 0; }
+.irow:focus { outline: none; }
+.ir-main { display: flex; align-items: center; gap: 7px; min-height: 30px; padding: 2px 4px 2px calc(4px + var(--ind, 0) * 16px); border-radius: 6px; cursor: pointer; }
+.ir-main .title { font-weight: 600; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1 auto; }
+.ir-main .ind { color: var(--muted-fg); margin-right: -3px; }
+.ir-acts { display: none; gap: 1px; flex: none; }
+.ir-more { position: absolute; z-index: 6; top: calc(100% - 3px); left: calc(28px + var(--ind, 0) * 16px); right: 6px; visibility: hidden; pointer-events: none;
+  background: var(--card); border-radius: 8px; box-shadow: var(--shadow-hi), inset 0 0 0 1px var(--line); padding: 6px 10px; font-size: 12px; line-height: 1.45; display: grid; gap: 2px; }
+.ir-more .chip { height: 17px; font-size: 11px; }
+.irow.up > .ir-more { top: auto; bottom: calc(100% - 3px); }
+/* the one state for hovered, focused, and selected */
+.irow:is(:hover, :focus-within, .sel) > .ir-main { background: color-mix(in srgb, var(--muted) 60%, transparent); }
+.irow:is(:hover, :focus-within, .sel) .ir-acts { display: inline-flex; }
+.irow:is(:hover, :focus-within, .sel) > .ir-more { visibility: visible; }
+.irow:focus-visible > .ir-main, .irow:has(.ia:focus-visible) > .ir-main, .irow.sel > .ir-main { box-shadow: inset 0 0 0 1.5px var(--primary); }
+.sti { display: inline-flex; flex: none; width: 16px; height: 16px; }
+.sti-svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.ia { width: 26px; height: 22px; border: 0; border-radius: 6px; background: transparent; color: var(--muted-fg); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; padding: 0; }
+.ia:hover, .ia:focus-visible { background: var(--card); color: var(--primary); outline: none; box-shadow: inset 0 0 0 1px var(--line); }
+.ia.go { color: var(--primary); }
+.ia .i { width: 15px; height: 15px; }
+.who { display: inline-flex; justify-content: flex-end; flex: none; width: 64px; padding-left: 3px; }
+.av { width: 20px; height: 20px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; flex: none; margin-left: -3px; font-style: normal; font-size: 9px; font-weight: 800; letter-spacing: -.02em;
+  background: color-mix(in srgb, var(--primary) 15%, var(--card)); color: var(--primary); box-shadow: 0 0 0 1.5px var(--card); }
+.av.me { background: var(--primary); color: var(--primary-fg); }
+.av.pend { background: var(--card); color: var(--teal); box-shadow: 0 0 0 1.5px var(--card), inset 0 0 0 1px var(--teal); }
+.av.more { background: var(--muted); color: var(--muted-fg); }
+.pri { flex: none; width: 34px; text-align: center; font-size: 11.5px; color: var(--muted-fg); white-space: nowrap; }
+.pri.hi { color: var(--fail); font-weight: 700; }
+.pri.lo { opacity: .7; }
+.due2 { flex: none; width: 46px; text-align: right; font-family: var(--mono); font-size: 11.5px; color: var(--muted-fg); white-space: nowrap; }
+.due2.soon { color: var(--fg); }
+.due2.now { color: var(--warn); font-weight: 700; }
+.due2.over { color: var(--fail); font-weight: 700; }
+.due2.ended { opacity: .6; }
+.wicon { display: inline-flex; flex: none; color: var(--conc); }
+.wicon.flag { color: var(--fail); }
+.udot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--primary); }
+.subn { font-weight: 600; letter-spacing: 0; }
+#tip { position: fixed; z-index: 95; max-width: 340px; padding: 4px 8px; border-radius: 6px; background: var(--fg); color: var(--card); font-size: 12px; line-height: 1.4; pointer-events: none; box-shadow: var(--shadow-hi); }
+#tip[hidden] { display: none; }
+
+/* Items panel header: scope presets (357) and the scope's view modes */
+.scopes { display: inline-flex; gap: 2px; padding: 2px; border-radius: 999px; background: var(--card); flex-wrap: wrap; }
+.scp { font: inherit; font-size: 12px; font-weight: 600; border: 0; background: transparent; color: var(--muted-fg); border-radius: 999px; padding: 1px 10px; cursor: pointer; white-space: nowrap; }
+.scp:hover { color: var(--fg); }
+.scp.on { background: var(--primary); color: var(--primary-fg); }
+.card.panel > header { flex-wrap: wrap; row-gap: 4px; padding-top: 5px; padding-bottom: 5px; }
+
+/* my team scope: a group per person, its header carrying the person's roll-up counts */
+.tg { margin-left: calc(var(--d) * 16px); }
+.tg + .tg { margin-top: 4px; }
+.tg-head { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; padding: 6px 4px 3px; font-size: 12.5px; border-top: 1px solid var(--line); }
+.tg:first-child > .tg-head { border-top: 0; }
+.tg-head .av { margin-left: 0; }
+.tg-head .nid { font-family: var(--mono); font-size: 11px; color: var(--muted-fg); }
+.tg-head .cnt { font-size: 12px; color: var(--muted-fg); }
 
 /* team tree */
 .tree, .tree ul { list-style: none; margin: 0; padding: 0; }
@@ -335,10 +400,15 @@ details.unpushed { margin: -6px 2px 10px; font-size: 12px; }
 details.unpushed summary { cursor: pointer; color: var(--warn); }
 .atl .day { margin-top: 8px; font-size: 11.5px; font-weight: 800; color: var(--muted-fg); border-bottom: 1px solid var(--line); }
 /* kanban lanes and cards follow page.css's ticket lanes */
-.kanban { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(170px, 1fr); gap: 10px; overflow-x: auto; align-items: start; }
+.kanban { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(150px, 1fr); gap: 10px; overflow-x: auto; align-items: start; }
 .kcol { background: color-mix(in srgb, var(--muted) 45%, var(--card)); border-radius: 10px; padding: 8px; min-height: 120px; }
 .khead { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; font-size: 12px; }
 .kcard { background: var(--card); border-radius: 8px; padding: 6px 8px; margin-bottom: 6px; box-shadow: var(--shadow); cursor: pointer; font-size: 12px; }
+.kc-t .title { font-weight: 600; color: var(--fg); overflow-wrap: anywhere; }
+.kc-m { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; margin-top: 4px; }
+.kc-m .who { width: auto; }
+.kc-m .pri, .kc-m .due2 { width: auto; }
+.khead b { font-weight: 700; }
 .kcard:hover { box-shadow: var(--shadow-hi); }
 .kcard.drag { cursor: grab; box-shadow: inset 3px 0 0 var(--primary), var(--shadow); }
 .kcard.drag:hover { box-shadow: inset 3px 0 0 var(--primary), var(--shadow-hi); }
@@ -361,11 +431,11 @@ details.unpushed summary { cursor: pointer; color: var(--warn); }
 .cday.now { box-shadow: inset 0 0 0 2px var(--primary); }
 .cnum { font-size: 11px; color: var(--muted-fg); }
 .citem { display: flex; gap: 3px; align-items: center; flex-wrap: wrap; margin: 2px 0; cursor: pointer; }
-.tm-work.notice { font-style: normal; }
 
 .sup { margin: 2px 0; font-size: 12px; }
 
 /* chat card: placeholder for the support-agent chat child; fixed height, internal scroll, newest at the bottom */
+.card.chat > .cbody { flex: none; }
 .card.chat .cbody { height: 360px; padding: 0; display: flex; flex-direction: column; }
 .chat-log { flex: 1 1 0; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 8px; padding: 8px 10px; background: color-mix(in srgb, var(--muted) 45%, var(--bg)); }
 .chat-log .msg { max-width: 92%; }
