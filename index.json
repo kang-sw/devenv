@@ -654,7 +654,14 @@
       }
     },
     "261108-feat-ws-tracker-caller": {
-      "registered_at": "2026-11-08T04:21:41Z"
+      "registered_at": "2026-11-08T04:21:41Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-08T05:14:26Z"
+      }
     },
     "261108-feat-ws-tracker-drawer-ui": {
       "registered_at": "2026-11-08T04:46:24Z"
