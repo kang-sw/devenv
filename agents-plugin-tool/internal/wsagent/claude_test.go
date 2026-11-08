@@ -2,8 +2,12 @@ package wsagent
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
+	"errors"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -299,5 +303,165 @@ func TestClaudeMapperTurnError(t *testing.T) {
 	end := evs[len(evs)-1]
 	if !end.TurnEnd || end.TurnError != "You're out of extra usage" {
 		t.Fatalf("a refused turn should end with its error, got %+v", end)
+	}
+}
+
+// TestClaudeBackendStart drives Start against a stand-in claude that records
+// its command line (NUL-separated: the setting-sources value is empty),
+// working directory, and environment.
+func TestClaudeBackendStart(t *testing.T) {
+	out := t.TempDir()
+	fake := filepath.Join(t.TempDir(), "claude")
+	script := "#!/bin/sh\nprintf '%s\\0' \"$@\" > " + out + "/args\npwd -P > " + out + "/cwd\nenv > " + out + "/env\ntouch " + out + "/ready\ncat > /dev/null\n"
+	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	spec := claudeSpec(t, `{"backend":"claude","tools":["Read","Bash(git status)"],"ws_tools":["tickets.query"]}`)
+	spec.Root, spec.Dir = root, t.TempDir()
+	spec.Model, spec.SessionID, spec.Instructions = "opus", "sess-1", filepath.Join(spec.Dir, "instructions.md")
+	spec.WSMCP = &MCPCommand{Command: "/bin/ws-mcp"}
+	spec.Env = []string{"PATH=" + os.Getenv("PATH"), "CLAUDECODE=1", "CLAUDE_CODE_ENTRYPOINT=cli",
+		"CLAUDE_CONFIG_DIR=/cfg", "WS_MAILBOX_ADDRESS=lead", "HOME=/home/u"}
+	proc, err := ClaudeBackend{Command: fake}.Start(context.Background(), spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Close SIGTERMs a child that outlives closeGrace; close only once the
+	// stand-in finished writing its records.
+	ready := filepath.Join(out, "ready")
+	for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(5 * time.Millisecond) {
+		if _, err := os.Stat(ready); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the stand-in claude never finished writing its records")
+		}
+	}
+	proc.Close()
+
+	read := func(name string) string {
+		raw, err := os.ReadFile(filepath.Join(out, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(raw)
+	}
+	want, err := claudeArgs(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Split(strings.TrimSuffix(read("args"), "\x00"), "\x00")
+	if !slices.Equal(got, want) {
+		t.Fatalf("args = %q, want %q", got, want)
+	}
+	for flag, value := range map[string]string{"--input-format": "stream-json", "--output-format": "stream-json",
+		"--model": "opus", "--resume": "sess-1", "--append-system-prompt-file": spec.Instructions, "--permission-mode": "dontAsk"} {
+		if v, _ := flagValue(got, flag); v != value {
+			t.Errorf("%s = %q, want %q", flag, v, value)
+		}
+	}
+	if got[0] != "-p" || !slices.Contains(got, "--strict-mcp-config") {
+		t.Errorf("print mode with a strict MCP config: %q", got)
+	}
+	wantRoot, _ := filepath.EvalSymlinks(root)
+	if cwd := strings.TrimSpace(read("cwd")); cwd != wantRoot {
+		t.Fatalf("claude runs at the working root: %q, want %q", cwd, wantRoot)
+	}
+	env := strings.Split(read("env"), "\n")
+	for _, kv := range []string{"CLAUDE_CONFIG_DIR=/cfg", "HOME=/home/u"} {
+		if !slices.Contains(env, kv) {
+			t.Errorf("child env lacks %s", kv)
+		}
+	}
+	for _, prefix := range []string{"CLAUDECODE=", "CLAUDE_CODE_ENTRYPOINT=", "WS_MAILBOX_"} {
+		for _, kv := range env {
+			if strings.HasPrefix(kv, prefix) {
+				t.Errorf("child env keeps the parent session's %s", kv)
+			}
+		}
+	}
+
+	restore := lookPath
+	lookPath = func(string) (string, error) { return "", exec.ErrNotFound }
+	t.Cleanup(func() { lookPath = restore })
+	if _, err := (ClaudeBackend{}).Start(context.Background(), spec); err == nil || !strings.Contains(err.Error(), "claude backend") {
+		t.Fatalf("a missing claude names the backend, got %v", err)
+	}
+}
+
+// claudeResponder is a stand-in claude that logs each input line and
+// answers every control_request: success, except set_model "bogus" (a
+// plain error) and set_model "legacy" (an unsupported subtype).
+const claudeResponder = `import sys, json
+log = open(sys.argv[1], "a")
+for line in sys.stdin:
+    log.write(line); log.flush()
+    d = json.loads(line)
+    if d.get("type") != "control_request":
+        continue
+    model = d["request"].get("model")
+    r = {"subtype": "success", "request_id": d["request_id"]}
+    if model == "bogus":
+        r = {"subtype": "error", "request_id": d["request_id"], "error": "model not found"}
+    elif model == "legacy":
+        r = {"subtype": "error", "request_id": d["request_id"], "error": "Unsupported control request subtype: set_model"}
+    print(json.dumps({"type": "control_response", "response": r}), flush=True)
+`
+
+// TestClaudeProcessControls pins the stream-json input lines: the user line,
+// the interrupt and set_model control requests, and how an error answer maps
+// (an unsupported one to ErrUnsupported, which makes the runner restart).
+func TestClaudeProcessControls(t *testing.T) {
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 not available")
+	}
+	logPath := filepath.Join(t.TempDir(), "input.jsonl")
+	sp, err := startStreamProcess(exec.Command(python, "-I", "-c", claudeResponder, logPath),
+		newClaudeMapper(claudeSpec(t, `{"backend":"claude"}`)), claudeProtocol{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := claudeProcess{sp}
+	go func() {
+		for range p.Events() {
+		}
+	}()
+
+	if err := p.Send("hello"); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Interrupt(); err != nil {
+		t.Fatalf("Interrupt: %v", err)
+	}
+	if err := p.SetModel("opus"); err != nil {
+		t.Fatalf("SetModel: %v", err)
+	}
+	if err := p.SetModel(""); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("a return to the default model needs a restart, got %v", err)
+	}
+	if err := p.SetEffort("high"); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("effort has no in-stream form, got %v", err)
+	}
+	if err := p.SetModel("bogus"); err == nil || errors.Is(err, ErrUnsupported) || err.Error() != "model not found" {
+		t.Fatalf("a refused model is the error, got %v", err)
+	}
+	if err := p.SetModel("legacy"); !errors.Is(err, ErrUnsupported) || !strings.Contains(err.Error(), "Unsupported control request subtype") {
+		t.Fatalf("an unsupported answer wraps ErrUnsupported, got %v", err)
+	}
+	p.Close()
+
+	raw, _ := os.ReadFile(logPath)
+	got := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	want := []string{
+		`{"message":{"content":"hello","role":"user"},"type":"user"}`,
+		`{"request":{"subtype":"interrupt"},"request_id":"ws-1","type":"control_request"}`,
+		`{"request":{"model":"opus","subtype":"set_model"},"request_id":"ws-2","type":"control_request"}`,
+		`{"request":{"model":"bogus","subtype":"set_model"},"request_id":"ws-3","type":"control_request"}`,
+		`{"request":{"model":"legacy","subtype":"set_model"},"request_id":"ws-4","type":"control_request"}`,
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("input lines =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 }
