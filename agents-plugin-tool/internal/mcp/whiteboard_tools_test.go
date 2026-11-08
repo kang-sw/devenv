@@ -310,7 +310,7 @@ func TestWhiteboardEmbedRetentionAndDistinctNames(t *testing.T) {
 	}
 	// Age is the render sequence, not mtime: make the oldest-by-sequence
 	// embed the newest on disk, and it is still the one evicted.
-	rec, _ := f.s.sessions.readState(f.key)
+	rec, _ := f.s.sessions.readState(f.key, partAll)
 	oldest := rec.Whiteboard.Embeds[0].Name
 	future := time.Now().Add(time.Hour)
 	if err := os.Chtimes(filepath.Join(f.dir(), oldest), future, future); err != nil {
@@ -423,7 +423,7 @@ func TestWhiteboardRenameRetriesSharingViolation(t *testing.T) {
 			if !isToolError(resp) || !strings.Contains(toolText(t, resp), "write "+map[string]string{"page": "full page", "stamp": "stamp"}[target]) {
 				t.Fatalf("persistent sharing violation must fail the render: %s", resp)
 			}
-			rec, _ := f.s.sessions.readState(f.key)
+			rec, _ := f.s.sessions.readState(f.key, partAll)
 			if len(rec.Whiteboard.Items) != 1 {
 				t.Fatalf("a failed render must not persist its batch: %d items", len(rec.Whiteboard.Items))
 			}
@@ -628,6 +628,45 @@ func TestWhiteboardUpdateResultHasNoNowFile(t *testing.T) {
 	}
 	if whiteboardFilePattern.MatchString("abc.now.md") {
 		t.Fatalf("the file pattern must not match .now.md")
+	}
+}
+
+// The stale-topic nudge reaches the update result as an info line, once per
+// hour, and never the pages written to disk.
+func TestWhiteboardUpdateResultCarriesStaleTopicNudge(t *testing.T) {
+	f := newWhiteboardFixture(t)
+	var bodies strings.Builder
+	for _, name := range []string{"alpha", "beta", "gamma", "delta", "epsilon"} {
+		bodies.WriteString(`<wb:topic name="` + name + `">notes on ` + name + "</wb:topic>\n")
+	}
+	if text := f.update(t, bodies.String()); strings.Contains(text, "info: ") {
+		t.Fatalf("fresh topics must not nudge:\n%s", text)
+	}
+	old := time.Now().Add(-2 * time.Hour).UTC().Format(time.RFC3339)
+	if err := f.s.sessions.mutateRecord(f.key, partWhiteboard, func(rec *sessionRecord) error {
+		for i := range rec.Whiteboard.Topics {
+			rec.Whiteboard.Topics[i].ChangedAt = old
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	text := f.update(t, ``)
+	want := "5 of 5 open topics unchanged for 60+ min (alpha, beta, gamma, delta, epsilon); if finished, close them with wb:close."
+	if got := resultLine(t, text, "info: "); got != want {
+		t.Fatalf("info line = %q\nwant        %q", got, want)
+	}
+	for _, path := range []string{resultLine(t, text, "full: "), resultLine(t, text, "embed: ")} {
+		page, err := os.ReadFile(filepath.Join(f.root, path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(page), "unchanged for") {
+			t.Fatalf("%s renders the nudge", path)
+		}
+	}
+	if text := f.update(t, ``); strings.Contains(text, "info: ") {
+		t.Fatalf("a second update within the hour must not nudge:\n%s", text)
 	}
 }
 

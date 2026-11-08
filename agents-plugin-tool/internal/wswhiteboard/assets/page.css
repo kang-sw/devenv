@@ -116,7 +116,16 @@ a { color: var(--wb-primary); }
 /* topic: one elevated surface with a filled title bar */
 .topic { background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); margin-bottom: 16px; overflow: hidden; }
 .tbar { display: flex; align-items: center; gap: 6px; padding: 4px 12px; min-height: 30px; background: var(--wb-topic); color: var(--wb-on-topic); }
-.tbar .tname { font-size: 14px; font-weight: 700; margin-right: auto; overflow-wrap: anywhere; }
+.tbar .tlead { margin-right: auto; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
+.tbar .tname { font-size: 14px; font-weight: 700; overflow-wrap: anywhere; }
+.tbar .tresult { font-size: 12.5px; opacity: .7; overflow-wrap: anywhere; }
+.tbar .tago { font-size: 11.5px; opacity: .7; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tbar .tnote-toggle { background: transparent; color: inherit; opacity: .7; flex: none; }
+.tbar .tnote-toggle:hover { opacity: 1; }
+.topic > .tnote { width: calc(100% - 20px); margin: 6px 10px; }
+.topic.quiet > .tnote { width: 100%; margin: 4px 0; }
+.closed-more { display: block; margin: 0 0 16px; font-size: 12.5px; color: var(--wb-muted-fg); }
+button.closed-more { display: flex; margin: 0 auto 16px; }
 .tbar .chip:not(.policy):not(.assumed):not(.ok):not(.fresh) { background: rgb(127 127 127 / .28); color: inherit; }
 .tbody { padding: 10px; display: flex; flex-direction: column; gap: 8px; }
 .topic.quiet { box-shadow: none; background: transparent; }
@@ -270,6 +279,7 @@ details.more[open] > summary { margin-bottom: 2px; }
    opens as a full-width block under the bar. */
 .topic { position: relative; }
 .topic.has-doc > .tbar { padding-right: 46px; }
+.topic.has-doc:has(> details.tdoc > summary .new) > .tbar { padding-right: 60px; }
 details.tdoc > summary { position: absolute; top: 5px; right: 12px; cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 9px; border-radius: 999px; background: rgb(127 127 127 / .28); color: var(--wb-on-topic); }
 details.tdoc > summary::-webkit-details-marker { display: none; }
 details.tdoc > summary .new { background: currentColor; }
@@ -328,6 +338,34 @@ details.folded .rows li { color: var(--wb-muted-fg); }
 .rows a { color: inherit; text-decoration: underline; text-decoration-color: var(--wb-muted); }
 .rows a:hover { color: var(--wb-primary); }
 
+/* panel tree (agendas): each root is a tinted block, its fields nest under a
+   guide line; a container's summary shows its folded preview only while
+   folded, and a long string folds to one line and opens in full */
+.rows + .tree { margin-top: 8px; }
+.tree, .tree ul { list-style: none; margin: 0; padding: 0; }
+.tree ul { margin-left: 5px; padding-left: 9px; border-left: 1px solid var(--wb-line); }
+.tree > li + li { margin-top: 6px; }
+.tree > li > details, .tree > li > .tleaf { background: color-mix(in srgb, var(--wb-muted) 45%, var(--wb-card)); border-radius: 8px; padding: 4px 8px; }
+.tree summary, .tree .tleaf { display: flex; gap: 6px; align-items: baseline; min-width: 0; padding: 1px 0; font-size: 12.5px; line-height: 1.45; }
+.tree summary { list-style: none; cursor: pointer; border-radius: 4px; }
+.tree summary::-webkit-details-marker { display: none; }
+.tree summary:hover { background: var(--wb-wash); }
+.tree summary::before { content: ""; flex: none; align-self: center; width: 0; height: 0; margin: 0 2px 0 1px; border-left: 5px solid var(--wb-muted-fg); border-top: 4px solid transparent; border-bottom: 4px solid transparent; transition: transform .12s; }
+.tree details[open] > summary::before { transform: rotate(90deg); }
+.tree .tleaf::before { content: ""; flex: none; width: 8px; }
+.tkey { flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 12px/1.45 var(--wb-mono); color: var(--wb-muted-fg); }
+.tree > li > details > summary > .tkey, .tree > li > .tleaf > .tkey { max-width: none; color: var(--wb-primary); }
+.tsum, .tv { flex: 1 1 auto; min-width: 0; }
+.tsum { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 11.5px/1.45 var(--wb-mono); color: var(--wb-muted-fg); }
+.tree details[open] > summary > .tsum { display: none; }
+.tv { overflow-wrap: anywhere; }
+.tv.num, .tv.bool { font: 12px/1.45 var(--wb-mono); color: var(--wb-primary); }
+.tv.null, .tv.obj, .tv.arr { font: 12px/1.45 var(--wb-mono); color: var(--wb-muted-fg); }
+.tv.null { font-style: italic; }
+.tlong > summary > .tv { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--wb-muted-fg); }
+.tree .tlong[open] > summary > .tv { display: none; }
+.tfull { margin: 2px 0 4px 14px; padding: 4px 8px; border-radius: 6px; background: var(--wb-wash); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12.5px; line-height: 1.45; }
+
 /* kanban lanes (tickets panel): side by side once the panel body is wide
    enough, stacked otherwise; the container query follows the panel's own
    width, which differs between the side column, a narrow page, and the embed */
@@ -360,6 +398,7 @@ details.panel .body { container-type: inline-size; }
 /* reply bar */
 .reply { background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow-hi); padding: 10px 12px; display: grid; grid-template-columns: auto 1fr auto auto; gap: 8px; align-items: center; margin: 4px 0 12px; }
 .reply.solo { grid-template-columns: 1fr auto auto; }
+.reply[hidden] { display: none; }
 .full .reply { position: sticky; bottom: 10px; z-index: 2; }
 .reply textarea { font-family: var(--wb-mono); font-size: 12.5px; color: inherit; background: var(--wb-muted); border: 0; border-radius: 8px; padding: 7px 9px; resize: none; height: 34px; width: 100%; }
 .reply .allok { display: inline-flex; align-items: center; gap: 4px; height: 34px; padding: 0 10px; border-radius: 8px; background: var(--wb-muted); font-size: 12px; font-weight: 700; color: var(--wb-muted-fg); cursor: pointer; user-select: none; }

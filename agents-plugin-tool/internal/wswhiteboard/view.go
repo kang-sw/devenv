@@ -2,7 +2,14 @@ package wswhiteboard
 
 import (
 	"sort"
+	"time"
 )
+
+// ClosedCap is how many closed topics a page shows, the most recently closed
+// first. The served page fetches more through ClosedWindow; the file page and
+// the embed name how many they leave out. A closed topic still waiting on the
+// user is never capped, and the store keeps every topic.
+const ClosedCap = 30
 
 // Layout selects which page a View renders as.
 type Layout int
@@ -25,6 +32,9 @@ type View struct {
 	// file name beside the page. Empty for the embed.
 	StampFile string
 	Topics    []TopicView
+	// ClosedMore counts the closed topics past the ones Topics holds, in close
+	// order; ClosedNext is the index (ClosedWindow.From) of the first of them.
+	ClosedMore, ClosedNext int
 	// Panels come from the section providers, in registration order.
 	Panels []Panel
 	// BulkAck shows the reply bar's bulk checkbox: the board holds an open
@@ -124,6 +134,16 @@ type TopicView struct {
 	Quiet bool
 	// Closed marks a topic the lead closed.
 	Closed bool
+	// Result is the closed topic's close result, empty while the topic is
+	// open or when its close gave none (a store written before results).
+	Result string
+	// UpdatedAt is the topic's latest change, the newest change time among
+	// its items and body (RFC 3339, UTC), empty when none has one. UpdatedMs
+	// is the same instant in Unix milliseconds for the page script, and
+	// UpdatedClock its local HH:MM, which the embed shows.
+	UpdatedAt    string
+	UpdatedMs    int64
+	UpdatedClock string
 	// Fresh counts the items new since the previous embed (embed only).
 	Fresh int
 }
@@ -191,6 +211,9 @@ type Panel struct {
 	// Lanes render before Rows as kanban lanes: side by side when the panel
 	// is wide enough, stacked otherwise. A lane's rows render as cards.
 	Lanes []PanelLane
+	// Tree renders after Rows as foldable nodes, one root each (see
+	// JSONTree).
+	Tree []TreeNode
 }
 
 // PanelLane is one kanban lane of a panel: a header and a vertical stack of
@@ -283,6 +306,18 @@ type ViewInput struct {
 	ImageSrc    func(path string) string
 	DocImageSrc func(path string) string
 	FileActions func(path string) FileAction
+	// Closed, when set, builds the view of the capped closed topics alone,
+	// the served page's show-more fetch; nil builds the whole board with the
+	// first ClosedCap of them.
+	Closed *ClosedWindow
+	// Location is the time zone of UpdatedClock; nil is the local zone.
+	Location *time.Location
+}
+
+// ClosedWindow selects capped closed topics by index in close order, the
+// most recently closed first: N of them from From.
+type ClosedWindow struct {
+	From, N int
 }
 
 // BuildView derives a page view from state.
@@ -360,6 +395,12 @@ func BuildView(state *State, in ViewInput) View {
 		block.DocMarks = doc.Marks
 		block.DocNew = in.Layout == LayoutEmbed && doc.Changed > state.LastEmbedSeq
 	}
+	stampUpdated(state, blocks, in.Location)
+	for _, block := range blocks {
+		if block.Closed {
+			block.Result = state.CloseResults[block.Name]
+		}
+	}
 
 	settledOrder := map[int]int{}
 	for _, item := range state.Items {
@@ -429,10 +470,62 @@ func BuildView(state *State, in ViewInput) View {
 		}
 		return activity[order[i]] > activity[order[j]]
 	})
+	// A closed topic with nothing waiting goes last, the most recently
+	// closed first, and only a window of them renders (ClosedCap).
+	closedAt := map[string]int{}
+	for i, topic := range state.ClosedTopics {
+		closedAt[topic] = i
+	}
+	waiting := func(t *TopicView) bool { return len(t.Policy) > 0 || len(t.Assumed) > 0 || len(t.Acks) > 0 }
+	var shown, capped []string
 	for _, name := range order {
+		if blocks[name].Closed && !waiting(blocks[name]) {
+			capped = append(capped, name)
+		} else {
+			shown = append(shown, name)
+		}
+	}
+	sort.SliceStable(capped, func(i, j int) bool { return closedAt[capped[i]] > closedAt[capped[j]] })
+	from, n := 0, ClosedCap
+	if in.Closed != nil {
+		shown = nil
+		from, n = max(in.Closed.From, 0), max(in.Closed.N, 0)
+	}
+	from = min(from, len(capped))
+	end := min(from+n, len(capped))
+	shown = append(shown, capped[from:end]...)
+	view.ClosedNext, view.ClosedMore = end, len(capped)-end
+	for _, name := range shown {
 		view.Topics = append(view.Topics, *blocks[name])
 	}
 	return view
+}
+
+// stampUpdated sets each block's latest change from the change times of its
+// items and body; a time that does not parse (a store written before change
+// times) counts as none.
+func stampUpdated(state *State, blocks map[string]*TopicView, loc *time.Location) {
+	if loc == nil {
+		loc = time.Local
+	}
+	latest := map[string]time.Time{}
+	touch := func(topic, at string) {
+		if t, err := time.Parse(time.RFC3339, at); err == nil && t.After(latest[topic]) {
+			latest[topic] = t
+		}
+	}
+	for _, item := range state.Items {
+		touch(item.Topic, item.ChangedAt)
+	}
+	for _, doc := range state.Topics {
+		touch(doc.Name, doc.ChangedAt)
+	}
+	for topic, t := range latest {
+		block := blocks[topic]
+		block.UpdatedAt = t.UTC().Format(time.RFC3339)
+		block.UpdatedMs = t.UnixMilli()
+		block.UpdatedClock = t.In(loc).Format("15:04")
+	}
 }
 
 // recentSettled returns the IDs of the ExpandedSettled most recently settled

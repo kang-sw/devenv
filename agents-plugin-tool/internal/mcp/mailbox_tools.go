@@ -556,7 +556,7 @@ func (s *Server) mailboxPiggybackBadge(sessionKey string) string {
 		return ""
 	}
 	identity := s.mailboxIdentityResolved()
-	record, found := s.sessions.readState(sessionKey)
+	record, found := s.sessions.readState(sessionKey, partKey)
 	if !found {
 		return ""
 	}

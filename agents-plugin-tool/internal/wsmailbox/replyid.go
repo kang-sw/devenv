@@ -18,7 +18,7 @@ import (
 
 // The always-on reply channel uses a deterministic session-derived handle.
 // Its flat registry and queues live at the machine-global session-key cache
-// root (wsstate.CacheRoot, sibling to keys/), independently of named scopes.
+// root (wsstate.CacheRoot, sibling to sessions/), independently of named scopes.
 const replyRegistryName = "mailbox-replyids.json"
 
 // ReplyID concatenates four deterministic full-pool words. Handles are local

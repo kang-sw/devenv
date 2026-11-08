@@ -89,7 +89,7 @@ func startStreamProcess(cmd *exec.Cmd, mapper lineMapper, proto lineProtocol) (*
 	go func() {
 		defer close(p.read)
 		sc := bufio.NewScanner(stdout)
-		sc.Buffer(make([]byte, 64<<10), 64<<20)
+		sc.Buffer(make([]byte, min(64<<10, maxLineBytes)), maxLineBytes)
 		for sc.Scan() {
 			for _, ev := range mapper.mapLine(sc.Bytes(), p) {
 				if ev.Fatal != nil {
@@ -100,6 +100,16 @@ func startStreamProcess(cmd *exec.Cmd, mapper lineMapper, proto lineProtocol) (*
 				case p.events <- ev:
 				case <-p.closing:
 				}
+			}
+		}
+		if err := sc.Err(); err != nil {
+			// A line over maxLineBytes or a failed read ends the reader; the
+			// child, left writing to a pipe nobody reads, would block and hold
+			// the turn open, so it is ended here with the error.
+			_ = cmd.Process.Kill()
+			select {
+			case p.events <- Event{Fatal: fmt.Errorf("reading %s output: %w", filepath.Base(cmd.Path), err)}:
+			case <-p.closing:
 			}
 		}
 	}()
@@ -149,6 +159,9 @@ func (p *streamProcess) send(v any) { go func() { _ = p.writeLine(v) }() }
 
 // streamWaitDelay bounds how long an exited child's output pipes are read.
 const streamWaitDelay = 2 * time.Second
+
+// maxLineBytes bounds one stdout line; a test lowers it.
+var maxLineBytes = 64 << 20
 
 // controlTimeout bounds the wait for a request's response.
 var controlTimeout = 10 * time.Second

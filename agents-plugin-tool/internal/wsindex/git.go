@@ -16,9 +16,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
-	"time"
+
+	"github.com/kang-sw/devenv/internal/gitbatch"
 )
 
 // Namespace is the protocol-named ref namespace. It is deliberately not
@@ -109,8 +109,7 @@ func (ExecRunner) Run(ctx context.Context, dir string, c Command) ([]byte, error
 	argv := append([]string{"-C", dir}, c.Args...)
 	cmd := exec.CommandContext(ctx, "git", argv...)
 	cmd.Env = append(os.Environ(), c.Env...)
-	cmd.WaitDelay = 300 * time.Millisecond
-	configureKill(cmd)
+	gitbatch.Bound(cmd)
 	if c.Stdin != nil {
 		cmd.Stdin = bytes.NewReader(c.Stdin)
 	}
@@ -146,67 +145,28 @@ var localEnv = []string{
 	"GIT_COMMITTER_EMAIL=ticket-index@localhost",
 }
 
-// remoteArgs prefixes a remote git subcommand with config that disables
-// credential prompting on git versions that understand it (older versions
-// ignore the unknown key).
-func remoteArgs(args ...string) []string {
-	return append([]string{"-c", "credential.interactive=false"}, args...)
-}
-
 // remoteEnv builds the non-interactive environment every remote command runs
-// under: no terminal prompt, no askpass helper, and BatchMode ssh appended to
-// whatever ssh command the user configured.
+// under (gitbatch.RemoteEnv) with the ssh command this clone resolves.
 func (c *Client) remoteEnv(ctx context.Context) []string {
-	env := []string{
-		"GIT_TERMINAL_PROMPT=0",
-		"GIT_ASKPASS=",
-		"SSH_ASKPASS=",
-		"GCM_INTERACTIVE=never",
-	}
-	return append(env, "GIT_SSH_COMMAND="+c.batchSSHCommand(ctx))
+	return gitbatch.RemoteEnv(c.batchSSHCommand(ctx))
 }
 
-// batchSSHCommand preserves the configured ssh command with git's own
-// precedence (GIT_SSH_COMMAND, then core.sshCommand, then GIT_SSH, then ssh)
-// and appends the non-interactive options for its variant.
+// batchSSHCommand is gitbatch.SSHCommand over this client's environment and
+// the clone's core.sshCommand.
 func (c *Client) batchSSHCommand(ctx context.Context) string {
-	base := strings.TrimSpace(c.getenv("GIT_SSH_COMMAND"))
-	if base == "" {
-		if out, err := c.git(ctx, nil, "config", "--get", "core.sshCommand"); err == nil {
-			base = strings.TrimSpace(out)
+	return gitbatch.SSHCommand(c.getenv, func() string {
+		out, err := c.git(ctx, nil, "config", "--get", "core.sshCommand")
+		if err != nil {
+			return ""
 		}
-	}
-	if base == "" {
-		if program := strings.TrimSpace(c.getenv("GIT_SSH")); program != "" {
-			base = shellQuote(program)
-		}
-	}
-	if base == "" {
-		base = "ssh"
-	}
-	if isPlink(base) {
-		return base + " -batch"
-	}
-	return base + " -o BatchMode=yes -o ConnectTimeout=5"
-}
-
-func isPlink(command string) bool {
-	fields := strings.Fields(command)
-	if len(fields) == 0 {
-		return false
-	}
-	name := strings.ToLower(filepath.Base(strings.Trim(fields[0], `'"`)))
-	return strings.Contains(name, "plink")
-}
-
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+		return out
+	})
 }
 
 // remote runs a remote git command under the non-interactive environment.
 // The caller's ctx carries the hard timeout.
 func (c *Client) remote(ctx context.Context, args ...string) (string, error) {
 	env := append(append([]string{}, localEnv...), c.remoteEnv(ctx)...)
-	out, err := c.runner.Run(ctx, c.root, Command{Args: remoteArgs(args...), Env: env, Remote: true})
+	out, err := c.runner.Run(ctx, c.root, Command{Args: gitbatch.RemoteArgs(args...), Env: env, Remote: true})
 	return string(out), err
 }

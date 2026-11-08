@@ -15,7 +15,11 @@ func TestRedactsRemoteCredentials(t *testing.T) {
 		"ssh://git@github.com/o/r.git":                         "ssh://git@github.com/o/r.git",
 		"https://github.com/o/r.git":                           "https://github.com/o/r.git",
 		"https://user:p@ss@host/x.git":                         "https://***@host/x.git",
-		"clone https://u:a@b@c@host/r and https://h/p?q=a@b":   "clone https://***@host/r and https://h/p?q=a@b",
+		"clone https://u:a@b@c@host/r and https://h/p?q=a@b":   "clone https://***@host/r and https://h/p?q=***",
+		"https://host/r.git?private_token=glpat-x&ref=main":    "https://host/r.git?private_token=***&ref=***",
+		"fetch 'https://u:p@host/r?access_token=abc' failed":   "fetch 'https://***@host/r?access_token=***' failed",
+		"https://host/r.git?sigsecret#frag":                    "https://host/r.git?***#frag",
+		"see https://host/docs?q=1 and ssh://h/r?x=1":          "see https://host/docs?q=*** and ssh://h/r?x=1",
 	} {
 		if got := RedactCredentials(in); got != want {
 			t.Fatalf("RedactCredentials(%q) = %q, want %q", in, got, want)

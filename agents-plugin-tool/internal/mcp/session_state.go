@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -15,9 +16,10 @@ import (
 // per-session record store (session_auth.go): the agenda namespace (freeform
 // session-level blobs) and the todos namespace (ordered step-level checklist).
 //
-// All disk persistence reuses the existing sessionRecord file
-// (<cache-root>/keys/<session-key>.json), its atomic temp+rename writer
-// (writeRecordAtomic), and reader (readRecord). The pure list logic here is kept
+// All disk persistence goes through the session key store's part files
+// (session_layout.go): the agenda lives in agenda.json and the todo list in
+// todos.json, each written atomically, so an agenda write never rewrites the
+// todos and neither rewrites the whiteboard. The pure list logic here is kept
 // free of disk I/O so it can be table-tested without the server or filesystem.
 
 // todoStatus is the lifecycle state of a single todo item. Unknown values are
@@ -578,15 +580,6 @@ func joinHumanList(items []string) string {
 	}
 }
 
-// deriveProceedTodos mirrors the proceed route sequence: build route context,
-// then resolve the MCP verdict with an executable Next instruction.
-func deriveProceedTodos() []todoItem {
-	return withPendingStatus([]todoItem{
-		{Key: "route-context", Title: "Build route context"},
-		{Key: "resolve-verdict", Title: "Resolve MCP verdict"},
-	})
-}
-
 // withPendingStatus stamps every item with pending status. Derivation builders
 // leave Status empty for brevity.
 func withPendingStatus(items []todoItem) []todoItem {
@@ -599,39 +592,69 @@ func withPendingStatus(items []todoItem) []todoItem {
 // --- store-bound read-modify-write wrappers ----------------------------------
 
 // mutateRecord runs fn against the session record for sessionKey under s.mu and
-// persists the result atomically. It is the shared read-modify-write primitive
-// for every agenda/todo mutation, matching the discipline of setOverride.
-func (s *sessionStore) mutateRecord(sessionKey string, fn func(*sessionRecord) error) error {
-	dir, err := s.keysDir()
-	if err != nil {
-		return err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	record, ok := s.readRecord(dir, sessionKey)
-	if !ok {
-		return fmt.Errorf("session key not found: %s", sessionKey)
-	}
-	if err := fn(&record); err != nil {
-		return err
-	}
-	return s.writeRecordAtomic(dir, sessionKey, record)
+// persists the parts in write atomically, reading key.json and those parts
+// first. It is the shared read-modify-write primitive for every session
+// record mutation, so fn must change only fields of the parts it names: a
+// change to any other part is not written.
+func (s *sessionStore) mutateRecord(sessionKey string, write recordPart, fn func(*sessionRecord) error) error {
+	return s.mutateRecordParts(sessionKey, write, write, fn)
 }
 
-// readState returns a snapshot of the session record for read-only callers
-// (e.g. ws.todo.list). It holds s.mu to avoid racing a concurrent write.
-func (s *sessionStore) readState(sessionKey string) (sessionRecord, bool) {
-	dir, err := s.keysDir()
+// mutateRecordParts is mutateRecord for an fn that also reads parts it does
+// not write (the whiteboard render reads the agenda and todos for its
+// panels): read and write are both loaded, only write is persisted.
+//
+// A legacy record (session_layout.go) is loaded whole and its first mutation
+// migrates it: every part and key.json land in the split layout and the
+// legacy file goes. A write to a split record also removes a legacy file a
+// crash left behind mid-migration. fn returning errRecordUnchanged writes
+// nothing, migration included.
+func (s *sessionStore) mutateRecordParts(sessionKey string, read, write recordPart, fn func(*sessionRecord) error) error {
+	d, err := s.dirs()
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	record, legacy, err := s.loadRecord(d, sessionKey, read|write, nil)
+	if errors.Is(err, errSessionNotFound) {
+		return fmt.Errorf("session key not found: %s", sessionKey)
+	}
+	if err != nil {
+		return err
+	}
+	if err := fn(&record); err != nil {
+		if errors.Is(err, errRecordUnchanged) {
+			return nil
+		}
+		return err
+	}
+	if legacy {
+		return s.migrateRecord(d, sessionKey, &record)
+	}
+	if err := s.writeParts(d, sessionKey, &record, write); err != nil {
+		return err
+	}
+	removeLegacyRecord(d, sessionKey)
+	return nil
+}
+
+// readState returns a snapshot of the session record's key.json and the parts
+// in parts for read-only callers (e.g. ws.todo.list); a legacy record comes
+// whole. It holds s.mu to avoid racing a concurrent write, touches the
+// record, and never migrates it.
+func (s *sessionStore) readState(sessionKey string, parts recordPart) (sessionRecord, bool) {
+	d, err := s.dirs()
 	if err != nil {
 		return sessionRecord{}, false
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	record, ok := s.readRecord(dir, sessionKey)
+	record, ok := s.readRecord(d, sessionKey, parts)
 	if !ok {
 		return sessionRecord{}, false
 	}
-	s.touch(dir, sessionKey)
+	s.touch(d, sessionKey)
 	return record, true
 }
 
@@ -646,7 +669,7 @@ func (s *sessionStore) setAgenda(sessionKey, key string, value json.RawMessage) 
 // write, so a concurrent mutation cannot skew the reported total.
 func (s *sessionStore) setAgendaNote(sessionKey, key string, value json.RawMessage) (string, error) {
 	var note string
-	err := s.mutateRecord(sessionKey, func(r *sessionRecord) error {
+	err := s.mutateRecord(sessionKey, partAgenda, func(r *sessionRecord) error {
 		if r.Agenda == nil {
 			r.Agenda = map[string]json.RawMessage{}
 		}
@@ -663,7 +686,7 @@ func (s *sessionStore) setAgendaNote(sessionKey, key string, value json.RawMessa
 // patched as {}.
 func (s *sessionStore) mergeAgendaNote(sessionKey, key string, patch json.RawMessage) (string, error) {
 	var note string
-	err := s.mutateRecord(sessionKey, func(r *sessionRecord) error {
+	err := s.mutateRecord(sessionKey, partAgenda, func(r *sessionRecord) error {
 		var target any
 		if stored, ok := r.Agenda[key]; ok {
 			decoded, err := decodeJSONNumber(stored)
@@ -726,7 +749,7 @@ func jsonMergePatch(target, patch any) any {
 
 // clearAgenda removes the agenda blob for key. A missing key is a no-op.
 func (s *sessionStore) clearAgenda(sessionKey, key string) error {
-	return s.mutateRecord(sessionKey, func(r *sessionRecord) error {
+	return s.mutateRecord(sessionKey, partAgenda, func(r *sessionRecord) error {
 		delete(r.Agenda, key)
 		if len(r.Agenda) == 0 {
 			r.Agenda = nil
@@ -738,18 +761,20 @@ func (s *sessionStore) clearAgenda(sessionKey, key string) error {
 // clearAllAgenda removes every agenda blob for the session. An already-empty
 // agenda map is a no-op.
 func (s *sessionStore) clearAllAgenda(sessionKey string) error {
-	return s.mutateRecord(sessionKey, func(r *sessionRecord) error {
+	return s.mutateRecord(sessionKey, partAgenda, func(r *sessionRecord) error {
 		r.Agenda = nil
 		return nil
 	})
 }
 
-// enterMode atomically stores the typed payload as an agenda blob under
-// agendaKey and replaces the entire todo list with todos. This is the single
-// write behind every ws.route.resolve_* tool: agenda update and todo replacement land
-// together so a reader never observes a half-applied mode switch.
+// enterMode stores the typed payload as an agenda blob under agendaKey and
+// replaces the entire todo list with todos. This is the single write behind
+// every ws.route.resolve_* tool: agenda update and todo replacement land in
+// one s.mu critical section, so no reader in this process observes a
+// half-applied mode switch. They are two part files, though, so a reader in
+// another process can, for the moment between the two renames.
 func (s *sessionStore) enterMode(sessionKey, agendaKey string, payload json.RawMessage, todos []todoItem) error {
-	return s.mutateRecord(sessionKey, func(r *sessionRecord) error {
+	return s.mutateRecord(sessionKey, partAgenda|partTodos, func(r *sessionRecord) error {
 		if r.Agenda == nil {
 			r.Agenda = map[string]json.RawMessage{}
 		}
@@ -761,7 +786,7 @@ func (s *sessionStore) enterMode(sessionKey, agendaKey string, payload json.RawM
 
 // mutateTodos applies a pure list mutation to the stored todo list.
 func (s *sessionStore) mutateTodos(sessionKey string, fn func([]todoItem) ([]todoItem, error)) error {
-	return s.mutateRecord(sessionKey, func(r *sessionRecord) error {
+	return s.mutateRecord(sessionKey, partTodos, func(r *sessionRecord) error {
 		next, err := fn(r.Todos)
 		if err != nil {
 			return err
@@ -773,7 +798,7 @@ func (s *sessionStore) mutateTodos(sessionKey string, fn func([]todoItem) ([]tod
 
 func (s *sessionStore) mutateTodosResult(sessionKey string, fn func([]todoItem) ([]todoItem, error)) ([]todoItem, error) {
 	var updated []todoItem
-	if err := s.mutateRecord(sessionKey, func(r *sessionRecord) error {
+	if err := s.mutateRecord(sessionKey, partTodos, func(r *sessionRecord) error {
 		next, err := fn(r.Todos)
 		if err != nil {
 			return err
@@ -962,7 +987,7 @@ func (s *Server) handleAgendaList(id json.RawMessage, args map[string]any) respo
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
-	record, ok := s.sessions.readState(sessionKey)
+	record, ok := s.sessions.readState(sessionKey, partAgenda)
 	if !ok {
 		return toolTextResponse(id, "", fmt.Errorf("%s: session key not found: %s", tool, sessionKey))
 	}
@@ -1003,7 +1028,7 @@ func (s *Server) handleEnter(id json.RawMessage, tool, mode string, args map[str
 		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
 	}
 	text := fmt.Sprintf("entered %s mode; todo list replaced (%d items)\n%s\n", mode, len(todos), renderTodos(todos, false))
-	if record, ok := s.sessions.readState(sessionKey); ok {
+	if record, ok := s.sessions.readState(sessionKey, partKey); ok {
 		if reviewNudge := wsreview.CheckpointNudge(context.Background(), record.Root); reviewNudge != "" {
 			text += "review-watermark: " + reviewNudge + "\n"
 		}
@@ -1025,7 +1050,7 @@ func (s *Server) handleEnterImplement(id json.RawMessage, args map[string]any) r
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
-	record, ok := s.sessions.readState(sessionKey)
+	record, ok := s.sessions.readState(sessionKey, partKey)
 	if !ok {
 		return toolTextResponse(id, "", fmt.Errorf("%s: session key not found: %s", tool, sessionKey))
 	}
@@ -1073,56 +1098,6 @@ func (s *Server) handleEnterImplement(id json.RawMessage, args map[string]any) r
 		raw += "review-watermark: " + reviewNudge + "\n"
 	}
 	return toolTextResponse(id, raw, nil)
-}
-
-func (s *Server) handleEnterProceed(id json.RawMessage, args map[string]any) response {
-	const tool = "route.resolve_proceed"
-	sessionKey, err := sessionStateKey(tool, args)
-	if err != nil {
-		return toolTextResponse(id, "", err)
-	}
-	typedArgs, _, err := routeEnvelope(tool, args)
-	if err != nil {
-		return toolTextResponse(id, "", err)
-	}
-	input, err := parseProceedInput(typedArgs)
-	if err != nil {
-		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
-	}
-	// Read session state before resolving so the binding-anchor gate reflects
-	// whether this project declares a `### Binding Anchor`; when it does not,
-	// resolveProceed normalizes the anchor fact to n/a regardless of the
-	// supplied facts.gates.binding_anchor value. The same record feeds the
-	// review-watermark nudge below (no duplicate read).
-	record, haveRecord := s.sessions.readState(sessionKey)
-	if haveRecord {
-		input.AnchorDeclared = wsreview.ReadAgentsBindingAnchor(record.Root).Declared
-	}
-	result := resolveProceed(input)
-	rawAgenda, err := json.Marshal(result.Agenda)
-	if err != nil {
-		return toolTextResponse(id, "", fmt.Errorf("%s: agenda is not JSON-encodable: %w", tool, err))
-	}
-	todos := deriveProceedTodos()
-	if err := s.sessions.enterMode(sessionKey, "proceed", rawAgenda, todos); err != nil {
-		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
-	}
-	// Append the review-watermark nudge to result.Raw before branching on
-	// format, so the JSON result's Raw field mirrors the text output exactly
-	// (TestEnterProceedJSONIncludesRawVerdict). Appending only in the text
-	// branch left the two formats out of parity whenever the nudge is
-	// non-empty — latent until 260830 made the baseline arm reachable on
-	// trackless repos.
-	if haveRecord {
-		if reviewNudge := wsreview.CheckpointNudge(context.Background(), record.Root); reviewNudge != "" {
-			result.Raw += "review-watermark: " + reviewNudge + "\n"
-		}
-	}
-	if input.Format == "json" {
-		text, err := proceedResultJSON(result)
-		return toolTextResponse(id, text, err)
-	}
-	return toolTextResponse(id, result.Raw, nil)
 }
 
 func (s *Server) handleTodoAdd(id json.RawMessage, args map[string]any) response {
@@ -1257,7 +1232,7 @@ func (s *Server) handleTodoList(id json.RawMessage, args map[string]any) respons
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
-	record, ok := s.sessions.readState(sessionKey)
+	record, ok := s.sessions.readState(sessionKey, partTodos)
 	if !ok {
 		return toolTextResponse(id, "", fmt.Errorf("%s: session key not found: %s", tool, sessionKey))
 	}
@@ -1275,7 +1250,7 @@ func (s *Server) handleTodoRead(id json.RawMessage, args map[string]any) respons
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
-	record, ok := s.sessions.readState(sessionKey)
+	record, ok := s.sessions.readState(sessionKey, partTodos)
 	if !ok {
 		return toolTextResponse(id, "", fmt.Errorf("%s: session key not found: %s", tool, sessionKey))
 	}

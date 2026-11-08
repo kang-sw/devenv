@@ -15,6 +15,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/kang-sw/devenv/internal/gitbatch"
 )
 
 // Scenario IDs in test names (TestA2..., TestB3..., TestI5..., and so on)
@@ -100,7 +102,7 @@ func hangingSSH(t *testing.T, c *testClone) {
 	t.Helper()
 	script := filepath.Join(c.h.dir, "hang-ssh.sh")
 	writeExecutable(t, script, hangTransport(t, c.h.dir))
-	gitT(t, c.root, "config", "core.sshCommand", shellQuote(filepath.ToSlash(script)))
+	gitT(t, c.root, "config", "core.sshCommand", gitbatch.ShellQuote(filepath.ToSlash(script)))
 	c.setOriginURL("ssh://git@wsindex.invalid/repo.git")
 }
 
@@ -150,7 +152,7 @@ while kill -0 "$c" 2>/dev/null; do
 done
 wait "$c" 2>/dev/null
 rm -f "$live/$$"
-`, shellQuote(filepath.ToSlash(live)), shellQuote(filepath.ToSlash(stop)))
+`, gitbatch.ShellQuote(filepath.ToSlash(live)), gitbatch.ShellQuote(filepath.ToSlash(stop)))
 }
 
 // stopHangTransports raises the stop file and, on Windows, waits for every

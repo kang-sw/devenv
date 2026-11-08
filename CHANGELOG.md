@@ -42,6 +42,18 @@
   retained; its routes now name `lead-run` and `lead-ticket` instead of the
   retired skills.
 
+### Removed
+- **The `review-adjudicator`, `implementer-relay`, and `implementer-elevated`
+  delegate playbooks.** The two-round worker-owned review model left all three
+  with no caller; only their own render tests kept them alive. They are gone
+  from the `ws`, `wsflow`, and Pi rsrc trees and manifests.
+- **The `session.note` MCP tool.** Its only caller was the retired fan-out
+  skill and it never shipped in a release. `session.children` still reads and
+  filters (`unnoted_only`) a note already stored on a child record.
+- **The `route.resolve_proceed` MCP tool and its resolver.** Its only entry
+  point was the retired routing skill, and no shipped skill or playbook calls
+  it. `route.resolve_implement` keeps the shared fact-parsing helpers.
+
 ## v0.42.0 - 2026-08-23
 
 ### Changed

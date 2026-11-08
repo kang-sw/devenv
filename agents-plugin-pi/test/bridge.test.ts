@@ -69,10 +69,10 @@ const BUNDLED_RUNTIME = JSON.parse(readFileSync(join(TEST_DIR, "..", "runtime.js
 // to the bundled contract below; it is not an independent hand-maintained
 // contract source.
 const LIVE_TOOL_NAMES = [
-  "runtime.read", "runtime.debug_events", "session.children", "session.note",
+  "runtime.read", "runtime.debug_events", "session.children",
   "mailbox.send", "mailbox.recv", "mailbox.lookup_peers",
   "ferrule", "agenda.set", "agenda.clear", "agenda.list",
-  "route.resolve_implement", "route.resolve_proceed", "todo.add", "todo.check",
+  "route.resolve_implement", "todo.add", "todo.check",
   "todo.erase", "todo.clear", "todo.list", "todo.read", "todo.reorder",
   "api.list", "config.list", "config.tune", "config.get", "config.resolve_agent",
   "git.status", "git.resolve_impl_branch", "git.diff", "git.log", "git.merge_base", "git.merge",
@@ -84,10 +84,13 @@ const LIVE_TOOL_NAMES = [
   "tickets.index_init", "path.generate", "workflow_manual",
   "workflow_state", "playbook.read", "playbook.render", "rationale.query", "git.followups",
   "worktree.acquire", "worktree.release", "worktree.remove", "worktree.list",
+  "mailbox.history", "dashboard.inbox_drain", "dashboard.intake",
+  "tracker.query", "tracker.update", "whiteboard.query", "whiteboard.update",
 ];
 const RETIRED_TOOL_NAMES = [
   "specs.query", "mental_models.list", "mental_models.query", "mental_models.status",
-  "references.trace", "spec_index.verify", "spec_stem.generate",
+  "references.trace", "spec_index.verify", "spec_stem.generate", "session.note",
+  "route.resolve_proceed",
 ];
 const EXPECTED_COMMAND_NAMES = [
   "runtime.info", "runtime.capabilities", "smoke", "config.list", "config.tune",
@@ -112,9 +115,10 @@ describe("sanitizeToolName", () => {
     assert.equal(sanitizeToolName("ferrule"), "ws__ferrule");
   });
 
-  test("captured tool set exactly matches the bundled 65-tool contract", () => {
+  test("captured tool set exactly matches the bundled tool contract", () => {
+    // No hard-coded tool count: the deepEqual below is the drift signal, and a
+    // magic number only rots when runtime.json gains a tool.
     const bundledToolNames = Object.keys(BUNDLED_RUNTIME.tools).sort();
-    assert.equal(bundledToolNames.length, 65);
     assert.deepEqual([...LIVE_TOOL_NAMES].sort(), bundledToolNames);
     assert.ok(bundledToolNames.includes("git.merge"));
     for (const retiredName of RETIRED_TOOL_NAMES) {

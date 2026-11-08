@@ -118,7 +118,7 @@ type item struct {
 // attachment is attachment metadata as folded; oid is the content's sha256.
 type attachment struct {
 	oid, name, mime string
-	size            int64
+	size            float64 // the engine's number; never converted to int (see posIntOf)
 }
 
 // rec is one assignment record: "<assign or handoff event id>><member>".
@@ -185,7 +185,7 @@ type state struct {
 	corder   []string
 	reg      map[string][]head
 	prio     priority
-	attMax   int // attachments.max_bytes
+	attMax   float64 // attachments.max_bytes, the engine's number (posIntOf)
 }
 
 // genesis is the parsed roles.json the fold starts from.
@@ -194,7 +194,7 @@ type genesis struct {
 	members []*member
 	admins  []string
 	prio    priority
-	attMax  int
+	attMax  float64
 }
 
 func parseGenesis(raw json.RawMessage) *genesis {
@@ -203,7 +203,7 @@ func parseGenesis(raw json.RawMessage) *genesis {
 		g.prio = normPriority(obj(p))
 	}
 	if a, ok := g.raw["attachments"].(map[string]any); ok {
-		if v, ok := obj(a).intOf("max_bytes"); ok && v > 0 {
+		if v, ok := obj(a).posIntOf("max_bytes"); ok {
 			g.attMax = v
 		}
 	}
@@ -311,7 +311,7 @@ func rolesProblems(r obj) []string {
 	}
 	if a := r["attachments"]; truthy(a) {
 		ao, _ := a.(map[string]any)
-		if v, ok := obj(ao).intOf("max_bytes"); !ok || v <= 0 {
+		if _, ok := obj(ao).posIntOf("max_bytes"); !ok {
 			out = append(out, "attachments.max_bytes must be a positive integer")
 		}
 	}
@@ -694,7 +694,7 @@ func attachmentsOf(p obj) []attachment {
 			a = obj(m)
 		}
 		size, _ := a["size"].(float64)
-		out = append(out, attachment{oid: a.str("oid"), name: a.str("name"), mime: a.str("mime"), size: int64(size)})
+		out = append(out, attachment{oid: a.str("oid"), name: a.str("name"), mime: a.str("mime"), size: size})
 	}
 	return out
 }
@@ -1090,8 +1090,8 @@ func (s *state) apply(n *node) {
 		d, _ := n.p.intOf("default")
 		s.prio = s.write("prio", "priority levels", n, priority{names: p.strList("names"), def: d}).(priority)
 	case TypeSetAttachmentLimit:
-		v, _ := p.intOf("max_bytes")
-		s.attMax = s.write("att", "attachment limit", n, v).(int)
+		v, _ := p.posIntOf("max_bytes")
+		s.attMax = s.write("att", "attachment limit", n, v).(float64)
 	}
 	if strings.HasPrefix(n.typ, "roles.") || n.typ == TypeItemAssign || n.typ == wsledger.TypeMemberJoin {
 		s.refreshLive(n)

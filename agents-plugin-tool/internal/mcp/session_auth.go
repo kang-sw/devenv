@@ -3,17 +3,13 @@ package mcp
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
-	"path/filepath"
 	"regexp"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wskey"
-	"github.com/kang-sw/devenv/internal/wsstate"
 	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
 
@@ -45,14 +41,15 @@ type sessionChild struct {
 	note   string
 }
 
-// sessionRecord is the on-disk JSON shape of a session entry. It is versioned so
-// the format can grow (render lineage, permission/capability metadata) without a
-// migration; unknown future fields are simply ignored by older readers.
+// sessionKeyRecord is key.json's shape (session_layout.go): the session's
+// identity and its small fields. It is versioned so the format can grow
+// (render lineage, permission/capability metadata) without a migration;
+// unknown future fields are simply ignored by older readers.
 //
 // Note: retired typed fields are not migrated. Old records carrying a field
-// this struct no longer declares are silently ignored on read (Go's
+// these structs no longer declare are silently ignored on read (Go's
 // json.Unmarshal drops unknown fields).
-type sessionRecord struct {
+type sessionKeyRecord struct {
 	SchemaVersion int    `json:"schema_version"`
 	Root          string `json:"root"`
 	Scope         string `json:"scope"`
@@ -61,17 +58,10 @@ type sessionRecord struct {
 	// identifiers; values are string-encoded config values. Added as an additive
 	// field; existing records without it parse with a nil map.
 	Overrides map[string]string `json:"overrides,omitempty"`
-	// Agenda holds session-level mode-context blobs keyed by name. Values are
-	// arbitrary JSON objects (typed enter-payloads or freeform notes). Added as
-	// an additive field; older records parse with a nil map. See session_state.go.
-	Agenda map[string]json.RawMessage `json:"agenda,omitempty"`
-	// Todos is the ordered step-level checklist for the session. Added as an
-	// additive field; older records parse with a nil slice. See session_state.go.
-	Todos []todoItem `json:"todos,omitempty"`
-	// Note is a free-form one-line annotation a lead attaches to this child's own
-	// record via session.note. Empty is the same as absent (omitempty) so a
-	// "clear the note" write is just writing an empty string, not a separate
-	// verb. See session_state.go's handleSessionNote.
+	// Note is a free-form one-line annotation on this child's own record,
+	// surfaced and filtered (unnoted_only) by session.children. Its writer,
+	// session.note, is retired; the field stays so records that already carry a
+	// note keep reading back through session.children unchanged.
 	Note string `json:"note,omitempty"`
 	// ReviewTrackNudgeShown marks that the review-track config nudge (see
 	// review_track_alarm.go) has already fired once for this session. Added as
@@ -88,22 +78,40 @@ type sessionRecord struct {
 	// as an additive field; older records parse with the zero value
 	// (false), the correct "never opened" default.
 	MailboxReplyOpened bool `json:"mailbox_reply_opened,omitempty"`
-	// Whiteboard is the session whiteboard's item store (whiteboard_tools.go).
-	// Nil until the first whiteboard.update creates the board; its presence
-	// also gates the implicit todo/agenda re-render. Additive field; older
-	// records parse with nil.
+}
+
+// sessionRecord is a session's whole record in memory: key.json plus its
+// part files (session_layout.go). A reader fills only the parts it asked
+// for. The embedded sessionKeyRecord's fields flatten into one JSON object,
+// which is exactly the legacy one-file record, so a legacy file still
+// decodes into sessionRecord unchanged.
+type sessionRecord struct {
+	sessionKeyRecord
+	// Agenda holds session-level mode-context blobs keyed by name
+	// (agenda.json). Values are arbitrary JSON objects (typed enter-payloads
+	// or freeform notes). Nil when empty. See session_state.go.
+	Agenda map[string]json.RawMessage `json:"agenda,omitempty"`
+	// Todos is the ordered step-level checklist for the session (todos.json).
+	// Nil when empty. See session_state.go.
+	Todos []todoItem `json:"todos,omitempty"`
+	// Whiteboard is the session whiteboard's item store (whiteboard.json,
+	// whiteboard_tools.go). Nil until the first whiteboard.update creates the
+	// board; its presence also gates the implicit todo/agenda re-render.
 	Whiteboard *wswhiteboard.State `json:"whiteboard,omitempty"`
 }
 
-const sessionRecordSchemaVersion = 1
+// sessionRecordSchemaVersion is key.json's schema version. Version 1 was the
+// legacy one-file record; version 2 is the split layout's key.json.
+const sessionRecordSchemaVersion = 2
 
 // touchGuardWindow throttles touch() so a burst of keyed calls against the same
 // session only issues one Chtimes per window, not one per call.
 //
-// pruneScanCadence bounds how often maybePrune() actually walks keys/: a scan
-// is skipped if the prune marker was refreshed less than this long ago.
+// pruneScanCadence bounds how often maybePrune() actually walks the key
+// store: a scan is skipped if the prune marker was refreshed less than this
+// long ago.
 //
-// keyRetentionAge is the mtime age past which a key record file is pruned.
+// keyRetentionAge is the mtime age past which a key record is pruned.
 // Touch keeps active sessions' mtimes fresh, so retention only bites records
 // that have gone genuinely idle for this long.
 const (
@@ -113,9 +121,9 @@ const (
 )
 
 // pruneMarkerName is a bookkeeping file (not a session key) placed directly in
-// keys/ to record when the last prune scan ran. It deliberately has a
-// non-".json" extension so children's directory walk (which filters to
-// ".json" entries) and mint's key namespace both ignore it automatically.
+// sessions/ to record when the last prune scan ran. It is a file, not a
+// directory, and its leading dot is outside sessionKeyFilenamePattern, so
+// listKeys and mint's key namespace both ignore it automatically.
 const pruneMarkerName = ".prune-marker"
 
 // sessionKeyFilenamePattern bounds which key strings may become a file path. It
@@ -125,24 +133,25 @@ const pruneMarkerName = ".prune-marker"
 // "../../etc/passwd" handed to lookup by an untrusted caller.
 var sessionKeyFilenamePattern = regexp.MustCompile(`^[a-z0-9-]{1,128}$`)
 
-// sessionStore maps ephemeral session keys to session entries using one JSON
-// file per key under a flat keys/ directory in the ws cache root. The file is
-// the source of truth, not the process: a fresh MCP server instance (or a lead
-// that restarted mid-delegation) resolves a key by reading its file, so session
-// continuity no longer depends on a shared in-memory registry. There is no
-// logout, but records do age out: every successful keyed resolution touches a
-// record's mtime (see touch, guarded to at most once per touchGuardWindow),
-// and maybePrune deletes records whose mtime exceeds keyRetentionAge, scanned
-// at most once per pruneScanCadence. Deleting the file remains the only
-// immediate/manual removal path.
+// sessionStore maps ephemeral session keys to session entries using one
+// directory per key in the ws cache root (layout: session_layout.go). The
+// files are the source of truth, not the process: a fresh MCP server instance
+// (or a lead that restarted mid-delegation) resolves a key by reading its
+// key.json, so session continuity no longer depends on a shared in-memory
+// registry. There is no logout, but records do age out: every successful
+// keyed resolution touches a record's activity mark (see touch, guarded to at
+// most once per touchGuardWindow), and maybePrune deletes records whose mark
+// is older than keyRetentionAge, scanned at most once per pruneScanCadence.
+// Deleting the record remains the only immediate/manual removal path.
 //
-// The flat layout (keys/<key>.json) is required by the access pattern: a caller
-// presents only the opaque key, never its root, so the file path must be
+// The flat per-key layout is required by the access pattern: a caller
+// presents only the opaque key, never its root, so the record path must be
 // derivable from the key plus the globally-deterministic cache root.
 type sessionStore struct {
 	// mu serializes same-process read-modify-write and the mint claim loop.
-	// Cross-process safety rests on filesystem primitives: O_EXCL create for the
-	// unique mint claim, atomic temp+rename for updates.
+	// Cross-process safety rests on filesystem primitives: an exclusive
+	// directory create for the unique mint claim, atomic temp+rename per part
+	// file for updates.
 	mu sync.Mutex
 }
 
@@ -150,44 +159,24 @@ func newSessionStore() *sessionStore {
 	return &sessionStore{}
 }
 
-// keysDir resolves and creates the flat per-session key directory. The cache
-// root honors WS_CACHE_HOME (and otherwise ~/.cache/ws@...), the same seam every
-// other ws cache artifact uses, so all server instances agree on the location.
-func (s *sessionStore) keysDir() (string, error) {
-	cacheRoot, err := wsstate.CacheRoot(wsstate.Options{})
-	if err != nil {
-		return "", err
-	}
-	dir := filepath.Join(cacheRoot, "keys")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", fmt.Errorf("create session keys dir: %w", err)
-	}
-	return dir, nil
-}
-
-func (s *sessionStore) keyPath(dir, key string) string {
-	return filepath.Join(dir, key+".json")
-}
-
-// mint generates a unique session key and writes its record file.
+// mint generates a unique session key and writes its key.json.
 //
-// Uniqueness is claimed at the filesystem level: O_CREATE|O_EXCL creates the
-// final file atomically, so two processes (or goroutines) generating the same
-// candidate cannot both succeed — the loser sees os.IsExist and retries with a
-// fresh candidate. This is the cross-process analogue of the previous in-memory
-// check-and-insert and has no TOCTOU window.
+// Uniqueness is claimed at the filesystem level (claimKey): creating the key's
+// directory is atomic, so two processes (or goroutines) generating the same
+// candidate cannot both succeed — the loser retries with a fresh candidate. A
+// candidate a legacy record file already holds is taken too. Only the split
+// layout is ever minted into.
 func (s *sessionStore) mint(root string, scope toolRole, parent string) (string, error) {
-	dir, err := s.keysDir()
+	d, err := s.dirs()
 	if err != nil {
 		return "", err
 	}
-	record := sessionRecord{
+	payload, err := json.Marshal(sessionKeyRecord{
 		SchemaVersion: sessionRecordSchemaVersion,
 		Root:          root,
 		Scope:         string(scope),
 		Parent:        parent,
-	}
-	payload, err := json.Marshal(record)
+	})
 	if err != nil {
 		return "", err
 	}
@@ -200,23 +189,14 @@ func (s *sessionStore) mint(root string, scope toolRole, parent string) (string,
 		if err != nil {
 			return "", err
 		}
-		f, err := os.OpenFile(s.keyPath(dir, candidate), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		claimed, err := s.claimKey(d, candidate, payload)
 		if err != nil {
-			if os.IsExist(err) {
-				continue // rare collision; generate a fresh candidate and retry
-			}
-			return "", fmt.Errorf("create session key file: %w", err)
+			return "", err
 		}
-		if _, werr := f.Write(payload); werr != nil {
-			f.Close()
-			os.Remove(s.keyPath(dir, candidate)) // do not leave a half-written claim behind
-			return "", fmt.Errorf("write session key file: %w", werr)
+		if claimed {
+			return candidate, nil
 		}
-		if cerr := f.Close(); cerr != nil {
-			os.Remove(s.keyPath(dir, candidate))
-			return "", fmt.Errorf("close session key file: %w", cerr)
-		}
-		return candidate, nil
+		// rare collision; generate a fresh candidate and retry
 	}
 	return "", errors.New("mcp: could not mint a unique session key after many attempts")
 }
@@ -224,16 +204,18 @@ func (s *sessionStore) mint(root string, scope toolRole, parent string) (string,
 // lookup returns the session entry for the given key and whether it was found.
 // A malformed key (path-unsafe, or simply unknown) returns (zero, false), which
 // callers translate into the unknown_session re-login contract.
+//
+// It reads key.json alone (a legacy record file whole), never a part file.
 func (s *sessionStore) lookup(key string) (sessionEntry, bool) {
-	dir, err := s.keysDir()
+	d, err := s.dirs()
 	if err != nil {
 		return sessionEntry{}, false
 	}
-	record, ok := s.readRecord(dir, key)
+	record, ok := s.readRecord(d, key, partKey)
 	if !ok {
 		return sessionEntry{}, false
 	}
-	s.touch(dir, key)
+	s.touch(d, key)
 	return sessionEntry{
 		root:   record.Root,
 		scope:  toolRole(record.Scope),
@@ -241,32 +223,34 @@ func (s *sessionStore) lookup(key string) (sessionEntry, bool) {
 	}, true
 }
 
-// recordMtime returns key's record mtime and whether the record exists and
-// parses. Unlike lookup it never touches the record: an inspection read (such
-// as worktree.list reporting a lease holder) must not fabricate activity on the
-// keys it reports.
+// recordMtime returns the mtime of key's activity mark (key.json, or a legacy
+// record file) and whether the record exists and parses. Unlike lookup it
+// never touches the record: an inspection read (such as worktree.list
+// reporting a lease holder) must not fabricate activity on the keys it
+// reports.
 func (s *sessionStore) recordMtime(key string) (time.Time, bool) {
-	dir, err := s.keysDir()
+	d, err := s.dirs()
 	if err != nil {
 		return time.Time{}, false
 	}
-	if _, ok := s.readRecord(dir, key); !ok {
+	if _, ok := s.readRecord(d, key, partKey); !ok {
 		return time.Time{}, false
 	}
-	info, err := os.Stat(s.keyPath(dir, key))
-	if err != nil {
+	_, info, ok := activityMark(d, key)
+	if !ok {
 		return time.Time{}, false
 	}
 	return info.ModTime(), true
 }
 
-// children returns the descendants of parentKey from the flat keys store,
-// ordered deterministically (depth, then key). maxDepth bounds the walk:
-// maxDepth >= 1 returns that many levels; maxDepth <= 0 returns the full
-// subtree. The queried key itself is not included. A cycle guard prevents
-// infinite loops on malformed parent edges.
+// children returns the descendants of parentKey from the key store (both
+// layouts; key.json alone per split record), ordered deterministically
+// (depth, then key). maxDepth bounds the walk: maxDepth >= 1 returns that
+// many levels; maxDepth <= 0 returns the full subtree. The queried key itself
+// is not included. A cycle guard prevents infinite loops on malformed parent
+// edges.
 func (s *sessionStore) children(parentKey string, maxDepth int) ([]sessionChild, error) {
-	dir, err := s.keysDir()
+	d, err := s.dirs()
 	if err != nil {
 		return nil, err
 	}
@@ -274,19 +258,15 @@ func (s *sessionStore) children(parentKey string, maxDepth int) ([]sessionChild,
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	entries, err := os.ReadDir(dir)
+	keys, err := s.listKeys(d)
 	if err != nil {
-		return nil, fmt.Errorf("read session keys dir: %w", err)
+		return nil, err
 	}
 
 	records := map[string]sessionRecord{}
 	adjacency := map[string][]string{}
-	for _, entry := range entries {
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
-			continue
-		}
-		key := strings.TrimSuffix(entry.Name(), ".json")
-		record, ok := s.readRecord(dir, key)
+	for _, key := range keys {
+		record, ok := s.readRecord(d, key, partKey)
 		if !ok {
 			continue
 		}
@@ -302,7 +282,7 @@ func (s *sessionStore) children(parentKey string, maxDepth int) ([]sessionChild,
 	// Touch only parentKey's own record: this is a read of parentKey's activity,
 	// not of every other session visited while walking the directory to build
 	// the adjacency map.
-	s.touch(dir, parentKey)
+	s.touch(d, parentKey)
 
 	type queued struct {
 		key   string
@@ -350,28 +330,14 @@ func (s *sessionStore) children(parentKey string, maxDepth int) ([]sessionChild,
 	return children, nil
 }
 
-// setNote writes a free-form note onto targetKey's own session record via the
-// shared atomic read-modify-write primitive (mutateRecord, session_state.go).
-// It is the on-disk half of session.note: the caller's session_key only
-// authorizes the call (gated lead-only by the existing session.* prefix
-// block); the note itself lands on targetKey's record, not the caller's, so a
-// later session.children read of targetKey's parent surfaces it directly. An
-// empty text is a legitimate "clear the note" write, made possible purely by
-// the Note field's omitempty JSON tag.
-func (s *sessionStore) setNote(targetKey, text string) error {
-	return s.mutateRecord(targetKey, func(r *sessionRecord) error {
-		r.Note = text
-		return nil
-	})
-}
-
 // setReviewTrackNudgeShown marks the review-track config nudge as already
 // fired for targetKey's own session record, via the same atomic
-// read-modify-write primitive as setNote. Called by the workflow_manual
-// wiring sites (review_track_alarm.go) immediately after a non-empty nudge is
-// injected, so a later same-session call does not repeat it.
+// read-modify-write primitive (mutateRecord) on key.json. Called by the
+// workflow_manual wiring sites (review_track_alarm.go) immediately after a
+// non-empty nudge is injected, so a later same-session call does not repeat
+// it.
 func (s *sessionStore) setReviewTrackNudgeShown(targetKey string) error {
-	return s.mutateRecord(targetKey, func(r *sessionRecord) error {
+	return s.mutateRecord(targetKey, partKey, func(r *sessionRecord) error {
 		r.ReviewTrackNudgeShown = true
 		return nil
 	})
@@ -395,20 +361,20 @@ func (s *sessionStore) setReviewTrackNudgeShown(targetKey string) error {
 // setOverride, preventing a data race when another goroutine is concurrently
 // writing to the same session record.
 func (s *sessionStore) getOverride(sessionKey, itemKey string) (string, bool) {
-	dir, err := s.keysDir()
+	d, err := s.dirs()
 	if err != nil {
 		return "", false
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	record, ok := s.readRecord(dir, sessionKey)
+	record, ok := s.readRecord(d, sessionKey, partKey)
 	if !ok {
 		return "", false
 	}
-	s.touch(dir, sessionKey)
+	s.touch(d, sessionKey)
 	var value string
 	found := false
-	s.walkLineage(dir, sessionKey, record, func(r sessionRecord) bool {
+	s.walkLineage(d, sessionKey, record, func(r sessionRecord) bool {
 		value, found = r.Overrides[itemKey]
 		return found
 	})
@@ -419,7 +385,7 @@ func (s *sessionStore) getOverride(sessionKey, itemKey string) (string, bool) {
 // readable ancestor along its Parent chain, nearest first, until visit returns
 // true, a link is unreadable, or a key repeats. It never touches a record. The
 // caller holds s.mu.
-func (s *sessionStore) walkLineage(dir, key string, record sessionRecord, visit func(sessionRecord) bool) {
+func (s *sessionStore) walkLineage(d sessionDirs, key string, record sessionRecord, visit func(sessionRecord) bool) {
 	seen := map[string]struct{}{key: {}}
 	for {
 		if visit(record) {
@@ -433,7 +399,7 @@ func (s *sessionStore) walkLineage(dir, key string, record sessionRecord, visit 
 			return
 		}
 		seen[parent] = struct{}{}
-		next, ok := s.readRecord(dir, parent)
+		next, ok := s.readRecord(d, parent, partKey)
 		if !ok {
 			return
 		}
@@ -446,19 +412,19 @@ func (s *sessionStore) walkLineage(dir, key string, record sessionRecord, visit 
 // Parent chain (the same lineage getOverride resolves through). Returns nil
 // when the session is not found or no record on the chain holds an override.
 func (s *sessionStore) listOverrideKeys(sessionKey string) []string {
-	dir, err := s.keysDir()
+	d, err := s.dirs()
 	if err != nil {
 		return nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	record, ok := s.readRecord(dir, sessionKey)
+	record, ok := s.readRecord(d, sessionKey, partKey)
 	if !ok {
 		return nil
 	}
-	s.touch(dir, sessionKey)
+	s.touch(d, sessionKey)
 	set := map[string]struct{}{}
-	s.walkLineage(dir, sessionKey, record, func(r sessionRecord) bool {
+	s.walkLineage(d, sessionKey, record, func(r sessionRecord) bool {
 		for k := range r.Overrides {
 			set[k] = struct{}{}
 		}
@@ -475,111 +441,30 @@ func (s *sessionStore) listOverrideKeys(sessionKey string) []string {
 }
 
 // setOverride writes an Overrides entry for the given item key/value into the
-// session record identified by sessionKey via atomic read-modify-write.
-// Returns an error if the session key is not found or the write fails.
+// session record identified by sessionKey via atomic read-modify-write of
+// key.json. Returns an error if the session key is not found or the write
+// fails.
 func (s *sessionStore) setOverride(sessionKey, itemKey, value string) error {
-	dir, err := s.keysDir()
-	if err != nil {
-		return err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	record, ok := s.readRecord(dir, sessionKey)
-	if !ok {
-		return fmt.Errorf("session key not found: %s", sessionKey)
-	}
-	if record.Overrides == nil {
-		record.Overrides = map[string]string{}
-	}
-	record.Overrides[itemKey] = value
-	return s.writeRecordAtomic(dir, sessionKey, record)
+	return s.mutateRecord(sessionKey, partKey, func(r *sessionRecord) error {
+		if r.Overrides == nil {
+			r.Overrides = map[string]string{}
+		}
+		r.Overrides[itemKey] = value
+		return nil
+	})
 }
 
 // deleteOverride removes an Overrides entry for the given item key from the
-// session record identified by sessionKey via atomic read-modify-write.
-// Returns an error if the session key is not found. Removing an absent item
-// key (or a session with no Overrides map) is a no-op, not an error.
+// session record identified by sessionKey via atomic read-modify-write of
+// key.json. Returns an error if the session key is not found. Removing an
+// absent item key (or a session with no Overrides map) is a no-op, not an
+// error, and writes nothing.
 func (s *sessionStore) deleteOverride(sessionKey, itemKey string) error {
-	dir, err := s.keysDir()
-	if err != nil {
-		return err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	record, ok := s.readRecord(dir, sessionKey)
-	if !ok {
-		return fmt.Errorf("session key not found: %s", sessionKey)
-	}
-	if record.Overrides == nil {
+	return s.mutateRecord(sessionKey, partKey, func(r *sessionRecord) error {
+		if _, present := r.Overrides[itemKey]; !present {
+			return errRecordUnchanged
+		}
+		delete(r.Overrides, itemKey)
 		return nil
-	}
-	if _, present := record.Overrides[itemKey]; !present {
-		return nil
-	}
-	delete(record.Overrides, itemKey)
-	return s.writeRecordAtomic(dir, sessionKey, record)
-}
-
-// touch refreshes the mtime of key's record file to mark it as recently
-// active, unless it was already touched within touchGuardWindow (throttling a
-// burst of keyed calls to at most one Chtimes per window). Best-effort: stat
-// and Chtimes failures are ignored, matching the non-fatal style of the other
-// read-only session lookups. Callers are expected to have already validated
-// key via a prior readRecord success (mint/readRecord already applies
-// sessionKeyFilenamePattern), so touch does not re-derive that guard.
-func (s *sessionStore) touch(dir, key string) {
-	path := s.keyPath(dir, key)
-	info, err := os.Stat(path)
-	if err != nil {
-		return
-	}
-	if time.Since(info.ModTime()) < touchGuardWindow {
-		return
-	}
-	now := time.Now()
-	_ = os.Chtimes(path, now, now)
-}
-
-func (s *sessionStore) readRecord(dir, key string) (sessionRecord, bool) {
-	if !sessionKeyFilenamePattern.MatchString(key) {
-		return sessionRecord{}, false
-	}
-	data, err := os.ReadFile(s.keyPath(dir, key))
-	if err != nil {
-		return sessionRecord{}, false
-	}
-	var record sessionRecord
-	if err := json.Unmarshal(data, &record); err != nil {
-		return sessionRecord{}, false
-	}
-	return record, true
-}
-
-// writeRecordAtomic replaces an existing key file via temp-write + rename so a
-// concurrent reader never observes a partial record. The caller holds s.mu and
-// has already validated the key via readRecord.
-func (s *sessionStore) writeRecordAtomic(dir, key string, record sessionRecord) error {
-	payload, err := json.Marshal(record)
-	if err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(dir, key+"-*.tmp")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	if _, err := tmp.Write(payload); err != nil {
-		tmp.Close()
-		os.Remove(tmpName)
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		os.Remove(tmpName)
-		return err
-	}
-	if err := os.Rename(tmpName, s.keyPath(dir, key)); err != nil {
-		os.Remove(tmpName)
-		return err
-	}
-	return nil
+	})
 }

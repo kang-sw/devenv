@@ -10,6 +10,7 @@ import {
   callArgs,
   createDashboard,
   FLUSH_INTERVAL_MS,
+  HELD_AGENT_CAP,
   labelWhiteboard,
   parseInboxDrain,
   parseInterruptDrain,
@@ -20,6 +21,7 @@ import {
   whiteboardBody,
   type DashboardEvent,
   type IntakeResult,
+  type ListedAgent,
 } from './dashboard'
 
 const tick = async (n = 30) => {
@@ -46,6 +48,10 @@ function harness(opts: { key?: string | undefined } = {}) {
     accepts: false,
     logs: [] as string[],
     epochs: 0,
+    /** What the agent list answers: its agents, or the error it rejects with. */
+    list: [] as ListedAgent[] | Error,
+    /** How many times the agent list was read. */
+    listCalls: 0,
   }
   const dash = createDashboard({
     key: () => h.key,
@@ -58,6 +64,11 @@ function harness(opts: { key?: string | undefined } = {}) {
       return { ok: answer, text: answer ? `ok: 1 of 1 events applied\n${h.accepts ? 'accepts: status\n' : ''}` : 'unknown session_key' }
     },
     ownTool: (tool) => tool.startsWith(OWN),
+    agents: async () => {
+      h.listCalls += 1
+      if (h.list instanceof Error) throw h.list
+      return structuredClone(h.list)
+    },
     now: () => h.now,
     schedule: (ms, fn) => {
       const timer = { at: h.now + ms, fn, cancelled: false }
@@ -485,27 +496,30 @@ describe('the feed', () => {
 })
 
 describe('subagents', () => {
-  test('keyed by the native agent id, labelled from the spawn even when their first event came before it', async () => {
+  test('keyed by the native agent id, held out of the tree until its spawn announces it, then shown with what came before', async () => {
     const { dash, after } = await started()
-    // The subagent's turn starts before its spawn resolves.
-    let events = await after(() => dash.turnStarted('a9820e'))
-    expect(lastAgent(events, 'a9820e')).toEqual({ kind: 'agent', agentId: 'a9820e', status: 'running', batches: [] })
+    // The subagent's turn and first call come before its spawn resolves: held, not sent.
+    let events = await after(() => {
+      dash.turnStarted('a9820e')
+      dash.stepBegan('a9820e', 's/0')
+      dash.stepChunk('a9820e', 's/0', { kind: 'tool', index: 0, id: 'v1', name: 'Bash' })
+      dash.toolBegan('a9820e', 'v1', 'Bash', { command: 'ls' })
+    })
+    expect(lastAgent(events, 'a9820e')).toBeUndefined()
     events = await after(() => dash.agentSpawned({ agentId: 'a9820e', parentId: 'p1', description: 'Probe files', subagentType: 'general-purpose' }))
-    expect(lastAgent(events, 'a9820e')).toEqual({
+    const shown = lastAgent(events, 'a9820e')
+    expect({ ...shown, batches: undefined }).toEqual({
       kind: 'agent',
       agentId: 'a9820e',
       parentId: 'p1',
       label: 'Probe files',
       caption: 'general-purpose',
       status: 'running',
-      batches: [],
+      batches: undefined,
     })
-    events = await after(() => {
-      dash.stepBegan('a9820e', 's/0')
-      dash.stepChunk('a9820e', 's/0', { kind: 'tool', index: 0, id: 'v1', name: 'Bash' })
-      dash.toolBegan('a9820e', 'v1', 'Bash', { command: 'ls' })
-    })
-    expect(batches(lastAgent(events, 'a9820e'))[0]?.running?.toolName).toBe('Bash')
+    expect(batches(shown)[0]?.running?.toolName).toBe('Bash')
+    events = await after(() => dash.toolEnded('a9820e', 'v1', false))
+    expect(batches(lastAgent(events, 'a9820e'))[0]?.callCount).toBe(1)
     // Its events never touch the lead.
     expect(lastLead(events)).toBeUndefined()
     events = await after(() => dash.turnCompleted('a9820e', 'report', 'answer'))
@@ -514,8 +528,126 @@ describe('subagents', () => {
     expect(events.some((e) => e.kind === 'reply')).toBe(false)
   })
 
+  test('an agent id no spawn announced is never shown: its turn, step, call, ask, and end send nothing, a resync included', async () => {
+    const { h, dash, after, advance } = await started()
+    dash.turnStarted(undefined)
+    let events = await after(() => {
+      dash.turnStarted('ghost')
+      dash.stepBegan('ghost', 'g/0')
+      dash.stepChunk('ghost', 'g/0', { kind: 'tool', index: 0, id: 'g1', name: 'Read' })
+      dash.toolChecked({ agentId: 'ghost', id: 'g1', tool: 'Read', input: { file_path: '/x' }, approver: 'person' }, 'ask')
+      dash.toolBegan('ghost', 'g1', 'Read', { file_path: '/x' })
+      dash.notified(PERMISSION_PROMPT)
+      dash.toolEnded('ghost', 'g1', true)
+    })
+    expect(events.filter((e) => e.agentId === 'ghost' || e.kind === 'permission')).toEqual([])
+    // A failed call resends the whole tree: still no trace of it.
+    h.answers.push(false)
+    dash.userMessage('x', 'terminal')
+    await advance()
+    await advance(RETRY_MS)
+    expect(h.calls.at(-1)!.events.filter((e) => e.agentId === 'ghost')).toEqual([])
+    events = await after(() => dash.turnCompleted('ghost', '', 'error'))
+    expect(events.filter((e) => e.agentId === 'ghost')).toEqual([])
+  })
+
+  test('an id no spawn announced but the agent list names is shown with its label, caption, parent, and what came before; a later spawn refreshes it', async () => {
+    const { h, dash, after } = await started()
+    h.list = [{ id: 'b7', description: 'Scan logs', type: 'Explore', status: 'running', parentId: 'p2' }]
+    let events = await after(() => {
+      dash.turnStarted('b7')
+      dash.stepBegan('b7', 's/0')
+      dash.stepChunk('b7', 's/0', { kind: 'tool', index: 0, id: 'w1', name: 'Grep' })
+      dash.toolBegan('b7', 'w1', 'Grep', { pattern: 'x' })
+    })
+    const shown = lastAgent(events, 'b7')
+    expect({ ...shown, batches: undefined }).toEqual({
+      kind: 'agent',
+      agentId: 'b7',
+      parentId: 'p2',
+      label: 'Scan logs',
+      caption: 'Explore',
+      status: 'running',
+      batches: undefined,
+    })
+    expect(batches(shown)[0]?.running?.toolName).toBe('Grep')
+    events = await after(() => dash.agentSpawned({ agentId: 'b7', parentId: 'p3', description: 'Scan more logs', subagentType: 'Explore' }))
+    expect(lastAgent(events, 'b7')).toMatchObject({ parentId: 'p3', label: 'Scan more logs', caption: 'Explore' })
+  })
+
+  test('an id the agent list does not name is asked about and stays held', async () => {
+    const { h, dash, after } = await started()
+    const reads = h.listCalls
+    h.list = [{ id: 'other', description: 'Other', type: 'Explore', status: 'running' }]
+    const events = await after(() => {
+      dash.turnStarted('fork1')
+      dash.toolBegan('fork1', 'g1', 'Read', { file_path: '/x' })
+    })
+    expect(h.listCalls).toBe(reads + 1)
+    expect(events.filter((e) => e.agentId === 'fork1')).toEqual([])
+  })
+
+  test('an agent list that rejects leaves the id held; its later spawn still shows it with what came before', async () => {
+    const { h, dash, after } = await started()
+    h.list = new Error('list unreadable')
+    let events = await after(() => dash.toolBegan('c3', 'v1', 'Bash', { command: 'ls' }))
+    expect(events.filter((e) => e.agentId === 'c3')).toEqual([])
+    expect(h.logs.some((l) => l.includes('list unreadable'))).toBe(true)
+    events = await after(() => dash.agentSpawned({ agentId: 'c3', description: 'Late spawn' }))
+    expect(lastAgent(events, 'c3')?.label).toBe('Late spawn')
+    expect(batches(lastAgent(events, 'c3'))[0]?.running?.toolName).toBe('Bash')
+  })
+
+  test('the start seeds the tree from the agent list: a live agent shows and its next turn needs no spawn; an idle teammate shows done; an ended one stays out', async () => {
+    const t = harness()
+    t.h.list = [
+      { id: 'r1', description: 'Long task', type: 'general-purpose', status: 'running', parentId: 'p0' },
+      { id: 'tm', description: 'Helper', type: 'teammate', status: 'idle' },
+      { id: 'old', description: 'Old task', type: 'Explore', status: 'completed' },
+    ]
+    t.dash.start()
+    await t.advance()
+    let events = t.sent()
+    expect(lastAgent(events, 'r1')).toEqual({ kind: 'agent', agentId: 'r1', parentId: 'p0', label: 'Long task', caption: 'general-purpose', status: 'running', batches: [] })
+    expect(lastAgent(events, 'tm')).toMatchObject({ label: 'Helper', status: 'done' })
+    expect(lastAgent(events, 'old')).toBeUndefined()
+    events = await t.after(() => {
+      t.dash.turnStarted('r1')
+      t.dash.stepBegan('r1', 's/1')
+      t.dash.stepChunk('r1', 's/1', { kind: 'tool', index: 0, id: 'x1', name: 'Bash' })
+      t.dash.toolBegan('r1', 'x1', 'Bash', { command: 'make' })
+    })
+    expect(lastAgent(events, 'r1')).toMatchObject({ label: 'Long task', parentId: 'p0' })
+    expect(batches(lastAgent(events, 'r1'))[0]?.running?.toolName).toBe('Bash')
+    // The seeded id is known: no lookup of its own.
+    expect(t.h.listCalls).toBe(1)
+  })
+
+  test('the agent list is read once per unknown id, not once per event', async () => {
+    const { h, dash, after } = await started()
+    const reads = h.listCalls
+    await after(() => {
+      for (let i = 0; i < 5; i++) dash.toolBegan('u1', `c${i}`, 'Read', {})
+      dash.turnStarted('u2')
+      dash.stepBegan('u2', 's/0')
+      dash.turnCompleted('u2', '', 'answer')
+    })
+    expect(h.listCalls).toBe(reads + 2)
+  })
+
+  test('past HELD_AGENT_CAP unannounced ids, the oldest held one is dropped', async () => {
+    const { dash, after } = await started()
+    for (let i = 0; i <= HELD_AGENT_CAP; i++) dash.toolBegan(`g${i}`, `c${i}`, 'Read', {})
+    // The newest held one keeps its call; the oldest lost it and shows empty once announced.
+    let events = await after(() => dash.agentSpawned({ agentId: `g${HELD_AGENT_CAP}` }))
+    expect(batches(lastAgent(events, `g${HELD_AGENT_CAP}`))[0]?.running?.toolName).toBe('Read')
+    events = await after(() => dash.agentSpawned({ agentId: 'g0' }))
+    expect(batches(lastAgent(events, 'g0'))).toEqual([])
+  })
+
   test('a run ending in an error or an interrupt marks the agent failed; a later run makes it running again', async () => {
     const { dash, after } = await started()
+    dash.agentSpawned({ agentId: 'a1' })
     dash.turnStarted('a1')
     expect(lastAgent(await after(() => dash.turnCompleted('a1', '', 'error')), 'a1')?.status).toBe('failed')
     expect(lastAgent(await after(() => dash.turnStarted('a1')), 'a1')?.status).toBe('running')
@@ -525,6 +657,7 @@ describe('subagents', () => {
   test('a delegate\'s session key comes from its own call of this plugin\'s tools and travels only as sessionKey', async () => {
     const { h, dash, after } = await started()
     dash.turnStarted(undefined)
+    dash.agentSpawned({ agentId: 'd1' })
     dash.turnStarted('d1')
     // Another server's tool with a session_key is not this plugin's key.
     let events = await after(() => dash.toolBegan('d1', 'x1', 'mcp__other__thing', { session_key: 'not-ours' }))
@@ -548,8 +681,10 @@ describe('subagents', () => {
 
   test('finished agents past the cap leave the local tree; running ones stay', async () => {
     const { dash, h, advance } = await started()
+    dash.agentSpawned({ agentId: 'keep' })
     dash.turnStarted('keep')
     for (let i = 0; i < 8; i++) {
+      dash.agentSpawned({ agentId: `f${i}` })
       dash.turnStarted(`f${i}`)
       h.now += 1
       dash.turnCompleted(`f${i}`, '', 'answer')
@@ -585,6 +720,7 @@ describe('permission waits', () => {
   test('several pending asks are all marked by one notification', async () => {
     const { dash, after } = await started()
     dash.turnStarted(undefined)
+    dash.agentSpawned({ agentId: 'a1' })
     dash.turnStarted('a1')
     dash.toolChecked({ id: 'u1', tool: 'Bash', input: { command: 'rm x' }, approver: 'person' }, 'ask')
     dash.toolChecked({ agentId: 'a1', id: 'v1', tool: 'Write', input: { file_path: '/y' }, approver: 'person' }, 'ask')
@@ -696,6 +832,7 @@ describe('delivery', () => {
     const { h, dash, advance } = await started()
     dash.promptSubmitting('terminal', true)
     dash.turnStarted(undefined)
+    dash.agentSpawned({ agentId: 'a1' })
     dash.turnStarted('a1')
     await advance()
     h.answers.push(new Error('server gone'))
@@ -750,6 +887,7 @@ describe('delivery', () => {
 
   test('a new key resyncs the new session from scratch', async () => {
     const { h, dash, advance } = await started()
+    dash.agentSpawned({ agentId: 'a1' })
     dash.turnStarted('a1')
     await advance()
     h.key = 'second-key'
@@ -763,6 +901,7 @@ describe('delivery', () => {
 
   test('a restart drops the conversation\'s state and resets the view; a stop sends nothing more', async () => {
     const { h, dash, advance } = await started()
+    dash.agentSpawned({ agentId: 'a1' })
     dash.turnStarted('a1')
     await advance()
     dash.restart()
@@ -793,6 +932,7 @@ describe('usage status', () => {
     expect(statuses(sent())).toEqual([])
     // A result naming status: the held figures go with the next call.
     h.accepts = true
+    dash.agentSpawned({ agentId: 'a1' })
     dash.turnStarted('a1')
     await advance()
     await advance()
@@ -807,12 +947,14 @@ describe('usage status', () => {
     expect(h.calls.length).toBe(calls)
     // A "dashboard off" result names nothing: newer figures are held, not sent.
     h.answers.push(OFF)
+    dash.agentSpawned({ agentId: 'a2' })
     dash.turnStarted('a2')
     await advance()
     dash.status(figures(30_000))
     await advance(1000)
     expect(statuses(sent()).length).toBe(2)
     // Named again: the latest figures follow.
+    dash.agentSpawned({ agentId: 'a3' })
     dash.turnStarted('a3')
     await advance()
     await advance()
@@ -823,11 +965,13 @@ describe('usage status', () => {
     const { h, dash, advance, sent } = await started()
     h.accepts = true
     dash.status(figures(10_000))
+    dash.agentSpawned({ agentId: 'a1' })
     dash.turnStarted('a1')
     await advance()
     await advance()
     expect(statuses(sent()).length).toBe(1)
     h.answers.push(new Error('server gone'))
+    dash.agentSpawned({ agentId: 'a2' })
     dash.turnStarted('a2')
     await advance()
     await advance(RETRY_MS)
@@ -842,6 +986,7 @@ describe('usage status', () => {
     const { h, dash, advance } = await started()
     h.accepts = true
     dash.status(figures(10_000))
+    dash.agentSpawned({ agentId: 'a1' })
     dash.turnStarted('a1')
     await advance()
     await advance()

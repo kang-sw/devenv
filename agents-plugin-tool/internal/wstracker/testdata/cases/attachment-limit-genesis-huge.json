@@ -1,0 +1,84 @@
+{
+ "name": "attachment-limit-genesis-huge",
+ "comment": "A genesis attachments.max_bytes above the 64-bit integer range (1e19) is a valid positive integer in the reference engine and holds as given on every platform: 9.5e18 bytes applies, 2e19 is flagged against the limit as written.",
+ "viewers": [
+  "maya.pc"
+ ],
+ "now": "2026-11-02T09:00:00Z",
+ "genesis": {
+  "admins": [
+   "ada"
+  ],
+  "members": [
+   {
+    "id": "ada",
+    "name": "Ada",
+    "keys": [
+     "ada-k1"
+    ],
+    "leads": []
+   },
+   {
+    "id": "maya",
+    "name": "Maya",
+    "keys": [
+     "maya-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   }
+  ],
+  "attachments": {
+   "max_bytes": 10000000000000000000
+  }
+ },
+ "commits": {
+  "maya.pc": [
+   {
+    "ts": "2026-11-01T09:00:00Z",
+    "seen": {},
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "topic",
+       "title": "T1",
+       "body": "b",
+       "attachments": [
+        {
+         "oid": "1111111111111111111111111111111111111111111111111111111111111111",
+         "name": "big.bin",
+         "size": 9500000000000000000,
+         "mime": "application/octet-stream"
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:10:00Z",
+    "seen": {},
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "topic",
+       "title": "T2",
+       "body": "b",
+       "attachments": [
+        {
+         "oid": "2222222222222222222222222222222222222222222222222222222222222222",
+         "name": "bigger.bin",
+         "size": 20000000000000000000,
+         "mime": "application/octet-stream"
+        }
+       ]
+      }
+     ]
+    ]
+   }
+  ]
+ }
+}

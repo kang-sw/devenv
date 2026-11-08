@@ -9,9 +9,12 @@ element.
   must contain its own closing tag puts that text in `<![CDATA[...]]>`. A
   body loses one newline right after its opening tag and one right before
   its closing tag; nothing else is trimmed.
-- An attribute value is quoted with `"` or `'` and is not decoded either, so
-  a value holding `"` is quoted with `'`. A tag with no content may
-  self-close.
+- An attribute value is quoted with `"` or `'`, so a value holding `"` is
+  quoted with `'`. A tag with no content may self-close.
+- An escape written anyway (`&lt;`, `&amp;`, `&#60;`) is decoded in an
+  attribute value and in plain-text fields, outside CDATA. A body that is
+  raw HTML, an exact-match operand against stored text, or the user's
+  verbatim words is kept exactly as written.
 - Text between commands or between a command's fields, an unknown tag, and
   an unknown attribute are refused.
 - Commands apply in the order written. A batch is validated whole: any

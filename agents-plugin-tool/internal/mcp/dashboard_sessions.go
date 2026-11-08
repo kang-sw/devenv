@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -15,8 +16,6 @@ import (
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsdashboard"
-	"github.com/kang-sw/devenv/internal/wsinbox"
-	"github.com/kang-sw/devenv/internal/wslive"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
 )
 
@@ -405,8 +404,9 @@ func (s *Server) dashboardPageURL(sessionKey string) (string, bool) {
 // index from the session key store and the session's live stores (snapshot
 // and conversation ring) in its registry directory, and reads their pages
 // (ReadPage, dashboard_page.go). It maps a reply-id to its
-// session key by scanning the key file names, so no new file ever records a
-// session key; the key stays inside this process and never reaches a page.
+// session key by scanning the key store's names (both layouts), so no new
+// file ever records a session key; the key stays inside this process and
+// never reaches a page. Its reads never migrate a legacy record.
 type DashboardSessionSource struct {
 	store *sessionStore
 	// stateDir resolves the daemon state directory; nil uses
@@ -418,7 +418,7 @@ type DashboardSessionSource struct {
 	mu      sync.Mutex
 	byReply map[string][]string
 	scanned time.Time
-	dirMod  time.Time
+	dirMods [2]time.Time
 }
 
 // NewDashboardSessionSource returns a source over this machine's key store.
@@ -427,8 +427,8 @@ func NewDashboardSessionSource() *DashboardSessionSource {
 }
 
 // dashboardRescanAfter bounds how stale the reply-id map may be before a
-// reply-id it does not know triggers a rescan even when the key directory's
-// modification time looks unchanged.
+// reply-id it does not know triggers a rescan even when the key directories'
+// modification times look unchanged.
 const dashboardRescanAfter = 5 * time.Second
 
 // ReadSession reads the session record behind reg. It reports false when no
@@ -473,24 +473,21 @@ func (src *DashboardSessionSource) ReadSession(reg wsdashboard.Registration) (ws
 
 // lookupRecord finds the session record behind reg: the top-level lead
 // record rooted at reg.Project whose key maps to reg.ReplyID. It returns the
-// key (which never leaves this process), the raw record file, and the
-// decoded record.
+// key (which never leaves this process), the raw bytes of the record's files,
+// and the decoded record with every part.
 func (src *DashboardSessionSource) lookupRecord(reg wsdashboard.Registration) (key string, raw []byte, record sessionRecord, ok bool) {
-	dir, err := src.store.keysDir()
+	d, err := src.store.dirs()
 	if err != nil {
 		return "", nil, sessionRecord{}, false
 	}
 	for attempt := 0; attempt < 2; attempt++ {
-		for _, key := range src.keysFor(dir, reg.ReplyID, attempt > 0) {
-			data, err := os.ReadFile(src.store.keyPath(dir, key))
-			if err != nil {
+		for _, key := range src.keysFor(d, reg.ReplyID, attempt > 0) {
+			var buf bytes.Buffer
+			record, _, err := src.store.loadRecord(d, key, partAll, &buf)
+			if err != nil || record.Root != reg.Project || record.Scope != string(roleLead) || record.Parent != "" {
 				continue
 			}
-			var record sessionRecord
-			if json.Unmarshal(data, &record) != nil || record.Root != reg.Project || record.Scope != string(roleLead) || record.Parent != "" {
-				continue
-			}
-			return key, data, record, true
+			return key, buf.Bytes(), record, true
 		}
 	}
 	return "", nil, sessionRecord{}, false
@@ -505,10 +502,8 @@ func (src *DashboardSessionSource) clock() time.Time {
 }
 
 // hashLiveStores folds the session's live stores into h and returns the
-// snapshot's updatedAt. The snapshot is hashed without updatedAt but with
-// its staleness, so a heartbeat rewrite is no change while a writer that
-// stopped is one; the ring and the board-answer inbox (held and drained) are
-// hashed by their entry names, since an entry file is never rewritten.
+// snapshot's updatedAt (wsdashboard.HashLiveStores, under this source's state
+// dir and clock).
 func (src *DashboardSessionSource) hashLiveStores(h io.Writer, replyID string) time.Time {
 	resolve := src.stateDir
 	if resolve == nil {
@@ -518,76 +513,49 @@ func (src *DashboardSessionSource) hashLiveStores(h io.Writer, replyID string) t
 	if err != nil {
 		return time.Time{}
 	}
-	sessionDir := wsdashboard.SessionDir(dir, replyID)
-	var updatedAt time.Time
-	if raw, err := os.ReadFile(wslive.SnapshotPath(sessionDir)); err == nil {
-		var doc map[string]any
-		var snap wslive.Snapshot
-		if json.Unmarshal(raw, &doc) == nil && json.Unmarshal(raw, &snap) == nil {
-			delete(doc, "updatedAt")
-			canonical, _ := json.Marshal(doc)
-			fmt.Fprintf(h, "\x00snapshot stale=%t\x00%s", snap.Stale(src.clock()), canonical)
-			if snap.UpdatedAt > 0 {
-				updatedAt = time.UnixMilli(snap.UpdatedAt)
-			}
-		}
-	}
-	if names, err := wslive.RingNames(wslive.RingDir(sessionDir)); err == nil {
-		io.WriteString(h, "\x00ring")
-		for _, name := range names {
-			io.WriteString(h, "\x00"+name)
-		}
-	}
-	// Entry files are never rewritten, so held and drained names tell a send
-	// (a new held name, or a merge replacing one) and a drain apart.
-	inbox := wsinbox.Dir(sessionDir)
-	if names, err := wsinbox.Names(inbox); err == nil {
-		io.WriteString(h, "\x00inbox")
-		for _, name := range names {
-			io.WriteString(h, "\x00"+name)
-		}
-	}
-	if names, err := wsinbox.DrainedNames(inbox); err == nil {
-		io.WriteString(h, "\x00inbox-drained")
-		for _, name := range names {
-			io.WriteString(h, "\x00"+name)
-		}
-	}
-	return updatedAt
+	return wsdashboard.HashLiveStores(h, dir, replyID, src.clock())
 }
 
 // keysFor returns the session keys whose reply-id is replyID. A miss, or
-// rescan, rebuilds the map when the key directory changed or the map is
-// older than dashboardRescanAfter.
-func (src *DashboardSessionSource) keysFor(dir, replyID string, rescan bool) []string {
+// rescan, rebuilds the map when a key directory changed or the map is older
+// than dashboardRescanAfter.
+func (src *DashboardSessionSource) keysFor(d sessionDirs, replyID string, rescan bool) []string {
 	src.mu.Lock()
 	defer src.mu.Unlock()
 	if keys, ok := src.byReply[replyID]; ok && !rescan {
 		return keys
 	}
-	info, err := os.Stat(dir)
-	if err != nil {
+	mods, ok := keyStoreMods(d)
+	if !ok {
 		return nil
 	}
-	if src.byReply != nil && info.ModTime().Equal(src.dirMod) && time.Since(src.scanned) < dashboardRescanAfter {
+	if src.byReply != nil && mods == src.dirMods && time.Since(src.scanned) < dashboardRescanAfter {
 		return src.byReply[replyID]
 	}
-	entries, err := os.ReadDir(dir)
+	keys, err := src.store.listKeys(d)
 	if err != nil {
 		return nil
 	}
 	byReply := map[string][]string{}
-	for _, entry := range entries {
-		name := entry.Name()
-		if entry.IsDir() || !strings.HasSuffix(name, ".json") {
-			continue
-		}
-		key := strings.TrimSuffix(name, ".json")
-		if sessionKeyFilenamePattern.MatchString(key) {
-			id := wsmailbox.ReplyID(key)
-			byReply[id] = append(byReply[id], key)
-		}
+	for _, key := range keys {
+		id := wsmailbox.ReplyID(key)
+		byReply[id] = append(byReply[id], key)
 	}
-	src.byReply, src.scanned, src.dirMod = byReply, time.Now(), info.ModTime()
+	src.byReply, src.scanned, src.dirMods = byReply, time.Now(), mods
 	return byReply[replyID]
+}
+
+// keyStoreMods returns the modification times of the key store's two roots,
+// zero for a missing legacy root: a key added to or removed from either
+// changes one. ok is false when the split root cannot be read.
+func keyStoreMods(d sessionDirs) ([2]time.Time, bool) {
+	info, err := os.Stat(d.sessions)
+	if err != nil {
+		return [2]time.Time{}, false
+	}
+	mods := [2]time.Time{info.ModTime()}
+	if info, err := os.Stat(d.legacy); err == nil {
+		mods[1] = info.ModTime()
+	}
+	return mods, true
 }

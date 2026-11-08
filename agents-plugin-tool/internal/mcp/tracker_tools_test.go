@@ -3,15 +3,20 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/kang-sw/devenv/internal/wsconfig"
+	"github.com/kang-sw/devenv/internal/wsgit"
 	"github.com/kang-sw/devenv/internal/wsledger"
 	"github.com/kang-sw/devenv/internal/wstracker"
 	"github.com/kang-sw/devenv/internal/wstrackerhost"
+	"github.com/kang-sw/devenv/internal/wsxmlcmd"
 )
 
 func (f *whiteboardFixture) trackerUpdate(t *testing.T, commands string) string {
@@ -145,6 +150,48 @@ func TestTrackerUpdateRegistersAndJoinsWithSavedProfile(t *testing.T) {
 	}
 }
 
+// trackerCorruptAfterPush breaks the tracker registry once, after the
+// first push succeeds, so a registration fails after it reached the remote.
+type trackerCorruptAfterPush struct {
+	registry string
+	done     bool
+}
+
+func (r *trackerCorruptAfterPush) RunGit(ctx context.Context, root string, args ...string) ([]byte, error) {
+	out, err := wsgit.ExecRunner{}.RunGit(ctx, root, args...)
+	if err == nil && !r.done && slices.Contains(args, "push") {
+		r.done = true
+		if werr := os.WriteFile(r.registry, []byte("not json"), 0o600); werr != nil {
+			return nil, werr
+		}
+	}
+	return out, err
+}
+
+// A register that fails after its push says what the remote already holds
+// and how to finish, instead of claiming nothing was registered; sending
+// the same command again finishes it.
+func TestTrackerRegisterFailureAfterPushNamesWhatTheRemoteHolds(t *testing.T) {
+	f := newTrackerLeadFixture(t)
+	root, err := wstrackerhost.Root(wsconfig.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := filepath.Join(root, "stores.json")
+	f.s.tracker.opts.Runner = &trackerCorruptAfterPush{registry: registry}
+	register := `<tk:register store="team" member="ada" given="Ada" remote="` + initTrackerRemote(t) + `"/>`
+	text := f.trackerRefused(t, "tracker.update", map[string]any{"commands": register})
+	if !strings.Contains(text, "Nothing was registered on this machine, but the remote already holds the new store, with member ada as its sole admin; send the same tk:register again to finish") {
+		t.Fatalf("a failure after the push must name what the remote holds: %s", text)
+	}
+	if err := os.Remove(registry); err != nil {
+		t.Fatal(err)
+	}
+	if out := f.trackerUpdate(t, register); !strings.Contains(out, "registered team: created, member ada") {
+		t.Fatalf("sending the register again must finish it: %s", out)
+	}
+}
+
 func TestTrackerCallsTurnTheKnobOnOnlyWhenTheySucceed(t *testing.T) {
 	f := newTrackerLeadFixture(t)
 	text := f.trackerRefused(t, "tracker.update", map[string]any{"commands": `<tk:item.create store="me" kind="task" title="x"/>`})
@@ -209,6 +256,33 @@ func TestTrackerToolsRefuseSpawnedKeys(t *testing.T) {
 	}
 	if out := f.trackerQuery(t, nil); !strings.Contains(out, "stores: none registered") {
 		t.Fatalf("a refused spawned register must register nothing: %s", out)
+	}
+}
+
+// A key the session store cannot find (made up, stale, or expired) passes
+// the call gate, which only refuses keys it finds; the tracker tools refuse
+// it themselves before any registry read or write.
+func TestTrackerToolsRefuseUnknownKeys(t *testing.T) {
+	f := newTrackerLeadFixture(t)
+	f.trackerUpdate(t, trackerPersonal)
+	for tool, args := range map[string]map[string]any{
+		"tracker.update": {"session_key": "not-a-real-key", "commands": `<tk:register store="mine" member="eve" given="Eve"/>`},
+		"tracker.query":  {"session_key": "not-a-real-key"},
+	} {
+		text := f.trackerRefused(t, tool, args)
+		if !strings.Contains(text, "unknown_session") {
+			t.Fatalf("%s with an unknown key must be refused as an unknown session: %s", tool, text)
+		}
+	}
+	text := f.trackerRefused(t, "tracker.update", map[string]any{"session_key": "bogus", "commands": `<tk:item.create store="me" kind="task" title="smuggled"/>`})
+	if !strings.Contains(text, "unknown_session") {
+		t.Fatalf("an event write with an unknown key must be refused: %s", text)
+	}
+	if out := f.trackerQuery(t, nil); strings.Contains(out, "mine") {
+		t.Fatalf("a refused unknown-key register must register nothing: %s", out)
+	}
+	if out := f.trackerQuery(t, map[string]any{"store": "me", "scope": "all"}); strings.Contains(out, "smuggled") {
+		t.Fatalf("a refused unknown-key write must write nothing: %s", out)
 	}
 }
 
@@ -304,6 +378,15 @@ func TestTrackerUpdateWritesRawBodiesAndBatchReferences(t *testing.T) {
 func TestTrackerUpdateIsAllOrNothing(t *testing.T) {
 	f := newTrackerLeadFixture(t)
 	f.trackerUpdate(t, trackerPersonal)
+	h, err := f.s.trackerHost()
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := h.View(context.Background(), "me", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeEvents := len(before.Events)
 	text := f.trackerRefused(t, "tracker.update", map[string]any{"commands": `<tk:item.create store="me" kind="task" title="kept out"/>
 
 <tk:item.hide store="me" item="$1"/>
@@ -311,8 +394,23 @@ func TestTrackerUpdateIsAllOrNothing(t *testing.T) {
 	if !strings.Contains(text, "command 3 <tk:item.hide> (line 4): the store would flag this write:") || !strings.Contains(text, "nothing was applied") {
 		t.Fatalf("the refusal must cite the flagged command and its line:\n%s", text)
 	}
-	if out := f.trackerQuery(t, map[string]any{"store": "me", "scope": "all", "status": "hidden"}); strings.Contains(out, "kept out") {
-		t.Fatalf("a refused batch must write nothing:\n%s", out)
+	// Under any status: a partial write of command 1 alone leaves a visible
+	// item, of commands 1 and 2 a hidden one.
+	for _, status := range []string{"", "hidden"} {
+		payload := map[string]any{"store": "me", "scope": "all"}
+		if status != "" {
+			payload["status"] = status
+		}
+		if out := f.trackerQuery(t, payload); strings.Contains(out, "kept out") {
+			t.Fatalf("a refused batch must write nothing (status %q):\n%s", status, out)
+		}
+	}
+	after, err := h.View(context.Background(), "me", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after.Items) != 0 || len(after.Events) != beforeEvents {
+		t.Fatalf("a refused batch must write nothing: %d items, %d events (was %d)", len(after.Items), len(after.Events), beforeEvents)
 	}
 }
 
@@ -512,6 +610,38 @@ func TestParseTrackerID(t *testing.T) {
 	for _, bad := range []string{"maya", "maya-5", "maya.pc-0", "maya.pc#x", "maya.pc#5!c:1"} {
 		if _, err := parseTrackerID(bad); err == nil {
 			t.Fatalf("parseTrackerID(%q) must fail", bad)
+		}
+	}
+}
+
+// Every tk: attribute and body is plain text, so an escaped one is decoded:
+// a title and project, an item body, a note, and a comment; CDATA stays
+// literal.
+func TestTrackerUpdateDecodesEscapedText(t *testing.T) {
+	var problems wsxmlcmd.Problems
+	b := planTrackerBatch(&problems, `<tk:item.create store="team" kind="task" title="Parse &lt;key&gt; &amp; value" project="a&#38;b">body &lt;b&gt;</tk:item.create>`+
+		`<tk:item.edit store="team" item="$1" title="&quot;t&quot;">new &lt;b&gt;</tk:item.edit>`+
+		`<tk:item.status store="team" item="$1" status="doing">waiting on &lt;key&gt;</tk:item.status>`+
+		`<tk:item.close store="team" item="$1">done &amp; dusted <![CDATA[&lt;kept&gt;]]></tk:item.close>`+
+		`<tk:comment.add store="team" item="$1">see &lt;b&gt;</tk:comment.add>`+
+		`<tk:comment.edit store="team" comment="$5">edit &lt;b&gt;</tk:comment.edit>`,
+		[]wstrackerhost.StoreEntry{{ID: "team"}})
+	if len(problems.List) > 0 {
+		t.Fatalf("problems: %q", problems.List)
+	}
+	want := []map[string]any{
+		{"title": "Parse <key> & value", "project": "a&b", "body": "body <b>"},
+		{"title": `"t"`, "body": "new <b>"},
+		{"note": "waiting on <key>"},
+		{"note": "done & dusted &lt;kept&gt;"},
+		{"body": "see <b>"},
+		{"body": "edit <b>"},
+	}
+	for i, fields := range want {
+		for k, v := range fields {
+			if got := b.events[i].payload[k]; got != v {
+				t.Errorf("event %d (%s) %s = %q, want %q", i+1, b.events[i].typ, k, got, v)
+			}
 		}
 	}
 }

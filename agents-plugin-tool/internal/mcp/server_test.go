@@ -29,7 +29,7 @@ import (
 // rsrc tree override it per-test with t.Setenv.
 //
 // It also defaults WS_CACHE_HOME to a throwaway temp dir so the file-backed
-// session store (keys/<key>.json under the cache root) never reads or writes the
+// session store (sessions/<key>/ under the cache root) never reads or writes the
 // developer's real ~/.cache during the suite. Tests that assert specific cache
 // paths still override it per-test with t.Setenv (last write wins).
 //

@@ -124,6 +124,35 @@ func TestTopicMarksFollowOnlyBodyEdits(t *testing.T) {
 	}
 }
 
+func TestTopicMarksArePerBatch(t *testing.T) {
+	edit := func(old, repl string) string {
+		return `<wb:edit topic="t"><wb:old>` + old + `</wb:old><wb:new>` + repl + `</wb:new></wb:edit>`
+	}
+
+	// Several edits to different blocks in one batch keep every block's mark.
+	st := &State{}
+	mustApply(t, st, topicXML("t", "alpha\n\nbeta\n\ngamma"))
+	mustApply(t, st, edit("alpha", "ALPHA")+edit("gamma", "GAMMA"))
+	if got, want := topicMarks(t, st), marks(0, MarkMod, 2, MarkMod); !reflect.DeepEqual(got, want) {
+		t.Fatalf("two edits in one batch: %v, want %v", got, want)
+	}
+
+	// A body created in a batch and edited in it had no body before the batch.
+	st = &State{}
+	mustApply(t, st, topicXML("t", "one\n\ntwo")+edit("two", "TWO"))
+	if got := topicMarks(t, st); got != nil {
+		t.Fatalf("a body created and edited in one batch marks nothing, got %v", got)
+	}
+
+	// An edit that reverts an earlier edit of the same batch leaves no mark.
+	st = &State{}
+	mustApply(t, st, topicXML("t", "alpha\n\nbeta\n\ngamma"))
+	mustApply(t, st, edit("alpha", "ALPHA")+edit("gamma", "GAMMA")+edit("ALPHA", "alpha"))
+	if got, want := topicMarks(t, st), marks(2, MarkMod); !reflect.DeepEqual(got, want) {
+		t.Fatalf("a reverted edit: %v, want %v", got, want)
+	}
+}
+
 func TestTopicMarksSurviveReload(t *testing.T) {
 	st := &State{}
 	mustApply(t, st, topicXML("t", "one\n\ntwo"))

@@ -364,7 +364,7 @@ func appendDebugEvent(event string, fields map[string]any) {
 
 // crashLogPath resolves the always-on, cross-platform panic-trace sink under
 // the shared cache root (WS_CACHE_HOME or ~/.cache/ws@...), the same
-// root-independent seam sessionStore.keysDir uses for the keys/ dir: a
+// root-independent seam sessionStore.dirs uses for the session key store: a
 // panicking request may not know which project root it belonged to, so the
 // crash file lives in a flat top-level dir under CacheRoot(), not under any
 // per-project layout. It creates the directory (0o755) if needed and returns
@@ -778,8 +778,6 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		return toolTextResponse(req.ID, "", fmt.Errorf("session default roots were removed; if you are the lead, obtain a session_key per ws:workflow-manual and pass it"))
 	case "session.children":
 		return s.handleSessionChildren(req.ID, params.Arguments)
-	case "session.note":
-		return s.handleSessionNote(req.ID, params.Arguments)
 	case "agenda.set":
 		return s.handleAgendaSet(req.ID, params.Arguments)
 	case "agenda.clear":
@@ -796,8 +794,6 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		return s.handleTicketsIndexInit(req.ID, params.Arguments, params.Meta)
 	case "route.resolve_implement":
 		return s.handleEnterImplement(req.ID, params.Arguments)
-	case "route.resolve_proceed":
-		return s.handleEnterProceed(req.ID, params.Arguments)
 	case "todo.add":
 		return s.handleTodoAdd(req.ID, params.Arguments)
 	case "todo.check":
@@ -1638,7 +1634,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		commitKey, _ := params.Arguments["session_key"].(string)
 		commitKey = strings.TrimSpace(commitKey)
 		if commitKey != "" {
-			if rec, ok := s.sessions.readState(commitKey); ok && len(rec.Todos) > 0 {
+			if rec, ok := s.sessions.readState(commitKey, partTodos); ok && len(rec.Todos) > 0 {
 				commitText += fmt.Sprintf("\n## TODO(%s reminder: update this if stale)\n%s\n", RuntimeNamespace(), renderTodos(rec.Todos, false))
 			}
 		}
@@ -2469,40 +2465,6 @@ func (s *Server) handleSessionChildren(id json.RawMessage, arguments map[string]
 		}, nil)
 	}
 	return toolTextResponse(id, formatSessionChildren(sessionKey, out, includeDead), nil)
-}
-
-// handleSessionNote lets a lead attach a free-form one-line note to a child
-// session key. session_key only authorizes the call (gated lead-only by the
-// existing session.* prefix block in roleAllowsTool; no additional lineage
-// check here, matching session.children's trust model); the note itself is
-// written onto child_session_key's own record, not the caller's, so a later
-// session.children read of the child's parent surfaces it. An empty text is a
-// legitimate "clear the note" write (the Note field's omitempty JSON tag is
-// what makes it disappear from output), not a separate clear verb.
-func (s *Server) handleSessionNote(id json.RawMessage, arguments map[string]any) response {
-	const tool = "session.note"
-	if _, err := sessionStateKey(tool, arguments); err != nil {
-		return toolTextResponse(id, "", err)
-	}
-	childKey, err := stringArg(tool, "child_session_key", arguments)
-	if err != nil {
-		return toolTextResponse(id, "", err)
-	}
-	rawText, ok := arguments["text"]
-	if !ok {
-		return toolTextResponse(id, "", fmt.Errorf("%s: text is required", tool))
-	}
-	text, ok := rawText.(string)
-	if !ok {
-		return toolTextResponse(id, "", fmt.Errorf("%s: text must be a string", tool))
-	}
-	if err := s.sessions.setNote(childKey, text); err != nil {
-		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
-	}
-	if text == "" {
-		return toolTextResponse(id, fmt.Sprintf("note cleared: %s\n", childKey), nil)
-	}
-	return toolTextResponse(id, fmt.Sprintf("note set: %s\n", childKey), nil)
 }
 
 func sessionChildScopeLabel(scope toolRole) string {
@@ -4283,19 +4245,6 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "session.note",
-			"description": "Attach a free-form one-line note to a child session key. The note is written onto the child's own record (not the caller's) and is surfaced by session.children.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"session_key":       stringProperty("Caller's lead session key; authorizes the call (see ws:workflow-manual)."),
-					"child_session_key": stringProperty("Target child session key to annotate."),
-					"text":              stringProperty("Free-form note text. An empty string clears the note."),
-				},
-				"required": []string{"session_key", "child_session_key", "text"},
-			},
-		},
-		{
 			"name":        bootstrapToolName,
 			"description": "Reserved workflow primitive. See ws:workflow-manual before use.",
 			"inputSchema": map[string]any{
@@ -4371,25 +4320,6 @@ func tools() []map[string]any {
 					"params": map[string]any{
 						"type":        "object",
 						"description": "Opaque implementation-routing input, constructed by the ticket-worker playbook. Inner step of that playbook; not a direct entry point — see its route step for the full field set.",
-					},
-				},
-				// Open top level: the unwrapped typed call shape (target,
-				// policy, facts, format as bare arguments) is a live caller
-				// form, so names outside properties are the handler's to judge.
-				"additionalProperties": true,
-				"required":             []string{"session_key"},
-			},
-		},
-		{
-			"name":        "route.resolve_proceed",
-			"description": "Inner routing step; not a direct entry point — params are constructed by the calling skill. Resolves deterministic proceed facts into one route verdict, stores the 'proceed' agenda blob, and replaces the todo list with the derived proceed checklist.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
-					"params": map[string]any{
-						"type":        "object",
-						"description": "Opaque routing input, constructed by the calling skill. Inner step of that skill; not a direct entry point — see its Fact Contract for the full field set.",
 					},
 				},
 				// Open top level: the unwrapped typed call shape (target,

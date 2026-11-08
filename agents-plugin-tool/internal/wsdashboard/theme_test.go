@@ -1,10 +1,14 @@
 package wsdashboard
 
 import (
+	"bufio"
+	"html"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kang-sw/devenv/internal/wsi18n"
 )
@@ -62,6 +66,74 @@ func TestPagesRenderTheThemeCookieOnTheRoot(t *testing.T) {
 				}
 			} else if !strings.Contains(root, c.want) {
 				t.Errorf("%s, cookie %q: root %q lacks %s", page.name, c.cookie, root, c.want)
+			}
+		}
+	}
+}
+
+// frameRoots returns the root element (<html ...>) of every topic-body
+// frame's srcdoc document in page, as a browser parses the attribute.
+func frameRoots(t *testing.T, page string) []string {
+	t.Helper()
+	var out []string
+	for _, m := range regexp.MustCompile(`<iframe class="doc-frame"[^>]* srcdoc="([^"]*)"`).FindAllStringSubmatch(page, -1) {
+		doc := html.UnescapeString(m[1])
+		i := strings.Index(doc, "<html")
+		if i < 0 {
+			t.Fatalf("frame document without a root: %.200q", doc)
+		}
+		out = append(out, doc[i:i+strings.Index(doc[i:], ">")+1])
+	}
+	if len(out) == 0 {
+		t.Fatalf("no topic-body frame in the page:\n%.400s", page)
+	}
+	return out
+}
+
+// A topic-body frame is its own document: it pins the page's theme from the
+// first byte, on the page and on the session stream, or its body text would
+// take the OS palette over the pinned card.
+func TestTopicFramesCarryThePinnedTheme(t *testing.T) {
+	f := startPageFixture(t)
+	for _, c := range []struct{ cookie, want string }{
+		{"light", `<html data-theme="light">`},
+		{"dark", `<html data-theme="dark">`},
+		{"", `<html>`},
+		{"auto", `<html>`},
+	} {
+		for _, path := range []string{"/s/boardsession", "/s/livesession"} {
+			_, body := getTheme(t, f.base+path, c.cookie)
+			for _, root := range frameRoots(t, body) {
+				if root != c.want {
+					t.Errorf("%s, cookie %q: frame root %q, want %q", path, c.cookie, root, c.want)
+				}
+			}
+		}
+
+		req, _ := http.NewRequest(http.MethodGet, f.base+"/s/livesession/events", nil)
+		if c.cookie != "" {
+			req.AddCookie(&http.Cookie{Name: themeCookie, Value: c.cookie})
+		}
+		resp, err := (&http.Client{Transport: &http.Transport{Proxy: nil}}).Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		events := make(chan sseEvent, 16)
+		go readEvents(t, bufio.NewReader(resp.Body), events)
+		board := ""
+		for board == "" {
+			ev, ok := nextRegion(t, events, 2*time.Second)
+			if !ok {
+				t.Fatalf("cookie %q: the stream sent no board region", c.cookie)
+			}
+			if ev.Name == "board" {
+				board = ev.HTML
+			}
+		}
+		resp.Body.Close()
+		for _, root := range frameRoots(t, board) {
+			if root != c.want {
+				t.Errorf("stream, cookie %q: frame root %q, want %q", c.cookie, root, c.want)
 			}
 		}
 	}

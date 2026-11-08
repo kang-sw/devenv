@@ -6,7 +6,7 @@
 <style>{{.Assets.CSS}}</style>
 <style>{{.Assets.TrackerCSS}}</style></head>
 <body class="dash {{.Mode}}">{{.Assets.WhiteboardSprite}}{{.Assets.Sprite}}<div class="dwrap">
-<div class="top"><a class="back" href="/" title="{{t "nav.sessions"}}" aria-label="{{t "nav.sessions"}}">{{icon "back"}}</a>{{region . "head"}}{{template "sse"}}{{template "qsslot"}}{{template "gear" .Adapter}}</div>
+<div class="top"><a class="back" href="/" title="{{t "nav.sessions"}}" aria-label="{{t "nav.sessions"}}">{{icon "back"}}</a>{{region . "head"}}{{template "sse"}}{{region . "git"}}{{template "qsslot"}}{{template "gear" .Adapter}}</div>
 {{template "drawer" .}}
 <div class="banner" id="dash-banner" hidden></div>
 <main id="grid" class="dgrid {{.Mode}}">
@@ -50,7 +50,7 @@ sheet's bottom edge while open. */}}
 
 {{define "r-head"}}<span class="meta">{{.ReplyID}}{{if .HasBoard}} · #{{.Seq}}{{end}}</span>{{with .Harness}}<span class="host">{{.}}</span>{{end}}<span class="meta">{{.ProjectName}}</span>{{if not .Live}}<span class="ended-chip" title="{{t "head.ended.title"}}">{{t "head.ended"}}</span>{{end}}{{if not .Adapter}}<span class="nolive" title="{{t "head.stores.title"}}">{{t "head.stores"}}</span>{{end}}<span class="counts">{{with .CountPolicy}}<span class="chip policy" title="{{t "chip.answer"}}">{{icon "ask"}}{{.}}</span>{{end}}{{with .CountAssumed}}<span class="chip assumed" title="{{t "chip.assumed"}}">{{icon "arrow"}}{{.}}</span>{{end}}{{with .CountAcks}}<span class="chip ok" title="{{t "chip.ack"}}">{{icon "check"}}{{.}}</span>{{end}}</span>{{end}}
 
-{{define "r-board"}}{{if .HasBoard}}{{.Board}}{{else}}<div class="empty">{{t "board.empty"}}</div>{{end}}{{end}}
+{{define "r-board"}}{{if .HasBoard}}{{.ThemedBoard}}{{else}}<div class="empty">{{t "board.empty"}}</div>{{end}}{{end}}
 
 {{define "r-panels"}}{{.Panels}}{{end}}
 
@@ -96,6 +96,12 @@ A part with no figure is left out; an empty region collapses. */}}
 {{define "tree"}}{{if or .Modified .Staged .Untracked}}<span class="sb-diff" title="{{t "band.tree"}}{{with .Modified}} {{t "band.modified" .}}{{end}}{{with .Staged}} {{t "band.staged" .}}{{end}}{{with .Untracked}} {{t "band.untracked" .}}{{end}}">{{with .Modified}}<b class="mod">~{{.}}</b>{{end}}{{with .Staged}}<b class="add">+{{.}}</b>{{end}}{{with .Untracked}}<b class="unt">?{{.}}</b>{{end}}</span>{{end}}{{end}}
 
 {{define "sync"}}{{if not .Upstream}}<span class="sb-sync none" title="{{t "band.noupstream.title"}}">{{t "band.noupstream"}}</span>{{else if and (eq .Ahead 0) (eq .Behind 0)}}<span class="sb-sync ok" title="{{t "band.insync" .Upstream}}">✓<span class="sl"> {{t "band.synced"}}</span></span>{{else}}<span class="sb-sync" title="{{t "band.against" .Upstream}}{{with .Ahead}} {{t "band.push" .}}{{end}}{{with .Behind}} {{t "band.pull" .}}{{end}}">{{with .Ahead}}<span class="up">↑{{.}}</span>{{end}}{{with .Behind}}<span class="dn">↓{{.}}</span>{{end}}</span>{{end}}{{end}}
+
+{{/* The top bar's git badge (gitbadge.go): the session root's branch,
+upstream standing, and working-tree counts, in the status band's grammar and
+classes, read by the daemon while the page is open. A click asks for a read
+at once; at carries the read's time, so every read swaps the region. */}}
+{{define "r-git"}}{{with .Git}}<button type="button" class="btn sb gitb {{.State}}" id="gitb" data-at="{{.At}}" title="{{if eq .State "norepo"}}{{t "git.norepo.title" .Root}}{{else if eq .State "failed"}}{{t "git.failed.title" .Err}}{{else if eq .State "pending"}}{{t "git.pending"}}{{else}}{{t "git.title" .Root}}{{end}}">{{if eq .State "ok"}}<span class="sb-br" title="{{if .Detached}}{{t "band.detached" .Branch}}{{else}}{{t "band.branch" .Branch}}{{end}}">{{icon "branch"}}<span>{{.Branch}}</span></span>{{if not .Detached}}{{template "sync" .Repo}}{{end}}{{template "tree" .Repo}}{{else}}<span class="sb-br">{{icon "branch"}}<span>{{if eq .State "norepo"}}{{t "git.norepo"}}{{else if eq .State "failed"}}{{t "git.failed"}}{{else}}…{{end}}</span></span>{{end}}</button>{{end}}{{end}}
 
 {{define "limit"}}<span class="sb-use{{with .Level}} {{.}}{{end}}{{if .Both}} both{{end}}{{if .Hi}} hi{{end}}" data-limit="{{.Kind}}" title="{{t "band.limit" (limitName .Name) .Percent}}"><span class="u-pct">{{.Percent}}%</span>{{if .ResetsAt}}/<time class="t" data-ms="{{.ResetsAt}}" data-f="{{.ResetFormat}}">{{.ResetText}}</time><em class="u-pace" data-reset="{{.ResetsAt}}" data-win="{{.WindowSec}}" data-pct="{{.Percent}}"></em>{{end}}</span>{{end}}
 

@@ -94,3 +94,71 @@ func TestRevokeConcurrentThenReissue(t *testing.T) {
 	}
 	wantVerdict(t, ada, e4, Ignored)
 }
+
+// TestUnregisteredKeyKeepsWritesInJournal: a clone whose key the identity
+// state does not hold commits nothing and re-issues nothing. An append and
+// a sync leave its ref where it was and the event in the journal; once an
+// admin adds the key, the next sync closes the batch, re-issues the event
+// the revocation cut, and the commit verifies.
+func TestUnregisteredKeyKeepsWritesInJournal(t *testing.T) {
+	w := newWorld(t)
+	ada := w.create("ada", "c1")
+	jon := w.join("jon", "c1")
+	appendOne(t, jon, "note", map[string]int{"n": 2})
+	syncOK(t, jon)
+	fetchOK(t, ada)
+	cut := appendOne(t, jon, "note", map[string]int{"n": 3}) // concurrent with the revocation
+	appendOne(t, ada, TypeRevokeKey, KeyPayload{Member: "jon", Key: jon.pubKey})
+	syncOK(t, ada)
+	// jon's sync closes the cut event with its old seen; its key is now
+	// revoked, so it re-issues nothing.
+	if rep := syncOK(t, jon); rep.Reissued != 0 || rep.Pending.Uncommitted != 0 {
+		t.Fatalf("sync under a revoked key = %+v, want nothing re-issued", rep)
+	}
+	wantVerdict(t, jon, cut, Ignored)
+
+	// jon copies in a new key no admin has added yet.
+	jon2, err := Open(context.Background(), w.optsWithKey("jon", "c1", t.TempDir()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !jon2.Pending().KeyNotRegistered {
+		t.Fatal("the new key should read as not registered")
+	}
+	ref := memberRef("jon", "c1")
+	tip := refTip(t, jon2, ref)
+	id := appendOne(t, jon2, "note", map[string]int{"n": 4})
+	rep := syncOK(t, jon2)
+	if rep.Closed || rep.Reissued != 0 {
+		t.Fatalf("sync under an unregistered key = %+v, want no batch closed and nothing re-issued", rep)
+	}
+	if got := refTip(t, jon2, ref); got != tip {
+		t.Fatalf("a commit landed under an unregistered key: %s -> %s", tip, got)
+	}
+	if got := jon2.Pending().Uncommitted; got != 1 {
+		t.Fatalf("uncommitted = %d, want the event kept in the journal", got)
+	}
+	if e := eventsByID(jon2)[id]; !e.Pending {
+		t.Fatalf("event %s should still be pending: %+v", id, e)
+	}
+	fetchOK(t, ada)
+	if _, ok := eventsByID(ada)[id]; ok {
+		t.Fatalf("ada received %s, which was never committed", id)
+	}
+
+	appendOne(t, ada, TypeAddKey, KeyPayload{Member: "jon", Key: jon2.pubKey})
+	syncOK(t, ada)
+	if rep := syncOK(t, jon2); !rep.Closed || rep.Reissued != 1 {
+		t.Fatalf("sync after the key was added = %+v, want the batch closed and the cut event re-issued", rep)
+	}
+	if got := refTip(t, jon2, ref); got == tip {
+		t.Fatal("no commit landed after the key was added")
+	}
+	if got := jon2.Pending().Uncommitted; got != 0 {
+		t.Fatalf("uncommitted = %d after the batch closed, want 0", got)
+	}
+	fetchOK(t, ada)
+	if e := wantVerdict(t, ada, id, Valid); e.Pending {
+		t.Fatalf("event %s still pending after the batch closed", id)
+	}
+}

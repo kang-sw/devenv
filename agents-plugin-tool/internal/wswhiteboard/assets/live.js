@@ -3,11 +3,13 @@
   try { store = window.sessionStorage; store.getItem("wb"); } catch (e) { store = null; }
 
   // --- panels: remember open state across reloads ---------------------------
-  q("details.panel[id]").forEach(function (d) {
+  // A panel keys it on its id, a panel tree node on its data-key path.
+  q("details.panel[id], details.tnode[data-key]").forEach(function (d) {
     if (!store) return;
-    var v = store.getItem("wb-open-" + d.id);
+    var k = "wb-open-" + (d.classList.contains("panel") ? d.id : "k:" + d.getAttribute("data-key"));
+    var v = store.getItem(k);
     if (v !== null) d.open = v === "1";
-    d.addEventListener("toggle", function () { store.setItem("wb-open-" + d.id, d.open ? "1" : "0"); });
+    d.addEventListener("toggle", function () { store.setItem(k, d.open ? "1" : "0"); });
   });
 
   // --- change signal ----------------------------------------------------------

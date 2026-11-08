@@ -201,7 +201,7 @@ func TestEnterImplementAdHocTargetReadsNoTicket(t *testing.T) {
 			if !result.Verdict.NeedReview {
 				t.Fatalf("ad-hoc run dropped independent review: %+v", result.Verdict)
 			}
-			record, ok := server.sessions.readState(key)
+			record, ok := server.sessions.readState(key, partAll)
 			if !ok {
 				t.Fatal("session record not found")
 			}
@@ -359,7 +359,7 @@ func TestEnterImplementReviewPhaseResolvesThroughParentSession(t *testing.T) {
 		if result.Verdict.ReviewAlloc != tc.wantAlloc || result.Verdict.NeedReview != wantNeed {
 			t.Fatalf("%s: review = %q need=%v, want %q need=%v", tc.name, result.Verdict.ReviewAlloc, result.Verdict.NeedReview, tc.wantAlloc, wantNeed)
 		}
-		record, ok := server.sessions.readState(tc.key)
+		record, ok := server.sessions.readState(tc.key, partAll)
 		if !ok {
 			t.Fatalf("%s: session record not found", tc.name)
 		}

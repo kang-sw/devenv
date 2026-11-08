@@ -245,13 +245,15 @@ func TestRenderPageContentOnlyTopic(t *testing.T) {
 	st := &State{}
 	mustApply(t, st, topicXML("notes", "# Plan\n\n- one"))
 	out := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
-	wantAll(t, out, `<section class="topic has-doc"><div class="tbar"><span class="tname">notes</span></div>`,
+	wantAll(t, out, `<section class="topic has-doc"><div class="tbar"><span class="tlead"><span class="tname">notes</span></span>`,
 		`<details class="tdoc" data-key="doc:notes" open>`, "<h1>Plan</h1>", "<li>one</li>")
-	wantNone(t, out, `class="tbody"`, `class="reply`)
+	wantNone(t, out, `class="tbody"`)
+	// Nothing to answer: the reply bar waits hidden for a topic note.
+	wantAll(t, out, `<div class="reply solo" data-idle hidden>`)
 
-	mustApply(t, st, `<wb:close topic="notes"/>`)
+	mustApply(t, st, `<wb:close topic="notes" result="done"/>`)
 	out = render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
-	wantAll(t, out, `<section class="topic quiet closed has-doc"><div class="tbar"><span class="tname" title="closed">notes</span></div>`,
+	wantAll(t, out, `<section class="topic quiet closed has-doc"><div class="tbar"><span class="tlead"><span class="tname" title="closed">notes</span><span class="tresult" title="how the topic ended">done</span></span>`,
 		`<details class="tdoc" data-key="doc:notes"><summary`, "<h1>Plan</h1>")
 	wantNone(t, out, `data-key="doc:notes" open`)
 }
@@ -265,7 +267,7 @@ func TestRenderPageTopicBodyToggleBelongsToTheBar(t *testing.T) {
 		st := sampleState()
 		st.Topics = []TopicDoc{{Name: "embed layout", Body: "layout notes", Changed: 12}}
 		out := render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r"}))
-		wantAll(t, out, `<section class="topic has-doc"><div class="tbar"><span class="tname">embed layout</span>`,
+		wantAll(t, out, `<section class="topic has-doc"><div class="tbar"><span class="tlead"><span class="tname">embed layout</span></span>`,
 			`.topic.has-doc > .tbar { padding-right:`, `details.tdoc > summary { position: absolute;`)
 		start := strings.Index(out, `<span class="tname">embed retention</span>`)
 		if start < 0 {
@@ -526,7 +528,7 @@ func TestRenderPageQuietAndCollapsedSettled(t *testing.T) {
 	}
 
 	embed := render(t, sampleView(LayoutEmbed))
-	if !strings.Contains(embed, `<section class="topic quiet"><div class="tbar"><span class="tname">tool surface</span>`) {
+	if !strings.Contains(embed, `<section class="topic quiet"><div class="tbar"><span class="tlead"><span class="tname">tool surface</span></span>`) {
 		t.Errorf("embed: settled-only topic with nothing new is not quiet")
 	}
 }
@@ -578,8 +580,8 @@ func TestRenderPageReplyBar(t *testing.T) {
 		t.Errorf("bulk checkbox renders without BulkAck")
 	}
 	view.Answerable = false
-	if out = render(t, view); strings.Contains(out, `id="reply-text"`) {
-		t.Errorf("reply bar renders on a board with nothing to answer")
+	if out = render(t, view); !strings.Contains(out, `<div class="reply solo" data-idle hidden>`) {
+		t.Errorf("a board with nothing to answer does not keep its reply bar hidden for topic notes")
 	}
 }
 
@@ -743,9 +745,10 @@ func TestRenderPageEmbedSizeBudget(t *testing.T) {
 	out := render(t, BuildView(st, ViewInput{Layout: LayoutEmbed, ReplyID: "size-check", Panels: panels}))
 	const budget = 512 << 10
 	t.Logf("populated embed: %d bytes (%.1f%% of 512 KiB)", len(out), 100*float64(len(out))/budget)
-	// A third of the limit: the stress is past any real board (60 items,
-	// 100 ready tickets), and the embed has no truncation to fall back on.
-	if len(out) > budget/3 {
+	// About a third of the limit: the stress is past any real board (60
+	// items, 100 ready tickets), and the embed has no truncation to fall back
+	// on. 35% leaves the topic bar's pen, note box, and updated time room.
+	if len(out) > budget*35/100 {
 		t.Errorf("populated embed is %d bytes, not well under 512 KiB", len(out))
 	}
 }

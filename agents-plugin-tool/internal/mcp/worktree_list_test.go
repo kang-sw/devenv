@@ -68,11 +68,7 @@ func listEntryByPath(t *testing.T, res worktreeListResult, path string) worktree
 
 func keyRecordPath(t *testing.T, s *Server, key string) string {
 	t.Helper()
-	dir, err := s.sessions.keysDir()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return s.sessions.keyPath(dir, key)
+	return splitKeyPath(t, s.sessions, key)
 }
 
 // TestWorktreeListDispatch covers the per-entry facts over a mixed pool: a held

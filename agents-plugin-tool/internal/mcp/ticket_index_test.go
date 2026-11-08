@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kang-sw/devenv/internal/gitbatch"
 	"github.com/kang-sw/devenv/internal/wsindex"
 )
 
@@ -264,11 +265,11 @@ while kill -0 "$c" 2>/dev/null; do
 done
 wait "$c" 2>/dev/null
 rm -f "$live/$$"
-`, shellQuote(filepath.ToSlash(live)), shellQuote(filepath.ToSlash(stop))))
+`, gitbatch.ShellQuote(filepath.ToSlash(live)), gitbatch.ShellQuote(filepath.ToSlash(stop))))
 	if err := os.Chmod(script, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	c.git("config", "core.sshCommand", shellQuote(filepath.ToSlash(script)))
+	c.git("config", "core.sshCommand", gitbatch.ShellQuote(filepath.ToSlash(script)))
 	c.git("remote", "set-url", "origin", "ssh://git@ticket-index.invalid/repo.git")
 }
 
@@ -303,13 +304,6 @@ func stopHangTransports(t *testing.T, live, stop string) {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-}
-
-// shellQuote single-quotes s for sh. It is a copy of internal/wsindex's
-// unexported shellQuote (git.go), kept local like the hang transport itself;
-// keep the two in step.
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // call runs one tool and returns its text and whether it was an error.

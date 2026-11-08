@@ -216,20 +216,45 @@ func jsString(v any) string {
 	return "[object Object]"
 }
 
+// jsNum is Number.prototype.toString: positional between 1e-6 and 1e21,
+// exponent form outside, with no leading zero in the exponent (1e-7, 1e+21).
 func jsNum(f float64) string {
 	if math.IsNaN(f) {
 		return "NaN"
 	}
+	if a := math.Abs(f); a != 0 && (a < 1e-6 || a >= 1e21) {
+		s := strconv.FormatFloat(f, 'e', -1, 64)
+		if n := len(s); s[n-4] == 'e' && s[n-2] == '0' {
+			s = s[:n-2] + s[n-1:]
+		}
+		return s
+	}
 	return strconv.FormatFloat(f, 'f', -1, 64)
 }
 
-// intOf returns a field as an integer when it is one (Number.isInteger).
+// intOf returns a field as an int when it is an integer (Number.isInteger)
+// within the int32 range. Go's conversion of an out-of-range float to int is
+// platform-defined (arm64 saturates, amd64 yields MinInt64), so a larger
+// integer reports not-ok instead; every caller range-checks the value against
+// a small bound and words not-ok and out-of-range alike.
 func (p obj) intOf(k string) (int, bool) {
 	f, ok := p[k].(float64)
-	if !ok || f != math.Trunc(f) || math.IsInf(f, 0) {
+	if !ok || f != math.Trunc(f) || f < math.MinInt32 || f > math.MaxInt32 {
 		return 0, false
 	}
 	return int(f), true
+}
+
+// posIntOf returns a field that is a positive integer (Number.isInteger and
+// > 0) as the float64 the reference engine holds. It has no upper bound and
+// never converts to int, so a value beyond the int range folds the same on
+// every platform.
+func (p obj) posIntOf(k string) (float64, bool) {
+	f, ok := p[k].(float64)
+	if !ok || f != math.Trunc(f) || math.IsInf(f, 0) || f <= 0 {
+		return 0, false
+	}
+	return f, true
 }
 
 // list returns an array field (nil when missing or not an array).

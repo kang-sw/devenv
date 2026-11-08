@@ -55,6 +55,33 @@ ws-mcp serve --stdio --root <repo-root>
 `ai-docs/`, and `AGENTS.md`; downstream projects should rely on MCP tools for
 bundled conventions rather than repository-local source paths.
 
+### Session key store
+
+Each session key is a directory, `<cache root>/sessions/<key>/`, holding
+`key.json` (the identity - root, scope, parent - plus the session-scope
+config overrides, the child note, and the once-only flags), `agenda.json`,
+`todos.json`, and `whiteboard.json`. An absent part file is that part
+empty. A write replaces only the part files it changes, each atomically, and
+the lookup every keyed call makes reads `key.json` alone. `key.json` is also
+the key's claim (mint creates the directory exclusively) and its activity
+mark: keyed calls refresh its mtime at most hourly, and the prune that
+`ws.ferrule` runs at most daily deletes a key directory whose `key.json` is
+older than 30 days.
+
+The older layout, one `<cache root>/keys/<key>.json` per key, is still read:
+a key with no `key.json` is served whole from its legacy file, and the
+session's first write moves it into `sessions/<key>/` and deletes the legacy
+file. Reads never move it, and no pass moves the rest; an unwritten legacy
+file ages out through the same prune.
+
+Restart every ws process after updating ws, as an install update already
+expects: the session MCP servers (a host restart or MCP reconnect) and the
+dashboard daemon (the next `serve` of a newer build replaces it, or `POST
+/shutdown`). An older ws-mcp knows only `keys/`, so once a newer one has
+moved a session, the older one reports that key unknown. Downgrading loses
+sight of moved sessions the same way; session keys are cache state, so a
+fresh key is the recovery.
+
 ### Dashboard daemon
 
 `ws-mcp dashboard` is an optional machine-wide daemon (one per OS
@@ -73,9 +100,14 @@ tools never depend on it. Its state lives under `<cache root>/dashboard/`:
 - `sessions/<reply-id>/registration.json` - one entry per top-level lead
   session whose `dashboard.enabled` resolves on (session scope included),
   written by the serving ws-mcp at its first keyed call and heartbeated every
-  2 minutes; a session counts as live while its heartbeat is under 5 minutes
-  old and it has not ended. The daemon only reads this registry; ws-mcp prunes
-  entries unseen for 7 days.
+  2 minutes, and one per agent runner conversation (below), written by the
+  runner with `agent: true` (and `unlisted: true` when its profile keeps it
+  off the index page) while the daemon runs. A session counts as live while
+  its heartbeat is under 5 minutes old and it has not ended. The daemon's
+  index only reads this registry; ws-mcp prunes entries unseen for 7 days,
+  except an agent conversation (an `agent` registration, or a directory
+  holding `agent.json`), whose lifetime is the runner's: it heartbeats only
+  while the daemon runs, so a daemon down for a week must not lose it.
 - `sessions/<reply-id>/snapshot.json` and `sessions/<reply-id>/ring/` - the
   session's live snapshot (current lead and subagent activity, rewritten
   debounced and on a 30-second heartbeat, stale after 3 missed heartbeats by
@@ -123,6 +155,15 @@ tools never depend on it. Its state lives under `<cache root>/dashboard/`:
   record. `mailbox wait --board-interrupt` also wakes on one (alone, or with
   `--board-inbox` or `--board-steer`), counted as `interrupt` (its own
   `kinds` value), never as `board`.
+- `sessions/<reply-id>/agent.json`, `instructions.md`, and `pi/` - an agent
+  runner conversation's own files (`internal/wsagent`): the owner-only
+  record a process start needs after a daemon restart (profile, backend,
+  working root, backend session id, model and effort, the conversation's ws
+  session key), the composed instruction file appended to the harness's
+  system prompt (owner-only; it carries the session key when the profile
+  allows ws tools), and for the pi backend its session file and MCP bridge.
+  The daemon reads the conversation from its live stores alone, since no
+  ws-mcp serves it and it has no session record.
 
 After a store write the serving ws-mcp sends `POST /nudge {reply_id,
 project}`; the daemon also re-reads every session every 30 seconds.
@@ -139,7 +180,28 @@ standing, the 5-hour and weekly usage limits (each with its reset and its
 pace, which the page computes), and the cost (`~$` for an estimate, a
 trailing `+` when calls of unknown price were left out). A part with no
 figure is left out; context and limits warn at 80% and turn critical at 95%;
-below a 360px band only the limit under more pressure stays. On the served board and in the conversation's lead
+below a 360px band only the limit under more pressure stays.
+
+The session page's top bar (not the `/` hub) carries a git badge between
+the live mark and the gear: the session root's branch, upstream standing, and
+working-tree counts in the status band's grammar and classes, which the
+daemon reads itself (`internal/wsdashboard/gitbadge.go`) rather than from the
+snapshot. It reads a root only while at least one session page under it holds
+its SSE stream open: once when the first stream opens, every 3 minutes while
+one stays, and at once on `POST /s/<reply-id>/git` (the badge's click; it
+needs an `Origin` equal to the daemon's own, answers 204, and 409 when no
+open page watches the root). One goroutine per watched root runs every read,
+so pages sharing a root share one read and no two reads of a root overlap; a
+refresh inside 2 seconds of the last read waits for that gap's end, and
+requests arriving meanwhile fold into that one read. The last stream's close
+ends the root's reads and drops its value. A read is `rev-parse`,
+`symbolic-ref`, `rev-list --left-right --count`, and `status --porcelain`
+with no optional lock (`wsgit.BranchSync`, `wsgit.WorkingTreeCounts`), in the
+C locale, bounded by 10 s together, with no daemon-wide lock held; it never
+fetches. A non-repository root or a failed read shows the badge dimmed, with
+the reason (git's message) in its title.
+
+On the served board and in the conversation's lead
 replies, a file link renders as an action link (`data-wl="file"`, titled with
 its repo-relative path) and an http(s) link is marked `data-wl="url"`: a
 click opens a menu (open in new tab, open in system browser, copy relative or
@@ -159,7 +221,12 @@ renders in its own sandboxed `srcdoc` frame (`allow-scripts allow-popups
 allow-popups-to-escape-sandbox`, an opaque origin that sends no cookie), so
 its images are inlined as `data:` URLs up to 2 MiB under the same containment
 (`wsdashboard.ImageDataURL`); a larger image falls back to the image route,
-which a LAN viewer's frame cannot load. A finished lead reply draws its mermaid
+which a LAN viewer's frame cannot load. The served board renders the 30 most
+recently closed topics (with nothing waiting on the user) and a show-more
+control; `GET /s/<reply-id>/closed?from=<index>&n=<count>` (from at least 1,
+n default 30, at most 300) answers `{html}` with the next closed topics in
+close order, rendered and framed as on the board, through the optional
+`wsdashboard.ClosedTopicsSource`; a session without a board is 404. A finished lead reply draws its mermaid
 fences; the reply still streaming keeps them code blocks. A finished lead
 reply also keeps its inline HTML and SVG through an allow-list sanitizer: no
 script, form, embed, or fetching element or attribute survives, and a raw
@@ -214,6 +281,28 @@ tracker revision bumps; both pages' SSE streams send `event: tracker` with
 `{"rev": N}` when it differs from what that stream last sent (once on connect
 too), and the page re-reads.
 
+The daemon also hosts headless agent conversations (the agent runner,
+`internal/wsagent`, wired in by `cmd/ws-mcp/dashboard.go`): a Claude Code or
+Pi process per conversation, started from a named profile in the
+`agent.profile.<name>` config family (a whole-object structured value at
+project, repo, or global scope, resolved through the conversation's working
+root; repo scope may not set `mcp_servers` or `plugins`; no profile is built
+in; `agent.` is a reserved prefix no adapter manifest may claim). Each
+conversation is a dashboard session (registration, snapshot, ring, inbox)
+whose page shows it like a lead session. Its routes, behind the same access
+guard: `GET /agents` (every conversation's state), `POST /agents {profile,
+root}` (open one), `GET /agents/<id>`, and `POST /agents/<id>/send {text}`,
+`/interrupt` (answers the held text it took back), `/stop` (ends the
+process; the next send resumes the backend session), `/close` (ends the
+conversation for good; later writes get 409), and `/settings {model?,
+effort?}` (from the next turn). Every POST needs a JSON body
+(`Content-Type: application/json`) and either no `Origin` (a client on this
+machine) or the daemon's own, so no other web page can drive an agent. After
+a daemon restart the runner re-registers each conversation with no process
+and starts one at its next send. An attached ws-mcp gets
+`WS_MCP_ALLOWED_TOOLS` (the profile's ws tools) and `WS_MCP_NO_DASHBOARD`,
+and no mailbox identity.
+
 Pages render in one language end to end, chosen by the server from the first
 byte: the `ws_dashboard_lang` cookie when it names an available language (the
 gear menu's language `<select>` writes it; no cookie, or the empty choice,
@@ -225,6 +314,16 @@ with no code change. English is the fallback and the key set: another table
 may hold only keys English has, and `internal/wsi18n`'s key sweep fails on a
 key a source names that English lacks or an English key nothing uses. Keys
 that start with `js.` ship to the page scripts as the page's own table.
+
+The theme works the same way: the gear menu's theme buttons write the
+`ws_dashboard_theme` cookie (`light` or `dark`; auto deletes it and follows
+the OS), and the server renders the page root's `data-theme` from it on the
+first byte, on every page. A topic body's frame is a separate document, so
+the daemon pins the same `data-theme` on each frame document's root, on the
+session page and its SSE stream; a switch needs no reload: the page sets its
+root, posts the theme to every body frame (and again to a frame that reports
+its height, which covers a frame swapped in after the switch), and redraws
+drawn mermaid diagrams, in the page and in the frames, in the new palette.
 
 By default the daemon binds loopback and every route requires a loopback
 Host. LAN mode (`dashboard.lan_enabled`, read from the global config layer
@@ -325,6 +424,8 @@ Current launcher inputs:
 | `WS_MCP_PROJECT_ROOT` | Project root default for root-aware tools and CLI commands when no higher-priority root exists. |
 | `WS_MCP_DASHBOARD_DEV_SOURCE` | Read by `ws-mcp dashboard`: the `agents-plugin-tool` source root the daemon serves dashboard and whiteboard page assets from instead of the embedded copies (see Dashboard daemon, Dev assets). Unset is off. |
 | `WS_MCP_NO_AGENT` | Product-mode gate for agentless distributions such as wsflow. |
+| `WS_MCP_NO_DASHBOARD` | `1`/`true`/`yes`/`on` turns the dashboard off for this ws-mcp whatever `dashboard.enabled` resolves: no daemon start, no session registration, no prune. The agent runner sets it on the ws-mcp it attaches to a conversation. |
+| `WS_MCP_ALLOWED_TOOLS` | Comma list of ws tool names; when set, `tools/list` advertises and `tools/call` accepts only these. The agent runner sets it to a profile's ws tools. |
 | `WS_MCP_NAMESPACE` | User-facing MCP namespace text override; empty or unset defaults to `ws`. |
 | `WS_MCP_SETUP_TOOL` | Advertised setup tool name override; empty or unset defaults to `ws.setup`. |
 | `WS_MCP_CONFIG_MANIFESTS` | Adapter config key manifests, separated by the platform path-list separator (`:` POSIX, `;` Windows); `;` is accepted on every platform, which the static launcher configs use. Declared keys become `config.tune`-writable, cataloged by `config.list`, and typed in `config.get`; a rejected manifest is logged to stderr and listed by `config.list`. The ws and wsflow packages each ship their own `config-manifest.json` (namespace `claude.`; the same keys, differing only in `default`, pinned by `TestShippedClaudeManifestsDifferOnlyInDefaults`) and set it in both launch configs: `.mcp.json` (Codex) as `./config-manifest.json`, resolved against `cwd: "."` (the plugin root), and `.claude-plugin/plugin.json` as `${CLAUDE_PLUGIN_ROOT}/config-manifest.json`. Each package (ws, wsflow, Pi) also lists its `dashboard-config-manifest.json` (namespace `dashboard.`: `dashboard.enabled`, default on in ws and Pi, off in wsflow; `dashboard.port`, default 29417; `dashboard.lan_enabled`, global-only and default off in every package) beside its own manifest; the Pi bridge joins the two with the platform separator. A path that does not resolve fails nothing: the keys stay undeclared, so check `config.list` after changing either. |
@@ -551,7 +652,7 @@ installed plugin packaging changes.
   the plugin so Codex rematerializes the MCP entry.
 - Routing or implementation context lost after context compaction: expected — the
   transcript is summarized, but session state persists in
-  `<cache-root>/keys/<session-key>.json`. Recover by calling
+  `<cache-root>/sessions/<session-key>/` (see Session key store). Recover by calling
   `ws.workflow_manual(session_key: <key preserved in the compaction summary>)`,
   which reloads the manual primitives and restores the agenda/todo Session State.
   Do not call `ws.ferrule` to "re-enter" — it is non-idempotent and mints a new key,

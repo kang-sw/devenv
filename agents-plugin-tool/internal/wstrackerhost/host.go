@@ -207,6 +207,21 @@ type RegisterRequest struct {
 	Origin string
 }
 
+// RemoteHeldError is a Register failure that came after the store's
+// genesis or this member's join reached the remote: nothing is registered
+// on this machine, but the remote keeps what was pushed. Registering again
+// with the same member id finishes the registration; this machine's key is
+// then already a member, so it writes no new join.
+type RemoteHeldError struct {
+	Err error
+	// Creator: what the remote holds is the new store, with this member as
+	// its sole admin; otherwise it is this member's join.
+	Creator bool
+}
+
+func (e *RemoteHeldError) Error() string { return e.Err.Error() }
+func (e *RemoteHeldError) Unwrap() error { return e.Err }
+
 // RegisterResult reports a registration.
 type RegisterResult struct {
 	Entry StoreEntry
@@ -221,7 +236,8 @@ type RegisterResult struct {
 // the store in the registry, and saves the profile as the one used last.
 // It keeps the store open. A store that cannot be registered leaves no
 // directory or registry entry behind; wsledger.ErrIDTaken means another
-// join holds the member id.
+// join holds the member id, and a *RemoteHeldError means the remote already
+// holds what this registration pushed.
 func (h *Host) Register(ctx context.Context, req RegisterRequest) (RegisterResult, error) {
 	var res RegisterResult
 	if !wsledger.ValidID(req.ID) || req.ID == keysDir {
@@ -281,6 +297,7 @@ func (h *Host) Register(ctx context.Context, req RegisterRequest) (RegisterResul
 	}
 	h.stores[entry.ID] = st
 	h.mu.Unlock()
+	pushed := false
 	err = func() error {
 		opts := h.ledgerOptions(entry, profile.Given)
 		var l *wsledger.Ledger
@@ -293,11 +310,13 @@ func (h *Host) Register(ctx context.Context, req RegisterRequest) (RegisterResul
 		if err != nil {
 			return err
 		}
+		// wsledger.Register has pushed the genesis or the join by now.
+		pushed = entry.Remote != ""
 		st.ledger, st.tracker = l, wstracker.New(l, l.MemberID()+"."+l.CloneID())
+		res.Creator = genesisLists(l.Identity().Genesis, req.Member)
 		if res.Profile, err = writeProfile(ctx, st, profile, req.Origin); err != nil {
 			return err
 		}
-		res.Creator = genesisLists(l.Identity().Genesis, req.Member)
 		return h.addEntry(entry)
 	}()
 	if err != nil {
@@ -311,6 +330,9 @@ func (h *Host) Register(ctx context.Context, req RegisterRequest) (RegisterResul
 			delete(h.stores, entry.ID)
 		}
 		h.mu.Unlock()
+		if pushed {
+			return RegisterResult{}, &RemoteHeldError{Err: err, Creator: res.Creator}
+		}
 		return RegisterResult{}, err
 	}
 	if entry.Remote != "" {

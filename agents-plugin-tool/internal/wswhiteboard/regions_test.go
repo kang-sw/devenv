@@ -315,7 +315,7 @@ func TestServedBoardFramesEveryBodySeparately(t *testing.T) {
 	st := &State{}
 	mustApply(t, st, addXML(ClassTechnical, "one", "x")+
 		`<wb:topic name='say "hi" &amp; <go>'>second body</wb:topic>`+
-		topicXML("one", "first body")+topicXML("closed", "third body")+`<wb:close topic="closed"/>`+addXML(ClassTechnical, "no body", "y"))
+		topicXML("one", "first body")+topicXML("closed", "third body")+`<wb:close topic="closed" result="done"/>`+addXML(ClassTechnical, "no body", "y"))
 	regions, err := RenderRegions(BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
 	if err != nil {
 		t.Fatal(err)
@@ -324,19 +324,20 @@ func TestServedBoardFramesEveryBodySeparately(t *testing.T) {
 	if len(docs) != 3 {
 		t.Fatalf("frames = %d, want one per body", len(docs))
 	}
-	for name, want := range map[string]string{"one": "first body", `say "hi" &amp; <go>`: "second body", "closed": "third body"} {
+	for name, want := range map[string]string{"one": "first body", `say "hi" & <go>`: "second body", "closed": "third body"} {
 		doc, ok := docs[name]
 		if !ok || !strings.Contains(doc, `<div class="doc-body md">`+want+`</div>`) {
 			t.Errorf("frame %q = %.200q, want %q", name, doc, want)
 		}
-		for other, text := range map[string]string{"one": "first body", `say "hi" &amp; <go>`: "second body", "closed": "third body"} {
+		for other, text := range map[string]string{"one": "first body", `say "hi" & <go>`: "second body", "closed": "third body"} {
 			if other != name && strings.Contains(doc, text) {
 				t.Errorf("frame %q holds %q's text", name, other)
 			}
 		}
 	}
-	// The name reaches the attribute escaped, so it cannot end the attribute.
-	wantAll(t, string(regions.Board), `data-doc="say &#34;hi&#34; &amp;amp; &lt;go&gt;"`)
+	// The name (its &amp; decoded on input) reaches the attribute escaped, so
+	// it cannot end the attribute.
+	wantAll(t, string(regions.Board), `data-doc="say &#34;hi&#34; &amp; &lt;go&gt;"`)
 	// A closed topic's body sits in a closed fold, framed all the same.
 	wantAll(t, string(regions.Board), `<details class="tdoc" data-key="doc:closed"><summary`)
 }

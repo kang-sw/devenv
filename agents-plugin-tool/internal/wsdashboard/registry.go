@@ -14,8 +14,9 @@ import (
 // The machine session registry: one directory per registered session under
 // <state dir>/sessions/<reply-id>/, holding the session's registration file.
 // A stdio ws-mcp writes the registration of every top-level lead session it
-// serves while that session's dashboard key resolves on; the daemon only
-// reads it. Registering per session, not per project root, is what keeps a
+// serves while that session's dashboard key resolves on, and the daemon's
+// agent runner writes one (Agent set) for each conversation it hosts; the
+// daemon's index only reads them. Registering per session, not per project root, is what keeps a
 // key-off session off the dashboard when another key-on ws-mcp serves the
 // same root.
 //
@@ -27,6 +28,10 @@ const (
 	registrationFileName = "registration.json"
 
 	registrationSchemaVersion = 1
+
+	// AgentRecordFileName is the agent runner's conversation record in a
+	// session directory; its presence marks the directory as the runner's.
+	AgentRecordFileName = "agent.json"
 
 	// HeartbeatInterval is how often a ws-mcp refreshes the heartbeat of each
 	// session it still serves.
@@ -205,7 +210,11 @@ func RemoveRegistration(dir, replyID string) error {
 // PruneRegistrations deletes the directory of every session last seen more
 // than retention before now, and of every directory without a readable
 // registration that has not changed for as long. It returns how many it
-// deleted.
+// deleted. An agent conversation (registration Agent, or a directory holding
+// AgentRecordFileName) is never pruned: it heartbeats only while the daemon
+// runs, so a daemon down past retention would otherwise lose its record,
+// held sends, and backend session before the runner re-registers it; its
+// lifetime is the runner's.
 func PruneRegistrations(dir string, now time.Time, retention time.Duration) int {
 	entries, err := os.ReadDir(filepath.Join(dir, sessionsDirName))
 	if err != nil {
@@ -216,8 +225,14 @@ func PruneRegistrations(dir string, now time.Time, retention time.Duration) int 
 		if !entry.IsDir() || !ValidReplyID(entry.Name()) {
 			continue
 		}
+		if _, err := os.Stat(filepath.Join(SessionDir(dir, entry.Name()), AgentRecordFileName)); err == nil {
+			continue
+		}
 		last := time.Time{}
 		if reg, err := ReadRegistration(dir, entry.Name()); err == nil {
+			if reg.Agent {
+				continue
+			}
 			last = reg.LastSeen()
 		}
 		if last.IsZero() {

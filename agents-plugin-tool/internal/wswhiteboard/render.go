@@ -26,7 +26,7 @@ import (
 // full page's stamp script and, when it holds a mermaid block, the shared
 // mermaid script (MermaidAsset).
 //
-//go:embed assets/page.tmpl assets/page.css assets/chg.js assets/form.js assets/live.js assets/pill.js assets/mermaid-init.js assets/doc-frame.js assets/viewer.js assets/svg-view.js assets/sprite.svg
+//go:embed assets/page.tmpl assets/page.css assets/chg.js assets/form.js assets/live.js assets/pill.js assets/ago.js assets/mermaid-init.js assets/doc-frame.js assets/viewer.js assets/svg-view.js assets/sprite.svg
 var assetFS embed.FS
 
 type pageAssets struct {
@@ -39,6 +39,8 @@ type pageAssets struct {
 	live  string
 	// pill is the open-question pill, shared by the full page and the dashboard.
 	pill string
+	// ago keeps the topic bars' updated-ago times current, on the same two.
+	ago string
 	// mermaidInit themes and runs mermaid after the shared script loads.
 	mermaidInit template.JS
 	// chg draws a topic body's change marks (wbChangeBars, wbWatchChanges).
@@ -111,6 +113,7 @@ func buildAssets(read func(name string) ([]byte, error)) (*pageAssets, error) {
 		form:        get("form.js"),
 		live:        get("live.js"),
 		pill:        get("pill.js"),
+		ago:         get("ago.js"),
 		mermaidInit: template.JS(get("mermaid-init.js")),
 		docFrame:    svgView + "\n" + chg + "\n" + get("doc-frame.js"),
 		chg:         chg,
@@ -240,6 +243,24 @@ func RenderRegions(view View) (Regions, error) {
 	}, nil
 }
 
+// RenderClosedTopics renders the closed topics of a view built with a
+// ViewInput.Closed window as one fragment, as RenderRegions renders them on
+// the board (each topic body in its sandboxed frame), followed by the
+// show-more control when more remain: the served page's show-more answer.
+func RenderClosedTopics(view View) (template.HTML, error) {
+	a, err := loadAssets()
+	if err != nil {
+		return "", fmt.Errorf("whiteboard page assets: %w", err)
+	}
+	view.Layout = LayoutFull
+	view.StampFile = ""
+	var buf bytes.Buffer
+	if err := a.templateFor(view.Lang).ExecuteTemplate(&buf, "closedpage", newPageData(view, a, true)); err != nil {
+		return "", fmt.Errorf("whiteboard closed topics: %w", err)
+	}
+	return template.HTML(buf.String()), nil
+}
+
 // SharedAssets are the static page's inlined assets, for a page that hosts
 // RenderRegions fragments: the stylesheet the fragments are styled by, the
 // icon sprite they reference, the answer-form script that drives the board's
@@ -261,7 +282,7 @@ func PageAssets() (SharedAssets, error) {
 	if err != nil {
 		return SharedAssets{}, fmt.Errorf("whiteboard page assets: %w", err)
 	}
-	return SharedAssets{CSS: a.css, Sprite: a.sprite, FormScript: template.JS(a.form + "\n" + a.pill), MermaidInit: a.mermaidInit, ViewerScript: template.JS(a.viewer)}, nil
+	return SharedAssets{CSS: a.css, Sprite: a.sprite, FormScript: template.JS(a.form + "\n" + a.pill + "\n" + a.ago), MermaidInit: a.mermaidInit, ViewerScript: template.JS(a.viewer)}, nil
 }
 
 // pageData is what the page template executes on: the view plus the inlined
@@ -333,7 +354,7 @@ func newPageData(view View, a *pageAssets, framed bool) *pageData {
 	if full {
 		// The viewer is for the standalone page; the embed is a chat
 		// snapshot with a size budget and runs only the answer form.
-		script = a.viewer + script + a.pill + a.live + a.chg + chgWire
+		script = a.viewer + script + a.pill + a.ago + a.live + a.chg + chgWire
 	}
 	p := &pageData{
 		View:        view,
@@ -423,7 +444,7 @@ const frameCSS = "html, body { background: transparent; overflow: hidden; }"
 // frame's height across a board swap.
 func (p *pageData) framedDoc(topic string, body template.HTML, mermaid bool, a *pageAssets) template.HTML {
 	var doc strings.Builder
-	doc.WriteString(`<!DOCTYPE html><html><head><meta charset="utf-8"><base target="_blank"><style>`)
+	doc.WriteString(frameDocStart + `<head><meta charset="utf-8"><base target="_blank"><style>`)
 	doc.WriteString(string(a.css))
 	doc.WriteString("\n" + frameCSS + `</style></head><body class="doc-frame"><div class="doc-body md">`)
 	doc.WriteString(string(body))
@@ -434,6 +455,27 @@ func (p *pageData) framedDoc(topic string, body template.HTML, mermaid bool, a *
 	doc.WriteString(`</body></html>`)
 	return template.HTML(`<iframe class="doc-frame" title="` + template.HTMLEscapeString(topic) + `" data-doc="` + template.HTMLEscapeString(topic) + `" sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox" srcdoc="` +
 		template.HTMLEscapeString(doc.String()) + `"></iframe>`)
+}
+
+// frameDocStart opens every topic-body frame's document (framedDoc), the
+// root ThemeFrames pins a theme on.
+const frameDocStart = `<!DOCTYPE html><html>`
+
+// ThemeFrames pins theme ("light" or "dark") on the root of every topic-body
+// frame in board, as the host page pins it on its own root: a frame is a
+// separate document whose stylesheet otherwise follows the OS, under a
+// transparent background that shows the host's pinned card. Any other theme
+// returns board unchanged (the frames follow the OS, as the page does). The
+// daemon applies it per request, from the request's theme cookie, so the
+// board itself renders theme-free; the page script carries a later switch
+// to the frames (doc-frame.js).
+func ThemeFrames(board template.HTML, theme string) template.HTML {
+	if theme != "light" && theme != "dark" {
+		return board
+	}
+	from := `srcdoc="` + template.HTMLEscapeString(frameDocStart)
+	to := `srcdoc="` + template.HTMLEscapeString(`<!DOCTYPE html><html data-theme="`+theme+`">`)
+	return template.HTML(strings.ReplaceAll(string(board), from, to))
 }
 
 // topicData is one topic block with the page it sits on.

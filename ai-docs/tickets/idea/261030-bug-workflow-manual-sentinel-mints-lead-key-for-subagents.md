@@ -40,3 +40,12 @@ body.
   candidate signals (claude-mod `agentId` on `tool.call`, a harness-side
   marker, Pi spawn role env) are uninvestigated; the fix direction is
   unsettled.
+
+## Status (2026-11-08)
+
+Runner-spawned agents are closed by f4845e28c: agent profile validation refuses
+`ferrule` and `workflow_manual` in `ws_tools`, so a runner agent's ws-mcp
+can never reach a lead-key-minting tool. The remaining case is in-process
+subagents that share the lead's ws-mcp; closing it needs a per-call caller
+signal (uninvestigated: claude-mod hook agent id, Pi spawn env). The ticket
+stays open for that.

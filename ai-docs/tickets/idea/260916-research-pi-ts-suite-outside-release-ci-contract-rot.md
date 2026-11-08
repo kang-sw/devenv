@@ -62,3 +62,7 @@ setting the rot aside.
   the same reason? (Audit `bridge.test.ts`'s sibling `*.test.ts` count/snapshot
   assertions.)
 - Does wsflow's Python suite have the same CI-scope gap?
+
+## Status (2026-11-08)
+
+The `bridge.test.ts` tool-count drift (65 vs 72 in `runtime.json`) is fixed: the hard-coded count is gone and the snapshot carries the missing tools. CI wiring for the pi suite and the environment-only `web-startup` test thread remain open.

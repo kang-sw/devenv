@@ -125,6 +125,10 @@ type Item struct {
 	// item; the embed marks an item new when it changed after the previous
 	// embed.
 	Changed int `json:"changed"`
+	// ChangedAt is the wall-clock time (RFC 3339) of that update, which the
+	// stale-topic nudge ages topics by; see stampChanges for a store written
+	// before the field.
+	ChangedAt string `json:"changed_at,omitempty"`
 	// Settled is the item's settle order (a board-wide counter), zero while
 	// the item is open or assumed. Rotation and archive eviction order by
 	// it, never by time.
@@ -146,6 +150,8 @@ type TopicDoc struct {
 	// Changed is the render sequence of the update that last changed the
 	// body; it counts toward the topic's recency like an item's Changed.
 	Changed int `json:"changed"`
+	// ChangedAt is the wall-clock time of that update, as an item's.
+	ChangedAt string `json:"changed_at,omitempty"`
 	// Marks are the change marks of the body's latest edit (diffBodies). Only
 	// a body edit replaces them: the first body has none, the same body again
 	// keeps them, and no other write touches them.
@@ -167,9 +173,16 @@ type State struct {
 	// is not an assumption: the board's mark of the user having answered
 	// something. Zero before any such answer and on a board stored before
 	// the field; LastAnswerSeq derives a stand-in for the latter.
-	AnswerSeq    int      `json:"answer_seq,omitempty"`
-	Items        []Item   `json:"items,omitempty"`
+	AnswerSeq int    `json:"answer_seq,omitempty"`
+	Items     []Item `json:"items,omitempty"`
+	// ClosedTopics lists the closed topics in close order, the most recently
+	// closed last: a close appends, a reopen removes.
 	ClosedTopics []string `json:"closed_topics,omitempty"`
+	// CloseResults holds each topic's close result, the one sentence its
+	// latest wb:close gave on how it ended. A reopen keeps it (the page shows
+	// it only while the topic is closed) and the next close replaces it; a
+	// topic closed before the field has none.
+	CloseResults map[string]string `json:"close_results,omitempty"`
 	// Topics holds the topics that have a body, in first-set order. A store
 	// written while the board had a Now slot keeps its "now" text on disk
 	// until the next write; the field is gone, so nothing reads it.
@@ -180,6 +193,10 @@ type State struct {
 	// EmbedDir is the host embed folder, empty when embeds go to the
 	// repository folder.
 	EmbedDir string `json:"embed_dir,omitempty"`
+	// LastNudgeAt is when an update result last carried the stale-topic
+	// nudge (RFC 3339); empty, as on a store written before the field, is
+	// never.
+	LastNudgeAt string `json:"last_nudge_at,omitempty"`
 }
 
 // Env carries the side effects Apply needs, so the store stays testable.
@@ -195,6 +212,9 @@ type Env struct {
 type Outcome struct {
 	// IDs holds the ID of every wb:add command, in command order.
 	IDs []int
+	// Info is the stale-topic nudge (see staleNudge), "" when the batch
+	// carries none. It is for the caller's tool result only; no page shows it.
+	Info string
 }
 
 // FormatID renders an item ID as the board shows it: (nn), three digits
@@ -269,8 +289,11 @@ func (s *State) TopicBody(topic string) string {
 }
 
 // setTopicBody sets topic's body; a change marks the topic changed and, as
-// an added item does, reopens a closed topic.
-func (s *State) setTopicBody(topic, body string, mark int) {
+// an added item does, reopens a closed topic. Change marks are per update
+// batch: base is the state as the batch began, and the marks diff against
+// the body it held there, so several edits to one topic in a batch keep all
+// their marks and a body the batch created marks nothing.
+func (s *State) setTopicBody(topic, body string, mark int, base *State) {
 	i := s.topicDocIndex(topic)
 	if i >= 0 && s.Topics[i].Body == body {
 		return
@@ -279,7 +302,8 @@ func (s *State) setTopicBody(topic, body string, mark int) {
 		s.Topics = append(s.Topics, TopicDoc{Name: topic})
 		i = len(s.Topics) - 1
 	}
-	if prev := s.Topics[i].Body; prev != "" {
+	s.Topics[i].Marks = nil
+	if prev := base.TopicBody(topic); prev != "" {
 		s.Topics[i].Marks = diffBodies(prev, body)
 	}
 	s.Topics[i].Body = body
@@ -402,18 +426,11 @@ func Apply(state *State, commands string, env Env) (Outcome, []string) {
 		case "wb:patch":
 			applyPatch(p, work, cmd, mark)
 		case "wb:topic":
-			applyTopic(p, work, cmd, mark)
+			applyTopic(p, work, state, cmd, mark)
 		case "wb:edit":
-			applyEdit(p, work, cmd, mark)
+			applyEdit(p, work, state, cmd, mark)
 		case "wb:close":
-			if topic, ok := wsxmlcmd.RequiredAttr(p, cmd, "topic"); ok {
-				switch {
-				case !work.topicKnown(topic):
-					p.Add("%s: no item or topic body has topic %q", cmd.At("topic"), topic)
-				case !work.topicClosed(topic):
-					work.ClosedTopics = append(work.ClosedTopics, topic)
-				}
-			}
+			applyClose(p, work, cmd)
 		case "wb:floor":
 			if floor, ok := wsxmlcmd.IntAttr(p, cmd, "id", true); ok && floor > work.Counter {
 				work.Counter = floor
@@ -443,8 +460,31 @@ func Apply(state *State, commands string, env Env) (Outcome, []string) {
 		return Outcome{}, p.List
 	}
 	work.evictArchive()
+	work.stampChanges(mark, env.Now)
+	out.Info = work.staleNudge(env.Now)
 	*state = *work
 	return out, nil
+}
+
+// applyClose closes a topic with its result. Closing a closed topic again
+// replaces its result and keeps its place in the close order.
+func applyClose(p *problems, work *State, cmd command) {
+	topic, topicOK := wsxmlcmd.RequiredAttr(p, cmd, "topic")
+	result, resultOK := wsxmlcmd.RequiredAttr(p, cmd, "result")
+	if !topicOK || !resultOK {
+		return
+	}
+	if !work.topicKnown(topic) {
+		p.Add("%s: no item or topic body has topic %q", cmd.At("topic"), topic)
+		return
+	}
+	if !work.topicClosed(topic) {
+		work.ClosedTopics = append(work.ClosedTopics, topic)
+	}
+	if work.CloseResults == nil {
+		work.CloseResults = map[string]string{}
+	}
+	work.CloseResults[topic] = strings.TrimSpace(result)
 }
 
 // itemFields are an add or patch command's item fields, read from its field
@@ -690,7 +730,7 @@ func applyPatch(p *problems, work *State, cmd command, mark int) {
 
 // applyTopic replaces a topic's body whole; an empty (or blank) body clears
 // it. The same body again is no change.
-func applyTopic(p *problems, work *State, cmd command, mark int) {
+func applyTopic(p *problems, work, base *State, cmd command, mark int) {
 	name, ok := wsxmlcmd.RequiredAttr(p, cmd, "name")
 	if !ok {
 		return
@@ -704,12 +744,12 @@ func applyTopic(p *problems, work *State, cmd command, mark int) {
 		p.Add("%s: a topic body takes markdown with inline HTML, not a full document (found <!DOCTYPE or <html)", cmd.Label())
 		return
 	}
-	work.setTopicBody(name, body, mark)
+	work.setTopicBody(name, body, mark, base)
 }
 
 // applyEdit replaces one exact match of old in a topic's body with new, or
 // every match with replace_all="true".
-func applyEdit(p *problems, work *State, cmd command, mark int) {
+func applyEdit(p *problems, work, base *State, cmd command, mark int) {
 	name, nameOK := wsxmlcmd.RequiredAttr(p, cmd, "topic")
 	all, _ := wsxmlcmd.BoolAttr(p, cmd, "replace_all")
 	old, hasOld := cmd.Single(p, "wb:old")
@@ -748,7 +788,7 @@ func applyEdit(p *problems, work *State, cmd command, mark int) {
 		p.Add("%s: the edited body would hold a full document (found <!DOCTYPE or <html)", cmd.Label())
 		return
 	}
-	work.setTopicBody(name, next, mark)
+	work.setTopicBody(name, next, mark, base)
 }
 
 // checkPolicyShape checks what a policy item's options and recommendation

@@ -129,13 +129,14 @@ func TestBodyStripsOneNewlineAtEachEndOnly(t *testing.T) {
 	}
 }
 
-func TestAttributeValuesAreQuotedAndNeverDecoded(t *testing.T) {
+func TestAttributeValuesAreQuotedAndDecoded(t *testing.T) {
 	for name, tc := range map[string]struct{ in, want string }{
 		"double quotes":                   {`name="plain"`, "plain"},
 		"single quotes":                   {`name='plain'`, "plain"},
 		"single quote inside double":      {`name="it's"`, "it's"},
 		"double quote inside single":      {`name='say "hi"'`, `say "hi"`},
-		"entities stay as written":        {`name="a &amp; b &lt; c &quot;"`, `a &amp; b &lt; c &quot;`},
+		"entities are decoded":            {`name="a &amp; b &lt; c &quot; &#39;"`, `a & b < c " '`},
+		"a bare & stays":                  {`name="a && b &nbsp;"`, "a && b &nbsp;"},
 		"angle brackets inside":           {`name="a>b<c"`, "a>b<c"},
 		"slash and gt do not end the tag": {`name="x/>y"`, "x/>y"},
 		"spaces around =":                 {`name = "spaced"`, "spaced"},
@@ -152,12 +153,52 @@ func TestAttributeValuesAreQuotedAndNeverDecoded(t *testing.T) {
 			t.Errorf("%s: name = %q, want %q", name, got, tc.want)
 		}
 	}
-	// A topic name with a quote or entity is the same topic everywhere.
+	// A topic name with a quote or entity is the same topic everywhere,
+	// escaped or not.
 	st := &State{}
 	mustApply(t, st, `<wb:add class="technical" topic='say "hi" &amp; <go>'><wb:title>x</wb:title></wb:add>`+
-		`<wb:topic name='say "hi" &amp; <go>'>body</wb:topic><wb:close topic='say "hi" &amp; <go>'/>`)
-	if st.Items[0].Topic != `say "hi" &amp; <go>` || st.TopicBody(`say "hi" &amp; <go>`) != "body" || !st.topicClosed(`say "hi" &amp; <go>`) {
+		`<wb:topic name='say "hi" & <go>'>body</wb:topic><wb:close topic="say &quot;hi&quot; &amp; &lt;go&gt;" result="done"/>`)
+	if st.Items[0].Topic != `say "hi" & <go>` || st.TopicBody(`say "hi" & <go>`) != "body" || !st.topicClosed(`say "hi" & <go>`) {
 		t.Fatalf("state = %+v", st)
+	}
+}
+
+// An escaped item field is decoded, since an item field is plain text; a
+// topic body (raw HTML), wb:edit's operands (matched against a stored body),
+// and an answer (the user's verbatim words) keep their entities.
+func TestItemFieldsDecodeEntitiesOtherBodiesDoNot(t *testing.T) {
+	st := &State{}
+	mustApply(t, st, `<wb:add id="1" class="policy" topic="t">
+<wb:title>Key &amp; value</wb:title>
+<wb:option><code>&lt;key&gt;</code></wb:option>
+<wb:option>a &#60;b&#x3E; <![CDATA[&lt;kept&gt;]]></wb:option>
+<wb:recommend>a: &quot;short&quot;</wb:recommend>
+<wb:why>x &lt; y</wb:why>
+<wb:link>see &apos;notes&apos;</wb:link>
+</wb:add>
+<wb:topic name="t">raw &lt;b&gt; in HTML</wb:topic>`)
+	got := item(t, st, 1)
+	if got.Title != "Key & value" || got.Options[0] != "<code><key></code>" || got.Options[1] != "a <b> &lt;kept&gt;" ||
+		got.Recommendation != `a: "short"` || got.Rationale != "x < y" || got.Links[0] != "see 'notes'" {
+		t.Fatalf("item = %+v", got)
+	}
+	mustApply(t, st, `<wb:patch id="1"><wb:why>p &gt; q</wb:why></wb:patch>`)
+	if got := item(t, st, 1); got.Rationale != "p > q" {
+		t.Fatalf("patched why = %q", got.Rationale)
+	}
+	if st.TopicBody("t") != "raw &lt;b&gt; in HTML" {
+		t.Fatalf("topic body = %q", st.TopicBody("t"))
+	}
+	cmds := mustParse(t, `<wb:edit topic="t"><wb:old>&lt;b&gt;</wb:old><wb:new>&lt;i&gt;</wb:new></wb:edit><wb:answer id="1" value="a &amp; b">(1) &lt;a&gt;</wb:answer>`)
+	if cmds[0].FieldsOf("wb:old")[0] != "&lt;b&gt;" || cmds[0].FieldsOf("wb:new")[0] != "&lt;i&gt;" {
+		t.Fatalf("edit fields = %+v", cmds[0].Fields)
+	}
+	if v, _ := cmds[1].Attr("value"); v != "a & b" || cmds[1].Body != "(1) &lt;a&gt;" {
+		t.Fatalf("answer = %+v", cmds[1])
+	}
+	mustApply(t, st, `<wb:edit topic="t"><wb:old>&lt;b&gt;</wb:old><wb:new>&lt;i&gt;</wb:new></wb:edit>`)
+	if st.TopicBody("t") != "raw &lt;i&gt; in HTML" {
+		t.Fatalf("edited topic body = %q", st.TopicBody("t"))
 	}
 }
 
@@ -200,7 +241,7 @@ func TestUnknownTagsAttributesAndStructureAreProblems(t *testing.T) {
 		"unknown command":            {`<wb:nope x="1">body</wb:nope>`, "command 1 <wb:nope> (line 1): unknown command"},
 		"unprefixed command":         {`<add class="policy" topic="t"/>`, "command 1 <add> (line 1): unknown command"},
 		"unknown self-closing":       {`<wb:nope/>`, "unknown command"},
-		"unknown attribute":          {`<wb:close topic="t" force="1"/>`, "unknown attribute force (known: topic)"},
+		"unknown attribute":          {`<wb:close topic="t" force="1"/>`, "unknown attribute force (known: topic, result)"},
 		"attribute on a field":       {`<wb:add class="technical" topic="t"><wb:title lang="ko">x</wb:title></wb:add>`, "command 1 <wb:add> (line 1) field <wb:title>: unknown attribute lang (it takes none)"},
 		"attribute given twice":      {`<wb:close topic="a" topic="b"/>`, "attribute topic given twice"},
 		"unknown field":              {`<wb:add class="technical" topic="t"><wb:subtitle>x</wb:subtitle></wb:add>`, "unknown field <wb:subtitle> (fields: "},
@@ -236,7 +277,7 @@ func TestUnknownTagsAttributesAndStructureAreProblems(t *testing.T) {
 // before it are still validated.
 func TestRefusalListsEveryProblemSoFar(t *testing.T) {
 	st := &State{}
-	problems := refused(t, st, "<wb:nope/>\nstray\n</wb:add>\n<wb:close topic=\"missing\"/>\n<wb:add class=\"bad\" topic=\"t\"><wb:title>x</wb:title></wb:add>")
+	problems := refused(t, st, "<wb:nope/>\nstray\n</wb:add>\n<wb:close topic=\"missing\" result=\"done\"/>\n<wb:add class=\"bad\" topic=\"t\"><wb:title>x</wb:title></wb:add>")
 	wantProblems(t, problems,
 		"command 1 <wb:nope> (line 1): unknown command",
 		`line 2: text outside a command: "stray"`,
@@ -244,7 +285,7 @@ func TestRefusalListsEveryProblemSoFar(t *testing.T) {
 		`command 2 <wb:close> (line 4) topic: no item or topic body has topic "missing"`,
 		"command 3 <wb:add> (line 5) class: must be one of",
 	)
-	problems = refused(t, st, "<wb:close topic=\"missing\"/>\n<wb:topic name=\"t\">never closed")
+	problems = refused(t, st, "<wb:close topic=\"missing\" result=\"done\"/>\n<wb:topic name=\"t\">never closed")
 	wantProblems(t, problems,
 		`command 1 <wb:close> (line 1) topic: no item or topic body has topic "missing"`,
 		"line 2: <wb:topic> has no closing </wb:topic>",

@@ -42,6 +42,25 @@ func trackerLeadOnlyDenial(name string) string {
 	return fmt.Sprintf("%s is not available to a spawned session: the tracker records the user's work through the top-level lead. Put progress in your final report; your lead records it.", name)
 }
 
+// trackerSessionKey returns the caller's session key when it names a
+// top-level lead. The call gate refuses a spawned key only when it finds the
+// key, so a key the store cannot find (made up, stale, expired) would pass
+// it; this refuses one before any registry read or write.
+func (s *Server) trackerSessionKey(tool string, args map[string]any) (string, error) {
+	key, err := sessionStateKey(tool, args)
+	if err != nil {
+		return "", err
+	}
+	entry, found := s.sessions.lookup(key)
+	if !found {
+		return "", mailboxUnknownSessionError(tool)
+	}
+	if !entry.isTopLevelLead() {
+		return "", errors.New(trackerLeadOnlyDenial(tool))
+	}
+	return key, nil
+}
+
 // trackerOrigins are the origins a tracker.update write may carry: every
 // write through this tool is an agent's, so human is not among them, and
 // agent-auto marks a write the agent made unasked.
@@ -64,8 +83,11 @@ const (
 // its own.
 var trackerEventAttrs = []string{"store", "origin"}
 
+// trackerEventSpec is an event command. Its body (an item body, a comment,
+// or a note) is shown as plain text, never as raw HTML, and matched against
+// nothing, so an escaped body is decoded like the attributes.
 func trackerEventSpec(kind wsxmlcmd.Kind, attrs ...string) wsxmlcmd.Spec {
-	return wsxmlcmd.Spec{Kind: kind, Attrs: append(append([]string{}, trackerEventAttrs...), attrs...)}
+	return wsxmlcmd.Spec{Kind: kind, Attrs: append(append([]string{}, trackerEventAttrs...), attrs...), DecodeBody: true}
 }
 
 // trackerCommands is the command table, keyed by name without the prefix:
@@ -543,7 +565,7 @@ func (b *trackerBatch) newEvents(next wsledger.EventID) ([]wsledger.NewEvent, er
 
 func (s *Server) handleTrackerUpdate(ctx context.Context, id json.RawMessage, args map[string]any) response {
 	const tool = "tracker.update"
-	key, err := sessionStateKey(tool, args)
+	key, err := s.trackerSessionKey(tool, args)
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
@@ -613,7 +635,8 @@ func (s *Server) trackerSucceeded(key, text string) string {
 }
 
 // trackerRegisterCommand registers a store from a tk:register command; a
-// failure leaves nothing registered.
+// failure leaves nothing registered on this machine, and says so, and what
+// the remote already holds when the failure came after the push.
 func trackerRegisterCommand(ctx context.Context, h *wstrackerhost.Host, cmd wsxmlcmd.Command) (string, error) {
 	req := wstrackerhost.RegisterRequest{Origin: wstracker.OriginAgent}
 	req.ID, _ = cmd.Attr("store")
@@ -634,6 +657,14 @@ func trackerRegisterCommand(ctx context.Context, h *wstrackerhost.Host, cmd wsxm
 	res, err := h.Register(ctx, req)
 	if errors.Is(err, wsledger.ErrIDTaken) {
 		return "", fmt.Errorf("%s: member %q is taken in that store; register under another member id. Nothing was registered", cmd.Label(), req.Member)
+	}
+	var held *wstrackerhost.RemoteHeldError
+	if errors.As(err, &held) {
+		what := fmt.Sprintf("member %s's join", req.Member)
+		if held.Creator {
+			what = fmt.Sprintf("the new store, with member %s as its sole admin", req.Member)
+		}
+		return "", fmt.Errorf("%s: %w. Nothing was registered on this machine, but the remote already holds %s; send the same tk:register again to finish (this machine's key is already that member, so no new join is written)", cmd.Label(), err, what)
 	}
 	if err != nil {
 		return "", fmt.Errorf("%s: %w. Nothing was registered", cmd.Label(), err)
@@ -806,7 +837,7 @@ type trackerStoreSummary struct {
 
 func (s *Server) handleTrackerQuery(ctx context.Context, id json.RawMessage, args map[string]any) response {
 	const tool = "tracker.query"
-	key, err := sessionStateKey(tool, args)
+	key, err := s.trackerSessionKey(tool, args)
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}

@@ -252,9 +252,10 @@
   if ($("glang")) $("glang").addEventListener("change", function () { setLang(this.value); });
 
   // Theme: the choice lives in a cookie the server reads, so the root's
-  // data-theme is right from the first byte; no cookie (auto) follows the OS.
-  // A change only sets the attribute and the cookie: the stylesheets do the
-  // rest, with no reload.
+  // data-theme, and each topic-body frame's, is right from the first byte; no
+  // cookie (auto) follows the OS. A change sets the attribute and the cookie,
+  // posts the theme to the body frames (separate documents), and redraws the
+  // drawn diagrams: the stylesheets do the rest, with no reload.
   var THEME_COOKIE = "ws_dashboard_theme";
   function markTheme() {
     var cur = root.getAttribute("data-theme") || "";
@@ -266,6 +267,11 @@
     if (v) root.setAttribute("data-theme", v);
     else root.removeAttribute("data-theme");
     markTheme();
+    q("iframe.doc-frame").forEach(postTheme);
+    if (window.mermaid && q("pre.mermaid[data-processed]").length) window.wbMermaid();
+  }
+  function postTheme(f) {
+    if (f.contentWindow) f.contentWindow.postMessage({ wbDoc: "theme", theme: root.getAttribute("data-theme") || "" }, "*");
   }
   markTheme();
 
@@ -285,7 +291,17 @@
       if (box && box.checked) s.checked = true;
       if (s.pick || s.note || s.noteOpen || s.checked) out[item.getAttribute("data-id")] = s;
     });
+    // A topic note carries over by topic name, keyed apart from item numbers.
+    q(".tnote[data-topic]", el).forEach(function (note) {
+      if (note.value || !note.hidden) out["t:" + note.getAttribute("data-topic")] = { note: note.value, noteOpen: !note.hidden };
+    });
     return out;
+  }
+  function openNote(note, s) {
+    note.value = s.note || "";
+    note.hidden = false;
+    note.style.height = "auto";
+    if (note.scrollHeight) note.style.height = note.scrollHeight + "px";
   }
   function writeAnswers(el, saved) {
     q(".card[data-id], .arow[data-id]", el).forEach(function (item) {
@@ -293,13 +309,12 @@
       if (!s) return;
       var note = item.querySelector(".note"), box = item.querySelector(".ack input");
       if (s.pick) q(".opt[data-opt], .btn[data-v]", item).forEach(function (b) { if (pickKey(b) === s.pick) b.setAttribute("aria-pressed", "true"); });
-      if (note && (s.note || s.noteOpen)) {
-        note.value = s.note || "";
-        note.hidden = false;
-        note.style.height = "auto";
-        if (note.scrollHeight) note.style.height = note.scrollHeight + "px";
-      }
+      if (note && (s.note || s.noteOpen)) openNote(note, s);
       if (box && s.checked) box.checked = true;
+    });
+    q(".tnote[data-topic]", el).forEach(function (note) {
+      var s = saved["t:" + note.getAttribute("data-topic")];
+      if (s) openNote(note, s);
     });
   }
   // A board swap waits while the user is typing in the answer form, and
@@ -355,6 +370,7 @@
       mermaid();
       syncChips();
       syncNote();
+      refetchClosed(el);
     }
     if (board || name === "convlive") applySent();
     if (name === "panels") drawerSync();
@@ -462,6 +478,39 @@
     s.onload = function () { window.wbMermaid(); };
     s.onerror = function () { mermaidLoading = false; s.parentNode.removeChild(s); };
     doc.head.appendChild(s);
+  }
+
+  // --- closed topics past the board's cap: fetched on request ---------------
+  // The board renders the most recently closed topics up to its cap, then a
+  // show-more control naming the next index (data-closed-next); a click
+  // fetches the next page from the closed route into the control's place,
+  // ending with the next control when more remain. closedUpTo is the index
+  // past the last topic fetched, so a board swap, which renders the capped
+  // board again, fetches the same topics back in one request.
+  var closedUpTo = 0;
+  function loadClosed(btn, n) {
+    if (!window.fetch || btn.disabled) return;
+    btn.disabled = true;
+    var from = +btn.getAttribute("data-closed-next");
+    fetch("/s/" + rid + "/closed?from=" + from + (n ? "&n=" + n : ""), { credentials: "same-origin", cache: "no-store" }).then(function (r) {
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.json();
+    }).then(function (res) {
+      var page = frag(res.html || "").firstElementChild;
+      // A board swap meanwhile replaced the control, and refetches itself.
+      if (!btn.parentNode || !page) { btn.disabled = false; return; }
+      btn.parentNode.replaceChild(page, btn);
+      closedUpTo = Math.max(closedUpTo, from + page.querySelectorAll(".topic").length);
+      restoreOpen(page);
+      if (window.wbBindBoard) window.wbBindBoard(page);
+      if (window.wbAgo) window.wbAgo(page);
+      mermaid();
+    }, function () { btn.disabled = false; });
+  }
+  function refetchClosed(el) {
+    var btn = el.querySelector("button.closed-more[data-closed-next]");
+    var from = btn ? +btn.getAttribute("data-closed-next") : 0;
+    if (btn && closedUpTo > from) loadClosed(btn, closedUpTo - from);
   }
 
   // --- composer: never inside a region, so a swap never touches it ---------
@@ -759,12 +808,22 @@
     });
   }
   var sending = false;
+  // topicNotes are the board's non-empty topic notes. A send carries them
+  // as "[topic] text" lines after the typed text, the lines the board's
+  // copy-answers adds; they are no item's answer, so they are no chip.
+  function topicNotes() {
+    var b = region("board");
+    return (b ? q(".tnote[data-topic]", b) : []).map(function (el) {
+      return { el: el, value: el.value, line: "[" + el.getAttribute("data-topic") + "] " + el.value.trim() };
+    }).filter(function (n) { return n.value.trim(); });
+  }
   function sendMessage() {
     if (sending) return;
-    var t = ctext.value.trim(), list = chipList(), pics = imgs.slice();
-    if (!t && !list.length && !pics.length) { syncNote(wsT("js.send.empty")); return; }
+    var t = ctext.value.trim(), list = chipList(), pics = imgs.slice(), notes = topicNotes();
+    if (!t && !list.length && !pics.length && !notes.length) { syncNote(wsT("js.send.empty")); return; }
     if (pics.some(function (p) { return !p.ref && p.data === null; })) { syncNote(wsT("js.send.reading")); return; }
-    var body = { text: t, chips: list };
+    var lines = notes.map(function (n) { return n.line; }).join("\n");
+    var body = { text: t + (t && lines ? "\n\n" : "") + lines, chips: list };
     var up = pics.filter(function (p) { return !p.ref; }), refs = pics.filter(function (p) { return !!p.ref; });
     if (up.length) body.images = up.map(function (p) { return { name: p.name, data: p.data, n: p.n }; });
     if (refs.length) {
@@ -787,6 +846,12 @@
       var sent = list.filter(function (c) { var cur = chips[c.id]; return cur && cur.answer === c.answer && cur.note === c.note; });
       sent.forEach(function (c) { dropChip(c.id); });
       sent.forEach(function (c) { setItem(c.id, null); });
+      // A topic note edited during the send stays for the next one.
+      notes.forEach(function (n) {
+        if (n.el.value !== n.value) return;
+        n.el.value = "";
+        n.el.dispatchEvent(new Event("input", { bubbles: true }));
+      });
       renderChips();
       syncNote(wsT(res.merged ? "js.send.merged" : "js.send.ok"));
     });
@@ -977,6 +1042,8 @@
     if (u) { var uid = u.getAttribute("data-unchip"); dropChip(uid); setItem(uid, null); renderChips(); syncNote(); return; }
     u = t.closest("[data-unimg]");
     if (u) { unattach(imgs[+u.getAttribute("data-unimg")]); syncNote(); return; }
+    u = t.closest("#r-board button.closed-more[data-closed-next]");
+    if (u) { loadClosed(u); return; }
     u = t.closest("#r-convlive [data-cancel]");
     if (u) { if (!u.disabled) cancelHeld(u); return; }
     u = t.closest("#r-convlive [data-steer]");
@@ -1449,6 +1516,9 @@
     if (m.wbDoc === "height") {
       var h = num(m.height);
       if (h >= 0 && h < 100000) f.style.height = Math.ceil(h) + "px";
+      // A frame rendered before a theme switch (a board swap on a stream
+      // opened earlier) takes the current theme when it first reports.
+      postTheme(f);
     } else if (m.wbDoc === "jump") {
       var item = /^item-\d+$/.test(str(m.id)) && $(m.id);
       if (item) item.scrollIntoView({ block: "start" });
@@ -1651,6 +1721,21 @@
   }
   function trackerLost() { tkLastRev = null; }
 
+  // --- git badge -------------------------------------------------------------
+  // A click on the top bar's git badge asks the daemon to read the root's git
+  // status at once. The answer arrives as the git region's next swap, which
+  // replaces the busy button; a refused request, or one that never answers,
+  // drops busy on its own.
+  doc.addEventListener("click", function (e) {
+    var b = e.target.closest && e.target.closest("#gitb");
+    if (!b || b.classList.contains("busy") || !window.fetch) return;
+    b.classList.add("busy");
+    function idle() { b.classList.remove("busy"); }
+    fetch("/s/" + rid + "/git", { method: "POST", credentials: "same-origin", cache: "no-store" })
+      .then(function (r) { if (!r.ok) idle(); }, idle);
+    setTimeout(idle, 15000);
+  });
+
   // --- stream ----------------------------------------------------------------
   var sse = $("sse"), sseLabel = sse && sse.querySelector(".sse-label");
   function connected(on) {
@@ -1702,7 +1787,7 @@
   }
   // holdsDraft reports unsent work a reload would drop: composer text,
   // answers picked on the board, or an attached image.
-  function holdsDraft() { return !!((ctext && ctext.value) || boardAnswers() || imgs.length); }
+  function holdsDraft() { return !!((ctext && ctext.value) || boardAnswers() || imgs.length || topicNotes().length); }
   function modeChanged(next) {
     // The other mode has other regions, and a reload renders them; text typed
     // in the composer or answers picked on the board are never dropped for it.
