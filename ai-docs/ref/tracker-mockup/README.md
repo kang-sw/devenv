@@ -18,18 +18,25 @@ reference implementation the Go data-structure child ports, and
 Open `index.html` from the file system (double-click, or a `file://` URL). No
 build, no server, no dependencies.
 
-- `index.html` holds the frame and mount points. `style.css` holds the
-  dashboard's look (variables and component rules copied from the dashboard
-  stylesheets), light and dark, with the gear menu's auto / light / dark theme.
+- `index.html` holds the frame only (header, conversation placeholder,
+  composer, the panels stub handle) and loads the files below. `style.css` holds
+  the frame's look and defines the dashboard's surface tokens (`--wb-*`, copied
+  from the dashboard stylesheets), light and dark, with the gear menu's
+  auto / light / dark theme.
 - `engine.js` is the data layer (`window.TrackerEngine`). It computes causality
   from `seen`, validates each event against what its author had seen, folds the
   state, marks concurrent changes, derives the view state, and simulates the
   per-clone journal and sync.
-- `app.js` is the view. It reads only the view state (`store.view`) and writes
-  only by dispatching events (`store.dispatch`).
-- `status-icons.js` is the status icon set (`window.TrackerStatusIcons`): one
-  shape, colour token, label, and description per status, kept in one file so
-  the dashboard can adopt it (355).
+- `../../../agents-plugin-tool/internal/wsdashboard/assets/tracker.js` and
+  `tracker.css` beside it are the view, a shipped dashboard asset:
+  `window.WsTracker.mount(adapter, opts)` draws the drawer, store page, item
+  window, quick switcher, and dialogs, including the status icon set. It reads
+  only the view state the adapter serves and writes only by dispatching events
+  through it.
+- `mock-adapter.js` is that adapter over `engine.js` and `fixtures.js`, plus
+  every mockup-only control: the viewer and clone selects, the clock, Go offline
+  / online, the Data tab, the Support agent placeholder tab, the theme gear, the
+  saved profiles, and the join simulation.
 - `fixtures.js` assigns `window.TRACKER_FIXTURES`, because `fetch` of local JSON
   is blocked on `file://`. Edit it to keep a data change.
 
