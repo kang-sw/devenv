@@ -131,6 +131,26 @@ repository sized for 50-60 people, reached from the dashboard.
     lead is notified and may return it. An assignee may hand off its
     assignment. "Everyone within N" stays forced-only. Detail: the mockup
     README.
+  - Amended 2026-11-08 (board (490) a, (491) a, (492) a, (529) ok, (530) a):
+    "everyone within N" generalizes to a subtree rule `{root,
+    include_root, levels?}`; the old form reads as a rule rooted at the
+    author. A rule rooted at a member outside the author's reach goes pending
+    to that root member, whose accept makes the rule live with forced
+    semantics, notifying the accepter's direct lead, who may return it. One
+    assign event carries a target list mixing people and subtree rules. A
+    `task` or `todo` created from the dashboard is assigned to its creator at
+    once. Assignment is picked in a search popover (people with live/pending
+    marks plus team rules), replacing the checkbox grid.
+- **Item order and references** (user, board (528) a, (531) a):
+  - Items carry a sibling position: a create records an `after` anchor (a
+    sibling id, or none for first), so an item inserted between two rows
+    shows there; reorder and reparent later extend the same field. Rejected:
+    parent-only insertion, which shows the new item at the end of its
+    siblings rather than where it was inserted.
+  - Items and comments carry `refs`, the item ids referenced with `#ID` in
+    their text, kept only while `#ID` stays in the text (the mention rule);
+    a referenced item shows its backlinks. Rejected: link rendering only,
+    with no stored refs and no backlinks.
 - **Agent recording** (user, board (123) b): an agent automatically records
   progress and completion only for tasks assigned to its user; anything else
   is recorded on request. Rejected: recording only on request; automatic
