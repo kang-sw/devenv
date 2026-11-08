@@ -208,7 +208,7 @@ func TestSessionPagesCarryScriptHooks(t *testing.T) {
 	// of the board column.
 	for name, page := range map[string]string{"live": live, "board-first": board} {
 		for _, want := range []string{
-			`<div class="drawer" id="drawer">`, `id="drclip"`, `id="drsheet"`, `id="drhandle"`, `id="dricons"`, `class="dr-wait"`,
+			`<div class="drawer" id="drawer">`, `id="drclip"`, `id="drsheet"`, `id="drhandle"`, `class="dr-wait"`, `class="tdot"`,
 			`<div class="dr-body" id="drbody"><div id="r-panels" class="region r-panels" data-region="panels"`,
 		} {
 			if !strings.Contains(page, want) {

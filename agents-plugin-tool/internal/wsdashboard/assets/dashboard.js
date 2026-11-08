@@ -1197,22 +1197,14 @@
   // and the handle holds one icon per present entry. Open state and height
   // are this browser's (ws.dashboard.drawer*).
   var drawer = $("drawer"), drclip = $("drclip"), drsheet = $("drsheet"), drbody = $("drbody");
-  var drhandle = $("drhandle"), dricons = $("dricons"), drheader = doc.querySelector(".dwrap > .top");
+  var drhandle = $("drhandle"), drheader = doc.querySelector(".dwrap > .top");
   var DR_OPEN = "ws.dashboard.drawer", DR_H = "ws.dashboard.drawer.h";
   var DR_MIN = 160, DR_DEF = 320, DR_SHUT = 80;
   var drRoomW = -1, drEntries = [], drWant = false, drOpen = false, drHas = false, drH = DR_DEF, drTop = 0;
+  var drBadge = false, drSwap = false; // the handle's dot: a section badge, or a panels change while closed
   function drawerTab(entry) { drEntries.push(entry); }
-  var SVGNS = "http://www.w3.org/2000/svg";
-  function iconEl(href) {
-    var svg = doc.createElementNS(SVGNS, "svg"), use = doc.createElementNS(SVGNS, "use");
-    svg.setAttribute("class", "i");
-    svg.setAttribute("aria-hidden", "true");
-    use.setAttribute("href", href);
-    svg.appendChild(use);
-    return svg;
-  }
   // panelTab registers a panel of the panels region (#p-<id>) as an entry: its
-  // title, icon, and count chip come from the panel's own title bar.
+  // title and count chip come from the panel's own title bar.
   function panelTab(id, badge) {
     function el() { var r = region("panels"); return r ? r.querySelector('[id="p-' + id + '"]') : null; }
     function head() { var p = el(); return p ? p.querySelector("summary") : null; }
@@ -1222,7 +1214,6 @@
         var h = head();
         return h ? Array.prototype.filter.call(h.childNodes, function (n) { return n.nodeType === 3; }).map(function (n) { return n.nodeValue; }).join("").trim() : id;
       },
-      icon: function () { var h = head(), u = h && h.querySelector("svg.i use"); return u ? u.getAttribute("href") : ""; },
       count: function () { var h = head(), c = h && h.querySelector(".chip"); return c ? c.textContent.trim() : ""; },
       badge: badge,
       content: el
@@ -1241,40 +1232,23 @@
   });
 
   function drPresent() { return drEntries.filter(function (t) { return !!t.content(); }); }
-  // drawerSync re-reads the entries: each card kept open, the handle's icon
-  // array and badges, and whether there is a drawer at all. A sync never
-  // changes the open state or the scroll.
+  // drawerSync re-reads the entries: each card kept open, the handle's
+  // tooltip (the section titles, with what is new in each) and its dot, and
+  // whether there is a drawer at all. A sync never changes the open state or
+  // the scroll.
   function drawerSync() {
     if (!drawer) return;
-    var present = drPresent(), ids = {};
-    present.forEach(function (t) { ids[t.id] = true; });
+    var present = drPresent(), tips = [];
+    drBadge = false;
     present.forEach(function (t) {
       var el = t.content();
       if (el.tagName === "DETAILS" && !el.open) el.open = true;
-    });
-    // handle icons: one per present entry, in drawer order
-    q("[data-drtab]", dricons).forEach(function (b) { if (!ids[b.getAttribute("data-drtab")]) dricons.removeChild(b); });
-    var tips = [];
-    present.forEach(function (t, i) {
-      var b = dricons.querySelector('[data-drtab="' + t.id + '"]');
-      if (!b) {
-        b = doc.createElement("span");
-        b.setAttribute("data-drtab", t.id);
-      }
-      if (dricons.children[i] !== b) dricons.insertBefore(b, dricons.children[i] || null);
-      var icon = t.icon(), title = t.title(), bd = t.badge && t.badge(t.count());
-      var sig = icon + "\n" + title + "\n" + (bd ? bd.n : "");
-      if (b.getAttribute("data-sig") !== sig) {
-        b.setAttribute("data-sig", sig);
-        b.className = "dr-ico" + (bd ? " has-badge" : "");
-        b.title = bd ? title + ": " + bd.title : title;
-        b.textContent = "";
-        if (icon) b.appendChild(iconEl(icon));
-        if (bd) { var n = doc.createElement("b"); n.textContent = String(bd.n); b.appendChild(n); }
-      }
-      if (bd) tips.push(bd.title);
+      var bd = t.badge && t.badge(t.count());
+      if (bd) drBadge = true;
+      tips.push(bd ? t.title() + ": " + bd.title : t.title());
     });
     drhandle.setAttribute("data-tip", tips.join(", "));
+    drDot();
     drTitle();
     var has = present.length > 0;
     if (has !== drHas) {
@@ -1286,8 +1260,12 @@
     }
     drRoom();
   }
-  // drRoom keeps the header clear of the handle, whose width follows its
-  // icons; the header's own padding reads --drhw.
+  function drDot() {
+    var d = drhandle.querySelector(".tdot");
+    if (d) d.classList.toggle("on", drBadge || drSwap);
+  }
+  // drRoom keeps the header clear of the handle; the header's own padding
+  // reads --drhw.
   function drRoom() {
     var w = drHas ? Math.ceil(drhandle.getBoundingClientRect().width) : 0;
     if (w !== drRoomW) {
@@ -1300,6 +1278,7 @@
     if (tip) t += " (" + tip + ")";
     if (drhandle.classList.contains("wait")) t += "; " + wsT("js.drawer.waiting");
     drhandle.title = t;
+    drhandle.setAttribute("aria-label", t);
   }
   // drawerWait marks the handle while an approval waits, open or closed:
   // an open drawer can cover the agents tree's approval row.
@@ -1310,8 +1289,7 @@
   }
   // A panels change the drawer is closed over lights the handle's dot.
   function drawerSwapped() {
-    var d = drhandle && drhandle.querySelector(".tdot");
-    if (d && !drOpen && drHas) d.classList.add("on");
+    if (drhandle && !drOpen && drHas) { drSwap = true; drDot(); }
   }
   function drHeaderBottom() {
     return drheader ? Math.max(0, Math.round(drheader.getBoundingClientRect().bottom)) : 0;
@@ -1352,20 +1330,8 @@
     if (!open && drsheet.contains(doc.activeElement)) drhandle.focus();
     drWant = drOpen = open;
     save(DR_OPEN, open ? "1" : null);
-    if (open) { var d = drhandle.querySelector(".tdot"); if (d) d.classList.remove("on"); }
+    if (open) { drSwap = false; drDot(); }
     drApply(true);
-  }
-  // drReveal opens the drawer for a handle icon and flashes that entry's card,
-  // scrolled into view when the cards stack in a scrolling body.
-  function drReveal(id) {
-    var t = drEntries.filter(function (e) { return e.id === id; })[0], el = t && t.content();
-    if (!drOpen) drSetOpen(true);
-    if (!el) return;
-    if (drbody.scrollHeight > drbody.clientHeight) drbody.scrollTop += el.getBoundingClientRect().top - drbody.getBoundingClientRect().top - 10;
-    el.classList.remove("flash");
-    void el.offsetWidth;
-    el.classList.add("flash");
-    setTimeout(function () { el.classList.remove("flash"); }, 1200);
   }
   if (drawer) {
     drWant = load(DR_OPEN) === "1";
@@ -1376,11 +1342,10 @@
     // drag: the handle follows the pointer; past the header's bottom the
     // sheet comes with it, and the release sets the height or, short of
     // DR_SHUT, closes. A press that never moves is a click.
-    var drDrag = null, drDragged = false, drIcon = null;
+    var drDrag = null, drDragged = false;
     drhandle.addEventListener("pointerdown", function (e) {
       if (e.button !== undefined && e.button !== 0) return;
       drMeasure();
-      drIcon = e.target.closest ? e.target.closest("[data-drtab]") : null;
       drDrag = { y0: e.clientY, off: e.clientY - drhandle.getBoundingClientRect().top, moved: false, ext: 0 };
       try { drhandle.setPointerCapture(e.pointerId); } catch (x) { /* no capture: the moves still land */ }
     });
@@ -1397,17 +1362,10 @@
       drclip.style.height = ext + "px";
       drhandle.style.top = (ext > 0 ? drTop + ext : Math.max(0, Math.min(y, drTop))) + "px";
     });
-    function drEnd(e) {
+    function drEnd() {
       var d = drDrag;
       drDrag = null;
-      // The pressed icon belongs to a click that follows a press that stayed
-      // put; a drag, or a cancelled press that sends no click, would leave it
-      // for a later keyboard activation to reveal as a stale entry.
-      if (!d || !d.moved) {
-        if (e && e.type === "pointercancel") drIcon = null;
-        return;
-      }
-      drIcon = null;
+      if (!d || !d.moved) return; // a press that stayed put is a click
       drawer.classList.remove("drag");
       drDragged = true;
       setTimeout(function () { drDragged = false; }, 0);
@@ -1416,20 +1374,14 @@
       save(DR_H, String(drH));
       drWant = drOpen = true;
       save(DR_OPEN, "1");
-      var dot = drhandle.querySelector(".tdot");
-      if (dot) dot.classList.remove("on");
+      drSwap = false; drDot();
       drApply(false);
     }
     drhandle.addEventListener("pointerup", drEnd);
     drhandle.addEventListener("pointercancel", drEnd);
-    // The pressed icon is remembered at pointerdown: with the pointer
-    // captured, the click lands on the handle itself.
     drhandle.addEventListener("click", function () {
       if (drDragged) return;
-      var ic = drIcon;
-      drIcon = null;
-      if (ic) drReveal(ic.getAttribute("data-drtab"));
-      else drSetOpen(!drOpen);
+      drSetOpen(!drOpen);
     });
     // A card's title bar is not a toggle: every card stays open.
     drbody.addEventListener("click", function (e) {

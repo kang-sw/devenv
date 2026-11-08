@@ -145,8 +145,6 @@
 .tk .tk-handle.on { color: var(--wb-fg); box-shadow: inset 0 -2px 0 var(--wb-primary), var(--wb-shadow-hi); }
 .tk .tk-handle.open { transform: translateY(calc(var(--tktop) + var(--tkext))); }
 .tk.tk-drawer.drag .tk-dr-clip, .tk.tk-drawer.drag .tk-handle { transition: none; }
-.tk .tk-handle .i:last-child { transition: transform .15s; }
-.tk .tk-handle.open .i:last-child { transform: rotate(180deg); }
 /* "+ store": an icon-only square (34px, the handle height) at the row's left end */
 .tk .tk-handle.tk-add { width: 34px; padding: 2px 0 0; justify-content: center; touch-action: auto; }
 .tk .tk-handle.tk-add .i { width: 14px; height: 14px; }
