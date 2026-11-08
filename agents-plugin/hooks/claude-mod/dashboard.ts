@@ -13,10 +13,10 @@
 //   `whiteboard` (a prompt the mod submitted with the whiteboard label), or
 //   `mail` (a prompt the mailbox push submitted);
 // - the lead's batches (no agentId) and one `agent` event per subagent an
-//   `agent.spawn` announced, keyed by the host's native agent id, with its
-//   label, parent, status, and the ws session key a delegate passes to this
-//   plugin's tools; the server shows that key's reply-id and never stores the
-//   key;
+//   `agent.spawn` announced or the session's agent list (`$.agent.list()`)
+//   names, keyed by the host's native agent id, with its label, parent,
+//   status, and the ws session key a delegate passes to this plugin's tools;
+//   the server shows that key's reply-id and never stores the key;
 // - the lead's streamed reply text (the step's text so far) and each
 //   finished reply (`final: true`);
 // - each finished user message with its origin;
@@ -54,6 +54,13 @@
 // of them to waiting for approval (the notification names no tool), and the
 // call's tool.call end clears it, after the tool ran or was refused. An ask
 // settled with no dialog gets no notification and never shows the marker.
+//
+// Subagents: an agent id seen first in a turn, step, or tool event is held
+// out of the tree until it is known to be a real subagent: its `agent.spawn`
+// announces it, or the agent list, asked once per held id, names it. An id
+// the list does not name (an engine fork, a workflow's agent) stays held. At
+// start the feed seeds the tree from the list, so a subagent spawned before a
+// reload or a resume shows under its label and parent.
 //
 // The feed never affects the session: handlers only record state and arm a
 // timer, and one flush at a time drains everything into a single intake
@@ -101,7 +108,7 @@ export const BATCH_RETAIN_CAP = 32
 export const BATCH_CALL_CAP = 32
 /** Finished subagents kept beside every running one, as the snapshot keeps them. */
 export const FINISHED_AGENT_CAP = 5
-/** Agent ids no `agent.spawn` has announced yet, held out of the tree; past it the oldest held one goes. */
+/** Agent ids neither an `agent.spawn` nor the agent list has announced yet, held out of the tree; past it the oldest held one goes. */
 export const HELD_AGENT_CAP = 16
 /** The notification type that confirms a permission dialog is open. */
 export const PERMISSION_PROMPT = 'permission_prompt'
@@ -534,6 +541,9 @@ export type DashboardEvent = { kind: 'reset' | 'turn_start' | 'turn_end' | 'agen
 /** One intake call's outcome: whether it was delivered (not an error result) and its result text. */
 export type IntakeResult = { ok: boolean; text: string }
 
+/** One agent of the session's agent list, as the feed reads `$.agent.list()`'s records. */
+export type ListedAgent = { id: string; description?: string; type?: string; status?: string; parentId?: string }
+
 export interface DashboardEdges {
   /** The session key the feed reports under: the conversation's lead key, else undefined (held until one arrives). */
   key: () => string | undefined
@@ -541,6 +551,8 @@ export interface DashboardEdges {
   call: (args: { session_key: string; adapter: string; events: DashboardEvent[] }) => Promise<IntakeResult>
   /** Whether a tool is one of this plugin's MCP server tools, whose `session_key` names a delegate's key. */
   ownTool: (tool: string) => boolean
+  /** The session's real subagents and teammates (`$.agent.list()`); rejects when the list cannot be read. */
+  agents: () => Promise<readonly ListedAgent[]>
   now: () => number
   /** Arms a timer and returns its cancel. */
   schedule: (ms: number, fn: () => void) => () => void
@@ -562,9 +574,14 @@ type AgentRec = {
   endedAt?: number
   /** The permission wait last sent, as JSON; '' for none. */
   permissionSent: string
-  /** Whether the record is in the tree: the lead always, a subagent once its `agent.spawn` named it. */
+  /** Whether the record is in the tree: the lead always, a subagent once its `agent.spawn` or the agent list named it. */
   announced: boolean
 }
+
+/** Agent list statuses seeded into the tree at start: a loop running a turn or held on its own work. */
+const LIVE_LISTED = new Set(['running', 'waiting'])
+/** The agent list status of a teammate between turns: seeded as a finished turn, as its turn end would leave it. */
+const IDLE_LISTED = 'idle'
 
 export interface Dashboard {
   /** Whether the feed runs: started and not stopped. */
@@ -670,21 +687,94 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
 
   const lead = (): AgentRec => rec(LEAD)
 
-  // A subagent shows only once `agent.spawn` announced it. Any other agent id
-  // (a host-internal loop that sends a tool call or a turn start but never a
-  // spawn or an end) would otherwise stay "running" in the tree forever. The
-  // engine may deliver a real subagent's turn start before its spawn resolves,
-  // so an unannounced id's record is held, out of every event, until the spawn
-  // shows it with what it gathered; at most HELD_AGENT_CAP are held. Accepted
-  // trade-off: a subagent spawned before the feed (re)started is never shown.
+  // A subagent shows only once `agent.spawn` or the agent list announced it.
+  // Any other agent id (an engine fork or a workflow's agent, which sends a
+  // tool call or a turn start but never a spawn or an end, and which no list
+  // names) would otherwise stay "running" in the tree forever. The engine may
+  // deliver a real subagent's turn start before its spawn resolves, so an
+  // unannounced id's record is held, out of every event, until the list
+  // lookup or the spawn shows it with what it gathered; at most
+  // HELD_AGENT_CAP are held. The start's seed and the lookup cover a subagent
+  // spawned before the feed (re)started, which no spawn will announce; the
+  // remaining gap is a list that cannot be read, which leaves such a subagent
+  // unshown.
   function rec(id: string): AgentRec {
-    let r = agents.get(id)
-    if (!r) {
-      r = { buf: createBuffer(edges.epoch()), dirty: true, status: 'running', permissionSent: '', announced: id === LEAD }
-      agents.set(id, r)
-      if (!r.announced) dropOldestHeld()
+    return agents.get(id) ?? addRec(id, id === LEAD)
+  }
+
+  /** A new record; a held one evicts the oldest held past the cap and asks the agent list about itself. */
+  function addRec(id: string, announced: boolean): AgentRec {
+    const r: AgentRec = { buf: createBuffer(edges.epoch()), dirty: true, status: 'running', permissionSent: '', announced }
+    agents.set(id, r)
+    if (!announced) {
+      dropOldestHeld()
+      lookUp(id)
     }
     return r
+  }
+
+  /** Puts a subagent in the tree with its parent, label, and caption: from its spawn or its agent list record. */
+  function announce(id: string, f: { parentId?: string; description?: string; type?: string }): AgentRec {
+    const r = agents.get(id) ?? addRec(id, true)
+    r.announced = true
+    if (f.parentId && f.parentId !== id) r.parentId = f.parentId
+    const label = f.description?.trim() || f.type?.trim()
+    if (label) r.label = label
+    if (f.type?.trim()) r.caption = f.type.trim()
+    markDirty(id)
+    return r
+  }
+
+  /**
+   * Reads the agent list, then hands it to `use` while the same feed
+   * generation runs; a list that rejects is logged and changes nothing.
+   */
+  function readList(what: string, use: (list: readonly ListedAgent[]) => void): void {
+    const callGeneration = generation
+    let run: Promise<readonly ListedAgent[]>
+    try {
+      run = edges.agents()
+    } catch (err) {
+      run = Promise.reject(err)
+    }
+    run.then(
+      (list) => {
+        if (stopped || callGeneration !== generation || !Array.isArray(list)) return
+        try {
+          use(list)
+        } catch (err) {
+          edges.log(`dashboard ${what} failed: ${String(err)}`)
+        }
+      },
+      (err) => edges.log(`dashboard ${what}: agent list failed: ${String(err)}`),
+    )
+  }
+
+  /** Asks the agent list about a held id, once per record: listed, it is announced; otherwise it stays held. */
+  function lookUp(id: string): void {
+    readList('agent lookup', (list) => {
+      const r = agents.get(id)
+      const info = list.find((a) => a?.id === id)
+      if (r && !r.announced && info) announce(id, info)
+    })
+  }
+
+  /** Seeds the tree from the agent list: every live subagent, and every idle teammate as a finished turn. */
+  function seed(): void {
+    readList('agent seed', (list) => {
+      for (const info of list) {
+        if (typeof info?.id !== 'string' || info.id === LEAD) continue
+        const idle = info.status === IDLE_LISTED
+        if (!idle && !LIVE_LISTED.has(info.status ?? '')) continue
+        const fresh = !agents.has(info.id)
+        const r = announce(info.id, info)
+        if (fresh && idle) {
+          r.status = 'done'
+          r.endedAt = edges.now()
+        }
+      }
+      pruneFinished()
+    })
   }
 
   function dropOldestHeld(): void {
@@ -1003,6 +1093,7 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
       sentKey = undefined
       resyncDue = true
       lead()
+      seed()
       scheduleFlush()
     },
     stop() {
@@ -1161,13 +1252,7 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
       }
     }),
     agentSpawned: guard('agent spawn', (spawn: Parameters<Dashboard['agentSpawned']>[0]) => {
-      const r = rec(spawn.agentId)
-      r.announced = true
-      if (spawn.parentId && spawn.parentId !== spawn.agentId) r.parentId = spawn.parentId
-      const label = spawn.description?.trim() || spawn.subagentType?.trim()
-      if (label) r.label = label
-      if (spawn.subagentType?.trim()) r.caption = spawn.subagentType.trim()
-      markDirty(spawn.agentId)
+      announce(spawn.agentId, { parentId: spawn.parentId, description: spawn.description, type: spawn.subagentType })
     }),
     status: guard('status', (figures: StatusFigures) => {
       const json = JSON.stringify(figures)
