@@ -995,7 +995,14 @@
       }
     },
     "260923-bug-pi-fork-owner-thread-windows-instability": {
-      "registered_at": "2026-09-24T10:38:33Z"
+      "registered_at": "2026-09-24T10:38:33Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "delegate/idea-triage-close",
+        "phase": "closed",
+        "touched_at": "2026-11-08T08:13:24Z"
+      }
     },
     "260923-bug-worktree-acquire-concurrent-pool-claim": {
       "registered_at": "2026-09-24T10:38:33Z"
