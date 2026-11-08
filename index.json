@@ -1093,6 +1093,16 @@
     "260928-bug-pi-exec-windows-timeout-orphans-git-bash-child": {
       "registered_at": "2026-09-28T07:57:19Z"
     },
+    "260930-bug-close-lease-prune-test-tempdir-cleanup-flake": {
+      "registered_at": "2026-11-08T08:14:28Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "delegate/idea-triage-close",
+        "phase": "closed",
+        "touched_at": "2026-11-08T08:14:28Z"
+      }
+    },
     "260930-bug-lead-run-parallel-merge-before-release-orphans-branch": {
       "registered_at": "2026-09-30T01:10:57Z",
       "lease": {
