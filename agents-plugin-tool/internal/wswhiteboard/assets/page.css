@@ -191,7 +191,9 @@ a { color: var(--wb-primary); }
 .opt .k { font-family: var(--wb-mono); font-weight: 800; color: var(--wb-accent-policy); display: inline-flex; align-items: flex-start; }
 .opt .k .i { width: 8px; height: 8px; margin: 1px 0 0 1px; }
 /* selected: neon outline over the same quiet fill, not a fill swap */
-.opt[aria-pressed="true"], .opt[aria-pressed="true"]:hover, .opt.picked, .pick { box-shadow: 0 0 0 1.5px var(--wb-accent-policy), 0 0 10px 1px color-mix(in srgb, var(--wb-accent-policy) 55%, transparent); font-weight: 600; }
+.opt[aria-pressed="true"], .opt[aria-pressed="true"]:hover, .opt.picked { box-shadow: 0 0 0 1.5px var(--wb-accent-policy), 0 0 10px 1px color-mix(in srgb, var(--wb-accent-policy) 55%, transparent); font-weight: 600; }
+/* settled-row pick chip: the same choice, quieter; a thin faint ring and no glow, so a finished item reads as done. Assumed items await confirmation and keep the strong .opt.picked above. */
+.pick { box-shadow: 0 0 0 1px color-mix(in srgb, var(--wb-accent-policy) 40%, transparent); font-weight: 500; }
 .opt.static { cursor: default; }
 .opt.static:not(.picked) { box-shadow: none; opacity: .75; }
 .opt.static:hover { background: var(--wb-opt); }
