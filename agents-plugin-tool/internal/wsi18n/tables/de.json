@@ -674,7 +674,7 @@
   "js.tk.team.sent": "{0} hat dies an <b>{1}</b> gesendet; noch nicht angenommen",
   "js.tk.team.sent.handoff": "{0} hat dies an <b>{1}</b> gesendet (Übergabe); noch nicht angenommen",
   "js.tk.team.stale": "{0} veraltet",
-  "js.tk.team.summary": "Admins: {0}. Du: {1}, {2}. Prioritätsstufen: {3}. Anhang-Limit: {4} (attachments.max_bytes {5}).",
+  "js.tk.team.summary": "Admins: {0}. Du: {1}, {2}. Prioritätsstufen: {3}. Anhang-Limit: {4}.",
   "js.tk.team.unaccepted": "{0} nicht angenommen",
   "js.tk.team.unreachable": "von keinem Root erreichbar: {0}",
   "js.tk.team.waiting": "{0} warten auf andere",

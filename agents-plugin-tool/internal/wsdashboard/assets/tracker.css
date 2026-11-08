@@ -378,6 +378,11 @@ body.tk-paged .tk-drawer { display: none; }
 /* the org is a muted prefix where a person is named; it is not part of the display name */
 .tk .org { color: var(--wb-muted-fg); font-weight: 400; font-size: .92em; }
 .tk .tree .nid { font-family: var(--wb-mono); font-size: 11px; color: var(--wb-muted-fg); }
+.tk .tree .node .grow { flex: 1 1 0; }
+.tk .tree .mdetails { margin: 2px 0 4px 26px; padding: 4px 8px; border-left: 2px solid var(--wb-line); display: flex; flex-direction: column; align-items: flex-start; gap: 3px; }
+.tk .tree .kline { display: flex; align-items: center; gap: 6px; max-width: 100%; }
+.tk .tree .kline code { font-family: var(--wb-mono); font-size: 11px; color: var(--wb-muted-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tk .tree .kline.rev code { text-decoration: line-through; }
 
 /* activity */
 .tk .ev { padding: 4px 0; border-top: 1px solid var(--wb-muted); font-size: 12.5px; }

@@ -674,7 +674,7 @@
   "js.tk.team.sent": "{0} がこれを <b>{1}</b> に送りました; まだ承諾されていません",
   "js.tk.team.sent.handoff": "{0} がこれを <b>{1}</b> に送りました (引き継ぎ); まだ承諾されていません",
   "js.tk.team.stale": "停滞 {0}",
-  "js.tk.team.summary": "管理者: {0}。あなた: {1}、{2}。優先度の段階: {3}。添付の上限: {4} (attachments.max_bytes {5})。",
+  "js.tk.team.summary": "管理者: {0}。あなた: {1}、{2}。優先度の段階: {3}。添付の上限: {4}。",
   "js.tk.team.unaccepted": "未承諾 {0}",
   "js.tk.team.unreachable": "どのルートからも到達できません: {0}",
   "js.tk.team.waiting": "他の人待ち {0}",

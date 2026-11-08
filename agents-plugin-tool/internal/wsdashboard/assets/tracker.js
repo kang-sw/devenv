@@ -211,6 +211,7 @@
     tfold: {},            // "store|item id" -> 'o' | 'f': a context-tree node unfolded in full or folded (display state, stored; absent: the default, see ctxTree)
     wfold: {},            // "store|item id" -> true | false: a node of the item window's subtree open or folded (page lifetime; absent: the default)
     focus: null,          // { ev: event id, flash: true until its first paint } the item window scrolls to and marks; null: nothing
+    mdet: {},             // "store|member id" -> true: the member's key and profile details are expanded in the org card (page lifetime)
     sel: null,            // the row selected by a tap: it shows the same actions and details a hover shows
     nrow: {},             // store -> { val, kind } while the Items list shows its "+ New" input row
     sub: null,            // { item: parent, rk: the row it sits under, val } while an "add subtask" input row shows
@@ -1044,19 +1045,31 @@
     var summary = wsT("js.tk.team.summary", esc(VS.admins.join(', ')), VS.viewer.lead ? wsT("js.tk.team.lead", esc(VS.viewer.lead)) : wsT("js.tk.team.root"),
       Object.keys(R).length ? wsT("js.tk.team.reach", Object.keys(levels).map(function (d) { return wsT("js.tk.team.reachat", levels[d], d); }).join(', ')) : wsT("js.tk.team.nofollowers"),
       VS.priority.names.map(function (x, i) { return i === VS.priority.default ? wsT("js.tk.team.default", esc(x)) : esc(x); }).join(' &lt; '),
-      fmtSize(VS.attachments.max_bytes), VS.attachments.max_bytes);
+      fmtSize(VS.attachments.max_bytes));
+    function shortKey(k) {
+      var w = String(k).split(/\s+/), b = w[1] || w[0];
+      if (String(k).length <= 32) return String(k);
+      return (w[1] ? w[0] + ' ' : '') + b.slice(0, 8) + '\u2026' + b.slice(-8);
+    }
+    function keyLine(k, rev) {
+      return '<div class="kline' + (rev ? ' rev' : '') + '"><code' + tipAttr(k) + '>' + esc(shortKey(k)) + '</code>' + (rev ? '<span class="chip flag">' + wsT("js.tk.team.key.revoked") + '</span>' : '') +
+        '<button type="button" class="idcopy"' + attr('act', 'idcopy') + attr('id', k) + ' aria-label="' + esc(wsT("js.tk.team.key.copy.aria")) + '"' + tipAttr(k) + '><svg class="i"><use href="#tki-copy"/></svg><span>' + wsT("js.tk.team.key.copy") + '</span></button></div>';
+    }
     function node(id) {
       if (seen[id]) return '<li>' + wsT("js.tk.team.cycle", esc(id)) + '</li>';
       seen[id] = true;
-      var m = VS.members[id];
+      var m = VS.members[id], open = !!ui.mdet[ui.store + '|' + id];
       var chips = (id === v ? '<span class="chip you">' + wsT("js.tk.team.you") + '</span>' : '') + (m.admin ? '<span class="chip admin">' + wsT("js.tk.team.admin") + '</span>' : '') +
         (id === VS.viewer.lead ? '<span class="chip">' + wsT("js.tk.team.yourlead") + '</span>' : '') + (R[id] ? '<span class="chip" title="' + wsT("js.tk.team.levels.tip") + '">L' + R[id] + '</span>' : '') +
         (m.joined ? '<span class="chip" title="' + wsT("js.tk.team.joined.tip", esc(alias(m.joined))) + '">' + wsT("js.tk.team.joined") + '</span>' : '') +
-        (m.revoked.length ? '<span class="chip flag" title="' + wsT("js.tk.team.revoked.tip") + '">' + wsT("js.tk.team.revoked", esc(m.revoked.map(function (x) { return x.key; }).join(', '))) + '</span>' : '') +
+        (m.revoked.length ? '<span class="chip flag" title="' + wsT("js.tk.team.revoked.tip") + '">' + wsT("js.tk.team.revoked", m.revoked.length) + '</span>' : '') +
         ((VS.clones[id] || []).length > 1 ? '<span class="chip" title="' + wsT("js.tk.team.clones.tip") + '">' + wsT("js.tk.team.clones", VS.clones[id].length) + '</span>' : '');
       return '<li><div class="node' + (id === v ? ' me' : '') + '"><i class="av">' + esc(m.avatar) + '</i>' + (m.profile.org ? '<span class="org">' + esc(m.profile.org) + '</span>' : '') +
         '<span class="nm">' + esc(m.name) + '</span><span class="nid">' + esc(id) + '</span>' + chips +
-        '<span class="nid">' + esc(m.keys.join(', ')) + '</span>' + (id === v || me.admin ? btn('profile', wsT("js.tk.team.editprofile"), { who: id }) : '') + '</div>' + (m.children.length ? '<ul>' + m.children.map(node).join('') + '</ul>' : '') + '</li>';
+        '<span class="grow"></span><button type="button" class="ia mdet"' + attr('act', 'mdet') + attr('who', id) + ' aria-expanded="' + (open ? 'true' : 'false') + '" aria-label="' + esc(wsT("js.tk.team.details")) + '"' + tipAttr(wsT("js.tk.team.details")) + '><svg class="i"><use href="#tki-more"/></svg></button></div>' +
+        (open ? '<div class="mdetails">' + m.keys.map(function (k) { return keyLine(k, false); }).join('') + m.revoked.map(function (x) { return keyLine(x.key, true); }).join('') +
+          (id === v || me.admin ? '<div>' + btn('profile', wsT("js.tk.team.editprofile"), { who: id }) + '</div>' : '') + '</div>' : '') +
+        (m.children.length ? '<ul>' + m.children.map(node).join('') + '</ul>' : '') + '</li>';
     }
     var roots = Object.keys(VS.members).filter(function (id) { var m = VS.members[id], l = m.leads; return !m.removed && (!l.length || !VS.members[l[0]] || VS.members[l[0]].removed); });
     var h = '<p class="r2" style="margin:0 0 6px">' + summary + '</p>';
@@ -2909,6 +2922,7 @@
         else if (k === 'cedit-save') saveCedit();
         else if (k === 'cedit-x') endCedit();
         else if (k === 'create') openNewRow();
+        else if (k === 'mdet') { var mk = ui.store + '|' + d.who; ui.mdet[mk] = !ui.mdet[mk]; render(); }
         else if (k === 'idcopy') copyId(a);
         else if (k === 'new-x') closeNewRow();
         else if (k === 'sub-x') closeSub();
