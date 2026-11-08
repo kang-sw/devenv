@@ -145,6 +145,10 @@ type TopicDoc struct {
 	// Changed is the render sequence of the update that last changed the
 	// body; it counts toward the topic's recency like an item's Changed.
 	Changed int `json:"changed"`
+	// Marks are the change marks of the body's latest edit (diffBodies). Only
+	// a body edit replaces them: the first body has none, the same body again
+	// keeps them, and no other write touches them.
+	Marks []BlockMark `json:"marks,omitempty"`
 }
 
 // State is the whole whiteboard of one session. The MCP layer stores it in
@@ -273,6 +277,9 @@ func (s *State) setTopicBody(topic, body string, mark int) {
 	if i < 0 {
 		s.Topics = append(s.Topics, TopicDoc{Name: topic})
 		i = len(s.Topics) - 1
+	}
+	if prev := s.Topics[i].Body; prev != "" {
+		s.Topics[i].Marks = diffBodies(prev, body)
 	}
 	s.Topics[i].Body = body
 	s.Topics[i].Changed = mark

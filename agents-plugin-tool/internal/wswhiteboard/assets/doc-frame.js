@@ -26,6 +26,7 @@
     });
   };
 
+  if (body) wbWatchChanges(body);
   if (!body || window.parent === window) return;
   function post(m) { window.parent.postMessage(m, "*"); }
 

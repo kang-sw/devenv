@@ -102,6 +102,9 @@ type TopicView struct {
 	// closed on the full page, and open on the embed only when it changed
 	// since the previous embed (DocNew).
 	Doc string
+	// DocMarks are the change marks of the body's latest edit, in the block
+	// numbering of bodyUnits.
+	DocMarks []BlockMark
 	// DocNew marks a body changed since the previous embed (embed only).
 	DocNew bool
 	// Policy, Assumed, and Acks are the topic's items waiting on the user;
@@ -354,6 +357,7 @@ func BuildView(state *State, in ViewInput) View {
 	for _, doc := range state.Topics {
 		block := blockOf(doc.Name)
 		block.Doc = doc.Body
+		block.DocMarks = doc.Marks
 		block.DocNew = in.Layout == LayoutEmbed && doc.Changed > state.LastEmbedSeq
 	}
 

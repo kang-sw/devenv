@@ -277,6 +277,13 @@ details.tdoc > summary .new { background: currentColor; }
 .doc-body > svg { width: 100%; height: auto; display: block; }
 .doc-body img, .doc-body canvas { max-width: 100%; height: auto; }
 .doc-body pre { background: var(--wb-muted); border-radius: 8px; padding: 8px 10px; overflow-x: auto; font-size: 12.5px; }
+/* change marks of a topic body's latest edit (chg.js): thin bars in the gutter
+   left of the text column, so they never read as a blockquote's border */
+.wb-chg-layer { position: relative; height: 0; }
+.wb-chg-bar { position: absolute; width: 2px; border-radius: 1px; pointer-events: none; --chg: transparent; background: var(--chg); }
+.wb-chg-bar.new { --chg: light-dark(#1a7f37, #3fb950); }
+.wb-chg-bar.mod { --chg: light-dark(#0969da, #58a6ff); }
+.wb-chg-bar.del { --chg: light-dark(#cf222e, #f85149); width: 8px; height: 2px; }
 /* a served page's topic body: a sandboxed frame sized to its content, which pads itself */
 .doc-body.framed { padding: 0; }
 iframe.doc-frame { display: block; width: 100%; height: 0; border: 0; }

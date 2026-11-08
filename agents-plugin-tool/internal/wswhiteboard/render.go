@@ -24,7 +24,7 @@ import (
 // full page's stamp script and, when it holds a mermaid block, the shared
 // mermaid script (MermaidAsset).
 //
-//go:embed assets/page.tmpl assets/page.css assets/form.js assets/live.js assets/pill.js assets/mermaid-init.js assets/doc-frame.js assets/viewer.js assets/svg-view.js assets/sprite.svg
+//go:embed assets/page.tmpl assets/page.css assets/chg.js assets/form.js assets/live.js assets/pill.js assets/mermaid-init.js assets/doc-frame.js assets/viewer.js assets/svg-view.js assets/sprite.svg
 var assetFS embed.FS
 
 type pageAssets struct {
@@ -39,6 +39,8 @@ type pageAssets struct {
 	pill string
 	// mermaidInit themes and runs mermaid after the shared script loads.
 	mermaidInit template.JS
+	// chg draws a topic body's change marks (wbChangeBars, wbWatchChanges).
+	chg string
 	// docFrame runs inside a served page's topic-body frame (framedDoc).
 	docFrame string
 	// viewer is the image viewer, a self-contained script.
@@ -75,13 +77,15 @@ func loadAssets() (*pageAssets, error) {
 			return string(data)
 		}
 		svgView := read("svg-view.js")
+		chg := read("chg.js")
 		a := &pageAssets{
 			css:         template.CSS(read("page.css")),
 			form:        read("form.js"),
 			live:        read("live.js"),
 			pill:        read("pill.js"),
 			mermaidInit: template.JS(read("mermaid-init.js")),
-			docFrame:    svgView + "\n" + read("doc-frame.js"),
+			docFrame:    svgView + "\n" + chg + "\n" + read("doc-frame.js"),
+			chg:         chg,
 			viewer:      "(function () {\n" + svgView + "\n" + read("viewer.js") + "})();\n",
 			sprite:      template.HTML(strings.TrimSpace(read("sprite.svg"))),
 			icons:       map[string]bool{},
@@ -280,6 +284,10 @@ type pageData struct {
 	footnotePrefix string
 }
 
+// chgWire starts the change marks of every unframed topic body on the page;
+// a framed body's own frame script starts its own (doc-frame.js).
+const chgWire = "\nArray.prototype.forEach.call(document.querySelectorAll('.doc-body:not(.framed)'), wbWatchChanges);\n"
+
 // MermaidFile is the shared mermaid script's name, beside the page.
 func (p *pageData) MermaidFile() string {
 	name, _ := MermaidAsset()
@@ -294,7 +302,7 @@ func newPageData(view View, a *pageAssets, framed bool) *pageData {
 	if full {
 		// The viewer is for the standalone page; the embed is a chat
 		// snapshot with a size budget and runs only the answer form.
-		script = a.viewer + script + a.pill + a.live
+		script = a.viewer + script + a.pill + a.live + a.chg + chgWire
 	}
 	p := &pageData{
 		View:        view,
@@ -335,7 +343,11 @@ func newPageData(view View, a *pageAssets, framed bool) *pageData {
 		page := p.Mermaid
 		p.Mermaid = false
 		p.framing = framed
-		html := p.renderDoc(t.Doc)
+		marks := t.DocMarks
+		if !full {
+			marks = nil // the embed has no script to draw them
+		}
+		html := p.renderDoc(t.Doc, marks)
 		p.framing = false
 		if framed {
 			// The frame loads mermaid for its own blocks; the page loads it
