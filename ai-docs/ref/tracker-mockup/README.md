@@ -604,6 +604,7 @@ creation, and it has a topic and a blocked subtask.
 | 337 a | Attachment content is stored as content-addressed blobs under `attachments/<sha256>` in the member's ledger tree and fetched on demand through a partial clone. The storage itself is deferred to a later ledger ticket; v3 models metadata only. |
 | 338 a, 339 a | Item bodies and comments carry `attachments: [{oid, name, size, mime}]` with `oid` the content's sha256. The roles file's `attachments.max_bytes` (default 10 MiB) is changed by the admin `roles.set_attachment_limit`; an attachment above it is flagged with a reason. The thread shows a chip with name and size and a simulated loaded state (local UI only). |
 | 340 | In the product the notification read state lives per clone on the local filesystem outside git, read and written by the daemon; the mockup keeps it in memory. |
+| 341 | Tests keep local bare remotes (`file://` with `uploadpack.allowFilter=true` exercises a partial clone); a hosted private repository is used only at live acceptance (the caller child and the attachment ledger ticket), where HTTPS auth, host filter support, and latency show. |
 
 ## Open questions
 
