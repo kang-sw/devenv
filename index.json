@@ -640,6 +640,9 @@
     "261108-bug-ws-whiteboard-item-raw-html": {
       "registered_at": "2026-11-08T04:42:23Z"
     },
+    "261108-feat-ws-manual-shared-command-syntax": {
+      "registered_at": "2026-11-08T04:46:30Z"
+    },
     "261108-feat-ws-tracker-caller": {
       "registered_at": "2026-11-08T04:21:41Z"
     },
