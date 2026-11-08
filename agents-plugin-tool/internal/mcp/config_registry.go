@@ -61,8 +61,9 @@ type configKeyEntry struct {
 	// RequiresLeadAuthority marks knobs that require a lead-scoped session
 	// key beyond the config.* prefix gate (today: the global-only
 	// workflow-preference writers, whose entries derive it from
-	// wsconfig.GlobalOnly, and workflow.whiteboard_enabled, which sets it
-	// explicitly because it resolves through every scope).
+	// wsconfig.GlobalOnly, and workflow.whiteboard_enabled and
+	// workflow.tracker_enabled, which set it explicitly because they resolve
+	// through every scope).
 	RequiresLeadAuthority bool
 	// ResolverBacked reports whether this key is read/written through
 	// wsconfig.Resolver.Get/Set/Unset. False only for agents.tier, which
@@ -222,6 +223,34 @@ var configRegistry = []configKeyEntry{
 		NoAgentVisible:    true,
 		// A lead-only knob at every scope: it shapes the lead's own channel
 		// to the user, so a write needs a lead session_key.
+		RequiresLeadAuthority: true,
+		ResolverBacked:        true,
+	},
+	{
+		Key:        wsconfig.ItemWorkflowTrackerEnabled,
+		WriterTool: "config.tune",
+		ResetTool:  "config.tune",
+		SelectorFields: []tuningField{
+			{
+				Name:        "harness",
+				Description: "Harness bucket the value applies to. When omitted, defaults to the current session's detected harness. Use * explicitly for every harness (all).",
+				Enum:        promptHarnessEnum,
+			},
+			{
+				Name:        "scope",
+				Description: "Storage scope. When omitted the write lands in the item's declared default scope (global).",
+				Enum:        wsconfig.ScopeSchemaEnum(),
+			},
+		},
+		ValueFields: []tuningField{{
+			Name:        "value",
+			Description: "Desired mode: on or off. Omit when reset is true.",
+			Enum:        onOffEnum,
+		}},
+		HarnessApplicable: true,
+		NoAgentVisible:    true,
+		// A lead-only knob at every scope: it shapes the lead's own
+		// recording habit, so a write needs a lead session_key.
 		RequiresLeadAuthority: true,
 		ResolverBacked:        true,
 	},

@@ -42,6 +42,17 @@ const (
 	// Builtin default: off, held on the bare key only.
 	ItemWorkflowWhiteboardEnabled = "workflow.whiteboard_enabled"
 
+	// ItemWorkflowTrackerEnabled gates the workflow manual's tracker
+	// section, which tells the lead to record work in the user's registered
+	// tracker stores. It gates only that text: the tracker tools work in
+	// every top-level lead session, and the background poll and the
+	// lead-session-start check ignore it. It is harness-bucketed like
+	// ItemWorkflowWhiteboardEnabled: values are stored under
+	// ItemWorkflowTrackerEnabled+"."+<claude|codex|pi|all>, and a value
+	// under this bare key is a legacy value read in the all position.
+	// Builtin default: off, held on the bare key only.
+	ItemWorkflowTrackerEnabled = "workflow.tracker_enabled"
+
 	// ItemSageReview is the layered config key for the completeness stage of the
 	// sage review gate at actionable ready/ promotion. Value "auto" requires the
 	// completeness reviewer; "ask" recommends it; absent/empty/"off" skips it.
@@ -154,6 +165,12 @@ func init() {
 	RegisterDefaultScope(ItemWorkflowWhiteboardEnabled, ScopeGlobal)
 	for _, bucket := range []string{"claude", "codex", "pi", "all"} {
 		RegisterDefaultScope(ItemWorkflowWhiteboardEnabled+"."+bucket, ScopeGlobal)
+	}
+	// workflow.tracker_enabled is the same cross-project habit, so it takes
+	// the same global default on the bare key and every bucket key.
+	RegisterDefaultScope(ItemWorkflowTrackerEnabled, ScopeGlobal)
+	for _, bucket := range []string{"claude", "codex", "pi", "all"} {
+		RegisterDefaultScope(ItemWorkflowTrackerEnabled+"."+bucket, ScopeGlobal)
 	}
 	RegisterGlobalOnly(ItemWorkflowSkepticalPosture)
 	RegisterGlobalOnly(ItemBootstrapAlarm)

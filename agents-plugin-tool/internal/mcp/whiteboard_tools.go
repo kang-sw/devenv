@@ -696,45 +696,58 @@ func (s *sessionStore) liveReplyIDs() (map[string]bool, bool) {
 // that has no session yet; it must be built with builtinConfigDefaults so the
 // bare key's builtin applies.
 func (s *Server) whiteboardEnabled(resolver *wsconfig.Resolver, sessionKey string) (bool, error) {
-	rv, _, err := resolveHarnessBucketed(resolver, sessionKey, wsconfig.ItemWorkflowWhiteboardEnabled, s.currentHarness())
-	if err != nil {
-		return false, fmt.Errorf("resolve %s: %w", wsconfig.ItemWorkflowWhiteboardEnabled, err)
-	}
-	return strings.ToLower(strings.TrimSpace(rv.Value)) == whiteboardOnValue, nil
+	return s.bucketedKnobOn(resolver, sessionKey, wsconfig.ItemWorkflowWhiteboardEnabled)
 }
 
 // enableWhiteboardKnobForSession turns workflow.whiteboard_enabled on at
 // session scope after a successful whiteboard.update, so a session that
 // started using the board keeps the manual's whiteboard mandate (revive
-// included) when the knob resolves off. It writes what config.tune with scope
+// included) when the knob resolves off. See enableBucketedKnobForSession for
+// the write rule. Callers reach it only past the top-level-lead gate on the
+// whiteboard tools.
+func (s *Server) enableWhiteboardKnobForSession(sessionKey string) error {
+	if err := s.enableBucketedKnobForSession(sessionKey, wsconfig.ItemWorkflowWhiteboardEnabled); err != nil {
+		return fmt.Errorf("whiteboard knob not enabled: %w", err)
+	}
+	return nil
+}
+
+// bucketedKnobOn reads a harness-bucketed on/off knob (item is the bare key)
+// for this server's session harness. resolver must be built with
+// builtinConfigDefaults so the bare key's builtin applies.
+func (s *Server) bucketedKnobOn(resolver *wsconfig.Resolver, sessionKey, item string) (bool, error) {
+	rv, _, err := resolveHarnessBucketed(resolver, sessionKey, item, s.currentHarness())
+	if err != nil {
+		return false, fmt.Errorf("resolve %s: %w", item, err)
+	}
+	return strings.ToLower(strings.TrimSpace(rv.Value)) == whiteboardOnValue, nil
+}
+
+// enableBucketedKnobForSession turns a harness-bucketed on/off knob on at
+// session scope when it resolves off. It writes what config.tune with scope
 // session writes: the session's harness bucket. A session-scope value for the
 // harness's read buckets or the bare key is the session's own choice and is
-// left alone, so an explicit session off stands. Callers reach it only past
-// the top-level-lead gate on the whiteboard tools.
-func (s *Server) enableWhiteboardKnobForSession(sessionKey string) error {
+// left alone, so an explicit session off stands.
+func (s *Server) enableBucketedKnobForSession(sessionKey, item string) error {
 	resolver := s.sessionResolver(sessionKey, builtinConfigDefaults())
-	on, err := s.whiteboardEnabled(&resolver, sessionKey)
+	on, err := s.bucketedKnobOn(&resolver, sessionKey, item)
 	if err != nil {
-		return fmt.Errorf("whiteboard knob not enabled: %w", err)
+		return err
 	}
 	if on {
 		return nil
 	}
 	harness := s.currentHarness()
 	buckets := harnessBucketReadOrder(harness)
-	storeKeys := []string{wsconfig.ItemWorkflowWhiteboardEnabled}
+	storeKeys := []string{item}
 	for _, bucket := range buckets {
-		storeKeys = append(storeKeys, harnessBucketKey(wsconfig.ItemWorkflowWhiteboardEnabled, bucket))
+		storeKeys = append(storeKeys, harnessBucketKey(item, bucket))
 	}
 	for _, storeKey := range storeKeys {
 		if value, ok := s.sessions.getOverride(sessionKey, storeKey); ok && strings.TrimSpace(value) != "" {
 			return nil
 		}
 	}
-	err = resolver.Set(harnessBucketKey(wsconfig.ItemWorkflowWhiteboardEnabled, buckets[0]), whiteboardOnValue,
+	return resolver.Set(harnessBucketKey(item, buckets[0]), whiteboardOnValue,
 		wsconfig.SetOptions{ExplicitScope: wsconfig.ScopeSession, SessionKey: sessionKey})
-	if err != nil {
-		return fmt.Errorf("whiteboard knob not enabled: %w", err)
-	}
-	return nil
 }
