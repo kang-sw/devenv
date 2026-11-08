@@ -47,6 +47,19 @@ func TestParseProfileDefaults(t *testing.T) {
 	}
 }
 
+func TestParseProfileRefusesLeadKeyMintingTools(t *testing.T) {
+	for _, name := range []string{"ferrule", "workflow_manual"} {
+		raw := `{"backend":"claude","ws_tools":["tickets.query","` + name + `"]}`
+		_, err := ParseProfile(json.RawMessage(raw))
+		if err == nil || !strings.Contains(err.Error(), name) || !strings.Contains(err.Error(), "lead session key") {
+			t.Errorf("%s: want a refusal naming the tool and the lead key, got %v", name, err)
+		}
+	}
+	if _, err := ParseProfile(json.RawMessage(`{"backend":"claude","ws_tools":["tickets.query","workflow_state"]}`)); err != nil {
+		t.Errorf("an ordinary ws_tools list validates: %v", err)
+	}
+}
+
 func TestParseProfileRefusesInvalid(t *testing.T) {
 	cases := map[string]string{
 		"not an object":    `["claude"]`,
@@ -60,6 +73,8 @@ func TestParseProfileRefusesInvalid(t *testing.T) {
 		"unclosed rule":    `{"backend":"claude","tools":["Bash(git"]}`,
 		"bad ws tool":      `{"backend":"claude","ws_tools":["Tickets Query"]}`,
 		"trailing value":   `{"backend":"claude"} {}`,
+		"mints lead key":   `{"backend":"claude","ws_tools":["tickets.query","ferrule"]}`,
+		"mints lead key 2": `{"backend":"pi","ws_tools":["workflow_manual"]}`,
 		"blank instructns": `{"backend":"claude","instructions":"  "}`,
 	}
 	for name, raw := range cases {

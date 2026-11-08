@@ -56,6 +56,17 @@ var (
 	serverNamePattern  = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 )
 
+// leadKeyMintingTools are the ws tools that mint a parent-less lead session
+// key from a caller that holds no key: ferrule (caller-chosen capability) and
+// workflow_manual (its fresh-session sentinel). A runner agent's ws-mcp is
+// filtered by ws_tools, so listing either one hands the agent a lead key and
+// with it every lead-only tool the delegate key is denied. ws_tools may never
+// name them. Add a tool here when it gains a no-key lead-key path.
+var leadKeyMintingTools = map[string]bool{
+	"ferrule":         true,
+	"workflow_manual": true,
+}
+
 // Profile is the normative profile shape. Field names are a committed
 // on-disk format (structured_overrides in a config file); do not rename
 // them. Every capability defaults off: no built-in tool, no ws tool, no MCP
@@ -194,6 +205,9 @@ func (p Profile) validate() error {
 	for i, name := range p.WSTools {
 		if !wsToolPattern.MatchString(name) {
 			return fmt.Errorf("ws_tools[%d] %q must be a ws tool name such as tickets.query", i, name)
+		}
+		if leadKeyMintingTools[name] {
+			return fmt.Errorf("ws_tools[%d] %q is not allowed: it mints a lead session key, which an agent must never hold", i, name)
 		}
 	}
 	for name, value := range p.MCPServers {
