@@ -5,8 +5,10 @@ related:
   260908-feat-ws-pi-claude-code-lead-provider: prior billing finding (system prompt content routed to extra usage)
   261002-chore-ws-pi-retire-ws-claude-and-soften-compaction-advisory: prior headless claude delegate, retired as unstable
   261106-feat-ws-dashboard-claude-adapter: live dashboard Claude stream-json adapter
-sage-review-design: blocked
-sage-review-completeness: blocked
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: 72e011e469bf168d
+sage-review-completeness-reviewed: 72e011e469bf168d
 ---
 
 # ws daemon agent runner: profile-driven headless agents (claude, pi) hosted by the dashboard daemon
@@ -242,7 +244,13 @@ renderer shows it.
    ((329)), modelled on `worktree.profile.<name>`, with the fields of the
    profiles decision (idle timeout `0` = never; the session-index listing
    knob of (316)), resolved through the conversation's working root
-   ((330)). No profile ships in this ticket; tests define their own. An
+   ((330)). Add `agent.` to `reservedConfigPrefixes`
+   (`internal/mcp/config_manifest.go`) so no adapter manifest can claim it.
+   Keep the resolver free of `internal/mcp` (which imports
+   `internal/wsdashboard`), like `resolveWorktreeProfiles`, which depends only
+   on `wsconfig`: put it in a lower package, or make the runner a new package
+   wired from `cmd/ws-mcp/dashboard.go`. No profile ships in this ticket;
+   tests define their own. An
    unknown profile or backend, or a missing instruction file, fails the
    launch with a clear error.
 3. **Runner core** in the dashboard daemon: a backend interface (start,
@@ -274,7 +282,9 @@ renderer shows it.
    `ai-docs/manuals/ws-mcp.md` first.
 6. **REST control** behind the existing access control ((314)): create a
    conversation from a profile and a working root ((330)), send a turn
-   (held while a turn runs, (327)), interrupt, `stop` and `close` ((328)),
+   (held while a turn runs, (327); what happens to held sends on
+   interrupt, `stop`, `close`, and a daemon restart is the implementer's
+   choice, tested and recorded in `### Result`), interrupt, `stop` and `close` ((328)),
    change model or effort, and read state (the session directory key;
    running, idle, or closed).
    Runner conversations stay out of the session index unless the profile
@@ -282,7 +292,9 @@ renderer shows it.
    variable name are the implementer's choice and are recorded in
    `### Result`, since the consumer ticket builds on them.
 
-Verification: unit tests for profile parsing, the idle timer, the
+Verification: unit tests for profile parsing and working-root resolution
+(project layer, else global), the persisted conversation record surviving a
+simulated daemon restart, the idle timer, the
 lazy-resume path, held sends, `stop` versus `close`, stream-json-to-`wslive` mapping (with recorded
 stream-json fixtures), and the ws-mcp allowlist filter; a fake backend
 drives the REST routes end to end in tests; one live run of the claude backend through the REST routes on the
@@ -303,7 +315,7 @@ the Phase 1 test suite runs against the pi backend through the same fake and
 recorded-event fixtures, plus one live Pi run through the REST routes,
 recorded in `### Result`.
 
-## Blocked (2026-11-08)
+## Sage Review Round 1 (2026-11-08)
 
 ### Design Reviewer — block
 
