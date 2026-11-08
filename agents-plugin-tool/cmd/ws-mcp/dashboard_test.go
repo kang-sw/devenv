@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -210,6 +211,16 @@ func TestDashboardDaemonRunsTheTrackerPoll(t *testing.T) {
 		if time.Now().After(end) {
 			t.Fatal("the daemon never took the tracker poll lock")
 		}
+	}
+	// The same daemon serves the tracker routes over its one host.
+	resp, err := dashboardTestClient.Get(fmt.Sprintf("http://127.0.0.1:%d/tracker/stores", ep.Port))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || !strings.HasPrefix(string(body), `{"rev":`) || !strings.Contains(string(body), `"stores":[]`) {
+		t.Fatalf("GET /tracker/stores = %d %s", resp.StatusCode, body)
 	}
 	if err := wsdashboard.RequestShutdown(context.Background(), dashboardTestClient, ep); err != nil {
 		t.Fatal(err)
