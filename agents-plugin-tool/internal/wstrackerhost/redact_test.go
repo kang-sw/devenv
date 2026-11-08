@@ -14,6 +14,8 @@ func TestRedactsRemoteCredentials(t *testing.T) {
 		"git@github.com:o/r.git":                               "git@github.com:o/r.git",
 		"ssh://git@github.com/o/r.git":                         "ssh://git@github.com/o/r.git",
 		"https://github.com/o/r.git":                           "https://github.com/o/r.git",
+		"https://user:p@ss@host/x.git":                         "https://***@host/x.git",
+		"clone https://u:a@b@c@host/r and https://h/p?q=a@b":   "clone https://***@host/r and https://h/p?q=a@b",
 	} {
 		if got := RedactCredentials(in); got != want {
 			t.Fatalf("RedactCredentials(%q) = %q, want %q", in, got, want)

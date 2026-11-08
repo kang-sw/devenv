@@ -1174,7 +1174,9 @@
     var h = '<div class="sync' + (remote && s.online ? '' : ' off') + '">';
     h += '<span class="muted">' + wsT("js.tk.sync.clone", '<code>' + esc(refOf(vs.viewer.stream)) + '</code>') + '</span> &middot; ';
     if (!remote) h += '<span class="sdot"></span>' + wsT("js.tk.sync.noremote");
-    else h += '<span class="sdot"></span><b>' + (s.online ? wsT("js.tk.sync.online") : wsT("js.tk.sync.offline")) + '</b> &middot; ' + wsT("js.tk.sync.synced", esc(fmtTs(s.syncedAt))) + (s.online ? '' : ' &middot; ' + wsT("js.tk.sync.retry"));
+    // the last attempt's error (view state sync.error, when the data layer has one) is the
+    // offline label's tooltip
+    else h += '<span class="sdot"></span><b' + (!s.online && s.error ? tipAttr(s.error) : '') + '>' + (s.online ? wsT("js.tk.sync.online") : wsT("js.tk.sync.offline")) + '</b> &middot; ' + wsT("js.tk.sync.synced", esc(fmtTs(s.syncedAt))) + (s.online ? '' : ' &middot; ' + wsT("js.tk.sync.retry"));
     h += ' &middot; <span' + (events ? ' class="unp"' : '') + '>' + wsT("js.tk.sync.unpushed", events) + '</span>';
     if (remote && s.upstream) h += ' &middot; <span class="muted" title="' + wsT("js.tk.sync.upstream.tip") + '">' + wsT("js.tk.sync.upstream", s.upstream) + '</span>';
     if (remote) h += btn('sync', wsT("js.tk.sync.now"), {}) + tools;

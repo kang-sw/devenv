@@ -3,8 +3,10 @@ package wstrackerhost
 import "regexp"
 
 // remoteCredentials matches the userinfo of an http(s) URL, where a token
-// or password sits; an ssh user (git@host) carries none.
-var remoteCredentials = regexp.MustCompile(`(?i)(https?://)[^/@\s]+@`)
+// or password sits; an ssh user (git@host) carries none. The userinfo runs
+// to the last '@' before the host's path, since a password may hold an
+// unencoded '@' (user:p@ss@host).
+var remoteCredentials = regexp.MustCompile(`(?i)(https?://)[^/\s]*@`)
 
 // RedactCredentials hides the userinfo of every http(s) URL in s, so a
 // token in a store's remote URL never reaches an agent's context or a
