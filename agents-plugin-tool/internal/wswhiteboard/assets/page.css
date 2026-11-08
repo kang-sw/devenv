@@ -29,8 +29,11 @@
   --wb-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   color-scheme: light dark;
 }
+/* Dark palette. The OS preference applies it unless the page pins light
+   (data-theme="light"); data-theme="dark" applies it whatever the OS says.
+   The two blocks hold the same variables: change them together. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --wb-bg: var(--background, #141518);
     --wb-fg: var(--foreground, #e7e7e4);
     --wb-card: var(--card, #1e2024);
@@ -54,6 +57,31 @@
     --wb-shadow-hi: 0 2px 4px rgb(0 0 0 / .55), 0 8px 22px rgb(0 0 0 / .4);
   }
 }
+:root[data-theme="dark"] {
+  --wb-bg: var(--background, #141518);
+  --wb-fg: var(--foreground, #e7e7e4);
+  --wb-card: var(--card, #1e2024);
+  --wb-muted: var(--muted, #2b2d32);
+  --wb-muted-fg: var(--muted-foreground, #a2a6ad);
+  --wb-primary: var(--primary, #7aa2ff);
+  --wb-primary-fg: var(--primary-foreground, #0c1424);
+  --wb-topic: #2a2d33;
+  --wb-on-topic: #e4e5e8;
+  --wb-now: #243457;
+  --wb-on-now: #d3defb;
+  --wb-policy: #5b3a1c;      --wb-on-policy: #f6d9bd;
+  --wb-technical: #26385e;   --wb-on-technical: #d2dcf6;
+  --wb-announced: #1f4433;   --wb-on-announced: #c6ead6;
+  --wb-assumed: #592a3d;     --wb-on-assumed: #f3d0dd;
+  --wb-accent-policy: #e0a36c;
+  --wb-on-accent-policy: #1f150b;
+  --wb-opt: color-mix(in srgb, var(--wb-policy) 20%, var(--wb-card));
+  --wb-opt-hover: color-mix(in srgb, var(--wb-policy) 34%, var(--wb-card));
+  --wb-shadow: 0 1px 2px rgb(0 0 0 / .5), 0 2px 8px rgb(0 0 0 / .3);
+  --wb-shadow-hi: 0 2px 4px rgb(0 0 0 / .55), 0 8px 22px rgb(0 0 0 / .4);
+}
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
 * { box-sizing: border-box; }
 html, body { margin: 0; background: var(--wb-bg); color: var(--wb-fg); }
 body { font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif; }

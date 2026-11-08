@@ -18,7 +18,9 @@
     muted = c("--wb-muted"), mutedFg = c("--wb-muted-fg"),
     now = c("--wb-now"), onNow = c("--wb-on-now");
   doc.body.removeChild(probe);
-  var dark = !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+  // A page that pins its theme (data-theme on the root) decides; else the OS does.
+  var pinned = doc.documentElement.getAttribute("data-theme");
+  var dark = pinned ? pinned === "dark" : !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
   m.initialize({
     startOnLoad: false,
     securityLevel: "strict",
