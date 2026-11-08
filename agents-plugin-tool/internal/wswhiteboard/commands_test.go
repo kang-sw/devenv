@@ -8,7 +8,7 @@ import (
 func parse(s string) ([]command, []string) {
 	p := &problems{}
 	cmds := parseCommands(p, s)
-	return cmds, p.list
+	return cmds, p.List
 }
 
 func mustParse(t *testing.T, s string) []command {
@@ -25,10 +25,10 @@ func mustParse(t *testing.T, s string) []command {
 func TestBodiesAreRawText(t *testing.T) {
 	body := "## 배경\n\n<details><summary>접기</summary>\n<option value=\"a\">옵션 & <b>굵게</b></option>\n</details>\n\n```mermaid\ngraph TD; A-->B\n```\n\n1 < 2 && 3 > 2, &amp; &lt;"
 	cmds := mustParse(t, `<wb:topic name="화이트보드 재설계">`+"\n"+body+"\n"+`</wb:topic>`)
-	if len(cmds) != 1 || cmds[0].tag != "wb:topic" || cmds[0].body != body {
+	if len(cmds) != 1 || cmds[0].Tag != "wb:topic" || cmds[0].Body != body {
 		t.Fatalf("topic command = %+v", cmds)
 	}
-	if name, _ := cmds[0].attr("name"); name != "화이트보드 재설계" {
+	if name, _ := cmds[0].Attr("name"); name != "화이트보드 재설계" {
 		t.Fatalf("name = %q", name)
 	}
 
@@ -66,19 +66,19 @@ func TestBodyEndsAtItsOwnExactClosingTag(t *testing.T) {
 	// Other closing tags, a lookalike, and the format's own tags are text.
 	body := `quoting the format: <wb:add class="policy" topic="t"><wb:title>x</wb:title></wb:add> and </wb:why> and </wb:topicx>, a < b`
 	cmds := mustParse(t, `<wb:topic name="t">`+body+`</wb:topic><wb:close topic="t"/>`)
-	if len(cmds) != 2 || cmds[0].body != body || cmds[1].tag != "wb:close" {
+	if len(cmds) != 2 || cmds[0].Body != body || cmds[1].Tag != "wb:close" {
 		t.Fatalf("commands = %+v", cmds)
 	}
 }
 
 func TestCDATAHoldsALiteralClosingTag(t *testing.T) {
 	cmds := mustParse(t, `<wb:topic name="t">use <![CDATA[</wb:topic> and <b> & ]]> here</wb:topic>`)
-	if want := "use </wb:topic> and <b> & " + " here"; cmds[0].body != want {
-		t.Fatalf("body = %q, want %q", cmds[0].body, want)
+	if want := "use </wb:topic> and <b> & " + " here"; cmds[0].Body != want {
+		t.Fatalf("body = %q, want %q", cmds[0].Body, want)
 	}
 	// A field body, and the newline strip around a CDATA-only body.
 	cmds = mustParse(t, "<wb:add class=\"technical\" topic=\"t\"><wb:why>\n<![CDATA[the </wb:why> tag]]>\n</wb:why><wb:title>x</wb:title></wb:add>")
-	if got := cmds[0].fieldsOf("wb:why"); len(got) != 1 || got[0] != "the </wb:why> tag" {
+	if got := cmds[0].FieldsOf("wb:why"); len(got) != 1 || got[0] != "the </wb:why> tag" {
 		t.Fatalf("why = %q", got)
 	}
 	// Applied: the stored body holds the closing tag literally.
@@ -110,20 +110,20 @@ func TestBodyStripsOneNewlineAtEachEndOnly(t *testing.T) {
 		"empty":                   {"", ""},
 	} {
 		cmds := mustParse(t, `<wb:topic name="t">`+tc.in+`</wb:topic>`)
-		if cmds[0].body != tc.want {
-			t.Errorf("%s: body of %q = %q, want %q", name, tc.in, cmds[0].body, tc.want)
+		if cmds[0].Body != tc.want {
+			t.Errorf("%s: body of %q = %q, want %q", name, tc.in, cmds[0].Body, tc.want)
 		}
 	}
 	// The same rule reads every body: a field, an answer quote, wb:old/wb:new.
 	cmds := mustParse(t, "<wb:add class=\"technical\" topic=\"t\"><wb:title>\n  padded\n</wb:title></wb:add><wb:answer id=\"1\" value=\"ok\">\nq\n\n</wb:answer><wb:edit topic=\"t\"><wb:old>\nfind\n</wb:old><wb:new>\n\nrepl\n</wb:new></wb:edit>")
-	if got := cmds[0].fieldsOf("wb:title")[0]; got != "  padded" {
+	if got := cmds[0].FieldsOf("wb:title")[0]; got != "  padded" {
 		t.Errorf("title = %q", got)
 	}
-	if cmds[1].body != "q\n" {
-		t.Errorf("answer body = %q", cmds[1].body)
+	if cmds[1].Body != "q\n" {
+		t.Errorf("answer body = %q", cmds[1].Body)
 	}
-	if cmds[2].fieldsOf("wb:old")[0] != "find" || cmds[2].fieldsOf("wb:new")[0] != "\nrepl" {
-		t.Errorf("edit fields = %+v", cmds[2].fields)
+	if cmds[2].FieldsOf("wb:old")[0] != "find" || cmds[2].FieldsOf("wb:new")[0] != "\nrepl" {
+		t.Errorf("edit fields = %+v", cmds[2].Fields)
 	}
 }
 
@@ -146,7 +146,7 @@ func TestAttributeValuesAreQuotedAndNeverDecoded(t *testing.T) {
 			t.Errorf("%s: problems %q", name, problems)
 			continue
 		}
-		if got, _ := cmds[0].attr("name"); got != tc.want {
+		if got, _ := cmds[0].Attr("name"); got != tc.want {
 			t.Errorf("%s: name = %q, want %q", name, got, tc.want)
 		}
 	}
@@ -166,15 +166,15 @@ func TestSelfClosingAndEmptyForms(t *testing.T) {
 		t.Fatalf("commands = %+v", cmds)
 	}
 	for i, tag := range []string{"wb:close", "wb:close", "wb:close", "wb:floor", "wb:topic", "wb:add"} {
-		if cmds[i].tag != tag || cmds[i].pos != i+1 {
+		if cmds[i].Tag != tag || cmds[i].Pos != i+1 {
 			t.Fatalf("command %d = %+v", i, cmds[i])
 		}
 	}
-	if cmds[4].body != "" || len(cmds[5].fields) != 3 || cmds[5].fields[1].body != "" {
-		t.Fatalf("empty forms = %+v / %+v", cmds[4], cmds[5].fields)
+	if cmds[4].Body != "" || len(cmds[5].Fields) != 3 || cmds[5].Fields[1].Body != "" {
+		t.Fatalf("empty forms = %+v / %+v", cmds[4], cmds[5].Fields)
 	}
-	if cmds[5].line != 2 || cmds[5].fields[0].line != 2 {
-		t.Fatalf("add line = %d", cmds[5].line)
+	if cmds[5].Line != 2 || cmds[5].Fields[0].Line != 2 {
+		t.Fatalf("add line = %d", cmds[5].Line)
 	}
 }
 
