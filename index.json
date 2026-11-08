@@ -368,7 +368,14 @@
       "registered_at": "2026-09-24T10:38:33Z"
     },
     "260729-bug-git-commit-omits-mental-model-checkpoint": {
-      "registered_at": "2026-09-24T10:38:33Z"
+      "registered_at": "2026-09-24T10:38:33Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "delegate/idea-triage-close",
+        "phase": "closed",
+        "touched_at": "2026-11-08T08:09:11Z"
+      }
     },
     "260729-feat-workflow-manual-submodule-detection": {
       "registered_at": "2026-09-24T10:38:33Z"
