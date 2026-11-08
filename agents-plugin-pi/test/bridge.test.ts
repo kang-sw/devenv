@@ -84,6 +84,8 @@ const LIVE_TOOL_NAMES = [
   "tickets.index_init", "path.generate", "workflow_manual",
   "workflow_state", "playbook.read", "playbook.render", "rationale.query", "git.followups",
   "worktree.acquire", "worktree.release", "worktree.remove", "worktree.list",
+  "mailbox.history", "dashboard.inbox_drain", "dashboard.intake",
+  "tracker.query", "tracker.update", "whiteboard.query", "whiteboard.update",
 ];
 const RETIRED_TOOL_NAMES = [
   "specs.query", "mental_models.list", "mental_models.query", "mental_models.status",
@@ -112,9 +114,10 @@ describe("sanitizeToolName", () => {
     assert.equal(sanitizeToolName("ferrule"), "ws__ferrule");
   });
 
-  test("captured tool set exactly matches the bundled 65-tool contract", () => {
+  test("captured tool set exactly matches the bundled tool contract", () => {
+    // No hard-coded tool count: the deepEqual below is the drift signal, and a
+    // magic number only rots when runtime.json gains a tool.
     const bundledToolNames = Object.keys(BUNDLED_RUNTIME.tools).sort();
-    assert.equal(bundledToolNames.length, 65);
     assert.deepEqual([...LIVE_TOOL_NAMES].sort(), bundledToolNames);
     assert.ok(bundledToolNames.includes("git.merge"));
     for (const retiredName of RETIRED_TOOL_NAMES) {

@@ -26,6 +26,14 @@ permissions:
   # The tag CI gate reads ws-mcp CI runs for the tagged commit.
   actions: read
 
+# One run per ref at a time. A tag push can start two runs for the same tag;
+# run concurrently they race `gh release upload` (HTTP 422 "asset already
+# exists"). Queued, not cancelled: the later run re-uploads with --clobber, so
+# the release never ends up half-published by a cancelled run.
+concurrency:
+  group: ws-mcp-release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build:
     name: Build ws-mcp assets
