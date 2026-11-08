@@ -1199,7 +1199,14 @@
       "registered_at": "2026-10-30T14:07:33Z"
     },
     "261105-bug-sage-stamp-move-next-instruction-loop": {
-      "registered_at": "2026-11-05T00:41:52Z"
+      "registered_at": "2026-11-05T00:41:52Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "delegate/idea-triage-close",
+        "phase": "closed",
+        "touched_at": "2026-11-08T08:13:36Z"
+      }
     },
     "261105-feat-whiteboard-lead-confirmed-status": {
       "registered_at": "2026-11-05T01:20:45Z"
