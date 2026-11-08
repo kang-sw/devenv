@@ -252,9 +252,10 @@
   if ($("glang")) $("glang").addEventListener("change", function () { setLang(this.value); });
 
   // Theme: the choice lives in a cookie the server reads, so the root's
-  // data-theme is right from the first byte; no cookie (auto) follows the OS.
-  // A change only sets the attribute and the cookie: the stylesheets do the
-  // rest, with no reload.
+  // data-theme, and each topic-body frame's, is right from the first byte; no
+  // cookie (auto) follows the OS. A change sets the attribute and the cookie,
+  // posts the theme to the body frames (separate documents), and redraws the
+  // drawn diagrams: the stylesheets do the rest, with no reload.
   var THEME_COOKIE = "ws_dashboard_theme";
   function markTheme() {
     var cur = root.getAttribute("data-theme") || "";
@@ -266,6 +267,11 @@
     if (v) root.setAttribute("data-theme", v);
     else root.removeAttribute("data-theme");
     markTheme();
+    q("iframe.doc-frame").forEach(postTheme);
+    if (window.mermaid && q("pre.mermaid[data-processed]").length) window.wbMermaid();
+  }
+  function postTheme(f) {
+    if (f.contentWindow) f.contentWindow.postMessage({ wbDoc: "theme", theme: root.getAttribute("data-theme") || "" }, "*");
   }
   markTheme();
 
@@ -1437,6 +1443,9 @@
     if (m.wbDoc === "height") {
       var h = num(m.height);
       if (h >= 0 && h < 100000) f.style.height = Math.ceil(h) + "px";
+      // A frame rendered before a theme switch (a board swap on a stream
+      // opened earlier) takes the current theme when it first reports.
+      postTheme(f);
     } else if (m.wbDoc === "jump") {
       var item = /^item-\d+$/.test(str(m.id)) && $(m.id);
       if (item) item.scrollIntoView({ block: "start" });

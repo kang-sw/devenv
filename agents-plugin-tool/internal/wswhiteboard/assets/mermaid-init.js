@@ -5,6 +5,24 @@
   var m = window.mermaid;
   if (!m) return;
   var doc = document;
+  // A page that pins its theme (data-theme on the root) decides; else the OS does.
+  var pinned = doc.documentElement.getAttribute("data-theme");
+  var dark = pinned ? pinned === "dark" : !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+  var tone = dark ? "dark" : "light";
+  // Running this again after a theme switch redraws: each block keeps its
+  // source and the tone it was drawn in, and a block drawn in the other tone
+  // gets its source back and is drawn again below.
+  Array.prototype.forEach.call(doc.querySelectorAll("pre.mermaid"), function (pre) {
+    if (!pre.hasAttribute("data-processed")) {
+      pre.setAttribute("data-wb-src", pre.textContent);
+    } else if (pre.hasAttribute("data-wb-src") && pre.getAttribute("data-wb-tone") !== tone) {
+      pre.textContent = pre.getAttribute("data-wb-src");
+      pre.removeAttribute("data-processed");
+    } else {
+      return;
+    }
+    pre.setAttribute("data-wb-tone", tone);
+  });
   // mermaid's colour math cannot read var(...) strings: resolve every --wb-*
   // colour to the value the page computes for it before initializing.
   var probe = doc.createElement("span");
@@ -18,9 +36,6 @@
     muted = c("--wb-muted"), mutedFg = c("--wb-muted-fg"),
     now = c("--wb-now"), onNow = c("--wb-on-now");
   doc.body.removeChild(probe);
-  // A page that pins its theme (data-theme on the root) decides; else the OS does.
-  var pinned = doc.documentElement.getAttribute("data-theme");
-  var dark = pinned ? pinned === "dark" : !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
   m.initialize({
     startOnLoad: false,
     securityLevel: "strict",

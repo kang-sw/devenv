@@ -93,6 +93,7 @@ func (d *Daemon) handleSessionEvents(w http.ResponseWriter, r *http.Request, rep
 		return
 	}
 	lang, _ := requestLang(r)
+	theme := requestTheme(r)
 	pages := d.pagesIn(lang)
 	if _, ok := pages.session(replyID); !ok {
 		http.Error(w, "unknown session", http.StatusNotFound)
@@ -103,7 +104,7 @@ func (d *Daemon) handleSessionEvents(w http.ResponseWriter, r *http.Request, rep
 		if !ok {
 			return nil, false
 		}
-		view.Lang = lang
+		view.Lang, view.Theme = lang, theme
 		regions, err := renderSessionRegions(view, d.entries)
 		if err != nil {
 			fmt.Fprintf(d.log, "dashboard: render session %s: %v\n", replyID, err)
