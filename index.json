@@ -246,7 +246,14 @@
       "registered_at": "2026-09-24T10:38:33Z"
     },
     "260726-research-review-loop-nonclean-generator": {
-      "registered_at": "2026-09-24T10:38:33Z"
+      "registered_at": "2026-09-24T10:38:33Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "delegate/idea-triage-close",
+        "phase": "closed",
+        "touched_at": "2026-11-08T08:08:19Z"
+      }
     },
     "260726-research-skill-prose-compression-ceiling": {
       "registered_at": "2026-09-24T10:38:33Z"
