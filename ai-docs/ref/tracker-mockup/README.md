@@ -61,7 +61,12 @@ build, no server, no dependencies.
     (about two thirds of the width) and one **tab pane** on the right with the
     tabs *Notifications*, *Support agent*, *Team*, *Activity*, and *Data*
     (debug), in that order. One tab shows at a time and uses the pane's
-    height; *Notifications* is the default tab.
+    height; *Notifications* is the default tab. The tabs are **icon buttons**
+    (384): one inline SVG each (bell, agent, people, pulse, database; no
+    external library), the name in the immediate tooltip and the `aria-label`,
+    the active tab highlighted, and the "new" dot on the icon's corner. So the
+    bar stays on one line at any width; the narrow layout's tabs (with *Items*
+    first) and layout D's tab pane use the same icons.
   - *D* (about 1600px and up): three columns, Items | *Notifications* (always
     open, as a card) | the tab pane holding the remaining tabs.
   - *Narrow* (below about 1000px): everything is one tab pane, *Items* first,
@@ -82,8 +87,12 @@ build, no server, no dependencies.
   toggles. Panels scroll inside that height (the Items list, the shown tab), and
   switching tabs never changes it. Only while a store's drawer was never
   dragged does it follow its content (366), up to the same 60% maximum, so a
-  short list gives a short first open. The *Support agent* tab keeps its
-  fixed-height chat. The store page is full-page and not affected. A card keeps its scroll position across
+  short list gives a short first open. **Panels span the drawer's height**
+  (389): the Items panel, the tab pane, and layout D's *Notifications* column
+  always fill it whatever their content, so a short list leaves a full-height
+  panel, not a short card above empty drawer; long content scrolls inside each
+  panel as before. The *Support agent* tab's chat fills the pane, with the
+  composer at its bottom. The store page is full-page and not affected. A card keeps its scroll position across
   re-renders. This supersedes the stacked side column of (359), the Today
   card of (358), and the per-card 70% cap of (350).
 - **Store page** (371). The route `#/<storeId>` shows that store full-page, in
@@ -109,16 +118,54 @@ build, no server, no dependencies.
 
   | scope | rows | modes |
   |---|---|---|
-  | *mine* | my live assignments (forced, self-assigned, accepted, or taken over by handoff), then done, then items I created and did not assign | list / kanban (assignment cards, with the pending column) / due timeline / calendar |
+  | *mine* | my live assignments (forced, self-assigned, accepted, or taken over by handoff), then items I created and did not assign; the done ones sit in *recently closed* at the bottom | list / kanban (assignment cards, with the pending column) / due timeline / calendar |
   | *received requests* | answers to what I sent (declined, or returned by the accepter's lead), pending assignments to me, the ones I answered, and the ones I sent | list |
-  | *assigned by me* | what I assigned or handed to others, live or pending; each assignee's state and note in the row details | list / kanban / due timeline / calendar |
+  | *assigned by me* | what I assigned or handed to others, live or pending; each assignee's state and note in the row details; done items in *recently closed* | list / kanban / due timeline / calendar |
   | *my team* (a viewer with followers) | grouped by person: each follower down to 3 levels, indented, with a group header carrying that person's open, done, blocked, stale, unaccepted, and "waiting on others" counts and last update; then their open and unaccepted work and the pending assignments they sent that nobody accepted yet | list / kanban / due timeline / calendar |
-  | *all* | the tree of threads, filtered by kind (`request` = items with a pending assignment) and status (open / blocked / done / hidden) | tree / kanban (item cards) / due timeline / calendar |
+  | *all* | the tree of threads, filtered by kind (`request` = items with a pending assignment) and status (open / blocked / done / hidden); under *open*, closed items follow the rules below | tree / kanban (item cards) / due timeline / calendar |
 
   The panel opens on *mine*. The chosen scope and each scope's mode are local
   UI state, remembered per store in memory (they survive a viewer switch within
   the store), never an event (360). The panel is already wide, so no mode
   spans rows any more (supersedes (304)).
+- **Panel header, view icons, and search** (384), (385). The header has two
+  rows: row 1 is the title, the scope presets, and the scope's count chip;
+  row 2 is the **view icons**, then a **search box** that takes the remaining
+  width. The view switch is one icon button per mode (list or tree, kanban,
+  due timeline, calendar; none on *received requests*, which has one mode),
+  the name in the tooltip and the `aria-label`, the current one pressed. In
+  the narrow layout both rows sit in the tool area under the tab bar. The
+  search filters the current scope client-side as you type, on the item's
+  title, body, project, and id (the full id and the short alias); it
+  combines with the Today chip filter, applies in every view mode, and Esc
+  clears it (with the box empty, Esc goes on to close the window or drawer).
+  The text is local UI state per store, kept across scopes; the box keeps
+  focus and the caret while the panel re-renders, and an IME composition is
+  not interrupted. It also searches the *recently closed* section.
+- **Recently closed** (386). In the list views (*mine*, *assigned by me*, and
+  *all* under the *open* status) done items leave the main list and appear in
+  a "recently closed N" section pinned to the bottom of the panel's height
+  (right after the list when the list is long), greyed, expanded by default,
+  covering the last 14 days of the page clock; older ones, counted in the
+  header ("N older through search"), are reached through search, which lists
+  every matching closed item whatever its age. The section's open or
+  collapsed state is local UI state per store. The view state carries no
+  close time, and none was added: a record row's close time is the done
+  assignment's `lastUpdate` (the ts of the close or confirm write), an item
+  row's is the latest of that over its live done assignments, falling back to
+  the item's `lastActivity`. *Kanban* keeps its done column; the due timeline
+  and calendar keep showing ended items, muted. *Received requests* and *my
+  team* list requests and open work, so they have no closed section.
+- **Closed items in the tree** (387). The *all* tree stays a tree. Under its
+  parent, closed children among open siblings fold into one "closed N" row
+  (N counts the items hidden in it, descendants included), expandable on
+  click, its state local UI. A closed parent with an open descendant stays in
+  the tree, greyed. A closed parent whose whole subtree is closed moves, with
+  that subtree, as one unit to *recently closed* (when its parent is not on
+  screen; under a shown parent it is part of that parent's "closed N" row).
+  The parent's roll-up (done 3/5) still counts the closed children. While a
+  search or a Today chip is on, the tree shows the plain matches in tree order
+  instead (open and greyed ones in the list, closed ones in the section).
 - **Today chips** (366), in the Items panel header (in the narrow layout, at
   the top of the tab pane): *my work N · answer N · confirm N*, that is my
   open work, pending assignments waiting for my answer, and closes waiting for
@@ -181,8 +228,9 @@ build, no server, no dependencies.
     or `blocked` of work I assigned, Confirm requests waiting on me, replies
     to my comments, my live assignments due today or overdue, and mentions of
     me. Every entry is derived from the view state and only opens the item
-    window; the actions it refers to (Accept, Return, Confirm, ...) are
-    hover actions on the item's row in the Items panel. Unread entries are
+    window, at what it refers to (390, see the item window below); the actions
+    it refers to (Accept, Return, Confirm, ...) are hover actions on the item's
+    row in the Items panel. Unread entries are
     highlighted; clicking one, or *Mark all read*, marks it read, which also
     clears the row's unread dot. Read state is local UI state per viewer
     clone, kept in memory like the handle badge's `seen`, and writes no
@@ -257,9 +305,21 @@ build, no server, no dependencies.
   attach row (file name and byte count; the mock stands in a 64-hex oid
   because it has no content). An item or comment edit that changes the body
   keeps the attachments and the mentions whose `@id` is still in the text.
-  The window opens through one function, `openItemWindow(storeId, itemId)`
-  (also on `window`), which the quick switcher calls; it switches to the
-  store when needed and returns false for an unknown store or item.
+  The window opens through one function,
+  `openItemWindow(storeId, itemId, {focus: eventId})` (also on `window`),
+  which the quick switcher, the rows, and the notifications call; it
+  switches to the store when needed and returns false for an unknown store or
+  item. **Notification focus** (390): a notification carries the id of the
+  event it is about, and clicking it opens the window scrolled to and marking
+  that target, found by the event's type: a comment or mention -> that
+  comment; a status, close, confirm, reject, or reopen -> that assignee's
+  entry on the holders line; an assignment or handoff -> the holders line; an
+  accept -> the accepter's entry there; a decline or return -> the assignees
+  row that ended; a body edit (or a mention in the body) -> the body; an
+  edit that only adds an attachment -> its chip. The target flashes briefly
+  and keeps a thin left mark while the window stays open; with no target
+  (a due notice, or an event the window does not show) the window just opens.
+  A later URL route reuses the same `focus` option.
 - **Actions** append events to the viewer clone's open batch, then report each
   event as applied or flagged. The actions are create (any kind, with due,
   priority, and an optional assignee in the same write), edit, comment, reply,
@@ -734,6 +794,13 @@ creation, and it has a topic and a blocked subtask.
 | 371 | Each store has its own page, the route `#/<storeId>`: the same Items panel and tab pane layout full-page rather than in the pull-down drawer, reached by *Open as page* on the drawer header; back, clearing the hash, or *Back to session* returns; a reload restores it. No item routes. |
 | 372 b | A magnifier next to the gear opens a quick switcher searching stores and items by title (the viewer's visible items, from the view state); a store opens its page, an item its window; arrows, Enter, Esc, focus return. |
 | 382 a | The drawer height is set by dragging its handle, like the dashboard drawer (about 160px to 60% of the window, saved per store as local UI state, restored on reload); panels scroll inside it. Only while a store's drawer was never dragged does the first open use the content-fit height, capped at the same maximum; once dragged, the user's height wins whatever the content or the active tab. Supersedes the content-height drawer of (366)'s plan (and (366 b)'s last sentence). Click-to-open/close stays; the store page is unaffected. |
+
+| 384 | The tab pane's tabs and the Items panel's view switch are icon buttons (inline SVG, no external library) with the name in the tooltip and `aria-label`; the active tab stays highlighted and the "new" dot stays; the same icons serve the narrow layout and layout D. Frees the wrapped tab bar and row 2 of the panel header. |
+| 385 | The panel header keeps two rows; row 2 is the view icons, then a search box taking the remaining width. It filters the current scope client-side as you type (title, body, project, item id), combines with the Today chip filter, Esc clears it, and it searches the closed section too. |
+| 386 b | Done items leave the main list and appear in a greyed, expanded-by-default "recently closed N" section at the bottom of the Items list, covering the last 14 days (by the done assignment's last write, `lastUpdate`; no field added); older ones through search. Its open state is local UI state per store. Kanban keeps its done column; the timelines keep ended items, muted. |
+| 387 a | The tree stays a tree: closed children among open siblings fold into one expandable "closed N" row under their parent; a closed parent with open descendants stays, greyed; a closed parent whose whole subtree is closed moves as one unit to *recently closed*; the parent's roll-up stays. |
+| 389 | The Items panel, the tab pane, and layout D's Notifications column always span the drawer's height whatever their content (a short list no longer leaves a short card above empty drawer); long content scrolls inside each. The drag-set drawer height of (382) a stays. |
+| 390 | Clicking a notification opens the item window and scrolls to and highlights what it refers to, found through the event id it carries (comment or mention -> the comment, with a brief flash and a thin left mark; status, close, or confirm -> the assignee's entry on the holders line; assignment or handoff -> the holders line; body edit -> the body; attachment -> its chip); `openItemWindow(storeId, itemId, {focus: eventId})` so a later URL route can reuse it; no target found just opens the window. |
 
 ## Open questions
 
