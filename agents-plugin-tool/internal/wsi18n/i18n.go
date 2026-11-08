@@ -281,12 +281,46 @@ func Script(lang string) template.JS {
 	if !Supported(lang) {
 		lang = Default
 	}
-	table, _ := json.Marshal(ClientTable(lang))
-	return template.JS("window.wsI18n = { lang: " + strconv.Quote(lang) + ", t: " + string(table) + ` };
+	return script(lang, ClientTable(lang))
+}
+
+// SubsetScript is Script over only the client keys that start with prefix,
+// for a static page that loads one renderer and its strings from a file
+// instead of from a dashboard page.
+func SubsetScript(lang, prefix string) template.JS {
+	return filteredScript(lang, func(k string) bool { return strings.HasPrefix(k, prefix) })
+}
+
+// ScriptExcept is Script without the client keys that start with prefix,
+// for a page that never loads the script those keys belong to, so their
+// text neither weighs on the page nor shows in its source.
+func ScriptExcept(lang, prefix string) template.JS {
+	return filteredScript(lang, func(k string) bool { return !strings.HasPrefix(k, prefix) })
+}
+
+// filteredScript is Script over the client keys keep accepts.
+func filteredScript(lang string, keep func(key string) bool) template.JS {
+	if !Supported(lang) {
+		lang = Default
+	}
+	table := map[string]string{}
+	for k, v := range ClientTable(lang) {
+		if keep(k) {
+			table[k] = v
+		}
+	}
+	return script(lang, table)
+}
+
+// script is the lookup source both Script forms share. wsT fills every
+// placeholder in one pass, as Fill does, so an argument that itself holds
+// "{1}" (a title someone typed) is never filled again.
+func script(lang string, table map[string]string) template.JS {
+	raw, _ := json.Marshal(table)
+	return template.JS("window.wsI18n = { lang: " + strconv.Quote(lang) + ", t: " + string(raw) + ` };
 window.wsT = function (key) {
-  var t = window.wsI18n.t, s = Object.prototype.hasOwnProperty.call(t, key) ? t[key] : key;
-  for (var i = 1; i < arguments.length; i++) s = s.split("{" + (i - 1) + "}").join(String(arguments[i]));
-  return s;
+  var t = window.wsI18n.t, s = Object.prototype.hasOwnProperty.call(t, key) ? t[key] : key, a = arguments;
+  return s.replace(/\{(\d+)\}/g, function (m, i) { return Number(i) + 1 < a.length ? String(a[Number(i) + 1]) : m; });
 };
 window.wsTn = function (key, n) {
   var a = Array.prototype.slice.call(arguments, 2);

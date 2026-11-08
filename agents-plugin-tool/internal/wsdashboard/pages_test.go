@@ -155,10 +155,14 @@ func TestSessionPageRendersLiveRegions(t *testing.T) {
 			t.Errorf("session page lacks %q", want)
 		}
 	}
-	for _, leak := range []string{"hist-1.json", "hist-gone.json", f.project + "/", "file:", `id="wb-now"`} {
+	for _, leak := range []string{"hist-1.json", "hist-gone.json", f.project + "/", `id="wb-now"`} {
 		if strings.Contains(body, leak) {
 			t.Errorf("session page carries %q", leak)
 		}
+	}
+	// A file: URL, as a word: the inlined string table says "profile:".
+	if regexp.MustCompile(`\bfile:`).MatchString(body) {
+		t.Errorf("session page carries a file: URL")
 	}
 }
 
@@ -230,6 +234,40 @@ func TestSessionPagesCarryScriptHooks(t *testing.T) {
 	for name, page := range map[string]string{"live": live, "board-first": board} {
 		if !strings.Contains(page, "data-wb-title") {
 			t.Errorf("%s page lacks the open-question pill script", name)
+		}
+	}
+}
+
+// TestPagesCarryTheTracker pins the tracker renderer on every page: its
+// stylesheet after the dashboard's, its script after the string table and
+// before the page script that mounts it, and the header slot its quick
+// switcher goes into.
+func TestPagesCarryTheTracker(t *testing.T) {
+	f := startPageFixture(t)
+	for name, path := range map[string]string{"live": "/s/livesession", "board-first": "/s/boardsession", "index": "/"} {
+		code, page := get(t, f.base+path)
+		if code != http.StatusOK {
+			t.Fatalf("GET %s = %d", path, code)
+		}
+		css, trackerCSS := strings.Index(page, ".dwrap {"), strings.Index(page, ".tk.tk-drawer {")
+		if css < 0 || trackerCSS < css {
+			t.Errorf("%s page: the tracker stylesheet is missing or ahead of the dashboard's", name)
+		}
+		i18n, tracker, script := strings.Index(page, "window.wsT = function"), strings.Index(page, "window.WsTracker = { mount: mount }"), strings.Index(page, "The dashboard page script, shared")
+		if i18n < 0 || tracker < i18n || script < tracker {
+			t.Errorf("%s page: the tracker script is missing or not between the string table and the page script", name)
+		}
+		// The whiteboard's own pages leave the tracker strings out; the
+		// dashboard pages that mount the tracker must keep them.
+		if !strings.Contains(page, `"js.tk.`) {
+			t.Errorf("%s page: the string table lacks the tracker strings (js.tk.*)", name)
+		}
+		if strings.Count(page, `<span class="qsslot" id="qsslot"></span>`) != 1 {
+			t.Errorf("%s page lacks the quick-switcher slot", name)
+		}
+		// In the header, right before the gear menu.
+		if i, j := strings.Index(page, `<div class="top">`), strings.Index(page, `id="qsslot"></span><span class="gearwrap">`); i < 0 || j < i {
+			t.Errorf("%s page: the quick-switcher slot is not in the header before the gear", name)
 		}
 	}
 }

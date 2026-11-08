@@ -110,10 +110,11 @@ func (h *Host) forEachStore(ctx context.Context, fn func(*store)) {
 // StartPoll runs the background poll in this process: it creates the root,
 // takes the poll lock (retrying each tick while another process holds it),
 // and runs PollOnce at once and then every interval while it holds the
-// lock, re-reading the registry each round. stop ends it and releases the lock. The dashboard
-// daemon runs it, so while the daemon runs, PreRead leaves the network to
-// it.
-func (h *Host) StartPoll(interval time.Duration) (stop func()) {
+// lock, re-reading the registry each round. onRound, when not nil, runs after
+// each round this process ran, that is, only while it holds the poll lock.
+// stop ends the poll and releases the lock. The dashboard daemon runs it, so
+// while the daemon runs, PreRead leaves the network to it.
+func (h *Host) StartPoll(interval time.Duration, onRound func()) (stop func()) {
 	if interval <= 0 {
 		interval = DefaultPollInterval
 	}
@@ -131,30 +132,30 @@ func (h *Host) StartPoll(interval time.Duration) (stop func()) {
 				_ = fl.Unlock()
 			}
 		}()
-		take := func() {
+		round := func() {
 			if !held {
 				// Fails while another process polls.
 				if locked, err := fl.TryLock(); err == nil && locked {
 					held = true
 				}
 			}
+			if held {
+				h.PollOnce(ctx)
+				if onRound != nil && ctx.Err() == nil {
+					onRound()
+				}
+			}
 		}
 		// The first round runs as soon as the lock is held: holding it turns
 		// every process's PreRead into a no-op, so waiting a full interval
 		// would leave reads that stale after the daemon starts.
-		take()
-		if held {
-			h.PollOnce(ctx)
-		}
+		round()
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				take()
-				if held {
-					h.PollOnce(ctx)
-				}
+				round()
 			}
 		}
 	}()

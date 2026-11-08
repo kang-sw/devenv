@@ -22,7 +22,11 @@ import (
 // Protocol: "event: region" with data {"name", "hash", "html"}; for the
 // session page, the pseudo-region "mode" carries the page mode as its html,
 // and a change means the layout no longer fits; "event: gone" when the
-// session left the index.
+// session left the index. A daemon with a tracker host also sends
+// "event: tracker" with data {"rev": N} on both pages' streams whenever the
+// tracker revision (TrackerChanged) differs from what that stream last
+// sent, including once right after connect; the page then re-reads the
+// tracker routes. A daemon without one never sends it.
 
 const (
 	// sseMinInterval coalesces bursts (a streamed reply nudges about ten times
@@ -170,6 +174,9 @@ func (d *Daemon) stream(w http.ResponseWriter, r *http.Request, render func() (r
 	held := parseHeld(r.URL.Query().Get("h"))
 	wake, cancel := d.broker.subscribe()
 	defer cancel()
+	// sentRev is the tracker revision this stream last sent; the sentinel
+	// -1 sends revision 0 on connect too.
+	sentRev := int64(-1)
 
 	send := func() bool {
 		regions, ok := render()
@@ -188,6 +195,13 @@ func (d *Daemon) stream(w http.ResponseWriter, r *http.Request, render func() (r
 			fmt.Fprintf(w, "event: region\ndata: %s\n\n", payload)
 			held[name] = region.Hash
 			sent = true
+		}
+		if d.tracker != nil {
+			if rev := d.trackerRev.Load(); rev != sentRev {
+				fmt.Fprintf(w, "event: tracker\ndata: {\"rev\":%d}\n\n", rev)
+				sentRev = rev
+				sent = true
+			}
 		}
 		if sent {
 			flusher.Flush()

@@ -394,7 +394,7 @@ func TestPollSyncsTwoClones(t *testing.T) {
 	if b.PollerRunning() {
 		t.Fatal("precondition: nothing polls")
 	}
-	stop := b.StartPoll(20 * time.Millisecond)
+	stop := b.StartPoll(20*time.Millisecond, nil)
 	deadline := time.Now().Add(20 * time.Second)
 	for !hasItem(view(t, b, "team"), item) {
 		if time.Now().After(deadline) {
@@ -428,7 +428,7 @@ func TestPollRunsAtOnce(t *testing.T) {
 	item := createItem(t, a, "team", "fresh at start")
 	syncStore(t, a, "team")
 
-	stop := b.StartPoll(time.Hour)
+	stop := b.StartPoll(time.Hour, nil)
 	defer stop()
 	deadline := time.Now().Add(20 * time.Second)
 	for !hasItem(view(t, b, "team"), item) {
@@ -802,4 +802,149 @@ func TestDispatchWithHoldsTheWriteLockAcrossProcesses(t *testing.T) {
 	if r.ids[0].Seq != ids[1].Seq+1 {
 		t.Fatalf("the other write must follow the batch: %v after %v", r.ids, ids)
 	}
+}
+
+// batchEvent builds one NewEvent from a payload map.
+func batchEvent(t *testing.T, typ string, payload map[string]any) wsledger.NewEvent {
+	t.Helper()
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return wsledger.NewEvent{Type: typ, Payload: raw}
+}
+
+// TestDispatchBatchResolvesReferences: a "$1" in a later event names the
+// item the first event creates, and the stored comment carries its id.
+func TestDispatchBatchResolvesReferences(t *testing.T) {
+	w := newWorld(t)
+	a := w.machine("a")
+	w.register(a, "team", "ada", &wstracker.Profile{Given: "Ada"})
+	createItem(t, a, "team", "earlier") // so the batch's ids do not start at 1
+
+	ids, err := a.DispatchBatch(context.Background(), "team", []wsledger.NewEvent{
+		batchEvent(t, wstracker.TypeItemCreate, map[string]any{"kind": "task", "title": "batched"}),
+		batchEvent(t, wstracker.TypeCommentAdd, map[string]any{"item": "$1", "body": "first"}),
+		batchEvent(t, wstracker.TypeCommentAdd, map[string]any{"item": "$1", "reply_to": "$2", "body": "second"}),
+	})
+	if err != nil || len(ids) != 3 {
+		t.Fatalf("DispatchBatch = %v, %v", ids, err)
+	}
+	v := view(t, a, "team")
+	item := ids[0].String()
+	if !hasItem(v, item) {
+		t.Fatalf("item %s missing from the view", item)
+	}
+	first, second := v.Comments[ids[1].String()], v.Comments[ids[2].String()]
+	if first.Item != item || second.Item != item {
+		t.Fatalf("comments on %q and %q, want %q", first.Item, second.Item, item)
+	}
+	if second.ReplyTo == nil || *second.ReplyTo != ids[1].String() {
+		t.Fatalf("reply_to = %v, want %q", second.ReplyTo, ids[1].String())
+	}
+}
+
+// TestDispatchBatchRejectsBadReferences: a reference that names no earlier
+// event of the batch is an error and nothing is written.
+func TestDispatchBatchRejectsBadReferences(t *testing.T) {
+	w := newWorld(t)
+	a := w.machine("a")
+	w.register(a, "team", "ada", &wstracker.Profile{Given: "Ada"})
+	item := createItem(t, a, "team", "base")
+	before := len(view(t, a, "team").Items)
+	count := func() int {
+		n := 0
+		err := a.with(context.Background(), "team", func(st *store) error {
+			evs, _ := st.ledger.Events(wsledger.Cursor{})
+			n = len(evs)
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	events := count()
+
+	create := batchEvent(t, wstracker.TypeItemCreate, map[string]any{"kind": "task", "title": "x"})
+	for name, batch := range map[string][]wsledger.NewEvent{
+		"$0":       {create, batchEvent(t, wstracker.TypeCommentAdd, map[string]any{"item": "$0", "body": "b"})},
+		"forward":  {batchEvent(t, wstracker.TypeCommentAdd, map[string]any{"item": "$2", "body": "b"}), create},
+		"self":     {batchEvent(t, wstracker.TypeCommentAdd, map[string]any{"item": "$1", "body": "b"})},
+		"$x":       {create, batchEvent(t, wstracker.TypeCommentAdd, map[string]any{"item": "$x", "body": "b"})},
+		"negative": {create, batchEvent(t, wstracker.TypeCommentAdd, map[string]any{"item": "$-1", "body": "b"})},
+		"padded":   {create, batchEvent(t, wstracker.TypeCommentAdd, map[string]any{"item": "$01", "body": "b"})},
+		"reply_to": {create, batchEvent(t, wstracker.TypeCommentAdd, map[string]any{"item": item, "reply_to": "$5", "body": "b"})},
+	} {
+		_, err := a.DispatchBatch(context.Background(), "team", batch)
+		if err == nil {
+			t.Fatalf("%s: want an error", name)
+		}
+		if !strings.Contains(err.Error(), "event ") || !strings.Contains(err.Error(), "field") {
+			t.Fatalf("%s: error %q must name the event and field", name, err)
+		}
+		if got := count(); got != events {
+			t.Fatalf("%s: store holds %d events, want %d (nothing written)", name, got, events)
+		}
+	}
+	if got := len(view(t, a, "team").Items); got != before {
+		t.Fatalf("items = %d, want %d", got, before)
+	}
+}
+
+// TestDispatchBatchPassesOtherPayloadsThrough: a non-object payload and
+// unrelated "$" strings are left alone by the resolver.
+func TestDispatchBatchPassesOtherPayloadsThrough(t *testing.T) {
+	next := wsledger.EventID{Member: "ada", Clone: "pc", Seq: 5}
+	for _, raw := range []string{`"$9"`, `[1]`, `null`, `{"title":"$9","item":3,"body":"$x"}`} {
+		got, err := resolveBatchRefs(json.RawMessage(raw), 0, next)
+		if err != nil || string(got) != raw {
+			t.Fatalf("resolveBatchRefs(%s) = %s, %v; want it unchanged", raw, got, err)
+		}
+	}
+}
+
+// TestStartPollRunsOnRound: onRound runs after a poll round this process
+// ran, and a nil onRound is fine.
+func TestStartPollRunsOnRound(t *testing.T) {
+	w := newWorld(t)
+	a := w.machine("a")
+	w.register(a, "team", "ada", &wstracker.Profile{Given: "Ada"})
+
+	rounds := make(chan struct{}, 16)
+	stop := a.StartPoll(10*time.Millisecond, func() {
+		select {
+		case rounds <- struct{}{}:
+		default:
+		}
+	})
+	select {
+	case <-rounds:
+	case <-time.After(20 * time.Second):
+		stop()
+		t.Fatal("onRound never ran")
+	}
+	stop()
+
+	// While another process holds the poll lock, this one runs no round.
+	holder := w.machine("a") // same root as a
+	defer holder.Close()
+	stopHolder := holder.StartPoll(10*time.Millisecond, nil)
+	defer stopHolder()
+	for !holder.PollerRunning() {
+		time.Sleep(5 * time.Millisecond)
+	}
+	for len(rounds) > 0 {
+		<-rounds
+	}
+	stopLoser := a.StartPoll(10*time.Millisecond, func() { rounds <- struct{}{} })
+	time.Sleep(100 * time.Millisecond)
+	stopLoser()
+	if len(rounds) != 0 {
+		t.Fatal("onRound ran in a process that does not hold the poll lock")
+	}
+
+	stopNil := a.StartPoll(10*time.Millisecond, nil)
+	time.Sleep(50 * time.Millisecond)
+	stopNil()
 }

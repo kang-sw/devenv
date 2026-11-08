@@ -1,0 +1,568 @@
+/* Tracker renderer styles (tracker.js). Every rule is scoped to the renderer's
+   own nodes: each node it creates carries the class tk, and every selector
+   starts at one, so nothing here reaches the host page.
+
+   Colours: the shared surface tokens are the host's --wb-* properties (bg, fg,
+   card, muted, muted-fg, primary, primary-fg, line, shadow, shadow-hi, radius,
+   mono), which the dashboard page already defines; the host also provides
+   --dpad (the page's side padding) and --drhw (its own drawer handle's width),
+   and may set --tkmaxw (the page's maximum width, which the drawer and its
+   handle row align with; 1680px when unset).
+   The tracker's own tones are the --tk-* properties below. Light and dark follow
+   the OS (prefers-color-scheme) unless the root carries data-theme="light" or
+   data-theme="dark", so the dark block is written twice: under the media query
+   for an unset root, and for data-theme="dark". */
+:root {
+  --tk-ok: #1d7348; --tk-fail: #c0262d; --tk-on-fail: #ffffff; --tk-warn: #a35f00;
+  --tk-teal: #0e7a83;                                     /* pending, requests, mentions */
+  --tk-agent: #6a4fc4; --tk-on-agent: #ffffff; --tk-agent-ink: #6a4fc4;
+  --tk-conc: #e9a100; --tk-on-conc: #1b1d21;              /* concurrent-write markers */
+  --tk-topic: #2c3038; --tk-on-topic: #ffffff;            /* admin chip */
+  --tk-toast-fail: #ffb4b8;
+  --tk-backdrop: rgb(0 0 0 / .28);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --tk-ok: #6cc39a; --tk-fail: #f0797e; --tk-on-fail: #2a0d0f; --tk-warn: #e0a36c;
+    --tk-teal: #6fcdd4;
+    --tk-agent: #3d2f6b; --tk-on-agent: #ddd3fb; --tk-agent-ink: #b9a6f5;
+    --tk-conc: #d1a239; --tk-on-conc: #1b1d21;
+    --tk-topic: #d9dbe0; --tk-on-topic: #1b1d21;
+    --tk-toast-fail: #b0202a;
+    --tk-backdrop: rgb(0 0 0 / .5);
+  }
+}
+:root[data-theme="dark"] {
+  --tk-ok: #6cc39a; --tk-fail: #f0797e; --tk-on-fail: #2a0d0f; --tk-warn: #e0a36c;
+  --tk-teal: #6fcdd4;
+  --tk-agent: #3d2f6b; --tk-on-agent: #ddd3fb; --tk-agent-ink: #b9a6f5;
+  --tk-conc: #d1a239; --tk-on-conc: #1b1d21;
+  --tk-topic: #d9dbe0; --tk-on-topic: #1b1d21;
+  --tk-toast-fail: #b0202a;
+  --tk-backdrop: rgb(0 0 0 / .5);
+}
+
+/* ===== base ===== */
+.tk, .tk * { box-sizing: border-box; }
+/* The host page's own stylesheets style generic class names this markup shares
+   (.btn, .chip, .new, .i, code, ...). Where no rule here sets a property such a
+   host rule does, these restate the browser default, so the host's value never
+   reaches the tracker; without such a host they change nothing. Every later rule
+   here still wins. */
+.tk .btn { width: auto; height: auto; justify-content: normal; }
+.tk .btn .i { width: 14px; height: 14px; }
+.tk .i { display: inline; }
+.tk code { background: none; border-radius: 0; padding: 0; }
+.tk .chip.new { width: auto; flex: 0 1 auto; align-self: auto; }
+.tk .tdot { flex: 0 1 auto; }
+.tk .kcard { display: block; flex-direction: row; align-items: normal; gap: normal; }
+.tk .crow { grid-template-columns: none; }
+.tk .arow { flex-wrap: nowrap; align-items: normal; }
+.tk .empty { margin: 0; }
+.tk-sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+.tk code, .tk .id { font-family: var(--wb-mono); font-size: 12px; }
+.tk a { color: var(--wb-primary); text-decoration: none; }
+.tk a:hover { text-decoration: underline; }
+.tk .muted { color: var(--wb-muted-fg); }
+.tk .grow { flex: 1 1 auto; }
+.tk .i { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.tk .tk-wait { padding: 12px; font-size: 13px; color: var(--wb-muted-fg); }
+
+/* ===== quick switcher: a popover with one search over stores and items ===== */
+.tk.tk-qswrap { position: relative; display: block; }
+.tk .tk-qpop { position: absolute; right: 0; top: calc(100% + 6px); z-index: 55; width: min(460px, calc(100vw - 24px)); background: var(--wb-card); border-radius: 10px; box-shadow: var(--wb-shadow-hi);
+  padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+.tk .tk-qpop[hidden] { display: none; }
+.tk .tk-qpop input { font: inherit; font-size: 13.5px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--wb-line); background: var(--wb-bg); color: var(--wb-fg); }
+.tk .tk-qpop ul { list-style: none; margin: 0; padding: 0; max-height: min(420px, 60vh); overflow: auto; }
+.tk .qgrp { font-size: 11px; font-weight: 800; color: var(--wb-muted-fg); text-transform: uppercase; letter-spacing: .04em; padding: 6px 6px 2px; }
+.tk .qopt { display: flex; align-items: center; gap: 7px; padding: 5px 8px; border-radius: 7px; cursor: pointer; font-size: 13px; min-width: 0; }
+.tk .qopt.on { background: color-mix(in srgb, var(--wb-primary) 14%, var(--wb-card)); }
+.tk .qopt .qt { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.tk .qopt .muted { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; font-size: 12px; }
+.tk .qopt .qk { flex: none; font-size: 11px; font-weight: 700; color: var(--wb-muted-fg); padding: 0 6px; border-radius: 4px; background: var(--wb-muted); }
+.tk .qnone { padding: 10px 8px; font-size: 12.5px; color: var(--wb-muted-fg); }
+.tk .tk-qhint { font-size: 11px; color: var(--wb-muted-fg); padding: 0 4px; }
+.tk .tk-qsbtn { height: 28px; width: 32px; padding: 0; justify-content: center; }
+.tk .tk-qsbtn .i { width: 17px; height: 17px; }
+/* ===== shared small parts ===== */
+.tk .btn { font: inherit; font-size: 12.5px; background: var(--wb-muted); color: var(--wb-fg); border: 0; border-radius: 999px; padding: 2px 11px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.tk .btn:hover { background: color-mix(in srgb, var(--wb-muted) 70%, var(--wb-fg) 14%); }
+.tk .btn.primary { background: var(--wb-primary); color: var(--wb-primary-fg); }
+.tk .btn.mini { font-size: 11.5px; padding: 0 9px; }
+.tk .btn:focus-visible, .tk select:focus-visible, .tk input:focus-visible, .tk textarea:focus-visible { outline: 1.5px solid var(--wb-primary); }
+.tk input[type=checkbox], .tk input[type=radio] { accent-color: var(--wb-primary); }
+.tk .chip { display: inline-flex; align-items: center; gap: 3px; height: 19px; font-size: 11.5px; font-weight: 700; line-height: 1; padding: 0 8px; border-radius: 999px; background: var(--wb-muted); color: var(--wb-muted-fg); white-space: nowrap; }
+.tk .chip.st-todo { background: color-mix(in srgb, var(--wb-primary) 10%, var(--wb-card)); color: var(--wb-primary); }
+.tk .chip.st-doing { background: color-mix(in srgb, var(--wb-primary) 20%, var(--wb-card)); color: var(--wb-primary); }
+.tk .chip.st-blocked { background: var(--tk-fail); color: var(--tk-on-fail); }
+.tk .chip.st-awaiting { background: color-mix(in srgb, var(--tk-warn) 18%, var(--wb-card)); color: var(--tk-warn); }
+.tk .chip.st-done { background: color-mix(in srgb, var(--tk-ok) 16%, var(--wb-card)); color: var(--tk-ok); }
+.tk .chip.st-unassigned, .tk .chip.st-declined, .tk .chip.st-returned { background: var(--wb-muted); color: var(--wb-muted-fg); }
+.tk .chip.st-pending { background: color-mix(in srgb, var(--tk-teal) 16%, var(--wb-card)); color: var(--tk-teal); }
+.tk .chip.req { background: transparent; box-shadow: inset 0 0 0 1px var(--tk-teal); color: var(--tk-teal); font-weight: 600; }
+.tk .chip.hid { background: transparent; box-shadow: inset 0 0 0 1px var(--wb-muted-fg); font-weight: 600; }
+.tk .chip.roll { background: transparent; box-shadow: inset 0 0 0 1px var(--wb-line); font-weight: 600; color: var(--wb-fg); }
+.tk .chip.warn { background: color-mix(in srgb, var(--tk-fail) 12%, var(--wb-card)); color: var(--tk-fail); }
+.tk .chip.late { background: color-mix(in srgb, var(--tk-warn) 14%, var(--wb-card)); color: var(--tk-warn); }
+.tk .chip.local { background: transparent; box-shadow: inset 0 0 0 1px var(--tk-warn); color: var(--tk-warn); }
+.tk .chip.conc-c { background: var(--tk-conc); color: var(--tk-on-conc); }
+.tk .chip.agent { background: var(--tk-agent); color: var(--tk-on-agent); }
+.tk .chip.auto { background: color-mix(in srgb, var(--tk-agent-ink) 16%, var(--wb-card)); color: var(--tk-agent-ink); }
+.tk .chip.new { background: var(--wb-primary); color: var(--wb-primary-fg); }
+.tk .chip.admin { background: var(--tk-topic); color: var(--tk-on-topic); }
+.tk .chip.you { background: var(--wb-primary); color: var(--wb-primary-fg); }
+.tk .chip.flag { background: color-mix(in srgb, var(--tk-fail) 16%, var(--wb-card)); color: var(--tk-fail); }
+.tk .chip.kind { background: transparent; box-shadow: inset 0 0 0 1px var(--wb-line); font-weight: 600; }
+.tk .btn.ghost { opacity: .6; }
+.tk .ts { font-family: var(--wb-mono); font-size: 11px; white-space: nowrap; }
+.tk .al { font-family: var(--wb-mono); font-size: 11px; color: var(--wb-muted-fg); margin-right: 2px; }
+.tk .conc { margin: 4px 0 2px; padding: 4px 8px; border-radius: 6px; border-left: 3px solid var(--tk-conc); background: color-mix(in srgb, var(--tk-conc) 12%, var(--wb-card)); font-size: 12px; color: var(--wb-fg); }
+.tk ul.plain { list-style: none; margin: 0; padding: 0; }
+.tk .bar { display: inline-block; width: 72px; height: 6px; border-radius: 3px; background: var(--wb-muted); overflow: hidden; vertical-align: middle; flex: none; }
+.tk .bar i { display: block; height: 100%; background: var(--wb-primary); }
+.tk .bar.full i { background: var(--tk-ok); }
+.tk .pct { font-size: 11.5px; font-variant-numeric: tabular-nums; color: var(--wb-muted-fg); min-width: 34px; display: inline-block; }
+.tk .empty { padding: 12px; text-align: center; font-size: 13px; color: var(--wb-muted-fg); border: 1px dashed var(--wb-muted-fg); border-radius: var(--wb-radius); }
+.tk .err { color: var(--tk-fail); }
+
+/* ===== drawer (geometry follows the dashboard's session drawer) =====
+   The handle row sits left of the host's own handle: --drhw is the host's handle
+   width (0 when it has none); the renderer sets --tkhw on the root to this row's
+   width plus the 6px gap, so the host header can pad clear of both. */
+.tk.tk-drawer { position: fixed; top: 0; left: 0; right: 0; height: 0; z-index: 40; pointer-events: none;
+  --tktop: 48px; --tkh: 60vh; --tkext: var(--tkh); } /* the renderer sets --tktop (the header's bottom edge) and --tkh (the dragged height, else the content height, capped at 60vh); --tkext is the pointer's extent during a drag */
+.tk .tk-dr-in { position: relative; max-width: var(--tkmaxw, 1680px); margin: 0 auto; }
+.tk .tk-dr-clip { position: absolute; top: var(--tktop); left: var(--dpad, 16px); right: var(--dpad, 16px); height: 0; overflow: hidden; pointer-events: auto; visibility: hidden; border-radius: 0 0 var(--wb-radius) var(--wb-radius); box-shadow: var(--wb-shadow-hi); transition: height .18s ease-out, visibility 0s linear .18s; }
+.tk.tk-drawer.open .tk-dr-clip { height: var(--tkext); visibility: visible; transition: height .18s ease-out, visibility 0s; }
+.tk .tk-dr-sheet { position: absolute; left: 0; right: 0; bottom: 0; height: var(--tkh); background: var(--wb-bg); border-top: 1px solid var(--wb-muted); display: flex; flex-direction: column; }
+.tk .tk-dr-body { flex: 1 1 0; min-height: 0; overflow: hidden; padding: 10px; display: flex; flex-direction: column; }
+.tk .tk-dr-body > * { flex: none; }
+
+.tk .tk-handles { position: absolute; top: 0; right: calc(var(--dpad, 16px) + var(--drhw, 0px) + 6px); display: flex; flex-direction: row-reverse; gap: 6px; pointer-events: none; }
+.tk .tk-handle { height: 34px; padding: 2px 10px 0; border: 0; border-radius: 0 0 8px 8px; pointer-events: auto; cursor: pointer; display: flex; align-items: center; gap: 7px; background: var(--wb-card); color: var(--wb-muted-fg); box-shadow: var(--wb-shadow-hi); font: inherit; font-size: 12px; font-weight: 700; white-space: nowrap; touch-action: none; transition: transform .18s ease-out; }
+.tk .tk-handle:hover { color: var(--wb-fg); }
+.tk .tk-handle.on { color: var(--wb-fg); box-shadow: inset 0 -2px 0 var(--wb-primary), var(--wb-shadow-hi); }
+.tk .tk-handle.open { transform: translateY(calc(var(--tktop) + var(--tkext))); }
+.tk.tk-drawer.drag .tk-dr-clip, .tk.tk-drawer.drag .tk-handle { transition: none; }
+.tk .tk-handle .i:last-child { transition: transform .15s; }
+.tk .tk-handle.open .i:last-child { transform: rotate(180deg); }
+/* "+ store": a compact sibling at the row's left end */
+.tk .tk-handle.tk-add { padding: 2px 8px 0; gap: 4px; font-size: 11.5px; font-weight: 600; touch-action: auto; }
+.tk .tk-handle.tk-add .i { width: 12px; height: 12px; }
+.tk .tk-badge { min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--wb-primary); color: var(--wb-primary-fg); font-size: 10.5px; line-height: 16px; text-align: center; font-weight: 800; }
+
+/* the store page #/<storeId>: the store full-page in place of the conversation and the drawer */
+.tk.tk-spage { flex: 1 1 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+.tk.tk-spage[hidden] { display: none; }
+.tk.tk-spage > * { flex: none; }
+body.tk-paged .tk-drawer { display: none; }
+.tk.tk-spage .tk-title { margin-top: 2px; }
+
+/* drawer content: layout A is the Items panel (about two thirds) and one tab pane;
+   D (wide) is Items | Notifications | the tab pane; narrow is one tab pane. the renderer picks
+   the layout from the window width (data-layout). Each column's card fills the column, the
+   drawer's height, whatever its content: a short list leaves its panel standing full
+   height, a long one scrolls inside. */
+.tk .tk-zones { flex: 1 1 0; min-height: 0; display: grid; grid-template-rows: minmax(0, 1fr); gap: 10px; }
+.tk .tk-zones[data-layout="a"] { grid-template-columns: minmax(0, 2fr) minmax(340px, 1fr); }
+.tk .tk-zones[data-layout="d"] { grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr) minmax(300px, 1fr); }
+.tk .tk-zones[data-layout="narrow"] { grid-template-columns: minmax(0, 1fr); }
+.tk .tk-col { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.tk .tk-col > .card { flex: 1 1 auto; min-height: 0; max-height: 100%; }
+/* fitDrawer: one synchronous layout at natural height, every cap lifted */
+.tk.tk-measure .tk-dr-sheet { height: auto; }
+.tk.tk-measure .tk-dr-body, .tk.tk-measure .tk-zones { flex: none; }
+.tk.tk-measure .tk-zones { grid-template-rows: auto; }
+.tk.tk-measure .tk-col > .card { max-height: none; }
+.tk.tk-measure .tk-col > .card > .cbody { overflow: visible; flex: none; }
+.tk .tk-title { display: flex; align-items: center; gap: 8px; margin: 0 2px 8px; font-size: 13px; color: var(--wb-muted-fg); }
+.tk .tk-title b { color: var(--wb-fg); font-size: 14px; }
+@media (max-width: 640px) {
+  .tk .tk-handle { padding: 2px 7px 0; gap: 5px; }
+  .tk .tk-handle .hl { display: none; }
+  .tk .tk-handle.tk-add { padding: 2px 7px 0; }
+}
+
+/* store sync line */
+.tk .sync { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: -2px 2px 10px; font-size: 12px; color: var(--wb-muted-fg); }
+.tk .sync b { color: var(--wb-fg); }
+.tk .sync .sdot { width: 7px; height: 7px; border-radius: 50%; background: var(--tk-ok); }
+.tk .sync.off .sdot { background: var(--wb-muted-fg); }
+.tk .sync .unp { color: var(--tk-warn); font-weight: 700; }
+.tk .hoff { font-size: 12px; color: var(--tk-warn); }
+
+/* ===== cards ===== */
+.tk .card { background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); overflow: hidden; }
+/* a card fills its column (see .tk-col); the body takes what the header leaves and scrolls inside */
+.tk .card { display: flex; flex-direction: column; }
+.tk .card > * { flex: none; }
+.tk .card > .cbody { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.tk .card > header { display: flex; gap: 8px; align-items: center; padding: 4px 8px 4px 12px; min-height: 32px; background: var(--wb-muted); font-weight: 700; font-size: 13px; }
+.tk .card > header h2 { margin: 0; font-size: 13px; }
+.tk .card > header .chip { background: var(--wb-card); }
+.tk .card .cbody { padding: 8px 12px 10px; font-size: 13px; }
+.tk .card .toolbar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+.tk .toolbar select { font: inherit; font-size: 12px; padding: 1px 4px; border-radius: 6px; border: 1px solid var(--wb-line); background: var(--wb-card); color: var(--wb-fg); }
+.tk .sub { margin: 10px 0 4px; font-size: 11.5px; font-weight: 800; color: var(--wb-muted-fg); text-transform: uppercase; letter-spacing: .04em; }
+.tk .sub:first-child { margin-top: 0; }
+
+.tk .row { padding: 6px 0; border-top: 1px solid var(--wb-muted); }
+.tk .row:first-child { border-top: 0; }
+.tk .row.click { cursor: pointer; }
+.tk .row.click:hover { background: color-mix(in srgb, var(--wb-muted) 50%, transparent); }
+.tk .r1 { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.tk .r1 .title { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+.tk .r2 { font-size: 12px; color: var(--wb-muted-fg); margin-top: 1px; }
+.tk .r3 { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 4px; font-size: 12px; }
+.tk .r3 .next { color: var(--wb-muted-fg); margin-right: auto; }
+.tk .assignee-line { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 12px; margin: 3px 0 0 8px; padding-left: 8px; border-left: 2px solid var(--wb-muted); }
+
+/* ===== item rows: quiet by default; details and actions on hover, keyboard focus, or tap-selection ===== */
+.tk .irow { position: relative; border-top: 1px solid var(--wb-muted); }
+.tk .irow:first-child, .tk .sub + .irow, .tk .tg-head + .irow, .tk .toolbar + .irow { border-top: 0; }
+.tk .irow:focus { outline: none; }
+.tk .ir-main { display: flex; align-items: center; gap: 7px; min-height: 30px; padding: 2px 4px 2px calc(4px + var(--ind, 0) * 16px); border-radius: 6px; cursor: pointer; }
+.tk .ir-main .title { font-weight: 600; color: var(--wb-fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1 auto; }
+.tk .ir-main .ind { color: var(--wb-muted-fg); margin-right: -3px; }
+.tk .ir-acts { display: none; gap: 1px; flex: none; }
+/* the quick preview: fixed, placed by the renderer placeMore so a short scrolling card does not clip it */
+.tk .ir-more { position: fixed; z-index: 6; top: 0; left: 0; width: 320px; visibility: hidden; pointer-events: none;
+  background: var(--wb-card); border-radius: 8px; box-shadow: var(--wb-shadow-hi), inset 0 0 0 1px var(--wb-line); padding: 6px 10px; font-size: 12px; line-height: 1.45; display: grid; gap: 2px; }
+.tk .ir-more .chip { height: 17px; font-size: 11px; }
+/* the one state for hovered, focused, and selected */
+.tk .irow:is(:hover, :focus-within, .sel) > .ir-main { background: color-mix(in srgb, var(--wb-muted) 60%, transparent); }
+.tk .irow:is(:hover, :focus-within, .sel) .ir-acts { display: inline-flex; }
+.tk .irow:is(:hover, :focus-within, .sel) > .ir-more { visibility: visible; }
+.tk .irow:focus-visible > .ir-main, .tk .irow:has(.ia:focus-visible) > .ir-main, .tk .irow.sel > .ir-main { box-shadow: inset 0 0 0 1.5px var(--wb-primary); }
+.tk .sti { display: inline-flex; flex: none; width: 16px; height: 16px; }
+.tk .sti-svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.tk .ia { width: 26px; height: 22px; border: 0; border-radius: 6px; background: transparent; color: var(--wb-muted-fg); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; padding: 0; }
+.tk .ia:hover, .tk .ia:focus-visible { background: var(--wb-card); color: var(--wb-primary); outline: none; box-shadow: inset 0 0 0 1px var(--wb-line); }
+.tk .ia.go { color: var(--wb-primary); }
+.tk .ia .i { width: 15px; height: 15px; }
+.tk .who { display: inline-flex; justify-content: flex-end; flex: none; width: 64px; padding-left: 3px; }
+.tk .av { width: 20px; height: 20px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; flex: none; margin-left: -3px; font-style: normal; font-size: 9px; font-weight: 800; letter-spacing: -.02em;
+  background: color-mix(in srgb, var(--wb-primary) 15%, var(--wb-card)); color: var(--wb-primary); box-shadow: 0 0 0 1.5px var(--wb-card); }
+.tk .av.me { background: var(--wb-primary); color: var(--wb-primary-fg); }
+.tk .av.pend { background: var(--wb-card); color: var(--tk-teal); box-shadow: 0 0 0 1.5px var(--wb-card), inset 0 0 0 1px var(--tk-teal); }
+.tk .av.more { background: var(--wb-muted); color: var(--wb-muted-fg); }
+.tk .pri { flex: none; width: 34px; text-align: center; font-size: 11.5px; color: var(--wb-muted-fg); white-space: nowrap; }
+.tk .pri.hi { color: var(--tk-fail); font-weight: 700; }
+.tk .pri.lo { opacity: .7; }
+.tk .due2 { flex: none; width: 46px; text-align: right; font-family: var(--wb-mono); font-size: 11.5px; color: var(--wb-muted-fg); white-space: nowrap; }
+.tk .due2.soon { color: var(--wb-fg); }
+.tk .due2.now { color: var(--tk-warn); font-weight: 700; }
+.tk .due2.over { color: var(--tk-fail); font-weight: 700; }
+.tk .due2.ended { opacity: .6; }
+.tk .wicon { display: inline-flex; flex: none; color: var(--tk-conc); }
+.tk .wicon.flag { color: var(--tk-fail); }
+.tk .udot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--wb-primary); }
+.tk .subn { font-weight: 600; letter-spacing: 0; }
+.tk.tk-tip { position: fixed; z-index: 95; max-width: 340px; padding: 4px 8px; border-radius: 6px; background: var(--wb-fg); color: var(--wb-card); font-size: 12px; line-height: 1.4; pointer-events: none; box-shadow: var(--wb-shadow-hi); }
+.tk.tk-tip[hidden] { display: none; }
+
+/* Items panel header: scope presets and the scope's view modes */
+.tk .scopes { display: inline-flex; gap: 2px; padding: 2px; border-radius: 999px; background: var(--wb-card); flex-wrap: wrap; }
+.tk .scp { font: inherit; font-size: 12px; font-weight: 600; border: 0; background: transparent; color: var(--wb-muted-fg); border-radius: 999px; padding: 1px 10px; cursor: pointer; white-space: nowrap; }
+.tk .scp:hover { color: var(--wb-fg); }
+.tk .scp.on { background: var(--wb-primary); color: var(--wb-primary-fg); }
+.tk .card.panel > header { flex-wrap: wrap; row-gap: 4px; padding-top: 5px; padding-bottom: 5px; }
+/* row 2 of the panel header: the view icons, then the search box taking the rest of the row */
+.tk .prow2 { flex: 1 0 100%; display: flex; align-items: center; gap: 8px; min-width: 0; }
+.tk .vmodes { display: inline-flex; gap: 1px; padding: 2px; border-radius: 999px; background: var(--wb-card); flex: none; }
+.tk .vbtn { width: 28px; height: 24px; border: 0; border-radius: 999px; background: transparent; color: var(--wb-muted-fg); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; padding: 0; }
+.tk .vbtn .i { width: 15px; height: 15px; }
+.tk .vbtn:hover { color: var(--wb-fg); }
+.tk .vbtn.on { background: var(--wb-primary); color: var(--wb-primary-fg); }
+.tk .vbtn:focus-visible { outline: 1.5px solid var(--wb-primary); }
+.tk .psearch { flex: 1 1 0; min-width: 0; display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 6px 0 9px; border-radius: 999px; background: var(--wb-card); color: var(--wb-muted-fg); box-shadow: inset 0 0 0 1px var(--wb-line); }
+.tk .psearch:focus-within { box-shadow: inset 0 0 0 1.5px var(--wb-primary); color: var(--wb-primary); }
+.tk .psearch input { flex: 1 1 auto; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--wb-fg); font: inherit; font-size: 12.5px; font-weight: 400; padding: 0; }
+.tk .psearch input::placeholder { color: var(--wb-muted-fg); }
+.tk .psx { width: 20px; height: 20px; border: 0; border-radius: 50%; background: transparent; color: var(--wb-muted-fg); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; padding: 0; flex: none; }
+.tk .psx:hover { background: var(--wb-muted); color: var(--wb-fg); }
+.tk .psx .i { width: 12px; height: 12px; }
+.tk .ptools .psearch { background: var(--wb-muted); box-shadow: none; }
+.tk .ptools .vmodes { background: var(--wb-muted); }
+.tk .ptools .psearch:focus-within { box-shadow: inset 0 0 0 1.5px var(--wb-primary); }
+
+/* the Items panel body: the list on top, the "recently closed" section pinned to the bottom of the panel's height */
+.tk .card.panel > .cbody { display: flex; flex-direction: column; }
+.tk .card.panel > .cbody > * { flex: none; }
+.tk .pclosed { margin-top: auto; padding-top: 10px; }
+.tk .pc-head { width: 100%; display: flex; align-items: center; gap: 6px; padding: 5px 4px; border: 0; border-top: 1px solid var(--wb-line); background: transparent; color: var(--wb-muted-fg); font: inherit; font-size: 11.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; text-align: left; cursor: pointer; }
+.tk .pc-head .muted { font-weight: 400; text-transform: none; letter-spacing: 0; }
+.tk .pc-head:hover { color: var(--wb-fg); }
+.tk .pc-head:focus-visible { outline: 1.5px solid var(--wb-primary); }
+.tk .pc-head .i { transition: transform .15s; }
+.tk .pclosed:not(.open) .pc-head .i, .tk .csum:not(.open) .i { transform: rotate(-90deg); }
+.tk .pc-rows > p { margin: 4px; font-size: 12.5px; }
+/* closed rows: greyed, but the actions and the detail preview stay as they are */
+.tk .irow.closed > .ir-main > :not(.ir-acts) { opacity: .55; }
+.tk .irow.closed > .ir-main .title { text-decoration: none; }
+/* the tree's "closed N" row under a parent */
+.tk .csum { display: flex; align-items: center; gap: 5px; width: 100%; min-height: 24px; padding: 1px 4px 1px calc(4px + var(--ind, 0) * 16px); border: 0; background: transparent; color: var(--wb-muted-fg); font: inherit; font-size: 12px; cursor: pointer; text-align: left; border-radius: 6px; }
+.tk .csum:hover { background: color-mix(in srgb, var(--wb-muted) 60%, transparent); color: var(--wb-fg); }
+.tk .csum:focus-visible { outline: 1.5px solid var(--wb-primary); }
+.tk .csum .i { width: 12px; height: 12px; transition: transform .15s; }
+.tk .csum .subn { font-weight: 700; }
+
+/* Today chips: one pill under the Items header (in the narrow layout, under the tab bar) */
+.tk .todaybar { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; margin: 6px 10px 0; padding: 2px 4px 2px 10px; width: fit-content; max-width: calc(100% - 20px);
+  border-radius: 999px; background: color-mix(in srgb, var(--wb-primary) 10%, var(--wb-card)); color: var(--wb-primary); font-size: 12.5px; }
+.tk .todaybar .tl { font-weight: 700; margin-right: 4px; }
+.tk .todaybar .tsep { opacity: .6; }
+.tk .tch { font: inherit; font-size: 12.5px; border: 0; background: transparent; color: var(--wb-primary); border-radius: 999px; padding: 1px 8px; cursor: pointer; white-space: nowrap; }
+.tk .tch b { font-variant-numeric: tabular-nums; }
+.tk .tch:hover { background: color-mix(in srgb, var(--wb-primary) 16%, var(--wb-card)); }
+.tk .tch.on { background: var(--wb-primary); color: var(--wb-primary-fg); }
+.tk .tch.zero { color: var(--wb-muted-fg); }
+.tk .tch.tclr { padding: 1px 5px; display: inline-flex; align-items: center; }
+.tk .tch:focus-visible { outline: 1.5px solid var(--wb-primary); }
+
+/* the tab pane: the dashboard tab bar's look (pill group, active tab raised), a dot on a hidden tab with something new */
+.tk .card.pane > header { padding: 4px 6px; min-height: 36px; }
+.tk .ptabs { display: flex; flex-wrap: wrap; gap: 2px; background: var(--wb-card); border-radius: 999px; padding: 2px; }
+.tk .ptab { position: relative; font: inherit; font-size: 12px; font-weight: 700; border: 0; background: transparent; color: var(--wb-muted-fg); border-radius: 999px; height: 26px; width: 32px; padding: 0; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; white-space: nowrap; }
+.tk .ptab .i { width: 16px; height: 16px; }
+.tk .ptab:hover { color: var(--wb-fg); }
+.tk .ptab[aria-selected="true"] { background: var(--wb-muted); color: var(--wb-fg); box-shadow: inset 0 0 0 1px var(--wb-line); }
+.tk .ptab:focus-visible { outline: 1.5px solid var(--wb-primary); }
+/* the dot sits on the tab's corner, so it never changes the tab's width */
+.tk .tdot { display: none; position: absolute; top: 3px; right: 4px; width: 7px; height: 7px; border-radius: 50%; background: var(--wb-primary); box-shadow: 0 0 0 1.5px var(--wb-card); }
+.tk .tdot.on { display: inline-block; }
+.tk .ptools { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 6px 12px 0; font-size: 12.5px; }
+.tk .ptools:empty { display: none; }
+.tk .ptools .chip { background: var(--wb-muted); }
+.tk .card.pane > .cbody { padding-top: 6px; }
+
+/* my team scope: a group per person, its header carrying the person's roll-up counts */
+.tk .tg { margin-left: calc(var(--d) * 16px); }
+.tk .tg + .tg { margin-top: 4px; }
+.tk .tg-head { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; padding: 6px 4px 3px; font-size: 12.5px; border-top: 1px solid var(--wb-line); }
+.tk .tg:first-child > .tg-head { border-top: 0; }
+.tk .tg-head .av { margin-left: 0; }
+.tk .tg-head .nid { font-family: var(--wb-mono); font-size: 11px; color: var(--wb-muted-fg); }
+.tk .tg-head .cnt { font-size: 12px; color: var(--wb-muted-fg); }
+
+/* team tree */
+.tk .tree, .tk .tree ul { list-style: none; margin: 0; padding: 0; }
+.tk .tree ul { margin-left: 12px; padding-left: 8px; border-left: 2px solid var(--wb-muted); }
+.tk .tree .node { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; padding: 2px 0; }
+.tk .tree .node.me { background: color-mix(in srgb, var(--wb-primary) 9%, var(--wb-card)); border-radius: 6px; padding-left: 4px; }
+.tk .tree .nm { font-weight: 600; }
+.tk .tree .node .av { margin-left: 0; }
+/* the org is a muted prefix where a person is named; it is not part of the display name */
+.tk .org { color: var(--wb-muted-fg); font-weight: 400; font-size: .92em; }
+.tk .tree .nid { font-family: var(--wb-mono); font-size: 11px; color: var(--wb-muted-fg); }
+
+/* activity */
+.tk .ev { padding: 4px 0; border-top: 1px solid var(--wb-muted); font-size: 12.5px; }
+.tk .ev:first-child { border-top: 0; }
+.tk .ev .when { font-family: var(--wb-mono); font-size: 11px; color: var(--wb-muted-fg); margin-right: 4px; }
+.tk .ev.flagged { background: color-mix(in srgb, var(--tk-fail) 7%, var(--wb-card)); }
+.tk .ev.waiting { background: color-mix(in srgb, var(--wb-muted) 60%, var(--wb-card)); }
+.tk .ev .reason { display: block; color: var(--tk-fail); font-size: 12px; margin-left: 2px; }
+.tk .lastact { margin-bottom: 8px; padding: 6px 8px; border-radius: 8px; background: var(--wb-muted); font-size: 12px; }
+
+
+/* ===== item window: one centred window over a dimmed backdrop ===== */
+.tk.tk-iwin-back { position: fixed; inset: 0; z-index: 70; background: var(--tk-backdrop); display: flex; align-items: center; justify-content: center; padding: 3vh 12px; }
+.tk.tk-iwin-back[hidden] { display: none; }
+.tk .iwin { container: iw / inline-size; width: min(1040px, 100%); max-height: 94vh; display: flex; flex-direction: column; background: var(--wb-bg); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow-hi); overflow: hidden; }
+.tk .iwin:focus { outline: none; }
+.tk .iwin-in { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 0 18px; display: flex; flex-direction: column; gap: 10px; }
+.tk .iw-top { position: sticky; top: 0; z-index: 2; margin: 0 -18px; padding: 14px 18px 10px; background: var(--wb-bg); box-shadow: 0 1px 0 var(--wb-line); display: flex; flex-direction: column; gap: 6px; }
+.tk .iw-head { display: flex; gap: 8px; align-items: flex-start; }
+.tk .iw-head .sti { margin-top: 3px; }
+.tk .iw-head h2 { margin: 0; font-size: 18px; line-height: 1.3; flex: 1; overflow-wrap: anywhere; }
+.tk .iw-chips { display: flex; gap: 5px; align-items: center; flex-wrap: wrap; }
+.tk .sh-actions .btn .i { width: 13px; height: 13px; }
+.tk .iwin h3 { margin: 4px 0 0; font-size: 12px; font-weight: 800; color: var(--wb-muted-fg); text-transform: uppercase; letter-spacing: .04em; }
+.tk .sh-body { white-space: pre-wrap; background: var(--wb-card); border-radius: 10px; padding: 8px 10px; box-shadow: var(--wb-shadow); font-size: 13px; }
+.tk .sh-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.tk .timeline { list-style: none; margin: 0; padding: 4px 10px; background: var(--wb-card); border-radius: 10px; box-shadow: var(--wb-shadow); }
+.tk .timeline .ev { padding: 6px 0 6px 12px; border-left: 2px solid var(--wb-muted); margin-left: 4px; position: relative; }
+.tk .timeline .ev::before { content: ""; position: absolute; left: -5px; top: 11px; width: 8px; height: 8px; border-radius: 50%; background: var(--wb-muted-fg); }
+.tk .timeline .ev.agent::before { background: var(--tk-agent-ink); }
+.tk .timeline .ev.flagged::before { background: var(--tk-fail); }
+.tk .timeline .ev.concm::before, .tk .timeline .cmt.concm::before { background: var(--tk-conc); }
+.tk .timeline .ev { font-size: 12.5px; }
+.tk .timeline .cmt { margin: 6px 0 6px 4px; padding: 6px 10px 6px 12px; border-left: 2px solid var(--wb-muted); position: relative; }
+.tk .timeline .cmt::before { content: ""; position: absolute; left: -5px; top: 12px; width: 8px; height: 8px; border-radius: 50%; background: var(--wb-primary); }
+.tk .timeline .cmt .ctext { background: color-mix(in srgb, var(--wb-muted) 55%, var(--wb-card)); border-radius: 4px 10px 10px 10px; padding: 6px 9px; white-space: pre-wrap; font-size: 13px; }
+.tk .timeline .cmt.mine .ctext { background: color-mix(in srgb, var(--wb-primary) 11%, var(--wb-card)); }
+.tk .timeline .cmt.flagged .ctext { background: color-mix(in srgb, var(--tk-fail) 8%, var(--wb-card)); text-decoration: line-through; }
+.tk .timeline .cmt .ch { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; font-size: 12px; margin-bottom: 3px; }
+.tk .timeline .cmt .when { font-family: var(--wb-mono); font-size: 11px; color: var(--wb-muted-fg); }
+.tk .timeline .cmt .reason { color: var(--tk-fail); font-size: 12px; display: block; }
+.tk .quote { font-size: 12px; color: var(--wb-muted-fg); border-left: 3px solid var(--wb-line); padding: 1px 8px; margin: 0 0 3px; }
+.tk .hiddenc { font-size: 12px; font-style: italic; color: var(--wb-muted-fg); }
+.tk .hiddenc summary { cursor: pointer; font-style: normal; }
+.tk .composer2 { position: sticky; bottom: 0; margin: 4px -18px 0; padding: 8px 18px 14px; background: var(--wb-bg); box-shadow: 0 -4px 10px rgb(0 0 0 / .06); display: flex; flex-direction: column; gap: 6px; }
+.tk .composer2 .quick { display: flex; gap: 5px; align-items: center; flex-wrap: wrap; font-size: 12px; }
+.tk .composer2 .replying { font-size: 12px; background: var(--wb-muted); border-radius: 8px; padding: 3px 8px; }
+.tk .composer2 .crow { display: flex; gap: 8px; align-items: stretch; }
+.tk .composer2 textarea { flex: 1; font: inherit; font-size: 13px; border: 1px solid var(--wb-line); border-radius: 10px; padding: 6px 9px; resize: vertical; background: var(--wb-card); color: var(--wb-fg); }
+.tk .composer2 .ccol { display: flex; flex-direction: column; gap: 4px; justify-content: space-between; }
+.tk .composer2 select { font: inherit; font-size: 11.5px; border-radius: 6px; border: 1px solid var(--wb-line); background: var(--wb-card); color: var(--wb-fg); }
+
+/* ===== dialog forms ===== */
+dialog.tk-dlg { border: 0; border-radius: var(--wb-radius); box-shadow: var(--wb-shadow-hi); padding: 0; width: min(560px, 94vw); background: var(--wb-card); color: var(--wb-fg); max-height: 92vh; }
+dialog.tk-dlg::backdrop { background: var(--tk-backdrop); }
+dialog.tk-dlg form { padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; max-height: 92vh; overflow: auto; }
+dialog.tk-dlg h2 { margin: 0; font-size: 16px; }
+dialog.tk-dlg p { margin: 0; font-size: 12.5px; color: var(--wb-muted-fg); }
+.tk .fld { display: flex; flex-direction: column; gap: 3px; font-size: 12.5px; font-weight: 600; }
+.tk .fld > span { color: var(--wb-muted-fg); font-size: 11.5px; }
+.tk .fld select, .tk .fld input[type=text], .tk .fld input[type=number], .tk .fld input[type=date], .tk .fld textarea { font: inherit; font-weight: 400; padding: 5px 8px; border-radius: 8px; border: 1px solid var(--wb-line); background: var(--wb-card); color: var(--wb-fg); width: 100%; }
+.tk .fld.inline { flex-direction: row; align-items: center; gap: 8px; font-weight: 400; }
+.tk .opts { display: flex; gap: 12px; flex-wrap: wrap; font-weight: 400; }
+.tk .opts label { display: inline-flex; gap: 4px; align-items: center; font-size: 13px; }
+.tk .people { display: flex; gap: 4px 12px; flex-wrap: wrap; font-weight: 400; max-height: 130px; overflow: auto; padding: 4px 6px; border: 1px solid var(--wb-line); border-radius: 8px; }
+.tk .people label { display: inline-flex; gap: 4px; align-items: center; font-size: 12.5px; }
+.tk .people.off { opacity: .45; }
+.tk .hint { padding: 6px 8px; border-radius: 8px; background: var(--wb-muted); font-size: 12px; }
+.tk .hint.warn { background: color-mix(in srgb, var(--tk-fail) 10%, var(--wb-card)); color: var(--tk-fail); }
+.tk .btns { display: flex; gap: 8px; justify-content: flex-end; }
+.tk .btns .btn { padding: 4px 16px; font-size: 13px; }
+
+.tk.tk-toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 90; max-width: min(640px, 92vw); background: var(--wb-fg); color: var(--wb-card); border-radius: 10px; padding: 8px 14px; font-size: 13px; box-shadow: var(--wb-shadow-hi); }
+.tk.tk-toast .tf { color: var(--tk-toast-fail); font-weight: 700; }
+
+/* ===== priority, due, view modes ===== */
+.tk .chip.pr { background: transparent; box-shadow: inset 0 0 0 1px var(--wb-line); font-weight: 600; color: var(--wb-muted-fg); }
+.tk .chip.pr-1 { color: var(--wb-fg); }
+.tk .chip.pr-2, .tk .chip.pr-3, .tk .chip.pr-4, .tk .chip.pr-5, .tk .chip.pr-6, .tk .chip.pr-7, .tk .chip.pr-8 { color: var(--tk-fail); box-shadow: inset 0 0 0 1px var(--tk-fail); }
+.tk .chip.due { background: transparent; box-shadow: inset 0 0 0 1px var(--wb-line); font-weight: 600; }
+.tk .chip.due.over { color: var(--tk-fail); box-shadow: inset 0 0 0 1px var(--tk-fail); }
+.tk .chip.due.now { color: var(--tk-warn); box-shadow: inset 0 0 0 1px var(--tk-warn); }
+.tk .chip.st-handed, .tk .chip.st-withdrawn { background: var(--wb-muted); color: var(--wb-muted-fg); }
+.tk .cmodes { display: inline-flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+.tk .card > header .cmodes .btn { font-weight: 400; }
+.tk .card > header:has(.cmodes) { flex-wrap: wrap; row-gap: 2px; }
+.tk .card > header h2 { white-space: nowrap; }
+.tk details.unpushed { margin: -6px 2px 10px; font-size: 12px; }
+.tk details.unpushed summary { cursor: pointer; color: var(--tk-warn); }
+.tk .atl .day { margin-top: 8px; font-size: 11.5px; font-weight: 800; color: var(--wb-muted-fg); border-bottom: 1px solid var(--wb-line); }
+/* kanban lanes and cards follow page.css's ticket lanes */
+.tk .kanban { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(150px, 1fr); gap: 10px; overflow-x: auto; align-items: start; }
+.tk .kcol { background: color-mix(in srgb, var(--wb-muted) 45%, var(--wb-card)); border-radius: 10px; padding: 8px; min-height: 120px; }
+.tk .khead { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; font-size: 12px; }
+.tk .kcard { background: var(--wb-card); border-radius: 8px; padding: 6px 8px; margin-bottom: 6px; box-shadow: var(--wb-shadow); cursor: pointer; font-size: 12px; }
+.tk .kc-t .title { font-weight: 600; color: var(--wb-fg); overflow-wrap: anywhere; }
+.tk .kc-m { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; margin-top: 4px; }
+.tk .kc-m .who { width: auto; }
+.tk .kc-m .pri, .tk .kc-m .due2 { width: auto; }
+.tk .khead b { font-weight: 700; }
+.tk .kcard:hover { box-shadow: var(--wb-shadow-hi); }
+.tk .kcard.drag { cursor: grab; box-shadow: inset 3px 0 0 var(--wb-primary), var(--wb-shadow); }
+.tk .kcard.drag:hover { box-shadow: inset 3px 0 0 var(--wb-primary), var(--wb-shadow-hi); }
+.tk .gantt { font-size: 12px; }
+.tk .grow-row.ended .glabel, .tk .grow-row.ended .gbar { opacity: .55; } /* timeline and calendar keep ended items, muted */
+.tk .citem.ended { opacity: .55; }
+.tk .grow-axis, .tk .grow-row { display: grid; grid-template-columns: minmax(180px, 34%) 1fr; gap: 8px; align-items: center; padding: 2px 0; border-top: 1px solid var(--wb-muted); }
+.tk .glabel { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; min-width: 0; }
+.tk .gtrack { position: relative; height: 18px; }
+.tk .gtrack.axis { height: 16px; }
+.tk .gtick { position: absolute; top: 0; font-size: 10.5px; color: var(--wb-muted-fg); border-left: 1px solid var(--wb-line); padding-left: 2px; height: 16px; }
+.tk .gtick.now, .tk .gnow { border-left: 2px solid var(--wb-primary); }
+.tk .gnow { position: absolute; top: -2px; bottom: -2px; }
+.tk .gbar { position: absolute; top: 3px; height: 12px; border-radius: 3px; background: color-mix(in srgb, var(--wb-primary) 35%, var(--wb-card)); font-size: 9.5px; line-height: 12px; text-align: right; padding-right: 2px; overflow: hidden; color: var(--wb-fg); }
+.tk .gbar.st-done { background: color-mix(in srgb, var(--tk-ok) 35%, var(--wb-card)); }
+.tk .gbar.st-blocked, .tk .gbar.over { background: color-mix(in srgb, var(--tk-fail) 40%, var(--wb-card)); }
+.tk .gbar.st-pending, .tk .gbar.st-unassigned { background: var(--wb-muted); }
+.tk .cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 3px; }
+.tk .cdow { font-size: 11px; font-weight: 800; color: var(--wb-muted-fg); text-align: center; }
+.tk .cday { background: var(--wb-card); box-shadow: inset 0 0 0 1px var(--wb-muted); border-radius: 6px; min-height: 64px; padding: 2px 4px; font-size: 11.5px; }
+.tk .cday.off { background: transparent; box-shadow: none; }
+.tk .cday.now { box-shadow: inset 0 0 0 2px var(--wb-primary); }
+.tk .cnum { font-size: 11px; color: var(--wb-muted-fg); }
+.tk .citem { display: flex; gap: 3px; align-items: center; flex-wrap: wrap; margin: 2px 0; cursor: pointer; }
+
+.tk .sup { margin: 2px 0; font-size: 12px; }
+
+.tk .cref { margin-top: 6px; padding: 5px 8px; border-radius: 8px; background: var(--wb-card); box-shadow: inset 0 0 0 1px var(--wb-line); border-left: 3px solid var(--wb-primary); cursor: pointer; }
+.tk .cref:hover { background: color-mix(in srgb, var(--wb-muted) 50%, var(--wb-card)); }
+.tk .cref .ct { font-weight: 600; margin-top: 2px; overflow-wrap: anywhere; }
+
+/* notification card: unread entries are highlighted until clicked or marked read */
+.tk .nfeed { padding-left: 6px; border-left: 3px solid transparent; }
+.tk .nfeed.unread { border-left-color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 7%, var(--wb-card)); }
+.tk .nfeed.unread .title { font-weight: 700; }
+.tk .chip.nk { background: transparent; box-shadow: inset 0 0 0 1px var(--wb-line); font-weight: 600; }
+
+/* mentions and attachment metadata */
+.tk .mentions, .tk .atts, .tk .cdraft { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; margin: 4px 0; }
+.tk .chip.mention { background: color-mix(in srgb, var(--tk-teal) 14%, var(--wb-card)); color: var(--tk-teal); }
+.tk .chip.att { border: 0; cursor: pointer; font-family: inherit; background: transparent; box-shadow: inset 0 0 0 1px var(--wb-line); color: var(--wb-fg); font-weight: 600; }
+.tk .chip.att.loaded { background: color-mix(in srgb, var(--tk-ok) 16%, var(--wb-card)); color: var(--tk-ok); }
+.tk .chip.att.rejected { cursor: default; text-decoration: line-through; color: var(--wb-muted-fg); }
+.tk .composer2 .cextra { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 12px; }
+.tk .composer2 .cextra input { font: inherit; font-size: 11.5px; border: 1px solid var(--wb-line); border-radius: 6px; padding: 1px 6px; background: var(--wb-card); color: var(--wb-fg); width: 150px; }
+.tk .composer2 .cextra input[type=number] { width: 90px; }
+
+/* a notification opens the item window at its target: a brief flash, then a thin left mark stays */
+.tk .fx-mark { box-shadow: inset 3px 0 0 var(--wb-primary); border-radius: 3px; }
+.tk .timeline .cmt.fx-mark { box-shadow: none; border-left: 3px solid var(--wb-primary); margin-left: 3px; }
+.tk .timeline .cmt.fx-mark::before { left: -6px; }
+.tk .pcard dd.fx-mark { padding-left: 6px; }
+.tk .arow.fx-mark { border-radius: 0; }
+.tk .fx-flash { animation: tk-fx-flash 1.8s ease-out; }
+.tk .chip.att.fx-mark { box-shadow: inset 0 0 0 1.5px var(--wb-primary); }
+@keyframes tk-fx-flash { 0%, 35% { background-color: color-mix(in srgb, var(--wb-primary) 26%, transparent); } 100% { background-color: transparent; } }
+@media (prefers-reduced-motion: reduce) { .tk .fx-flash { animation: none; } }
+
+/* The item window: a header over two columns (main: body, subtasks, thread, composer;
+   side: the property card and the assignees), one column below 820px of window width. In one
+   column the wrappers dissolve and `order` sets header -> properties -> body -> subtasks ->
+   assignees -> thread -> composer. */
+.tk .iw-grid { display: flex; flex-direction: column; gap: 10px; flex: 1 0 auto; }
+.tk .iw-main, .tk .iw-side { display: contents; }
+.tk .pcard { order: 1; } .tk .iw-body { order: 2; } .tk .iw-sub { order: 3; } .tk .iw-asg { order: 4; } .tk .iw-thread { order: 5; } .tk .iw-main > .composer2 { order: 6; }
+.tk .iw-crumb { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--wb-muted-fg); min-width: 0; overflow: hidden; white-space: nowrap; }
+.tk .iw-crumb a { color: var(--wb-muted-fg); text-decoration: none; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.tk .iw-crumb a:hover, .tk .iw-crumb a:focus-visible { color: var(--wb-primary); text-decoration: underline; }
+.tk .iw-body { display: flex; flex-direction: column; gap: 4px; }
+.tk .iwin h3 .cnt { font-weight: 600; letter-spacing: 0; margin-left: 4px; }
+.tk .iwin h3.prom { display: flex; align-items: center; gap: 6px; margin: 2px 0 0; font-size: 14px; color: var(--wb-fg); text-transform: none; letter-spacing: 0; }
+.tk .iw-sub, .tk .iw-thread, .tk .iw-asg { display: flex; flex-direction: column; gap: 6px; }
+.tk .pcard { background: color-mix(in srgb, var(--wb-muted) 55%, var(--wb-card)); border: 1px solid var(--wb-line); border-radius: var(--wb-radius); padding: 8px 12px 10px; min-width: 0; }
+.tk .pcard h3 { margin: 0 0 6px; }
+.tk .pcard dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 5px 12px; margin: 0; font-size: 12.5px; }
+.tk .pcard dt { color: var(--wb-muted-fg); }
+.tk .pcard dd { margin: 0; overflow-wrap: anywhere; }
+.tk .srows { background: var(--wb-card); border-radius: 10px; box-shadow: var(--wb-shadow); padding: 2px 10px; }
+.tk .srow { display: flex; gap: 8px; align-items: center; padding: 6px 0; font-size: 13px; cursor: pointer; }
+.tk .srow + .srow { border-top: 1px solid var(--wb-muted); }
+.tk .srow .title { font-weight: 600; color: var(--wb-fg); text-decoration: none; overflow-wrap: anywhere; }
+.tk .srow:hover .title, .tk .srow .title:focus-visible { color: var(--wb-primary); text-decoration: underline; }
+.tk .srow.gone { opacity: .6; }
+.tk .srow .who { width: auto; }
+.tk .a-common { font-size: 12px; margin: -2px 0 0; }
+.tk .alist { list-style: none; margin: 0; padding: 0; background: var(--wb-card); border-radius: 10px; box-shadow: var(--wb-shadow); font-size: 12.5px; overflow: hidden; }
+.tk .alist.folded .arow.more { display: none; }
+.tk .arow { padding: 6px 10px; display: flex; flex-direction: column; gap: 2px; }
+.tk .arow + .arow { border-top: 1px solid var(--wb-muted); }
+.tk .arow.gone { opacity: .6; }
+.tk .arow.fx-mark { box-shadow: inset 3px 0 0 var(--wb-primary); }
+.tk .arow.fx-flash { animation: tk-fx-flash 1.8s ease-out; }
+.tk .ar-main { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.tk .ar-main .av { margin-left: 0; width: 18px; height: 18px; font-size: 8.5px; }
+.tk .ar-name { font-weight: 700; flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.tk .ar-st { flex: none; display: inline-flex; gap: 4px; align-items: center; }
+.tk .ar-note, .tk .ar-diff { padding-left: 24px; overflow-wrap: anywhere; }
+.tk .arow .tb { display: flex; gap: 4px; flex-wrap: wrap; margin: 2px 0 0 24px; }
+.tk .a-fold { display: flex; }
+@container iw (min-width: 520px) and (max-width: 819px) {
+  .tk .pcard dl { grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr); }
+}
+@container iw (min-width: 820px) {
+  .tk .iw-grid { display: grid; grid-template-columns: minmax(0, 1fr) 292px; gap: 12px 18px; align-items: start; }
+  .tk .iw-main, .tk .iw-side { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+  .tk .iw-main { align-self: stretch; }
+  .tk .iw-main > .composer2 { margin: auto 0 0 -18px; padding: 8px 8px 14px 18px; }
+}
+.tk .iw-side { padding-bottom: 14px; }

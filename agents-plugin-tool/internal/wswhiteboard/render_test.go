@@ -704,6 +704,22 @@ func TestRenderPageItemReferenceKeepsEscaping(t *testing.T) {
 	}
 }
 
+// TestPagesLeaveOutTheTrackerStrings: a whiteboard page, full or embed,
+// never loads the dashboard's tracker renderer, so its client table carries
+// every client string except the tracker's (js.tk.*).
+func TestPagesLeaveOutTheTrackerStrings(t *testing.T) {
+	st := &State{Seq: 1}
+	for _, layout := range []Layout{LayoutFull, LayoutEmbed} {
+		out := render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r"}))
+		if !strings.Contains(out, `"js.ago"`) {
+			t.Errorf("layout %v: the page lacks its client strings", layout)
+		}
+		if strings.Contains(out, `"js.tk.`) {
+			t.Errorf("layout %v: the page carries the tracker strings", layout)
+		}
+	}
+}
+
 func TestRenderPageEmbedSizeBudget(t *testing.T) {
 	long := strings.Repeat("A fairly long sentence about the trade-off, written the way a lead explains it. ", 4)
 	st := &State{Seq: 30, LastEmbedSeq: 20, Topics: []TopicDoc{{Name: "topic 1", Body: sampleDoc, Changed: 30}, {Name: "topic 2", Body: sampleDoc, Changed: 5}}}

@@ -597,31 +597,6 @@ func TestTrackerPlaybookReadAppendsCommandSyntax(t *testing.T) {
 	}
 }
 
-func TestTrackerRedactsRemoteCredentials(t *testing.T) {
-	for in, want := range map[string]string{
-		"https://x-access-token:ghp_secret@github.com/o/r.git": "https://***@github.com/o/r.git",
-		"fatal: could not read from HTTP://tok@host/r":         "fatal: could not read from HTTP://***@host/r",
-		"git@github.com:o/r.git":                               "git@github.com:o/r.git",
-		"ssh://git@github.com/o/r.git":                         "ssh://git@github.com/o/r.git",
-		"https://github.com/o/r.git":                           "https://github.com/o/r.git",
-		"https://host/r.git?private_token=glpat-x&ref=main":    "https://host/r.git?private_token=***&ref=***",
-		"fetch 'https://u:p@host/r?access_token=abc' failed":   "fetch 'https://***@host/r?access_token=***' failed",
-		"https://host/r.git?sigsecret#frag":                    "https://host/r.git?***#frag",
-		"see https://host/docs?q=1 and ssh://h/r?x=1":          "see https://host/docs?q=*** and ssh://h/r?x=1",
-	} {
-		if got := redactRemoteCredentials(in); got != want {
-			t.Fatalf("redact(%q) = %q, want %q", in, got, want)
-		}
-	}
-	remote := "https://tok@example.com/r.git"
-	v := &wstrackerhost.StoreView{View: &wstracker.View{}, Store: wstrackerhost.StoreInfo{Name: "s", Remote: &remote}}
-	v.Sync.Error = "push to https://tok@example.com/r.git failed"
-	redactStoreView(v)
-	if strings.Contains(*v.Store.Remote+v.Sync.Error, "tok") || remote != "https://tok@example.com/r.git" {
-		t.Fatalf("the view's remote and error must be redacted without touching the entry: %q %q", *v.Store.Remote, v.Sync.Error)
-	}
-}
-
 func TestParseTrackerID(t *testing.T) {
 	for in, want := range map[string]string{
 		"maya.pc-5":       "maya.pc#5",

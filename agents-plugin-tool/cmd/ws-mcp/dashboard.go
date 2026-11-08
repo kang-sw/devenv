@@ -49,6 +49,15 @@ func dashboardCommand(args []string) {
 	if err != nil {
 		fatal("dashboard", err)
 	}
+	// One tracker host per daemon, shared by the poll and the tracker
+	// routes; a host that cannot be created still goes in, so the page
+	// shows why.
+	tracker, trackerErr := wstrackerhost.New(wstrackerhost.Options{})
+	closeTracker := func() {
+		if tracker != nil {
+			_ = tracker.Close()
+		}
+	}
 	daemon, err := wsdashboard.StartDaemon(wsdashboard.DaemonOptions{
 		Dir:       dir,
 		Port:      *port,
@@ -59,16 +68,19 @@ func dashboardCommand(args []string) {
 		Log:       logw,
 		Sessions:  mcp.NewDashboardSessionSource(),
 		Agents:    newAgentRunner(dir, logw),
+		Tracker:   &dashboardTracker{h: tracker, err: trackerErr},
 	})
 	if errors.Is(err, wsdashboard.ErrLocked) {
+		closeTracker()
 		fmt.Fprintln(os.Stderr, "ws-mcp dashboard: another dashboard daemon is running (it holds the lock); exiting")
 		os.Exit(3)
 	}
 	if err != nil {
+		closeTracker()
 		fatal("dashboard", err)
 	}
 	wsdashboard.LogDevAssets(logw, devRoot)
-	stopPoll := startTrackerPoll(logw)
+	stopPoll := startTrackerPoll(tracker, trackerErr, daemon.TrackerChanged, logw)
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
 	select {
@@ -77,24 +89,21 @@ func dashboardCommand(args []string) {
 	case <-daemon.Done():
 	}
 	stopPoll()
+	closeTracker()
 }
 
-// startTrackerPoll runs the tracker's background poll in the daemon: every
-// wstrackerhost.DefaultPollInterval, a fetch of every registered store,
-// whatever workflow.tracker_enabled says (the knob gates only manual text).
-// While it runs, a ws-mcp's pre-read check leaves the network to it. A host
-// that cannot be created is logged, and the daemon runs without the poll.
-func startTrackerPoll(logw io.Writer) (stop func()) {
-	h, err := wstrackerhost.New(wstrackerhost.Options{})
-	if err != nil {
-		fmt.Fprintf(logw, "ws-mcp dashboard: tracker poll not started: %v\n", err)
+// startTrackerPoll runs the tracker's background poll in the daemon on h:
+// every wstrackerhost.DefaultPollInterval, a fetch of every registered
+// store, whatever workflow.tracker_enabled says (the knob gates only manual
+// text), and onRound after each round. While it runs, a ws-mcp's pre-read
+// check leaves the network to it. newErr is h's creation error: it is
+// logged once, and the daemon runs without the poll. The caller closes h.
+func startTrackerPoll(h *wstrackerhost.Host, newErr error, onRound func(), logw io.Writer) (stop func()) {
+	if newErr != nil {
+		fmt.Fprintf(logw, "ws-mcp dashboard: tracker poll not started: %v\n", wstrackerhost.RedactCredentials(newErr.Error()))
 		return func() {}
 	}
-	stopPoll := h.StartPoll(wstrackerhost.DefaultPollInterval)
-	return func() {
-		stopPoll()
-		_ = h.Close()
-	}
+	return h.StartPoll(wstrackerhost.DefaultPollInterval, onRound)
 }
 
 // newAgentRunner is the daemon's agent runner: the claude and pi backends,

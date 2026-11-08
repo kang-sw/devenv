@@ -73,11 +73,11 @@ func TestRenderPanelTree(t *testing.T) {
 	for name, layout := range layouts() {
 		out := render(t, BuildView(&State{}, ViewInput{Layout: layout, ReplyID: "r", Panels: []Panel{panel}}))
 		for _, want := range []string{
-			`<ul class="tree"><li><details class="tnode" data-key="agenda/plan" open><summary><span class="tk">plan</span>`,
-			`<details class="tnode" data-key="agenda/plan/step"><summary><span class="tk">step</span><span class="tsum">{n}</span></summary>`,
-			`<div class="tleaf"><span class="tk">n</span><span class="tv num">3</span></div>`,
+			`<ul class="tree"><li><details class="tnode" data-key="agenda/plan" open><summary><span class="tkey">plan</span>`,
+			`<details class="tnode" data-key="agenda/plan/step"><summary><span class="tkey">step</span><span class="tsum">{n}</span></summary>`,
+			`<div class="tleaf"><span class="tkey">n</span><span class="tv num">3</span></div>`,
 			`<span class="tv str">&lt;b&gt;x&lt;/b&gt;</span>`,
-			`<details class="tnode tlong" data-key="agenda/plan/long"><summary><span class="tk">long</span><span class="tv str">` + long + `</span></summary><div class="tfull">` + long + `</div></details>`,
+			`<details class="tnode tlong" data-key="agenda/plan/long"><summary><span class="tkey">long</span><span class="tv str">` + long + `</span></summary><div class="tfull">` + long + `</div></details>`,
 			`<span class="tv bool">false</span>`,
 		} {
 			if !strings.Contains(out, want) {

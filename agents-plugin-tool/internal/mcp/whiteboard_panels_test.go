@@ -310,12 +310,12 @@ func TestWhiteboardAgendaPanelTree(t *testing.T) {
 	for name, page := range map[string]string{"disk": agendaPanelHTML(f.fullPage(t)), "served": served()} {
 		for _, want := range []string{
 			`<details class="tnode" data-key="agenda/overnight" open>`,
-			`<details class="tnode" data-key="agenda/overnight/run"><summary><span class="tk">run</span><span class="tsum">{branch, phases}</span>`,
+			`<details class="tnode" data-key="agenda/overnight/run"><summary><span class="tkey">run</span><span class="tsum">{branch, phases}</span>`,
 			`<details class="tnode" data-key="agenda/overnight/run/phases">`,
 			`<details class="tnode tlong" data-key="agenda/overnight/story">`,
-			`<span class="tk">flaky</span><span class="tv arr">[]</span>`,
+			`<span class="tkey">flaky</span><span class="tv arr">[]</span>`,
 			`<details class="tnode" data-key="agenda/round2" open>`,
-			`<span class="tk">notes</span><span class="tv str">masonry memo</span>`,
+			`<span class="tkey">notes</span><span class="tv str">masonry memo</span>`,
 		} {
 			if !strings.Contains(page, want) {
 				t.Errorf("%s agenda panel lacks %s\n%s", name, want, page)

@@ -102,6 +102,16 @@ func guardedRoutes() []struct{ method, path, body string } {
 		// OS open command.
 		{http.MethodPost, "/s/livesession/open", `{"target":"ftp://guard.test/"}`},
 		{http.MethodPost, "/s/livesession/git", ""},
+		// The tracker routes, served when the fixture has a tracker host.
+		{http.MethodGet, "/tracker/stores", ""},
+		{http.MethodGet, "/tracker/stores/team/view", ""},
+		{http.MethodPost, "/tracker/stores/team/dispatch", `{"events":[{"type":"item.create","payload":{}}]}`},
+		{http.MethodPost, "/tracker/stores/team/check", ""},
+		{http.MethodPost, "/tracker/stores/team/sync", ""},
+		{http.MethodPost, "/tracker/stores/team/seen", `{"badge":["b"]}`},
+		{http.MethodGet, "/tracker/profiles", ""},
+		{http.MethodPost, "/tracker/profiles", `{"given":"Ada"}`},
+		{http.MethodPost, "/tracker/register", `{"id":"new"}`},
 	}
 }
 
@@ -142,7 +152,7 @@ func TestLANModeServesTheMermaidScriptToAll(t *testing.T) {
 // Host, need the token like any other request; the token passes by query
 // parameter or cookie, and the endpoint file's shutdown token does not.
 func TestLANModeGuardsEveryRoute(t *testing.T) {
-	f := startPageFixture(t, lanMode)
+	f := startPageFixture(t, lanMode, withTracker(newFakeTracker()))
 	if err := os.WriteFile(filepath.Join(f.project, "shot.png"), []byte("png"), 0o644); err != nil {
 		t.Fatal(err)
 	}

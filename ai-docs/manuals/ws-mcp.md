@@ -262,6 +262,25 @@ and a session without a fresh adapter snapshot gets 409. `whiteboard.update`'s `
 `http://127.0.0.1:<port>/s/<reply-id>` once the session's last nudge was
 answered, and the page path otherwise.
 
+The daemon creates one tracker host (`wstrackerhost.New`) before it starts
+serving, shared by the tracker's background poll and the tracker routes, and
+never a second; a host that could not be created still goes in, so every
+tracker route answers 503 with its (redacted) error and the page's "+ store"
+dialog shows it. The routes, JSON in and out with errors as `{"error"}`:
+`GET /tracker/stores` (`{stores, rev}`), `GET /tracker/stores/<id>/view`
+(`{view, seen}`), `POST /tracker/stores/<id>/dispatch {events}` (origin forced
+to `human`, `"$N"` names the batch's Nth event; a refusal is 409 with
+`refusal {index, type, reason}`), `POST .../check` and `.../sync` (a report; an
+unreachable remote is `offline: true`, not an error), `POST .../seen {badge,
+read}` (204), `GET`/`POST /tracker/profiles`, and `POST /tracker/register`.
+An unknown store id is 404. Every POST requires an `Origin` equal to the
+daemon's own and a body under 256 KiB, and runs to completion even when the
+page closes mid-request. Every string a route returns has credentials
+redacted. After each write the routes ran, and after each poll round, the
+tracker revision bumps; both pages' SSE streams send `event: tracker` with
+`{"rev": N}` when it differs from what that stream last sent (once on connect
+too), and the page re-reads.
+
 The daemon also hosts headless agent conversations (the agent runner,
 `internal/wsagent`, wired in by `cmd/ws-mcp/dashboard.go`): a Claude Code or
 Pi process per conversation, started from a named profile in the

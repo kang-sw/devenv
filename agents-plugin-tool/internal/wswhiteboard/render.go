@@ -94,6 +94,12 @@ func SetDevAssets(root *wsdevassets.Root) { devAssets.Store(root) }
 // devAssetDir is where the whiteboard assets live under a dev source root.
 const devAssetDir = "internal/wswhiteboard/assets"
 
+// trackerKeyPrefix marks the client strings of the dashboard's tracker
+// renderer (tracker.js). A whiteboard page never loads that script, and
+// the strings would take a large share of the embed's size budget, so its
+// client table leaves them out.
+const trackerKeyPrefix = "js.tk."
+
 // buildAssets reads every asset by file name through read and parses the
 // template set.
 func buildAssets(read func(name string) ([]byte, error)) (*pageAssets, error) {
@@ -143,7 +149,7 @@ func buildAssets(read func(name string) ([]byte, error)) (*pageAssets, error) {
 			"href":        rowHref,
 			"actionAttrs": panelActionAttrs,
 			"t":           func(key string, args ...any) string { return wsi18n.T(lang, key, args...) },
-			"i18n":        func() template.JS { return wsi18n.Script(lang) },
+			"i18n":        func() template.JS { return wsi18n.ScriptExcept(lang, trackerKeyPrefix) },
 		}
 		// The file's template is "page.tmpl" under the root "page", as
 		// ParseFS names it.

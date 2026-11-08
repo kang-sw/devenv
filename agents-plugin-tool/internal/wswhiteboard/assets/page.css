@@ -353,8 +353,8 @@ details.folded .rows li { color: var(--wb-muted-fg); }
 .tree summary::before { content: ""; flex: none; align-self: center; width: 0; height: 0; margin: 0 2px 0 1px; border-left: 5px solid var(--wb-muted-fg); border-top: 4px solid transparent; border-bottom: 4px solid transparent; transition: transform .12s; }
 .tree details[open] > summary::before { transform: rotate(90deg); }
 .tree .tleaf::before { content: ""; flex: none; width: 8px; }
-.tk { flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 12px/1.45 var(--wb-mono); color: var(--wb-muted-fg); }
-.tree > li > details > summary > .tk, .tree > li > .tleaf > .tk { max-width: none; color: var(--wb-primary); }
+.tkey { flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 12px/1.45 var(--wb-mono); color: var(--wb-muted-fg); }
+.tree > li > details > summary > .tkey, .tree > li > .tleaf > .tkey { max-width: none; color: var(--wb-primary); }
 .tsum, .tv { flex: 1 1 auto; min-width: 0; }
 .tsum { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 11.5px/1.45 var(--wb-mono); color: var(--wb-muted-fg); }
 .tree details[open] > summary > .tsum { display: none; }
