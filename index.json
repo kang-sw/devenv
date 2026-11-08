@@ -1089,7 +1089,14 @@
       "registered_at": "2026-10-04T03:10:48Z"
     },
     "261007-bug-mailbox-tests-leak-ambient-ws-mailbox-env": {
-      "registered_at": "2026-10-07T14:15:57Z"
+      "registered_at": "2026-10-07T14:15:57Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "delegate/idea-triage-close",
+        "phase": "closed",
+        "touched_at": "2026-11-08T08:13:42Z"
+      }
     },
     "261007-bug-pi-fork-lineage-keeps-bootstrap-key-after-adoption": {
       "registered_at": "2026-10-07T08:41:34Z"
