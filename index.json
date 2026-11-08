@@ -653,7 +653,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-08T07:37:34Z"
+        "touched_at": "2026-11-08T07:38:14Z",
+        "impl": {
+          "branch": "impl/develop/bribe-diner-candy"
+        }
       }
     },
     "261108-feat-ws-tracker-ledger-attachments": {
