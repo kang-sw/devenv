@@ -782,7 +782,10 @@ func TestDiscoveryClearsAbsenceWhenFetchFails(t *testing.T) {
 	if view, err := x.client().Read(bg); err != nil || view.State != ViewAbsent {
 		t.Fatalf("Read = %s, %v; want absent", view.State, err)
 	}
-	x.opts.ReadTimeout = 0
+	// The final read's ls-remote plus fetch must finish to read fresh, and a
+	// loaded Windows CI runner can take longer than DefaultReadTimeout for
+	// them, which reads as unknown. The read timeout is not under test here.
+	x.opts.ReadTimeout = DefaultWriteTimeout
 	cl := x.client()
 	if st := cl.loadState(); st.AbsentAt == nil || st.AbsentSource != absenceReadTimeout {
 		t.Fatalf("state after the timed-out read = %+v, want a cached read-timeout absence", st)
