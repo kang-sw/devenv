@@ -73,9 +73,14 @@ tools never depend on it. Its state lives under `<cache root>/dashboard/`:
 - `sessions/<reply-id>/registration.json` - one entry per top-level lead
   session whose `dashboard.enabled` resolves on (session scope included),
   written by the serving ws-mcp at its first keyed call and heartbeated every
-  2 minutes; a session counts as live while its heartbeat is under 5 minutes
-  old and it has not ended. The daemon only reads this registry; ws-mcp prunes
-  entries unseen for 7 days.
+  2 minutes, and one per agent runner conversation (below), written by the
+  runner with `agent: true` (and `unlisted: true` when its profile keeps it
+  off the index page) while the daemon runs. A session counts as live while
+  its heartbeat is under 5 minutes old and it has not ended. The daemon's
+  index only reads this registry; ws-mcp prunes entries unseen for 7 days,
+  except an agent conversation (an `agent` registration, or a directory
+  holding `agent.json`), whose lifetime is the runner's: it heartbeats only
+  while the daemon runs, so a daemon down for a week must not lose it.
 - `sessions/<reply-id>/snapshot.json` and `sessions/<reply-id>/ring/` - the
   session's live snapshot (current lead and subagent activity, rewritten
   debounced and on a 30-second heartbeat, stale after 3 missed heartbeats by
@@ -123,6 +128,15 @@ tools never depend on it. Its state lives under `<cache root>/dashboard/`:
   record. `mailbox wait --board-interrupt` also wakes on one (alone, or with
   `--board-inbox` or `--board-steer`), counted as `interrupt` (its own
   `kinds` value), never as `board`.
+- `sessions/<reply-id>/agent.json`, `instructions.md`, and `pi/` - an agent
+  runner conversation's own files (`internal/wsagent`): the owner-only
+  record a process start needs after a daemon restart (profile, backend,
+  working root, backend session id, model and effort, the conversation's ws
+  session key), the composed instruction file appended to the harness's
+  system prompt (owner-only; it carries the session key when the profile
+  allows ws tools), and for the pi backend its session file and MCP bridge.
+  The daemon reads the conversation from its live stores alone, since no
+  ws-mcp serves it and it has no session record.
 
 After a store write the serving ws-mcp sends `POST /nudge {reply_id,
 project}`; the daemon also re-reads every session every 30 seconds.
@@ -195,6 +209,28 @@ and a session without a fresh adapter snapshot gets 409. `whiteboard.update`'s `
 `http://127.0.0.1:<port>/s/<reply-id>` once the session's last nudge was
 answered, and the page path otherwise.
 
+The daemon also hosts headless agent conversations (the agent runner,
+`internal/wsagent`, wired in by `cmd/ws-mcp/dashboard.go`): a Claude Code or
+Pi process per conversation, started from a named profile in the
+`agent.profile.<name>` config family (a whole-object structured value at
+project, repo, or global scope, resolved through the conversation's working
+root; repo scope may not set `mcp_servers` or `plugins`; no profile is built
+in; `agent.` is a reserved prefix no adapter manifest may claim). Each
+conversation is a dashboard session (registration, snapshot, ring, inbox)
+whose page shows it like a lead session. Its routes, behind the same access
+guard: `GET /agents` (every conversation's state), `POST /agents {profile,
+root}` (open one), `GET /agents/<id>`, and `POST /agents/<id>/send {text}`,
+`/interrupt` (answers the held text it took back), `/stop` (ends the
+process; the next send resumes the backend session), `/close` (ends the
+conversation for good; later writes get 409), and `/settings {model?,
+effort?}` (from the next turn). Every POST needs a JSON body
+(`Content-Type: application/json`) and either no `Origin` (a client on this
+machine) or the daemon's own, so no other web page can drive an agent. After
+a daemon restart the runner re-registers each conversation with no process
+and starts one at its next send. An attached ws-mcp gets
+`WS_MCP_ALLOWED_TOOLS` (the profile's ws tools) and `WS_MCP_NO_DASHBOARD`,
+and no mailbox identity.
+
 Pages render in one language end to end, chosen by the server from the first
 byte: the `ws_dashboard_lang` cookie when it names an available language (the
 gear menu's language `<select>` writes it; no cookie, or the empty choice,
@@ -206,6 +242,16 @@ with no code change. English is the fallback and the key set: another table
 may hold only keys English has, and `internal/wsi18n`'s key sweep fails on a
 key a source names that English lacks or an English key nothing uses. Keys
 that start with `js.` ship to the page scripts as the page's own table.
+
+The theme works the same way: the gear menu's theme buttons write the
+`ws_dashboard_theme` cookie (`light` or `dark`; auto deletes it and follows
+the OS), and the server renders the page root's `data-theme` from it on the
+first byte, on every page. A topic body's frame is a separate document, so
+the daemon pins the same `data-theme` on each frame document's root, on the
+session page and its SSE stream; a switch needs no reload: the page sets its
+root, posts the theme to every body frame (and again to a frame that reports
+its height, which covers a frame swapped in after the switch), and redraws
+drawn mermaid diagrams, in the page and in the frames, in the new palette.
 
 By default the daemon binds loopback and every route requires a loopback
 Host. LAN mode (`dashboard.lan_enabled`, read from the global config layer
@@ -306,6 +352,8 @@ Current launcher inputs:
 | `WS_MCP_PROJECT_ROOT` | Project root default for root-aware tools and CLI commands when no higher-priority root exists. |
 | `WS_MCP_DASHBOARD_DEV_SOURCE` | Read by `ws-mcp dashboard`: the `agents-plugin-tool` source root the daemon serves dashboard and whiteboard page assets from instead of the embedded copies (see Dashboard daemon, Dev assets). Unset is off. |
 | `WS_MCP_NO_AGENT` | Product-mode gate for agentless distributions such as wsflow. |
+| `WS_MCP_NO_DASHBOARD` | `1`/`true`/`yes`/`on` turns the dashboard off for this ws-mcp whatever `dashboard.enabled` resolves: no daemon start, no session registration, no prune. The agent runner sets it on the ws-mcp it attaches to a conversation. |
+| `WS_MCP_ALLOWED_TOOLS` | Comma list of ws tool names; when set, `tools/list` advertises and `tools/call` accepts only these. The agent runner sets it to a profile's ws tools. |
 | `WS_MCP_NAMESPACE` | User-facing MCP namespace text override; empty or unset defaults to `ws`. |
 | `WS_MCP_SETUP_TOOL` | Advertised setup tool name override; empty or unset defaults to `ws.setup`. |
 | `WS_MCP_CONFIG_MANIFESTS` | Adapter config key manifests, separated by the platform path-list separator (`:` POSIX, `;` Windows); `;` is accepted on every platform, which the static launcher configs use. Declared keys become `config.tune`-writable, cataloged by `config.list`, and typed in `config.get`; a rejected manifest is logged to stderr and listed by `config.list`. The ws and wsflow packages each ship their own `config-manifest.json` (namespace `claude.`; the same keys, differing only in `default`, pinned by `TestShippedClaudeManifestsDifferOnlyInDefaults`) and set it in both launch configs: `.mcp.json` (Codex) as `./config-manifest.json`, resolved against `cwd: "."` (the plugin root), and `.claude-plugin/plugin.json` as `${CLAUDE_PLUGIN_ROOT}/config-manifest.json`. Each package (ws, wsflow, Pi) also lists its `dashboard-config-manifest.json` (namespace `dashboard.`: `dashboard.enabled`, default on in ws and Pi, off in wsflow; `dashboard.port`, default 29417; `dashboard.lan_enabled`, global-only and default off in every package) beside its own manifest; the Pi bridge joins the two with the platform separator. A path that does not resolve fails nothing: the keys stay undeclared, so check `config.list` after changing either. |
