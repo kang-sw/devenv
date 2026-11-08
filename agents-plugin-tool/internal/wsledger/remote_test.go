@@ -457,12 +457,24 @@ func TestRemoteForeignAdvanceMoveToFreshClone(t *testing.T) {
 		t.Fatalf("remote own ref moved to %s, want y's %s", got, knownBefore)
 	}
 
+	_, before := x.Events(Cursor{})
 	fresh, err := x.MoveToFreshClone(context.Background())
 	if err != nil {
 		t.Fatalf("MoveToFreshClone: %v", err)
 	}
 	if fresh == "" || fresh == "c1" || x.CloneID() != fresh {
 		t.Fatalf("fresh clone id %q (CloneID %q), want a new id", fresh, x.CloneID())
+	}
+	// The old stream's unpushed events left the view: a reader holding a
+	// cursor from before the move re-reads everything, without them.
+	after, cur := x.Events(before)
+	if cur.Epoch == before.Epoch {
+		t.Fatal("the epoch did not change when the move dropped the old stream's events")
+	}
+	for _, e := range after {
+		if e.ID.Stream() == "bo.c1" && e.Type == "note" && payloadNote(t, e) != "x1" {
+			t.Fatalf("the re-read after the move still holds the old stream's %s (%s)", e.ID, payloadNote(t, e))
+		}
 	}
 	moved := streamEvents(x, "bo."+fresh)
 	if len(moved) != 2 {

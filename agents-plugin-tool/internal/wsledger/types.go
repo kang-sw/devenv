@@ -121,7 +121,8 @@ type NewEvent struct {
 // causal events already delivered, plus the verdict generation the caller
 // has seen. The zero Cursor reads everything. A cursor from another Ledger
 // instance (another Epoch) also reads everything, because generations are
-// per instance.
+// per instance; so does one from before an event left the view, which
+// changes the epoch because a cursor cannot report a removal.
 type Cursor struct {
 	Watermark map[string]int
 	Gen       uint64
