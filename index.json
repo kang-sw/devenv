@@ -424,7 +424,14 @@
       }
     },
     "260731-bug-dashboard-drop-property-scan-implementation-branch": {
-      "registered_at": "2026-09-24T10:38:33Z"
+      "registered_at": "2026-09-24T10:38:33Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "delegate/idea-triage-close",
+        "phase": "closed",
+        "touched_at": "2026-11-08T08:09:34Z"
+      }
     },
     "260731-bug-implementer-ticket-result-read-authorization": {
       "registered_at": "2026-09-24T10:38:33Z",
