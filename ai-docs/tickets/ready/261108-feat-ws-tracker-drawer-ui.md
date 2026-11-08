@@ -178,6 +178,46 @@ All confirmed on the session board, 2026-11-08.
   walk and a headless Chromium error sweep (900, 1280, 1760px; every viewer,
   scope, view mode) unchanged; `go test` for `wsdashboard`.
 
+### Result (9aa78d509) - 2026-11-08
+
+- Spine: `ai-docs/.plans/2026-11/08-1650-tracker-drawer-spine.md`
+  (`ef0138ad8`) fixes the adapter seam, mount options, display/seen split,
+  string lookup, and the Phase 2 daemon contract.
+- `internal/wsdashboard/assets/tracker.js` + `tracker.css` (`9eff2c86f`):
+  the whole mockup view as `WsTracker.mount(adapter, opts)` - drawer with one
+  handle per store, the `#/<storeId>` store page, item window, quick
+  switcher, dialogs. The header comment is the adapter/opts/api contract.
+  The pure engine helpers moved in; status icons are inlined. Writes resolve
+  intra-batch references as `"$N"` in the adapter, never a browser next id.
+  CSS is scoped by one `.tk` class of specificity; ids and frame classes are
+  `tk`-prefixed. Mockup chrome reaches in through `ext` (tabs, syncTools,
+  teamTools, qsActions, dialogs, action, rendered); `caps` gates origin
+  pickers, attachment drafting, and `roles.add_member`.
+- Mockup (`409e0b4bb`): `index.html` loads the shipped renderer by relative
+  path and `mock-adapter.js` (engine + fixtures + all mockup-only chrome);
+  `app.js` and `status-icons.js` removed; `engine.js` changed only in its
+  header comment.
+- i18n (`98f82079c`, `9aa78d509`): 571 `js.tk.*` keys in `en.json`;
+  `wsi18n.SubsetScript(lang, prefix)` builds the mockup's `i18n-en.js` from
+  the same builder as `Script`; `TestTrackerMockupI18nIsCurrent` fails on
+  drift (`WS_REGEN_TRACKER_MOCKUP_I18N=1` rewrites, skips without the
+  mockup dir). The page `wsT` now fills placeholders in one pass, so user
+  text containing `{1}` is not re-filled. `pages_test.go`'s leak check
+  matches `\bfile:` so `profile:` in the inlined table does not trip it.
+- Verification: `go build ./...`, `go vet` and `go test ./internal/wsi18n
+  ./internal/wsdashboard` pass; `node --check` on `engine.js`,
+  `fixtures.js`, `i18n-en.js`, `mock-adapter.js`, `tracker.js` passes;
+  headless Chromium parity against the pre-move page (ad hoc scripts under
+  `/tmp/tkv`: drawer and item-window text at 900/1280/1760px for every
+  viewer clone, scope, view mode, and side tab; SCENARIOS walks 1, 3, 4, 6,
+  8, 10; mockup-only controls) showed 0 text differences besides the
+  renamed classes, and light/dark screenshots differ only by sub-pixel
+  antialiasing.
+- Decisions: the `ext` hooks go beyond the spine's list because the join
+  simulation and the Data tab needed a way in without engine knowledge;
+  board citations were dropped from shipped comments and one string was
+  reworded, since the asset ships downstream.
+
 ### Phase 2: Daemon wiring, per-store handles, local UI state, join dialog
 
 - Daemon JSON view and write endpoints over the core's stores and an SSE
