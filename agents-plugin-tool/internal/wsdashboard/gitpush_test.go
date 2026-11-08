@@ -1,6 +1,7 @@
 package wsdashboard
 
 import (
+	"context"
 	"bufio"
 	"errors"
 	"net/http"
@@ -146,6 +147,13 @@ func TestGitPushErrText(t *testing.T) {
 	if got, want := gitActionErrText(out, errors.New("exit status 1")), "! [rejected] main -> main (fetch first)"; got != want {
 		t.Errorf("rejection = %q, want %q", got, want)
 	}
+	hook := "remote: checking the push\nremote: policy says no\nTo /tmp/origin.git\n ! [remote rejected] main -> main (pre-receive hook declined)\nerror: failed to push some refs to '/tmp/origin.git'\n"
+	if got, want := gitActionErrText(hook, nil), "! [remote rejected] main -> main (pre-receive hook declined)"; got != want {
+		t.Errorf("hook rejection = %q, want %q", got, want)
+	}
+	if got, want := gitActionErrText("remote: hello\nerror: src refspec x does not match any\n", nil), "error: src refspec x does not match any"; got != want {
+		t.Errorf("error line = %q, want %q", got, want)
+	}
 	if got := gitActionErrText("fatal: could not read Username for 'https://example.com': terminal prompts disabled\n", nil); !strings.HasPrefix(got, "fatal: could not read Username") {
 		t.Errorf("credential failure = %q", got)
 	}
@@ -154,6 +162,25 @@ func TestGitPushErrText(t *testing.T) {
 	}
 	if got := gitActionErrText(strings.Repeat("x", 3*gitErrMax), nil); len([]rune(got)) != gitErrMax+1 {
 		t.Errorf("long line = %d runes", len([]rune(got)))
+	}
+}
+
+// TestGitBadgeRunnerNamesItsTimeout: a command cut by its context's bound
+// says that bound: the read's by default, the action's when it runs under
+// one.
+func TestGitBadgeRunnerNamesItsTimeout(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	for _, c := range []struct {
+		run  *gitBadgeRunner
+		want string
+	}{
+		{&gitBadgeRunner{}, "timed out after " + gitReadTimeout.String()},
+		{&gitBadgeRunner{timeout: gitActionTimeout}, "timed out after " + gitActionTimeout.String()},
+	} {
+		if _, err := c.run.RunGit(ctx, t.TempDir(), "status"); err == nil || err.Error() != c.want {
+			t.Errorf("timeout %v: err = %v, want %q", c.run.timeout, err, c.want)
+		}
 	}
 }
 

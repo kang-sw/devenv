@@ -1,6 +1,7 @@
 package wsdashboard
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -59,6 +60,37 @@ func TestReadGitChanges(t *testing.T) {
 	}
 }
 
+// TestGitReadsParseStdoutOnly: a warning git writes to stderr on success
+// (here autocrlf's "LF will be replaced by CRLF", which diff prints) never
+// reaches a parse, so the file keeps its delta, the badge its counts, and a
+// failure still carries stderr's message.
+func TestGitReadsParseStdoutOnly(t *testing.T) {
+	work := filepath.Join(t.TempDir(), "work")
+	pushRepos(t, work, 0)
+	gitRun(t, work, "config", "core.autocrlf", "true")
+	writeFile(t, filepath.Join(work, "a"), "a\nmore\n")
+
+	c, err := readGitChanges(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []GitFile{{"a", "M", 2, 1}}; !reflect.DeepEqual(c.Unstaged, want) || len(c.Staged) != 0 || len(c.Untracked) != 0 {
+		t.Fatalf("changes = %+v, want unstaged %+v", c, want)
+	}
+	if b := readGitBadge(work); b.State != gitOK || b.Modified != 1 || b.Staged != 0 || b.Untracked != 0 {
+		t.Fatalf("badge = %+v", b)
+	}
+
+	run := &gitBadgeRunner{}
+	out, err := run.RunGit(context.Background(), work, "-c", "alias.warn=!echo out; echo warn >&2", "warn")
+	if err != nil || string(out) != "out\n" {
+		t.Fatalf("success: out = %q, err = %v", out, err)
+	}
+	if _, err := run.RunGit(context.Background(), work, "-c", "alias.fail=!echo out; echo bad >&2; exit 1", "fail"); err == nil || err.Error() != "bad" || run.err == nil {
+		t.Fatalf("failure: err = %v", err)
+	}
+}
+
 // TestFillGitChanges pins the status parse on its own: an unmerged path is
 // unstaged with status U, an ignored one is left out, a path with spaces
 // keeps them, and each group stops at gitFilesMax, marking the list cut.
@@ -83,8 +115,9 @@ func TestFillGitChanges(t *testing.T) {
 // TestPullGit pins the pull on real repositories: dirty tracked files and a
 // diverged branch are refused and move nothing, untracked files alone do
 // not make the tree dirty, a branch behind fast-forwards to its upstream,
-// one already there finds nothing to pull, and a detached HEAD and a branch
-// without an upstream are refused.
+// one already there finds nothing to pull, an upstream the fetch prunes is
+// refused rather than read as nothing to pull, and a detached HEAD and a
+// branch without an upstream are refused.
 func TestPullGit(t *testing.T) {
 	base := t.TempDir()
 	work := filepath.Join(base, "work")
@@ -128,6 +161,13 @@ func TestPullGit(t *testing.T) {
 	}
 	if got := revParse(t, work, "HEAD"); got != head {
 		t.Fatalf("a diverged pull moved HEAD to %s", got)
+	}
+
+	gitRun(t, work, "reset", "-q", "--hard", "origin/main")
+	gitRun(t, work, "config", "fetch.prune", "true")
+	gitRun(t, origin, "update-ref", "-d", "refs/heads/main")
+	if outcome, err := pullGit(work); err != nil || outcome != pullNoUpstream {
+		t.Errorf("upstream pruned by the fetch: pullGit = %v, %v; want pullNoUpstream", outcome, err)
 	}
 
 	gitRun(t, work, "checkout", "-q", "-b", "topic")

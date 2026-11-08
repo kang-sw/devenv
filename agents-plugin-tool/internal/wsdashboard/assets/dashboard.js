@@ -1731,7 +1731,10 @@
       });
     }, function () { if (seq === gSeq) gitFail(wsT("js.post.unreachable")); });
   }
+  // gitFail shows a failed read in place of the files; the standing line
+  // goes with them, since it is as old as the failed read says.
   function gitFail(msg) {
+    gref.textContent = "";
     gfiles.textContent = "";
     gfiles.appendChild(mk("div", "gempty err", wsT("js.git.fail", msg)));
   }
@@ -1831,7 +1834,7 @@
   // the daemon's marks with the local copy, which may hold marks still being
   // posted.
   var tkApi = null, tkOrder = [], tkViews = {}, tkErrs = {}, tkSeen = {}, tkHostErr = null, tkSubs = [];
-  var tkBusy = false, tkQueued = false, tkNext = [], tkLastRev = null;
+  var tkBusy = false, tkQueued = false, tkNext = [], tkLastRev = null, tkNudgedRev = null;
   function tkUrl(id, op) { return "/tracker/stores/" + encodeURIComponent(id) + "/" + op; }
   // tkFetch calls a tracker route, a POST when body is given; done(status,
   // answer) gets the HTTP status (0: the daemon was not reached) and the
@@ -1904,6 +1907,10 @@
       if (!tkApi && (status === 200 || status === 503)) tkMount();
     }, function () {
       tkBusy = false;
+      if (tkNudgedRev !== null) {
+        if (tkNudgedRev !== tkLastRev) tkQueued = true;
+        tkNudgedRev = null;
+      }
       if (tkApi) tkNotify();
       thens.forEach(function (fn) { fn(); });
       if (tkQueued) tkReload();
@@ -1985,10 +1992,15 @@
     if (window.WsTracker && window.fetch) tkReload();
   }
   // trackerNudge handles the stream's tracker event: a revision other than
-  // the last one handled reloads. trackerLost forgets it when the stream
+  // the last one handled reloads. While a reload runs (the page load's, which
+  // the stream's first event usually meets), the revision waits for its end
+  // and reloads again only when the store list it read brought another one,
+  // so a page loads once. trackerLost forgets the revision when the stream
   // drops, since a restarted daemon counts from 0 again.
   function trackerNudge(rev) {
-    if (rev === tkLastRev || !window.WsTracker || !window.fetch) return;
+    if (!window.WsTracker || !window.fetch) return;
+    if (tkBusy) { tkNudgedRev = rev; return; }
+    if (rev === tkLastRev) return;
     tkLastRev = rev;
     tkReload();
   }

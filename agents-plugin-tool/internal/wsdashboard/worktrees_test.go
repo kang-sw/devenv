@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -154,6 +155,35 @@ func TestWorktreeCleanupHoldsOneMessageWithThePool(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Errorf("cleanup message lacks %q:\n%s", want, text)
 		}
+	}
+}
+
+// TestWorktreePoolTextIsBounded: a pool too large for one message lists
+// what fits and ends with how many worktrees it left out, and a cleanup of
+// it still sends.
+func TestWorktreePoolTextIsBounded(t *testing.T) {
+	pool := WorktreePool{Pool: "/p"}
+	for i := range 2000 {
+		pool.Worktrees = append(pool.Worktrees, PooledWorktree{Path: "/p/" + strings.Repeat("w", 40) + strconv.Itoa(i), Branch: "impl/x"})
+	}
+	text := pool.text(worktreeTextMax)
+	if len(text) > worktreeTextMax+64 {
+		t.Fatalf("text is %d bytes, bound %d", len(text), worktreeTextMax)
+	}
+	listed := strings.Count(text, "\nworktree: ")
+	if listed == 0 || listed == len(pool.Worktrees) || !strings.HasSuffix(text, "\n... "+strconv.Itoa(len(pool.Worktrees)-listed)+" more worktrees\n") {
+		t.Fatalf("listed %d of %d; text ends %q", listed, len(pool.Worktrees), text[len(text)-60:])
+	}
+	if small := (WorktreePool{Pool: "/p", Worktrees: pool.Worktrees[:2]}).text(worktreeTextMax); strings.Contains(small, "more worktrees") {
+		t.Errorf("a small pool is cut: %q", small)
+	}
+
+	f, src, _, _ := worktreeFixture(t)
+	src.mu.Lock()
+	src.pool = pool
+	src.mu.Unlock()
+	if code, _, raw := postJSON(t, f.base+"/s/livesession/worktrees/cleanup", f.base, ""); code != http.StatusOK {
+		t.Fatalf("cleanup of a large pool = %d: %s", code, raw)
 	}
 }
 
