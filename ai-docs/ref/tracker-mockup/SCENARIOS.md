@@ -330,6 +330,38 @@ second applied, and ivy's Notifications tab then shows it as a mention.
 
 Snags: none.
 
+## 11. Open a parent, walk into a subtask, and back up
+
+Added with the item window's property card, assignee fold, and hierarchical
+fixtures (board (424)-(427), 2026-11-08).
+
+Steps: view as `maya.pc`; open the *all* scope; click "Infra capacity plan"
+(its row, a parent with three subtasks); read the Subtasks section; click
+"Forecast storage growth" in it, then "Pull 90-day disk usage" in that
+window (depth 3); click "Infra capacity plan" in the breadcrumb above the
+title; then open "Security training" (13 assignees), read Assignees, click
+*9 more*, then reopen it through `openItemWindow(..., {focus})` on Noa's status
+event (what a notification for it does).
+
+Outcome: "Infra capacity plan" shows its status, a `done 1/3 · blocked below`
+roll-up, and a Subtasks section of three rows (Collect node metrics doing,
+Forecast storage growth todo with `done 0/1 · blocked 1`, Review cooling
+budget done and greyed), each opening that item in the same window. "Pull
+90-day disk usage" (blocked, self-assigned by sven) shows the breadcrumb
+"Infra capacity plan > Forecast storage growth" above its title and a parent
+link in the property card; the breadcrumb link went back to the root. In the
+property card "Security training" reads "13 · doing 3 · done 1" on one line; Assignees
+lists four people (Bo Lindqvist, Maya Ortiz, Raj Rao, Ivy Chen: the shallowest
+lead-chain depth first) under one header line "from Ada Park (forced: their
+lead chain) · assignee closes", and *9 more* expanded the rest, with Pia Novak
+alone carrying "(inherited: everyone within L2, reached later)". A
+focus on a hidden assignee (Noa's status) opened the window with the fold
+already expanded and her row marked. At a window width under
+820px the same content is one column: header, property card, body, Subtasks,
+Assignees, thread, composer.
+
+Snags: none.
+
 ## Summary
 
 | # | scenario | outcome (after the resolutions) | view snags (fixed) | model snags (resolved) |
@@ -344,6 +376,7 @@ Snags: none.
 | 8 | handoff to a peer | works; status carries over, a returned handoff restores the original | - | M7, M8 |
 | 9 | typo in a member's item | works | - | M9 |
 | 10 | notifications, mention, attachment | works | - | - |
+| 11 | parent, subtask, breadcrumb, assignee fold | works | - | - |
 
 | model snag | recommended resolution | board resolution |
 |---|---|---|
