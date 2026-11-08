@@ -638,7 +638,14 @@
       "registered_at": "2026-11-07T15:11:11Z"
     },
     "261108-feat-ws-daemon-agent-runner": {
-      "registered_at": "2026-11-08T00:25:09Z"
+      "registered_at": "2026-11-08T00:25:09Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-08T00:55:42Z"
+      }
     },
     "261108-feat-ws-tracker-support-agent-chat": {
       "registered_at": "2026-11-08T00:25:15Z"
