@@ -3,6 +3,7 @@ title: "mailbox MCP tests read the ambient WS_MAILBOX env instead of controlling
 related:
   260913-feat-cross-session-mailbox-core: source — the self-address / inert-by-default tests that leak the ambient env live in this ticket's surface
   260913-test-mailbox-and-landing-gate-coverage-gaps: context — the ship-gate coverage work that these tests belong to
+completed: 2026-11-08
 ---
 
 # mailbox MCP tests read the ambient WS_MAILBOX env instead of controlling it
@@ -67,3 +68,8 @@ suite rather than per-test.
 - "Just document that maintainers must unset WS_MAILBOX before running tests" —
   rejected: a test that depends on the developer's ambient shell is the defect;
   documenting the workaround leaves the trap armed for the next dogfooder.
+
+
+## Resolution (2026-11-08)
+
+Fixed: setupMailboxTestEnv blanks WS_MAILBOX and WS_MAILBOX_AUTO so the mailbox suite no longer depends on the caller's shell.

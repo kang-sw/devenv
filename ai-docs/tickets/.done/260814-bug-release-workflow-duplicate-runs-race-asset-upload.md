@@ -2,6 +2,7 @@
 title: Release tag push spawns duplicate concurrent workflow runs that race on asset upload
 related:
   260814-bug-ship-preflight-go-test-cache-masks-drift: sibling ship-robustness finding
+completed: 2026-11-08
 ---
 
 # Release tag push spawns duplicate concurrent runs that race on asset upload
@@ -66,3 +67,8 @@ Not yet decided — captured for discussion. Candidate directions:
 Raised during the v0.41.0 dogfood ship, alongside
 `260814-bug-ship-preflight-go-test-cache-masks-drift`. The ship succeeded; this
 is CI-noise hardening, not a release blocker.
+
+
+## Resolution (2026-11-08)
+
+Fixed: ws-mcp-release.yml has a per-ref concurrency group (cancel-in-progress false) so duplicate tag runs no longer race the asset upload.

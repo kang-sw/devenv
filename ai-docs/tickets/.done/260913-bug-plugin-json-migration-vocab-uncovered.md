@@ -2,6 +2,7 @@
 title: agents-plugin/.codex-plugin/plugin.json ships uncovered migration vocabulary
 related:
   260913-feat-cross-session-mailbox-wake: prior-art — Phase 2's round-1 review fix relocated the Codex Stop-hook manifest into .codex-plugin/, exposing that the neutrality scanner never covered that directory
+completed: 2026-11-08
 ---
 
 # agents-plugin/.codex-plugin/plugin.json ships uncovered migration vocabulary
@@ -91,3 +92,8 @@ get scanned too.
   scope for a hook-adapter ticket; the narrower exact-file `TEXT_TREES`
   entry lets that ticket's own fix land without deciding this separately
   owned question.
+
+
+## Resolution (2026-11-08)
+
+Fixed: Codex-first wording removed from the ws plugin manifests and TEXT_TREES widened to the whole .codex-plugin directory.
