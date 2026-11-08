@@ -120,12 +120,19 @@ renderer shows it.
   a turn is billed as extra usage; Phase 2 is the pi backend. Rejected: one
   phase, since the billing outcome gates everything built on the claude
   path.
-
-## Open Decision Queue
-
-Last ID: (326)
-
-(326) [open] [technical] A profile that allows ws tools gets ws-mcp over stdio in its `--mcp-config`, launched with an environment variable carrying the profile's allowlisted ws tool names, and ws-mcp advertises (`tools/list`) and accepts (`tools/call`) only those - over named toolsets defined in ws-mcp code (two places to edit per new agent) and over a daemon-hosted MCP endpoint (a second transport and tool registry); the precedent is the existing env-gated surface filter (`NoAgentMode` with `noAgentHiddenTool`, `internal/mcp/server.go`), and the filter is what lets the init-message check ((Constraints)) pass, since `--allowedTools` denies calls but leaves tools visible. Unverified: ws-mcp's startup side effects (dashboard ensure, session registration) in this role, which Phase 1 checks.
+- **ws-mcp attached with the profile's allowlist as a surface filter**
+  (board (326) ok, user: "새로 열리는 에이전트 세션에 ws-mcp를 제한된
+  프로필로 붙이는 방식"): a profile that allows ws tools gets ws-mcp over
+  stdio in its `--mcp-config` (pi: through its extension path in Phase 2),
+  launched with an environment variable carrying the profile's allowlisted
+  ws tool names; ws-mcp advertises (`tools/list`) and accepts
+  (`tools/call`) only those. The agent profile is the single source of the
+  restriction. Precedent: the env-gated surface filter `NoAgentMode` with
+  `noAgentHiddenTool` in `internal/mcp/server.go`. The filter is what lets
+  the init-message check (Constraints) pass, since `--allowedTools` denies
+  calls but leaves tools visible. Rejected: named toolsets defined in
+  ws-mcp code (two places to edit per new agent); a daemon-hosted MCP
+  endpoint (a second transport and tool registry).
 
 ## Constraints
 
@@ -175,16 +182,22 @@ Last ID: (326)
    so the existing conversation renderer shows them; verify the child's init
    message lists only the profile's tools and MCP servers and fail the
    launch otherwise.
-5. **REST control** behind the existing access control ((314)): create a
+5. **ws-mcp surface filter** ((326)): ws-mcp reads the allowlist
+   environment variable and limits `tools/list` and `tools/call` to it; the
+   claude backend adds ws-mcp to `--mcp-config` when the profile allows any
+   ws tool. Check ws-mcp's startup side effects in this role (dashboard
+   ensure, session registration) and suppress the ones an agent session must
+   not trigger. Read `ai-docs/manuals/ws-mcp.md` first.
+6. **REST control** behind the existing access control ((314)): create a
    conversation from a profile, send a turn, interrupt, stop, change model or
    effort, and read state (the session directory key, running or idle).
    Runner conversations stay out of the session index unless the profile
    lists them.
 
 Verification: unit tests for profile parsing, the idle timer, the
-lazy-resume path, and stream-json-to-`wslive` mapping (with recorded
-stream-json fixtures); a fake backend drives the REST routes end to end in
-tests; one live run of the claude backend through the REST routes on the
+lazy-resume path, stream-json-to-`wslive` mapping (with recorded
+stream-json fixtures), and the ws-mcp allowlist filter; a fake backend
+drives the REST routes end to end in tests; one live run of the claude backend through the REST routes on the
 subscription login, recorded in `### Result` with the billing observation.
 
 ### Phase 2: pi backend
