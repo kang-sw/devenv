@@ -44,6 +44,35 @@
   var DEFAULT_ATTACHMENT_MAX = 10 * 1024 * 1024;
   var OID_RE = /^[0-9a-f]{64}$/;
 
+  // Member profile ((391)-(393)): `org` (one free-text string, may be empty), `family`
+  // (may be empty: a single-name person) and `given` (required). The display name and
+  // the avatar are derived from it; neither is stored. A name with Hangul, a CJK
+  // ideograph or kana reads family + given with no space; any other reads
+  // `given family`. These two functions and the Go port's must agree.
+  var PROFILE_FIELDS = ['org', 'family', 'given'];
+  var PROFILE_LABEL = { org: 'org', family: 'family name', given: 'given name' };
+  var CJK_RE = /[\p{Script=Han}\p{Script=Hangul}\p{Script=Hiragana}\p{Script=Katakana}]/u;
+  function pstr(x) { return typeof x === 'string' ? x.trim() : ''; }
+  // The stored profile of a roles-file member or a join payload. A member written
+  // before profiles (a bare `name`, or nothing) keeps one given name: the name, else the id.
+  function normProfile(m, id) {
+    var pr = m && m.profile && typeof m.profile === 'object' && !Array.isArray(m.profile) ? m.profile : null;
+    if (pr && pstr(pr.given)) return { org: pstr(pr.org), family: pstr(pr.family), given: pstr(pr.given) };
+    return { org: pr ? pstr(pr.org) : '', family: pr ? pstr(pr.family) : '', given: pstr(m && m.name) || id };
+  }
+  function isCJKName(pr) { return CJK_RE.test(pr.family + pr.given); }
+  function displayName(pr) {
+    if (!pr.family) return pr.given;
+    return isCJKName(pr) ? pr.family + pr.given : pr.given + ' ' + pr.family;
+  }
+  // CJK: the given name, up to two characters; else first letter of given + first
+  // letter of family, upper-cased; a single name: its first two letters.
+  function avatar(pr) {
+    var g = Array.from(pr.given), f = Array.from(pr.family);
+    if (isCJKName(pr)) return g.slice(0, 2).join('');
+    return (f.length ? g.slice(0, 1).concat(f.slice(0, 1)) : g.slice(0, 2)).join('').toUpperCase();
+  }
+
   function clone(x) { return x === undefined ? undefined : JSON.parse(JSON.stringify(x)); }
   function alias(id) { return String(id).replace('#', '-'); }
   function has(o, k) { return Object.prototype.hasOwnProperty.call(o, k); }
@@ -190,7 +219,7 @@
     var S = { members: {}, admins: {}, items: {}, asg: {}, rules: {}, comments: {}, reg: {}, prio: normPriority(roles.priority),
       att: normAttachments(roles.attachments) };
     (roles.members || []).forEach(function (m) {
-      S.members[m.id] = { id: m.id, name: m.name || m.id, keys: (m.keys || []).slice(), revoked: {}, leads: (m.leads || []).slice(), removed: null, joined: null };
+      S.members[m.id] = { id: m.id, profile: normProfile(m, m.id), keys: (m.keys || []).slice(), revoked: {}, leads: (m.leads || []).slice(), removed: null, joined: null };
     });
     (roles.admins || []).forEach(function (a) { S.admins[a] = true; });
     return S;
@@ -236,6 +265,19 @@
       if (!S.members[l] || S.members[l].removed) rej('lead "' + l + '" is not a member');
       if (l === id || wouldCycle(S.members, id, l)) rej('cycle: ' + l + ' is already below ' + id);
     });
+  }
+  // (391) A profile write: an object of strings among org / family / given. `full`
+  // (a join) needs `given`; a later write carries only the fields it changes, and a
+  // `given` it carries cannot be empty.
+  function checkProfile(pr, full) {
+    if (!pr || typeof pr !== 'object' || Array.isArray(pr)) rej('profile must be an object {org, family, given}');
+    Object.keys(pr).forEach(function (k) {
+      if (PROFILE_FIELDS.indexOf(k) < 0) rej('profile has no field "' + k + '" (org, family, given)');
+      if (typeof pr[k] !== 'string') rej('profile.' + k + ' must be a string');
+    });
+    if (full && !has(pr, 'given')) rej('profile.given required');
+    if (has(pr, 'given') && !pr.given.trim()) rej('profile.given cannot be empty');
+    if (!PROFILE_FIELDS.some(function (f) { return has(pr, f); })) rej('profile has none of org, family, given');
   }
   function checkFields(S, p) {
     if (has(p, 'title') && !p.title) rej('title cannot be empty');
@@ -461,9 +503,17 @@
         if (!nm.id) rej('member.id required');
         if (String(nm.id).indexOf('.') >= 0) rej('member ids cannot contain "." (it separates member and clone in a stream id)');
         if (S.members[nm.id]) rej('member "' + nm.id + '" already exists' + (S.members[nm.id].removed ? ' (removed; ids are not reused)' : ''));
+        checkProfile(nm.profile, true);
         if (!nm.keys || !nm.keys.length) rej('member.keys required');
         nm.keys.forEach(function (k) { if (keyInUse(S, k)) rej('key "' + k + '" is already in use'); });
         checkLeads(S, nm.id, nm.leads || []);
+        break;
+      }
+      case 'member.profile': {
+        var who = p.member == null ? a : p.member;
+        checkProfile(p.profile, false);
+        needMember(S, who);
+        if (who !== a && !S.admins[a]) rej('only an admin changes another member\'s profile (' + a + ' is not an admin)');
         break;
       }
       case 'roles.set_lead':
@@ -758,9 +808,15 @@
         break;
       case 'roles.add_member': {
         var nm = p.member || {};
-        S.members[nm.id] = { id: nm.id, name: nm.name || nm.id, keys: (nm.keys || []).slice(), revoked: {}, leads: (nm.leads || []).slice(), removed: null, joined: n.id };
+        S.members[nm.id] = { id: nm.id, profile: normProfile(nm, nm.id), keys: (nm.keys || []).slice(), revoked: {}, leads: (nm.leads || []).slice(), removed: null, joined: n.id };
         break;
       }
+      case 'member.profile': // (392) each field is its own register: concurrent changes merge by (203)
+        m = S.members[p.member == null ? a : p.member]; if (!m) break;
+        PROFILE_FIELDS.forEach(function (f) {
+          if (has(p.profile, f)) m.profile[f] = pstr(write(S, 'prof:' + m.id + ':' + f, PROFILE_LABEL[f] + ' of ' + m.id, n, pstr(p.profile[f]), C));
+        });
+        break;
       case 'roles.set_lead': {
         m = S.members[p.member]; if (!m) break;
         var leads = p.leads || [];
@@ -876,6 +932,7 @@
       if (l.length > 1) out.push(m.id + ': leads must have length at most 1 (got ' + l.length + ')');
       l.forEach(function (x) { if (!ids[x]) out.push(m.id + ': lead "' + x + '" is not a member'); });
       if (!m.keys || !m.keys.length) out.push(m.id + ': no keys');
+      if (m.profile && !pstr(m.profile.given)) out.push(m.id + ': profile.given required');
     });
     if (roles.priority && (!Array.isArray(roles.priority.names) || !roles.priority.names.length)) out.push('priority.names must be a non-empty list');
     if (roles.attachments && !(Number.isInteger(roles.attachments.max_bytes) && roles.attachments.max_bytes > 0)) out.push('attachments.max_bytes must be a positive integer');
@@ -991,7 +1048,7 @@
     var members = {};
     Object.keys(S.members).forEach(function (id) {
       var m = S.members[id];
-      members[id] = { id: id, name: m.name, leads: m.leads.slice(), keys: m.keys.slice(),
+      members[id] = { id: id, name: displayName(m.profile), profile: clone(m.profile), avatar: avatar(m.profile), leads: m.leads.slice(), keys: m.keys.slice(),
         revoked: Object.keys(m.revoked).map(function (k) { return { key: k, by: m.revoked[k] }; }),
         removed: m.removed, joined: m.joined, admin: !!S.admins[id], children: (g.children[id] || []).slice(), depth: R[id] || null,
         role: (m.leads || []).length ? ((g.children[id] || []).length ? 'lead' : 'member') : 'root' };
@@ -1065,7 +1122,7 @@
     Object.keys(input.commits || {}).forEach(function (k) { commits += input.commits[k].length; });
 
     return {
-      viewer: { member: v, stream: stream, name: me ? me.name : v, admin: !!S.admins[v], lead: me ? (me.leads || [])[0] || null : null,
+      viewer: { member: v, stream: stream, name: me ? displayName(me.profile) : v, profile: me ? clone(me.profile) : null, admin: !!S.admins[v], lead: me ? (me.leads || [])[0] || null : null,
         followers: (g.children[v] || []).slice(), reach: R, isMember: !!(me && !me.removed) },
       priority: clone(S.prio), attachments: clone(S.att),
       members: members, admins: Object.keys(S.admins), rolesProblems: rolesProblems(input.roles),
@@ -1209,6 +1266,13 @@
         c.syncedAt = now;
         return { fetched: got };
       },
+      // A new clone (the join dialog's stand-in for a fresh checkout): online, empty, and
+      // it fetches what the remote holds.
+      addClone: function (s, now) {
+        if (state.clones[s]) throw new Error('clone stream "' + s + '" already exists');
+        state.clones[s] = { online: true, syncedAt: null, have: {}, late: {}, local: [] };
+        if (hasRemote) { receive(s); state.clones[s].syncedAt = now || null; }
+      },
       setOnline: function (s, on) { need(s).online = !!on; },
       view: function (s, now) {
         var c = need(s), vs = deriveViewState(input(s), { stream: s, now: now });
@@ -1235,6 +1299,7 @@
   window.TrackerEngine = {
     KINDS: KINDS, SETTABLE: SETTABLE, ORIGINS: ORIGINS, DEFAULT_PRIORITY: DEFAULT_PRIORITY, STALE_DAYS: STALE_DAYS,
     DEFAULT_ATTACHMENT_MAX: DEFAULT_ATTACHMENT_MAX,
+    displayName: displayName, avatar: avatar, normProfile: normProfile,
     alias: alias, memberOf: memberOf, cloneOf: cloneOf, refOf: refOf, reach: reach,
     openStore: openStore, deriveViewState: deriveViewState
   };

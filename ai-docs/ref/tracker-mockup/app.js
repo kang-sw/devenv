@@ -7,6 +7,7 @@
   'use strict';
 
   var E = window.TrackerEngine, alias = E.alias, memberOf = E.memberOf;
+  var PROFILE_FIELDS = ['org', 'family', 'given'];
 
   var stores = {}, defs = {}, order = [], vss = {}, EV = {};
   var ui = {
@@ -58,6 +59,12 @@
 
   var VS = null; // the view state being rendered
   function nm(id) { return VS.members[id] ? VS.members[id].name : id; }
+  // (391) The org is not part of the display name: it shows as a muted prefix where a
+  // person is named in markup (whoName), and as a plain prefix in tooltips and option
+  // texts (nmo).
+  function orgOf(id) { var m = VS.members[id]; return m && m.profile ? m.profile.org : ''; }
+  function nmo(id) { var o = orgOf(id); return (o ? o + ' ' : '') + nm(id); }
+  function whoName(id) { var o = orgOf(id); return (o ? '<span class="org">' + esc(o) + '</span> ' : '') + esc(nm(id)); }
   function fmtTs(ts) { return ts ? String(ts).slice(5, 16).replace('T', ' ') : '-'; }
   function today() { return String(ui.clock[ui.store] || '').slice(0, 10); }
   function itemRef(id) { return '<a href="#"' + attr('item', id) + '>' + esc(alias(id)) + '</a>'; }
@@ -171,7 +178,12 @@
       case 'comment.add': return 'commented' + ref(p.item) + (inThread ? '' : ': ' + esc(String(p.body || '').slice(0, 90))) + extrasTxt(p);
       case 'comment.edit': return 'edited comment ' + esc(alias(p.comment)) + (inThread ? '' : ref(n.thread || '')) + extrasTxt(p);
       case 'comment.hide': return 'hid comment ' + esc(alias(p.comment)) + ' (tombstone; history stays)';
-      case 'roles.add_member': return 'added member <b>' + esc((p.member || {}).id) + '</b> under ' + esc(((p.member || {}).leads || []).join(', ') || 'nobody');
+      case 'member.profile': {
+        var pr = p.profile || {};
+        return 'changed ' + (p.member && p.member !== n.member ? 'the profile of <b>' + esc(p.member) + '</b> (admin)' : 'their own profile') + ': ' +
+          PROFILE_FIELDS.filter(function (f) { return f in pr; }).map(function (f) { return f + ' &rarr; "' + esc(pr[f]) + '"'; }).join(', ');
+      }
+      case 'roles.add_member': return 'added member <b>' + esc((p.member || {}).id) + '</b> (' + esc(E.displayName(E.normProfile(p.member, (p.member || {}).id))) + ') under ' + esc(((p.member || {}).leads || []).join(', ') || 'nobody');
       case 'roles.set_lead': return 'set lead of <b>' + esc(p.member) + '</b> to ' + esc((p.leads || []).join(', ') || 'nobody');
       case 'roles.add_admin': return 'made <b>' + esc(p.member) + '</b> an admin';
       case 'roles.remove_admin': return 'removed admin role from <b>' + esc(p.member) + '</b>';
@@ -255,16 +267,14 @@
   function tipHtml(h) { return ' data-tip="' + String(h).replace(/<[^>]*>/g, '').replace(/"/g, '&quot;') + '"'; }
   function stDesc(s) { var x = SI.info(s); return x.label + ': ' + x.desc; }
   function stIcon(s) { return '<span class="sti"' + tipAttr(stDesc(s)) + '>' + SI.svg(s) + '</span>'; }
-  function initials(id) {
-    var w = String(nm(id)).split(/\s+/).filter(Boolean);
-    return (w.length > 1 ? w[0].charAt(0) + w[w.length - 1].charAt(0) : String(w[0] || id).slice(0, 2)).toUpperCase();
-  }
+  // (383 b) The avatar text comes from the view state (the profile rules live in the engine).
+  function initials(id) { var m = VS.members[id]; return m ? m.avatar : String(id).slice(0, 2).toUpperCase(); }
   function holders(it) { return it.assignments.map(A).filter(function (r) { return r.state === 'live' || r.state === 'pending'; }); }
   function whoHtml(it) {
     var as = holders(it), v = VS.viewer.member;
     if (!as.length) return '<span class="who"></span>';
     var shown = as.slice(0, 3), more = as.length - shown.length;
-    var tip = 'assignees: ' + as.map(function (r) { return nm(r.to) + (r.state === 'pending' ? ' (pending)' : ''); }).join(', ');
+    var tip = 'assignees: ' + as.map(function (r) { return nmo(r.to) + (r.state === 'pending' ? ' (pending)' : ''); }).join(', ');
     return '<span class="who"' + tipAttr(tip) + '>' + shown.map(function (r) {
       return '<i class="av' + (r.state === 'pending' ? ' pend' : '') + (r.to === v ? ' me' : '') + '">' + esc(initials(r.to)) + '</i>';
     }).join('') + (more ? '<i class="av more">+' + more + '</i>' : '') + '</span>';
@@ -553,7 +563,7 @@
       if (p.stale) c.push('<span class="err">' + p.stale + ' stale</span>');
       if (p.pending.length) c.push(p.pending.length + ' unaccepted');
       if (p.waiting.length) c.push('<span' + tipAttr('pending assignments they sent that nobody accepted yet') + '>' + p.waiting.length + ' waiting on others</span>');
-      var g = '<div class="tg" style="--d:' + (p.depth - 1) + '"' + attr('person', p.id) + '><div class="tg-head"><i class="av">' + esc(initials(p.id)) + '</i><b>' + esc(m.name) + '</b>' +
+      var g = '<div class="tg" style="--d:' + (p.depth - 1) + '"' + attr('person', p.id) + '><div class="tg-head"><i class="av">' + esc(initials(p.id)) + '</i><b>' + whoName(p.id) + '</b>' +
         '<span class="nid">' + esc(p.id) + ' L' + p.depth + (m.children.length ? ', lead' : '') + '</span><span class="cnt">' + c.join(' &middot; ') + '</span><span class="grow"></span>' +
         '<span class="muted ts"' + tipAttr('last update on their work') + '>' + esc(fmtTs(p.last)) + '</span></div>';
       g += work.map(function (id) { var r = A(id); return irow({ rk: 'team:' + id, item: r.item, rec: r }); }).join('');
@@ -627,8 +637,9 @@
         (m.joined ? '<span class="chip" title="added by ' + esc(alias(m.joined)) + '">joined</span>' : '') +
         (m.revoked.length ? '<span class="chip flag" title="revoked keys">revoked ' + esc(m.revoked.map(function (x) { return x.key; }).join(', ')) + '</span>' : '') +
         ((VS.clones[id] || []).length > 1 ? '<span class="chip" title="clones (one ref each)">' + VS.clones[id].length + ' clones</span>' : '');
-      return '<li><div class="node' + (id === v ? ' me' : '') + '"><span class="nm">' + esc(m.name) + '</span><span class="nid">' + esc(id) + '</span>' + chips +
-        '<span class="nid">' + esc(m.keys.join(', ')) + '</span></div>' + (m.children.length ? '<ul>' + m.children.map(node).join('') + '</ul>' : '') + '</li>';
+      return '<li><div class="node' + (id === v ? ' me' : '') + '"><i class="av">' + esc(m.avatar) + '</i>' + (m.profile.org ? '<span class="org">' + esc(m.profile.org) + '</span>' : '') +
+        '<span class="nm">' + esc(m.name) + '</span><span class="nid">' + esc(id) + '</span>' + chips +
+        '<span class="nid">' + esc(m.keys.join(', ')) + '</span>' + (id === v || me.admin ? btn('profile', 'Edit profile', { who: id }) : '') + '</div>' + (m.children.length ? '<ul>' + m.children.map(node).join('') + '</ul>' : '') + '</li>';
     }
     var roots = Object.keys(VS.members).filter(function (id) { var m = VS.members[id], l = m.leads; return !m.removed && (!l.length || !VS.members[l[0]] || VS.members[l[0]].removed); });
     var h = '<p class="r2" style="margin:0 0 6px">' + summary + '</p>';
@@ -638,7 +649,7 @@
     if (gone.length) h += '<p class="r2">removed: ' + esc(gone.join(', ')) + '</p>';
     var lost = Object.keys(VS.members).filter(function (id) { return !seen[id] && !VS.members[id].removed; });
     if (lost.length) h += '<p class="err">unreachable from any root: ' + esc(lost.join(', ')) + '</p>';
-    h += '<div class="toolbar" style="margin-top:8px">' + btn('admin', 'Admin: roles event', {}) +
+    h += '<div class="toolbar" style="margin-top:8px">' + btn('admin', 'Admin: roles event', {}) + btn('join', 'Join a store...', {}) +
       '<span class="muted">' + (me.admin ? 'you are an admin' : 'flagged unless you are an admin') + '</span></div>';
     var nMem = Object.keys(VS.members).filter(function (id) { return !VS.members[id].removed; }).length;
     return card('Team', nMem + (nMem === 1 ? ' member' : ' members'), h, '', 'card-org');
@@ -772,9 +783,9 @@
     return h + '</div>' + lastWrite();
   }
 
-  var FAMILIES = [['all', 'all events'], ['item', 'item fields and status'], ['assign', 'assignment (assign, accept, decline, return, handoff, unassign)'], ['comment', 'comments'], ['roles', 'roles']];
+  var FAMILIES = [['all', 'all events'], ['item', 'item fields and status'], ['assign', 'assignment (assign, accept, decline, return, handoff, unassign)'], ['comment', 'comments'], ['roles', 'roles and profiles']];
   function family(t) {
-    if (/^roles\./.test(t)) return 'roles';
+    if (/^(roles|member)\./.test(t)) return 'roles';
     if (/^comment\./.test(t)) return 'comment';
     if (/^item\.(assign|accept|decline|return|handoff|unassign)$/.test(t)) return 'assign';
     return 'item';
@@ -784,7 +795,7 @@
       return (f.family === 'all' || family(n.type) === f.family) && (f.member === 'all' || n.member === f.member) &&
         (!f.flagged || n.status !== 'applied') && (!f.conc || n.markers.length);
     }).slice().sort(function (a, b) { return String(b.ts) < String(a.ts) ? -1 : String(b.ts) > String(a.ts) ? 1 : 0; });
-    var people = [['all', 'everyone']].concat(Object.keys(VS.members).map(function (id) { return [id, VS.members[id].name]; }));
+    var people = [['all', 'everyone']].concat(Object.keys(VS.members).map(function (id) { return [id, nmo(id)]; }));
     var h = '<div class="toolbar">' + sel('a-family', f.family, FAMILIES) + sel('a-member', f.member, people) +
       '<label><input type="checkbox" id="flagged-only"' + (f.flagged ? ' checked' : '') + '> flagged only</label>' +
       '<label><input type="checkbox" id="conc-only"' + (f.conc ? ' checked' : '') + '> concurrent only</label><span class="grow"></span><span class="muted">' + rows.length + ' events, by write time, newest first</span></div>';
@@ -1040,7 +1051,7 @@
     h += '<dl class="iw-meta">' +
       '<dt>status</dt><dd>' + (it.kind === 'topic' ? '<span class="muted">topic: discussion only</span>' : esc(SI.info(it.status).label) + ' <span class="muted">' + esc(SI.info(it.status).desc) + '</span>') + '</dd>' +
       '<dt>kind</dt><dd>' + esc(it.kind) + (it.pending.length ? ' <span class="muted">(pending assignment)</span>' : '') + (it.hidden ? ' <span class="muted">(hidden)</span>' : '') + '</dd>' +
-      (it.kind !== 'topic' ? '<dt>holders</dt><dd>' + (hs.length ? hs.map(function (r) { return '<i class="av' + (r.state === 'pending' ? ' pend' : '') + (r.to === v ? ' me' : '') + '">' + esc(initials(r.to)) + '</i> ' + esc(nm(r.to)) + ' <span class="muted">' + esc(SI.info(stKey(it, r)).label) + '</span>'; }).join(', ') : '<span class="muted">not assigned</span>') + '</dd>' : '') +
+      (it.kind !== 'topic' ? '<dt>holders</dt><dd>' + (hs.length ? hs.map(function (r) { return '<i class="av' + (r.state === 'pending' ? ' pend' : '') + (r.to === v ? ' me' : '') + '">' + esc(initials(r.to)) + '</i> ' + whoName(r.to) + ' <span class="muted">' + esc(SI.info(stKey(it, r)).label) + '</span>'; }).join(', ') : '<span class="muted">not assigned</span>') + '</dd>' : '') +
       (it.chain.length > 1 ? '<dt>path</dt><dd>' + esc(it.chain.join(' > ')) + '</dd>' : '') +
       (it.kind !== 'topic' ? '<dt>due</dt><dd>' + (it.due ? esc(it.due) : '<span class="muted">-</span>') + '</dd>' : '') +
       '<dt>creator</dt><dd>' + esc(nm(it.author)) + (VS.members[it.author] && VS.members[it.author].admin ? ' <span class="chip admin">admin</span>' : '') + '</dd>' +
@@ -1098,7 +1109,7 @@
       btn('comment', 'Post', { item: it.id }, 'primary') + '</div></div>' +
       // (335) a simple @ picker; (338) attachment metadata typed in by hand (the mock computes a stand-in oid)
       '<div class="cextra"><select id="cmention" title="mention a member"><option value="">@ mention...</option>' +
-      Object.keys(VS.members).filter(function (id) { return !VS.members[id].removed; }).map(function (id) { return '<option value="' + esc(id) + '">@' + esc(id) + ' ' + esc(VS.members[id].name) + '</option>'; }).join('') +
+      Object.keys(VS.members).filter(function (id) { return !VS.members[id].removed; }).map(function (id) { return '<option value="' + esc(id) + '">@' + esc(id) + ' ' + esc(nmo(id)) + '</option>'; }).join('') +
       '</select><input id="catt-name" type="text" placeholder="attach (mock): file name"><input id="catt-size" type="number" min="0" placeholder="bytes">' +
       btn('att-add', 'Attach', {}) + '<span class="muted">limit ' + fmtSize(VS.attachments.max_bytes) + '</span></div></div>';
     return h;
@@ -1128,7 +1139,7 @@
     return list.map(function (x) { return '<option value="' + esc(x[0]) + '"' + (String(x[0]) === String(cur) ? ' selected' : '') + '>' + esc(x[1]) + '</option>'; }).join('');
   }
   function memberOpts(cur, filter) {
-    return optsHtml(Object.keys(VS.members).filter(function (id) { return !filter || filter(VS.members[id]); }).map(function (id) { return [id, VS.members[id].name + ' (' + id + ')']; }), 'nobody', cur);
+    return optsHtml(Object.keys(VS.members).filter(function (id) { return !filter || filter(VS.members[id]); }).map(function (id) { return [id, nmo(id) + ' (' + id + ')']; }), 'nobody', cur);
   }
   function reachTag(v, id) { return id === v ? 'self' : VS.viewer.reach[id] ? 'forced, L' + VS.viewer.reach[id] : 'pending'; }
   // Anyone in the store: below me = forced (live at once); anyone else = pending until accepted.
@@ -1136,7 +1147,7 @@
     var R = VS.viewer.reach, ids = Object.keys(VS.members).filter(function (id) { return id !== v && !VS.members[id].removed; });
     ids.sort(function (a, b) { return (R[a] || 99) - (R[b] || 99) || (a < b ? -1 : 1); });
     return '<label><input type="checkbox" name="people" value="' + esc(v) + '"> myself</label>' + ids.map(function (id) {
-      return '<label><input type="checkbox" name="people" value="' + esc(id) + '"> ' + esc(nm(id)) + ' <span class="muted">' + reachTag(v, id) + '</span></label>';
+      return '<label><input type="checkbox" name="people" value="' + esc(id) + '"> ' + whoName(id) + ' <span class="muted">' + reachTag(v, id) + '</span></label>';
     }).join('');
   }
   function levelSel() { return '<select name="levels"><option>1</option><option>2</option><option>3</option></select>'; }
@@ -1149,6 +1160,37 @@
   }
   function originSel() { return '<select name="origin"><option value="human">human</option><option value="agent">agent (on request)</option><option value="agent-auto">agent-auto (unprompted)</option></select>'; }
   function fld(label, inner) { return '<div class="fld"><span>' + label + '</span>' + inner + '</div>'; }
+  // (393) A person's earlier profiles are machine-local, never in the ledger: simulated here
+  // with localStorage (the real flow belongs to the later caller ticket). Most recent first;
+  // the first entry is the last-used profile.
+  var PROF_KEY = 'tracker-mockup-profiles';
+  function loadProfiles() {
+    try {
+      var x = JSON.parse(localStorage.getItem(PROF_KEY));
+      return Array.isArray(x) ? x.filter(function (e) { return e && typeof e.given === 'string' && e.given; }).map(function (e) { return { org: String(e.org || ''), family: String(e.family || ''), given: e.given }; }) : [];
+    } catch (e) { return []; }
+  }
+  function rememberProfile(pr) {
+    if (!pr.given.trim()) return;
+    var one = { org: pr.org.trim(), family: pr.family.trim(), given: pr.given.trim() };
+    var list = loadProfiles().filter(function (x) { return x.org !== one.org || x.family !== one.family || x.given !== one.given; });
+    list.unshift(one);
+    try { localStorage.setItem(PROF_KEY, JSON.stringify(list.slice(0, 12))); } catch (e) { /* storage off: not remembered */ }
+  }
+  function profileText(pr) { return (pr.org ? pr.org + ' ' : '') + E.displayName({ org: pr.org, family: pr.family, given: pr.given }); }
+  function profileFields(pr) {
+    return '<div class="fld inline">' + fld('org (optional)', '<input type="text" name="org" value="' + esc(pr.org) + '">') +
+      fld('family name (optional)', '<input type="text" name="family" value="' + esc(pr.family) + '">') +
+      fld('given name (required)', '<input type="text" name="given" value="' + esc(pr.given) + '">') + '</div>' +
+      '<div class="hint" id="pview"></div>';
+  }
+  function profileView(form) {
+    var el = form.elements, pv = form.querySelector('#pview');
+    if (!pv || !el.given) return;
+    var pr = { org: el.org.value.trim(), family: el.family.value.trim(), given: el.given.value.trim() };
+    pv.classList.toggle('warn', !pr.given);
+    pv.textContent = pr.given ? 'Shown as ' + E.displayName(pr) + (pr.org ? ' (org ' + pr.org + ')' : '') + ', avatar ' + E.avatar(pr) : 'The given name is required; an empty one is flagged.';
+  }
   var ROLE_TYPES = ['roles.add_member', 'roles.set_lead', 'roles.add_admin', 'roles.remove_admin', 'roles.add_key', 'roles.revoke_key', 'roles.remove_member', 'roles.set_priority_levels', 'roles.set_attachment_limit'];
 
   function dialogHtml(kind, d) {
@@ -1163,7 +1205,7 @@
           fld('project reference (free text, optional)', '<input type="text" name="project">') +
           '<div class="fld inline">' + fld('due (optional)', '<input type="date" name="due">') + fld('priority', prioSel(VS.priority.default)) + '</div>' +
           fld('assign to (ignored for topics)', '<select name="assignee"><option value="">(nobody)</option><option value="' + esc(v) + '" selected>myself</option>' +
-            Object.keys(VS.members).filter(function (id) { return id !== v && !VS.members[id].removed; }).map(function (id) { return '<option value="' + esc(id) + '">' + esc(nm(id)) + ' (' + reachTag(v, id) + ')</option>'; }).join('') + '</select>') +
+            Object.keys(VS.members).filter(function (id) { return id !== v && !VS.members[id].removed; }).map(function (id) { return '<option value="' + esc(id) + '">' + esc(nmo(id)) + ' (' + reachTag(v, id) + ')</option>'; }).join('') + '</select>') +
           fld('completion', complRadios()), 'Create'];
         break;
       case 'edit':
@@ -1217,13 +1259,33 @@
         T = ['Edit comment ' + alias(d.cid), 'comment.edit; only its author edits it.', fld('text', '<textarea name="body" rows="4">' + esc(cm.body) + '</textarea>'), 'Save'];
         break;
       }
+      case 'join': {
+        // (393) the chosen profile joins the current store. A join is a self-write (member.join, (231));
+        // the mockup has the roles.add_member stand-in, which only an admin writes, so an admin's clone
+        // writes it and the new member's clone is created and opened.
+        if (!VS.store.remote) { T = ['Join ' + VS.store.name, 'This store has no remote, so nobody can join it. Open a team store first.', '', 'Close']; break; }
+        var saved = loadProfiles(), p0 = saved[0] || { org: '', family: '', given: '' };
+        T = ['Join ' + VS.store.name, 'Joins this store as a new member. The saved profiles are this machine\'s own list (localStorage), never in the ledger: pick one, or edit the fields, which saves a new entry. The profile goes into the join payload.',
+          fld('saved profiles', '<select name="saved">' + saved.map(function (x, i) { return '<option value="' + i + '" data-p="' + esc(JSON.stringify(x)) + '"' + (i === 0 ? ' selected' : '') + '>' + esc(profileText(x)) + (i === 0 ? ' (last used)' : '') + '</option>'; }).join('') +
+            '<option value="">' + (saved.length ? '(edited)' : '(none saved)') + '</option></select>') + profileFields(p0) +
+          '<div class="fld inline">' + fld('member id (a handle, no ".")', '<input type="text" name="nid" value="' + esc(asciiId(p0.given)) + '">') +
+          fld('lead', '<select name="lead"><option value="">(none: root)</option>' + memberOpts('', function (m) { return !m.removed; }) + '</select>') + '</div>', 'Join'];
+        break;
+      }
+      case 'profile': {
+        var pw = d.who || v, pm = VS.members[pw];
+        T = [pw === v ? 'Edit your profile' : 'Edit the profile of ' + esc(nm(pw)),
+          'member.profile: ' + (pw === v ? 'your own profile.' : 'an admin changing another member\'s profile; it shows in Activity with you as the author.') + ' Only the fields you change are written; each merges by the (203) rule.',
+          profileFields(pm.profile) + '<input type="hidden" name="who" value="' + esc(pw) + '">', 'Save'];
+        break;
+      }
       case 'admin':
         T = ['Roles event', 'Admin-only. Written to ' + esc(viewerOf(ui.store)) + '\'s own journal; replay applies it to the roles file in causal order.',
           fld('type', '<select name="rtype">' + ROLE_TYPES.map(function (t) { return '<option>' + t + '</option>'; }).join('') + '</select>') +
           fld('member (existing)', '<select name="member">' + memberOpts('') + '</select>') +
           fld('lead (set_lead, add_member)', '<select name="lead"><option value="">(none: root)</option>' + memberOpts(v) + '</select>') +
           fld('key (add_key, revoke_key, add_member)', '<input type="text" name="key" placeholder="e.g. jon-k3">') +
-          fld('new member id and name (add_member)', '<div class="fld inline"><input type="text" name="nid" placeholder="id"><input type="text" name="nname" placeholder="name"></div>') +
+          fld('new member id and profile (add_member)', '<div class="fld inline"><input type="text" name="nid" placeholder="id"><input type="text" name="norg" placeholder="org"><input type="text" name="nfamily" placeholder="family"><input type="text" name="ngiven" placeholder="given"></div>') +
           fld('priority level names, lowest first (set_priority_levels)', '<input type="text" name="pnames" value="' + esc(VS.priority.names.join(', ')) + '">') +
           fld('default level (set_priority_levels)', '<input type="number" name="pdefault" min="0" value="' + VS.priority.default + '">') +
           fld('attachment limit in bytes (set_attachment_limit)', '<input type="number" name="maxbytes" min="1" value="' + VS.attachments.max_bytes + '">'), 'Append'];
@@ -1255,11 +1317,12 @@
     hint.textContent = msg; hint.classList.toggle('warn', warn);
   }
 
+  function asciiId(given) { return String(given || '').toLowerCase().replace(/[^a-z0-9]+/g, '') || 'newcomer'; }
   function openDialog(kind, d) {
     var dl = $('dlg');
     dl.innerHTML = dialogHtml(kind, d || {});
     var f = dl.querySelector('form');
-    updateHint(f);
+    updateHint(f); profileView(f);
     if (!dl.open) dl.showModal();
     var first = f.querySelector('input[type="text"], textarea, select');
     if (first) first.focus();
@@ -1298,8 +1361,8 @@
 
   // One write: events go to the viewer clone's journal (open batch). Events are not
   // pre-validated, so a form can deliberately produce a flagged event.
-  function commit(events) {
-    var name = ui.store, s = viewerOf(name), ts = ui.clock[name];
+  function commit(events, asStream) {
+    var name = ui.store, s = asStream || viewerOf(name), ts = ui.clock[name];
     var res = stores[name].dispatch(s, events.map(function (e) { return { type: e[0], payload: e[1], origin: e[2] || 'human' }; }), ts);
     tick(name, 1);
     ui.last = res;
@@ -1319,6 +1382,32 @@
     function people() { return Array.prototype.map.call(form.querySelectorAll('input[name="people"]:checked'), function (e) { return e.value; }); }
     var evs = [], open = null;
     switch (kind) {
+      case 'join': {
+        if (!VS.store.remote) return closeDialog();
+        var jp = { org: val('org').trim(), family: val('family').trim(), given: val('given').trim() }, jid = val('nid').trim();
+        var adm = VS.admins.filter(function (id) { return VS.members[id] && !VS.members[id].removed; })[0];
+        var adminStream = adm && stores[ui.store].clonesOf(adm)[0];
+        if (!adminStream) return toast('No admin clone to write the stand-in join.');
+        var jres = commit([['roles.add_member', { member: { id: jid, profile: jp, keys: [jid + '-k1'], leads: val('lead') ? [val('lead')] : [] } }]], adminStream);
+        if (jres[0].status !== 'applied') return; // flagged: the toast says why; the write stays in the admin clone's journal
+        rememberProfile(jp);
+        var jst = stores[ui.store], jclone = jid + '.pc';
+        jst.sync(adminStream, ui.clock[ui.store]);
+        jst.addClone(jclone, ui.clock[ui.store]);
+        switchViewer(jclone);
+        toast('Joined ' + esc(ui.store) + ' as ' + esc(profileText(jp)) + ' (stand-in: ' + esc(jres[0].alias) + ' written by ' + esc(adm) + '). Now viewing as ' + esc(jclone) + '.');
+        return;
+      }
+      case 'profile': {
+        var who = val('who') || v, pm = VS.members[who].profile, pp = {};
+        PROFILE_FIELDS.forEach(function (f) { if (val(f).trim() !== pm[f]) pp[f] = val(f).trim(); });
+        if (!Object.keys(pp).length) { closeDialog(); return toast('Nothing changed.'); }
+        var pe = { profile: pp };
+        if (who !== v) pe.member = who;
+        if (who === v) rememberProfile({ org: val('org'), family: val('family'), given: val('given') });
+        evs.push(['member.profile', pe]);
+        break;
+      }
       case 'create': {
         var pl = { kind: val('kind'), title: val('title') };
         if (val('body')) pl.body = val('body');
@@ -1394,7 +1483,7 @@
       }
       case 'admin': {
         var t = val('rtype'), rp = {};
-        if (t === 'roles.add_member') rp.member = { id: val('nid'), name: val('nname') || val('nid'), keys: val('key') ? [val('key')] : [], leads: val('lead') ? [val('lead')] : [] };
+        if (t === 'roles.add_member') rp.member = { id: val('nid'), profile: { org: val('norg'), family: val('nfamily'), given: val('ngiven') }, keys: val('key') ? [val('key')] : [], leads: val('lead') ? [val('lead')] : [] };
         else if (t === 'roles.set_priority_levels') { rp.names = val('pnames').split(',').map(function (x) { return x.trim(); }).filter(Boolean); rp.default = Number(val('pdefault')); }
         else if (t === 'roles.set_attachment_limit') rp.max_bytes = Number(val('maxbytes'));
         else {
@@ -1564,7 +1653,7 @@
 
     $('viewer').innerHTML = Object.keys(VS.members).map(function (k) {
       var m = VS.members[k];
-      return '<option value="' + esc(k) + '"' + (k === v ? ' selected' : '') + '>' + esc(m.name + ' (' + k + ', ' + (m.removed ? 'removed' : m.role) + ')') + '</option>';
+      return '<option value="' + esc(k) + '"' + (k === v ? ' selected' : '') + '>' + esc(nmo(k) + ' (' + k + ', ' + (m.removed ? 'removed' : m.role) + ')') + '</option>';
     }).join('');
     $('vclone').innerHTML = (VS.clones[v] || []).map(function (c) {
       return '<option value="' + esc(c.stream) + '"' + (c.stream === s ? ' selected' : '') + '>' + esc(E.cloneOf(c.stream)) + (c.online ? '' : ' (offline)') + (c.unpushed ? ' *' : '') + '</option>';
@@ -1700,6 +1789,8 @@
       var st = vss[n].store;
       if (!q || n.toLowerCase().indexOf(q) >= 0 || String(st.label).toLowerCase().indexOf(q) >= 0) out.push({ kind: 'store', store: n, label: st.label });
     });
+    // (393) the join action for the store the page is on (a store with no remote has nothing to join)
+    if ((!q || 'join'.indexOf(q) >= 0 || q.indexOf('join') >= 0) && vss[ui.store].store.remote) out.push({ kind: 'join', store: ui.store, label: vss[ui.store].store.label });
     if (q) order.forEach(function (n) {
       var V = vss[n];
       V.itemOrder.forEach(function (id) {
@@ -1713,9 +1804,10 @@
     var list = qs.items = qResults($('qin').value), last = null, h = '';
     if (qs.idx >= list.length) qs.idx = Math.max(0, list.length - 1);
     list.forEach(function (x, i) {
-      if (x.kind !== last) { last = x.kind; h += '<li class="qgrp" role="presentation">' + (x.kind === 'store' ? 'Stores' : 'Items') + '</li>'; }
+      if (x.kind !== last) { last = x.kind; h += '<li class="qgrp" role="presentation">' + (x.kind === 'store' ? 'Stores' : x.kind === 'join' ? 'Actions' : 'Items') + '</li>'; }
       h += '<li class="qopt' + (i === qs.idx ? ' on' : '') + '" role="option" id="qopt-' + i + '" aria-selected="' + (i === qs.idx) + '"' + attr('qi', i) + '>' +
-        (x.kind === 'store' ? '<svg class="i"><use href="#i-tasks"/></svg><b>' + esc(x.store) + '</b><span class="muted">' + esc(x.label) + '</span><span class="grow"></span><span class="qk">open page</span>' :
+        (x.kind === 'join' ? '<svg class="i"><use href="#i-plus"/></svg><b>Join ' + esc(x.store) + '</b><span class="muted">with a saved or new profile</span><span class="grow"></span><span class="qk">join</span>' :
+          x.kind === 'store' ? '<svg class="i"><use href="#i-tasks"/></svg><b>' + esc(x.store) + '</b><span class="muted">' + esc(x.label) + '</span><span class="grow"></span><span class="qk">open page</span>' :
           '<span class="sti">' + SI.svg(x.st) + '</span><span class="qt">' + esc(x.title) + '</span><span class="grow"></span><code class="al">' + esc(x.alias) + '</code><span class="qk">' + esc(x.store) + '</span>') + '</li>';
     });
     $('qlist').innerHTML = h || '<li class="qnone" role="presentation">No store or item matches.</li>';
@@ -1740,6 +1832,7 @@
     var x = qs.items[i];
     if (!x) return;
     qClose(true);
+    if (x.kind === 'join') { openDialog('join', {}); return; }
     if (x.kind === 'store') { if (ui.page !== x.store) location.hash = '#/' + encodeURIComponent(x.store); else $('qs').focus(); }
     else if (!openItemWindow(x.store, x.item, $('qs'))) toast('That item is not visible to this viewer.');
   }
@@ -1896,7 +1989,20 @@
         if (ui.mdraft.indexOf(id) < 0) ui.mdraft.push(id);
         render();
       }
-      else if (t.closest && t.closest('#dlg form')) updateHint(t.closest('form'));
+      else if (t.closest && t.closest('#dlg form')) {
+        var df = t.closest('form');
+        if (t.name === 'saved') { // (393) picking a saved profile fills the fields
+          var o = t.options[t.selectedIndex], sp = o && o.getAttribute('data-p');
+          if (sp) { var pr = JSON.parse(sp); df.elements.org.value = pr.org; df.elements.family.value = pr.family; df.elements.given.value = pr.given; df.elements.nid.value = asciiId(pr.given); }
+        }
+        updateHint(df); profileView(df);
+      }
+    });
+    document.addEventListener('input', function (e) {
+      var t = e.target, df = t.closest && t.closest('#dlg form');
+      if (!df || !df.elements.given) return;
+      if (df.elements.saved && t.name !== 'saved' && t.name !== 'nid' && t.name !== 'lead') df.elements.saved.value = '';
+      profileView(df);
     });
     document.addEventListener('dragstart', function (e) {
       var c = e.target.closest && e.target.closest('[data-drag]');

@@ -50,7 +50,7 @@ function translate(def) {
       c.events.forEach(function (ev) {
         if (ev.type !== 'roles.add_member') return;
         const m = ev.payload.member;
-        def.roles.members.push({ id: m.id, name: m.name, keys: m.keys, leads: [] });
+        def.roles.members.push({ id: m.id, profile: m.profile, keys: m.keys, leads: [] });
         ev.type = 'roles.set_lead';
         ev.payload = { member: m.id, leads: m.leads || [] };
       });

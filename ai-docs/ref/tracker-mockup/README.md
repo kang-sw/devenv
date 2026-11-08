@@ -188,8 +188,10 @@ build, no server, no dependencies.
     clone, kept in memory like the handle badge's `seen`, and writes no
     event. In the product the daemon keeps it per clone on the local
     filesystem, outside git (340).
-  - *Team*: the org tree, admins, clones per member, revoked keys, the
-    priority levels, and an admin roles-event dialog.
+  - *Team*: the org tree (avatar, org prefix, display name), admins, clones
+    per member, revoked keys, the priority levels, an admin roles-event
+    dialog, "Edit profile" (on yourself; an admin on any member) and "Join a
+    store..." ((393); the quick switcher offers it too).
   - *Activity*: the merged log in causal order, newest first, with filters
     for flagged-only and concurrent-only; or the activity timeline.
   - *Data*: the raw roles file, each ref's pushed commits (the remote), and
@@ -277,8 +279,17 @@ build, no server, no dependencies.
 { "admins": ["ada", "bo"],
   "priority": { "names": ["알림", "업무", "긴급"], "default": 1 },
   "attachments": { "max_bytes": 10485760 },
-  "members": [ { "id": "maya", "name": "Maya Ortiz", "keys": ["maya-k1"], "leads": ["ada"] } ] }
+  "members": [ { "id": "maya", "profile": { "org": "Search", "family": "Ortiz", "given": "Maya" },
+                 "keys": ["maya-k1"], "leads": ["ada"] } ] }
 ```
+
+`profile` ((391)) replaces the old `name` string: `org` is one free-text
+string and may be empty (no org tree: team structure stays in `leads`),
+`family` may be empty (a single-name person), `given` is required and
+non-empty. A genesis member written with only a bare `name` (or nothing) reads
+as a profile whose `given` is that name, else the id; a `profile` present
+without a `given` is a roles-file problem.
+
 
 `admins` lists member ids. A member with `leads: []` is a root, and several
 roots are allowed. `leads` is a list validated to length at most 1. Member ids
@@ -344,7 +355,8 @@ attachment the store accepts, in bytes (339); without it the limit is 10 MiB
 | `item.reopen` | `item`, `assignee?`, `note?` | The assigner or the assignee reopens a `done` assignment, back to `doing`. |
 | `comment.add` | `item`, `body`, `reply_to?`, `mentions?`, `attachments?` | Anyone in the store. `reply_to` is one comment in the same thread (flat timeline, quote reply). |
 | `comment.edit` / `comment.hide` | `comment`, `body`, `mentions?`, `attachments?` (edit) | Comment author only. Hide is a tombstone. |
-| `roles.add_member` | `member` (`id`, `name`, `keys`, `leads`) | Admin. Stands in for the self-join (`member.join`, (231)). |
+| `member.profile` | `profile` (any of `org`, `family`, `given`: strings), `member?` | (392 b) The author's own profile, or with `member` another member's: only an admin may write that, anyone else's write is flagged. Each field present is its own register, so concurrent changes merge by (203), and a write only carries the fields it changes. `given` is required and non-empty whenever it is present; a profile with an unknown or non-string field, or with none of the three, is flagged. The member must exist and not be removed. Shows in Activity with the writer, the admin when an admin made it. |
+| `roles.add_member` | `member` (`id`, `profile` (`org?`, `family?`, `given`), `keys`, `leads`) | Admin. Stands in for the self-join (`member.join`, (231)), whose payload carries the same `profile`. Flagged without `profile.given` (391). |
 | `roles.set_lead` | `member`, `leads` | Admin. Length at most 1, no cycle. |
 | `roles.add_admin` / `roles.remove_admin` | `member` | Admin. The last admin cannot be removed. |
 | `roles.add_key` / `roles.revoke_key` | `member`, `key` | Admin. Revocation rule below. |
@@ -442,10 +454,10 @@ ts)`, which returns each new event's id and verdict. This object is the shape
 the Go data-structure child should serve.
 
 ```text
-viewer       { member, stream, name, admin, lead, followers[], reach{id: depth}, isMember }
+viewer       { member, stream, name, profile{org, family, given}, admin, lead, followers[], reach{id: depth}, isMember }
 priority     { names[], default }
 attachments  { max_bytes }
-members      { id: { id, name, leads[], keys[], revoked[{key, by}], removed, joined, admin, children[], depth, role } }
+members      { id: { id, name, profile{org, family, given}, avatar, leads[], keys[], revoked[{key, by}], removed, joined, admin, children[], depth, role } }
 admins[], rolesProblems[]
 items        { id: { id, alias, kind, title, body, project, due, priority, priorityLevel, priorityName,
                      parent, children[], author, ts, hidden, edited{id, ts}, status, counted,
@@ -477,6 +489,19 @@ sync         { online, syncedAt, upstream, unpushed[{open, ts, events[]}] }   th
 clones       { member: [{ stream, online, unpushed }] }
 ```
 
+`name` is derived from the profile, never stored: kept in the view state so a
+view reads one string where it names a person. **Display rules** ((383 b),
+(391)): when `family` or `given` holds Hangul, a CJK ideograph, or kana, the
+name is `family` + `given` with no space ("홍길동"); otherwise `given family`
+("Ada Park"); no `family` means the given name alone. `org` is not merged into
+the name: a view shows it as a muted prefix or in the tooltip where a person is
+named. `avatar` is the text in the avatar circle: for a CJK name, `given` up
+to two characters ("길동", and "민" for 남궁민); otherwise the first letter of
+`given` and of `family`, upper-cased ("AP"); a single name, its first two
+letters, upper-cased ("SV"). `engine.js` (`displayName`, `avatar`) and the Go
+port (`Profile.DisplayName`, `Profile.Avatar`) hold the same rules, pinned by
+the golden parity.
+
 Lists hold ids into the maps. Everything is per viewer clone: two clones of
 one member can show different states until they sync. The notification card
 reads only this object; its read state, like the badge's `seen`, is client
@@ -499,7 +524,8 @@ state outside it.
    past.
    - **Field writes.** These are assignment status (written by the assignee
      with status / close and by the assigner with confirm / reject / reopen),
-     a member's lead, the priority levels, the attachment limit, and item or
+     a member's lead, the priority levels, the attachment limit, each of a
+     member's profile fields (`member.profile`: org, family, given), and item or
      comment text, due, and priority. Each field is a multi-value register; concurrent writes are all
      kept. The **display winner** is the later `ts`, then the greater member
      id, clone id, and seq. Writes by two different members get a
@@ -554,6 +580,10 @@ Flagged reasons, as the engine words them:
 - an attachment list that is malformed, an oid that is not a sha256, a
   missing name or mime type, a size that is not a byte count, or a newly
   added attachment above `attachments.max_bytes`
+- `member.profile` or a join with a profile that is not an object of strings
+  among org / family / given, an empty `given`, no field at all, or a join
+  without `given`; another member's profile by a non-admin, or of an unknown
+  or removed member
 - `roles.*` by a non-admin, a lead list over length 1, a cycle, an unknown
   member, a key in use, removing the last admin, invalid priority levels, or
   an attachment limit that is not a positive integer
@@ -565,6 +595,13 @@ are Maya (lena, omar, ivy, jon, kai), Raj (sven, tia, noa, and later pia), and
 Bo (admin; uma). Default viewer is `maya.pc`; maya also has a `lap` clone. The
 page clock starts at 2026-11-06 09:00. The fixtures show:
 
+- profiles: every member has an org (Platform, Search, Infra, or SW개발팀);
+  jon (홍길동), kai (김민수) and uma (남궁민: a two-character family name and a
+  one-character given name) have Korean names under SW개발팀, sven has a
+  single name, and the rest are Latin, so both display rules and the three
+  avatar rules show (ids are unchanged). `ada.pc-15` (ada moves tia's org)
+  and `tia.pc-6` (tia changes it herself) are concurrent writes to one
+  profile field, a (203) conflict.
 - threads with comments and quote replies; due dates and priorities on most
   tasks, with overdue, stale (doing or blocked for 3+ days) and blocked work
 - an edit of `ada.pc-1`, and a flagged edit of it by maya (creator only)
@@ -734,6 +771,10 @@ creation, and it has a topic and a blocked subtask.
 | 371 | Each store has its own page, the route `#/<storeId>`: the same Items panel and tab pane layout full-page rather than in the pull-down drawer, reached by *Open as page* on the drawer header; back, clearing the hash, or *Back to session* returns; a reload restores it. No item routes. |
 | 372 b | A magnifier next to the gear opens a quick switcher searching stores and items by title (the viewer's visible items, from the view state); a store opens its page, an item its window; arrows, Enter, Esc, focus return. |
 | 382 a | The drawer height is set by dragging its handle, like the dashboard drawer (about 160px to 60% of the window, saved per store as local UI state, restored on reload); panels scroll inside it. Only while a store's drawer was never dragged does the first open use the content-fit height, capped at the same maximum; once dragged, the user's height wins whatever the content or the active tab. Supersedes the content-height drawer of (366)'s plan (and (366 b)'s last sentence). Click-to-open/close stays; the store page is unaffected. |
+| 383 b | A member's name is a profile, not a raw string: companies name people "SW개발팀 홍길동", and one string makes the org and the name run together. Asked for at the first join of a repo, as org / family / given. Display and avatar follow the rules under View state; the org is shown beside the name, never merged into it. |
+| 391 | The structured profile `{org, family, given}` replaces `name` in the roles file, `roles.add_member` (the join stand-in), the view state's `members` and `viewer` (which keep a derived `name` and add `profile`, `avatar`), and the Go port. `org` is one free-text string, may be empty, and is no org tree. `given` is required and non-empty; `family` may be empty. A write missing `given` is flagged. The Go port reads `profile` from the genesis member and the `member.join` payload, and treats an older bare `name` as the given name. |
+| 392 b | The member writes their own profile at join (in the join payload) and may change it with a `member.profile` event; an admin may change any member's with the same event naming `member` (a department move, a typo). Each field is its own register merged by (203); a non-admin writing someone else's profile is flagged; Activity shows it with the admin as author. Decided as partial writes (only the fields that changed) so that two people changing different fields do not overwrite each other, so "missing `given`" is flagged only on a join and for an empty `given`. |
+| 393 | A person's earlier profiles are machine-local, never in the ledger. The mockup simulates the list with localStorage: a *Join a store* dialog (Team tab, or the quick switcher's "join" action) defaults to the last-used profile, picks any saved one, or edits the fields (which saves a new entry), then writes the join stand-in: `roles.add_member` from an admin's clone (the self-write `member.join` is not modeled), after which the new member's clone is opened. The real flow belongs to the caller ticket. |
 
 ## Open questions
 
@@ -751,7 +792,8 @@ takes the ending event's state, and both events are marked. None is open now.
 Real signatures and crypto; git refs, pushes, and fetches (sync is simulated
 per clone); the background poll and the 5-minute push delay (push happens at
 Sync, panel collapse, and viewer switch); the self-join (stand-in:
-`roles.add_member`) and claim refs; re-issue of a revoked key's own events;
+`roles.add_member`) and claim refs; the local saved-profile list beyond
+localStorage; re-issue of a revoked key's own events;
 search; the MCP surface; notifications beyond the handle badge, the derived
 notices, and the notification card (no push, mail, or OS notification; read
 state is in memory, not on disk (340)); attachment content storage and fetch

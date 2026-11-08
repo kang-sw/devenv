@@ -1,0 +1,744 @@
+{
+ "store": "case-member-profile",
+ "viewer": "maya.pc",
+ "now": "2026-11-02T09:00:00Z",
+ "staleDays": 3,
+ "genesis": {
+  "admins": [
+   "ada",
+   "bo"
+  ],
+  "members": [
+   {
+    "id": "ada",
+    "profile": {
+     "org": "Platform",
+     "family": "Park",
+     "given": "Ada"
+    },
+    "keys": [
+     "ada-k1"
+    ],
+    "leads": []
+   },
+   {
+    "id": "maya",
+    "profile": {
+     "org": "Search",
+     "family": "Ortiz",
+     "given": "Maya"
+    },
+    "keys": [
+     "maya-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "raj",
+    "profile": {
+     "org": "Infra",
+     "family": "Rao",
+     "given": "Raj"
+    },
+    "keys": [
+     "raj-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "bo",
+    "profile": {
+     "org": "Platform",
+     "family": "Lindqvist",
+     "given": "Bo"
+    },
+    "keys": [
+     "bo-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "lena",
+    "profile": {
+     "org": "Search",
+     "family": "Weiss",
+     "given": "Lena"
+    },
+    "keys": [
+     "lena-k1"
+    ],
+    "leads": [
+     "maya"
+    ]
+   },
+   {
+    "id": "omar",
+    "name": "Omar",
+    "keys": [
+     "omar-k1"
+    ],
+    "leads": [
+     "maya"
+    ]
+   },
+   {
+    "id": "jon",
+    "profile": {
+     "org": "SW개발팀",
+     "family": "홍",
+     "given": "길동"
+    },
+    "keys": [
+     "jon-k1"
+    ],
+    "leads": [
+     "maya"
+    ]
+   },
+   {
+    "id": "uma",
+    "profile": {
+     "org": "SW개발팀",
+     "family": "남궁",
+     "given": "민"
+    },
+    "keys": [
+     "uma-k1"
+    ],
+    "leads": [
+     "bo"
+    ]
+   },
+   {
+    "id": "sven",
+    "profile": {
+     "org": "Infra",
+     "family": "",
+     "given": "Sven"
+    },
+    "keys": [
+     "sven-k1"
+    ],
+    "leads": [
+     "raj"
+    ]
+   }
+  ]
+ },
+ "events": [
+  {
+   "member": "lena",
+   "clone": "pc",
+   "seq": 1,
+   "ts": "2026-11-01T10:00:00Z",
+   "type": "member.profile",
+   "payload": {
+    "profile": {
+     "family": "Weiss-Berg"
+    }
+   },
+   "seen": {},
+   "verdict": "valid"
+  },
+  {
+   "member": "ada",
+   "clone": "pc",
+   "seq": 1,
+   "ts": "2026-11-01T10:05:00Z",
+   "type": "member.profile",
+   "payload": {
+    "member": "omar",
+    "profile": {
+     "org": "Search",
+     "family": "Haddad"
+    }
+   },
+   "seen": {
+    "lena.pc": 1
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "maya",
+   "clone": "pc",
+   "seq": 1,
+   "ts": "2026-11-01T10:10:00Z",
+   "type": "member.profile",
+   "payload": {
+    "member": "lena",
+    "profile": {
+     "org": "Infra"
+    }
+   },
+   "seen": {
+    "ada.pc": 1,
+    "lena.pc": 1
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "maya",
+   "clone": "pc",
+   "seq": 2,
+   "ts": "2026-11-01T11:00:00Z",
+   "type": "member.profile",
+   "payload": {
+    "profile": {
+     "org": "Search / Infra",
+     "family": "Ortiz-Ruiz"
+    }
+   },
+   "seen": {
+    "ada.pc": 1,
+    "lena.pc": 1
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "ada",
+   "clone": "pc",
+   "seq": 2,
+   "ts": "2026-11-01T11:05:00Z",
+   "type": "member.profile",
+   "payload": {
+    "member": "maya",
+    "profile": {
+     "org": "Platform"
+    }
+   },
+   "seen": {
+    "lena.pc": 1
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "ada",
+   "clone": "pc",
+   "seq": 3,
+   "ts": "2026-11-01T12:00:00Z",
+   "type": "member.profile",
+   "payload": {
+    "member": "jon",
+    "profile": {
+     "given": ""
+    }
+   },
+   "seen": {
+    "lena.pc": 1
+   },
+   "verdict": "valid"
+  }
+ ],
+ "expected": {
+  "viewer": {
+   "member": "maya",
+   "stream": "maya.pc",
+   "name": "Maya Ortiz-Ruiz",
+   "profile": {
+    "org": "Platform",
+    "family": "Ortiz-Ruiz",
+    "given": "Maya"
+   },
+   "admin": false,
+   "lead": "ada",
+   "followers": [
+    "lena",
+    "omar",
+    "jon"
+   ],
+   "reach": {
+    "lena": 1,
+    "omar": 1,
+    "jon": 1
+   },
+   "isMember": true
+  },
+  "priority": {
+   "names": [
+    "알림",
+    "업무",
+    "긴급"
+   ],
+   "default": 1
+  },
+  "attachments": {
+   "max_bytes": 10485760
+  },
+  "members": {
+   "ada": {
+    "id": "ada",
+    "name": "Ada Park",
+    "profile": {
+     "org": "Platform",
+     "family": "Park",
+     "given": "Ada"
+    },
+    "avatar": "AP",
+    "leads": [],
+    "keys": [
+     "ada-k1"
+    ],
+    "revoked": [],
+    "removed": null,
+    "joined": null,
+    "admin": true,
+    "children": [
+     "maya",
+     "raj",
+     "bo"
+    ],
+    "depth": null,
+    "role": "root"
+   },
+   "maya": {
+    "id": "maya",
+    "name": "Maya Ortiz-Ruiz",
+    "profile": {
+     "org": "Platform",
+     "family": "Ortiz-Ruiz",
+     "given": "Maya"
+    },
+    "avatar": "MO",
+    "leads": [
+     "ada"
+    ],
+    "keys": [
+     "maya-k1"
+    ],
+    "revoked": [],
+    "removed": null,
+    "joined": null,
+    "admin": false,
+    "children": [
+     "lena",
+     "omar",
+     "jon"
+    ],
+    "depth": null,
+    "role": "lead"
+   },
+   "raj": {
+    "id": "raj",
+    "name": "Raj Rao",
+    "profile": {
+     "org": "Infra",
+     "family": "Rao",
+     "given": "Raj"
+    },
+    "avatar": "RR",
+    "leads": [
+     "ada"
+    ],
+    "keys": [
+     "raj-k1"
+    ],
+    "revoked": [],
+    "removed": null,
+    "joined": null,
+    "admin": false,
+    "children": [
+     "sven"
+    ],
+    "depth": null,
+    "role": "lead"
+   },
+   "bo": {
+    "id": "bo",
+    "name": "Bo Lindqvist",
+    "profile": {
+     "org": "Platform",
+     "family": "Lindqvist",
+     "given": "Bo"
+    },
+    "avatar": "BL",
+    "leads": [
+     "ada"
+    ],
+    "keys": [
+     "bo-k1"
+    ],
+    "revoked": [],
+    "removed": null,
+    "joined": null,
+    "admin": true,
+    "children": [
+     "uma"
+    ],
+    "depth": null,
+    "role": "lead"
+   },
+   "lena": {
+    "id": "lena",
+    "name": "Lena Weiss-Berg",
+    "profile": {
+     "org": "Search",
+     "family": "Weiss-Berg",
+     "given": "Lena"
+    },
+    "avatar": "LW",
+    "leads": [
+     "maya"
+    ],
+    "keys": [
+     "lena-k1"
+    ],
+    "revoked": [],
+    "removed": null,
+    "joined": null,
+    "admin": false,
+    "children": [],
+    "depth": 1,
+    "role": "member"
+   },
+   "omar": {
+    "id": "omar",
+    "name": "Omar Haddad",
+    "profile": {
+     "org": "Search",
+     "family": "Haddad",
+     "given": "Omar"
+    },
+    "avatar": "OH",
+    "leads": [
+     "maya"
+    ],
+    "keys": [
+     "omar-k1"
+    ],
+    "revoked": [],
+    "removed": null,
+    "joined": null,
+    "admin": false,
+    "children": [],
+    "depth": 1,
+    "role": "member"
+   },
+   "jon": {
+    "id": "jon",
+    "name": "홍길동",
+    "profile": {
+     "org": "SW개발팀",
+     "family": "홍",
+     "given": "길동"
+    },
+    "avatar": "길동",
+    "leads": [
+     "maya"
+    ],
+    "keys": [
+     "jon-k1"
+    ],
+    "revoked": [],
+    "removed": null,
+    "joined": null,
+    "admin": false,
+    "children": [],
+    "depth": 1,
+    "role": "member"
+   },
+   "uma": {
+    "id": "uma",
+    "name": "남궁민",
+    "profile": {
+     "org": "SW개발팀",
+     "family": "남궁",
+     "given": "민"
+    },
+    "avatar": "민",
+    "leads": [
+     "bo"
+    ],
+    "keys": [
+     "uma-k1"
+    ],
+    "revoked": [],
+    "removed": null,
+    "joined": null,
+    "admin": false,
+    "children": [],
+    "depth": null,
+    "role": "member"
+   },
+   "sven": {
+    "id": "sven",
+    "name": "Sven",
+    "profile": {
+     "org": "Infra",
+     "family": "",
+     "given": "Sven"
+    },
+    "avatar": "SV",
+    "leads": [
+     "raj"
+    ],
+    "keys": [
+     "sven-k1"
+    ],
+    "revoked": [],
+    "removed": null,
+    "joined": null,
+    "admin": false,
+    "children": [],
+    "depth": null,
+    "role": "member"
+   }
+  },
+  "admins": [
+   "ada",
+   "bo"
+  ],
+  "rolesProblems": [],
+  "items": {},
+  "itemOrder": [],
+  "assignments": {},
+  "comments": {},
+  "events": [
+   {
+    "id": "lena.pc#1",
+    "alias": "lena.pc-1",
+    "stream": "lena.pc",
+    "member": "lena",
+    "seq": 1,
+    "ts": "2026-11-01T10:00:00Z",
+    "type": "member.profile",
+    "origin": "human",
+    "payload": {
+     "profile": {
+      "family": "Weiss-Berg"
+     }
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": null,
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "ada.pc#1",
+    "alias": "ada.pc-1",
+    "stream": "ada.pc",
+    "member": "ada",
+    "seq": 1,
+    "ts": "2026-11-01T10:05:00Z",
+    "type": "member.profile",
+    "origin": "human",
+    "payload": {
+     "member": "omar",
+     "profile": {
+      "org": "Search",
+      "family": "Haddad"
+     }
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": null,
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "maya.pc#1",
+    "alias": "maya.pc-1",
+    "stream": "maya.pc",
+    "member": "maya",
+    "seq": 1,
+    "ts": "2026-11-01T10:10:00Z",
+    "type": "member.profile",
+    "origin": "human",
+    "payload": {
+     "member": "lena",
+     "profile": {
+      "org": "Infra"
+     }
+    },
+    "status": "flagged",
+    "reason": "only an admin changes another member's profile (maya is not an admin)",
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": null,
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "maya.pc#2",
+    "alias": "maya.pc-2",
+    "stream": "maya.pc",
+    "member": "maya",
+    "seq": 2,
+    "ts": "2026-11-01T11:00:00Z",
+    "type": "member.profile",
+    "origin": "human",
+    "payload": {
+     "profile": {
+      "org": "Search / Infra",
+      "family": "Ortiz-Ruiz"
+     }
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [
+     {
+      "kind": "field",
+      "field": "org of maya",
+      "other": "ada.pc#2",
+      "otherMember": "ada",
+      "winner": "ada.pc#2",
+      "mine": "Search / Infra",
+      "theirs": "Platform"
+     }
+    ],
+    "superseded": [],
+    "thread": null,
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "ada.pc#2",
+    "alias": "ada.pc-2",
+    "stream": "ada.pc",
+    "member": "ada",
+    "seq": 2,
+    "ts": "2026-11-01T11:05:00Z",
+    "type": "member.profile",
+    "origin": "human",
+    "payload": {
+     "member": "maya",
+     "profile": {
+      "org": "Platform"
+     }
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [
+     {
+      "kind": "field",
+      "field": "org of maya",
+      "other": "maya.pc#2",
+      "otherMember": "maya",
+      "winner": "ada.pc#2",
+      "mine": "Platform",
+      "theirs": "Search / Infra"
+     }
+    ],
+    "superseded": [],
+    "thread": null,
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "ada.pc#3",
+    "alias": "ada.pc-3",
+    "stream": "ada.pc",
+    "member": "ada",
+    "seq": 3,
+    "ts": "2026-11-01T12:00:00Z",
+    "type": "member.profile",
+    "origin": "human",
+    "payload": {
+     "member": "jon",
+     "profile": {
+      "given": ""
+     }
+    },
+    "status": "flagged",
+    "reason": "profile.given cannot be empty",
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": null,
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   }
+  ],
+  "notices": [],
+  "my": {
+   "assignments": [],
+   "today": {
+    "work": [],
+    "pending": [],
+    "confirms": []
+   },
+   "received": {
+    "pending": [],
+    "answered": [],
+    "sent": []
+   },
+   "given": [],
+   "created": [],
+   "team": [
+    {
+     "id": "lena",
+     "depth": 1,
+     "open": [],
+     "pending": [],
+     "waiting": [],
+     "done": 0,
+     "blocked": 0,
+     "stale": 0,
+     "last": null
+    },
+    {
+     "id": "omar",
+     "depth": 1,
+     "open": [],
+     "pending": [],
+     "waiting": [],
+     "done": 0,
+     "blocked": 0,
+     "stale": 0,
+     "last": null
+    },
+    {
+     "id": "jon",
+     "depth": 1,
+     "open": [],
+     "pending": [],
+     "waiting": [],
+     "done": 0,
+     "blocked": 0,
+     "stale": 0,
+     "last": null
+    }
+   ],
+   "badge": []
+  },
+  "stats": {
+   "events": 6,
+   "commits": 6,
+   "flagged": 2,
+   "concurrent": 2
+  },
+  "heads": {
+   "lena.pc": 1,
+   "ada.pc": 3,
+   "maya.pc": 2
+  },
+  "now": "2026-11-02T09:00:00Z"
+ }
+}

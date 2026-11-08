@@ -22,19 +22,19 @@ window.TRACKER_FIXTURES = {
         "priority": {"names": ["알림", "업무", "긴급"], "default": 1},
         "attachments": {"max_bytes": 10485760},
         "members": [
-          {"id":"ada","name":"Ada Park","keys":["ada-k1"],"leads":[]},
-          {"id":"maya","name":"Maya Ortiz","keys":["maya-k1"],"leads":["ada"]},
-          {"id":"raj","name":"Raj Rao","keys":["raj-k1"],"leads":["ada"]},
-          {"id":"bo","name":"Bo Lindqvist","keys":["bo-k1"],"leads":["ada"]},
-          {"id":"lena","name":"Lena Weiss","keys":["lena-k1"],"leads":["maya"]},
-          {"id":"omar","name":"Omar Haddad","keys":["omar-k1"],"leads":["maya"]},
-          {"id":"ivy","name":"Ivy Chen","keys":["ivy-k1"],"leads":["maya"]},
-          {"id":"jon","name":"Jon Ek","keys":["jon-k1"],"leads":["maya"]},
-          {"id":"kai","name":"Kai Mori","keys":["kai-k1"],"leads":["maya"]},
-          {"id":"sven","name":"Sven Berg","keys":["sven-k1"],"leads":["raj"]},
-          {"id":"tia","name":"Tia Moreau","keys":["tia-k1"],"leads":["raj"]},
-          {"id":"noa","name":"Noa Fisher","keys":["noa-k1"],"leads":["raj"]},
-          {"id":"uma","name":"Uma Iyer","keys":["uma-k1"],"leads":["bo"]}
+          {"id":"ada","profile":{"org":"Platform","family":"Park","given":"Ada"},"keys":["ada-k1"],"leads":[]},
+          {"id":"maya","profile":{"org":"Search","family":"Ortiz","given":"Maya"},"keys":["maya-k1"],"leads":["ada"]},
+          {"id":"raj","profile":{"org":"Infra","family":"Rao","given":"Raj"},"keys":["raj-k1"],"leads":["ada"]},
+          {"id":"bo","profile":{"org":"Platform","family":"Lindqvist","given":"Bo"},"keys":["bo-k1"],"leads":["ada"]},
+          {"id":"lena","profile":{"org":"Search","family":"Weiss","given":"Lena"},"keys":["lena-k1"],"leads":["maya"]},
+          {"id":"omar","profile":{"org":"Search","family":"Haddad","given":"Omar"},"keys":["omar-k1"],"leads":["maya"]},
+          {"id":"ivy","profile":{"org":"Search","family":"Chen","given":"Ivy"},"keys":["ivy-k1"],"leads":["maya"]},
+          {"id":"jon","profile":{"org":"SW개발팀","family":"홍","given":"길동"},"keys":["jon-k1"],"leads":["maya"]},
+          {"id":"kai","profile":{"org":"SW개발팀","family":"김","given":"민수"},"keys":["kai-k1"],"leads":["maya"]},
+          {"id":"sven","profile":{"org":"Infra","family":"","given":"Sven"},"keys":["sven-k1"],"leads":["raj"]},
+          {"id":"tia","profile":{"org":"Infra","family":"Moreau","given":"Tia"},"keys":["tia-k1"],"leads":["raj"]},
+          {"id":"noa","profile":{"org":"Infra","family":"Fisher","given":"Noa"},"keys":["noa-k1"],"leads":["raj"]},
+          {"id":"uma","profile":{"org":"SW개발팀","family":"남궁","given":"민"},"keys":["uma-k1"],"leads":["bo"]}
         ]
       },
       commits: {
@@ -46,10 +46,11 @@ window.TRACKER_FIXTURES = {
           {"stream":"ada.pc","ts":"2026-11-02T17:00:00Z","signer":"ada-k1","seen":{"bo.pc":2,"ivy.pc":2,"jon.pc":1,"lena.pc":1,"maya.pc":9,"omar.pc":2,"raj.pc":5,"sven.pc":2,"tia.pc":1,"uma.pc":3},"events":[{"seq":6,"type":"item.create","payload":{"kind":"task","title":"Security training","body":"Finish the module before the 30th.","due":"2026-11-30","priority":0}},{"seq":7,"type":"item.assign","payload":{"item":"ada.pc#6","mode":"all","levels":2,"completion":"assignee"}}]},
           {"stream":"ada.pc","ts":"2026-11-02T17:30:00Z","signer":"ada-k1","seen":{"bo.pc":2,"ivy.pc":2,"jon.pc":1,"kai.pc":1,"lena.pc":1,"maya.pc":9,"omar.pc":2,"raj.pc":5,"sven.pc":2,"tia.pc":1,"uma.pc":3},"events":[{"seq":8,"type":"item.create","payload":{"kind":"todo","title":"Book offsite venue","due":"2026-11-14","priority":0}},{"seq":9,"type":"item.assign","payload":{"item":"ada.pc#8","mode":"chosen","completion":"assignee","people":["ada"]}}]},
           {"stream":"ada.pc","ts":"2026-11-03T08:30:00Z","signer":"ada-k1","seen":{"bo.pc":4,"ivy.pc":3,"jon.pc":1,"kai.pc":3,"lena.pc":3,"mallory.pc":1,"maya.pc":10,"noa.pc":2,"omar.pc":2,"raj.pc":6,"sven.pc":2,"tia.pc":2,"uma.pc":3},"events":[{"seq":10,"type":"item.accept","payload":{"item":"kai.pc#2"}}]},
-          {"stream":"ada.pc","ts":"2026-11-03T09:00:00Z","signer":"ada-k1","seen":{"bo.pc":4,"ivy.pc":3,"jon.pc":1,"kai.pc":3,"lena.pc":3,"mallory.pc":1,"maya.pc":10,"noa.pc":2,"omar.pc":2,"raj.pc":6,"sven.pc":2,"tia.pc":2,"uma.pc":3},"events":[{"seq":11,"type":"roles.add_member","payload":{"member":{"id":"pia","name":"Pia Novak","keys":["pia-k1"],"leads":["raj"]}}}]},
+          {"stream":"ada.pc","ts":"2026-11-03T09:00:00Z","signer":"ada-k1","seen":{"bo.pc":4,"ivy.pc":3,"jon.pc":1,"kai.pc":3,"lena.pc":3,"mallory.pc":1,"maya.pc":10,"noa.pc":2,"omar.pc":2,"raj.pc":6,"sven.pc":2,"tia.pc":2,"uma.pc":3},"events":[{"seq":11,"type":"roles.add_member","payload":{"member":{"id":"pia","profile":{"org":"Infra","family":"Novak","given":"Pia"},"keys":["pia-k1"],"leads":["raj"]}}}]},
           {"stream":"ada.pc","ts":"2026-11-04T15:00:00Z","signer":"ada-k1","seen":{"bo.pc":7,"ivy.pc":5,"jon.pc":8,"kai.pc":3,"lena.pc":5,"mallory.pc":1,"maya.pc":18,"noa.pc":4,"omar.pc":3,"pia.pc":2,"raj.pc":8,"sven.pc":4,"tia.pc":4,"uma.pc":5},"events":[{"seq":12,"type":"item.close","payload":{"item":"kai.pc#2","note":"budget approved for Q4"}}]},
           {"stream":"ada.pc","ts":"2026-11-05T09:00:00Z","signer":"ada-k1","seen":{"bo.pc":7,"ivy.pc":5,"jon.pc":8,"kai.pc":3,"lena.pc":5,"mallory.pc":1,"maya.pc":19,"noa.pc":4,"omar.pc":3,"pia.pc":2,"raj.pc":8,"sven.pc":4,"tia.pc":4,"uma.pc":5},"events":[{"seq":13,"type":"comment.add","payload":{"item":"ada.pc#3","body":"CI hygiene moves to December.","reply_to":"maya.pc#3"}}]},
-          {"stream":"ada.pc","ts":"2026-11-05T09:30:00Z","signer":"ada-k1","seen":{"bo.pc":7,"ivy.pc":5,"jon.pc":8,"kai.pc":3,"lena.pc":5,"mallory.pc":1,"maya.pc":19,"noa.pc":4,"omar.pc":3,"pia.pc":2,"raj.pc":8,"sven.pc":4,"tia.pc":4,"uma.pc":5},"events":[{"seq":14,"type":"item.close","payload":{"item":"ada.pc#8"}}]}
+          {"stream":"ada.pc","ts":"2026-11-05T09:30:00Z","signer":"ada-k1","seen":{"bo.pc":7,"ivy.pc":5,"jon.pc":8,"kai.pc":3,"lena.pc":5,"mallory.pc":1,"maya.pc":19,"noa.pc":4,"omar.pc":3,"pia.pc":2,"raj.pc":8,"sven.pc":4,"tia.pc":4,"uma.pc":5},"events":[{"seq":14,"type":"item.close","payload":{"item":"ada.pc#8"}}]},
+          {"stream":"ada.pc","ts":"2026-11-05T09:45:00Z","signer":"ada-k1","seen":{"bo.pc":7,"ivy.pc":5,"jon.pc":8,"kai.pc":3,"lena.pc":5,"mallory.pc":1,"maya.pc":19,"noa.pc":4,"omar.pc":3,"pia.pc":2,"raj.pc":8,"sven.pc":4,"tia.pc":4,"uma.pc":5},"events":[{"seq":15,"type":"member.profile","payload":{"member":"tia","profile":{"org":"Platform"}}}]}
         ],
         "maya.pc": [
           {"stream":"maya.pc","ts":"2026-11-02T09:40:00Z","signer":"maya-k1","seen":{"ada.pc":3},"events":[{"seq":1,"type":"item.create","payload":{"kind":"task","title":"Index builder","parent":"ada.pc#1","project":"search-service","due":"2026-11-13","priority":2}},{"seq":2,"type":"item.assign","payload":{"item":"maya.pc#1","mode":"chosen","completion":"assignee","people":["lena","omar"]}}]},
@@ -136,7 +137,8 @@ window.TRACKER_FIXTURES = {
           {"stream":"tia.pc","ts":"2026-11-02T14:00:00Z","signer":"tia-k1","seen":{"ada.pc":5,"ivy.pc":2,"jon.pc":1,"lena.pc":1,"maya.pc":9,"omar.pc":2,"raj.pc":5},"events":[{"seq":1,"type":"item.status","payload":{"item":"raj.pc#1","status":"doing"}}]},
           {"stream":"tia.pc","ts":"2026-11-02T19:30:00Z","signer":"tia-k1","seen":{"ada.pc":9,"bo.pc":2,"ivy.pc":3,"jon.pc":1,"kai.pc":3,"lena.pc":1,"mallory.pc":1,"maya.pc":9,"noa.pc":2,"omar.pc":2,"raj.pc":6,"sven.pc":2,"uma.pc":3},"events":[{"seq":2,"type":"roles.set_lead","payload":{"member":"tia","leads":["ada"]}}]},
           {"stream":"tia.pc","ts":"2026-11-03T11:05:00Z","signer":"tia-k1","seen":{"ada.pc":11,"bo.pc":5,"ivy.pc":3,"jon.pc":4,"kai.pc":3,"lena.pc":3,"mallory.pc":1,"maya.pc":11,"noa.pc":2,"omar.pc":3,"pia.pc":2,"raj.pc":8,"sven.pc":4,"uma.pc":3},"events":[{"seq":3,"type":"item.create","payload":{"kind":"task","title":"Load-test the cache layer","body":"One afternoon with the load rig before the cache ships.","due":"2026-11-12","priority":1}},{"seq":4,"type":"item.assign","payload":{"item":"tia.pc#3","mode":"chosen","people":["uma"],"completion":"assignee"}}]},
-          {"stream":"tia.pc","ts":"2026-11-05T10:30:00Z","signer":"tia-k1","seen":{"ada.pc":14,"bo.pc":7,"ivy.pc":5,"jon.pc":8,"kai.pc":3,"lena.pc":5,"mallory.pc":1,"maya.pc":19,"noa.pc":4,"omar.pc":3,"pia.pc":2,"raj.pc":8,"sven.pc":4,"uma.pc":5},"events":[{"seq":5,"type":"comment.add","payload":{"item":"raj.pc#7","body":"Escalated the redis approval to bo."}}]}
+          {"stream":"tia.pc","ts":"2026-11-05T10:30:00Z","signer":"tia-k1","seen":{"ada.pc":14,"bo.pc":7,"ivy.pc":5,"jon.pc":8,"kai.pc":3,"lena.pc":5,"mallory.pc":1,"maya.pc":19,"noa.pc":4,"omar.pc":3,"pia.pc":2,"raj.pc":8,"sven.pc":4,"uma.pc":5},"events":[{"seq":5,"type":"comment.add","payload":{"item":"raj.pc#7","body":"Escalated the redis approval to bo."}}]},
+          {"stream":"tia.pc","ts":"2026-11-05T10:50:00Z","signer":"tia-k1","seen":{"ada.pc":14,"bo.pc":7,"ivy.pc":5,"jon.pc":8,"kai.pc":3,"lena.pc":5,"mallory.pc":1,"maya.pc":19,"noa.pc":4,"omar.pc":3,"pia.pc":2,"raj.pc":8,"sven.pc":4,"uma.pc":5},"events":[{"seq":6,"type":"member.profile","payload":{"profile":{"org":"Infra / SRE"}}}]}
         ],
         "noa.pc": [
           {"stream":"noa.pc","ts":"2026-11-02T18:00:00Z","signer":"ivy-k1","seen":{"ada.pc":9,"bo.pc":2,"ivy.pc":3,"jon.pc":1,"kai.pc":1,"lena.pc":1,"maya.pc":9,"omar.pc":2,"raj.pc":5,"sven.pc":2,"tia.pc":1,"uma.pc":3},"events":[{"seq":1,"type":"item.close","payload":{"item":"ada.pc#6"}}]},
@@ -180,7 +182,7 @@ window.TRACKER_FIXTURES = {
         "admins": ["hana"],
         "priority": {"names": ["알림", "업무", "긴급"], "default": 1},
         "members": [
-          {"id":"hana","name":"Hana Seo","keys":["hana-k1"],"leads":[]}
+          {"id":"hana","profile":{"org":"","family":"Seo","given":"Hana"},"keys":["hana-k1"],"leads":[]}
         ]
       },
       commits: {

@@ -1,0 +1,247 @@
+{
+ "name": "member-profile",
+ "comment": "(391)-(393) member.profile: a member edits their own profile (lena), an admin edits another member's (omar, whose genesis entry is a legacy bare name), a non-admin editing someone else's is flagged, an empty given is flagged, and concurrent writes merge per field: maya changes org and family while ada concurrently moves maya's org, so org gets a concurrent-change marker (ada, the later write, shows) and the family change stands.",
+ "viewers": [
+  "ada.pc",
+  "maya.pc"
+ ],
+ "now": "2026-11-02T09:00:00Z",
+ "genesis": {
+  "admins": [
+   "ada",
+   "bo"
+  ],
+  "members": [
+   {
+    "id": "ada",
+    "profile": {
+     "org": "Platform",
+     "family": "Park",
+     "given": "Ada"
+    },
+    "keys": [
+     "ada-k1"
+    ],
+    "leads": []
+   },
+   {
+    "id": "maya",
+    "profile": {
+     "org": "Search",
+     "family": "Ortiz",
+     "given": "Maya"
+    },
+    "keys": [
+     "maya-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "raj",
+    "profile": {
+     "org": "Infra",
+     "family": "Rao",
+     "given": "Raj"
+    },
+    "keys": [
+     "raj-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "bo",
+    "profile": {
+     "org": "Platform",
+     "family": "Lindqvist",
+     "given": "Bo"
+    },
+    "keys": [
+     "bo-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "lena",
+    "profile": {
+     "org": "Search",
+     "family": "Weiss",
+     "given": "Lena"
+    },
+    "keys": [
+     "lena-k1"
+    ],
+    "leads": [
+     "maya"
+    ]
+   },
+   {
+    "id": "omar",
+    "name": "Omar",
+    "keys": [
+     "omar-k1"
+    ],
+    "leads": [
+     "maya"
+    ]
+   },
+   {
+    "id": "jon",
+    "profile": {
+     "org": "SW개발팀",
+     "family": "홍",
+     "given": "길동"
+    },
+    "keys": [
+     "jon-k1"
+    ],
+    "leads": [
+     "maya"
+    ]
+   },
+   {
+    "id": "uma",
+    "profile": {
+     "org": "SW개발팀",
+     "family": "남궁",
+     "given": "민"
+    },
+    "keys": [
+     "uma-k1"
+    ],
+    "leads": [
+     "bo"
+    ]
+   },
+   {
+    "id": "sven",
+    "profile": {
+     "org": "Infra",
+     "family": "",
+     "given": "Sven"
+    },
+    "keys": [
+     "sven-k1"
+    ],
+    "leads": [
+     "raj"
+    ]
+   }
+  ]
+ },
+ "commits": {
+  "lena.pc": [
+   {
+    "ts": "2026-11-01T10:00:00Z",
+    "seen": {},
+    "events": [
+     [
+      "member.profile",
+      {
+       "profile": {
+        "family": "Weiss-Berg"
+       }
+      }
+     ]
+    ]
+   }
+  ],
+  "ada.pc": [
+   {
+    "ts": "2026-11-01T10:05:00Z",
+    "seen": {
+     "lena.pc": 1
+    },
+    "events": [
+     [
+      "member.profile",
+      {
+       "member": "omar",
+       "profile": {
+        "org": "Search",
+        "family": "Haddad"
+       }
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T11:05:00Z",
+    "seen": {
+     "lena.pc": 1
+    },
+    "events": [
+     [
+      "member.profile",
+      {
+       "member": "maya",
+       "profile": {
+        "org": "Platform"
+       }
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T12:00:00Z",
+    "seen": {
+     "lena.pc": 1
+    },
+    "events": [
+     [
+      "member.profile",
+      {
+       "member": "jon",
+       "profile": {
+        "given": ""
+       }
+      }
+     ]
+    ]
+   }
+  ],
+  "maya.pc": [
+   {
+    "ts": "2026-11-01T10:10:00Z",
+    "seen": {
+     "ada.pc": 1,
+     "lena.pc": 1
+    },
+    "events": [
+     [
+      "member.profile",
+      {
+       "member": "lena",
+       "profile": {
+        "org": "Infra"
+       }
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T11:00:00Z",
+    "seen": {
+     "ada.pc": 1,
+     "lena.pc": 1
+    },
+    "events": [
+     [
+      "member.profile",
+      {
+       "profile": {
+        "org": "Search / Infra",
+        "family": "Ortiz-Ruiz"
+       }
+      }
+     ]
+    ]
+   }
+  ]
+ }
+}

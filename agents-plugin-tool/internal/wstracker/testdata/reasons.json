@@ -1,5 +1,5 @@
 {
- "comment": "Flagged-reason cases. Each case is a linear history (every event sees all earlier ones) on the genesis below; every step but the last must apply, and the last is flagged with the expected reason. gen-golden.js runs each case through the reference engine and fails when its reason differs; goOnly cases are skipped there.",
+ "comment": "Flagged-reason cases. Each case is a linear history (every event sees all earlier ones) on the genesis below; every step but the last must apply, and the last is flagged with the expected reason. gen-golden.js runs each case through the reference engine and fails when its reason differs; goOnly cases are skipped there, engineOnly cases (the roles.add_member stand-in, which Go does not port) by the Go test.",
  "genesis": {
   "admins": ["ada", "bo"],
   "members": [
@@ -132,6 +132,16 @@
   {"name": "attachment limit not positive", "steps": [["ada.pc", "roles.set_attachment_limit", {"max_bytes": 0}]], "reason": "max_bytes must be a positive integer (bytes)"},
   {"name": "attachment limit fractional", "steps": [["bo.pc", "roles.set_attachment_limit", {"max_bytes": 2.5}]], "reason": "max_bytes must be a positive integer (bytes)"},
   {"name": "unknown type", "steps": [["maya.pc", "item.frobnicate", {"item": "ada.pc#1"}]], "reason": "unknown event type \"item.frobnicate\""},
-  {"name": "add_member stand-in is unknown", "goOnly": true, "steps": [["ada.pc", "roles.add_member", {"member": {"id": "pia", "name": "Pia", "keys": ["pia-k1"], "leads": []}}]], "reason": "unknown event type \"roles.add_member\""}
+  {"name": "add_member stand-in is unknown", "goOnly": true, "steps": [["ada.pc", "roles.add_member", {"member": {"id": "pia", "name": "Pia", "keys": ["pia-k1"], "leads": []}}]], "reason": "unknown event type \"roles.add_member\""},
+  {"name": "profile given blank", "steps": [["lena.pc", "member.profile", {"profile": {"given": "  "}}]], "reason": "profile.given cannot be empty"},
+  {"name": "profile unknown field", "steps": [["lena.pc", "member.profile", {"profile": {"nickname": "x"}}]], "reason": "profile has no field \"nickname\" (org, family, given)"},
+  {"name": "profile field not a string", "steps": [["lena.pc", "member.profile", {"profile": {"org": 3}}]], "reason": "profile.org must be a string"},
+  {"name": "profile empty object", "steps": [["lena.pc", "member.profile", {"profile": {}}]], "reason": "profile has none of org, family, given"},
+  {"name": "profile missing", "steps": [["lena.pc", "member.profile", {}]], "reason": "profile must be an object {org, family, given}"},
+  {"name": "profile of another member by a non-admin", "steps": [["maya.pc", "member.profile", {"member": "lena", "profile": {"org": "x"}}]], "reason": "only an admin changes another member's profile (maya is not an admin)"},
+  {"name": "profile of an unknown member", "steps": [["ada.pc", "member.profile", {"member": "zed", "profile": {"org": "x"}}]], "reason": "unknown member \"zed\""},
+  {"name": "profile of a removed member", "steps": [["ada.pc", "roles.remove_member", {"member": "sven"}], ["ada.pc", "member.profile", {"member": "sven", "profile": {"org": "x"}}]], "reason": "sven was removed (ada.pc-4)"},
+  {"name": "add_member profile without given", "engineOnly": true, "steps": [["ada.pc", "roles.add_member", {"member": {"id": "pia", "profile": {"org": "Infra"}, "keys": ["pia-k1"], "leads": []}}]], "reason": "profile.given required"},
+  {"name": "add_member without a profile", "engineOnly": true, "steps": [["ada.pc", "roles.add_member", {"member": {"id": "pia", "name": "Pia", "keys": ["pia-k1"], "leads": []}}]], "reason": "profile must be an object {org, family, given}"}
  ]
 }
