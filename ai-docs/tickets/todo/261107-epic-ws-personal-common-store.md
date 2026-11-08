@@ -53,8 +53,17 @@ repository sized for 50-60 people, reached from the dashboard.
   `wsledger` (event types, validation, fold, view state JSON in the mockup's
   View state shape), ported from the mockup engine with golden parity tests
   (board (283) a). No caller surface.
-- Next (unplanned): the caller child, covering MCP and skill exposure
-  ((115)), the dashboard drawer, sync triggers, and config.
+- `261108-feat-ws-tracker-caller` (todo): the caller core - enable key,
+  machine store registry, sync triggers, `wstracker` wrappers, four coarse
+  MCP tools with a whiteboard-syntax `tracker.write`, a manual section, and
+  live acceptance on a private GitHub repository (board (395)-(413)).
+- `261108-feat-ws-tracker-drawer-ui` (todo): the dashboard side, blocked by
+  the core - per-store handles, the mockup renderer shared between the
+  mockup and the dashboard, a disk-assets dev mode, daemon endpoints and
+  SSE, local UI state on disk, the join dialog (board (408) b, (412) c).
+- `261108-feat-ws-manual-shared-command-syntax` (todo, outside the epic):
+  one shared parser and manual section for the XML command syntax, which the
+  core's Phase 2 needs (board (414), (415)).
 - `261108-feat-ws-tracker-support-agent-chat` (draft): the support-agent
   chat card in the drawer, on the standalone agent runner
   `261108-feat-ws-daemon-agent-runner` (board (300)-(312)). The mockup's

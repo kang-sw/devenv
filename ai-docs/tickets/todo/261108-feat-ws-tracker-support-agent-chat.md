@@ -3,6 +3,8 @@ title: "ws tracker support-agent chat card: a daemon-hosted agent conversation i
 parent: 261107-epic-ws-personal-common-store
 related:
   261108-feat-ws-daemon-agent-runner: prerequisite (agent launch, profiles, wslive output, REST control)
+  261108-feat-ws-tracker-caller: prerequisite (the tracker MCP tools the agent calls)
+  261108-feat-ws-tracker-drawer-ui: prerequisite (the drawer this card lives in)
 ---
 
 # ws tracker support-agent chat card: a daemon-hosted agent conversation inside the tracker drawer
@@ -34,8 +36,9 @@ agent runner (`261108-feat-ws-daemon-agent-runner`).
 - **Mockup scope stays placement only** (board (300) a): chat behaviour and
   the API are settled here, not in the mockup.
 - **Prerequisites** (board (321) ok): blocked by the agent runner and by the
-  next tracker caller child (the dashboard drawer this card lives in and the
-  tracker MCP/skill tools the agent calls, (115)).
+  tracker caller children - `261108-feat-ws-tracker-caller` (the tracker MCP
+  tools the agent calls, (115)) and `261108-feat-ws-tracker-drawer-ui` (the
+  drawer this card lives in), split by board (408) b.
 - **One ongoing conversation per store** (board (322) a): kept across drawer
   opens and days, with a "new conversation" action that starts a fresh
   backend session. Rejected for now: a conversation list per store; a fresh
