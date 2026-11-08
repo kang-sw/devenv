@@ -101,6 +101,7 @@ func guardedRoutes() []struct{ method, path, body string } {
 		// A target the route refuses, so a passing request never runs the
 		// OS open command.
 		{http.MethodPost, "/s/livesession/open", `{"target":"ftp://guard.test/"}`},
+		{http.MethodPost, "/s/livesession/git", ""},
 	}
 }
 

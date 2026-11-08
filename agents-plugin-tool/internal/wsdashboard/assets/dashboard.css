@@ -55,6 +55,14 @@
 .sse .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--wb-ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--wb-ok) 25%, transparent); }
 .sse.off .dot { background: var(--wb-muted-fg); box-shadow: 0 0 0 3px color-mix(in srgb, var(--wb-muted-fg) 20%, transparent); }
 .dash.index .sse { margin-left: auto; }
+/* the git badge: a status band line in a button, read by the daemon */
+.r-git { display: contents; }
+.gitb { display: inline-flex; flex-wrap: nowrap; gap: 8px; min-width: 0; height: 28px; padding: 0 10px; font-size: 12.5px; color: var(--wb-fg); background: var(--wb-card); box-shadow: inset 0 0 0 1px var(--wb-line); }
+.gitb:hover { box-shadow: inset 0 0 0 1px var(--wb-primary); }
+.gitb.pending, .gitb.norepo, .gitb.failed { opacity: .6; }
+.gitb.pending .sb-br, .gitb.norepo .sb-br { color: var(--wb-muted-fg); font-family: inherit; font-weight: 600; }
+.gitb.failed .sb-br { color: var(--wb-warn-ink); font-family: inherit; }
+.gitb.busy { opacity: .5; cursor: progress; }
 .gearwrap { position: relative; }
 .gear { height: 28px; width: 32px; padding: 0; }
 .gear .i { width: 17px; height: 17px; }

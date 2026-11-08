@@ -47,6 +47,7 @@ const (
 	regionEntries  = "entries"
 	regionConvLive = "convlive"
 	regionCtx      = "ctx"
+	regionGit      = "git"
 	regionSLine    = "sline"
 	regionBoard    = "board"
 	regionPanels   = "panels"
@@ -59,9 +60,9 @@ const (
 // sessionRegions lists the regions a session page in mode holds.
 func sessionRegions(mode string) []string {
 	if mode == modeLive {
-		return []string{regionHead, regionTree, regionEntries, regionConvLive, regionCtx, regionSLine, regionBoard, regionPanels}
+		return []string{regionHead, regionGit, regionTree, regionEntries, regionConvLive, regionCtx, regionSLine, regionBoard, regionPanels}
 	}
-	return []string{regionHead, regionBoard, regionPanels}
+	return []string{regionHead, regionGit, regionBoard, regionPanels}
 }
 
 type dashboardAssets struct {
@@ -700,8 +701,8 @@ func (d *Daemon) handleIndex(w http.ResponseWriter, r *http.Request) {
 
 // handleSessionRoutes serves everything under /s/: a session page, its SSE
 // stream, its image, file view, history, and attachment routes, its message,
-// cancel, steer, interrupt, and system-open routes, and the shared assets a page loads
-// by relative path.
+// cancel, steer, interrupt, system-open, and git refresh routes, and the
+// shared assets a page loads by relative path.
 func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 	rest := strings.TrimPrefix(r.URL.Path, "/s/")
 	if replyID, sub, _ := strings.Cut(rest, "/"); sub == "message" || sub == "cancel" || sub == "steer" || sub == "interrupt" {
@@ -709,6 +710,9 @@ func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 		return
 	} else if sub == "open" {
 		d.handleSystemOpen(w, r, replyID)
+		return
+	} else if sub == "git" {
+		d.handleGitRefresh(w, r, replyID)
 		return
 	}
 	if !readMethod(w, r) {
@@ -749,6 +753,7 @@ func (d *Daemon) handleSessionPage(w http.ResponseWriter, r *http.Request, reply
 		return
 	}
 	view.Lang, view.LangPref, view.Theme = lang, pref, requestTheme(r)
+	view.Git = d.git.badge(view.Project)
 	regions, err := renderSessionRegions(view, d.entries)
 	if err == nil {
 		var html string

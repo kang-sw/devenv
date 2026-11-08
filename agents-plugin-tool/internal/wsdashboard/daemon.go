@@ -76,6 +76,11 @@ type DaemonOptions struct {
 	// openSystem replaces the system-open route's OS open command, so a
 	// test never starts a browser; nil runs systemOpen.
 	openSystem func(target string) error
+	// gitRead replaces the git badge's read, so a test never runs git; nil
+	// runs readGitBadge. noGitBadge turns the badge off: no read and no
+	// badge, for the tests that pin which regions a stream sends.
+	gitRead    func(root string) GitBadge
+	noGitBadge bool
 }
 
 // nudgeBodyLimit bounds a /nudge request body.
@@ -113,6 +118,9 @@ type Daemon struct {
 	buildTime int64
 	// openSystem opens a system-open route's target (systemOpen).
 	openSystem func(target string) error
+	// git reads the git badge of the roots open session pages show
+	// (gitbadge.go); nil when the badge is off.
+	git *gitWatcher
 
 	closeOnce sync.Once
 	stop      chan struct{}
@@ -203,6 +211,13 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 	}
 	if d.openSystem == nil {
 		d.openSystem = systemOpen
+	}
+	if !opts.noGitBadge {
+		read := opts.gitRead
+		if read == nil {
+			read = readGitBadge
+		}
+		d.git = newGitWatcher(read, d.broker.wake, d.stop)
 	}
 	if d.lan {
 		// Mint the token now, so the localhost index shows it before any
@@ -364,7 +379,9 @@ func (d *Daemon) Close() {
 // /s/<reply-id>, their SSE streams, and a session's image, file view, and
 // history routes) are read-only; a session's message, cancel, steer, and interrupt
 // routes (inbox_routes.go) are the only browser writes, and its system-open
-// route (sysopen_route.go) the only route that runs a host command.
+// route (sysopen_route.go) the only route that runs a host command beside
+// git: a session stream keeps its root's git badge read, and the git route
+// (gitbadge.go) asks for a read at once, without running git itself.
 func (d *Daemon) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", d.handleHealth)
