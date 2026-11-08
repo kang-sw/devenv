@@ -8,7 +8,7 @@ The session whiteboard is a top-level lead's board for its user. The server
 keeps the items you ask (IDs, statuses, verbatim answers) and topic bodies,
 and renders them with the session's todos, agendas, ready and todo tickets,
 and mailbox into a full page beside the terminal and an embed snapshot for a
-host that shows HTML inline.
+host that shows HTML inline. Workers and subagents do not use it.
 
 ## Calls
 
