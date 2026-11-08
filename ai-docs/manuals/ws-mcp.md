@@ -55,6 +55,33 @@ ws-mcp serve --stdio --root <repo-root>
 `ai-docs/`, and `AGENTS.md`; downstream projects should rely on MCP tools for
 bundled conventions rather than repository-local source paths.
 
+### Session key store
+
+Each session key is a directory, `<cache root>/sessions/<key>/`, holding
+`key.json` (the identity - root, scope, parent - plus the session-scope
+config overrides, the child note, and the once-only flags), `agenda.json`,
+`todos.json`, and `whiteboard.json`. An absent part file is that part
+empty. A write replaces only the part files it changes, each atomically, and
+the lookup every keyed call makes reads `key.json` alone. `key.json` is also
+the key's claim (mint creates the directory exclusively) and its activity
+mark: keyed calls refresh its mtime at most hourly, and the prune that
+`ws.ferrule` runs at most daily deletes a key directory whose `key.json` is
+older than 30 days.
+
+The older layout, one `<cache root>/keys/<key>.json` per key, is still read:
+a key with no `key.json` is served whole from its legacy file, and the
+session's first write moves it into `sessions/<key>/` and deletes the legacy
+file. Reads never move it, and no pass moves the rest; an unwritten legacy
+file ages out through the same prune.
+
+Restart every ws process after updating ws, as an install update already
+expects: the session MCP servers (a host restart or MCP reconnect) and the
+dashboard daemon (the next `serve` of a newer build replaces it, or `POST
+/shutdown`). An older ws-mcp knows only `keys/`, so once a newer one has
+moved a session, the older one reports that key unknown. Downgrading loses
+sight of moved sessions the same way; session keys are cache state, so a
+fresh key is the recovery.
+
 ### Dashboard daemon
 
 `ws-mcp dashboard` is an optional machine-wide daemon (one per OS
@@ -606,7 +633,7 @@ installed plugin packaging changes.
   the plugin so Codex rematerializes the MCP entry.
 - Routing or implementation context lost after context compaction: expected — the
   transcript is summarized, but session state persists in
-  `<cache-root>/keys/<session-key>.json`. Recover by calling
+  `<cache-root>/sessions/<session-key>/` (see Session key store). Recover by calling
   `ws.workflow_manual(session_key: <key preserved in the compaction summary>)`,
   which reloads the manual primitives and restores the agenda/todo Session State.
   Do not call `ws.ferrule` to "re-enter" — it is non-idempotent and mints a new key,

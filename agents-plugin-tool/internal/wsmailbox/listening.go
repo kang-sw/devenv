@@ -18,9 +18,9 @@ import (
 // 2-3's territory, and this file exists so that mechanism has something
 // durable to point at later.
 //
-// Keyed by the caller's own session_key (mirroring <cache-root>/keys/<session
-// -key>.json's established convention of using the raw session key as a
-// filename, per ai-docs/manuals/ws-mcp.md's troubleshooting section): a
+// Keyed by the caller's own session_key (mirroring <cache-root>/sessions/
+// <session-key>/'s established convention of using the raw session key as a
+// file name, per ai-docs/manuals/ws-mcp.md's session key store section): a
 // session can only usefully arm one wait at a time, and session_key is always
 // present regardless of whether the caller also carries a durable slug.
 

@@ -38,8 +38,9 @@ const (
 	// mailboxHistoryTitleMax bounds a title in runes; a longer first line is
 	// cut there with an ellipsis.
 	mailboxHistoryTitleMax = 120
-	// mailboxHistoryDirName is the cache-root sibling of keys/ that holds one
-	// directory per session key, so no enumerator of keys/ sees it.
+	// mailboxHistoryDirName is the cache-root sibling of the session key store
+	// (sessions/, legacy keys/) that holds one directory per session key, so
+	// no enumerator of the key store sees it.
 	mailboxHistoryDirName = "mailbox-history"
 	// mailboxHistoryStampLayout is the entry file-name stamp: fixed width with
 	// nanoseconds, so names sort lexically in time order. The RFC3339 seconds

@@ -128,9 +128,9 @@ func TestDashboardReadPageServesTheBoard(t *testing.T) {
 	}
 
 	// The stored board is untouched by a page read.
-	before, _ := f.s.sessions.readState(f.key)
+	before, _ := f.s.sessions.readState(f.key, partAll)
 	readPageOK(t, src, reg)
-	after, _ := f.s.sessions.readState(f.key)
+	after, _ := f.s.sessions.readState(f.key, partAll)
 	b1, _ := json.Marshal(before.Whiteboard)
 	b2, _ := json.Marshal(after.Whiteboard)
 	if string(b1) != string(b2) {
@@ -215,7 +215,7 @@ func TestDashboardReadPageContacts(t *testing.T) {
 	replyA := wsmailbox.ReplyID(hf.keyA)
 	mustSend(t, hf.serverB, 50, hf.keyB, wsmailbox.ReplyIDPrefix+replyA, "to the reply id")
 	mustSend(t, hf.serverB, 51, hf.keyB, "alice@worktree", "to the inbox")
-	recB, ok := hf.serverB.sessions.readState(hf.keyB)
+	recB, ok := hf.serverB.sessions.readState(hf.keyB, partAll)
 	if !ok {
 		t.Fatal("no record for B")
 	}

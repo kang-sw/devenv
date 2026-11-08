@@ -249,7 +249,7 @@ func (s *Server) handleWorkflowState(id json.RawMessage, args map[string]any) re
 
 	// 2. Reuse workflow_manual's fail-loud notice verbatim for any unresolvable
 	//    key (including the sentinel, which is never a stored record). NEVER mint.
-	rec, recOK := s.sessions.readState(key)
+	rec, recOK := s.sessions.readState(key, partAgenda|partTodos)
 	if !recOK {
 		notice := fmt.Sprintf("## Session State\n(no restorable state for session key %q; this key resolves to no stored session record — do not assume prior agenda/todo. If you are the lead recovering after compaction, re-run lead-revive to restore your session.)", key)
 		return toolTextResponse(id, notice+"\n", nil)
@@ -291,7 +291,7 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 	//    gate via lookup-miss, so a non-lead caller reaching this path could read
 	//    that mention to discover the escalation. Return only a no-restore notice
 	//    naming lead-revive (a skill, not the ferrule/sentinel surface). NEVER mint.
-	rec, recOK := s.sessions.readState(key)
+	rec, recOK := s.sessions.readState(key, partAgenda|partTodos)
 	if key != freshBootstrapKey && !recOK {
 		notice := fmt.Sprintf("## Session State\n(no restorable state for session key %q; this key resolves to no stored session record — do not assume prior agenda/todo. If you are the lead recovering after compaction, re-run lead-revive to restore your session.)", key)
 		return toolTextResponse(id, notice+"\n", nil)

@@ -14,7 +14,7 @@ func (s *Server) handleResolveImplBranch(id json.RawMessage, args map[string]any
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
-	record, ok := s.sessions.readState(key)
+	record, ok := s.sessions.readState(key, partKey)
 	if !ok {
 		return toolTextResponse(id, "", fmt.Errorf("session key not found: %s", key))
 	}

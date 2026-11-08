@@ -22,11 +22,7 @@ func TestAgentKeyStoreMintAndEnsure(t *testing.T) {
 		t.Fatalf("an agent key is a parentless delegate key at its root: %+v %v", entry, ok)
 	}
 
-	dir, err := store.keysDir()
-	if err != nil {
-		t.Fatal(err)
-	}
-	path := store.keyPath(dir, key)
+	path := splitKeyPath(t, store, key)
 	old := time.Now().Add(-20 * 24 * time.Hour)
 	if err := os.Chtimes(path, old, old); err != nil {
 		t.Fatal(err)
@@ -38,7 +34,8 @@ func TestAgentKeyStoreMintAndEnsure(t *testing.T) {
 		t.Fatalf("Ensure should refresh the record against age pruning")
 	}
 
-	if err := os.Remove(path); err != nil {
+	// Prune removes the key's whole directory, not key.json alone.
+	if err := os.RemoveAll(filepath.Dir(path)); err != nil {
 		t.Fatal(err)
 	}
 	if err := keys.Ensure(root, key); err != nil {

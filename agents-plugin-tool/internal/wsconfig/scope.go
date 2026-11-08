@@ -5,7 +5,7 @@ package wsconfig
 type Scope string
 
 const (
-	// ScopeSession is the ephemeral per-key session store (keys/<key>.json).
+	// ScopeSession is the ephemeral per-key session store (sessions/<key>/key.json).
 	ScopeSession Scope = "session"
 	// ScopeProject is the per-project, machine-local file (~/.ws@<id>/config.json).
 	ScopeProject Scope = "project"

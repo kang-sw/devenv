@@ -253,21 +253,15 @@ func TestFerruleEmptyParentSessionKeyBehavesAsAbsent(t *testing.T) {
 
 func sessionKeyFileCount(t *testing.T, server *Server) int {
 	t.Helper()
-	dir, err := server.sessions.keysDir()
+	d, err := server.sessions.dirs()
 	if err != nil {
-		t.Fatalf("keysDir: %v", err)
+		t.Fatalf("dirs: %v", err)
 	}
-	entries, err := os.ReadDir(dir)
+	keys, err := server.sessions.listKeys(d)
 	if err != nil {
-		t.Fatalf("ReadDir(%q): %v", dir, err)
+		t.Fatalf("listKeys: %v", err)
 	}
-	count := 0
-	for _, entry := range entries {
-		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".json") {
-			count++
-		}
-	}
-	return count
+	return len(keys)
 }
 
 // --- Test 2: valid session_key resolves the bound root; concurrent calls do not clobber ---
@@ -624,7 +618,7 @@ func TestSessionKeySurvivesFreshServerInstance(t *testing.T) {
 	}
 
 	// A brand-new server shares no in-memory state with leadServer; it must
-	// resolve the key purely from the keys/<key>.json file.
+	// resolve the key purely from the sessions/<key>/key.json file.
 	freshServer := NewServer(root, "test")
 	resp := callToolOnce(t, freshServer, 1, "git.status", map[string]any{"session_key": key})
 	if toolIsError(t, resp) {
@@ -726,18 +720,12 @@ func TestRenderPathMintedChildRecordsLeadParent(t *testing.T) {
 func TestLegacySessionRecordWithoutParentResolves(t *testing.T) {
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 	store := newSessionStore()
-	dir, err := store.keysDir()
-	if err != nil {
-		t.Fatalf("keysDir: %v", err)
-	}
 	const key = "legacy-key-00"
 	// The legacy record carries a retired typed field this struct no longer
 	// declares; it must be silently ignored on read, while the record still
 	// resolves with an empty parent edge.
 	legacyJSON := `{"schema_version":1,"root":"/legacy/root","scope":"delegate","retired_typed_field":true}`
-	if err := os.WriteFile(store.keyPath(dir, key), []byte(legacyJSON), 0o644); err != nil {
-		t.Fatalf("write legacy record: %v", err)
-	}
+	writeRawLegacyRecordForTest(t, store, key, legacyJSON)
 	entry, ok := store.lookup(key)
 	if !ok {
 		t.Fatalf("legacy key %q did not resolve", key)
@@ -777,11 +765,7 @@ func TestSetOverridePreservesParent(t *testing.T) {
 
 func writeSessionRecordForTest(t *testing.T, store *sessionStore, key, root string, scope toolRole, parent string) {
 	t.Helper()
-	dir, err := store.keysDir()
-	if err != nil {
-		t.Fatalf("keysDir: %v", err)
-	}
-	payload, err := json.Marshal(sessionRecord{
+	payload, err := json.Marshal(sessionKeyRecord{
 		SchemaVersion: sessionRecordSchemaVersion,
 		Root:          root,
 		Scope:         string(scope),
@@ -790,7 +774,11 @@ func writeSessionRecordForTest(t *testing.T, store *sessionStore, key, root stri
 	if err != nil {
 		t.Fatalf("marshal session record: %v", err)
 	}
-	if err := os.WriteFile(store.keyPath(dir, key), payload, 0o644); err != nil {
+	path := splitKeyPath(t, store, key)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("create session dir %q: %v", key, err)
+	}
+	if err := os.WriteFile(path, payload, 0o644); err != nil {
 		t.Fatalf("write session record %q: %v", key, err)
 	}
 }
@@ -1016,7 +1004,7 @@ func TestSessionChildrenScopeAndUnnotedFilters(t *testing.T) {
 	} {
 		writeSessionRecordForTest(t, server.sessions, child.key, root, child.role, child.parent)
 		note := child.note
-		if err := server.sessions.mutateRecord(child.key, func(r *sessionRecord) error {
+		if err := server.sessions.mutateRecord(child.key, partKey, func(r *sessionRecord) error {
 			r.Note = note
 			return nil
 		}); err != nil {
@@ -1196,13 +1184,9 @@ func TestGetOverrideParentWalkDoesNotTouchAncestors(t *testing.T) {
 	if err := store.setOverride("idle-lead-00", "review_phase", "full"); err != nil {
 		t.Fatalf("setOverride: %v", err)
 	}
-	dir, err := store.keysDir()
-	if err != nil {
-		t.Fatalf("keysDir: %v", err)
-	}
 	old := time.Now().Add(-2 * touchGuardWindow).Truncate(time.Second)
 	for _, key := range []string{"idle-lead-00", "busy-child-00"} {
-		if err := os.Chtimes(store.keyPath(dir, key), old, old); err != nil {
+		if err := os.Chtimes(splitKeyPath(t, store, key), old, old); err != nil {
 			t.Fatalf("chtimes %s: %v", key, err)
 		}
 	}
@@ -1210,14 +1194,14 @@ func TestGetOverrideParentWalkDoesNotTouchAncestors(t *testing.T) {
 		t.Fatalf("getOverride(child) = (%q, %v), want inherited", v, ok)
 	}
 	_ = store.listOverrideKeys("busy-child-00")
-	parentInfo, err := os.Stat(store.keyPath(dir, "idle-lead-00"))
+	parentInfo, err := os.Stat(splitKeyPath(t, store, "idle-lead-00"))
 	if err != nil {
 		t.Fatalf("stat parent: %v", err)
 	}
 	if !parentInfo.ModTime().Equal(old) {
 		t.Fatalf("ancestor mtime moved to %v, want untouched %v", parentInfo.ModTime(), old)
 	}
-	childInfo, err := os.Stat(store.keyPath(dir, "busy-child-00"))
+	childInfo, err := os.Stat(splitKeyPath(t, store, "busy-child-00"))
 	if err != nil {
 		t.Fatalf("stat child: %v", err)
 	}
