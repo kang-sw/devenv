@@ -19,7 +19,9 @@ host that shows HTML inline. Workers and subagents do not use it.
   `wb:add` IDs, in order), `full:` (the session's dashboard page URL while
   the dashboard daemon serves the session, else the full page path relative
   to the session root), and `embed:` (the snapshot's path, or its bare file
-  name while an embed folder is set).
+  name while an embed folder is set). An `info:` line, at most once an hour,
+  names open topics unchanged for an hour with nothing waiting on the user;
+  close the finished ones with `wb:close`.
 - `{{.McpNamespace}}/whiteboard.query(session_key, payload)` returns stored
   items, settled ones included, and changes nothing. Query before adding, so
   a question the board already holds is patched or reused, not added twice.

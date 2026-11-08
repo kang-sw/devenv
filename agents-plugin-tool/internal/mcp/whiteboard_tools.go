@@ -270,6 +270,9 @@ func (s *Server) handleWhiteboardUpdate(id json.RawMessage, args map[string]any)
 	}
 	sb.WriteString("full: " + full + "\n")
 	sb.WriteString("embed: " + render.embed + "\n")
+	if outcome.Info != "" {
+		sb.WriteString("info: " + outcome.Info + "\n")
+	}
 	if err := s.enableWhiteboardKnobForSession(key); err != nil {
 		sb.WriteString("warning: " + err.Error() + "\n")
 	}
