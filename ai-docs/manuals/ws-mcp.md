@@ -220,6 +220,21 @@ binary therefore replaces the running daemon at the next `serve`. To force a
 restart anyway, `POST /shutdown` with `Authorization: Bearer <token from
 endpoint.json>`; the next `serve` starts a new one.
 
+Dev assets: with `WS_MCP_DASHBOARD_DEV_SOURCE=<repo>/agents-plugin-tool` in the
+environment of `ws-mcp dashboard`, the daemon serves the dashboard and
+whiteboard page assets (`internal/wsdashboard/assets`,
+`internal/wswhiteboard/assets`: templates, CSS, JS, sprites) from that working
+tree instead of its embedded copies, re-reading and re-parsing them on every
+request, so an edit shows on a browser reload and only Go changes need a
+rebuild. Off when unset; a root without those directories fails the daemon at
+startup, and a file that resolves outside the root (a symlink) is refused. The
+vendored mermaid bundle and the MCP server's own whiteboard page file and embed
+stay embedded. A running daemon keeps its mode, so shut it down first
+(`POST /shutdown` above), then start
+`WS_MCP_DASHBOARD_DEV_SOURCE=$PWD/agents-plugin-tool ws-mcp dashboard`; a
+half-edited template answers 500 (the error is in `dashboard.log`) and the next
+request retries.
+
 ## Plugin-Managed Startup
 
 Codex plugin bundles can reference plugin-local MCP configuration:
@@ -277,6 +292,7 @@ Current launcher inputs:
 | `WS_MCP_RELEASE_BASE_URL` | Override the full release asset base URL; useful for local file or HTTP smoke tests. |
 | `WS_MCP_LAUNCHER_DEBUG` | Print launcher diagnostics to stderr when set to `1`. |
 | `WS_MCP_PROJECT_ROOT` | Project root default for root-aware tools and CLI commands when no higher-priority root exists. |
+| `WS_MCP_DASHBOARD_DEV_SOURCE` | Read by `ws-mcp dashboard`: the `agents-plugin-tool` source root the daemon serves dashboard and whiteboard page assets from instead of the embedded copies (see Dashboard daemon, Dev assets). Unset is off. |
 | `WS_MCP_NO_AGENT` | Product-mode gate for agentless distributions such as wsflow. |
 | `WS_MCP_NAMESPACE` | User-facing MCP namespace text override; empty or unset defaults to `ws`. |
 | `WS_MCP_SETUP_TOOL` | Advertised setup tool name override; empty or unset defaults to `ws.setup`. |

@@ -18,7 +18,8 @@ import (
 )
 
 // dashboardCommand runs the machine-wide dashboard daemon in the foreground.
-// ws-mcp serve starts it detached; running it by hand is for diagnosis.
+// ws-mcp serve starts it detached; running it by hand is for diagnosis and,
+// with WS_MCP_DASHBOARD_DEV_SOURCE set, for editing the page assets live.
 func dashboardCommand(args []string) {
 	fs := flag.NewFlagSet("dashboard", flag.ExitOnError)
 	port := fs.Int("port", wsdashboard.DefaultPort, "preferred loopback port; 0 lets the OS choose, and a taken port falls back to an OS-chosen one")
@@ -40,6 +41,13 @@ func dashboardCommand(args []string) {
 		}
 	}
 	logw := openDashboardLog(dir)
+	// Dev assets switch on before the daemon serves its first request. The
+	// notice waits for StartDaemon: the lazy log truncates on first write, and
+	// only the lock holder may do that.
+	devRoot, err := wsdashboard.EnableDevAssets(os.Getenv(wsdashboard.DevSourceEnv))
+	if err != nil {
+		fatal("dashboard", err)
+	}
 	daemon, err := wsdashboard.StartDaemon(wsdashboard.DaemonOptions{
 		Dir:       dir,
 		Port:      *port,
@@ -58,6 +66,7 @@ func dashboardCommand(args []string) {
 	if err != nil {
 		fatal("dashboard", err)
 	}
+	wsdashboard.LogDevAssets(logw, devRoot)
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
 	select {
