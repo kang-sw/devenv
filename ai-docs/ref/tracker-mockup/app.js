@@ -16,6 +16,9 @@
     clock: {},            // store -> mock "now"; each write advances it by a minute
     seen: {},             // "store|stream" -> { badge key: true } already shown to that viewer
     fresh: {},            // badge keys that were new when the drawer last opened
+    read: {},             // "store|stream" -> { notification entry key: true } read by that viewer (local UI state, (334), (340))
+    loaded: {},           // "store|stream" -> { attachment oid: true } "loaded" by that viewer's clone (simulated, local UI state)
+    mdraft: [], adraft: [], // composer drafts: member ids picked with @, attachment metadata to post
     item: null, sheet: false, last: null, replyTo: null,
     cmodes: {}, calMonth: {}, // store -> { card key -> view mode }; card key -> calendar month (local UI state, never an event)
     act: { family: 'all', member: 'all', flagged: false, conc: false },
@@ -113,18 +116,25 @@
   function A(id) { return VS.assignments[id]; }
 
   var EDIT_FIELDS = ['title', 'body', 'project', 'due', 'priority'];
+  function listOf(x) { return Array.isArray(x) ? x : []; }
+  // Mentions and attachments a write carries, for one-line descriptions.
+  function extrasTxt(p) {
+    var m = listOf(p.mentions), a = listOf(p.attachments);
+    return (m.length ? ' (mentions ' + esc(m.map(function (x) { return '@' + x; }).join(', ')) + ')' : '') +
+      (a.length ? ' [' + a.length + ' attachment' + (a.length === 1 ? '' : 's') + ']' : '');
+  }
   function describe(n, inThread) {
     var p = n.payload, ref = function (id) { return inThread ? '' : ' ' + itemRef(id); };
     switch (n.type) {
       case 'item.create':
         if (inThread === 'parent') return 'opened subtask thread ' + itemRef(n.id) + ' <b>' + esc(p.title) + '</b> ' + (VS.items[n.id] ? stChip(VS.items[n.id].status) : '');
         return 'created ' + esc(p.kind) + ' <b>' + esc(p.title) + '</b>' + (inThread ? '' : ' (' + itemRef(n.id) + ')') + (p.parent && !inThread ? ' under ' + itemRef(p.parent) : '') +
-          (p.due ? ', due ' + esc(p.due) : '') + (p.priority != null ? ', priority ' + esc(VS.priority.names[p.priority] || p.priority) : '');
+          (p.due ? ', due ' + esc(p.due) : '') + (p.priority != null ? ', priority ' + esc(VS.priority.names[p.priority] || p.priority) : '') + extrasTxt(p);
       case 'item.edit':
         return 'edited' + ref(p.item) + ' ' + EDIT_FIELDS.filter(function (f) { return f in p; }).map(function (f) {
           var v = f === 'priority' ? (VS.priority.names[p[f]] || p[f]) : p[f];
           return f + ' &rarr; "' + esc(v == null ? '(none)' : String(v).slice(0, 80)) + '"';
-        }).join(', ');
+        }).join(', ') + extrasTxt(p);
       case 'item.hide': return 'hid' + ref(p.item) + ' (tombstone; history stays)';
       case 'item.assign':
         return 'assigned' + ref(p.item) + ' to ' + (p.mode === 'all' ? '<b>everyone within L' + esc(p.levels) + '</b> (forced, live: later followers inherit)' :
@@ -139,8 +149,8 @@
       case 'item.confirm': return 'confirmed ' + esc(p.assignee) + '\'s close' + ref(p.item) + (p.note ? ': ' + esc(p.note) : '');
       case 'item.reject': return 'rejected ' + esc(p.assignee) + '\'s close (back to doing)' + ref(p.item) + (p.note ? ': ' + esc(p.note) : '');
       case 'item.reopen': return 'reopened ' + esc(p.assignee || n.member) + '\'s assignment' + ref(p.item) + (p.note ? ': ' + esc(p.note) : '');
-      case 'comment.add': return 'commented' + ref(p.item) + (inThread ? '' : ': ' + esc(String(p.body || '').slice(0, 90)));
-      case 'comment.edit': return 'edited comment ' + esc(alias(p.comment)) + (inThread ? '' : ref(n.thread || ''));
+      case 'comment.add': return 'commented' + ref(p.item) + (inThread ? '' : ': ' + esc(String(p.body || '').slice(0, 90))) + extrasTxt(p);
+      case 'comment.edit': return 'edited comment ' + esc(alias(p.comment)) + (inThread ? '' : ref(n.thread || '')) + extrasTxt(p);
       case 'comment.hide': return 'hid comment ' + esc(alias(p.comment)) + ' (tombstone; history stays)';
       case 'roles.add_member': return 'added member <b>' + esc((p.member || {}).id) + '</b> under ' + esc(((p.member || {}).leads || []).join(', ') || 'nobody');
       case 'roles.set_lead': return 'set lead of <b>' + esc(p.member) + '</b> to ' + esc((p.leads || []).join(', ') || 'nobody');
@@ -150,6 +160,7 @@
       case 'roles.revoke_key': return 'revoked key <code>' + esc(p.key) + '</code> of ' + esc(p.member);
       case 'roles.remove_member': return 'removed member <b>' + esc(p.member) + '</b>';
       case 'roles.set_priority_levels': return 'set priority levels to <b>' + esc((p.names || []).join(' / ')) + '</b>, default ' + esc((p.names || [])[p.default]);
+      case 'roles.set_attachment_limit': return 'set the attachment limit to <b>' + esc(p.max_bytes) + ' bytes</b>' + (Number.isInteger(p.max_bytes) ? ' (' + fmtSize(p.max_bytes) + ')' : '');
       default: return esc(n.type);
     }
   }
@@ -236,6 +247,92 @@
   }
   function answerBtns(r) {
     return btn('accept', 'Accept', { item: r.item }, 'primary') + btn('note', 'Decline', { item: r.item, op: 'item.decline' }) + btn('open', 'Discuss', { item: r.item });
+  }
+
+  // (331)-(334) The notification feed: one card, list only, newest first. Every entry
+  // is derived from the view state; an entry only opens the item's thread sheet, while
+  // Received requests and My team keep their notices and buttons. Read state is local
+  // UI state per viewer clone, like the handle badge's `seen`; no event is written
+  // (in the product the daemon keeps it per clone on the local filesystem, (340)).
+  var NK = { assigned: 'assigned', pending: 'pending', answer: 'answer', reference: 'for reference', done: 'done', blocked: 'blocked',
+    confirm: 'confirm', reply: 'reply', due: 'due', mention: 'mention' };
+  function snippet(s) { s = String(s || ''); return '&ldquo;' + esc(s.length > 80 ? s.slice(0, 77) + '...' : s) + '&rdquo;'; }
+  function feedEntries(v) {
+    var out = [], t = today();
+    function add(key, kind, item, ts, html) {
+      if (VS.items[item] && !VS.items[item].hidden) out.push({ key: key, kind: kind, item: item, ts: String(ts || ''), html: html });
+    }
+    VS.my.assignments.map(A).forEach(function (r) {
+      var it = VS.items[r.item];
+      // new forced assignments: the same rule as the handle badge's "a:" keys
+      if (r.by !== v && r.forced && r.status === 'todo') add('a:' + r.id, 'assigned', r.item, r.ts, '<b>' + esc(nm(r.by)) + '</b> assigned this to you' + (r.inherited ? ' (everyone within L' + esc(r.ruleLevels) + ')' : ''));
+      // near the due date, as the due chip computes it
+      if (it.due && it.due <= t && r.status !== 'done' && it.status !== 'done')
+        add('d:' + r.id + ':' + (it.due < t ? 'over' : 'today'), 'due', r.item, it.due + 'T00:00:00Z', it.due < t ? 'overdue since ' + esc(it.due) : 'due today');
+    });
+    VS.my.received.pending.map(A).forEach(function (r) {
+      add('p:' + r.id, 'pending', r.item, r.ts, '<b>' + esc(nm(r.sender)) + '</b> ' + (r.handoffOf ? 'hands you their assignment' : 'sent you a pending assignment') + '; answer it on Received requests');
+    });
+    VS.notices.forEach(function (x) {
+      var r = A(x.assignment), txt;
+      if (x.kind === 'declined') txt = '<b>' + esc(nm(x.to)) + '</b> declined what you sent';
+      else if (x.kind === 'returned') txt = '<b>' + esc(nm(x.endedBy)) + '</b> (lead of ' + esc(nm(x.to)) + ') returned ' + esc(nm(x.to)) + '\'s accepted ' + (r.handoffOf ? 'handoff' : 'assignment');
+      else if (x.kind === 'accepted') txt = '<b>' + esc(nm(x.to)) + '</b> accepted ' + (r.handoffOf ? 'a handoff' : 'an assignment from ' + esc(nm(x.by))) + ' (you are their lead)';
+      else txt = '<b>' + esc(nm(x.to)) + '</b> took over ' + esc(nm(x.from)) + '\'s assignment you gave';
+      add(x.key, x.kind === 'declined' || x.kind === 'returned' ? 'answer' : 'reference', x.item, x.ts, txt + (x.note ? ': ' + snippet(x.note) : ''));
+    });
+    vals(VS.assignments).forEach(function (r) {
+      if (r.by !== v || r.to === v || r.state !== 'live' || (r.status !== 'done' && r.status !== 'blocked')) return;
+      add('w:' + r.id + ':' + r.status + ':' + r.lastUpdate, r.status, r.item, r.lastUpdate,
+        '<b>' + esc(nm(r.to)) + '</b> ' + (r.status === 'done' ? 'finished work you assigned' : 'is blocked on work you assigned') + (r.note ? ': ' + snippet(r.note) : ''));
+    });
+    VS.my.today.confirms.map(A).forEach(function (r) {
+      add('c:' + r.id + ':' + r.lastUpdate, 'confirm', r.item, r.lastUpdate, '<b>' + esc(nm(r.to)) + '</b> closed this; it waits for your confirm');
+    });
+    vals(VS.comments).forEach(function (c) {
+      if (c.hidden || c.author === v) return;
+      var q = c.reply_to && VS.comments[c.reply_to];
+      if (q && q.author === v) add('r:' + c.id, 'reply', c.item, c.ts, '<b>' + esc(nm(c.author)) + '</b> replied to your comment: ' + snippet(c.body));
+      var ts = c.edited ? c.edited.ts : c.ts;
+      if (c.mentions.indexOf(v) >= 0) add('m:' + c.id + ':' + ts, 'mention', c.item, ts, '<b>' + esc(nm(c.author)) + '</b> mentioned you: ' + snippet(c.body));
+    });
+    vals(VS.items).forEach(function (it) {
+      var ts = it.edited ? it.edited.ts : it.ts;
+      if (it.author !== v && it.mentions.indexOf(v) >= 0) add('m:' + it.id + ':' + ts, 'mention', it.id, ts, '<b>' + esc(nm(it.author)) + '</b> mentioned you in the item body');
+    });
+    return out.sort(function (a, b) { return a.ts < b.ts ? 1 : a.ts > b.ts ? -1 : a.key < b.key ? -1 : 1; });
+  }
+  function readMap() { return (ui.read[seenKey(ui.store)] = ui.read[seenKey(ui.store)] || {}); }
+  function cardNotify(v) {
+    var list = feedEntries(v), read = readMap(), unread = list.filter(function (x) { return !read[x.key]; }).length;
+    var h = list.length ? list.map(function (x) {
+      return '<div class="row click nfeed' + (read[x.key] ? '' : ' unread') + '"' + attr('item', x.item) + attr('nkey', x.key) + attr('nkind', x.kind) + '><div class="r1">' +
+        '<span class="chip nk">' + esc(NK[x.kind]) + '</span>' + isNew(x.key) + titleRef(x.item) + '<span class="grow"></span><span class="muted ts">' + esc(fmtTs(x.ts)) + '</span></div>' +
+        '<div class="r2">' + x.html + '</div></div>';
+    }).join('') : '<p class="muted">Nothing for you right now.</p>';
+    return card('Notifications', unread + ' unread of ' + list.length, h, unread ? btn('nread-all', 'Mark all read', {}) : '', 'card-notify');
+  }
+
+  // (335) mention chips and (338) attachment chips. Loading is simulated: the real
+  // client fetches the blob on demand through a partial clone (a later ledger ticket).
+  function fmtSize(n) { return n >= 1048576 ? (n / 1048576).toFixed(1) + ' MiB' : n >= 1024 ? Math.round(n / 1024) + ' KiB' : n + ' B'; }
+  function mentionChips(ids) {
+    ids = listOf(ids).filter(function (x) { return typeof x === 'string'; });
+    return ids.length ? '<div class="mentions">' + ids.map(function (id) {
+      return '<span class="chip mention" title="mentions ' + esc(id) + '">@' + esc(VS.members[id] ? VS.members[id].name : id) + '</span>';
+    }).join('') + '</div>' : '';
+  }
+  function attChips(list, live) {
+    list = listOf(list).filter(function (x) { return x && typeof x === 'object'; });
+    if (!list.length) return '';
+    var got = ui.loaded[seenKey(ui.store)] || {};
+    return '<div class="atts">' + list.map(function (x) {
+      var label = 'file ' + esc(x.name) + ' &middot; ' + (Number.isInteger(x.size) ? fmtSize(x.size) : '?');
+      if (!live) return '<span class="chip att rejected" title="not stored: the write was flagged">' + label + '</span>';
+      var on = !!got[x.oid];
+      return '<button type="button" class="chip att' + (on ? ' loaded' : '') + '"' + attr('act', 'att-load') + attr('oid', x.oid) +
+        ' title="' + esc(x.mime + ', ' + x.size + ' bytes, sha256 ' + x.oid + (on ? '' : '; click to fetch it (simulated)')) + '">' + label + ' &middot; ' + (on ? 'loaded' : 'not loaded') + '</button>';
+    }).join('') + '</div>';
   }
 
   // Morning check: my open work by priority and due, what waits for my answer, what waits for my confirm.
@@ -364,7 +461,8 @@
     Object.keys(R).forEach(function (k) { levels[R[k]] = (levels[R[k]] || 0) + 1; });
     var summary = 'Admins: ' + esc(VS.admins.join(', ')) + '. You: ' + (VS.viewer.lead ? 'lead <b>' + esc(VS.viewer.lead) + '</b>' : 'no lead (root)') + ', ' +
       (Object.keys(R).length ? 'reach ' + Object.keys(levels).map(function (d) { return levels[d] + ' at L' + d; }).join(', ') : 'no followers') +
-      '. Priority levels: ' + VS.priority.names.map(function (x, i) { return esc(x) + (i === VS.priority.default ? ' (default)' : ''); }).join(' &lt; ') + '.';
+      '. Priority levels: ' + VS.priority.names.map(function (x, i) { return esc(x) + (i === VS.priority.default ? ' (default)' : ''); }).join(' &lt; ') +
+      '. Attachment limit: ' + fmtSize(VS.attachments.max_bytes) + ' (attachments.max_bytes ' + VS.attachments.max_bytes + ').';
     function node(id) {
       if (seen[id]) return '<li>' + esc(id) + ' (cycle guard)</li>';
       seen[id] = true;
@@ -679,10 +777,10 @@
 
   // The drawer has one layout, the cards layout (303). A card in a wide mode leaves its
   // column and spans the full row above the columns; the remaining cards flow below (304).
-  var LAYOUT = [['today', 'mine', 'received', 'given'], ['myteam', 'items'], ['chat', 'org', 'activity', 'data']];
+  var LAYOUT = [['notify', 'today', 'mine', 'received', 'given'], ['myteam', 'items'], ['chat', 'org', 'activity', 'data']];
   function drawerHtml(name, v) {
     var vs = VS, nMem = Object.keys(vs.members).filter(function (id) { return !vs.members[id].removed; }).length;
-    var CARDS = { today: cardToday, mine: cardMine, received: cardRequests, given: cardGiven, myteam: cardMyTeam, items: cardItems,
+    var CARDS = { notify: cardNotify, today: cardToday, mine: cardMine, received: cardRequests, given: cardGiven, myteam: cardMyTeam, items: cardItems,
       chat: cardChat, org: cardTeam, activity: cardActivity, data: cardData };
     var h = '<div class="dr-title"><b>' + esc(vs.store.label) + '</b><span>' + nMem + ' members, ' + vs.stats.events + ' events from ' + vs.stats.commits + ' commits, ' +
       vs.stats.flagged + ' flagged</span><span class="grow"></span>' +
@@ -712,8 +810,9 @@
       acts += btn('reply', 'Reply', { cid: n.id });
       if (n.member === v) acts += btn('cedit', 'Edit', { cid: n.id }) + btn('chide', 'Hide', { cid: n.id });
     }
+    var live = n.status === 'applied' && !!VS.comments[n.id];
     var txt = c.hidden ? '<div class="hiddenc">comment hidden by its author (' + esc(alias(c.hidden)) + ')<details><summary>history keeps the text</summary>' + esc(body) + '</details></div>' :
-      '<div class="ctext">' + esc(body) + '</div>';
+      '<div class="ctext">' + esc(body) + '</div>' + mentionChips(live ? c.mentions : p.mentions) + attChips(live ? c.attachments : p.attachments, live);
     return '<li class="cmt' + (n.status !== 'applied' ? ' ' + n.status : '') + (n.markers.length ? ' concm' : '') + (n.member === v ? ' mine' : '') + '"' + attr('ev', n.id) + '>' +
       '<div class="ch"><b>' + esc(nm(n.member)) + '</b>' + originChip(n.origin) + '<span class="when">' + esc(fmtTs(n.ts)) + '</span><span class="al">' + esc(n.alias) + '</span>' +
       (c.edited ? '<span class="chip">edited</span>' : '') + flags(n) + '<span class="grow"></span>' + acts + '</div>' + reply + txt +
@@ -741,6 +840,7 @@
       '<dt>parent</dt><dd>' + (it.parent ? itemRef(it.parent) + ' ' + esc((VS.items[it.parent] || {}).title || '') : '<span class="muted">-</span>') + '</dd>' +
       '<dt>created</dt><dd>' + esc(fmtTs(it.ts)) + (it.edited ? ' &middot; edited ' + esc(fmtTs(it.edited.ts)) : '') + '</dd></dl>';
     h += it.body ? '<div class="sh-body">' + esc(it.body) + '</div>' : '';
+    h += mentionChips(it.mentions) + attChips(it.attachments, true);
     h += '<div class="sh-actions">' + (acts || '<span class="muted">No item actions for ' + esc(nm(v)) + '.</span>') + '</div>';
 
     if (it.kind !== 'topic') {
@@ -788,12 +888,34 @@
     }
     h += '<div class="composer2">' + (it.hidden ? '<span class="muted">thread hidden; comments are flagged</span>' : '') +
       (rt ? '<div class="replying">replying to ' + esc(alias(rt.id)) + ' <b>' + esc(rt.author) + '</b>: ' + esc(String(rt.body).slice(0, 70)) + ' ' + btn('reply-x', 'x', {}) + '</div>' : '') +
-      (quick ? '<div class="quick">' + quick + '</div>' : '') +
+      (quick ? '<div class="quick">' + quick + '</div>' : '') + draftHtml() +
       '<div class="crow"><textarea id="cbox" rows="2" placeholder="Comment as ' + esc(nm(v)) + '..."></textarea><div class="ccol">' +
       '<select id="corigin" title="origin"><option value="human">human</option><option value="agent">agent</option><option value="agent-auto">agent-auto</option></select>' +
-      btn('comment', 'Post', { item: it.id }, 'primary') + '</div></div></div>';
+      btn('comment', 'Post', { item: it.id }, 'primary') + '</div></div>' +
+      // (335) a simple @ picker; (338) attachment metadata typed in by hand (the mock computes a stand-in oid)
+      '<div class="cextra"><select id="cmention" title="mention a member"><option value="">@ mention...</option>' +
+      Object.keys(VS.members).filter(function (id) { return !VS.members[id].removed; }).map(function (id) { return '<option value="' + esc(id) + '">@' + esc(id) + ' ' + esc(VS.members[id].name) + '</option>'; }).join('') +
+      '</select><input id="catt-name" type="text" placeholder="attach (mock): file name"><input id="catt-size" type="number" min="0" placeholder="bytes">' +
+      btn('att-add', 'Attach', {}) + '<span class="muted">limit ' + fmtSize(VS.attachments.max_bytes) + '</span></div></div>';
     return h;
   }
+  function draftHtml() {
+    if (!ui.mdraft.length && !ui.adraft.length) return '';
+    return '<div class="cdraft">' + ui.mdraft.map(function (id) { return '<span class="chip mention">@' + esc(nm(id)) + '</span>'; }).join('') +
+      ui.adraft.map(function (x, i) { return '<span class="chip att">file ' + esc(x.name) + ' &middot; ' + fmtSize(x.size) + '</span>' + btn('att-x', 'x', { idx: i }); }).join('') +
+      '<span class="muted">sent with the next post (a mention counts while its @id stays in the text)</span></div>';
+  }
+  // A stand-in for the sha256 of the content: the mock has no content, so it hashes
+  // the name and size into 64 hex digits. The real client hashes the file.
+  function mockOid(s) {
+    var h = '', x = 2166136261;
+    for (var r = 0; r < 8; r++) { for (var i = 0; i < s.length; i++) x = Math.imul(x ^ s.charCodeAt(i) ^ r, 16777619) >>> 0; h += ('0000000' + x.toString(16)).slice(-8); }
+    return h;
+  }
+  var MIME = { png: 'image/png', jpg: 'image/jpeg', pdf: 'application/pdf', txt: 'text/plain', zip: 'application/zip', zst: 'application/zstd', md: 'text/markdown' };
+  function mimeOf(name) { return MIME[String(name).split('.').pop().toLowerCase()] || 'application/octet-stream'; }
+  // An edit of a body keeps the mentions whose @id is still in the text and every attachment.
+  function keptMentions(ids, body) { return listOf(ids).filter(function (id) { return body.indexOf('@' + id) >= 0; }); }
 
   // --------------------------------------------------------- dialog forms
 
@@ -823,7 +945,7 @@
   }
   function originSel() { return '<select name="origin"><option value="human">human</option><option value="agent">agent (on request)</option><option value="agent-auto">agent-auto (unprompted)</option></select>'; }
   function fld(label, inner) { return '<div class="fld"><span>' + label + '</span>' + inner + '</div>'; }
-  var ROLE_TYPES = ['roles.add_member', 'roles.set_lead', 'roles.add_admin', 'roles.remove_admin', 'roles.add_key', 'roles.revoke_key', 'roles.remove_member', 'roles.set_priority_levels'];
+  var ROLE_TYPES = ['roles.add_member', 'roles.set_lead', 'roles.add_admin', 'roles.remove_admin', 'roles.add_key', 'roles.revoke_key', 'roles.remove_member', 'roles.set_priority_levels', 'roles.set_attachment_limit'];
 
   function dialogHtml(kind, d) {
     var v = memberOf(viewerOf(ui.store)), it = d.item && VS.items[d.item];
@@ -899,7 +1021,8 @@
           fld('key (add_key, revoke_key, add_member)', '<input type="text" name="key" placeholder="e.g. jon-k3">') +
           fld('new member id and name (add_member)', '<div class="fld inline"><input type="text" name="nid" placeholder="id"><input type="text" name="nname" placeholder="name"></div>') +
           fld('priority level names, lowest first (set_priority_levels)', '<input type="text" name="pnames" value="' + esc(VS.priority.names.join(', ')) + '">') +
-          fld('default level (set_priority_levels)', '<input type="number" name="pdefault" min="0" value="' + VS.priority.default + '">'), 'Append'];
+          fld('default level (set_priority_levels)', '<input type="number" name="pdefault" min="0" value="' + VS.priority.default + '">') +
+          fld('attachment limit in bytes (set_attachment_limit)', '<input type="number" name="maxbytes" min="1" value="' + VS.attachments.max_bytes + '">'), 'Append'];
         break;
     }
     return '<form' + attr('kind', kind) + attr('fitem', d.item || '') + attr('fcid', d.cid || '') + '><h2>' + T[0] + '</h2><p>' + T[1] + '</p>' + T[2] +
@@ -1005,6 +1128,11 @@
       case 'edit': {
         var it = VS.items[item], ep = { item: item };
         ['title', 'body', 'project'].forEach(function (f) { if (val(f) !== it[f]) ep[f] = val(f); });
+        if ('body' in ep) {
+          var km = keptMentions(it.mentions, ep.body);
+          if (km.length) ep.mentions = km;
+          if (it.attachments.length) ep.attachments = it.attachments;
+        }
         if ((val('due') || null) !== it.due) ep.due = val('due') || null;
         if (Number(val('priority')) !== it.priority) ep.priority = Number(val('priority'));
         evs.push(['item.edit', ep]);
@@ -1052,13 +1180,19 @@
         evs.push([val('op'), np]);
         break;
       }
-      case 'cedit':
-        evs.push(['comment.edit', { comment: form.getAttribute('data-fcid'), body: val('body') }]);
+      case 'cedit': {
+        var ocm = VS.comments[form.getAttribute('data-fcid')], cep = { comment: form.getAttribute('data-fcid'), body: val('body') };
+        var ckm = keptMentions(ocm.mentions, cep.body);
+        if (ckm.length) cep.mentions = ckm;
+        if (ocm.attachments.length) cep.attachments = ocm.attachments;
+        evs.push(['comment.edit', cep]);
         break;
+      }
       case 'admin': {
         var t = val('rtype'), rp = {};
         if (t === 'roles.add_member') rp.member = { id: val('nid'), name: val('nname') || val('nid'), keys: val('key') ? [val('key')] : [], leads: val('lead') ? [val('lead')] : [] };
         else if (t === 'roles.set_priority_levels') { rp.names = val('pnames').split(',').map(function (x) { return x.trim(); }).filter(Boolean); rp.default = Number(val('pdefault')); }
+        else if (t === 'roles.set_attachment_limit') rp.max_bytes = Number(val('maxbytes'));
         else {
           rp.member = val('member');
           if (t === 'roles.set_lead') rp.leads = val('lead') ? [val('lead')] : [];
@@ -1094,7 +1228,10 @@
         if (!box || !box.value.trim()) return toast('Write a comment first.');
         var cp = { item: item, body: box.value.trim() };
         if (ui.replyTo) cp.reply_to = ui.replyTo;
-        ui.replyTo = null;
+        var ms = keptMentions(ui.mdraft, cp.body);
+        if (ms.length) cp.mentions = ms;
+        if (ui.adraft.length) cp.attachments = ui.adraft;
+        ui.replyTo = null; ui.mdraft = []; ui.adraft = [];
         commit([['comment.add', cp, origin]]);
         break;
       }
@@ -1207,7 +1344,7 @@
     markSeen(name);
     render();
   }
-  function showItem(id) { ui.item = id; ui.sheet = true; ui.itemChanged = true; ui.replyTo = null; render(); }
+  function showItem(id) { ui.item = id; ui.sheet = true; ui.itemChanged = true; ui.replyTo = null; ui.mdraft = []; ui.adraft = []; render(); }
 
   var QUICK = { 'q-status': 1, 'q-close': 1, confirm: 1, unassign: 1, accept: 1, ihide: 1, chide: 1, comment: 1 };
 
@@ -1248,10 +1385,20 @@
         else if (k === 'go-online') { stores[ui.store].setOnline(viewerOf(ui.store), true); syncNow(ui.store); render(); }
         else if (k === 'reply') { ui.replyTo = d.cid; render(); if ($('cbox')) $('cbox').focus(); }
         else if (k === 'reply-x') { ui.replyTo = null; render(); }
+        else if (k === 'nread-all') { var rm = readMap(); feedEntries(memberOf(viewerOf(ui.store))).forEach(function (x) { rm[x.key] = true; }); render(); }
+        else if (k === 'att-load') { var lm = (ui.loaded[seenKey(ui.store)] = ui.loaded[seenKey(ui.store)] || {}), oid = a.getAttribute('data-oid'); lm[oid] = !lm[oid]; render(); }
+        else if (k === 'att-add') {
+          var an = $('catt-name').value.trim(), asz = $('catt-size').value;
+          if (!an || asz === '') return toast('Attachment needs a file name and a size in bytes.');
+          ui.adraft.push({ oid: mockOid(an + '|' + asz), name: an, size: Number(asz), mime: mimeOf(an) }); render();
+        }
+        else if (k === 'att-x') { ui.adraft.splice(Number(a.getAttribute('data-idx')), 1); render(); }
         else if (QUICK[k]) { if (k === 'comment' || a.getAttribute('data-note')) ui.clearDraft = true; quick(k, a); }
         else openDialog(k, d);
         return;
       }
+      var nk = t.closest('[data-nkey]');
+      if (nk) readMap()[nk.getAttribute('data-nkey')] = true; // a feed entry is read once clicked
       var it = t.closest('[data-item]');
       if (it && !t.closest('select, textarea, input, #dlg')) { e.preventDefault(); showItem(it.getAttribute('data-item')); return; }
       if (t.closest('a[href="#"]')) e.preventDefault();
@@ -1270,6 +1417,13 @@
       else if (t.id === 'a-member') { ui.act.member = t.value; render(); }
       else if (t.id === 'flagged-only') { ui.act.flagged = t.checked; render(); }
       else if (t.id === 'conc-only') { ui.act.conc = t.checked; render(); }
+      else if (t.id === 'cmention') {
+        var box = $('cbox'), id = t.value;
+        if (!id || !box) return;
+        box.value = box.value + (box.value && !/\s$/.test(box.value) ? ' ' : '') + '@' + id + ' ';
+        if (ui.mdraft.indexOf(id) < 0) ui.mdraft.push(id);
+        render();
+      }
       else if (t.closest && t.closest('#dlg form')) updateHint(t.closest('form'));
     });
     document.addEventListener('dragstart', function (e) {

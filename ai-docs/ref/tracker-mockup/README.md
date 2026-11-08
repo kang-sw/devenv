@@ -42,7 +42,8 @@ build, no server, no dependencies.
   (241)) and the new clone opens the drawer (an immediate fetch); an offline
   clone does neither. A pull-down drawer has one handle per store. A handle
   badge counts new forced assignments, pending assignments to the viewer, and
-  reference notices; opening the store clears it. A handle shows ⊘ when the
+  reference notices; opening the store clears it (the notification card below
+  does not change what it counts). A handle shows ⊘ when the
   viewer's clone is offline or the store has no remote.
 - **Store header.** The viewer's clone ref, online or offline, last synced, "N of
   my writes not yet pushed" with a list of the open batch and the closed
@@ -59,7 +60,7 @@ build, no server, no dependencies.
   | *Items* | tree / kanban (item cards) / due timeline / calendar |
   | *My assignments*, *Assigned by me*, *My team* | list / kanban (assignment cards, with the pending column) / due timeline / calendar |
   | *Activity* | list / activity timeline |
-  | *Today*, *Received requests*, *Team*, *Data* | list only (no picker) |
+  | *Notifications*, *Today*, *Received requests*, *Team*, *Data* | list only (no picker) |
   | *Support agent* (chat placeholder) | conversation only (no picker) |
 
   A card switched to a wide mode (kanban, due timeline, calendar, activity
@@ -68,7 +69,19 @@ build, no server, no dependencies.
   fallback and no maximize button. Each card's chosen mode is local UI state,
   remembered per store in memory (it survives a viewer switch within the
   store), never an event (305).
-  - *Lists* (the v2 layout plus *Today*):
+  - *Lists* (the v2 layout plus *Notifications* and *Today*):
+    - *Notifications* ((331)-(334)): one feed of what concerns the viewer,
+      newest first: new forced assignments to me, pending assignments to me,
+      answer notices, reference notices, completion or `blocked` of work I
+      assigned, Confirm requests waiting on me, replies to my comments, my
+      live assignments due today or overdue, and mentions of me. Every entry
+      is derived from the view state and only opens the item's thread sheet;
+      *Received requests* and *My team* keep their notices and buttons
+      (Accept / Decline / Return). Unread entries are highlighted; clicking
+      one, or *Mark all read*, marks it read. Read state is local UI state per
+      viewer clone, kept in memory like the handle badge's `seen`, and writes
+      no event. In the product the daemon keeps it per clone on the local
+      filesystem, outside git (340).
     - *Today*: the morning check. My open work by priority then due, pending
       assignments waiting for my answer, and closes waiting for my confirm.
     - *My assignments*: my live assignments (forced, self-assigned, accepted,
@@ -135,11 +148,18 @@ build, no server, no dependencies.
   "superseded by" notes on a member's losing write from another clone. The
   composer posts a comment, as a reply when one is chosen, with an origin; with
   an own assignment on the thread, quick status buttons use the composer text
-  as the note.
+  as the note. Mentions on the body and on each comment show as chips (335).
+  Attachments show as chips with name and size and a simulated "not loaded /
+  loaded" state: a click toggles it, as local UI state per viewer clone
+  (338). An attachment on a flagged write shows struck through. The composer
+  has a simple `@` picker that inserts `@id` and records the id, and a mock
+  attach row (file name and byte count; the mock stands in a 64-hex oid
+  because it has no content). An item or comment edit that changes the body
+  keeps the attachments and the mentions whose `@id` is still in the text.
 - **Actions** append events to the viewer clone's open batch, then report each
   event as applied or flagged. The actions are create (any kind, with due,
   priority, and an optional assignee in the same write), edit, comment, reply,
-  edit or hide own comment, assign (chosen people or everyone within N),
+  edit or hide own comment (each with mentions and attachments), assign (chosen people or everyone within N),
   split into a subtask, hand off, status, close, confirm, reject, unassign or
   withdraw, reopen, hide item, accept / decline / return, and every `roles.*`
   event. Actions are not pre-validated, so you can produce flagged events on
@@ -152,6 +172,7 @@ build, no server, no dependencies.
 ```json
 { "admins": ["ada", "bo"],
   "priority": { "names": ["알림", "업무", "긴급"], "default": 1 },
+  "attachments": { "max_bytes": 10485760 },
   "members": [ { "id": "maya", "name": "Maya Ortiz", "keys": ["maya-k1"], "leads": ["ada"] } ] }
 ```
 
@@ -161,8 +182,9 @@ cannot contain `.`, which separates member and clone in a stream id.
 `priority` is the store's priority configuration: level codes are the integers
 `0..n-1` (larger = more urgent), `names` are display names only, and `default`
 is the level new items start at. Without it the store uses three levels named
-알림 / 업무 / 긴급 with default 1. Later changes are admin `roles.*` events,
-folded in causal order.
+알림 / 업무 / 긴급 with default 1. `attachments.max_bytes` is the largest
+attachment the store accepts, in bytes (339); without it the limit is 10 MiB
+(10485760). Later changes are admin `roles.*` events, folded in causal order.
 
 ### Clone streams and commits
 
@@ -204,8 +226,8 @@ folded in causal order.
 
 | type | payload | rule |
 |---|---|---|
-| `item.create` | `kind` (`task`/`todo`/`topic`), `title`, `body?`, `project?`, `due?`, `priority?`, `parent?` | A `parent` must be assigned to or created by the author. `project` is one free-text string, the only grouping (no labels or tags). `due` is a `YYYY-MM-DD` date. `priority` is a level in the author's current range; omitted, the item starts at the store's default level. |
-| `item.edit` | `item`, any of `title`/`body`/`project`/`due`/`priority` | Creator only; an admin may also edit an item whose creator was removed (292). `due: null` clears the date; priority cannot be cleared. Each field merges by the (203) rule. |
+| `item.create` | `kind` (`task`/`todo`/`topic`), `title`, `body?`, `project?`, `due?`, `priority?`, `parent?`, `mentions?`, `attachments?` | A `parent` must be assigned to or created by the author. `project` is one free-text string, the only grouping (no labels or tags). `due` is a `YYYY-MM-DD` date. `priority` is a level in the author's current range; omitted, the item starts at the store's default level. |
+| `item.edit` | `item`, any of `title`/`body`/`project`/`due`/`priority`; `mentions?` and `attachments?` with `body` | Creator only; an admin may also edit an item whose creator was removed (292). `due: null` clears the date; priority cannot be cleared. Each field merges by the (203) rule. `mentions` or `attachments` without `body` is flagged. |
 | `item.hide` | `item` | Creator only; an admin may also hide an item whose creator was removed (292). A tombstone: the content stays in history. Flagged while someone else holds an open (live or pending) assignment on the item. |
 | `item.assign` | `item`, `mode` (`all`/`chosen`), `levels` (all), `people` (chosen), `completion` (`assignee`/`assigner`, default `assignee`) | Creator only; an admin may also assign an item whose creator was removed. `chosen` may target anyone in the store: the author, or someone the author reaches (the author is in their lead chain, any depth), is a **forced** assignment, live at once; anyone else gets a **pending** assignment. `all` targets everyone within N levels below the author, forced only, and stays live: anyone who later enters the range inherits it. Flagged when every chosen person already holds a live or pending assignment. Not allowed on topics. |
 | `item.handoff` | `item`, `to`, `assignee?`, `note?` | The holder of a live assignment hands it to anyone; an admin may hand off any member's live assignment by naming its holder in `assignee` (286), so open work can be taken over before the member is removed. It makes a pending assignment to `to` with the original's assigner and completion mode; on accept the original assignment ends (`handed`) and the new one starts with the original's status and note (290). Flagged on a done assignment, when `to` is the holder or already holds one, or while another handoff of it is pending. |
@@ -216,14 +238,28 @@ folded in causal order.
 | `item.close` | `item`, `note?` | Assignee. Moves to `done`, or to `awaiting` when completion is `assigner`. |
 | `item.confirm` / `item.reject` | `item`, `assignee`, `note?` | Assigner, on an `awaiting` assignment. Moves to `done` / back to `doing`. |
 | `item.reopen` | `item`, `assignee?`, `note?` | The assigner or the assignee reopens a `done` assignment, back to `doing`. |
-| `comment.add` | `item`, `body`, `reply_to?` | Anyone in the store. `reply_to` is one comment in the same thread (flat timeline, quote reply). |
-| `comment.edit` / `comment.hide` | `comment`, `body` (edit) | Comment author only. Hide is a tombstone. |
+| `comment.add` | `item`, `body`, `reply_to?`, `mentions?`, `attachments?` | Anyone in the store. `reply_to` is one comment in the same thread (flat timeline, quote reply). |
+| `comment.edit` / `comment.hide` | `comment`, `body`, `mentions?`, `attachments?` (edit) | Comment author only. Hide is a tombstone. |
 | `roles.add_member` | `member` (`id`, `name`, `keys`, `leads`) | Admin. Stands in for the self-join (`member.join`, (231)). |
 | `roles.set_lead` | `member`, `leads` | Admin. Length at most 1, no cycle. |
 | `roles.add_admin` / `roles.remove_admin` | `member` | Admin. The last admin cannot be removed. |
 | `roles.add_key` / `roles.revoke_key` | `member`, `key` | Admin. Revocation rule below. |
 | `roles.remove_member` | `member` | Admin. The member must lead nobody and must not be an admin. Their earlier events stay valid. Their live assignments end as `unassigned` and their pending ones as `withdrawn` (287), so nothing stays counted under a removed member; like an unassign, this beats a concurrent status write. |
 | `roles.set_priority_levels` | `names` (1-9 display names, lowest first), `default` | Admin. Changes the level count and names; a field write, so concurrent changes merge by (203). |
+| `roles.set_attachment_limit` | `max_bytes` (a positive integer) | Admin. Changes `attachments.max_bytes`; a field write, merged by (203). Attachments already written stay; later writes are checked against the new limit in their author's causal past. |
+
+**Mentions and attachments** ((335), (338)). A body (an item's on
+`item.create` / `item.edit`, a comment's on `comment.add` / `comment.edit`)
+may carry `mentions`, a list of member ids, and `attachments`, a list of
+`{oid, name, size, mime}`. The text keeps `@name` for display; the list is
+what notifies. Each id must be a member, not removed, in the author's causal
+past. `oid` is the sha256 of the content (64 lowercase hex digits), `size` is
+a byte count no larger than `attachments.max_bytes` in the author's causal
+past, and `name` and `mime` are required. Both lists ride with the body: a
+body write replaces them (absent means empty), and the shown lists are the
+winning body write's, so concurrent edits follow the (203) / (271) winner.
+Only metadata is modelled; storing and fetching the content is a later
+ledger ticket (337). Agent-authored writes may mention.
 
 `agent-auto` is valid only on `item.status` and `item.close` for the author's
 own assignment. It is always invalid on accept, decline, return, and handoff:
@@ -298,19 +334,22 @@ the Go data-structure child should serve.
 ```text
 viewer       { member, stream, name, admin, lead, followers[], reach{id: depth}, isMember }
 priority     { names[], default }
+attachments  { max_bytes }
 members      { id: { id, name, leads[], keys[], revoked[{key, by}], removed, joined, admin, children[], depth, role } }
 admins[], rolesProblems[]
 items        { id: { id, alias, kind, title, body, project, due, priority, priorityLevel, priorityName,
                      parent, children[], author, ts, hidden, edited{id, ts}, status, counted,
                      rollup{total, counts{status: n}, blocked[]}, lastActivity, started,
-                     assignments[], pending[], thread[eventId], concurrent, depth, chain[] } }
+                     assignments[], pending[], thread[eventId], concurrent, depth, chain[],
+                     mentions[memberId], attachments[{oid, name, size, mime}] } }
 itemOrder[]  item ids in tree order
 assignments  { id: { id, item, to, by, sender, completion, state, forced, status, note, noteBy, via, ts,
                      inherited, ruleLevels, handoffOf, handoffFrom, handoffNote, answerNote,
                      restored{id, ts}, restores, accepted{id, ts},
                      leadAtAccept, ended{id, type, ts, by}, depth, statusOrigin, statusBy,
                      lastUpdate, stale } }
-comments     { id: { id, item, author, body, reply_to, ts, edited{id, ts}, hidden } }
+comments     { id: { id, item, author, body, reply_to, ts, edited{id, ts}, hidden,
+                     mentions[memberId], attachments[{oid, name, size, mime}] } }
 events[]     display order: { id, alias, stream, member, seq, ts, type, origin, payload, status
                      (applied|flagged|waiting), reason, ignored, markers[{kind, field, other,
                      otherMember, winner, mine, theirs}], superseded[{field, by, why (later|human)}],
@@ -329,7 +368,9 @@ clones       { member: [{ stream, online, unpushed }] }
 ```
 
 Lists hold ids into the maps. Everything is per viewer clone: two clones of
-one member can show different states until they sync.
+one member can show different states until they sync. The notification card
+reads only this object; its read state, like the badge's `seen`, is client
+state outside it.
 
 ## Validation and concurrency
 
@@ -348,8 +389,8 @@ one member can show different states until they sync.
    past.
    - **Field writes.** These are assignment status (written by the assignee
      with status / close and by the assigner with confirm / reject / reopen),
-     a member's lead, the priority levels, and item or comment text, due, and
-     priority. Each field is a multi-value register; concurrent writes are all
+     a member's lead, the priority levels, the attachment limit, and item or
+     comment text, due, and priority. Each field is a multi-value register; concurrent writes are all
      kept. The **display winner** is the later `ts`, then the greater member
      id, clone id, and seq. Writes by two different members get a
      "concurrent change" marker naming both values. Writes by one member from
@@ -398,8 +439,14 @@ Flagged reasons, as the engine words them:
 - confirm or reject by a non-assigner, when not awaiting, or when no
   confirmation is required
 - a reply to a comment that is unseen, hidden, or in another thread
+- a mention that is not a list of ids, or names someone who is not a member
+  or was removed; mentions or attachments on an item edit without a body
+- an attachment list that is malformed, an oid that is not a sha256, a
+  missing name or mime type, a size that is not a byte count, or a size
+  above `attachments.max_bytes`
 - `roles.*` by a non-admin, a lead list over length 1, a cycle, an unknown
-  member, a key in use, removing the last admin, or invalid priority levels
+  member, a key in use, removing the last admin, invalid priority levels, or
+  an attachment limit that is not a positive integer
 
 ## Fixtures (`team-alpha`)
 
@@ -443,6 +490,14 @@ page clock starts at 2026-11-06 09:00. The fixtures show:
   - handoff: `lena.pc-2` to raj (pending, raj accepts, ada gets a notice), raj
     hands it to sven, sven accepts (lena, the assigner, gets a notice)
   - awaiting confirm: ivy's close of "Tokenizer" waits for maya
+- mentions and attachments: lena's comment `lena.pc-6` on "Index builder"
+  mentions maya and omar and attaches `index-layout-v2.png`; her next comment
+  `lena.pc-7` attaches a 50 MiB trace and is flagged over the 10 MiB limit;
+  bo's topic `bo.pc-9` mentions maya and raj in its body and attaches a PDF;
+  `uma.pc-6` is flagged for mentioning `zed`, who is not a member; maya's
+  reply `maya.pc-22` to `lena.pc-6` mentions lena and ivy. Together with the
+  rest, the notification card shows every entry kind: maya's card alone has
+  all but the answer notice, which sven's and tia's cards show.
 - about a dozen flagged demos, one for most reasons above
 
 `hana-personal` has one member and one clone with no remote. Its commits are
@@ -543,6 +598,12 @@ creation, and it has a topic and a blocked subtask.
 | 304 a | A card in a wide mode (kanban, due timeline, calendar, activity timeline) spans the full row of the cards layout; the remaining cards flow below it. No horizontal scroll in the card and no maximize button for now. |
 | 300 a, 302 | A chat card placeholder for the future daemon-side local support agent: placement and a static sample only (fixed height, internal scroll, newest at the bottom, a disabled composer), with no working chat, no fake responder, and no new events. |
 | 305 | The chat sample mimics the dashboard conversation entries plus a tracker card reference entry that renders an item from the view state and opens its thread sheet. Each card's chosen mode is local UI state remembered per store, never an event. |
+| 331 c, 332 a, 333 a, 334 | A *Notifications* card in the cards layout, list only, newest first, derived from the view state: new forced and pending assignments to me, answer and reference notices, completion or blocked of work I assigned, Confirm requests waiting on me, replies to my comments, my live assignments due today or overdue, and mentions of me. An entry opens the item's thread sheet; *Received requests* and *My team* keep their buttons. Unread entries are highlighted and cleared by a click or *Mark all read*; no event is written. The handle badge is unchanged. |
+| 331 c, 335 | Item bodies and comments carry an optional explicit `mentions` list of member ids, validated against the author's causal past; the text keeps `@name`. Mentions show in the mentioned member's notification card and as chips in the thread; the composer has a simple `@` picker. Agent-authored writes may mention. |
+| 336 | Mentions, attachments, and the attachment limit are ported to the Go domain layer (`agents-plugin-tool/internal/wstracker`) in the same change, with golden parity; the ledger layer is untouched. |
+| 337 a | Attachment content is stored as content-addressed blobs under `attachments/<sha256>` in the member's ledger tree and fetched on demand through a partial clone. The storage itself is deferred to a later ledger ticket; v3 models metadata only. |
+| 338 a, 339 a | Item bodies and comments carry `attachments: [{oid, name, size, mime}]` with `oid` the content's sha256. The roles file's `attachments.max_bytes` (default 10 MiB) is changed by the admin `roles.set_attachment_limit`; an attachment above it is flagged with a reason. The thread shows a chip with name and size and a simulated loaded state (local UI only). |
+| 340 | In the product the notification read state lives per clone on the local filesystem outside git, read and written by the daemon; the mockup keeps it in memory. |
 
 ## Open questions
 
@@ -561,6 +622,8 @@ Real signatures and crypto; git refs, pushes, and fetches (sync is simulated
 per clone); the background poll and the 5-minute push delay (push happens at
 Sync, panel collapse, and viewer switch); the self-join (stand-in:
 `roles.add_member`) and claim refs; re-issue of a revoked key's own events;
-search; the MCP surface; notifications beyond the handle badge and the
-derived notices; labels and tags (278 a); multiple leads; snapshots; a
+search; the MCP surface; notifications beyond the handle badge, the derived
+notices, and the notification card (no push, mail, or OS notification; read
+state is in memory, not on disk (340)); attachment content storage and fetch
+(337); labels and tags (278 a); multiple leads; snapshots; a
 working support-agent chat (the chat card is a static placeholder); styling.

@@ -258,6 +258,29 @@ Snags:
   flagged); `item.hide` still needs the open assignments ended first. The
   sheet offers *Edit (admin: creator removed)* and *Hide item (admin)*.
 
+## 10. Notifications, a mention, and an attachment
+
+Added with the notification card ((331)-(340)), walked the same way.
+
+Steps: view as `maya.pc`; read the Notifications card; click the mention
+entry for "Retro notes: search v2 sprint"; *Mark all read*; open "Index
+builder", load lena's attachment; post a comment that picks `@ivy` and
+attaches a 20000000-byte file, then one with a 2048-byte file; view as `ivy`.
+
+Outcome: maya's card lists ten entries, all unread, newest first: due today,
+two mentions (bo's topic body, lena's comment), a confirm, a pending
+assignment, a reply, completion and blocked of work she assigned, a
+reference notice, and a forced assignment. The click opened the thread sheet
+and cleared that entry only; *Mark all read* cleared the rest. In the thread
+`lena.pc-6` shows `@Maya Ortiz` / `@Omar Haddad` chips and an
+`index-layout-v2.png` chip that toggled from "not loaded" to "loaded";
+`lena.pc-7` shows its 50 MiB attachment struck through with the over-limit
+reason. The first post was flagged with `attachment "huge.zip" is 20000000
+bytes, above the store limit of 10485760 bytes (attachments.max_bytes)`; the
+second applied, and ivy's card then shows it as a mention.
+
+Snags: none.
+
 ## Summary
 
 | # | scenario | outcome (after the resolutions) | view snags (fixed) | model snags (resolved) |
@@ -271,6 +294,7 @@ Snags:
 | 7 | same body from two clones | works; the losing edit is marked superseded | - | M6 |
 | 8 | handoff to a peer | works; status carries over, a returned handoff restores the original | - | M7, M8 |
 | 9 | typo in a member's item | works | - | M9 |
+| 10 | notifications, mention, attachment | works | - | - |
 
 | model snag | recommended resolution | board resolution |
 |---|---|---|
