@@ -637,18 +637,8 @@
     "261108-bug-pi-esc-drops-queued-mail-batches": {
       "registered_at": "2026-11-07T15:11:11Z"
     },
-    "261108-feat-ws-tracker-data-structure": {
-      "registered_at": "2026-11-07T16:08:19Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-07T16:20:57Z",
-        "impl": {
-          "branch": "impl/develop/elope-bluff-race"
-        }
-      }
+    "261108-feat-ws-daemon-agent-runner": {
+      "registered_at": "2026-11-08T00:25:09Z"
     }
   }
 }
