@@ -716,6 +716,9 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			if isWhiteboardTool(params.Name) && !entry.isTopLevelLead() {
 				return errorResponse(req.ID, -32601, whiteboardLeadOnlyDenial(params.Name))
 			}
+			if isTrackerTool(params.Name) && !entry.isTopLevelLead() {
+				return errorResponse(req.ID, -32601, trackerLeadOnlyDenial(params.Name))
+			}
 			if entry.isTopLevelLead() {
 				// Registers the session on the dashboard, or keeps it off.
 				s.dashboardTouch(keyStr, entry.root, false)
@@ -1677,6 +1680,10 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		return s.handleWhiteboardUpdate(req.ID, params.Arguments)
 	case "whiteboard.query":
 		return s.handleWhiteboardQuery(req.ID, params.Arguments)
+	case "tracker.update":
+		return s.handleTrackerUpdate(ctx, req.ID, params.Arguments)
+	case "tracker.query":
+		return s.handleTrackerQuery(ctx, req.ID, params.Arguments)
 	case "tickets.query":
 		if hasSpecStemArgument(params.Arguments) {
 			return toolTextResponse(req.ID, "", fmt.Errorf("tickets tools use ticket_stem, not spec_stem"))
@@ -2118,11 +2125,20 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		body, err = applyWhiteboardVariants(s, rsrcRoot, name, body, whiteboardOn)
+		trackerOn, err := s.trackerEnabled(&knobResolver, keyStr)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		if name == whiteboardPlaybookName {
+		// The tracker section is never a spawned key's (as workflow_manual
+		// renders it); its tools refuse that key.
+		if entry, found := s.sessions.lookup(keyStr); found && !entry.isTopLevelLead() {
+			trackerOn = false
+		}
+		body, err = applyKnobVariants(s, rsrcRoot, name, body, whiteboardOn, trackerOn)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		if name == whiteboardPlaybookName || name == trackerPlaybookName {
 			if body, err = appendCommandSyntax(rsrcRoot, body); err != nil {
 				return toolTextResponse(req.ID, "", err)
 			}
@@ -4912,6 +4928,34 @@ func tools() []map[string]any {
 				"properties": map[string]any{
 					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
 					"payload":     objectProperty("Defined by the whiteboard playbook."),
+				},
+				"required": []string{"session_key"},
+			},
+		},
+		{
+			// The tracker tools follow the whiteboard's shape: always listed
+			// with a pointer to their playbook, and a string command batch
+			// for the same \u-escape reason.
+			"name":        "tracker.update",
+			"description": "Lead-only. Read the `tracker` playbook (ws/playbook.read) before first use; it defines the commands.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
+					"commands":    stringProperty("Defined by the tracker playbook."),
+				},
+				"required": []string{"session_key"},
+			},
+		},
+		{
+			"name":        "tracker.query",
+			"description": "Lead-only, read-only. Read the `tracker` playbook (ws/playbook.read) before first use; it defines the payload.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
+					"payload":     objectProperty("Defined by the tracker playbook."),
+					"format":      stringProperty("\"json\" for the store's whole view state; text when omitted."),
 				},
 				"required": []string{"session_key"},
 			},
