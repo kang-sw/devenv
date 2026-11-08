@@ -284,6 +284,18 @@ test('a subagent is keyed by its native id and labelled from its spawn; its own 
   expect(JSON.stringify(sent(w)).split('dk-9').length - 1).toBe(JSON.stringify(sent(w)).split('"sessionKey":"dk-9"').length - 1)
 })
 
+test('a turn and a tool call under an agent id no spawn announced send no agent event', async ($, on) => {
+  const w = world(on, { dashboard: true })
+  await start($, w)
+  await $.turn.start({ text: 'x', turnId: 't' })
+  await $.turn.complete({ answer: 'hi', durationMs: 1, isAborted: false, turnId: 't', reason: 'answer' } as never)
+  // A loop the host runs past the lead's turn end with no agent.spawn.
+  await $.turn.start({ text: '', turnId: 'g', agentId: 'ad1ac9' })
+  await $.tool.call({ tool: 'Read', tool_use_id: 'g1', file_path: '/x', agentId: 'ad1ac9' } as never)
+  await flush(w)
+  expect(sent(w).filter((e) => e.kind === 'agent' && e.agentId !== undefined)).toEqual([])
+})
+
 test('a whiteboard-labelled prompt of the plugin\'s own enters as a whiteboard message, label stripped', async ($, on) => {
   const w = world(on, { dashboard: true })
   await start($, w)

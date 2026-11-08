@@ -12,10 +12,11 @@
 //   carrying what started it: `terminal` (a prompt the person typed),
 //   `whiteboard` (a prompt the mod submitted with the whiteboard label), or
 //   `mail` (a prompt the mailbox push submitted);
-// - the lead's batches (no agentId) and one `agent` event per subagent,
-//   keyed by the host's native agent id, with its label, parent, status, and
-//   the ws session key a delegate passes to this plugin's tools; the server
-//   shows that key's reply-id and never stores the key;
+// - the lead's batches (no agentId) and one `agent` event per subagent an
+//   `agent.spawn` announced, keyed by the host's native agent id, with its
+//   label, parent, status, and the ws session key a delegate passes to this
+//   plugin's tools; the server shows that key's reply-id and never stores the
+//   key;
 // - the lead's streamed reply text (the step's text so far) and each
 //   finished reply (`final: true`);
 // - each finished user message with its origin;
@@ -100,6 +101,8 @@ export const BATCH_RETAIN_CAP = 32
 export const BATCH_CALL_CAP = 32
 /** Finished subagents kept beside every running one, as the snapshot keeps them. */
 export const FINISHED_AGENT_CAP = 5
+/** Agent ids no `agent.spawn` has announced yet, held out of the tree; past it the oldest held one goes. */
+export const HELD_AGENT_CAP = 16
 /** The notification type that confirms a permission dialog is open. */
 export const PERMISSION_PROMPT = 'permission_prompt'
 
@@ -559,6 +562,8 @@ type AgentRec = {
   endedAt?: number
   /** The permission wait last sent, as JSON; '' for none. */
   permissionSent: string
+  /** Whether the record is in the tree: the lead always, a subagent once its `agent.spawn` named it. */
+  announced: boolean
 }
 
 export interface Dashboard {
@@ -665,14 +670,34 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
 
   const lead = (): AgentRec => rec(LEAD)
 
+  // A subagent shows only once `agent.spawn` announced it. Any other agent id
+  // (a host-internal loop that sends a tool call or a turn start but never a
+  // spawn or an end) would otherwise stay "running" in the tree forever. The
+  // engine may deliver a real subagent's turn start before its spawn resolves,
+  // so an unannounced id's record is held, out of every event, until the spawn
+  // shows it with what it gathered; at most HELD_AGENT_CAP are held. Accepted
+  // trade-off: a subagent spawned before the feed (re)started is never shown.
   function rec(id: string): AgentRec {
     let r = agents.get(id)
     if (!r) {
-      r = { buf: createBuffer(edges.epoch()), dirty: true, status: 'running', permissionSent: '' }
+      r = { buf: createBuffer(edges.epoch()), dirty: true, status: 'running', permissionSent: '', announced: id === LEAD }
       agents.set(id, r)
+      if (!r.announced) dropOldestHeld()
     }
     return r
   }
+
+  function dropOldestHeld(): void {
+    const held = [...agents.entries()].filter(([, r]) => !r.announced)
+    for (const [id] of held.slice(0, Math.max(0, held.length - HELD_AGENT_CAP))) {
+      agents.delete(id)
+      clearAsksOf(id)
+    }
+  }
+
+  /** Whether an agent's record has state to send: dirty and in the tree. */
+  const due = (r: AgentRec) => r.dirty && r.announced
+  const anyDue = () => [...agents.values()].some(due)
 
   const idOf = (agentId: string | undefined) => agentId ?? LEAD
 
@@ -680,12 +705,12 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
   const compactDue = () => compactDirty && compactAccepted && compacting !== undefined
 
   function hasWork(): boolean {
-    return pending.length > 0 || replyDirty || statusDue() || compactDue() || [...agents.values()].some((r) => r.dirty)
+    return pending.length > 0 || replyDirty || statusDue() || compactDue() || anyDue()
   }
 
   /** Whether streamed reply text is the only pending change, so the slow cadence applies. */
   function textOnly(): boolean {
-    return replyDirty && pending.length === 0 && !statusDue() && !compactDue() && ![...agents.values()].some((r) => r.dirty)
+    return replyDirty && pending.length === 0 && !statusDue() && !compactDue() && !anyDue()
   }
 
   function scheduleFlush(): void {
@@ -766,7 +791,7 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
   /** Every dirty state as events, in a stable order: the lead, the subagents, the streamed reply, a running compaction, the usage status. */
   function dirtyEvents(): DashboardEvent[] {
     const out: DashboardEvent[] = []
-    for (const [id, r] of agents) if (r.dirty) out.push(...agentEvents(id, r))
+    for (const [id, r] of agents) if (due(r)) out.push(...agentEvents(id, r))
     const stream = streamEvent()
     if (stream) out.push(stream)
     if (compactDue()) {
@@ -834,7 +859,7 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
 
   /** Finished subagents past the cap leave the local tree, as they leave the snapshot's. */
   function pruneFinished(): void {
-    const finished = [...agents.entries()].filter(([id, r]) => id !== LEAD && r.status !== 'running')
+    const finished = [...agents.entries()].filter(([id, r]) => id !== LEAD && r.announced && r.status !== 'running')
     if (finished.length <= FINISHED_AGENT_CAP) return
     finished.sort(([, a], [, b]) => (b.endedAt ?? 0) - (a.endedAt ?? 0))
     for (const [id] of finished.slice(FINISHED_AGENT_CAP)) agents.delete(id)
@@ -1137,6 +1162,7 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
     }),
     agentSpawned: guard('agent spawn', (spawn: Parameters<Dashboard['agentSpawned']>[0]) => {
       const r = rec(spawn.agentId)
+      r.announced = true
       if (spawn.parentId && spawn.parentId !== spawn.agentId) r.parentId = spawn.parentId
       const label = spawn.description?.trim() || spawn.subagentType?.trim()
       if (label) r.label = label
