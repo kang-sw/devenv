@@ -607,9 +607,6 @@
     "261106-bug-git-commit-trailer-placement": {
       "registered_at": "2026-11-06T07:33:45Z"
     },
-    "261106-bug-git-merge-directory-rename-relocates-tickets": {
-      "registered_at": "2026-11-06T10:06:42Z"
-    },
     "261106-bug-sage-stamp-missing-restamp-loop": {
       "registered_at": "2026-11-06T08:56:03Z"
     },
@@ -618,9 +615,6 @@
     },
     "261106-feat-whiteboard-policy-answer-user-alternative": {
       "registered_at": "2026-11-06T04:42:55Z"
-    },
-    "261107-bug-git-merge-directory-rename-false-conflict": {
-      "registered_at": "2026-11-07T06:30:42Z"
     },
     "261107-bug-pi-source-tests-fetch-release-runtime": {
       "registered_at": "2026-11-06T15:40:06Z"
@@ -631,14 +625,11 @@
     "261107-epic-ws-personal-common-store": {
       "registered_at": "2026-11-07T05:11:56Z"
     },
-    "261108-bug-git-merge-directory-rename-moves-tickets": {
-      "registered_at": "2026-11-07T16:19:45Z"
-    },
     "261108-bug-pi-esc-drops-queued-mail-batches": {
       "registered_at": "2026-11-07T15:11:11Z"
     },
-    "261108-bug-ws-git-merge-directory-rename-misplaces-tickets": {
-      "registered_at": "2026-11-08T05:47:25Z"
+    "261108-bug-ws-ledger-moved-reissued-events-lose-intra-batch-refs": {
+      "registered_at": "2026-11-08T07:47:49Z"
     },
     "261108-bug-ws-route-resolve-implement-target-nesting-undocumented": {
       "registered_at": "2026-11-08T05:50:36Z"
