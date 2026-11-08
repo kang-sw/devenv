@@ -5,6 +5,7 @@ related:
   260722-feat-goal-run-autonomy-posture: an autonomous goal run meeting an unreviewed ready ticket is a posture question owned there, not here
   260723-epic-ticket-write-reshape: adjacent enforcement-placement reshape, but that epic owns the write path and this is the consumption path
 sage-review-design: required
+dropped: 2026-11-08
 ---
 
 # enter.proceed does not check sage posture, so an unreviewed ready ticket can be drained
@@ -96,3 +97,8 @@ Verification boundary: with a `ready/` ticket whose sage posture is `required`,
 `enter.proceed` reports the posture and the resolving call rather than routing
 straight to implementation, and a goal-loop step over the same ticket inherits
 that behavior without its own check.
+
+
+## Resolution (2026-11-08)
+
+Dropped: the route.resolve_proceed tool this guard targeted was removed in 09b43b145.
