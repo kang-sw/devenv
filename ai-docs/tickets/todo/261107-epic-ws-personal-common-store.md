@@ -54,9 +54,10 @@ repository sized for 50-60 people, reached from the dashboard.
   View state shape), ported from the mockup engine with golden parity tests
   (board (283) a). No caller surface.
 - `261108-feat-ws-tracker-caller` (todo): the caller core - enable key,
-  machine store registry, sync triggers, `wstracker` wrappers, four coarse
-  MCP tools with a whiteboard-syntax `tracker.write`, a manual section, and
-  live acceptance on a private GitHub repository (board (395)-(413)).
+  machine store registry, sync triggers, `wstracker` wrappers, two MCP
+  tools (`tracker.query` and a whiteboard-syntax `tracker.update`), a manual
+  section, and live acceptance on a private GitHub repository (board
+  (395)-(423)).
 - `261108-feat-ws-tracker-drawer-ui` (todo): the dashboard side, blocked by
   the core - per-store handles, the mockup renderer shared between the
   mockup and the dashboard, a disk-assets dev mode, daemon endpoints and
@@ -162,8 +163,9 @@ repository sized for 50-60 people, reached from the dashboard.
 - **Dashboard placement** (board (137) ok, from (119) a, (126), (131) a):
   each store is its own drawer handle; handles stack leftward from the
   top-right corner.
-- **Config** (board (138) ok): the ws and wsflow manifests differ only in the
-  enable key's default.
+- **Config** (board (138) ok, revised by (418) c): the enable key is the
+  tuning-catalog knob `workflow.tracker_enabled`, default off in ws and
+  wsflow alike; no manifest key.
 - **Mockup form** (board (140) ok, (141) ok): a standalone HTML+JS page under
   `ai-docs/ref/`, with JSON fixtures of per-member event logs and a roles
   file, every view computed in the browser. Its final state is committed to
