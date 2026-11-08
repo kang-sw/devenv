@@ -306,8 +306,10 @@ func (s *Support) open(store, root string, sel Selection, hs []SupportHarness) (
 		effort = &sel.Effort
 	}
 	if model != nil || effort != nil {
-		if st, err = s.opts.Runner.SetSettings(st.ID, model, effort); err != nil {
-			_, _ = s.opts.Runner.CloseConversation(st.ID)
+		// SetSettings answers State{} on error, so close by the created id.
+		created := st.ID
+		if st, err = s.opts.Runner.SetSettings(created, model, effort); err != nil {
+			_, _ = s.opts.Runner.CloseConversation(created)
 			return State{}, err
 		}
 	}

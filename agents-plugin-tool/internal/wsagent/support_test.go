@@ -146,6 +146,26 @@ func TestSupportKeepsOneConversationPerStore(t *testing.T) {
 	}
 }
 
+// TestSupportOpenClosesAConversationItCannotSet: a conversation whose
+// selection the runner refuses is closed and left unmapped, not open.
+func TestSupportOpenClosesAConversationItCannotSet(t *testing.T) {
+	sh := newSupportHarness(t)
+	sh.support.mu.Lock()
+	_, err := sh.support.open("alpha", sh.stores["alpha"], Selection{Harness: BackendClaude, Model: "bad model"}, sh.support.harnesses())
+	sh.support.mu.Unlock()
+	if err == nil {
+		t.Fatalf("a model the runner refuses must fail the open")
+	}
+	for _, st := range sh.runner.List() {
+		if st.Status != StatusClosed {
+			t.Fatalf("the refused conversation stays open: %+v", st)
+		}
+	}
+	if c := sh.storeConv("alpha"); c != nil {
+		t.Fatalf("the refused conversation is mapped: %+v", c)
+	}
+}
+
 func TestSupportNewConversationClosesTheOld(t *testing.T) {
 	sh := newSupportHarness(t)
 	old := sh.send("alpha", "hello")
