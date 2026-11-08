@@ -1,7 +1,8 @@
 // Tracker mockup v3 data layer: validate and fold the per-clone commit lists on top
 // of the roles file, and simulate the per-clone journal and sync. No DOM here;
-// app.js is the view. Exposes window.TrackerEngine. The rules are the ones settled
-// on the board (README.md), and this file is the reference the Go port follows.
+// the view is the shared renderer tracker.js, fed through mock-adapter.js.
+// Exposes window.TrackerEngine. The rules are the ones settled on the board
+// (README.md), and this file is the reference the Go port follows.
 //
 // Shape: input = { roles, commits: { stream: [commit] } }, stream = "<member>.<clone>"
 // (ref refs/heads/tracker/m/<member>/<clone>), commit = { stream, ts, signer,

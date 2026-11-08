@@ -30,6 +30,9 @@
   function resetStore(name) {
     stores[name].reset();
     clock[name] = defs[name].now || new Date().toISOString().slice(0, 19) + 'Z';
+    // a clone only a simulated join created is gone now: view as the fixture's default again
+    var v = viewers[name];
+    if (v && stores[name].clonesOf(String(v).split('.')[0]).indexOf(v) < 0) viewers[name] = defs[name].defaultViewer;
   }
   window.TRACKER_FIXTURES.stores.forEach(function (d) {
     defs[d.name] = d;

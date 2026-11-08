@@ -150,10 +150,14 @@ func TestSessionPageRendersLiveRegions(t *testing.T) {
 			t.Errorf("session page lacks %q", want)
 		}
 	}
-	for _, leak := range []string{"hist-1.json", "hist-gone.json", f.project + "/", "file:", `id="wb-now"`} {
+	for _, leak := range []string{"hist-1.json", "hist-gone.json", f.project + "/", `id="wb-now"`} {
 		if strings.Contains(body, leak) {
 			t.Errorf("session page carries %q", leak)
 		}
+	}
+	// A file: URL, as a word: the inlined string table says "profile:".
+	if regexp.MustCompile(`\bfile:`).MatchString(body) {
+		t.Errorf("session page carries a file: URL")
 	}
 }
 

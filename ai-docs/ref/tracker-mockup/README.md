@@ -27,6 +27,11 @@ build, no server, no dependencies.
   from `seen`, validates each event against what its author had seen, folds the
   state, marks concurrent changes, derives the view state, and simulates the
   per-clone journal and sync.
+- `i18n-en.js` defines `wsT` / `wsTn` over the English tracker strings
+  (`js.tk.*`), the lookup the renderer calls for every string it draws. It is
+  generated from the dashboard's English table; a Go test in
+  `agents-plugin-tool/internal/wsdashboard` fails when it is stale, and its
+  first line says how to regenerate it.
 - `../../../agents-plugin-tool/internal/wsdashboard/assets/tracker.js` and
   `tracker.css` beside it are the view, a shipped dashboard asset:
   `window.WsTracker.mount(adapter, opts)` draws the drawer, store page, item
@@ -223,7 +228,7 @@ build, no server, no dependencies.
   declined / returned / handed off / withdrawn as muted rings with a mark, and
   a speech bubble for a topic. Icons, initials, priority, due, and action
   buttons share one immediate custom tooltip (not the browser's delayed
-  `title`); the set lives in `status-icons.js`.
+  `title`); the set lives in the shared renderer, `tracker.js`.
 - **Tabs** (the tab pane, (366)). Each offers only the modes that fit it:
   *Activity* has list / activity timeline; the others have one layout. A
   tab's count chip, mode picker, and buttons sit in a tool row under the tab
