@@ -20,15 +20,24 @@
     loaded: {},           // "store|stream" -> { attachment oid: true } "loaded" by that viewer's clone (simulated, local UI state)
     mdraft: [], adraft: [], // composer drafts: member ids picked with @, attachment metadata to post
     item: null, sheet: false, last: null, replyTo: null,
-    cmodes: {}, calMonth: {}, // store -> { card key -> view mode }; card key -> calendar month (local UI state, never an event)
+    cmodes: {}, calMonth: {}, // store -> { card key -> view mode }; card or scope key -> calendar month (local UI state, never an event)
+    panel: {},            // store -> { scope, modes: { scope -> view mode } } of the Items panel (360), local UI state like cmodes
+    sel: null,            // the row selected by a tap (354): it shows the same actions and details a hover shows
     act: { family: 'all', member: 'all', flagged: false, conc: false },
     kind: 'all', status: 'open', dataOpen: false, openLogs: {}
   };
-  // (303) each card offers only the view modes that fit its content; a card missing here has one layout (no picker).
+  // (357) The Items panel: scope presets crossed with the view modes each scope offers.
+  // (303) A side card offers only the modes that fit it; a card missing from CARD_MODES has one layout.
   var ASSIGN_MODES = [['list', 'list'], ['kanban', 'kanban'], ['gantt', 'due timeline'], ['calendar', 'calendar']];
-  var CARD_MODES = { items: [['list', 'tree'], ['kanban', 'kanban'], ['gantt', 'due timeline'], ['calendar', 'calendar']],
-    mine: ASSIGN_MODES, given: ASSIGN_MODES, myteam: ASSIGN_MODES, activity: [['list', 'list'], ['activity', 'activity timeline']] };
-  var WIDE = { kanban: 1, gantt: 1, calendar: 1, activity: 1 }; // (304) a card in one of these spans the full row
+  var SCOPES = [['mine', 'mine', 'my live assignments, then done, then what I created and did not assign'],
+    ['received', 'received requests', 'pending assignments to me (someone outside my lead chain, or a handoff), the ones I answered, what I sent, and answers to it'],
+    ['given', 'assigned by me', 'what I assigned or handed to others, live or pending'],
+    ['team', 'my team', 'what each follower (down to 3 levels) works on, whoever assigned it, grouped by person'],
+    ['all', 'all', 'every item as a tree, with kind and status filters']];
+  var SCOPE_MODES = { mine: ASSIGN_MODES, received: [['list', 'list']], given: ASSIGN_MODES, team: ASSIGN_MODES,
+    all: [['list', 'tree'], ['kanban', 'kanban'], ['gantt', 'due timeline'], ['calendar', 'calendar']] };
+  var CARD_MODES = { activity: [['list', 'list'], ['activity', 'activity timeline']] };
+  var SI = window.TrackerStatusIcons;
 
   function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
@@ -100,12 +109,11 @@
     return '<button class="btn mini' + (cls ? ' ' + cls : '') + '"' + attr('act', act) + d + '>' + label + '</button>';
   }
   function card(title, chip, body, extra, id, mode, cls) {
-    return '<section class="card' + (WIDE[mode] ? ' wide' : '') + (cls ? ' ' + cls : '') + '"' + (id ? ' id="' + id + '"' : '') + (mode ? attr('view', mode) : '') + '><header><h2>' + title + '</h2>' + (chip ? '<span class="chip">' + chip + '</span>' : '') +
+    return '<section class="card' + (cls ? ' ' + cls : '') + '"' + (id ? ' id="' + id + '"' : '') + (mode ? attr('view', mode) : '') + '><header><h2>' + title + '</h2>' + (chip ? '<span class="chip">' + chip + '</span>' : '') +
       '<span class="grow"></span>' + (extra || '') + '</header><div class="cbody">' + body + '</div></section>';
   }
   // (305) the chosen mode is remembered per store, so it survives a viewer switch within the store
   function modeOf(key) { var m = (ui.cmodes[ui.store] || {})[key]; return CARD_MODES[key] && m ? m : 'list'; }
-  function isWide(key) { return !!WIDE[modeOf(key)]; }
   function picker(key) {
     return '<span class="cmodes"' + attr('card', key) + '>' + CARD_MODES[key].map(function (m) {
       return '<button class="btn mini' + (modeOf(key) === m[0] ? ' primary' : '') + '"' + attr('act', 'cmode') + attr('card', key) + attr('mode', m[0]) + '>' + m[1] + '</button>';
@@ -218,40 +226,133 @@
   }
   function isNew(key) { return ui.fresh[key] ? '<span class="chip new">new</span>' : ''; }
 
+  // ---------------------------------------------------------------- item rows
+  //
+  // (356) An item row shows by default only what must be seen: status icon, title,
+  // assignee initials, priority, due, a warning icon for flagged or concurrent writes,
+  // and an unread dot. Everything else (kind, source clone and event id, dates, roll-up,
+  // assignment path, notes) is the row's detail overlay, and the actions are icons; both
+  // appear on hover. (354) Keyboard focus and a tap-selection (ui.sel) show the same:
+  // one CSS state, `.irow:is(:hover, :focus-within, .sel)`. (:focus-within, because
+  // Chromium does not re-match :has(:focus-visible) in time when Tab moves from the row
+  // into its buttons, so they hide mid-move and focus falls to the body.)
+  // The overlay ignores the pointer, so moving down a list hovers the next row.
+
+  function stKey(it, r) { return r ? (r.state === 'live' ? r.status : r.state) : it.kind === 'topic' ? 'topic' : it.status; }
+  function tipAttr(text) { return ' data-tip="' + esc(text) + '"'; }
+  // data-tip from already-escaped HTML: drop the tags, keep the entities (the attribute decodes them)
+  function tipHtml(h) { return ' data-tip="' + String(h).replace(/<[^>]*>/g, '').replace(/"/g, '&quot;') + '"'; }
+  function stDesc(s) { var x = SI.info(s); return x.label + ': ' + x.desc; }
+  function stIcon(s) { return '<span class="sti"' + tipAttr(stDesc(s)) + '>' + SI.svg(s) + '</span>'; }
+  function initials(id) {
+    var w = String(nm(id)).split(/\s+/).filter(Boolean);
+    return (w.length > 1 ? w[0].charAt(0) + w[w.length - 1].charAt(0) : String(w[0] || id).slice(0, 2)).toUpperCase();
+  }
+  function holders(it) { return it.assignments.map(A).filter(function (r) { return r.state === 'live' || r.state === 'pending'; }); }
+  function whoHtml(it) {
+    var as = holders(it), v = VS.viewer.member;
+    if (!as.length) return '<span class="who"></span>';
+    var shown = as.slice(0, 3), more = as.length - shown.length;
+    var tip = 'assignees: ' + as.map(function (r) { return nm(r.to) + (r.state === 'pending' ? ' (pending)' : ''); }).join(', ');
+    return '<span class="who"' + tipAttr(tip) + '>' + shown.map(function (r) {
+      return '<i class="av' + (r.state === 'pending' ? ' pend' : '') + (r.to === v ? ' me' : '') + '">' + esc(initials(r.to)) + '</i>';
+    }).join('') + (more ? '<i class="av more">+' + more + '</i>' : '') + '</span>';
+  }
+  function priHtml(it) {
+    if (!it || it.kind === 'topic') return '<span class="pri"></span>';
+    var lv = it.priorityLevel, d = VS.priority.default;
+    return '<span class="pri' + (lv > d ? ' hi' : lv < d ? ' lo' : '') + '"' + tipAttr('priority ' + lv + ' of ' + (VS.priority.names.length - 1) + ': ' + it.priorityName +
+      (it.priority !== lv ? ' (stored ' + it.priority + ', outside the current range: shown as the top level)' : '')) + '>' + esc(it.priorityName) + '</span>';
+  }
+  // (356) Due: D-N within 7 days, D-day today, D+N past due (danger colour), else a short date.
+  var ENDED = { done: 1, declined: 1, returned: 1, handed: 1, withdrawn: 1 };
+  function dueHtml(it, st) {
+    if (!it || !it.due || it.kind === 'topic') return '<span class="due2"></span>';
+    var n = dayNum(it.due) - dayNum(today()), t, c, tip;
+    if (ENDED[st]) { t = it.due.slice(5); c = 'ended'; tip = 'due ' + it.due + ' (' + SI.info(st).label + ')'; }
+    else if (n < 0) { t = 'D+' + -n; c = 'over'; tip = 'due ' + it.due + ', overdue by ' + -n + (n === -1 ? ' day' : ' days'); }
+    else if (n === 0) { t = 'D-day'; c = 'now'; tip = 'due today (' + it.due + ')'; }
+    else if (n <= 7) { t = 'D-' + n; c = 'soon'; tip = 'due ' + it.due + ', in ' + n + (n === 1 ? ' day' : ' days'); }
+    else { t = it.due.slice(5); c = ''; tip = 'due ' + it.due; }
+    return '<span class="due2' + (c ? ' ' + c : '') + '"' + tipAttr(tip) + '>' + esc(t) + '</span>';
+  }
+  var FLAGGED = {}, UNREAD = {}; // per render: item -> flagged writes in its own thread; item -> unread notification entries
+  function warnHtml(it) {
+    var f = FLAGGED[it.id] || 0, c = it.concurrent;
+    if (!f && !c) return '';
+    var tip = [f ? f + ' flagged write' + (f === 1 ? '' : 's') : '', c ? c + ' concurrent change' + (c === 1 ? '' : 's') : ''].filter(Boolean).join(', ') + '; see the thread';
+    return '<span class="wicon' + (f ? ' flag' : '') + '"' + tipAttr(tip) + '><svg class="i"><use href="#i-warn"/></svg></span>';
+  }
+  function dotHtml(it) {
+    var n = UNREAD[it.id];
+    return n ? '<span class="udot"' + tipAttr(n + ' unread notification' + (n === 1 ? '' : 's') + ' (Notifications)') + '></span>' : '';
+  }
+
+  // Row actions as icon buttons: every action the viewer may take on the item, from the
+  // view state. Each dispatches through the same data-act handlers the sheet uses.
+  function ia(act, icon, label, data, cls) {
+    var d = '';
+    Object.keys(data || {}).forEach(function (k) { d += attr(k, data[k]); });
+    return '<button type="button" class="ia' + (cls ? ' ' + cls : '') + '"' + attr('act', act) + d + ' aria-label="' + esc(label) + '"' + tipAttr(label) + '><svg class="i"><use href="#i-' + icon + '"/></svg></button>';
+  }
+  function actsFor(it) {
+    if (!it || it.hidden) return '';
+    var v = VS.viewer.member, recs = it.assignments.map(A), h = '', id = it.id;
+    var mineR = recs.filter(function (r) { return r.to === v && r.state === 'live'; })[0];
+    if (recs.some(function (r) { return r.to === v && r.state === 'pending'; }))
+      h += ia('accept', 'accept', 'Accept', { item: id }, 'go') + ia('note', 'decline', 'Decline...', { item: id, op: 'item.decline' }) + ia('open', 'chat', 'Discuss (open the thread)', { item: id });
+    if (mineR && mineR.status !== 'done') {
+      h += ia('status', 'status', 'Status...', { item: id });
+      if (mineR.status !== 'awaiting') h += ia('close', 'close', 'Close...', { item: id });
+      h += ia('split', 'split', 'Split into a subtask...', { item: id }) + ia('handoff', 'handoff', 'Hand off...', { item: id });
+    }
+    recs.forEach(function (r) {
+      var lead = VS.members[r.to] && VS.members[r.to].leads[0];
+      if (r.state === 'live' && r.by === v && r.status === 'awaiting')
+        h += ia('confirm', 'confirm', 'Confirm ' + nm(r.to) + '\'s close', { item: id, who: r.to }, 'go') + ia('note', 'reject', 'Reject ' + nm(r.to) + '\'s close...', { item: id, who: r.to, op: 'item.reject' });
+      if (r.state === 'live' && r.accepted && lead === v) h += ia('note', 'return', 'Return ' + nm(r.to) + '\'s accepted assignment...', { item: id, who: r.to, op: 'item.return' });
+      if (r.state === 'pending' && (r.by === v || r.sender === v) && r.to !== v) h += ia('unassign', 'withdraw', 'Withdraw what you sent to ' + nm(r.to), { item: id, who: r.to });
+    });
+    if (it.author === v && it.kind !== 'topic' && !holders(it).length) h += ia('assign', 'assign', 'Assign...', { item: id });
+    return h;
+  }
+
+  // The detail overlay: what the row leaves out by default.
+  function detailsHtml(it, r, extra) {
+    var d = [], st = stKey(it, r), ist = stKey(it);
+    d.push(kindChip(it) + ' <span class="al">' + esc(it.alias) + '</span> by ' + esc(nm(it.author)) + (it.project ? ' &middot; ' + esc(it.project) : ''));
+    d.push('<b>' + esc(SI.info(st).label) + '</b> <span class="muted">' + esc(SI.info(st).desc) + '</span>' +
+      (r && r.state === 'live' && r.statusOrigin && r.statusOrigin !== 'human' ? ' &middot; set by ' + esc(nm(r.statusBy)) + '\'s agent (' + esc(r.statusOrigin) + ')' : '') +
+      (r && ist !== st && it.kind !== 'topic' ? ' &middot; item ' + esc(SI.info(ist).label) : '') +
+      (r && r.stale ? ' &middot; <span class="err">stale</span>: no status update for ' + E.STALE_DAYS + '+ days' : ''));
+    var roll = rollupHtml(it);
+    if (roll) d.push(roll);
+    if (r) d.push(source(r) + ' &middot; ' + complText(r.completion) + (it.chain.length > 1 ? ' &middot; chain ' + esc(it.chain.join(' > ')) : ''));
+    else if (it.kind !== 'topic') d.push(holders(it).length ? '&rarr; ' + holders(it).map(function (x) { return esc(nm(x.to)) + ' <span class="muted">' + esc(SI.info(stKey(it, x)).label) + '</span>'; }).join(', ') : '<span class="muted">not assigned</span>');
+    var note = r && (r.note ? [r.note, r.noteBy] : r.handoffNote ? [r.handoffNote, r.sender] : r.answerNote ? [r.answerNote, r.to] : null);
+    if (note) d.push('&ldquo;' + esc(note[0]) + '&rdquo; <span class="muted">(' + esc(note[1]) + ')</span>');
+    if (extra) d.push(extra);
+    var f = FLAGGED[it.id] || 0;
+    d.push('<span class="muted">created ' + esc(fmtTs(it.ts)) + (it.edited ? ' &middot; edited ' + esc(fmtTs(it.edited.ts)) : '') + ' &middot; last activity ' + esc(fmtTs(it.lastActivity)) +
+      (r ? ' &middot; assignment updated ' + esc(fmtTs(r.lastUpdate || r.ts)) : '') + (f ? ' &middot; ' + f + ' flagged' : '') + (it.concurrent ? ' &middot; ' + it.concurrent + ' concurrent' : '') + '</span>');
+    return d.map(function (x) { return '<div>' + x + '</div>'; }).join('');
+  }
+  // o: { rk (unique row key in the drawer), item, rec?, more?, depth?, acts? }
+  function irow(o) {
+    var it = VS.items[o.item], r = o.rec, st = stKey(it, r), acts = o.acts != null ? o.acts : actsFor(it);
+    return '<div class="irow' + (ui.sel === o.rk ? ' sel' : '') + '" tabindex="0"' + attr('item', it.id) + attr('rk', o.rk) + (r ? attr('rec', r.id) : '') +
+      (o.depth ? ' style="--ind:' + o.depth + '"' : '') + '><div class="ir-main">' + (o.depth ? '<span class="ind">&#8627;</span>' : '') + stIcon(st) +
+      '<a class="title" href="#" tabindex="-1"' + attr('item', it.id) + '>' + esc(it.title) + '</a>' + warnHtml(it) + dotHtml(it) + '<span class="grow"></span>' +
+      (acts ? '<span class="ir-acts">' + acts + '</span>' : '') + whoHtml(it) + priHtml(it) + dueHtml(it, st) + '</div>' +
+      '<div class="ir-more">' + detailsHtml(it, r, o.more) + '</div></div>';
+  }
+  function sub(label, n) { return '<div class="sub">' + label + (n != null ? ' <span class="subn">' + n + '</span>' : '') + '</div>'; }
+
   // ------------------------------------------------------------------ cards
 
-  function workRow(r, withActs) {
-    var it = VS.items[r.item];
-    var chainTxt = it.chain.length > 1 ? ' &middot; chain ' + esc(it.chain.join(' > ')) : '';
-    var acts = '';
-    if (withActs && r.status !== 'done') {
-      if (r.status !== 'doing') acts += btn('q-status', 'doing', { item: r.item, status: 'doing' });
-      if (r.status !== 'blocked') acts += btn('q-status', 'blocked', { item: r.item, status: 'blocked' });
-      acts += btn('status', 'Status...', { item: r.item });
-      if (r.status !== 'awaiting') acts += btn('close', 'Close', { item: r.item });
-      acts += btn('split', 'Split', { item: r.item }) + btn('handoff', 'Hand off...', { item: r.item });
-    }
-    return '<div class="row click"' + attr('item', r.item) + attr('rec', r.id) + '><div class="r1">' + recChip(r) + isNew('a:' + r.id) + prChip(it) +
-      titleRef(r.item) + dueChip(it) + rollupHtml(it) + (r.stale ? '<span class="chip warn" title="no status update for ' + E.STALE_DAYS + '+ days">stale</span>' : '') +
-      '<span class="grow"></span><span class="muted ts">' + esc(fmtTs(it.lastActivity)) + '</span></div>' +
-      '<div class="r2">' + source(r) + ' &middot; ' + complText(r.completion) + chainTxt + (it.project ? ' &middot; ' + esc(it.project) : '') +
-      (r.note ? '<br>&ldquo;' + esc(r.note) + '&rdquo; <span class="muted">(' + esc(r.noteBy) + ')</span>' : '') + '</div>' +
-      (acts ? '<div class="r3">' + acts + '</div>' : '') + '</div>';
-  }
-  function pendRow(r, acts) {
-    var it = VS.items[r.item];
-    return '<div class="row click"' + attr('item', r.item) + attr('rec', r.id) + '><div class="r1">' + recChip(r) + isNew('p:' + r.id) + prChip(it) + titleRef(r.item) + dueChip(it) +
-      '<span class="grow"></span><span class="muted ts">' + esc(fmtTs(r.ts)) + '</span></div>' +
-      '<div class="r2">' + source(r) + ' &middot; ' + complText(r.completion) + (r.handoffNote ? ' &middot; &ldquo;' + esc(r.handoffNote) + '&rdquo;' : '') +
-      (r.answerNote ? ' &middot; &ldquo;' + esc(r.answerNote) + '&rdquo;' : '') + '</div>' + (acts ? '<div class="r3">' + acts + '</div>' : '') + '</div>';
-  }
-  function answerBtns(r) {
-    return btn('accept', 'Accept', { item: r.item }, 'primary') + btn('note', 'Decline', { item: r.item, op: 'item.decline' }) + btn('open', 'Discuss', { item: r.item });
-  }
-
   // (331)-(334) The notification feed: one card, list only, newest first. Every entry
-  // is derived from the view state; an entry only opens the item's thread sheet, while
-  // Received requests and My team keep their notices and buttons. Read state is local
+  // is derived from the view state; an entry only opens the item's thread sheet, and the
+  // actions live on the item's row in the Items panel (357). Read state is local
   // UI state per viewer clone, like the handle badge's `seen`; no event is written
   // (in the product the daemon keeps it per clone on the local filesystem, (340)).
   var NK = { assigned: 'assigned', pending: 'pending', answer: 'answer', reference: 'for reference', done: 'done', blocked: 'blocked',
@@ -271,7 +372,7 @@
         add('d:' + r.id + ':' + (it.due < t ? 'over' : 'today'), 'due', r.item, it.due + 'T00:00:00Z', it.due < t ? 'overdue since ' + esc(it.due) : 'due today');
     });
     VS.my.received.pending.map(A).forEach(function (r) {
-      add('p:' + r.id, 'pending', r.item, r.ts, '<b>' + esc(nm(r.sender)) + '</b> ' + (r.handoffOf ? 'hands you their assignment' : 'sent you a pending assignment') + '; answer it on Received requests');
+      add('p:' + r.id, 'pending', r.item, r.ts, '<b>' + esc(nm(r.sender)) + '</b> ' + (r.handoffOf ? 'hands you their assignment' : 'sent you a pending assignment') + '; answer it on its row (Items, received requests)');
     });
     VS.notices.forEach(function (x) {
       var r = A(x.assignment), txt;
@@ -335,125 +436,111 @@
     }).join('') + '</div>';
   }
 
-  // Morning check: my open work by priority and due, what waits for my answer, what waits for my confirm.
+  // (358) Today: a compact summary that stays visible whatever scope the Items panel
+  // shows. My open work by priority then due, what waits for my answer, what waits for
+  // my confirm; the rows are item rows, so Accept / Confirm are their hover actions.
   function cardToday() {
     var t = VS.my.today, h = '';
-    h += '<div class="sub">my open work (priority, then due)</div>' + (t.work.length ? t.work.map(function (id) {
-      var r = A(id), it = VS.items[r.item];
-      return '<div class="row click"' + attr('item', r.item) + '><div class="r1">' + prChip(it) + recChip(r) + titleRef(r.item) + dueChip(it) +
-        (r.stale ? '<span class="chip warn">stale</span>' : '') + '<span class="grow"></span><span class="muted">' + esc(nm(r.by)) + '</span></div></div>';
-    }).join('') : '<p class="muted">Nothing open.</p>');
-    if (t.pending.length) h += '<div class="sub">waiting for my answer</div>' + t.pending.map(function (id) { return pendRow(A(id), answerBtns(A(id))); }).join('');
-    if (t.confirms.length) h += '<div class="sub">waiting for my confirm</div>' + t.confirms.map(function (id) {
-      var r = A(id);
-      return '<div class="row click"' + attr('item', r.item) + '><div class="r1">' + stChip('awaiting') + prChip(VS.items[r.item]) + titleRef(r.item) + '<span class="muted">' + esc(nm(r.to)) + '</span>' +
-        '<span class="grow"></span>' + btn('confirm', 'Confirm', { item: r.item, who: r.to }, 'primary') + btn('note', 'Reject', { item: r.item, who: r.to, op: 'item.reject' }) + '</div>' +
-        (r.note ? '<div class="r2">&ldquo;' + esc(r.note) + '&rdquo;</div>' : '') + '</div>';
-    }).join('');
+    h += sub('my open work', t.work.length) + (t.work.length ? t.work.map(function (id) { return irow({ rk: 'today:' + id, item: A(id).item, rec: A(id) }); }).join('') : '<p class="muted">Nothing open.</p>');
+    if (t.pending.length) h += sub('waiting for my answer', t.pending.length) + t.pending.map(function (id) { return irow({ rk: 'today:' + id, item: A(id).item, rec: A(id) }); }).join('');
+    if (t.confirms.length) h += sub('waiting for my confirm', t.confirms.length) + t.confirms.map(function (id) { return irow({ rk: 'today:' + id, item: A(id).item, rec: A(id) }); }).join('');
     return card('Today', t.work.length + ' open, ' + t.pending.length + ' to answer, ' + t.confirms.length + ' to confirm', h, '', 'card-today');
   }
 
-  function cardMine(v) {
-    var mine = VS.my.assignments.map(A);
-    var openR = mine.filter(function (r) { return r.status !== 'done'; }), done = mine.filter(function (r) { return r.status === 'done'; });
-    var m = modeOf('mine');
-    if (m !== 'list') return card('My assignments', openR.length + ' open', modeBody('mine', m, v), picker('mine'), 'card-mine', m);
-    var h = openR.length ? openR.map(function (r) { return workRow(r, true); }).join('') : '<p class="muted">Nothing open is assigned to you.</p>';
-    if (done.length) h += '<div class="sub">done</div>' + done.map(function (r) {
-      return '<div class="row click"' + attr('item', r.item) + '><div class="r1">' + stChip('done') + titleRef(r.item) + '<span class="grow"></span><span class="muted">' + source(r) + '</span></div></div>';
-    }).join('');
-    if (VS.my.created.length) h += '<div class="sub">created by me, not assigned</div>' + VS.my.created.map(function (id) {
-      var it = VS.items[id];
-      return '<div class="row click"' + attr('item', id) + '><div class="r1">' + stChip(it.status) + kindChip(it) + titleRef(id) + '<span class="grow"></span>' +
-        btn('assign', 'Assign', { item: id }) + '</div></div>';
-    }).join('');
-    return card('My assignments', openR.length + ' open', h, picker('mine'), 'card-mine', m);
-  }
+  // ------------------------------------------------------------- Items panel
+  //
+  // (357) One panel replaces My assignments, Received requests, Assigned by me, My team,
+  // and Items: scope presets (SCOPES) crossed with the view modes each scope offers
+  // (SCOPE_MODES). (360) It opens on "mine"; the chosen scope and each scope's mode are
+  // remembered per store in memory, like the side cards' modes, and never written.
 
-  function cardRequests() {
-    var R = VS.my.received, ans = VS.notices.filter(function (x) { return x.kind === 'declined' || x.kind === 'returned'; });
-    if (!R.pending.length && !R.answered.length && !R.sent.length && !ans.length) return '';
-    var h = ans.length ? '<div class="sub">answers to what I sent</div>' + ans.map(function (x) {
-      var r = A(x.assignment);
-      var txt = x.kind === 'declined' ? '<b>' + esc(nm(x.to)) + '</b> declined' :
-        '<b>' + esc(nm(x.endedBy)) + '</b> (lead of ' + esc(nm(x.to)) + ') returned ' + esc(nm(x.to)) + '\'s accepted ' + (r.handoffOf ? 'handoff' : 'assignment') +
-        (x.restores ? '; ' + esc(nm(x.from)) + '\'s assignment is restored' : r.handoffOf ? '; nobody holds it now' : '');
-      return '<div class="tm-work click notice"' + attr('item', x.item) + attr('notice', x.key) + '>' + isNew(x.key) + recChip(r) + titleRef(x.item) + '<span class="muted">' + txt +
-        (x.note ? ': &ldquo;' + esc(x.note) + '&rdquo;' : '') + ', ' + esc(fmtTs(x.ts)) + '</span></div>';
-    }).join('') : '';
-    h += R.pending.length ? R.pending.map(function (id) { return pendRow(A(id), answerBtns(A(id))); }).join('') : '<p class="muted">No pending assignments to you.</p>';
-    if (R.answered.length) h += '<div class="sub">answered</div>' + R.answered.map(function (id) { return pendRow(A(id)); }).join('');
-    if (R.sent.length) h += '<div class="sub">sent by me</div>' + R.sent.map(function (id) {
-      var r = A(id);
-      return pendRow(r, r.state === 'pending' ? '<span class="muted">to <b>' + esc(nm(r.to)) + '</b></span>' + btn('unassign', 'Withdraw', { item: r.item, who: r.to }) : '<span class="muted">to <b>' + esc(nm(r.to)) + '</b></span>');
-    }).join('');
-    return card('Received requests', R.pending.length + ' pending', '<p class="r2" style="margin:0 0 6px">Pending assignments: someone outside your lead chain, or a handoff. Not counted in any roll-up until accepted.</p>' + h, '', 'card-received');
-  }
+  function panelState() { return (ui.panel[ui.store] = ui.panel[ui.store] || { scope: 'mine', modes: {} }); }
+  function scopeList() { return SCOPES.filter(function (x) { return x[0] !== 'team' || VS.my.team.length; }); }
+  function scopeOf() { var s = panelState().scope; return scopeList().some(function (x) { return x[0] === s; }) ? s : 'mine'; }
+  function panelMode(s) { var m = panelState().modes[s]; return m && SCOPE_MODES[s].some(function (x) { return x[0] === m; }) ? m : 'list'; }
 
-  // Lead perspective: notices, then what each follower (down to 3 levels) works on, whoever assigned it.
-  function cardMyTeam(v) {
-    var team = VS.my.team, notices = VS.notices.filter(function (x) { return x.kind === 'accepted' || x.kind === 'handoff'; });
-    if (!team.length && !notices.length) return '';
-    var totals = { open: 0, blocked: 0, pending: 0, stale: 0 }, h = '';
-    if (notices.length) h += '<div class="sub">for reference: accepted assignments</div>' + notices.map(function (x) {
-      var r = A(x.assignment);
-      var txt = x.kind === 'accepted' ? '<b>' + esc(nm(x.to)) + '</b> accepted ' + (r.handoffOf ? 'a handoff from ' + esc(nm(r.sender)) : 'an assignment from ' + esc(nm(x.by))) + ' (you are their lead)' :
-        '<b>' + esc(nm(x.to)) + '</b> took over ' + esc(nm(x.from)) + '\'s assignment you gave (handoff accepted)';
-      return '<div class="tm-work click notice"' + attr('item', x.item) + attr('notice', x.key) + '>' + isNew(x.key) + recChip(r) + titleRef(x.item) + '<span class="muted">' + txt + ', ' + esc(fmtTs(x.ts)) + '</span>' +
-        '<span class="grow"></span>' + (x.kind === 'accepted' && r.state === 'live' ? btn('note', 'Return', { item: x.item, who: x.to, op: 'item.return' }) : '') + '</div>';
+  function listMine() {
+    var mine = VS.my.assignments.map(A), open = mine.filter(function (r) { return r.status !== 'done'; }), done = mine.filter(function (r) { return r.status === 'done'; });
+    var h = open.length ? open.map(function (r) { return irow({ rk: 'mine:' + r.id, item: r.item, rec: r }); }).join('') : '<p class="muted">Nothing open is assigned to you.</p>';
+    if (done.length) h += sub('done', done.length) + done.map(function (r) { return irow({ rk: 'mine:' + r.id, item: r.item, rec: r }); }).join('');
+    if (VS.my.created.length) h += sub('created by me, not assigned', VS.my.created.length) + VS.my.created.map(function (id) { return irow({ rk: 'mine:c:' + id, item: id }); }).join('');
+    return h;
+  }
+  function answerTxt(x) {
+    var r = A(x.assignment);
+    return (x.kind === 'declined' ? '<b>' + esc(nm(x.to)) + '</b> declined what you sent' :
+      '<b>' + esc(nm(x.endedBy)) + '</b> (lead of ' + esc(nm(x.to)) + ') returned ' + esc(nm(x.to)) + '\'s accepted ' + (r.handoffOf ? 'handoff' : 'assignment') +
+      (x.restores ? '; ' + esc(nm(x.from)) + '\'s assignment is restored' : r.handoffOf ? '; nobody holds it now' : '')) +
+      (x.note ? ': &ldquo;' + esc(x.note) + '&rdquo;' : '') + ', ' + esc(fmtTs(x.ts));
+  }
+  function listReceived() {
+    var R = VS.my.received, ans = VS.notices.filter(function (x) { return x.kind === 'declined' || x.kind === 'returned'; }), h = '';
+    function rows(ids, pre, more) { return ids.map(function (id) { var r = A(id); return irow({ rk: pre + id, item: r.item, rec: r, more: more && more(r) }); }).join(''); }
+    if (ans.length) h += sub('answers to what I sent', ans.length) + ans.map(function (x) { return irow({ rk: 'rcv:a:' + x.key, item: x.item, rec: A(x.assignment), more: answerTxt(x) }); }).join('');
+    h += sub('waiting for my answer', R.pending.length) + (R.pending.length ? rows(R.pending, 'rcv:p:') : '<p class="muted">No pending assignments to you.</p>');
+    if (R.answered.length) h += sub('answered', R.answered.length) + rows(R.answered, 'rcv:d:');
+    if (R.sent.length) h += sub('sent by me', R.sent.length) + rows(R.sent, 'rcv:s:', function (r) { return 'sent to <b>' + esc(nm(r.to)) + '</b>'; });
+    return h;
+  }
+  function listGiven() {
+    var v = VS.viewer.member;
+    if (!VS.my.given.length) return '<div class="empty">You have not assigned anything to others.</div>';
+    return VS.my.given.map(function (id) {
+      var lines = VS.items[id].assignments.map(A).filter(function (r) { return (r.by === v || r.sender === v) && r.to !== v && (r.state === 'live' || r.state === 'pending'); }).sort(byRank).map(function (r) {
+        return '<b>' + esc(nm(r.to)) + '</b>' + (r.depth ? ' <span class="muted">L' + r.depth + '</span>' : '') + ' ' + esc(SI.info(stKey(null, r)).label) + (r.forced ? '' : ' <span class="muted">(' + (r.handoffOf ? 'handoff' : 'sent') + ')</span>') +
+          (r.note ? ' &ldquo;' + esc(r.note) + '&rdquo;' : '');
+      });
+      return irow({ rk: 'given:' + id, item: id, more: lines.join('<br>') });
     }).join('');
-    h += team.map(function (p) {
-      var m = VS.members[p.id];
-      totals.open += p.open.length; totals.blocked += p.blocked; totals.pending += p.pending.length; totals.stale += p.stale;
-      var x = '<div class="tm-person" style="--d:' + (p.depth - 1) + '"' + attr('person', p.id) + '><div class="tm-head"><b>' + esc(m.name) + '</b><span class="nid">' + esc(p.id) + '</span>' +
-        '<span class="chip">L' + p.depth + '</span>' + (m.children.length ? '<span class="chip">lead</span>' : '') +
-        '<span class="muted">' + p.open.length + ' open' + (p.done ? ', ' + p.done + ' done' : '') + '</span>' +
-        (p.blocked ? '<span class="chip st-blocked">' + p.blocked + ' blocked</span>' : '') +
-        (p.stale ? '<span class="chip warn">' + p.stale + ' stale</span>' : '') +
-        (p.pending.length ? '<span class="chip st-pending">' + p.pending.length + ' unaccepted</span>' : '') +
-        (p.waiting.length ? '<span class="chip st-pending" title="pending assignments they sent that nobody accepted yet">' + p.waiting.length + ' waiting on others</span>' : '') +
-        '<span class="grow"></span><span class="muted ts" title="last update on their work">' + esc(fmtTs(p.last)) + '</span></div>';
-      x += p.open.map(function (id) {
-        var r = A(id), it = VS.items[r.item];
-        return '<div class="tm-work click"' + attr('item', r.item) + '>' + recChip(r) + prChip(it) + titleRef(r.item) + dueChip(it) + rollupHtml(it) +
-          (r.stale ? '<span class="chip warn">stale</span>' : '') +
-          '<span class="muted">' + source(r) + (r.note ? ' &middot; &ldquo;' + esc(r.note) + '&rdquo;' : '') + '</span>' +
-          '<span class="grow"></span><span class="muted ts">' + esc(fmtTs(r.lastUpdate)) + '</span></div>';
-      }).join('');
-      x += p.pending.map(function (id) {
+  }
+  // (357) My team as a group-by-person view: each group header carries that person's roll-up counts.
+  function listTeam() {
+    return VS.my.team.map(function (p) {
+      var m = VS.members[p.id], c = [p.open.length + ' open'];
+      if (p.done) c.push(p.done + ' done');
+      if (p.blocked) c.push('<span class="err">' + p.blocked + ' blocked</span>');
+      if (p.stale) c.push('<span class="err">' + p.stale + ' stale</span>');
+      if (p.pending.length) c.push(p.pending.length + ' unaccepted');
+      if (p.waiting.length) c.push('<span' + tipAttr('pending assignments they sent that nobody accepted yet') + '>' + p.waiting.length + ' waiting on others</span>');
+      var h = '<div class="tg" style="--d:' + (p.depth - 1) + '"' + attr('person', p.id) + '><div class="tg-head"><i class="av">' + esc(initials(p.id)) + '</i><b>' + esc(m.name) + '</b>' +
+        '<span class="nid">' + esc(p.id) + ' L' + p.depth + (m.children.length ? ', lead' : '') + '</span><span class="cnt">' + c.join(' &middot; ') + '</span><span class="grow"></span>' +
+        '<span class="muted ts"' + tipAttr('last update on their work') + '>' + esc(fmtTs(p.last)) + '</span></div>';
+      h += p.open.concat(p.pending).map(function (id) { var r = A(id); return irow({ rk: 'team:' + id, item: r.item, rec: r }); }).join('');
+      h += p.waiting.map(function (id) {
         var r = A(id);
-        return '<div class="tm-work click pend"' + attr('item', r.item) + '>' + stChip('pending') + titleRef(r.item) +
-          '<span class="muted">' + source(r) + '</span><span class="grow"></span><span class="muted ts">' + esc(fmtTs(r.ts)) + '</span></div>';
+        return irow({ rk: 'team:w:' + id, item: r.item, rec: r, more: esc(nm(p.id)) + ' sent this to <b>' + esc(nm(r.to)) + '</b>' + (r.handoffOf ? ' (handoff)' : '') + '; not accepted yet' });
       }).join('');
-      x += p.waiting.map(function (id) {
-        var r = A(id);
-        return '<div class="tm-work click pend"' + attr('item', r.item) + '>' + stChip('pending') + titleRef(r.item) +
-          '<span class="muted">sent to ' + esc(nm(r.to)) + (r.handoffOf ? ' (handoff)' : '') + ', not accepted yet</span><span class="grow"></span><span class="muted ts">' + esc(fmtTs(r.ts)) + '</span></div>';
-      }).join('');
-      return x + '</div>';
-    }).join('');
-    var m = modeOf('myteam');
-    return card('My team', team.length + ' below you, ' + totals.open + ' open' + (totals.blocked ? ', ' + totals.blocked + ' blocked' : '') +
-      (totals.stale ? ', ' + totals.stale + ' stale' : '') + (totals.pending ? ', ' + totals.pending + ' unaccepted' : ''),
-      m !== 'list' ? modeBody('myteam', m, v) :
-      '<p class="r2" style="margin:0 0 6px">Everything your followers (down to 3 levels) are working on, whoever assigned it. Stale: doing or blocked with no status update for ' + E.STALE_DAYS + '+ days.</p>' + h, picker('myteam'), 'card-team', m);
+      return h + '</div>';
+    }).join('') || '<div class="empty">Nobody below you.</div>';
   }
-
-  function cardGiven(v) {
-    var m = modeOf('given'), chip = VS.my.given.length + (VS.my.given.length === 1 ? ' item' : ' items') + (VS.my.today.confirms.length ? ', ' + VS.my.today.confirms.length + ' to confirm' : '');
-    if (m !== 'list') return card('Assigned by me', chip, modeBody('given', m, v), picker('given'), 'card-given', m);
-    var h = VS.my.given.length ? VS.my.given.map(function (id) {
-      var it = VS.items[id];
-      var as = it.assignments.map(A).filter(function (r) { return (r.by === v || r.sender === v) && r.to !== v && (r.state === 'live' || r.state === 'pending'); }).sort(byRank);
-      return '<div class="row click"' + attr('item', id) + '><div class="r1">' + stChip(it.status) + prChip(it) + titleRef(id) + dueChip(it) + rollupHtml(it) + '</div>' +
-        as.map(function (r) {
-          return '<div class="assignee-line"><b>' + esc(nm(r.to)) + '</b>' + (r.depth ? '<span class="muted">L' + r.depth + '</span>' : '') + recChip(r) +
-            (r.forced ? '' : '<span class="muted">' + (r.handoffOf ? 'handoff' : 'sent') + '</span>') +
-            (r.note ? '<span class="muted">&ldquo;' + esc(r.note) + '&rdquo;</span>' : '') +
-            (r.state === 'live' && r.status === 'awaiting' && r.by === v ? btn('confirm', 'Confirm', { item: r.item, who: r.to }, 'primary') + btn('note', 'Reject', { item: r.item, who: r.to, op: 'item.reject' }) : '') + '</div>';
-        }).join('') + '</div>';
-    }).join('') : '<div class="empty">You have not assigned anything to others.</div>';
-    return card('Assigned by me', chip, h, picker('given'), 'card-given', m);
+  function allRows(kanban) { return VS.itemOrder.map(function (id) { return VS.items[id]; }).filter(kanban ? function (it) { return !it.hidden && kindFilter(it); } : itemFilter); }
+  function listAll() {
+    var rows = allRows();
+    return '<div class="toolbar">' + itemFilterBar() + '</div>' + (rows.length ? rows.map(function (it) { return irow({ rk: 'all:' + it.id, item: it.id, depth: it.depth }); }).join('') : '<div class="empty">No items match.</div>');
+  }
+  function scopeChip(s) {
+    if (s === 'mine') return VS.my.assignments.map(A).filter(function (r) { return r.status !== 'done'; }).length + ' open';
+    if (s === 'received') return VS.my.received.pending.length + ' pending';
+    if (s === 'given') return VS.my.given.length + (VS.my.given.length === 1 ? ' item' : ' items') + (VS.my.today.confirms.length ? ', ' + VS.my.today.confirms.length + ' to confirm' : '');
+    if (s === 'team') {
+      var t = { open: 0, blocked: 0, stale: 0, pending: 0 };
+      VS.my.team.forEach(function (p) { t.open += p.open.length; t.blocked += p.blocked; t.stale += p.stale; t.pending += p.pending.length; });
+      return VS.my.team.length + ' below you, ' + t.open + ' open' + (t.blocked ? ', ' + t.blocked + ' blocked' : '') + (t.stale ? ', ' + t.stale + ' stale' : '') + (t.pending ? ', ' + t.pending + ' unaccepted' : '');
+    }
+    return allRows(panelMode('all') === 'kanban').length + ' of ' + Object.keys(VS.items).length;
+  }
+  var LISTS = { mine: listMine, received: listReceived, given: listGiven, team: listTeam, all: listAll };
+  function cardPanel(v) {
+    var s = scopeOf(), m = panelMode(s);
+    var scopes = '<span class="scopes" role="tablist" aria-label="scope">' + scopeList().map(function (x) {
+      return '<button type="button" class="scp' + (x[0] === s ? ' on' : '') + '" role="tab" aria-selected="' + (x[0] === s) + '"' + attr('act', 'scope') + attr('scope', x[0]) + tipAttr(x[2]) + '>' + esc(x[1]) + '</button>';
+    }).join('') + '</span>';
+    var modes = SCOPE_MODES[s].length > 1 ? '<span class="cmodes">' + SCOPE_MODES[s].map(function (x) {
+      return '<button class="btn mini' + (m === x[0] ? ' primary' : '') + '"' + attr('act', 'pmode') + attr('mode', x[0]) + '>' + x[1] + '</button>';
+    }).join('') + '</span>' : '';
+    var body = m === 'list' ? LISTS[s](v) : modeBody(s, m, v);
+    return '<section class="card panel" id="card-items"' + attr('scope', s) + attr('view', m) + '><header><h2>Items</h2>' + scopes + '<span class="chip">' + esc(scopeChip(s)) + '</span><span class="grow"></span>' + modes +
+      '</header><div class="cbody">' + body + '</div></section>';
   }
 
   function cardTeam(v) {
@@ -510,21 +597,6 @@
     return 'kind ' + sel('f-kind', ui.kind, [['all', 'all'], ['task', 'task'], ['todo', 'todo'], ['topic', 'topic'], ['request', 'request (pending assignment)']]) +
       (kindOnly ? '' : ' status ' + sel('f-status', ui.status, ['all', 'open', 'blocked', 'done', 'hidden']));
   }
-  function cardItems() {
-    var m = modeOf('items'), rows = VS.itemOrder.map(function (id) { return VS.items[id]; }).filter(m === 'kanban' ? function (it) { return !it.hidden && kindFilter(it); } : itemFilter);
-    if (m !== 'list') return card('Items', rows.length + ' of ' + Object.keys(VS.items).length, modeBody('items', m), picker('items'), 'card-items', m);
-    var h = '<div class="toolbar">' + itemFilterBar() + '</div>';
-    h += rows.length ? rows.map(function (it) {
-      var as = it.assignments.map(A).filter(function (r) { return r.state === 'live' || r.state === 'pending'; });
-      var who = as.length ? '<span class="muted">&rarr; ' + esc(as.length > 4 ? as.length + ' people' : as.map(function (a) { return a.to + (a.state === 'pending' ? '?' : ''); }).join(', ')) + '</span>' : '';
-      return '<div class="row click"' + attr('item', it.id) + ' style="padding-left:' + it.depth * 14 + 'px"><div class="r1">' + (it.depth ? '<span class="muted">&#8627;</span>' : '') +
-        stChip(it.status) + prChip(it) + titleRef(it.id) + dueChip(it) + who + rollupHtml(it) + (it.concurrent ? '<span class="chip conc-c">concurrent ' + it.concurrent + '</span>' : '') +
-        '<span class="grow"></span>' + kindChip(it) + '</div>' +
-        '<div class="r2">' + esc(it.alias) + ' by ' + esc(nm(it.author)) + (it.project ? ' &middot; ' + esc(it.project) : '') + ' &middot; ' + esc(fmtTs(it.lastActivity)) + '</div></div>';
-    }).join('') : '<div class="empty">No items match.</div>';
-    return card('Items', rows.length + ' of ' + Object.keys(VS.items).length, h, picker('items'), 'card-items', m);
-  }
-
   function cardActivity() {
     var chip = VS.stats.events + ' events, ' + VS.stats.flagged + ' flagged' + (VS.stats.concurrent ? ', ' + VS.stats.concurrent + ' concurrent' : ''), m = modeOf('activity');
     if (m !== 'list') return card('Activity', chip, modeBody('activity', m), picker('activity'), 'card-activity', m);
@@ -566,9 +638,9 @@
 
   // ------------------------------------------------------------- view modes
 
-  // (303) The kanban, activity timeline, due timeline, and calendar renderers draw a
-  // card's body, scoped to that card's own rows and filters. A card in one of these
-  // modes spans the full row of the cards layout (304).
+  // (303) The kanban, activity timeline, due timeline, and calendar renderers draw the
+  // body of the Items panel for one scope (its own rows; "all" keeps its filters), or of
+  // the Activity card. The panel is the wide main zone (359), so no mode spans rows.
   function modeBody(key, m, v) {
     if (m === 'kanban') return kanbanBody(key, v);
     if (m === 'gantt') return ganttBody(key, dueRows(key, v));
@@ -576,9 +648,8 @@
     if (m === 'activity') return activityBody();
     return '';
   }
-  // The assignment records an assignment card shows: mine (live plus pending to me),
-  // given (what I assigned or handed to others, live or pending), myteam (followers'
-  // open and unaccepted work).
+  // The assignment records a scope shows: mine (live plus pending to me), given (what I
+  // assigned or handed to others, live or pending), team (followers' open and unaccepted work).
   function assignRecs(key, v) {
     if (key === 'mine') return VS.my.assignments.concat(VS.my.received.pending).map(A);
     if (key === 'given') return [].concat.apply([], VS.my.given.map(function (id) {
@@ -587,18 +658,18 @@
     return [].concat.apply([], VS.my.team.map(function (p) { return p.open.concat(p.pending); })).map(A);
   }
 
-  // Kanban: columns by status. Assignment cards: cards are assignments (with the
-  // pending column); Items: cards are items. Dragging moves only the viewer's own
+  // Kanban: columns by status. Assignment scopes: cards are assignments (with the
+  // pending column); "all": cards are items. Dragging moves only the viewer's own
   // live assignment (item.status, or item.close on the done column).
   var KCOLS = { assign: ['pending', 'todo', 'doing', 'blocked', 'awaiting', 'done'],
     items: ['unassigned', 'pending', 'todo', 'doing', 'blocked', 'awaiting', 'done', 'declined', 'returned'] };
   function kanbanBody(key, v) {
-    var cols = KCOLS[key === 'items' ? 'items' : 'assign'], buckets = {};
+    var cols = KCOLS[key === 'all' ? 'items' : 'assign'], buckets = {};
     cols.forEach(function (c) { buckets[c] = []; });
-    if (key === 'items') {
+    if (key === 'all') {
       VS.itemOrder.forEach(function (id) {
         var it = VS.items[id];
-        // the columns already are the statuses, so the Items status filter would only empty them: kind filter only
+        // the columns already are the statuses, so the status filter would only empty them: kind filter only
         if (it.hidden || it.kind === 'topic' || !buckets[it.status] || !kindFilter(it)) return;
         var mineR = it.assignments.map(A).filter(function (r) { return r.to === v && r.state === 'live'; })[0];
         buckets[it.status].push({ item: id, drag: mineR && mineR.status !== 'done' ? id : null,
@@ -609,20 +680,22 @@
         var col = r.state === 'pending' ? 'pending' : r.status;
         if (!buckets[col]) return;
         buckets[col].push({ item: r.item, rec: r, drag: r.to === v && r.state === 'live' && r.status !== 'done' ? r.item : null,
-          sub: (key !== 'mine' ? esc(nm(r.to)) + ' &middot; ' : '') + source(r) });
+          who: key !== 'mine' ? r.to : null, sub: (key !== 'mine' ? esc(nm(r.to)) + ' &middot; ' : '') + source(r) });
       });
     }
     Object.keys(buckets).forEach(function (c) {
       buckets[c].sort(function (x, y) { var a = VS.items[x.item], b = VS.items[y.item]; return b.priorityLevel - a.priorityLevel || ((a.due || '9') < (b.due || '9') ? -1 : 1); });
     });
-    var h = '<div class="toolbar">' + (key === 'items' ? itemFilterBar(true) : '') +
+    var h = '<div class="toolbar">' + (key === 'all' ? itemFilterBar(true) : '') +
       '<span class="muted">drag a card to change the status of your own assignment (done = close)</span></div><div class="kanban">';
     h += cols.map(function (c) {
-      return '<div class="kcol"' + attr('kcol', c) + '><div class="khead">' + stChip(c) + ' <span class="muted">' + buckets[c].length + '</span></div>' +
+      return '<div class="kcol"' + attr('kcol', c) + '><div class="khead">' + stIcon(c) + '<b>' + esc(SI.info(c).label) + '</b> <span class="muted">' + buckets[c].length + '</span></div>' +
         buckets[c].map(function (x) {
+          // (356) quiet cards: title, then initials (the record's assignee off "mine"), priority, due; the source on hover
           var it = VS.items[x.item];
-          return '<div class="kcard' + (x.drag ? ' drag' : '') + '"' + (x.drag ? ' draggable="true"' + attr('drag', x.drag) : '') + attr('item', x.item) + '>' +
-            '<div class="r1">' + prChip(it) + titleRef(x.item) + dueChip(it) + '</div><div class="r2">' + x.sub + '</div></div>';
+          return '<div class="kcard' + (x.drag ? ' drag' : '') + '"' + (x.drag ? ' draggable="true"' + attr('drag', x.drag) : '') + attr('item', x.item) + tipHtml(x.sub) + '>' +
+            '<div class="kc-t">' + titleRef(x.item) + '</div><div class="kc-m">' + warnHtml(it) + dotHtml(it) + (x.who ? '<span class="who"><i class="av">' + esc(initials(x.who)) + '</i></span>' : whoHtml(it)) +
+            '<span class="grow"></span>' + priHtml(it) + dueHtml(it, x.rec ? stKey(it, x.rec) : c) + '</div></div>';
         }).join('') + '</div>';
     }).join('');
     return h + '</div>' + lastWrite();
@@ -655,22 +728,22 @@
 
   function dayNum(d) { return Math.floor(Date.parse(String(d).slice(0, 10) + 'T00:00:00Z') / 86400000); }
   function dayStr(n) { return new Date(n * 86400000).toISOString().slice(0, 10); }
-  // The dated rows a due timeline or calendar draws for a card: one per item on
-  // Items (its filters apply), one per assignment record on an assignment card,
+  // The dated rows a due timeline or calendar draws for a scope: one per item on
+  // "all" (its filters apply), one per assignment record on an assignment scope,
   // with the record's own state and, off "mine", the assignee.
   function dueRows(key, v) {
     function dated(it) { return it && it.due && !it.hidden && it.kind !== 'topic'; }
-    if (key === 'items') return VS.itemOrder.map(function (id) { return VS.items[id]; }).filter(function (it) { return dated(it) && itemFilter(it); })
-      .map(function (it) { return { item: it.id, status: it.status, chip: stChip(it.status), who: '' }; });
+    if (key === 'all') return VS.itemOrder.map(function (id) { return VS.items[id]; }).filter(function (it) { return dated(it) && itemFilter(it); })
+      .map(function (it) { return { item: it.id, status: it.status, chip: stIcon(it.status), who: '' }; });
     return assignRecs(key, v).filter(function (r) { return dated(VS.items[r.item]); }).map(function (r) {
-      return { item: r.item, status: r.state === 'live' ? r.status : r.state, chip: recChip(r), who: key === 'mine' ? '' : nm(r.to) };
+      return { item: r.item, status: stKey(null, r), chip: stIcon(stKey(null, r)), who: key === 'mine' ? '' : nm(r.to) };
     });
   }
   function whoTag(x) { return x.who ? '<span class="muted">' + esc(x.who) + '</span>' : ''; }
   // Due-date timeline: one bar per row, from the item's start (first doing, else
   // creation) to its due day.
   function ganttBody(key, rows) {
-    var bar = key === 'items' ? itemFilterBar() : '';
+    var bar = key === 'all' ? itemFilterBar() : '';
     if (!rows.length) return '<div class="toolbar">' + bar + '</div><div class="empty">No items with a due date match.</div>';
     var t0 = dayNum(today()), lo = t0, hi = t0;
     rows.forEach(function (x) { var it = VS.items[x.item]; lo = Math.min(lo, dayNum(it.started || it.ts), dayNum(it.due)); hi = Math.max(hi, dayNum(it.due)); });
@@ -682,7 +755,7 @@
       '<div class="gantt"><div class="grow-axis"><div class="glabel"></div><div class="gtrack axis">' + axis + '</div></div>';
     h += rows.map(function (x) {
       var it = VS.items[x.item], s = dayNum(it.started || it.ts), e = dayNum(it.due) + 1, over = it.due < today() && x.status !== 'done';
-      return '<div class="grow-row click"' + attr('item', it.id) + '><div class="glabel">' + prChip(it) + x.chip + titleRef(it.id) + whoTag(x) + '</div>' +
+      return '<div class="grow-row click"' + attr('item', it.id) + '><div class="glabel">' + x.chip + titleRef(it.id) + whoTag(x) + priHtml(it) + '</div>' +
         '<div class="gtrack"><span class="gnow" style="left:' + pct(t0) + '"></span><span class="gbar st-' + esc(x.status) + (over ? ' over' : '') + '" style="left:' + pct(Math.min(s, e - 1)) + ';width:' + ((Math.max(1, e - Math.min(s, e - 1))) / span * 100).toFixed(2) + '%" title="' +
         esc((it.started ? 'started ' : 'created ') + String(it.started || it.ts).slice(0, 10) + ' - due ' + it.due) + '">' + esc(it.due.slice(5)) + '</span></div></div>';
     }).join('');
@@ -697,13 +770,13 @@
     var prev = new Date(Date.UTC(y, mo - 2, 1)).toISOString().slice(0, 7), next = new Date(Date.UTC(y, mo, 1)).toISOString().slice(0, 7);
     var n = Object.keys(byDay).filter(function (k) { return k.slice(0, 7) === m; }).reduce(function (s, k) { return s + byDay[k].length; }, 0);
     var h = '<div class="toolbar">' + btn('cal', '&lsaquo;', { month: prev, card: key }) + '<b>' + esc(m) + '</b>' + btn('cal', '&rsaquo;', { month: next, card: key }) +
-      btn('cal', 'today', { month: today().slice(0, 7), card: key }) + (key === 'items' ? itemFilterBar() : '') + '<span class="muted">' + n + ' due in ' + esc(m) + '</span></div>' +
+      btn('cal', 'today', { month: today().slice(0, 7), card: key }) + (key === 'all' ? itemFilterBar() : '') + '<span class="muted">' + n + ' due in ' + esc(m) + '</span></div>' +
       '<div class="cal">' + ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(function (d) { return '<div class="cdow">' + d + '</div>'; }).join('');
     for (var i = 0; i < dow; i++) h += '<div class="cday off"></div>';
     for (var d = 1; d <= days; d++) {
       var ds = m + '-' + (d < 10 ? '0' : '') + d, list = byDay[ds] || [];
       h += '<div class="cday' + (ds === today() ? ' now' : '') + '"' + attr('day', ds) + '><div class="cnum">' + d + '</div>' + list.map(function (x) {
-        return '<div class="citem click"' + attr('item', x.item) + '>' + x.chip + prChip(VS.items[x.item]) + titleRef(x.item) + whoTag(x) + '</div>';
+        return '<div class="citem click"' + attr('item', x.item) + tipHtml(SI.info(x.status).label + ' · ' + VS.items[x.item].priorityName + (x.who ? ' · ' + esc(x.who) : '')) + '>' + x.chip + titleRef(x.item) + '</div>';
       }).join('') + '</div>';
     }
     return h + '</div>';
@@ -775,50 +848,19 @@
     return h;
   }
 
-  // The drawer has one layout, the cards layout (303). A card in a wide mode leaves the
-  // masonry and spans the full row above it; the remaining cards flow below (304).
-  // LAYOUT is the cards' reading order; packMasonry() places them.
-  var LAYOUT = ['notify', 'today', 'mine', 'received', 'given', 'myteam', 'items', 'chat', 'org', 'activity', 'data'];
+  // (359) The drawer has two zones: the Items panel as the wide main zone, and a side
+  // column stacking Notifications, Today, Support agent, Team, Activity, and Data in
+  // SIDE order. At narrow widths the side column moves above the panel (style.css).
+  var SIDE = ['notify', 'today', 'chat', 'org', 'activity', 'data'];
   function drawerHtml(name, v) {
     var vs = VS, nMem = Object.keys(vs.members).filter(function (id) { return !vs.members[id].removed; }).length;
-    var CARDS = { notify: cardNotify, today: cardToday, mine: cardMine, received: cardRequests, given: cardGiven, myteam: cardMyTeam, items: cardItems,
-      chat: cardChat, org: cardTeam, activity: cardActivity, data: cardData };
+    var CARDS = { notify: cardNotify, today: cardToday, chat: cardChat, org: cardTeam, activity: cardActivity, data: cardData };
     var h = '<div class="dr-title"><b>' + esc(vs.store.label) + '</b><span>' + nMem + ' members, ' + vs.stats.events + ' events from ' + vs.stats.commits + ' commits, ' +
       vs.stats.flagged + ' flagged</span><span class="grow"></span>' +
       '<button class="btn primary" data-act="create"><svg class="i"><use href="#i-plus"/></svg>New</button></div>' + syncHtml(name);
     if (!vs.viewer.isMember) h += '<p class="err">' + esc(v) + ' is not a member of this store (removed or never joined): writes are flagged.</p>';
-    var wide = '', rest = LAYOUT.map(function (k) {
-      var html = CARDS[k](v);
-      if (html && isWide(k)) { wide += html; return ''; }
-      return html;
-    }).join('');
-    return h + (wide ? '<div class="dr-wide">' + wide + '</div>' : '') + '<div class="dr-mason">' + rest + '</div>';
-  }
-
-  // Masonry (board (347) c): each card, in LAYOUT order, goes to the currently shortest of
-  // N equal columns, N following the body's width, so cards keep their natural height and
-  // the first N cards read left to right across the top. Chosen over CSS columns, which
-  // read top to bottom then left to right and rebalance every card when one grows, and
-  // over CSS masonry, which is not shipped. Packed on every render and resize; a card that
-  // grows in place (an opened <details>) keeps its column until the next render.
-  var MASON_MIN = 360, MASON_GAP = 10;
-  function packMasonry() {
-    var box = document.querySelector('#drbody .dr-mason');
-    if (!box) return;
-    // a fresh render holds the cards directly, in reading order; a repack (resize) reuses that order
-    var cards = box.__cards && box.querySelector(':scope > .dr-mcol') ? box.__cards : Array.prototype.slice.call(box.children);
-    box.__cards = cards;
-    var n = Math.max(1, Math.floor((box.clientWidth + MASON_GAP) / (MASON_MIN + MASON_GAP)));
-    var cols = [];
-    box.textContent = '';
-    for (var i = 0; i < n; i++) { var c = document.createElement('div'); c.className = 'dr-mcol'; box.appendChild(c); cols.push(c); }
-    cards.forEach(function (card) {
-      var low = cols[0];
-      cols.forEach(function (c) { if (c.offsetHeight < low.offsetHeight) low = c; });
-      low.appendChild(card);
-    });
-    var chat = box.querySelector('.chat-log');
-    if (chat) chat.scrollTop = chat.scrollHeight; // newest message at the bottom; a move resets the scroll
+    return h + '<div class="dr-zones"><div class="dr-main">' + cardPanel(v) + '</div><div class="dr-side">' +
+      SIDE.map(function (k) { return CARDS[k](v); }).join('') + '</div></div>';
   }
 
   // ------------------------------------------------------------ thread sheet
@@ -857,7 +899,7 @@
     var h = '<div class="sh-top"><div class="sh-head"><div>' + kindChip(it) + '</div><h2>' + esc(it.title) + '</h2>' +
       '<button class="btn mini" data-act="sheet-close" title="close (Esc)"><svg class="i"><use href="#i-x"/></svg></button></div>';
     h += '<dl class="sh-meta"><dt>id</dt><dd><code>' + esc(it.alias) + '</code> <span class="muted">(' + esc(it.id) + ')</span></dd>' +
-      '<dt>status</dt><dd>' + (it.kind === 'topic' ? '<span class="muted">topic: discussion only</span>' : stChip(it.status) + ' ' + rollupHtml(it)) + '</dd>' +
+      '<dt>status</dt><dd>' + (it.kind === 'topic' ? '<span class="muted">topic: discussion only</span>' : stIcon(it.status) + ' ' + stChip(it.status) + ' ' + rollupHtml(it)) + '</dd>' +
       (it.kind !== 'topic' ? '<dt>priority</dt><dd>' + prChip(it) + '</dd><dt>due</dt><dd>' + (it.due ? dueChip(it) + ' ' + esc(it.due) : '<span class="muted">-</span>') + '</dd>' : '') +
       '<dt>creator</dt><dd>' + esc(nm(it.author)) + (VS.members[it.author] && VS.members[it.author].admin ? ' <span class="chip admin">admin</span>' : '') + '</dd>' +
       '<dt>project</dt><dd>' + (it.project ? esc(it.project) : '<span class="muted">-</span>') + '</dd>' +
@@ -1322,6 +1364,11 @@
     VS = vss[name]; EV = {};
     VS.events.forEach(function (e) { EV[e.id] = e; });
     if (ui.item && !VS.items[ui.item]) { ui.item = null; ui.sheet = false; }
+    // per-render row marks (356): flagged writes in an item's own thread, unread notification entries per item
+    FLAGGED = {}; UNREAD = {};
+    VS.events.forEach(function (e) { if (e.status === 'flagged' && e.thread && VS.items[e.thread]) FLAGGED[e.thread] = (FLAGGED[e.thread] || 0) + 1; });
+    var rm = readMap();
+    feedEntries(v).forEach(function (x) { if (!rm[x.key]) UNREAD[x.item] = (UNREAD[x.item] || 0) + 1; });
 
     $('viewer').innerHTML = Object.keys(VS.members).map(function (k) {
       var m = VS.members[k];
@@ -1330,16 +1377,26 @@
     $('vclone').innerHTML = (VS.clones[v] || []).map(function (c) {
       return '<option value="' + esc(c.stream) + '"' + (c.stream === s ? ' selected' : '') + '>' + esc(E.cloneOf(c.stream)) + (c.online ? '' : ' (offline)') + (c.unpushed ? ' *' : '') + '</option>';
     }).join('');
-    $('vstore').textContent = name;
     $('vclock').textContent = fmtTs(ui.clock[name]);
     renderHandles();
     $('drawer').classList.toggle('open', !!ui.open);
 
     var body = $('drbody'), sb = $('sheet').firstElementChild, top1 = body.scrollTop, top2 = sb.scrollTop;
     var draft = $('cbox') ? $('cbox').value : '';
+    // (350) cards scroll inside; keep each card's scroll and the focused row across the re-render
+    var scrolls = {}, fa = document.activeElement, focusRk = fa && fa.closest && body.contains(fa) && fa.closest('[data-rk]');
+    focusRk = focusRk && focusRk.getAttribute('data-rk');
+    Array.prototype.forEach.call(body.querySelectorAll('.card[id] > .cbody'), function (c) { scrolls[c.parentNode.id] = c.scrollTop; });
+    hideTip();
     body.innerHTML = drawerHtml(name, v);
-    packMasonry();
+    Array.prototype.forEach.call(body.querySelectorAll('.card[id] > .cbody'), function (c) { if (scrolls[c.parentNode.id]) c.scrollTop = scrolls[c.parentNode.id]; });
+    var chat = body.querySelector('.chat-log');
+    if (chat) chat.scrollTop = chat.scrollHeight; // newest message at the bottom
     body.scrollTop = top1;
+    var fr = focusRk && lastInput === 'key' && body.querySelector('[data-rk="' + CSS.escape(focusRk) + '"]');
+    if (fr) fr.focus({ preventScroll: true });
+    var sr = ui.sel && body.querySelector('[data-rk="' + CSS.escape(ui.sel) + '"]');
+    if (sr) placeMore(sr);
     var open = ui.sheet && ui.item;
     $('sheet').classList.toggle('open', !!open);
     $('sheet').setAttribute('aria-hidden', String(!open));
@@ -1381,6 +1438,28 @@
   }
   function gearMenu(open) { $('gmenu').hidden = !open; $('gear').setAttribute('aria-expanded', String(open)); }
 
+  // (355) The immediate custom tooltip: one fixed element shown at once for whatever
+  // [data-tip] the pointer or keyboard focus is on (the browser's title waits ~1s).
+  var tipFor = null;
+  function showTip(el) {
+    var t = $('tip');
+    tipFor = el; t.textContent = el.getAttribute('data-tip'); t.hidden = false;
+    var r = el.getBoundingClientRect(), w = t.offsetWidth, h = t.offsetHeight;
+    var x = Math.max(6, Math.min(r.left + r.width / 2 - w / 2, window.innerWidth - w - 6)), y = r.bottom + 6;
+    if (y + h > window.innerHeight - 6) y = r.top - h - 6;
+    t.style.left = Math.round(x) + 'px'; t.style.top = Math.round(y) + 'px';
+  }
+  function hideTip() { tipFor = null; $('tip').hidden = true; }
+  // A row's detail overlay opens below it, or above when below would leave the card's
+  // scroll box (the drawer body for the Items panel, which does not scroll itself).
+  function placeMore(row) {
+    var m = row.querySelector(':scope > .ir-more'), box = row.closest('.panel') ? $('drbody') : row.closest('.cbody');
+    if (!m || !box) return;
+    var b = box.getBoundingClientRect(), r = row.getBoundingClientRect(), h = m.offsetHeight;
+    row.classList.toggle('up', r.bottom + h > b.bottom && r.top - h >= b.top);
+  }
+  var lastPointer = 'mouse', lastInput = 'pointer'; // the focused row is restored after a re-render only for keyboard use
+
   var QUICK = { 'q-status': 1, 'q-close': 1, confirm: 1, unassign: 1, accept: 1, ihide: 1, chide: 1, comment: 1 };
 
   function init() {
@@ -1417,6 +1496,8 @@
         else if (k === 'sheet-close') { ui.sheet = false; render(); }
         else if (k === 'dlg-cancel') closeDialog();
         else if (k === 'open') showItem(d.item);
+        else if (k === 'scope') { panelState().scope = a.getAttribute('data-scope'); ui.sel = null; render(); }
+        else if (k === 'pmode') { panelState().modes[scopeOf()] = a.getAttribute('data-mode'); render(); }
         else if (k === 'cmode') { (ui.cmodes[ui.store] = ui.cmodes[ui.store] || {})[a.getAttribute('data-card')] = a.getAttribute('data-mode'); render(); }
         else if (k === 'cal') { ui.calMonth[a.getAttribute('data-card')] = a.getAttribute('data-month'); render(); }
         else if (k === 'clock') { tick(ui.store, Number(a.getAttribute('data-min'))); render(); }
@@ -1436,6 +1517,12 @@
         else if (QUICK[k]) { if (k === 'comment' || a.getAttribute('data-note')) ui.clearDraft = true; quick(k, a); }
         else openDialog(k, d);
         return;
+      }
+      // (354) touch: a tap selects a row, which shows its actions and details as a hover
+      // would; a tap on the selected row (or on its title) opens the thread
+      var row = t.closest('.irow');
+      if (row && lastPointer === 'touch' && !t.closest('a.title') && ui.sel !== row.getAttribute('data-rk')) {
+        e.preventDefault(); ui.sel = row.getAttribute('data-rk'); render(); return;
       }
       var nk = t.closest('[data-nkey]');
       if (nk) readMap()[nk.getAttribute('data-nkey')] = true; // a feed entry is read once clicked
@@ -1486,12 +1573,29 @@
       if (t.id === 'data-details') ui.dataOpen = t.open;
       else if (t.getAttribute('data-owner')) ui.openLogs[t.getAttribute('data-owner')] = t.open;
     }, true);
+    document.addEventListener('pointerdown', function (e) { lastPointer = e.pointerType || 'mouse'; lastInput = 'pointer'; }, true);
+    document.addEventListener('mouseover', function (e) {
+      var tt = e.target.closest && e.target.closest('[data-tip]');
+      if (tt && tt !== tipFor) showTip(tt); else if (!tt && tipFor) hideTip();
+      var row = e.target.closest && e.target.closest('.irow');
+      if (row && !row.contains(e.relatedTarget)) placeMore(row);
+    });
+    document.addEventListener('focusin', function (e) {
+      var row = e.target.closest && e.target.closest('.irow');
+      if (row) placeMore(row);
+      if (e.target.matches && e.target.matches('button[data-tip]')) showTip(e.target); else if (tipFor) hideTip();
+    });
+    document.addEventListener('scroll', function () { if (tipFor) hideTip(); }, true);
+    document.addEventListener('mouseout', function (e) { if (!e.relatedTarget && tipFor) hideTip(); });
     document.addEventListener('keydown', function (e) {
+      lastInput = 'key';
+      // (354) keyboard: a focused row shows its actions and details; Enter opens its thread
+      if (e.key === 'Enter' && e.target.classList && e.target.classList.contains('irow')) { e.preventDefault(); showItem(e.target.getAttribute('data-item')); return; }
       if (e.key !== 'Escape' || $('dlg').open) return;
       if (!$('gmenu').hidden) { gearMenu(false); return; }
       if (ui.sheet) { ui.sheet = false; render(); } else if (ui.open) { var n = ui.open; ui.open = null; syncNow(n, true); render(); }
     });
-    window.addEventListener('resize', function () { measure(); packMasonry(); });
+    window.addEventListener('resize', measure);
     render();
   }
 

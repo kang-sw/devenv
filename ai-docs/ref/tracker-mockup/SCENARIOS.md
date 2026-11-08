@@ -14,10 +14,19 @@ Snags are classified:
   5, 7 and 8 were walked again afterwards; each snag below ends with its
   resolution and the re-walk result.
 
+The layout change of board (350), (352)-(360) merged My assignments, Received
+requests, Assigned by me, My team, and Items into one Items panel with scope
+presets, and moved the card buttons to hover actions on the rows. Scenarios 1,
+2, 3, 4, 5, 8 and 10 were walked again through the new panel (2026-11-08) with
+the same outcomes; their steps below name the new places. A row action is
+reached by hovering the row (or focusing it, or tapping it on touch) and
+clicking its icon.
+
 ## 1. Morning check
 
 Steps: view as `maya.pc`; read the Today card; accept ivy's pending review
-from it; confirm ivy's close of Tokenizer from it.
+from its row there (Accept); confirm ivy's close of Tokenizer from its row
+there (Confirm).
 
 Outcome: Today lists my open work by priority then due ("Prepare Friday demo"
 긴급, due today; "Ship search v2" 긴급, 11-20; "Security training" 알림, 11-30),
@@ -25,7 +34,7 @@ the pending assignment waiting for my answer (ivy's "Review the emoji
 tokenizer fix", assigner confirms), and the close waiting for my confirm
 (ivy on Tokenizer). Accept made the review a live assignment that keeps ivy
 as assigner (she confirms), and it moved into my open work; Confirm moved
-Tokenizer to done. Both buttons dispatch from the card.
+Tokenizer to done. Both actions dispatch from the Today rows.
 
 Snags:
 
@@ -34,9 +43,11 @@ Snags:
 
 ## 2. A lead finds stuck work
 
-Steps: view as `maya.pc`, `raj.pc`, then `ada.pc`; read My team.
+Steps: view as `maya.pc`, `raj.pc`, then `ada.pc`; read the Items panel's
+*my team* scope.
 
-Outcome: each follower row counts open, blocked, stale, and unaccepted work.
+Outcome: each follower's group header counts open, blocked, stale, and
+unaccepted work.
 maya sees lena's unaccepted request from noa, omar's blocked "Shard writer
 docs" (omar's late commit, the display winner over her reject), and ivy's
 stale "Security training" (doing since 11-02). raj sees sven, tia and noa
@@ -47,7 +58,8 @@ Snags:
 
 - V2 (view, fixed): a follower's own pending assignments to others that
   nobody accepted were invisible to their lead (noa's request to lena did not
-  show on raj's view). My team now shows "N waiting on others" and the rows.
+  show on raj's view). My team now shows "N waiting on others" and the rows
+  (today in the follower's group of the *my team* scope).
 - M1 (model): "stale" was never defined on the board. The mockup uses "live,
   doing or blocked, no status write for 3 days"; a comment by the assignee
   does not reset it, and todo work never goes stale (otherwise every
@@ -59,14 +71,15 @@ Snags:
 
 ## 3. Accepted, returned by the accepter's lead, sent again
 
-Steps: as `lena.pc`, accept noa's pending "Explain the tokenizer API" from
-Received requests; as `maya.pc` (lena's lead), open the reference notice in My
-team and Return with a note; as `noa.pc`, open the item and assign it to lena
-again.
+Steps: as `lena.pc`, accept noa's pending "Explain the tokenizer API" from its
+row in the *received requests* scope; as `maya.pc` (lena's lead), read the
+reference notice on the Notifications card, then Return with a note from the
+item's row in lena's group of the *my team* scope; as `noa.pc`, open the item
+and assign it to lena again.
 
-Outcome: on accept, maya's My team shows "Lena Weiss accepted an assignment
-from Noa Fisher (you are their lead)" with Return, and maya's handle badge
-counts it. The return ends lena's assignment as `returned` with maya's note;
+Outcome: on accept, maya's Notifications card shows "Lena Weiss accepted an
+assignment from Noa Fisher (you are their lead)", the row in lena's group
+offers Return, and maya's handle badge counts it. The return ends lena's assignment as `returned` with maya's note;
 the item status is `returned` and it leaves every roll-up. noa's new
 `item.assign` is valid (nothing live or pending to lena remains) and creates a
 fresh pending assignment; the returned one stays in history.
@@ -83,9 +96,9 @@ Snags:
   on return (no new event type).
   **Resolved (285)**: derived `declined` / `returned` notices (keys `dec:` /
   `ret:`). Re-walk: after maya's return, noa's badge holds
-  `ret:noa.pc#4>lena` and her Received requests card opens with "Maya Ortiz
-  (lead of Lena Weiss) returned Lena Weiss's accepted assignment" and the
-  note. The fixture shows the decline side: tia has `dec:tia.pc#4>uma`.
+  `ret:noa.pc#4>lena` and her *received requests* scope opens with an
+  "answers to what I sent" row whose details read "Maya Ortiz (lead of Lena
+  Weiss) returned Lena Weiss's accepted assignment" and the note. The fixture shows the decline side: tia has `dec:tia.pc#4>uma`.
 
 ## 4. A member leaves
 
@@ -115,8 +128,9 @@ Snags:
   **Resolved (286)**: `item.handoff` takes an `assignee`, allowed for an
   admin on any member's live assignment. Re-walk: ada opens "Shard writer
   docs", clicks *Hand off (admin)* on omar's row, hands it to jon; jon's
-  Received card shows "admin handoff of Omar Haddad's assignment by Ada Park
-  (assigner Maya Ortiz)"; jon accepts and starts at omar's `blocked`
+  *received requests* row shows "admin handoff of Omar Haddad's assignment by
+  Ada Park (assigner Maya Ortiz)" in its details; jon accepts from the row and
+  starts at omar's `blocked`
   (290); omar's assignment is `handed`; then ada removes omar. The scenario's
   order now works.
 - M4 (model): removing a member leaves their live and pending assignments in
@@ -135,7 +149,8 @@ Snags:
 ## 5. An agent auto-updates status; the human sees and corrects it
 
 Steps: as `lena.pc`, set "Index builder" to blocked through the status dialog
-with origin `agent-auto`; see it on My assignments and in the thread; correct
+(the row's Status action in the *mine* scope) with origin `agent-auto`; see it
+in the row's details ("set by Lena Weiss's agent") and in the thread; correct
 it from the thread composer (doing, with a note).
 
 Outcome: the agent's write is valid (agent-auto on the author's own
@@ -147,7 +162,8 @@ Snags:
 
 - V5 (view, fixed): cards showed an agent-written status like a human one
   (only the note author). Assignment rows now carry a "by agent" chip, from
-  the view state's `statusOrigin`.
+  the view state's `statusOrigin` (today "set by ...'s agent" in the row's
+  details).
 - M5 (model): when the agent writes from one clone and the human corrects
   from another clone of the same member without having synced, (271)
   applies: the later ts wins with no marker. Checked in the engine: a human
@@ -202,15 +218,18 @@ Snags:
 
 ## 8. An assignee hands off to a peer; the peer accepts
 
-Steps: as `lena.pc`, Hand off "Index builder" to ivy with a note; as `ivy.pc`,
-accept it from Received requests; as `maya.pc`, read My team.
+Steps: as `lena.pc`, Hand off "Index builder" to ivy with a note (the row's
+Hand off action); as `ivy.pc`, accept it from its row in the *received
+requests* scope; as `maya.pc`, read the Notifications card and ivy's group in
+the *my team* scope.
 
 Outcome: until ivy accepts, lena still holds her assignment (doing) and ivy's
-is pending, shown on ivy's Received card and badge as a handoff from lena
-with maya as assigner. On accept lena's assignment ends as `handed` and
+is pending, shown in ivy's *received requests* scope and badge as a handoff
+from lena with maya as assigner. On accept lena's assignment ends as `handed` and
 ivy's is live with maya still the assigner (confirm and unassign stay with
 her). maya, ivy's lead and the original assigner, gets one notice ("Ivy Chen
-accepted a handoff from Lena Weiss") with Return.
+accepted a handoff from Lena Weiss") on the Notifications card, and the row in
+ivy's group of the *my team* scope offers Return.
 
 Snags:
 
@@ -226,9 +245,10 @@ Snags:
   handoff restores the original assignment (`handed` back to `live`), or at
   least notifies the original assigner (ties to M2).
   **Resolved (291)**: both. Re-walk: maya returns ivy's accepted handoff from
-  her My team notice; lena's assignment is live again at `doing` (restored),
-  the item stays `doing`, and lena's Received card says "Lena Weiss's
-  assignment is restored". Checked in the engine: when the original
+  her My team notice (today: the row in ivy's group of the *my team* scope);
+  lena's assignment is live again at `doing` (restored), the item stays
+  `doing`, and lena's Received card (today: the *received requests* scope)
+  says "Lena Weiss's assignment is restored". Checked in the engine: when the original
   assigner is not the returning lead (raj's handoff to sven, returned by
   raj), the assigner lena gets the `ret:` notice and raj's assignment is
   restored. No restore happens when the original holder was removed or
@@ -271,7 +291,8 @@ Outcome: maya's card lists ten entries, all unread, newest first: due today,
 two mentions (bo's topic body, lena's comment), a confirm, a pending
 assignment, a reply, completion and blocked of work she assigned, a
 reference notice, and a forced assignment. The click opened the thread sheet
-and cleared that entry only; *Mark all read* cleared the rest. In the thread
+and cleared that entry only; *Mark all read* cleared the rest, and with them
+the unread dots on the Items panel's rows. In the thread
 `lena.pc-6` shows `@Maya Ortiz` / `@Omar Haddad` chips and an
 `index-layout-v2.png` chip that toggled from "not loaded" to "loaded";
 `lena.pc-7` shows its 50 MiB attachment struck through with the over-limit
