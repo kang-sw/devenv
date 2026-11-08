@@ -824,6 +824,8 @@
   // The "all" tree passes opt.rest, which draws a node's non-spine children (its closed units)
   // as the "closed N" row instead; there a node toggles between the default and 'f' only.
   // The kids of a node are its non-hidden children (opt.kids replaces that), in item order.
+  // A match's chain of ancestors stops below the first hidden one, or the first opt.keep(id) refuses
+  // (the "all" scope's kind filter), so neither shows as a context row; the match then roots there.
   function kidsShown(id) { var it = VS.items[id]; return it ? it.children.filter(function (k) { return VS.items[k] && !VS.items[k].hidden; }) : []; }
   function foldOf(id) { return ui.tfold[ui.store + '|' + id] || ''; }
   // rows: the scope's matches in its own order, each an irow option object ({ rk, item, rec?, more?, closed? }).
@@ -837,7 +839,10 @@
     VS.itemOrder.forEach(function (id, i) { pos[id] = i; });
     rows.forEach(function (r, i) {
       (byItem[r.item] = byItem[r.item] || []).push(r);
-      for (var cur = r.item, n = 0; cur && VS.items[cur] && n < 50; cur = VS.items[cur].parent, n++) if (!(cur in rank)) rank[cur] = i;
+      for (var cur = r.item, n = 0; cur && VS.items[cur] && n < 50; cur = VS.items[cur].parent, n++) {
+        if (cur !== r.item && (VS.items[cur].hidden || (opt.keep && !opt.keep(cur)))) break;
+        if (!(cur in rank)) rank[cur] = i;
+      }
     });
     function inItemOrder(a, b) { return (pos[a] || 0) - (pos[b] || 0); }
     Object.keys(rank).forEach(function (id) { var p = VS.items[id].parent; if (p && p in rank) (spine[p] = spine[p] || []).push(id); });
@@ -883,7 +888,8 @@
       }).join('');
     }).join('');
   }
-  function treeRows(rows, pre) { return treeHtml(ctxTree(rows), pre); }
+  function treeRows(rows, pre, opt) { return treeHtml(ctxTree(rows, opt), pre); }
+  function keepKind(id) { return kindFilter(VS.items[id]); }
 
   function listMine() {
     var mine = VS.my.assignments.map(A).filter(keepRec), open = mine.filter(function (r) { return r.status !== 'done'; }), done = mine.filter(function (r) { return r.status === 'done'; });
@@ -966,7 +972,7 @@
     var bar = '<div class="toolbar">' + itemFilterBar() + '</div>';
     if (ui.status !== 'open') {
       var rows = allRows().filter(function (it) { return keepItem(it.id); });
-      return bar + (rows.length ? treeRows(rows.map(function (it) { return { rk: 'all:' + it.id, item: it.id }; }), 'all:') : FILT ? filterEmpty() : '<div class="empty">' + wsT("js.tk.list.all.nomatch") + '</div>');
+      return bar + (rows.length ? treeRows(rows.map(function (it) { return { rk: 'all:' + it.id, item: it.id }; }), 'all:', { keep: keepKind }) : FILT ? filterEmpty() : '<div class="empty">' + wsT("js.tk.list.all.nomatch") + '</div>');
     }
     var base = {}, order = [], kids = {}, openBelow = {};
     VS.itemOrder.forEach(function (id) { var it = VS.items[id]; if (!it.hidden && kindFilter(it)) { base[id] = it; order.push(id); } });
@@ -986,7 +992,7 @@
     if (FILT) {
       var main = order.filter(function (id) { return inTree(id) && keepItem(id); }), shut = order.filter(function (id) { return isUnit(id) && keepItem(id); });
       shut.forEach(function (id) { addClosed(closeTs(base[id]), 1, irow({ rk: 'all:' + id, item: id, closed: true })); });
-      return bar + (main.length ? treeRows(main.map(function (id) { return { rk: 'all:' + id, item: id, closed: isClosed(id) }; }), 'all:') : shut.length ? '<p class="muted">' + wsT("js.tk.list.nomatch") + '</p>' : filterEmpty());
+      return bar + (main.length ? treeRows(main.map(function (id) { return { rk: 'all:' + id, item: id, closed: isClosed(id) }; }), 'all:', { keep: keepKind }) : shut.length ? '<p class="muted">' + wsT("js.tk.list.nomatch") + '</p>' : filterEmpty());
     }
     // the tree's matches are the open items and the greyed closed parents; a node's closed units are its "closed N" row
     function closedRow(id, cu, depth) {
@@ -999,7 +1005,7 @@
     order.forEach(function (id) {
       if (isUnit(id) && !(parentOf(id) && (isUnit(parentOf(id)) || inTree(parentOf(id))))) addClosed(latest(id), size(id), unitRows(id, 0));
     });
-    return bar + (tree.length ? treeHtml(ctxTree(tree, { kids: function (id) { return base[id] ? kidsOf(id).filter(function (k) { return inTree(k) || isUnit(k); }) : []; }, rest: closedRow }), 'all:') :
+    return bar + (tree.length ? treeHtml(ctxTree(tree, { kids: function (id) { return base[id] ? kidsOf(id).filter(function (k) { return inTree(k) || isUnit(k); }) : []; }, rest: closedRow, keep: function (id) { return !!base[id]; } }), 'all:') :
       '<div class="empty">' + wsT("js.tk.list.all.none") + '</div>');
   }
   function scopeChip(s) {
@@ -1257,7 +1263,7 @@
   function ganttBody(key, rows) {
     var bar = key === 'all' ? itemFilterBar() : '';
     if (!rows.length) return '<div class="toolbar">' + bar + '</div><div class="empty">' + wsT("js.tk.gantt.empty") + '</div>';
-    var ents = ctxTree(rows), below = {};
+    var ents = ctxTree(rows, key === 'all' ? { keep: keepKind } : null), below = {};
     // [first day, day after the last] of an item's own bar, or null without a due date
     function own(id) {
       var it = VS.items[id];
@@ -1893,7 +1899,9 @@
   function mentionPick(i) {
     var box = $('cbox'), id = MP && MP.ids[i];
     if (!box || !id) return;
-    var end = box.selectionStart, spaced = /\s/.test(box.value.charAt(end)), ref = MP.ch === '#';
+    // The pick replaces the whole token, the part after the caret too (`@ma|ry`).
+    var end = box.selectionStart + /^[^\s@#]*/.exec(box.value.slice(box.selectionStart))[0].length;
+    var spaced = /\s/.test(box.value.charAt(end)), ref = MP.ch === '#';
     box.setRangeText((ref ? '#' + VS.items[id].alias : '@' + id) + (spaced ? '' : ' '), MP.start, end, 'end');
     if (spaced) box.selectionStart = box.selectionEnd = box.selectionEnd + 1;
     if (!ref && ui.mdraft.indexOf(id) < 0) ui.mdraft.push(id);

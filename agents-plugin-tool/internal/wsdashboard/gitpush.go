@@ -54,7 +54,7 @@ const (
 func pushGit(root string) (pushRefusal, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), gitActionTimeout)
 	defer cancel()
-	run := &gitBadgeRunner{}
+	run := &gitBadgeRunner{timeout: gitActionTimeout}
 	st, ok := wsgit.BranchSync(ctx, run, root)
 	if !ok {
 		return pushRan, branchErr(run)
@@ -95,7 +95,7 @@ const (
 func pullGit(root string) (pullOutcome, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), gitActionTimeout)
 	defer cancel()
-	run := &gitBadgeRunner{}
+	run := &gitBadgeRunner{timeout: gitActionTimeout}
 	st, ok := wsgit.BranchSync(ctx, run, root)
 	if !ok {
 		return pullRan, branchErr(run)
@@ -122,10 +122,21 @@ func pullGit(root string) (pullOutcome, error) {
 			return pullRan, err
 		}
 	}
+	run.err = nil
 	if st, ok = wsgit.BranchSync(ctx, run, root); !ok {
 		return pullRan, branchErr(run)
 	}
+	// The fetch may have pruned the upstream, or the count may have failed:
+	// either leaves Behind 0, which must not read as nothing to pull. With
+	// a branch and an upstream, the only failure BranchSync passes over is
+	// the count's.
 	switch {
+	case st.Head == "":
+		return pullDetached, nil
+	case st.Upstream == "":
+		return pullNoUpstream, nil
+	case run.err != nil:
+		return pullRan, branchErr(run)
 	case st.Behind == 0:
 		return pullCurrent, nil
 	case st.Ahead > 0:
@@ -194,17 +205,31 @@ func gitPushArgs(remote, branch, merge string) []string {
 	return []string{"push", "--", remote, "refs/heads/" + branch + ":" + merge}
 }
 
-// gitActionErrText is a failed action's message for the drawer: the first
-// line of git's output that says what went wrong, skipping the destination
-// or source line, hints, and blank lines, with its runs of spaces folded,
-// bounded.
+// gitActionErrText is a failed action's message for the drawer: the line of
+// git's output that says what went wrong, with its runs of spaces folded,
+// bounded. A ref's rejection line ("! [rejected]", "! [remote rejected]")
+// comes first, then an "error:" or "fatal:" line, then the first other line
+// that is not the destination or source line, a hint, or blank, so a hook's
+// "remote: ..." chatter never hides the reason.
 func gitActionErrText(out string, err error) string {
+	best, bestRank := "", 3
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.Join(strings.Fields(line), " ")
-		if line == "" || strings.HasPrefix(line, "To ") || strings.HasPrefix(line, "From ") || strings.HasPrefix(line, "hint:") {
+		rank := 2
+		switch {
+		case line == "" || strings.HasPrefix(line, "To ") || strings.HasPrefix(line, "From ") || strings.HasPrefix(line, "hint:"):
 			continue
+		case strings.HasPrefix(line, "! ["):
+			rank = 0
+		case strings.HasPrefix(line, "error:") || strings.HasPrefix(line, "fatal:"):
+			rank = 1
 		}
-		return gitErrText(fmt.Errorf("%s", line))
+		if rank < bestRank {
+			best, bestRank = line, rank
+		}
+	}
+	if best != "" {
+		return gitErrText(fmt.Errorf("%s", best))
 	}
 	return gitErrText(err)
 }

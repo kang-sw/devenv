@@ -3,6 +3,7 @@ package mcp
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -382,6 +383,78 @@ func TestGitSearchDashPaths(t *testing.T) {
 		}
 		if got := f.mustSearch(t, args); !strings.HasSuffix(got, "1) dash line\n") {
 			t.Errorf("blame (revisions %v) = %q", revs, got)
+		}
+	}
+}
+
+// TestGitSearchNeutralisesAHostileRepoConfig: a repository whose own config
+// points an external diff, a textconv driver, a pager, and an fsmonitor hook
+// at sentinel scripts runs none of them under git.search, though plain git
+// in the same repository runs the diff, textconv, and fsmonitor ones (the
+// pager needs a terminal, which neither has).
+func TestGitSearchNeutralisesAHostileRepoConfig(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("sentinel programs are shell scripts")
+	}
+	f := newGitSearchFixture(t)
+	marks := t.TempDir()
+	sentinel := func(name, tail string) string {
+		path := filepath.Join(marks, name+".sh")
+		script := "#!/bin/sh\necho ran >> '" + filepath.Join(marks, name) + "'\n" + tail
+		if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	ran := func() []string {
+		var names []string
+		for _, name := range []string{"external", "textconv", "pager", "fsmonitor"} {
+			if _, err := os.Stat(filepath.Join(marks, name)); err == nil {
+				names = append(names, name)
+			}
+		}
+		return names
+	}
+	runGit(t, f.repo, "config", "diff.external", sentinel("external", ""))
+	runGit(t, f.repo, "config", "diff.hostile.textconv", sentinel("textconv", "cat \"$1\"\n"))
+	runGit(t, f.repo, "config", "pager.log", sentinel("pager", "cat\n"))
+	runGit(t, f.repo, "config", "core.pager", sentinel("pager", "cat\n"))
+	runGit(t, f.repo, "config", "core.fsmonitor", sentinel("fsmonitor", "exit 1\n"))
+	mustWrite(t, f.repo, ".gitattributes", "*.txt diff=hostile\n")
+	runGit(t, f.repo, "add", ".gitattributes")
+	runGit(t, f.repo, "-c", "core.fsmonitor=false", "commit", "-qm", "attributes")
+	mustWrite(t, f.repo, "a.txt", "hello\nworld\nagain\nmore\n")
+	runGit(t, f.repo, "-c", "core.fsmonitor=false", "commit", "-qam", "three")
+
+	// The control: plain git runs the sentinels this config names.
+	runGitOutput(t, f.repo, "diff", "HEAD~1", "HEAD")
+	runGitOutput(t, f.repo, "show", "--no-ext-diff", "HEAD")
+	runGitOutput(t, f.repo, "status")
+	if got := ran(); strings.Join(got, ",") != "external,textconv,fsmonitor" {
+		t.Fatalf("the control ran %v, want external, textconv, and fsmonitor", got)
+	}
+	if err := os.RemoveAll(marks); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(marks, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"external", "textconv", "pager", "fsmonitor"} {
+		sentinel(name, "")
+	}
+
+	for _, args := range []map[string]any{
+		{"repo": f.repo, "command": "log", "options": []any{"-p", "-n2"}},
+		{"repo": f.repo, "command": "log", "options": []any{"--stat"}},
+		{"repo": f.repo, "command": "show", "revisions": []any{"HEAD"}},
+		{"repo": f.repo, "command": "grep", "pattern": "more"},
+		{"repo": f.repo, "command": "grep", "pattern": "world", "revisions": []any{"HEAD~1"}},
+		{"repo": f.repo, "command": "blame", "paths": []any{"a.txt"}},
+		{"repo": f.repo, "command": "ls-files"},
+	} {
+		f.mustSearch(t, args)
+		if got := ran(); len(got) != 0 {
+			t.Fatalf("git.search(%v) ran the sentinels %v", args, got)
 		}
 	}
 }

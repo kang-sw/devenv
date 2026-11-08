@@ -256,6 +256,13 @@ func (s *state) checkTargets(it *item, a string, p obj) rejection {
 }
 
 func (s *state) notAssignee(it *item, who string) rejection {
+	if r := s.pendingRec(it.id, who); r != nil && s.openRec(it.id, who) == nil {
+		// who holds only a rule request, which never holds the item itself.
+		if ru := s.ruleByID[r.rule]; ru != nil && !ru.includeRoot {
+			return rejection(who + " holds only a pending rule request on " + it.alias + "; accepting it assigns the members below " + who + ", not " + who)
+		}
+		return rejection(who + " has not accepted the pending rule request on " + it.alias)
+	}
 	if s.pendingRec(it.id, who) != nil {
 		return rejection(who + " has not accepted the pending assignment on " + it.alias)
 	}

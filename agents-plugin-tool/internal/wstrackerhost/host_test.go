@@ -380,6 +380,57 @@ func TestRegisterFailureAfterPushSaysTheRemoteHoldsIt(t *testing.T) {
 	}
 }
 
+// failFetchAfterPush is a runner whose first fetch after a successful push
+// fails, so wsledger.Register itself fails once the remote holds its push.
+type failFetchAfterPush struct {
+	mu            sync.Mutex
+	pushed, fired bool
+}
+
+func (r *failFetchAfterPush) RunGit(ctx context.Context, root string, args ...string) ([]byte, error) {
+	r.mu.Lock()
+	fail := r.pushed && !r.fired && slices.Contains(args, "fetch")
+	r.fired = r.fired || fail
+	r.mu.Unlock()
+	if fail {
+		return nil, errors.New("fetch broke")
+	}
+	out, err := batchRunner{}.RunGit(ctx, root, args...)
+	if err == nil && slices.Contains(args, "push") {
+		r.mu.Lock()
+		r.pushed = true
+		r.mu.Unlock()
+	}
+	return out, err
+}
+
+// TestRegisterFailureInsideTheLedgerAfterPush: a failure inside the ledger's
+// own registration, after its push landed, says the remote holds the push
+// too, naming the new store for its creator.
+func TestRegisterFailureInsideTheLedgerAfterPush(t *testing.T) {
+	w := newWorld(t)
+	p := &wstracker.Profile{Given: "Ada"}
+	for _, creator := range []bool{true, false} {
+		name, member := "creator2", "ada"
+		if !creator {
+			name, member = "joiner2", "jon"
+		}
+		h, err := New(Options{Root: filepath.Join(w.dir, name), Clock: w.clock, Runner: &failFetchAfterPush{}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = h.Register(context.Background(), RegisterRequest{ID: "team", Remote: w.remote, Member: member, Profile: p})
+		h.Close()
+		var held *RemoteHeldError
+		if !errors.As(err, &held) || held.Creator != creator || !strings.Contains(err.Error(), "fetch broke") {
+			t.Fatalf("%s: a ledger failure after the push = %v, want a RemoteHeldError with Creator %v", name, err, creator)
+		}
+		if w.remoteTip("refs/heads/tracker/id/"+member) == "" {
+			t.Fatalf("%s: the remote must hold the member's claim", name)
+		}
+	}
+}
+
 // TestPollSyncsTwoClones: the poll, which consults no tracker knob, brings
 // one clone's pushed write to the other, and holds the poll lock while it
 // runs.

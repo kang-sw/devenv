@@ -46,6 +46,10 @@ var supportProfiles = []struct{ name, backend string }{
 // choicesTTL is how long a harness's listed choices are reused.
 const choicesTTL = 5 * time.Minute
 
+// choicesFailTTL is how long a failed listing is reused, so a harness whose
+// listing hangs does not hold every choices request for choicesTimeout.
+const choicesFailTTL = 30 * time.Second
+
 // choicesTimeout bounds one harness's listing.
 const choicesTimeout = 15 * time.Second
 
@@ -121,6 +125,17 @@ type cachedChoices struct {
 	at      time.Time
 	models  []ModelChoice
 	efforts []string
+	// err is a failed listing's message; such an entry answers for
+	// choicesFailTTL only.
+	err string
+}
+
+// fresh reports whether c still answers at now.
+func (c cachedChoices) fresh(now time.Time) bool {
+	if c.err != "" {
+		return now.Sub(c.at) < choicesFailTTL
+	}
+	return now.Sub(c.at) < choicesTTL
 }
 
 // NewSupport returns a Support over opts, loading support.json; a missing
@@ -209,7 +224,10 @@ func (s *Support) harnesses() []SupportHarness {
 }
 
 // listChoices fills each available harness's models and efforts, from the
-// cache when fresh. A listing failure is that harness's error alone.
+// cache when fresh. A listing failure is that harness's error alone, and is
+// cached briefly too. A listing runs apart from ctx's cancellation, bounded
+// by choicesTimeout alone: a request its caller abandoned still fills the
+// cache for the next one instead of leaving it to list again.
 func (s *Support) listChoices(ctx context.Context, hs []SupportHarness) {
 	s.choicesMu.Lock()
 	defer s.choicesMu.Unlock()
@@ -223,11 +241,11 @@ func (s *Support) listChoices(ctx context.Context, hs []SupportHarness) {
 		if !ok {
 			continue
 		}
-		if c, ok := s.cache[h.Harness]; ok && now.Sub(c.at) < choicesTTL {
-			h.Models, h.Efforts = c.models, c.efforts
+		if c, ok := s.cache[h.Harness]; ok && c.fresh(now) {
+			h.Models, h.Efforts, h.Error = c.models, c.efforts, c.err
 			continue
 		}
-		lctx, cancel := context.WithTimeout(ctx, choicesTimeout)
+		lctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), choicesTimeout)
 		models, efforts, err := cl.Choices(lctx)
 		cancel()
 		if efforts != nil {
@@ -235,6 +253,7 @@ func (s *Support) listChoices(ctx context.Context, hs []SupportHarness) {
 		}
 		if err != nil {
 			h.Error = err.Error()
+			s.cache[h.Harness] = cachedChoices{at: now, models: h.Models, efforts: h.Efforts, err: h.Error}
 			continue
 		}
 		if models != nil {

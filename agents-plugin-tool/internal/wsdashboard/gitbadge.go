@@ -1,6 +1,7 @@
 package wsdashboard
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net/http"
@@ -114,16 +115,32 @@ func readGitBadge(root string) GitBadge {
 
 // gitBadgeRunner runs git as wsgit.ExecRunner does, but in the C locale, so
 // a non-repository is told apart by git's message whatever the user's
-// language, and it keeps the last failure for the badge's title.
-type gitBadgeRunner struct{ err error }
+// language, and it keeps the last failure for the badge's title. Its output
+// is stdout alone, which the callers parse: a warning git writes to stderr
+// on success (autocrlf's "LF will be replaced by CRLF", an unreadable
+// directory) never reaches a parse, and a failure's message is stderr's.
+type gitBadgeRunner struct {
+	err error
+	// timeout is the bound of the context the runner is given, which a
+	// timed-out command's message names; zero is gitReadTimeout.
+	timeout time.Duration
+}
 
 func (r *gitBadgeRunner) RunGit(ctx context.Context, root string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", root}, args...)...)
 	cmd.Env = append(os.Environ(), "LC_ALL=C")
-	out, err := cmd.CombinedOutput()
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
 	if err != nil {
 		if ctx.Err() != nil {
-			err = fmt.Errorf("timed out after %s", gitReadTimeout)
+			timeout := r.timeout
+			if timeout == 0 {
+				timeout = gitReadTimeout
+			}
+			err = fmt.Errorf("timed out after %s", timeout)
+		} else if msg := strings.TrimSpace(stderr.String()); msg != "" {
+			err = fmt.Errorf("%s", msg)
 		} else if msg := strings.TrimSpace(string(out)); msg != "" {
 			err = fmt.Errorf("%s", msg)
 		}

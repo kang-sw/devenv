@@ -470,12 +470,15 @@ func (l *Ledger) onDeadline() {
 // back to joining. A repository with a store is joined, unless the identity
 // state already holds this key for the member id (another PC with the
 // copied key, a re-clone, or a key an admin added), which writes no join
-// and no claim. ErrIDTaken means another join claimed the member id first.
+// and no claim. ErrIDTaken means another join claimed the member id first;
+// any other failure after the push landed is a *PushedError.
 func Register(ctx context.Context, opts Options, url string) (*Ledger, error) {
 	l, err := newLedger(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
+	// pushed is the store's genesis once the push landed, nil before.
+	var pushed json.RawMessage
 	err = l.withLock(ctx, func() error {
 		if err := l.git.initBare(ctx); err != nil {
 			return err
@@ -517,6 +520,7 @@ func Register(ctx context.Context, opts Options, url string) (*Ledger, error) {
 		if _, err := l.pushAll(ctx); err != nil {
 			return err
 		}
+		pushed = append(json.RawMessage(nil), l.genesis.raw...)
 		if err := l.fetchRemote(ctx); err != nil {
 			return err
 		}
@@ -530,10 +534,26 @@ func Register(ctx context.Context, opts Options, url string) (*Ledger, error) {
 	})
 	if err != nil {
 		l.Close()
+		if pushed != nil && !errors.Is(err, ErrIDTaken) {
+			err = &PushedError{Err: err, Genesis: pushed}
+		}
 		return nil, err
 	}
 	return l, nil
 }
+
+// PushedError is a Register failure that came after its push landed: the
+// remote holds the genesis, or this member's join, though Register opened
+// nothing here. Registering again with the same key finishes it without a
+// new join.
+type PushedError struct {
+	Err error
+	// Genesis is the store's genesis payload, which names its first admins.
+	Genesis json.RawMessage
+}
+
+func (e *PushedError) Error() string { return e.Err.Error() }
+func (e *PushedError) Unwrap() error { return e.Err }
 
 // Restore pushes the local copy of ref back to the remote, replacing a
 // deletion or a rewind there. It is the manual action rewind refusal leaves

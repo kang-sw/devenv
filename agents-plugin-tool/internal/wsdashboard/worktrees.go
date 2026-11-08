@@ -77,6 +77,10 @@ const (
 	worktreeSizeWait = 20 * time.Second
 	// worktreeSizeWalkers bounds the walks that run at once.
 	worktreeSizeWalkers = 2
+	// worktreeTextMax bounds the pool's text in the cleanup message, well
+	// below the inbox's 64 KiB cap on one send's text, so a large pool
+	// still sends.
+	worktreeTextMax = 48 << 10
 )
 
 // sizeCache measures worktree sizes off the request path: a read takes the
@@ -242,21 +246,23 @@ func (d *Daemon) handleWorktreeCleanup(w http.ResponseWriter, r *http.Request, r
 		return
 	}
 	lang, _ := requestLang(r)
-	raw, _ := json.Marshal(messageRequest{Text: wsi18n.T(lang, "worktree.cleanup.ask") + "\n\n" + pool.text()})
+	raw, _ := json.Marshal(messageRequest{Text: wsi18n.T(lang, "worktree.cleanup.ask") + "\n\n" + pool.text(worktreeTextMax)})
 	status, answer := d.messageWrite(sessionInbox(d.dir, replyID), raw, now)
 	d.inboxAnswered(w, s, status, answer)
 }
 
 // text is the pool as the cleanup message carries it: plain text for the
-// session, in the shape of worktree.list's text.
-func (p WorktreePool) text() string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "pool: %s\n", p.Pool)
+// session, in the shape of worktree.list's text, at most limit bytes plus a
+// last "... N more worktrees" line for the worktrees it leaves out.
+func (p WorktreePool) text(limit int) string {
+	var out strings.Builder
+	fmt.Fprintf(&out, "pool: %s\n", p.Pool)
 	if len(p.Worktrees) == 0 {
-		b.WriteString("worktrees: none\n")
+		out.WriteString("worktrees: none\n")
 	}
 	stamp := func(ms int64) string { return time.UnixMilli(ms).UTC().Format(time.RFC3339) }
-	for _, wt := range p.Worktrees {
+	for i, wt := range p.Worktrees {
+		var b strings.Builder
 		fmt.Fprintf(&b, "\nworktree: %s\n", wt.Path)
 		if wt.Profile != "" {
 			fmt.Fprintf(&b, "  profile: %s\n", wt.Profile)
@@ -292,8 +298,13 @@ func (p WorktreePool) text() string {
 		} else {
 			b.WriteString("  size: unknown\n")
 		}
+		if out.Len()+b.Len() > limit {
+			fmt.Fprintf(&out, "\n... %d more worktrees\n", len(p.Worktrees)-i)
+			break
+		}
+		out.WriteString(b.String())
 	}
-	return b.String()
+	return out.String()
 }
 
 // byteSize is n bytes in decimal units, one decimal past the first unit.

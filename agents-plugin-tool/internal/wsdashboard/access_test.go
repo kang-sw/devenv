@@ -105,6 +105,9 @@ func guardedRoutes() []struct{ method, path, body string } {
 		// The fixture's root is no repository, so a passing request pushes
 		// nothing.
 		{http.MethodPost, "/s/livesession/git/push", ""},
+		// The pooled-worktree routes, served when the fixture reads pools.
+		{http.MethodGet, "/s/livesession/worktrees", ""},
+		{http.MethodPost, "/s/livesession/worktrees/cleanup", ""},
 		// The tracker routes, served when the fixture has a tracker host.
 		{http.MethodGet, "/tracker/stores", ""},
 		{http.MethodGet, "/tracker/stores/team/view", ""},
@@ -155,7 +158,7 @@ func TestLANModeServesTheMermaidScriptToAll(t *testing.T) {
 // Host, need the token like any other request; the token passes by query
 // parameter or cookie, and the endpoint file's shutdown token does not.
 func TestLANModeGuardsEveryRoute(t *testing.T) {
-	f := startPageFixture(t, lanMode, withTracker(newFakeTracker()))
+	f := startPageFixture(t, lanMode, withTracker(newFakeTracker()), func(o *DaemonOptions) { o.Worktrees = &fakeWorktrees{} })
 	if err := os.WriteFile(filepath.Join(f.project, "shot.png"), []byte("png"), 0o644); err != nil {
 		t.Fatal(err)
 	}

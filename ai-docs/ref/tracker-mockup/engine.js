@@ -381,7 +381,13 @@
       rej('everyone chosen already holds a live or pending assignment');
   }
   function notAssignee(S, it, who) {
-    if (pendingRec(S, it.id, who)) return who + ' has not accepted the pending assignment on ' + it.alias;
+    var pr = pendingRec(S, it.id, who);
+    if (pr && !openRec(S, it.id, who)) { // who holds only a rule request, which never holds the item itself
+      var ru = S.rules[pr.rule];
+      if (ru && !ru.includeRoot) return who + ' holds only a pending rule request on ' + it.alias + '; accepting it assigns the members below ' + who + ', not ' + who;
+      return who + ' has not accepted the pending rule request on ' + it.alias;
+    }
+    if (pr) return who + ' has not accepted the pending assignment on ' + it.alias;
     var gone = lastEndedRec(S, it.id, who);
     if (gone) return who + '\'s assignment on ' + it.alias + ' ended (' + gone.state + ', ' + alias(gone.ended.id) + ')';
     if (it.author === who) return who + ' created ' + it.alias + ' but is not assigned to it (self-assign first)';

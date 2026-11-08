@@ -292,7 +292,9 @@ func (s *State) TopicBody(topic string) string {
 // an added item does, reopens a closed topic. Change marks are per update
 // batch: base is the state as the batch began, and the marks diff against
 // the body it held there, so several edits to one topic in a batch keep all
-// their marks and a body the batch created marks nothing.
+// their marks and a body the batch created marks nothing. Edits that bring
+// the body back to the one the batch began with change nothing: the topic
+// keeps that body's marks and Changed.
 func (s *State) setTopicBody(topic, body string, mark int, base *State) {
 	i := s.topicDocIndex(topic)
 	if i >= 0 && s.Topics[i].Body == body {
@@ -301,6 +303,12 @@ func (s *State) setTopicBody(topic, body string, mark int, base *State) {
 	if i < 0 {
 		s.Topics = append(s.Topics, TopicDoc{Name: topic})
 		i = len(s.Topics) - 1
+	}
+	if base != nil {
+		if bi := base.topicDocIndex(topic); bi >= 0 && base.Topics[bi].Body == body {
+			s.Topics[i] = base.Topics[bi]
+			return
+		}
 	}
 	s.Topics[i].Marks = nil
 	if prev := base.TopicBody(topic); prev != "" {

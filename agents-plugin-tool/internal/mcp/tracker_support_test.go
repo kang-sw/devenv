@@ -256,8 +256,8 @@ func TestTrackerShowCardsOwnStoreOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resp := f.call(t, trackerShowTool, f.as(bare, map[string]any{"item": f.meItem})); !isToolError(resp) || !strings.Contains(resp, "not available to a spawned session") {
-		t.Fatalf("a non-support spawned key must be refused tracker.show: %s", resp)
+	if resp := f.call(t, trackerShowTool, f.as(bare, map[string]any{"item": f.meItem})); !isToolError(resp) || !strings.Contains(resp, "not available to a spawned session: only a tracker store's support conversation draws item cards") {
+		t.Fatalf("a non-support spawned key must be refused tracker.show, with its own reason: %s", resp)
 	}
 }
 

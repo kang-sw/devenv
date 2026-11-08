@@ -318,11 +318,14 @@ func stubListing(t *testing.T, out string, err error) *listingStub {
 	t.Helper()
 	s := &listingStub{out: out, err: err}
 	old := runListing
-	runListing = func(_ context.Context, command string, args, _ []string) ([]byte, error) {
+	runListing = func(ctx context.Context, command string, args, _ []string) ([]byte, error) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		s.calls++
 		s.args = append([]string{command}, args...)
+		if err := ctx.Err(); err != nil {
+			return nil, err // as an exec under a done context fails
+		}
 		return []byte(s.out), s.err
 	}
 	t.Cleanup(func() { runListing = old })
@@ -437,12 +440,35 @@ func TestSupportChoicesListingErrorIsPerHarness(t *testing.T) {
 	if claude := harnessByName(t, ans, BackendClaude); claude.Error != "" || len(claude.Models) != 4 {
 		t.Fatalf("claude = %+v", claude)
 	}
-	// A failure is not cached.
+	// A failure is cached briefly: the next request answers it again without
+	// listing, and one past choicesFailTTL lists again.
 	listing.mu.Lock()
 	listing.err, listing.out = nil, piListing
 	listing.mu.Unlock()
-	if pi := harnessByName(t, s.Choices(context.Background()), BackendPi); pi.Error != "" || len(pi.Models) != 3 {
-		t.Fatalf("pi after the listing recovered = %+v", pi)
+	if pi := harnessByName(t, s.Choices(context.Background()), BackendPi); !strings.Contains(pi.Error, "exit status 1") || len(pi.Efforts) != 7 || listing.count() != 1 {
+		t.Fatalf("pi inside the failure window = %+v after %d listings", pi, listing.count())
+	}
+	now = now.Add(choicesFailTTL)
+	if pi := harnessByName(t, s.Choices(context.Background()), BackendPi); pi.Error != "" || len(pi.Models) != 3 || listing.count() != 2 {
+		t.Fatalf("pi after the listing recovered = %+v after %d listings", pi, listing.count())
+	}
+}
+
+// TestSupportChoicesListingOutlivesACanceledRequest: a request canceled
+// before its listing runs still lists in full and fills the cache, so the
+// next request does not list again.
+func TestSupportChoicesListingOutlivesACanceledRequest(t *testing.T) {
+	stubLookPath(t)
+	listing := stubListing(t, piListing, nil)
+	now := time.Now()
+	s := realChoices(t, &now)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if pi := harnessByName(t, s.Choices(ctx), BackendPi); pi.Error != "" || len(pi.Models) != 3 {
+		t.Fatalf("pi under a canceled request = %+v", pi)
+	}
+	if pi := harnessByName(t, s.Choices(context.Background()), BackendPi); pi.Error != "" || len(pi.Models) != 3 || listing.count() != 1 {
+		t.Fatalf("pi on the next request = %+v after %d listings", pi, listing.count())
 	}
 }
 

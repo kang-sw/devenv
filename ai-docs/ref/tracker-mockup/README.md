@@ -162,7 +162,9 @@ build, no server, no dependencies.
   each sub-section of *received requests*, and each person's group in *my
   team*) is a tree of its matching rows. Each match's ancestor chain stands
   above it as greyed **context rows**: they are not matches (the scope's count
-  leaves them out), carry no status button, and open their item on click. A
+  leaves them out), carry no status button, and open their item on click. The
+  chain stops below a hidden ancestor (and, on *all*, below one the kind
+  filter drops), so the match roots there. A
   context node's other children, unrelated to any match, fold into one
   "… N more" row (a click shows them). A match's own subtree starts folded,
   shown as an "N subtasks" chip after its title. Every node with children
