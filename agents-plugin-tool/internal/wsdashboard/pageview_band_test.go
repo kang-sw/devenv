@@ -74,29 +74,30 @@ func TestBandContextStates(t *testing.T) {
 }
 
 // TestBandRepoStates pins the line's git parts: no upstream, in sync, ahead
-// and behind, ahead only, a detached HEAD (no sync chip), and a root that is
-// not a repository (the folder alone). They show with no usage figures at
+// and behind (the ahead count the push popover's button), ahead only, a
+// detached HEAD (no sync chip), and a root that is not a repository (the
+// folder alone). They show with no usage figures at
 // all, since ws-mcp reads them itself.
 func TestBandRepoStates(t *testing.T) {
 	_, sline := bandRegions(t, nil, &wslive.Repo{Folder: "devenv", Branch: "topic/band"})
 	contains(t, "no upstream", sline, `<span>devenv</span>`, `<span>topic/band</span>`, `class="sb-sync none"`, "no upstream")
-	lacks(t, "no upstream", sline, "sb-tail")
+	lacks(t, "no upstream", sline, "sb-tail", "gitpush")
 
 	_, sline = bandRegions(t, nil, &wslive.Repo{Folder: "devenv", Branch: "develop", Upstream: "origin/develop"})
 	contains(t, "in sync", sline, `class="sb-sync ok"`, "synced", "in sync with origin/develop")
-	lacks(t, "in sync", sline, "no upstream", `class="up"`, `class="dn"`)
+	lacks(t, "in sync", sline, "no upstream", `class="up`, `class="dn"`, "gitpush")
 
 	_, sline = bandRegions(t, nil, &wslive.Repo{Folder: "devenv", Branch: "develop", Upstream: "origin/develop", Ahead: 2, Behind: 1})
-	contains(t, "ahead and behind", sline, `<span class="up">↑2</span>`, `<span class="dn">↓1</span>`, "2 to push", "1 to pull")
+	contains(t, "ahead and behind", sline, `<button type="button" class="up gitpush" data-br="develop" data-up="origin/develop" data-n="2 commits to push" aria-haspopup="dialog" title="push to origin/develop…">↑2</button>`, `<span class="dn">↓1</span>`, "2 to push", "1 to pull")
 	lacks(t, "ahead and behind", sline, "synced")
 
 	_, sline = bandRegions(t, nil, &wslive.Repo{Folder: "devenv", Branch: "develop", Upstream: "origin/develop", Ahead: 3})
-	contains(t, "ahead only", sline, `<span class="up">↑3</span>`)
+	contains(t, "ahead only", sline, `class="up gitpush"`, `data-n="3 commits to push"`, `>↑3</button>`)
 	lacks(t, "ahead only", sline, `class="dn"`)
 
 	_, sline = bandRegions(t, nil, &wslive.Repo{Folder: "devenv", Branch: "1a2b3c4", Detached: true})
 	contains(t, "detached", sline, "detached HEAD at 1a2b3c4")
-	lacks(t, "detached", sline, "sb-sync")
+	lacks(t, "detached", sline, "sb-sync", "gitpush")
 
 	_, sline = bandRegions(t, nil, &wslive.Repo{Folder: "scratch"})
 	contains(t, "not a repository", sline, `<span>scratch</span>`)

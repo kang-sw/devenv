@@ -241,7 +241,9 @@ func TestGitWatcherEndsWithTheDaemon(t *testing.T) {
 
 // TestGitBadgeRendersEachState pins the badge's markup: the band's branch,
 // sync, and change chips for a read repository, the detached form, and the
-// dimmed forms with their reasons.
+// dimmed forms with their reasons. The badge is a span whose branch chip is
+// the refresh button, and its ahead count, where a push can go, the push
+// popover's.
 func TestGitBadgeRendersEachState(t *testing.T) {
 	repo := func(r wslive.Repo) *GitBadge { return &GitBadge{State: gitOK, Root: "/p", Repo: r, At: 42} }
 	cases := []struct {
@@ -251,20 +253,20 @@ func TestGitBadgeRendersEachState(t *testing.T) {
 		not   []string
 	}{
 		{"clean, in sync", repo(wslive.Repo{Branch: "main", Upstream: "origin/main"}),
-			[]string{`class="btn sb gitb ok"`, `data-at="42"`, `title="git status of /p: click to read it again now"`, `class="sb-br" title="branch: main"`, `<span>main</span>`, `class="sb-sync ok" title="in sync with origin/main as of the last fetch"`},
-			[]string{"sb-diff"}},
+			[]string{`<span class="btn sb gitb ok"`, `data-at="42"`, `title="git status of /p: click to read it again now"`, `<button type="button" class="sb-br" title="branch: main"`, `<span>main</span>`, `class="sb-sync ok" title="in sync with origin/main as of the last fetch"`},
+			[]string{"sb-diff", "gitpush", `<button type="button" class="btn`}},
 		{"dirty", repo(wslive.Repo{Branch: "main", Upstream: "origin/main", Modified: 2, Staged: 1, Untracked: 3}),
 			[]string{`class="sb-diff" title="working tree: 2 modified 1 staged 3 untracked"`, `<b class="mod">~2</b><b class="add">+1</b><b class="unt">?3</b>`},
 			nil},
 		{"ahead and behind", repo(wslive.Repo{Branch: "topic", Upstream: "origin/topic", Ahead: 2, Behind: 1}),
-			[]string{`<span class="up">↑2</span><span class="dn">↓1</span>`, "2 to push", "1 to pull"},
+			[]string{`<button type="button" class="up gitpush" data-br="topic" data-up="origin/topic" data-n="2 commits to push" aria-haspopup="dialog" title="push to origin/topic…">↑2</button><span class="dn">↓1</span>`, "2 to push", "1 to pull"},
 			[]string{"sb-sync ok", "sb-diff"}},
 		{"no upstream", repo(wslive.Repo{Branch: "topic"}),
 			[]string{`class="sb-sync none" title="no upstream branch is set"`, ">no upstream<"},
-			nil},
+			[]string{"gitpush"}},
 		{"detached", repo(wslive.Repo{Branch: "abc1234", Detached: true, Modified: 1}),
 			[]string{`title="detached HEAD at abc1234"`, `<span>abc1234</span>`, `<b class="mod">~1</b>`},
-			[]string{"sb-sync"}},
+			[]string{"sb-sync", "gitpush"}},
 		{"not a repository", &GitBadge{State: gitNoRepo, Root: "/p", At: 42},
 			[]string{`class="btn sb gitb norepo"`, `title="/p is not a git repository"`, "<span>no repo</span>"},
 			[]string{"sb-sync", "sb-diff"}},
@@ -437,16 +439,102 @@ func TestGitRefreshRouteAndStream(t *testing.T) {
 			}
 		}
 	}
-	gitEvent(`<span class="up">↑1</span>`)
+	gitEvent(`>↑1</button>`)
 
 	if code, _, raw := postJSON(t, route, f.base, ""); code != http.StatusNoContent {
 		t.Fatalf("refresh = %d %s, want 204", code, raw)
 	}
-	gitEvent(`<span class="up">↑2</span>`)
+	gitEvent(`>↑2</button>`)
 
 	resp.Body.Close()
 	waitFor(t, "the root to be dropped", func() bool { return watched(f.d.git) == 0 })
 	if n := git.readCount(f.project); n != 2 {
 		t.Fatalf("reads = %d, want 2", n)
 	}
+}
+
+// TestGitBadgeFollowsTheSnapshot pins follow on the watcher: a snapshot whose
+// repo figures differ from the badge's read asks for a read, the same
+// snapshot again asks for nothing even while the two still disagree, one
+// that agrees with the read asks for nothing, and neither does a snapshot
+// without a branch or of a root no page watches.
+func TestGitBadgeFollowsTheSnapshot(t *testing.T) {
+	f := newFakeGit()
+	g, _ := newTestWatcher(t, f)
+	g.gap = 0
+	repo := func(ahead int) wslive.Repo {
+		return wslive.Repo{Folder: "repo", Branch: "main", Upstream: "origin/main", Ahead: ahead}
+	}
+	// Before the first read lands nothing is asked for: that read is fresh.
+	f.gate = make(chan struct{})
+	release := g.watch("/repo")
+	defer release()
+	g.follow("/repo", "s1", repo(1))
+	f.gate <- struct{}{}
+	expectRead(t, f, "/repo") // the first read: ahead 1
+	f.gate = nil
+	expectNoRead(t, f)
+
+	g.follow("/repo", "s1", repo(17))
+	expectRead(t, f, "/repo") // ahead 2
+	g.follow("/repo", "s1", repo(17))
+	expectNoRead(t, f)
+
+	waitFor(t, "the read to be stored", func() bool { return g.badge("/repo").Ahead == 2 })
+	g.follow("/repo", "s1", repo(2)) // changed, but agrees with the read
+	expectNoRead(t, f)
+
+	g.follow("/repo", "s1", wslive.Repo{Folder: "repo"})
+	g.follow("/other", "s1", repo(5))
+	expectNoRead(t, f)
+
+	g.follow("/repo", "s1", wslive.Repo{Folder: "repo", Branch: "main", Upstream: "origin/main", Ahead: 2, Modified: 1})
+	expectRead(t, f, "/repo")
+}
+
+// TestGitBadgeFollowsTheStreamedSnapshot: a session page's stream hands its
+// snapshot's repo figures to follow, so a snapshot change reads the badge
+// again, and a snapshot that changed elsewhere does not.
+func TestGitBadgeFollowsTheStreamedSnapshot(t *testing.T) {
+	git := newFakeGit()
+	f := startPageFixture(t, gitBadgeOn(git))
+	f.d.git.gap = 0
+	snapshot := func(reply string, ahead int) {
+		writeSnapshot(t, f.dir, "livesession", &wslive.Snapshot{SchemaVersion: 1, Adapter: "pi", UpdatedAt: time.Now().UnixMilli(), HeartbeatMs: 30000,
+			Lead: wslive.Lead{Activity: wslive.Activity{Phase: wslive.PhaseReplying}, Reply: &wslive.Reply{Text: reply}},
+			Repo: &wslive.Repo{Folder: "p", Branch: "main", Upstream: "origin/main", Ahead: ahead}})
+		f.d.broker.wake("livesession")
+	}
+	snapshot("first reply", 1)
+	_, page := get(t, f.base+"/s/livesession")
+	client := &http.Client{Transport: &http.Transport{Proxy: nil}}
+	resp, err := client.Get(f.base + "/s/livesession/events?h=" + heldOf(page) + ",mode." + newRegion(modeLive).Hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	events := make(chan sseEvent, 64)
+	go readEvents(t, bufio.NewReader(resp.Body), events)
+	waitRegion := func(name, want string) {
+		t.Helper()
+		for {
+			ev, ok := nextRegion(t, events, 5*time.Second)
+			if !ok {
+				t.Fatalf("no %s region carrying %q", name, want)
+			}
+			if ev.Name == name && strings.Contains(ev.HTML, want) {
+				return
+			}
+		}
+	}
+	expectRead(t, git, f.project)
+	waitRegion(regionGit, `↑1<`)
+
+	snapshot("first reply", 17)
+	expectRead(t, git, f.project)
+	waitRegion(regionGit, `↑2<`)
+
+	snapshot("second reply", 17)
+	waitRegion("convlive", "second reply")
+	expectNoRead(t, git)
 }
