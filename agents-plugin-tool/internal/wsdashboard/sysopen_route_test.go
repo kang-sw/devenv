@@ -202,7 +202,7 @@ func TestSystemOpenNativeTarget(t *testing.T) {
 	refused := []string{
 		"shots/a.png", "./shots/a.png", filepath.Join(outside, "notes.txt"), filepath.Join(outside, "dir.png"),
 		filepath.Join(outside, "missing.png"), "/" + filepath.ToSlash(outImg), `\\server\share\x.png`, "//server/share/x.png",
-		`\\?\C:\x.png`, "//?/C:/x.png", `\\.\x.png`, "//./x.png", "-x.png", inRoot + "\x00.png",
+		`\\?\C:\x.png`, "//?/C:/x.png", `\\.\x.png`, "//./x.png", `\??\UNC\s\sh\x.png`, "/??/C:/x.png", "-x.png", inRoot + "\x00.png",
 		"/" + strings.Repeat("a", openTargetMax) + ".png",
 	}
 	if symlinks {

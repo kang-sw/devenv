@@ -1204,16 +1204,21 @@
     var span = doc.createElement("span");
     span.className = "img-text";
     if (img.alt) span.appendChild(doc.createTextNode(img.alt + " "));
-    var a = doc.createElement("a");
-    a.setAttribute("tabindex", "0");
-    a.setAttribute("data-wl", "file");
-    a.setAttribute("data-abs", abs);
-    a.setAttribute("title", abs);
     var code = doc.createElement("code");
     code.className = "fpath";
     code.textContent = abs;
-    a.appendChild(code);
-    span.appendChild(a);
+    // Inside a link already (an image linked to itself), the path stays
+    // text: an anchor in an anchor has no defined click target.
+    if (img.parentNode && img.parentNode.closest && img.parentNode.closest("a")) span.appendChild(code);
+    else {
+      var a = doc.createElement("a");
+      a.setAttribute("tabindex", "0");
+      a.setAttribute("data-wl", "file");
+      a.setAttribute("data-abs", abs);
+      a.setAttribute("title", abs);
+      a.appendChild(code);
+      span.appendChild(a);
+    }
     if (img.parentNode) img.parentNode.replaceChild(span, img);
   }
   function sweepOutImgs(el) {

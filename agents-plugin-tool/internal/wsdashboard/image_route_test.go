@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -261,6 +262,8 @@ func TestImageRouteServesOutsideImagesToLoopbackViewersOnly(t *testing.T) {
 		"device path":                       imageAs(f.d, peer, local, "", "", `\\?\C:\x.png`),
 		"device path, forward slashes":      imageAs(f.d, peer, local, "", "", "//?/C:/x.png"),
 		"dot device path":                   imageAs(f.d, peer, local, "", "", `\\.\x.png`),
+		"NT namespace path":                 imageAs(f.d, peer, local, "", "", `\??\UNC\s\sh\x.png`),
+		"NT namespace, forward slashes":     imageAs(f.d, peer, local, "", "", "/??/UNC/s/sh/x.png"),
 	}
 	if symlinks {
 		refused["symlink to a non-image"] = imageAs(f.d, peer, local, "", "", filepath.Join(outside, "renamed.png"))
@@ -287,6 +290,7 @@ func TestNetworkPathRefusesUNCAndDevicePaths(t *testing.T) {
 	for path, want := range map[string]bool{
 		`\\server\share\x.png`: true, "//server/share/x.png": true, `\\?\C:\x.png`: true, "//?/C:/x.png": true,
 		`\\.\PhysicalDrive0`: true, "//./x.png": true, `/\server\x.png`: true, `\/server/x.png`: true,
+		`\??\C:\x.png`: true, `\??\UNC\s\sh\x.png`: true, "/??/UNC/s/sh/x.png": true, "/??x.png": false,
 		"/tmp/x.png": false, `C:\x.png`: false, "C:/x.png": false, `\x.png`: false, "x.png": false, "": false, "/": false,
 	} {
 		if got := networkPath(path); got != want {
@@ -348,5 +352,26 @@ func TestServedTargetsOutsideImages(t *testing.T) {
 	}
 	if strings.Count(html, "data-out") != 2 {
 		t.Errorf("reply marks %d targets data-out, want 2:\n%s", strings.Count(html, "data-out"), html)
+	}
+}
+
+// TestDriveOrRootPathRefusesNamespaceVolumes pins the volume check on
+// Windows: only a drive-letter volume passes, so no spelling of a UNC,
+// device, or NT-namespace path reaches the filesystem; on Unix every
+// absolute path passes, having no volume.
+func TestDriveOrRootPathRefusesNamespaceVolumes(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		if !driveOrRootPath("/tmp/x.png") {
+			t.Error("driveOrRootPath refused a Unix absolute path")
+		}
+		return
+	}
+	for path, want := range map[string]bool{
+		`C:\x.png`: true, `c:\a\b.png`: true,
+		`\\?\C:\x.png`: false, `\\.\C:\x.png`: false, `\??\C:\x.png`: false, `\??\UNC\s\sh\x.png`: false, `\\s\sh\x.png`: false,
+	} {
+		if got := driveOrRootPath(path); got != want {
+			t.Errorf("driveOrRootPath(%q) = %v, want %v", path, got, want)
+		}
 	}
 }

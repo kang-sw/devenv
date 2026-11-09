@@ -102,12 +102,26 @@ func OutsideImage(root, replyID string) func(path string) wswhiteboard.FileActio
 }
 
 // networkPath reports whether path starts with two separators in either
-// slash direction: a Windows UNC path (\\server\share, which would reach
-// the network) or device path (\\?\..., \\.\...). It is a pure string
-// check, so it runs before the filesystem is touched and on every OS.
+// slash direction, a Windows UNC path (\\server\share, which would reach
+// the network) or device path (\\?\..., \\.\...), or with an NT-namespace
+// prefix (\??\, which Windows also reads as absolute and passes through to
+// any device, a network share included). It is a pure string check, so it
+// runs before the filesystem is touched and on every OS.
 func networkPath(path string) bool {
 	sep := func(c byte) bool { return c == '/' || c == '\\' }
-	return len(path) >= 2 && sep(path[0]) && sep(path[1])
+	if len(path) >= 2 && sep(path[0]) && sep(path[1]) {
+		return true
+	}
+	return len(path) >= 4 && sep(path[0]) && path[1] == '?' && path[2] == '?' && sep(path[3])
+}
+
+// driveOrRootPath reports whether the native absolute path is on a plain
+// volume: on Windows a drive letter ("C:"), never a UNC, device, or other
+// namespace volume, whatever its spelling; on Unix every absolute path,
+// which has no volume.
+func driveOrRootPath(native string) bool {
+	vol := filepath.VolumeName(native)
+	return vol == "" || (len(vol) == 2 && vol[1] == ':')
 }
 
 // absoluteImageName lexically checks a path written absolute with an image
@@ -118,7 +132,7 @@ func absoluteImageName(path string) (string, string, bool) {
 		return "", "", false
 	}
 	native := filepath.FromSlash(path)
-	if !filepath.IsAbs(native) {
+	if !filepath.IsAbs(native) || !driveOrRootPath(native) {
 		return "", "", false
 	}
 	ctype, ok := imageType(native)
@@ -145,7 +159,7 @@ func outsideImagePath(root, path string) (string, bool) {
 // and not be on a UNC or device path.
 func resolvedImage(abs string) (string, bool) {
 	real, err := filepath.EvalSymlinks(abs)
-	if err != nil || networkPath(real) {
+	if err != nil || networkPath(real) || !driveOrRootPath(real) {
 		return "", false
 	}
 	if _, ok := imageType(real); !ok {
