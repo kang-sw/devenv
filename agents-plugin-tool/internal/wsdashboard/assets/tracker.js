@@ -50,11 +50,20 @@
 //                        false, error}); creator: this registration created the
 //                        store (false: it joined). done comes after stores() holds
 //                        the new store, which the renderer then opens
-//   render(id, text, done)
-//                        optional, for the editors' preview: renders markdown text the
-//                        way the view's html renders an item body or comment text.
+//   render(id, req, done)
+//                        optional, for the editors' preview: renders markdown req.text
+//                        the way the view's html renders an item body or comment text,
+//                        with req.attachments ([{oid, name, size, mime}]: the ones the
+//                        editor's save would carry, uploads included) as the text's own,
+//                        so an ![name](attachment:<oid>) image of one shows.
 //                        done({ok: true, html} | {ok: false, error}). Without it the
 //                        preview shows the plain text (the mockup)
+//   upload(id, file, name, done)
+//                        optional, for an image pasted or dropped into an editor: stages
+//                        the file's bytes for a later write; name is the dropped file's
+//                        name, '' for a clipboard paste. done({ok: true, attachment:
+//                        {oid, name, size, mime}} | {ok: false, error}). Without it a
+//                        pasted or dropped image is refused with a notice (the mockup)
 //   hostError()       -> optional: the reason the store list could not be read (the
 //                        host is unavailable), or null; the "+ store" dialog shows it
 //                        and offers nothing else
@@ -225,6 +234,7 @@
     iedit: null,          // { item, title, body, project, mpick } while the item window edits the item in place
     cedit: null,          // { cid, body, mpick } while an own comment is edited in place; mpick: member ids picked with @ meanwhile
     edpv: {},             // editor textarea id -> { text, html, err, busy } while that editor shows its preview (editorHtml)
+    eatt: {},             // editor textarea id -> [{oid, name, size, mime}] images uploaded into that editor since it opened (edImages)
     act: { family: 'all', member: 'all', flagged: false, conc: false },
     kind: 'all', status: 'open'
   };
@@ -1866,7 +1876,7 @@
       var st = ui.edpv[id] = { text: box.value, html: null, err: null, busy: false };
       if (AD.render && st.text.trim()) {
         st.busy = true;
-        AD.render(ui.store, st.text, function (res) {
+        AD.render(ui.store, { text: st.text, attachments: edAtts(id) }, function (res) {
           if (ui.edpv[id] !== st) return; // back to write, or the editor closed
           st.busy = false;
           if (res && res.ok) st.html = String(res.html || ''); else st.err = String((res && res.error) || '');
@@ -1892,6 +1902,65 @@
   function edKeep(t) {
     if (t.id === 'tkcedit' && ui.cedit) ui.cedit.body = t.value;
     else if (/^iw-e(title|body|proj)$/.test(t.id) && ui.iedit) ui.iedit[{ 'iw-etitle': 'title', 'iw-ebody': 'body', 'iw-eproj': 'project' }[t.id]] = t.value;
+  }
+
+  // An image pasted or dropped into an editor (png, jpeg, gif, or webp, within the view's
+  // attachments.max_bytes, checked here before any request) is uploaded at once through the
+  // adapter's upload, which stages it until a write names it, then written into the text at the
+  // caret as ![name](attachment:<oid>) and kept in ui.eatt[editor id]. A save sends the entries
+  // whose attachment:<oid> is still in the text (savedAtts), and the preview's render request
+  // carries them, so a pasted image shows before it is saved. Any other file, an oversized
+  // image, and every image without upload (the mockup) get a notice and nothing else. An upload
+  // that lands after its editor ended is dropped; its staged copy expires on the server.
+  var IMG_TYPES = { 'image/png': 1, 'image/jpeg': 1, 'image/gif': 1, 'image/webp': 1 };
+  function edImages(id, files, named) {
+    var max = VS && VS.attachments ? VS.attachments.max_bytes : 0, store = ui.store;
+    files.forEach(function (f) {
+      var label = esc((named && f.name) || wsT("js.tk.ed.img.this"));
+      if (!AD.upload) return toast(wsT("js.tk.ed.img.off"));
+      if (!IMG_TYPES[f.type]) return toast(wsT("js.tk.ed.img.type", label));
+      if (max && f.size > max) return toast(wsT("js.tk.ed.img.big", label, fmtSize(max)));
+      var list = ui.eatt[id] || (ui.eatt[id] = []);
+      toast(wsT("js.tk.ed.img.busy", label));
+      AD.upload(store, f, named ? f.name || '' : '', function (res) {
+        var box = $(id);
+        if (ui.store !== store || ui.eatt[id] !== list || !box) return; // the editor ended meanwhile
+        if (!res || !res.ok || !res.attachment || !res.attachment.oid) return toast(wsT("js.tk.ed.img.fail", label, esc((res && res.error) || '')));
+        var a = res.attachment;
+        if (!list.some(function (x) { return x.oid === a.oid; })) list.push({ oid: a.oid, name: a.name, size: a.size, mime: a.mime });
+        if (ui.edpv[id]) edMode(id, 'write');
+        var alt = String(a.name || 'image').replace(/[\r\n]+/g, ' ').replace(/[\\\[\]]/g, '\\$&');
+        edInsert(box, '![' + alt + '](attachment:' + a.oid + ')');
+      });
+    });
+  }
+  // Puts s at box's caret (its selection while it is not focused), spaced from the words around it.
+  function edInsert(box, s) {
+    var v = box.value, a = box.selectionStart, b = box.selectionEnd;
+    if (a > 0 && !/\s/.test(v.charAt(a - 1))) s = ' ' + s;
+    if (b < v.length && !/\s/.test(v.charAt(b))) s += ' ';
+    box.setRangeText(s, a, b, 'end');
+    edKeep(box); // setRangeText fires no input event
+    if (box.id === 'cbox' || document.activeElement !== box) box.focus();
+  }
+  // The attachments editor id's text already had: an edit's stored ones, the composer's
+  // hand-drafted ones (caps.attach, the mockup).
+  function edBase(id) {
+    var o = id === 'iw-ebody' ? ui.iedit && VS.items[ui.iedit.item] : id === 'tkcedit' ? ui.cedit && VS.comments[ui.cedit.cid] : null;
+    return id === 'cbox' ? ui.adraft : o ? listOf(o.attachments) : [];
+  }
+  // edBase plus the editor's uploads, each oid once: the list a preview renders against.
+  function edAtts(id) {
+    var out = edBase(id).slice();
+    listOf(ui.eatt[id]).forEach(function (a) { if (!out.some(function (x) { return x.oid === a.oid; })) out.push(a); });
+    return out;
+  }
+  // The attachments a save of editor id with text sends: those whose attachment:<oid> is still in
+  // the text, as a mention lasts while its @id does. Under caps.attach the base entries are
+  // metadata drafted by hand, which no text names, so they stay as before.
+  function savedAtts(id, text) {
+    var base = edBase(id);
+    return edAtts(id).filter(function (a) { return String(text).indexOf('attachment:' + a.oid) >= 0 || (CAPS.attach && base.indexOf(a) >= 0); });
   }
 
   // ------------------------------------------ @-mention and #-reference suggestion popup
@@ -2251,8 +2320,9 @@
         var ms = keptMentions(ui.mdraft, cp.body), crs = refsIn(cp.body);
         if (ms.length) cp.mentions = ms;
         if (crs.length) cp.refs = crs;
-        if (ui.adraft.length) cp.attachments = ui.adraft;
-        put([['comment.add', cp, origin]], function () { ui.clearDraft = true; ui.replyTo = null; ui.mdraft = []; ui.adraft = []; });
+        var cas = savedAtts('cbox', cp.body);
+        if (cas.length) cp.attachments = cas;
+        put([['comment.add', cp, origin]], function () { ui.clearDraft = true; ui.replyTo = null; ui.mdraft = []; ui.adraft = []; delete ui.eatt.cbox; });
         break;
       }
     }
@@ -2890,7 +2960,7 @@
     if (!it) return;
     if (!(ui.win && ui.item === id)) showItem(id);
     ui.iedit = { item: id, title: it.title, body: it.body || '', project: it.project || '', mpick: [] };
-    delete ui.edpv['iw-ebody'];
+    delete ui.edpv['iw-ebody']; delete ui.eatt['iw-ebody'];
     render();
     if ($('iw-etitle')) $('iw-etitle').focus();
   }
@@ -2905,7 +2975,8 @@
       var km = keptMentions(withPicks(it.mentions, e.mpick), ep.body), ers = refsIn(ep.body);
       if (km.length) ep.mentions = km;
       if (ers.length) ep.refs = ers;
-      if (it.attachments.length) ep.attachments = it.attachments;
+      var eas = savedAtts('iw-ebody', ep.body);
+      if (eas.length) ep.attachments = eas;
     }
     commit([['item.edit', ep]], null, function () { ui.iedit = null; });
   }
@@ -2913,7 +2984,7 @@
     var c = VS.comments[cid];
     if (!c) return;
     ui.cedit = { cid: cid, body: c.body, mpick: [] };
-    delete ui.edpv.tkcedit;
+    delete ui.edpv.tkcedit; delete ui.eatt.tkcedit;
     render();
     var t = $('tkcedit');
     if (t) { t.focus(); t.setSelectionRange(t.value.length, t.value.length); }
@@ -2932,7 +3003,8 @@
     var ckm = keptMentions(withPicks(ocm.mentions, e.mpick), cep.body), cers = refsIn(cep.body);
     if (ckm.length) cep.mentions = ckm;
     if (cers.length) cep.refs = cers;
-    if (ocm.attachments.length) cep.attachments = ocm.attachments;
+    var ceas = savedAtts('tkcedit', cep.body);
+    if (ceas.length) cep.attachments = ceas;
     commit([['comment.edit', cep]], null, function () { ui.cedit = null; });
   }
 
@@ -3131,9 +3203,9 @@
     $('tkwin').firstElementChild.setAttribute('aria-labelledby', 'iw-title');
     setInert(open);
     // an editor's preview ends with the editor: an edit saved or cancelled, a comment posted, another item
-    if (!ui.iedit) delete ui.edpv['iw-ebody'];
-    if (!ui.cedit) delete ui.edpv.tkcedit;
-    if (!open || ui.itemChanged || ui.clearDraft) delete ui.edpv.cbox;
+    if (!ui.iedit) { delete ui.edpv['iw-ebody']; delete ui.eatt['iw-ebody']; }
+    if (!ui.cedit) { delete ui.edpv.tkcedit; delete ui.eatt.tkcedit; }
+    if (!open || ui.itemChanged || ui.clearDraft) { delete ui.edpv.cbox; delete ui.eatt.cbox; }
     if (open) {
       sb.innerHTML = windowHtml(v, VS.items[ui.item]);
       if (!ui.itemChanged && !ui.clearDraft && $('cbox')) $('cbox').value = draft;
@@ -3470,6 +3542,15 @@
   // Delegated handlers act only on the renderer's own nodes, so the host page's clicks,
   // changes, and keys stay the host's.
   function own(t) { return !!(t && t.closest && t.closest('.tk')); }
+  // the editor (editorHtml's wrapper) a drag is over, when it is one
+  function edDrop(e) { return e.target.closest ? e.target.closest('.tked[data-ed]') : null; }
+  function hasFiles(e) { return !!e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') >= 0; }
+  // the files a clipboard or a drop carries
+  function filesOf(dt) {
+    if (!dt) return [];
+    if (dt.items && dt.items.length) return Array.prototype.map.call(dt.items, function (it) { return it.kind === 'file' ? it.getAsFile() : null; }).filter(Boolean);
+    return Array.prototype.slice.call(dt.files || []);
+  }
 
   function listen() {
     // dragging a handle sets the drawer height; a drag's trailing click is swallowed
@@ -3641,7 +3722,23 @@
       e.dataTransfer.setData('text/plain', c.getAttribute('data-drag'));
       e.dataTransfer.effectAllowed = 'move';
     });
-    document.addEventListener('dragover', function (e) { if (own(e.target) && e.target.closest('[data-kcol]')) e.preventDefault(); });
+    document.addEventListener('dragover', function (e) {
+      if (own(e.target) && (e.target.closest('[data-kcol]') || (edDrop(e) && hasFiles(e)))) e.preventDefault();
+    });
+    // an image pasted into an editor's textarea, or dropped on an editor (edImages); a paste that
+    // also carries text (a copied web page) still pastes its text
+    document.addEventListener('paste', function (e) {
+      var t = mentionBox(e.target), files = t ? filesOf(e.clipboardData) : [];
+      if (!files.length) return;
+      if (Array.prototype.indexOf.call(e.clipboardData.types || [], 'text/plain') < 0) e.preventDefault();
+      edImages(t.id, files, false);
+    });
+    document.addEventListener('drop', function (e) {
+      var wrap = own(e.target) && edDrop(e);
+      if (!wrap || !hasFiles(e)) return;
+      e.preventDefault();
+      edImages(wrap.getAttribute('data-ed'), filesOf(e.dataTransfer), true);
+    });
     document.addEventListener('drop', function (e) {
       var col = own(e.target) && e.target.closest('[data-kcol]');
       if (!col) return;
