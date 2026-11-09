@@ -795,6 +795,7 @@
   "js.tk.sync.unpushed": "{0} das minhas escritas ainda não enviadas",
   "js.tk.sync.upstream": "{0} commits upstream não buscados",
   "js.tk.sync.upstream.tip": "commits que outros clones enviaram e que este clone ainda não buscou",
+  "js.tk.sync.wikiwarn": "falha ao sincronizar a wiki",
   "js.tk.tab.activity": "Atividade",
   "js.tk.tab.aria": "abas do tracker",
   "js.tk.tab.items": "Itens",

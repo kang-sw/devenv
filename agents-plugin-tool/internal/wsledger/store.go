@@ -107,6 +107,13 @@ type Ledger struct {
 	noFilterWarned bool
 	// wikiWarns are the anomalies the last wiki absorb found (wiki.go).
 	wikiWarns []Warning
+	// wikiPushWarns are the last pushLocalWikis' refused pushes. They
+	// stand, carried by every report, until the next pushLocalWikis: a
+	// Fetch (a background poll, a check) does not push, so a one-shot
+	// warning would be gone from its report while the wiki is still
+	// refused. A failed wiki fetch needs no such care: every fetch retries
+	// it and reports it again (pendingWarns).
+	wikiPushWarns []Warning
 
 	view          *view
 	pendingCommit *commitRec
@@ -1019,7 +1026,6 @@ func (l *Ledger) reissue() (int, error) {
 // sync leaves pending writes in place for the next attempt.
 func (l *Ledger) Sync(ctx context.Context) (SyncReport, error) {
 	var rep SyncReport
-	var wikiFailed map[string]error
 	err := l.withLock(ctx, func() error {
 		if err := l.refresh(ctx); err != nil {
 			return err
@@ -1040,12 +1046,10 @@ func (l *Ledger) Sync(ctx context.Context) (SyncReport, error) {
 			}
 			rep.Pushed = rep.Pushed || pushed
 			// A wiki the remote refuses does not stop the ledger's own
-			// fetch; it is reported, once per Sync.
-			failed, err := l.pushLocalWikis(ctx)
-			if err != nil {
+			// fetch; it is reported (wikiPushWarns) until a push lands.
+			if _, err := l.pushLocalWikis(ctx); err != nil {
 				return err
 			}
-			wikiFailed = failed
 			if err := l.fetchRemote(ctx); err != nil {
 				return err
 			}
@@ -1069,7 +1073,6 @@ func (l *Ledger) Sync(ctx context.Context) (SyncReport, error) {
 		}
 		return nil
 	})
-	rep.Warnings = append(rep.Warnings, wikiPushWarnings(wikiFailed)...)
 	l.finishReport(&rep)
 	return rep, err
 }
@@ -1130,7 +1133,7 @@ func (l *Ledger) finishReport(rep *SyncReport) {
 	defer l.mu.Unlock()
 	rep.Received = l.received
 	rep.Warnings = append(append(append(rep.Warnings, l.remoteWarns...), l.badRefs...), l.attachWarns...)
-	rep.Warnings = append(append(rep.Warnings, l.wikiWarns...), l.pendingWarns...)
+	rep.Warnings = append(append(append(rep.Warnings, l.wikiWarns...), l.wikiPushWarns...), l.pendingWarns...)
 	l.pendingWarns = nil
 	rep.Pending = l.pendingLocked()
 }

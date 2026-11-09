@@ -46,6 +46,10 @@ type SyncInfo struct {
 	Unpushed []UnpushedCommit `json:"unpushed"`
 	// Error is the last attempt's error when it did not reach the remote.
 	Error string `json:"error,omitempty"`
+	// WikiWarnings are the last attempt's wiki sync failures: a wiki the
+	// remote refuses, or a wiki fetch that failed while the ledger's own
+	// sync went on (Online stays true).
+	WikiWarnings []string `json:"wikiWarnings,omitempty"`
 }
 
 // UnpushedCommit is one unpushed commit, or the open batch (Open).
@@ -77,6 +81,7 @@ func fill(v *wstracker.View, e StoreEntry, stream string, evs []wsledger.Event, 
 		out.Store.Remote = &remote
 		out.Sync.Online = s.Error == ""
 		out.Sync.Error = s.Error
+		out.Sync.WikiWarnings = s.WikiWarnings
 	}
 	if !s.SyncedAt.IsZero() {
 		at := tsString(s.SyncedAt)

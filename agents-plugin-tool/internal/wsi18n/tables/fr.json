@@ -795,6 +795,7 @@
   "js.tk.sync.unpushed": "{0} de mes écritures pas encore poussées",
   "js.tk.sync.upstream": "{0} commits en amont non récupérés",
   "js.tk.sync.upstream.tip": "commits poussés par d'autres clones que ce clone n'a pas encore récupérés",
+  "js.tk.sync.wikiwarn": "échec de la synchronisation du wiki",
   "js.tk.tab.activity": "Activité",
   "js.tk.tab.aria": "onglets du suivi",
   "js.tk.tab.items": "Éléments",

@@ -795,6 +795,7 @@
   "js.tk.sync.unpushed": "自分の書き込み {0} 件が未 push",
   "js.tk.sync.upstream": "アップストリームの {0} コミットが未 fetch",
   "js.tk.sync.upstream.tip": "他のクローンが push したが、このクローンがまだ fetch していないコミット",
+  "js.tk.sync.wikiwarn": "wiki の同期に失敗",
   "js.tk.tab.activity": "アクティビティ",
   "js.tk.tab.aria": "トラッカーのタブ",
   "js.tk.tab.items": "項目",

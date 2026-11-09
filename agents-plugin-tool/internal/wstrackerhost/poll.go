@@ -46,10 +46,7 @@ func (h *Host) checkThrottled(ctx context.Context, st *store, timeout time.Durat
 			return
 		}
 	}
-	_ = h.attempt(ctx, st, timeout, func(ctx context.Context) error {
-		_, err := st.ledger.Fetch(ctx)
-		return err
-	})
+	_ = h.attempt(ctx, st, timeout, st.ledger.Fetch)
 }
 
 // PreRead is the check before a tracker read when no daemon polls: a fetch
@@ -83,10 +80,7 @@ func (h *Host) PollOnce(ctx context.Context) {
 		if st.entry.Remote == "" {
 			return
 		}
-		_ = h.attempt(ctx, st, networkTimeout, func(ctx context.Context) error {
-			_, err := st.ledger.Fetch(ctx)
-			return err
-		})
+		_ = h.attempt(ctx, st, networkTimeout, st.ledger.Fetch)
 	})
 }
 

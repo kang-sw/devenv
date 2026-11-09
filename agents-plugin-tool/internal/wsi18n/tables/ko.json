@@ -795,6 +795,7 @@
   "js.tk.sync.unpushed": "내 기록 {0}건이 아직 push되지 않음",
   "js.tk.sync.upstream": "업스트림 커밋 {0}개를 아직 fetch하지 않음",
   "js.tk.sync.upstream.tip": "다른 클론이 push했지만 이 클론이 아직 fetch하지 않은 커밋",
+  "js.tk.sync.wikiwarn": "위키 동기화 실패",
   "js.tk.tab.activity": "활동",
   "js.tk.tab.aria": "트래커 탭",
   "js.tk.tab.items": "항목",

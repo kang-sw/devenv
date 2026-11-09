@@ -795,6 +795,7 @@
   "js.tk.sync.unpushed": "моих записей не отправлено: {0}",
   "js.tk.sync.upstream": "не получено (fetch) коммитов из upstream: {0}",
   "js.tk.sync.upstream.tip": "коммиты, которые другие клоны отправили (push), а этот клон ещё не получил (fetch)",
+  "js.tk.sync.wikiwarn": "сбой синхронизации вики",
   "js.tk.tab.activity": "Активность",
   "js.tk.tab.aria": "вкладки трекера",
   "js.tk.tab.items": "Элементы",

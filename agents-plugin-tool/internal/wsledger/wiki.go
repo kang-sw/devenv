@@ -386,7 +386,8 @@ func (l *Ledger) absorbWiki(ctx context.Context) error {
 // a recovery point. A push that fails (a remote refusal, a transport
 // failure) is returned in failed, by ref, and the other wikis are still
 // pushed: one wiki the remote refuses must not hold up the ledger's sync
-// or saves to other wikis. err is a local failure.
+// or saves to other wikis. err is a local failure. The refusals stand in
+// l.wikiPushWarns until the next call.
 func (l *Ledger) pushLocalWikis(ctx context.Context) (failed map[string]error, err error) {
 	local, snap, known, err := l.wikiRefs(ctx)
 	if err != nil {
@@ -415,6 +416,7 @@ func (l *Ledger) pushLocalWikis(ctx context.Context) (failed map[string]error, e
 			}
 		}
 	}
+	l.wikiPushWarns = wikiPushWarnings(failed)
 	return failed, nil
 }
 
