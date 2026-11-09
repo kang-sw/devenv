@@ -8,7 +8,6 @@ package gitbatch
 
 import (
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 )
@@ -65,27 +64,49 @@ func SSHCommand(getenv func(string) string, coreSSHCommand func() string) string
 	if base == "" {
 		base = strings.TrimSpace(coreSSHCommand())
 	}
+	program := commandProgram(base)
 	if base == "" {
-		if program := strings.TrimSpace(getenv("GIT_SSH")); program != "" {
+		// GIT_SSH names a program, not a command line: a path with spaces
+		// (C:\Program Files\PuTTY\plink.exe) is one word, quoted for sh.
+		if program = strings.TrimSpace(getenv("GIT_SSH")); program != "" {
 			base = ShellQuote(program)
 		}
 	}
 	if base == "" {
-		base = "ssh"
+		base, program = "ssh", "ssh"
 	}
-	if isPlink(base) {
+	if isPlink(program) {
 		return base + " -batch"
 	}
 	return base + " -o BatchMode=yes -o ConnectTimeout=5"
 }
 
-func isPlink(command string) bool {
-	fields := strings.Fields(command)
-	if len(fields) == 0 {
-		return false
+// commandProgram is the program a shell command line runs: its first word,
+// with a leading single- or double-quoted span taken whole, so a quoted path
+// with spaces ("C:\Program Files\PuTTY\plink.exe" -v) is one program.
+func commandProgram(command string) string {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return ""
 	}
-	name := strings.ToLower(filepath.Base(strings.Trim(fields[0], `'"`)))
-	return strings.Contains(name, "plink")
+	if q := command[0]; q == '\'' || q == '"' {
+		if end := strings.IndexByte(command[1:], q); end >= 0 {
+			return command[1 : 1+end]
+		}
+		return command[1:]
+	}
+	if end := strings.IndexAny(command, " \t"); end >= 0 {
+		return command[:end]
+	}
+	return command
+}
+
+// isPlink reports whether program is a PuTTY plink variant (plink,
+// tortoiseplink, TortoiseGitPlink; any case, .exe optional), judged by its
+// base name with either path separator.
+func isPlink(program string) bool {
+	name := program[strings.LastIndexAny(program, `/\`)+1:]
+	return strings.Contains(strings.ToLower(name), "plink")
 }
 
 // ShellQuote single-quotes s for sh.
