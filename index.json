@@ -373,7 +373,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-09T07:02:36Z"
+        "touched_at": "2026-11-09T07:03:08Z",
+        "impl": {
+          "branch": "impl/develop/mushy-rack-alto"
+        }
       }
     },
     "261109-bug-ws-tracker-external-write-refresh": {
