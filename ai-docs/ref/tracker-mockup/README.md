@@ -59,7 +59,7 @@ build, no server, no dependencies.
   (241)) and the new clone opens the drawer (an immediate fetch); an offline
   clone does neither. A pull-down drawer has one handle per store. A handle
   badge counts new forced assignments, pending assignments to the viewer, and
-  reference notices; opening the store clears it (the notification card below
+  the derived notices (answer, reference, done, and blocked); opening the store clears it (the notification card below
   does not change what it counts). A handle shows ⊘ when the
   viewer's clone is offline or the store has no remote.
 - **Store header** (500). One row: the store name, then the icon-only
@@ -322,7 +322,8 @@ build, no server, no dependencies.
     the assignee's initials); on *all* the cards are items under the kind
     filter only: the columns already are the statuses, so the status filter
     is ignored there (it would only empty columns) and the kanban toolbar
-    offers kind alone. Cards are quiet like rows (title, initials, priority,
+    offers kind alone. Its first column is *review*, whose `+` creates a task
+    in the review stage, not self-assigned. Cards are quiet like rows (title, initials, priority,
     due), with the source on hover. Dragging moves a card only for the
     viewer's own live assignment and dispatches `item.status` (todo / doing /
     blocked) or `item.close` (done). Cards stay independent tasks (469):
@@ -518,10 +519,10 @@ attachment the store accepts, in bytes (339); without it the limit is 10 MiB
 
 | type | payload | rule |
 |---|---|---|
-| `item.create` | `kind` (`task`/`todo`/`topic`), `title`, `body?`, `project?`, `due?`, `priority?`, `parent?`, `after?`, `mentions?`, `attachments?`, `refs?` | A `parent` must be assigned to or created by the author. `project` is one free-text string, the only grouping (no labels or tags). `due` is a `YYYY-MM-DD` date. `priority` is a level in the author's current range; omitted, the item starts at the store's default level. `after` places it among its siblings (528), below. |
-| `item.edit` | `item`, any of `title`/`body`/`project`/`due`/`priority`; `mentions?`, `attachments?` and `refs?` with `body` | Creator only; an admin may also edit an item whose creator was removed (292). `due: null` clears the date; priority cannot be cleared. Each field merges by the (203) rule. `mentions` or `attachments` without `body` is flagged, and so is `refs`. |
+| `item.create` | `kind` (`task`/`todo`/`topic`), `title`, `body?`, `project?`, `due?`, `priority?`, `parent?`, `after?`, `stage?`, `mentions?`, `attachments?`, `refs?` | A `parent` must be assigned to or created by the author. `project` is one free-text string, the only grouping (no labels or tags). `due` is a `YYYY-MM-DD` date. `priority` is a level in the author's current range; omitted, the item starts at the store's default level. `after` places it among its siblings (528), below. `stage: "review"` creates a task or todo in the review stage (see Derived state); absent, it starts in todo. Flagged: a stage on a topic, or any other value. |
+| `item.edit` | `item`, any of `title`/`body`/`project`/`due`/`priority`/`stage`; `mentions?`, `attachments?` and `refs?` with `body` | Creator only; an admin may also edit an item whose creator was removed (292). `due: null` clears the date; priority cannot be cleared. `stage: "review"` moves a task or todo back to review, `stage: null` moves it to todo; moving to review is flagged while the item holds a live or pending assignment, and a stage on a topic is flagged. Each field merges by the (203) rule. `mentions` or `attachments` without `body` is flagged, and so is `refs`. |
 | `item.hide` | `item` | Creator only; an admin may also hide an item whose creator was removed (292). A tombstone: the content stays in history. Flagged while someone else holds an open (live or pending) assignment on the item. |
-| `item.assign` | `item`, `targets` (a list of member ids and rules `{root, include_root?, levels?}`) or the older `mode` (`all`/`chosen`), `levels` (all), `people` (chosen); `completion` (`assignee`/`assigner`, default `assignee`) | Creator only; an admin may also assign an item whose creator was removed. A person may be anyone in the store: the author, or someone the author reaches (the author is in their lead chain, any depth), is a **forced** assignment, live at once; anyone else gets a **pending** assignment. A rule (490)-(492) targets everyone below `root` (within `levels`, absent = the whole subtree; `root` too with `include_root`), forced, and stays live: anyone who later enters the range inherits it. A rule rooted at the author or below is live at once; one rooted elsewhere is a **rule request** pending to `root`. The older `chosen` is `targets` of people and `all` is one rule `{root: author, levels}`, with the event id as the rule id. Flagged: both `targets` and `mode`, an empty list, a malformed target, two rules on one root, a rule with nobody in it, a rule another live rule of the author's on the item already covers, or every person chosen (with no rule) already holding a live or pending assignment. Not allowed on topics. |
+| `item.assign` | `item`, `targets` (a list of member ids and rules `{root, include_root?, levels?}`) or the older `mode` (`all`/`chosen`), `levels` (all), `people` (chosen); `completion` (`assignee`/`assigner`; absent reads as `assignee`, and writers fill it in: `assigner` when anyone but the author is a target, `assignee` when the author is the only one) | Creator only; an admin may also assign an item whose creator was removed. A person may be anyone in the store: the author, or someone the author reaches (the author is in their lead chain, any depth), is a **forced** assignment, live at once; anyone else gets a **pending** assignment. A rule (490)-(492) targets everyone below `root` (within `levels`, absent = the whole subtree; `root` too with `include_root`), forced, and stays live: anyone who later enters the range inherits it. A rule rooted at the author or below is live at once; one rooted elsewhere is a **rule request** pending to `root`. The older `chosen` is `targets` of people and `all` is one rule `{root: author, levels}`, with the event id as the rule id. Flagged: both `targets` and `mode`, an empty list, a malformed target, two rules on one root, a rule with nobody in it, a rule another live rule of the author's on the item already covers, or every person chosen (with no rule) already holding a live or pending assignment. Not allowed on topics. Any applied assign moves a review-stage item to todo. |
 | `item.handoff` | `item`, `to`, `assignee?`, `note?` | The holder of a live assignment hands it to anyone; an admin may hand off any member's live assignment by naming its holder in `assignee` (286), so open work can be taken over before the member is removed. It makes a pending assignment to `to` with the original's assigner and completion mode; on accept the original assignment ends (`handed`) and the new one starts with the original's status and note (290). Flagged on a done assignment, when `to` is the holder or already holds one, or while another handoff of it is pending. |
 | `item.accept` / `item.decline` | `item`, `note?` | The target of a pending assignment, on it. Accept makes it live; for a handoff it also ends the original. Decline ends it as `declined`. A pending handoff whose original ends another way is withdrawn with it (295), so a later accept or decline finds no pending assignment. |
 | `item.return` | `item`, `assignee`, `note?` | Only the assignee's direct lead, on an accepted (formerly pending) live assignment. Ends it as `returned`; the assigner may send again. Returning an accepted handoff restores the original assignment with its prior status (291), unless its holder was removed or holds another assignment on the item by then. |
@@ -615,6 +616,10 @@ forced (author, or someone the author reaches) starts live
   when it is declined or, once accepted, returned; for a returned handoff the
   original assigner gets one too. Notices are derived from the assignment
   records, never events.
+- **Done and blocked notices.** The assigner of a live assignment gets a
+  notice (`done` / `blocked`, key `w:<assignment>:<status>:<lastUpdate>`)
+  when someone else set it done or blocked; an awaiting close is in the
+  confirm list instead, and a status the assigner set (a confirm) is none.
 - `returned` and `declined` are terminal: the assigner may assign again.
 - Completion mode (assignee closes / assigner confirms) stays per assignment.
 - **Rules** ((490)-(492)). A rule's id is `<assign event id>~<root>` (the
@@ -642,13 +647,18 @@ rule rooted elsewhere:  request pending --accept--> live --request returned / un
 - An assignment's status is `todo`, `doing`, `blocked`, `awaiting`, or `done`
   while live. An item's own status comes from its live assignments: all done
   means `done`, any blocked means `blocked`, then awaiting, then doing, then
-  todo. With no live assignment it is `pending` (some pending), `declined` or
-  `returned` (the latest one ended that way), or `unassigned`. Topics have
-  none.
+  todo. With no live assignment it is `pending` (some pending), `review` (the
+  item is in the review stage), `declined` or `returned` (the latest one
+  ended that way), or `unassigned`. Topics have none.
+- **Review stage.** A task or todo carries `stage` (`review`, or none for
+  todo), set on create or by `item.edit`. An item holding a live or pending
+  assignment is never in review: an assign clears the stage, moving to review
+  is refused while one is held, and a move to review that folds after a
+  concurrent assign is dropped (the assignment wins), in both engines.
 - Roll-up: a parent shows its children by status ("done 3/5 · blocked 1") and a
   "blocked below" warning when any descendant is blocked, all the way up to the
-  root. Topics and items whose status is pending, declined, or returned are not
-  counted. The parent's own status stays manual, set by its assignee.
+  root. Topics and items whose status is pending, review, declined, or
+  returned are not counted. The parent's own status stays manual, set by its assignee.
 - Priority displays as the level name; a stored value outside the current range
   displays as the top level. Stale (284) = a live assignment in `doing` or
   `blocked` with no status write for 3 days by the viewer's clock (the mock
@@ -691,7 +701,7 @@ events[]     display order: { id, alias, stream, member, seq, ts, type, origin, 
                      (applied|flagged|waiting), reason, ignored, markers[{kind, field, other,
                      otherMember, winner, mine, theirs}], superseded[{field, by, why (later|human)}],
                      thread, parentThread, local, open, late }
-notices[]    { key, kind (accepted|handoff|declined|returned), assignment, item, to, by, sender, ts,
+notices[]    { key, kind (accepted|handoff|done|blocked|declined|returned), assignment, item, to, by, sender, ts,
                state, from?, endedBy?, note?, restores? }   keys acc:/ho:/dec:/ret: + assignment id
 my           { assignments[], today{work[], pending[], confirms[]}, received{pending[], answered[], sent[]},
                given[itemId], created[itemId], team[{id, depth, open[], pending[], waiting[], done, blocked,
@@ -1032,6 +1042,10 @@ creation, and it has a topic and a blocked subtask.
 | 529 | A `task` or `todo` created from the dashboard is assigned to its creator in the same batch (`item.assign` on `$1`, people = the creator, assignee closes); a `topic` is not. This covers the inline subtask row too, superseding (474)'s "unassigned task". |
 | 530 a | Assign is a search popover anchored at its trigger (the assignee card's `+`, the menu's *Assign ▸*), replacing the checkbox grid: chips for the picked people and rules (each with ×); a search field; with no query, "My team" rule rows (within L1, within L2 when the team is that deep, the whole subtree), each with its head count; with a query, the whole-subtree rule of each matching member who leads anyone, marked pending when outside the viewer's reach; member rows with avatar, name, id, and a forced/pending mark; the completion mode; an apply button disabled while nothing is picked, replacing the "select at least one" message. Already held people and rules a live rule of the viewer's already covers are greyed. Arrows move, Enter toggles, Cmd/Ctrl+Enter applies, Esc closes. It writes `targets`, popover rules without `include_root`. |
 | 531 a | Items and comments carry `refs`, the item ids their text references with `#<alias>`, riding with the body like mentions (the writer keeps a ref only while its token stays in the text). Each ref must be an item in the author's causal past. The view shows `refs` on items and comments, and `backrefs` on items: shown items, then shown comments on shown items, own thread excluded. |
+| 20 b (11-09) | Assigning to someone else defaults to `assigner` (awaiting, then the assigner confirms); assigning only to oneself defaults to `assignee`. The fold's absent-means-`assignee` stays for old events; writers store the value. (59 a) The MCP writer fills an omitted `completion` the same way. (58) The assign popover defaults to `assigner` when any picked person or rule is not the viewer, `assignee` when the viewer is the only target. |
+| 21, 57 (11-09) | Done and blocked of work I assigned are derived notices to the assigner when someone else set them (awaiting stays in the confirm list), in Go and `engine.js`; no notice events. Being notices, they count on the handle badge, which (331) left unchanged when the Notifications card derived them client-side. |
+| 22 a, 32 a, 33 a, 34 c, 51-56 (11-09) | A review stage ("검토") before todo: the item field `stage` (`review`, or absent for todo) on `item.create` / `item.edit`, tasks and todos only, under the `item.edit` permission (promotion is `stage: null`). A review item has status `review` and is left out of roll-ups, review subtasks too. Assigning promotes it (the assign permission alone); moving back to review is refused while a live or pending assignment exists, and a concurrent move folded after an assign is dropped. The "all" kanban gets a review column first with a `+` that creates a review item, not self-assigned (narrowing 529); the item menu promotes ("할 일로 올리기") and demotes. Every other creation path stays todo plus self-assign. |
+| 66 a (11-09) | A task or todo an agent creates through the MCP tracker tool is self-assigned like (529) when the same batch does not assign it, unless it is created in review. |
 | 531 UI | The composer's `#` opens the `@` popup's twin, searching shown items by alias and title (alias prefix, title prefix, then contains); a pick inserts `#<alias> `. `refs` are derived from the `#<alias>` / `#<id>` tokens in the text at write time (comment, comment edit, body edit), not kept from the picks. `#<alias>` in bodies and comments renders as a link to the item, its title on hover. The item window shows "Referenced by" (참조됨) under Subtasks when the item has backrefs: items, then comments with their author and a snippet; a comment row opens its item at the comment. |
 
 ## Open questions

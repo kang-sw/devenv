@@ -170,6 +170,16 @@ func (w *liveWriter) write(res wslive.Result, err error, kind string) bool {
 	return true
 }
 
+// endAgents marks every running subagent failed: the process that ran them
+// is gone, so no end will come for them.
+func (w *liveWriter) endAgents() {
+	for _, a := range w.st.Snapshot(w.now().UnixMilli()).Agents {
+		if a.Status == wslive.StatusRunning {
+			w.apply(wslive.Event{Kind: wslive.KindAgent, AgentID: a.ID, Status: wslive.StatusFailed})
+		}
+	}
+}
+
 // setAdapter changes the snapshot's adapter name ("" for a closed
 // conversation, so the page's composer refuses input) and writes it.
 func (w *liveWriter) setAdapter(name string) {

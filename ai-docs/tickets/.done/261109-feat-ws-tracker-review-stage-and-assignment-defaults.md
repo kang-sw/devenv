@@ -5,6 +5,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 99cb8a6d16897788
 sage-review-completeness-reviewed: 99cb8a6d16897788
+completed: 2026-11-09
 ---
 
 # ws tracker: a review stage before todo, approval-by-default when assigning others, and done/blocked notices to the assigner
@@ -214,3 +215,50 @@ reference engine `ai-docs/ref/tracker-mockup/engine.js`):
   to the assignment (not review). The wsflow mirror test stays green. `node --check` on edited
   JS; i18n tests green. The Result lists the browser hand check of the
   kanban column and menu as unverified if not done.
+
+### Result (9390fed99) - 2026-11-09
+
+Landed in five commits: 9e0c77973 (model), f61a8b2a9 (MCP writer and
+playbook), 64a206dfb (page and i18n), 94c5b75b3 (mockup README), 9390fed99
+(review fixes).
+
+- Model (Go `wstracker` and `engine.js`): `stage` on `item.create` /
+  `item.edit` (tasks and todos; `review` or null), counted by `itemFields`;
+  any applied assign clears it; demotion flagged while a live or pending
+  record exists; a concurrent demote folded after an assign is dropped, and a
+  register winner that recomputes to review while records are open is
+  dropped too. Status `review` (only with no live or pending record), not
+  counted. Derived notices `done` / `blocked` to the assigner when someone
+  else set the status, keyed `w:<assignment>:<status>:<lastUpdate>` (the
+  dashboard's former client-side feed key, so read state carries over); they
+  also count on the handle badge. No `stage` field in the item view: status
+  carries it.
+- MCP writer: `stage="review"` on create/edit, `clear="stage"`; omitted
+  `completion` filled (assignee only when the writer is the sole person
+  target, no rules/levels); creator self-assignment inserted right after each
+  unassigned non-review task/todo create, reported as
+  `(self-assignment)` under the create's position; `tracker.query` status
+  filter accepts `review`. Playbook updated, wsflow and pi rsrc mirrors
+  regenerated/synced.
+- Page: `review` status icon and status-filter option; review column first on
+  the "all" kanban with a "+" creating an unassigned review task; item menu
+  "Move to todo" / "Move to review" under `canEdit`; assign popover default
+  by (58) until the radio is touched; done/blocked feed entries read from
+  `VS.notices`. Six new i18n keys in all 11 tables; mockup i18n regenerated.
+- Verification: `go test ./internal/wstracker/ ./internal/wstrackerhost/
+  ./internal/wsi18n/ ./internal/wsrsrc/` ok; `go test ./internal/mcp/` ok
+  (leaf run, 398s); `go test ./internal/wsdashboard/` ok (leaf run);
+  `gen-golden.js` regenerates with no diff, 160 reason cases agree;
+  `node --check` on tracker.js and engine.js; wsflow package tests OK. New
+  golden case `review-stage` (create in review, promote, demote, assign
+  promotes, review subtask out of roll-up, both orders of a concurrent demote
+  and assign, blocked and done notices, none on the assigner's confirm) and
+  seven flagged-reason cases.
+- Browser check: the page leaf drove the mockup in headless Chromium (review
+  column and its single "+", create without assign, promote/demote entries,
+  popover default, assigning a review item, blocked notice). Unverified: a
+  rendered done notice, visual look and dark mode, a real (non-mockup)
+  dashboard session.
+- Open (Minor, accepted): the MCP writer defaults any rule or `levels`
+  target to `assigner`, though a rule `<writer>+:*` with no reports covers
+  only the writer.

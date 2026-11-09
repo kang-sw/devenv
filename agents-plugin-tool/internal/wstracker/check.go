@@ -186,6 +186,33 @@ func (s *state) checkExtras(p obj, prior []attachment) rejection {
 	return ""
 }
 
+const stageShape = "stage must be review (null or absent: todo)"
+
+// checkStage checks an item.edit stage change: tasks and todos only, review
+// or null (todo). Moving to review needs an item with no live or pending
+// assignment, since assigning is what moves an item to todo.
+func (s *state) checkStage(it *item, p obj) rejection {
+	if it.kind == "topic" {
+		return "topics have no stage"
+	}
+	if p.null("stage") {
+		return ""
+	}
+	if p["stage"] != "review" {
+		return stageShape
+	}
+	var held []string
+	for _, x := range s.openRecs(it.id) {
+		if !contains(held, x.to) {
+			held = append(held, x.to)
+		}
+	}
+	if len(held) > 0 {
+		return rejection(it.alias + " has live or pending assignments (" + strings.Join(held, ", ") + "); unassign them before moving it to review")
+	}
+	return ""
+}
+
 const targetShape = "a target is a member id or a rule {root, include_root?, levels?}"
 
 // checkTargets checks item.assign targets (490)-(492): member ids and rules
@@ -313,6 +340,14 @@ func (s *state) check(n *node) rejection {
 		if r := s.checkFields(p); r != "" {
 			return r
 		}
+		if !p.null("stage") {
+			if p["kind"] == "topic" {
+				return "topics have no stage"
+			}
+			if p["stage"] != "review" {
+				return stageShape
+			}
+		}
 		if r := s.checkExtras(p, nil); r != "" {
 			return r
 		}
@@ -357,6 +392,11 @@ func (s *state) check(n *node) rejection {
 		}
 		if r := s.checkFields(p); r != "" {
 			return r
+		}
+		if p.has("stage") {
+			if r := s.checkStage(it, p); r != "" {
+				return r
+			}
 		}
 		if (!p.null("mentions") || !p.null("attachments")) && !p.has("body") {
 			return "mentions and attachments go with a body edit"

@@ -767,6 +767,7 @@ func (c *conv) processExited() {
 		c.setStatus(func() { c.turn = false })
 		c.apply(wslive.Event{Kind: wslive.KindTurnEnd})
 	}
+	c.live.endAgents()
 	c.live.writeSnapshot()
 	c.r.notify(c.rec.ReplyID, c.rec.Root)
 }
@@ -785,6 +786,7 @@ func (c *conv) stopProcess(string) {
 		c.setStatus(func() { c.turn = false })
 		c.apply(wslive.Event{Kind: wslive.KindTurnEnd})
 	}
+	c.live.endAgents()
 	c.live.writeSnapshot()
 	c.r.notify(c.rec.ReplyID, c.rec.Root)
 }

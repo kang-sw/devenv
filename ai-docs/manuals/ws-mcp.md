@@ -375,7 +375,12 @@ allows the `Agent` tool as its only built-in tool, so it may spawn
 subagents: Claude applies the launch's `--tools` and dontAsk allowlist to
 them too (a subagent type whose every tool is outside it is refused), and
 its system/init reports the tool as `Task`, which the init check accepts
-for `Agent`. Each
+for `Agent`. Claude runs such a subagent as a background task: the
+runner maps its `task_started` and terminal `task_updated` /
+`task_notification` lines to a snapshot subagent (running, then done or
+failed; failed too when the process ends first), which drives the
+conversation's subagent badge, and drops the subagent's own
+`parent_tool_use_id` lines from the lead's reply and batches. Each
 conversation is a dashboard session (registration, snapshot, ring, inbox)
 whose page shows it like a lead session. Its routes, behind the same access
 guard: `GET /agents` (every conversation's state), `POST /agents {profile,
