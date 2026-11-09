@@ -148,6 +148,7 @@
   "js.interrupt.ok": "Interruption envoyée.",
   "js.interrupt.restored": "Interruption envoyée : les messages en attente sont revenus dans la zone de saisie.",
   "js.interrupt.title": "arrêter le tour en cours du lead ; les messages en attente reviennent dans la zone de saisie",
+  "js.mention.label": "Suggestions de fichiers : Haut/Bas pour se déplacer, Tab ou Entrée pour insérer, Échap pour fermer",
   "js.menu.copyabs": "Copier le chemin absolu",
   "js.menu.copyrel": "Copier le chemin relatif",
   "js.menu.copyurl": "Copier l'URL",

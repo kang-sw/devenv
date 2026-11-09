@@ -148,6 +148,7 @@
   "js.interrupt.ok": "Interrupção enviada.",
   "js.interrupt.restored": "Interrupção enviada: as mensagens retidas voltaram para a caixa de mensagem.",
   "js.interrupt.title": "parar o turno em andamento do lead; as mensagens retidas voltam para a caixa de mensagem",
+  "js.mention.label": "Sugestões de arquivos: Cima/Baixo para mover, Tab ou Enter para inserir, Escape para fechar",
   "js.menu.copyabs": "Copiar caminho absoluto",
   "js.menu.copyrel": "Copiar caminho relativo",
   "js.menu.copyurl": "Copiar URL",

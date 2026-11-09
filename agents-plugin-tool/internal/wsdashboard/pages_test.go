@@ -201,8 +201,9 @@ func TestSessionHeadLeadsWithTheProjectAndLightsTheHarnessBadge(t *testing.T) {
 // TestSessionPagesCarryScriptHooks pins the elements and attributes the page
 // script and stylesheet read: the board column, the drawer that holds the
 // panels, the tab bar and its dots, the layout menu, the composer and its
-// interrupt badge and subagent badge, the lead's phase and running subagent
-// counts on the convlive region, the stream
+// interrupt badge and subagent badge, its mention layer behind the message
+// box and the file-mention module loaded ahead of the page script, the lead's
+// phase and running subagent counts on the convlive region, the stream
 // indicators, and the banner.
 func TestSessionPagesCarryScriptHooks(t *testing.T) {
 	f := startPageFixture(t)
@@ -218,10 +219,14 @@ func TestSessionPagesCarryScriptHooks(t *testing.T) {
 		`<div id="composer" class="composer"><div class="cbadges"><button type="button" class="ibadge" id="ibadge"`, `<span class="ilabel">Interrupt</span>`,
 		`</button><span class="sbadge" id="sbadge" title="running subagents: the lead&#39;s own, and (&#43;) those they started" hidden><span class="spin"></span><svg class="i" aria-hidden="true"><use href="#i-agents"/></svg><span class="slabel"></span></span></div>`,
 		`<div class="conv clive" data-phase="replying" data-sub="0" data-subdeep="0">`,
+		`<div class="cfield"><div class="chl" id="chl" aria-hidden="true"></div><textarea id="ctext"`,
 	} {
 		if !strings.Contains(live, want) {
 			t.Errorf("live session page lacks %q", want)
 		}
+	}
+	if m, d := strings.Index(live, "window.wsMention = {"), strings.Index(live, "--- composer file mentions"); m < 0 || d < m {
+		t.Errorf("live session page does not load the mention module ahead of the page script (module at %d, page script at %d)", m, d)
 	}
 	// The composer sends on a key or the thin icon-only send button; the
 	// copy button and the lead strip are gone, and the splitter sits between the tree and the

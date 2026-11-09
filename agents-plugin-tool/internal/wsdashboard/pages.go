@@ -30,7 +30,7 @@ import (
 // (wswhiteboard.RenderRegions); the rest render from the view model
 // (pageview.go).
 
-//go:embed assets/dashboard.tmpl assets/dashboard.css assets/dashboard.js assets/sprite.svg assets/tracker.css assets/tracker.js
+//go:embed assets/dashboard.tmpl assets/dashboard.css assets/dashboard.js assets/sprite.svg assets/tracker.css assets/tracker.js assets/mention.js
 var dashboardFS embed.FS
 
 // Region names. The session page's regions in order; the index page has one.
@@ -98,6 +98,9 @@ type pageAssetsData struct {
 	// which dashboard.js mounts when the daemon serves the tracker routes.
 	TrackerCSS    template.CSS
 	TrackerScript template.JS
+	// MentionScript is the @ file-mention popup module (mention.js), which
+	// the session page's composer attaches.
+	MentionScript template.JS
 }
 
 var (
@@ -162,6 +165,7 @@ func buildDashboardAssets(read func(name string) ([]byte, error)) (*dashboardAss
 		Sprite:           template.HTML(strings.TrimSpace(get("sprite.svg"))),
 		TrackerCSS:       template.CSS(get("tracker.css")),
 		TrackerScript:    template.JS(get("tracker.js")),
+		MentionScript:    template.JS(get("mention.js")),
 		WhiteboardCSS:    wb.CSS,
 		WhiteboardSprite: wb.Sprite,
 		FormScript:       wb.FormScript,
@@ -706,8 +710,8 @@ func (d *Daemon) handleIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleSessionRoutes serves everything under /s/: a session page, its SSE
-// stream, its image, file view, history, closed-topic, worktree pool, git
-// status, and attachment routes, its message, cancel, steer, interrupt,
+// stream, its image, file view, files, history, closed-topic, worktree pool,
+// git status, and attachment routes, its message, cancel, steer, interrupt,
 // system-open, git refresh, git push, pull, and fetch, and worktree cleanup
 // routes, and the shared assets a page loads by relative path.
 func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
@@ -749,6 +753,8 @@ func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 		d.handleImage(w, r, replyID)
 	case sub == "file":
 		d.handleFile(w, r, replyID)
+	case sub == "files":
+		d.handleFiles(w, r, replyID)
 	case sub == "history":
 		d.handleHistory(w, r, replyID)
 	case sub == "closed":

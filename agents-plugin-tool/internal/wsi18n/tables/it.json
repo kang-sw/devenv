@@ -148,6 +148,7 @@
   "js.interrupt.ok": "Interruzione inviata.",
   "js.interrupt.restored": "Interruzione inviata: i messaggi in sospeso sono tornati nella casella di scrittura.",
   "js.interrupt.title": "ferma il turno in corso del lead; i messaggi in sospeso tornano nella casella di scrittura",
+  "js.mention.label": "Suggerimenti di file: Su/Giù per spostarsi, Tab o Invio per inserire, Esc per chiudere",
   "js.menu.copyabs": "Copia percorso assoluto",
   "js.menu.copyrel": "Copia percorso relativo",
   "js.menu.copyurl": "Copia URL",

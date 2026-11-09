@@ -148,6 +148,7 @@
   "js.interrupt.ok": "中断を送信しました。",
   "js.interrupt.restored": "中断を送信しました: 保留中のメッセージは入力欄に戻りました。",
   "js.interrupt.title": "lead の実行中のターンを止めます。保留中のメッセージは入力欄に戻ります",
+  "js.mention.label": "ファイル候補: 上下キーで移動、Tab または Enter で挿入、Escape で閉じる",
   "js.menu.copyabs": "絶対パスをコピー",
   "js.menu.copyrel": "相対パスをコピー",
   "js.menu.copyurl": "URL をコピー",
