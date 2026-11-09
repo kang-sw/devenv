@@ -367,7 +367,14 @@
       }
     },
     "261109-bug-ws-whiteboard-patch-cannot-change-item-class": {
-      "registered_at": "2026-11-09T05:54:05Z"
+      "registered_at": "2026-11-09T05:54:05Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "28ef83e379b353cc",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-09T06:28:21Z"
+      }
     },
     "261109-feat-ws-dashboard-git-commit-graph": {
       "registered_at": "2026-11-09T05:26:59Z",
