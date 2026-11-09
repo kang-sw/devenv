@@ -86,6 +86,7 @@ const LIVE_TOOL_NAMES = [
   "worktree.acquire", "worktree.release", "worktree.remove", "worktree.list",
   "mailbox.history", "dashboard.inbox_drain", "dashboard.intake",
   "tracker.query", "tracker.update", "whiteboard.query", "whiteboard.update",
+  "wiki.query", "wiki.update",
 ];
 const RETIRED_TOOL_NAMES = [
   "specs.query", "mental_models.list", "mental_models.query", "mental_models.status",
