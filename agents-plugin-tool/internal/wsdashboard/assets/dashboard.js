@@ -2072,6 +2072,13 @@
       });
     },
     saveProfile: function (p) { tkFetch("/tracker/profiles", p, function () {}); },
+    // An editor's preview: the daemon renders the text as the view renders a saved one.
+    render: function (id, text, done) {
+      tkFetch(tkUrl(id, "render"), { text: text }, function (status, v) {
+        if (status === 200 && typeof v.html === "string") done({ ok: true, html: v.html });
+        else done({ ok: false, error: tkErrText(status, v) });
+      });
+    },
     // done comes after the reload, so the store list already holds the new store.
     register: function (req, done) {
       tkFetch("/tracker/register", req, function (status, v) {

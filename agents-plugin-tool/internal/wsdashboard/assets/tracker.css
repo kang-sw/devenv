@@ -595,6 +595,20 @@ dialog.tk-dlg p { margin: 0; font-size: 12.5px; color: var(--wb-muted-fg); }
 .tk .iw-edt input { flex: 1; min-width: 0; font-size: 17px; font-weight: 700; padding: 2px 8px; }
 .tk .iw-edit .tb, .tk .cedit .tb { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 12px; }
 .tk .cedit { display: flex; flex-direction: column; gap: 4px; }
+/* The shared markdown editor (editorHtml in tracker.js): a Write / Preview toggle over the
+   textarea, and the preview pane in its place, drawn like the saved block (sh-body or ctext). */
+.tk .tked { display: flex; flex-direction: column; gap: 4px; }
+.tk .cbox.tked { gap: 0; }
+.tk .tked > [hidden] { display: none; }
+.tk .tked-tabs { display: flex; gap: 2px; align-self: flex-start; }
+.tk .cbox .tked-tabs { padding: 4px 6px 0; }
+.tk .tked-tab { font: inherit; font-size: 11.5px; border: 0; border-radius: 6px; padding: 1px 8px; background: transparent; color: var(--wb-muted-fg); cursor: pointer; }
+.tk .tked-tab:hover { color: var(--wb-primary); }
+.tk .tked-tab[aria-pressed="true"] { background: var(--wb-card); color: var(--wb-fg); font-weight: 600; }
+.tk .tked-tab:focus-visible { outline: 1.5px solid var(--wb-primary); }
+.tk .tked-pv { min-height: 44px; max-height: 50vh; overflow: auto; overflow-wrap: anywhere; font-size: 13px; }
+.tk .tked-pv:not(.md) { white-space: pre-wrap; }
+.tk .cbox .tked-pv { padding: 8px 11px 2px; background: transparent; }
 .tk .iwin h3 .cnt { font-weight: 600; letter-spacing: 0; margin-left: 4px; }
 .tk .iwin h3.prom { display: flex; align-items: center; gap: 6px; margin: 2px 0 0; font-size: 14px; color: var(--wb-fg); text-transform: none; letter-spacing: 0; }
 .tk .iw-sub, .tk .iw-brefs, .tk .iw-thread, .tk .iw-asg { display: flex; flex-direction: column; gap: 6px; }
@@ -792,7 +806,7 @@ body.tk-menuon .tk .ir-more { visibility: hidden !important; }
    flows as HTML rather than pre-wrap, wide blocks scroll inside the box, headings stay
    below the item title and clear the window's section-label h3 rule, and a comment is
    more compact than a body. */
-.tk .sh-body.md, .tk .timeline .cmt .ctext.md { white-space: normal; overflow-wrap: anywhere; }
+.tk .sh-body.md, .tk .timeline .cmt .ctext.md, .tk .tked-pv.md { white-space: normal; overflow-wrap: anywhere; }
 .tk .sh-body.md :is(h1, h2, h3, h4, h5, h6), .tk .ctext.md :is(h1, h2, h3, h4, h5, h6) {
   margin: 8px 0 4px; font-size: 13px; font-weight: 700; line-height: 1.35; color: inherit; text-transform: none; letter-spacing: normal; }
 .tk .sh-body.md h1 { font-size: 15px; }
