@@ -1,0 +1,1067 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>git drawer commit graph mockup</title>
+<style>
+/* ===== shipped tokens (wswhiteboard page.css, dashboard.css, tracker.css), dark block keyed on data-theme for the mockup toggle ===== */
+:root {
+  --wb-bg: #f3f3f0; --wb-fg: #1b1d21; --wb-card: #ffffff; --wb-muted: #e9e8e3; --wb-muted-fg: #5f646b;
+  --wb-primary: #2b62d9; --wb-primary-fg: #ffffff;
+  --wb-now: var(--wb-primary); --wb-on-now: var(--wb-primary-fg);
+  --wb-line: color-mix(in srgb, var(--wb-fg) 16%, transparent);
+  --wb-wash: color-mix(in srgb, var(--wb-fg) 6%, transparent);
+  --wb-shadow: 0 1px 2px rgb(0 0 0 / .14), 0 2px 6px rgb(0 0 0 / .06);
+  --wb-shadow-hi: 0 2px 4px rgb(0 0 0 / .16), 0 6px 18px rgb(0 0 0 / .10);
+  --wb-radius: 12px;
+  --wb-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --wb-ok: #1d7348; --wb-fail: #c0262d; --wb-warn: #c27a00; --wb-warn-ink: #a35f00;
+  --gh-gold: #b8860b;
+  --tk-ok: #1d7348; --tk-backdrop: rgb(0 0 0 / .28);
+  --dpad: 16px;
+  /* NEW (graph): lane colours; lane 0 is the checked-out branch's first-parent line */
+  --gl-0: #2b62d9; --gl-1: #0e7a83; --gl-2: #6a4fc4; --gl-3: #b25000;
+  --gl-4: #1d7348; --gl-5: #b0245a; --gl-6: #9a7400; --gl-7: #5f646b;
+  /* NEW (diff viewer) */
+  --df-add: color-mix(in srgb, var(--wb-ok) 11%, var(--wb-card));
+  --df-add-g: color-mix(in srgb, var(--wb-ok) 20%, var(--wb-card));
+  --df-add-x: color-mix(in srgb, var(--wb-ok) 32%, var(--wb-card));
+  --df-del: color-mix(in srgb, var(--wb-fail) 9%, var(--wb-card));
+  --df-del-g: color-mix(in srgb, var(--wb-fail) 17%, var(--wb-card));
+  --df-del-x: color-mix(in srgb, var(--wb-fail) 28%, var(--wb-card));
+  --df-hunk: color-mix(in srgb, var(--wb-primary) 8%, var(--wb-card));
+  /* NEW (chroma class tokens) */
+  --hl-k: #a626a4; --hl-kt: #0e7a83; --hl-nb: #b25000; --hl-nf: #2457c5; --hl-s: #50701a;
+  --hl-c: #6e7681; --hl-mi: #b25000; --hl-nt: #2457c5;
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --wb-bg: #141518; --wb-fg: #e7e7e4; --wb-card: #1e2024; --wb-muted: #2b2d32; --wb-muted-fg: #a2a6ad;
+  --wb-primary: #7aa2ff; --wb-primary-fg: #0c1424;
+  --wb-now: #243457; --wb-on-now: #d3defb;
+  --wb-shadow: 0 1px 2px rgb(0 0 0 / .5), 0 2px 8px rgb(0 0 0 / .3);
+  --wb-shadow-hi: 0 2px 4px rgb(0 0 0 / .55), 0 8px 22px rgb(0 0 0 / .4);
+  --wb-ok: #6cc39a; --wb-fail: #f0797e; --wb-warn: #e0a36c; --wb-warn-ink: #e0a36c;
+  --gh-gold: #e3b341;
+  --tk-ok: #6cc39a; --tk-backdrop: rgb(0 0 0 / .5);
+  --gl-0: #7aa2ff; --gl-1: #6fcdd4; --gl-2: #b9a6f5; --gl-3: #e0a36c;
+  --gl-4: #6cc39a; --gl-5: #e48aae; --gl-6: #e3b341; --gl-7: #a2a6ad;
+  --df-add: color-mix(in srgb, var(--wb-ok) 10%, var(--wb-card));
+  --df-add-g: color-mix(in srgb, var(--wb-ok) 18%, var(--wb-card));
+  --df-add-x: color-mix(in srgb, var(--wb-ok) 34%, var(--wb-card));
+  --df-del: color-mix(in srgb, var(--wb-fail) 10%, var(--wb-card));
+  --df-del-g: color-mix(in srgb, var(--wb-fail) 18%, var(--wb-card));
+  --df-del-x: color-mix(in srgb, var(--wb-fail) 32%, var(--wb-card));
+  --df-hunk: color-mix(in srgb, var(--wb-primary) 10%, var(--wb-card));
+  --hl-k: #c792ea; --hl-kt: #6fcdd4; --hl-nb: #f2a76a; --hl-nf: #82aaff; --hl-s: #b5d88a;
+  --hl-c: #7f8590; --hl-mi: #f2a76a; --hl-nt: #82aaff;
+  color-scheme: dark;
+}
+
+/* ===== shipped base (page.css) ===== */
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--wb-bg); color: var(--wb-fg); }
+body { font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif; }
+code { font-family: var(--wb-mono); }
+button { font: inherit; color: inherit; }
+.i { width: 14px; height: 14px; flex: none; display: block; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.chip { display: inline-flex; align-items: center; gap: 3px; height: 20px; font-size: 12px; font-weight: 700; line-height: 1; padding: 0 9px; border-radius: 999px; background: var(--wb-muted); color: var(--wb-muted-fg); white-space: nowrap; }
+.btn { font-size: 13px; background: var(--wb-muted); border: 0; border-radius: 999px; padding: 3px 12px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+
+/* ===== mockup chrome (not shipped) ===== */
+.mockhead { position: sticky; top: 0; z-index: 30; display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; justify-content: space-between; padding: 8px 16px; background: var(--wb-card); box-shadow: var(--wb-shadow); }
+.mockhead .muted { color: var(--wb-muted-fg); font-size: 12.5px; }
+.mctl { display: flex; flex-wrap: wrap; gap: 8px; }
+.seg { display: inline-flex; gap: 3px; background: var(--wb-muted); border-radius: 999px; padding: 3px; }
+.seg button { border: 0; background: transparent; border-radius: 999px; height: 26px; padding: 0 12px; font-weight: 700; font-size: 12.5px; cursor: pointer; color: var(--wb-muted-fg); }
+.seg button[aria-pressed="true"] { background: var(--wb-card); color: var(--wb-fg); box-shadow: var(--wb-shadow); }
+.mockmain { max-width: 1680px; margin: 0 auto; padding: 12px 0 40px; }
+.mk-intro, .mk-legend { margin: 0 var(--dpad) 12px; font-size: 13px; }
+.mk-intro p { margin: 0 0 4px; }
+.mk-legend { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; margin-top: 18px; }
+.mk-legend section { background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); padding: 10px 14px; }
+.mk-legend h2 { margin: 0 0 6px; font-size: 13px; display: flex; align-items: center; gap: 6px; }
+.mk-legend ul { margin: 0; padding-left: 18px; }
+.mk-legend li { margin: 2px 0; }
+.ph { display: inline-flex; align-items: center; height: 18px; padding: 0 7px; border-radius: 999px; font-size: 11px; font-weight: 800; }
+.ph.p1 { background: var(--wb-now); color: var(--wb-on-now); }
+.ph.p2 { background: color-mix(in srgb, var(--gl-2) 22%, var(--wb-card)); color: var(--wb-fg); }
+.ph.mk { background: var(--wb-muted); color: var(--wb-muted-fg); }
+/* the page under the drawer, faded: header, then a hint of the conversation */
+.mk-top { display: flex; align-items: center; gap: 10px; margin: 0 var(--dpad); height: 40px; }
+.mk-top .back { width: 30px; height: 30px; border-radius: 999px; background: var(--wb-muted); display: inline-flex; align-items: center; justify-content: center; color: var(--wb-muted-fg); }
+.mk-top b { font-size: 15px; }
+.mk-top .meta { color: var(--wb-muted-fg); font: 12px var(--wb-mono); }
+.mk-under { margin: 54px var(--dpad) 0; display: grid; gap: 10px; opacity: .45; }
+.mk-under div { height: 14px; border-radius: 6px; background: var(--wb-muted); }
+.mk-narrow-note { display: none; margin: 0 var(--dpad) 10px; padding: 8px 12px; border-radius: 10px; font-size: 12.5px; background: color-mix(in srgb, var(--wb-warn) 14%, var(--wb-card)); }
+body.narrow .mk-narrow-note { display: block; }
+body.narrow .mk-stage { max-width: 420px; margin: 0 auto; }
+/* the drawer, drawn open and in flow instead of fixed (dashboard.css .dr-clip / .dr-sheet) */
+.mk-drawer { position: relative; margin: 0 var(--dpad); }
+.mk-clip { height: min(640px, calc(100vh - 150px)); min-height: 420px; overflow: hidden; border-radius: 0 0 var(--wb-radius) var(--wb-radius); box-shadow: var(--wb-shadow-hi); }
+.dr-sheet { height: 100%; display: flex; flex-direction: column; background: var(--wb-bg); border-top: 1px solid var(--wb-muted); }
+.mk-handles { position: absolute; right: 0; top: 100%; display: flex; gap: 6px; }
+
+/* ===== shipped drawer handles (dashboard.css) ===== */
+.gh { position: relative; height: 34px; max-width: min(320px, 46vw); padding: 2px 10px 0; border: 0; border-radius: 0 0 8px 8px; cursor: pointer; display: flex; align-items: center; gap: 6px; background: var(--wb-card); color: var(--wb-fg); box-shadow: inset 0 -2px 0 var(--wb-primary), var(--wb-shadow-hi); font-size: 12px; font-weight: 700; white-space: nowrap; }
+.gh .i { width: 15px; height: 15px; }
+.gh-br { font-family: var(--wb-mono); }
+.gh-ab { display: inline-flex; gap: 4px; font: 700 11px/1 var(--wb-mono); }
+.gh-ab .up, .gpanel .gref .up { color: var(--wb-primary); }
+.gh-ab .dn, .gpanel .gref .dn { color: var(--wb-warn-ink); }
+.gh-dirty { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--wb-warn); }
+.dr-handle { height: 34px; padding: 2px 9px 0; border: 0; border-radius: 0 0 8px 8px; display: flex; align-items: center; background: var(--wb-card); color: var(--wb-fg); box-shadow: var(--wb-shadow-hi); }
+.dr-handle .i { width: 17px; height: 17px; }
+
+/* ===== shipped git sheet (dashboard.css), .gleft replaced by .glog below ===== */
+.dr-body { flex: 1 1 0; min-height: 0; overflow: hidden; padding: 10px; display: flex; gap: 10px; }
+.gbody { display: grid; grid-template-columns: minmax(0, 2fr) minmax(340px, 1fr); grid-template-rows: minmax(0, 1fr); }
+.gpanel { min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); overflow: hidden; }
+.ghead { flex: none; display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 4px 8px 4px 12px; background: var(--wb-muted); font-size: 13px; }
+.ghead > .i { width: 14px; height: 14px; flex: none; color: var(--wb-muted-fg); }
+.gref { display: flex; align-items: center; gap: 6px; min-width: 0; font: 700 12px/1.3 var(--wb-mono); }
+.gref > * { flex: none; }
+.gref .gbr, .gref .gup { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gref .gto, .gref .gup { color: var(--wb-muted-fg); }
+.gacts { flex: none; display: flex; gap: 6px; padding: 8px 12px 0; }
+.gact { height: 28px; padding: 0 12px; gap: 5px; font-size: 12.5px; }
+.gact .i { width: 14px; height: 14px; }
+.gfiles { flex: 1 1 0; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 8px 12px 10px; display: grid; align-content: start; gap: 8px; }
+.gsec { display: grid; gap: 1px; }
+.ggrp { display: flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 800; color: var(--wb-muted-fg); padding: 0 2px 2px; }
+.gf { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; align-items: center; column-gap: 8px; padding: 2px 4px; border-radius: 5px; font-size: 12.5px; }
+.gf:hover { background: var(--wb-muted); }
+.gst { font: 800 11.5px/1 var(--wb-mono); text-align: center; color: var(--wb-warn-ink); }
+.gst.st-A, .gst.st-q { color: var(--wb-ok); }
+.gst.st-D, .gst.st-U { color: var(--wb-fail); }
+.gst.st-R { color: var(--wb-primary); }
+.gp { display: flex; min-width: 0; font-family: var(--wb-mono); font-size: 12px; white-space: nowrap; }
+.gdir { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--wb-muted-fg); }
+.gname { flex: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.gd { display: inline-flex; gap: 6px; font: 700 11.5px/1 var(--wb-mono); white-space: nowrap; }
+.gd i { font-style: normal; }
+.gd .add { color: var(--wb-ok); }
+.gd .del { color: var(--wb-fail); }
+.gd .bin { color: var(--wb-muted-fg); font-weight: 600; }
+/* NEW (Phase 2): a working-tree row opens the commit window in working-tree mode */
+html:not(.p1only) .gfiles .gf { cursor: pointer; }
+
+/* ===== NEW: the commit graph (replaces .gleft) ===== */
+.glog { min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); overflow: hidden; }
+.glog .ghead .gtitle { font-weight: 700; }
+.glog .ghead .gsub { color: var(--wb-muted-fg); font-size: 12px; margin-right: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.glscroll { flex: 1 1 0; min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.glcols, .glr { display: grid; grid-template-columns: var(--gw, 120px) minmax(0, 1fr) 96px 62px 66px; column-gap: 10px; align-items: center; padding-right: 12px; }
+.glcols { position: sticky; top: 0; z-index: 3; height: 24px; background: var(--wb-card); box-shadow: 0 1px 0 var(--wb-line); font-size: 11px; font-weight: 800; color: var(--wb-muted-fg); text-transform: uppercase; letter-spacing: .04em; }
+.glcols span:first-child { padding-left: 10px; }
+.glcols .r { text-align: right; }
+.glrows { position: relative; }
+.glsvg { position: absolute; left: 0; top: 0; z-index: 1; pointer-events: none; overflow: visible; }
+.glsvg path { fill: none; stroke-width: 2; stroke-linecap: round; }
+.glsvg .cont { stroke-dasharray: 2 4; }
+.glsvg circle.dot { stroke: var(--wb-card); stroke-width: 2; }
+.glsvg circle.mg { fill: var(--wb-card); stroke-width: 2.2; }
+.glsvg circle.rem { fill: var(--wb-card); stroke-width: 1.6; stroke-dasharray: 2 1.6; }
+.glsvg circle.head { fill: none; stroke: var(--wb-fg); stroke-width: 1.6; }
+.glr { height: 26px; font-size: 12.5px; cursor: pointer; }
+.glr:hover { background: var(--wb-wash); }
+.glr.sel { background: color-mix(in srgb, var(--wb-primary) 13%, transparent); }
+.glr:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: -2px; }
+.gls { display: flex; align-items: center; gap: 5px; min-width: 0; overflow: hidden; position: relative; z-index: 2; }
+.glsub { flex: 1 1 10ch; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.glr.mg .glsub { color: var(--wb-muted-fg); }
+.glr.rem .glsub { color: var(--wb-muted-fg); font-style: italic; }
+.gla { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--wb-muted-fg); font-size: 12px; }
+.glt { text-align: right; color: var(--wb-muted-fg); font-size: 11.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.glh { text-align: right; font: 11.5px var(--wb-mono); color: var(--wb-muted-fg); }
+.glmore { height: 34px; display: flex; align-items: center; padding-left: calc(var(--gw, 120px) + 10px); gap: 8px; font-size: 12px; color: var(--wb-muted-fg); }
+.glmore .btn { height: 24px; font-size: 12px; position: relative; z-index: 2; }
+/* ref pills: a local branch in its lane's colour (handle icon + stem, ahead/behind, worktree mark),
+   its upstream folded in when it points at the same commit, else an outlined pill of its own */
+.rf { --lc: var(--gl-7); flex: 0 1 auto; min-width: 6ch; display: inline-flex; align-items: center; gap: 3px; height: 18px; padding: 0 6px; border-radius: 5px; font: 700 11px/1 var(--wb-mono); white-space: nowrap; color: var(--wb-fg); background: color-mix(in srgb, var(--lc) 14%, var(--wb-card)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--lc) 50%, transparent); max-width: 36ch; }
+.rf .i { width: 12px; height: 12px; }
+.rf .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.rf .gh-impl { color: var(--wb-primary); display: inline-flex; }
+.rf .gh-goal { color: var(--gh-gold); display: inline-flex; }
+.rf .hd { font: 800 9.5px/1 system-ui, sans-serif; letter-spacing: .04em; padding: 2px 4px; border-radius: 3px; background: var(--wb-fg); color: var(--wb-card); }
+.rf .ab { display: inline-flex; gap: 3px; }
+.rf .ab .up { color: var(--wb-primary); }
+.rf .ab .dn { color: var(--wb-warn-ink); }
+.rf .wt { display: inline-flex; color: var(--wb-ok); }
+.rf .ups { color: var(--wb-muted-fg); font-weight: 600; padding-left: 4px; margin-left: 1px; border-left: 1px solid color-mix(in srgb, var(--lc) 45%, transparent); }
+.rf.remote { background: transparent; color: var(--wb-muted-fg); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--lc) 55%, transparent); border: 0; outline: 1px dashed transparent; }
+.rf.head { background: color-mix(in srgb, var(--lc) 24%, var(--wb-card)); box-shadow: inset 0 0 0 1.5px var(--lc); }
+.rf.wtd { background: transparent; color: var(--wb-muted-fg); box-shadow: inset 0 0 0 1px var(--wb-line); font-weight: 600; }
+.rf.wtd .wt { color: var(--wb-muted-fg); }
+.rf.merged { opacity: .72; }
+/* one column on a narrow screen, the panel alone (after .glog so it wins) */
+@media (max-width: 759px) {
+  .gbody { grid-template-columns: minmax(0, 1fr); }
+  .glog { display: none; }
+}
+body.narrow .gbody { grid-template-columns: minmax(0, 1fr); }
+body.narrow .glog { display: none; }
+/* hover tooltip */
+.gltip { position: fixed; z-index: 60; max-width: 420px; padding: 8px 10px; border-radius: 8px; background: var(--wb-card); box-shadow: var(--wb-shadow-hi), 0 0 0 1px var(--wb-line); font-size: 12.5px; pointer-events: none; display: grid; gap: 5px; }
+.gltip[hidden] { display: none; }
+.gltip .ts { font-weight: 700; overflow-wrap: anywhere; }
+.gltip .tr { display: flex; flex-wrap: wrap; gap: 4px; }
+.gltip .tm { display: flex; gap: 6px; flex-wrap: wrap; color: var(--wb-muted-fg); font-size: 12px; }
+.gltip .tm code { color: var(--wb-fg); }
+
+/* ===== NEW: the commit window (tracker.css .tk-iwin-back / .iwin frame, wider) ===== */
+.gwin-back { position: fixed; inset: 0; z-index: 70; background: var(--tk-backdrop); display: flex; align-items: center; justify-content: center; padding: 3vh 12px; }
+.gwin-back[hidden] { display: none; }
+.gwin { width: min(1320px, 100%); height: 94vh; display: flex; flex-direction: column; background: var(--wb-bg); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow-hi); overflow: hidden; }
+.gwin:focus { outline: none; }
+.gw-top { flex: none; padding: 14px 18px 10px; box-shadow: 0 1px 0 var(--wb-line); display: flex; flex-direction: column; gap: 6px; }
+.gw-head { display: flex; gap: 8px; align-items: flex-start; }
+.gw-head h2 { margin: 0; font-size: 18px; line-height: 1.3; flex: 1; overflow-wrap: anywhere; }
+.gw-acts { flex: none; display: flex; align-items: center; gap: 4px; }
+.gw-chips { display: flex; gap: 5px; align-items: center; flex-wrap: wrap; }
+.gw-chips code.hash { font-size: 12px; padding: 1px 6px; border-radius: 5px; background: var(--wb-muted); }
+.gw-chips .note { font-size: 12px; color: var(--wb-muted-fg); }
+.idcopy { font: inherit; font-size: 11.5px; display: inline-flex; align-items: center; gap: 3px; padding: 1px 7px 1px 5px; border: 0; border-radius: 999px; background: transparent; color: var(--wb-muted-fg); cursor: pointer; box-shadow: inset 0 0 0 1px var(--wb-line); height: 22px; }
+.idcopy:hover, .idcopy:focus-visible { color: var(--wb-primary); outline: none; background: var(--wb-card); }
+.idcopy.done { color: var(--tk-ok); }
+.idcopy .i { width: 12px; height: 12px; }
+.idcopy[hidden] { display: none; }
+.ia { width: 26px; height: 22px; border: 0; border-radius: 6px; background: transparent; color: var(--wb-muted-fg); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; padding: 0; }
+.ia:hover, .ia:focus-visible { background: var(--wb-card); color: var(--wb-primary); outline: none; box-shadow: inset 0 0 0 1px var(--wb-line); }
+.ia .i { width: 15px; height: 15px; }
+.gw-meta { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 1px 10px; font-size: 12.5px; }
+.gw-meta dt { color: var(--wb-muted-fg); font-weight: 700; font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; line-height: 19px; }
+.gw-meta dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.gw-meta .em { color: var(--wb-muted-fg); }
+.gw-meta .abs { color: var(--wb-muted-fg); font-variant-numeric: tabular-nums; }
+.gw-par { font: 12px var(--wb-mono); border: 0; background: var(--wb-muted); border-radius: 5px; padding: 0 6px; cursor: pointer; color: var(--wb-primary); }
+.gw-par:hover { text-decoration: underline; }
+.gw-msg { margin: 0; white-space: pre-wrap; font: 12.5px/1.5 var(--wb-mono); background: var(--wb-card); border-radius: 10px; padding: 8px 10px; box-shadow: var(--wb-shadow); max-height: 9.5em; overflow: auto; }
+.gw-msg[hidden] { display: none; }
+.gw-body { flex: 1 1 0; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, 320px); }
+.gw-diff { position: relative; min-width: 0; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 10px 12px 40px 18px; display: flex; flex-direction: column; gap: 12px; }
+.gw-files { min-height: 0; overflow: auto; overscroll-behavior: contain; border-left: 1px solid var(--wb-line); padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+.gw-fsum { display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 700; padding: 0 4px 4px; }
+.gw-fsum .gd { margin-left: auto; }
+.gwf { grid-template-columns: 16px minmax(0, 1fr) auto; cursor: pointer; row-gap: 0; padding: 3px 4px; }
+.gwf .ren { grid-column: 2 / 4; font: 11px var(--wb-mono); color: var(--wb-muted-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gwf.on { background: color-mix(in srgb, var(--wb-primary) 13%, transparent); }
+.gwf.on:hover { background: color-mix(in srgb, var(--wb-primary) 18%, transparent); }
+.gw-p1 { display: none; margin: auto; text-align: center; color: var(--wb-muted-fg); font-size: 13px; border: 1px dashed var(--wb-muted-fg); border-radius: var(--wb-radius); padding: 40px 30px; opacity: .8; }
+html.p1only .gw-diff > .dfile { display: none; }
+html.p1only .gw-p1 { display: block; }
+/* one file section: a sticky header, then its unified diff (or a notice, a load button, a skeleton) */
+.dfile { flex: none; background: var(--wb-card); border-radius: 10px; box-shadow: var(--wb-shadow); }
+.dfh { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 4px 8px 4px 6px; background: var(--wb-card); border-radius: 10px 10px 0 0; box-shadow: 0 1px 0 var(--wb-line); }
+.dfh .gst { width: 16px; }
+.dfh .gp { flex: 0 1 auto; font-size: 12.5px; }
+.dfh .gname { font-weight: 700; }
+.dfh .dfren { font: 11.5px var(--wb-mono); color: var(--wb-muted-fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.dfh .gd { margin-left: auto; }
+.dfh .ia .i { transition: transform .12s; }
+.dfile.fold .dfh .ia .i { transform: rotate(-90deg); }
+.dfile.fold .dfb { display: none; }
+.dfile.fold .dfh { border-radius: 10px; box-shadow: none; }
+.dfb { overflow-x: auto; border-radius: 0 0 10px 10px; }
+.dtab { tab-size: 4; display: grid; grid-template-columns: max-content max-content 18px minmax(max-content, 1fr); width: max-content; min-width: 100%; font: 12px/19px var(--wb-mono); }
+.dl { display: contents; }
+.dl > span { white-space: pre; }
+.dl .no { padding: 0 8px; min-width: 44px; text-align: right; color: var(--wb-muted-fg); user-select: none; opacity: .8; }
+.dl .sg { text-align: center; user-select: none; color: var(--wb-muted-fg); }
+.dl .cd { padding-right: 24px; }
+.dl.add > span { background: var(--df-add); }
+.dl.add .no, .dl.add .sg { background: var(--df-add-g); color: var(--wb-ok); opacity: 1; }
+.dl.del > span { background: var(--df-del); }
+.dl.del .no, .dl.del .sg { background: var(--df-del-g); color: var(--wb-fail); opacity: 1; }
+.dl.add .x { background: var(--df-add-x); border-radius: 3px; }
+.dl.del .x { background: var(--df-del-x); border-radius: 3px; }
+.dl.hk > span { background: var(--df-hunk); color: var(--wb-muted-fg); }
+.dl.hk .cd { padding-top: 2px; padding-bottom: 2px; }
+.dnote { display: flex; align-items: center; gap: 10px; padding: 12px 14px; font-size: 12.5px; color: var(--wb-muted-fg); }
+.dnote .btn { height: 26px; font-size: 12.5px; color: var(--wb-fg); }
+.dnote.cut { border-top: 1px dashed var(--wb-line); color: var(--wb-warn-ink); }
+.dskel { padding: 10px 14px; display: grid; gap: 7px; }
+.dskel i { display: block; height: 11px; border-radius: 4px; background: var(--wb-muted); animation: pulse 1.1s ease-in-out infinite alternate; }
+@keyframes pulse { from { opacity: .45; } to { opacity: 1; } }
+/* chroma (html.WithClasses): class tokens, coloured from theme tokens */
+.chroma .k, .chroma .kd, .chroma .kn, .chroma .kr { color: var(--hl-k); }
+.chroma .kt { color: var(--hl-kt); }
+.chroma .kc, .chroma .nb { color: var(--hl-nb); }
+.chroma .nf, .chroma .nx { color: var(--hl-nf); }
+.chroma .s, .chroma .s1, .chroma .s2, .chroma .sb { color: var(--hl-s); }
+.chroma .c, .chroma .c1, .chroma .cm { color: var(--hl-c); font-style: italic; }
+.chroma .m, .chroma .mi { color: var(--hl-mi); }
+.chroma .nt { color: var(--hl-nt); }
+@media (max-width: 900px) { .gw-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) 30%; } .gw-files { border-left: 0; border-top: 1px solid var(--wb-line); } }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<symbol id="i-menu" viewBox="0 0 16 16"><path d="M2.8 4.2h10.4M2.8 8h10.4M2.8 11.8h10.4"/></symbol>
+<symbol id="i-back" viewBox="0 0 16 16"><path d="M10 3.5L5.5 8l4.5 4.5"/></symbol>
+<symbol id="i-chev" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></symbol>
+<symbol id="i-folder" viewBox="0 0 16 16"><path d="M2 4.2h4l1.4 1.6H14v6.7H2z"/></symbol>
+<symbol id="i-branch" viewBox="0 0 16 16"><circle cx="4.5" cy="3.6" r="1.5"/><circle cx="4.5" cy="12.4" r="1.5"/><circle cx="11.5" cy="6" r="1.5"/><path d="M4.5 5.1v5.8M11.5 7.5c0 2.6-3.2 2.4-7 3.4"/></symbol>
+<symbol id="i-hammer" viewBox="0 0 16 16"><path d="M8.6 6.4l-6 6a1.1 1.1 0 0 0 1.5 1.5l6-6"/><path d="M6.6 4.4l2.6-2.2c1.6-.6 3.2-.2 4.4 1l-1.4.6 1.6 1.6-2.6 2.6-1.6-1.6-.4.4z"/></symbol>
+<symbol id="i-trophy" viewBox="0 0 16 16"><path d="M4.6 2.4h6.8v3.4a3.4 3.4 0 0 1-6.8 0z"/><path d="M4.6 3.6H2.4c0 2 .9 3.2 2.5 3.4M11.4 3.6h2.2c0 2-.9 3.2-2.5 3.4M8 9.2v2.6M5.4 13.6h5.2M6.2 11.8h3.6v1.8H6.2z"/></symbol>
+<symbol id="i-fetch" viewBox="0 0 16 16"><path d="M13 8a5 5 0 0 1-8.6 3.5M3 8a5 5 0 0 1 8.6-3.5"/><path d="M11.8 2v2.7H9.1M4.2 14v-2.7h2.7"/></symbol>
+<symbol id="i-pull" viewBox="0 0 16 16"><path d="M8 2.5v8M4.6 7.2L8 10.6l3.4-3.4M3 13.5h10"/></symbol>
+<symbol id="i-push" viewBox="0 0 16 16"><path d="M8 13.5v-8M4.6 8.8L8 5.4l3.4 3.4M3 2.5h10"/></symbol>
+<symbol id="i-x" viewBox="0 0 16 16"><path d="M4.2 4.2l7.6 7.6M11.8 4.2l-7.6 7.6"/></symbol>
+<symbol id="i-copy" viewBox="0 0 16 16"><rect x="5.5" y="5.5" width="8" height="8" rx="1.6"/><path d="M10.5 3.2V3a.8.8 0 0 0-.8-.8H3a.8.8 0 0 0-.8.8v6.7c0 .4.4.8.8.8h.2"/></symbol>
+<symbol id="i-check" viewBox="0 0 16 16"><path d="M3 8.5l3.2 3.1L13 4.6"/></symbol>
+</svg>
+
+<header class="mockhead"><div><b>git drawer commit graph mockup</b> <span class="muted">static fixture; look from dashboard.css / tracker.css tokens; ticket 261109-feat-ws-dashboard-git-commit-graph</span></div>
+<div class="mctl">
+<span class="seg" role="group" aria-label="scope"><button id="sc-2" aria-pressed="true">Phase 1 + 2</button><button id="sc-1" aria-pressed="false">Phase 1 only</button></span>
+<span class="seg" role="group" aria-label="width"><button id="w-w" aria-pressed="true">Wide</button><button id="w-n" aria-pressed="false">Under 760px</button></span>
+<span class="seg" role="group" aria-label="theme"><button id="th-l" aria-pressed="true">Light</button><button id="th-d" aria-pressed="false">Dark</button></span>
+</div></header>
+
+<main class="mockmain">
+<div class="mk-intro"><p><b>What this is.</b> The session page's git drawer, drawn open, with the <code>.gleft</code> placeholder replaced by the commit graph. Hover a row for the tooltip; click a row (or a working-tree file on the right) for the commit window. Esc, the close button, or a click outside closes it.</p></div>
+<div class="mk-narrow-note"><b>Under 760px</b> the graph is hidden (as today's <code>.gleft</code>): the sheet shows the action panel alone, and the commit window has no entry point from the graph. The working-tree file list still opens the window in its working-tree mode (Phase 2).</div>
+<div class="mk-stage">
+<div class="mk-top"><span class="back"><svg class="i"><use href="#i-back"/></svg></span><b>devenv</b><span class="meta">q7f3a · claude</span></div>
+<div class="mk-drawer">
+ <div class="mk-clip"><div class="dr-sheet">
+  <div class="dr-body gbody" id="gbody">
+   <section class="glog" aria-label="Commit graph">
+    <div class="ghead"><svg class="i"><use href="#i-branch"/></svg><span class="gtitle">History</span><span class="gsub">local branches and their upstreams · topo order</span><span class="chip" id="glcount"></span></div>
+    <div class="glscroll" id="glscroll">
+     <div class="glcols"><span>Graph</span><span>Subject</span><span>Author</span><span class="r">When</span><span class="r">Commit</span></div>
+     <div class="glrows" id="glrows"></div>
+    </div>
+   </section>
+   <section class="gpanel" aria-label="Git">
+    <div class="ghead"><svg class="i"><use href="#i-branch"/></svg><span class="gref"><b class="gbr">develop</b><span class="gto">→</span><span class="gup">origin/develop</span><b class="up">↑4</b></span></div>
+    <div class="gacts"><button type="button" class="btn gact"><svg class="i"><use href="#i-fetch"/></svg><span>Fetch</span></button><button type="button" class="btn gact"><svg class="i"><use href="#i-pull"/></svg><span>Pull</span></button><button type="button" class="btn gact"><svg class="i"><use href="#i-push"/></svg><span>Push</span></button></div>
+    <div class="gfiles" id="gfiles"></div>
+   </section>
+  </div>
+ </div></div>
+ <div class="mk-handles"><button type="button" class="gh"><svg class="i"><use href="#i-branch"/></svg><span class="gh-br">develop</span><span class="gh-ab"><b class="up">↑4</b></span><span class="gh-dirty"></span></button><button type="button" class="dr-handle"><svg class="i"><use href="#i-menu"/></svg></button></div>
+</div>
+<div class="mk-under"><div style="width:62%"></div><div style="width:81%"></div><div style="width:44%"></div><div style="width:70%"></div></div>
+</div>
+
+<div class="mk-legend">
+<section><h2><span class="ph p1">Phase 1</span> graph, tooltip, commit window without diffs</h2><ul>
+<li>Lanes for every local branch and its upstream, laid out by the daemon (<code>GET git/log</code>, <code>--topo-order</code>), drawn as inline SVG: dots, merge edges (hollow dot = merge), the checked-out branch's first-parent line held in lane 0, a ring on HEAD.</li>
+<li>Ref pills: the handle's hammer / trophy icons and stem abbreviation (full name on hover), <span class="ph mk">HEAD</span> mark, ahead/behind against the upstream, upstream folded into the pill when it is on the same commit and an outlined pill of its own otherwise, a folder mark for a branch checked out in a worktree, an outlined folder pill for a detached worktree.</li>
+<li>Columns: subject, author, relative time, short hash; a commit reachable only from an upstream is italic with a dashed dot; the "Load more" row with lanes continuing dashed (200 per page).</li>
+<li>Hover tooltip: subject, refs, author, relative time, short hash.</li>
+<li>Commit window (tracker item-window frame): subject, full message, author / committer with times, copy-hash button (the tracker's ID copy shape), parents (first parent marked as the diff base on a merge); right side file list with status letter, rename source, +/- numstat. The left side is a placeholder (toggle "Phase 1 only").</li>
+</ul></section>
+<section><h2><span class="ph p2">Phase 2</span> diff viewer, highlighting, working tree</h2><ul>
+<li>One scrolling multi-file unified diff, a sticky header per file (fold chevron), hunk headers, line numbers, added / removed colours.</li>
+<li>chroma highlighting as class tokens (<code>.k .kt .nf .s2 .c1 .cm .mi</code> ...) coloured from theme tokens; the first hunk of <code>gitdrawer.go</code> opens inside a block comment and stays a comment (whole-file highlighting).</li>
+<li>Intra-line marks on paired removed/added lines (<code>gitReadTimeout</code>, <code>truncated</code> lines).</li>
+<li>On-demand loading: sections load when they near the viewport (skeleton first); over 400 changed lines, binary, and deleted files wait behind "Load diff"; clicking a file in the list scrolls to it and loads it.</li>
+<li>Working-tree mode: a staged / unstaged / untracked row in the drawer's right panel opens the same window.</li>
+</ul></section>
+<section><h2><span class="ph mk">Mockup only</span> notes</h2><ul>
+<li>Every commit opens the same file fixture; header data is per commit.</li>
+<li>Parent hashes are clickable here (navigate the window); the ticket only says they are listed. Keep or drop on review.</li>
+<li>Lane colours are new tokens (<code>--gl-0</code>..<code>--gl-7</code>), as are the diff and chroma tokens; everything else reuses shipped classes (<code>.gpanel .ghead .gf .gst .gd .idcopy .ia .chip .btn</code>).</li>
+<li>URL hash for fixed states: <code>#theme=dark&amp;tip=d1&amp;open=d2&amp;file=4&amp;wt=unstaged&amp;p1=1&amp;narrow=1</code>.</li>
+</ul></section>
+</div>
+</main>
+
+<div class="gltip" id="gltip" hidden></div>
+
+<div class="gwin-back" id="gwback" hidden>
+ <div class="gwin" id="gwin" role="dialog" aria-modal="true" aria-labelledby="gwsubj" tabindex="-1">
+  <div class="gw-top">
+   <div class="gw-head"><h2 id="gwsubj"></h2><div class="gw-acts"><button type="button" class="idcopy" id="gwcopy" title="Copy the full commit hash"><svg class="i"><use href="#i-copy"/></svg><span>Copy hash</span></button><button type="button" class="ia" id="gwclose" aria-label="Close" title="Close (Esc)"><svg class="i"><use href="#i-x"/></svg></button></div></div>
+   <div class="gw-chips" id="gwchips"></div>
+   <dl class="gw-meta" id="gwmeta"></dl>
+   <pre class="gw-msg" id="gwmsg"></pre>
+  </div>
+  <div class="gw-body">
+   <div class="gw-diff" id="gwdiff"></div>
+   <aside class="gw-files" id="gwfiles" aria-label="Changed files"></aside>
+  </div>
+ </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var NOW = new Date(2026, 10, 9, 14, 40);
+  var ME = "kang-sw", MEM = "kang-sw@example.com";
+
+  // ---------- fixture: commits in --topo-order, newest first ----------
+  // [id, parents, minutes ago, subject, author?, body?]
+  var C = [
+    ["r2", ["r1"], 4, "docs(ref): git graph mockup theme toggle and phase legend"],
+    ["r1", ["d1"], 11, "docs(ref): static git drawer commit graph mockup", null, "One self-contained page under ai-docs/ref/git-graph-mockup/: the git drawer\nwith the graph in the left area, the hover tooltip, and the commit window\nwith the multi-file diff viewer."],
+    ["c5", ["c4"], 9, "fix(wsledger): retry an attachment fetch once on a partial clone"],
+    ["c4", ["c3"], 22, "docs(tickets): record Phase 1 result for 261108-feat-ws-tracker-ledger-attachments"],
+    ["d1", ["d2"], 6, "docs(tickets): ready - dashboard git commit graph and diff viewer", null, "Board 2026-11-09 items (97)-(110): lanes for local branches and their\nupstreams, hover tooltip, a centred commit window with a file list and a\nmulti-file unified diff, chroma highlighting in the daemon.\n\n## AI Context\n- Design and completeness reviews accepted; refinements recorded in Decisions."],
+    ["d2", ["d3", "p1"], 9, "Merge dashboard opt-in pprof into develop"],
+    ["p1", ["d3"], 10, "feat(wsdashboard): opt-in loopback-only pprof on the dashboard daemon", null, "WS_DASHBOARD_PPROF=1 mounts net/http/pprof on a second listener bound to\n127.0.0.1 only; the LAN listener never serves it.\n\n## AI Context\n- Rejected: mounting under the main mux (LAN mode would expose it)."],
+    ["d3", ["d4"], 36, "docs(tickets): settle and promote 261108-feat-ws-tracker-wiki-git-branch to ready"],
+    ["g3", ["g2", "i2"], 40, "Merge impl/goal/develop/amber-lantern-drift/lark-pelican-ember into goal/develop/amber-lantern-drift"],
+    ["i2", ["i1"], 44, "feat(wstracker): wiki page git branch picker", "jhlee <jhlee@example.com>"],
+    ["c3", ["c2"], 23, "fix(wsledger): restore an attachment ref rewound on its own; fetch failure is not \"not found\""],
+    ["d4", ["d5", "w1"], 34, "Merge whiteboard assumed-as-settled rows into develop"],
+    ["w1", ["d6"], 37, "feat(whiteboard): assumed items render and count as settled"],
+    ["i1", ["g2"], 58, "feat(wstracker): read route for a wiki page's git branch", "jhlee <jhlee@example.com>"],
+    ["g2", ["g1"], 66, "docs(tickets): goal plan for the tracker wiki git branch"],
+    ["d5", ["d6", "s2"], 43, "Merge subagent badge on the tracker support chat card into develop"],
+    ["s2", ["s1"], 43, "feat(wsagent): map Claude subagent tasks to snapshot subagents"],
+    ["s1", ["d6"], 44, "feat(wsdashboard): subagent badge on the tracker support chat card"],
+    ["c2", ["c1"], 42, "feat(wstrackerhost): staged attachment uploads written with the events that name them"],
+    ["d6", ["d7", "t3"], 48, "Merge tracker review stage and assignment defaults into develop"],
+    ["t3", ["t2"], 49, "docs(tickets): close 261109-feat-ws-tracker-review-stage-and-assignment-defaults", "jhlee <jhlee@example.com>"],
+    ["t2", ["t1"], 50, "fix(tracker): keep a review register winner off assigned items", "jhlee <jhlee@example.com>"],
+    ["t1", ["d8"], 78, "feat(wstracker): review stage, assigning promotes, done/blocked notices", "jhlee <jhlee@example.com>"],
+    ["g1", ["d8"], 81, "feat(wstracker): wiki pages carry a git branch field"],
+    ["d7", ["d8", "f2"], 64, "Merge composer file mention into develop"],
+    ["f2", ["f1"], 66, "fix(dashboard): file mention review fixes (stale picks, device names)"],
+    ["f1", ["d8"], 73, "feat(dashboard): @ file mention popup in the session composer"],
+    ["c1", ["d8"], 59, "feat(wsledger): content-addressed attachment refs with partial-clone fetch"],
+    ["d8", ["d9"], 89, "docs(tickets): promote tracker attachments, editor, badge, file mention, review stage to ready"],
+    ["d9", ["d10", "x1"], 121, "Merge drawer-span-fill into develop"],
+    ["x1", ["d10"], 124, "feat(dashboard): drawer cards stretch down into the last row's empty cells"],
+    ["d10", ["d11"], 131, "feat(whiteboard): pill counts dashboard-sent and held items as answered"],
+    ["d11", ["d12", "y1"], 140, "Merge wb-pill-answered-count into develop"],
+    ["y1", ["d13"], 146, "feat(whiteboard): pill splits drafted answers and notes out of the open count"],
+    ["d12", ["d13"], 150, "docs(tickets): settle subagent badge, file mention, tracker editor, review stage"],
+    ["d13", ["d14"], 175, "chore(release): ws@0.48.12, wsflow@0.48.12"],
+    ["d14", ["d15"], 182, "feat(dashboard): label peer lead rows <folder>/<address>"],
+    ["d15", ["d16"], 190, "style(dashboard): lightly dim a sent or held item's title"],
+    ["d16", ["d17"], 196, "feat(whiteboard): link a code span that is exactly one path"],
+    ["d17", ["d18"], 203, "fix(dashboard): serve out-of-root images to Sec-Fetch-Site: none"]
+  ];
+  var BR = [
+    { name: "develop", tip: "d1", head: true, wt: "devenv (session root)", up: "origin/develop", upTip: "d4", ahead: 4, behind: 0 },
+    { name: "impl/develop/registrar-sphinx-duckbill", tip: "r2", wt: "registrar-sphinx-duckbill" },
+    { name: "impl/develop/candy-mummy-suing", tip: "c4", wt: "candy-mummy-suing", up: "origin/impl/develop/candy-mummy-suing", upTip: "c5", ahead: 0, behind: 1 },
+    { name: "impl/develop/frost-ledger-otter", tip: "p1", merged: true },
+    { name: "goal/develop/amber-lantern-drift", tip: "g3", up: "origin/goal/develop/amber-lantern-drift", upTip: "g2", ahead: 3, behind: 0 },
+    { name: "impl/goal/develop/amber-lantern-drift/lark-pelican-ember", tip: "i2", wt: "lark-pelican-ember", merged: true },
+    { name: "main", tip: "d13", up: "origin/main", upTip: "d13", ahead: 0, behind: 0 }
+  ];
+  var DETACHED = [{ wt: "review-tamer-quill", at: "d10" }];
+
+  // ---------- derived ----------
+  function fakeHash(id) {
+    var h = 2166136261, out = "";
+    for (var i = 0; i < id.length; i++) { h ^= id.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+    for (var k = 0; k < 5; k++) { h = Math.imul(h ^ (h >>> 13), 1103515245) + 12345 >>> 0; out += ("00000000" + h.toString(16)).slice(-8); }
+    return out;
+  }
+  var byId = {};
+  var commits = C.map(function (r, i) {
+    var a = r[4] || (ME + " <" + MEM + ">");
+    var c = { id: r[0], parents: r[1], ago: r[2], subject: r[3], author: a, body: r[5] || "", row: i, hash: fakeHash(r[0]) };
+    c.authorName = a.replace(/ <.*/, "");
+    c.committer = ME + " <" + MEM + ">";
+    c.committed = r[4] ? Math.max(1, r[2] - 7) : r[2];
+    byId[c.id] = c;
+    return c;
+  });
+  function shortHash(id) { return byId[id] ? byId[id].hash.slice(0, 9) : fakeHash(id).slice(0, 9); }
+  // the checked-out branch's first-parent chain holds lane 0
+  var trunk = {};
+  for (var t = "d1"; byId[t]; t = byId[t].parents[0]) trunk[t] = true;
+  // reachable from a local branch (else the commit exists only on an upstream)
+  var local = {};
+  (function () {
+    var st = BR.map(function (b) { return b.tip; });
+    while (st.length) { var id = st.pop(); if (local[id] || !byId[id]) continue; local[id] = true; byId[id].parents.forEach(function (p) { st.push(p); }); }
+  })();
+
+  // the handle's label rule (gitdrawer.go branchHandle)
+  function handle(name) {
+    var segs = name.split("/");
+    if (segs.length < 2 || (segs[0] !== "impl" && segs[0] !== "goal") || !segs[segs.length - 1]) return { text: name };
+    var h = { text: segs[segs.length - 1] };
+    segs.slice(0, -1).forEach(function (s) { if (s === "impl") h.impl = true; if (s === "goal") h.goal = true; });
+    return h;
+  }
+
+  // ---------- lane layout (the daemon's job; drawn here from the same rules) ----------
+  var NCOL = 8;
+  function layout() {
+    var lanes = [null], lc = [0], next = 1, maxCol = 0, out = [];
+    function alloc() { for (var k = 1; k < lanes.length; k++) if (lanes[k] === null) return k; lanes.push(null); lc.push(0); return lanes.length - 1; }
+    commits.forEach(function (c) {
+      var col, segs = [], j;
+      if (trunk[c.id]) col = 0;
+      else { col = -1; for (j = 1; j < lanes.length; j++) if (lanes[j] === c.id) { col = j; break; } }
+      if (col < 0) { col = alloc(); lc[col] = next++ % NCOL || next++ % NCOL; }
+      for (j = 0; j < lanes.length; j++) {
+        if (lanes[j] === null) continue;
+        if (lanes[j] === c.id) segs.push([j, 0, col, .5, lc[j]]);
+        else segs.push([j, 0, j, 1, lc[j]]);
+      }
+      for (j = 0; j < lanes.length; j++) if (lanes[j] === c.id) lanes[j] = null;
+      var color = lc[col];
+      if (c.parents.length) { lanes[col] = c.parents[0]; segs.push([col, .5, col, 1, lc[col]]); }
+      c.parents.slice(1).forEach(function (p) {
+        var k = lanes.indexOf(p);
+        if (k < 0) { k = alloc(); lanes[k] = p; lc[k] = next++ % NCOL || next++ % NCOL; }
+        segs.push([col, .5, k, 1, lc[k]]);
+      });
+      lanes.forEach(function (v, k) { if (v !== null && k > maxCol) maxCol = k; });
+      if (col > maxCol) maxCol = col;
+      c.col = col; c.color = color;
+      out.push(segs);
+    });
+    var tail = [];
+    lanes.forEach(function (v, k) { if (v !== null) tail.push([k, lc[k]]); });
+    return { segs: out, maxCol: maxCol, tail: tail };
+  }
+
+  // ---------- helpers ----------
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (ch) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]; }); }
+  function $(id) { return document.getElementById(id); }
+  function icon(n) { return '<svg class="i"><use href="#i-' + n + '"/></svg>'; }
+  function rel(min) {
+    if (min < 60) return min + " min ago";
+    var h = Math.round(min / 60);
+    return h + (h === 1 ? " hour ago" : " hours ago");
+  }
+  function relShort(min) { return min < 60 ? min + "m" : Math.round(min / 60) + "h"; }
+  function abs(min) {
+    var d = new Date(NOW.getTime() - min * 60000);
+    function p(n) { return (n < 10 ? "0" : "") + n; }
+    return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + " " + p(d.getHours()) + ":" + p(d.getMinutes());
+  }
+
+  // ---------- ref pills ----------
+  function pillIcon(h) {
+    var s = "";
+    if (h.goal) s += '<span class="gh-goal">' + icon("trophy") + "</span>";
+    if (h.impl) s += '<span class="gh-impl">' + icon("hammer") + "</span>";
+    if (!h.goal && !h.impl) s += icon("branch");
+    return s;
+  }
+  function refsHtml(c) {
+    var s = "", lcv = "var(--gl-" + c.color + ")";
+    BR.forEach(function (b) {
+      if (b.tip === c.id) {
+        var h = handle(b.name), same = b.up && b.upTip === c.id;
+        var title = b.name + (b.up ? "\nupstream " + b.up + (b.ahead || b.behind ? " (ahead " + (b.ahead || 0) + ", behind " + (b.behind || 0) + ")" : " (even)") : "\nno upstream") + (b.wt ? "\nchecked out in worktree " + b.wt : "") + (b.head ? "\nHEAD of the session root" : "");
+        s += '<span class="rf' + (b.head ? " head" : "") + (b.merged ? " merged" : "") + '" style="--lc:' + lcv + '" title="' + esc(title) + '">' +
+          (b.head ? '<span class="hd">HEAD</span>' : "") + pillIcon(h) + '<span class="t">' + esc(h.text) + "</span>" +
+          (b.ahead || b.behind ? '<span class="ab">' + (b.ahead ? '<b class="up">↑' + b.ahead + "</b>" : "") + (b.behind ? '<b class="dn">↓' + b.behind + "</b>" : "") + "</span>" : "") +
+          (b.wt ? '<span class="wt" title="worktree ' + esc(b.wt) + '">' + icon("folder") + "</span>" : "") +
+          (same ? '<span class="ups">' + esc(b.up.split("/")[0]) + "</span>" : "") + "</span>";
+      }
+      if (b.up && b.upTip === c.id && b.tip !== c.id) {
+        var r = b.up.split("/"), uh = handle(r.slice(1).join("/"));
+        s += '<span class="rf remote" style="--lc:' + lcv + '" title="' + esc(b.up + "\nupstream of " + b.name) + '">' + pillIcon(uh) + '<span class="t">' + esc(r[0] + "/" + uh.text) + "</span></span>";
+      }
+    });
+    DETACHED.forEach(function (d) {
+      if (d.at === c.id) s += '<span class="rf wtd" title="' + esc("worktree " + d.wt + "\ndetached HEAD at " + shortHash(c.id)) + '"><span class="wt">' + icon("folder") + '</span><span class="t">' + esc(d.wt) + "</span></span>";
+    });
+    return s;
+  }
+
+  // ---------- graph ----------
+  var ROW = 26, DX = 14, X0 = 12;
+  function lx(col) { return X0 + col * DX; }
+  function drawGraph() {
+    var L = layout(), rows = $("glrows"), w = lx(L.maxCol) + 12, H = commits.length * ROW;
+    $("glscroll").style.setProperty("--gw", w + "px");
+    $("glcount").textContent = commits.length + " of 200+";
+    var paths = "", dots = "";
+    L.segs.forEach(function (segs, i) {
+      segs.forEach(function (s) {
+        var x1 = lx(s[0]), y1 = (i + s[1]) * ROW, x2 = lx(s[2]), y2 = (i + s[3]) * ROW, d;
+        if (x1 === x2) d = "M" + x1 + " " + y1 + "V" + y2;
+        else { var m = (y1 + y2) / 2; d = "M" + x1 + " " + y1 + "C" + x1 + " " + m + " " + x2 + " " + m + " " + x2 + " " + y2; }
+        paths += '<path d="' + d + '" stroke="var(--gl-' + s[4] + ')"/>';
+      });
+    });
+    L.tail.forEach(function (t) { paths += '<path class="cont" d="M' + lx(t[0]) + " " + H + "V" + (H + 30) + '" stroke="var(--gl-' + t[1] + ')"/>'; });
+    commits.forEach(function (c, i) {
+      var x = lx(c.col), y = i * ROW + ROW / 2, col = "var(--gl-" + c.color + ")";
+      if (c.id === "d1") dots += '<circle class="head" cx="' + x + '" cy="' + y + '" r="8"/>';
+      if (!local[c.id]) dots += '<circle class="rem" cx="' + x + '" cy="' + y + '" r="4" stroke="' + col + '"/>';
+      else if (c.parents.length > 1) dots += '<circle class="mg" cx="' + x + '" cy="' + y + '" r="4" stroke="' + col + '"/>';
+      else dots += '<circle class="dot" cx="' + x + '" cy="' + y + '" r="5" fill="' + col + '"/>';
+    });
+    var html = "";
+    commits.forEach(function (c) {
+      html += '<div class="glr' + (c.parents.length > 1 ? " mg" : "") + (local[c.id] ? "" : " rem") + '" tabindex="0" data-id="' + c.id + '">' +
+        "<span></span>" +
+        '<span class="gls">' + refsHtml(c) + '<span class="glsub">' + esc(c.subject) + "</span></span>" +
+        '<span class="gla">' + esc(c.authorName) + "</span>" +
+        '<span class="glt" title="' + abs(c.ago) + '">' + relShort(c.ago) + "</span>" +
+        '<span class="glh">' + c.hash.slice(0, 7) + "</span></div>";
+    });
+    html += '<div class="glmore"><button type="button" class="btn" id="glmore">Load more</button><span id="glmorenote">next 200 commits; lanes continue across the page boundary</span></div>';
+    html += '<svg class="glsvg" width="' + w + '" height="' + (H + 34) + '" aria-hidden="true">' + paths + dots + "</svg>";
+    rows.innerHTML = html;
+    $("glmore").onclick = function () { $("glmorenote").textContent = "(mockup: no further fixture)"; };
+  }
+
+  // ---------- tooltip ----------
+  var tip = $("gltip");
+  function showTip(row) {
+    var c = byId[row.getAttribute("data-id")], refs = refsHtml(c);
+    tip.innerHTML = '<div class="ts">' + esc(c.subject) + "</div>" + (refs ? '<div class="tr">' + refs + "</div>" : "") +
+      '<div class="tm"><span>' + esc(c.authorName) + "</span><span>·</span><span>" + rel(c.ago) + "</span><span>·</span><code>" + c.hash.slice(0, 9) + "</code></div>";
+    tip.hidden = false;
+    var r = row.getBoundingClientRect(), sx = row.parentNode.getBoundingClientRect().left;
+    var x = sx + lx(c.col) + 14, y = r.bottom + 4, th = tip.offsetHeight;
+    if (y + th > window.innerHeight - 8) y = r.top - th - 4;
+    tip.style.left = Math.min(x, window.innerWidth - tip.offsetWidth - 8) + "px";
+    tip.style.top = y + "px";
+  }
+  function bindRows() {
+    $("glrows").addEventListener("mouseover", function (e) { var row = e.target.closest(".glr"); if (row) showTip(row); });
+    $("glrows").addEventListener("mouseleave", function () { tip.hidden = true; });
+    $("glscroll").addEventListener("scroll", function () { tip.hidden = true; });
+    $("glrows").addEventListener("click", function (e) { var row = e.target.closest(".glr"); if (row) { tip.hidden = true; openCommit(row.getAttribute("data-id")); } });
+    $("glrows").addEventListener("keydown", function (e) { var row = e.target.closest(".glr"); if (row && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); openCommit(row.getAttribute("data-id")); } });
+  }
+
+  // ---------- highlighter standing in for chroma's class output ----------
+  var KW = {
+    go: "break case chan const continue default defer else fallthrough for func go goto if import interface map package range return select struct switch type var",
+    js: "var let const function return if else for while do switch case break continue new typeof instanceof in of this try catch finally throw class"
+  };
+  var KT = { go: "string int int64 bool error byte rune uint64 float64 any", js: "" };
+  var NB = { go: "nil true false len make append cap new panic iota", js: "null undefined true false document window JSON Math" };
+  function set(s) { var o = {}; (s || "").split(" ").forEach(function (w) { if (w) o[w] = 1; }); return o; }
+  var SETS = {};
+  ["go", "js"].forEach(function (l) { SETS[l] = { k: set(KW[l]), kt: set(KT[l]), nb: set(NB[l]) }; });
+  function hlSeg(text, lang) {
+    if (lang === "md" || lang === "txt") return esc(text);
+    var re = /(\/\/.*$)|("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`[^`]*`)|(\b\d+(?:\.\d+)?\b)|([A-Za-z_$][\w$]*)|(\s+|.)/g, m, out = "", S = SETS[lang] || SETS.js;
+    while ((m = re.exec(text))) {
+      if (m[1]) out += '<span class="c1">' + esc(m[1]) + "</span>";
+      else if (m[2]) {
+        var cls = m[2][0] === "`" ? "sb" : m[2][0] === "'" ? "s1" : "s2";
+        if (lang === "json" && /^\s*:/.test(text.slice(re.lastIndex))) cls = "nt";
+        out += '<span class="' + cls + '">' + esc(m[2]) + "</span>";
+      }
+      else if (m[3]) out += '<span class="mi">' + m[3] + "</span>";
+      else if (m[4]) {
+        var w = m[4], c = S.k[w] ? "k" : S.kt[w] ? "kt" : S.nb[w] ? "nb" : /^\s*\(/.test(text.slice(re.lastIndex)) ? "nf" : "";
+        out += c ? '<span class="' + c + '">' + w + "</span>" : esc(w);
+      }
+      else out += esc(m[5]);
+    }
+    return out;
+  }
+  // a line: first char is the kind (" ", "+", "-"); "~" next means the whole line sits in a block comment;
+  // [[...]] marks an intra-line change (the daemon pairs equal-length removed/added runs)
+  function hlLine(src, lang) {
+    if (src[0] === "~") return '<span class="cm">' + esc(src.slice(1)) + "</span>";
+    return src.split(/(\[\[.*?\]\])/).map(function (part) {
+      var mk = /^\[\[(.*)\]\]$/.exec(part);
+      return mk ? '<span class="x">' + hlSeg(mk[1], lang) + "</span>" : hlSeg(part, lang);
+    }).join("");
+  }
+  function renderHunks(hunks, lang) {
+    var s = '<div class="dtab chroma">';
+    hunks.forEach(function (h) {
+      var o = h.o, n = h.n;
+      s += '<div class="dl hk"><span class="no"></span><span class="no"></span><span class="sg"></span><span class="cd">' + esc(h.h) + "</span></div>";
+      h.lines.forEach(function (ln) {
+        var k = ln[0], body = ln.slice(1), cls = k === "+" ? "add" : k === "-" ? "del" : "", on = "", nn = "";
+        if (k === "+") nn = n++; else if (k === "-") on = o++; else { on = o++; nn = n++; }
+        s += '<div class="dl ' + cls + '"><span class="no">' + on + '</span><span class="no">' + nn + '</span><span class="sg">' + (k === " " ? "" : k === "-" ? "−" : "+") + '</span><span class="cd">' + hlLine(body, lang) + "</span></div>";
+      });
+    });
+    return s + "</div>";
+  }
+
+  // ---------- diff fixture ----------
+  var GODRAWER = [{ h: "@@ -24,11 +24,14 @@ import (", o: 24, n: 24, lines: [
+    " ~   the drawer's left area: the commit graph reads GET /s/<rid>/git/log,",
+    " ~   which lays out lanes for every local branch and its upstream; the",
+    "+~   daemon computes the layout so the browser only draws it, and a page",
+    "+~   boundary keeps the lanes it had open.",
+    " ~ */",
+    " const (",
+    " \t// gitReadInterval is the period between a watched root's reads.",
+    " \tgitReadInterval = 20 * time.Second",
+    "-\tgitReadTimeout  = [[5]] * time.Second",
+    "+\tgitReadTimeout  = [[8]] * time.Second",
+    "+\t// gitLogPage is how many commits one GET git/log page carries.",
+    "+\tgitLogPage = 200",
+    " \tgitErrMax       = 400",
+    " )"
+  ] }, { h: "@@ -158,6 +161,41 @@ func (d *Daemon) handleGitStatus(w http.ResponseWriter, r *http.Request) {", o: 158, n: 161, lines: [
+    " \tw.Header().Set(\"X-Content-Type-Options\", \"nosniff\")",
+    " \t_, _ = w.Write(raw)",
+    " }",
+    "+",
+    "+// handleGitLog answers one page of the commit graph: commits in topo order",
+    "+// with their parents, refs, and the lane layout from the top of the log.",
+    "+func (d *Daemon) handleGitLog(w http.ResponseWriter, r *http.Request, s *Session) {",
+    "+\tif r.Method != http.MethodGet {",
+    "+\t\thttp.Error(w, \"method not allowed\", http.StatusMethodNotAllowed)",
+    "+\t\treturn",
+    "+\t}",
+    "+\tskip, err := strconv.Atoi(r.URL.Query().Get(\"skip\"))",
+    "+\tif err != nil || skip < 0 {",
+    "+\t\tskip = 0",
+    "+\t}",
+    "+\tpage, err := readGitLog(s.Project, skip, gitLogPage)",
+    "+\tif err != nil {",
+    "+\t\thttp.Error(w, err.Error(), http.StatusBadGateway)",
+    "+\t\treturn",
+    "+\t}",
+    "+\twriteJSON(w, page)",
+    "+}",
+    " ",
+    " // GitHandle is the drawer handle's abbreviated branch label: an",
+    " // \"impl/<parent>/<stem>\" branch is Impl, a \"goal/<parent>/<stem>\" one Goal,"
+  ] }];
+  var JSDASH = [{ h: "@@ -1986,9 +1986,12 @@ function gitDraw(v) {", o: 1986, n: 1986, lines: [
+    "       list.forEach(function (f) { sec.appendChild(gitRow(f)); });",
+    "       gfiles.appendChild(sec);",
+    "     });",
+    "     if (!any) gfiles.appendChild(mk(\"div\", \"gempty\", wsT(\"js.git.clean\")));",
+    "-    if (v.truncated) gfiles.appendChild(mk(\"div\", \"gempty\", wsT(\"js.git.truncated\", [[300]])));",
+    "+    if (v.truncated) gfiles.appendChild(mk(\"div\", \"gempty\", wsT(\"js.git.truncated\", [[GIT_FILES_MAX]])));",
+    "+    gfiles.querySelectorAll(\".gf\").forEach(function (row) {",
+    "+      row.addEventListener(\"click\", function () { gwOpenWorktree(row.dataset.side, row.title); });",
+    "+    });",
+    "   }",
+    "   function gitMsg(text, err) {",
+    "     gmsg.textContent = text || \"\";"
+  ] }];
+  var GOLOG = [{ h: "@@ -0,0 +1,212 @@", o: 0, n: 1, lines: [
+    "+// Commit graph reads for the git drawer (GET /s/<rid>/git/log).",
+    "+package wsdashboard",
+    "+",
+    "+import (",
+    "+\t\"strings\"",
+    "+)",
+    "+",
+    "+// GitLogPage is one page of the commit graph.",
+    "+type GitLogPage struct {",
+    "+\tCommits []GitLogCommit `json:\"commits\"`",
+    "+\tLanes   int            `json:\"lanes\"`",
+    "+\tMore    string         `json:\"more,omitempty\"`",
+    "+}",
+    "+",
+    "+// GitLogCommit is one row: its column, the edges leaving it, and its refs.",
+    "+type GitLogCommit struct {",
+    "+\tOid     string    `json:\"oid\"`",
+    "+\tParents []string  `json:\"parents\"`",
+    "+\tCol     int       `json:\"col\"`",
+    "+\tEdges   []GitEdge `json:\"edges\"`",
+    "+\tRefs    []GitRef  `json:\"refs,omitempty\"`",
+    "+\tSubject string    `json:\"subject\"`",
+    "+\tAuthor  string    `json:\"author\"`",
+    "+\tTime    int64     `json:\"time\"`",
+    "+}",
+    "+",
+    "+// laneOf returns the free lane for oid, opening one when none waits for it.",
+    "+func laneOf(lanes []string, oid string) (int, []string) {",
+    "+\tfor i, want := range lanes {",
+    "+\t\tif want == oid {",
+    "+\t\t\treturn i, lanes",
+    "+\t\t}",
+    "+\t}",
+    "+\tfor i, want := range lanes {",
+    "+\t\tif want == \"\" && !strings.HasPrefix(oid, \"-\") {",
+    "+\t\t\treturn i, lanes",
+    "+\t\t}",
+    "+\t}",
+    "+\treturn len(lanes), append(lanes, \"\")",
+    "+}"
+  ] }];
+  var GOTEST = [{ h: "@@ -12,9 +12,20 @@ func TestGitLogLanes(t *testing.T) {", o: 12, n: 12, lines: [
+    " \trepo := newTempRepo(t)",
+    " \trepo.commit(\"root\")",
+    "-\trepo.branch(\"[[feature]]\")",
+    "+\trepo.branch(\"[[impl/develop/alpha]]\")",
+    " \trepo.commit(\"a1\")",
+    "+\trepo.checkout(\"develop\")",
+    "+\trepo.commit(\"d1\")",
+    "+\trepo.merge(\"impl/develop/alpha\")",
+    "+\tpage := mustLog(t, repo.dir, 0, 200)",
+    "+\tif got := page.Commits[0].Col; got != 0 {",
+    "+\t\tt.Fatalf(\"merge col = %d, want 0 (first-parent line holds lane 0)\", got)",
+    "+\t}",
+    "+\tif len(page.Commits[0].Edges) != 2 {",
+    "+\t\tt.Fatalf(\"merge edges = %v, want two\", page.Commits[0].Edges)",
+    "+\t}",
+    " \t_ = repo",
+    " }"
+  ] }];
+  var JSONBIG = [{ h: "@@ -212,8 +212,14 @@", o: 212, n: 212, lines: [
+    "   \"git.fetch.title\": \"Fetch from the upstream remote\",",
+    "-  \"git.graph.later\": \"The commit graph comes later.\",",
+    "+  \"git.graph.title\": \"History\",",
+    "+  \"git.graph.more\": \"Load more\",",
+    "+  \"git.commit.copy\": \"Copy hash\",",
+    "+  \"git.commit.parents\": \"Parents\",",
+    "+  \"git.diff.load\": \"Load diff\",",
+    "+  \"git.diff.large\": \"Large diff ({0} changed lines) is not loaded automatically.\",",
+    "   \"git.lost\": \"The page lost the daemon.\",",
+    "   \"git.pull\": \"Pull\","
+  ] }];
+  var MDDEL = [{ h: "@@ -1,48 +0,0 @@", o: 1, n: 0, lines: [
+    "-# git drawer notes",
+    "-",
+    "-Working notes for the drawer's first cut, kept until the commit graph",
+    "-replaced the placeholder.",
+    "-",
+    "-- The right panel lists staged, unstaged, and untracked files.",
+    "-- Fetch, pull (fast-forward only), and push are the only writes.",
+    "-- The left area is reserved for a commit graph.",
+    "-",
+    "-## Open questions",
+    "-",
+    "-- Which branches get lanes?",
+    "-- Is the graph drawn by the browser or laid out by the daemon?"
+  ] }];
+
+  // kind: auto (loads near the viewport) | manual (waits behind Load diff)
+  var FILES = [
+    { st: "M", path: "agents-plugin-tool/internal/wsdashboard/assets/dashboard.js", add: 4, del: 1, lang: "js", hunks: JSDASH },
+    { st: "A", path: "agents-plugin-tool/internal/wsdashboard/assets/git-lanes.png", add: -1, del: -1, manual: "binary", size: "14.2 KB" },
+    { st: "M", path: "agents-plugin-tool/internal/wsdashboard/gitdrawer.go", add: 38, del: 1, lang: "go", hunks: GODRAWER },
+    { st: "A", path: "agents-plugin-tool/internal/wsdashboard/gitlog.go", add: 212, del: 0, lang: "go", hunks: GOLOG, more: 172 },
+    { st: "R", path: "agents-plugin-tool/internal/wsdashboard/gitlog_test.go", from: "agents-plugin-tool/internal/wsdashboard/graph_test.go", sim: 81, add: 12, del: 1, lang: "go", hunks: GOTEST },
+    { st: "M", path: "agents-plugin-tool/internal/wsi18n/tables/en.json", add: 410, del: 202, lang: "json", hunks: JSONBIG, manual: "large", more: 598 },
+    { st: "D", path: "ai-docs/ref/git-drawer-notes.md", add: 0, del: 48, lang: "md", hunks: MDDEL, manual: "deleted", more: 35 }
+  ];
+  var WT = {
+    staged: [
+      { st: "M", path: "agents-plugin-tool/internal/wsdashboard/gitlog.go", add: 40, del: 8, lang: "go", hunks: GOLOG.map(function (h) { return { h: "@@ -31,6 +31,12 @@ type GitLogCommit struct {", o: 31, n: 31, lines: h.lines.slice(14, 26) }; }) },
+      { st: "A", path: "ai-docs/ref/git-graph-mockup/index.html", add: 1012, del: 0, lang: "txt", manual: "large", hunks: [{ h: "@@ -0,0 +1,1012 @@", o: 0, n: 1, lines: ["+<!DOCTYPE html>", "+<html lang=\"en\" data-theme=\"light\">", "+<head><meta charset=\"utf-8\">"] }], more: 1009 }
+    ],
+    unstaged: [
+      { st: "M", path: "agents-plugin-tool/internal/wsdashboard/assets/dashboard.css", add: 2, del: 1, lang: "txt", hunks: [{ h: "@@ -584,4 +584,5 @@", o: 584, n: 584, lines: [
+        " .gbody { display: grid; grid-template-columns: minmax(0, 2fr) minmax(340px, 1fr); grid-template-rows: minmax(0, 1fr); }",
+        "-.gleft { display: flex; align-items: center; justify-content: center; border: 1px dashed var(--wb-muted-fg); border-radius: var(--wb-radius); [[opacity: .6; ]]}",
+        "+.gleft { display: flex; align-items: center; justify-content: center; border: 1px dashed var(--wb-muted-fg); border-radius: var(--wb-radius); [[min-height: 0; ]]}",
+        "+.glog { min-width: 0; min-height: 0; display: flex; flex-direction: column; }",
+        " .gnote { font-size: 12.5px; color: var(--wb-muted-fg); }"
+      ] }] },
+      { st: "M", path: "AGENTS.md", add: 1, del: 1, lang: "md", hunks: [{ h: "@@ -301,3 +301,3 @@ ## Project Orientation", o: 301, n: 301, lines: [
+        "   package: `agents-plugin/` (`ws@0.48.12`). Conservative-default",
+        "-  distribution: `agents-plugin-wsflow/` (`wsflow@[[0.48.12]]`). Native",
+        "+  distribution: `agents-plugin-wsflow/` (`wsflow@[[0.48.13]]`). Native",
+        "   MCP/tooling source: `agents-plugin-tool/`."
+      ] }] }
+    ],
+    untracked: [
+      { st: "?", path: "ai-docs/tickets/todo/261109-bug-ws-dashboard-stream-wake-rerender-cpu.md", add: 0, del: 0, lang: "md", hunks: [{ h: "@@ -0,0 +1,9 @@", o: 0, n: 1, lines: [
+        "+---", "+title: \"ws dashboard: a stream wake re-renders every region\"", "+---", "+", "+# ws dashboard: a stream wake re-renders every region", "+", "+## Background", "+", "+pprof on the dashboard daemon shows ..."
+      ] }] }
+    ]
+  };
+
+  // ---------- working-tree list in the drawer's right panel ----------
+  function pathHtml(p) {
+    var i = p.lastIndexOf("/");
+    return '<span class="gp">' + (i >= 0 ? '<span class="gdir">' + esc(p.slice(0, i + 1)) + "</span>" : "") + '<span class="gname">' + esc(p.slice(i + 1)) + "</span></span>";
+  }
+  function numHtml(f) {
+    if (f.add < 0) return '<span class="gd"><i class="bin">bin</i></span>';
+    if (f.st === "?") return '<span class="gd"></span>';
+    return '<span class="gd">' + (f.add ? '<i class="add">+' + f.add + "</i>" : "") + (f.del ? '<i class="del">−' + f.del + "</i>" : "") + "</span>";
+  }
+  function stHtml(st) { return '<b class="gst st-' + (st === "?" ? "q" : st) + '">' + st + "</b>"; }
+  function drawWorktree() {
+    var s = "";
+    [["staged", "Staged"], ["unstaged", "Unstaged"], ["untracked", "Untracked"]].forEach(function (g) {
+      s += '<div class="gsec"><div class="ggrp"><span>' + g[1] + '</span><span class="chip">' + WT[g[0]].length + "</span></div>";
+      WT[g[0]].forEach(function (f, i) { s += '<div class="gf" title="' + esc(f.path) + '" data-side="' + g[0] + '" data-i="' + i + '">' + stHtml(f.st) + pathHtml(f.path) + numHtml(f) + "</div>"; });
+      s += "</div>";
+    });
+    $("gfiles").innerHTML = s;
+    $("gfiles").addEventListener("click", function (e) {
+      var row = e.target.closest(".gf");
+      if (!row || document.documentElement.classList.contains("p1only")) return;
+      openWorktree(row.getAttribute("data-side"), +row.getAttribute("data-i"));
+    });
+  }
+
+  // ---------- commit window ----------
+  var back = $("gwback"), win = $("gwin"), cur = null, files = [], io = null, lastFocus = null, pinned = null;
+  function sectionHtml(f, i) {
+    var stateCls = f.manual ? "manual" : "auto";
+    return '<section class="dfile" id="df-' + i + '" data-i="' + i + '" data-state="' + stateCls + '">' +
+      '<header class="dfh"><button type="button" class="ia fold-b" title="Fold">' + icon("chev") + "</button>" + stHtml(f.st) + pathHtml(f.path) +
+      (f.from ? '<span class="dfren">← ' + esc(f.from) + (f.sim ? " (" + f.sim + "%)" : "") + "</span>" : "") + numHtml(f) + "</header>" +
+      '<div class="dfb">' + bodyFor(f, stateCls) + "</div></section>";
+  }
+  function bodyFor(f, state) {
+    if (state === "auto") return '<div class="dskel"><i style="width:46%"></i><i style="width:72%"></i><i style="width:58%"></i></div>';
+    if (state === "loading") return '<div class="dskel"><i style="width:60%"></i><i style="width:38%"></i><i style="width:66%"></i><i style="width:50%"></i></div>';
+    if (state === "manual") {
+      var why = f.manual === "binary" ? "Binary file." : f.manual === "deleted" ? "Deleted file (" + f.del + " lines)." : "Large diff (" + (f.add + f.del) + " changed lines) is not loaded automatically.";
+      return '<div class="dnote"><span>' + why + '</span><button type="button" class="btn load-b">Load diff</button></div>';
+    }
+    if (f.manual === "binary") return '<div class="dnote"><span>Binary file added · ' + esc(f.size) + " · no text diff</span></div>";
+    var s = renderHunks(f.hunks, f.lang);
+    if (f.more) s += '<div class="dnote">… ' + f.more + " more lines (mockup fixture ends here)</div>";
+    return s;
+  }
+  function setState(sec, state) {
+    var f = files[+sec.getAttribute("data-i")];
+    sec.setAttribute("data-state", state);
+    sec.querySelector(".dfb").innerHTML = bodyFor(f, state);
+    // sections above the target grow as they load; keep the clicked file in place until the user scrolls
+    if (pinned != null && $("df-" + pinned)) $("gwdiff").scrollTop = $("df-" + pinned).offsetTop - 10;
+  }
+  function load(sec) {
+    var st = sec.getAttribute("data-state");
+    if (st === "ready" || st === "loading") return;
+    setState(sec, "loading");
+    setTimeout(function () { if (sec.isConnected) setState(sec, "ready"); }, 380);
+  }
+  function fileListHtml(groups) {
+    var tadd = 0, tdel = 0, n = 0, s = "";
+    groups.forEach(function (g) {
+      if (g.label) s += '<div class="ggrp"><span>' + g.label + '</span><span class="chip">' + g.files.length + "</span></div>";
+      g.files.forEach(function (f) {
+        if (f.add > 0) tadd += f.add; if (f.del > 0) tdel += f.del;
+        s += '<div class="gf gwf" data-i="' + n + '" title="' + esc(f.path) + '">' + stHtml(f.st) + pathHtml(f.path) + numHtml(f) +
+          (f.from ? '<span class="ren">← ' + esc(f.from.slice(f.from.lastIndexOf("/") + 1)) + "</span>" : "") + "</div>";
+        n++;
+      });
+    });
+    return '<div class="gw-fsum"><span>' + n + " files changed</span>" + '<span class="gd"><i class="add">+' + tadd + '</i><i class="del">−' + tdel + "</i></span></div>" + s;
+  }
+  function fillBody(groups, focus) {
+    files = [];
+    pinned = null;
+    groups.forEach(function (g) { files = files.concat(g.files); });
+    $("gwfiles").innerHTML = fileListHtml(groups);
+    $("gwdiff").innerHTML = '<div class="gw-p1"><b>Diff viewer: Phase 2</b><br>Phase 1 leaves this side as a placeholder; the file list on the right is live.</div>' + files.map(sectionHtml).join("");
+    $("gwdiff").scrollTop = 0;
+    if (io) io.disconnect();
+    io = "IntersectionObserver" in window ? new IntersectionObserver(function (es) {
+      es.forEach(function (e) { if (e.isIntersecting && e.target.getAttribute("data-state") === "auto") load(e.target); });
+    }, { root: $("gwdiff"), rootMargin: "200px 0px" }) : null;
+    document.querySelectorAll(".dfile").forEach(function (sec) { if (io) io.observe(sec); else if (sec.getAttribute("data-state") === "auto") load(sec); });
+    spy();
+    if (focus != null) setTimeout(function () { goFile(focus); }, 30);
+  }
+  function goFile(i) {
+    var sec = $("df-" + i);
+    if (!sec) return;
+    if (!document.documentElement.classList.contains("p1only")) {
+      pinned = i;
+      sec.classList.remove("fold");
+      load(sec);
+      $("gwdiff").scrollTop = sec.offsetTop - 10;
+    }
+    markFile(i);
+  }
+  function markFile(i) { document.querySelectorAll(".gwf").forEach(function (r) { r.classList.toggle("on", +r.getAttribute("data-i") === i); }); }
+  function spy() {
+    if (document.documentElement.classList.contains("p1only")) return;
+    if (pinned != null) { markFile(pinned); return; }
+    var top = $("gwdiff").scrollTop + 40, on = 0;
+    document.querySelectorAll(".dfile").forEach(function (sec) { if (sec.offsetTop <= top) on = +sec.getAttribute("data-i"); });
+    markFile(on);
+  }
+  function show() {
+    if (back.hidden) lastFocus = document.activeElement;
+    back.hidden = false;
+    win.focus();
+    spy();
+  }
+  function close() {
+    back.hidden = true;
+    cur = null;
+    if (io) io.disconnect();
+    document.querySelectorAll(".glr.sel").forEach(function (r) { r.classList.remove("sel"); });
+    if (lastFocus && lastFocus.focus) lastFocus.focus();
+  }
+  function openCommit(id, focus) {
+    var c = byId[id];
+    if (!c) return;
+    cur = c;
+    document.querySelectorAll(".glr").forEach(function (r) { r.classList.toggle("sel", r.getAttribute("data-id") === id); });
+    $("gwsubj").textContent = c.subject;
+    $("gwcopy").hidden = false;
+    $("gwcopy").classList.remove("done");
+    $("gwcopy").querySelector("span").textContent = "Copy hash";
+    var chips = '<code class="hash" title="' + c.hash + '">' + c.hash.slice(0, 12) + "</code>" + refsHtml(c);
+    if (c.parents.length > 1) chips += '<span class="note">merge · diffed against the first parent</span>';
+    $("gwchips").innerHTML = chips;
+    var meta = "<dt>Author</dt><dd>" + esc(c.authorName) + ' <span class="em">' + esc(c.author.replace(/^[^<]*/, "")) + "</span> · " + rel(c.ago) + ' <span class="abs">(' + abs(c.ago) + ")</span></dd>";
+    meta += "<dt>Committer</dt><dd>" + (c.committer === c.author && c.committed === c.ago ? '<span class="em">same as author</span>' : esc(ME) + ' <span class="em">&lt;' + MEM + "&gt;</span> · " + rel(c.committed) + ' <span class="abs">(' + abs(c.committed) + ")</span>") + "</dd>";
+    meta += "<dt>Parents</dt><dd>" + c.parents.map(function (p, i) {
+      return '<button type="button" class="gw-par" data-id="' + p + '" title="' + esc(byId[p] ? byId[p].subject : "not on this page") + '">' + shortHash(p) + "</button>" + (i === 0 && c.parents.length > 1 ? ' <span class="em">first parent, diff base</span>' : "");
+    }).join(" ") + "</dd>";
+    $("gwmeta").innerHTML = meta;
+    $("gwmsg").hidden = !c.body;
+    $("gwmsg").textContent = c.body;
+    fillBody([{ files: FILES }], focus);
+    show();
+  }
+  function openWorktree(side, idx) {
+    cur = null;
+    $("gwsubj").textContent = "Working tree";
+    $("gwcopy").hidden = true;
+    $("gwchips").innerHTML = '<span class="rf head" style="--lc:var(--gl-0)">' + icon("branch") + '<span class="t">develop</span></span><span class="note">staged: index vs HEAD · unstaged: working tree vs index · untracked: whole file</span>';
+    $("gwmeta").innerHTML = "<dt>Root</dt><dd><code>~/devenv</code></dd>";
+    $("gwmsg").hidden = true;
+    var groups = [{ label: "Staged", files: WT.staged }, { label: "Unstaged", files: WT.unstaged }, { label: "Untracked", files: WT.untracked }];
+    var off = side === "unstaged" ? WT.staged.length : side === "untracked" ? WT.staged.length + WT.unstaged.length : 0;
+    fillBody(groups, off + (idx || 0));
+    show();
+  }
+  $("gwclose").onclick = close;
+  back.addEventListener("mousedown", function (e) { if (e.target === back) close(); });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape" && !back.hidden) close(); });
+  $("gwcopy").onclick = function () {
+    var b = this;
+    try { if (navigator.clipboard && cur) navigator.clipboard.writeText(cur.hash).catch(function () {}); } catch (err) {}
+    b.classList.add("done");
+    b.querySelector("svg use").setAttribute("href", "#i-check");
+    b.querySelector("span").textContent = "Copied";
+    setTimeout(function () { b.classList.remove("done"); b.querySelector("svg use").setAttribute("href", "#i-copy"); b.querySelector("span").textContent = "Copy hash"; }, 1400);
+  };
+  $("gwmeta").addEventListener("click", function (e) { var p = e.target.closest(".gw-par"); if (p && byId[p.getAttribute("data-id")]) openCommit(p.getAttribute("data-id")); });
+  $("gwfiles").addEventListener("click", function (e) { var r = e.target.closest(".gwf"); if (r) goFile(+r.getAttribute("data-i")); });
+  $("gwdiff").addEventListener("click", function (e) {
+    var b = e.target.closest(".load-b"), f = e.target.closest(".fold-b");
+    if (b) load(b.closest(".dfile"));
+    if (f) f.closest(".dfile").classList.toggle("fold");
+  });
+  $("gwdiff").addEventListener("scroll", spy);
+  ["wheel", "touchstart", "keydown", "mousedown"].forEach(function (ev) { $("gwdiff").addEventListener(ev, function () { pinned = null; }, { passive: true }); });
+
+  // ---------- mockup controls ----------
+  var root = document.documentElement;
+  function seg(a, b, on) { $(a).setAttribute("aria-pressed", on); $(b).setAttribute("aria-pressed", !on); }
+  function theme(t) { root.setAttribute("data-theme", t); seg("th-l", "th-d", t === "light"); }
+  function scope(p1) { root.classList.toggle("p1only", p1); seg("sc-2", "sc-1", !p1); }
+  function narrow(n) { document.body.classList.toggle("narrow", n); seg("w-w", "w-n", !n); }
+  $("th-l").onclick = function () { theme("light"); };
+  $("th-d").onclick = function () { theme("dark"); };
+  $("sc-2").onclick = function () { scope(false); };
+  $("sc-1").onclick = function () { scope(true); };
+  $("w-w").onclick = function () { narrow(false); };
+  $("w-n").onclick = function () { narrow(true); };
+
+  drawGraph();
+  bindRows();
+  drawWorktree();
+
+  // URL hash for fixed states (screenshots): theme, p1, narrow, tip, open, file, wt
+  var q = {};
+  location.hash.slice(1).split("&").forEach(function (kv) { var p = kv.split("="); if (p[0]) q[p[0]] = decodeURIComponent(p[1] || "1"); });
+  theme(q.theme || (window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"));
+  if (q.p1) scope(true);
+  if (q.narrow) narrow(true);
+  if (q.tip) { var tr = document.querySelector('.glr[data-id="' + q.tip + '"]'); if (tr) { tr.classList.add("sel"); showTip(tr); } }
+  if (q.open) openCommit(q.open, q.file != null ? +q.file : null);
+  if (q.wt) openWorktree(q.wt, 0);
+})();
+</script>
+</body></html>
