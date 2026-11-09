@@ -277,3 +277,77 @@ the size cap skipping highlight; working-tree staged / unstaged / untracked
 diffs and their path guard. A headless browser screenshot of the viewer
 with several files, one waiting behind "load diff", and a highlighted
 hunk. Report the binary size delta.
+
+### Result (8b16a803a) - 2026-11-09
+
+Done in 20a239176, b33cc85eb, 8b16a803a.
+
+- Server: `GET /s/<rid>/git/commit/<oid>/diff?path=` and `GET
+  /s/<rid>/git/worktree/diff?side=staged|unstaged|untracked&path=`, both
+  GET-only and in the LAN guard list.
+  - Both routes take only a path from the file lists git itself gives (the
+    commit route's list, the drawer's status groups). Any other path is a
+    404.
+  - Each path goes to git as `:(top,literal)<path>`, so a glob-shaped name
+    matches only itself and a session rooted in a subdirectory still works.
+  - Patches are read with `-p --full-index --no-color --no-ext-diff
+    --no-textconv`; git is killed past the 1 MiB cut, and the diff is marked
+    `truncated`.
+  - Untracked entries are read under the file view's rule: Lstat, contained
+    open, inside the session root. A symlink shows its target and is never
+    followed; a file above the session root gets an `outside` notice.
+- JSON: `{path, binary, notice (dir|gitlink|unmerged|special|outside),
+  truncated, hunks[{header, old, new, lines[{k, t[{s, c, x}]}]}]}`.
+  - `k` is the line kind.
+  - Pieces carry the text, a folded highlight class, and an intra-line
+    change mark.
+  - Marks are the differing middle of equal-length removed/added runs, after
+    the common leading and trailing words.
+- Highlighting: chroma v2.24.1 (the newest that accepts the module's go
+  1.23; go.mod's go line is unchanged).
+  - The whole old and new contents are highlighted and mapped onto hunk
+    lines, so a comment opened above a hunk colours it correctly. A line
+    takes colour only when its token text equals the patch text.
+  - Content over 256 KiB is not highlighted.
+  - An LRU of 32 entries is keyed by (blob id, path). Working-tree content
+    is never cached.
+  - chroma's classes are folded into ten codes (k, kt, kc, nf, nt, na, s, m,
+    c, cp), rendered as `t-<code>`, with `--hl-*` tokens for light and dark.
+  - The mark class is `dx`, because chroma's raw names collide with
+    dashboard classes.
+- Binary size (linux/amd64, merge-base 7fea6af00): stripped 24,850,697 ->
+  28,238,089 B (+3.39 MB); unstripped 33,292,640 -> 37,077,871 B.
+- Browser: the commit window's left side is a multi-file viewer.
+  - Per-file sections load through an IntersectionObserver (rootMargin
+    200px). A section over 400 lines, a binary file, or a deleted file
+    waits behind "Load diff"; binary stays manual until the user asks.
+  - A list click scrolls to its file, loads it, and pins it: a re-scroll
+    keeps the file in place while sections above it load, until the user
+    wheels, touches, types, or clicks. A scroll spy marks the current file
+    in the list. Files can be folded.
+  - The drawer's working-tree rows open the same window for staged,
+    unstaged, or untracked changes.
+- Verification:
+  - gofmt and go vet are clean. `go test ./internal/wsdashboard/
+    ./internal/wsi18n/ ./cmd/ws-mcp/` passes, and the diff subset passes
+    under `-race`.
+  - The new tests cover modify, add, delete, rename, binary, the 1 MiB cut,
+    paths refused outside the list, highlight mapping across a comment
+    opened above the hunk, the size cap, word marks, LRU eviction, staged,
+    unstaged and untracked diffs (including a symlink pointing outside the
+    root), literal and subdirectory-root pathspecs, and the routes' status
+    codes.
+  - Headless Chromium over CDP against a dev daemon (isolated env, spare
+    port), light and dark:
+    - a six-file commit with a highlighted hunk, marks, and CSV, binary and
+      deleted files waiting behind "Load diff";
+    - list click with pin and fold;
+    - the working-tree window (staged, unstaged, untracked, symlink);
+    - a 30-file pin test with slowed fetches;
+    - narrow 420px.
+- Lite review: two Important findings, both fixed in 8b16a803a.
+  - Glob-shaped paths were treated as pathspecs.
+  - A subdirectory session root got the wrong paths.
+  - Minors left by choice: the truncation note's 300 copies the drawer's
+    existing constant use, and intra-line marks are lost across a "No
+    newline at end of file" marker.
