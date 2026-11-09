@@ -369,6 +369,9 @@
     "261109-bug-ws-tracker-assignee-list-ended-records": {
       "registered_at": "2026-11-09T06:57:50Z"
     },
+    "261109-bug-ws-tracker-external-write-refresh": {
+      "registered_at": "2026-11-09T06:57:54Z"
+    },
     "261109-feat-ws-dashboard-agents-panel-fixed-rows": {
       "registered_at": "2026-11-09T06:34:52Z",
       "lease": {
