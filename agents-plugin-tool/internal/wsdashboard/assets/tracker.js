@@ -290,7 +290,10 @@
   var KIND_KEY = { task: "js.tk.kind.task", todo: "js.tk.kind.todo", topic: "js.tk.kind.topic" };
   function kindName(k) { return KIND_KEY[k] ? wsT(KIND_KEY[k]) : k; }
   function stChip(s) { return s ? '<span class="chip st-' + esc(s) + '">' + esc(stLabel(s)) + '</span>' : ''; }
+  // An ended record's pill is its end-state text (endText), not a status chip: the item-status
+  // table's "unassigned" names an item without assignees and misreads on a member row.
   function recChip(r) {
+    if (r.ended) return '<span class="chip ended">' + esc(endText(r.state) || r.state) + '</span>';
     if (r.state !== 'live') return stChip(r.state);
     return stChip(r.status) + (r.statusOrigin && r.statusOrigin !== 'human' ? '<span class="chip agent" title="' + wsT("js.tk.chip.byagent.tip", esc(r.statusBy), esc(r.statusOrigin)) + '">' + wsT("js.tk.chip.byagent") + '</span>' : '');
   }
@@ -1521,7 +1524,8 @@
   // a comment (added, edited, or hidden) -> that comment; a status, close, confirm, reject,
   // or reopen -> that assignee's row in Assignees; an assignment or handoff -> the holders
   // line of the property card; an accept -> the accepter's row; a decline, return, or unassign ->
-  // the assignees row that ended (the holders line no longer lists it); a body edit or the
+  // the assignees row that ended (the holders line no longer lists it), or that member's row when
+  // the list hid the ended record (visibleRecs); a body edit or the
   // item's creation -> the body; an edit that only adds attachments -> the first new chip.
   // Anything else falls back to its own line in the thread, and null when the window has none.
   function focusTarget(root, evId) {
@@ -1535,7 +1539,7 @@
     else if (e.type === 'item.accept') el = by('data-hmember', e.member) || holders;
     else if (e.type === 'item.decline' || e.type === 'item.return' || e.type === 'item.unassign') {
       var gone = vals(VS.assignments).filter(function (r) { return r.ended && r.ended.id === e.id; })[0];
-      el = gone && by('data-rec', gone.id);
+      el = gone && (by('data-rec', gone.id) || by('data-hmember', gone.to));
     }
     else if (e.type === 'item.create' || e.type === 'item.edit') {
       var atts = listOf(p.attachments).filter(function (x) { return x && x.oid; });
@@ -1603,7 +1607,23 @@
   function rmBadge(label, r) {
     return '<button type="button" class="rmb"' + attr('act', 'unassign') + attr('item', r.item) + attr('who', r.to) + ' aria-label="' + esc(label) + '"' + tipAttr(label) + '><svg class="i"><use href="#tki-minus"/></svg></button>';
   }
+  // The records the assignees list shows: every live or pending record, and for a member who
+  // holds neither only that member's latest ended record (latest by the parsed end time, ties to
+  // the later record), so unassigning and reassigning never stacks rows. The member is the
+  // record's `to`. The fold keeps every ended record; only this list hides them.
+  function visibleRecs(recs) {
+    var on = {}, last = {};
+    recs.forEach(function (r) { if (r.state === 'live' || r.state === 'pending') on[r.to] = true; });
+    recs.forEach(function (r, i) {
+      if (r.state === 'live' || r.state === 'pending' || on[r.to]) return;
+      var t = Date.parse(r.ended && r.ended.ts), b = last[r.to];
+      if (isNaN(t)) t = -Infinity;
+      if (!b || t >= b.t) last[r.to] = { r: r, t: t };
+    });
+    return recs.filter(function (r) { return r.state === 'live' || r.state === 'pending' || (last[r.to] && last[r.to].r === r); });
+  }
   function assigneesHtml(v, it, recs) {
+    recs = visibleRecs(recs);
     if (!recs.length) return '<section class="iw-asg"><h3>' + wsT("js.tk.asg.title") + '<span class="grow"></span>' + assignAddBtn(it, v) + '</h3><div class="empty">' + wsT("js.tk.asg.none") + '</div></section>';
     var rows = recs.map(function (r, i) { return { r: r, i: i, d: leadDepth(r.to), on: r.state === 'live' || r.state === 'pending', src: source(r), cm: complText(r.completion) }; });
     rows.sort(function (a, b) { return (b.on - a.on) || (a.d - b.d) || nm(a.r.to).localeCompare(nm(b.r.to)) || (a.i - b.i); });
