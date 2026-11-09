@@ -818,6 +818,40 @@ func (l *Ledger) WikiImageRead(ctx context.Context, name, oid string) ([]byte, e
 	return data, err
 }
 
+// WikiImages lists the oids of the images in wiki name's tip tree
+// (_attachments/<oid>.<ext>), the attachment: references a page of it may
+// show. It reads no content; WikiImageRead checks the hash when one is
+// served.
+func (l *Ledger) WikiImages(ctx context.Context, name string) ([]string, error) {
+	var oids []string
+	err := l.withLock(ctx, func() error {
+		tip, err := l.wikiCommitArg(ctx, name, "")
+		if err != nil {
+			return err
+		}
+		tree, err := l.git.treeOf(ctx, tip)
+		if err != nil {
+			return err
+		}
+		dir, ok, err := l.git.entryAt(ctx, tree, WikiAttachDir)
+		if err != nil || !ok || !dir.isTree() {
+			return err
+		}
+		entries, err := l.git.lsTree(ctx, dir.oid)
+		if err != nil {
+			return err
+		}
+		for _, e := range entries {
+			oid, _, found := strings.Cut(e.name, ".")
+			if found && e.mode == "100644" && ValidAttachmentOID(oid) {
+				oids = append(oids, oid)
+			}
+		}
+		return nil
+	})
+	return oids, err
+}
+
 func firstErr(errs ...error) error {
 	for _, err := range errs {
 		if err != nil {

@@ -818,3 +818,150 @@ body.tk-menuon .tk .ir-more { visibility: hidden !important; }
 .tk .md table { display: block; width: fit-content; max-width: 100%; overflow-x: auto; }
 .tk .md hr { border: 0; border-top: 1px solid var(--wb-line); margin: 8px 0; }
 .tk .sh-body.md > :last-child, .tk .ctext.md > :last-child { margin-bottom: 0; }
+
+/* The wiki in the Items panel (cardWiki in tracker.js; the look is ai-docs/ref/wiki-mockup).
+   Classes are wk-*, plus a.wlink for a wiki: page link in any rendered text. */
+/* the Items panel header's first control: Items | Wiki. It takes the h2's place and reads
+   as a mode switch (the item window's .iw-seg look), not as one more scope pill */
+.tk .wk-sw { display: inline-flex; gap: 1px; padding: 2px; border-radius: 8px; background: var(--wb-card); flex: none; }
+.tk .wk-sw button { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px; border: 0; border-radius: 6px; background: transparent; color: var(--wb-muted-fg); font: inherit; font-size: 12.5px; font-weight: 700; cursor: pointer; }
+.tk .wk-sw button:hover { color: var(--wb-fg); }
+.tk .wk-sw button[aria-pressed="true"] { background: var(--wb-muted); color: var(--wb-fg); box-shadow: inset 0 0 0 1px var(--wb-line); }
+.tk .wk-sw .i { width: 15px; height: 15px; }
+/* the wiki picker: the current wiki, a menu of the store's wikis and "New wiki" */
+.tk .wk-pickw { position: relative; flex: 0 1 auto; min-width: 0; }
+.tk .wk-pick { display: inline-flex; align-items: center; gap: 5px; height: 26px; max-width: 100%; padding: 0 8px 0 9px; border: 0; border-radius: 999px; background: var(--wb-card); color: var(--wb-fg); font: inherit; font-size: 12.5px; font-weight: 700; cursor: pointer; box-shadow: inset 0 0 0 1px var(--wb-line); }
+.tk .wk-pick .nm { font-family: var(--wb-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tk .wk-pick .pre { color: var(--wb-muted-fg); font-weight: 400; font-family: var(--wb-mono); }
+.tk .wk-pick:hover { box-shadow: inset 0 0 0 1px var(--wb-muted-fg); }
+.tk .wk-pop { position: absolute; left: 0; top: calc(100% + 6px); z-index: 20; width: 300px; background: var(--wb-card); border-radius: 10px; box-shadow: var(--wb-shadow-hi); padding: 6px; display: flex; flex-direction: column; gap: 1px; font-weight: 400; }
+.tk .wk-pop.r { left: auto; right: 0; }
+.tk .wk-opt { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; align-items: center; column-gap: 7px; padding: 5px 8px; border: 0; border-radius: 7px; background: transparent; color: var(--wb-fg); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.tk .wk-opt:hover { background: color-mix(in srgb, var(--wb-primary) 10%, var(--wb-card)); }
+.tk .wk-opt.on { background: color-mix(in srgb, var(--wb-primary) 14%, var(--wb-card)); }
+.tk .wk-opt .nm { font-family: var(--wb-mono); font-weight: 700; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; }
+.tk .wk-opt .sub { grid-column: 2 / 4; font-size: 11.5px; color: var(--wb-muted-fg); }
+.tk .wk-opt .n { font-size: 11.5px; color: var(--wb-muted-fg); }
+.tk .wk-opt.add { color: var(--wb-primary); font-weight: 600; }
+.tk .wk-popsep { height: 1px; background: var(--wb-line); margin: 4px 2px; }
+.tk .wk-pophint { font-size: 11px; color: var(--wb-muted-fg); padding: 2px 8px 2px; }
+/* the wiki body: page tree | page; one column under 560px of panel width */
+.tk .card > .cbody.wk-body { padding: 0; display: grid; grid-template-columns: minmax(150px, 220px) minmax(0, 1fr); overflow: hidden; container: wkb / inline-size; }
+.tk .wk-body.notree { grid-template-columns: minmax(0, 1fr); }
+.tk .wk-body.notree .wk-tree { display: none; }
+.tk .wk-body.wide { grid-template-columns: minmax(180px, 260px) minmax(0, 1fr); }
+.tk .wk-tree { min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 8px 6px 10px 8px; border-right: 1px solid var(--wb-muted); font-size: 12.5px; }
+.tk .wk-tn { display: flex; align-items: center; gap: 5px; width: 100%; min-height: 25px; padding: 1px 6px 1px calc(6px + var(--d, 0) * 14px); border: 0; border-radius: 6px; background: transparent; color: var(--wb-fg); font: inherit; text-align: left; cursor: pointer; white-space: nowrap; }
+.tk .wk-tn .t { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.tk .wk-tn .i { width: 14px; height: 14px; color: var(--wb-muted-fg); }
+.tk .wk-tn:hover { background: color-mix(in srgb, var(--wb-muted) 60%, transparent); }
+.tk .wk-tn.dir { color: var(--wb-muted-fg); font-weight: 600; }
+.tk .wk-tn.dir .cv { width: 12px; height: 12px; transition: transform .15s; }
+.tk .wk-tn.dir[aria-expanded="false"] .cv { transform: rotate(-90deg); }
+.tk .wk-tn.on { background: color-mix(in srgb, var(--wb-primary) 13%, transparent); color: var(--wb-fg); font-weight: 600; }
+.tk .wk-tn.on .i { color: var(--wb-primary); }
+.tk .wk-tn.ed .t::after { content: " \2022"; color: var(--tk-warn); }
+.tk .wk-tn mark, .tk .wk-snip mark { background: color-mix(in srgb, var(--tk-conc) 35%, transparent); color: inherit; border-radius: 2px; }
+.tk .wk-snip { margin: -2px 0 3px calc(25px + var(--d, 0) * 14px); font-size: 11.5px; color: var(--wb-muted-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tk .wk-tcount { margin: 0 6px 6px; font-size: 11.5px; color: var(--wb-muted-fg); }
+.tk .wk-tadd { display: flex; align-items: center; gap: 5px; margin-top: 6px; padding: 2px 6px; border: 0; background: transparent; color: var(--wb-muted-fg); font: inherit; font-size: 12px; cursor: pointer; border-radius: 6px; }
+.tk .wk-tadd:hover { color: var(--wb-primary); background: color-mix(in srgb, var(--wb-muted) 60%, transparent); }
+.tk .wk-tadd .i { width: 12px; height: 12px; }
+/* the page: a sticky head (path, last change, actions) over the rendered page or the editor */
+.tk .wk-page { min-width: 0; min-height: 0; overflow: auto; overscroll-behavior: contain; display: flex; flex-direction: column; container: wkp / inline-size; }
+.tk .wk-phead { position: sticky; top: 0; z-index: 3; flex: none; display: flex; align-items: center; gap: 6px; min-height: 36px; padding: 4px 8px 4px 14px; background: var(--wb-card); box-shadow: 0 1px 0 var(--wb-muted); }
+.tk .wk-path { display: flex; align-items: center; gap: 3px; min-width: 0; font-size: 12.5px; color: var(--wb-muted-fg); overflow: hidden; white-space: nowrap; }
+.tk .wk-path a { color: var(--wb-muted-fg); }
+.tk .wk-path b { color: var(--wb-fg); font-weight: 700; overflow: hidden; text-overflow: ellipsis; }
+.tk .wk-path .sep { opacity: .6; }
+.tk .wk-meta { flex: none; display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--wb-muted-fg); white-space: nowrap; }
+.tk .wk-meta .av { width: 18px; height: 18px; font-size: 8.5px; }
+@container wkp (max-width: 460px) { .tk .wk-meta .wt, .tk .wk-meta .wk-sha { display: none; } }
+.tk .wk-sha { font: 11px var(--wb-mono); color: var(--wb-muted-fg); }
+.tk .wk-more { position: relative; flex: none; }
+.tk .wk-menu { position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; width: 290px; background: var(--wb-card); border-radius: 10px; box-shadow: var(--wb-shadow-hi); padding: 6px; display: flex; flex-direction: column; gap: 1px; font-size: 13px; }
+.tk .wk-menu button { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border: 0; border-radius: 7px; background: transparent; color: var(--wb-fg); font: inherit; text-align: left; cursor: pointer; }
+.tk .wk-menu button:hover { background: color-mix(in srgb, var(--wb-primary) 10%, var(--wb-card)); }
+.tk .wk-menu .i { color: var(--wb-muted-fg); }
+.tk .wk-menu code { font-size: 11px; color: var(--wb-muted-fg); }
+.tk .wk-doc { padding: 12px 18px 22px; font-size: 13.5px; line-height: 1.55; max-width: 860px; }
+.tk .wk-doc :is(h1, h2, h3, h4) { margin: 14px 0 6px; line-height: 1.3; font-weight: 700; }
+.tk .wk-doc h1 { font-size: 19px; margin-top: 2px; }
+.tk .wk-doc h2 { font-size: 15px; padding-bottom: 3px; border-bottom: 1px solid var(--wb-muted); }
+.tk .wk-doc h3 { font-size: 13.5px; }
+.tk .wk-doc p, .tk .wk-doc ul, .tk .wk-doc ol, .tk .wk-doc pre, .tk .wk-doc table, .tk .wk-doc blockquote { margin-bottom: 9px; }
+.tk .wk-doc img { display: block; margin: 4px 0 10px; box-shadow: 0 0 0 1px var(--wb-line); }
+/* a wiki: link: the book mark tells it from a web link; a missing page is dashed and offers to create it */
+.tk a.wlink { display: inline; white-space: nowrap; }
+.tk a.wlink .i { display: inline-block; width: 12px; height: 12px; vertical-align: -1px; margin-right: 2px; }
+.tk a.wlink.miss { color: var(--wb-muted-fg); text-decoration: underline dashed; text-underline-offset: 3px; }
+.tk .wk-flash { animation: tk-fx-flash 1.8s ease-out; }
+/* edit mode: the shared editor (.tked) fills the page; the bar carries save, cancel, and the base */
+.tk .wk-edit { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 6px; padding: 8px 14px 10px; }
+.tk .wk-edit .tked { flex: 1 1 auto; min-height: 0; }
+.tk .wk-edit textarea { flex: 1 1 auto; min-height: 220px; width: 100%; resize: none; font: 12.5px/1.55 var(--wb-mono); border: 1px solid var(--wb-line); border-radius: 8px; padding: 8px 10px; background: var(--wb-card); color: var(--wb-fg); }
+.tk .wk-edit .tked-pv { flex: 1 1 auto; min-height: 220px; border: 1px solid var(--wb-line); border-radius: 8px; background: var(--wb-card); }
+.tk .wk-edit .tked-pv.wk-doc { max-width: none; }
+.tk .wk-etop { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.tk .wk-etop .tked-tabs { margin-right: auto; }
+.tk .wk-epath { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--wb-muted-fg); }
+.tk .wk-epath input { font: 12.5px var(--wb-mono); width: 200px; padding: 2px 7px; border-radius: 6px; border: 1px solid var(--wb-line); background: var(--wb-card); color: var(--wb-fg); }
+.tk .wk-base { margin-left: auto; font: 11px var(--wb-mono); color: var(--wb-muted-fg); opacity: .8; cursor: help; }
+.tk .chip.att.wk-pend { box-shadow: inset 0 0 0 1px var(--tk-warn); color: var(--tk-warn); }
+.tk .chip.att.wk-pend .i { width: 12px; height: 12px; }
+.tk .wk-note { font-size: 12px; padding: 5px 9px; border-radius: 8px; background: color-mix(in srgb, var(--wb-primary) 9%, var(--wb-card)); color: var(--wb-fg); }
+/* refused save: the reason, the ways out, then yours and theirs side by side (stacked when narrow) */
+.tk .wk-ref { padding: 10px 14px 14px; display: flex; flex-direction: column; gap: 8px; }
+.tk .wk-refwhy { display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; border-radius: 10px; background: color-mix(in srgb, var(--tk-fail) 9%, var(--wb-card)); border-left: 3px solid var(--tk-fail); font-size: 12.5px; }
+.tk .wk-refwhy .i { width: 16px; height: 16px; color: var(--tk-fail); margin-top: 1px; }
+.tk .wk-refwhy b { color: var(--tk-fail); }
+.tk .wk-refacts { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.tk .wk-refacts .btn { padding: 3px 12px; }
+.tk .wk-key { display: inline-flex; align-items: center; gap: 10px; font-size: 11.5px; color: var(--wb-muted-fg); margin-left: auto; }
+.tk .wk-key i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: -1px; margin-right: 3px; }
+.tk .wk-key .k-conf { background: color-mix(in srgb, var(--tk-conc) 38%, var(--wb-card)); box-shadow: inset 2px 0 0 var(--tk-conc); }
+.tk .wk-key .k-chg { background: color-mix(in srgb, var(--wb-primary) 14%, var(--wb-card)); }
+.tk .wk-vs { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
+@container wkp (max-width: 640px) { .tk .wk-vs { grid-template-columns: minmax(0, 1fr); } }
+.tk .wk-side { min-width: 0; border-radius: 10px; box-shadow: inset 0 0 0 1px var(--wb-line); overflow: hidden; background: var(--wb-card); }
+.tk .wk-side > header { display: flex; align-items: center; gap: 6px; padding: 5px 10px; background: var(--wb-muted); font-size: 12px; font-weight: 700; }
+.tk .wk-side > header .wk-sha { font-weight: 400; }
+.tk .wk-side > header .grow + * { font-weight: 400; color: var(--wb-muted-fg); }
+.tk .wk-lines { margin: 0; padding: 4px 0; font: 12px/1.6 var(--wb-mono); }
+.tk .wk-ln { display: grid; grid-template-columns: 34px minmax(0, 1fr); white-space: pre-wrap; overflow-wrap: anywhere; }
+.tk .wk-ln::before { content: attr(data-n); text-align: right; padding-right: 8px; color: var(--wb-muted-fg); opacity: .7; user-select: none; }
+.tk .wk-ln.conf { background: color-mix(in srgb, var(--tk-conc) 30%, var(--wb-card)); box-shadow: inset 3px 0 0 var(--tk-conc); }
+.tk .wk-ln.chg { background: color-mix(in srgb, var(--wb-primary) 11%, var(--wb-card)); }
+.tk .wk-ln.gap { color: var(--wb-muted-fg); font: italic 11.5px/1.9 system-ui, sans-serif; cursor: pointer; background: var(--wb-wash); }
+.tk .wk-ln.gap:hover { color: var(--wb-primary); }
+/* empty state and the new-wiki form */
+.tk .wk-empty { grid-column: 1 / -1; align-self: center; justify-self: center; width: min(460px, 100%); padding: 24px 18px; display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; }
+.tk .wk-empty > .i { width: 34px; height: 34px; stroke-width: 1.3; color: var(--wb-muted-fg); }
+.tk .wk-empty h3 { margin: 0; font-size: 15px; }
+.tk .wk-empty p { margin: 0; font-size: 12.5px; color: var(--wb-muted-fg); }
+.tk .wk-form { width: 100%; display: flex; flex-direction: column; gap: 8px; text-align: left; margin-top: 6px; padding: 12px; border-radius: var(--wb-radius); background: color-mix(in srgb, var(--wb-muted) 55%, var(--wb-card)); border: 1px solid var(--wb-line); }
+.tk .wk-fld { display: flex; flex-direction: column; gap: 3px; font-size: 11.5px; color: var(--wb-muted-fg); font-weight: 600; }
+.tk .wk-in { display: flex; align-items: center; border-radius: 8px; border: 1px solid var(--wb-line); background: var(--wb-card); overflow: hidden; }
+.tk .wk-in:focus-within { border-color: var(--wb-primary); }
+.tk .wk-in span { padding: 0 2px 0 8px; font: 12.5px var(--wb-mono); color: var(--wb-muted-fg); }
+.tk .wk-in input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--wb-fg); font: 12.5px var(--wb-mono); padding: 6px 8px 6px 0; }
+.tk .wk-fld .h { font-weight: 400; }
+.tk .wk-fld .h.bad { color: var(--tk-fail); }
+.tk .wk-form .tb { justify-content: flex-end; }
+/* the narrow layout: the tree folds into one "Pages" control above the page */
+.tk .wk-nartree { flex: none; border-bottom: 1px solid var(--wb-muted); }
+.tk .wk-tsel { display: flex; align-items: center; gap: 6px; width: 100%; padding: 6px 12px; border: 0; background: transparent; color: var(--wb-fg); font: inherit; font-size: 12.5px; cursor: pointer; text-align: left; }
+.tk .wk-tsel .i { width: 14px; height: 14px; color: var(--wb-muted-fg); }
+.tk .wk-tsel .cv { margin-left: auto; transition: transform .15s; }
+.tk .wk-tsel[aria-expanded="true"] .cv { transform: rotate(180deg); }
+.tk .wk-tsel code { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tk .wk-nartree .wk-tree { border-right: 0; max-height: 260px; padding-top: 0; }
+.tk .card.pane > .cbody.wk-nbody { padding: 0; display: flex; flex-direction: column; overflow: hidden; }
+.tk .card.pane > .cbody.wk-nbody .wk-page { flex: 1 1 auto; }
+.tk .card.pane > .cbody.wk-nbody .wk-empty { margin: auto; }
+.tk .chip.wk-nosave { background: color-mix(in srgb, var(--tk-fail) 14%, var(--wb-card)); color: var(--tk-fail); }
+.tk .wk-tcount.err { color: var(--tk-fail); }
+.tk .wk-empty .err { color: var(--tk-fail); }
+.tk .wk-edit .tb { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 12px; }
+.tk .wk-edit .tb .muted { flex: 1 1 auto; min-width: 0; }
+.tk .wk-edit .tb .wk-base { flex: none; }

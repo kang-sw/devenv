@@ -64,6 +64,22 @@
 //                        name, '' for a clipboard paste. done({ok: true, attachment:
 //                        {oid, name, size, mime}} | {ok: false, error}). Without it a
 //                        pasted or dropped image is refused with a notice (the mockup)
+//                        render's req.wiki names the wiki an editor's text belongs to
+//                        (the wiki editor), so the wiki tree's images show as well
+//   wiki                 optional: the store's wiki branches; without it the Items
+//                        panel shows no Items | Wiki switch and no Wiki tab.
+//     list(id, done)       done({ok: true, wikis: [{name, tip, unpushed}]} | err)
+//     pages(id, wiki, done) done({ok: true, pages: [path], commit} | err)
+//     read(id, wiki, path, done)
+//                          done({ok: true, path, content, commit, html} | err);
+//                          html is the page rendered as the view renders a body
+//     save(id, wiki, req, done)
+//                          req = {base, newWiki, op, path, to, content, commit,
+//                          message, attachments}; done({ok: true, commit, merged,
+//                          created, warnings} | err); a save that could not merge is
+//                          err with status 409 and conflict = {path, kind, reason,
+//                          base, theirs, oursText, theirsText}
+//                        err is {ok: false, error, status} (status 0: not reached)
 //   hostError()       -> optional: the reason the store list could not be read (the
 //                        host is unavailable), or null; the "+ store" dialog shows it
 //                        and offers nothing else
@@ -235,6 +251,7 @@
     cedit: null,          // { cid, body, mpick } while an own comment is edited in place; mpick: member ids picked with @ meanwhile
     edpv: {},             // editor textarea id -> { text, html, err, busy } while that editor shows its preview (editorHtml)
     eatt: {},             // editor textarea id -> [{oid, name, size, mime}] images uploaded into that editor since it opened (edImages)
+    wiki: {},             // store -> the Items panel's wiki state (wk(), see cardWiki)
     act: { family: 'all', member: 'all', flagged: false, conc: false },
     kind: 'all', status: 'open'
   };
@@ -1067,8 +1084,10 @@
     return { title: wsT("js.tk.tab.items"), tools: scopes + '<span class="chip">' + esc(scopeChip(s)) + '</span><div class="prow2">' + modes + search + '</div>', body: '<div class="plist">' + body + '</div>' + closed, id: 'card-items', cls: 'panel',
       attrs: attr('scope', s) + attr('view', m) };
   }
+  // With the adapter's wiki, the title is the Items | Wiki switch (wkSwitch); the Today bar belongs to the items
   function panelHtml(p, withToday) {
-    return '<section class="card panel" id="card-items"' + p.attrs + '><header><h2>' + wsT("js.tk.tab.items") + '</h2>' + p.tools + '</header>' + (withToday ? todayBar() : '') + '<div class="cbody">' + p.body + '</div>' + ribbonHtml() + '</section>';
+    return '<section class="card panel" id="card-items"' + (p.attrs || '') + '><header>' + (AD.wiki ? wkSwitch() : '<h2>' + wsT("js.tk.tab.items") + '</h2>') + p.tools + '</header>' + (withToday && !p.bodyCls ? todayBar() : '') +
+      '<div class="cbody' + (p.bodyCls ? ' ' + p.bodyCls : '') + '">' + p.body + '</div>' + ribbonHtml() + '</section>';
   }
   // Does the given scope and mode show any row under the Today filter `key`? (a chip click moves to TODAY_HOME when not)
   // The search is left out: typing in the box never moves the panel to another scope.
@@ -1078,6 +1097,429 @@
     var has = /data-item=/.test(panelBody(s, m, v));
     TF = null; FILT = false; panelState().today = keep;
     return has;
+  }
+
+  // ------------------------------------------------------------ the wiki
+  // The store's wiki branches (adapter.wiki) in the Items panel under the header's Items |
+  // Wiki switch, or as the Wiki tab of the narrow layout: a picker of the store's wikis, the
+  // page tree from the page paths, the page as the daemon rendered it, the shared editor in
+  // its place, and the refused-save view (both texts, the lines that overlap marked) when a
+  // save could not merge. Everything is read on demand and kept per store in ui.wiki; a save
+  // re-reads the list, the pages, and the page. The look is ai-docs/ref/wiki-mockup.
+  var WK_NAME = /^[a-z0-9][a-z0-9-]*$/, WK_NAME_MAX = 64;
+  function wk() {
+    return (ui.wiki[ui.store] = ui.wiki[ui.store] || {
+      mode: 'items',        // 'items' | 'wiki': what the Items panel shows (the wide layouts)
+      name: null,           // the wiki shown
+      list: null, listErr: null, listBusy: false, // the store's wikis [{name, tip, unpushed}], or why they could not be read
+      pages: null, pagesErr: null, pagesBusy: false, // {paths, commit} of the wiki shown
+      page: null,           // the page path shown
+      doc: null, docErr: null, docBusy: false, // {path, content, commit, html} of the page shown
+      edit: null,           // { path, isNew, newWiki, base, text, orig, newPath, note } while the editor is open; orig is the text the edit started from
+      conflict: null,       // { c: the adapter's conflict, mine: the refused text } while the refused-save view shows
+      saving: false,
+      creating: false, wname: '', wfirst: 'index', // the "New wiki" form
+      q: '', tree: true, closed: {}, ntree: false, // search text, tree shown (wide), folded dirs "wiki:dir", narrow tree open
+      pick: false, more: false, // the picker and the page menu
+      flash: false, top: false, full: false // a page just opened flashes its head and starts at the top; the refused view shows the whole text
+    });
+  }
+  function wkIc(id, cls) { return '<svg class="i' + (cls ? ' ' + cls : '') + '"><use href="#tki-' + id + '"/></svg>'; }
+  function wkSha(c) { return String(c || '').slice(0, 7); }
+  function wkSwitch() {
+    var m = wk().mode;
+    return '<span class="wk-sw" role="group" aria-label="' + esc(wsT("js.tk.wk.sw.aria")) + '">' +
+      '<button type="button"' + attr('act', 'wk-mode') + attr('mode', 'items') + ' aria-pressed="' + (m === 'items') + '">' + wkIc('tasks') + esc(wsT("js.tk.tab.items")) + '</button>' +
+      '<button type="button"' + attr('act', 'wk-mode') + attr('mode', 'wiki') + ' aria-pressed="' + (m === 'wiki') + '">' + wkIc('book') + esc(wsT("js.tk.wk.tab")) + '</button></span>';
+  }
+  // the wiki an editor's preview renders in: the one shown, once it exists
+  function wkRenderName() { var st = wk(); return st.edit && !st.edit.newWiki && st.name ? st.name : undefined; }
+  function wkHas(st, path) { return !!(st.pages && st.pages.paths.indexOf(path) >= 0); }
+  // Reads land on the state object they started from, for the wiki (and page) still shown; a
+  // read for one no longer shown clears its busy flag and reads what is shown now instead.
+  function wkLoadList(st, store) {
+    if (st.listBusy) return;
+    st.listBusy = true;
+    AD.wiki.list(store, function (res) {
+      st.listBusy = false;
+      if (ui.wiki[store] !== st) return;
+      if (!res.ok) { st.listErr = res.error; if (!st.list) st.list = []; render(); return; }
+      st.list = res.wikis; st.listErr = null;
+      if (st.name && !st.list.some(function (w) { return w.name === st.name; }) && !(st.edit && st.edit.newWiki)) { st.name = null; st.pages = null; st.page = null; st.doc = null; }
+      if (!st.name && st.list.length) st.name = st.list[0].name;
+      render();
+    });
+  }
+  function wkLoadPages(st, store, name) {
+    if (st.pagesBusy) return;
+    st.pagesBusy = true;
+    AD.wiki.pages(store, name, function (res) {
+      st.pagesBusy = false;
+      if (ui.wiki[store] !== st) return;
+      if (st.name !== name) { if (ui.store === store) wkPull(st); return; }
+      if (!res.ok) { st.pagesErr = res.error; if (!st.pages) st.pages = { paths: [], commit: '' }; render(); return; }
+      st.pages = { paths: res.pages.slice(), commit: res.commit }; st.pagesErr = null;
+      if (!st.page && st.pages.paths.length) st.page = wkHas(st, 'index') ? 'index' : st.pages.paths[0];
+      render();
+    });
+  }
+  // soft: a re-read of the page shown; one that is gone shows as an error, not as a new page
+  function wkLoadDoc(st, store, name, path, soft) {
+    if (st.docBusy) return;
+    st.docBusy = true;
+    AD.wiki.read(store, name, path, function (res) {
+      st.docBusy = false;
+      if (ui.wiki[store] !== st) return;
+      if (st.name !== name || st.page !== path) { if (ui.store === store) wkPull(st); return; }
+      if (!res.ok) {
+        // a page that is not there (a wiki: link to it) opens as a new page at that path
+        if (res.status === 404 && !st.edit && !soft) { st.doc = null; st.docErr = null; wkStartEdit(path, true, false); return; }
+        st.docErr = res.error; render(); return;
+      }
+      st.doc = { path: res.path, content: res.content, commit: res.commit, html: res.html }; st.docErr = null;
+      render();
+    });
+  }
+  // What the panel shows but has not read yet is read now; the draw shows what is there.
+  function wkPull(st) {
+    var store = ui.store;
+    if (st.list === null) wkLoadList(st, store);
+    if (st.name && st.pages === null) wkLoadPages(st, store, st.name);
+    if (st.name && st.page && st.doc === null && !st.docErr && !st.edit) wkLoadDoc(st, store, st.name, st.page);
+  }
+  function wkReload(st) {
+    st.list = null; st.pages = null; st.doc = null; st.docErr = null;
+    wkPull(st);
+  }
+  // A tracker change (a save by an agent, by another browser, or one the host's poll round
+  // brought in) re-reads the wiki shown; what arrives replaces what is drawn, the page
+  // excepted while it is edited or its refused save shows.
+  function wkRefresh() {
+    if (!AD.wiki || !ui.store) return;
+    var st = ui.wiki[ui.store], store = ui.store;
+    if (!st || st.list === null || !(st.mode === 'wiki' || (ui.layout === 'narrow' && tabState().narrow === 'wiki'))) return;
+    wkLoadList(st, store);
+    if (st.name && !(st.edit && st.edit.newWiki)) wkLoadPages(st, store, st.name);
+    if (st.name && st.page && !st.edit && !st.conflict) wkLoadDoc(st, store, st.name, st.page, true);
+  }
+
+  function wkPicker() {
+    var st = wk(), pop = '';
+    if (st.pick) {
+      pop = '<div class="wk-pop" role="menu">' + (st.list || []).map(function (w) {
+        return '<button type="button" class="wk-opt' + (w.name === st.name ? ' on' : '') + '" role="menuitem"' + attr('act', 'wk-pick') + attr('wiki', w.name) + '>' + wkIc('book') +
+          '<span class="nm">' + esc(w.name) + '</span><span class="n">' + (w.name === st.name && st.pages ? esc(wsTn("js.tk.wk.pages", st.pages.paths.length)) : '') + '</span>' +
+          '<span class="sub">' + esc(wsT("js.tk.wk.pick.tip", wkSha(w.tip))) + (w.unpushed ? ' &middot; ' + esc(wsT("js.tk.wk.pick.unpushed")) : '') + '</span></button>';
+      }).join('') + '<div class="wk-popsep"></div><button type="button" class="wk-opt add" role="menuitem"' + attr('act', 'wk-newwiki') + '>' + wkIc('plus') + '<span>' + esc(wsT("js.tk.wk.pick.new")) + '</span></button>' +
+        '<div class="wk-pophint">' + wsT("js.tk.wk.pick.hint") + '</div></div>';
+    }
+    return '<span class="wk-pickw"><button type="button" class="wk-pick"' + attr('act', 'wk-pickopen') + ' aria-haspopup="menu" aria-expanded="' + st.pick + '"' + tipAttr(wsT("js.tk.wk.pick.switch")) + '>' + wkIc('book') +
+      '<span class="pre">wiki/</span><span class="nm">' + esc(st.name || '') + '</span>' + wkIc('chev') + '</button>' + pop + '</span>';
+  }
+  function wkSearchHtml() {
+    var st = wk();
+    return '<span class="psearch">' + wkIc('search') + '<input id="wksearch" type="text" role="searchbox" autocomplete="off" spellcheck="false" value="' + esc(st.q) + '" placeholder="' + esc(wsT("js.tk.wk.search", st.name || '')) + '" aria-label="' + esc(wsT("js.tk.wk.search.aria")) + '">' +
+      (st.q ? '<button type="button" class="psx"' + attr('act', 'wk-qclear') + ' aria-label="' + esc(wsT("js.tk.panel.clearsearch")) + '">' + wkIc('x') + '</button>' : '') + '</span>';
+  }
+  // the header's tools: the picker, the page count, the tree toggle (wide), "new page", and the search box
+  function wkTools(narrow) {
+    var st = wk();
+    if (st.list && !st.list.length && !(st.edit && st.edit.newWiki)) return '<span class="chip">' + esc(wsT("js.tk.wk.nowiki")) + '</span>';
+    if (!st.name) return '<span class="chip">' + esc(wsT("js.tk.loading")) + '</span>';
+    return wkPicker() + (st.pages && !narrow ? '<span class="chip">' + esc(wsTn("js.tk.wk.pages", st.pages.paths.length)) + '</span>' : '') + '<span class="grow"></span>' +
+      (narrow ? '' : '<button type="button" class="ia"' + attr('act', 'wk-tree') + ' aria-pressed="' + st.tree + '" aria-label="' + esc(wsT("js.tk.wk.tree.aria")) + '"' + tipAttr(wsT(st.tree ? "js.tk.wk.tree.hide" : "js.tk.wk.tree.show")) + '>' + wkIc('sidebar') + '</button>') +
+      '<button type="button" class="btn ib"' + attr('act', 'wk-newpage') + ' aria-label="' + esc(wsT("js.tk.wk.newpage")) + '"' + tipAttr(wsT("js.tk.wk.newpage")) + '>' + wkIc('plus') + '</button>' +
+      '<div class="prow2">' + wkSearchHtml() + '</div>';
+  }
+  // The tree from the page paths: index first, then folders before pages, each folder foldable;
+  // the search box filters by path (the texts are not here to search).
+  function wkTreeHtml() {
+    var st = wk(), q = st.q.trim().toLowerCase(), all = st.pages ? st.pages.paths : [], seen = {}, h = '';
+    var paths = all.filter(function (p) { return !q || p.toLowerCase().indexOf(q) >= 0; }).sort(function (a, b) {
+      if (a === 'index') return -1; if (b === 'index') return 1;
+      var da = a.indexOf('/') >= 0, db = b.indexOf('/') >= 0;
+      if (da !== db) return da ? -1 : 1;
+      return a < b ? -1 : a > b ? 1 : 0;
+    });
+    function hl(t) { if (!q) return esc(t); var k = t.toLowerCase().indexOf(q); return k < 0 ? esc(t) : esc(t.slice(0, k)) + '<mark>' + esc(t.slice(k, k + q.length)) + '</mark>' + esc(t.slice(k + q.length)); }
+    function folded(segs, upto) { for (var k = 0; k < upto; k++) if (st.closed[st.name + ':' + segs.slice(0, k + 1).join('/')]) return true; return false; }
+    if (q) h += '<div class="wk-tcount">' + esc(wsT("js.tk.wk.match", paths.length, all.length)) + '</div>';
+    paths.forEach(function (p) {
+      var segs = p.split('/');
+      for (var d = 0; d < segs.length - 1; d++) {
+        var dir = segs.slice(0, d + 1).join('/');
+        if (seen[dir]) continue;
+        seen[dir] = 1;
+        if (folded(segs, d)) continue;
+        var open = !st.closed[st.name + ':' + dir];
+        h += '<button type="button" class="wk-tn dir" style="--d:' + d + '"' + attr('act', 'wk-fold') + attr('dir', dir) + ' aria-expanded="' + open + '">' + wkIc('chev', 'cv') + wkIc('folder') + '<span class="t">' + esc(segs[d]) + '</span></button>';
+      }
+      if (folded(segs, segs.length - 1)) return;
+      var on = p === st.page && !(st.edit && st.edit.isNew), ed = on && !!(st.edit || st.conflict);
+      h += '<button type="button" class="wk-tn' + (on ? ' on' : '') + (ed ? ' ed' : '') + '" style="--d:' + (segs.length - 1) + '"' + attr('act', 'wk-open') + attr('path', p) + tipAttr(st.name + '/' + p) + (on ? ' aria-current="page"' : '') + '>' +
+        wkIc('doc') + '<span class="t">' + hl(segs[segs.length - 1]) + '</span></button>';
+    });
+    if (q && !paths.length) h += '<div class="wk-tcount">' + esc(wsT("js.tk.wk.nomatch")) + '</div>';
+    if (st.pagesErr) h += '<div class="wk-tcount err">' + esc(st.pagesErr) + '</div>';
+    return h + '<button type="button" class="wk-tadd"' + attr('act', 'wk-newpage') + '>' + wkIc('plus') + esc(wsT("js.tk.wk.newpage")) + '</button>';
+  }
+  function wkCrumb(path) {
+    var st = wk(), segs = String(path).split('/');
+    return '<nav class="wk-path" aria-label="' + esc(wsT("js.tk.wk.path.aria")) + '"><a href="#"' + attr('act', 'wk-open') + attr('path', 'index') + '>' + esc(st.name) + '</a>' + segs.map(function (s, k) {
+      return '<span class="sep">/</span>' + (k === segs.length - 1 ? '<b>' + esc(s) + '</b>' : '<span>' + esc(s) + '</span>');
+    }).join('') + '</nav>';
+  }
+  function wkMoreMenu() {
+    var st = wk();
+    if (!st.more) return '';
+    var link = 'wiki:' + st.name + '/' + st.page;
+    return '<div class="wk-menu" role="menu">' +
+      '<button type="button" role="menuitem"' + attr('act', 'wk-copy') + attr('text', link) + '>' + wkIc('link') + '<span>' + esc(wsT("js.tk.wk.copylink")) + '<br><code>' + esc(link) + '</code></span></button>' +
+      '<button type="button" role="menuitem"' + attr('act', 'wk-copy') + attr('text', st.page) + '>' + wkIc('copy') + '<span>' + esc(wsT("js.tk.wk.copypath")) + '</span></button>' +
+      '<button type="button" role="menuitem"' + attr('act', 'wk-agent') + '>' + wkIc('history') + '<span>' + esc(wsT(XTAB.chat ? "js.tk.wk.history.agent" : "js.tk.wk.history.tools")) + '</span></button></div>';
+  }
+  function wkPageRead() {
+    var st = wk(), d = st.doc;
+    var head = '<div class="wk-phead' + (st.flash ? ' wk-flash' : '') + '">' + wkCrumb(st.page) + '<span class="grow"></span>';
+    if (d) head += '<span class="wk-meta"' + tipAttr(wsT("js.tk.wk.commit.tip", wkSha(d.commit))) + '><span class="wk-sha">' + esc(wkSha(d.commit)) + '</span></span>' +
+      '<button type="button" class="ia"' + attr('act', 'wk-edit') + ' aria-label="' + esc(wsT("js.tk.wk.edit")) + '"' + tipAttr(wsT("js.tk.wk.edit")) + '>' + wkIc('pen') + '</button>' +
+      '<span class="wk-more"><button type="button" class="ia"' + attr('act', 'wk-more') + ' aria-label="' + esc(wsT("js.tk.wk.more")) + '" aria-haspopup="menu" aria-expanded="' + st.more + '"' + tipAttr(wsT("js.tk.wk.more")) + '>' + wkIc('more') + '</button>' + wkMoreMenu() + '</span>';
+    head += '</div>';
+    if (st.docErr) return head + '<div class="wk-empty"><p class="err">' + esc(wsT("js.tk.wk.fail", st.docErr)) + '</p></div>';
+    if (!d) return head + '<div class="wk-empty"><p class="muted">' + esc(wsT("js.tk.loading")) + '</p></div>';
+    return head + '<article class="wk-doc md">' + refLinksHtml(d.html) + '</article>';
+  }
+  function wkPageEdit() {
+    var st = wk(), ed = st.edit, chord = MAC ? '⌘Enter' : 'Ctrl+Enter';
+    var head = '<div class="wk-phead">' + (ed.isNew ? '<nav class="wk-path"><span>' + esc(st.name) + '</span><span class="sep">/</span><b>' + esc(wsT("js.tk.wk.new.title")) + '</b></nav>' : wkCrumb(ed.path)) +
+      '<span class="grow"></span><span class="chip st-doing">' + esc(wsT("js.tk.wk.editing")) + '</span></div>';
+    var path = ed.isNew ? '<label class="wk-epath">' + esc(wsT("js.tk.wk.epath")) + ' <input id="wk-epath" type="text" data-keep value="' + esc(ed.newPath) + '" spellcheck="false" autocomplete="off" aria-label="' + esc(wsT("js.tk.wk.epath.aria")) + '"></label>' : '';
+    var base = ed.newWiki ? wsT("js.tk.wk.base.new") : wsT("js.tk.wk.base", wkSha(ed.base));
+    var bar = '<div class="tb">' + btn('wk-save', wsT("js.tk.dlg.save"), {}, 'primary' + (st.saving ? ' busy' : '')) + btn('wk-cancel', wsT("js.tk.dlg.cancel"), {}) +
+      '<span class="muted">' + esc(wsT("js.tk.wk.hint", chord)) + '</span><span class="wk-base"' + tipAttr(wsT("js.tk.wk.base.tip", wkSha(ed.base))) + '>' + esc(base) + '</span></div>';
+    return head + '<div class="wk-edit">' + (ed.note ? '<div class="wk-note">' + wsT("js.tk.wk.note", '<code>' + esc(wkSha(ed.base)) + '</code>') + '</div>' : '') +
+      (path ? '<div class="wk-etop">' + path + '</div>' : '') + editorHtml('wk-ebody', { value: ed.text, rows: 14, label: esc(wsT("js.tk.wk.ed.aria")), pv: 'wk-doc' }) + bar + '</div>';
+  }
+  // Line regions of side that differ from base (an LCS alignment), as [{b0, b1: the base lines
+  // they replace, lines: side's line indexes}]; wkMarks classes each side's lines 'conf' when
+  // its region overlaps one of the other side (the lines that refused the merge) or 'chg'.
+  function wkRegions(base, side) {
+    // the lines both start and end with are aligned as they are; the table covers the rest
+    var pre = 0, suf = 0, N = base.length, M = side.length;
+    while (pre < N && pre < M && base[pre] === side[pre]) pre++;
+    while (suf < N - pre && suf < M - pre && base[N - 1 - suf] === side[M - 1 - suf]) suf++;
+    base = base.slice(pre, N - suf); side = side.slice(pre, M - suf);
+    var n = base.length, m = side.length, T = [], i, j;
+    for (i = 0; i <= n; i++) T.push(new Array(m + 1).fill(0));
+    for (i = n - 1; i >= 0; i--) for (j = m - 1; j >= 0; j--) T[i][j] = base[i] === side[j] ? T[i + 1][j + 1] + 1 : Math.max(T[i + 1][j], T[i][j + 1]);
+    var regs = [], cur = null;
+    i = 0; j = 0;
+    function close() { if (cur) { cur.b1 = i + pre; regs.push(cur); cur = null; } }
+    while (i < n || j < m) {
+      if (i < n && j < m && base[i] === side[j]) { close(); i++; j++; }
+      else { if (!cur) cur = { b0: i + pre, lines: [] }; if (j < m && (i >= n || T[i][j + 1] >= T[i + 1][j])) { cur.lines.push(j + pre); j++; } else i++; }
+    }
+    close();
+    return regs;
+  }
+  function wkMarks(base, a, b) {
+    var ra = wkRegions(base, a), rb = wkRegions(base, b), ma = {}, mb = {}, conf = 0, other = 0;
+    function hit(r, o) { return (r.b0 < o.b1 && o.b0 < r.b1) || r.b0 === o.b0; }
+    ra.forEach(function (r) { var c = rb.some(function (o) { return hit(r, o); }); if (c) conf++; else other++; r.lines.forEach(function (k) { ma[k] = c ? 'conf' : 'chg'; }); });
+    rb.forEach(function (r) { var c = ra.some(function (o) { return hit(r, o); }); if (!c) other++; r.lines.forEach(function (k) { mb[k] = c ? 'conf' : 'chg'; }); });
+    return { a: ma, b: mb, conf: conf, other: other };
+  }
+  function wkRefused() {
+    var st = wk(), c = st.conflict.c, base = String(st.conflict.orig || '').split('\n'), a = String(st.conflict.mine).split('\n'), b = String(c.theirsText || '').split('\n'), mk = wkMarks(base, a, b);
+    // unchanged runs fold to a gap row (two lines of context around a change); a click shows the whole text
+    function lines(arr, m) {
+      var keep = arr.map(function (t, k) { if (st.full) return true; for (var d = -2; d <= 2; d++) if (m[k + d]) return true; return false; }), h = '', k = 0;
+      while (k < arr.length) {
+        if (keep[k]) { h += '<span class="wk-ln' + (m[k] ? ' ' + m[k] : '') + '" data-n="' + (k + 1) + '">' + (esc(arr[k]) || ' ') + '</span>'; k++; continue; }
+        var j = k;
+        while (j < arr.length && !keep[j]) j++;
+        h += '<span class="wk-ln gap" data-n=""' + attr('act', 'wk-full') + tipAttr(wsT("js.tk.wk.gap.tip")) + '>&#8943; ' + esc(wsTn("js.tk.wk.gap", j - k)) + '</span>'; k = j;
+      }
+      return '<pre class="wk-lines">' + h + '</pre>';
+    }
+    var head = '<div class="wk-phead">' + wkCrumb(c.path || st.page) + '<span class="grow"></span><span class="chip wk-nosave">' + esc(wsT("js.tk.wk.notsaved")) + '</span></div>';
+    return head + '<div class="wk-ref">' +
+      '<div class="wk-refwhy">' + wkIc('warn') + '<div><b>' + esc(wsT("js.tk.wk.ref.title")) + '</b> ' + esc(c.reason ? String(c.reason).replace(/[\s.]*$/, '.') : wsT("js.tk.wk.ref.moved", wkSha(c.theirs), wkSha(c.base))) + ' ' +
+      esc(wsTn("js.tk.wk.ref.conf", mk.conf)) + ', ' + esc(wsTn("js.tk.wk.ref.other", mk.other)) + '. ' + esc(wsT("js.tk.wk.ref.kept")) + '</div></div>' +
+      '<div class="wk-refacts">' + btn('wk-copymine', wkIc('copy') + esc(wsT("js.tk.wk.copymine")), {}) + btn('wk-theirs', wkIc('reload') + esc(wsT("js.tk.wk.theirs")), {}) + btn('wk-again', wkIc('pen') + esc(wsT("js.tk.wk.again")), {}, 'primary') +
+      '<span class="wk-key"><span><i class="k-conf"></i>' + esc(wsT("js.tk.wk.key.conf")) + '</span><span><i class="k-chg"></i>' + esc(wsT("js.tk.wk.key.chg")) + '</span><a href="#"' + attr('act', 'wk-full') + '>' + esc(wsT(st.full ? "js.tk.wk.changes" : "js.tk.wk.full")) + '</a></span></div>' +
+      '<div class="wk-vs"><section class="wk-side"><header>' + esc(wsT("js.tk.wk.yours")) + '<span class="wk-sha">' + esc(wsT("js.tk.wk.from", wkSha(c.base))) + '</span><span class="grow"></span><span>' + esc(wsT("js.tk.wk.unsaved")) + '</span></header>' + lines(a, mk.a) + '</section>' +
+      '<section class="wk-side"><header>' + esc(wsT("js.tk.wk.theirs.side")) + '<span class="wk-sha">' + esc(wkSha(c.theirs)) + '</span><span class="grow"></span></header>' + lines(b, mk.b) + '</section></div></div>';
+  }
+  // The empty store ("no wiki yet") and the "New wiki" form: a wiki is created by its first page.
+  function wkEmptyHtml(create) {
+    var st = wk(), ok = WK_NAME.test(st.wname) && st.wname.length <= WK_NAME_MAX;
+    return '<div class="wk-empty">' + (create ? '' : wkIc('book') + '<h3>' + esc(wsT("js.tk.wk.empty.title")) + '</h3><p>' + wsT("js.tk.wk.empty.text") + '</p>') +
+      (st.listErr ? '<p class="err">' + esc(wsT("js.tk.wk.fail", st.listErr)) + '</p>' : '') +
+      '<form class="wk-form">' + (create ? '<b>' + esc(wsT("js.tk.wk.newwiki")) + '</b>' : '') +
+      '<label class="wk-fld">' + esc(wsT("js.tk.wk.name")) + '<span class="wk-in"><span>wiki/</span><input id="wk-wname" type="text" data-keep value="' + esc(st.wname) + '" spellcheck="false" autocomplete="off"></span><span class="h' + (ok ? '' : ' bad') + '" id="wk-wnameh">' + esc(wsT(ok ? "js.tk.wk.name.ok" : "js.tk.wk.name.bad")) + '</span></label>' +
+      '<label class="wk-fld">' + esc(wsT("js.tk.wk.first")) + '<span class="wk-in"><input id="wk-wfirst" type="text" data-keep value="' + esc(st.wfirst) + '" spellcheck="false" autocomplete="off" style="padding-left:8px"></span><span class="h">' + esc(wsT("js.tk.wk.first.hint")) + '</span></label>' +
+      '<div class="tb">' + (create ? btn('wk-cancelnew', wsT("js.tk.dlg.cancel"), {}) : '') + btn('wk-create', wkIc('plus') + esc(wsT("js.tk.wk.create")), {}, 'primary') + '</div></form></div>';
+  }
+  function wkNameInput(el) {
+    var st = wk(), h = $('wk-wnameh');
+    st.wname = el.value;
+    var ok = WK_NAME.test(st.wname) && st.wname.length <= WK_NAME_MAX;
+    if (h) { h.className = 'h' + (ok ? '' : ' bad'); h.textContent = wsT(ok ? "js.tk.wk.name.ok" : "js.tk.wk.name.bad"); }
+  }
+  function wkPageHtml() {
+    var st = wk();
+    if (st.creating) return wkEmptyHtml(true);
+    if (st.conflict) return wkRefused();
+    if (st.edit) return wkPageEdit();
+    if (!st.page) return st.pages && !st.pagesBusy ? wkEmptyPages() : '<div class="wk-empty"><p class="muted">' + esc(wsT("js.tk.loading")) + '</p></div>';
+    return wkPageRead();
+  }
+  function wkEmptyPages() {
+    return '<div class="wk-empty">' + wkIc('book') + '<h3>' + esc(wsT("js.tk.wk.nopages")) + '</h3><div class="tb">' + btn('wk-newpage', wkIc('plus') + esc(wsT("js.tk.wk.newpage")), {}, 'primary') + '</div></div>';
+  }
+  // The wiki as the Items panel's card spec (panelHtml), or the narrow layout's Wiki tab (paneHtml).
+  function cardWiki(v, narrow) {
+    var st = wk();
+    wkPull(st);
+    var none = st.list !== null && !st.list.length && !(st.edit && st.edit.newWiki), body;
+    if (narrow) {
+      body = none ? wkEmptyHtml(false) : !st.name ? '<div class="wk-empty"><p class="muted">' + esc(wsT("js.tk.loading")) + '</p></div>' :
+        '<div class="wk-nartree"><button type="button" class="wk-tsel"' + attr('act', 'wk-ntree') + ' aria-expanded="' + st.ntree + '">' + wkIc('tree') + '<span>' + esc(wsT("js.tk.wk.tree.aria")) + '</span><code>' + esc(st.edit && st.edit.isNew ? wsT("js.tk.wk.new.title") : st.page || '') + '</code>' + wkIc('chev', 'cv') + '</button>' +
+        (st.ntree ? '<nav class="wk-tree" id="wktree" aria-label="' + esc(wsT("js.tk.wk.tree.aria")) + '">' + wkTreeHtml() + '</nav>' : '') + '</div><div class="wk-page" id="wkpage">' + wkPageHtml() + '</div>';
+      return { tools: wkTools(true), body: body, id: 'card-wiki', cls: '', bodyCls: 'wk-nbody' };
+    }
+    if (none) return { tools: wkTools(false), body: wkEmptyHtml(false), id: 'card-items', cls: 'panel', bodyCls: 'wk-body notree' };
+    if (!st.name) return { tools: wkTools(false), body: '<div class="wk-empty"><p class="muted">' + esc(wsT("js.tk.loading")) + '</p></div>', id: 'card-items', cls: 'panel', bodyCls: 'wk-body notree' };
+    body = '<nav class="wk-tree" id="wktree" aria-label="' + esc(wsT("js.tk.wk.tree.aria")) + '">' + wkTreeHtml() + '</nav><div class="wk-page" id="wkpage">' + wkPageHtml() + '</div>';
+    return { tools: wkTools(false), body: body, id: 'card-items', cls: 'panel', bodyCls: 'wk-body' + (st.tree ? '' : ' notree') + (ui.page ? ' wide' : '') };
+  }
+  // After a draw: the page and tree keep their scroll (a page just opened starts at the top), a
+  // wiki: link in any rendered text gets its mark, and the flash runs once.
+  function wkAfterDraw(body, scroll) {
+    var st = ui.store ? wk() : null;
+    ['wkpage', 'wktree'].forEach(function (k) { if ($(k) && scroll[k] && !(st && st.top && k === 'wkpage')) $(k).scrollTop = scroll[k]; });
+    wkMarkLinks(body);
+    if (st) { st.flash = false; st.top = false; }
+  }
+  function wkMarkLinks(root) {
+    if (!AD.wiki || !root) return;
+    var st = ui.store ? wk() : null;
+    Array.prototype.forEach.call(root.querySelectorAll('a[data-wiki][data-page]'), function (a) {
+      var name = a.getAttribute('data-wiki'), path = a.getAttribute('data-page'), miss = !!(st && st.name === name && st.pages && !wkHas(st, path));
+      a.classList.add('wlink'); a.classList.toggle('miss', miss);
+      if (!a.querySelector('svg.i')) a.insertAdjacentHTML('afterbegin', wkIc('book'));
+      a.setAttribute('title', 'wiki:' + name + '/' + path + (miss ? ' (' + wsT("js.tk.wk.missing") + ')' : ''));
+    });
+  }
+  // The panel shows the wiki: the Items | Wiki switch in the wide layouts, the Wiki tab when narrow.
+  function wkShow() { if (ui.layout === 'narrow') { tabState().narrow = 'wiki'; } else wk().mode = 'wiki'; }
+  function wkOpenPage(name, path) {
+    var st = wk();
+    st.creating = false; st.edit = null; st.conflict = null; st.more = false; st.pick = false; st.ntree = false;
+    if (st.name !== name) { st.name = name; st.pages = null; st.q = ''; }
+    st.page = path; st.doc = null; st.docErr = null; st.flash = true; st.top = true;
+    // a link into a wiki the store does not have yet starts that wiki with this page
+    if (st.list && !st.list.some(function (w) { return w.name === name; })) { st.pages = { paths: [], commit: '' }; wkStartEdit(path, true, true); return; }
+    if (st.pages && !wkHas(st, path)) { wkStartEdit(path, true, false); return; }
+    wkShow();
+    render();
+  }
+  function wkOpenLink(name, path) {
+    if (ui.win) closeItemWindow();
+    wkOpenPage(name, path);
+  }
+  function wkStartEdit(path, isNew, newWiki) {
+    var st = wk();
+    st.creating = false; st.conflict = null; st.more = false; st.pick = false; st.ntree = false;
+    delete ui.edpv['wk-ebody']; delete ui.eatt['wk-ebody'];
+    if (isNew) st.edit = { path: path, isNew: true, newWiki: !!newWiki, base: st.pages ? st.pages.commit : '', text: '# ' + String(path).split('/').pop().replace(/-/g, ' ') + '\n\n', orig: '', newPath: path, note: false };
+    else st.edit = { path: path, isNew: false, newWiki: false, base: st.doc.commit, text: st.doc.content, orig: st.doc.content, newPath: '', note: false };
+    wkShow();
+    render();
+    var f = $(isNew && (!path || path.slice(-1) === '/') ? 'wk-epath' : 'wk-ebody');
+    if (f) { f.focus({ preventScroll: true }); if (f.id === 'wk-ebody') { try { f.setSelectionRange(f.value.length, f.value.length); } catch (x) { /* not a text field */ } } }
+  }
+  function wkCancel() {
+    var st = wk();
+    if (!st.edit) return;
+    var ed = st.edit;
+    st.edit = null; st.conflict = null;
+    if (ed.newWiki) { st.name = null; st.page = null; st.pages = null; st.doc = null; st.list = null; }
+    else if (ed.isNew) { st.page = wkHas(st, 'index') ? 'index' : (st.pages && st.pages.paths[0]) || null; st.doc = null; }
+    render();
+  }
+  function wkCreate() {
+    var st = wk(), name = ($('wk-wname') ? $('wk-wname').value : st.wname).trim(), first = ($('wk-wfirst') ? $('wk-wfirst').value : st.wfirst).trim().replace(/^\/+|\/+$/g, '') || 'index';
+    st.wname = name; st.wfirst = first;
+    if (!WK_NAME.test(name) || name.length > WK_NAME_MAX) return toast(esc(wsT("js.tk.wk.toast.name")));
+    if (st.list && st.list.some(function (w) { return w.name === name; })) { st.creating = false; wkOpenPage(name, first); return; }
+    st.name = name; st.pages = { paths: [], commit: '' }; st.page = first; st.doc = null; st.docErr = null;
+    wkStartEdit(first, true, true);
+  }
+  function wkSave() {
+    var st = wk(), ed = st.edit, store = ui.store, name = st.name;
+    if (!ed || st.saving || !name) return;
+    var box = $('wk-ebody');
+    if (box) ed.text = box.value;
+    var path = ed.isNew ? ($('wk-epath') ? $('wk-epath').value : ed.newPath).trim().replace(/^\/+|\/+$/g, '').replace(/\/{2,}/g, '/') : ed.path;
+    if (!path) return toast(esc(wsT("js.tk.wk.toast.path")));
+    if (ed.isNew && wkHas(st, path)) return toast(esc(wsT("js.tk.wk.toast.exists", path)));
+    st.saving = true; render();
+    AD.wiki.save(store, name, { base: ed.newWiki ? '' : ed.base, newWiki: !!ed.newWiki, op: 'write', path: path, content: ed.text, attachments: savedAtts('wk-ebody', ed.text) }, function (res) {
+      st.saving = false;
+      var live = ui.wiki[store] === st && st.edit === ed; // the editor this save left from still shows
+      if (res.ok) {
+        toast(esc(wsT(res.merged ? "js.tk.wk.saved.merged" : "js.tk.wk.saved", wkSha(res.commit))) + (res.warnings || []).map(function (w) { return '<br>' + esc(w); }).join(''));
+        if (live) { st.edit = null; st.conflict = null; st.page = path; st.flash = true; st.top = true; }
+        // what the save changed is re-read on the next draw of this store's wiki
+        st.list = null; st.pages = null; st.doc = null; st.docErr = null;
+        render(); return;
+      }
+      if (!live) { if (!res.conflict) toast(esc(wsT("js.tk.wk.toast.fail", res.error))); return; }
+      if (res.conflict) { st.conflict = { c: res.conflict, mine: ed.text, orig: ed.orig }; st.full = false; render(); return; }
+      toast(esc(wsT("js.tk.wk.toast.fail", res.error))); render();
+    });
+  }
+  function wkAct(k, a) {
+    var st = wk();
+    if (k === 'wk-mode') { st.mode = a.getAttribute('data-mode'); st.pick = st.more = false; render(); }
+    else if (k === 'wk-pickopen') { st.pick = !st.pick; st.more = false; render(); }
+    else if (k === 'wk-pick') { st.pick = false; var nm2 = a.getAttribute('data-wiki'); if (nm2 !== st.name) { st.name = nm2; st.pages = null; st.page = null; st.doc = null; st.docErr = null; st.edit = null; st.conflict = null; st.q = ''; st.creating = false; } render(); }
+    else if (k === 'wk-newwiki') { st.pick = false; st.creating = true; st.edit = null; st.conflict = null; st.wname = ''; render(); if ($('wk-wname')) $('wk-wname').focus(); }
+    else if (k === 'wk-cancelnew') { st.creating = false; render(); }
+    else if (k === 'wk-create') wkCreate();
+    else if (k === 'wk-open') wkOpenPage(st.name, a.getAttribute('data-path'));
+    else if (k === 'wk-fold') { var fk = st.name + ':' + a.getAttribute('data-dir'); st.closed[fk] = !st.closed[fk]; render(); }
+    else if (k === 'wk-tree') { st.tree = !st.tree; render(); }
+    else if (k === 'wk-ntree') { st.ntree = !st.ntree; render(); }
+    else if (k === 'wk-qclear') { st.q = ''; render(); if ($('wksearch')) $('wksearch').focus(); }
+    else if (k === 'wk-more') { st.more = !st.more; st.pick = false; render(); }
+    else if (k === 'wk-edit') { if (st.doc) wkStartEdit(st.page, false, false); }
+    else if (k === 'wk-newpage') { if (st.name) wkStartEdit(st.page && st.page.indexOf('/') >= 0 ? st.page.slice(0, st.page.lastIndexOf('/') + 1) : '', true, false); }
+    else if (k === 'wk-save') wkSave();
+    else if (k === 'wk-cancel') wkCancel();
+    else if (k === 'wk-copy' || k === 'wk-copymine') {
+      var text = k === 'wk-copymine' ? st.conflict.mine : a.getAttribute('data-text');
+      st.more = false;
+      copyText(text, a.parentNode, function (ok) { toast(esc(ok ? wsT("js.toast.copied", k === 'wk-copymine' ? wsT("js.tk.wk.yours") : text) : wsT("js.tk.win.copyfail"))); if (k === 'wk-copy') render(); });
+    }
+    else if (k === 'wk-agent') {
+      st.more = false;
+      if (XTAB.chat) { if (ui.layout === 'narrow') tabState().narrow = 'chat'; else tabState().side = 'chat'; }
+      else toast(esc(wsT("js.tk.wk.history.tools")));
+      render();
+    }
+    else if (k === 'wk-theirs') { var c = st.conflict.c; st.conflict = null; st.edit = null; st.doc = null; st.docErr = null; toast(esc(wsT("js.tk.wk.reloaded", wkSha(c.theirs)))); wkReload(st); render(); }
+    else if (k === 'wk-again') {
+      var cf = st.conflict;
+      st.conflict = null;
+      st.edit = { path: cf.c.path || st.page, isNew: !cf.c.theirs, newWiki: !cf.c.theirs, base: cf.c.theirs || '', text: cf.mine, orig: cf.c.theirsText || '', newPath: cf.c.path || st.page, note: !!cf.c.theirs };
+      delete ui.edpv['wk-ebody'];
+      render();
+      if ($('wk-ebody')) $('wk-ebody').focus();
+    }
+    else if (k === 'wk-full') { st.full = !st.full; render(); }
   }
 
   function cardTeam(v) {
@@ -1420,9 +1862,9 @@
   // A tab is one icon button: the name is the tooltip and the aria-label, a dot rides its corner.
   // The host's extra tabs (ext.tabs) join the side tabs at mount (mergeTabs).
   // Built-in tab names are table keys (looked up in tabName); a host tab brings its own text.
-  var TABS = { items: "js.tk.tab.items", notify: "js.tk.tab.notify", org: "js.tk.tab.org", activity: "js.tk.tab.activity" };
+  var TABS = { items: "js.tk.tab.items", wiki: "js.tk.wk.tab", notify: "js.tk.tab.notify", org: "js.tk.tab.org", activity: "js.tk.tab.activity" };
   var TAB_TIP = {};
-  var TAB_ICON = { items: '#tki-tasks', notify: '#tki-bell', org: '#tki-team', activity: '#tki-activity' };
+  var TAB_ICON = { items: '#tki-tasks', wiki: '#tki-book', notify: '#tki-bell', org: '#tki-team', activity: '#tki-activity' };
   var SIDE = ['notify', 'org', 'activity'], XTAB = {};
   function mergeTabs() {
     (X.tabs || []).forEach(function (t) {
@@ -1466,11 +1908,12 @@
     var tools = c.tools != null ? c.tools : (c.chip ? '<span class="chip">' + c.chip + '</span>' : '') + '<span class="grow"></span>' + c.extra;
     tabShown(active, v);
     return '<section class="card pane' + (c.cls ? ' ' + c.cls : '') + '" id="' + c.id + '"' + attr('tab', active) + (c.attrs || '') + (c.mode ? attr('view', c.mode) : '') + '><header>' + nav + '</header>' +
-      (narrow ? todayBar() : '') + '<div class="ptools">' + tools + '</div><div class="cbody">' + c.body + '</div>' + (active === 'items' ? ribbonHtml() : '') + '</section>';
+      (narrow && active === 'items' ? todayBar() : '') + '<div class="ptools">' + tools + '</div><div class="cbody' + (c.bodyCls ? ' ' + c.bodyCls : '') + '">' + c.body + '</div>' + (active === 'items' || active === 'wiki' ? ribbonHtml() : '') + '</section>';
   }
   function drawerHtml(name, v) {
     var vs = VS;
-    var MAKE = { items: cardPanel, notify: cardNotify, org: cardTeam, activity: cardActivity };
+    // the Items panel holds the items or, under the header's Items | Wiki switch, the wiki
+    var MAKE = { items: function (v) { return AD.wiki && wk().mode === 'wiki' ? cardWiki(v, false) : cardPanel(v); }, wiki: function (v) { return cardWiki(v, true); }, notify: cardNotify, org: cardTeam, activity: cardActivity };
     var h = '<div class="tk-title"><b>' + esc(vs.store.label) + '</b><span class="grow"></span>' +
       // the drawer links to the store page; the page links back to the session view
       (ui.page ? '<button class="btn" data-act="page-back"' + tipAttr(wsT("js.tk.drawer.back.tip")) + '><svg class="i"><use href="#tki-back"/></svg>' + wsT("js.tk.drawer.back") + '</button>' :
@@ -1479,7 +1922,7 @@
     var L = ui.layout = layoutOf(), ts = tabState(), specs = {};
     function make(k) { return (specs[k] = specs[k] || (MAKE[k] ? MAKE[k](v) : XTAB[k].make(name, VS, H))); }
     if (L === 'narrow') {
-      var all = ['items'].concat(SIDE), act = all.indexOf(ts.narrow) >= 0 ? ts.narrow : 'items';
+      var all = ['items'].concat(AD.wiki ? ['wiki'] : []).concat(SIDE), act = all.indexOf(ts.narrow) >= 0 ? ts.narrow : 'items';
       make(act);
       return h + '<div class="tk-zones" data-layout="narrow"><div class="tk-col">' + paneHtml(all, act, v, specs, true) + '</div></div>';
     }
@@ -1896,7 +2339,7 @@
       var st = ui.edpv[id] = { text: box.value, html: null, err: null, busy: false };
       if (AD.render && st.text.trim()) {
         st.busy = true;
-        AD.render(ui.store, { text: st.text, attachments: edAtts(id) }, function (res) {
+        AD.render(ui.store, { text: st.text, attachments: edAtts(id), wiki: id === 'wk-ebody' ? wkRenderName() : undefined }, function (res) {
           if (ui.edpv[id] !== st) return; // back to write, or the editor closed
           st.busy = false;
           if (res && res.ok) st.html = String(res.html || ''); else st.err = String((res && res.error) || '');
@@ -1922,6 +2365,8 @@
   function edKeep(t) {
     if (t.id === 'tkcedit' && ui.cedit) ui.cedit.body = t.value;
     else if (/^iw-e(title|body|proj)$/.test(t.id) && ui.iedit) ui.iedit[{ 'iw-etitle': 'title', 'iw-ebody': 'body', 'iw-eproj': 'project' }[t.id]] = t.value;
+    else if (t.id === 'wk-ebody' && wk().edit) wk().edit.text = t.value;
+    else if (t.id === 'wk-epath' && wk().edit) wk().edit.newPath = t.value;
   }
 
   // An image pasted or dropped into an editor (png, jpeg, gif, or webp, within the view's
@@ -3195,7 +3640,9 @@
     // cards scroll inside; keep each card's scroll and the focused row across the re-render
     var scrolls = {}, fa = document.activeElement, focusRk = fa && fa.closest && body.contains(fa) && fa.closest('[data-rk]');
     focusRk = focusRk && focusRk.getAttribute('data-rk');
-    var focusSearch = fa && fa.id === 'psearch' ? [fa.selectionStart, fa.selectionEnd] : null;
+    var focusSearch = fa && (fa.id === 'psearch' || fa.id === 'wksearch') ? [fa.id, fa.selectionStart, fa.selectionEnd] : null;
+    // the wiki's page and tree scroll inside the card body; a page just opened starts at the top
+    var wkScroll = {}; ['wkpage', 'wktree'].forEach(function (k) { if ($(k)) wkScroll[k] = $(k).scrollTop; });
     // an inline input (new item, subtask, in-place edit, the composer) keeps focus and its caret
     var focusKeep = fa && fa.id && fa.hasAttribute('data-keep') ? [fa.id, fa.selectionStart, fa.selectionEnd] : null;
     // an editor's Write / Preview toggle keeps focus too (it has focus while the editor previews)
@@ -3210,7 +3657,8 @@
     if (!ui.page) fitDrawer();
     Array.prototype.forEach.call(body.querySelectorAll('.card[id] > .cbody'), function (c) { if (scrolls[c.parentNode.id]) c.scrollTop = scrolls[c.parentNode.id]; });
     body.scrollTop = top1;
-    if (focusSearch && $('psearch')) { $('psearch').focus({ preventScroll: true }); $('psearch').setSelectionRange(focusSearch[0], focusSearch[1]); }
+    wkAfterDraw(body, wkScroll);
+    if (focusSearch && $(focusSearch[0])) { $(focusSearch[0]).focus({ preventScroll: true }); $(focusSearch[0]).setSelectionRange(focusSearch[1], focusSearch[2]); }
     var ff = focusFk && lastInput === 'key' && body.querySelector('[data-fk="' + CSS.escape(focusFk) + '"]');
     if (ff) ff.focus({ preventScroll: true });
     var fr = focusRk && lastInput === 'key' && body.querySelector('[data-rk="' + CSS.escape(focusRk) + '"]');
@@ -3225,9 +3673,12 @@
     // an editor's preview ends with the editor: an edit saved or cancelled, a comment posted, another item
     if (!ui.iedit) { delete ui.edpv['iw-ebody']; delete ui.eatt['iw-ebody']; }
     if (!ui.cedit) { delete ui.edpv.tkcedit; delete ui.eatt.tkcedit; }
+    // the wiki editor's preview and uploads go when no store's wiki edit is open (another store's edit keeps them)
+    if (!Object.keys(ui.wiki).some(function (k) { return !!ui.wiki[k].edit; })) { delete ui.edpv['wk-ebody']; delete ui.eatt['wk-ebody']; }
     if (!open || ui.itemChanged || ui.clearDraft) { delete ui.edpv.cbox; delete ui.eatt.cbox; }
     if (open) {
       sb.innerHTML = windowHtml(v, VS.items[ui.item]);
+      wkMarkLinks(sb);
       if (!ui.itemChanged && !ui.clearDraft && $('cbox')) $('cbox').value = draft;
       sb.scrollTop = ui.itemChanged ? 0 : top2;
       // the notification's target: a thin mark stays while the window is open; the flash and the scroll happen once
@@ -3531,6 +3982,14 @@
     '<symbol id="tki-pen" viewBox="0 0 16 16"><path d="M10.6 2.8l2.6 2.6-7.6 7.6-3.2.6.6-3.2z"/></symbol>' +
     '<symbol id="tki-copy" viewBox="0 0 16 16"><rect x="5.5" y="5.5" width="8" height="8" rx="1.2"/><path d="M10.5 3.5v-.3a.7.7 0 0 0-.7-.7H3.2a.7.7 0 0 0-.7.7v6.6a.7.7 0 0 0 .7.7h.3"/></symbol>' +
     '<symbol id="tki-page" viewBox="0 0 16 16"><path d="M9.5 2.5h4v4M13.5 2.5L8 8M11.5 9.5v3.2a.8.8 0 0 1-.8.8H3.3a.8.8 0 0 1-.8-.8V5.3a.8.8 0 0 1 .8-.8h3.2"/></symbol>' +
+    // the wiki (cardWiki)
+    '<symbol id="tki-book" viewBox="0 0 16 16"><path d="M8 4.2C6.6 3 4.6 2.6 2.4 2.8v9.6c2.2-.2 4.2.2 5.6 1.4 1.4-1.2 3.4-1.6 5.6-1.4V2.8C11.4 2.6 9.4 3 8 4.2zM8 4.2v9.6"/></symbol>' +
+    '<symbol id="tki-doc" viewBox="0 0 16 16"><path d="M4 2.4h5.2L12 5.2v8.4H4z"/><path d="M9 2.6v2.8h2.8M6 8.4h4M6 10.8h4"/></symbol>' +
+    '<symbol id="tki-folder" viewBox="0 0 16 16"><path d="M2 4.2h4l1.4 1.6H14v6.7H2z"/></symbol>' +
+    '<symbol id="tki-sidebar" viewBox="0 0 16 16"><rect x="2.2" y="2.8" width="11.6" height="10.4" rx="1.4"/><path d="M6.2 2.8v10.4"/></symbol>' +
+    '<symbol id="tki-history" viewBox="0 0 16 16"><path d="M2.8 8a5.2 5.2 0 1 0 1.6-3.8"/><path d="M2.6 2.6v2.6h2.6M8 5.2V8l2 1.4"/></symbol>' +
+    '<symbol id="tki-link" viewBox="0 0 16 16"><path d="M6.8 9.2a2.6 2.6 0 0 0 3.7 0l2-2a2.6 2.6 0 0 0-3.7-3.7l-.8.8M9.2 6.8a2.6 2.6 0 0 0-3.7 0l-2 2a2.6 2.6 0 0 0 3.7 3.7l.8-.8"/></symbol>' +
+    '<symbol id="tki-reload" viewBox="0 0 16 16"><path d="M13 8a5 5 0 1 1-1.5-3.6"/><path d="M12 2v2.8H9.2"/></symbol>' +
     '</svg>';
 
   function el(tag, props, html) {
@@ -3599,11 +4058,18 @@
       if (qo) { qPick(Number(qo.getAttribute('data-qi'))); return; }
       var h = t.closest('.tk-handle[data-handle]');
       if (h) { openStore(h.getAttribute('data-handle')); return; }
+      // a wiki: link in rendered text (the daemon marks it data-wiki / data-page) opens that page in the panel
+      var wl = t.closest('a[data-wiki][data-page]');
+      if (wl && AD.wiki) { e.preventDefault(); wkOpenLink(wl.getAttribute('data-wiki'), wl.getAttribute('data-page')); return; }
+      // the wiki's menus close on a click elsewhere in the tracker
+      if (AD.wiki && ui.store && wk().pick && !t.closest('.wk-pickw')) { wk().pick = false; render(); }
+      if (AD.wiki && ui.store && wk().more && !t.closest('.wk-more')) { wk().more = false; render(); }
       var a = t.closest('[data-act]');
       if (a) {
         e.preventDefault(); e.stopPropagation();
         var k = a.getAttribute('data-act'), d = { item: a.getAttribute('data-item'), who: a.getAttribute('data-who'), op: a.getAttribute('data-op'), cid: a.getAttribute('data-cid') };
-        if (k === 'win-close') closeItemWindow();
+        if (k.indexOf('wk-') === 0) wkAct(k, a);
+        else if (k === 'win-close') closeItemWindow();
         else if (k === 'page-back') leavePage();
         else if (k === 'afold') { ui.aopen = ui.aopen === ui.item ? null : ui.item; render(); }
         else if (k === 'menu') itemMenu(d.item, a);
@@ -3687,12 +4153,15 @@
     document.addEventListener('submit', function (e) {
       var f = e.target;
       if (f.closest && f.closest('#tkdlg, #tkmenu')) { e.preventDefault(); submit(f); }
+      else if (f.closest && f.closest('.wk-form')) { e.preventDefault(); wkCreate(); }
     });
     // the search box filters as you type; the render rebuilds the panel, so focus and the caret are put back (see render),
     // and an IME composition (Korean, Japanese) is left alone until it commits
     function searchInput(e) {
-      if (e.target.id !== 'psearch' || e.isComposing || !own(e.target)) return;
-      panelState().q = e.target.value; render();
+      if (e.isComposing || !own(e.target)) return;
+      if (e.target.id === 'psearch') { panelState().q = e.target.value; render(); }
+      else if (e.target.id === 'wksearch') { wk().q = e.target.value; render(); }
+      else if (e.target.id === 'wk-wname') wkNameInput(e.target);
     }
     document.addEventListener('input', searchInput);
     document.addEventListener('compositionend', searchInput);
@@ -3852,6 +4321,7 @@
         if (e.key === 'Escape') edMode(eid, 'write');
         else if (eid === 'iw-ebody') saveEdit();
         else if (eid === 'tkcedit') saveCedit();
+        else if (eid === 'wk-ebody') wkSave();
         else if (eid === 'cbox' && $('tkcsend')) quick('comment', $('tkcsend'));
         return;
       }
@@ -3875,10 +4345,16 @@
         }
         if (id === 'iw-ebody') { if (chord) { e.preventDefault(); saveEdit(); } else if (esc1) { e.preventDefault(); endEdit(); } return; }
         if (id === 'tkcedit') { if (chord) { e.preventDefault(); saveCedit(); } else if (esc1) { e.preventDefault(); endCedit(); } return; }
+        if (id === 'wk-ebody') { if (chord) { e.preventDefault(); wkSave(); } else if (esc1) { e.preventDefault(); wkCancel(); } return; }
+        if (id === 'wk-epath') { if (plain || chord) { e.preventDefault(); wkSave(); } else if (esc1) { e.preventDefault(); wkCancel(); } return; }
+        if (id === 'wk-wname' || id === 'wk-wfirst') { if (plain) { e.preventDefault(); wkCreate(); } else if (esc1 && wk().creating) { e.preventDefault(); wk().creating = false; render(); } return; }
         if (id === 'cbox' && chord) { e.preventDefault(); if ($('tkcsend')) quick('comment', $('tkcsend')); return; }
       }
       // Esc in the search box clears it first; with it empty, Esc goes on to close the window or the drawer
       if (e.key === 'Escape' && e.target.id === 'psearch' && e.target.value && own(e.target)) { e.preventDefault(); panelState().q = ''; render(); if ($('psearch')) $('psearch').focus(); return; }
+      if (e.key === 'Escape' && e.target.id === 'wksearch' && e.target.value && own(e.target)) { e.preventDefault(); wk().q = ''; render(); if ($('wksearch')) $('wksearch').focus(); return; }
+      // Esc closes an open wiki menu before anything else
+      if (e.key === 'Escape' && own(t) && AD.wiki && ui.store && (wk().pick || wk().more)) { e.preventDefault(); wk().pick = wk().more = false; render(); return; }
       // keyboard: a focused row shows its actions and details; Enter opens its item window
       if (e.key === 'Enter' && e.target.classList && e.target.classList.contains('irow') && own(e.target)) { e.preventDefault(); showItem(e.target.getAttribute('data-item')); return; }
       // ArrowRight unfolds a focused tree row, ArrowLeft folds it
@@ -3926,7 +4402,7 @@
     };
     syncHandles();
     ui.store = order[0] || null;
-    AD.onChange(function () { render(); });
+    AD.onChange(function () { wkRefresh(); render(); });
     applyRoute();
     // read-only hook for scripted checks (headless verification); not part of the model
     window.__tracker = { ui: ui, vs: function () { return VS; }, openItemWindow: openItemWindow };

@@ -336,6 +336,17 @@ func TestPagesCarryTheTracker(t *testing.T) {
 		if strings.Count(page, `<span class="qsslot" id="qsslot"></span>`) != 1 {
 			t.Errorf("%s page lacks the quick-switcher slot", name)
 		}
+		// The wiki in the Items panel: its stylesheet block, the renderer's
+		// switch and card, the adapter's wiki methods, and the wiki strings.
+		for _, hook := range []string{
+			".tk .wk-sw {", ".tk .card > .cbody.wk-body {", ".tk a.wlink {", ".tk .wk-vs {",
+			`attr('act', 'wk-mode')`, "function cardWiki(", "function wkRefused(", `'a[data-wiki][data-page]'`,
+			`tkUrl(id, "wiki")`, `"/save"), req,`, `"js.tk.wk.tab"`,
+		} {
+			if !strings.Contains(page, hook) {
+				t.Errorf("%s page lacks the wiki hook %q", name, hook)
+			}
+		}
 		// In the header, at its end: before the gear menu on the index
 		// page, and last on a session page, whose settings are a drawer card.
 		tail := `id="qsslot"></span></div>`

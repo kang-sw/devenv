@@ -11,6 +11,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 00f08d64c08fc052
 sage-review-completeness-reviewed: 00f08d64c08fc052
+completed: 2026-11-09
 ---
 
 # ws tracker wiki: native-git wiki branches in the store repository
@@ -170,11 +171,23 @@ settled on the board on 2026-11-09 (topic "트래커: 위키", items (72)-(91)).
   existing `#ID` references. Links are always absolute, also within one
   wiki (board (89)). Rejected: `[[wiki:path]]` (not standard markdown, the
   renderer would need new syntax).
-- **UI: a drawer wiki card for reading and editing** (board (77) a): page
-  list, rendering with the tracker renderer, and editing with the shared
-  editor (`261109-feat-ws-tracker-shared-markdown-editor`), plus a wiki
-  picker and "new wiki". History browsing and recovery go through the agent
-  tools. Rejected: a read-only card; no UI.
+- **UI: wiki in the Items panel for reading and editing** (board (77) a;
+  placement board (129) a): the tracker's left Items panel header gets an
+  *Items | Wiki* switch; under *Wiki* that area shows a page tree (left) and
+  the page (right), and editing happens in place. In the narrow layout Wiki
+  is one tab (the tree folds into a Pages control). The store page
+  (`#/<storeId>`) uses the same switch at full width. Page list, rendering
+  with the tracker renderer, editing with the shared editor
+  (`261109-feat-ws-tracker-shared-markdown-editor`), a wiki picker and "new
+  wiki" as before. History browsing and recovery go through the agent tools
+  (the page's more menu only points to the support agent). The look is the
+  approved static mockup `ai-docs/ref/wiki-mockup/index.html` (board (133)
+  a). Rejected: a card in the right tab pane (board (129) c, too narrow for
+  long pages plus the editor); a pane-tab page list with a floating page
+  window (board (129) b, opening and closing windows between pages); a
+  read-only card; no UI. Not in scope (board (134) ok): a formatting
+  toolbar beyond the shared editor's Write/Preview, a history/restore UI,
+  a rename/delete UI.
 - **Agent tools** (board (79) ok): MCP `wiki_query` (page read, list,
   search, history, diff) and `wiki_update` (write, rename, delete, restore a
   page to a given commit), each taking the wiki name. Restore is always a
@@ -187,7 +200,8 @@ settled on the board on 2026-11-09 (topic "트래커: 위키", items (72)-(91)).
   recovering from it must be convenient; the user expects to ask an agent to
   do it, so recovery is an agent tool surface first.
 - **Two phases** (board (84) ok): Phase 1 is the server side and the agent
-  tools, already useful to agents on its own; Phase 2 is the drawer card.
+  tools, already useful to agents on its own; Phase 2 is the Items panel
+  wiki UI.
 
 ## Constraints
 
@@ -349,17 +363,20 @@ sync, save path, host methods), 86ecf88 (dashboard image read route),
   save's result but not the next Sync report.
 - Phase 2 remains; the ticket stays in `ready/`.
 
-### Phase 2: drawer wiki card
+### Phase 2: wiki in the Items panel
 
 - The render route gains a page mode taking the wiki name: `attachment:`
   oids render when found in that wiki tree's `_attachments/` or among the
   held pasted images; a save referencing an expired held image is refused,
   as for items.
-- Wiki picker, page list, page rendering (tracker renderer, `wiki:` links
-  resolved in item bodies and pages, `attachment:` images from the wiki
-  tree), edit with the shared editor and preview, image paste into the wiki
-  branch, refused-save view showing both versions, empty state with "new
-  wiki".
+- The UI follows the *Items | Wiki* switch placement (board (129) a) and
+  the approved mockup `ai-docs/ref/wiki-mockup/index.html` (board (133)
+  a): wiki picker, page tree, page rendering (tracker renderer, `wiki:`
+  links resolved in item bodies and pages, `attachment:` images from the
+  wiki tree), in-place edit with the shared editor and preview, image paste
+  into the wiki branch, refused-save view showing both versions, empty
+  state with "new wiki"; the narrow layout's Wiki tab and the store page
+  use the same pieces.
 
 #### Verification
 
@@ -371,3 +388,70 @@ sync, save path, host methods), 86ecf88 (dashboard image read route),
   - a refused save showing both versions;
   - `wiki:` link resolution from an item body;
   - image paste rendering in preview and after save.
+
+### Result (389b387) - 2026-11-09
+
+Commits on `impl/develop/much-haiku-grove`: d62a564 (wiki page routes,
+render wiki mode, `wiki:` links), 14c45cf (ticket Decisions: the wiki lives
+in the Items panel), 265870b (merge develop), 9abd5fd (wiki in the Items
+panel), a0cd827 (editor bar layout and refusal text from the probe), 389b387
+(review fixes).
+
+- Server: `GET /tracker/stores/<id>/wiki` lists `{name, tip, unpushed}`;
+  `.../wiki/<name>/pages` returns `{pages, commit}`; `.../page?path=`
+  returns `{path, content, commit, html}` (the host renders the page in
+  wiki mode so the browser never renders twice); `POST .../save` takes
+  `{base, newWiki, op, path, to, content, commit, message, attachments}`
+  and answers 200 `{commit, merged, created, warnings}`, 409 `{conflict}`
+  with both texts, 422 for a refused save (a held image that expired, an
+  invalid name or path). `POST .../render` takes `wiki` and resolves
+  `attachment:` oids from that wiki's `_attachments/` tree and the held
+  pasted images. The renderer turns `[text](wiki:<name>/<path>)` into
+  `<a data-wiki data-page>`; POSTs stay same-origin, localhost needs no token,
+  and every new route is in `TestLANModeGuardsEveryRoute`.
+- Browser (`tracker.js`, `tracker.css`, `dashboard.js`): the Items header
+  carries the *Items | Wiki* switch (board (129) a); the narrow layout gets
+  a Wiki tab and the store page the wide tree. Pieces per the mockup
+  (board (133) a): wiki picker with tip and unpushed mark, "New wiki" form
+  with the live name rule, page tree (index first, folders fold, path
+  search), crumb and page menu (copy path, copy `wiki:` link for an agent),
+  the page as the daemon rendered it with `wiki:` links marked (missing
+  pages dotted), in-place edit through the shared editor with preview and
+  image paste into the wiki branch, chord save and Esc cancel, the
+  refused-save view with both texts and the overlapping lines marked (LCS
+  per side with folded context), and the empty state. `wiki:` links in item
+  bodies, item windows, and pages open the page; a missing page or a wiki
+  the store does not have opens as a new page (new wiki) at that path. The
+  mockup's `.wk-*` / `a.wlink` CSS was lifted into `tracker.css`; the
+  mockup-only first-save refusal was not carried over. The adapter exposes
+  `wiki.list/pages/read/save` and `render` takes `req.wiki`.
+- State is per store in `ui.wiki`, read on demand; a save re-reads list,
+  pages, and page; a tracker change event re-reads the wiki shown (the page
+  is left alone while edited or while a refused save shows). 77 `js.tk.wk.*`
+  keys in all eleven i18n tables (eight plural); the mockup `i18n-en.js` is
+  regenerated.
+- Verification: `TestPagesCarryTheTracker` pins the new markup hooks, the
+  adapter's wiki calls, and the tab key; `node --check` on `tracker.js` and
+  `dashboard.js`; `go vet`; `go test` on `./internal/wsdashboard/`,
+  `./internal/wsi18n/`, `./internal/wswhiteboard/`, `./cmd/ws-mcp/` (the
+  full suite was green before the develop merge). The headless Chromium probe
+  against an isolated dev daemon (`WS_CONFIG_HOME`/`WS_CACHE_HOME` in the
+  scratchpad, port 0, the user's daemons untouched) passes 60 checks over
+  ten scenes: empty state and new wiki, page read with tree and marked
+  links, more menu, edit and save, refused save with both texts and marks,
+  image paste in preview and after save (served from the wiki image route),
+  `wiki:` link from an item body and from the item window, narrow Wiki tab,
+  store page, Esc and chord in the editor, an external save appearing in
+  the open page, and a new page at an existing path refused. Ten
+  screenshots were reviewed.
+- Deviations: the tree search matches page paths only (no content search
+  in the panel; `wiki.query search` covers content); the page shows no
+  author or date line (history stays with the MCP tool); the refused view
+  marks lines by LCS regions rather than the server's hunk positions.
+- Review (lite): two Critical (stuck busy flags, stuck `saving`) and two
+  Important (silent overwrite of an existing path by a new page, no refresh
+  on tracker change) findings, all fixed in 389b387, which also folded in
+  three Minors (link into an absent wiki, LCS prefix/suffix trim, uploads
+  kept across a store switch). Minor left open: following a `wiki:` link
+  from the editor's own preview or from an item window discards an unsaved
+  edit without asking.

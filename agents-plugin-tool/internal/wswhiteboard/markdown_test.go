@@ -601,3 +601,44 @@ func TestRenderTextAttachmentSrc(t *testing.T) {
 	}
 	wantNone(t, string(RenderText("![shot](attachment:"+own+")", TextTargets{})), "<img")
 }
+
+// TestRenderTextWikiLink: a wiki:<name>/<path> link becomes an anchor to
+// the href WikiLink gives, marked with its name and page, only when that
+// href is a fragment or a daemon path; a name or path WikiLink refuses, a
+// destination without a path, one with a query or fragment, a wiki: image,
+// and every wiki: link without WikiLink stay text.
+func TestRenderTextWikiLink(t *testing.T) {
+	targets := TextTargets{WikiLink: func(name, path string) string {
+		switch name {
+		case "notes":
+			return "#"
+		case "served":
+			return "/tracker/stores/team/wiki/served/page?path=" + path
+		case "evil":
+			return "https://example.com/" + path
+		}
+		return ""
+	}}
+	out := string(RenderText("see [home](wiki:notes/guide/home)", targets))
+	wantAll(t, out, `<a href="#" data-wiki="notes" data-page="guide/home">home</a>`)
+	wantNone(t, out, "target=", "rel=")
+	out = string(RenderText("<wiki:served/a>", targets))
+	wantAll(t, out, `<a href="/tracker/stores/team/wiki/served/page?path=a" data-wiki="served" data-page="a">wiki:served/a</a>`)
+	out = string(RenderText(`[x](wiki:notes/a"b)`, targets))
+	wantAll(t, out, `data-page="a&quot;b"`)
+	for _, in := range []string{
+		"[x](wiki:other/home)",
+		"[x](wiki:evil/home)",
+		"[x](wiki:notes)",
+		"[x](wiki:notes/)",
+		"[x](wiki:/home)",
+		"[x](wiki:notes/home?x=1)",
+		"[x](wiki:notes/home#frag)",
+		"[x](wiki://notes/home)",
+		"![x](wiki:notes/home)",
+	} {
+		got := string(RenderText(in, targets))
+		wantNone(t, got, "<a ", "href", "<img")
+	}
+	wantNone(t, string(RenderText("[x](wiki:notes/home)", TextTargets{})), "<a ", "href")
+}

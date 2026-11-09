@@ -122,35 +122,57 @@ func attachmentOIDs(l []wstracker.AttachmentView) []string {
 }
 
 // trackerText renders tracker text as markdown. The text is any store
-// member's, so it renders under the zero TextTargets but for own: a tag the
-// author types is escaped text, a file path or local image is path text, a
-// network image is its alt text, only an http(s) link (opening in a new
-// tab, rel="noopener noreferrer") or an in-page fragment is an anchor, and
-// item references and mermaid fences stay literal. An image written
-// ![name](attachment:<oid>) is an <img> only when own serves that oid: the
-// attachments of the same body or comment (ownAttachments); nil serves none.
+// member's, so it renders under the zero TextTargets but for own and the
+// wiki link: a tag the author types is escaped text, a file path or local
+// image is path text, a network image is its alt text, only an http(s)
+// link (opening in a new tab, rel="noopener noreferrer"), an in-page
+// fragment, or a wiki page link is an anchor, and item references and
+// mermaid fences stay literal. An image written ![name](attachment:<oid>)
+// is an <img> only when own serves that oid: the attachments of the same
+// body or comment (ownAttachments), or of the wiki page being rendered
+// (wikiAttachments); nil serves none. A link written [text](wiki:<name>/<path>)
+// to a well-formed wiki name and page path is an anchor the page opens
+// itself (href "#", data-wiki, data-page), as it opens an item reference.
 func trackerText(s string, own func(oid string) string) template.HTML {
-	return wswhiteboard.RenderText(s, wswhiteboard.TextTargets{AttachmentSrc: own})
+	return wswhiteboard.RenderText(s, wswhiteboard.TextTargets{AttachmentSrc: own, WikiLink: wikiLink})
+}
+
+// wikiLink is trackerText's wiki page link: the page itself opens the
+// card from the anchor's marks, so the href is only an in-page anchor.
+func wikiLink(name, path string) string {
+	if !wsledger.ValidWikiName(name) || !wsledger.ValidWikiPath(path) {
+		return ""
+	}
+	return "#"
 }
 
 // ownAttachments serves each oid of oids, a text's own attachment list, from
 // store id's attachment read route; any other oid is not served.
 func ownAttachments(id string, oids []string) func(string) string {
-	if len(oids) == 0 {
+	return attachmentSources(id, "", nil, oids)
+}
+
+// attachmentSources serves the oids of tree from wiki's image route of
+// store id and the oids of held from the store's attachment read route (a
+// staged copy or a stored blob); any other oid is not served. Nil when
+// there is nothing to serve.
+func attachmentSources(id, wiki string, tree, held []string) func(string) string {
+	if len(tree) == 0 && len(held) == 0 {
 		return nil
 	}
-	set := make(map[string]bool, len(oids))
-	for _, oid := range oids {
+	store := "/tracker/stores/" + url.PathEscape(id)
+	src := make(map[string]string, len(tree)+len(held))
+	for _, oid := range held {
 		if wsledger.ValidAttachmentOID(oid) {
-			set[oid] = true
+			src[oid] = store + "/attachments/" + oid
 		}
 	}
-	return func(oid string) string {
-		if !set[oid] {
-			return ""
+	for _, oid := range tree {
+		if wsledger.ValidAttachmentOID(oid) {
+			src[oid] = store + "/wiki/" + wiki + "/attachments/" + oid
 		}
-		return "/tracker/stores/" + url.PathEscape(id) + "/attachments/" + oid
 	}
+	return func(oid string) string { return src[oid] }
 }
 
 // Render is an editor's preview: the text through trackerText, the same
@@ -158,22 +180,35 @@ func ownAttachments(id string, oids []string) func(string) string {
 // The text's own attachments are the pending list the request carries,
 // each kept only when its oid is staged on this clone or already stored
 // (what a write may name), so a preview cannot open an image no save
-// could. The route already checked that the store is listed.
+// could. In wiki mode (req.Wiki) the images of that wiki's tip tree are
+// served too, from the wiki image route, as the page's saved view serves
+// them; a wiki that does not exist yet holds none. The route already
+// checked that the store is listed.
 func (t *dashboardTracker) Render(ctx context.Context, id string, req wsdashboard.TrackerRenderRequest) (string, error) {
 	if t.err != nil {
 		return "", redacted(t.err)
 	}
-	var oids []string
+	var held []string
 	for _, a := range req.Attachments {
 		ok, err := t.h.HasAttachment(ctx, id, a.OID)
 		if err != nil {
 			return "", redacted(err)
 		}
 		if ok {
-			oids = append(oids, a.OID)
+			held = append(held, a.OID)
 		}
 	}
-	return string(trackerText(req.Text, ownAttachments(id, oids))), nil
+	var tree []string
+	if req.Wiki != "" {
+		if !wsledger.ValidWikiName(req.Wiki) {
+			return "", fmt.Errorf("%w: %v", wsdashboard.ErrTrackerWikiNotFound, wsledger.ErrWikiBadName)
+		}
+		var err error
+		if tree, err = t.h.WikiImages(ctx, id, req.Wiki); err != nil {
+			return "", redacted(err)
+		}
+	}
+	return string(trackerText(req.Text, attachmentSources(id, req.Wiki, tree, held))), nil
 }
 
 func (t *dashboardTracker) Dispatch(ctx context.Context, id string, events []wsdashboard.TrackerEvent) ([]string, error) {
@@ -327,4 +362,92 @@ func (t *dashboardTracker) ReadWikiImage(ctx context.Context, id, wiki, oid stri
 		return nil, attachmentError(err)
 	}
 	return data, nil
+}
+
+// wikiError maps a host wiki error onto the dashboard's: an unknown wiki
+// or page, or a malformed name or path, is ErrTrackerWikiNotFound on a
+// read; a *WikiConflict is the dashboard's conflict; any other refusal of
+// the saver's is ErrTrackerWikiRefused with its reason; the rest is only
+// redacted.
+func wikiError(err error, read bool) error {
+	var conflict *wsledger.WikiConflict
+	if errors.As(err, &conflict) {
+		return &wsdashboard.TrackerWikiConflict{Path: conflict.Path, Kind: conflict.Kind, Reason: wstrackerhost.RedactCredentials(conflict.Reason),
+			Base: conflict.Base, Theirs: conflict.Theirs, OursText: conflict.OursText, TheirsText: conflict.TheirsText}
+	}
+	if read {
+		for _, e := range []error{wsledger.ErrWikiNotFound, wsledger.ErrWikiPageNotFound, wsledger.ErrWikiBadName, wsledger.ErrWikiBadPath} {
+			if errors.Is(err, e) {
+				return fmt.Errorf("%w: %v", wsdashboard.ErrTrackerWikiNotFound, redacted(err))
+			}
+		}
+	} else if wstrackerhost.IsWikiRefusal(err) {
+		return fmt.Errorf("%w: %v", wsdashboard.ErrTrackerWikiRefused, redacted(err))
+	}
+	return redacted(err)
+}
+
+func (t *dashboardTracker) WikiList(ctx context.Context, id string) ([]wsdashboard.TrackerWiki, error) {
+	if t.err != nil {
+		return nil, redacted(t.err)
+	}
+	list, err := t.h.WikiList(ctx, id)
+	if err != nil {
+		return nil, redacted(err)
+	}
+	out := make([]wsdashboard.TrackerWiki, 0, len(list))
+	for _, w := range list {
+		out = append(out, wsdashboard.TrackerWiki{Name: w.Name, Tip: w.Tip, Unpushed: w.Unpushed})
+	}
+	return out, nil
+}
+
+func (t *dashboardTracker) WikiPages(ctx context.Context, id, wiki string) (wsdashboard.TrackerWikiPages, error) {
+	if t.err != nil {
+		return wsdashboard.TrackerWikiPages{}, redacted(t.err)
+	}
+	pages, at, err := t.h.WikiPages(ctx, id, wiki, "")
+	if err != nil {
+		return wsdashboard.TrackerWikiPages{}, wikiError(err, true)
+	}
+	return wsdashboard.TrackerWikiPages{Pages: pages, Commit: at}, nil
+}
+
+func (t *dashboardTracker) WikiRead(ctx context.Context, id, wiki, path string) (wsdashboard.TrackerWikiPage, error) {
+	if t.err != nil {
+		return wsdashboard.TrackerWikiPage{}, redacted(t.err)
+	}
+	content, at, err := t.h.WikiRead(ctx, id, wiki, path, "")
+	if err != nil {
+		return wsdashboard.TrackerWikiPage{}, wikiError(err, true)
+	}
+	tree, err := t.h.WikiImages(ctx, id, wiki)
+	if err != nil {
+		return wsdashboard.TrackerWikiPage{}, redacted(err)
+	}
+	return wsdashboard.TrackerWikiPage{Path: path, Content: content, Commit: at, HTML: string(trackerText(content, attachmentSources(id, wiki, tree, nil)))}, nil
+}
+
+// WikiSave applies the page's edit. The images the request names are the
+// staged uploads of this clone (the paste went up through the attachment
+// upload); the host writes each into the wiki with the page, and refuses
+// one whose staged copy expired, as a dispatch does.
+func (t *dashboardTracker) WikiSave(ctx context.Context, id, wiki string, req wsdashboard.TrackerWikiSave) (wsdashboard.TrackerWikiSaveResult, error) {
+	if t.err != nil {
+		return wsdashboard.TrackerWikiSaveResult{}, redacted(t.err)
+	}
+	save := wstrackerhost.WikiSave{Edit: wsledger.WikiEdit{Wiki: wiki, Base: req.Base, NewWiki: req.NewWiki, Op: req.Op, Path: req.Path, To: req.To,
+		Content: req.Content, Commit: req.Commit, Message: req.Message}}
+	for _, a := range req.Attachments {
+		save.Staged = append(save.Staged, a.OID)
+	}
+	res, err := t.h.WikiSave(ctx, id, save)
+	if err != nil {
+		return wsdashboard.TrackerWikiSaveResult{}, wikiError(err, false)
+	}
+	out := wsdashboard.TrackerWikiSaveResult{Commit: res.Commit, Merged: res.Merged, Created: res.Created}
+	for _, w := range res.Warnings {
+		out.Warnings = append(out.Warnings, wstrackerhost.RedactCredentials(w.Ref+": "+w.Kind+" "+w.Detail))
+	}
+	return out, nil
 }

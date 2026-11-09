@@ -29,6 +29,14 @@ import (
 //	                                     the image bytes
 //	GET  /tracker/stores/<id>/wiki/<name>/attachments/<sha256>
 //	                                     a wiki page's image bytes
+//	GET  /tracker/stores/<id>/wiki       {"wikis": [{"name", "tip", "unpushed"}]}
+//	GET  /tracker/stores/<id>/wiki/<name>/pages
+//	                                     {"pages": [...], "commit"}: the pages at the tip
+//	GET  /tracker/stores/<id>/wiki/<name>/page?path=<path>
+//	                                     {"path", "content", "commit"}: the commit is the save's base
+//	POST /tracker/stores/<id>/wiki/<name>/save
+//	                                     a TrackerWikiSave -> {"commit", "merged", "created", "warnings"};
+//	                                     a conflict is 409 with "conflict", a refusal 422
 //	GET  /tracker/profiles               the saved profiles
 //	POST /tracker/profiles               save one; the profiles after the save
 //	POST /tracker/register               register a store
@@ -55,6 +63,18 @@ import (
 // wiki image read serves an image of wiki <name> (a lowercase name, see
 // validWikiName) under the same rules.
 //
+// The wiki routes serve the drawer's wiki card over the store's wiki
+// branches. A page read returns the commit it read, which the save of that
+// edit sends back as its base; a save whose base is no longer the tip
+// merges, and one that cannot merge cleanly answers 409 with both texts
+// (TrackerWikiConflict), so the editor shows them and the saver merges. A
+// pasted image goes up through the attachment upload like an item's; the
+// save names it in its attachments list, and the host writes the staged
+// copy into the wiki with the page. The render route's wiki mode (a
+// request with "wiki") shows such an image from the wiki's own tree or
+// from the staged copy, so the preview before the save and the page after
+// it look alike.
+//
 // The revision counter (TrackerChanged) bumps after every write these
 // routes run and on the host's own poll round; each SSE stream sends it as
 // "event: tracker" when it changed (sse.go), and the page re-reads.
@@ -75,6 +95,12 @@ var (
 	ErrTrackerAttachmentTooLarge = errors.New("attachment too large")
 	// ErrTrackerAttachmentNotFound: the store has no such attachment.
 	ErrTrackerAttachmentNotFound = errors.New("attachment not found")
+	// ErrTrackerWikiNotFound: a wiki read names no wiki or page.
+	ErrTrackerWikiNotFound = errors.New("wiki or page not found")
+	// ErrTrackerWikiRefused: a wiki save the wiki rules refuse (a malformed
+	// name, path, or edit; a new wiki that exists; a page already there or
+	// gone; a pasted image whose staged copy expired); the message says why.
+	ErrTrackerWikiRefused = errors.New("wiki save refused")
 )
 
 // TrackerHost is the daemon's tracker host: the stores the user registered
@@ -117,15 +143,103 @@ type TrackerHost interface {
 	// ReadWikiImage returns the content of image oid of wiki of store id, or
 	// ErrTrackerAttachmentNotFound when the wiki or the image is absent.
 	ReadWikiImage(ctx context.Context, id, wiki, oid string) ([]byte, error)
+	// WikiList lists the wikis of store id.
+	WikiList(ctx context.Context, id string) ([]TrackerWiki, error)
+	// WikiPages lists the pages of a wiki of store id at its tip, or
+	// ErrTrackerWikiNotFound.
+	WikiPages(ctx context.Context, id, wiki string) (TrackerWikiPages, error)
+	// WikiRead returns a page of a wiki of store id at its tip, or
+	// ErrTrackerWikiNotFound.
+	WikiRead(ctx context.Context, id, wiki, path string) (TrackerWikiPage, error)
+	// WikiSave applies one edit to a wiki of store id. A save that cannot
+	// merge is a *TrackerWikiConflict error; one the wiki rules refuse is
+	// ErrTrackerWikiRefused; any other error is the store's or the remote's.
+	WikiSave(ctx context.Context, id, wiki string, req TrackerWikiSave) (TrackerWikiSaveResult, error)
 }
 
 // TrackerRenderRequest is the render route's body: the markdown text an
 // editor holds and the attachments its save would carry (the stored ones
 // plus the images uploaded meanwhile), which the host may render inline
-// when each is staged or stored.
+// when each is staged or stored. Wiki, when set, renders a page of that
+// wiki: an image is also shown from the wiki's own tree.
 type TrackerRenderRequest struct {
 	Text        string              `json:"text"`
 	Attachments []TrackerAttachment `json:"attachments,omitempty"`
+	Wiki        string              `json:"wiki,omitempty"`
+}
+
+// TrackerWiki is one wiki of a store as the wiki list answers it.
+type TrackerWiki struct {
+	Name string `json:"name"`
+	Tip  string `json:"tip"`
+	// Unpushed is true when the store has a remote the tip is not known to
+	// hold.
+	Unpushed bool `json:"unpushed"`
+}
+
+// TrackerWikiPages is the page list of a wiki at Commit, its tip.
+type TrackerWikiPages struct {
+	Pages  []string `json:"pages"`
+	Commit string   `json:"commit"`
+}
+
+// TrackerWikiPage is one page as read at Commit, the base a save of this
+// edit sends. HTML is the content rendered as the render route renders it
+// in that wiki's mode (the tree's images show), so a page read draws at
+// once.
+type TrackerWikiPage struct {
+	Path    string `json:"path"`
+	Content string `json:"content"`
+	Commit  string `json:"commit"`
+	HTML    string `json:"html"`
+}
+
+// TrackerWikiSave is the wiki save route's body: one edit of the wiki the
+// route names. Base is the commit the edit started from (the page read's
+// commit); NewWiki creates the wiki with this save instead, and is refused
+// when it exists. Op is write (Content at Path), rename (Path to To),
+// delete (Path), or restore (Path as Commit held it). Attachments are the
+// images the page names that were uploaded through the attachment upload
+// and not yet saved; the save writes each into the wiki beside the page.
+type TrackerWikiSave struct {
+	Base        string              `json:"base"`
+	NewWiki     bool                `json:"newWiki"`
+	Op          string              `json:"op"`
+	Path        string              `json:"path"`
+	To          string              `json:"to,omitempty"`
+	Content     string              `json:"content"`
+	Commit      string              `json:"commit,omitempty"`
+	Message     string              `json:"message,omitempty"`
+	Attachments []TrackerAttachment `json:"attachments,omitempty"`
+}
+
+// TrackerWikiSaveResult is a landed wiki save: the new tip, whether the
+// save merged a moved tip, whether it created the wiki, and the warnings
+// its fetch found.
+type TrackerWikiSaveResult struct {
+	Commit   string   `json:"commit"`
+	Merged   bool     `json:"merged"`
+	Created  bool     `json:"created"`
+	Warnings []string `json:"warnings"`
+}
+
+// TrackerWikiConflict is a wiki save that could not merge, nothing saved:
+// the edit's Path, the Kind of conflict and its Reason, the edit's Base,
+// the current tip Theirs ("" when the wiki is gone), and the two texts,
+// the saver's and the tip's. The saver merges them and saves again with
+// Theirs as the base (or NewWiki when Theirs is empty).
+type TrackerWikiConflict struct {
+	Path       string `json:"path"`
+	Kind       string `json:"kind"`
+	Reason     string `json:"reason"`
+	Base       string `json:"base"`
+	Theirs     string `json:"theirs"`
+	OursText   string `json:"oursText"`
+	TheirsText string `json:"theirsText"`
+}
+
+func (c *TrackerWikiConflict) Error() string {
+	return fmt.Sprintf("wiki %s refused on %s: %s", c.Kind, c.Path, c.Reason)
 }
 
 // TrackerAttachment is a staged attachment as the upload route answers it.
@@ -226,10 +340,11 @@ type TrackerRegisterResult struct {
 }
 
 // trackerStoreOps are the operations of the store route
-// /tracker/stores/<id>/<op>; view is the only GET. The attachment read,
-// /tracker/stores/<id>/attachments/<oid>, is the op "attachment"; the wiki
-// image read, /tracker/stores/<id>/wiki/<name>/attachments/<oid>, the op
-// "wiki-image". Both are GET only.
+// /tracker/stores/<id>/<op>; view and wiki (the wiki list) are the GETs.
+// The attachment read, /tracker/stores/<id>/attachments/<oid>, is the op
+// "attachment". A route under /tracker/stores/<id>/wiki/<name>/ is a
+// wiki op (trackerWikiOps) with the op prefixed "wiki-"; the image read
+// /tracker/stores/<id>/wiki/<name>/attachments/<oid> is "wiki-image".
 var trackerStoreOps = map[string]string{
 	"view":        http.MethodGet,
 	"dispatch":    http.MethodPost,
@@ -238,6 +353,15 @@ var trackerStoreOps = map[string]string{
 	"seen":        http.MethodPost,
 	"attachments": http.MethodPost,
 	"render":      http.MethodPost,
+	"wiki":        http.MethodGet,
+}
+
+// trackerWikiOps are the operations of one wiki,
+// /tracker/stores/<id>/wiki/<name>/<op>.
+var trackerWikiOps = map[string]string{
+	"pages": http.MethodGet,
+	"page":  http.MethodGet,
+	"save":  http.MethodPost,
 }
 
 // trackerAttachmentTypes are the content types the attachment read serves.
@@ -337,12 +461,25 @@ func (d *Daemon) handleTracker(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		if wp, ok := strings.CutPrefix(sub, "wiki/"); ok {
-			name, a, found := strings.Cut(wp, "/attachments/")
-			if id == "" || !found || !validWikiName(name) || !validAttachmentOID(a) {
+			name, tail, found := strings.Cut(wp, "/")
+			if id == "" || !found || !validWikiName(name) {
 				trackerError(w, http.StatusNotFound, "not found")
 				return
 			}
-			method, storeID, op, oid, wiki = http.MethodGet, id, "wiki-image", a, name
+			if a, ok := strings.CutPrefix(tail, "attachments/"); ok {
+				if !validAttachmentOID(a) {
+					trackerError(w, http.StatusNotFound, "not found")
+					return
+				}
+				method, storeID, op, oid, wiki = http.MethodGet, id, "wiki-image", a, name
+				break
+			}
+			m, known := trackerWikiOps[tail]
+			if !known {
+				trackerError(w, http.StatusNotFound, "not found")
+				return
+			}
+			method, storeID, op, wiki = m, id, "wiki-"+tail, name
 			break
 		}
 		m, known := trackerStoreOps[sub]
@@ -456,6 +593,64 @@ func (d *Daemon) handleTracker(w http.ResponseWriter, r *http.Request) {
 		d.trackerReadAttachment(w, r, storeID, oid)
 	case op == "wiki-image":
 		d.trackerReadWikiImage(w, r, storeID, wiki, oid)
+	case op == "wiki":
+		wikis, err := d.tracker.WikiList(r.Context(), storeID)
+		if err != nil {
+			trackerError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"wikis": nonNil(wikis)})
+	case op == "wiki-pages":
+		pages, err := d.tracker.WikiPages(r.Context(), storeID, wiki)
+		if err != nil {
+			trackerWikiError(w, err)
+			return
+		}
+		pages.Pages = nonNil(pages.Pages)
+		writeJSON(w, http.StatusOK, pages)
+	case op == "wiki-page":
+		path := r.URL.Query().Get("path")
+		if path == "" {
+			trackerError(w, http.StatusBadRequest, "path required")
+			return
+		}
+		page, err := d.tracker.WikiRead(r.Context(), storeID, wiki, path)
+		if err != nil {
+			trackerWikiError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, page)
+	case op == "wiki-save":
+		var req TrackerWikiSave
+		if !decodeTrackerBody(w, r, &req) {
+			return
+		}
+		res, err := d.tracker.WikiSave(ctx, storeID, wiki, req)
+		if err != nil {
+			var conflict *TrackerWikiConflict
+			if errors.As(err, &conflict) {
+				writeJSON(w, http.StatusConflict, map[string]any{"error": conflict.Error(), "conflict": conflict})
+				return
+			}
+			trackerWikiError(w, err)
+			return
+		}
+		d.TrackerChanged()
+		res.Warnings = nonNil(res.Warnings)
+		writeJSON(w, http.StatusOK, res)
+	}
+}
+
+// trackerWikiError answers a wiki read or save error: 404 for an unknown
+// wiki or page, 422 for a refused save, else 500.
+func trackerWikiError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, ErrTrackerWikiNotFound):
+		trackerError(w, http.StatusNotFound, err.Error())
+	case errors.Is(err, ErrTrackerWikiRefused):
+		trackerError(w, http.StatusUnprocessableEntity, err.Error())
+	default:
+		trackerError(w, http.StatusInternalServerError, err.Error())
 	}
 }
 
