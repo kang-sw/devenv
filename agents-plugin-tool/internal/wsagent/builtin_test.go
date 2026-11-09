@@ -13,8 +13,9 @@ import (
 
 // TestBuiltinSupportProfilesResolve: each harness has a builtin support
 // profile that resolves through any root with no config file, allows the
-// tracker tools, git.search, and playbook.read, and names the embedded
-// instruction text, never a file under the root.
+// tracker tools, git.search, and playbook.read (and, on Claude, the Agent
+// tool alone), and names the embedded instruction text, never a file under
+// the root.
 func TestBuiltinSupportProfilesResolve(t *testing.T) {
 	opts := testConfig(t)
 	root := t.TempDir()
@@ -32,8 +33,17 @@ func TestBuiltinSupportProfilesResolve(t *testing.T) {
 				t.Errorf("%s ws_tools %v lack %s", name, p.WSTools, tool)
 			}
 		}
-		if len(p.Tools) != 0 || len(p.MCPServers) != 0 || len(p.Plugins) != 0 || p.Skills || p.ListInIndex {
-			t.Errorf("%s should allow no built-in tool, server, plugin, or skill and stay off the index: %+v", name, p)
+		// Claude's support agent may spawn subagents (Agent, nothing else);
+		// Pi has no subagent tool, so its profile allows no built-in tool.
+		wantTools := []string(nil)
+		if backend == BackendClaude {
+			wantTools = []string{"Agent"}
+		}
+		if !slices.Equal(p.Tools, wantTools) {
+			t.Errorf("%s built-in tools = %v, want %v", name, p.Tools, wantTools)
+		}
+		if len(p.MCPServers) != 0 || len(p.Plugins) != 0 || p.Skills || p.ListInIndex {
+			t.Errorf("%s should allow no server, plugin, or skill and stay off the index: %+v", name, p)
 		}
 		if p.InstructionsPath(root) != "" {
 			t.Errorf("%s instructions should not resolve to a file: %s", name, p.InstructionsPath(root))
