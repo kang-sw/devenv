@@ -337,21 +337,15 @@
     "261108-bug-ws-whiteboard-item-raw-html": {
       "registered_at": "2026-11-08T04:42:23Z"
     },
-    "261108-feat-ws-tracker-ledger-attachments": {
-      "registered_at": "2026-11-08T01:19:47Z",
+    "261108-feat-ws-tracker-wiki-git-branch": {
+      "registered_at": "2026-11-08T03:56:55Z",
       "lease": {
         "email": "ki6080@gmail.com",
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-09T04:13:45Z",
-        "impl": {
-          "branch": "impl/develop/candy-mummy-suing"
-        }
+        "phase": "active",
+        "touched_at": "2026-11-09T05:24:57Z"
       }
-    },
-    "261108-feat-ws-tracker-wiki-git-branch": {
-      "registered_at": "2026-11-08T03:56:55Z"
     },
     "261109-bug-git-commit-paths-in-delegate-worktree": {
       "registered_at": "2026-11-09T04:57:34Z"
