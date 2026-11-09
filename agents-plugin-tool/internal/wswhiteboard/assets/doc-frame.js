@@ -8,7 +8,9 @@
   // item-reference click (href="#item-nn"), so the host scrolls to the item; and an
   // image or diagram click, so the host opens its viewer over the whole page
   // ({wbDoc: "view"}: the image's source, or the diagram flattened by
-  // wbFlattenSvg, which svg-view.js defines ahead of this script).
+  // wbFlattenSvg, which svg-view.js defines ahead of this script); and, for
+  // an image outside the session root, a request for its bytes
+  // ({wbDoc: "img"}, see relay below).
   // A plain link needs no help: <base target="_blank"> opens it in a new tab.
   var d = document, body = d.querySelector(".doc-body");
 
@@ -56,12 +58,47 @@
     else root.removeAttribute("data-theme");
     if (redraw && d.querySelector("pre.mermaid[data-processed]")) window.wbDocMermaid(redraw);
   }
+  // An image outside the session root: the server leaves its path text
+  // marked data-relay with the image route URL (wswhiteboard relayImage),
+  // which this opaque origin cannot load (the route refuses it a cross-site
+  // request). The frame asks the host page for it by index, and the host,
+  // which fetches only a URL listed on this frame's own element, answers
+  // with the image as a Blob. The image replaces the path text only once it
+  // decodes; with no answer (a LAN viewer, a missing file, a refused fetch)
+  // or a broken image the path text stays. A request lost to a host that was
+  // not yet listening is asked again when the host asks for the height.
+  var relays = Array.prototype.slice.call(d.querySelectorAll("span.img-text[data-relay]"));
+  function askRelays() {
+    relays.forEach(function (s, i) {
+      if (!s.wbRelayed) post({ wbDoc: "img", id: i, href: s.getAttribute("data-relay") });
+    });
+  }
+  function relayed(m) {
+    var s = typeof m.id === "number" ? relays[m.id] : null, b = m.blob;
+    if (!s || s.wbRelayed || !s.parentNode || !window.Blob || !(b instanceof Blob) || !/^image\//.test(b.type)) return;
+    s.wbRelayed = true;
+    var alt = s.cloneNode(true);
+    Array.prototype.forEach.call(alt.querySelectorAll("a, code"), function (c) { c.parentNode.removeChild(c); });
+    var r = new FileReader();
+    r.onload = function () {
+      var img = d.createElement("img"), code = s.querySelector("code");
+      img.alt = alt.textContent.trim();
+      if (code) img.title = code.textContent;
+      function show() { if (s.parentNode) s.parentNode.replaceChild(img, s); }
+      img.src = r.result;
+      if (img.decode) img.decode().then(show, function () {});
+      else { img.onload = show; }
+    };
+    r.readAsDataURL(b);
+  }
   window.addEventListener("message", function (e) {
     if (e.source !== window.parent || !e.data) return;
-    if (e.data.wbDoc === "size") { last = -1; size(); }
+    if (e.data.wbDoc === "size") { last = -1; size(); askRelays(); }
     else if (e.data.wbDoc === "theme") theme(e.data.theme);
+    else if (e.data.wbDoc === "img") relayed(e.data);
   });
   size();
+  askRelays();
 
   function link(a, e) {
     var r = a.getBoundingClientRect(), key = e.type === "keydown" || e.detail === 0;

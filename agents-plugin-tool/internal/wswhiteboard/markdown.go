@@ -295,6 +295,10 @@ type target struct {
 	// action is a file target's link actions on a page with FileActions;
 	// zero when the target has none.
 	action FileAction
+	// relay is, for an image in a framed topic body that OutsideImage
+	// serves, the image route URL the frame asks its host to fetch in its
+	// path text's place (relayImage); empty otherwise.
+	relay string
 }
 
 // isAction reports whether the target renders as an action link.
@@ -378,8 +382,9 @@ func (p *pageData) resolveTarget(dest string, image bool) (target, bool) {
 // dropped), when that is non-empty; for an image OutsideImage serves, as its
 // Href with its action kept for the image's own marks; else as path text on
 // a page with FileText, with the FileActions action when the page has them
-// (OutsideImage's when FileActions gives no Href), else as the href fileHref
-// builds.
+// (OutsideImage's when FileActions gives no Href), and for an image in a
+// framed body that OutsideImage serves with the relay its frame asks the
+// host for; else as the href fileHref builds.
 func (p *pageData) fileTarget(path, suffix string, image bool) target {
 	if image && p.framing && p.DocImageSrc != nil {
 		if src := p.DocImageSrc(path); src != "" {
@@ -397,6 +402,9 @@ func (p *pageData) fileTarget(path, suffix string, image bool) target {
 	}
 	if p.FileText != nil {
 		t := target{text: p.FileText(path)}
+		if image {
+			t.relay = p.relayImage(path)
+		}
 		if t.text == "" {
 			t.text = filepath.ToSlash(path)
 		}
@@ -426,6 +434,32 @@ func (p *pageData) outsideImage(path string) FileAction {
 		return FileAction{}
 	}
 	return a
+}
+
+// relayImage is, for an image in a framed topic body, the image route URL
+// OutsideImage gives path (URL-escaped, as an image's src is), recorded in
+// relays for the frame's allowlist; empty otherwise. The frame's opaque
+// origin cannot load that route itself (its requests are cross-site, which
+// the route refuses an outside image), so the body keeps the path text and
+// marks it data-relay; the frame asks its host page for the bytes, and the
+// host fetches only a URL in the frame's own data-relay list (framedDoc).
+// Only a loopback viewer's fetch succeeds; anywhere else the path text stays.
+func (p *pageData) relayImage(path string) string {
+	if !p.framing || p.OutsideImage == nil || !p.linkActions() {
+		return ""
+	}
+	a := p.OutsideImage(path)
+	if !a.Outside || !daemonPath(a.Href) {
+		return ""
+	}
+	href := string(util.URLEscape([]byte(a.Href), false))
+	for _, h := range p.relays {
+		if h == href {
+			return href
+		}
+	}
+	p.relays = append(p.relays, href)
+	return href
 }
 
 // linkActions reports whether the page renders the served page's action
@@ -745,7 +779,11 @@ func (r *mdRenderer) image(w util.BufWriter, source []byte, node ast.Node, enter
 		// A board image on a served page: its alt text and its path, never
 		// a file: URL or a path the browser would resolve against the server;
 		// with link actions the path is an action link.
-		_, _ = w.WriteString(`<span class="img-text">`)
+		_, _ = w.WriteString(`<span class="img-text"`)
+		if t.relay != "" {
+			writeAttrs(w, [][2]string{{"data-relay", t.relay}})
+		}
+		_ = w.WriteByte('>')
 		writeAltText(w, source, n)
 		if t.isAction() {
 			_ = w.WriteByte(' ')
