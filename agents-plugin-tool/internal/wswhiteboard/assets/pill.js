@@ -1,5 +1,5 @@
 ;(function () {
-  // Open-question pill. Items awaiting the user (open policy, assumed, ack)
+  // Open-question pill. Items awaiting the user (open policy, ack)
   // scrolled out of the board's scroll area show a floating pill at that
   // edge, split into still-open items and items already answered (the form
   // holds a reply, or the dashboard marked one sent or held), and the tab
@@ -13,7 +13,7 @@
   var st = window.wbPill || (window.wbPill = {});
   if (st.off) st.off();
 
-  var items = Array.prototype.slice.call(d.querySelectorAll('.card.policy[id^="item-"], .card.assumed[id^="item-"], .arow[id^="item-"]'));
+  var items = Array.prototype.slice.call(d.querySelectorAll('.card.policy[id^="item-"], .arow[id^="item-"]'));
 
   // An item's draft state, read from the same form controls form.js builds
   // the reply from: a pick, a ticked ack, or a non-empty note is a reply
@@ -24,7 +24,7 @@
   }
   function responded(el) {
     var box = el.querySelector(".ack input");
-    return !!(el.querySelector('.opt[aria-pressed="true"], .btn[data-v][aria-pressed="true"]') || (box && box.checked) || noted(el));
+    return !!(el.querySelector('.opt[aria-pressed="true"]') || (box && box.checked) || noted(el));
   }
   // The dashboard marks an item it already sent, or holds, a reply for with
   // sent-sent / sent-held; that item is no longer open either. A standalone

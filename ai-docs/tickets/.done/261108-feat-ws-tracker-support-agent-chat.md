@@ -9,6 +9,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: bca264cac21c1781
 sage-review-design-reviewed: bca264cac21c1781
+completed: 2026-11-09
 ---
 
 # ws tracker support-agent chat card: a daemon-hosted agent conversation inside the tracker drawer
@@ -451,3 +452,111 @@ Verification:
 - `node --check` on the touched scripts; Go tests for any new daemon
   route; i18n keys in `en.json` and `ko.json`.
 - The "new conversation" action.
+
+### Result (c09fcbad8) - 2026-11-09
+
+What landed (7e99671b3, review fixes in c09fcbad8):
+
+- **Chat tab.** When the daemon serves `/support`, each tracker store's
+  drawer gets a Chat tab. The stores answer carries a new `support` flag, so
+  the page never probes `/support/choices` to decide.
+  - The tab is a fixed-height card: the log scrolls inside it with the
+    newest entry at the bottom, and the composer sits under the log.
+  - The tab tools carry a "new conversation" action.
+  - The tracker renderer redraws the drawer from HTML on every change. The
+    chat therefore keeps one DOM root per store and moves it into the tab's
+    slot on each redraw (`ext.rendered`), so the draft, scroll offset, and
+    focus survive a redraw.
+- **Log.** The log is the conversation's own `entries` and `convlive`
+  regions, using the existing renderer and the merge-by-key behaviour.
+  - The session stream now takes `?regions=entries,convlive` and sends only
+    the regions it names. With a filter, the mode pseudo-region is dropped
+    and git is not watched.
+  - The stream is open only while the chat shows.
+  - Held-message steer and cancel controls are stripped.
+- **Card entries.**
+  - The Claude and Pi mappers read a successful ws `tracker.show` result's
+    `card <store> <alias>` line, plus the title, into `Event.Card`.
+  - The runner writes it as a `card` ring entry (`wslive.State.Card`) after
+    the streamed reply and the tool gap it ends. Store and alias are checked
+    against an id grammar, and the title is scrubbed and capped.
+  - The entry template draws a plain reference line with
+    `data-tk-store`/`data-tk-alias`. The chat upgrades it to `h.crefHtml`
+    from the view the renderer drew, and clicking the card opens the item
+    window. The plain line shows wherever the view does not hold the item.
+- **Composer and popover.**
+  - The dashboard composer's markup and CSS and its Enter/mod input mode,
+    without the session badges.
+  - The selection chip opens a popover with three controls:
+    - a harness segment: switching an open conversation's harness first
+      shows an inline warning and confirm, then starts a new conversation
+      (517);
+    - a fuzzy-searched model list including "default", with arrow and Enter
+      keys;
+    - an effort knob: role=slider, an empty circle per level, the thumb
+      snapping on drag or arrow keys, the low and high ends labelled, and a
+      reset to default.
+  - A model or effort change applies from the next message, with a note
+    saying so (518). The last choice is the default (519), and the runner
+    supplies the lists (520).
+- **i18n.** `entry.card`, `entry.card.title`, and 24 `js.sup.*` keys are in
+  all 11 tables. The `js.sup.*` prefix keeps them out of the tracker
+  mockup's generated `js.tk.*` lookup file.
+
+Verification:
+
+- `go test ./... -count=1 -timeout 40m` in agents-plugin-tool: 29 packages
+  ok, exit 0. New tests:
+  - `TestCardFollowsTheReplyItEnds` (wslive);
+  - `card_test.go` (wsagent): card line parse; the Claude mapper with
+    string and block results, error, another tool, and another server; the
+    Pi mapper; the live writer ring entry;
+  - `support_chat_test.go` (wsdashboard): entry markup, the
+    `?regions=entries,convlive` stream sending only those regions, and the
+    stores support flag. `TestTrackerRoutesAnswer` now pins
+    `"support":false`.
+- `node --check` on dashboard.js passes.
+- Dev daemon on port 39457, with isolated `WS_CACHE_HOME` and
+  `WS_CONFIG_HOME`, `WS_RSRC_ROOT` set to the worktree rsrc, and
+  `WS_MCP_DASHBOARD_DEV_SOURCE` set. It used a local store `live` with no
+  remote and three seeded items. Headless chrome-headless-shell through
+  playwright-core checked:
+  - the card in the cards layout (1300px) and on the narrow store page
+    (900px);
+  - a message typed and sent with Enter reached the claude conversation.
+    The reply rendered, and a `tracker.show` call rendered as the mini
+    card, which opened the item window titled "Fix the sync ribbon
+    flicker". This was re-run after the review fixes;
+  - the popover listed claude and pi with claude's models;
+  - the knob snapped to each of low, medium, high, xhigh, and max, and the
+    chip followed. A mid-drag move snapped to "high";
+  - the harness-switch warning appeared, and confirming it started a fresh
+    pi conversation with an empty log;
+  - "sol" narrowed the 422-model Pi list to 33, and a keyboard pick changed
+    the model on the same conversation;
+  - after a reload, the chip showed the last choice (`pi · openai-codex/gpt-5.6-sol`);
+  - "new conversation" gave a new id with an empty log;
+  - a tracker write during typing kept the draft and the focus.
+- Review: lite, one pass, with no Critical or Important findings. Minors 1
+  and 2 were fixed in c09fcbad8: card upgrade from the renderer's drawn view,
+  which removed a possible throw, and a card whose item left the view going
+  back to the server line.
+
+Decisions taken:
+
+- **Card source.** Cards come from the runner reading tool results, not
+  from a new live-intake event kind, so the adapter intake protocol is
+  unchanged.
+- **Stream.** The chat reuses the session stream with a region filter,
+  with no new chat route.
+- **Composer.** The composer is reused by markup, CSS, and input mode, not
+  by code, because the dashboard composer's code is bound to the session
+  page's element ids.
+- **Known limits.**
+  - The chat shows the newest ring page (50 entries), with no older-history
+    paging.
+  - The tab is decided once at mount (tracker.js merges `ext.tabs` only
+    there). A host that first answers 503 and later reports support needs
+    a page reload (review Minor 3, left).
+  - The runner records the chat's user messages with the whiteboard origin
+    tag, which predates this phase.

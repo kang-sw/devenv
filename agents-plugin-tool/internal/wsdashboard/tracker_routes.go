@@ -16,7 +16,7 @@ import (
 // caller supplies, and this package knows it only through the JSON-level
 // types below, so the dashboard stays free of the tracker packages.
 //
-//	GET  /tracker/stores                 {"stores": [...], "rev": N}
+//	GET  /tracker/stores                 {"stores": [...], "rev": N, "support": B}
 //	GET  /tracker/stores/<id>/view       {"view": ..., "seen": {"badge", "read"}}
 //	POST /tracker/stores/<id>/dispatch   {"events": [...]} -> {"ids": [...]}; a refusal is 409
 //	POST /tracker/stores/<id>/check      the sync report
@@ -36,6 +36,9 @@ import (
 // requires an Origin equal to the daemon's own (sameOrigin), which stops
 // cross-site form posts, and reads a size-limited body. A dispatched
 // event's origin is always "human": the page is the user's own hand.
+//
+// "support" reports that the daemon serves the store chats
+// (SupportRoutePrefix), so the drawer shows each store's chat tab.
 //
 // The attachment upload stages an image for a later dispatch, whose event
 // names it by the returned oid; it reads a raw body (not JSON) under the
@@ -327,7 +330,7 @@ func (d *Daemon) handleTracker(w http.ResponseWriter, r *http.Request) {
 	ctx := context.WithoutCancel(r.Context())
 	switch {
 	case rest == "stores":
-		writeJSON(w, http.StatusOK, map[string]any{"stores": nonNil(stores), "rev": d.trackerRev.Load()})
+		writeJSON(w, http.StatusOK, map[string]any{"stores": nonNil(stores), "rev": d.trackerRev.Load(), "support": d.support != nil})
 	case rest == "profiles" && method == http.MethodGet:
 		d.trackerProfiles(w)
 	case rest == "profiles":

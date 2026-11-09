@@ -11032,6 +11032,17 @@
   ],
   "notices": [
    {
+    "key": "w:ada.pc#7>kai:done:2026-11-02T17:10:00Z",
+    "kind": "done",
+    "ts": "2026-11-02T17:10:00Z",
+    "assignment": "ada.pc#7>kai",
+    "item": "ada.pc#6",
+    "to": "kai",
+    "by": "ada",
+    "sender": "ada",
+    "state": "live"
+   },
+   {
     "key": "acc:lena.pc#3>raj",
     "kind": "accepted",
     "ts": "2026-11-05T13:00:00Z",
@@ -11263,6 +11274,7 @@
     }
    ],
    "badge": [
+    "w:ada.pc#7>kai:done:2026-11-02T17:10:00Z",
     "acc:lena.pc#3>raj"
    ]
   },

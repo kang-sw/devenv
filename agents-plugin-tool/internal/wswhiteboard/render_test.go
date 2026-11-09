@@ -27,7 +27,7 @@ const sampleDoc = `<p>One update writes the full page and an embed; the embed ke
 // several topics, one of them closed, and no topic body. The previous embed
 // was at seq 10.
 func sampleState() *State {
-	st := &State{Counter: 90, Seq: 12, LastEmbedSeq: 10, SettleSeq: 20, ClosedTopics: []string{"초기 범위"}}
+	st := &State{Counter: 90, Seq: 12, LastEmbedSeq: 10, SettleSeq: 21, ClosedTopics: []string{"초기 범위"}}
 	add := func(item Item) { st.Items = append(st.Items, item) }
 	settled := func(id int, topic, title string, order, changed int) Item {
 		return Item{ID: id, Class: ClassTechnical, Topic: topic, Title: title, Status: StatusAnswered, Answer: "ok", AnswerQuote: "looks fine", Settled: order, Changed: changed}
@@ -51,7 +51,7 @@ func sampleState() *State {
 		Status:         StatusOpen, Changed: 12})
 	add(Item{ID: 76, Class: ClassPolicy, Topic: "embed layout", Title: "Recommendation shows as a star plus a line",
 		Options: []string{"star only", "star and recommendation line"}, Recommendation: "b",
-		Status: StatusAssumed, Answer: "b", AnswerQuote: "71-76 look good", Changed: 11})
+		Status: StatusAssumed, Answer: "b", AnswerQuote: "71-76 look good", Settled: 21, Changed: 11})
 	add(Item{ID: 71, Class: ClassAnnounced, Topic: "embed layout", Title: "Full page has two columns, panels in the sidebar",
 		Status: StatusAnswered, Answer: "ok", AnswerQuote: "71-76 look good", Settled: 18, Changed: 11})
 	add(Item{ID: 72, Class: ClassAnnounced, Topic: "embed layout", Title: "Embed has one column",
@@ -428,12 +428,13 @@ func TestRenderPageTopicBlockOrder(t *testing.T) {
 	}
 	block := out[start:]
 	block = block[:strings.Index(block, "</section>")]
-	policy, assumed, settled := strings.Index(block, `id="item-73"`), strings.Index(block, `id="item-76"`), strings.Index(block, `id="item-72"`)
-	if !(policy >= 0 && policy < assumed && assumed < settled) {
-		t.Errorf("block order policy %d, assumed %d, settled %d", policy, assumed, settled)
+	// The assumed item is the newest settled row, above the older ones.
+	policy, list, assumed, settled := strings.Index(block, `id="item-73"`), strings.Index(block, `<details class="settled"`), strings.Index(block, `id="item-76"`), strings.Index(block, `id="item-72"`)
+	if !(policy >= 0 && policy < list && list < assumed && assumed < settled) {
+		t.Errorf("block order policy %d, settled list %d, assumed %d, settled %d", policy, list, assumed, settled)
 	}
-	if !strings.Contains(block, `<span class="chip policy" title="to answer">`) || !strings.Contains(block, `<span class="chip assumed" title="assumed, confirm or correct">`) {
-		t.Errorf("per-class count chips missing from the title bar")
+	if !strings.Contains(block, `<span class="chip policy" title="to answer">`) || strings.Contains(block, "chip assumed") {
+		t.Errorf("title bar chips: want the policy count and no assumed count")
 	}
 
 	start = strings.Index(out, `<span class="tname">embed retention</span>`)
@@ -451,9 +452,6 @@ func TestRenderPagePolicyOptionsAndPicks(t *testing.T) {
 		`<div class="card policy" id="item-77" data-id="77">`,
 		`<button class="opt rec" data-opt="b" aria-pressed="false"><span class="k">b<svg class="i" aria-hidden="true"><use href="#i-star"/></svg></span>`,
 		`<b><svg class="i" aria-hidden="true"><use href="#i-star"/></svg>b</b> bounds the file count`,
-		// the assumed item's picked option is static, never a form button
-		`<span class="opt static rec picked"><span class="k">b`,
-		`<button class="btn mini" data-v="ok" aria-pressed="false" title="confirm">`,
 		// a settled policy item shows its picked option
 		`<span class="pick" title="picked"><span class="k">a</span><span class="pt">ai-docs/whiteboards/</span></span>`,
 		`<input type="checkbox" data-id="78">`,
@@ -462,10 +460,54 @@ func TestRenderPagePolicyOptionsAndPicks(t *testing.T) {
 			t.Errorf("full page lacks %q", want)
 		}
 	}
-	// one note button per waiting item: (77), (78), (73), (76), (80), (79)
+	// one note button per waiting item, (77), (78), (73), (80), (79), and one
+	// on the assumed settled row (76)
 	if got := strings.Count(out, `<button class="btn mini note-toggle" title="note">`); got != 6 {
-		t.Errorf("%d note buttons, want one per waiting item (6)", got)
+		t.Errorf("%d note buttons, want one per waiting item and assumed row (6)", got)
 	}
+}
+
+// An assumed item renders as a settled row: the picked-option chip and the
+// lead's reading, a small assumed marker, and a pen whose note becomes the
+// user's veto or comment. It counts nowhere as waiting: no header or topic
+// chip, no bulk checkbox, and its topic is quiet once nothing else waits.
+func TestRenderPageAssumedItemIsASettledRow(t *testing.T) {
+	out := render(t, sampleView(LayoutFull))
+	wantAll(t, out,
+		`<div class="srow" id="item-76" data-id="76"><span class="stext"><span class="id">(76)</span><span class="amark" title="assumed, confirm or correct">assumed</span><b>Recommendation shows as a star plus a line</b> <span class="pick" title="picked"><span class="k">b</span>`,
+		`“71-76 look good”</span></span><button class="btn mini note-toggle" title="note"><svg class="i" aria-hidden="true"><use href="#i-pen"/></svg></button><textarea class="note" rows="1" placeholder="✎" title="correction" hidden></textarea></div>`)
+	wantNone(t, out, "card assumed", "chip assumed", `data-v="ok"`)
+	if got := strings.Count(out, `class="amark"`); got != 1 {
+		t.Errorf("%d assumed markers, want 1", got)
+	}
+	// A settled row that is not assumed has neither a marker nor a pen.
+	wantAll(t, out, `<div class="srow" id="item-72"><span class="stext"><span class="id">(72)</span><b>`)
+
+	// A topic holding only an assumed item waits on nothing: the item rotates
+	// with the settled rows, the header carries no count, and once closed the
+	// topic is quiet and the row keeps its pen.
+	st := &State{}
+	mustApply(t, st, addXML(ClassPolicy, "t", "p", "x", "y"))
+	mustApply(t, st, `<wb:answer id="1" value="a" assumed="true">sure</wb:answer>`)
+	open := BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"})
+	if topic := open.Topics[0]; len(topic.Policy) != 0 || len(topic.Acks) != 0 || len(topic.Expanded) != 1 {
+		t.Fatalf("assumed-only topic = %+v", topic)
+	}
+	if open.BulkAck || open.Answerable {
+		t.Fatalf("an assumed item made the board answerable: %+v", open)
+	}
+	mustApply(t, st, `<wb:topic name="t"><wb:close result="done"/></wb:topic>`)
+	if got := item(t, st, 1).Status; got != StatusAssumed {
+		t.Fatalf("close changed the assumed item to %s", got)
+	}
+	closed := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
+	wantAll(t, closed, `<section class="topic quiet closed">`,
+		`<div class="srow" id="item-1" data-id="01">`,
+		`<button class="btn mini note-toggle" title="note"><svg class="i" aria-hidden="true"><use href="#i-pen"/></svg></button><textarea class="note" rows="1" placeholder="✎" title="correction" hidden></textarea></div>`,
+		`<div class="reply solo" data-idle hidden>`)
+	head := closed[strings.Index(closed, `<div class="top">`):]
+	head = head[:strings.Index(head, "</div>")]
+	wantNone(t, head, "chip")
 }
 
 // A settled row's picked-option chip is a flex row; inline code and an item
@@ -506,23 +548,24 @@ func TestRenderPageQuietAndCollapsedSettled(t *testing.T) {
 		}
 	}
 
-	// tool surface: its three most recent settled items are among the ten
-	// expanded board-wide, the other five sit in a nested collapsed +5.
+	// tool surface: its two most recent settled items are among the ten
+	// expanded board-wide (the assumed (76) rotates with them), the other six
+	// sit in a nested collapsed +6.
 	start = strings.Index(full, `<span class="tname">tool surface</span>`)
 	block = full[start:]
 	block = block[:strings.Index(block, "</section>")]
 	if !strings.Contains(block, `<details class="settled" open><summary title="settled">`) {
 		t.Errorf("expanded settled rows are not shown open")
 	}
-	more := strings.Index(block, `<details class="more"><summary title="older settled items">+5</summary>`)
+	more := strings.Index(block, `<details class="more"><summary title="older settled items">+6</summary>`)
 	if more < 0 {
-		t.Fatalf("nested +5 details missing: %s", block)
+		t.Fatalf("nested +6 details missing: %s", block)
 	}
 	for id := 52; id < 60; id++ {
 		at := strings.Index(block, fmt.Sprintf(`id="item-%d"`, id))
 		if at < 0 {
 			t.Errorf("settled item %d missing", id)
-		} else if collapsed := id < 57; collapsed != (at > more) {
+		} else if collapsed := id < 58; collapsed != (at > more) {
 			t.Errorf("settled item %d collapsed=%v but sits at %d against +N at %d", id, collapsed, at, more)
 		}
 	}
@@ -566,7 +609,9 @@ func TestRenderPageReplyBar(t *testing.T) {
 		t.Fatalf("sample board should be answerable with a bulk checkbox")
 	}
 	out := render(t, view)
-	if !strings.Contains(out, `<input type="checkbox" id="ack-all"><svg class="i" aria-hidden="true"><use href="#i-check"/></svg>4</label>`) {
+	// The bulk checkbox counts the open acknowledgements (78), (79), (80); an
+	// assumed item reads as settled and is not among them.
+	if !strings.Contains(out, `<input type="checkbox" id="ack-all"><svg class="i" aria-hidden="true"><use href="#i-check"/></svg>3</label>`) {
 		t.Errorf("bulk checkbox missing or miscounted")
 	}
 	// Embed: reply bar right after the topics, panels collapsed after it.
@@ -664,7 +709,7 @@ func TestRenderPageItemReferences(t *testing.T) {
 		"link " + anchor,                // links
 		"step (2)</span>",               // a prose link
 		"assumed " + anchor,             // assumed title
-		"x " + anchor,                   // static option text
+		"x " + anchor,                   // assumed row's picked option
 		"reading " + anchor,             // assumed answer reading after the letter
 		"plain " + anchor,               // assumed answer reading without a letter
 		"settled " + anchor,             // settled title

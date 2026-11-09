@@ -29,6 +29,8 @@ func bodies(names ...string) string {
 // staleBoard holds seven open topics at testNow+30m: A, B, D, E carry only a
 // body set at testNow; W has an open item and S an assumed one, both from
 // testNow; F's body changed at testNow+30m. X is closed and is not counted.
+// An assumed item reads as settled, so S goes stale like a topic with no
+// item waiting.
 func staleBoard(t *testing.T) *State {
 	t.Helper()
 	st := &State{}
@@ -40,7 +42,7 @@ func staleBoard(t *testing.T) *State {
 	return st
 }
 
-const wantStaleInfo = "4 of 7 open topics unchanged for 60+ min (A, B, D, E); if finished, close them with wb:close and a one-line result."
+const wantStaleInfo = "5 of 7 open topics unchanged for 60+ min (S, A, B, D, E); if finished, close them with wb:close and a one-line result."
 
 func TestStaleNudgeNamesStaleTopicsOnly(t *testing.T) {
 	st := staleBoard(t)

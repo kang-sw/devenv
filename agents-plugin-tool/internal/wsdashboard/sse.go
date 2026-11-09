@@ -27,6 +27,11 @@ import (
 // tracker revision (TrackerChanged) differs from what that stream last
 // sent, including once right after connect; the page then re-reads the
 // tracker routes. A daemon without one never sends it.
+//
+// A session stream may name the regions it wants (?regions=entries,convlive):
+// it then sends only those, no mode pseudo-region unless named, and watches
+// no git root unless git is named. The tracker drawer's store chat follows
+// a support conversation's entries this way.
 
 const (
 	// sseMinInterval coalesces bursts (a streamed reply nudges about ten times
@@ -104,9 +109,10 @@ func (d *Daemon) handleSessionEvents(w http.ResponseWriter, r *http.Request, rep
 		http.Error(w, "unknown session", http.StatusNotFound)
 		return
 	}
+	only := parseRegionFilter(r.URL.Query().Get("regions"))
 	// The stream is the page's presence: the git handle's root is read while
 	// some stream watches it.
-	if d.git != nil && first.Project != "" {
+	if d.git != nil && first.Project != "" && only.has(regionGit) {
 		release := d.git.watch(first.Project)
 		defer release()
 	}
@@ -127,8 +133,40 @@ func (d *Daemon) handleSessionEvents(w http.ResponseWriter, r *http.Request, rep
 			fmt.Fprintf(d.log, "dashboard: render session %s: %v\n", replyID, err)
 			return nil, true
 		}
-		return regions, true
+		return only.apply(regions), true
 	})
+}
+
+// regionFilter is the region set a stream asked for; nil is every region.
+type regionFilter map[string]bool
+
+// parseRegionFilter reads a ?regions= list; empty asks for every region.
+func parseRegionFilter(raw string) regionFilter {
+	var f regionFilter
+	for _, name := range strings.Split(raw, ",") {
+		if name = strings.TrimSpace(name); name != "" {
+			if f == nil {
+				f = regionFilter{}
+			}
+			f[name] = true
+		}
+	}
+	return f
+}
+
+func (f regionFilter) has(name string) bool { return f == nil || f[name] }
+
+// apply keeps the regions f names.
+func (f regionFilter) apply(regions regionSet) regionSet {
+	if f == nil {
+		return regions
+	}
+	for name := range regions {
+		if !f[name] {
+			delete(regions, name)
+		}
+	}
+	return regions
 }
 
 // streamMethod admits GET only: a stream has no headers-only form, and a

@@ -716,6 +716,10 @@ func (c *conv) handle(ev Event) {
 		}
 	case ev.Live != nil:
 		c.apply(*ev.Live)
+	case ev.Card != nil:
+		if c.live.card(*ev.Card) {
+			c.r.notify(c.rec.ReplyID, c.rec.Root)
+		}
 	case ev.Fatal != nil:
 		c.setStatus(func() { c.lastErr = ev.Fatal.Error() })
 		fmt.Fprintf(c.r.opts.Log, "agent %s: %v\n", c.rec.ReplyID, ev.Fatal)
@@ -763,6 +767,7 @@ func (c *conv) processExited() {
 		c.setStatus(func() { c.turn = false })
 		c.apply(wslive.Event{Kind: wslive.KindTurnEnd})
 	}
+	c.live.endAgents()
 	c.live.writeSnapshot()
 	c.r.notify(c.rec.ReplyID, c.rec.Root)
 }
@@ -781,6 +786,7 @@ func (c *conv) stopProcess(string) {
 		c.setStatus(func() { c.turn = false })
 		c.apply(wslive.Event{Kind: wslive.KindTurnEnd})
 	}
+	c.live.endAgents()
 	c.live.writeSnapshot()
 	c.r.notify(c.rec.ReplyID, c.rec.Root)
 }

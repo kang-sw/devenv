@@ -145,6 +145,9 @@ type Daemon struct {
 	// measures their worktrees' disk use (worktrees.go).
 	worktrees WorktreeSource
 	sizes     *sizeCache
+	// files caches each session root's file list for the files route
+	// (files_route.go).
+	files *fileListCache
 	// support serves SupportRoutePrefix, nil without the routes.
 	support http.Handler
 
@@ -228,6 +231,7 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 		openSystem: opts.openSystem,
 		worktrees:  opts.Worktrees,
 		sizes:      newSizeCache(),
+		files:      newFileListCache(),
 		support:    opts.Support,
 		stop:       make(chan struct{}),
 		done:       make(chan struct{}),

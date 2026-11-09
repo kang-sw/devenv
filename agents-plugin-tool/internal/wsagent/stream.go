@@ -394,6 +394,46 @@ func (t *batchTracker) event() Event {
 	return Event{Live: &wslive.Event{Kind: wslive.KindAgent, Batches: []json.RawMessage{raw}}}
 }
 
+// callName is the current batch's call id's tool name; "" when the batch
+// holds no such call.
+func (t *batchTracker) callName(id string) string {
+	if t.batch == nil {
+		return ""
+	}
+	for _, c := range t.batch.calls {
+		if c.id == id {
+			return c.name
+		}
+	}
+	return ""
+}
+
+// CardTool is the ws tool whose result a support chat draws as a card.
+const CardTool = "tracker.show"
+
+// cardEvent reads a CardTool result: a first line "card <store> <alias>",
+// then the item line "<alias> <kind> <quoted title>", whose title it keeps
+// when it parses. A result without the card line (an item of another
+// store, answered as text) shows no card: nil.
+func cardEvent(result string) *Event {
+	lines := strings.SplitN(result, "\n", 3)
+	f := strings.Fields(lines[0])
+	if len(f) != 3 || f[0] != "card" {
+		return nil
+	}
+	ref := wslive.CardRef{Store: f[1], Alias: f[2]}
+	if len(lines) > 1 {
+		if alias, rest, ok := strings.Cut(strings.TrimSpace(lines[1]), " "); ok && alias == ref.Alias {
+			if _, quoted, ok := strings.Cut(rest, " "); ok {
+				if title, err := strconv.Unquote(quoted); err == nil {
+					ref.Title = title
+				}
+			}
+		}
+	}
+	return &Event{Card: &ref}
+}
+
 // argsPreview is a tool call's arguments as one line: the first string
 // value of a small object, else the compact JSON.
 func argsPreview(raw json.RawMessage) string {

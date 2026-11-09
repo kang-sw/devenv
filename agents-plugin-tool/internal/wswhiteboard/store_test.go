@@ -357,17 +357,20 @@ func TestApplyAssumedThenConfirmedMovesToAnswered(t *testing.T) {
 	st := &State{}
 	mustApply(t, st, addXML(ClassPolicy, "t", "p", "x", "y"))
 	mustApply(t, st, `<wb:answer id="1" value="a" assumed="true">sounds right</wb:answer>`)
+	// An assumed item takes a settle order, so the page rotates it with the
+	// settled items.
 	got := item(t, st, 1)
-	if got.Status != StatusAssumed || got.Settled != 0 {
+	if got.Status != StatusAssumed || got.Settled == 0 {
 		t.Fatalf("assumed item = %+v", got)
 	}
+	assumedAt := got.Settled
 	later := testEnv()
 	later.Now = testNow.Add(time.Hour)
 	if _, problems := Apply(st, `<wb:answer id="1" value="a">(01) ok</wb:answer>`, later); len(problems) > 0 {
 		t.Fatalf("confirm refused: %v", problems)
 	}
 	got = item(t, st, 1)
-	if got.Status != StatusAnswered || got.AnswerQuote != "(01) ok" || got.AnsweredAt != testNow.Add(time.Hour).Format(time.RFC3339) || got.Settled == 0 {
+	if got.Status != StatusAnswered || got.AnswerQuote != "(01) ok" || got.AnsweredAt != testNow.Add(time.Hour).Format(time.RFC3339) || got.Settled <= assumedAt {
 		t.Fatalf("confirmed item = %+v, want answered with the new quote and time", got)
 	}
 }
@@ -517,9 +520,10 @@ func TestClosedTopicReopensWhenAnItemIsAdded(t *testing.T) {
 	}
 }
 
-// Closing a topic withdraws its open and assumed items, settled now as a
-// patch to withdrawn would; answered, superseded, and other topics' items
-// stay; a reopen does not restore them; a refused batch withdraws nothing.
+// Closing a topic withdraws its open items, settled now as a patch to
+// withdrawn would; assumed (already read as settled), answered, superseded,
+// and other topics' items stay; a reopen does not restore them; a refused
+// batch withdraws nothing.
 func TestCloseWithdrawsTheTopicsOpenItems(t *testing.T) {
 	st := &State{}
 	mustApply(t, st, addXML(ClassTechnical, "a", "open")+addXML(ClassTechnical, "a", "assumed")+
@@ -530,25 +534,23 @@ func TestCloseWithdrawsTheTopicsOpenItems(t *testing.T) {
 	refused(t, st, `<wb:topic name="a"><wb:close result="done"/></wb:topic><wb:patch id="99" status="open"/>`)
 
 	prevSeq := st.SettleSeq
+	assumed := item(t, st, 2)
 	out := mustApply(t, st, `<wb:topic name="a"><wb:close result="Done."/></wb:topic>`)
 	if !st.topicClosed("a") {
 		t.Fatal("topic a should be closed")
 	}
-	for _, id := range []int{1, 2} {
-		it := item(t, st, id)
-		if it.Status != StatusWithdrawn || it.Changed != st.Seq || it.Settled <= prevSeq || it.ChangedAt == "" {
-			t.Fatalf("item %d after close = %+v, want withdrawn, changed and settled by this batch", id, it)
-		}
+	if it := item(t, st, 1); it.Status != StatusWithdrawn || it.Changed != st.Seq || it.Settled <= prevSeq || it.ChangedAt == "" {
+		t.Fatalf("item 1 after close = %+v, want withdrawn, changed and settled by this batch", it)
 	}
-	if it := item(t, st, 2); it.Answer != "guess" || it.AnswerQuote != "maybe" {
-		t.Fatalf("an assumed item keeps its answer as history, as a patch to withdrawn does: %+v", it)
+	if it := item(t, st, 2); it.Status != StatusAssumed || it.Changed != assumed.Changed || it.Settled != assumed.Settled || it.Answer != "guess" {
+		t.Fatalf("assumed item after close = %+v, want it untouched", it)
 	}
 	for id, want := range map[int]string{3: StatusAnswered, 4: StatusSuperseded, 5: StatusOpen} {
 		if got := item(t, st, id).Status; got != want {
 			t.Fatalf("item %d = %s, want %s", id, got, want)
 		}
 	}
-	if !slices.Equal(out.Withdrawn, []int{1, 2}) || out.Info != "wb:close withdrew (01), (02) (still open or assumed in the closed topic)." {
+	if !slices.Equal(out.Withdrawn, []int{1}) || out.Info != "wb:close withdrew (01) (still open in the closed topic)." {
 		t.Fatalf("outcome withdrawn %v, info %q", out.Withdrawn, out.Info)
 	}
 
@@ -557,10 +559,8 @@ func TestCloseWithdrawsTheTopicsOpenItems(t *testing.T) {
 	if st.topicClosed("a") {
 		t.Fatal("the add should reopen topic a")
 	}
-	for _, id := range []int{1, 2} {
-		if got := item(t, st, id).Status; got != StatusWithdrawn {
-			t.Fatalf("item %d after reopen = %s, want withdrawn", id, got)
-		}
+	if got := item(t, st, 1).Status; got != StatusWithdrawn {
+		t.Fatalf("item 1 after reopen = %s, want withdrawn", got)
 	}
 
 	// Closing with nothing open withdraws nothing and adds no info.
@@ -809,7 +809,8 @@ func TestBuildViewTopicOrderAndEmbedFreshness(t *testing.T) {
 	for _, topic := range view.Topics {
 		names = append(names, topic.Name)
 	}
-	if strings.Join(names, ",") != "policy,assumed,acks,settled" {
+	// An assumed item reads as settled: its topic ranks with the settled one.
+	if strings.Join(names, ",") != "policy,acks,settled,assumed" {
 		t.Fatalf("topic order = %v", names)
 	}
 	if !view.BulkAck || !view.Answerable || view.StampFile != "r.stamp.js" {

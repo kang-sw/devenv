@@ -108,20 +108,21 @@ Markdown up to the closing tag.
   short text. A later answer replaces an earlier one. The body, required, is
   the user's verbatim words for this item. `ids="14 15"` records the same
   value and words on each listed item. `assumed="true"` records your reading
-  of a vague reply; the item stays highlighted until you record the user's
-  confirming or correcting words as another `wb:answer` on that ID without
-  `assumed`.
+  of a vague reply; the page shows the item as a settled row marked assumed,
+  with a note pen the user can veto or comment through. Record the user's
+  later confirming or correcting words as another `wb:answer` on that ID
+  without `assumed`.
 - Status: an item starts `open`; `wb:answer` sets `answered`, or `assumed`
   with `assumed="true"`; `wb:patch status` sets `open`, `withdrawn`, or
-  `superseded`. Answered, withdrawn, and superseded items are settled: the
-  page keeps the 10 most recently settled expanded and the rest behind their
-  topic's count chip. Options change only on an open item, since an answer
+  `superseded`. Answered, withdrawn, and superseded items are settled, and an
+  assumed item shows among them: the page keeps the 10 most recently settled
+  expanded and the rest behind their topic's count chip. Options change only on an open item, since an answer
   is stored as an option letter.
 - `wb:close` collapses a topic's settled items and its body; the topic needs
   an item or a body. `result` is required: one sentence saying how the topic
   ended, shown dimmed beside the closed topic's name. Closing withdraws every
-  item of the topic still `open` or `assumed`, with `result` as the reason;
-  an `info:` line names them. Adding an item to a closed topic, or changing
+  item of the topic still `open`, with `result` as the reason, and an
+  `info:` line names them; an `assumed` item stays assumed. Adding an item to a closed topic, or changing
   its body, reopens it and hides the result, but does not restore the
   withdrawn items; the next close replaces the result. Closed topics with nothing waiting on the user go
   last, most recently closed first; past 30, the dashboard page loads the

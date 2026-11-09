@@ -285,17 +285,11 @@ func TestMarkdownOptionStacking(t *testing.T) {
 
 	for name, opt := range block {
 		t.Run(name, func(t *testing.T) {
-			for _, status := range []string{StatusOpen, StatusAssumed} {
-				st := &State{Seq: 2}
-				st.Items = []Item{{ID: 1, Class: ClassPolicy, Topic: "t", Title: "block", Options: []string{"short", opt}, Status: status, Answer: "a", AnswerQuote: "q"}}
-				out := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
-				if status == StatusOpen {
-					wantAll(t, out, `<div class="opts stack"><div class="opt" role="button" tabindex="0" data-opt="a" aria-pressed="false"><span class="k">a</span><div class="md">short</div></div>`)
-					wantNone(t, out, `<button class="opt`)
-				} else {
-					wantAll(t, out, `<div class="opts stack"><div class="opt static picked"><span class="k">a</span><div class="md">short</div></div>`)
-				}
-			}
+			st := &State{Seq: 2}
+			st.Items = []Item{{ID: 1, Class: ClassPolicy, Topic: "t", Title: "block", Options: []string{"short", opt}, Status: StatusOpen}}
+			out := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
+			wantAll(t, out, `<div class="opts stack"><div class="opt" role="button" tabindex="0" data-opt="a" aria-pressed="false"><span class="k">a</span><div class="md">short</div></div>`)
+			wantNone(t, out, `<button class="opt`)
 		})
 	}
 }

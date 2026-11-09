@@ -288,14 +288,14 @@ func TestTrackerUpdateWritesEveryEventCommand(t *testing.T) {
 	// status, and closes.
 	step(trackerWriteStep{`<tk:store name="team">
 <tk:item.create kind="task" title="T2"/>
-<tk:item.assign item="$1" people="bo"/>
+<tk:item.assign item="$1" people="bo" completion="assignee"/>
 <tk:item.handoff item="$1" to="ada" assignee="bo">take it</tk:item.handoff>
 <tk:item.accept item="$1">mine now</tk:item.accept>
 <tk:item.status item="$1" status="blocked">waiting</tk:item.status>
 <tk:item.close item="$1">done</tk:item.close>
 </tk:store>`, []trackerWantEvent{
 		{typ: wstracker.TypeItemCreate, name: "t2", payload: map[string]any{"kind": "task", "title": "T2"}},
-		{typ: wstracker.TypeItemAssign, payload: map[string]any{"item": "{t2}", "mode": "chosen", "people": []any{"bo"}}},
+		{typ: wstracker.TypeItemAssign, payload: map[string]any{"item": "{t2}", "mode": "chosen", "people": []any{"bo"}, "completion": "assignee"}},
 		{typ: wstracker.TypeItemHandoff, payload: map[string]any{"item": "{t2}", "to": "ada", "assignee": "bo", "note": "take it"}},
 		{typ: wstracker.TypeItemAccept, payload: map[string]any{"item": "{t2}", "note": "mine now"}},
 		{typ: wstracker.TypeItemStatus, payload: map[string]any{"item": "{t2}", "status": "blocked", "note": "waiting"}},
@@ -331,7 +331,7 @@ func TestTrackerUpdateWritesEveryEventCommand(t *testing.T) {
 		{typ: wstracker.TypeItemAssign, payload: map[string]any{"item": "{t4}", "mode": "all", "levels": 1, "completion": "assignee"}},
 		{typ: wstracker.TypeItemUnassign, payload: map[string]any{"item": "{t4}"}},
 		{typ: wstracker.TypeItemCreate, name: "t5", payload: map[string]any{"kind": "task", "title": "T5"}},
-		{typ: wstracker.TypeItemAssign, payload: map[string]any{"item": "{t5}", "mode": "chosen", "people": []any{"bo"}}},
+		{typ: wstracker.TypeItemAssign, payload: map[string]any{"item": "{t5}", "mode": "chosen", "people": []any{"bo"}, "completion": "assigner"}},
 		{typ: wstracker.TypeItemUnassign, payload: map[string]any{"item": "{t5}", "assignee": "bo"}},
 		{typ: wstracker.TypeItemCreate, name: "t6", payload: map[string]any{"kind": "topic", "title": "T6"}},
 		{typ: wstracker.TypeItemHide, payload: map[string]any{"item": "{t6}"}},
@@ -430,10 +430,12 @@ func TestTrackerUpdateWritesStructureAttributes(t *testing.T) {
 	if got := v.Items[w.ids["b"]].Backrefs; !reflect.DeepEqual(got, []string{w.ids["a"], w.ids["cm"]}) {
 		t.Fatalf("B's backrefs = %v", got)
 	}
+	// Each task the batch creates and does not assign is self-assigned to
+	// its creator, so it reads todo.
 	full := w.trackerQuery(t, map[string]any{"store": "team", "item": w.ids["b"]})
 	for _, want := range []string{
-		"refs:\n- " + trackerAlias(w.ids["a"]) + " [task unassigned] P", " A\n- " + trackerAlias(w.ids["c"]) + " [task unassigned] P",
-		"referenced by:\n- " + trackerAlias(w.ids["a"]) + " [task unassigned]",
+		"refs:\n- " + trackerAlias(w.ids["a"]) + " [task todo] P", " A\n- " + trackerAlias(w.ids["c"]) + " [task todo] P",
+		"referenced by:\n- " + trackerAlias(w.ids["a"]) + " [task todo]",
 		"- comment " + trackerAlias(w.ids["cm"]) + " by ada on " + trackerAlias(w.ids["a"]) + " A\n",
 	} {
 		if !strings.Contains(full, want) {
