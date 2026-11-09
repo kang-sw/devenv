@@ -47,11 +47,14 @@ const (
 
 // broker fans index changes out to every open stream.
 type broker struct {
-	mu   sync.Mutex
-	subs map[chan struct{}]struct{}
+	mu    sync.Mutex
+	subs  map[chan struct{}]struct{}
+	stats *streamStats
 }
 
-func newBroker() *broker { return &broker{subs: map[chan struct{}]struct{}{}} }
+func newBroker(stats *streamStats) *broker {
+	return &broker{subs: map[chan struct{}]struct{}{}, stats: stats}
+}
 
 // subscribe returns a wake channel and its cancel function.
 func (b *broker) subscribe() (chan struct{}, func()) {
@@ -74,6 +77,7 @@ func (b *broker) wake(string) {
 	for ch := range b.subs {
 		select {
 		case ch <- struct{}{}:
+			b.stats.Signals.Add(1)
 		default:
 		}
 	}
@@ -121,6 +125,7 @@ func (d *Daemon) handleSessionEvents(w http.ResponseWriter, r *http.Request, rep
 		if !ok {
 			return nil, false
 		}
+		d.stats.SessionRenders.Add(1)
 		view.Lang, view.Theme = lang, theme
 		view.Git = d.git.badge(view.Project)
 		// The snapshot's repo figures come from the session's ws-mcp;
@@ -186,6 +191,7 @@ func (d *Daemon) handleIndexEvents(w http.ResponseWriter, r *http.Request) {
 	lang, _ := requestLang(r)
 	pages := d.pagesIn(lang)
 	d.stream(w, r, func() (regionSet, bool) {
+		d.stats.IndexRenders.Add(1)
 		view := pages.indexView()
 		view.Lang = lang
 		regions, err := renderIndexRegions(view)
@@ -236,6 +242,7 @@ func (d *Daemon) stream(w http.ResponseWriter, r *http.Request, render func() (r
 			}
 			payload, _ := json.Marshal(regionEvent{Name: name, Hash: region.Hash, HTML: string(region.HTML)})
 			fmt.Fprintf(w, "event: region\ndata: %s\n\n", payload)
+			d.stats.Sends.Add(1)
 			held[name] = region.Hash
 			sent = true
 		}

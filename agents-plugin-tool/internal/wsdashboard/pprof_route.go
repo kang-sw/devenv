@@ -29,8 +29,12 @@ const pprofPrefix = "/debug/pprof/"
 // profiles (a goroutine dump or the command line shows more than any page),
 // so this refuses every request that is not a local viewer whatever it
 // carries.
-func pprofHandler() http.Handler {
+//
+// It also serves the daemon's live-update counters (streamStats) as JSON at
+// pprofPrefix+"streams".
+func pprofHandler(stats *streamStats) http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc(pprofPrefix+"streams", stats.serve)
 	mux.HandleFunc(pprofPrefix, pprof.Index)
 	mux.HandleFunc(pprofPrefix+"cmdline", pprof.Cmdline)
 	mux.HandleFunc(pprofPrefix+"profile", pprof.Profile)

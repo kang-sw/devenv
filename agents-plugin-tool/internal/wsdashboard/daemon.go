@@ -122,6 +122,8 @@ type Daemon struct {
 	source   SessionSource
 	agents   AgentHost
 	broker   *broker
+	// stats counts the live-update work (stream_stats.go).
+	stats *streamStats
 	// tracker is the tracker host, nil without one; trackerRev is the
 	// revision TrackerChanged bumps and the streams send.
 	tracker    TrackerHost
@@ -222,6 +224,7 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 		_ = lock.Unlock()
 		return nil, err
 	}
+	stats := &streamStats{}
 	d := &Daemon{
 		dir:        opts.Dir,
 		lock:       lock,
@@ -229,7 +232,8 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 		log:        logw,
 		agents:     opts.Agents,
 		tracker:    opts.Tracker,
-		broker:     newBroker(),
+		broker:     newBroker(stats),
+		stats:      stats,
 		entries:    newEntryCache(),
 		lan:        opts.LAN,
 		pprof:      opts.Pprof,
@@ -258,7 +262,10 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 		if read == nil {
 			read = readGitBadge
 		}
-		d.git = newGitWatcher(read, d.broker.wake, d.stop)
+		d.git = newGitWatcher(read, func(root string) {
+			d.stats.WakeGit.Add(1)
+			d.broker.wake(root)
+		}, d.stop)
 	}
 	if d.lan {
 		// Mint the token now, so the localhost index shows it before any
@@ -353,6 +360,7 @@ func (d *Daemon) sessionChanged(replyID string) {
 			d.entries.drop(replyID)
 		}
 	}
+	d.stats.WakeSession.Add(1)
 	d.broker.wake(replyID)
 }
 
@@ -362,6 +370,7 @@ func (d *Daemon) agentChanged(replyID, project string) {
 	if d.index != nil {
 		d.index.Nudge(replyID, project)
 	}
+	d.stats.WakeAgent.Add(1)
 	d.broker.wake(replyID)
 }
 
@@ -455,7 +464,7 @@ func (d *Daemon) Handler() http.Handler {
 		mux.Handle(SupportRoutePrefix+"/", d.support)
 	}
 	if d.pprof {
-		mux.Handle(pprofPrefix, pprofHandler())
+		mux.Handle(pprofPrefix, pprofHandler(d.stats))
 	}
 	mux.HandleFunc("/", d.handleIndex)
 	if d.lan {

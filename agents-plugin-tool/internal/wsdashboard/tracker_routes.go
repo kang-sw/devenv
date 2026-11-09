@@ -257,6 +257,7 @@ func validAttachmentOID(oid string) bool {
 // first request.
 func (d *Daemon) TrackerChanged() {
 	d.trackerRev.Add(1)
+	d.stats.WakeTracker.Add(1)
 	d.broker.wake("")
 }
 
