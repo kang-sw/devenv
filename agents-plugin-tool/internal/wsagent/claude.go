@@ -375,6 +375,28 @@ type claudeBlock struct {
 	Input     json.RawMessage `json:"input"`
 	ToolUseID string          `json:"tool_use_id"`
 	IsError   bool            `json:"is_error"`
+	// Content is a tool_result's content: a string, or text blocks.
+	Content json.RawMessage `json:"content"`
+}
+
+// claudeResultText is a tool_result's content as text: the string itself,
+// or its text blocks joined.
+func claudeResultText(raw json.RawMessage) string {
+	var text string
+	if json.Unmarshal(raw, &text) == nil {
+		return text
+	}
+	var blocks []claudeBlock
+	if json.Unmarshal(raw, &blocks) != nil {
+		return ""
+	}
+	var parts []string
+	for _, b := range blocks {
+		if b.Type == "text" {
+			parts = append(parts, b.Text)
+		}
+	}
+	return strings.Join(parts, "\n")
 }
 
 func (m *claudeMapper) mapLine(line []byte, replies lineReplies) []Event {
@@ -492,7 +514,13 @@ func (m *claudeMapper) toolResults(raw json.RawMessage, now int64) []Event {
 	var out []Event
 	for _, b := range blocks {
 		if b.Type == "tool_result" {
+			name := m.batches.callName(b.ToolUseID)
 			out = append(out, m.batches.endCall(b.ToolUseID, b.IsError, now)...)
+			if !b.IsError && name == claudeMCPToolName(ReservedMCPServer, CardTool) {
+				if ev := cardEvent(claudeResultText(b.Content)); ev != nil {
+					out = append(out, *ev)
+				}
+			}
 		}
 	}
 	return out

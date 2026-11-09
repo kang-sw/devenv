@@ -332,6 +332,35 @@ func (st *State) Apply(ev Event, now int64) (Result, error) {
 	return res, nil
 }
 
+// CardTitleRunes caps a card line's title.
+const CardTitleRunes = 200
+
+// Card applies a tracker card reference the lead showed at now: the reply
+// streamed so far and the open tool gap are written first, so the card
+// follows the text and the calls that led to it. It is not an adapter event
+// kind: only a host that reads tool results itself (the agent runner) shows
+// cards.
+func (st *State) Card(ref CardRef, now int64) (Result, error) {
+	if !cardIDPattern.MatchString(ref.Store) || !cardIDPattern.MatchString(ref.Alias) {
+		return Result{}, fmt.Errorf("card store and alias must be 1-128 letters, digits, or ._- starting with a letter or digit")
+	}
+	leadReply := st.reply
+	var res Result
+	if st.reply != nil {
+		st.flushTools(&res)
+		res.Ring = append(res.Ring, st.finishReply(""))
+	}
+	st.flushTools(&res)
+	ref.Title = cleanLine(st.scrub.scrub(ref.Title), CardTitleRunes)
+	res.Ring = append(res.Ring, RingEntry{Kind: RingCard, Card: &ref})
+	res.Changed = true
+	st.refreshPhases(now)
+	if st.reply != leadReply {
+		res.Urgent = true
+	}
+	return res, nil
+}
+
 func turnOrigin(origin string) (string, error) {
 	switch origin = strings.TrimSpace(origin); origin {
 	case "", OriginTerminal, OriginWhiteboard, OriginMail:

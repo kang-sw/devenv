@@ -215,7 +215,7 @@ func TestTrackerRoutesAnswer(t *testing.T) {
 	d := startTrackerDaemon(t, fake)
 
 	code, body := call(d, http.MethodGet, "/tracker/stores", "")
-	if code != http.StatusOK || body != `{"rev":0,"stores":[{"id":"team","label":"Team","member":"ada","remote":"https://***@example.invalid/x.git"}]}`+"\n" {
+	if code != http.StatusOK || body != `{"rev":0,"stores":[{"id":"team","label":"Team","member":"ada","remote":"https://***@example.invalid/x.git"}],"support":false}`+"\n" {
 		t.Fatalf("stores = %d %s", code, body)
 	}
 

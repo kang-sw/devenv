@@ -1,0 +1,10 @@
+# Merge develop into the support-agent chat Phase 2 impl branch
+
+Outcome: branch `impl/develop/judo-jab-outer` (ticket 261108-feat-ws-tracker-support-agent-chat, closed to `.done/`) merges cleanly into `develop`.
+
+- The branch forked at cb793e978. `develop` has since gained ticket promotions (e5355c724), the pill fix, the subagent badge (c80edb923) and composer file mention (df9a605b8).
+- `git merge-tree` reports content conflicts in all 11 `agents-plugin-tool/internal/wsi18n/tables/*.json`: both sides add keys. Keep every key from both sides, valid JSON, existing key order style.
+- Trap: at the fork point `ai-docs/tickets/ready/` held only the support-chat ticket, so git's directory-rename detection treats this branch's close as `ready/` -> `.done/` and proposes moving three develop tickets (`261108-feat-ws-tracker-ledger-attachments`, `261109-feat-ws-tracker-review-stage-and-assignment-defaults`, `261109-feat-ws-tracker-shared-markdown-editor`) into `.done/`. Those tickets are NOT done; they must stay in `ai-docs/tickets/ready/`. Merge with `git -c merge.directoryRenames=false merge develop` and confirm after the merge that `ai-docs/tickets/ready/` still holds those three and `.done/` holds only the support-chat ticket from this branch's side.
+- Check the auto-merged composer files (`dashboard.js`, `dashboard.css`, `dashboard.tmpl`, `wsagent/claude.go`) for semantic interaction with the badge and file-mention features: the chat card reuses the composer markup/CSS but not its code; make sure the mention keydown hook and the subagent badge code do not assume the session page elements exist on the tracker page, and the chat card's composer still works.
+- Verification (from `agents-plugin-tool/`): `go vet ./internal/...`, `gofmt -l ./internal`, `go test ./internal/wsdashboard/ ./internal/wsi18n/ ./internal/wsagent/ ./internal/wslive/ ./cmd/ws-mcp/ -count=1 -timeout 30m`, `node --check` on `assets/dashboard.js`, `assets/mention.js`, `assets/tracker.js`.
+- Return when the merge commit is on the branch and verification passes, or when an interaction needs a product decision.
