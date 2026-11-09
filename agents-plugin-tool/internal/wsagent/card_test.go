@@ -3,6 +3,7 @@ package wsagent
 import (
 	"encoding/json"
 	"io"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -116,4 +117,85 @@ func TestLiveWriterWritesCardLines(t *testing.T) {
 	if len(ring) != 1 || ring[0].Kind != wslive.RingCard || ring[0].Card == nil || ring[0].Card.Alias != "ada.c89-3" {
 		t.Fatalf("ring: %+v", ring)
 	}
+}
+
+func trackerWrites(events []Event) int {
+	n := 0
+	for _, ev := range events {
+		if ev.TrackerWrite {
+			n++
+		}
+	}
+	return n
+}
+
+// TestClaudeMapperRaisesTrackerWrites pins which Claude tool results raise a
+// tracker write: a successful ws tracker.update. An error, another ws
+// tool, and another server's tool of the same name raise none.
+func TestClaudeMapperRaisesTrackerWrites(t *testing.T) {
+	m := newClaudeMapper(claudeSpec(t, `{"backend":"claude"}`))
+	update := claudeMCPToolName(ReservedMCPServer, TrackerWriteTool)
+	events := claudeLines(t, m,
+		claudeCall("t1", update), claudeResult("t1", "created ada.c89-4", false),
+		claudeCall("t2", update), claudeResult("t2", "refused", true),
+		claudeCall("t3", claudeMCPToolName(ReservedMCPServer, CardTool)), claudeResult("t3", cardResult, false),
+		claudeCall("t4", "mcp__other__tracker_update"), claudeResult("t4", "created", false),
+	)
+	if n := trackerWrites(events); n != 1 {
+		t.Fatalf("tracker writes: %d, want 1", n)
+	}
+	if got := cards(events); len(got) != 1 {
+		t.Fatalf("the card next to a tracker write: %+v", got)
+	}
+}
+
+// TestPiMapperRaisesTrackerWrites is the Pi form.
+func TestPiMapperRaisesTrackerWrites(t *testing.T) {
+	m := newPiMapper(piSpec(t, `{"backend":"pi"}`))
+	update := piMCPToolName(ReservedMCPServer, TrackerWriteTool)
+	var events []Event
+	for _, l := range []map[string]any{
+		{"type": "tool_execution_end", "toolCallId": "c1", "toolName": update, "result": map[string]any{"content": []any{map[string]any{"type": "text", "text": "created"}}}, "isError": false},
+		{"type": "tool_execution_end", "toolCallId": "c2", "toolName": update, "result": map[string]any{"content": []any{map[string]any{"type": "text", "text": "refused"}}}, "isError": true},
+		{"type": "tool_execution_end", "toolCallId": "c3", "toolName": "read", "result": map[string]any{"content": []any{}}, "isError": false},
+	} {
+		raw, _ := json.Marshal(l)
+		events = append(events, m.mapLine(raw, nopReplies{})...)
+	}
+	if n := trackerWrites(events); n != 1 {
+		t.Fatalf("tracker writes: %d, want 1", n)
+	}
+}
+
+// TestRunnerCallsTrackerChangedOnTrackerWrite pins the runner's path: a
+// TrackerWrite event calls Options.TrackerChanged; a runner without one
+// ignores it.
+func TestRunnerCallsTrackerChangedOnTrackerWrite(t *testing.T) {
+	var calls atomic.Int64
+	h := newHarness(t, map[string]string{"chat": chatProfile})
+	h.runner.Close()
+	h.config.TrackerChanged = func() { calls.Add(1) }
+	h.start()
+	id := h.create("chat").ID
+	if _, err := h.runner.Send(id, "make three tasks"); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "process start", func() bool { return h.backend.startCount() == 1 })
+	p := h.backend.proc(0)
+	p.nextSent(t)
+	p.events <- Event{TrackerWrite: true}
+	p.reply("done")
+	eventually(t, "the tracker-changed call", func() bool { return calls.Load() == 1 })
+
+	bare := newHarness(t, map[string]string{"chat": chatProfile})
+	id = bare.create("chat").ID
+	if _, err := bare.runner.Send(id, "hello"); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "process start", func() bool { return bare.backend.startCount() == 1 })
+	q := bare.backend.proc(0)
+	q.nextSent(t)
+	q.events <- Event{TrackerWrite: true}
+	q.reply("done")
+	eventually(t, "idle", func() bool { return bare.state(id).Status == StatusIdle })
 }
