@@ -501,6 +501,31 @@ func TestRotationKeepsTenMostRecentSettledBoardWide(t *testing.T) {
 	wantProblems(t, refused(t, st, `<wb:close result="done"/>`), `command 1 <wb:close> (line 1): goes inside a <wb:topic name="..."> group`)
 }
 
+// An assumed item stored before assumed items took a settle order keeps
+// Settled 0; it rotates as the newest settled row, never the oldest, and
+// two such items order by Changed.
+func TestLegacyAssumedItemRotatesAsNewest(t *testing.T) {
+	st := &State{}
+	mustApply(t, st, addXML(ClassTechnical, "a", "first legacy")+addXML(ClassTechnical, "a", "second legacy"))
+	mustApply(t, st, `<wb:answer id="1" value="guess" assumed="true">maybe</wb:answer>`)
+	mustApply(t, st, `<wb:answer id="2" value="guess" assumed="true">maybe</wb:answer>`)
+	for i := range st.Items {
+		st.Items[i].Settled = 0 // as stored before this release
+	}
+	settleItems(t, st, "a", ExpandedSettled+2)
+
+	view := BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"})
+	var expanded []int
+	for _, topic := range view.Topics {
+		for _, iv := range topic.Expanded {
+			expanded = append(expanded, iv.ID)
+		}
+	}
+	if len(expanded) != ExpandedSettled || expanded[0] != 2 || expanded[1] != 1 {
+		t.Fatalf("expanded = %v, want the legacy assumed items 2 then 1 first of %d", expanded, ExpandedSettled)
+	}
+}
+
 func TestClosedTopicReopensWhenAnItemIsAdded(t *testing.T) {
 	st := &State{}
 	settleItems(t, st, "a", 2)
@@ -567,6 +592,22 @@ func TestCloseWithdrawsTheTopicsOpenItems(t *testing.T) {
 	mustApply(t, st, `<wb:patch id="6" status="withdrawn"/>`)
 	if out := mustApply(t, st, `<wb:topic name="a"><wb:close result="Done."/></wb:topic>`); len(out.Withdrawn) != 0 || out.Info != "" {
 		t.Fatalf("outcome withdrawn %v, info %q", out.Withdrawn, out.Info)
+	}
+}
+
+// An answer after the close that withdrew its item, in one batch, is refused
+// naming that close; the same answer before the close is accepted.
+func TestAnswerAfterCloseInOneBatchNamesTheClose(t *testing.T) {
+	st := &State{}
+	mustApply(t, st, addXML(ClassTechnical, "a", "open"))
+	problems := refused(t, st, `<wb:topic name="a"><wb:close result="Done."/></wb:topic><wb:answer id="1" value="ok">ok</wb:answer>`)
+	wantProblems(t, problems, `command 2 <wb:answer> (line 1) (01): command 1 <wb:close> (line 1) earlier in this batch withdrew it; put the answers before the close`)
+	if hasProblem(problems, "patch its status to open") {
+		t.Fatalf("problems = %q, want no reopen advice for an item this batch withdrew", problems)
+	}
+	out := mustApply(t, st, `<wb:answer id="1" value="ok">ok</wb:answer><wb:topic name="a"><wb:close result="Done."/></wb:topic>`)
+	if got := item(t, st, 1).Status; got != StatusAnswered || len(out.Withdrawn) != 0 {
+		t.Fatalf("item 1 = %s, withdrawn %v; want answered and nothing withdrawn", got, out.Withdrawn)
 	}
 }
 

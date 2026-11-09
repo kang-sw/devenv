@@ -399,6 +399,17 @@ func (s *State) settle(item *Item) {
 	item.Settled = s.SettleSeq
 }
 
+// settleOrder is the order the page rotates a settled or assumed item by.
+// An assumed item stored before assumed items took a settle order has
+// Settled 0; it ranks as newer than every settle order (several such items
+// by Changed), since sorting it as the oldest would collapse it at once.
+func (s *State) settleOrder(item Item) int {
+	if item.Settled == 0 && item.Status == StatusAssumed {
+		return s.SettleSeq + item.Changed
+	}
+	return item.Settled
+}
+
 // LastAnswerSeq is the render sequence of the board's most recent user
 // answer. A board stored before AnswerSeq existed has none recorded; the
 // newest change among its answered items stands in, which can only be later
@@ -466,6 +477,8 @@ func Apply(state *State, commands string, env Env) (Outcome, []string) {
 	var out Outcome
 	var optionWarn []int
 	embedDir := false
+	// closedBy names, per item a close in this batch withdrew, that close.
+	closedBy := map[int]string{}
 
 	for _, cmd := range cmds {
 		switch cmd.Tag {
@@ -474,7 +487,7 @@ func Apply(state *State, commands string, env Env) (Outcome, []string) {
 			out.IDs = append(out.IDs, id)
 			optionWarn = work.noteNonPolicyOptions(optionWarn, id)
 		case "wb:answer":
-			applyAnswer(p, work, cmd, mark, env.Now)
+			applyAnswer(p, work, cmd, mark, env.Now, closedBy)
 		case "wb:patch":
 			optionWarn = work.noteNonPolicyOptions(optionWarn, applyPatch(p, work, cmd, mark, env.Now))
 		case "wb:body":
@@ -482,7 +495,11 @@ func Apply(state *State, commands string, env Env) (Outcome, []string) {
 		case "wb:edit":
 			applyEdit(p, work, state, cmd, mark)
 		case "wb:close":
-			out.Withdrawn = append(out.Withdrawn, applyClose(p, work, cmd, mark)...)
+			withdrawn := applyClose(p, work, cmd, mark)
+			for _, id := range withdrawn {
+				closedBy[id] = cmd.Label()
+			}
+			out.Withdrawn = append(out.Withdrawn, withdrawn...)
 		case "wb:floor":
 			if floor, ok := wsxmlcmd.IntAttr(p, cmd, "id", true); ok && floor > work.Counter {
 				work.Counter = floor
@@ -701,7 +718,10 @@ func applyAdd(p *problems, work *State, cmd command, mark int) int {
 	return item.ID
 }
 
-func applyAnswer(p *problems, work *State, cmd command, mark int, now time.Time) {
+// applyAnswer records an answer. closedBy names the close earlier in the
+// batch that withdrew an item, so answering it says to move the answer
+// before that close rather than to reopen the item.
+func applyAnswer(p *problems, work *State, cmd command, mark int, now time.Time, closedBy map[int]string) {
 	ids := answerIDs(p, cmd)
 	answer, answerOK := wsxmlcmd.RequiredAttr(p, cmd, "value")
 	quote := cmd.Body
@@ -720,6 +740,10 @@ func applyAnswer(p *problems, work *State, cmd command, mark int, now time.Time)
 		item := &work.Items[idx]
 		switch item.Status {
 		case StatusWithdrawn, StatusSuperseded:
+			if by, ok := closedBy[id]; ok && item.Status == StatusWithdrawn {
+				p.Add("%s: %s earlier in this batch withdrew it; put the answers before the close", label, by)
+				continue
+			}
 			p.Add("%s: is %s; patch its status to open before answering it", label, item.Status)
 			continue
 		}
