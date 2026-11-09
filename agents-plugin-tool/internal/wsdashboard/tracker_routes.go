@@ -27,6 +27,8 @@ import (
 //	                                     raw image bytes -> {"oid", "name", "size", "mime"}
 //	GET  /tracker/stores/<id>/attachments/<oid>
 //	                                     the image bytes
+//	GET  /tracker/stores/<id>/wiki/<name>/attachments/<sha256>
+//	                                     a wiki page's image bytes
 //	GET  /tracker/profiles               the saved profiles
 //	POST /tracker/profiles               save one; the profiles after the save
 //	POST /tracker/register               register a store
@@ -49,7 +51,9 @@ import (
 // only an oid of 64 lowercase hex digits, only content that sniffs as
 // PNG, JPEG, GIF, or WebP, and refuses a request another site started
 // (crossSiteFetch); every refusal, like a missing attachment, answers 404.
-// Its content is addressed by its hash, so it is cacheable for good.
+// Its content is addressed by its hash, so it is cacheable for good. The
+// wiki image read serves an image of wiki <name> (a lowercase name, see
+// validWikiName) under the same rules.
 //
 // The revision counter (TrackerChanged) bumps after every write these
 // routes run and on the host's own poll round; each SSE stream sends it as
@@ -110,6 +114,9 @@ type TrackerHost interface {
 	// ReadAttachment returns the content of attachment oid of store id, or
 	// ErrTrackerAttachmentNotFound.
 	ReadAttachment(ctx context.Context, id, oid string) ([]byte, error)
+	// ReadWikiImage returns the content of image oid of wiki of store id, or
+	// ErrTrackerAttachmentNotFound when the wiki or the image is absent.
+	ReadWikiImage(ctx context.Context, id, wiki, oid string) ([]byte, error)
 }
 
 // TrackerRenderRequest is the render route's body: the markdown text an
@@ -220,7 +227,9 @@ type TrackerRegisterResult struct {
 
 // trackerStoreOps are the operations of the store route
 // /tracker/stores/<id>/<op>; view is the only GET. The attachment read,
-// /tracker/stores/<id>/attachments/<oid>, is the op "attachment".
+// /tracker/stores/<id>/attachments/<oid>, is the op "attachment"; the wiki
+// image read, /tracker/stores/<id>/wiki/<name>/attachments/<oid>, the op
+// "wiki-image". Both are GET only.
 var trackerStoreOps = map[string]string{
 	"view":        http.MethodGet,
 	"dispatch":    http.MethodPost,
@@ -246,6 +255,20 @@ func validAttachmentOID(oid string) bool {
 	}
 	for i := 0; i < len(oid); i++ {
 		if c := oid[i]; (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+// validWikiName reports a wiki name: a lowercase letter or digit, then up
+// to 63 lowercase letters, digits, or hyphens.
+func validWikiName(name string) bool {
+	if name == "" || len(name) > 64 || name[0] == '-' {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		if c := name[i]; (c < '0' || c > '9') && (c < 'a' || c > 'z') && c != '-' {
 			return false
 		}
 	}
@@ -291,7 +314,7 @@ func decodeTrackerBody(w http.ResponseWriter, r *http.Request, v any) bool {
 // handleTracker serves every route under /tracker/ (see the file comment).
 func (d *Daemon) handleTracker(w http.ResponseWriter, r *http.Request) {
 	rest := strings.TrimPrefix(r.URL.Path, "/tracker/")
-	var method, storeID, op, oid string
+	var method, storeID, op, oid, wiki string
 	switch {
 	case rest == "stores":
 		method = http.MethodGet
@@ -310,6 +333,15 @@ func (d *Daemon) handleTracker(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			method, storeID, op, oid = http.MethodGet, id, "attachment", a
+			break
+		}
+		if wp, ok := strings.CutPrefix(sub, "wiki/"); ok {
+			name, a, found := strings.Cut(wp, "/attachments/")
+			if id == "" || !found || !validWikiName(name) || !validAttachmentOID(a) {
+				trackerError(w, http.StatusNotFound, "not found")
+				return
+			}
+			method, storeID, op, oid, wiki = http.MethodGet, id, "wiki-image", a, name
 			break
 		}
 		m, known := trackerStoreOps[sub]
@@ -421,6 +453,8 @@ func (d *Daemon) handleTracker(w http.ResponseWriter, r *http.Request) {
 		d.trackerStageAttachment(ctx, w, r, storeID)
 	case op == "attachment":
 		d.trackerReadAttachment(w, r, storeID, oid)
+	case op == "wiki-image":
+		d.trackerReadWikiImage(w, r, storeID, wiki, oid)
 	}
 }
 
@@ -508,6 +542,22 @@ func (d *Daemon) trackerReadAttachment(w http.ResponseWriter, r *http.Request, i
 		return
 	}
 	data, err := d.tracker.ReadAttachment(r.Context(), id, oid)
+	serveTrackerImage(w, data, err)
+}
+
+// trackerReadWikiImage serves image oid of wiki of store id.
+func (d *Daemon) trackerReadWikiImage(w http.ResponseWriter, r *http.Request, id, wiki, oid string) {
+	if crossSiteFetch(r) {
+		trackerError(w, http.StatusNotFound, "not found")
+		return
+	}
+	data, err := d.tracker.ReadWikiImage(r.Context(), id, wiki, oid)
+	serveTrackerImage(w, data, err)
+}
+
+// serveTrackerImage answers an image read: data when it sniffs as an
+// accepted image type, else 404, as for ErrTrackerAttachmentNotFound.
+func serveTrackerImage(w http.ResponseWriter, data []byte, err error) {
 	if errors.Is(err, ErrTrackerAttachmentNotFound) {
 		trackerError(w, http.StatusNotFound, "not found")
 		return

@@ -13,9 +13,9 @@ import (
 
 // TestBuiltinSupportProfilesResolve: each harness has a builtin support
 // profile that resolves through any root with no config file, allows the
-// tracker tools, git.search, and playbook.read (and, on Claude, the Agent
-// tool alone), and names the embedded instruction text, never a file under
-// the root.
+// tracker tools, the wiki tools, git.search, and playbook.read (and, on
+// Claude, the Agent tool alone), and names the embedded instruction text,
+// never a file under the root.
 func TestBuiltinSupportProfilesResolve(t *testing.T) {
 	opts := testConfig(t)
 	root := t.TempDir()
@@ -28,7 +28,7 @@ func TestBuiltinSupportProfilesResolve(t *testing.T) {
 		if rp.Scope != wsconfig.ScopeBuiltin || p.Backend != backend {
 			t.Fatalf("%s should resolve from the builtin floor on %s: %+v", name, backend, rp)
 		}
-		for _, tool := range []string{"tracker.query", "tracker.update", "tracker.show", "git.search", "playbook.read"} {
+		for _, tool := range []string{"tracker.query", "tracker.update", "tracker.show", "wiki.query", "wiki.update", "git.search", "playbook.read"} {
 			if !slices.Contains(p.WSTools, tool) {
 				t.Errorf("%s ws_tools %v lack %s", name, p.WSTools, tool)
 			}
@@ -49,7 +49,7 @@ func TestBuiltinSupportProfilesResolve(t *testing.T) {
 			t.Errorf("%s instructions should not resolve to a file: %s", name, p.InstructionsPath(root))
 		}
 		text, ok := p.BuiltinInstructions()
-		if !ok || !strings.Contains(text, "tracker.show") || !strings.Contains(text, "git.search") {
+		if !ok || !strings.Contains(text, "tracker.show") || !strings.Contains(text, "git.search") || !strings.Contains(text, "wiki.update") {
 			t.Errorf("%s should carry the embedded support text, got %v %q", name, ok, text)
 		}
 	}

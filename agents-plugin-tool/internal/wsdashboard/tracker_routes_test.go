@@ -33,14 +33,16 @@ type fakeTracker struct {
 	seen      TrackerSeen
 	profiles  []TrackerProfile
 	blobs     map[string][]byte // staged attachments by oid
+	wikiBlobs map[string][]byte // wiki images by wiki+"/"+oid
 	maxBytes  int               // the fake store's attachment limit
 }
 
 func newFakeTracker() *fakeTracker {
 	return &fakeTracker{
-		stores:   []TrackerStore{{ID: "team", Label: "Team", Member: "ada", Remote: "https://***@example.invalid/x.git"}},
-		blobs:    map[string][]byte{},
-		maxBytes: 1 << 20,
+		stores:    []TrackerStore{{ID: "team", Label: "Team", Member: "ada", Remote: "https://***@example.invalid/x.git"}},
+		blobs:     map[string][]byte{},
+		wikiBlobs: map[string][]byte{},
+		maxBytes:  1 << 20,
 	}
 }
 
@@ -176,6 +178,17 @@ func (f *fakeTracker) ReadAttachment(_ context.Context, id, oid string) ([]byte,
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	data, ok := f.blobs[oid]
+	if !ok {
+		return nil, ErrTrackerAttachmentNotFound
+	}
+	return data, nil
+}
+
+func (f *fakeTracker) ReadWikiImage(_ context.Context, id, wiki, oid string) ([]byte, error) {
+	f.record("wiki-image " + id)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	data, ok := f.wikiBlobs[wiki+"/"+oid]
 	if !ok {
 		return nil, ErrTrackerAttachmentNotFound
 	}
@@ -656,5 +669,65 @@ func TestTrackerAttachmentRead(t *testing.T) {
 	fake.mu.Unlock()
 	if rec := callRaw(d, http.MethodGet, "/tracker/stores/team/attachments/"+oid, nil, nil); rec.Code != http.StatusNotFound {
 		t.Errorf("non-image content read = %d, want 404", rec.Code)
+	}
+}
+
+func TestTrackerWikiImageRead(t *testing.T) {
+	fake := newFakeTracker()
+	d := startTrackerDaemon(t, fake)
+	sum := sha256.Sum256(tinyPNG)
+	oid := hex.EncodeToString(sum[:])
+	textSum := sha256.Sum256([]byte("plain text"))
+	textOID := hex.EncodeToString(textSum[:])
+	fake.mu.Lock()
+	fake.wikiBlobs["notes/"+oid] = tinyPNG
+	fake.wikiBlobs["notes/"+textOID] = []byte("plain text")
+	fake.mu.Unlock()
+	read := "/tracker/stores/team/wiki/notes/attachments/" + oid
+
+	rec := callRaw(d, http.MethodGet, read, nil, nil)
+	if rec.Code != http.StatusOK || !bytes.Equal(rec.Body.Bytes(), tinyPNG) {
+		t.Fatalf("read = %d %q", rec.Code, rec.Body)
+	}
+	h := rec.Header()
+	for k, want := range map[string]string{
+		"Content-Type":                 "image/png",
+		"X-Content-Type-Options":       "nosniff",
+		"Content-Security-Policy":      imageContentSecurityPolicy,
+		"Cache-Control":                "private, max-age=31536000, immutable",
+		"Referrer-Policy":              "no-referrer",
+		"Cross-Origin-Resource-Policy": "same-origin",
+		"Content-Length":               strconv.Itoa(len(tinyPNG)),
+	} {
+		if got := h.Get(k); got != want {
+			t.Errorf("read %s = %q, want %q", k, got, want)
+		}
+	}
+	for _, site := range []string{"none", "same-origin"} {
+		if rec := callRaw(d, http.MethodGet, read, nil, map[string]string{"Sec-Fetch-Site": site}); rec.Code != http.StatusOK {
+			t.Errorf("Sec-Fetch-Site %s read = %d, want 200", site, rec.Code)
+		}
+	}
+	if rec := callRaw(d, http.MethodGet, read, nil, map[string]string{"Sec-Fetch-Site": "cross-site"}); rec.Code != http.StatusNotFound {
+		t.Errorf("cross-site read = %d, want 404", rec.Code)
+	}
+
+	for name, path := range map[string]string{
+		"non-image content": "/tracker/stores/team/wiki/notes/attachments/" + textOID,
+		"unknown oid":       "/tracker/stores/team/wiki/notes/attachments/" + strings.Repeat("0", 64),
+		"unknown wiki":      "/tracker/stores/team/wiki/other/attachments/" + oid,
+		"uppercase wiki":    "/tracker/stores/team/wiki/Notes/attachments/" + oid,
+		"leading hyphen":    "/tracker/stores/team/wiki/-notes/attachments/" + oid,
+		"uppercase oid":     "/tracker/stores/team/wiki/notes/attachments/" + strings.ToUpper(oid),
+		"malformed oid":     "/tracker/stores/team/wiki/notes/attachments/abc",
+		"no attachments":    "/tracker/stores/team/wiki/notes/" + oid,
+		"unknown store":     "/tracker/stores/other/wiki/notes/attachments/" + oid,
+	} {
+		if rec := callRaw(d, http.MethodGet, path, nil, nil); rec.Code != http.StatusNotFound {
+			t.Errorf("%s read = %d, want 404", name, rec.Code)
+		}
+	}
+	if rec := callRaw(d, http.MethodPost, read, tinyPNG, nil); rec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("POST read path = %d, want 405", rec.Code)
 	}
 }

@@ -717,9 +717,10 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 				return errorResponse(req.ID, -32601, whiteboardLeadOnlyDenial(params.Name))
 			}
 			// A store's support conversation passes like a top-level lead for
-			// the tracker tools its profile names (its writes are pinned to its
-			// store in handleTrackerUpdate); tracker.show is its own.
-			if (isTrackerTool(params.Name) || params.Name == trackerShowTool) && !entry.isTopLevelLead() && !s.trackerSupportAdmits(keyStr, entry, params.Name) {
+			// the tracker and wiki tools its profile names (its writes are
+			// pinned to its store in handleTrackerUpdate, and the wiki tools
+			// reach its store alone); tracker.show is its own.
+			if (isTrackerTool(params.Name) || isWikiTool(params.Name) || params.Name == trackerShowTool) && !entry.isTopLevelLead() && !s.trackerSupportAdmits(keyStr, entry, params.Name) {
 				return errorResponse(req.ID, -32601, trackerLeadOnlyDenial(params.Name))
 			}
 			if entry.isTopLevelLead() {
@@ -1687,6 +1688,10 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		return s.handleGitSearch(ctx, req.ID, params.Arguments)
 	case "tracker.query":
 		return s.handleTrackerQuery(ctx, req.ID, params.Arguments)
+	case wikiQueryTool:
+		return s.handleWikiQuery(ctx, req.ID, params.Arguments)
+	case wikiUpdateTool:
+		return s.handleWikiUpdate(ctx, req.ID, params.Arguments)
 	case "tickets.query":
 		if hasSpecStemArgument(params.Arguments) {
 			return toolTextResponse(req.ID, "", fmt.Errorf("tickets tools use ticket_stem, not spec_stem"))
@@ -4910,6 +4915,61 @@ func tools() []map[string]any {
 					"format":      stringProperty("\"json\" for the store's whole view state; text when omitted."),
 				},
 				"required": []string{"session_key"},
+			},
+		},
+		{
+			"name":        wikiQueryTool,
+			"description": "Read-only; read a tracker store's wikis: markdown pages kept on git branches of the store, with full history. For a top-level lead, or a store's support conversation on its own store. op list lists the wikis, pages a wiki's pages, read one page with the commit it was read at (the base a wiki.update save of that page must name), search finds text in the pages, history lists commits with their signature verdicts, diff shows a page's change, and recovery lists tips a rewind or deletion replaced. Text by default; format \"json\" for structured output.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
+					"store":       stringProperty("The ID of a registered tracker store, as tracker.query lists them."),
+					"op":          enumStringProperty("list: the store's wikis and their tips. pages: the pages of wiki (at commit when given). read: page path of wiki (at commit when given) and the commit read, the base for a later save. search: lines of wiki's pages containing query (case-insensitive) at the tip. history: wiki's commits, or those touching path, newest first. diff: path's change in commit to, against from or the parent of to. recovery: the replaced tips kept on this machine, of wiki or of every wiki.", wikiQueryOps),
+					"wiki":        stringProperty("The wiki name: [a-z0-9][a-z0-9-]*, at most 64 characters. Required by every op but list and recovery."),
+					"path":        stringProperty("A page path: folder segments and the page name joined by /, without the .md suffix, such as guides/setup. Required by read and diff; narrows history."),
+					"commit":      stringProperty("A full commit id to read pages or a page at instead of the tip (from history or recovery)."),
+					"query":       stringProperty("The text search finds (a fixed string, not a pattern)."),
+					"from":        stringProperty("diff: the full commit id to diff from; omitted, the parent of to."),
+					"to":          stringProperty("diff: the full commit id whose change is shown."),
+					"limit":       integerProperty("history: at most this many commits (30 when omitted). search: at most this many hits."),
+					"format":      stringProperty("\"json\" for structured output; text when omitted."),
+				},
+				"required": []string{"session_key", "store", "op"},
+			},
+		},
+		{
+			"name":        wikiUpdateTool,
+			"description": "Save one edit to a tracker store's wiki as a signed commit. For a top-level lead, or a store's support conversation on its own store. Read the page with wiki.query op=read first and pass the commit it returned as base: a save never falls back to the current tip. When others saved since your base, a non-overlapping edit merges automatically; an overlapping one, or a base that is not an ancestor of the tip, is refused as a conflict carrying both texts and the tip to save on next. new_wiki: true creates a wiki that does not exist yet, with no base. The result names the new commit, the base for your next save.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
+					"store":       stringProperty("The ID of a registered tracker store, as tracker.query lists them."),
+					"wiki":        stringProperty("The wiki name: [a-z0-9][a-z0-9-]*, at most 64 characters."),
+					"op":          enumStringProperty("write: put content at path (creating or replacing the page). rename: move path to to. delete: remove path. restore: put path back as commit held it, with the images it references.", wikiUpdateOps),
+					"base":        stringProperty("The full commit id the edit started from: the commit wiki.query op=read returned, or the commit of your previous save. Required unless new_wiki. A stale base is refused as a conflict."),
+					"new_wiki":    boolProperty("true creates the wiki with this save; refused when the wiki already exists. Pass no base with it."),
+					"path":        stringProperty("The page path: folder segments and the page name joined by /, without the .md suffix, such as guides/setup."),
+					"to":          stringProperty("rename: the new page path; refused when a page is already there."),
+					"content":     stringProperty("write: the whole markdown text of the page."),
+					"commit":      stringProperty("restore: the full commit id to restore the page from (from history or recovery)."),
+					"message":     stringProperty("Optional commit message body under the generated subject."),
+					"images": map[string]any{
+						"type":        "array",
+						"description": "write: images saved beside the page, each a PNG, JPEG, GIF, or WebP. A page shows one as ![alt](attachment:<sha256>), where <sha256> is the lowercase hex sha256 of the image bytes, so the same write's content can already reference it; the result lists each image's sha256.",
+						"items": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"data": stringProperty("The image bytes, base64-encoded."),
+								"name": stringProperty("Optional label echoed beside the image's sha256 in the result."),
+							},
+							"required": []string{"data"},
+						},
+					},
+					"format": stringProperty("\"json\" for structured output, a conflict included; text when omitted."),
+				},
+				"required": []string{"session_key", "store", "wiki", "op", "path"},
 			},
 		},
 		{

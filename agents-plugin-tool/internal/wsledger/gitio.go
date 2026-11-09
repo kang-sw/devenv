@@ -155,6 +155,28 @@ func (g *gitRepo) lsTree(ctx context.Context, tree string) ([]treeEntry, error) 
 	if err != nil {
 		return nil, err
 	}
+	return parseLsTree(out), nil
+}
+
+// entryAt returns the entry at path inside tree (ok false when there is
+// none); the entry's name is the full path. An empty tree holds nothing.
+func (g *gitRepo) entryAt(ctx context.Context, tree, path string) (treeEntry, bool, error) {
+	if tree == "" {
+		return treeEntry{}, false, nil
+	}
+	out, err := g.run(ctx, "ls-tree", "-z", "--full-tree", tree, "--", path)
+	if err != nil {
+		return treeEntry{}, false, err
+	}
+	for _, e := range parseLsTree(out) {
+		if e.name == path {
+			return e, true, nil
+		}
+	}
+	return treeEntry{}, false, nil
+}
+
+func parseLsTree(out []byte) []treeEntry {
 	var entries []treeEntry
 	for _, rec := range strings.Split(string(out), "\x00") {
 		meta, name, ok := strings.Cut(rec, "\t")
@@ -167,7 +189,7 @@ func (g *gitRepo) lsTree(ctx context.Context, tree string) ([]treeEntry, error) 
 		}
 		entries = append(entries, treeEntry{mode: strings.TrimPrefix(f[0], "0"), name: name, oid: f[2]})
 	}
-	return entries, nil
+	return entries
 }
 
 // writeTree writes a tree object in git's binary format.
@@ -235,6 +257,118 @@ func (g *gitRepo) putPath(ctx context.Context, base string, parts []string, blob
 	return g.writeTree(ctx, entries)
 }
 
+// removePath returns a tree equal to base without the entry at parts; a
+// directory left empty is removed with it. Removing what is not there
+// returns base unchanged.
+func (g *gitRepo) removePath(ctx context.Context, base string, parts []string) (string, error) {
+	if base == "" {
+		return "", nil
+	}
+	entries, err := g.lsTree(ctx, base)
+	if err != nil {
+		return "", err
+	}
+	idx := -1
+	for i, e := range entries {
+		if e.name == parts[0] {
+			idx = i
+		}
+	}
+	if idx < 0 {
+		return base, nil
+	}
+	if len(parts) > 1 {
+		if !entries[idx].isTree() {
+			return base, nil
+		}
+		sub, err := g.removePath(ctx, entries[idx].oid, parts[1:])
+		if err != nil {
+			return "", err
+		}
+		if sub == entries[idx].oid {
+			return base, nil
+		}
+		if sub != "" {
+			if subEntries, err := g.lsTree(ctx, sub); err != nil {
+				return "", err
+			} else if len(subEntries) > 0 {
+				entries[idx].oid = sub
+				return g.writeTree(ctx, entries)
+			}
+		}
+	}
+	entries = append(entries[:idx], entries[idx+1:]...)
+	return g.writeTree(ctx, entries)
+}
+
+// walkTree lists every blob under tree, depth first, as (path, entry).
+func (g *gitRepo) walkTree(ctx context.Context, tree, prefix string, fn func(path string, e treeEntry) error) error {
+	if tree == "" {
+		return nil
+	}
+	entries, err := g.lsTree(ctx, tree)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		path := prefix + e.name
+		if e.isTree() {
+			if err := g.walkTree(ctx, e.oid, path+"/", fn); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := fn(path, e); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// mergeFile merges three blobs the way git merge does one file: the result
+// blob when it merges cleanly, conflict true when lines overlap (git
+// merge-file exits with the conflict count, 1..127; 255 is a failure).
+func (g *gitRepo) mergeFile(ctx context.Context, base, ours, theirs string) (blob string, conflict bool, err error) {
+	read := func(oid string) ([]byte, error) {
+		if oid == "" {
+			return nil, nil
+		}
+		data, ok, err := g.readBlob(ctx, oid)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, fmt.Errorf("blob %s is not in this clone", oid)
+		}
+		return data, nil
+	}
+	var paths [3]string
+	for i, oid := range []string{ours, base, theirs} {
+		data, err := read(oid)
+		if err != nil {
+			return "", false, err
+		}
+		p, err := g.tempFile(data)
+		if err != nil {
+			return "", false, err
+		}
+		defer os.Remove(p)
+		paths[i] = p
+	}
+	if _, err := g.run(ctx, "merge-file", "-L", "ours", "-L", "base", "-L", "theirs", paths[0], paths[1], paths[2]); err != nil {
+		if strings.Contains(err.Error(), "exit status 255") || !strings.Contains(err.Error(), "exit status") {
+			return "", false, err
+		}
+		return "", true, nil
+	}
+	merged, err := os.ReadFile(paths[0])
+	if err != nil {
+		return "", false, err
+	}
+	blob, err = g.hashObject(ctx, "blob", merged)
+	return blob, false, err
+}
+
 // treeOf returns a commit's tree id.
 func (g *gitRepo) treeOf(ctx context.Context, commit string) (string, error) {
 	out, err := g.run(ctx, "rev-parse", "--verify", "--quiet", commit+"^{tree}")
@@ -246,6 +380,16 @@ func (g *gitRepo) treeOf(ctx context.Context, commit string) (string, error) {
 
 // commitTree writes a commit signed with the SSH private key at keyPath.
 func (g *gitRepo) commitTree(ctx context.Context, tree, parent string, msg []byte, author, keyPath string) (string, error) {
+	var parents []string
+	if parent != "" {
+		parents = []string{parent}
+	}
+	return g.commitTreeParents(ctx, tree, parents, msg, author, keyPath)
+}
+
+// commitTreeParents is commitTree with any number of parents (a wiki merge
+// has two).
+func (g *gitRepo) commitTreeParents(ctx context.Context, tree string, parents []string, msg []byte, author, keyPath string) (string, error) {
 	path, err := g.tempFile(msg)
 	if err != nil {
 		return "", err
@@ -258,7 +402,7 @@ func (g *gitRepo) commitTree(ctx context.Context, tree, parent string, msg []byt
 		"-c", "user.signingkey=" + keyPath,
 		"commit-tree", "-S", "-F", path,
 	}
-	if parent != "" {
+	for _, parent := range parents {
 		args = append(args, "-p", parent)
 	}
 	args = append(args, tree)

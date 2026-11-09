@@ -317,3 +317,14 @@ func (t *dashboardTracker) ReadAttachment(ctx context.Context, id, oid string) (
 	}
 	return data, nil
 }
+
+func (t *dashboardTracker) ReadWikiImage(ctx context.Context, id, wiki, oid string) ([]byte, error) {
+	if t.err != nil {
+		return nil, redacted(t.err)
+	}
+	data, err := t.h.ReadWikiImage(ctx, id, wiki, oid)
+	if err != nil {
+		return nil, attachmentError(err)
+	}
+	return data, nil
+}

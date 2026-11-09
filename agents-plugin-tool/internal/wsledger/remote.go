@@ -36,7 +36,9 @@ import (
 // so it is unset after every filtered fetch; a binary that predates
 // attachments on the same clone then fetches whole. When the attachment
 // fetch fails the event fetch does not run, so an absorbed event never
-// names a blob missing from every attachment tree this clone has.
+// names a blob missing from every attachment tree this clone has. The wiki
+// refs (refs/heads/wiki/<name>, wiki.go) are fetched last, whole, with
+// their own follow-the-remote rules; they are not ledger refs.
 
 const (
 	remoteName  = "origin"
@@ -155,6 +157,9 @@ func (g *gitRepo) fetchRefs(ctx context.Context) (noFilter bool, err error) {
 	if _, err := g.fetchNamespace(ctx, "tracker/", "--no-filter"); err != nil {
 		return noFilter, err
 	}
+	if err := g.fetchWikiRefs(ctx); err != nil {
+		return noFilter, err
+	}
 	return noFilter, nil
 }
 
@@ -171,11 +176,26 @@ const (
 type pushSpec struct {
 	Ref   string
 	Lease *string
+	// Src is what to push to Ref: an object id, or "" for the local Ref
+	// itself (a wiki save pushes a commit before it moves the local ref).
+	Src string
+}
+
+func (s pushSpec) src() string {
+	if s.Src != "" {
+		return s.Src
+	}
+	return s.Ref
 }
 
 // push pushes one ref (see pushRefs).
 func (g *gitRepo) push(ctx context.Context, ref string, lease *string) (pushOutcome, error) {
 	return g.pushRefs(ctx, pushSpec{Ref: ref, Lease: lease})
+}
+
+// pushCommit pushes commit to ref under lease (see pushRefs).
+func (g *gitRepo) pushCommit(ctx context.Context, ref, commit string, lease *string) (pushOutcome, error) {
+	return g.pushRefs(ctx, pushSpec{Ref: ref, Lease: lease, Src: commit})
 }
 
 // pushRefs pushes the refs in one push, atomic when there are several (the
@@ -200,14 +220,14 @@ func (g *gitRepo) pushRefs(ctx context.Context, specs ...pushSpec) (pushOutcome,
 	}
 	args = append(args, remoteName)
 	for _, s := range specs {
-		args = append(args, s.Ref+":"+s.Ref)
+		args = append(args, s.src()+":"+s.Ref)
 	}
 	_, err := g.run(ctx, remoteArgs(args...)...)
 	if err == nil {
 		return pushOK, nil
 	}
 	for _, s := range specs {
-		if strings.Contains(err.Error(), "!\t"+s.Ref+":"+s.Ref+"\t[rejected]") {
+		if strings.Contains(err.Error(), "!\t"+s.src()+":"+s.Ref+"\t[rejected]") {
 			return pushRejected, nil
 		}
 	}
@@ -254,7 +274,10 @@ func (l *Ledger) fetchRemote(ctx context.Context) error {
 		l.noFilterWarned = true
 		l.pendingWarns = append(l.pendingWarns, noFilterWarning(attachPrefix+"*"))
 	}
-	return l.absorbRemote(ctx)
+	if err := l.absorbRemote(ctx); err != nil {
+		return err
+	}
+	return l.absorbWiki(ctx)
 }
 
 // absorbRemote applies the fetched snapshot to the local copies under the
@@ -641,6 +664,10 @@ func Register(ctx context.Context, opts Options, url string) (*Ledger, error) {
 		// registration.
 		if landed {
 			pushed = append(json.RawMessage(nil), l.genesis.raw...)
+		}
+		// A store that had no remote until now publishes its wikis too.
+		if err := l.pushLocalWikis(ctx); err != nil {
+			return err
 		}
 		if err := l.fetchRemote(ctx); err != nil {
 			return err

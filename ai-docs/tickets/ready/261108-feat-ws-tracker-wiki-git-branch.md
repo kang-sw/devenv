@@ -280,6 +280,75 @@ From `agents-plugin-tool/`: `go test` on the touched packages plus
 `./internal/mcp/`, `./internal/wsagent/`, `./internal/wsdashboard/`, and
 `go vet ./internal/...`.
 
+### Result (34218aa) - 2026-11-09
+
+Commits on `impl/develop/much-haiku-grove`: 17d383e (wsledger wiki branches,
+sync, save path, host methods), 86ecf88 (dashboard image read route),
+0cb6003 (MCP `wiki.query` / `wiki.update`, support profile, runtime maps),
+34218aa (review fixes).
+
+- Wikis live in package `wsledger` (`wiki.go`): `refs/heads/wiki/<name>`,
+  pages `<path>.md` at any depth, images `_attachments/<sha256>.<ext>`.
+  `fetchRefs` fetches the wiki namespace last, `--no-filter`, with
+  `--negotiation-tip` limited to wiki refs. `absorbWiki` follows the remote;
+  a rewind or a deletion of a wiki this clone knew keeps the replaced tip
+  under the local-only, never-pruned `refs/ledger/wiki-recovery/<name>/<oid>`
+  and warns (`WarnRewound` / `WarnDeleted`), judged against
+  `refs/ledger/known/wiki/<name>`; a wiki written before the store had a
+  remote is pushed by `Sync`, `Register`, and the next save
+  (`pushLocalWikis`, create-only or fast-forward under a lease).
+- `WikiSave` requires an explicit `Base` (ancestor of the tip; otherwise a
+  `stale-base` conflict, including an absent ref), refuses `NewWiki` on an
+  existing ref, applies the edit on the base tree, commits it signed with
+  the clone's key, merges three-way against a moved tip (Go-level tree merge
+  plus `git merge-file`; kinds `text`, `modify-delete`, `add-add`,
+  `tree-file`, `rename`), pushes the candidate commit by oid under
+  `--force-with-lease` on the tip it saw, and on a rejection fetches and
+  merges again up to five times, never forcing. `*WikiConflict` carries
+  kind, reason, base, theirs, the saver's text, and the tip's text. A store
+  with a remote never keeps a commit the remote refused; without a remote
+  the local ref moves alone.
+- Reads: `WikiList`, `WikiPages`, `WikiRead` (returns the commit as the
+  next base), `WikiSearch` (`git grep`), `WikiHistory` (signatures verified
+  against member keys, revoked keys included as for attachment commits;
+  unverified commits reported, not refused), `WikiDiff`, `WikiRecovery`,
+  `WikiImageRead` (hash-checked). Restore writes the page from an older
+  commit as a new commit and brings back the `attachment:<sha256>` images it
+  references.
+- `wstrackerhost` wraps the above; `WikiSave` types images by magic bytes,
+  bounds them by `attachments.max_bytes`, records a landed save as a sync
+  and a refusal as nothing. `ReadWikiImage` backs the dashboard route
+  `GET /tracker/stores/<id>/wiki/<name>/attachments/<sha256>`, which shares
+  the attachment route's tail (cross-site refused with `none` kept, magic
+  bytes only, nosniff, CSP, CORP same-origin) and is in
+  `TestLANModeGuardsEveryRoute`.
+- MCP `wiki.query` (list, pages, read, search, history, diff, recovery) and
+  `wiki.update` (write, rename, delete, restore; `images` as base64) are
+  gated like the tracker tools (a support conversation reaches its pinned
+  store alone), listed in `SupportWSTools` with one instruction line, and
+  present in the ws, wsflow, and pi `runtime.json` (pi mirrors ws byte for
+  byte; its bridge test pins the tool set).
+- Verification: `go test` passes on `./internal/wsledger/` (wiki tests
+  cover every bullet of the list above against a bare remote and two
+  clones), `./internal/wstrackerhost/`, `./internal/wsdashboard/`,
+  `./internal/mcp/`, `./internal/wsagent/`, `./internal/wsrsrc/`,
+  `./cmd/ws-mcp/`; `go vet ./internal/...` and `gofmt -l` clean; wsflow and
+  ws runtime-contract and downstream-neutral Python tests pass. The pi node
+  test did not run (no `node_modules` in the worktree); its tool set was
+  checked against `runtime.json` by script.
+- Deviations: wiki code lives in `wsledger` rather than a sibling package
+  (the route facts allowed either); the tool names are `wiki.query` /
+  `wiki.update` (dotted, like the tracker tools) rather than the ticket's
+  underscore spelling.
+- Review (lite): four Important findings, all fixed in 34218aa. Minor
+  findings left open: a delete that prunes a folder conflicts spuriously
+  with an addition inside that folder (refused, not wrong); a page holding
+  a NUL byte fails `git merge-file` with a raw error instead of a text
+  conflict; `commit` arguments accept any commit of the store clone, not
+  only the wiki's history; warnings found by a save's own fetch reach that
+  save's result but not the next Sync report.
+- Phase 2 remains; the ticket stays in `ready/`.
+
 ### Phase 2: drawer wiki card
 
 - The render route gains a page mode taking the wiki name: `attachment:`

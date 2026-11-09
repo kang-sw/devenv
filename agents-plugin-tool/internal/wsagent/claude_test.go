@@ -139,7 +139,7 @@ func TestClaudeArgsBuiltinSupportProfile(t *testing.T) {
 	if i < 0 {
 		t.Fatalf("no --allowedTools: %v", args)
 	}
-	want := []string{"Agent", "mcp__ws__tracker_query", "mcp__ws__tracker_update", "mcp__ws__tracker_show", "mcp__ws__git_search", "mcp__ws__playbook_read"}
+	want := []string{"Agent", "mcp__ws__tracker_query", "mcp__ws__tracker_update", "mcp__ws__tracker_show", "mcp__ws__wiki_query", "mcp__ws__wiki_update", "mcp__ws__git_search", "mcp__ws__playbook_read"}
 	if allowed := args[i+1:]; !slices.Equal(allowed, want) {
 		t.Fatalf("--allowedTools = %v, want %v", allowed, want)
 	}
