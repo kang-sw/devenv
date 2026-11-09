@@ -1356,6 +1356,45 @@
       }
     }
     drRoom();
+    drFill();
+  }
+  // drFill stretches cards into the empty cells of the panels grid's last
+  // row: the card directly above each empty cell spans two rows. Cards keep
+  // their DOM order (grid-auto-flow: dense would reorder them); a spanning
+  // card sits in the full row above the last, right of every last-row card,
+  // so auto-placement puts the last row's cards in the same cells as before.
+  // The column count is the computed track list (auto-fit's collapsed tracks
+  // read 0px). Spans clear first, and only while the body is a grid: the
+  // narrow layout (a flex column) and the git sheet (body hidden) get none.
+  // A card already placed or spanned by a stylesheet skips the fill.
+  var drFilled = [];
+  function drFill() {
+    if (!drbody) return;
+    drFilled.forEach(function (el) { el.style.gridRow = ""; });
+    drFilled = [];
+    var cs = getComputedStyle(drbody);
+    if (drbody.hidden || cs.display !== "grid") return;
+    var n = cs.gridTemplateColumns.split(/\s+/).filter(function (w) { return parseFloat(w) > 0; }).length;
+    var cards = [];
+    (function items(el) {
+      Array.prototype.forEach.call(el.children, function (c) {
+        var d = getComputedStyle(c).display;
+        if (d === "contents") items(c);
+        else if (d !== "none") cards.push(c);
+      });
+    })(drbody);
+    var k = cards.length, rem = n > 0 ? k % n : 0;
+    if (n < 2 || k <= n || !rem) return;
+    var placed = cards.some(function (c) {
+      var s = getComputedStyle(c);
+      return [s.gridRowStart, s.gridRowEnd, s.gridColumnStart, s.gridColumnEnd].some(function (v) { return v !== "auto"; });
+    });
+    if (placed) return;
+    var above = (Math.floor(k / n) - 1) * n;
+    for (var c = rem; c < n; c++) {
+      cards[above + c].style.gridRow = "span 2";
+      drFilled.push(cards[above + c]);
+    }
   }
   function drDot() {
     var d = drhandle.querySelector(".tdot");
@@ -1427,6 +1466,7 @@
     drhandle.setAttribute("aria-expanded", String(drOpen && !git));
     ghSync();
     drTitle();
+    drFill();
     // Each opening of a sheet reads its data again: the worktree pool for
     // the panels, the changed files for the git sheet.
     var shown = drOpen ? drMode : "";
@@ -1567,6 +1607,9 @@
       drRo.observe(drhandle);
       if (gitRegion) drRo.observe(gitRegion);
     }
+    // The panels grid's column count follows the body's width: the last
+    // row's fill is laid out again (drFill).
+    if (window.ResizeObserver) new ResizeObserver(drFill).observe(drbody);
     // The board-first page scrolls the document, and the header with it: the
     // sheet follows the header's bottom (the live layout never scrolls, so
     // this never fires there). Once a frame, and only when the bottom moved,
