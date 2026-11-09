@@ -959,6 +959,7 @@
   "js.tk.wk.tab": "Wiki",
   "js.tk.wk.theirs": "相手の版を読み込む",
   "js.tk.wk.theirs.side": "相手の版",
+  "js.tk.wk.toast.exists": "{0} にはすでにページがあります",
   "js.tk.wk.toast.fail": "保存されませんでした: {0}",
   "js.tk.wk.toast.name": "先に名前を直してください",
   "js.tk.wk.toast.path": "ページにパスを付けてください",

@@ -1132,13 +1132,14 @@
   // the wiki an editor's preview renders in: the one shown, once it exists
   function wkRenderName() { var st = wk(); return st.edit && !st.edit.newWiki && st.name ? st.name : undefined; }
   function wkHas(st, path) { return !!(st.pages && st.pages.paths.indexOf(path) >= 0); }
-  // Reads land on the state object they started from, for the wiki (and page) still shown.
+  // Reads land on the state object they started from, for the wiki (and page) still shown; a
+  // read for one no longer shown clears its busy flag and reads what is shown now instead.
   function wkLoadList(st, store) {
     if (st.listBusy) return;
     st.listBusy = true;
     AD.wiki.list(store, function (res) {
-      if (ui.wiki[store] !== st) return;
       st.listBusy = false;
+      if (ui.wiki[store] !== st) return;
       if (!res.ok) { st.listErr = res.error; if (!st.list) st.list = []; render(); return; }
       st.list = res.wikis; st.listErr = null;
       if (st.name && !st.list.some(function (w) { return w.name === st.name; }) && !(st.edit && st.edit.newWiki)) { st.name = null; st.pages = null; st.page = null; st.doc = null; }
@@ -1150,23 +1151,26 @@
     if (st.pagesBusy) return;
     st.pagesBusy = true;
     AD.wiki.pages(store, name, function (res) {
-      if (ui.wiki[store] !== st || st.name !== name) return;
       st.pagesBusy = false;
+      if (ui.wiki[store] !== st) return;
+      if (st.name !== name) { if (ui.store === store) wkPull(st); return; }
       if (!res.ok) { st.pagesErr = res.error; if (!st.pages) st.pages = { paths: [], commit: '' }; render(); return; }
       st.pages = { paths: res.pages.slice(), commit: res.commit }; st.pagesErr = null;
       if (!st.page && st.pages.paths.length) st.page = wkHas(st, 'index') ? 'index' : st.pages.paths[0];
       render();
     });
   }
-  function wkLoadDoc(st, store, name, path) {
+  // soft: a re-read of the page shown; one that is gone shows as an error, not as a new page
+  function wkLoadDoc(st, store, name, path, soft) {
     if (st.docBusy) return;
     st.docBusy = true;
     AD.wiki.read(store, name, path, function (res) {
-      if (ui.wiki[store] !== st || st.name !== name || st.page !== path) return;
       st.docBusy = false;
+      if (ui.wiki[store] !== st) return;
+      if (st.name !== name || st.page !== path) { if (ui.store === store) wkPull(st); return; }
       if (!res.ok) {
         // a page that is not there (a wiki: link to it) opens as a new page at that path
-        if (res.status === 404 && !st.edit) { st.doc = null; st.docErr = null; wkStartEdit(path, true, false); return; }
+        if (res.status === 404 && !st.edit && !soft) { st.doc = null; st.docErr = null; wkStartEdit(path, true, false); return; }
         st.docErr = res.error; render(); return;
       }
       st.doc = { path: res.path, content: res.content, commit: res.commit, html: res.html }; st.docErr = null;
@@ -1183,6 +1187,17 @@
   function wkReload(st) {
     st.list = null; st.pages = null; st.doc = null; st.docErr = null;
     wkPull(st);
+  }
+  // A tracker change (a save by an agent, by another browser, or one the host's poll round
+  // brought in) re-reads the wiki shown; what arrives replaces what is drawn, the page
+  // excepted while it is edited or its refused save shows.
+  function wkRefresh() {
+    if (!AD.wiki || !ui.store) return;
+    var st = ui.wiki[ui.store], store = ui.store;
+    if (!st || st.list === null || !(st.mode === 'wiki' || (ui.layout === 'narrow' && tabState().narrow === 'wiki'))) return;
+    wkLoadList(st, store);
+    if (st.name && !(st.edit && st.edit.newWiki)) wkLoadPages(st, store, st.name);
+    if (st.name && st.page && !st.edit && !st.conflict) wkLoadDoc(st, store, st.name, st.page, true);
   }
 
   function wkPicker() {
@@ -1286,15 +1301,20 @@
   // they replace, lines: side's line indexes}]; wkMarks classes each side's lines 'conf' when
   // its region overlaps one of the other side (the lines that refused the merge) or 'chg'.
   function wkRegions(base, side) {
+    // the lines both start and end with are aligned as they are; the table covers the rest
+    var pre = 0, suf = 0, N = base.length, M = side.length;
+    while (pre < N && pre < M && base[pre] === side[pre]) pre++;
+    while (suf < N - pre && suf < M - pre && base[N - 1 - suf] === side[M - 1 - suf]) suf++;
+    base = base.slice(pre, N - suf); side = side.slice(pre, M - suf);
     var n = base.length, m = side.length, T = [], i, j;
     for (i = 0; i <= n; i++) T.push(new Array(m + 1).fill(0));
     for (i = n - 1; i >= 0; i--) for (j = m - 1; j >= 0; j--) T[i][j] = base[i] === side[j] ? T[i + 1][j + 1] + 1 : Math.max(T[i + 1][j], T[i][j + 1]);
     var regs = [], cur = null;
     i = 0; j = 0;
-    function close() { if (cur) { cur.b1 = i; regs.push(cur); cur = null; } }
+    function close() { if (cur) { cur.b1 = i + pre; regs.push(cur); cur = null; } }
     while (i < n || j < m) {
       if (i < n && j < m && base[i] === side[j]) { close(); i++; j++; }
-      else { if (!cur) cur = { b0: i, lines: [] }; if (j < m && (i >= n || T[i][j + 1] >= T[i + 1][j])) { cur.lines.push(j); j++; } else i++; }
+      else { if (!cur) cur = { b0: i + pre, lines: [] }; if (j < m && (i >= n || T[i][j + 1] >= T[i + 1][j])) { cur.lines.push(j + pre); j++; } else i++; }
     }
     close();
     return regs;
@@ -1396,6 +1416,8 @@
     st.creating = false; st.edit = null; st.conflict = null; st.more = false; st.pick = false; st.ntree = false;
     if (st.name !== name) { st.name = name; st.pages = null; st.q = ''; }
     st.page = path; st.doc = null; st.docErr = null; st.flash = true; st.top = true;
+    // a link into a wiki the store does not have yet starts that wiki with this page
+    if (st.list && !st.list.some(function (w) { return w.name === name; })) { st.pages = { paths: [], commit: '' }; wkStartEdit(path, true, true); return; }
     if (st.pages && !wkHas(st, path)) { wkStartEdit(path, true, false); return; }
     wkShow();
     render();
@@ -1439,15 +1461,19 @@
     if (box) ed.text = box.value;
     var path = ed.isNew ? ($('wk-epath') ? $('wk-epath').value : ed.newPath).trim().replace(/^\/+|\/+$/g, '').replace(/\/{2,}/g, '/') : ed.path;
     if (!path) return toast(esc(wsT("js.tk.wk.toast.path")));
+    if (ed.isNew && wkHas(st, path)) return toast(esc(wsT("js.tk.wk.toast.exists", path)));
     st.saving = true; render();
     AD.wiki.save(store, name, { base: ed.newWiki ? '' : ed.base, newWiki: !!ed.newWiki, op: 'write', path: path, content: ed.text, attachments: savedAtts('wk-ebody', ed.text) }, function (res) {
-      if (ui.wiki[store] !== st || st.edit !== ed) return;
       st.saving = false;
+      var live = ui.wiki[store] === st && st.edit === ed; // the editor this save left from still shows
       if (res.ok) {
-        st.edit = null; st.conflict = null; st.page = path; st.flash = true; st.top = true;
         toast(esc(wsT(res.merged ? "js.tk.wk.saved.merged" : "js.tk.wk.saved", wkSha(res.commit))) + (res.warnings || []).map(function (w) { return '<br>' + esc(w); }).join(''));
-        wkReload(st); render(); return;
+        if (live) { st.edit = null; st.conflict = null; st.page = path; st.flash = true; st.top = true; }
+        // what the save changed is re-read on the next draw of this store's wiki
+        st.list = null; st.pages = null; st.doc = null; st.docErr = null;
+        render(); return;
       }
+      if (!live) { if (!res.conflict) toast(esc(wsT("js.tk.wk.toast.fail", res.error))); return; }
       if (res.conflict) { st.conflict = { c: res.conflict, mine: ed.text, orig: ed.orig }; st.full = false; render(); return; }
       toast(esc(wsT("js.tk.wk.toast.fail", res.error))); render();
     });
@@ -3627,7 +3653,8 @@
     // an editor's preview ends with the editor: an edit saved or cancelled, a comment posted, another item
     if (!ui.iedit) { delete ui.edpv['iw-ebody']; delete ui.eatt['iw-ebody']; }
     if (!ui.cedit) { delete ui.edpv.tkcedit; delete ui.eatt.tkcedit; }
-    if (!wk().edit) { delete ui.edpv['wk-ebody']; delete ui.eatt['wk-ebody']; }
+    // the wiki editor's preview and uploads go when no store's wiki edit is open (another store's edit keeps them)
+    if (!Object.keys(ui.wiki).some(function (k) { return !!ui.wiki[k].edit; })) { delete ui.edpv['wk-ebody']; delete ui.eatt['wk-ebody']; }
     if (!open || ui.itemChanged || ui.clearDraft) { delete ui.edpv.cbox; delete ui.eatt.cbox; }
     if (open) {
       sb.innerHTML = windowHtml(v, VS.items[ui.item]);
@@ -4355,7 +4382,7 @@
     };
     syncHandles();
     ui.store = order[0] || null;
-    AD.onChange(function () { render(); });
+    AD.onChange(function () { wkRefresh(); render(); });
     applyRoute();
     // read-only hook for scripted checks (headless verification); not part of the model
     window.__tracker = { ui: ui, vs: function () { return VS; }, openItemWindow: openItemWindow };

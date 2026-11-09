@@ -959,6 +959,7 @@
   "js.tk.wk.tab": "Wiki",
   "js.tk.wk.theirs": "Ihre Version laden",
   "js.tk.wk.theirs.side": "Ihre Version",
+  "js.tk.wk.toast.exists": "Unter {0} gibt es schon eine Seite",
   "js.tk.wk.toast.fail": "Nicht gespeichert: {0}",
   "js.tk.wk.toast.name": "Zuerst den Namen korrigieren",
   "js.tk.wk.toast.path": "Der Seite einen Pfad geben",
