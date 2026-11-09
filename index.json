@@ -350,19 +350,6 @@
         }
       }
     },
-    "261108-feat-ws-tracker-support-agent-chat": {
-      "registered_at": "2026-11-08T00:25:15Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-09T03:54:36Z",
-        "impl": {
-          "branch": "impl/develop/judo-jab-outer"
-        }
-      }
-    },
     "261108-feat-ws-tracker-wiki-git-branch": {
       "registered_at": "2026-11-08T03:56:55Z"
     },
@@ -372,7 +359,7 @@
         "email": "ki6080@gmail.com",
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
-        "phase": "active",
+        "phase": "closed",
         "touched_at": "2026-11-09T04:13:38Z",
         "impl": {
           "branch": "impl/develop/mummy-amuck-rage"
