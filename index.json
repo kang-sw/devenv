@@ -370,7 +370,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-09T04:12:32Z"
+        "touched_at": "2026-11-09T04:13:36Z",
+        "impl": {
+          "branch": "impl/develop/exes-drier-awoke"
+        }
       }
     },
     "261109-feat-ws-dashboard-subagent-badge": {
