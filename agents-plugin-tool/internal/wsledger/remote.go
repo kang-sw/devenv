@@ -280,11 +280,25 @@ func (l *Ledger) fetchRemote(ctx context.Context) error {
 		return err
 	}
 	if err := l.git.fetchWikiRefs(ctx); err != nil {
-		l.pendingWarns = append(l.pendingWarns, Warning{Ref: wikiPrefix + "*", Kind: WarnWikiSyncFailed,
+		// A Sync can fetch twice before its report drains this (a reissue
+		// publishes again); the report carries the failure once.
+		l.addPending(Warning{Ref: wikiPrefix + "*", Kind: WarnWikiSyncFailed,
 			Detail: "wiki fetch failed: " + err.Error() + "; the wikis stay as the last fetch left them and the next sync retries"})
 		return nil
 	}
 	return l.absorbWiki(ctx)
+}
+
+// addPending queues w for the next report, replacing a queued warning of
+// the same ref and kind.
+func (l *Ledger) addPending(w Warning) {
+	for i, p := range l.pendingWarns {
+		if p.Ref == w.Ref && p.Kind == w.Kind {
+			l.pendingWarns[i] = w
+			return
+		}
+	}
+	l.pendingWarns = append(l.pendingWarns, w)
 }
 
 // absorbRemote applies the fetched snapshot to the local copies under the

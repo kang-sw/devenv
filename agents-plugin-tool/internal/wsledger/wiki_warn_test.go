@@ -54,3 +54,29 @@ func countWarnings(ws []Warning, ref, kind string) int {
 	}
 	return n
 }
+
+// TestWikiFetchFailureReportedOnce: a Sync that fetches twice before its
+// report (a reissue publishes again) carries the failed wiki fetch once.
+func TestWikiFetchFailureReportedOnce(t *testing.T) {
+	w := newWorld(t)
+	url := w.newRemote("r")
+	ob := w.remoteOpts("bo", "c1")
+	fr := &wikiFaultRunner{inner: wsgit.ExecRunner{Env: GitEnv}}
+	ob.Runner = fr
+	bo := w.register(ob, url)
+	fr.set("", true)
+	ctx := context.Background()
+	if err := bo.withLock(ctx, func() error {
+		if err := bo.fetchRemote(ctx); err != nil {
+			return err
+		}
+		return bo.fetchRemote(ctx)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var rep SyncReport
+	bo.finishReport(&rep)
+	if n := countWarnings(rep.Warnings, wikiPrefix+"*", WarnWikiSyncFailed); n != 1 {
+		t.Fatalf("two failed wiki fetches in one report: %d warnings, want 1: %+v", n, rep.Warnings)
+	}
+}
