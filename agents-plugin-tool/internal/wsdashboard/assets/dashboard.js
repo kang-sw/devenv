@@ -2144,7 +2144,11 @@
     });
     return out;
   }
-  function glFail(msg) {
+  function glFail(msg, append) {
+    // A failed further page keeps the rows already drawn and says so where
+    // its "Load more" was.
+    var more = append && gl.commits.length && q(".glmore", glrows)[0];
+    if (more) { q(".glmore-b", more).forEach(function (b) { b.disabled = false; }); more.lastChild.textContent = wsT("js.git.log.fail", msg); return; }
     glcount.hidden = true;
     glrows.textContent = "";
     glrows.appendChild(mk("div", "gempty err", wsT("js.git.log.fail", msg)));
@@ -2208,7 +2212,9 @@
   }
   // glLoad reads the first page again, or (append) the next one.
   function glLoad(append) {
-    if (!glog || !window.fetch || !glog.offsetWidth) return;
+    if (!glog || !window.fetch) return;
+    // Hidden (narrow layout): read it again once it shows.
+    if (!glog.offsetWidth) { if (!append) gl.loaded = false; return; }
     if (append && (!gl.more || gl.busy)) return;
     gl.loaded = true;
     var seq = ++gl.seq, offset = append ? gl.more : 0;
@@ -2219,9 +2225,9 @@
       return r.text().then(function (s) {
         if (seq !== gl.seq) return;
         gl.busy = false;
-        if (!r.ok) { glFail(s.trim() || "HTTP " + r.status); return; }
+        if (!r.ok) { glFail(s.trim() || "HTTP " + r.status, append); return; }
         var v;
-        try { v = JSON.parse(s); } catch (e) { glFail("malformed answer"); return; }
+        try { v = JSON.parse(s); } catch (e) { glFail("malformed answer", append); return; }
         if (!append) { gl.commits = []; gl.width = 1; gl.page = (v.commits || []).length; }
         gl.commits = gl.commits.concat(v.commits || []);
         gl.width = Math.max(gl.width, v.width || 1);
@@ -2229,7 +2235,7 @@
         gl.head = v.head || "";
         glDraw();
       });
-    }, function () { if (seq === gl.seq) { gl.busy = false; glFail(wsT("js.post.unreachable")); } });
+    }, function () { if (seq === gl.seq) { gl.busy = false; glFail(wsT("js.post.unreachable"), append); } });
   }
   // The tooltip: subject, refs, author, age, short hash, under the row.
   var gltip = null;
