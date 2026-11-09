@@ -79,6 +79,7 @@ func (h *Host) CheckAll(ctx context.Context) {
 // every registered store with a remote.
 func (h *Host) PollOnce(ctx context.Context) {
 	h.forEachStore(ctx, func(st *store) {
+		h.trySweep(st)
 		if st.entry.Remote == "" {
 			return
 		}

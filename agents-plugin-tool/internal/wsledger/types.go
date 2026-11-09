@@ -117,6 +117,14 @@ type NewEvent struct {
 	Payload json.RawMessage
 }
 
+// Blob is one attachment's content, handed to AppendWithBlobs with the
+// events whose payloads name it. OID is the lowercase hex sha256 of Data;
+// the ledger refuses a blob whose content does not hash to its oid.
+type Blob struct {
+	OID  string
+	Data []byte
+}
+
 // Cursor is a read position for Events: a per-stream watermark of the
 // causal events already delivered, plus the verdict generation the caller
 // has seen. The zero Cursor reads everything. A cursor from another Ledger
@@ -199,6 +207,14 @@ const (
 	// WarnBadRef: a ref under the ledger namespace whose name is not a
 	// ledger ref; it is not read.
 	WarnBadRef = "bad-ref"
+	// WarnBadAttachment: a commit of an attachment ref is not a signed pure
+	// addition of attachment blobs by the ref's member; it and the commits
+	// after it are not read, so their blobs are never served.
+	WarnBadAttachment = "bad-attachment"
+	// WarnNoFilter: the remote does not honor partial-clone filters, so the
+	// attachment refs were fetched whole and this clone holds every
+	// attachment. Reported once per store per process.
+	WarnNoFilter = "no-filter"
 )
 
 // SyncReport is the outcome of one Sync or Fetch.

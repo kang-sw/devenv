@@ -64,7 +64,9 @@ type Options struct {
 	PushDelay time.Duration
 	// Veto is the optional domain veto hook for identity events.
 	Veto VetoFunc
-	// Runner runs git; nil means wsgit.ExecRunner.
+	// Runner runs git; nil means wsgit.ExecRunner with GitEnv. A caller's
+	// runner should set GitEnv too, or a partial clone may fetch a missing
+	// attachment blob implicitly where only ReadAttachment should.
 	Runner wsgit.Runner
 }
 
@@ -94,6 +96,15 @@ type Ledger struct {
 	claims   map[string]*commitRec // member id -> claim commit
 	sigCache map[string]sigInfo
 	badRefs  []Warning
+
+	// Attachments (attach.go).
+	attach      map[string]*attachState // attachment ref -> parsed history
+	attachIndex map[string][]attachLoc  // attachment oid -> verified copies, by ref name
+	attachWarns []Warning
+	// pendingWarns are one-shot warnings the next report carries (the
+	// no-filter fallback, reported once per store per process).
+	pendingWarns   []Warning
+	noFilterWarned bool
 
 	view          *view
 	pendingCommit *commitRec
@@ -150,7 +161,7 @@ func (o Options) normalize() (Options, error) {
 		o.PushDelay = DefaultPushDelay
 	}
 	if o.Runner == nil {
-		o.Runner = wsgit.ExecRunner{}
+		o.Runner = wsgit.ExecRunner{Env: GitEnv}
 	}
 	return o, nil
 }
@@ -183,6 +194,7 @@ func newLedger(ctx context.Context, opts Options) (*Ledger, error) {
 		claims:   map[string]*commitRec{},
 		sigCache: map[string]sigInfo{},
 		marks:    map[EventID]mark{},
+		attach:   map[string]*attachState{},
 	}, nil
 }
 
@@ -609,11 +621,15 @@ func (l *Ledger) refresh(ctx context.Context) error {
 			delete(l.claims, member)
 		}
 	}
+	if err := l.loadAttachRefs(ctx); err != nil {
+		return err
+	}
 	if err := l.checkSignatures(ctx); err != nil {
 		return err
 	}
 	l.committedMax = l.ownSeqThrough("")
 	l.rebuild()
+	l.evalAttach()
 	return nil
 }
 
@@ -691,6 +707,9 @@ func (l *Ledger) checkSignatures(ctx context.Context) error {
 	}
 	for _, c := range l.claims {
 		need(c)
+	}
+	for _, oid := range l.attachCommitOIDs() {
+		need(&commitRec{OID: oid})
 	}
 	if len(oids) == 0 {
 		return nil
@@ -852,6 +871,11 @@ func (l *Ledger) closeBatch(ctx context.Context) (bool, error) {
 	if pend[0].Seq != l.committedMax+1 {
 		return false, errJournalGap
 	}
+	// The attachment commit first, so the event commit never precedes the
+	// blobs it names, locally or (one atomic push) on the remote.
+	if err := l.commitAttachments(ctx, pend); err != nil {
+		return false, err
+	}
 	tip := l.ownTip()
 	oid, err := l.writeEventCommit(ctx, tip, l.journal.batchSeen, l.now(), pend)
 	if err != nil {
@@ -872,18 +896,26 @@ func (l *Ledger) receiveClose(ctx context.Context) (bool, error) {
 	return l.closeBatch(ctx)
 }
 
-// Append writes events durably to this clone's journal.
-func (l *Ledger) Append(ctx context.Context, events []NewEvent) ([]EventID, error) {
+// checkNewEvents validates the shape of events the domain appends.
+func checkNewEvents(events []NewEvent) error {
 	for i, e := range events {
 		if e.Type == "" {
-			return nil, fmt.Errorf("ledger: event %d: type required", i)
+			return fmt.Errorf("ledger: event %d: type required", i)
 		}
 		if e.Type == TypeMemberJoin {
-			return nil, fmt.Errorf("ledger: event %d: %s is written by Join", i, TypeMemberJoin)
+			return fmt.Errorf("ledger: event %d: %s is written by Join", i, TypeMemberJoin)
 		}
 		if len(e.Payload) > 0 && !json.Valid(e.Payload) {
-			return nil, fmt.Errorf("ledger: event %d: payload is not valid JSON", i)
+			return fmt.Errorf("ledger: event %d: payload is not valid JSON", i)
 		}
+	}
+	return nil
+}
+
+// Append writes events durably to this clone's journal.
+func (l *Ledger) Append(ctx context.Context, events []NewEvent) ([]EventID, error) {
+	if err := checkNewEvents(events); err != nil {
+		return nil, err
 	}
 	var ids []EventID
 	err := l.withLock(ctx, func() error {
@@ -894,7 +926,7 @@ func (l *Ledger) Append(ctx context.Context, events []NewEvent) ([]EventID, erro
 			return err
 		}
 		var err error
-		if ids, err = l.appendLocked(events, nil); err != nil {
+		if ids, err = l.appendLocked(events, nil, nil); err != nil {
 			return err
 		}
 		if l.hasRemote(ctx) {
@@ -905,7 +937,9 @@ func (l *Ledger) Append(ctx context.Context, events []NewEvent) ([]EventID, erro
 	return ids, err
 }
 
-func (l *Ledger) appendLocked(events []NewEvent, of []int) ([]EventID, error) {
+// appendLocked journals events; att, when set, is recorded with the first
+// of them (the batch commits as one, so the attachment commit covers all).
+func (l *Ledger) appendLocked(events []NewEvent, of []int, att map[string]string) ([]EventID, error) {
 	now := l.now()
 	items := make([]journalEvent, len(events))
 	for i, e := range events {
@@ -913,6 +947,9 @@ func (l *Ledger) appendLocked(events []NewEvent, of []int) ([]EventID, error) {
 		if of != nil {
 			items[i].Of = of[i]
 		}
+	}
+	if len(att) > 0 && len(items) > 0 {
+		items[0].Att = att
 	}
 	return l.appendEvents(items)
 }
@@ -936,7 +973,7 @@ func (l *Ledger) appendEvents(events []journalEvent) ([]EventID, error) {
 			payload = json.RawMessage("{}")
 		}
 		ts := e.TS
-		recs = append(recs, journalRec{K: "ev", Seq: seq, TS: &ts, Type: e.Type, Origin: e.Origin, Payload: payload, Of: e.Of})
+		recs = append(recs, journalRec{K: "ev", Seq: seq, TS: &ts, Type: e.Type, Origin: e.Origin, Payload: payload, Of: e.Of, Att: e.Att})
 		ids = append(ids, EventID{Member: l.member, Clone: l.clone, Seq: seq})
 	}
 	if err := l.journal.write(recs...); err != nil {
@@ -969,7 +1006,7 @@ func (l *Ledger) reissue() (int, error) {
 	if len(events) == 0 {
 		return 0, nil
 	}
-	if _, err := l.appendLocked(events, of); err != nil {
+	if _, err := l.appendLocked(events, of, nil); err != nil {
 		return 0, err
 	}
 	return len(events), nil
@@ -1081,7 +1118,9 @@ func (l *Ledger) finishReport(rep *SyncReport) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	rep.Received = l.received
-	rep.Warnings = append(append(rep.Warnings, l.remoteWarns...), l.badRefs...)
+	rep.Warnings = append(append(append(rep.Warnings, l.remoteWarns...), l.badRefs...), l.attachWarns...)
+	rep.Warnings = append(rep.Warnings, l.pendingWarns...)
+	l.pendingWarns = nil
 	rep.Pending = l.pendingLocked()
 }
 

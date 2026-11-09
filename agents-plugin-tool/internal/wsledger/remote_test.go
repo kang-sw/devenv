@@ -863,7 +863,9 @@ func TestReloadReadsOtherProcessesWithoutNetwork(t *testing.T) {
 	}
 }
 
-// failFetchRunner fails the nth fetch (1-based) and runs everything else.
+// failFetchRunner fails the nth fetch round (1-based) and runs everything
+// else. A round is one fetchRemote: the attachment-ref fetch (which starts
+// it) and the event-ref fetch; the runner fails the round at its start.
 type failFetchRunner struct {
 	mu      sync.Mutex
 	fetches int
@@ -871,19 +873,25 @@ type failFetchRunner struct {
 }
 
 func (r *failFetchRunner) RunGit(ctx context.Context, root string, args ...string) ([]byte, error) {
-	for _, a := range args {
-		if a == "fetch" {
-			r.mu.Lock()
-			r.fetches++
-			fail := r.fetches == r.n
-			r.mu.Unlock()
-			if fail {
-				return nil, errors.New("fetch broke")
-			}
-			break
+	if isFetch(args) && strings.HasPrefix(args[len(args)-1], "+"+attachPrefix) {
+		r.mu.Lock()
+		r.fetches++
+		fail := r.fetches == r.n
+		r.mu.Unlock()
+		if fail {
+			return nil, errors.New("fetch broke")
 		}
 	}
-	return wsgit.ExecRunner{}.RunGit(ctx, root, args...)
+	return wsgit.ExecRunner{Env: GitEnv}.RunGit(ctx, root, args...)
+}
+
+func isFetch(args []string) bool {
+	for _, a := range args {
+		if a == "fetch" {
+			return true
+		}
+	}
+	return false
 }
 
 // TestRegisterFailureAfterAPushIsPushedErrorOnlyWhenOneLanded: a failure of

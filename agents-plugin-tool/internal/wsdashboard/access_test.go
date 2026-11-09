@@ -115,6 +115,8 @@ func guardedRoutes() []struct{ method, path, body string } {
 		{http.MethodPost, "/tracker/stores/team/check", ""},
 		{http.MethodPost, "/tracker/stores/team/sync", ""},
 		{http.MethodPost, "/tracker/stores/team/seen", `{"badge":["b"]}`},
+		{http.MethodPost, "/tracker/stores/team/attachments?name=guard.png", "\x89PNG\r\n\x1a\nguard"},
+		{http.MethodGet, "/tracker/stores/team/attachments/" + strings.Repeat("0", 64), ""},
 		{http.MethodGet, "/tracker/profiles", ""},
 		{http.MethodPost, "/tracker/profiles", `{"given":"Ada"}`},
 		{http.MethodPost, "/tracker/register", `{"id":"new"}`},

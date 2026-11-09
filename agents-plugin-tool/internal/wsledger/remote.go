@@ -16,22 +16,52 @@ import (
 // ref namespaces meet here:
 //
 //	refs/heads/tracker/...         local copies, the only refs verification reads
-//	refs/ledger/remote/tracker/... the remote as the last fetch saw it (pruned)
-//	refs/ledger/known/tracker/...  the last value of each ref known to have been
+//	refs/heads/attach/...          local copies of the attachment refs (attach.go)
+//	refs/ledger/remote/...         the remote as the last fetch saw it (pruned)
+//	refs/ledger/known/...          the last value of each ref known to have been
 //	                               on the remote (fetched or pushed); never
 //	                               pruned, so a deletion stays visible
 //
 // A fetch moves a local copy only into existence or forward along a member
-// ref; anything else is refused with a warning and the local copy is kept
-// (rewind refusal). Only a ref value that was once pushed or fetched is
-// protected: a create-once ref this clone wrote but never pushed is replaced
-// by the remote's when its push loses.
+// or attachment ref; anything else is refused with a warning and the local
+// copy is kept (rewind refusal). Only a ref value that was once pushed or
+// fetched is protected: a create-once ref this clone wrote but never pushed
+// is replaced by the remote's when its push loses.
+//
+// Fetch modes: attachment refs are fetched first, with --filter=blob:none
+// (commits and trees only; git marks the remote as the promisor on the first
+// filtered fetch), then event refs with --no-filter, so verification never
+// lacks an event blob. Git also records the filter in
+// remote.origin.partialclonefilter, which a later plain fetch would inherit,
+// so it is unset after every filtered fetch; a binary that predates
+// attachments on the same clone then fetches whole. When the attachment
+// fetch fails the event fetch does not run, so an absorbed event never
+// names a blob missing from every attachment tree this clone has.
 
 const (
 	remoteName  = "origin"
 	snapPrefix  = "refs/ledger/remote/"
 	knownPrefix = "refs/ledger/known/"
 )
+
+// ledgerNamespaces are the branch namespaces a store uses under
+// refs/heads/, refs/ledger/remote/, and refs/ledger/known/.
+var ledgerNamespaces = []string{"tracker/", "attach/"}
+
+// listLedgerRefs lists every ref under prefix + each ledger namespace.
+func (g *gitRepo) listLedgerRefs(ctx context.Context, prefix string) (map[string]string, error) {
+	out := map[string]string{}
+	for _, ns := range ledgerNamespaces {
+		refs, err := g.listRefs(ctx, prefix+ns)
+		if err != nil {
+			return nil, err
+		}
+		for k, v := range refs {
+			out[k] = v
+		}
+	}
+	return out, nil
+}
 
 func snapRef(ref string) string  { return snapPrefix + strings.TrimPrefix(ref, "refs/heads/") }
 func knownRef(ref string) string { return knownPrefix + strings.TrimPrefix(ref, "refs/heads/") }
@@ -53,7 +83,12 @@ const (
 	kindGenesis
 	kindClaim
 	kindMember
+	kindAttach
 )
+
+// appendOnly reports a ref that only ever moves forward (a member's event
+// ref or attachment ref), as opposed to a create-once ref.
+func (k refKind) appendOnly() bool { return k == kindMember || k == kindAttach }
 
 func classifyRef(ref string) refKind {
 	if ref == genesisRef {
@@ -64,6 +99,9 @@ func classifyRef(ref string) refKind {
 	}
 	if _, _, ok := parseMemberRef(ref); ok {
 		return kindMember
+	}
+	if _, _, ok := parseAttachRef(ref); ok {
+		return kindAttach
 	}
 	return kindBad
 }
@@ -87,13 +125,37 @@ func remoteArgs(args ...string) []string {
 	return append([]string{"-c", "credential.interactive=false"}, args...)
 }
 
-// fetchTracker sets the snapshot namespace to exactly the remote's tracker
-// branches. A fetch with nothing new transfers no objects.
-func (g *gitRepo) fetchTracker(ctx context.Context) error {
-	_, err := g.run(ctx, remoteArgs("fetch", "--quiet", "--no-tags", "--no-write-fetch-head",
-		"--prune", "--no-auto-gc", "--no-recurse-submodules",
-		remoteName, "+"+refPrefix+"*:"+snapPrefix+"tracker/*")...)
-	return err
+// fetchNamespace sets one snapshot namespace to exactly the remote's
+// branches under it. A fetch with nothing new transfers no objects. The
+// combined output is returned for the caller to read git's warnings.
+func (g *gitRepo) fetchNamespace(ctx context.Context, ns string, mode ...string) ([]byte, error) {
+	args := append([]string{"fetch", "--no-tags", "--no-write-fetch-head",
+		"--prune", "--no-auto-gc", "--no-recurse-submodules"}, mode...)
+	args = append(args, remoteName, "+refs/heads/"+ns+"*:"+snapPrefix+ns+"*")
+	return g.run(ctx, remoteArgs(args...)...)
+}
+
+// fetchRefs fetches the remote's ledger refs into the snapshot namespace in
+// the two modes the file comment describes: attachment refs filtered, then
+// event refs whole. It reports whether the server ignored the filter.
+func (g *gitRepo) fetchRefs(ctx context.Context) (noFilter bool, err error) {
+	out, err := g.fetchNamespace(ctx, "attach/", "--filter=blob:none")
+	// Unset before judging the error: a failed filtered fetch may have
+	// recorded the filter already.
+	if _, uerr := g.run(ctx, "config", "--unset", "remote."+remoteName+".partialclonefilter"); uerr != nil && err == nil {
+		// Exit 5 is "no such key"; anything else is a real failure.
+		if !strings.Contains(uerr.Error(), "exit status 5") {
+			return false, uerr
+		}
+	}
+	if err != nil {
+		return false, err
+	}
+	noFilter = strings.Contains(string(out), noFilterMarker)
+	if _, err := g.fetchNamespace(ctx, "tracker/", "--no-filter"); err != nil {
+		return noFilter, err
+	}
+	return noFilter, nil
 }
 
 type pushOutcome int
@@ -103,27 +165,51 @@ const (
 	pushRejected
 )
 
-// push pushes the local ref to the same name on the remote, fast-forward
-// only, or, with lease set, forced but only while the remote still holds
-// *lease ("" = must not exist). A client-side "[rejected]" (the remote ref
-// is not what this push expects: a lost race, a foreign advance, a deletion
-// under a lease) is pushRejected, which the fetch after the push explains.
-// A "[remote rejected]" (a hook, branch protection, or missing permission)
-// and a transport or credential failure are errors, so Sync reports them.
+// pushSpec is one ref of a push: pushed to its own name on the remote,
+// fast-forward only, or, with Lease set, forced but only while the remote
+// still holds *Lease ("" = must not exist).
+type pushSpec struct {
+	Ref   string
+	Lease *string
+}
+
+// push pushes one ref (see pushRefs).
 func (g *gitRepo) push(ctx context.Context, ref string, lease *string) (pushOutcome, error) {
+	return g.pushRefs(ctx, pushSpec{Ref: ref, Lease: lease})
+}
+
+// pushRefs pushes the refs in one push, atomic when there are several (the
+// remote takes all or none; a host without the atomic capability fails the
+// push with an error naming it). A client-side "[rejected]" on any ref (the
+// remote ref is not what this push expects: a lost race, a foreign advance,
+// a deletion under a lease, or the atomic transaction failed on another
+// ref) is pushRejected, which the fetch after the push explains. A "[remote
+// rejected]" (a hook, branch protection, or missing permission) and a
+// transport or credential failure are errors, so Sync reports them.
+func (g *gitRepo) pushRefs(ctx context.Context, specs ...pushSpec) (pushOutcome, error) {
 	args := []string{"push", "--porcelain", "--no-verify"}
-	if lease != nil {
-		// No "+" on the refspec: a forced refspec overrides the lease. A
-		// matching lease alone permits a non-fast-forward update.
-		args = append(args, "--force-with-lease="+ref+":"+*lease)
+	if len(specs) > 1 {
+		args = append(args, "--atomic")
 	}
-	args = append(args, remoteName, ref+":"+ref)
+	for _, s := range specs {
+		if s.Lease != nil {
+			// No "+" on the refspec: a forced refspec overrides the lease. A
+			// matching lease alone permits a non-fast-forward update.
+			args = append(args, "--force-with-lease="+s.Ref+":"+*s.Lease)
+		}
+	}
+	args = append(args, remoteName)
+	for _, s := range specs {
+		args = append(args, s.Ref+":"+s.Ref)
+	}
 	_, err := g.run(ctx, remoteArgs(args...)...)
 	if err == nil {
 		return pushOK, nil
 	}
-	if strings.Contains(err.Error(), "!\t"+ref+":"+ref+"\t[rejected]") {
-		return pushRejected, nil
+	for _, s := range specs {
+		if strings.Contains(err.Error(), "!\t"+s.Ref+":"+s.Ref+"\t[rejected]") {
+			return pushRejected, nil
+		}
 	}
 	return pushOK, err
 }
@@ -160,8 +246,13 @@ func (l *Ledger) loadKnownOwn(ctx context.Context) error {
 
 // fetchRemote fetches and applies the snapshot to the local copies.
 func (l *Ledger) fetchRemote(ctx context.Context) error {
-	if err := l.git.fetchTracker(ctx); err != nil {
+	noFilter, err := l.git.fetchRefs(ctx)
+	if err != nil {
 		return fmt.Errorf("ledger: fetch: %w", err)
+	}
+	if noFilter && !l.noFilterWarned {
+		l.noFilterWarned = true
+		l.pendingWarns = append(l.pendingWarns, noFilterWarning(attachPrefix+"*"))
 	}
 	return l.absorbRemote(ctx)
 }
@@ -169,15 +260,15 @@ func (l *Ledger) fetchRemote(ctx context.Context) error {
 // absorbRemote applies the fetched snapshot to the local copies under the
 // rewind-refusal rules and records the anomalies in l.remoteWarns.
 func (l *Ledger) absorbRemote(ctx context.Context) error {
-	local, err := l.git.listRefs(ctx, refPrefix)
+	local, err := l.git.listLedgerRefs(ctx, "refs/heads/")
 	if err != nil {
 		return err
 	}
-	snapRaw, err := l.git.listRefs(ctx, snapPrefix+"tracker/")
+	snapRaw, err := l.git.listLedgerRefs(ctx, snapPrefix)
 	if err != nil {
 		return err
 	}
-	knownRaw, err := l.git.listRefs(ctx, knownPrefix+"tracker/")
+	knownRaw, err := l.git.listLedgerRefs(ctx, knownPrefix)
 	if err != nil {
 		return err
 	}
@@ -206,7 +297,7 @@ func (l *Ledger) absorbRemote(ctx context.Context) error {
 		}
 		return l.setKnown(ctx, ref, s)
 	}
-	own := l.ownRef()
+	own, ownAttach := l.ownRef(), l.ownAttachRef()
 	for _, name := range sorted {
 		L, S, K := local[name], snap[name], known[name]
 		kind := classifyRef(name)
@@ -216,7 +307,9 @@ func (l *Ledger) absorbRemote(ctx context.Context) error {
 			}
 			continue
 		}
-		isOwn := name == own
+		// This clone's attachment ref follows the same rules as its event
+		// ref: the two move together in one atomic push.
+		isOwn := name == own || name == ownAttach
 		switch {
 		case S == "":
 			if L != "" && K != "" {
@@ -252,17 +345,17 @@ func (l *Ledger) absorbRemote(ctx context.Context) error {
 		case isOwn:
 			warn(name, WarnForeignAdvance, "the remote copy of this clone's ref holds commits this clone did not write; not taken. MoveToFreshClone moves the unpushed events to a fresh clone id")
 			l.foreign = true
-		case kind == kindMember && l.git.isAncestor(ctx, L, S):
+		case kind.appendOnly() && l.git.isAncestor(ctx, L, S):
 			if err := take(name, S, L); err != nil {
 				return err
 			}
-		case kind != kindMember && K == "":
+		case !kind.appendOnly() && K == "":
 			// A create-once ref this clone wrote and never pushed lost to
 			// the remote's.
 			if err := take(name, S, L); err != nil {
 				return err
 			}
-		case kind != kindMember:
+		case !kind.appendOnly():
 			warn(name, WarnRewound, "a create-once ref moved on the remote; the local copy is kept")
 		default:
 			warn(name, WarnRewound, "moved on the remote to a non-descendant of the local copy; the local copy is kept, and Restore pushes it back")
@@ -286,11 +379,11 @@ func (l *Ledger) ownJoined() bool {
 // the remote. A lost genesis or claim race fetches, so the remote's ref
 // replaces the local one and the view converges with everyone's.
 func (l *Ledger) pushAll(ctx context.Context) (bool, error) {
-	local, err := l.git.listRefs(ctx, refPrefix)
+	local, err := l.git.listLedgerRefs(ctx, "refs/heads/")
 	if err != nil {
 		return false, err
 	}
-	knownRaw, err := l.git.listRefs(ctx, knownPrefix+"tracker/")
+	knownRaw, err := l.git.listLedgerRefs(ctx, knownPrefix)
 	if err != nil {
 		return false, err
 	}
@@ -331,8 +424,12 @@ func (l *Ledger) pushAll(ctx context.Context) (bool, error) {
 	if l.pendingLocked().IDTaken {
 		return false, nil
 	}
-	tip := local[own]
-	if tip == "" || tip == known[own] || l.foreign || l.ownBlocked {
+	attach := l.ownAttachRef()
+	tip, atip := local[own], local[attach]
+	if tip == "" || l.foreign || l.ownBlocked {
+		return false, nil
+	}
+	if tip == known[own] && (atip == "" || atip == known[attach]) {
 		return false, nil
 	}
 	if l.ownJoined() && known[claimRef(l.member)] == "" && local[claimRef(l.member)] != "" {
@@ -347,7 +444,19 @@ func (l *Ledger) pushAll(ctx context.Context) (bool, error) {
 	if lease != "" && !l.git.isAncestor(ctx, lease, tip) {
 		return false, nil
 	}
-	out, err := l.git.push(ctx, own, &lease)
+	// The attachment ref goes in the same atomic push, first in the refspec
+	// list as in the local commit order, so the remote never holds an event
+	// commit without the blobs it names.
+	var specs []pushSpec
+	if atip != "" && atip != known[attach] {
+		alease := known[attach]
+		if alease != "" && !l.git.isAncestor(ctx, alease, atip) {
+			return false, nil
+		}
+		specs = append(specs, pushSpec{Ref: attach, Lease: &alease})
+	}
+	specs = append(specs, pushSpec{Ref: own, Lease: &lease})
+	out, err := l.git.pushRefs(ctx, specs...)
 	if err != nil {
 		return false, fmt.Errorf("ledger: push: %w", err)
 	}
@@ -355,6 +464,11 @@ func (l *Ledger) pushAll(ctx context.Context) (bool, error) {
 		// Deleted, rewound, or advanced by another writer: the fetch that
 		// follows every push tells which and warns.
 		return false, nil
+	}
+	if len(specs) > 1 {
+		if err := l.setKnown(ctx, attach, atip); err != nil {
+			return false, err
+		}
 	}
 	return true, l.setKnown(ctx, own, tip)
 }
@@ -565,7 +679,10 @@ func (e *PushedError) Unwrap() error { return e.Err }
 // Restore pushes the local copy of ref back to the remote, replacing a
 // deletion or a rewind there. It is the manual action rewind refusal leaves
 // to a person, who judges the cause first; signed events verify whoever
-// pushes them.
+// pushes them. Restoring a member's event ref also restores its attachment
+// ref when that one is deleted or rewound (with or without the event ref),
+// in the same atomic push, so the remote never holds an event commit
+// without the blobs it names.
 func (l *Ledger) Restore(ctx context.Context, ref string) error {
 	return l.withLock(ctx, func() error {
 		if !l.hasRemote(ctx) {
@@ -574,7 +691,7 @@ func (l *Ledger) Restore(ctx context.Context, ref string) error {
 		if classifyRef(ref) == kindBad {
 			return fmt.Errorf("ledger: %s is not a ledger ref", ref)
 		}
-		local, err := l.git.listRefs(ctx, ref)
+		local, err := l.git.listLedgerRefs(ctx, "refs/heads/")
 		if err != nil {
 			return err
 		}
@@ -582,31 +699,63 @@ func (l *Ledger) Restore(ctx context.Context, ref string) error {
 		if tip == "" {
 			return fmt.Errorf("ledger: no local copy of %s", ref)
 		}
-		if err := l.git.fetchTracker(ctx); err != nil {
+		if _, err := l.git.fetchRefs(ctx); err != nil {
 			return fmt.Errorf("ledger: fetch: %w", err)
 		}
-		snap, err := l.git.listRefs(ctx, snapRef(ref))
+		snapRaw, err := l.git.listLedgerRefs(ctx, snapPrefix)
 		if err != nil {
 			return err
 		}
-		lease := snap[snapRef(ref)]
-		if lease == tip {
-			return nil // the remote already holds the local copy
+		snap := rekey(snapRaw, snapPrefix)
+		// behind reports whether the remote's copy is a deletion or a
+		// rewind of the local one (restorable), or already it, or ahead.
+		behind := func(ref, tip string) (restorable bool, err error) {
+			lease := snap[ref]
+			if lease == tip {
+				return false, nil
+			}
+			if lease != "" && l.git.isAncestor(ctx, tip, lease) {
+				// Not a deletion or a rewind: the remote moved ahead, and
+				// pushing the local copy would discard its newer commits.
+				return false, fmt.Errorf("ledger: the remote %s is ahead of the local copy; fetch instead of restoring", ref)
+			}
+			return true, nil
 		}
-		if lease != "" && l.git.isAncestor(ctx, tip, lease) {
-			// Not a deletion or a rewind: the remote moved ahead, and
-			// pushing the local copy would discard its newer commits.
-			return fmt.Errorf("ledger: the remote %s is ahead of the local copy; fetch instead of restoring", ref)
+		restorable, err := behind(ref, tip)
+		if err != nil {
+			return err
 		}
-		out, err := l.git.push(ctx, ref, &lease)
+		var specs []pushSpec
+		var pushed [][2]string
+		if member, clone, ok := parseMemberRef(ref); ok {
+			// The attachment ref alone may be the one deleted or rewound.
+			if a := attachRef(member, clone); local[a] != "" {
+				if r, err := behind(a, local[a]); err == nil && r {
+					lease := snap[a]
+					specs = append(specs, pushSpec{Ref: a, Lease: &lease})
+					pushed = append(pushed, [2]string{a, local[a]})
+				}
+			}
+		}
+		if restorable {
+			lease := snap[ref]
+			specs = append(specs, pushSpec{Ref: ref, Lease: &lease})
+			pushed = append(pushed, [2]string{ref, tip})
+		}
+		if len(specs) == 0 {
+			return nil // the remote already holds the local copies
+		}
+		out, err := l.git.pushRefs(ctx, specs...)
 		if err != nil {
 			return fmt.Errorf("ledger: push: %w", err)
 		}
 		if out == pushRejected {
 			return fmt.Errorf("ledger: the remote %s moved while restoring; fetch and retry", ref)
 		}
-		if err := l.setKnown(ctx, ref, tip); err != nil {
-			return err
+		for _, p := range pushed {
+			if err := l.setKnown(ctx, p[0], p[1]); err != nil {
+				return err
+			}
 		}
 		if err := l.fetchRemote(ctx); err != nil {
 			return err
@@ -641,6 +790,22 @@ func (l *Ledger) MoveToFreshClone(ctx context.Context) (string, error) {
 			}
 		} else if l.ownTip() != "" {
 			if err := l.git.deleteRef(ctx, old, l.ownTip()); err != nil {
+				return err
+			}
+		}
+		// The old attachment ref goes back the same way; the moved events'
+		// journal records still name their blobs' git objects, so the fresh
+		// clone's first batch close commits them to its own attachment ref.
+		if oldAttach := l.ownAttachRef(); l.attach[oldAttach] != nil {
+			knownRaw, err := l.git.listRefs(ctx, knownRef(oldAttach))
+			if err != nil {
+				return err
+			}
+			if k := knownRaw[knownRef(oldAttach)]; k != "" {
+				if _, err := l.git.run(ctx, "update-ref", "-m", "ledger", oldAttach, k); err != nil {
+					return err
+				}
+			} else if err := l.git.deleteRef(ctx, oldAttach, l.attach[oldAttach].tip); err != nil {
 				return err
 			}
 		}
