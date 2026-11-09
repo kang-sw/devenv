@@ -30,7 +30,8 @@
   var KINDS = ['task', 'todo', 'topic'];
   var SETTABLE = ['todo', 'doing', 'blocked'];
   var ORIGINS = ['human', 'agent', 'agent-auto'];
-  var ITEM_FIELDS = ['title', 'body', 'project', 'due', 'priority'];
+  var ITEM_FIELDS = ['title', 'body', 'project', 'due', 'priority', 'stage'];
+  var STAGE_SHAPE = 'stage must be review (null or absent: todo)';
   // Priority levels are store configuration (roles file, roles.set_priority_levels).
   // Codes are integers 0..n-1, larger = more urgent; names are display names only.
   var DEFAULT_PRIORITY = { names: ['Notice', 'Task', 'Urgent'], default: 1 };
@@ -399,6 +400,18 @@
     return r;
   }
 
+  // An item.edit stage change: tasks and todos only, review or null (todo). Moving to
+  // review needs an item with no live or pending assignment, since assigning is what
+  // moves an item to todo.
+  function checkStage(S, it, p) {
+    if (it.kind === 'topic') rej('topics have no stage');
+    if (p.stage == null) return;
+    if (p.stage !== 'review') rej(STAGE_SHAPE);
+    var held = [];
+    openRecs(S, it.id).forEach(function (x) { if (held.indexOf(x.to) < 0) held.push(x.to); });
+    if (held.length) rej(it.alias + ' has live or pending assignments (' + held.join(', ') + '); unassign them before moving it to review');
+  }
+
   function check(S, n) {
     var p = n.p, a = n.author, c = n.commit, m = S.members[a], it, r, q;
     if (!m) rej('author "' + a + '" is not a member in the state its author had seen');
@@ -417,6 +430,10 @@
         if (!p.title) rej('title required');
         if (KINDS.indexOf(p.kind) < 0) rej('kind must be task, todo or topic');
         checkFields(S, p);
+        if (p.stage != null) {
+          if (p.kind === 'topic') rej('topics have no stage');
+          if (p.stage !== 'review') rej(STAGE_SHAPE);
+        }
         checkExtras(S, p, null);
         if (p.parent) {
           var par = needItem(S, p.parent, 'parent');
@@ -435,6 +452,7 @@
         if (!ITEM_FIELDS.some(function (f) { return has(p, f); })) rej('nothing to edit (' + ITEM_FIELDS.join(', ') + ')');
         if (has(p, 'priority') && p.priority == null) rej('priority cannot be cleared; set a level');
         checkFields(S, p);
+        if (has(p, 'stage')) checkStage(S, it, p);
         if ((p.mentions != null || p.attachments != null) && !has(p, 'body')) rej('mentions and attachments go with a body edit');
         if (p.refs != null && !has(p, 'body')) rej('refs go with a body edit');
         checkExtras(S, p, it.attachments);
@@ -826,12 +844,16 @@
         S.items[n.id] = { id: n.id, alias: n.alias, kind: p.kind, title: p.title, body: p.body || '', project: p.project || '',
           due: p.due || null, priority: p.priority != null ? p.priority : S.prio.default,
           parent: p.parent || null, after: has(p, 'after') ? (p.after || null) : undefined, author: a, ts: n.ts, hidden: false, edited: null, node: n,
+          stage: p.stage === 'review' ? 'review' : '',
           mentions: mentionsOf(p), attachments: attachmentsOf(p), refs: refsOf(p) };
         break;
       case 'item.edit':
         it = S.items[p.item]; if (!it) break;
         ITEM_FIELDS.forEach(function (f) {
-          if (has(p, f)) it[f] = write(S, 'it:' + it.id + ':' + f, f + ' of ' + it.alias, n, p[f] == null ? (f === 'due' ? null : '') : p[f], C);
+          if (!has(p, f)) return;
+          // The assignment wins over a concurrent move to review.
+          if (f === 'stage' && p.stage === 'review' && openRecs(S, it.id).length) return;
+          it[f] = write(S, 'it:' + it.id + ':' + f, f + ' of ' + it.alias, n, p[f] == null ? (f === 'due' ? null : '') : p[f], C);
         });
         if (has(p, 'body')) { var bw = regWinner(S, 'it:' + it.id + ':body'); it.mentions = mentionsOf(bw.p); it.attachments = attachmentsOf(bw.p); it.refs = refsOf(bw.p); }
         it.edited = n;
@@ -843,6 +865,7 @@
       case 'item.assign': {
         var completion = p.completion || 'assignee';
         if (!S.items[p.item]) break;
+        S.items[p.item].stage = ''; // assigning promotes a review item to todo
         if (p.targets != null) (Array.isArray(p.targets) ? p.targets : []).forEach(function (x) {
           if (typeof x === 'string') assignPerson(S, n, p.item, x, a, completion);
           else if (x && typeof x.root === 'string') addRule(S, n, p.item, x, a, completion);
@@ -1092,6 +1115,8 @@
     var recs = recsOn(g.S, it.id), live = recs.filter(function (r) { return r.state === 'live'; });
     if (!live.length) {
       if (recs.some(function (r) { return r.state === 'pending'; })) return 'pending';
+      // A review-stage item holds no live or pending assignment (an assign clears it).
+      if (it.stage === 'review') return 'review';
       // the latest ended one; among ties (one event ended several) the first
       var last = recs.reduce(function (b, r) { return r.ended && (!b || later(r.ended, b.ended)) ? r : b; }, null);
       return last && (last.state === 'declined' || last.state === 'returned') ? last.state : 'unassigned';
@@ -1104,10 +1129,11 @@
     return 'todo';
   }
   // Pending assignments are excluded from status and roll-up: an item whose only
-  // assignments are pending (or declined / returned) is not counted.
+  // assignments are pending (or declined / returned) is not counted; nor is an item
+  // in the review stage.
   function counted(g, it) {
     var s = itemStatus(g, it);
-    return it.kind !== 'topic' && s !== 'pending' && s !== 'declined' && s !== 'returned';
+    return it.kind !== 'topic' && s !== 'pending' && s !== 'declined' && s !== 'returned' && s !== 'review';
   }
   function subtasksOf(g, id) { return vals(g.items).filter(function (i) { return i.parent === id && !i.hidden; }); }
   function rollup(g, it) {
@@ -1255,9 +1281,11 @@
     });
 
     // Notices are derived, never events. accepted: to the accepter's lead at accept
-    // time; handoff: to the original assigner when a handoff is accepted; declined /
-    // returned (285): to the sender, and for a returned handoff also to the original
-    // assigner (291).
+    // time; handoff: to the original assigner when a handoff is accepted; done /
+    // blocked: to the assigner when someone else set that status on a live assignment
+    // (an awaiting one is in the confirm list), keyed by status and time so a later
+    // write of the same status is a new notice; declined / returned (285): to the
+    // sender, and for a returned handoff also to the original assigner (291).
     var notices = [];
     A.forEach(function (r) {
       var base = { assignment: r.id, item: r.item, to: r.to, by: r.by, sender: r.sender, state: r.state };
@@ -1266,6 +1294,8 @@
         if (r.leadAtAccept === v) notices.push(Object.assign({ key: 'acc:' + r.id, kind: 'accepted' }, b1));
         else if (r.handoffOf && assignments[r.handoffOf] && assignments[r.handoffOf].by === v) notices.push(Object.assign({ key: 'ho:' + r.id, kind: 'handoff', from: r.handoffFrom }, b1));
       }
+      if (r.by === v && r.to !== v && r.state === 'live' && (r.status === 'done' || r.status === 'blocked') && r.statusBy && r.statusBy !== v)
+        notices.push(Object.assign({ key: 'w:' + r.id + ':' + r.status + ':' + r.lastUpdate, kind: r.status, ts: r.lastUpdate }, base));
       if (r.to === v || !r.ended) return;
       var b2 = Object.assign({ ts: r.ended.ts, endedBy: r.ended.by, note: r.answerNote, from: r.handoffFrom, restores: r.restores }, base);
       if (r.state === 'declined' && r.sender === v) notices.push(Object.assign({ key: 'dec:' + r.id, kind: 'declined' }, b2));
