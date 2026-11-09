@@ -380,7 +380,14 @@
       }
     },
     "261109-feat-ws-dashboard-agents-panel-fixed-rows": {
-      "registered_at": "2026-11-09T06:34:52Z"
+      "registered_at": "2026-11-09T06:34:52Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "28ef83e379b353cc",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-09T06:39:56Z"
+      }
     },
     "261109-feat-ws-dashboard-git-commit-graph": {
       "registered_at": "2026-11-09T05:26:59Z",
@@ -392,19 +399,6 @@
         "touched_at": "2026-11-09T05:35:01Z",
         "impl": {
           "branch": "impl/develop/tibia-ipod-amply"
-        }
-      }
-    },
-    "261109-feat-ws-whiteboard-topic-body-out-of-root-images": {
-      "registered_at": "2026-11-09T06:06:05Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-09T06:16:21Z",
-        "impl": {
-          "branch": "impl/develop/chuck-fade-reset"
         }
       }
     },
