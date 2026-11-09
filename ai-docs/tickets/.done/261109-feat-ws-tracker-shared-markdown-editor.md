@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: ebc4ef9e4c5f5534
 sage-review-completeness-reviewed: ebc4ef9e4c5f5534
+completed: 2026-11-09
 ---
 
 # ws tracker: one markdown editor for item body, comment input, and comment edit, with preview and image paste
