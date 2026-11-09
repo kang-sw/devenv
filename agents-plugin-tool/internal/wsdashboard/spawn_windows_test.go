@@ -7,6 +7,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -27,19 +29,20 @@ var (
 	procGetConsoleProcessList = windows.NewLazySystemDLL("kernel32.dll").NewProc("GetConsoleProcessList")
 )
 
-// consoleState is this process's console window handle and the number of
-// processes attached to its console (0 when it has none).
-func consoleState() (hwnd uintptr, procs uintptr) {
+// consoleState is this process's console window handle and the ids of the
+// processes attached to its console (none when it has no console).
+func consoleState() (hwnd uintptr, pids []uint32) {
 	hwnd, _, _ = procGetConsoleWindow.Call()
 	var ids [64]uint32
-	procs, _, _ = procGetConsoleProcessList.Call(uintptr(unsafe.Pointer(&ids[0])), uintptr(len(ids)))
-	return hwnd, procs
+	n, _, _ := procGetConsoleProcessList.Call(uintptr(unsafe.Pointer(&ids[0])), uintptr(len(ids)))
+	return hwnd, ids[:min(int(n), len(ids))]
 }
 
 // TestDaemonChildrenShareItsHiddenConsole: a process startDetached starts
 // owns a console with no window, and a console child it starts the plain way
 // (as the daemon starts git, ssh, shells) attaches to that console instead
-// of getting a new, visible one. The test binary plays both: the "daemon"
+// of getting a new, visible one. The console is the daemon's own: the test
+// process is not attached to it. The test binary plays both: the "daemon"
 // mode starts the "child" mode, which records its console state.
 func TestDaemonChildrenShareItsHiddenConsole(t *testing.T) {
 	self, err := os.Executable()
@@ -55,8 +58,8 @@ func TestDaemonChildrenShareItsHiddenConsole(t *testing.T) {
 		}
 		os.Exit(0)
 	case "child":
-		hwnd, procs := consoleState()
-		_ = os.WriteFile(os.Getenv(consoleProbeOutEnv), []byte(fmt.Sprintf("%d %d", hwnd, procs)), 0o644)
+		hwnd, pids := consoleState()
+		_ = os.WriteFile(os.Getenv(consoleProbeOutEnv), []byte(fmt.Sprint(hwnd, pids)), 0o644)
 		os.Exit(0)
 	}
 
@@ -76,20 +79,28 @@ func TestDaemonChildrenShareItsHiddenConsole(t *testing.T) {
 		}
 	case <-time.After(60 * time.Second):
 		_ = cmd.Process.Kill()
+		<-done // let the killed helper go before TempDir cleanup
 		t.Fatal("daemon helper did not exit within 60s")
 	}
 	raw, err := os.ReadFile(out)
 	if err != nil {
 		t.Fatalf("child wrote no console state: %v", err)
 	}
-	var hwnd, procs uintptr
-	if _, err := fmt.Sscanf(strings.TrimSpace(string(raw)), "%d %d", &hwnd, &procs); err != nil {
-		t.Fatalf("console state %q: %v", raw, err)
+	hwndText, pidsText, ok := strings.Cut(strings.TrimSpace(string(raw)), " ")
+	if !ok {
+		t.Fatalf("console state %q", raw)
 	}
-	if hwnd != 0 {
-		t.Fatalf("child has console window %#x, want none", hwnd)
+	if hwndText != "0" {
+		t.Fatalf("child has console window %s, want none", hwndText)
 	}
-	if procs < 2 {
-		t.Fatalf("child's console has %d processes, want >= 2 (shared with the daemon)", procs)
+	pids := strings.Fields(strings.Trim(pidsText, "[]"))
+	if len(pids) < 2 {
+		t.Fatalf("child's console has processes %v, want >= 2 (shared with the daemon)", pids)
+	}
+	if !slices.Contains(pids, strconv.Itoa(cmd.Process.Pid)) {
+		t.Fatalf("child's console processes %v lack the daemon %d", pids, cmd.Process.Pid)
+	}
+	if slices.Contains(pids, strconv.Itoa(os.Getpid())) {
+		t.Fatalf("child's console processes %v include the test process %d, want the daemon's own console", pids, os.Getpid())
 	}
 }
