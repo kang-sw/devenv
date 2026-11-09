@@ -83,6 +83,18 @@
 :root[data-theme="light"] { color-scheme: light; }
 :root[data-theme="dark"] { color-scheme: dark; }
 * { box-sizing: border-box; }
+/* Scrollbars, for every scroller of the board, its body frames, and the embed: thin,
+   a transparent track, and a thumb of the text colour, a little stronger under the
+   pointer, so the OS's wide opaque bars (Windows) read as part of either theme;
+   overlay bars (macOS) stay overlay. Standard properties only: Chromium 121+ ignores
+   ::-webkit-scrollbar on an element whose scrollbar-color is set, and the engines
+   that still read those rules (Safari, older Chromium) would swap macOS overlay bars
+   for always-shown ones. Set on every element rather than inherited from :root, so
+   :hover strengthens the scrollers under the pointer and not the ones nested inside
+   them; hover changes the colour only, never the width, so nothing reflows. The
+   dashboard declares the same pair for its own page. */
+* { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--wb-fg) 24%, transparent) transparent; }
+*:hover { scrollbar-color: color-mix(in srgb, var(--wb-fg) 42%, transparent) transparent; }
 html, body { margin: 0; background: var(--wb-bg); color: var(--wb-fg); }
 body { font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif; }
 .id, code { font-family: var(--wb-mono); }
