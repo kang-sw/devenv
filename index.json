@@ -383,7 +383,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-09T04:12:28Z"
+        "touched_at": "2026-11-09T04:13:36Z",
+        "impl": {
+          "branch": "impl/develop/badge-lucid-plus"
+        }
       }
     },
     "261109-feat-ws-tracker-review-stage-and-assignment-defaults": {
