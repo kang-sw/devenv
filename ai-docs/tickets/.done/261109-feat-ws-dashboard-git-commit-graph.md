@@ -4,6 +4,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: a0ec016492d9efd7
 sage-review-design-reviewed: a0ec016492d9efd7
+completed: 2026-11-09
 ---
 
 # ws dashboard git drawer: commit graph and commit diff viewer
