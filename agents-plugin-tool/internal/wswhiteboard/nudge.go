@@ -44,8 +44,9 @@ func (s *State) stampChanges(mark int, now time.Time) {
 
 // staleNudge returns the nudge line for the board at now and records it as
 // the last nudge, or returns "" and records nothing. A topic is stale when it
-// is open, none of its items is open or assumed, and neither its items nor its
-// body changed for staleNudgeAge; the stalest are listed first.
+// is open, none of its items is open (an assumed item reads as settled), and
+// neither its items nor its body changed for staleNudgeAge; the stalest are
+// listed first.
 func (s *State) staleNudge(now time.Time) string {
 	if last, err := time.Parse(time.RFC3339, s.LastNudgeAt); err == nil && now.Sub(last) < staleNudgeInterval {
 		return ""
@@ -65,7 +66,7 @@ func (s *State) staleNudge(now time.Time) string {
 	}
 	for _, item := range s.Items {
 		touch(item.Topic, item.ChangedAt)
-		if item.Status == StatusOpen || item.Status == StatusAssumed {
+		if item.Status == StatusOpen {
 			waiting[item.Topic] = true
 		}
 	}

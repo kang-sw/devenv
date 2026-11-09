@@ -29,29 +29,9 @@
         });
       });
     });
-    q(".card.assumed", root).forEach(function (card) {
-      function pick(btn) {
-        var on = btn.getAttribute("aria-pressed") === "true";
-        q(".btn[data-v]", card).forEach(function (b) { b.setAttribute("aria-pressed", "false"); });
-        btn.setAttribute("aria-pressed", on ? "false" : "true");
-        build();
-      }
-      q(".btn[data-v]", card).forEach(function (btn) {
-        btn.addEventListener("click", function () { pick(btn); });
-      });
-      // A click on the card itself toggles ok, as an ack row's label toggles its
-      // checkbox; the buttons, links, and the note keep their own behavior, and
-      // a drag that selected text is not a click.
-      card.addEventListener("click", function (e) {
-        if (e.target.closest(".btn, a, textarea")) return;
-        var sel = window.getSelection && window.getSelection();
-        if (sel && !sel.isCollapsed && card.contains(sel.anchorNode)) return;
-        pick(card.querySelector(".btn[data-v=ok]"));
-      });
-    });
     q(".note-toggle", root).forEach(function (t) {
       t.addEventListener("click", function () {
-        var n = t.closest(".card, .arow").querySelector(".note");
+        var n = t.closest(".card, .arow, .srow").querySelector(".note");
         n.hidden = !n.hidden; if (!n.hidden) { grow(n); n.focus(); }
       });
     });
@@ -63,32 +43,23 @@
         n.hidden = !n.hidden; if (!n.hidden) { grow(n); n.focus(); }
       });
     });
-    q(".card.assumed .btn[data-v=no]", root).forEach(function (b) {
-      b.addEventListener("click", function () { var n = b.closest(".card").querySelector(".note"); n.hidden = false; grow(n); n.focus(); });
-    });
     q(".note", root).forEach(function (el) { el.addEventListener("input", function () { grow(el); }); });
     q(".note, .ack input", root).forEach(function (el) { el.addEventListener("input", build); el.addEventListener("change", build); });
     inPageLinks(root);
   }
   // Size a note textarea to its content; scrollHeight is 0 while hidden.
   function grow(n) { n.style.height = "auto"; if (n.scrollHeight) n.style.height = n.scrollHeight + "px"; }
-  // Bulk acknowledge: checks every ack row and confirms every assumed card;
-  // an assumed card already marked "no" keeps that answer. Policy items stay manual.
+  // Bulk acknowledge: checks every ack row. Policy items stay manual.
   var all = doc.getElementById("ack-all");
   if (all) all.addEventListener("change", function () {
     q(".ack input").forEach(function (c) { c.checked = all.checked; });
-    q(".card.assumed").forEach(function (card) {
-      var ok = card.querySelector(".btn[data-v=ok]"), no = card.querySelector(".btn[data-v=no]");
-      if (no.getAttribute("aria-pressed") !== "true") ok.setAttribute("aria-pressed", all.checked ? "true" : "false");
-    });
     build();
   });
   function syncAll() {
     if (!all) return;
-    var acks = q(".ack input"), cards = q(".card.assumed");
-    var on = acks.filter(function (c) { return c.checked; }).length +
-      cards.filter(function (c) { return c.querySelector('[aria-pressed="true"]'); }).length;
-    var total = acks.length + cards.length;
+    var acks = q(".ack input");
+    var on = acks.filter(function (c) { return c.checked; }).length;
+    var total = acks.length;
     all.checked = total > 0 && on === total;
     all.indeterminate = on > 0 && on < total;
   }
@@ -99,15 +70,13 @@
   function build() {
     if (!ta) return;
     var parts = [], acked = [];
-    q(".card.policy, .card.assumed").forEach(function (card) {
+    q(".card.policy").forEach(function (card) {
       var id = card.getAttribute("data-id");
       var pick = card.querySelector('[aria-pressed="true"]');
       var noteEl = card.querySelector(".note");
       var note = noteEl ? noteEl.value.trim() : "";
       var s = "";
-      // A confirmed assumed item without a note joins the grouped "ok" segment.
-      if (!note && pick && pick.getAttribute("data-v") === "ok") { acked.push("(" + id + ")"); return; }
-      if (pick) s = "(" + id + ") " + (pick.getAttribute("data-opt") || pick.getAttribute("data-v"));
+      if (pick) s = "(" + id + ") " + pick.getAttribute("data-opt");
       if (note) s = (s || "(" + id + ")") + (s ? ", " : " ") + "note: " + note;
       if (s) parts.push(s);
     });
@@ -118,6 +87,12 @@
       var note = row.querySelector(".note").value.trim();
       if (note) parts.push("(" + id + ") " + (on ? "ok, " : "") + "note: " + note);
       else if (on) acked.push("(" + id + ")");
+    });
+    // An assumed item reads as settled; its pen still takes a veto or a
+    // comment, sent as "(nn) note: ...".
+    q(".srow[data-id]").forEach(function (row) {
+      var note = row.querySelector(".note").value.trim();
+      if (note) parts.push("(" + row.getAttribute("data-id") + ") note: " + note);
     });
     if (acked.length) parts.push(acked.join(", ") + " ok");
     // Topic notes follow the item segments, one line each: "[topic] text".

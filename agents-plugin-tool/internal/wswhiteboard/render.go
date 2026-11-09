@@ -212,8 +212,8 @@ type Regions struct {
 	// frames, so the page loads the shared mermaid script (MermaidAsset) and
 	// MermaidInitScript; a frame loads them itself for a block in its body.
 	Mermaid bool
-	// CountPolicy, CountAssumed, and CountAcks are the header's counts.
-	CountPolicy, CountAssumed, CountAcks int
+	// CountPolicy and CountAcks are the header's counts.
+	CountPolicy, CountAcks int
 }
 
 // RenderRegions renders view's board and panels as fragments, as the full
@@ -240,12 +240,11 @@ func RenderRegions(view View) (Regions, error) {
 		}
 	}
 	return Regions{
-		Board:        template.HTML(board.String()),
-		Panels:       template.HTML(panels.String()),
-		Mermaid:      data.Mermaid,
-		CountPolicy:  data.CountPolicy,
-		CountAssumed: data.CountAssumed,
-		CountAcks:    data.CountAcks,
+		Board:       template.HTML(board.String()),
+		Panels:      template.HTML(panels.String()),
+		Mermaid:     data.Mermaid,
+		CountPolicy: data.CountPolicy,
+		CountAcks:   data.CountAcks,
 	}, nil
 }
 
@@ -312,7 +311,7 @@ type pageData struct {
 	// targets never take OutsideImage.
 	inDoc bool
 
-	CountPolicy, CountAssumed, CountAcks, CountFresh int
+	CountPolicy, CountAcks, CountFresh int
 	// CountBulk is how many items the bulk checkbox answers.
 	CountBulk int
 
@@ -384,16 +383,15 @@ func newPageData(view View, a *pageAssets, framed bool) *pageData {
 	}
 	for _, t := range view.Topics {
 		p.CountPolicy += len(t.Policy)
-		p.CountAssumed += len(t.Assumed)
 		p.CountAcks += len(t.Acks)
 		p.CountFresh += t.Fresh
-		for _, list := range [][]ItemView{t.Policy, t.Assumed, t.Acks, t.Expanded, t.Collapsed} {
+		for _, list := range [][]ItemView{t.Policy, t.Acks, t.Expanded, t.Collapsed} {
 			for _, iv := range list {
 				p.onPage[iv.ID] = true
 			}
 		}
 	}
-	p.CountBulk = p.CountAssumed + p.CountAcks
+	p.CountBulk = p.CountAcks
 	// After onPage is complete, so a reference in a body links like one in
 	// an item; a mermaid block in an unframed body sets Mermaid before the
 	// template runs.
@@ -516,6 +514,10 @@ func (d itemData) IsNew() bool { return d.Page.Embed && d.New }
 func (d itemData) Void() bool {
 	return d.Status == StatusWithdrawn || d.Status == StatusSuperseded
 }
+
+// Assumed reports an item whose answer is the lead's reading, which its
+// settled row marks.
+func (d itemData) Assumed() bool { return d.Status == StatusAssumed }
 
 // PickedOption is the option a settled or assumed answer chose, nil when none.
 func (d itemData) PickedOption() *OptionView {

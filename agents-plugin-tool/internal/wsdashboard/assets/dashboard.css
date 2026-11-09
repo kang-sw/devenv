@@ -361,6 +361,7 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .hchips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; white-space: normal; }
 .hchips .achip { padding-right: 9px; }
 .sentmark { font-size: 10px; font-weight: 800; letter-spacing: .03em; padding: 0 6px; border-radius: 4px; white-space: nowrap; background: var(--wb-muted); color: var(--wb-muted-fg); }
+.srow .stext > .sentmark { margin-right: 6px; }
 .sentmark.held { background: var(--wb-ph-perm); color: var(--wb-on-ph-perm); }
 /* an item whose answer was sent (or is held) grays its answer area until the board records the answer, and dims its title lightly, so the largest text shows the state too; the ID chip, class tag, and mark stay full brightness, and focusing a control in it (to revise the answer) brings the area and title back */
 .card.sent-sent > .cbody > :not(.note), .arow.sent-sent .why, .arow.sent-sent input { opacity: .4; transition: opacity .15s; }

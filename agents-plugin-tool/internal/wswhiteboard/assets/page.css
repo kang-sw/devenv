@@ -18,7 +18,7 @@
   --wb-policy: #b25000;      --wb-on-policy: #ffffff;
   --wb-technical: #2457c5;   --wb-on-technical: #ffffff;
   --wb-announced: #1d7348;   --wb-on-announced: #ffffff;
-  --wb-assumed: #b0245a;     --wb-on-assumed: #ffffff;
+  --wb-accent-assumed: #b0245a;
   --wb-accent-policy: #b25000;
   --wb-on-accent-policy: #ffffff;
   --wb-opt: color-mix(in srgb, var(--wb-policy) 5%, var(--wb-card));
@@ -48,7 +48,7 @@
     --wb-policy: #5b3a1c;      --wb-on-policy: #f6d9bd;
     --wb-technical: #26385e;   --wb-on-technical: #d2dcf6;
     --wb-announced: #1f4433;   --wb-on-announced: #c6ead6;
-    --wb-assumed: #592a3d;     --wb-on-assumed: #f3d0dd;
+    --wb-accent-assumed: #e48aae;
     --wb-accent-policy: #e0a36c;
     --wb-on-accent-policy: #1f150b;
     --wb-opt: color-mix(in srgb, var(--wb-policy) 20%, var(--wb-card));
@@ -72,7 +72,7 @@
   --wb-policy: #5b3a1c;      --wb-on-policy: #f6d9bd;
   --wb-technical: #26385e;   --wb-on-technical: #d2dcf6;
   --wb-announced: #1f4433;   --wb-on-announced: #c6ead6;
-  --wb-assumed: #592a3d;     --wb-on-assumed: #f3d0dd;
+  --wb-accent-assumed: #e48aae;
   --wb-accent-policy: #e0a36c;
   --wb-on-accent-policy: #1f150b;
   --wb-opt: color-mix(in srgb, var(--wb-policy) 20%, var(--wb-card));
@@ -101,7 +101,6 @@ a { color: var(--wb-primary); }
 /* chips: filled, role-coloured */
 .chip { display: inline-flex; align-items: center; gap: 3px; height: 20px; font-size: 12px; font-weight: 700; line-height: 1; padding: 0 9px; border-radius: 999px; background: var(--wb-muted); color: var(--wb-muted-fg); white-space: nowrap; }
 .chip.policy { background: var(--wb-policy); color: var(--wb-on-policy); }
-.chip.assumed { background: var(--wb-assumed); color: var(--wb-on-assumed); }
 .chip.ok { background: var(--wb-technical); color: var(--wb-on-technical); }
 .chip.fresh { background: var(--wb-now); color: var(--wb-on-now); }
 .chip.fresh .new { background: currentColor; }
@@ -126,7 +125,7 @@ a { color: var(--wb-primary); }
 .topic.quiet > .tnote { width: 100%; margin: 4px 0; }
 .closed-more { display: block; margin: 0 0 16px; font-size: 12.5px; color: var(--wb-muted-fg); }
 button.closed-more { display: flex; margin: 0 auto 16px; }
-.tbar .chip:not(.policy):not(.assumed):not(.ok):not(.fresh) { background: rgb(127 127 127 / .28); color: inherit; }
+.tbar .chip:not(.policy):not(.ok):not(.fresh) { background: rgb(127 127 127 / .28); color: inherit; }
 .tbody { padding: 10px; display: flex; flex-direction: column; gap: 8px; }
 .topic.quiet { box-shadow: none; background: transparent; }
 .topic.quiet .tbar { background: var(--wb-muted); color: var(--wb-muted-fg); border-radius: var(--wb-radius); flex-wrap: wrap; }
@@ -137,7 +136,6 @@ button.closed-more { display: flex; margin: 0 auto 16px; }
 .card { border-radius: 10px; overflow: hidden; background: var(--wb-bg); }
 .cbar { display: flex; align-items: center; gap: 8px; padding: 3px 6px 3px 10px; min-height: 28px; }
 .card.policy .cbar { background: var(--wb-policy); color: var(--wb-on-policy); }
-.card.assumed .cbar { background: var(--wb-assumed); color: var(--wb-on-assumed); }
 /* head: id and chips lead the title inline, so a wrapped title line returns to the left edge */
 .cbar .head { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .cbar .head > :not(.title) { margin-right: 6px; }
@@ -146,11 +144,7 @@ button.closed-more { display: flex; margin: 0 auto 16px; }
 .cbar .title { font-weight: 700; }
 .cbar .new, .ack .new, .srow .new { vertical-align: middle; }
 .cbar .btn { background: rgb(255 255 255 / .16); color: inherit; border: 0; flex: none; }
-.cbar .btn[aria-pressed="true"] { background: currentColor; }
-.cbar .btn[aria-pressed="true"] .i { color: var(--wb-assumed); }
 .cbody { padding: 8px 10px 10px; }
-.card.assumed { cursor: pointer; }
-.card.assumed a, .card.assumed .note { cursor: auto; }
 .new { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--wb-primary); flex: none; align-self: center; }
 .cbar .new { background: currentColor; }
 .ctx { margin: 0 0 8px; color: var(--wb-muted-fg); font-size: 13px; overflow-wrap: anywhere; }
@@ -200,12 +194,9 @@ button.closed-more { display: flex; margin: 0 auto 16px; }
 .opt .k { font-family: var(--wb-mono); font-weight: 800; color: var(--wb-accent-policy); display: inline-flex; align-items: flex-start; }
 .opt .k .i { width: 8px; height: 8px; margin: 1px 0 0 1px; }
 /* selected: neon outline over the same quiet fill, not a fill swap */
-.opt[aria-pressed="true"], .opt[aria-pressed="true"]:hover, .opt.picked { box-shadow: 0 0 0 1.5px var(--wb-accent-policy), 0 0 10px 1px color-mix(in srgb, var(--wb-accent-policy) 55%, transparent); font-weight: 600; }
-/* settled-row pick chip: the same choice, quieter; a thin faint ring and no glow, so a finished item reads as done. Assumed items await confirmation and keep the strong .opt.picked above. */
+.opt[aria-pressed="true"], .opt[aria-pressed="true"]:hover { box-shadow: 0 0 0 1.5px var(--wb-accent-policy), 0 0 10px 1px color-mix(in srgb, var(--wb-accent-policy) 55%, transparent); font-weight: 600; }
+/* settled-row pick chip: the same choice, quieter; a thin faint ring and no glow, so a finished item reads as done. */
 .pick { box-shadow: 0 0 0 1px color-mix(in srgb, var(--wb-accent-policy) 40%, transparent); font-weight: 500; }
-.opt.static { cursor: default; }
-.opt.static:not(.picked) { box-shadow: none; opacity: .75; }
-.opt.static:hover { background: var(--wb-opt); }
 /* stacked: a block option is a full-width card whose text stays selectable */
 .opts.stack { flex-direction: column; }
 .opts.stack .opt { flex: none; width: 100%; grid-template-columns: 18px minmax(0, 1fr); user-select: text; }
@@ -216,8 +207,6 @@ button.closed-more { display: flex; margin: 0 auto 16px; }
 .note { width: 100%; margin-top: 8px; font: inherit; color: inherit; background: var(--wb-card); border: 0; border-bottom: 2px solid var(--wb-muted-fg); border-radius: 6px 6px 0 0; padding: 6px 9px; resize: none; overflow: hidden; display: block; line-height: 1.4; }
 .note[hidden] { display: none; }
 .note:focus { outline: none; border-bottom-color: var(--wb-primary); }
-.read { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; font-size: 13.5px; }
-.opts + .read { margin-top: 8px; }
 .quote { color: var(--wb-muted-fg); font-size: 12.5px; }
 .pick { display: inline-flex; gap: 5px; align-items: baseline; background: var(--wb-opt); border-radius: 6px; padding: 0 7px; font-size: 12.5px; margin: 0 2px; }
 /* the chip is a flex row of letter and text: the text is one item, so code spans and links stay inline in it */
@@ -226,7 +215,6 @@ button.closed-more { display: flex; margin: 0 auto 16px; }
 .links { display: flex; flex-wrap: wrap; gap: 2px 12px; margin: 0 0 8px; font-size: 12.5px; color: var(--wb-muted-fg); overflow-wrap: anywhere; }
 .links .i { width: 12px; height: 12px; display: inline-block; vertical-align: -1px; margin-right: 3px; }
 .atext .links, .srow .links { flex-basis: 100%; margin: 0; }
-.read + .links { margin: 6px 0 0; }
 
 /* buttons */
 .btn { font-size: 13px; background: var(--wb-muted); border: 0; border-radius: 999px; padding: 3px 12px; cursor: pointer; }
@@ -267,9 +255,17 @@ details.more > summary { padding: 0 8px; background: transparent; box-shadow: in
 details.more[open] > summary { margin-bottom: 2px; }
 .srow { padding: 2px 4px; }
 .srow .id { font-size: 12px; color: var(--wb-muted-fg); }
-.srow .stext > .id, .srow .stext > .new { margin-right: 6px; }
+.srow .stext > .id, .srow .stext > .amark, .srow .stext > .new { margin-right: 6px; }
+/* assumed: the lead's reading, settled like an answer; a small muted tag, not a role fill */
+.srow .amark { font-size: 10.5px; font-weight: 700; letter-spacing: .04em; color: color-mix(in srgb, var(--wb-accent-assumed) 75%, var(--wb-muted-fg)); }
 .srow b { font-weight: 600; }
 .srow .stext { display: block; overflow-wrap: anywhere; }
+/* an assumed row keeps a pen: the user can still veto or comment through a note */
+.srow[data-id] { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0 4px; }
+.srow[data-id] .stext { flex: 1; min-width: 0; }
+.srow .note-toggle { background: transparent; color: var(--wb-muted-fg); opacity: .7; flex: none; }
+.srow .note-toggle:hover { opacity: 1; }
+.srow .note { flex-basis: 100%; margin-top: 4px; }
 .srow .ans { color: var(--wb-muted-fg); }
 .srow.void b { font-weight: 400; text-decoration: line-through; color: var(--wb-muted-fg); }
 
@@ -393,7 +389,6 @@ details.panel .body { container-type: inline-size; }
 .i { width: 14px; height: 14px; flex: none; display: block; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .chip .i, details.settled .i { width: 12px; height: 12px; stroke-width: 2; }
 .rec-line .i { width: 12px; height: 12px; }
-.lead-read { display: inline-flex; align-items: center; gap: 4px; }
 
 /* reply bar */
 .reply { background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow-hi); padding: 10px 12px; display: grid; grid-template-columns: auto 1fr auto auto; gap: 8px; align-items: center; margin: 4px 0 12px; }
