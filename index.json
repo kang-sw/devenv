@@ -356,6 +356,9 @@
     "261109-bug-ws-dashboard-stream-wake-rerender-cpu": {
       "registered_at": "2026-11-09T05:34:52Z"
     },
+    "261109-bug-ws-whiteboard-patch-cannot-change-item-class": {
+      "registered_at": "2026-11-09T05:54:05Z"
+    },
     "261109-feat-ws-dashboard-git-commit-graph": {
       "registered_at": "2026-11-09T05:26:59Z",
       "lease": {
@@ -366,19 +369,6 @@
         "touched_at": "2026-11-09T05:35:01Z",
         "impl": {
           "branch": "impl/develop/tibia-ipod-amply"
-        }
-      }
-    },
-    "261109-feat-ws-tracker-shared-markdown-editor": {
-      "registered_at": "2026-11-09T03:33:13Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-09T05:27:54Z",
-        "impl": {
-          "branch": "impl/develop/bok-dealt-blame"
         }
       }
     },
