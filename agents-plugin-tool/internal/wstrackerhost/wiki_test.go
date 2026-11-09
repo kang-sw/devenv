@@ -97,3 +97,59 @@ func TestWikiSaveReadAcrossMachines(t *testing.T) {
 		t.Fatalf("recovery = %+v, %v", points, err)
 	}
 }
+
+// TestWikiSaveStagedImages: a save names images uploaded earlier through
+// StageAttachment by oid; an oid with no staged copy that the wiki does
+// not hold is refused as the saver's problem, an oid the wiki already
+// holds needs no copy, the staged copy outlives the save (the sweep takes
+// it), and WikiImages lists the tip's images, none for an absent wiki.
+func TestWikiSaveStagedImages(t *testing.T) {
+	w := newWorld(t)
+	a, b := w.machine("a"), w.machine("b")
+	w.register(a, "team", "ada", &wstracker.Profile{Given: "Ada"})
+	w.register(b, "team", "bo", &wstracker.Profile{Given: "Bo"})
+	ctx := context.Background()
+
+	img := pngBytes("held")
+	att := stageOK(t, a, "team", "held.png", img)
+	ghost := attachmentOID([]byte("never uploaded"))
+	edit := wsledger.WikiEdit{Wiki: "docs", NewWiki: true, Op: wsledger.WikiOpWrite, Path: "home", Content: "![x](attachment:" + att.OID + ")\n"}
+	if oids, err := a.WikiImages(ctx, "team", "docs"); err != nil || oids != nil {
+		t.Fatalf("images of an absent wiki = %v, %v", oids, err)
+	}
+	_, err := a.WikiSave(ctx, "team", WikiSave{Edit: edit, Staged: []string{att.OID, ghost}})
+	if !errors.Is(err, ErrAttachmentNotFound) || !IsWikiRefusal(err) {
+		t.Fatalf("save with an expired image = %v, want a refusal", err)
+	}
+	if s := readSyncState(a.stores["team"].entry.Dir); s.Error != "" {
+		t.Fatalf("a refusal was recorded as a sync error: %+v", s)
+	}
+	res, err := a.WikiSave(ctx, "team", WikiSave{Edit: edit, Staged: []string{att.OID}})
+	if err != nil || !res.Created {
+		t.Fatalf("save = %+v, %v", res, err)
+	}
+	if _, ok := readStaged(a.stores["team"].entry.Dir, att.OID); !ok {
+		t.Fatal("the staged copy was dropped by the save")
+	}
+	if oids, err := a.WikiImages(ctx, "team", "docs"); err != nil || len(oids) != 1 || oids[0] != att.OID {
+		t.Fatalf("images = %v, %v", oids, err)
+	}
+	if _, err := b.Check(ctx, "team"); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := b.ReadWikiImage(ctx, "team", "docs", att.OID); err != nil || !bytes.Equal(data, img) {
+		t.Fatalf("bo reads image: %d bytes, %v", len(data), err)
+	}
+	// bo names the image the wiki holds without a staged copy of its own.
+	_, at, err := b.WikiRead(ctx, "team", "docs", "home", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res2, err := b.WikiSave(ctx, "team", WikiSave{Edit: wsledger.WikiEdit{Wiki: "docs", Base: at, Op: wsledger.WikiOpWrite, Path: "home", Content: edit.Content + "again\n"}, Staged: []string{att.OID}})
+	if err != nil || res2.Commit == "" {
+		t.Fatalf("save naming a held image = %+v, %v", res2, err)
+	}
+	if oids, err := b.WikiImages(ctx, "team", "docs"); err != nil || len(oids) != 1 {
+		t.Fatalf("images after = %v, %v", oids, err)
+	}
+}

@@ -500,3 +500,138 @@ func TestDashboardTrackerAttachmentImages(t *testing.T) {
 		t.Errorf("comment html = %q, want its own image", h)
 	}
 }
+
+// TestDashboardTrackerWiki: the wiki methods over a real host. A save
+// creating a wiki names a staged upload, which lands in the wiki tree and
+// shows in the page's render from the wiki image route; a staged but
+// unsaved image shows in a wiki-mode preview from the attachment route, an
+// unknown oid never, and a wiki's image not in an item's own list never
+// in an item render; a wiki: link to a well-formed page is an anchor the
+// page keys on, in a wiki page and in an item body alike, and a malformed
+// one stays text. A stale base is the typed conflict, an expired image
+// and a repeated new-wiki form are refusals, and an unknown wiki or page
+// is not found.
+func TestDashboardTrackerWiki(t *testing.T) {
+	dt, _ := newTestTracker(t)
+	ctx := context.Background()
+	if list, err := dt.WikiList(ctx, "team"); err != nil || len(list) != 0 {
+		t.Fatalf("list = %v, %v", list, err)
+	}
+	if _, err := dt.WikiPages(ctx, "team", "docs"); !errors.Is(err, wsdashboard.ErrTrackerWikiNotFound) {
+		t.Fatalf("pages of an absent wiki = %v", err)
+	}
+	if _, err := dt.Render(ctx, "team", wsdashboard.TrackerRenderRequest{Text: "x", Wiki: "Docs"}); !errors.Is(err, wsdashboard.ErrTrackerWikiNotFound) {
+		t.Fatalf("render of a malformed wiki name = %v", err)
+	}
+
+	data := append([]byte("\x89PNG\r\n\x1a\n"), "wiki"...)
+	att, err := dt.StageAttachment(ctx, "team", "shot.png", data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ghost := wsdashboard.TrackerAttachment{OID: strings.Repeat("d", 64), Name: "ghost.png", Size: 1, Mime: "image/png"}
+	text := "see [home](wiki:docs/guide/home) and [bad](wiki:Docs/x) ![shot](attachment:" + att.OID + ") ![ghost](attachment:" + ghost.OID + ")"
+	link := `<a href="#" data-wiki="docs" data-page="guide/home">home</a>`
+	staged := `<img src="/tracker/stores/team/attachments/` + att.OID + `"`
+	inWiki := `<img src="/tracker/stores/team/wiki/docs/attachments/` + att.OID + `"`
+
+	// The preview before the wiki exists: the staged image from the
+	// attachment route, the link an anchor, the bad link text.
+	got, err := dt.Render(ctx, "team", wsdashboard.TrackerRenderRequest{Text: text, Wiki: "docs", Attachments: []wsdashboard.TrackerAttachment{att, ghost}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, staged) || !strings.Contains(got, link) || strings.Contains(got, ghost.OID) || strings.Contains(got, `data-wiki="Docs"`) {
+		t.Fatalf("preview = %q", got)
+	}
+
+	if _, err := dt.WikiSave(ctx, "team", "docs", wsdashboard.TrackerWikiSave{NewWiki: true, Op: "write", Path: "guide/home", Content: text, Attachments: []wsdashboard.TrackerAttachment{att, ghost}}); !errors.Is(err, wsdashboard.ErrTrackerWikiRefused) || !strings.Contains(err.Error(), ghost.OID) {
+		t.Fatalf("save naming an expired image = %v, want a refusal naming it", err)
+	}
+	res, err := dt.WikiSave(ctx, "team", "docs", wsdashboard.TrackerWikiSave{NewWiki: true, Op: "write", Path: "guide/home", Content: text, Attachments: []wsdashboard.TrackerAttachment{att}})
+	if err != nil || !res.Created || res.Commit == "" || res.Merged {
+		t.Fatalf("save = %+v, %v", res, err)
+	}
+	if list, err := dt.WikiList(ctx, "team"); err != nil || len(list) != 1 || list[0].Name != "docs" || list[0].Tip != res.Commit || list[0].Unpushed {
+		t.Fatalf("list = %+v, %v", list, err)
+	}
+	pages, err := dt.WikiPages(ctx, "team", "docs")
+	if err != nil || len(pages.Pages) != 1 || pages.Pages[0] != "guide/home" || pages.Commit != res.Commit {
+		t.Fatalf("pages = %+v, %v", pages, err)
+	}
+	page, err := dt.WikiRead(ctx, "team", "docs", "guide/home")
+	if err != nil || page.Content != text || page.Commit != res.Commit || page.Path != "guide/home" {
+		t.Fatalf("read = %+v, %v", page, err)
+	}
+	if _, err := dt.WikiRead(ctx, "team", "docs", "nope"); !errors.Is(err, wsdashboard.ErrTrackerWikiNotFound) {
+		t.Fatalf("read of an absent page = %v", err)
+	}
+	if img, err := dt.ReadWikiImage(ctx, "team", "docs", att.OID); err != nil || string(img) != string(data) {
+		t.Fatalf("wiki image = %d bytes, %v", len(img), err)
+	}
+
+	// The saved page renders its image from the wiki, with no pending list.
+	got, err = dt.Render(ctx, "team", wsdashboard.TrackerRenderRequest{Text: page.Content, Wiki: "docs"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, inWiki) || strings.Contains(got, staged) || !strings.Contains(got, link) {
+		t.Fatalf("page render = %q", got)
+	}
+	// An item preview does not reach into the wiki's tree, but links pages.
+	if got, _ := dt.Render(ctx, "team", wsdashboard.TrackerRenderRequest{Text: page.Content}); strings.Contains(got, inWiki) || !strings.Contains(got, link) {
+		t.Fatalf("item render = %q, want no wiki image and the link", got)
+	}
+	create, _ := json.Marshal(map[string]any{"kind": "task", "title": "linker", "body": "read [home](wiki:docs/guide/home)"})
+	ids, err := dt.Dispatch(ctx, "team", []wsdashboard.TrackerEvent{{Type: wstracker.TypeItemCreate, Payload: create}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, err := dt.View(ctx, "team")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var view struct {
+		HTML struct {
+			Items map[string]string `json:"items"`
+		} `json:"html"`
+	}
+	if err := json.Unmarshal(v.View, &view); err != nil {
+		t.Fatal(err)
+	}
+	if h := view.HTML.Items[ids[0]]; !strings.Contains(h, link) {
+		t.Errorf("item html = %q, want the wiki link", h)
+	}
+
+	// A second writer moved the tip; a save on the old base over the same
+	// lines is the typed conflict with both texts, and nothing moved.
+	if _, err := dt.WikiSave(ctx, "team", "docs", wsdashboard.TrackerWikiSave{Base: res.Commit, Op: "write", Path: "guide/home", Content: "theirs\n"}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = dt.WikiSave(ctx, "team", "docs", wsdashboard.TrackerWikiSave{Base: res.Commit, Op: "write", Path: "guide/home", Content: "ours\n"})
+	var conflict *wsdashboard.TrackerWikiConflict
+	if !errors.As(err, &conflict) {
+		t.Fatalf("stale save = %v, want a conflict", err)
+	}
+	if conflict.Path != "guide/home" || conflict.Base != res.Commit || conflict.Theirs == "" || conflict.OursText != "ours\n" || conflict.TheirsText != "theirs\n" || conflict.Kind == "" {
+		t.Errorf("conflict = %+v", conflict)
+	}
+	if page, _ := dt.WikiRead(ctx, "team", "docs", "guide/home"); page.Content != "theirs\n" || page.Commit != conflict.Theirs {
+		t.Errorf("page after the conflict = %+v", page)
+	}
+	for name, save := range map[string]wsdashboard.TrackerWikiSave{
+		"new wiki twice": {NewWiki: true, Op: "write", Path: "x", Content: "x"},
+		"no base":        {Op: "write", Path: "x", Content: "x"},
+		"bad op":         {Base: conflict.Theirs, Op: "move", Path: "x"},
+		"bad path":       {Base: conflict.Theirs, Op: "write", Path: "../x", Content: "x"},
+		"no change":      {Base: conflict.Theirs, Op: "write", Path: "guide/home", Content: "theirs\n"},
+	} {
+		_, err := dt.WikiSave(ctx, "team", "docs", save)
+		if errors.As(err, &conflict) && name == "no base" {
+			continue // a missing base reads as stale
+		}
+		if !errors.Is(err, wsdashboard.ErrTrackerWikiRefused) {
+			t.Errorf("%s = %v, want a refusal", name, err)
+		}
+	}
+}

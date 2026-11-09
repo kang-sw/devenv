@@ -24,6 +24,13 @@ type TextTargets struct {
 	// its alt text. Nil leaves every such image as alt text, and a link to
 	// one is never an anchor.
 	AttachmentSrc func(oid string) string
+	// WikiLink serves a link whose destination is wiki:<name>/<path> (a page
+	// of a store wiki): the href the anchor opens, a fragment or a path on
+	// the serving daemon, or empty to leave the link as its label text. The
+	// anchor also carries data-wiki="<name>" and data-page="<path>" for the
+	// host page to key on. Nil leaves every such link as text, and a wiki:
+	// image is always its alt text.
+	WikiLink func(name, path string) string
 	// Mermaid renders a mermaid fence as <pre class="mermaid"> for the host
 	// page to draw. Off, it is a plain code block: for text that re-renders
 	// as it streams, where a diagram would redraw on every tick, and for a
@@ -47,7 +54,7 @@ func RenderText(s string, t TextTargets) template.HTML {
 	if fileText == nil {
 		fileText = func(string) string { return "" }
 	}
-	p := &pageData{View: View{FileText: fileText, ImageSrc: t.ImageSrc, FileActions: t.FileActions, OutsideImage: t.OutsideImage}, noMermaid: !t.Mermaid, noInlineTags: true, attachmentSrc: t.AttachmentSrc}
+	p := &pageData{View: View{FileText: fileText, ImageSrc: t.ImageSrc, FileActions: t.FileActions, OutsideImage: t.OutsideImage}, noMermaid: !t.Mermaid, noInlineTags: true, attachmentSrc: t.AttachmentSrc, wikiLink: t.WikiLink}
 	if !t.HTML {
 		return p.Block(s)
 	}

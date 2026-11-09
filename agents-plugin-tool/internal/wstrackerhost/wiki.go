@@ -22,10 +22,18 @@ type WikiImageInput struct {
 }
 
 // WikiSave is one wiki edit on store id (wsledger.WikiEdit) with its
-// pasted images, which the host types and hashes.
+// pasted images: Images are raw bytes the host types and hashes; Staged
+// are the oids of images uploaded earlier through StageAttachment (a
+// browser pastes into its preview before it saves), loaded from the staged
+// copies at save time. A staged oid the wiki's tip already holds needs no
+// copy; one that is neither staged nor held is refused
+// (ErrAttachmentNotFound: the staged copy expired, so the saver pastes the
+// image again). The staged copy is left to the sweep, since an item editor
+// may still name the same oid.
 type WikiSave struct {
 	Edit   wsledger.WikiEdit
 	Images []WikiImageInput
+	Staged []string
 }
 
 // WikiList lists store id's wikis.
@@ -108,6 +116,21 @@ func (h *Host) WikiRecovery(ctx context.Context, id, wiki string) ([]wsledger.Wi
 	return out, err
 }
 
+// WikiImages lists the oids of the images in a wiki's tip tree; nil when
+// the wiki does not exist.
+func (h *Host) WikiImages(ctx context.Context, id, wiki string) ([]string, error) {
+	var oids []string
+	err := h.with(ctx, id, func(st *store) error {
+		var err error
+		oids, err = st.ledger.WikiImages(ctx, wiki)
+		if errors.Is(err, wsledger.ErrWikiNotFound) {
+			return nil
+		}
+		return err
+	})
+	return oids, err
+}
+
 // ReadWikiImage returns the image oid of wiki's tip, or
 // ErrAttachmentNotFound.
 func (h *Host) ReadWikiImage(ctx context.Context, id, wiki, oid string) ([]byte, error) {
@@ -144,8 +167,9 @@ func imageExt(mime string) string {
 // WikiSave applies one edit to store id. Images are typed by their bytes
 // (ErrNotImage) and bounded by attachments.max_bytes
 // (ErrAttachmentTooLarge) before anything is written; the edit's Images
-// field is replaced by them. Refusals are wsledger's (a *WikiConflict,
-// ErrWikiExists, ...).
+// field is replaced by them and the loaded Staged copies. Refusals are
+// wsledger's (a *WikiConflict, ErrWikiExists, ...) and
+// ErrAttachmentNotFound for a Staged oid with no copy.
 func (h *Host) WikiSave(ctx context.Context, id string, s WikiSave) (wsledger.WikiSaveResult, error) {
 	var res wsledger.WikiSaveResult
 	edit := s.Edit
@@ -158,6 +182,31 @@ func (h *Host) WikiSave(ctx context.Context, id string, s WikiSave) (wsledger.Wi
 		edit.Images = append(edit.Images, wsledger.WikiImage{OID: attachmentOID(img.Data), Ext: imageExt(mime), Data: img.Data})
 	}
 	err := h.with(ctx, id, func(st *store) error {
+		if len(s.Staged) > 0 {
+			held, err := st.ledger.WikiImages(ctx, edit.Wiki)
+			if err != nil && !errors.Is(err, wsledger.ErrWikiNotFound) && !errors.Is(err, wsledger.ErrWikiBadName) {
+				return err
+			}
+			have := make(map[string]bool, len(held))
+			for _, oid := range held {
+				have[oid] = true
+			}
+			for _, oid := range s.Staged {
+				if have[oid] {
+					continue
+				}
+				data, ok := readStaged(st.entry.Dir, oid)
+				if !ok {
+					return fmt.Errorf("%w: image %s is neither staged nor in the wiki; paste it again", ErrAttachmentNotFound, oid)
+				}
+				mime := imageMime(data)
+				if mime == "" {
+					return ErrNotImage
+				}
+				have[oid] = true
+				edit.Images = append(edit.Images, wsledger.WikiImage{OID: oid, Ext: imageExt(mime), Data: data})
+			}
+		}
 		if len(edit.Images) > 0 {
 			st.tracker.Refresh()
 			limit := st.tracker.View(h.now(), 0).Attachments.MaxBytes
@@ -190,6 +239,11 @@ func (h *Host) WikiSave(ctx context.Context, id string, s WikiSave) (wsledger.Wi
 	return res, err
 }
 
+// IsWikiRefusal reports whether err is the saver's refusal (a conflict, a
+// malformed edit, an unknown page or wiki, a pasted image with no copy)
+// rather than a store or network failure.
+func IsWikiRefusal(err error) bool { return isWikiRefusal(err) }
+
 // isWikiRefusal reports whether err is the saver's refusal rather than a
 // store or network failure.
 func isWikiRefusal(err error) bool {
@@ -197,7 +251,7 @@ func isWikiRefusal(err error) bool {
 	if errors.As(err, &c) {
 		return true
 	}
-	for _, e := range []error{wsledger.ErrWikiBadName, wsledger.ErrWikiBadPath, wsledger.ErrWikiNotFound,
+	for _, e := range []error{ErrAttachmentNotFound, ErrNotImage, ErrAttachmentTooLarge, wsledger.ErrWikiBadName, wsledger.ErrWikiBadPath, wsledger.ErrWikiNotFound,
 		wsledger.ErrWikiExists, wsledger.ErrWikiNoBase, wsledger.ErrWikiPageNotFound, wsledger.ErrWikiPageExists,
 		wsledger.ErrWikiNoChange, wsledger.ErrWikiBadOp, wsledger.ErrWikiBadEdit, wsledger.ErrBlobMismatch} {
 		if errors.Is(err, e) {

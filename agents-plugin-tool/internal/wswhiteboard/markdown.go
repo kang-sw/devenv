@@ -295,6 +295,9 @@ type target struct {
 	// action is a file target's link actions on a page with FileActions;
 	// zero when the target has none.
 	action FileAction
+	// wikiName and wikiPage are set for a wiki:<name>/<path> link, the
+	// anchor's data-wiki and data-page.
+	wikiName, wikiPage string
 }
 
 // isAction reports whether the target renders as an action link.
@@ -312,7 +315,10 @@ func (t target) isAction() bool { return t.action.Href != "" || t.action.Abs != 
 // image file target on a page with ImageSrc comes back as the src ImageSrc
 // returns, unless it returns empty (see fileTarget). An attachment:<oid>
 // image comes back as the src attachmentSrc returns, when that is a daemon
-// path; every other attachment: destination renders as text.
+// path; every other attachment: destination renders as text. A
+// wiki:<name>/<path> link comes back as the href wikiLink returns, when that
+// is a fragment or a daemon path, with the name and path for its marks;
+// every other wiki: destination renders as text.
 func (p *pageData) resolveTarget(dest string, image bool) (target, bool) {
 	dest = strings.TrimSpace(dest)
 	switch {
@@ -345,6 +351,20 @@ func (p *pageData) resolveTarget(dest string, image bool) (target, bool) {
 		}
 		if src := p.attachmentSrc(u.Opaque); daemonPath(src) {
 			return target{href: src}, true
+		}
+		return target{}, false
+	case "wiki":
+		// Only a link, only through wikiLink, and only to a fragment or a
+		// path on the serving daemon; the opaque part is <name>/<path>.
+		if image || p.wikiLink == nil || suffix != "" {
+			return target{}, false
+		}
+		name, path, found := strings.Cut(u.Opaque, "/")
+		if !found || name == "" || path == "" {
+			return target{}, false
+		}
+		if href := p.wikiLink(name, path); href != "" && (strings.HasPrefix(href, "#") || daemonPath(href)) {
+			return target{href: href, wikiName: name, wikiPage: path}, true
 		}
 		return target{}, false
 	case "file":
@@ -574,7 +594,7 @@ func (r *mdRenderer) link(w util.BufWriter, source []byte, node ast.Node, enteri
 		return ast.WalkContinue, nil
 	}
 	if entering {
-		r.writeAnchorOpen(w, t.href, n.Title)
+		r.writeAnchorOpen(w, t, n.Title)
 	} else {
 		_, _ = w.WriteString("</a>")
 	}
@@ -603,7 +623,7 @@ func (r *mdRenderer) autoLink(w util.BufWriter, source []byte, node ast.Node, en
 	case t.text != "":
 		writePathText(w, t.text)
 	default:
-		r.writeAnchorOpen(w, t.href, nil)
+		r.writeAnchorOpen(w, t, nil)
 		_, _ = w.Write(label)
 		_, _ = w.WriteString("</a>")
 	}
@@ -620,9 +640,13 @@ func destination(raw []byte) string {
 	return string(util.ResolveEntityNames(v))
 }
 
-// writeAnchorOpen opens an anchor to a resolved link's href (linkAttrs).
-func (r *mdRenderer) writeAnchorOpen(w util.BufWriter, href string, title []byte) {
-	attrs := r.page.linkAttrs(href)
+// writeAnchorOpen opens an anchor to a resolved link's href (linkAttrs),
+// with a wiki link's marks after it.
+func (r *mdRenderer) writeAnchorOpen(w util.BufWriter, t target, title []byte) {
+	attrs := r.page.linkAttrs(t.href)
+	if t.wikiName != "" {
+		attrs = append(attrs, [2]string{"data-wiki", t.wikiName}, [2]string{"data-page", t.wikiPage})
+	}
 	_, _ = w.WriteString(`<a`)
 	writeAttrs(w, attrs[:1])
 	r.page.writeTrustRef(w, attrs, false)

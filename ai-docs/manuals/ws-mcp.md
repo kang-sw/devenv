@@ -351,6 +351,16 @@ to `human`, `"$N"` names the batch's Nth event; a refusal is 409 with
 `refusal {index, type, reason}`), `POST .../check` and `.../sync` (a report; an
 unreachable remote is `offline: true`, not an error), `POST .../seen {badge,
 read}` (204), `GET`/`POST /tracker/profiles`, and `POST /tracker/register`.
+The editor routes: `POST .../render {text, attachments, wiki}` (an editor's
+preview through the view's renderer; `wiki` names a wiki whose tree images
+also show), `POST .../attachments?name=` (raw image bytes staged for a later
+write) and `GET .../attachments/<sha256>` (the bytes, magic-byte typed). The
+wiki routes over the store's `refs/heads/wiki/<name>` branches: `GET
+.../wiki` (the list), `GET .../wiki/<name>/pages`, `GET
+.../wiki/<name>/page?path=` (content plus the commit a save sends back as
+`base`), `POST .../wiki/<name>/save` (an edit; a merge conflict is 409 with
+`conflict {path, kind, reason, base, theirs, oursText, theirsText}`, a
+refused edit 422), and `GET .../wiki/<name>/attachments/<sha256>`.
 An unknown store id is 404. Every POST requires an `Origin` equal to the
 daemon's own and a body under 256 KiB, and runs to completion even when the
 page closes mid-request. Every string a route returns has credentials

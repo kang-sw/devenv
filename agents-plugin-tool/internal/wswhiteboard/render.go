@@ -329,6 +329,8 @@ type pageData struct {
 	noInlineTags bool
 	// attachmentSrc is RenderText's TextTargets.AttachmentSrc.
 	attachmentSrc func(oid string) string
+	// wikiLink is RenderText's TextTargets.WikiLink.
+	wikiLink func(name, path string) string
 
 	icons map[string]bool
 	// onPage holds every item ID the page renders, the targets an in-page
