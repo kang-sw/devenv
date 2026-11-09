@@ -366,26 +366,13 @@
         }
       }
     },
-    "261109-bug-ws-whiteboard-patch-cannot-change-item-class": {
-      "registered_at": "2026-11-09T05:54:05Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-09T06:29:12Z",
-        "impl": {
-          "branch": "impl/develop/grid-swirl-stank"
-        }
-      }
-    },
     "261109-feat-ws-dashboard-agents-panel-fixed-rows": {
       "registered_at": "2026-11-09T06:34:52Z",
       "lease": {
         "email": "ki6080@gmail.com",
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
-        "phase": "active",
+        "phase": "closed",
         "touched_at": "2026-11-09T06:40:35Z",
         "impl": {
           "branch": "impl/develop/lurk-snub-romp"
