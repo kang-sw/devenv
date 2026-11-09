@@ -639,3 +639,37 @@ func TestDashboardTrackerWiki(t *testing.T) {
 		}
 	}
 }
+
+// TestDashboardTrackerAttachmentErrorMapping: the adapter maps the host's
+// attachment refusals onto the dashboard sentinels the routes answer with
+// (415, 413, 404); any other host failure maps to none of them, so the
+// route answers 500.
+func TestDashboardTrackerAttachmentErrorMapping(t *testing.T) {
+	dt, _ := newTestTracker(t)
+	ctx := context.Background()
+	sentinels := []error{wsdashboard.ErrTrackerNotImage, wsdashboard.ErrTrackerAttachmentTooLarge, wsdashboard.ErrTrackerAttachmentNotFound}
+	only := func(name string, err, want error) {
+		t.Helper()
+		for _, s := range sentinels {
+			if errors.Is(err, s) != (s == want) {
+				t.Errorf("%s = %v; errors.Is(%v) = %v", name, err, s, errors.Is(err, s))
+			}
+		}
+		if err == nil {
+			t.Errorf("%s succeeded", name)
+		}
+	}
+	_, err := dt.StageAttachment(ctx, "team", "a.txt", []byte("not an image at all"))
+	only("non-image upload", err, wsdashboard.ErrTrackerNotImage)
+	huge := append([]byte("\x89PNG\r\n\x1a\n"), make([]byte, wstracker.DefaultAttachmentMax)...)
+	_, err = dt.StageAttachment(ctx, "team", "big.png", huge)
+	only("oversize upload", err, wsdashboard.ErrTrackerAttachmentTooLarge)
+	_, err = dt.ReadAttachment(ctx, "team", strings.Repeat("a", 64))
+	only("read of an unknown oid", err, wsdashboard.ErrTrackerAttachmentNotFound)
+	_, err = dt.ReadWikiImage(ctx, "team", "docs", strings.Repeat("a", 64))
+	only("read of an unknown wiki image", err, wsdashboard.ErrTrackerAttachmentNotFound)
+	_, err = dt.StageAttachment(ctx, "nope", "a.png", append([]byte("\x89PNG\r\n\x1a\n"), "x"...))
+	only("upload to an unknown store", err, nil)
+	_, err = dt.ReadAttachment(ctx, "nope", strings.Repeat("a", 64))
+	only("read from an unknown store", err, nil)
+}
