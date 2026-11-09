@@ -379,6 +379,9 @@
         }
       }
     },
+    "261109-feat-ws-dashboard-agents-panel-fixed-rows": {
+      "registered_at": "2026-11-09T06:34:52Z"
+    },
     "261109-feat-ws-dashboard-git-commit-graph": {
       "registered_at": "2026-11-09T05:26:59Z",
       "lease": {
