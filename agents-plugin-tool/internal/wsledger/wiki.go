@@ -386,8 +386,9 @@ func (l *Ledger) absorbWiki(ctx context.Context) error {
 // a recovery point. A push that fails (a remote refusal, a transport
 // failure) is returned in failed, by ref, and the other wikis are still
 // pushed: one wiki the remote refuses must not hold up the ledger's sync
-// or saves to other wikis. err is a local failure. The refusals stand in
-// l.wikiPushWarns until the next call.
+// or saves to other wikis. err is a local failure. The refusals are kept
+// in l.wikiPushErrs until the next call, as the reasons noteUnpublished
+// gives.
 func (l *Ledger) pushLocalWikis(ctx context.Context) (failed map[string]error, err error) {
 	local, snap, known, err := l.wikiRefs(ctx)
 	if err != nil {
@@ -416,8 +417,34 @@ func (l *Ledger) pushLocalWikis(ctx context.Context) (failed map[string]error, e
 			}
 		}
 	}
-	l.wikiPushWarns = wikiPushWarnings(failed)
+	l.wikiPushErrs = failed
 	return failed, nil
+}
+
+// noteUnpublished re-derives l.wikiPushWarns from the refs: a local wiki
+// the remote is not known to hold, on a store with a remote, is not
+// published yet (its push was refused, or has not run), and stays so until
+// a push of it lands from whichever process shares the store. The reason
+// is this process's last refusal of it when it saw one. A failure to read
+// the refs leaves the warnings as they were.
+func (l *Ledger) noteUnpublished(ctx context.Context) {
+	if !l.hasRemote(ctx) {
+		l.wikiPushWarns = nil
+		return
+	}
+	local, _, known, err := l.wikiRefs(ctx)
+	if err != nil {
+		return
+	}
+	unpublished := map[string]error{}
+	for ref := range local {
+		if _, ok := wikiNameOf(ref); ok && known[ref] == "" {
+			if unpublished[ref] = l.wikiPushErrs[ref]; unpublished[ref] == nil {
+				unpublished[ref] = errors.New("ledger: wiki not yet published to the remote")
+			}
+		}
+	}
+	l.wikiPushWarns = wikiPushWarnings(unpublished)
 }
 
 // wikiPushWarnings reports the failed pushes of pushLocalWikis, by ref.

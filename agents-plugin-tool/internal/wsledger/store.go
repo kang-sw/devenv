@@ -107,13 +107,15 @@ type Ledger struct {
 	noFilterWarned bool
 	// wikiWarns are the anomalies the last wiki absorb found (wiki.go).
 	wikiWarns []Warning
-	// wikiPushWarns are the last pushLocalWikis' refused pushes. They
-	// stand, carried by every report, until the next pushLocalWikis: a
-	// Fetch (a background poll, a check) does not push, so a one-shot
-	// warning would be gone from its report while the wiki is still
-	// refused. A failed wiki fetch needs no such care: every fetch retries
-	// it and reports it again (pendingWarns).
+	// wikiPushWarns name the unpublished wikis, which every Fetch and Sync
+	// re-derives from the refs (noteUnpublished), so every process sharing
+	// the store, a fresh one included, reports a refused wiki until a push
+	// of it lands from any of them. wikiPushErrs are this process's last
+	// pushLocalWikis refusals, by ref: only the reason a warning gives.
+	// A failed wiki fetch needs no such care: every fetch retries it and
+	// reports it again (pendingWarns).
 	wikiPushWarns []Warning
+	wikiPushErrs  map[string]error
 
 	view          *view
 	pendingCommit *commitRec
@@ -1027,6 +1029,7 @@ func (l *Ledger) reissue() (int, error) {
 func (l *Ledger) Sync(ctx context.Context) (SyncReport, error) {
 	var rep SyncReport
 	err := l.withLock(ctx, func() error {
+		defer l.noteUnpublished(ctx)
 		if err := l.refresh(ctx); err != nil {
 			return err
 		}
@@ -1046,7 +1049,7 @@ func (l *Ledger) Sync(ctx context.Context) (SyncReport, error) {
 			}
 			rep.Pushed = rep.Pushed || pushed
 			// A wiki the remote refuses does not stop the ledger's own
-			// fetch; it is reported (wikiPushWarns) until a push lands.
+			// fetch; it is reported (noteUnpublished) until a push lands.
 			if _, err := l.pushLocalWikis(ctx); err != nil {
 				return err
 			}
@@ -1083,6 +1086,7 @@ func (l *Ledger) Sync(ctx context.Context) (SyncReport, error) {
 func (l *Ledger) Fetch(ctx context.Context) (SyncReport, error) {
 	var rep SyncReport
 	err := l.withLock(ctx, func() error {
+		defer l.noteUnpublished(ctx)
 		if err := l.refresh(ctx); err != nil {
 			return err
 		}
