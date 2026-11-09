@@ -344,13 +344,10 @@
       "registered_at": "2026-11-08T00:25:15Z",
       "lease": {
         "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
+        "clone_id": "28ef83e379b353cc",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-08T12:30:33Z",
-        "impl": {
-          "branch": "impl/develop/judo-jab-outer"
-        }
+        "touched_at": "2026-11-09T03:54:00Z"
       }
     },
     "261108-feat-ws-tracker-wiki-git-branch": {
