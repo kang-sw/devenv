@@ -20,7 +20,9 @@ host that shows HTML inline. Workers and subagents do not use it.
   the dashboard daemon serves the session, else the full page path relative
   to the session root), and `embed:` (the snapshot's path, or its bare file
   name while an embed folder is set). An `info:` line names the items a
-  `wb:close` withdrew and, at most once an hour, open topics unchanged for an
+  `wb:close` withdrew, items holding options under a class other than
+  `policy` (only a policy item's options are offered as picks), and, at most
+  once an hour, open topics unchanged for an
   hour with nothing waiting on the user; close the finished ones with
   `wb:close`.
 - `{{.McpNamespace}}/whiteboard.query(session_key, payload)` returns stored
@@ -47,7 +49,7 @@ several `wb:topic` groups.
 | `wb:add` | `id?`, `class` | fields `wb:title`, `wb:option`..., `wb:recommend?`, `wb:why?`, `wb:link`... |
 | `wb:close` | `result` | none |
 | `wb:answer` | `id` or `ids`, `value`, `assumed?` | the user's verbatim words |
-| `wb:patch` | `id`, `status?`, `clear?` | any `wb:add` field, each replacing that field |
+| `wb:patch` | `id`, `status?`, `class?`, `clear?` | any `wb:add` field, each replacing that field |
 | `wb:floor` | `id` | none |
 | `wb:embed-dir` | `path` | none |
 
@@ -116,8 +118,17 @@ Markdown up to the closing tag.
   with `assumed="true"`; `wb:patch status` sets `open`, `withdrawn`, or
   `superseded`. Answered, withdrawn, and superseded items are settled, and an
   assumed item shows among them: the page keeps the 10 most recently settled
-  expanded and the rest behind their topic's count chip. Options change only on an open item, since an answer
-  is stored as an option letter.
+  expanded and the rest behind their topic's count chip. Options and `class`
+  change only on an item that is open once the patch's own `status` applies,
+  since an answer is stored as an option letter under its class: to turn a
+  settled item into a policy question under its existing ID, send
+  `status="open"`, `class="policy"`, and the options in one `wb:patch`.
+- Re-ask: a `wb:patch` that changes an item's `class` or options, or sets a
+  settled or assumed item back to `open`, asks it again. The dashboard then
+  drops the answers the user sent for it before the patch, so the item shows
+  as waiting on the user even when an earlier answer was sent but not yet
+  recorded. A patch that only edits the title, `wb:why`, `wb:recommend`, or
+  links, or resends the current class or options, is not a re-ask.
 - `wb:close` collapses a topic's settled items and its body; the topic needs
   an item or a body. `result` is required: one sentence saying how the topic
   ended, shown dimmed beside the closed topic's name. Closing withdraws every

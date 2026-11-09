@@ -55,6 +55,7 @@ func (src *DashboardSessionSource) ReadPageLang(reg wsdashboard.Registration, la
 	}
 	page.HasBoard = true
 	page.Seq = record.Whiteboard.Seq
+	page.Reasked = record.Whiteboard.ReaskTimes()
 	// BuildView only reads the state: the served page never begins a render
 	// or writes a file, so the stored board and the static page are untouched.
 	in := servedViewInput(record, reg.ReplyID)
@@ -109,8 +110,8 @@ func servedViewInput(record sessionRecord, replyID string) wswhiteboard.ViewInpu
 		},
 		FileActions: wsdashboard.FileActions(record.Root, replyID),
 		// An item field's absolute image path outside the root loads, for a
-		// loopback viewer, through the image route; a topic body never takes
-		// it (wswhiteboard.View OutsideImage).
+		// loopback viewer, through the image route; a topic body's frame asks
+		// the page to fetch it there (wswhiteboard.View OutsideImage).
 		OutsideImage: wsdashboard.OutsideImage(record.Root, replyID),
 	}
 }

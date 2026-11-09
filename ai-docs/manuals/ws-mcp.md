@@ -272,8 +272,8 @@ an image inline, markdown rendered in the board's escaped mode with relative
 links resolved against the file's own directory, other UTF-8 text as
 `text/plain`, and a binary or over-2-MiB file as a page offering the path
 copies. A file outside the root offers the copies only, except an image
-written as an absolute path in a lead reply or a board item field (not a
-topic body, not the file view). A board image inside
+written as an absolute path in a lead reply, a board item field, or (through
+the relay below) a topic body, not the file view. A board image inside
 the root loads through `GET /s/<reply-id>/image?path=<root-relative path>`,
 which serves only an image-extension file under the same containment, and
 any other image renders as its path, with that one exception: an absolute
@@ -292,7 +292,18 @@ renders in its own sandboxed `srcdoc` frame (`allow-scripts allow-popups
 allow-popups-to-escape-sandbox`, an opaque origin that sends no cookie), so
 its images are inlined as `data:` URLs up to 2 MiB under the same containment
 (`wsdashboard.ImageDataURL`); a larger image falls back to the image route,
-which a LAN viewer's frame cannot load. The served board renders the 30 most
+which a LAN viewer's frame cannot load. An absolute image path outside the
+root is never inlined (the frame's content is the same for every viewer):
+it stays path text marked `data-relay` with its image route URL, and the
+frame element lists those URLs as its own `data-relay`. The frame cannot load
+that route itself (its opaque origin's requests are `Sec-Fetch-Site:
+cross-site`, which the route 404s), so it asks the page by `postMessage`;
+the page's relay handler accepts the request only from one of its own body
+frames and only for a URL on that frame's list that is this session's image
+route for an image name, fetches it same-origin (served only to a loopback
+viewer), and posts the frame an image `Blob`, which the frame shows in the
+path text's place once it decodes. A LAN viewer's fetch 404s and the path
+text stays. The served board renders the 30 most
 recently closed topics (with nothing waiting on the user) and a show-more
 control; `GET /s/<reply-id>/closed?from=<index>&n=<count>` (from at least 1,
 n default 30, at most 300) answers `{html}` with the next closed topics in

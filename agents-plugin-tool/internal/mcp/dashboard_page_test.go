@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	stdhtml "html"
@@ -146,22 +147,28 @@ func TestDashboardReadPageServesTheBoard(t *testing.T) {
 // topic body: one sandboxed doc-frame iframe per body (opaque origin, no
 // allow-same-origin, since the daemon's routes accept messages and steer
 // sessions), its text and inline HTML in the frame's document, a local image
-// inlined as a data: URL because the frame sends no cookie, and no Now slot.
+// inlined as a data: URL because the frame sends no cookie, an absolute image
+// outside the root left as path text marked for the host's relay (never its
+// bytes inlined) with the frame listing that image route URL, and no Now
+// slot. The pages written to disk carry no relay.
 func TestDashboardServedPageRendersTopicBodyInAFrame(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	now := time.Now()
 	src := dashboardPageSource(t, &now)
 	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
 	mustWrite(t, f.root, "shots/a.png", "not-really-a-png")
+	outDir := t.TempDir()
+	mustWrite(t, outDir, "away.png", "outside-bytes")
+	outside := filepath.ToSlash(filepath.Join(outDir, "away.png"))
 	f.update(t, "<wb:topic name=\"Rollout\"><wb:add class=\"technical\"><wb:title>an item</wb:title></wb:add></wb:topic>\n"+
-		"<wb:topic name=\"Rollout\"><wb:body>\n## 배경\n본문 body-marker <details><summary>more</summary>raw</details>\n\n![shot](shots/a.png)\n</wb:body></wb:topic>\n"+
+		"<wb:topic name=\"Rollout\"><wb:body>\n## 배경\n본문 body-marker <details><summary>more</summary>raw</details>\n\n![shot](shots/a.png) ![away]("+outside+")\n</wb:body></wb:topic>\n"+
 		"<wb:topic name=\"Body only\"><wb:body>\nsecond-marker\n</wb:body></wb:topic>")
 	html := string(readPageOK(t, src, reg).Board.Board)
 
 	if strings.Contains(html, `id="wb-now"`) || strings.Contains(html, `class="now`) {
 		t.Errorf("the served board carries a Now slot:\n%.600s", html)
 	}
-	frames := regexp.MustCompile(`<iframe class="doc-frame" title="([^"]*)" data-doc="([^"]*)" sandbox="([^"]*)" srcdoc="([^"]*)"></iframe>`).FindAllStringSubmatch(html, -1)
+	frames := regexp.MustCompile(`<iframe class="doc-frame" title="([^"]*)" data-doc="([^"]*)"(?: data-relay="[^"]*")? sandbox="([^"]*)" srcdoc="([^"]*)"></iframe>`).FindAllStringSubmatch(html, -1)
 	if len(frames) != 2 {
 		t.Fatalf("doc-frame iframes = %d, want one per topic body:\n%.600s", len(frames), html)
 	}
@@ -181,8 +188,31 @@ func TestDashboardServedPageRendersTopicBodyInAFrame(t *testing.T) {
 			t.Errorf("the Rollout frame document lacks %q:\n%.800s", want, rollout)
 		}
 	}
-	if strings.Contains(rollout, "/image?path=") {
-		t.Errorf("a frame image must be inlined, not loaded through the cookie-gated route")
+	if strings.Contains(rollout, `src="/s/`) {
+		t.Errorf("a frame image must be inlined or relayed, never loaded through the cookie-gated route")
+	}
+	relay := "/s/" + reg.ReplyID + "/image?path=" + url.QueryEscape(outside)
+	if want := `<span class="img-text" data-relay="` + relay + `">away `; !strings.Contains(rollout, want) {
+		t.Errorf("the Rollout frame document lacks the relay marker %q:\n%.1200s", want, rollout)
+	}
+	if strings.Contains(rollout, base64.StdEncoding.EncodeToString([]byte("outside-bytes"))) || strings.Count(rollout, "data:image/png") != 1 {
+		t.Errorf("an image outside the root must never be inlined into the frame")
+	}
+	if want := `data-doc="Rollout" data-relay="` + stdhtml.EscapeString(relay) + `" sandbox=`; !strings.Contains(html, want) {
+		t.Errorf("the Rollout frame lacks its relay list %q", want)
+	}
+	if strings.Contains(html, `data-doc="Body only" data-relay`) {
+		t.Errorf("a body without an outside image must list no relay")
+	}
+	// The page written to disk and the embed take no relay.
+	written := append([]string{f.replyID() + ".html"}, f.embeds(t, f.dir())...)
+	if len(written) < 2 {
+		t.Fatalf("pages written to disk = %v, want the full page and an embed", written)
+	}
+	for _, name := range written {
+		if page := readPage(t, filepath.Join(f.dir(), name)); strings.Contains(page, "data-relay") || strings.Contains(page, "/image?path=") {
+			t.Errorf("%s carries a relay or the image route", name)
+		}
 	}
 	if !strings.Contains(docs["Body only"], "second-marker") {
 		t.Errorf("a topic with a body and no items must render its frame: %v", docs)
@@ -553,6 +583,26 @@ func TestDashboardReadPageLangTranslatesBoardAndPanelText(t *testing.T) {
 	}
 	if strings.Contains(koHTML, ">Tickets<") || strings.Contains(koHTML, "1 ready, 1 todo") {
 		t.Error("Korean page still carries English panel text")
+	}
+}
+
+// TestDashboardReadPageCarriesReaskTimes pins the plumbing of the re-ask
+// rule: the served page carries each re-asked item's latest re-ask time,
+// read from the session's whiteboard, for the sent-mark filter; an item
+// never re-asked is absent.
+func TestDashboardReadPageCarriesReaskTimes(t *testing.T) {
+	f := newWhiteboardFixture(t)
+	src := dashboardPageSource(t, nil)
+	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
+	f.update(t, `<wb:topic name="t"><wb:add class="technical"><wb:title>one</wb:title></wb:add><wb:add class="technical"><wb:title>two</wb:title></wb:add></wb:topic>`)
+	if page := readPageOK(t, src, reg); page.Reasked != nil {
+		t.Fatalf("no item re-asked: Reasked = %v", page.Reasked)
+	}
+	before := time.Now().UnixMilli()
+	f.update(t, `<wb:patch id="1" class="policy"><wb:option>x</wb:option><wb:option>y</wb:option></wb:patch>`)
+	page := readPageOK(t, src, reg)
+	if len(page.Reasked) != 1 || page.Reasked[1] < before || page.Reasked[1] > time.Now().UnixMilli() {
+		t.Fatalf("Reasked = %v, want item 1 at or after %d", page.Reasked, before)
 	}
 }
 

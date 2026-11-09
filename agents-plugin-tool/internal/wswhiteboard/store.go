@@ -136,6 +136,39 @@ type Item struct {
 	// the item is open. Rotation and archive eviction order by it, never by
 	// time.
 	Settled int `json:"settled,omitempty"`
+	// ReaskedAt is the wall-clock time (RFC 3339, millisecond precision) of
+	// the item's latest re-ask: a patch that changed its class or options, or
+	// set it back to open from settled or assumed. Empty when it was never
+	// re-asked. The dashboard drops sent marks older than it (ReaskTimes).
+	ReaskedAt string `json:"reasked_at,omitempty"`
+}
+
+// reaskLayout is ReaskedAt's format: RFC 3339 with milliseconds, the
+// precision of the dashboard inbox's send times it is compared with.
+const reaskLayout = "2006-01-02T15:04:05.000Z07:00"
+
+// ReaskTimes maps each re-asked item's ID to its latest re-ask time in epoch
+// milliseconds; an item never re-asked, or with an unreadable time, is
+// absent. A nil state has none.
+func (s *State) ReaskTimes() map[int]int64 {
+	if s == nil {
+		return nil
+	}
+	var out map[int]int64
+	for _, item := range s.Items {
+		if item.ReaskedAt == "" {
+			continue
+		}
+		at, err := time.Parse(time.RFC3339Nano, item.ReaskedAt)
+		if err != nil {
+			continue
+		}
+		if out == nil {
+			out = map[int]int64{}
+		}
+		out[item.ID] = at.UnixMilli()
+	}
+	return out
 }
 
 // Embed records one embed snapshot written to the repository folder, so
@@ -218,8 +251,9 @@ type Outcome struct {
 	// Withdrawn holds the ID of every item a wb:close withdrew, in command
 	// order.
 	Withdrawn []int
-	// Info is the note on Withdrawn followed by the stale-topic nudge (see
-	// staleNudge), "" when the batch carries neither. It is for the caller's
+	// Info is the note on Withdrawn, then the note on items left holding
+	// options under a class other than policy, then the stale-topic nudge
+	// (see staleNudge), "" when the batch carries none. It is for the caller's
 	// tool result only; no page shows it.
 	Info string
 }
@@ -430,16 +464,19 @@ func Apply(state *State, commands string, env Env) (Outcome, []string) {
 	work.Seq++
 	mark := work.Seq
 	var out Outcome
+	var optionWarn []int
 	embedDir := false
 
 	for _, cmd := range cmds {
 		switch cmd.Tag {
 		case "wb:add":
-			out.IDs = append(out.IDs, applyAdd(p, work, cmd, mark))
+			id := applyAdd(p, work, cmd, mark)
+			out.IDs = append(out.IDs, id)
+			optionWarn = work.noteNonPolicyOptions(optionWarn, id)
 		case "wb:answer":
 			applyAnswer(p, work, cmd, mark, env.Now)
 		case "wb:patch":
-			applyPatch(p, work, cmd, mark)
+			optionWarn = work.noteNonPolicyOptions(optionWarn, applyPatch(p, work, cmd, mark, env.Now))
 		case "wb:body":
 			applyBody(p, work, state, cmd, mark)
 		case "wb:edit":
@@ -476,7 +513,7 @@ func Apply(state *State, commands string, env Env) (Outcome, []string) {
 	}
 	work.evictArchive()
 	work.stampChanges(mark, env.Now)
-	out.Info = joinInfo(withdrawnInfo(out.Withdrawn), work.staleNudge(env.Now))
+	out.Info = joinInfo(withdrawnInfo(out.Withdrawn), nonPolicyOptionsInfo(work, optionWarn), work.staleNudge(env.Now))
 	*state = *work
 	return out, nil
 }
@@ -529,6 +566,40 @@ func withdrawnInfo(ids []int) string {
 		labels[i] = FormatID(id)
 	}
 	return "wb:close withdrew " + strings.Join(labels, ", ") + " (still open in the closed topic)."
+}
+
+// noteNonPolicyOptions appends id to ids when the item it names now holds
+// options under a class other than policy, and is not listed yet. Options
+// are judged after the command, so an add, a patch adding options, and a
+// reclass away from policy that keeps them all count.
+func (s *State) noteNonPolicyOptions(ids []int, id int) []int {
+	idx := s.index(id)
+	if id == 0 || idx < 0 || slices.Contains(ids, id) {
+		return ids
+	}
+	if item := s.Items[idx]; item.Class != ClassPolicy && len(item.Options) > 0 {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+// nonPolicyOptionsInfo is the update result's note on items that hold
+// options under a class other than policy, "" when there are none. Only a
+// policy item's options are offered for a pick.
+func nonPolicyOptionsInfo(s *State, ids []int) string {
+	if len(ids) == 0 {
+		return ""
+	}
+	labels := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if idx := s.index(id); idx >= 0 {
+			labels = append(labels, FormatID(id)+" ["+s.Items[idx].Class+"]")
+		}
+	}
+	if len(labels) == 0 {
+		return ""
+	}
+	return "Options on a non-policy item: " + strings.Join(labels, ", ") + ". Options are a pick for a policy question; reclass it with <wb:patch id=\"..\" class=\"policy\"> or clear them with clear=\"options\"."
 }
 
 // joinInfo joins the non-empty info sentences with a space.
@@ -712,18 +783,30 @@ func answerIDs(p *problems, cmd command) []int {
 // patchClearValues are the list fields a patch's clear attribute empties.
 var patchClearValues = []string{"options", "links"}
 
-func applyPatch(p *problems, work *State, cmd command, mark int) {
+// applyPatch edits one item and returns its ID, 0 when the id attribute is
+// unusable. Class and options change only on an item that is open once the
+// patch's own status change applies, so one patch can reopen a settled item,
+// reclass it, and give it new options: a stored answer means something only
+// under the class and options it was given. A patch that really changes the
+// class or the options, or sets a settled or assumed item back to open, is a
+// re-ask and stamps ReaskedAt with now.
+func applyPatch(p *problems, work *State, cmd command, mark int, now time.Time) int {
 	before := len(p.List)
-	idx := -1
-	if id, ok := wsxmlcmd.IntAttr(p, cmd, "id", true); ok {
-		if idx = work.index(id); idx < 0 {
-			p.Add("%s: %s is not in the store", cmd.At("id"), FormatID(id))
+	idx, id := -1, 0
+	if n, ok := wsxmlcmd.IntAttr(p, cmd, "id", true); ok {
+		id = n
+		if idx = work.index(n); idx < 0 {
+			p.Add("%s: %s is not in the store", cmd.At("id"), FormatID(n))
 		}
 	}
 	f := readItemFields(p, cmd)
 	status := ""
 	if _, present := cmd.Attr("status"); present {
 		status, _ = wsxmlcmd.EnumAttr(p, cmd, "status", patchStatusValues)
+	}
+	class := ""
+	if _, present := cmd.Attr("class"); present {
+		class, _ = wsxmlcmd.EnumAttr(p, cmd, "class", classValues)
 	}
 	clear := map[string]bool{}
 	if raw, present := cmd.Attr("clear"); present {
@@ -742,17 +825,30 @@ func applyPatch(p *problems, work *State, cmd command, mark int) {
 		p.Add("%s: clear=\"links\" and <wb:link> fields contradict each other", cmd.Label())
 	}
 	if idx < 0 {
-		return
+		return 0
 	}
-	next := work.Items[idx]
+	prev := work.Items[idx]
+	next := prev
+	// The open checks below read the status this patch leaves the item in.
+	after := prev.Status
+	if status != "" {
+		after = status
+	}
 	if f.title != nil && wsxmlcmd.NonEmpty(p, cmd.At("<wb:title>"), *f.title) {
 		next.Title = *f.title
 	}
 	if f.hasOptions || clear["options"] {
-		if next.Status != StatusOpen {
-			p.Add("%s: %s is %s; options change only on an open item, since its answer is stored as an option letter", cmd.At("<wb:option>"), FormatID(next.ID), next.Status)
+		if after != StatusOpen {
+			p.Add("%s: %s is %s; options change only on an open item, since its answer is stored as an option letter (send status=\"open\" in the same patch to re-ask it)", cmd.At("<wb:option>"), FormatID(next.ID), after)
 		} else {
 			next.Options = f.options
+		}
+	}
+	if class != "" {
+		if after != StatusOpen {
+			p.Add("%s: %s is %s; class changes only on an open item, since its answer was given under its class (send status=\"open\" in the same patch to re-ask it)", cmd.At("class"), FormatID(next.ID), after)
+		} else {
+			next.Class = class
 		}
 	}
 	if f.recommend != nil {
@@ -766,21 +862,27 @@ func applyPatch(p *problems, work *State, cmd command, mark int) {
 	}
 	checkPolicyShape(p, cmd.Label(), next)
 	if len(p.List) > before {
-		return
+		return id
 	}
 	next.Changed = mark
+	reopened := false
 	if status != "" && status != next.Status {
 		next.Status = status
 		if status == StatusOpen {
 			// Reopening asks the item again: its earlier answer no longer
 			// stands. Withdrawn and superseded items keep theirs as history.
+			reopened = true
 			next.Settled = 0
 			next.Answer, next.AnswerQuote, next.AnsweredAt = "", "", ""
 		} else {
 			work.settle(&next)
 		}
 	}
+	if reopened || next.Class != prev.Class || !slices.Equal(next.Options, prev.Options) {
+		next.ReaskedAt = now.UTC().Format(reaskLayout)
+	}
 	work.Items[idx] = next
+	return id
 }
 
 // applyBody replaces a topic's body whole; an empty (or blank) body clears

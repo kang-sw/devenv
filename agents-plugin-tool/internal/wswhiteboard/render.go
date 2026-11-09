@@ -308,8 +308,12 @@ type pageData struct {
 	// DocImageSrc.
 	framing bool
 	// inDoc is set while any topic body renders, framed or not, so its file
-	// targets never take OutsideImage.
+	// targets never take OutsideImage as a src or link; a framed body's
+	// image takes it only as a relay (relayImage).
 	inDoc bool
+	// relays collects the relay URLs of the framed body being rendered
+	// (relayImage), which framedDoc lists on its frame.
+	relays []string
 
 	CountPolicy, CountAcks, CountFresh int
 	// CountBulk is how many items the bulk checkbox answers.
@@ -405,7 +409,7 @@ func newPageData(view View, a *pageAssets, framed bool) *pageData {
 		}
 		page := p.Mermaid
 		p.Mermaid = false
-		p.framing, p.inDoc = framed, true
+		p.framing, p.inDoc, p.relays = framed, true, nil
 		marks := t.DocMarks
 		if !full {
 			marks = nil // the embed has no script to draw them
@@ -415,7 +419,7 @@ func newPageData(view View, a *pageAssets, framed bool) *pageData {
 		if framed {
 			// The frame loads mermaid for its own blocks; the page loads it
 			// only for a block outside every frame.
-			html = p.framedDoc(t.Name, html, p.Mermaid, a)
+			html = p.framedDoc(t.Name, html, p.Mermaid, p.relays, a)
 			p.Mermaid = false
 		}
 		p.Mermaid = p.Mermaid || page
@@ -451,9 +455,15 @@ const frameCSS = "html, body { background: transparent; overflow: hidden; }"
 // blocks. An image reaches the frame as whatever src ImageSrc (or
 // DocImageSrc) gave it: the frame's requests carry no cookie, so a served
 // page inlines body images rather than pointing at a route that needs one.
+// An image outside the session root is the one exception: inlining it would
+// hand its bytes to every viewer, so the body keeps its path text marked
+// data-relay (relayImage), and the frame lists those URLs as its own
+// data-relay, space-separated. The host fetches a URL its frame asks for only
+// when it is on that list, which the body's own markup cannot extend, and
+// hands the frame the image (doc-frame.js and the dashboard script).
 // The frame carries its topic name as data-doc, so the host can keep each
 // frame's height across a board swap.
-func (p *pageData) framedDoc(topic string, body template.HTML, mermaid bool, a *pageAssets) template.HTML {
+func (p *pageData) framedDoc(topic string, body template.HTML, mermaid bool, relays []string, a *pageAssets) template.HTML {
 	var doc strings.Builder
 	doc.WriteString(frameDocStart + `<head><meta charset="utf-8"><base target="_blank"><style>`)
 	doc.WriteString(string(a.css))
@@ -464,7 +474,11 @@ func (p *pageData) framedDoc(topic string, body template.HTML, mermaid bool, a *
 		doc.WriteString(`<script src="` + template.HTMLEscapeString(p.MermaidFile()) + `"></script><script>wbDocMermaid(function () {` + string(a.mermaidInit) + `});</script>`)
 	}
 	doc.WriteString(`</body></html>`)
-	return template.HTML(`<iframe class="doc-frame" title="` + template.HTMLEscapeString(topic) + `" data-doc="` + template.HTMLEscapeString(topic) + `" sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox" srcdoc="` +
+	relay := ""
+	if len(relays) > 0 {
+		relay = ` data-relay="` + template.HTMLEscapeString(strings.Join(relays, " ")) + `"`
+	}
+	return template.HTML(`<iframe class="doc-frame" title="` + template.HTMLEscapeString(topic) + `" data-doc="` + template.HTMLEscapeString(topic) + `"` + relay + ` sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox" srcdoc="` +
 		template.HTMLEscapeString(doc.String()) + `"></iframe>`)
 }
 

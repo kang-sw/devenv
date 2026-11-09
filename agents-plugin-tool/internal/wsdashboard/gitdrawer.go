@@ -3,7 +3,6 @@ package wsdashboard
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -160,25 +159,16 @@ func parseNumstat(out []byte) map[string][2]int {
 // handleGitStatus serves GET /s/<reply-id>/git/status: the session root's
 // changed files as JSON (GitChanges), or 502 with git's reason.
 func (d *Daemon) handleGitStatus(w http.ResponseWriter, r *http.Request, replyID string) {
-	if d.index == nil || !ValidReplyID(replyID) {
-		http.Error(w, "unknown session", http.StatusNotFound)
+	root, ok := d.sessionRoot(w, replyID)
+	if !ok {
 		return
 	}
-	s, ok := d.index.Session(replyID)
-	if !ok || s.Project == "" {
-		http.Error(w, "unknown session", http.StatusNotFound)
-		return
-	}
-	c, err := readGitChanges(s.Project)
+	c, err := readGitChanges(root)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
-	raw, _ := json.Marshal(c)
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("X-Content-Type-Options", "nosniff")
-	_, _ = w.Write(raw)
+	writeGitJSON(w, c)
 }
 
 // GitHandle is the drawer handle's abbreviated branch label: an

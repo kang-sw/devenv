@@ -102,6 +102,12 @@ func guardedRoutes() []struct{ method, path, body string } {
 		// OS open command.
 		{http.MethodPost, "/s/livesession/open", `{"target":"ftp://guard.test/"}`},
 		{http.MethodPost, "/s/livesession/git", ""},
+		// The git drawer's reads; the fixture's root is no repository.
+		{http.MethodGet, "/s/livesession/git/status", ""},
+		{http.MethodGet, "/s/livesession/git/log", ""},
+		{http.MethodGet, "/s/livesession/git/commit/" + strings.Repeat("0", 40), ""},
+		{http.MethodGet, "/s/livesession/git/commit/" + strings.Repeat("0", 40) + "/diff?path=x", ""},
+		{http.MethodGet, "/s/livesession/git/worktree/diff?side=staged&path=x", ""},
 		// The fixture's root is no repository, so a passing request pushes
 		// nothing.
 		{http.MethodPost, "/s/livesession/git/push", ""},
