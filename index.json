@@ -344,7 +344,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-09T04:12:22Z"
+        "touched_at": "2026-11-09T04:13:45Z",
+        "impl": {
+          "branch": "impl/develop/candy-mummy-suing"
+        }
       }
     },
     "261108-feat-ws-tracker-support-agent-chat": {
