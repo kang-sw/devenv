@@ -353,18 +353,8 @@
     "261108-feat-ws-tracker-wiki-git-branch": {
       "registered_at": "2026-11-08T03:56:55Z"
     },
-    "261109-feat-ws-tracker-review-stage-and-assignment-defaults": {
-      "registered_at": "2026-11-09T03:33:17Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-09T04:13:38Z",
-        "impl": {
-          "branch": "impl/develop/mummy-amuck-rage"
-        }
-      }
+    "261109-bug-git-commit-paths-in-delegate-worktree": {
+      "registered_at": "2026-11-09T04:57:34Z"
     },
     "261109-feat-ws-tracker-shared-markdown-editor": {
       "registered_at": "2026-11-09T03:33:13Z",
