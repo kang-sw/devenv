@@ -105,6 +105,8 @@ type Ledger struct {
 	// no-filter fallback, reported once per store per process).
 	pendingWarns   []Warning
 	noFilterWarned bool
+	// wikiWarns are the anomalies the last wiki absorb found (wiki.go).
+	wikiWarns []Warning
 
 	view          *view
 	pendingCommit *commitRec
@@ -1036,6 +1038,9 @@ func (l *Ledger) Sync(ctx context.Context) (SyncReport, error) {
 				return err
 			}
 			rep.Pushed = rep.Pushed || pushed
+			if err := l.pushLocalWikis(ctx); err != nil {
+				return err
+			}
 			if err := l.fetchRemote(ctx); err != nil {
 				return err
 			}
@@ -1119,7 +1124,7 @@ func (l *Ledger) finishReport(rep *SyncReport) {
 	defer l.mu.Unlock()
 	rep.Received = l.received
 	rep.Warnings = append(append(append(rep.Warnings, l.remoteWarns...), l.badRefs...), l.attachWarns...)
-	rep.Warnings = append(rep.Warnings, l.pendingWarns...)
+	rep.Warnings = append(append(rep.Warnings, l.wikiWarns...), l.pendingWarns...)
 	l.pendingWarns = nil
 	rep.Pending = l.pendingLocked()
 }
