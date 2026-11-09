@@ -1922,7 +1922,7 @@
   // pull's "nothing to pull" as a plain note. Every answer reads the files
   // again, and the graph with them; the handle's own re-read arrives
   // through the stream.
-  var gref = $("gref"), gfiles = $("gfiles"), gmsg = $("gmsg"), gSeq = 0, gBusy = false;
+  var gref = $("gref"), gfiles = $("gfiles"), gmsg = $("gmsg"), gSeq = 0, gBusy = false, gitLast = null;
   function gitOpened() {
     if (!gbody || !window.fetch) return;
     fetch("/s/" + rid + "/git", { method: "POST", credentials: "same-origin", cache: "no-store" }).catch(function () {});
@@ -1976,6 +1976,7 @@
     return row;
   }
   function gitDraw(v) {
+    gitLast = v;
     gitRef(v);
     gfiles.textContent = "";
     var groups = [["staged", "js.git.staged"], ["unstaged", "js.git.unstaged"], ["untracked", "js.git.untracked"]], any = false;
@@ -1987,7 +1988,12 @@
       head.appendChild(mk("span", "", wsT(g[1])));
       head.appendChild(mk("span", "chip", String(list.length)));
       sec.appendChild(head);
-      list.forEach(function (f) { sec.appendChild(gitRow(f)); });
+      list.forEach(function (f, i) {
+        var row = gitRow(f);
+        row.setAttribute("data-side", g[0]);
+        row.setAttribute("data-i", String(i));
+        sec.appendChild(row);
+      });
       gfiles.appendChild(sec);
     });
     if (!any) gfiles.appendChild(mk("div", "gempty", wsT("js.git.clean")));
@@ -2028,6 +2034,9 @@
   if (gbody) gbody.addEventListener("click", function (e) {
     var b = e.target.closest && e.target.closest(".gact");
     if (b && !b.disabled) gitAct(b);
+    // A changed file opens the commit window on the working tree.
+    var f = e.target.closest && e.target.closest(".gf[data-side]");
+    if (f) gwWorktree(f.getAttribute("data-side"), +f.getAttribute("data-i"));
   });
 
   // --- git drawer: the commit graph and the commit window --------------------
@@ -2041,7 +2050,8 @@
   // row's hover shows its tooltip; a click (or Enter) opens the commit
   // window (GET git/commit/<oid>), a centred window over the page: header,
   // message, author and committer, copy-hash, parents (a parent opens in the
-  // same window), and the changed-file list.
+  // same window), the changed-file list, and the diff viewer below; the
+  // working-tree file list opens the same window.
   var glog = $("glog"), glrows = $("glrows"), glscroll = $("glscroll"), glcount = $("glcount");
   var GL_ROW = 26, GL_DX = 14, GL_X0 = 12, GL_MORE = 34;
   var gl = { commits: [], by: {}, width: 1, more: 0, page: 0, head: "", seq: 0, busy: false, loaded: false, tipRow: null };
@@ -2279,7 +2289,7 @@
 
   // The commit window, built on first use and kept on the body (outside the
   // drawer's clip, which a fixed element inside it would not escape).
-  var gw = { back: null, oid: "", seq: 0, lastFocus: null, down: false };
+  var gw = { back: null, oid: "", seq: 0, lastFocus: null, down: false, list: [], pin: -1, io: null };
   function gwBuild() {
     if (gw.back) return;
     var back = mk("div", "gwin-back"), win = mk("div", "gwin"), top = mk("div", "gw-top"), head = mk("div", "gw-head");
@@ -2335,7 +2345,18 @@
     meta.addEventListener("click", function (e) { var p = e.target.closest(".gw-par"); if (p) gwOpen(p.getAttribute("data-oid")); });
     files.addEventListener("click", function (e) {
       var r = e.target.closest(".gwf");
-      if (r) q(".gwf", files).forEach(function (x) { x.classList.toggle("on", x === r); });
+      if (r) gwGo(+r.getAttribute("data-i"));
+    });
+    diff.addEventListener("click", function (e) {
+      var b = e.target.closest(".load-b"), f = e.target.closest(".fold-b");
+      if (b) gwLoad(b.closest(".dfile"));
+      if (f) f.closest(".dfile").classList.toggle("fold");
+    });
+    diff.addEventListener("scroll", gwSpy, { passive: true });
+    // A clicked file stays pinned in view while the sections above it load
+    // and grow, until the user scrolls the viewer.
+    ["wheel", "touchstart", "keydown", "mousedown"].forEach(function (ev) {
+      diff.addEventListener(ev, function () { gw.pin = -1; }, { passive: true });
     });
   }
   function gwCopy(text, near, done) {
@@ -2356,6 +2377,7 @@
     if (!gw.back || gw.back.hidden) return;
     gw.back.hidden = true;
     gw.seq++;
+    if (gw.io) gw.io.disconnect();
     gwSel();
     gw.oid = "";
     if (gw.lastFocus && gw.lastFocus.focus && doc.contains(gw.lastFocus)) gw.lastFocus.focus();
@@ -2446,25 +2468,210 @@
     });
     gw.msg.textContent = body;
     gw.msg.hidden = !body;
-    gw.files.textContent = "";
-    var add = 0, del = 0;
-    c.files.forEach(function (f) { if (f.add > 0) add += f.add; if (f.del > 0) del += f.del; });
+    var base = "/s/" + rid + "/git/commit/" + c.oid + "/diff?path=";
+    gwBody([{ files: c.files.map(function (f) { return { path: f.path, status: f.status, from: f.from, add: f.add, del: f.del, url: base + encodeURIComponent(f.path) }; }) }], -1,
+      c.truncated ? wsT("js.git.win.truncated", c.files.length) : "");
+  }
+  // gwWorktree opens the window on the working tree's changed files (the
+  // git sheet's last status read), the file at index i of side in view.
+  function gwWorktree(side, i) {
+    var v = gitLast;
+    if (!v || !window.fetch) return;
+    gwBuild();
+    var seq = ++gw.seq;
+    gw.oid = "";
+    if (gw.back.hidden) { gw.lastFocus = doc.activeElement; gw.back.hidden = false; }
+    gwSel();
+    gw.win.focus();
+    gw.h2.textContent = wsT("js.git.win.worktree");
+    gw.copy.hidden = true;
+    gw.chips.textContent = gw.meta.textContent = "";
+    gw.chips.appendChild(mk("span", "gw-note", wsT("js.git.win.wtnote")));
+    gw.meta.appendChild(mk("dt", "", wsT("js.git.win.branch")));
+    gw.meta.appendChild(mk("dd", "", v.detached ? wsT("js.git.detached", v.branch) : v.branch + (v.upstream ? " \u2192 " + v.upstream : "")));
+    gw.msg.hidden = true;
+    var focus = -1, n = 0, groups = [];
+    [["staged", "js.git.staged"], ["unstaged", "js.git.unstaged"], ["untracked", "js.git.untracked"]].forEach(function (g) {
+      var list = v[g[0]] || [];
+      if (g[0] === side) focus = n + i;
+      n += list.length;
+      if (!list.length) return;
+      var base = "/s/" + rid + "/git/worktree/diff?side=" + g[0] + "&path=";
+      groups.push({ label: wsT(g[1]), files: list.map(function (f) { return { path: f.path, status: f.status, add: f.add, del: f.del, untracked: g[0] === "untracked", url: base + encodeURIComponent(f.path) }; }) });
+    });
+    if (seq === gw.seq) gwBody(groups, focus, v.truncated ? wsT("js.git.truncated", 300) : "");
+  }
+
+  // --- the commit window's diff viewer ---------------------------------------
+  // One section per changed file (gitdiff.go serves each file's diff). A
+  // section reads its diff when it nears the viewport; a file with more than
+  // GW_MANUAL changed lines, a binary file, or a deleted file waits behind
+  // "Load diff". Clicking a file in the list scrolls to its section and loads
+  // it, and keeps it pinned in view until the user scrolls (gwState).
+  var GW_MANUAL = 400;
+  function gwStatusClass(st) { return "gst st-" + (st === "?" ? "q" : st); }
+  function gwManual(f) {
+    if (f.add < 0) return wsT("js.git.diff.binarywait");
+    if (f.status === "D") return wsTn("js.git.diff.deleted", f.del);
+    if (f.add + f.del > GW_MANUAL) return wsT("js.git.diff.large", f.add + f.del);
+    return "";
+  }
+  // gwBody fills the file list (groups of {label, files}) and the viewer's
+  // sections, and brings file focus (an index over every group) into view.
+  function gwBody(groups, focus, note) {
+    var seq = gw.seq, add = 0, del = 0, n = 0;
+    gw.list = [];
+    gw.pin = -1;
+    if (gw.io) gw.io.disconnect();
+    gw.files.textContent = gw.diff.textContent = "";
+    groups.forEach(function (g) { g.files.forEach(function (f) { gw.list.push(f); if (f.add > 0) add += f.add; if (f.del > 0) del += f.del; }); });
     var sum = mk("div", "gw-fsum");
-    sum.appendChild(mk("span", "", wsTn("js.git.win.files", c.files.length)));
+    sum.appendChild(mk("span", "", wsTn("js.git.win.files", gw.list.length)));
     sum.appendChild(gwDelta(add, del));
     gw.files.appendChild(sum);
-    c.files.forEach(function (f) {
-      var row = mk("div", "gf gwf");
-      row.title = f.from ? f.from + " → " + f.path : f.path;
-      row.appendChild(mk("b", "gst st-" + f.status, f.status));
-      row.appendChild(gwPath(f.path));
-      row.appendChild(gwDelta(f.add, f.del));
-      if (f.from) row.appendChild(mk("span", "ren", "← " + f.from.slice(f.from.lastIndexOf("/") + 1)));
-      gw.files.appendChild(row);
+    groups.forEach(function (g) {
+      if (g.label) {
+        var head = mk("div", "ggrp");
+        head.appendChild(mk("span", "", g.label));
+        head.appendChild(mk("span", "chip", String(g.files.length)));
+        gw.files.appendChild(head);
+      }
+      g.files.forEach(function (f) {
+        var row = mk("div", "gf gwf");
+        row.setAttribute("data-i", String(n++));
+        row.title = f.from ? f.from + " \u2192 " + f.path : f.path;
+        row.appendChild(mk("b", gwStatusClass(f.status), f.status));
+        row.appendChild(gwPath(f.path));
+        row.appendChild(f.untracked ? mk("span", "gd") : gwDelta(f.add, f.del));
+        if (f.from) row.appendChild(mk("span", "ren", "\u2190 " + f.from.slice(f.from.lastIndexOf("/") + 1)));
+        gw.files.appendChild(row);
+      });
     });
-    if (c.truncated) gw.files.appendChild(gwNote(wsT("js.git.win.truncated", c.files.length)));
-    gw.diff.textContent = "";
-    gw.diff.appendChild(mk("div", "gw-ph", wsT("js.git.win.nodiff")));
+    if (note) gw.files.appendChild(gwNote(note));
+    if (!gw.list.length) gw.diff.appendChild(gwNote(wsT("js.git.win.nofiles")));
+    gw.list.forEach(function (f, i) { gw.diff.appendChild(gwSection(f, i, seq)); });
+    gw.diff.scrollTop = 0;
+    gw.io = "IntersectionObserver" in window ? new IntersectionObserver(function (es) {
+      es.forEach(function (e) { if (e.isIntersecting && e.target.getAttribute("data-state") === "auto") gwLoad(e.target); });
+    }, { root: gw.diff, rootMargin: "200px 0px" }) : null;
+    q(".dfile", gw.diff).forEach(function (sec) {
+      if (gw.io) gw.io.observe(sec);
+      else if (sec.getAttribute("data-state") === "auto") gwLoad(sec);
+    });
+    if (focus >= 0) gwGo(focus);
+    else gwSpy();
+  }
+  function gwSection(f, i, seq) {
+    var sec = mk("section", "dfile"), h = mk("header", "dfh"), fold = mk("button", "ia fold-b");
+    sec.setAttribute("data-i", String(i));
+    sec.gwSeq = seq;
+    fold.type = "button";
+    fold.title = wsT("js.git.win.fold");
+    fold.setAttribute("aria-label", fold.title);
+    fold.appendChild(gIcon("chev"));
+    h.appendChild(fold);
+    h.appendChild(mk("b", gwStatusClass(f.status), f.status));
+    h.appendChild(gwPath(f.path));
+    if (f.from) h.appendChild(mk("span", "dfren", "\u2190 " + f.from));
+    h.appendChild(f.untracked ? mk("span", "gd") : gwDelta(f.add, f.del));
+    sec.appendChild(h);
+    sec.appendChild(mk("div", "dfb"));
+    gwState(sec, gwManual(f) ? "manual" : "auto");
+    return sec;
+  }
+  function gwSkeleton(widths) {
+    var sk = mk("div", "dskel");
+    widths.forEach(function (w) { var i = mk("i"); i.style.width = w + "%"; sk.appendChild(i); });
+    return sk;
+  }
+  // gwState draws a section's body for its state: auto and loading (a
+  // skeleton), manual (why, and "Load diff"), fail, or ready (the diff).
+  function gwState(sec, state, data) {
+    var f = gw.list[+sec.getAttribute("data-i")], b = sec.querySelector(".dfb");
+    sec.setAttribute("data-state", state);
+    b.textContent = "";
+    if (state === "auto") b.appendChild(gwSkeleton([46, 72, 58]));
+    else if (state === "loading") b.appendChild(gwSkeleton([60, 38, 66, 50]));
+    else if (state === "manual" || state === "fail") {
+      var note = mk("div", "dnote" + (state === "fail" ? " err" : ""));
+      note.appendChild(mk("span", "", state === "fail" ? wsT("js.git.diff.fail", data) : gwManual(f)));
+      var lb = mk("button", "btn load-b", wsT("js.git.win.loaddiff"));
+      lb.type = "button";
+      note.appendChild(lb);
+      b.appendChild(note);
+    } else gwRender(b, data);
+    // Sections above the pinned file grow as they load: keep it in place.
+    var pin = gw.pin >= 0 && q('.dfile[data-i="' + gw.pin + '"]', gw.diff)[0];
+    if (pin) gw.diff.scrollTop = pin.offsetTop - 10;
+  }
+  function gwLoad(sec) {
+    var st = sec.getAttribute("data-state"), seq = sec.gwSeq, f = gw.list[+sec.getAttribute("data-i")];
+    if (st === "ready" || st === "loading" || seq !== gw.seq || !f) return;
+    gwState(sec, "loading");
+    fetch(f.url, { credentials: "same-origin", cache: "no-store" }).then(function (r) {
+      return r.text().then(function (s) {
+        if (seq !== gw.seq) return;
+        var d = null;
+        if (r.ok) { try { d = JSON.parse(s); } catch (e) { s = "malformed answer"; } }
+        if (d) gwState(sec, "ready", d);
+        else gwState(sec, "fail", s.trim() || "HTTP " + r.status);
+      });
+    }, function () { if (seq === gw.seq) gwState(sec, "fail", wsT("js.post.unreachable")); });
+  }
+  function gwDnote(text, cls) { return mk("div", "dnote" + (cls ? " " + cls : ""), text); }
+  // gwRender draws one file's diff (GitFileDiff): numbered unified lines
+  // with their highlight classes and intra-line marks, or a notice.
+  function gwRender(b, d) {
+    var notices = { dir: wsT("js.git.diff.notice.dir"), gitlink: wsT("js.git.diff.notice.gitlink"), unmerged: wsT("js.git.diff.notice.unmerged"), special: wsT("js.git.diff.notice.special") };
+    if (d.notice) b.appendChild(gwDnote(notices[d.notice] || d.notice));
+    else if (d.binary) b.appendChild(gwDnote(wsT("js.git.diff.binary")));
+    else if (!d.hunks || !d.hunks.length) b.appendChild(gwDnote(wsT("js.git.diff.nochange")));
+    else {
+      var tab = mk("div", "dtab chroma"), frag = doc.createDocumentFragment();
+      d.hunks.forEach(function (h) {
+        var o = h.old, n = h.new;
+        frag.appendChild(gwRow("hk", "", "", "", [{ s: h.header }]));
+        h.lines.forEach(function (l) {
+          if (l.k === "+") frag.appendChild(gwRow("add", "", n++, "+", l.t));
+          else if (l.k === "-") frag.appendChild(gwRow("del", o++, "", "\u2212", l.t));
+          else if (l.k === "\\") frag.appendChild(gwRow("nl", "", "", "", l.t));
+          else frag.appendChild(gwRow("", o++, n++, "", l.t));
+        });
+      });
+      tab.appendChild(frag);
+      b.appendChild(tab);
+    }
+    if (d.truncated) b.appendChild(gwDnote(wsT("js.git.diff.cut"), "cut"));
+  }
+  function gwRow(cls, o, n, sign, pieces) {
+    var row = mk("div", "dl" + (cls ? " " + cls : "")), cd = mk("span", "cd");
+    row.appendChild(mk("span", "no", String(o)));
+    row.appendChild(mk("span", "no", String(n)));
+    row.appendChild(mk("span", "sg", sign));
+    (pieces || []).forEach(function (p) {
+      if (!p.c && !p.x) { cd.appendChild(doc.createTextNode(p.s)); return; }
+      cd.appendChild(mk("span", (p.c ? "t-" + p.c : "") + (p.x ? (p.c ? " dx" : "dx") : ""), p.s));
+    });
+    row.appendChild(cd);
+    return row;
+  }
+  // gwGo scrolls to file i's section, loads it, and pins it.
+  function gwGo(i) {
+    var sec = q('.dfile[data-i="' + i + '"]', gw.diff)[0];
+    if (!sec) return;
+    gw.pin = i;
+    sec.classList.remove("fold");
+    gwLoad(sec);
+    gw.diff.scrollTop = sec.offsetTop - 10;
+    gwMark(i);
+  }
+  function gwMark(i) { q(".gwf", gw.files).forEach(function (r) { r.classList.toggle("on", +r.getAttribute("data-i") === i); }); }
+  // gwSpy marks the file whose section is at the top of the viewer.
+  function gwSpy() {
+    if (gw.pin >= 0) { gwMark(gw.pin); return; }
+    var top = gw.diff.scrollTop + 40, on = 0;
+    q(".dfile", gw.diff).forEach(function (sec) { if (sec.offsetTop <= top) on = +sec.getAttribute("data-i"); });
+    gwMark(gw.list.length ? on : -1);
   }
 
   // --- tracker: the store drawers over the daemon's /tracker routes ---------
