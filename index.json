@@ -386,7 +386,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-09T06:39:56Z"
+        "touched_at": "2026-11-09T06:40:35Z",
+        "impl": {
+          "branch": "impl/develop/lurk-snub-romp"
+        }
       }
     },
     "261109-feat-ws-dashboard-git-commit-graph": {
