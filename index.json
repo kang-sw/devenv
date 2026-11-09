@@ -344,7 +344,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-09T05:24:57Z"
+        "touched_at": "2026-11-09T05:25:53Z",
+        "impl": {
+          "branch": "impl/develop/much-haiku-grove"
+        }
       }
     },
     "261109-bug-git-commit-paths-in-delegate-worktree": {
