@@ -4,6 +4,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: b4ab1a9a51a5423c
 sage-review-completeness-reviewed: b4ab1a9a51a5423c
+completed: 2026-11-09
 ---
 
 # whiteboard: a re-asked item keeps its old class and its sent mark, so it looks settled
