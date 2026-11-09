@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"html/template"
 	"time"
 
@@ -223,4 +224,42 @@ func (t *dashboardTracker) Register(ctx context.Context, req wsdashboard.Tracker
 		return wsdashboard.TrackerRegisterResult{}, redacted(err)
 	}
 	return wsdashboard.TrackerRegisterResult{Store: res.Entry.ID, Creator: res.Creator, Profile: wsdashboard.TrackerProfile(res.Profile)}, nil
+}
+
+// attachmentError maps a host attachment error onto the dashboard's
+// sentinel it matches, keeping the redacted message; any other error is
+// only redacted.
+func attachmentError(err error) error {
+	for _, m := range []struct{ host, dash error }{
+		{wstrackerhost.ErrNotImage, wsdashboard.ErrTrackerNotImage},
+		{wstrackerhost.ErrAttachmentTooLarge, wsdashboard.ErrTrackerAttachmentTooLarge},
+		{wstrackerhost.ErrAttachmentNotFound, wsdashboard.ErrTrackerAttachmentNotFound},
+	} {
+		if errors.Is(err, m.host) {
+			return fmt.Errorf("%w: %v", m.dash, redacted(err))
+		}
+	}
+	return redacted(err)
+}
+
+func (t *dashboardTracker) StageAttachment(ctx context.Context, id, name string, data []byte) (wsdashboard.TrackerAttachment, error) {
+	if t.err != nil {
+		return wsdashboard.TrackerAttachment{}, redacted(t.err)
+	}
+	a, err := t.h.StageAttachment(ctx, id, name, data)
+	if err != nil {
+		return wsdashboard.TrackerAttachment{}, attachmentError(err)
+	}
+	return wsdashboard.TrackerAttachment{OID: a.OID, Name: a.Name, Size: a.Size, Mime: a.Mime}, nil
+}
+
+func (t *dashboardTracker) ReadAttachment(ctx context.Context, id, oid string) ([]byte, error) {
+	if t.err != nil {
+		return nil, redacted(t.err)
+	}
+	data, err := t.h.ReadAttachment(ctx, id, oid)
+	if err != nil {
+		return nil, attachmentError(err)
+	}
+	return data, nil
 }
