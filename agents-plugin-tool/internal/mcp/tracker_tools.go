@@ -217,6 +217,7 @@ var trackerGrammar = func() wsxmlcmd.Grammar {
 }()
 
 func buildItemCreate(b *trackerBatch, cmd wsxmlcmd.Command, ev *trackerEvent) {
+	// todo stays accepted on input; the store folds it as a task.
 	if v, ok := wsxmlcmd.EnumAttr(b.p, cmd, "kind", []string{"task", "todo", "topic"}); ok {
 		ev.payload["kind"] = v
 	}
@@ -707,9 +708,9 @@ func planTrackerBatch(p *wsxmlcmd.Problems, commands string, registered []wstrac
 // item.assign without completion gets it stored explicitly: assignee when
 // the writer is its only target, else assigner (a rule or levels always
 // covers someone else, since the store refuses one that covers nobody); the
-// fold's absent-means-assignee rule stays for old events. A task or todo
-// created outside review that no item.assign of the batch names by $N is
-// self-assigned (people = the writer, assignee closes) by an item.assign
+// fold's absent-means-assignee rule stays for old events. An item created
+// outside review (a topic too, which the writer then holds) that no
+// item.assign of the batch names by $N is self-assigned (people = the writer, assignee closes) by an item.assign
 // inserted right after its create, so a later command of the batch acts on
 // an item already assigned, as on the dashboard; every event index is
 // renumbered to match.
@@ -740,8 +741,7 @@ func (b *trackerBatch) writerDefaults(writer string) {
 	for i, ev := range b.events {
 		moved[i] = len(events)
 		events = append(events, ev)
-		kind := ev.payload["kind"]
-		if ev.typ != wstracker.TypeItemCreate || (kind != "task" && kind != "todo") || ev.payload["stage"] == "review" || assigned[i] {
+		if ev.typ != wstracker.TypeItemCreate || ev.payload["stage"] == "review" || assigned[i] {
 			continue
 		}
 		events = append(events, &trackerEvent{
@@ -1002,7 +1002,8 @@ type trackerQuery struct {
 
 var (
 	trackerScopes = []string{"mine", "received", "assigned", "team", "all"}
-	trackerKinds  = []string{"task", "todo", "topic"}
+	// todo is not a filter value: the store folds a todo create as a task.
+	trackerKinds = []string{"task", "topic"}
 	// trackerStatuses are the status filter's values: open (not done) and
 	// hidden, then an item's derived statuses.
 	trackerStatuses = []string{"open", "hidden", "todo", "doing", "blocked", "awaiting", "done", "pending", "review", "unassigned", "declined", "returned"}

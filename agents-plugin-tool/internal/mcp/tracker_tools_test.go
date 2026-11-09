@@ -374,6 +374,10 @@ func TestTrackerUpdateWritesRawBodiesAndBatchReferences(t *testing.T) {
 	if none := f.trackerQuery(t, map[string]any{"store": "me", "scope": "all", "kind": "topic"}); !strings.Contains(none, "no rows pass the filters") {
 		t.Fatalf("a filter that matches nothing must say so: %s", none)
 	}
+	// todo is no filter value: the store folds a todo create as a task.
+	if bad := f.trackerRefused(t, "tracker.query", map[string]any{"payload": map[string]any{"store": "me", "kind": "todo"}}); !strings.Contains(bad, "must be one of task, topic") {
+		t.Fatalf("a todo kind filter must be refused with the two kinds: %s", bad)
+	}
 	if hit := f.trackerQuery(t, map[string]any{"store": "me", "scope": "all", "text": "따옴표"}); !strings.Contains(hit, item+" [task doing]") {
 		t.Fatalf("a text filter must match the body: %s", hit)
 	}
@@ -749,10 +753,10 @@ func TestTrackerUpdateCompletionDefault(t *testing.T) {
 	}
 }
 
-// A task or todo the batch creates and does not assign is self-assigned
-// right after its create; a topic, a review-stage create, and a create the
-// batch assigns by $N get none, and every $N still names its command's
-// event.
+// An item the batch creates and does not assign is self-assigned right
+// after its create, a topic too (the writer holds it) and a create still
+// written as todo; a review-stage create and a create the batch assigns by
+// $N get none, and every $N still names its command's event.
 func TestTrackerUpdateSelfAssignsCreates(t *testing.T) {
 	b := trackerPlan(t, `<tk:item.create kind="task" title="a"/>`+
 		`<tk:item.create kind="todo" title="b" parent="$1" origin="agent-auto"/>`+
@@ -776,10 +780,11 @@ func TestTrackerUpdateSelfAssignsCreates(t *testing.T) {
 		{wstracker.TypeItemCreate, wstracker.OriginAgentAuto, map[string]any{"kind": "todo", "title": "b", "parent": id(10)}},
 		{wstracker.TypeItemAssign, wstracker.OriginAgentAuto, map[string]any{"item": id(12), "mode": "chosen", "people": []any{"ada"}, "completion": "assignee"}},
 		{wstracker.TypeItemCreate, wstracker.OriginAgent, map[string]any{"kind": "topic", "title": "c"}},
+		{wstracker.TypeItemAssign, wstracker.OriginAgent, map[string]any{"item": id(14), "mode": "chosen", "people": []any{"ada"}, "completion": "assignee"}},
 		{wstracker.TypeItemCreate, wstracker.OriginAgent, map[string]any{"kind": "task", "title": "d", "stage": "review"}},
 		{wstracker.TypeItemCreate, wstracker.OriginAgent, map[string]any{"kind": "task", "title": "e"}},
-		{wstracker.TypeItemAssign, wstracker.OriginAgent, map[string]any{"item": id(16), "mode": "chosen", "people": []any{"bo"}, "completion": "assigner"}},
-		{wstracker.TypeCommentAdd, wstracker.OriginAgent, map[string]any{"item": id(12), "refs": []any{id(10), id(16)}, "body": "hi"}},
+		{wstracker.TypeItemAssign, wstracker.OriginAgent, map[string]any{"item": id(17), "mode": "chosen", "people": []any{"bo"}, "completion": "assigner"}},
+		{wstracker.TypeCommentAdd, wstracker.OriginAgent, map[string]any{"item": id(12), "refs": []any{id(10), id(17)}, "body": "hi"}},
 	}
 	if len(evs) != len(want) {
 		t.Fatalf("got %d events, want %d", len(evs), len(want))
@@ -793,7 +798,8 @@ func TestTrackerUpdateSelfAssignsCreates(t *testing.T) {
 			t.Errorf("event %d = %s %s %s, want %s %s %v", i, evs[i].Type, evs[i].Origin, evs[i].Payload, w.typ, w.origin, w.payload)
 		}
 	}
-	if !b.events[1].selfAssign || b.events[1].cmd.Pos != 1 || !b.events[3].selfAssign || b.events[3].cmd.Pos != 2 {
+	if !b.events[1].selfAssign || b.events[1].cmd.Pos != 1 || !b.events[3].selfAssign || b.events[3].cmd.Pos != 2 ||
+		!b.events[5].selfAssign || b.events[5].cmd.Pos != 3 {
 		t.Fatalf("each self-assignment is marked and carries its create's command")
 	}
 }

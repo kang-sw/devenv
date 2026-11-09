@@ -802,6 +802,9 @@ func filter(l []*Assignment, f func(*Assignment) bool) []*Assignment {
 func (r *replayed) viewerLists(vw *View, A []*Assignment, v string, children map[string][]string) {
 	items := vw.Items
 	visible := func(a *Assignment) bool { it, ok := items[a.Item]; return ok && !it.Hidden }
+	// (153 b) a held topic is ownership only: in my.assignments, received and
+	// the pending badge, never in a status-based list or count
+	notTopic := func(a *Assignment) bool { return items[a.Item].Kind != "topic" }
 	byRank := func(l []*Assignment) {
 		sort.SliceStable(l, func(i, j int) bool { return rank[l[i].Status] < rank[l[j].Status] })
 	}
@@ -908,11 +911,13 @@ func (r *replayed) viewerLists(vw *View, A []*Assignment, v string, children map
 			if !ok {
 				continue
 			}
-			recs := filter(A, func(a *Assignment) bool { return a.To == id && visible(a) })
+			recs := filter(A, func(a *Assignment) bool { return a.To == id && visible(a) && notTopic(a) })
 			open := filter(recs, func(a *Assignment) bool { return a.State == "live" && a.Status != "done" })
 			byRank(open)
 			pend := filter(recs, func(a *Assignment) bool { return a.State == "pending" })
-			waiting := filter(A, func(a *Assignment) bool { return a.Sender == id && a.To != id && a.State == "pending" && visible(a) })
+			waiting := filter(A, func(a *Assignment) bool {
+				return a.Sender == id && a.To != id && a.State == "pending" && visible(a) && notTopic(a)
+			})
 			t := Team{ID: id, Depth: d, Open: ids(open), Pending: ids(pend), Waiting: ids(waiting)}
 			var last time.Time
 			for _, a := range recs {
@@ -944,7 +949,7 @@ func (r *replayed) viewerLists(vw *View, A []*Assignment, v string, children map
 	walk(v)
 
 	for _, a := range mine {
-		if a.By != v && a.Forced && a.Status == "todo" {
+		if a.By != v && a.Forced && a.Status == "todo" && notTopic(a) {
 			my.Badge = append(my.Badge, "a:"+a.ID)
 		}
 	}
@@ -960,7 +965,7 @@ func (r *replayed) viewerLists(vw *View, A []*Assignment, v string, children map
 	// urgency-sorted list.
 	byRank(mine)
 	my.Assignments = ids(mine)
-	work := filter(mine, func(a *Assignment) bool { return a.Status != "done" && a.Status != "awaiting" })
+	work := filter(mine, func(a *Assignment) bool { return a.Status != "done" && a.Status != "awaiting" && notTopic(a) })
 	byUrgency(work)
 	byUrgency(pendingToMe)
 	my.Today = Today{Work: ids(work), Pending: ids(pendingToMe), Confirms: ids(confirms)}

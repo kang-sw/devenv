@@ -282,6 +282,37 @@ func (s *state) checkTargets(it *item, a string, p obj) rejection {
 	return ""
 }
 
+const topicOne = "a topic has one holder: assign it to exactly one person"
+
+// checkTopicAssign (153 b): a topic is held by one person, for ownership
+// only. An assign names exactly one member, as targets [id] or mode chosen
+// with one person, and only while the topic has no live or pending record
+// (a pending handoff included). Its completion is accepted and not stored.
+func (s *state) checkTopicAssign(it *item, p obj) rejection {
+	one := false
+	if !p.null("targets") {
+		l, ok := p.list("targets")
+		if ok && p.null("mode") && len(l) == 1 {
+			_, one = l[0].(string)
+		}
+	} else if l, ok := p.list("people"); ok && p["mode"] == "chosen" && len(l) == 1 {
+		_, one = l[0].(string)
+	}
+	if !one {
+		return topicOne
+	}
+	var held []string
+	for _, x := range s.openRecs(it.id) {
+		if !contains(held, x.to) {
+			held = append(held, x.to)
+		}
+	}
+	if len(held) > 0 {
+		return rejection("topic " + it.alias + " is already held by " + strings.Join(held, ", ") + "; unassign " + held[0] + " first")
+	}
+	return ""
+}
+
 func (s *state) notAssignee(it *item, who string) rejection {
 	if r := s.pendingRec(it.id, who); r != nil && s.openRec(it.id, who) == nil {
 		// who holds only a rule request, which never holds the item itself.
@@ -435,9 +466,6 @@ func (s *state) check(n *node) rejection {
 		if it.hidden {
 			return rejection(it.alias + " is hidden")
 		}
-		if it.kind == "topic" {
-			return "topics have no assignment"
-		}
 		if it.author != a && !s.creatorGone(it, a) {
 			return rejection("only the creator (" + it.author + ") assigns " + it.alias + "; an assignee hands off their own assignment with item.handoff")
 		}
@@ -447,6 +475,11 @@ func (s *state) check(n *node) rejection {
 		}
 		if completion != "assignee" && completion != "assigner" {
 			return "completion must be assignee or assigner"
+		}
+		if it.kind == "topic" {
+			if r := s.checkTopicAssign(it, p); r != "" {
+				return r
+			}
 		}
 		if !p.null("targets") {
 			if !p.null("mode") {
@@ -603,7 +636,8 @@ func (s *state) check(n *node) rejection {
 				return rejection(who + " has no live or pending assignment on " + it.alias)
 			}
 			departed := (s.members[rc.to] != nil && s.members[rc.to].removed != nil) || (s.members[rc.by] != nil && s.members[rc.by].removed != nil)
-			if rc.by != a && !(rc.state == "pending" && rc.sender == a) && !(s.admins[a] && departed) {
+			holder := it.kind == "topic" && rc.to == a && rc.state == "live" // (153 b) the holder releases a topic
+			if rc.by != a && !(rc.state == "pending" && rc.sender == a) && !(s.admins[a] && departed) && !holder {
 				extra := ""
 				if rc.state == "pending" && rc.sender != rc.by {
 					extra = " (or " + rc.sender + " withdraws)"
@@ -628,6 +662,9 @@ func (s *state) check(n *node) rejection {
 		if r != "" {
 			return r
 		}
+		if it.kind == "topic" {
+			return "topics have no status"
+		}
 		if st, ok := p["status"].(string); !ok || !contains(settable, st) {
 			return "status must be todo, doing or blocked (done goes through item.close)"
 		}
@@ -643,6 +680,9 @@ func (s *state) check(n *node) rejection {
 		it, r := needIt()
 		if r != "" {
 			return r
+		}
+		if it.kind == "topic" {
+			return "topics have no status"
 		}
 		rc, r := s.needRec(it, a)
 		if r != "" {

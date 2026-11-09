@@ -381,6 +381,19 @@
     if (!rules && !targets.some(function (x) { return !openRec(S, it.id, x); }))
       rej('everyone chosen already holds a live or pending assignment');
   }
+  // (153 b) A topic is held by one person, for ownership only: an assign names
+  // exactly one member, as targets: [id] or mode chosen with one person, and only
+  // while the topic has no live or pending record (a pending handoff included).
+  // Its completion is accepted and not stored.
+  var TOPIC_ONE = 'a topic has one holder: assign it to exactly one person';
+  function checkTopicAssign(S, it, p) {
+    var one = p.targets != null ? p.mode == null && Array.isArray(p.targets) && p.targets.length === 1 && typeof p.targets[0] === 'string'
+      : p.mode === 'chosen' && Array.isArray(p.people) && p.people.length === 1 && typeof p.people[0] === 'string';
+    if (!one) rej(TOPIC_ONE);
+    var held = [];
+    openRecs(S, it.id).forEach(function (x) { if (held.indexOf(x.to) < 0) held.push(x.to); });
+    if (held.length) rej('topic ' + it.alias + ' is already held by ' + held.join(', ') + '; unassign ' + held[0] + ' first');
+  }
   function notAssignee(S, it, who) {
     var pr = pendingRec(S, it.id, who);
     if (pr && !openRec(S, it.id, who)) { // who holds only a rule request, which never holds the item itself
@@ -470,11 +483,11 @@
       case 'item.assign': {
         it = needItem(S, p.item);
         if (it.hidden) rej(it.alias + ' is hidden');
-        if (it.kind === 'topic') rej('topics have no assignment');
         if (it.author !== a && !creatorGone(S, it, a))
           rej('only the creator (' + it.author + ') assigns ' + it.alias + '; an assignee hands off their own assignment with item.handoff');
         var completion = p.completion || 'assignee';
         if (completion !== 'assignee' && completion !== 'assigner') rej('completion must be assignee or assigner');
+        if (it.kind === 'topic') checkTopicAssign(S, it, p);
         if (p.targets != null) {
           if (p.mode != null) rej('item.assign takes targets or mode, not both');
           checkTargets(S, it, a, p.targets);
@@ -538,7 +551,8 @@
           r = openRec(S, it.id, p.assignee);
           if (!r) rej(p.assignee + ' has no live or pending assignment on ' + it.alias);
           var departed = (S.members[r.to] || {}).removed || (S.members[r.by] || {}).removed;
-          if (r.by !== a && !(r.state === 'pending' && r.sender === a) && !(S.admins[a] && departed))
+          var holder = it.kind === 'topic' && r.to === a && r.state === 'live'; // (153 b) the holder releases a topic
+          if (r.by !== a && !(r.state === 'pending' && r.sender === a) && !(S.admins[a] && departed) && !holder)
             rej('only the assigner (' + r.by + ') unassigns' + (r.state === 'pending' && r.sender !== r.by ? ' (or ' + r.sender + ' withdraws)' : ''));
         } else if (!openRecs(S, it.id).some(function (x) { return x.by === a || (x.state === 'pending' && x.sender === a); }) &&
           !openRules(S, it.id).some(function (x) { return x.by === a; }))
@@ -547,6 +561,7 @@
 
       case 'item.status':
         it = needItem(S, p.item);
+        if (it.kind === 'topic') rej('topics have no status');
         if (SETTABLE.indexOf(p.status) < 0) rej('status must be todo, doing or blocked (done goes through item.close)');
         r = needRec(S, it.id, a);
         if (r.status === 'done') rej('assignment is done; reopen it first');
@@ -554,6 +569,7 @@
 
       case 'item.close':
         it = needItem(S, p.item);
+        if (it.kind === 'topic') rej('topics have no status');
         r = needRec(S, it.id, a);
         if (r.status === 'done') rej('assignment is already done');
         if (r.status === 'awaiting') rej('already awaiting confirmation by ' + r.by);
@@ -841,7 +857,8 @@
     var p = n.p, a = n.author, it, q, m, r;
     switch (n.type) {
       case 'item.create':
-        S.items[n.id] = { id: n.id, alias: n.alias, kind: p.kind, title: p.title, body: p.body || '', project: p.project || '',
+        // (154 a) task and todo are one kind: a todo create folds as a task.
+        S.items[n.id] = { id: n.id, alias: n.alias, kind: p.kind === 'todo' ? 'task' : p.kind, title: p.title, body: p.body || '', project: p.project || '',
           due: p.due || null, priority: p.priority != null ? p.priority : S.prio.default,
           parent: p.parent || null, after: has(p, 'after') ? (p.after || null) : undefined, author: a, ts: n.ts, hidden: false, edited: null, node: n,
           stage: p.stage === 'review' ? 'review' : '',
@@ -864,8 +881,9 @@
         it.hidden = write(S, 'it:' + it.id + ':hidden', it.alias + ' hidden', n, true, C);
         break;
       case 'item.assign': {
-        var completion = p.completion || 'assignee';
         if (!S.items[p.item]) break;
+        // a topic record carries no status, so no completion mode either
+        var completion = S.items[p.item].kind === 'topic' ? '' : p.completion || 'assignee';
         S.items[p.item].stage = ''; // assigning promotes a review item to todo
         if (p.targets != null) (Array.isArray(p.targets) ? p.targets : []).forEach(function (x) {
           if (typeof x === 'string') assignPerson(S, n, p.item, x, a, completion);
@@ -1260,6 +1278,9 @@
     // ---- viewer-specific lists
     var A = vals(assignments), RANK = { blocked: 0, doing: 1, todo: 2, awaiting: 3, done: 4 };
     function visible(r) { return items[r.item] && !items[r.item].hidden; }
+    // (153 b) a held topic is ownership only: in my.assignments, received and the
+    // pending badge, never in a status-based list or count
+    function notTopic(r) { return items[r.item].kind !== 'topic'; }
     function byRank(x, y) { return RANK[x.status] - RANK[y.status]; }
     function byUrgency(x, y) { // priority desc, then due asc (none last), then status
       var ix = items[x.item], iy = items[y.item];
@@ -1307,10 +1328,10 @@
     (function walk(lead) {
       (g.children[lead] || []).forEach(function (id) {
         if (!(id in R3)) return;
-        var recs = A.filter(function (r) { return r.to === id && visible(r); });
+        var recs = A.filter(function (r) { return r.to === id && visible(r) && notTopic(r); });
         var open = recs.filter(function (r) { return r.state === 'live' && r.status !== 'done'; }).sort(byRank);
         var pend = recs.filter(function (r) { return r.state === 'pending'; });
-        var waiting = A.filter(function (r) { return r.sender === id && r.to !== id && r.state === 'pending' && visible(r); });
+        var waiting = A.filter(function (r) { return r.sender === id && r.to !== id && r.state === 'pending' && visible(r) && notTopic(r); });
         team.push({ id: id, depth: R3[id], open: ids(open), pending: ids(pend), waiting: ids(waiting),
           done: recs.filter(function (r) { return r.state === 'live' && r.status === 'done'; }).length,
           blocked: open.filter(function (r) { return r.status === 'blocked'; }).length,
@@ -1321,7 +1342,7 @@
     })(v);
 
     var badge = [];
-    mine.forEach(function (r) { if (r.by !== v && r.forced && r.status === 'todo') badge.push('a:' + r.id); });
+    mine.forEach(function (r) { if (r.by !== v && r.forced && r.status === 'todo' && notTopic(r)) badge.push('a:' + r.id); });
     pendingToMe.forEach(function (r) { badge.push('p:' + r.id); });
     notices.forEach(function (x) { badge.push(x.key); });
 
@@ -1336,7 +1357,7 @@
       items: items, itemOrder: itemOrder, assignments: assignments, rules: rules, comments: comments, events: events, notices: notices,
       my: {
         assignments: ids(mine.sort(byRank)),
-        today: { work: ids(mine.filter(function (r) { return r.status !== 'done' && r.status !== 'awaiting'; }).sort(byUrgency)), pending: ids(pendingToMe.sort(byUrgency)), confirms: ids(confirms) },
+        today: { work: ids(mine.filter(function (r) { return r.status !== 'done' && r.status !== 'awaiting' && notTopic(r); }).sort(byUrgency)), pending: ids(pendingToMe.sort(byUrgency)), confirms: ids(confirms) },
         received: { pending: ids(pendingToMe), answered: ids(answered), sent: ids(sent) },
         given: given, created: created, team: team, badge: badge
       },

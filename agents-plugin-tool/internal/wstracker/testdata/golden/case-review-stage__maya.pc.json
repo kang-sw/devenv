@@ -900,7 +900,7 @@
    "ada.pc#6": {
     "id": "ada.pc#6",
     "alias": "ada.pc-6",
-    "kind": "todo",
+    "kind": "task",
     "title": "Demote before assign",
     "body": "",
     "project": "",
@@ -1040,7 +1040,7 @@
    "ada.pc#9": {
     "id": "ada.pc#9",
     "alias": "ada.pc-9",
-    "kind": "todo",
+    "kind": "task",
     "title": "Promoted",
     "body": "",
     "project": "",

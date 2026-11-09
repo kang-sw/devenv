@@ -4864,7 +4864,7 @@
    "ada.pc#8": {
     "id": "ada.pc#8",
     "alias": "ada.pc-8",
-    "kind": "todo",
+    "kind": "task",
     "title": "Book offsite venue",
     "body": "",
     "project": "",
@@ -5194,7 +5194,7 @@
    "maya.lap#2": {
     "id": "maya.lap#2",
     "alias": "maya.lap-2",
-    "kind": "todo",
+    "kind": "task",
     "title": "Prepare Friday demo",
     "body": "",
     "project": "",

@@ -399,7 +399,7 @@
    "hana.pc#4": {
     "id": "hana.pc#4",
     "alias": "hana.pc-4",
-    "kind": "todo",
+    "kind": "task",
     "title": "Renew passport",
     "body": "",
     "project": "",
@@ -444,7 +444,7 @@
    "hana.pc#6": {
     "id": "hana.pc#6",
     "alias": "hana.pc-6",
-    "kind": "todo",
+    "kind": "task",
     "title": "Try the tracker mockup",
     "body": "",
     "project": "",

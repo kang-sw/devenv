@@ -304,7 +304,8 @@
   }
   // A status's or a kind's display name: the table's, else the value itself.
   function stLabel(s) { return SI.set[s] ? wsT(SI.set[s].label) : s; }
-  var KIND_KEY = { task: "js.tk.kind.task", todo: "js.tk.kind.todo", topic: "js.tk.kind.topic" };
+  // todo is the retired name of task: an old create payload in the event history reads as a task.
+  var KIND_KEY = { task: "js.tk.kind.task", todo: "js.tk.kind.task", topic: "js.tk.kind.topic" };
   function kindName(k) { return KIND_KEY[k] ? wsT(KIND_KEY[k]) : k; }
   function stChip(s) { return s ? '<span class="chip st-' + esc(s) + '">' + esc(stLabel(s)) + '</span>' : ''; }
   // An ended record's pill is its end-state text (endText), not a status chip: the item-status
@@ -425,7 +426,8 @@
         }).join(', ')) + extrasTxt(p);
       case 'item.hide': return wsT("js.tk.ev.hide", ref(p.item));
       case 'item.assign':
-        return wsT("js.tk.ev.assign", ref(p.item), p.targets ? '<b>' + targetsText(p.targets, n.member) + '</b>' : p.mode === 'all' ? wsT("js.tk.ev.assign.all", esc(p.levels)) :
+        // a topic's assignment names its holder; the store keeps no completion for it
+        return wsT(VS.items[p.item] && VS.items[p.item].kind === 'topic' ? "js.tk.ev.assign.topic" : "js.tk.ev.assign", ref(p.item), p.targets ? '<b>' + targetsText(p.targets, n.member) + '</b>' : p.mode === 'all' ? wsT("js.tk.ev.assign.all", esc(p.levels)) :
           '<b>' + esc((p.people || []).map(function (x) { return x === n.member ? wsT("js.tk.ev.self") : x; }).join(', ')) + '</b>', complText(p.completion));
       case 'item.handoff': return (p.assignee && p.assignee !== n.member ? wsT("js.tk.ev.handoff.admin", esc(p.assignee), ref(p.item), esc(p.to)) : wsT("js.tk.ev.handoff", ref(p.item), esc(p.to))) + tail(p.note);
       case 'item.accept': return wsT("js.tk.ev.accept", ref(p.item)) + tail(p.note);
@@ -525,7 +527,8 @@
   // into its buttons, so they hide mid-move and focus falls to the body.)
   // The overlay ignores the pointer, so moving down a list hovers the next row.
 
-  function stKey(it, r) { return r ? (r.state === 'live' ? r.status : r.state) : it.kind === 'topic' ? 'topic' : it.status; }
+  // A topic has no status: its live record (its holder) shows the topic, a pending one stays pending.
+  function stKey(it, r) { var topic = !!it && it.kind === 'topic'; return r ? (r.state !== 'live' ? r.state : topic ? 'topic' : r.status) : topic ? 'topic' : it.status; }
   function tipAttr(text) { return ' data-tip="' + esc(text) + '"'; }
   // data-tip from already-escaped HTML: drop the tags, keep the entities (the attribute decodes them)
   function tipHtml(h) { return ' data-tip="' + String(h).replace(/<[^>]*>/g, '').replace(/"/g, '&quot;') + '"'; }
@@ -534,6 +537,8 @@
   // The avatar text comes from the view state (the profile rules live in the data layer).
   function initials(id) { var m = VS.members[id]; return m ? m.avatar : String(id).slice(0, 2).toUpperCase(); }
   function holders(it) { return it.assignments.map(A).filter(function (r) { return r.state === 'live' || r.state === 'pending'; }); }
+  // A topic's holder in markup (a pending handoff names its receiver as pending), '' when nobody holds it.
+  function holderNames(it) { return holders(it).map(function (r) { return r.state === 'pending' ? wsT("js.tk.row.assignee.pending", whoName(r.to)) : whoName(r.to); }).join(', '); }
   function whoHtml(it) {
     var as = holders(it), v = VS.viewer.member;
     if (!as.length) return '<span class="who"></span>';
@@ -609,7 +614,7 @@
   }
   // A subtask's parent is assigned to or created by its author.
   function canSplit(it) { return (!!mineLive(it) || it.author === VS.viewer.member) && it.kind !== 'topic' && !it.hidden; }
-  function canStatus(it) { var r = !it.hidden && mineLive(it); return !!r && r.status !== 'done'; }
+  function canStatus(it) { var r = !it.hidden && it.kind !== 'topic' && mineLive(it); return !!r && r.status !== 'done'; }
   // The "⋯" button every menu-capable row, card, entry, and the item window header carries.
   function moreBtn(id, cls, tab) {
     return '<button type="button" class="ia mbtn' + (cls ? ' ' + cls : '') + '"' + attr('act', 'menu') + attr('item', id) + ' aria-haspopup="menu" aria-label="' + esc(wsT("js.tk.menu.more")) + '"' +
@@ -633,8 +638,9 @@
       (r && r.stale ? ' &middot; ' + wsT("js.tk.row.stale", STALE_DAYS) : ''));
     var roll = rollupHtml(it);
     if (roll) d.push(roll);
-    if (r) d.push(source(r) + ' &middot; ' + complText(r.completion) + (it.chain.length > 1 ? ' &middot; ' + wsT("js.tk.row.chain", esc(it.chain.join(' > '))) : ''));
-    else if (it.kind !== 'topic') d.push(holders(it).length ? '&rarr; ' + holders(it).map(function (x) { return esc(nm(x.to)) + ' <span class="muted">' + esc(SI.info(stKey(it, x)).label) + '</span>'; }).join(', ') : '<span class="muted">' + wsT("js.tk.row.unassigned") + '</span>');
+    if (r) d.push(source(r) + (it.kind === 'topic' ? '' : ' &middot; ' + complText(r.completion)) + (it.chain.length > 1 ? ' &middot; ' + wsT("js.tk.row.chain", esc(it.chain.join(' > '))) : ''));
+    else if (it.kind === 'topic') { if (holders(it).length) d.push(wsT("js.tk.row.heldby", holderNames(it))); }
+    else d.push(holders(it).length ? '&rarr; ' + holders(it).map(function (x) { return esc(nm(x.to)) + ' <span class="muted">' + esc(SI.info(stKey(it, x)).label) + '</span>'; }).join(', ') : '<span class="muted">' + wsT("js.tk.row.unassigned") + '</span>');
     var note = r && (r.note ? [r.note, r.noteBy] : r.handoffNote ? [r.handoffNote, r.sender] : r.answerNote ? [r.answerNote, r.to] : null);
     if (note) d.push('&ldquo;' + esc(note[0]) + '&rdquo; <span class="muted">(' + esc(note[1]) + ')</span>');
     if (extra) d.push(extra);
@@ -683,6 +689,7 @@
     }
     VS.my.assignments.map(A).forEach(function (r) {
       var it = VS.items[r.item];
+      if (it.kind === 'topic') return; // a held topic carries no work to start or finish: the store's "a:" badge leaves it out too
       // new forced assignments: the same rule as the handle badge's "a:" keys
       if (r.by !== v && r.forced && r.status === 'todo') add('a:' + r.id, 'assigned', r.item, r.ts, r.inherited && r.ruleLevels != null ? wsT("js.tk.feed.assigned.all", esc(nm(r.by)), esc(r.ruleLevels)) : wsT("js.tk.feed.assigned", esc(nm(r.by))), r.via);
       // near the due date, as the due chip computes it
@@ -966,7 +973,7 @@
     if (!given.length) return filterEmpty();
     given.forEach(function (id) {
       var lines = VS.items[id].assignments.map(A).filter(function (r) { return (r.by === v || r.sender === v) && r.to !== v && (r.state === 'live' || r.state === 'pending'); }).sort(byRank).map(function (r) {
-        return '<b>' + esc(nm(r.to)) + '</b>' + (r.depth ? ' <span class="muted">L' + r.depth + '</span>' : '') + ' ' + esc(SI.info(stKey(null, r)).label) + (r.forced ? '' : ' <span class="muted">' + (r.handoffOf ? wsT("js.tk.list.given.handoff") : wsT("js.tk.list.given.sent")) + '</span>') +
+        return '<b>' + esc(nm(r.to)) + '</b>' + (r.depth ? ' <span class="muted">L' + r.depth + '</span>' : '') + ' ' + esc(SI.info(stKey(VS.items[id], r)).label) + (r.forced ? '' : ' <span class="muted">' + (r.handoffOf ? wsT("js.tk.list.given.handoff") : wsT("js.tk.list.given.sent")) + '</span>') +
           (r.note ? ' &ldquo;' + esc(r.note) + '&rdquo;' : '');
       });
       if (VS.items[id].status === 'done') return addClosed(closeTs(VS.items[id]), 1, irow({ rk: 'given:' + id, item: id, more: lines.join('<br>'), closed: true }));
@@ -1048,7 +1055,7 @@
       '<div class="empty">' + wsT("js.tk.list.all.none") + '</div>');
   }
   function scopeChip(s) {
-    if (s === 'mine') return wsT("js.tk.team.open", VS.my.assignments.map(A).filter(function (r) { return r.status !== 'done'; }).length);
+    if (s === 'mine') return wsT("js.tk.team.open", VS.my.assignments.map(A).filter(function (r) { return r.status !== 'done' && VS.items[r.item].kind !== 'topic'; }).length);
     if (s === 'received') return wsT("js.tk.scope.chip.pending", VS.my.received.pending.length);
     if (s === 'given') return wsTn("js.tk.scope.chip.items", VS.my.given.length) + (VS.my.today.confirms.length ? ', ' + wsT("js.tk.scope.chip.confirm", VS.my.today.confirms.length) : '');
     if (s === 'team') {
@@ -1605,7 +1612,7 @@
     }).join('') + '</select>';
   }
   function itemFilterBar(kindOnly) {
-    return wsT("js.tk.filter.kind") + ' ' + sel('f-kind', ui.kind, [['all', wsT("js.tk.filter.all")], ['task', kindName('task')], ['todo', kindName('todo')], ['topic', kindName('topic')], ['request', wsT("js.tk.filter.request")]]) +
+    return wsT("js.tk.filter.kind") + ' ' + sel('f-kind', ui.kind, [['all', wsT("js.tk.filter.all")], ['task', kindName('task')], ['topic', kindName('topic')], ['request', wsT("js.tk.filter.request")]]) +
       (kindOnly ? '' : ' ' + wsT("js.tk.filter.status") + ' ' + sel('f-status', ui.status, [['all', wsT("js.tk.filter.all")], ['open', wsT("js.tk.filter.open")], ['review', stLabel('review')], ['blocked', stLabel('blocked')], ['done', stLabel('done')], ['hidden', wsT("js.tk.chip.hidden")]]));
   }
   function cardActivity() {
@@ -1646,7 +1653,7 @@
   }
   // The assignment records a scope shows: mine (live plus pending to me), given (what I
   // assigned or handed to others, live or pending), team (followers' open and unaccepted work).
-  // A Today filter keeps only its records.
+  // A Today filter keeps only its records. A topic record (its holder) has no status, so no scope shows it here.
   function assignRecs(key, v) {
     var recs;
     if (key === 'mine') recs = VS.my.assignments.concat(VS.my.received.pending).map(A);
@@ -1654,7 +1661,7 @@
       return VS.items[id].assignments.map(A).filter(function (r) { return (r.by === v || r.sender === v) && r.to !== v && (r.state === 'live' || r.state === 'pending'); });
     }));
     else recs = [].concat.apply([], VS.my.team.map(function (p) { return p.open.concat(p.pending); })).map(A);
-    return recs.filter(keepRec);
+    return recs.filter(function (r) { return keepRec(r) && VS.items[r.item].kind !== 'topic'; });
   }
 
   // Kanban: columns by status. Assignment scopes: cards are assignments (with the
@@ -2049,7 +2056,8 @@
     return '<section class="pcard" aria-label="' + wsT("js.tk.prop.aria") + '"><h3>' + wsT("js.tk.prop.title") + '</h3><dl>' +
       '<dt>' + wsT("js.tk.prop.status") + '</dt><dd>' + (topic ? '<span class="muted">' + wsT("js.tk.prop.topic") + '</span>' : esc(SI.info(it.status).label) + ' <span class="muted">' + esc(SI.info(it.status).desc) + '</span>') + '</dd>' +
       '<dt>' + wsT("js.tk.prop.kind") + '</dt><dd>' + esc(kindName(it.kind)) + (it.pending.length ? ' <span class="muted">' + wsT("js.tk.prop.pending") + '</span>' : '') + (it.hidden ? ' <span class="muted">' + wsT("js.tk.prop.hidden") + '</span>' : '') + '</dd>' +
-      (topic ? '' : '<dt>' + wsT("js.tk.prop.holders") + '</dt><dd' + attr('focus', 'holders') + '>' + holdersSummary(it) + '</dd>') +
+      (topic ? '<dt>' + wsT("js.tk.prop.holder") + '</dt><dd' + attr('focus', 'holders') + '>' + (holderNames(it) || '<span class="muted">' + wsT("js.tk.row.unassigned") + '</span>') + '</dd>' :
+        '<dt>' + wsT("js.tk.prop.holders") + '</dt><dd' + attr('focus', 'holders') + '>' + holdersSummary(it) + '</dd>') +
       (it.chain.length > 1 ? '<dt>' + wsT("js.tk.prop.path") + '</dt><dd>' + esc(it.chain.join(' > ')) + '</dd>' : '') +
       (topic ? '' : '<dt>' + wsT("js.tk.prop.due") + '</dt><dd>' + (it.due ? esc(it.due) : '<span class="muted">-</span>') + '</dd>') +
       '<dt>' + wsT("js.tk.prop.creator") + '</dt><dd>' + whoName(it.author) + (VS.members[it.author] && VS.members[it.author].admin ? ' <span class="chip admin">' + wsT("js.tk.team.admin") + '</span>' : '') + '</dd>' +
@@ -2062,10 +2070,12 @@
   // then live before ended, then display name, then assignment order). What every row shares (the
   // provenance text and the close rule) is written once in the header; a row adds only what
   // differs. The rows past A_SHOWN are in the markup, hidden until the "N more" toggle (ui.aopen).
-  // The assignees card's "+": who may assign sees it (the menu's rule). It opens the assign
+  // The assignees card's "+": who may assign sees it (the menu's rule: the creator, and on a topic
+  // only while nobody holds it, as the store refuses a second holder). It opens the assign
   // popover (asgHtml, the item menu's assign step) anchored at itself.
+  function canAssign(it, v) { return it.author === v && !it.hidden && (it.kind !== 'topic' || !holders(it).length); }
   function assignAddBtn(it, v) {
-    if (it.author !== v || it.kind === 'topic' || it.hidden) return '';
+    if (!canAssign(it, v)) return '';
     return '<button type="button" class="ia a-add"' + attr('act', 'asg-add') + attr('item', it.id) + ' aria-haspopup="dialog" aria-label="' + esc(wsT("js.tk.act.assign")) + '"' + tipAttr(wsT("js.tk.act.assign")) + '><svg class="i"><use href="#tki-plus"/></svg></button>';
   }
   function openAssign(id, anchor) { itemMenu(id, anchor, null, { step: 'assign' }); }
@@ -2091,7 +2101,8 @@
   function assigneesHtml(v, it, recs) {
     recs = visibleRecs(recs);
     if (!recs.length) return '<section class="iw-asg"><h3>' + wsT("js.tk.asg.title") + '<span class="grow"></span>' + assignAddBtn(it, v) + '</h3><div class="empty">' + wsT("js.tk.asg.none") + '</div></section>';
-    var rows = recs.map(function (r, i) { return { r: r, i: i, d: leadDepth(r.to), on: r.state === 'live' || r.state === 'pending', src: source(r), cm: complText(r.completion) }; });
+    var topic = it.kind === 'topic'; // a topic's record is its holder: no completion, no status
+    var rows = recs.map(function (r, i) { return { r: r, i: i, d: leadDepth(r.to), on: r.state === 'live' || r.state === 'pending', src: source(r), cm: topic ? null : complText(r.completion) }; });
     rows.sort(function (a, b) { return (b.on - a.on) || (a.d - b.d) || nm(a.r.to).localeCompare(nm(b.r.to)) || (a.i - b.i); });
     function common(key) { // the most frequent value, when at least two rows hold it
       var n = {}, best = null;
@@ -2102,7 +2113,10 @@
     var head = cs !== null || cc !== null ? '<div class="a-common muted">' + [cs, cc].filter(function (x) { return x !== null; }).join(' &middot; ') + '</div>' : '';
     var list = rows.map(function (x, k) {
       var r = x.r, b = '', rm = '';
-      if (r.state === 'live') {
+      if (r.state === 'live' && topic && r.to === v) {
+        // the holder releases the topic (unassigns their own record) or hands it off
+        if (!it.hidden) b += btn('unassign', wsT("js.tk.act.release"), { item: r.item, who: v }) + btn('handoff', esc(wsT("js.tk.act.handoff")), { item: r.item });
+      } else if (r.state === 'live') {
         if ((r.by === v || r.to === v) && r.status === 'done') b += btn('note', wsT("js.tk.asg.reopen"), { item: r.item, who: r.to, op: 'item.reopen' });
         var departed = (VS.members[r.to] || {}).removed || (VS.members[r.by] || {}).removed;
         if (r.by === v || (departed && VS.viewer.admin)) rm = rmBadge(r.by === v ? wsT("js.tk.asg.unassign") : wsT("js.tk.asg.unassign.admin"), r);
@@ -2110,10 +2124,10 @@
       } else if (r.state === 'pending' && r.to === v && (r.by === v || r.sender === v)) rm = rmBadge(wsT("js.tk.asg.withdraw"), r);
       var note = r.note || r.answerNote, diff = [];
       if (x.src !== cs) diff.push(cs !== null && x.src.indexOf(cs) === 0 ? x.src.slice(cs.length).trim() : x.src);
-      if (x.cm !== cc) diff.push(x.cm);
+      if (x.cm !== cc && x.cm !== null) diff.push(x.cm);
       return '<li class="arow' + (!x.on ? ' gone' : '') + (k >= A_SHOWN ? ' more' : '') + '"' + attr('rec', r.id) + attr('hmember', r.to) + '>' +
         '<div class="ar-main"><i class="av' + (r.state === 'pending' ? ' pend' : '') + (r.to === v ? ' me' : '') + '">' + esc(initials(r.to)) + '</i><span class="ar-name">' + whoName(r.to) + '</span>' +
-        '<span class="ar-st">' + recChip(r) + (r.ended ? ' <span class="muted">' + esc(alias(r.ended.id)) + endedBy(r) + '</span>' : '') + rm + '</span></div>' +
+        '<span class="ar-st">' + (topic && r.state === 'live' && !r.ended ? '<span class="chip">' + wsT("js.tk.asg.holder") + '</span>' : recChip(r)) + (r.ended ? ' <span class="muted">' + esc(alias(r.ended.id)) + endedBy(r) + '</span>' : '') + rm + '</span></div>' +
         (note ? '<div class="ar-note">&ldquo;' + esc(note) + '&rdquo;</div>' : '') +
         (diff.length ? '<div class="ar-diff muted">' + diff.join(' &middot; ') + '</div>' : '') +
         (b ? '<div class="tb">' + b + '</div>' : '') + '</li>';
@@ -2196,14 +2210,14 @@
       // with caps.attach, attachment metadata typed in by hand (a stand-in oid is computed)
       (CAPS.attach ? '<div class="cextra"><input id="catt-name" type="text" placeholder="' + wsT("js.tk.composer.attname") + '"><input id="catt-size" type="number" min="0" placeholder="' + wsT("js.tk.composer.attsize") + '">' +
       btn('att-add', wsT("js.tk.composer.attach"), {}) + '<span class="muted">' + wsT("js.tk.composer.limit", fmtSize(VS.attachments.max_bytes)) + '</span></div>' : '') + '</div>';
-    h += '</div><div class="iw-side">' + propertyCard(it) + (it.kind !== 'topic' ? assigneesHtml(v, it, recs) : '') + '</div></div>';
+    h += '</div><div class="iw-side">' + propertyCard(it) + assigneesHtml(v, it, recs) + '</div></div>';
     return h;
   }
   // The header's common actions, left of the "⋯" menu: the viewer's status as a segmented control
   // (applies on click, no note; the menu keeps the status-with-note part), then "add subtask" and
   // "hand off" as icon buttons. Each shows under the same condition the menu uses.
   function headActs(it) {
-    var r = canStatus(it) && mineLive(it), h = '';
+    var mine = !it.hidden && mineLive(it), r = canStatus(it) && mine, h = '';
     if (r) {
       var cur = r.status === 'awaiting' ? 'done' : r.status;
       h += '<div class="iw-seg" role="group" aria-label="' + wsT("js.tk.prop.status") + '">' + ['todo', 'doing', 'blocked', 'done'].map(function (s) {
@@ -2213,7 +2227,7 @@
       }).join('') + '</div>';
     }
     if (canSplit(it)) h += '<button type="button" class="ia"' + attr('act', 'hsub') + attr('item', it.id) + ' aria-label="' + esc(wsT("js.tk.menu.sub")) + '"' + tipAttr(wsT("js.tk.menu.sub")) + '><svg class="i"><use href="#tki-plus"/></svg></button>';
-    if (r) h += '<button type="button" class="ia"' + attr('act', 'handoff') + attr('item', it.id) + ' aria-haspopup="menu" aria-label="' + esc(wsT("js.tk.act.handoff")) + '"' + tipAttr(wsT("js.tk.act.handoff")) + '><svg class="i"><use href="#tki-handoff"/></svg></button>';
+    if (mine && mine.status !== 'done') h += '<button type="button" class="ia"' + attr('act', 'handoff') + attr('item', it.id) + ' aria-haspopup="menu" aria-label="' + esc(wsT("js.tk.act.handoff")) + '"' + tipAttr(wsT("js.tk.act.handoff")) + '><svg class="i"><use href="#tki-handoff"/></svg></button>';
     return h ? '<div class="iw-acts">' + h + '</div>' : '';
   }
   // The item window's id button: "<kind> ID" copies the item's id (its tooltip) and says so for a moment.
@@ -2937,7 +2951,7 @@
     if (step === 'assign') return h + back + asgHtml(it);
     // the main step: the status part (radios that apply on click, a note that rides along), then the actions
     var parts = [];
-    if (mineR && mineR.status !== 'done' && !it.hidden) {
+    if (canStatus(it)) {
       var cur = mineR.status === 'awaiting' ? 'done' : mineR.status, pick = MN.pick || cur;
       parts.push('<div class="mst" role="group" aria-label="' + wsT("js.tk.prop.status") + '">' + ['todo', 'doing', 'blocked', 'done'].map(function (s) {
         var on = s === cur, label = s === 'done' && mineR.completion === 'assigner' ? wsT("js.tk.menu.reqdone") : stLabel(s), dis = s === 'done' && mineR.status === 'awaiting';
@@ -2963,7 +2977,9 @@
       else if (!it.assignments.map(A).some(function (r) { return r.state === 'live' || r.state === 'pending'; })) more.push(mi('m-demote', esc(wsT("js.tk.menu.demote")), { item: it.id }, { icon: 'return' }));
     }
     if (mineR && mineR.status !== 'done' && !it.hidden && !inWin) more.push(mi('handoff', esc(wsT("js.tk.act.handoff")), { item: it.id }, { icon: 'handoff', sub: 1 }));
-    if (it.author === v && task && !it.hidden) more.push(mi('assign', esc(wsT("js.tk.act.assign")), { item: it.id }, { icon: 'assign', sub: 1 }));
+    // a topic's holder releases it: item.unassign of their own record
+    if (mineR && !task && !it.hidden) more.push(mi('unassign', esc(wsT("js.tk.act.release")), { item: it.id, who: v }, { icon: 'withdraw' }));
+    if (canAssign(it, v)) more.push(mi('assign', esc(wsT("js.tk.act.assign")), { item: it.id }, { icon: 'assign', sub: 1 }));
     if (more.length) parts.push(more.join(''));
     var last = [];
     if (edit) last.push(mi('edit', esc(it.author === v ? wsT("js.tk.act.edit") : wsT("js.tk.act.edit.admin")), { item: it.id }, { icon: 'pen' }));
@@ -2992,6 +3008,8 @@
   // there covers, shows as assigned and is not picked. Focus stays in the search field: arrows
   // move, Enter toggles (Cmd/Ctrl+Enter applies), Esc goes back or closes (menuKey).
   // compl stays null until the completion radio is touched; until then asgCompl derives it (58).
+  // A topic takes one holder: people only, picking one replaces the last, and no completion
+  // mode (the store keeps none for a topic; the payload still carries the derived one).
   function asgState() { return MN.as || (MN.as = { q: '', sel: [], compl: null, idx: 0, opts: [] }); }
   // The completion mode shown and written: the user's pick once they touched the radio, else
   // assignee when the viewer is the only target, assigner when any target (a rule always) is
@@ -3040,7 +3058,8 @@
       var sub = subtreeOf(root);
       return { t: 'r', root: root, levels: levels, n: inRange(sub, levels), pend: root !== v && !R[root], off: ruleCovered(it, root, levels) };
     }
-    if (!q) {
+    var topic = it.kind === 'topic';
+    if (!q && !topic) {
       var depth = Math.max.apply(null, [0].concat(vals(R)));
       if (depth) {
         out.push({ g: wsT("js.tk.ap.myteam") }, rule(v, 1));
@@ -3052,7 +3071,7 @@
       if (a === v || b === v) return a === v ? -1 : 1;
       return (R[a] || 99) - (R[b] || 99) || (a < b ? -1 : 1);
     });
-    if (q) {
+    if (q && !topic) {
       var leads = ids.filter(function (id) { return id !== v && inRange(subtreeOf(id), null); });
       if (leads.length) out.push({ g: wsT("js.tk.ap.teams") });
       leads.forEach(function (id) { out.push(rule(id, null)); });
@@ -3086,14 +3105,14 @@
     }).join('');
   }
   function asgHtml(it) {
-    var S = asgState(), list = asgListHtml(it), any = S.opts.some(function (o) { return !o.g && !o.off; });
+    var S = asgState(), list = asgListHtml(it), any = S.opts.some(function (o) { return !o.g && !o.off; }), topic = it.kind === 'topic';
     return '<div class="ap"><div class="ap-chips" id="tkachips">' + asgChipsHtml() + '</div>' +
       '<label class="ap-q"><svg class="i"><use href="#tki-search"/></svg><input type="text" id="tkaq" data-autofocus autocomplete="off" spellcheck="false" role="combobox" aria-expanded="true" aria-controls="tkalist" aria-autocomplete="list"' +
       (any ? ' aria-activedescendant="tkaopt-' + S.idx + '"' : '') + ' placeholder="' + wsT("js.tk.ap.search") + '" aria-label="' + wsT("js.tk.ap.search") + '" value="' + esc(S.q) + '"></label>' +
-      '<ul class="ap-list" id="tkalist" role="listbox" aria-multiselectable="true" aria-label="' + esc(wsT("js.tk.act.assign")) + '">' + list + '</ul>' +
-      '<div class="ap-foot"><span class="ap-cm" role="radiogroup" aria-label="' + wsT("js.tk.form.completion") + '">' + ['assignee', 'assigner'].map(function (c) {
+      '<ul class="ap-list" id="tkalist" role="listbox" aria-multiselectable="' + !topic + '" aria-label="' + esc(wsT("js.tk.act.assign")) + '">' + list + '</ul>' +
+      '<div class="ap-foot">' + (topic ? '<span class="muted">' + wsT("js.tk.ap.topic") + '</span>' : '<span class="ap-cm" role="radiogroup" aria-label="' + wsT("js.tk.form.completion") + '">' + ['assignee', 'assigner'].map(function (c) {
         return '<button type="button" role="radio" aria-checked="' + (asgCompl(S) === c) + '"' + attr('act', 'm-acm') + attr('c', c) + '>' + esc(complText(c)) + '</button>';
-      }).join('') + '</span><button type="button" class="btn primary" id="tkaapply"' + attr('act', 'm-aapply') + (S.sel.length ? '' : ' disabled') + '>' + wsT("js.tk.dlg.assign.submit") + '</button></div></div>';
+      }).join('') + '</span>') + '<button type="button" class="btn primary" id="tkaapply"' + attr('act', 'm-aapply') + (S.sel.length ? '' : ' disabled') + '>' + wsT("js.tk.dlg.assign.submit") + '</button></div></div>';
   }
   // the list, the chips, and the apply button again; the search field (and an IME composition in it) stays
   function asgDraw() {
@@ -3111,7 +3130,8 @@
     var S = asgState(), o = S.opts.filter(function (x) { return !x.g && !x.off; })[i];
     if (!o) return;
     var k = asgKey(o), had = S.sel.some(function (x) { return asgKey(x) === k; });
-    S.sel = S.sel.filter(function (x) { return asgKey(x) !== k && !(o.t === 'r' && x.t === 'r' && x.root === o.root); });
+    var one = VS.items[MN.item] && VS.items[MN.item].kind === 'topic';
+    S.sel = one ? [] : S.sel.filter(function (x) { return asgKey(x) !== k && !(o.t === 'r' && x.t === 'r' && x.root === o.root); });
     if (!had) S.sel.push({ t: o.t, id: o.id, root: o.root, levels: o.levels });
     S.idx = i;
     asgDraw();
@@ -3272,7 +3292,7 @@
     var n = ui.nrow[ui.store];
     if (!n) return '';
     return '<div class="nrow"' + (n.depth ? ' style="--ind:' + n.depth + '"' : '') + '><svg class="i"><use href="#tki-plus"/></svg><input type="text" id="tknew" data-keep autocomplete="off" value="' + esc(n.val) + '" placeholder="' + wsT("js.tk.new.ph") + '" aria-label="' + wsT("js.tk.new.aria") + '">' +
-      '<select id="tknewkind" aria-label="' + wsT("js.tk.form.kind") + '">' + ['task', 'todo', 'topic'].map(function (k) { return '<option value="' + k + '"' + (k === n.kind ? ' selected' : '') + '>' + esc(kindName(k)) + '</option>'; }).join('') + '</select>' +
+      '<select id="tknewkind" aria-label="' + wsT("js.tk.form.kind") + '">' + ['task', 'topic'].map(function (k) { return '<option value="' + k + '"' + (k === n.kind ? ' selected' : '') + '>' + esc(kindName(k)) + '</option>'; }).join('') + '</select>' +
       '<button type="button" class="ia"' + attr('act', 'new-x') + ' aria-label="' + wsT("js.tk.dlg.cancel") + '"' + tipAttr(wsT("js.tk.new.close")) + '><svg class="i"><use href="#tki-x"/></svg></button></div>';
   }
   function newBtn() {
@@ -3307,11 +3327,10 @@
       if (n.at && res[0] && res[0].status === 'applied') { n.after = res[0].id; n.at = { item: res[0].id }; }
     });
   }
-  // (529) a task or todo made here is its creator's at once: the create, then the assign in the same write
+  // (529) an item made here is its creator's at once: the create, then the assign in the same write
+  // (a topic's assign makes the creator its one holder; the store ignores its completion)
   function selfAssigned(cp, v) {
-    var evs = [['item.create', cp]];
-    if (cp.kind !== 'topic') evs.push(['item.assign', { item: '$1', mode: 'chosen', people: [v], completion: 'assignee' }]);
-    return evs;
+    return [['item.create', cp], ['item.assign', { item: '$1', mode: 'chosen', people: [v], completion: 'assignee' }]];
   }
   // The "all" kanban's review column "+": an input row atop that column (ui.knew[store] = { val }).
   // Title + Enter creates a task in the review stage, not self-assigned (53): assigning would
@@ -3500,7 +3519,7 @@
   function dropOn(item, col) {
     var v = memberOf(viewerOf(ui.store)), r = VS.items[item] && VS.items[item].assignments.map(A).filter(function (x) { return x.to === v && x.state === 'live'; })[0];
     if (!r) return toast(wsT("js.tk.toast.notmine"));
-    if (col === r.status) return;
+    if (col === r.status || VS.items[item].kind === 'topic') return; // a topic has no status to move
     if (col === 'todo' || col === 'doing' || col === 'blocked') return commit([['item.status', { item: item, status: col }]]);
     if (col === 'done') return commit([['item.close', { item: item }]]);
     toast(wsT("js.tk.toast.notstatus", esc(stLabel(col))));
