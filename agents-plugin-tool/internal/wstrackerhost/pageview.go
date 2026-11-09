@@ -34,7 +34,9 @@ func newReload() *reload { return &reload{done: make(chan struct{})} }
 // it returns the view the last completed reload folded (its sync state and
 // time-relative fields as of that reload), and when the reload it left
 // behind completes, the change callback StartWatch set runs so the page
-// reads again. A store with no completed reload yet waits as View does.
+// reads again. A store with no completed reload yet waits as View does. A
+// reload that fails within the wait returns its error, and one that fails
+// later signals nothing.
 // Every caller of one Host passes the same staleDays: a reload in flight
 // serves every reader that joins it.
 //

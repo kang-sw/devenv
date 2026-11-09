@@ -17,7 +17,7 @@ const DefaultWatchInterval = 2 * time.Second
 
 // StartWatch runs the store watch in this process: every interval it stamps
 // each registered store's ledger state (the journal files' sizes and times
-// and the repository's branch refs; no fold, no network) and calls
+// and the repository's branch and push-known refs; no fold, no network) and calls
 // onChange when a stamp, or the set of stores, changed since the last tick.
 // It re-reads the registry each tick, so a store registered later is
 // watched. Only what a write moves is stamped, never a file a read writes
@@ -81,9 +81,10 @@ func (h *Host) watchStamps() map[string]uint64 {
 
 // storeStamp hashes what a write to the store directory moves: each journal
 // (journal.<stream>.jsonl, appended by Append) by size and modification
-// time, and the repository's branch refs (wsledger's tracker, attachment,
-// and wiki refs, under refs/heads/) by content, loose or packed, in either
-// ref backend. A missing file stamps as absent.
+// time, the repository's branch refs (wsledger's tracker, attachment, and
+// wiki refs, under refs/heads/), and the refs/ledger/known/ refs a push
+// moves (the view's unpushed list reads them), by content, loose or packed,
+// in either ref backend. A missing file stamps as absent.
 func storeStamp(dir string) uint64 {
 	sum := fnv.New64a()
 	field := func(parts ...[]byte) {
@@ -111,16 +112,18 @@ func storeStamp(dir string) uint64 {
 			field([]byte(name), data)
 		}
 	}
-	heads := filepath.Join(repo, "refs", "heads")
-	_ = filepath.WalkDir(heads, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
+	refs := filepath.Join(repo, "refs")
+	for _, ns := range []string{"heads", filepath.Join("ledger", "known")} {
+		_ = filepath.WalkDir(filepath.Join(refs, ns), func(path string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() {
+				return nil
+			}
+			if data, err := os.ReadFile(path); err == nil {
+				rel, _ := filepath.Rel(refs, path)
+				field([]byte(filepath.ToSlash(rel)), data)
+			}
 			return nil
-		}
-		if data, err := os.ReadFile(path); err == nil {
-			rel, _ := filepath.Rel(heads, path)
-			field([]byte(filepath.ToSlash(rel)), data)
-		}
-		return nil
-	})
+		})
+	}
 	return sum.Sum64()
 }

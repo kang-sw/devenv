@@ -2,7 +2,9 @@ package wstrackerhost
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -142,5 +144,47 @@ func TestStoreStampIgnoresReadSideFiles(t *testing.T) {
 	createItem(t, h, "team", "moves it")
 	if storeStamp(dir) == before {
 		t.Fatal("a journal append did not move the store stamp")
+	}
+}
+
+// failPushRunner is the real git runner whose pushes fail: an offline
+// push after the batch has closed.
+type failPushRunner struct{}
+
+func (failPushRunner) RunGit(ctx context.Context, root string, args ...string) ([]byte, error) {
+	if slices.Contains(args, "push") {
+		return nil, errors.New("push refused")
+	}
+	return batchRunner{}.RunGit(ctx, root, args...)
+}
+
+// TestWatchSeesAnotherProcessPush: a push whose batch commit was already
+// stamped moves only the push-known refs, and the view's unpushed list
+// reads them, so the push is a change too.
+func TestWatchSeesAnotherProcessPush(t *testing.T) {
+	w := newWorld(t)
+	daemon := w.machine("ada")
+	w.register(daemon, "team", "ada", &wstracker.Profile{Given: "Ada"})
+	offline, err := New(Options{Root: filepath.Join(w.dir, "ada"), Clock: w.clock, Runner: failPushRunner{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { offline.Close() })
+	createItem(t, offline, "team", "to push")
+	// The sync closes the batch into a commit; its push fails.
+	_, _ = offline.Sync(context.Background(), "team")
+	if v := view(t, daemon, "team"); len(v.Sync.Unpushed) == 0 || v.Sync.Unpushed[0].Open {
+		t.Fatalf("the write must read as a closed, unpushed commit: %+v", v.Sync.Unpushed)
+	}
+
+	var changes counter
+	stop := daemon.StartWatch(20*time.Millisecond, changes.inc)
+	defer stop()
+	time.Sleep(60 * time.Millisecond)
+	changes.reset()
+	syncStore(t, sameRoot(t, w, "ada"), "team")
+	waitFor(t, 5*time.Second, "the change callback after another process's push", func() bool { return changes.get() > 0 })
+	if v := view(t, daemon, "team"); len(v.Sync.Unpushed) != 0 {
+		t.Fatalf("after the push the daemon must read nothing unpushed: %+v", v.Sync.Unpushed)
 	}
 }

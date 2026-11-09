@@ -47,7 +47,7 @@ func within(t *testing.T, h *Host, store string) *StoreView {
 	if err != nil {
 		t.Fatalf("view within %s: %v", store, err)
 	}
-	if took := time.Since(start); took > pageWait+2*time.Second {
+	if took := time.Since(start); took > pageWait+time.Second {
 		t.Fatalf("ViewWithin took %v, past its %v bound", took, pageWait)
 	}
 	return v
@@ -202,5 +202,53 @@ func TestViewWithinAfterClose(t *testing.T) {
 	h.Close()
 	if _, err := h.ViewWithin(context.Background(), "team", 0, pageWait); err == nil {
 		t.Fatal("a closed host must refuse a read")
+	}
+}
+
+// TestViewWithinQueuesBehindAReloadThatStartedReading: a read arriving
+// after the in-flight reload began re-reading the store directory waits for
+// the next reload, not the one that may have missed a write; both run, and
+// the late signal fires once they land.
+func TestViewWithinQueuesBehindAReloadThatStartedReading(t *testing.T) {
+	w := newWorld(t)
+	daemon := w.machine("ada")
+	res := w.register(daemon, "team", "ada", &wstracker.Profile{Given: "Ada"})
+	var changes counter
+	stop := daemon.StartWatch(time.Hour, changes.inc)
+	defer stop()
+	_ = within(t, daemon, "team")
+
+	lock := flock.New(filepath.Join(res.Entry.Dir, "lock"))
+	if ok, err := lock.TryLock(); err != nil || !ok {
+		t.Fatalf("take the store lock: %v %v", ok, err)
+	}
+	_ = within(t, daemon, "team") // starts a reload that blocks inside Reload
+	st, err := daemon.store("team")
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.viewMu.Lock()
+	first, started := st.cur, st.cur != nil && st.cur.read
+	st.viewMu.Unlock()
+	if !started {
+		lock.Unlock()
+		t.Fatal("the blocked reload must have started reading")
+	}
+	_ = within(t, daemon, "team")
+	st.viewMu.Lock()
+	queued := st.next != nil && st.cur == first
+	st.viewMu.Unlock()
+	if !queued {
+		lock.Unlock()
+		t.Fatal("a read after the reload started reading must queue the next reload")
+	}
+	lock.Unlock()
+	waitFor(t, 10*time.Second, "both reloads to land", func() bool {
+		st.viewMu.Lock()
+		defer st.viewMu.Unlock()
+		return st.cur == nil && st.next == nil
+	})
+	if changes.get() == 0 {
+		t.Fatal("the late reloads must signal")
 	}
 }
