@@ -179,9 +179,11 @@ func TestAttachmentsStagedExpiry(t *testing.T) {
 	}
 }
 
-// deadlineRunner records, for every explicit object fetch (the attachment
-// read's on-demand fetch), how far off its context's deadline was.
+// deadlineRunner records, for every remote command match selects (nil:
+// every explicit object fetch, the attachment read's on-demand fetch), how
+// far off its context's deadline was.
 type deadlineRunner struct {
+	match     func(args []string) bool
 	mu        sync.Mutex
 	deadlines []time.Duration // 0: no deadline
 }
@@ -189,7 +191,11 @@ type deadlineRunner struct {
 var objectIDRe = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
 func (r *deadlineRunner) RunGit(ctx context.Context, root string, args ...string) ([]byte, error) {
-	if isRemoteCommand(args) && objectIDRe.MatchString(args[len(args)-1]) {
+	matched := r.match != nil && r.match(args)
+	if r.match == nil {
+		matched = objectIDRe.MatchString(args[len(args)-1])
+	}
+	if isRemoteCommand(args) && matched {
 		var left time.Duration
 		if d, ok := ctx.Deadline(); ok {
 			left = time.Until(d)
