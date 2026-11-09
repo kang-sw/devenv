@@ -264,7 +264,7 @@ var scriptElement = regexp.MustCompile(`(?s)<script>.*?</script>`)
 func frameDocs(t *testing.T, board string) map[string]string {
 	t.Helper()
 	out := map[string]string{}
-	for _, m := range regexp.MustCompile(`<iframe class="doc-frame" title="([^"]*)" data-doc="([^"]*)" sandbox="[^"]*" srcdoc="([^"]*)"></iframe>`).FindAllStringSubmatch(board, -1) {
+	for _, m := range regexp.MustCompile(`<iframe class="doc-frame" title="([^"]*)" data-doc="([^"]*)"(?: data-relay="[^"]*")? sandbox="[^"]*" srcdoc="([^"]*)"></iframe>`).FindAllStringSubmatch(board, -1) {
 		name := html.UnescapeString(m[2])
 		if html.UnescapeString(m[1]) != name {
 			t.Errorf("frame title %q differs from its data-doc %q", m[1], m[2])
@@ -437,7 +437,7 @@ func TestImageViewerScriptHooks(t *testing.T) {
 		t.Fatal(err)
 	}
 	doc := frameDocs(t, string(regions.Board))["doc"]
-	wantAll(t, doc, `function wbFlattenSvg(`, `wbDoc: "view"`)
+	wantAll(t, doc, `function wbFlattenSvg(`, `wbDoc: "view"`, `wbDoc: "img"`, `span.img-text[data-relay]`)
 	wantNone(t, doc, `createObjectURL`)
 
 	shared, err := PageAssets()
@@ -448,14 +448,17 @@ func TestImageViewerScriptHooks(t *testing.T) {
 	wantNone(t, string(shared.FormScript), `wbFlattenSvg`)
 }
 
-// TestOutsideImageServesItemsNotTopicBodies pins where OutsideImage applies:
-// an item's image it serves renders as <img> on its Href, marked data-out
-// with its absolute path, and a link to it is an action link on that Href
-// marked data-img and data-out; an in-root image link from FileActions is
-// marked data-img alone. A topic body, framed or not, never takes it, so its
-// image stays path text with a copy-only link; an Href that is not a daemon
-// path is dropped, leaving the path text.
-func TestOutsideImageServesItemsNotTopicBodies(t *testing.T) {
+// TestOutsideImageServesItemsAndRelaysFramedBodyImages pins where
+// OutsideImage applies: an item's image it serves renders as <img> on its
+// Href, marked data-out with its absolute path, and a link to it is an action
+// link on that Href marked data-img and data-out; an in-root image link from
+// FileActions is marked data-img alone. A framed topic body never loads it
+// itself: its image stays path text with a copy-only link, marked data-relay
+// with the Href, and the frame element lists that Href as its own data-relay
+// for the host's relay; a link to it stays copy-only. An unframed body (the
+// page written to disk) takes no relay. An Href that is not a daemon path is
+// dropped, leaving the path text unmarked.
+func TestOutsideImageServesItemsAndRelaysFramedBodyImages(t *testing.T) {
 	const md = "![out](/x/out.png) [lnk](/x/out.png) ![bad](/x/bad.png) [in](shots/a.png)"
 	st := &State{Seq: 2, Topics: []TopicDoc{{Name: "doc", Body: md, Changed: 2}},
 		Items: []Item{{ID: 1, Class: ClassPolicy, Topic: "t", Title: "x", Status: StatusOpen, Options: []string{"a", "b"}, Rationale: md}}}
@@ -491,13 +494,24 @@ func TestOutsideImageServesItemsNotTopicBodies(t *testing.T) {
 	wantNone(t, board, "javascript:")
 	doc := frameDocs(t, board)["doc"]
 	wantAll(t, doc,
-		`<span class="img-text">out <a tabindex="0" data-wl="file" data-abs="/x/out.png" title="/x/out.png"><code class="fpath">/x/out.png</code></a></span>`,
+		`<span class="img-text" data-relay="/s/r/image?path=/x/out.png">out <a tabindex="0" data-wl="file" data-abs="/x/out.png" title="/x/out.png"><code class="fpath">/x/out.png</code></a></span>`,
 		`<a tabindex="0" data-wl="file" data-abs="/x/out.png" title="/x/out.png">lnk</a>`,
+		`<span class="img-text">bad <a tabindex="0" data-wl="file" data-abs="/x/bad.png" title="/x/bad.png"><code class="fpath">/x/bad.png</code></a></span>`,
 	)
-	wantNone(t, doc, "data-out", "/s/r/image")
+	wantNone(t, doc, "data-out", `src="/s/r/image`, "data:image", "javascript:")
+	wantAll(t, board, `<iframe class="doc-frame" title="doc" data-doc="doc" data-relay="/s/r/image?path=/x/out.png" sandbox=`)
 
-	// An unframed body (the page written to disk's renderer) takes it no
-	// more than a framed one.
+	// The same image twice is listed once; a body with no relayed image
+	// lists none.
+	two := &State{Seq: 2, Topics: []TopicDoc{{Name: "doc", Body: "![a](/x/out.png) ![b](/x/out.png)", Changed: 2}, {Name: "plain", Body: "![in](shots/a.png)", Changed: 2}}}
+	regions, err = RenderRegions(BuildView(two, in))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantAll(t, string(regions.Board), `data-doc="doc" data-relay="/s/r/image?path=/x/out.png" sandbox=`, `data-doc="plain" sandbox=`)
+
+	// An unframed body (the page written to disk's renderer) takes neither
+	// the image nor a relay.
 	page := render(t, BuildView(&State{Seq: 2, Topics: st.Topics}, in))
-	wantNone(t, markup(page), "data-out", "/s/r/image")
+	wantNone(t, markup(page), "data-out", "/s/r/image", "data-relay")
 }

@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 6115f023b65734b8
 sage-review-completeness-reviewed: 6115f023b65734b8
+completed: 2026-11-09
 ---
 
 # Served whiteboard topic bodies show images outside the project root for a loopback viewer
@@ -135,3 +136,49 @@ From `agents-plugin-tool/`: `gofmt -l ./internal ./cmd`, `go vet
 Required: the headless Chromium check from the phase (loopback page shows
 the image through the relay; a refused parent fetch shows path text; a
 direct frame load of the route recorded). Report its outcome in the Result.
+
+### Result (1e1a91a01) - 2026-11-09
+
+Landed in 1e1a91a01, plus a comment fix in 0c54cbc64.
+
+- **Server render.** In a framed topic body, an image that `OutsideImage` serves keeps its path text, now marked `data-relay="/s/<rid>/image?path=..."` (`pageData.relayImage`, `markdown.go`). `framedDoc` lists that body's relay URLs, deduped and space-separated, as the iframe element's own `data-relay`. `inDoc` still keeps `OutsideImage` off a body's srcs and links. `ImageDataURL`, `DocImageSrc`, and `FileActions` stay root-only. In-root images keep `data:` inlining and the over-2-MiB route fallback. Pages written to disk and the embed take no relay, and no viewer context enters the render.
+- **Frame (`doc-frame.js`).** The frame posts `{wbDoc: "img", id, href}` for each marker. It asks again when the host asks for its height. It accepts an answer only from `window.parent`, and only when the answer is an `image/*` Blob. It reads the Blob as a `data:` URL and replaces the path text only after `decode()` resolves. Otherwise the path text stays.
+- **Host relay (`dashboard.js`, `relayHref` / `relayImage`).**
+  - It handles a request only inside the listener gated on `docFrame(e.source)`.
+  - It fetches only a URL on the asking frame element's own `data-relay` list, and that URL must also be this session's image route for an image extension, with no `&`, `#`, or whitespace.
+  - The fetch is same-origin with `redirect: "error"`.
+  - It answers only with an `image/*` Blob, posted only to the asking frame.
+  - It fetches each request once per frame element.
+  - A comment at the handler states that it is never a generic fetch relay.
+- **CSP.** No change was needed. The session page's CSP is `frame-ancestors` only, and the frame shows a `data:` URL, not a `blob:` URL.
+- **Image route.** The server gate is unchanged.
+
+Decisions:
+- **Allowlist on the frame element.** This is narrower than the ticket's minimum ("this session's route for an image name"). Without it, a body script could read any image file on a loopback viewer's machine.
+- **`data:` URL instead of `blob:`.** No CSP change and no revoke are needed, and the existing viewer opens the image unchanged.
+- **Path text as the default.** The image replaces it only after decode, so no viewer ever sees a broken image.
+
+Verification, from `agents-plugin-tool/`:
+- `gofmt -l ./internal ./cmd` printed nothing.
+- `go vet ./internal/...` passed.
+- `node --check` passed on `dashboard.js` and `doc-frame.js`.
+- `go test ./internal/wswhiteboard/ ./internal/wsdashboard/ ./internal/mcp/ -count=1` passed for all three packages.
+- New and updated tests:
+  - `TestOutsideImageServesItemsAndRelaysFramedBodyImages` (regions): marker, frame list, dedup, a bad Href gets no relay, the unframed body gets no relay.
+  - `TestDashboardServedPageRendersTopicBodyInAFrame` (mcp): marker, frame list, outside bytes never inlined, in-root image still inlined, the disk page and the embed carry no relay.
+  - `TestTopicBodyImageRelayStaysNarrow` (wsdashboard): string pins on the gate and the fetch shape, plus the `relayHref` accept/reject table run under node. A mutation that drops the list check fails it.
+- The loopback-200 / LAN-404 route behavior stays pinned by the existing `TestImageRouteServesOutsideImagesToLoopbackViewersOnly`.
+
+Headless Chromium check (chrome-headless-shell 1223 over CDP, against a temporary in-package fixture daemon in LAN mode, not committed):
+
+| Case | What happened |
+|---|---|
+| Loopback page | The relayed outside image showed as `<img src="data:image/png...">` (naturalWidth 1). The relay fetch was `Sec-Fetch-Site: same-origin`, status 200. |
+| Missing outside file, loopback | The relay fetch got 404 and the path text stayed. |
+| LAN-token host (`lan.test` mapped to 127.0.0.1) | Both relay fetches got 404 and both images stayed path text. |
+| Direct frame `<img src=route>` | Sent as `Sec-Fetch-Site: cross-site` and refused (naturalWidth 0). This confirms the ticket's premise. |
+| Forged request from inside the frame | A URL not on the frame's list, and a repeated id for a listed URL, each caused no fetch. |
+
+Lite review: one round. No Critical or Important findings. One minor (garbled comment) was fixed in 0c54cbc64. Two minors remain as observations:
+- The `relayHref` table is skipped when node is not installed.
+- The relay fetches again after each board swap, because the frames are re-created, and a failure is not retried within one frame's life.

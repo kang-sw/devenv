@@ -1735,8 +1735,9 @@
   // The server renders each topic body on the board in its own sandboxed
   // frame with an opaque origin (wswhiteboard framedDoc), so its scripts
   // cannot reach this page or the daemon's routes. The frame's script
-  // (doc-frame.js) posts its content height, its marked-link clicks, and its
-  // item-reference clicks. A message counts only when its source is a body
+  // (doc-frame.js) posts its content height, its marked-link clicks, its
+  // item-reference clicks, and its requests for an image outside the
+  // session root (relayImage). A message counts only when its source is a body
   // frame on this page, and its
   // fields are data, checked as such: a link opens the same menu a board
   // link does, with an href kept only in the shapes the renderer gives one
@@ -1761,6 +1762,45 @@
     if (kind === "file" && m.img === true) a.setAttribute("data-img", "");
     return a;
   }
+  // relayHref is the URL the host fetches for a frame's image request
+  // ({wbDoc: "img"}): href itself, only when it is on list, the frame
+  // element's own data-relay (wswhiteboard framedDoc, which the body's markup
+  // cannot reach), and only as this session's image route for an image file
+  // name with no other query part; "" otherwise.
+  function relayHref(list, href) {
+    var pre = "/s/" + rid + "/image?path=", path;
+    if (!rid || !href || typeof href !== "string" || (" " + list + " ").indexOf(" " + href + " ") < 0) return "";
+    if (href.indexOf(pre) !== 0 || /[\s&#]/.test(href)) return "";
+    try { path = decodeURIComponent(href.slice(pre.length).replace(/\+/g, " ")); } catch (x) { return ""; }
+    return /\.(avif|bmp|gif|ico|jpe?g|png|svg|webp)$/i.test(path) ? href : "";
+  }
+  // relayImage answers a topic-body frame's image request: the frame's
+  // opaque origin cannot load an image outside the session root from the
+  // image route, which refuses it a cross-site request, so this page, same
+  // origin and served that image only for a loopback viewer, fetches it and
+  // posts the frame the bytes as a Blob. This is a security boundary between
+  // a body's scripts and this page's origin, and it stays narrow: only a
+  // message from one of this page's own body frames (docFrame), only a URL
+  // relayHref allows for that frame, only an answer that is an image, and
+  // only back to the frame that asked. It is never a generic fetch relay. A
+  // failed fetch (a LAN viewer, a missing file) answers nothing, and the
+  // frame keeps the path text.
+  function relayImage(f, m) {
+    var href = relayHref(f.getAttribute("data-relay") || "", m.href), id = m.id;
+    if (!href || typeof id !== "number" || !window.fetch) return;
+    // A frame asks again when the host asks for its height, in case its
+    // first request went out before this listener; each frame element
+    // fetches each of its requests once.
+    var asked = f.wbRelayAsked || (f.wbRelayAsked = {});
+    if (asked[id]) return;
+    asked[id] = true;
+    fetch(href, { credentials: "same-origin", redirect: "error" }).then(function (r) {
+      var type = (r.headers.get("Content-Type") || "").split(";")[0].trim().toLowerCase();
+      return r.ok && /^image\/[a-z0-9.+-]+$/.test(type) ? r.blob() : null;
+    }).then(function (b) {
+      if (b && f.contentWindow) f.contentWindow.postMessage({ wbDoc: "img", id: id, blob: b }, "*");
+    }, function () {});
+  }
   window.addEventListener("message", function (e) {
     var f = docFrame(e.source), m = e.data;
     if (!f || !m || typeof m !== "object") return;
@@ -1778,6 +1818,8 @@
       if (!a) return;
       var r = f.getBoundingClientRect();
       openLinkMenu(a, r.left + num(m.x), r.top + num(m.y));
+    } else if (m.wbDoc === "img") {
+      relayImage(f, m);
     }
   });
   // A swap re-creates every frame, which starts at no height until it posts

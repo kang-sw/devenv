@@ -91,8 +91,11 @@ type View struct {
 	// data-out with the absolute path as data-abs, so the page can put the
 	// path back when the image fails to load; and a link to it an action
 	// link on that Href, marked data-out, whose open items the page shows
-	// only where the image loads. A topic body never consults it: its frame
-	// has no viewer to load such an image for. A zero FileAction leaves the
+	// only where the image loads. A topic body uses it for an image only,
+	// and only in its sandboxed frame (RenderRegions), which cannot load the
+	// Href itself: the image keeps its path text, marked data-relay with the
+	// Href, for the frame to ask its host page for the image (framedDoc).
+	// An unframed body never consults it. A zero FileAction leaves the
 	// target to ImageSrc and FileActions alone.
 	OutsideImage func(path string) FileAction
 	// Lang is the language of the text the page itself draws (a wsi18n
