@@ -14,7 +14,7 @@
 {{region . "tree"}}
 <div id="splitter" class="splitter" role="separator" aria-orientation="horizontal" aria-label="{{t "splitter.label"}}" tabindex="0" title="{{t "splitter.title"}}"></div>
 <div id="convo" class="convo">{{region . "entries"}}{{region . "convlive"}}</div>
-<div id="composer" class="composer"><button type="button" class="ibadge" id="ibadge" title="{{t "js.interrupt.title"}}" hidden><span class="istop"></span><span class="ilabel">{{t "js.interrupt"}}</span></button>{{region . "ctx"}}<div class="cimgs" id="cimgs"></div><div class="cchips" id="cchips"></div><div class="crow"><textarea id="ctext" rows="1" aria-description="{{t "composer.aria"}}" placeholder="{{t "js.hint.enter"}}"></textarea><button type="button" class="csend" id="csend" title="{{t "composer.send"}}" aria-label="{{t "composer.send"}}">{{icon "send"}}</button></div>{{region . "sline"}}<div class="cnote" id="cnote"></div></div>
+<div id="composer" class="composer"><button type="button" class="ibadge" id="ibadge" title="{{t "js.interrupt.title"}}" hidden><span class="istop"></span><span class="ilabel">{{t "js.interrupt"}}</span></button>{{region . "ctx"}}<div class="cimgs" id="cimgs"></div><div class="cchips" id="cchips"></div><div class="crow"><div class="cfield"><div class="chl" id="chl" aria-hidden="true"></div><textarea id="ctext" rows="1" aria-description="{{t "composer.aria"}}" placeholder="{{t "js.hint.enter"}}"></textarea></div><button type="button" class="csend" id="csend" title="{{t "composer.send"}}" aria-label="{{t "composer.send"}}">{{icon "send"}}</button></div>{{region . "sline"}}<div class="cnote" id="cnote"></div></div>
 {{end}}<div id="bcol" class="bcol">{{region . "board"}}</div>
 </main></div>
 <script>{{i18n}}</script>
@@ -25,6 +25,7 @@ window.wbMermaid = function () {
 window.wbMermaidFile = {{.Assets.MermaidFile}};</script>
 <script>{{.Assets.ViewerScript}}</script>
 <script>{{.Assets.TrackerScript}}</script>
+<script>{{.Assets.MentionScript}}</script>
 <script>{{.Assets.Script}}</script>
 </body></html>
 {{end}}
