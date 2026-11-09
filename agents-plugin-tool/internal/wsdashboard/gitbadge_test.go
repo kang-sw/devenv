@@ -324,7 +324,8 @@ func TestGitHandleRendersEachState(t *testing.T) {
 // TestGitHandleSitsLeftOfThePanelsHandle pins the handle's place: in the
 // drawer frame after the panels handle (the stylesheet hangs it left of
 // it), with the git sheet beside the panels in the drawer's sheet, and no
-// git badge in the top bar. A page without a git read has neither.
+// git badge in the top bar; the sheet holds the commit graph's frame, whose
+// rows the page script draws. A page without a git read has neither.
 func TestGitHandleSitsLeftOfThePanelsHandle(t *testing.T) {
 	view := SessionView{ReplyID: "x", Git: &GitBadge{State: gitPending, Root: "/p"}}
 	regions, err := renderSessionRegions(view, nil)
@@ -345,7 +346,7 @@ func TestGitHandleSitsLeftOfThePanelsHandle(t *testing.T) {
 			t.Errorf("the top bar carries %q: %s", n, top)
 		}
 	}
-	for _, w := range []string{`data-git="fetch"`, `data-git="pull"`, `data-git="push"`, `class="gleft"`, "The commit graph will appear here.", `data-lost="the dashboard did not answer"`} {
+	for _, w := range []string{`data-git="fetch"`, `data-git="pull"`, `data-git="push"`, `id="glog"`, `id="glrows"`, `aria-label="commit graph"`, `data-lost="the dashboard did not answer"`} {
 		if !strings.Contains(page, w) {
 			t.Errorf("the git sheet lacks %q", w)
 		}

@@ -711,9 +711,10 @@ func (d *Daemon) handleIndex(w http.ResponseWriter, r *http.Request) {
 
 // handleSessionRoutes serves everything under /s/: a session page, its SSE
 // stream, its image, file view, files, history, closed-topic, worktree pool,
-// git status, and attachment routes, its message, cancel, steer, interrupt,
-// system-open, git refresh, git push, pull, and fetch, and worktree cleanup
-// routes, and the shared assets a page loads by relative path.
+// git status, log, and commit, and attachment routes, its message, cancel,
+// steer, interrupt, system-open, git refresh, git push, pull, and fetch, and
+// worktree cleanup routes, and the shared assets a page loads by relative
+// path.
 func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 	rest := strings.TrimPrefix(r.URL.Path, "/s/")
 	if replyID, sub, _ := strings.Cut(rest, "/"); sub == "message" || sub == "cancel" || sub == "steer" || sub == "interrupt" {
@@ -763,6 +764,14 @@ func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 		d.handleWorktrees(w, r, replyID)
 	case sub == "git/status":
 		d.handleGitStatus(w, r, replyID)
+	case sub == "git/log":
+		d.handleGitLog(w, r, replyID)
+	case strings.HasPrefix(sub, "git/commit/") && strings.HasSuffix(sub, "/diff"):
+		d.handleGitCommitDiff(w, r, replyID, strings.TrimSuffix(strings.TrimPrefix(sub, "git/commit/"), "/diff"))
+	case strings.HasPrefix(sub, "git/commit/"):
+		d.handleGitCommit(w, r, replyID, strings.TrimPrefix(sub, "git/commit/"))
+	case sub == "git/worktree/diff":
+		d.handleGitWorktreeDiff(w, r, replyID)
 	case strings.HasPrefix(sub, "attachment/"):
 		d.handleAttachment(w, r, replyID, strings.TrimPrefix(sub, "attachment/"))
 	default:
