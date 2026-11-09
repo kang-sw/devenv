@@ -441,8 +441,8 @@ func TestMarkdownBareURLs(t *testing.T) {
 // extension link, a ":line" or ":line:col" suffix stays in the label but
 // leaves the destination, and trailing sentence punctuation stays outside;
 // a path glued to a word, a slashed word without an extension, a path in a
-// code span or block, a home path, and a path with any other colon stay
-// text.
+// code block, a home path, and a path with any other colon stay text; a code
+// span that is one whole path links (TestMarkdownCodeSpanPaths).
 func TestMarkdownBarePaths(t *testing.T) {
 	for name, layout := range layouts() {
 		t.Run(name, func(t *testing.T) {
@@ -453,7 +453,7 @@ func TestMarkdownBarePaths(t *testing.T) {
 			)
 			wantAll(t, out,
 				`fix <a href="L/internal/a/b.go">internal/a/b.go:12</a>, then <a href="L//srv/notes/x">/srv/notes/x</a>.`,
-				`and/or a/b x1.5/2.5 ~/home/a.md <code>ai-docs/c.md</code> a/b.go:note (<a href="L/ai-docs/x.md">ai-docs/x.md</a>) <a href="L/docs/q.md">docs/q.md:3:4</a>: <a href="L/C:%5CUsers%5Ca.txt">C:\Users\a.txt</a>`,
+				`and/or a/b x1.5/2.5 ~/home/a.md <a href="L/ai-docs/c.md"><code>ai-docs/c.md</code></a> a/b.go:note (<a href="L/ai-docs/x.md">ai-docs/x.md</a>) <a href="L/docs/q.md">docs/q.md:3:4</a>: <a href="L/C:%5CUsers%5Ca.txt">C:\Users\a.txt</a>`,
 			)
 		})
 	}
@@ -461,6 +461,53 @@ func TestMarkdownBarePaths(t *testing.T) {
 		Rationale: "/abs/at/head and x/y.go\n\n```\nsrc/in/fence.go\n```"})
 	wantAll(t, out, `<a href="L//abs/at/head">/abs/at/head</a> and <a href="L/x/y.go">x/y.go</a>`, "<pre><code>src/in/fence.go\n</code></pre>")
 	wantNone(t, out, `href="L/src`, `href="L/home`, `href="L//home`)
+}
+
+// TestMarkdownCodeSpanPaths pins a code span whose whole content, trimmed,
+// is one bare path: it renders as the bare path's link with the code span as
+// its label, on a board page and under every served rule, ":line" kept in
+// the label only. A span holding a path and other words, a URL, a fenced
+// block, a span inside a link label or a raw <a>, a path the page shows as
+// text without link actions, and a path resolveTarget refuses stay a plain
+// code span.
+func TestMarkdownCodeSpanPaths(t *testing.T) {
+	out := mdBoard(t, LayoutFull, Item{ID: 1, Class: ClassPolicy, Topic: "t", Title: "q", Options: []string{"a", "b"}, Status: StatusOpen,
+		Rationale: "open `ai-docs/paged/x/document.html` and ` docs/q.md:3 `, not `see a/b.md` or `https://x.example/a` " +
+			"or [`in/label.md`](https://y.example/) or `bad/a%zz.md`\n\n```\nsrc/in/fence.go\n```"})
+	wantAll(t, out,
+		`open <a href="L/ai-docs/paged/x/document.html"><code>ai-docs/paged/x/document.html</code></a> and <a href="L/docs/q.md"><code>docs/q.md:3</code></a>, not <code>see a/b.md</code> or <code>https://x.example/a</code>`,
+		`<code>in/label.md</code></a> or <code>bad/a%zz.md</code>`,
+		"<pre><code>src/in/fence.go\n</code></pre>",
+	)
+	wantNone(t, out, `href="L/see`, `href="L/a/b.md`, `href="L/in`, `href="L/bad`, `href="L/src`, `href="https://x.example`)
+
+	page := &pageData{View: View{FileLink: func(p string) string { return "L/" + p }}}
+	actions := TextTargets{
+		FileText:    func(p string) string { return p },
+		FileActions: func(p string) FileAction { return FileAction{Href: "/s/r/file?path=" + p, Rel: p, Abs: "/root/" + p} },
+	}
+	finished := actions
+	finished.HTML = true
+	renders := map[string]func(string) string{
+		"board":    func(s string) string { return string(page.Block(s)) },
+		"actions":  func(s string) string { return string(RenderText(s, actions)) },
+		"finished": func(s string) string { return string(RenderText(s, finished)) },
+	}
+	for name, render := range renders {
+		got, bare := render("see `docs/a.md:12`."), render("see docs/a.md:12.")
+		want := strings.Replace(bare, ">docs/a.md:12</a>", "><code>docs/a.md:12</code></a>", 1)
+		if got != want || want == bare {
+			t.Errorf("%s:\ncode span %s\nwant      %s", name, got, want)
+		}
+	}
+	raw := string(RenderText(`<a href="https://w.example/">`+"`x/y.md`"+`</a> <code>`+"`p/q.md`"+`</code> `+"`r/s.md`", finished))
+	if strings.Count(raw, `data-wl="file"`) != 1 || !strings.Contains(raw, `title="r/s.md"><code>r/s.md</code></a>`) {
+		t.Errorf("code spans in raw tags: %s", raw)
+	}
+	textOnly := TextTargets{FileText: func(p string) string { return "T:" + p }}
+	if got := string(RenderText("see `docs/a.md`.", textOnly)); got != "see <code>docs/a.md</code>." {
+		t.Errorf("path text page: %s", got)
+	}
 }
 
 // TestMarkdownBareLinksMatchWrittenLinks pins the generated link to the

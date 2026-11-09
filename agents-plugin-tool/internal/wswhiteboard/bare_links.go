@@ -18,7 +18,8 @@ import (
 // raw HTML blocks keep them literal, and they yield the nodes an author's
 // own link would (an autolink for a URL, a link for a path), so the
 // renderer sends them through resolveTarget and writes them exactly as it
-// writes a written link to the same destination.
+// writes a written link to the same destination. One exception: a code span
+// whose whole content is one bare path links as that path (codePathParser).
 
 var (
 	// bareURL is goldmark's linkify URL pattern cut to http(s), with a host
@@ -148,7 +149,35 @@ func (barePathParser) Parse(parent ast.Node, block text.Reader, pc parser.Contex
 	return link
 }
 
-// isBarePath reports whether n is a link the path parser generated.
+// codePathParser is the code span parser, except that a code span whose
+// whole content, trimmed, is one bare path (barePath) comes back inside the
+// link barePathParser would generate for that path, so the renderer resolves
+// and writes it as it does the bare path, with the code span as its label;
+// where the bare path would stay text, the span stays a plain code span. A
+// span with anything beside the path, a URL, and a span inside a link label
+// or a raw <a> or <code> stay literal.
+type codePathParser struct{ parser.InlineParser }
+
+func (p codePathParser) Parse(parent ast.Node, block text.Reader, pc parser.Context) ast.Node {
+	node := p.InlineParser.Parse(parent, block, pc)
+	span, ok := node.(*ast.CodeSpan)
+	if !ok || pc.IsInLinkLabel() || inRawTag(parent, block.Source()) {
+		return node
+	}
+	content := strings.TrimSpace(plainText(block.Source(), span))
+	m := barePath.FindStringSubmatchIndex(content)
+	if m == nil {
+		return node
+	}
+	link := ast.NewLink()
+	link.Destination = []byte(content[m[2]:m[3]])
+	link.AppendChild(link, span)
+	link.SetAttribute(barePathAttr, true)
+	return link
+}
+
+// isBarePath reports whether n is a link the path parser or codePathParser
+// generated.
 func isBarePath(n ast.Node) bool {
 	_, ok := n.Attribute(barePathAttr)
 	return ok

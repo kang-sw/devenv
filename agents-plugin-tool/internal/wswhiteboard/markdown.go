@@ -148,13 +148,14 @@ func blockMarkdown(p *pageData, refs util.PrioritizedValue, rawHTML bool) goldma
 	)
 }
 
-// inlineParsers is goldmark's default inline set plus refs and the bare URL
+// inlineParsers is goldmark's default inline set, its code span parser
+// linking a whole-path span (codePathParser), plus refs and the bare URL
 // and path parsers (bare_links.go), with the raw
 // HTML parser when rawHTML and the allowlisted inline tags (inline_tags.go)
 // when inlineTags.
 func inlineParsers(refs util.PrioritizedValue, rawHTML, inlineTags bool) []util.PrioritizedValue {
 	list := []util.PrioritizedValue{
-		util.Prioritized(parser.NewCodeSpanParser(), 100),
+		util.Prioritized(codePathParser{parser.NewCodeSpanParser()}, 100),
 		util.Prioritized(parser.NewLinkParser(), 200),
 		util.Prioritized(parser.NewAutoLinkParser(), 300),
 		util.Prioritized(parser.NewEmphasisParser(), 500),

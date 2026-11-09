@@ -181,7 +181,8 @@ func TestLeadReplyLinksAreActionLinks(t *testing.T) {
 // TestLeadReplyBareLinksAreActionLinks pins bare URLs and file paths in a
 // lead reply, finished or streaming: each renders exactly as the markdown
 // link to the same destination does (a path's ":line" suffix stays in the
-// label only), and a URL or path in a code span stays text.
+// label only); a code span that is one whole path links as that path, with
+// the span as its label, and a URL in a code span stays text.
 func TestLeadReplyBareLinksAreActionLinks(t *testing.T) {
 	render := replyMarkdown("/proj", "self")
 	bare := "open http://127.0.0.1:29417/s/self/x, docs/a.md:12 and /etc/hosts. `docs/b.md` `https://code.example/`"
@@ -195,7 +196,7 @@ func TestLeadReplyBareLinksAreActionLinks(t *testing.T) {
 			`<a href="http://127.0.0.1:29417/s/self/x" target="_blank" rel="noopener noreferrer" data-wl="url">http://127.0.0.1:29417/s/self/x</a>,`,
 			`<a href="/s/self/file?path=docs%2Fa.md" data-wl="file" data-rel="docs/a.md" data-abs="` + filepath.Join("/proj", "docs", "a.md") + `" title="docs/a.md">docs/a.md:12</a>`,
 			`<a tabindex="0" data-wl="file" data-abs="` + filepath.FromSlash("/etc/hosts") + `" title="/etc/hosts">/etc/hosts</a>.`,
-			`<code>docs/b.md</code> <code>https://code.example/</code>`,
+			`title="docs/b.md"><code>docs/b.md</code></a> <code>https://code.example/</code>`,
 		} {
 			if !strings.Contains(got, w) {
 				t.Errorf("%s reply lacks %q:\n%s", name, w, got)
