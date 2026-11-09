@@ -10,9 +10,11 @@ import (
 
 // Wikis: the host's thin spine over wsledger's wiki branches. Every call
 // runs on the opened store under its lock; a save on a store with a remote
-// is a network call (it fetches and pushes), recorded like a sync, except
-// that a refusal (a conflict, a stale base, a bad name) is the saver's
-// problem, not the remote's, and is not recorded as a sync error.
+// is a network call (it fetches and pushes the wiki refs alone), bounded
+// like a sync but not recorded as one: the store's sync state is the
+// ledger's, and a save that landed says nothing about a standing ledger
+// sync error, nor stands in for the next check. A save's own failure is
+// its caller's error.
 
 // WikiImageInput is one image a write pastes: raw bytes the host types by
 // their magic numbers (PNG, JPEG, GIF, WebP) and bounds by the store's
@@ -216,25 +218,11 @@ func (h *Host) WikiSave(ctx context.Context, id string, s WikiSave) (wsledger.Wi
 				}
 			}
 		}
-		if st.entry.Remote == "" {
-			var err error
-			res, err = st.ledger.WikiSave(ctx, edit)
-			return err
-		}
-		var refused error
-		err := h.attempt(ctx, st, networkTimeout, func(ctx context.Context) error {
-			var err error
-			res, err = st.ledger.WikiSave(ctx, edit)
-			if isWikiRefusal(err) {
-				refused = err
-				return nil
-			}
-			return err
-		})
-		if err != nil {
-			return err
-		}
-		return refused
+		saveCtx, cancel := context.WithTimeout(ctx, networkTimeout)
+		defer cancel()
+		var err error
+		res, err = st.ledger.WikiSave(saveCtx, edit)
+		return err
 	})
 	return res, err
 }
