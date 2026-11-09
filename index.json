@@ -366,6 +366,9 @@
         }
       }
     },
+    "261109-bug-ws-tracker-assignee-list-ended-records": {
+      "registered_at": "2026-11-09T06:57:50Z"
+    },
     "261109-feat-ws-dashboard-agents-panel-fixed-rows": {
       "registered_at": "2026-11-09T06:34:52Z",
       "lease": {
@@ -376,19 +379,6 @@
         "touched_at": "2026-11-09T06:40:35Z",
         "impl": {
           "branch": "impl/develop/lurk-snub-romp"
-        }
-      }
-    },
-    "261109-feat-ws-dashboard-git-commit-graph": {
-      "registered_at": "2026-11-09T05:26:59Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-09T05:35:01Z",
-        "impl": {
-          "branch": "impl/develop/tibia-ipod-amply"
         }
       }
     },
