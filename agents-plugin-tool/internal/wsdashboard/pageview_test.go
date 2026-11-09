@@ -89,6 +89,80 @@ func TestAgentTreeNestsAndLinksServedDelegates(t *testing.T) {
 	}
 }
 
+// TestSubagentCounts pins the composer badge's N(+M): Direct counts the
+// running agents with no known parent (an evicted parent's running child
+// included), Deep the running agents below them plus the running agents of
+// a running delegate that holds its own served session, recursively, each
+// session counted once.
+func TestSubagentCounts(t *testing.T) {
+	now := testNow
+	run := func(id, parent, reply string) wslive.Agent {
+		return wslive.Agent{ID: id, ParentID: parent, ReplyID: reply, Status: wslive.StatusRunning}
+	}
+	done := func(id, parent string) wslive.Agent {
+		return wslive.Agent{ID: id, ParentID: parent, Status: wslive.StatusDone}
+	}
+	stale := *liveSnap(now, wslive.Lead{}, run("s1", "", ""))
+	stale.UpdatedAt = now.Add(-10 * time.Minute).UnixMilli()
+	sessions := map[string]Session{}
+	for _, id := range []string{"self", "dlg", "dlg2", "loop", "stale", "nosnap"} {
+		sessions[id] = liveSession(id, "/p", now)
+	}
+	snaps := map[string]*wslive.Snapshot{
+		// dlg runs two agents, one nested, and a delegate of its own (dlg2).
+		"dlg":  liveSnap(now, wslive.Lead{}, run("d1", "", "dlg2"), run("d2", "d1", ""), done("d3", "")),
+		"dlg2": liveSnap(now, wslive.Lead{}, run("e1", "", "")),
+		// loop's agent points back at the viewed session and at loop itself.
+		"loop":  liveSnap(now, wslive.Lead{}, run("l1", "", "self"), run("l2", "", "loop")),
+		"stale": &stale,
+	}
+	lookup := lookupOf(sessions, snaps)
+	cases := map[string]struct {
+		agents []wslive.Agent
+		want   SubagentCount
+	}{
+		"none":                {nil, SubagentCount{}},
+		"direct children":     {[]wslive.Agent{run("a", "", ""), run("b", "", "")}, SubagentCount{Direct: 2}},
+		"grandchildren":       {[]wslive.Agent{run("a", "", ""), run("b", "a", ""), run("c", "b", "")}, SubagentCount{Direct: 1, Deep: 2}},
+		"under finished":      {[]wslive.Agent{done("a", ""), run("b", "a", "")}, SubagentCount{Deep: 1}},
+		"evicted parent":      {[]wslive.Agent{run("b", "gone", ""), run("c", "b", "")}, SubagentCount{Direct: 1, Deep: 1}},
+		"finished ignored":    {[]wslive.Agent{done("a", ""), done("b", "a"), {ID: "c", Status: wslive.StatusFailed}}, SubagentCount{}},
+		"linked delegate":     {[]wslive.Agent{run("a", "", "dlg")}, SubagentCount{Direct: 1, Deep: 3}},
+		"finished delegate":   {[]wslive.Agent{{ID: "a", ReplyID: "dlg", Status: wslive.StatusDone}}, SubagentCount{}},
+		"delegate twice":      {[]wslive.Agent{run("a", "", "dlg"), run("b", "", "dlg")}, SubagentCount{Direct: 2, Deep: 3}},
+		"lookup cycle":        {[]wslive.Agent{run("a", "", "loop")}, SubagentCount{Direct: 1, Deep: 2}},
+		"stale delegate":      {[]wslive.Agent{run("a", "", "stale")}, SubagentCount{Direct: 1}},
+		"unserved delegate":   {[]wslive.Agent{run("a", "", "unknown"), run("b", "", "nosnap")}, SubagentCount{Direct: 2}},
+		"self parent ignored": {[]wslive.Agent{run("a", "a", "")}, SubagentCount{Direct: 1}},
+	}
+	for name, c := range cases {
+		if got := subagentCounts("self", c.agents, lookup, now); got != c.want {
+			t.Errorf("%s: counts = %+v, want %+v", name, got, c.want)
+		}
+	}
+}
+
+// TestConvLiveCarriesSubagentCounts: the convlive region carries the counts
+// for the composer's subagent badge beside the lead's phase.
+func TestConvLiveCarriesSubagentCounts(t *testing.T) {
+	snap := liveSnap(testNow, wslive.Lead{},
+		wslive.Agent{ID: "a", Status: wslive.StatusRunning},
+		wslive.Agent{ID: "b", ParentID: "a", Status: wslive.StatusRunning},
+		wslive.Agent{ID: "c", ParentID: "a", Status: wslive.StatusRunning},
+		wslive.Agent{ID: "d", Status: wslive.StatusDone})
+	v := buildSessionView(pageInputs{Session: liveSession("self", "/p", testNow), Snapshot: snap, Now: testNow})
+	if v.Conversation.Subagents != (SubagentCount{Direct: 1, Deep: 2}) {
+		t.Fatalf("Subagents = %+v", v.Conversation.Subagents)
+	}
+	set, err := renderSessionRegions(v, newEntryCache())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if html := string(set[regionConvLive].HTML); !strings.Contains(html, `<div class="conv clive" data-phase="" data-sub="1" data-subdeep="2">`) {
+		t.Errorf("convlive lacks the subagent counts:\n%s", html)
+	}
+}
+
 func TestPeerGroupMergesResolvesAndRetains(t *testing.T) {
 	now := testNow
 	at := func(min int) time.Time { return now.Add(-time.Duration(min) * time.Minute) }

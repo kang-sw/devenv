@@ -184,6 +184,11 @@ type claudeInit struct {
 	} `json:"plugins"`
 }
 
+// claudeInitToolNames maps a built-in tool name to the older name Claude's
+// system/init may report for it: Claude 2.1.319 launched with --tools Agent
+// lists the tool as "Task" in init while its calls are named "Agent".
+var claudeInitToolNames = map[string]string{"Agent": "Task"}
+
 // checkClaudeInit verifies that the child sees only what spec permits: its
 // tools are the profile's built-in tools, ws tools, and own servers' tools;
 // its MCP servers are ws (when attached) and the profile's; every plugin
@@ -192,7 +197,11 @@ type claudeInit struct {
 func checkClaudeInit(init claudeInit, spec StartSpec) error {
 	allowed := map[string]bool{}
 	for _, entry := range spec.Profile.Tools {
-		allowed[ToolBase(entry)] = true
+		base := ToolBase(entry)
+		allowed[base] = true
+		if legacy, ok := claudeInitToolNames[base]; ok {
+			allowed[legacy] = true
+		}
 	}
 	servers := map[string]bool{}
 	var prefixes []string

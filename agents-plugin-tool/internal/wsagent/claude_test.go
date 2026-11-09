@@ -117,6 +117,33 @@ func TestClaudeArgsFromProfile(t *testing.T) {
 	}
 }
 
+// TestClaudeArgsBuiltinSupportProfile: the builtin Claude support profile
+// launches with Agent as its only built-in tool, in --tools and in the
+// dontAsk allowlist beside its ws tools, so a subagent it spawns inherits
+// the same limit.
+func TestClaudeArgsBuiltinSupportProfile(t *testing.T) {
+	p, err := ParseProfile(BuiltinProfiles()[ProfilePrefix+SupportProfileClaude])
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := StartSpec{Root: "/work", Profile: p, WSMCP: &MCPCommand{Command: "/bin/ws-mcp"}}
+	args, err := claudeArgs(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := flagValue(args, "--tools"); got != "Agent" {
+		t.Fatalf("--tools = %q, want Agent alone", got)
+	}
+	i := slices.Index(args, "--allowedTools")
+	if i < 0 {
+		t.Fatalf("no --allowedTools: %v", args)
+	}
+	want := []string{"Agent", "mcp__ws__tracker_query", "mcp__ws__tracker_update", "mcp__ws__tracker_show", "mcp__ws__git_search", "mcp__ws__playbook_read"}
+	if allowed := args[i+1:]; !slices.Equal(allowed, want) {
+		t.Fatalf("--allowedTools = %v, want %v", allowed, want)
+	}
+}
+
 func TestHarnessEnvDropsParentSession(t *testing.T) {
 	env := []string{"PATH=/bin", "CLAUDECODE=1", "CLAUDE_CODE_PLUGIN_DIRS=/x", "CLAUDE_CODE_SESSION_ID=s", "CLAUDE_CONFIG_DIR=/cfg", "CLAUDE_CODE_OAUTH_TOKEN=t", "WS_MAILBOX=lead@machine", "WS_MAILBOX_AUTO=1", "HOME=/h"}
 	got := claudeEnv(env)
@@ -165,6 +192,18 @@ func TestCheckClaudeInit(t *testing.T) {
 	}{Name: "claude.ai Gmail"})
 	if err := checkClaudeInit(extraServer, spec); err == nil {
 		t.Fatalf("an extra MCP server should refuse the launch")
+	}
+	// Claude's init names the Agent tool "Task": a profile allowing Agent
+	// accepts it, and one that does not refuses it.
+	task := ok
+	task.Tools = append(slices.Clone(ok.Tools), "Task")
+	if err := checkClaudeInit(task, spec); err == nil || !strings.Contains(err.Error(), "Task") {
+		t.Fatalf("Task without Agent in the profile should refuse the launch, got %v", err)
+	}
+	agentSpec := spec
+	agentSpec.Profile.Tools = append(slices.Clone(spec.Profile.Tools), "Agent")
+	if err := checkClaudeInit(task, agentSpec); err != nil {
+		t.Fatalf("Task with Agent in the profile should pass: %v", err)
 	}
 	mode := ok
 	mode.PermissionMode = "default"

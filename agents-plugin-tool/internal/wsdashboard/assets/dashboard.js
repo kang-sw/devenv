@@ -813,6 +813,85 @@
       addFiles(imageFiles(e.dataTransfer));
     });
   }
+  // --- composer file mentions ------------------------------------------------
+  // Typing @ opens the file popup (mention.js) on the files route: paths in
+  // the session root by fuzzy search, or, for a browser on this machine, an
+  // absolute path one directory at a time. A pick is recorded as a mention:
+  // its range in the text and the text it inserted. An edit before a mention
+  // moves it; an edit inside it, or one that glues text to either end, drops
+  // it, so a mention is only ever what a pick inserted, and typed text such
+  // as "@mary" is never one. The layer behind the textarea draws each mention
+  // as a pill, and a send strips each one's @, so the session reads a plain
+  // path (a code span when the path holds spaces). Held messages a cancel
+  // returns come back as plain text: they were sent without the @.
+  var chl = $("chl"), mentions = [], mentionWas = "", mention = null;
+  function liveMention(m, v) {
+    var before = v.charAt(m.start - 1), after = v.charAt(m.end);
+    return v.slice(m.start, m.end) === m.text && (!before || /\s/.test(before)) && (!after || /\s/.test(after));
+  }
+  // trackMentions follows an edit, found as the span between the common
+  // prefix and suffix of the text before and after it.
+  function trackMentions() {
+    var v = ctext.value, was = mentionWas, a = 0, s = 0;
+    mentionWas = v;
+    if (!mentions.length) return;
+    while (a < was.length && a < v.length && was.charCodeAt(a) === v.charCodeAt(a)) a++;
+    while (s < was.length - a && s < v.length - a && was.charCodeAt(was.length - 1 - s) === v.charCodeAt(v.length - 1 - s)) s++;
+    var end = was.length - s, d = v.length - was.length;
+    mentions = mentions.filter(function (m) {
+      if (end <= m.start) { m.start += d; m.end += d; } else if (a < m.end) return false;
+      return liveMention(m, v);
+    });
+  }
+  // shiftMentions moves every mention by d after the text was set whole.
+  function shiftMentions(d) {
+    var v = ctext.value;
+    mentions = mentions.filter(function (m) { m.start += d; m.end += d; return liveMention(m, v); });
+    mentionWas = v;
+    paintMentions();
+  }
+  function clearMentions() {
+    mentions = [];
+    mentionWas = ctext.value;
+    paintMentions();
+  }
+  function paintMentions() {
+    if (!chl || !window.wsMention) return;
+    // The textarea's scrollbar narrows its text; the layer narrows alike.
+    chl.style.paddingRight = (parseFloat(getComputedStyle(ctext).paddingRight) + ctext.offsetWidth - ctext.clientWidth) + "px";
+    window.wsMention.paint(chl, ctext.value, mentions);
+    chl.scrollTop = ctext.scrollTop;
+  }
+  // sendText is the composer's text with each mention's @ stripped.
+  function sendText() {
+    var v = ctext.value, out = "", at = 0;
+    mentions.slice().sort(function (x, y) { return x.start - y.start; }).forEach(function (m) {
+      if (m.start < at || !liveMention(m, v)) return;
+      out += v.slice(at, m.start) + m.text.slice(1);
+      at = m.end;
+    });
+    return out + v.slice(at);
+  }
+  // fileCandidates asks the files route for the candidates of q.
+  function fileCandidates(q, done) {
+    if (!window.fetch) { done([]); return; }
+    fetch("/s/" + rid + "/files?q=" + encodeURIComponent(q), { credentials: "same-origin", cache: "no-store" }).then(function (r) {
+      return r.ok ? r.json() : { items: [] };
+    }).then(function (v) { done((v && v.items) || []); }, function () { done([]); });
+  }
+  if (ctext && rid && window.wsMention) {
+    mention = window.wsMention.attach(ctext, {
+      label: wsT("js.mention.label"),
+      source: fileCandidates,
+      insert: editText,
+      onPick: function (p) {
+        mentions.push({ start: p.start, end: p.end, text: p.text });
+        paintMentions();
+      }
+    });
+    ctext.addEventListener("scroll", function () { if (chl) chl.scrollTop = ctext.scrollTop; });
+    window.addEventListener("resize", paintMentions);
+  }
   var sending = false;
   // topicNotes are the board's non-empty topic notes. A send carries them
   // as "[topic] text" lines after the typed text, the lines the board's
@@ -825,7 +904,7 @@
   }
   function sendMessage() {
     if (sending) return;
-    var t = ctext.value.trim(), list = chipList(), pics = imgs.slice(), notes = topicNotes();
+    var raw = ctext.value.trim(), t = sendText().trim(), list = chipList(), pics = imgs.slice(), notes = topicNotes();
     if (!t && !list.length && !pics.length && !notes.length) { syncNote(wsT("js.send.empty")); return; }
     if (pics.some(function (p) { return !p.ref && p.data === null; })) { syncNote(wsT("js.send.reading")); return; }
     var lines = notes.map(function (n) { return n.line; }).join("\n");
@@ -840,7 +919,7 @@
     post("message", body, function (ok, res) {
       sending = false;
       if (!ok) { syncNote(wsT("js.send.fail", res)); return; }
-      if (ctext.value.trim() === t) { ctext.value = ""; grow(); }
+      if (ctext.value.trim() === raw) { ctext.value = ""; grow(); clearMentions(); }
       pics.forEach(function (p) { dropImg(p); release(p); });
       clearTrash();
       // A fresh draft numbers its images from 1 again.
@@ -870,6 +949,8 @@
   // before it use, the markers with them, as the server numbers a merge.
   function restoreHeld(list) {
     var cur = ctext.value.trim(), top = imgSeq, backs = [], back;
+    // The draft's mentions move with it, past its leading whitespace's trim.
+    var lead = ctext.value.length - ctext.value.replace(/^\s+/, "").length;
     Object.keys(markerNums(cur)).forEach(function (k) { top = Math.max(top, +k); });
     imgs.forEach(function (p) { top = Math.max(top, p.n); });
     list.forEach(function (res) {
@@ -892,6 +973,7 @@
     back = backs.join("\n\n");
     ctext.value = back + (back && cur ? "\n\n" : "") + cur;
     grow();
+    shiftMentions(back.length + (back && cur ? 2 : 0) - lead);
     imgs.sort(function (a, b) { return a.n - b.n; });
     // A later message's answer replaces an earlier one's, and a chip
     // attached since keeps its newer answer.
@@ -926,6 +1008,7 @@
     return !!c && WORKING[c.getAttribute("data-phase")] === 1;
   }
   function syncBadge() {
+    subBadge(sbadge, doc.querySelector("#r-convlive .clive"), liveMode);
     if (!ibadge) return;
     var on = liveMode && leadWorking();
     if (!on) interrupting = false;
@@ -934,6 +1017,23 @@
     ibadge.classList.toggle("busy", interrupting);
     var label = wsT(interrupting ? "js.interrupt.busy" : "js.interrupt");
     if (ilabel && ilabel.textContent !== label) ilabel.textContent = label;
+  }
+  // --- subagent badge --------------------------------------------------------
+  // Beside the interrupt badge: a spinner, the robot icon, and "N(+M)
+  // subagents" while the session runs subagents, whether or not its lead
+  // works. N is a convlive region's data-sub (its running direct children),
+  // M its data-subdeep (every running agent below them), counted by the
+  // server; "(+M)" shows only when M is above zero. on is live mode.
+  var sbadge = $("sbadge");
+  function subBadge(badge, clive, on) {
+    if (!badge) return;
+    var n = clive ? Number(clive.getAttribute("data-sub")) || 0 : 0;
+    var m = clive ? Number(clive.getAttribute("data-subdeep")) || 0 : 0;
+    badge.hidden = !(on && n + m > 0);
+    if (badge.hidden) return;
+    var label = wsTn("js.subagents", n + m, m > 0 ? n + "(+" + m + ")" : String(n));
+    var el = badge.querySelector(".slabel");
+    if (el && el.textContent !== label) el.textContent = label;
   }
   function interruptTurn() {
     if (interrupting) return;
@@ -1009,7 +1109,7 @@
   if (ctext) {
     var csend = $("csend");
     if (csend) csend.addEventListener("click", function () { sendMessage(); ctext.focus(); });
-    ctext.addEventListener("input", function () { grow(); syncNote(); syncMarkers(); });
+    ctext.addEventListener("input", function () { grow(); syncNote(); syncMarkers(); trackMentions(); paintMentions(); });
     // Tab indents rather than leaving the composer; Escape, then Tab,
     // leaves it (the keyboard way out).
     var tabOut = false;
@@ -1019,6 +1119,10 @@
       // must never send or indent: browsers report it as isComposing, and
       // Safari reports the first keydown after compositionend as keyCode 229.
       if (e.isComposing || e.keyCode === 229) return;
+      // While the file popup shows, it takes Up/Down, Tab and Enter (which
+      // pick, never send), and Escape (which closes it without arming
+      // Tab-out).
+      if (mention && mention.key(e)) { tabOut = false; return; }
       if (e.key === "Tab") {
         if (e.ctrlKey || e.metaKey || e.altKey) return;
         if (tabOut) { tabOut = false; return; }
@@ -1356,6 +1460,45 @@
       }
     }
     drRoom();
+    drFill();
+  }
+  // drFill stretches cards into the empty cells of the panels grid's last
+  // row: the card directly above each empty cell spans two rows. Cards keep
+  // their DOM order (grid-auto-flow: dense would reorder them); a spanning
+  // card sits in the full row above the last, right of every last-row card,
+  // so auto-placement puts the last row's cards in the same cells as before.
+  // The column count is the computed track list (auto-fit's collapsed tracks
+  // read 0px). Spans clear first, and only while the body is a grid: the
+  // narrow layout (a flex column) and the git sheet (body hidden) get none.
+  // A card already placed or spanned by a stylesheet skips the fill.
+  var drFilled = [];
+  function drFill() {
+    if (!drbody) return;
+    drFilled.forEach(function (el) { el.style.gridRow = ""; });
+    drFilled = [];
+    var cs = getComputedStyle(drbody);
+    if (drbody.hidden || cs.display !== "grid") return;
+    var n = cs.gridTemplateColumns.split(/\s+/).filter(function (w) { return parseFloat(w) > 0; }).length;
+    var cards = [];
+    (function items(el) {
+      Array.prototype.forEach.call(el.children, function (c) {
+        var d = getComputedStyle(c).display;
+        if (d === "contents") items(c);
+        else if (d !== "none") cards.push(c);
+      });
+    })(drbody);
+    var k = cards.length, rem = n > 0 ? k % n : 0;
+    if (n < 2 || k <= n || !rem) return;
+    var placed = cards.some(function (c) {
+      var s = getComputedStyle(c);
+      return [s.gridRowStart, s.gridRowEnd, s.gridColumnStart, s.gridColumnEnd].some(function (v) { return v !== "auto"; });
+    });
+    if (placed) return;
+    var above = (Math.floor(k / n) - 1) * n;
+    for (var c = rem; c < n; c++) {
+      cards[above + c].style.gridRow = "span 2";
+      drFilled.push(cards[above + c]);
+    }
   }
   function drDot() {
     var d = drhandle.querySelector(".tdot");
@@ -1427,6 +1570,7 @@
     drhandle.setAttribute("aria-expanded", String(drOpen && !git));
     ghSync();
     drTitle();
+    drFill();
     // Each opening of a sheet reads its data again: the worktree pool for
     // the panels, the changed files for the git sheet.
     var shown = drOpen ? drMode : "";
@@ -1567,6 +1711,9 @@
       drRo.observe(drhandle);
       if (gitRegion) drRo.observe(gitRegion);
     }
+    // The panels grid's column count follows the body's width: the last
+    // row's fill is laid out again (drFill).
+    if (window.ResizeObserver) new ResizeObserver(drFill).observe(drbody);
     // The board-first page scrolls the document, and the header with it: the
     // sheet follows the header's bottom (the live layout never scrolls, so
     // this never fires there). Once a frame, and only when the bottom moved,

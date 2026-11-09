@@ -141,6 +141,14 @@ repository sized for 50-60 people, reached from the dashboard.
     `task` or `todo` created from the dashboard is assigned to its creator at
     once. Assignment is picked in a search popover (people with live/pending
     marks plus team rules), replacing the checkbox grid.
+  - Amended 2026-11-09 (board (20) b, (53) ok, (59) a, (66) a; child
+    261109-feat-ws-tracker-review-stage-and-assignment-defaults): assigning
+    someone else defaults to assigner-confirms and assigning only oneself to
+    assignee-closes, for the dashboard popover and the MCP writer alike, so
+    "The default is assignee closes" above now holds only for self-assignment
+    (and for old events, whose absent mode still reads as assignee). An item
+    created in the kanban's review stage is not self-assigned; every other
+    dashboard or agent creation of a task or todo is.
 - **Item order and references** (user, board (528) a, (531) a):
   - Items carry a sibling position: a create records an `after` anchor (a
     sibling id, or none for first), so an item inserted between two rows

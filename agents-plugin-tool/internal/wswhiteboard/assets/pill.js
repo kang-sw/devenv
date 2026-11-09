@@ -1,8 +1,10 @@
 ;(function () {
   // Open-question pill. Items awaiting the user (open policy, assumed, ack)
   // scrolled out of the board's scroll area show a floating pill at that
-  // edge, split into still-open items and items the form already holds a
-  // reply for, and the tab title carries the still-open total. The dashboard
+  // edge, split into still-open items and items already answered (the form
+  // holds a reply, the item is assumed, or the dashboard marked one sent or
+  // held), and the tab
+  // title carries the still-open total. The dashboard
   // re-runs this after every board swap, so it tears down what the previous
   // run attached.
   var d = document;
@@ -25,13 +27,20 @@
     var box = el.querySelector(".ack input");
     return !!(el.querySelector('.opt[aria-pressed="true"], .btn[data-v][aria-pressed="true"]') || (box && box.checked) || noted(el));
   }
+  // The dashboard marks an item it already sent, or holds, a reply for with
+  // sent-sent / sent-held; that item is no longer open either. A standalone
+  // page never carries these classes. An assumed item already carries the
+  // lead's reading and work proceeds on it, so it counts as answered too.
+  function answered(el) {
+    return responded(el) || el.classList.contains("assumed") || el.classList.contains("sent-sent") || el.classList.contains("sent-held");
+  }
 
   // The title prefix is the still-open total, whatever is in view.
   var html = d.documentElement;
   var base = html.getAttribute("data-wb-title");
   if (base === null) { base = d.title.replace(/^\(\d+\) /, ""); html.setAttribute("data-wb-title", base); }
   function retitle() {
-    var n = items.filter(function (el) { return !responded(el); }).length;
+    var n = items.filter(function (el) { return !answered(el); }).length;
     d.title = (n ? "(" + n + ") " : "") + base;
   }
 
@@ -62,7 +71,7 @@
 
   // list is ordered top to bottom; the nearest item at the top edge is the
   // last one, at the bottom edge the first. A click goes to the nearest
-  // still-open item, or the nearest drafted one when none is open.
+  // still-open item, or the nearest answered one when none is open.
   function show(edge, list) {
     var p = pills[edge];
     p.hidden = !list.length;
@@ -70,7 +79,7 @@
     if (!list.length) return;
     var open = [], done = [], notes = 0;
     list.forEach(function (el) {
-      if (!responded(el)) { open.push(el); return; }
+      if (!answered(el)) { open.push(el); return; }
       done.push(el);
       if (noted(el)) notes++;
     });
@@ -123,6 +132,11 @@
   host.addEventListener("click", redraw);
   host.addEventListener("input", redraw);
   host.addEventListener("change", redraw);
+  // The dashboard's sent marks land after its region swaps, including a
+  // conversation-only swap that does not re-run this script, so watch the
+  // items' class attributes rather than wait for a board swap.
+  var mo = window.MutationObserver ? new MutationObserver(redraw) : null;
+  if (mo) items.forEach(function (el) { mo.observe(el, { attributes: true, attributeFilter: ["class"] }); });
   retitle();
 
   function click(edge) {
@@ -134,6 +148,7 @@
   st.off = function () {
     io.disconnect();
     if (ro) ro.disconnect();
+    if (mo) mo.disconnect();
     clearTimeout(timer);
     scroller.removeEventListener("scroll", later);
     window.removeEventListener("resize", later);
