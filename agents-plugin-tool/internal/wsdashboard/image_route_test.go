@@ -203,8 +203,9 @@ func imageAs(d *Daemon, peer, host, cookie, fetchSite, path string) *httptest.Re
 // one widening: a browser on this machine is served an image outside the
 // root by its absolute path, symlinks followed to a file that is an image
 // too, under the image CSP with Cross-Origin-Resource-Policy: same-origin.
-// A LAN viewer with the token, a request another site or the address bar
-// started (Sec-Fetch-Site present and not same-origin), a non-image, a
+// A request the user started (Sec-Fetch-Site: none) is served too. A LAN
+// viewer with the token, a request another site started (Sec-Fetch-Site
+// same-site or cross-site), a non-image, a
 // directory, a missing file, a relative escape, a symlink to a non-image,
 // and a UNC or device path (refused on its spelling, even where it names a
 // real file) all get the uniform 404. An in-root image is unchanged: no
@@ -231,7 +232,7 @@ func TestImageRouteServesOutsideImagesToLoopbackViewersOnly(t *testing.T) {
 		served = append(served, filepath.Join(outside, "alias.png"))
 	}
 	for _, path := range served {
-		for _, site := range []string{"", "same-origin"} {
+		for _, site := range []string{"", "same-origin", "none"} {
 			r := imageAs(f.d, peer, local, "", site, path)
 			h := r.Header()
 			if r.Code != http.StatusOK || r.Body.String() != "PNG-OUTSIDE" {
@@ -251,7 +252,6 @@ func TestImageRouteServesOutsideImagesToLoopbackViewersOnly(t *testing.T) {
 		"loopback peer, LAN Host, token":    imageAs(f.d, peer, lanHost, token, "", secret),
 		"cross-site fetch":                  imageAs(f.d, peer, local, "", "cross-site", secret),
 		"same-site fetch":                   imageAs(f.d, peer, local, "", "same-site", secret),
-		"address-bar fetch":                 imageAs(f.d, peer, local, "", "none", secret),
 		"non-image":                         imageAs(f.d, peer, local, "", "", filepath.Join(outside, "notes.txt")),
 		"directory":                         imageAs(f.d, peer, local, "", "", filepath.Join(outside, "dir.png")),
 		"missing":                           imageAs(f.d, peer, local, "", "", filepath.Join(outside, "missing.png")),

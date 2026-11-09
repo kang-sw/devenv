@@ -33,9 +33,13 @@ import (
 // outside the root, which a served lead reply or board item names by an
 // absolute path (OutsideImage), is served too, under outsideImage's rules.
 // Such a response is refused, with the same 404, to a request whose
-// Sec-Fetch-Site is present and not same-origin, and carries
+// Sec-Fetch-Site is same-site or cross-site, and carries
 // Cross-Origin-Resource-Policy: same-origin, so another site open in the
 // same browser cannot probe the filesystem through an <img> load or error.
+// Sec-Fetch-Site: none is accepted: it is a navigation the user started
+// (a reload of a tab the link menu opened, the browser's own open image in
+// new tab, a pasted URL), not another site's page, and localViewer still
+// holds the route to this machine.
 // A LAN viewer, token or not, gets the 404 every other refusal gets.
 
 // imageTypes maps the image extensions the route serves to their content type.
@@ -187,11 +191,16 @@ func outsideImage(root, path string) (file, ctype string, ok bool) {
 	return real, ctype, true
 }
 
-// crossSiteFetch reports a request whose Sec-Fetch-Site is present and not
-// same-origin: one another site's page started, or one typed or bookmarked.
+// crossSiteFetch reports a request another site's page started: its
+// Sec-Fetch-Site is present and neither same-origin nor none. none is a
+// navigation the user started (typed, pasted, reloaded, or the browser's own
+// open image in new tab), so refusing it would 404 the image the menu opened.
 func crossSiteFetch(r *http.Request) bool {
-	site := r.Header.Get("Sec-Fetch-Site")
-	return site != "" && site != "same-origin"
+	switch r.Header.Get("Sec-Fetch-Site") {
+	case "", "same-origin", "none":
+		return false
+	}
+	return true
 }
 
 // imageDataMax bounds the image ImageDataURL inlines; a larger one falls

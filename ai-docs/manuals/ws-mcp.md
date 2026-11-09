@@ -281,7 +281,8 @@ image path outside the root (not a UNC or device path, image extension on
 the name and on the file its symlinks resolve to) renders inline on the
 image route and links through it (`data-out`), and the route serves it only
 to a viewer on this machine (404 to a LAN viewer, token or not, and to a
-request whose `Sec-Fetch-Site` is present and not `same-origin`), with
+request whose `Sec-Fetch-Site` is `same-site` or `cross-site`; absent,
+`same-origin`, and `none`, a navigation the user started, are served), with
 `Cross-Origin-Resource-Policy: same-origin`. Where such an image fails to
 load (a LAN viewer, a missing file), the page puts its alt text and a
 copy-only path link in its place, and its link offers the copies only; for
