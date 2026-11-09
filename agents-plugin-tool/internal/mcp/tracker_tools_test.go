@@ -248,6 +248,8 @@ func TestTrackerToolsRefuseSpawnedKeys(t *testing.T) {
 		for tool, args := range map[string]map[string]any{
 			"tracker.update": {"session_key": key, "commands": trackerPersonal},
 			"tracker.query":  {"session_key": key},
+			wikiQueryTool:    {"session_key": key, "store": "me", "op": "list"},
+			wikiUpdateTool:   {"session_key": key, "store": "me", "wiki": "docs", "op": "write", "new_wiki": true, "path": "home", "content": "smuggled\n"},
 		} {
 			resp := f.call(t, tool, args)
 			if !isToolError(resp) || !strings.Contains(resp, "not available to a spawned session") {
@@ -269,6 +271,8 @@ func TestTrackerToolsRefuseUnknownKeys(t *testing.T) {
 	for tool, args := range map[string]map[string]any{
 		"tracker.update": {"session_key": "not-a-real-key", "commands": `<tk:register store="mine" member="eve" given="Eve"/>`},
 		"tracker.query":  {"session_key": "not-a-real-key"},
+		wikiQueryTool:    {"session_key": "not-a-real-key", "store": "me", "op": "list"},
+		wikiUpdateTool:   {"session_key": "not-a-real-key", "store": "me", "wiki": "docs", "op": "write", "new_wiki": true, "path": "home", "content": "smuggled\n"},
 	} {
 		text := f.trackerRefused(t, tool, args)
 		if !strings.Contains(text, "unknown_session") {
@@ -284,6 +288,9 @@ func TestTrackerToolsRefuseUnknownKeys(t *testing.T) {
 	}
 	if out := f.trackerQuery(t, map[string]any{"store": "me", "scope": "all"}); strings.Contains(out, "smuggled") {
 		t.Fatalf("a refused unknown-key write must write nothing: %s", out)
+	}
+	if out := f.wikiCall(t, wikiQueryTool, map[string]any{"store": "me", "op": "list"}); !strings.Contains(out, "has no wikis") {
+		t.Fatalf("a refused unknown-key wiki save must write nothing: %s", out)
 	}
 }
 
