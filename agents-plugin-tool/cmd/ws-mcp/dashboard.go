@@ -68,6 +68,7 @@ func dashboardCommand(args []string) {
 		BuildTime: *buildTime,
 		LockWait:  *lockWait,
 		Log:       logw,
+		Pprof:     wsdashboard.PprofEnabled(os.Getenv(wsdashboard.PprofEnv)),
 		Sessions:  sessions,
 		Worktrees: sessions,
 		Agents:    agents,

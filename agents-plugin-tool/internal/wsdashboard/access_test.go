@@ -217,6 +217,60 @@ func TestLANModeGuardsEveryRoute(t *testing.T) {
 	}
 }
 
+// TestPprofRoutesAreOptInAndLoopbackOnly pins the pprof routes: absent
+// unless the daemon is started with them (404 through the normal mux), and
+// once on, served to a local viewer only: in LAN mode a request carrying the
+// LAN token still passes the access guard but is refused by the route, and
+// one without the token meets the guard as on any other route.
+func TestPprofRoutesAreOptInAndLoopbackOnly(t *testing.T) {
+	withPprof := func(o *DaemonOptions) { o.Pprof = true }
+	paths := []string{"/debug/pprof/", "/debug/pprof/goroutine?debug=1", "/debug/pprof/cmdline"}
+
+	off := startPageFixture(t, lanMode)
+	offPort := strconv.Itoa(off.d.Endpoint().Port)
+	for _, path := range paths {
+		if rec := serve(off.d, viewer{peer: "127.0.0.1:50000", host: "127.0.0.1:" + offPort}, http.MethodGet, path, ""); rec.Code != http.StatusNotFound {
+			t.Errorf("pprof off: GET %s from loopback = %d, want 404", path, rec.Code)
+		}
+	}
+
+	on := startPageFixture(t, lanMode, withPprof)
+	token := readLANToken(t, on.dir)
+	port := strconv.Itoa(on.d.Endpoint().Port)
+	lanHost := "192.168.7.20:" + port
+	local := []viewer{
+		{name: "loopback peer and Host", peer: "127.0.0.1:50000", host: "127.0.0.1:" + port},
+		{name: "loopback peer and localhost Host", peer: "[::1]:50000", host: "localhost:" + port},
+	}
+	tokened := []viewer{
+		{name: "foreign peer with the token query", peer: "192.168.7.30:50000", host: lanHost, query: token},
+		{name: "foreign peer with the token cookie", peer: "192.168.7.30:50000", host: lanHost, cookie: token},
+		{name: "loopback peer, foreign Host, token cookie", peer: "127.0.0.1:50000", host: lanHost, cookie: token},
+	}
+	for _, path := range paths {
+		for _, v := range local {
+			if rec := serve(on.d, v, http.MethodGet, path, ""); rec.Code != http.StatusOK {
+				t.Errorf("pprof on: GET %s as %s = %d, want 200", path, v.name, rec.Code)
+			}
+		}
+		for _, v := range tokened {
+			if rec := serve(on.d, v, http.MethodGet, path, ""); rec.Code != http.StatusForbidden {
+				t.Errorf("pprof on: GET %s as %s = %d, want 403", path, v.name, rec.Code)
+			}
+		}
+		stranger := viewer{peer: "192.168.7.30:50000", host: lanHost}
+		if rec := serve(on.d, stranger, http.MethodGet, path, ""); !refusedByGuard(rec) {
+			t.Errorf("pprof on: GET %s from a foreign peer without the token = %d, want the guard's 401", path, rec.Code)
+		}
+	}
+
+	// Localhost mode serves them to a loopback viewer too.
+	loop := startPageFixture(t, withPprof)
+	if code, page := get(t, loop.base+"/debug/pprof/"); code != http.StatusOK || !strings.Contains(page, "goroutine") {
+		t.Errorf("pprof on in localhost mode: index = %d, want 200 with the profile list:\n%.500s", code, page)
+	}
+}
+
 // TestLANTokenIsNotAShutdownCredential: the LAN token never authorizes the
 // shutdown request, and the endpoint file never holds it.
 func TestLANTokenIsNotAShutdownCredential(t *testing.T) {
