@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/kang-sw/devenv/internal/wsledger"
 	"github.com/kang-sw/devenv/internal/wstracker"
@@ -12,8 +14,8 @@ import (
 
 // TestWikiSaveReadAcrossMachines: a write with a pasted image on one
 // machine is readable on another after its check; the image is typed by
-// its bytes and bounded by the store's limit; a refused save is not
-// recorded as a sync error while a landed one is recorded as a sync.
+// its bytes and bounded by the store's limit; neither a landed nor a
+// refused save is recorded as a sync.
 func TestWikiSaveReadAcrossMachines(t *testing.T) {
 	w := newWorld(t)
 	a, b := w.machine("a"), w.machine("b")
@@ -34,7 +36,7 @@ func TestWikiSaveReadAcrossMachines(t *testing.T) {
 	if err != nil || !res.Created {
 		t.Fatalf("save = %+v, %v", res, err)
 	}
-	if s := readSyncState(a.stores["team"].entry.Dir); s.SyncedAt.IsZero() || s.Error != "" {
+	if s := readSyncState(a.stores["team"].entry.Dir); s.Error != "" {
 		t.Fatalf("sync state after a landed save = %+v", s)
 	}
 	// A refused save: the base is stale.
@@ -151,5 +153,26 @@ func TestWikiSaveStagedImages(t *testing.T) {
 	}
 	if oids, err := b.WikiImages(ctx, "team", "docs"); err != nil || len(oids) != 1 {
 		t.Fatalf("images after = %v, %v", oids, err)
+	}
+}
+
+// TestWikiSaveLeavesLedgerSyncStateAlone: a landed wiki save neither
+// clears a standing sync error nor counts as a check, so the next pre-read
+// check still runs.
+func TestWikiSaveLeavesLedgerSyncStateAlone(t *testing.T) {
+	w := newWorld(t)
+	a := w.machine("a")
+	w.register(a, "team", "ada", &wstracker.Profile{Given: "Ada"})
+	ctx := context.Background()
+	dir := a.stores["team"].entry.Dir
+	standing := syncState{AttemptedAt: w.clock.Now().UTC().Add(-time.Hour), Error: "ledger: push: the remote refused"}
+	if err := writeJSON(filepath.Join(dir, syncStateFile), standing); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.WikiSave(ctx, "team", WikiSave{Edit: wsledger.WikiEdit{Wiki: "docs", NewWiki: true, Op: wsledger.WikiOpWrite, Path: "home", Content: "x\n"}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := readSyncState(dir); got.Error != standing.Error || !got.AttemptedAt.Equal(standing.AttemptedAt) || !got.SyncedAt.IsZero() {
+		t.Fatalf("sync state after a wiki save = %+v, want the standing %+v", got, standing)
 	}
 }

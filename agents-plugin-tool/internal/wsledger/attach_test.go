@@ -470,6 +470,51 @@ func TestAttachRewoundRefRefused(t *testing.T) {
 	}
 }
 
+// TestAttachRestoreWithoutBlobsRestoresEventRefAlone: a clone that fetched
+// another member's attachment ref filtered lacks its blobs and cannot push
+// that ref back; restoring the member's event ref restores the event ref
+// alone and reports the attachment ref as not restored. The member's own
+// clone, which holds the blobs, restores the attachment ref afterwards.
+func TestAttachRestoreWithoutBlobsRestoresEventRefAlone(t *testing.T) {
+	w := newWorld(t)
+	url, dir := w.fileRemote("r", true)
+	ada := w.register(w.remoteOpts("ada", "c1"), url)
+	appendBlob(t, ada, blob("kept by ada"))
+	syncOK(t, ada)
+	bo := w.register(w.remoteOpts("bo", "c1"), url)
+	own, aref := memberRef("ada", "c1"), attachRef("ada", "c1")
+	if _, ok, _ := bo.git.readBlob(context.Background(), bo.attachIndex[blob("kept by ada").OID][0].blob); ok {
+		t.Fatal("the filtered fetch brought the blob; the test needs it absent")
+	}
+	wantOwn, wantAttach := remoteRefs(t, dir)[own], remoteRefs(t, dir)[aref]
+
+	remoteGit(t, dir, "update-ref", "-d", own)
+	remoteGit(t, dir, "update-ref", "-d", aref)
+	fetchOK(t, bo)
+	if err := bo.Restore(context.Background(), own); err != nil {
+		t.Fatalf("restore without the attachment blobs: %v", err)
+	}
+	refs := remoteRefs(t, dir)
+	if refs[own] != wantOwn || refs[aref] != "" {
+		t.Fatalf("after restore remote %s=%s %s=%s, want the event ref alone back", own, refs[own], aref, refs[aref])
+	}
+	rep := fetchOK(t, bo)
+	if !hasWarning(rep.Warnings, aref, WarnNotRestored) {
+		t.Fatalf("warnings = %+v, want WarnNotRestored on %s", rep.Warnings, aref)
+	}
+	if rep := fetchOK(t, bo); hasWarning(rep.Warnings, aref, WarnNotRestored) {
+		t.Fatal("the not-restored warning repeated")
+	}
+
+	fetchOK(t, ada)
+	if err := ada.Restore(context.Background(), own); err != nil {
+		t.Fatalf("restore by the clone holding the blobs: %v", err)
+	}
+	if got := remoteRefs(t, dir)[aref]; got != wantAttach {
+		t.Fatalf("after ada's restore remote %s=%s, want %s", aref, got, wantAttach)
+	}
+}
+
 // TestAttachFetchFailureLeavesEventsUnabsorbed: when the attachment-ref
 // fetch fails the event refs are not fetched, so no absorbed event names a
 // blob no tree holds.
@@ -535,5 +580,49 @@ func TestAttachMoveToFreshCloneCarriesPendingBlobs(t *testing.T) {
 	fetchOK(t, y)
 	if got := readOK(t, y, b.OID, "bo"); string(got) != "moved" {
 		t.Fatalf("y read = %q", got)
+	}
+}
+
+// failObjectFetchRunner fails every explicit object fetch (ReadAttachment's
+// on-demand fetch) while fail is set.
+type failObjectFetchRunner struct {
+	mu   sync.Mutex
+	fail bool
+}
+
+func (r *failObjectFetchRunner) RunGit(ctx context.Context, root string, args ...string) ([]byte, error) {
+	r.mu.Lock()
+	fail := r.fail
+	r.mu.Unlock()
+	if fail && isFetch(args) && oidRe.MatchString(args[len(args)-1]) {
+		return nil, errors.New("fatal: unable to access the remote: connection reset")
+	}
+	return wsgit.ExecRunner{Env: GitEnv}.RunGit(ctx, root, args...)
+}
+
+// TestAttachFetchFailureIsNotNotFound: a blob this clone lacks whose
+// explicit fetch fails is the fetch's error, not ErrAttachmentNotFound
+// (the remote may hold it); once the fetch works the blob is served.
+func TestAttachFetchFailureIsNotNotFound(t *testing.T) {
+	w := newWorld(t)
+	url, _ := w.fileRemote("r", true)
+	ada := w.register(w.remoteOpts("ada", "c1"), url)
+	b := blob("far away")
+	appendBlob(t, ada, b)
+	syncOK(t, ada)
+	o := w.remoteOpts("bo", "c1")
+	fr := &failObjectFetchRunner{fail: true}
+	o.Runner = fr
+	bo := w.register(o, url)
+
+	_, err := bo.ReadAttachment(context.Background(), b.OID, "ada")
+	if err == nil || errors.Is(err, ErrAttachmentNotFound) || !strings.Contains(err.Error(), "connection reset") {
+		t.Fatalf("read over a failing fetch = %v, want the fetch's error and not ErrAttachmentNotFound", err)
+	}
+	fr.mu.Lock()
+	fr.fail = false
+	fr.mu.Unlock()
+	if got := readOK(t, bo, b.OID, "ada"); string(got) != "far away" {
+		t.Fatalf("read = %q", got)
 	}
 }

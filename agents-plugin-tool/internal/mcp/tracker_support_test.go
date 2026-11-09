@@ -131,6 +131,8 @@ func TestTrackerSupportGateRefusesEveryOtherSpawnedKey(t *testing.T) {
 		for tool, args := range map[string]map[string]any{
 			"tracker.update": {"commands": `<tk:store name="me"><tk:comment.add item="` + f.meItem + `">smuggled</tk:comment.add></tk:store>`},
 			"tracker.query":  {},
+			wikiQueryTool:    {"store": "me", "op": "list"},
+			wikiUpdateTool:   {"store": "me", "wiki": "smuggled", "op": "write", "new_wiki": true, "path": "home", "content": "smuggled\n"},
 		} {
 			resp := f.call(t, tool, f.as(key, args))
 			if !isToolError(resp) || !strings.Contains(resp, spawned) {
@@ -190,6 +192,17 @@ func TestTrackerSupportGateRefusesEveryOtherSpawnedKey(t *testing.T) {
 	}
 	if resp := f.call(t, "tracker.update", f.as(reader, map[string]any{"commands": `<tk:store name="me"><tk:comment.add item="` + f.meItem + `">x</tk:comment.add></tk:store>`})); !isToolError(resp) || !strings.Contains(resp, spawned) {
 		t.Fatalf("a profile without tracker.update must not write: %s", resp)
+	}
+	for tool, args := range map[string]map[string]any{
+		wikiQueryTool:  {"store": "me", "op": "list"},
+		wikiUpdateTool: {"store": "me", "wiki": "smuggled", "op": "write", "new_wiki": true, "path": "home", "content": "smuggled\n"},
+	} {
+		if resp := f.call(t, tool, f.as(reader, args)); !isToolError(resp) || !strings.Contains(resp, spawned) {
+			t.Fatalf("a profile naming only tracker.query must not reach %s: %s", tool, resp)
+		}
+	}
+	if out := f.wikiCall(t, wikiQueryTool, map[string]any{"store": "me", "op": "list"}); strings.Contains(out, "smuggled") {
+		t.Fatalf("a refused key must save no wiki: %s", out)
 	}
 	if out := f.trackerQuery(t, map[string]any{"store": "me", "item": f.meItem}); strings.Contains(out, "smuggled") {
 		t.Fatalf("a refused key must write nothing: %s", out)

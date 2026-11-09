@@ -383,11 +383,14 @@ func (l *Ledger) absorbWiki(ctx context.Context) error {
 // fast-forward when the local copy descends from it (absorbWiki left that
 // case alone). A rejection (the remote moved meanwhile) is left to the
 // fetch that follows, which follows the remote and keeps the local tip as
-// a recovery point.
-func (l *Ledger) pushLocalWikis(ctx context.Context) error {
+// a recovery point. A push that fails (a remote refusal, a transport
+// failure) is returned in failed, by ref, and the other wikis are still
+// pushed: one wiki the remote refuses must not hold up the ledger's sync
+// or saves to other wikis. err is a local failure.
+func (l *Ledger) pushLocalWikis(ctx context.Context) (failed map[string]error, err error) {
 	local, snap, known, err := l.wikiRefs(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	refs := make([]string, 0, len(local))
 	for ref := range local {
@@ -400,15 +403,34 @@ func (l *Ledger) pushLocalWikis(ctx context.Context) error {
 		lease := snap[ref]
 		out, err := l.git.push(ctx, ref, &lease)
 		if err != nil {
-			return fmt.Errorf("ledger: wiki push: %w", err)
+			if failed == nil {
+				failed = map[string]error{}
+			}
+			failed[ref] = fmt.Errorf("ledger: wiki push: %w", err)
+			continue
 		}
 		if out == pushOK {
 			if err := l.setKnown(ctx, ref, local[ref]); err != nil {
-				return err
+				return failed, err
 			}
 		}
 	}
-	return nil
+	return failed, nil
+}
+
+// wikiPushWarnings reports the failed pushes of pushLocalWikis, by ref.
+func wikiPushWarnings(failed map[string]error) []Warning {
+	refs := make([]string, 0, len(failed))
+	for ref := range failed {
+		refs = append(refs, ref)
+	}
+	sort.Strings(refs)
+	out := make([]Warning, 0, len(refs))
+	for _, ref := range refs {
+		out = append(out, Warning{Ref: ref, Kind: WarnWikiSyncFailed,
+			Detail: failed[ref].Error() + "; the wiki stays on this clone and the next sync retries"})
+	}
+	return out
 }
 
 // Reads.
@@ -1154,6 +1176,7 @@ func (l *Ledger) WikiSave(ctx context.Context, e WikiEdit) (WikiSaveResult, erro
 	if err := checkWikiEdit(&e); err != nil {
 		return res, err
 	}
+	var pushWarns []Warning
 	err := l.withLock(ctx, func() error {
 		remote := l.hasRemote(ctx)
 		if remote {
@@ -1162,9 +1185,16 @@ func (l *Ledger) WikiSave(ctx context.Context, e WikiEdit) (WikiSaveResult, erro
 			}
 			// A wiki written before the store had a remote is published
 			// first, so the save below pushes onto a ref the remote holds.
-			if err := l.pushLocalWikis(ctx); err != nil {
+			// Another wiki the remote refuses is only reported; this one
+			// refuses the save.
+			failed, err := l.pushLocalWikis(ctx)
+			if err != nil {
 				return err
 			}
+			if err := failed[wikiRef(e.Wiki)]; err != nil {
+				return err
+			}
+			pushWarns = wikiPushWarnings(failed)
 		}
 		ref := wikiRef(e.Wiki)
 		tip, err := l.wikiTip(ctx, e.Wiki)
@@ -1274,7 +1304,7 @@ func (l *Ledger) WikiSave(ctx context.Context, e WikiEdit) (WikiSaveResult, erro
 		}
 	})
 	l.mu.Lock()
-	res.Warnings = append([]Warning(nil), l.wikiWarns...)
+	res.Warnings = append(append([]Warning(nil), l.wikiWarns...), pushWarns...)
 	l.mu.Unlock()
 	return res, err
 }
@@ -1300,12 +1330,17 @@ func (l *Ledger) renameGuard(ctx context.Context, e WikiEdit, baseTree, theirsTr
 	if err != nil || !ok {
 		return nil, err
 	}
+	// A rename is the page's content at a path the base did not hold: a
+	// page the base already held with the same content is not where this
+	// one went.
 	renamed := false
 	err = l.git.walkTree(ctx, theirsTree, "", func(path string, entry treeEntry) error {
-		if entry.oid == base.oid && strings.HasSuffix(path, pageExt) {
-			renamed = true
+		if renamed || entry.oid != base.oid || !strings.HasSuffix(path, pageExt) {
+			return nil
 		}
-		return nil
+		_, inBase, err := l.git.entryAt(ctx, baseTree, path)
+		renamed = err == nil && !inBase
+		return err
 	})
 	if err != nil || !renamed {
 		return nil, err

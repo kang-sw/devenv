@@ -38,7 +38,8 @@ import (
 // fetch fails the event fetch does not run, so an absorbed event never
 // names a blob missing from every attachment tree this clone has. The wiki
 // refs (refs/heads/wiki/<name>, wiki.go) are fetched last, whole, with
-// their own follow-the-remote rules; they are not ledger refs.
+// their own follow-the-remote rules; they are not ledger refs, so a wiki
+// fetch or push failure is a WarnWikiSyncFailed, never a failed sync.
 
 const (
 	remoteName  = "origin"
@@ -139,7 +140,8 @@ func (g *gitRepo) fetchNamespace(ctx context.Context, ns string, mode ...string)
 
 // fetchRefs fetches the remote's ledger refs into the snapshot namespace in
 // the two modes the file comment describes: attachment refs filtered, then
-// event refs whole. It reports whether the server ignored the filter.
+// event refs whole. It reports whether the server ignored the filter. The
+// wiki refs are fetchRemote's own step.
 func (g *gitRepo) fetchRefs(ctx context.Context) (noFilter bool, err error) {
 	out, err := g.fetchNamespace(ctx, "attach/", "--filter=blob:none")
 	// Unset before judging the error: a failed filtered fetch may have
@@ -155,9 +157,6 @@ func (g *gitRepo) fetchRefs(ctx context.Context) (noFilter bool, err error) {
 	}
 	noFilter = strings.Contains(string(out), noFilterMarker)
 	if _, err := g.fetchNamespace(ctx, "tracker/", "--no-filter"); err != nil {
-		return noFilter, err
-	}
-	if err := g.fetchWikiRefs(ctx); err != nil {
 		return noFilter, err
 	}
 	return noFilter, nil
@@ -264,7 +263,10 @@ func (l *Ledger) loadKnownOwn(ctx context.Context) error {
 	return nil
 }
 
-// fetchRemote fetches and applies the snapshot to the local copies.
+// fetchRemote fetches and applies the snapshot to the local copies, then
+// fetches and absorbs the wiki refs. A failed wiki fetch is a warning, not
+// an error: the ledger refs are absorbed already, and the wikis stay as
+// the last fetch left them.
 func (l *Ledger) fetchRemote(ctx context.Context) error {
 	noFilter, err := l.git.fetchRefs(ctx)
 	if err != nil {
@@ -276,6 +278,11 @@ func (l *Ledger) fetchRemote(ctx context.Context) error {
 	}
 	if err := l.absorbRemote(ctx); err != nil {
 		return err
+	}
+	if err := l.git.fetchWikiRefs(ctx); err != nil {
+		l.pendingWarns = append(l.pendingWarns, Warning{Ref: wikiPrefix + "*", Kind: WarnWikiSyncFailed,
+			Detail: "wiki fetch failed: " + err.Error() + "; the wikis stay as the last fetch left them and the next sync retries"})
+		return nil
 	}
 	return l.absorbWiki(ctx)
 }
@@ -665,10 +672,13 @@ func Register(ctx context.Context, opts Options, url string) (*Ledger, error) {
 		if landed {
 			pushed = append(json.RawMessage(nil), l.genesis.raw...)
 		}
-		// A store that had no remote until now publishes its wikis too.
-		if err := l.pushLocalWikis(ctx); err != nil {
+		// A store that had no remote until now publishes its wikis too; a
+		// wiki the remote refuses is reported, and the next sync retries it.
+		failed, err := l.pushLocalWikis(ctx)
+		if err != nil {
 			return err
 		}
+		l.pendingWarns = append(l.pendingWarns, wikiPushWarnings(failed)...)
 		if err := l.fetchRemote(ctx); err != nil {
 			return err
 		}
@@ -709,7 +719,11 @@ func (e *PushedError) Unwrap() error { return e.Err }
 // pushes them. Restoring a member's event ref also restores its attachment
 // ref when that one is deleted or rewound (with or without the event ref),
 // in the same atomic push, so the remote never holds an event commit
-// without the blobs it names.
+// without the blobs it names, provided this clone holds every blob the
+// push needs. Another member's attachment ref was fetched filtered, so its
+// blobs are usually absent here: then the event ref goes back alone and a
+// WarnNotRestored in the next report names the attachment ref, which a
+// clone holding the blobs (the member's own) restores.
 func (l *Ledger) Restore(ctx context.Context, ref string) error {
 	return l.withLock(ctx, func() error {
 		if !l.hasRemote(ctx) {
@@ -754,13 +768,23 @@ func (l *Ledger) Restore(ctx context.Context, ref string) error {
 		}
 		var specs []pushSpec
 		var pushed [][2]string
+		var notRestored *Warning
 		if member, clone, ok := parseMemberRef(ref); ok {
 			// The attachment ref alone may be the one deleted or rewound.
 			if a := attachRef(member, clone); local[a] != "" {
 				if r, err := behind(a, local[a]); err == nil && r {
-					lease := snap[a]
-					specs = append(specs, pushSpec{Ref: a, Lease: &lease})
-					pushed = append(pushed, [2]string{a, local[a]})
+					missing, err := l.git.missingObjects(ctx, local[a])
+					if err != nil {
+						return err
+					}
+					if missing {
+						notRestored = &Warning{Ref: a, Kind: WarnNotRestored,
+							Detail: "not restored with " + ref + ": this clone lacks blobs the push needs; restore it from a clone that holds them (the member's own)"}
+					} else {
+						lease := snap[a]
+						specs = append(specs, pushSpec{Ref: a, Lease: &lease})
+						pushed = append(pushed, [2]string{a, local[a]})
+					}
 				}
 			}
 		}
@@ -769,8 +793,14 @@ func (l *Ledger) Restore(ctx context.Context, ref string) error {
 			specs = append(specs, pushSpec{Ref: ref, Lease: &lease})
 			pushed = append(pushed, [2]string{ref, tip})
 		}
+		warnNotRestored := func() {
+			if notRestored != nil {
+				l.pendingWarns = append(l.pendingWarns, *notRestored)
+			}
+		}
 		if len(specs) == 0 {
-			return nil // the remote already holds the local copies
+			warnNotRestored()
+			return nil // the remote already holds the local copies it can take
 		}
 		out, err := l.git.pushRefs(ctx, specs...)
 		if err != nil {
@@ -779,6 +809,7 @@ func (l *Ledger) Restore(ctx context.Context, ref string) error {
 		if out == pushRejected {
 			return fmt.Errorf("ledger: the remote %s moved while restoring; fetch and retry", ref)
 		}
+		warnNotRestored()
 		for _, p := range pushed {
 			if err := l.setKnown(ctx, p[0], p[1]); err != nil {
 				return err

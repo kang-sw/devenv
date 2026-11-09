@@ -920,3 +920,163 @@ func TestWikiLocalAheadOfRemoteFastForwards(t *testing.T) {
 		t.Fatal("the save after the fast-forward did not land")
 	}
 }
+
+// wikiFaultRunner fails, while its switches are on, the push of one wiki
+// ref (as a remote hook rejects it) and the wiki namespace fetch (as a
+// transport failure).
+type wikiFaultRunner struct {
+	inner     wsgit.Runner
+	mu        sync.Mutex
+	pushRef   string // the wiki ref whose push fails; "" for none
+	failFetch bool
+}
+
+func (r *wikiFaultRunner) set(pushRef string, failFetch bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.pushRef, r.failFetch = pushRef, failFetch
+}
+
+func (r *wikiFaultRunner) RunGit(ctx context.Context, root string, args ...string) ([]byte, error) {
+	r.mu.Lock()
+	pushRef, failFetch := r.pushRef, r.failFetch
+	r.mu.Unlock()
+	if len(args) > 0 {
+		last := args[len(args)-1]
+		if pushRef != "" && strings.HasSuffix(last, ":"+pushRef) {
+			return nil, fmt.Errorf("exit status 1: !\t%s\t[remote rejected] (pre-receive hook declined)", last)
+		}
+		if failFetch && last == "+"+wikiPrefix+"*:"+snapPrefix+wikiNamespace+"*" {
+			return nil, errors.New("exit status 128: fatal: the wiki fetch broke")
+		}
+	}
+	return r.inner.RunGit(ctx, root, args...)
+}
+
+// TestWikiPushFailureDoesNotAbortLedgerSync: a local-only wiki the remote
+// refuses does not fail Register or Sync: the ledger's own push, fetch,
+// and deadline clear still run and the refused wiki is a warning; saves to
+// every other wiki land, while a save to the refused wiki itself is
+// refused.
+func TestWikiPushFailureDoesNotAbortLedgerSync(t *testing.T) {
+	w := newWorld(t)
+	url := w.newRemote("r")
+	oa := w.remoteOpts("ada", "c1")
+	ada, err := Create(context.Background(), oa)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	stuck := saveOK(t, ada, wikiCreate("stuck", "p", "1\n"))
+	ada.Close()
+
+	fr := &wikiFaultRunner{inner: wsgit.ExecRunner{Env: GitEnv}, pushRef: wikiRef("stuck")}
+	oa.Runner = fr
+	ada = w.register(oa, url)
+	if remoteRefs(t, url)[wikiRef("stuck")] != "" {
+		t.Fatal("the refused wiki reached the remote")
+	}
+	if rep := fetchOK(t, ada); !hasWarning(rep.Warnings, wikiRef("stuck"), WarnWikiSyncFailed) {
+		t.Fatalf("report after register = %+v, want WarnWikiSyncFailed on the refused wiki", rep.Warnings)
+	}
+
+	bo := w.register(w.remoteOpts("bo", "c1"), url)
+	theirs := appendOne(t, bo, "note", note("b1"))
+	syncOK(t, bo)
+	appendOne(t, ada, "note", note("a1"))
+	rep, err := ada.Sync(ctx)
+	if err != nil {
+		t.Fatalf("sync with a refused local wiki = %v", err)
+	}
+	if !rep.Pushed || rep.Pending.Count != 0 || !rep.Pending.PushDue.IsZero() {
+		t.Fatalf("sync = %+v, want pushed with nothing pending and no deadline", rep)
+	}
+	if !hasWarning(rep.Warnings, wikiRef("stuck"), WarnWikiSyncFailed) {
+		t.Fatalf("sync warnings = %+v, want WarnWikiSyncFailed on the refused wiki", rep.Warnings)
+	}
+	wantVerdict(t, ada, theirs, Valid)
+
+	res, err := ada.WikiSave(ctx, wikiCreate("free", "p", "x\n"))
+	if err != nil {
+		t.Fatalf("save to another wiki = %v", err)
+	}
+	if remoteRefs(t, url)[wikiRef("free")] != res.Commit || !hasWarning(res.Warnings, wikiRef("stuck"), WarnWikiSyncFailed) {
+		t.Fatalf("save to another wiki = %+v, want landed with the refused wiki's warning", res)
+	}
+	if _, err := ada.WikiSave(ctx, wikiWrite("stuck", stuck.Commit, "p", "2\n")); err == nil || !strings.Contains(err.Error(), "pre-receive hook declined") {
+		t.Fatalf("save to the refused wiki = %v, want its push failure", err)
+	}
+
+	// Once the remote takes it, the next sync publishes it.
+	fr.set("", false)
+	if rep := syncOK(t, ada); hasWarning(rep.Warnings, wikiRef("stuck"), WarnWikiSyncFailed) {
+		t.Fatalf("sync after the remote relented = %+v", rep.Warnings)
+	}
+	if remoteRefs(t, url)[wikiRef("stuck")] != stuck.Commit {
+		t.Fatal("the local wiki was not pushed once the remote took it")
+	}
+}
+
+// TestWikiFetchFailureStillAbsorbsEvents: a failed wiki fetch does not
+// fail the store fetch: the event refs fetched before it are absorbed, the
+// wikis stay as they were, and the failure is a warning.
+func TestWikiFetchFailureStillAbsorbsEvents(t *testing.T) {
+	w := newWorld(t)
+	url := w.newRemote("r")
+	ada := w.register(w.remoteOpts("ada", "c1"), url)
+	ob := w.remoteOpts("bo", "c1")
+	fr := &wikiFaultRunner{inner: wsgit.ExecRunner{Env: GitEnv}}
+	ob.Runner = fr
+	bo := w.register(ob, url)
+
+	r0 := saveOK(t, ada, wikiCreate("docs", "p", "1\n"))
+	id := appendOne(t, ada, "note", note("a1"))
+	syncOK(t, ada)
+	fr.set("", true)
+	for name, run := range map[string]func(context.Context) (SyncReport, error){"fetch": bo.Fetch, "sync": bo.Sync} {
+		rep, err := run(context.Background())
+		if err != nil {
+			t.Fatalf("%s with a failing wiki fetch = %v", name, err)
+		}
+		if !hasWarning(rep.Warnings, wikiPrefix+"*", WarnWikiSyncFailed) {
+			t.Fatalf("%s warnings = %+v, want WarnWikiSyncFailed on the wiki namespace", name, rep.Warnings)
+		}
+	}
+	wantVerdict(t, bo, id, Valid)
+	if localRef(t, bo, wikiRef("docs")) != "" {
+		t.Fatal("a failed wiki fetch took the wiki")
+	}
+	fr.set("", false)
+	if rep := fetchOK(t, bo); hasWarning(rep.Warnings, wikiPrefix+"*", WarnWikiSyncFailed) {
+		t.Fatalf("fetch after recovery = %+v", rep.Warnings)
+	}
+	if localRef(t, bo, wikiRef("docs")) != r0.Commit {
+		t.Fatal("the wiki was not taken once the fetch worked")
+	}
+}
+
+// TestWikiDeleteOfSharedContentPageBothSidesDeleted: a page both sides
+// deleted is not a conflict even when another page the base already held
+// has the same content; only the same content at a path the base lacks
+// reads as a rename.
+func TestWikiDeleteOfSharedContentPageBothSidesDeleted(t *testing.T) {
+	w := newWorld(t)
+	url := w.newRemote("r")
+	ada := w.register(w.remoteOpts("ada", "c1"), url)
+	bo := w.register(w.remoteOpts("bo", "c1"), url)
+
+	r0 := saveOK(t, ada, wikiCreate("dup", "a", "same\n"))
+	r1 := saveOK(t, ada, wikiWrite("dup", r0.Commit, "b", "same\n"))
+	fetchOK(t, bo)
+	rd := saveOK(t, ada, WikiEdit{Wiki: "dup", Base: r1.Commit, Op: WikiOpDelete, Path: "a"})
+	res := saveOK(t, bo, WikiEdit{Wiki: "dup", Base: r1.Commit, Op: WikiOpDelete, Path: "a"})
+	if res.Commit != rd.Commit {
+		t.Fatalf("delete of a page both sides deleted = %+v, want the tip %s", res, rd.Commit)
+	}
+	// The same content moved to a new path is still a rename.
+	rr := saveOK(t, ada, WikiEdit{Wiki: "dup", Base: rd.Commit, Op: WikiOpRename, Path: "b", To: "c"})
+	_, err := bo.WikiSave(context.Background(), WikiEdit{Wiki: "dup", Base: rd.Commit, Op: WikiOpDelete, Path: "b"})
+	if c := wantConflict(t, err, WikiConflictRename); c.Theirs != rr.Commit {
+		t.Fatalf("delete of a renamed page = %+v", c)
+	}
+}

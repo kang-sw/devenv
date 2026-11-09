@@ -986,7 +986,9 @@ func formatTrackerSyncReport(rep wsledger.SyncReport) string {
 		parts = append(parts, "the remote holds writes under this clone that it did not make, so it cannot push")
 	}
 	for _, w := range rep.Warnings {
-		parts = append(parts, fmt.Sprintf("warning: %s %s %s", w.Ref, w.Kind, w.Detail))
+		// A wiki sync warning carries git's error text, which may name the
+		// remote with its credentials.
+		parts = append(parts, fmt.Sprintf("warning: %s %s %s", w.Ref, w.Kind, wstrackerhost.RedactCredentials(w.Detail)))
 	}
 	return strings.Join(parts, ", ")
 }

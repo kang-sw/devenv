@@ -1019,6 +1019,7 @@ func (l *Ledger) reissue() (int, error) {
 // sync leaves pending writes in place for the next attempt.
 func (l *Ledger) Sync(ctx context.Context) (SyncReport, error) {
 	var rep SyncReport
+	var wikiFailed map[string]error
 	err := l.withLock(ctx, func() error {
 		if err := l.refresh(ctx); err != nil {
 			return err
@@ -1038,9 +1039,13 @@ func (l *Ledger) Sync(ctx context.Context) (SyncReport, error) {
 				return err
 			}
 			rep.Pushed = rep.Pushed || pushed
-			if err := l.pushLocalWikis(ctx); err != nil {
+			// A wiki the remote refuses does not stop the ledger's own
+			// fetch; it is reported, once per Sync.
+			failed, err := l.pushLocalWikis(ctx)
+			if err != nil {
 				return err
 			}
+			wikiFailed = failed
 			if err := l.fetchRemote(ctx); err != nil {
 				return err
 			}
@@ -1064,6 +1069,7 @@ func (l *Ledger) Sync(ctx context.Context) (SyncReport, error) {
 		}
 		return nil
 	})
+	rep.Warnings = append(rep.Warnings, wikiPushWarnings(wikiFailed)...)
 	l.finishReport(&rep)
 	return rep, err
 }
