@@ -1,8 +1,10 @@
 ;(function () {
   // Open-question pill. Items awaiting the user (open policy, assumed, ack)
   // scrolled out of the board's scroll area show a floating pill at that
-  // edge, and the tab title carries their total. The dashboard re-runs this
-  // after every board swap, so it tears down what the previous run attached.
+  // edge, split into still-open items and items the form already holds a
+  // reply for, and the tab title carries the still-open total. The dashboard
+  // re-runs this after every board swap, so it tears down what the previous
+  // run attached.
   var d = document;
   if (d.body.classList.contains("embed") || !window.IntersectionObserver) return;
   var host = d.getElementById("bcol") || d.querySelector(".wrap");
@@ -12,11 +14,26 @@
 
   var items = Array.prototype.slice.call(d.querySelectorAll('.card.policy[id^="item-"], .card.assumed[id^="item-"], .arow[id^="item-"]'));
 
-  // The title prefix is the total, whatever is in view.
+  // An item's draft state, read from the same form controls form.js builds
+  // the reply from: a pick, a ticked ack, or a non-empty note is a reply
+  // segment ("responded"); a note alone also counts as "noted".
+  function noted(el) {
+    var n = el.querySelector(".note");
+    return !!(n && n.value.trim());
+  }
+  function responded(el) {
+    var box = el.querySelector(".ack input");
+    return !!(el.querySelector('.opt[aria-pressed="true"], .btn[data-v][aria-pressed="true"]') || (box && box.checked) || noted(el));
+  }
+
+  // The title prefix is the still-open total, whatever is in view.
   var html = d.documentElement;
   var base = html.getAttribute("data-wb-title");
   if (base === null) { base = d.title.replace(/^\(\d+\) /, ""); html.setAttribute("data-wb-title", base); }
-  d.title = (items.length ? "(" + items.length + ") " : "") + base;
+  function retitle() {
+    var n = items.filter(function (el) { return !responded(el); }).length;
+    d.title = (n ? "(" + n + ") " : "") + base;
+  }
 
   // Two zero-height sticky wrappers, first and last in the host, carry the
   // pills so showing one never moves the board.
@@ -43,12 +60,26 @@
   var root = /auto|scroll/.test(getComputedStyle(host).overflowY) ? host : null;
   var seen = new Set();
 
-  function show(edge, list, nearest) {
+  // list is ordered top to bottom; the nearest item at the top edge is the
+  // last one, at the bottom edge the first. A click goes to the nearest
+  // still-open item, or the nearest drafted one when none is open.
+  function show(edge, list) {
     var p = pills[edge];
-    target[edge] = nearest;
     p.hidden = !list.length;
+    target[edge] = null;
     if (!list.length) return;
-    p.textContent = (edge === "top" ? "↑ " : "↓ ") + wsT("js.pill.open", list.length);
+    var open = [], done = [], notes = 0;
+    list.forEach(function (el) {
+      if (!responded(el)) { open.push(el); return; }
+      done.push(el);
+      if (noted(el)) notes++;
+    });
+    var pickFrom = open.length ? open : done;
+    target[edge] = edge === "top" ? pickFrom[pickFrom.length - 1] : pickFrom[0];
+    var parts = [];
+    if (open.length) parts.push(wsT("js.pill.open", open.length));
+    if (done.length) parts.push(wsT("js.pill.answered", done.length) + (notes ? " " + wsT("js.pill.noted", notes) : ""));
+    p.textContent = (edge === "top" ? "↑ " : "↓ ") + parts.join(" / ");
     p.title = wsT(edge === "top" ? "js.pill.up" : "js.pill.down");
   }
   function update() {
@@ -61,8 +92,9 @@
       if (!r.width && !r.height) return; // not rendered, e.g. the board tab is hidden
       (r.top < rt ? above : below).push(el);
     });
-    show("top", above, above[above.length - 1]);
-    show("bot", below, below[0]);
+    show("top", above);
+    show("bot", below);
+    retitle();
     // Keep the bottom pill clear of the sticky reply bar.
     var reply = host.querySelector(".reply");
     wraps.bot.style.bottom = (reply && reply.offsetHeight ? reply.offsetHeight + 18 : 10) + "px";
@@ -85,6 +117,14 @@
   var ro = window.ResizeObserver ? new ResizeObserver(later) : null;
   if (ro) ro.observe(host);
 
+  // A pick, a ticked ack, or a typed note changes an item's draft state; the
+  // host-level listeners run after form.js's own control handlers.
+  function redraw() { update(); }
+  host.addEventListener("click", redraw);
+  host.addEventListener("input", redraw);
+  host.addEventListener("change", redraw);
+  retitle();
+
   function click(edge) {
     return function () { if (target[edge]) target[edge].scrollIntoView({ block: "center", behavior: "smooth" }); };
   }
@@ -97,5 +137,8 @@
     clearTimeout(timer);
     scroller.removeEventListener("scroll", later);
     window.removeEventListener("resize", later);
+    host.removeEventListener("click", redraw);
+    host.removeEventListener("input", redraw);
+    host.removeEventListener("change", redraw);
   };
 })();
