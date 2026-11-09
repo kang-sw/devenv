@@ -982,7 +982,12 @@ func (s *state) apply(n *node) {
 	p, a := n.p, n.member
 	switch n.typ {
 	case TypeItemCreate:
-		it := &item{id: n.id, alias: n.alias, kind: p.str("kind"), title: jsString(p["title"]),
+		// (154 a) task and todo are one kind: a todo create folds as a task.
+		kind := p.str("kind")
+		if kind == "todo" {
+			kind = "task"
+		}
+		it := &item{id: n.id, alias: n.alias, kind: kind, title: jsString(p["title"]),
 			parent: p.str("parent"), author: a, ts: n.ts, node: n, priority: s.prio.def}
 		if p.truthy("body") {
 			it.body = jsString(p["body"])
@@ -1354,6 +1359,9 @@ func (s *state) applyAssign(n *node) {
 	completion := p.str("completion")
 	if !p.truthy("completion") {
 		completion = "assignee"
+	}
+	if s.items[item].kind == "topic" {
+		completion = "" // a topic record carries no status, so no completion mode either
 	}
 	if !p.null("targets") {
 		l, _ := p.list("targets")
