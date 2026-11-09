@@ -3,6 +3,10 @@ title: "ws dashboard conversation view: a running-subagent badge N(+M), and the 
 related:
   261107-epic-ws-dashboard-messenger-round2: the conversation view and composer this badge sits on
   261108-feat-ws-tracker-support-agent-chat: its Phase 2 chat card reuses the conversation view and this badge; this ticket also opens the support profile to the Agent tool
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: 62ff8849f1c30565
+sage-review-completeness-reviewed: 62ff8849f1c30565
 ---
 
 # ws dashboard conversation view: a running-subagent badge N(+M), and the Agent tool for the support profile
@@ -45,6 +49,21 @@ Today:
   line, and shows only in live mode while one or more subagents are running,
   as a spinner plus `N(+M) 서브에이전트` (the `(+M)` part only when M > 0).
   Its label is a dashboard i18n string, so every i18n table holds it.
+- **Same icon as other agent counts** (board (65), auto-confirmed from fact
+  population): the badge reuses the dashboard's existing running-agent
+  pattern (spinner and robot icon, as the peer row's `prun`; commits
+  e6c3aed2 and faa7da76 made subagents look the same everywhere) followed
+  by the `N(+M) 서브에이전트` label. This deliberately departs from
+  e6c3aed2's bare-number form (count text only in the hover title): the user
+  asked for the visible label on 2026-11-09 and the composer border has the
+  room. Rejected: a text label without the robot icon (breaks the
+  2026-11-08 one-look rule).
+- **Position without the interrupt badge** (design review, auto-confirmed):
+  the badge also shows while the lead is idle and background subagents run;
+  when `#ibadge` is hidden the badge keeps the slot it has beside it (to the
+  right of the border's center), so it never jumps sideways when the lead
+  starts or stops working. Rejected: centering it when alone (moves under
+  the user's eye on every turn boundary).
 - **Counted on the server** (board (16) ok): N and M are computed from the
   server's agent tree (N = running direct children of the lead; M = running
   agents at level 2 and below), not by JS walking the DOM. The count rides
@@ -74,7 +93,13 @@ Today:
   unknown mechanism could still leak).
 - **Live verification** (board (39) ok): verification includes one live
   support-agent conversation in which a subagent is refused a tool outside
-  the profile, as support-agent-chat Phase 1 did (board (444)).
+  the profile, as support-agent-chat Phase 1 did (board (444)). The Result
+  records which subagent types that conversation can spawn (the launch
+  passes `--setting-sources ""` and the profile's plugin dirs, so few are
+  reachable) and tests the default one.
+- **A leak stops only the tool, not the badge** (completeness review,
+  auto-confirmed): if (38) stops `Agent`, the badge part may still merge at
+  the lead's call, since it does not depend on the support profile.
 - **Standalone ticket** (board (37) ok): this ticket and the composer
   file-mention ticket are standalone with `related:` links. Rejected:
   children of `261107-epic-ws-dashboard-messenger-round2` (that epic awaits
@@ -93,6 +118,31 @@ Today:
 - The support-agent chat card itself (support-agent-chat Phase 2) is out of
   scope.
 
+## Prior Decisions
+
+- 261108-feat-ws-tracker-support-agent-chat (2026-11-08, Decisions): "Runner-only tool listing (board (443) ok): the git search tool and `tracker.show` are ws-mcp tools listed only in a runner conversation whose profile allows them, never in an ordinary lead session's tool list" — bearing: constrains
+- 85b9da5f (2026-11-08, commit): "Claude emits system/init only per user turn, so the init check runs at the first turn's init and kills the child on mismatch; dontAsk with --allowedTools still denies unlisted calls in that window." — bearing: constrains
+- 5651e314 (2026-11-08, commit): "Running uses AgentNode.IsRunning's rule (status running) over the flat snapshot agent list, so nested running agents count and finished/failed ones do not." — bearing: supports
+- e6c3aed2 (2026-11-08, commit): "User direction (2026-11-08): \"subagents are shown with a robot icon; the spaces are mostly narrow\". The running indicator must be compact, and subagents should be drawn the same way everywhere." — bearing: contradiction-candidate
+- faa7da76 (2026-11-08, commit): "Running count is computed for every live served peer with an adapter, compact (other-worktree) rows included; finished agents are not counted; zero draws nothing." — bearing: supports
+- 53dc37e8 (2026-11-07, commit): "Only finished evictions are remembered; a running agent dropped by RunningAgentCap is still running, so recreating it on its next event is right." — bearing: supports
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin-tool/internal/wsdashboard/pageview.go, assets/dashboard.tmpl, assets/dashboard.css, assets/dashboard.js, internal/wsi18n/tables/*.json, internal/wsagent/builtin.go, plus tests |
+| scope.surface | cross-module | wsdashboard view and template-JS data attribute, wsi18n tables, wsagent builtin support profile Tools reaching claudeArgs --tools and --allowedTools |
+| scope.new_public_symbol | yes | a running-count field on the exported conversation view read by the r-convlive template, and a new dashboard i18n key; exact names not fixed by the ticket |
+| scope.new_type_contract | no | the counting function is a pure internal helper; the new data attribute on r-convlive is a template-to-JS contract, not a Go type |
+| scope.test_surface | existing | wsdashboard/pageview_test.go, wsdashboard/i18n_test.go, wsagent/builtin_test.go, wsagent/claude_test.go |
+| complexity.reuse_points | confirmed | agentTree and its lookup in pageview.go#L345-L380, AgentNode.IsRunning pageview.go#L128-L129, peerGroup RunningAgents loop pageview.go#L440-L466, syncBadge in dashboard.js |
+| complexity.side_effect_risk | moderate | adding Agent to the builtin Claude support profile widens what a support conversation can launch |
+| risk.correctness | moderate | recursive count over linked delegate snapshots needs a cycle guard and the evicted-parent N versus M split |
+| risk.fit | moderate | the new badge must sit beside the absolutely centered .ibadge on the composer top border without overlap and be reusable by the support chat card |
+| risk.test | moderate | subagent tool-limit inheritance is proven only by one live Claude conversation, and the badge layout only by a hand browser check |
+| risk.security_or_contract | high | whether a Claude subagent inherits the parent --tools, --allowedTools, and dontAsk limit is unproven in this repository and a leak would expose base tools to the support agent |
+
 ## Phases
 
 ### Phase 1: badge and support-profile Agent tool
@@ -105,12 +155,15 @@ Today:
   finished agents ignored).
 - Page: the badge markup inside `#composer` next to `#ibadge`, CSS on the top
   border to the right of the interrupt badge (both visible at once must not
-  overlap; reduced-motion respected like `.ibadge`), and `dashboard.js`
-  showing or hiding it on every region swap with the label `N(+M)`.
-- Support profile: add `Agent` to the builtin support Claude profile so the
-  launch lists it in `--tools` and `--allowedTools`; keep the claude args
-  tests in step.
-- Verification: `go test` for `internal/wsdashboard/`, `internal/wslive/`,
+  overlap; the same slot when `#ibadge` is hidden; reduced-motion respected
+  like `.ibadge`), and `dashboard.js` showing or hiding it on every region
+  swap: spinner, robot icon, then `N(+M) 서브에이전트`, with `(+M)` only when
+  M > 0 and the label from the dashboard i18n tables.
+- Support profile: add `Agent` to the builtin support Claude profile only
+  (`BuiltinProfiles` builds the Claude and Pi profiles in one loop, so the Pi
+  profile must not gain it) so the launch lists it in `--tools` and
+  `--allowedTools`; keep the claude args tests in step.
+- Verification: `go test` for `internal/wsdashboard/` and
   `internal/wsagent/`; `node --check` on edited JS; i18n table test green.
   One live support-agent conversation over the daemon (as support-agent-chat
   Phase 1 did) in which the agent spawns a subagent, and that subagent tries
