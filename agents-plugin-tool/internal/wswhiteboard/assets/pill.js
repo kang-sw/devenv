@@ -2,7 +2,8 @@
   // Open-question pill. Items awaiting the user (open policy, assumed, ack)
   // scrolled out of the board's scroll area show a floating pill at that
   // edge, split into still-open items and items already answered (the form
-  // holds a reply, or the dashboard marked one sent or held), and the tab
+  // holds a reply, the item is assumed, or the dashboard marked one sent or
+  // held), and the tab
   // title carries the still-open total. The dashboard
   // re-runs this after every board swap, so it tears down what the previous
   // run attached.
@@ -28,9 +29,10 @@
   }
   // The dashboard marks an item it already sent, or holds, a reply for with
   // sent-sent / sent-held; that item is no longer open either. A standalone
-  // page never carries these classes.
+  // page never carries these classes. An assumed item already carries the
+  // lead's reading and work proceeds on it, so it counts as answered too.
   function answered(el) {
-    return responded(el) || el.classList.contains("sent-sent") || el.classList.contains("sent-held");
+    return responded(el) || el.classList.contains("assumed") || el.classList.contains("sent-sent") || el.classList.contains("sent-held");
   }
 
   // The title prefix is the still-open total, whatever is in view.
