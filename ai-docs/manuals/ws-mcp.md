@@ -503,6 +503,15 @@ stay embedded. A running daemon keeps its mode, so shut it down first
 half-edited template answers 500 (the error is in `dashboard.log`) and the next
 request retries.
 
+Profiling: with `WS_MCP_DASHBOARD_PPROF=1` (also `true`/`yes`/`on`) in the
+environment of `ws-mcp dashboard`, the daemon serves `net/http/pprof` under
+`/debug/pprof/` to loopback viewers only; a LAN-mode request carrying the LAN
+token is refused (403), and with the variable unset the routes do not exist
+(404). A `serve`-started daemon inherits `serve`'s environment, so the simplest
+route is the same restart as dev assets: `POST /shutdown`, then
+`WS_MCP_DASHBOARD_PPROF=1 ws-mcp dashboard --port 29417`, then
+`go tool pprof -top 'http://127.0.0.1:29417/debug/pprof/profile?seconds=30'`.
+
 ## Plugin-Managed Startup
 
 Codex plugin bundles can reference plugin-local MCP configuration:
@@ -561,6 +570,7 @@ Current launcher inputs:
 | `WS_MCP_LAUNCHER_DEBUG` | Print launcher diagnostics to stderr when set to `1`. |
 | `WS_MCP_PROJECT_ROOT` | Project root default for root-aware tools and CLI commands when no higher-priority root exists. |
 | `WS_MCP_DASHBOARD_DEV_SOURCE` | Read by `ws-mcp dashboard`: the `agents-plugin-tool` source root the daemon serves dashboard and whiteboard page assets from instead of the embedded copies (see Dashboard daemon, Dev assets). Unset is off. |
+| `WS_MCP_DASHBOARD_PPROF` | Read by `ws-mcp dashboard`: `1`/`true`/`yes`/`on` serves `net/http/pprof` under `/debug/pprof/` to loopback viewers only, never to a LAN-token request (see Dashboard daemon, Profiling). Unset is off: the routes do not exist. |
 | `WS_MCP_NO_AGENT` | Product-mode gate for agentless distributions such as wsflow. |
 | `WS_MCP_NO_DASHBOARD` | `1`/`true`/`yes`/`on` turns the dashboard off for this ws-mcp whatever `dashboard.enabled` resolves: no daemon start, no session registration, no prune. The agent runner sets it on the ws-mcp it attaches to a conversation. |
 | `WS_MCP_ALLOWED_TOOLS` | Comma list of ws tool names; when set, `tools/list` advertises and `tools/call` accepts only these. The agent runner sets it to a profile's ws tools. `tracker.show` and `git.search` are listed and callable only when it names them. |

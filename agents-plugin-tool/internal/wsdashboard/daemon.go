@@ -80,6 +80,9 @@ type DaemonOptions struct {
 	// SupportRoutePrefix (the agent runner's per-store conversations); nil
 	// serves none.
 	Support http.Handler
+	// Pprof serves net/http/pprof under /debug/pprof/ to loopback viewers
+	// only (pprof_route.go; PprofEnv); false serves no such route.
+	Pprof bool
 
 	// bindHost overrides the address the daemon binds, so a test runs LAN
 	// mode on loopback; empty derives it from LAN.
@@ -130,6 +133,8 @@ type Daemon struct {
 	// lan is LAN mode; tokenMu serializes reading and minting the LAN token.
 	lan     bool
 	tokenMu sync.Mutex
+	// pprof serves the pprof routes (pprofHandler).
+	pprof bool
 	// buildTime is the build time /health reports; zero is unknown.
 	buildTime int64
 	// openSystem opens a system-open route's target (systemOpen).
@@ -227,6 +232,7 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 		broker:     newBroker(),
 		entries:    newEntryCache(),
 		lan:        opts.LAN,
+		pprof:      opts.Pprof,
 		buildTime:  opts.BuildTime,
 		openSystem: opts.openSystem,
 		worktrees:  opts.Worktrees,
@@ -426,7 +432,9 @@ func (d *Daemon) Close() {
 // that runs a host command beside git and the agent runner's harnesses: a
 // session stream keeps its root's git handle read, the git route
 // (gitbadge.go) asks for a read at once without running git itself, and the
-// git status route (gitdrawer.go) reads the root's changed files.
+// git status route (gitdrawer.go) reads the root's changed files. With
+// Pprof on, /debug/pprof/ (pprof_route.go) is served behind the guard to
+// local viewers only.
 func (d *Daemon) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", d.handleHealth)
@@ -445,6 +453,9 @@ func (d *Daemon) Handler() http.Handler {
 	if d.support != nil {
 		mux.Handle(SupportRoutePrefix, d.support)
 		mux.Handle(SupportRoutePrefix+"/", d.support)
+	}
+	if d.pprof {
+		mux.Handle(pprofPrefix, pprofHandler())
 	}
 	mux.HandleFunc("/", d.handleIndex)
 	if d.lan {
