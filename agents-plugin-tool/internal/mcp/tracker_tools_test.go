@@ -821,3 +821,20 @@ func TestTrackerUpdateReviewStageAndSelfAssignment(t *testing.T) {
 		t.Fatalf("moving an assigned item to review must be refused:\n%s", text)
 	}
 }
+
+// A wiki sync warning carries git's error text, which can name the remote
+// with its credentials; the sync report must not echo them.
+func TestTrackerSyncReportRedactsWarningCredentials(t *testing.T) {
+	rep := wsledger.SyncReport{Warnings: []wsledger.Warning{{
+		Ref:    "refs/ws/wiki/docs",
+		Kind:   wsledger.WarnWikiSyncFailed,
+		Detail: "ledger: wiki push: fatal: unable to access 'https://user:s3cr3t-token@example.com/store.git/': 403",
+	}}}
+	got := formatTrackerSyncReport(rep)
+	if strings.Contains(got, "s3cr3t-token") || strings.Contains(got, "user:") {
+		t.Fatalf("sync report leaks the remote's credentials: %q", got)
+	}
+	if !strings.Contains(got, "warning: refs/ws/wiki/docs "+wsledger.WarnWikiSyncFailed) || !strings.Contains(got, "https://***@example.com/store.git/") {
+		t.Fatalf("sync report = %q, want the warning with its redacted remote", got)
+	}
+}
