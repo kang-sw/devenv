@@ -128,7 +128,8 @@ func TestTopicBarCarriesANotePen(t *testing.T) {
 
 // closedBoard holds n closed topics c1..cn, closed in that order, each with
 // one settled item, plus an open topic, a quiet open topic, and a closed
-// topic still waiting on the user.
+// topic still waiting on the user (its item, withdrawn by the close, patched
+// back to open).
 func closedBoard(t *testing.T, n int) *State {
 	t.Helper()
 	st := &State{}
@@ -148,6 +149,7 @@ func closedBoard(t *testing.T, n int) *State {
 		fmt.Fprintf(&cmds, `<wb:topic name="c%d"><wb:close result="Ending %d."/></wb:topic>`, i, i)
 	}
 	cmds.WriteString(addXML(ClassTechnical, "closed waiting", "still asks") + `<wb:topic name="closed waiting"><wb:close result="Closed early."/></wb:topic>`)
+	fmt.Fprintf(&cmds, `<wb:patch id="%d" status="open"/>`, n+3)
 	mustApply(t, st, cmds.String())
 	return st
 }

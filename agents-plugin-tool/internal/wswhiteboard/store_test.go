@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -513,6 +514,59 @@ func TestClosedTopicReopensWhenAnItemIsAdded(t *testing.T) {
 	refused(t, st, `<wb:topic name="a"><wb:add class="bad"><wb:title>x</wb:title></wb:add></wb:topic>`)
 	if !st.topicClosed("a") {
 		t.Fatalf("a refused add must not reopen the topic")
+	}
+}
+
+// Closing a topic withdraws its open and assumed items, settled now as a
+// patch to withdrawn would; answered, superseded, and other topics' items
+// stay; a reopen does not restore them; a refused batch withdraws nothing.
+func TestCloseWithdrawsTheTopicsOpenItems(t *testing.T) {
+	st := &State{}
+	mustApply(t, st, addXML(ClassTechnical, "a", "open")+addXML(ClassTechnical, "a", "assumed")+
+		addXML(ClassTechnical, "a", "answered")+addXML(ClassTechnical, "a", "superseded")+addXML(ClassTechnical, "b", "elsewhere"))
+	mustApply(t, st, `<wb:answer id="2" value="guess" assumed="true">maybe</wb:answer><wb:answer id="3" value="ok">ok</wb:answer><wb:patch id="4" status="superseded"/>`)
+
+	// A refused batch carrying the close changes no item and closes nothing.
+	refused(t, st, `<wb:topic name="a"><wb:close result="done"/></wb:topic><wb:patch id="99" status="open"/>`)
+
+	prevSeq := st.SettleSeq
+	out := mustApply(t, st, `<wb:topic name="a"><wb:close result="Done."/></wb:topic>`)
+	if !st.topicClosed("a") {
+		t.Fatal("topic a should be closed")
+	}
+	for _, id := range []int{1, 2} {
+		it := item(t, st, id)
+		if it.Status != StatusWithdrawn || it.Changed != st.Seq || it.Settled <= prevSeq || it.ChangedAt == "" {
+			t.Fatalf("item %d after close = %+v, want withdrawn, changed and settled by this batch", id, it)
+		}
+	}
+	if it := item(t, st, 2); it.Answer != "guess" || it.AnswerQuote != "maybe" {
+		t.Fatalf("an assumed item keeps its answer as history, as a patch to withdrawn does: %+v", it)
+	}
+	for id, want := range map[int]string{3: StatusAnswered, 4: StatusSuperseded, 5: StatusOpen} {
+		if got := item(t, st, id).Status; got != want {
+			t.Fatalf("item %d = %s, want %s", id, got, want)
+		}
+	}
+	if !slices.Equal(out.Withdrawn, []int{1, 2}) || out.Info != "wb:close withdrew (01), (02) (still open or assumed in the closed topic)." {
+		t.Fatalf("outcome withdrawn %v, info %q", out.Withdrawn, out.Info)
+	}
+
+	// A reopen by an add leaves the withdrawn items withdrawn.
+	mustApply(t, st, addXML(ClassTechnical, "a", "again"))
+	if st.topicClosed("a") {
+		t.Fatal("the add should reopen topic a")
+	}
+	for _, id := range []int{1, 2} {
+		if got := item(t, st, id).Status; got != StatusWithdrawn {
+			t.Fatalf("item %d after reopen = %s, want withdrawn", id, got)
+		}
+	}
+
+	// Closing with nothing open withdraws nothing and adds no info.
+	mustApply(t, st, `<wb:patch id="6" status="withdrawn"/>`)
+	if out := mustApply(t, st, `<wb:topic name="a"><wb:close result="Done."/></wb:topic>`); len(out.Withdrawn) != 0 || out.Info != "" {
+		t.Fatalf("outcome withdrawn %v, info %q", out.Withdrawn, out.Info)
 	}
 }
 
