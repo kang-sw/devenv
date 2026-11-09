@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 62ff8849f1c30565
 sage-review-completeness-reviewed: 62ff8849f1c30565
+completed: 2026-11-09
 ---
 
 # ws dashboard conversation view: a running-subagent badge N(+M), and the Agent tool for the support profile
@@ -170,3 +171,101 @@ Today:
   a tool outside the profile (for example Bash or Read) and is refused; record
   the transcript evidence in the Result. A hand check of the badge in a
   browser is listed as unverified if not done.
+
+### Result (4b0f344ee) - 2026-11-09
+
+Landed in 087228bc2 (support profile) and 4b0f344ee (badge).
+
+- **Counts.** `subagentCounts` (`wsdashboard/pageview.go`) is a pure
+  function that fills `ConversationView.Subagents{Direct, Deep}`:
+  - Direct is the running agents whose parent is not in the list.
+  - Deep is the running agents whose parent is in the list.
+  - Deep also gets the running agents of each running delegate whose
+    `ReplyID` session has a live adapter. This recurses through that
+    session's own delegates. A visited set, seeded with the viewed
+    session, counts each session once.
+  - The convlive region carries the counts as `data-sub` and
+    `data-subdeep`, next to `data-phase`.
+- **Badge.**
+  - The template piece `subbadge` holds a spinner, the robot icon, and
+    `.slabel`. It sits with `#ibadge` in a new `.cbadges` grid row on the
+    composer's top border (columns `1fr auto 1fr`). The interrupt badge
+    stays centered, and the subagent badge starts the right column.
+  - A hidden `#ibadge` now uses `visibility: hidden`, so the subagent badge
+    keeps its slot.
+  - `dashboard.js` `subBadge()` runs on every convlive swap and mode
+    change. It shows the badge in live mode while N+M > 0, as
+    `wsTn("js.subagents", N+M, "N(+M)")`; `(+M)` appears only when M > 0.
+  - All 11 i18n tables have `js.subagents.one`, `js.subagents.other`, and
+    `js.subagents.title` (ko: `{1} 서브에이전트`).
+  - Reduced motion turns off the rise animation of both badges. The
+    spinner already stopped under the global `.spin` rule.
+- **Support profile.**
+  - `SupportClaudeTools = ["Agent"]` is set on `tracker-support-claude`
+    only, so the launch passes `--tools Agent` and puts `Agent` first in
+    `--allowedTools`. The Pi profile still has no built-in tool.
+  - Claude 2.1.319 reports the tool as `Task` in system/init. The init
+    check therefore accepts `Task` when a profile allows `Agent`.
+    Otherwise every launch would have been refused.
+  - The ws-mcp runbook records both.
+
+Verification:
+
+- `go test ./internal/wsdashboard/ ./internal/wsi18n/ ./internal/wsagent/
+  -count=1` passed. New tests:
+  - `TestSubagentCounts`: direct children, grandchildren, a running agent
+    under a finished parent, an evicted parent, finished agents ignored, a
+    linked delegate (nested agents plus its own delegate), a finished
+    delegate, the same delegate twice, a lookup cycle back to the viewed
+    session, stale and unserved delegates, a self-parent.
+  - `TestConvLiveCarriesSubagentCounts`.
+  - The page hook pins for `.cbadges`, `#sbadge`, and the data attributes.
+  - `TestClaudeArgsBuiltinSupportProfile`.
+  - The `Task`/`Agent` init cases.
+  - The builtin profile tool lists.
+- `go vet ./internal/...` is clean, and `node --check
+  assets/dashboard.js` passed.
+- **Live check.** A dev daemon ran on port 39437 with isolated
+  `WS_CACHE_HOME` and `WS_CONFIG_HOME`. One `tracker-support-claude`
+  conversation was opened through `POST /agents` on a scratch root holding
+  `probe.txt`.
+  - The launch passed the init check.
+  - Subagent types offered: `claude`, `Explore`, `general-purpose`,
+    `Plan`.
+  - The default-type subagent (no `subagent_type`) reported its only
+    tools as `Agent` and the five profile ws tools. It had no Bash, Read,
+    or Write, and `leak.txt` was never created.
+  - An `Explore` subagent had only the ws tools.
+  - `statusline-setup` was refused by the Agent tool: "Agent type
+    'statusline-setup' is unavailable because every tool it may use is
+    denied by the current permission settings."
+  - A direct claude CLI probe with the same flags matched.
+  - No leak, so `Agent` ships.
+- **Browser check.** Headless chrome-headless-shell screenshots against
+  the dev daemon used a fake agent session:
+  - lead working at 2(+3): both badges on one line, no overlap;
+  - lead idle at 2: same slot, interrupt badge hidden;
+  - nothing running: badge hidden;
+  - 400px wide: the label is ellipsized.
+  - A hand check in the user's own browser was not done.
+- **Review.** Lite, one pass: clean, no findings.
+
+Decisions taken:
+
+- A linked delegate counts only when its snapshot has a live adapter, the
+  same rule as the peer rows' count. A dead delegate's stale snapshot never
+  holds M up.
+- Agents are classified as Direct or Deep by whether their parent is in
+  the list, not by `agentTree` depth. The two are the same for real
+  snapshots. A malformed parent cycle counts as Deep.
+- The init check accepts `Task` for `Agent`, rather than the profile
+  naming `Task`, so that a future Claude that reports `Agent` in init is
+  still accepted.
+- The label pluralizes on N+M, with the `N(+M)` text as `{1}`.
+
+#### Forward
+
+- The support chat card (support-agent-chat Phase 2) reuses `subbadge`.
+  Its markup hardcodes `id="sbadge"`, so a second composer must give it its
+  own binding: call `subBadge(badgeEl, cliveEl, on)` with that card's
+  elements.

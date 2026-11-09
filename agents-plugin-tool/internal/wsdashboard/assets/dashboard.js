@@ -1008,6 +1008,7 @@
     return !!c && WORKING[c.getAttribute("data-phase")] === 1;
   }
   function syncBadge() {
+    subBadge(sbadge, doc.querySelector("#r-convlive .clive"), liveMode);
     if (!ibadge) return;
     var on = liveMode && leadWorking();
     if (!on) interrupting = false;
@@ -1016,6 +1017,23 @@
     ibadge.classList.toggle("busy", interrupting);
     var label = wsT(interrupting ? "js.interrupt.busy" : "js.interrupt");
     if (ilabel && ilabel.textContent !== label) ilabel.textContent = label;
+  }
+  // --- subagent badge --------------------------------------------------------
+  // Beside the interrupt badge: a spinner, the robot icon, and "N(+M)
+  // subagents" while the session runs subagents, whether or not its lead
+  // works. N is a convlive region's data-sub (its running direct children),
+  // M its data-subdeep (every running agent below them), counted by the
+  // server; "(+M)" shows only when M is above zero. on is live mode.
+  var sbadge = $("sbadge");
+  function subBadge(badge, clive, on) {
+    if (!badge) return;
+    var n = clive ? Number(clive.getAttribute("data-sub")) || 0 : 0;
+    var m = clive ? Number(clive.getAttribute("data-subdeep")) || 0 : 0;
+    badge.hidden = !(on && n + m > 0);
+    if (badge.hidden) return;
+    var label = wsTn("js.subagents", n + m, m > 0 ? n + "(+" + m + ")" : String(n));
+    var el = badge.querySelector(".slabel");
+    if (el && el.textContent !== label) el.textContent = label;
   }
   function interruptTurn() {
     if (interrupting) return;

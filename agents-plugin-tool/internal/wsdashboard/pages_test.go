@@ -201,9 +201,10 @@ func TestSessionHeadLeadsWithTheProjectAndLightsTheHarnessBadge(t *testing.T) {
 // TestSessionPagesCarryScriptHooks pins the elements and attributes the page
 // script and stylesheet read: the board column, the drawer that holds the
 // panels, the tab bar and its dots, the layout menu, the composer and its
-// interrupt badge, its mention layer behind the message box and the
-// file-mention module loaded ahead of the page script, the lead's phase on
-// the convlive region, the stream indicators, and the banner.
+// interrupt badge and subagent badge, its mention layer behind the message
+// box and the file-mention module loaded ahead of the page script, the lead's
+// phase and running subagent counts on the convlive region, the stream
+// indicators, and the banner.
 func TestSessionPagesCarryScriptHooks(t *testing.T) {
 	f := startPageFixture(t)
 	code, live := get(t, f.base+"/s/livesession")
@@ -215,8 +216,9 @@ func TestSessionPagesCarryScriptHooks(t *testing.T) {
 		`id="tabbar"`, `data-tab="convo"`, `data-tab="board"`, `<span class="tdot"></span>`,
 		`class="gmenu gcard"`, `data-layout="auto"`, `data-layout="split"`, `data-layout="tabs"`,
 		`id="ctext"`, `id="cnote"`, `id="csend"`, `aria-label="send"`, `id="sse"`, `id="dash-banner"`,
-		`<div id="composer" class="composer"><button type="button" class="ibadge" id="ibadge"`, `<span class="ilabel">Interrupt</span>`,
-		`<div class="conv clive" data-phase="replying">`,
+		`<div id="composer" class="composer"><div class="cbadges"><button type="button" class="ibadge" id="ibadge"`, `<span class="ilabel">Interrupt</span>`,
+		`</button><span class="sbadge" id="sbadge" title="running subagents: the lead&#39;s own, and (&#43;) those they started" hidden><span class="spin"></span><svg class="i" aria-hidden="true"><use href="#i-agents"/></svg><span class="slabel"></span></span></div>`,
+		`<div class="conv clive" data-phase="replying" data-sub="0" data-subdeep="0">`,
 		`<div class="cfield"><div class="chl" id="chl" aria-hidden="true"></div><textarea id="ctext"`,
 	} {
 		if !strings.Contains(live, want) {
