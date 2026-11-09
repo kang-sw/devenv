@@ -183,8 +183,15 @@ func TestMessageRouteRefusesBadImages(t *testing.T) {
 		{"too many", `{"images":` + imagesJSON(nine...) + `}`, http.StatusRequestEntityTooLarge, "at most 8"},
 		{"too large", `{"images":` + imagesJSON("big.png", big) + `}`, http.StatusRequestEntityTooLarge, "big.png"},
 	}
+	// The image-size case posts a ~13 MB body, which outlasts testClient's
+	// 500 ms under -race; the multi-megabyte bodies go through a patient client.
+	bigClient := &http.Client{Timeout: 30 * time.Second, Transport: &http.Transport{Proxy: nil}}
 	for _, c := range cases {
-		code, raw := f.postMessage(t, c.body)
+		client := testClient()
+		if len(c.body) > 1<<20 {
+			client = bigClient
+		}
+		code, _, raw := postJSONWith(t, client, f.base+"/s/livesession/message", f.base, c.body)
 		if code != c.code || !strings.Contains(raw, c.says) {
 			t.Errorf("%s = %d (%s), want %d naming %q", c.name, code, strings.TrimSpace(raw), c.code, c.says)
 		}
