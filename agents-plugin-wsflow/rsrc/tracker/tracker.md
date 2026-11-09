@@ -159,12 +159,12 @@ Body text, markdown, written as is.
     `tk:item.unassign` (the assigner) withdraws `assignee`'s assignment, ends
     the user's rule rooted at `root`, or, without either, withdraws all of the
     user's assignments and rules on the item.
+    `tk:item.reopen` (the assigner or the holder) reopens a done one.
   - A topic has one holder: its `tk:item.assign` names exactly one person in
     `people`, and is refused while anyone holds it or a handoff of it is
     pending. It takes no `tk:item.status` or `tk:item.close`. Its holder
     releases it with `tk:item.unassign` naming themselves as `assignee`, or
     hands it off.
-    `tk:item.reopen` (the assigner or the holder) reopens a done one.
 - `clear` on `tk:item.edit`: `body`, `due`, `stage`, or several
   (`clear="body due"`); an absent body leaves the body as it is.
 - `origin`: `agent` (the user asked; the default) or `agent-auto` (recorded
