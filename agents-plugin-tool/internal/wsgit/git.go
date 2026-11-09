@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
@@ -21,11 +22,19 @@ type Runner interface {
 	RunGit(ctx context.Context, root string, args ...string) ([]byte, error)
 }
 
-type ExecRunner struct{}
+// ExecRunner runs the user's git. Env, when set, is appended to the process
+// environment of every run (a caller that must pin a GIT_* variable, such
+// as a ledger that forbids lazy fetches, sets it here).
+type ExecRunner struct {
+	Env []string
+}
 
-func (ExecRunner) RunGit(ctx context.Context, root string, args ...string) ([]byte, error) {
+func (r ExecRunner) RunGit(ctx context.Context, root string, args ...string) ([]byte, error) {
 	argv := append([]string{"-C", root}, args...)
 	cmd := exec.CommandContext(ctx, "git", argv...)
+	if len(r.Env) > 0 {
+		cmd.Env = append(os.Environ(), r.Env...)
+	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))

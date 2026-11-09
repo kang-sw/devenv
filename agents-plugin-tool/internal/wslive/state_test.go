@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/kang-sw/devenv/internal/wsmailbox"
 )
@@ -638,5 +639,33 @@ func TestCompactionPermissionWinsAndBadEventsFail(t *testing.T) {
 	}
 	if lead := st.Snapshot(4_000).Lead; lead.Phase != PhaseCompacting {
 		t.Fatalf("a rejected event changed the phase to %q", lead.Phase)
+	}
+}
+
+// TestCardFollowsTheReplyItEnds pins a card line: the reply streamed so far
+// is written ahead of it, its title is scrubbed and capped, and a store or
+// alias outside the id grammar is refused with nothing written.
+func TestCardFollowsTheReplyItEnds(t *testing.T) {
+	st := NewState(ownerKey)
+	mustApply(t, st, Event{Kind: KindTurnStart}, 100)
+	mustApply(t, st, Event{Kind: KindReply, Text: "This one first:"}, 110)
+	res, err := st.Card(CardRef{Store: "live", Alias: "ada.c89-3", Title: "fix " + ownerKey + "\n" + strings.Repeat("x", 300)}, 120)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Ring) != 2 || res.Ring[0].Kind != RingReply || res.Ring[0].Text != "This one first:" || res.Ring[1].Kind != RingCard || !res.Changed || !res.Urgent {
+		t.Fatalf("card ring: %+v", res)
+	}
+	c := res.Ring[1].Card
+	if c == nil || c.Store != "live" || c.Alias != "ada.c89-3" || strings.Contains(c.Title, ownerKey) || strings.Contains(c.Title, "\n") || utf8.RuneCountInString(c.Title) > CardTitleRunes {
+		t.Fatalf("card ref: %+v", c)
+	}
+	if st.Snapshot(120).Lead.Reply != nil {
+		t.Fatal("the card should end the streamed reply")
+	}
+	for _, bad := range []CardRef{{Store: "", Alias: "a-1"}, {Store: "live", Alias: "-x"}, {Store: "li ve", Alias: "a-1"}, {Store: "live", Alias: "<b>"}} {
+		if res, err := st.Card(bad, 130); err == nil || len(res.Ring) != 0 {
+			t.Fatalf("card %+v: want a refusal, got %+v", bad, res)
+		}
 	}
 }

@@ -37,6 +37,9 @@ const (
 	RingTools = "tools"
 	// RingCompact is a main-conversation compaction that landed or failed.
 	RingCompact = "compact"
+	// RingCard is a tracker card reference the lead showed (CardRef): a
+	// store conversation's chat draws the item as a mini card.
+	RingCard = "card"
 )
 
 // Mail directions.
@@ -50,7 +53,7 @@ const ringStampLayout = "20060102T150405.000000000Z"
 
 // RingEntry is one ring file.
 type RingEntry struct {
-	// Kind is user, reply, turn, mail, compact, or tools.
+	// Kind is user, reply, turn, mail, compact, tools, or card.
 	Kind string `json:"kind"`
 	// Origin tags a user message (terminal, whiteboard) or a turn summary
 	// (terminal, whiteboard, mail; empty when unknown).
@@ -77,7 +80,23 @@ type RingEntry struct {
 	// compaction that landed.
 	Trigger       string `json:"trigger,omitempty"`
 	CompactFailed bool   `json:"compactFailed,omitempty"`
+	// Card is a card line's item reference.
+	Card *CardRef `json:"card,omitempty"`
 }
+
+// CardRef is a tracker item a conversation showed as a card: the store it
+// belongs to, its alias, and its title when known. A page holding the
+// store's view draws the card from that view; Title is what a page without
+// it shows.
+type CardRef struct {
+	Store string `json:"store"`
+	Alias string `json:"alias"`
+	Title string `json:"title,omitempty"`
+}
+
+// cardIDPattern bounds a card's store id and alias: a word of letters,
+// digits, and ._- (the shapes a tracker store id and item alias take).
+var cardIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
 
 // RingRecord is a read entry with its file name and time.
 type RingRecord struct {

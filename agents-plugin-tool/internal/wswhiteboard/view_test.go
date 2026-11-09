@@ -111,11 +111,11 @@ func TestChangedBodyRanksLikeAnOpenAcknowledgement(t *testing.T) {
 	if notes := topicView(t, st, LayoutFull, "notes"); notes.Quiet || !notes.DocOpen(false) {
 		t.Fatalf("notes = %+v", notes)
 	}
-	// An assumption is the lead's, not the user's: it adds an assumed item
-	// (rank 1, above the body) and leaves the body unread.
+	// An assumption is the lead's, not the user's: its item reads as settled
+	// and the body stays unread, still above the settled topic.
 	mustApply(t, st, addXML(ClassTechnical, "settled", "again"))
 	mustApply(t, st, `<wb:answer id="3" value="ok" assumed="true">assumed</wb:answer>`)
-	wantTopicOrder(t, st, "policy", "settled", "notes")
+	wantTopicOrder(t, st, "policy", "notes", "settled")
 	if st.AnswerSeq == st.Seq {
 		t.Fatalf("an assumed answer moved AnswerSeq to %d", st.AnswerSeq)
 	}

@@ -248,8 +248,10 @@ type EventView struct {
 	ParentThread *string         `json:"parentThread"`
 }
 
-// Notice is a derived notice (285): accepted, handoff, declined, returned.
-// Key is "acc:", "ho:", "dec:", or "ret:" plus the assignment id.
+// Notice is a derived notice (285): accepted, handoff, done, blocked,
+// declined, returned. Key is "acc:", "ho:", "dec:", or "ret:" plus the
+// assignment id; a done or blocked key is "w:<assignment>:<status>:<ts>", so
+// a later write of the same status is a new notice.
 type Notice struct {
 	Key        string
 	Kind       string
@@ -357,7 +359,8 @@ func memberOf(stream string) string {
 	return stream
 }
 
-// itemStatus derives an item's own status from its live assignments.
+// itemStatus derives an item's own status from its live assignments. A
+// review-stage item holding no live or pending assignment is "review".
 func (r *replayed) itemStatus(it *item) string {
 	if it.kind == "topic" {
 		return ""
@@ -381,6 +384,9 @@ func (r *replayed) itemStatus(it *item) string {
 	if len(live) == 0 {
 		if pending {
 			return "pending"
+		}
+		if it.stage == "review" {
+			return "review"
 		}
 		if last != nil && (last.state == "declined" || last.state == "returned") {
 			return last.state
@@ -409,9 +415,9 @@ func (r *replayed) itemStatus(it *item) string {
 
 // counted: pending assignments are excluded from status and roll-up, so an
 // item whose only assignments are pending (or declined / returned) is not
-// counted.
+// counted; nor is an item in the review stage.
 func (r *replayed) counted(it *item, st string) bool {
-	return it.kind != "topic" && st != "pending" && st != "declined" && st != "returned"
+	return it.kind != "topic" && st != "pending" && st != "declined" && st != "returned" && st != "review"
 }
 
 func (r *replayed) view(stream string, now time.Time, staleDays int) *View {
@@ -851,8 +857,10 @@ func (r *replayed) viewerLists(vw *View, A []*Assignment, v string, children map
 
 	// Notices are derived, never events. accepted: to the accepter's lead at
 	// accept time; handoff: to the original assigner when a handoff is
-	// accepted; declined / returned (285): to the sender, and for a returned
-	// handoff also to the original assigner (291).
+	// accepted; done / blocked: to the assigner when someone else set that
+	// status on a live assignment (an awaiting one is in the confirm list);
+	// declined / returned (285): to the sender, and for a returned handoff
+	// also to the original assigner (291).
 	vw.Notices = []Notice{}
 	for _, a := range A {
 		base := Notice{Assignment: a.ID, Item: a.Item, To: a.To, By: a.By, Sender: a.Sender, State: a.State}
@@ -866,6 +874,13 @@ func (r *replayed) viewerLists(vw *View, A []*Assignment, v string, children map
 				nt.Key, nt.Kind, nt.From, nt.HasFrom = "ho:"+a.ID, "handoff", a.HandoffFrom, true
 				vw.Notices = append(vw.Notices, nt)
 			}
+		}
+		if a.By == v && a.To != v && a.State == "live" && (a.Status == "done" || a.Status == "blocked") &&
+			a.StatusBy != nil && *a.StatusBy != v {
+			nt := base
+			nt.TS, nt.Kind = a.LastUpdate, a.Status
+			nt.Key = "w:" + a.ID + ":" + a.Status + ":" + a.LastUpdate
+			vw.Notices = append(vw.Notices, nt)
 		}
 		if a.To == v || a.Ended == nil {
 			continue

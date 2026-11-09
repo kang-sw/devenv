@@ -23,3 +23,13 @@ type Source interface {
 }
 
 var _ Source = (*wsledger.Ledger)(nil)
+
+// BlobSource is a Source that stores the content of the attachments its
+// events name (wsledger.Blob). *wsledger.Ledger satisfies it; a Source
+// without it refuses DispatchWithBlobs.
+type BlobSource interface {
+	Source
+	AppendWithBlobs(ctx context.Context, events []wsledger.NewEvent, blobs []wsledger.Blob) ([]wsledger.EventID, error)
+}
+
+var _ BlobSource = (*wsledger.Ledger)(nil)

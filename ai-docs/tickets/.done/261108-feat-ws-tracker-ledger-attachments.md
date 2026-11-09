@@ -9,6 +9,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 5625ad14f2d60479
 sage-review-completeness-reviewed: 5625ad14f2d60479
+completed: 2026-11-09
 ---
 
 # ws tracker ledger attachments: content-addressed blobs fetched on demand through a partial clone
@@ -255,3 +256,52 @@ stores and fetches the content.
   by a pending event does not, and a committed blob's staged copy is
   deleted. A hosted private repository is exercised
   only at live acceptance and is listed as unverified in the Result.
+
+### Result (831359d) - 2026-11-09
+
+Implemented as planned across `00ec5835b` (wsledger, wsgit), `9d6543dba`
+(wstracker, wstrackerhost), `36f680efe` (wsdashboard, cmd/ws-mcp) and the
+review-fix commit `831359d85`.
+
+- Ledger: `refs/heads/attach/m/<member>/<clone>`, add-only signed commits of
+  `attachments/<sha256>`, written by `closeBatch` before the event commit
+  from `att` entries in the journal records (`AppendWithBlobs` writes the
+  git objects at append time); `pushRefs --atomic` with the attachment
+  refspec first; two-phase fetch (`--filter=blob:none` attachment refs,
+  `partialclonefilter` unset after every filtered fetch, then `--no-filter`
+  event refs; an attachment fetch failure returns before any absorb);
+  `absorbRemote`/`pushAll`/`Restore`/`MoveToFreshClone` cover both
+  namespaces; `ReadAttachment` fetches a missing blob by id and hash-checks
+  every candidate; `WarnBadAttachment` cuts a chain, `WarnNoFilter` once per
+  store per process. `GIT_NO_LAZY_FETCH=1` through `wsgit.ExecRunner.Env`
+  (`wsledger.GitEnv`), set by the default runner and by the host's
+  `batchRunner` on every run.
+- Host and routes: `StageAttachment`/`ReadAttachment` on `wstrackerhost.Host`
+  and `wsdashboard.TrackerHost`; staged copies at `<store>/staged/<sha256>`,
+  deleted at append time under the write lock; 24h expiry sweep (pending
+  events exempt) at open, upload, dispatch, and poll round, hourly;
+  `POST .../attachments?name=` (413/415/403/500) and
+  `GET .../attachments/<sha256>` (sniffed type, nosniff, CORP, CSP; 404 on
+  every refusal including cross-site).
+
+Deviations and findings:
+
+- Revoked keys are accepted as signers of attachment commits so a re-keyed
+  member's earlier attachments stay readable; the ticket did not fix this.
+- The ticket's premise that a plain-path remote ignores `--filter` is wrong:
+  plain paths honor it. Only `file://` without `uploadpack.allowFilter`
+  prints the no-filter warning, so both cases are tested over `file://`.
+- Forward: the attachment-then-event fetch order (as the ticket specifies)
+  leaves a transient window when an atomic push lands between the two
+  fetches: the event arrives without its attachment commit until the next
+  fetch (the read answers 404 meanwhile). Fetching event refs first would
+  close it, since the atomic push keeps the attachment ref at least as new.
+- Forward: `ReadAttachment` holds the ledger mutex across the explicit blob
+  fetch; the upload route buffers up to 256 MiB before the store's limit
+  applies. Both are recorded minor review findings, unchanged.
+- Not covered by tests: a remove-a-path attachment commit (the verifier
+  accepts `A` lines only, so the change check refuses it too) and a sole
+  mismatching read candidate.
+- Unverified: a hosted private repository (live acceptance only).
+- Dogfood: `261109-bug-git-commit-paths-in-delegate-worktree` (the delegate
+  implementer could not commit through `ws/git.commit` from the worktree).

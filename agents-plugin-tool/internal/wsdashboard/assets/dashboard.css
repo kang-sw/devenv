@@ -254,6 +254,13 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .permwait .t { margin-left: auto; font-size: 11.5px; color: var(--wb-muted-fg); font-variant-numeric: tabular-nums; flex: none; }
 .activity { display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--wb-muted-fg); padding: 0 4px; }
 .activity .spin { color: var(--wb-primary); }
+/* a tracker card the agent showed: a store chat (tracker drawer) draws it as the item's mini card; elsewhere it is this line */
+.cardref { display: flex; gap: 6px; align-items: baseline; max-width: 92%; padding: 4px 8px; border-radius: 8px; border-left: 3px solid var(--wb-primary); background: var(--wb-card); box-shadow: inset 0 0 0 1px var(--wb-line); font-size: 12.5px; }
+.cardref .crk { color: var(--wb-muted-fg); flex: none; }
+.cardref .cra { flex: none; }
+.cardref .crt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cardref.up { display: block; padding: 0; border: 0; background: none; box-shadow: none; }
+.cardref.up > .cref { margin-top: 0; }
 .mailline { font-size: 12.5px; }
 .mailline > summary, .mailline.nobody { display: flex; gap: 6px; align-items: baseline; padding: 3px 8px; border-radius: 8px; color: var(--wb-muted-fg); }
 .mailline > summary { list-style: none; cursor: pointer; }
@@ -271,21 +278,50 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 
 /* ===== composer: never swapped ===== */
 .composer { position: relative; background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow-hi); padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
-/* interrupt badge: a pill centred on the 10px gap between the conversation and
-   the composer, out of flow, so showing it moves neither; the page script
-   shows it while the lead works on a turn */
-.ibadge { position: absolute; z-index: 3; left: 50%; top: -5px; transform: translate(-50%, -50%); display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 12px 0 10px; border: 0; border-radius: 999px; cursor: pointer; white-space: nowrap; font-size: 11.5px; font-weight: 800; letter-spacing: .03em; line-height: 1; color: var(--wb-fail); background: var(--wb-card); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--wb-fail) 55%, transparent), var(--wb-shadow-hi); animation: ibadge-rise .16s ease-out; }
-.ibadge[hidden] { display: none; }
+/* composer badges: a row centred on the 10px gap between the conversation and
+   the composer, out of flow, so showing a badge moves neither. The interrupt
+   badge is the middle column, centred on the border, and the page script
+   shows it while the lead works on a turn; the subagent badge starts the
+   right column, beside it, and shows while subagents run. A hidden interrupt
+   badge keeps its space, so the subagent badge never moves sideways when the
+   lead starts or stops working. */
+.cbadges { position: absolute; z-index: 3; left: 10px; right: 10px; top: -5px; transform: translateY(-50%); display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); column-gap: 8px; align-items: center; pointer-events: none; }
+.cbadges > * { pointer-events: auto; }
+.ibadge { grid-column: 2; display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 12px 0 10px; border: 0; border-radius: 999px; cursor: pointer; white-space: nowrap; font-size: 11.5px; font-weight: 800; letter-spacing: .03em; line-height: 1; color: var(--wb-fail); background: var(--wb-card); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--wb-fail) 55%, transparent), var(--wb-shadow-hi); }
+.ibadge:not([hidden]) { animation: ibadge-rise .16s ease-out; }
+.ibadge[hidden] { display: inline-flex; visibility: hidden; }
 .ibadge:hover:not(:disabled) { background: color-mix(in srgb, var(--wb-fail) 12%, var(--wb-card)); }
 .ibadge:focus-visible { outline: 1.5px solid var(--wb-fail); outline-offset: 2px; }
 .ibadge .istop { width: 8px; height: 8px; border-radius: 2px; background: currentColor; flex: none; }
 .ibadge.busy { cursor: default; color: color-mix(in srgb, var(--wb-fail) 60%, var(--wb-muted-fg)); }
 .ibadge.busy .istop { width: 9px; height: 9px; border-radius: 50%; background: transparent; border: 2px solid currentColor; border-right-color: transparent; animation: dash-spin .8s linear infinite; }
-@keyframes ibadge-rise { from { opacity: 0; transform: translate(-50%, -10%); } }
-@media (prefers-reduced-motion: reduce) { .ibadge, .ibadge.busy .istop { animation: none; } }
+/* subagent badge: the running-agent look of the peer rows (spinner, robot) */
+.sbadge { grid-column: 3; justify-self: start; min-width: 0; max-width: 100%; display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 11px 0 9px; border-radius: 999px; white-space: nowrap; overflow: hidden; font-size: 11.5px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; color: var(--wb-primary); background: var(--wb-card); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--wb-primary) 45%, transparent), var(--wb-shadow-hi); animation: ibadge-rise .16s ease-out; }
+.sbadge[hidden] { display: none; }
+.sbadge .spin { width: 10px; height: 10px; }
+.sbadge .i { width: 13px; height: 13px; }
+.sbadge .slabel { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+@keyframes ibadge-rise { from { opacity: 0; transform: translateY(40%); } }
+@media (prefers-reduced-motion: reduce) { .ibadge:not([hidden]), .sbadge, .ibadge.busy .istop { animation: none; } }
 .crow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; align-items: stretch; }
 .composer textarea { font: 13.5px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif; color: inherit; background: var(--wb-muted); border: 0; border-radius: 10px; padding: 8px 10px; resize: none; min-height: 38px; max-height: 160px; width: 100%; display: block; }
 .composer textarea:focus { outline: 1.5px solid var(--wb-primary); }
+/* the message box over its mention layer: the layer is laid out like the
+   textarea (same font, padding, and wrapping) and drawn behind it with
+   transparent text, so only each @ mention's pill shows under the
+   textarea's own text; the page script keeps its scroll and right padding
+   (the textarea's scrollbar) in step */
+.cfield { position: relative; min-width: 0; background: var(--wb-muted); border-radius: 10px; }
+.composer .cfield textarea { position: relative; background: transparent; white-space: pre-wrap; overflow-wrap: break-word; }
+.chl { position: absolute; inset: 0; overflow: hidden; pointer-events: none; padding: 8px 10px; border-radius: 10px; font: 13.5px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif; white-space: pre-wrap; overflow-wrap: break-word; color: transparent; }
+.wsm-pill { border-radius: 4px; background: color-mix(in srgb, var(--wb-primary) 20%, transparent); box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--wb-primary) 20%, transparent); }
+/* the @ file-mention popup (mention.js), fixed at the @ it completes */
+.wsm-pop { position: fixed; z-index: 80; width: min(440px, calc(100vw - 16px)); max-height: 260px; overflow: auto; list-style: none; margin: 0; padding: 4px; background: var(--wb-card); color: var(--wb-fg); border-radius: 10px; box-shadow: var(--wb-shadow-hi); }
+.wsm-pop[hidden] { display: none; }
+.wsm-opt { display: flex; align-items: baseline; gap: 8px; padding: 4px 8px; border-radius: 7px; cursor: pointer; font-size: 12.5px; font-family: var(--wb-mono); min-width: 0; }
+.wsm-opt.on { background: color-mix(in srgb, var(--wb-primary) 14%, var(--wb-card)); }
+.wsm-name { flex: none; max-width: 65%; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wsm-dir { min-width: 0; font-size: 11.5px; color: var(--wb-muted-fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .csend { display: inline-flex; align-items: center; justify-content: center; width: 34px; padding: 0; border: 0; border-radius: 10px; cursor: pointer; color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 14%, var(--wb-card)); }
 .csend:hover { background: color-mix(in srgb, var(--wb-primary) 24%, var(--wb-card)); }
 .csend:focus-visible { outline: 1.5px solid var(--wb-primary); }
@@ -325,6 +361,7 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .hchips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; white-space: normal; }
 .hchips .achip { padding-right: 9px; }
 .sentmark { font-size: 10px; font-weight: 800; letter-spacing: .03em; padding: 0 6px; border-radius: 4px; white-space: nowrap; background: var(--wb-muted); color: var(--wb-muted-fg); }
+.srow .stext > .sentmark { margin-right: 6px; }
 .sentmark.held { background: var(--wb-ph-perm); color: var(--wb-on-ph-perm); }
 /* an item whose answer was sent (or is held) grays its answer area until the board records the answer, and dims its title lightly, so the largest text shows the state too; the ID chip, class tag, and mark stay full brightness, and focusing a control in it (to revise the answer) brings the area and title back */
 .card.sent-sent > .cbody > :not(.note), .arow.sent-sent .why, .arow.sent-sent input { opacity: .4; transition: opacity .15s; }
@@ -649,3 +686,70 @@ a[data-wl="file"]:not([href]) { color: inherit; }
 
 /* conversation images open in the viewer (viewer.js) */
 .thumbs img, .bub img { cursor: zoom-in; }
+
+/* the tracker drawer's chat tab (dashboard.js, supChat): a fixed-height slot,
+   the log scrolling inside it with the newest at the bottom, the composer
+   under it, and the selection popover over the log. The slot holds its
+   height while empty, so the drawer measures the same before the chat
+   moves in. */
+.tk .card.pane.chat > .cbody { display: flex; flex-direction: column; overflow: hidden; padding: 0; }
+.tk .supslot { flex: 1 1 auto; height: 460px; min-height: 0; display: flex; flex-direction: column; }
+.tk .supchat { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; position: relative; }
+.tk .suplog { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; }
+.tk .suplog > .centries { margin-top: auto; }
+.tk .suplog .conv { padding: 8px 10px; gap: 8px; }
+.tk .suplog .conv.clive { padding-top: 0; }
+.tk .suplog .conv.clive:empty, .tk .suplog .suplive:empty { display: none; }
+.tk .suplog .cardref.up { max-width: 100%; width: min(100%, 420px); }
+.tk .supempty { margin: auto 16px; text-align: center; color: var(--wb-muted-fg); font-size: 12.5px; line-height: 1.5; }
+.tk .supempty[hidden] { display: none; }
+.tk .superr { margin: 0 10px 4px; font-size: 12px; color: var(--wb-fail); overflow-wrap: anywhere; }
+.tk .superr[hidden] { display: none; }
+.tk .supcomp { margin: 0 8px 8px; box-shadow: var(--wb-shadow), inset 0 0 0 1px var(--wb-line); }
+.tk .supbar { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.tk .supchip { font: inherit; font-size: 11.5px; display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%; border: 0; border-radius: 999px; padding: 1px 6px 1px 9px; cursor: pointer;
+  background: var(--wb-muted); color: var(--wb-muted-fg); }
+.tk .supchip > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tk .supchip .i { width: 11px; height: 11px; flex: none; }
+.tk .supchip:hover, .tk .supchip[aria-expanded="true"] { color: var(--wb-fg); }
+.tk .supchip:focus-visible { outline: 1.5px solid var(--wb-primary); }
+/* tracker.css neutralizes the dashboard's .crow and sizes its own .csend; the chat composer is the dashboard's */
+.tk .supcomp .crow { grid-template-columns: minmax(0, 1fr) auto; }
+.tk .supcomp .csend { height: auto; }
+.tk .supcomp .csend .i { width: 17px; height: 17px; }
+.tk .supcomp .csend:disabled { opacity: .45; cursor: default; }
+.tk .supcomp textarea { min-height: 54px; }
+.tk .supcomp textarea:disabled { opacity: .6; }
+.tk .supcomp .sbadge .i { width: 13px; height: 13px; }
+.tk .supnew .i { width: 12px; height: 12px; }
+.tk .suppop { position: absolute; z-index: 3; left: 0; bottom: calc(100% + 6px); width: min(360px, 100%); max-height: 340px; overflow-y: auto; overscroll-behavior: contain; display: grid; gap: 10px;
+  background: var(--wb-card); border-radius: 10px; box-shadow: var(--wb-shadow-hi), inset 0 0 0 1px var(--wb-line); padding: 10px 12px; font-size: 12.5px; }
+.tk .suppop[hidden] { display: none; }
+.tk .spsec { display: grid; gap: 5px; }
+.tk .splbl { display: flex; align-items: baseline; gap: 8px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--wb-muted-fg); }
+.tk .spval { font-weight: 600; text-transform: none; letter-spacing: 0; color: var(--wb-fg); font-family: var(--wb-mono); }
+.tk .spreset { font: inherit; font-size: 11px; font-weight: 400; text-transform: none; letter-spacing: 0; border: 0; background: none; padding: 0; color: var(--wb-primary); cursor: pointer; margin-left: auto; }
+.tk .spseg { display: flex; flex-wrap: wrap; gap: 2px; width: fit-content; background: var(--wb-muted); border-radius: 999px; padding: 2px; }
+.tk .spseg button { font: inherit; font-size: 12px; font-weight: 600; border: 0; border-radius: 999px; padding: 2px 12px; background: transparent; color: var(--wb-muted-fg); cursor: pointer; }
+.tk .spseg button[aria-checked="true"] { background: var(--wb-card); color: var(--wb-fg); box-shadow: inset 0 0 0 1px var(--wb-line); }
+.tk .spseg button:disabled { opacity: .45; cursor: not-allowed; }
+.tk .spseg button:focus-visible { outline: 1.5px solid var(--wb-primary); }
+.tk .spwarn { display: grid; gap: 6px; padding: 6px 8px; border-radius: 8px; color: var(--wb-fg); background: color-mix(in srgb, var(--tk-warn) 12%, var(--wb-card)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tk-warn) 45%, transparent); }
+.tk .spacts { display: flex; gap: 6px; }
+.tk .spq { font: inherit; font-size: 12.5px; width: 100%; border: 0; border-radius: 8px; padding: 4px 8px; background: var(--wb-muted); color: inherit; }
+.tk .splist { list-style: none; margin: 0; padding: 0; max-height: 132px; overflow-y: auto; border-radius: 8px; box-shadow: inset 0 0 0 1px var(--wb-line); }
+.tk .splist li { padding: 3px 8px; cursor: pointer; font-family: var(--wb-mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tk .splist li i { font-family: system-ui, sans-serif; color: var(--wb-muted-fg); }
+.tk .splist li:hover, .tk .splist li.hi { background: var(--wb-muted); }
+.tk .splist li[aria-selected="true"] { color: var(--wb-primary); font-weight: 700; }
+.tk .splist li.spnone { cursor: default; color: var(--wb-muted-fg); font-family: inherit; }
+.tk .spnote { margin: 0; font-size: 11.5px; color: var(--wb-muted-fg); }
+.tk .spnote.err { color: var(--wb-fail); }
+/* the effort knob: an empty circle per level, the thumb on the chosen one, the ends labelled */
+.tk .knob { padding: 4px 9px 0; outline: none; touch-action: none; cursor: pointer; border-radius: 8px; }
+.tk .knob:focus-visible { box-shadow: 0 0 0 1.5px var(--wb-primary); }
+.tk .ktrack { position: relative; height: 18px; margin: 0 2px; }
+.tk .ktrack::before { content: ""; position: absolute; left: 0; right: 0; top: 8px; height: 2px; border-radius: 1px; background: var(--wb-line); }
+.tk .kdot { position: absolute; top: 4px; width: 10px; height: 10px; margin-left: -5px; border-radius: 50%; background: var(--wb-card); box-shadow: inset 0 0 0 1.5px var(--wb-muted-fg); }
+.tk .kthumb { position: absolute; top: 1px; width: 16px; height: 16px; margin-left: -8px; border-radius: 50%; background: var(--wb-primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--wb-primary) 22%, transparent); transition: left .08s; pointer-events: none; }
+.tk .kends { display: flex; justify-content: space-between; margin-top: 2px; font-size: 11px; color: var(--wb-muted-fg); font-family: var(--wb-mono); }

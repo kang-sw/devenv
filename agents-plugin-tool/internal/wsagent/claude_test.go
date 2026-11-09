@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -117,6 +118,33 @@ func TestClaudeArgsFromProfile(t *testing.T) {
 	}
 }
 
+// TestClaudeArgsBuiltinSupportProfile: the builtin Claude support profile
+// launches with Agent as its only built-in tool, in --tools and in the
+// dontAsk allowlist beside its ws tools, so a subagent it spawns inherits
+// the same limit.
+func TestClaudeArgsBuiltinSupportProfile(t *testing.T) {
+	p, err := ParseProfile(BuiltinProfiles()[ProfilePrefix+SupportProfileClaude])
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := StartSpec{Root: "/work", Profile: p, WSMCP: &MCPCommand{Command: "/bin/ws-mcp"}}
+	args, err := claudeArgs(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := flagValue(args, "--tools"); got != "Agent" {
+		t.Fatalf("--tools = %q, want Agent alone", got)
+	}
+	i := slices.Index(args, "--allowedTools")
+	if i < 0 {
+		t.Fatalf("no --allowedTools: %v", args)
+	}
+	want := []string{"Agent", "mcp__ws__tracker_query", "mcp__ws__tracker_update", "mcp__ws__tracker_show", "mcp__ws__git_search", "mcp__ws__playbook_read"}
+	if allowed := args[i+1:]; !slices.Equal(allowed, want) {
+		t.Fatalf("--allowedTools = %v, want %v", allowed, want)
+	}
+}
+
 func TestHarnessEnvDropsParentSession(t *testing.T) {
 	env := []string{"PATH=/bin", "CLAUDECODE=1", "CLAUDE_CODE_PLUGIN_DIRS=/x", "CLAUDE_CODE_SESSION_ID=s", "CLAUDE_CONFIG_DIR=/cfg", "CLAUDE_CODE_OAUTH_TOKEN=t", "WS_MAILBOX=lead@machine", "WS_MAILBOX_AUTO=1", "HOME=/h"}
 	got := claudeEnv(env)
@@ -165,6 +193,18 @@ func TestCheckClaudeInit(t *testing.T) {
 	}{Name: "claude.ai Gmail"})
 	if err := checkClaudeInit(extraServer, spec); err == nil {
 		t.Fatalf("an extra MCP server should refuse the launch")
+	}
+	// Claude's init names the Agent tool "Task": a profile allowing Agent
+	// accepts it, and one that does not refuses it.
+	task := ok
+	task.Tools = append(slices.Clone(ok.Tools), "Task")
+	if err := checkClaudeInit(task, spec); err == nil || !strings.Contains(err.Error(), "Task") {
+		t.Fatalf("Task without Agent in the profile should refuse the launch, got %v", err)
+	}
+	agentSpec := spec
+	agentSpec.Profile.Tools = append(slices.Clone(spec.Profile.Tools), "Agent")
+	if err := checkClaudeInit(task, agentSpec); err != nil {
+		t.Fatalf("Task with Agent in the profile should pass: %v", err)
 	}
 	mode := ok
 	mode.PermissionMode = "default"
@@ -454,5 +494,80 @@ func TestClaudeProcessControls(t *testing.T) {
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("input lines =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// TestClaudeMapperSubagentTask pins the support badge's source: Claude runs
+// an Agent call's subagent as a background task, whose task_started line
+// adds a running subagent to the snapshot and whose completion ends it; the
+// subagent's own lines (parent_tool_use_id set) stay out of the lead's
+// reply. Recorded with Claude 2.1.319, --tools Agent.
+func TestClaudeMapperSubagentTask(t *testing.T) {
+	spec := claudeSpec(t, `{"backend":"claude","tools":["Agent"]}`)
+	st, ring, events := replayClaude(t, "claude-subagent-turn.jsonl", spec)
+	var states []string
+	for _, ev := range events {
+		if ev.Fatal != nil {
+			t.Fatalf("a permitted fixture should not refuse: %v", ev.Fatal)
+		}
+		if ev.Live != nil && ev.Live.AgentID != "" {
+			states = append(states, ev.Live.AgentID+" "+ev.Live.Status+" "+ev.Live.Label)
+		}
+	}
+	want := []string{"a8019a344cc37a38c running say hi", "a8019a344cc37a38c done "}
+	if strings.Join(states, "|") != strings.Join(want, "|") {
+		t.Fatalf("subagent events = %q, want %q", states, want)
+	}
+	agents := st.Snapshot(2_000_000).Agents
+	if len(agents) != 1 || agents[0].ID != "a8019a344cc37a38c" || agents[0].Status != wslive.StatusDone || agents[0].Label != "say hi" {
+		t.Fatalf("snapshot agents: %+v", agents)
+	}
+	for _, e := range ring {
+		if e.Kind == wslive.RingReply && strings.TrimSpace(e.Text) == "hi" {
+			t.Fatalf("the subagent's text became a lead reply: %+v", ring)
+		}
+	}
+}
+
+// TestClaudeMapperSubagentTaskEndsOnce: an end for a task never started, a
+// non-agent task, and a second end are dropped, so no finished agent appears
+// from nothing; a killed task ends failed.
+func TestClaudeMapperSubagentTaskEndsOnce(t *testing.T) {
+	m := newClaudeMapper(claudeSpec(t, `{"backend":"claude","tools":["Agent"]}`))
+	lines := []string{
+		`{"type":"system","subtype":"task_notification","task_id":"ghost","status":"completed"}`,
+		`{"type":"system","subtype":"task_started","task_id":"sh1","task_type":"local_bash","description":"sleep"}`,
+		`{"type":"system","subtype":"task_started","task_id":"ag1","task_type":"local_agent","description":"look"}`,
+		`{"type":"system","subtype":"task_updated","task_id":"ag1","patch":{"status":"running"}}`,
+		`{"type":"system","subtype":"task_updated","task_id":"ag1","patch":{"status":"killed"}}`,
+		`{"type":"system","subtype":"task_notification","task_id":"ag1","status":"killed"}`,
+	}
+	var got []string
+	for _, line := range lines {
+		for _, ev := range m.mapLine([]byte(line), nopReplies{}) {
+			if ev.Live != nil {
+				got = append(got, ev.Live.AgentID+" "+ev.Live.Status)
+			}
+		}
+	}
+	if want := "ag1 running|ag1 failed"; strings.Join(got, "|") != want {
+		t.Fatalf("events = %q, want %q", got, want)
+	}
+}
+
+// TestLiveWriterEndAgents: a process gone ends its running subagents failed
+// and leaves finished ones as they were.
+func TestLiveWriterEndAgents(t *testing.T) {
+	w := newLiveWriter(t.TempDir(), "end-test-key", "claude", time.Now, io.Discard)
+	w.apply(wslive.Event{Kind: wslive.KindAgent, AgentID: "a", Status: wslive.StatusRunning})
+	w.apply(wslive.Event{Kind: wslive.KindAgent, AgentID: "b", Status: wslive.StatusRunning})
+	w.apply(wslive.Event{Kind: wslive.KindAgent, AgentID: "b", Status: wslive.StatusDone})
+	w.endAgents()
+	got := map[string]string{}
+	for _, a := range w.st.Snapshot(time.Now().UnixMilli()).Agents {
+		got[a.ID] = a.Status
+	}
+	if got["a"] != wslive.StatusFailed || got["b"] != wslive.StatusDone {
+		t.Fatalf("agents after endAgents: %v", got)
 	}
 }

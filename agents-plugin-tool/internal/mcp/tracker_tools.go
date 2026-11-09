@@ -125,8 +125,8 @@ func trackerEventSpec(kind wsxmlcmd.Kind, attrs ...string) wsxmlcmd.Spec {
 // register and sync. A body is the event's text field: the item body, the
 // comment, or the note.
 var trackerCommands = map[string]trackerCommandDef{
-	wstracker.TypeItemCreate: {trackerEventSpec(wsxmlcmd.Leaf, "kind", "title", "project", "due", "priority", "parent", "after", "mentions", "refs"), buildItemCreate},
-	wstracker.TypeItemEdit:   {trackerEventSpec(wsxmlcmd.Leaf, "item", "title", "project", "due", "priority", "mentions", "refs", "clear"), buildItemEdit},
+	wstracker.TypeItemCreate: {trackerEventSpec(wsxmlcmd.Leaf, "kind", "title", "project", "due", "priority", "parent", "after", "mentions", "refs", "stage"), buildItemCreate},
+	wstracker.TypeItemEdit:   {trackerEventSpec(wsxmlcmd.Leaf, "item", "title", "project", "due", "priority", "mentions", "refs", "stage", "clear"), buildItemEdit},
 	wstracker.TypeItemHide:   {trackerEventSpec(wsxmlcmd.Empty, "item"), buildItemOnly},
 	wstracker.TypeItemAssign: {trackerEventSpec(wsxmlcmd.Empty, "item", "people", "rules", "levels", "completion"), buildItemAssign},
 	wstracker.TypeItemHandoff: {trackerEventSpec(wsxmlcmd.Leaf, "item", "to", "assignee"), func(b *trackerBatch, cmd wsxmlcmd.Command, ev *trackerEvent) {
@@ -237,6 +237,7 @@ func buildItemCreate(b *trackerBatch, cmd wsxmlcmd.Command, ev *trackerEvent) {
 			b.itemRef(cmd, ev, "after")
 		}
 	}
+	b.stage(cmd, ev, "without stage the item starts in todo")
 	b.list(cmd, ev, "mentions")
 	b.itemRefList(cmd, ev, "refs")
 	b.text(cmd, ev, "body", false)
@@ -244,7 +245,8 @@ func buildItemCreate(b *trackerBatch, cmd wsxmlcmd.Command, ev *trackerEvent) {
 
 // buildItemEdit writes only the fields the command changes: an attribute
 // present sets its field, a non-empty body sets the body, and clear names
-// fields to empty (body) or remove (due, written as null).
+// fields to empty (body) or remove (due, and stage, which moves the item to
+// todo; written as null).
 func buildItemEdit(b *trackerBatch, cmd wsxmlcmd.Command, ev *trackerEvent) {
 	b.itemRef(cmd, ev, "item")
 	if v, ok := cmd.Attr("title"); ok && wsxmlcmd.NonEmpty(b.p, cmd.At("title"), v) {
@@ -259,6 +261,7 @@ func buildItemEdit(b *trackerBatch, cmd wsxmlcmd.Command, ev *trackerEvent) {
 	if n, ok := trackerLevelAttr(b.p, cmd, "priority", false); ok {
 		ev.payload["priority"] = n
 	}
+	b.stage(cmd, ev, `clear="stage" moves the item to todo`)
 	b.list(cmd, ev, "mentions")
 	b.itemRefList(cmd, ev, "refs")
 	if cmd.Body != "" {
@@ -277,8 +280,13 @@ func buildItemEdit(b *trackerBatch, cmd wsxmlcmd.Command, ev *trackerEvent) {
 					b.p.Add("%s: clear=\"due\" with a due attribute; send one or the other", cmd.Label())
 				}
 				ev.payload["due"] = nil
+			case "stage":
+				if _, set := cmd.Attr("stage"); set {
+					b.p.Add("%s: clear=\"stage\" with a stage attribute; send one or the other", cmd.Label())
+				}
+				ev.payload["stage"] = nil
 			default:
-				b.p.Add("%s: must list body or due; got %q", cmd.At("clear"), field)
+				b.p.Add("%s: must list body, due, or stage; got %q", cmd.At("clear"), field)
 			}
 		}
 	}
@@ -434,6 +442,9 @@ type trackerEvent struct {
 	// refLists maps a list field to its entries in order: a stored id, or
 	// the event index of the event it names.
 	refLists map[string][]trackerListRef
+	// selfAssign marks the creator self-assignment the writer adds right
+	// after the item.create of cmd (writerDefaults); it has no command.
+	selfAssign bool
 }
 
 // trackerListRef is one entry of an ID list: id when given, else the batch
@@ -469,6 +480,20 @@ func (b *trackerBatch) optional(cmd wsxmlcmd.Command, ev *trackerEvent, name str
 	if v, ok := cmd.Attr(name); ok && wsxmlcmd.NonEmpty(b.p, cmd.At(name), v) {
 		ev.payload[name] = v
 	}
+}
+
+// stage reads the optional stage attribute, whose one value is review;
+// other says what the item gets without it.
+func (b *trackerBatch) stage(cmd wsxmlcmd.Command, ev *trackerEvent, other string) {
+	v, ok := cmd.Attr("stage")
+	if !ok {
+		return
+	}
+	if strings.TrimSpace(v) != "review" {
+		b.p.Add("%s: must be review (%s); got %q", cmd.At("stage"), other, v)
+		return
+	}
+	ev.payload["stage"] = "review"
 }
 
 func (b *trackerBatch) list(cmd wsxmlcmd.Command, ev *trackerEvent, name string) {
@@ -669,7 +694,82 @@ func planTrackerBatch(p *wsxmlcmd.Problems, commands string, registered []wstrac
 		def.build(b, cmd, ev)
 		b.events = append(b.events, ev)
 	}
+	for _, e := range registered {
+		if e.ID == b.store && e.Member != "" {
+			b.writerDefaults(e.Member)
+		}
+	}
 	return b
+}
+
+// writerDefaults fills what the writer, member writer of the batch's
+// store, decides for an agent as the dashboard does for a person. An
+// item.assign without completion gets it stored explicitly: assignee when
+// the writer is its only target, else assigner (a rule or levels always
+// covers someone else, since the store refuses one that covers nobody); the
+// fold's absent-means-assignee rule stays for old events. A task or todo
+// created outside review that no item.assign of the batch names by $N is
+// self-assigned (people = the writer, assignee closes) by an item.assign
+// inserted right after its create, so a later command of the batch acts on
+// an item already assigned, as on the dashboard; every event index is
+// renumbered to match.
+func (b *trackerBatch) writerDefaults(writer string) {
+	assigned := map[int]bool{}
+	for _, ev := range b.events {
+		if ev.typ != wstracker.TypeItemAssign {
+			continue
+		}
+		if idx, ok := ev.refs["item"]; ok {
+			assigned[idx] = true
+		}
+		if _, ok := ev.payload["completion"]; !ok {
+			ev.payload["completion"] = "assigner"
+			if people, ok := ev.payload["people"].([]string); ok && ev.payload["mode"] == "chosen" && len(people) > 0 {
+				self := true
+				for _, person := range people {
+					self = self && person == writer
+				}
+				if self {
+					ev.payload["completion"] = "assignee"
+				}
+			}
+		}
+	}
+	events := make([]*trackerEvent, 0, len(b.events))
+	moved := make([]int, len(b.events))
+	for i, ev := range b.events {
+		moved[i] = len(events)
+		events = append(events, ev)
+		kind := ev.payload["kind"]
+		if ev.typ != wstracker.TypeItemCreate || (kind != "task" && kind != "todo") || ev.payload["stage"] == "review" || assigned[i] {
+			continue
+		}
+		events = append(events, &trackerEvent{
+			cmd: ev.cmd, typ: wstracker.TypeItemAssign, origin: ev.origin, selfAssign: true,
+			payload:  map[string]any{"mode": "chosen", "people": []string{writer}, "completion": "assignee"},
+			refs:     map[string]int{"item": i},
+			refLists: map[string][]trackerListRef{},
+		})
+	}
+	if len(events) == len(b.events) {
+		return
+	}
+	for _, ev := range events {
+		for field, idx := range ev.refs {
+			ev.refs[field] = moved[idx]
+		}
+		for _, list := range ev.refLists {
+			for j := range list {
+				if list[j].id == "" {
+					list[j].event = moved[list[j].event]
+				}
+			}
+		}
+	}
+	for pos, idx := range b.eventOf {
+		b.eventOf[pos] = moved[idx]
+	}
+	b.events = events
 }
 
 // newEvents builds the batch's events for a store whose next event gets
@@ -751,16 +851,24 @@ func (s *Server) handleTrackerUpdate(ctx context.Context, id json.RawMessage, ar
 		ids, err = h.DispatchWith(ctx, b.store, b.newEvents)
 		var refusal *wstracker.Refusal
 		if errors.As(err, &refusal) && refusal.Index >= 0 && refusal.Index < len(b.events) {
-			cmd := b.events[refusal.Index].cmd
+			ev := b.events[refusal.Index]
+			what := "this write"
+			if ev.selfAssign {
+				what = "the self-assignment written with this create"
+			}
 			return toolErrorTextResponse(id, s.trackerRefusal(tool, []string{
-				fmt.Sprintf("%s: the store would flag this write: %s", cmd.Label(), refusal.Reason),
+				fmt.Sprintf("%s: the store would flag %s: %s", ev.cmd.Label(), what, refusal.Reason),
 			}))
 		}
 		if err == nil {
 			var sb strings.Builder
 			fmt.Fprintf(&sb, "%s: wrote %s\n", b.store, trackerCount(len(ids), "event"))
 			for i, eventID := range ids {
-				if i < len(b.events) {
+				switch {
+				case i >= len(b.events):
+				case b.events[i].selfAssign:
+					fmt.Fprintf(&sb, "%d %s%s %s (self-assignment)\n", b.events[i].cmd.Pos, trackerPrefix, wstracker.TypeItemAssign, trackerAlias(eventID.String()))
+				default:
 					fmt.Fprintf(&sb, "%d %s %s\n", b.events[i].cmd.Pos, b.events[i].cmd.Tag, trackerAlias(eventID.String()))
 				}
 			}
@@ -895,7 +1003,7 @@ var (
 	trackerKinds  = []string{"task", "todo", "topic"}
 	// trackerStatuses are the status filter's values: open (not done) and
 	// hidden, then an item's derived statuses.
-	trackerStatuses = []string{"open", "hidden", "todo", "doing", "blocked", "awaiting", "done", "pending", "unassigned", "declined", "returned"}
+	trackerStatuses = []string{"open", "hidden", "todo", "doing", "blocked", "awaiting", "done", "pending", "review", "unassigned", "declined", "returned"}
 )
 
 // parseTrackerQuery reads the payload object and format argument.

@@ -61,10 +61,10 @@ type SessionView struct {
 
 	HasBoard bool
 	Seq      int
-	// CountPolicy, CountAssumed, and CountAcks are the board's open items.
-	CountPolicy, CountAssumed, CountAcks int
-	Board, Panels                        template.HTML
-	Mermaid                              bool
+	// CountPolicy and CountAcks are the board's open items.
+	CountPolicy, CountAcks int
+	Board, Panels          template.HTML
+	Mermaid                bool
 
 	Lead         LeadView
 	Tree         TreeView
@@ -203,6 +203,8 @@ type ConversationView struct {
 	ToolGap *wslive.ToolSummary
 	// Users and Mails count the user messages and mail lines.
 	Users, Mails int
+	// Subagents counts the running subagents for the composer's badge.
+	Subagents SubagentCount
 	// Held lists the messages sent from the page that the session has not
 	// received yet, oldest first; Sent is each board item's latest sent
 	// answer, which the page marks on the item's card.
@@ -211,6 +213,58 @@ type ConversationView struct {
 	// markdown renders a finished lead reply (replyRender.finished); an
 	// entry runs it only when the entry cache misses (renderEntries).
 	markdown func(string) template.HTML
+}
+
+// SubagentCount is the running subagents of a session: Direct are its own
+// running children, Deep every running agent below them, including the
+// running agents of a running delegate that holds its own ws session.
+type SubagentCount struct {
+	Direct, Deep int
+}
+
+// subagentCounts counts the running agents of self's snapshot agents by
+// depth: one whose parent is in the list is Deep, any other Direct (so the
+// running child of an evicted parent counts as Direct; the sum stays right,
+// since retention keeps every running agent). A running agent whose
+// ReplyID lookup resolves to a session with a live adapter adds that
+// session's running agents, at every depth and through its own delegates,
+// to Deep; a session already counted (self included) is not counted again.
+func subagentCounts(self string, agents []wslive.Agent, lookup func(string) (Session, *wslive.Snapshot, bool), now time.Time) SubagentCount {
+	var c SubagentCount
+	visited := map[string]bool{self: true}
+	var linked func(agents []wslive.Agent)
+	linked = func(agents []wslive.Agent) {
+		for _, a := range agents {
+			if a.Status != wslive.StatusRunning || a.ReplyID == "" || visited[a.ReplyID] {
+				continue
+			}
+			visited[a.ReplyID] = true
+			if _, snap, ok := lookup(a.ReplyID); ok && adapterPresent(snap, now) {
+				for _, b := range snap.Agents {
+					if b.Status == wslive.StatusRunning {
+						c.Deep++
+					}
+				}
+				linked(snap.Agents)
+			}
+		}
+	}
+	known := map[string]bool{}
+	for _, a := range agents {
+		known[a.ID] = true
+	}
+	for _, a := range agents {
+		if a.Status != wslive.StatusRunning {
+			continue
+		}
+		if a.ParentID != "" && a.ParentID != a.ID && known[a.ParentID] {
+			c.Deep++
+		} else {
+			c.Direct++
+		}
+	}
+	linked(agents)
+	return c
 }
 
 // ConvEntry is one conversation ring entry as the page shows it.
@@ -270,21 +324,20 @@ func adapterPresent(snap *wslive.Snapshot, now time.Time) bool {
 func buildSessionView(in pageInputs) SessionView {
 	reg := in.Session.Registration
 	v := SessionView{
-		ReplyID:      reg.ReplyID,
-		Project:      reg.Project,
-		ProjectName:  filepath.Base(reg.Project),
-		Harness:      reg.Harness,
-		Live:         reg.Live(in.Now),
-		Adapter:      adapterPresent(in.Snapshot, in.Now),
-		Version:      in.Version,
-		HasBoard:     in.Page.HasBoard,
-		Seq:          in.Page.Seq,
-		CountPolicy:  in.Page.Board.CountPolicy,
-		CountAssumed: in.Page.Board.CountAssumed,
-		CountAcks:    in.Page.Board.CountAcks,
-		Board:        in.Page.Board.Board,
-		Panels:       in.Page.Board.Panels,
-		Mermaid:      in.Page.Board.Mermaid,
+		ReplyID:     reg.ReplyID,
+		Project:     reg.Project,
+		ProjectName: filepath.Base(reg.Project),
+		Harness:     reg.Harness,
+		Live:        reg.Live(in.Now),
+		Adapter:     adapterPresent(in.Snapshot, in.Now),
+		Version:     in.Version,
+		HasBoard:    in.Page.HasBoard,
+		Seq:         in.Page.Seq,
+		CountPolicy: in.Page.Board.CountPolicy,
+		CountAcks:   in.Page.Board.CountAcks,
+		Board:       in.Page.Board.Board,
+		Panels:      in.Page.Board.Panels,
+		Mermaid:     in.Page.Board.Mermaid,
 	}
 	if !v.Adapter {
 		return v
@@ -312,6 +365,7 @@ func buildSessionView(in pageInputs) SessionView {
 	userEntryImages(v.Conversation.Entries, in.AttachDir, reg.ReplyID)
 	v.Conversation.Held = heldViews(in.Held, in.AttachDir, reg.ReplyID)
 	v.Conversation.Sent = sentMarks(in.Drained, in.Held)
+	v.Conversation.Subagents = subagentCounts(reg.ReplyID, in.Snapshot.Agents, lookup, in.Now)
 	return v
 }
 
@@ -602,7 +656,6 @@ type IndexRow struct {
 	RunningAgents int
 	HasBoard      bool
 	CountPolicy   int
-	CountAssumed  int
 	// LastSeen is the registration's latest stamp (epoch ms).
 	LastSeen int64
 }
@@ -629,13 +682,12 @@ func buildIndexView(sessions []indexInput, now time.Time, version string) IndexV
 			order = append(order, reg.Project)
 		}
 		row := IndexRow{
-			ReplyID:      reg.ReplyID,
-			Harness:      reg.Harness,
-			Live:         reg.Live(now),
-			HasBoard:     in.Page.HasBoard,
-			CountPolicy:  in.Page.Board.CountPolicy,
-			CountAssumed: in.Page.Board.CountAssumed,
-			LastSeen:     reg.LastSeen().UnixMilli(),
+			ReplyID:     reg.ReplyID,
+			Harness:     reg.Harness,
+			Live:        reg.Live(now),
+			HasBoard:    in.Page.HasBoard,
+			CountPolicy: in.Page.Board.CountPolicy,
+			LastSeen:    reg.LastSeen().UnixMilli(),
 		}
 		if adapterPresent(in.Snapshot, now) {
 			row.Adapter = true

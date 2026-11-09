@@ -15,9 +15,13 @@ import (
 //
 //	{"k":"open","seen":{...}}   the seen of the open batch; it applies to every
 //	                            event not yet in a commit
-//	{"k":"ev","seq":N,"ts":"...","type":"...","origin":"...","payload":...,"of":M}
+//	{"k":"ev","seq":N,"ts":"...","type":"...","origin":"...","payload":...,"of":M,
+//	 "att":{"<sha256>":"<git blob id>"}}
 //	                            one event; "of" names the seq this event
-//	                            re-issues under a new key
+//	                            re-issues under a new key; "att" names the
+//	                            attachment blobs written with it (their git
+//	                            objects already exist), which closeBatch
+//	                            commits to the attachment ref
 //
 // An event is pending while its seq is above the highest seq on this clone's
 // own ref; the ref, not the journal, says what was committed, so a crash
@@ -25,14 +29,15 @@ import (
 // journal after their batch closes and is pushed: re-issue reads them.
 
 type journalRec struct {
-	K       string          `json:"k"`
-	Seen    map[string]int  `json:"seen,omitempty"`
-	Seq     int             `json:"seq,omitempty"`
-	TS      *time.Time      `json:"ts,omitempty"`
-	Type    string          `json:"type,omitempty"`
-	Origin  string          `json:"origin,omitempty"`
-	Payload json.RawMessage `json:"payload,omitempty"`
-	Of      int             `json:"of,omitempty"`
+	K       string            `json:"k"`
+	Seen    map[string]int    `json:"seen,omitempty"`
+	Seq     int               `json:"seq,omitempty"`
+	TS      *time.Time        `json:"ts,omitempty"`
+	Type    string            `json:"type,omitempty"`
+	Origin  string            `json:"origin,omitempty"`
+	Payload json.RawMessage   `json:"payload,omitempty"`
+	Of      int               `json:"of,omitempty"`
+	Att     map[string]string `json:"att,omitempty"`
 }
 
 type journalEvent struct {
@@ -42,6 +47,9 @@ type journalEvent struct {
 	Origin  string
 	Payload json.RawMessage
 	Of      int
+	// Att maps the sha256 oid of each attachment blob written with this
+	// event to its git blob id.
+	Att map[string]string
 }
 
 type journal struct {
@@ -111,7 +119,7 @@ func (j *journal) absorb(r journalRec) {
 		if _, dup := j.bySeq[r.Seq]; dup || r.Seq <= 0 {
 			return
 		}
-		e := journalEvent{Seq: r.Seq, Type: r.Type, Origin: r.Origin, Payload: r.Payload, Of: r.Of}
+		e := journalEvent{Seq: r.Seq, Type: r.Type, Origin: r.Origin, Payload: r.Payload, Of: r.Of, Att: r.Att}
 		if r.TS != nil {
 			e.TS = *r.TS
 		}

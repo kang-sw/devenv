@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"strconv"
 	"strings"
 )
 
@@ -14,13 +16,17 @@ import (
 // caller supplies, and this package knows it only through the JSON-level
 // types below, so the dashboard stays free of the tracker packages.
 //
-//	GET  /tracker/stores                 {"stores": [...], "rev": N}
+//	GET  /tracker/stores                 {"stores": [...], "rev": N, "support": B}
 //	GET  /tracker/stores/<id>/view       {"view": ..., "seen": {"badge", "read"}}
 //	POST /tracker/stores/<id>/dispatch   {"events": [...]} -> {"ids": [...]}; a refusal is 409
 //	POST /tracker/stores/<id>/check      the sync report
 //	POST /tracker/stores/<id>/sync       the sync report
 //	POST /tracker/stores/<id>/seen       {"badge", "read"} -> 204
 //	POST /tracker/stores/<id>/render     {"text"} -> {"html"}: an editor's preview
+//	POST /tracker/stores/<id>/attachments?name=<name>
+//	                                     raw image bytes -> {"oid", "name", "size", "mime"}
+//	GET  /tracker/stores/<id>/attachments/<oid>
+//	                                     the image bytes
 //	GET  /tracker/profiles               the saved profiles
 //	POST /tracker/profiles               save one; the profiles after the save
 //	POST /tracker/register               register a store
@@ -32,12 +38,40 @@ import (
 // cross-site form posts, and reads a size-limited body. A dispatched
 // event's origin is always "human": the page is the user's own hand.
 //
+// "support" reports that the daemon serves the store chats
+// (SupportRoutePrefix), so the drawer shows each store's chat tab.
+//
+// The attachment upload stages an image for a later dispatch, whose event
+// names it by the returned oid; it reads a raw body (not JSON) under the
+// hard ceiling trackerAttachmentBodyLimit, and the host applies the
+// store's own, usually smaller, limit. A body that is not an accepted
+// image answers 415, one over either limit 413. The attachment read serves
+// only an oid of 64 lowercase hex digits, only content that sniffs as
+// PNG, JPEG, GIF, or WebP, and refuses a request another site started
+// (crossSiteFetch); every refusal, like a missing attachment, answers 404.
+// Its content is addressed by its hash, so it is cacheable for good.
+//
 // The revision counter (TrackerChanged) bumps after every write these
 // routes run and on the host's own poll round; each SSE stream sends it as
 // "event: tracker" when it changed (sse.go), and the page re-reads.
 
 // trackerBodyLimit bounds a tracker POST body.
 const trackerBodyLimit = 256 << 10
+
+// trackerAttachmentBodyLimit is the hard ceiling of an attachment upload
+// body, above any store's own attachments limit.
+const trackerAttachmentBodyLimit = 256 << 20
+
+// The errors a TrackerHost's attachment methods wrap, which the
+// attachment routes map to their status.
+var (
+	// ErrTrackerNotImage: the upload is not an accepted image.
+	ErrTrackerNotImage = errors.New("attachment is not a supported image")
+	// ErrTrackerAttachmentTooLarge: the upload exceeds the store's limit.
+	ErrTrackerAttachmentTooLarge = errors.New("attachment too large")
+	// ErrTrackerAttachmentNotFound: the store has no such attachment.
+	ErrTrackerAttachmentNotFound = errors.New("attachment not found")
+)
 
 // TrackerHost is the daemon's tracker host: the stores the user registered
 // and the operations the tracker drawer runs on them. Every string it
@@ -68,12 +102,28 @@ type TrackerHost interface {
 	// an item body or comment text, so an editor's preview matches the
 	// saved view. It writes nothing.
 	Render(ctx context.Context, id string, req TrackerRenderRequest) (string, error)
+	// StageAttachment stores an uploaded image for a later dispatch of store id and
+	// returns what the event's attachments field names. ErrTrackerNotImage when the
+	// bytes are not an accepted image; ErrTrackerAttachmentTooLarge when over the
+	// store's attachments.max_bytes.
+	StageAttachment(ctx context.Context, id, name string, data []byte) (TrackerAttachment, error)
+	// ReadAttachment returns the content of attachment oid of store id, or
+	// ErrTrackerAttachmentNotFound.
+	ReadAttachment(ctx context.Context, id, oid string) ([]byte, error)
 }
 
 // TrackerRenderRequest is the render route's body: the markdown text an
 // editor holds.
 type TrackerRenderRequest struct {
 	Text string `json:"text"`
+}
+
+// TrackerAttachment is a staged attachment as the upload route answers it.
+type TrackerAttachment struct {
+	OID  string `json:"oid"`
+	Name string `json:"name"`
+	Size int64  `json:"size"`
+	Mime string `json:"mime"`
 }
 
 // TrackerStore is one registered store as the stores route lists it.
@@ -166,14 +216,37 @@ type TrackerRegisterResult struct {
 }
 
 // trackerStoreOps are the operations of the store route
-// /tracker/stores/<id>/<op>; view is the only GET.
+// /tracker/stores/<id>/<op>; view is the only GET. The attachment read,
+// /tracker/stores/<id>/attachments/<oid>, is the op "attachment".
 var trackerStoreOps = map[string]string{
-	"view":     http.MethodGet,
-	"dispatch": http.MethodPost,
-	"check":    http.MethodPost,
-	"sync":     http.MethodPost,
-	"seen":     http.MethodPost,
-	"render":   http.MethodPost,
+	"view":        http.MethodGet,
+	"dispatch":    http.MethodPost,
+	"check":       http.MethodPost,
+	"sync":        http.MethodPost,
+	"seen":        http.MethodPost,
+	"attachments": http.MethodPost,
+	"render":      http.MethodPost,
+}
+
+// trackerAttachmentTypes are the content types the attachment read serves.
+var trackerAttachmentTypes = map[string]bool{
+	"image/png":  true,
+	"image/jpeg": true,
+	"image/gif":  true,
+	"image/webp": true,
+}
+
+// validAttachmentOID reports an oid of 64 lowercase hex digits.
+func validAttachmentOID(oid string) bool {
+	if len(oid) != 64 {
+		return false
+	}
+	for i := 0; i < len(oid); i++ {
+		if c := oid[i]; (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // TrackerChanged bumps the tracker revision and wakes every stream, which
@@ -215,7 +288,7 @@ func decodeTrackerBody(w http.ResponseWriter, r *http.Request, v any) bool {
 // handleTracker serves every route under /tracker/ (see the file comment).
 func (d *Daemon) handleTracker(w http.ResponseWriter, r *http.Request) {
 	rest := strings.TrimPrefix(r.URL.Path, "/tracker/")
-	var method, storeID, op string
+	var method, storeID, op, oid string
 	switch {
 	case rest == "stores":
 		method = http.MethodGet
@@ -228,6 +301,14 @@ func (d *Daemon) handleTracker(w http.ResponseWriter, r *http.Request) {
 		method = http.MethodPost
 	case strings.HasPrefix(rest, "stores/"):
 		id, sub, ok := strings.Cut(strings.TrimPrefix(rest, "stores/"), "/")
+		if a, ok := strings.CutPrefix(sub, "attachments/"); ok {
+			if id == "" || !validAttachmentOID(a) {
+				trackerError(w, http.StatusNotFound, "not found")
+				return
+			}
+			method, storeID, op, oid = http.MethodGet, id, "attachment", a
+			break
+		}
 		m, known := trackerStoreOps[sub]
 		if !ok || id == "" || !known {
 			trackerError(w, http.StatusNotFound, "not found")
@@ -261,7 +342,7 @@ func (d *Daemon) handleTracker(w http.ResponseWriter, r *http.Request) {
 	ctx := context.WithoutCancel(r.Context())
 	switch {
 	case rest == "stores":
-		writeJSON(w, http.StatusOK, map[string]any{"stores": nonNil(stores), "rev": d.trackerRev.Load()})
+		writeJSON(w, http.StatusOK, map[string]any{"stores": nonNil(stores), "rev": d.trackerRev.Load(), "support": d.support != nil})
 	case rest == "profiles" && method == http.MethodGet:
 		d.trackerProfiles(w)
 	case rest == "profiles":
@@ -333,6 +414,10 @@ func (d *Daemon) handleTracker(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"html": html})
+	case op == "attachments":
+		d.trackerStageAttachment(ctx, w, r, storeID)
+	case op == "attachment":
+		d.trackerReadAttachment(w, r, storeID, oid)
 	}
 }
 
@@ -383,4 +468,64 @@ func (d *Daemon) trackerDispatch(ctx context.Context, w http.ResponseWriter, r *
 	}
 	d.TrackerChanged()
 	writeJSON(w, http.StatusOK, map[string]any{"ids": nonNil(ids)})
+}
+
+// trackerStageAttachment serves the attachment upload of store id. Staging
+// changes no view, so it does not bump the revision; the dispatch naming
+// the attachment does.
+func (d *Daemon) trackerStageAttachment(ctx context.Context, w http.ResponseWriter, r *http.Request, id string) {
+	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, trackerAttachmentBodyLimit))
+	if err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			trackerError(w, http.StatusRequestEntityTooLarge, "attachment too large")
+		} else {
+			trackerError(w, http.StatusBadRequest, "unreadable request body")
+		}
+		return
+	}
+	att, err := d.tracker.StageAttachment(ctx, id, r.URL.Query().Get("name"), data)
+	switch {
+	case errors.Is(err, ErrTrackerNotImage):
+		trackerError(w, http.StatusUnsupportedMediaType, err.Error())
+	case errors.Is(err, ErrTrackerAttachmentTooLarge):
+		trackerError(w, http.StatusRequestEntityTooLarge, err.Error())
+	case err != nil:
+		// Not the upload's fault: the store's write lock or disk.
+		trackerError(w, http.StatusInternalServerError, err.Error())
+	default:
+		writeJSON(w, http.StatusOK, att)
+	}
+}
+
+// trackerReadAttachment serves attachment oid of store id.
+func (d *Daemon) trackerReadAttachment(w http.ResponseWriter, r *http.Request, id, oid string) {
+	if crossSiteFetch(r) {
+		trackerError(w, http.StatusNotFound, "not found")
+		return
+	}
+	data, err := d.tracker.ReadAttachment(r.Context(), id, oid)
+	if errors.Is(err, ErrTrackerAttachmentNotFound) {
+		trackerError(w, http.StatusNotFound, "not found")
+		return
+	}
+	if err != nil {
+		trackerError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	ctype := http.DetectContentType(data)
+	if !trackerAttachmentTypes[ctype] {
+		trackerError(w, http.StatusNotFound, "not found")
+		return
+	}
+	h := w.Header()
+	h.Set("Content-Type", ctype)
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("Content-Security-Policy", imageContentSecurityPolicy)
+	h.Set("Cache-Control", "private, max-age=31536000, immutable")
+	h.Set("Referrer-Policy", "no-referrer")
+	h.Set("Cross-Origin-Resource-Policy", "same-origin")
+	h.Set("Content-Length", strconv.Itoa(len(data)))
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
 }

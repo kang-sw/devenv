@@ -429,9 +429,13 @@ type piLine struct {
 	Data       json.RawMessage `json:"data"`
 	Message    json.RawMessage `json:"message"`
 	ToolCallID string          `json:"toolCallId"`
-	IsError    bool            `json:"isError"`
-	Reason     string          `json:"reason"`
-	Method     string          `json:"method"`
+	ToolName   string          `json:"toolName"`
+	// Result is a tool_execution_end's result, read only for a card call:
+	// left raw so no other line's result shape can fail the line's decode.
+	Result  json.RawMessage `json:"result"`
+	IsError bool            `json:"isError"`
+	Reason  string          `json:"reason"`
+	Method  string          `json:"method"`
 }
 
 type piMessage struct {
@@ -494,7 +498,22 @@ func (m *piMapper) mapLine(line []byte, replies lineReplies) []Event {
 	case "message_end":
 		return m.message(l.Message, now)
 	case "tool_execution_end":
-		return m.batches.endCall(l.ToolCallID, l.IsError, now)
+		out := m.batches.endCall(l.ToolCallID, l.IsError, now)
+		var result struct {
+			Content []piBlock `json:"content"`
+		}
+		if !l.IsError && l.ToolName == piMCPToolName(ReservedMCPServer, CardTool) && json.Unmarshal(l.Result, &result) == nil {
+			var parts []string
+			for _, b := range result.Content {
+				if b.Type == "text" {
+					parts = append(parts, b.Text)
+				}
+			}
+			if ev := cardEvent(strings.Join(parts, "\n")); ev != nil {
+				out = append(out, *ev)
+			}
+		}
+		return out
 	case "compaction_start", "compaction_end":
 		trigger := ""
 		switch l.Reason {

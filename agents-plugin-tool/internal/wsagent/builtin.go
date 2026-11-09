@@ -29,6 +29,13 @@ const (
 // playbook's grammar.
 var SupportWSTools = []string{"tracker.query", "tracker.update", "tracker.show", "git.search", "playbook.read"}
 
+// SupportClaudeTools are the built-in tools the Claude support profile
+// allows: Agent alone, so the agent may spawn subagents. Claude applies the
+// launch's --tools and dontAsk allowlist to those subagents too, so they
+// reach nothing the parent cannot (a subagent type whose every tool is
+// outside the list is refused). Pi has no subagent tool and gets none.
+var SupportClaudeTools = []string{"Agent"}
+
 //go:embed instructions/tracker-support.md
 var trackerSupportText string
 
@@ -61,9 +68,14 @@ func builtinInstructionName(value string) (string, bool) {
 func BuiltinProfiles() map[string]json.RawMessage {
 	out := map[string]json.RawMessage{}
 	for name, backend := range map[string]string{SupportProfileClaude: BackendClaude, SupportProfilePi: BackendPi} {
+		var tools []string
+		if backend == BackendClaude {
+			tools = SupportClaudeTools
+		}
 		raw, err := json.Marshal(Profile{
 			Description:  fmt.Sprintf("Tracker store support agent (%s): talks with the user about one tracker store from the store's chat card; reads the user's stores and local git repositories, and writes to its own store only when asked.", backend),
 			Backend:      backend,
+			Tools:        tools,
 			WSTools:      SupportWSTools,
 			Instructions: BuiltinInstructionsPrefix + supportInstructions,
 		})

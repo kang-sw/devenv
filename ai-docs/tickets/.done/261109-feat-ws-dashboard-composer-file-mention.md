@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: f158aae35f54195b
 sage-review-completeness-reviewed: f158aae35f54195b
+completed: 2026-11-09
 ---
 
 # ws dashboard composer: @ file mention with a fuzzy popup (root search and absolute-path browsing)
@@ -174,3 +175,51 @@ view and system open).
   reasons through the key paths (popup open: Enter, Tab on file and on
   directory, Esc; popup closed: unchanged behavior) and lists the browser
   hand check as unverified if not done.
+
+### Result (0e59fc0dc) - 2026-11-09
+
+Landed in c984fdc97 (server), b27455b47 (page), 0e59fc0dc (review fixes).
+
+- Server: `GET /s/<rid>/files?q=` in `wsdashboard/files_route.go`, with the
+  contract's mode detection (`absQuery`), answer shape, 50-item cap, per-root
+  10-second cache (`fileListCache`, one listing per root under a burst),
+  `git ls-files -z --cached --others --exclude-standard` under a 5-second
+  timeout, and the capped `WalkDir` fallback (depth 8, 20,000 entries,
+  dot-directories skipped, symlinked dirs not followed). Directories are
+  derived from listed files' parents. Abs mode is refused unless
+  `localViewer` and not a cross-site fetch, refuses UNC/device/NT-namespace
+  spellings on the raw query, non-plain volumes, and (on Windows) reserved
+  device names before the filesystem is touched, re-checks after
+  `EvalSymlinks`, lists one directory, and carries CORP same-origin.
+  Dot-entries show only for a basename query starting with `.`. Fuzzy scorer
+  `fuzzyScore` (basename, boundary, camel, consecutive bonuses; length
+  penalty).
+- Page: `assets/mention.js` (`window.wsMention.attach(input, {source,
+  insert, onPick, label})`, plus `paint` and `tokenAt`), inlined ahead of
+  `dashboard.js`; it creates its own listbox element, binds no fixed ids,
+  and owns token detection (bare and backticked forms, reopen on
+  continuing a mention), anchor/placement, ARIA wiring, keys, mouse picks,
+  and directory continuation. The composer records picked mentions as
+  ranges (prefix/suffix diff per input, re-validated against text and
+  whitespace boundaries), paints them as pills on `#chl` behind the
+  textarea, and `sendMessage` strips the `@` from recorded mentions only.
+  One i18n key, `js.mention.label`, in all 11 tables.
+- Verification: `go vet ./internal/wsdashboard/` (also `GOOS=windows`)
+  clean; `go test ./internal/wsdashboard/ ./internal/wsi18n/` ok;
+  `node --check` on mention.js and dashboard.js ok; an ad-hoc node check of
+  `tokenAt`/`mentionParts` (19 cases) passed. Lite review: no
+  Critical/Important; four minors fixed in 0e59fc0dc.
+- Key paths reasoned (no JS harness): popup shown -> Enter and Tab pick
+  (never send), Tab on a directory inserts `dir/` and keeps the popup on
+  its contents, Tab on a file completes and closes, Esc closes without
+  arming Tab-out, Up/Down move; popup hidden (no token, or zero candidates)
+  -> `key()` returns false, so Tab indent, Esc Tab-out, and input-mode send
+  keys are unchanged. The IME guard still runs first.
+- Decisions: the popup counts as open only with at least one candidate, so
+  a zero-match token (`thanks @team`) leaves Enter sending; a multi-line Tab
+  indent over a mention drops its record (sent as typed); held messages a
+  cancel returns come back as plain text (no draft store).
+- Unverified: browser hand check of the popup, pill alignment, and
+  Windows-path browsing. Open: on Windows, `EvalSymlinks` and a listed
+  symlink's `Stat` follow a link before the resolved path is checked (same
+  as the image route; loopback only).
