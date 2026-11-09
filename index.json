@@ -360,7 +360,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-09T06:15:36Z"
+        "touched_at": "2026-11-09T06:16:24Z",
+        "impl": {
+          "branch": "impl/develop/outer-treat-knee"
+        }
       }
     },
     "261109-bug-ws-whiteboard-patch-cannot-change-item-class": {
