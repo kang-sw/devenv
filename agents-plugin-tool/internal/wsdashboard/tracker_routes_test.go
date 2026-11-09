@@ -147,7 +147,11 @@ func (f *fakeTracker) Render(_ context.Context, id string, req TrackerRenderRequ
 	if f.renderErr != nil {
 		return "", f.renderErr
 	}
-	return "<p>" + req.Text + "</p>", nil
+	out := "<p>" + req.Text + "</p>"
+	for _, a := range req.Attachments {
+		out += "[" + a.OID + " " + a.Name + "]"
+	}
+	return out, nil
 }
 
 func (f *fakeTracker) StageAttachment(_ context.Context, id, name string, data []byte) (TrackerAttachment, error) {
@@ -329,6 +333,11 @@ func TestTrackerRoutesAnswer(t *testing.T) {
 	code, body = call(d, http.MethodPost, "/tracker/stores/team/render", `{"text":"**md**"}`)
 	if code != http.StatusOK || body != `{"html":"\u003cp\u003e**md**\u003c/p\u003e"}`+"\n" {
 		t.Fatalf("render = %d %s", code, body)
+	}
+	// The pending attachment list reaches the host as sent.
+	code, body = call(d, http.MethodPost, "/tracker/stores/team/render", `{"text":"x","attachments":[{"oid":"abc","name":"a.png","size":3,"mime":"image/png"}]}`)
+	if code != http.StatusOK || body != `{"html":"\u003cp\u003ex\u003c/p\u003e[abc a.png]"}`+"\n" {
+		t.Fatalf("render with attachments = %d %s", code, body)
 	}
 
 	for _, wrong := range []struct{ method, path string }{

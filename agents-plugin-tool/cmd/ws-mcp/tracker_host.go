@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"net/url"
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsdashboard"
@@ -64,7 +65,7 @@ func (t *dashboardTracker) View(ctx context.Context, id string) (wsdashboard.Tra
 		return wsdashboard.TrackerView{}, redacted(err)
 	}
 	v.Redact()
-	raw, err := json.Marshal(dashboardView{StoreView: v, HTML: renderViewHTML(v)})
+	raw, err := json.Marshal(dashboardView{StoreView: v, HTML: renderViewHTML(id, v)})
 	if err != nil {
 		return wsdashboard.TrackerView{}, err
 	}
@@ -94,42 +95,85 @@ type viewHTML struct {
 	Comments map[string]template.HTML `json:"comments"`
 }
 
-func renderViewHTML(v *wstrackerhost.StoreView) viewHTML {
+func renderViewHTML(id string, v *wstrackerhost.StoreView) viewHTML {
 	out := viewHTML{Items: map[string]template.HTML{}, Comments: map[string]template.HTML{}}
 	if v == nil || v.View == nil {
 		return out
 	}
-	for id, it := range v.Items {
+	for iid, it := range v.Items {
 		if it.Body != "" {
-			out.Items[id] = trackerText(it.Body)
+			out.Items[iid] = trackerText(it.Body, ownAttachments(id, attachmentOIDs(it.Attachments)))
 		}
 	}
-	for id, c := range v.Comments {
+	for cid, c := range v.Comments {
 		if c.Body != "" && c.Hidden == nil {
-			out.Comments[id] = trackerText(c.Body)
+			out.Comments[cid] = trackerText(c.Body, ownAttachments(id, attachmentOIDs(c.Attachments)))
 		}
 	}
 	return out
 }
 
+func attachmentOIDs(l []wstracker.AttachmentView) []string {
+	out := make([]string, len(l))
+	for i, a := range l {
+		out[i] = a.OID
+	}
+	return out
+}
+
 // trackerText renders tracker text as markdown. The text is any store
-// member's, so it renders under the zero TextTargets: a tag the author
-// types is escaped text, a file path or local image is path text, a
+// member's, so it renders under the zero TextTargets but for own: a tag the
+// author types is escaped text, a file path or local image is path text, a
 // network image is its alt text, only an http(s) link (opening in a new
 // tab, rel="noopener noreferrer") or an in-page fragment is an anchor, and
-// item references and mermaid fences stay literal.
-func trackerText(s string) template.HTML {
-	return wswhiteboard.RenderText(s, wswhiteboard.TextTargets{})
+// item references and mermaid fences stay literal. An image written
+// ![name](attachment:<oid>) is an <img> only when own serves that oid: the
+// attachments of the same body or comment (ownAttachments); nil serves none.
+func trackerText(s string, own func(oid string) string) template.HTML {
+	return wswhiteboard.RenderText(s, wswhiteboard.TextTargets{AttachmentSrc: own})
+}
+
+// ownAttachments serves each oid of oids, a text's own attachment list, from
+// store id's attachment read route; any other oid is not served.
+func ownAttachments(id string, oids []string) func(string) string {
+	if len(oids) == 0 {
+		return nil
+	}
+	set := make(map[string]bool, len(oids))
+	for _, oid := range oids {
+		if wsledger.ValidAttachmentOID(oid) {
+			set[oid] = true
+		}
+	}
+	return func(oid string) string {
+		if !set[oid] {
+			return ""
+		}
+		return "/tracker/stores/" + url.PathEscape(id) + "/attachments/" + oid
+	}
 }
 
 // Render is an editor's preview: the text through trackerText, the same
 // renderer renderViewHTML runs, so the preview and the saved view match.
-// The route already checked that the store is listed.
-func (t *dashboardTracker) Render(_ context.Context, _ string, req wsdashboard.TrackerRenderRequest) (string, error) {
+// The text's own attachments are the pending list the request carries,
+// each kept only when its oid is staged on this clone or already stored
+// (what a write may name), so a preview cannot open an image no save
+// could. The route already checked that the store is listed.
+func (t *dashboardTracker) Render(ctx context.Context, id string, req wsdashboard.TrackerRenderRequest) (string, error) {
 	if t.err != nil {
 		return "", redacted(t.err)
 	}
-	return string(trackerText(req.Text)), nil
+	var oids []string
+	for _, a := range req.Attachments {
+		ok, err := t.h.HasAttachment(ctx, id, a.OID)
+		if err != nil {
+			return "", redacted(err)
+		}
+		if ok {
+			oids = append(oids, a.OID)
+		}
+	}
+	return string(trackerText(req.Text, ownAttachments(id, oids))), nil
 }
 
 func (t *dashboardTracker) Dispatch(ctx context.Context, id string, events []wsdashboard.TrackerEvent) ([]string, error) {

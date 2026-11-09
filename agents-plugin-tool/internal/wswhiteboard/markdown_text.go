@@ -18,6 +18,12 @@ type TextTargets struct {
 	// OutsideImage serves an image outside the session root to the viewers
 	// that may load it (View.OutsideImage); nil leaves it to the rules above.
 	OutsideImage func(path string) FileAction
+	// AttachmentSrc serves an image whose destination is attachment:<oid>
+	// (a store attachment named by its content hash): the src it loads
+	// from, a path on the serving daemon, or empty to leave the image as
+	// its alt text. Nil leaves every such image as alt text, and a link to
+	// one is never an anchor.
+	AttachmentSrc func(oid string) string
 	// Mermaid renders a mermaid fence as <pre class="mermaid"> for the host
 	// page to draw. Off, it is a plain code block: for text that re-renders
 	// as it streams, where a diagram would redraw on every tick, and for a
@@ -41,7 +47,7 @@ func RenderText(s string, t TextTargets) template.HTML {
 	if fileText == nil {
 		fileText = func(string) string { return "" }
 	}
-	p := &pageData{View: View{FileText: fileText, ImageSrc: t.ImageSrc, FileActions: t.FileActions, OutsideImage: t.OutsideImage}, noMermaid: !t.Mermaid, noInlineTags: true}
+	p := &pageData{View: View{FileText: fileText, ImageSrc: t.ImageSrc, FileActions: t.FileActions, OutsideImage: t.OutsideImage}, noMermaid: !t.Mermaid, noInlineTags: true, attachmentSrc: t.AttachmentSrc}
 	if !t.HTML {
 		return p.Block(s)
 	}

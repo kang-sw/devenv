@@ -22,7 +22,7 @@ import (
 //	POST /tracker/stores/<id>/check      the sync report
 //	POST /tracker/stores/<id>/sync       the sync report
 //	POST /tracker/stores/<id>/seen       {"badge", "read"} -> 204
-//	POST /tracker/stores/<id>/render     {"text"} -> {"html"}: an editor's preview
+//	POST /tracker/stores/<id>/render     {"text", "attachments"} -> {"html"}: an editor's preview
 //	POST /tracker/stores/<id>/attachments?name=<name>
 //	                                     raw image bytes -> {"oid", "name", "size", "mime"}
 //	GET  /tracker/stores/<id>/attachments/<oid>
@@ -113,9 +113,12 @@ type TrackerHost interface {
 }
 
 // TrackerRenderRequest is the render route's body: the markdown text an
-// editor holds.
+// editor holds and the attachments its save would carry (the stored ones
+// plus the images uploaded meanwhile), which the host may render inline
+// when each is staged or stored.
 type TrackerRenderRequest struct {
-	Text string `json:"text"`
+	Text        string              `json:"text"`
+	Attachments []TrackerAttachment `json:"attachments,omitempty"`
 }
 
 // TrackerAttachment is a staged attachment as the upload route answers it.

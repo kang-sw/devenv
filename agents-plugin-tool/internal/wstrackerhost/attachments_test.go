@@ -38,7 +38,8 @@ func createWithAttachment(t *testing.T, h *Host, store string, att Attachment) (
 // accepted image within the limit; a dispatch naming an oid that is neither
 // staged nor stored is refused; a dispatch naming a staged oid writes the
 // blob with the event and drops the staged copy; the blob is readable on
-// the writer before the push and on another machine after it.
+// the writer before the push and on another machine after it. HasAttachment
+// answers true for a staged, pending, or stored oid and false otherwise.
 func TestAttachmentsStageDispatchRead(t *testing.T) {
 	w := newWorld(t)
 	a, b := w.machine("a"), w.machine("b")
@@ -72,6 +73,16 @@ func TestAttachmentsStageDispatchRead(t *testing.T) {
 
 	unknown := att
 	unknown.OID = attachmentOID([]byte("never uploaded"))
+	hasAtt := func(h *Host, oid string, want bool, when string) {
+		t.Helper()
+		if got, err := h.HasAttachment(ctx, "team", oid); err != nil || got != want {
+			t.Fatalf("HasAttachment(%s) %s = %v, %v; want %v", oid, when, got, err, want)
+		}
+	}
+	hasAtt(a, att.OID, true, "staged")
+	hasAtt(a, unknown.OID, false, "never uploaded")
+	hasAtt(a, "zz", false, "malformed")
+	hasAtt(b, att.OID, false, "staged on another machine")
 	var refusal *wstracker.Refusal
 	if _, err := createWithAttachment(t, a, "team", unknown); !errors.As(err, &refusal) {
 		t.Fatalf("dispatch naming an unstaged oid = %v, want a refusal", err)
@@ -87,6 +98,7 @@ func TestAttachmentsStageDispatchRead(t *testing.T) {
 	if got, err := a.ReadAttachment(ctx, "team", att.OID); err != nil || !bytes.Equal(got, data) {
 		t.Fatalf("read of a pending blob = %q, %v", got, err)
 	}
+	hasAtt(a, att.OID, true, "pending")
 	if atts := view(t, a, "team").Items[ids[0].String()].Attachments; len(atts) != 1 || atts[0].OID != att.OID {
 		t.Fatalf("item attachments = %+v", atts)
 	}
@@ -103,6 +115,7 @@ func TestAttachmentsStageDispatchRead(t *testing.T) {
 	if !hasItem(view(t, b, "team"), ids[0].String()) {
 		t.Fatal("bo did not receive the item")
 	}
+	hasAtt(b, att.OID, true, "stored by another member")
 	if got, err := b.ReadAttachment(ctx, "team", att.OID); err != nil || !bytes.Equal(got, data) {
 		t.Fatalf("bo's read = %q, %v", got, err)
 	}
