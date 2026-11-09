@@ -3067,6 +3067,8 @@
     var focusSearch = fa && fa.id === 'psearch' ? [fa.selectionStart, fa.selectionEnd] : null;
     // an inline input (new item, subtask, in-place edit, the composer) keeps focus and its caret
     var focusKeep = fa && fa.id && fa.hasAttribute('data-keep') ? [fa.id, fa.selectionStart, fa.selectionEnd] : null;
+    // an editor's Write / Preview toggle keeps focus too (it has focus while the editor previews)
+    var focusTab = fa && fa.classList && fa.classList.contains('tked-tab') ? '.tked-tab[data-ed="' + CSS.escape(fa.getAttribute('data-ed')) + '"][data-mode="' + fa.getAttribute('data-mode') + '"]' : null;
     var focusFk = fa && fa.closest && (body.contains(fa) || sb.contains(fa)) && fa.closest('[data-fk]'); // the fold buttons keep keyboard focus across their re-render
     focusFk = focusFk && focusFk.getAttribute('data-fk');
     Array.prototype.forEach.call(body.querySelectorAll('.card[id] > .cbody'), function (c) { scrolls[c.parentNode.id] = c.scrollTop; });
@@ -3110,6 +3112,8 @@
     if (open) placeSub();
     var fk2 = focusKeep && $(focusKeep[0]);
     if (fk2) { fk2.focus({ preventScroll: true }); try { fk2.setSelectionRange(focusKeep[1], focusKeep[2]); } catch (x) { /* not a text field */ } }
+    var ft = focusTab && document.querySelector(focusTab);
+    if (ft) ft.focus({ preventScroll: true });
     if (MP) mentionSync(); // the editors were redrawn: the popup follows the new box, or closes with it
     // the menu stays over the redraw: the status popover follows the store, an item menu closes with its item
     if (MN && MN.kind === 'sync') {
@@ -3679,6 +3683,17 @@
       if ((e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) && own(t) && !t.closest('#tkdlg, input, textarea, select')) {
         var mk = t.closest('[data-mitem], [data-item]');
         if (mk) { e.preventDefault(); itemMenu(mk.getAttribute('data-mitem') || mk.getAttribute('data-item'), t.closest('[data-rk]') && !t.matches('button') ? t.closest('[data-rk]') : t); }
+        return;
+      }
+      // an editor showing its preview (focus on its toggle or the pane): Cmd/Ctrl+Enter saves or
+      // sends as in its textarea, and Esc goes back to writing rather than closing the window
+      var edw = own(t) && t.closest && t.closest('.tked-tabs, .tked-pv') && t.closest('.tked'), eid = edw && edw.getAttribute('data-ed');
+      if (eid && ui.edpv[eid] && (chord || e.key === 'Escape')) {
+        e.preventDefault();
+        if (e.key === 'Escape') edMode(eid, 'write');
+        else if (eid === 'iw-ebody') saveEdit();
+        else if (eid === 'tkcedit') saveCedit();
+        else if (eid === 'cbox' && $('tkcsend')) quick('comment', $('tkcsend'));
         return;
       }
       // the inline inputs: Enter (or Cmd/Ctrl+Enter in a multi-line field) writes, Esc leaves
