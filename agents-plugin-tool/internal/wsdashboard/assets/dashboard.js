@@ -1789,7 +1789,7 @@
     var href = relayHref(f.getAttribute("data-relay") || "", m.href), id = m.id;
     if (!href || typeof id !== "number" || !window.fetch) return;
     // A frame asks again when the host asks for its height, in case its
-    // first request went out before this listener; each frame element is
+    // first request went out before this listener; each frame element
     // fetches each of its requests once.
     var asked = f.wbRelayAsked || (f.wbRelayAsked = {});
     if (asked[id]) return;
