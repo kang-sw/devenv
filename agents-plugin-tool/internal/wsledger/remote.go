@@ -673,12 +673,11 @@ func Register(ctx context.Context, opts Options, url string) (*Ledger, error) {
 			pushed = append(json.RawMessage(nil), l.genesis.raw...)
 		}
 		// A store that had no remote until now publishes its wikis too; a
-		// wiki the remote refuses is reported, and the next sync retries it.
-		failed, err := l.pushLocalWikis(ctx)
-		if err != nil {
+		// wiki the remote refuses is reported (wikiPushWarns), and the next
+		// sync retries it.
+		if _, err := l.pushLocalWikis(ctx); err != nil {
 			return err
 		}
-		l.pendingWarns = append(l.pendingWarns, wikiPushWarnings(failed)...)
 		if err := l.fetchRemote(ctx); err != nil {
 			return err
 		}

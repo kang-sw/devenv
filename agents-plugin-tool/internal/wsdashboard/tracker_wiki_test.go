@@ -66,6 +66,24 @@ wkPull(a);
 answer('read', { ok: false, status: 404, error: 'not found' });
 check('editors opened once A shows', starts, ['A:missing']);
 
+// B1 with a change signal: the signal marks the in-flight read to run again, and the 404
+// lands while B shows; the re-run must not read A's page softly (a soft 404 is an error,
+// which keeps A's new-page editor from opening when A shows again).
+pending = []; starts = []; ui.store = 'A';
+a = ui.wiki.A = state({ page: 'missing', doc: null });
+wkLoadDoc(a, 'A', 'w', 'missing');
+wkRefresh();
+ui.store = 'B';
+answer('read', { ok: false, status: 404, error: 'not found' });
+check('reads pending after the switched 404', kinds(), 'list,pages');
+answer('list', { ok: true, wikis: [{ name: 'w' }] });
+answer('pages', { ok: true, pages: ['index'], commit: 'c1' });
+check('A page after the switched 404 and signal', [a.doc, a.docErr], [null, null]);
+ui.store = 'A';
+wkPull(a);
+answer('read', { ok: false, status: 404, error: 'not found' });
+check('editors opened once A shows after the signal', starts, ['A:missing']);
+
 // B2: a change signal while every read is in flight.
 pending = []; ui.store = 'A';
 var s = ui.wiki.A = state({});

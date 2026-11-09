@@ -36,8 +36,8 @@ func RedactCredentials(s string) string {
 	})
 }
 
-// Redact redacts the view's remote URL and sync error in place; a nil
-// view is left alone.
+// Redact redacts the view's remote URL, sync error, and wiki warnings in
+// place; a nil view is left alone.
 func (v *StoreView) Redact() {
 	if v == nil {
 		return
@@ -47,4 +47,7 @@ func (v *StoreView) Redact() {
 		v.Store.Remote = &r
 	}
 	v.Sync.Error = RedactCredentials(v.Sync.Error)
+	for i, w := range v.Sync.WikiWarnings {
+		v.Sync.WikiWarnings[i] = RedactCredentials(w)
+	}
 }

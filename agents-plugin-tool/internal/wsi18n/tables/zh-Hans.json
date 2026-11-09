@@ -795,6 +795,7 @@
   "js.tk.sync.unpushed": "我的 {0} 次写入尚未 push",
   "js.tk.sync.upstream": "上游有 {0} 个提交尚未 fetch",
   "js.tk.sync.upstream.tip": "其他克隆已 push、但此克隆尚未 fetch 的提交",
+  "js.tk.sync.wikiwarn": "wiki 同步失败",
   "js.tk.tab.activity": "活动",
   "js.tk.tab.aria": "追踪器标签页",
   "js.tk.tab.items": "条目",

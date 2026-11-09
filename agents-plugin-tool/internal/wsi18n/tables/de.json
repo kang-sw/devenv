@@ -795,6 +795,7 @@
   "js.tk.sync.unpushed": "{0} meiner Schreibvorgänge noch nicht gepusht",
   "js.tk.sync.upstream": "{0} Upstream-Commits nicht abgerufen",
   "js.tk.sync.upstream.tip": "Commits, die andere Clones gepusht haben und die dieser Clone noch nicht abgerufen hat",
+  "js.tk.sync.wikiwarn": "Wiki-Synchronisierung fehlgeschlagen",
   "js.tk.tab.activity": "Aktivität",
   "js.tk.tab.aria": "Tracker-Tabs",
   "js.tk.tab.items": "Einträge",

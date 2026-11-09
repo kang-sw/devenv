@@ -795,6 +795,7 @@
   "js.tk.sync.unpushed": "{0} of my writes not yet pushed",
   "js.tk.sync.upstream": "{0} upstream commits not fetched",
   "js.tk.sync.upstream.tip": "commits other clones pushed that this clone has not fetched",
+  "js.tk.sync.wikiwarn": "wiki sync failed",
   "js.tk.tab.activity": "Activity",
   "js.tk.tab.aria": "tracker tabs",
   "js.tk.tab.items": "Items",

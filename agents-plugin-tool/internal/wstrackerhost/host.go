@@ -347,7 +347,7 @@ func (h *Host) Register(ctx context.Context, req RegisterRequest) (RegisterResul
 	}
 	if entry.Remote != "" {
 		// Publish the profile now; a failure leaves it to the idle push.
-		_ = h.attempt(ctx, st, networkTimeout, func(ctx context.Context) error { _, err := st.ledger.Sync(ctx); return err })
+		_ = h.attempt(ctx, st, networkTimeout, st.ledger.Sync)
 	}
 	res.Entry = entry
 	_ = h.SaveProfile(profile) // the store is registered; a lost profile save costs only the default
@@ -547,10 +547,10 @@ func (h *Host) Check(ctx context.Context, id string) (wsledger.SyncReport, error
 			rep, err = st.ledger.Reload(ctx)
 			return err
 		}
-		return h.attempt(ctx, st, networkTimeout, func(ctx context.Context) error {
+		return h.attempt(ctx, st, networkTimeout, func(ctx context.Context) (wsledger.SyncReport, error) {
 			var err error
 			rep, err = st.ledger.Fetch(ctx)
-			return err
+			return rep, err
 		})
 	})
 	return rep, err
@@ -568,10 +568,10 @@ func (h *Host) Sync(ctx context.Context, id string) (wsledger.SyncReport, error)
 			rep, err = st.ledger.Sync(ctx)
 			return err
 		}
-		return h.attempt(ctx, st, networkTimeout, func(ctx context.Context) error {
+		return h.attempt(ctx, st, networkTimeout, func(ctx context.Context) (wsledger.SyncReport, error) {
 			var err error
 			rep, err = st.ledger.Sync(ctx)
-			return err
+			return rep, err
 		})
 	})
 	return rep, err
@@ -587,6 +587,11 @@ type syncState struct {
 	SyncedAt time.Time `json:"syncedAt,omitempty"`
 	// Error is the last attempt's error; empty when it reached the remote.
 	Error string `json:"error,omitempty"`
+	// WikiWarnings are the last attempt's wiki sync failures (a wiki fetch
+	// or push the ledger's sync went on without), one line each. The
+	// ledger re-reports them until the wiki syncs, so the next attempt
+	// after that clears them; a background poll's report is read here too.
+	WikiWarnings []string `json:"wikiWarnings,omitempty"`
 }
 
 const syncStateFile = "host-sync.json"
@@ -600,6 +605,18 @@ const (
 	writeLockWait = 2*networkTimeout + lockWait
 )
 
+// wikiWarnings renders the wiki sync failures among warns, one line each
+// naming the wiki (or the wiki namespace, for a failed fetch).
+func wikiWarnings(warns []wsledger.Warning) []string {
+	var out []string
+	for _, w := range warns {
+		if w.Kind == wsledger.WarnWikiSyncFailed {
+			out = append(out, strings.TrimPrefix(w.Ref, "refs/heads/")+": "+w.Detail)
+		}
+	}
+	return out
+}
+
 func readSyncState(dir string) syncState {
 	var s syncState
 	_ = readJSON(filepath.Join(dir, syncStateFile), &s)
@@ -608,12 +625,13 @@ func readSyncState(dir string) syncState {
 
 // attempt runs one network call on st within timeout and records its
 // outcome for every process. Callers hold st.mu.
-func (h *Host) attempt(ctx context.Context, st *store, timeout time.Duration, call func(context.Context) error) error {
+func (h *Host) attempt(ctx context.Context, st *store, timeout time.Duration, call func(context.Context) (wsledger.SyncReport, error)) error {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	err := call(ctx)
+	rep, err := call(ctx)
 	s := readSyncState(st.entry.Dir)
 	s.AttemptedAt = h.now()
+	s.WikiWarnings = wikiWarnings(rep.Warnings)
 	if err != nil {
 		s.Error = err.Error()
 	} else {

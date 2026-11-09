@@ -1140,13 +1140,15 @@
   // wkDone wraps a read's answer: it clears the busy flag of read k ('list' | 'pages' |
   // 'doc'), drops an answer for a state no longer kept, and runs read k once more when a
   // change signal arrived while it was in flight (wkReread marked it), since the answer
-  // predates that change.
+  // predates that change. A store no longer shown is not re-read: its re-read is a soft one,
+  // whose 404 for a page not yet read would set docErr and keep wkPull from opening the new
+  // page when the store shows again; what it is missing then is read by wkPull.
   function wkDone(st, store, k, fn) {
     return function (res) {
       st[k + 'Busy'] = false;
       if (ui.wiki[store] !== st) return;
       fn(res);
-      if (st[k + 'Again']) { st[k + 'Again'] = false; wkReread(st, store, k); }
+      if (st[k + 'Again']) { st[k + 'Again'] = false; if (ui.store === store) wkReread(st, store, k); }
     };
   }
   function wkLoadList(st, store) {
@@ -1831,15 +1833,19 @@
     if (!(m >= 1)) return wsT("js.tk.rib.now");
     return m < 60 ? wsTn("js.tk.rib.min", m) : m < 1440 ? wsTn("js.tk.rib.hour", Math.floor(m / 60)) : wsTn("js.tk.rib.day", Math.floor(m / 1440));
   }
+  // A wiki sync failure (a wiki fetch or push the ledger's sync went on without) leaves the
+  // store online; it marks the line and keeps it from dimming while it stands.
+  function wikiWarns(vs) { return vs.store.remote && vs.sync.wikiWarnings ? vs.sync.wikiWarnings : []; }
   function ribbonHtml() {
-    var s = VS.sync, remote = VS.store.remote, n = unpushedN(VS), tone, txt;
+    var s = VS.sync, remote = VS.store.remote, n = unpushedN(VS), ww = wikiWarns(VS), tone, txt;
     if (!remote) { tone = n ? 'pend' : 'local'; txt = wsT("js.tk.rib.local") + (n ? ' &middot; ' + wsTn("js.tk.rib.pending", n) : ''); }
     else if (!s.online) { tone = 'off'; txt = wsT("js.tk.sync.offline") + (n ? ' &middot; ' + wsTn("js.tk.rib.topush", n) : ''); }
     else if (n) { tone = 'pend'; txt = wsTn("js.tk.rib.topush", n); }
     else { tone = 'ok'; txt = esc(syncedAgo(s.syncedAt)); }
+    if (ww.length && s.online) { tone = 'pend'; txt += ' &middot; ' + wsT("js.tk.sync.wikiwarn"); }
     var open = !!(MN && MN.kind === 'sync');
-    return '<div class="ribbon r-' + tone + (n ? '' : ' idle') + '"><button type="button" class="rib-main"' + attr('act', 'rib') + attr('fk', 'rib') + ' aria-haspopup="dialog" aria-expanded="' + open + '"' +
-      tipAttr(wsT("js.tk.rib.tip") + (!s.online && remote && s.error ? ' (' + s.error + ')' : '')) + '><span class="sdot"></span><span class="rt">' + txt + '</span></button>' +
+    return '<div class="ribbon r-' + tone + (n || ww.length ? '' : ' idle') + '"><button type="button" class="rib-main"' + attr('act', 'rib') + attr('fk', 'rib') + ' aria-haspopup="dialog" aria-expanded="' + open + '"' +
+      tipAttr(wsT("js.tk.rib.tip") + (!s.online && remote && s.error ? ' (' + s.error + ')' : '') + (ww.length ? ' (' + ww.join('; ') + ')' : '')) + '><span class="sdot"></span><span class="rt">' + txt + '</span></button>' +
       (n ? btn('sync', remote ? wsT("js.tk.sync.now") : wsT("js.tk.sync.closebatch"), {}, 'primary') : '') + '</div>';
   }
   // The status popover: the clone ref, the remote state, the store's counts, the unpushed
@@ -1852,6 +1858,7 @@
     h += '<div>' + (remote ? '<b' + (!s.online && s.error ? tipAttr(s.error) : '') + '>' + (s.online ? wsT("js.tk.sync.online") : wsT("js.tk.sync.offline")) + '</b> &middot; ' +
       wsT("js.tk.sync.synced", esc(fmtTs(s.syncedAt))) + (s.online ? '' : ' &middot; ' + wsT("js.tk.sync.retry")) : wsT("js.tk.sync.noremote")) + '</div>';
     if (!s.online && remote && s.error) h += '<div class="err">' + esc(s.error) + '</div>';
+    wikiWarns(vs).forEach(function (w) { h += '<div class="err">' + esc(w) + '</div>'; });
     h += '<div class="muted">' + wsT("js.tk.drawer.stats", nMem, vs.stats.events, vs.stats.commits, vs.stats.flagged) + '</div>';
     h += '<div' + (events ? ' class="unp"' : '') + '>' + wsT("js.tk.sync.unpushed", events) + '</div>';
     if (remote && s.upstream) h += '<div class="muted"' + tipAttr(wsT("js.tk.sync.upstream.tip")) + '>' + wsT("js.tk.sync.upstream", s.upstream) + '</div>';
