@@ -21,6 +21,15 @@ asks for in its chat: the unasked recording below is a lead's, and
   and prints, per command position, the ID of the event it wrote. The ID a
   `tk:item.create` or `tk:comment.add` prints is the new item's or comment's
   ID for later batches.
+- `{{.McpNamespace}}/wiki.query` and `{{.McpNamespace}}/wiki.update` read and
+  edit a store's wikis, markdown pages kept on git branches of the store.
+  Read a page with `wiki.query` `op: "read"` before saving it, and pass the
+  commit that read returned as the save's `base`. A link
+  `[text](wiki:<name>/<path>)` names the page `<path>` (no `.md` suffix) of
+  the wiki `<name>` in the store whose item, comment, or page holds the link:
+  call the wiki tools with that store, `wiki: "<name>"`, and
+  `path: "<path>"`. Item bodies, comments, and wiki pages may link pages that
+  way.
 
 ## Recording
 

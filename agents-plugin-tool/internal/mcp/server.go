@@ -4919,7 +4919,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        wikiQueryTool,
-			"description": "Read-only; read a tracker store's wikis: markdown pages kept on git branches of the store, with full history. For a top-level lead, or a store's support conversation on its own store. op list lists the wikis, pages a wiki's pages, read one page with the commit it was read at (the base a wiki.update save of that page must name), search finds text in the pages, history lists commits with their signature verdicts, diff shows a page's change, and recovery lists tips a rewind or deletion replaced. Text by default; format \"json\" for structured output.",
+			"description": "Read-only; read a tracker store's wikis: markdown pages kept on git branches of the store, with full history. For a top-level lead, or a store's support conversation on its own store. op list lists the wikis, pages a wiki's pages, read one page with the commit it was read at (the base a wiki.update save of that page must name), search finds text in the pages, history lists commits with their signature verdicts, diff shows a page's change, and recovery lists tips a rewind or deletion replaced. A link wiki:<name>/<path> in a store's item, comment, or wiki page names the page <path> of the wiki <name> in that store. Text by default; format \"json\" for structured output.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -4940,7 +4940,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        wikiUpdateTool,
-			"description": "Save one edit to a tracker store's wiki as a signed commit. For a top-level lead, or a store's support conversation on its own store. Read the page with wiki.query op=read first and pass the commit it returned as base: a save never falls back to the current tip. When others saved since your base, a non-overlapping edit merges automatically; an overlapping one, or a base that is not an ancestor of the tip, is refused as a conflict carrying both texts and the tip to save on next. new_wiki: true creates a wiki that does not exist yet, with no base. The result names the new commit, the base for your next save.",
+			"description": "Save one edit to a tracker store's wiki as a signed commit. For a top-level lead, or a store's support conversation on its own store. Read the page with wiki.query op=read first and pass the commit it returned as base: a save never falls back to the current tip. When others saved since your base, a non-overlapping edit merges automatically; an overlapping one, or a base that is not an ancestor of the tip, is refused as a conflict carrying both texts and the tip to save on next. new_wiki: true creates a wiki that does not exist yet, with no base. The result names the new commit, the base for your next save. Item bodies, comments, and pages link a page of the same store as [text](wiki:<name>/<path>), the page <path> of the wiki <name>.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
