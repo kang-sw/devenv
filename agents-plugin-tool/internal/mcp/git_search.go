@@ -624,28 +624,31 @@ func parseGitSearchRequest(args map[string]any) (gitSearchRequest, error) {
 	return req, nil
 }
 
-// gitSearchArgs is the git argument list for req. ls-files and blame break
-// the common shape (checked on git 2.50): after --end-of-options, ls-files
-// reads "--" as a pathspec, so its paths go bare (each still a path, even
-// one starting with -); blame with a revision reads "--" as its path
-// ("--end-of-options HEAD -- f" fails), so a revision and its path go bare,
-// while "--end-of-options -- f" works when there is no revision.
+// gitSearchArgs is the git argument list for req. log and show take the
+// common shape. After --end-of-options, ls-files reads "--" as a pathspec
+// (checked on git 2.50), so its paths go bare (each still a path, even one
+// starting with -).
+//
+// grep and blame get no --end-of-options at all: git 2.43 grep reads it as
+// a revision ("unable to resolve revision: --end-of-options"), and 2.43
+// blame reads the word after it as its path ("--end-of-options -- f" fails
+// with "no such path '--'"), while 2.50 blame instead rejects
+// "--end-of-options HEAD -- f". Neither needs it: grep's pattern goes
+// through -e, a revision starting with - is refused by the request parser,
+// and their paths follow "--", so "[rev] -- path" is safe on both versions.
 func gitSearchArgs(req gitSearchRequest) []string {
 	args := []string{"--no-pager", "-c", "core.fsmonitor=false", req.command}
 	args = append(args, gitSearchForcedFlags[req.command]...)
 	args = append(args, req.options...)
-	if req.command == "grep" {
-		args = append(args, "-e", req.pattern)
-	}
-	args = append(args, "--end-of-options")
 	switch req.command {
-	case "ls-files":
-		return append(args, req.paths...)
+	case "grep":
+		args = append(args, "-e", req.pattern)
 	case "blame":
-		if len(req.revisions) == 1 {
-			return append(args, req.revisions[0], req.paths[0])
-		}
-		return append(args, "--", req.paths[0])
+	default:
+		args = append(args, "--end-of-options")
+	}
+	if req.command == "ls-files" {
+		return append(args, req.paths...)
 	}
 	args = append(args, req.revisions...)
 	args = append(args, "--")
