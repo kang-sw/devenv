@@ -4,6 +4,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 1b8518755d8f7989
 sage-review-completeness-reviewed: 1b8518755d8f7989
+completed: 2026-11-09
 ---
 
 # ws dashboard daemon: every stream re-renders its whole page on any session change
@@ -191,3 +192,54 @@ From `agents-plugin-tool/`: `gofmt -l ./internal ./cmd`, `go vet
   edit of a listed ticket file.
 Before / after CPU, file-open and wake/render numbers from the dev daemon,
 with the setup above, in the Result.
+
+### Result (f26637400) - 2026-11-09
+
+Landed in 6431890de (counters behind the pprof opt-in, at
+`/debug/pprof/streams`), dc8d5566e (targeted wake, shared render, refresh
+skip, index board-count memo), f26637400 (review fixes: mailbox panel
+inputs in the refresh stamp, volatile pages, failed renders retried).
+
+- Targeted wake: the broker numbers wakes per token (a reply-id, or
+  `git:<root>` for the git watcher). Each stream narrows to the tokens its
+  last render looked up (own reply-id, peers, delegates), and a wake that
+  lands during a render re-signals it. The index stream and an empty-token
+  wake reach everything; the tracker signals every stream without staling
+  any render.
+- Shared render: `stream_cache.go` keys a page by reply-id (empty for the
+  index), language, and theme. Theme went into the key instead of a
+  theme-neutral board. No region depends on the viewer class, so the key
+  holds none. `regionFilter.apply` copies.
+- Refresh skip: the stamp covers looked-up sessions' presence, Rev,
+  liveness, and adapter state; the stat of every path the page source names
+  in the new `PageContent.Watch` (ticket dirs and files, inlined images,
+  mailbox stores, history dir, listening marker); contact liveness via the
+  new `ContactSource`. A page with an armed wait is `Volatile` and
+  re-renders every tick, as before.
+- Further fix the measurement pointed at: after the first three, each of
+  200 index renders per window still re-read and re-rendered all six
+  session pages for `HasBoard`/`CountPolicy`. The index now memoizes those
+  per reply-id and Rev.
+
+Measurement (script outside the repo; 6 `serve --stdio` sessions with live
+adapter snapshots and peer mail, ~3 MCP writes/s, 3 streams on each of 2
+sessions plus 1 index stream, 60 s window, isolated cache/config, spare
+port). strace is not installed, so file reads are `/proc/<pid>/io` syscr,
+which also counts socket reads.
+
+| binary | CPU (% of a core) | read syscalls/s | session renders | index renders | shared | refresh skips | region sends |
+|---|---|---|---|---|---|---|---|
+| before (2 runs) | 20.4 / 19.5 | 2,401 / 2,408 | 1,200 / 1,204 | 200 / 201 | 0 | 0 | 653 |
+| wake + share + skip | 14.0 | 1,348 | 337 | 199 | 658 | 16 | 653 |
+| + index memo (2 runs) | 6.4 / 7.5 | 714 / 713 | 337 / 335 | 200 | 659 / 656 | 15 / 14 | 653 / 652 |
+| final, after review fixes | 4.3 | 716 | 338 | 201 | 660 | 16 | 654 |
+
+Wake counts were unchanged: 198 session wakes, no agent/git/inbox/tracker
+wakes in the window. The same region sends mean the pages got the same
+updates. Outside the wake and render path, the after-profile puts the
+nudge-driven `ReadSession` fingerprint at ~5% of samples (~0.5% of a core).
+That is too small for a follow-up ticket. The remaining cost is the session
+render per real change to a viewed page.
+
+Known minor: the board-count memo's Rev restarts at 1 when a session leaves
+and rejoins the index, so a stale count can show until its next change.
