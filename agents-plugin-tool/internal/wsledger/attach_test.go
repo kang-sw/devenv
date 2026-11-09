@@ -515,6 +515,37 @@ func TestAttachRestoreWithoutBlobsRestoresEventRefAlone(t *testing.T) {
 	}
 }
 
+// TestAttachRestoreWithoutBlobsAttachmentOnly: when the remote still holds
+// the member's event ref and only the attachment ref is gone, a restore by
+// a clone lacking the blobs has nothing to push, and still reports the
+// attachment ref as not restored rather than succeeding silently.
+func TestAttachRestoreWithoutBlobsAttachmentOnly(t *testing.T) {
+	w := newWorld(t)
+	url, dir := w.fileRemote("r", true)
+	ada := w.register(w.remoteOpts("ada", "c1"), url)
+	appendBlob(t, ada, blob("kept by ada"))
+	syncOK(t, ada)
+	bo := w.register(w.remoteOpts("bo", "c1"), url)
+	own, aref := memberRef("ada", "c1"), attachRef("ada", "c1")
+	if _, ok, _ := bo.git.readBlob(context.Background(), bo.attachIndex[blob("kept by ada").OID][0].blob); ok {
+		t.Fatal("the filtered fetch brought the blob; the test needs it absent")
+	}
+	wantOwn := remoteRefs(t, dir)[own]
+
+	remoteGit(t, dir, "update-ref", "-d", aref)
+	fetchOK(t, bo)
+	if err := bo.Restore(context.Background(), own); err != nil {
+		t.Fatalf("restore over an attachment-only deletion without the blobs: %v", err)
+	}
+	refs := remoteRefs(t, dir)
+	if refs[own] != wantOwn || refs[aref] != "" {
+		t.Fatalf("after restore remote %s=%s %s=%s, want the event ref untouched and the attachment ref still gone", own, refs[own], aref, refs[aref])
+	}
+	if rep := fetchOK(t, bo); !hasWarning(rep.Warnings, aref, WarnNotRestored) {
+		t.Fatalf("warnings = %+v, want WarnNotRestored on %s", rep.Warnings, aref)
+	}
+}
+
 // TestAttachFetchFailureLeavesEventsUnabsorbed: when the attachment-ref
 // fetch fails the event refs are not fetched, so no absorbed event names a
 // blob no tree holds.
