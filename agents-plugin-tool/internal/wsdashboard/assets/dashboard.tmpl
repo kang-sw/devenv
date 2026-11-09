@@ -103,7 +103,9 @@ drawer opens, and the cleanup button asks the session to clean the pool up
 {{/* subbadge is the running-subagent badge on the composer's top border,
 beside the interrupt badge: the page script fills its label from a convlive
 region's data-sub and data-subdeep and hides it while nothing runs. Any
-composer that shows a session's conversation may carry it. */}}
+composer that shows a session's conversation may carry it; the tracker's
+support chat card builds the same markup, without the id, in script
+(supChat). */}}
 {{define "subbadge"}}<span class="sbadge" id="sbadge" title="{{t "js.subagents.title"}}" hidden><span class="spin"></span>{{icon "agents"}}<span class="slabel"></span></span>{{end}}
 
 {{define "peer"}}{{if and .Served .Adapter (not .Compact)}}<details class="peer {{if .Live}}live{{else}}ended{{end}}" data-peer="{{.ReplyID}}"><summary>{{template "peerrow" .}}</summary><div class="ptree"><ol class="brows">{{range .Lead.Finished}}{{template "batch" .}}{{end}}{{template "liverows" .Lead}}</ol>{{with .Agents}}<div class="kids">{{range .}}{{template "agent" .}}{{end}}</div>{{end}}</div></details>{{else}}<div class="peer {{if .Live}}{{if .Compact}}live compact{{if not .Adapter}} nophase{{end}}{{else if .Served}}live nophase{{else}}unserved{{end}}{{else}}ended{{end}}">{{template "peerrow" .}}</div>{{end}}{{end}}
