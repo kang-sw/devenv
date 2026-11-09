@@ -142,8 +142,20 @@ func newLiveWriter(dir, key, adapter string, now func() time.Time, log io.Writer
 // was written.
 func (w *liveWriter) apply(ev wslive.Event) bool {
 	res, err := w.st.Apply(ev, w.now().UnixMilli())
+	return w.write(res, err, ev.Kind)
+}
+
+// card applies a tracker card reference the lead showed, as apply does.
+func (w *liveWriter) card(ref wslive.CardRef) bool {
+	res, err := w.st.Card(ref, w.now().UnixMilli())
+	return w.write(res, err, wslive.RingCard)
+}
+
+// write writes what an applied change of kind brought; a refused one (err)
+// is logged and dropped.
+func (w *liveWriter) write(res wslive.Result, err error, kind string) bool {
 	if err != nil {
-		fmt.Fprintf(w.log, "agent %s: drop %s event: %v\n", w.st.ReplyID(), ev.Kind, err)
+		fmt.Fprintf(w.log, "agent %s: drop %s event: %v\n", w.st.ReplyID(), kind, err)
 		return false
 	}
 	if len(res.Ring) > 0 {

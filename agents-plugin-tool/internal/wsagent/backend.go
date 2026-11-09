@@ -90,6 +90,9 @@ type Event struct {
 	// boundaries and user messages itself; a backend never sends
 	// turn_start, turn_end, user, or reset.
 	Live *wslive.Event
+	// Card is a tracker card the lead showed: a successful tracker.show call
+	// of the attached ws-mcp whose result opens with its card line.
+	Card *wslive.CardRef
 	// SessionID is the backend session id, once known; the runner persists
 	// it for resume.
 	SessionID string

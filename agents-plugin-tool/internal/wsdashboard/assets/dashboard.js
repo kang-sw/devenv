@@ -1893,7 +1893,7 @@
   // the daemon's marks with the local copy, which may hold marks still being
   // posted.
   var tkApi = null, tkOrder = [], tkViews = {}, tkErrs = {}, tkSeen = {}, tkHostErr = null, tkSubs = [];
-  var tkBusy = false, tkQueued = false, tkNext = [], tkLastRev = null, tkNudgedRev = null;
+  var tkSupport = false, tkBusy = false, tkQueued = false, tkNext = [], tkLastRev = null, tkNudgedRev = null;
   function tkUrl(id, op) { return "/tracker/stores/" + encodeURIComponent(id) + "/" + op; }
   // tkFetch calls a tracker route, a POST when body is given; done(status,
   // answer) gets the HTTP status (0: the daemon was not reached) and the
@@ -1939,6 +1939,7 @@
       if (status === 503) { tkHostErr = tkErrText(status, v); tkOrder = []; }
       if (status === 200) {
         tkHostErr = null;
+        tkSupport = !!v.support;
         if (typeof v.rev === "number") tkLastRev = v.rev;
         tkOrder = (Array.isArray(v.stores) ? v.stores : []).map(function (s) { return String(s.id); });
         var keep = {};
@@ -2045,6 +2046,7 @@
     var header = doc.querySelector(".dwrap > .top"), slot = $("qsslot"), wrap = doc.querySelector(".dwrap");
     if (!header || !slot || !wrap) return;
     header.classList.add("tk-room");
+    if (tkSupport) tkAdapter.ext = supExt();
     tkApi = window.WsTracker.mount(tkAdapter, { header: header, qsSlot: slot, pageParent: wrap, storagePrefix: "ws.tracker." });
   }
   function trackerStart() {
@@ -2064,6 +2066,473 @@
     tkReload();
   }
   function trackerLost() { tkLastRev = null; }
+
+  // --- tracker: the store support chat (a drawer tab) ------------------------
+  // When the daemon serves the support conversations (the store list's
+  // support flag), every store's drawer gets a Chat tab over the store's one
+  // ongoing runner conversation (/support/stores/<store>). The renderer
+  // redraws the drawer from HTML on every change, so each store's chat is one
+  // DOM root kept here, which rendered() moves into the tab's slot: the log,
+  // the draft, the scroll offset, and the focus survive a redraw. The log is
+  // the conversation's own session regions over its event stream (entries
+  // merged by key, convlive replaced), open only while the chat shows. A
+  // card line (the agent called tracker.show) becomes the item's mini card
+  // from the store's view, which opens the item window as any card
+  // reference does. The chip opens the selection popover: the harness (a
+  // switch starts a new conversation, after a warning), the model (fuzzy
+  // searched), and the effort (a knob snapping to the levels); the runner
+  // lists the choices and remembers the last one as the next default.
+  var supChats = {}, supChoices = null, supChoicesBusy = false, supH = null, supStore = null;
+  function supUrl(id, op) { return "/support/stores/" + encodeURIComponent(id) + (op ? "/" + op : ""); }
+  function supEsc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
+  function supIcon(href) { return '<svg class="i"><use href="' + href + '"/></svg>'; }
+  function supExt() {
+    return {
+      tabs: [{ key: "chat", icon: "#tki-chat", title: wsT("js.sup.title"), tip: wsT("js.sup.tip"), after: "notify", make: function (id, view, h) {
+        return h.card(wsT("js.sup.title"), "", '<div class="supslot"' + h.attr("store", id) + "></div>",
+          h.btn("sup-new", supIcon("#tki-plus") + wsT("js.sup.new"), { store: id }, "supnew"), "tk-chat", "", "chat");
+      } }],
+      rendered: supRendered,
+      action: function (k, el) {
+        if (k !== "sup-new" || !el) return false;
+        supNew(el.getAttribute("data-store"));
+        return true;
+      }
+    };
+  }
+  // supChat returns store id's chat, building its root on first use.
+  function supChat(id) {
+    if (supChats[id]) return supChats[id];
+    var c = supChats[id] = { id: id, conv: null, sel: null, loaded: false, loading: false, es: null, esFor: null, retry: null,
+      stick: true, top: 0, focus: null, sending: false, pop: false, pending: null, q: "", qi: -1, err: "" };
+    var r = c.root = doc.createElement("div");
+    r.className = "supchat";
+    r.innerHTML = '<div class="suplog"><p class="supempty"></p><div class="conv centries"></div><div class="suplive"></div></div>' +
+      '<p class="superr" hidden></p>' +
+      '<div class="composer supcomp"><div class="supbar"><button type="button" class="supchip" aria-haspopup="dialog" aria-expanded="false"></button>' +
+      '<span class="grow"></span></div><div class="crow"><textarea rows="1" aria-label="' + supEsc(wsT("js.sup.title")) + '"></textarea>' +
+      '<button type="button" class="csend" aria-label="' + supEsc(wsT("js.sup.send")) + '" title="' + supEsc(wsT("js.sup.send")) + '">' + supIcon("#tki-send") + "</button></div>" +
+      '<div class="suppop" role="dialog" aria-label="' + supEsc(wsT("js.sup.chip.tip")) + '" hidden></div></div>';
+    c.log = r.querySelector(".suplog"); c.box = r.querySelector(".centries"); c.live = r.querySelector(".suplive");
+    c.ta = r.querySelector("textarea"); c.chip = r.querySelector(".supchip"); c.popEl = r.querySelector(".suppop");
+    c.log.addEventListener("scroll", function () {
+      if (!c.root.isConnected) return;
+      c.top = c.log.scrollTop;
+      c.stick = c.log.scrollTop + c.log.clientHeight >= c.log.scrollHeight - 24;
+    });
+    // The redraw detaches the root, which may or may not fire focusout; the
+    // focus counts as lost only when, after the event, it sits elsewhere
+    // with the root on the page.
+    r.addEventListener("focusin", function (e) { c.focus = e.target; });
+    r.addEventListener("focusout", function (e) {
+      if (e.relatedTarget && !r.contains(e.relatedTarget)) { c.focus = null; return; }
+      setTimeout(function () { if (c.root.isConnected && !c.root.contains(doc.activeElement)) c.focus = null; }, 0);
+    });
+    c.ta.addEventListener("input", function () { supGrow(c); });
+    c.ta.addEventListener("keydown", function (e) {
+      if (e.isComposing || e.keyCode === 229) return;
+      // Escape leaves the box (the next one, outside it, collapses the drawer)
+      if (e.key === "Escape") { e.preventDefault(); if (c.pop) supPop(c, false); else c.ta.blur(); return; }
+      if (e.key !== "Enter") return;
+      var mod = e.ctrlKey || e.metaKey;
+      if (inputMode === "enter" ? !e.shiftKey && !e.altKey : mod) { e.preventDefault(); supSend(c); }
+    });
+    r.querySelector(".csend").addEventListener("click", function () { supSend(c); c.ta.focus(); });
+    c.chip.addEventListener("click", function () { supPop(c, !c.pop); });
+    c.popEl.addEventListener("click", function (e) { supPopClick(c, e); });
+    c.popEl.addEventListener("input", function (e) {
+      if (!e.target.classList.contains("spq")) return;
+      c.q = e.target.value; c.qi = c.q ? 0 : -1; supDrawModels(c);
+    });
+    c.popEl.addEventListener("keydown", function (e) { supPopKey(c, e); });
+    supDraw(c);
+    return c;
+  }
+  function supGrow(c) {
+    c.ta.style.height = "auto";
+    c.ta.style.height = Math.min(c.ta.scrollHeight, 160) + "px";
+  }
+  // supShown reports whether the chat's slot is on screen: in the store page,
+  // or in an open drawer.
+  function supShown(slot) {
+    if (!slot || !slot.isConnected) return false;
+    var page = $("tkpage"), dr = $("tkdrawer");
+    return !!((page && page.contains(slot)) || (dr && dr.classList.contains("open") && dr.contains(slot)));
+  }
+  function supRendered(name, view, h) {
+    supH = h; supStore = view ? name : null;
+    var slot = name && doc.querySelector('.supslot[data-store="' + CSS.escape(name) + '"]');
+    Object.keys(supChats).forEach(function (id) {
+      var c = supChats[id];
+      if (id !== name || !supShown(slot)) { supClose(c); if (c.pop) supPop(c, false); }
+    });
+    if (!supShown(slot)) return;
+    var c = supChat(name);
+    if (c.root.parentNode !== slot) slot.appendChild(c.root);
+    c.ta.placeholder = wsT(inputMode === "mod" ? "js.sup.hint.mod" : "js.sup.hint.enter");
+    supCards(c);
+    c.log.scrollTop = c.stick ? c.log.scrollHeight : c.top;
+    if (c.focus && c.root.contains(c.focus) && !c.root.contains(doc.activeElement)) {
+      var f = c.focus, s0 = f.selectionStart, s1 = f.selectionEnd;
+      f.focus({ preventScroll: true });
+      try { if (s0 != null) f.setSelectionRange(s0, s1); } catch (x) { /* not a text field */ }
+    }
+    if (!c.loaded && !c.loading) supLoad(c); else supOpen(c);
+  }
+  // supLoad reads the store's conversation and selection.
+  function supLoad(c) {
+    c.loading = true;
+    tkFetch(supUrl(c.id), undefined, function (status, v) {
+      c.loading = false;
+      if (status !== 200) { c.err = tkErrText(status, v); supDraw(c); return; }
+      c.loaded = true; c.err = "";
+      c.sel = v.selection || null;
+      supSetConv(c, v.conversation || null);
+      supDraw(c);
+    });
+  }
+  // supSetConv takes the store's conversation as the routes answered it; a
+  // different conversation starts an empty log and its own stream.
+  function supSetConv(c, conv) {
+    var was = c.conv && c.conv.id, now = conv && conv.status !== "closed" ? conv : null;
+    c.conv = now;
+    if ((now && now.id) !== was) {
+      supClose(c);
+      c.box.innerHTML = ""; c.live.innerHTML = ""; c.stick = true;
+    }
+    supOpen(c);
+  }
+  // supOpen opens the conversation's region stream while the chat shows.
+  function supOpen(c) {
+    var slot = c.root.parentNode;
+    if (!c.conv || !window.EventSource || !supShown(slot) || (c.es && c.esFor === c.conv.id)) return;
+    supClose(c);
+    var id = c.conv.id, es = c.es = new EventSource(c.conv.page + "/events?regions=entries,convlive");
+    c.esFor = id;
+    es.addEventListener("region", function (e) {
+      var ev;
+      try { ev = JSON.parse(e.data); } catch (x) { return; }
+      if (c.es !== es) return;
+      supRegion(c, ev.name, ev.html || "");
+    });
+    // A conversation the index does not list yet (just opened) or a dropped
+    // stream: try again shortly while the chat still shows.
+    es.onerror = function () {
+      if (c.es !== es) return;
+      supClose(c);
+      c.retry = setTimeout(function () { c.retry = null; supOpen(c); }, 2000);
+    };
+    es.addEventListener("gone", function () { if (c.es === es) supClose(c); });
+  }
+  function supClose(c) {
+    if (c.retry) { clearTimeout(c.retry); c.retry = null; }
+    if (c.es) { c.es.close(); c.es = null; c.esFor = null; }
+  }
+  function supRegion(c, name, html) {
+    var stick = c.root.isConnected ? c.log.scrollTop + c.log.clientHeight >= c.log.scrollHeight - 24 : c.stick;
+    if (name === "entries") {
+      var nbox = frag(html).querySelector(".centries");
+      if (nbox) mergeEntries(c.box, nbox);
+      sweepOutImgs(c.box);
+      supCards(c);
+    } else if (name === "convlive") {
+      c.live.innerHTML = html;
+      // held messages are answered from the session page, not from here
+      q(".hsteer, .hcancel, .sentdata", c.live).forEach(function (n) { n.remove(); });
+      restoreOpen(c.live);
+      fmtTimes(c.live);
+    } else return;
+    supDraw(c);
+    if (stick && c.root.isConnected) { c.log.scrollTop = c.log.scrollHeight; c.stick = true; }
+  }
+  // supCards draws each card line as the item's mini card while the store's
+  // view holds the item, else leaves the line as the server drew it.
+  function supCards(c) {
+    if (!supH || supStore !== c.id) return;
+    var vs = tkViews[c.id], byAlias = null;
+    q(".cardref[data-tk-alias]", c.box).forEach(function (el) {
+      if (el.getAttribute("data-tk-store") !== c.id || !vs || !vs.items) return;
+      if (!byAlias) {
+        byAlias = {};
+        Object.keys(vs.items).forEach(function (iid) { byAlias[vs.items[iid].alias] = iid; });
+      }
+      var iid = byAlias[el.getAttribute("data-tk-alias")];
+      if (!iid) return;
+      var html = supH.crefHtml(iid);
+      if (el.getAttribute("data-up") === html) return;
+      if (!el.hasAttribute("data-fb")) el.setAttribute("data-fb", el.innerHTML);
+      el.innerHTML = html;
+      el.setAttribute("data-up", html);
+      el.classList.add("up");
+    });
+  }
+  function supSelText(sel) {
+    if (!sel || !sel.harness) return wsT("js.sup.none.short");
+    return sel.harness + " · " + (sel.model || wsT("js.sup.default")) + " · " + (sel.effort || wsT("js.sup.default"));
+  }
+  // supCur is the selection the next message goes with: the open
+  // conversation's own settings, else the remembered choice.
+  function supCur(c) {
+    if (c.conv) return { harness: c.conv.backend, model: c.conv.model || "", effort: c.conv.effort || "" };
+    return c.sel || { harness: "", model: "", effort: "" };
+  }
+  function supDraw(c) {
+    var empty = !c.box.firstElementChild && !c.live.textContent.trim();
+    var e = c.root.querySelector(".supempty");
+    e.hidden = !empty;
+    e.textContent = !c.loaded ? (c.err ? "" : wsT("js.sup.loading")) : wsT("js.sup.empty");
+    var er = c.root.querySelector(".superr");
+    er.hidden = !c.err;
+    er.textContent = c.err;
+    var cur = supCur(c), none = c.loaded && !cur.harness;
+    c.chip.innerHTML = "<span>" + supEsc(supSelText(cur)) + "</span>" + supIcon("#tki-chev");
+    c.chip.title = wsT("js.sup.chip.tip");
+    c.chip.setAttribute("aria-expanded", String(c.pop));
+    c.root.querySelector(".csend").disabled = c.sending || !c.loaded || none;
+    c.ta.disabled = !c.loaded || none;
+  }
+  function supSend(c) {
+    var text = c.ta.value;
+    if (c.sending || !text.trim()) return;
+    c.sending = true; c.err = ""; supDraw(c);
+    tkFetch(supUrl(c.id, "send"), { text: text }, function (status, v) {
+      c.sending = false;
+      if (status !== 200) { c.err = tkErrText(status, v); supDraw(c); return; }
+      if (c.ta.value === text) { c.ta.value = ""; supGrow(c); }
+      c.stick = true;
+      supSetConv(c, v);
+      supDraw(c);
+    });
+  }
+  function supNew(id) {
+    var c = supChat(id);
+    c.err = ""; supDraw(c);
+    tkFetch(supUrl(id, "new"), {}, function (status, v) {
+      if (status !== 200) { c.err = tkErrText(status, v); supDraw(c); return; }
+      supSetConv(c, v);
+      supDraw(c);
+      if (c.root.isConnected) c.ta.focus();
+    });
+  }
+  // supSelect saves a choice; a harness switch answers with a new
+  // conversation, a model or effort change with the same one.
+  function supSelect(c, req) {
+    c.err = "";
+    tkFetch(supUrl(c.id, "select"), req, function (status, v) {
+      if (status !== 200) { c.err = tkErrText(status, v); supDraw(c); supDrawPop(c); return; }
+      c.sel = v.selection || c.sel;
+      supSetConv(c, v.conversation || null);
+      supDraw(c); supDrawPop(c);
+    });
+  }
+
+  // --- the selection popover ---
+  function supPop(c, open) {
+    c.pop = open; c.pending = null;
+    c.popEl.hidden = !open;
+    c.chip.setAttribute("aria-expanded", String(open));
+    if (!open) { c.popEl.innerHTML = ""; return; }
+    c.q = ""; c.qi = -1;
+    supDrawPop(c);
+    var f = c.popEl.querySelector(".spq");
+    if (f) f.focus({ preventScroll: true });
+    if (!supChoicesBusy) {
+      supChoicesBusy = true;
+      tkFetch("/support/choices", undefined, function (status, v) {
+        supChoicesBusy = false;
+        if (status === 200 && Array.isArray(v.harnesses)) supChoices = v;
+        else if (!supChoices) supChoices = { harnesses: [], error: tkErrText(status, v) };
+        Object.keys(supChats).forEach(function (id) { if (supChats[id].pop) supDrawPop(supChats[id]); });
+      });
+    }
+  }
+  function supHarness(name) {
+    var hs = (supChoices && supChoices.harnesses) || [];
+    for (var i = 0; i < hs.length; i++) if (hs[i].harness === name) return hs[i];
+    return null;
+  }
+  // supFuzzy scores id against query q: every character of q in order, a
+  // run of adjacent ones and a start at a word boundary scoring higher; -1
+  // when q is not a subsequence.
+  function supFuzzy(id, qq) {
+    if (!qq) return 0;
+    var s = id.toLowerCase(), qs = qq.toLowerCase().replace(/\s+/g, ""), at = -1, score = 0, run = 0;
+    for (var i = 0; i < qs.length; i++) {
+      var j = s.indexOf(qs[i], at + 1);
+      if (j < 0) return -1;
+      run = j === at + 1 ? run + 1 : 0;
+      score += 1 + run * 2 + (j === 0 || /[^a-z0-9]/.test(s[j - 1]) ? 3 : 0);
+      at = j;
+    }
+    return score - s.length / 100;
+  }
+  function supModels(c) {
+    var h = supHarness(supCur(c).harness), list = [{ id: "", label: wsT("js.sup.default") }];
+    ((h && h.models) || []).forEach(function (m) { list.push({ id: m.id, label: m.id, thinking: m.thinking }); });
+    if (!c.q) return list;
+    return list.filter(function (m) { return m.id; }).map(function (m) { return { m: m, s: supFuzzy(m.id, c.q) }; })
+      .filter(function (x) { return x.s >= 0; }).sort(function (a, b) { return b.s - a.s; }).map(function (x) { return x.m; });
+  }
+  function supDrawPop(c) {
+    if (!c.pop) return;
+    var cur = supCur(c), h = supHarness(cur.harness), hs = (supChoices && supChoices.harnesses) || [];
+    var html = '<div class="spsec"><div class="splbl">' + wsT("js.sup.harness") + "</div>";
+    if (!supChoices) html += '<p class="spnote">' + wsT("js.sup.loading") + "</p>";
+    else if (supChoices.error) html += '<p class="spnote err">' + supEsc(supChoices.error) + "</p>";
+    else {
+      html += '<div class="spseg" role="radiogroup" aria-label="' + supEsc(wsT("js.sup.harness")) + '">' + hs.map(function (x) {
+        var on = x.harness === cur.harness;
+        return '<button type="button" role="radio" aria-checked="' + on + '" data-harness="' + supEsc(x.harness) + '"' + (x.available ? "" : " disabled") +
+          (x.available ? "" : ' title="' + supEsc(wsT("js.sup.unavail", x.harness, x.error || "")) + '"') + ">" + supEsc(x.harness) + "</button>";
+      }).join("") + "</div>";
+    }
+    if (c.pending) {
+      html += '<div class="spwarn" role="alert"><span>' + supEsc(wsT("js.sup.switch.warn", c.pending)) + '</span><span class="spacts">' +
+        '<button type="button" class="btn mini primary" data-sp="switch">' + wsT("js.sup.switch.ok") + "</button>" +
+        '<button type="button" class="btn mini" data-sp="cancel">' + wsT("js.sup.switch.cancel") + "</button></span></div>";
+    }
+    html += "</div>";
+    html += '<div class="spsec"><div class="splbl">' + wsT("js.sup.model") + '</div><input class="spq" type="search" autocomplete="off" spellcheck="false" placeholder="' +
+      supEsc(wsT("js.sup.search")) + '" value="' + supEsc(c.q) + '"><ul class="splist" role="listbox" aria-label="' + supEsc(wsT("js.sup.model")) + '"></ul></div>';
+    var levels = (h && h.efforts) || [], m = null;
+    ((h && h.models) || []).forEach(function (x) { if (x.id === cur.model) m = x; });
+    var noEffort = !levels.length || (m && m.thinking === false);
+    html += '<div class="spsec"><div class="splbl">' + wsT("js.sup.effort") + '<span class="spval">' + supEsc(cur.effort || wsT("js.sup.default")) + "</span>" +
+      (cur.effort && !noEffort ? '<button type="button" class="spreset" data-sp="effort-reset">' + wsT("js.sup.effort.reset") + "</button>" : "") + "</div>";
+    if (noEffort) html += '<p class="spnote">' + wsT(levels.length ? "js.sup.noeffort" : "js.sup.noefforts") + "</p>";
+    else {
+      var at = levels.indexOf(cur.effort);
+      html += '<div class="knob" role="slider" tabindex="0" aria-label="' + supEsc(wsT("js.sup.effort")) + '" aria-valuemin="0" aria-valuemax="' + (levels.length - 1) +
+        '" aria-valuenow="' + Math.max(at, 0) + '" aria-valuetext="' + supEsc(cur.effort || wsT("js.sup.default")) + '"' + (at < 0 ? ' data-none=""' : "") + '><div class="ktrack">' +
+        levels.map(function (lv, i) { return '<span class="kdot' + (i === at ? " on" : "") + '" style="left:' + supPct(i, levels.length) + '%" title="' + supEsc(lv) + '"></span>'; }).join("") +
+        (at >= 0 ? '<span class="kthumb" style="left:' + supPct(at, levels.length) + '%"></span>' : "") + '</div><div class="kends"><span>' + supEsc(levels[0]) + "</span><span>" +
+        supEsc(levels[levels.length - 1]) + "</span></div></div>";
+    }
+    if (c.conv) html += '<p class="spnote">' + wsT("js.sup.next") + "</p>";
+    if (c.err) html += '<p class="spnote err">' + supEsc(c.err) + "</p>";
+    var fq = doc.activeElement && doc.activeElement.classList && doc.activeElement.classList.contains("spq") && c.popEl.contains(doc.activeElement);
+    var fk = doc.activeElement && doc.activeElement.classList && doc.activeElement.classList.contains("knob") && c.popEl.contains(doc.activeElement);
+    var caret = fq ? [doc.activeElement.selectionStart, doc.activeElement.selectionEnd] : null;
+    c.popEl.innerHTML = html;
+    // the popover opens upward over the log and never past the chat's top
+    var comp = c.popEl.parentNode;
+    if (comp.offsetTop > 0) c.popEl.style.maxHeight = Math.max(160, comp.offsetTop - 12) + "px";
+    supDrawModels(c);
+    var kn = c.popEl.querySelector(".knob");
+    if (kn) supKnob(c, kn, levels);
+    if (fq) { var nq = c.popEl.querySelector(".spq"); nq.focus({ preventScroll: true }); try { nq.setSelectionRange(caret[0], caret[1]); } catch (x) { /* search fields */ } }
+    if (fk && kn) kn.focus({ preventScroll: true });
+  }
+  function supPct(i, n) { return n < 2 ? 50 : i / (n - 1) * 100; }
+  function supDrawModels(c) {
+    var ul = c.popEl.querySelector(".splist");
+    if (!ul) return;
+    var cur = supCur(c).model, list = supModels(c);
+    if (c.qi >= list.length) c.qi = list.length - 1;
+    ul.innerHTML = list.length ? list.map(function (m, i) {
+      return '<li role="option" aria-selected="' + (m.id === cur) + '" class="' + (i === c.qi ? "hi" : "") + '" data-model="' + supEsc(m.id) + '">' +
+        (m.id ? supEsc(m.label) : "<i>" + supEsc(m.label) + "</i>") + "</li>";
+    }).join("") : '<li class="spnone">' + wsT("js.sup.nomatch") + "</li>";
+    var hi = ul.querySelector("li.hi");
+    if (hi) hi.scrollIntoView({ block: "nearest" });
+  }
+  function supPopClick(c, e) {
+    var t = e.target, b;
+    if ((b = t.closest("[data-harness]"))) {
+      var name = b.getAttribute("data-harness");
+      if (name === supCur(c).harness) { c.pending = null; supDrawPop(c); return; }
+      // switching an open conversation's harness replaces the conversation
+      if (c.conv) { c.pending = name; supDrawPop(c); return; }
+      supSelect(c, { harness: name });
+      return;
+    }
+    if ((b = t.closest("[data-sp]"))) {
+      var k = b.getAttribute("data-sp");
+      if (k === "switch" && c.pending) { var p = c.pending; c.pending = null; supSelect(c, { harness: p }); }
+      else if (k === "cancel") { c.pending = null; supDrawPop(c); }
+      else if (k === "effort-reset") supSelect(c, { effort: "" });
+      return;
+    }
+    if ((b = t.closest("li[data-model]"))) supPickModel(c, b.getAttribute("data-model"));
+  }
+  function supPickModel(c, id) {
+    c.q = ""; c.qi = -1;
+    if (id === supCur(c).model) { supDrawPop(c); return; }
+    supSelect(c, { model: id });
+  }
+  function supPopKey(c, e) {
+    if (e.key === "Escape") { e.preventDefault(); supPop(c, false); c.chip.focus(); return; }
+    if (!e.target.classList.contains("spq") || e.isComposing) return;
+    var list = supModels(c);
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      if (!list.length) return;
+      c.qi = c.qi < 0 ? (e.key === "ArrowDown" ? 0 : list.length - 1) : (c.qi + (e.key === "ArrowDown" ? 1 : list.length - 1)) % list.length;
+      supDrawModelsHi(c, list);
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (c.qi >= 0 && list[c.qi]) supPickModel(c, list[c.qi].id);
+    }
+  }
+  function supDrawModelsHi(c, list) {
+    q(".splist li", c.popEl).forEach(function (li, i) { li.classList.toggle("hi", i === c.qi && !!list[i]); });
+    var hi = c.popEl.querySelector(".splist li.hi");
+    if (hi) hi.scrollIntoView({ block: "nearest" });
+  }
+  // supKnob wires the effort knob: a drag moves the thumb, snapping to the
+  // nearest level, and its release (or an arrow key) selects that level.
+  function supKnob(c, kn, levels) {
+    var track = kn.querySelector(".ktrack"), drag = null;
+    function at(x) {
+      var r = track.getBoundingClientRect();
+      return Math.round(Math.max(0, Math.min(1, (x - r.left) / (r.width || 1))) * (levels.length - 1));
+    }
+    function show(i) {
+      var th = track.querySelector(".kthumb");
+      if (!th) { th = doc.createElement("span"); th.className = "kthumb"; track.appendChild(th); }
+      th.style.left = supPct(i, levels.length) + "%";
+      q(".kdot", track).forEach(function (d, j) { d.classList.toggle("on", j === i); });
+      kn.removeAttribute("data-none");
+      kn.setAttribute("aria-valuenow", String(i));
+      kn.setAttribute("aria-valuetext", levels[i]);
+      var v = c.popEl.querySelector(".spval");
+      if (v) v.textContent = levels[i];
+    }
+    function pick(i) { if (levels[i] !== supCur(c).effort) supSelect(c, { effort: levels[i] }); }
+    kn.addEventListener("pointerdown", function (e) {
+      if (e.button) return;
+      drag = { i: at(e.clientX) };
+      try { kn.setPointerCapture(e.pointerId); } catch (x) { /* the moves still land */ }
+      show(drag.i);
+      e.preventDefault();
+      kn.focus({ preventScroll: true });
+    });
+    kn.addEventListener("pointermove", function (e) {
+      if (!drag) return;
+      var i = at(e.clientX);
+      if (i !== drag.i) { drag.i = i; show(i); }
+    });
+    function end() { if (!drag) return; var i = drag.i; drag = null; pick(i); }
+    kn.addEventListener("pointerup", end);
+    kn.addEventListener("pointercancel", function () { drag = null; supDrawPop(c); });
+    kn.addEventListener("keydown", function (e) {
+      var cur = levels.indexOf(supCur(c).effort), i = cur;
+      if (e.key === "ArrowRight" || e.key === "ArrowUp") i = Math.min(levels.length - 1, cur + 1);
+      else if (e.key === "ArrowLeft" || e.key === "ArrowDown") i = cur < 0 ? 0 : Math.max(0, cur - 1);
+      else if (e.key === "Home") i = 0;
+      else if (e.key === "End") i = levels.length - 1;
+      else return;
+      e.preventDefault();
+      if (i !== cur) { show(i); pick(i); }
+    });
+  }
+  // A click outside an open popover (and outside its chip) closes it.
+  doc.addEventListener("click", function (e) {
+    Object.keys(supChats).forEach(function (id) {
+      var c = supChats[id];
+      if (c.pop && !c.popEl.contains(e.target) && !c.chip.contains(e.target) && e.target.isConnected) supPop(c, false);
+    });
+  });
 
   // --- stream ----------------------------------------------------------------
   // The stream state shows on every indicator in the top bar: the bare dot,
