@@ -257,9 +257,9 @@ removes or releases a worktree itself.
 On the served board and in the conversation's lead
 replies, a file link renders as an action link (`data-wl="file"`, titled with
 its repo-relative path) and an http(s) link is marked `data-wl="url"`: a
-click opens a menu (open in new tab, open in system browser, copy relative or
-absolute path; copy URL for an http(s) link), and Cmd/Ctrl+click opens a new
-tab. Every markdown renderer (the board, lead replies, tracker text) also
+click opens a menu (open in new tab, open in system browser, open in native
+app for an image file, copy relative or absolute path; copy URL for an
+http(s) link), and Cmd/Ctrl+click opens a new tab. Every markdown renderer (the board, lead replies, tracker text) also
 links a bare http(s) URL (a loopback or LAN host included) and a bare file
 path (absolute or drive, two segments or more, or relative with a `/` and a
 file extension; optional `:line[:col]`) outside code and raw anchors,
@@ -271,10 +271,22 @@ symlink (404 otherwise), to a loopback viewer and a LAN token holder alike:
 an image inline, markdown rendered in the board's escaped mode with relative
 links resolved against the file's own directory, other UTF-8 text as
 `text/plain`, and a binary or over-2-MiB file as a page offering the path
-copies. A file outside the root offers the copies only. A board image inside
+copies. A file outside the root offers the copies only, except an image
+written as an absolute path in a lead reply or a board item field (not a
+topic body, not the file view). A board image inside
 the root loads through `GET /s/<reply-id>/image?path=<root-relative path>`,
 which serves only an image-extension file under the same containment, and
-any other image renders as its path. On a served page each topic body on the board
+any other image renders as its path, with that one exception: an absolute
+image path outside the root (not a UNC or device path, image extension on
+the name and on the file its symlinks resolve to) renders inline on the
+image route and links through it (`data-out`), and the route serves it only
+to a viewer on this machine (404 to a LAN viewer, token or not, and to a
+request whose `Sec-Fetch-Site` is present and not `same-origin`), with
+`Cross-Origin-Resource-Policy: same-origin`. Where such an image fails to
+load (a LAN viewer, a missing file), the page puts its alt text and a
+copy-only path link in its place, and its link offers the copies only; for
+a viewer on this machine its menu offers open in new tab and open in native
+app, not open in system browser. On a served page each topic body on the board
 renders in its own sandboxed `srcdoc` frame (`allow-scripts allow-popups
 allow-popups-to-escape-sandbox`, an opaque origin that sends no cookie), so
 its images are inlined as `data:` URLs up to 2 MiB under the same containment
@@ -292,10 +304,14 @@ link or image follows the same link rule, so it renders as the same action
 link or path text as its markdown form; the streaming reply, user messages,
 and mail bodies show HTML as text. `POST
 /s/<reply-id>/open {target}` opens an http(s) URL or this session's own file
-view path in the host's default browser with the OS open command, run with
-no shell (`rundll32 url.dll,FileProtocolHandler` on Windows); it requires a
+view path in the host's default browser, and `{native}` opens an absolute
+image path (inside the root or outside it, under the image rules above; the
+file its symlinks resolve to is what opens) in the host's default app for
+it, with the OS open command, run with no shell (`rundll32
+url.dll,FileProtocolHandler` on Windows, `open` on macOS, `xdg-open`
+elsewhere); a body names exactly one of them. It requires a
 viewer on this machine (404 to any other, token or not) and an `Origin`
-equal to the daemon's own, and the page offers the item only to such a
+equal to the daemon's own, and the page offers the items only to such a
 viewer. The live layout's
 composer sends: `POST /s/<reply-id>/message {text, chips, images, refs,
 refNums}` holds the message in the session's inbox (merged into a still-held

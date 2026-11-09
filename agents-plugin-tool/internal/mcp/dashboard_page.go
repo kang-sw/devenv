@@ -108,6 +108,10 @@ func servedViewInput(record sessionRecord, replyID string) wswhiteboard.ViewInpu
 			return wsdashboard.ImageDataURL(record.Root, path)
 		},
 		FileActions: wsdashboard.FileActions(record.Root, replyID),
+		// An item field's absolute image path outside the root loads, for a
+		// loopback viewer, through the image route; a topic body never takes
+		// it (wswhiteboard.View OutsideImage).
+		OutsideImage: wsdashboard.OutsideImage(record.Root, replyID),
 	}
 }
 

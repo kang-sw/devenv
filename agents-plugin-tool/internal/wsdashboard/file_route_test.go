@@ -114,7 +114,7 @@ func TestFileViewKinds(t *testing.T) {
 	writeFile(t, filepath.Join(f.project, "draw.svg"), `<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>`)
 	writeFile(t, filepath.Join(f.project, "page.html"), "<script>alert(1)</script><b>x</b>")
 	writeFile(t, filepath.Join(f.project, "docs", "guide", "a.md"), "# Guide\n\n<script>alert(1)</script> and <b>bold</b>\n\n"+
-		"[sibling](b.md) [up](../top.md) [abs](/etc/hosts) [web](https://example.com/) ![pic](pic.png)\n\n"+
+		"[sibling](b.md) [up](../top.md) [abs](/etc/hosts) [web](https://example.com/) ![pic](pic.png) ![outpic](/elsewhere/out.png)\n\n"+
 		"```mermaid\ngraph TD; A-->B\n```\n")
 	writeFile(t, filepath.Join(f.project, "blob.bin"), "BIN\x00\x01\x02")
 	writeFile(t, filepath.Join(f.project, "huge.txt"), strings.Repeat("x", fileViewMax+1))
@@ -144,6 +144,9 @@ func TestFileViewKinds(t *testing.T) {
 		`<a href="/s/livesession/file?path=docs%2Fguide%2Fb.md" data-wl="file" data-rel="docs/guide/b.md"`,
 		`<a href="/s/livesession/file?path=docs%2Ftop.md" data-wl="file" data-rel="docs/top.md"`,
 		`abs <code class="fpath">/etc/hosts</code>`,
+		// An image outside the root stays path text: the page runs no script
+		// to put the path back if the image failed to load.
+		`<span class="img-text">outpic <code class="fpath">/elsewhere/out.png</code></span>`,
 		`<a href="https://example.com/" target="_blank" rel="noopener noreferrer" data-wl="url">web</a>`,
 		`<img src="/s/livesession/image?path=docs%2Fguide%2Fpic.png" alt="pic">`,
 		`<code class="language-mermaid">`,
@@ -154,7 +157,7 @@ func TestFileViewKinds(t *testing.T) {
 			t.Errorf("md page lacks %q:\n%s", want, body)
 		}
 	}
-	for _, bad := range []string{"<script", "<b>bold", `class="mermaid"`, "file:"} {
+	for _, bad := range []string{"<script", "<b>bold", `class="mermaid"`, "file:", "data-out"} {
 		if strings.Contains(body, bad) {
 			t.Errorf("md page carries %q", bad)
 		}
@@ -193,8 +196,10 @@ func TestFileViewKinds(t *testing.T) {
 
 // TestFileActionsMapsFileTargets pins the served page's link actions: a
 // path inside the root, relative or absolute, gets the file view URL, its
-// root-relative path, and its absolute path; a path outside it gets its
-// absolute path alone, for the copy-only menu; no root gives no action.
+// root-relative path, and its absolute path, marked an image when it has an
+// image extension; a path outside it gets its absolute path alone, for the
+// copy-only menu, an image included (OutsideImage widens that); no root
+// gives no action.
 func TestFileActionsMapsFileTargets(t *testing.T) {
 	root := t.TempDir()
 	outside := filepath.Join(filepath.Dir(root), "elsewhere", "x.md")
@@ -203,9 +208,11 @@ func TestFileActionsMapsFileTargets(t *testing.T) {
 		"docs/a b.md": {Href: "/s/rid/file?path=docs%2Fa+b.md", Rel: "docs/a b.md", Abs: filepath.Join(root, "docs", "a b.md")},
 		"./x/../y.go": {Href: "/s/rid/file?path=y.go", Rel: "y.go", Abs: filepath.Join(root, "y.go")},
 		filepath.ToSlash(filepath.Join(root, "z.txt")): {Href: "/s/rid/file?path=z.txt", Rel: "z.txt", Abs: filepath.Join(root, "z.txt")},
-		"../elsewhere/x.md":                            {Abs: outside},
-		filepath.ToSlash(outside):                      {Abs: outside},
-		"":                                             {},
+		"shots/a.PNG": {Href: "/s/rid/file?path=shots%2Fa.PNG", Rel: "shots/a.PNG", Abs: filepath.Join(root, "shots", "a.PNG"), Image: true},
+		filepath.ToSlash(filepath.Join(filepath.Dir(root), "o.png")): {Abs: filepath.Join(filepath.Dir(root), "o.png")},
+		"../elsewhere/x.md":       {Abs: outside},
+		filepath.ToSlash(outside): {Abs: outside},
+		"":                        {},
 	} {
 		if got := actions(in); got != want {
 			t.Errorf("FileActions(%q) = %+v, want %+v", in, got, want)

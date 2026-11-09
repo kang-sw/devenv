@@ -366,6 +366,7 @@
       fmtTimes(el);
     }
     el.setAttribute("data-h", hash);
+    sweepOutImgs(el);
     if (board) {
       setFrameHeights(el, frameH);
       writeAnswers(el, answers);
@@ -1074,11 +1075,16 @@
   // --- link actions: the menu a served page's marked links open ------------
   // The renderer marks a served link data-wl="file" (href: the file view, or
   // no href outside the session root; data-rel, data-abs) or data-wl="url";
-  // no other anchor is touched. A plain click opens the menu; Cmd/Ctrl+click
-  // on a link with an href is left to the browser, which opens a new tab,
-  // and opens the menu otherwise. The system-browser item shows only on a
-  // page the server marked data-sysopen (a browser on the daemon's machine);
-  // the open route checks that again.
+  // no other anchor is touched. An image file link is also marked data-img;
+  // an absolute image path outside the root is marked data-out, with the
+  // image route as its href, which the daemon serves only to a browser on
+  // its own machine. A plain click opens the menu; Cmd/Ctrl+click on a link
+  // the page can open is left to the browser, which opens a new tab, and
+  // opens the menu otherwise. The system-browser and native-app items show
+  // only on a page the server marked data-sysopen (a browser on the daemon's
+  // machine), and a data-out link opens at all only there; the daemon checks
+  // both again. The markup is the same for every viewer: entries render once
+  // for all of them.
   var lmenu = null, lmenuFrom = null, ltoast = null, ltoastTimer = 0;
   function closeLinkMenu(refocus) {
     if (!lmenu) return;
@@ -1119,17 +1125,28 @@
       navigator.clipboard.writeText(s).then(function () { toast(wsT("js.toast.copied", s)); }, fallback);
     } else fallback();
   }
+  // linkOpens reports whether this page can open a marked link's href: a
+  // data-out link only on a data-sysopen page.
+  function linkOpens(a) {
+    return !!a.getAttribute("href") && (!a.hasAttribute("data-out") || root.hasAttribute("data-sysopen"));
+  }
   function openLinkMenu(a, x, y) {
     closeLinkMenu(false);
     var kind = a.getAttribute("data-wl"), href = a.getAttribute("href");
     var rel = a.getAttribute("data-rel"), abs = a.getAttribute("data-abs"), url = a.href;
+    var sys = root.hasAttribute("data-sysopen"), out = a.hasAttribute("data-out");
     var items = [];
-    if (href) items.push([wsT("js.menu.newtab"), function () { window.open(url, "_blank", "noopener"); }]);
-    if (href && root.hasAttribute("data-sysopen")) {
+    if (linkOpens(a)) items.push([wsT("js.menu.newtab"), function () { window.open(url, "_blank", "noopener"); }]);
+    if (href && sys && !out) {
       items.push([wsT("js.menu.sysopen"), function () {
         // A file link sends its file view path; the daemon opens it on the
         // address this page was loaded from.
         post("open", { target: kind === "url" ? url : href }, function (ok, v) { toast(ok ? wsT("js.toast.opened") : wsT("js.toast.openfail", v)); });
+      }]);
+    }
+    if (kind === "file" && abs && sys && a.hasAttribute("data-img")) {
+      items.push([wsT("js.menu.native"), function () {
+        post("open", { native: abs }, function (ok, v) { toast(ok ? wsT("js.toast.openednative") : wsT("js.toast.openfail", v)); });
       }]);
     }
     if (kind === "url") items.push([wsT("js.menu.copyurl"), function () { copyText(url); }]);
@@ -1170,11 +1187,52 @@
     if (e.button !== 0 || !t || !t.closest) return;
     var a = t.closest("a[data-wl]");
     if (!a) return;
-    var href = a.getAttribute("href");
-    if (href && (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)) return;
+    if (linkOpens(a) && (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)) return;
     e.preventDefault();
     linkAt(a, e);
   }, true);
+  // An image outside the session root (img[data-out]) loads only for a
+  // browser on the daemon's machine; where it fails (a LAN viewer, a missing
+  // file) its alt text and its absolute path, as a copy-only link, take its
+  // place, the shape a path the page does not serve takes. The page CSP
+  // forbids inline onerror, so a capture listener catches the error, and a
+  // sweep after each render catches an image that failed before it: decode()
+  // rejects only a broken image, where naturalWidth alone is also 0 for a
+  // loaded SVG with no intrinsic size.
+  function outImgFailed(img) {
+    var abs = img.getAttribute("data-abs") || "";
+    var span = doc.createElement("span");
+    span.className = "img-text";
+    if (img.alt) span.appendChild(doc.createTextNode(img.alt + " "));
+    var code = doc.createElement("code");
+    code.className = "fpath";
+    code.textContent = abs;
+    // Inside a link already (an image linked to itself), the path stays
+    // text: an anchor in an anchor has no defined click target.
+    if (img.parentNode && img.parentNode.closest && img.parentNode.closest("a")) span.appendChild(code);
+    else {
+      var a = doc.createElement("a");
+      a.setAttribute("tabindex", "0");
+      a.setAttribute("data-wl", "file");
+      a.setAttribute("data-abs", abs);
+      a.setAttribute("title", abs);
+      a.appendChild(code);
+      span.appendChild(a);
+    }
+    if (img.parentNode) img.parentNode.replaceChild(span, img);
+  }
+  function sweepOutImgs(el) {
+    q("img[data-out]", el).forEach(function (img) {
+      if (!img.complete || img.naturalWidth) return;
+      if (img.decode) img.decode().then(null, function () { if (img.isConnected) outImgFailed(img); });
+      else outImgFailed(img);
+    });
+  }
+  doc.addEventListener("error", function (e) {
+    var t = e.target;
+    if (t && t.tagName === "IMG" && t.hasAttribute("data-out")) outImgFailed(t);
+  }, true);
+  sweepOutImgs(doc);
   doc.addEventListener("keydown", function (e) {
     var inMenu = !!lmenu && lmenu.contains(doc.activeElement);
     if (lmenu && e.key === "Escape") { if (inMenu) e.preventDefault(); closeLinkMenu(inMenu); return; }
@@ -1552,6 +1610,7 @@
     if (href) a.setAttribute("href", href);
     if (str(m.rel)) a.setAttribute("data-rel", str(m.rel));
     if (str(m.abs)) a.setAttribute("data-abs", str(m.abs));
+    if (kind === "file" && m.img === true) a.setAttribute("data-img", "");
     return a;
   }
   window.addEventListener("message", function (e) {

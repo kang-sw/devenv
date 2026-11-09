@@ -6,6 +6,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -141,6 +143,89 @@ func TestSystemOpenRoute(t *testing.T) {
 	rec.err = errors.New("no browser")
 	if r := openRequestAs(f.d, http.MethodPost, peer, local, "http://"+local, "", good); r.Code != http.StatusInternalServerError {
 		t.Errorf("failing open command = %d, want 500", r.Code)
+	}
+}
+
+func nativeBody(path string) string {
+	raw, _ := json.Marshal(openRequest{Native: path})
+	return string(raw)
+}
+
+// TestSystemOpenNativeTarget pins the route's native-app target: an absolute
+// image path, inside the root or outside it, opens as the file it resolves
+// to through every symlink. A relative path, a non-image, a symlink to a
+// non-image, a directory, a missing file, a UNC or device path, an
+// over-long path, and a body naming both target and native are 400 and never
+// reach the open command; the route's loopback (404) and same-Origin (403)
+// gates hold for it as for target.
+func TestSystemOpenNativeTarget(t *testing.T) {
+	rec := &openRecorder{}
+	f := startPageFixture(t, lanMode, func(o *DaemonOptions) { o.openSystem = rec.open })
+	token := readLANToken(t, f.dir)
+	local := "127.0.0.1:" + strconv.Itoa(f.d.Endpoint().Port)
+	lanHost := "192.168.7.20:" + strconv.Itoa(f.d.Endpoint().Port)
+	const peer = "127.0.0.1:50000"
+	outside := t.TempDir()
+	inRoot := filepath.Join(f.project, "shots", "a.png")
+	outImg := filepath.Join(outside, "b.JPG")
+	writeFile(t, inRoot, "PNG")
+	writeFile(t, outImg, "JPG")
+	writeFile(t, filepath.Join(outside, "notes.txt"), "TEXT")
+	if err := os.MkdirAll(filepath.Join(outside, "dir.png"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	resolved := func(p string) string {
+		real, err := filepath.EvalSymlinks(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return real
+	}
+	opened := map[string]string{
+		inRoot:                   resolved(inRoot),
+		outImg:                   resolved(outImg),
+		filepath.ToSlash(outImg): resolved(outImg),
+	}
+	symlinks := os.Symlink(outImg, filepath.Join(outside, "alias.png")) == nil &&
+		os.Symlink(filepath.Join(outside, "notes.txt"), filepath.Join(outside, "renamed.png")) == nil
+	if symlinks {
+		opened[filepath.Join(outside, "alias.png")] = resolved(outImg)
+	}
+	for path, want := range opened {
+		r := openRequestAs(f.d, http.MethodPost, peer, local, "http://"+local, "", nativeBody(path))
+		got := rec.take()
+		if r.Code != http.StatusNoContent || len(got) != 1 || got[0] != want {
+			t.Errorf("native %q = %d %q, opened %q, want 204 and %q", path, r.Code, strings.TrimSpace(r.Body.String()), got, want)
+		}
+	}
+
+	refused := []string{
+		"shots/a.png", "./shots/a.png", filepath.Join(outside, "notes.txt"), filepath.Join(outside, "dir.png"),
+		filepath.Join(outside, "missing.png"), "/" + filepath.ToSlash(outImg), `\\server\share\x.png`, "//server/share/x.png",
+		`\\?\C:\x.png`, "//?/C:/x.png", `\\.\x.png`, "//./x.png", `\??\UNC\s\sh\x.png`, "/??/C:/x.png", "-x.png", inRoot + "\x00.png",
+		"/" + strings.Repeat("a", openTargetMax) + ".png",
+	}
+	if symlinks {
+		refused = append(refused, filepath.Join(outside, "renamed.png"))
+	}
+	for _, path := range refused {
+		if r := openRequestAs(f.d, http.MethodPost, peer, local, "http://"+local, "", nativeBody(path)); r.Code != http.StatusBadRequest {
+			t.Errorf("native %q = %d, want 400", path, r.Code)
+		}
+	}
+	both, _ := json.Marshal(openRequest{Target: "https://example.com/", Native: outImg})
+	if r := openRequestAs(f.d, http.MethodPost, peer, local, "http://"+local, "", string(both)); r.Code != http.StatusBadRequest {
+		t.Errorf("target and native together = %d, want 400", r.Code)
+	}
+	good := nativeBody(outImg)
+	if r := openRequestAs(f.d, http.MethodPost, "192.168.7.30:50000", lanHost, "http://"+lanHost, token, good); r.Code != http.StatusNotFound {
+		t.Errorf("native from a LAN token holder = %d, want 404", r.Code)
+	}
+	if r := openRequestAs(f.d, http.MethodPost, peer, local, "http://evil.example", "", good); r.Code != http.StatusForbidden {
+		t.Errorf("native with a foreign Origin = %d, want 403", r.Code)
+	}
+	if got := rec.take(); len(got) != 0 {
+		t.Fatalf("refused native requests reached the open command: %q", got)
 	}
 }
 

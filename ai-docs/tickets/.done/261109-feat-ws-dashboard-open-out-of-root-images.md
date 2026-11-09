@@ -4,6 +4,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: abfb51cb5ac33e2a
 sage-review-completeness-reviewed: abfb51cb5ac33e2a
+completed: 2026-11-09
 ---
 
 # Dashboard opens image paths outside the project root for a loopback viewer
@@ -182,3 +183,84 @@ and refinement bullets pass (route serving and refusals, CORP and
 `Sec-Fetch-Site`, UNC/device string check, native-target validation, topic
 body and file view still root-only, i18n tables), plus a by-hand check of
 the menu items and the image swap.
+
+### Result (2c1ae57e3) - 2026-11-09
+
+Landed as specified, plus one review fix (8295d5c83).
+
+- Hook: `OutsideImage func(path) FileAction` on `wswhiteboard.View`,
+  `ViewInput`, and `TextTargets`; `FileAction` gained `Image` (`data-img`)
+  and `Outside` (`data-out`). `fileTarget` consults it only after `ImageSrc`
+  and `FileActions` come back empty, never while a topic body renders (new
+  `pageData.inDoc`, framed or not), and only for an Href that passes
+  `daemonPath`. An out-of-root image renders as
+  `<img src=route data-out data-abs>`, and a link to it renders as an action
+  link on the route marked `data-img data-out`. The reply sanitizer gets the
+  same attributes from `imageAttrs`/`actionAttrs`, and a raw `data-out` in
+  reply HTML is dropped. `ImageSrc`, `ImageDataURL`, the `DocImageSrc`
+  fallback, and the file view stay root-only. `FileActions` now marks
+  in-root image links `Image`.
+- Wiring: `servedTargets` (lead replies) and `servedViewInput` (board item
+  fields) take `wsdashboard.OutsideImage`. `fileViewTargets` does not.
+- Route: `handleImage` falls back to `outsideImage` only for `localViewer`
+  and when `Sec-Fetch-Site` is absent or `same-origin`. Such a response
+  carries `Cross-Origin-Resource-Policy: same-origin`. Containment:
+  - `absoluteImageName` requires a path written absolute, with an image
+    extension and no NUL. `networkPath` is a pure string check that refuses
+    two leading separators in either direction and the `\??\` prefix.
+    `driveOrRootPath` accepts only a drive-letter volume on Windows.
+  - The path must be lexically outside the root.
+  - `resolvedImage` runs EvalSymlinks; the resolved file must have an image
+    extension, must not be a UNC/device path, and must be a regular file.
+- System open: `{native: <abs path>}` beside `{target}`, exactly one per
+  request. It is validated by the same name and resolution checks, and
+  `systemOpen` runs on the resolved path. The 500 text is now generic.
+- JS (`dashboard.js`): for a `data-out` link the menu offers "open in new
+  tab" only on a `data-sysopen` page, and never offers "open in system
+  browser". "Open in native app" appears for any `data-img` file link on a
+  `data-sysopen` page. Both click handlers treat a `data-out` link on a LAN
+  page as having no href. Image swap: a capture `error` listener, plus a
+  `decode()`-based sweep at init and after each region swap. `doc-frame.js`
+  forwards `data-img`. New i18n keys `js.menu.native` and
+  `js.toast.openednative` are in all 11 tables.
+- Manual: `ws-mcp.md` link-menu, image-route, and system-open prose updated.
+- Verification:
+  - `go test ./internal/wsdashboard ./internal/wswhiteboard ./internal/wsi18n`
+    passes. `go test -timeout 25m ./internal/mcp` passes (468 s; a default-timeout run timed out under load in an unrelated ticket-index test).
+  - `GOOS=windows go vet` and test compile of wsdashboard pass, as does a
+    `GOOS=darwin` build.
+  - New tests:
+    - `TestImageRouteServesOutsideImagesToLoopbackViewersOnly`
+    - `TestNetworkPathRefusesUNCAndDevicePaths`
+    - `TestDriveOrRootPathRefusesNamespaceVolumes` (its cases run on Windows
+      only)
+    - `TestOutsideImageMapsAbsoluteImagesOutsideTheRoot`
+    - `TestServedTargetsOutsideImages`
+    - `TestSystemOpenNativeTarget`
+    - `TestOutsideImageServesItemsNotTopicBodies`: topic bodies stay path
+      text
+    - `TestRenderTextOutsideImage`: covers the sanitizer
+  - Extended tests: `TestFileActionsMapsFileTargets` (image mark),
+    `TestFileViewKinds` (the file view keeps an out-of-root image as path
+    text), and `TestDashboardReadPageServesTheBoard` (the item field now uses
+    the route).
+  - By-hand check, done in headless Chromium over CDP against a fixture
+    daemon, as a loopback viewer and as a LAN-token viewer:
+    - Loopback: the out-of-root image loads and the missing one is swapped.
+    - Loopback menus: a `data-out` link offers new tab, native app, and copy
+      absolute path. An in-root image link offers all five items. A
+      non-image outside the root offers copy only.
+    - Loopback actions: Ctrl+click on a `data-out` link is left to the
+      browser. Native app POSTed and opened the resolved path, with a toast.
+    - LAN: both images are swapped, the `data-out` link offers copy only,
+      and Ctrl+click opens the menu.
+- Decisions: the new names are `OutsideImage`, `FileAction.Image`/`Outside`,
+  `data-img`/`data-out`, and the `native` body field. An absolute path that
+  is lexically inside the root but refused by the in-root rules (for
+  example a symlink escaping the root) stays refused rather than falling
+  through to the out-of-root rule. A topic body's in-root image link also
+  gets the native item, through `data-img` forwarding.
+- Open: run a Windows by-hand check of "open in native app" (rundll32
+  FileProtocolHandler with a path containing spaces is untested).
+  `Sec-Fetch-Site: none` loads (address bar, the browser's own "open image
+  in new tab", possibly reload) get a 404, per the ticket.
