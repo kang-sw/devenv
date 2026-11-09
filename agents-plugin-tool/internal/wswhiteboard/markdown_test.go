@@ -295,14 +295,18 @@ func TestMarkdownOptionStacking(t *testing.T) {
 }
 
 // TestMarkdownPickedChipShowsFirstLine pins a settled row's picked-option
-// chip: the option's first line, as inline markdown.
+// chip: the option's first line, as inline markdown. The whole option renders
+// only in the row's expanded body, outside its summary.
 func TestMarkdownPickedChipShowsFirstLine(t *testing.T) {
 	st := &State{Seq: 2, SettleSeq: 1}
 	st.Items = []Item{{ID: 1, Class: ClassPolicy, Topic: "t", Title: "q", Options: []string{"**Keep** it\n- detail\n```go\nx\n```", "other"},
 		Status: StatusAnswered, Answer: "a", AnswerQuote: "q", Settled: 1}}
 	out := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
 	wantAll(t, out, `<span class="pick" title="picked"><span class="k">a</span><span class="pt"><strong>Keep</strong> it</span></span>`)
-	wantNone(t, out, "<li>detail", "<pre>")
+	summary := out[strings.Index(out, `<details class="sx"`):]
+	summary = summary[:strings.Index(summary, "</summary>")]
+	wantNone(t, summary, "<li>detail", "<pre>")
+	wantAll(t, out, `<div class="sbody"><div class="opts stack"><div class="opt static picked">`)
 }
 
 // TestMarkdownMermaidBlock pins a mermaid block: its source sits escaped in

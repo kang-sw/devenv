@@ -4,6 +4,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 8f45bb45ad42631b
 sage-review-completeness-reviewed: 8f45bb45ad42631b
+completed: 2026-11-10
 ---
 
 # Whiteboard settled rows expand to show the original question
@@ -161,3 +162,36 @@ are the same case.
   the note, no option letter from the static options; with a row open, make an unrelated board change and check the row
   stays open on the dashboard page (region swap) and on the static file page
   (`live.js` reload); check the embed snapshot unfolds the same way.
+
+### Result (bf509a9f8) - 2026-11-10
+
+- `page.tmpl`: `srow` wraps `<details class="sx" data-key="item:<ID>">` when the
+  item is `Expandable` (options or `wb:why`; links never count); the compact
+  text moved into a `stext` sub-template used as the summary, and the body holds
+  `ctx` then the shared `opts` sub-template. The assumed row's pen and `.note`
+  follow the `<details>` as siblings; only an assumed row carries `data-id`.
+  `opts` is the card's option and recommendation markup with a `Static` mode
+  (`opt static`, `picked` class, no `data-opt`/`aria-pressed`/button/role).
+- `render.go`: `itemData.Static`, `AsStatic`, `Expandable` (unexported).
+- `page.css`: caret summary, indented body, `.opt.static` look (settled quiet
+  ring on the pick, unpicked dimmed), light and dark via existing tokens;
+  `.srow b` / `.srow.void b` narrowed to `.stext > b` so the void strike-through
+  does not reach the expanded body.
+- `live.js`: open-state restore selector widened to `details.sx[data-key]`.
+  `dashboard.js` unchanged (it already restores any `details[data-key]`).
+- Tests: new `TestRenderPageSettledRowExpands` (full and embed); updated
+  `TestRenderPageAssumedItemIsASettledRow`, `TestMarkdownPickedChipShowsFirstLine`
+  (first-line check scoped to the summary); embed size budget raised 35% -> 40%
+  because settled rationales now ride in the snapshot (32.7% -> 35.2%).
+- Verification: `go vet` and `go test -count=1 ./internal/wswhiteboard/
+  ./internal/wsdashboard/ ./internal/wsi18n/` ok; `node --check live.js` ok.
+  Headless Chromium on the static page and embed: rows open and close, the
+  assumed pen works on collapsed and expanded rows without toggling (typed
+  space included), the reply line carries only `(76) note: ...`, an opened row
+  stays open across a `live.js` reload with an unrelated change, and the embed
+  unfolds with static options (light and dark screenshots checked).
+- Not run: the dashboard-daemon checks (chip carries only the note; open row
+  survives a region swap). No fixture mode seeds a board without a live
+  session; code reading supports both (dashboard selectors need `data-opt`,
+  `restoreOpen` covers any `details[data-key]`).
+- Lite review: no Critical or Important findings.

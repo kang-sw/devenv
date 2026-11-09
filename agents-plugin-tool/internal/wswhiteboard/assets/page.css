@@ -270,16 +270,29 @@ details.more[open] > summary { margin-bottom: 2px; }
 .srow .stext > .id, .srow .stext > .amark, .srow .stext > .new { margin-right: 6px; }
 /* assumed: the lead's reading, settled like an answer; a small muted tag, not a role fill */
 .srow .amark { font-size: 10.5px; font-weight: 700; letter-spacing: .04em; color: color-mix(in srgb, var(--wb-accent-assumed) 75%, var(--wb-muted-fg)); }
-.srow b { font-weight: 600; }
+.srow .stext > b { font-weight: 600; }
 .srow .stext { display: block; overflow-wrap: anywhere; }
 /* an assumed row keeps a pen: the user can still veto or comment through a note */
 .srow[data-id] { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0 4px; }
-.srow[data-id] .stext { flex: 1; min-width: 0; }
+.srow[data-id] > .stext, .srow[data-id] > details.sx { flex: 1; min-width: 0; }
 .srow .note-toggle { background: transparent; color: var(--wb-muted-fg); opacity: .7; flex: none; }
 .srow .note-toggle:hover { opacity: 1; }
 .srow .note { flex-basis: 100%; margin-top: 4px; }
 .srow .ans { color: var(--wb-muted-fg); }
-.srow.void b { font-weight: 400; text-decoration: line-through; color: var(--wb-muted-fg); }
+/* a settled row with more to show: the compact text is a summary with a small
+   disclosure caret, and the body is the original item, options static */
+details.sx > summary { list-style: none; cursor: pointer; display: flex; align-items: baseline; gap: 4px; border-radius: 4px; }
+details.sx > summary::-webkit-details-marker { display: none; }
+details.sx > summary:hover { background: var(--wb-wash); }
+details.sx > summary::before { content: ""; flex: none; align-self: center; width: 0; height: 0; border-left: 5px solid var(--wb-muted-fg); border-top: 4px solid transparent; border-bottom: 4px solid transparent; transition: transform .12s; }
+details.sx[open] > summary::before { transform: rotate(90deg); }
+details.sx > summary > .stext { flex: 1; min-width: 0; }
+.sbody { margin: 4px 0 6px 13px; padding: 6px 0 2px 10px; border-left: 2px solid var(--wb-muted); }
+.opt.static { cursor: default; }
+.opt.static:hover { background: var(--wb-opt); box-shadow: var(--wb-shadow); }
+.opt.static.picked, .opt.static.picked:hover { box-shadow: 0 0 0 1px color-mix(in srgb, var(--wb-accent-policy) 40%, transparent); font-weight: 500; }
+.opt.static:not(.picked) { opacity: .75; }
+.srow.void .stext > b { font-weight: 400; text-decoration: line-through; color: var(--wb-muted-fg); }
 
 /* topic body: block markdown above the topic's items, folded under its own summary */
 /* The summary is the topic bar's button: it is taken out of the details' flow
