@@ -354,7 +354,14 @@
       "registered_at": "2026-11-09T04:57:34Z"
     },
     "261109-bug-ws-dashboard-stream-wake-rerender-cpu": {
-      "registered_at": "2026-11-09T05:34:52Z"
+      "registered_at": "2026-11-09T05:34:52Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "28ef83e379b353cc",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-09T06:15:36Z"
+      }
     },
     "261109-bug-ws-whiteboard-patch-cannot-change-item-class": {
       "registered_at": "2026-11-09T05:54:05Z"
