@@ -39,6 +39,16 @@
 // An unreachable remote takes the same path as offline: the check is
 // recorded as failed and reads serve the local state.
 //
+// # Seeing other processes' writes
+//
+// The process running StartWatch (the dashboard daemon) stamps every
+// registered store's journals and branch refs each DefaultWatchInterval and
+// calls its change callback when a stamp moves, so a write by any other
+// process reaches the page within seconds. The page reads through
+// ViewWithin, which serves the last folded state instead of waiting behind
+// a push or fetch holding the store's lock, and calls the same callback
+// when the reload it left behind lands. View, the MCP tools' read, waits.
+//
 // A Host keeps every store it opened open until Close, so wsledger's
 // in-process idle push still fires in a process that wrote, with or without
 // the daemon. Every read and write first reloads the store directory

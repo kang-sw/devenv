@@ -58,9 +58,18 @@ type Host struct {
 	pushDelay     time.Duration
 	checkInterval time.Duration
 
+	// ctx is canceled by Close; the background reloads of ViewWithin run on
+	// it, and wg counts them.
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
+
 	mu     sync.Mutex
 	stores map[string]*store
 	closed bool
+	// onChange is the change callback StartWatch sets; a late ViewWithin
+	// reload calls it too. nil when no watch runs.
+	onChange func()
 
 	// seenMu serializes this process's reads and writes of the stores'
 	// ui-seen.json files (seen.go).
@@ -77,6 +86,13 @@ type store struct {
 	// lastSweep is when the staged-attachment sweep last ran
 	// (attachments.go).
 	lastSweep time.Time
+
+	// viewMu guards ViewWithin's state, apart from mu so a waiting read
+	// never holds mu: snap is the view the last reload folded, cur the
+	// reload in flight, and next the one queued behind it.
+	viewMu    sync.Mutex
+	snap      *StoreView
+	cur, next *reload
 }
 
 type systemClock struct{}
@@ -98,6 +114,7 @@ func New(opts Options) (*Host, error) {
 	}
 	h := &Host{root: root, runner: opts.Runner, clock: opts.Clock, pushDelay: opts.PushDelay,
 		checkInterval: opts.CheckInterval, stores: map[string]*store{}}
+	h.ctx, h.cancel = context.WithCancel(context.Background())
 	if h.runner == nil {
 		h.runner = batchRunner{}
 	}
@@ -170,13 +187,16 @@ func (h *Host) with(ctx context.Context, id string, fn func(*store) error) error
 	return fn(st)
 }
 
-// Close closes every open store. Unpushed writes stay in their journals and
-// restart the push delay when a store is next opened.
+// Close stops the background reloads and closes every open store. Unpushed
+// writes stay in their journals and restart the push delay when a store is
+// next opened.
 func (h *Host) Close() error {
 	h.mu.Lock()
 	stores := h.stores
 	h.stores, h.closed = map[string]*store{}, true
 	h.mu.Unlock()
+	h.cancel()
+	h.wg.Wait()
 	var first error
 	for _, st := range stores {
 		st.mu.Lock()
@@ -519,8 +539,17 @@ func resolveBatchRefs(payload json.RawMessage, i int, next wsledger.EventID) (js
 // directory as every process left it and never calls the remote.
 // staleDays <= 0 means wstracker's default.
 func (h *Host) View(ctx context.Context, id string, staleDays int) (*StoreView, error) {
+	return h.view(ctx, id, staleDays, nil)
+}
+
+// view is View; reading, when not nil, runs just before the store directory
+// is re-read.
+func (h *Host) view(ctx context.Context, id string, staleDays int, reading func()) (*StoreView, error) {
 	var out *StoreView
 	err := h.with(ctx, id, func(st *store) error {
+		if reading != nil {
+			reading()
+		}
 		if _, err := st.ledger.Reload(ctx); err != nil {
 			return err
 		}
