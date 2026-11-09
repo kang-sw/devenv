@@ -384,6 +384,9 @@
     "261110-feat-ws-tracker-item-move-reparent": {
       "registered_at": "2026-11-09T15:09:01Z"
     },
+    "261110-feat-ws-tracker-search-query-grammar": {
+      "registered_at": "2026-11-09T15:23:30Z"
+    },
     "261110-feat-ws-tracker-support-agent-ui-commands": {
       "registered_at": "2026-11-09T15:23:24Z"
     },
