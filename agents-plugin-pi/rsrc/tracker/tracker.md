@@ -4,7 +4,7 @@ kind: print
 
 # Tracker
 
-The tracker holds the user's tasks, todos, and topics in the stores the user
+The tracker holds the user's tasks and topics in the stores the user
 registered on this machine: personal stores, and team stores shared through a
 git repository. Only a top-level lead and a store's support conversation call
 the tracker tools; workers and subagents report progress to their lead. A
@@ -116,17 +116,17 @@ Body text, markdown, written as is.
 - `refs`: the items the text references, each written `#<ID>` in the text.
   `mentions` and `refs` ride with the body: a new body replaces both, so an
   edit that keeps them repeats them.
-- `kind`: `task` (work to assign and track), `todo` (a personal checklist
-  entry), or `topic` (a discussion with no status; it cannot be assigned).
+- `kind`: `task` (work to assign and track) or `topic` (a discussion with
+  no status, held by one member who looks after it).
   `due`: `YYYY-MM-DD`. `priority`: a level number from the store view's
   priority line, larger is more urgent; without one an item gets the store
   default. A note is optional.
-- `stage="review"` (tasks and todos): the item waits in review before todo.
+- `stage="review"` (tasks): the item waits in review before todo.
   `tk:item.edit` with `stage="review"` moves an item back to review, refused
   while it holds a live or pending assignment; `clear="stage"` promotes it to
   todo, and so does assigning it. Either move is the item creator's, or an
   admin's when the creator was removed.
-- A task or todo the batch creates is assigned to the user
+- An item the batch creates, a topic too, is assigned to the user
   (`completion="assignee"`) unless the same batch assigns it with
   `tk:item.assign item="$N"` or creates it in review; the update prints that
   assignment under the create's position.
@@ -159,6 +159,11 @@ Body text, markdown, written as is.
     `tk:item.unassign` (the assigner) withdraws `assignee`'s assignment, ends
     the user's rule rooted at `root`, or, without either, withdraws all of the
     user's assignments and rules on the item.
+  - A topic has one holder: its `tk:item.assign` names exactly one person in
+    `people`, and is refused while anyone holds it or a handoff of it is
+    pending. It takes no `tk:item.status` or `tk:item.close`. Its holder
+    releases it with `tk:item.unassign` naming themselves as `assignee`, or
+    hands it off.
     `tk:item.reopen` (the assigner or the holder) reopens a done one.
 - `clear` on `tk:item.edit`: `body`, `due`, `stage`, or several
   (`clear="body due"`); an absent body leaves the body as it is.
