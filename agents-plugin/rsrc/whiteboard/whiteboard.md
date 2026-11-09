@@ -22,9 +22,8 @@ host that shows HTML inline. Workers and subagents do not use it.
   name while an embed folder is set). An `info:` line names the items a
   `wb:close` withdrew, items holding options under a class other than
   `policy` (only a policy item's options are offered as picks), and, at most
-  once an hour, open topics unchanged for an
-  hour with nothing waiting on the user; close the finished ones with
-  `wb:close`.
+  once an hour, open topics unchanged for an hour with nothing waiting on the
+  user; close the finished ones with `wb:close`.
 - `{{.McpNamespace}}/whiteboard.query(session_key, payload)` returns stored
   items, settled ones included, and changes nothing. Query before adding, so
   a question the board already holds is patched or reused, not added twice.
@@ -125,19 +124,24 @@ Markdown up to the closing tag.
   `status="open"`, `class="policy"`, and the options in one `wb:patch`.
 - Re-ask: a `wb:patch` that changes an item's `class` or options, or sets a
   settled or assumed item back to `open`, asks it again. The dashboard then
-  drops the answers the user sent for it before the patch, so the item shows
-  as waiting on the user even when an earlier answer was sent but not yet
-  recorded. A patch that only edits the title, `wb:why`, `wb:recommend`, or
-  links, or resends the current class or options, is not a re-ask.
+  drops the sent mark of an answer the user sent for it before the patch, so
+  the item shows as waiting on the user. An answer sent before the patch
+  and not yet delivered still reaches you, and it refers to the options it
+  was sent against. A patch that only edits the title, `wb:why`,
+  `wb:recommend`, or links, or resends the current class or options, is not
+  a re-ask.
 - `wb:close` collapses a topic's settled items and its body; the topic needs
   an item or a body. `result` is required: one sentence saying how the topic
   ended, shown dimmed beside the closed topic's name. Closing withdraws every
   item of the topic still `open`, with `result` as the reason, and an
-  `info:` line names them; an `assumed` item stays assumed. Adding an item to a closed topic, or changing
-  its body, reopens it and hides the result, but does not restore the
-  withdrawn items; the next close replaces the result. Closed topics with nothing waiting on the user go
-  last, most recently closed first; past 30, the dashboard page loads the
-  rest on request and the file page and embed print how many are left out.
+  `info:` line names them; an `assumed` item stays assumed. Put a batch's
+  answers to the topic's items before its `wb:close`, since an answer after
+  the close finds the item withdrawn. Adding an item to a closed topic, or
+  changing its body, reopens it and hides the result, but does not restore
+  the withdrawn items; the next close replaces the result. Closed topics with
+  nothing waiting on the user go last, most recently closed first; past 30,
+  the dashboard page loads the rest on request and the file page and embed
+  print how many are left out.
 - Topic body: one per topic, rendered above its items, for context that
   outlasts a chat reply: background, the shape of a decision, a diagram; a
   topic may hold a body and no items. `wb:body` replaces the body whole,

@@ -424,7 +424,7 @@ func BuildView(state *State, in ViewInput) View {
 
 	settledOrder := map[int]int{}
 	for _, item := range state.Items {
-		settledOrder[item.ID] = item.Settled
+		settledOrder[item.ID] = state.settleOrder(item)
 	}
 	newestFirst := func(list []ItemView) {
 		sort.SliceStable(list, func(i, j int) bool { return settledOrder[list[i].ID] > settledOrder[list[j].ID] })
@@ -556,7 +556,7 @@ func recentSettled(state *State) []int {
 	var settled []entry
 	for _, item := range state.Items {
 		if (IsSettled(item.Status) || item.Status == StatusAssumed) && !state.topicClosed(item.Topic) {
-			settled = append(settled, entry{item.ID, item.Settled})
+			settled = append(settled, entry{item.ID, state.settleOrder(item)})
 		}
 	}
 	sort.Slice(settled, func(i, j int) bool { return settled[i].order > settled[j].order })
