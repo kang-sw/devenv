@@ -189,6 +189,55 @@ Today (`agents-plugin-tool/internal/wsdashboard/assets/tracker.js`):
   comment input, comment edit: write, preview, save, cancel, mention pick)
   and lists the browser hand check as unverified if not done.
 
+### Result (8f0adc0f5) - 2026-11-09
+
+Landed in 212459130 (render route), 5df290c54 (shared editor), 8f0adc0f5
+(review fix: keys and focus while previewing).
+
+- Server: `POST /tracker/stores/<id>/render` takes `{"text"}` and answers
+  `{"html"}`; `TrackerHost` gained `Render(ctx, id, TrackerRenderRequest)
+  (string, error)`, and the `cmd/ws-mcp` adapter runs `trackerText`, the
+  renderer `renderViewHTML` uses. The route is in `trackerStoreOps`, so it
+  takes the listed-store check, the same-origin POST rule, the LAN guard, and
+  `trackerBodyLimit`; it is a read and does not bump the tracker revision.
+  `TrackerRenderRequest` is a struct so Phase 2 can add the pending
+  attachment list.
+- Page: `editorHtml(id, o)` builds all three editors (ids kept: `iw-ebody`,
+  `cbox`, `tkcedit`): a Write / Preview toggle, a `data-mention` textarea,
+  and a preview pane drawn with the saved block's class (`sh-body` or
+  `ctext`). The preview calls the new optional adapter method
+  `render(id, text, done)` (documented in the tracker.js header; the
+  dashboard adapter posts to the route) and shows the escaped plain text
+  without it (the mockup). Preview state lives in `ui.edpv`; the toggle
+  works in place so focus stays, and `render()` clears it when its editor
+  ends. The `@`/`#` popup follows the focused editor (`MP.box`); a pick in
+  the body or comment edit goes to `mpick`, and the save sends
+  `keptMentions(withPicks(stored, mpick), body)`. One keydown branch runs the
+  IME guard and the popup keys for every editor before each place's own
+  save/cancel keys. While previewing, Cmd/Ctrl+Enter on the toggle saves or
+  sends and Esc returns to Write.
+- Six `js.tk.ed.*` strings in all 11 tables; mockup `i18n-en.js`
+  regenerated.
+- Decisions: the `@` button stays composer-only (typing `@`/`#` works in
+  all three); Esc during an IME composition in the body editor no longer
+  cancels the edit, matching the comment box; Esc in preview steps back to
+  Write rather than cancelling outright.
+- Verification: `go test ./internal/wsdashboard ./internal/wsi18n
+  ./cmd/ws-mcp` ok (new `TestDashboardTrackerRenderMatchesTheView`: the
+  render equals the view's html for the same body, safe mode kept; route
+  tests cover the 200 answer, the 405, unknown store, host error, malformed and
+  oversize body, origin, LAN guard, and no revision bump);
+  `TestTrackerMockupI18nIsCurrent` and the i18n key tests green;
+  `node --check` on tracker.js and dashboard.js ok. Browser check: the
+  mockup driven in headless Chromium over CDP with an injected fake
+  `adapter.render` passed 27 scripted checks across body edit, comment
+  input, and comment edit (write, preview, render failure, plain fallback,
+  save, cancel, `@` and `#` pick, IME Enter guard, keys and focus while
+  previewing). It is a one-off script, not a checked-in harness; the live
+  product page (real daemon) was not hand-checked.
+- Review (lite): two minors (keys and focus while previewing), both fixed
+  in 8f0adc0f5.
+
 ### Phase 2: image paste and inline images
 
 Prerequisite: Phase 1 of `261108-feat-ws-tracker-ledger-attachments`.
