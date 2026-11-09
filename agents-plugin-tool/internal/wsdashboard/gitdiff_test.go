@@ -294,6 +294,54 @@ func TestReadWorktreeFileDiff(t *testing.T) {
 	}
 }
 
+// TestDiffPathsAreLiteralFromTheTop pins how a listed path reaches git: a
+// glob-shaped name matches only itself, and a session rooted in a
+// subdirectory still finds the files its lists name from the top.
+func TestDiffPathsAreLiteralFromTheTop(t *testing.T) {
+	work := filepath.Join(t.TempDir(), "work")
+	pushRepos(t, work, 0)
+	writeFile(t, filepath.Join(work, "d", "*.txt"), "star\n")
+	writeFile(t, filepath.Join(work, "d", "b.txt"), "bee\n")
+	writeFile(t, filepath.Join(work, "top.txt"), "top\n")
+	gitRun(t, work, "add", ".")
+	gitRun(t, work, "commit", "-q", "-m", "seed")
+	writeFile(t, filepath.Join(work, "d", "*.txt"), "star\nstar2\n")
+	writeFile(t, filepath.Join(work, "d", "b.txt"), "bee\nbee2\n")
+	writeFile(t, filepath.Join(work, "top.txt"), "top\ntop2\n")
+	gitRun(t, work, "add", ".")
+	gitRun(t, work, "commit", "-q", "-m", "change")
+	head := revParse(t, work, "HEAD")
+	writeFile(t, filepath.Join(work, "d", "*.txt"), "star\nstar2\nstar3\n")
+	writeFile(t, filepath.Join(work, "d", "b.txt"), "bee\nbee2\nbee3\n")
+	writeFile(t, filepath.Join(work, "top.txt"), "top\ntop2\ntop3\n")
+	writeFile(t, filepath.Join(work, "d", "new.txt"), "n\n")
+	writeFile(t, filepath.Join(work, "loose.txt"), "l\n")
+
+	for _, root := range []string{work, filepath.Join(work, "d")} {
+		d, err := readCommitFileDiff(root, head, "d/*.txt")
+		if err != nil || !reflect.DeepEqual(diffShape(d), []string{"@@", " star", "+star2"}) {
+			t.Errorf("%s commit d/*.txt = %v %v", root, diffShape(d), err)
+		}
+		d, err = readWorktreeFileDiff(root, "unstaged", "d/*.txt")
+		if err != nil || !reflect.DeepEqual(diffShape(d), []string{"@@", " star", " star2", "+star3"}) {
+			t.Errorf("%s unstaged d/*.txt = %v %v", root, diffShape(d), err)
+		}
+		d, err = readWorktreeFileDiff(root, "unstaged", "top.txt")
+		if err != nil || !reflect.DeepEqual(diffShape(d), []string{"@@", " top", " top2", "+top3"}) {
+			t.Errorf("%s unstaged top.txt = %v %v", root, diffShape(d), err)
+		}
+		d, err = readWorktreeFileDiff(root, "untracked", "d/new.txt")
+		if err != nil || d.Path != "d/new.txt" || !reflect.DeepEqual(diffShape(d), []string{"@@", "+n"}) {
+			t.Errorf("%s untracked d/new.txt = %+v %v", root, d, err)
+		}
+	}
+	// From the subdirectory, an untracked file above the root is not read.
+	d, err := readWorktreeFileDiff(filepath.Join(work, "d"), "untracked", "loose.txt")
+	if err != nil || d.Notice != "outside" || len(d.Hunks) != 0 {
+		t.Errorf("untracked above the root = %+v %v", d, err)
+	}
+}
+
 func TestGitDiffRoutes(t *testing.T) {
 	f := startPageFixture(t)
 	work := f.project

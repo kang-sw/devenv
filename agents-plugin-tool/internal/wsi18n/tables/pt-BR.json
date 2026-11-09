@@ -143,6 +143,7 @@
   "js.git.diff.nochange": "Sem alterações de texto (só o modo ou o nome mudou, ou o arquivo está vazio).",
   "js.git.diff.notice.dir": "Um diretório não rastreado: seus arquivos não são listados um a um.",
   "js.git.diff.notice.gitlink": "Uma entrada de submódulo: sem diff de texto.",
+  "js.git.diff.notice.outside": "Fica fora da pasta da sessão, por isso não é exibido.",
   "js.git.diff.notice.special": "Não é um arquivo comum: sem diff de texto.",
   "js.git.diff.notice.unmerged": "Não mesclado: resolva o conflito para ver um diff.",
   "js.git.fail": "não foi possível ler o status do git: {0}",

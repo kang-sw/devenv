@@ -143,6 +143,7 @@
   "js.git.diff.nochange": "テキストの変更なし (モードか名前のみの変更、または空のファイル)。",
   "js.git.diff.notice.dir": "追跡されていないディレクトリ: 中のファイルは個別に表示されません。",
   "js.git.diff.notice.gitlink": "サブモジュールのエントリ: テキスト差分なし。",
+  "js.git.diff.notice.outside": "セッションのフォルダーの外にあるため、表示しません。",
   "js.git.diff.notice.special": "通常のファイルではありません: テキスト差分なし。",
   "js.git.diff.notice.unmerged": "未マージ: 競合を解決すると差分が表示されます。",
   "js.git.fail": "git の状態を読めませんでした: {0}",

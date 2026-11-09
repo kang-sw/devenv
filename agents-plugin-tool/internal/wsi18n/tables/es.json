@@ -143,6 +143,7 @@
   "js.git.diff.nochange": "Sin cambios de texto (solo cambió el modo o el nombre, o el archivo está vacío).",
   "js.git.diff.notice.dir": "Un directorio sin seguimiento: sus archivos no se listan uno a uno.",
   "js.git.diff.notice.gitlink": "Una entrada de submódulo: sin diff de texto.",
+  "js.git.diff.notice.outside": "Está fuera de la carpeta de la sesión, así que no se muestra.",
   "js.git.diff.notice.special": "No es un archivo normal: sin diff de texto.",
   "js.git.diff.notice.unmerged": "Sin fusionar: resuelve el conflicto para ver un diff.",
   "js.git.fail": "no se pudo leer el estado de git: {0}",

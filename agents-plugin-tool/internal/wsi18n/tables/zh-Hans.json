@@ -143,6 +143,7 @@
   "js.git.diff.nochange": "没有文本更改（仅更改了模式或名称，或文件为空）。",
   "js.git.diff.notice.dir": "未跟踪的目录：其中的文件不逐一列出。",
   "js.git.diff.notice.gitlink": "子模块条目：无文本差异。",
+  "js.git.diff.notice.outside": "位于会话文件夹之外，因此不显示。",
   "js.git.diff.notice.special": "不是普通文件：无文本差异。",
   "js.git.diff.notice.unmerged": "未合并：解决冲突后可查看差异。",
   "js.git.fail": "无法读取 git 状态：{0}",

@@ -2622,7 +2622,7 @@
   // gwRender draws one file's diff (GitFileDiff): numbered unified lines
   // with their highlight classes and intra-line marks, or a notice.
   function gwRender(b, d) {
-    var notices = { dir: wsT("js.git.diff.notice.dir"), gitlink: wsT("js.git.diff.notice.gitlink"), unmerged: wsT("js.git.diff.notice.unmerged"), special: wsT("js.git.diff.notice.special") };
+    var notices = { dir: wsT("js.git.diff.notice.dir"), gitlink: wsT("js.git.diff.notice.gitlink"), unmerged: wsT("js.git.diff.notice.unmerged"), special: wsT("js.git.diff.notice.special"), outside: wsT("js.git.diff.notice.outside") };
     if (d.notice) b.appendChild(gwDnote(notices[d.notice] || d.notice));
     else if (d.binary) b.appendChild(gwDnote(wsT("js.git.diff.binary")));
     else if (!d.hunks || !d.hunks.length) b.appendChild(gwDnote(wsT("js.git.diff.nochange")));

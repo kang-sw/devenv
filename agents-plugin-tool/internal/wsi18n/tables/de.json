@@ -143,6 +143,7 @@
   "js.git.diff.nochange": "Keine Textänderungen (nur Modus oder Name geändert, oder die Datei ist leer).",
   "js.git.diff.notice.dir": "Ein nicht verfolgtes Verzeichnis: seine Dateien werden nicht einzeln aufgeführt.",
   "js.git.diff.notice.gitlink": "Ein Submodul-Eintrag: kein Text-Diff.",
+  "js.git.diff.notice.outside": "Liegt außerhalb des Sitzungsordners und wird daher nicht angezeigt.",
   "js.git.diff.notice.special": "Keine reguläre Datei: kein Text-Diff.",
   "js.git.diff.notice.unmerged": "Nicht zusammengeführt: Löse den Konflikt, um einen Diff zu sehen.",
   "js.git.fail": "der Git-Status konnte nicht gelesen werden: {0}",

@@ -143,6 +143,7 @@
   "js.git.diff.nochange": "No text changes (only the mode or name changed, or the file is empty).",
   "js.git.diff.notice.dir": "An untracked directory: its files are not listed one by one.",
   "js.git.diff.notice.gitlink": "A submodule entry: no text diff.",
+  "js.git.diff.notice.outside": "Outside the session folder, so it is not shown.",
   "js.git.diff.notice.special": "Not a regular file, so there is no text diff.",
   "js.git.diff.notice.unmerged": "Unmerged: resolve the conflict to see a diff.",
   "js.git.fail": "the git status could not be read: {0}",

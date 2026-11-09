@@ -61,8 +61,9 @@ type GitFileDiff struct {
 	Path   string `json:"path"`
 	Binary bool   `json:"binary,omitempty"`
 	// Notice names why the file has no text diff: "dir" (an untracked
-	// directory), "gitlink" (a submodule entry), "unmerged", or "special"
-	// (neither a regular file nor a symlink).
+	// directory), "gitlink" (a submodule entry), "unmerged", "special"
+	// (neither a regular file nor a symlink), or "outside" (an untracked
+	// file outside the session root, which is not read).
 	Notice    string    `json:"notice,omitempty"`
 	Truncated bool      `json:"truncated,omitempty"`
 	Hunks     []GitHunk `json:"hunks"`
@@ -135,6 +136,32 @@ func runGitCapped(ctx context.Context, root string, max int, args ...string) (ou
 // diff, or textconv.
 var diffArgs = []string{"-p", "--full-index", "--no-color", "--no-ext-diff", "--no-textconv"}
 
+// topPathspec names one listed file to git exactly. The lists (diff-tree,
+// status) give paths from the repository top, while git reads a pathspec
+// from -C root, a subdirectory when the session runs in one; and a plain
+// pathspec globs, so a file named *.txt would match its siblings too.
+func topPathspec(path string) string { return ":(top,literal)" + path }
+
+// gitPrefix is root's path below the repository top, slash-terminated, or
+// "" at the top (git rev-parse --show-prefix).
+func gitPrefix(ctx context.Context, root string) (string, error) {
+	out, _, err := runGitCapped(ctx, root, 1<<12, "rev-parse", "--show-prefix")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimRight(string(out), "\r\n"), nil
+}
+
+// underPrefix turns a path from the repository top into one from the
+// session root, false when the file lies outside the root: the working
+// tree is read under the file view's rule, inside the session root only.
+func underPrefix(prefix, path string) (string, bool) {
+	if !strings.HasPrefix(path, prefix) || len(path) == len(prefix) {
+		return "", false
+	}
+	return path[len(prefix):], true
+}
+
 // readCommitFileDiff reads path's diff in commit oid.
 func readCommitFileDiff(root, oid, path string) (GitFileDiff, error) {
 	c, err := readGitCommit(root, oid)
@@ -166,9 +193,9 @@ func readCommitFileDiff(root, oid, path string) (GitFileDiff, error) {
 	}
 	args = append(args, "--")
 	if file.From != "" {
-		args = append(args, file.From)
+		args = append(args, topPathspec(file.From))
 	}
-	args = append(args, path)
+	args = append(args, topPathspec(path))
 	out, cut, err := runGitCapped(ctx, root, gitDiffMax, args...)
 	if err != nil {
 		return GitFileDiff{}, err
@@ -204,22 +231,39 @@ func readWorktreeFileDiff(root, side, path string) (GitFileDiff, error) {
 	}
 	d := GitFileDiff{Path: path, Hunks: []GitHunk{}}
 	switch {
-	case side == "untracked":
-		return untrackedFileDiff(root, path), nil
 	case file.Status == "U":
 		d.Notice = "unmerged"
 		return d, nil
-	case file.Add < 0:
+	case side != "untracked" && file.Add < 0:
 		d.Binary = true
 		return d, nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), gitReadTimeout)
 	defer cancel()
+	// Working-tree reads take the path from the session root.
+	var local string
+	localOK := false
+	if side != "staged" {
+		prefix, err := gitPrefix(ctx, root)
+		if err != nil {
+			return GitFileDiff{}, err
+		}
+		local, localOK = underPrefix(prefix, path)
+	}
+	if side == "untracked" {
+		if !localOK {
+			d.Notice = "outside"
+			return d, nil
+		}
+		d = untrackedFileDiff(root, local)
+		d.Path = path
+		return d, nil
+	}
 	args := []string{"--no-optional-locks", "diff", "--no-renames"}
 	if side == "staged" {
 		args = append(args, "--cached")
 	}
-	args = append(append(args, diffArgs...), "--", path)
+	args = append(append(args, diffArgs...), "--", topPathspec(path))
 	out, cut, err := runGitCapped(ctx, root, gitDiffMax, args...)
 	if err != nil {
 		return GitFileDiff{}, err
@@ -228,8 +272,14 @@ func readWorktreeFileDiff(root, side, path string) (GitFileDiff, error) {
 	if side == "staged" {
 		return buildFileDiff(path, out, cut, blob, blob), nil
 	}
-	// The new side is the working tree, which has no blob to read or cache.
-	work := func(string) hlLines { return fileHighlight(root, path) }
+	// The new side is the working tree, which has no blob to read or cache;
+	// outside the session root it goes uncoloured.
+	work := func(string) hlLines {
+		if !localOK {
+			return nil
+		}
+		return fileHighlight(root, local)
+	}
 	return buildFileDiff(path, out, cut, blob, work), nil
 }
 

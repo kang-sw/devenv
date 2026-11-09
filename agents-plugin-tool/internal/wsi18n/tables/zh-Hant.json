@@ -143,6 +143,7 @@
   "js.git.diff.nochange": "沒有文字變更（僅變更了模式或名稱，或檔案為空）。",
   "js.git.diff.notice.dir": "未追蹤的目錄：其中的檔案不逐一列出。",
   "js.git.diff.notice.gitlink": "子模組項目：無文字差異。",
+  "js.git.diff.notice.outside": "位於工作階段資料夾之外，因此不顯示。",
   "js.git.diff.notice.special": "不是一般檔案：無文字差異。",
   "js.git.diff.notice.unmerged": "未合併：解決衝突後可查看差異。",
   "js.git.fail": "無法讀取 git 狀態：{0}",
