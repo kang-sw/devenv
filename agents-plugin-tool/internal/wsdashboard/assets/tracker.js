@@ -2256,7 +2256,7 @@
   function menuHtml() {
     var it = VS.items[MN.item], v = VS.viewer.member, h = '';
     if (!it) return '';
-    h += '<div class="mh"><code class="al">' + esc(it.alias) + '</code><b>' + esc(it.title) + '</b></div>';
+    h += '<div class="mh">' + idCopyBtn(it) + '<b>' + esc(it.title) + '</b></div>';
     var back = MN.from ? mi('m-back', wsT("js.tk.menu.back"), {}, { icon: 'back', cls: 'mback' }) + msep() : '';
     var mineR = mineLive(it), step = MN.step;
     if (step === 'pri') {

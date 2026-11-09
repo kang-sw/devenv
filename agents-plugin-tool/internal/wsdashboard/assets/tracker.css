@@ -669,7 +669,8 @@ dialog.tk-dlg p { margin: 0; font-size: 12.5px; color: var(--wb-muted-fg); }
 .tk.tk-menu[hidden] { display: none; }
 .tk.tk-menu.wide { width: min(380px, calc(100vw - 12px)); max-width: none; }
 .tk.tk-menu.spopw { width: min(360px, calc(100vw - 12px)); max-width: none; }
-.tk-menu .mh { display: flex; align-items: baseline; gap: 6px; padding: 4px 8px 6px; font-size: 12px; color: var(--wb-muted-fg); min-width: 0; }
+.tk-menu .mh { display: flex; align-items: center; gap: 6px; padding: 4px 8px 6px; font-size: 12px; color: var(--wb-muted-fg); min-width: 0; }
+.tk-menu .mh .idcopy { flex: none; }
 .tk-menu .mh b { color: var(--wb-fg); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .tk-menu .mi { width: 100%; display: flex; align-items: center; gap: 8px; min-height: 28px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: var(--wb-fg); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
 .tk-menu .mi:hover, .tk-menu .mi:focus-visible { background: color-mix(in srgb, var(--wb-primary) 12%, var(--wb-card)); outline: none; }
