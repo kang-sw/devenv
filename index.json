@@ -353,6 +353,9 @@
     "261109-bug-git-commit-paths-in-delegate-worktree": {
       "registered_at": "2026-11-09T04:57:34Z"
     },
+    "261109-feat-ws-dashboard-git-commit-graph": {
+      "registered_at": "2026-11-09T05:26:59Z"
+    },
     "261109-feat-ws-tracker-shared-markdown-editor": {
       "registered_at": "2026-11-09T03:33:13Z",
       "lease": {
