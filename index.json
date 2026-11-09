@@ -386,7 +386,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-09T06:15:39Z"
+        "touched_at": "2026-11-09T06:16:21Z",
+        "impl": {
+          "branch": "impl/develop/chuck-fade-reset"
+        }
       }
     },
     "261109-research-windows-code-signing-signpath": {
