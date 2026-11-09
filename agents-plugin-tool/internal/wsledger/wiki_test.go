@@ -1017,6 +1017,32 @@ func TestWikiPushFailureDoesNotAbortLedgerSync(t *testing.T) {
 	}
 }
 
+// TestWikiPushFailureStillPushesOtherWikis: when one local-only wiki's
+// push fails, the wikis after it are still pushed by the same sync.
+func TestWikiPushFailureStillPushesOtherWikis(t *testing.T) {
+	w := newWorld(t)
+	url := w.newRemote("r")
+	oa := w.remoteOpts("ada", "c1")
+	ada, err := Create(context.Background(), oa)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// pushLocalWikis walks refs in order: the refused wiki comes first.
+	saveOK(t, ada, wikiCreate("alpha", "p", "1\n"))
+	beta := saveOK(t, ada, wikiCreate("beta", "p", "1\n"))
+	ada.Close()
+
+	oa.Runner = &wikiFaultRunner{inner: wsgit.ExecRunner{Env: GitEnv}, pushRef: wikiRef("alpha")}
+	ada = w.register(oa, url)
+	refs := remoteRefs(t, url)
+	if refs[wikiRef("alpha")] != "" {
+		t.Fatal("the refused wiki reached the remote")
+	}
+	if refs[wikiRef("beta")] != beta.Commit {
+		t.Fatalf("remote beta = %q, want %s: a refused wiki held up the wikis after it", refs[wikiRef("beta")], beta.Commit)
+	}
+}
+
 // TestWikiFetchFailureStillAbsorbsEvents: a failed wiki fetch does not
 // fail the store fetch: the event refs fetched before it are absorbed, the
 // wikis stay as they were, and the failure is a warning.
