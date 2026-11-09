@@ -310,11 +310,15 @@ func (claudeProcess) SetEffort(string) error { return ErrUnsupported }
 // init message to the session id (after the init check), assistant text to
 // final replies, tool calls to the lead's batch (one per assistant
 // message), rate-limit and result figures to usage, and the result to the
-// turn's end.
+// turn's end, and the subagent tasks the Agent tool starts to subagents.
+// A line a subagent wrote (parent_tool_use_id set) is not the lead's: its
+// text and tool calls stay out of the lead's reply and batches.
 type claudeMapper struct {
 	spec    StartSpec
 	now     func() time.Time
 	batches batchTracker
+	// tasks are the subagent task ids started and not yet ended.
+	tasks map[string]bool
 
 	context *wslive.UsageContext
 	limits  map[string]wslive.UsageLimit
@@ -323,13 +327,25 @@ type claudeMapper struct {
 }
 
 func newClaudeMapper(spec StartSpec) *claudeMapper {
-	return &claudeMapper{spec: spec, now: time.Now, batches: newBatchTracker("c"), limits: map[string]wslive.UsageLimit{}}
+	return &claudeMapper{spec: spec, now: time.Now, batches: newBatchTracker("c"), limits: map[string]wslive.UsageLimit{}, tasks: map[string]bool{}}
 }
 
 type claudeLine struct {
-	Type     string          `json:"type"`
-	Subtype  string          `json:"subtype"`
-	Message  json.RawMessage `json:"message"`
+	Type    string          `json:"type"`
+	Subtype string          `json:"subtype"`
+	Message json.RawMessage `json:"message"`
+	// ParentToolUseID names the Agent call whose subagent wrote the line.
+	ParentToolUseID string `json:"parent_tool_use_id"`
+	// TaskID, TaskType, Description, Status, and Patch describe a
+	// background task's system lines (task_started, task_updated,
+	// task_notification).
+	TaskID      string `json:"task_id"`
+	TaskType    string `json:"task_type"`
+	Description string `json:"description"`
+	Status      string `json:"status"`
+	Patch       struct {
+		Status string `json:"status"`
+	} `json:"patch"`
 	Response struct {
 		Subtype   string `json:"subtype"`
 		RequestID string `json:"request_id"`
@@ -427,10 +443,30 @@ func (m *claudeMapper) mapLine(line []byte, replies lineReplies) []Event {
 				trigger = l.CompactMetadata.Trigger
 			}
 			return []Event{{Live: &wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactEnd, Trigger: trigger}}}
+		case "task_started":
+			if l.TaskType == claudeAgentTask && l.TaskID != "" {
+				m.tasks[l.TaskID] = true
+				return []Event{{Live: &wslive.Event{Kind: wslive.KindAgent, AgentID: l.TaskID, Status: wslive.StatusRunning, Label: l.Description}}}
+			}
+		case "task_updated", "task_notification":
+			status := l.Status
+			if l.Subtype == "task_updated" {
+				status = l.Patch.Status
+			}
+			if end := claudeTaskEnd(status); end != "" && m.tasks[l.TaskID] {
+				delete(m.tasks, l.TaskID)
+				return []Event{{Live: &wslive.Event{Kind: wslive.KindAgent, AgentID: l.TaskID, Status: end}}}
+			}
 		}
 	case "assistant":
+		if l.ParentToolUseID != "" {
+			return nil
+		}
 		return m.assistant(l.Message, now)
 	case "user":
+		if l.ParentToolUseID != "" {
+			return nil
+		}
 		return m.toolResults(l.Message, now)
 	case "rate_limit_event":
 		if l.RateLimit != nil {
@@ -473,6 +509,23 @@ func (m *claudeMapper) mapLine(line []byte, replies lineReplies) []Event {
 		return append(out, end)
 	}
 	return nil
+}
+
+// claudeAgentTask is the task type of a subagent the Agent tool started.
+// Claude 2.1.319 runs it in the background: the Agent call's tool_result
+// comes at once, and system task lines carry the subagent's start and end.
+const claudeAgentTask = "local_agent"
+
+// claudeTaskEnd maps a task status to the subagent's final status: done for
+// completed, failed for any other terminal one, "" while it runs.
+func claudeTaskEnd(status string) string {
+	switch status {
+	case "", "pending", "running":
+		return ""
+	case "completed":
+		return wslive.StatusDone
+	}
+	return wslive.StatusFailed
 }
 
 func (m *claudeMapper) assistant(raw json.RawMessage, now int64) []Event {
