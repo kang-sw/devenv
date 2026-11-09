@@ -93,6 +93,9 @@ type Event struct {
 	// Card is a tracker card the lead showed: a successful tracker.show call
 	// of the attached ws-mcp whose result opens with its card line.
 	Card *wslive.CardRef
+	// TrackerWrite: a successful tracker.update call of the attached ws-mcp
+	// (TrackerWriteTool) returned, so a tracker store may have changed.
+	TrackerWrite bool
 	// SessionID is the backend session id, once known; the runner persists
 	// it for resume.
 	SessionID string

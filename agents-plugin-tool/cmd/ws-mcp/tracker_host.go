@@ -20,6 +20,11 @@ import (
 // same bound a tk:register gets for a clone of the remote.
 const dashboardRegisterTimeout = 3 * time.Minute
 
+// dashboardViewWait bounds how long a page read waits for a store's reload
+// before it serves the last folded state (wstrackerhost.ViewWithin): a
+// reload can wait behind a push or fetch holding the store's lock.
+const dashboardViewWait = 500 * time.Millisecond
+
 // dashboardTracker is the daemon's wsdashboard.TrackerHost over its one
 // wstrackerhost.Host, the host its background poll also runs on. err is
 // wstrackerhost.New's error: then every method returns it, so the tracker
@@ -60,7 +65,7 @@ func (t *dashboardTracker) View(ctx context.Context, id string) (wsdashboard.Tra
 	if t.err != nil {
 		return wsdashboard.TrackerView{}, redacted(t.err)
 	}
-	v, err := t.h.View(ctx, id, 0)
+	v, err := t.h.ViewWithin(ctx, id, 0, dashboardViewWait)
 	if err != nil {
 		return wsdashboard.TrackerView{}, redacted(err)
 	}

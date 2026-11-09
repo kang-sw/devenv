@@ -513,6 +513,9 @@ func (m *piMapper) mapLine(line []byte, replies lineReplies) []Event {
 				out = append(out, *ev)
 			}
 		}
+		if !l.IsError && l.ToolName == piMCPToolName(ReservedMCPServer, TrackerWriteTool) {
+			out = append(out, Event{TrackerWrite: true})
+		}
 		return out
 	case "compaction_start", "compaction_end":
 		trigger := ""

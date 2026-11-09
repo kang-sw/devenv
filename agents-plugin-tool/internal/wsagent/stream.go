@@ -411,6 +411,10 @@ func (t *batchTracker) callName(id string) string {
 // CardTool is the ws tool whose result a support chat draws as a card.
 const CardTool = "tracker.show"
 
+// TrackerWriteTool is the ws tool that writes tracker stores; a successful
+// call of it raises an Event with TrackerWrite set.
+const TrackerWriteTool = "tracker.update"
+
 // cardEvent reads a CardTool result: a first line "card <store> <alias>",
 // then the item line "<alias> <kind> <quoted title>", whose title it keeps
 // when it parses. A result without the card line (an item of another

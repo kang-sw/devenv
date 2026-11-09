@@ -62,6 +62,11 @@ type Options struct {
 	Now func() time.Time
 	// Log receives diagnostics; nil discards them.
 	Log io.Writer
+	// TrackerChanged, when not nil, is called after a conversation's
+	// successful tracker write (an Event with TrackerWrite set), so the
+	// daemon re-reads its tracker stores. It may be called from any
+	// goroutine.
+	TrackerChanged func()
 	// heartbeat overrides wslive.HeartbeatInterval for tests.
 	heartbeat time.Duration
 }
@@ -719,6 +724,10 @@ func (c *conv) handle(ev Event) {
 	case ev.Card != nil:
 		if c.live.card(*ev.Card) {
 			c.r.notify(c.rec.ReplyID, c.rec.Root)
+		}
+	case ev.TrackerWrite:
+		if f := c.r.opts.TrackerChanged; f != nil {
+			f()
 		}
 	case ev.Fatal != nil:
 		c.setStatus(func() { c.lastErr = ev.Fatal.Error() })

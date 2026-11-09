@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 16f46749ccaf97a9
 sage-review-completeness-reviewed: 16f46749ccaf97a9
+completed: 2026-11-10
 ---
 
 # Tracker page misses writes from other processes until the poll
@@ -217,3 +218,63 @@ fetch. This was already recorded as a minor on
 - Verify in a headless browser against a dev daemon: create items through a
   separate `ws-mcp` process's `tracker_update`; the Items panel shows them
   within the watch interval without a reload.
+
+### Result (7d9d2fba8) - 2026-11-10
+
+Landed in 025cf0282, 3bb961915, 68f4f629e, 7d9d2fba8.
+
+- Runner hook: `wsagent.Event.TrackerWrite` is raised by the Claude and Pi
+  parsers on a non-error `tracker.update` result of the reserved ws server
+  (`TrackerWriteTool`, matched with the same name forms as `CardTool`);
+  `conv.handle` calls `wsagent.Options.TrackerChanged`. The daemon binds it
+  through a `lateFunc` (atomic pointer) set right after `StartDaemon`,
+  because `StartDaemon` starts the runner before it returns the `*Daemon`.
+- Store watch: `wstrackerhost.Host.StartWatch(interval, onChange)`
+  (`DefaultWatchInterval` 2 s) re-reads the registry each tick and stamps
+  each store's journals (size + mtime) and the loose/packed/reftable refs
+  under `refs/heads/` and `refs/ledger/known/` (the push-known refs the
+  view's unpushed list reads); a changed stamp or store set calls
+  onChange. No fold, no network, no git process. Wired in
+  `cmd/ws-mcp/dashboard.go` as `startTrackerWatch(..., daemon.TrackerChanged)`
+  next to `startTrackerPoll`, stopped before the host closes.
+- Lock hardening: `Host.ViewWithin(ctx, id, staleDays, wait)` runs the
+  reload in the background (one per store, a reader arriving after the
+  in-flight reload began re-reading queues the next one), waits at most
+  `wait`, and otherwise serves the last folded snapshot through a shallow
+  copy (so the daemon's in-place `Redact` stays per reader). A reload that
+  outlived its reader calls the Host's change callback (set by
+  `StartWatch`). The reload runs on a Host context `Close` cancels, bounded
+  by `writeLockWait`; `Close` waits for reloads. No wsledger change.
+  `dashboardTracker.View` uses it with `dashboardViewWait` 500 ms; the MCP
+  `View` path is unchanged and keeps waiting.
+- Page: `tkReadAll` notifies the mounted renderer as each store's view
+  arrives; the last store's notify comes from `tkReload`'s done path.
+- Tests: `internal/wstrackerhost/watch_test.go` (another process's write
+  and push reach the callback, an idle store with repeated reads causes
+  none, a new store is watched, the stamp ignores read-side files),
+  `pageview_test.go` (stale state within the bound while a fetch is
+  blocked and the callback fires once on release; another process holding
+  `<store>/lock` does not hold the bounded read, while the unbounded View
+  waits and returns fresh state; the reload queue; shared-copy Redact;
+  closed host), `internal/wsagent/card_test.go` (Claude/Pi TrackerWrite
+  recognition, runner calls TrackerChanged), `cmd/ws-mcp/tracker_watch_test.go`
+  (another Host's write bumps the real daemon's `/tracker/stores` rev),
+  `internal/wsdashboard/tracker_readall_test.go` (node: the fast store
+  renders before the slow one answers).
+- Verification: `go test -race ./internal/wstrackerhost ./internal/wsagent
+  ./cmd/ws-mcp` ok; `go test ./internal/wsdashboard` ok; `go vet` (linux and
+  GOOS=windows for the touched packages) clean. Headless check against an
+  isolated dev daemon (port 38417, scratch WS_CACHE_HOME / WS_CONFIG_HOME):
+  with the store drawer open, a separate `ws-mcp serve --stdio`
+  `tracker.update` created a topic and three tasks, and all four showed in
+  the page about 0.9 s after the write returned, without a reload.
+- Decisions: `ViewWithin` is a separate method rather than a Host option;
+  callers of one Host pass one staleDays (a reload serves every reader
+  that joins it); a reload that fails inside the wait returns its error.
+- Minors left open: wiki reads (`WikiList`, `WikiPages`, `WikiRead`) still
+  wait behind a fetch; a late reload that fails signals nothing (the page
+  waits for the next watch or poll change); `host-sync.json` changes from
+  another process's fetch (online / syncedAt) are not stamped by design, so
+  that indicator can lag until the next poll; a second `StartWatch` on one
+  Host would have its callback cleared by the first one's stop (single
+  caller today).

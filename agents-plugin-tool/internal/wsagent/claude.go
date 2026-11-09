@@ -574,6 +574,9 @@ func (m *claudeMapper) toolResults(raw json.RawMessage, now int64) []Event {
 					out = append(out, *ev)
 				}
 			}
+			if !b.IsError && name == claudeMCPToolName(ReservedMCPServer, TrackerWriteTool) {
+				out = append(out, Event{TrackerWrite: true})
+			}
 		}
 	}
 	return out

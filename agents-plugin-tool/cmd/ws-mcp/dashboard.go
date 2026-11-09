@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"syscall"
 
 	"github.com/kang-sw/devenv/internal/mcp"
@@ -59,7 +60,10 @@ func dashboardCommand(args []string) {
 		}
 	}
 	sessions := mcp.NewDashboardSessionSource()
-	agents := newAgentRunner(dir, logw)
+	// StartDaemon starts the runner before it returns the daemon, so the
+	// runner's tracker-changed callback is bound once the daemon exists.
+	var trackerChanged lateFunc
+	agents := newAgentRunner(dir, logw, trackerChanged.call)
 	daemon, err := wsdashboard.StartDaemon(wsdashboard.DaemonOptions{
 		Dir:       dir,
 		Port:      *port,
@@ -89,7 +93,9 @@ func dashboardCommand(args []string) {
 		fatal("dashboard", err)
 	}
 	wsdashboard.LogDevAssets(logw, devRoot)
+	trackerChanged.set(daemon.TrackerChanged)
 	stopPoll := startTrackerPoll(tracker, trackerErr, daemon.TrackerChanged, logw)
+	stopWatch := startTrackerWatch(tracker, trackerErr, daemon.TrackerChanged)
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
 	select {
@@ -97,8 +103,34 @@ func dashboardCommand(args []string) {
 		daemon.Close()
 	case <-daemon.Done():
 	}
+	stopWatch()
 	stopPoll()
 	closeTracker()
+}
+
+// lateFunc is a callback bound after the code that calls it is built; a
+// call before set does nothing. Safe from any goroutine.
+type lateFunc struct{ f atomic.Pointer[func()] }
+
+func (l *lateFunc) set(f func()) { l.f.Store(&f) }
+
+func (l *lateFunc) call() {
+	if f := l.f.Load(); f != nil {
+		(*f)()
+	}
+}
+
+// startTrackerWatch runs the tracker's store watch in the daemon on h, so a
+// write by another process (a lead session's or a support agent's ws-mcp)
+// calls onChange within wstrackerhost.DefaultWatchInterval; onChange is
+// also what a page read that served the last state calls when the store's
+// reload lands. newErr is h's creation error: the daemon runs without the
+// watch. The caller closes h.
+func startTrackerWatch(h *wstrackerhost.Host, newErr error, onChange func()) (stop func()) {
+	if newErr != nil {
+		return func() {}
+	}
+	return h.StartWatch(wstrackerhost.DefaultWatchInterval, onChange)
 }
 
 // startTrackerPoll runs the tracker's background poll in the daemon on h:
@@ -135,7 +167,8 @@ func trackerStoreRoot(h *wstrackerhost.Host, newErr error) func(id string) (stri
 // newAgentRunner is the daemon's agent runner: the claude and pi backends,
 // ws-mcp's key store for conversation keys, and this executable as the
 // ws-mcp it attaches to a conversation whose profile allows ws tools.
-func newAgentRunner(dir string, logw io.Writer) *wsagent.Runner {
+// trackerChanged runs after a conversation's successful tracker write.
+func newAgentRunner(dir string, logw io.Writer, trackerChanged func()) *wsagent.Runner {
 	return wsagent.NewRunner(wsagent.Options{
 		Dir:      dir,
 		Backends: map[string]wsagent.Backend{wsagent.BackendClaude: wsagent.ClaudeBackend{}, wsagent.BackendPi: wsagent.PiBackend{}},
@@ -147,7 +180,8 @@ func newAgentRunner(dir string, logw io.Writer) *wsagent.Runner {
 			}
 			return wsagent.MCPCommand{Command: exe, Args: []string{"serve", "--stdio", "--root", root}}, nil
 		},
-		Log: logw,
+		Log:            logw,
+		TrackerChanged: trackerChanged,
 	})
 }
 
