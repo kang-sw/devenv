@@ -99,10 +99,14 @@
 .phase.none { background: transparent; color: var(--wb-muted-fg); box-shadow: inset 0 0 0 1px var(--wb-muted); font-weight: 600; }
 .ahead .phase, .peer .phase, .sess .phase { height: 18px; font-size: 11px; padding: 0 7px 0 6px; gap: 5px; }
 .spin { width: 11px; height: 11px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: dash-spin .8s linear infinite; flex: none; display: inline-block; }
-.ahead .phase .spin, .peer .spin, .sess .spin, .activity .spin, .brow .mk .spin { width: 10px; height: 10px; }
+.sess .spin, .activity .spin, .brow .mk .spin { width: 10px; height: 10px; }
 @keyframes dash-spin { to { transform: rotate(360deg); } }
 .idle-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; opacity: .55; flex: none; display: inline-block; }
-@media (prefers-reduced-motion: reduce) { .spin, .caret { animation: none; } }
+/* the agents panel's running-agent mark: a pulsing dot, never rotating, so
+   it reads apart from a live tool row's spinner */
+.pulse { width: 8px; height: 8px; border-radius: 50%; background: currentColor; flex: none; display: inline-block; animation: dash-pulse 1.6s ease-in-out infinite; }
+@keyframes dash-pulse { 50% { opacity: .3; } }
+@media (prefers-reduced-motion: reduce) { .spin, .caret, .pulse { animation: none; } }
 .args { font-family: var(--wb-mono); font-size: 12px; color: var(--wb-muted-fg); }
 code.fpath { font-size: 11.5px; color: var(--wb-muted-fg); overflow-wrap: anywhere; }
 .empty { margin: 8px 0; padding: 18px 14px; text-align: center; font-size: 13px; color: var(--wb-muted-fg); border: 1px dashed var(--wb-muted-fg); border-radius: var(--wb-radius); }
@@ -130,6 +134,7 @@ code.fpath { font-size: 11.5px; color: var(--wb-muted-fg); overflow-wrap: anywhe
 .brow.live { font-weight: 600; }
 .brow.live .mk .spin { color: var(--wb-primary); }
 .brow.perm .mk { color: var(--wb-perm-ink); }
+.brow.ph .mk { opacity: .5; }
 .brow.live .args { font-size: 11.5px; font-weight: 400; flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
 /* ===== agent tree ===== */
@@ -142,6 +147,9 @@ div.agent + div.agent { border-top: 1px solid var(--wb-muted); }
 summary.ahead { list-style: none; }
 summary.ahead::-webkit-details-marker { display: none; }
 .ahead { display: flex; align-items: center; gap: 6px; flex-wrap: nowrap; min-width: 0; padding: 3px 0; cursor: pointer; }
+/* the board's .tree summary rule (baseline) reaches these rows; centring keeps
+   an agent row one height whatever its phase pill holds */
+.tree summary.ahead { align-items: center; }
 .ahead .amk { width: 16px; display: inline-flex; justify-content: center; font-weight: 800; flex: none; }
 .ahead .amk .i { width: 12px; height: 12px; }
 .agent.running > details > .ahead .amk, .agent.root > details > .ahead .amk { color: var(--wb-primary); }
@@ -165,6 +173,10 @@ details[open] > .ahead .am > .i { transform: rotate(180deg); }
 .ahead .ldet .tn { font-family: var(--wb-mono); font-weight: 700; font-size: 11.5px; }
 .ahead .ldet .args { font-size: 11.5px; }
 .agent .brows { margin-left: 23px; }
+/* a running agent's fixed live rows hang from its mark on a guide line; every
+   row keeps one height so a placeholder holds the slot */
+.agent > .brows.bguide { margin-left: 7px; padding-left: 14px; border-left: 2px solid var(--wb-muted); }
+.brows.bguide > .brow { min-height: 20px; align-items: center; box-sizing: border-box; }
 .agent.done > details > .brows, .agent.failed > details > .brows { opacity: .8; }
 .agent.done > details > .ahead { opacity: .7; }
 .agent.failed > details > .ahead { opacity: .85; }

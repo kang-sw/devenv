@@ -375,16 +375,18 @@ func TestPeerWorktreeCompactAndOrder(t *testing.T) {
 	if !strings.Contains(html, `<span class="chip">`+"\u003c"[:0]) && !strings.Contains(html, `4</span></span></div>`) {
 		t.Errorf("mail chip does not count every live peer: %s", html)
 	}
-	// The compact row has the phase mark and last mail but no tool, count, or tree.
+	// The compact row has the phase mark (a pulsing dot) and last mail but no
+	// tool, count, or tree.
 	i := strings.Index(html, `class="peer live compact"`)
 	row := html[i : i+strings.Index(html[i:], "</div>")]
-	for _, want := range []string{`href="/s/otherwt"`, `class="spin`, `last mail exchange`} {
+	for _, want := range []string{`href="/s/otherwt"`, `class="pulse"`, `last mail exchange`} {
 		if !strings.Contains(row, want) {
 			t.Errorf("compact row lacks %q: %s", want, row)
 		}
 	}
-	// Its one running subagent shows as the spinner label, not the total.
-	if !strings.Contains(row, `class="prun"`) || !strings.Contains(row, `title="1 subagent"`) || !strings.Contains(row, `class="spin"></span><svg`) {
+	// Its one running subagent shows as the running label, not the total; an
+	// agent mark, so it carries no spinner.
+	if !strings.Contains(row, `class="prun"`) || !strings.Contains(row, `title="1 subagent"`) || strings.Contains(row, `spin`) {
 		t.Errorf("compact row lacks the running-subagent label: %s", row)
 	}
 	for _, not := range []string{"ptool", "ptree", "pline"} {
@@ -422,7 +424,7 @@ func TestPeerRunningSubagentSpinner(t *testing.T) {
 		if row.RunningAgents != 2 {
 			t.Errorf("%s: RunningAgents = %d, want 2 (finished agents excluded)", name, row.RunningAgents)
 		}
-		if html := render(row); !strings.Contains(html, `class="prun"`) || !strings.Contains(html, `title="2 subagents"`) || !strings.Contains(html, "</svg>2</span>") || !strings.Contains(html, `class="spin"></span><svg`) {
+		if html := render(row); !strings.Contains(html, `class="prun"`) || !strings.Contains(html, `title="2 subagents"`) || !strings.Contains(html, "</svg>2</span>") || strings.Contains(html, `class="spin"`) {
 			t.Errorf("%s: no running label: %s", name, html)
 		}
 		// Zero running: finished agents leave no spinner label.
@@ -519,5 +521,181 @@ func TestIndexViewListsLiveAndRecentlyEndedSessions(t *testing.T) {
 		if !strings.Contains("recentend lapsed", r.ReplyID) {
 			t.Errorf("unexpected ended row %s", r.ReplyID)
 		}
+	}
+}
+
+// renderNamed renders one named template of the page set.
+func renderNamed(t *testing.T, name string, data any) string {
+	t.Helper()
+	a, err := loadDashboardAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := a.tmpl.ExecuteTemplate(&buf, name, data); err != nil {
+		t.Fatal(err)
+	}
+	return buf.String()
+}
+
+// liveList is the one ol.brows.live in html, with its rows split out.
+func liveList(t *testing.T, html string) (list string, rows []string) {
+	t.Helper()
+	const open = `<ol class="brows live bguide">`
+	if n := strings.Count(html, open); n != 1 {
+		t.Fatalf("live lists = %d, want 1: %s", n, html)
+	}
+	i := strings.Index(html, open) + len(open)
+	list = html[i : i+strings.Index(html[i:], "</ol>")]
+	for _, r := range strings.SplitAfter(list, "</li>") {
+		if r != "" {
+			rows = append(rows, r)
+		}
+	}
+	return list, rows
+}
+
+// TestRunningAgentHasTwoFixedLiveSlots pins the fixed live rows: a running
+// agent always shows exactly two, the latest entries oldest first, a pending
+// permission prompt on top of the newest call, placeholders at the bottom.
+func TestRunningAgentHasTwoFixedLiveSlots(t *testing.T) {
+	now := testNow
+	ms := now.UnixMilli()
+	fin := func(tool string) wslive.BatchView {
+		return wslive.BatchView{ToolNames: []string{tool}, CallCount: 1, EndedAt: ms}
+	}
+	running := wslive.BatchView{Running: &wslive.RunningView{ToolName: "RunTool", ArgsPreview: "run args", StartedAt: ms}}
+	generating := wslive.BatchView{Generating: &wslive.GeneratingView{Kind: wslive.PhaseTool, ToolName: "GenTool", Chars: 12, PhaseStartedAt: ms}}
+	thinking := wslive.BatchView{Generating: &wslive.GeneratingView{Kind: wslive.PhaseThinking, PhaseStartedAt: ms}}
+	perm := &wslive.Permission{ToolName: "PermTool", StartedAt: ms}
+	const ph = "placeholder"
+	cases := []struct {
+		name    string
+		batches []wslive.BatchView
+		perm    *wslive.Permission
+		want    [2]string // a tool name each row shows, or ph
+	}{
+		{"no batches", nil, nil, [2]string{ph, ph}},
+		{"thinking only", []wslive.BatchView{thinking}, nil, [2]string{ph, ph}},
+		{"one finished", []wslive.BatchView{fin("F1")}, nil, [2]string{"F1", ph}},
+		{"three finished", []wslive.BatchView{fin("F1"), fin("F2"), fin("F3")}, nil, [2]string{"F2", "F3"}},
+		{"finished then thinking", []wslive.BatchView{fin("F1"), fin("F2"), thinking}, nil, [2]string{"F1", "F2"}},
+		{"running and finished", []wslive.BatchView{fin("F1"), fin("F2"), running}, nil, [2]string{"F2", "RunTool"}},
+		{"generating and running", []wslive.BatchView{fin("F1"), running, generating}, nil, [2]string{"RunTool", "GenTool"}},
+		{"permission, running, generating", []wslive.BatchView{fin("F1"), running, generating}, perm, [2]string{"PermTool", "GenTool"}},
+		{"permission, finished", []wslive.BatchView{fin("F1"), fin("F2")}, perm, [2]string{"PermTool", "F2"}},
+		{"permission alone", nil, perm, [2]string{"PermTool", ph}},
+	}
+	for _, c := range cases {
+		agent := wslive.Agent{ID: "a1", Status: wslive.StatusRunning, StartedAt: ms,
+			Activity: wslive.Activity{Phase: wslive.PhaseTool, Batches: c.batches, Permission: c.perm}}
+		v := buildSessionView(pageInputs{Session: liveSession("self", "/p", now), Snapshot: liveSnap(now, wslive.Lead{}, agent), Now: now})
+		if got := len(v.Tree.Agents[0].Slots); got != liveSlotCount {
+			t.Errorf("%s: Slots = %d, want %d", c.name, got, liveSlotCount)
+		}
+		_, rows := liveList(t, renderTree(t, v))
+		if len(rows) != 2 {
+			t.Errorf("%s: live rows = %d, want 2: %v", c.name, len(rows), rows)
+			continue
+		}
+		for i, want := range c.want {
+			row := rows[i]
+			switch {
+			case want == ph:
+				if row != `<li class="brow ph"><span class="mk">-</span></li>` {
+					t.Errorf("%s: row %d is no placeholder: %s", c.name, i, row)
+				}
+			case !strings.Contains(row, `title="`+want+`"`):
+				t.Errorf("%s: row %d lacks %s: %s", c.name, i, want, row)
+			case want == "PermTool" && !strings.HasPrefix(row, `<li class="brow live perm">`),
+				want == "RunTool" && !strings.Contains(row, `run args`),
+				want == "GenTool" && !strings.Contains(row, `writing arguments`),
+				strings.HasPrefix(want, "F") && !strings.HasPrefix(row, `<li class="brow done"><span class="mk">✓</span>`):
+				t.Errorf("%s: row %d has the wrong look for %s: %s", c.name, i, want, row)
+			}
+			if (want == "RunTool" || want == "GenTool") && !strings.Contains(row, `<span class="mk"><span class="spin"></span></span>`) {
+				t.Errorf("%s: live tool row %d lacks its spinner: %s", c.name, i, row)
+			}
+		}
+	}
+	// A finished or failed agent has no live list.
+	for _, status := range []string{wslive.StatusDone, wslive.StatusFailed} {
+		agent := wslive.Agent{ID: "a1", Status: status, Activity: wslive.Activity{Batches: []wslive.BatchView{fin("F1")}}}
+		v := buildSessionView(pageInputs{Session: liveSession("self", "/p", now), Snapshot: liveSnap(now, wslive.Lead{}, agent), Now: now})
+		if v.Tree.Agents[0].Slots != nil {
+			t.Errorf("%s agent has slots: %+v", status, v.Tree.Agents[0].Slots)
+		}
+		if html := renderTree(t, v); strings.Contains(html, "brows live") {
+			t.Errorf("%s agent renders a live list: %s", status, html)
+		}
+	}
+}
+
+// TestAgentsPanelSpinsOnlyOnToolRows pins Decision "agent marks are a state
+// dot": in the agents panel only live tool rows carry the rotating spinner;
+// agent, lead, and peer marks pulse, phase pills and the running-subagent
+// label have none. The session index row and the subagent badge keep theirs.
+func TestAgentsPanelSpinsOnlyOnToolRows(t *testing.T) {
+	now := testNow
+	ms := now.UnixMilli()
+	run := func(tool string) wslive.BatchView {
+		return wslive.BatchView{Running: &wslive.RunningView{ToolName: tool, StartedAt: ms}}
+	}
+	busy := func(phase string) wslive.Lead {
+		return wslive.Lead{Activity: wslive.Activity{Phase: phase, PhaseStartedAt: ms, Batches: []wslive.BatchView{{ToolNames: []string{"Read"}, CallCount: 1, EndedAt: ms}, run("Bash")}}}
+	}
+	agents := []wslive.Agent{
+		{ID: "a", Status: wslive.StatusRunning, Activity: wslive.Activity{Phase: wslive.PhaseTool, Batches: []wslive.BatchView{run("Edit")}}},
+		{ID: "b", ParentID: "a", Status: wslive.StatusRunning, Activity: wslive.Activity{Phase: wslive.PhaseThinking}},
+	}
+	sessions := map[string]Session{"samewt": liveSession("samewt", "/p", now), "otherwt": liveSession("otherwt", "/q", now)}
+	snaps := map[string]*wslive.Snapshot{
+		"samewt":  liveSnap(now, busy(wslive.PhaseReplying), agents...),
+		"otherwt": liveSnap(now, busy(wslive.PhaseCompacting), agents...),
+	}
+	contacts := []Contact{{Address: "id:samewt", ReplyID: "samewt", LastExchange: now}, {Address: "id:otherwt", ReplyID: "otherwt", LastExchange: now}}
+	v := buildSessionView(pageInputs{Session: liveSession("self", "/p", now), Snapshot: liveSnap(now, busy(wslive.PhaseTool), agents...), Now: now,
+		Page: PageContent{Contacts: contacts}, Lookup: lookupOf(sessions, snaps)})
+	html := renderTree(t, v)
+	for _, want := range []string{`class="prun"`, `<span class="phase tool">`, `<span class="phase thinking">`, `<span class="phase replying">`, `<ol class="brows live bguide">`} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("tree lacks %q: %s", want, html)
+		}
+	}
+	// Lead, two peers (one compact), and every running agent row pulse.
+	if n := strings.Count(html, `<span class="pulse"></span>`); n < 6 {
+		t.Errorf("pulsing marks = %d, want at least 6: %s", n, html)
+	}
+	// Remove every live tool row; no spinner may remain.
+	rest := html
+	spinRows := 0
+	for {
+		i := strings.Index(rest, `<li class="brow live`)
+		if i < 0 {
+			break
+		}
+		j := strings.Index(rest[i:], "</li>")
+		if strings.Contains(rest[i:i+j], `class="spin"`) {
+			spinRows++
+		}
+		rest = rest[:i] + rest[i+j+len("</li>"):]
+	}
+	if spinRows == 0 {
+		t.Errorf("no live tool row spins: %s", html)
+	}
+	if strings.Contains(rest, "spin") {
+		t.Errorf("a spinner outside the live tool rows: %s", rest)
+	}
+	// Outside the agents panel the spinner stays.
+	if srow := renderNamed(t, "srow", IndexRow{ReplyID: "s", Live: true, Adapter: true, Phase: wslive.PhaseTool}); !strings.Contains(srow, `<span class="phase tool"><span class="spin"></span>`) {
+		t.Errorf("session index row lost its spinner: %s", srow)
+	}
+	if badge := renderNamed(t, "subbadge", nil); !strings.Contains(badge, `<span class="spin"></span>`) {
+		t.Errorf("subagent badge lost its spinner: %s", badge)
+	}
+	// Reduced motion stops the pulse as it stops the spinner.
+	css := mustAsset(t, "dashboard.css")
+	if !strings.Contains(css, "@media (prefers-reduced-motion: reduce) { .spin, .caret, .pulse { animation: none; } }") {
+		t.Errorf("reduced-motion rule does not name .pulse")
 	}
 }

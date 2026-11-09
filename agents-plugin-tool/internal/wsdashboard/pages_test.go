@@ -683,7 +683,7 @@ func TestRenderedCompaction(t *testing.T) {
 	if strings.Contains(conv, `class="activity"`) {
 		t.Errorf("live region also shows the generic activity line: %s", conv)
 	}
-	if tree := string(set[regionTree].HTML); !strings.Contains(tree, `<span class="phase compacting"><span class="spin"></span>compacting</span>`) {
+	if tree := string(set[regionTree].HTML); !strings.Contains(tree, `<span class="phase compacting">compacting</span>`) {
 		t.Errorf("tree's lead row lacks the compacting phase: %s", tree)
 	}
 	entries := string(set[regionEntries].HTML)
@@ -719,8 +719,9 @@ func TestToolNameAndShortID(t *testing.T) {
 
 // TestTreeRowsAreDense pins the compact tree: the lead's tool shows with its
 // MCP prefix stripped (full name in the title) on the one summary row, a
-// subagent's caption sits on its own row, a thinking agent has no live row
-// repeating its pill, and a lone call reads "1 call".
+// subagent's caption sits on its own row, a thinking agent with no calls yet
+// shows its two placeholder slots (no live row repeating its pill), and a
+// lone call reads "1 call".
 func TestTreeRowsAreDense(t *testing.T) {
 	now := testNow
 	lead := wslive.Lead{Activity: wslive.Activity{Phase: wslive.PhaseTool, Batches: []wslive.BatchView{
@@ -747,8 +748,8 @@ func TestTreeRowsAreDense(t *testing.T) {
 	if strings.Contains(tree, "1 calls") || strings.Contains(tree, "writing") {
 		t.Errorf("tree carries a plural or a live row repeating the phase: %s", tree)
 	}
-	// The thinking agent's live list stays empty.
-	if !strings.Contains(tree, `<ol class="brows live"></ol>`) {
+	// The thinking agent's live list holds only its two placeholders.
+	if ph := `<li class="brow ph"><span class="mk">-</span></li>`; !strings.Contains(tree, `<ol class="brows live bguide">`+ph+ph+`</ol>`) {
 		t.Errorf("thinking agent has a live row: %s", tree)
 	}
 }

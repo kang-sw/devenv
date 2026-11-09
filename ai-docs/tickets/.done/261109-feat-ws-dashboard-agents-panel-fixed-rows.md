@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: d8b802b9edeb80e6
 sage-review-completeness-reviewed: d8b802b9edeb80e6
+completed: 2026-11-09
 ---
 
 # Dashboard agents panel: fixed tool rows per running agent, agent marks distinct from tool spinners
@@ -179,3 +180,59 @@ Verification:
   45743) showing a running sub-agent across consecutive states with the same
   panel height, in light and dark themes; screenshots go to the scratchpad,
   not the repo.
+
+### Result (5e42cb819) - 2026-11-09
+
+Landed:
+
+- `pageview.go`: `AgentNode.Slots []LiveSlot` (Permission / Finished /
+  Running / Generating, none set = placeholder) from `liveSlots`, computed in
+  `agentTree` for running agents only (`liveSlotCount = 2`). Entries are the
+  finished batches in order, then the running call, then a tool-kind
+  generating call; a permission prompt takes the top slot above the newest
+  entry; placeholders fill the bottom.
+- `dashboard.tmpl`: `liverows` split into `permrow` / `runrow` / `genrow`;
+  new `slots` template renders a running agent's
+  `<ol class="brows live bguide">` (finished slots reuse `batch`, placeholder
+  `<li class="brow ph"><span class="mk">-</span></li>`). The expanded peer
+  tree keeps `liverows` (Decision 6). New `tphase` (phase pill without
+  spinner) is used by the lead root row, `agent`, and `peerrow`; `phase`
+  is unchanged for `srow`. `mark` and the agent `.amk` emit `.pulse`; `.prun`
+  dropped its spinner.
+- `dashboard.css`: `.pulse` (opacity pulse, added to the reduced-motion
+  rule), guide line on `.agent > .brows.bguide`, a 20px fixed row height for
+  its rows, dim placeholder mark, `.tree summary.ahead { align-items: center }`;
+  removed the now-unused `.ahead .phase .spin` / `.peer .spin` sizes.
+
+Verification:
+
+- `go test ./internal/wsdashboard/...` ok, with new
+  `TestRunningAgentHasTwoFixedLiveSlots` (cases a-g plus thinking-only,
+  finished-then-thinking, permission+finished; finished/failed agents have no
+  live list) and `TestAgentsPanelSpinsOnlyOnToolRows` (no `spin` in `r-tree`
+  outside `li.brow.live` rows across lead, same-worktree and compact peers,
+  nested agents, `.prun`; `srow` and `subbadge` keep `.spin`; reduced-motion
+  names `.pulse`; guide class asserted). Existing tests that asserted tree
+  spinners and the empty thinking-agent live list were updated to the new
+  behavior. `go test ./cmd/ws-mcp/... ./internal/wsagent/...` ok.
+- `go vet ./internal/wsdashboard/...` clean; gofmt clean.
+- Headless Chromium (Playwright headless shell) screenshots of the full
+  session page in light and dark themes across five consecutive sub-agent
+  states (thinking before any call, running, thinking after two calls,
+  running + generating, permission + running): measured `.tree` height
+  137.09px in all ten renders; screenshots in the session scratchpad.
+- Lite review: clean.
+
+Decisions:
+
+- The page was rendered with `renderSessionRegions`/`renderSessionPage` from a
+  throwaway test into static HTML, not a live dev daemon: same templates and
+  CSS, no daemon or user ports touched.
+- Guide class is `bguide`: the whiteboard's `.lane` rule reaches the dashboard
+  and painted a card behind the rows.
+- `.tree summary.ahead { align-items: center }` added: the whiteboard's
+  `.tree summary` baseline rule made an agent row about 1.2px taller under
+  the permission pill's lock icon, breaking the fixed height.
+- The spinner assertion is "none outside `li.brow.live`" rather than
+  "outside `ol.brows.live`", because the expanded peer tree's live tool
+  rows sit in a plain `ol.brows` per Decision 6.

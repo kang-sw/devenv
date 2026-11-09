@@ -122,7 +122,24 @@ type AgentNode struct {
 	// Finished is the agent's finished batches, oldest first; the page shows
 	// them when the node is expanded.
 	Finished []wslive.BatchView
+	// Slots is a running agent's live rows, always liveSlotCount of them
+	// (liveSlots); nil for a finished or failed agent.
+	Slots    []LiveSlot
 	Children []AgentNode
+}
+
+// liveSlotCount is the fixed number of live rows under a running agent, so
+// the panel's height changes only when an agent starts or ends.
+const liveSlotCount = 2
+
+// LiveSlot is one live row under a running agent. At most one field is set;
+// none set is a placeholder row.
+type LiveSlot struct {
+	Permission *wslive.Permission
+	Finished   *wslive.BatchView
+	Running    *wslive.RunningView
+	// Generating is a tool call whose arguments are streaming.
+	Generating *wslive.GeneratingView
 }
 
 // IsRunning reports a running agent.
@@ -393,6 +410,38 @@ func splitBatches(batches []wslive.BatchView) (finished []wslive.BatchView, runn
 	return finished, running, generating
 }
 
+// liveSlots picks a running agent's liveSlotCount rows: the latest entries of
+// its finished batches, then the running call, then a tool call generating its
+// arguments, oldest at the top. A pending permission prompt takes the top slot
+// above the newest entry. Thinking and replying add no entry, so the slots
+// keep the latest calls; placeholders fill the bottom.
+func liveSlots(perm *wslive.Permission, finished []wslive.BatchView, running *wslive.RunningView, generating *wslive.GeneratingView) []LiveSlot {
+	var entries []LiveSlot
+	for i := range finished {
+		entries = append(entries, LiveSlot{Finished: &finished[i]})
+	}
+	if running != nil {
+		entries = append(entries, LiveSlot{Running: running})
+	}
+	if generating != nil && generating.Kind == wslive.PhaseTool {
+		entries = append(entries, LiveSlot{Generating: generating})
+	}
+	keep := liveSlotCount
+	var slots []LiveSlot
+	if perm != nil {
+		slots = append(slots, LiveSlot{Permission: perm})
+		keep--
+	}
+	if len(entries) > keep {
+		entries = entries[len(entries)-keep:]
+	}
+	slots = append(slots, entries...)
+	for len(slots) < liveSlotCount {
+		slots = append(slots, LiveSlot{})
+	}
+	return slots
+}
+
 // agentTree nests the snapshot's flat agent list by parent id, keeping the
 // snapshot's order among siblings. An agent whose parent is not in the list
 // hangs from the root, so retention never hides a running grandchild.
@@ -421,6 +470,9 @@ func agentTree(agents []wslive.Agent, lookup func(string) (Session, *wslive.Snap
 			seen[a.ID] = true
 			node := AgentNode{Agent: a}
 			node.Finished, node.Running, node.Generating = splitBatches(a.Batches)
+			if node.IsRunning() {
+				node.Slots = liveSlots(node.Permission, node.Finished, node.Running, node.Generating)
+			}
 			if a.ReplyID != "" {
 				if s, _, ok := lookup(a.ReplyID); ok && s.HasBoard {
 					node.Linked = true
