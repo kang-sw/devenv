@@ -358,6 +358,9 @@
     },
     "261109-research-windows-code-signing-signpath": {
       "registered_at": "2026-11-09T00:46:52Z"
+    },
+    "261110-feat-ws-tracker-item-move-reparent": {
+      "registered_at": "2026-11-09T15:09:01Z"
     }
   }
 }
