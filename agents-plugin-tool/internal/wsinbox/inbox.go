@@ -128,6 +128,11 @@ type Chip struct {
 	ID     string `json:"id"`
 	Answer string `json:"answer,omitempty"`
 	Note   string `json:"note,omitempty"`
+	// SentAt is the time of the send that carried this chip, epoch
+	// milliseconds; Send sets it, and Merge keeps it per chip, since an
+	// entry's own SentAt is its first send's. Zero on a chip written before
+	// the field.
+	SentAt int64 `json:"sentAt,omitempty"`
 }
 
 // Entry is one held message.
@@ -451,6 +456,9 @@ func Merge(base, add Entry) Entry {
 	}
 	out.Chips = append([]Chip{}, base.Chips...)
 	for _, c := range add.Chips {
+		if c.SentAt == 0 {
+			c.SentAt = add.SentAt
+		}
 		out.Chips = putChip(out.Chips, c)
 	}
 	baseNums := base.Nums()
@@ -607,6 +615,10 @@ func Send(dir string, add Entry, now time.Time) (name string, merged bool, err e
 	add, err = Normalize(add)
 	if err != nil {
 		return "", false, err
+	}
+	// Every chip carries this send's time, whatever the caller put there.
+	for i := range add.Chips {
+		add.Chips[i].SentAt = add.SentAt
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", false, fmt.Errorf("create inbox dir: %w", err)

@@ -55,6 +55,7 @@ func (src *DashboardSessionSource) ReadPageLang(reg wsdashboard.Registration, la
 	}
 	page.HasBoard = true
 	page.Seq = record.Whiteboard.Seq
+	page.Reasked = record.Whiteboard.ReaskTimes()
 	// BuildView only reads the state: the served page never begins a render
 	// or writes a file, so the stored board and the static page are untouched.
 	in := servedViewInput(record, reg.ReplyID)

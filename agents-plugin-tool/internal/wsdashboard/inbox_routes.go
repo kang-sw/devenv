@@ -380,9 +380,12 @@ func removeFiles(paths []string) {
 // the page shows them as chips that reference the files, and a re-send
 // references them.
 func heldAnswer(dir string, entry wsinbox.Entry) map[string]any {
-	chips := entry.Chips
-	if chips == nil {
-		chips = []wsinbox.Chip{}
+	// A chip's send time is the inbox's own record (Send sets it on the
+	// re-send), so the page's copy leaves it out.
+	chips := make([]wsinbox.Chip, len(entry.Chips))
+	for i, c := range entry.Chips {
+		c.SentAt = 0
+		chips[i] = c
 	}
 	images, nums := []string{}, []int{}
 	attachDir := wsinbox.AttachmentsDir(dir)
