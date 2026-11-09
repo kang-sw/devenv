@@ -360,7 +360,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-09T15:14:45Z"
+        "touched_at": "2026-11-09T15:16:19Z",
+        "impl": {
+          "branch": "impl/develop/race-lip-chase"
+        }
       }
     },
     "261109-research-windows-code-signing-signpath": {
