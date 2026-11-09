@@ -359,7 +359,7 @@
         "email": "ki6080@gmail.com",
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
-        "phase": "active",
+        "phase": "closed",
         "touched_at": "2026-11-09T06:16:24Z",
         "impl": {
           "branch": "impl/develop/outer-treat-knee"
@@ -381,19 +381,6 @@
     },
     "261109-bug-ws-tracker-external-write-refresh": {
       "registered_at": "2026-11-09T06:57:54Z"
-    },
-    "261109-feat-ws-dashboard-agents-panel-fixed-rows": {
-      "registered_at": "2026-11-09T06:34:52Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-09T06:40:35Z",
-        "impl": {
-          "branch": "impl/develop/lurk-snub-romp"
-        }
-      }
     },
     "261109-research-windows-code-signing-signpath": {
       "registered_at": "2026-11-09T00:46:52Z"
