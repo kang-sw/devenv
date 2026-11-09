@@ -582,3 +582,47 @@ func TestAttachMoveToFreshCloneCarriesPendingBlobs(t *testing.T) {
 		t.Fatalf("y read = %q", got)
 	}
 }
+
+// failObjectFetchRunner fails every explicit object fetch (ReadAttachment's
+// on-demand fetch) while fail is set.
+type failObjectFetchRunner struct {
+	mu   sync.Mutex
+	fail bool
+}
+
+func (r *failObjectFetchRunner) RunGit(ctx context.Context, root string, args ...string) ([]byte, error) {
+	r.mu.Lock()
+	fail := r.fail
+	r.mu.Unlock()
+	if fail && isFetch(args) && oidRe.MatchString(args[len(args)-1]) {
+		return nil, errors.New("fatal: unable to access the remote: connection reset")
+	}
+	return wsgit.ExecRunner{Env: GitEnv}.RunGit(ctx, root, args...)
+}
+
+// TestAttachFetchFailureIsNotNotFound: a blob this clone lacks whose
+// explicit fetch fails is the fetch's error, not ErrAttachmentNotFound
+// (the remote may hold it); once the fetch works the blob is served.
+func TestAttachFetchFailureIsNotNotFound(t *testing.T) {
+	w := newWorld(t)
+	url, _ := w.fileRemote("r", true)
+	ada := w.register(w.remoteOpts("ada", "c1"), url)
+	b := blob("far away")
+	appendBlob(t, ada, b)
+	syncOK(t, ada)
+	o := w.remoteOpts("bo", "c1")
+	fr := &failObjectFetchRunner{fail: true}
+	o.Runner = fr
+	bo := w.register(o, url)
+
+	_, err := bo.ReadAttachment(context.Background(), b.OID, "ada")
+	if err == nil || errors.Is(err, ErrAttachmentNotFound) || !strings.Contains(err.Error(), "connection reset") {
+		t.Fatalf("read over a failing fetch = %v, want the fetch's error and not ErrAttachmentNotFound", err)
+	}
+	fr.mu.Lock()
+	fr.fail = false
+	fr.mu.Unlock()
+	if got := readOK(t, bo, b.OID, "ada"); string(got) != "far away" {
+		t.Fatalf("read = %q", got)
+	}
+}
