@@ -70,6 +70,11 @@ func (src *DashboardSessionSource) ReadPageLang(reg wsdashboard.Registration, la
 		return inline(path)
 	}
 	in.Panels = servedWhiteboardPanels(record, key, reg.ReplyID, lang, watch)
+	// An armed wait shows as long as its process runs, and a process can
+	// die leaving its marker: no watched file reports that.
+	if _, ok, _ := wsmailbox.ReadListeningMarker(key); ok {
+		page.Volatile = true
+	}
 	view := wswhiteboard.BuildView(record.Whiteboard, in)
 	view.Lang = lang
 	regions, err := wswhiteboard.RenderRegions(view)

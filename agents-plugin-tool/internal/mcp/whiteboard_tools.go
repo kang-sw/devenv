@@ -103,7 +103,8 @@ type whiteboardPanelInput struct {
 	lang string
 	// watch, when not nil, is told each file and directory a panel read
 	// that a writer may change without a nudge (the ticket directories and
-	// files), which a served page names for its refresh check.
+	// files, the mailbox stores, history directory, and listening marker),
+	// which a served page names for its refresh check.
 	watch func(path string)
 }
 

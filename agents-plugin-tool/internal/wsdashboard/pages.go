@@ -640,7 +640,7 @@ func (r pageReader) readSession(replyID string) (SessionView, refreshInputs, boo
 	}
 	in := pageInputs{Session: s, Page: page, Snapshot: r.readSnapshot(replyID), Now: r.clock(), Version: r.version}
 	looked := map[string]bool{replyID: true}
-	inputs := refreshInputs{watch: slices.Clone(page.Watch)}
+	inputs := refreshInputs{watch: slices.Clone(page.Watch), volatile: page.Volatile}
 	if adapterPresent(in.Snapshot, in.Now) {
 		in.Ring, _ = wslive.ReadRing(wslive.RingDir(SessionDir(r.dir, replyID)))
 		inbox := sessionInbox(r.dir, replyID)
@@ -673,9 +673,9 @@ func (r pageReader) readSession(replyID string) (SessionView, refreshInputs, boo
 // whether the index holds it, its revision, its liveness, and whether its
 // snapshot names a present adapter, all at call time; the state of each
 // watched path; and the contacts as re-read now. ok is false when the page
-// shows contacts the source cannot re-read.
+// shows contacts the source cannot re-read, or volatile content.
 func (r pageReader) sessionStamp(replyID string, in refreshInputs) (string, bool) {
-	if r.index == nil {
+	if r.index == nil || in.volatile {
 		return "", false
 	}
 	now := r.clock()

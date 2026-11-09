@@ -239,6 +239,58 @@ func TestDashboardReadPageWatchesUnnudgedFiles(t *testing.T) {
 	}
 }
 
+// TestDashboardReadPageWatchesTheMailboxPanel pins the mailbox panel's
+// refresh inputs: a sender's mail nudges only the sender, so the page
+// names the history directory and the reply store the panel reads, and an
+// armed wait, whose process may die leaving its marker, makes the page
+// volatile.
+func TestDashboardReadPageWatchesTheMailboxPanel(t *testing.T) {
+	hf := newHistoryFixture(t, time.Date(2026, 11, 6, 9, 0, 0, 0, time.UTC))
+	if out := callToolWithKey(t, hf.serverB, 40, hf.keyB, "whiteboard.update", map[string]any{"commands": `<wb:topic name="t"><wb:add class="technical"><wb:title>q</wb:title></wb:add></wb:topic>`}); strings.Contains(out, "error") {
+		t.Fatalf("whiteboard.update: %s", out)
+	}
+	mustSend(t, hf.serverB, 50, hf.keyB, wsmailbox.ReplyIDPrefix+wsmailbox.ReplyID(hf.keyA), "hello")
+	recB, ok := hf.serverB.sessions.readState(hf.keyB, partAll)
+	if !ok {
+		t.Fatal("no record for B")
+	}
+	reg := wsdashboard.Registration{ReplyID: wsmailbox.ReplyID(hf.keyB), Project: recB.Root}
+	src := dashboardPageSource(t, nil)
+
+	page := readPageOK(t, src, reg)
+	history, err := mailboxHistoryDir(hf.keyB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replies, err := wsmailbox.ReplyRegistryPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	marker, err := wsmailbox.ListeningMarkerPath(hf.keyB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{history, replies, marker} {
+		found := false
+		for _, path := range page.Watch {
+			found = found || path == want
+		}
+		if !found {
+			t.Errorf("Watch lacks %s: %v", want, page.Watch)
+		}
+	}
+	if page.Volatile {
+		t.Error("a page with no armed wait is volatile")
+	}
+
+	if err := wsmailbox.WriteListeningMarker(wsmailbox.ListeningMarker{SessionKey: hf.keyB, PID: os.Getpid(), StartedAt: time.Now().Format(time.RFC3339)}); err != nil {
+		t.Fatal(err)
+	}
+	if !readPageOK(t, src, reg).Volatile {
+		t.Error("a page with an armed wait is not volatile")
+	}
+}
+
 // TestDashboardServedFileText pins the path text rule for each path form.
 func TestDashboardServedFileText(t *testing.T) {
 	root := t.TempDir()

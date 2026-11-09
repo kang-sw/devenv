@@ -398,3 +398,15 @@ func TestIndexRendersReadOnlyTheChangedSession(t *testing.T) {
 		t.Errorf("the index re-read an unchanged session %d times", got-liveReads)
 	}
 }
+
+// TestRefreshTickRereadsAVolatilePage: a page whose source marks it
+// volatile (content no watched file covers) is re-read on every tick.
+func TestRefreshTickRereadsAVolatilePage(t *testing.T) {
+	f := startPageFixture(t, withRefresh)
+	f.src.setPage("boardsession", PageContent{HasBoard: true, Seq: 1, Board: boardRegions(t, "volatile"), Volatile: true})
+	f.d.index.Nudge("boardsession", f.project)
+	events := openStream(t, f.base+"/s/boardsession/events")
+	waitRegionHolding(t, events, regionBoard, "volatile")
+	reads := f.src.readCount("boardsession")
+	waitFor(t, "ticks to re-read the page", func() bool { return f.src.readCount("boardsession") >= reads+3 })
+}

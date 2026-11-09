@@ -41,10 +41,12 @@ type refreshInputs struct {
 	ids      []string
 	watch    []string
 	contacts bool
+	// volatile is PageContent.Volatile: no stamp covers the page.
+	volatile bool
 }
 
 func (a refreshInputs) equal(b refreshInputs) bool {
-	return a.contacts == b.contacts && slices.Equal(a.ids, b.ids) && slices.Equal(a.watch, b.watch)
+	return a.contacts == b.contacts && a.volatile == b.volatile && slices.Equal(a.ids, b.ids) && slices.Equal(a.watch, b.watch)
 }
 
 // pageRender is one render of a page.
@@ -155,8 +157,9 @@ func (c *pageCache) get(p *sharedPage, src pageSource, refresh bool) (pageRender
 	r := src.render()
 	p.r, p.at, p.rendered = r, at, true
 	// The stamp was taken before this read, from the previous render's
-	// inputs: it is this render's only when the inputs did not change.
-	p.stamp, p.stampOK = stamp, stampOK && r.inputs.equal(prev)
+	// inputs: it is this render's only when the inputs did not change. A
+	// failed render (no regions) keeps none, so the next tick retries it.
+	p.stamp, p.stampOK = stamp, stampOK && r.inputs.equal(prev) && (r.regions != nil || !r.ok)
 	return r, at
 }
 
