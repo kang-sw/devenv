@@ -378,6 +378,9 @@
     "261110-epic-ws-dashboard-agent-host": {
       "registered_at": "2026-11-09T15:09:33Z"
     },
+    "261110-feat-ws-tracker-idea-status-and-assignment-invariant": {
+      "registered_at": "2026-11-09T15:23:18Z"
+    },
     "261110-feat-ws-tracker-item-move-reparent": {
       "registered_at": "2026-11-09T15:09:01Z"
     },
