@@ -1140,13 +1140,15 @@
   // wkDone wraps a read's answer: it clears the busy flag of read k ('list' | 'pages' |
   // 'doc'), drops an answer for a state no longer kept, and runs read k once more when a
   // change signal arrived while it was in flight (wkReread marked it), since the answer
-  // predates that change.
+  // predates that change. A store no longer shown is not re-read: its re-read is a soft one,
+  // whose 404 for a page not yet read would set docErr and keep wkPull from opening the new
+  // page when the store shows again; what it is missing then is read by wkPull.
   function wkDone(st, store, k, fn) {
     return function (res) {
       st[k + 'Busy'] = false;
       if (ui.wiki[store] !== st) return;
       fn(res);
-      if (st[k + 'Again']) { st[k + 'Again'] = false; wkReread(st, store, k); }
+      if (st[k + 'Again']) { st[k + 'Again'] = false; if (ui.store === store) wkReread(st, store, k); }
     };
   }
   function wkLoadList(st, store) {
