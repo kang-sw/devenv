@@ -61,10 +61,10 @@ type SessionView struct {
 
 	HasBoard bool
 	Seq      int
-	// CountPolicy, CountAssumed, and CountAcks are the board's open items.
-	CountPolicy, CountAssumed, CountAcks int
-	Board, Panels                        template.HTML
-	Mermaid                              bool
+	// CountPolicy and CountAcks are the board's open items.
+	CountPolicy, CountAcks int
+	Board, Panels          template.HTML
+	Mermaid                bool
 
 	Lead         LeadView
 	Tree         TreeView
@@ -324,21 +324,20 @@ func adapterPresent(snap *wslive.Snapshot, now time.Time) bool {
 func buildSessionView(in pageInputs) SessionView {
 	reg := in.Session.Registration
 	v := SessionView{
-		ReplyID:      reg.ReplyID,
-		Project:      reg.Project,
-		ProjectName:  filepath.Base(reg.Project),
-		Harness:      reg.Harness,
-		Live:         reg.Live(in.Now),
-		Adapter:      adapterPresent(in.Snapshot, in.Now),
-		Version:      in.Version,
-		HasBoard:     in.Page.HasBoard,
-		Seq:          in.Page.Seq,
-		CountPolicy:  in.Page.Board.CountPolicy,
-		CountAssumed: in.Page.Board.CountAssumed,
-		CountAcks:    in.Page.Board.CountAcks,
-		Board:        in.Page.Board.Board,
-		Panels:       in.Page.Board.Panels,
-		Mermaid:      in.Page.Board.Mermaid,
+		ReplyID:     reg.ReplyID,
+		Project:     reg.Project,
+		ProjectName: filepath.Base(reg.Project),
+		Harness:     reg.Harness,
+		Live:        reg.Live(in.Now),
+		Adapter:     adapterPresent(in.Snapshot, in.Now),
+		Version:     in.Version,
+		HasBoard:    in.Page.HasBoard,
+		Seq:         in.Page.Seq,
+		CountPolicy: in.Page.Board.CountPolicy,
+		CountAcks:   in.Page.Board.CountAcks,
+		Board:       in.Page.Board.Board,
+		Panels:      in.Page.Board.Panels,
+		Mermaid:     in.Page.Board.Mermaid,
 	}
 	if !v.Adapter {
 		return v
@@ -657,7 +656,6 @@ type IndexRow struct {
 	RunningAgents int
 	HasBoard      bool
 	CountPolicy   int
-	CountAssumed  int
 	// LastSeen is the registration's latest stamp (epoch ms).
 	LastSeen int64
 }
@@ -684,13 +682,12 @@ func buildIndexView(sessions []indexInput, now time.Time, version string) IndexV
 			order = append(order, reg.Project)
 		}
 		row := IndexRow{
-			ReplyID:      reg.ReplyID,
-			Harness:      reg.Harness,
-			Live:         reg.Live(now),
-			HasBoard:     in.Page.HasBoard,
-			CountPolicy:  in.Page.Board.CountPolicy,
-			CountAssumed: in.Page.Board.CountAssumed,
-			LastSeen:     reg.LastSeen().UnixMilli(),
+			ReplyID:     reg.ReplyID,
+			Harness:     reg.Harness,
+			Live:        reg.Live(now),
+			HasBoard:    in.Page.HasBoard,
+			CountPolicy: in.Page.Board.CountPolicy,
+			LastSeen:    reg.LastSeen().UnixMilli(),
 		}
 		if adapterPresent(in.Snapshot, now) {
 			row.Adapter = true

@@ -285,7 +285,7 @@
   function pickKey(b) { return (b.getAttribute("data-opt") || "") + "|" + (b.getAttribute("data-v") || ""); }
   function readAnswers(el) {
     var out = {};
-    q(".card[data-id], .arow[data-id]", el).forEach(function (item) {
+    q(".card[data-id], .arow[data-id], .srow[data-id]", el).forEach(function (item) {
       var s = {}, note = item.querySelector(".note"), box = item.querySelector(".ack input");
       var pick = item.querySelector('.opt[data-opt][aria-pressed="true"], .btn[data-v][aria-pressed="true"]');
       if (pick) s.pick = pickKey(pick);
@@ -307,7 +307,7 @@
     if (note.scrollHeight) note.style.height = note.scrollHeight + "px";
   }
   function writeAnswers(el, saved) {
-    q(".card[data-id], .arow[data-id]", el).forEach(function (item) {
+    q(".card[data-id], .arow[data-id], .srow[data-id]", el).forEach(function (item) {
       var s = saved[item.getAttribute("data-id")];
       if (!s) return;
       var note = item.querySelector(".note"), box = item.querySelector(".ack input");
@@ -547,7 +547,7 @@
   }
   function boardItem(id) {
     var b = region("board");
-    return b ? b.querySelector('.card[data-id="' + id + '"], .arow[data-id="' + id + '"]') : null;
+    return b ? b.querySelector('.card[data-id="' + id + '"], .arow[data-id="' + id + '"], .srow[data-id="' + id + '"]') : null;
   }
   // readItem is a board item's answer as a chip; null when it has none.
   function readItem(item) {
@@ -580,7 +580,7 @@
   function syncChips() {
     var b = region("board");
     if (!b || !cchips) return;
-    q(".card[data-id], .arow[data-id]", b).forEach(function (item) {
+    q(".card[data-id], .arow[data-id], .srow[data-id]", b).forEach(function (item) {
       var c = readItem(item), id = item.getAttribute("data-id");
       if (c) putChip(c); else if (chips[id]) dropChip(id);
     });
@@ -1068,7 +1068,7 @@
     q(".sentmark", b).forEach(function (m) { m.parentNode.removeChild(m); });
     q(".sent-sent, .sent-held", b).forEach(function (el) { el.classList.remove("sent-sent", "sent-held"); });
     q(".sentdata i[data-id]").forEach(function (i) {
-      var item = boardItem(i.getAttribute("data-id")), head = item && item.querySelector(".head");
+      var item = boardItem(i.getAttribute("data-id")), head = item && item.querySelector(".head, .stext");
       if (!head) return;
       var state = i.getAttribute("data-state"), m = doc.createElement("span");
       item.classList.add(state === "held" ? "sent-held" : "sent-sent");

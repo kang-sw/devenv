@@ -38,7 +38,7 @@ type View struct {
 	// Panels come from the section providers, in registration order.
 	Panels []Panel
 	// BulkAck shows the reply bar's bulk checkbox: the board holds an open
-	// technical or announced item or an assumed item.
+	// technical or announced item.
 	BulkAck bool
 	// Answerable reports whether any item takes an answer on this page.
 	Answerable bool
@@ -134,12 +134,12 @@ type TopicView struct {
 	DocMarks []BlockMark
 	// DocNew marks a body changed since the previous embed (embed only).
 	DocNew bool
-	// Policy, Assumed, and Acks are the topic's items waiting on the user;
-	// they never collapse.
-	Policy  []ItemView
-	Assumed []ItemView
-	Acks    []ItemView
-	// Expanded holds settled items shown inside the block: on the full page
+	// Policy and Acks are the topic's items waiting on the user; they never
+	// collapse.
+	Policy []ItemView
+	Acks   []ItemView
+	// Expanded holds settled items shown inside the block (an assumed item
+	// among them, ordered by its settle order like the rest): on the full page
 	// the topic's share of the most recent settled items board-wide, on the
 	// embed the settled items new since the previous embed. Newest first.
 	Expanded []ItemView
@@ -393,8 +393,6 @@ func BuildView(state *State, in ViewInput) View {
 			block.Policy = append(block.Policy, iv)
 		case item.Status == StatusOpen:
 			block.Acks = append(block.Acks, iv)
-		case item.Status == StatusAssumed:
-			block.Assumed = append(block.Assumed, iv)
 		default:
 			show := expanded[item.ID]
 			if in.Layout == LayoutEmbed {
@@ -446,20 +444,18 @@ func BuildView(state *State, in ViewInput) View {
 		switch {
 		case len(t.Policy) > 0:
 			return 0
-		case len(t.Assumed) > 0:
-			return 1
 		case len(t.Acks) > 0:
-			return 2
+			return 1
 		case len(t.Expanded) > 0 || t.DocOpen(in.Layout == LayoutEmbed):
-			return 3
+			return 2
 		default:
-			return 4
+			return 3
 		}
 	}
 	rank := func(t *TopicView) int {
 		r := visible(t)
-		if r > 2 && t.Doc != "" && !t.Closed && docChanged[t.Name] > 0 && docChanged[t.Name] >= answered {
-			return 2
+		if r > 1 && t.Doc != "" && !t.Closed && docChanged[t.Name] > 0 && docChanged[t.Name] >= answered {
+			return 1
 		}
 		return r
 	}
@@ -467,11 +463,11 @@ func BuildView(state *State, in ViewInput) View {
 		block := blocks[name]
 		newestFirst(block.Expanded)
 		newestFirst(block.Collapsed)
-		block.Quiet = visible(block) == 4
-		if len(block.Acks) > 0 || len(block.Assumed) > 0 {
+		block.Quiet = visible(block) == 3
+		if len(block.Acks) > 0 {
 			view.BulkAck = true
 		}
-		if len(block.Policy) > 0 || len(block.Assumed) > 0 || len(block.Acks) > 0 {
+		if len(block.Policy) > 0 || len(block.Acks) > 0 {
 			view.Answerable = true
 		}
 	}
@@ -497,7 +493,7 @@ func BuildView(state *State, in ViewInput) View {
 	for i, topic := range state.ClosedTopics {
 		closedAt[topic] = i
 	}
-	waiting := func(t *TopicView) bool { return len(t.Policy) > 0 || len(t.Assumed) > 0 || len(t.Acks) > 0 }
+	waiting := func(t *TopicView) bool { return len(t.Policy) > 0 || len(t.Acks) > 0 }
 	var shown, capped []string
 	for _, name := range order {
 		if blocks[name].Closed && !waiting(blocks[name]) {
@@ -550,12 +546,13 @@ func stampUpdated(state *State, blocks map[string]*TopicView, loc *time.Location
 }
 
 // recentSettled returns the IDs of the ExpandedSettled most recently settled
-// items outside closed topics, counted board-wide.
+// items outside closed topics, counted board-wide. An assumed item rotates
+// with them: the page shows it as a settled row.
 func recentSettled(state *State) []int {
 	type entry struct{ id, order int }
 	var settled []entry
 	for _, item := range state.Items {
-		if IsSettled(item.Status) && !state.topicClosed(item.Topic) {
+		if (IsSettled(item.Status) || item.Status == StatusAssumed) && !state.topicClosed(item.Topic) {
 			settled = append(settled, entry{item.ID, item.Settled})
 		}
 	}

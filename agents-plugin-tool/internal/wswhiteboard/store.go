@@ -30,8 +30,11 @@ const (
 	ClassAnnounced = "announced"
 )
 
-// Item statuses. Answered, withdrawn, and superseded items are settled;
-// open and assumed items still wait on the user.
+// Item statuses. Answered, withdrawn, and superseded items are settled; open
+// items still wait on the user. An assumed item carries the lead's reading of
+// a vague reply: it takes a settle order and the page shows it among the
+// settled items, but it is not IsSettled, so archive eviction never drops it
+// and the user's later words still land on its ID.
 const (
 	StatusOpen       = "open"
 	StatusAnswered   = "answered"
@@ -130,8 +133,8 @@ type Item struct {
 	// before the field.
 	ChangedAt string `json:"changed_at,omitempty"`
 	// Settled is the item's settle order (a board-wide counter), zero while
-	// the item is open or assumed. Rotation and archive eviction order by
-	// it, never by time.
+	// the item is open. Rotation and archive eviction order by it, never by
+	// time.
 	Settled int `json:"settled,omitempty"`
 }
 
@@ -480,9 +483,10 @@ func Apply(state *State, commands string, env Env) (Outcome, []string) {
 
 // applyClose closes a topic with its result. Closing a closed topic again
 // replaces its result and keeps its place in the close order. Every item of
-// the topic still open or assumed is withdrawn, as a patch to withdrawn would
-// (settled now, answer fields kept as history); a later reopen of the topic
-// does not restore them. It returns the withdrawn IDs.
+// the topic still open is withdrawn, as a patch to withdrawn would (settled
+// now, answer fields kept as history); a later reopen of the topic does not
+// restore them. An assumed item already reads as settled and stays assumed.
+// It returns the withdrawn IDs.
 func applyClose(p *problems, work *State, cmd command, mark int) []int {
 	topic, topicOK := cmd.Scoped()
 	result, resultOK := wsxmlcmd.RequiredAttr(p, cmd, "result")
@@ -503,7 +507,7 @@ func applyClose(p *problems, work *State, cmd command, mark int) []int {
 	var withdrawn []int
 	for i := range work.Items {
 		item := &work.Items[i]
-		if item.Topic != topic || (item.Status != StatusOpen && item.Status != StatusAssumed) {
+		if item.Topic != topic || item.Status != StatusOpen {
 			continue
 		}
 		item.Status = StatusWithdrawn
@@ -524,7 +528,7 @@ func withdrawnInfo(ids []int) string {
 	for i, id := range ids {
 		labels[i] = FormatID(id)
 	}
-	return "wb:close withdrew " + strings.Join(labels, ", ") + " (still open or assumed in the closed topic)."
+	return "wb:close withdrew " + strings.Join(labels, ", ") + " (still open in the closed topic)."
 }
 
 // joinInfo joins the non-empty info sentences with a space.
@@ -656,13 +660,12 @@ func applyAnswer(p *problems, work *State, cmd command, mark int, now time.Time)
 		item.AnswerQuote = quote
 		item.AnsweredAt = now.UTC().Format(time.RFC3339)
 		item.Changed = mark
+		work.settle(item)
 		if assumed {
 			item.Status = StatusAssumed
-			item.Settled = 0
 			continue
 		}
 		item.Status = StatusAnswered
-		work.settle(item)
 		work.AnswerSeq = mark
 	}
 }
