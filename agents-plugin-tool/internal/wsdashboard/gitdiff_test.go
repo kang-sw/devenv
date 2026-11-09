@@ -295,36 +295,37 @@ func TestReadWorktreeFileDiff(t *testing.T) {
 }
 
 // TestDiffPathsAreLiteralFromTheTop pins how a listed path reaches git: a
-// glob-shaped name matches only itself, and a session rooted in a
-// subdirectory still finds the files its lists name from the top.
+// glob-shaped name ("[b].txt", which as a glob also matches "b.txt"; "*"
+// cannot appear in a Windows file name) matches only itself, and a session
+// rooted in a subdirectory still finds the files its lists name from the top.
 func TestDiffPathsAreLiteralFromTheTop(t *testing.T) {
 	work := filepath.Join(t.TempDir(), "work")
 	pushRepos(t, work, 0)
-	writeFile(t, filepath.Join(work, "d", "*.txt"), "star\n")
+	writeFile(t, filepath.Join(work, "d", "[b].txt"), "star\n")
 	writeFile(t, filepath.Join(work, "d", "b.txt"), "bee\n")
 	writeFile(t, filepath.Join(work, "top.txt"), "top\n")
 	gitRun(t, work, "add", ".")
 	gitRun(t, work, "commit", "-q", "-m", "seed")
-	writeFile(t, filepath.Join(work, "d", "*.txt"), "star\nstar2\n")
+	writeFile(t, filepath.Join(work, "d", "[b].txt"), "star\nstar2\n")
 	writeFile(t, filepath.Join(work, "d", "b.txt"), "bee\nbee2\n")
 	writeFile(t, filepath.Join(work, "top.txt"), "top\ntop2\n")
 	gitRun(t, work, "add", ".")
 	gitRun(t, work, "commit", "-q", "-m", "change")
 	head := revParse(t, work, "HEAD")
-	writeFile(t, filepath.Join(work, "d", "*.txt"), "star\nstar2\nstar3\n")
+	writeFile(t, filepath.Join(work, "d", "[b].txt"), "star\nstar2\nstar3\n")
 	writeFile(t, filepath.Join(work, "d", "b.txt"), "bee\nbee2\nbee3\n")
 	writeFile(t, filepath.Join(work, "top.txt"), "top\ntop2\ntop3\n")
 	writeFile(t, filepath.Join(work, "d", "new.txt"), "n\n")
 	writeFile(t, filepath.Join(work, "loose.txt"), "l\n")
 
 	for _, root := range []string{work, filepath.Join(work, "d")} {
-		d, err := readCommitFileDiff(root, head, "d/*.txt")
+		d, err := readCommitFileDiff(root, head, "d/[b].txt")
 		if err != nil || !reflect.DeepEqual(diffShape(d), []string{"@@", " star", "+star2"}) {
-			t.Errorf("%s commit d/*.txt = %v %v", root, diffShape(d), err)
+			t.Errorf("%s commit d/[b].txt = %v %v", root, diffShape(d), err)
 		}
-		d, err = readWorktreeFileDiff(root, "unstaged", "d/*.txt")
+		d, err = readWorktreeFileDiff(root, "unstaged", "d/[b].txt")
 		if err != nil || !reflect.DeepEqual(diffShape(d), []string{"@@", " star", " star2", "+star3"}) {
-			t.Errorf("%s unstaged d/*.txt = %v %v", root, diffShape(d), err)
+			t.Errorf("%s unstaged d/[b].txt = %v %v", root, diffShape(d), err)
 		}
 		d, err = readWorktreeFileDiff(root, "unstaged", "top.txt")
 		if err != nil || !reflect.DeepEqual(diffShape(d), []string{"@@", " top", " top2", "+top3"}) {

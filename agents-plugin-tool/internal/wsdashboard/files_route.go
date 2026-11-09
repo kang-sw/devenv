@@ -390,7 +390,9 @@ func listAbsDir(q string) (string, []fileItem, bool) {
 // reserved device (NUL, CON, COM1, ...) in one of its elements: resolving
 // or opening it would reach the device, which can block the handler, rather
 // than a directory. It is a pure string check; on other systems those names
-// are ordinary.
+// are ordinary. The stem before the first '.' or ':' is checked on its own
+// because filepath.IsLocal in recent Go releases follows Windows 11, where
+// "con.txt" is an ordinary name, while older Windows still opens the device.
 func deviceElement(clean string) bool {
 	if runtime.GOOS != "windows" {
 		return false
@@ -399,6 +401,11 @@ func deviceElement(clean string) bool {
 	for _, e := range strings.FieldsFunc(rest, func(r rune) bool { return r == '\\' || r == '/' }) {
 		if !filepath.IsLocal(e) {
 			return true
+		}
+		if i := strings.IndexAny(e, ".:"); i > 0 {
+			if stem := strings.TrimRight(e[:i], " "); stem != "" && !filepath.IsLocal(stem) {
+				return true
+			}
 		}
 	}
 	return false
