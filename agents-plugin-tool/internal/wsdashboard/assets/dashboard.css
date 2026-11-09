@@ -577,13 +577,11 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .gh-ab .up, .gpanel .gref .up { color: var(--wb-primary); }
 .gh-ab .dn, .gpanel .gref .dn { color: var(--wb-warn-ink); }
 .gh-dirty { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--wb-warn); }
-/* the git sheet (gitbody): a wide area kept for the commit graph, and the
-   action panel, its card filling the drawer's height and its file list
-   scrolling inside; one column on a narrow screen, the panel alone */
+/* the git sheet (gitbody): the commit graph, and the action panel, each card
+   filling the drawer's height and scrolling inside; one column on a narrow
+   screen, the panel alone */
 .dr-body[hidden] { display: none; }
 .gbody { display: grid; grid-template-columns: minmax(0, 2fr) minmax(340px, 1fr); grid-template-rows: minmax(0, 1fr); }
-.gleft { display: flex; align-items: center; justify-content: center; border: 1px dashed var(--wb-muted-fg); border-radius: var(--wb-radius); opacity: .6; }
-.gnote { font-size: 12.5px; color: var(--wb-muted-fg); }
 .gpanel { min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); overflow: hidden; }
 .ghead { flex: none; display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 4px 8px 4px 12px; background: var(--wb-muted); font-size: 13px; }
 .ghead > .i { width: 14px; height: 14px; flex: none; color: var(--wb-muted-fg); }
@@ -619,10 +617,129 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .gd .bin { color: var(--wb-muted-fg); font-weight: 600; }
 .gempty { font-size: 12.5px; color: var(--wb-muted-fg); }
 .gempty.err { color: var(--wb-warn-ink); }
+.gst.st-R, .gst.st-C { color: var(--wb-primary); }
+
+/* the commit graph (gitlog.go lays the lanes out; dashboard.js draws them as
+   one inline SVG under the rows). Lane colours cycle through --gl-0..7. */
+:root {
+  --gl-0: #2b62d9; --gl-1: #0e7a83; --gl-2: #6a4fc4; --gl-3: #b25000;
+  --gl-4: #1d7348; --gl-5: #b0245a; --gl-6: #9a7400; --gl-7: #5f646b;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --gl-0: #7aa2ff; --gl-1: #6fcdd4; --gl-2: #b9a6f5; --gl-3: #e0a36c;
+    --gl-4: #6cc39a; --gl-5: #e48aae; --gl-6: #e3b341; --gl-7: #a2a6ad;
+  }
+}
+:root[data-theme="dark"] {
+  --gl-0: #7aa2ff; --gl-1: #6fcdd4; --gl-2: #b9a6f5; --gl-3: #e0a36c;
+  --gl-4: #6cc39a; --gl-5: #e48aae; --gl-6: #e3b341; --gl-7: #a2a6ad;
+}
+.glog { min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); overflow: hidden; }
+.glog .ghead .gtitle { font-weight: 700; }
+.glog .ghead .gsub { color: var(--wb-muted-fg); font-size: 12px; margin-right: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.glog .ghead .chip[hidden] { display: none; }
+.glscroll { flex: 1 1 0; min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.glcols, .glr { display: grid; grid-template-columns: var(--gw, 120px) minmax(0, 1fr) 96px 62px 66px; column-gap: 10px; align-items: center; padding-right: 12px; }
+.glcols { position: sticky; top: 0; z-index: 3; height: 24px; background: var(--wb-card); box-shadow: 0 1px 0 var(--wb-line); font-size: 11px; font-weight: 800; color: var(--wb-muted-fg); text-transform: uppercase; letter-spacing: .04em; }
+.glcols span:first-child { padding-left: 10px; }
+.glcols .r { text-align: right; }
+.glrows { position: relative; }
+.glrows > .gempty { padding: 10px 12px; }
+.glsvg { position: absolute; left: 0; top: 0; z-index: 1; pointer-events: none; overflow: visible; }
+.glsvg path { fill: none; stroke-width: 2; stroke-linecap: round; }
+.glsvg .cont { stroke-dasharray: 2 4; }
+.glsvg circle.dot { stroke: var(--wb-card); stroke-width: 2; }
+.glsvg circle.mg { fill: var(--wb-card); stroke-width: 2.2; }
+.glsvg circle.rem { fill: var(--wb-card); stroke-width: 1.6; stroke-dasharray: 2 1.6; }
+.glsvg circle.head { fill: none; stroke: var(--wb-fg); stroke-width: 1.6; }
+.glr { height: 26px; font-size: 12.5px; cursor: pointer; }
+.glr:hover { background: var(--wb-wash); }
+.glr.sel { background: color-mix(in srgb, var(--wb-primary) 13%, transparent); }
+.glr:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: -2px; }
+.gls { display: flex; align-items: center; gap: 5px; min-width: 0; overflow: hidden; position: relative; z-index: 2; }
+.glsub { flex: 1 1 10ch; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.glr.mg .glsub { color: var(--wb-muted-fg); }
+.glr.rem .glsub { color: var(--wb-muted-fg); font-style: italic; }
+.gla { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--wb-muted-fg); font-size: 12px; }
+.glt { text-align: right; color: var(--wb-muted-fg); font-size: 11.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.glh { text-align: right; font: 11.5px var(--wb-mono); color: var(--wb-muted-fg); }
+.glmore { height: 34px; display: flex; align-items: center; padding-left: calc(var(--gw, 120px) + 10px); gap: 8px; font-size: 12px; color: var(--wb-muted-fg); }
+.glmore .btn { height: 24px; font-size: 12px; position: relative; z-index: 2; }
+.glmore .btn:disabled { opacity: .55; cursor: progress; }
+/* ref pills: a local branch in its lane's colour (the handle's icon and
+   abbreviation, ahead/behind, a worktree mark), its upstream folded in when
+   on the same commit, else an outlined pill of its own; a detached
+   worktree's HEAD as an outlined folder pill */
+.rf { --lc: var(--gl-7); flex: 0 1 auto; min-width: 6ch; max-width: 36ch; display: inline-flex; align-items: center; gap: 3px; height: 18px; padding: 0 6px; border-radius: 5px; font: 700 11px/1 var(--wb-mono); white-space: nowrap; color: var(--wb-fg); background: color-mix(in srgb, var(--lc) 14%, var(--wb-card)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--lc) 50%, transparent); }
+.rf .i { width: 12px; height: 12px; }
+.rf .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.rf .gh-impl, .rf .gh-goal { display: inline-flex; }
+.rf .hd { font: 800 9.5px/1 system-ui, sans-serif; letter-spacing: .04em; padding: 2px 4px; border-radius: 3px; background: var(--wb-fg); color: var(--wb-card); }
+.rf .ab { display: inline-flex; gap: 3px; }
+.rf .ab .up { color: var(--wb-primary); }
+.rf .ab .dn { color: var(--wb-warn-ink); }
+.rf .wt { display: inline-flex; color: var(--wb-ok); }
+.rf .ups { color: var(--wb-muted-fg); font-weight: 600; padding-left: 4px; margin-left: 1px; border-left: 1px solid color-mix(in srgb, var(--lc) 45%, transparent); }
+.rf.remote { background: transparent; color: var(--wb-muted-fg); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--lc) 55%, transparent); }
+.rf.head { background: color-mix(in srgb, var(--lc) 24%, var(--wb-card)); box-shadow: inset 0 0 0 1.5px var(--lc); }
+.rf.wtd { background: transparent; color: var(--wb-muted-fg); box-shadow: inset 0 0 0 1px var(--wb-line); font-weight: 600; }
+.rf.wtd .wt { color: var(--wb-muted-fg); }
+.rf.merged { opacity: .72; }
 @media (max-width: 759px) {
   .gbody { grid-template-columns: minmax(0, 1fr); }
-  .gleft { display: none; }
+  .glog { display: none; }
 }
+/* a commit's hover tooltip */
+.gltip { position: fixed; z-index: 60; max-width: 420px; padding: 8px 10px; border-radius: 8px; background: var(--wb-card); box-shadow: var(--wb-shadow-hi), 0 0 0 1px var(--wb-line); font-size: 12.5px; pointer-events: none; display: grid; gap: 5px; }
+.gltip[hidden] { display: none; }
+.gltip .ts { font-weight: 700; overflow-wrap: anywhere; }
+.gltip .tr { display: flex; flex-wrap: wrap; gap: 4px; }
+.gltip .tm { display: flex; gap: 6px; flex-wrap: wrap; color: var(--wb-muted-fg); font-size: 12px; }
+.gltip .tm code { color: var(--wb-fg); }
+
+/* the commit window: a centred window over the page (the tracker's item
+   window frame, wider): the header, then the diff area and the changed-file
+   list side by side */
+.gwin-back { position: fixed; inset: 0; z-index: 70; background: var(--tk-backdrop); display: flex; align-items: center; justify-content: center; padding: 3vh 12px; }
+.gwin-back[hidden] { display: none; }
+.gwin { width: min(1320px, 100%); height: 94vh; display: flex; flex-direction: column; background: var(--wb-bg); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow-hi); overflow: hidden; }
+.gwin:focus { outline: none; }
+.gw-top { flex: none; padding: 14px 18px 10px; box-shadow: 0 1px 0 var(--wb-line); display: flex; flex-direction: column; gap: 6px; }
+.gw-head { display: flex; gap: 8px; align-items: flex-start; }
+.gw-head h2 { margin: 0; font-size: 18px; line-height: 1.3; flex: 1; overflow-wrap: anywhere; }
+.gw-acts { flex: none; display: flex; align-items: center; gap: 4px; }
+.gw-chips { display: flex; gap: 5px; align-items: center; flex-wrap: wrap; }
+.gw-chips code.hash { font-size: 12px; padding: 1px 6px; border-radius: 5px; background: var(--wb-muted); }
+.gw-chips .gw-note { font-size: 12px; color: var(--wb-muted-fg); }
+.gwin .idcopy { font: inherit; font-size: 11.5px; display: inline-flex; align-items: center; gap: 3px; height: 22px; padding: 1px 7px 1px 5px; border: 0; border-radius: 999px; background: transparent; color: var(--wb-muted-fg); cursor: pointer; box-shadow: inset 0 0 0 1px var(--wb-line); }
+.gwin .idcopy:hover, .gwin .idcopy:focus-visible { color: var(--wb-primary); outline: none; background: var(--wb-card); }
+.gwin .idcopy.done { color: var(--wb-ok); }
+.gwin .idcopy .i { width: 12px; height: 12px; }
+.gwin .idcopy[hidden] { display: none; }
+.gwin .ia { width: 26px; height: 22px; border: 0; border-radius: 6px; background: transparent; color: var(--wb-muted-fg); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; padding: 0; }
+.gwin .ia:hover, .gwin .ia:focus-visible { background: var(--wb-card); color: var(--wb-primary); outline: none; box-shadow: inset 0 0 0 1px var(--wb-line); }
+.gwin .ia .i { width: 15px; height: 15px; }
+.gw-meta { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 1px 10px; margin: 0; font-size: 12.5px; }
+.gw-meta dt { color: var(--wb-muted-fg); font-weight: 700; font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; line-height: 19px; }
+.gw-meta dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.gw-meta .em, .gw-meta .abs { color: var(--wb-muted-fg); }
+.gw-meta .abs { font-variant-numeric: tabular-nums; }
+.gw-par { font: 12px var(--wb-mono); border: 0; background: var(--wb-muted); border-radius: 5px; padding: 0 6px; cursor: pointer; color: var(--wb-primary); }
+.gw-par:hover { text-decoration: underline; }
+.gw-msg { margin: 0; white-space: pre-wrap; font: 12.5px/1.5 var(--wb-mono); background: var(--wb-card); border-radius: 10px; padding: 8px 10px; box-shadow: var(--wb-shadow); max-height: 9.5em; overflow: auto; }
+.gw-msg[hidden] { display: none; }
+.gw-body { flex: 1 1 0; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, 320px); }
+.gw-diff { position: relative; min-width: 0; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 10px 12px 40px 18px; display: flex; flex-direction: column; gap: 12px; }
+.gw-files { min-height: 0; overflow: auto; overscroll-behavior: contain; border-left: 1px solid var(--wb-line); padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+.gw-fsum { display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 700; padding: 0 4px 4px; }
+.gw-fsum .gd { margin-left: auto; }
+.gwf { cursor: pointer; row-gap: 0; padding: 3px 4px; }
+.gwf .ren { grid-column: 2 / 4; font: 11px var(--wb-mono); color: var(--wb-muted-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gwf.on { background: color-mix(in srgb, var(--wb-primary) 13%, transparent); }
+.gwf.on:hover { background: color-mix(in srgb, var(--wb-primary) 18%, transparent); }
+.gw-ph { margin: auto; text-align: center; color: var(--wb-muted-fg); font-size: 13px; border: 1px dashed var(--wb-muted-fg); border-radius: var(--wb-radius); padding: 40px 30px; opacity: .8; }
+@media (max-width: 900px) { .gw-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) 30%; } .gw-files { border-left: 0; border-top: 1px solid var(--wb-line); } }
 /* the header keeps every line it wraps to clear of the closed handles and of
    the tracker's handle row left of them (--drhw covers both handles; --tkhw,
    set by tracker.js, includes its own 6px gap); tk-room marks a page the

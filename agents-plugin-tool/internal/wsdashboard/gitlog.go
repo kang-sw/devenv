@@ -24,8 +24,9 @@ import (
 //	{"head": "<oid of the root's HEAD, or empty>",
 //	 "commits": [{"oid", "parents": [...], "subject", "author", "time": <ms>,
 //	              "col", "color", "down": [{"from", "to", "color"}, ...],
-//	              "refs": [{"name", "kind", "head", "impl", "goal", "text",
-//	                        "worktree"}, ...]}, ...],
+//	              "remote", "refs": [{"name", "kind", "head", "impl", "goal",
+//	                        "text", "worktree", "upstream", "ahead", "behind",
+//	                        "gone", "merged", "of"}, ...]}, ...],
 //	 "width": <columns this page uses>, "more": <next offset, 0 when none>}
 //
 // Rows are in --topo-order, newest first. A row's node sits in column col
@@ -35,7 +36,8 @@ import (
 // the last row of the page before it (the daemon lays out every page from
 // the top of the log). color is a lane's stable index, which the page maps
 // onto its palette; a lane keeps its color while it continues through first
-// parents.
+// parents. remote marks a commit no local branch or checkout reaches, only
+// an upstream.
 
 const (
 	// gitLogPage is the number of commits one log page holds.
@@ -72,6 +74,9 @@ type GitLogCommit struct {
 	// Down is the segments between this row and the next.
 	Down []GitLane   `json:"down"`
 	Refs []GitLogRef `json:"refs,omitempty"`
+	// Remote marks a commit only an upstream reaches: no local branch and
+	// no checkout has it.
+	Remote bool `json:"remote,omitempty"`
 }
 
 // GitLane is one line segment between two adjacent rows: from a column at
@@ -101,6 +106,17 @@ type GitLogRef struct {
 	// Worktree is the path of the worktree that has this branch (or this
 	// detached HEAD) checked out, "" when none.
 	Worktree string `json:"worktree,omitempty"`
+	// Upstream is a local branch's upstream short name; Ahead and Behind
+	// its standing against it, and Gone an upstream whose ref is gone.
+	Upstream string `json:"upstream,omitempty"`
+	Ahead    int    `json:"ahead,omitempty"`
+	Behind   int    `json:"behind,omitempty"`
+	Gone     bool   `json:"gone,omitempty"`
+	// Merged marks a local branch whose tip the root's HEAD reaches (other
+	// than the branch HEAD is on).
+	Merged bool `json:"merged,omitempty"`
+	// Of is, for an upstream, the local branch that tracks it.
+	Of string `json:"of,omitempty"`
 }
 
 // laneCommit is a row the lane layout reads: a commit and its parents.
@@ -225,6 +241,8 @@ type gitLogRefs struct {
 	revs   []string
 	labels map[string][]GitLogRef
 	head   string
+	// local are the commits local branches and checkouts stand on.
+	local []string
 }
 
 // readGitLogRefs reads root's local branches, the upstreams they have, the
@@ -240,20 +258,22 @@ func readGitLogRefs(ctx context.Context, run *gitBadgeRunner, root string) (gitL
 	if out, err := run.RunGit(ctx, root, "--no-optional-locks", "rev-parse", "--symbolic-full-name", "HEAD"); err == nil {
 		headRef = strings.TrimSpace(string(out))
 	}
-	out, err := run.RunGit(ctx, root, "--no-optional-locks", "for-each-ref", "--format=%(refname)%00%(objectname)%00%(upstream)", "refs/heads", "refs/remotes")
+	out, err := run.RunGit(ctx, root, "--no-optional-locks", "for-each-ref", "--format=%(refname)%00%(objectname)%00%(upstream)%00%(upstream:track,nobracket)", "refs/heads", "refs/remotes")
 	if err != nil {
 		return refs, fmt.Errorf("%s", gitErrText(err))
 	}
 	oids := map[string]string{}
+	upOf, track := map[string]string{}, map[string]string{}
 	var locals, ups []string
 	for _, line := range strings.Split(string(out), "\n") {
 		f := strings.Split(line, "\x00")
-		if len(f) != 3 || f[1] == "" {
+		if len(f) != 4 || f[1] == "" {
 			continue
 		}
 		oids[f[0]] = f[1]
 		if strings.HasPrefix(f[0], "refs/heads/") {
 			locals = append(locals, f[0])
+			upOf[f[0]], track[f[0]] = f[2], f[3]
 			if strings.HasPrefix(f[2], "refs/remotes/") {
 				ups = append(ups, f[2])
 			}
@@ -268,7 +288,12 @@ func readGitLogRefs(ctx context.Context, run *gitBadgeRunner, root string) (gitL
 		if h.Impl || h.Goal {
 			l.Impl, l.Goal, l.Text = h.Impl, h.Goal, h.Text
 		}
+		if up := upOf[ref]; up != "" {
+			l.Upstream = strings.TrimPrefix(strings.TrimPrefix(up, "refs/remotes/"), "refs/heads/")
+			l.Ahead, l.Behind, l.Gone = parseTrack(track[ref])
+		}
 		refs.labels[oids[ref]] = append(refs.labels[oids[ref]], l)
+		refs.local = append(refs.local, oids[ref])
 		refs.revs = append(refs.revs, ref)
 		seen[ref] = true
 	}
@@ -278,7 +303,14 @@ func readGitLogRefs(ctx context.Context, run *gitBadgeRunner, root string) (gitL
 			continue // an upstream whose ref is gone, or a second branch tracking it
 		}
 		seen[ref] = true
-		refs.labels[oid] = append(refs.labels[oid], GitLogRef{Name: strings.TrimPrefix(ref, "refs/remotes/"), Kind: "upstream"})
+		of := ""
+		for _, l := range locals {
+			if upOf[l] == ref {
+				of = strings.TrimPrefix(l, "refs/heads/")
+				break
+			}
+		}
+		refs.labels[oid] = append(refs.labels[oid], GitLogRef{Name: strings.TrimPrefix(ref, "refs/remotes/"), Kind: "upstream", Of: of})
 		refs.revs = append(refs.revs, ref)
 	}
 	// Detached checkouts: the root's own HEAD, and every worktree's.
@@ -306,8 +338,25 @@ func readGitLogRefs(ctx context.Context, run *gitBadgeRunner, root string) (gitL
 		head := headRef == "HEAD" && oid == refs.head
 		refs.labels[oid] = append(refs.labels[oid], GitLogRef{Kind: "detached", Head: head, Worktree: detached[oid]})
 		refs.revs = append(refs.revs, oid)
+		refs.local = append(refs.local, oid)
 	}
 	return refs, nil
+}
+
+// parseTrack reads %(upstream:track,nobracket): "ahead 3, behind 2",
+// either part alone, "gone", or "" when even.
+func parseTrack(s string) (ahead, behind int, gone bool) {
+	if s == "gone" {
+		return 0, 0, true
+	}
+	for _, part := range strings.Split(s, ", ") {
+		if v, ok := strings.CutPrefix(part, "ahead "); ok {
+			ahead, _ = strconv.Atoi(v)
+		} else if v, ok := strings.CutPrefix(part, "behind "); ok {
+			behind, _ = strconv.Atoi(v)
+		}
+	}
+	return ahead, behind, false
 }
 
 // readWorktreeCheckouts reads `git worktree list --porcelain`: each
@@ -373,13 +422,36 @@ func readGitLog(root string, offset, page int) (GitLog, error) {
 		rows = append(rows, laneCommit{oid: c.OID, parents: c.Parents})
 	}
 	lay := layoutLanes(rows)
+	// Reach in one pass: rows come children first, so a commit's children
+	// have all been read when its own row is.
+	local, fromHead := map[string]bool{}, map[string]bool{}
+	for _, oid := range refs.local {
+		local[oid] = true
+	}
+	if refs.head != "" {
+		fromHead[refs.head] = true
+	}
+	for _, c := range all {
+		for _, p := range c.Parents {
+			if local[c.OID] {
+				local[p] = true
+			}
+			if fromHead[c.OID] {
+				fromHead[p] = true
+			}
+		}
+	}
 	end := min(len(all), offset+page)
 	if len(all) > offset+page {
 		g.More = offset + page
 	}
 	for i := offset; i < end; i++ {
 		c := all[i]
-		c.Col, c.Color, c.Down, c.Refs = lay.cols[i], lay.colors[i], lay.down[i], refs.labels[c.OID]
+		c.Col, c.Color, c.Down, c.Remote = lay.cols[i], lay.colors[i], lay.down[i], !local[c.OID]
+		for _, r := range refs.labels[c.OID] {
+			r.Merged = r.Kind == "branch" && !r.Head && fromHead[c.OID]
+			c.Refs = append(c.Refs, r)
+		}
 		g.Width = max(g.Width, c.Col+1)
 		for _, s := range c.Down {
 			g.Width = max(g.Width, s.From+1, s.To+1)

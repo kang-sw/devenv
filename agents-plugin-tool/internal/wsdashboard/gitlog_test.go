@@ -187,20 +187,28 @@ func TestReadGitLog(t *testing.T) {
 	}
 
 	refs := func(subject string) []GitLogRef { return by[subject].Refs }
-	if r := refs("c"); len(r) != 1 || r[0].Name != "main" || r[0].Kind != "branch" || !r[0].Head || r[0].Impl || !sameDir(t, r[0].Worktree, work) {
+	// main: 5 ahead (s1, s2, b, the merge, c) and 1 behind (theirs).
+	if r := refs("c"); len(r) != 1 || r[0].Name != "main" || r[0].Kind != "branch" || !r[0].Head || r[0].Impl || !sameDir(t, r[0].Worktree, work) ||
+		r[0].Upstream != "origin/main" || r[0].Ahead != 5 || r[0].Behind != 1 || r[0].Gone || r[0].Merged {
 		t.Errorf("refs of c = %+v", r)
 	}
-	if r := refs("theirs"); len(r) != 1 || r[0].Name != "origin/main" || r[0].Kind != "upstream" || r[0].Head || r[0].Worktree != "" {
+	if r := refs("theirs"); len(r) != 1 || r[0].Name != "origin/main" || r[0].Kind != "upstream" || r[0].Of != "main" || r[0].Head || r[0].Worktree != "" || r[0].Merged {
 		t.Errorf("refs of theirs = %+v", r)
 	}
-	if r := refs("x1"); len(r) != 1 || r[0].Name != "impl/main/261109-feat-x" || !r[0].Impl || r[0].Goal || r[0].Text != "261109-feat-x" || !sameDir(t, r[0].Worktree, implWT) {
+	if r := refs("x1"); len(r) != 1 || r[0].Name != "impl/main/261109-feat-x" || !r[0].Impl || r[0].Goal || r[0].Text != "261109-feat-x" || !sameDir(t, r[0].Worktree, implWT) ||
+		r[0].Upstream != "" || r[0].Merged {
 		t.Errorf("refs of x1 = %+v", r)
 	}
-	if r := refs("s2"); len(r) != 1 || r[0].Name != "side" || r[0].Worktree != "" || r[0].Text != "" {
+	if r := refs("s2"); len(r) != 1 || r[0].Name != "side" || r[0].Worktree != "" || r[0].Text != "" || !r[0].Merged {
 		t.Errorf("refs of s2 = %+v", r)
 	}
 	if r := refs("b"); len(r) != 1 || r[0].Kind != "detached" || r[0].Name != "" || r[0].Head || !sameDir(t, r[0].Worktree, detWT) {
 		t.Errorf("refs of b = %+v", r)
+	}
+	for _, c := range g.Commits {
+		if c.Remote != (c.Subject == "theirs") {
+			t.Errorf("commit %q remote = %v", c.Subject, c.Remote)
+		}
 	}
 	if m := by["merge side"]; len(m.Parents) != 2 || by["s2"].Col == m.Col {
 		t.Errorf("merge = %+v, side tip in column %d", m, by["s2"].Col)
@@ -227,6 +235,22 @@ func TestReadGitLog(t *testing.T) {
 
 	if _, err := readGitLog(t.TempDir(), 0, gitLogPage); err == nil || !strings.Contains(err.Error(), "not a git repository") {
 		t.Errorf("non-repository: err = %v", err)
+	}
+}
+
+// TestParseTrack pins the upstream standing parse.
+func TestParseTrack(t *testing.T) {
+	for in, want := range map[string][3]any{
+		"":                   {0, 0, false},
+		"ahead 3":            {3, 0, false},
+		"behind 2":           {0, 2, false},
+		"ahead 12, behind 7": {12, 7, false},
+		"gone":               {0, 0, true},
+	} {
+		a, b, g := parseTrack(in)
+		if got := [3]any{a, b, g}; got != want {
+			t.Errorf("parseTrack(%q) = %v, want %v", in, got, want)
+		}
 	}
 }
 
