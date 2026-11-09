@@ -354,7 +354,7 @@ func readGitLog(root string, offset, page int) (GitLog, error) {
 	}
 	args := []string{"--no-optional-locks", "log", "--topo-order", "--no-show-signature", "-z",
 		"--format=%H%x1f%P%x1f%an%x1f%at%x1f%s", "-n", strconv.Itoa(offset + page + 1)}
-	out, err := run.RunGit(ctx, root, append(args, refs.revs...)...)
+	out, err := run.RunGit(ctx, root, append(append(args, refs.revs...), "--")...)
 	if err != nil {
 		return GitLog{}, fmt.Errorf("%s", gitErrText(err))
 	}
@@ -455,6 +455,11 @@ func readGitCommit(root, oid string) (GitCommit, error) {
 		return GitCommit{}, errNoCommit
 	}
 	full := strings.TrimSpace(string(out))
+	// rev-parse reads a hex-shaped name as a ref first (a branch named
+	// "cafe"), so the answer counts only when it is the id asked for.
+	if !strings.HasPrefix(full, strings.ToLower(oid)) {
+		return GitCommit{}, errNoCommit
+	}
 	out, err = run.RunGit(ctx, root, "--no-optional-locks", "show", "-s", "--no-show-signature",
 		"--format=%H%x00%P%x00%an%x00%ae%x00%at%x00%cn%x00%ce%x00%ct%x00%B", full)
 	if err != nil {

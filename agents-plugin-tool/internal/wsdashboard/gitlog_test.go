@@ -340,6 +340,13 @@ func TestReadGitCommit(t *testing.T) {
 			t.Errorf("readGitCommit(%q) err = %v, want errNoCommit", oid, err)
 		}
 	}
+	// A hex-shaped branch name is no object id.
+	if head := revParse(t, work, "HEAD"); !strings.HasPrefix(head, "abcdef") {
+		gitRun(t, work, "branch", "abcdef")
+		if _, err := readGitCommit(work, "abcdef"); err != errNoCommit {
+			t.Errorf("a branch named abcdef: err = %v, want errNoCommit", err)
+		}
+	}
 	if _, err := readGitCommit(t.TempDir(), "abcd"); err == nil || err == errNoCommit {
 		t.Errorf("non-repository: err = %v", err)
 	}
