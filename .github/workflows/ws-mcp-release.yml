@@ -58,9 +58,9 @@ jobs:
       # ubuntu + windows suite on this exact commit (the ship flow waits for it
       # before tagging), and the Windows leg alone costs ~30 min. A tag whose
       # commit has no green ws-mcp CI run publishes nothing. A develop push
-      # without `[ci]` in its head commit still creates a ws-mcp CI run whose
-      # test jobs are all skipped, so a run counts only when every one of its
-      # jobs concluded `success`.
+      # starts no ws-mcp CI run, so the ship flow dispatches one on the pinned
+      # commit. A run counts only when every one of its jobs concluded
+      # `success`.
       - name: Require green ws-mcp CI on the tagged commit
         if: startsWith(github.ref, 'refs/tags/')
         env:

@@ -129,16 +129,16 @@ local Pre-flight `go test` cannot vouch for. The final gate precedes every push
   (`<reviewed-through-sha>..develop`) before retrying.
 - `git push origin develop` — publish the synced develop first. This claims no
   version and publishes no release.
-- **CI gate** on `<reviewed-through-sha>`. A develop push runs the test jobs
-  only when its head commit message carries `[ci]`; any other push creates a
-  `ws-mcp CI` run whose jobs are all skipped, which proves nothing.
-  1. Reuse a run only when its tests actually ran: `gh run list --workflow
+- **CI gate** on `<reviewed-through-sha>`. A develop push starts no
+  `ws-mcp CI` run (the workflow runs only on pull requests and manual
+  dispatch), so the gate dispatches one on the pinned commit.
+  1. Reuse a run only when it already passed: `gh run list --workflow
      ws-mcp-ci.yml --commit <reviewed-through-sha> --json
-     databaseId,headSha,event,status,conclusion`, polling for up to 60 seconds
-     after the push, and take the newest entry whose jobs (`gh run view
-     <run-id> --json jobs --jq '.jobs[] | [.name, .conclusion]'`) are not
-     `skipped` (a `[ci]` push, or a dispatch from an earlier attempt on the
-     same SHA).
+     databaseId,headSha,event,status,conclusion`, and take the newest entry
+     whose `conclusion` is `success` and whose jobs (`gh run view <run-id>
+     --json jobs --jq '.jobs[] | [.name, .conclusion]'`) are not `skipped`.
+     Then continue with step 3 (`gh run watch` returns at once for a finished
+     run).
   2. No such run: dispatch one with
      `gh workflow run ws-mcp-ci.yml --ref develop`, then take the newest run
      from `gh run list --workflow ws-mcp-ci.yml --event workflow_dispatch
