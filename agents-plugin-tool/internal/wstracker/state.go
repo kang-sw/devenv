@@ -13,7 +13,7 @@ var (
 	settable = []string{"todo", "doing", "blocked"}
 	origins  = []string{OriginHuman, OriginAgent, OriginAgentAuto}
 	// itemFields are the item.edit fields, in the engine's order.
-	itemFields = []string{"title", "body", "project", "due", "priority"}
+	itemFields = []string{"title", "body", "project", "due", "priority", "stage"}
 )
 
 // DefaultStaleDays is the stale threshold (284): a live assignment in doing
@@ -109,8 +109,13 @@ type item struct {
 	parent, author       string
 	// after is the sibling anchor (528) when afterSet: "" = first. Unset
 	// (every item created before the field) = last.
-	after       string
-	afterSet    bool
+	after    string
+	afterSet bool
+	// stage is "review" for an item in the review stage, "" for todo. It
+	// never holds "review" while the item holds a live or pending
+	// assignment: an assign clears it, and a concurrent move to review that
+	// folds after the assign is dropped (the assignment wins).
+	stage       string
 	ts          time.Time
 	hidden      bool
 	edited      *node
@@ -991,6 +996,9 @@ func (s *state) apply(n *node) {
 		}
 		it.mentions, it.attachments, it.refs = mentionsOf(p), attachmentsOf(p), refsOf(p)
 		it.after, it.afterSet = p.str("after"), p.has("after")
+		if p.str("stage") == "review" {
+			it.stage = "review"
+		}
 		if s.items[n.id] == nil {
 			s.iorder = append(s.iorder, n.id)
 		}
@@ -1031,6 +1039,19 @@ func (s *state) apply(n *node) {
 			case "priority":
 				v, _ := p.intOf(f)
 				it.priority = s.write(key, label, n, v).(int)
+			case "stage":
+				v := ""
+				if !p.null(f) {
+					v = jsString(p[f])
+				}
+				// The assignment wins over a concurrent move to review.
+				if v == "review" && len(s.openRecs(it.id)) > 0 {
+					continue
+				}
+				it.stage = s.write(key, label, n, v).(string)
+				if it.stage == "review" && len(s.openRecs(it.id)) > 0 {
+					it.stage = "" // an older concurrent review write won the register
+				}
 			}
 		}
 		if p.has("body") {
@@ -1329,6 +1350,7 @@ func (s *state) applyAssign(n *node) {
 	if s.items[item] == nil {
 		return
 	}
+	s.items[item].stage = "" // assigning promotes a review item to todo
 	completion := p.str("completion")
 	if !p.truthy("completion") {
 		completion = "assignee"

@@ -1,0 +1,371 @@
+{
+ "name": "review-stage",
+ "comment": "Review stage and done/blocked notices. ada.pc-1 is created in review, promoted, demoted, then assigned to maya (the assign promotes it). ada.pc-3 is a review subtask its parent's roll-up leaves out. ada.pc-5: a demote concurrent with an assign that folds after it is dropped; ada.pc-6: a concurrent demote folded before the assign is cleared by it; both end todo. maya blocks ada.pc-1 and raj closes ada.pc-7, so ada gets a blocked and a done notice; maya closes ada.pc-8 (awaiting, in the confirm list) and ada confirms it, which is no notice since ada set it.",
+ "viewers": [
+  "ada.pc",
+  "maya.pc"
+ ],
+ "now": "2026-11-02T09:00:00Z",
+ "genesis": {
+  "admins": [
+   "ada"
+  ],
+  "members": [
+   {
+    "id": "ada",
+    "name": "Ada",
+    "keys": [
+     "ada-k1"
+    ],
+    "leads": []
+   },
+   {
+    "id": "maya",
+    "name": "Maya",
+    "keys": [
+     "maya-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "raj",
+    "name": "Raj",
+    "keys": [
+     "raj-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "bo",
+    "name": "Bo",
+    "keys": [
+     "bo-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "lena",
+    "name": "Lena",
+    "keys": [
+     "lena-k1"
+    ],
+    "leads": [
+     "maya"
+    ]
+   },
+   {
+    "id": "omar",
+    "name": "Omar",
+    "keys": [
+     "omar-k1"
+    ],
+    "leads": [
+     "maya"
+    ]
+   },
+   {
+    "id": "sven",
+    "name": "Sven",
+    "keys": [
+     "sven-k1"
+    ],
+    "leads": [
+     "raj"
+    ]
+   }
+  ]
+ },
+ "commits": {
+  "ada.pc": [
+   {
+    "ts": "2026-11-01T09:00:00Z",
+    "seen": {},
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Review me",
+       "stage": "review"
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Parent"
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Child in review",
+       "parent": "ada.pc#2",
+       "stage": "review"
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Child counted",
+       "parent": "ada.pc#2"
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Demote after assign"
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "todo",
+       "title": "Demote before assign"
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Raj finishes"
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Maya awaits"
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "todo",
+       "title": "Promoted"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:01:00Z",
+    "seen": {},
+    "events": [
+     [
+      "item.edit",
+      {
+       "item": "ada.pc#1",
+       "stage": null
+      }
+     ],
+     [
+      "item.edit",
+      {
+       "item": "ada.pc#1",
+       "stage": "review"
+      }
+     ],
+     [
+      "item.assign",
+      {
+       "item": "ada.pc#1",
+       "targets": [
+        "maya"
+       ],
+       "completion": "assigner"
+      }
+     ],
+     [
+      "item.assign",
+      {
+       "item": "ada.pc#7",
+       "targets": [
+        "raj"
+       ]
+      }
+     ],
+     [
+      "item.assign",
+      {
+       "item": "ada.pc#8",
+       "targets": [
+        "maya"
+       ],
+       "completion": "assigner"
+      }
+     ],
+     [
+      "item.assign",
+      {
+       "item": "ada.pc#4",
+       "targets": [
+        "ada"
+       ]
+      }
+     ],
+     [
+      "item.edit",
+      {
+       "item": "ada.pc#9",
+       "stage": "review"
+      }
+     ],
+     [
+      "item.edit",
+      {
+       "item": "ada.pc#9",
+       "stage": null
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:02:00Z",
+    "seen": {},
+    "events": [
+     [
+      "item.edit",
+      {
+       "item": "ada.pc#6",
+       "stage": "review"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:10:00Z",
+    "seen": {},
+    "events": [
+     [
+      "item.edit",
+      {
+       "item": "ada.pc#5",
+       "stage": "review"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:50:00Z",
+    "seen": {
+     "ada.lap": 2,
+     "maya.pc": 3,
+     "raj.pc": 1
+    },
+    "events": [
+     [
+      "item.confirm",
+      {
+       "item": "ada.pc#8",
+       "assignee": "maya"
+      }
+     ]
+    ]
+   }
+  ],
+  "ada.lap": [
+   {
+    "ts": "2026-11-01T09:05:00Z",
+    "seen": {
+     "ada.pc": 17
+    },
+    "events": [
+     [
+      "item.assign",
+      {
+       "item": "ada.pc#5",
+       "targets": [
+        "raj"
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:06:00Z",
+    "seen": {
+     "ada.pc": 17
+    },
+    "events": [
+     [
+      "item.assign",
+      {
+       "item": "ada.pc#6",
+       "targets": [
+        "raj"
+       ]
+      }
+     ]
+    ]
+   }
+  ],
+  "maya.pc": [
+   {
+    "ts": "2026-11-01T09:20:00Z",
+    "seen": {
+     "ada.pc": 19,
+     "ada.lap": 2
+    },
+    "events": [
+     [
+      "item.status",
+      {
+       "item": "ada.pc#1",
+       "status": "blocked",
+       "note": "waiting on the API"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:30:00Z",
+    "seen": {
+     "ada.pc": 19,
+     "ada.lap": 2
+    },
+    "events": [
+     [
+      "item.status",
+      {
+       "item": "ada.pc#8",
+       "status": "doing"
+      }
+     ],
+     [
+      "item.close",
+      {
+       "item": "ada.pc#8"
+      }
+     ]
+    ]
+   }
+  ],
+  "raj.pc": [
+   {
+    "ts": "2026-11-01T09:21:00Z",
+    "seen": {
+     "ada.pc": 19,
+     "ada.lap": 2,
+     "maya.pc": 1
+    },
+    "events": [
+     [
+      "item.close",
+      {
+       "item": "ada.pc#7"
+      }
+     ]
+    ]
+   }
+  ]
+ }
+}

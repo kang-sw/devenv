@@ -168,6 +168,7 @@
       done:       { label: "js.tk.st.done", desc: "js.tk.st.done.desc", tone: 'tk-ok', svg: '<circle cx="8" cy="8" r="6" fill="currentColor" stroke="none"/><path d="M5.3 8.2l1.9 1.9 3.6-3.8" stroke="var(--wb-card)"/>' },
       pending:    { label: "js.tk.st.pending", desc: "js.tk.st.pending.desc", tone: 'tk-teal',
         svg: '<circle cx="8" cy="8" r="5.6" stroke-dasharray="2.2 1.9"/><path d="M6.5 6.6a1.55 1.55 0 1 1 2.2 1.4c-.5.25-.7.6-.7 1.1M8 10.9v.05"/>' },
+      review:     { label: "js.tk.st.review", desc: "js.tk.st.review.desc", tone: 'wb-muted-fg', svg: '<path d="M2.6 9.2l1.6-5.4h7.6l1.6 5.4v3.6H2.6zM2.6 9.2h3.2l.9 1.5h2.6l.9-1.5h3.2"/>' },
       unassigned: { label: "js.tk.st.unassigned", desc: "js.tk.st.unassigned.desc", tone: 'wb-muted-fg', svg: '<circle cx="8" cy="8" r="5.6" stroke-dasharray="0.8 2.2"/>' },
       declined:   { label: "js.tk.st.declined", desc: "js.tk.st.declined.desc", tone: 'wb-muted-fg', svg: RING + '<path d="M5.9 5.9l4.2 4.2M10.1 5.9l-4.2 4.2"/>' },
       returned:   { label: "js.tk.st.returned", desc: "js.tk.st.returned.desc", tone: 'wb-muted-fg', svg: RING + '<path d="M10.4 10.4V8.9a1.9 1.9 0 0 0-1.9-1.9H5.6M7.1 5.4L5.5 7l1.6 1.6"/>' },
@@ -214,6 +215,7 @@
     mdet: {},             // "store|member id" -> true: the member's key and profile details are expanded in the org card (page lifetime)
     sel: null,            // the row selected by a tap: it shows the same actions and details a hover shows
     nrow: {},             // store -> { val, kind } while the Items list shows its "+ New" input row
+    knew: {},             // store -> { val } while the "all" kanban's review column shows its "+" input row
     sub: null,            // { item: parent, rk: the row it sits under, val } while an "add subtask" input row shows
     iedit: null,          // { item, title, body, project } while the item window edits the item in place
     cedit: null,          // { cid, body } while an own comment is edited in place
@@ -654,18 +656,19 @@
     VS.my.received.pending.map(A).forEach(function (r) {
       add('p:' + r.id, 'pending', r.item, r.ts, r.handoffOf ? wsT("js.tk.feed.pending.handoff", esc(nm(r.sender))) : wsT("js.tk.feed.pending", esc(nm(r.sender))), r.via);
     });
+    // the model's derived notices; done / blocked: work I assigned, set by someone else
     VS.notices.forEach(function (x) {
       var r = A(x.assignment), txt;
+      if (x.kind === 'done' || x.kind === 'blocked') {
+        add(x.key, x.kind, x.item, x.ts, (x.kind === 'done' ? wsT("js.tk.feed.finished", esc(nm(x.to))) : wsT("js.tk.feed.blocked", esc(nm(x.to)))) + (r.note ? wsT("js.tk.ev.tail", snippet(r.note)) : ''), statusEv(r));
+        return;
+      }
       if (x.kind === 'declined') txt = wsT("js.tk.feed.declined", esc(nm(x.to)));
       else if (x.kind === 'returned') txt = r.handoffOf ? wsT("js.tk.feed.returned.handoff", esc(nm(x.endedBy)), esc(nm(x.to))) : wsT("js.tk.feed.returned", esc(nm(x.endedBy)), esc(nm(x.to)));
       else if (x.kind === 'accepted') txt = r.handoffOf ? wsT("js.tk.feed.accepted.handoff", esc(nm(x.to))) : wsT("js.tk.feed.accepted", esc(nm(x.to)), esc(nm(x.by)));
-      else txt = wsT("js.tk.feed.tookover", esc(nm(x.to)), esc(nm(x.from)));
+      else if (x.kind === 'handoff') txt = wsT("js.tk.feed.tookover", esc(nm(x.to)), esc(nm(x.from)));
+      else return;
       add(x.key, x.kind === 'declined' || x.kind === 'returned' ? 'answer' : 'reference', x.item, x.ts, txt + (x.note ? wsT("js.tk.ev.tail", snippet(x.note)) : ''), (x.kind === 'declined' || x.kind === 'returned' ? r.ended : r.accepted).id);
-    });
-    vals(VS.assignments).forEach(function (r) {
-      if (r.by !== v || r.to === v || r.state !== 'live' || (r.status !== 'done' && r.status !== 'blocked')) return;
-      add('w:' + r.id + ':' + r.status + ':' + r.lastUpdate, r.status, r.item, r.lastUpdate,
-        (r.status === 'done' ? wsT("js.tk.feed.finished", esc(nm(r.to))) : wsT("js.tk.feed.blocked", esc(nm(r.to)))) + (r.note ? wsT("js.tk.ev.tail", snippet(r.note)) : ''), statusEv(r));
     });
     VS.my.today.confirms.map(A).forEach(function (r) {
       add('c:' + r.id + ':' + r.lastUpdate, 'confirm', r.item, r.lastUpdate, wsT("js.tk.feed.confirm", esc(nm(r.to))), statusEv(r));
@@ -1113,6 +1116,7 @@
     if (ui.status === 'open') return s !== 'done' && s !== 'declined' && s !== 'returned';
     if (ui.status === 'done') return s === 'done';
     if (ui.status === 'blocked') return s === 'blocked' || it.rollup.blocked.length;
+    if (ui.status === 'review') return s === 'review';
     return true;
   }
   function sel(id, val, list) {
@@ -1123,7 +1127,7 @@
   }
   function itemFilterBar(kindOnly) {
     return wsT("js.tk.filter.kind") + ' ' + sel('f-kind', ui.kind, [['all', wsT("js.tk.filter.all")], ['task', kindName('task')], ['todo', kindName('todo')], ['topic', kindName('topic')], ['request', wsT("js.tk.filter.request")]]) +
-      (kindOnly ? '' : ' ' + wsT("js.tk.filter.status") + ' ' + sel('f-status', ui.status, [['all', wsT("js.tk.filter.all")], ['open', wsT("js.tk.filter.open")], ['blocked', stLabel('blocked')], ['done', stLabel('done')], ['hidden', wsT("js.tk.chip.hidden")]]));
+      (kindOnly ? '' : ' ' + wsT("js.tk.filter.status") + ' ' + sel('f-status', ui.status, [['all', wsT("js.tk.filter.all")], ['open', wsT("js.tk.filter.open")], ['review', stLabel('review')], ['blocked', stLabel('blocked')], ['done', stLabel('done')], ['hidden', wsT("js.tk.chip.hidden")]]));
   }
   function cardActivity() {
     var chip = wsT("js.tk.activity.chip", VS.stats.events, VS.stats.flagged) + (VS.stats.concurrent ? ', ' + wsT("js.tk.row.nconcurrent", VS.stats.concurrent) : ''), m = modeOf('activity');
@@ -1175,10 +1179,11 @@
   }
 
   // Kanban: columns by status. Assignment scopes: cards are assignments (with the
-  // pending column); "all": cards are items. Dragging moves only the viewer's own
+  // pending column); "all": cards are items, the review stage first, whose header "+"
+  // opens an input row atop it (knewRowHtml). Dragging moves only the viewer's own
   // live assignment (item.status, or item.close on the done column).
   var KCOLS = { assign: ['pending', 'todo', 'doing', 'blocked', 'awaiting', 'done'],
-    items: ['unassigned', 'pending', 'todo', 'doing', 'blocked', 'awaiting', 'done', 'declined', 'returned'] };
+    items: ['review', 'unassigned', 'pending', 'todo', 'doing', 'blocked', 'awaiting', 'done', 'declined', 'returned'] };
   function kanbanBody(key, v) {
     var cols = KCOLS[key === 'all' ? 'items' : 'assign'], buckets = {};
     cols.forEach(function (c) { buckets[c] = []; });
@@ -1205,7 +1210,9 @@
     var h = '<div class="toolbar">' + (key === 'all' ? itemFilterBar(true) : '') +
       '<span class="muted">' + wsT("js.tk.kanban.hint") + '</span></div><div class="kanban">';
     h += cols.map(function (c) {
-      return '<div class="kcol"' + attr('kcol', c) + '><div class="khead">' + stIcon(c) + '<b>' + esc(SI.info(c).label) + '</b> <span class="muted">' + buckets[c].length + '</span></div>' +
+      var rv = key === 'all' && c === 'review', kn = rv && ui.knew[ui.store];
+      return '<div class="kcol"' + attr('kcol', c) + '><div class="khead">' + stIcon(c) + '<b>' + esc(SI.info(c).label) + '</b> <span class="muted">' + buckets[c].length + '</span>' +
+        (rv ? '<span class="grow"></span>' + ia('knew', 'plus', wsT("js.tk.kanban.new"), {}) : '') + '</div>' + (kn ? knewRowHtml(kn) : '') +
         buckets[c].map(function (x) {
           // quiet cards: title, then initials (the record's assignee off "mine"), priority, due; the source on hover
           var it = VS.items[x.item];
@@ -2307,6 +2314,9 @@
     if (edit && task) {
       more.push(mi('pri', wsT("js.tk.menu.pri"), { item: it.id }, { icon: 'flag', sub: 1, val: esc(it.priorityName) }));
       more.push(mi('due', wsT("js.tk.menu.due"), { item: it.id }, { icon: 'calendar', sub: 1, val: it.due ? esc(it.due) : '' }));
+      // the stage (56): promote a review item; demote one that holds no live or pending assignment (55)
+      if (it.status === 'review') more.push(mi('m-promote', esc(wsT("js.tk.menu.promote")), { item: it.id }, { icon: 'accept' }));
+      else if (!it.assignments.map(A).some(function (r) { return r.state === 'live' || r.state === 'pending'; })) more.push(mi('m-demote', esc(wsT("js.tk.menu.demote")), { item: it.id }, { icon: 'return' }));
     }
     if (mineR && mineR.status !== 'done' && !it.hidden && !inWin) more.push(mi('handoff', esc(wsT("js.tk.act.handoff")), { item: it.id }, { icon: 'handoff', sub: 1 }));
     if (it.author === v && task && !it.hidden) more.push(mi('assign', esc(wsT("js.tk.act.assign")), { item: it.id }, { icon: 'assign', sub: 1 }));
@@ -2337,7 +2347,15 @@
   // another drops the first. A person already holding the item, or a rule one of my live rules
   // there covers, shows as assigned and is not picked. Focus stays in the search field: arrows
   // move, Enter toggles (Cmd/Ctrl+Enter applies), Esc goes back or closes (menuKey).
-  function asgState() { return MN.as || (MN.as = { q: '', sel: [], compl: 'assignee', idx: 0, opts: [] }); }
+  // compl stays null until the completion radio is touched; until then asgCompl derives it (58).
+  function asgState() { return MN.as || (MN.as = { q: '', sel: [], compl: null, idx: 0, opts: [] }); }
+  // The completion mode shown and written: the user's pick once they touched the radio, else
+  // assignee when the viewer is the only target, assigner when any target (a rule always) is
+  // someone else, and assigner while nothing is picked.
+  function asgCompl(S) {
+    var v = VS.viewer.member;
+    return S.compl || (S.sel.length && S.sel.every(function (o) { return o.t === 'p' && o.id === v; }) ? 'assignee' : 'assigner');
+  }
   // everyone below root (removed members left out), by depth
   function subtreeOf(root) {
     if (root === VS.viewer.member) return VS.viewer.reach;
@@ -2430,7 +2448,7 @@
       (any ? ' aria-activedescendant="tkaopt-' + S.idx + '"' : '') + ' placeholder="' + wsT("js.tk.ap.search") + '" aria-label="' + wsT("js.tk.ap.search") + '" value="' + esc(S.q) + '"></label>' +
       '<ul class="ap-list" id="tkalist" role="listbox" aria-multiselectable="true" aria-label="' + esc(wsT("js.tk.act.assign")) + '">' + list + '</ul>' +
       '<div class="ap-foot"><span class="ap-cm" role="radiogroup" aria-label="' + wsT("js.tk.form.completion") + '">' + ['assignee', 'assigner'].map(function (c) {
-        return '<button type="button" role="radio" aria-checked="' + (S.compl === c) + '"' + attr('act', 'm-acm') + attr('c', c) + '>' + esc(complText(c)) + '</button>';
+        return '<button type="button" role="radio" aria-checked="' + (asgCompl(S) === c) + '"' + attr('act', 'm-acm') + attr('c', c) + '>' + esc(complText(c)) + '</button>';
       }).join('') + '</span><button type="button" class="btn primary" id="tkaapply"' + attr('act', 'm-aapply') + (S.sel.length ? '' : ' disabled') + '>' + wsT("js.tk.dlg.assign.submit") + '</button></div></div>';
   }
   // the list, the chips, and the apply button again; the search field (and an IME composition in it) stays
@@ -2443,7 +2461,7 @@
     $('tkaq').setAttribute('aria-activedescendant', $('tkaopt-' + S.idx) ? 'tkaopt-' + S.idx : '');
     var on = $('tkalist').querySelector('.aopt.on');
     if (on) on.scrollIntoView({ block: 'nearest' });
-    Array.prototype.forEach.call(document.querySelectorAll('#tkmenu .ap-cm [role="radio"]'), function (b) { b.setAttribute('aria-checked', String(b.getAttribute('data-c') === S.compl)); });
+    Array.prototype.forEach.call(document.querySelectorAll('#tkmenu .ap-cm [role="radio"]'), function (b) { b.setAttribute('aria-checked', String(b.getAttribute('data-c') === asgCompl(S))); });
   }
   function asgToggle(i) {
     var S = asgState(), o = S.opts.filter(function (x) { return !x.g && !x.off; })[i];
@@ -2460,7 +2478,7 @@
     if (!it || !S.sel.length) return;
     var people = S.sel.filter(function (o) { return o.t === 'p'; }).map(function (o) { return o.id; });
     var rules = S.sel.filter(function (o) { return o.t === 'r'; }).map(function (o) { return o.levels == null ? { root: o.root } : { root: o.root, levels: o.levels }; });
-    commit([['item.assign', { item: it.id, targets: people.concat(rules), completion: S.compl }]]);
+    commit([['item.assign', { item: it.id, targets: people.concat(rules), completion: asgCompl(S) }]]);
   }
   function asgMenuKey(e) {
     var t = e.target, S = asgState(), k = e.key;
@@ -2522,6 +2540,8 @@
         return commit([['item.edit', { item: id, due: dv }]]);
       }
       case 'm-due-clear': return commit([['item.edit', { item: id, due: null }]]);
+      case 'm-promote': return commit([['item.edit', { item: id, stage: null }]]);
+      case 'm-demote': return commit([['item.edit', { item: id, stage: 'review' }]]);
       case 'm-handoff': {
         var hp = { item: id, to: a.getAttribute('data-to') }, note = menuNote();
         if (MN.who && MN.who !== VS.viewer.member) hp.assignee = MN.who;
@@ -2648,6 +2668,25 @@
     var evs = [['item.create', cp]];
     if (cp.kind !== 'topic') evs.push(['item.assign', { item: '$1', mode: 'chosen', people: [v], completion: 'assignee' }]);
     return evs;
+  }
+  // The "all" kanban's review column "+": an input row atop that column (ui.knew[store] = { val }).
+  // Title + Enter creates a task in the review stage, not self-assigned (53): assigning would
+  // move it to todo at once. The row stays for the next one; Esc closes it.
+  function knewRowHtml(n) {
+    return '<div class="nrow"><svg class="i"><use href="#tki-plus"/></svg><input type="text" id="tkknew" data-keep autocomplete="off" value="' + esc(n.val) + '" placeholder="' + wsT("js.tk.kanban.new.ph") + '" aria-label="' + wsT("js.tk.kanban.new") + '">' +
+      '<button type="button" class="ia"' + attr('act', 'knew-x') + ' aria-label="' + wsT("js.tk.dlg.cancel") + '"' + tipAttr(wsT("js.tk.new.close")) + '><svg class="i"><use href="#tki-x"/></svg></button></div>';
+  }
+  function openKnew() {
+    if (!VS) return;
+    ui.knew[ui.store] = ui.knew[ui.store] || { val: '' };
+    render();
+    if ($('tkknew')) $('tkknew').focus();
+  }
+  function closeKnew() { delete ui.knew[ui.store]; render(); var b = document.querySelector('.tk [data-act="knew"]'); if (b) b.focus(); }
+  function createKnew() {
+    var n = ui.knew[ui.store], title = $('tkknew').value.trim();
+    if (!n || !title) return;
+    commit([['item.create', { kind: 'task', title: title, stage: 'review' }]], null, function () { n.val = ''; });
   }
 
   // The hover insert: in a list view, the pointer near the line between two rows (or under the
@@ -3385,6 +3424,8 @@
         else if (k === 'mdet') { var mk = ui.store + '|' + d.who; ui.mdet[mk] = !ui.mdet[mk]; render(); }
         else if (k === 'idcopy') copyId(a);
         else if (k === 'new-x') closeNewRow();
+        else if (k === 'knew') openKnew();
+        else if (k === 'knew-x') closeKnew();
         else if (k === 'sub-x') closeSub();
         else if (k === 'rib') openMenu({ kind: 'sync' }, a);
         else if (k === 'actf') { var af = a.getAttribute('data-f'); ui.act[af] = !ui.act[af]; render(); }
@@ -3479,6 +3520,7 @@
       var t = e.target;
       if (!own(t)) return;
       if (t.id === 'tknew' && ui.nrow[ui.store]) ui.nrow[ui.store].val = t.value;
+      else if (t.id === 'tkknew' && ui.knew[ui.store]) ui.knew[ui.store].val = t.value;
       else if (t.id === 'tksub' && ui.sub) ui.sub.val = t.value;
       else if (t.id === 'tkcedit' && ui.cedit) ui.cedit.body = t.value;
       else if (t.id === 'cbox') mentionSync(); // also mid-composition: the popup filters on the composing text
@@ -3593,6 +3635,7 @@
       if (own(t) && t.hasAttribute && t.hasAttribute('data-keep')) {
         var esc1 = e.key === 'Escape';
         if (id === 'tknew') { if (plain) { e.preventDefault(); createNew(); } else if (esc1) { e.preventDefault(); closeNewRow(); } return; }
+        if (id === 'tkknew') { if (plain) { e.preventDefault(); createKnew(); } else if (esc1) { e.preventDefault(); closeKnew(); } return; }
         if (id === 'tksub') { if (plain) { e.preventDefault(); createSub(); } else if (esc1) { e.preventDefault(); closeSub(); } return; }
         if (id === 'iw-etitle' || id === 'iw-eproj') { if (plain || chord) { e.preventDefault(); saveEdit(); } else if (esc1) { e.preventDefault(); endEdit(); } return; }
         if (id === 'iw-ebody') { if (chord) { e.preventDefault(); saveEdit(); } else if (esc1) { e.preventDefault(); endEdit(); } return; }
