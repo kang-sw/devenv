@@ -26,7 +26,7 @@ var grammar = wsxmlcmd.Grammar{
 		"add":       {Kind: wsxmlcmd.Container, Attrs: []string{"id", "class"}, Fields: itemFieldNames, DecodeFields: itemFieldNames, Scoped: true},
 		"close":     {Kind: wsxmlcmd.Empty, Attrs: []string{"result"}, Scoped: true},
 		"answer":    {Kind: wsxmlcmd.Leaf, Attrs: []string{"id", "ids", "value", "assumed"}},
-		"patch":     {Kind: wsxmlcmd.Container, Attrs: []string{"id", "status", "clear"}, Fields: itemFieldNames, DecodeFields: itemFieldNames},
+		"patch":     {Kind: wsxmlcmd.Container, Attrs: []string{"id", "status", "class", "clear"}, Fields: itemFieldNames, DecodeFields: itemFieldNames},
 		"floor":     {Kind: wsxmlcmd.Empty, Attrs: []string{"id"}},
 		"embed-dir": {Kind: wsxmlcmd.Empty, Attrs: []string{"path"}},
 	},

@@ -586,6 +586,26 @@ func TestDashboardReadPageLangTranslatesBoardAndPanelText(t *testing.T) {
 	}
 }
 
+// TestDashboardReadPageCarriesReaskTimes pins the plumbing of the re-ask
+// rule: the served page carries each re-asked item's latest re-ask time,
+// read from the session's whiteboard, for the sent-mark filter; an item
+// never re-asked is absent.
+func TestDashboardReadPageCarriesReaskTimes(t *testing.T) {
+	f := newWhiteboardFixture(t)
+	src := dashboardPageSource(t, nil)
+	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
+	f.update(t, `<wb:topic name="t"><wb:add class="technical"><wb:title>one</wb:title></wb:add><wb:add class="technical"><wb:title>two</wb:title></wb:add></wb:topic>`)
+	if page := readPageOK(t, src, reg); page.Reasked != nil {
+		t.Fatalf("no item re-asked: Reasked = %v", page.Reasked)
+	}
+	before := time.Now().UnixMilli()
+	f.update(t, `<wb:patch id="1" class="policy"><wb:option>x</wb:option><wb:option>y</wb:option></wb:patch>`)
+	page := readPageOK(t, src, reg)
+	if len(page.Reasked) != 1 || page.Reasked[1] < before || page.Reasked[1] > time.Now().UnixMilli() {
+		t.Fatalf("Reasked = %v, want item 1 at or after %d", page.Reasked, before)
+	}
+}
+
 // TestDashboardReadClosedTopicsPastTheCap pins the served board's closed-topic
 // cap end to end: the board ends with the show-more control, and
 // ReadClosedTopics renders the topics past the cap under the served link

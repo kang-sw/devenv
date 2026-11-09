@@ -4,6 +4,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: b4ab1a9a51a5423c
 sage-review-completeness-reviewed: b4ab1a9a51a5423c
+completed: 2026-11-09
 ---
 
 # whiteboard: a re-asked item keeps its old class and its sent mark, so it looks settled
@@ -187,3 +188,47 @@ behaviors:
 
 A headless browser check of a re-asked item on the dashboard is welcome. If it
 is not run, say so.
+
+### Result (57ba56f1d) - 2026-11-09
+
+Landed:
+- `wb:patch` takes `class` (`commands.go`, `applyPatch` in `store.go`). The
+  open check for class and options reads the status after the patch's own
+  `status` change, so one patch reopens, reclasses and gives options; a
+  settled item without `status="open"` (or one the patch withdraws or
+  supersedes) is refused.
+- `Item.ReaskedAt` (RFC 3339, millisecond precision) is stamped on a real
+  class change, a real options change (`slices.Equal`), or settled/assumed ->
+  open; a later re-ask replaces it. `State.ReaskTimes()` exposes epoch ms.
+- The update `info:` line warns ("Options on a non-policy item: (nn) [class]
+  ...") when an add or patch leaves an item holding options under a class
+  other than policy.
+- `wsinbox.Chip.SentAt`: `Send` sets every chip to its send's time
+  (overriding client values), `Merge` keeps each chip's own time. The cancel
+  route's page copy strips it, so the browser wire shape is unchanged.
+- `PageContent.Reasked` filled in `ReadPageLang`; `sentMarks` drops a chip
+  (drained or held) with a send time earlier than its item's re-ask. Chips
+  without a send time keep their marks. `dashboard.js`, `dashboard.tmpl` and
+  `pill.js` are unchanged.
+- Playbook: `wb:patch` row gains `class?`, the open-after-patch rule, a
+  Re-ask bullet, and the new `info:` note, in all three byte-identical
+  `whiteboard.md` copies; rsrc `manifest.json` regenerated and mirrored.
+
+Verification (from `agents-plugin-tool/`): `gofmt -l ./internal ./cmd`
+clean; `go vet ./internal/...` clean; `go test ./internal/wswhiteboard/
+./internal/wsdashboard/ ./internal/wsi18n/ ./internal/wsdoc/...
+./internal/wsinbox/ ./internal/wsrsrc/ ./internal/mcp/ -count=1` all ok. No JS
+changed, so no `node --check`. New tests: `wswhiteboard/reask_test.go`,
+`wsinbox/chip_sent_test.go`, `TestSentMarksDropAnswersSentBeforeTheItemsReask`,
+`TestDashboardReadPageCarriesReaskTimes`. Lite review: clean. No headless
+browser check was run.
+
+Decisions:
+- The non-policy options warning judges every add/patch command by the item
+  after it, so a later patch of such an item (for example a `wb:why` edit)
+  warns again; deduped per batch.
+- Because open checks read the post-patch status, a patch that sets options
+  and `status="withdrawn"` on an open item in one command is now refused
+  (previously accepted).
+- Chip send time is stripped from the cancel route's response rather than
+  exposed to the page.

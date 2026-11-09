@@ -364,7 +364,7 @@ func buildSessionView(in pageInputs) SessionView {
 	v.Conversation = conversation(in.Snapshot.Lead, in.Ring, in.Page.MailBodies, contacts, lookup, replyMarkdown(reg.Project, reg.ReplyID))
 	userEntryImages(v.Conversation.Entries, in.AttachDir, reg.ReplyID)
 	v.Conversation.Held = heldViews(in.Held, in.AttachDir, reg.ReplyID)
-	v.Conversation.Sent = sentMarks(in.Drained, in.Held)
+	v.Conversation.Sent = sentMarks(in.Drained, in.Held, in.Page.Reasked)
 	v.Conversation.Subagents = subagentCounts(reg.ReplyID, in.Snapshot.Agents, lookup, in.Now)
 	return v
 }

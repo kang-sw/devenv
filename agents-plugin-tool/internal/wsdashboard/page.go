@@ -58,6 +58,10 @@ type PageContent struct {
 	// panel row lists its file as Path text, never as a file: URL or a
 	// relative link.
 	Board wswhiteboard.Regions
+	// Reasked maps each re-asked board item's ID to its latest re-ask time,
+	// epoch milliseconds (wswhiteboard.State.ReaskTimes); the page's sent
+	// marks drop answers sent before it. Nil when no item was re-asked.
+	Reasked map[int]int64
 	// Contacts are the session's mail correspondents, newest exchange first.
 	Contacts []Contact
 	// MailBodies maps a mailbox history entry name (a conversation ring mail

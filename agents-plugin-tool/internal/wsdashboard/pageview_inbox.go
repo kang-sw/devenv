@@ -136,13 +136,31 @@ func heldViews(held []wsinbox.Record, attachDir, replyID string) []HeldView {
 // chip for the item across the drained records and then the held entries, so
 // a held answer shows over an earlier delivered one. The drained records are
 // on disk, so a mark survives a page reload while the newest DrainedCap
-// records hold it.
-func sentMarks(drained, held []wsinbox.Record) []SentMark {
+// records hold it. reasked maps a board item's ID to its latest re-ask time
+// (epoch ms, PageContent.Reasked): a chip for it sent before that time
+// answered an earlier ask and marks nothing, so the item waits on the user
+// again. A chip without a send time (written before chips carried one)
+// keeps its mark.
+func sentMarks(drained, held []wsinbox.Record, reasked map[int]int64) []SentMark {
 	var order []string
 	marks := map[string]SentMark{}
+	stale := func(c wsinbox.Chip) bool {
+		if c.SentAt == 0 || len(reasked) == 0 {
+			return false
+		}
+		id, err := strconv.Atoi(c.ID)
+		if err != nil {
+			return false
+		}
+		at, ok := reasked[id]
+		return ok && c.SentAt < at
+	}
 	add := func(records []wsinbox.Record, isHeld bool) {
 		for _, r := range records {
 			for _, c := range r.Entry.Chips {
+				if stale(c) {
+					continue
+				}
 				if _, seen := marks[c.ID]; !seen {
 					order = append(order, c.ID)
 				}
