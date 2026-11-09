@@ -1,5 +1,5 @@
 ---
-title: ""
+title: "ws/git.merge reports a false directory-rename conflict when a branch empties a ticket status directory"
 ---
 
 ## Observation (2026-11-10)
