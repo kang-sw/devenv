@@ -44,6 +44,31 @@ stores and fetches the content.
   URL (a plain path clone ignores the filter). A hosted private repository is
   used only at live acceptance, where HTTPS auth, host filter support, and
   latency show.
+- **Host without filter support** (user; board (47) a): when the hosting
+  remote refuses partial-clone filters (`uploadpack.allowFilter` off), the
+  store falls back to a full fetch: attachments still work, the clone just
+  holds every attachment, and the store reports the fallback once.
+  Rejected: refusing attachments on such a store (pasted images would fail
+  outright on those hosts).
+- **Blob in the event commit** (board (48) ok): the ledger verifier lets an
+  event commit also add `attachments/<sha256>` blobs, each referenced by an
+  attachment in that commit's appended events and whose content hashes to
+  its path, and nothing else. Rejected: a separate blob-only commit ((337) a
+  commits the blob with the event that references it, and one commit per
+  write keeps causality simple).
+- **Staged upload** (board (49) ok): `POST /tracker/stores/<id>/attachments`
+  takes the bytes; the daemon computes the sha256, checks the type and
+  `attachments.max_bytes`, stages the blob, and returns
+  `{oid,name,size,mime}`. The next write carrying that metadata commits the
+  staged blob with its event; unreferenced staged blobs expire. Rejected:
+  base64 bytes inside the event write (the tracker write body limit is
+  256 KiB and events carry only metadata).
+- **Read route** (board (50) ok): `GET /tracker/stores/<id>/attachments/<sha256>`
+  serves a blob found in a member's ledger tree, fetching it on demand from
+  the promisor remote, under the access rules of the other tracker routes,
+  with `Content-Type` from the stored metadata and
+  `X-Content-Type-Options: nosniff`. Rejected: serving through the session
+  image route (attachments belong to a store, not a session).
 
 ## Constraints
 
@@ -56,8 +81,33 @@ stores and fetches the content.
 
 ### Phase 1: blob storage and on-demand fetch
 
-To be written at planning: write path (blob next to the event in the same
-signed commit, oid verified against content), filtered clone and fetch
-configuration, an on-demand fetch of one blob by oid, behaviour when the
-host does not support filters (full fetch fallback or refusal, to decide),
-and the limit check against the stored blob size.
+- Ledger (`internal/wsledger`): the verifier accepts an event commit that
+  also adds `attachments/<sha256>` blobs under the rule above (each path
+  referenced by that commit's appended events, content hashing to its
+  name, no other path); the write path stages a blob and commits it in the
+  same signed commit as the event that first references it; clone and
+  fetch use `--filter=blob:limit=N` against the promisor remote, with the
+  full-fetch fallback and its one-time report when the host refuses the
+  filter; reading one blob by oid fetches it on demand when the partial
+  clone lacks it. Signatures, causality, and rewind refusal apply
+  unchanged.
+- Domain and daemon: the staged upload route and the read route above
+  (`wsdashboard/tracker_routes.go`, beside the existing tracker store
+  routes), the type check (png, jpeg, gif, webp, matching the editor
+  ticket's accepted images) and the `attachments.max_bytes` check against
+  the uploaded byte size, staging expiry for blobs no write referenced, and
+  the write path committing the staged blobs a write's attachment metadata
+  names. A write naming an oid that is neither staged nor already in the
+  ledger is refused.
+- Verification: `go test ./internal/wsledger/ ./internal/wstracker/
+  ./internal/wsdashboard/`. Tests over local bare remotes (`newRemote`)
+  cover: an event commit with a referenced blob verifies; an unreferenced
+  blob, a blob whose content does not hash to its path, or any other added
+  path is refused; a partial clone over a `file://` URL with
+  `uploadpack.allowFilter=true` lacks the blob until it is read, then
+  fetches only that blob; a remote with the filter off falls back to a full
+  fetch and reports it once; upload over the size limit or of a non-image
+  type is refused; the read route sets `nosniff` and the stored type and
+  refuses a viewer the other tracker routes refuse; an unreferenced staged
+  blob expires. A hosted private repository is exercised only at live
+  acceptance and is listed as unverified in the Result.
