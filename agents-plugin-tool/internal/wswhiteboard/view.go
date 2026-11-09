@@ -84,6 +84,17 @@ type View struct {
 	// through here and stay unmarked; a finished reply's raw anchors and
 	// images do, through the reply sanitizer (sanitize.go).
 	FileActions func(path string) FileAction
+	// OutsideImage, when set on a page with FileActions, serves an image
+	// file ImageSrc and FileActions leave out, one outside the session root
+	// that only some viewers may load. A FileAction with an Href (Outside
+	// set) makes an image of that path render as <img> on that Href, marked
+	// data-out with the absolute path as data-abs, so the page can put the
+	// path back when the image fails to load; and a link to it an action
+	// link on that Href, marked data-out, whose open items the page shows
+	// only where the image loads. A topic body never consults it: its frame
+	// has no viewer to load such an image for. A zero FileAction leaves the
+	// target to ImageSrc and FileActions alone.
+	OutsideImage func(path string) FileAction
 	// Lang is the language of the text the page itself draws (a wsi18n
 	// code; empty renders English). A page written to disk renders in
 	// English: it has no viewer to follow. The served dashboard page sets
@@ -102,6 +113,12 @@ type FileAction struct {
 	Rel string
 	// Abs is the absolute path.
 	Abs string
+	// Image marks an image file the page may hand the host's native image
+	// app (data-img).
+	Image bool
+	// Outside marks an image outside the session root whose Href only some
+	// viewers may load (data-out; View.OutsideImage).
+	Outside bool
 }
 
 // TopicView is one topic block.
@@ -299,13 +316,14 @@ type ViewInput struct {
 	Layout  Layout
 	ReplyID string
 	Panels  []Panel
-	// FileLink, FileText, ImageSrc, DocImageSrc, and FileActions are copied
-	// to the View.
-	FileLink    func(path string) string
-	FileText    func(path string) string
-	ImageSrc    func(path string) string
-	DocImageSrc func(path string) string
-	FileActions func(path string) FileAction
+	// FileLink, FileText, ImageSrc, DocImageSrc, FileActions, and
+	// OutsideImage are copied to the View.
+	FileLink     func(path string) string
+	FileText     func(path string) string
+	ImageSrc     func(path string) string
+	DocImageSrc  func(path string) string
+	FileActions  func(path string) FileAction
+	OutsideImage func(path string) FileAction
 	// Closed, when set, builds the view of the capped closed topics alone,
 	// the served page's show-more fetch; nil builds the whole board with the
 	// first ClosedCap of them.
@@ -323,16 +341,17 @@ type ClosedWindow struct {
 // BuildView derives a page view from state.
 func BuildView(state *State, in ViewInput) View {
 	view := View{
-		Layout:      in.Layout,
-		ReplyID:     in.ReplyID,
-		Seq:         state.Seq,
-		Panels:      in.Panels,
-		Stored:      map[int]bool{},
-		FileLink:    in.FileLink,
-		FileText:    in.FileText,
-		ImageSrc:    in.ImageSrc,
-		DocImageSrc: in.DocImageSrc,
-		FileActions: in.FileActions,
+		Layout:       in.Layout,
+		ReplyID:      in.ReplyID,
+		Seq:          state.Seq,
+		Panels:       in.Panels,
+		Stored:       map[int]bool{},
+		FileLink:     in.FileLink,
+		FileText:     in.FileText,
+		ImageSrc:     in.ImageSrc,
+		DocImageSrc:  in.DocImageSrc,
+		FileActions:  in.FileActions,
+		OutsideImage: in.OutsideImage,
 	}
 	if in.FileActions != nil && in.FileText != nil {
 		view.Panels = withActions(in.Panels, in.FileActions)

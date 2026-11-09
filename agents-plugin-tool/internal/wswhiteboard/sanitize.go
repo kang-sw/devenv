@@ -62,7 +62,7 @@ const svgIDPrefix = "wbr-"
 
 // trustedTarget is the attributes a link or image the markdown renderer
 // resolved while a finished reply rendered opened with (linkAttrs,
-// actionAttrs, or an image's src), its URL already URL-escaped.
+// actionAttrs, or imageAttrs), its URL already URL-escaped.
 type trustedTarget struct {
 	attrs [][2]string
 	image bool
@@ -334,7 +334,7 @@ func (p *pageData) keepImageSrc(n *xhtml.Node, urls map[string]string, ref int) 
 			replaceImage(n, t.text, t)
 			return
 		}
-		attrs = [][2]string{{"src", string(util.URLEscape([]byte(t.href), false))}}
+		attrs = imageAttrs(t)
 	}
 	if set := p.resolveSrcset(urls["srcset"]); set != "" {
 		attrs = append(attrs, [2]string{"srcset", set})

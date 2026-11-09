@@ -5,6 +5,7 @@ import (
 	"fmt"
 	stdhtml "html"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -53,7 +54,8 @@ var hrefPattern = regexp.MustCompile(`(?:href|src)="([^"]*)"`)
 // layout, the same fragments the static page renders when no file target is
 // involved, and the served link rule otherwise (a file target is an action
 // link to the file view inside the root and a copy-only action link outside
-// it, ticket rows are path text, never a file: URL or a relative href), with
+// it, an absolute image outside it the image route marked data-out, ticket
+// rows are path text, never a file: URL or a relative href), with
 // no session key anywhere in what reaches the browser.
 func TestDashboardReadPageServesTheBoard(t *testing.T) {
 	f := newWhiteboardFixture(t)
@@ -97,10 +99,12 @@ func TestDashboardReadPageServesTheBoard(t *testing.T) {
 	for _, want := range []string{
 		`<a href="/s/` + reg.ReplyID + `/file?path=ai-docs%2Fplan.md" data-wl="file" data-rel="ai-docs/plan.md" data-abs="` + filepath.Join(f.root, "ai-docs", "plan.md") + `" title="ai-docs/plan.md">the plan</a>`,
 		`<a href="/s/` + reg.ReplyID + `/file?path=docs%2Finside.md" data-wl="file" data-rel="docs/inside.md" data-abs="` + filepath.Join(f.root, "docs", "inside.md") + `" title="docs/inside.md">inside</a>`,
-		// An image inside the root is the image route; one outside it stays
-		// path text, as a copy-only action link.
+		// An image inside the root is the image route; one outside it,
+		// written absolute, is the image route too, marked data-out with its
+		// absolute path (the route serves it to a loopback viewer only, and
+		// the page puts the path back where it fails to load).
 		`<img src="/s/` + reg.ReplyID + `/image?path=shots%2Fa.png" alt="shot">`,
-		`<span class="img-text">away <a tabindex="0" data-wl="file" data-abs="` + filepath.FromSlash(outside) + `" title="` + outside + `"><code class="fpath">` + outside + `</code></a></span>`,
+		`<img src="/s/` + reg.ReplyID + `/image?path=` + url.QueryEscape(outside) + `" data-out="" data-abs="` + filepath.FromSlash(outside) + `" alt="away">`,
 		`<span class="chip cat feat">feat</span><a href="/s/` + reg.ReplyID + `/file?path=ai-docs%2Ftickets%2Fready%2F261101-feat-ready-one.md" data-wl="file" data-rel="ai-docs/tickets/ready/261101-feat-ready-one.md" data-abs="` + filepath.Join(f.root, "ai-docs", "tickets", "ready", "261101-feat-ready-one.md") + `" title="ai-docs/tickets/ready/261101-feat-ready-one.md">Ready one</a></span>`,
 		`<span class="chip cat feat">feat</span><a href="/s/` + reg.ReplyID + `/file?path=ai-docs%2Ftickets%2Ftodo%2F261102-feat-todo-one.md" data-wl="file" data-rel="ai-docs/tickets/todo/261102-feat-todo-one.md" data-abs="` + filepath.Join(f.root, "ai-docs", "tickets", "todo", "261102-feat-todo-one.md") + `" title="ai-docs/tickets/todo/261102-feat-todo-one.md">Todo one</a></span>`,
 		"1 ready, 1 todo", // the full layout's ticket count

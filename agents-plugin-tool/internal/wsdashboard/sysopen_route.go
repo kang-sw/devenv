@@ -12,8 +12,10 @@ import (
 
 // The system-open route: POST /s/<reply-id>/open {"target": <url>} opens
 // target in the host machine's default browser, for the link menu's "open in
-// system browser" item. It runs a command on the host, so the server enforces
-// what the page only reflects by showing the item to a loopback viewer:
+// system browser" item, and POST /s/<reply-id>/open {"native": <path>} opens
+// an image file in the host's default app for it, for the "open in native
+// app" item. It runs a command on the host, so the server enforces what the
+// page only reflects by showing the items to a loopback viewer:
 //
 //   - the request comes from a browser on this machine (localViewer); a LAN
 //     viewer, token or not, gets 404, as if the route did not exist;
@@ -24,10 +26,16 @@ import (
 //     which is opened on the daemon's loopback address the request named;
 //     it is printable ASCII with no space, quote, or backslash, as a browser
 //     serializes a link's href;
+//   - native is, strictly, an absolute path with an image extension, not a
+//     UNC or device path (refused before the filesystem is touched), that
+//     resolves through every symlink to a regular file that also carries an
+//     image extension and is on no UNC or device path; the resolved path is
+//     what the OS opens. Exactly one of target and native is set;
 //   - the OS open command runs directly, never through a shell, with target
-//     as one argument that starts with "http" and so never reads as an
-//     option. On Windows that is rundll32's FileProtocolHandler, not
-//     "cmd /c start", where a "&" in a query would start a second command.
+//     as one argument that starts with "http", or the absolute file path,
+//     and so never reads as an option. On Windows that is rundll32's
+//     FileProtocolHandler, not "cmd /c start", where a "&" in a query would
+//     start a second command.
 //
 // It answers 204 once the command started; whether the browser then opened
 // is not observed.
@@ -41,6 +49,7 @@ const (
 // openRequest is the system-open route's body. Unknown fields are ignored.
 type openRequest struct {
 	Target string `json:"target"`
+	Native string `json:"native"`
 }
 
 // openTarget validates a system-open target for the session replyID on the
@@ -77,8 +86,22 @@ func openTarget(raw, replyID, host string) (string, bool) {
 	return "", false
 }
 
-// systemOpen opens target in the default browser with the host OS's open
-// command, run with no shell; the command is reaped in the background.
+// nativeTarget validates a system-open native target and returns the
+// resolved image file to hand the OS.
+func nativeTarget(raw string) (string, bool) {
+	if len(raw) > openTargetMax {
+		return "", false
+	}
+	abs, _, ok := absoluteImageName(raw)
+	if !ok {
+		return "", false
+	}
+	return resolvedImage(abs)
+}
+
+// systemOpen opens target, a URL or an absolute file path, in its default
+// app (the browser for a URL) with the host OS's open command, run with no
+// shell; the command is reaped in the background.
 func systemOpen(target string) error {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
@@ -123,14 +146,28 @@ func (d *Daemon) handleSystemOpen(w http.ResponseWriter, r *http.Request, replyI
 		http.Error(w, "malformed request", http.StatusBadRequest)
 		return
 	}
-	target, ok := openTarget(req.Target, replyID, r.Host)
-	if !ok {
-		http.Error(w, "target must be an http(s) URL or this session's file view", http.StatusBadRequest)
+	var target string
+	var ok bool
+	switch {
+	case req.Native != "" && req.Target == "":
+		target, ok = nativeTarget(req.Native)
+		if !ok {
+			http.Error(w, "native must be the absolute path of an image file", http.StatusBadRequest)
+			return
+		}
+	case req.Native == "":
+		target, ok = openTarget(req.Target, replyID, r.Host)
+		if !ok {
+			http.Error(w, "target must be an http(s) URL or this session's file view", http.StatusBadRequest)
+			return
+		}
+	default:
+		http.Error(w, "set target or native, not both", http.StatusBadRequest)
 		return
 	}
 	if err := d.openSystem(target); err != nil {
 		fmt.Fprintf(d.log, "dashboard: system open: %v\n", err)
-		http.Error(w, "the system browser could not be started", http.StatusInternalServerError)
+		http.Error(w, "the system open command could not be started", http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

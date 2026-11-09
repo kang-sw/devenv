@@ -308,6 +308,9 @@ type pageData struct {
 	// framing is set while a framed body renders, so its file images take
 	// DocImageSrc.
 	framing bool
+	// inDoc is set while any topic body renders, framed or not, so its file
+	// targets never take OutsideImage.
+	inDoc bool
 
 	CountPolicy, CountAssumed, CountAcks, CountFresh int
 	// CountBulk is how many items the bulk checkbox answers.
@@ -400,13 +403,13 @@ func newPageData(view View, a *pageAssets, framed bool) *pageData {
 		}
 		page := p.Mermaid
 		p.Mermaid = false
-		p.framing = framed
+		p.framing, p.inDoc = framed, true
 		marks := t.DocMarks
 		if !full {
 			marks = nil // the embed has no script to draw them
 		}
 		html := p.renderDoc(t.Doc, marks)
-		p.framing = false
+		p.framing, p.inDoc = false, false
 		if framed {
 			// The frame loads mermaid for its own blocks; the page loads it
 			// only for a block outside every frame.

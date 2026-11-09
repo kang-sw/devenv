@@ -502,3 +502,31 @@ func TestMarkdownBareLinksMatchWrittenLinks(t *testing.T) {
 		t.Errorf("path text page: %s", got)
 	}
 }
+
+// TestRenderTextOutsideImage: RenderText passes OutsideImage through, and a
+// finished reply's raw HTML resolves an <img> or <a> by the same rule,
+// while a data-out or data-abs the reply writes itself never survives the
+// sanitizer.
+func TestRenderTextOutsideImage(t *testing.T) {
+	targets := TextTargets{
+		FileText:    func(p string) string { return p },
+		ImageSrc:    func(p string) string { return map[string]string{"in.png": "/s/r/image?path=in.png"}[p] },
+		FileActions: func(p string) FileAction { return FileAction{Abs: p} },
+		OutsideImage: func(p string) FileAction {
+			if p != "/x/out.png" {
+				return FileAction{}
+			}
+			return FileAction{Href: "/s/r/image?path=/x/out.png", Abs: p, Image: true, Outside: true}
+		},
+		HTML: true,
+	}
+	out := string(RenderText("![md](/x/out.png)\n\n<img src=\"/x/out.png\" alt=\"raw\"> <a href=\"/x/out.png\">rawlink</a> "+
+		"<img src=\"in.png\" data-out data-abs=\"/etc/forged\" alt=\"forged\">", targets))
+	wantAll(t, out,
+		`<img src="/s/r/image?path=/x/out.png" data-out="" data-abs="/x/out.png" alt="md"/>`,
+		`<img src="/s/r/image?path=/x/out.png" data-out="" data-abs="/x/out.png" alt="raw"/>`,
+		`<a href="/s/r/image?path=/x/out.png" data-wl="file" data-abs="/x/out.png" data-img="" data-out="" title="/x/out.png">rawlink</a>`,
+		`<img src="/s/r/image?path=in.png" alt="forged"/>`,
+	)
+	wantNone(t, out, "/etc/forged")
+}

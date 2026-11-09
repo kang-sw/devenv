@@ -55,25 +55,30 @@ func FileSrc(replyID, rel string) string {
 // FileActions is a served page's link-action rule (wswhiteboard.View
 // FileActions) for the session replyID with project root root: a path
 // inside root gets its file view URL, its root-relative path, and its
-// absolute path; any other path gets its absolute path alone, which the link
-// menu offers to copy. It reads no file, so a path the file view refuses
-// once it reads the file (missing, a symlink) still links and answers 404.
+// absolute path, and is marked an image when it has an image extension; any
+// other path gets its absolute path alone, which the link menu offers to
+// copy (OutsideImage widens that for an absolute image path). It reads no
+// file, so a path the file view refuses once it reads the file (missing, a
+// symlink) still links and answers 404.
 func FileActions(root, replyID string) func(path string) wswhiteboard.FileAction {
 	return func(path string) wswhiteboard.FileAction {
 		if root == "" || path == "" || strings.ContainsRune(path, 0) {
 			return wswhiteboard.FileAction{}
 		}
 		if rel, ok := relativeInside(root, path); ok && ValidReplyID(replyID) {
-			return wswhiteboard.FileAction{Href: FileSrc(replyID, rel), Rel: filepath.ToSlash(rel), Abs: filepath.Join(filepath.Clean(root), rel)}
+			_, image := imageType(rel)
+			return wswhiteboard.FileAction{Href: FileSrc(replyID, rel), Rel: filepath.ToSlash(rel), Abs: filepath.Join(filepath.Clean(root), rel), Image: image}
 		}
 		return wswhiteboard.FileAction{Abs: resolveAgainst(root, filepath.FromSlash(path))}
 	}
 }
 
 // servedTargets is the served page's markdown link rule for the session
-// replyID with project root root: a file target shows its root-relative
-// path (its own path outside root) and links through FileActions, and an
-// image inside root loads through the image route.
+// replyID with project root root, for a lead reply: a file target shows its
+// root-relative path (its own path outside root) and links through
+// FileActions, an image inside root loads through the image route, and an
+// image outside root written absolute loads, for a loopback viewer, through
+// the image route too (OutsideImage).
 func servedTargets(root, replyID string) wswhiteboard.TextTargets {
 	return wswhiteboard.TextTargets{
 		FileText: func(path string) string {
@@ -82,15 +87,18 @@ func servedTargets(root, replyID string) wswhiteboard.TextTargets {
 			}
 			return filepath.ToSlash(path)
 		},
-		ImageSrc:    func(path string) string { return ImageSrc(root, replyID, path) },
-		FileActions: FileActions(root, replyID),
+		ImageSrc:     func(path string) string { return ImageSrc(root, replyID, path) },
+		FileActions:  FileActions(root, replyID),
+		OutsideImage: OutsideImage(root, replyID),
 	}
 }
 
 // fileViewTargets is the markdown file view's link rule: servedTargets with
 // a relative path resolved against the file's own directory base (relative
 // to root), and a target outside root left as path text, since the page has
-// no link menu to copy it from.
+// no link menu to copy it from. It takes no OutsideImage: the page runs no
+// script, so it could not put a path back in place of an image that fails
+// to load.
 func fileViewTargets(root, replyID, base string) wswhiteboard.TextTargets {
 	served := servedTargets(root, replyID)
 	rebase := func(path string) string {

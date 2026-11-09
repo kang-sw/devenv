@@ -3,8 +3,8 @@ package wswhiteboard
 import "html/template"
 
 // TextTargets is the file-target rule a RenderText caller serves its text
-// under, and whether that text may hold HTML; FileText, ImageSrc, and
-// FileActions have the View meaning of the same name.
+// under, and whether that text may hold HTML; FileText, ImageSrc,
+// FileActions, and OutsideImage have the View meaning of the same name.
 type TextTargets struct {
 	// FileText shows a file path a link or image names as text. Nil shows
 	// the path as written, never as a file: or relative link.
@@ -15,6 +15,9 @@ type TextTargets struct {
 	// FileActions turns a file target into the served page's action link;
 	// nil keeps FileText's path text and leaves http(s) links unmarked.
 	FileActions func(path string) FileAction
+	// OutsideImage serves an image outside the session root to the viewers
+	// that may load it (View.OutsideImage); nil leaves it to the rules above.
+	OutsideImage func(path string) FileAction
 	// Mermaid renders a mermaid fence as <pre class="mermaid"> for the host
 	// page to draw. Off, it is a plain code block: for text that re-renders
 	// as it streams, where a diagram would redraw on every tick, and for a
@@ -38,7 +41,7 @@ func RenderText(s string, t TextTargets) template.HTML {
 	if fileText == nil {
 		fileText = func(string) string { return "" }
 	}
-	p := &pageData{View: View{FileText: fileText, ImageSrc: t.ImageSrc, FileActions: t.FileActions}, noMermaid: !t.Mermaid, noInlineTags: true}
+	p := &pageData{View: View{FileText: fileText, ImageSrc: t.ImageSrc, FileActions: t.FileActions, OutsideImage: t.OutsideImage}, noMermaid: !t.Mermaid, noInlineTags: true}
 	if !t.HTML {
 		return p.Block(s)
 	}

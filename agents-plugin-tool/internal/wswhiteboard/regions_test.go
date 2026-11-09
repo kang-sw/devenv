@@ -447,3 +447,57 @@ func TestImageViewerScriptHooks(t *testing.T) {
 	wantAll(t, string(shared.ViewerScript), `function wbFlattenSvg(`, `wbviewerclose`, `message`)
 	wantNone(t, string(shared.FormScript), `wbFlattenSvg`)
 }
+
+// TestOutsideImageServesItemsNotTopicBodies pins where OutsideImage applies:
+// an item's image it serves renders as <img> on its Href, marked data-out
+// with its absolute path, and a link to it is an action link on that Href
+// marked data-img and data-out; an in-root image link from FileActions is
+// marked data-img alone. A topic body, framed or not, never takes it, so its
+// image stays path text with a copy-only link; an Href that is not a daemon
+// path is dropped, leaving the path text.
+func TestOutsideImageServesItemsNotTopicBodies(t *testing.T) {
+	const md = "![out](/x/out.png) [lnk](/x/out.png) ![bad](/x/bad.png) [in](shots/a.png)"
+	st := &State{Seq: 2, Topics: []TopicDoc{{Name: "doc", Body: md, Changed: 2}},
+		Items: []Item{{ID: 1, Class: ClassPolicy, Topic: "t", Title: "x", Status: StatusOpen, Options: []string{"a", "b"}, Rationale: md}}}
+	in := ViewInput{Layout: LayoutFull, ReplyID: "r",
+		FileText: func(p string) string { return p },
+		ImageSrc: func(string) string { return "" },
+		FileActions: func(p string) FileAction {
+			if strings.HasPrefix(p, "/x/") {
+				return FileAction{Abs: p}
+			}
+			return FileAction{Href: "/s/r/file?path=" + p, Rel: p, Abs: "/root/" + p, Image: true}
+		},
+		OutsideImage: func(p string) FileAction {
+			switch p {
+			case "/x/out.png":
+				return FileAction{Href: "/s/r/image?path=/x/out.png", Abs: p, Image: true, Outside: true}
+			case "/x/bad.png":
+				return FileAction{Href: "javascript:alert(1)", Abs: p, Image: true, Outside: true}
+			}
+			return FileAction{}
+		}}
+	regions, err := RenderRegions(BuildView(st, in))
+	if err != nil {
+		t.Fatal(err)
+	}
+	board := string(regions.Board)
+	wantAll(t, board,
+		`<img src="/s/r/image?path=/x/out.png" data-out="" data-abs="/x/out.png" alt="out">`,
+		`<a href="/s/r/image?path=/x/out.png" data-wl="file" data-abs="/x/out.png" data-img="" data-out="" title="/x/out.png">lnk</a>`,
+		`<span class="img-text">bad <a tabindex="0" data-wl="file" data-abs="/x/bad.png" title="/x/bad.png"><code class="fpath">/x/bad.png</code></a></span>`,
+		`<a href="/s/r/file?path=shots/a.png" data-wl="file" data-rel="shots/a.png" data-abs="/root/shots/a.png" data-img="" title="shots/a.png">in</a>`,
+	)
+	wantNone(t, board, "javascript:")
+	doc := frameDocs(t, board)["doc"]
+	wantAll(t, doc,
+		`<span class="img-text">out <a tabindex="0" data-wl="file" data-abs="/x/out.png" title="/x/out.png"><code class="fpath">/x/out.png</code></a></span>`,
+		`<a tabindex="0" data-wl="file" data-abs="/x/out.png" title="/x/out.png">lnk</a>`,
+	)
+	wantNone(t, doc, "data-out", "/s/r/image")
+
+	// An unframed body (the page written to disk's renderer) takes it no
+	// more than a framed one.
+	page := render(t, BuildView(&State{Seq: 2, Topics: st.Topics}, in))
+	wantNone(t, markup(page), "data-out", "/s/r/image")
+}

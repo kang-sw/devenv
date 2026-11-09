@@ -71,6 +71,7 @@
       href: a.getAttribute("href") || "",
       rel: a.getAttribute("data-rel") || "",
       abs: a.getAttribute("data-abs") || "",
+      img: a.hasAttribute("data-img"),
       x: key ? r.left : e.clientX,
       y: key ? r.bottom : e.clientY
     });

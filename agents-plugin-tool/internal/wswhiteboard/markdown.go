@@ -362,9 +362,11 @@ func (p *pageData) resolveTarget(dest string, image bool) (target, bool) {
 // fileTarget resolves a file path: for an image in a framed topic body, as
 // the src DocImageSrc returns, when that is non-empty; for an image on a page with
 // ImageSrc, as the src ImageSrc returns (the destination's own query and fragment are
-// dropped), when that is non-empty; else as path text on a page with
-// FileText, with the FileActions action when the page has them, else as the
-// href fileHref builds.
+// dropped), when that is non-empty; for an image OutsideImage serves, as its
+// Href with its action kept for the image's own marks; else as path text on
+// a page with FileText, with the FileActions action when the page has them
+// (OutsideImage's when FileActions gives no Href), else as the href fileHref
+// builds.
 func (p *pageData) fileTarget(path, suffix string, image bool) target {
 	if image && p.framing && p.DocImageSrc != nil {
 		if src := p.DocImageSrc(path); src != "" {
@@ -376,6 +378,10 @@ func (p *pageData) fileTarget(path, suffix string, image bool) target {
 			return target{href: src}
 		}
 	}
+	outside := p.outsideImage(path)
+	if image && outside.Href != "" {
+		return target{href: outside.Href, action: outside}
+	}
 	if p.FileText != nil {
 		t := target{text: p.FileText(path)}
 		if t.text == "" {
@@ -383,6 +389,9 @@ func (p *pageData) fileTarget(path, suffix string, image bool) target {
 		}
 		if p.linkActions() {
 			t.action = p.FileActions(path)
+			if t.action.Href == "" && outside.Href != "" {
+				t.action = outside
+			}
 			if !daemonPath(t.action.Href) {
 				t.action.Href = ""
 			}
@@ -390,6 +399,20 @@ func (p *pageData) fileTarget(path, suffix string, image bool) target {
 		return t
 	}
 	return target{href: p.fileHref(path, suffix)}
+}
+
+// outsideImage is OutsideImage's action for path on a page with link
+// actions, outside every topic body, with an Href that passes daemonPath;
+// zero otherwise.
+func (p *pageData) outsideImage(path string) FileAction {
+	if p.OutsideImage == nil || p.inDoc || !p.linkActions() {
+		return FileAction{}
+	}
+	a := p.OutsideImage(path)
+	if !a.Outside || !daemonPath(a.Href) {
+		return FileAction{}
+	}
+	return a
 }
 
 // linkActions reports whether the page renders the served page's action
@@ -649,6 +672,25 @@ func actionAttrs(t target) [][2]string {
 	if t.action.Abs != "" {
 		attrs = append(attrs, [2]string{"data-abs", t.action.Abs})
 	}
+	if t.action.Image {
+		attrs = append(attrs, [2]string{"data-img", ""})
+	}
+	if t.action.Outside {
+		attrs = append(attrs, [2]string{"data-out", ""})
+	}
+	return attrs
+}
+
+// imageAttrs are the attributes a resolved image opens with besides its alt
+// and title: the URL-escaped src, and for an image OutsideImage serves the
+// outside marker (data-out) with its absolute path, which the page shows in
+// the image's place when it fails to load. The markdown writer and the reply
+// sanitizer both take them from here.
+func imageAttrs(t target) [][2]string {
+	attrs := [][2]string{{"src", string(util.URLEscape([]byte(t.href), false))}}
+	if t.action.Outside {
+		attrs = append(attrs, [2]string{"data-out", ""}, [2]string{"data-abs", t.action.Abs})
+	}
 	return attrs
 }
 
@@ -707,11 +749,10 @@ func (r *mdRenderer) image(w util.BufWriter, source []byte, node ast.Node, enter
 		writeAltText(w, source, n)
 		return ast.WalkSkipChildren, nil
 	}
-	escaped := string(util.URLEscape([]byte(t.href), false))
-	_, _ = w.WriteString(`<img src="`)
-	_, _ = w.Write(util.EscapeHTML([]byte(escaped)))
-	_ = w.WriteByte('"')
-	r.page.writeTrustRef(w, [][2]string{{"src", escaped}}, true)
+	attrs := imageAttrs(t)
+	_, _ = w.WriteString(`<img`)
+	writeAttrs(w, attrs)
+	r.page.writeTrustRef(w, attrs, true)
 	_, _ = w.WriteString(` alt="`)
 	writeAltText(w, source, n)
 	_ = w.WriteByte('"')
