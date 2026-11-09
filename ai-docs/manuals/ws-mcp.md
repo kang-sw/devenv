@@ -226,7 +226,11 @@ no option, so the remote moves by fast-forward only; pull fetches the
 upstream's remote and fast-forwards only, refusing a detached HEAD, a branch
 with no upstream (also one the fetch pruned), modified or staged tracked
 files (untracked ones do not count), and a branch that has diverged; fetch
-is a plain `git fetch`. An action answers 204, 200 with a note (nothing to
+is a plain `git fetch`. Push and fetch never prompt on a console (the
+daemon's console is hidden, so ssh runs in batch mode): an ssh key that
+needs a passphrase must be in ssh-agent, and an unknown host must be
+accepted once in a terminal, while a Git Credential Manager sign-in dialog
+still appears. An action answers 204, 200 with a note (nothing to
 pull), 409 with the refusal's reason, or 502 with git's message (a ref's
 `! [rejected]` line first, then an `error:` or `fatal:` line, over a hook's
 `remote:` lines), which the panel shows inline; each re-reads the handle.

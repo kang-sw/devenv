@@ -184,19 +184,21 @@ func runGitAction(ctx context.Context, root string, args ...string) error {
 
 // gitActionCommand is one action's git in root under the C locale, which
 // keeps git's messages comparable, bounded by ctx (gitbatch.Bound). A remote
-// command (push, fetch) also runs under the non-interactive bound
-// (internal/gitbatch): the daemon's console is hidden (spawn_windows.go), so
-// a credential, passphrase, or host-key prompt from git or its ssh would
-// wait unseen until the timeout; it fails at once instead.
+// command (push, fetch) also runs with no terminal prompt and ssh in batch
+// mode (gitbatch.SSHCommand): the daemon's console is hidden
+// (spawn_windows.go), so a passphrase or host-key prompt there would wait
+// unseen until the timeout; it fails at once instead. Unlike the background
+// callers it keeps credential helpers interactive (no gitbatch.RemoteArgs or
+// RemoteEnv): the action is user-initiated, and a credential manager's GUI
+// sign-in dialog is answerable where a console prompt is not.
 func gitActionCommand(ctx context.Context, root string, args ...string) *exec.Cmd {
 	remote := len(args) > 0 && (args[0] == "push" || args[0] == "fetch")
-	if remote {
-		args = gitbatch.RemoteArgs(args...)
-	}
 	cmd := gitActionGit(ctx, root, args...)
 	cmd.Env = append(os.Environ(), "LC_ALL=C")
 	if remote {
-		cmd.Env = append(cmd.Env, gitbatch.RemoteEnv(gitActionSSHCommand(ctx, root))...)
+		cmd.Env = append(cmd.Env,
+			"GIT_TERMINAL_PROMPT=0",
+			"GIT_SSH_COMMAND="+gitActionSSHCommand(ctx, root))
 	}
 	return cmd
 }
