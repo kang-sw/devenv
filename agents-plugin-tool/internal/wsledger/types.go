@@ -220,6 +220,10 @@ const (
 	// filtered); a clone holding them, the member's own, restores it.
 	// Reported once, by the report after the Restore.
 	WarnNotRestored = "not-restored"
+	// WarnWikiSyncFailed: a wiki push (Ref names the wiki) or the wiki
+	// fetch (Ref is the wiki namespace) failed. The ledger's own sync went
+	// on; the wiki stays as it was and the next sync retries.
+	WarnWikiSyncFailed = "wiki-sync-failed"
 )
 
 // SyncReport is the outcome of one Sync or Fetch.

@@ -38,7 +38,8 @@ import (
 // fetch fails the event fetch does not run, so an absorbed event never
 // names a blob missing from every attachment tree this clone has. The wiki
 // refs (refs/heads/wiki/<name>, wiki.go) are fetched last, whole, with
-// their own follow-the-remote rules; they are not ledger refs.
+// their own follow-the-remote rules; they are not ledger refs, so a wiki
+// fetch or push failure is a WarnWikiSyncFailed, never a failed sync.
 
 const (
 	remoteName  = "origin"
@@ -139,7 +140,8 @@ func (g *gitRepo) fetchNamespace(ctx context.Context, ns string, mode ...string)
 
 // fetchRefs fetches the remote's ledger refs into the snapshot namespace in
 // the two modes the file comment describes: attachment refs filtered, then
-// event refs whole. It reports whether the server ignored the filter.
+// event refs whole. It reports whether the server ignored the filter. The
+// wiki refs are fetchRemote's own step.
 func (g *gitRepo) fetchRefs(ctx context.Context) (noFilter bool, err error) {
 	out, err := g.fetchNamespace(ctx, "attach/", "--filter=blob:none")
 	// Unset before judging the error: a failed filtered fetch may have
@@ -155,9 +157,6 @@ func (g *gitRepo) fetchRefs(ctx context.Context) (noFilter bool, err error) {
 	}
 	noFilter = strings.Contains(string(out), noFilterMarker)
 	if _, err := g.fetchNamespace(ctx, "tracker/", "--no-filter"); err != nil {
-		return noFilter, err
-	}
-	if err := g.fetchWikiRefs(ctx); err != nil {
 		return noFilter, err
 	}
 	return noFilter, nil
@@ -264,7 +263,10 @@ func (l *Ledger) loadKnownOwn(ctx context.Context) error {
 	return nil
 }
 
-// fetchRemote fetches and applies the snapshot to the local copies.
+// fetchRemote fetches and applies the snapshot to the local copies, then
+// fetches and absorbs the wiki refs. A failed wiki fetch is a warning, not
+// an error: the ledger refs are absorbed already, and the wikis stay as
+// the last fetch left them.
 func (l *Ledger) fetchRemote(ctx context.Context) error {
 	noFilter, err := l.git.fetchRefs(ctx)
 	if err != nil {
@@ -276,6 +278,11 @@ func (l *Ledger) fetchRemote(ctx context.Context) error {
 	}
 	if err := l.absorbRemote(ctx); err != nil {
 		return err
+	}
+	if err := l.git.fetchWikiRefs(ctx); err != nil {
+		l.pendingWarns = append(l.pendingWarns, Warning{Ref: wikiPrefix + "*", Kind: WarnWikiSyncFailed,
+			Detail: "wiki fetch failed: " + err.Error() + "; the wikis stay as the last fetch left them and the next sync retries"})
+		return nil
 	}
 	return l.absorbWiki(ctx)
 }
@@ -665,10 +672,13 @@ func Register(ctx context.Context, opts Options, url string) (*Ledger, error) {
 		if landed {
 			pushed = append(json.RawMessage(nil), l.genesis.raw...)
 		}
-		// A store that had no remote until now publishes its wikis too.
-		if err := l.pushLocalWikis(ctx); err != nil {
+		// A store that had no remote until now publishes its wikis too; a
+		// wiki the remote refuses is reported, and the next sync retries it.
+		failed, err := l.pushLocalWikis(ctx)
+		if err != nil {
 			return err
 		}
+		l.pendingWarns = append(l.pendingWarns, wikiPushWarnings(failed)...)
 		if err := l.fetchRemote(ctx); err != nil {
 			return err
 		}
