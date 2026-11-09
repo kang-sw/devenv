@@ -343,6 +343,9 @@
     "261109-bug-ws-tracker-external-write-refresh": {
       "registered_at": "2026-11-09T06:57:54Z"
     },
+    "261109-feat-ws-whiteboard-settled-row-expand": {
+      "registered_at": "2026-11-09T08:01:29Z"
+    },
     "261109-research-windows-code-signing-signpath": {
       "registered_at": "2026-11-09T00:46:52Z"
     }
