@@ -2178,6 +2178,28 @@
       });
     },
     saveProfile: function (p) { tkFetch("/tracker/profiles", p, function () {}); },
+    // An editor's preview: the daemon renders the text as the view renders a saved one,
+    // with the editor's pending attachments as the text's own.
+    render: function (id, req, done) {
+      tkFetch(tkUrl(id, "render"), { text: req.text, attachments: req.attachments || [] }, function (status, v) {
+        if (status === 200 && typeof v.html === "string") done({ ok: true, html: v.html });
+        else done({ ok: false, error: tkErrText(status, v) });
+      });
+    },
+    // An image pasted or dropped into an editor: the raw bytes, which the daemon
+    // stages until a write names them; a paste sends no name (the daemon's default).
+    upload: function (id, file, name, done) {
+      var o = { method: "POST", credentials: "same-origin", cache: "no-store", body: file };
+      fetch(tkUrl(id, "attachments") + (name ? "?name=" + encodeURIComponent(name) : ""), o).then(function (r) {
+        return r.text().then(function (s) {
+          var v = null;
+          try { v = s ? JSON.parse(s) : null; } catch (e) { v = null; }
+          v = v && typeof v === "object" ? v : {};
+          if (r.status === 200 && typeof v.oid === "string") done({ ok: true, attachment: { oid: v.oid, name: v.name, size: v.size, mime: v.mime } });
+          else done({ ok: false, error: tkErrText(r.status, v) });
+        });
+      }, function () { done({ ok: false, error: tkErrText(0, {}) }); });
+    },
     // done comes after the reload, so the store list already holds the new store.
     register: function (req, done) {
       tkFetch("/tracker/register", req, function (status, v) {

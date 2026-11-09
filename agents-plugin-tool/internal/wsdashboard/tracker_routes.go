@@ -22,6 +22,7 @@ import (
 //	POST /tracker/stores/<id>/check      the sync report
 //	POST /tracker/stores/<id>/sync       the sync report
 //	POST /tracker/stores/<id>/seen       {"badge", "read"} -> 204
+//	POST /tracker/stores/<id>/render     {"text", "attachments"} -> {"html"}: an editor's preview
 //	POST /tracker/stores/<id>/attachments?name=<name>
 //	                                     raw image bytes -> {"oid", "name", "size", "mime"}
 //	GET  /tracker/stores/<id>/attachments/<oid>
@@ -97,6 +98,10 @@ type TrackerHost interface {
 	SaveProfile(p TrackerProfile) error
 	// Register registers (and when new, creates) a store.
 	Register(ctx context.Context, req TrackerRegisterRequest) (TrackerRegisterResult, error)
+	// Render renders text written for store id the way the view renders
+	// an item body or comment text, so an editor's preview matches the
+	// saved view. It writes nothing.
+	Render(ctx context.Context, id string, req TrackerRenderRequest) (string, error)
 	// StageAttachment stores an uploaded image for a later dispatch of store id and
 	// returns what the event's attachments field names. ErrTrackerNotImage when the
 	// bytes are not an accepted image; ErrTrackerAttachmentTooLarge when over the
@@ -105,6 +110,15 @@ type TrackerHost interface {
 	// ReadAttachment returns the content of attachment oid of store id, or
 	// ErrTrackerAttachmentNotFound.
 	ReadAttachment(ctx context.Context, id, oid string) ([]byte, error)
+}
+
+// TrackerRenderRequest is the render route's body: the markdown text an
+// editor holds and the attachments its save would carry (the stored ones
+// plus the images uploaded meanwhile), which the host may render inline
+// when each is staged or stored.
+type TrackerRenderRequest struct {
+	Text        string              `json:"text"`
+	Attachments []TrackerAttachment `json:"attachments,omitempty"`
 }
 
 // TrackerAttachment is a staged attachment as the upload route answers it.
@@ -214,6 +228,7 @@ var trackerStoreOps = map[string]string{
 	"sync":        http.MethodPost,
 	"seen":        http.MethodPost,
 	"attachments": http.MethodPost,
+	"render":      http.MethodPost,
 }
 
 // trackerAttachmentTypes are the content types the attachment read serves.
@@ -390,6 +405,18 @@ func (d *Daemon) handleTracker(w http.ResponseWriter, r *http.Request) {
 		}
 		d.TrackerChanged()
 		w.WriteHeader(http.StatusNoContent)
+	case op == "render":
+		// A read: nothing changed, so the revision stays.
+		var req TrackerRenderRequest
+		if !decodeTrackerBody(w, r, &req) {
+			return
+		}
+		html, err := d.tracker.Render(r.Context(), storeID, req)
+		if err != nil {
+			trackerError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"html": html})
 	case op == "attachments":
 		d.trackerStageAttachment(ctx, w, r, storeID)
 	case op == "attachment":

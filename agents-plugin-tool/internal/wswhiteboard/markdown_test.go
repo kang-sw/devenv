@@ -571,3 +571,33 @@ func TestRenderTextOutsideImage(t *testing.T) {
 	)
 	wantNone(t, out, "/etc/forged")
 }
+
+// TestRenderTextAttachmentSrc: an attachment:<oid> image becomes an <img>
+// only when AttachmentSrc gives a daemon path for that oid; an oid it
+// refuses, a src that is not a daemon path, a link to an attachment, and
+// every attachment image without AttachmentSrc stay text.
+func TestRenderTextAttachmentSrc(t *testing.T) {
+	own := strings.Repeat("a", 64)
+	targets := TextTargets{AttachmentSrc: func(oid string) string {
+		switch oid {
+		case own:
+			return "/tracker/stores/team/attachments/" + oid
+		case "evil":
+			return "https://example.com/x.png"
+		}
+		return ""
+	}}
+	out := string(RenderText("![shot](attachment:"+own+")", targets))
+	wantAll(t, out, `<img src="/tracker/stores/team/attachments/`+own+`" alt="shot">`)
+	for _, in := range []string{
+		"![other](attachment:" + strings.Repeat("b", 64) + ")",
+		"![evil](attachment:evil)",
+		"![q](attachment:" + own + "?x=1)",
+		"![host](attachment://" + own + ")",
+		"[link](attachment:" + own + ")",
+	} {
+		got := string(RenderText(in, targets))
+		wantNone(t, got, "<img", "<a ", "href")
+	}
+	wantNone(t, string(RenderText("![shot](attachment:"+own+")", TextTargets{})), "<img")
+}

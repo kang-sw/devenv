@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: ebc4ef9e4c5f5534
 sage-review-completeness-reviewed: ebc4ef9e4c5f5534
+completed: 2026-11-09
 ---
 
 # ws tracker: one markdown editor for item body, comment input, and comment edit, with preview and image paste
@@ -189,6 +190,55 @@ Today (`agents-plugin-tool/internal/wsdashboard/assets/tracker.js`):
   comment input, comment edit: write, preview, save, cancel, mention pick)
   and lists the browser hand check as unverified if not done.
 
+### Result (8f0adc0f5) - 2026-11-09
+
+Landed in 212459130 (render route), 5df290c54 (shared editor), 8f0adc0f5
+(review fix: keys and focus while previewing).
+
+- Server: `POST /tracker/stores/<id>/render` takes `{"text"}` and answers
+  `{"html"}`; `TrackerHost` gained `Render(ctx, id, TrackerRenderRequest)
+  (string, error)`, and the `cmd/ws-mcp` adapter runs `trackerText`, the
+  renderer `renderViewHTML` uses. The route is in `trackerStoreOps`, so it
+  takes the listed-store check, the same-origin POST rule, the LAN guard, and
+  `trackerBodyLimit`; it is a read and does not bump the tracker revision.
+  `TrackerRenderRequest` is a struct so Phase 2 can add the pending
+  attachment list.
+- Page: `editorHtml(id, o)` builds all three editors (ids kept: `iw-ebody`,
+  `cbox`, `tkcedit`): a Write / Preview toggle, a `data-mention` textarea,
+  and a preview pane drawn with the saved block's class (`sh-body` or
+  `ctext`). The preview calls the new optional adapter method
+  `render(id, text, done)` (documented in the tracker.js header; the
+  dashboard adapter posts to the route) and shows the escaped plain text
+  without it (the mockup). Preview state lives in `ui.edpv`; the toggle
+  works in place so focus stays, and `render()` clears it when its editor
+  ends. The `@`/`#` popup follows the focused editor (`MP.box`); a pick in
+  the body or comment edit goes to `mpick`, and the save sends
+  `keptMentions(withPicks(stored, mpick), body)`. One keydown branch runs the
+  IME guard and the popup keys for every editor before each place's own
+  save/cancel keys. While previewing, Cmd/Ctrl+Enter on the toggle saves or
+  sends and Esc returns to Write.
+- Six `js.tk.ed.*` strings in all 11 tables; mockup `i18n-en.js`
+  regenerated.
+- Decisions: the `@` button stays composer-only (typing `@`/`#` works in
+  all three); Esc during an IME composition in the body editor no longer
+  cancels the edit, matching the comment box; Esc in preview steps back to
+  Write rather than cancelling outright.
+- Verification: `go test ./internal/wsdashboard ./internal/wsi18n
+  ./cmd/ws-mcp` ok (new `TestDashboardTrackerRenderMatchesTheView`: the
+  render equals the view's html for the same body, safe mode kept; route
+  tests cover the 200 answer, the 405, unknown store, host error, malformed and
+  oversize body, origin, LAN guard, and no revision bump);
+  `TestTrackerMockupI18nIsCurrent` and the i18n key tests green;
+  `node --check` on tracker.js and dashboard.js ok. Browser check: the
+  mockup driven in headless Chromium over CDP with an injected fake
+  `adapter.render` passed 27 scripted checks across body edit, comment
+  input, and comment edit (write, preview, render failure, plain fallback,
+  save, cancel, `@` and `#` pick, IME Enter guard, keys and focus while
+  previewing). It is a one-off script, not a checked-in harness; the live
+  product page (real daemon) was not hand-checked.
+- Review (lite): two minors (keys and focus while previewing), both fixed
+  in 8f0adc0f5.
+
 ### Phase 2: image paste and inline images
 
 Prerequisite: Phase 1 of `261108-feat-ws-tracker-ledger-attachments`.
@@ -217,3 +267,57 @@ Prerequisite: Phase 1 of `261108-feat-ws-tracker-ledger-attachments`.
   commits the staged blob); `node --check`; i18n tests green. The Result
   reasons through paste, drop, refusal, and preview of a pasted image and
   lists the browser hand check as unverified if not done.
+
+### Result (e6aacfa73) - 2026-11-09
+
+Landed in 0fb7204ee (merge of develop, bringing the ledger attachment
+routes), 5a83c4e6a (renderer), e6aacfa73 (page).
+
+- Renderer: `wswhiteboard.TextTargets.AttachmentSrc`; an
+  `![name](attachment:<oid>)` image becomes `<img>` only when it returns a
+  daemon path for that oid; links to `attachment:` and every other local
+  image stay text. `trackerText(s, own)` with `ownAttachments(storeID,
+  oids)` serves only the same body's or comment's attachment oids from
+  `/tracker/stores/<id>/attachments/<oid>`. `TrackerRenderRequest` gains
+  `attachments`; the adapter keeps a pending entry only when the new
+  `wstrackerhost.Host.HasAttachment` finds it staged or stored.
+- Page: paste (any of the three editors) and drop (on an editor) upload
+  through the new optional adapter method `upload(id, file, name, done)`
+  (dashboard: raw body, `?name=` only for a dropped file), insert
+  `![name](attachment:<oid>)` at the caret, and keep the entry in
+  `ui.eatt[editor]`; saves send entries still named in the text (a comment
+  edit merges into its stored list); the preview request is now
+  `render(id, {text, attachments}, done)`. Non-image, over-limit (checked
+  against the view's `attachments.max_bytes` first), failed uploads, and
+  no-upload adapters get a notice. A refused save (expired staged oid)
+  keeps the draft. Six `js.tk.ed.img.*` strings in all 11 tables; mockup
+  i18n regenerated.
+- Decision (deviation): paste is gated on `adapter.upload`, not on
+  `caps.attach`: in code `caps.attach` is the mockup's simulation switch
+  (hand-typed metadata with stand-in oids) and the mockup runs with it on,
+  so enabling it in the product would offer drafts the server refuses. The
+  mockup has no `upload`, so it shows the notice as decided. Under
+  `caps.attach` the base (hand-drafted / stored mockup) entries are kept on
+  save since no text names them.
+- Verification: `go test ./internal/wswhiteboard ./internal/wstrackerhost
+  ./internal/wsdashboard ./internal/wsi18n ./cmd/ws-mcp` ok (new
+  `TestRenderTextAttachmentSrc`, `TestDashboardTrackerAttachmentImages`:
+  staged pending oid renders in preview, unstaged does not, the write
+  commits the staged blob, own image renders in the view and a borrowed oid
+  does not; `TestTrackerTextSafeMode` extended; `HasAttachment` checks in
+  `TestAttachmentsStageDispatchRead`; render route passes the list);
+  `node --check` on tracker.js and dashboard.js ok. Browser: the mockup in
+  headless Chromium over CDP with a fake `upload`/`render` passed 25
+  scripted checks (paste without name, drop with name, caret insert,
+  preview list, text-carrying paste, non-image and oversize refusal, save
+  pruning in all three places, late upload dropped, failed upload, refused
+  save keeps draft, no-upload notice). Unverified: the live product page
+  against a real daemon.
+- Review (lite): clean, two minors left as is. (1) A paste carrying both
+  text/plain and an image (spreadsheet cells) pastes the text and also
+  uploads the image rendition: kept, since it matches the dashboard
+  composer's paste rule this ticket follows. (2) Outside `caps.attach`, an
+  edit drops a stored attachment its text does not name: intended by the
+  "Pruning on save" decision; paste is the only product path that adds
+  attachments, and it always names them. Forward: if a client ever adds
+  chip-only attachments, keep base entries the text never named.
