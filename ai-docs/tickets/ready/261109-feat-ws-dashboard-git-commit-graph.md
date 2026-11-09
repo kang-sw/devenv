@@ -214,6 +214,45 @@ route guards (`TestLANModeGuardsEveryRoute`, GET only, unknown oid
 refused). A headless browser screenshot of the drawer with the graph, a
 tooltip, and the open commit panel.
 
+### Result (bfbdeee63) - 2026-11-09
+
+Done in 651b2cf75, 4da12b0e9, 7a4e793e2, bfbdeee63.
+
+- Server: `GET /s/<rid>/git/log?offset=` (topo order, 200 per page, `more`
+  is the next offset or 0, offset capped at 20000; the layout is recomputed
+  from the top so lanes continue across pages) and `GET
+  /s/<rid>/git/commit/<oid>` (hex-only oid, resolved id must start with the
+  oid asked for so a hex-shaped branch name never answers; first-parent or
+  root base; file list cut at 1000). Both GET-only, in the LAN guard list.
+- Log JSON as settled before the browser side: `head`, `width`, `more`, and
+  per commit `oid, parents, subject, author, time (ms), col, color, down
+  [{from,to,color}], refs, remote`. Refs carry `kind`
+  (branch/upstream/detached), `head`, impl/goal handle fields, `worktree`,
+  and for branches `upstream, ahead, behind, gone, merged`; an upstream ref
+  carries `of` (the local branch tracking it). `remote` marks a commit only
+  an upstream reaches.
+- Browser: graph rows over one SVG (HEAD ring, merge and remote-only dots,
+  dashed continuation while a page remains, "Load more"), ref pills with the
+  handle's icons and abbreviation, ahead/behind, worktree marker, an upstream
+  folded into its branch when on the same commit; hover tooltip; centred
+  commit window with copy-hash, author/committer, parents, message, file
+  list (status, rename source, numstat) and a placeholder diff side. Look
+  and CSS lifted from the approved mockup; the daemon's lane layout wins over
+  the mockup's.
+- Decision (user, board (120) a): clicking a parent hash opens that parent
+  in the same window through the commit route; the graph's selected row
+  follows.
+- The graph loads only while visible (hidden under the narrow layout) and
+  re-reads on drawer open and after each action.
+- Verification: gofmt, go vet, `go test ./internal/wsdashboard/
+  ./internal/wsi18n/ ./cmd/ws-mcp/` all ok; `node --check`; headless
+  Chromium over CDP against a dev daemon (isolated env, spare port): graph,
+  tooltip, merge window, parent click, rename row, Esc/backdrop close keeping
+  the drawer, light/dark, narrow, three-page paging, failed page kept.
+- Lite review: clean; two minors fixed in bfbdeee63; the offset-paging seam
+  on a log that changed since page 1 stays by design (any reopen or action
+  re-reads from page 1).
+
 ### Phase 2: multi-file diff viewer, highlighting, and working-tree diffs
 
 Fill the panel's left side:
