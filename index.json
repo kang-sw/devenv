@@ -380,7 +380,14 @@
       }
     },
     "261109-feat-ws-whiteboard-topic-body-out-of-root-images": {
-      "registered_at": "2026-11-09T06:06:05Z"
+      "registered_at": "2026-11-09T06:06:05Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "28ef83e379b353cc",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-09T06:15:39Z"
+      }
     },
     "261109-research-windows-code-signing-signpath": {
       "registered_at": "2026-11-09T00:46:52Z"
