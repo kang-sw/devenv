@@ -766,8 +766,12 @@ func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 		d.handleGitStatus(w, r, replyID)
 	case sub == "git/log":
 		d.handleGitLog(w, r, replyID)
+	case strings.HasPrefix(sub, "git/commit/") && strings.HasSuffix(sub, "/diff"):
+		d.handleGitCommitDiff(w, r, replyID, strings.TrimSuffix(strings.TrimPrefix(sub, "git/commit/"), "/diff"))
 	case strings.HasPrefix(sub, "git/commit/"):
 		d.handleGitCommit(w, r, replyID, strings.TrimPrefix(sub, "git/commit/"))
+	case sub == "git/worktree/diff":
+		d.handleGitWorktreeDiff(w, r, replyID)
 	case strings.HasPrefix(sub, "attachment/"):
 		d.handleAttachment(w, r, replyID, strings.TrimPrefix(sub, "attachment/"))
 	default:

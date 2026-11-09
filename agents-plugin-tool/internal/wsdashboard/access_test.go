@@ -106,6 +106,8 @@ func guardedRoutes() []struct{ method, path, body string } {
 		{http.MethodGet, "/s/livesession/git/status", ""},
 		{http.MethodGet, "/s/livesession/git/log", ""},
 		{http.MethodGet, "/s/livesession/git/commit/" + strings.Repeat("0", 40), ""},
+		{http.MethodGet, "/s/livesession/git/commit/" + strings.Repeat("0", 40) + "/diff?path=x", ""},
+		{http.MethodGet, "/s/livesession/git/worktree/diff?side=staged&path=x", ""},
 		// The fixture's root is no repository, so a passing request pushes
 		// nothing.
 		{http.MethodPost, "/s/livesession/git/push", ""},

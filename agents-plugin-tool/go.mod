@@ -3,6 +3,7 @@ module github.com/kang-sw/devenv
 go 1.23
 
 require (
+	github.com/alecthomas/chroma/v2 v2.24.1
 	github.com/gofrs/flock v0.12.1
 	github.com/yuin/goldmark v1.8.7
 	golang.org/x/net v0.35.0
@@ -11,6 +12,7 @@ require (
 )
 
 require (
+	github.com/dlclark/regexp2 v1.12.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
