@@ -120,3 +120,33 @@ row's state pill comes from `recChip`, which for a non-live record calls
   one row and the header count is 1. Then unassign once more: the one row is
   dimmed, its pill shows the end-state text (`배정 해제됨` in Korean, not
   `미배정`), and the header count is 1.
+
+### Result (5707bb23d) - 2026-11-09
+
+Landed in `agents-plugin-tool/internal/wsdashboard/assets/tracker.js`:
+`visibleRecs(recs)` runs as the first line of `assigneesHtml`, so the rows,
+the empty check, the fold count, and the header count all read the filtered
+list. It keeps live and pending records, plus each remaining member's latest
+ended record: latest by `Date.parse(ended.ts)`, with an unparsable time
+counting as oldest and ties going to the later record. `recChip` gives an
+ended record a `chip ended` pill that shows `endText(r.state)`. `focusTarget`
+falls back to `data-hmember` when the ended record's row is hidden. The
+new test `tracker_assignees_test.go` runs seven filter cases under node and
+also pins the filter call and the pill string.
+
+Verification:
+- `go test ./internal/wsdashboard/` passes. A mutation of the tie-break made
+  the new test fail. `node --check tracker.js` passes.
+- Headless Chromium over CDP, against a dev daemon built from the branch
+  (port 39517, isolated `WS_CACHE_HOME` / `WS_CONFIG_HOME`). After assign,
+  unassign, and reassign twice, the list shows one live row and the count is
+  1. After one more unassign there is one dimmed row (opacity 0.6) with the
+  pill `배정 해제됨` (ko) / `unassigned` (en), and the count is 1.
+- Lite review: clean. There was one minor finding, below.
+
+Decisions:
+- The filter is applied inside `assigneesHtml`, not at its call site. The
+  item window has no other consumer, and this way every count reads one list.
+- `chip ended` gets no CSS rule of its own. It inherits the base muted
+  `.chip` style, which is the intended look for an ended record (the
+  reviewer's minor finding, kept on purpose).
