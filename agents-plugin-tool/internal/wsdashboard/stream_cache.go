@@ -1,0 +1,178 @@
+package wsdashboard
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"hash"
+	"os"
+	"slices"
+	"sync"
+)
+
+// Shared page renders. Every stream of one page (one session, or the
+// sessions index, in one language and theme) reads through one sharedPage,
+// so N tabs on a session cost one read and render per change instead of N.
+// A render is held in memory until a wake names one of its dependencies or
+// a refresh tick finds its refresh stamp changed; the cache starts empty
+// and is derived only from disk and the daemon's own reads, so a
+// replacement daemon renders the same pages. An entry lives while a stream
+// holds it.
+//
+// A render records its dependencies: the wake tokens (brokerDeps) whose
+// change can alter it, and the refresh inputs (refreshInputs) its refresh
+// stamp re-reads. The stamp covers what changes with no wake: liveness,
+// which follows the clock, contact liveness, and the files a page source
+// read that a writer may change without a nudge (PageContent.Watch).
+
+// pageKey names one shared page. replyID is empty for the sessions index.
+// No region depends on the viewer class (a loopback or LAN viewer): what
+// differs per viewer stays outside the regions (sessionPageData.SysOpen,
+// indexPageData.LAN), so the key carries none.
+type pageKey struct {
+	replyID, lang, theme string
+}
+
+// refreshInputs are what a page's refresh stamp re-reads: the sessions its
+// render looked up (its own first), the files its page source named, and
+// whether it showed contacts. Lists are sorted, so equal inputs compare
+// equal.
+type refreshInputs struct {
+	ids      []string
+	watch    []string
+	contacts bool
+}
+
+func (a refreshInputs) equal(b refreshInputs) bool {
+	return a.contacts == b.contacts && slices.Equal(a.ids, b.ids) && slices.Equal(a.watch, b.watch)
+}
+
+// pageRender is one render of a page.
+type pageRender struct {
+	// regions are the rendered regions; nil with ok skips a round (a
+	// render error). They are shared by every stream of the page: a stream
+	// never modifies them (regionFilter.apply copies).
+	regions regionSet
+	// ok is false once the page is gone.
+	ok bool
+	// deps are the wake tokens the render depends on; nil depends on every
+	// wake (the sessions index).
+	deps []string
+	// inputs are what the refresh stamp re-reads.
+	inputs refreshInputs
+}
+
+// pageSource renders one page and computes its refresh stamp.
+type pageSource struct {
+	key    pageKey
+	render func() pageRender
+	// stamp hashes, at call time, what in may have changed with no wake;
+	// ok false means the page has inputs the stamp cannot cover, so every
+	// refresh tick re-renders it.
+	stamp func(in refreshInputs) (stamp string, ok bool)
+}
+
+// pageCache holds the shared pages open streams read.
+type pageCache struct {
+	broker *broker
+	stats  *streamStats
+
+	mu    sync.Mutex
+	pages map[pageKey]*sharedPage
+}
+
+func newPageCache(b *broker, stats *streamStats) *pageCache {
+	return &pageCache{broker: b, stats: stats, pages: map[pageKey]*sharedPage{}}
+}
+
+// sharedPage is one page's latest render.
+type sharedPage struct {
+	// refs counts the streams holding the page; pageCache.mu guards it.
+	refs int
+
+	// mu serializes the page's renders: a stream that finds the render
+	// stale renders while the page's other streams wait, then share it.
+	mu       sync.Mutex
+	rendered bool
+	// at is the broker sequence taken before the render read anything, so a
+	// wake that lands during the render leaves it stale.
+	at uint64
+	r  pageRender
+	// stamp is the refresh stamp taken before the render read anything,
+	// valid only when stampOK: the render's inputs equal the ones it was
+	// taken from. A wake-driven render leaves it unknown, and the next
+	// refresh tick re-renders.
+	stamp   string
+	stampOK bool
+}
+
+// acquire returns the shared page for key, holding it for the caller.
+func (c *pageCache) acquire(key pageKey) *sharedPage {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	p := c.pages[key]
+	if p == nil {
+		p = &sharedPage{}
+		c.pages[key] = p
+	}
+	p.refs++
+	return p
+}
+
+// release drops the caller's hold; the last one drops the page.
+func (c *pageCache) release(key pageKey, p *sharedPage) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	p.refs--
+	if p.refs == 0 && c.pages[key] == p {
+		delete(c.pages, key)
+	}
+}
+
+// get returns the page's current render and the broker sequence it was
+// taken at. It renders only when a wake since the last render named one of
+// its dependencies, or, on a refresh tick (refresh), when the refresh stamp
+// is unknown or changed.
+func (c *pageCache) get(p *sharedPage, src pageSource, refresh bool) (pageRender, uint64) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	current := p.rendered && c.broker.unchangedSince(p.r.deps, p.at)
+	if current && !refresh {
+		c.stats.Shared.Add(1)
+		return p.r, p.at
+	}
+	var stamp string
+	var stampOK bool
+	if p.rendered && refresh {
+		stamp, stampOK = src.stamp(p.r.inputs)
+		if current && stampOK && p.stampOK && stamp == p.stamp {
+			c.stats.RefreshSkips.Add(1)
+			return p.r, p.at
+		}
+	}
+	at := c.broker.current()
+	prev := p.r.inputs
+	r := src.render()
+	p.r, p.at, p.rendered = r, at, true
+	// The stamp was taken before this read, from the previous render's
+	// inputs: it is this render's only when the inputs did not change.
+	p.stamp, p.stampOK = stamp, stampOK && r.inputs.equal(prev)
+	return r, at
+}
+
+// statStamp folds one path's state into h: whether it exists, its
+// modification time, and its size. An in-place edit moves the file's own
+// time; a file added or removed moves its directory's.
+func statStamp(h hash.Hash, path string) {
+	info, err := os.Stat(path)
+	if err != nil {
+		fmt.Fprintf(h, "%s\x00-\x01", path)
+		return
+	}
+	fmt.Fprintf(h, "%s\x00%d\x00%d\x01", path, info.ModTime().UnixNano(), info.Size())
+}
+
+func sumHex(h hash.Hash) string { return hex.EncodeToString(h.Sum(nil)[:16]) }
+
+// newStampHash is the hash a refresh stamp is built in.
+func newStampHash() hash.Hash { return sha256.New() }

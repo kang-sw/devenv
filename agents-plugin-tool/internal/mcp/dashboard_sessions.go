@@ -451,7 +451,7 @@ func (src *DashboardSessionSource) ReadSession(reg wsdashboard.Registration) (ws
 	h.Write(raw)
 	updatedAt := src.hashLiveStores(h, reg.ReplyID)
 	if record.Whiteboard != nil {
-		panels, _ := json.Marshal(servedWhiteboardPanels(record, key, reg.ReplyID, ""))
+		panels, _ := json.Marshal(servedWhiteboardPanels(record, key, reg.ReplyID, "", nil))
 		fmt.Fprintf(h, "\x00panels\x00%s", panels)
 	}
 	io.WriteString(h, "\x00history")

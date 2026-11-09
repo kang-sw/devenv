@@ -74,6 +74,18 @@ func (s agentSessions) ReadPageLang(reg Registration, lang string) (PageContent,
 	return PageContent{}, true
 }
 
+// ReadContacts forwards to the configured source; an agent conversation
+// has no contacts.
+func (s agentSessions) ReadContacts(reg Registration) ([]Contact, bool) {
+	if reg.Agent {
+		return nil, true
+	}
+	if cs, ok := s.inner.(ContactSource); ok {
+		return cs.ReadContacts(reg)
+	}
+	return nil, false
+}
+
 // ReadClosedTopics forwards to the configured source; an agent conversation
 // has no board.
 func (s agentSessions) ReadClosedTopics(reg Registration, lang string, from, n int) (template.HTML, bool) {

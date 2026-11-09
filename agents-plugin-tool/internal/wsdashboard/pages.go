@@ -10,6 +10,7 @@ import (
 	"html/template"
 	"net/http"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -544,8 +545,9 @@ func renderIndexPage(view IndexView, regions regionSet, lan *LANAccess) (string,
 }
 
 // pageReader reads what the pages render from the index and disk. It holds
-// no state of its own: every render re-reads, so a replacement daemon
-// renders the same pages from the same files.
+// no state of its own: every read re-reads, so a replacement daemon renders
+// the same pages from the same files. (The streams share their renders in
+// memory, which only skips reads; stream_cache.go.)
 type pageReader struct {
 	// lang is the viewer's language, passed to a LangPageSource.
 	lang    string
@@ -554,6 +556,9 @@ type pageReader struct {
 	source  SessionSource
 	version string
 	now     func() time.Time
+	// boards memoizes what the index shows of each session's board; nil
+	// reads every page.
+	boards *boardCounts
 }
 
 func (r pageReader) clock() time.Time {
@@ -620,20 +625,109 @@ func (r pageReader) lookup() func(id string) (Session, *wslive.Snapshot, bool) {
 // session builds one session page's view; false when the daemon does not
 // serve that reply-id.
 func (r pageReader) session(replyID string) (SessionView, bool) {
+	view, _, ok := r.readSession(replyID)
+	return view, ok
+}
+
+// readSession is session with the page's refresh inputs: every session the
+// view looked up (replyID first among them, sorted), the files its page
+// source named and the attachments directory its conversation reads, and
+// whether it shows contacts (only a live page does).
+func (r pageReader) readSession(replyID string) (SessionView, refreshInputs, bool) {
 	s, page, ok := r.served(replyID)
 	if !ok {
-		return SessionView{}, false
+		return SessionView{}, refreshInputs{}, false
 	}
 	in := pageInputs{Session: s, Page: page, Snapshot: r.readSnapshot(replyID), Now: r.clock(), Version: r.version}
+	looked := map[string]bool{replyID: true}
+	inputs := refreshInputs{watch: slices.Clone(page.Watch)}
 	if adapterPresent(in.Snapshot, in.Now) {
 		in.Ring, _ = wslive.ReadRing(wslive.RingDir(SessionDir(r.dir, replyID)))
 		inbox := sessionInbox(r.dir, replyID)
 		in.Held, _ = wsinbox.Held(inbox)
 		in.Drained, _ = wsinbox.Drained(inbox)
 		in.AttachDir = wsinbox.AttachmentsDir(inbox)
-		in.Lookup = r.lookup()
+		lookup := r.lookup()
+		in.Lookup = func(id string) (Session, *wslive.Snapshot, bool) {
+			looked[id] = true
+			return lookup(id)
+		}
+		inputs.watch = append(inputs.watch, in.AttachDir)
+		inputs.contacts = len(page.Contacts) > 0
 	}
-	return buildSessionView(in), true
+	view := buildSessionView(in)
+	for id := range looked {
+		if id != replyID {
+			inputs.ids = append(inputs.ids, id)
+		}
+	}
+	slices.Sort(inputs.ids)
+	inputs.ids = append([]string{replyID}, inputs.ids...)
+	slices.Sort(inputs.watch)
+	inputs.watch = slices.Compact(inputs.watch)
+	return view, inputs, true
+}
+
+// sessionStamp is the refresh stamp of replyID's session page over the
+// inputs of its last read (stream_cache.go): for each session it looked up,
+// whether the index holds it, its revision, its liveness, and whether its
+// snapshot names a present adapter, all at call time; the state of each
+// watched path; and the contacts as re-read now. ok is false when the page
+// shows contacts the source cannot re-read.
+func (r pageReader) sessionStamp(replyID string, in refreshInputs) (string, bool) {
+	if r.index == nil {
+		return "", false
+	}
+	now := r.clock()
+	h := newStampHash()
+	for _, id := range in.ids {
+		s, ok := r.index.Session(id)
+		present := ok && adapterPresent(r.readSnapshot(id), now)
+		fmt.Fprintf(h, "%s\x00%t\x00%d\x00%t\x00%t\x01", id, ok, s.Rev, ok && s.Registration.Live(now), present)
+	}
+	for _, path := range in.watch {
+		statStamp(h, path)
+	}
+	if in.contacts {
+		src, ok := r.source.(ContactSource)
+		if !ok {
+			return "", false
+		}
+		s, ok := r.index.Session(replyID)
+		if !ok {
+			return "", false
+		}
+		contacts, ok := src.ReadContacts(s.Registration)
+		if !ok {
+			return "", false
+		}
+		for _, c := range contacts {
+			fmt.Fprintf(h, "%s\x00%s\x00%t\x00%s\x00%d\x01", c.Address, c.ReplyID, c.PresenceLive, c.Cwd, c.LastExchange.UnixNano())
+		}
+	}
+	return sumHex(h), true
+}
+
+// indexStamp is the refresh stamp of the sessions index: for each listed
+// session, its revision, its liveness, whether its snapshot names a present
+// adapter, and whether it is inside the ended-session window, all at call
+// time. Everything else the index shows comes from the session records,
+// which the revision covers.
+func (r pageReader) indexStamp() (string, bool) {
+	if r.index == nil {
+		return "", true
+	}
+	now := r.clock()
+	h := newStampHash()
+	for _, s := range r.index.Sessions() {
+		if s.Unlisted {
+			continue
+		}
+		reg := s.Registration
+		fmt.Fprintf(h, "%s\x00%d\x00%t\x00%t\x00%t\x01", reg.ReplyID, s.Rev, reg.Live(now),
+			adapterPresent(r.readSnapshot(reg.ReplyID), now), now.Sub(reg.LastSeen()) <= endedSessionWindow)
+	}
+	return sumHex(h), true
 }
 
 // history reads one page of a served session's older conversation (see
@@ -664,7 +758,7 @@ func (r pageReader) indexView() IndexView {
 			if s.Unlisted {
 				continue
 			}
-			page, ok := r.readPage(s)
+			page, ok := r.indexPage(s)
 			if !ok {
 				continue
 			}
@@ -674,8 +768,58 @@ func (r pageReader) indexView() IndexView {
 	return buildIndexView(inputs, r.clock(), r.version)
 }
 
+// indexPage is the part of s's page the index shows (whether it has a
+// board and the board's open policy items), from r.boards when s has not
+// changed since it was read.
+func (r pageReader) indexPage(s Session) (PageContent, bool) {
+	if r.boards == nil {
+		return r.readPage(s)
+	}
+	if page, ok := r.boards.get(s); ok {
+		return page, true
+	}
+	page, ok := r.readPage(s)
+	if ok {
+		page = PageContent{HasBoard: page.HasBoard, Board: wswhiteboard.Regions{CountPolicy: page.Board.CountPolicy}}
+		r.boards.put(s, page)
+	}
+	return page, ok
+}
+
+// boardCounts memoizes each session's index page by its Rev. The session
+// fingerprint covers the stored board, so an unchanged Rev means unchanged
+// counts; without it, every index render re-read and re-rendered every
+// listed session's whole page for two numbers.
+type boardCounts struct {
+	mu sync.Mutex
+	m  map[string]boardCount
+}
+
+type boardCount struct {
+	rev  uint64
+	page PageContent
+}
+
+func newBoardCounts() *boardCounts { return &boardCounts{m: map[string]boardCount{}} }
+
+func (b *boardCounts) get(s Session) (PageContent, bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	c, ok := b.m[s.ReplyID]
+	return c.page, ok && c.rev == s.Rev
+}
+
+// put stores s's index page. A session's entry is replaced as its Rev
+// moves; one the index drops stays until the daemon exits, as small as
+// the index row it stood for.
+func (b *boardCounts) put(s Session, page PageContent) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.m[s.ReplyID] = boardCount{rev: s.Rev, page: page}
+}
+
 func (d *Daemon) pages() pageReader {
-	return pageReader{dir: d.dir, index: d.index, source: d.source, version: d.endpoint.Version}
+	return pageReader{dir: d.dir, index: d.index, source: d.source, version: d.endpoint.Version, boards: d.boards}
 }
 
 // pagesIn is pages reading in the viewer's language.

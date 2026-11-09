@@ -64,6 +64,25 @@ type PageContent struct {
 	// line's HistoryKey) to the message body, for every entry the session's
 	// mailbox history still holds.
 	MailBodies map[string]string
+	// Watch names every file and directory the read took page content from
+	// that a writer may change without a nudge, so no session fingerprint
+	// catches it within a stream's refresh interval: the ticket directories
+	// and ticket files the panels list, and each image a topic body inlines
+	// (a missing one included, since its appearance changes the page). A
+	// stream's refresh tick skips its re-read only while every one of them
+	// stats the same (stream_cache.go), so a source that reads such a file
+	// and leaves it out shows a stale page until the session's next change.
+	Watch []string
+}
+
+// ContactSource is a PageSource that re-reads a session's contacts alone
+// (PageContent.Contacts, the same read): a contact's liveness follows the
+// clock and its process's lifetime, so a stream's refresh tick re-reads it
+// to tell whether the page changed. ok false means it cannot (a wrapper
+// over a source without the read); then, as without a ContactSource, a page
+// that shows contacts is re-read on every refresh tick.
+type ContactSource interface {
+	ReadContacts(reg Registration) (contacts []Contact, ok bool)
 }
 
 // Contact is one mail correspondent of a session, resolved at read time.

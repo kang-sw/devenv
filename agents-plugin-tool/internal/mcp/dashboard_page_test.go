@@ -192,6 +192,53 @@ func TestDashboardServedPageRendersTopicBodyInAFrame(t *testing.T) {
 	}
 }
 
+// TestDashboardReadPageWatchesUnnudgedFiles pins PageContent.Watch: the
+// ticket status directories and every ticket file the panels list, and each
+// image a topic body inlines (a missing one included), so the daemon's
+// refresh tick can tell an edit no nudge reports; a session without a board
+// names nothing. ReadContacts re-reads what ReadPage's Contacts holds.
+func TestDashboardReadPageWatchesUnnudgedFiles(t *testing.T) {
+	f := newWhiteboardFixture(t)
+	src := dashboardPageSource(t, nil)
+	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
+	if page := readPageOK(t, src, reg); len(page.Watch) != 0 {
+		t.Fatalf("a session without a board watches %v", page.Watch)
+	}
+
+	writeTicket(t, f.root, "ready", "261101-feat-ready-one", "Ready one")
+	writeTicket(t, f.root, "todo", "261102-feat-todo-one", "Todo one")
+	mustWrite(t, f.root, "shots/a.png", "not-really-a-png")
+	f.update(t, "<wb:topic name=\"Rollout\"><wb:body>\n![shot](shots/a.png) ![gone](shots/missing.png)\n</wb:body></wb:topic>")
+	page := readPageOK(t, src, reg)
+	tickets := filepath.Join(f.root, "ai-docs", "tickets")
+	for _, want := range []string{
+		filepath.Join(tickets, "ready"),
+		filepath.Join(tickets, "todo"),
+		filepath.Join(tickets, "ready", "261101-feat-ready-one.md"),
+		filepath.Join(tickets, "todo", "261102-feat-todo-one.md"),
+		filepath.Join(f.root, "shots", "a.png"),
+		filepath.Join(f.root, "shots", "missing.png"),
+	} {
+		found := false
+		for _, path := range page.Watch {
+			found = found || path == want
+		}
+		if !found {
+			t.Errorf("Watch lacks %s: %v", want, page.Watch)
+		}
+	}
+
+	contacts, ok := src.ReadContacts(reg)
+	if !ok {
+		t.Fatal("ReadContacts is not supported")
+	}
+	got, _ := json.Marshal(contacts)
+	want, _ := json.Marshal(page.Contacts)
+	if string(got) != string(want) {
+		t.Errorf("ReadContacts = %s, ReadPage contacts = %s", got, want)
+	}
+}
+
 // TestDashboardServedFileText pins the path text rule for each path form.
 func TestDashboardServedFileText(t *testing.T) {
 	root := t.TempDir()

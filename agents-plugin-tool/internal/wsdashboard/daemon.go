@@ -95,6 +95,9 @@ type DaemonOptions struct {
 	// handle, for the tests that pin which regions a stream sends.
 	gitRead    func(root string) GitBadge
 	noGitBadge bool
+	// refreshInterval replaces sseRefreshInterval, so a test drives the
+	// refresh tick; zero is sseRefreshInterval.
+	refreshInterval time.Duration
 }
 
 // nudgeBodyLimit bounds a /nudge request body.
@@ -124,6 +127,12 @@ type Daemon struct {
 	broker   *broker
 	// stats counts the live-update work (stream_stats.go).
 	stats *streamStats
+	// cache holds the renders open streams share (stream_cache.go);
+	// refreshInterval is the streams' refresh tick.
+	cache           *pageCache
+	refreshInterval time.Duration
+	// boards memoizes the index's per-session board counts (pages.go).
+	boards *boardCounts
 	// tracker is the tracker host, nil without one; trackerRev is the
 	// revision TrackerChanged bumps and the streams send.
 	tracker    TrackerHost
@@ -226,25 +235,26 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 	}
 	stats := &streamStats{}
 	d := &Daemon{
-		dir:        opts.Dir,
-		lock:       lock,
-		listener:   listener,
-		log:        logw,
-		agents:     opts.Agents,
-		tracker:    opts.Tracker,
-		broker:     newBroker(stats),
-		stats:      stats,
-		entries:    newEntryCache(),
-		lan:        opts.LAN,
-		pprof:      opts.Pprof,
-		buildTime:  opts.BuildTime,
-		openSystem: opts.openSystem,
-		worktrees:  opts.Worktrees,
-		sizes:      newSizeCache(),
-		files:      newFileListCache(),
-		support:    opts.Support,
-		stop:       make(chan struct{}),
-		done:       make(chan struct{}),
+		dir:             opts.Dir,
+		lock:            lock,
+		listener:        listener,
+		log:             logw,
+		agents:          opts.Agents,
+		tracker:         opts.Tracker,
+		broker:          newBroker(stats),
+		stats:           stats,
+		refreshInterval: opts.refreshInterval,
+		entries:         newEntryCache(),
+		lan:             opts.LAN,
+		pprof:           opts.Pprof,
+		buildTime:       opts.BuildTime,
+		openSystem:      opts.openSystem,
+		worktrees:       opts.Worktrees,
+		sizes:           newSizeCache(),
+		files:           newFileListCache(),
+		support:         opts.Support,
+		stop:            make(chan struct{}),
+		done:            make(chan struct{}),
 		endpoint: Endpoint{
 			SchemaVersion: endpointSchemaVersion,
 			Port:          listener.Addr().(*net.TCPAddr).Port,
@@ -253,6 +263,11 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 			Token:         token,
 			StartedAt:     time.Now().UTC().Format(time.RFC3339),
 		},
+	}
+	d.cache = newPageCache(d.broker, stats)
+	d.boards = newBoardCounts()
+	if d.refreshInterval <= 0 {
+		d.refreshInterval = sseRefreshInterval
 	}
 	if d.openSystem == nil {
 		d.openSystem = systemOpen
@@ -264,7 +279,7 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 		}
 		d.git = newGitWatcher(read, func(root string) {
 			d.stats.WakeGit.Add(1)
-			d.broker.wake(root)
+			d.broker.wake(gitDep(root))
 		}, d.stop)
 	}
 	if d.lan {
@@ -352,8 +367,9 @@ func newToken() (string, error) {
 	return hex.EncodeToString(buf), nil
 }
 
-// sessionChanged is the index's change hook: it wakes every stream, and
-// drops a session's cached conversation entries once it left the index.
+// sessionChanged is the index's change hook: it wakes the streams whose
+// page shows the session, and drops a session's cached conversation entries
+// once it left the index.
 func (d *Daemon) sessionChanged(replyID string) {
 	if d.index != nil {
 		if _, ok := d.index.Session(replyID); !ok {
