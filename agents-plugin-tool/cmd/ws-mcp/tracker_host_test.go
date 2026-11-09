@@ -257,6 +257,52 @@ func TestDashboardTrackerWithoutAHostReturnsItsError(t *testing.T) {
 	check("SaveProfile", dt.SaveProfile(wsdashboard.TrackerProfile{Given: "Ada"}))
 	_, err = dt.Register(ctx, wsdashboard.TrackerRegisterRequest{ID: "team"})
 	check("Register", err)
+	_, err = dt.Render(ctx, "team", wsdashboard.TrackerRenderRequest{Text: "x"})
+	check("Render", err)
+}
+
+// TestDashboardTrackerRenderMatchesTheView: an editor's preview renders
+// through the renderer the view's html uses, safe mode included, so what
+// the preview shows is what the saved text shows.
+func TestDashboardTrackerRenderMatchesTheView(t *testing.T) {
+	dt, _ := newTestTracker(t)
+	ctx := context.Background()
+	text := "# heading\n\n**bold** <script>alert(1)</script> ![alt](shot.png) [x](https://example.com/a)"
+	create, _ := json.Marshal(map[string]any{"kind": "task", "title": "md", "body": text})
+	ids, err := dt.Dispatch(ctx, "team", []wsdashboard.TrackerEvent{{Type: wstracker.TypeItemCreate, Payload: create}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := dt.Render(ctx, "team", wsdashboard.TrackerRenderRequest{Text: text})
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, err := dt.View(ctx, "team")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var view struct {
+		HTML struct {
+			Items map[string]string `json:"items"`
+		} `json:"html"`
+	}
+	if err := json.Unmarshal(v.View, &view); err != nil {
+		t.Fatal(err)
+	}
+	if want := view.HTML.Items[ids[0]]; got != want || want == "" {
+		t.Fatalf("Render = %q, want the view's html %q", got, want)
+	}
+	for _, absent := range []string{"<script", "<img"} {
+		if strings.Contains(got, absent) {
+			t.Errorf("Render = %q holds %q; safe mode lost", got, absent)
+		}
+	}
+	if !strings.Contains(got, "<h1>heading</h1>") || !strings.Contains(got, `target="_blank"`) {
+		t.Errorf("Render = %q, want the markdown rendered", got)
+	}
+	if empty, err := dt.Render(ctx, "team", wsdashboard.TrackerRenderRequest{}); err != nil || empty != "" {
+		t.Errorf("Render of no text = %q, %v; want empty", empty, err)
+	}
 }
 
 // TestDashboardTrackerViewHTML: the view JSON carries each item body and

@@ -20,6 +20,7 @@ import (
 //	POST /tracker/stores/<id>/check      the sync report
 //	POST /tracker/stores/<id>/sync       the sync report
 //	POST /tracker/stores/<id>/seen       {"badge", "read"} -> 204
+//	POST /tracker/stores/<id>/render     {"text"} -> {"html"}: an editor's preview
 //	GET  /tracker/profiles               the saved profiles
 //	POST /tracker/profiles               save one; the profiles after the save
 //	POST /tracker/register               register a store
@@ -63,6 +64,16 @@ type TrackerHost interface {
 	SaveProfile(p TrackerProfile) error
 	// Register registers (and when new, creates) a store.
 	Register(ctx context.Context, req TrackerRegisterRequest) (TrackerRegisterResult, error)
+	// Render renders text written for store id the way the view renders
+	// an item body or comment text, so an editor's preview matches the
+	// saved view. It writes nothing.
+	Render(ctx context.Context, id string, req TrackerRenderRequest) (string, error)
+}
+
+// TrackerRenderRequest is the render route's body: the markdown text an
+// editor holds.
+type TrackerRenderRequest struct {
+	Text string `json:"text"`
 }
 
 // TrackerStore is one registered store as the stores route lists it.
@@ -162,6 +173,7 @@ var trackerStoreOps = map[string]string{
 	"check":    http.MethodPost,
 	"sync":     http.MethodPost,
 	"seen":     http.MethodPost,
+	"render":   http.MethodPost,
 }
 
 // TrackerChanged bumps the tracker revision and wakes every stream, which
@@ -309,6 +321,18 @@ func (d *Daemon) handleTracker(w http.ResponseWriter, r *http.Request) {
 		}
 		d.TrackerChanged()
 		w.WriteHeader(http.StatusNoContent)
+	case op == "render":
+		// A read: nothing changed, so the revision stays.
+		var req TrackerRenderRequest
+		if !decodeTrackerBody(w, r, &req) {
+			return
+		}
+		html, err := d.tracker.Render(r.Context(), storeID, req)
+		if err != nil {
+			trackerError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"html": html})
 	}
 }
 

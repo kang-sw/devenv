@@ -121,6 +121,16 @@ func trackerText(s string) template.HTML {
 	return wswhiteboard.RenderText(s, wswhiteboard.TextTargets{})
 }
 
+// Render is an editor's preview: the text through trackerText, the same
+// renderer renderViewHTML runs, so the preview and the saved view match.
+// The route already checked that the store is listed.
+func (t *dashboardTracker) Render(_ context.Context, _ string, req wsdashboard.TrackerRenderRequest) (string, error) {
+	if t.err != nil {
+		return "", redacted(t.err)
+	}
+	return string(trackerText(req.Text)), nil
+}
+
 func (t *dashboardTracker) Dispatch(ctx context.Context, id string, events []wsdashboard.TrackerEvent) ([]string, error) {
 	if t.err != nil {
 		return nil, redacted(t.err)
