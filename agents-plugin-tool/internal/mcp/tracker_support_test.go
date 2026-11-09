@@ -135,8 +135,8 @@ func TestTrackerSupportGateRefusesEveryOtherSpawnedKey(t *testing.T) {
 			wikiUpdateTool:   {"store": "me", "wiki": "smuggled", "op": "write", "new_wiki": true, "path": "home", "content": "smuggled\n"},
 		} {
 			resp := f.call(t, tool, f.as(key, args))
-			if !isToolError(resp) || !strings.Contains(resp, spawned) {
-				t.Errorf("%s: %s must be refused: %s", name, tool, resp)
+			if !isGateRefusal(resp) || !strings.Contains(resp, spawned) {
+				t.Errorf("%s: %s must be refused by the call gate: %s", name, tool, resp)
 			}
 		}
 	}
@@ -197,8 +197,8 @@ func TestTrackerSupportGateRefusesEveryOtherSpawnedKey(t *testing.T) {
 		wikiQueryTool:  {"store": "me", "op": "list"},
 		wikiUpdateTool: {"store": "me", "wiki": "smuggled", "op": "write", "new_wiki": true, "path": "home", "content": "smuggled\n"},
 	} {
-		if resp := f.call(t, tool, f.as(reader, args)); !isToolError(resp) || !strings.Contains(resp, spawned) {
-			t.Fatalf("a profile naming only tracker.query must not reach %s: %s", tool, resp)
+		if resp := f.call(t, tool, f.as(reader, args)); !isGateRefusal(resp) || !strings.Contains(resp, spawned) {
+			t.Fatalf("a profile naming only tracker.query must not reach %s past the call gate: %s", tool, resp)
 		}
 	}
 	if out := f.wikiCall(t, wikiQueryTool, map[string]any{"store": "me", "op": "list"}); strings.Contains(out, "smuggled") {

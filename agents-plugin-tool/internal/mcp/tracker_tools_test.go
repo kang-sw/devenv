@@ -234,6 +234,13 @@ func TestTrackerCallsTurnTheKnobOnOnlyWhenTheySucceed(t *testing.T) {
 	}
 }
 
+// isGateRefusal reports whether resp is the call gate's JSON-RPC refusal
+// (-32601) rather than a handler's tool error, which can carry the same
+// text and would mask a gate that let the call through.
+func isGateRefusal(resp string) bool {
+	return strings.Contains(resp, `"error":{"code":-32601,`)
+}
+
 func TestTrackerToolsRefuseSpawnedKeys(t *testing.T) {
 	f := newTrackerLeadFixture(t)
 	worker, err := f.s.sessions.mint(f.root, roleLead, f.key)
@@ -252,8 +259,8 @@ func TestTrackerToolsRefuseSpawnedKeys(t *testing.T) {
 			wikiUpdateTool:   {"session_key": key, "store": "me", "wiki": "docs", "op": "write", "new_wiki": true, "path": "home", "content": "smuggled\n"},
 		} {
 			resp := f.call(t, tool, args)
-			if !isToolError(resp) || !strings.Contains(resp, "not available to a spawned session") {
-				t.Fatalf("%s with a spawned key must be refused: %s", tool, resp)
+			if !isGateRefusal(resp) || !strings.Contains(resp, "not available to a spawned session") {
+				t.Fatalf("%s with a spawned key must be refused by the call gate: %s", tool, resp)
 			}
 		}
 	}
