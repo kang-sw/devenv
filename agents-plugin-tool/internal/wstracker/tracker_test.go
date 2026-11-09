@@ -232,3 +232,39 @@ func TestIncrementalRefresh(t *testing.T) {
 		t.Fatalf("cut event = %s ignored=%v", e.Status, e.Ignored)
 	}
 }
+
+// TestReviewRegisterWinnerDroppedWhileAssigned: a stage write folded after
+// an assign can recompute an older concurrent "review" write as the
+// register's winner (here, ada's agent write loses to her human one); the
+// fold drops it while the item holds open records, so once the assignment
+// ends the item reads unassigned, not review.
+func TestReviewRegisterWinnerDroppedWhileAssigned(t *testing.T) {
+	genesis := json.RawMessage(`{"admins":["ada"],"members":[
+		{"id":"ada","name":"Ada","keys":["ada-k1"],"leads":[]},
+		{"id":"maya","name":"Maya","keys":["maya-k1"],"leads":["ada"]}]}`)
+	t0 := time.Date(2026, 11, 2, 9, 0, 0, 0, time.UTC)
+	ev := func(stream string, seq int, min int, typ, origin string, seen map[string]int, payload map[string]any) wsledger.Event {
+		member, clone := splitTestStream(stream)
+		raw, _ := json.Marshal(payload)
+		return wsledger.Event{ID: wsledger.EventID{Member: member, Clone: clone, Seq: seq}, TS: t0.Add(time.Duration(min) * time.Minute),
+			Origin: origin, Type: typ, Payload: raw, Seen: seen, Verdict: wsledger.Valid}
+	}
+	events := []wsledger.Event{
+		ev("ada.pc", 1, 0, TypeItemCreate, OriginHuman, nil, map[string]any{"kind": "task", "title": "Raced"}),
+		ev("ada.pc", 2, 1, TypeItemEdit, OriginHuman, nil, map[string]any{"item": "ada.pc#1", "stage": "review"}),
+		ev("ada.pc", 3, 2, TypeItemAssign, OriginHuman, nil, map[string]any{"item": "ada.pc#1", "targets": []string{"maya"}}),
+		// Concurrent with the review write and the assign; its ts folds it
+		// after both, and the human head of the same member wins over it.
+		ev("ada.lap", 1, 3, TypeItemEdit, OriginAgent, map[string]int{"ada.pc": 1}, map[string]any{"item": "ada.pc#1", "stage": nil}),
+		ev("ada.pc", 4, 4, TypeItemUnassign, OriginHuman, map[string]int{"ada.lap": 1}, map[string]any{"item": "ada.pc#1", "assignee": "maya"}),
+	}
+	v := Derive(newMemSource(genesis, "ada.pc", events), "ada.pc", t0.Add(time.Hour), 0)
+	for _, id := range []string{"ada.lap#1", "ada.pc#4"} {
+		if e := eventOf(t, v, id); e.Status != "applied" {
+			t.Fatalf("%s is %s (%s), want applied", id, e.Status, deref(e.Reason))
+		}
+	}
+	if got := deref(v.Items["ada.pc#1"].Status); got != "unassigned" {
+		t.Fatalf("status after the unassign = %q, want unassigned (a review register winner must not come back)", got)
+	}
+}
