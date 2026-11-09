@@ -15,10 +15,11 @@ import (
 const stagedBinDir = "bin"
 
 // SpawnDetached starts exe with args as a process detached from the caller:
-// its own session (POSIX) or a detached console-less process group outside
-// the caller's job when the job allows it (Windows), stdio on the null
-// device, and dir as its working directory. It returns once the process has
-// started and reaps it in the background if it exits while the caller lives.
+// its own session (POSIX) or its own process group with its own hidden
+// console, outside the caller's job when the job allows it (Windows), stdio
+// on the null device, and dir as its working directory. It returns once the
+// process has started and reaps it in the background if it exits while the
+// caller lives.
 func SpawnDetached(exe string, args []string, dir string) error {
 	cmd, err := startDetached(exe, args, dir)
 	if err != nil {
