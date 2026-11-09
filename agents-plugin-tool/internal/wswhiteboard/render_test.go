@@ -474,8 +474,11 @@ func TestRenderPagePolicyOptionsAndPicks(t *testing.T) {
 func TestRenderPageAssumedItemIsASettledRow(t *testing.T) {
 	out := render(t, sampleView(LayoutFull))
 	wantAll(t, out,
-		`<div class="srow" id="item-76" data-id="76"><span class="stext"><span class="id">(76)</span><span class="amark" title="assumed, confirm or correct">assumed</span><b>Recommendation shows as a star plus a line</b> <span class="pick" title="picked"><span class="k">b</span>`,
-		`“71-76 look good”</span></span><button class="btn mini note-toggle" title="note"><svg class="i" aria-hidden="true"><use href="#i-pen"/></svg></button><textarea class="note" rows="1" placeholder="✎" title="correction" hidden></textarea></div>`)
+		`<div class="srow" id="item-76" data-id="76"><details class="sx" data-key="item:76"><summary><span class="stext"><span class="id">(76)</span><span class="amark" title="assumed, confirm or correct">assumed</span><b>Recommendation shows as a star plus a line</b> <span class="pick" title="picked"><span class="k">b</span>`,
+		`“71-76 look good”</span></span></summary>`,
+		// The pen and note follow the row's details as siblings, outside its
+		// toggle path, so they show and work while the row is closed.
+		`</div></details><button class="btn mini note-toggle" title="note"><svg class="i" aria-hidden="true"><use href="#i-pen"/></svg></button><textarea class="note" rows="1" placeholder="✎" title="correction" hidden></textarea></div>`)
 	wantNone(t, out, "card assumed", "chip assumed", `data-v="ok"`)
 	if got := strings.Count(out, `class="amark"`); got != 1 {
 		t.Errorf("%d assumed markers, want 1", got)
@@ -508,6 +511,62 @@ func TestRenderPageAssumedItemIsASettledRow(t *testing.T) {
 	head := closed[strings.Index(closed, `<div class="top">`):]
 	head = head[:strings.Index(head, "</div>")]
 	wantNone(t, head, "chip")
+}
+
+// A settled row with more to show unfolds to its original item: a details
+// keyed item:<ID> whose summary is the compact row and whose body holds the
+// rationale, every option (static: no answer-control attributes, the pick
+// marked by a class), and the recommendation. Links stay in the compact row
+// only. A row with nothing more to show stays plain.
+func TestRenderPageSettledRowExpands(t *testing.T) {
+	st := &State{Counter: 9, Seq: 3, SettleSeq: 5, Items: []Item{
+		{ID: 1, Class: ClassPolicy, Topic: "t", Title: "where", Options: []string{"here", "there", "nowhere"},
+			Recommendation: "b: closer", Rationale: "context **why**", Links: []string{"see {{2}}"},
+			Status: StatusAnswered, Answer: "b", AnswerQuote: "fine", Settled: 1, Changed: 2},
+		{ID: 2, Class: ClassPolicy, Topic: "t", Title: "gone", Options: []string{"x", "y"}, Status: StatusWithdrawn, Settled: 2, Changed: 2},
+		{ID: 3, Class: ClassTechnical, Topic: "t", Title: "tech", Rationale: "because `x`", Status: StatusAnswered, Answer: "ok", Settled: 3, Changed: 2},
+		{ID: 4, Class: ClassAnnounced, Topic: "t", Title: "bare", Links: []string{"only a link"}, Status: StatusAnswered, Answer: "ok", Settled: 4, Changed: 2},
+	}}
+	for name, layout := range layouts() {
+		out := render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r"}))
+		row := func(id int) string {
+			at := strings.LastIndex(out[:max(0, strings.Index(out, fmt.Sprintf(`" id="item-%d"`, id)))], `<div class="srow`)
+			if at < 0 {
+				t.Fatalf("%s: settled row %d missing", name, id)
+			}
+			r := out[at:]
+			r = r[:strings.Index(r, "</section>")]
+			if next := strings.Index(r[1:], `<div class="srow`); next >= 0 {
+				r = r[:next+1]
+			}
+			return r
+		}
+
+		policy := row(1)
+		wantAll(t, policy,
+			`<div class="srow" id="item-1"><details class="sx" data-key="item:1"><summary><span class="stext">`,
+			`<span class="link"><svg class="i" aria-hidden="true"><use href="#i-link"/></svg>see <a href="#item-2">(02)</a></span></span></span></summary><div class="sbody">`,
+			`<div class="sbody"><div class="ctx md">context <strong>why</strong></div><div class="opts">`,
+			`<span class="opt static"><span class="k">a</span><span>here</span></span>`,
+			`<span class="opt static rec picked"><span class="k">b<svg class="i" aria-hidden="true"><use href="#i-star"/></svg></span><span>there</span></span>`,
+			`<span class="opt static"><span class="k">c</span><span>nowhere</span></span>`,
+			`<div class="rec-line md" title="recommendation"><b><svg class="i" aria-hidden="true"><use href="#i-star"/></svg>b</b> closer</div></div></details></div>`)
+		wantNone(t, policy, "data-opt", "aria-pressed", "<button", `role="button"`, "data-id")
+		if got := strings.Count(policy, "#i-link"); got != 1 {
+			t.Errorf("%s: links render %d times in the row, want once in the compact row", name, got)
+		}
+
+		void := row(2)
+		wantAll(t, void, `<details class="sx" data-key="item:2">`,
+			`<span class="opt static"><span class="k">a</span><span>x</span></span><span class="opt static"><span class="k">b</span><span>y</span></span>`)
+		wantNone(t, void, "picked", "rec-line")
+
+		wantAll(t, row(3), `<details class="sx" data-key="item:3">`, `<div class="sbody"><div class="ctx md">because <code>x</code></div></div></details>`)
+
+		bare := row(4)
+		wantAll(t, bare, `<div class="srow" id="item-4"><span class="stext">`, "only a link")
+		wantNone(t, bare, "<details", "sbody")
+	}
 }
 
 // A settled row's picked-option chip is a flex row; inline code and an item
@@ -808,8 +867,10 @@ func TestRenderPageEmbedSizeBudget(t *testing.T) {
 	t.Logf("populated embed: %d bytes (%.1f%% of 512 KiB)", len(out), 100*float64(len(out))/budget)
 	// About a third of the limit: the stress is past any real board (60
 	// items, 100 ready tickets), and the embed has no truncation to fall back
-	// on. 35% leaves the topic bar's pen, note box, and updated time room.
-	if len(out) > budget*35/100 {
+	// on. 35% left the topic bar's pen, note box, and updated time room;
+	// 40% adds the settled rows' expanded bodies (each settled item's
+	// rationale and options ride in the snapshot so it unfolds without script).
+	if len(out) > budget*40/100 {
 		t.Errorf("populated embed is %d bytes, not well under 512 KiB", len(out))
 	}
 }

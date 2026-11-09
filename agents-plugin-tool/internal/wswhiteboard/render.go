@@ -516,6 +516,9 @@ func (p *pageData) TopicOf(t TopicView) topicData { return topicData{TopicView: 
 type itemData struct {
 	ItemView
 	Page *pageData
+	// Static renders the item's options as display, not answer controls
+	// (the "opts" template), for a settled row's expanded body.
+	Static bool
 }
 
 // ItemOf pairs an item with the page for the item templates.
@@ -545,6 +548,18 @@ func (d itemData) PickedOption() *OptionView {
 		}
 	}
 	return nil
+}
+
+// AsStatic is the item with its options rendered Static.
+func (d itemData) AsStatic() itemData {
+	d.Static = true
+	return d
+}
+
+// Expandable reports whether a settled row has more to show than its compact
+// text: options or a rationale. Links never count; the compact row prints them.
+func (d itemData) Expandable() bool {
+	return len(d.Options) > 0 || d.Rationale != ""
 }
 
 // Stacked reports whether the item's options render as stacked cards: any

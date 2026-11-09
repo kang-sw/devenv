@@ -3,8 +3,10 @@
   try { store = window.sessionStorage; store.getItem("wb"); } catch (e) { store = null; }
 
   // --- panels: remember open state across reloads ---------------------------
-  // A panel keys it on its id, a panel tree node on its data-key path.
-  q("details.panel[id], details.tnode[data-key]").forEach(function (d) {
+  // A panel keys it on its id, a panel tree node on its data-key path, and a
+  // settled row on its item:<ID> data-key, so an opened row stays open even
+  // when the reload changed that row.
+  q("details.panel[id], details.tnode[data-key], details.sx[data-key]").forEach(function (d) {
     if (!store) return;
     var k = "wb-open-" + (d.classList.contains("panel") ? d.id : "k:" + d.getAttribute("data-key"));
     var v = store.getItem(k);
