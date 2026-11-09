@@ -22,7 +22,10 @@ import (
 // Everything here reaches a browser, so no returned field may carry the
 // session key.
 
-var _ wsdashboard.LangPageSource = (*DashboardSessionSource)(nil)
+var (
+	_ wsdashboard.LangPageSource = (*DashboardSessionSource)(nil)
+	_ wsdashboard.ContactSource  = (*DashboardSessionSource)(nil)
+)
 
 // ReadPage reads the page parts of the session reg names, in English. It
 // reports false exactly when ReadSession does. A session without a board
@@ -58,8 +61,21 @@ func (src *DashboardSessionSource) ReadPageLang(reg wsdashboard.Registration, la
 	page.Reasked = record.Whiteboard.ReaskTimes()
 	// BuildView only reads the state: the served page never begins a render
 	// or writes a file, so the stored board and the static page are untouched.
+	// The ticket files the panels list and the images a topic body inlines
+	// change without a nudge, so the page names them (PageContent.Watch).
+	watch := func(path string) { page.Watch = append(page.Watch, path) }
 	in := servedViewInput(record, reg.ReplyID)
-	in.Panels = servedWhiteboardPanels(record, key, reg.ReplyID, lang)
+	inline := in.DocImageSrc
+	in.DocImageSrc = func(path string) string {
+		watch(docImagePath(record.Root, path))
+		return inline(path)
+	}
+	in.Panels = servedWhiteboardPanels(record, key, reg.ReplyID, lang, watch)
+	// An armed wait shows as long as its process runs, and a process can
+	// die leaving its marker: no watched file reports that.
+	if _, ok, _ := wsmailbox.ReadListeningMarker(key); ok {
+		page.Volatile = true
+	}
 	view := wswhiteboard.BuildView(record.Whiteboard, in)
 	view.Lang = lang
 	regions, err := wswhiteboard.RenderRegions(view)
@@ -116,11 +132,24 @@ func servedViewInput(record sessionRecord, replyID string) wswhiteboard.ViewInpu
 	}
 }
 
+// docImagePath is the file a topic body's image path names under root, as
+// the inlining resolves it before its containment check: an absolute path
+// as is, a relative one against root.
+func docImagePath(root, path string) string {
+	native := filepath.FromSlash(path)
+	if filepath.IsAbs(native) {
+		return filepath.Clean(native)
+	}
+	return filepath.Join(root, native)
+}
+
 // servedWhiteboardPanels builds the full page's panels for the served page.
 // The daemon process serves no session itself, so it holds no mailbox
 // identity: the mailbox panel shows the session's reply-id address and its
-// reply-id unread count, never a named inbox the session may own.
-func servedWhiteboardPanels(record sessionRecord, key, replyID, lang string) []wswhiteboard.Panel {
+// reply-id unread count, never a named inbox the session may own. watch,
+// when not nil, is told each file and directory the panels read that a
+// writer may change without a nudge (whiteboardPanelInput.watch).
+func servedWhiteboardPanels(record sessionRecord, key, replyID, lang string, watch func(path string)) []wswhiteboard.Panel {
 	return whiteboardPanels(whiteboardPanelInput{
 		rec:        record,
 		layout:     wswhiteboard.LayoutFull,
@@ -129,7 +158,14 @@ func servedWhiteboardPanels(record sessionRecord, key, replyID, lang string) []w
 		replyID:    replyID,
 		served:     true,
 		lang:       lang,
+		watch:      watch,
 	})
+}
+
+// ReadContacts re-reads the contacts of the session reg names, as ReadPage
+// reads them (wsdashboard.ContactSource).
+func (src *DashboardSessionSource) ReadContacts(reg wsdashboard.Registration) ([]wsdashboard.Contact, bool) {
+	return src.readContacts(reg), true
 }
 
 // servedFileText shows a file path an item's markdown names as text on a

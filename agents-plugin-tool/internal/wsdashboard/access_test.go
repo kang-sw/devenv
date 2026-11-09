@@ -232,7 +232,7 @@ func TestLANModeGuardsEveryRoute(t *testing.T) {
 // one without the token meets the guard as on any other route.
 func TestPprofRoutesAreOptInAndLoopbackOnly(t *testing.T) {
 	withPprof := func(o *DaemonOptions) { o.Pprof = true }
-	paths := []string{"/debug/pprof/", "/debug/pprof/goroutine?debug=1", "/debug/pprof/cmdline"}
+	paths := []string{"/debug/pprof/", "/debug/pprof/goroutine?debug=1", "/debug/pprof/cmdline", "/debug/pprof/streams"}
 
 	off := startPageFixture(t, lanMode)
 	offPort := strconv.Itoa(off.d.Endpoint().Port)

@@ -25,17 +25,49 @@ type pageFake struct {
 	pages map[string]PageContent
 	// boards are the whiteboards ReadClosedTopics renders from.
 	boards map[string]*wswhiteboard.State
+	// pageReads counts ReadPage calls per reply-id.
+	pageReads map[string]int
 }
 
 func newPageFake() *pageFake {
-	return &pageFake{fakeSource: newFakeSource(), pages: map[string]PageContent{}, boards: map[string]*wswhiteboard.State{}}
+	return &pageFake{fakeSource: newFakeSource(), pages: map[string]PageContent{}, boards: map[string]*wswhiteboard.State{}, pageReads: map[string]int{}}
 }
 
 func (p *pageFake) ReadPage(reg Registration) (PageContent, bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.pageReads[reg.ReplyID]++
 	page, ok := p.pages[reg.ReplyID]
 	return page, ok
+}
+
+// ReadContacts re-reads a page's contacts, as a ContactSource.
+func (p *pageFake) ReadContacts(reg Registration) ([]Contact, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.pages[reg.ReplyID].Contacts, true
+}
+
+// readCount is how often ReadPage read id.
+func (p *pageFake) readCount(id string) int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.pageReads[id]
+}
+
+// page is id's stored page content.
+func (p *pageFake) page(id string) PageContent {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.pages[id]
+}
+
+// putPage replaces page content without touching the session fingerprint,
+// as a write no nudge reports and no fingerprint covers.
+func (p *pageFake) putPage(id string, page PageContent) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.pages[id] = page
 }
 
 // setPage stores page content and a matching session fingerprint, so the

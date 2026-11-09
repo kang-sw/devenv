@@ -222,6 +222,105 @@ func TestDashboardServedPageRendersTopicBodyInAFrame(t *testing.T) {
 	}
 }
 
+// TestDashboardReadPageWatchesUnnudgedFiles pins PageContent.Watch: the
+// ticket status directories and every ticket file the panels list, and each
+// image a topic body inlines (a missing one included), so the daemon's
+// refresh tick can tell an edit no nudge reports; a session without a board
+// names nothing. ReadContacts re-reads what ReadPage's Contacts holds.
+func TestDashboardReadPageWatchesUnnudgedFiles(t *testing.T) {
+	f := newWhiteboardFixture(t)
+	src := dashboardPageSource(t, nil)
+	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
+	if page := readPageOK(t, src, reg); len(page.Watch) != 0 {
+		t.Fatalf("a session without a board watches %v", page.Watch)
+	}
+
+	writeTicket(t, f.root, "ready", "261101-feat-ready-one", "Ready one")
+	writeTicket(t, f.root, "todo", "261102-feat-todo-one", "Todo one")
+	mustWrite(t, f.root, "shots/a.png", "not-really-a-png")
+	f.update(t, "<wb:topic name=\"Rollout\"><wb:body>\n![shot](shots/a.png) ![gone](shots/missing.png)\n</wb:body></wb:topic>")
+	page := readPageOK(t, src, reg)
+	tickets := filepath.Join(f.root, "ai-docs", "tickets")
+	for _, want := range []string{
+		filepath.Join(tickets, "ready"),
+		filepath.Join(tickets, "todo"),
+		filepath.Join(tickets, "ready", "261101-feat-ready-one.md"),
+		filepath.Join(tickets, "todo", "261102-feat-todo-one.md"),
+		filepath.Join(f.root, "shots", "a.png"),
+		filepath.Join(f.root, "shots", "missing.png"),
+	} {
+		found := false
+		for _, path := range page.Watch {
+			found = found || path == want
+		}
+		if !found {
+			t.Errorf("Watch lacks %s: %v", want, page.Watch)
+		}
+	}
+
+	contacts, ok := src.ReadContacts(reg)
+	if !ok {
+		t.Fatal("ReadContacts is not supported")
+	}
+	got, _ := json.Marshal(contacts)
+	want, _ := json.Marshal(page.Contacts)
+	if string(got) != string(want) {
+		t.Errorf("ReadContacts = %s, ReadPage contacts = %s", got, want)
+	}
+}
+
+// TestDashboardReadPageWatchesTheMailboxPanel pins the mailbox panel's
+// refresh inputs: a sender's mail nudges only the sender, so the page
+// names the history directory and the reply store the panel reads, and an
+// armed wait, whose process may die leaving its marker, makes the page
+// volatile.
+func TestDashboardReadPageWatchesTheMailboxPanel(t *testing.T) {
+	hf := newHistoryFixture(t, time.Date(2026, 11, 6, 9, 0, 0, 0, time.UTC))
+	if out := callToolWithKey(t, hf.serverB, 40, hf.keyB, "whiteboard.update", map[string]any{"commands": `<wb:topic name="t"><wb:add class="technical"><wb:title>q</wb:title></wb:add></wb:topic>`}); strings.Contains(out, "error") {
+		t.Fatalf("whiteboard.update: %s", out)
+	}
+	mustSend(t, hf.serverB, 50, hf.keyB, wsmailbox.ReplyIDPrefix+wsmailbox.ReplyID(hf.keyA), "hello")
+	recB, ok := hf.serverB.sessions.readState(hf.keyB, partAll)
+	if !ok {
+		t.Fatal("no record for B")
+	}
+	reg := wsdashboard.Registration{ReplyID: wsmailbox.ReplyID(hf.keyB), Project: recB.Root}
+	src := dashboardPageSource(t, nil)
+
+	page := readPageOK(t, src, reg)
+	history, err := mailboxHistoryDir(hf.keyB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replies, err := wsmailbox.ReplyRegistryPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	marker, err := wsmailbox.ListeningMarkerPath(hf.keyB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{history, replies, marker} {
+		found := false
+		for _, path := range page.Watch {
+			found = found || path == want
+		}
+		if !found {
+			t.Errorf("Watch lacks %s: %v", want, page.Watch)
+		}
+	}
+	if page.Volatile {
+		t.Error("a page with no armed wait is volatile")
+	}
+
+	if err := wsmailbox.WriteListeningMarker(wsmailbox.ListeningMarker{SessionKey: hf.keyB, PID: os.Getpid(), StartedAt: time.Now().Format(time.RFC3339)}); err != nil {
+		t.Fatal(err)
+	}
+	if !readPageOK(t, src, reg).Volatile {
+		t.Error("a page with an armed wait is not volatile")
+	}
+}
+
 // TestDashboardServedFileText pins the path text rule for each path form.
 func TestDashboardServedFileText(t *testing.T) {
 	root := t.TempDir()

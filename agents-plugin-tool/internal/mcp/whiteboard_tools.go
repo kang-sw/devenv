@@ -101,6 +101,11 @@ type whiteboardPanelInput struct {
 	// phrases; a wsi18n code). Empty is English, which is what a page
 	// written to disk uses; only a served page follows its viewer.
 	lang string
+	// watch, when not nil, is told each file and directory a panel read
+	// that a writer may change without a nudge (the ticket directories and
+	// files, the mailbox stores, history directory, and listening marker),
+	// which a served page names for its refresh check.
+	watch func(path string)
 }
 
 type whiteboardMailbox struct {

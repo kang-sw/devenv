@@ -165,6 +165,7 @@ func (d *Daemon) inboxSession(w http.ResponseWriter, r *http.Request, replyID st
 func (d *Daemon) inboxAnswered(w http.ResponseWriter, s Session, status int, answer any) {
 	if status == http.StatusOK {
 		d.index.Nudge(s.ReplyID, s.Project)
+		d.stats.WakeInbox.Add(1)
 		d.broker.wake(s.ReplyID)
 		if s.Agent && d.agents != nil {
 			d.agents.InboxChanged(s.ReplyID)

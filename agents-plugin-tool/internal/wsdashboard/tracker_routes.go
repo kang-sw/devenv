@@ -280,7 +280,8 @@ func validWikiName(name string) bool {
 // first request.
 func (d *Daemon) TrackerChanged() {
 	d.trackerRev.Add(1)
-	d.broker.wake("")
+	d.stats.WakeTracker.Add(1)
+	d.broker.signalAll()
 }
 
 // trackerError writes the {"error": msg} answer.

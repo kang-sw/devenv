@@ -35,9 +35,22 @@ func (s *Server) whiteboardMailbox(sessionKey, root string) whiteboardMailbox {
 // card links to its file, or on a served page carries its repo-relative path
 // (which the page makes the file action link, titled with that path). idea/ tickets are never listed.
 func ticketPanel(in whiteboardPanelInput) (wswhiteboard.Panel, bool) {
-	tickets, err := wsdoc.TicketsList(in.root, wsdoc.TicketListOptions{Statuses: []string{"ready", "todo"}})
+	statuses := []string{"ready", "todo"}
+	if in.watch != nil {
+		// Named before the read: a status directory that appears later
+		// changes the panel too.
+		for _, status := range statuses {
+			in.watch(filepath.Join(in.root, "ai-docs", "tickets", status))
+		}
+	}
+	tickets, err := wsdoc.TicketsList(in.root, wsdoc.TicketListOptions{Statuses: statuses})
 	if err != nil {
 		return wswhiteboard.Panel{}, false
+	}
+	if in.watch != nil {
+		for _, t := range tickets {
+			in.watch(filepath.Join(in.root, filepath.FromSlash(t.Path)))
+		}
 	}
 	var ready, todo []wsdoc.TicketInfo
 	for _, t := range tickets {
@@ -163,6 +176,11 @@ func mailboxPanel(in whiteboardPanelInput) (wswhiteboard.Panel, bool) {
 	if in.mailbox.owner {
 		named = in.mailbox.identity.address()
 	}
+	if in.watch != nil {
+		if dir, err := mailboxHistoryDir(in.sessionKey); err == nil {
+			in.watch(dir)
+		}
+	}
 	history, _ := readMailboxHistory(in.sessionKey)
 	if named == "" && len(history) == 0 {
 		return wswhiteboard.Panel{}, false
@@ -175,6 +193,9 @@ func mailboxPanel(in whiteboardPanelInput) (wswhiteboard.Panel, bool) {
 	unread := 0
 	if named != "" {
 		if path, err := wsmailbox.PathForScope(in.mailbox.identity.Scope, in.root); err == nil {
+			if in.watch != nil {
+				in.watch(path)
+			}
 			if store, err := wsmailbox.Load(path); err == nil {
 				unread += len(store.Queues[in.mailbox.identity.Name])
 			}
@@ -182,6 +203,9 @@ func mailboxPanel(in whiteboardPanelInput) (wswhiteboard.Panel, bool) {
 	}
 	var entry wsmailbox.ReplyEntry
 	if path, err := wsmailbox.ReplyRegistryPath(); err == nil {
+		if in.watch != nil {
+			in.watch(path)
+		}
 		if store, err := wsmailbox.LoadReplyStore(path); err == nil {
 			unread += len(store.Queues[in.replyID])
 			entry = store.Entries[in.replyID]
@@ -194,6 +218,11 @@ func mailboxPanel(in whiteboardPanelInput) (wswhiteboard.Panel, bool) {
 		return panel, true
 	}
 
+	if in.watch != nil {
+		if path, err := wsmailbox.ListeningMarkerPath(in.sessionKey); err == nil {
+			in.watch(path)
+		}
+	}
 	if whiteboardMailboxListening(in.sessionKey) {
 		status = wsi18n.T(in.lang, "panel.mail.unread.wait", unread)
 	}
