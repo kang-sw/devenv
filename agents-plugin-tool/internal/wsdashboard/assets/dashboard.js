@@ -2770,7 +2770,10 @@
     });
   }
   // tkReadAll reads the store list, calls listed(status), and with a list
-  // reads every store's view in parallel before done().
+  // reads every store's view in parallel before done(). The renderer, once
+  // mounted, is told as each view but the last lands, so a slow store holds
+  // back only its own rows (it keeps its previous view, or the loading state,
+  // meanwhile); the last view is left to done's caller to announce.
   function tkReadAll(listed, done) {
     tkFetch("/tracker/stores", undefined, function (status, v) {
       if (status === 503) { tkHostErr = tkErrText(status, v); tkOrder = []; }
@@ -2786,7 +2789,12 @@
       listed(status);
       var left = status === 200 ? tkOrder.length : 0;
       if (!left) { done(); return; }
-      tkOrder.forEach(function (id) { tkLoadView(id, function () { if (--left === 0) done(); }); });
+      tkOrder.forEach(function (id) {
+        tkLoadView(id, function () {
+          if (--left === 0) done();
+          else if (tkApi) tkNotify();
+        });
+      });
     });
   }
   // tkReload re-reads everything, then tells the renderer and runs then;
