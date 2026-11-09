@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: c1e26acebf1b8b55
 sage-review-completeness-reviewed: c1e26acebf1b8b55
+completed: 2026-11-09
 ---
 
 # Tracker assignee list stacks ended records on reassign
