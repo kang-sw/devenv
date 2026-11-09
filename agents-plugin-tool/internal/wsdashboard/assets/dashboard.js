@@ -2082,7 +2082,7 @@
   // switch starts a new conversation, after a warning), the model (fuzzy
   // searched), and the effort (a knob snapping to the levels); the runner
   // lists the choices and remembers the last one as the next default.
-  var supChats = {}, supChoices = null, supChoicesBusy = false, supH = null, supStore = null;
+  var supChats = {}, supChoices = null, supChoicesBusy = false, supH = null, supStore = null, supView = null;
   function supUrl(id, op) { return "/support/stores/" + encodeURIComponent(id) + (op ? "/" + op : ""); }
   function supEsc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
   function supIcon(href) { return '<svg class="i"><use href="' + href + '"/></svg>'; }
@@ -2160,7 +2160,7 @@
     return !!((page && page.contains(slot)) || (dr && dr.classList.contains("open") && dr.contains(slot)));
   }
   function supRendered(name, view, h) {
-    supH = h; supStore = view ? name : null;
+    supH = h; supStore = view ? name : null; supView = view;
     var slot = name && doc.querySelector('.supslot[data-store="' + CSS.escape(name) + '"]');
     Object.keys(supChats).forEach(function (id) {
       var c = supChats[id];
@@ -2246,18 +2246,24 @@
     if (stick && c.root.isConnected) { c.log.scrollTop = c.log.scrollHeight; c.stick = true; }
   }
   // supCards draws each card line as the item's mini card while the store's
-  // view holds the item, else leaves the line as the server drew it.
+  // view holds the item, else as the server drew it. The view is the one
+  // the renderer last drew (crefHtml reads it), not the adapter's cache,
+  // which can be ahead of it between a store's reload and the redraw.
   function supCards(c) {
-    if (!supH || supStore !== c.id) return;
-    var vs = tkViews[c.id], byAlias = null;
+    if (!supH || supStore !== c.id || !supView || !supView.items) return;
+    var vs = supView, byAlias = null;
     q(".cardref[data-tk-alias]", c.box).forEach(function (el) {
-      if (el.getAttribute("data-tk-store") !== c.id || !vs || !vs.items) return;
+      if (el.getAttribute("data-tk-store") !== c.id) return;
       if (!byAlias) {
         byAlias = {};
         Object.keys(vs.items).forEach(function (iid) { byAlias[vs.items[iid].alias] = iid; });
       }
       var iid = byAlias[el.getAttribute("data-tk-alias")];
-      if (!iid) return;
+      if (!iid) {
+        // the item left the view: back to the server's line
+        if (el.hasAttribute("data-fb")) { el.innerHTML = el.getAttribute("data-fb"); el.removeAttribute("data-fb"); el.removeAttribute("data-up"); el.classList.remove("up"); }
+        return;
+      }
       var html = supH.crefHtml(iid);
       if (el.getAttribute("data-up") === html) return;
       if (!el.hasAttribute("data-fb")) el.setAttribute("data-fb", el.innerHTML);
