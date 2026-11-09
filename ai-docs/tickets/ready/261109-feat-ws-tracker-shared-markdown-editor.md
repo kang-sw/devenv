@@ -266,3 +266,51 @@ Prerequisite: Phase 1 of `261108-feat-ws-tracker-ledger-attachments`.
   commits the staged blob); `node --check`; i18n tests green. The Result
   reasons through paste, drop, refusal, and preview of a pasted image and
   lists the browser hand check as unverified if not done.
+
+### Result (e6aacfa73) - 2026-11-09
+
+Landed in 0fb7204ee (merge of develop, bringing the ledger attachment
+routes), 5a83c4e6a (renderer), e6aacfa73 (page).
+
+- Renderer: `wswhiteboard.TextTargets.AttachmentSrc`; an
+  `![name](attachment:<oid>)` image becomes `<img>` only when it returns a
+  daemon path for that oid; links to `attachment:` and every other local
+  image stay text. `trackerText(s, own)` with `ownAttachments(storeID,
+  oids)` serves only the same body's or comment's attachment oids from
+  `/tracker/stores/<id>/attachments/<oid>`. `TrackerRenderRequest` gains
+  `attachments`; the adapter keeps a pending entry only when the new
+  `wstrackerhost.Host.HasAttachment` finds it staged or stored.
+- Page: paste (any of the three editors) and drop (on an editor) upload
+  through the new optional adapter method `upload(id, file, name, done)`
+  (dashboard: raw body, `?name=` only for a dropped file), insert
+  `![name](attachment:<oid>)` at the caret, and keep the entry in
+  `ui.eatt[editor]`; saves send entries still named in the text (a comment
+  edit merges into its stored list); the preview request is now
+  `render(id, {text, attachments}, done)`. Non-image, over-limit (checked
+  against the view's `attachments.max_bytes` first), failed uploads, and
+  no-upload adapters get a notice. A refused save (expired staged oid)
+  keeps the draft. Six `js.tk.ed.img.*` strings in all 11 tables; mockup
+  i18n regenerated.
+- Decision (deviation): paste is gated on `adapter.upload`, not on
+  `caps.attach`: in code `caps.attach` is the mockup's simulation switch
+  (hand-typed metadata with stand-in oids) and the mockup runs with it on,
+  so enabling it in the product would offer drafts the server refuses. The
+  mockup has no `upload`, so it shows the notice as decided. Under
+  `caps.attach` the base (hand-drafted / stored mockup) entries are kept on
+  save since no text names them.
+- Verification: `go test ./internal/wswhiteboard ./internal/wstrackerhost
+  ./internal/wsdashboard ./internal/wsi18n ./cmd/ws-mcp` ok (new
+  `TestRenderTextAttachmentSrc`, `TestDashboardTrackerAttachmentImages`:
+  staged pending oid renders in preview, unstaged does not, the write
+  commits the staged blob, own image renders in the view and a borrowed oid
+  does not; `TestTrackerTextSafeMode` extended; `HasAttachment` checks in
+  `TestAttachmentsStageDispatchRead`; render route passes the list);
+  `node --check` on tracker.js and dashboard.js ok. Browser: the mockup in
+  headless Chromium over CDP with a fake `upload`/`render` passed 25
+  scripted checks (paste without name, drop with name, caret insert,
+  preview list, text-carrying paste, non-image and oversize refusal, save
+  pruning in all three places, late upload dropped, failed upload, refused
+  save keeps draft, no-upload notice). Unverified: the live product page
+  against a real daemon.
+- Review (lite): spawned; its report had not arrived when this Result was
+  written.
