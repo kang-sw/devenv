@@ -1054,3 +1054,29 @@ func TestWikiFetchFailureStillAbsorbsEvents(t *testing.T) {
 		t.Fatal("the wiki was not taken once the fetch worked")
 	}
 }
+
+// TestWikiDeleteOfSharedContentPageBothSidesDeleted: a page both sides
+// deleted is not a conflict even when another page the base already held
+// has the same content; only the same content at a path the base lacks
+// reads as a rename.
+func TestWikiDeleteOfSharedContentPageBothSidesDeleted(t *testing.T) {
+	w := newWorld(t)
+	url := w.newRemote("r")
+	ada := w.register(w.remoteOpts("ada", "c1"), url)
+	bo := w.register(w.remoteOpts("bo", "c1"), url)
+
+	r0 := saveOK(t, ada, wikiCreate("dup", "a", "same\n"))
+	r1 := saveOK(t, ada, wikiWrite("dup", r0.Commit, "b", "same\n"))
+	fetchOK(t, bo)
+	rd := saveOK(t, ada, WikiEdit{Wiki: "dup", Base: r1.Commit, Op: WikiOpDelete, Path: "a"})
+	res := saveOK(t, bo, WikiEdit{Wiki: "dup", Base: r1.Commit, Op: WikiOpDelete, Path: "a"})
+	if res.Commit != rd.Commit {
+		t.Fatalf("delete of a page both sides deleted = %+v, want the tip %s", res, rd.Commit)
+	}
+	// The same content moved to a new path is still a rename.
+	rr := saveOK(t, ada, WikiEdit{Wiki: "dup", Base: rd.Commit, Op: WikiOpRename, Path: "b", To: "c"})
+	_, err := bo.WikiSave(context.Background(), WikiEdit{Wiki: "dup", Base: rd.Commit, Op: WikiOpDelete, Path: "b"})
+	if c := wantConflict(t, err, WikiConflictRename); c.Theirs != rr.Commit {
+		t.Fatalf("delete of a renamed page = %+v", c)
+	}
+}

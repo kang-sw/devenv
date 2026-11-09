@@ -1330,12 +1330,17 @@ func (l *Ledger) renameGuard(ctx context.Context, e WikiEdit, baseTree, theirsTr
 	if err != nil || !ok {
 		return nil, err
 	}
+	// A rename is the page's content at a path the base did not hold: a
+	// page the base already held with the same content is not where this
+	// one went.
 	renamed := false
 	err = l.git.walkTree(ctx, theirsTree, "", func(path string, entry treeEntry) error {
-		if entry.oid == base.oid && strings.HasSuffix(path, pageExt) {
-			renamed = true
+		if renamed || entry.oid != base.oid || !strings.HasSuffix(path, pageExt) {
+			return nil
 		}
-		return nil
+		_, inBase, err := l.git.entryAt(ctx, baseTree, path)
+		renamed = err == nil && !inBase
+		return err
 	})
 	if err != nil || !renamed {
 		return nil, err
