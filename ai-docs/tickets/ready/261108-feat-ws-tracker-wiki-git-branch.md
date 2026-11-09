@@ -170,11 +170,23 @@ settled on the board on 2026-11-09 (topic "트래커: 위키", items (72)-(91)).
   existing `#ID` references. Links are always absolute, also within one
   wiki (board (89)). Rejected: `[[wiki:path]]` (not standard markdown, the
   renderer would need new syntax).
-- **UI: a drawer wiki card for reading and editing** (board (77) a): page
-  list, rendering with the tracker renderer, and editing with the shared
-  editor (`261109-feat-ws-tracker-shared-markdown-editor`), plus a wiki
-  picker and "new wiki". History browsing and recovery go through the agent
-  tools. Rejected: a read-only card; no UI.
+- **UI: wiki in the Items panel for reading and editing** (board (77) a;
+  placement board (129) a): the tracker's left Items panel header gets an
+  *Items | Wiki* switch; under *Wiki* that area shows a page tree (left) and
+  the page (right), and editing happens in place. In the narrow layout Wiki
+  is one tab (the tree folds into a Pages control). The store page
+  (`#/<storeId>`) uses the same switch at full width. Page list, rendering
+  with the tracker renderer, editing with the shared editor
+  (`261109-feat-ws-tracker-shared-markdown-editor`), a wiki picker and "new
+  wiki" as before. History browsing and recovery go through the agent tools
+  (the page's more menu only points to the support agent). The look is the
+  approved static mockup `ai-docs/ref/wiki-mockup/index.html` (board (133)
+  a). Rejected: a card in the right tab pane (board (129) c, too narrow for
+  long pages plus the editor); a pane-tab page list with a floating page
+  window (board (129) b, opening and closing windows between pages); a
+  read-only card; no UI. Not in scope (board (134) ok): a formatting
+  toolbar beyond the shared editor's Write/Preview, a history/restore UI,
+  a rename/delete UI.
 - **Agent tools** (board (79) ok): MCP `wiki_query` (page read, list,
   search, history, diff) and `wiki_update` (write, rename, delete, restore a
   page to a given commit), each taking the wiki name. Restore is always a
@@ -187,7 +199,8 @@ settled on the board on 2026-11-09 (topic "트래커: 위키", items (72)-(91)).
   recovering from it must be convenient; the user expects to ask an agent to
   do it, so recovery is an agent tool surface first.
 - **Two phases** (board (84) ok): Phase 1 is the server side and the agent
-  tools, already useful to agents on its own; Phase 2 is the drawer card.
+  tools, already useful to agents on its own; Phase 2 is the Items panel
+  wiki UI.
 
 ## Constraints
 
@@ -349,17 +362,20 @@ sync, save path, host methods), 86ecf88 (dashboard image read route),
   save's result but not the next Sync report.
 - Phase 2 remains; the ticket stays in `ready/`.
 
-### Phase 2: drawer wiki card
+### Phase 2: wiki in the Items panel
 
 - The render route gains a page mode taking the wiki name: `attachment:`
   oids render when found in that wiki tree's `_attachments/` or among the
   held pasted images; a save referencing an expired held image is refused,
   as for items.
-- Wiki picker, page list, page rendering (tracker renderer, `wiki:` links
-  resolved in item bodies and pages, `attachment:` images from the wiki
-  tree), edit with the shared editor and preview, image paste into the wiki
-  branch, refused-save view showing both versions, empty state with "new
-  wiki".
+- The UI follows the *Items | Wiki* switch placement (board (129) a) and
+  the approved mockup `ai-docs/ref/wiki-mockup/index.html` (board (133)
+  a): wiki picker, page tree, page rendering (tracker renderer, `wiki:`
+  links resolved in item bodies and pages, `attachment:` images from the
+  wiki tree), in-place edit with the shared editor and preview, image paste
+  into the wiki branch, refused-save view showing both versions, empty
+  state with "new wiki"; the narrow layout's Wiki tab and the store page
+  use the same pieces.
 
 #### Verification
 
