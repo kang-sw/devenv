@@ -453,6 +453,80 @@ func parsePatch(c *rawCommit, patch string) {
 	}
 }
 
+// attachCommits lists the first-parent commits of an attachment ref tip not
+// reachable from exclude (all when ""), oldest first, each with the paths
+// it adds. A merge commit, or one that changes, removes, or adds anything
+// but a regular-file attachments/<sha256> path, is marked Bad; blob content
+// is never read.
+func (g *gitRepo) attachCommits(ctx context.Context, tip, exclude string) ([]*attachCommit, error) {
+	n := nonce()
+	args := []string{
+		"-c", "log.showRoot=true",
+		"-c", "core.quotePath=true",
+		"log", "--first-parent", "--no-show-signature", "--no-decorate",
+		"--raw", "--no-abbrev", "--no-renames", "--no-color",
+		"--format=%x00" + n + " %H %P",
+		tip,
+	}
+	if exclude != "" {
+		args = append(args, "^"+exclude)
+	}
+	args = append(args, "--")
+	out, err := g.run(ctx, args...)
+	if err != nil {
+		return nil, err
+	}
+	var commits []*attachCommit
+	for _, rec := range strings.Split(string(out), "\x00"+n+" ")[1:] {
+		head, rest, _ := strings.Cut(rec, "\n")
+		fields := strings.Fields(head)
+		if len(fields) == 0 || !oidRe.MatchString(fields[0]) {
+			continue
+		}
+		c := &attachCommit{OID: fields[0], Adds: map[string]string{}}
+		if len(fields) > 2 {
+			c.Bad = "merge commit in an attachment ref"
+		}
+		for _, line := range strings.Split(rest, "\n") {
+			if !strings.HasPrefix(line, ":") {
+				continue
+			}
+			meta, path, ok := strings.Cut(line[1:], "\t")
+			f := strings.Fields(meta)
+			if !ok || len(f) != 5 {
+				c.Bad = "unreadable change: " + line
+				break
+			}
+			oid, found := strings.CutPrefix(path, attachDir+"/")
+			switch {
+			case f[4] != "A":
+				c.Bad = "changes or removes " + path + "; an attachment ref only adds"
+			case f[1] != "100644":
+				c.Bad = path + " is not a regular file"
+			case !found || !ValidAttachmentOID(oid) || !oidRe.MatchString(f[3]):
+				c.Bad = "adds " + path + ", not an attachments/<sha256> path"
+			default:
+				c.Adds[oid] = f[3]
+				continue
+			}
+			break
+		}
+		commits = append(commits, c)
+	}
+	for i, j := 0, len(commits)-1; i < j; i, j = i+1, j-1 {
+		commits[i], commits[j] = commits[j], commits[i]
+	}
+	return commits, nil
+}
+
+// fetchObject fetches one object by id from the remote, explicitly: the
+// one network read a missing attachment blob costs.
+func (g *gitRepo) fetchObject(ctx context.Context, oid string) error {
+	_, err := g.run(ctx, remoteArgs("fetch", "--quiet", "--no-tags", "--no-write-fetch-head",
+		"--no-auto-gc", "--no-recurse-submodules", remoteName, oid)...)
+	return err
+}
+
 type sigInfo struct {
 	state sigState
 	fp    string

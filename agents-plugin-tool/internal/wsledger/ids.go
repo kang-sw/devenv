@@ -21,7 +21,39 @@ const (
 	memberPrefix = refPrefix + "m/"
 
 	rolesFile = "roles.json"
+
+	// attachPrefix holds the attachment refs: refs/heads/attach/m/<member>/<clone>
+	// for the member ref refs/heads/tracker/m/<member>/<clone>. A client that
+	// predates attachments fetches only refPrefix and never sees them.
+	attachPrefix = "refs/heads/attach/"
+	attachDir    = "attachments"
 )
+
+func attachRef(member, clone string) string { return attachPrefix + "m/" + member + "/" + clone }
+
+// parseAttachRef returns the stream an attachment ref belongs to.
+func parseAttachRef(ref string) (member, clone string, ok bool) {
+	rest, found := strings.CutPrefix(ref, attachPrefix+"m/")
+	if !found {
+		return "", "", false
+	}
+	member, clone, found = strings.Cut(rest, "/")
+	if !found || !ValidID(member) || !ValidID(clone) {
+		return "", "", false
+	}
+	return member, clone, true
+}
+
+// attachOIDRe is an attachment oid: the sha256 of its content, 64 lowercase
+// hex digits.
+var attachOIDRe = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+// ValidAttachmentOID reports whether s is an attachment oid (the lowercase
+// hex sha256 of the content).
+func ValidAttachmentOID(s string) bool { return attachOIDRe.MatchString(s) }
+
+// attachPath is the tree path of an attachment blob.
+func attachPath(oid string) string { return attachDir + "/" + oid }
 
 // Protocol-owned identity event types. Every other type is a domain event.
 const (
