@@ -347,7 +347,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-09T15:07:57Z"
+        "touched_at": "2026-11-09T15:08:29Z",
+        "impl": {
+          "branch": "impl/develop/argue-trace-ether"
+        }
       }
     },
     "261109-feat-ws-whiteboard-settled-row-expand": {
