@@ -151,7 +151,9 @@ func readStaged(dir, oid string) ([]byte, bool) {
 }
 
 // ReadAttachment returns the content of attachment oid of store id, or
-// ErrAttachmentNotFound.
+// ErrAttachmentNotFound. A blob this clone lacks is fetched from the remote
+// under networkTimeout, as a check is: the fetch holds the store's lock,
+// so a stalled transfer must not outlast it whatever the caller's context.
 func (h *Host) ReadAttachment(ctx context.Context, id, oid string) ([]byte, error) {
 	if !wsledger.ValidAttachmentOID(oid) {
 		return nil, ErrAttachmentNotFound
@@ -162,8 +164,10 @@ func (h *Host) ReadAttachment(ctx context.Context, id, oid string) ([]byte, erro
 			return err
 		}
 		v := st.tracker.View(h.now(), 0)
+		fetchCtx, cancel := context.WithTimeout(ctx, networkTimeout)
+		defer cancel()
 		var err error
-		data, err = st.ledger.ReadAttachment(ctx, oid, attachmentAuthor(v, oid))
+		data, err = st.ledger.ReadAttachment(fetchCtx, oid, attachmentAuthor(v, oid))
 		if err == nil {
 			return nil
 		}

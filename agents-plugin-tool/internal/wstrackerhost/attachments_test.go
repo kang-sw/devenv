@@ -6,6 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"sync"
 	"testing"
 	"time"
 
@@ -172,5 +176,71 @@ func TestAttachmentsStagedExpiry(t *testing.T) {
 	}
 	if _, err := os.Stat(stagedPath(mine, named.OID)); err != nil {
 		t.Fatalf("staged copy named by a pending event: %v, want kept", err)
+	}
+}
+
+// deadlineRunner records, for every explicit object fetch (the attachment
+// read's on-demand fetch), how far off its context's deadline was.
+type deadlineRunner struct {
+	mu        sync.Mutex
+	deadlines []time.Duration // 0: no deadline
+}
+
+var objectIDRe = regexp.MustCompile(`^[0-9a-f]{40}$`)
+
+func (r *deadlineRunner) RunGit(ctx context.Context, root string, args ...string) ([]byte, error) {
+	if isRemoteCommand(args) && objectIDRe.MatchString(args[len(args)-1]) {
+		var left time.Duration
+		if d, ok := ctx.Deadline(); ok {
+			left = time.Until(d)
+		}
+		r.mu.Lock()
+		r.deadlines = append(r.deadlines, left)
+		r.mu.Unlock()
+	}
+	return batchRunner{}.RunGit(ctx, root, args...)
+}
+
+// TestReadAttachmentBoundsTheFetch: a blob the clone lacks is fetched on
+// demand under the network timeout, not only under the caller's context
+// (which may have none), since the fetch holds the store's lock.
+func TestReadAttachmentBoundsTheFetch(t *testing.T) {
+	w := newWorld(t)
+	if out, err := exec.Command("git", "-C", w.remote, "config", "uploadpack.allowFilter", "true").CombinedOutput(); err != nil {
+		t.Fatalf("allow filter: %v: %s", err, out)
+	}
+	a := w.machine("a")
+	rr := &deadlineRunner{}
+	b, err := New(Options{Root: filepath.Join(w.dir, "b"), Clock: w.clock, Runner: rr})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { b.Close() })
+	w.register(a, "team", "ada", &wstracker.Profile{Given: "Ada"})
+	w.register(b, "team", "bo", &wstracker.Profile{Given: "Bo"})
+	ctx := context.Background()
+	data := pngBytes("fetched on demand")
+	att := stageOK(t, a, "team", "far.png", data)
+	if _, err := createWithAttachment(t, a, "team", att); err != nil {
+		t.Fatal(err)
+	}
+	syncStore(t, a, "team")
+	if _, err := b.Check(ctx, "team"); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := b.ReadAttachment(ctx, "team", att.OID)
+	if err != nil || !bytes.Equal(got, data) {
+		t.Fatalf("read = %q, %v", got, err)
+	}
+	rr.mu.Lock()
+	defer rr.mu.Unlock()
+	if len(rr.deadlines) == 0 {
+		t.Fatal("the read fetched nothing; the test needs the blob absent")
+	}
+	for _, left := range rr.deadlines {
+		if left <= 0 || left > networkTimeout {
+			t.Fatalf("object fetch deadline %v away, want within the network timeout %v", left, networkTimeout)
+		}
 	}
 }
