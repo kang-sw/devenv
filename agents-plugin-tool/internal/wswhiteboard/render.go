@@ -327,6 +327,8 @@ type pageData struct {
 	// (inline_tags.go) escaped text, for RenderText: they are an item-field
 	// rule, and other authors' text keeps every tag as text.
 	noInlineTags bool
+	// attachmentSrc is RenderText's TextTargets.AttachmentSrc.
+	attachmentSrc func(oid string) string
 
 	icons map[string]bool
 	// onPage holds every item ID the page renders, the targets an in-page

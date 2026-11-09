@@ -257,6 +257,52 @@ func TestDashboardTrackerWithoutAHostReturnsItsError(t *testing.T) {
 	check("SaveProfile", dt.SaveProfile(wsdashboard.TrackerProfile{Given: "Ada"}))
 	_, err = dt.Register(ctx, wsdashboard.TrackerRegisterRequest{ID: "team"})
 	check("Register", err)
+	_, err = dt.Render(ctx, "team", wsdashboard.TrackerRenderRequest{Text: "x"})
+	check("Render", err)
+}
+
+// TestDashboardTrackerRenderMatchesTheView: an editor's preview renders
+// through the renderer the view's html uses, safe mode included, so what
+// the preview shows is what the saved text shows.
+func TestDashboardTrackerRenderMatchesTheView(t *testing.T) {
+	dt, _ := newTestTracker(t)
+	ctx := context.Background()
+	text := "# heading\n\n**bold** <script>alert(1)</script> ![alt](shot.png) [x](https://example.com/a)"
+	create, _ := json.Marshal(map[string]any{"kind": "task", "title": "md", "body": text})
+	ids, err := dt.Dispatch(ctx, "team", []wsdashboard.TrackerEvent{{Type: wstracker.TypeItemCreate, Payload: create}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := dt.Render(ctx, "team", wsdashboard.TrackerRenderRequest{Text: text})
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, err := dt.View(ctx, "team")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var view struct {
+		HTML struct {
+			Items map[string]string `json:"items"`
+		} `json:"html"`
+	}
+	if err := json.Unmarshal(v.View, &view); err != nil {
+		t.Fatal(err)
+	}
+	if want := view.HTML.Items[ids[0]]; got != want || want == "" {
+		t.Fatalf("Render = %q, want the view's html %q", got, want)
+	}
+	for _, absent := range []string{"<script", "<img"} {
+		if strings.Contains(got, absent) {
+			t.Errorf("Render = %q holds %q; safe mode lost", got, absent)
+		}
+	}
+	if !strings.Contains(got, "<h1>heading</h1>") || !strings.Contains(got, `target="_blank"`) {
+		t.Errorf("Render = %q, want the markdown rendered", got)
+	}
+	if empty, err := dt.Render(ctx, "team", wsdashboard.TrackerRenderRequest{}); err != nil || empty != "" {
+		t.Errorf("Render of no text = %q, %v; want empty", empty, err)
+	}
 }
 
 // TestDashboardTrackerViewHTML: the view JSON carries each item body and
@@ -348,7 +394,7 @@ func TestTrackerTextSafeMode(t *testing.T) {
 		"onclick in title": {`[x](https://example.com "a\" onclick=\"alert(1)")`, []string{`" onclick`}, nil},
 	}
 	for name, c := range inert {
-		got := string(trackerText(c.in))
+		got := string(trackerText(c.in, nil))
 		for _, s := range c.absent {
 			if strings.Contains(got, s) {
 				t.Errorf("%s: %q renders %q, which holds %q", name, c.in, got, s)
@@ -361,9 +407,96 @@ func TestTrackerTextSafeMode(t *testing.T) {
 		}
 	}
 	for _, in := range []string{"[x](https://example.com/a)", "https://example.com/a"} {
-		got := string(trackerText(in))
+		got := string(trackerText(in, nil))
 		if !strings.Contains(got, `<a href="https://example.com/a" target="_blank" rel="noopener noreferrer">`) {
 			t.Errorf("%q renders %q, want an anchor opening in a new tab", in, got)
 		}
+	}
+	// The one opening: an attachment image naming the text's own
+	// attachment. A foreign oid, a local path, a network image, and a link
+	// to the attachment stay text even beside it.
+	own, foreign := strings.Repeat("a", 64), strings.Repeat("b", 64)
+	src := ownAttachments("team", []string{own})
+	got := string(trackerText("![shot](attachment:"+own+")", src))
+	if want := `<img src="/tracker/stores/team/attachments/` + own + `" alt="shot">`; !strings.Contains(got, want) {
+		t.Errorf("own attachment renders %q, want %q", got, want)
+	}
+	for _, in := range []string{"![x](attachment:" + foreign + ")", "![x](shot.png)", "![x](https://example.com/x.png)", "[x](attachment:" + own + ")", "<img src=\"attachment:" + own + "\">"} {
+		if got := string(trackerText(in, src)); strings.Contains(got, "<img") || strings.Contains(got, "href") {
+			t.Errorf("%q with an own attachment list renders %q; want text", in, got)
+		}
+	}
+	if got := string(trackerText("![x](attachment:"+own+")", ownAttachments("team", []string{"not-an-oid", ""}))); strings.Contains(got, "<img") {
+		t.Errorf("an invalid own oid opened an image: %q", got)
+	}
+}
+
+// TestDashboardTrackerAttachmentImages: a staged upload renders inline in
+// a preview whose pending list names it, an unstaged oid in that list does
+// not; the write commits the staged blob, after which the view renders the
+// image in the body or comment that lists it and not in one that only
+// names its oid.
+func TestDashboardTrackerAttachmentImages(t *testing.T) {
+	dt, _ := newTestTracker(t)
+	ctx := context.Background()
+	data := append([]byte("\x89PNG\r\n\x1a\n"), "shot"...)
+	att, err := dt.StageAttachment(ctx, "team", "shot.png", data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ghost := wsdashboard.TrackerAttachment{OID: strings.Repeat("c", 64), Name: "ghost.png", Size: 1, Mime: "image/png"}
+	img := `<img src="/tracker/stores/team/attachments/` + att.OID + `"`
+	text := "look ![shot](attachment:" + att.OID + ") and ![ghost](attachment:" + ghost.OID + ")"
+
+	got, err := dt.Render(ctx, "team", wsdashboard.TrackerRenderRequest{Text: text, Attachments: []wsdashboard.TrackerAttachment{att, ghost}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, img) || strings.Contains(got, ghost.OID) {
+		t.Fatalf("preview = %q, want the staged image and not the unstaged one", got)
+	}
+	if got, _ := dt.Render(ctx, "team", wsdashboard.TrackerRenderRequest{Text: text}); strings.Contains(got, "<img") {
+		t.Fatalf("preview without a pending list = %q, want no image", got)
+	}
+
+	meta := []map[string]any{{"oid": att.OID, "name": att.Name, "size": att.Size, "mime": att.Mime}}
+	create, _ := json.Marshal(map[string]any{"kind": "task", "title": "img", "body": text, "attachments": meta})
+	other, _ := json.Marshal(map[string]any{"kind": "task", "title": "borrower", "body": "![x](attachment:" + att.OID + ")"})
+	comment, _ := json.Marshal(map[string]any{"item": "$1", "body": "again ![shot](attachment:" + att.OID + ")", "attachments": meta})
+	ids, err := dt.Dispatch(ctx, "team", []wsdashboard.TrackerEvent{
+		{Type: wstracker.TypeItemCreate, Payload: create},
+		{Type: wstracker.TypeItemCreate, Payload: other},
+		{Type: wstracker.TypeCommentAdd, Payload: comment},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if read, err := dt.ReadAttachment(ctx, "team", att.OID); err != nil || string(read) != string(data) {
+		t.Fatalf("read after the write = %q, %v", read, err)
+	}
+	if got, _ := dt.Render(ctx, "team", wsdashboard.TrackerRenderRequest{Text: text, Attachments: []wsdashboard.TrackerAttachment{att}}); !strings.Contains(got, img) {
+		t.Fatalf("preview of a stored oid = %q, want the image", got)
+	}
+	v, err := dt.View(ctx, "team")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var view struct {
+		HTML struct {
+			Items    map[string]string `json:"items"`
+			Comments map[string]string `json:"comments"`
+		} `json:"html"`
+	}
+	if err := json.Unmarshal(v.View, &view); err != nil {
+		t.Fatal(err)
+	}
+	if h := view.HTML.Items[ids[0]]; !strings.Contains(h, img) || strings.Contains(h, ghost.OID) {
+		t.Errorf("item html = %q, want its own image only", h)
+	}
+	if h := view.HTML.Items[ids[1]]; strings.Contains(h, "<img") {
+		t.Errorf("borrowing item html = %q, want no image", h)
+	}
+	if h := view.HTML.Comments[ids[2]]; !strings.Contains(h, img) {
+		t.Errorf("comment html = %q, want its own image", h)
 	}
 }

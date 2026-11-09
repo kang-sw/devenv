@@ -28,6 +28,7 @@ type fakeTracker struct {
 	checkErr  error
 	saveErr   error
 	regErr    error
+	renderErr error
 	events    []TrackerEvent
 	seen      TrackerSeen
 	profiles  []TrackerProfile
@@ -139,6 +140,18 @@ func (f *fakeTracker) Register(_ context.Context, req TrackerRegisterRequest) (T
 		return TrackerRegisterResult{}, f.regErr
 	}
 	return TrackerRegisterResult{Store: req.ID, Creator: true, Profile: TrackerProfile{Given: "Ada"}}, nil
+}
+
+func (f *fakeTracker) Render(_ context.Context, id string, req TrackerRenderRequest) (string, error) {
+	f.record("render " + id)
+	if f.renderErr != nil {
+		return "", f.renderErr
+	}
+	out := "<p>" + req.Text + "</p>"
+	for _, a := range req.Attachments {
+		out += "[" + a.OID + " " + a.Name + "]"
+	}
+	return out, nil
 }
 
 func (f *fakeTracker) StageAttachment(_ context.Context, id, name string, data []byte) (TrackerAttachment, error) {
@@ -317,11 +330,22 @@ func TestTrackerRoutesAnswer(t *testing.T) {
 		t.Fatalf("register = %d %s", code, body)
 	}
 
+	code, body = call(d, http.MethodPost, "/tracker/stores/team/render", `{"text":"**md**"}`)
+	if code != http.StatusOK || body != `{"html":"\u003cp\u003e**md**\u003c/p\u003e"}`+"\n" {
+		t.Fatalf("render = %d %s", code, body)
+	}
+	// The pending attachment list reaches the host as sent.
+	code, body = call(d, http.MethodPost, "/tracker/stores/team/render", `{"text":"x","attachments":[{"oid":"abc","name":"a.png","size":3,"mime":"image/png"}]}`)
+	if code != http.StatusOK || body != `{"html":"\u003cp\u003ex\u003c/p\u003e[abc a.png]"}`+"\n" {
+		t.Fatalf("render with attachments = %d %s", code, body)
+	}
+
 	for _, wrong := range []struct{ method, path string }{
 		{http.MethodPost, "/tracker/stores"},
 		{http.MethodPost, "/tracker/stores/team/view"},
 		{http.MethodGet, "/tracker/stores/team/dispatch"},
 		{http.MethodGet, "/tracker/stores/team/sync"},
+		{http.MethodGet, "/tracker/stores/team/render"},
 		{http.MethodGet, "/tracker/register"},
 		{http.MethodDelete, "/tracker/profiles"},
 	} {
@@ -344,6 +368,7 @@ func TestTrackerRouteErrors(t *testing.T) {
 		{http.MethodGet, "/tracker/stores/other/view"},
 		{http.MethodPost, "/tracker/stores/other/dispatch"},
 		{http.MethodPost, "/tracker/stores/other/seen"},
+		{http.MethodPost, "/tracker/stores/other/render"},
 	} {
 		code, body := call(d, r.method, r.path, `{"events":[{"type":"x"}]}`)
 		if code != http.StatusNotFound || body != `{"error":"unknown store"}`+"\n" {
@@ -364,6 +389,10 @@ func TestTrackerRouteErrors(t *testing.T) {
 			t.Errorf("%s error = %d %s", op, code, body)
 		}
 	}
+	fake.renderErr = errors.New("render broke")
+	if code, body := call(d, http.MethodPost, "/tracker/stores/team/render", `{"text":"x"}`); code != http.StatusInternalServerError || !strings.Contains(body, "render broke") {
+		t.Errorf("render error = %d %s", code, body)
+	}
 	fake.saveErr = errors.New("bad profile")
 	if code, body := call(d, http.MethodPost, "/tracker/profiles", `{"given":""}`); code != http.StatusBadRequest || !strings.Contains(body, "bad profile") {
 		t.Errorf("profile save error = %d %s", code, body)
@@ -378,6 +407,7 @@ func TestTrackerRouteErrors(t *testing.T) {
 		{http.MethodGet, "/tracker/stores"},
 		{http.MethodGet, "/tracker/stores/team/view"},
 		{http.MethodPost, "/tracker/stores/team/sync"},
+		{http.MethodPost, "/tracker/stores/team/render"},
 		{http.MethodGet, "/tracker/profiles"},
 		{http.MethodPost, "/tracker/register"},
 	} {
@@ -423,10 +453,14 @@ func TestTrackerDispatchForcesHumanOriginAndRefuses(t *testing.T) {
 			t.Errorf("%s body = %d, want 400", name, code)
 		}
 	}
-	for _, path := range []string{"/tracker/stores/team/seen", "/tracker/profiles", "/tracker/register"} {
+	for _, path := range []string{"/tracker/stores/team/seen", "/tracker/stores/team/render", "/tracker/profiles", "/tracker/register"} {
 		if code, _ := call(d, http.MethodPost, path, "not json"); code != http.StatusBadRequest {
 			t.Errorf("malformed body to %s = %d, want 400", path, code)
 		}
+	}
+	// The render route takes the write body limit too.
+	if code, body := call(d, http.MethodPost, "/tracker/stores/team/render", `{"text":"`+strings.Repeat("a", trackerBodyLimit)+`"}`); code != http.StatusBadRequest || !strings.Contains(body, "too large") {
+		t.Errorf("oversize render body = %d %s, want 400 too large", code, body)
 	}
 	if got := fake.recorded(); len(got) != before {
 		t.Fatalf("a refused body reached the host: %v", got[before:])
@@ -449,7 +483,9 @@ func TestTrackerPostsRequireTheDaemonsOwnOrigin(t *testing.T) {
 	fake := newFakeTracker()
 	d := startTrackerDaemon(t, fake)
 	base := endpointURL(d.Endpoint(), "")
-	for _, route := range trackerPosts() {
+	// The render route is a POST that writes nothing; it takes the same rule.
+	posts := append(trackerPosts(), struct{ path, body string }{"/tracker/stores/team/render", `{"text":"x"}`})
+	for _, route := range posts {
 		for _, origin := range []string{"", "null", "http://evil.example"} {
 			code, header, _ := postJSON(t, base+route.path, origin, route.body)
 			if code != http.StatusForbidden {
@@ -465,7 +501,7 @@ func TestTrackerPostsRequireTheDaemonsOwnOrigin(t *testing.T) {
 		t.Fatalf("a refused post bumped the revision to %d", rev)
 	}
 	// The same routes from the daemon's own origin pass.
-	for _, route := range trackerPosts() {
+	for _, route := range posts {
 		if code, _, body := postJSON(t, base+route.path, base, route.body); code >= 300 {
 			t.Errorf("same-origin %s = %d %s", route.path, code, body)
 		}
@@ -499,6 +535,7 @@ func TestTrackerWritesBumpTheRevision(t *testing.T) {
 	last = trackerRev(t, d)
 	call(d, http.MethodGet, "/tracker/stores/team/view", "")
 	call(d, http.MethodGet, "/tracker/profiles", "")
+	call(d, http.MethodPost, "/tracker/stores/team/render", `{"text":"x"}`)
 	if rev := trackerRev(t, d); rev != last {
 		t.Errorf("a read moved the revision from %d to %d", last, rev)
 	}

@@ -179,6 +179,26 @@ func (h *Host) ReadAttachment(ctx context.Context, id, oid string) ([]byte, erro
 	return data, err
 }
 
+// HasAttachment reports whether attachment oid of store id is staged on
+// this clone or stored (a verified attachment tree of some member, or a
+// pending write of this clone): the oids a write may name. It reads no
+// content; ReadAttachment checks the hash when the blob is served.
+func (h *Host) HasAttachment(ctx context.Context, id, oid string) (bool, error) {
+	if !wsledger.ValidAttachmentOID(oid) {
+		return false, nil
+	}
+	var ok bool
+	err := h.with(ctx, id, func(st *store) error {
+		if fi, err := os.Stat(stagedPath(st.entry.Dir, oid)); err == nil && fi.Mode().IsRegular() {
+			ok = true
+			return nil
+		}
+		ok = st.ledger.HasAttachment(oid)
+		return nil
+	})
+	return ok, err
+}
+
 // attachmentAuthor is the member whose item or comment names oid ("" when
 // none does): the tree ReadAttachment tries first.
 func attachmentAuthor(v *wstracker.View, oid string) string {

@@ -310,7 +310,9 @@ func (t target) isAction() bool { return t.action.Href != "" || t.action.Abs != 
 // page with FileText a file target instead comes back as path text, with an
 // empty href, and on a page with FileActions also as an action link. An
 // image file target on a page with ImageSrc comes back as the src ImageSrc
-// returns, unless it returns empty (see fileTarget).
+// returns, unless it returns empty (see fileTarget). An attachment:<oid>
+// image comes back as the src attachmentSrc returns, when that is a daemon
+// path; every other attachment: destination renders as text.
 func (p *pageData) resolveTarget(dest string, image bool) (target, bool) {
 	dest = strings.TrimSpace(dest)
 	switch {
@@ -335,6 +337,16 @@ func (p *pageData) resolveTarget(dest string, image bool) (target, bool) {
 	switch strings.ToLower(u.Scheme) {
 	case "http", "https":
 		return target{href: dest}, !image
+	case "attachment":
+		// Only an image, only through attachmentSrc, and only to a path on
+		// the serving daemon; the oid is the opaque part (attachment:<oid>).
+		if !image || p.attachmentSrc == nil || u.Opaque == "" || suffix != "" {
+			return target{}, false
+		}
+		if src := p.attachmentSrc(u.Opaque); daemonPath(src) {
+			return target{href: src}, true
+		}
+		return target{}, false
 	case "file":
 		if u.Host != "" && u.Host != "localhost" {
 			return target{}, false

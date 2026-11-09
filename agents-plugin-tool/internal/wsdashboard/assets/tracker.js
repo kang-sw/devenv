@@ -50,6 +50,20 @@
 //                        false, error}); creator: this registration created the
 //                        store (false: it joined). done comes after stores() holds
 //                        the new store, which the renderer then opens
+//   render(id, req, done)
+//                        optional, for the editors' preview: renders markdown req.text
+//                        the way the view's html renders an item body or comment text,
+//                        with req.attachments ([{oid, name, size, mime}]: the ones the
+//                        editor's save would carry, uploads included) as the text's own,
+//                        so an ![name](attachment:<oid>) image of one shows.
+//                        done({ok: true, html} | {ok: false, error}). Without it the
+//                        preview shows the plain text (the mockup)
+//   upload(id, file, name, done)
+//                        optional, for an image pasted or dropped into an editor: stages
+//                        the file's bytes for a later write; name is the dropped file's
+//                        name, '' for a clipboard paste. done({ok: true, attachment:
+//                        {oid, name, size, mime}} | {ok: false, error}). Without it a
+//                        pasted or dropped image is refused with a notice (the mockup)
 //   hostError()       -> optional: the reason the store list could not be read (the
 //                        host is unavailable), or null; the "+ store" dialog shows it
 //                        and offers nothing else
@@ -217,8 +231,10 @@
     nrow: {},             // store -> { val, kind } while the Items list shows its "+ New" input row
     knew: {},             // store -> { val } while the "all" kanban's review column shows its "+" input row
     sub: null,            // { item: parent, rk: the row it sits under, val } while an "add subtask" input row shows
-    iedit: null,          // { item, title, body, project } while the item window edits the item in place
-    cedit: null,          // { cid, body } while an own comment is edited in place
+    iedit: null,          // { item, title, body, project, mpick } while the item window edits the item in place
+    cedit: null,          // { cid, body, mpick } while an own comment is edited in place; mpick: member ids picked with @ meanwhile
+    edpv: {},             // editor textarea id -> { text, html, err, busy } while that editor shows its preview (editorHtml)
+    eatt: {},             // editor textarea id -> [{oid, name, size, mime}] images uploaded into that editor since it opened (edImages)
     act: { family: 'all', member: 'all', flagged: false, conc: false },
     kind: 'all', status: 'open'
   };
@@ -1488,7 +1504,7 @@
     var live = n.status === 'applied' && !!VS.comments[n.id], ed = ui.cedit && ui.cedit.cid === n.id && live && !c.hidden;
     if (ed) acts = '';
     // an own comment being edited in place (ui.cedit): Cmd/Ctrl+Enter saves, Esc cancels
-    var txt = ed ? '<div class="cedit"><textarea id="tkcedit" data-keep rows="3" aria-label="' + wsT("js.tk.cmt.edit") + '">' + esc(ui.cedit.body) + '</textarea><div class="tb">' +
+    var txt = ed ? '<div class="cedit">' + editorHtml('tkcedit', { value: ui.cedit.body, rows: 3, label: wsT("js.tk.cmt.edit"), pv: 'ctext' }) + '<div class="tb">' +
       btn('cedit-save', wsT("js.tk.dlg.save"), {}, 'primary') + btn('cedit-x', wsT("js.tk.dlg.cancel"), {}) + '<span class="muted">' + wsT("js.tk.cedit.hint", MAC ? '⌘Enter' : 'Ctrl+Enter') + '</span></div></div>' + mentionChips(c.mentions) + attChips(c.attachments, true) : c.hidden ? '<div class="hiddenc">' + wsT("js.tk.cmt.hidden", esc(alias(c.hidden))) + '<details><summary>' + wsT("js.tk.cmt.history") + '</summary>' + esc(body) + '</details></div>' :
       textBlock('ctext', 'comments', n.id, body) + mentionChips(live ? c.mentions : p.mentions) + attChips(live ? c.attachments : p.attachments, live);
     return '<li class="cmt' + (n.status !== 'applied' ? ' ' + n.status : '') + (n.markers.length ? ' concm' : '') + (n.member === v ? ' mine' : '') + '"' + attr('ev', n.id) + tipAttr(n.alias) + '>' +
@@ -1666,7 +1682,7 @@
       '<button type="button" class="ia iw-x" data-act="win-close" aria-label="' + wsT("js.tk.win.close") + '"' + tipAttr(wsT("js.tk.win.close")) + '><svg class="i"><use href="#tki-x"/></svg></button></div>' +
       '<div class="iw-chips">' + kindChip(it) + idCopyBtn(it) + (it.kind === 'topic' ? '' : stChip(it.status) + prChip(it) + dueChip(it) + rollupHtml(it)) + warnHtml(it) + '</div></div>';
     h += '<div class="iw-grid"><div class="iw-main">';
-    if (ed) h += '<div class="iw-body iw-edit"><textarea id="iw-ebody" data-keep rows="5" aria-label="' + wsT("js.tk.form.body") + '">' + esc(ed.body) + '</textarea>' +
+    if (ed) h += '<div class="iw-body iw-edit">' + editorHtml('iw-ebody', { value: ed.body, rows: 5, label: wsT("js.tk.form.body"), pv: 'sh-body' }) +
       '<input type="text" id="iw-eproj" data-keep autocomplete="off" value="' + esc(ed.project) + '" placeholder="' + wsT("js.tk.form.project") + '" aria-label="' + wsT("js.tk.form.project") + '">' +
       '<div class="tb">' + btn('iedit-save', wsT("js.tk.dlg.save"), {}, 'primary') + btn('iedit-x', wsT("js.tk.dlg.cancel"), {}) + '<span class="muted">' + wsT("js.tk.edit.hint") + '</span></div></div>';
     else if (it.body || it.mentions.length || it.attachments.length)
@@ -1681,15 +1697,16 @@
     // composer: a comment (optionally a quote reply); the status moved to the header's menu.
     // The box carries the @ button (bottom left) and the send button (bottom right); Cmd/Ctrl+Enter sends.
     // Typing @ (or the button) opens the member suggestion popup at the caret (see mentionSync).
+    // The box is the shared editor (editorHtml) with the bar below its text.
     var rt = ui.replyTo && VS.comments[ui.replyTo] && VS.comments[ui.replyTo].item === it.id ? VS.comments[ui.replyTo] : null;
     var send = wsT("js.tk.composer.send", MAC ? '⌘Enter' : 'Ctrl+Enter');
     h += '<div class="composer2">' + (it.hidden ? '<span class="muted">' + wsT("js.tk.composer.hidden") + '</span>' : '') +
       (rt ? '<div class="replying">' + wsT("js.tk.composer.replying", esc(alias(rt.id)), esc(nm(rt.author)), esc(String(rt.body).slice(0, 70))) + ' ' + btn('reply-x', 'x', {}) + '</div>' : '') +
       draftHtml() +
-      '<div class="cbox"><textarea id="cbox" data-keep rows="2" aria-autocomplete="list" aria-controls="tkmpop" aria-expanded="false" placeholder="' + wsT("js.tk.composer.placeholder", esc(nm(v))) + '"></textarea><div class="cbar">' +
+      editorHtml('cbox', { cls: 'cbox', rows: 2, placeholder: wsT("js.tk.composer.placeholder", esc(nm(v))), pv: 'ctext', foot: '<div class="cbar">' +
       '<button type="button" id="cmention" class="cat"' + attr('act', 'mention') + ' aria-label="' + wsT("js.tk.composer.mention") + '"' + tipAttr(wsT("js.tk.composer.mention.tip")) + '>@</button>' +
       (CAPS.origin ? '<select id="corigin" title="' + wsT("js.tk.origin") + '"><option value="human">' + wsT("js.tk.origin.human") + '</option><option value="agent">' + wsT("js.tk.origin.agent") + '</option><option value="agent-auto">' + wsT("js.tk.origin.auto") + '</option></select>' : '') +
-      '<span class="grow"></span><button type="button" class="csend" id="tkcsend"' + attr('act', 'comment') + attr('item', it.id) + ' aria-label="' + esc(send) + '"' + tipAttr(send) + '><svg class="i"><use href="#tki-send"/></svg></button></div></div>' +
+      '<span class="grow"></span><button type="button" class="csend" id="tkcsend"' + attr('act', 'comment') + attr('item', it.id) + ' aria-label="' + esc(send) + '"' + tipAttr(send) + '><svg class="i"><use href="#tki-send"/></svg></button></div>' }) +
       // with caps.attach, attachment metadata typed in by hand (a stand-in oid is computed)
       (CAPS.attach ? '<div class="cextra"><input id="catt-name" type="text" placeholder="' + wsT("js.tk.composer.attname") + '"><input id="catt-size" type="number" min="0" placeholder="' + wsT("js.tk.composer.attsize") + '">' +
       btn('att-add', wsT("js.tk.composer.attach"), {}) + '<span class="muted">' + wsT("js.tk.composer.limit", fmtSize(VS.attachments.max_bytes)) + '</span></div>' : '') + '</div>';
@@ -1771,6 +1788,8 @@
   }
   // An edit of a body keeps the mentions whose @id is still in the text and every attachment.
   function keptMentions(ids, body) { return listOf(ids).filter(function (id) { return hasToken(body, '@' + id); }); }
+  // the stored mentions plus the ones an edit picked with @, each once
+  function withPicks(ids, picks) { var out = listOf(ids).slice(); listOf(picks).forEach(function (id) { if (out.indexOf(id) < 0) out.push(id); }); return out; }
   // (531) The items a text references: each #<alias> (or #<item id>) token that names an item of the
   // store, in text order. A write carries them as refs, so a ref lasts while its token stays in
   // the text; the composer's # popup only types the token. A token ending in dots or hyphens is
@@ -1815,13 +1834,144 @@
     return t.innerHTML;
   }
 
+  // ------------------------------------------------------- the markdown editor
+
+  // One editor serves the item body edit (iw-ebody), the comment box (cbox), and a comment's
+  // edit in place (tkcedit): a Write / Preview toggle over the textarea, which carries the @ / #
+  // suggestion popup (data-mention), and a preview pane in its place while previewing. Each
+  // place keeps its own save and cancel keys (the keydown handler goes by the textarea id).
+  // The preview is the adapter's render of the text, the renderer the saved view uses, drawn
+  // like the saved block (o.pv: its class); without render, the plain text. The textarea stays
+  // in the page while hidden, so a save reads it as before.
+  // o: { value, rows, label, placeholder, cls (the wrapper's extra class), pv, foot (HTML after
+  // the text, inside the wrapper) }
+  function editorHtml(id, o) {
+    var on = !!ui.edpv[id];
+    return '<div class="tked' + (o.cls ? ' ' + o.cls : '') + '"' + attr('ed', id) + '>' +
+      '<div class="tked-tabs" role="group" aria-label="' + wsT("js.tk.ed.mode") + '">' +
+      ['write', 'preview'].map(function (m) {
+        return '<button type="button" class="tked-tab"' + attr('act', 'ed-mode') + attr('ed', id) + attr('mode', m) + ' aria-pressed="' + ((m === 'preview') === on) + '">' + (m === 'write' ? wsT("js.tk.ed.write") : wsT("js.tk.ed.preview")) + '</button>';
+      }).join('') + '</div>' +
+      '<textarea id="' + id + '" data-keep data-mention rows="' + (o.rows || 3) + '" aria-autocomplete="list" aria-controls="tkmpop" aria-expanded="false"' +
+      (o.label ? ' aria-label="' + o.label + '"' : '') + (o.placeholder ? ' placeholder="' + o.placeholder + '"' : '') + (on ? ' hidden' : '') + '>' + esc(o.value || '') + '</textarea>' +
+      '<div id="' + id + '-pv" class="' + pvClass(id, o.pv) + '"' + attr('pv', o.pv || '') + ' aria-live="polite"' + (on ? '' : ' hidden') + '>' + pvHtml(id) + '</div>' +
+      (o.foot || '') + '</div>';
+  }
+  function pvClass(id, cls) { var st = ui.edpv[id]; return 'tked-pv' + (cls ? ' ' + cls : '') + (st && st.html != null && !st.err ? ' md' : ''); }
+  function pvHtml(id) {
+    var st = ui.edpv[id];
+    if (!st) return '';
+    if (!st.text.trim()) return '<span class="muted">' + wsT("js.tk.ed.empty") + '</span>';
+    if (st.err != null) return '<span class="muted">' + wsT("js.tk.ed.failed", esc(st.err)) + '</span>';
+    if (st.busy) return '<span class="muted">' + wsT("js.tk.ed.loading") + '</span>';
+    return st.html != null ? refLinksHtml(st.html) : refLinks(esc(st.text));
+  }
+  // Switches editor id to mode ('write' or 'preview') in place, so the toggle keeps focus and a
+  // re-render is not needed; a render that lands meanwhile draws the same state from ui.edpv.
+  function edMode(id, mode) {
+    var box = $(id), wrap = box && box.closest('.tked');
+    if (!wrap || (mode === 'preview') === !!ui.edpv[id]) return;
+    if (mode === 'preview') {
+      if (MP) mentionClose();
+      var st = ui.edpv[id] = { text: box.value, html: null, err: null, busy: false };
+      if (AD.render && st.text.trim()) {
+        st.busy = true;
+        AD.render(ui.store, { text: st.text, attachments: edAtts(id) }, function (res) {
+          if (ui.edpv[id] !== st) return; // back to write, or the editor closed
+          st.busy = false;
+          if (res && res.ok) st.html = String(res.html || ''); else st.err = String((res && res.error) || '');
+          pvPaint(id);
+        });
+      }
+    } else delete ui.edpv[id];
+    var on = !!ui.edpv[id];
+    box.hidden = on;
+    $(id + '-pv').hidden = !on;
+    Array.prototype.forEach.call(wrap.querySelectorAll('.tked-tab'), function (b) { b.setAttribute('aria-pressed', String((b.getAttribute('data-mode') === 'preview') === on)); });
+    pvPaint(id);
+    if (!on) box.focus();
+  }
+  function pvPaint(id) {
+    var p = $(id + '-pv');
+    if (!p) return;
+    p.className = pvClass(id, p.getAttribute('data-pv'));
+    p.innerHTML = pvHtml(id);
+  }
+  // An editor textarea's text kept in ui, so a re-render draws it back (the comment box keeps
+  // its own draft across a render instead).
+  function edKeep(t) {
+    if (t.id === 'tkcedit' && ui.cedit) ui.cedit.body = t.value;
+    else if (/^iw-e(title|body|proj)$/.test(t.id) && ui.iedit) ui.iedit[{ 'iw-etitle': 'title', 'iw-ebody': 'body', 'iw-eproj': 'project' }[t.id]] = t.value;
+  }
+
+  // An image pasted or dropped into an editor (png, jpeg, gif, or webp, within the view's
+  // attachments.max_bytes, checked here before any request) is uploaded at once through the
+  // adapter's upload, which stages it until a write names it, then written into the text at the
+  // caret as ![name](attachment:<oid>) and kept in ui.eatt[editor id]. A save sends the entries
+  // whose attachment:<oid> is still in the text (savedAtts), and the preview's render request
+  // carries them, so a pasted image shows before it is saved. Any other file, an oversized
+  // image, and every image without upload (the mockup) get a notice and nothing else. An upload
+  // that lands after its editor ended is dropped; its staged copy expires on the server.
+  var IMG_TYPES = { 'image/png': 1, 'image/jpeg': 1, 'image/gif': 1, 'image/webp': 1 };
+  function edImages(id, files, named) {
+    var max = VS && VS.attachments ? VS.attachments.max_bytes : 0, store = ui.store;
+    files.forEach(function (f) {
+      var label = esc((named && f.name) || wsT("js.tk.ed.img.this"));
+      if (!AD.upload) return toast(wsT("js.tk.ed.img.off"));
+      if (!IMG_TYPES[f.type]) return toast(wsT("js.tk.ed.img.type", label));
+      if (max && f.size > max) return toast(wsT("js.tk.ed.img.big", label, fmtSize(max)));
+      var list = ui.eatt[id] || (ui.eatt[id] = []);
+      toast(wsT("js.tk.ed.img.busy", label));
+      AD.upload(store, f, named ? f.name || '' : '', function (res) {
+        var box = $(id);
+        if (ui.store !== store || ui.eatt[id] !== list || !box) return; // the editor ended meanwhile
+        if (!res || !res.ok || !res.attachment || !res.attachment.oid) return toast(wsT("js.tk.ed.img.fail", label, esc((res && res.error) || '')));
+        var a = res.attachment;
+        if (!list.some(function (x) { return x.oid === a.oid; })) list.push({ oid: a.oid, name: a.name, size: a.size, mime: a.mime });
+        if (ui.edpv[id]) edMode(id, 'write');
+        var alt = String(a.name || 'image').replace(/[\r\n]+/g, ' ').replace(/[\\\[\]]/g, '\\$&');
+        edInsert(box, '![' + alt + '](attachment:' + a.oid + ')');
+      });
+    });
+  }
+  // Puts s at box's caret (its selection while it is not focused), spaced from the words around it.
+  function edInsert(box, s) {
+    var v = box.value, a = box.selectionStart, b = box.selectionEnd;
+    if (a > 0 && !/\s/.test(v.charAt(a - 1))) s = ' ' + s;
+    if (b < v.length && !/\s/.test(v.charAt(b))) s += ' ';
+    box.setRangeText(s, a, b, 'end');
+    edKeep(box); // setRangeText fires no input event
+    if (box.id === 'cbox' || document.activeElement !== box) box.focus();
+  }
+  // The attachments editor id's text already had: an edit's stored ones, the composer's
+  // hand-drafted ones (caps.attach, the mockup).
+  function edBase(id) {
+    var o = id === 'iw-ebody' ? ui.iedit && VS.items[ui.iedit.item] : id === 'tkcedit' ? ui.cedit && VS.comments[ui.cedit.cid] : null;
+    return id === 'cbox' ? ui.adraft : o ? listOf(o.attachments) : [];
+  }
+  // edBase plus the editor's uploads, each oid once: the list a preview renders against.
+  function edAtts(id) {
+    var out = edBase(id).slice();
+    listOf(ui.eatt[id]).forEach(function (a) { if (!out.some(function (x) { return x.oid === a.oid; })) out.push(a); });
+    return out;
+  }
+  // The attachments a save of editor id with text sends: those whose attachment:<oid> is still in
+  // the text, as a mention lasts while its @id does. Under caps.attach the base entries are
+  // metadata drafted by hand, which no text names, so they stay as before.
+  function savedAtts(id, text) {
+    var base = edBase(id);
+    return edAtts(id).filter(function (a) { return String(text).indexOf('attachment:' + a.oid) >= 0 || (CAPS.attach && base.indexOf(a) >= 0); });
+  }
+
   // ------------------------------------------ @-mention and #-reference suggestion popup
 
-  // An @ or a # at the start or after whitespace in the comment box opens a list anchored at it,
+  // An @ or a # at the start or after whitespace in an editor's textarea opens a list anchored at it,
   // filtered by the text after it: members for @, items (by alias and title) for #. It is driven
   // by input events, which fire during an IME composition as well, so a Hangul name or title
   // filters while it is still being composed.
-  var MP = null; // the open popup: { ch: '@' or '#', start: index of ch, q: the text after it, idx: highlighted row, ids }
+  var MP = null; // the open popup: { box: the textarea id, ch: '@' or '#', start: index of ch, q: the text after it, idx: highlighted row, ids }
+  // the focused editor textarea t, when it is one
+  function mentionBox(t) { return t && t.hasAttribute && t.hasAttribute('data-mention') && own(t) ? t : null; }
   function mentionMatches(q) {
     q = q.toLowerCase();
     var pre = [], sub = [];
@@ -1853,10 +2003,11 @@
   }
   // Opens, refilters, re-places, or closes the popup after the box's text or caret changed.
   function mentionSync() {
-    var box = $('cbox'), tok = box && document.activeElement === box && mentionToken(box);
-    if (!tok) return mentionClose();
+    var box = mentionBox(document.activeElement), tok = box && mentionToken(box);
+    if (!tok || (MP && MP.box !== box.id)) mentionClose();
+    if (!tok) return;
     var same = MP && MP.ch === tok.ch && MP.start === tok.start && MP.q === tok.q;
-    MP = { ch: tok.ch, start: tok.start, q: tok.q, idx: same ? MP.idx : 0, ids: tok.ch === '#' ? refMatches(tok.q) : mentionMatches(tok.q) };
+    MP = { box: box.id, ch: tok.ch, start: tok.start, q: tok.q, idx: same ? MP.idx : 0, ids: tok.ch === '#' ? refMatches(tok.q) : mentionMatches(tok.q) };
     if (MP.idx >= MP.ids.length) MP.idx = 0;
     mentionDraw(box); mentionPlace(box);
   }
@@ -1897,27 +2048,31 @@
   }
   function mentionClose() {
     if (!MP) return;
+    var box = $(MP.box);
     MP = null; $('tkmpop').hidden = true;
-    var box = $('cbox');
     if (box) { box.setAttribute('aria-expanded', 'false'); box.removeAttribute('aria-activedescendant'); }
   }
-  // Picking replaces the @query token with "@<id> " at the caret and records the id for the next
-  // post; a #query token becomes "#<alias> ", which the post reads back as a ref (refsIn).
+  // Picking replaces the @query token with "@<id> " at the caret and records the id for the
+  // editor's next write (the comment box's draft, or the edit's mpick); a #query token becomes
+  // "#<alias> ", which the write reads back as a ref (refsIn).
   function mentionPick(i) {
-    var box = $('cbox'), id = MP && MP.ids[i];
+    var box = MP && $(MP.box), id = MP && MP.ids[i];
     if (!box || !id) return;
     // The pick replaces the whole token, the part after the caret too (`@ma|ry`).
     var end = box.selectionStart + /^[^\s@#]*/.exec(box.value.slice(box.selectionStart))[0].length;
     var spaced = /\s/.test(box.value.charAt(end)), ref = MP.ch === '#';
     box.setRangeText((ref ? '#' + VS.items[id].alias : '@' + id) + (spaced ? '' : ' '), MP.start, end, 'end');
     if (spaced) box.selectionStart = box.selectionEnd = box.selectionEnd + 1;
-    if (!ref && ui.mdraft.indexOf(id) < 0) ui.mdraft.push(id);
+    var picks = box.id === 'iw-ebody' ? ui.iedit && ui.iedit.mpick : box.id === 'tkcedit' ? ui.cedit && ui.cedit.mpick : ui.mdraft;
+    if (!ref && picks && picks.indexOf(id) < 0) picks.push(id);
+    edKeep(box); // setRangeText fires no input event
     mentionClose(); box.focus();
   }
   // The @ button: an @ at the caret (after a space when it would touch a word), then the popup.
   function mentionInsert() {
     var box = $('cbox');
     if (!box) return;
+    edMode('cbox', 'write');
     box.focus();
     var s = box.selectionStart;
     box.setRangeText((s && !/\s/.test(box.value.charAt(s - 1)) ? ' ' : '') + '@', s, box.selectionEnd, 'end');
@@ -2165,8 +2320,9 @@
         var ms = keptMentions(ui.mdraft, cp.body), crs = refsIn(cp.body);
         if (ms.length) cp.mentions = ms;
         if (crs.length) cp.refs = crs;
-        if (ui.adraft.length) cp.attachments = ui.adraft;
-        put([['comment.add', cp, origin]], function () { ui.clearDraft = true; ui.replyTo = null; ui.mdraft = []; ui.adraft = []; });
+        var cas = savedAtts('cbox', cp.body);
+        if (cas.length) cp.attachments = cas;
+        put([['comment.add', cp, origin]], function () { ui.clearDraft = true; ui.replyTo = null; ui.mdraft = []; ui.adraft = []; delete ui.eatt.cbox; });
         break;
       }
     }
@@ -2803,7 +2959,8 @@
     var it = VS.items[id];
     if (!it) return;
     if (!(ui.win && ui.item === id)) showItem(id);
-    ui.iedit = { item: id, title: it.title, body: it.body || '', project: it.project || '' };
+    ui.iedit = { item: id, title: it.title, body: it.body || '', project: it.project || '', mpick: [] };
+    delete ui.edpv['iw-ebody']; delete ui.eatt['iw-ebody'];
     render();
     if ($('iw-etitle')) $('iw-etitle').focus();
   }
@@ -2815,17 +2972,19 @@
     ['title', 'body', 'project'].forEach(function (f) { if (cur[f] !== (it[f] || '')) ep[f] = cur[f]; });
     if (!('title' in ep) && !('body' in ep) && !('project' in ep)) { toast(wsT("js.tk.toast.unchanged")); return endEdit(); }
     if ('body' in ep) {
-      var km = keptMentions(it.mentions, ep.body), ers = refsIn(ep.body);
+      var km = keptMentions(withPicks(it.mentions, e.mpick), ep.body), ers = refsIn(ep.body);
       if (km.length) ep.mentions = km;
       if (ers.length) ep.refs = ers;
-      if (it.attachments.length) ep.attachments = it.attachments;
+      var eas = savedAtts('iw-ebody', ep.body);
+      if (eas.length) ep.attachments = eas;
     }
     commit([['item.edit', ep]], null, function () { ui.iedit = null; });
   }
   function startCedit(cid) {
     var c = VS.comments[cid];
     if (!c) return;
-    ui.cedit = { cid: cid, body: c.body };
+    ui.cedit = { cid: cid, body: c.body, mpick: [] };
+    delete ui.edpv.tkcedit; delete ui.eatt.tkcedit;
     render();
     var t = $('tkcedit');
     if (t) { t.focus(); t.setSelectionRange(t.value.length, t.value.length); }
@@ -2841,10 +3000,11 @@
     if (!ocm) return;
     var cep = { comment: e.cid, body: $('tkcedit').value };
     if (cep.body === ocm.body) { toast(wsT("js.tk.toast.unchanged")); return endCedit(); }
-    var ckm = keptMentions(ocm.mentions, cep.body), cers = refsIn(cep.body);
+    var ckm = keptMentions(withPicks(ocm.mentions, e.mpick), cep.body), cers = refsIn(cep.body);
     if (ckm.length) cep.mentions = ckm;
     if (cers.length) cep.refs = cers;
-    if (ocm.attachments.length) cep.attachments = ocm.attachments;
+    var ceas = savedAtts('tkcedit', cep.body);
+    if (ceas.length) cep.attachments = ceas;
     commit([['comment.edit', cep]], null, function () { ui.cedit = null; });
   }
 
@@ -3018,6 +3178,8 @@
     var focusSearch = fa && fa.id === 'psearch' ? [fa.selectionStart, fa.selectionEnd] : null;
     // an inline input (new item, subtask, in-place edit, the composer) keeps focus and its caret
     var focusKeep = fa && fa.id && fa.hasAttribute('data-keep') ? [fa.id, fa.selectionStart, fa.selectionEnd] : null;
+    // an editor's Write / Preview toggle keeps focus too (it has focus while the editor previews)
+    var focusTab = fa && fa.classList && fa.classList.contains('tked-tab') ? '.tked-tab[data-ed="' + CSS.escape(fa.getAttribute('data-ed')) + '"][data-mode="' + fa.getAttribute('data-mode') + '"]' : null;
     var focusFk = fa && fa.closest && (body.contains(fa) || sb.contains(fa)) && fa.closest('[data-fk]'); // the fold buttons keep keyboard focus across their re-render
     focusFk = focusFk && focusFk.getAttribute('data-fk');
     Array.prototype.forEach.call(body.querySelectorAll('.card[id] > .cbody'), function (c) { scrolls[c.parentNode.id] = c.scrollTop; });
@@ -3040,6 +3202,10 @@
     $('tkwin').hidden = !open;
     $('tkwin').firstElementChild.setAttribute('aria-labelledby', 'iw-title');
     setInert(open);
+    // an editor's preview ends with the editor: an edit saved or cancelled, a comment posted, another item
+    if (!ui.iedit) { delete ui.edpv['iw-ebody']; delete ui.eatt['iw-ebody']; }
+    if (!ui.cedit) { delete ui.edpv.tkcedit; delete ui.eatt.tkcedit; }
+    if (!open || ui.itemChanged || ui.clearDraft) { delete ui.edpv.cbox; delete ui.eatt.cbox; }
     if (open) {
       sb.innerHTML = windowHtml(v, VS.items[ui.item]);
       if (!ui.itemChanged && !ui.clearDraft && $('cbox')) $('cbox').value = draft;
@@ -3057,7 +3223,9 @@
     if (open) placeSub();
     var fk2 = focusKeep && $(focusKeep[0]);
     if (fk2) { fk2.focus({ preventScroll: true }); try { fk2.setSelectionRange(focusKeep[1], focusKeep[2]); } catch (x) { /* not a text field */ } }
-    if (MP) mentionSync(); // the composer was redrawn: the popup follows the new box, or closes with it
+    var ft = focusTab && document.querySelector(focusTab);
+    if (ft) ft.focus({ preventScroll: true });
+    if (MP) mentionSync(); // the editors were redrawn: the popup follows the new box, or closes with it
     // the menu stays over the redraw: the status popover follows the store, an item menu closes with its item
     if (MN && MN.kind === 'sync') {
       var mIn = $('tkmenu').contains(document.activeElement);
@@ -3374,6 +3542,15 @@
   // Delegated handlers act only on the renderer's own nodes, so the host page's clicks,
   // changes, and keys stay the host's.
   function own(t) { return !!(t && t.closest && t.closest('.tk')); }
+  // the editor (editorHtml's wrapper) a drag is over, when it is one
+  function edDrop(e) { return e.target.closest ? e.target.closest('.tked[data-ed]') : null; }
+  function hasFiles(e) { return !!e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') >= 0; }
+  // the files a clipboard or a drop carries
+  function filesOf(dt) {
+    if (!dt) return [];
+    if (dt.items && dt.items.length) return Array.prototype.map.call(dt.items, function (it) { return it.kind === 'file' ? it.getAsFile() : null; }).filter(Boolean);
+    return Array.prototype.slice.call(dt.files || []);
+  }
 
   function listen() {
     // dragging a handle sets the drawer height; a drag's trailing click is swallowed
@@ -3387,7 +3564,7 @@
     document.addEventListener('click', function (e) {
       var t = e.target;
       if (qs.open && !(t.closest && t.closest('#tkqpop, #tkqs'))) qClose(true);
-      if (t.id === 'cbox' && own(t)) mentionSync(); // a click into an @token opens it, elsewhere in the box closes it
+      if (mentionBox(t)) mentionSync(); // a click into an @token opens it, elsewhere in the box closes it
       else if (MP && !(t.closest && t.closest('#tkmpop, #cmention'))) mentionClose();
       // a click outside the menu closes it; a click on its own opener toggles it shut
       if (MN && !(t.closest && t.closest('#tkmenu'))) {
@@ -3450,9 +3627,10 @@
         else if (k === 'cmode') { (ui.cmodes[ui.store] = ui.cmodes[ui.store] || {})[a.getAttribute('data-card')] = a.getAttribute('data-mode'); dsSave('card.modes', ui.cmodes); render(); }
         else if (k === 'cal') { ui.calMonth[a.getAttribute('data-card')] = a.getAttribute('data-month'); render(); }
         else if (k === 'sync') { syncNow(ui.store, false, function () { render(); }); }
-        else if (k === 'reply') { ui.replyTo = d.cid; render(); if ($('cbox')) $('cbox').focus(); }
+        else if (k === 'reply') { ui.replyTo = d.cid; delete ui.edpv.cbox; render(); if ($('cbox')) $('cbox').focus(); }
         else if (k === 'reply-x') { ui.replyTo = null; render(); }
         else if (k === 'mention') mentionInsert();
+        else if (k === 'ed-mode') edMode(a.getAttribute('data-ed'), a.getAttribute('data-mode'));
         else if (k === 'hstatus') setStatus(VS.items[d.item], a.getAttribute('data-status'), '');
         else if (k === 'hsub') startSub(d.item, 'iw:' + d.item);
         else if (k === 'asg-add') openAssign(d.item, a);
@@ -3522,11 +3700,10 @@
       if (t.id === 'tknew' && ui.nrow[ui.store]) ui.nrow[ui.store].val = t.value;
       else if (t.id === 'tkknew' && ui.knew[ui.store]) ui.knew[ui.store].val = t.value;
       else if (t.id === 'tksub' && ui.sub) ui.sub.val = t.value;
-      else if (t.id === 'tkcedit' && ui.cedit) ui.cedit.body = t.value;
-      else if (t.id === 'cbox') mentionSync(); // also mid-composition: the popup filters on the composing text
-      else if (/^iw-e(title|body|proj)$/.test(t.id) && ui.iedit) ui.iedit[{ 'iw-etitle': 'title', 'iw-ebody': 'body', 'iw-eproj': 'project' }[t.id]] = t.value;
       else if (t.id === 'tkaq' && MN && MN.step === 'assign') { var as = asgState(); as.q = t.value; as.idx = 0; asgDraw(); }
       else if (t.id === 'tkmq' && MN) { MN.q = t.value; var ml = $('tkmenu').querySelector('.mlist'); if (ml) ml.innerHTML = handoffList(VS.items[MN.item], MN.who || VS.viewer.member); }
+      else edKeep(t);
+      if (mentionBox(t)) mentionSync(); // also mid-composition: the popup filters on the composing text
     });
     document.addEventListener('input', function (e) {
       var t = e.target, df = t.closest && t.closest('#tkdlg form');
@@ -3545,7 +3722,23 @@
       e.dataTransfer.setData('text/plain', c.getAttribute('data-drag'));
       e.dataTransfer.effectAllowed = 'move';
     });
-    document.addEventListener('dragover', function (e) { if (own(e.target) && e.target.closest('[data-kcol]')) e.preventDefault(); });
+    document.addEventListener('dragover', function (e) {
+      if (own(e.target) && (e.target.closest('[data-kcol]') || (edDrop(e) && hasFiles(e)))) e.preventDefault();
+    });
+    // an image pasted into an editor's textarea, or dropped on an editor (edImages); a paste that
+    // also carries text (a copied web page) still pastes its text
+    document.addEventListener('paste', function (e) {
+      var t = mentionBox(e.target), files = t ? filesOf(e.clipboardData) : [];
+      if (!files.length) return;
+      if (Array.prototype.indexOf.call(e.clipboardData.types || [], 'text/plain') < 0) e.preventDefault();
+      edImages(t.id, files, false);
+    });
+    document.addEventListener('drop', function (e) {
+      var wrap = own(e.target) && edDrop(e);
+      if (!wrap || !hasFiles(e)) return;
+      e.preventDefault();
+      edImages(wrap.getAttribute('data-ed'), filesOf(e.dataTransfer), true);
+    });
     document.addEventListener('drop', function (e) {
       var col = own(e.target) && e.target.closest('[data-kcol]');
       if (!col) return;
@@ -3566,7 +3759,7 @@
       linkHi(own(e.target) && e.target.closest('.kcard, .citem'));
     });
     document.addEventListener('focusin', function (e) {
-      if (MP && e.target.id !== 'cbox') mentionClose();
+      if (MP && e.target.id !== MP.box) mentionClose();
       var row = own(e.target) && e.target.closest('.irow'), card = own(e.target) && e.target.closest('.kcard, .citem');
       if (row) placeMore(row);
       linkHi(card);
@@ -3596,7 +3789,7 @@
     });
     // the caret moved without an edit (arrow keys, Home/End): the popup follows the token under it
     document.addEventListener('keyup', function (e) {
-      if (e.target.id === 'cbox' && own(e.target) && /^(ArrowLeft|ArrowRight|Home|End)$/.test(e.key)) mentionSync();
+      if (mentionBox(e.target) && /^(ArrowLeft|ArrowRight|Home|End)$/.test(e.key)) mentionSync();
     });
     // the assign popover's rows and chip buttons act on click without taking focus from its search field
     $('tkmenu').addEventListener('mousedown', function (e) { if (e.target.closest('.ap-list .aopt, .ap-chips .ax')) e.preventDefault(); });
@@ -3615,7 +3808,7 @@
     });
     $('tkmpop').addEventListener('mousemove', function (e) {
       var o = e.target.closest('[data-mp]'), i = o && Number(o.getAttribute('data-mp'));
-      if (o && MP && i !== MP.idx) { MP.idx = i; mentionDraw($('cbox')); }
+      if (o && MP && i !== MP.idx) { MP.idx = i; mentionDraw($(MP.box)); }
     });
     $('tkqpop').addEventListener('mousemove', function (e) {
       var o = e.target.closest('[data-qi]'), i = o && Number(o.getAttribute('data-qi'));
@@ -3631,6 +3824,17 @@
         if (mk) { e.preventDefault(); itemMenu(mk.getAttribute('data-mitem') || mk.getAttribute('data-item'), t.closest('[data-rk]') && !t.matches('button') ? t.closest('[data-rk]') : t); }
         return;
       }
+      // an editor showing its preview (focus on its toggle or the pane): Cmd/Ctrl+Enter saves or
+      // sends as in its textarea, and Esc goes back to writing rather than closing the window
+      var edw = own(t) && t.closest && t.closest('.tked-tabs, .tked-pv') && t.closest('.tked'), eid = edw && edw.getAttribute('data-ed');
+      if (eid && ui.edpv[eid] && (chord || e.key === 'Escape')) {
+        e.preventDefault();
+        if (e.key === 'Escape') edMode(eid, 'write');
+        else if (eid === 'iw-ebody') saveEdit();
+        else if (eid === 'tkcedit') saveCedit();
+        else if (eid === 'cbox' && $('tkcsend')) quick('comment', $('tkcsend'));
+        return;
+      }
       // the inline inputs: Enter (or Cmd/Ctrl+Enter in a multi-line field) writes, Esc leaves
       if (own(t) && t.hasAttribute && t.hasAttribute('data-keep')) {
         var esc1 = e.key === 'Escape';
@@ -3638,18 +3842,20 @@
         if (id === 'tkknew') { if (plain) { e.preventDefault(); createKnew(); } else if (esc1) { e.preventDefault(); closeKnew(); } return; }
         if (id === 'tksub') { if (plain) { e.preventDefault(); createSub(); } else if (esc1) { e.preventDefault(); closeSub(); } return; }
         if (id === 'iw-etitle' || id === 'iw-eproj') { if (plain || chord) { e.preventDefault(); saveEdit(); } else if (esc1) { e.preventDefault(); endEdit(); } return; }
-        if (id === 'iw-ebody') { if (chord) { e.preventDefault(); saveEdit(); } else if (esc1) { e.preventDefault(); endEdit(); } return; }
-        if (id === 'tkcedit') { if (chord) { e.preventDefault(); saveCedit(); } else if (esc1) { e.preventDefault(); endCedit(); } return; }
-        if (id === 'cbox') {
-          // the Enter that commits an IME composition neither picks a member nor sends
+        if (t.hasAttribute('data-mention')) {
+          // an editor: the Enter that commits an IME composition neither picks, saves, nor sends;
+          // while the popup is open, its keys come first and Esc closes it, not the editor
           if (e.isComposing || e.keyCode === 229) return;
-          if (MP && MP.ids.length) {
+          var mp = MP && MP.box === id;
+          if (mp && MP.ids.length) {
             if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); MP.idx = (MP.idx + (e.key === 'ArrowDown' ? 1 : MP.ids.length - 1)) % MP.ids.length; mentionDraw(t); return; }
             if ((e.key === 'Enter' || e.key === 'Tab') && !e.shiftKey) { e.preventDefault(); mentionPick(MP.idx); return; }
           }
-          if (MP && esc1) { e.preventDefault(); mentionClose(); return; }
-          if (chord) { e.preventDefault(); if ($('tkcsend')) quick('comment', $('tkcsend')); return; }
+          if (mp && esc1) { e.preventDefault(); mentionClose(); return; }
         }
+        if (id === 'iw-ebody') { if (chord) { e.preventDefault(); saveEdit(); } else if (esc1) { e.preventDefault(); endEdit(); } return; }
+        if (id === 'tkcedit') { if (chord) { e.preventDefault(); saveCedit(); } else if (esc1) { e.preventDefault(); endCedit(); } return; }
+        if (id === 'cbox' && chord) { e.preventDefault(); if ($('tkcsend')) quick('comment', $('tkcsend')); return; }
       }
       // Esc in the search box clears it first; with it empty, Esc goes on to close the window or the drawer
       if (e.key === 'Escape' && e.target.id === 'psearch' && e.target.value && own(e.target)) { e.preventDefault(); panelState().q = ''; render(); if ($('psearch')) $('psearch').focus(); return; }
