@@ -362,6 +362,9 @@
     "261110-chore-ws-mcp-test-suite-runtime": {
       "registered_at": "2026-11-09T15:09:05Z"
     },
+    "261110-epic-ws-dashboard-agent-host": {
+      "registered_at": "2026-11-09T15:09:33Z"
+    },
     "261110-feat-ws-tracker-item-move-reparent": {
       "registered_at": "2026-11-09T15:09:01Z"
     }
