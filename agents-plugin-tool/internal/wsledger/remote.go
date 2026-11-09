@@ -680,8 +680,9 @@ func (e *PushedError) Unwrap() error { return e.Err }
 // deletion or a rewind there. It is the manual action rewind refusal leaves
 // to a person, who judges the cause first; signed events verify whoever
 // pushes them. Restoring a member's event ref also restores its attachment
-// ref when that one is deleted or rewound too, in the same atomic push, so
-// the remote never holds an event commit without the blobs it names.
+// ref when that one is deleted or rewound (with or without the event ref),
+// in the same atomic push, so the remote never holds an event commit
+// without the blobs it names.
 func (l *Ledger) Restore(ctx context.Context, ref string) error {
 	return l.withLock(ctx, func() error {
 		if !l.hasRemote(ctx) {
@@ -724,12 +725,10 @@ func (l *Ledger) Restore(ctx context.Context, ref string) error {
 		if err != nil {
 			return err
 		}
-		if !restorable {
-			return nil // the remote already holds the local copy
-		}
 		var specs []pushSpec
 		var pushed [][2]string
 		if member, clone, ok := parseMemberRef(ref); ok {
+			// The attachment ref alone may be the one deleted or rewound.
 			if a := attachRef(member, clone); local[a] != "" {
 				if r, err := behind(a, local[a]); err == nil && r {
 					lease := snap[a]
@@ -738,9 +737,14 @@ func (l *Ledger) Restore(ctx context.Context, ref string) error {
 				}
 			}
 		}
-		lease := snap[ref]
-		specs = append(specs, pushSpec{Ref: ref, Lease: &lease})
-		pushed = append(pushed, [2]string{ref, tip})
+		if restorable {
+			lease := snap[ref]
+			specs = append(specs, pushSpec{Ref: ref, Lease: &lease})
+			pushed = append(pushed, [2]string{ref, tip})
+		}
+		if len(specs) == 0 {
+			return nil // the remote already holds the local copies
+		}
 		out, err := l.git.pushRefs(ctx, specs...)
 		if err != nil {
 			return fmt.Errorf("ledger: push: %w", err)

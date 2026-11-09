@@ -464,7 +464,8 @@ func (d *Daemon) trackerStageAttachment(ctx context.Context, w http.ResponseWrit
 	case errors.Is(err, ErrTrackerAttachmentTooLarge):
 		trackerError(w, http.StatusRequestEntityTooLarge, err.Error())
 	case err != nil:
-		trackerError(w, http.StatusBadRequest, err.Error())
+		// Not the upload's fault: the store's write lock or disk.
+		trackerError(w, http.StatusInternalServerError, err.Error())
 	default:
 		writeJSON(w, http.StatusOK, att)
 	}

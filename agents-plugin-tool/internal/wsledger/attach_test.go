@@ -195,6 +195,13 @@ func TestAttachVerifierRefusesMalformedCommits(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Cleanup(func() { // reset the ref for the next case, even after a Fatal
+				if tip := refTip(t, ada, ref); tip != "" {
+					if err := ada.git.deleteRef(context.Background(), ref, tip); err != nil {
+						t.Error(err)
+					}
+				}
+			})
 			base := forgeAttach(t, bo, ref, refTip(t, bo, ref), map[string]string{attachPath(good.OID): "good"}, bo)
 			badOID := forgeAttach(t, bo, ref, base, tc.entries, tc.signer())
 			after := blob("after " + tc.name)
@@ -210,10 +217,6 @@ func TestAttachVerifierRefusesMalformedCommits(t *testing.T) {
 			}
 			if ada.HasAttachment(after.OID) {
 				t.Fatal("a blob after the bad commit is readable")
-			}
-			// Reset the ref for the next case.
-			if err := ada.git.deleteRef(context.Background(), ref, refTip(t, ada, ref)); err != nil {
-				t.Fatal(err)
 			}
 		})
 	}
@@ -444,9 +447,19 @@ func TestAttachRewoundRefRefused(t *testing.T) {
 		t.Fatal("the kept copy's blob left the index")
 	}
 
-	// Restore puts both refs back when the event ref is restored too.
+	// Restore of the event ref puts the attachment ref back even when the
+	// event ref itself is intact on the remote.
 	own := memberRef("ada", "c1")
+	if err := bo.Restore(context.Background(), own); err != nil {
+		t.Fatalf("restore over an attachment-only rewind: %v", err)
+	}
+	if got := remoteRefs(t, url)[aref]; got != second {
+		t.Fatalf("after restore remote %s=%s, want %s", aref, got, second)
+	}
+
+	// Both deleted: one restore puts both back.
 	remoteGit(t, url, "update-ref", "-d", own)
+	remoteGit(t, url, "update-ref", "-d", aref)
 	fetchOK(t, bo)
 	if err := bo.Restore(context.Background(), own); err != nil {
 		t.Fatalf("restore: %v", err)

@@ -311,7 +311,8 @@ func (l *Ledger) HasAttachment(oid string) bool {
 // pending writes, fetching a blob this clone lacks from the remote by its
 // id, and serves the first whose content hashes to oid. A blob that does
 // not is never served; a copy another member holds at the same path cannot
-// shadow the right one. ErrAttachmentNotFound when none matches.
+// shadow the right one. ErrAttachmentNotFound when none matches; a fetch
+// that fails is returned as its own error, since the remote may hold it.
 func (l *Ledger) ReadAttachment(ctx context.Context, oid, prefer string) ([]byte, error) {
 	if !ValidAttachmentOID(oid) {
 		return nil, fmt.Errorf("%w: %q is not an attachment oid", ErrAttachmentNotFound, oid)
@@ -344,7 +345,7 @@ func (l *Ledger) ReadAttachment(ctx context.Context, oid, prefer string) ([]byte
 		return nil, ErrAttachmentNotFound
 	}
 	remote := l.hasRemote(ctx)
-	var lastErr error
+	var lastErr, fetchErr error
 	for _, blob := range blobs {
 		data, ok, err := l.git.readBlob(ctx, blob)
 		if err != nil {
@@ -353,7 +354,7 @@ func (l *Ledger) ReadAttachment(ctx context.Context, oid, prefer string) ([]byte
 		}
 		if !ok && remote {
 			if err := l.git.fetchObject(ctx, blob); err != nil {
-				lastErr = err
+				fetchErr = err
 				continue
 			}
 			data, ok, err = l.git.readBlob(ctx, blob)
@@ -371,6 +372,11 @@ func (l *Ledger) ReadAttachment(ctx context.Context, oid, prefer string) ([]byte
 			continue
 		}
 		return data, nil
+	}
+	if fetchErr != nil {
+		// The remote may hold it: a transport or credential failure is not
+		// a missing attachment.
+		return nil, fmt.Errorf("ledger: fetch attachment %s: %w", oid, fetchErr)
 	}
 	return nil, fmt.Errorf("%w: %v", ErrAttachmentNotFound, lastErr)
 }
