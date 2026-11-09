@@ -354,7 +354,14 @@
       "registered_at": "2026-11-09T04:57:34Z"
     },
     "261109-feat-ws-dashboard-git-commit-graph": {
-      "registered_at": "2026-11-09T05:26:59Z"
+      "registered_at": "2026-11-09T05:26:59Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "28ef83e379b353cc",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-09T05:34:14Z"
+      }
     },
     "261109-feat-ws-tracker-shared-markdown-editor": {
       "registered_at": "2026-11-09T03:33:13Z",
