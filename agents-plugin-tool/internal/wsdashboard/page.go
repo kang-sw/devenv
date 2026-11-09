@@ -82,4 +82,8 @@ type Contact struct {
 	// it was seen recently), or an id: address's reply registry entry was
 	// seen within the last 10 minutes.
 	PresenceLive bool
+	// Cwd is the correspondent's working directory: its reply registry entry
+	// or presence record's, else the contact record's as known at the last
+	// exchange. Empty when neither records one.
+	Cwd string
 }

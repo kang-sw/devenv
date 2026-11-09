@@ -4,6 +4,7 @@ import (
 	"html/template"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsinbox"
@@ -146,6 +147,10 @@ type PeerRow struct {
 	// Address is the row's label: the most recent named address, else the
 	// id: address.
 	Address string
+	// Path is the folder the peer resides in: a served peer's registration
+	// Project, else the newest Contact.Cwd over the merged addresses. Empty
+	// when neither is known.
+	Path string
 	// ReplyID is the peer session; empty for a named address with no owner.
 	ReplyID string
 	// Served reports that this daemon indexes the peer, so the row links to
@@ -425,6 +430,9 @@ func peerGroup(contacts []Contact, project string, lookup func(string) (Session,
 			m.row.LastExchange = at
 		}
 		m.presenceLive = m.presenceLive || c.PresenceLive
+		if m.row.Path == "" {
+			m.row.Path = c.Cwd
+		}
 	}
 	var group PeerGroup
 	for _, key := range order {
@@ -435,6 +443,9 @@ func peerGroup(contacts []Contact, project string, lookup func(string) (Session,
 				row.Served = true
 				row.Live = s.Live
 				row.Harness = s.Harness
+				if s.Project != "" {
+					row.Path = s.Project
+				}
 				row.SameWorktree = s.Project != "" && filepath.Clean(s.Project) == filepath.Clean(project)
 				row.Compact = s.Live && !row.SameWorktree
 				if adapterPresent(snap, now) {
@@ -477,6 +488,14 @@ func peerGroup(contacts []Contact, project string, lookup func(string) (Session,
 		group.Ended = group.Ended[:endedPeerCap]
 	}
 	return group
+}
+
+// Folder is Path's last element, split on "/" and "\" alike (a Windows cwd
+// can reach a daemon on another OS), trailing separators ignored; the row's
+// label prefix. Empty when Path is.
+func (r PeerRow) Folder() string {
+	p := strings.TrimRight(r.Path, `/\`)
+	return p[strings.LastIndexAny(p, `/\`)+1:]
 }
 
 func hasReplyIDPrefix(address string) bool {

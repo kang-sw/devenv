@@ -146,6 +146,70 @@ func TestPeerGroupMergesResolvesAndRetains(t *testing.T) {
 	}
 }
 
+// TestPeerRowFolder pins the row label's folder: Path's last element, split
+// on either separator, trailing separators ignored.
+func TestPeerRowFolder(t *testing.T) {
+	for path, want := range map[string]string{
+		"/home/u/devenv":      "devenv",
+		"/home/u/devenv/":     "devenv",
+		`C:\Users\u\proj`:     "proj",
+		`C:\Users\u\proj\`:    "proj",
+		`D:/mixed\sep/leaf//`: "leaf",
+		"plain":               "plain",
+		"":                    "",
+		"/":                   "",
+	} {
+		if got := (PeerRow{Path: path}).Folder(); got != want {
+			t.Errorf("Folder(%q) = %q, want %q", path, got, want)
+		}
+	}
+}
+
+// TestPeerRowPath pins where a peer row's Path comes from: a served peer's
+// registration Project over any contact cwd; an unserved id: or named peer's
+// Contact.Cwd (the newest non-empty over merged addresses); none when no cwd
+// is known. The row renders the folder prefix muted inside .pname, the full
+// path as its title, and the bare address when no folder is known.
+func TestPeerRowPath(t *testing.T) {
+	now := testNow
+	at := func(min int) time.Time { return now.Add(-time.Duration(min) * time.Minute) }
+	sessions := map[string]Session{"served": liveSession("served", "/srv/work/served-wt", now)}
+	contacts := []Contact{
+		{Address: "id:served", ReplyID: "served", LastExchange: at(1), Cwd: "/elsewhere/ignored"},
+		{Address: "id:unserved", ReplyID: "unserved", LastExchange: at(2), PresenceLive: true, Cwd: "/home/u/idpeer"},
+		{Address: "named@machine", ReplyID: "namedpeer", LastExchange: at(3), PresenceLive: true},
+		{Address: "id:namedpeer", ReplyID: "namedpeer", LastExchange: at(4), Cwd: "/home/u/namedwt/"},
+		{Address: "win@machine", LastExchange: at(5), PresenceLive: true, Cwd: `C:\Users\u\winproj`},
+		{Address: "id:nocwd", ReplyID: "nocwd", LastExchange: at(6), PresenceLive: true},
+	}
+	v := buildSessionView(pageInputs{Session: liveSession("self", "/p", now), Snapshot: liveSnap(now, wslive.Lead{}), Now: now,
+		Page: PageContent{Contacts: contacts}, Lookup: lookupOf(sessions, nil)})
+	got := map[string][2]string{}
+	for _, r := range v.Tree.Peers.Rows() {
+		got[r.Address] = [2]string{r.Path, r.Folder()}
+	}
+	want := map[string][2]string{
+		"id:served":     {"/srv/work/served-wt", "served-wt"},
+		"id:unserved":   {"/home/u/idpeer", "idpeer"},
+		"named@machine": {"/home/u/namedwt/", "namedwt"},
+		"win@machine":   {`C:\Users\u\winproj`, "winproj"},
+		"id:nocwd":      {"", ""},
+	}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("rows (path, folder) = %v, want %v", got, want)
+	}
+	html := renderTree(t, v)
+	for _, w := range []string{
+		`<a class="pname" href="/s/served" title="/srv/work/served-wt"><span class="pfolder">served-wt/</span>id:served</a>`,
+		`<span class="pname" title="/home/u/idpeer"><span class="pfolder">idpeer/</span>id:unserved</span>`,
+		`<span class="pname">id:nocwd</span>`,
+	} {
+		if !strings.Contains(html, w) {
+			t.Errorf("tree lacks %q: %s", w, html)
+		}
+	}
+}
+
 func TestPeerTreeIsOneLevelDeep(t *testing.T) {
 	now := testNow
 	// The peer's snapshot carries agents; its own contacts are never read,

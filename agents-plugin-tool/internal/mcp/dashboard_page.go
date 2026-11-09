@@ -155,8 +155,9 @@ func servedFileText(root string) func(string) string {
 // entry was seen within mailboxLivenessThreshold (a reply entry carries no
 // pid, so only that half of mailboxPresenceLive applies); a named address
 // resolves through its presence record's owner and is live per
-// mailboxPresenceLive. An unreadable store leaves the fields it would fill
-// empty.
+// mailboxPresenceLive. Its Cwd is the registry entry's or presence record's,
+// else the contact record's. An unreadable store leaves the fields it would
+// fill empty.
 func (src *DashboardSessionSource) readContacts(reg wsdashboard.Registration) []wsdashboard.Contact {
 	path, err := wsmailbox.ReplyRegistryPath()
 	if err != nil {
@@ -186,7 +187,7 @@ func (src *DashboardSessionSource) readContacts(reg wsdashboard.Registration) []
 	}
 	out := make([]wsdashboard.Contact, 0, len(sorted))
 	for _, rec := range sorted {
-		c := wsdashboard.Contact{Address: rec.Address}
+		c := wsdashboard.Contact{Address: rec.Address, Cwd: rec.Cwd}
 		if at, err := time.Parse(time.RFC3339, rec.LastExchange); err == nil {
 			c.LastExchange = at
 		}
@@ -196,6 +197,9 @@ func (src *DashboardSessionSource) readContacts(reg wsdashboard.Registration) []
 				if seen, err := time.Parse(time.RFC3339, entry.LastSeen); err == nil {
 					c.PresenceLive = now.Sub(seen) < mailboxLivenessThreshold
 				}
+				if entry.Cwd != "" {
+					c.Cwd = entry.Cwd
+				}
 			}
 		} else if name, scope, err := wsmailbox.ParseSlugScope(rec.Address); err == nil {
 			if store := scopeStore(scope); store != nil {
@@ -204,6 +208,9 @@ func (src *DashboardSessionSource) readContacts(reg wsdashboard.Registration) []
 						c.ReplyID = wsmailbox.ReplyID(p.Owner)
 					}
 					c.PresenceLive = mailboxPresenceLive(p, now)
+					if p.Cwd != "" {
+						c.Cwd = p.Cwd
+					}
 				}
 			}
 		}

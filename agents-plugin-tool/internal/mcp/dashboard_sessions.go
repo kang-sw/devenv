@@ -438,9 +438,10 @@ const dashboardRescanAfter = 5 * time.Second
 // live stores (snapshot, ring, and the board-answer inbox's held and drained
 // entry names), the board's panels as the served page builds them (ticket
 // directories, mailbox queues, and the listening marker live outside the
-// record), the mailbox history entry names, and the resolved contacts. A
-// contact's liveness is left out: it is derived from the clock, and a
-// re-read that differs only by the time is no change.
+// record), the mailbox history entry names, and the resolved contacts (cwd
+// included: it labels the peer row). A contact's liveness is left out: it
+// is derived from the clock, and a re-read that differs only by the time is
+// no change.
 func (src *DashboardSessionSource) ReadSession(reg wsdashboard.Registration) (wsdashboard.SessionData, bool) {
 	key, raw, record, ok := src.lookupRecord(reg)
 	if !ok {
@@ -462,7 +463,7 @@ func (src *DashboardSessionSource) ReadSession(reg wsdashboard.Registration) (ws
 	}
 	io.WriteString(h, "\x00contacts")
 	for _, c := range src.readContacts(reg) {
-		fmt.Fprintf(h, "\x00%s\x01%s\x01%s", c.Address, c.ReplyID, c.LastExchange.UTC().Format(time.RFC3339))
+		fmt.Fprintf(h, "\x00%s\x01%s\x01%s\x01%s", c.Address, c.ReplyID, c.LastExchange.UTC().Format(time.RFC3339), c.Cwd)
 	}
 	return wsdashboard.SessionData{
 		HasBoard:          record.Whiteboard != nil,

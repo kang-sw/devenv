@@ -211,8 +211,10 @@ func TestDashboardServedFileText(t *testing.T) {
 
 // TestDashboardReadPageContacts pins contact resolution: an id: contact and
 // a named contact held by the same session resolve to one reply-id, a
-// rebind of the named address moves it, and liveness follows the reply
-// entry's LastSeen within 10 minutes (id:) or mailboxPresenceLive (named).
+// rebind of the named address moves it, liveness follows the reply
+// entry's LastSeen within 10 minutes (id:) or mailboxPresenceLive (named),
+// and the cwd is the reply entry's (id:) or presence record's (named), else
+// the contact record's.
 func TestDashboardReadPageContacts(t *testing.T) {
 	t0 := time.Date(2026, 11, 6, 9, 0, 0, 0, time.UTC)
 	hf := newHistoryFixture(t, t0)
@@ -290,6 +292,43 @@ func TestDashboardReadPageContacts(t *testing.T) {
 	if got := byAddress()["alice@worktree"].ReplyID; got != wsmailbox.ReplyID("rebound-session-key") {
 		t.Fatalf("named contact after rebind resolves to %q", got)
 	}
+	// The cwd: the live record's wins, the contact record's is the fallback.
+	setCwds := func(live, recorded string) {
+		t.Helper()
+		if err := wsmailbox.WithReplyLock(replyPath, func(st *wsmailbox.ReplyStore) error {
+			entry := st.Entries[replyA]
+			entry.Cwd = live
+			st.Entries[replyA] = entry
+			own := st.Entries[reg.ReplyID]
+			for addr, c := range own.Contacts {
+				c.Cwd = recorded
+				own.Contacts[addr] = c
+			}
+			st.Entries[reg.ReplyID] = own
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := wsmailbox.WithLock(storePath, func(st *wsmailbox.StoreFile) error {
+			p := st.Presence["alice"]
+			p.Cwd = live
+			st.Presence["alice"] = p
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	setCwds("/live/alpha", "/recorded/alpha")
+	contacts = byAddress()
+	if contacts[wsmailbox.ReplyIDPrefix+replyA].Cwd != "/live/alpha" || contacts["alice@worktree"].Cwd != "/live/alpha" {
+		t.Fatalf("live cwd: %+v", contacts)
+	}
+	setCwds("", "/recorded/alpha")
+	contacts = byAddress()
+	if contacts[wsmailbox.ReplyIDPrefix+replyA].Cwd != "/recorded/alpha" || contacts["alice@worktree"].Cwd != "/recorded/alpha" {
+		t.Fatalf("recorded cwd: %+v", contacts)
+	}
+
 	raw, _ := json.Marshal(readPageOK(t, src, reg))
 	for _, key := range []string{hf.keyA, hf.keyB, "rebound-session-key"} {
 		if strings.Contains(string(raw), key) {
@@ -388,6 +427,16 @@ func TestDashboardFingerprintCoversPageStores(t *testing.T) {
 			entry := st.Entries[f.replyID()]
 			entry.RecordContact(wsmailbox.ReplyIDPrefix+"peerpeer", wsmailbox.Contact{LastExchange: now.UTC().Format(time.RFC3339)})
 			st.Entries[f.replyID()] = entry
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	step("a contact's cwd", func() {
+		if err := wsmailbox.WithReplyLock(replyPath, func(st *wsmailbox.ReplyStore) error {
+			entry := st.Entries["peerpeer"]
+			entry.Cwd = "/work/peerpeer"
+			st.Entries["peerpeer"] = entry
 			return nil
 		}); err != nil {
 			t.Fatal(err)
