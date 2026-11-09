@@ -26,6 +26,8 @@ func TestSSHCommandPrecedenceAndVariant(t *testing.T) {
 		{"TortoiseGitPlink with spaces through GIT_SSH", map[string]string{"GIT_SSH": `C:\Program Files\TortoiseGit\bin\TortoiseGitPlink.exe`}, "", `'C:\Program Files\TortoiseGit\bin\TortoiseGitPlink.exe' -batch`},
 		{"plink with spaces through double-quoted GIT_SSH_COMMAND", map[string]string{"GIT_SSH_COMMAND": `"C:\Program Files\PuTTY\plink.exe" -v`}, "", `"C:\Program Files\PuTTY\plink.exe" -v -batch`},
 		{"plink with spaces through single-quoted core.sshCommand", nil, `'C:\Program Files\PuTTY\plink.exe'`, `'C:\Program Files\PuTTY\plink.exe' -batch`},
+		{"plink with an escaped space through GIT_SSH_COMMAND", map[string]string{"GIT_SSH_COMMAND": `C:/Program\ Files/PuTTY/plink.exe -v`}, "", `C:/Program\ Files/PuTTY/plink.exe -v -batch`},
+		{"ssh after an escaped space in a plink directory is not plink", map[string]string{"GIT_SSH_COMMAND": `/opt/plink\ tools/ssh -v`}, "", `/opt/plink\ tools/ssh -v -o BatchMode=yes -o ConnectTimeout=5`},
 		{"ssh with spaces in a plink directory is not plink", map[string]string{"GIT_SSH": `C:\plink tools\ssh.exe`}, "", `'C:\plink tools\ssh.exe' -o BatchMode=yes -o ConnectTimeout=5`},
 		{"plink only as an argument is not plink", map[string]string{"GIT_SSH_COMMAND": "ssh -F plink.conf"}, "", "ssh -F plink.conf -o BatchMode=yes -o ConnectTimeout=5"},
 	}

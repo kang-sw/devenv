@@ -83,7 +83,8 @@ func SSHCommand(getenv func(string) string, coreSSHCommand func() string) string
 
 // commandProgram is the program a shell command line runs: its first word,
 // with a leading single- or double-quoted span taken whole, so a quoted path
-// with spaces ("C:\Program Files\PuTTY\plink.exe" -v) is one program.
+// with spaces ("C:\Program Files\PuTTY\plink.exe" -v) is one program, and a
+// backslash-escaped space or tab kept inside an unquoted word.
 func commandProgram(command string) string {
 	command = strings.TrimSpace(command)
 	if command == "" {
@@ -95,10 +96,23 @@ func commandProgram(command string) string {
 		}
 		return command[1:]
 	}
-	if end := strings.IndexAny(command, " \t"); end >= 0 {
-		return command[:end]
+	// Unquoted: the word ends at a space or tab that no backslash escapes
+	// (C:/Program\ Files/PuTTY/plink.exe). Any other backslash is kept, since
+	// it is also a Windows path separator (C:\tools\plink.exe).
+	var word strings.Builder
+	for i := 0; i < len(command); i++ {
+		c := command[i]
+		if c == '\\' && i+1 < len(command) && (command[i+1] == ' ' || command[i+1] == '\t') {
+			i++
+			word.WriteByte(command[i])
+			continue
+		}
+		if c == ' ' || c == '\t' {
+			break
+		}
+		word.WriteByte(c)
 	}
-	return command
+	return word.String()
 }
 
 // isPlink reports whether program is a PuTTY plink variant (plink,
