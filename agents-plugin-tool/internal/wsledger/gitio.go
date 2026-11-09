@@ -663,6 +663,22 @@ func (g *gitRepo) attachCommits(ctx context.Context, tip, exclude string) ([]*at
 	return commits, nil
 }
 
+// missingObjects reports whether an object reachable from tip but not from
+// the remote's refs as the last fetch saw them is absent from this clone (a
+// blob of a ref fetched with a filter): a push of tip could not pack it.
+func (g *gitRepo) missingObjects(ctx context.Context, tip string) (bool, error) {
+	out, err := g.run(ctx, "rev-list", "--objects", "--missing=print", tip, "--not", "--glob="+snapPrefix+"*")
+	if err != nil {
+		return false, err
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.HasPrefix(line, "?") {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // fetchObject fetches one object by id from the remote, explicitly: the
 // one network read a missing attachment blob costs.
 func (g *gitRepo) fetchObject(ctx context.Context, oid string) error {

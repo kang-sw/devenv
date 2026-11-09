@@ -215,6 +215,11 @@ const (
 	// attachment refs were fetched whole and this clone holds every
 	// attachment. Reported once per store per process.
 	WarnNoFilter = "no-filter"
+	// WarnNotRestored: Restore put a member's event ref back but not its
+	// attachment ref, whose blobs this clone does not hold (it fetched them
+	// filtered); a clone holding them, the member's own, restores it.
+	// Reported once, by the report after the Restore.
+	WarnNotRestored = "not-restored"
 )
 
 // SyncReport is the outcome of one Sync or Fetch.

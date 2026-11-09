@@ -470,6 +470,51 @@ func TestAttachRewoundRefRefused(t *testing.T) {
 	}
 }
 
+// TestAttachRestoreWithoutBlobsRestoresEventRefAlone: a clone that fetched
+// another member's attachment ref filtered lacks its blobs and cannot push
+// that ref back; restoring the member's event ref restores the event ref
+// alone and reports the attachment ref as not restored. The member's own
+// clone, which holds the blobs, restores the attachment ref afterwards.
+func TestAttachRestoreWithoutBlobsRestoresEventRefAlone(t *testing.T) {
+	w := newWorld(t)
+	url, dir := w.fileRemote("r", true)
+	ada := w.register(w.remoteOpts("ada", "c1"), url)
+	appendBlob(t, ada, blob("kept by ada"))
+	syncOK(t, ada)
+	bo := w.register(w.remoteOpts("bo", "c1"), url)
+	own, aref := memberRef("ada", "c1"), attachRef("ada", "c1")
+	if _, ok, _ := bo.git.readBlob(context.Background(), bo.attachIndex[blob("kept by ada").OID][0].blob); ok {
+		t.Fatal("the filtered fetch brought the blob; the test needs it absent")
+	}
+	wantOwn, wantAttach := remoteRefs(t, dir)[own], remoteRefs(t, dir)[aref]
+
+	remoteGit(t, dir, "update-ref", "-d", own)
+	remoteGit(t, dir, "update-ref", "-d", aref)
+	fetchOK(t, bo)
+	if err := bo.Restore(context.Background(), own); err != nil {
+		t.Fatalf("restore without the attachment blobs: %v", err)
+	}
+	refs := remoteRefs(t, dir)
+	if refs[own] != wantOwn || refs[aref] != "" {
+		t.Fatalf("after restore remote %s=%s %s=%s, want the event ref alone back", own, refs[own], aref, refs[aref])
+	}
+	rep := fetchOK(t, bo)
+	if !hasWarning(rep.Warnings, aref, WarnNotRestored) {
+		t.Fatalf("warnings = %+v, want WarnNotRestored on %s", rep.Warnings, aref)
+	}
+	if rep := fetchOK(t, bo); hasWarning(rep.Warnings, aref, WarnNotRestored) {
+		t.Fatal("the not-restored warning repeated")
+	}
+
+	fetchOK(t, ada)
+	if err := ada.Restore(context.Background(), own); err != nil {
+		t.Fatalf("restore by the clone holding the blobs: %v", err)
+	}
+	if got := remoteRefs(t, dir)[aref]; got != wantAttach {
+		t.Fatalf("after ada's restore remote %s=%s, want %s", aref, got, wantAttach)
+	}
+}
+
 // TestAttachFetchFailureLeavesEventsUnabsorbed: when the attachment-ref
 // fetch fails the event refs are not fetched, so no absorbed event names a
 // blob no tree holds.
