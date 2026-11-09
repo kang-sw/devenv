@@ -5,6 +5,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 99cb8a6d16897788
 sage-review-completeness-reviewed: 99cb8a6d16897788
+completed: 2026-11-09
 ---
 
 # ws tracker: a review stage before todo, approval-by-default when assigning others, and done/blocked notices to the assigner
