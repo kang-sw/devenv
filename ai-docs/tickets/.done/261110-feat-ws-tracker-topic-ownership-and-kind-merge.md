@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: f4a2ce2a3ef89bee
 sage-review-completeness-reviewed: f4a2ce2a3ef89bee
+completed: 2026-11-10
 ---
 
 # Tracker: topics take an ownership assignment; task and todo merge into one kind
@@ -230,3 +231,63 @@ parent topic above the task in "mine". This ticket keeps that.
   the creator, in "mine", not in kanban), hand it off and accept, the
   receiver releases it (unassign);
   an old `todo` item shows as a task.
+
+### Result (381e94371) - 2026-11-10
+
+Landed in c536206ac (Go fold, mockup engine and README, goldens,
+reasons.json, `topic_test.go`), e7944d145 (MCP writerDefaults and kind
+filter, tracker playbook in all three copies), c1ade9b13 (dashboard
+`tracker.js`, i18n tables, regenerated mockup `i18n-en.js`), and 381e94371
+(playbook bullet order fix from review).
+
+- Fold: a `todo` create folds as `task`; `todo` stays valid on input and in
+  the MCP create enum, the query kind filter is `task`/`topic`. A topic
+  assign takes exactly one person (`targets: [id]` or `chosen` with one
+  person), refused otherwise ("a topic has one holder: assign it to exactly
+  one person") and while any live or pending record exists ("topic <alias>
+  is already held by <ids>; unassign <first> first"); status and close are
+  refused ("topics have no status"); a topic record stores completion `""`;
+  the topic's live holder may unassign their own record.
+- Views: a held topic is in `my.assignments` (and pending: received,
+  today.pending, `p:` badge), out of `today.work`, the `a:` badge, and every
+  `team` row list and count (open, pending, waiting, done, last).
+- Dashboard: kind pickers task/topic; event history maps raw `todo` to task;
+  `selfAssigned` covers topics; topic chip instead of status in lists; no
+  status controls or kanban drop on topics; assignment kanban and due skip
+  topic records; topic window shows the holder, Release
+  (`item.unassign {assignee: self}`) and Hand off, no holder-facing return;
+  the assign popover on a topic is single-pick, people only, offered to the
+  creator only while unheld. `js.tk.kind.todo` removed; `js.tk.prop.topic`
+  and `js.tk.st.topic.desc` reworded; six new keys in all 11 tables.
+
+Verification: `go test ./... -count=1` in `agents-plugin-tool` (exit 0, all
+packages ok, at c1ade9b13); `node testdata/gen-golden.js` reports
+"reasons.json: 169 cases agree with the engine"; `go test ./internal/wsrsrc/...`
+ok after 381e94371; `python3 -m unittest discover agents-plugin-wsflow/tests`
+ok. Headless browser (two dev daemons on ports 39511/39512, isolated
+`WS_CACHE_HOME`/`WS_CONFIG_HOME`, shared bare remote): an old `todo` item
+shows as task; a created topic is held by its creator, in "mine" with the
+topic chip, absent from the kanban; handed off and accepted by the second
+member; the receiver released it; the creator reassigned it. Lite review:
+clean, two minors (one fixed in 381e94371, one recorded below).
+
+Decisions:
+- Topic records keep the internal assignment status `todo` (an empty status
+  ranks differently in the engine's and Go's `my.assignments` sort);
+  completion is stored as `""` in both engines, so the Go JSON shape is
+  unchanged.
+- The team walk drops topic records from every list and count, not only
+  Pending/Done (Decision 6: every status-based aggregate).
+- The planned test "an assign while the giver has unassigned but their
+  handoff is still pending" is unreachable: ending a record withdraws its
+  pending handoff (295). reasons.json pins the assign refused while the
+  holder's handoff is pending and while an initial assign is pending.
+- Accepted limit: the one-holder rule is causal. Two concurrent assigns of
+  one topic (the creator on two clones) are each checked against their own
+  past and both apply, leaving two holders; views render a holder list, so
+  nothing breaks, and either can be unassigned.
+- Dashboard: the minus badge stays only for a creator whose topic someone
+  else holds (Release covers the holder); the "mine" chip count and the
+  page feed's forced/due entries skip held topics; new key
+  `js.tk.ev.assign.topic` so a topic assign line carries no completion text;
+  a topic still gets no dashboard subtask row (unchanged).
