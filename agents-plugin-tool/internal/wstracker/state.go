@@ -1049,6 +1049,9 @@ func (s *state) apply(n *node) {
 					continue
 				}
 				it.stage = s.write(key, label, n, v).(string)
+				if it.stage == "review" && len(s.openRecs(it.id)) > 0 {
+					it.stage = "" // an older concurrent review write won the register
+				}
 			}
 		}
 		if p.has("body") {

@@ -854,6 +854,7 @@
           // The assignment wins over a concurrent move to review.
           if (f === 'stage' && p.stage === 'review' && openRecs(S, it.id).length) return;
           it[f] = write(S, 'it:' + it.id + ':' + f, f + ' of ' + it.alias, n, p[f] == null ? (f === 'due' ? null : '') : p[f], C);
+          if (f === 'stage' && it.stage === 'review' && openRecs(S, it.id).length) it.stage = ''; // an older concurrent review write won the register
         });
         if (has(p, 'body')) { var bw = regWinner(S, 'it:' + it.id + ':body'); it.mentions = mentionsOf(bw.p); it.attachments = attachmentsOf(bw.p); it.refs = refsOf(bw.p); }
         it.edited = n;

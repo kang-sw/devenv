@@ -115,7 +115,8 @@ Body text, markdown, written as is.
 - `stage="review"` (tasks and todos): the item waits in review before todo.
   `tk:item.edit` with `stage="review"` moves an item back to review, refused
   while it holds a live or pending assignment; `clear="stage"` promotes it to
-  todo, and so does assigning it. Either move is the item creator's.
+  todo, and so does assigning it. Either move is the item creator's, or an
+  admin's when the creator was removed.
 - A task or todo the batch creates is assigned to the user
   (`completion="assignee"`) unless the same batch assigns it with
   `tk:item.assign item="$N"` or creates it in review; the update prints that
