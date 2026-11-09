@@ -74,6 +74,9 @@ type store struct {
 	entry   StoreEntry
 	ledger  *wsledger.Ledger
 	tracker *wstracker.Tracker
+	// lastSweep is when the staged-attachment sweep last ran
+	// (attachments.go).
+	lastSweep time.Time
 }
 
 type systemClock struct{}
@@ -149,6 +152,7 @@ func (h *Host) open(ctx context.Context, st *store) error {
 	}
 	st.ledger = l
 	st.tracker = wstracker.New(l, l.MemberID()+"."+l.CloneID())
+	h.trySweep(st)
 	return nil
 }
 
@@ -429,8 +433,20 @@ func (h *Host) DispatchWith(ctx context.Context, id string, build func(next wsle
 		if err != nil {
 			return err
 		}
-		ids, err = st.tracker.Dispatch(ctx, events)
-		return err
+		blobs, staged, err := collectBlobs(st, events)
+		if err != nil {
+			return err
+		}
+		if ids, err = st.tracker.DispatchWithBlobs(ctx, events, blobs); err != nil {
+			return err
+		}
+		// The append holds the blobs (as git objects named by the journal),
+		// so the staged copies have served.
+		for _, path := range staged {
+			os.Remove(path)
+		}
+		h.sweepStagedIfDue(st)
+		return nil
 	})
 	return ids, err
 }

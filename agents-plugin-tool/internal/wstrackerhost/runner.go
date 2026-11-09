@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/kang-sw/devenv/internal/gitbatch"
+	"github.com/kang-sw/devenv/internal/wsledger"
 )
 
 // batchRunner is the wsledger git runner for every store: the user's git,
@@ -23,8 +24,11 @@ func (batchRunner) RunGit(ctx context.Context, root string, args ...string) ([]b
 		args = gitbatch.RemoteArgs(args...)
 	}
 	cmd := gitCommand(ctx, root, args...)
+	// wsledger.GitEnv on every run: a store clone is a partial clone, and
+	// only the ledger's explicit attachment read may fetch a missing blob.
+	cmd.Env = append(os.Environ(), wsledger.GitEnv...)
 	if remote {
-		cmd.Env = append(os.Environ(), gitbatch.RemoteEnv(batchSSHCommand(ctx, root))...)
+		cmd.Env = append(cmd.Env, gitbatch.RemoteEnv(batchSSHCommand(ctx, root))...)
 	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {

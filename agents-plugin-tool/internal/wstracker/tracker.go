@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -106,6 +107,27 @@ func (t *Tracker) Dispatch(ctx context.Context, events []wsledger.NewEvent) ([]w
 		return nil, err
 	}
 	ids, err := t.src.Append(ctx, events)
+	t.Refresh()
+	return ids, err
+}
+
+// DispatchWithBlobs is Dispatch with the content of the attachments the
+// events newly name; the source stores the blobs with the events, so a
+// reader that sees an event can fetch what it names. With no blobs it is
+// Dispatch.
+func (t *Tracker) DispatchWithBlobs(ctx context.Context, events []wsledger.NewEvent, blobs []wsledger.Blob) ([]wsledger.EventID, error) {
+	if len(blobs) == 0 {
+		return t.Dispatch(ctx, events)
+	}
+	bs, ok := t.src.(BlobSource)
+	if !ok {
+		return nil, errors.New("tracker: the event source does not store attachments")
+	}
+	t.Refresh()
+	if err := t.validate(events); err != nil {
+		return nil, err
+	}
+	ids, err := bs.AppendWithBlobs(ctx, events, blobs)
 	t.Refresh()
 	return ids, err
 }
