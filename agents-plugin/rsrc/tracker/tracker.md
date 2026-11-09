@@ -46,8 +46,9 @@ tracker.query payload: {store?, scope?, item?, kind?, status?, project?, text?}
 - `kind`, `status`, `project`, and `text` (part of the title, body, project,
   or ID) narrow the rows. `status` is `open` (not done), `hidden` (the only
   way hidden items show), or a status the rows print: `todo`, `doing`,
-  `blocked`, `awaiting`, `done`, `pending`, `unassigned`, `declined`, or
-  `returned`.
+  `blocked`, `awaiting`, `done`, `pending`, `review`, `unassigned`,
+  `declined`, or `returned`. `review` is an item in the review stage, before
+  todo; like `pending`, it is left out of progress roll-ups.
 - `format: "json"` with `store` alone returns the store's full state as JSON
   (members, keys, events, every item), for what the text omits; without
   `store`, the store list as JSON.
@@ -64,8 +65,8 @@ any group.
 | command | attributes | content |
 |---|---|---|
 | `tk:store` | `name` | group of every command below but `tk:register` and `tk:sync` |
-| `tk:item.create` | `kind`, `title`, `project?`, `due?`, `priority?`, `parent?`, `after?`, `mentions?`, `refs?` | the body |
-| `tk:item.edit` | `item`, `title?`, `project?`, `due?`, `priority?`, `mentions?`, `refs?`, `clear?` | a new body |
+| `tk:item.create` | `kind`, `title`, `project?`, `due?`, `priority?`, `parent?`, `after?`, `mentions?`, `refs?`, `stage?` | the body |
+| `tk:item.edit` | `item`, `title?`, `project?`, `due?`, `priority?`, `mentions?`, `refs?`, `stage?`, `clear?` | a new body |
 | `tk:item.hide` | `item` | none |
 | `tk:item.assign` | `item`, `people?` and `rules?` (one or both), or `levels`; `completion?` | none |
 | `tk:item.handoff` | `item`, `to`, `assignee?` | a note |
@@ -111,6 +112,14 @@ Body text, markdown, written as is.
   `due`: `YYYY-MM-DD`. `priority`: a level number from the store view's
   priority line, larger is more urgent; without one an item gets the store
   default. A note is optional.
+- `stage="review"` (tasks and todos): the item waits in review before todo.
+  `tk:item.edit` with `stage="review"` moves an item back to review, refused
+  while it holds a live or pending assignment; `clear="stage"` promotes it to
+  todo, and so does assigning it. Either move is the item creator's.
+- A task or todo the batch creates is assigned to the user
+  (`completion="assignee"`) unless the same batch assigns it with
+  `tk:item.assign item="$N"` or creates it in review; the update prints that
+  assignment under the create's position.
 - People are member IDs; `people`, `rules`, `mentions`, `refs`, `leads`,
   `names`, and `clear` are space-separated.
 - Members form a lead tree; each member has at most one lead.
@@ -127,9 +136,11 @@ Body text, markdown, written as is.
     that member, live once they accept. `levels="N"` alone is the rule
     `<user>:N`.
   - The holder of a live assignment sets its `tk:item.status` and closes it
-    with `tk:item.close`. With `completion="assigner"` (the default is
-    `assignee`) a close waits until the assigner sends `tk:item.confirm` or
-    `tk:item.reject` naming the holder as `assignee`.
+    with `tk:item.close`. With `completion="assigner"` a close waits until
+    the assigner sends `tk:item.confirm` or `tk:item.reject` naming the
+    holder as `assignee`. Without `completion`, it is filled in and stored:
+    `assignee` when the user is the only target, `assigner` when anyone else
+    is (any rule or `levels` covers someone else).
   - `tk:item.handoff` passes the user's live assignment to `to`, pending
     until `to` accepts; an admin hands off another member's by naming them as
     `assignee`.
@@ -139,8 +150,8 @@ Body text, markdown, written as is.
     the user's rule rooted at `root`, or, without either, withdraws all of the
     user's assignments and rules on the item.
     `tk:item.reopen` (the assigner or the holder) reopens a done one.
-- `clear` on `tk:item.edit`: `body`, `due`, or `clear="body due"`; an absent
-  body leaves the body as it is.
+- `clear` on `tk:item.edit`: `body`, `due`, `stage`, or several
+  (`clear="body due"`); an absent body leaves the body as it is.
 - `origin`: `agent` (the user asked; the default) or `agent-auto` (recorded
   unasked, valid only on `tk:item.status` and `tk:item.close`; see Recording).
 - `tk:roles.*` and another member's `tk:member.profile` are admin commands.
