@@ -212,8 +212,12 @@ type Env struct {
 type Outcome struct {
 	// IDs holds the ID of every wb:add command, in command order.
 	IDs []int
-	// Info is the stale-topic nudge (see staleNudge), "" when the batch
-	// carries none. It is for the caller's tool result only; no page shows it.
+	// Withdrawn holds the ID of every item a wb:close withdrew, in command
+	// order.
+	Withdrawn []int
+	// Info is the note on Withdrawn followed by the stale-topic nudge (see
+	// staleNudge), "" when the batch carries neither. It is for the caller's
+	// tool result only; no page shows it.
 	Info string
 }
 
@@ -438,7 +442,7 @@ func Apply(state *State, commands string, env Env) (Outcome, []string) {
 		case "wb:edit":
 			applyEdit(p, work, state, cmd, mark)
 		case "wb:close":
-			applyClose(p, work, cmd)
+			out.Withdrawn = append(out.Withdrawn, applyClose(p, work, cmd, mark)...)
 		case "wb:floor":
 			if floor, ok := wsxmlcmd.IntAttr(p, cmd, "id", true); ok && floor > work.Counter {
 				work.Counter = floor
@@ -469,22 +473,25 @@ func Apply(state *State, commands string, env Env) (Outcome, []string) {
 	}
 	work.evictArchive()
 	work.stampChanges(mark, env.Now)
-	out.Info = work.staleNudge(env.Now)
+	out.Info = joinInfo(withdrawnInfo(out.Withdrawn), work.staleNudge(env.Now))
 	*state = *work
 	return out, nil
 }
 
 // applyClose closes a topic with its result. Closing a closed topic again
-// replaces its result and keeps its place in the close order.
-func applyClose(p *problems, work *State, cmd command) {
+// replaces its result and keeps its place in the close order. Every item of
+// the topic still open or assumed is withdrawn, as a patch to withdrawn would
+// (settled now, answer fields kept as history); a later reopen of the topic
+// does not restore them. It returns the withdrawn IDs.
+func applyClose(p *problems, work *State, cmd command, mark int) []int {
 	topic, topicOK := cmd.Scoped()
 	result, resultOK := wsxmlcmd.RequiredAttr(p, cmd, "result")
 	if !topicOK || !resultOK {
-		return
+		return nil
 	}
 	if !work.topicKnown(topic) {
 		p.Add("%s: no item or topic body has topic %q", cmd.Label(), topic)
-		return
+		return nil
 	}
 	if !work.topicClosed(topic) {
 		work.ClosedTopics = append(work.ClosedTopics, topic)
@@ -493,6 +500,42 @@ func applyClose(p *problems, work *State, cmd command) {
 		work.CloseResults = map[string]string{}
 	}
 	work.CloseResults[topic] = strings.TrimSpace(result)
+	var withdrawn []int
+	for i := range work.Items {
+		item := &work.Items[i]
+		if item.Topic != topic || (item.Status != StatusOpen && item.Status != StatusAssumed) {
+			continue
+		}
+		item.Status = StatusWithdrawn
+		item.Changed = mark
+		work.settle(item)
+		withdrawn = append(withdrawn, item.ID)
+	}
+	return withdrawn
+}
+
+// withdrawnInfo is the update result's note on the items a close withdrew,
+// "" when it withdrew none.
+func withdrawnInfo(ids []int) string {
+	if len(ids) == 0 {
+		return ""
+	}
+	labels := make([]string, len(ids))
+	for i, id := range ids {
+		labels[i] = FormatID(id)
+	}
+	return "wb:close withdrew " + strings.Join(labels, ", ") + " (still open or assumed in the closed topic)."
+}
+
+// joinInfo joins the non-empty info sentences with a space.
+func joinInfo(parts ...string) string {
+	var kept []string
+	for _, part := range parts {
+		if part != "" {
+			kept = append(kept, part)
+		}
+	}
+	return strings.Join(kept, " ")
 }
 
 // itemFields are an add or patch command's item fields, read from its field

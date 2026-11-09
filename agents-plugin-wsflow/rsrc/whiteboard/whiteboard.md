@@ -19,9 +19,10 @@ host that shows HTML inline. Workers and subagents do not use it.
   `wb:add` IDs, in order), `full:` (the session's dashboard page URL while
   the dashboard daemon serves the session, else the full page path relative
   to the session root), and `embed:` (the snapshot's path, or its bare file
-  name while an embed folder is set). An `info:` line, at most once an hour,
-  names open topics unchanged for an hour with nothing waiting on the user;
-  close the finished ones with `wb:close`.
+  name while an embed folder is set). An `info:` line names the items a
+  `wb:close` withdrew and, at most once an hour, open topics unchanged for an
+  hour with nothing waiting on the user; close the finished ones with
+  `wb:close`.
 - `{{.McpNamespace}}/whiteboard.query(session_key, payload)` returns stored
   items, settled ones included, and changes nothing. Query before adding, so
   a question the board already holds is patched or reused, not added twice.
@@ -118,9 +119,11 @@ Markdown up to the closing tag.
   is stored as an option letter.
 - `wb:close` collapses a topic's settled items and its body; the topic needs
   an item or a body. `result` is required: one sentence saying how the topic
-  ended, shown dimmed beside the closed topic's name. Adding an item to a
-  closed topic, or changing its body, reopens it and hides the result; the
-  next close replaces it. Closed topics with nothing waiting on the user go
+  ended, shown dimmed beside the closed topic's name. Closing withdraws every
+  item of the topic still `open` or `assumed`, with `result` as the reason;
+  an `info:` line names them. Adding an item to a closed topic, or changing
+  its body, reopens it and hides the result, but does not restore the
+  withdrawn items; the next close replaces the result. Closed topics with nothing waiting on the user go
   last, most recently closed first; past 30, the dashboard page loads the
   rest on request and the file page and embed print how many are left out.
 - Topic body: one per topic, rendered above its items, for context that
