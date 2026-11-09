@@ -1105,7 +1105,7 @@
   // page tree from the page paths, the page as the daemon rendered it, the shared editor in
   // its place, and the refused-save view (both texts, the lines that overlap marked) when a
   // save could not merge. Everything is read on demand and kept per store in ui.wiki; a save
-  // re-reads the list, the pages, and the page. The look is ai-docs/ref/wiki-mockup.
+  // re-reads the list, the pages, and the page.
   var WK_NAME = /^[a-z0-9][a-z0-9-]*$/, WK_NAME_MAX = 64;
   function wk() {
     return (ui.wiki[ui.store] = ui.wiki[ui.store] || {
@@ -1137,48 +1137,56 @@
   function wkHas(st, path) { return !!(st.pages && st.pages.paths.indexOf(path) >= 0); }
   // Reads land on the state object they started from, for the wiki (and page) still shown; a
   // read for one no longer shown clears its busy flag and reads what is shown now instead.
+  // wkDone wraps a read's answer: it clears the busy flag of read k ('list' | 'pages' |
+  // 'doc'), drops an answer for a state no longer kept, and runs read k once more when a
+  // change signal arrived while it was in flight (wkReread marked it), since the answer
+  // predates that change.
+  function wkDone(st, store, k, fn) {
+    return function (res) {
+      st[k + 'Busy'] = false;
+      if (ui.wiki[store] !== st) return;
+      fn(res);
+      if (st[k + 'Again']) { st[k + 'Again'] = false; wkReread(st, store, k); }
+    };
+  }
   function wkLoadList(st, store) {
     if (st.listBusy) return;
-    st.listBusy = true;
-    AD.wiki.list(store, function (res) {
-      st.listBusy = false;
-      if (ui.wiki[store] !== st) return;
+    st.listBusy = true; st.listAgain = false;
+    AD.wiki.list(store, wkDone(st, store, 'list', function (res) {
       if (!res.ok) { st.listErr = res.error; if (!st.list) st.list = []; render(); return; }
       st.list = res.wikis; st.listErr = null;
       if (st.name && !st.list.some(function (w) { return w.name === st.name; }) && !(st.edit && st.edit.newWiki)) { st.name = null; st.pages = null; st.page = null; st.doc = null; }
       if (!st.name && st.list.length) st.name = st.list[0].name;
       render();
-    });
+    }));
   }
   function wkLoadPages(st, store, name) {
     if (st.pagesBusy) return;
-    st.pagesBusy = true;
-    AD.wiki.pages(store, name, function (res) {
-      st.pagesBusy = false;
-      if (ui.wiki[store] !== st) return;
+    st.pagesBusy = true; st.pagesAgain = false;
+    AD.wiki.pages(store, name, wkDone(st, store, 'pages', function (res) {
       if (st.name !== name) { if (ui.store === store) wkPull(st); return; }
       if (!res.ok) { st.pagesErr = res.error; if (!st.pages) st.pages = { paths: [], commit: '' }; render(); return; }
       st.pages = { paths: res.pages.slice(), commit: res.commit }; st.pagesErr = null;
       if (!st.page && st.pages.paths.length) st.page = wkHas(st, 'index') ? 'index' : st.pages.paths[0];
       render();
-    });
+    }));
   }
   // soft: a re-read of the page shown; one that is gone shows as an error, not as a new page
   function wkLoadDoc(st, store, name, path, soft) {
     if (st.docBusy) return;
-    st.docBusy = true;
-    AD.wiki.read(store, name, path, function (res) {
-      st.docBusy = false;
-      if (ui.wiki[store] !== st) return;
+    st.docBusy = true; st.docAgain = false;
+    AD.wiki.read(store, name, path, wkDone(st, store, 'doc', function (res) {
       if (st.name !== name || st.page !== path) { if (ui.store === store) wkPull(st); return; }
       if (!res.ok) {
-        // a page that is not there (a wiki: link to it) opens as a new page at that path
-        if (res.status === 404 && !st.edit && !soft) { st.doc = null; st.docErr = null; wkStartEdit(path, true, false); return; }
+        // a page that is not there (a wiki: link to it) opens as a new page at that path; the
+        // editor opens on the store shown, so a store switched away from meanwhile reads the
+        // page again when it shows
+        if (res.status === 404 && !st.edit && !soft) { st.doc = null; st.docErr = null; if (ui.store === store) wkStartEdit(path, true, false); return; }
         st.docErr = res.error; render(); return;
       }
       st.doc = { path: res.path, content: res.content, commit: res.commit, html: res.html }; st.docErr = null;
       render();
-    });
+    }));
   }
   // What the panel shows but has not read yet is read now; the draw shows what is there.
   function wkPull(st) {
@@ -1198,9 +1206,17 @@
     if (!AD.wiki || !ui.store) return;
     var st = ui.wiki[ui.store], store = ui.store;
     if (!st || st.list === null || !(st.mode === 'wiki' || (ui.layout === 'narrow' && tabState().narrow === 'wiki'))) return;
-    wkLoadList(st, store);
-    if (st.name && !(st.edit && st.edit.newWiki)) wkLoadPages(st, store, st.name);
-    if (st.name && st.page && !st.edit && !st.conflict) wkLoadDoc(st, store, st.name, st.page, true);
+    wkReread(st, store, 'list');
+    wkReread(st, store, 'pages');
+    wkReread(st, store, 'doc');
+  }
+  // One read of a change signal; a read k already in flight started before the change, so it
+  // is marked to run again when it lands (wkDone) instead of being dropped.
+  function wkReread(st, store, k) {
+    if (st[k + 'Busy']) { st[k + 'Again'] = true; return; }
+    if (k === 'list') wkLoadList(st, store);
+    else if (k === 'pages') { if (st.name && !(st.edit && st.edit.newWiki)) wkLoadPages(st, store, st.name); }
+    else if (st.name && st.page && !st.edit && !st.conflict) wkLoadDoc(st, store, st.name, st.page, true);
   }
 
   function wkPicker() {

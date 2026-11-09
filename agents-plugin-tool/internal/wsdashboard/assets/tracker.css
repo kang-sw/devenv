@@ -819,7 +819,7 @@ body.tk-menuon .tk .ir-more { visibility: hidden !important; }
 .tk .md hr { border: 0; border-top: 1px solid var(--wb-line); margin: 8px 0; }
 .tk .sh-body.md > :last-child, .tk .ctext.md > :last-child { margin-bottom: 0; }
 
-/* The wiki in the Items panel (cardWiki in tracker.js; the look is ai-docs/ref/wiki-mockup).
+/* The wiki in the Items panel (cardWiki in tracker.js).
    Classes are wk-*, plus a.wlink for a wiki: page link in any rendered text. */
 /* the Items panel header's first control: Items | Wiki. It takes the h2's place and reads
    as a mode switch (the item window's .iw-seg look), not as one more scope pill */
