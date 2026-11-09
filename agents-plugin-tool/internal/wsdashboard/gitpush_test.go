@@ -356,3 +356,49 @@ func TestGitPushRoute(t *testing.T) {
 		t.Fatalf("push with nothing ahead = %d %q, want 409 nothing to push", code, raw)
 	}
 }
+
+// TestGitActionCommandBoundsRemoteCommands: push and fetch run under the
+// non-interactive bound (no credential prompt, ssh in batch mode over the
+// repository's core.sshCommand); a local merge does not; every action keeps
+// the C locale.
+func TestGitActionCommandBoundsRemoteCommands(t *testing.T) {
+	work := filepath.Join(t.TempDir(), "work")
+	pushRepos(t, work, 0)
+	t.Setenv("GIT_SSH_COMMAND", "")
+	t.Setenv("GIT_SSH", "")
+	gitRun(t, work, "config", "core.sshCommand", "ssh -i /k/id")
+	ctx := context.Background()
+	envHas := func(env []string, kv string) bool {
+		for _, e := range env {
+			if e == kv {
+				return true
+			}
+		}
+		return false
+	}
+	for _, args := range [][]string{{"fetch"}, gitPushArgs("origin", "main", "refs/heads/main")} {
+		cmd := gitActionCommand(ctx, work, args...)
+		if !strings.Contains(strings.Join(cmd.Args, " "), "-c credential.interactive=false "+args[0]) {
+			t.Fatalf("%s args = %q, want credential.interactive=false before the subcommand", args[0], cmd.Args)
+		}
+		for _, kv := range []string{
+			"LC_ALL=C",
+			"GIT_TERMINAL_PROMPT=0",
+			"GIT_SSH_COMMAND=ssh -i /k/id -o BatchMode=yes -o ConnectTimeout=5",
+		} {
+			if !envHas(cmd.Env, kv) {
+				t.Fatalf("%s env lacks %q", args[0], kv)
+			}
+		}
+		if cmd.WaitDelay == 0 {
+			t.Fatalf("%s is not bounded (WaitDelay 0)", args[0])
+		}
+	}
+	merge := gitActionCommand(ctx, work, "merge", "--ff-only", "--quiet", "@{upstream}")
+	if strings.Contains(strings.Join(merge.Args, " "), "credential.interactive") {
+		t.Fatalf("merge args = %q, want no remote config", merge.Args)
+	}
+	if !envHas(merge.Env, "LC_ALL=C") || envHas(merge.Env, "GIT_TERMINAL_PROMPT=0") {
+		t.Fatalf("merge env: want LC_ALL=C and no remote env")
+	}
+}

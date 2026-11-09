@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kang-sw/devenv/internal/gitbatch"
 	"github.com/kang-sw/devenv/internal/wsgit"
 	"github.com/kang-sw/devenv/internal/wsi18n"
 )
@@ -32,10 +33,6 @@ import (
 const (
 	// gitActionTimeout bounds one action, network included.
 	gitActionTimeout = 60 * time.Second
-	// gitActionWaitDelay bounds the wait for git's output pipes once an
-	// action's git is killed, which a helper git started (ssh) may still
-	// hold open.
-	gitActionWaitDelay = 5 * time.Second
 )
 
 // actionReads is the runner an action's branch reads go through, given the
@@ -171,14 +168,10 @@ func branchErr(run *gitBadgeRunner) error {
 	return fmt.Errorf("%s", gitErrText(run.err))
 }
 
-// runGitAction runs one git command of an action in root. A credential
-// prompt fails instead of waiting on a terminal the daemon does not have; the
-// C locale keeps git's messages comparable. Its error is git's first
-// meaningful line, bounded.
+// runGitAction runs one git command of an action in root. Its error is git's
+// first meaningful line, bounded.
 func runGitAction(ctx context.Context, root string, args ...string) error {
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", root}, args...)...)
-	cmd.Env = append(os.Environ(), "LC_ALL=C", "GIT_TERMINAL_PROMPT=0")
-	cmd.WaitDelay = gitActionWaitDelay
+	cmd := gitActionCommand(ctx, root, args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		if ctx.Err() != nil {
@@ -187,6 +180,44 @@ func runGitAction(ctx context.Context, root string, args ...string) error {
 		return fmt.Errorf("%s", gitActionErrText(string(out), err))
 	}
 	return nil
+}
+
+// gitActionCommand is one action's git in root under the C locale, which
+// keeps git's messages comparable, bounded by ctx (gitbatch.Bound). A remote
+// command (push, fetch) also runs under the non-interactive bound
+// (internal/gitbatch): the daemon's console is hidden (spawn_windows.go), so
+// a credential, passphrase, or host-key prompt from git or its ssh would
+// wait unseen until the timeout; it fails at once instead.
+func gitActionCommand(ctx context.Context, root string, args ...string) *exec.Cmd {
+	remote := len(args) > 0 && (args[0] == "push" || args[0] == "fetch")
+	if remote {
+		args = gitbatch.RemoteArgs(args...)
+	}
+	cmd := gitActionGit(ctx, root, args...)
+	cmd.Env = append(os.Environ(), "LC_ALL=C")
+	if remote {
+		cmd.Env = append(cmd.Env, gitbatch.RemoteEnv(gitActionSSHCommand(ctx, root))...)
+	}
+	return cmd
+}
+
+// gitActionGit is git in root, bounded by ctx (gitbatch.Bound).
+func gitActionGit(ctx context.Context, root string, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", root}, args...)...)
+	gitbatch.Bound(cmd)
+	return cmd
+}
+
+// gitActionSSHCommand is gitbatch.SSHCommand over the process environment
+// and root's core.sshCommand.
+func gitActionSSHCommand(ctx context.Context, root string) string {
+	return gitbatch.SSHCommand(os.Getenv, func() string {
+		out, err := gitActionGit(ctx, root, "config", "--get", "core.sshCommand").Output()
+		if err != nil {
+			return ""
+		}
+		return string(out)
+	})
 }
 
 // upstreamOf is branch's configured upstream: its remote and the remote
