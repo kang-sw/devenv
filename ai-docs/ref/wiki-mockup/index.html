@@ -1,0 +1,945 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tracker wiki mockup</title>
+<style>
+/* ===== shipped tokens (wswhiteboard page.css, dashboard.css, tracker.css), dark block keyed on data-theme for the mockup toggle ===== */
+:root {
+  --wb-bg: #f3f3f0; --wb-fg: #1b1d21; --wb-card: #ffffff; --wb-muted: #e9e8e3; --wb-muted-fg: #5f646b;
+  --wb-primary: #2b62d9; --wb-primary-fg: #ffffff;
+  --wb-line: color-mix(in srgb, var(--wb-fg) 16%, transparent);
+  --wb-wash: color-mix(in srgb, var(--wb-fg) 6%, transparent);
+  --wb-shadow: 0 1px 2px rgb(0 0 0 / .14), 0 2px 6px rgb(0 0 0 / .06);
+  --wb-shadow-hi: 0 2px 4px rgb(0 0 0 / .16), 0 6px 18px rgb(0 0 0 / .10);
+  --wb-radius: 12px;
+  --wb-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --tk-ok: #1d7348; --tk-fail: #c0262d; --tk-on-fail: #ffffff; --tk-warn: #a35f00;
+  --tk-teal: #0e7a83; --tk-agent: #6a4fc4; --tk-on-agent: #ffffff; --tk-agent-ink: #6a4fc4;
+  --tk-conc: #e9a100; --tk-on-conc: #1b1d21; --tk-toast-fail: #ffb4b8; --tk-backdrop: rgb(0 0 0 / .28);
+  --dpad: 16px;
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --wb-bg: #141518; --wb-fg: #e7e7e4; --wb-card: #1e2024; --wb-muted: #2b2d32; --wb-muted-fg: #a2a6ad;
+  --wb-primary: #7aa2ff; --wb-primary-fg: #0c1424;
+  --wb-shadow: 0 1px 2px rgb(0 0 0 / .5), 0 2px 8px rgb(0 0 0 / .3);
+  --wb-shadow-hi: 0 2px 4px rgb(0 0 0 / .55), 0 8px 22px rgb(0 0 0 / .4);
+  --tk-ok: #6cc39a; --tk-fail: #f0797e; --tk-on-fail: #2a0d0f; --tk-warn: #e0a36c;
+  --tk-teal: #6fcdd4; --tk-agent: #3d2f6b; --tk-on-agent: #ddd3fb; --tk-agent-ink: #b9a6f5;
+  --tk-conc: #d1a239; --tk-on-conc: #1b1d21; --tk-toast-fail: #b0202a; --tk-backdrop: rgb(0 0 0 / .5);
+  color-scheme: dark;
+}
+
+/* ===== shipped base (page.css) ===== */
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--wb-bg); color: var(--wb-fg); }
+body { font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif; }
+code { font-family: var(--wb-mono); }
+button { font: inherit; color: inherit; }
+.i { width: 14px; height: 14px; flex: none; display: block; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+
+/* ===== mockup chrome (not shipped; same as the git graph mockup) ===== */
+.mockhead { position: sticky; top: 0; z-index: 30; display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; justify-content: space-between; padding: 8px 16px; background: var(--wb-card); box-shadow: var(--wb-shadow); }
+.mockhead .muted { color: var(--wb-muted-fg); font-size: 12.5px; }
+.mctl { display: flex; flex-wrap: wrap; gap: 8px; }
+.seg { display: inline-flex; gap: 3px; background: var(--wb-muted); border-radius: 999px; padding: 3px; }
+.seg { flex-wrap: wrap; }
+.seg button { white-space: nowrap; border: 0; background: transparent; border-radius: 999px; height: 26px; padding: 0 12px; font-weight: 700; font-size: 12.5px; cursor: pointer; color: var(--wb-muted-fg); }
+.seg button[aria-pressed="true"] { background: var(--wb-card); color: var(--wb-fg); box-shadow: var(--wb-shadow); }
+.mockmain { margin: 0 auto; padding: 12px 0 40px; }
+.mk-intro, .mk-legend { max-width: 1680px; margin: 0 auto 12px; padding: 0 var(--dpad); font-size: 13px; }
+.mk-intro p { margin: 0 0 4px; }
+.mk-legend { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; margin-top: 18px; }
+.mk-legend section { background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); padding: 10px 14px; }
+.mk-legend h2 { margin: 0 0 6px; font-size: 13px; display: flex; align-items: center; gap: 6px; }
+.mk-legend ul { margin: 0; padding-left: 18px; }
+.mk-legend li { margin: 2px 0; }
+.mk-stage { max-width: 1320px; margin: 0 auto; }
+.mk-stage[data-layout="d"] { max-width: 1760px; }
+.mk-stage[data-layout="narrow"] { max-width: 440px; }
+.mk-stage[data-layout="page"] { max-width: 1680px; }
+.mk-top { display: flex; align-items: center; gap: 10px; margin: 0 var(--dpad); height: 40px; }
+.mk-top .back { width: 30px; height: 30px; border-radius: 999px; background: var(--wb-muted); display: inline-flex; align-items: center; justify-content: center; color: var(--wb-muted-fg); }
+.mk-top b { font-size: 15px; }
+.mk-top .meta { color: var(--wb-muted-fg); font: 12px var(--wb-mono); }
+.mk-under { margin: 54px var(--dpad) 0; display: grid; gap: 10px; opacity: .45; }
+.mk-under div { height: 14px; border-radius: 6px; background: var(--wb-muted); }
+/* the drawer, drawn open and in flow instead of fixed (tracker.css .tk-dr-clip / .tk-dr-sheet) */
+.mk-drawer { position: relative; margin: 0 var(--dpad); }
+.mk-clip { height: min(660px, calc(100vh - 150px)); min-height: 480px; overflow: hidden; border-radius: 0 0 var(--wb-radius) var(--wb-radius); box-shadow: var(--wb-shadow-hi); }
+.mk-handles { position: absolute; right: 0; top: 100%; display: flex; gap: 6px; }
+.mk-page { height: max(560px, calc(100vh - 150px)); margin: 0 var(--dpad); display: flex; flex-direction: column; }
+
+/* ===== shipped tracker renderer subset (tracker.css), unchanged ===== */
+.tk .btn { font: inherit; font-size: 12.5px; background: var(--wb-muted); color: var(--wb-fg); border: 0; border-radius: 999px; padding: 2px 11px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.tk .btn:hover { background: color-mix(in srgb, var(--wb-muted) 70%, var(--wb-fg) 14%); }
+.tk .btn.primary { background: var(--wb-primary); color: var(--wb-primary-fg); }
+.tk .btn.ib { padding: 4px 7px; }
+.tk .btn .i { width: 14px; height: 14px; }
+.tk .btn:focus-visible, .tk input:focus-visible, .tk textarea:focus-visible { outline: 1.5px solid var(--wb-primary); }
+.tk a { color: var(--wb-primary); text-decoration: none; }
+.tk a:hover { text-decoration: underline; }
+.tk .muted { color: var(--wb-muted-fg); }
+.tk .grow { flex: 1 1 auto; }
+.tk code { font-family: var(--wb-mono); font-size: 12px; }
+.tk .chip { display: inline-flex; align-items: center; gap: 3px; height: 19px; font-size: 11.5px; font-weight: 700; line-height: 1; padding: 0 8px; border-radius: 999px; background: var(--wb-muted); color: var(--wb-muted-fg); white-space: nowrap; }
+.tk .chip.st-todo { background: color-mix(in srgb, var(--wb-primary) 10%, var(--wb-card)); color: var(--wb-primary); }
+.tk .chip.st-doing { background: color-mix(in srgb, var(--wb-primary) 20%, var(--wb-card)); color: var(--wb-primary); }
+.tk .chip.st-done { background: color-mix(in srgb, var(--tk-ok) 16%, var(--wb-card)); color: var(--tk-ok); }
+.tk .chip.kind { background: transparent; box-shadow: inset 0 0 0 1px var(--wb-line); font-weight: 600; }
+.tk .chip.att { border: 0; font-family: inherit; background: transparent; box-shadow: inset 0 0 0 1px var(--wb-line); color: var(--wb-fg); font-weight: 600; }
+.tk .atts { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; margin: 4px 0; }
+.tk .tk-title { display: flex; align-items: center; gap: 8px; margin: 0 2px 8px; font-size: 13px; color: var(--wb-muted-fg); }
+.tk .tk-title b { color: var(--wb-fg); font-size: 14px; }
+.tk .tk-dr-sheet { height: 100%; background: var(--wb-bg); border-top: 1px solid var(--wb-muted); display: flex; flex-direction: column; }
+.tk .tk-dr-body { flex: 1 1 0; min-height: 0; overflow: hidden; padding: 10px; display: flex; flex-direction: column; }
+.tk .tk-dr-body > * { flex: none; }
+.tk.tk-spage { flex: 1 1 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+.tk.tk-spage > * { flex: none; }
+.tk .tk-zones { flex: 1 1 0; min-height: 0; display: grid; grid-template-rows: minmax(0, 1fr); gap: 10px; }
+.tk .tk-zones[data-layout="a"] { grid-template-columns: minmax(0, 2fr) minmax(340px, 1fr); }
+.tk .tk-zones[data-layout="d"] { grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr) minmax(300px, 1fr); }
+.tk .tk-zones[data-layout="narrow"] { grid-template-columns: minmax(0, 1fr); }
+.tk .tk-col { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.tk .tk-col > .card { flex: 1 1 auto; min-height: 0; max-height: 100%; }
+.tk .tk-handle { height: 34px; padding: 2px 10px 0; border: 0; border-radius: 0 0 8px 8px; cursor: pointer; display: flex; align-items: center; gap: 7px; background: var(--wb-card); color: var(--wb-fg); box-shadow: inset 0 -2px 0 var(--wb-primary), var(--wb-shadow-hi); font-size: 12px; font-weight: 700; white-space: nowrap; }
+.tk .card { background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); overflow: hidden; display: flex; flex-direction: column; }
+.tk .card > * { flex: none; }
+.tk .card > .cbody { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 8px 12px 10px; font-size: 13px; }
+.tk .card > header { display: flex; gap: 8px; align-items: center; padding: 4px 8px 4px 12px; min-height: 32px; background: var(--wb-muted); font-weight: 700; font-size: 13px; }
+.tk .card > header h2 { margin: 0; font-size: 13px; white-space: nowrap; }
+.tk .card > header .chip { background: var(--wb-card); }
+.tk .card.panel > header { flex-wrap: wrap; row-gap: 4px; padding-top: 5px; padding-bottom: 5px; }
+.tk .scopes { display: inline-flex; gap: 2px; padding: 2px; border-radius: 999px; background: var(--wb-card); flex-wrap: wrap; }
+.tk .scp { font: inherit; font-size: 12px; font-weight: 600; border: 0; background: transparent; color: var(--wb-muted-fg); border-radius: 999px; padding: 1px 10px; cursor: pointer; white-space: nowrap; }
+.tk .scp.on { background: var(--wb-primary); color: var(--wb-primary-fg); }
+.tk .prow2 { flex: 1 0 100%; display: flex; align-items: center; gap: 8px; min-width: 0; }
+.tk .vmodes { display: inline-flex; gap: 1px; padding: 2px; border-radius: 999px; background: var(--wb-card); flex: none; }
+.tk .vbtn { width: 28px; height: 24px; border: 0; border-radius: 999px; background: transparent; color: var(--wb-muted-fg); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; padding: 0; }
+.tk .vbtn .i { width: 15px; height: 15px; }
+.tk .vbtn.on { background: var(--wb-primary); color: var(--wb-primary-fg); }
+.tk .psearch { flex: 1 1 0; min-width: 0; display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 6px 0 9px; border-radius: 999px; background: var(--wb-card); color: var(--wb-muted-fg); box-shadow: inset 0 0 0 1px var(--wb-line); }
+.tk .psearch:focus-within { box-shadow: inset 0 0 0 1.5px var(--wb-primary); color: var(--wb-primary); }
+.tk .psearch input { flex: 1 1 auto; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--wb-fg); font: inherit; font-size: 12.5px; font-weight: 400; padding: 0; }
+.tk .psearch input::placeholder { color: var(--wb-muted-fg); }
+.tk .ptools .psearch { background: var(--wb-muted); box-shadow: none; }
+.tk .ribbon { flex: none; display: flex; align-items: center; gap: 6px; min-height: 24px; padding: 1px 8px 1px 4px; border-top: 1px solid var(--wb-muted); font-size: 11.5px; color: var(--wb-muted-fg); }
+.tk .ribbon.idle { opacity: .7; }
+.tk .rib-main { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 6px; height: 20px; padding: 0 6px; border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit; text-align: left; }
+.tk .sdot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--tk-ok); }
+.tk .card.pane > header { padding: 4px 6px; min-height: 36px; }
+.tk .ptabs { display: flex; flex-wrap: wrap; gap: 2px; background: var(--wb-card); border-radius: 999px; padding: 2px; }
+.tk .ptab { position: relative; font: inherit; border: 0; background: transparent; color: var(--wb-muted-fg); border-radius: 999px; height: 26px; width: 32px; padding: 0; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+.tk .ptab .i { width: 16px; height: 16px; }
+.tk .ptab:hover { color: var(--wb-fg); }
+.tk .ptab[aria-selected="true"] { background: var(--wb-muted); color: var(--wb-fg); box-shadow: inset 0 0 0 1px var(--wb-line); }
+.tk .tdot { display: none; position: absolute; top: 3px; right: 4px; width: 7px; height: 7px; border-radius: 50%; background: var(--wb-primary); box-shadow: 0 0 0 1.5px var(--wb-card); }
+.tk .tdot.on { display: inline-block; }
+.tk .ptools { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 6px 12px 0; font-size: 12.5px; }
+.tk .ptools:empty { display: none; }
+.tk .card.pane > .cbody { padding-top: 6px; }
+.tk .irow { position: relative; border-top: 1px solid var(--wb-muted); }
+.tk .irow:first-child { border-top: 0; }
+.tk .ir-main { display: flex; align-items: center; gap: 7px; min-height: 30px; padding: 2px 4px 2px calc(4px + var(--ind, 0) * 16px); border-radius: 6px; cursor: pointer; }
+.tk .ir-main:hover { background: color-mix(in srgb, var(--wb-muted) 60%, transparent); }
+.tk .ir-main .title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1 auto; }
+.tk .sti { display: inline-flex; flex: none; width: 16px; height: 16px; color: var(--wb-primary); }
+.tk .sti .i { width: 16px; height: 16px; }
+.tk .av { width: 20px; height: 20px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; flex: none; font-style: normal; font-size: 9px; font-weight: 800; background: color-mix(in srgb, var(--wb-primary) 15%, var(--wb-card)); color: var(--wb-primary); box-shadow: 0 0 0 1.5px var(--wb-card); }
+.tk .av.me { background: var(--wb-primary); color: var(--wb-primary-fg); }
+.tk .due2 { flex: none; width: 46px; text-align: right; font-family: var(--wb-mono); font-size: 11.5px; color: var(--wb-muted-fg); white-space: nowrap; }
+.tk .row { padding: 6px 0; border-top: 1px solid var(--wb-muted); }
+.tk .row:first-child { border-top: 0; }
+.tk .r1 { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.tk .r1 .title { font-weight: 600; }
+.tk .r2 { font-size: 12px; color: var(--wb-muted-fg); margin-top: 1px; }
+.tk .nfeed { padding-left: 6px; border-left: 3px solid transparent; }
+.tk .nfeed.unread { border-left-color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 7%, var(--wb-card)); }
+.tk .iref { color: var(--wb-primary); text-decoration: none; font-family: var(--wb-mono); font-size: .92em; }
+.tk .iref:hover { text-decoration: underline; }
+.tk .ia { width: 26px; height: 22px; border: 0; border-radius: 6px; background: transparent; color: var(--wb-muted-fg); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; padding: 0; }
+.tk .ia:hover, .tk .ia:focus-visible { background: var(--wb-card); color: var(--wb-primary); outline: none; box-shadow: inset 0 0 0 1px var(--wb-line); }
+.tk .ia .i { width: 15px; height: 15px; }
+.tk .idcopy { font: inherit; font-size: 11.5px; display: inline-flex; align-items: center; gap: 3px; padding: 1px 7px 1px 5px; border: 0; border-radius: 999px; background: transparent; color: var(--wb-muted-fg); cursor: pointer; box-shadow: inset 0 0 0 1px var(--wb-line); }
+.tk .idcopy .i { width: 12px; height: 12px; }
+.tk.tk-iwin-back { position: fixed; inset: 0; z-index: 70; background: var(--tk-backdrop); display: flex; align-items: center; justify-content: center; padding: 3vh 12px; }
+.tk .iwin { width: min(1040px, 100%); max-height: 94vh; display: flex; flex-direction: column; background: var(--wb-bg); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow-hi); overflow: hidden; }
+.tk .iwin-in { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 0 18px 18px; display: flex; flex-direction: column; gap: 10px; }
+.tk .iw-top { position: sticky; top: 0; z-index: 2; margin: 0 -18px; padding: 14px 18px 10px; background: var(--wb-bg); box-shadow: 0 1px 0 var(--wb-line); display: flex; flex-direction: column; gap: 6px; }
+.tk .iw-head { display: flex; gap: 8px; align-items: flex-start; }
+.tk .iw-head .sti { margin-top: 3px; }
+.tk .iw-head h2 { margin: 0; font-size: 18px; line-height: 1.3; flex: 1; }
+.tk .iw-chips { display: flex; gap: 5px; align-items: center; flex-wrap: wrap; }
+.tk .iw-crumb { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--wb-muted-fg); }
+.tk .iw-crumb a { color: var(--wb-muted-fg); }
+.tk .iwin h3 { margin: 4px 0 0; font-size: 12px; font-weight: 800; color: var(--wb-muted-fg); text-transform: uppercase; letter-spacing: .04em; }
+.tk .sh-body { background: var(--wb-card); border-radius: 10px; padding: 8px 10px; box-shadow: var(--wb-shadow); font-size: 13px; }
+.tk .timeline { list-style: none; margin: 0; padding: 4px 10px; background: var(--wb-card); border-radius: 10px; box-shadow: var(--wb-shadow); }
+.tk .timeline .ev { padding: 6px 0 6px 12px; border-left: 2px solid var(--wb-muted); margin-left: 4px; position: relative; font-size: 12.5px; }
+.tk .timeline .ev::before { content: ""; position: absolute; left: -5px; top: 11px; width: 8px; height: 8px; border-radius: 50%; background: var(--wb-muted-fg); }
+.tk .tked { display: flex; flex-direction: column; gap: 4px; }
+.tk .tked > [hidden] { display: none; }
+.tk .tked-tabs { display: flex; gap: 2px; align-self: flex-start; }
+.tk .tked-tab { font: inherit; font-size: 11.5px; border: 0; border-radius: 6px; padding: 1px 8px; background: transparent; color: var(--wb-muted-fg); cursor: pointer; }
+.tk .tked-tab:hover { color: var(--wb-primary); }
+.tk .tked-tab[aria-pressed="true"] { background: var(--wb-muted); color: var(--wb-fg); font-weight: 600; }
+.tk .tked-pv { min-height: 44px; overflow: auto; overflow-wrap: anywhere; font-size: 13px; }
+.tk .tb { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 12px; }
+.tk .hint { padding: 6px 8px; border-radius: 8px; background: var(--wb-muted); font-size: 12px; }
+.tk.tk-toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 90; max-width: min(640px, 92vw); background: var(--wb-fg); color: var(--wb-card); border-radius: 10px; padding: 8px 14px; font-size: 13px; box-shadow: var(--wb-shadow-hi); }
+.tk .fx-flash { animation: tk-fx-flash 1.8s ease-out; }
+@keyframes tk-fx-flash { 0%, 35% { background-color: color-mix(in srgb, var(--wb-primary) 26%, transparent); } 100% { background-color: transparent; } }
+/* shared .md rules (page.css) */
+.md > :first-child { margin-top: 0; }
+.md > :last-child { margin-bottom: 0; }
+.md p, .md ul, .md ol, .md pre, .md table, .md blockquote { margin: 0 0 6px; }
+.md ul, .md ol { padding-left: 18px; }
+.md li { margin: 2px 0; }
+.md blockquote { padding: 5px 11px; border-left: 3px solid color-mix(in srgb, var(--wb-primary) 70%, transparent); border-radius: 0 6px 6px 0; background: color-mix(in srgb, var(--wb-primary) 7%, transparent); color: color-mix(in srgb, var(--wb-fg) 78%, var(--wb-muted-fg)); }
+.md img { max-width: 100%; height: auto; border-radius: 6px; vertical-align: middle; }
+.md pre { background: var(--wb-muted); border-radius: 8px; padding: 6px 9px; overflow-x: auto; font-size: 12.5px; white-space: pre; }
+.md :not(pre) > code { background: var(--wb-muted); border-radius: 4px; padding: 0 4px; }
+.md table { display: table; border-collapse: separate; border-spacing: 0; font-size: 12.5px; border: 1px solid var(--wb-line); border-radius: 8px; }
+.md th, .md td { padding: 5px 10px; vertical-align: top; }
+.md th + th, .md td + td { border-left: 1px solid color-mix(in srgb, var(--wb-line) 55%, transparent); }
+.md th { text-align: left; background: var(--wb-wash); font-weight: 700; border-bottom: 1px solid var(--wb-line); }
+.md td { border-top: 1px solid var(--wb-line); }
+.md tbody tr:first-child td { border-top: 0; }
+.md tbody tr:nth-child(even) td { background: color-mix(in srgb, var(--wb-fg) 3%, transparent); }
+.md hr { border: 0; border-top: 1px solid var(--wb-line); margin: 8px 0; }
+.tk .sh-body.md :is(h1, h2, h3) { margin: 8px 0 4px; font-size: 13px; font-weight: 700; line-height: 1.35; }
+
+/* ===================================================================================
+   NEW (wiki). Everything below is new; class names keep the tracker's .tk scoping.
+   =================================================================================== */
+/* the Items panel header's first control: Items | Wiki. It takes the h2's place and reads
+   as a mode switch (the item window's .iw-seg look), not as one more scope pill */
+.tk .wk-sw { display: inline-flex; gap: 1px; padding: 2px; border-radius: 8px; background: var(--wb-card); flex: none; }
+.tk .wk-sw button { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px; border: 0; border-radius: 6px; background: transparent; color: var(--wb-muted-fg); font: inherit; font-size: 12.5px; font-weight: 700; cursor: pointer; }
+.tk .wk-sw button:hover { color: var(--wb-fg); }
+.tk .wk-sw button[aria-pressed="true"] { background: var(--wb-muted); color: var(--wb-fg); box-shadow: inset 0 0 0 1px var(--wb-line); }
+.tk .wk-sw .i { width: 15px; height: 15px; }
+/* the wiki picker: the current wiki, a menu of the store's wikis and "New wiki" */
+.tk .wk-pickw { position: relative; flex: 0 1 auto; min-width: 0; }
+.tk .wk-pick { display: inline-flex; align-items: center; gap: 5px; height: 26px; max-width: 100%; padding: 0 8px 0 9px; border: 0; border-radius: 999px; background: var(--wb-card); color: var(--wb-fg); font: inherit; font-size: 12.5px; font-weight: 700; cursor: pointer; box-shadow: inset 0 0 0 1px var(--wb-line); }
+.tk .wk-pick .nm { font-family: var(--wb-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tk .wk-pick .pre { color: var(--wb-muted-fg); font-weight: 400; font-family: var(--wb-mono); }
+.tk .wk-pick:hover { box-shadow: inset 0 0 0 1px var(--wb-muted-fg); }
+.tk .wk-pop { position: absolute; left: 0; top: calc(100% + 6px); z-index: 20; width: 300px; background: var(--wb-card); border-radius: 10px; box-shadow: var(--wb-shadow-hi); padding: 6px; display: flex; flex-direction: column; gap: 1px; font-weight: 400; }
+.tk .wk-pop.r { left: auto; right: 0; }
+.tk .wk-opt { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; align-items: center; column-gap: 7px; padding: 5px 8px; border: 0; border-radius: 7px; background: transparent; color: var(--wb-fg); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.tk .wk-opt:hover { background: color-mix(in srgb, var(--wb-primary) 10%, var(--wb-card)); }
+.tk .wk-opt.on { background: color-mix(in srgb, var(--wb-primary) 14%, var(--wb-card)); }
+.tk .wk-opt .nm { font-family: var(--wb-mono); font-weight: 700; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; }
+.tk .wk-opt .sub { grid-column: 2 / 4; font-size: 11.5px; color: var(--wb-muted-fg); }
+.tk .wk-opt .n { font-size: 11.5px; color: var(--wb-muted-fg); }
+.tk .wk-opt.add { color: var(--wb-primary); font-weight: 600; }
+.tk .wk-popsep { height: 1px; background: var(--wb-line); margin: 4px 2px; }
+.tk .wk-pophint { font-size: 11px; color: var(--wb-muted-fg); padding: 2px 8px 2px; }
+/* the wiki body: page tree | page; one column under 560px of panel width */
+.tk .card > .cbody.wk-body { padding: 0; display: grid; grid-template-columns: minmax(150px, 220px) minmax(0, 1fr); overflow: hidden; container: wkb / inline-size; }
+.tk .wk-body.notree { grid-template-columns: minmax(0, 1fr); }
+.tk .wk-body.notree .wk-tree { display: none; }
+.tk .wk-body.wide { grid-template-columns: minmax(180px, 260px) minmax(0, 1fr); }
+.tk .wk-tree { min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 8px 6px 10px 8px; border-right: 1px solid var(--wb-muted); font-size: 12.5px; }
+.tk .wk-tn { display: flex; align-items: center; gap: 5px; width: 100%; min-height: 25px; padding: 1px 6px 1px calc(6px + var(--d, 0) * 14px); border: 0; border-radius: 6px; background: transparent; color: var(--wb-fg); font: inherit; text-align: left; cursor: pointer; white-space: nowrap; }
+.tk .wk-tn .t { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.tk .wk-tn .i { width: 14px; height: 14px; color: var(--wb-muted-fg); }
+.tk .wk-tn:hover { background: color-mix(in srgb, var(--wb-muted) 60%, transparent); }
+.tk .wk-tn.dir { color: var(--wb-muted-fg); font-weight: 600; }
+.tk .wk-tn.dir .cv { width: 12px; height: 12px; transition: transform .15s; }
+.tk .wk-tn.dir[aria-expanded="false"] .cv { transform: rotate(-90deg); }
+.tk .wk-tn.on { background: color-mix(in srgb, var(--wb-primary) 13%, transparent); color: var(--wb-fg); font-weight: 600; }
+.tk .wk-tn.on .i { color: var(--wb-primary); }
+.tk .wk-tn.ed .t::after { content: " \2022"; color: var(--tk-warn); }
+.tk .wk-tn mark, .tk .wk-snip mark { background: color-mix(in srgb, var(--tk-conc) 35%, transparent); color: inherit; border-radius: 2px; }
+.tk .wk-snip { margin: -2px 0 3px calc(25px + var(--d, 0) * 14px); font-size: 11.5px; color: var(--wb-muted-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tk .wk-tcount { margin: 0 6px 6px; font-size: 11.5px; color: var(--wb-muted-fg); }
+.tk .wk-tadd { display: flex; align-items: center; gap: 5px; margin-top: 6px; padding: 2px 6px; border: 0; background: transparent; color: var(--wb-muted-fg); font: inherit; font-size: 12px; cursor: pointer; border-radius: 6px; }
+.tk .wk-tadd:hover { color: var(--wb-primary); background: color-mix(in srgb, var(--wb-muted) 60%, transparent); }
+.tk .wk-tadd .i { width: 12px; height: 12px; }
+/* the page: a sticky head (path, last change, actions) over the rendered page or the editor */
+.tk .wk-page { min-width: 0; min-height: 0; overflow: auto; overscroll-behavior: contain; display: flex; flex-direction: column; container: wkp / inline-size; }
+.tk .wk-phead { position: sticky; top: 0; z-index: 3; flex: none; display: flex; align-items: center; gap: 6px; min-height: 36px; padding: 4px 8px 4px 14px; background: var(--wb-card); box-shadow: 0 1px 0 var(--wb-muted); }
+.tk .wk-path { display: flex; align-items: center; gap: 3px; min-width: 0; font-size: 12.5px; color: var(--wb-muted-fg); overflow: hidden; white-space: nowrap; }
+.tk .wk-path a { color: var(--wb-muted-fg); }
+.tk .wk-path b { color: var(--wb-fg); font-weight: 700; overflow: hidden; text-overflow: ellipsis; }
+.tk .wk-path .sep { opacity: .6; }
+.tk .wk-meta { flex: none; display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--wb-muted-fg); white-space: nowrap; }
+.tk .wk-meta .av { width: 18px; height: 18px; font-size: 8.5px; }
+@container wkp (max-width: 460px) { .tk .wk-meta .wt, .tk .wk-meta .wk-sha { display: none; } }
+.tk .wk-sha { font: 11px var(--wb-mono); color: var(--wb-muted-fg); }
+.tk .wk-more { position: relative; flex: none; }
+.tk .wk-menu { position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; width: 290px; background: var(--wb-card); border-radius: 10px; box-shadow: var(--wb-shadow-hi); padding: 6px; display: flex; flex-direction: column; gap: 1px; font-size: 13px; }
+.tk .wk-menu button { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border: 0; border-radius: 7px; background: transparent; color: var(--wb-fg); font: inherit; text-align: left; cursor: pointer; }
+.tk .wk-menu button:hover { background: color-mix(in srgb, var(--wb-primary) 10%, var(--wb-card)); }
+.tk .wk-menu .i { color: var(--wb-muted-fg); }
+.tk .wk-menu code { font-size: 11px; color: var(--wb-muted-fg); }
+.tk .wk-doc { padding: 12px 18px 22px; font-size: 13.5px; line-height: 1.55; max-width: 860px; }
+.tk .wk-doc :is(h1, h2, h3, h4) { margin: 14px 0 6px; line-height: 1.3; font-weight: 700; }
+.tk .wk-doc h1 { font-size: 19px; margin-top: 2px; }
+.tk .wk-doc h2 { font-size: 15px; padding-bottom: 3px; border-bottom: 1px solid var(--wb-muted); }
+.tk .wk-doc h3 { font-size: 13.5px; }
+.tk .wk-doc p, .tk .wk-doc ul, .tk .wk-doc ol, .tk .wk-doc pre, .tk .wk-doc table, .tk .wk-doc blockquote { margin-bottom: 9px; }
+.tk .wk-doc img { display: block; margin: 4px 0 10px; box-shadow: 0 0 0 1px var(--wb-line); }
+/* a wiki: link: the book mark tells it from a web link; a missing page is dashed and offers to create it */
+.tk a.wlink { display: inline; white-space: nowrap; }
+.tk a.wlink .i { display: inline-block; width: 12px; height: 12px; vertical-align: -1px; margin-right: 2px; }
+.tk a.wlink.miss { color: var(--wb-muted-fg); text-decoration: underline dashed; text-underline-offset: 3px; }
+.tk .wk-flash { animation: tk-fx-flash 1.8s ease-out; }
+/* edit mode: the shared editor (.tked) fills the page; the bar carries save, cancel, and the base */
+.tk .wk-edit { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 6px; padding: 8px 14px 10px; }
+.tk .wk-edit .tked { flex: 1 1 auto; min-height: 0; }
+.tk .wk-edit textarea { flex: 1 1 auto; min-height: 220px; width: 100%; resize: none; font: 12.5px/1.55 var(--wb-mono); border: 1px solid var(--wb-line); border-radius: 8px; padding: 8px 10px; background: var(--wb-card); color: var(--wb-fg); }
+.tk .wk-edit .tked-pv { flex: 1 1 auto; min-height: 220px; border: 1px solid var(--wb-line); border-radius: 8px; background: var(--wb-card); }
+.tk .wk-edit .tked-pv.wk-doc { max-width: none; }
+.tk .wk-etop { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.tk .wk-etop .tked-tabs { margin-right: auto; }
+.tk .wk-epath { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--wb-muted-fg); }
+.tk .wk-epath input { font: 12.5px var(--wb-mono); width: 200px; padding: 2px 7px; border-radius: 6px; border: 1px solid var(--wb-line); background: var(--wb-card); color: var(--wb-fg); }
+.tk .wk-base { margin-left: auto; font: 11px var(--wb-mono); color: var(--wb-muted-fg); opacity: .8; cursor: help; }
+.tk .chip.att.wk-pend { box-shadow: inset 0 0 0 1px var(--tk-warn); color: var(--tk-warn); }
+.tk .chip.att.wk-pend .i { width: 12px; height: 12px; }
+.tk .wk-note { font-size: 12px; padding: 5px 9px; border-radius: 8px; background: color-mix(in srgb, var(--wb-primary) 9%, var(--wb-card)); color: var(--wb-fg); }
+/* refused save: the reason, the ways out, then yours and theirs side by side (stacked when narrow) */
+.tk .wk-ref { padding: 10px 14px 14px; display: flex; flex-direction: column; gap: 8px; }
+.tk .wk-refwhy { display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; border-radius: 10px; background: color-mix(in srgb, var(--tk-fail) 9%, var(--wb-card)); border-left: 3px solid var(--tk-fail); font-size: 12.5px; }
+.tk .wk-refwhy .i { width: 16px; height: 16px; color: var(--tk-fail); margin-top: 1px; }
+.tk .wk-refwhy b { color: var(--tk-fail); }
+.tk .wk-refacts { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.tk .wk-refacts .btn { padding: 3px 12px; }
+.tk .wk-key { display: inline-flex; align-items: center; gap: 10px; font-size: 11.5px; color: var(--wb-muted-fg); margin-left: auto; }
+.tk .wk-key i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: -1px; margin-right: 3px; }
+.tk .wk-key .k-conf { background: color-mix(in srgb, var(--tk-conc) 38%, var(--wb-card)); box-shadow: inset 2px 0 0 var(--tk-conc); }
+.tk .wk-key .k-chg { background: color-mix(in srgb, var(--wb-primary) 14%, var(--wb-card)); }
+.tk .wk-vs { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
+@container wkp (max-width: 640px) { .tk .wk-vs { grid-template-columns: minmax(0, 1fr); } }
+.tk .wk-side { min-width: 0; border-radius: 10px; box-shadow: inset 0 0 0 1px var(--wb-line); overflow: hidden; background: var(--wb-card); }
+.tk .wk-side > header { display: flex; align-items: center; gap: 6px; padding: 5px 10px; background: var(--wb-muted); font-size: 12px; font-weight: 700; }
+.tk .wk-side > header .wk-sha { font-weight: 400; }
+.tk .wk-side > header .grow + * { font-weight: 400; color: var(--wb-muted-fg); }
+.tk .wk-lines { margin: 0; padding: 4px 0; font: 12px/1.6 var(--wb-mono); }
+.tk .wk-ln { display: grid; grid-template-columns: 34px minmax(0, 1fr); white-space: pre-wrap; overflow-wrap: anywhere; }
+.tk .wk-ln::before { content: attr(data-n); text-align: right; padding-right: 8px; color: var(--wb-muted-fg); opacity: .7; user-select: none; }
+.tk .wk-ln.conf { background: color-mix(in srgb, var(--tk-conc) 30%, var(--wb-card)); box-shadow: inset 3px 0 0 var(--tk-conc); }
+.tk .wk-ln.chg { background: color-mix(in srgb, var(--wb-primary) 11%, var(--wb-card)); }
+.tk .wk-ln.gap { color: var(--wb-muted-fg); font: italic 11.5px/1.9 system-ui, sans-serif; cursor: pointer; background: var(--wb-wash); }
+.tk .wk-ln.gap:hover { color: var(--wb-primary); }
+/* empty state and the new-wiki form */
+.tk .wk-empty { grid-column: 1 / -1; align-self: center; justify-self: center; width: min(460px, 100%); padding: 24px 18px; display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; }
+.tk .wk-empty > .i { width: 34px; height: 34px; stroke-width: 1.3; color: var(--wb-muted-fg); }
+.tk .wk-empty h3 { margin: 0; font-size: 15px; }
+.tk .wk-empty p { margin: 0; font-size: 12.5px; color: var(--wb-muted-fg); }
+.tk .wk-form { width: 100%; display: flex; flex-direction: column; gap: 8px; text-align: left; margin-top: 6px; padding: 12px; border-radius: var(--wb-radius); background: color-mix(in srgb, var(--wb-muted) 55%, var(--wb-card)); border: 1px solid var(--wb-line); }
+.tk .wk-fld { display: flex; flex-direction: column; gap: 3px; font-size: 11.5px; color: var(--wb-muted-fg); font-weight: 600; }
+.tk .wk-in { display: flex; align-items: center; border-radius: 8px; border: 1px solid var(--wb-line); background: var(--wb-card); overflow: hidden; }
+.tk .wk-in:focus-within { border-color: var(--wb-primary); }
+.tk .wk-in span { padding: 0 2px 0 8px; font: 12.5px var(--wb-mono); color: var(--wb-muted-fg); }
+.tk .wk-in input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--wb-fg); font: 12.5px var(--wb-mono); padding: 6px 8px 6px 0; }
+.tk .wk-fld .h { font-weight: 400; }
+.tk .wk-fld .h.bad { color: var(--tk-fail); }
+.tk .wk-form .tb { justify-content: flex-end; }
+/* the narrow layout: the tree folds into one "Pages" control above the page */
+.tk .wk-nartree { flex: none; border-bottom: 1px solid var(--wb-muted); }
+.tk .wk-tsel { display: flex; align-items: center; gap: 6px; width: 100%; padding: 6px 12px; border: 0; background: transparent; color: var(--wb-fg); font: inherit; font-size: 12.5px; cursor: pointer; text-align: left; }
+.tk .wk-tsel .i { width: 14px; height: 14px; color: var(--wb-muted-fg); }
+.tk .wk-tsel .cv { margin-left: auto; transition: transform .15s; }
+.tk .wk-tsel[aria-expanded="true"] .cv { transform: rotate(180deg); }
+.tk .wk-tsel code { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tk .wk-nartree .wk-tree { border-right: 0; max-height: 260px; padding-top: 0; }
+.tk .card.pane > .cbody.wk-nbody { padding: 0; display: flex; flex-direction: column; overflow: hidden; }
+.tk .card.pane > .cbody.wk-nbody .wk-page { flex: 1 1 auto; }
+.tk .card.pane > .cbody.wk-nbody .wk-empty { margin: auto; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<symbol id="i-back" viewBox="0 0 16 16"><path d="M10 3.5L5.5 8l4.5 4.5"/></symbol>
+<symbol id="i-chev" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></symbol>
+<symbol id="i-tasks" viewBox="0 0 16 16"><path d="M2.5 4.2l1.4 1.4 2.4-2.6M2.5 10.2l1.4 1.4 2.4-2.6M8.5 4.6h5M8.5 10.6h5"/></symbol>
+<symbol id="i-book" viewBox="0 0 16 16"><path d="M8 4.2C6.6 3 4.6 2.6 2.4 2.8v9.6c2.2-.2 4.2.2 5.6 1.4 1.4-1.2 3.4-1.6 5.6-1.4V2.8C11.4 2.6 9.4 3 8 4.2zM8 4.2v9.6"/></symbol>
+<symbol id="i-doc" viewBox="0 0 16 16"><path d="M4 2.4h5.2L12 5.2v8.4H4z"/><path d="M9 2.6v2.8h2.8M6 8.4h4M6 10.8h4"/></symbol>
+<symbol id="i-folder" viewBox="0 0 16 16"><path d="M2 4.2h4l1.4 1.6H14v6.7H2z"/></symbol>
+<symbol id="i-plus" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></symbol>
+<symbol id="i-x" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></symbol>
+<symbol id="i-search" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.4"/><path d="M10.3 10.3l3.4 3.4"/></symbol>
+<symbol id="i-list" viewBox="0 0 16 16"><path d="M5.6 4h8M5.6 8h8M5.6 12h8M2.3 4h.1M2.3 8h.1M2.3 12h.1"/></symbol>
+<symbol id="i-tree" viewBox="0 0 16 16"><path d="M2.4 3.4h6M4.6 3.4v9.2M4.6 8h2.6M4.6 12.6h2.6M9 8h4.6M9 12.6h4.6"/></symbol>
+<symbol id="i-kanban" viewBox="0 0 16 16"><rect x="2.2" y="2.6" width="3.4" height="10.8" rx=".8"/><rect x="6.3" y="2.6" width="3.4" height="7" rx=".8"/><rect x="10.4" y="2.6" width="3.4" height="9" rx=".8"/></symbol>
+<symbol id="i-bell" viewBox="0 0 16 16"><path d="M8 2.6a3.6 3.6 0 0 0-3.6 3.6v2.4L3 10.8h10l-1.4-2.2V6.2A3.6 3.6 0 0 0 8 2.6zM6.6 12.8a1.5 1.5 0 0 0 2.8 0"/></symbol>
+<symbol id="i-team" viewBox="0 0 16 16"><circle cx="5.6" cy="5.4" r="2.1"/><path d="M1.8 13c.3-2.4 1.8-3.6 3.8-3.6s3.5 1.2 3.8 3.6"/><circle cx="11.2" cy="6" r="1.7"/><path d="M10.6 9.6c1.8-.1 3.2.9 3.6 3"/></symbol>
+<symbol id="i-activity" viewBox="0 0 16 16"><path d="M1.8 8h3l1.6-4.6 3 9 1.6-4.4h3.2"/></symbol>
+<symbol id="i-agent" viewBox="0 0 16 16"><rect x="2.8" y="5.2" width="10.4" height="7.6" rx="2.2"/><path d="M8 5.2V2.8M6 8.6v.9M10 8.6v.9M6.3 11h3.4"/></symbol>
+<symbol id="i-data" viewBox="0 0 16 16"><ellipse cx="8" cy="4.4" rx="5" ry="2"/><path d="M3 4.4v7.2c0 1.1 2.2 2 5 2s5-.9 5-2V4.4M3 8c0 1.1 2.2 2 5 2s5-.9 5-2"/></symbol>
+<symbol id="i-page" viewBox="0 0 16 16"><path d="M9.5 2.5h4v4M13.5 2.5L8 8M11.5 9.5v3.2a.8.8 0 0 1-.8.8H3.3a.8.8 0 0 1-.8-.8V5.3a.8.8 0 0 1 .8-.8h3.2"/></symbol>
+<symbol id="i-pen" viewBox="0 0 16 16"><path d="M10.6 2.8l2.6 2.6-7.6 7.6-3.2.6.6-3.2z"/></symbol>
+<symbol id="i-more" viewBox="0 0 16 16"><circle cx="3.4" cy="8" r="1.3" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.3" fill="currentColor" stroke="none"/><circle cx="12.6" cy="8" r="1.3" fill="currentColor" stroke="none"/></symbol>
+<symbol id="i-copy" viewBox="0 0 16 16"><rect x="5.5" y="5.5" width="8" height="8" rx="1.2"/><path d="M10.5 3.5v-.3a.7.7 0 0 0-.7-.7H3.2a.7.7 0 0 0-.7.7v6.6a.7.7 0 0 0 .7.7h.3"/></symbol>
+<symbol id="i-warn" viewBox="0 0 16 16"><path d="M8 2.4l6 10.8H2z"/><path d="M8 6.6v3M8 11.4v.05"/></symbol>
+<symbol id="i-image" viewBox="0 0 16 16"><rect x="2.4" y="3" width="11.2" height="10" rx="1.4"/><circle cx="6" cy="6.6" r="1.2"/><path d="M2.6 11.6l3.4-3 2.4 2.2 2-1.6 3 2.6"/></symbol>
+<symbol id="i-reload" viewBox="0 0 16 16"><path d="M13 8a5 5 0 1 1-1.5-3.6"/><path d="M12 2v2.8H9.2"/></symbol>
+<symbol id="i-sidebar" viewBox="0 0 16 16"><rect x="2.2" y="2.8" width="11.6" height="10.4" rx="1.4"/><path d="M6.2 2.8v10.4"/></symbol>
+<symbol id="i-history" viewBox="0 0 16 16"><path d="M2.8 8a5.2 5.2 0 1 0 1.6-3.8"/><path d="M2.6 2.6v2.6h2.6M8 5.2V8l2 1.4"/></symbol>
+<symbol id="i-link" viewBox="0 0 16 16"><path d="M6.8 9.2a2.6 2.6 0 0 0 3.7 0l2-2a2.6 2.6 0 0 0-3.7-3.7l-.8.8M9.2 6.8a2.6 2.6 0 0 0-3.7 0l-2 2a2.6 2.6 0 0 0 3.7 3.7l.8-.8"/></symbol>
+</svg>
+
+<header class="mockhead"><div><b>tracker wiki mockup</b> <span class="muted">static fixture; look from dashboard.css / tracker.css tokens; ticket 261108-feat-ws-tracker-wiki-git-branch Phase 2</span></div>
+<div class="mctl">
+<span class="seg" role="group" aria-label="layout"><button data-ly="a">A</button><button data-ly="d">D (wide)</button><button data-ly="narrow">Narrow</button><button data-ly="page">Store page</button></span>
+<span class="seg" role="group" aria-label="scene"><button data-sc="read">Read</button><button data-sc="edit">Edit</button><button data-sc="refused">Refused save</button><button data-sc="empty">Empty store</button><button data-sc="item">Item link</button></span>
+<span class="seg" role="group" aria-label="theme"><button data-th="light">Light</button><button data-th="dark">Dark</button></span>
+</div></header>
+
+<main class="mockmain">
+<div class="mk-intro"><p><b>What this is.</b> The tracker drawer drawn open, with the Items panel's header switch set to <b>Wiki</b>. Click around: the tree, the picker (<code>handbook</code>), a <code>wiki:</code> link (book mark) or an <code>#maya-12</code> reference in the page, the pen to edit, the search box. The scene buttons above jump to fixed states; the legend below says what each part shows.</p></div>
+<div id="stage" class="mk-stage"></div>
+<div class="mk-legend">
+<section><h2>Reading</h2><ul>
+<li><b>Items | Wiki</b> takes the Items header's title spot as a mode switch (item window segment look, so it does not read as one more scope pill). Under <i>Wiki</i> the Items panel holds the wiki; the tab pane on the right is unchanged.</li>
+<li><b>Picker</b>: <code>wiki/</code> + name, a menu of the store's wikis (one <code>refs/heads/wiki/&lt;name&gt;</code> each) with page count and last change, then <b>New wiki</b>.</li>
+<li><b>Tree</b> from folder paths (page path = file path without <code>.md</code>); <code>_attachments/</code> is not listed. The search box filters by path and text, with a snippet for a body hit.</li>
+<li><b>Page</b>: tracker renderer look (the shared <code>.md</code> rules), path crumb, last author, time, commit. <code>wiki:&lt;name&gt;/&lt;path&gt;</code> links carry a book mark and switch the panel (a missing page is dashed and opens a new page there); <code>#ID</code> opens the item window; <code>attachment:&lt;sha256&gt;</code> images come from the wiki tree's <code>_attachments/</code> through the wiki image route.</li>
+<li>The <b>more</b> menu copies the absolute link and points history and restore at the Support agent (agent tools only, per the ticket).</li>
+</ul></section>
+<section><h2>Editing and refused save</h2><ul>
+<li><b>Edit</b> replaces the page in place with the shared editor (<code>.tked</code>: Write / Preview tabs, the server-rendered preview), a pasted image pending (held daemon-local for the preview, committed into <code>_attachments/</code> by the save), Save / Cancel, and the base commit as a quiet mono label at the bar's end.</li>
+<li><b>Refused save</b>: the reason (who, which commit, merge base), the ways out (<i>Copy mine</i>, <i>Reload theirs</i>, <i>Edit again</i> on theirs as the new base), then <i>yours</i> and <i>theirs</i> side by side (stacked when the page column is under 640px). Overlapping lines use the tracker's concurrent-write tone; lines changed on one side only (they would have merged) get a light wash.</li>
+<li><b>Empty store</b>: no wiki yet; the call to action creates <code>wiki/&lt;name&gt;</code> with its first page (a wiki is created by its first save). Name rule shown live: <code>[a-z0-9][a-z0-9-]*</code>, up to 64.</li>
+</ul></section>
+<section><h2>Layouts, item link, notes</h2><ul>
+<li><b>A</b>: Items panel two thirds, tab pane one third. <b>D</b>: Items | Notifications | tab pane. <b>Narrow</b>: one tab pane; <i>Wiki</i> is its own tab after <i>Items</i>, and the tree folds into a <i>Pages</i> control above the page. <b>Store page</b>: the same switch, full page, a wider tree.</li>
+<li><b>Item link</b>: the item window of <code>#maya-12</code>, whose body links <code>wiki:handbook/process/release</code>; clicking it closes the window and switches the panel to that page (brief flash on the page head).</li>
+<li>Mockup only: <i>Save</i> is refused the first time (raj saved meanwhile) and succeeds after <i>Edit again</i>; "New page" opens the editor with a path field. New classes are <code>.wk-*</code> and <code>a.wlink</code> (marked NEW in the stylesheet); everything else is lifted from <code>tracker.css</code> and <code>page.css</code>.</li>
+<li>URL hash for fixed states: <code>#layout=a|d|narrow|page&amp;scene=read|edit|refused|empty|item&amp;theme=dark&amp;page=process/release&amp;wiki=handbook&amp;pick=1&amp;pv=1&amp;q=gate</code>.</li>
+</ul></section>
+</div>
+</main>
+<div id="iwin-root"></div>
+<div id="toast-root"></div>
+
+<script>
+(function () {
+  "use strict";
+  var $ = function (id) { return document.getElementById(id); };
+  function esc(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+  function ic(id, cls) { return '<svg class="i' + (cls ? " " + cls : "") + '"><use href="#i-' + id + '"/></svg>'; }
+
+  // ---------- fixture images (stand-ins for attachment blobs; user images keep their own white background) ----------
+  function svgUri(s) { return "data:image/svg+xml," + encodeURIComponent(s); }
+  var IMG = {
+    "9f2c41d0e8": svgUri('<svg xmlns="http://www.w3.org/2000/svg" width="560" height="150" viewBox="0 0 560 150" font-family="system-ui,sans-serif" font-size="13"><rect width="560" height="150" fill="#fff"/><g stroke="#2b62d9" stroke-width="3" fill="none"><path d="M30 50H530"/><path d="M30 105H530" stroke="#1d7348"/><path d="M150 50C190 50 190 105 230 105M390 50C430 50 430 105 470 105" stroke="#888" stroke-dasharray="5 4"/></g><g fill="#2b62d9"><circle cx="70" cy="50" r="7"/><circle cx="150" cy="50" r="7"/><circle cx="270" cy="50" r="7"/><circle cx="390" cy="50" r="7"/></g><g fill="#1d7348"><circle cx="230" cy="105" r="8"/><circle cx="470" cy="105" r="8"/></g><g fill="#333"><text x="30" y="30" font-weight="700">develop</text><text x="30" y="135" font-weight="700" fill="#1d7348">main</text><text x="208" y="132">v0.48</text><text x="448" y="132">v0.49</text><text x="300" y="30" fill="#666">release gate: watermark range clear</text></g></svg>'),
+    "3c7e90b1a4": svgUri('<svg xmlns="http://www.w3.org/2000/svg" width="420" height="120" viewBox="0 0 420 120" font-family="system-ui,sans-serif" font-size="12"><rect width="420" height="120" fill="#fff"/><text x="14" y="22" font-weight="700" fill="#333">build matrix (CI)</text><g fill="#333"><text x="14" y="50">linux</text><text x="14" y="76">macos</text><text x="14" y="102">windows</text><text x="110" y="34" fill="#777">go 1.24</text><text x="210" y="34" fill="#777">go 1.25</text><text x="310" y="34" fill="#777">race</text></g><g><rect x="104" y="40" width="80" height="16" rx="4" fill="#cfe8da"/><rect x="204" y="40" width="80" height="16" rx="4" fill="#cfe8da"/><rect x="304" y="40" width="80" height="16" rx="4" fill="#cfe8da"/><rect x="104" y="66" width="80" height="16" rx="4" fill="#cfe8da"/><rect x="204" y="66" width="80" height="16" rx="4" fill="#cfe8da"/><rect x="304" y="66" width="80" height="16" rx="4" fill="#eee"/><rect x="104" y="92" width="80" height="16" rx="4" fill="#cfe8da"/><rect x="204" y="92" width="80" height="16" rx="4" fill="#f6d0d2"/><rect x="304" y="92" width="80" height="16" rx="4" fill="#eee"/></g></svg>')
+  };
+
+  // ---------- fixtures ----------
+  var ITEMS = {
+    "maya-12": { title: "Cut the 0.49 release", kind: "task", st: "doing", who: "MA", due: "Nov 14", body: "Cut 0.49 once the review sweep is clear. Follow the [release checklist](wiki:handbook/process/release); the deploy steps are in [the deploy runbook](wiki:runbooks/deploy).\n\n- freeze `develop` on Thursday\n- run the gate, tag, announce\n\nOpen question for #raj-7: do signed tags need the new key?" },
+    "raj-7": { title: "Wiki: decide the image size cap", kind: "task", st: "todo", who: "RA", due: "Nov 12", body: "See [storage decision](wiki:handbook/decisions/0007-wiki-storage)." },
+    "lena-3": { title: "Onboard Omar", kind: "task", st: "doing", who: "LE", due: "Nov 18", body: "Start with [dev setup](wiki:handbook/onboarding/dev-setup)." },
+    "maya-15": { title: "Review policy cleanup", kind: "todo", st: "todo", who: "MA", due: "", body: "" },
+    "omar-2": { title: "Write the paging runbook", kind: "task", st: "done", who: "OM", due: "Nov 6", body: "" }
+  };
+  var RELEASE = [
+    "# Release process",
+    "",
+    "How a release goes from `develop` to `main`. Owner this cycle: @maya; tracking item #maya-12.",
+    "",
+    "## Before the cut",
+    "",
+    "1. Every item under #maya-12 is done or moved to the next milestone.",
+    "2. The review sweep is clear since the last watermark (see [review policy](wiki:handbook/process/review)).",
+    "3. New contributors check their machine against [dev setup](wiki:handbook/onboarding/dev-setup) first.",
+    "",
+    "![release flow](attachment:9f2c41d0e8)",
+    "",
+    "## Steps",
+    "",
+    "| step | who | where |",
+    "|---|---|---|",
+    "| Freeze `develop` | lead | board |",
+    "| Run the release gate | lead | `ws ship` |",
+    "| Tag and publish | delegate | CI |",
+    "| Announce | owner | #releases channel |",
+    "",
+    "```sh",
+    "ws ship devenv --dry-run",
+    "git tag -s v0.49.0 -m \"v0.49.0\"",
+    "```",
+    "",
+    "> A refused gate is not a failure: fix the range and run it again.",
+    "",
+    "## After",
+    "",
+    "- Close #maya-12 and link the tag.",
+    "- Move leftovers with the item menu, not by hand.",
+    "- Deploy steps live in the runbooks: [deploy](wiki:runbooks/deploy)."
+  ].join("\n");
+  function sub(src, pairs) { pairs.forEach(function (p) { src = src.replace(p[0], p[1]); }); return src; }
+  var MINE = sub(RELEASE, [
+    ["`main`. Owner", "`main`, start to finish. Owner"],
+    ["| Tag and publish | delegate | CI |", "| Tag, sign, and publish | delegate | CI (signed tags) |"],
+    ["```sh", "![build matrix](attachment:3c7e90b1a4)\n\n```sh"]
+  ]);
+  var THEIRS = sub(RELEASE, [
+    ["| Tag and publish | delegate | CI |", "| Tag and publish | release bot | CI |"],
+    ["- Close #maya-12 and link the tag.", "- Close #maya-12, link the tag, and post the changelog."]
+  ]);
+
+  function P(md, by, when, sha) { return { md: md, by: by, when: when, sha: sha }; }
+  var WIKIS = {
+    handbook: { tip: "a1b2c3d", last: "maya, 2h ago", pages: {
+      "index": P("# Team handbook\n\nStart here. The handbook is a git branch (`wiki/handbook`) in this store's repository; any member edits any page.\n\n- [Dev setup](wiki:handbook/onboarding/dev-setup)\n- [First week](wiki:handbook/onboarding/first-week)\n- [Release process](wiki:handbook/process/release)\n- [Review policy](wiki:handbook/process/review)\n- [Glossary](wiki:handbook/glossary)\n\nOperational steps live in the other wiki: [runbooks](wiki:runbooks/index).", "LE", "3d ago", "77d0e1a"),
+      "glossary": P("# Glossary\n\n**Watermark**: the newest reviewed commit on the review track.\n\n**Gate**: the check `ws ship` runs before promoting `develop`.", "RA", "1w ago", "0c9b2f4"),
+      "onboarding/dev-setup": P("# Dev setup\n\n1. Install Go 1.24 or newer and git 2.34 or newer.\n2. Run `./install.sh update`.\n3. Open the dashboard and join this store (ask a lead for the invite).\n\nEditor settings: [editor config](wiki:handbook/onboarding/editor-config).\n\nYour first item is usually under #lena-3.", "LE", "2d ago", "5e41aa0"),
+      "onboarding/first-week": P("# First week\n\n- Pair on one ticket from `ready/`.\n- Read the [release process](wiki:handbook/process/release) before Thursday.", "LE", "2d ago", "5e41aa0"),
+      "process/release": P(RELEASE, "MA", "2h ago", "a1b2c3d"),
+      "process/review": P("# Review policy\n\nEvery merge to `develop` is reviewed. The sweep tracks `develop`; the gate reads the watermark.\n\nCleanup tracked in #maya-15.", "RA", "5d ago", "d93e0c2"),
+      "decisions/0007-wiki-storage": P("# 0007 Wiki storage\n\nWikis are branches `refs/heads/wiki/<name>` in the store repository. Pages are `.md` files; images live under `_attachments/`.\n\nOpen: the size cap, #raj-7.", "RA", "1d ago", "be2210f"),
+      "decisions/0008-signing": P("# 0008 Signing\n\nWiki commits are signed with the clone's SSH key. Unverified commits show a warning in history.", "RA", "1d ago", "be2210f")
+    } },
+    runbooks: { tip: "4f0e9d2", last: "omar, 1d ago", pages: {
+      "index": P("# Runbooks\n\n- [Deploy](wiki:runbooks/deploy)\n- [Paging](wiki:runbooks/incident/paging)\n- [Postmortem template](wiki:runbooks/incident/postmortem-template)", "OM", "1d ago", "4f0e9d2"),
+      "deploy": P("# Deploy\n\nAfter the tag from the [release process](wiki:handbook/process/release):\n\n```sh\nws ship devenv --execute\n```\n\nRollback: re-run with the previous tag.", "OM", "1d ago", "4f0e9d2"),
+      "incident/paging": P("# Paging\n\nWritten under #omar-2.", "OM", "3d ago", "19ac3e7"),
+      "incident/postmortem-template": P("# Postmortem template\n\n## Summary\n\n## Timeline\n\n## Follow-ups", "OM", "3d ago", "19ac3e7")
+    } },
+    "design-notes": { tip: "c0ffe42", last: "kai, 3w ago", pages: {
+      "index": P("# Design notes\n\nLoose notes; promote to a ticket when one hardens.", "KA", "3w ago", "c0ffe42"),
+      "tracker/drawer-layout": P("# Drawer layout\n\nA, D, and narrow follow the window width.", "KA", "3w ago", "c0ffe42")
+    } }
+  };
+  var WHO = { MA: "maya", RA: "raj", LE: "lena", OM: "omar", KA: "kai" };
+
+  // ---------- state ----------
+  var S = { layout: "a", scene: "read", theme: "light", mode: "wiki", wiki: "handbook", page: "process/release", pick: false, more: false,
+    item: null, pv: false, q: "", full: false, tree: true, ntree: false, side: "notify", dside: "org", ntab: "wiki", closed: {}, saves: 0,
+    base: null, text: null, newpage: null, flash: false, wname: "team-notes", creating: false };
+
+  // ---------- micro markdown renderer (stand-in for the server's trackerText) ----------
+  function wikiExists(w, p) { return !!(WIKIS[w] && WIKIS[w].pages[p]); }
+  function inline(s, ctx) {
+    var codes = [];
+    s = esc(s).replace(/`([^`]+)`/g, function (m, c) { codes.push("<code>" + c + "</code>"); return "\u0000" + (codes.length - 1) + "\u0000"; });
+    s = s.replace(/(^|[^\w&;])#([a-z]+-\d+)\b/g, function (m, pre, id) {
+      return ITEMS[id] ? pre + '<a href="#" class="iref" data-item="' + id + '" title="' + esc(ITEMS[id].title) + '">#' + id + "</a>" : m;
+    });
+    s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, function (m, alt, src) {
+      var k = src.replace(/^attachment:/, "");
+      if (src.indexOf("attachment:") === 0 && IMG[k] && (ctx.atts || []).indexOf(k) >= 0) return '<img src="' + IMG[k] + '" alt="' + alt + '" title="attachment:' + k + '">';
+      return '<code>' + esc(src) + "</code>"; // safe mode: anything else stays path text
+    });
+    s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, function (m, txt, href) {
+      var w = /^wiki:([a-z0-9][a-z0-9-]*)\/(.+)$/.exec(href);
+      if (w) {
+        var ok = wikiExists(w[1], w[2]);
+        return '<a href="#" class="wlink' + (ok ? "" : " miss") + '" data-wiki="' + w[1] + '" data-path="' + esc(w[2]) + '" title="' + esc(href) + (ok ? "" : " (no such page: click to create it)") + '">' + ic("book") + txt + "</a>";
+      }
+      return '<a href="' + href + '" target="_blank" rel="noopener">' + txt + "</a>";
+    });
+    s = s.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>").replace(/(^|\W)\*([^*]+)\*/g, "$1<i>$2</i>");
+    return s.replace(/\u0000(\d+)\u0000/g, function (m, i) { return codes[+i]; });
+  }
+  function md(src, ctx) {
+    var L = src.split("\n"), out = [], i = 0;
+    ctx = ctx || {};
+    while (i < L.length) {
+      var l = L[i], m;
+      if (/^```/.test(l)) { var code = []; i++; while (i < L.length && !/^```/.test(L[i])) code.push(L[i++]); i++; out.push("<pre><code>" + esc(code.join("\n")) + "</code></pre>"); continue; }
+      if ((m = /^(#{1,4}) (.*)$/.exec(l))) { out.push("<h" + m[1].length + ">" + inline(m[2], ctx) + "</h" + m[1].length + ">"); i++; continue; }
+      if (/^\|/.test(l)) {
+        var rows = []; while (i < L.length && /^\|/.test(L[i])) rows.push(L[i++]);
+        var cells = function (r) { return r.replace(/^\||\|$/g, "").split("|").map(function (c) { return c.trim(); }); };
+        var h = "<table><thead><tr>" + cells(rows[0]).map(function (c) { return "<th>" + inline(c, ctx) + "</th>"; }).join("") + "</tr></thead><tbody>";
+        rows.slice(2).forEach(function (r) { h += "<tr>" + cells(r).map(function (c) { return "<td>" + inline(c, ctx) + "</td>"; }).join("") + "</tr>"; });
+        out.push(h + "</tbody></table>"); continue;
+      }
+      if (/^> /.test(l)) { var q = []; while (i < L.length && /^> /.test(L[i])) q.push(L[i++].slice(2)); out.push("<blockquote><p>" + inline(q.join(" "), ctx) + "</p></blockquote>"); continue; }
+      if (/^\s*[-*] /.test(l) || /^\s*\d+\. /.test(l)) {
+        var ol = /^\s*\d+\. /.test(l), it = [];
+        while (i < L.length && (ol ? /^\s*\d+\. /.test(L[i]) : /^\s*[-*] /.test(L[i]))) it.push(L[i++].replace(/^\s*(?:[-*]|\d+\.) /, ""));
+        out.push((ol ? "<ol>" : "<ul>") + it.map(function (x) { return "<li>" + inline(x, ctx) + "</li>"; }).join("") + (ol ? "</ol>" : "</ul>")); continue;
+      }
+      if (/^---$/.test(l)) { out.push("<hr>"); i++; continue; }
+      if (!l.trim()) { i++; continue; }
+      var para = []; while (i < L.length && L[i].trim() && !/^(#{1,4} |```|\||> |\s*[-*] |\s*\d+\. )/.test(L[i])) para.push(L[i++]);
+      out.push("<p>" + inline(para.join(" "), ctx) + "</p>");
+    }
+    return out.join("\n");
+  }
+  function wikiAtts(w) { return w === "handbook" ? ["9f2c41d0e8"] : []; }
+
+  // ---------- line diff for the refused view (LCS against the merge base) ----------
+  function regions(base, side) {
+    var n = base.length, m = side.length, T = [], i, j;
+    for (i = 0; i <= n; i++) { T.push(new Array(m + 1).fill(0)); }
+    for (i = n - 1; i >= 0; i--) for (j = m - 1; j >= 0; j--) T[i][j] = base[i] === side[j] ? T[i + 1][j + 1] + 1 : Math.max(T[i + 1][j], T[i][j + 1]);
+    var regs = [], cur = null; i = 0; j = 0;
+    function close() { if (cur) { cur.b1 = i; regs.push(cur); cur = null; } }
+    while (i < n || j < m) {
+      if (i < n && j < m && base[i] === side[j]) { close(); i++; j++; }
+      else { if (!cur) cur = { b0: i, lines: [] }; if (j < m && (i >= n || T[i][j + 1] >= T[i + 1][j])) { cur.lines.push(j); j++; } else i++; }
+    }
+    close();
+    return regs;
+  }
+  function marks(base, a, b) {
+    var ra = regions(base, a), rb = regions(base, b), ma = {}, mb = {}, conf = 0, other = 0;
+    function hit(r, o) { return r.b0 < o.b1 && o.b0 < r.b1 || r.b0 === o.b0; }
+    ra.forEach(function (r) { var c = rb.some(function (o) { return hit(r, o); }); if (c) conf++; else other++; r.lines.forEach(function (k) { ma[k] = c ? "conf" : "chg"; }); });
+    rb.forEach(function (r) { var c = ra.some(function (o) { return hit(r, o); }); if (!c) other++; r.lines.forEach(function (k) { mb[k] = c ? "conf" : "chg"; }); });
+    return { a: ma, b: mb, conf: conf, other: other };
+  }
+
+  // ---------- pieces ----------
+  function av(code, me) { return '<i class="av' + (me ? " me" : "") + '">' + code + "</i>"; }
+  function pagesOf(w) { return Object.keys(WIKIS[w].pages); }
+  function wsw() {
+    return '<span class="wk-sw" role="group" aria-label="Items or wiki">' +
+      '<button type="button" data-act="mode" data-mode="items" aria-pressed="' + (S.mode === "items") + '">' + ic("tasks") + "Items</button>" +
+      '<button type="button" data-act="mode" data-mode="wiki" aria-pressed="' + (S.mode === "wiki") + '">' + ic("book") + "Wiki</button></span>";
+  }
+  function picker(right) {
+    var names = Object.keys(WIKIS);
+    var pop = S.pick ? '<div class="wk-pop' + (right ? " r" : "") + '" role="menu">' + names.map(function (n) {
+      return '<button type="button" class="wk-opt' + (n === S.wiki ? " on" : "") + '" role="menuitem" data-act="wiki" data-wiki="' + n + '">' + ic("book") + '<span class="nm">' + n + '</span><span class="n">' + pagesOf(n).length + ' pages</span><span class="sub">last change ' + WIKIS[n].last + "</span></button>";
+    }).join("") + '<div class="wk-popsep"></div><button type="button" class="wk-opt add" role="menuitem" data-act="newwiki">' + ic("plus") + "<span>New wiki…</span></button>" +
+      '<div class="wk-pophint">Each wiki is a branch <code>wiki/&lt;name&gt;</code> in the store repository.</div></div>' : "";
+    return '<span class="wk-pickw"><button type="button" class="wk-pick" data-act="pick" aria-haspopup="menu" aria-expanded="' + S.pick + '" title="Switch wiki">' + ic("book") + '<span class="pre">wiki/</span><span class="nm">' + S.wiki + "</span>" + ic("chev") + "</button>" + pop + "</span>";
+  }
+  function search(ph) {
+    return '<span class="psearch">' + ic("search") + '<input id="wsearch" type="text" role="searchbox" autocomplete="off" spellcheck="false" value="' + esc(S.q) + '" placeholder="' + ph + '" aria-label="Search pages">' +
+      (S.q ? '<button type="button" class="ia" data-act="qclear" aria-label="Clear search" style="width:20px;height:20px">' + ic("x") + "</button>" : "") + "</span>";
+  }
+  function noWiki() { return S.scene === "empty"; }
+
+  function treeHtml() {
+    var w = WIKIS[S.wiki], q = S.q.trim().toLowerCase(), paths = pagesOf(S.wiki).slice();
+    var match = function (p) { return !q || p.toLowerCase().indexOf(q) >= 0 || w.pages[p].md.toLowerCase().indexOf(q) >= 0; };
+    paths = paths.filter(match).sort(function (a, b) {
+      var da = a.indexOf("/") >= 0, db = b.indexOf("/") >= 0;
+      if (a === "index") return -1; if (b === "index") return 1;
+      if (da !== db) return da ? -1 : 1;
+      return a < b ? -1 : 1;
+    });
+    var h = q ? '<div class="wk-tcount">' + paths.length + " of " + pagesOf(S.wiki).length + " pages match</div>" : "", seen = {};
+    var hl = function (t) { if (!q) return esc(t); var k = t.toLowerCase().indexOf(q); return k < 0 ? esc(t) : esc(t.slice(0, k)) + "<mark>" + esc(t.slice(k, k + q.length)) + "</mark>" + esc(t.slice(k + q.length)); };
+    paths.forEach(function (p) {
+      var segs = p.split("/");
+      for (var d = 0; d < segs.length - 1; d++) {
+        var dir = segs.slice(0, d + 1).join("/");
+        if (seen[dir]) continue; seen[dir] = 1;
+        var parentClosed = segs.slice(0, d).some(function (x, k) { return S.closed[S.wiki + ":" + segs.slice(0, k + 1).join("/")]; });
+        if (parentClosed) continue;
+        var open = !S.closed[S.wiki + ":" + dir];
+        h += '<button type="button" class="wk-tn dir" style="--d:' + d + '" data-act="fold" data-dir="' + esc(dir) + '" aria-expanded="' + open + '">' + ic("chev", "cv") + ic("folder") + '<span class="t">' + esc(segs[d]) + "</span></button>";
+      }
+      var hidden = segs.slice(0, -1).some(function (x, k) { return S.closed[S.wiki + ":" + segs.slice(0, k + 1).join("/")]; });
+      if (hidden) return;
+      var on = p === S.page && !S.newpage, ed = on && (S.scene === "edit" || S.scene === "refused");
+      h += '<button type="button" class="wk-tn' + (on ? " on" : "") + (ed ? " ed" : "") + '" style="--d:' + (segs.length - 1) + '" data-act="open" data-path="' + esc(p) + '" title="' + esc(S.wiki + "/" + p) + '"' + (on ? ' aria-current="page"' : "") + ">" + ic("doc") + '<span class="t">' + hl(segs[segs.length - 1]) + "</span></button>";
+      if (q && p.toLowerCase().indexOf(q) < 0) {
+        var body = w.pages[p].md.replace(/[*`#>|]+/g, "").replace(/\s+/g, " "), k = body.toLowerCase().indexOf(q);
+        h += '<div class="wk-snip" style="--d:' + (segs.length - 1) + '">…' + hl(body.slice(Math.max(0, k - 18), k + q.length + 30)) + "…</div>";
+      }
+    });
+    if (!paths.length) h += '<div class="wk-tcount">No page matches.</div>';
+    return h + '<button type="button" class="wk-tadd" data-act="newpage">' + ic("plus") + "New page</button>";
+  }
+
+  function crumb(p) {
+    var segs = p.split("/");
+    return '<nav class="wk-path" aria-label="Page path"><a href="#" data-act="open" data-path="index">' + S.wiki + "</a>" + segs.map(function (s, k) {
+      return '<span class="sep">/</span>' + (k === segs.length - 1 ? "<b>" + esc(s) + "</b>" : "<span>" + esc(s) + "</span>");
+    }).join("") + "</nav>";
+  }
+  function moreMenu() {
+    if (!S.more) return "";
+    return '<div class="wk-menu" role="menu">' +
+      '<button type="button" role="menuitem" data-act="toast" data-msg="Copied wiki:' + S.wiki + "/" + esc(S.page) + '">' + ic("link") + '<span>Copy link<br><code>wiki:' + S.wiki + "/" + esc(S.page) + "</code></span></button>" +
+      '<button type="button" role="menuitem" data-act="toast" data-msg="Copied ' + esc(S.page) + '">' + ic("copy") + "<span>Copy page path</span></button>" +
+      '<button type="button" role="menuitem" data-act="agent">' + ic("history") + "<span>History and restore: ask the Support agent</span></button></div>";
+  }
+
+  function pageRead(wide) {
+    var pg = WIKIS[S.wiki].pages[S.page];
+    var head = '<div class="wk-phead' + (S.flash ? " wk-flash" : "") + '">' + crumb(S.page) + '<span class="grow"></span>' +
+      '<span class="wk-meta" title="last change to this page: ' + WHO[pg.by] + ", " + pg.when + ", commit " + pg.sha + '">' + av(pg.by) + '<span class="wt">' + WHO[pg.by] + " · " + pg.when + '</span> <span class="wk-sha">' + pg.sha + "</span></span>" +
+      '<button type="button" class="ia" data-act="edit" aria-label="Edit page" title="Edit page">' + ic("pen") + "</button>" +
+      '<span class="wk-more"><button type="button" class="ia" data-act="more" aria-label="More" title="More" aria-expanded="' + S.more + '">' + ic("more") + "</button>" + moreMenu() + "</span></div>";
+    return head + '<article class="wk-doc md">' + md(pg.md, { atts: wikiAtts(S.wiki) }) + "</article>";
+  }
+
+  function pageEdit() {
+    var np = S.newpage != null, text = S.text != null ? S.text : MINE;
+    var atts = wikiAtts(S.wiki).concat(np ? [] : ["3c7e90b1a4"]);
+    var head = '<div class="wk-phead">' + (np ? '<nav class="wk-path"><span>' + S.wiki + '</span><span class="sep">/</span><b>new page</b></nav>' : crumb(S.page)) + '<span class="grow"></span><span class="chip st-doing">editing</span></div>';
+    var etop = '<div class="wk-etop"><div class="tked-tabs" role="group" aria-label="Editor mode">' +
+      '<button type="button" class="tked-tab" data-act="pv" data-pv="0" aria-pressed="' + !S.pv + '">Write</button><button type="button" class="tked-tab" data-act="pv" data-pv="1" aria-pressed="' + S.pv + '">Preview</button></div>' +
+      (np ? '<label class="wk-epath">path <input id="wnp" type="text" value="' + esc(S.newpage) + '" spellcheck="false"></label>' : "") + "</div>";
+    var ed = '<div class="tked" data-ed="wk-ebody">' + etop +
+      '<textarea id="wk-ebody" spellcheck="false" aria-label="Page text"' + (S.pv ? " hidden" : "") + ">" + esc(text) + "</textarea>" +
+      '<div class="tked-pv md wk-doc"' + (S.pv ? "" : " hidden") + ">" + md(text, { atts: atts }) + "</div></div>";
+    var pend = np ? "" : '<div class="atts"><span class="chip att wk-pend" title="pasted; held on this clone for the preview, committed into _attachments/ by the save">' + ic("image") + 'build-matrix.png · 38 KB · pending</span><span class="muted" style="font-size:11.5px">pasted at the caret as <code>![build matrix](attachment:3c7e90b1a4)</code></span></div>';
+    var note = S.base && S.base !== WIKIS[S.wiki].tip ? '<div class="wk-note">Now based on raj’s <code>' + S.base + '</code>: bring their line into yours, then save.</div>' : "";
+    var baseSha = np ? WIKIS[S.wiki].tip : (S.base || WIKIS[S.wiki].pages[S.page].sha);
+    var bar = '<div class="tb"><button type="button" class="btn primary" data-act="save">Save</button><button type="button" class="btn" data-act="cancel">Cancel</button><span class="muted">Ctrl+Enter saves · Esc cancels · paste an image to attach it</span>' +
+      '<span class="wk-base" title="The edit started from commit ' + baseSha + '. The save commits on top of it, fetches, and merges; overlapping lines refuse the save.">base ' + baseSha + "</span></div>";
+    return head + '<div class="wk-edit">' + note + ed + pend + bar + "</div>";
+  }
+
+  function pageRefused() {
+    var base = RELEASE.split("\n"), a = MINE.split("\n"), b = THEIRS.split("\n"), mk = marks(base, a, b);
+    // unchanged runs fold to a gap row (two lines of context around a change); a click shows the whole text
+    var lines = function (arr, m) {
+      var keep = arr.map(function (t, k) { if (S.full) return true; for (var d = -2; d <= 2; d++) if (m[k + d]) return true; return false; }), h = "", k = 0;
+      while (k < arr.length) {
+        if (keep[k]) { h += '<span class="wk-ln' + (m[k] ? " " + m[k] : "") + '" data-n="' + (k + 1) + '">' + (esc(arr[k]) || " ") + "</span>"; k++; continue; }
+        var j = k; while (j < arr.length && !keep[j]) j++;
+        h += '<span class="wk-ln gap" data-n="" data-act="full" title="Show the whole text">⋯ ' + (j - k) + " unchanged line" + (j - k > 1 ? "s" : "") + "</span>"; k = j;
+      }
+      return '<pre class="wk-lines">' + h + "</pre>";
+    };
+    var head = '<div class="wk-phead">' + crumb(S.page) + '<span class="grow"></span><span class="chip" style="background:color-mix(in srgb,var(--tk-fail) 14%,var(--wb-card));color:var(--tk-fail)">not saved</span></div>';
+    return head + '<div class="wk-ref">' +
+      '<div class="wk-refwhy">' + ic("warn") + "<div><b>Not saved.</b> raj changed the same lines meanwhile (commit <code>e41d9a0</code>, 4 min ago; merge base <code>a1b2c3d</code>). " +
+      mk.conf + " overlapping change, " + mk.other + " other changes that would have merged. Nothing was committed; your text is kept here until you leave.</div></div>" +
+      '<div class="wk-refacts"><button type="button" class="btn" data-act="toast" data-msg="Your text is on the clipboard">' + ic("copy") + 'Copy mine</button><button type="button" class="btn" data-act="theirs">' + ic("reload") + 'Reload theirs</button><button type="button" class="btn primary" data-act="again">' + ic("pen") + "Edit again</button>" +
+      '<span class="wk-key"><span><i class="k-conf"></i>overlap</span><span><i class="k-chg"></i>changed on one side only</span><a href="#" data-act="full">' + (S.full ? "Changes only" : "Whole text") + "</a></span></div>" +
+      '<div class="wk-vs"><section class="wk-side"><header>Yours<span class="wk-sha">from a1b2c3d</span><span class="grow"></span><span>maya · unsaved</span></header>' + lines(a, mk.a) + "</section>" +
+      '<section class="wk-side"><header>Theirs<span class="wk-sha">e41d9a0</span><span class="grow"></span><span>raj · 4 min ago</span></header>' + lines(b, mk.b) + "</section></div></div>";
+  }
+
+  function emptyHtml(create) {
+    var ok = /^[a-z0-9][a-z0-9-]*$/.test(S.wname) && S.wname.length <= 64;
+    return '<div class="wk-empty">' + (create ? "" : ic("book") + "<h3>No wiki in this store yet</h3><p>A wiki is a git branch in the store repository (<code>wiki/&lt;name&gt;</code>), shared by every member. It is created by its first page.</p>") +
+      '<form class="wk-form" onsubmit="return false">' + (create ? '<b style="font-size:13px">New wiki</b>' : "") +
+      '<label class="wk-fld">Name<span class="wk-in"><span>wiki/</span><input id="wname" type="text" value="' + esc(S.wname) + '" spellcheck="false" autocomplete="off"></span><span class="h' + (ok ? "" : " bad") + '" id="wnameh">' + (ok ? "Lowercase letters, digits, and dashes; up to 64." : "Use lowercase letters, digits, and dashes, starting with a letter or digit; up to 64.") + "</span></label>" +
+      '<label class="wk-fld">First page<span class="wk-in"><input type="text" value="index" spellcheck="false" style="padding-left:8px"></span><span class="h">Opens in the editor; saving it creates the wiki.</span></label>' +
+      '<div class="tb">' + (create ? '<button type="button" class="btn" data-act="cancelnew">Cancel</button>' : "") + '<button type="button" class="btn primary" data-act="createwiki">' + ic("plus") + "Create wiki</button></div></form></div>";
+  }
+
+  function pageHtml() {
+    if (S.creating) return emptyHtml(true);
+    if (S.scene === "edit") return pageEdit();
+    if (S.scene === "refused") return pageRefused();
+    return pageRead();
+  }
+
+  // ---------- Items mode (abridged, as shipped) ----------
+  function itemsHeader() {
+    return '<span class="scopes" role="tablist"><button class="scp">Mine</button><button class="scp">Received</button><button class="scp">Given</button><button class="scp">Team</button><button class="scp on">All</button></span><span class="chip">5 of 5</span>' +
+      '<div class="prow2"><span class="vmodes"><button class="vbtn on">' + ic("list") + '</button><button class="vbtn">' + ic("tree") + '</button><button class="vbtn">' + ic("kanban") + "</button></span>" +
+      '<span class="psearch">' + ic("search") + '<input type="text" placeholder="Search items" aria-label="Search items"></span></div>';
+  }
+  function itemsBody() {
+    return Object.keys(ITEMS).map(function (id) {
+      var it = ITEMS[id];
+      return '<div class="irow"><div class="ir-main" data-act="item" data-item="' + id + '"><span class="sti">' + ic(it.st === "done" ? "tasks" : "doc") + '</span><span class="title">' + esc(it.title) + '</span><span class="grow"></span><span class="chip st-' + it.st + '">' + it.st + '</span>' + av(it.who, it.who === "MA") + '<span class="due2">' + it.due + "</span></div></div>";
+    }).join("");
+  }
+  function ribbon() {
+    var w = S.mode === "wiki" && !noWiki() ? ' · <span class="wk-sha">wiki/' + S.wiki + " at " + (S.base || WIKIS[S.wiki].tip) + "</span>" : "";
+    return '<div class="ribbon r-ok idle"><span class="rib-main"><span class="sdot"></span><span class="rt">synced 3 min ago' + w + "</span></span></div>";
+  }
+  function wikiHeaderTools() {
+    if (noWiki()) return '<span class="chip">no wiki yet</span>';
+    return picker(false) + '<span class="chip">' + pagesOf(S.wiki).length + ' pages</span><span class="grow"></span>' +
+      '<button type="button" class="ia" data-act="tree" aria-pressed="' + S.tree + '" aria-label="Show page tree" title="' + (S.tree ? "Hide" : "Show") + ' page tree">' + ic("sidebar") + "</button>" +
+      '<button type="button" class="btn ib" data-act="newpage" title="New page" aria-label="New page">' + ic("plus") + "</button>" +
+      '<div class="prow2">' + search("Search pages in " + S.wiki) + "</div>";
+  }
+  function itemsCard(wide) {
+    var wiki = S.mode === "wiki";
+    var body = !wiki ? '<div class="cbody">' + itemsBody() + "</div>" :
+      noWiki() ? '<div class="cbody wk-body">' + emptyHtml(false) + "</div>" :
+      '<div class="cbody wk-body' + (S.tree ? "" : " notree") + (wide ? " wide" : "") + '"><nav class="wk-tree" aria-label="Pages">' + treeHtml() + '</nav><div class="wk-page" id="wkpage">' + pageHtml() + "</div></div>";
+    return '<section class="card panel" id="card-items"><header>' + wsw() + (wiki ? wikiHeaderTools() : itemsHeader()) + "</header>" + body + ribbon() + "</section>";
+  }
+
+  // ---------- the tab pane (unchanged look) ----------
+  var TABS = { items: ["tasks", "Items"], wiki: ["book", "Wiki"], notify: ["bell", "Notifications"], chat: ["agent", "Support agent"], org: ["team", "Team"], activity: ["activity", "Activity"], data: ["data", "Data (debug)"] };
+  function notifyBody() {
+    return '<div class="row nfeed unread"><div class="r1"><span class="title">raj answered on Cut the 0.49 release</span></div><div class="r2">“signed tags use the clone key, nothing new” · 6 min ago</div></div>' +
+      '<div class="row nfeed unread"><div class="r1"><span class="title">Assigned to you: Review policy cleanup</span></div><div class="r2">from raj · 1h ago</div></div>' +
+      '<div class="row nfeed"><div class="r1"><span class="title">omar closed Write the paging runbook</span></div><div class="r2">yesterday</div></div>' +
+      '<div class="row nfeed"><div class="r1"><span class="title">lena mentioned you on Onboard Omar</span></div><div class="r2">2 days ago</div></div>';
+  }
+  function teamBody() {
+    return ["maya (you) · lead", "raj · lead", "lena · member", "omar · member", "kai · member"].map(function (t, k) {
+      return '<div class="row"><div class="r1">' + av(["MA", "RA", "LE", "OM", "KA"][k], k === 0) + '<span class="title">' + t + "</span></div></div>";
+    }).join("");
+  }
+  function chatBody() { return '<p class="muted" style="margin:4px 0">Support agent. Wiki history, diffs, and restoring a page go through it (<code>wiki_query</code>, <code>wiki_update</code>): “restore process/release to before raj’s edit”.</p>'; }
+  function tabBody(k) { return k === "notify" ? notifyBody() : k === "org" ? teamBody() : k === "chat" ? chatBody() : '<p class="muted" style="margin:4px 0">(' + TABS[k][1] + ": unchanged by the wiki)</p>"; }
+  function paneHtml(tabs, active, narrow) {
+    var nav = '<nav class="ptabs" role="tablist">' + tabs.map(function (k) {
+      return '<button type="button" class="ptab" role="tab" aria-selected="' + (k === active) + '" aria-label="' + TABS[k][1] + '" title="' + TABS[k][1] + '" data-act="' + (narrow ? "ntab" : "tab") + '" data-tab="' + k + '">' + ic(TABS[k][0]) + '<span class="tdot' + (k === "notify" && k !== active ? " on" : "") + '"></span></button>';
+    }).join("") + "</nav>";
+    if (narrow && active === "wiki") {
+      var tools = noWiki() ? '<span class="chip">no wiki yet</span>' : picker(false) + '<span class="grow"></span><button type="button" class="btn ib" data-act="newpage" aria-label="New page" title="New page">' + ic("plus") + "</button>" + '<div style="flex:1 0 100%;display:flex">' + search("Search pages") + "</div>";
+      var body = noWiki() ? emptyHtml(false) : '<div class="wk-nartree"><button type="button" class="wk-tsel" data-act="ntree" aria-expanded="' + S.ntree + '">' + ic("tree") + '<span>Pages</span><code>' + (S.newpage != null ? "new page" : esc(S.page)) + "</code>" + ic("chev", "cv") + "</button>" + (S.ntree ? '<nav class="wk-tree" aria-label="Pages">' + treeHtml() + "</nav>" : "") + '</div><div class="wk-page" id="wkpage">' + pageHtml() + "</div>";
+      return '<section class="card pane"><header>' + nav + '</header><div class="ptools">' + tools + '</div><div class="cbody wk-nbody">' + body + "</div>" + ribbon() + "</section>";
+    }
+    if (narrow && active === "items") return '<section class="card pane"><header>' + nav + '</header><div class="ptools">' + '<span class="scopes"><button class="scp on">All</button><button class="scp">Mine</button></span>' + '</div><div class="cbody">' + itemsBody() + "</div>" + ribbon() + "</section>";
+    return '<section class="card pane"><header>' + nav + '</header><div class="ptools"><span class="chip">' + TABS[active][1] + '</span></div><div class="cbody">' + tabBody(active) + "</div></section>";
+  }
+  function cardNotify() { return '<section class="card"><header><h2>Notifications</h2><span class="chip">2 new</span></header><div class="cbody">' + notifyBody() + "</div></section>"; }
+
+  function zones(L, wide) {
+    if (L === "narrow") return '<div class="tk-zones" data-layout="narrow"><div class="tk-col">' + paneHtml(["items", "wiki", "notify", "chat", "org", "activity", "data"], S.ntab, true) + "</div></div>";
+    if (L === "d") return '<div class="tk-zones" data-layout="d"><div class="tk-col">' + itemsCard(wide) + '</div><div class="tk-col">' + cardNotify() + '</div><div class="tk-col">' + paneHtml(["chat", "org", "activity", "data"], S.dside, false) + "</div></div>";
+    return '<div class="tk-zones" data-layout="a"><div class="tk-col">' + itemsCard(wide) + '</div><div class="tk-col">' + paneHtml(["notify", "chat", "org", "activity", "data"], S.side, false) + "</div></div>";
+  }
+  function title(page) {
+    return '<div class="tk-title"><b>platform team</b><span class="muted">store</span><span class="grow"></span>' +
+      (page ? '<button class="btn" data-act="toast" data-msg="Back to the session view (mockup)">' + ic("back") + "Back</button>" : '<a class="btn ib" href="#" aria-label="Open as page" title="Open platform team as a page" data-act="ly" data-ly="page">' + ic("page") + "</a>") + "</div>";
+  }
+
+  // ---------- item window ----------
+  function itemWindow() {
+    if (!S.item) return "";
+    var it = ITEMS[S.item];
+    return '<div class="tk tk-iwin-back" data-act="winback"><div class="iwin" role="dialog" aria-modal="true" aria-label="' + esc(it.title) + '"><div class="iwin-in">' +
+      '<div class="iw-top"><nav class="iw-crumb"><a href="#">Release train</a><span>&rsaquo;</span></nav><div class="iw-head"><span class="sti">' + ic("doc") + "</span><h2>" + esc(it.title) + '</h2><button type="button" class="ia" aria-label="Edit">' + ic("pen") + '</button><button type="button" class="ia" data-act="winclose" aria-label="Close">' + ic("x") + "</button></div>" +
+      '<div class="iw-chips"><span class="chip kind">' + it.kind + '</span><button type="button" class="idcopy">' + ic("copy") + "#" + S.item + '</button><span class="chip st-' + it.st + '">' + it.st + "</span>" + (it.due ? '<span class="chip">due ' + it.due + "</span>" : "") + "</div></div>" +
+      '<div class="sh-body md">' + (it.body ? md(it.body, {}) : '<span class="muted">No description.</span>') + "</div>" +
+      '<h3>Thread</h3><ul class="timeline"><li class="ev">maya created this · Nov 3</li><li class="ev">raj: “signed tags use the clone key, nothing new” · 6 min ago</li></ul>' +
+      "</div></div></div>";
+  }
+
+  // ---------- render ----------
+  function render() {
+    var keep = document.activeElement && document.activeElement.id, selS = keep && document.activeElement.selectionStart;
+    var page = $("wkpage"), st = page ? page.scrollTop : 0;
+    var L = S.layout, h;
+    $("stage").setAttribute("data-layout", L);
+    if (L === "page") {
+      h = '<div class="mk-top"><span class="back">' + ic("back") + '</span><b>devenv</b><span class="meta">#/platform-team · store page</span></div>' +
+        '<div class="mk-page"><div class="tk tk-spage">' + title(true) + zones("a", true) + "</div></div>";
+    } else {
+      h = '<div class="mk-top"><span class="back">' + ic("back") + '</span><b>devenv</b><span class="meta">q7f3a · claude</span></div>' +
+        '<div class="mk-drawer tk"><div class="mk-clip"><div class="tk-dr-sheet"><div class="tk-dr-body">' + title(false) + zones(L, false) + "</div></div></div>" +
+        '<div class="mk-handles"><button type="button" class="tk-handle">' + ic("tasks") + '<span class="hl">platform team</span></button></div></div>' +
+        '<div class="mk-under"><div style="width:62%"></div><div style="width:81%"></div><div style="width:44%"></div></div>';
+    }
+    $("stage").innerHTML = h;
+    $("iwin-root").innerHTML = itemWindow();
+    if (page && $("wkpage") && !S.flash) $("wkpage").scrollTop = st;
+    if (keep && $(keep)) { $(keep).focus(); try { $(keep).setSelectionRange(selS, selS); } catch (e) {} }
+    S.flash = false;
+    document.querySelectorAll("[data-ly]").forEach(function (b) { if (b.closest(".seg")) b.setAttribute("aria-pressed", b.getAttribute("data-ly") === L); });
+    document.querySelectorAll("[data-sc]").forEach(function (b) { b.setAttribute("aria-pressed", b.getAttribute("data-sc") === (S.item ? "item" : S.scene)); });
+    document.querySelectorAll("[data-th]").forEach(function (b) { b.setAttribute("aria-pressed", b.getAttribute("data-th") === S.theme); });
+  }
+  function toast(msg) {
+    $("toast-root").innerHTML = '<div class="tk tk-toast">' + esc(msg) + "</div>";
+    clearTimeout(toast.t); toast.t = setTimeout(function () { $("toast-root").innerHTML = ""; }, 2200);
+  }
+  function openPage(w, p) {
+    S.creating = false; S.newpage = null; S.more = false; S.pick = false;
+    if (!wikiExists(w, p)) { S.wiki = w; S.scene = "edit"; S.newpage = p; S.text = "# " + p.split("/").pop().replace(/-/g, " ") + "\n\n"; S.pv = false; S.base = null; return; }
+    S.wiki = w; S.page = p; S.scene = "read"; S.text = null; S.base = null; S.flash = true;
+    if (S.layout === "narrow") { S.ntab = "wiki"; S.ntree = false; } else S.mode = "wiki";
+  }
+  function scene(sc) {
+    S.item = null; S.pick = false; S.more = false; S.creating = false; S.newpage = null; S.text = null; S.base = null; S.pv = false; S.q = "";
+    if (sc === "item") { S.scene = "read"; S.mode = "items"; S.ntab = "items"; S.item = "maya-12"; return; }
+    S.scene = sc; S.mode = "wiki"; S.ntab = "wiki";
+    if (sc !== "empty") { S.wiki = "handbook"; S.page = "process/release"; }
+    if (sc === "refused") S.saves = 1;
+    if (sc === "edit") S.saves = 0;
+  }
+
+  // ---------- events ----------
+  document.addEventListener("click", function (e) {
+    var t = e.target.closest("[data-act],[data-ly],[data-sc],[data-th],a.wlink,a.iref");
+    if (!t) { if (S.pick || S.more) { S.pick = S.more = false; render(); } return; }
+    var a = t.getAttribute("data-act");
+    if (t.hasAttribute("data-sc") && !a) { scene(t.getAttribute("data-sc")); render(); return; }
+    if (t.hasAttribute("data-th") && !a) { S.theme = t.getAttribute("data-th"); document.documentElement.setAttribute("data-theme", S.theme); render(); return; }
+    if (t.hasAttribute("data-ly") && (!a || a === "ly")) { e.preventDefault(); S.layout = t.getAttribute("data-ly"); render(); return; }
+    if (t.tagName === "A") e.preventDefault();
+    if (a === "winback" && e.target !== t) return;
+    var closeMenus = true;
+    switch (a) {
+      case "mode": S.mode = t.getAttribute("data-mode"); break;
+      case "pick": S.pick = !S.pick; S.more = false; closeMenus = false; break;
+      case "wiki": var w = t.getAttribute("data-wiki"); S.wiki = w; S.page = "index"; S.scene = "read"; S.q = ""; S.creating = false; S.newpage = null; break;
+      case "newwiki": S.creating = true; S.scene = "read"; S.wname = "team-notes"; break;
+      case "cancelnew": S.creating = false; break;
+      case "createwiki":
+        if (!/^[a-z0-9][a-z0-9-]*$/.test(S.wname)) { toast("Fix the name first"); return; }
+        WIKIS[S.wname] = WIKIS[S.wname] || { tip: "(new)", last: "you, just now", pages: {} };
+        S.creating = false; S.wiki = S.wname; S.scene = "edit"; S.newpage = "index"; S.text = "# " + S.wname + "\n\n"; S.pv = false; S.base = null;
+        if (S.layout === "narrow") S.ntab = "wiki"; else S.mode = "wiki";
+        break;
+      case "open": openPage(S.wiki, t.getAttribute("data-path")); if (S.layout === "narrow") S.ntree = false; break;
+      case "fold": var k = S.wiki + ":" + t.getAttribute("data-dir"); S.closed[k] = !S.closed[k]; break;
+      case "tree": S.tree = !S.tree; break;
+      case "ntree": S.ntree = !S.ntree; break;
+      case "qclear": S.q = ""; break;
+      case "more": S.more = !S.more; S.pick = false; closeMenus = false; break;
+      case "edit": S.scene = "edit"; S.text = MINE; S.pv = false; S.base = null; S.newpage = null; S.saves = 0; break;
+      case "newpage": S.creating = false; S.scene = "edit"; S.newpage = "process/"; S.text = ""; S.pv = false; S.base = null; if (S.layout === "narrow") S.ntab = "wiki"; else S.mode = "wiki"; break;
+      case "pv": if ($("wk-ebody")) S.text = $("wk-ebody").value; S.pv = t.getAttribute("data-pv") === "1"; break;
+      case "cancel": S.scene = "read"; S.text = null; S.base = null; S.newpage = null; break;
+      case "save":
+        if ($("wk-ebody")) S.text = $("wk-ebody").value;
+        if (S.newpage != null) {
+          var np = ($("wnp") ? $("wnp").value : S.newpage).replace(/\/+$/, "").replace(/^\/+/, "");
+          if (!np || /\/$/.test(np)) { toast("Give the page a path"); return; }
+          WIKIS[S.wiki].pages[np] = P(S.text || "# " + np, "MA", "just now", "f00c1e2");
+          WIKIS[S.wiki].tip = "f00c1e2"; S.page = np; S.newpage = null; S.scene = "read"; S.text = null; S.flash = true; toast("Saved and pushed f00c1e2"); break;
+        }
+        if (S.saves === 0) { S.saves = 1; S.scene = "refused"; break; }
+        WIKIS[S.wiki].pages[S.page] = P(S.text, "MA", "just now", "f00c1e2"); WIKIS[S.wiki].tip = "f00c1e2";
+        S.scene = "read"; S.text = null; S.base = null; S.flash = true; toast("Saved and pushed f00c1e2 (merged onto e41d9a0)"); break;
+      case "again": S.scene = "edit"; S.text = MINE; S.base = "e41d9a0"; S.pv = false; break;
+      case "theirs": WIKIS[S.wiki].pages[S.page] = P(THEIRS, "RA", "4 min ago", "e41d9a0"); WIKIS[S.wiki].tip = "e41d9a0"; S.scene = "read"; S.text = null; S.base = null; S.saves = 0; toast("Reloaded raj’s e41d9a0; your text was dropped"); break;
+      case "toast": toast(t.getAttribute("data-msg")); break;
+      case "full": S.full = !S.full; break;
+      case "agent": if (S.layout === "narrow") S.ntab = "chat"; else if (S.layout === "d") S.dside = "chat"; else S.side = "chat"; break;
+      case "tab": if (S.layout === "d") S.dside = t.getAttribute("data-tab"); else S.side = t.getAttribute("data-tab"); break;
+      case "ntab": S.ntab = t.getAttribute("data-tab"); break;
+      case "item": S.item = t.getAttribute("data-item"); break;
+      case "winclose": case "winback": S.item = null; break;
+      default: break;
+    }
+    if (t.classList.contains("wlink")) { S.item = null; openPage(t.getAttribute("data-wiki"), t.getAttribute("data-path")); }
+    else if (t.classList.contains("iref")) S.item = t.getAttribute("data-item");
+    if (closeMenus) { if (a !== "pick") S.pick = false; if (a !== "more") S.more = false; }
+    render();
+  });
+  document.addEventListener("input", function (e) {
+    if (e.target.id === "wsearch") { S.q = e.target.value; render(); }
+    if (e.target.id === "wname") {
+      S.wname = e.target.value;
+      var ok = /^[a-z0-9][a-z0-9-]*$/.test(S.wname) && S.wname.length <= 64, h = $("wnameh");
+      h.className = "h" + (ok ? "" : " bad");
+      h.textContent = ok ? "Lowercase letters, digits, and dashes; up to 64." : "Use lowercase letters, digits, and dashes, starting with a letter or digit; up to 64.";
+    }
+    if (e.target.id === "wk-ebody") S.text = e.target.value;
+    if (e.target.id === "wnp") S.newpage = e.target.value;
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") { if (S.item) S.item = null; else if (S.pick || S.more) S.pick = S.more = false; else if (S.scene === "edit") { S.scene = "read"; S.text = null; S.newpage = null; } else return; render(); }
+  });
+
+  // ---------- URL hash for fixed states (screenshots) ----------
+  var q = {};
+  location.hash.slice(1).split("&").forEach(function (kv) { var p = kv.split("="); if (p[0]) q[p[0]] = decodeURIComponent(p[1] || "1"); });
+  S.theme = q.theme || (window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  document.documentElement.setAttribute("data-theme", S.theme);
+  if (q.layout) S.layout = q.layout;
+  scene(q.scene || "read");
+  if (q.wiki && WIKIS[q.wiki]) S.wiki = q.wiki;
+  if (q.page && wikiExists(S.wiki, q.page)) S.page = q.page;
+  if (q.pick) S.pick = true;
+  if (q.pv) S.pv = true;
+  if (q.q) S.q = q.q;
+  if (q.ntree) S.ntree = true;
+  if (q.tab) { if (S.layout === "narrow") S.ntab = q.tab; else S.side = q.tab; }
+  render();
+})();
+</script>
+</body></html>
