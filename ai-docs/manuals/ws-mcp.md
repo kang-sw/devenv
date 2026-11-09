@@ -226,8 +226,9 @@ no option, so the remote moves by fast-forward only; pull fetches the
 upstream's remote and fast-forwards only, refusing a detached HEAD, a branch
 with no upstream (also one the fetch pruned), modified or staged tracked
 files (untracked ones do not count), and a branch that has diverged; fetch
-is a plain `git fetch`. Push and fetch never prompt on a console (the
-daemon's console is hidden, so ssh runs in batch mode): an ssh key that
+is a plain `git fetch`. No network step of push, pull, or fetch ever
+prompts on a console (the daemon's console is hidden, so ssh runs in batch
+mode): an ssh key that
 needs a passphrase must be in ssh-agent, and an unknown host must be
 accepted once in a terminal, while a Git Credential Manager sign-in dialog
 still appears. An action answers 204, 200 with a note (nothing to
