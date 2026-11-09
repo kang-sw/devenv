@@ -76,3 +76,23 @@ func TestStoresRouteReportsTheSupportChats(t *testing.T) {
 		t.Fatalf("stores with support = %d %s", code, body)
 	}
 }
+
+// TestSupportChatCarriesTheSubagentBadge pins the chat card's script hooks:
+// its composer carries the session composer's subagent badge (without the
+// session page's id) and fills it from the convlive region its log streams.
+func TestSupportChatCarriesTheSubagentBadge(t *testing.T) {
+	f := startPageFixture(t)
+	code, index := get(t, f.base+"/")
+	if code != http.StatusOK {
+		t.Fatalf("GET / = %d", code)
+	}
+	for _, want := range []string{
+		`'<div class="composer supcomp"><div class="cbadges"><span class="sbadge" title="' + supEsc(wsT("js.subagents.title")) + '" hidden>'`,
+		`'<span class="spin"></span><svg class="i" aria-hidden="true"><use href="#i-agents"/></svg><span class="slabel"></span></span></div>`,
+		`subBadge(c.sbadge, c.live.querySelector(".clive"), !!c.conv);`,
+	} {
+		if !strings.Contains(index, want) {
+			t.Errorf("index page script lacks %q", want)
+		}
+	}
+}

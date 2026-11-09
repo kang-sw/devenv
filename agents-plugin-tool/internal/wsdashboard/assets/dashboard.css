@@ -719,6 +719,7 @@ a[data-wl="file"]:not([href]) { color: inherit; }
 .tk .supcomp .csend:disabled { opacity: .45; cursor: default; }
 .tk .supcomp textarea { min-height: 54px; }
 .tk .supcomp textarea:disabled { opacity: .6; }
+.tk .supcomp .sbadge .i { width: 13px; height: 13px; }
 .tk .supnew .i { width: 12px; height: 12px; }
 .tk .suppop { position: absolute; z-index: 3; left: 0; bottom: calc(100% + 6px); width: min(360px, 100%); max-height: 340px; overflow-y: auto; overscroll-behavior: contain; display: grid; gap: 10px;
   background: var(--wb-card); border-radius: 10px; box-shadow: var(--wb-shadow-hi), inset 0 0 0 1px var(--wb-line); padding: 10px 12px; font-size: 12.5px; }

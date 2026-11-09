@@ -1023,7 +1023,8 @@
   // subagents" while the session runs subagents, whether or not its lead
   // works. N is a convlive region's data-sub (its running direct children),
   // M its data-subdeep (every running agent below them), counted by the
-  // server; "(+M)" shows only when M is above zero. on is live mode.
+  // server; "(+M)" shows only when M is above zero. on gates it: the
+  // session page's live mode, or the support chat card's open conversation.
   var sbadge = $("sbadge");
   function subBadge(badge, clive, on) {
     if (!badge) return;
@@ -2256,12 +2257,14 @@
     r.className = "supchat";
     r.innerHTML = '<div class="suplog"><p class="supempty"></p><div class="conv centries"></div><div class="suplive"></div></div>' +
       '<p class="superr" hidden></p>' +
-      '<div class="composer supcomp"><div class="supbar"><button type="button" class="supchip" aria-haspopup="dialog" aria-expanded="false"></button>' +
+      '<div class="composer supcomp"><div class="cbadges"><span class="sbadge" title="' + supEsc(wsT("js.subagents.title")) + '" hidden>' +
+      '<span class="spin"></span><svg class="i" aria-hidden="true"><use href="#i-agents"/></svg><span class="slabel"></span></span></div><div class="supbar"><button type="button" class="supchip" aria-haspopup="dialog" aria-expanded="false"></button>' +
       '<span class="grow"></span></div><div class="crow"><textarea rows="1" aria-label="' + supEsc(wsT("js.sup.title")) + '"></textarea>' +
       '<button type="button" class="csend" aria-label="' + supEsc(wsT("js.sup.send")) + '" title="' + supEsc(wsT("js.sup.send")) + '">' + supIcon("#tki-send") + "</button></div>" +
       '<div class="suppop" role="dialog" aria-label="' + supEsc(wsT("js.sup.chip.tip")) + '" hidden></div></div>';
     c.log = r.querySelector(".suplog"); c.box = r.querySelector(".centries"); c.live = r.querySelector(".suplive");
     c.ta = r.querySelector("textarea"); c.chip = r.querySelector(".supchip"); c.popEl = r.querySelector(".suppop");
+    c.sbadge = r.querySelector(".sbadge");
     c.log.addEventListener("scroll", function () {
       if (!c.root.isConnected) return;
       c.top = c.log.scrollTop;
@@ -2441,6 +2444,9 @@
     c.chip.innerHTML = "<span>" + supEsc(supSelText(cur)) + "</span>" + supIcon("#tki-chev");
     c.chip.title = wsT("js.sup.chip.tip");
     c.chip.setAttribute("aria-expanded", String(c.pop));
+    // the session composer's subagent badge, over the convlive region the
+    // log streams; the card has no interrupt badge
+    subBadge(c.sbadge, c.live.querySelector(".clive"), !!c.conv);
     c.root.querySelector(".csend").disabled = c.sending || !c.loaded || none;
     c.ta.disabled = !c.loaded || none;
   }
