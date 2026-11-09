@@ -312,5 +312,11 @@ routes), 5a83c4e6a (renderer), e6aacfa73 (page).
   pruning in all three places, late upload dropped, failed upload, refused
   save keeps draft, no-upload notice). Unverified: the live product page
   against a real daemon.
-- Review (lite): spawned; its report had not arrived when this Result was
-  written.
+- Review (lite): clean, two minors left as is. (1) A paste carrying both
+  text/plain and an image (spreadsheet cells) pastes the text and also
+  uploads the image rendition: kept, since it matches the dashboard
+  composer's paste rule this ticket follows. (2) Outside `caps.attach`, an
+  edit drops a stored attachment its text does not name: intended by the
+  "Pruning on save" decision; paste is the only product path that adds
+  attachments, and it always names them. Forward: if a client ever adds
+  chip-only attachments, keep base entries the text never named.
