@@ -234,6 +234,13 @@ func TestTrackerCallsTurnTheKnobOnOnlyWhenTheySucceed(t *testing.T) {
 	}
 }
 
+// isGateRefusal reports whether resp is the call gate's JSON-RPC refusal
+// (-32601) rather than a handler's tool error, which can carry the same
+// text and would mask a gate that let the call through.
+func isGateRefusal(resp string) bool {
+	return strings.Contains(resp, `"error":{"code":-32601,`)
+}
+
 func TestTrackerToolsRefuseSpawnedKeys(t *testing.T) {
 	f := newTrackerLeadFixture(t)
 	worker, err := f.s.sessions.mint(f.root, roleLead, f.key)
@@ -252,8 +259,8 @@ func TestTrackerToolsRefuseSpawnedKeys(t *testing.T) {
 			wikiUpdateTool:   {"session_key": key, "store": "me", "wiki": "docs", "op": "write", "new_wiki": true, "path": "home", "content": "smuggled\n"},
 		} {
 			resp := f.call(t, tool, args)
-			if !isToolError(resp) || !strings.Contains(resp, "not available to a spawned session") {
-				t.Fatalf("%s with a spawned key must be refused: %s", tool, resp)
+			if !isGateRefusal(resp) || !strings.Contains(resp, "not available to a spawned session") {
+				t.Fatalf("%s with a spawned key must be refused by the call gate: %s", tool, resp)
 			}
 		}
 	}
@@ -819,5 +826,22 @@ func TestTrackerUpdateReviewStageAndSelfAssignment(t *testing.T) {
 	text := f.trackerRefused(t, "tracker.update", map[string]any{"commands": `<tk:store name="me"><tk:item.edit item="` + mine + `" stage="review"/></tk:store>`})
 	if !strings.Contains(text, "the store would flag this write:") || !strings.Contains(text, "has live or pending assignments (ada)") {
 		t.Fatalf("moving an assigned item to review must be refused:\n%s", text)
+	}
+}
+
+// A wiki sync warning carries git's error text, which can name the remote
+// with its credentials; the sync report must not echo them.
+func TestTrackerSyncReportRedactsWarningCredentials(t *testing.T) {
+	rep := wsledger.SyncReport{Warnings: []wsledger.Warning{{
+		Ref:    "refs/ws/wiki/docs",
+		Kind:   wsledger.WarnWikiSyncFailed,
+		Detail: "ledger: wiki push: fatal: unable to access 'https://user:s3cr3t-token@example.com/store.git/': 403",
+	}}}
+	got := formatTrackerSyncReport(rep)
+	if strings.Contains(got, "s3cr3t-token") || strings.Contains(got, "user:") {
+		t.Fatalf("sync report leaks the remote's credentials: %q", got)
+	}
+	if !strings.Contains(got, "warning: refs/ws/wiki/docs "+wsledger.WarnWikiSyncFailed) || !strings.Contains(got, "https://***@example.com/store.git/") {
+		t.Fatalf("sync report = %q, want the warning with its redacted remote", got)
 	}
 }

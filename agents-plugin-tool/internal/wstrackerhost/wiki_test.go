@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -174,5 +175,37 @@ func TestWikiSaveLeavesLedgerSyncStateAlone(t *testing.T) {
 	}
 	if got := readSyncState(dir); got.Error != standing.Error || !got.AttemptedAt.Equal(standing.AttemptedAt) || !got.SyncedAt.IsZero() {
 		t.Fatalf("sync state after a wiki save = %+v, want the standing %+v", got, standing)
+	}
+}
+
+// TestWikiSaveBoundsTheNetwork: a save's fetch and push run under the
+// network timeout, not only under the caller's context (which may have
+// none), since they hold the store's lock.
+func TestWikiSaveBoundsTheNetwork(t *testing.T) {
+	w := newWorld(t)
+	var armed atomic.Bool
+	rr := &deadlineRunner{match: func([]string) bool { return armed.Load() }}
+	a, err := New(Options{Root: filepath.Join(w.dir, "a"), Clock: w.clock, Runner: rr})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { a.Close() })
+	w.register(a, "team", "ada", &wstracker.Profile{Given: "Ada"})
+
+	armed.Store(true)
+	edit := wsledger.WikiEdit{Wiki: "docs", NewWiki: true, Op: wsledger.WikiOpWrite, Path: "home", Content: "hello\n"}
+	if res, err := a.WikiSave(context.Background(), "team", WikiSave{Edit: edit}); err != nil || !res.Created {
+		t.Fatalf("save = %+v, %v", res, err)
+	}
+	armed.Store(false)
+	rr.mu.Lock()
+	defer rr.mu.Unlock()
+	if len(rr.deadlines) == 0 {
+		t.Fatal("the save ran no remote command; the test needs its push")
+	}
+	for _, left := range rr.deadlines {
+		if left <= 0 || left > networkTimeout {
+			t.Fatalf("save's remote command deadline %v away, want within the network timeout %v", left, networkTimeout)
+		}
 	}
 }
