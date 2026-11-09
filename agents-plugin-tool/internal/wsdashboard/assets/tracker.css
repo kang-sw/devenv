@@ -962,3 +962,6 @@ body.tk-menuon .tk .ir-more { visibility: hidden !important; }
 .tk .chip.wk-nosave { background: color-mix(in srgb, var(--tk-fail) 14%, var(--wb-card)); color: var(--tk-fail); }
 .tk .wk-tcount.err { color: var(--tk-fail); }
 .tk .wk-empty .err { color: var(--tk-fail); }
+.tk .wk-edit .tb { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 12px; }
+.tk .wk-edit .tb .muted { flex: 1 1 auto; min-width: 0; }
+.tk .wk-edit .tb .wk-base { flex: none; }

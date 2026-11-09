@@ -1321,7 +1321,7 @@
     }
     var head = '<div class="wk-phead">' + wkCrumb(c.path || st.page) + '<span class="grow"></span><span class="chip wk-nosave">' + esc(wsT("js.tk.wk.notsaved")) + '</span></div>';
     return head + '<div class="wk-ref">' +
-      '<div class="wk-refwhy">' + wkIc('warn') + '<div><b>' + esc(wsT("js.tk.wk.ref.title")) + '</b> ' + esc(c.reason || wsT("js.tk.wk.ref.moved", wkSha(c.theirs), wkSha(c.base))) + ' ' +
+      '<div class="wk-refwhy">' + wkIc('warn') + '<div><b>' + esc(wsT("js.tk.wk.ref.title")) + '</b> ' + esc(c.reason ? String(c.reason).replace(/[\s.]*$/, '.') : wsT("js.tk.wk.ref.moved", wkSha(c.theirs), wkSha(c.base))) + ' ' +
       esc(wsTn("js.tk.wk.ref.conf", mk.conf)) + ', ' + esc(wsTn("js.tk.wk.ref.other", mk.other)) + '. ' + esc(wsT("js.tk.wk.ref.kept")) + '</div></div>' +
       '<div class="wk-refacts">' + btn('wk-copymine', wkIc('copy') + esc(wsT("js.tk.wk.copymine")), {}) + btn('wk-theirs', wkIc('reload') + esc(wsT("js.tk.wk.theirs")), {}) + btn('wk-again', wkIc('pen') + esc(wsT("js.tk.wk.again")), {}, 'primary') +
       '<span class="wk-key"><span><i class="k-conf"></i>' + esc(wsT("js.tk.wk.key.conf")) + '</span><span><i class="k-chg"></i>' + esc(wsT("js.tk.wk.key.chg")) + '</span><a href="#"' + attr('act', 'wk-full') + '>' + esc(wsT(st.full ? "js.tk.wk.changes" : "js.tk.wk.full")) + '</a></span></div>' +
@@ -1413,7 +1413,7 @@
     wkShow();
     render();
     var f = $(isNew && (!path || path.slice(-1) === '/') ? 'wk-epath' : 'wk-ebody');
-    if (f) { f.focus(); if (f.id === 'wk-ebody') { try { f.setSelectionRange(f.value.length, f.value.length); } catch (x) { /* not a text field */ } } }
+    if (f) { f.focus({ preventScroll: true }); if (f.id === 'wk-ebody') { try { f.setSelectionRange(f.value.length, f.value.length); } catch (x) { /* not a text field */ } } }
   }
   function wkCancel() {
     var st = wk();
