@@ -421,7 +421,11 @@ func (t *dashboardTracker) WikiRead(ctx context.Context, id, wiki, path string) 
 	if err != nil {
 		return wsdashboard.TrackerWikiPage{}, wikiError(err, true)
 	}
-	return wsdashboard.TrackerWikiPage{Path: path, Content: content, Commit: at}, nil
+	tree, err := t.h.WikiImages(ctx, id, wiki)
+	if err != nil {
+		return wsdashboard.TrackerWikiPage{}, redacted(err)
+	}
+	return wsdashboard.TrackerWikiPage{Path: path, Content: content, Commit: at, HTML: string(trackerText(content, attachmentSources(id, wiki, tree, nil)))}, nil
 }
 
 // WikiSave applies the page's edit. The images the request names are the

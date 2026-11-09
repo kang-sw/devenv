@@ -2870,10 +2870,40 @@
     // An editor's preview: the daemon renders the text as the view renders a saved one,
     // with the editor's pending attachments as the text's own.
     render: function (id, req, done) {
-      tkFetch(tkUrl(id, "render"), { text: req.text, attachments: req.attachments || [] }, function (status, v) {
+      var body = { text: req.text, attachments: req.attachments || [] };
+      if (req.wiki) body.wiki = req.wiki;
+      tkFetch(tkUrl(id, "render"), body, function (status, v) {
         if (status === 200 && typeof v.html === "string") done({ ok: true, html: v.html });
         else done({ ok: false, error: tkErrText(status, v) });
       });
+    },
+    // The store's wiki branches (tracker_routes.go: the wiki routes). A save that
+    // cannot merge answers 409 with both texts, passed on as res.conflict.
+    wiki: {
+      list: function (id, done) {
+        tkFetch(tkUrl(id, "wiki"), undefined, function (status, v) {
+          if (status === 200 && Array.isArray(v.wikis)) done({ ok: true, wikis: v.wikis });
+          else done({ ok: false, error: tkErrText(status, v), status: status });
+        });
+      },
+      pages: function (id, wiki, done) {
+        tkFetch(tkUrl(id, "wiki/" + encodeURIComponent(wiki) + "/pages"), undefined, function (status, v) {
+          if (status === 200 && Array.isArray(v.pages)) done({ ok: true, pages: v.pages, commit: String(v.commit || "") });
+          else done({ ok: false, error: tkErrText(status, v), status: status });
+        });
+      },
+      read: function (id, wiki, path, done) {
+        tkFetch(tkUrl(id, "wiki/" + encodeURIComponent(wiki) + "/page?path=" + encodeURIComponent(path)), undefined, function (status, v) {
+          if (status === 200 && typeof v.content === "string") done({ ok: true, path: String(v.path || path), content: v.content, commit: String(v.commit || ""), html: String(v.html || "") });
+          else done({ ok: false, error: tkErrText(status, v), status: status });
+        });
+      },
+      save: function (id, wiki, req, done) {
+        tkFetch(tkUrl(id, "wiki/" + encodeURIComponent(wiki) + "/save"), req, function (status, v) {
+          if (status === 200 && typeof v.commit === "string") done({ ok: true, commit: v.commit, merged: !!v.merged, created: !!v.created, warnings: v.warnings || [] });
+          else done({ ok: false, error: tkErrText(status, v), status: status, conflict: status === 409 && v.conflict && typeof v.conflict === "object" ? v.conflict : null });
+        });
+      }
     },
     // An image pasted or dropped into an editor: the raw bytes, which the daemon
     // stages until a write names them; a paste sends no name (the daemon's default).

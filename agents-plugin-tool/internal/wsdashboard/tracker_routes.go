@@ -184,11 +184,14 @@ type TrackerWikiPages struct {
 }
 
 // TrackerWikiPage is one page as read at Commit, the base a save of this
-// edit sends.
+// edit sends. HTML is the content rendered as the render route renders it
+// in that wiki's mode (the tree's images show), so a page read draws at
+// once.
 type TrackerWikiPage struct {
 	Path    string `json:"path"`
 	Content string `json:"content"`
 	Commit  string `json:"commit"`
+	HTML    string `json:"html"`
 }
 
 // TrackerWikiSave is the wiki save route's body: one edit of the wiki the

@@ -563,6 +563,10 @@ func TestDashboardTrackerWiki(t *testing.T) {
 	if err != nil || page.Content != text || page.Commit != res.Commit || page.Path != "guide/home" {
 		t.Fatalf("read = %+v, %v", page, err)
 	}
+	// the read renders the page in wiki mode: the tree's image shows
+	if !strings.Contains(page.HTML, `<img src="/tracker/stores/team/wiki/docs/attachments/`+att.OID) {
+		t.Fatalf("read html = %q", page.HTML)
+	}
 	if _, err := dt.WikiRead(ctx, "team", "docs", "nope"); !errors.Is(err, wsdashboard.ErrTrackerWikiNotFound) {
 		t.Fatalf("read of an absent page = %v", err)
 	}
