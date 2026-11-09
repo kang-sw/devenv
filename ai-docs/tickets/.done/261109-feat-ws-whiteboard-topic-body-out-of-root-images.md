@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 6115f023b65734b8
 sage-review-completeness-reviewed: 6115f023b65734b8
+completed: 2026-11-09
 ---
 
 # Served whiteboard topic bodies show images outside the project root for a loopback viewer
