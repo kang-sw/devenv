@@ -127,21 +127,26 @@
       var tok = doc.activeElement === input && input.selectionStart === input.selectionEnd && tokenAt(input.value, input.selectionStart);
       if (!tok) { close(); return; }
       var keep = st && st.start === tok.start;
-      st = { start: tok.start, end: tok.end, q: tok.q, items: keep ? st.items : [], idx: keep ? st.idx : 0 };
+      // The rows of the last answer stay up while the next is asked for;
+      // itemsQ is the query they answer.
+      st = { start: tok.start, end: tok.end, q: tok.q, items: keep ? st.items : [], itemsQ: keep ? st.itemsQ : null, idx: keep ? st.idx : 0, pickNext: false };
       if (st.items.length) draw(); else hide();
-      request(tok.q);
+      request(tok.q, 60);
     }
-    function request(q) {
+    function request(q, delay) {
       clearTimeout(timer);
       var n = ++ask;
       timer = setTimeout(function () {
         opts.source(q, function (items) {
           if (n !== ask || !st) return;
           st.items = (items || []).slice(0, 50);
+          st.itemsQ = q;
           st.idx = 0;
-          if (st.items.length) draw(); else hide();
+          if (!st.items.length) { hide(); return; }
+          if (st.pickNext) { pick(0); return; }
+          draw();
         });
-      }, 60);
+      }, delay);
     }
     function draw() {
       pop.textContent = "";
@@ -189,18 +194,28 @@
       insert(start, end, parts.text + tail);
       var mend = start + parts.text.length;
       // A directory leaves the caret inside its mention, before a code
-      // span's closing fence, so typing goes on refining it.
-      var caret = it.dir ? mend - parts.close : mend + 1;
+      // span's closing fence, so typing goes on refining it; a file leaves
+      // it past the space after the mention, but never past a line break.
+      var caret = it.dir ? mend - parts.close : spaced && v.charAt(end) !== " " ? mend : mend + 1;
       input.setSelectionRange(caret, caret);
       if (opts.onPick) opts.onPick({ start: start, end: mend, text: parts.text, path: path, dir: !!it.dir });
-      if (it.dir) sync(); else close();
+      if (!it.dir) { close(); return; }
+      // The parent directory's rows answer nothing inside it.
+      if (st) st.items = [];
+      sync();
     }
     // key handles a keydown while the popup shows; true when it took it.
     function key(e) {
       if (!shown()) return false;
       var k = e.key;
       if (k === "ArrowDown" || k === "ArrowUp") { e.preventDefault(); move(k === "ArrowDown" ? 1 : -1); return true; }
-      if (k === "Enter" || (k === "Tab" && !e.ctrlKey && !e.metaKey && !e.altKey)) { e.preventDefault(); pick(st.idx); return true; }
+      if (k === "Enter" || (k === "Tab" && !e.ctrlKey && !e.metaKey && !e.altKey)) {
+        e.preventDefault();
+        // Rows still answering an older query are not what was typed: ask
+        // for the current one now and pick its first row when it answers.
+        if (st.itemsQ !== st.q) { st.pickNext = true; request(st.q, 0); } else pick(st.idx);
+        return true;
+      }
       if (k === "Escape") { e.preventDefault(); close(); return true; }
       return false;
     }

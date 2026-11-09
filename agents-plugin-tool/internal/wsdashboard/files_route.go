@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -331,6 +332,9 @@ func listAbsDir(q string) (string, []fileItem, bool) {
 		return "", nil, false
 	}
 	clean := filepath.Clean(native)
+	if deviceElement(clean) {
+		return "", nil, false
+	}
 	real, err := filepath.EvalSymlinks(clean)
 	if err != nil || networkPath(real) || !driveOrRootPath(real) {
 		return "", nil, false
@@ -380,6 +384,24 @@ func listAbsDir(q string) (string, []fileItem, bool) {
 		items = append(items, fileItem{Path: filepath.ToSlash(filepath.Join(clean, h.name)), Dir: h.dir})
 	}
 	return filepath.ToSlash(clean), items, true
+}
+
+// deviceElement reports whether the cleaned absolute path names a Windows
+// reserved device (NUL, CON, COM1, ...) in one of its elements: resolving
+// or opening it would reach the device, which can block the handler, rather
+// than a directory. It is a pure string check; on other systems those names
+// are ordinary.
+func deviceElement(clean string) bool {
+	if runtime.GOOS != "windows" {
+		return false
+	}
+	rest := strings.TrimPrefix(clean, filepath.VolumeName(clean))
+	for _, e := range strings.FieldsFunc(rest, func(r rune) bool { return r == '\\' || r == '/' }) {
+		if !filepath.IsLocal(e) {
+			return true
+		}
+	}
+	return false
 }
 
 // The fuzzy scorer's weights: each matched rune scores fuzzyMatch, plus

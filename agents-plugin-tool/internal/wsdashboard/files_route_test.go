@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -339,6 +340,9 @@ func TestFilesAbsModeRefusals(t *testing.T) {
 	for _, unc := range []string{`\\server\share\`, "//server/share/", `\\?\C:\`, "//?/C:/", `\\.\x\`, `\??\UNC\s\sh\`, "/??/UNC/s/sh/", `\\server\s`} {
 		refused[unc] = filesAs(f.d, peer, local, "", "", unc)
 	}
+	// The real directory spelled with a leading double slash: cleaning it
+	// would list it, so only the refusal on its spelling keeps it out.
+	refused["double-slash spelling of a real directory"] = filesAs(f.d, peer, local, "", "", "/"+q)
 	for name, r := range refused {
 		if r.Code != http.StatusNotFound || strings.Contains(r.Body.String(), "listedname") || strings.Contains(r.Body.String(), "items") {
 			t.Errorf("%s = %d %q, want 404", name, r.Code, r.Body.String())
@@ -378,5 +382,25 @@ func TestFilesRouteRefusesUnknownSessionsAndBadQueries(t *testing.T) {
 	}
 	if r := serveAs(http.MethodPost, "/s/livesession/files?q=x"); r.Code != http.StatusMethodNotAllowed {
 		t.Errorf("POST = %d, want 405", r.Code)
+	}
+}
+
+// TestDeviceElementRefusesWindowsReservedNames pins the abs-mode check that
+// keeps a Windows reserved device name in any element of the listed
+// directory from reaching the filesystem; elsewhere those names are
+// ordinary.
+func TestDeviceElementRefusesWindowsReservedNames(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		if deviceElement("/tmp/NUL") {
+			t.Error("deviceElement refused an ordinary Unix name")
+		}
+		return
+	}
+	for path, want := range map[string]bool{
+		`C:\`: false, `C:\Users\me`: false, `C:\COM1`: true, `C:\x\NUL`: true, `C:\x\con.txt`: true, `C:\x\nullish`: false,
+	} {
+		if got := deviceElement(path); got != want {
+			t.Errorf("deviceElement(%q) = %v, want %v", path, got, want)
+		}
 	}
 }
