@@ -81,6 +81,9 @@ const (
 	WikiConflictAddAdd = "add-add"
 	// WikiConflictTreeFile: a folder on one side is a file on the other.
 	WikiConflictTreeFile = "tree-file"
+	// WikiConflictRename: the page a rename or delete names was renamed
+	// or removed on the other side.
+	WikiConflictRename = "rename"
 )
 
 var (
@@ -135,13 +138,15 @@ func ValidWikiPath(s string) bool {
 	return true
 }
 
-func wikiRef(name string) string                { return wikiPrefix + name }
-func wikiRecoveryRef(name, oid string) string   { return wikiRecoveryPrefix + name + "/" + oid }
-func pageFile(path string) string               { return path + pageExt }
-func pageParts(path string) []string            { return strings.Split(pageFile(path), "/") }
-func wikiImageFile(oid, ext string) string      { return WikiAttachDir + "/" + oid + "." + ext }
-func wikiImageParts(oid, ext string) []string   { return []string{WikiAttachDir, oid + "." + ext} }
-func wikiNameOf(ref string) (string, bool)      { n, ok := strings.CutPrefix(ref, wikiPrefix); return n, ok && ValidWikiName(n) }
+func wikiRef(name string) string              { return wikiPrefix + name }
+func wikiRecoveryRef(name, oid string) string { return wikiRecoveryPrefix + name + "/" + oid }
+func pageFile(path string) string             { return path + pageExt }
+func pageParts(path string) []string          { return strings.Split(pageFile(path), "/") }
+func wikiImageParts(oid, ext string) []string { return []string{WikiAttachDir, oid + "." + ext} }
+func wikiNameOf(ref string) (string, bool) {
+	n, ok := strings.CutPrefix(ref, wikiPrefix)
+	return n, ok && ValidWikiName(n)
+}
 
 // WikiImage is one image a write commits beside its page, at
 // _attachments/<OID>.<Ext>. Data must hash to OID (the sha256 of the
@@ -354,7 +359,8 @@ func (l *Ledger) absorbWiki(ctx context.Context) error {
 				return err
 			}
 		case K == "" && l.git.isAncestor(ctx, S, L):
-			// Never pushed, and ahead of the remote: the push fast-forwards.
+			// Never pushed, and ahead of the remote: pushLocalWikis
+			// fast-forwards the remote under a lease on S.
 		default:
 			if err := recover(name, ref, L); err != nil {
 				return err
@@ -372,12 +378,14 @@ func (l *Ledger) absorbWiki(ctx context.Context) error {
 }
 
 // pushLocalWikis pushes every wiki the remote is not known to hold (one
-// written before the store had a remote), create-only. A rejection (the
-// remote gained a wiki of that name meanwhile) is left to the fetch that
-// follows, which follows the remote and keeps the local tip as a recovery
-// point.
+// written before the store had a remote) under a lease on the last
+// snapshot of the remote ref: create-only when the remote has none, a
+// fast-forward when the local copy descends from it (absorbWiki left that
+// case alone). A rejection (the remote moved meanwhile) is left to the
+// fetch that follows, which follows the remote and keeps the local tip as
+// a recovery point.
 func (l *Ledger) pushLocalWikis(ctx context.Context) error {
-	local, _, known, err := l.wikiRefs(ctx)
+	local, snap, known, err := l.wikiRefs(ctx)
 	if err != nil {
 		return err
 	}
@@ -389,7 +397,7 @@ func (l *Ledger) pushLocalWikis(ctx context.Context) error {
 	}
 	sort.Strings(refs)
 	for _, ref := range refs {
-		lease := ""
+		lease := snap[ref]
 		out, err := l.git.push(ctx, ref, &lease)
 		if err != nil {
 			return fmt.Errorf("ledger: wiki push: %w", err)
@@ -716,7 +724,7 @@ func (l *Ledger) WikiRecovery(ctx context.Context, name string) ([]WikiRecoveryP
 			return err
 		}
 		var oids []string
-		byOID := map[string]*WikiRecoveryPoint{}
+		seen := map[string]bool{}
 		for ref, oid := range refs {
 			rest := strings.TrimPrefix(ref, wikiRecoveryPrefix)
 			wiki, kept, ok := strings.Cut(rest, "/")
@@ -724,11 +732,18 @@ func (l *Ledger) WikiRecovery(ctx context.Context, name string) ([]WikiRecoveryP
 				continue
 			}
 			points = append(points, WikiRecoveryPoint{Wiki: wiki, OID: oid})
-			byOID[oid] = &points[len(points)-1]
-			oids = append(oids, oid)
+			if !seen[oid] {
+				seen[oid] = true
+				oids = append(oids, oid)
+			}
 		}
 		if len(oids) == 0 {
 			return nil
+		}
+		// The same commit may be a recovery point of two wikis.
+		byOID := map[string][]int{}
+		for i, p := range points {
+			byOID[p.OID] = append(byOID[p.OID], i)
 		}
 		args := []string{"-c", "i18n.logOutputEncoding=UTF-8", "log", "--no-walk=unsorted", "--no-color", "--no-decorate", "--no-show-signature", "--format=%H %at %s"}
 		args = append(args, oids...)
@@ -739,13 +754,15 @@ func (l *Ledger) WikiRecovery(ctx context.Context, name string) ([]WikiRecoveryP
 		}
 		for _, line := range strings.Split(string(out), "\n") {
 			f := strings.SplitN(line, " ", 3)
-			if len(f) < 2 || byOID[f[0]] == nil {
+			if len(f) < 2 {
 				continue
 			}
 			sec, _ := strconv.ParseInt(f[1], 10, 64)
-			byOID[f[0]].Time = time.Unix(sec, 0).UTC()
-			if len(f) == 3 {
-				byOID[f[0]].Subject = f[2]
+			for _, i := range byOID[f[0]] {
+				points[i].Time = time.Unix(sec, 0).UTC()
+				if len(f) == 3 {
+					points[i].Subject = f[2]
+				}
 			}
 		}
 		sort.Slice(points, func(i, j int) bool {
@@ -1121,7 +1138,7 @@ func (l *Ledger) WikiSave(ctx context.Context, e WikiEdit) (WikiSaveResult, erro
 			return err
 		}
 		stale := func(tip string) error {
-			return l.wikiConflict(ctx, e, tip, &treeConflict{Path: pageFile(e.Path), Kind: WikiConflictStaleBase})
+			return l.wikiConflict(ctx, e, tip, "", &treeConflict{Path: pageFile(e.Path), Kind: WikiConflictStaleBase})
 		}
 		baseTree := ""
 		if e.NewWiki {
@@ -1158,12 +1175,18 @@ func (l *Ledger) WikiSave(ctx context.Context, e WikiEdit) (WikiSaveResult, erro
 				if err != nil {
 					return err
 				}
-				mergedTree, conflict, err := l.git.mergeTrees(ctx, baseTree, tree, theirsTree, "")
+				conflict, err := l.renameGuard(ctx, e, baseTree, theirsTree)
 				if err != nil {
 					return err
 				}
+				var mergedTree string
+				if conflict == nil {
+					if mergedTree, conflict, err = l.git.mergeTrees(ctx, baseTree, tree, theirsTree, ""); err != nil {
+						return err
+					}
+				}
 				if conflict != nil {
-					return l.wikiConflict(ctx, e, tip, conflict)
+					return l.wikiConflict(ctx, e, tip, tree, conflict)
 				}
 				if mergedTree == theirsTree {
 					// The tip already holds this edit.
@@ -1222,11 +1245,51 @@ func (l *Ledger) WikiSave(ctx context.Context, e WikiEdit) (WikiSaveResult, erro
 	return res, err
 }
 
+// renameGuard refuses a rename or delete whose page the other side moved
+// or removed: the tree merge alone would keep both names of a page both
+// sides renamed, or resurrect under its new name a page the other side
+// deleted. A page both sides deleted outright is not a conflict (the
+// merge finds the edit already applied). nil when the edit is neither, or
+// the tip still holds the page.
+func (l *Ledger) renameGuard(ctx context.Context, e WikiEdit, baseTree, theirsTree string) (*treeConflict, error) {
+	if e.Op != WikiOpRename && e.Op != WikiOpDelete {
+		return nil, nil
+	}
+	file := pageFile(e.Path)
+	if _, ok, err := l.git.entryAt(ctx, theirsTree, file); err != nil || ok {
+		return nil, err
+	}
+	if e.Op == WikiOpRename {
+		return &treeConflict{Path: file, Kind: WikiConflictRename}, nil
+	}
+	base, ok, err := l.git.entryAt(ctx, baseTree, file)
+	if err != nil || !ok {
+		return nil, err
+	}
+	renamed := false
+	err = l.git.walkTree(ctx, theirsTree, "", func(path string, entry treeEntry) error {
+		if entry.oid == base.oid && strings.HasSuffix(path, pageExt) {
+			renamed = true
+		}
+		return nil
+	})
+	if err != nil || !renamed {
+		return nil, err
+	}
+	return &treeConflict{Path: file, Kind: WikiConflictRename}, nil
+}
+
 // wikiConflict builds the refusal of an edit against tip: the saver's text
-// and the text at tip of the conflicting path.
-func (l *Ledger) wikiConflict(ctx context.Context, e WikiEdit, tip string, c *treeConflict) error {
+// (the conflicting path as the edit's tree holds it, when the edit was
+// applied) and the text at tip of the conflicting path.
+func (l *Ledger) wikiConflict(ctx context.Context, e WikiEdit, tip, oursTree string, c *treeConflict) error {
 	out := &WikiConflict{Wiki: e.Wiki, Path: strings.TrimSuffix(c.Path, pageExt), Kind: c.Kind, Base: e.Base, Theirs: tip}
-	if e.Op == WikiOpWrite && strings.TrimSuffix(c.Path, pageExt) == e.Path {
+	switch {
+	case oursTree != "":
+		if data, ok, err := l.git.readBlob(ctx, oursTree+":"+c.Path); err == nil && ok {
+			out.OursText = string(data)
+		}
+	case e.Op == WikiOpWrite && strings.TrimSuffix(c.Path, pageExt) == e.Path:
 		out.OursText = e.Content
 	}
 	if tip != "" {
@@ -1248,6 +1311,8 @@ func (l *Ledger) wikiConflict(ctx context.Context, e WikiEdit, tip string, c *tr
 		out.Reason = "one side changed what the other deleted; decide and save again with the current tip as base"
 	case WikiConflictAddAdd:
 		out.Reason = "both sides added this path with different content; merge and save again with the current tip as base"
+	case WikiConflictRename:
+		out.Reason = "the page was renamed or removed on the other side; find it at the current tip and redo the edit there"
 	default:
 		out.Reason = "the edit and the current tip disagree on whether this path is a folder or a file"
 	}

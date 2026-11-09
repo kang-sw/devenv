@@ -800,3 +800,123 @@ func TestWikiSaveDoesNotTouchLedgerRefs(t *testing.T) {
 		t.Fatalf("sync after a save = %+v", rep.Warnings)
 	}
 }
+
+// TestWikiRenameConflictsRefuse: a rename of a page the other side renamed
+// or deleted, and a delete of a page the other side renamed, are refused;
+// a page both sides deleted is not a conflict; a refused restore carries
+// the restored text as the saver's text.
+func TestWikiRenameConflictsRefuse(t *testing.T) {
+	w := newWorld(t)
+	url := w.newRemote("r")
+	ada := w.register(w.remoteOpts("ada", "c1"), url)
+	bo := w.register(w.remoteOpts("bo", "c1"), url)
+	ctx := context.Background()
+
+	r0 := saveOK(t, ada, wikiCreate("rn", "page", "p\n"))
+	r1 := saveOK(t, ada, wikiWrite("rn", r0.Commit, "other", "o\n"))
+	r2 := saveOK(t, ada, wikiWrite("rn", r1.Commit, "both", "b\n"))
+	fetchOK(t, bo)
+
+	// rename vs rename
+	ra := saveOK(t, ada, WikiEdit{Wiki: "rn", Base: r2.Commit, Op: WikiOpRename, Path: "page", To: "a"})
+	_, err := bo.WikiSave(ctx, WikiEdit{Wiki: "rn", Base: r2.Commit, Op: WikiOpRename, Path: "page", To: "b"})
+	c := wantConflict(t, err, WikiConflictRename)
+	if c.Path != "page" || c.Theirs != ra.Commit {
+		t.Fatalf("rename/rename = %+v", c)
+	}
+	if pages, _, _ := ada.WikiPages(ctx, "rn", ""); strings.Join(pages, ",") != "a,both,other" {
+		t.Fatalf("pages after the refused rename = %v", pages)
+	}
+	// delete vs rename (the other side renamed what this side deletes)
+	_, err = bo.WikiSave(ctx, WikiEdit{Wiki: "rn", Base: r2.Commit, Op: WikiOpDelete, Path: "page"})
+	wantConflict(t, err, WikiConflictRename)
+	// rename vs delete (the other side deleted what this side renames)
+	rd := saveOK(t, ada, WikiEdit{Wiki: "rn", Base: ra.Commit, Op: WikiOpDelete, Path: "other"})
+	_, err = bo.WikiSave(ctx, WikiEdit{Wiki: "rn", Base: ra.Commit, Op: WikiOpRename, Path: "other", To: "elsewhere"})
+	wantConflict(t, err, WikiConflictRename)
+	// both delete: no conflict, the tip already holds the edit
+	res := saveOK(t, bo, WikiEdit{Wiki: "rn", Base: ra.Commit, Op: WikiOpDelete, Path: "other"})
+	if res.Commit != rd.Commit {
+		t.Fatalf("delete of a page both sides deleted = %+v, want the tip %s", res, rd.Commit)
+	}
+	// a refused restore carries the restored text
+	re := saveOK(t, ada, wikiWrite("rn", rd.Commit, "both", "b2\n"))
+	fetchOK(t, bo)
+	rf := saveOK(t, ada, wikiWrite("rn", re.Commit, "both", "b3\n"))
+	_, err = bo.WikiSave(ctx, WikiEdit{Wiki: "rn", Base: re.Commit, Op: WikiOpRestore, Path: "both", Commit: r2.Commit})
+	c = wantConflict(t, err, WikiConflictText)
+	if c.OursText != "b\n" || c.TheirsText != "b3\n" || c.Theirs != rf.Commit {
+		t.Fatalf("restore conflict = %+v", c)
+	}
+	if remoteRefs(t, url)[wikiRef("rn")] != rf.Commit {
+		t.Fatal("a refused save moved the remote")
+	}
+}
+
+// TestWikiRecoveryListsSeveralPoints: two recovery points of one wiki and
+// one of another all carry their time and subject, newest first.
+func TestWikiRecoveryListsSeveralPoints(t *testing.T) {
+	w := newWorld(t)
+	url := w.newRemote("r")
+	ada := w.register(w.remoteOpts("ada", "c1"), url)
+	bo := w.register(w.remoteOpts("bo", "c1"), url)
+	ctx := context.Background()
+
+	a0 := saveOK(t, ada, wikiCreate("one", "p", "1\n"))
+	a1 := saveOK(t, ada, wikiWrite("one", a0.Commit, "p", "2\n"))
+	b0 := saveOK(t, ada, wikiCreate("two", "p", "1\n"))
+	b1 := saveOK(t, ada, wikiWrite("two", b0.Commit, "p", "2\n"))
+	fetchOK(t, bo)
+	remoteGit(t, url, "update-ref", wikiRef("one"), a0.Commit, a1.Commit)
+	remoteGit(t, url, "update-ref", wikiRef("two"), b0.Commit, b1.Commit)
+	fetchOK(t, bo)
+	a2 := saveOK(t, ada, wikiWrite("one", a0.Commit, "p", "3\n"))
+	fetchOK(t, bo)
+	remoteGit(t, url, "update-ref", wikiRef("one"), a0.Commit, a2.Commit)
+	fetchOK(t, bo)
+
+	points, err := bo.WikiRecovery(ctx, "")
+	if err != nil || len(points) != 3 {
+		t.Fatalf("recovery = %+v, %v", points, err)
+	}
+	for _, p := range points {
+		if p.Time.IsZero() || !strings.HasPrefix(p.Subject, "wiki("+p.Wiki+"): write p") {
+			t.Fatalf("point without its commit data: %+v", p)
+		}
+	}
+	one, err := bo.WikiRecovery(ctx, "one")
+	if err != nil || len(one) != 2 || one[0].OID == one[1].OID {
+		t.Fatalf("recovery of one = %+v, %v", one, err)
+	}
+}
+
+// TestWikiLocalAheadOfRemoteFastForwards: a wiki whose remote copy is an
+// ancestor of a never-pushed local copy (the remote was seeded from the
+// store) is pushed as a fast-forward, and saves on it land.
+func TestWikiLocalAheadOfRemoteFastForwards(t *testing.T) {
+	w := newWorld(t)
+	url := w.newRemote("r")
+	oa := w.remoteOpts("ada", "c1")
+	ada, err := Create(context.Background(), oa)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r0 := saveOK(t, ada, wikiCreate("seed", "p", "1\n"))
+	r1 := saveOK(t, ada, wikiWrite("seed", r0.Commit, "p", "2\n"))
+	if out, err := exec.Command("git", "-C", filepath.Join(oa.Dir, "repo.git"), "push", url, r0.Commit+":"+wikiRef("seed")).CombinedOutput(); err != nil {
+		t.Fatalf("seed the remote: %v: %s", err, out)
+	}
+	ada.Close()
+
+	ada = w.register(oa, url)
+	if remoteRefs(t, url)[wikiRef("seed")] != r1.Commit {
+		t.Fatalf("remote = %s, want the local tip %s pushed as a fast-forward", remoteRefs(t, url)[wikiRef("seed")], r1.Commit)
+	}
+	if list, _ := ada.WikiList(context.Background()); len(list) != 1 || list[0].Unpushed {
+		t.Fatalf("list = %+v", list)
+	}
+	r2 := saveOK(t, ada, wikiWrite("seed", r1.Commit, "p", "3\n"))
+	if remoteRefs(t, url)[wikiRef("seed")] != r2.Commit {
+		t.Fatal("the save after the fast-forward did not land")
+	}
+}
