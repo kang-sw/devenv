@@ -363,7 +363,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-09T05:34:14Z"
+        "touched_at": "2026-11-09T05:35:01Z",
+        "impl": {
+          "branch": "impl/develop/tibia-ipod-amply"
+        }
       }
     },
     "261109-feat-ws-tracker-shared-markdown-editor": {
