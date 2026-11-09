@@ -363,7 +363,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-09T01:15:06Z"
+        "touched_at": "2026-11-09T01:15:33Z",
+        "impl": {
+          "branch": "impl/develop/salsa-woof-mocha"
+        }
       }
     },
     "261109-research-windows-code-signing-signpath": {
