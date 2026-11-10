@@ -163,6 +163,7 @@ type Assignment struct {
 	RuleLevels   *float64 `json:"ruleLevels"`
 	Rule         *string  `json:"rule"`        // the rule that made it, or the rule a request asks for
 	RuleRequest  bool     `json:"ruleRequest"` // the request a rule rooted outside reach sends its root
+	Fallback     bool     `json:"fallback"`    // derived: the task's creator (or an admin) holds what nobody else does
 	HandoffOf    *string  `json:"handoffOf"`
 	HandoffFrom  *string  `json:"handoffFrom"`
 	HandoffNote  *string  `json:"handoffNote"`
@@ -359,44 +360,35 @@ func memberOf(stream string) string {
 	return stream
 }
 
-// itemStatus derives an item's own status from its live assignments. A
-// review-stage item holding no live or pending assignment is "review". A
-// pending rule request holds nothing, so it does not make the item pending.
+// itemStatus derives an item's own status from its live assignments, the
+// fallback included, so a task always has one (todo in a store with no
+// holder to fall back on). A pending rule request holds nothing, so it does
+// not make the item pending. idea only when every live holder is at idea:
+// it ranks below todo.
 func (r *replayed) itemStatus(it *item) string {
 	if it.kind == "topic" {
 		return ""
 	}
-	recs := r.S.recsOn(it.id)
 	var live []*rec
 	pending := false
-	var last *rec
-	for _, x := range recs {
+	for _, x := range r.S.recsOn(it.id) {
 		switch {
 		case x.state == "live":
 			live = append(live, x)
 		case x.state == "pending" && !x.ruleRequest:
 			pending = true
 		}
-		// the latest ended one; among ties (one event ended several) the first
-		if x.ended != nil && (last == nil || later(x.ended, last.ended)) {
-			last = x
-		}
 	}
 	if len(live) == 0 {
 		if pending {
 			return "pending"
 		}
-		if it.stage == "review" {
-			return "review"
-		}
-		if last != nil && (last.state == "declined" || last.state == "returned") {
-			return last.state
-		}
-		return "unassigned"
+		return "todo"
 	}
-	all, blocked, awaiting, doing := true, false, false, false
+	all, idea, blocked, awaiting, doing := true, true, false, false, false
 	for _, x := range live {
 		all = all && x.status == "done"
+		idea = idea && x.status == "idea"
 		blocked = blocked || x.status == "blocked"
 		awaiting = awaiting || x.status == "awaiting"
 		doing = doing || x.status == "doing" || x.status == "done"
@@ -410,15 +402,17 @@ func (r *replayed) itemStatus(it *item) string {
 		return "awaiting"
 	case doing:
 		return "doing"
+	case idea:
+		return "idea"
 	}
 	return "todo"
 }
 
 // counted: pending assignments are excluded from status and roll-up, so an
-// item whose only assignments are pending (or declined / returned) is not
-// counted; nor is an item in the review stage.
+// item whose only assignments are pending is not counted; nor is an item
+// at idea.
 func (r *replayed) counted(it *item, st string) bool {
-	return it.kind != "topic" && st != "pending" && st != "declined" && st != "returned" && st != "review"
+	return it.kind != "topic" && st != "pending" && st != "idea"
 }
 
 func (r *replayed) view(stream string, now time.Time, staleDays int) *View {
@@ -465,6 +459,9 @@ func (r *replayed) view(stream string, now time.Time, staleDays int) *View {
 	vw.Assignments = map[string]Assignment{}
 	var A []*Assignment
 	for _, x := range S.recs {
+		if x.fallback && x.state != "live" {
+			continue // an ended fallback period holds nothing worth showing
+		}
 		last := x.ts
 		if x.last != nil {
 			last = x.last.ts
@@ -473,7 +470,7 @@ func (r *replayed) view(stream string, now time.Time, staleDays int) *View {
 			State: x.state, Forced: x.forced, Status: x.status, Note: nz(x.note), NoteBy: nz(x.noteBy), Via: x.via,
 			TS: ts(x.ts), Inherited: x.inherited != "", HandoffOf: nz(x.handoffOf), HandoffNote: nz(x.handoffNote),
 			AnswerNote: nz(x.answerNote), Restored: ref(x.restored), Restores: nz(x.restores), Accepted: ref(x.accepted),
-			LeadAtAccept: nz(x.leadAtAccept), StatusBy: nz(x.noteBy), LastUpdate: ts(last), lastUpdate: last}
+			LeadAtAccept: nz(x.leadAtAccept), StatusBy: nz(x.noteBy), LastUpdate: ts(last), lastUpdate: last, Fallback: x.fallback}
 		if ru := S.ruleByID[x.rule]; ru != nil {
 			a.Rule, a.RuleRequest, a.RuleLevels = &ru.id, x.ruleRequest, ruleLevels(ru)
 		}
@@ -604,7 +601,9 @@ func (r *replayed) view(stream string, now time.Time, staleDays int) *View {
 		var started *time.Time
 		var recIDs, pend []string
 		for _, x := range S.recsOn(id) {
-			recIDs = append(recIDs, x.id)
+			if !x.fallback || x.state == "live" {
+				recIDs = append(recIDs, x.id)
+			}
 			if x.state == "pending" {
 				pend = append(pend, x.id)
 			}
@@ -779,7 +778,7 @@ func orEmpty(l []string) []string {
 	return l
 }
 
-var rank = map[string]int{"blocked": 0, "doing": 1, "todo": 2, "awaiting": 3, "done": 4}
+var rank = map[string]int{"blocked": 0, "doing": 1, "todo": 2, "idea": 3, "awaiting": 4, "done": 5}
 
 func ids(l []*Assignment) []string {
 	out := make([]string, len(l))

@@ -571,7 +571,7 @@
     "ts": "2026-11-01T09:00:00Z",
     "hidden": false,
     "edited": null,
-    "status": "unassigned",
+    "status": "todo",
     "counted": true,
     "rollup": {
      "total": 0,
@@ -583,7 +583,8 @@
     "children": [],
     "assignments": [
      "maya.pc#2>lena",
-     "lena.pc#1>raj"
+     "lena.pc#1>raj",
+     "maya.pc#5@maya.pc#1>maya"
     ],
     "pending": [],
     "thread": [
@@ -619,7 +620,7 @@
     "ts": "2026-11-01T09:00:00Z",
     "hidden": false,
     "edited": null,
-    "status": "unassigned",
+    "status": "todo",
     "counted": true,
     "rollup": {
      "total": 0,
@@ -631,7 +632,8 @@
     "children": [],
     "assignments": [
      "maya.pc#4>omar",
-     "omar.pc#1>raj"
+     "omar.pc#1>raj",
+     "ada.pc#1@maya.pc#3>maya"
     ],
     "pending": [],
     "thread": [
@@ -666,8 +668,8 @@
     "ts": "2026-11-01T09:01:00Z",
     "hidden": false,
     "edited": null,
-    "status": "returned",
-    "counted": false,
+    "status": "todo",
+    "counted": true,
     "rollup": {
      "total": 0,
      "counts": {},
@@ -678,7 +680,8 @@
     "children": [],
     "assignments": [
      "sven.pc#2>lena",
-     "lena.pc#3>bo"
+     "lena.pc#3>bo",
+     "maya.pc#6@sven.pc#1>sven"
     ],
     "pending": [],
     "thread": [
@@ -724,6 +727,7 @@
     "ruleLevels": null,
     "rule": null,
     "ruleRequest": false,
+    "fallback": false,
     "handoffOf": null,
     "handoffFrom": null,
     "handoffNote": null,
@@ -762,6 +766,7 @@
     "ruleLevels": null,
     "rule": null,
     "ruleRequest": false,
+    "fallback": false,
     "handoffOf": null,
     "handoffFrom": null,
     "handoffNote": null,
@@ -800,6 +805,7 @@
     "ruleLevels": null,
     "rule": null,
     "ruleRequest": false,
+    "fallback": false,
     "handoffOf": null,
     "handoffFrom": null,
     "handoffNote": null,
@@ -841,6 +847,7 @@
     "ruleLevels": null,
     "rule": null,
     "ruleRequest": false,
+    "fallback": false,
     "handoffOf": "maya.pc#2>lena",
     "handoffFrom": "lena",
     "handoffNote": null,
@@ -879,6 +886,7 @@
     "ruleLevels": null,
     "rule": null,
     "ruleRequest": false,
+    "fallback": false,
     "handoffOf": "sven.pc#2>lena",
     "handoffFrom": "lena",
     "handoffNote": null,
@@ -917,6 +925,7 @@
     "ruleLevels": null,
     "rule": null,
     "ruleRequest": false,
+    "fallback": false,
     "handoffOf": "maya.pc#4>omar",
     "handoffFrom": "omar",
     "handoffNote": null,
@@ -935,6 +944,108 @@
     "statusOrigin": null,
     "statusBy": null,
     "lastUpdate": "2026-11-01T09:03:00Z",
+    "stale": false
+   },
+   "maya.pc#5@maya.pc#1>maya": {
+    "id": "maya.pc#5@maya.pc#1>maya",
+    "item": "maya.pc#1",
+    "to": "maya",
+    "by": "maya",
+    "sender": "maya",
+    "completion": "assignee",
+    "state": "live",
+    "forced": true,
+    "status": "todo",
+    "note": null,
+    "noteBy": null,
+    "via": "maya.pc#5",
+    "ts": "2026-11-01T09:04:00Z",
+    "inherited": false,
+    "ruleLevels": null,
+    "rule": null,
+    "ruleRequest": false,
+    "fallback": true,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": null,
+    "restored": null,
+    "restores": null,
+    "accepted": null,
+    "leadAtAccept": null,
+    "ended": null,
+    "depth": 0,
+    "statusOrigin": null,
+    "statusBy": null,
+    "lastUpdate": "2026-11-01T09:04:00Z",
+    "stale": false
+   },
+   "maya.pc#6@sven.pc#1>sven": {
+    "id": "maya.pc#6@sven.pc#1>sven",
+    "item": "sven.pc#1",
+    "to": "sven",
+    "by": "sven",
+    "sender": "sven",
+    "completion": "assignee",
+    "state": "live",
+    "forced": true,
+    "status": "todo",
+    "note": null,
+    "noteBy": null,
+    "via": "maya.pc#6",
+    "ts": "2026-11-01T09:04:00Z",
+    "inherited": false,
+    "ruleLevels": null,
+    "rule": null,
+    "ruleRequest": false,
+    "fallback": true,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": null,
+    "restored": null,
+    "restores": null,
+    "accepted": null,
+    "leadAtAccept": null,
+    "ended": null,
+    "depth": 0,
+    "statusOrigin": null,
+    "statusBy": null,
+    "lastUpdate": "2026-11-01T09:04:00Z",
+    "stale": false
+   },
+   "ada.pc#1@maya.pc#3>maya": {
+    "id": "ada.pc#1@maya.pc#3>maya",
+    "item": "maya.pc#3",
+    "to": "maya",
+    "by": "maya",
+    "sender": "maya",
+    "completion": "assignee",
+    "state": "live",
+    "forced": true,
+    "status": "todo",
+    "note": null,
+    "noteBy": null,
+    "via": "ada.pc#1",
+    "ts": "2026-11-01T09:05:00Z",
+    "inherited": false,
+    "ruleLevels": null,
+    "rule": null,
+    "ruleRequest": false,
+    "fallback": true,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": null,
+    "restored": null,
+    "restores": null,
+    "accepted": null,
+    "leadAtAccept": null,
+    "ended": null,
+    "depth": 0,
+    "statusOrigin": null,
+    "statusBy": null,
+    "lastUpdate": "2026-11-01T09:05:00Z",
     "stale": false
    }
   },
@@ -1350,13 +1461,16 @@
     {
      "id": "maya",
      "depth": 1,
-     "open": [],
+     "open": [
+      "maya.pc#5@maya.pc#1>maya",
+      "ada.pc#1@maya.pc#3>maya"
+     ],
      "pending": [],
      "waiting": [],
      "done": 0,
      "blocked": 0,
      "stale": 0,
-     "last": null
+     "last": "2026-11-01T09:05:00Z"
     },
     {
      "id": "lena",
@@ -1383,13 +1497,15 @@
     {
      "id": "sven",
      "depth": 2,
-     "open": [],
+     "open": [
+      "maya.pc#6@sven.pc#1>sven"
+     ],
      "pending": [],
      "waiting": [],
      "done": 0,
      "blocked": 0,
      "stale": 0,
-     "last": null
+     "last": "2026-11-01T09:04:00Z"
     },
     {
      "id": "bo",

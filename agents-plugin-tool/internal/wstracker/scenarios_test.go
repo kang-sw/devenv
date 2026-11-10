@@ -94,8 +94,9 @@ func TestScenario3AcceptedReturnedSentAgain(t *testing.T) {
 	tm.do("maya.pc", TypeItemReturn, map[string]any{"item": explain, "assignee": "lena", "note": "lena is on the index builder this week"})
 	maya = tm.view("maya.pc")
 	wantEq(t, "returned state", asg(t, maya, first).State, "returned")
-	wantEq(t, "item status", *maya.Items[explain].Status, "returned")
-	wantEq(t, "item counted", maya.Items[explain].Counted, false)
+	// its creator holds it again, at todo
+	wantEq(t, "item status", *maya.Items[explain].Status, "todo")
+	wantEq(t, "item counted", maya.Items[explain].Counted, true)
 
 	// M2 (285): the sender is notified of the return.
 	noa := tm.view("noa.pc")

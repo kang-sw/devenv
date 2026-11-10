@@ -157,8 +157,9 @@ func TestAssignRuleOutsideReach(t *testing.T) {
 	if _, ok := v.Assignments[rid+">sven"]; ok {
 		t.Fatalf("sven holds a record before raj accepts")
 	}
-	// (535 b) a rule request holds nothing, so it does not make the item pending.
-	wantEq(t, "item status", *v.Items[cross].Status, "unassigned")
+	// (535 b) a rule request holds nothing, so it does not make the item
+	// pending; the creator holds it meanwhile.
+	wantEq(t, "item status", *v.Items[cross].Status, "todo")
 	wantEq(t, "a request holds nothing to unassign",
 		tm.refused("maya.pc", TypeItemUnassign, map[string]any{"item": cross, "assignee": "raj"}),
 		"raj has no live or pending assignment on "+alias(cross))
@@ -183,7 +184,7 @@ func TestAssignRuleOutsideReach(t *testing.T) {
 	wantEq(t, "rule ended", v.Rules[rid].State, "ended")
 	wantEq(t, "request returned", asg(t, v, rid).State, "returned")
 	wantEq(t, "sven unassigned", asg(t, v, rid+">sven").State, "unassigned")
-	wantEq(t, "item status", *v.Items[cross].Status, "returned")
+	wantEq(t, "item status", *v.Items[cross].Status, "todo")
 	var ret []string
 	for _, n := range v.Notices {
 		ret = append(ret, n.Key)

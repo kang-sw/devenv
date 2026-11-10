@@ -28,9 +28,11 @@
   'use strict';
 
   var KINDS = ['task', 'todo', 'topic'];
-  var SETTABLE = ['todo', 'doing', 'blocked'];
+  var SETTABLE = ['idea', 'todo', 'doing', 'blocked'];
   var ORIGINS = ['human', 'agent', 'agent-auto'];
-  var ITEM_FIELDS = ['title', 'body', 'project', 'due', 'priority', 'stage'];
+  // stage is retired: only older events carry it (see apply), so EDIT_FIELDS, the
+  // list a refusal names, leaves it out.
+  var ITEM_FIELDS = ['title', 'body', 'project', 'due', 'priority', 'stage'], EDIT_FIELDS = ITEM_FIELDS.slice(0, 5);
   var STAGE_SHAPE = 'stage must be review (null or absent: todo)';
   // Priority levels are store configuration (roles file, roles.set_priority_levels).
   // Codes are integers 0..n-1, larger = more urgent; names are display names only.
@@ -233,9 +235,13 @@
   // rooted outside its author's reach sends to the root: pending -> accepted (the
   // rule goes live) | declined | withdrawn; accepted -> returned | unassigned. It
   // never holds the item, so holder lookups (openRec) skip it.
+  // A fallback (fallback set) is the holding the fold derives for a task nobody
+  // else holds (see settle): live -> displaced (someone else came to hold it) |
+  // unassigned (its holder was removed). openRecs and openRec skip it, so it never
+  // blocks an assign; liveRec finds it, so its holder sets its status and closes it.
   function recsOn(S, item) { return vals(S.asg).filter(function (r) { return r.item === item; }); }
   function liveRecs(S, item) { return recsOn(S, item).filter(function (r) { return r.state === 'live'; }); }
-  function openRecs(S, item) { return recsOn(S, item).filter(function (r) { return r.state === 'live' || r.state === 'pending'; }); }
+  function openRecs(S, item) { return recsOn(S, item).filter(function (r) { return (r.state === 'live' || r.state === 'pending') && !r.fallback; }); }
   function liveRec(S, item, who) { return liveRecs(S, item).filter(function (r) { return r.to === who; })[0] || null; }
   function pendingRec(S, item, who) { return recsOn(S, item).filter(function (r) { return r.to === who && r.state === 'pending'; })[0] || null; }
   function openRec(S, item, who) { return openRecs(S, item).filter(function (r) { return r.to === who && !r.ruleRequest; })[0] || null; }
@@ -402,7 +408,7 @@
       return who + ' has not accepted the pending rule request on ' + it.alias;
     }
     if (pr) return who + ' has not accepted the pending assignment on ' + it.alias;
-    var gone = lastEndedRec(S, it.id, who);
+    var gone = recsOn(S, it.id).filter(function (r) { return r.to === who && r.ended && !r.fallback; }).pop(); // a fallback left out
     if (gone) return who + '\'s assignment on ' + it.alias + ' ended (' + gone.state + ', ' + alias(gone.ended.id) + ')';
     if (it.author === who) return who + ' created ' + it.alias + ' but is not assigned to it (self-assign first)';
     return who + ' is not an assignee of ' + it.alias;
@@ -413,9 +419,10 @@
     return r;
   }
 
-  // An item.edit stage change: tasks and todos only, review or null (todo). Moving to
-  // review needs an item with no live or pending assignment, since assigning is what
-  // moves an item to todo.
+  // An older item.edit stage change, checked as it was when stages were written:
+  // tasks and todos only, review or null (todo). Moving to review needs an item with
+  // no live or pending assignment (the fallback is neither). A new write carrying
+  // stage is refused by the writers, not here: the mock store appends what it is given.
   function checkStage(S, it, p) {
     if (it.kind === 'topic') rej('topics have no stage');
     if (p.stage == null) return;
@@ -462,7 +469,7 @@
         it = needItem(S, p.item);
         if (it.author !== a && !creatorGone(S, it, a)) rej('only the creator (' + it.author + ') edits ' + it.alias);
         if (it.hidden) rej(it.alias + ' is hidden');
-        if (!ITEM_FIELDS.some(function (f) { return has(p, f); })) rej('nothing to edit (' + ITEM_FIELDS.join(', ') + ')');
+        if (!ITEM_FIELDS.some(function (f) { return has(p, f); })) rej('nothing to edit (' + EDIT_FIELDS.join(', ') + ')');
         if (has(p, 'priority') && p.priority == null) rej('priority cannot be cleared; set a level');
         checkFields(S, p);
         if (has(p, 'stage')) checkStage(S, it, p);
@@ -513,6 +520,7 @@
         var from = p.assignee || a; // (286) an admin may hand off any member's live assignment
         if (from !== a && !S.admins[a]) rej('only the assignee (' + from + ') hands off their assignment; an admin may hand off any member\'s');
         r = needRec(S, it.id, from);
+        if (r.fallback) rej(from + ' holds ' + it.alias + ' only because nobody else does; assign it instead');
         if (r.status === 'done') rej('assignment is done; nothing to hand off');
         if (!p.to) rej('to required');
         if (p.to === from) rej('hand off to someone else');
@@ -533,6 +541,7 @@
       case 'item.return': { // an accepted assignment, and an accepted rule rooted at the assignee
         it = needItem(S, p.item);
         r = liveRec(S, it.id, p.assignee);
+        if (r && r.fallback) r = null; // nobody else holds it: nothing to return
         q = acceptedReq(S, it.id, p.assignee);
         if (!r && !q) rej((p.assignee || '?') + ' has no live assignment on ' + it.alias);
         var to = (r || q).to, lead = ((S.members[to] || {}).leads || [])[0];
@@ -569,7 +578,7 @@
       case 'item.status':
         it = needItem(S, p.item);
         if (it.kind === 'topic') rej('topics have no status');
-        if (SETTABLE.indexOf(p.status) < 0) rej('status must be todo, doing or blocked (done goes through item.close)');
+        if (SETTABLE.indexOf(p.status) < 0) rej('status must be idea, todo, doing or blocked (done goes through item.close)');
         r = needRec(S, it.id, a);
         if (r.status === 'done') rej('assignment is done; reopen it first');
         break;
@@ -797,6 +806,33 @@
     else if (q && q.state === 'accepted') { q.state = 'unassigned'; q.ended = n; }
     endRule(S, rule, n, C);
   }
+  // Who holds a task nobody else holds: its creator, or when the creator was removed
+  // the first admin in the roles admin order.
+  function liveMember(S, id) { return !!S.members[id] && !S.members[id].removed; }
+  function fallbackHolder(S, it) {
+    if (liveMember(S, it.author)) return it.author;
+    return Object.keys(S.admins).filter(function (a) { return liveMember(S, a); })[0] || null;
+  }
+  function liveFallback(S, item) { return recsOn(S, item).filter(function (r) { return r.fallback && r.state === 'live'; })[0] || null; }
+  // Keep every task held after n: a live or pending record other than a rule request
+  // displaces the fallback, and with none the fallback holder gets a fresh record
+  // "<n>@<item>><holder>" at todo, so each fallback period has its own status
+  // register. A topic may be held by nobody.
+  function settle(S, id, n, C) {
+    var it = S.items[id];
+    if (!it || it.kind === 'topic') return;
+    var fb = null, held = false;
+    recsOn(S, id).forEach(function (r) {
+      if (r.fallback) { if (r.state === 'live') fb = r; }
+      else if ((r.state === 'live' || r.state === 'pending') && !r.ruleRequest) held = true;
+    });
+    if (held) { if (fb) endRec(S, fb, n, 'displaced', C); return; }
+    var h = fallbackHolder(S, it);
+    if (fb || !h) return;
+    addRec(S, n, id, h, h, 'assignee', { id: n.id + '@' + id + '>' + h, fallback: true, start: n,
+      status: n.type === 'item.create' && n.p.stage === 'review' ? 'idea' : 'todo' }); // an older create in the review stage
+  }
+  function settleAll(S, n, C) { Object.keys(S.items).forEach(function (id) { settle(S, id, n, C); }); }
   function assignPerson(S, n, item, t, a, completion) { // (273) below the author = forced (live), anyone else = pending
     if (!S.members[t] || openRec(S, item, t)) return;
     var forced = t === a || below(S.members, a, t);
@@ -876,17 +912,24 @@
         S.items[n.id] = { id: n.id, alias: n.alias, kind: p.kind === 'todo' ? 'task' : p.kind, title: p.title, body: p.body || '', project: p.project || '',
           due: p.due || null, priority: p.priority != null ? p.priority : S.prio.default,
           parent: p.parent || null, after: has(p, 'after') ? (p.after || null) : undefined, author: a, ts: n.ts, hidden: false, edited: null, node: n,
-          stage: p.stage === 'review' ? 'review' : '',
           mentions: mentionsOf(p), attachments: attachmentsOf(p), refs: refsOf(p) };
         break;
       case 'item.edit':
         it = S.items[p.item]; if (!it) break;
         ITEM_FIELDS.forEach(function (f) {
           if (!has(p, f)) return;
-          // The assignment wins over a concurrent move to review.
-          if (f === 'stage' && p.stage === 'review' && openRecs(S, it.id).length) return;
+          if (f === 'stage') {
+            // An older event: review is the fallback holder's idea status, null (todo)
+            // its todo. Held by anyone else, the item is not in review, and the
+            // assignment wins.
+            var fb = liveFallback(S, it.id);
+            if (!fb) return;
+            fb.writes.push(n);
+            var sw = write(S, 'st:' + fb.id, 'status of ' + fb.to + ' on ' + alias(it.id), n, { status: p.stage === 'review' ? 'idea' : 'todo', note: null, by: a, n: n }, C);
+            fb.status = sw.status; fb.note = sw.note; fb.noteBy = sw.by; fb.last = sw.n;
+            return;
+          }
           it[f] = write(S, 'it:' + it.id + ':' + f, f + ' of ' + it.alias, n, p[f] == null ? (f === 'due' ? null : '') : p[f], C);
-          if (f === 'stage' && it.stage === 'review' && openRecs(S, it.id).length) it.stage = ''; // an older concurrent review write won the register
         });
         if (has(p, 'body')) { var bw = regWinner(S, 'it:' + it.id + ':body'); it.mentions = mentionsOf(bw.p); it.attachments = attachmentsOf(bw.p); it.refs = refsOf(bw.p); }
         it.edited = n;
@@ -899,7 +942,6 @@
         if (!S.items[p.item]) break;
         // a topic record carries no status, so no completion mode either
         var completion = S.items[p.item].kind === 'topic' ? '' : p.completion || 'assignee';
-        S.items[p.item].stage = ''; // assigning promotes a review item to todo
         if (p.targets != null) (Array.isArray(p.targets) ? p.targets : []).forEach(function (x) {
           if (typeof x === 'string') assignPerson(S, n, p.item, x, a, completion);
           else if (x && typeof x.root === 'string') addRule(S, n, p.item, x, a, completion);
@@ -913,7 +955,7 @@
       }
       case 'item.handoff':
         r = liveRec(S, p.item, p.assignee || a);
-        if (!r || !S.members[p.to] || openRec(S, p.item, p.to)) break;
+        if (!r || r.fallback || !S.members[p.to] || openRec(S, p.item, p.to)) break;
         addRec(S, n, p.item, p.to, r.by, r.completion, { forced: false, state: 'pending', sender: a, handoffOf: r.id, answerNote: null, handoffNote: p.note || null });
         break;
       case 'item.accept': { // answers every pending assignment of the author on the item
@@ -947,6 +989,7 @@
       case 'item.return': {
         var rq = acceptedReq(S, p.item, p.assignee);
         r = liveRec(S, p.item, p.assignee);
+        if (r && r.fallback) r = null; // a fallback is not returned; with no other holding nothing happens
         if (!r) { q = handedRec(S, p.item, p.assignee, n); r = q && reverseHanded(S, q, n, C); }
         if (r && (r.accepted || !rq)) {
           endRec(S, r, n, 'returned', C); r.answerNote = p.note || null;
@@ -986,6 +1029,7 @@
       case 'item.status': case 'item.close': case 'item.confirm': case 'item.reject': case 'item.reopen': {
         var who = (n.type === 'item.status' || n.type === 'item.close') ? a : (p.assignee || a);
         r = liveRec(S, p.item, who);
+        if (r && r.fallback && r.start !== n && !hb(r.start, n)) r = null; // n had not seen the fallback start: it was meant for the record that ended
         if (!r) { onEnded(S, p.item, who, n, C); break; } // folded onto an assignment a concurrent event ended
         r.writes.push(n);
         var v = n.type === 'item.status' ? p.status : n.type === 'item.close' ? (r.completion === 'assigner' ? 'awaiting' : 'done') :
@@ -1046,7 +1090,9 @@
         S.att = { max_bytes: write(S, 'att', 'attachment limit', n, p.max_bytes, C) };
         break;
     }
-    if (/^roles\./.test(n.type) || n.type === 'item.assign') refreshLive(S, n);
+    if (/^roles\./.test(n.type) || n.type === 'item.assign') { refreshLive(S, n); settleAll(S, n, C); }
+    else if (n.type === 'item.create') settle(S, n.id, n, C);
+    else if (/^item\./.test(n.type)) settle(S, p.item, n, C);
   }
 
   // ------------------------------------------------------------------ replay
@@ -1141,31 +1187,29 @@
 
   // ----------------------------------------------------------- derived state
 
+  // An item's own status from its live assignments, the fallback included, so a task
+  // always has one (todo in a store with no holder to fall back on). idea only when
+  // every live holder is at idea: it ranks below todo.
   function itemStatus(g, it) {
     if (it.kind === 'topic') return null;
     var recs = recsOn(g.S, it.id), live = recs.filter(function (r) { return r.state === 'live'; });
     if (!live.length) {
       // a pending rule request holds nothing, so it does not make the item pending
-      if (recs.some(function (r) { return r.state === 'pending' && !r.ruleRequest; })) return 'pending';
-      // A review-stage item holds no live or pending assignment (an assign clears it).
-      if (it.stage === 'review') return 'review';
-      // the latest ended one; among ties (one event ended several) the first
-      var last = recs.reduce(function (b, r) { return r.ended && (!b || later(r.ended, b.ended)) ? r : b; }, null);
-      return last && (last.state === 'declined' || last.state === 'returned') ? last.state : 'unassigned';
+      return recs.some(function (r) { return r.state === 'pending' && !r.ruleRequest; }) ? 'pending' : 'todo';
     }
     var s = live.map(function (r) { return r.status; });
     if (s.every(function (x) { return x === 'done'; })) return 'done';
     if (s.indexOf('blocked') >= 0) return 'blocked';
     if (s.indexOf('awaiting') >= 0) return 'awaiting';
     if (s.some(function (x) { return x === 'doing' || x === 'done'; })) return 'doing';
+    if (s.every(function (x) { return x === 'idea'; })) return 'idea';
     return 'todo';
   }
   // Pending assignments are excluded from status and roll-up: an item whose only
-  // assignments are pending (or declined / returned) is not counted; nor is an item
-  // in the review stage.
+  // assignments are pending is not counted; nor is an item at idea.
   function counted(g, it) {
     var s = itemStatus(g, it);
-    return it.kind !== 'topic' && s !== 'pending' && s !== 'declined' && s !== 'returned' && s !== 'review';
+    return it.kind !== 'topic' && s !== 'pending' && s !== 'idea';
   }
   function subtasksOf(g, id) { return vals(g.items).filter(function (i) { return i.parent === id && !i.hidden; }); }
   function rollup(g, it) {
@@ -1202,11 +1246,12 @@
 
     var assignments = {};
     vals(S.asg).forEach(function (r) {
+      if (r.fallback && r.state !== 'live') return; // an ended fallback period holds nothing worth showing
       var last = r.last ? r.last.ts : r.ts, live = r.state === 'live';
       assignments[r.id] = { id: r.id, item: r.item, to: r.to, by: r.by, sender: r.sender, completion: r.completion, state: r.state,
         forced: r.forced, status: r.status, note: r.note, noteBy: r.noteBy, via: r.via, ts: r.ts,
         inherited: !!r.inherited, ruleLevels: g.rules[r.rule] ? g.rules[r.rule].levels : null,
-        rule: r.rule, ruleRequest: !!r.ruleRequest,
+        rule: r.rule, ruleRequest: !!r.ruleRequest, fallback: !!r.fallback,
         handoffOf: r.handoffOf, handoffFrom: r.handoffOf && S.asg[r.handoffOf] ? S.asg[r.handoffOf].to : null,
         handoffNote: r.handoffNote || null, answerNote: r.answerNote,
         restored: r.restored ? { id: r.restored.id, ts: r.restored.ts } : null, restores: r.restores || null,
@@ -1259,7 +1304,7 @@
         edited: it.edited ? { id: it.edited.id, ts: it.edited.ts } : null, status: itemStatus(g, it), counted: counted(g, it),
         rollup: rollup(g, it), lastActivity: lastAct[it.id] || it.ts, started: started,
         children: (sib[it.id] || []).slice(),
-        assignments: recs.map(function (r) { return r.id; }),
+        assignments: recs.filter(function (r) { return !r.fallback || r.state === 'live'; }).map(function (r) { return r.id; }),
         pending: recs.filter(function (r) { return r.state === 'pending'; }).map(function (r) { return r.id; }),
         thread: threads[it.id] || [], concurrent: (threads[it.id] || []).filter(function (id) { return g.byId[id].markers.length; }).length,
         depth: chain.length - 1, chain: chain.slice().reverse(), mentions: it.mentions.slice(), attachments: clone(it.attachments),
@@ -1289,7 +1334,7 @@
     });
 
     // ---- viewer-specific lists
-    var A = vals(assignments), RANK = { blocked: 0, doing: 1, todo: 2, awaiting: 3, done: 4 };
+    var A = vals(assignments), RANK = { blocked: 0, doing: 1, todo: 2, idea: 3, awaiting: 4, done: 5 };
     function visible(r) { return items[r.item] && !items[r.item].hidden; }
     // (153 b) a held topic is ownership only: in my.assignments, received and the
     // pending badge, never in a status-based list or count

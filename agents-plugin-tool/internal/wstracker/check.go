@@ -188,9 +188,14 @@ func (s *state) checkExtras(p obj, prior []attachment) rejection {
 
 const stageShape = "stage must be review (null or absent: todo)"
 
-// checkStage checks an item.edit stage change: tasks and todos only, review
-// or null (todo). Moving to review needs an item with no live or pending
-// assignment, since assigning is what moves an item to todo.
+// retiredStage refuses a new write carrying stage. The review stage is
+// retired for the idea status; older events with it still fold (apply).
+const retiredStage = "stage is retired; a task before todo is its holder's idea status (item.status)"
+
+// checkStage checks an older item.edit stage change as it was checked when
+// stages were written: tasks and todos only, review or null (todo). Moving
+// to review needs an item with no live or pending assignment (the fallback
+// is neither).
 func (s *state) checkStage(it *item, p obj) rejection {
 	if it.kind == "topic" {
 		return "topics have no stage"
@@ -324,7 +329,13 @@ func (s *state) notAssignee(it *item, who string) rejection {
 	if s.pendingRec(it.id, who) != nil {
 		return rejection(who + " has not accepted the pending assignment on " + it.alias)
 	}
-	if gone := s.lastEndedRec(it.id, who); gone != nil {
+	var gone *rec // the last ended holding of who's, a fallback left out
+	for _, x := range s.byItem[it.id] {
+		if x.to == who && x.ended != nil && !x.fallback {
+			gone = x
+		}
+	}
+	if gone != nil {
 		return rejection(who + "'s assignment on " + it.alias + " ended (" + gone.state + ", " + gone.ended.alias + ")")
 	}
 	if it.author == who {
@@ -371,6 +382,9 @@ func (s *state) check(n *node) rejection {
 		if r := s.checkFields(p); r != "" {
 			return r
 		}
+		if n.synthetic && p.has("stage") {
+			return retiredStage
+		}
 		if !p.null("stage") {
 			if p["kind"] == "topic" {
 				return "topics have no stage"
@@ -416,13 +430,16 @@ func (s *state) check(n *node) rejection {
 			any = any || p.has(f)
 		}
 		if !any {
-			return rejection("nothing to edit (" + strings.Join(itemFields, ", ") + ")")
+			return rejection("nothing to edit (" + strings.Join(editFields, ", ") + ")")
 		}
 		if p.has("priority") && p.null("priority") {
 			return "priority cannot be cleared; set a level"
 		}
 		if r := s.checkFields(p); r != "" {
 			return r
+		}
+		if n.synthetic && p.has("stage") {
+			return retiredStage
 		}
 		if p.has("stage") {
 			if r := s.checkStage(it, p); r != "" {
@@ -545,6 +562,9 @@ func (s *state) check(n *node) rejection {
 		if r != "" {
 			return r
 		}
+		if rc.fallback {
+			return rejection(from + " holds " + it.alias + " only because nobody else does; assign it instead")
+		}
 		if rc.status == "done" {
 			return "assignment is done; nothing to hand off"
 		}
@@ -587,6 +607,9 @@ func (s *state) check(n *node) rejection {
 		// an accepted assignment, and an accepted rule rooted at the assignee
 		who := p.disp("assignee")
 		rc := s.liveRec(it.id, who)
+		if rc != nil && rc.fallback {
+			rc = nil // nobody else holds it: nothing to return
+		}
 		rq := s.acceptedReq(it.id, who)
 		if rc == nil && rq == nil {
 			if !p.truthy("assignee") {
@@ -684,7 +707,7 @@ func (s *state) check(n *node) rejection {
 			return "topics have no status"
 		}
 		if st, ok := p["status"].(string); !ok || !contains(settable, st) {
-			return "status must be todo, doing or blocked (done goes through item.close)"
+			return "status must be idea, todo, doing or blocked (done goes through item.close)"
 		}
 		rc, r := s.needRec(it, a)
 		if r != "" {
