@@ -362,19 +362,6 @@
     "261110-feat-ws-tracker-item-move-reparent": {
       "registered_at": "2026-11-09T15:09:01Z"
     },
-    "261110-feat-ws-tracker-support-agent-ui-commands": {
-      "registered_at": "2026-11-09T15:23:24Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-10T00:56:30Z",
-        "impl": {
-          "branch": "impl/develop/frown-gone-parka"
-        }
-      }
-    },
     "261110-research-ws-dashboard-agent-host-foundations": {
       "registered_at": "2026-11-09T15:09:40Z"
     },
