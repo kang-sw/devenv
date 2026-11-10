@@ -450,6 +450,8 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 
 /* ===== board column ===== */
 .r-board .reply { position: sticky; bottom: 10px; z-index: 2; }
+/* a page with the agent composer sends the board's answers from there, so its copy-answers bar (and the bulk-ack checkbox in it) stays hidden; display only, because the composer reads #reply-text. A page without a composer keeps the bar, and rail.js stacks the bottom capsules above it */
+.dgrid:has(> #composer) > .bcol .reply { display: none; }
 
 /* ===== session layout =====
    live: one grid whose children are the tab bar, the tree, the splitter, the
