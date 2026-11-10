@@ -12,8 +12,10 @@ import (
 // repository's worktree records only, never a working tree, and never
 // fetches) and the repository's worktree pool roots. Like the git badge
 // (gitbadge.go) the lists are read only while some page showing the rail
-// holds its stream open: once when the first such stream opens, then every
-// gitReadInterval until the last one closes, and at once when a page asks
+// holds its stream open: when the first such stream opens (unless the last
+// full read is under gitReadInterval old, as it is when a page moves to
+// another session through the rail: its stream closes, the next one opens),
+// then every gitReadInterval until the last one closes, and at once when a page asks
 // (POST /rail/refresh, the rail header's refresh button). A repository the
 // rail starts to show between those reads (a session registered in it) is
 // read on its own at once; the others keep their lists. One goroutine runs
@@ -61,8 +63,10 @@ type railLister struct {
 	read func(repo string, regs []Registration) (RepoWorktrees, error)
 	// interval is the period between full reads.
 	interval time.Duration
-	// after is time.After, injected so a test drives the clock.
+	// after is time.After and now time.Now, injected so a test drives the
+	// clock.
 	after func(time.Duration) <-chan time.Time
+	now   func() time.Time
 	// changed is called after a read that changed a list.
 	changed func()
 	stop    <-chan struct{}
@@ -72,8 +76,10 @@ type railLister struct {
 	running bool
 	wake    chan struct{}
 	// full asks the next read for every wanted repository, not only the
-	// pending ones.
-	full bool
+	// pending ones; lastFull is when the last full read began (zero before
+	// one).
+	full     bool
+	lastFull time.Time
 	// wanted holds the repositories the last rail render showed, with the
 	// registrations of their sessions; pending the wanted ones not read yet.
 	wanted  map[string][]Registration
@@ -88,6 +94,7 @@ func newRailLister(read func(string, []Registration) (RepoWorktrees, error), cha
 		read:     read,
 		interval: gitReadInterval,
 		after:    time.After,
+		now:      time.Now,
 		changed:  changed,
 		stop:     stop,
 		wake:     make(chan struct{}, 1),
@@ -98,7 +105,9 @@ func newRailLister(read func(string, []Registration) (RepoWorktrees, error), cha
 }
 
 // watch adds a viewer and returns its release. The first viewer starts the
-// lister's goroutine, which reads every wanted repository at once.
+// lister's goroutine, which reads every wanted repository at once unless
+// the last full read is under the interval old; the next then comes when
+// the interval since it ends.
 func (l *railLister) watch() (release func()) {
 	if l == nil {
 		return func() {}
@@ -106,7 +115,9 @@ func (l *railLister) watch() (release func()) {
 	l.mu.Lock()
 	l.viewers++
 	if l.viewers == 1 {
-		l.full = true
+		if l.lastFull.IsZero() || l.now().Sub(l.lastFull) >= l.interval {
+			l.full = true
+		}
 		signal(l.wake)
 		if !l.running {
 			l.running = true
@@ -186,7 +197,10 @@ func (l *railLister) lists(wanted map[string][]Registration) map[string]railRepo
 // run is the lister's goroutine: it reads on each wake or interval while a
 // page watches, and ends once none does.
 func (l *railLister) run() {
+	// The first wake of a run arms the interval from the last full read
+	// when it reads less than everything (a recent full read was kept).
 	var tick <-chan time.Time
+	armed := false
 	for {
 		select {
 		case <-l.stop:
@@ -208,6 +222,13 @@ func (l *railLister) run() {
 		}
 		full := l.full
 		l.full = false
+		if full {
+			l.lastFull = l.now()
+		}
+		rearm := time.Duration(-1)
+		if !full && !armed {
+			rearm = max(0, l.interval-l.now().Sub(l.lastFull))
+		}
 		todo := map[string][]Registration{}
 		for repo, regs := range l.wanted {
 			if full || l.pending[repo] {
@@ -230,7 +251,9 @@ func (l *railLister) run() {
 			l.mu.Unlock()
 		}
 		if full {
-			tick = l.after(l.interval)
+			tick, armed = l.after(l.interval), true
+		} else if rearm >= 0 {
+			tick, armed = l.after(rearm), true
 		}
 		if changed && l.changed != nil {
 			l.changed()

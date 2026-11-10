@@ -9,8 +9,9 @@ import (
 )
 
 // railMessageScan bounds how far back a ring read walks for a user message
-// or a lead reply: past it the row shows no message rather than reading a
-// whole ring of tool and mail entries.
+// or a lead reply: past it the row keeps the message it last showed (none
+// on a first read) rather than reading a whole ring of tool and mail
+// entries.
 const railMessageScan = 64
 
 // railMessages holds each session's last conversation message for the
@@ -66,7 +67,6 @@ func (c *railMessages) last(replyID string, rev uint64, dir string) railMessage 
 	msg := known.msg
 	read := 0
 	if !have || newest != known.newest {
-		msg = railMessage{}
 		for i := len(names) - 1; i >= 0 && len(names)-i <= railMessageScan; i-- {
 			read++
 			rec, ok := wslive.ReadRingEntry(dir, names[i])

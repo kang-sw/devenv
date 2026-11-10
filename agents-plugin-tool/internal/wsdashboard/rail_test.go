@@ -122,6 +122,15 @@ func TestRailViewWithoutAListShowsTheSessionRoots(t *testing.T) {
 	if len(view.Workspaces) != 1 || len(view.Workspaces[0].Worktrees) != 2 {
 		t.Fatalf("view = %+v, want the two session roots", view)
 	}
+	// A session in a folder of the root worktree sits under it; a linked
+	// worktree inside the repository folder is its own row.
+	sub := buildRailView([]railInput{
+		{Session: railSession("a", "/r/sub/dir", now, time.Time{}), Repo: "/r"},
+		{Session: railSession("b", "/r/.ws-worktrees/w", now, time.Time{}), Repo: "/r", Linked: true},
+	}, nil, now)
+	if wts := sub.Workspaces[0].Worktrees; len(wts) != 2 || wts[0].Path != "/r" || len(wts[0].Sessions) != 1 || wts[0].Sessions[0].ReplyID != "a" || wts[1].Path != "/r/.ws-worktrees/w" {
+		t.Errorf("worktrees = %+v, want a under the root and b on its own", wts)
+	}
 	if !view.Workspaces[0].Worktrees[0].Root {
 		t.Errorf("first worktree = %+v, want the root", view.Workspaces[0].Worktrees[0])
 	}
@@ -333,6 +342,17 @@ func TestRailListerReadsOnlyWhilePagesShowTheRail(t *testing.T) {
 	if l.refresh() {
 		t.Error("refresh taken after the last viewer left")
 	}
+	// A page moving to another session closes its stream and opens the
+	// next: within the interval of the last full read nothing is reread,
+	// and the interval runs on from that read.
+	release = l.watch()
+	time.Sleep(50 * time.Millisecond)
+	if fake.count("/a") != 3 {
+		t.Errorf("a re-watch within the interval read /a again (%d reads)", fake.count("/a"))
+	}
+	ticks <- time.Now()
+	waitFor(t, "the interval's full read after the re-watch", func() bool { return fake.count("/a") == 4 })
+	release()
 }
 
 // railFakeSource is a WorktreeSource that also lists repositories.

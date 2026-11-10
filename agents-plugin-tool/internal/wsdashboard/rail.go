@@ -42,6 +42,9 @@ func (d *Daemon) railView(r pageReader) RailView {
 			continue
 		}
 		in := railInput{Session: s, Snapshot: r.readSnapshot(reg.ReplyID), Repo: railRepoRoot(reg)}
+		if in.Repo != "" {
+			in.Linked = worktreeMain(reg.Project) != ""
+		}
 		in.Message = d.railMsgs.last(reg.ReplyID, s.Rev, wslive.RingDir(SessionDir(d.dir, reg.ReplyID)))
 		if in.Repo != "" {
 			wanted[in.Repo] = append(wanted[in.Repo], reg)

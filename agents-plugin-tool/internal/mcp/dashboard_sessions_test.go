@@ -166,6 +166,9 @@ func TestDashboardRegistersATopLevelLeadSessionWithTheKeyOn(t *testing.T) {
 	if reg.ReplyID != wsmailbox.ReplyID(key) || reg.Project != loginRoot || reg.Harness != "claude" || reg.HeartbeatAt != dashboardStamp(now) || !reg.Live(now) {
 		t.Fatalf("registration = %+v", reg)
 	}
+	if got, err := filepath.EvalSymlinks(reg.GitCommonDir); err != nil || got != filepath.Join(loginRoot, ".git") {
+		t.Errorf("registration git common dir = %q, want %s", reg.GitCommonDir, filepath.Join(loginRoot, ".git"))
+	}
 	raw, err := os.ReadFile(filepath.Join(wsdashboard.SessionDir(dir, reg.ReplyID), "registration.json"))
 	if err != nil {
 		t.Fatal(err)

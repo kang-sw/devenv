@@ -110,8 +110,11 @@ type railInput struct {
 	// none.
 	Snapshot *wslive.Snapshot
 	// Repo is the session's repository root (railRepoRoot), empty for a
-	// plain folder.
+	// plain folder. Linked reports a session root that is a linked worktree
+	// (its .git is a file), which a missing worktree list cannot place
+	// under the root worktree.
 	Repo    string
+	Linked  bool
 	Message railMessage
 }
 
@@ -205,8 +208,9 @@ func buildRailView(sessions []railInput, repos map[string]railRepo, now time.Tim
 			entries = nil
 		}
 		// Each session sits under the listed worktree with the longest path
-		// prefix of its root; a root no listed worktree holds (no list read
-		// yet, or a worktree added since) is a worktree of its own.
+		// prefix of its root. A root no listed worktree holds (no list read
+		// yet, or a worktree added since) sits under the root worktree when
+		// it is a folder inside it, else is a worktree of its own.
 		type wtAcc struct {
 			wt   RailWorktree
 			snap *wslive.Snapshot
@@ -241,6 +245,8 @@ func buildRailView(sessions []railInput, repos map[string]railRepo, now time.Tim
 						break
 					}
 				}
+			} else if railPathUnder(key, project) && !m.in.Linked {
+				a = addWT(railWorktreeEntry{Path: key})
 			} else {
 				a = addWT(railWorktreeEntry{Path: project})
 			}

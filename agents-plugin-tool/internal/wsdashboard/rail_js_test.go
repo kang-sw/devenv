@@ -1,6 +1,10 @@
 package wsdashboard
 
-import "testing"
+import (
+	"regexp"
+	"strings"
+	"testing"
+)
 
 // railJSHarness is a minimal DOM (children, attributes, classes, one-class
 // querySelector, insertBefore, nextSibling) and an in-memory store for
@@ -122,4 +126,106 @@ func TestRailScript(t *testing.T) {
 		t.Fatal(err)
 	}
 	runNode(t, "rail.js", railJSHarness+string(data)+railJSCases)
+}
+
+// railDraftPrelude stubs what dashboard.js's per-session drafts block reads
+// from the rest of the page script: the composer (text, mentions, images),
+// the board answers, the chips, the open details, the tab, the notice, and
+// a virtual clock.
+const railDraftPrelude = `
+var now = 0, timers = [], tid = 0;
+function setTimeout(fn, ms) { var id = ++tid; timers.push({ id: id, at: now + (ms || 0), fn: fn }); return id; }
+function clearTimeout(id) { timers = timers.filter(function (t) { return t.id !== id; }); }
+function advance(ms) { now += ms; var due = timers.filter(function (t) { return t.at <= now; }); timers = timers.filter(function (t) { return t.at > now; }); due.forEach(function (t) { t.fn(); }); }
+var listeners = {}, winListeners = {};
+var doc = { hidden: false, addEventListener: function (t, fn) { listeners[t] = fn; } };
+window.addEventListener = function (t, fn) { winListeners[t] = fn; };
+var WsRail = window.WsRail, rid = "sess1", live = true, railStore = memStore();
+var grid = new El("grid", { "data-tab": "convo" });
+var ctext = { value: "", selectionStart: 0, selectionEnd: 0, setSelectionRange: function (a, b) { this.selectionStart = a; this.selectionEnd = b; } };
+var mentions = [], mentionWas = "", imgs = [], imgSeq = 0, chips = {}, cchips = {}, items = {}, openState = {}, boardAnswers = {}, notes = [];
+var MARKER = "\\[Image #([1-9][0-9]{0,5})\\]";
+function markerNums(text) { var out = {}, re = new RegExp(MARKER, "g"), m; while ((m = re.exec(text))) out[+m[1]] = true; return out; }
+function liveMention(m, v) { return v.slice(m.start, m.end) === m.text; }
+function region(name) { return name === "board" ? {} : null; }
+function readAnswers() { return JSON.parse(JSON.stringify(boardAnswers)); }
+function writeAnswers(b, a) { boardAnswers = a; }
+function chipList() { return Object.keys(chips).map(function (k) { return chips[k]; }); }
+function putChip(c) { chips[c.id] = c; }
+function setItem(id, c) { items[id] = c; }
+function syncChips() {}
+function restoreOpen() {}
+function attachSrc(ref) { return "/s/sess1/attachment/" + ref; }
+function grow() {} function paintMentions() {} function renderImgs() {}
+function setTab(t) { grid.setAttribute("data-tab", t); }
+function syncNote(s) { notes.push(s); }
+function wsT(k, n) { return k + ":" + n; }
+`
+
+// TestRailDraftRestore runs dashboard.js's per-session drafts block under
+// node: an edit saves the draft after the debounce; a reload restores the
+// composer text, mentions, selection, the reference images, the board
+// answers, the chips, the open details, and the board tab; a pasted image is
+// not kept, its marker is stripped, and the restore says so; the leave
+// guard asks only while a pasted image is held; a send clears the draft.
+func TestRailDraftRestore(t *testing.T) {
+	rail, err := dashboardFS.ReadFile("assets/rail.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := dashboardFS.ReadFile("assets/dashboard.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(data)
+	block := regexp.MustCompile(`(?s)\n  // --- per-session drafts -.*?\n\n  if \(live\) \{`).FindString(src)
+	if block == "" {
+		t.Fatal("dashboard.js holds no per-session drafts block ending before if (live)")
+	}
+	block = strings.TrimSuffix(block, "if (live) {")
+	if !regexp.MustCompile(`clearDraft\(\);\s*\n\s*syncNote\(wsT\(res\.merged \? "js\.send\.merged" : "js\.send\.ok"\)\);`).MatchString(src) {
+		t.Error("a successful send no longer clears the draft")
+	}
+	runNode(t, "draft restore", railJSHarness+string(rail)+railDraftPrelude+block+`
+// type, pick, open, and switch tab; the debounce saves it
+ctext.value = "hi @bob see [Image #1] and [Image #2] end";
+ctext.selectionStart = ctext.selectionEnd = 6;
+mentions = [{ start: 3, end: 7, text: "@bob", extra: 1 }];
+imgs = [{ n: 1, name: "a.png", ref: "00aa-1.png" }, { n: 2, name: "pasted.png", data: "xx" }];
+boardAnswers = { "3": { answer: "yes" }, "topic:2": { note: "keep it" } };
+chips = { "3": { id: "3", answer: "yes" } };
+openState = { "rended:/w": true, "gone": false };
+grid.setAttribute("data-tab", "board");
+listeners.input();
+check("nothing saved before the debounce", railStore.load("ws.dashboard.draft.sess1"), null);
+advance(400);
+var saved = JSON.parse(railStore.load("ws.dashboard.draft.sess1"));
+check("the saved draft", [saved.text, saved.mentions, saved.sel, saved.refs, saved.lost, saved.open, saved.tab],
+  [ctext.value, [{ start: 3, end: 7, text: "@bob" }], [6, 6], [{ ref: "00aa-1.png", name: "a.png", n: 1 }], [2], { "rended:/w": true }, "board"]);
+check("the guard asks while a pasted image is held", (function () { var e = { preventDefault: function () {} }; winListeners.beforeunload(e); return e.returnValue; })(), "");
+
+// a reload of the page: empty composer and state, then the restore
+ctext.value = ""; mentions = []; imgs = []; chips = {}; items = {}; openState = {}; boardAnswers = {}; grid.setAttribute("data-tab", "convo");
+restoreDraft();
+check("text without the pasted image's marker", ctext.value, "hi @bob see [Image #1] and end");
+check("mentions, selection, the reference image", [mentions, [ctext.selectionStart, ctext.selectionEnd], imgs.map(function (p) { return [p.n, p.ref, p.url]; })],
+  [[{ start: 3, end: 7, text: "@bob" }], [6, 6], [[1, "00aa-1.png", "/s/sess1/attachment/00aa-1.png"]]]);
+check("answers, chips, open details, tab", [boardAnswers, Object.keys(chips), items["3"].answer, openState, grid.getAttribute("data-tab")],
+  [{ "3": { answer: "yes" }, "topic:2": { note: "keep it" } }, ["3"], "yes", { "rended:/w": true }, "board"]);
+check("the restore says a pasted image was not kept", notes, ["js.draft.imgslost:1"]);
+check("no guard once only reference images are held", (function () { var e = { preventDefault: function () {} }; return winListeners.beforeunload(e); })(), undefined);
+check("the restore itself saved nothing", timers.length, 0);
+
+// a typed composer is not overwritten by a later restore
+ctext.value = "typed"; restoreDraft();
+check("a non-empty composer keeps its text", ctext.value, "typed");
+
+// a send clears the draft; what is left is saved again as the next draft
+ctext.value = ""; imgs = []; chips = {}; boardAnswers = {}; openState = {}; grid.setAttribute("data-tab", "convo");
+clearDraft();
+check("cleared at once", railStore.load("ws.dashboard.draft.sess1"), null);
+advance(400);
+check("an empty page saves no draft", [railStore.load("ws.dashboard.draft.sess1"), railStore.load("ws.dashboard.drafts")], [null, null]);
+if (bad.length) console.log(bad.join("\n"));
+`)
 }
