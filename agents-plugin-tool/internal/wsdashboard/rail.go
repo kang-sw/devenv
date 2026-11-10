@@ -23,9 +23,9 @@ const railRoute = "/rail/refresh"
 
 // railView reads what the rail shows: every listed session of the index,
 // its snapshot (stale or not), its repository, and its last message, with
-// the worktree lists read so far. A session's repository joins the lister's
-// wanted set, so a render is what tells the lister which repositories to
-// read.
+// the stored workspaces and the worktree lists read so far. A session's
+// repository and a stored one join the lister's wanted set, so a render is
+// what tells the lister which repositories to read.
 func (d *Daemon) railView(r pageReader) RailView {
 	if d.index == nil {
 		return RailView{}
@@ -51,7 +51,17 @@ func (d *Daemon) railView(r pageReader) RailView {
 		}
 		inputs = append(inputs, in)
 	}
-	return buildRailView(inputs, d.rail.lists(wanted), now)
+	// A stored repository's worktrees are listed whether or not a session
+	// runs in it.
+	stored := d.workspaces.workspaces()
+	for _, w := range stored {
+		if _, ok := wanted[w.Path]; w.Repo && !ok {
+			wanted[w.Path] = nil
+		}
+	}
+	view := buildRailView(inputs, d.rail.lists(wanted), stored, now)
+	view.CanAdd = d.workspaces != nil
+	return view
 }
 
 // renderRailRegion renders the rail region in lang.

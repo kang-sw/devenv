@@ -89,6 +89,10 @@ type DaemonOptions struct {
 	// Pprof serves net/http/pprof under /debug/pprof/ to loopback viewers
 	// only (pprof_route.go; PprofEnv); false serves no such route.
 	Pprof bool
+	// WorkspacesFile is the stored workspace list's file (workspaces.go),
+	// which belongs in the config home; empty keeps no stored workspace and
+	// serves no workspace route (workspace_routes.go).
+	WorkspacesFile string
 
 	// bindHost overrides the address the daemon binds, so a test runs LAN
 	// mode on loopback; empty derives it from LAN.
@@ -182,6 +186,11 @@ type Daemon struct {
 	// for it (railmessages.go).
 	rail     *railLister
 	railMsgs *railMessages
+	// workspaces holds the stored workspaces, nil without them
+	// (workspaces.go); pathHost is the machine whose rules read a pasted
+	// folder path (workspacepath.go).
+	workspaces *workspaceStore
+	pathHost   pathHost
 	// files caches each session root's file list for the files route
 	// (files_route.go).
 	files *fileListCache
@@ -332,6 +341,11 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 	}
 	d.railMsgs = newRailMessages()
 	d.rail = newRailLister(railRead, func() { d.broker.wake(railListRepoKey) }, d.stop)
+	d.workspaces = openWorkspaceStore(opts.WorkspacesFile)
+	d.pathHost = daemonPathHost()
+	if d.workspaces != nil {
+		d.rail.sweep = d.workspaces.sweep
+	}
 	if d.lan {
 		// Mint the token now, so the localhost index shows it before any
 		// LAN request; a failure leaves every LAN request refused.
@@ -525,7 +539,9 @@ func (d *Daemon) Close() {
 // (tracker_routes.go), and with a support handler the support POST routes
 // (a tracker store's support conversation: send, new, select) are the only
 // browser writes besides the git drawer's push, pull, and fetch routes
-// (gitpush.go), and its system-open route (sysopen_route.go) the only route
+// (gitpush.go) and, with stored workspaces, the rail's workspace routes
+// (workspace_routes.go: the stored list, and git worktree add), and its
+// system-open route (sysopen_route.go) the only route
 // that runs a host command beside git and the agent runner's harnesses: a
 // session stream keeps its root's git handle read, the git route
 // (gitbadge.go) asks for a read at once without running git itself, and the
@@ -543,6 +559,9 @@ func (d *Daemon) Handler() http.Handler {
 	mux.HandleFunc("/events", d.handleIndexEvents)
 	mux.HandleFunc("/s/", d.handleSessionRoutes)
 	mux.HandleFunc(railRoute, d.handleRailRefresh)
+	if d.workspaces != nil {
+		d.workspaceRoutes(mux)
+	}
 	if d.tracker != nil {
 		mux.HandleFunc("/tracker/", d.handleTracker)
 	}

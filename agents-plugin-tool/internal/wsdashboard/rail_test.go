@@ -72,7 +72,7 @@ func TestRailViewGroupsSessionsByWorkspaceAndWorktree(t *testing.T) {
 		{Path: pool + "/spare", Detached: true},
 		{Path: "/w/gone", Branch: "old", Prunable: true},
 	}}}
-	view := buildRailView(sessions, repos, now)
+	view := buildRailView(sessions, repos, nil, now)
 	if len(view.Workspaces) != 2 {
 		t.Fatalf("workspaces = %+v, want the repository and the folder", view.Workspaces)
 	}
@@ -118,7 +118,7 @@ func TestRailViewWithoutAListShowsTheSessionRoots(t *testing.T) {
 	view := buildRailView([]railInput{
 		{Session: railSession("a", "/r", now, time.Time{}), Repo: "/r"},
 		{Session: railSession("b", "/r-wt", now, time.Time{}), Repo: "/r"},
-	}, map[string]railRepo{"/r": {Read: false, Entries: []railWorktreeEntry{{Path: "/r-other"}}}}, now)
+	}, map[string]railRepo{"/r": {Read: false, Entries: []railWorktreeEntry{{Path: "/r-other"}}}}, nil, now)
 	if len(view.Workspaces) != 1 || len(view.Workspaces[0].Worktrees) != 2 {
 		t.Fatalf("view = %+v, want the two session roots", view)
 	}
@@ -127,12 +127,87 @@ func TestRailViewWithoutAListShowsTheSessionRoots(t *testing.T) {
 	sub := buildRailView([]railInput{
 		{Session: railSession("a", "/r/sub/dir", now, time.Time{}), Repo: "/r"},
 		{Session: railSession("b", "/r/.ws-worktrees/w", now, time.Time{}), Repo: "/r", Linked: true},
-	}, nil, now)
+	}, nil, nil, now)
 	if wts := sub.Workspaces[0].Worktrees; len(wts) != 2 || wts[0].Path != "/r" || len(wts[0].Sessions) != 1 || wts[0].Sessions[0].ReplyID != "a" || wts[1].Path != "/r/.ws-worktrees/w" {
 		t.Errorf("worktrees = %+v, want a under the root and b on its own", wts)
 	}
 	if !view.Workspaces[0].Worktrees[0].Root {
 		t.Errorf("first worktree = %+v, want the root", view.Workspaces[0].Worktrees[0])
+	}
+}
+
+// TestRailViewShowsStoredWorkspaces pins how the stored workspaces join the
+// grouping: a stored one shows without a session, a repository with the
+// worktrees its list names (a pooled one still hidden); a stored and a
+// session's repository of the same root are one bar; a session in no
+// repository joins the longest stored plain folder at or above its root,
+// while one in a repository stays under its repository even below a stored
+// folder, and a stored repository takes no plain session.
+func TestRailViewShowsStoredWorkspaces(t *testing.T) {
+	now := time.Now()
+	stored := []storedWorkspace{
+		{Path: "/w/idle-repo", Repo: true},
+		{Path: "/w/busy-repo", Repo: true},
+		{Path: "/w/projects"},
+		{Path: "/w/projects/notes"},
+		{Path: "/w/empty-folder"},
+	}
+	sessions := []railInput{
+		{Session: railSession("inrepo", "/w/busy-repo", now, time.Time{}), Repo: "/w/busy-repo"},
+		{Session: railSession("nested", "/w/projects/app", now, time.Time{}), Repo: "/w/projects/app"},
+		{Session: railSession("loose", "/w/projects/scratch/a", now, time.Time{})},
+		{Session: railSession("deep", "/w/projects/notes/2026", now, time.Time{})},
+		{Session: railSession("exact", "/w/projects/notes", now.Add(-time.Hour), time.Time{})},
+		{Session: railSession("stray", "/w/elsewhere", now, time.Time{})},
+		{Session: railSession("underrepo", "/w/idle-repo/docs", now, time.Time{})},
+	}
+	repos := map[string]railRepo{"/w/idle-repo": {Read: true, Pools: []string{"/w/.ws-worktrees/idle-repo"}, Entries: []railWorktreeEntry{
+		{Path: "/w/idle-repo", Branch: "main"},
+		{Path: "/w/idle-wt", Branch: "feat/idle"},
+		{Path: "/w/.ws-worktrees/idle-repo/spare", Detached: true},
+	}}}
+	view := buildRailView(sessions, repos, stored, now)
+	byPath := map[string]RailWorkspace{}
+	var paths []string
+	for _, ws := range view.Workspaces {
+		byPath[ws.Path] = ws
+		paths = append(paths, ws.Path)
+	}
+	want := []string{"/w/busy-repo", "/w/elsewhere", "/w/empty-folder", "/w/idle-repo", "/w/idle-repo/docs", "/w/projects", "/w/projects/app", "/w/projects/notes"}
+	if strings.Join(paths, " ") != strings.Join(want, " ") {
+		t.Fatalf("workspaces = %v, want %v", paths, want)
+	}
+	for path, wantStored := range map[string]bool{"/w/busy-repo": true, "/w/idle-repo": true, "/w/projects": true, "/w/projects/notes": true, "/w/empty-folder": true,
+		"/w/elsewhere": false, "/w/projects/app": false, "/w/idle-repo/docs": false} {
+		if byPath[path].Stored != wantStored {
+			t.Errorf("%s: stored = %v, want %v", path, byPath[path].Stored, wantStored)
+		}
+	}
+	idle := byPath["/w/idle-repo"]
+	if !idle.Repo || idle.Live != 0 || len(idle.Worktrees) != 2 || !idle.Worktrees[0].Root || idle.Worktrees[0].Branch != "main" ||
+		idle.Worktrees[1].Path != "/w/idle-wt" || idle.Worktrees[1].Branch != "feat/idle" || !idle.Worktrees[1].Empty() {
+		t.Errorf("stored repository without a session = %+v, want its root and its unpooled worktree, both empty", idle)
+	}
+	if busy := byPath["/w/busy-repo"]; !busy.Repo || busy.Live != 1 || len(busy.Worktrees) != 1 {
+		t.Errorf("stored repository with a session = %+v, want one bar holding it", busy)
+	}
+	if app := byPath["/w/projects/app"]; !app.Repo || app.Live != 1 {
+		t.Errorf("repository under a stored folder = %+v, want its own workspace", app)
+	}
+	if got := railIDs(byPath["/w/projects"].Sessions); strings.Join(got, " ") != "loose" {
+		t.Errorf("stored folder's sessions = %v, want loose only", got)
+	}
+	if got := railIDs(byPath["/w/projects/notes"].Sessions); strings.Join(got, " ") != "deep exact" {
+		t.Errorf("nested stored folder's sessions = %v, want deep then exact", got)
+	}
+	if empty := byPath["/w/empty-folder"]; empty.Repo || len(empty.Sessions) != 0 || len(empty.Worktrees) != 0 {
+		t.Errorf("stored folder without a session = %+v, want an empty bar", empty)
+	}
+	if docs := byPath["/w/idle-repo/docs"]; docs.Repo || len(docs.Sessions) != 1 {
+		t.Errorf("plain session under a stored repository = %+v, want a workspace of its own", docs)
+	}
+	if view.Live != 7 {
+		t.Errorf("live = %d, want 7", view.Live)
 	}
 }
 
@@ -147,7 +222,7 @@ func TestRailWorktreeChangesComeFromTheNewestSnapshot(t *testing.T) {
 		{Session: railSession("a", "/r", now, time.Time{}), Repo: "/r", Snapshot: older},
 		{Session: railSession("b", "/r", now, time.Time{}), Repo: "/r", Snapshot: newer},
 		{Session: railSession("c", "/r2", now, time.Time{}), Repo: "/r", Snapshot: &wslive.Snapshot{UpdatedAt: now.UnixMilli()}},
-	}, map[string]railRepo{"/r": {Read: true, Entries: []railWorktreeEntry{{Path: "/r"}, {Path: "/r2"}}}}, now)
+	}, map[string]railRepo{"/r": {Read: true, Entries: []railWorktreeEntry{{Path: "/r"}, {Path: "/r2"}}}}, nil, now)
 	ws := view.Workspaces[0]
 	if w := railWT(t, ws, "/r"); !w.HasChanges || w.Changes != 6 {
 		t.Errorf("root = %+v, want 6 changes from the newer snapshot", w)
@@ -355,6 +430,56 @@ func TestRailListerReadsOnlyWhilePagesShowTheRail(t *testing.T) {
 	release()
 }
 
+// TestRailListerSweepsOnFullReadsAndRereadsOneRepository pins the lister's
+// two hooks for the stored workspaces: the sweep runs once before each full
+// read and never on a single repository's read, and its change wakes the
+// rail; a reread reads the one repository at once, the others keeping their
+// lists, and with no viewer drops that repository's list so the next render
+// reads it.
+func TestRailListerSweepsOnFullReadsAndRereadsOneRepository(t *testing.T) {
+	fake := &railFakeRead{reads: map[string]int{}}
+	stop := make(chan struct{})
+	defer close(stop)
+	var mu sync.Mutex
+	sweeps, changed := 0, 0
+	l := newRailLister(fake.read, func() { mu.Lock(); changed++; mu.Unlock() }, stop)
+	l.sweep = func() bool { mu.Lock(); sweeps++; mu.Unlock(); return true }
+	count := func(n *int) int { mu.Lock(); defer mu.Unlock(); return *n }
+	ticks := make(chan time.Time)
+	l.after = func(time.Duration) <-chan time.Time { return ticks }
+	wanted := map[string][]Registration{"/a": nil, "/b": nil}
+
+	l.lists(wanted)
+	release := l.watch()
+	waitFor(t, "the first full read", func() bool { return fake.count("/a") == 1 && fake.count("/b") == 1 })
+	waitFor(t, "both lists to land", func() bool { return len(l.lists(wanted)) == 2 })
+	if count(&sweeps) != 1 {
+		t.Fatalf("sweeps after the first full read = %d, want 1", count(&sweeps))
+	}
+
+	l.reread("/a/")
+	l.reread("/not-wanted")
+	waitFor(t, "the reread", func() bool { return fake.count("/a") == 2 })
+	time.Sleep(50 * time.Millisecond)
+	if fake.count("/b") != 1 || fake.count("/not-wanted") != 0 || count(&sweeps) != 1 {
+		t.Errorf("a reread read /b %d times and an unwanted repository %d times, and swept %d times; want 1, 0, 1", fake.count("/b"), fake.count("/not-wanted"), count(&sweeps))
+	}
+	ticks <- time.Now()
+	waitFor(t, "the interval's sweep and full read", func() bool { return count(&sweeps) == 2 && fake.count("/b") == 2 })
+	if count(&changed) < 2 {
+		t.Errorf("changed called %d times, want one per sweep that reported a change", count(&changed))
+	}
+
+	release()
+	waitFor(t, "the goroutine to end", func() bool { l.mu.Lock(); defer l.mu.Unlock(); return !l.running })
+	l.reread("/a")
+	if got := l.lists(wanted); len(got) != 1 {
+		t.Errorf("lists after a reread with no viewer = %v, want /b's only", got)
+	}
+	var none *railLister
+	none.reread("/a")
+}
+
 // railFakeSource is a WorktreeSource that also lists repositories.
 type railFakeSource struct {
 	railFakeRead
@@ -426,5 +551,89 @@ func TestSessionPagesShareOneRailRender(t *testing.T) {
 	waitRegionHolding(t, live, regionRail, "branch-read-2")
 	if code, _, _ := postJSON(t, f.base+railRoute, "http://evil.example", ""); code != http.StatusForbidden {
 		t.Errorf("cross-origin refresh = %d, want 403", code)
+	}
+}
+
+// railSection is the rendered rail's section for the workspace at path.
+func railSection(t *testing.T, html, path string) string {
+	t.Helper()
+	_, rest, ok := strings.Cut(html, `<section class="rws" data-ws="`+path+`">`)
+	if !ok {
+		t.Fatalf("the rail has no section for %s:\n%s", path, html)
+	}
+	section, _, _ := strings.Cut(rest, `</section>`)
+	return section
+}
+
+// TestRailMarkupAddButtonsAndForget pins the rail's + buttons and forget:
+// the header's add-workspace + and a repository bar's add-worktree + only on
+// a daemon that keeps stored workspaces, never on a plain folder's bar or a
+// worktree row; forget on a stored bar only, a plain folder's too; and a
+// bar whose collapse toggle holds no other button, so the markup nests
+// validly and each action is its own keyboard stop.
+func TestRailMarkupAddButtonsAndForget(t *testing.T) {
+	row := RailRow{ReplyID: "railrow", Harness: "claude", Live: true}
+	view := RailView{CanAdd: true, Workspaces: []RailWorkspace{
+		{Name: "stored-repo", Path: "/w/stored-repo", Repo: true, Stored: true, Worktrees: []RailWorktree{
+			{Path: "/w/stored-repo", Root: true, Folder: "stored-repo", Branch: "main", Sessions: []RailRow{row}},
+			{Path: "/w/stored-wt", Folder: "stored-wt", Branch: "feat/x"},
+		}},
+		{Name: "derived-repo", Path: "/w/derived-repo", Repo: true, Worktrees: []RailWorktree{{Path: "/w/derived-repo", Root: true, Branch: "main"}}},
+		{Name: "stored-folder", Path: "/w/stored-folder", Stored: true},
+		{Name: "derived-folder", Path: "/w/derived-folder", Sessions: []RailRow{row}},
+	}}
+	region, err := renderRailRegion(view, "en")
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(region.HTML)
+	head, _, _ := strings.Cut(html, `<div class="rlist"`)
+	if !strings.Contains(head, `<button type="button" class="radd" data-add="ws"`) || !strings.Contains(head, `aria-haspopup="dialog"`) {
+		t.Errorf("the rail header lacks the add-workspace +:\n%s", head)
+	}
+	for path, want := range map[string]struct{ add, forget bool }{
+		"/w/stored-repo":    {true, true},
+		"/w/derived-repo":   {true, false},
+		"/w/stored-folder":  {false, true},
+		"/w/derived-folder": {false, false},
+	} {
+		section := railSection(t, html, path)
+		bar, body, _ := strings.Cut(section, `<div class="wsbody">`)
+		if got := strings.Contains(bar, `class="radd" data-add="wt"`); got != want.add {
+			t.Errorf("%s: add-worktree + on the bar = %v, want %v", path, got, want.add)
+		}
+		if got := strings.Contains(bar, `class="rforget"`); got != want.forget {
+			t.Errorf("%s: forget on the bar = %v, want %v", path, got, want.forget)
+		}
+		if strings.Contains(body, `radd`) || strings.Contains(body, `rforget`) {
+			t.Errorf("%s: a + or forget below the bar (a worktree row or a session):\n%s", path, body)
+		}
+		if strings.Contains(bar, `<button type="button" class="wsbar"`) || !strings.HasPrefix(bar, `<div class="wsbar">`) {
+			t.Errorf("%s: the bar is not a container: %s", path, bar)
+		}
+		_, tog, ok := strings.Cut(bar, `<button type="button" class="wstog" aria-expanded="true" title="`+path+`">`)
+		if !ok {
+			t.Fatalf("%s: the bar lacks its collapse toggle: %s", path, bar)
+		}
+		tog, _, _ = strings.Cut(tog, `</button>`)
+		if strings.Contains(tog, `<button`) {
+			t.Errorf("%s: a button nests in the collapse toggle: %s", path, tog)
+		}
+	}
+	if body := railSection(t, html, "/w/stored-folder"); !strings.Contains(body, `<div class="wsbody"></div>`) {
+		t.Errorf("a stored folder without sessions = %s, want a bar with an empty body", body)
+	}
+	if !strings.Contains(railSection(t, html, "/w/stored-repo"), `title="Add a worktree to stored-repo"`) {
+		t.Error("the add-worktree + does not name its workspace")
+	}
+
+	view.CanAdd = false
+	view.Workspaces = view.Workspaces[1:2]
+	region, err = renderRailRegion(view, "en")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(region.HTML), "radd") {
+		t.Errorf("a daemon without stored workspaces shows a +:\n%s", region.HTML)
 	}
 }
