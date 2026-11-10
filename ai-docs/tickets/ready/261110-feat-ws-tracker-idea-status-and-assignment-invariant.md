@@ -196,6 +196,25 @@ docs, dashboard withdraw), and the `pending` derivation in `view.go` and
 `agents-plugin-tool`, with scenario tests for withdrawing one of two rules
 on a root and for a rule-request-only item's status.
 
+### Result (18941160e, cd44f8610) - 2026-11-10
+
+- `item.unassign` takes an optional `rule` id in the Go fold/check and the
+  mockup engine. Only that rule of the author's ends: a pending request is
+  withdrawn, an accepted one unassigned. The rule and root branches share
+  one `unassignRule` helper. `rule` next to `assignee` is refused, and so is
+  a `root` that is not the rule's root. reasons.json has six new refusal cases.
+- A pending rule request no longer makes the item `pending` (Go
+  `itemStatus` and the engine). TestAssignRuleOutsideReach now expects
+  `unassigned`; Phase 2's fallback changes that to `todo`.
+- `tk:item.unassign` takes `rule` in either printed form. The item view
+  prints each rule's ID after its label, so an agent can name the rule.
+  The dashboard's withdraw on a pending rule request passes `rule`.
+- New tests in wstracker/holder_test.go: withdrawing one of two rules on
+  the same root by id leaves the other live, while ending by root ends
+  both; a rule-request-only item is not pending.
+- Verified: ws-rgo `go test` on mcp, wsrsrc, wsdashboard and wstracker
+  all ok; gen-golden reports 175 reason cases agree, with goldens unchanged.
+
 ### Phase 2: idea status and the assignment invariant
 
 Decisions 1 to 3 and 6 to 13 on top of Phase 1's derivation: the idea
