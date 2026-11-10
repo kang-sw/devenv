@@ -927,6 +927,7 @@
   "js.tk.wk.history.tools": "Cronologia e ripristino passano dagli strumenti dell'agente (wiki_query, wiki_update)",
   "js.tk.wk.key.chg": "modificato su un solo lato",
   "js.tk.wk.key.conf": "sovrapposizione",
+  "js.tk.wk.leave": "Scartare la modifica alla wiki non salvata?",
   "js.tk.wk.match": "{0} pagine su {1} corrispondono",
   "js.tk.wk.missing": "pagina inesistente: clic per crearla",
   "js.tk.wk.more": "Altro",

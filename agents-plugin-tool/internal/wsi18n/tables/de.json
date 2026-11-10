@@ -927,6 +927,7 @@
   "js.tk.wk.history.tools": "Verlauf und Wiederherstellen laufen über die Agent-Werkzeuge (wiki_query, wiki_update)",
   "js.tk.wk.key.chg": "nur auf einer Seite geändert",
   "js.tk.wk.key.conf": "Überlappung",
+  "js.tk.wk.leave": "Deine ungespeicherte Wiki-Bearbeitung verwerfen?",
   "js.tk.wk.match": "{0} von {1} Seiten passen",
   "js.tk.wk.missing": "Seite fehlt: Klick legt sie an",
   "js.tk.wk.more": "Mehr",

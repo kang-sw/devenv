@@ -394,6 +394,73 @@ func TestTrackerUpdateWritesRawBodiesAndBatchReferences(t *testing.T) {
 	}
 }
 
+// payload.q takes the dashboard search grammar and AND-s with kind,
+// status, project, and text; text keeps its substring meaning; a malformed
+// known key is refused naming the token.
+func TestTrackerQuerySearchField(t *testing.T) {
+	f := newTrackerLeadFixture(t)
+	f.trackerUpdate(t, trackerPersonal)
+	out := f.trackerUpdate(t, `<tk:store name="me">
+<tk:item.create kind="task" title="Ship release" due="2026-11-20" priority="2" project="web">body</tk:item.create>
+<tk:item.assign item="$1" people="ada"/>
+<tk:item.status item="$1" status="doing"/>
+<tk:comment.add item="$1">needs a changelog</tk:comment.add>
+<tk:item.create kind="task" title="Write docs" due="2026-12-01" project="web">a:b in the body</tk:item.create>
+<tk:item.create kind="task" title="Gone"/>
+<tk:item.hide item="$6"/>
+</tk:store>`)
+	ids := trackerWrote(t, out)
+	ship, docs, gone := ids["1"], ids["5"], ids["6"]
+	all := func(payload map[string]any) string {
+		payload["store"], payload["scope"] = "me", "all"
+		return f.trackerQuery(t, payload)
+	}
+	for _, c := range []struct {
+		payload   map[string]any
+		hit, miss []string
+	}{
+		{map[string]any{"q": "status:doing"}, []string{ship}, []string{docs}},
+		{map[string]any{"q": "changelog"}, []string{ship}, []string{docs}},
+		{map[string]any{"q": `due:<2026-12-01 "ship release"`}, []string{ship}, []string{docs}},
+		{map[string]any{"q": "priority:>=2 assignee:ada"}, []string{ship}, []string{docs}},
+		{map[string]any{"q": "project:web", "status": "todo"}, []string{docs}, []string{ship}},
+		{map[string]any{"q": "project:web", "text": "release"}, []string{ship}, []string{docs}},
+		// text is a plain substring: the colon does not start a filter
+		{map[string]any{"text": "a:b"}, []string{docs}, []string{ship}},
+		// an unknown key is free text
+		{map[string]any{"q": "a:b"}, []string{docs}, []string{ship}},
+		// a hidden item shows only for status hidden, in q too
+		{map[string]any{"q": "gone"}, nil, []string{gone}},
+		{map[string]any{"q": "status:hidden"}, []string{gone}, []string{ship, docs}},
+	} {
+		got := all(c.payload)
+		for _, id := range c.hit {
+			if !strings.Contains(got, id+" [") {
+				t.Errorf("%v must list %s:\n%s", c.payload, id, got)
+			}
+		}
+		for _, id := range c.miss {
+			if strings.Contains(got, id+" [") {
+				t.Errorf("%v must not list %s:\n%s", c.payload, id, got)
+			}
+		}
+	}
+	if none := all(map[string]any{"q": "status:done"}); !strings.Contains(none, "no rows pass the filters") {
+		t.Fatalf("a q that matches nothing must say so: %s", none)
+	}
+	// the mine scope filters its assignment rows by the item's status
+	if mine := f.trackerQuery(t, map[string]any{"store": "me", "q": "status:doing"}); !strings.Contains(mine, ship+" P") {
+		t.Fatalf("mine with status:doing must list the doing assignment: %s", mine)
+	}
+	bad := f.trackerRefused(t, "tracker.query", map[string]any{"payload": map[string]any{"store": "me", "q": "ship due:<tomorrow"}})
+	if !strings.Contains(bad, `payload.q: search "due:<tomorrow": due takes a date YYYY-MM-DD`) {
+		t.Fatalf("a malformed due token must be refused by name: %s", bad)
+	}
+	if bad := f.trackerRefused(t, "tracker.query", map[string]any{"payload": map[string]any{"q": "ship"}}); !strings.Contains(bad, "need store") {
+		t.Fatalf("q without store must be refused: %s", bad)
+	}
+}
+
 // One flagged command refuses the whole batch with its command position and
 // line; the commands before it write nothing.
 func TestTrackerUpdateIsAllOrNothing(t *testing.T) {

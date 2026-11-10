@@ -290,6 +290,8 @@ body.tk-paged .tk-drawer { display: none; }
 .tk .psx:hover { background: var(--wb-muted); color: var(--wb-fg); }
 .tk .psx .i { width: 12px; height: 12px; }
 .tk .ptools .psearch { background: var(--wb-muted); box-shadow: none; }
+/* a malformed search query: the host's message under the box; the list stays unfiltered */
+.tk .psearch-err { flex: 1 0 100%; min-width: 0; color: var(--tk-fail); font-size: 12px; font-weight: 400; overflow-wrap: anywhere; }
 .tk .ptools .vmodes { background: var(--wb-muted); }
 .tk .ptools .psearch:focus-within { box-shadow: inset 0 0 0 1.5px var(--wb-primary); }
 

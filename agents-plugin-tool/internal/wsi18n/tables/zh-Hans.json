@@ -927,6 +927,7 @@
   "js.tk.wk.history.tools": "历史与恢复通过代理工具（wiki_query、wiki_update）进行",
   "js.tk.wk.key.chg": "仅一侧变更",
   "js.tk.wk.key.conf": "重叠",
+  "js.tk.wk.leave": "放弃未保存的 wiki 编辑？",
   "js.tk.wk.match": "{1} 个页面中有 {0} 个匹配",
   "js.tk.wk.missing": "页面不存在：点击创建",
   "js.tk.wk.more": "更多",

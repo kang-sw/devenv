@@ -80,6 +80,13 @@
 //                          err with status 409 and conflict = {path, kind, reason,
 //                          base, theirs, oursText, theirsText}
 //                        err is {ok: false, error, status} (status 0: not reached)
+//   search(id, q, done)  optional, for the Items panel's search box: the ids of the
+//                        store's items that pass q, parsed by the tracker's search
+//                        grammar (the daemon parses it, so the box and the agents'
+//                        tracker.query q agree). done({ok: true, ids} | {ok: false,
+//                        error}); an error is a malformed query, shown under the box
+//                        with the list left unfiltered. Without it the box matches a
+//                        plain substring of the title, body, project, and id (the mockup)
 //   hostError()       -> optional: the reason the store list could not be read (the
 //                        host is unavailable), or null; the "+ store" dialog shows it
 //                        and offers nothing else
@@ -239,6 +246,7 @@
     cmodes: {}, calMonth: {}, // store -> { card key -> view mode } (display state, stored); card or scope key -> calendar month
     pmodes: {}, closedOpen: {}, // store -> { scope -> view mode } and store -> "recently closed" expanded (display state, stored)
     panel: {},            // store -> { scope, modes: { scope -> view mode }, today: Today chip filter or null, q: search text, closedOpen: "recently closed" expanded, treeOpen: { parent id -> its "closed N" row expanded } } of the Items panel
+    psr: {},              // store -> the search box's adapter.search state (searchState, page lifetime)
     tfold: {},            // "store|item id" -> 'o' | 'f': a context-tree node unfolded in full or folded (display state, stored; absent: the default, see ctxTree)
     wfold: {},            // "store|item id" -> true | false: a node of the item window's subtree open or folded (page lifetime; absent: the default)
     focus: null,          // { ev: event id, flash: true until its first paint } the item window scrolls to and marks; null: nothing
@@ -804,13 +812,47 @@
     VS.my.today[k].forEach(function (id) { f.recs[id] = true; f.items[A(id).item] = true; });
     return f;
   }
-  // The search box (row 2 of the panel header) filters the current scope as you type, on
-  // the item's title, body, project, and id (the full id and the short alias), and combines
-  // with the Today filter. SQ is the lower-cased query of the render in progress, '' for none.
-  var SQ = '', FILT = false; // per render: the search query; whether the Today filter or a search is on
+  // The search box (row 2 of the panel header) filters the current scope and combines with
+  // the Today filter. With adapter.search the query is the tracker's search grammar, which
+  // the adapter's host parses and answers with the matching ids (SIDS): the request goes out
+  // SEARCH_DEBOUNCE ms after the last keystroke, and again at once when the store's view
+  // changes (a write or a refresh can change what matches), so the ids never go stale. Until
+  // the first answer the list stays unfiltered, and while a newer request runs it keeps the
+  // last answer. A malformed query leaves the list unfiltered and shows the host's message
+  // under the box (SERR). Without adapter.search the box matches a plain substring (the
+  // mockup). SQ is the lower-cased query of the render in progress, '' for none or while no
+  // answer filters the list.
+  var SQ = '', SIDS = null, SERR = '', FILT = false; // per render: the query; the matching ids, null when not filtering by ids; the malformed-query message; whether the Today filter or a search is on
+  var SEARCH_DEBOUNCE = 250;
   function matchItem(it) {
     if (!SQ) return true;
+    if (SIDS) return !!SIDS[it.id];
     return [it.title, it.body, it.project, it.id, it.alias].some(function (x) { return String(x == null ? '' : x).toLowerCase().indexOf(SQ) >= 0; });
+  }
+  // a store's search state: want / wantView, the query and view object the last request was
+  // made for; seq, the request counter (an answer to an older request is dropped); q, ids, err,
+  // the last answer; timer, the pending debounced request
+  function searchState(n) { return (ui.psr[n] = ui.psr[n] || { seq: 0, want: null, wantView: null, q: null, ids: null, err: '', timer: null }); }
+  // Called by each render of the panel with the trimmed query: (re)sends the request when the
+  // query or the view object changed since the last one, debounced when the query changed.
+  function searchFor(n, q) {
+    var st = searchState(n);
+    if (!q) { clearTimeout(st.timer); ui.psr[n] = null; return; }
+    if (st.want === q && st.wantView === VS) return;
+    var typed = st.want !== q;
+    st.want = q; st.wantView = VS;
+    clearTimeout(st.timer);
+    st.timer = setTimeout(function () {
+      st.timer = null;
+      var seq = ++st.seq;
+      AD.search(n, q, function (res) {
+        if (ui.psr[n] !== st || seq !== st.seq) return;
+        st.q = q;
+        if (res && res.ok) { st.err = ''; st.ids = {}; (res.ids || []).forEach(function (id) { st.ids[id] = true; }); }
+        else { st.err = String((res && res.error) || ''); st.ids = null; }
+        if (ui.store === n) render();
+      });
+    }, typed ? SEARCH_DEBOUNCE : 0);
   }
   // a row with an assignment record passes on the record; an item row passes on the item
   function keepRec(r) { return (!TF || !!TF.recs[r.id]) && matchItem(VS.items[r.item]); }
@@ -1073,7 +1115,16 @@
   var VIEW_ICON = { "js.tk.mode.list": 'list', "js.tk.mode.tree": 'tree', "js.tk.mode.kanban": 'kanban', "js.tk.mode.gantt": 'timeline', "js.tk.mode.calendar": 'calendar' };
   function cardPanel(v) {
     var s = scopeOf(), m = panelMode(s), q = panelState().q;
-    TF = todayFilter(); SQ = q.trim().toLowerCase(); FILT = !!(TF || SQ);
+    var qt = q.trim();
+    TF = todayFilter(); SQ = ''; SIDS = null; SERR = '';
+    if (qt && !AD.search) SQ = qt.toLowerCase();
+    else if (qt) {
+      searchFor(ui.store, qt);
+      var sr = searchState(ui.store);
+      if (sr.err) { if (sr.q === qt) SERR = sr.err; } // a newer query's answer is pending: no stale message
+      else if (sr.ids) { SQ = qt.toLowerCase(); SIDS = sr.ids; }
+    } else searchFor(ui.store, '');
+    FILT = !!(TF || SQ);
     CLOSED = m === 'list' ? { entries: [], older: 0 } : null;
     var scopes = '<span class="scopes" role="tablist" aria-label="' + wsT("js.tk.panel.scope") + '">' + scopeList().map(function (x) {
       return '<button type="button" class="scp' + (x[0] === s ? ' on' : '') + '" role="tab" aria-selected="' + (x[0] === s) + '"' + attr('act', 'scope') + attr('scope', x[0]) + tipAttr(wsT(x[2])) + '>' + esc(wsT(x[1])) + '</button>';
@@ -1087,8 +1138,9 @@
     // a new item: the hover insert between list rows (insShow), or the "+" that ends the panel, which
     // opens the input row in its place (the keyboard path; an empty list keeps only this one)
     var n = ui.nrow[ui.store], body = panelBody(s, m, v) + (n && !n.at ? newRowHtml() : newBtn()), closed = closedHtml();
-    TF = null; SQ = ''; FILT = false; CLOSED = null;
-    return { title: wsT("js.tk.tab.items"), tools: scopes + '<span class="chip">' + esc(scopeChip(s)) + '</span><div class="prow2">' + modes + search + '</div>', body: '<div class="plist">' + body + '</div>' + closed, id: 'card-items', cls: 'panel',
+    var serr = SERR ? '<div class="psearch-err" role="alert">' + esc(SERR) + '</div>' : '';
+    TF = null; SQ = ''; SIDS = null; SERR = ''; FILT = false; CLOSED = null;
+    return { title: wsT("js.tk.tab.items"), tools: scopes + '<span class="chip">' + esc(scopeChip(s)) + '</span><div class="prow2">' + modes + search + '</div>' + serr, body: '<div class="plist">' + body + '</div>' + closed, id: 'card-items', cls: 'panel',
       attrs: attr('scope', s) + attr('view', m) };
   }
   // With the adapter's wiki, the title is the Items | Wiki switch (wkSwitch); the Today bar belongs to the items
@@ -1439,7 +1491,17 @@
   }
   // The panel shows the wiki: the Items | Wiki switch in the wide layouts, the Wiki tab when narrow.
   function wkShow() { if (ui.layout === 'narrow') { tabState().narrow = 'wiki'; } else wk().mode = 'wiki'; }
+  // An edit is dirty when its text left where it started: the page's text, the seeded heading of
+  // a new page (seed; orig stays '' as the conflict view's merge base), or the refused-save
+  // "theirs" text after Edit again.
+  function wkDirty(ed) { return !!ed && ed.text !== (ed.seed !== undefined ? ed.seed : ed.orig); }
+  // Asked before a navigation that drops the wiki edit; false keeps the editor, draft, and page.
+  // Cancel, Esc, and taking theirs drop the draft on purpose and do not ask.
+  function wkLeaveOk() { return !wkDirty(wk().edit) || window.confirm(wsT("js.tk.wk.leave")); }
   function wkOpenPage(name, path) {
+    if (wkLeaveOk()) wkGoPage(name, path);
+  }
+  function wkGoPage(name, path) {
     var st = wk();
     st.creating = false; st.edit = null; st.conflict = null; st.more = false; st.pick = false; st.ntree = false;
     if (st.name !== name) { st.name = name; st.pages = null; st.q = ''; }
@@ -1451,14 +1513,16 @@
     render();
   }
   function wkOpenLink(name, path) {
+    if (!wkLeaveOk()) return; // declining leaves the item window open too
     if (ui.win) closeItemWindow();
-    wkOpenPage(name, path);
+    wkGoPage(name, path);
   }
   function wkStartEdit(path, isNew, newWiki) {
     var st = wk();
     st.creating = false; st.conflict = null; st.more = false; st.pick = false; st.ntree = false;
     delete ui.edpv['wk-ebody']; delete ui.eatt['wk-ebody'];
-    if (isNew) st.edit = { path: path, isNew: true, newWiki: !!newWiki, base: st.pages ? st.pages.commit : '', text: '# ' + String(path).split('/').pop().replace(/-/g, ' ') + '\n\n', orig: '', newPath: path, note: false };
+    var seed = '# ' + String(path).split('/').pop().replace(/-/g, ' ') + '\n\n';
+    if (isNew) st.edit = { path: path, isNew: true, newWiki: !!newWiki, base: st.pages ? st.pages.commit : '', text: seed, orig: '', seed: seed, newPath: path, note: false };
     else st.edit = { path: path, isNew: false, newWiki: false, base: st.doc.commit, text: st.doc.content, orig: st.doc.content, newPath: '', note: false };
     wkShow();
     render();
@@ -1510,8 +1574,8 @@
     var st = wk();
     if (k === 'wk-mode') { st.mode = a.getAttribute('data-mode'); st.pick = st.more = false; render(); }
     else if (k === 'wk-pickopen') { st.pick = !st.pick; st.more = false; render(); }
-    else if (k === 'wk-pick') { st.pick = false; var nm2 = a.getAttribute('data-wiki'); if (nm2 !== st.name) { st.name = nm2; st.pages = null; st.page = null; st.doc = null; st.docErr = null; st.edit = null; st.conflict = null; st.q = ''; st.creating = false; } render(); }
-    else if (k === 'wk-newwiki') { st.pick = false; st.creating = true; st.edit = null; st.conflict = null; st.wname = ''; render(); if ($('wk-wname')) $('wk-wname').focus(); }
+    else if (k === 'wk-pick') { st.pick = false; var nm2 = a.getAttribute('data-wiki'); if (nm2 !== st.name && wkLeaveOk()) { st.name = nm2; st.pages = null; st.page = null; st.doc = null; st.docErr = null; st.edit = null; st.conflict = null; st.q = ''; st.creating = false; } render(); }
+    else if (k === 'wk-newwiki') { st.pick = false; if (!wkLeaveOk()) { render(); return; } st.creating = true; st.edit = null; st.conflict = null; st.wname = ''; render(); if ($('wk-wname')) $('wk-wname').focus(); }
     else if (k === 'wk-cancelnew') { st.creating = false; render(); }
     else if (k === 'wk-create') wkCreate();
     else if (k === 'wk-open') wkOpenPage(st.name, a.getAttribute('data-path'));

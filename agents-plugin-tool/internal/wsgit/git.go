@@ -608,6 +608,11 @@ func (c Client) Commit(ctx context.Context, root string, opts CommitOptions) (Co
 	if err != nil {
 		return CommitResult{}, err
 	}
+	for _, path := range opts.Paths {
+		if err := validateCommitPath(root, path); err != nil {
+			return CommitResult{}, err
+		}
+	}
 	runner := c.runner()
 	// Branch guard first, before any staging mutation: resolve the actual
 	// current branch and refuse if it disagrees with the caller's believed
@@ -770,11 +775,6 @@ func normalizeCommitOptions(opts CommitOptions) (CommitOptions, error) {
 	if len(paths) == 0 {
 		return CommitOptions{}, fmt.Errorf("paths requires at least one path")
 	}
-	for _, path := range paths {
-		if err := validateCommitPath(path); err != nil {
-			return CommitOptions{}, err
-		}
-	}
 	opts.Paths = paths
 	return opts, nil
 }
@@ -861,7 +861,12 @@ func commitRootHasAddableStatus(status StatusResult, root string) bool {
 	return false
 }
 
-func validateCommitPath(path string) error {
+// validateCommitPath refuses a path git.commit will not stage. The relative
+// and inside-the-repository refusals name root, the directory every path
+// resolves against, so a caller whose shell runs in another checkout can tell
+// which checkout its session is bound to; an absolute path under root also
+// gets its relative spelling. Absolute paths stay refused, never rebased.
+func validateCommitPath(root, path string) error {
 	if path == "" {
 		return fmt.Errorf("paths may not contain empty entries")
 	}
@@ -869,11 +874,15 @@ func validateCommitPath(path string) error {
 		return fmt.Errorf("path %q must not start with '-'", path)
 	}
 	if filepath.IsAbs(path) || strings.HasPrefix(path, "/") {
-		return fmt.Errorf("path %q must be relative", path)
+		msg := fmt.Sprintf("path %q must be relative to the commit root %s, which every path resolves against", path, root)
+		if rel, err := filepath.Rel(root, path); err == nil && rel != "." && rel != ".." && !strings.HasPrefix(filepath.ToSlash(rel), "../") {
+			msg += fmt.Sprintf("; pass %q", filepath.ToSlash(rel))
+		}
+		return fmt.Errorf("%s", msg)
 	}
 	cleaned := filepath.Clean(path)
 	if cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) || strings.HasPrefix(filepath.ToSlash(cleaned), "../") {
-		return fmt.Errorf("path %q must stay inside the repository", path)
+		return fmt.Errorf("path %q must stay inside the commit root %s, which every path resolves against", path, root)
 	}
 	return nil
 }

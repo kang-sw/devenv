@@ -927,6 +927,7 @@
   "js.tk.wk.history.tools": "History and restore go through the agent tools (wiki_query, wiki_update)",
   "js.tk.wk.key.chg": "changed on one side only",
   "js.tk.wk.key.conf": "overlap",
+  "js.tk.wk.leave": "Discard your unsaved wiki edit?",
   "js.tk.wk.match": "{0} of {1} pages match",
   "js.tk.wk.missing": "no such page: click to create it",
   "js.tk.wk.more": "More",

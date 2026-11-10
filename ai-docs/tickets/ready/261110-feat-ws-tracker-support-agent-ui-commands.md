@@ -3,8 +3,10 @@ title: "Tracker support agent drives the dashboard UI: the operations a user can
 related:
   261108-feat-ws-tracker-support-agent-chat: "the support conversation and its card channel this ticket extends"
   261110-feat-ws-tracker-search-query-grammar: "the open-search command's query is that ticket's grammar once it lands; the later of the two updates the tracker.ui description"
-sage-review-design: blocked
-sage-review-completeness: blocked
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-completeness-reviewed: 8ee60d3e759c24e9
+sage-review-design-reviewed: 8ee60d3e759c24e9
 ---
 
 # Tracker support agent drives the dashboard UI
@@ -37,11 +39,21 @@ conversation ring (`wslive`), and drawn by the dashboard.
    these", the agent shows cards in the chat instead.
 3. **The first command set is navigation only (user, (563) a):** open the
    search box with a query, focus an item and its thread, open a
-   notification's target, and switch store, scope, or view. Every write
+   notification's target, and switch scope or view, all within the
+   conversation's store. Every write
    (accept, status, comment) already has a tracker tool the agent calls
    directly. Rejected: also pressing UI buttons that write, such as accept
    or close ((563) b), which duplicates the tracker tools and puts a write
    behind a UI step.
+   **No store switch (user, (581) a):** for an item in another store the
+   agent answers in text naming the store, as `tracker.show` already does
+   (261108). Each store's drawer hosts its own Chat tab
+   (`dashboard.js:2967-2972`), so switching store would close the chat that
+   sent the command while the agent's tools stay pinned to its store.
+   Rejected: a terminal "switch store and leave the chat" command ((581) b,
+   strands the conversation); keeping the chat visible across the switch
+   ((581) c, detaches the chat from its drawer and reopens the store
+   pinning).
 4. **A new support tool (working name `tracker.ui`) carries the commands
    ((564)):** its result's first line `ui <op> <args>` is parsed by the
    stream the way `cardEvent` parses `card`. Rejected: overloading
@@ -52,8 +64,13 @@ conversation ring (`wslive`), and drawn by the dashboard.
    (the `SCOPES` keys, `tracker.js:262-266`), and `ui view <mode>` (a mode
    the current scope offers, `SCOPE_MODES`). The tool validates op and
    arguments before producing the result line: an unknown op, a scope or
-   mode outside those lists, or an alias not in the conversation's store is
-   a tool error naming the problem, and no marker is produced. A view mode
+   mode outside those lists, an alias not in the conversation's store, or a
+   comment id that is not a comment on that item's thread is a tool error
+   naming the problem, and no marker is produced. The scope keys and mode
+   keys are a Go copy of `SCOPES` / `SCOPE_MODES` (mode keys `list`,
+   `kanban`, `gantt`, `calendar`; the `all` scope's tree is `list`), with a
+   comment at both sites and a Go test that reads `tracker.js` and fails
+   when the two lists differ. A view mode
    the tab's current scope does not offer is ignored by the tab.
 5. **Fire-once is decided by the dashboard tab: a `ui` marker acts only
    when it arrives live, after the tab has loaded the conversation's
@@ -68,12 +85,22 @@ conversation ring (`wslive`), and drawn by the dashboard.
    Every `ui` marker renders in the chat as one muted line summarizing the
    command (op and arguments); a live marker renders the same line after it
    acts, so live and replayed history look alike.
+6. **"Open a notification's target" is the focus command with the target's
+   item alias and, for a thread event, its comment.** Notifications are
+   per-viewer feed entries (`focusTarget(root, evId)`, `tracker.js#L2004`)
+   whose IDs no tracker tool exposes, while the agent already reads item
+   aliases and thread comments through the tracker tools. Rejected: a
+   notification-ID argument, which would need a new tool surface to list
+   the viewer's notifications.
 7. **A command whose target is hidden by the chat moves the view and
    accepts that the chat's stream closes.** In the narrow layout
    (`tracker.js:1883-1890`) Items and the Chat tab share one pane, so
    search, scope, and view switch the pane to Items, which closes the
    chat's stream (`supShown`, `dashboard.js:3056-3060`); markers after that
-   point are met on reopen as replay and stay inert under Decision 5. The
+   point are met on reopen as replay and stay inert under Decision 5. Focus
+   is not one of them: it opens the item window (`openItemWindow`, then
+   `focusTarget` for a comment), an overlay that leaves the Chat tab and
+   its stream as they are, in both layouts. The
    `tracker.ui` description tells the agent to send a UI command as the
    last step of its reply. Rejected: keeping a hidden chat's stream open
    (changes the stream lifecycle 7e99671b set: open only while the chat tab
@@ -85,13 +112,6 @@ conversation ring (`wslive`), and drawn by the dashboard.
    of the two tickets lands second updates the `tracker.ui` description and
    the support prompt (`internal/wsagent/instructions/tracker-support.md`)
    to name the grammar and point at `tracker.query` `q`.
-6. **"Open a notification's target" is the focus command with the target's
-   item alias and, for a thread event, its comment.** Notifications are
-   per-viewer feed entries (`focusTarget(root, evId)`, `tracker.js#L2004`)
-   whose IDs no tracker tool exposes, while the agent already reads item
-   aliases and thread comments through the tracker tools. Rejected: a
-   notification-ID argument, which would need a new tool surface to list
-   the viewer's notifications.
 
 ## Constraints
 
@@ -105,6 +125,10 @@ conversation ring (`wslive`), and drawn by the dashboard.
   added to that list, admitted by the MCP support gate
   (`agents-plugin-tool/internal/mcp/server.go#L719-L725`), and parsed in both
   the Claude and Pi stream handlers.
+- The new tool goes through `hiddenUnlessAllowlisted` like `tracker.show`
+  (261108 Result): absent from `tools/list`, refused by `tools/call`, and
+  left out of `LeadToolNames` for any session not allowlisted for it, so a
+  lead never sees it.
 - Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for `agents-plugin/`, `agents-plugin-wsflow/`, `agents-plugin-tool/`)
 - Convention: ai-docs/manuals/ws-mcp.md (declared for `agents-plugin-tool/internal/mcp/`)
 
@@ -147,9 +171,11 @@ backends, the tool's refusals, the ring carrying the marker, and a replay
 delivering it unchanged), plus a headless-browser check on an isolated
 daemon that: a live command acts in every tab showing that chat and in no
 other tab; reloading or reconnecting renders the same markers inert; and
-at narrow width a search command switches the pane to Items.
+at narrow width a search command switches the pane to Items while a
+focus command leaves the chat open under the item window; and a search
+command shows its results without waiting out the typing debounce.
 
-## Blocked (2026-11-10)
+## Sage Review Round 1 (2026-11-10)
 
 ### Design Reviewer — block
 
@@ -169,13 +195,3 @@ at narrow width a search command switches the pane to Items.
 | 3 | ui <op> <args> grammar and op set not enumerated; invalid op/alias reporting | minor |
 | 4 | Stale route facts | minor |
 | 5 | Inert replay rendering unspecified | minor |
-
-## Open Decision Queue
-Last ID: (581)
-
-(581) [open] [policy] The first command set drops "switch store"; for an item in another store the agent answers in text naming the store.
-- Context: each store's drawer hosts its own Chat tab over that store's conversation (`dashboard.js:2967-2972`), and the agent's tools are pinned to the conversation's store (261108 Prior Decision on `tracker.show`). Switching store closes the drawer showing the chat (`openStore`, `tracker.js:3773-3780`), so the chat that sent the command closes and the agent cannot act in the store it switched to.
-- Alternative a: drop store switching from the first set; the agent says in text which store holds the item.
-- Alternative b: keep it as a terminal command that switches store and leaves the chat (the new store's chat is a separate conversation).
-- Alternative c: keep the hosting chat visible across the switch (the chat detaches from its store's drawer; a layout change and an unpinned conversation).
-> Recommend a: the store-pinned conversation (261108) and the per-store drawer both stay as they are; b works but strands the conversation, and c reopens the pinning decision.

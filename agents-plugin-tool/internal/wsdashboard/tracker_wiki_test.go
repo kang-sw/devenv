@@ -125,3 +125,114 @@ process.stdout.write(bad.join("\n"));
 		t.Errorf("wiki read cases failed:\n%s", s)
 	}
 }
+
+// TestTrackerWikiNavigationAsksBeforeDroppingAnEdit pins the leave guard of
+// the wiki panel (tracker.js wkLeaveOk): following a wiki: link, opening a
+// page, switching wiki, and starting a new wiki ask before they drop an edit
+// whose text changed (a new page's seeded heading counts as unchanged);
+// declining keeps the editor, the page, and an open item window; a clean
+// editor, a pick of the shown wiki, and the reopen after a save do not ask.
+// The cases execute under node when it is installed.
+func TestTrackerWikiNavigationAsksBeforeDroppingAnEdit(t *testing.T) {
+	data, err := dashboardFS.ReadFile("assets/tracker.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(data)
+	nav := regexp.MustCompile(`(?s)\n  function wkShow\(\) \{.*?\n  function wkCancel\(\) \{`).FindString(src)
+	act := regexp.MustCompile(`(?s)\n  function wkAct\(k, a\) \{.*?\n  function cardTeam\(v\) \{`).FindString(src)
+	if nav == "" || act == "" {
+		t.Fatal("tracker.js holds no wkShow ... wkCancel or wkAct ... cardTeam block")
+	}
+	nav = strings.TrimSuffix(nav, "function wkCancel() {")
+	act = strings.TrimSuffix(act, "function cardTeam(v) {")
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed; wiki leave guard cases not executed")
+	}
+	script := `
+var asked = 0, answer = false, bad = [], closed = 0, st;
+var window = { confirm: function (m) { asked++; if (m !== 'LEAVE') bad.push('prompt text ' + m); return answer; } };
+var ui = { layout: 'wide', win: false, edpv: {}, eatt: {} };
+function wsT(k) { return k === 'js.tk.wk.leave' ? 'LEAVE' : k; }
+function wk() { return st; }
+function render() {}
+function $() { return null; }
+function tabState() { return {}; }
+function closeItemWindow() { closed++; ui.win = false; }
+function wkHas(s, p) { return s.pages.paths.indexOf(p) >= 0; }
+function el(attrs) { return { getAttribute: function (k) { return attrs[k]; } }; }
+` + nav + act + `
+function check(what, got, want) { if (JSON.stringify(got) !== JSON.stringify(want)) bad.push(what + ': got ' + JSON.stringify(got) + ', want ' + JSON.stringify(want)); }
+function fresh() {
+  st = { mode: 'wiki', name: 'w', list: [{ name: 'w' }, { name: 'v' }], pages: { paths: ['index', 'a'], commit: 'c1' }, page: 'index',
+    doc: { path: 'index', content: 'old', commit: 'c1' }, docErr: null, edit: null, conflict: null, pick: true };
+  asked = 0; closed = 0; ui.win = false;
+}
+function dirty() { wkStartEdit('index', false, false); st.edit.text = 'changed'; }
+var navs = {
+  link: function () { wkOpenLink('w', 'a'); },
+  open: function () { wkAct('wk-open', el({ 'data-path': 'a' })); },
+  pick: function () { wkAct('wk-pick', el({ 'data-wiki': 'v' })); },
+  newwiki: function () { wkAct('wk-newwiki', el({})); }
+};
+Object.keys(navs).forEach(function (n) {
+  fresh(); dirty(); answer = false; var ed = st.edit;
+  navs[n]();
+  check(n + ' declined: asked', asked, 1);
+  check(n + ' declined: kept', [st.edit === ed, st.edit.text, st.name, st.page, !!st.creating], [true, 'changed', 'w', 'index', false]);
+  fresh(); dirty(); answer = true;
+  navs[n]();
+  check(n + ' accepted: asked', asked, 1);
+  check(n + ' accepted: dropped', st.edit, null);
+  fresh(); wkStartEdit('index', false, false);
+  navs[n]();
+  check(n + ' clean edit: asked', asked, 0);
+  fresh();
+  navs[n]();
+  check(n + ' no edit: asked', asked, 0);
+});
+
+// a new page is clean until its text leaves the seeded heading; its conflict merge base stays ''
+fresh(); wkStartEdit('dir/new-page', true, false);
+check('new page seed', [st.edit.text, st.edit.orig], ['# new page\n\n', '']);
+wkOpenLink('w', 'a');
+check('untouched new page: asked', asked, 0);
+fresh(); wkStartEdit('dir/new-page', true, false); st.edit.text += 'body'; answer = false;
+wkOpenLink('w', 'a');
+check('typed new page: asked', asked, 1);
+
+// declining a link from an item window leaves the window open; accepting closes it once
+fresh(); dirty(); ui.win = true; answer = false;
+wkOpenLink('w', 'a');
+check('declined link from window', [asked, closed, ui.win], [1, 0, true]);
+fresh(); dirty(); ui.win = true; answer = true;
+wkOpenLink('w', 'a');
+check('accepted link from window', [asked, closed, ui.win, st.page], [1, 1, false, 'a']);
+
+// a pick of the wiki shown drops nothing and does not ask
+fresh(); dirty();
+wkAct('wk-pick', el({ 'data-wiki': 'w' }));
+check('pick of the shown wiki', [asked, st.edit && st.edit.text], [0, 'changed']);
+
+// Edit again after a refused save is dirty against the saved "theirs" text
+fresh(); st.conflict = { c: { path: 'index', theirs: 'c2', theirsText: 'theirs' }, mine: 'mine', orig: 'old' };
+wkAct('wk-again', el({})); answer = false;
+wkOpenLink('w', 'a');
+check('edit again: asked', asked, 1);
+
+// the reopen after a save (the save clears the edit) does not ask
+fresh(); dirty(); st.edit = null;
+wkOpenLink('w', 'a');
+check('after save: asked', asked, 0);
+
+process.stdout.write(bad.join("\n"));
+`
+	out, err := exec.Command(node, "-e", script).CombinedOutput()
+	if err != nil {
+		t.Fatalf("node: %v\n%s", err, out)
+	}
+	if s := strings.TrimSpace(string(out)); s != "" {
+		t.Errorf("wiki leave guard cases failed:\n%s", s)
+	}
+}
