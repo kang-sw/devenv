@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 
 	"github.com/kang-sw/devenv/internal/gitbatch"
@@ -90,14 +91,17 @@ func gitExecutable(env []string) string {
 func batchSSHCommand(ctx context.Context, env []string, root string) string {
 	getenv := func(key string) string {
 		for _, kv := range env {
-			if k, v, ok := strings.Cut(kv, "="); ok && k == key {
+			k, v, ok := strings.Cut(kv, "=")
+			if ok && (k == key || (runtime.GOOS == "windows" && strings.EqualFold(k, key))) {
 				return v
 			}
 		}
 		return ""
 	}
 	return gitbatch.SSHCommand(getenv, func() string {
-		out, err := gitCommand(ctx, env, root, "config", "--get", "core.sshCommand").Output()
+		probe := gitCommand(ctx, env, root, "config", "--get", "core.sshCommand")
+		probe.Env = env
+		out, err := probe.Output()
 		if err != nil {
 			return ""
 		}

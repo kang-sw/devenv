@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsdashboard"
+	"github.com/kang-sw/devenv/internal/wsmailbox"
 )
 
 // The end-to-end smoke of the daemon-hosted path: the real Python launcher,
@@ -23,7 +24,7 @@ import (
 // server-initiated notification of its own, so pass-through of one is
 // covered by the launcher's fake-daemon tests in agents-plugin/tests.)
 
-func launcherTestPlugin(t *testing.T, bin string) (launcher string, env []string, cache string) {
+func launcherTestPlugin(t *testing.T, bin string) (launcher string, env []string, cache, cwd string) {
 	t.Helper()
 	python, err := exec.LookPath("python3")
 	if err != nil {
@@ -71,19 +72,30 @@ func launcherTestPlugin(t *testing.T, bin string) (launcher string, env []string
 	env, _ = dashboardTestEnv(t)
 	cache = cacheHomeFromEnv(t, env)
 	project := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(project, "ai-docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(project, "ai-docs", "_index.md"), []byte("# Index\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if out, err := exec.Command("git", "init", "-q", project).CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v\n%s", err, out)
 	}
+	// The manifest list is relative to the launcher's cwd, as Codex's
+	// .mcp.json writes it (cwd "." and "./config-manifest.json"); the hello
+	// must carry it absolute or the daemon reads it against its own cwd.
+	manifest := writeDashboardTestManifest(t, true)
+	cwd = filepath.Dir(manifest)
 	env = append(env,
 		"WS_MCP_BOOTSTRAP_BINARY="+bin,
 		"WS_MCP_RUNTIME_DIR="+filepath.Join(t.TempDir(), "runtime"),
 		"WS_RSRC_ROOT="+rsrc,
 		"WS_MCP_PROJECT_ROOT="+project,
-		"WS_MCP_CONFIG_MANIFESTS="+writeDashboardTestManifest(t, true),
+		"WS_MCP_CONFIG_MANIFESTS=./"+filepath.Base(manifest),
 		"WS_MCP_LAUNCHER_DEBUG=1",
 	)
 	_ = python
-	return launcher, env, cache
+	return launcher, env, cache, cwd
 }
 
 type launcherClient struct {
@@ -95,10 +107,11 @@ type launcherClient struct {
 	nextID int
 }
 
-func startLauncher(t *testing.T, launcher string, env []string, args ...string) *launcherClient {
+func startLauncher(t *testing.T, launcher, dir string, env []string, args ...string) *launcherClient {
 	t.Helper()
 	cmd := exec.Command("python3", append([]string{launcher}, args...)...)
 	cmd.Env = env
+	cmd.Dir = dir
 	stdinR, stdinW, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
@@ -173,11 +186,11 @@ func (c *launcherClient) notify(method string) {
 
 func TestLauncherServesThroughTheDaemonItStartsFromTheStagedCopy(t *testing.T) {
 	bin := buildDashboardTestBin(t, "")
-	launcher, env, cache := launcherTestPlugin(t, bin)
+	launcher, env, cache, cwd := launcherTestPlugin(t, bin)
 	versionOut, _ := exec.Command(bin, "version").Output()
 	version := strings.TrimSpace(string(versionOut))
 
-	client := startLauncher(t, launcher, env, "serve", "--stdio")
+	client := startLauncher(t, launcher, cwd, env, "serve", "--stdio")
 	init := client.call("initialize", map[string]any{"protocolVersion": "2025-03-26", "capabilities": map[string]any{}, "clientInfo": map[string]any{"name": "smoke", "version": "0"}})
 	result, _ := init["result"].(map[string]any)
 	serverInfo, _ := result["serverInfo"].(map[string]any)
@@ -200,6 +213,26 @@ func TestLauncherServesThroughTheDaemonItStartsFromTheStagedCopy(t *testing.T) {
 	}
 	if !strings.Contains(toolText(t, read), version) {
 		t.Fatalf("runtime.read answer %q does not name the version %q", toolText(t, read), version)
+	}
+
+	// The relative manifest reached the hosted server: its dashboard is
+	// declared, so the lead session this login opens registers.
+	ferrule := client.call("tools/call", map[string]any{"name": "ferrule", "arguments": map[string]any{"root": envValue(t, env, "WS_MCP_PROJECT_ROOT")}})
+	var key string
+	for _, segment := range strings.Split(toolText(t, ferrule), "\n") {
+		if k, ok := strings.CutPrefix(strings.TrimSpace(segment), "session_key:"); ok {
+			key = strings.TrimSpace(k)
+		}
+	}
+	if key == "" {
+		t.Fatalf("ferrule answered no session key: %v", ferrule)
+	}
+	if list := client.call("tools/call", map[string]any{"name": "todo.list", "arguments": map[string]any{"session_key": key}}); list["error"] != nil {
+		t.Fatalf("todo.list: %v", list["error"])
+	}
+	stateDir, _ := wsdashboard.Dir(cache)
+	if reg, err := wsdashboard.ReadRegistration(stateDir, wsmailbox.ReplyID(key)); err != nil || !reg.Live(time.Now()) {
+		t.Fatalf("hosted lead session not registered (the relative manifest was lost?): %+v, %v\nstderr:\n%s", reg, err, client.stderr.String())
 	}
 
 	// The daemon runs from the staged copy, and it alone.
@@ -226,7 +259,7 @@ func TestLauncherServesThroughTheDaemonItStartsFromTheStagedCopy(t *testing.T) {
 	}
 
 	// A second session connects to the running daemon without another start.
-	second := startLauncher(t, launcher, env, "serve", "--stdio")
+	second := startLauncher(t, launcher, cwd, env, "serve", "--stdio")
 	second.call("initialize", map[string]any{"protocolVersion": "2025-03-26", "capabilities": map[string]any{}, "clientInfo": map[string]any{"name": "smoke2", "version": "0"}})
 	if strings.Contains(second.stderr.String(), "starting the daemon") {
 		t.Fatalf("the second session started a daemon:\n%s", second.stderr.String())
@@ -254,12 +287,13 @@ func toolText(t *testing.T, resp map[string]any) string {
 
 func TestLauncherRunsMailboxWaitThroughTheDaemonLikeTheDirectCLI(t *testing.T) {
 	bin := buildDashboardTestBin(t, "")
-	launcher, env, _ := launcherTestPlugin(t, bin)
+	launcher, env, _, cwd := launcherTestPlugin(t, bin)
 
 	run := func(name string, argv ...string) (string, string, int) {
 		t.Helper()
 		cmd := exec.Command(name, argv...)
 		cmd.Env = env
+		cmd.Dir = cwd
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout, cmd.Stderr = &stdout, &stderr
 		err := cmd.Run()

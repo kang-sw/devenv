@@ -9,7 +9,6 @@ import (
 	"io"
 	"math"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime/debug"
@@ -1381,7 +1380,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		// Bind the worker key to the canonical worktree root so the worker's
 		// root-aware ws calls resolve against its own worktree, not the lead's.
 		mintPath := result.Path
-		if canon, cerr := canonicalGitRoot(result.Path); cerr == nil {
+		if canon, cerr := canonicalGitRoot(s.gitRunner(), result.Path); cerr == nil {
 			mintPath = canon
 		}
 		workerKey, err := s.sessions.mint(mintPath, roleLead, key)
@@ -2254,12 +2253,12 @@ func formatRuntimeInfo(info map[string]any) string {
 	return b.String()
 }
 
-func canonicalSetupRoot(root string) (string, error) {
+func canonicalSetupRoot(runner wsgit.Runner, root string) (string, error) {
 	root = strings.TrimSpace(root)
 	if root == "<cwd>" {
 		return "", fmt.Errorf("root must be an absolute repository path; the MCP server cannot infer the agent's current directory from %q", root)
 	}
-	return canonicalGitRoot(root)
+	return canonicalGitRoot(runner, root)
 }
 
 // handleLeadLogin implements the session-bootstrap tool (bootstrapToolName): canonicalize root, mint an
@@ -2276,7 +2275,7 @@ func (s *Server) handleLeadLogin(id json.RawMessage, arguments map[string]any) r
 	if strings.TrimSpace(rootArg) == "" {
 		return toolTextResponse(id, "", fmt.Errorf("session bootstrap: root is required"))
 	}
-	canonical, err := canonicalSetupRoot(rootArg)
+	canonical, err := canonicalSetupRoot(s.gitRunner(), rootArg)
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
@@ -3982,15 +3981,16 @@ func (s *Server) resolveToolRoot(arguments map[string]any, meta map[string]any) 
 	return "", fmt.Errorf("mandatory_session_key: root-aware ws tools require a session_key; if you are the lead, obtain one per ws:workflow-manual and pass it")
 }
 
-func canonicalGitRoot(root string) (string, error) {
+// canonicalGitRoot resolves root's worktree top level with runner's git
+// (a hosted server's runner carries the connection's environment).
+func canonicalGitRoot(runner wsgit.Runner, root string) (string, error) {
 	root = strings.TrimSpace(root)
 	if root == "" {
 		return "", fmt.Errorf("root is required")
 	}
-	cmd := exec.Command("git", "-C", root, "rev-parse", "--show-toplevel")
-	output, err := cmd.CombinedOutput()
+	output, err := runner.RunGit(context.Background(), root, "rev-parse", "--show-toplevel")
 	if err != nil {
-		return "", fmt.Errorf("root %q is not inside a Git worktree: %s", root, strings.TrimSpace(string(output)))
+		return "", fmt.Errorf("root %q is not inside a Git worktree: %v", root, err)
 	}
 	canonical := strings.TrimSpace(string(output))
 	if canonical == "" {

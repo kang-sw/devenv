@@ -289,6 +289,24 @@ func (s *Server) Drain(ctx context.Context) bool {
 	}
 }
 
+// Close releases what a server holds beyond its serve loop: the dashboard
+// nudge sender's goroutine and the tracker host. A stdio server's process
+// exit frees these; a daemon-hosted server must release them itself, or
+// every ended session keeps its Server alive for the daemon's lifetime.
+// Call it after ServeStdio has returned.
+func (s *Server) Close() {
+	d := &s.dashboard
+	d.mu.Lock()
+	if d.nudges != nil && !d.nudgesClosed {
+		close(d.nudges)
+	}
+	d.nudgesClosed = true
+	d.mu.Unlock()
+	if host := s.tracker.host; host != nil {
+		_ = host.Close()
+	}
+}
+
 // debugRing is one server's recent debug events, mirrored to a log file
 // when one is configured.
 type debugRing struct {

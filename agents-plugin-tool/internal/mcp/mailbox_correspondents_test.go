@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kang-sw/devenv/internal/wsgit"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
 )
 
@@ -58,7 +59,7 @@ func replyEntryFor(t *testing.T, key string) (wsmailbox.ReplyEntry, bool) {
 // (RUNNER~1) that canonicalization expands, so compare against this, not root.
 func sessionCwd(t *testing.T, root string) string {
 	t.Helper()
-	cwd, err := canonicalGitRoot(root)
+	cwd, err := canonicalGitRoot(wsgit.ExecRunner{}, root)
 	if err != nil {
 		t.Fatal(err)
 	}

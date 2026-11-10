@@ -138,6 +138,7 @@ func (s *proxyMCPSession) Serve(ctx context.Context, stream io.ReadWriteCloser) 
 		}
 	}()
 	_ = s.server.ServeStdio(ctx, stream, stream)
+	s.server.Close()
 }
 
 func (s *proxyMCPSession) Drain(ctx context.Context) { s.server.Drain(ctx) }

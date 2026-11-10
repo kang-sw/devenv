@@ -576,5 +576,86 @@ class LauncherProxyTest(unittest.TestCase):
         self.assertEqual(staged.stat().st_mtime_ns, first, "an up-to-date staged copy is left alone")
 
 
+class RecordingStream:
+    """A stream stub that records writes and whether it was closed."""
+
+    def __init__(self) -> None:
+        self.writes: list[bytes] = []
+        self.closed = False
+
+    def write(self, data: bytes) -> None:
+        self.writes.append(data)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class LauncherProxyReviewTest(unittest.TestCase):
+    """Fixes from the lite review: relative paths in the hello, a client that
+    leaves during a reconnect, and the compatibility probe's executable."""
+
+    def test_hello_env_makes_path_values_absolute_against_the_cwd(self) -> None:
+        cwd = os.path.abspath(os.path.join(os.sep, "work", "plugin"))
+        env = {
+            "WS_MCP_CONFIG_MANIFESTS": "./config-manifest.json;" + os.pathsep.join(["dash/d.json", ""]) + ";",
+            "WS_CACHE_HOME": "cache",
+            "WS_CONFIG_HOME": "",
+            "WS_RSRC_ROOT": os.path.join(cwd, "rsrc"),
+            "HOME": "relative-home-is-not-ours",
+        }
+        out = self.launcher.hello_env(env, cwd)
+        self.assertEqual(out["WS_MCP_CONFIG_MANIFESTS"], ";".join([os.path.join(cwd, "config-manifest.json"), os.path.join(cwd, "dash", "d.json")]))
+        self.assertEqual(out["WS_CACHE_HOME"], os.path.join(cwd, "cache"))
+        self.assertEqual(out["WS_CONFIG_HOME"], "", "an empty value stays empty")
+        self.assertEqual(out["WS_RSRC_ROOT"], os.path.join(cwd, "rsrc"), "an absolute value is unchanged")
+        self.assertEqual(out["HOME"], "relative-home-is-not-ours", "only ws path keys are touched")
+        self.assertEqual(env["WS_CACHE_HOME"], "cache", "the launcher's own environment is not modified")
+        hello = self.launcher.proxy_hello("mcp", ["serve", "--stdio"], {"WS_MCP_CONFIG_MANIFESTS": "./m.json"}, "0.48.16")
+        self.assertEqual(hello["env"]["WS_MCP_CONFIG_MANIFESTS"], os.path.join(os.getcwd(), "m.json"))
+
+    def test_replay_into_ends_the_session_when_the_client_already_left(self) -> None:
+        proxy = self.launcher.McpProxy(None, {}, ["serve", "--stdio"], io.BytesIO(), io.BytesIO(), io.StringIO())
+        proxy.initialize = {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}
+        proxy.initialized = b'{"jsonrpc":"2.0","method":"notifications/initialized"}\n'
+        proxy.inflight = {"n:7": 7}
+        proxy.stdin_closed = True
+        stream = RecordingStream()
+        proxy.replay_into(stream)
+        self.assertTrue(stream.closed, "nobody else will close the successor stream")
+        self.assertEqual(stream.writes, [], "no replay into a session the client left")
+        self.assertEqual(proxy.inflight, {})
+        self.assertIs(proxy.stream, stream)
+
+        # With the client still attached the replay goes through.
+        proxy.stdin_closed = False
+        proxy.inflight = {"n:7": 7}
+        live = RecordingStream()
+        proxy.replay_into(live)
+        self.assertFalse(live.closed)
+        self.assertEqual(len(live.writes), 2)
+        self.assertIn(self.launcher.PROXY_REPLAY_ID_PREFIX.encode(), live.writes[0])
+
+    def test_compat_probe_runs_the_staged_copy_on_the_daemon_path(self) -> None:
+        cache = Path(self.tmp.name) / "probe-cache"
+        env = {"WS_CACHE_HOME": str(cache)}
+        bin_dir = self.launcher.proxy_daemon_dir(env) / self.launcher.DAEMON_BIN_DIR_NAME
+        probe = self.launcher.compat_probe_binary(self.binary, env, "mcp")
+        self.assertEqual(probe.parent, bin_dir, "the probe runs the staged daemon copy, not the plugin-dir binary")
+        self.assertEqual(probe.read_bytes(), self.binary.read_bytes())
+        self.assertEqual(self.launcher.compat_probe_binary(self.binary, env, None), self.binary, "no proxy mode: the runtime binary itself")
+        self.assertEqual(self.launcher.compat_probe_binary(self.binary, {**env, "WS_MCP_LAUNCHER_DIRECT": "1"}, "mcp"), self.binary)
+        missing = Path(self.tmp.name) / "missing-binary"
+        self.assertEqual(self.launcher.compat_probe_binary(missing, env, "mcp"), missing, "a missing runtime is the caller's to report")
+
+    def setUp(self) -> None:
+        time.sleep = _REAL_SLEEP
+        self.launcher = load_launcher()
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.binary = Path(self.tmp.name) / "ws-mcp-0.48.16-abcdef123456"
+        self.binary.write_bytes(b"#!/bin/sh\nexit 0\n")
+        self.binary.chmod(0o755)
+
+
 if __name__ == "__main__":
     unittest.main()

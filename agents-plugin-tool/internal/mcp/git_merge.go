@@ -217,7 +217,7 @@ func mergeImplBranch(ctx context.Context, root string, runner wsgit.Runner, bran
 			gitFailure("worktree_inspection", "Cannot list worktrees", "", err, "worktree", "list", "--porcelain")
 			return
 		}
-		sessionRoot, cerr := canonicalGitRoot(root)
+		sessionRoot, cerr := canonicalGitRoot(runner, root)
 		if cerr != nil {
 			sessionRoot = filepath.Clean(root)
 		}

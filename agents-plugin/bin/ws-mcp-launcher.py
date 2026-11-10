@@ -1017,15 +1017,57 @@ def daemon_health(port: int, timeout: float) -> dict | None:
     return payload
 
 
+# Environment variables whose values are paths the hosted server reads. A
+# harness may set them relative to the launcher's cwd (Codex's .mcp.json
+# names "./config-manifest.json" with cwd "."); the daemon resolves relative
+# paths against its own cwd, so the hello carries them absolute.
+HELLO_PATH_ENV_KEYS = (
+    "WS_CACHE_HOME",
+    "WS_CONFIG_HOME",
+    "WS_RSRC_ROOT",
+    "WS_SKILLS_ROOT",
+    "WS_MCP_PROJECT_ROOT",
+    "WS_WORKTREE_DIR",
+    "WS_MCP_DEBUG_LOG",
+    "WS_MCP_RUNTIME_BINARY",
+    "WS_MCP_RUNTIME_DIR",
+)
+# A list of manifest paths, split on ";" and the platform separator as the
+# server splits it, rejoined with ";" (accepted everywhere).
+HELLO_PATH_LIST_ENV_KEYS = ("WS_MCP_CONFIG_MANIFESTS",)
+
+
+def hello_env(env: dict, cwd: str) -> dict:
+    """env for the hello, path-valued entries made absolute against cwd."""
+    out = dict(env)
+    for key in HELLO_PATH_ENV_KEYS:
+        value = out.get(key, "")
+        if value.strip():
+            out[key] = os.path.normpath(os.path.join(cwd, value.strip()))
+    for key in HELLO_PATH_LIST_ENV_KEYS:
+        value = out.get(key, "")
+        if not value.strip():
+            continue
+        parts = []
+        for part in value.split(";"):
+            for item in (part.split(os.pathsep) if os.pathsep != ";" else [part]):
+                if item.strip():
+                    parts.append(os.path.normpath(os.path.join(cwd, item.strip())))
+        out[key] = ";".join(parts)
+    return out
+
+
 def proxy_hello(mode: str, argv: list[str], env: dict, runtime_version: str) -> dict:
     """The first line on the stream: this connection's process context."""
+    cwd = os.getcwd()
+    env = hello_env(env, cwd)
     return {
         "protocol": PROXY_PROTOCOL,
         "mode": mode,
         "argv": list(argv),
-        "cwd": os.getcwd(),
+        "cwd": cwd,
         "project_root": env.get("WS_MCP_PROJECT_ROOT", ""),
-        "env": dict(env),
+        "env": env,
         "harness": env.get("WS_MCP_HARNESS", ""),
         "owner_pid": os.getpid(),
         "version": runtime_version,
@@ -1381,6 +1423,12 @@ class McpProxy:
     def replay_into(self, stream) -> None:
         with self.lock:
             self.stream = stream
+            if self.stdin_closed:
+                # The client left while we reconnected: nobody will close
+                # this stream for us, so end the session now.
+                self.inflight.clear()
+                stream.close()
+                return
             lost = list(self.inflight.values())
             self.inflight.clear()
             if self.initialize is not None:
@@ -1491,6 +1539,23 @@ def proxy_cli(link: DaemonLink, argv: list[str], stdout, stderr) -> int | None:
             return code if isinstance(code, int) else 1
 
 
+def compat_probe_binary(binary: Path, env: dict, mode) -> Path:
+    """The executable the compatibility probe runs.
+
+    On the daemon path the plugin-dir copy never executes: the probe runs the
+    staged daemon copy (byte-identical, so the verdict is the same), which keeps
+    one executable path per build for the endpoint protector. Off that path,
+    or when staging fails, the runtime binary itself.
+    """
+    if mode is None or proxy_disabled(env) or not binary.is_file():
+        return binary
+    try:
+        return stage_daemon_binary(binary, proxy_daemon_dir(env) / DAEMON_BIN_DIR_NAME)
+    except OSError as exc:
+        note(f"staging the runtime for the compatibility probe failed: {exc}")
+        return binary
+
+
 def proxy_disabled(env: dict) -> bool:
     return env.get("WS_MCP_LAUNCHER_DIRECT", "").strip().lower() in {"1", "true", "yes", "on"}
 
@@ -1518,6 +1583,7 @@ def main() -> int:
     # rebuild. A miss means the source changed (or no runtime exists) -> rebuild.
     source_fingerprint = local_devenv_source_fingerprint(plugin_dir, os_name) if local_enabled else None
 
+    mode = proxy_mode(sys.argv[1:])
     need_install = False
     if bootstrap_forced:
         note("forcing runtime install from bootstrap binary or url")
@@ -1528,7 +1594,7 @@ def main() -> int:
     elif install_forced and local_enabled:
         note("local devenv source changed or runtime missing; rebuilding from source")
         need_install = True
-    elif runtime_fully_compatible(binary, contract, runtime_dir, allow_same_minor=local_enabled):
+    elif runtime_fully_compatible(compat_probe_binary(binary, os.environ, mode), contract, runtime_dir, allow_same_minor=local_enabled):
         write_compatibility_stamp(binary, contract, contract_path, runtime_dir, source_fingerprint)
     else:
         need_install = True
@@ -1537,7 +1603,7 @@ def main() -> int:
         note("installing or repairing incompatible runtime")
         clear_compatibility_stamp(runtime_dir)
         install_runtime(plugin_dir, runtime_dir, binary, asset, contract, os_name, platform_name, force_local=local_enabled)
-        if not runtime_fully_compatible(binary, contract, runtime_dir, allow_same_minor=local_enabled):
+        if not runtime_fully_compatible(compat_probe_binary(binary, os.environ, mode), contract, runtime_dir, allow_same_minor=local_enabled):
             fail("incompatible ws-mcp runtime after repair")
         write_compatibility_stamp(binary, contract, contract_path, runtime_dir, source_fingerprint)
 
@@ -1554,7 +1620,6 @@ def main() -> int:
     wait_for_rsrc_tree(plugin_dir)
     apply_rsrc_root_env(plugin_dir, os.environ)
     apply_skills_root_env(plugin_dir, os.environ)
-    mode = proxy_mode(sys.argv[1:])
     if mode is not None and not proxy_disabled(os.environ):
         # The runtime's version is the one the contract accepted: the daemon's
         # build time, not a second run of the binary, tells a newer build apart.

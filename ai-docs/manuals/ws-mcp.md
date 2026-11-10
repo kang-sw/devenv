@@ -669,6 +669,11 @@ Finding and starting the daemon (`DaemonLink` in the launcher):
    than `runtime.json` lists; compatibility on this path is the version rule
    only).
 
+On the daemon path the compatibility probe (`runtime capabilities` on a
+stamp miss, see Runtime Repair And Drift) also runs the staged copy, so the
+plugin-directory binary never executes: one executable path per build is
+what keeps the endpoint protector to one prompt per version.
+
 Direct fallback: when the daemon cannot be reached or started within those
 budgets, or refuses the hello, the launcher writes one `ws-mcp-launcher: ...;
 running the direct path` line to stderr and runs the runtime binary as
@@ -701,6 +706,14 @@ hello, one JSON object:
  "env": {"<every variable of the launcher's environment>": "..."},
  "harness": "", "owner_pid": <launcher pid>, "version": "<runtime.json plugin_version>"}
 ```
+
+Path-valued ws variables in the hello (`WS_CACHE_HOME`, `WS_CONFIG_HOME`,
+`WS_RSRC_ROOT`, `WS_SKILLS_ROOT`, `WS_MCP_PROJECT_ROOT`, `WS_WORKTREE_DIR`,
+`WS_MCP_DEBUG_LOG`, `WS_MCP_RUNTIME_BINARY`, `WS_MCP_RUNTIME_DIR`, and each
+entry of `WS_MCP_CONFIG_MANIFESTS`) are made absolute against the launcher's
+cwd before sending: a harness may set them relative (Codex's `.mcp.json`
+names `./config-manifest.json` with cwd `.`), and the daemon would resolve
+them against its own cwd.
 
 The daemon answers one line, `{"ok": true, "version": "<daemon version>",
 "pid": <daemon pid>}` or `{"ok": false, "reason": "..."}` (a protocol other

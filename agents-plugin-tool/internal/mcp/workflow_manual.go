@@ -323,7 +323,7 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 	// do; a FRESH render has no session, and the sentinel resolves no root.
 	var canonical string
 	if key == freshBootstrapKey && root != "" {
-		canonical, err = canonicalSetupRoot(root)
+		canonical, err = canonicalSetupRoot(s.gitRunner(), root)
 		if err != nil {
 			return toolTextResponse(id, "", fmt.Errorf("workflow_manual: canonicalize root: %w", err))
 		}

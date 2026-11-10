@@ -63,6 +63,8 @@ type dashboardLink struct {
 
 	nudgeOnce sync.Once
 	nudges    chan wsdashboard.NudgeBody
+	// nudgesClosed is set by Close; a nudge queued after it is dropped.
+	nudgesClosed bool
 }
 
 // dashboardSession is one session key this process has seen on a keyed call
@@ -312,6 +314,9 @@ func (s *Server) dashboardNudge(sessionKey string) {
 // d.mu.
 func (s *Server) queueDashboardNudge(sess *dashboardSession) {
 	d := &s.dashboard
+	if d.nudgesClosed {
+		return
+	}
 	d.nudgeOnce.Do(func() {
 		d.nudges = make(chan wsdashboard.NudgeBody, dashboardNudgeQueue)
 		go s.runDashboardNudges(d.nudges)
