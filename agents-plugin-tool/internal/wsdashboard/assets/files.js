@@ -366,7 +366,9 @@
       var p = chain[i];
       open[p] = true;
       if (lists[p]) { step(i + 1); return; }
-      listDir(p).then(function (a) { lists[p] = a; step(i + 1); }, function () { delete open[p]; render(); });
+      // An answer for a root the explorer has left is dropped, not kept
+      // as the new root's listing of the same path.
+      listDir(p).then(function (a) { if (g !== gen) return; lists[p] = a; step(i + 1); }, function () { if (g !== gen) return; delete open[p]; render(); });
     })(0);
   }
 

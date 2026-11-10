@@ -169,11 +169,11 @@ func TestStatusMarks(t *testing.T) {
 	status := strings.Join([]string{
 		" M src/mod.go", "A  src/added.go", "AM src/addmod.go", "?? src/new.txt", " D src/gone.go", "D  src/staged-gone.go",
 		"?? src/fresh/", "MM src/deep/x/y.go", " D src/dead/only.go", " D src/mixed/a.go", " M src/mixed/b.go", "UU src/conflict.go",
-		" M other/elsewhere.go", " M top.go", "?? srcfile",
+		" M other/elsewhere.go", " M top.go", "?? srcfile", " A src/intent.go",
 	}, "\x00") + "\x00"
 	marks, dirs, gone := statusMarks([]byte(status), "src/")
 	want := map[string]string{"mod.go": "M", "added.go": "A", "addmod.go": "A", "new.txt": "U", "gone.go": "D", "staged-gone.go": "D",
-		"fresh": "U", "deep": "*", "dead": "*", "mixed": "*", "conflict.go": "M"}
+		"fresh": "U", "deep": "*", "dead": "*", "mixed": "*", "conflict.go": "M", "intent.go": "A"}
 	if !reflect.DeepEqual(marks, want) {
 		t.Errorf("marks under src/ = %v, want %v", marks, want)
 	}
@@ -224,6 +224,17 @@ func TestFSListCarriesGitMarks(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// A nested repository added as a gitlink is one path to git; a new
+	// commit inside it is a change the folder holds.
+	sub := filepath.Join(f.project, "sub")
+	writeFile(t, filepath.Join(sub, "s.txt"), "1")
+	gitRun(t, sub, "init", "-q")
+	gitRun(t, sub, "add", "-A")
+	gitRun(t, sub, "commit", "-q", "-m", "sub")
+	gitRun(t, f.project, "add", "sub")
+	gitRun(t, f.project, "commit", "-q", "-m", "link", "--", "sub")
+	writeFile(t, filepath.Join(sub, "s.txt"), "2")
+	gitRun(t, sub, "commit", "-q", "-a", "-m", "sub moves")
 	marked := func(dir string) map[string]string {
 		t.Helper()
 		code, a := fsList(t, f, lan, "dir="+url.QueryEscape(dir))
@@ -246,7 +257,7 @@ func TestFSListCarriesGitMarks(t *testing.T) {
 		return out
 	}
 	if got, want := marked(""), map[string]string{"mod.txt": "M", "new.txt": "U", "staged.txt": "A", "gone.txt (gone)": "D",
-		"fresh/": "U", "src/": "*", "dead/ (gone)": "*"}; !reflect.DeepEqual(got, want) {
+		"fresh/": "U", "src/": "*", "dead/ (gone)": "*", "sub/": "*"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("root marks = %v, want %v", got, want)
 	}
 	if got, want := marked("src"), map[string]string{"deep/": "*"}; !reflect.DeepEqual(got, want) {

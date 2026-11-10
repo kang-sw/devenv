@@ -305,7 +305,8 @@ func statusMarks(status []byte, prefix string) (marks map[string]string, dirs, g
 			marks[name] = "U"
 		case deleted:
 			marks[name] = "D"
-		case x == 'A' || (x == '?' && y == 'A'):
+		case x == 'A' || y == 'A':
+			// y is 'A' for a file added with intent only (git add -N).
 			marks[name] = "A"
 		default:
 			marks[name] = "M"
@@ -386,6 +387,10 @@ func listDir(full string) (entries []fsEntry, more, repo bool, err error) {
 		case e.Ignored:
 		case mark != "" && (e.Dir == markDirs[e.Name] || e.Gone):
 			e.Status = mark
+		case mark != "" && e.Dir:
+			// A directory git reports as one path, a submodule: it holds
+			// the change whatever its letter.
+			e.Status = "*"
 		case marks[""] != "":
 			e.Status = marks[""]
 		}
