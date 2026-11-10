@@ -175,6 +175,77 @@ at narrow width a search command switches the pane to Items while a
 focus command leaves the chat open under the item window; and a search
 command shows its results without waiting out the typing debounce.
 
+### Result (4ab4c3fe6) - 2026-11-10
+
+Landed in b181144ee, a860ccf83, d0a7073c6 (develop merge with the search
+grammar), 306f7dad1, and 4ab4c3fe6.
+
+- **Tool.** `tracker.ui {op: search|focus|scope|view, query | item
+  [+comment] | scope | mode}` (mcp/tracker_ui.go). It exists only for a
+  store's support conversation: it is hidden unless allowlisted, sits in
+  `SupportWSTools`, and a lead gets a refusal. Checks: an item of the
+  conversation's own store, a comment on that item's thread, a scope or mode
+  from `wslive.UIScopes` / `UIViewModes`, and a one-line query of at most 200
+  runes that `wstracker.ParseQuery` accepts. The answer's first line is
+  `ui <op> <arg> [<comment>]`.
+- **Channel.** Both backends read result lines through the shared
+  `resultTool` / `resultEvents` (wsagent/stream.go). A `ui` line becomes an
+  `Event.UI`, which the runner writes as a `kind: "ui"` ring entry
+  (wslive/ui.go, shared `lineAfterReply` with cards). The template draws it
+  as a muted `.sysline.uiline`; the i18n keys are in all 11 tables.
+- **Fire-once (Decision 5).** In the browser, each EventSource treats its
+  first `entries` region as history. A ui line acts only when a later region
+  adds it (dashboard.js supActUI, then tracker.js `uiCommand`). A command
+  that closes the stream stops the rest of its batch.
+- **Search.** It sets the Items box and skips the grammar ticket's typing
+  debounce through a one-shot `searchState().now` flag. It keeps the open
+  item window and keyboard focus.
+- **Decision 8.** The tracker.ui description and the support prompt name
+  the search grammar and tell the agent to find items with `tracker.query`
+  `q` first.
+
+Verification:
+- **Go tests** (remote ws-rgo, the lead's routing during the machine-load
+  incident): `go test ./internal/wslive/ ./internal/wsagent/ ./internal/mcp/
+  ./internal/wsdashboard/ ./internal/wsi18n/ ./internal/wstracker/
+  ./cmd/ws-mcp/ -count=1` all pass at 306f7dad1. mcp and wsagent pass again
+  at 4ab4c3fe6. `go vet` on the touched packages is clean, and so is
+  `node --check` on dashboard.js and tracker.js. This covers the packages the
+  change touches, not a full `./...`, per the lead's instruction.
+- **Headless check** on an isolated dev daemon (own WS_CACHE_HOME and
+  WS_CONFIG_HOME, port 39611, binary at 306f7dad1). Commands came from one
+  real claude run plus ring-file injection followed by /nudge. Results:
+  - Real run: a claude support turn's `tracker.ui search` filtered the rows
+    from 3 to 1.
+  - Live commands acted in both chat tabs and not in a Notify tab.
+  - Reload, tab switch, and drawer reopen kept the lines inert with stable
+    keys, and the next live line acted.
+  - Wide focus opened #tkwin on the comment (fx-flash) with the chat still
+    live.
+  - At 900 px wide, search switched the pane to Items and closed the
+    EventSource, while focus left narrow=chat with the stream open.
+  - The search request went out 3.7 ms after the line appeared, against
+    252 ms for typed input.
+  - No pageerror lines.
+
+Decisions:
+- The `ui` line carries no store. The tool checks the item against the
+  conversation's own store, and the dashboard acts only when that chat's
+  store is shown.
+- The Go copy of the scope and mode lists lives in wslive. A test reads the
+  embedded tracker.js to keep the two in sync.
+- Lite review (one pass) raised one Important finding. In the narrow layout,
+  the prompt's scope-then-search sequence loses the second command, because
+  the first one closes the stream. Fixed on the prompt side: at most one
+  search, scope, or view per reply, said in the prompt, the description, and
+  the tool's answer. A scope argument on `search` was rejected: the query is
+  the rest of the line, so a second argument has no clean delimiter.
+- From the same review's Minor findings, the text fixes were taken: a team
+  scope that the panel does not offer is a no-op, and a subagent's call does
+  not move the view. Two Minors were left as they are: the 404-retry
+  first-turn race and the drift-test text span. Both are rare and consistent
+  with Decision 5.
+
 ## Sage Review Round 1 (2026-11-10)
 
 ### Design Reviewer — block
