@@ -650,9 +650,11 @@ rule rooted elsewhere:  request pending --accept--> live --request returned / un
 - An assignment's status is `todo`, `doing`, `blocked`, `awaiting`, or `done`
   while live. An item's own status comes from its live assignments: all done
   means `done`, any blocked means `blocked`, then awaiting, then doing, then
-  todo, then `idea` when every live holder is at idea. A task always has a
-  live holder (the fallback below), so with no live assignment it is only
-  `pending` (a pending one shadows the fallback). Topics have none.
+  todo, then `idea` when every live holder is at idea. A task normally has
+  a live holder (the fallback below), so with no live assignment it is
+  `pending` (a pending one shadows the fallback), or `todo` when no
+  fallback holder exists (the creator removed and no live admin). Topics
+  have none.
 - **Fallback holder.** A task nobody else holds is held by its creator (the
   first admin in the roles admin order when the creator was removed): a
   derived record `<start event id>@<item id>><holder>`, live, by and to the
