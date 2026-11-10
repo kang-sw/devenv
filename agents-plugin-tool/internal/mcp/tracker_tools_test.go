@@ -875,8 +875,24 @@ func TestTrackerUpdateCreatorHoldsAnUnassignedTask(t *testing.T) {
 		t.Fatalf("the idea item alone shows status idea:\n%s", got)
 	}
 	text := f.trackerRefused(t, "tracker.update", map[string]any{"commands": `<tk:store name="me"><tk:item.unassign item="` + mine + `" assignee="ada"/></tk:store>`})
-	if !strings.Contains(text, "the store would flag this write:") {
+	if !strings.Contains(text, "the store would flag this write:") || !strings.Contains(text, "ada has no live or pending assignment on ") {
 		t.Fatalf("the creator's holding cannot be unassigned:\n%s", text)
+	}
+
+	// Assigning someone else replaces the creator's holding.
+	remote := initTrackerRemote(t)
+	f.trackerUpdate(t, `<tk:register store="team" member="ada" remote="`+remote+`"/>`)
+	bo := trackerOtherMachine(t)
+	if _, err := bo.Register(context.Background(), wstrackerhost.RegisterRequest{ID: "team", Remote: remote, Member: "bo", Profile: &wstracker.Profile{Given: "Bo"}}); err != nil {
+		t.Fatalf("bo joins: %v", err)
+	}
+	f.trackerUpdate(t, `<tk:sync store="team"/>`)
+	task := trackerWrote(t, f.trackerUpdate(t, `<tk:store name="team">
+<tk:item.create kind="task" title="for bo"/>
+<tk:item.assign item="$1" people="bo"/>
+</tk:store>`))["1"]
+	if got := f.trackerQuery(t, map[string]any{"store": "team", "item": task}); !strings.Contains(got, "- bo pending (by ada") || strings.Contains(got, "ada todo (by ada)") {
+		t.Fatalf("assigning bo replaces the creator's holding:\n%s", got)
 	}
 }
 

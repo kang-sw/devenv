@@ -224,6 +224,17 @@ func TestImageDataURLCachesByResolvedFile(t *testing.T) {
 		t.Fatalf("the edit read %d files in all, want 3", got)
 	}
 
+	// Another image extension naming the same file is another content type:
+	// it gets its own entry, never the png's data URL.
+	if os.Symlink(filepath.Join(root, "shots", "a.png"), filepath.Join(root, "alias.jpg")) == nil {
+		if got := ImageDataURL(root, "alias.jpg"); got != "data:image/jpeg;base64,QUJDRA==" {
+			t.Fatalf("ImageDataURL through a .jpg name = %.60q", got)
+		}
+		if got := ImageDataURL(root, "shots/a.png"); got != "data:image/png;base64,QUJDRA==" {
+			t.Fatalf("ImageDataURL after the .jpg name = %.60q", got)
+		}
+	}
+
 	if link {
 		if err := os.Remove(filepath.Join(root, "alias.png")); err != nil {
 			t.Fatal(err)

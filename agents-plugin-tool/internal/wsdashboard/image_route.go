@@ -217,14 +217,15 @@ const imageDataMax = 2 << 20
 // is empty when the route would refuse the path or the file is larger than
 // imageDataMax; the page then falls back to the route's URL (ImageSrc).
 // The containment checks run on every call; the encoded result is cached by
-// the resolved file's path, size, and modification time (imageDataCache),
-// so an unchanged image is read once while an edited one is read again.
+// the resolved file's path, size, and modification time and the content
+// type (imageDataCache), so an unchanged image is read once while an edited
+// one is read again.
 func ImageDataURL(root, path string) string {
 	file, ctype, info, ok := containedImageInfo(root, path)
 	if !ok {
 		return ""
 	}
-	key := imageDataKey{file: file, size: info.Size(), mod: info.ModTime().UnixNano()}
+	key := imageDataKey{file: file, ctype: ctype, size: info.Size(), mod: info.ModTime().UnixNano()}
 	if url, ok := imageData.get(key); ok {
 		return url
 	}
@@ -268,10 +269,11 @@ var imageData = newImageDataCache(imageDataCacheMax)
 // imageDataKey names one state of a resolved image file: the real path
 // containedImage returns after resolving every symlink, so two spellings of
 // one file share an entry, and its size and modification time, so an edit
-// misses.
+// misses. The content type follows the requested name's extension, so two
+// names of one file with different image extensions keep separate entries.
 type imageDataKey struct {
-	file      string
-	size, mod int64
+	file, ctype string
+	size, mod   int64
 }
 
 // imageDataCache is a bounded LRU of inlined images by imageDataKey.

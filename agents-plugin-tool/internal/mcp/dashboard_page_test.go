@@ -954,6 +954,43 @@ func TestDashboardBoardMemoOffWithDevAssets(t *testing.T) {
 	}
 }
 
+// TestDashboardBoardMemoFullReplacesItsOwnKey: at boardMemoMax entries, a
+// re-render of a key the memo holds replaces that entry and keeps the
+// others; only a new key starts the memo over.
+func TestDashboardBoardMemoFullReplacesItsOwnKey(t *testing.T) {
+	f := newWhiteboardFixture(t)
+	src := dashboardPageSource(t, nil)
+	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
+	f.update(t, `<wb:topic name="t"><wb:add class="technical"><wb:title>q one</wb:title></wb:add></wb:topic>`)
+	readPageOK(t, src, reg)
+	entries := func() int {
+		src.boards.mu.Lock()
+		defer src.boards.mu.Unlock()
+		return len(src.boards.entries)
+	}
+	src.boards.mu.Lock()
+	for i := len(src.boards.entries); i < boardMemoMax; i++ {
+		src.boards.entries[fmt.Sprintf("other-%d\x00en", i)] = boardMemoEntry{}
+	}
+	src.boards.mu.Unlock()
+
+	f.update(t, `<wb:topic name="t"><wb:add class="technical"><wb:title>q two</wb:title></wb:add></wb:topic>`)
+	before := boardRenders(src)
+	readPageOK(t, src, reg)
+	if boardRenders(src) == before {
+		t.Fatal("the board's update did not re-render it")
+	}
+	if got := entries(); got != boardMemoMax {
+		t.Fatalf("a re-render of a held key left %d entries, want %d", got, boardMemoMax)
+	}
+	if _, ok := src.ReadPageLang(reg, "ko"); !ok {
+		t.Fatal("ReadPageLang failed")
+	}
+	if got := entries(); got != 1 {
+		t.Fatalf("a new key past the bound left %d entries, want 1", got)
+	}
+}
+
 // TestDashboardReadSessionCountsOpenPolicyItems: the index's board count
 // comes with the session read, without rendering the board.
 func TestDashboardReadSessionCountsOpenPolicyItems(t *testing.T) {
