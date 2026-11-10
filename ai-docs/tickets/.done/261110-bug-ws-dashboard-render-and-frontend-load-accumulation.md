@@ -8,6 +8,7 @@ related:
   261110-feat-ws-tracker-support-agent-ui-commands: "its ui markers act only when they arrive live on the support chat stream, which Decision 10 must not drop"
 sage-review-design-reviewed: c1c9683997baf0a1
 sage-review-completeness-reviewed: c1c9683997baf0a1
+completed: 2026-11-10
 ---
 
 # Dashboard render cost and frontend load accumulation
