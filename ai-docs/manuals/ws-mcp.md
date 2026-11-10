@@ -461,10 +461,12 @@ text; a lead gets a refusal. `tracker.ui {op, ...}` is its dashboard UI
 command: `search {query}`, `focus {item, comment?}`, `scope {scope}`, or
 `view {mode}`, checked first (an item of its own store, a comment on that
 item's thread, the scope and mode keys of `wslive.UIScopes` /
-`UIViewModes`), answering `ui <op> <arg>`; the runner writes that as a `ui`
+`UIViewModes`, a query `wstracker.ParseQuery` accepts), answering `ui <op> <arg>`; the runner writes that as a `ui`
 ring entry, and the store chat acts on it once, only when it arrives live
 after the stream's first (history) entries region, so a reload or reconnect
-draws it as an inert line. `git.search` runs `log`, `show`, `grep`,
+draws it as an inert line. A narrow-layout search, scope, or view switch
+closes the chat's stream, so a later command in that reply is lost; the
+prompt and the tool's answer ask for at most one per reply. `git.search` runs `log`, `show`, `grep`,
 `blame`, or `ls-files` read-only (a per-subcommand flag allowlist, no git
 global options, external diff and textconv off, no pager, a 20 s timeout and
 64 KiB of output) in a repository at or under an allowed root: the project

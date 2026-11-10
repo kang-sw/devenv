@@ -99,7 +99,7 @@ func (s *Server) handleTrackerUI(ctx context.Context, id json.RawMessage, args m
 		if !slices.Contains(wslive.UIScopes, cmd.Arg) {
 			return refuse("scope %q is not an Items scope; pass one of %s", cmd.Arg, strings.Join(wslive.UIScopes, ", "))
 		}
-		does = "switches the Items scope to " + cmd.Arg
+		does = "switches the Items scope to " + cmd.Arg + " (a scope the user's panel does not offer, such as team for a user who leads no one, leaves the scope as it is)"
 	case wslive.UIView:
 		cmd.Arg = str("mode")
 		if !slices.Contains(wslive.UIViewModes, cmd.Arg) {
@@ -122,5 +122,5 @@ func formatTrackerUI(cmd wslive.UICommand, does string) string {
 	if cmd.Comment != "" {
 		line += " " + cmd.Comment
 	}
-	return fmt.Sprintf("%s\nThe user's chat %s, if the chat is open; nothing in the store changes. Send UI commands as the last step of your reply.\n", line, does)
+	return fmt.Sprintf("%s\nThe user's chat %s, if the chat is open; nothing in the store changes. Send UI commands as the last step of your reply, at most one search, scope, or view among them: on a narrow screen the first hides the chat and a later one is lost.\n", line, does)
 }

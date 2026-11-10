@@ -5028,7 +5028,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        trackerUITool,
-			"description": "Move the user's tracker view of your store, as the user could: search types a query into the Items search box, which takes the search grammar of tracker.query's q (the tracker playbook spells it out) and lists the current scope's matching items, so find the items with tracker.query q first; focus opens an item's window, at one of its thread's comments when comment is given, scope switches the Items scope, and view switches the Items view mode. For a store's support conversation only. The view moves only while the user has your chat open; a search, scope, or view switch may hide the chat on a narrow screen, so send UI commands as the last step of your reply. It never writes and never leaves your store.",
+			"description": "Move the user's tracker view of your store, as the user could: search types a query into the Items search box, which takes the search grammar of tracker.query's q (the tracker playbook spells it out) and lists the current scope's matching items, so find the items with tracker.query q first; focus opens an item's window, at one of its thread's comments when comment is given, scope switches the Items scope, and view switches the Items view mode. For a store's support conversation only. The view moves only while the user has your chat open; on a narrow screen a search, scope, or view switch hides the chat and any later command is lost, so send UI commands as the last step of your reply, with at most one search, scope, or view among them. It never writes and never leaves your store.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
