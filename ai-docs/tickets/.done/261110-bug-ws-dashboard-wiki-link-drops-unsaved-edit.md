@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 92ea43f3cd795b09
 sage-review-completeness-reviewed: 92ea43f3cd795b09
+completed: 2026-11-10
 ---
 
 # Dashboard: wiki navigation drops an unsaved wiki edit without asking
@@ -94,3 +95,32 @@ new wiki each prompt; declining keeps the draft; with a clean editor none of
 them prompt; following a `wiki:` link from an item window and declining
 leaves the item window open; saving or creating a page and then navigating
 does not prompt. The new string is one `js.tk.wk.*` key in every table.
+
+### Result (38079f5) - 2026-11-10
+
+- `tracker.js`: `wkLeaveOk` asks with `window.confirm(wsT("js.tk.wk.leave"))`
+  when `wkDirty(wk().edit)`, before `wkOpenPage` (tree opens and the
+  existing-wiki branch of `wkCreate`), `wkOpenLink` (checked before
+  `closeItemWindow`), `wk-pick` (only when the pick changes wiki), and
+  `wk-newwiki`. `wkOpenPage` became a guarded wrapper over the unchanged body,
+  now `wkGoPage`, so `wkOpenLink` asks once. Cancel, Esc, and taking theirs do
+  not ask; a save clears the edit, so the reopen after it does not ask.
+- Dirty baseline: a new page records its seeded heading in a new `edit.seed`
+  field, and `wkDirty` compares against `seed` when present, otherwise `orig`.
+  `orig` stays `''` for a new page because the refused-save view uses it as
+  the merge base. Edit again compares against theirs text.
+- `js.tk.wk.leave` added to all eleven tables; the mockup `i18n-en.js`
+  regenerated (`TestTrackerMockupI18nIsCurrent`).
+- Test: `TestTrackerWikiNavigationAsksBeforeDroppingAnEdit` runs the real
+  `wkShow`..`wkStartEdit` and `wkAct` blocks under node: declined/accepted/
+  clean/no-edit for link, tree open, pick, and new wiki; untouched vs typed new
+  page; item window kept on decline and closed once on accept; pick of the
+  shown wiki; Edit again; after save. Disabling the guard fails it.
+- Verification: `go test ./internal/wsdashboard/... ./internal/wsi18n/...`
+  ok; `go vet ./internal/wsdashboard/` clean; `node --check tracker.js` ok.
+  Headless Chromium on an isolated dev daemon (scratch `WS_CACHE_HOME` /
+  `WS_CONFIG_HOME`, port 39561): 22/22 checks pass, covering every case the
+  phase lists, plus cancel and Esc not asking. In the probe, wiki: links were
+  injected anchors clicked through the document handler, which is the same
+  path a rendered link takes.
+- Review (lite): clean.
