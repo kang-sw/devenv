@@ -86,10 +86,12 @@ func dashboardCommand(args []string) {
 		Log:         logw,
 		Proxy:       host,
 		Pprof:       wsdashboard.PprofEnabled(os.Getenv(wsdashboard.PprofEnv)),
-		Sessions:    sessions,
-		Worktrees:   sessions,
-		Agents:      agents,
-		Tracker:     &dashboardTracker{h: tracker, err: trackerErr},
+		// User-curated, so beside the config file rather than in the cache.
+		WorkspacesFile: wsdashboard.WorkspacesFilePath(configPath),
+		Sessions:       sessions,
+		Worktrees:      sessions,
+		Agents:         agents,
+		Tracker:        &dashboardTracker{h: tracker, err: trackerErr},
 		Support: wsagent.NewSupport(wsagent.SupportOptions{
 			Runner:    agents,
 			Dir:       dir,

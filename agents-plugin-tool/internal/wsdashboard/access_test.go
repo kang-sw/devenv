@@ -114,6 +114,14 @@ func guardedRoutes() []struct{ method, path, body string } {
 		// The pooled-worktree routes, served when the fixture reads pools.
 		{http.MethodGet, "/s/livesession/worktrees", ""},
 		{http.MethodPost, "/s/livesession/worktrees/cleanup", ""},
+		// The rail's workspace routes, served when the fixture keeps stored
+		// workspaces. Each body is one the route refuses or finds unknown,
+		// so a passing request stores nothing and runs no git.
+		{http.MethodPost, workspacePreviewRoute, `{"path":"relative/guard"}`},
+		{http.MethodPost, workspaceAddRoute, `{"path":"relative/guard"}`},
+		{http.MethodPost, workspaceForgetRoute, `{"path":"relative/guard"}`},
+		{http.MethodPost, worktreeOptionsRoute, `{"workspace":"relative/guard"}`},
+		{http.MethodPost, worktreeAddRoute, `{"workspace":"relative/guard","branch":"guard","new":true}`},
 		// The tracker routes, served when the fixture has a tracker host.
 		{http.MethodGet, "/tracker/stores", ""},
 		{http.MethodGet, "/tracker/stores/team/view", ""},
@@ -172,7 +180,7 @@ func TestLANModeServesTheMermaidScriptToAll(t *testing.T) {
 // Host, need the token like any other request; the token passes by query
 // parameter or cookie, and the endpoint file's shutdown token does not.
 func TestLANModeGuardsEveryRoute(t *testing.T) {
-	f := startPageFixture(t, lanMode, withTracker(newFakeTracker()), func(o *DaemonOptions) { o.Worktrees = &fakeWorktrees{} })
+	f := startPageFixture(t, lanMode, withTracker(newFakeTracker()), withWorkspaces(t), func(o *DaemonOptions) { o.Worktrees = &fakeWorktrees{} })
 	if err := os.WriteFile(filepath.Join(f.project, "shot.png"), []byte("png"), 0o644); err != nil {
 		t.Fatal(err)
 	}

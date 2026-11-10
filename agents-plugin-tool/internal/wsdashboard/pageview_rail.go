@@ -26,8 +26,12 @@ import (
 // folder. Under a repository every worktree git lists is a row, a worktree
 // with no session dimmed, except the ws pooled worktrees (under the
 // repository's worktree_pool roots), which show only while they hold a
-// listed session. The rail shows nothing the index and the session pages do
-// not already serve to the same viewers.
+// listed session. A workspace the user stored (workspaces.go) shows whether
+// or not it holds a session, and a stored repository lists its worktrees
+// and their branches without one: any viewer who can add a workspace can
+// list its worktrees anyway. Beyond the stored workspaces the rail shows
+// nothing the index and the session pages do not already serve to the same
+// viewers.
 
 // railMessageRunes bounds a row's last message; the row shows one line.
 const railMessageRunes = 160
@@ -38,6 +42,9 @@ type RailView struct {
 	// Live counts the live sessions; CountPolicy sums their open policy
 	// items.
 	Live, CountPolicy int
+	// CanAdd reports a daemon that keeps stored workspaces: the page then
+	// shows the add-workspace and add-worktree buttons.
+	CanAdd bool
 }
 
 // RailWorkspace is one repository or plain folder.
@@ -47,6 +54,9 @@ type RailWorkspace struct {
 	// Repo marks a repository: its sessions sit under Worktrees. A plain
 	// folder lists them directly in Sessions and Ended.
 	Repo bool
+	// Stored marks a workspace in the stored list; the page offers to
+	// forget it.
+	Stored bool
 	// Live counts the workspace's live sessions.
 	Live      int
 	Worktrees []RailWorktree
@@ -148,8 +158,24 @@ type railWorktreeEntry struct {
 // endedSessionWindow. repos holds the worktree lists read so far, by
 // repository root; a repository without one shows the worktrees its
 // sessions are rooted in.
-func buildRailView(sessions []railInput, repos map[string]railRepo, now time.Time) RailView {
+//
+// stored are the stored workspaces. A session in a repository always sits
+// under its repository, which is one workspace with a stored one of the
+// same root. A session in no repository joins the stored plain folder its
+// root is at or under (the longest such folder), so a stored parent folder
+// never takes a repository's sessions; without one its root is a workspace
+// of its own. A stored workspace shows without sessions too.
+func buildRailView(sessions []railInput, repos map[string]railRepo, stored []storedWorkspace, now time.Time) RailView {
 	var view RailView
+	storedAt := map[string]bool{}
+	var folders []string
+	for _, w := range stored {
+		p := filepath.Clean(w.Path)
+		storedAt[p] = true
+		if !w.Repo {
+			folders = append(folders, p)
+		}
+	}
 	type member struct {
 		in  railInput
 		row RailRow
@@ -167,11 +193,30 @@ func buildRailView(sessions []railInput, repos map[string]railRepo, now time.Tim
 		if in.Repo != "" {
 			key = filepath.Clean(in.Repo)
 			repoOf[key] = true
+		} else {
+			best := ""
+			for _, f := range folders {
+				if railPathUnder(f, key) && len(f) > len(best) {
+					best = f
+				}
+			}
+			if best != "" {
+				key = best
+			}
 		}
 		byWS[key] = append(byWS[key], member{in: in, row: row})
 		if live {
 			view.Live++
 			view.CountPolicy += row.CountPolicy
+		}
+	}
+	for _, w := range stored {
+		p := filepath.Clean(w.Path)
+		if _, ok := byWS[p]; !ok {
+			byWS[p] = nil
+			if w.Repo {
+				repoOf[p] = true
+			}
 		}
 	}
 	keys := make([]string, 0, len(byWS))
@@ -181,7 +226,7 @@ func buildRailView(sessions []railInput, repos map[string]railRepo, now time.Tim
 	sort.Strings(keys)
 	for _, key := range keys {
 		members := byWS[key]
-		ws := RailWorkspace{Name: lastElem(key), Path: key, Repo: repoOf[key]}
+		ws := RailWorkspace{Name: lastElem(key), Path: key, Repo: repoOf[key], Stored: storedAt[key]}
 		for _, m := range members {
 			if m.row.Live {
 				ws.Live++

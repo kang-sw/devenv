@@ -30,9 +30,10 @@ const railListRepoKey = "rail:worktrees"
 // RepoWorktreeSource is an optional interface of a WorktreeSource: the
 // worktrees of one repository and its worktree pool roots, which the
 // session rail lists. regs are the registrations of the sessions the rail
-// shows in the repository, so the pool roots can resolve as one of their
-// sessions resolves its worktree_pool (a source falls back to the default
-// value when none resolves). What it returns reaches a browser, so it never
+// shows in the repository (none for a stored workspace without a session),
+// so the pool roots can resolve as one of their sessions resolves its
+// worktree_pool (a source falls back to the default value when none
+// resolves). What it returns reaches a browser, so it never
 // carries a session key.
 type RepoWorktreeSource interface {
 	ReadRepoWorktrees(repo string, regs []Registration) (RepoWorktrees, error)
@@ -69,7 +70,11 @@ type railLister struct {
 	now   func() time.Time
 	// changed is called after a read that changed a list.
 	changed func()
-	stop    <-chan struct{}
+	// sweep runs before each full read, on the lister's goroutine and never
+	// under mu: the stored workspaces' own re-read (workspaceStore.sweep).
+	// It reports a change the rail shows. Nil sweeps nothing.
+	sweep func() bool
+	stop  <-chan struct{}
 
 	mu      sync.Mutex
 	viewers int
@@ -152,6 +157,27 @@ func (l *railLister) refresh() bool {
 	l.full = true
 	signal(l.wake)
 	return true
+}
+
+// reread asks for an immediate read of one repository, the others keeping
+// their lists: after the daemon added a worktree to it. With no page
+// watching, the list it holds is dropped instead, so the next render that
+// wants it reads it.
+func (l *railLister) reread(repo string) {
+	if l == nil {
+		return
+	}
+	key := filepath.Clean(repo)
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.viewers == 0 {
+		delete(l.repos, key)
+		return
+	}
+	if _, ok := l.wanted[key]; ok {
+		l.pending[key] = true
+		signal(l.wake)
+	}
 }
 
 // lists records the repositories a render shows (with their sessions'
@@ -238,6 +264,9 @@ func (l *railLister) run() {
 		l.pending = map[string]bool{}
 		l.mu.Unlock()
 		changed := false
+		if full && l.sweep != nil && l.sweep() {
+			changed = true
+		}
 		for repo, regs := range todo {
 			r := l.readRepo(repo, regs)
 			l.mu.Lock()
