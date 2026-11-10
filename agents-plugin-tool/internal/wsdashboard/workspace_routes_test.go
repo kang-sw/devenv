@@ -159,7 +159,8 @@ func TestWorkspacePreviewAddAndForget(t *testing.T) {
 			t.Errorf("add of %q = %d %q, want 409 with the reason", c.path, code, body)
 		}
 	}
-	if got := preview(`"` + sub + `/"`); !got.OK || got.Path != sub || got.Root != root || !got.Repo || got.Result != string(workspaceAdded) || !strings.Contains(got.Note, root) {
+	subPreview := preview(`"` + sub + `/"`)
+	if got := subPreview; !got.OK || got.Path != sub || got.Root != root || !got.Repo || got.Result != string(workspaceAdded) || !strings.Contains(got.Note, root) {
 		t.Errorf("preview of a repository subfolder = %+v, want an add of the root %s, named in the note", got, root)
 	}
 	if got := preview(root); !got.OK || got.Root != root || got.Note != "" {
@@ -181,8 +182,8 @@ func TestWorkspacePreviewAddAndForget(t *testing.T) {
 		}
 		return out
 	}
-	if got := add(sub); got.Result != string(workspaceAdded) || got.Root != root || !got.Repo || !strings.Contains(got.Message, root) {
-		t.Errorf("add of a subfolder = %+v, want the root %s added and named", got, root)
+	if got := add(sub); got.Result != string(workspaceAdded) || got.Root != root || !got.Repo || !strings.Contains(got.Message, root) || got.Message == subPreview.Note {
+		t.Errorf("add of a subfolder = %+v, want the root %s added and named, in other words than the preview's %q", got, root, subPreview.Note)
 	}
 	waitRegionHolding(t, live, regionRail, `data-ws="`+root+`"`)
 	waitRegionHolding(t, live, regionRail, "topic/linked")

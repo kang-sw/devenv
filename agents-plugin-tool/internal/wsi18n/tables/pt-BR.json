@@ -1180,5 +1180,7 @@
   "js.rail.wt.create": "Criar",
   "js.rail.cancel": "Cancelar",
   "js.rail.forgot": "{0} saiu da lista de workspaces; seus arquivos não foram tocados",
-  "js.rail.unknown": "O painel não mostra mais este workspace"
+  "js.rail.unknown": "O painel não mostra mais este workspace",
+  "rail.ws.preview.root": "A pasta colada está dentro de um repositório; a raiz {0} será adicionada",
+  "rail.ws.preview.merged": "{0} é um worktree de {1}; será exibido em {1}"
 }

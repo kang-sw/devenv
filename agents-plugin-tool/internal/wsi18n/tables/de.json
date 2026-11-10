@@ -1180,5 +1180,7 @@
   "js.rail.wt.create": "Erstellen",
   "js.rail.cancel": "Abbrechen",
   "js.rail.forgot": "{0} aus der Workspace-Liste entfernt; seine Dateien bleiben unberührt",
-  "js.rail.unknown": "Die Leiste zeigt diesen Workspace nicht mehr"
+  "js.rail.unknown": "Die Leiste zeigt diesen Workspace nicht mehr",
+  "rail.ws.preview.root": "Der eingefügte Ordner liegt in einem Repository; dessen Stammverzeichnis {0} wird hinzugefügt",
+  "rail.ws.preview.merged": "{0} ist ein Worktree von {1} und wird unter {1} angezeigt"
 }

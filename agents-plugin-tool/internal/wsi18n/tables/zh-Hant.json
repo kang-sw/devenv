@@ -1180,5 +1180,7 @@
   "js.rail.wt.create": "建立",
   "js.rail.cancel": "取消",
   "js.rail.forgot": "已從工作區清單中移除 {0}；其檔案未受影響",
-  "js.rail.unknown": "側欄已不再顯示此工作區"
+  "js.rail.unknown": "側欄已不再顯示此工作區",
+  "rail.ws.preview.root": "貼上的資料夾位於儲存庫內；將新增其根目錄 {0}",
+  "rail.ws.preview.merged": "{0} 是 {1} 的工作樹；將顯示在 {1} 下"
 }

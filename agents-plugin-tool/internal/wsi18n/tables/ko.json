@@ -1180,5 +1180,7 @@
   "js.rail.wt.create": "만들기",
   "js.rail.cancel": "취소",
   "js.rail.forgot": "{0}을(를) 워크스페이스 목록에서 뺐습니다. 파일은 그대로입니다",
-  "js.rail.unknown": "이 워크스페이스는 더 이상 목록에 없습니다"
+  "js.rail.unknown": "이 워크스페이스는 더 이상 목록에 없습니다",
+  "rail.ws.preview.root": "붙여넣은 폴더는 저장소 안에 있습니다. 저장소 루트 {0}을(를) 추가합니다",
+  "rail.ws.preview.merged": "{0}은(는) {1}의 워크트리입니다. {1} 아래에 표시됩니다"
 }

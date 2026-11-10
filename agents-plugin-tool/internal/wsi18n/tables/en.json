@@ -1180,5 +1180,7 @@
   "js.rail.wt.create": "Create",
   "js.rail.cancel": "Cancel",
   "js.rail.forgot": "Removed {0} from the workspace list; its files are untouched",
-  "js.rail.unknown": "The rail no longer shows this workspace"
+  "js.rail.unknown": "The rail no longer shows this workspace",
+  "rail.ws.preview.root": "The pasted folder is inside a repository; its root {0} will be added",
+  "rail.ws.preview.merged": "{0} is a worktree of {1}; it will show under {1}"
 }

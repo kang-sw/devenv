@@ -143,8 +143,7 @@ func pathRefusalText(lang string, refusal pathRefusal, path string) string {
 	return wsi18n.T(lang, "rail.ws.refuse.relative")
 }
 
-// workspaceAddText is an add's line in lang: the toast after an add, or
-// the preview's note before one.
+// workspaceAddText is an add's line in lang: the toast after an add.
 func workspaceAddText(lang string, a workspaceAdd) string {
 	switch {
 	case a.Result == workspaceMerged:
@@ -157,6 +156,20 @@ func workspaceAddText(lang string, a workspaceAdd) string {
 		return wsi18n.T(lang, "rail.ws.added.root", a.Root)
 	}
 	return wsi18n.T(lang, "rail.ws.added", a.Root)
+}
+
+// workspacePreviewText is the preview's note in lang for an add that has
+// not happened: empty when the add would plainly add the pasted path.
+func workspacePreviewText(lang string, a workspaceAdd) string {
+	switch {
+	case a.Result == workspaceMerged:
+		return wsi18n.T(lang, "rail.ws.preview.merged", a.Worktree, a.Root)
+	case a.Result == workspaceKnown:
+		return workspaceAddText(lang, a)
+	case a.Root != a.Path:
+		return wsi18n.T(lang, "rail.ws.preview.root", a.Root)
+	}
+	return ""
 }
 
 // handleWorkspacePreview serves the preview route: always 200 with a
@@ -177,11 +190,7 @@ func (d *Daemon) handleWorkspacePreview(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, wsi18n.T(lang, "rail.ws.storefailed"), http.StatusInternalServerError)
 		return
 	}
-	out := workspacePreview{OK: true, Path: a.Path, Root: a.Root, Repo: a.Repo, Result: string(a.Result)}
-	if a.Result != workspaceAdded || a.Root != a.Path {
-		out.Note = workspaceAddText(lang, a)
-	}
-	writeJSON(w, http.StatusOK, out)
+	writeJSON(w, http.StatusOK, workspacePreview{OK: true, Path: a.Path, Root: a.Root, Repo: a.Repo, Result: string(a.Result), Note: workspacePreviewText(lang, a)})
 }
 
 // handleWorkspaceAdd serves the add route: 200 with a workspaceAddAnswer (a

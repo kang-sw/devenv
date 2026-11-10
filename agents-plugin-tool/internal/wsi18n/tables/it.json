@@ -1180,5 +1180,7 @@
   "js.rail.wt.create": "Crea",
   "js.rail.cancel": "Annulla",
   "js.rail.forgot": "{0} tolto dall'elenco dei workspace; i suoi file non sono stati toccati",
-  "js.rail.unknown": "La barra non mostra più questo workspace"
+  "js.rail.unknown": "La barra non mostra più questo workspace",
+  "rail.ws.preview.root": "La cartella incollata si trova in un repository; verrà aggiunta la sua radice {0}",
+  "rail.ws.preview.merged": "{0} è un worktree di {1}; verrà mostrato sotto {1}"
 }

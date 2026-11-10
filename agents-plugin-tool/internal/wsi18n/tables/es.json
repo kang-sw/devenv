@@ -1180,5 +1180,7 @@
   "js.rail.wt.create": "Crear",
   "js.rail.cancel": "Cancelar",
   "js.rail.forgot": "Se quitó {0} de la lista de workspaces; sus archivos no se tocaron",
-  "js.rail.unknown": "El panel ya no muestra este workspace"
+  "js.rail.unknown": "El panel ya no muestra este workspace",
+  "rail.ws.preview.root": "La carpeta pegada está dentro de un repositorio; se añadirá su raíz {0}",
+  "rail.ws.preview.merged": "{0} es un worktree de {1}; se mostrará bajo {1}"
 }

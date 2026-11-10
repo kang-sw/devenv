@@ -1180,5 +1180,7 @@
   "js.rail.wt.create": "Créer",
   "js.rail.cancel": "Annuler",
   "js.rail.forgot": "{0} retiré de la liste des espaces de travail ; ses fichiers ne sont pas touchés",
-  "js.rail.unknown": "Le panneau n'affiche plus cet espace de travail"
+  "js.rail.unknown": "Le panneau n'affiche plus cet espace de travail",
+  "rail.ws.preview.root": "Le dossier collé se trouve dans un dépôt ; sa racine {0} sera ajoutée",
+  "rail.ws.preview.merged": "{0} est un worktree de {1} ; il s'affichera sous {1}"
 }

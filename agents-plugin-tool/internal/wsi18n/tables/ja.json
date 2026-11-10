@@ -1180,5 +1180,7 @@
   "js.rail.wt.create": "作成",
   "js.rail.cancel": "キャンセル",
   "js.rail.forgot": "{0} をワークスペース一覧から外しました。ファイルはそのままです",
-  "js.rail.unknown": "このワークスペースはもう一覧にありません"
+  "js.rail.unknown": "このワークスペースはもう一覧にありません",
+  "rail.ws.preview.root": "貼り付けたフォルダーはリポジトリ内にあります。そのルート {0} を追加します",
+  "rail.ws.preview.merged": "{0} は {1} の Worktree です。{1} の下に表示されます"
 }
