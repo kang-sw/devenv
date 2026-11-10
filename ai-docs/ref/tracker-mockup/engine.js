@@ -543,7 +543,14 @@
 
       case 'item.unassign':
         it = needItem(S, p.item);
-        if (p.root != null) { // the author's rules rooted at `root`, with their requests and records
+        if (p.rule != null) { // one rule of the author's, with its request and records
+          if (p.assignee) rej('item.unassign takes assignee or rule, not both');
+          if (typeof p.rule !== 'string') rej('rule must be a rule id');
+          q = S.rules[p.rule];
+          if (!q || q.item !== it.id || q.ended) rej(alias(p.rule) + ' is not an open rule on ' + it.alias);
+          if (q.by !== a) rej('only the rule\'s author (' + q.by + ') ends ' + alias(p.rule));
+          if (p.root != null && p.root !== q.root) rej(alias(p.rule) + ' is rooted at ' + q.root + ', not ' + p.root);
+        } else if (p.root != null) { // the author's rules rooted at `root`, with their requests and records
           if (p.assignee) rej('item.unassign takes assignee or root, not both');
           if (!openRules(S, it.id).some(function (x) { return x.by === a && x.root === p.root; }))
             rej(a + ' has no rule rooted at ' + p.root + ' on ' + it.alias);
@@ -782,6 +789,14 @@
       if (x.rule === rule.id && !x.ruleRequest && x.state === 'live') endRec(S, x, n, 'unassigned', C);
     });
   }
+  // item.unassign {root} or {rule}: a pending request is withdrawn, an accepted one
+  // unassigned, then the rule ends with its records.
+  function unassignRule(S, rule, n, C) {
+    var q = rule.request && S.asg[rule.request];
+    if (q && q.state === 'pending') endRec(S, q, n, 'withdrawn', C);
+    else if (q && q.state === 'accepted') { q.state = 'unassigned'; q.ended = n; }
+    endRule(S, rule, n, C);
+  }
   function assignPerson(S, n, item, t, a, completion) { // (273) below the author = forced (live), anyone else = pending
     if (!S.members[t] || openRec(S, item, t)) return;
     var forced = t === a || below(S.members, a, t);
@@ -946,14 +961,11 @@
         break;
       }
       case 'item.unassign':
-        if (p.root != null) {
-          openRules(S, p.item).forEach(function (rule) {
-            if (rule.by !== a || rule.root !== p.root) return;
-            q = rule.request && S.asg[rule.request];
-            if (q && q.state === 'pending') endRec(S, q, n, 'withdrawn', C);
-            else if (q && q.state === 'accepted') { q.state = 'unassigned'; q.ended = n; }
-            endRule(S, rule, n, C);
-          });
+        if (p.rule != null) {
+          q = S.rules[p.rule];
+          if (q && q.item === p.item && !q.ended && q.by === a) unassignRule(S, q, n, C);
+        } else if (p.root != null) {
+          openRules(S, p.item).forEach(function (rule) { if (rule.by === a && rule.root === p.root) unassignRule(S, rule, n, C); });
         } else if (p.assignee) {
           r = openRec(S, p.item, p.assignee);
           if (!r) { q = handedRec(S, p.item, p.assignee, n); r = q && reverseHanded(S, q, n, C); }
@@ -1133,7 +1145,8 @@
     if (it.kind === 'topic') return null;
     var recs = recsOn(g.S, it.id), live = recs.filter(function (r) { return r.state === 'live'; });
     if (!live.length) {
-      if (recs.some(function (r) { return r.state === 'pending'; })) return 'pending';
+      // a pending rule request holds nothing, so it does not make the item pending
+      if (recs.some(function (r) { return r.state === 'pending' && !r.ruleRequest; })) return 'pending';
       // A review-stage item holds no live or pending assignment (an assign clears it).
       if (it.stage === 'review') return 'review';
       // the latest ended one; among ties (one event ended several) the first

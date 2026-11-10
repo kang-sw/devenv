@@ -618,7 +618,25 @@ func (s *state) check(n *node) rejection {
 		if r != "" {
 			return r
 		}
-		if !p.null("root") { // the author's rules rooted at root, with their requests and records
+		if !p.null("rule") { // one rule of the author's, with its request and records
+			if p.truthy("assignee") {
+				return "item.unassign takes assignee or rule, not both"
+			}
+			id, ok := p["rule"].(string)
+			if !ok {
+				return "rule must be a rule id"
+			}
+			ru := s.ruleByID[id]
+			if ru == nil || ru.item != it.id || ru.ended != "" {
+				return rejection(alias(id) + " is not an open rule on " + it.alias)
+			}
+			if ru.by != a {
+				return rejection("only the rule's author (" + ru.by + ") ends " + alias(id))
+			}
+			if !p.null("root") && p["root"] != ru.root {
+				return rejection(alias(id) + " is rooted at " + ru.root + ", not " + p.disp("root"))
+			}
+		} else if !p.null("root") { // the author's rules rooted at root, with their requests and records
 			if p.truthy("assignee") {
 				return "item.unassign takes assignee or root, not both"
 			}

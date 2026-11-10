@@ -360,7 +360,8 @@ func memberOf(stream string) string {
 }
 
 // itemStatus derives an item's own status from its live assignments. A
-// review-stage item holding no live or pending assignment is "review".
+// review-stage item holding no live or pending assignment is "review". A
+// pending rule request holds nothing, so it does not make the item pending.
 func (r *replayed) itemStatus(it *item) string {
 	if it.kind == "topic" {
 		return ""
@@ -373,7 +374,7 @@ func (r *replayed) itemStatus(it *item) string {
 		switch {
 		case x.state == "live":
 			live = append(live, x)
-		case x.state == "pending":
+		case x.state == "pending" && !x.ruleRequest:
 			pending = true
 		}
 		// the latest ended one; among ties (one event ended several) the first

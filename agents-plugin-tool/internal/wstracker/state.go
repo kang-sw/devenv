@@ -675,6 +675,21 @@ func (s *state) endRule(ru *rule, n *node) {
 	}
 }
 
+// unassignRule ends ru for item.unassign {root} or {rule}: a pending request
+// is withdrawn, an accepted one unassigned, then the rule ends with its
+// records.
+func (s *state) unassignRule(ru *rule, n *node) {
+	if q := s.asg[ru.request]; ru.request != "" && q != nil {
+		switch q.state {
+		case "pending":
+			s.endRec(q, n, "withdrawn")
+		case "accepted":
+			q.state, q.ended = "unassigned", n
+		}
+	}
+	s.endRule(ru, n)
+}
+
 // assignPerson (273): below the author is forced (live), anyone else
 // pending.
 func (s *state) assignPerson(n *node, item, t, completion string) {
@@ -1151,20 +1166,15 @@ func (s *state) apply(n *node) {
 		}
 	case TypeItemUnassign:
 		item := p.str("item")
-		if !p.null("root") {
+		if !p.null("rule") {
+			if ru := s.ruleByID[p.str("rule")]; ru != nil && ru.item == item && ru.ended == "" && ru.by == a {
+				s.unassignRule(ru, n)
+			}
+		} else if !p.null("root") {
 			for _, ru := range s.openRules(item) {
-				if ru.by != a || ru.root != p.str("root") {
-					continue
+				if ru.by == a && ru.root == p.str("root") {
+					s.unassignRule(ru, n)
 				}
-				if q := s.asg[ru.request]; ru.request != "" && q != nil {
-					switch q.state {
-					case "pending":
-						s.endRec(q, n, "withdrawn")
-					case "accepted":
-						q.state, q.ended = "unassigned", n
-					}
-				}
-				s.endRule(ru, n)
 			}
 		} else if p.truthy("assignee") {
 			who := p.str("assignee")

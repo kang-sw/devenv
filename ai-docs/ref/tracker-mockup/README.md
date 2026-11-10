@@ -526,7 +526,7 @@ attachment the store accepts, in bytes (339); without it the limit is 10 MiB
 | `item.handoff` | `item`, `to`, `assignee?`, `note?` | The holder of a live assignment hands it to anyone; an admin may hand off any member's live assignment by naming its holder in `assignee` (286), so open work can be taken over before the member is removed. It makes a pending assignment to `to` with the original's assigner and completion mode; on accept the original assignment ends (`handed`) and the new one starts with the original's status and note (290). Flagged on a done assignment, when `to` is the holder or already holds one, or while another handoff of it is pending. |
 | `item.accept` / `item.decline` | `item`, `note?` | The target of a pending assignment, on it. Accept makes it live; for a handoff it also ends the original. Decline ends it as `declined`. A pending handoff whose original ends another way is withdrawn with it (295), so a later accept or decline finds no pending assignment. |
 | `item.return` | `item`, `assignee`, `note?` | Only the assignee's direct lead, on an accepted (formerly pending) live assignment. Ends it as `returned`; the assigner may send again. Returning an accepted handoff restores the original assignment with its prior status (291), unless its holder was removed or holds another assignment on the item by then. |
-| `item.unassign` | `item`, `assignee?` or `root?` | By the assigner; the sender of a pending assignment may also withdraw it, and the holder of a topic may release their own live one (153 b). An admin may also unassign when the assignee or assigner was removed. With `root`, it ends the author's open rule rooted there (a pending rule request is withdrawn). Without either, it withdraws all of the author's assignments on the item and ends their rules. |
+| `item.unassign` | `item`, `assignee?`, or `root?` and `rule?` | By the assigner; the sender of a pending assignment may also withdraw it, and the holder of a topic may release their own live one (153 b). An admin may also unassign when the assignee or assigner was removed. With `root`, it ends the author's open rules rooted there (a pending rule request is withdrawn). With `rule` (a rule id), it ends that one rule of the author's on the item, with its request and records; flagged when it is not an open rule on the item, is another member's, sits beside `assignee`, or has a root other than a given `root`. Without any, it withdraws all of the author's assignments on the item and ends their rules. |
 | `item.status` | `item`, `status` (`todo`/`doing`/`blocked`), `note?` | Assignee only (live). The creator self-assigns first. Allowed while awaiting confirmation, which withdraws the close. Not allowed on done, or on a topic (153 b). |
 | `item.close` | `item`, `note?` | Assignee. Moves to `done`, or to `awaiting` when completion is `assigner`. Not allowed on a topic (153 b). |
 | `item.confirm` / `item.reject` | `item`, `assignee`, `note?` | Assigner, on an `awaiting` assignment. Moves to `done` / back to `doing`. |
@@ -632,9 +632,10 @@ forced (author, or someone the author reaches) starts live
   appear) and notifies the root's direct lead, who may return the request:
   that ends the rule and its records as `unassigned`. A decline ends it, and
   `item.unassign` with `root` (or without a target) withdraws it while
-  pending. Accept and decline answer every pending record the author holds
-  on the item. A request is neither live work nor counted in the item status
-  while pending.
+  pending; with `rule` it ends that one rule, so of two rules on one root
+  the other stays. Accept and decline answer every pending record the author
+  holds on the item. A request holds nothing: it is neither live work nor
+  counted in the item status, and it does not make the item pending.
 
 ```text
 rule rooted at the author or below:  live at once --unassign root / all--> ended
