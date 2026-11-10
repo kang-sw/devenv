@@ -236,3 +236,56 @@ and edit, and an old `stage: "review"` event folding as specified; plus a
 headless-browser check on an isolated daemon that both quick-add rows
 create a creator-held idea task and the "all" kanban shows the idea column
 with no review, unassigned, declined, or returned column.
+
+### Result (2dfd0f9ed, 6392106d1, eb3a16346) - 2026-11-10
+
+- Fold (Go and engine.js in lockstep): a task nobody else holds gets a
+  derived fallback record `<start event>@<item>><holder>`, held by the
+  creator or, when the creator was removed, the first admin in the roles
+  admin order. Each period starts at todo. The record is settled at the
+  end of every apply, and in `stateBefore` after `refreshLive`. Any live
+  or pending record other than a rule request displaces it. The assign
+  check ignores it, handoff refuses it ("assign it instead"), and return
+  and unassign skip or refuse it. A status write that had not seen the
+  period's start folds onto the ended record. The holder is re-derived
+  only on member removal; losing the admin role keeps it. Ended fallbacks
+  are left out of the view; `Assignment.Fallback` marks a live one.
+- `idea` is settable. An item is idea only when every live holder is, and
+  idea is left out of roll-ups. The item statuses review, unassigned,
+  declined and returned no longer occur, and `QueryStatuses` follows. New
+  writes that carry `stage` are refused (`retiredStage`, synthetic only).
+  Older stage events fold onto the live fallback: review becomes idea,
+  null becomes todo.
+- MCP: `tk:item.create` and `tk:item.edit` drop `stage`, and `clear="stage"`
+  goes too. `tk:item.status` takes idea. The creator self-assignment is
+  kept for topics only; a topic has no fallback. tracker.md is updated in
+  all three packages, with the manifest hashes edited by hand.
+- Dashboard:
+  - The idea status replaces review.
+  - The "all" kanban columns are pending, idea (with the "+" row), todo,
+    doing, blocked, awaiting, done. The assignment kanban gains idea too.
+  - Both quick-add rows send create plus `item.status $1 idea`. A topic
+    still self-assigns. The inline subtask row sends a bare create.
+  - The promote/demote menu entries are gone.
+  - A fallback holding shows no unassign or hand-off control.
+  - i18n is updated in all 11 tables, and the mockup `i18n-en.js` is
+    regenerated.
+- Verified:
+  - ws-rgo `go test ./...` passes after merging develop 88326de57, and
+    `go vet` on wstracker and mcp is clean.
+  - gen-golden: 178 reason cases agree.
+  - Headless check (chromium headless shell over CDP): Items quick-add and
+    the idea column's "+" each created a creator-held fallback record at
+    idea. The "all" kanban had no review, unassigned, declined or returned
+    column. This check ran on the mockup page (shared tracker.js over
+    engine.js), not on an isolated daemon, because a daemon binary cannot
+    be built locally (go runs only on the remote server). The Go path for
+    create plus status idea is covered by
+    `TestTrackerUpdateCreatorHoldsAnUnassignedTask`.
+- Lite review: no Critical or Important findings. Minor 4 (README wording)
+  is fixed in 497c04bd8. Left:
+  - The `hb` guard on fallback status writes and the `stateBefore`
+    `settleAll` have no direct Go test.
+  - `settleAll` walks every item on each assign/roles event.
+  - A status write routed to an ended fallback names a record the view
+    omits.
