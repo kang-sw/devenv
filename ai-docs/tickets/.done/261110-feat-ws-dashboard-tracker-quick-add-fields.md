@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: f73d1bc2dea89865
 sage-review-completeness-reviewed: f73d1bc2dea89865
+completed: 2026-11-10
 ---
 
 # Tracker quick-add: status, assignee, and schedule at entry time
@@ -145,6 +146,36 @@ check on an isolated daemon that:
   otherwise) (Decision 8);
 - after a create the chips keep their values, and closing the row restores
   the defaults (Decision 7).
+
+### Result (bf059c46) - 2026-11-10
+
+Landed: the Items panel's new row has three chips (status, assignee, due). Each chip opens the item menu's own picker over a draft of the row (`MN.kind 'new'`, read through `mnItem()`/`draftItem()`). The status picker offers idea, todo, doing, and blocked. The due picker is the item menu's due step. The assign picker lists people only, no subtree rules.
+
+What the row sends:
+- Defaults: the same batches as before. A task sends `asIdea`, which is create plus `item.status $1 idea`. A topic sends `heldTopic` with the creator.
+- A due date goes in `item.create`'s `due` field.
+- With the viewer alone as assignee: one `item.status $1 <pick>`.
+- With any other assignee set: one `item.assign {targets, completion}` and no status. The completion is the one picked in the picker, else assigner.
+- Topic kind: the status and due chips are hidden. The assignee chip picks the one holder. Switching the kind to topic collapses several people to the viewer.
+
+Chip state: chips keep their values across creates and across hover-insert moves. Closing the row restores idea / me / none. The kanban idea-column row is still title-only.
+
+i18n: five `js.tk.new.*` keys in every table. The mockup `i18n-en.js` was regenerated.
+
+Decisions:
+- `done` is not in the quick-add status picker, because `item.status` refuses it (`wstracker/check.go`).
+- For non-me assignees, the completion defaults to assigner, following `asgCompl`'s rule.
+
+Verification:
+- `go test ./...` under `agents-plugin-tool`, run remotely through ws-rgo: pass, including `TestTrackerMockupI18nIsCurrent` and the wsi18n parity tests.
+- Headless browser (CDP, chrome-headless-shell) on isolated daemons: separate WS_CACHE_HOME/WS_CONFIG_HOME, ports 47811-47813, ws-mcp built remotely. Members: ada (admin), bob (lead ada), cy.
+  - Defaults sent exactly create + status idea.
+  - doing + due sent create{due} + status doing, and the store shows ada's record at doing with the due date set.
+  - bob + cy sent create + assign{targets, assigner} with no status. In the store bob is live at todo and cy is pending.
+  - Topic kind hid status and due, collapsed two people to ada, and sent bob as the single holder.
+  - Chips kept their values after creates and reset on close. A default topic sent the creator assign.
+
+Review: lite, clean. One minor observation: no automated JS test pins the batch shapes.
 
 ## Sage Review Round 1 (2026-11-10)
 
