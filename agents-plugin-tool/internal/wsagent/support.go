@@ -111,7 +111,16 @@ type SupportOptions struct {
 type Support struct {
 	opts SupportOptions
 
-	// mu serializes every state change and conversation operation.
+	// Each store's conversation operations (find, open, send, close) run
+	// under that store's lock (lockStore), so a send cannot race a new
+	// conversation or a harness switch closing the one it found, while
+	// another store's operations never wait on them. storesMu guards
+	// storeLocks.
+	storesMu   sync.Mutex
+	storeLocks map[string]*sync.Mutex
+
+	// mu guards state and its saves; it is never held across a runner
+	// call.
 	mu    sync.Mutex
 	state supportState
 
@@ -148,7 +157,7 @@ func NewSupport(opts SupportOptions) *Support {
 		opts.Config = opts.Runner.opts.Config
 	}
 	opts.Config.RepoRoot = ""
-	s := &Support{opts: opts, cache: map[string]cachedChoices{}}
+	s := &Support{opts: opts, cache: map[string]cachedChoices{}, storeLocks: map[string]*sync.Mutex{}}
 	raw, err := os.ReadFile(s.path())
 	if err == nil {
 		err = json.Unmarshal(raw, &s.state)
@@ -164,6 +173,27 @@ func NewSupport(opts SupportOptions) *Support {
 }
 
 func (s *Support) path() string { return filepath.Join(s.opts.Dir, supportFileName) }
+
+// lockStore takes store's lock and returns its unlock.
+func (s *Support) lockStore(store string) func() {
+	s.storesMu.Lock()
+	l := s.storeLocks[store]
+	if l == nil {
+		l = &sync.Mutex{}
+		s.storeLocks[store] = l
+	}
+	s.storesMu.Unlock()
+	l.Lock()
+	return l.Unlock
+}
+
+// update changes state under mu and saves it.
+func (s *Support) update(fn func(st *supportState)) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	fn(&s.state)
+	return s.save()
+}
 
 // save writes support.json; s.mu is held.
 func (s *Support) save() error {
@@ -278,9 +308,12 @@ func findHarness(hs []SupportHarness, name string) (SupportHarness, bool) {
 
 // selection is the effective selection: the last one when its harness is
 // available, else the first available harness with default model and
-// effort, else the empty selection. s.mu is held.
+// effort, else the empty selection.
 func (s *Support) selection(hs []SupportHarness) Selection {
-	if last := s.state.Last; last != nil {
+	s.mu.Lock()
+	last := s.state.Last
+	s.mu.Unlock()
+	if last != nil {
 		if h, ok := findHarness(hs, last.Harness); ok && h.Available {
 			return *last
 		}
@@ -296,9 +329,11 @@ func (s *Support) selection(hs []SupportHarness) Selection {
 var errNoHarness = &requestError{status: http.StatusServiceUnavailable, msg: "no support harness is available: neither claude nor pi is installed and registered"}
 
 // current returns the store's open conversation, if any: the mapped one,
-// still open, at root. s.mu is held.
+// still open, at root.
 func (s *Support) current(store, root string) (State, bool) {
+	s.mu.Lock()
 	id := s.state.Stores[store]
+	s.mu.Unlock()
 	if id == "" {
 		return State{}, false
 	}
@@ -310,7 +345,7 @@ func (s *Support) current(store, root string) (State, bool) {
 }
 
 // open creates a conversation at root with sel, maps it to store, and
-// saves. s.mu is held.
+// saves. The store's lock is held.
 func (s *Support) open(store, root string, sel Selection, hs []SupportHarness) (State, error) {
 	h, ok := findHarness(hs, sel.Harness)
 	if !ok || !h.Available {
@@ -335,8 +370,7 @@ func (s *Support) open(store, root string, sel Selection, hs []SupportHarness) (
 			return State{}, err
 		}
 	}
-	s.state.Stores[store] = st.ID
-	if err := s.save(); err != nil {
+	if err := s.update(func(state *supportState) { state.Stores[store] = st.ID }); err != nil {
 		return State{}, err
 	}
 	return st, nil
@@ -368,20 +402,17 @@ type ChoicesAnswer struct {
 func (s *Support) Choices(ctx context.Context) ChoicesAnswer {
 	hs := s.harnesses()
 	s.listChoices(ctx, hs)
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	return ChoicesAnswer{Harnesses: hs, Last: s.selection(hs)}
 }
 
-// Store reads the store's conversation and the current selection.
+// Store reads the store's conversation and the current selection, without
+// waiting on the store's conversation operations.
 func (s *Support) Store(store string) (StoreAnswer, error) {
 	root, err := s.root(store)
 	if err != nil {
 		return StoreAnswer{}, err
 	}
 	hs := s.harnesses()
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	ans := StoreAnswer{Store: store, Selection: s.selection(hs)}
 	if st, ok := s.current(store, root); ok {
 		ans.Conversation = &st
@@ -390,7 +421,8 @@ func (s *Support) Store(store string) (StoreAnswer, error) {
 }
 
 // Send sends text to the store's conversation, opening one with the
-// current selection when none is open.
+// current selection when none is open. It returns once the message is held
+// (Runner.Send): the process starts in the conversation's loop.
 func (s *Support) Send(store, text string) (State, error) {
 	if strings.TrimSpace(text) == "" {
 		return State{}, badRequest("text is empty")
@@ -400,8 +432,7 @@ func (s *Support) Send(store, text string) (State, error) {
 		return State{}, err
 	}
 	hs := s.harnesses()
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer s.lockStore(store)()
 	st, ok := s.current(store, root)
 	if !ok {
 		if st, err = s.open(store, root, s.selection(hs), hs); err != nil {
@@ -419,14 +450,12 @@ func (s *Support) New(store string) (State, error) {
 		return State{}, err
 	}
 	hs := s.harnesses()
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer s.lockStore(store)()
 	if st, ok := s.current(store, root); ok {
 		if _, err := s.opts.Runner.CloseConversation(st.ID); err != nil {
 			return State{}, err
 		}
-		delete(s.state.Stores, store)
-		if err := s.save(); err != nil {
+		if err := s.update(func(state *supportState) { delete(state.Stores, store) }); err != nil {
 			return State{}, err
 		}
 	}
@@ -456,8 +485,7 @@ func (s *Support) Select(store string, req selectRequest) (SelectAnswer, error) 
 		return SelectAnswer{}, badRequest("effort %q must be a lowercase word", *req.Effort)
 	}
 	hs := s.harnesses()
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer s.lockStore(store)()
 	// The base is the open conversation's own settings, else the last
 	// selection: "same harness" is the conversation's.
 	st, open := s.current(store, root)
@@ -505,8 +533,7 @@ func (s *Support) Select(store string, req selectRequest) (SelectAnswer, error) 
 	default:
 		ans.Conversation = &st
 	}
-	s.state.Last = &next
-	if err := s.save(); err != nil {
+	if err := s.update(func(state *supportState) { state.Last = &next }); err != nil {
 		return SelectAnswer{}, err
 	}
 	return ans, nil

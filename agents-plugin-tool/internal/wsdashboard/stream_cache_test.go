@@ -91,6 +91,7 @@ func (f *pageFixture) change(t *testing.T, id, project, text string, seq int) {
 	if !f.d.index.Nudge(id, project) {
 		t.Fatalf("nudge %s refused", id)
 	}
+	f.d.index.Settle()
 }
 
 // TestWakeRendersOnlyThePagesThatShowTheSession pins the targeted wake: a
@@ -295,6 +296,7 @@ func TestRefreshTickSkipsUntilAKeyPartChanges(t *testing.T) {
 	watch := []string{ready, ticket}
 	f.src.setPage("boardsession", PageContent{HasBoard: true, Seq: 1, Board: boardRegions(t, "one ticket"), Watch: watch})
 	f.d.index.Nudge("boardsession", f.project)
+	f.d.index.Settle()
 	events := openStream(t, f.base+"/s/boardsession/events")
 	waitRegionHolding(t, events, regionBoard, "one ticket")
 
@@ -342,6 +344,7 @@ func TestRefreshTickRereadsContactLiveness(t *testing.T) {
 	page.Contacts = append(page.Contacts, Contact{Address: "far@machine", LastExchange: time.Now()})
 	f.src.setPage("livesession", page)
 	f.d.index.Nudge("livesession", f.project)
+	f.d.index.Settle()
 	events := openStream(t, f.base+"/s/livesession/events")
 	quiet(t, events)
 
@@ -391,6 +394,7 @@ func TestIndexReadsNoSessionPage(t *testing.T) {
 	page.Board.CountPolicy = 7
 	f.src.setPage("lonersession", page)
 	f.d.index.Nudge("lonersession", other)
+	f.d.index.Settle()
 	waitRegionHolding(t, index, regionSessions, `>7</span></span><span class="when">`)
 	time.Sleep(settle)
 	if got := f.src.readCount("lonersession"); got != lonerReads {
@@ -405,6 +409,7 @@ func TestIndexReadsNoSessionPage(t *testing.T) {
 	f.src.gone["lonersession"] = true
 	f.src.mu.Unlock()
 	f.d.index.Nudge("lonersession", other)
+	f.d.index.Settle()
 	waitFor(t, "lonersession to leave", func() bool { _, ok := f.d.Index().Session("lonersession"); return !ok })
 	f.src.mu.Lock()
 	delete(f.src.gone, "lonersession")
@@ -412,6 +417,7 @@ func TestIndexReadsNoSessionPage(t *testing.T) {
 	page.Board.CountPolicy = 9
 	f.src.setPage("lonersession", page)
 	f.d.index.Nudge("lonersession", other)
+	f.d.index.Settle()
 	waitRegionHolding(t, index, regionSessions, `>9</span></span><span class="when">`)
 }
 
@@ -432,6 +438,7 @@ func TestRefreshTickFollowsAWatchedProcess(t *testing.T) {
 	f := startPageFixture(t, withRefresh)
 	f.src.setPage("boardsession", PageContent{HasBoard: true, Seq: 1, Board: boardRegions(t, "waiting"), WatchPIDs: []int{4242}})
 	f.d.index.Nudge("boardsession", f.project)
+	f.d.index.Settle()
 	events := openStream(t, f.base+"/s/boardsession/events")
 	waitRegionHolding(t, events, regionBoard, "waiting")
 

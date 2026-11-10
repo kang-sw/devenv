@@ -709,3 +709,30 @@ func TestDashboardTrackerAttachmentErrorMapping(t *testing.T) {
 	_, err = dt.ReadAttachment(ctx, "nope", strings.Repeat("a", 64))
 	only("read from an unknown store", err, nil)
 }
+
+// TestDashboardTrackerBusyMapping: a page read that gave up on its store's
+// lock (wstrackerhost.ErrStoreBusy) reaches the routes as
+// wsdashboard.ErrTrackerBusy through every read's error mapping, and no
+// other error does.
+func TestDashboardTrackerBusyMapping(t *testing.T) {
+	busy := fmt.Errorf("%w: %q", wstrackerhost.ErrStoreBusy, "team")
+	for name, err := range map[string]error{
+		"attachment": attachmentError(busy),
+		"wiki read":  wikiError(busy, true),
+		"read":       readError(busy),
+	} {
+		if !errors.Is(err, wsdashboard.ErrTrackerBusy) {
+			t.Errorf("%s mapping of a busy store = %v, want ErrTrackerBusy", name, err)
+		}
+	}
+	other := errors.New("disk broke")
+	for name, err := range map[string]error{
+		"attachment": attachmentError(other),
+		"wiki read":  wikiError(other, true),
+		"read":       readError(other),
+	} {
+		if errors.Is(err, wsdashboard.ErrTrackerBusy) {
+			t.Errorf("%s mapping of another error = %v, want no ErrTrackerBusy", name, err)
+		}
+	}
+}

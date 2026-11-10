@@ -1256,10 +1256,27 @@
       if (st[k + 'Again']) { st[k + 'Again'] = false; if (ui.store === store) wkReread(st, store, k); }
     };
   }
+  // A read the daemon answers 503 found the store busy (a fetch or push holds it) and runs
+  // again after the daemon's Retry-After (WK_RETRY_MS: the adapter passes on the status, not
+  // the header) instead of drawing the error, up to WK_RETRIES times in a row. Read k stays
+  // busy meanwhile, so a change signal marks it to run again (wkReread) rather than starting
+  // a second one; again() decides what still to read when the wait ends.
+  var WK_RETRY_MS = 1000, WK_RETRIES = 5;
+  function wkRetry(st, store, k, res, again) {
+    if (res.ok || res.status !== 503 || (st[k + 'Tries'] || 0) >= WK_RETRIES) { st[k + 'Tries'] = 0; return false; }
+    st[k + 'Tries'] = (st[k + 'Tries'] || 0) + 1;
+    st[k + 'Busy'] = true;
+    setTimeout(function () {
+      st[k + 'Busy'] = false;
+      if (ui.wiki[store] === st && ui.store === store) again();
+    }, WK_RETRY_MS);
+    return true;
+  }
   function wkLoadList(st, store) {
     if (st.listBusy) return;
     st.listBusy = true; st.listAgain = false;
     AD.wiki.list(store, wkDone(st, store, 'list', function (res) {
+      if (wkRetry(st, store, 'list', res, function () { wkLoadList(st, store); })) return;
       if (!res.ok) { st.listErr = res.error; if (!st.list) st.list = []; render(); return; }
       st.list = res.wikis; st.listErr = null;
       if (st.name && !st.list.some(function (w) { return w.name === st.name; }) && !(st.edit && st.edit.newWiki)) { st.name = null; st.pages = null; st.page = null; st.doc = null; }
@@ -1272,6 +1289,7 @@
     st.pagesBusy = true; st.pagesAgain = false;
     AD.wiki.pages(store, name, wkDone(st, store, 'pages', function (res) {
       if (st.name !== name) { if (ui.store === store) wkPull(st); return; }
+      if (wkRetry(st, store, 'pages', res, function () { if (st.name === name) wkLoadPages(st, store, name); else wkPull(st); })) return;
       if (!res.ok) { st.pagesErr = res.error; if (!st.pages) st.pages = { paths: [], commit: '' }; render(); return; }
       st.pages = { paths: res.pages.slice(), commit: res.commit }; st.pagesErr = null;
       if (!st.page && st.pages.paths.length) st.page = wkHas(st, 'index') ? 'index' : st.pages.paths[0];
@@ -1284,6 +1302,7 @@
     st.docBusy = true; st.docAgain = false;
     AD.wiki.read(store, name, path, wkDone(st, store, 'doc', function (res) {
       if (st.name !== name || st.page !== path) { if (ui.store === store) wkPull(st); return; }
+      if (wkRetry(st, store, 'doc', res, function () { if (st.name === name && st.page === path && !st.edit) wkLoadDoc(st, store, name, path, soft); else wkPull(st); })) return;
       if (!res.ok) {
         // a page that is not there (a wiki: link to it) opens as a new page at that path; the
         // editor opens on the store shown, so a store switched away from meanwhile reads the
@@ -4377,6 +4396,29 @@
     return Array.prototype.slice.call(dt.files || []);
   }
 
+  // A store image (an attachment, or a wiki's image) fails while its store is busy: the daemon
+  // answers 503 while a fetch or push holds the store, and a script never sees an image's
+  // status. A failed one loads again after IMG_RETRY_MS, with a query the daemon ignores so
+  // the browser does not reuse the failure, up to IMG_RETRIES times per element; an element a
+  // redraw replaced meanwhile is left alone.
+  var IMG_RETRY_MS = 1500, IMG_RETRIES = 3;
+  var IMG_ROUTE = /^\/tracker\/stores\/[^/]+\/(wiki\/[^/]+\/)?attachments\/[^/]+$/;
+  function imgRetry(e) {
+    var img = e.target;
+    if (!img || img.tagName !== 'IMG') return;
+    var u;
+    try { u = new URL(img.src, location.href); } catch (x) { return; }
+    if (u.origin !== location.origin || !IMG_ROUTE.test(u.pathname)) return;
+    var n = +(img.getAttribute('data-tk-retry') || 0);
+    if (n >= IMG_RETRIES) return;
+    img.setAttribute('data-tk-retry', String(n + 1));
+    setTimeout(function () {
+      if (!img.isConnected) return;
+      u.searchParams.set('retry', String(n + 1));
+      img.src = u.pathname + u.search;
+    }, IMG_RETRY_MS);
+  }
+
   function listen() {
     // dragging a handle sets the drawer height; a drag's trailing click is swallowed
     var hs = $('tkhandles');
@@ -4586,6 +4628,7 @@
       var t = e.target;
       if (t.tagName === 'DETAILS' && $('tkbody').contains(t)) fitDrawer(); // an opened details block changes the content height
     }, true);
+    document.addEventListener('error', imgRetry, true); // an image's error does not bubble
     document.addEventListener('pointerdown', function (e) { lastPointer = e.pointerType || 'mouse'; lastInput = 'pointer'; }, true);
     document.addEventListener('mouseover', function (e) {
       var tt = own(e.target) && e.target.closest('[data-tip]');

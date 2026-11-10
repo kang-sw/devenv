@@ -114,7 +114,7 @@ func TestRESTRoutesEndToEnd(t *testing.T) {
 		t.Fatalf("send: %d %s", r.status, r.body)
 	}
 	eventually(t, "start", func() bool { return d.backend.startCount() == 1 })
-	p := d.backend.proc(0)
+	p := d.backend.waitProc(t, 0)
 	if got := p.nextSent(t); got != "hello" {
 		t.Fatalf("turn = %q", got)
 	}

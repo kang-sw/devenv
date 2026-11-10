@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -35,6 +36,7 @@ type fakeTracker struct {
 	blobs     map[string][]byte // staged attachments by oid
 	wikiBlobs map[string][]byte // wiki images by wiki+"/"+oid
 	maxBytes  int               // the fake store's attachment limit
+	readErr   error             // fails every attachment and wiki image read, when set
 	// wikis holds each fake wiki's pages by path; wikiRev counts its
 	// saves (the commit); wikiErr fails every wiki call, wikiConflict
 	// refuses every save, when set.
@@ -284,6 +286,9 @@ func (f *fakeTracker) ReadAttachment(_ context.Context, id, oid string) ([]byte,
 	f.record("read " + id)
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.readErr != nil {
+		return nil, f.readErr
+	}
 	data, ok := f.blobs[oid]
 	if !ok {
 		return nil, ErrTrackerAttachmentNotFound
@@ -295,6 +300,9 @@ func (f *fakeTracker) ReadWikiImage(_ context.Context, id, wiki, oid string) ([]
 	f.record("wiki-image " + id)
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.readErr != nil {
+		return nil, f.readErr
+	}
 	data, ok := f.wikiBlobs[wiki+"/"+oid]
 	if !ok {
 		return nil, ErrTrackerAttachmentNotFound
@@ -859,6 +867,31 @@ func TestTrackerWikiImageRead(t *testing.T) {
 	}
 	if rec := callRaw(d, http.MethodPost, read, tinyPNG, nil); rec.Code != http.StatusMethodNotAllowed {
 		t.Errorf("POST read path = %d, want 405", rec.Code)
+	}
+}
+
+// TestTrackerBusyReadsAnswerRetryAfter: a wiki JSON read or an image read
+// the host answers ErrTrackerBusy (the store stayed held by a fetch or
+// push) is a 503 with Retry-After, so the page reads it again shortly.
+func TestTrackerBusyReadsAnswerRetryAfter(t *testing.T) {
+	fake := newFakeTracker()
+	d := startTrackerDaemon(t, fake)
+	busy := fmt.Errorf("%w: team", ErrTrackerBusy)
+	fake.mu.Lock()
+	fake.wikiErr, fake.readErr = busy, busy
+	fake.mu.Unlock()
+	oid := strings.Repeat("a", 64)
+	for _, path := range []string{
+		"/tracker/stores/team/wiki",
+		"/tracker/stores/team/wiki/notes/pages",
+		"/tracker/stores/team/wiki/notes/page?path=home",
+		"/tracker/stores/team/attachments/" + oid,
+		"/tracker/stores/team/wiki/notes/attachments/" + oid,
+	} {
+		rec := callRaw(d, http.MethodGet, path, nil, nil)
+		if rec.Code != http.StatusServiceUnavailable || rec.Header().Get("Retry-After") != trackerBusyRetry || !strings.Contains(rec.Body.String(), "store busy") {
+			t.Errorf("busy %s = %d Retry-After %q %s, want 503 with Retry-After %s", path, rec.Code, rec.Header().Get("Retry-After"), rec.Body, trackerBusyRetry)
+		}
 	}
 }
 

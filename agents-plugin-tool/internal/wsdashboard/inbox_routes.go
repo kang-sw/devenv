@@ -160,11 +160,12 @@ func (d *Daemon) inboxSession(w http.ResponseWriter, r *http.Request, replyID st
 }
 
 // inboxAnswered answers a write route with its inbox write's outcome, and
-// on success tells the index, the session's streams, and the agent runner
-// (for a conversation it hosts) that the inbox changed.
+// on success tells the index (a scheduled re-read the answer does not wait
+// for), the session's streams, and the agent runner (for a conversation it
+// hosts) that the inbox changed.
 func (d *Daemon) inboxAnswered(w http.ResponseWriter, s Session, status int, answer any) {
 	if status == http.StatusOK {
-		d.index.Nudge(s.ReplyID, s.Project)
+		d.index.Reread(s.ReplyID)
 		d.stats.WakeInbox.Add(1)
 		d.broker.wake(s.ReplyID)
 		if s.Agent && d.agents != nil {

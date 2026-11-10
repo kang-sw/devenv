@@ -25,6 +25,33 @@ const dashboardRegisterTimeout = 3 * time.Minute
 // reload can wait behind a push or fetch holding the store's lock.
 const dashboardViewWait = 500 * time.Millisecond
 
+// dashboardLockWait bounds how long a page's wiki or image read waits for
+// its store's lock, which a fetch or push holds up to a network timeout;
+// past it the read answers wsdashboard.ErrTrackerBusy and the page retries.
+const dashboardLockWait = 500 * time.Millisecond
+
+// pageRead bounds the store lock wait of the page reads run with it.
+func pageRead(ctx context.Context) context.Context {
+	return wstrackerhost.WithLockWait(ctx, dashboardLockWait)
+}
+
+// busyError maps a read that gave up on its store's lock onto
+// wsdashboard.ErrTrackerBusy; ok is false for any other error.
+func busyError(err error) (error, bool) {
+	if errors.Is(err, wstrackerhost.ErrStoreBusy) {
+		return fmt.Errorf("%w: %v", wsdashboard.ErrTrackerBusy, redacted(err)), true
+	}
+	return nil, false
+}
+
+// readError is a page read's error: busy, or only redacted.
+func readError(err error) error {
+	if b, ok := busyError(err); ok {
+		return b
+	}
+	return redacted(err)
+}
+
 // dashboardTracker is the daemon's wsdashboard.TrackerHost over its one
 // wstrackerhost.Host, the host its background poll also runs on. err is
 // wstrackerhost.New's error: then every method returns it, so the tracker
@@ -360,6 +387,9 @@ func (t *dashboardTracker) Register(ctx context.Context, req wsdashboard.Tracker
 // sentinel it matches, keeping the redacted message; any other error is
 // only redacted.
 func attachmentError(err error) error {
+	if b, ok := busyError(err); ok {
+		return b
+	}
 	for _, m := range []struct{ host, dash error }{
 		{wstrackerhost.ErrNotImage, wsdashboard.ErrTrackerNotImage},
 		{wstrackerhost.ErrAttachmentTooLarge, wsdashboard.ErrTrackerAttachmentTooLarge},
@@ -387,7 +417,7 @@ func (t *dashboardTracker) ReadAttachment(ctx context.Context, id, oid string) (
 	if t.err != nil {
 		return nil, redacted(t.err)
 	}
-	data, err := t.h.ReadAttachment(ctx, id, oid)
+	data, err := t.h.ReadAttachment(pageRead(ctx), id, oid)
 	if err != nil {
 		return nil, attachmentError(err)
 	}
@@ -398,7 +428,7 @@ func (t *dashboardTracker) ReadWikiImage(ctx context.Context, id, wiki, oid stri
 	if t.err != nil {
 		return nil, redacted(t.err)
 	}
-	data, err := t.h.ReadWikiImage(ctx, id, wiki, oid)
+	data, err := t.h.ReadWikiImage(pageRead(ctx), id, wiki, oid)
 	if err != nil {
 		return nil, attachmentError(err)
 	}
@@ -411,6 +441,9 @@ func (t *dashboardTracker) ReadWikiImage(ctx context.Context, id, wiki, oid stri
 // the saver's is ErrTrackerWikiRefused with its reason; the rest is only
 // redacted.
 func wikiError(err error, read bool) error {
+	if b, ok := busyError(err); ok {
+		return b
+	}
 	var conflict *wsledger.WikiConflict
 	if errors.As(err, &conflict) {
 		return &wsdashboard.TrackerWikiConflict{Path: conflict.Path, Kind: conflict.Kind, Reason: wstrackerhost.RedactCredentials(conflict.Reason),
@@ -432,9 +465,9 @@ func (t *dashboardTracker) WikiList(ctx context.Context, id string) ([]wsdashboa
 	if t.err != nil {
 		return nil, redacted(t.err)
 	}
-	list, err := t.h.WikiList(ctx, id)
+	list, err := t.h.WikiList(pageRead(ctx), id)
 	if err != nil {
-		return nil, redacted(err)
+		return nil, readError(err)
 	}
 	out := make([]wsdashboard.TrackerWiki, 0, len(list))
 	for _, w := range list {
@@ -447,7 +480,7 @@ func (t *dashboardTracker) WikiPages(ctx context.Context, id, wiki string) (wsda
 	if t.err != nil {
 		return wsdashboard.TrackerWikiPages{}, redacted(t.err)
 	}
-	pages, at, err := t.h.WikiPages(ctx, id, wiki, "")
+	pages, at, err := t.h.WikiPages(pageRead(ctx), id, wiki, "")
 	if err != nil {
 		return wsdashboard.TrackerWikiPages{}, wikiError(err, true)
 	}
@@ -458,13 +491,14 @@ func (t *dashboardTracker) WikiRead(ctx context.Context, id, wiki, path string) 
 	if t.err != nil {
 		return wsdashboard.TrackerWikiPage{}, redacted(t.err)
 	}
+	ctx = pageRead(ctx)
 	content, at, err := t.h.WikiRead(ctx, id, wiki, path, "")
 	if err != nil {
 		return wsdashboard.TrackerWikiPage{}, wikiError(err, true)
 	}
 	tree, err := t.h.WikiImages(ctx, id, wiki)
 	if err != nil {
-		return wsdashboard.TrackerWikiPage{}, redacted(err)
+		return wsdashboard.TrackerWikiPage{}, readError(err)
 	}
 	return wsdashboard.TrackerWikiPage{Path: path, Content: content, Commit: at, HTML: string(trackerText(content, attachmentSources(id, wiki, tree, nil)))}, nil
 }
