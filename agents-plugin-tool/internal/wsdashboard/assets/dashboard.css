@@ -190,7 +190,7 @@ details[open] > .ahead .am > .i { transform: rotate(180deg); }
 .ahead .astat .amodel { font-family: var(--wb-mono); font-size: 10.5px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
 .ahead .astat .atps { color: var(--wb-primary); font-weight: 700; }
 @container atree (max-width: 559px) { .ahead .astat { display: none; } }
-.atip .tm { display: grid; gap: 2px; }
+.gltip.atip .tm { display: grid; gap: 2px; }
 .ahead .ldet { flex: 1 1 0; min-width: 0; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ahead .ldet .tn { font-family: var(--wb-mono); font-weight: 700; font-size: 11.5px; }
 .ahead .ldet .args { font-size: 11.5px; }
