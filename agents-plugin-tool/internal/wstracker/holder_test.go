@@ -3,6 +3,7 @@ package wstracker
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kang-sw/devenv/internal/wsledger"
 )
@@ -205,6 +206,80 @@ func TestNewWritesRefuseStage(t *testing.T) {
 	wantEq(t, "edit", tm.refused("maya.pc", TypeItemEdit, map[string]any{"item": it, "stage": nil}), retiredStage)
 	tm.do("maya.pc", TypeItemStatus, map[string]any{"item": it, "status": "idea"})
 	wantEq(t, "idea through status", deref(tm.view("maya.pc").Items[it].Status), "idea")
+}
+
+// A status write that had not seen the unassign starting a fallback period
+// was meant for the record that unassign ended: it folds there (marked as
+// removed), and the new fallback keeps its own todo.
+func TestStatusWriteThatMissedTheFallbackStartFoldsOntoTheEndedRecord(t *testing.T) {
+	tm := newTeam(t)
+	it := tm.do("maya.pc", TypeItemCreate, map[string]any{"kind": "task", "title": "Guard"})
+	self := tm.do("maya.pc", TypeItemAssign, map[string]any{"item": it, "targets": []any{"maya"}, "completion": "assignee"})
+	tm.goOffline("maya.lap")
+	// The unassign folds first (earlier ts) and starts maya's fallback period.
+	un := tm.do("maya.pc", TypeItemUnassign, map[string]any{"item": it, "assignee": "maya"})
+	st := tm.do("maya.lap", TypeItemStatus, map[string]any{"item": it, "status": "doing"})
+	tm.comeOnline("maya.lap")
+	for _, s := range []string{"maya.pc", "maya.lap", "ada.pc"} {
+		v := tm.view(s)
+		wantEq(t, s+": explicit record", asg(t, v, self+">maya").State, "unassigned")
+		wantEq(t, s+": the new fallback", fallbackOn(t, v, it), un+"@"+it+">maya todo")
+		wantEq(t, s+": item status", deref(v.Items[it].Status), "todo")
+		e := event(t, v, st)
+		wantEq(t, s+": status write", e.Status, "applied")
+		wantIn(t, s+": status write markers", markerKinds(e), "removed:"+un)
+	}
+}
+
+// The check-time fold (stateBefore) settles fallbacks after another
+// thread's assign extends a live rule, as the full fold does. ada's rule
+// skips lena, who holds the task; lena hands it to omar, whose unassign
+// excludes only omar and leaves the task to ada's fallback; sven's assign
+// on another task then extends the rule to lena, displacing that fallback,
+// so ada's status write holds nothing.
+func TestCheckTimeFoldSettlesAfterAnotherThreadsAssign(t *testing.T) {
+	rc := loadReasonCases(t)
+	evs := history([]step{
+		{"ada.pc", "item.create", map[string]any{"kind": "task", "title": "X"}},
+		{"ada.pc", "item.assign", map[string]any{"item": "ada.pc#1", "targets": []any{"lena"}}},
+		{"ada.pc", "item.assign", map[string]any{"item": "ada.pc#1", "targets": []any{map[string]any{"root": "lena", "include_root": true, "levels": 1}}}},
+		{"lena.pc", "item.handoff", map[string]any{"item": "ada.pc#1", "to": "omar"}},
+		{"omar.pc", "item.accept", map[string]any{"item": "ada.pc#1"}},
+		{"ada.pc", "item.unassign", map[string]any{"item": "ada.pc#1", "assignee": "omar"}},
+		{"sven.pc", "item.create", map[string]any{"kind": "task", "title": "Y"}},
+		{"sven.pc", "item.assign", map[string]any{"item": "sven.pc#1", "targets": []any{"sven"}}},
+		{"ada.pc", "item.status", map[string]any{"item": "ada.pc#1", "status": "doing"}},
+	})
+	v := Derive(newMemSource(rc.Genesis, "ada.pc", evs), "ada.pc", time.Time{}, 0)
+	var open []string
+	for _, a := range openOn(v, "ada.pc#1") {
+		open = append(open, a.ID+" "+a.State)
+	}
+	wantEq(t, "open on X, no fallback", strings.Join(open, ", "), "ada.pc#3~lena>lena live")
+	e := event(t, v, "ada.pc#5")
+	wantEq(t, "ada's status write", e.Status+": "+deref(e.Reason),
+		"flagged: ada created ada.pc-1 but is not assigned to it (self-assign first)")
+
+	// Every verdict equals judging against the whole causal past.
+	src := newMemSource(rc.Genesis, "ada.pc", evs)
+	r := replay(evs, rc.Genesis, src.Concurrent)
+	for _, n := range r.order {
+		S := newState(r.g, r.hb, false)
+		for _, x := range r.order[:n.pos] {
+			if x.status == "applied" && r.hb(x, n) {
+				S.apply(x)
+			}
+		}
+		want := "applied"
+		if rej := S.check(n); rej != "" {
+			want = "flagged: " + string(rej)
+		}
+		got := n.status
+		if got == "flagged" {
+			got += ": " + n.reason
+		}
+		wantEq(t, n.id+" "+n.typ, got, want)
+	}
 }
 
 
