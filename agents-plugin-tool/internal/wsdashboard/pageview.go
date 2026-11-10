@@ -168,6 +168,9 @@ type PeerRow struct {
 	// Project, else the newest Contact.Cwd over the merged addresses. Empty
 	// when neither is known.
 	Path string
+	// WorktreeMain is the main repository root when Path is a git linked
+	// worktree (worktreeMain), else empty; it names the label prefix.
+	WorktreeMain string
 	// ReplyID is the peer session; empty for a named address with no owner.
 	ReplyID string
 	// Served reports that this daemon indexes the peer, so the row links to
@@ -577,6 +580,7 @@ func peerGroup(contacts []Contact, project string, lookup func(string) (Session,
 		if !row.Served {
 			row.Live = m.presenceLive
 		}
+		row.WorktreeMain = worktreeMain(row.Path)
 		if row.Live {
 			group.Live = append(group.Live, row)
 		} else {
@@ -596,11 +600,25 @@ func peerGroup(contacts []Contact, project string, lookup func(string) (Session,
 	return group
 }
 
-// Folder is Path's last element, split on "/" and "\" alike (a Windows cwd
-// can reach a daemon on another OS), trailing separators ignored; the row's
-// label prefix. Empty when Path is.
-func (r PeerRow) Folder() string {
-	p := strings.TrimRight(r.Path, `/\`)
+// Folder is the row's label prefix: Path's last element, as
+// "<main>(<folder>)" when Path is a linked worktree of the repository at
+// WorktreeMain (peerFolderLabel). Empty when Path is.
+func (r PeerRow) Folder() string { return peerFolderLabel(r.Path, r.WorktreeMain) }
+
+// peerFolderLabel is "<main>(<folder>)" when main, a worktree's main
+// repository root, is known, else path's last element (lastElem).
+func peerFolderLabel(path, main string) string {
+	folder := lastElem(path)
+	if m := lastElem(main); m != "" && folder != "" {
+		return m + "(" + folder + ")"
+	}
+	return folder
+}
+
+// lastElem is p's last element, split on "/" and "\" alike (a Windows cwd
+// can reach a daemon on another OS), trailing separators ignored.
+func lastElem(p string) string {
+	p = strings.TrimRight(p, `/\`)
 	return p[strings.LastIndexAny(p, `/\`)+1:]
 }
 

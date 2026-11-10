@@ -3,6 +3,8 @@ package wsdashboard
 import (
 	"bytes"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -236,6 +238,91 @@ func TestPeerRowFolder(t *testing.T) {
 		if got := (PeerRow{Path: path}).Folder(); got != want {
 			t.Errorf("Folder(%q) = %q, want %q", path, got, want)
 		}
+	}
+}
+
+// TestPeerFolderLabel pins the linked-worktree prefix: "<main>(<folder>)"
+// from both paths' last elements under either separator, the plain folder
+// when no main root is known or the path is empty.
+func TestPeerFolderLabel(t *testing.T) {
+	for _, c := range []struct{ path, main, want string }{
+		{"/home/u/.wt/devenv/gamma", "/home/u/devenv", "devenv(gamma)"},
+		{"/home/u/.wt/devenv/gamma/", "/home/u/devenv/", "devenv(gamma)"},
+		{`C:\wt\gamma\`, `C:\src\devenv`, "devenv(gamma)"},
+		{"/home/u/devenv", "", "devenv"},
+		{"", "/home/u/devenv", ""},
+		{"/home/u/x", "/", "x"},
+	} {
+		if got := (PeerRow{Path: c.path, WorktreeMain: c.main}).Folder(); got != c.want {
+			t.Errorf("Folder(%q, %q) = %q, want %q", c.path, c.main, got, c.want)
+		}
+	}
+}
+
+// TestWorktreeMain pins linked-worktree detection from fake .git entries: a
+// .git file pointing into <root>/.git/worktrees/<name> yields root (via
+// commondir when present, relative gitdir included); a plain repo, a
+// submodule, a bare-repo worktree, a missing path, and a Windows path seen
+// here yield "". Trailing separators resolve like the clean path.
+func TestWorktreeMain(t *testing.T) {
+	base := t.TempDir()
+	mk := func(parts ...string) string {
+		p := filepath.Join(append([]string{base}, parts...)...)
+		if err := os.MkdirAll(p, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	write := func(path, body string) {
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	main := mk("devenv")
+	mk("devenv", ".git", "modules", "sub")
+	wtGit := mk("devenv", ".git", "worktrees", "gamma")
+	write(filepath.Join(wtGit, "commondir"), "../..\n")
+	linked := mk("wt", "gamma")
+	write(filepath.Join(linked, ".git"), "gitdir: "+wtGit+"\n")
+
+	// No commondir, relative gitdir.
+	mk("devenv", ".git", "worktrees", "delta")
+	rel := mk("wt", "delta")
+	write(filepath.Join(rel, ".git"), "gitdir: ../../devenv/.git/worktrees/delta\n")
+
+	sub := mk("devenv", "sub")
+	write(filepath.Join(sub, ".git"), "gitdir: ../.git/modules/sub\n")
+
+	bareWt := mk("repo.git", "worktrees", "eps")
+	write(filepath.Join(bareWt, "commondir"), "../..\n")
+	bare := mk("wt", "eps")
+	write(filepath.Join(bare, ".git"), "gitdir: "+bareWt+"\n")
+
+	for path, want := range map[string]string{
+		linked:                              main,
+		linked + string(filepath.Separator): main,
+		rel:                                 main,
+		main:                                "",
+		sub:                                 "",
+		bare:                                "",
+		filepath.Join(base, "missing"):      "",
+		`C:\Users\u\proj`:                   "",
+		"":                                  "",
+	} {
+		if got := readWorktreeMain(path); path != "" && got != want {
+			t.Errorf("readWorktreeMain(%q) = %q, want %q", path, got, want)
+		}
+		if got := worktreeMain(path); got != want {
+			t.Errorf("worktreeMain(%q) = %q, want %q", path, got, want)
+		}
+	}
+
+	// Peer rows carry the prefix for a linked-worktree cwd.
+	now := testNow
+	contacts := []Contact{{Address: "id:wt", ReplyID: "wt", LastExchange: now, PresenceLive: true, Cwd: linked}}
+	g := peerGroup(contacts, "/p", lookupOf(map[string]Session{}, nil), now)
+	if len(g.Live) != 1 || g.Live[0].Folder() != "devenv(gamma)" {
+		t.Errorf("peer row folder = %+v, want devenv(gamma)", g.Live)
 	}
 }
 
