@@ -415,7 +415,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-10T00:45:28Z"
+        "touched_at": "2026-11-10T00:46:47Z",
+        "impl": {
+          "branch": "impl/develop/truth-amaze-many"
+        }
       }
     },
     "261110-feat-ws-tracker-support-agent-ui-commands": {
