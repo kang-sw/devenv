@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: 9057b416ee62b5c1
 sage-review-design-reviewed: 9057b416ee62b5c1
+completed: 2026-11-10
 ---
 
 # Tracker search: query grammar
