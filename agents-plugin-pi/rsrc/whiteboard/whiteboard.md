@@ -204,9 +204,9 @@ whiteboard.query payload: {topic?, ids?, id?, status?, text?, depth?, fields?, b
   text> - <note>`, ` (assumed)` appended); a withdrawn or superseded item
   keeps only its line. `full` adds every detail; `fields`, a list from
   `options`, `recommendation`, `rationale`, `answer`, `answered_at`,
-  `answer_quote`, and `links`, picks which, all when omitted. Items
-  answered together print their shared `answer_quote` once, then `same as
-  (nn)`.
+  `answer_quote`, and `links`, picks which, all when omitted; `fields`
+  without `depth` means `full`. Items answered together print their shared
+  `answer_quote` once, then `same as (nn)`.
 - `body: true` prints each listed topic's body after its topic line.
   `closed: true` lists closed topics, whose items follow the same depth and
   status as any topic's; otherwise one `omitted:` count stands for them.

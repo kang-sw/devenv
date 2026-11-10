@@ -76,8 +76,8 @@ type queryFilter struct {
 
 // parseQuery validates payload and applies the per-filter defaults: they
 // come from the most specific target present (ids or id, then topic, then
-// text, then none), and an explicit depth, status, body, or closed always
-// overrides them.
+// text, then none), fields without depth means depth full, and an explicit
+// depth, status, body, or closed always overrides them.
 func parseQuery(p *problems, payload any) queryFilter {
 	var f queryFilter
 	obj, ok := payloadObject(p, payload)
@@ -138,6 +138,11 @@ func parseQuery(p *problems, payload any) queryFilter {
 	f.depth = DepthItems
 	if target == "ids" || target == "topic" {
 		f.depth = DepthSummary
+	}
+	if _, hasFields := obj["fields"]; hasFields {
+		// fields selects detail lines at depth full only; any other default
+		// depth would silently drop the fields the caller asked for.
+		f.depth = DepthFull
 	}
 	if hasDepth {
 		f.depth = depth

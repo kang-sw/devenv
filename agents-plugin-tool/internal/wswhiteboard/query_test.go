@@ -101,12 +101,14 @@ func TestQueryFields(t *testing.T) {
 	wantText(t, "fields answer and time", text, []string{"    answer: ok\n    answered_at: 2026-11-04T09:00:00Z\n"}, nil)
 	text = queryText(t, st, `{"id":2,"depth":"full","fields":["rationale","answer_quote"]}`)
 	wantText(t, "fields rationale quote", text, []string{"    rationale: because zeta\n", `    answer_quote: "(02) ok"`}, []string{"answer: ok", "answered_at"})
-	// fields selects at depth full only: summary ignores it.
+	// fields without depth means depth full, whatever the target's default.
 	text = queryText(t, st, `{"id":2,"fields":["rationale"]}`)
-	wantText(t, "fields at summary", text, []string{"    answer: ok\n"}, []string{"rationale:"})
-	// fields alone keeps the unfiltered depth items: no detail lines.
+	wantText(t, "fields default depth ids", text, []string{"    rationale: because zeta\n"}, []string{"answer: ok"})
 	text = queryText(t, st, `{"fields":"options"}`)
-	wantText(t, "fields alone", text, []string{"  (01) [open] [policy] pick one\n"}, []string{"a) optx"})
+	wantText(t, "fields default depth none", text, []string{"  (01) [open] [policy] pick one\n    a) optx first\n    b) second\n"}, []string{"recommendation:"})
+	// An explicit depth still wins: summary ignores fields.
+	text = queryText(t, st, `{"id":2,"depth":"summary","fields":["rationale"]}`)
+	wantText(t, "fields at explicit summary", text, []string{"    answer: ok\n"}, []string{"rationale:"})
 }
 
 // id and ids print their items at depth summary, every status, with no
