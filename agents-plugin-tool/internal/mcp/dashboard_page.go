@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -31,8 +30,9 @@ import (
 // session key.
 
 var (
-	_ wsdashboard.LangPageSource = (*DashboardSessionSource)(nil)
-	_ wsdashboard.ContactSource  = (*DashboardSessionSource)(nil)
+	_ wsdashboard.LangPageSource  = (*DashboardSessionSource)(nil)
+	_ wsdashboard.ContactSource   = (*DashboardSessionSource)(nil)
+	_ wsdashboard.MailPrintSource = (*DashboardSessionSource)(nil)
 )
 
 // ReadPage reads the page parts of the session reg names, in English. It
@@ -90,7 +90,8 @@ type boardRender struct {
 // page re-read that changed nothing the board shows (a live-snapshot change
 // re-renders only the live regions) reuses it. An entry is used only while
 // its key, taken before the render read anything, still matches
-// (boardMemoBase) and every file the render named still stats the same.
+// (boardMemoBase) and every file the render named still stamps the same
+// (wsdashboard.StampWatched).
 type boardMemo struct {
 	mu      sync.Mutex
 	entries map[string]boardMemoEntry
@@ -134,7 +135,8 @@ func (src *DashboardSessionSource) renderBoard(key string, record sessionRecord,
 		return src.renderBoardNow(key, record, replyID, lang)
 	}
 	memoKey := replyID + "\x00" + lang
-	base := boardMemoBase(key, record, lang, reasked)
+	replies, repliesOK := src.loadReplies()
+	base := boardMemoBase(key, record, lang, reasked, replyPrint(replies, repliesOK, replyID))
 	m := &src.boards
 	m.mu.Lock()
 	prev, had := m.entries[memoKey]
@@ -170,11 +172,12 @@ func (src *DashboardSessionSource) renderBoard(key string, record sessionRecord,
 // state, and Seq covers them only when the board's refresh after their
 // write succeeds), the language, the mailbox listening marker's presence,
 // process, and that process's liveness (an armed wait shows only while it
-// runs), and the re-ask times. The mailbox owner and identity are not in
-// it: the served page never sets them (servedWhiteboardPanels).
-func boardMemoBase(key string, record sessionRecord, lang string, reasked map[int]int64) string {
+// runs), the re-ask times, and replies, the session's reply-registry print
+// (replyPrint). The mailbox owner and identity are not in it: the served
+// page never sets them (servedWhiteboardPanels).
+func boardMemoBase(key string, record sessionRecord, lang string, reasked map[int]int64, replies string) string {
 	h := sha256.New()
-	fmt.Fprintf(h, "seq\x00%d\x00lang\x00%s\x00", record.Whiteboard.Seq, lang)
+	fmt.Fprintf(h, "seq\x00%d\x00lang\x00%s\x00replies\x00%s\x00", record.Whiteboard.Seq, lang, replies)
 	todos, _ := json.Marshal(record.Todos)
 	agenda, _ := json.Marshal(record.Agenda)
 	asked, _ := json.Marshal(reasked)
@@ -189,17 +192,12 @@ func boardMemoBase(key string, record sessionRecord, lang string, reasked map[in
 // seam).
 var markerAlive = wsstate.ProcessAlive
 
-// boardWatchStamp stats every file a board render named: whether it
-// exists, its modification time, and its size.
+// boardWatchStamp stamps every file a board render named
+// (wsdashboard.StampWatched: a ticket directory by its listing, any other
+// path by its stat).
 func boardWatchStamp(watch []string) string {
 	h := sha256.New()
-	for _, path := range watch {
-		if info, err := os.Stat(path); err == nil {
-			fmt.Fprintf(h, "%s\x00%d\x00%d\x01", path, info.ModTime().UnixNano(), info.Size())
-		} else {
-			fmt.Fprintf(h, "%s\x00-\x01", path)
-		}
-	}
+	wsdashboard.StampWatched(h, watch)
 	return hex.EncodeToString(h.Sum(nil))
 }
 
@@ -223,7 +221,7 @@ func (src *DashboardSessionSource) renderBoardNow(key string, record sessionReco
 	}
 	in.Panels = servedWhiteboardPanels(record, key, replyID, lang, watch, func() ([]mailboxHistoryRecord, error) {
 		return src.history.read(replyID, key)
-	})
+	}, src.loadReplies)
 	// An armed wait shows as long as its process runs, and a process can
 	// die leaving its marker: no watched file reports that, so the page
 	// names the process.
@@ -303,8 +301,9 @@ func docImagePath(root, path string) string {
 // reply-id unread count, never a named inbox the session may own. watch,
 // when not nil, is told each file and directory the panels read that a
 // writer may change without a nudge (whiteboardPanelInput.watch). history,
-// when not nil, reads the mailbox history (whiteboardPanelInput.history).
-func servedWhiteboardPanels(record sessionRecord, key, replyID, lang string, watch func(path string), history func() ([]mailboxHistoryRecord, error)) []wswhiteboard.Panel {
+// when not nil, reads the mailbox history (whiteboardPanelInput.history),
+// and replies the reply registry (whiteboardPanelInput.replies).
+func servedWhiteboardPanels(record sessionRecord, key, replyID, lang string, watch func(path string), history func() ([]mailboxHistoryRecord, error), replies func() (wsmailbox.ReplyStore, bool)) []wswhiteboard.Panel {
 	return whiteboardPanels(whiteboardPanelInput{
 		rec:        record,
 		layout:     wswhiteboard.LayoutFull,
@@ -315,6 +314,7 @@ func servedWhiteboardPanels(record sessionRecord, key, replyID, lang string, wat
 		lang:       lang,
 		watch:      watch,
 		history:    history,
+		replies:    replies,
 	})
 }
 
@@ -352,25 +352,47 @@ func servedFileText(root string) func(string) string {
 // else the contact record's. An unreadable store leaves the fields it would
 // fill empty.
 func (src *DashboardSessionSource) readContacts(reg wsdashboard.Registration) []wsdashboard.Contact {
-	replies, ok := loadReplyRegistry()
+	replies, ok := src.loadReplies()
 	if !ok {
 		return nil
 	}
 	return src.contactsFrom(reg, replies)
 }
 
-// loadReplyRegistry loads the machine reply-id registry; false when it
-// cannot be read.
-func loadReplyRegistry() (wsmailbox.ReplyStore, bool) {
+// loadReplies loads the machine reply-id registry through the source's
+// cache; false when it cannot be read. The store is shared: the caller only
+// reads it.
+func (src *DashboardSessionSource) loadReplies() (wsmailbox.ReplyStore, bool) {
 	path, err := wsmailbox.ReplyRegistryPath()
 	if err != nil {
 		return wsmailbox.ReplyStore{}, false
 	}
-	replies, err := wsmailbox.LoadReplyStore(path)
+	replies, err := src.replies.Load(path, wsmailbox.LoadReplyStore)
 	if err != nil {
 		return wsmailbox.ReplyStore{}, false
 	}
 	return replies, true
+}
+
+// replyPrint is what the served board and page show of session replyID's
+// reply-registry entry: its contacts and its reply-id unread count, never
+// the rest of the entry (the heartbeat-driven LastSeen would move it on
+// every refresh) or another session's entry. ok false prints that the
+// registry did not read.
+func replyPrint(replies wsmailbox.ReplyStore, ok bool, replyID string) string {
+	if !ok {
+		return "-"
+	}
+	contacts, _ := json.Marshal(replies.Entries[replyID].Contacts)
+	return fmt.Sprintf("%s\x00%d", contacts, len(replies.Queues[replyID]))
+}
+
+// MailPrint is the session's reply-registry print (replyPrint), which the
+// daemon's refresh stamp folds, since mail to a reply-id sends no nudge
+// (wsdashboard.MailPrintSource).
+func (src *DashboardSessionSource) MailPrint(reg wsdashboard.Registration) (string, bool) {
+	replies, ok := src.loadReplies()
+	return replyPrint(replies, ok, reg.ReplyID), true
 }
 
 // contactsFrom is readContacts over a reply registry already loaded.
@@ -387,7 +409,7 @@ func (src *DashboardSessionSource) contactsFrom(reg wsdashboard.Registration, re
 		}
 		stores[scope] = nil
 		if path, err := wsmailbox.PathForScope(scope, reg.Project); err == nil {
-			if store, err := wsmailbox.Load(path); err == nil {
+			if store, err := src.scopes.Load(path, wsmailbox.Load); err == nil {
 				stores[scope] = &store
 			}
 		}

@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -168,38 +169,65 @@ func (d sessionDirs) legacyPath(key string) string { return filepath.Join(d.lega
 // errSessionNotFound; an unparsable part file is its own error. raw, when not
 // nil, receives every file read, for a change fingerprint.
 func (s *sessionStore) loadRecord(d sessionDirs, key string, parts recordPart, raw io.Writer) (record sessionRecord, legacy bool, err error) {
+	return loadRecordWith(d, key, parts, raw, readRecordFile)
+}
+
+// recordFileReader reads one record file and decodes it into a value
+// newValue makes, returning the file's bytes and the decoded value (a
+// pointer of newValue's type). A file that does not exist is an error that
+// is fs.ErrNotExist.
+type recordFileReader func(path string, newValue func() any) (data []byte, value any, err error)
+
+// readRecordFile is the recordFileReader that reads the file afresh.
+func readRecordFile(path string, newValue func() any) ([]byte, any, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	v := newValue()
+	if err := json.Unmarshal(data, v); err != nil {
+		return nil, nil, err
+	}
+	return data, v, nil
+}
+
+// loadRecordWith is loadRecord reading each file through read. A reader may
+// hand out values it shares with other callers (the dashboard source's
+// cache), so the record's slices, maps, and whiteboard may be shared: a
+// caller of such a reader only reads them.
+func loadRecordWith(d sessionDirs, key string, parts recordPart, raw io.Writer, read recordFileReader) (record sessionRecord, legacy bool, err error) {
 	if !sessionKeyFilenamePattern.MatchString(key) {
 		return sessionRecord{}, false, errSessionNotFound
 	}
-	data, err := os.ReadFile(d.partPath(key, partKey))
+	data, v, err := read(d.partPath(key, partKey), func() any { return new(sessionKeyRecord) })
 	if errors.Is(err, fs.ErrNotExist) {
-		data, err = os.ReadFile(d.legacyPath(key))
-		if err != nil || json.Unmarshal(data, &record) != nil {
+		data, v, err = read(d.legacyPath(key), func() any { return new(sessionRecord) })
+		if err != nil {
 			return sessionRecord{}, false, errSessionNotFound
 		}
+		record = *v.(*sessionRecord)
 		if raw != nil {
 			raw.Write(data)
 		}
 		return record, true, nil
 	}
-	if err != nil || json.Unmarshal(data, &record.sessionKeyRecord) != nil {
+	if err != nil {
 		return sessionRecord{}, false, errSessionNotFound
 	}
+	record.sessionKeyRecord = *v.(*sessionKeyRecord)
 	writeRawPart(raw, partKey, data)
 	for _, part := range recordParts {
 		if part == partKey || parts&part == 0 {
 			continue
 		}
-		data, err := os.ReadFile(d.partPath(key, part))
+		data, v, err := read(d.partPath(key, part), func() any { return reflect.New(reflect.TypeOf(record.partValue(part)).Elem()).Interface() })
 		if errors.Is(err, fs.ErrNotExist) {
 			continue
-		}
-		if err == nil {
-			err = json.Unmarshal(data, record.partValue(part))
 		}
 		if err != nil {
 			return sessionRecord{}, false, fmt.Errorf("read session %s: %w", part.fileName(), err)
 		}
+		reflect.ValueOf(record.partValue(part)).Elem().Set(reflect.ValueOf(v).Elem())
 		writeRawPart(raw, part, data)
 	}
 	return record, false, nil

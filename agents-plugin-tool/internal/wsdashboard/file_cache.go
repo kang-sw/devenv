@@ -30,7 +30,7 @@ type FileCache[T any] struct {
 	mu      sync.Mutex
 	entries map[string]fileCacheEntry[T]
 	// hits and misses count the loads served from the cache and the ones
-	// that read the file.
+	// that read the file; a load of a file that does not stat is neither.
 	hits, misses atomic.Int64
 	// now is the clock the racy window is judged by; nil is time.Now.
 	now func() time.Time
@@ -55,7 +55,7 @@ func (c *FileCache[T]) Load(path string, load func(path string) (T, error)) (T, 
 	}
 	info, err := os.Stat(path)
 	if err != nil {
-		c.misses.Add(1)
+		// Counted neither way: a file that is not there reads no bytes.
 		c.forget(path)
 		return load(path)
 	}
