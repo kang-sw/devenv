@@ -329,7 +329,14 @@
       "registered_at": "2026-11-09T00:46:52Z"
     },
     "261110-bug-ws-dashboard-daemon-read-amplification": {
-      "registered_at": "2026-11-10T06:56:32Z"
+      "registered_at": "2026-11-10T06:56:32Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "28ef83e379b353cc",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-10T07:06:52Z"
+      }
     },
     "261110-bug-ws-mcp-move-close-guard-flake-and-suite-timeout": {
       "registered_at": "2026-11-10T01:04:17Z"
