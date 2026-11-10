@@ -38,8 +38,36 @@ Observed, with the query that showed it:
 7. **`topic` needs the exact full title.** Long titles must be retyped
    exactly; there is no unique-prefix or substring form.
 
+## Direction (user, 2026-11-10)
+
+Today's `depth: full` output is the maximum verbosity, not noise to cut. The
+gap is a missing middle level. Start from what a lead needs to know, find the
+query it has to run for that today, and add the level that answers the need
+without the rest. Trimming fields from `full` is not the goal on its own.
+
+Needs seen while dogfooding, with the query each takes today:
+
+| need | query today | what the need actually reads |
+|---|---|---|
+| What did the user decide in topic X (after compaction, before writing a ticket) | `topic` at `full` | title, chosen option text, note, assumed flag |
+| What is waiting on the user and what exactly was asked | default + `ids` at `full` | the full ask of open items only |
+| Was this already asked (dedupe before `wb:add`) | `text` | matching items, which field matched, a short snippet |
+| Quote the user's words into a ticket's Decisions | `ids` at `full` | `answer_quote` of the listed items |
+| Quote a topic body for `wb:edit` | `topic` (body + every item at `full`) | the body |
+
+A middle level along these lines would print an open item's full ask and a
+settled item as title + decoded answer (`a: <option text>`, note, assumed),
+leaving options, recommendation, rationale, quote, and time to `full` or an
+explicit `fields` list. Whether it becomes the default for `topic` and `ids`
+targets is open.
+
 ## Open Questions
 
+- Give each topic a short stable key (stem) separate from its title, with the
+  title as an editable label, so `wb:topic` and `topic` queries take the key
+  instead of the exact title? Board item (656). (Supersedes 7 if adopted.)
+- Make the middle level the default for `topic` and `ids` targets, keeping
+  `full` as the explicit maximum?
 - For a settled policy item, print the chosen option text in place of the
   option list and recommendation at the default detail, keeping the full ask
   behind an explicit `fields` request? (Decides 1.)
