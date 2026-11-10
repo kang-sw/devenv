@@ -342,9 +342,11 @@ func (r *replayed) stateBefore(n *node) *state {
 			continue
 		}
 		if x.typ == TypeItemAssign && !rel[x.p.str("item")] {
-			// Another thread's assign only re-applies the live rules here.
+			// Another thread's assign only re-applies the live rules here,
+			// and a record a rule adds displaces that item's fallback.
 			if S.hasLiveRule() && r.hb(x, n) {
 				S.refreshLive(x)
+				S.settleAll(x)
 			}
 			continue
 		}

@@ -10,10 +10,13 @@ import (
 
 var (
 	kinds    = []string{"task", "todo", "topic"}
-	settable = []string{"todo", "doing", "blocked"}
+	settable = []string{"idea", "todo", "doing", "blocked"}
 	origins  = []string{OriginHuman, OriginAgent, OriginAgentAuto}
-	// itemFields are the item.edit fields, in the engine's order.
+	// itemFields are the item.edit fields, in the engine's order. stage is
+	// retired: only older events carry it (see apply), so editFields, the
+	// list a refusal names, leaves it out.
 	itemFields = []string{"title", "body", "project", "due", "priority", "stage"}
+	editFields = itemFields[:5]
 )
 
 // DefaultStaleDays is the stale threshold (284): a live assignment in doing
@@ -111,11 +114,6 @@ type item struct {
 	// (every item created before the field) = last.
 	after    string
 	afterSet bool
-	// stage is "review" for an item in the review stage, "" for todo. It
-	// never holds "review" while the item holds a live or pending
-	// assignment: an assign clears it, and a concurrent move to review that
-	// folds after the assign is dropped (the assignment wins).
-	stage       string
 	ts          time.Time
 	hidden      bool
 	edited      *node
@@ -139,6 +137,11 @@ type attachment struct {
 // rule rooted outside its author's reach sends to the root: pending ->
 // accepted (the rule goes live) | declined | withdrawn; accepted ->
 // returned | unassigned. It never holds the item, so openRec skips it.
+// A fallback (fallback set) is the holding the fold derives for a task
+// nobody else holds (see settle): live -> displaced (someone else came to
+// hold it) | unassigned (its holder was removed). openRec and openRecs skip
+// it, so it never blocks an assign; liveRec finds it, so its holder sets its
+// status and closes it.
 type rec struct {
 	id, item, to, by, sender, completion, via string
 	ts                                        time.Time
@@ -153,6 +156,8 @@ type rec struct {
 	inherited                                 string
 	rule                                      string
 	ruleRequest                               bool
+	fallback                                  bool
+	start                                     *node // a fallback's: the event that started its period
 }
 
 // rule is an assignment rule (490)-(492): it covers root (with
@@ -509,7 +514,7 @@ func isOpen(r *rec) bool { return r.state == "live" || r.state == "pending" }
 // nothing.
 func (s *state) openRec(item, who string) *rec {
 	for _, r := range s.byItem[item] {
-		if isOpen(r) && r.to == who && !r.ruleRequest {
+		if isOpen(r) && r.to == who && !r.ruleRequest && !r.fallback {
 			return r
 		}
 	}
@@ -527,10 +532,11 @@ func (s *state) acceptedReq(item, who string) *rec {
 	return nil
 }
 
+// openRecs are item's live or pending records, the fallback left out.
 func (s *state) openRecs(item string) []*rec {
 	var out []*rec
 	for _, r := range s.byItem[item] {
-		if isOpen(r) {
+		if isOpen(r) && !r.fallback {
 			out = append(out, r)
 		}
 	}
@@ -672,6 +678,91 @@ func (s *state) endRule(ru *rule, n *node) {
 		if x.rule == ru.id && !x.ruleRequest && x.state == "live" {
 			s.endRec(x, n, "unassigned")
 		}
+	}
+}
+
+// unassignRule ends ru for item.unassign {root} or {rule}: a pending request
+// is withdrawn, an accepted one unassigned, then the rule ends with its
+// records.
+func (s *state) unassignRule(ru *rule, n *node) {
+	if q := s.asg[ru.request]; ru.request != "" && q != nil {
+		switch q.state {
+		case "pending":
+			s.endRec(q, n, "withdrawn")
+		case "accepted":
+			q.state, q.ended = "unassigned", n
+		}
+	}
+	s.endRule(ru, n)
+}
+
+// fallbackHolder is who holds a task nobody else holds: its creator, or
+// when the creator was removed the first admin in the roles admin order.
+func (s *state) fallbackHolder(it *item) string {
+	if s.liveMember(it.author) {
+		return it.author
+	}
+	for _, a := range s.aorder {
+		if s.liveMember(a) {
+			return a
+		}
+	}
+	return ""
+}
+
+// liveFallback is item's live fallback record, if any.
+func (s *state) liveFallback(item string) *rec {
+	for _, r := range s.byItem[item] {
+		if r.fallback && r.state == "live" {
+			return r
+		}
+	}
+	return nil
+}
+
+// settle keeps every task held after n: a live or pending record other than
+// a rule request displaces the fallback, and with none the fallback holder
+// gets a fresh record "<n>@<item>><holder>" at todo, so each fallback period
+// has its own status register. A topic may be held by nobody.
+func (s *state) settle(id string, n *node) {
+	it := s.items[id]
+	if it == nil || it.kind == "topic" {
+		return
+	}
+	var fb *rec
+	held := false
+	for _, r := range s.byItem[id] {
+		switch {
+		case r.fallback:
+			if r.state == "live" {
+				fb = r
+			}
+		case isOpen(r) && !r.ruleRequest:
+			held = true
+		}
+	}
+	if held {
+		if fb != nil {
+			s.endRec(fb, n, "displaced")
+		}
+		return
+	}
+	h := s.fallbackHolder(it)
+	if fb != nil || h == "" {
+		return
+	}
+	s.addRecID(n.id+"@"+id+">"+h, n.id, n.ts, n, id, h, h, "assignee", func(r *rec) {
+		r.fallback, r.start = true, n
+		if n.typ == TypeItemCreate && n.p.str("stage") == "review" {
+			r.status = "idea" // an older create in the review stage
+		}
+	})
+}
+
+// settleAll settles every item, in insertion order.
+func (s *state) settleAll(n *node) {
+	for _, id := range s.iorder {
+		s.settle(id, n)
 	}
 }
 
@@ -1001,9 +1092,6 @@ func (s *state) apply(n *node) {
 		}
 		it.mentions, it.attachments, it.refs = mentionsOf(p), attachmentsOf(p), refsOf(p)
 		it.after, it.afterSet = p.str("after"), p.has("after")
-		if p.str("stage") == "review" {
-			it.stage = "review"
-		}
 		if s.items[n.id] == nil {
 			s.iorder = append(s.iorder, n.id)
 		}
@@ -1045,18 +1133,20 @@ func (s *state) apply(n *node) {
 				v, _ := p.intOf(f)
 				it.priority = s.write(key, label, n, v).(int)
 			case "stage":
-				v := ""
-				if !p.null(f) {
-					v = jsString(p[f])
-				}
-				// The assignment wins over a concurrent move to review.
-				if v == "review" && len(s.openRecs(it.id)) > 0 {
+				// An older event: review is the fallback holder's idea status,
+				// null (todo) its todo. Held by anyone else, the item is not in
+				// review, and the assignment wins.
+				fb := s.liveFallback(it.id)
+				if fb == nil {
 					continue
 				}
-				it.stage = s.write(key, label, n, v).(string)
-				if it.stage == "review" && len(s.openRecs(it.id)) > 0 {
-					it.stage = "" // an older concurrent review write won the register
+				v := "todo"
+				if p.str(f) == "review" {
+					v = "idea"
 				}
+				fb.writes = append(fb.writes, n)
+				w := s.write("st:"+fb.id, "status of "+fb.to+" on "+alias(it.id), n, statusVal{v, "", a, n}).(statusVal)
+				fb.status, fb.note, fb.noteBy, fb.last = w.status, w.note, w.by, w.n
 			}
 		}
 		if p.has("body") {
@@ -1077,7 +1167,7 @@ func (s *state) apply(n *node) {
 		}
 		r := s.liveRec(p.str("item"), from)
 		to := p.str("to")
-		if r == nil || s.members[to] == nil || s.openRec(p.str("item"), to) != nil {
+		if r == nil || r.fallback || s.members[to] == nil || s.openRec(p.str("item"), to) != nil {
 			break
 		}
 		s.addRec(n.id, n.ts, n, r.item, to, r.by, r.completion, func(x *rec) {
@@ -1129,6 +1219,9 @@ func (s *state) apply(n *node) {
 		item, who := p.str("item"), p.str("assignee")
 		rq := s.acceptedReq(item, who)
 		r := s.liveRec(item, who)
+		if r != nil && r.fallback {
+			r = nil // a fallback is not returned; with no other holding nothing happens
+		}
 		if r == nil {
 			if q := s.handedRec(item, who, n); q != nil {
 				r = s.reverseHanded(q, n)
@@ -1151,20 +1244,15 @@ func (s *state) apply(n *node) {
 		}
 	case TypeItemUnassign:
 		item := p.str("item")
-		if !p.null("root") {
+		if !p.null("rule") {
+			if ru := s.ruleByID[p.str("rule")]; ru != nil && ru.item == item && ru.ended == "" && ru.by == a {
+				s.unassignRule(ru, n)
+			}
+		} else if !p.null("root") {
 			for _, ru := range s.openRules(item) {
-				if ru.by != a || ru.root != p.str("root") {
-					continue
+				if ru.by == a && ru.root == p.str("root") {
+					s.unassignRule(ru, n)
 				}
-				if q := s.asg[ru.request]; ru.request != "" && q != nil {
-					switch q.state {
-					case "pending":
-						s.endRec(q, n, "withdrawn")
-					case "accepted":
-						q.state, q.ended = "unassigned", n
-					}
-				}
-				s.endRule(ru, n)
 			}
 		} else if p.truthy("assignee") {
 			who := p.str("assignee")
@@ -1217,6 +1305,9 @@ func (s *state) apply(n *node) {
 		}
 		item := p.str("item")
 		r := s.liveRec(item, who)
+		if r != nil && r.fallback && r.start != n && !s.hb(r.start, n) {
+			r = nil // n had not seen the fallback start: it was meant for the record that ended
+		}
 		if r == nil {
 			// folded onto an assignment a concurrent event ended
 			s.onEnded(item, who, n)
@@ -1344,8 +1435,14 @@ func (s *state) apply(n *node) {
 		v, _ := p.posIntOf("max_bytes")
 		s.attMax = s.write("att", "attachment limit", n, v).(float64)
 	}
-	if strings.HasPrefix(n.typ, "roles.") || n.typ == TypeItemAssign || n.typ == wsledger.TypeMemberJoin {
+	switch {
+	case strings.HasPrefix(n.typ, "roles.") || n.typ == TypeItemAssign || n.typ == wsledger.TypeMemberJoin:
 		s.refreshLive(n)
+		s.settleAll(n)
+	case n.typ == TypeItemCreate:
+		s.settle(n.id, n)
+	case strings.HasPrefix(n.typ, "item."):
+		s.settle(p.str("item"), n)
 	}
 }
 
@@ -1355,7 +1452,6 @@ func (s *state) applyAssign(n *node) {
 	if s.items[item] == nil {
 		return
 	}
-	s.items[item].stage = "" // assigning promotes a review item to todo
 	completion := p.str("completion")
 	if !p.truthy("completion") {
 		completion = "assignee"

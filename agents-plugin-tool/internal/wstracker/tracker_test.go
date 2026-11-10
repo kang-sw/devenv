@@ -233,11 +233,10 @@ func TestIncrementalRefresh(t *testing.T) {
 	}
 }
 
-// TestReviewRegisterWinnerDroppedWhileAssigned: a stage write folded after
-// an assign can recompute an older concurrent "review" write as the
-// register's winner (here, ada's agent write loses to her human one); the
-// fold drops it while the item holds open records, so once the assignment
-// ends the item reads unassigned, not review.
+// TestReviewRegisterWinnerDroppedWhileAssigned: older stage writes fold
+// onto the creator's fallback; one folded while someone else holds the item
+// is dropped (the assignment wins), so once the assignment ends the item
+// starts a fresh fallback period at todo, not at the older review's idea.
 func TestReviewRegisterWinnerDroppedWhileAssigned(t *testing.T) {
 	genesis := json.RawMessage(`{"admins":["ada"],"members":[
 		{"id":"ada","name":"Ada","keys":["ada-k1"],"leads":[]},
@@ -264,7 +263,7 @@ func TestReviewRegisterWinnerDroppedWhileAssigned(t *testing.T) {
 			t.Fatalf("%s is %s (%s), want applied", id, e.Status, deref(e.Reason))
 		}
 	}
-	if got := deref(v.Items["ada.pc#1"].Status); got != "unassigned" {
-		t.Fatalf("status after the unassign = %q, want unassigned (a review register winner must not come back)", got)
+	if got := deref(v.Items["ada.pc#1"].Status); got != "todo" {
+		t.Fatalf("status after the unassign = %q, want todo (an older review must not come back)", got)
 	}
 }

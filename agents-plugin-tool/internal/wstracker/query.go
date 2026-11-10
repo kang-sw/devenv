@@ -34,7 +34,7 @@ import (
 
 // QueryStatuses are the values status: and tracker.query's status filter
 // take: open (not done) and hidden, then an item's derived statuses.
-var QueryStatuses = []string{"open", "hidden", "todo", "doing", "blocked", "awaiting", "done", "pending", "review", "unassigned", "declined", "returned"}
+var QueryStatuses = []string{"open", "hidden", "idea", "todo", "doing", "blocked", "awaiting", "done", "pending"}
 
 // QueryKinds are the values kind: and tracker.query's kind filter take. A
 // todo create folds as a task, so todo is not one.

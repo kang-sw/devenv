@@ -322,8 +322,9 @@ build, no server, no dependencies.
     the assignee's initials); on *all* the cards are items under the kind
     filter only: the columns already are the statuses, so the status filter
     is ignored there (it would only empty columns) and the kanban toolbar
-    offers kind alone. Its first column is *review*, whose `+` creates a task
-    in the review stage, not self-assigned. Cards are quiet like rows (title, initials, priority,
+    offers kind alone. Its *idea* column sits right before *todo*; its `+`
+    creates a task its creator holds at idea (`item.create` then
+    `item.status idea` in one write). Cards are quiet like rows (title, initials, priority,
     due), with the source on hover. Dragging moves a card only for the
     viewer's own live assignment and dispatches `item.status` (todo / doing /
     blocked) or `item.close` (done). Cards stay independent tasks (469):
@@ -442,7 +443,8 @@ build, no server, no dependencies.
   A later URL route reuses the same `focus` option.
 - **Actions** append events to the viewer clone's open batch, then report each
   event as applied or flagged. The actions are create (any kind, from the
-  inline new-item row; every kind self-assigns in the same write), edit, comment, reply,
+  inline new-item row: a task is created at idea, held by its creator through
+  the fallback; a topic self-assigns in the same write), edit, comment, reply,
   edit or hide own comment (each with mentions, refs, and attachments), assign (people and subtree rules),
   split into a subtask, hand off, status, close, confirm, reject, unassign or
   withdraw, reopen, hide item, accept / decline / return, and every `roles.*`
@@ -519,15 +521,15 @@ attachment the store accepts, in bytes (339); without it the limit is 10 MiB
 
 | type | payload | rule |
 |---|---|---|
-| `item.create` | `kind` (`task`/`topic`; `todo` is still accepted and folds as `task`, 154 a), `title`, `body?`, `project?`, `due?`, `priority?`, `parent?`, `after?`, `stage?`, `mentions?`, `attachments?`, `refs?` | A `parent` must be assigned to or created by the author. `project` is one free-text string, the only grouping (no labels or tags). `due` is a `YYYY-MM-DD` date. `priority` is a level in the author's current range; omitted, the item starts at the store's default level. `after` places it among its siblings (528), below. `stage: "review"` creates a task in the review stage (see Derived state); absent, it starts in todo. Flagged: a stage on a topic, or any other value. |
-| `item.edit` | `item`, any of `title`/`body`/`project`/`due`/`priority`/`stage`; `mentions?`, `attachments?` and `refs?` with `body` | Creator only; an admin may also edit an item whose creator was removed (292). `due: null` clears the date; priority cannot be cleared. `stage: "review"` moves a task back to review, `stage: null` moves it to todo; moving to review is flagged while the item holds a live or pending assignment, and a stage on a topic is flagged. Each field merges by the (203) rule. `mentions` or `attachments` without `body` is flagged, and so is `refs`. |
+| `item.create` | `kind` (`task`/`topic`; `todo` is still accepted and folds as `task`, 154 a), `title`, `body?`, `project?`, `due?`, `priority?`, `parent?`, `after?`, `mentions?`, `attachments?`, `refs?` | A `parent` must be assigned to or created by the author. `project` is one free-text string, the only grouping (no labels or tags). `due` is a `YYYY-MM-DD` date. `priority` is a level in the author's current range; omitted, the item starts at the store's default level. `after` places it among its siblings (528), below. A new write carrying `stage` is refused (retired); an older event's stage folds as described under Derived state. |
+| `item.edit` | `item`, any of `title`/`body`/`project`/`due`/`priority`; `mentions?`, `attachments?` and `refs?` with `body` | Creator only; an admin may also edit an item whose creator was removed (292). `due: null` clears the date; priority cannot be cleared. A new write carrying `stage` is refused (retired). Each field merges by the (203) rule. `mentions` or `attachments` without `body` is flagged, and so is `refs`. |
 | `item.hide` | `item` | Creator only; an admin may also hide an item whose creator was removed (292). A tombstone: the content stays in history. Flagged while someone else holds an open (live or pending) assignment on the item. |
-| `item.assign` | `item`, `targets` (a list of member ids and rules `{root, include_root?, levels?}`) or the older `mode` (`all`/`chosen`), `levels` (all), `people` (chosen); `completion` (`assignee`/`assigner`; absent reads as `assignee`, and writers fill it in: `assigner` when anyone but the author is a target, `assignee` when the author is the only one) | Creator only; an admin may also assign an item whose creator was removed. A person may be anyone in the store: the author, or someone the author reaches (the author is in their lead chain, any depth), is a **forced** assignment, live at once; anyone else gets a **pending** assignment. A rule (490)-(492) targets everyone below `root` (within `levels`, absent = the whole subtree; `root` too with `include_root`), forced, and stays live: anyone who later enters the range inherits it. A rule rooted at the author or below is live at once; one rooted elsewhere is a **rule request** pending to `root`. The older `chosen` is `targets` of people and `all` is one rule `{root: author, levels}`, with the event id as the rule id. Flagged: both `targets` and `mode`, an empty list, a malformed target, two rules on one root, a rule with nobody in it, a rule another live rule of the author's on the item already covers, or every person chosen (with no rule) already holding a live or pending assignment. On a topic (153 b) an assign names exactly one person (`targets: [id]`, or `chosen` with one person) and makes its **holder**: flagged otherwise (`all`, a rule, or more than one), and flagged while the topic has any live or pending assignment, a pending handoff included; its `completion` is accepted and not stored. Any applied assign moves a review-stage item to todo. |
+| `item.assign` | `item`, `targets` (a list of member ids and rules `{root, include_root?, levels?}`) or the older `mode` (`all`/`chosen`), `levels` (all), `people` (chosen); `completion` (`assignee`/`assigner`; absent reads as `assignee`, and writers fill it in: `assigner` when anyone but the author is a target, `assignee` when the author is the only one) | Creator only; an admin may also assign an item whose creator was removed. A person may be anyone in the store: the author, or someone the author reaches (the author is in their lead chain, any depth), is a **forced** assignment, live at once; anyone else gets a **pending** assignment. A rule (490)-(492) targets everyone below `root` (within `levels`, absent = the whole subtree; `root` too with `include_root`), forced, and stays live: anyone who later enters the range inherits it. A rule rooted at the author or below is live at once; one rooted elsewhere is a **rule request** pending to `root`. The older `chosen` is `targets` of people and `all` is one rule `{root: author, levels}`, with the event id as the rule id. Flagged: both `targets` and `mode`, an empty list, a malformed target, two rules on one root, a rule with nobody in it, a rule another live rule of the author's on the item already covers, or every person chosen (with no rule) already holding a live or pending assignment. On a topic (153 b) an assign names exactly one person (`targets: [id]`, or `chosen` with one person) and makes its **holder**: flagged otherwise (`all`, a rule, or more than one), and flagged while the topic has any live or pending assignment, a pending handoff included; its `completion` is accepted and not stored. Any applied assign (the creator included) displaces a task's fallback holding. |
 | `item.handoff` | `item`, `to`, `assignee?`, `note?` | The holder of a live assignment hands it to anyone; an admin may hand off any member's live assignment by naming its holder in `assignee` (286), so open work can be taken over before the member is removed. It makes a pending assignment to `to` with the original's assigner and completion mode; on accept the original assignment ends (`handed`) and the new one starts with the original's status and note (290). Flagged on a done assignment, when `to` is the holder or already holds one, or while another handoff of it is pending. |
 | `item.accept` / `item.decline` | `item`, `note?` | The target of a pending assignment, on it. Accept makes it live; for a handoff it also ends the original. Decline ends it as `declined`. A pending handoff whose original ends another way is withdrawn with it (295), so a later accept or decline finds no pending assignment. |
 | `item.return` | `item`, `assignee`, `note?` | Only the assignee's direct lead, on an accepted (formerly pending) live assignment. Ends it as `returned`; the assigner may send again. Returning an accepted handoff restores the original assignment with its prior status (291), unless its holder was removed or holds another assignment on the item by then. |
-| `item.unassign` | `item`, `assignee?` or `root?` | By the assigner; the sender of a pending assignment may also withdraw it, and the holder of a topic may release their own live one (153 b). An admin may also unassign when the assignee or assigner was removed. With `root`, it ends the author's open rule rooted there (a pending rule request is withdrawn). Without either, it withdraws all of the author's assignments on the item and ends their rules. |
-| `item.status` | `item`, `status` (`todo`/`doing`/`blocked`), `note?` | Assignee only (live). The creator self-assigns first. Allowed while awaiting confirmation, which withdraws the close. Not allowed on done, or on a topic (153 b). |
+| `item.unassign` | `item`, `assignee?`, or `root?` and `rule?` | By the assigner; the sender of a pending assignment may also withdraw it, and the holder of a topic may release their own live one (153 b). An admin may also unassign when the assignee or assigner was removed. With `root`, it ends the author's open rules rooted there (a pending rule request is withdrawn). With `rule` (a rule id), it ends that one rule of the author's on the item, with its request and records; flagged when it is not an open rule on the item, is another member's, sits beside `assignee`, or has a root other than a given `root`. Without any, it withdraws all of the author's assignments on the item and ends their rules. |
+| `item.status` | `item`, `status` (`idea`/`todo`/`doing`/`blocked`), `note?` | Assignee only (live), the fallback holder included. Allowed while awaiting confirmation, which withdraws the close. Not allowed on done, or on a topic (153 b). |
 | `item.close` | `item`, `note?` | Assignee. Moves to `done`, or to `awaiting` when completion is `assigner`. Not allowed on a topic (153 b). |
 | `item.confirm` / `item.reject` | `item`, `assignee`, `note?` | Assigner, on an `awaiting` assignment. Moves to `done` / back to `doing`. |
 | `item.reopen` | `item`, `assignee?`, `note?` | The assigner or the assignee reopens a `done` assignment, back to `doing`. |
@@ -632,9 +634,10 @@ forced (author, or someone the author reaches) starts live
   appear) and notifies the root's direct lead, who may return the request:
   that ends the rule and its records as `unassigned`. A decline ends it, and
   `item.unassign` with `root` (or without a target) withdraws it while
-  pending. Accept and decline answer every pending record the author holds
-  on the item. A request is neither live work nor counted in the item status
-  while pending.
+  pending; with `rule` it ends that one rule, so of two rules on one root
+  the other stays. Accept and decline answer every pending record the author
+  holds on the item. A request holds nothing: it is neither live work nor
+  counted in the item status, and it does not make the item pending.
 
 ```text
 rule rooted at the author or below:  live at once --unassign root / all--> ended
@@ -647,24 +650,34 @@ rule rooted elsewhere:  request pending --accept--> live --request returned / un
 - An assignment's status is `todo`, `doing`, `blocked`, `awaiting`, or `done`
   while live. An item's own status comes from its live assignments: all done
   means `done`, any blocked means `blocked`, then awaiting, then doing, then
-  todo. With no live assignment it is `pending` (some pending), `review` (the
-  item is in the review stage), `declined` or `returned` (the latest one
-  ended that way), or `unassigned`. Topics have none.
+  todo, then `idea` when every live holder is at idea. A task normally has
+  a live holder (the fallback below), so with no live assignment it is
+  `pending` (a pending one shadows the fallback), or `todo` when no
+  fallback holder exists (the creator removed and no live admin). Topics
+  have none.
+- **Fallback holder.** A task nobody else holds is held by its creator (the
+  first admin in the roles admin order when the creator was removed): a
+  derived record `<start event id>@<item id>><holder>`, live, by and to the
+  holder, assignee closes, starting at todo. The start is the create, or
+  the event that ended the last assignment, so each period has its own
+  status register. Any live or pending assignment other than a rule
+  request displaces it; it cannot be unassigned, handed off, or returned,
+  and the assign check ignores it. A status write that had not seen the
+  period's start folds onto the ended record. Ended fallbacks are left out
+  of the view.
 - **Topic holder (153 b).** A topic's assignment is ownership only: one holder
   at a time, no status write, no completion mode. It shows in the holder's
   `my.assignments`, and a pending one (a handoff) in the target's
   `received.pending`, `today.pending`, and badge; it stays out of
   `today.work`, the forced-assignment badge, every `team` row list and count,
   and roll-ups.
-- **Review stage.** A task carries `stage` (`review`, or none for
-  todo), set on create or by `item.edit`. An item holding a live or pending
-  assignment is never in review: an assign clears the stage, moving to review
-  is refused while one is held, and a move to review that folds after a
-  concurrent assign is dropped (the assignment wins), in both engines.
+- **Retired review stage.** New writes carrying `stage` are refused. An
+  older event's stage folds onto the live fallback's status register:
+  `stage: "review"` (on create or edit) as idea, `stage: null` as todo; with
+  no live fallback it is skipped.
 - Roll-up: a parent shows its children by status ("done 3/5 · blocked 1") and a
   "blocked below" warning when any descendant is blocked, all the way up to the
-  root. Topics and items whose status is pending, review, declined, or
-  returned are not counted. The parent's own status stays manual, set by its assignee.
+  root. Topics and items whose status is pending or idea are not counted. The parent's own status stays manual, set by its assignee.
 - Priority displays as the level name; a stored value outside the current range
   displays as the top level. Stale (284) = a live assignment in `doing` or
   `blocked` with no status write for 3 days by the viewer's clock (the mock
@@ -1057,6 +1070,7 @@ creation, and it has a topic and a blocked subtask.
 | 531 UI | The composer's `#` opens the `@` popup's twin, searching shown items by alias and title (alias prefix, title prefix, then contains); a pick inserts `#<alias> `. `refs` are derived from the `#<alias>` / `#<id>` tokens in the text at write time (comment, comment edit, body edit), not kept from the picks. `#<alias>` in bodies and comments renders as a link to the item, its title on hover. The item window shows "Referenced by" (참조됨) under Subtasks when the item has backrefs: items, then comments with their author and a snippet; a comment row opens its item at the comment. |
 | 153 b (11-10) | A topic takes an ownership-only assignment: one holder (`targets: [id]` or `chosen` with one person), refused otherwise and while any live or pending assignment exists; no status or close, no completion mode stored; the holder may unassign their own record, so a handoff receiver can release it too; accept, decline, handoff, and return are unchanged. A held topic shows in the holder's assignments only, never in status lists or counts. Every creation path assigns a new topic to its creator (supersedes 529's topic exception and 151 a); topics created before stay unheld. |
 | 154 a (11-10) | `task` and `todo` merge: the fold stores `task` for a `todo` create, so views, filters, and checks see one kind; `todo` stays valid on input so old events replay unflagged. The `kind` field stays for a later subcategory. |
+| 555-561 (11-10) | Every task has a holder: a task nobody else holds is held by its creator (the first admin when the creator was removed) through a fold-derived fallback record, one per period, each starting at todo; any assign displaces it, and it cannot be unassigned, handed off, or returned. `idea` is a settable status before todo, left out of roll-ups; an item is idea only when every live holder is. The review stage is retired: new `stage` writes are refused, older ones fold onto the fallback (review = idea). Item statuses review, unassigned, declined, and returned no longer occur. Both quick-add rows create a task its creator holds at idea; dashboard and MCP task creates no longer self-assign (topics still do). Supersedes the 11-09 review-stage rows and 529 for tasks. |
 
 ## Open questions
 

@@ -54,10 +54,10 @@ tracker.query payload: {store?, scope?, item?, kind?, status?, project?, text?, 
 - `item`: one item in full, with its assignments, children, and comments.
 - `kind`, `status`, `project`, and `text` (part of the title, body, project,
   or ID) narrow the rows. `status` is `open` (not done), `hidden` (the only
-  way hidden items show), or a status the rows print: `todo`, `doing`,
-  `blocked`, `awaiting`, `done`, `pending`, `review`, `unassigned`,
-  `declined`, or `returned`. `review` is an item in the review stage, before
-  todo; like `pending`, it is left out of progress roll-ups.
+  way hidden items show), or a status the rows print: `idea`, `todo`,
+  `doing`, `blocked`, `awaiting`, `done`, or `pending`. `idea` is a task
+  every holder keeps before todo; like `pending`, it is left out of progress
+  roll-ups.
 - `q` is a search in the grammar of the dashboard's Items search box, so
   the tool and the screen list the same items; it is AND-ed with the fields
   above, and `text` keeps its plain substring meaning. Tokens are separated
@@ -88,14 +88,14 @@ any group.
 | command | attributes | content |
 |---|---|---|
 | `tk:store` | `name` | group of every command below but `tk:register` and `tk:sync` |
-| `tk:item.create` | `kind`, `title`, `project?`, `due?`, `priority?`, `parent?`, `after?`, `mentions?`, `refs?`, `stage?` | the body |
-| `tk:item.edit` | `item`, `title?`, `project?`, `due?`, `priority?`, `mentions?`, `refs?`, `stage?`, `clear?` | a new body |
+| `tk:item.create` | `kind`, `title`, `project?`, `due?`, `priority?`, `parent?`, `after?`, `mentions?`, `refs?` | the body |
+| `tk:item.edit` | `item`, `title?`, `project?`, `due?`, `priority?`, `mentions?`, `refs?`, `clear?` | a new body |
 | `tk:item.hide` | `item` | none |
 | `tk:item.assign` | `item`, `people?` and `rules?` (one or both), or `levels`; `completion?` | none |
 | `tk:item.handoff` | `item`, `to`, `assignee?` | a note |
 | `tk:item.accept`, `tk:item.decline` | `item` | a note |
 | `tk:item.return` | `item`, `assignee` | a note |
-| `tk:item.unassign` | `item`, `assignee?` or `root?` | none |
+| `tk:item.unassign` | `item`, `assignee?`, or `root?` and `rule?` | none |
 | `tk:item.status` | `item`, `status` | a note |
 | `tk:item.close` | `item` | a note |
 | `tk:item.confirm`, `tk:item.reject` | `item`, `assignee` | a note |
@@ -135,14 +135,18 @@ Body text, markdown, written as is.
   `due`: `YYYY-MM-DD`. `priority`: a level number from the store view's
   priority line, larger is more urgent; without one an item gets the store
   default. A note is optional.
-- `stage="review"` (tasks): the item waits in review before todo.
-  `tk:item.edit` with `stage="review"` moves an item back to review, refused
-  while it holds a live or pending assignment; `clear="stage"` promotes it to
-  todo, and so does assigning it. Either move is the item creator's, or an
-  admin's when the creator was removed.
-- An item the batch creates, a topic too, is assigned to the user
-  (`completion="assignee"`) unless the same batch assigns it with
-  `tk:item.assign item="$N"` or creates it in review; the update prints that
+- A task always has a holder: while nobody else holds it, its creator does
+  (an admin when the creator was removed), at todo, and that holder sets its
+  status and closes it. Assigning anyone, the creator included, replaces
+  that holding; when the last assignment ends, the creator holds it again
+  at todo. It cannot be unassigned, handed off, or returned; assign the
+  item instead.
+- `status`: `idea` (before todo, not counted in progress), `todo`, `doing`,
+  or `blocked`. To create a task straight into idea, follow its
+  `tk:item.create` with `tk:item.status item="$N" status="idea"` in the
+  same batch.
+- A topic the batch creates is assigned to the user unless the same batch
+  assigns it with `tk:item.assign item="$N"`; the update prints that
   assignment under the create's position.
 - People are member IDs; `people`, `rules`, `mentions`, `refs`, `leads`,
   `names`, and `clear` are space-separated.
@@ -171,15 +175,17 @@ Body text, markdown, written as is.
   - `tk:item.return` (the holder's direct lead) ends an accepted assignment;
     returning an accepted rule request ends its rule.
     `tk:item.unassign` (the assigner) withdraws `assignee`'s assignment, ends
-    the user's rule rooted at `root`, or, without either, withdraws all of the
-    user's assignments and rules on the item.
+    the user's rules rooted at `root`, or, without either, withdraws all of the
+    user's assignments and rules on the item. `rule` names one rule (its ID
+    follows the rule in the item view) and ends only that one, withdrawing it
+    while it is a request.
     `tk:item.reopen` (the assigner or the holder) reopens a done one.
   - A topic has one holder: its `tk:item.assign` names exactly one person in
     `people`, and is refused while anyone holds it or a handoff of it is
     pending. It takes no `tk:item.status` or `tk:item.close`. Its holder
     releases it with `tk:item.unassign` naming themselves as `assignee`, or
     hands it off.
-- `clear` on `tk:item.edit`: `body`, `due`, `stage`, or several
+- `clear` on `tk:item.edit`: `body`, `due`, or both
   (`clear="body due"`); an absent body leaves the body as it is.
 - `origin`: `agent` (the user asked; the default) or `agent-auto` (recorded
   unasked, valid only on `tk:item.status` and `tk:item.close`; see Recording).

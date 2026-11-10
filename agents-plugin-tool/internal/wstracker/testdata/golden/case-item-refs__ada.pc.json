@@ -542,7 +542,7 @@
     "ts": "2026-11-01T09:00:00Z",
     "hidden": false,
     "edited": null,
-    "status": "unassigned",
+    "status": "todo",
     "counted": true,
     "rollup": {
      "total": 0,
@@ -552,7 +552,9 @@
     "lastActivity": "2026-11-01T09:05:00Z",
     "started": null,
     "children": [],
-    "assignments": [],
+    "assignments": [
+     "ada.pc#1@ada.pc#1>ada"
+    ],
     "pending": [],
     "thread": [
      "ada.pc#1",
@@ -587,7 +589,7 @@
     "ts": "2026-11-01T09:00:00Z",
     "hidden": false,
     "edited": null,
-    "status": "unassigned",
+    "status": "todo",
     "counted": true,
     "rollup": {
      "total": 0,
@@ -597,7 +599,9 @@
     "lastActivity": "2026-11-01T09:15:00Z",
     "started": null,
     "children": [],
-    "assignments": [],
+    "assignments": [
+     "ada.pc#2@ada.pc#2>ada"
+    ],
     "pending": [],
     "thread": [
      "ada.pc#2",
@@ -686,7 +690,7 @@
      "id": "ada.pc#6",
      "ts": "2026-11-01T09:10:00Z"
     },
-    "status": "unassigned",
+    "status": "todo",
     "counted": true,
     "rollup": {
      "total": 0,
@@ -696,7 +700,9 @@
     "lastActivity": "2026-11-01T09:10:00Z",
     "started": null,
     "children": [],
-    "assignments": [],
+    "assignments": [
+     "ada.pc#5@ada.pc#5>ada"
+    ],
     "pending": [],
     "thread": [
      "ada.pc#5",
@@ -728,7 +734,7 @@
     "ts": "2026-11-01T09:10:00Z",
     "hidden": true,
     "edited": null,
-    "status": "unassigned",
+    "status": "todo",
     "counted": true,
     "rollup": {
      "total": 0,
@@ -738,7 +744,9 @@
     "lastActivity": "2026-11-01T09:10:00Z",
     "started": null,
     "children": [],
-    "assignments": [],
+    "assignments": [
+     "ada.pc#7@ada.pc#7>ada"
+    ],
     "pending": [],
     "thread": [
      "ada.pc#7",
@@ -764,7 +772,144 @@
    "ada.pc#5",
    "ada.pc#7"
   ],
-  "assignments": {},
+  "assignments": {
+   "ada.pc#1@ada.pc#1>ada": {
+    "id": "ada.pc#1@ada.pc#1>ada",
+    "item": "ada.pc#1",
+    "to": "ada",
+    "by": "ada",
+    "sender": "ada",
+    "completion": "assignee",
+    "state": "live",
+    "forced": true,
+    "status": "todo",
+    "note": null,
+    "noteBy": null,
+    "via": "ada.pc#1",
+    "ts": "2026-11-01T09:00:00Z",
+    "inherited": false,
+    "ruleLevels": null,
+    "rule": null,
+    "ruleRequest": false,
+    "fallback": true,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": null,
+    "restored": null,
+    "restores": null,
+    "accepted": null,
+    "leadAtAccept": null,
+    "ended": null,
+    "depth": 0,
+    "statusOrigin": null,
+    "statusBy": null,
+    "lastUpdate": "2026-11-01T09:00:00Z",
+    "stale": false
+   },
+   "ada.pc#2@ada.pc#2>ada": {
+    "id": "ada.pc#2@ada.pc#2>ada",
+    "item": "ada.pc#2",
+    "to": "ada",
+    "by": "ada",
+    "sender": "ada",
+    "completion": "assignee",
+    "state": "live",
+    "forced": true,
+    "status": "todo",
+    "note": null,
+    "noteBy": null,
+    "via": "ada.pc#2",
+    "ts": "2026-11-01T09:00:00Z",
+    "inherited": false,
+    "ruleLevels": null,
+    "rule": null,
+    "ruleRequest": false,
+    "fallback": true,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": null,
+    "restored": null,
+    "restores": null,
+    "accepted": null,
+    "leadAtAccept": null,
+    "ended": null,
+    "depth": 0,
+    "statusOrigin": null,
+    "statusBy": null,
+    "lastUpdate": "2026-11-01T09:00:00Z",
+    "stale": false
+   },
+   "ada.pc#5@ada.pc#5>ada": {
+    "id": "ada.pc#5@ada.pc#5>ada",
+    "item": "ada.pc#5",
+    "to": "ada",
+    "by": "ada",
+    "sender": "ada",
+    "completion": "assignee",
+    "state": "live",
+    "forced": true,
+    "status": "todo",
+    "note": null,
+    "noteBy": null,
+    "via": "ada.pc#5",
+    "ts": "2026-11-01T09:10:00Z",
+    "inherited": false,
+    "ruleLevels": null,
+    "rule": null,
+    "ruleRequest": false,
+    "fallback": true,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": null,
+    "restored": null,
+    "restores": null,
+    "accepted": null,
+    "leadAtAccept": null,
+    "ended": null,
+    "depth": 0,
+    "statusOrigin": null,
+    "statusBy": null,
+    "lastUpdate": "2026-11-01T09:10:00Z",
+    "stale": false
+   },
+   "ada.pc#7@ada.pc#7>ada": {
+    "id": "ada.pc#7@ada.pc#7>ada",
+    "item": "ada.pc#7",
+    "to": "ada",
+    "by": "ada",
+    "sender": "ada",
+    "completion": "assignee",
+    "state": "live",
+    "forced": true,
+    "status": "todo",
+    "note": null,
+    "noteBy": null,
+    "via": "ada.pc#7",
+    "ts": "2026-11-01T09:10:00Z",
+    "inherited": false,
+    "ruleLevels": null,
+    "rule": null,
+    "ruleRequest": false,
+    "fallback": true,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": null,
+    "restored": null,
+    "restores": null,
+    "accepted": null,
+    "leadAtAccept": null,
+    "ended": null,
+    "depth": 0,
+    "statusOrigin": null,
+    "statusBy": null,
+    "lastUpdate": "2026-11-01T09:10:00Z",
+    "stale": false
+   }
+  },
   "rules": {},
   "comments": {
    "maya.pc#1": {
@@ -1200,9 +1345,17 @@
   ],
   "notices": [],
   "my": {
-   "assignments": [],
+   "assignments": [
+    "ada.pc#1@ada.pc#1>ada",
+    "ada.pc#2@ada.pc#2>ada",
+    "ada.pc#5@ada.pc#5>ada"
+   ],
    "today": {
-    "work": [],
+    "work": [
+     "ada.pc#1@ada.pc#1>ada",
+     "ada.pc#2@ada.pc#2>ada",
+     "ada.pc#5@ada.pc#5>ada"
+    ],
     "pending": [],
     "confirms": []
    },
@@ -1212,11 +1365,7 @@
     "sent": []
    },
    "given": [],
-   "created": [
-    "ada.pc#1",
-    "ada.pc#2",
-    "ada.pc#5"
-   ],
+   "created": [],
    "team": [
     {
      "id": "maya",

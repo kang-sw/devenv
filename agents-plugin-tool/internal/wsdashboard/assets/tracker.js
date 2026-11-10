@@ -199,6 +199,8 @@
   var SI = (function () {
     var RING = '<circle cx="8" cy="8" r="5.6"/>';
     var SET = {
+      idea:       { label: "js.tk.st.idea", desc: "js.tk.st.idea.desc", tone: 'wb-muted-fg',
+        svg: '<path d="M8 2.2a4 4 0 0 0-2.4 7.2c.5.4.8 1 .8 1.6v.4h3.2V11c0-.6.3-1.2.8-1.6A4 4 0 0 0 8 2.2zM6.2 13.8h3.6"/>' },
       todo:       { label: "js.tk.st.todo", desc: "js.tk.st.todo.desc", tone: 'wb-primary', svg: RING },
       doing:      { label: "js.tk.st.doing", desc: "js.tk.st.doing.desc", tone: 'wb-primary', svg: RING + '<path d="M8 2.4a5.6 5.6 0 0 1 0 11.2z" fill="currentColor"/>' },
       blocked:    { label: "js.tk.st.blocked", desc: "js.tk.st.blocked.desc", tone: 'tk-fail', svg: RING + '<path d="M4.1 4.1l7.8 7.8"/>' },
@@ -207,7 +209,6 @@
       done:       { label: "js.tk.st.done", desc: "js.tk.st.done.desc", tone: 'tk-ok', svg: '<circle cx="8" cy="8" r="6" fill="currentColor" stroke="none"/><path d="M5.3 8.2l1.9 1.9 3.6-3.8" stroke="var(--wb-card)"/>' },
       pending:    { label: "js.tk.st.pending", desc: "js.tk.st.pending.desc", tone: 'tk-teal',
         svg: '<circle cx="8" cy="8" r="5.6" stroke-dasharray="2.2 1.9"/><path d="M6.5 6.6a1.55 1.55 0 1 1 2.2 1.4c-.5.25-.7.6-.7 1.1M8 10.9v.05"/>' },
-      review:     { label: "js.tk.st.review", desc: "js.tk.st.review.desc", tone: 'wb-muted-fg', svg: '<path d="M2.6 9.2l1.6-5.4h7.6l1.6 5.4v3.6H2.6zM2.6 9.2h3.2l.9 1.5h2.6l.9-1.5h3.2"/>' },
       unassigned: { label: "js.tk.st.unassigned", desc: "js.tk.st.unassigned.desc", tone: 'wb-muted-fg', svg: '<circle cx="8" cy="8" r="5.6" stroke-dasharray="0.8 2.2"/>' },
       declined:   { label: "js.tk.st.declined", desc: "js.tk.st.declined.desc", tone: 'wb-muted-fg', svg: RING + '<path d="M5.9 5.9l4.2 4.2M10.1 5.9l-4.2 4.2"/>' },
       returned:   { label: "js.tk.st.returned", desc: "js.tk.st.returned.desc", tone: 'wb-muted-fg', svg: RING + '<path d="M10.4 10.4V8.9a1.9 1.9 0 0 0-1.9-1.9H5.6M7.1 5.4L5.5 7l1.6 1.6"/>' },
@@ -255,7 +256,7 @@
     mdet: {},             // "store|member id" -> true: the member's key and profile details are expanded in the org card (page lifetime)
     sel: null,            // the row selected by a tap: it shows the same actions and details a hover shows
     nrow: {},             // store -> { val, kind } while the Items list shows its "+ New" input row
-    knew: {},             // store -> { val } while the "all" kanban's review column shows its "+" input row
+    knew: {},             // store -> { val } while the "all" kanban's idea column shows its "+" input row
     sub: null,            // { item: parent, rk: the row it sits under, val } while an "add subtask" input row shows
     iedit: null,          // { item, title, body, project, mpick } while the item window edits the item in place
     cedit: null,          // { cid, body, mpick } while an own comment is edited in place; mpick: member ids picked with @ meanwhile
@@ -613,8 +614,8 @@
       if (r.state === 'live' && r.by === v && r.status === 'awaiting')
         out.push(['confirm', 'confirm', wsT("js.tk.act.confirm", nm(r.to)), { item: id, who: r.to }, 1], ['note', 'reject', wsT("js.tk.act.reject", nm(r.to)), { item: id, who: r.to, op: 'item.reject' }]);
       if (r.state === 'live' && r.accepted && lead === v) out.push(['note', 'return', wsT("js.tk.act.return", nm(r.to)), { item: id, who: r.to, op: 'item.return' }]);
-      // a rule request is withdrawn by its rule's root, not as a person (the store refuses that)
-      if (r.state === 'pending' && (r.by === v || r.sender === v) && r.to !== v) out.push(['unassign', 'withdraw', wsT("js.tk.act.withdraw", nm(r.to)), r.ruleRequest ? { item: id, root: r.to } : { item: id, who: r.to }]);
+      // a rule request is withdrawn as its one rule, not as a person (the store refuses that)
+      if (r.state === 'pending' && (r.by === v || r.sender === v) && r.to !== v) out.push(['unassign', 'withdraw', wsT("js.tk.act.withdraw", nm(r.to)), r.ruleRequest ? { item: id, root: r.to, rule: r.rule } : { item: id, who: r.to }]);
     });
     return out;
   }
@@ -1670,10 +1671,10 @@
     var s = it.status;
     if (ui.status === 'hidden') return it.hidden;
     if (it.hidden) return false;
-    if (ui.status === 'open') return s !== 'done' && s !== 'declined' && s !== 'returned';
+    if (ui.status === 'open') return s !== 'done';
     if (ui.status === 'done') return s === 'done';
     if (ui.status === 'blocked') return s === 'blocked' || it.rollup.blocked.length;
-    if (ui.status === 'review') return s === 'review';
+    if (ui.status === 'idea') return s === 'idea';
     return true;
   }
   function sel(id, val, list) {
@@ -1684,7 +1685,7 @@
   }
   function itemFilterBar(kindOnly) {
     return wsT("js.tk.filter.kind") + ' ' + sel('f-kind', ui.kind, [['all', wsT("js.tk.filter.all")], ['task', kindName('task')], ['topic', kindName('topic')], ['request', wsT("js.tk.filter.request")]]) +
-      (kindOnly ? '' : ' ' + wsT("js.tk.filter.status") + ' ' + sel('f-status', ui.status, [['all', wsT("js.tk.filter.all")], ['open', wsT("js.tk.filter.open")], ['review', stLabel('review')], ['blocked', stLabel('blocked')], ['done', stLabel('done')], ['hidden', wsT("js.tk.chip.hidden")]]));
+      (kindOnly ? '' : ' ' + wsT("js.tk.filter.status") + ' ' + sel('f-status', ui.status, [['all', wsT("js.tk.filter.all")], ['open', wsT("js.tk.filter.open")], ['idea', stLabel('idea')], ['blocked', stLabel('blocked')], ['done', stLabel('done')], ['hidden', wsT("js.tk.chip.hidden")]]));
   }
   function cardActivity() {
     var chip = wsT("js.tk.activity.chip", VS.stats.events, VS.stats.flagged) + (VS.stats.concurrent ? ', ' + wsT("js.tk.row.nconcurrent", VS.stats.concurrent) : ''), m = modeOf('activity');
@@ -1736,11 +1737,11 @@
   }
 
   // Kanban: columns by status. Assignment scopes: cards are assignments (with the
-  // pending column); "all": cards are items, the review stage first, whose header "+"
+  // pending column); "all": cards are items by item status, whose idea column's header "+"
   // opens an input row atop it (knewRowHtml). Dragging moves only the viewer's own
   // live assignment (item.status, or item.close on the done column).
-  var KCOLS = { assign: ['pending', 'todo', 'doing', 'blocked', 'awaiting', 'done'],
-    items: ['review', 'unassigned', 'pending', 'todo', 'doing', 'blocked', 'awaiting', 'done', 'declined', 'returned'] };
+  var KCOLS = { assign: ['pending', 'idea', 'todo', 'doing', 'blocked', 'awaiting', 'done'],
+    items: ['pending', 'idea', 'todo', 'doing', 'blocked', 'awaiting', 'done'] };
   function kanbanBody(key, v) {
     var cols = KCOLS[key === 'all' ? 'items' : 'assign'], buckets = {};
     cols.forEach(function (c) { buckets[c] = []; });
@@ -1767,7 +1768,7 @@
     var h = '<div class="toolbar">' + (key === 'all' ? itemFilterBar(true) : '') +
       '<span class="muted">' + wsT("js.tk.kanban.hint") + '</span></div><div class="kanban">';
     h += cols.map(function (c) {
-      var rv = key === 'all' && c === 'review', kn = rv && ui.knew[ui.store];
+      var rv = key === 'all' && c === 'idea', kn = rv && ui.knew[ui.store];
       return '<div class="kcol"' + attr('kcol', c) + '><div class="khead">' + stIcon(c) + '<b>' + esc(SI.info(c).label) + '</b> <span class="muted">' + buckets[c].length + '</span>' +
         (rv ? '<span class="grow"></span>' + ia('knew', 'plus', wsT("js.tk.kanban.new"), {}) : '') + '</div>' + (kn ? knewRowHtml(kn) : '') +
         buckets[c].map(function (x) {
@@ -2190,8 +2191,9 @@
       } else if (r.state === 'live') {
         if ((r.by === v || r.to === v) && r.status === 'done') b += btn('note', wsT("js.tk.asg.reopen"), { item: r.item, who: r.to, op: 'item.reopen' });
         var departed = (VS.members[r.to] || {}).removed || (VS.members[r.by] || {}).removed;
-        if (r.by === v || (departed && VS.viewer.admin)) rm = rmBadge(r.by === v ? wsT("js.tk.asg.unassign") : wsT("js.tk.asg.unassign.admin"), r);
-        if (VS.viewer.admin && r.to !== v && r.status !== 'done' && !it.hidden) b += btn('handoff', wsT("js.tk.asg.handoff.admin"), { item: r.item, who: r.to });
+        // a fallback holding (nobody else holds the task) is not unassigned or handed off: assign instead
+        if (!r.fallback && (r.by === v || (departed && VS.viewer.admin))) rm = rmBadge(r.by === v ? wsT("js.tk.asg.unassign") : wsT("js.tk.asg.unassign.admin"), r);
+        if (VS.viewer.admin && r.to !== v && r.status !== 'done' && !r.fallback && !it.hidden) b += btn('handoff', wsT("js.tk.asg.handoff.admin"), { item: r.item, who: r.to });
       } else if (r.state === 'pending' && r.to === v && (r.by === v || r.sender === v)) rm = rmBadge(wsT("js.tk.asg.withdraw"), r);
       var note = r.note || r.answerNote, diff = [];
       if (x.src !== cs) diff.push(cs !== null && x.src.indexOf(cs) === 0 ? x.src.slice(cs.length).trim() : x.src);
@@ -2291,14 +2293,14 @@
     var mine = !it.hidden && mineLive(it), r = canStatus(it) && mine, h = '';
     if (r) {
       var cur = r.status === 'awaiting' ? 'done' : r.status;
-      h += '<div class="iw-seg" role="group" aria-label="' + wsT("js.tk.prop.status") + '">' + ['todo', 'doing', 'blocked', 'done'].map(function (s) {
+      h += '<div class="iw-seg" role="group" aria-label="' + wsT("js.tk.prop.status") + '">' + ['idea', 'todo', 'doing', 'blocked', 'done'].map(function (s) {
         var label = s === 'done' && r.completion === 'assigner' ? wsT("js.tk.menu.reqdone") : stLabel(s), dis = s === 'done' && r.status === 'awaiting';
         return '<button type="button" class="sg"' + attr('act', 'hstatus') + attr('item', it.id) + attr('status', s) + ' aria-pressed="' + (s === cur) + '" aria-label="' + esc(label) + '"' + tipAttr(label) + (dis ? ' disabled' : '') + '>' +
           SI.svg(s) + '<span class="sl">' + esc(label) + '</span></button>';
       }).join('') + '</div>';
     }
     if (canSplit(it)) h += '<button type="button" class="ia"' + attr('act', 'hsub') + attr('item', it.id) + ' aria-label="' + esc(wsT("js.tk.menu.sub")) + '"' + tipAttr(wsT("js.tk.menu.sub")) + '><svg class="i"><use href="#tki-plus"/></svg></button>';
-    if (mine && mine.status !== 'done') h += '<button type="button" class="ia"' + attr('act', 'handoff') + attr('item', it.id) + ' aria-haspopup="menu" aria-label="' + esc(wsT("js.tk.act.handoff")) + '"' + tipAttr(wsT("js.tk.act.handoff")) + '><svg class="i"><use href="#tki-handoff"/></svg></button>';
+    if (mine && mine.status !== 'done' && !mine.fallback) h += '<button type="button" class="ia"' + attr('act', 'handoff') + attr('item', it.id) + ' aria-haspopup="menu" aria-label="' + esc(wsT("js.tk.act.handoff")) + '"' + tipAttr(wsT("js.tk.act.handoff")) + '><svg class="i"><use href="#tki-handoff"/></svg></button>';
     return h ? '<div class="iw-acts">' + h + '</div>' : '';
   }
   // The item window's id button: "<kind> ID" copies the item's id (its tooltip) and says so for a moment.
@@ -2882,7 +2884,7 @@
     function put(evs, extra) { commit(evs, null, extra); }
     switch (k) {
       case 'confirm': put([['item.confirm', { item: item, assignee: who }]]); break;
-      case 'unassign': put([['item.unassign', a.hasAttribute('data-root') ? { item: item, root: a.getAttribute('data-root') } : { item: item, assignee: who }]]); break;
+      case 'unassign': put([['item.unassign', a.hasAttribute('data-rule') ? { item: item, root: a.getAttribute('data-root'), rule: a.getAttribute('data-rule') } : { item: item, assignee: who }]]); break;
       case 'accept': put([['item.accept', { item: item }]]); break;
       case 'ihide': put([['item.hide', { item: item }]]); break;
       case 'chide': put([['comment.hide', { comment: cid }]]); break;
@@ -3024,7 +3026,7 @@
     var parts = [];
     if (canStatus(it)) {
       var cur = mineR.status === 'awaiting' ? 'done' : mineR.status, pick = MN.pick || cur;
-      parts.push('<div class="mst" role="group" aria-label="' + wsT("js.tk.prop.status") + '">' + ['todo', 'doing', 'blocked', 'done'].map(function (s) {
+      parts.push('<div class="mst" role="group" aria-label="' + wsT("js.tk.prop.status") + '">' + ['idea', 'todo', 'doing', 'blocked', 'done'].map(function (s) {
         var on = s === cur, label = s === 'done' && mineR.completion === 'assigner' ? wsT("js.tk.menu.reqdone") : stLabel(s), dis = s === 'done' && mineR.status === 'awaiting';
         return '<button type="button" class="mr' + (s === pick && !on ? ' pick' : '') + '" role="menuitemradio" aria-checked="' + on + '" data-mi' + attr('act', 'm-status') + attr('status', s) + (dis ? ' disabled' : '') + (on ? ' data-autofocus' : '') + '>' +
           SI.svg(s) + '<span>' + esc(label) + '</span></button>';
@@ -3043,11 +3045,8 @@
     if (edit && task) {
       more.push(mi('pri', wsT("js.tk.menu.pri"), { item: it.id }, { icon: 'flag', sub: 1, val: esc(it.priorityName) }));
       more.push(mi('due', wsT("js.tk.menu.due"), { item: it.id }, { icon: 'calendar', sub: 1, val: it.due ? esc(it.due) : '' }));
-      // the stage (56): promote a review item; demote one that holds no live or pending assignment (55)
-      if (it.status === 'review') more.push(mi('m-promote', esc(wsT("js.tk.menu.promote")), { item: it.id }, { icon: 'accept' }));
-      else if (!it.assignments.map(A).some(function (r) { return r.state === 'live' || r.state === 'pending'; })) more.push(mi('m-demote', esc(wsT("js.tk.menu.demote")), { item: it.id }, { icon: 'return' }));
     }
-    if (mineR && mineR.status !== 'done' && !it.hidden && !inWin) more.push(mi('handoff', esc(wsT("js.tk.act.handoff")), { item: it.id }, { icon: 'handoff', sub: 1 }));
+    if (mineR && mineR.status !== 'done' && !mineR.fallback && !it.hidden && !inWin) more.push(mi('handoff', esc(wsT("js.tk.act.handoff")), { item: it.id }, { icon: 'handoff', sub: 1 }));
     // a topic's holder releases it: item.unassign of their own record
     if (mineR && !task && !it.hidden) more.push(mi('unassign', esc(wsT("js.tk.act.release")), { item: it.id, who: v }, { icon: 'withdraw' }));
     if (canAssign(it, v)) more.push(mi('assign', esc(wsT("js.tk.act.assign")), { item: it.id }, { icon: 'assign', sub: 1 }));
@@ -3275,8 +3274,6 @@
         return commit([['item.edit', { item: id, due: dv }]]);
       }
       case 'm-due-clear': return commit([['item.edit', { item: id, due: null }]]);
-      case 'm-promote': return commit([['item.edit', { item: id, stage: null }]]);
-      case 'm-demote': return commit([['item.edit', { item: id, stage: 'review' }]]);
       case 'm-handoff': {
         var hp = { item: id, to: a.getAttribute('data-to') }, note = menuNote();
         if (MN.who && MN.who !== VS.viewer.member) hp.assignee = MN.who;
@@ -3393,19 +3390,24 @@
     var cp = { kind: n.kind, title: title };
     if (n.parent) cp.parent = n.parent;
     if (n.after != null) cp.after = n.after;
-    commit(selfAssigned(cp, v), null, function (res) {
+    commit(cp.kind === 'topic' ? heldTopic(cp, v) : asIdea(cp), null, function (res) {
       n.val = '';
       if (n.at && res[0] && res[0].status === 'applied') { n.after = res[0].id; n.at = { item: res[0].id }; }
     });
   }
-  // (529) an item made here is its creator's at once: the create, then the assign in the same write
-  // (a topic's assign makes the creator its one holder; the store ignores its completion)
-  function selfAssigned(cp, v) {
+  // (560) a quick-added task lands before todo: the create, then the creator's status idea in the
+  // same write. No assign: the store holds a task nobody else holds for its creator.
+  function asIdea(cp) {
+    return [['item.create', cp], ['item.status', { item: '$1', status: 'idea' }]];
+  }
+  // (529) a topic made here is its creator's at once: the create, then the assign that makes the
+  // creator its one holder (a topic has no fallback holder; the store ignores its completion)
+  function heldTopic(cp, v) {
     return [['item.create', cp], ['item.assign', { item: '$1', mode: 'chosen', people: [v], completion: 'assignee' }]];
   }
-  // The "all" kanban's review column "+": an input row atop that column (ui.knew[store] = { val }).
-  // Title + Enter creates a task in the review stage, not self-assigned (53): assigning would
-  // move it to todo at once. The row stays for the next one; Esc closes it.
+  // The "all" kanban's idea column "+": an input row atop that column (ui.knew[store] = { val }).
+  // Title + Enter creates a creator-held task at idea (asIdea). The row stays for the next one;
+  // Esc closes it.
   function knewRowHtml(n) {
     return '<div class="nrow"><svg class="i"><use href="#tki-plus"/></svg><input type="text" id="tkknew" data-keep autocomplete="off" value="' + esc(n.val) + '" placeholder="' + wsT("js.tk.kanban.new.ph") + '" aria-label="' + wsT("js.tk.kanban.new") + '">' +
       '<button type="button" class="ia"' + attr('act', 'knew-x') + ' aria-label="' + wsT("js.tk.dlg.cancel") + '"' + tipAttr(wsT("js.tk.new.close")) + '><svg class="i"><use href="#tki-x"/></svg></button></div>';
@@ -3420,7 +3422,7 @@
   function createKnew() {
     var n = ui.knew[ui.store], title = $('tkknew').value.trim();
     if (!n || !title) return;
-    commit([['item.create', { kind: 'task', title: title, stage: 'review' }]], null, function () { n.val = ''; });
+    commit(asIdea({ kind: 'task', title: title }), null, function () { n.val = ''; });
   }
 
   // The hover insert: in a list view, the pointer near the line between two rows (or under the
@@ -3530,7 +3532,7 @@
   function createSub() {
     var s = ui.sub, title = $('tksub').value.trim();
     if (!s || !title) return;
-    commit(selfAssigned({ kind: 'task', title: title, parent: s.item }, VS.viewer.member), null, function () { s.val = ''; });
+    commit([['item.create', { kind: 'task', title: title, parent: s.item }]], null, function () { s.val = ''; });
   }
   // The item window's edit mode and a comment's edit in place.
   function startEdit(id) {
@@ -3591,7 +3593,7 @@
     var v = memberOf(viewerOf(ui.store)), r = VS.items[item] && VS.items[item].assignments.map(A).filter(function (x) { return x.to === v && x.state === 'live'; })[0];
     if (!r) return toast(wsT("js.tk.toast.notmine"));
     if (col === r.status || VS.items[item].kind === 'topic') return; // a topic has no status to move
-    if (col === 'todo' || col === 'doing' || col === 'blocked') return commit([['item.status', { item: item, status: col }]]);
+    if (col === 'idea' || col === 'todo' || col === 'doing' || col === 'blocked') return commit([['item.status', { item: item, status: col }]]);
     if (col === 'done') return commit([['item.close', { item: item }]]);
     toast(wsT("js.tk.toast.notstatus", esc(stLabel(col))));
   }

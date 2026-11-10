@@ -14,7 +14,8 @@ import (
 //	           pending to raj (maya does not lead raj)
 //	ada.pc#3   topic "Roadmap", no due
 //	ada.pc#4   task "Old idea", hidden
-//	ada.pc#6   task "Ended", assigned to bo then unassigned
+//	ada.pc#6   task "Ended", assigned to bo then unassigned; ada, holding it
+//	           again, sets it idea
 func queryView(t *testing.T) *View {
 	t.Helper()
 	return topicView(t, "ada.pc", []step{
@@ -30,6 +31,7 @@ func queryView(t *testing.T) *View {
 		{"ada.pc", "item.create", map[string]any{"kind": "task", "title": "Ended"}},
 		{"ada.pc", "item.assign", map[string]any{"item": "ada.pc#6", "targets": []any{"bo"}}},
 		{"ada.pc", "item.unassign", map[string]any{"item": "ada.pc#6", "assignee": "bo"}},
+		{"ada.pc", "item.status", map[string]any{"item": "ada.pc#6", "status": "idea"}},
 	})
 }
 
@@ -46,7 +48,7 @@ func TestQuerySearchTable(t *testing.T) {
 		{"status:pending", []string{docs}},
 		{"status:open", []string{ship, docs, road, ended}},
 		{"status:hidden", []string{old}},
-		{"status:unassigned", []string{ended}},
+		{"status:idea", []string{ended}},
 		{"assignee:maya", []string{ship}},
 		{"assignee:Ma", []string{ship}},
 		{"assignee:raj", []string{docs}}, // pending counts
@@ -103,7 +105,7 @@ func TestQueryMalformedKnownKeyRefused(t *testing.T) {
 		"due:2026-13-01": "due takes a date YYYY-MM-DD, optionally after <, >, <=, or >=",
 		"priority:high":  "priority takes a level number, optionally after <, >, <=, or >=",
 		"priority:>=-1":  "priority takes a level number, optionally after <, >, <=, or >=",
-		"status:review2": "status takes one of open, hidden, todo, doing, blocked, awaiting, done, pending, review, unassigned, declined, returned",
+		"status:review2": "status takes one of open, hidden, idea, todo, doing, blocked, awaiting, done, pending",
 		"kind:epic":      "kind takes one of task, topic",
 		"assignee:":      "assignee takes a value",
 		"project:":       "project takes a value",

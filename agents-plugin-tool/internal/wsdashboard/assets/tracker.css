@@ -99,7 +99,7 @@
 .tk .chip.st-blocked { background: var(--tk-fail); color: var(--tk-on-fail); }
 .tk .chip.st-awaiting { background: color-mix(in srgb, var(--tk-warn) 18%, var(--wb-card)); color: var(--tk-warn); }
 .tk .chip.st-done { background: color-mix(in srgb, var(--tk-ok) 16%, var(--wb-card)); color: var(--tk-ok); }
-.tk .chip.st-unassigned, .tk .chip.st-declined, .tk .chip.st-returned { background: var(--wb-muted); color: var(--wb-muted-fg); }
+.tk .chip.st-idea, .tk .chip.st-unassigned, .tk .chip.st-declined, .tk .chip.st-returned { background: var(--wb-muted); color: var(--wb-muted-fg); }
 .tk .chip.st-pending { background: color-mix(in srgb, var(--tk-teal) 16%, var(--wb-card)); color: var(--tk-teal); }
 .tk .chip.req { background: transparent; box-shadow: inset 0 0 0 1px var(--tk-teal); color: var(--tk-teal); font-weight: 600; }
 .tk .chip.hid { background: transparent; box-shadow: inset 0 0 0 1px var(--wb-muted-fg); font-weight: 600; }
@@ -534,7 +534,7 @@ dialog.tk-dlg p { margin: 0; font-size: 12.5px; color: var(--wb-muted-fg); }
 .tk .gbar { position: absolute; top: 2px; height: 11px; border-radius: 3px; background: color-mix(in srgb, var(--wb-primary) 35%, var(--wb-card)); font-size: 9.5px; line-height: 12px; text-align: right; padding-right: 2px; overflow: hidden; color: var(--wb-fg); }
 .tk .gbar.st-done { background: color-mix(in srgb, var(--tk-ok) 35%, var(--wb-card)); }
 .tk .gbar.st-blocked, .tk .gbar.over { background: color-mix(in srgb, var(--tk-fail) 40%, var(--wb-card)); }
-.tk .gbar.st-pending, .tk .gbar.st-unassigned { background: var(--wb-muted); }
+.tk .gbar.st-pending, .tk .gbar.st-idea, .tk .gbar.st-unassigned { background: var(--wb-muted); }
 .tk .cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 3px; }
 .tk .cdow { font-size: 11px; font-weight: 800; color: var(--wb-muted-fg); text-align: center; }
 .tk .cday { background: var(--wb-card); box-shadow: inset 0 0 0 1px var(--wb-muted); border-radius: 6px; min-height: 64px; padding: 2px 4px; font-size: 11.5px; }
