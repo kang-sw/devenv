@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: f73d1bc2dea89865
 sage-review-completeness-reviewed: f73d1bc2dea89865
+completed: 2026-11-10
 ---
 
 # Tracker quick-add: status, assignee, and schedule at entry time
