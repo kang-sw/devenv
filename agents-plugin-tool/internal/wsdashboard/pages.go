@@ -31,7 +31,7 @@ import (
 // (wswhiteboard.RenderRegions); the rest render from the view model
 // (pageview.go).
 
-//go:embed assets/dashboard.tmpl assets/dashboard.css assets/dashboard.js assets/sprite.svg assets/tracker.css assets/tracker.js assets/mention.js assets/toast.js assets/rail.js assets/cards.js assets/preview.js
+//go:embed assets/dashboard.tmpl assets/dashboard.css assets/dashboard.js assets/sprite.svg assets/tracker.css assets/tracker.js assets/mention.js assets/toast.js assets/rail.js assets/cards.js assets/preview.js assets/files.js
 var dashboardFS embed.FS
 
 // Region names. The session page's regions in order; the index page has one.
@@ -109,12 +109,15 @@ type pageAssetsData struct {
 	// window.WsRail): per-session drafts, stars, and the rail's own
 	// toggles, which the session page's script uses.
 	RailScript template.JS
-	// CardsScript is the board card framework (cards.js, window.WsCards) and
-	// PreviewScript its file preview kind (preview.js, window.WsPreview);
-	// LucideSprite holds the vendored icons both draw (lucide.go). A session
-	// page loads them before its own script, which mounts the framework.
+	// CardsScript is the board card framework (cards.js, window.WsCards),
+	// PreviewScript its file preview kind (preview.js, window.WsPreview),
+	// and FilesScript the conversation column's file explorer (files.js,
+	// window.WsFiles); LucideSprite holds the vendored icons they draw
+	// (lucide.go). A session page loads them before its own script, which
+	// mounts them.
 	CardsScript   template.JS
 	PreviewScript template.JS
+	FilesScript   template.JS
 	LucideSprite  template.HTML
 }
 
@@ -189,6 +192,7 @@ func buildDashboardAssets(read func(name string) ([]byte, error)) (*dashboardAss
 		RailScript:       template.JS(get("rail.js")),
 		CardsScript:      template.JS(get("cards.js")),
 		PreviewScript:    template.JS(get("preview.js")),
+		FilesScript:      template.JS(get("files.js")),
 		LucideSprite:     lucide,
 		WhiteboardCSS:    wb.CSS,
 		WhiteboardSprite: wb.Sprite,

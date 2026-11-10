@@ -12,6 +12,8 @@
 <div class="dbody"><aside id="rail" class="rail" aria-label="{{t "rail.title"}}">{{region . "rail"}}</aside><div class="rscrim" id="rscrim"></div>
 <main id="grid" class="dgrid {{.Mode}}">
 {{if .Adapter}}<nav id="tabbar" class="tabbar"><button data-tab="convo" aria-pressed="true">{{icon "chat"}}{{t "tab.conversation"}}<span class="tdot"></span></button><button data-tab="board" aria-pressed="false">{{icon "board"}}{{t "tab.board"}}<span class="tdot"></span></button></nav>
+<nav id="ctabs" class="ctabs" aria-label="{{t "tab.column"}}"><button type="button" data-ctab="convo" aria-pressed="true">{{t "tab.conversation"}}<span class="tdot"></span></button><button type="button" data-ctab="files" aria-pressed="false">{{t "tab.files"}}</button></nav>
+<section id="files" class="fpane" aria-label="{{t "tab.files"}}"></section>
 {{region . "tree"}}
 <div id="splitter" class="splitter" role="separator" aria-orientation="horizontal" aria-label="{{t "splitter.label"}}" tabindex="0" title="{{t "splitter.title"}}"></div>
 <div id="convo" class="convo">{{region . "entries"}}{{region . "convlive"}}</div>
@@ -31,6 +33,7 @@ window.wbMermaidFile = {{.Assets.MermaidFile}};</script>
 <script>{{.Assets.RailScript}}</script>
 <script>{{.Assets.CardsScript}}</script>
 <script>{{.Assets.PreviewScript}}</script>
+<script>{{.Assets.FilesScript}}</script>
 <script>{{.Assets.Script}}</script>
 </body></html>
 {{end}}

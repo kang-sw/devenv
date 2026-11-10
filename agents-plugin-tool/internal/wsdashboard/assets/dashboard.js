@@ -165,10 +165,17 @@
   // TAB maps a region to the tab that shows it; PANE names the element whose
   // visibility tells whether a tab is shown in the current view. The panels
   // live in the drawer, whose handle carries their dot instead.
+  // The conversation column itself switches "Conversation | Files"
+  // (ctabs): its Files pane (files.js) stands in for the agents tree, the
+  // conversation, and the composer, which are only hidden meanwhile, so
+  // their scroll, the draft, and the tree's state survive the switch. The
+  // conversation tab counts as shown while either of the two shows.
   var TAB = { tree: "convo", entries: "convo", convlive: "convo", board: "board" };
   var PANE = { convo: "convo", board: "bcol" };
-  function tabShown(t) { return visible($(PANE[t])); }
+  var fpane = $("files"), filesSeen = false;
+  function tabShown(t) { return visible($(PANE[t])) || (t === "convo" && visible(fpane)); }
   function tabDot(t) { var b = doc.querySelector('#tabbar [data-tab="' + t + '"]'); return b && b.querySelector(".tdot"); }
+  function ctabDot() { return doc.querySelector('#ctabs [data-ctab="convo"] .tdot'); }
   function revealPanes() {
     PANES.forEach(function (id) {
       var el = $(id);
@@ -177,6 +184,15 @@
     pinConvo();
     nearTop(); // a conversation shown too short to scroll still loads older entries
     Object.keys(PANE).forEach(function (t) { var d = tabDot(t); if (d && tabShown(t)) d.classList.remove("on"); });
+    if (visible(convo) && ctabDot()) ctabDot().classList.remove("on");
+    // The Files pane hears each time it comes into view (a tab, a layout,
+    // or a resize showed it) and each time it leaves.
+    var fs = visible(fpane);
+    if (fs !== filesSeen && window.WsFiles) {
+      if (fs) window.WsFiles.shown();
+      else window.WsFiles.hidden();
+    }
+    filesSeen = fs;
   }
   function setLayout(v) {
     if (v !== "split" && v !== "tabs") v = "auto";
@@ -255,6 +271,14 @@
   function setTab(t) {
     grid.setAttribute("data-tab", t);
     q("#tabbar [data-tab]").forEach(function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-tab") === t)); });
+    revealPanes();
+  }
+  // setCtab switches the conversation column between the conversation and
+  // the Files pane; it is not kept across a reload.
+  function setCtab(t) {
+    if (t !== "files" || !fpane || !window.WsFiles) t = "convo";
+    grid.setAttribute("data-ctab", t);
+    q("#ctabs [data-ctab]").forEach(function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-ctab") === t)); });
     revealPanes();
   }
   if (live) {
@@ -436,6 +460,7 @@
       var dot = tabDot(TAB[name]);
       if (dot) dot.classList.add("on");
     }
+    if (live && TAB[name] === "convo" && !visible(convo) && visible(fpane) && ctabDot()) ctabDot().classList.add("on");
     if (name === "panels") drawerSwapped();
     if (name === "tree" || name === "convlive") drawerWait();
     if (name === "tree") agentTipSwapped();
@@ -473,6 +498,13 @@
     window.WsCards.mount(cardBoard, {
       key: "ws.dashboard.cards." + rid, load: load, save: save,
       reveal: function () { if (live && !tabShown("board")) setTab("board"); }
+    });
+  }
+  // --- the Files pane (files.js): mounted once, loaded when first shown -------
+  if (live && fpane && window.WsFiles) {
+    window.WsFiles.mount(fpane, {
+      rid: rid, load: load, save: save, post: post, toast: toast, copy: copyText,
+      local: function () { return root.hasAttribute("data-sysopen"); }
     });
   }
   // morphBoard applies a board region event to el and returns the element
@@ -1465,6 +1497,8 @@
     if (b) { save(LAYOUT_KEY, b.getAttribute("data-layout")); setLayout(b.getAttribute("data-layout")); return; }
     b = t.closest("#tabbar [data-tab]");
     if (b) { setTab(b.getAttribute("data-tab")); return; }
+    b = t.closest("#ctabs [data-ctab]");
+    if (b) { setCtab(b.getAttribute("data-ctab")); return; }
   });
 
   // --- link actions: the menu a served page's marked links open ------------
@@ -4651,6 +4685,7 @@
     setSplit(savedSplit());
     setInput(load(INPUT_KEY));
     setTab("convo");
+    setCtab("convo");
   }
   restoreOpen(doc);
   // A body frame that posted its height before the listener above existed
