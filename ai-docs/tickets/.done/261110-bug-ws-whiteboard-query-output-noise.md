@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 3573a255edbfa06a
 sage-review-completeness-reviewed: 3573a255edbfa06a
+completed: 2026-11-10
 ---
 
 # whiteboard: a middle query verbosity level and stable topic keys
