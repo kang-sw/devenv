@@ -372,7 +372,7 @@ func TestCacheRootUsesExplicitOptionThenEnvThenHome(t *testing.T) {
 	}
 
 	env := filepath.Join(t.TempDir(), "env")
-	t.Setenv(envCacheHome, env)
+	t.Setenv(EnvCacheHome, env)
 	got, err = CacheRoot(Options{})
 	if err != nil {
 		t.Fatalf("CacheRoot env returned error: %v", err)
@@ -381,7 +381,7 @@ func TestCacheRootUsesExplicitOptionThenEnvThenHome(t *testing.T) {
 		t.Fatalf("CacheRoot env = %q, want %q", got, env)
 	}
 
-	t.Setenv(envCacheHome, "")
+	t.Setenv(EnvCacheHome, "")
 	home, err := os.UserHomeDir()
 	if err != nil {
 		t.Fatal(err)

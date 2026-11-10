@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -59,79 +60,15 @@ const mailboxWaitExitTimeout = 3
 // Timeout nor a normal success/failure outcome.
 const mailboxWaitExitInterrupted = 130
 
+// mailboxWait is the CLI entry: the wait runs in this process, owned by
+// its PID, ended by a signal or (on Windows) the parent's death.
 func mailboxWait(args []string) {
-	fs := flag.NewFlagSet("mailbox wait", flag.ExitOnError)
-	root := fs.String("root", ".", "caller's own worktree/clone root; only needed to resolve a worktree/clone-scope --slug")
-	sessionKey := fs.String("session-key", "", "caller's own session_key (required): computes the reply-id queue and the named-inbox owner check")
-	slug := fs.String("slug", "", `optional explicit "name@scope" to also check the named inbox for (owner-gated); omit for reply-id-only (env-less) wait`)
-	timeout := fs.Duration("timeout", 0, "maximum time to block (e.g. 5m); 0 blocks until mail arrives")
-	format := fs.String("format", "", `output format: text or json`)
-	boardInbox := fs.Bool("board-inbox", false, "also wake on a message the user sent from the dashboard page (held in the session's board-answer inbox); the adapter collects it with the adapter-only dashboard.inbox_drain tool, and this wait only peeks. The result says which kind arrived: mail, board, or both")
-	boardSteer := fs.Bool("board-steer", false, "also wake on a dashboard message the user promoted to steering, but not on a held one that was not promoted: the wait an adapter arms during a running turn, when held messages wait for the turn end. Peek only, like --board-inbox, which it cannot be combined with; a steered message reports as board")
-	boardInterrupt := fs.Bool("board-interrupt", false, "also wake on an interrupt entry: the user's request from the dashboard page to stop the running turn, held in the session's board-answer inbox. An adapter keeps it armed while dashboard messages are on, idle or during a turn, alone or with --board-inbox or --board-steer; alone it wakes on no held message. Peek only; the adapter collects the entry with dashboard.inbox_drain interrupt_only, and a wake while no turn runs just lets it consume and drop the entry. The result reports it as interrupt, never as board")
-	_ = fs.Parse(args)
-
-	*sessionKey = strings.TrimSpace(*sessionKey)
-	if *sessionKey == "" {
-		fatal("mailbox wait", fmt.Errorf("--session-key is required"))
-	}
-	if *timeout < 0 {
-		fatal("mailbox wait", fmt.Errorf("--timeout must be >= 0 (0 blocks until mail arrives)"))
-	}
-	if *boardInbox && *boardSteer {
-		fatal("mailbox wait", fmt.Errorf("--board-inbox and --board-steer cannot be combined: --board-inbox already wakes on every held message"))
-	}
-
-	target := wsmailbox.WaitTarget{SessionKey: *sessionKey, Root: defaultRoot(*root), Slug: strings.TrimSpace(*slug)}
-	if *boardInbox || *boardSteer || *boardInterrupt {
-		stateDir, err := wsdashboard.Dir("")
-		if err != nil {
-			fatal("mailbox wait", err)
-		}
-		target.InboxDir = wsinbox.Dir(wsdashboard.SessionDir(stateDir, wsmailbox.ReplyID(*sessionKey)))
-		target.InboxSteerOnly = *boardSteer
-		target.InboxInterrupt = *boardInterrupt
-		target.InboxInterruptOnly = *boardInterrupt && !*boardInbox && !*boardSteer
-	}
-
-	// One-time startup diagnostic (never repeated in the poll loop): warn
-	// when an explicit --slug cannot actually be reached, so a wait that
-	// silently degrades to reply-id-only does not also silently time out
-	// with no explanation while the named inbox it names fills up.
-	if target.Slug != "" {
-		if present, owned, err := wsmailbox.NamedInboxStatus(target); err != nil {
-			fmt.Fprintf(os.Stderr, "ws-mcp mailbox wait: warning: could not resolve --slug %s: %v\n", target.Slug, err)
-		} else if !owned {
-			reason := "has no presence record yet"
-			if present {
-				reason = "is not currently owned by this --session-key"
-			}
-			fmt.Fprintf(os.Stderr, "ws-mcp mailbox wait: warning: named inbox %s %s; falling back to a reply-id-only wait\n", target.Slug, reason)
-		}
-	}
-
-	nowStr := time.Now().UTC().Format(time.RFC3339)
-	marker := wsmailbox.ListeningMarker{SessionKey: *sessionKey, Slug: target.Slug, PID: os.Getpid(), StartedAt: nowStr}
-	if *timeout > 0 {
-		marker.TimeoutAt = time.Now().UTC().Add(*timeout).Format(time.RFC3339)
-	}
-	if err := wsmailbox.WriteListeningMarker(marker); err != nil {
-		fatal("mailbox wait", err)
-	}
-	// Every exit path below calls os.Exit (directly, or via fatal/
-	// emitMailboxWaitResult): os.Exit never runs deferred functions, so the
-	// marker clear cannot live behind `defer` here — each branch clears it
-	// explicitly before its own terminal exit.
-	// Owner-checked: a replacement wait on the same session_key may already
-	// have rewritten the marker, and this exit must not delete it.
-	clearMarker := func() { _ = wsmailbox.ClearListeningMarker(*sessionKey, marker.PID) }
-
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	// Parent death joins the signal path rather than exiting on its own, so
-	// the one interrupted branch below clears the marker and sets the exit
-	// code for both. On Windows a host that stops this wait terminates only
-	// its direct parent (the launcher), not this process; the watch is
+	// the one interrupted branch clears the marker and sets the exit code
+	// for both. On Windows a host that stops this wait terminates only its
+	// direct parent (the launcher), not this process; the watch is
 	// Windows-only (a no-op on POSIX, where the launcher execs). It arms for
 	// every Windows wait, whoever started it, so any wait — including one a
 	// shell started in the background — now ends when its direct parent
@@ -147,59 +84,136 @@ func mailboxWait(args []string) {
 		})
 		cancelOnParentExit()
 	})
+	os.Exit(runMailboxWait(ctx, args, os.Stdout, os.Stderr, os.Getpid(), os.Getenv))
+}
 
-	type outcome struct {
-		result wsmailbox.WaitResult
-		err    error
+// runMailboxWait is `mailbox wait` as a function: the flags in args, the
+// result on stdout, diagnostics on stderr, the exit code returned. ownerPID
+// owns the listening marker (the launcher's PID when the dashboard daemon
+// runs the wait for a launcher, this process's otherwise), and getenv reads
+// the caller's environment. A ctx that ends cancels the wait at once and
+// clears the marker, as a signal does.
+func runMailboxWait(ctx context.Context, args []string, stdout, stderr io.Writer, ownerPID int, getenv func(string) string) int {
+	fs := flag.NewFlagSet("mailbox wait", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	root := fs.String("root", ".", "caller's own worktree/clone root; only needed to resolve a worktree/clone-scope --slug")
+	sessionKey := fs.String("session-key", "", "caller's own session_key (required): computes the reply-id queue and the named-inbox owner check")
+	slug := fs.String("slug", "", `optional explicit "name@scope" to also check the named inbox for (owner-gated); omit for reply-id-only (env-less) wait`)
+	timeout := fs.Duration("timeout", 0, "maximum time to block (e.g. 5m); 0 blocks until mail arrives")
+	format := fs.String("format", "", `output format: text or json`)
+	boardInbox := fs.Bool("board-inbox", false, "also wake on a message the user sent from the dashboard page (held in the session's board-answer inbox); the adapter collects it with the adapter-only dashboard.inbox_drain tool, and this wait only peeks. The result says which kind arrived: mail, board, or both")
+	boardSteer := fs.Bool("board-steer", false, "also wake on a dashboard message the user promoted to steering, but not on a held one that was not promoted: the wait an adapter arms during a running turn, when held messages wait for the turn end. Peek only, like --board-inbox, which it cannot be combined with; a steered message reports as board")
+	boardInterrupt := fs.Bool("board-interrupt", false, "also wake on an interrupt entry: the user's request from the dashboard page to stop the running turn, held in the session's board-answer inbox. An adapter keeps it armed while dashboard messages are on, idle or during a turn, alone or with --board-inbox or --board-steer; alone it wakes on no held message. Peek only; the adapter collects the entry with dashboard.inbox_drain interrupt_only, and a wake while no turn runs just lets it consume and drop the entry. The result reports it as interrupt, never as board")
+	if err := fs.Parse(args); err != nil {
+		return 2
 	}
-	done := make(chan outcome, 1)
-	go func() {
-		result, err := wsmailbox.Wait(target, wsmailbox.WaitOptions{Timeout: *timeout})
-		done <- outcome{result, err}
-	}()
+	failed := func(err error) int {
+		fmt.Fprintf(stderr, "ws-mcp mailbox wait: %v\n", err)
+		return 1
+	}
+
+	*sessionKey = strings.TrimSpace(*sessionKey)
+	if *sessionKey == "" {
+		return failed(fmt.Errorf("--session-key is required"))
+	}
+	if *timeout < 0 {
+		return failed(fmt.Errorf("--timeout must be >= 0 (0 blocks until mail arrives)"))
+	}
+	if *boardInbox && *boardSteer {
+		return failed(fmt.Errorf("--board-inbox and --board-steer cannot be combined: --board-inbox already wakes on every held message"))
+	}
+
+	target := wsmailbox.WaitTarget{SessionKey: *sessionKey, Root: defaultRootFrom(*root, getenv), Slug: strings.TrimSpace(*slug)}
+	if *boardInbox || *boardSteer || *boardInterrupt {
+		stateDir, err := wsdashboard.Dir("")
+		if err != nil {
+			return failed(err)
+		}
+		target.InboxDir = wsinbox.Dir(wsdashboard.SessionDir(stateDir, wsmailbox.ReplyID(*sessionKey)))
+		target.InboxSteerOnly = *boardSteer
+		target.InboxInterrupt = *boardInterrupt
+		target.InboxInterruptOnly = *boardInterrupt && !*boardInbox && !*boardSteer
+	}
+
+	// One-time startup diagnostic (never repeated in the poll loop): warn
+	// when an explicit --slug cannot actually be reached, so a wait that
+	// silently degrades to reply-id-only does not also silently time out
+	// with no explanation while the named inbox it names fills up.
+	if target.Slug != "" {
+		if present, owned, err := wsmailbox.NamedInboxStatus(target); err != nil {
+			fmt.Fprintf(stderr, "ws-mcp mailbox wait: warning: could not resolve --slug %s: %v\n", target.Slug, err)
+		} else if !owned {
+			reason := "has no presence record yet"
+			if present {
+				reason = "is not currently owned by this --session-key"
+			}
+			fmt.Fprintf(stderr, "ws-mcp mailbox wait: warning: named inbox %s %s; falling back to a reply-id-only wait\n", target.Slug, reason)
+		}
+	}
+
+	nowStr := time.Now().UTC().Format(time.RFC3339)
+	marker := wsmailbox.ListeningMarker{SessionKey: *sessionKey, Slug: target.Slug, PID: ownerPID, StartedAt: nowStr}
+	if *timeout > 0 {
+		marker.TimeoutAt = time.Now().UTC().Add(*timeout).Format(time.RFC3339)
+	}
+	if err := wsmailbox.WriteListeningMarker(marker); err != nil {
+		return failed(err)
+	}
+	// Owner-checked: a replacement wait on the same session_key may already
+	// have rewritten the marker, and this exit must not delete it.
+	defer func() { _ = wsmailbox.ClearListeningMarker(*sessionKey, marker.PID) }()
 
 	// Reprint this invocation's own command name plus the wait-scoping flags
 	// it received, so every return path can hand the caller a runnable re-arm
 	// command: the arming guidance is read once, but the wait fires much later,
 	// so the "re-arm to keep listening" reminder has to arrive at fire time,
-	// not only at read time. mcp.CLICommandName() prefers the declared shim
-	// name (a wait launched through the shim re-arms through it) and falls back
-	// to os.Args[0].
-	rearmCmd := buildMailboxWaitRearmCommand(mcp.CLICommandName(), *sessionKey, target.Slug, *timeout, boardFlags(*boardInbox, *boardSteer, *boardInterrupt))
+	// not only at read time. mcp.CLICommandNameFrom prefers the declared shim
+	// name (a wait launched through the shim re-arms through it).
+	rearmCmd := buildMailboxWaitRearmCommand(mcp.CLICommandNameFrom(getenv), *sessionKey, target.Slug, *timeout, boardFlags(*boardInbox, *boardSteer, *boardInterrupt))
 
-	select {
-	case out := <-done:
-		clearMarker()
-		if out.err != nil {
-			fatal("mailbox wait", out.err)
-		}
-		emitMailboxWaitResult(out.result, *format, rearmCmd, *boardInbox || *boardSteer)
-	case <-ctx.Done():
-		clearMarker()
-		fmt.Fprintln(os.Stderr, "ws-mcp mailbox wait: interrupted")
-		os.Exit(mailboxWaitExitInterrupted)
+	result, err := wsmailbox.Wait(target, wsmailbox.WaitOptions{Timeout: *timeout, Done: ctx.Done()})
+	if errors.Is(err, wsmailbox.ErrWaitCancelled) {
+		fmt.Fprintln(stderr, "ws-mcp mailbox wait: interrupted")
+		return mailboxWaitExitInterrupted
 	}
+	if err != nil {
+		return failed(err)
+	}
+	return emitMailboxWaitResult(stdout, stderr, result, *format, rearmCmd, *boardInbox || *boardSteer)
 }
 
-func emitMailboxWaitResult(result wsmailbox.WaitResult, format, rearmCmd string, boardInbox bool) {
+// emitMailboxWaitResult writes the result to stdout and returns the exit
+// code: mailboxWaitExitTimeout on a timeout, 0 on an arrival.
+func emitMailboxWaitResult(stdout, stderr io.Writer, result wsmailbox.WaitResult, format, rearmCmd string, boardInbox bool) int {
 	// The re-arm reminder rides every return path (mail or timeout): a single
 	// wait covers one wake, so the caller must re-run to keep listening. In
 	// JSON it is a structured `rearm` object rather than prose, so machine
 	// callers see one additive field, not a changed result shape.
 	rearm := map[string]string{"command": rearmCmd, "nudge": mailboxRearmNudge}
+	writeJSON := func(value any) int {
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			fmt.Fprintf(stderr, "ws-mcp mailbox wait: %v\n", err)
+			return 1
+		}
+		fmt.Fprintln(stdout, string(encoded))
+		return -1
+	}
 
 	if result.TimedOut {
 		if outputJSON(format) {
-			printJSONOrFatal("mailbox wait", map[string]any{
+			if code := writeJSON(map[string]any{
 				"timed_out": true, "unread": 0, "board": 0, "interrupt": 0, "kinds": []string{},
 				"named": []wsmailbox.Envelope{}, "reply": []wsmailbox.Envelope{},
 				"rearm": rearm,
-			}, nil)
+			}); code >= 0 {
+				return code
+			}
 		} else {
-			fmt.Println("timeout: no unread mail")
-			printMailboxWaitRearm(rearmCmd)
+			fmt.Fprintln(stdout, "timeout: no unread mail")
+			printMailboxWaitRearm(stdout, rearmCmd)
 		}
-		os.Exit(mailboxWaitExitTimeout)
+		return mailboxWaitExitTimeout
 	}
 
 	total := result.Total()
@@ -229,7 +243,7 @@ func emitMailboxWaitResult(result wsmailbox.WaitResult, format, rearmCmd string,
 		if reply == nil {
 			reply = []wsmailbox.Envelope{}
 		}
-		printJSONOrFatal("mailbox wait", map[string]any{
+		if code := writeJSON(map[string]any{
 			"timed_out": false,
 			"unread":    total,
 			"board":     result.Board,
@@ -238,23 +252,26 @@ func emitMailboxWaitResult(result wsmailbox.WaitResult, format, rearmCmd string,
 			"named":     named,
 			"reply":     reply,
 			"rearm":     rearm,
-		}, nil)
-		return
+		}); code >= 0 {
+			return code
+		}
+		return 0
 	}
-	fmt.Printf("unread %d\n", total)
+	fmt.Fprintf(stdout, "unread %d\n", total)
 	if boardInbox && result.Board > 0 {
-		fmt.Printf("board %d\n", result.Board)
+		fmt.Fprintf(stdout, "board %d\n", result.Board)
 	}
 	if result.Interrupt > 0 {
-		fmt.Printf("interrupt %d\n", result.Interrupt)
+		fmt.Fprintf(stdout, "interrupt %d\n", result.Interrupt)
 	}
 	for _, m := range result.Named {
-		printMailboxEnvelope(m)
+		printMailboxEnvelope(stdout, m)
 	}
 	for _, m := range result.Reply {
-		printMailboxEnvelope(m)
+		printMailboxEnvelope(stdout, m)
 	}
-	printMailboxWaitRearm(rearmCmd)
+	printMailboxWaitRearm(stdout, rearmCmd)
+	return 0
 }
 
 // mailboxRearmNudge is the plain-language reminder printed (text) or carried
@@ -301,17 +318,17 @@ func buildMailboxWaitRearmCommand(bin, sessionKey, slug string, timeout time.Dur
 // the result, on the human/text path only. It rides the same stream as the
 // result the harness re-injects into the agent, so the "re-arm to keep
 // listening" reminder reaches the woken agent alongside the mail it woke for.
-func printMailboxWaitRearm(rearmCmd string) {
-	fmt.Printf("\nre-arm: %s\n", rearmCmd)
-	fmt.Printf("(%s)\n", mailboxRearmNudge)
+func printMailboxWaitRearm(out io.Writer, rearmCmd string) {
+	fmt.Fprintf(out, "\nre-arm: %s\n", rearmCmd)
+	fmt.Fprintf(out, "(%s)\n", mailboxRearmNudge)
 }
 
-func printMailboxEnvelope(m wsmailbox.Envelope) {
+func printMailboxEnvelope(out io.Writer, m wsmailbox.Envelope) {
 	handle := m.From
 	if handle == "" {
 		handle = m.ReplyTo
 	}
-	fmt.Printf("[%s] %s: %s\n", m.SentAt, handle, m.Content)
+	fmt.Fprintf(out, "[%s] %s: %s\n", m.SentAt, handle, m.Content)
 }
 
 // stopHookMailboxEnv mirrors internal/mcp/mailbox_runtime.go's envMailbox

@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsnote"
 )
 
@@ -89,7 +88,7 @@ func (s *Server) resolveNoteStoreForLayer(toolName string, layer wsnote.Layer, a
 			return nil, fmt.Errorf("%s: unknown_session: session key not found; "+
 				"if you are the lead, re-bootstrap your session per ws:workflow-manual with your known root and retry the call", toolName)
 		}
-		path, err := wsnote.MachinePath(wsconfig.Options{})
+		path, err := wsnote.MachinePath(s.configOptions())
 		if err != nil {
 			return nil, err
 		}

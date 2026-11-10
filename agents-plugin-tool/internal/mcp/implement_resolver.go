@@ -583,12 +583,12 @@ func parseImplementPolicy(raw any) (implementPolicyInput, error) {
 // ahead of mergeRoot's merge-base with currentBranch. Callers must surface an
 // error: treating an unverifiable branch as clean would let unrelated ticket
 // work be mixed precisely when the safety check cannot run.
-func aheadOfMergeRootCount(root, mergeRoot, currentBranch string) (int, error) {
-	result, err := wsgit.NewClient().MergeBase(context.Background(), root, mergeRoot, currentBranch)
+func aheadOfMergeRootCount(client wsgit.Client, root, mergeRoot, currentBranch string) (int, error) {
+	result, err := client.MergeBase(context.Background(), root, mergeRoot, currentBranch)
 	if err != nil {
 		return 0, err
 	}
-	out, err := (wsgit.ExecRunner{}).RunGit(context.Background(), root, "rev-list", "--count", result.MergeBase+".."+currentBranch)
+	out, err := client.Runner.RunGit(context.Background(), root, "rev-list", "--count", result.MergeBase+".."+currentBranch)
 	if err != nil {
 		return 0, err
 	}
@@ -601,8 +601,8 @@ func aheadOfMergeRootCount(root, mergeRoot, currentBranch string) (int, error) {
 
 // Closure never merges. Warn without blocking closure when integration is
 // outstanding or cannot be verified, so Git errors cannot silently hide it.
-func implementCloseMergeReviewNudge(root string) string {
-	obs, err := observeImplementBranch(root, "")
+func implementCloseMergeReviewNudge(client wsgit.Client, root string) string {
+	obs, err := observeImplementBranch(client, root, "")
 	if err != nil {
 		return fmt.Sprintf("Warning: could not verify implementation merge state: %v. After committing closure, report the retained branch to the lead for integration review; do not merge from the worker.", err)
 	}
@@ -613,8 +613,8 @@ func implementCloseMergeReviewNudge(root string) string {
 	return fmt.Sprintf("Warning: %s remains unmerged into %s. This tool performed no merge. After the close-move commit lands, the worker reports the branch; the lead integrates it with git.merge under merge_confirm. Do not merge from the worker.", "impl/"+mergeRoot+"/"+stem, mergeRoot)
 }
 
-func observeImplementBranch(root string, targetBranch string) (implementBranchObservation, error) {
-	client := wsgit.NewClient()
+// client runs git under the caller's environment.
+func observeImplementBranch(client wsgit.Client, root string, targetBranch string) (implementBranchObservation, error) {
 	status, err := client.Status(context.Background(), root)
 	if err != nil {
 		return implementBranchObservation{}, err
@@ -629,7 +629,7 @@ func observeImplementBranch(root string, targetBranch string) (implementBranchOb
 	if validObservedBranch(obs.CurrentBranch) {
 		mergeRoot := implementMergeRootFor(obs.CurrentBranch)
 		if mergeRoot != "" && mergeRoot != obs.CurrentBranch {
-			count, err := aheadOfMergeRootCount(root, mergeRoot, obs.CurrentBranch)
+			count, err := aheadOfMergeRootCount(client, root, mergeRoot, obs.CurrentBranch)
 			if err != nil {
 				return implementBranchObservation{}, fmt.Errorf("verify implementation branch ahead state: %w", err)
 			}
@@ -637,7 +637,7 @@ func observeImplementBranch(root string, targetBranch string) (implementBranchOb
 		}
 	}
 	if targetBranch != "" {
-		if _, err := (wsgit.ExecRunner{}).RunGit(context.Background(), root, "rev-parse", "--verify", "--quiet", "refs/heads/"+targetBranch); err == nil {
+		if _, err := client.Runner.RunGit(context.Background(), root, "rev-parse", "--verify", "--quiet", "refs/heads/"+targetBranch); err == nil {
 			obs.TargetExists = true
 			// A leftover target branch is only safe to delete-and-recreate when
 			// it holds no unique work; measure its own ahead-of-merge-root count
@@ -645,7 +645,7 @@ func observeImplementBranch(root string, targetBranch string) (implementBranchOb
 			// exactly like the current-branch check: an unverifiable leftover is
 			// not assumed clean.
 			if mergeRoot := implementMergeRootFor(targetBranch); mergeRoot != "" && mergeRoot != targetBranch {
-				count, err := aheadOfMergeRootCount(root, mergeRoot, targetBranch)
+				count, err := aheadOfMergeRootCount(client, root, mergeRoot, targetBranch)
 				if err != nil {
 					return implementBranchObservation{}, fmt.Errorf("verify leftover target branch ahead state: %w", err)
 				}
@@ -655,7 +655,7 @@ func observeImplementBranch(root string, targetBranch string) (implementBranchOb
 		segments := strings.Split(targetBranch, "/")
 		for i := 1; i < len(segments); i++ {
 			ancestor := strings.Join(segments[:i], "/")
-			if _, err := (wsgit.ExecRunner{}).RunGit(context.Background(), root, "rev-parse", "--verify", "--quiet", "refs/heads/"+ancestor); err == nil {
+			if _, err := client.Runner.RunGit(context.Background(), root, "rev-parse", "--verify", "--quiet", "refs/heads/"+ancestor); err == nil {
 				obs.MergeRootRefConflict = ancestor
 				break
 			}

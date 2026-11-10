@@ -22,18 +22,29 @@ type Runner interface {
 	RunGit(ctx context.Context, root string, args ...string) ([]byte, error)
 }
 
-// ExecRunner runs the user's git. Env, when set, is appended to the process
-// environment of every run (a caller that must pin a GIT_* variable, such
-// as a ledger that forbids lazy fetches, sets it here).
+// ExecRunner runs the user's git. Environ, when set, is the base
+// environment of every run (the caller process's, for a server the
+// dashboard daemon hosts for another process); nil means this process's.
+// Env, when set, is appended to it (a caller that must pin a GIT_* variable,
+// such as a ledger that forbids lazy fetches, sets it here).
 type ExecRunner struct {
-	Env []string
+	Environ func() []string
+	Env     []string
 }
 
 func (r ExecRunner) RunGit(ctx context.Context, root string, args ...string) ([]byte, error) {
 	argv := append([]string{"-C", root}, args...)
-	cmd := exec.CommandContext(ctx, "git", argv...)
-	if len(r.Env) > 0 {
-		cmd.Env = append(os.Environ(), r.Env...)
+	var cmd *exec.Cmd
+	if r.Environ != nil {
+		// The git binary comes from the caller's PATH too (see LookPathEnv).
+		base := r.Environ()
+		cmd = exec.CommandContext(ctx, LookPathEnv("git", base), argv...)
+		cmd.Env = append(base, r.Env...)
+	} else {
+		cmd = exec.CommandContext(ctx, "git", argv...)
+		if len(r.Env) > 0 {
+			cmd.Env = append(os.Environ(), r.Env...)
+		}
 	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {

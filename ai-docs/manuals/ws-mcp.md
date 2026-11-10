@@ -81,17 +81,21 @@ file ages out through the same prune.
 
 Restart every ws process after updating ws, as an install update already
 expects: the session MCP servers (a host restart or MCP reconnect) and the
-dashboard daemon (the next `serve` of a newer build replaces it, or `POST
-/shutdown`). An older ws-mcp knows only `keys/`, so once a newer one has
+dashboard daemon (the next launcher start of a newer build replaces it, or
+`POST /shutdown`). An older ws-mcp knows only `keys/`, so once a newer one has
 moved a session, the older one reports that key unknown. Downgrading loses
 sight of moved sessions the same way; session keys are cache state, so a
 fresh key is the recovery.
 
 ### Dashboard daemon
 
-`ws-mcp dashboard` is an optional machine-wide daemon (one per OS
-environment) that `serve` starts detached when `dashboard.enabled` is on. MCP
-tools never depend on it. Its state lives under `<cache root>/dashboard/`:
+`ws-mcp dashboard` is the machine-wide daemon (one per OS environment, one
+per cache root) that the plugin launcher starts when none runs and connects
+every `serve --stdio` session to (see Daemon-Hosted MCP below): it hosts one
+MCP server per connected session and serves the dashboard pages. Whether a
+session's pages exist follows `dashboard.enabled` per session; the daemon
+runs either way, and the MCP tools never depend on its pages. Its state lives
+under `<cache root>/dashboard/`:
 
 - `dashboard.lock` - the single-instance OS file lock; `endpoint.json` - port,
   pid, version, and the shutdown token; `dashboard.log` - the running daemon's
@@ -536,18 +540,26 @@ a topic body's sandboxed frame, an opaque origin, loads it with no cookie. The t
 address the index page shows to a viewer on this machine only; that answer
 sets an HttpOnly cookie, which the page's links, SSE stream, images, and posts
 then carry, so no rendered URL holds it. `/health` reports the mode as `lan`,
-and a `serve` whose global value differs from a same-version daemon's mode
-replaces it through the normal handoff.
+and the daemon re-reads the global value when a session connects: a value
+that differs from its own mode replaces it through the drain path below.
 
 At an equal version the newer build wins: `/health` reports `build_time` (the
-ws-mcp executable's mtime in Unix milliseconds, read from the original binary
-and passed to the daemon as `dashboard --build-time`), and a `serve` whose
-build time is newer than the daemon's (a daemon that omits it counts as older)
-replaces it; an older or unknown build time never does, so builds of one
-version side by side leave each other's newer daemon alone. A rebuilt dev
-binary therefore replaces the running daemon at the next `serve`. To force a
-restart anyway, `POST /shutdown` with `Authorization: Bearer <token from
-endpoint.json>`; the next `serve` starts a new one.
+plugin's runtime binary's mtime in Unix milliseconds, which the launcher
+passes to `daemon-start --build-time` and the daemon receives as `dashboard
+--build-time`), and a launcher whose build time is newer than the daemon's
+(a daemon that omits it counts as older) replaces it; an older or unknown
+build time never does, so builds of one version side by side leave each
+other's newer daemon alone. A rebuilt dev binary therefore replaces the
+running daemon at the next session start. To force a restart anyway, `POST
+/shutdown` with `Authorization: Bearer <token from endpoint.json>`; the next
+session start brings a new one.
+
+A daemon asked to stop (a replacement, or `/shutdown`) drains: it closes its
+listener at once, so the successor can take the lock and the port, refuses
+new sessions, lets the MCP calls in flight finish for up to the lock wait
+minus 1.8 s (`proxyDrainBudget`), cancels long waits (a `mailbox wait`) at
+once, then closes its session streams; a git commit or merge in flight is
+not cut midway, and the sessions' launchers reconnect to the successor.
 
 Dev assets: with `WS_MCP_DASHBOARD_DEV_SOURCE=<repo>/agents-plugin-tool` in the
 environment of `ws-mcp dashboard`, the daemon serves the dashboard and
@@ -622,6 +634,113 @@ Native Windows plugin-managed startup uses the same Python launcher. Windows
 users need a working `python3` command on `PATH`; if the Windows Store alias is
 present without Python installed, install Python 3 and refresh the plugin.
 
+## Daemon-Hosted MCP
+
+For `serve --stdio` and `mailbox wait` the launcher is a proxy: it does not
+run the plugin's runtime binary but connects to the dashboard daemon of its
+cache root, which hosts the MCP server for that session, and copies bytes
+between its stdin/stdout and that connection. On this path the only ws-mcp
+executable that runs is the daemon's, once per build (the endpoint-protector
+prompt that a per-session executable caused). Every other subcommand
+(`version`, `call`, `runtime`, ...) still runs the runtime binary directly.
+
+Finding and starting the daemon (`DaemonLink` in the launcher):
+
+1. The daemon directory is `<cache root>/dashboard`, the cache root being
+   `WS_CACHE_HOME` (absolute, symlinks resolved when it exists) or
+   `~/.cache/ws@kang-sw-devenv`, as `wsstate.CacheRoot` resolves it; the test
+   `test_cache_root_and_staged_name_follow_the_go_rules` pins the parity.
+2. `endpoint.json` names the port and token; `GET /health` answers the
+   daemon's version and `build_time`. A daemon that answers nothing within
+   5 s (10 s on Windows) counts as absent.
+3. The daemon is started, or replaced, only when none answers, the running
+   one's version is older than the plugin's (`runtime.json`
+   `plugin_version`), or equal with an older `build_time` than the runtime
+   binary's mtime. The launcher copies the runtime binary to
+   `<daemon dir>/bin/ws-mcp-dashboard-<sha256[:16]><ext>` (the name
+   `StageExecutable` produces; other entries are removed) and runs
+   `<staged> daemon-start --build-time <mtime ms>` with its own environment:
+   Go resolves `dashboard.port` and `dashboard.lan_enabled` from config as
+   `serve` did and runs the `Ensure` handoff, printing one JSON line
+   (`outcome`, `port`, `pid`, `version`). The launcher then waits up to
+   `DefaultStartWait` + 5 s (Windows + 10 s) for a healthy daemon.
+4. A daemon in another minor is never used: the launcher runs the direct
+   path. The same minor, newer, is used as is (its tool set may be larger
+   than `runtime.json` lists; compatibility on this path is the version rule
+   only).
+
+On the daemon path the compatibility probe (`runtime capabilities` on a
+stamp miss, see Runtime Repair And Drift) also runs the staged copy, so the
+plugin-directory binary never executes: one executable path per build is
+what keeps the endpoint protector to one prompt per version.
+
+Direct fallback: when the daemon cannot be reached or started within those
+budgets, or refuses the hello, the launcher writes one `ws-mcp-launcher: ...;
+running the direct path` line to stderr and runs the runtime binary as
+before (`serve --stdio`, or the `mailbox wait`). `WS_MCP_LAUNCHER_DIRECT=1`
+forces the direct path.
+
+Reconnect: when the connection ends while the client is still attached (the
+daemon was replaced or died), the proxy connects again (giving a successor
+1.5 s before starting one), re-sends the client's captured `initialize`
+request under an id of its own (`ws-mcp-launcher-replay-<n>`, so a late
+answer from the old daemon can never be mistaken for it) and drops its
+answer, re-sends `notifications/initialized`, and answers every request that
+was in flight with a JSON-RPC error (`-32000`, "ws-mcp daemon connection was
+replaced"); the client never sees the server go away. When no daemon comes
+back within the start budget, a direct `serve --stdio` child takes over the
+same way.
+
+Wire format (`internal/wsdashboard/proxy.go`): `GET /mcp HTTP/1.1` with
+`Upgrade: ws-mcp`, `Connection: Upgrade`, and `Authorization: Bearer <token
+from endpoint.json>`, from a loopback peer (also in LAN mode) with no
+`Origin` header; the daemon answers `101 Switching Protocols` (401 for a
+missing or wrong token, 403 for a non-loopback peer or a browser Origin, 426
+without the upgrade headers) and the connection becomes a raw
+newline-delimited stream with no framing. The launcher's first line is the
+hello, one JSON object:
+
+```json
+{"protocol": 1, "mode": "mcp" | "cli", "argv": ["serve", "--stdio"],
+ "cwd": "<launcher cwd>", "project_root": "<WS_MCP_PROJECT_ROOT or empty>",
+ "env": {"<every variable of the launcher's environment>": "..."},
+ "harness": "", "owner_pid": <launcher pid>, "version": "<runtime.json plugin_version>"}
+```
+
+Path-valued ws variables in the hello (`WS_CACHE_HOME`, `WS_CONFIG_HOME`,
+`WS_RSRC_ROOT`, `WS_SKILLS_ROOT`, `WS_MCP_PROJECT_ROOT`, `WS_WORKTREE_DIR`,
+`WS_MCP_DEBUG_LOG`, `WS_MCP_RUNTIME_BINARY`, `WS_MCP_RUNTIME_DIR`, and each
+entry of `WS_MCP_CONFIG_MANIFESTS`) are made absolute against the launcher's
+cwd before sending: a harness may set them relative (Codex's `.mcp.json`
+names `./config-manifest.json` with cwd `.`), and the daemon would resolve
+them against its own cwd.
+
+The daemon answers one line, `{"ok": true, "version": "<daemon version>",
+"pid": <daemon pid>}` or `{"ok": false, "reason": "..."}` (a protocol other
+than 1, an unknown mode, an empty `cwd`, a missing `env` or `owner_pid`, a
+version outside the daemon's minor, an MCP hello without `WS_RSRC_ROOT`, or
+a CLI argv other than `mailbox wait ...`), closing the connection after a
+refusal. After `ok` the stream is the MCP session in `mcp` mode: the daemon
+builds one `mcp.Server` from the hello (`NewServerWithOptions`: the hello's
+environment is the server's whole environment and that of every subprocess
+its tools start, `owner_pid` is its PID for mailbox presence and listening
+markers, the debug event ring and `WS_MCP_DEBUG_LOG` are its own, resource
+and skills roots come from `WS_RSRC_ROOT`/`WS_SKILLS_ROOT` in the hello with
+no executable-relative fallback, and startup diagnostics such as a rejected
+config manifest go to the daemon log and the connection's debug events). The
+harness is detected from `initialize` as on stdio; the hello's `harness` is
+an optional hint. Closing the connection ends the session: its dashboard
+session, its mailbox presence, and any wait it holds.
+
+In `cli` mode the daemon runs `mailbox wait` with `argv[2:]` and answers in
+frames, one JSON object per line: `{"stream": "stderr", "data": "..."}` for
+each stderr write as it happens, then one `{"final": true, "exit_code": <n>,
+"data": "<the whole stdout>"}`. The launcher writes them to its own stderr and
+stdout and exits with `exit_code`, so the mod and the Pi waiter see the same
+output and codes as from the direct CLI; closing the connection (the
+launcher exits, or the daemon drains) cancels the wait at once and clears
+its listening marker (`exit_code` 130, "interrupted").
+
 ## Launcher Environment
 
 Current launcher inputs:
@@ -637,11 +756,12 @@ Current launcher inputs:
 | `WS_MCP_RELEASE_TAG` | Override the release tag from `runtime.json`, for example `v0.48.16`. |
 | `WS_MCP_RELEASE_BASE_URL` | Override the full release asset base URL; useful for local file or HTTP smoke tests. |
 | `WS_MCP_LAUNCHER_DEBUG` | Print launcher diagnostics to stderr when set to `1`. |
+| `WS_MCP_LAUNCHER_DIRECT` | `1`/`true`/`yes`/`on` makes the launcher run `serve --stdio` and `mailbox wait` on the runtime binary directly instead of through the daemon (see Daemon-Hosted MCP). Unset is off. |
 | `WS_MCP_PROJECT_ROOT` | Project root default for root-aware tools and CLI commands when no higher-priority root exists. |
 | `WS_MCP_DASHBOARD_DEV_SOURCE` | Read by `ws-mcp dashboard`: the `agents-plugin-tool` source root the daemon serves dashboard and whiteboard page assets from instead of the embedded copies (see Dashboard daemon, Dev assets). Unset is off. |
 | `WS_MCP_DASHBOARD_PPROF` | Read by `ws-mcp dashboard`: `1`/`true`/`yes`/`on` serves `net/http/pprof` under `/debug/pprof/` to loopback viewers only, never to a LAN-token request (see Dashboard daemon, Profiling). Unset is off: the routes do not exist. |
 | `WS_MCP_NO_AGENT` | Product-mode gate for agentless distributions such as wsflow. |
-| `WS_MCP_NO_DASHBOARD` | `1`/`true`/`yes`/`on` turns the dashboard off for this ws-mcp whatever `dashboard.enabled` resolves: no daemon start, no session registration, no prune. The agent runner sets it on the ws-mcp it attaches to a conversation. |
+| `WS_MCP_NO_DASHBOARD` | `1`/`true`/`yes`/`on` turns the dashboard off for this ws-mcp whatever `dashboard.enabled` resolves: no session registration, no prune (the daemon itself is started by the launcher, never by this ws-mcp). The agent runner sets it on the ws-mcp it attaches to a conversation. |
 | `WS_MCP_ALLOWED_TOOLS` | Comma list of ws tool names; when set, `tools/list` advertises and `tools/call` accepts only these. The agent runner sets it to a profile's ws tools. `tracker.show`, `tracker.ui`, and `git.search` are listed and callable only when it names them. |
 | `WS_MCP_NAMESPACE` | User-facing MCP namespace text override; empty or unset defaults to `ws`. |
 | `WS_MCP_SETUP_TOOL` | Advertised setup tool name override; empty or unset defaults to `ws.setup`. |
@@ -649,12 +769,15 @@ Current launcher inputs:
 | `WS_MCP_CLI_NAME` | Command name that printed agent-runnable CLI commands (the rendered `mailbox wait` command and its re-arm line) start with; empty or unset uses the invoked binary path (`os.Args[0]`). Set by the `ws-cli`/`wsflow-cli` shims and by the Claude manifests' `mcpServers.<name>.env`, where plugin `bin/` is on the agent's Bash PATH; left unset for Codex, which does not put plugin `bin/` on PATH. |
 
 Launcher diagnostics must go to stderr. Stdout belongs to the MCP JSON-RPC
-stream until the launcher execs the repaired runtime.
+stream from the moment the launcher connects to the daemon or execs the
+repaired runtime.
 
 ## Runtime Repair And Drift
 
 The launcher reads plugin-local `runtime.json`, repairs a missing or
-incompatible runtime binary, then execs `ws-mcp`.
+incompatible runtime binary, then connects to the daemon it starts from that
+binary (Daemon-Hosted MCP above) or, for other subcommands and on the direct
+fallback, execs `ws-mcp`.
 
 Runtime binaries live in the installed plugin cache by default:
 

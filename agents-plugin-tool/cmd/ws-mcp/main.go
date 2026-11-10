@@ -55,6 +55,8 @@ func main() {
 		callCommand(os.Args[2:])
 	case "dashboard":
 		dashboardCommand(os.Args[2:])
+	case "daemon-start":
+		daemonStart(os.Args[2:])
 	default:
 		usage()
 		os.Exit(2)
@@ -62,7 +64,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: ws-mcp <version|doctor|runtime|serve|smoke|config|path|git|tickets|mailbox|dashboard>")
+	fmt.Fprintln(os.Stderr, "usage: ws-mcp <version|doctor|runtime|serve|smoke|config|path|git|tickets|mailbox|dashboard|daemon-start>")
 }
 
 func doctor(args []string) {
@@ -931,11 +933,14 @@ func fatal(prefix string, err error) {
 	os.Exit(1)
 }
 
-func defaultRoot(root string) string {
+func defaultRoot(root string) string { return defaultRootFrom(root, os.Getenv) }
+
+// defaultRootFrom is defaultRoot under the environment getenv reads.
+func defaultRootFrom(root string, getenv func(string) string) string {
 	if root != "" && root != "." {
 		return root
 	}
-	if env := os.Getenv("WS_MCP_PROJECT_ROOT"); env != "" {
+	if env := getenv("WS_MCP_PROJECT_ROOT"); env != "" {
 		return env
 	}
 	return root

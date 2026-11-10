@@ -64,7 +64,7 @@ func toolInputSchema(name string) map[string]any {
 // `required` property must be present and every argument name must be a
 // declared property. It checks names only - no types, no nested objects - and
 // returns ok=false with the refusal text when the call must not run.
-func precheckToolArguments(name string, arguments map[string]any) (string, bool) {
+func (s *Server) precheckToolArguments(name string, arguments map[string]any) (string, bool) {
 	schema := toolInputSchema(name)
 	if schema == nil {
 		return "", true
@@ -116,12 +116,12 @@ func precheckToolArguments(name string, arguments map[string]any) (string, bool)
 	}
 	// One generic event per refusal keeps dropped-field diagnosis visible in
 	// runtime.debug_events for every tool, since the handler never runs.
-	appendDebugEvent("tools.call.precheck_refused", map[string]any{
+	s.debugEvent("tools.call.precheck_refused", map[string]any{
 		"tool":    name,
 		"missing": nonNilStrings(missing),
 		"unknown": nonNilStrings(unknown),
 	})
-	return toolArgumentsRefusal(name, schema, missing, unknown), false
+	return toolArgumentsRefusal(name, schema, missing, unknown, s.runtimeNamespace()), false
 }
 
 // schemaClosed reports whether the unknown-argument check applies. It does
@@ -159,7 +159,7 @@ func schemaStringList(value any) []string {
 // toolArgumentsRefusal names every missing required property and every
 // unknown argument, then appends the called tool's own advertised inputSchema
 // (never the full tool list) so the caller can correct the call in one retry.
-func toolArgumentsRefusal(name string, schema map[string]any, missing, unknown []string) string {
+func toolArgumentsRefusal(name string, schema map[string]any, missing, unknown []string, namespace string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s: invalid arguments; the tool did not run.\n", name)
 	if len(missing) > 0 {
@@ -169,7 +169,7 @@ func toolArgumentsRefusal(name string, schema map[string]any, missing, unknown [
 		fmt.Fprintf(&b, "unknown arguments: %s\n", strings.Join(unknown, ", "))
 	}
 	b.WriteString("Retry with arguments matching this inputSchema:\n")
-	raw, err := json.Marshal(namespaceValue(schema))
+	raw, err := json.Marshal(namespaceValue(schema, namespace))
 	if err != nil {
 		fmt.Fprintf(&b, "(inputSchema unavailable: %v)\n", err)
 		return b.String()

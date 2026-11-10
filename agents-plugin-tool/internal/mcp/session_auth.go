@@ -160,6 +160,9 @@ type sessionStore struct {
 	// nil means wsstate.AtomicReplaceFile. Both are test seams.
 	lockTimeout time.Duration
 	replace     func(tmp, path string) error
+	// cacheHome is the caller process's WS_CACHE_HOME; empty means this
+	// process's.
+	cacheHome string
 }
 
 func newSessionStore() *sessionStore {

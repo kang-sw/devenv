@@ -89,16 +89,18 @@ func nextMailboxHistoryStamp() time.Time {
 }
 
 // mailboxHistoryRoot is <cache root>/mailbox-history; it is not created.
-func mailboxHistoryRoot() (string, error) {
-	cacheRoot, err := wsstate.CacheRoot(wsstate.Options{})
+// cacheHome is the WS_CACHE_HOME of the process the ring belongs to; empty
+// means this process's.
+func mailboxHistoryRoot(cacheHome string) (string, error) {
+	cacheRoot, err := wsstate.CacheRoot(wsstate.Options{CacheHome: cacheHome})
 	if err != nil {
 		return "", err
 	}
 	return filepath.Join(cacheRoot, mailboxHistoryDirName), nil
 }
 
-func mailboxHistoryDir(sessionKey string) (string, error) {
-	root, err := mailboxHistoryRoot()
+func mailboxHistoryDir(cacheHome, sessionKey string) (string, error) {
+	root, err := mailboxHistoryRoot(cacheHome)
 	if err != nil {
 		return "", err
 	}
@@ -116,11 +118,11 @@ func isMailboxHistoryEntryName(name string) bool {
 // entries written, in order, and the first write error, stopping there;
 // callers log the error and never surface it, because the send has already
 // been enqueued or the mail already drained. Trimming is best effort.
-func appendMailboxHistory(sessionKey string, entries []mailboxHistoryEntry) ([]string, error) {
+func appendMailboxHistory(cacheHome, sessionKey string, entries []mailboxHistoryEntry) ([]string, error) {
 	if len(entries) == 0 {
 		return nil, nil
 	}
-	dir, err := mailboxHistoryDir(sessionKey)
+	dir, err := mailboxHistoryDir(cacheHome, sessionKey)
 	if err != nil {
 		return nil, err
 	}
@@ -206,8 +208,8 @@ func mailboxHistoryEntryNames(dir string) ([]string, error) {
 // readMailboxHistory returns sessionKey's ring, newest first. A missing
 // directory is an empty ring; an entry that cannot be read or parsed, or
 // whose name carries no valid stamp, is skipped.
-func readMailboxHistory(sessionKey string) ([]mailboxHistoryRecord, error) {
-	dir, err := mailboxHistoryDir(sessionKey)
+func readMailboxHistory(cacheHome, sessionKey string) ([]mailboxHistoryRecord, error) {
+	dir, err := mailboxHistoryDir(cacheHome, sessionKey)
 	if err != nil {
 		return nil, err
 	}
@@ -278,10 +280,10 @@ func mailboxHistoryTitle(body string) string {
 // recordMailboxHistory appends entries to sessionKey's ring, logging a failed
 // write rather than surfacing it, and returns the written entries' file names
 // in order (fewer than entries after a failed write).
-func recordMailboxHistory(sessionKey string, entries []mailboxHistoryEntry) []string {
-	names, err := appendMailboxHistory(sessionKey, entries)
+func (s *Server) recordMailboxHistory(sessionKey string, entries []mailboxHistoryEntry) []string {
+	names, err := appendMailboxHistory(s.getenv(wsstate.EnvCacheHome), sessionKey, entries)
 	if err != nil {
-		appendDebugEvent("mailbox.history_write_error", map[string]any{"error": err.Error()})
+		s.debugEvent("mailbox.history_write_error", map[string]any{"error": err.Error()})
 	}
 	return names
 }
@@ -317,7 +319,7 @@ func (s *Server) handleMailboxHistory(id json.RawMessage, args map[string]any) r
 		return toolTextResponse(id, "", fmt.Errorf(`%s: direction must be "recv", "sent", or "all"`, tool))
 	}
 
-	records, err := readMailboxHistory(sessionKey)
+	records, err := readMailboxHistory(s.getenv(wsstate.EnvCacheHome), sessionKey)
 	if err != nil {
 		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
 	}

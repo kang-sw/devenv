@@ -9,7 +9,6 @@ import (
 	"io"
 	"math"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime/debug"
@@ -27,7 +26,6 @@ import (
 	"github.com/kang-sw/devenv/internal/wslive"
 	"github.com/kang-sw/devenv/internal/wsrationale"
 	"github.com/kang-sw/devenv/internal/wsreview"
-	"github.com/kang-sw/devenv/internal/wsrsrc"
 	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
@@ -53,6 +51,19 @@ type Server struct {
 	dashboard dashboardLink
 	// tracker is this process's tracker host (tracker_host.go).
 	tracker trackerLink
+	// env is the caller process's environment; nil reads this process's
+	// live (process_env.go). ownerPID is the caller's PID; zero means this
+	// process. debug is the caller's debug ring.
+	env      *procEnv
+	ownerPID int
+	debug    *debugRing
+	// inflight counts the requests being handled; draining refuses new
+	// ones, and inflightDone closes once a draining server goes idle
+	// (Drain).
+	inflightMu   sync.Mutex
+	inflight     int
+	draining     bool
+	inflightDone chan struct{}
 }
 
 // gitStatusResult keeps the generic git observation intact while allowing the
@@ -159,12 +170,11 @@ const (
 	// dashboard daemon's agent runner sets it on the ws-mcp it attaches to
 	// an agent conversation, which the daemon itself hosts.
 	envNoDashboard = "WS_MCP_NO_DASHBOARD"
+	// envDebugLog names a file every debug event is appended to.
+	envDebugLog = "WS_MCP_DEBUG_LOG"
+	// envAllowedTools is the comma-separated tool allowlist.
+	envAllowedTools = "WS_MCP_ALLOWED_TOOLS"
 )
-
-var debugEvents = struct {
-	sync.Mutex
-	events []map[string]any
-}{}
 
 // testPanicHook is always nil in production. Only _test.go files in this
 // package set it, to exercise goroutine-level panic recovery (server.go's
@@ -172,17 +182,14 @@ var debugEvents = struct {
 // instead of a synthetic panic.
 var testPanicHook func(toolName string)
 
+// NewServer builds a server for this process: its environment, read live,
+// its PID, and the process debug ring.
 func NewServer(root, version string, sourceCommit ...string) *Server {
-	commit := "dev"
-	if len(sourceCommit) > 0 && sourceCommit[0] != "" {
+	commit := ""
+	if len(sourceCommit) > 0 {
 		commit = sourceCommit[0]
 	}
-	cleanRoot := filepath.Clean(root)
-	declared := loadDeclaredConfig(os.Getenv(envConfigManifests))
-	for _, rejected := range declared.rejected {
-		fmt.Fprintf(os.Stderr, "ws-mcp: config manifest rejected: %s\n", rejected)
-	}
-	return &Server{root: cleanRoot, version: version, sourceCommit: commit, sessions: newSessionStore(), declared: declared}
+	return NewServerWithOptions(ServerOptions{Root: root, Version: version, SourceCommit: commit})
 }
 
 func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) error {
@@ -230,7 +237,7 @@ func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) er
 		}
 		var req request
 		if err := json.Unmarshal(line, &req); err != nil {
-			appendDebugEvent("parse_error", map[string]any{"error": err.Error()})
+			s.debugEvent("parse_error", map[string]any{"error": err.Error()})
 			if err := writeResponse(errorResponse(nil, -32700, "parse error")); err != nil {
 				return err
 			}
@@ -240,13 +247,24 @@ func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) er
 			s.handleNotification(req, &requests)
 			continue
 		}
-		appendDebugEvent("request.received", map[string]any{"id": rawMessageString(req.ID), "method": req.Method})
-		reqCtx, cancel := context.WithCancel(ctx)
+		s.debugEvent("request.received", map[string]any{"id": rawMessageString(req.ID), "method": req.Method})
 		id := rawMessageString(req.ID)
+		finish, ok := s.requestStarted()
+		if !ok {
+			// The daemon hosting this server is draining: the proxy
+			// reconnects to its successor and replays, so refuse rather
+			// than start work this stream will not live to answer.
+			if err := writeResponse(errorResponse(req.ID, -32000, "server draining")); err != nil {
+				return err
+			}
+			continue
+		}
+		reqCtx, cancel := context.WithCancel(ctx)
 		requests.Store(id, cancel)
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			defer finish()
 			defer cancel()
 			defer requests.Delete(id)
 			// This defer is appended after the three above, so on unwind it
@@ -257,15 +275,15 @@ func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) er
 			defer func() {
 				if r := recover(); r != nil {
 					stack := debug.Stack()
-					recordPanic(req.Method, id, r, stack)
+					s.recordPanic(req.Method, id, r, stack)
 					resp := errorResponse(req.ID, -32000, fmt.Sprintf("internal error: request handler panicked (%s)", req.Method))
 					if err := writeResponse(resp); err != nil {
-						appendDebugEvent("response.write_error", map[string]any{"id": id, "error": err.Error()})
+						s.debugEvent("response.write_error", map[string]any{"id": id, "error": err.Error()})
 					}
 				}
 			}()
 			if err := writeResponse(s.handle(reqCtx, req)); err != nil {
-				appendDebugEvent("response.write_error", map[string]any{"id": id, "error": err.Error()})
+				s.debugEvent("response.write_error", map[string]any{"id": id, "error": err.Error()})
 			}
 		}()
 	}
@@ -295,9 +313,9 @@ func (s *Server) handleNotification(req request, requests *sync.Map) {
 				}
 			}
 		}
-		appendDebugEvent("notification.cancelled", fields)
+		s.debugEvent("notification.cancelled", fields)
 	default:
-		appendDebugEvent("notification.ignored", map[string]any{"method": req.Method})
+		s.debugEvent("notification.ignored", map[string]any{"method": req.Method})
 	}
 }
 
@@ -332,35 +350,11 @@ func (s *Server) handle(ctx context.Context, req request) response {
 	}
 }
 
+// appendDebugEvent records an event that belongs to no server: the
+// process ring (processDebug). A server's own events go through
+// Server.debugEvent, so a hosted server's ring holds only its connection's.
 func appendDebugEvent(event string, fields map[string]any) {
-	record := map[string]any{
-		"ts":    time.Now().UTC().Format(time.RFC3339Nano),
-		"event": event,
-	}
-	for key, value := range fields {
-		record[key] = value
-	}
-	debugEvents.Lock()
-	debugEvents.events = append(debugEvents.events, record)
-	if len(debugEvents.events) > maxDebugEvents {
-		debugEvents.events = append([]map[string]any(nil), debugEvents.events[len(debugEvents.events)-maxDebugEvents:]...)
-	}
-	debugEvents.Unlock()
-
-	path := strings.TrimSpace(os.Getenv("WS_MCP_DEBUG_LOG"))
-	if path == "" {
-		return
-	}
-	raw, err := json.Marshal(record)
-	if err != nil {
-		return
-	}
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
-		return
-	}
-	defer file.Close()
-	_, _ = file.Write(append(raw, '\n'))
+	processDebug.append(event, fields)
 }
 
 // crashLogPath resolves the always-on, cross-platform panic-trace sink under
@@ -402,6 +396,16 @@ func crashDir() (string, error) {
 // resolve or write the crash file falls back to stderr so a broken/unwritable
 // cache home never fully swallows the trace.
 func recordPanic(method, id string, recovered any, stack []byte) {
+	processDebug.append("request.panic", recordPanicToCrashLog(method, id, recovered, stack))
+}
+
+// recordPanic is the package function's server form: the crash file plus
+// this server's ring.
+func (s *Server) recordPanic(method, id string, recovered any, stack []byte) {
+	s.debugEvent("request.panic", recordPanicToCrashLog(method, id, recovered, stack))
+}
+
+func recordPanicToCrashLog(method, id string, recovered any, stack []byte) map[string]any {
 	fields := map[string]any{
 		"id":     id,
 		"method": method,
@@ -432,8 +436,7 @@ func recordPanic(method, id string, recovered any, stack []byte) {
 	} else {
 		fmt.Fprintf(os.Stderr, "mcp: failed to marshal crash record: %v\n", err)
 	}
-
-	appendDebugEvent("request.panic", fields)
+	return fields
 }
 
 // RecordLifecycleEvent persists a serve-process lifecycle event (e.g. detected
@@ -474,33 +477,7 @@ func RecordLifecycleEvent(event string, fields map[string]any) {
 	appendDebugEvent(event, fields)
 }
 
-func recentDebugEvents(limit int) []map[string]any {
-	if limit <= 0 || limit > maxDebugEvents {
-		limit = maxDebugEvents
-	}
-	debugEvents.Lock()
-	defer debugEvents.Unlock()
-	start := len(debugEvents.events) - limit
-	if start < 0 {
-		start = 0
-	}
-	out := make([]map[string]any, len(debugEvents.events[start:]))
-	copy(out, debugEvents.events[start:])
-	return out
-}
-
-func debugEventsJSONL(limit int) (string, error) {
-	var b strings.Builder
-	for _, event := range recentDebugEvents(limit) {
-		raw, err := json.Marshal(event)
-		if err != nil {
-			return "", err
-		}
-		b.Write(raw)
-		b.WriteByte('\n')
-	}
-	return b.String(), nil
-}
+func recentDebugEvents(limit int) []map[string]any { return processDebug.recent(limit) }
 
 func rawMessageString(raw json.RawMessage) string {
 	if len(raw) == 0 {
@@ -570,7 +547,7 @@ func builtinConfigAndPromptDefaults() map[string]string {
 // canonical worktree root. A keyless call or an unknown key leaves RepoRoot
 // empty, so the repo scope drops out rather than erroring.
 func (s *Server) sessionConfigOptions(sessionKey string) wsconfig.Options {
-	opts := wsconfig.Options{}
+	opts := s.configOptions()
 	if key := strings.TrimSpace(sessionKey); key != "" {
 		if entry, found := s.sessions.lookup(key); found {
 			opts.RepoRoot = entry.root
@@ -607,7 +584,7 @@ func (s *Server) assigneeFeature(root, sessionKey string) (aware bool, currentEm
 	if strings.TrimSpace(resolved.Value) != "on" {
 		return false, "", nil
 	}
-	return true, wsgit.CurrentUserEmail(context.Background(), wsgit.ExecRunner{}, root), nil
+	return true, wsgit.CurrentUserEmail(context.Background(), s.gitRunner(), root), nil
 }
 
 // applyAssigneeGate attaches the computed ownership gate to every ticket in the
@@ -680,11 +657,11 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		}()
 	}
 	s.observeHarness("tools.call.meta", detectHarnessFromMeta(params.Meta))
-	if NoAgentMode() && noAgentHiddenTool(params.Name) {
-		return errorResponse(req.ID, -32601, fmt.Sprintf("%s agentless mode disables agent-backed tool: %s", RuntimeNamespace(), params.Name))
+	if s.noAgentMode() && noAgentHiddenTool(params.Name) {
+		return errorResponse(req.ID, -32601, fmt.Sprintf("%s agentless mode disables agent-backed tool: %s", s.runtimeNamespace(), params.Name))
 	}
 	if !s.toolAllowed(params.Name) {
-		return errorResponse(req.ID, -32601, fmt.Sprintf("tool not available in current %s MCP profile: %s", RuntimeNamespace(), params.Name))
+		return errorResponse(req.ID, -32601, fmt.Sprintf("tool not available in current %s MCP profile: %s", s.runtimeNamespace(), params.Name))
 	}
 	// Keyed capability gate: when a session_key is present and maps to a known
 	// non-lead scope, enforce roleAllowsTool for this call. Unknown session keys
@@ -709,7 +686,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 	if keyStr, ok := params.Arguments["session_key"].(string); ok && strings.TrimSpace(keyStr) != "" {
 		if entry, found := s.sessions.lookup(keyStr); found {
 			if entry.scope != roleLead && (isLeadOnlyTool(params.Name) || !roleAllowsTool(entry.scope, params.Name)) {
-				return errorResponse(req.ID, -32601, fmt.Sprintf("tool not available in current %s MCP profile: %s", RuntimeNamespace(), params.Name))
+				return errorResponse(req.ID, -32601, fmt.Sprintf("tool not available in current %s MCP profile: %s", s.runtimeNamespace(), params.Name))
 			}
 			if isNoteMutationTool(params.Name) && !entry.isTopLevelLead() {
 				return errorResponse(req.ID, -32601, noteReadOnlyDenial(params.Name))
@@ -744,7 +721,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 	// Central argument precheck: refuse a call that misses a required
 	// property or carries an undeclared top-level argument before any handler
 	// runs, naming every problem and the tool's own schema at once.
-	if refusal, ok := precheckToolArguments(params.Name, params.Arguments); !ok {
+	if refusal, ok := s.precheckToolArguments(params.Name, params.Arguments); !ok {
 		return toolErrorTextResponse(req.ID, refusal)
 	}
 
@@ -775,7 +752,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		}
 		return toolTextResponse(req.ID, formatRuntimeInfo(info), nil)
 	case "runtime.debug_events":
-		text, err := debugEventsJSONL(intFromArgument(params.Arguments["limit"], 80))
+		text, err := s.debug.jsonl(intFromArgument(params.Arguments["limit"], 80))
 		return toolTextResponse(req.ID, text, err)
 	case "session.set_default_root":
 		return toolTextResponse(req.ID, "", fmt.Errorf("session default roots were removed; if you are the lead, obtain a session_key per ws:workflow-manual and pass it"))
@@ -838,7 +815,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		cmd, _ := params.Arguments["cmd"].(string)
 		workingDir, _ := params.Arguments["working_dir"].(string)
 		stdin, _ := params.Arguments["stdin"].(string)
-		result, err := execjob.Launch(execjob.LaunchOptions{Root: root, WorkingDir: workingDir, Cmd: cmd, Args: stringList(params.Arguments["args"]), Env: stringMapArgument(params.Arguments["env"]), Stdin: stdin})
+		result, err := execjob.Launch(execjob.LaunchOptions{Root: root, WorkingDir: workingDir, Cmd: cmd, Args: stringList(params.Arguments["args"]), Env: stringMapArgument(params.Arguments["env"]), Stdin: stdin, Environ: s.environ()})
 		return execResponse(req.ID, result, err, true)
 	case "exec.shell":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
@@ -849,7 +826,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		workingDir, _ := params.Arguments["working_dir"].(string)
 		stdin, _ := params.Arguments["stdin"].(string)
 		shell, _ := params.Arguments["shell"].(string)
-		result, err := execjob.Launch(execjob.LaunchOptions{Root: root, WorkingDir: workingDir, Command: command, Shell: shell, Env: stringMapArgument(params.Arguments["env"]), Stdin: stdin, ShellMode: true})
+		result, err := execjob.Launch(execjob.LaunchOptions{Root: root, WorkingDir: workingDir, Command: command, Shell: shell, Env: stringMapArgument(params.Arguments["env"]), Stdin: stdin, ShellMode: true, Environ: s.environ()})
 		return execResponse(req.ID, result, err, true)
 	case "exec.status":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
@@ -912,7 +889,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		sessionKey, _ := params.Arguments["session_key"].(string)
 		sessionKey = strings.TrimSpace(sessionKey)
 		rootOverride, _ := params.Arguments["root_override"].(string)
-		rsrcRoot, err := resolveRsrcRoot(strings.TrimSpace(rootOverride))
+		rsrcRoot, err := s.resolveRsrcRoot(strings.TrimSpace(rootOverride))
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
@@ -934,7 +911,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		// config.tuning path: project the per-key writer schema + current values,
 		// with the no-agent full-ws-only cut applied per entry.
 		catalogResolver := s.sessionResolver(sessionKey, s.declared.withDefaults(builtinConfigAndPromptDefaults()))
-		catalog, err := buildTuningCatalog(rsrcRoot, &catalogResolver, sessionKey, s.currentHarness(), NoAgentMode())
+		catalog, err := buildTuningCatalog(rsrcRoot, &catalogResolver, sessionKey, s.currentHarness(), s.noAgentMode(), s.configOptions())
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
@@ -973,8 +950,8 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		// No-agent gate at the KEY level: config.tune itself is never tool-hidden,
 		// so a wsflow caller could otherwise reach a full-ws-only knob through it.
 		// Mirrors the outer callTool per-tool gate's message shape.
-		if NoAgentMode() && !entry.NoAgentVisible {
-			return toolTextResponse(req.ID, "", fmt.Errorf("%s agentless mode disables agent-backed tool: %s", RuntimeNamespace(), key))
+		if s.noAgentMode() && !entry.NoAgentVisible {
+			return toolTextResponse(req.ID, "", fmt.Errorf("%s agentless mode disables agent-backed tool: %s", s.runtimeNamespace(), key))
 		}
 		// Session-key requirement varies per key (no registry field): lead-authority
 		// keys need a lead-scoped key; prompt.* keys need a non-empty (any-scope)
@@ -1048,7 +1025,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 				return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: %s does not support reset", key))
 			}
 			if entry.Key == "agents.tier" {
-				result, err := tuneAgentsTier(params.Arguments["value"], harness, explicitScope, true)
+				result, err := tuneAgentsTier(s.configOptions(), params.Arguments["value"], harness, explicitScope, true)
 				return toolJSONResponse(req.ID, result, err)
 			}
 			if rawValue, hasValue := params.Arguments["value"]; hasValue && rawValue != nil {
@@ -1110,7 +1087,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		adapter := sessionConfigAdapter{s: s.sessions}
 		switch {
 		case entry.Key == "agents.tier":
-			result, err := tuneAgentsTier(params.Arguments["value"], harness, explicitScope, false)
+			result, err := tuneAgentsTier(s.configOptions(), params.Arguments["value"], harness, explicitScope, false)
 			return toolJSONResponse(req.ID, result, err)
 		case strings.HasPrefix(entry.Key, "prompt."):
 			// prompt override set (subsumes config.prompt.set). The text lives in the
@@ -1212,7 +1189,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		if harness == "" {
 			harness = s.currentHarness()
 		}
-		backend, model, effort, resolvedFrom, err := wsconfig.ResolveAgentTierForHarness(wsconfig.Options{}, tier, harness)
+		backend, model, effort, resolvedFrom, err := wsconfig.ResolveAgentTierForHarness(s.configOptions(), tier, harness)
 		if err != nil {
 			return toolTextResponse(req.ID, "", fmt.Errorf("config.resolve_agent: %w", err))
 		}
@@ -1227,7 +1204,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		result, err := wsgit.NewClient().Status(context.Background(), root)
+		result, err := s.gitClient().Status(context.Background(), root)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
@@ -1255,7 +1232,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		}
 		rangeValue, _ := params.Arguments["range"].(string)
 		mode, _ := params.Arguments["mode"].(string)
-		result, err := wsgit.NewClient().Diff(context.Background(), root, wsgit.DiffOptions{Range: rangeValue, Mode: mode, Paths: stringList(params.Arguments["paths"])})
+		result, err := s.gitClient().Diff(context.Background(), root, wsgit.DiffOptions{Range: rangeValue, Mode: mode, Paths: stringList(params.Arguments["paths"])})
 		if wantsJSON(params.Arguments) {
 			return toolJSONResponse(req.ID, result, err)
 		}
@@ -1267,7 +1244,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		}
 		rangeValue, _ := params.Arguments["range"].(string)
 		includeBody, _ := params.Arguments["include_body"].(bool)
-		result, err := wsgit.NewClient().Log(context.Background(), root, wsgit.LogOptions{Range: rangeValue, Limit: intFromArgument(params.Arguments["limit"], 20), IncludeBody: includeBody})
+		result, err := s.gitClient().Log(context.Background(), root, wsgit.LogOptions{Range: rangeValue, Limit: intFromArgument(params.Arguments["limit"], 20), IncludeBody: includeBody})
 		if wantsJSON(params.Arguments) {
 			return toolJSONResponse(req.ID, result, err)
 		}
@@ -1277,7 +1254,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		result, err := wsrationale.OpenFollowups(context.Background(), wsgit.ExecRunner{}, root, wsrationale.FollowupOptions{
+		result, err := wsrationale.OpenFollowups(context.Background(), s.gitRunner(), root, wsrationale.FollowupOptions{
 			Range:    optString(params.Arguments["range"]),
 			Category: optString(params.Arguments["category"]),
 			MinLevel: optString(params.Arguments["min_level"]),
@@ -1305,7 +1282,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			Order:       optString(params.Arguments["order"]),
 			Limit:       intFromArgument(params.Arguments["limit"], 0),
 		}
-		result, err := wsrationale.Query(context.Background(), wsgit.ExecRunner{}, root, opts)
+		result, err := wsrationale.Query(context.Background(), s.gitRunner(), root, opts)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
@@ -1320,7 +1297,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		}
 		base, _ := params.Arguments["base"].(string)
 		head, _ := params.Arguments["head"].(string)
-		result, err := wsgit.NewClient().MergeBase(context.Background(), root, base, head)
+		result, err := s.gitClient().MergeBase(context.Background(), root, base, head)
 		if wantsJSON(params.Arguments) {
 			return toolJSONResponse(req.ID, result, err)
 		}
@@ -1353,11 +1330,11 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			if poolErr != nil {
 				return toolTextResponse(req.ID, "", fmt.Errorf("git.merge: %w", poolErr))
 			}
-			if entries, lerr := listWorktrees(context.Background(), wsgit.ExecRunner{}, root); lerr == nil && len(entries) > 0 {
+			if entries, lerr := listWorktrees(context.Background(), s.gitRunner(), root); lerr == nil && len(entries) > 0 {
 				mergePoolRoots = ownedPoolRoots(poolRV.Value, entries[0].Path)
 			}
 		}
-		result, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, target, wsgit.CommitOptions{
+		result, err := mergeImplBranch(context.Background(), root, s.gitRunner(), branch, target, wsgit.CommitOptions{
 			Title: title, Description: description, AIContext: stringList(mergeAIContextRaw), UpdatedTickets: stringList(params.Arguments["updated_tickets"]),
 		}, implMergeAcknowledgement{ReleaseTargetOverride: releaseOverride, ExpectedSourceOID: expectedSource, ExpectedTargetOID: expectedTarget}, mergePoolRoots)
 		if wantsJSON(params.Arguments) {
@@ -1396,21 +1373,21 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		if err != nil {
 			return toolTextResponse(req.ID, "", fmt.Errorf("worktree.acquire: %w", err))
 		}
-		result, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, entry.root, base, targetBranch, profile, poolRV.Value)
+		result, err := provisionWorktree(context.Background(), s.gitRunner(), entry.root, base, targetBranch, profile, poolRV.Value)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
 		// Bind the worker key to the canonical worktree root so the worker's
 		// root-aware ws calls resolve against its own worktree, not the lead's.
 		mintPath := result.Path
-		if canon, cerr := canonicalGitRoot(result.Path); cerr == nil {
+		if canon, cerr := canonicalGitRoot(s.gitRunner(), result.Path); cerr == nil {
 			mintPath = canon
 		}
 		workerKey, err := s.sessions.mint(mintPath, roleLead, key)
 		if err != nil {
 			// Detach the freshly provisioned worktree so a failed mint does not
 			// leave it branch-checked-out and thus ineligible for pool reuse.
-			_, _ = wsgit.ExecRunner{}.RunGit(context.Background(), result.Path, noSubmoduleRecurse("checkout", "--detach")...)
+			_, _ = s.gitRunner().RunGit(context.Background(), result.Path, noSubmoduleRecurse("checkout", "--detach")...)
 			return toolTextResponse(req.ID, "", fmt.Errorf("worktree.acquire: mint worker key: %w", err))
 		}
 		// The lease is written only after a successful mint, so the failed-mint
@@ -1419,14 +1396,14 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		// as "no lease record", indistinguishable from a released worktree. The
 		// minted key is left unused and ages out through key pruning.
 		lease := worktreeLease{WorkerKey: workerKey, ParentKey: key, AcquiredAt: time.Now().UTC().Format(time.RFC3339)}
-		if err := writeWorktreeLease(context.Background(), wsgit.ExecRunner{}, result.Path, lease); err != nil {
-			_, _ = wsgit.ExecRunner{}.RunGit(context.Background(), result.Path, noSubmoduleRecurse("checkout", "--detach")...)
+		if err := writeWorktreeLease(context.Background(), s.gitRunner(), result.Path, lease); err != nil {
+			_, _ = s.gitRunner().RunGit(context.Background(), result.Path, noSubmoduleRecurse("checkout", "--detach")...)
 			return toolTextResponse(req.ID, "", fmt.Errorf("worktree.acquire: record worktree lease: %w", err))
 		}
 		result.Path = mintPath
 		result.WorkerKey = workerKey
 		staleAfter, preservedLimit := worktreeNudgeThresholds(&resolver, key)
-		if nudge, err := poolNudge(context.Background(), wsgit.ExecRunner{}, entry.root, result.Pool, staleAfter, preservedLimit, time.Now()); err != nil {
+		if nudge, err := poolNudge(context.Background(), s.gitRunner(), entry.root, result.Pool, staleAfter, preservedLimit, time.Now()); err != nil {
 			result.Warnings = append(result.Warnings, "stale-pool check failed: "+err.Error())
 		} else {
 			result.Nudge = nudge
@@ -1463,7 +1440,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			profiles, err := resolveWorktreeProfiles(&resolver)
 			return staticProfileLookup(profiles, err)(name)
 		}
-		result, err := releaseWorktree(context.Background(), wsgit.ExecRunner{}, path, poolRV.Value, lookup)
+		result, err := releaseWorktree(context.Background(), s.gitRunner(), path, poolRV.Value, lookup)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
@@ -1500,7 +1477,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			return staticProfileLookup(profiles, err)(name)
 		}
 		staleAfter, _ := worktreeNudgeThresholds(&resolver, key)
-		result, err := removeWorktree(context.Background(), wsgit.ExecRunner{}, path, poolRV.Value, staleAfter, time.Now(), lookup)
+		result, err := removeWorktree(context.Background(), s.gitRunner(), path, poolRV.Value, staleAfter, time.Now(), lookup)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
@@ -1519,7 +1496,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		if err != nil {
 			return toolTextResponse(req.ID, "", fmt.Errorf("worktree.list: %w", err))
 		}
-		result, err := listPoolWorktrees(context.Background(), wsgit.ExecRunner{}, entry.root, poolRV.Value, s.sessions.recordMtime)
+		result, err := listPoolWorktrees(context.Background(), s.gitRunner(), entry.root, poolRV.Value, s.sessions.recordMtime)
 		if wantsJSON(params.Arguments) {
 			return toolJSONResponse(req.ID, result, err)
 		}
@@ -1549,7 +1526,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			// wrong-type call is exactly the case it needs to catch.
 			// type_mismatch distinguishes it from the absent/empty/all-blank
 			// events normalizeCommitOptions classifies below.
-			appendDebugEvent("git.commit.ai_context_received", map[string]any{
+			s.debugEvent("git.commit.ai_context_received", map[string]any{
 				"present":               aiContextPresent,
 				"raw_entry_count":       aiContextRawEntryCount,
 				"raw_bytes":             aiContextRawBytes,
@@ -1573,7 +1550,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 				aiContextPostTrimCount++
 			}
 		}
-		appendDebugEvent("git.commit.ai_context_received", map[string]any{
+		s.debugEvent("git.commit.ai_context_received", map[string]any{
 			"present":               aiContextPresent,
 			"raw_entry_count":       aiContextRawEntryCount,
 			"raw_bytes":             aiContextRawBytes,
@@ -1609,13 +1586,13 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		// never block it.
 		var resolveWarnings []string
 		if len(resolves) > 0 {
-			warnings, werr := wsrationale.ResolveWarnings(context.Background(), wsgit.ExecRunner{}, root, resolves)
+			warnings, werr := wsrationale.ResolveWarnings(context.Background(), s.gitRunner(), root, resolves)
 			if werr != nil {
 				warnings = []string{fmt.Sprintf("resolves: could not check ids against history: %v", werr)}
 			}
 			resolveWarnings = warnings
 		}
-		result, err := wsgit.Client{Runner: wsgit.ExecRunner{}, Verifier: verifyAdapter}.Commit(context.Background(), root, wsgit.CommitOptions{
+		result, err := wsgit.Client{Runner: s.gitRunner(), Verifier: verifyAdapter}.Commit(context.Background(), root, wsgit.CommitOptions{
 			Paths:             stringList(params.Arguments["paths"]),
 			Title:             title,
 			Description:       description,
@@ -1640,7 +1617,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		commitKey = strings.TrimSpace(commitKey)
 		if commitKey != "" {
 			if rec, ok := s.sessions.readState(commitKey, partTodos); ok && len(rec.Todos) > 0 {
-				commitText += fmt.Sprintf("\n## TODO(%s reminder: update this if stale)\n%s\n", RuntimeNamespace(), renderTodos(rec.Todos, false))
+				commitText += fmt.Sprintf("\n## TODO(%s reminder: update this if stale)\n%s\n", s.runtimeNamespace(), renderTodos(rec.Todos, false))
 			}
 		}
 		commitText = appendSessionKeyTip(commitText, commitKey)
@@ -1845,7 +1822,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		result, err := wsdoc.TicketsClose(root, wsgit.ExecRunner{}, wsdoc.TicketCloseOptions{
+		result, err := wsdoc.TicketsClose(root, s.gitRunner(), wsdoc.TicketCloseOptions{
 			TicketStem: stem,
 			Status:     status,
 			Resolution: resolution,
@@ -1867,7 +1844,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		text := formatTicketMutate("closed", result)
 		text += guard.text()
 		text += s.indexPiggyback(root, wsindex.OpClose, strings.TrimSuffix(filepath.Base(result.NewPath), ".md"), guard.override)
-		if nudge := implementCloseMergeReviewNudge(root); nudge != "" {
+		if nudge := implementCloseMergeReviewNudge(s.gitClient(), root); nudge != "" {
 			text += "next_instruction: " + nudge + "\n"
 		}
 		if reviewNudge := wsreview.CheckpointNudge(context.Background(), root); reviewNudge != "" {
@@ -1948,7 +1925,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		result, err := wsdoc.TicketsMove(root, wsgit.ExecRunner{}, wsdoc.TicketMoveOptions{
+		result, err := wsdoc.TicketsMove(root, s.gitRunner(), wsdoc.TicketMoveOptions{
 			TicketStem: stem,
 			To:         to,
 			SageReview: sageReview,
@@ -2082,7 +2059,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			return toolTextResponse(req.ID, "", err)
 		}
 		kind, _ := params.Arguments["kind"].(string)
-		generated, err := wsstate.NewManager(wsstate.Options{}).GeneratePaths(root, kind, stringList(params.Arguments["stems"]))
+		generated, err := wsstate.NewManager(s.stateOptions()).GeneratePaths(root, kind, stringList(params.Arguments["stems"]))
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
@@ -2098,7 +2075,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		name, _ := params.Arguments["name"].(string)
 		callerContext := stringMapArgument(params.Arguments["context"])
 		// M3 forward-compat: rsrc root resolved here so M3 can pass root_override.
-		rsrcRoot, err := resolveRsrcRoot("")
+		rsrcRoot, err := s.resolveRsrcRoot("")
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
@@ -2124,7 +2101,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		body, recommendedTier, err := printPlaybook(s, rsrcRoot, name, callerContext, wsconfig.Options{}, printWorkflowLangRV.Value, printOverrideLookup)
+		body, recommendedTier, err := printPlaybook(s, rsrcRoot, name, callerContext, s.configOptions(), printWorkflowLangRV.Value, printOverrideLookup)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
@@ -2182,7 +2159,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			}
 		}
 		// Delegate worktrees do not contain the installed resource manifest.
-		rsrcRoot, err := resolveRsrcRoot("")
+		rsrcRoot, err := s.resolveRsrcRoot("")
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
@@ -2228,8 +2205,8 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		path, planPath, recommendedTier, err := renderPlaybookWithPlan(s, rsrcRoot, worktreeRoot, name, callerContext, wsconfig.Options{}, mintRoot, parentKey, renderWorkflowLangRV.Value, renderOverrideLookup, tierOverride, planStem)
-		text := withRecommendedRenderBinding(path, s.currentHarness(), recommendedTier, wsconfig.Options{})
+		path, planPath, recommendedTier, err := renderPlaybookWithPlan(s, rsrcRoot, worktreeRoot, name, callerContext, s.configOptions(), mintRoot, parentKey, renderWorkflowLangRV.Value, renderOverrideLookup, tierOverride, planStem)
+		text := withRecommendedRenderBinding(path, s.currentHarness(), recommendedTier, s.configOptions())
 		if planPath != "" {
 			text += "\n" + planPathLinePrefix + planPath
 		}
@@ -2276,12 +2253,12 @@ func formatRuntimeInfo(info map[string]any) string {
 	return b.String()
 }
 
-func canonicalSetupRoot(root string) (string, error) {
+func canonicalSetupRoot(runner wsgit.Runner, root string) (string, error) {
 	root = strings.TrimSpace(root)
 	if root == "<cwd>" {
 		return "", fmt.Errorf("root must be an absolute repository path; the MCP server cannot infer the agent's current directory from %q", root)
 	}
-	return canonicalGitRoot(root)
+	return canonicalGitRoot(runner, root)
 }
 
 // handleLeadLogin implements the session-bootstrap tool (bootstrapToolName): canonicalize root, mint an
@@ -2298,7 +2275,7 @@ func (s *Server) handleLeadLogin(id json.RawMessage, arguments map[string]any) r
 	if strings.TrimSpace(rootArg) == "" {
 		return toolTextResponse(id, "", fmt.Errorf("session bootstrap: root is required"))
 	}
-	canonical, err := canonicalSetupRoot(rootArg)
+	canonical, err := canonicalSetupRoot(s.gitRunner(), rootArg)
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
@@ -2385,9 +2362,9 @@ func (s *Server) leadLoginResponse(id json.RawMessage, arguments map[string]any,
 		"root":        canonical,
 	}
 	text := fmt.Sprintf("session_key: %s\nroot: %s\n", key, canonical)
-	if skillsRoot, srErr := wsrsrc.ResolveSkillsRoot(); srErr == nil {
+	if skillsRoot, srErr := s.skillsRoot(); srErr == nil {
 		adapter := sessionConfigAdapter{s: s.sessions}
-		resolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), adapter, adapter)
+		resolver := wsconfig.NewResolver(s.configOptions(), builtinConfigDefaults(), adapter, adapter)
 		warning := bootstrapStalenessWarning(canonical, skillsRoot, &resolver, "")
 		if warning != "" {
 			result["bootstrap_alarm"] = warning
@@ -2756,7 +2733,7 @@ type tuningAgentTierCurrent struct {
 
 // harness selects the bucket a harness-bucketed knob's current value is
 // resolved for (the session's detected harness; empty reads only all).
-func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey, harness string, noAgentMode bool) (tuningCatalog, error) {
+func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey, harness string, noAgentMode bool, configOpts wsconfig.Options) (tuningCatalog, error) {
 	points, err := scanOverridePoints(rsrcRoot)
 	if err != nil {
 		return tuningCatalog{}, err
@@ -2945,7 +2922,7 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 		Current:        currentWorkflowPreference(resolver, sessionKey, langEntry.Key),
 	})
 
-	agentTiers, err := currentAgentTierMappings()
+	agentTiers, err := currentAgentTierMappings(configOpts)
 	if err != nil {
 		return tuningCatalog{}, err
 	}
@@ -3012,7 +2989,7 @@ type agentsTierTuneResult struct {
 	Warnings []string `json:"warnings"`
 }
 
-func tuneAgentsTier(value any, harness string, scope wsconfig.Scope, reset bool) (agentsTierTuneResult, error) {
+func tuneAgentsTier(opts wsconfig.Options, value any, harness string, scope wsconfig.Scope, reset bool) (agentsTierTuneResult, error) {
 	fields, ok := value.(map[string]any)
 	if !ok {
 		return agentsTierTuneResult{}, fmt.Errorf("config.tune: agents.tier value must be an object with tier/backend/model/effort fields (only tier when reset is true)")
@@ -3025,7 +3002,6 @@ func tuneAgentsTier(value any, harness string, scope wsconfig.Scope, reset bool)
 			return agentsTierTuneResult{}, fmt.Errorf("config.tune: agents.tier reset value must contain only tier (no backend, model, or effort)")
 		}
 	}
-	opts := wsconfig.Options{}
 	global := scope == wsconfig.ScopeGlobal
 	var cfg wsconfig.Config
 	var err error
@@ -3121,8 +3097,8 @@ func currentHarnessBucketedValue(resolver *wsconfig.Resolver, sessionKey, itemKe
 	}
 }
 
-func currentAgentTierMappings() ([]tuningAgentTierCurrent, error) {
-	cfg, err := wsconfig.LoadAgentTierConfig(wsconfig.Options{})
+func currentAgentTierMappings(opts wsconfig.Options) ([]tuningAgentTierCurrent, error) {
+	cfg, err := wsconfig.LoadAgentTierConfig(opts)
 	if err != nil {
 		return nil, err
 	}
@@ -4005,15 +3981,16 @@ func (s *Server) resolveToolRoot(arguments map[string]any, meta map[string]any) 
 	return "", fmt.Errorf("mandatory_session_key: root-aware ws tools require a session_key; if you are the lead, obtain one per ws:workflow-manual and pass it")
 }
 
-func canonicalGitRoot(root string) (string, error) {
+// canonicalGitRoot resolves root's worktree top level with runner's git
+// (a hosted server's runner carries the connection's environment).
+func canonicalGitRoot(runner wsgit.Runner, root string) (string, error) {
 	root = strings.TrimSpace(root)
 	if root == "" {
 		return "", fmt.Errorf("root is required")
 	}
-	cmd := exec.Command("git", "-C", root, "rev-parse", "--show-toplevel")
-	output, err := cmd.CombinedOutput()
+	output, err := runner.RunGit(context.Background(), root, "rev-parse", "--show-toplevel")
 	if err != nil {
-		return "", fmt.Errorf("root %q is not inside a Git worktree: %s", root, strings.TrimSpace(string(output)))
+		return "", fmt.Errorf("root %q is not inside a Git worktree: %v", root, err)
 	}
 	canonical := strings.TrimSpace(string(output))
 	if canonical == "" {
@@ -4052,11 +4029,11 @@ func (s *Server) observeHarness(source, harness string) {
 	defer s.rootMu.Unlock()
 	if s.sessionHarness == "" {
 		s.sessionHarness = harness
-		appendDebugEvent("harness.detected", map[string]any{"source": source, "harness": harness})
+		s.debugEvent("harness.detected", map[string]any{"source": source, "harness": harness})
 		return
 	}
 	if s.sessionHarness != harness {
-		appendDebugEvent("harness.conflict", map[string]any{
+		s.debugEvent("harness.conflict", map[string]any{
 			"source":   source,
 			"current":  s.sessionHarness,
 			"observed": harness,
@@ -5362,7 +5339,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "workflow_manual",
-			"description": namespaceText("Render and restore the ws workflow primitives manual and session state for a lead session_key. An unresolvable key returns a fail-loud notice and never mints a new key. Lead-only."),
+			"description": "Render and restore the ws workflow primitives manual and session state for a lead session_key. An unresolvable key returns a fail-loud notice and never mints a new key. Lead-only.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -5374,7 +5351,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "workflow_state",
-			"description": namespaceText("Return only the Session State section (agenda/todos) for a lead session_key, with no manual reference text. A cheap alternative to workflow_manual for a caller that only needs 'what's my key and current state', costly right after compaction or during lead-revive. An unresolvable key returns the same fail-loud notice as workflow_manual and never mints a new key. Lead-only; workflow_manual itself is unchanged."),
+			"description": "Return only the Session State section (agenda/todos) for a lead session_key, with no manual reference text. A cheap alternative to workflow_manual for a caller that only needs 'what's my key and current state', costly right after compaction or during lead-revive. An unresolvable key returns the same fail-loud notice as workflow_manual and never mints a new key. Lead-only; workflow_manual itself is unchanged.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -5385,7 +5362,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "playbook.read",
-			"description": namespaceText("Return a playbook's rendered procedure text inline (harness-aware, includes resolved, declared variables substituted). Available in both full and agentless product modes."),
+			"description": "Return a playbook's rendered procedure text inline (harness-aware, includes resolved, declared variables substituted). Available in both full and agentless product modes.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -5398,7 +5375,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "playbook.render",
-			"description": namespaceText("Render a playbook to a worktree-scoped tmp file and return its path plus stable recommended-tier metadata when the playbook declares a tier (or tier_override supplies one), with optional config-resolved recommended-model/recommended-reasoning-effort bindings. Lead callers receive a render-minted child session key spliced into the rendered body. A top-level lead render of delegate-implementer also reserves an empty write-once plan file under the worktree's ai-docs/.plans/, named from context plan_stem (default \"delegate\"), ends the rendered body with its path, and returns it as a final plan-path: line. Available in both full and agentless product modes."),
+			"description": "Render a playbook to a worktree-scoped tmp file and return its path plus stable recommended-tier metadata when the playbook declares a tier (or tier_override supplies one), with optional config-resolved recommended-model/recommended-reasoning-effort bindings. Lead callers receive a render-minted child session key spliced into the rendered body. A top-level lead render of delegate-implementer also reserves an empty write-once plan file under the worktree's ai-docs/.plans/, named from context plan_stem (default \"delegate\"), ends the rendered body with its path, and returns it as a final plan-path: line. Available in both full and agentless product modes.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -5480,7 +5457,7 @@ func LeadToolNames() []string {
 		if NoAgentMode() && noAgentHiddenTool(name) {
 			continue
 		}
-		if hiddenUnlessAllowlisted(name) && !explicitAllowedTools()[name] {
+		if hiddenUnlessAllowlisted(name) && !parseAllowedTools(os.Getenv(envAllowedTools))[name] {
 			continue
 		}
 		if name != "" {
@@ -5492,6 +5469,7 @@ func LeadToolNames() []string {
 }
 
 func (s *Server) filteredTools() []map[string]any {
+	namespace := s.runtimeNamespace()
 	base := tools()
 	filtered := make([]map[string]any, 0, len(base))
 	for _, tool := range base {
@@ -5501,13 +5479,13 @@ func (s *Server) filteredTools() []map[string]any {
 			continue
 		}
 		if s.toolAllowed(name) {
-			filtered = append(filtered, publicToolDefinition(tool, name))
+			filtered = append(filtered, publicToolDefinition(tool, name, namespace))
 		}
 	}
 	return filtered
 }
 
-func publicToolDefinition(tool map[string]any, advertisedName string) map[string]any {
+func publicToolDefinition(tool map[string]any, advertisedName, namespace string) map[string]any {
 	clone := make(map[string]any, len(tool))
 	for key, value := range tool {
 		clone[key] = value
@@ -5516,19 +5494,19 @@ func publicToolDefinition(tool map[string]any, advertisedName string) map[string
 		clone["name"] = advertisedName
 	}
 	if description, _ := clone["description"].(string); description != "" {
-		clone["description"] = namespaceText(description)
+		clone["description"] = namespaceText(description, namespace)
 	}
 	if schema, ok := clone["inputSchema"].(map[string]any); ok {
-		clone["inputSchema"] = namespaceValue(schema)
+		clone["inputSchema"] = namespaceValue(schema, namespace)
 	}
 	return clone
 }
 
 func (s *Server) toolAllowed(name string) bool {
-	if NoAgentMode() && noAgentHiddenTool(name) {
+	if s.noAgentMode() && noAgentHiddenTool(name) {
 		return false
 	}
-	if allowed := explicitAllowedTools(); len(allowed) > 0 {
+	if allowed := s.explicitAllowedTools(); len(allowed) > 0 {
 		return allowed[name]
 	}
 	return !hiddenUnlessAllowlisted(name)
@@ -5578,8 +5556,7 @@ func advertisedToolName(name string) string {
 	return name
 }
 
-func namespaceText(text string) string {
-	namespace := RuntimeNamespace()
+func namespaceText(text, namespace string) string {
 	if namespace == "ws" {
 		return text
 	}
@@ -5599,32 +5576,32 @@ func namespaceTerms(text, namespace string) string {
 	return text
 }
 
-func namespaceValue(value any) any {
+func namespaceValue(value any, namespace string) any {
 	switch typed := value.(type) {
 	case string:
-		return namespaceText(typed)
+		return namespaceText(typed, namespace)
 	case map[string]any:
 		clone := make(map[string]any, len(typed))
 		for key, child := range typed {
-			clone[key] = namespaceValue(child)
+			clone[key] = namespaceValue(child, namespace)
 		}
 		return clone
 	case map[string]string:
 		clone := make(map[string]string, len(typed))
 		for key, child := range typed {
-			clone[key] = namespaceText(child)
+			clone[key] = namespaceText(child, namespace)
 		}
 		return clone
 	case []any:
 		clone := make([]any, len(typed))
 		for i, child := range typed {
-			clone[i] = namespaceValue(child)
+			clone[i] = namespaceValue(child, namespace)
 		}
 		return clone
 	case []string:
 		clone := make([]string, len(typed))
 		for i, child := range typed {
-			clone[i] = namespaceText(child)
+			clone[i] = namespaceText(child, namespace)
 		}
 		return clone
 	default:
@@ -5700,8 +5677,8 @@ func appendRenderContext(body string, context map[string]string) string {
 	return body + sb.String()
 }
 
-func explicitAllowedTools() map[string]bool {
-	raw := strings.TrimSpace(os.Getenv("WS_MCP_ALLOWED_TOOLS"))
+func parseAllowedTools(raw string) map[string]bool {
+	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return nil
 	}

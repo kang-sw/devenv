@@ -54,11 +54,17 @@ type dashboardLink struct {
 	pruned   bool
 	// now is the clock; nil uses time.Now.
 	now func() time.Time
-	// dir resolves the daemon state directory; nil uses wsdashboard.Dir("").
+	// dir resolves the daemon state directory; nil uses
+	// wsdashboard.Dir(cacheHome).
 	dir func() (string, error)
+	// cacheHome is the caller process's WS_CACHE_HOME for a hosted server;
+	// empty means this process's, read live.
+	cacheHome string
 
 	nudgeOnce sync.Once
 	nudges    chan wsdashboard.NudgeBody
+	// nudgesClosed is set by Close; a nudge queued after it is dropped.
+	nudgesClosed bool
 }
 
 // dashboardSession is one session key this process has seen on a keyed call
@@ -90,7 +96,7 @@ func (d *dashboardLink) stateDir() (string, error) {
 	if d.dir != nil {
 		return d.dir()
 	}
-	return wsdashboard.Dir("")
+	return wsdashboard.Dir(d.cacheHome)
 }
 
 func dashboardStamp(t time.Time) string { return t.UTC().Format(time.RFC3339) }
@@ -106,7 +112,7 @@ func (s *Server) dashboardSessionEnabled(sessionKey string) bool {
 // dashboardDeclared reports whether this ws-mcp has a dashboard at all: a
 // loaded dashboard manifest declares its keys, and NoDashboardMode is off.
 func (s *Server) dashboardDeclared() bool {
-	if NoDashboardMode() {
+	if s.noDashboardMode() {
 		return false
 	}
 	_, ok := s.declared.lookup(DashboardEnabledKey)
@@ -162,7 +168,7 @@ func (s *Server) dashboardTouch(sessionKey, root string, force bool) {
 			// Off from the first call too: a registration a key-on run of
 			// this session left behind must not keep it listed.
 			if err := wsdashboard.RemoveRegistration(dir, sess.replyID); err != nil {
-				appendDebugEvent("dashboard.unregister_failed", map[string]any{"error": err.Error()})
+				s.debugEvent("dashboard.unregister_failed", map[string]any{"error": err.Error()})
 			}
 			sess.reg = wsdashboard.Registration{}
 			sess.servedPort = 0
@@ -184,7 +190,7 @@ func (s *Server) dashboardTouch(sessionKey, root string, force bool) {
 	reg.HeartbeatAt = dashboardStamp(now)
 	reg.EndedAt = ""
 	if err := wsdashboard.WriteRegistration(dir, reg); err != nil {
-		appendDebugEvent("dashboard.register_failed", map[string]any{"error": err.Error()})
+		s.debugEvent("dashboard.register_failed", map[string]any{"error": err.Error()})
 		return
 	}
 	sess.reg = reg
@@ -216,7 +222,7 @@ func (s *Server) dashboardHeartbeat() {
 		sess.checkedAt = now
 		if !sess.enabled {
 			if err := wsdashboard.RemoveRegistration(dir, sess.replyID); err != nil {
-				appendDebugEvent("dashboard.unregister_failed", map[string]any{"error": err.Error()})
+				s.debugEvent("dashboard.unregister_failed", map[string]any{"error": err.Error()})
 			}
 			sess.reg = wsdashboard.Registration{}
 			sess.servedPort = 0
@@ -225,7 +231,7 @@ func (s *Server) dashboardHeartbeat() {
 		reg := sess.reg
 		reg.HeartbeatAt = dashboardStamp(now)
 		if err := wsdashboard.WriteRegistration(dir, reg); err != nil {
-			appendDebugEvent("dashboard.heartbeat_failed", map[string]any{"error": err.Error()})
+			s.debugEvent("dashboard.heartbeat_failed", map[string]any{"error": err.Error()})
 			continue
 		}
 		sess.reg = reg
@@ -268,7 +274,7 @@ func (s *Server) startDashboardHeartbeat(ctx context.Context) <-chan struct{} {
 		defer close(done)
 		defer func() {
 			if r := recover(); r != nil {
-				recordPanic("dashboard.heartbeat", "", r, debug.Stack())
+				s.recordPanic("dashboard.heartbeat", "", r, debug.Stack())
 			}
 		}()
 		ticker := time.NewTicker(dashboardHeartbeatInterval)
@@ -308,6 +314,9 @@ func (s *Server) dashboardNudge(sessionKey string) {
 // d.mu.
 func (s *Server) queueDashboardNudge(sess *dashboardSession) {
 	d := &s.dashboard
+	if d.nudgesClosed {
+		return
+	}
 	d.nudgeOnce.Do(func() {
 		d.nudges = make(chan wsdashboard.NudgeBody, dashboardNudgeQueue)
 		go s.runDashboardNudges(d.nudges)
@@ -360,7 +369,7 @@ func (s *Server) runDashboardNudges(queue <-chan wsdashboard.NudgeBody) {
 			port := ep.Port
 			if err != nil {
 				port = 0
-				appendDebugEvent("dashboard.nudge_failed", map[string]any{"error": err.Error()})
+				s.debugEvent("dashboard.nudge_failed", map[string]any{"error": err.Error()})
 			}
 			s.recordDashboardNudges([]wsdashboard.NudgeBody{body}, port)
 		}
@@ -536,7 +545,7 @@ func (src *DashboardSessionSource) ReadSession(reg wsdashboard.Registration) (ws
 		boardPrint(h, key, record, reg.ReplyID, replies, repliesOK)
 	}
 	io.WriteString(h, "\x00history")
-	if dir, err := mailboxHistoryDir(key); err == nil {
+	if dir, err := mailboxHistoryDir("", key); err == nil {
 		names, _ := mailboxHistoryEntryNames(dir)
 		for _, name := range names {
 			io.WriteString(h, "\x00"+name)

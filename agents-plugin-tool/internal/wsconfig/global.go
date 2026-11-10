@@ -7,7 +7,9 @@ import (
 )
 
 const (
-	envConfigHome        = "WS_CONFIG_HOME"
+	// EnvConfigHome names the global config directory override a caller
+	// process carries.
+	EnvConfigHome        = "WS_CONFIG_HOME"
 	defaultConfigDirName = ".ws"
 )
 
@@ -17,7 +19,7 @@ func GlobalPath(opts Options) (string, error) {
 	if opts.ConfigHome != "" {
 		return filepath.Join(opts.ConfigHome, "config.json"), nil
 	}
-	if env := os.Getenv(envConfigHome); env != "" {
+	if env := os.Getenv(EnvConfigHome); env != "" {
 		return filepath.Join(env, "config.json"), nil
 	}
 	home, err := os.UserHomeDir()

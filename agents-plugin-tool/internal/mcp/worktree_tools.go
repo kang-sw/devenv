@@ -437,7 +437,7 @@ func provisionWorktree(ctx context.Context, runner wsgit.Runner, root, base, tar
 		}
 	}
 
-	hookEnv := worktreeHookEnv{WorktreeDir: wtPath, Base: base, TargetBranch: targetBranch}
+	hookEnv := worktreeHookEnv{WorktreeDir: wtPath, Base: base, TargetBranch: targetBranch, Environ: hookEnviron(runner)}
 	if hookEnv.TargetBranch == "" {
 		hookEnv.TargetBranch = base
 	}
@@ -681,7 +681,7 @@ func releaseWorktree(ctx context.Context, runner wsgit.Runner, wtPath, poolConfi
 		if found {
 			preserve = profile.Definition.Preserve
 			if h := profile.Definition.Hooks; h != nil {
-				runs, failure := runWorktreeHooks(ctx, worktreeHookPreRelease, h.PreRelease, profile.Scope, worktreeHookEnv{WorktreeDir: target, TargetBranch: branch})
+				runs, failure := runWorktreeHooks(ctx, worktreeHookPreRelease, h.PreRelease, profile.Scope, worktreeHookEnv{WorktreeDir: target, TargetBranch: branch, Environ: hookEnviron(runner)})
 				res.Hooks = runs
 				if failure != nil {
 					return res, fmt.Errorf("worktree.release: profile %q: %w. %s is unchanged and still leased; fix the hook or the profile (config.tune), then release again", marker.Profile, failure, target)

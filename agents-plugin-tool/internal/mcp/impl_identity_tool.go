@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-
-	"github.com/kang-sw/devenv/internal/wsgit"
 )
 
 func (s *Server) handleResolveImplBranch(id json.RawMessage, args map[string]any) response {
@@ -30,7 +28,7 @@ func (s *Server) handleResolveImplBranch(id json.RawMessage, args map[string]any
 	}
 	branch := implTicketBranch(base, stem)
 	for _, ref := range []string{base, branch} {
-		if _, err := (wsgit.ExecRunner{}).RunGit(context.Background(), record.Root, "check-ref-format", "refs/heads/"+ref); err != nil {
+		if _, err := s.gitRunner().RunGit(context.Background(), record.Root, "check-ref-format", "refs/heads/"+ref); err != nil {
 			return toolTextResponse(id, "", fmt.Errorf("invalid branch name %q: %w", ref, err))
 		}
 	}

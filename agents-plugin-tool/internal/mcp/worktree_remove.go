@@ -113,7 +113,7 @@ func removeWorktree(ctx context.Context, runner wsgit.Runner, wtPath, poolConfig
 		case !found:
 			res.Notes = append(res.Notes, fmt.Sprintf("profile %q no longer resolves; its pre_remove hooks were skipped", marker.Profile))
 		case profile.Definition.Hooks != nil:
-			runs, failure := runWorktreeHooks(ctx, worktreeHookPreRemove, profile.Definition.Hooks.PreRemove, profile.Scope, worktreeHookEnv{WorktreeDir: target, TargetBranch: res.Branch})
+			runs, failure := runWorktreeHooks(ctx, worktreeHookPreRemove, profile.Definition.Hooks.PreRemove, profile.Scope, worktreeHookEnv{WorktreeDir: target, TargetBranch: res.Branch, Environ: hookEnviron(runner)})
 			res.Hooks = runs
 			if failure != nil {
 				return res, fmt.Errorf("worktree.remove: profile %q: %w. %s was not removed; fix the hook or the profile (config.tune), then remove again", marker.Profile, failure, target)

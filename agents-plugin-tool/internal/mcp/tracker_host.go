@@ -26,7 +26,19 @@ type trackerLink struct {
 // trackerHost returns this process's tracker host.
 func (s *Server) trackerHost() (*wstrackerhost.Host, error) {
 	s.tracker.once.Do(func() {
-		s.tracker.host, s.tracker.err = wstrackerhost.New(s.tracker.opts)
+		// The host follows the caller: its root beside the caller's global
+		// config, its git under the caller's environment.
+		opts := s.tracker.opts
+		if opts.Root == "" {
+			opts.Root, s.tracker.err = wstrackerhost.Root(s.configOptions())
+			if s.tracker.err != nil {
+				return
+			}
+		}
+		if opts.Environ == nil {
+			opts.Environ = s.environ
+		}
+		s.tracker.host, s.tracker.err = wstrackerhost.New(opts)
 	})
 	return s.tracker.host, s.tracker.err
 }

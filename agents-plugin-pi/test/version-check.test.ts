@@ -21,7 +21,7 @@ describe("assertVersionPin", () => {
     assert.doesNotThrow(() => assertVersionPin(runtime, "0.43.4"));
   });
 
-  test("throws synchronously when the versions mismatch", () => {
+  test("throws synchronously when the server is in another minor", () => {
     const runtime: RuntimeContract = { plugin: "ws", plugin_version: "0.43.4" };
     assert.throws(
       () => assertVersionPin(runtime, "0.44.0"),
@@ -32,6 +32,21 @@ describe("assertVersionPin", () => {
         return true;
       },
     );
+    assert.throws(() => assertVersionPin(runtime, "1.43.4"));
+  });
+
+  // The server is the machine's daemon, shared with every same-minor plugin
+  // and run by the newest of them: a newer same-minor server is accepted,
+  // an older one (or an unparseable one) is not.
+  test("accepts a newer same-minor server and refuses an older one", () => {
+    const runtime: RuntimeContract = { plugin: "ws", plugin_version: "0.43.4" };
+    assert.doesNotThrow(() => assertVersionPin(runtime, "0.43.9"));
+    assert.doesNotThrow(() => assertVersionPin(runtime, "0.43.4-dev"));
+    assert.doesNotThrow(() => assertVersionPin(runtime, "v0.43.4"));
+    assert.throws(() => assertVersionPin(runtime, "0.43.3"));
+    assert.throws(() => assertVersionPin(runtime, "0.43"));
+    assert.throws(() => assertVersionPin(runtime, ""));
+    assert.throws(() => assertVersionPin({ plugin: "ws", plugin_version: "0.43.4-dev" }, "0.43.4"));
   });
 });
 

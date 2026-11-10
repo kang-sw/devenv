@@ -30,7 +30,7 @@ type historyEntries struct {
 // read is readMailboxHistory of session key key (reply-id replyID), with
 // every entry already read taken from the cache.
 func (c *mailboxHistoryCache) read(replyID, key string) ([]mailboxHistoryRecord, error) {
-	dir, err := mailboxHistoryDir(key)
+	dir, err := mailboxHistoryDir("", key)
 	if err != nil {
 		return nil, err
 	}

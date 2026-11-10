@@ -86,7 +86,7 @@ func (s *Server) handleMailboxSend(id json.RawMessage, args map[string]any) resp
 		replyTo = wsmailbox.ReplyIDPrefix + replyID
 	}
 	if entry.isTopLevelLead() {
-		content = stampPeerLeadNote(content, s.currentHarness())
+		content = stampPeerLeadNote(content, s.currentHarness(), s.runtimeNamespace())
 	}
 	envelope := wsmailbox.Envelope{From: from, ReplyTo: replyTo, Content: content, SentAt: now}
 
@@ -118,7 +118,7 @@ func (s *Server) handleMailboxSend(id json.RawMessage, args map[string]any) resp
 	// The send is enqueued: record it in the caller's history ring. A failed
 	// ring write is logged inside, never surfaced.
 	sent := []mailboxHistoryEntry{{Direction: mailboxHistorySent, Counterparty: counterparty, Body: envelope.Content}}
-	s.recordLiveMail(sessionKey, sent, recordMailboxHistory(sessionKey, sent))
+	s.recordLiveMail(sessionKey, sent, s.recordMailboxHistory(sessionKey, sent))
 
 	stampLabel, stampValue := "reply_to", replyTo
 	if from != "" {
@@ -214,7 +214,7 @@ func (s *Server) handleMailboxRecv(id json.RawMessage, args map[string]any) resp
 			return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, readErrs[0]))
 		}
 		for _, rerr := range readErrs {
-			appendDebugEvent("mailbox.recv_partial_error", map[string]any{"error": rerr.Error()})
+			s.debugEvent("mailbox.recv_partial_error", map[string]any{"error": rerr.Error()})
 		}
 	}
 
@@ -263,7 +263,7 @@ func (s *Server) recordMailboxRecvContacts(sessionKey, root, ownNamed string, dr
 		return
 	}
 	if _, err := s.publishReplyID(sessionKey, root, ownNamed, contacts...); err != nil {
-		appendDebugEvent("mailbox.recv_contact_error", map[string]any{"error": err.Error()})
+		s.debugEvent("mailbox.recv_contact_error", map[string]any{"error": err.Error()})
 	}
 }
 
@@ -282,7 +282,7 @@ func (s *Server) recordMailboxRecvHistory(sessionKey string, drained []wsmailbox
 		}
 		entries = append(entries, mailboxHistoryEntry{Direction: mailboxHistoryRecv, Counterparty: handle, Body: m.Content})
 	}
-	s.recordLiveMail(sessionKey, entries, recordMailboxHistory(sessionKey, entries))
+	s.recordLiveMail(sessionKey, entries, s.recordMailboxHistory(sessionKey, entries))
 }
 
 // mailboxPeerOut is lookup_peers' per-peer JSON/text shape.
@@ -658,9 +658,10 @@ func peerLeadNotePrefix(namespace string) string {
 
 // hasPeerLeadNote reports whether content already opens with a peer-lead note
 // from either product: mail crosses product boundaries, so a body a ws lead
-// stamped and a wsflow lead forwards must not be stamped twice.
-func hasPeerLeadNote(content string) bool {
-	for _, namespace := range []string{RuntimeNamespace(), "ws", "wsflow"} {
+// stamped and a wsflow lead forwards must not be stamped twice. namespaces
+// adds the caller's own namespace when it is neither of the two.
+func hasPeerLeadNote(content string, namespaces ...string) bool {
+	for _, namespace := range append(namespaces, "ws", "wsflow") {
 		if strings.HasPrefix(content, peerLeadNotePrefix(namespace)) {
 			return true
 		}
@@ -671,13 +672,13 @@ func hasPeerLeadNote(content string) bool {
 // stampPeerLeadNote prepends the peer-lead note line to content, naming the
 // sender's harness when known. Content already carrying the note is returned
 // unchanged so a forwarded or re-sent body is never double-stamped.
-func stampPeerLeadNote(content, harness string) string {
-	if hasPeerLeadNote(content) {
+func stampPeerLeadNote(content, harness, namespace string) string {
+	if hasPeerLeadNote(content, namespace) {
 		return content
 	}
 	who := "not a worker"
 	if h := strings.TrimSpace(harness); h != "" {
 		who = h + ", not a worker"
 	}
-	return peerLeadNotePrefix(RuntimeNamespace()) + " (" + who + "), with the same authority as yours]\n" + content
+	return peerLeadNotePrefix(namespace) + " (" + who + "), with the same authority as yours]\n" + content
 }

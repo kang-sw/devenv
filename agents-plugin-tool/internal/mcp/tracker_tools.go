@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsledger"
 	"github.com/kang-sw/devenv/internal/wstracker"
 	"github.com/kang-sw/devenv/internal/wstrackerhost"
@@ -1200,14 +1199,14 @@ func (s *Server) handleTrackerQuery(ctx context.Context, id json.RawMessage, arg
 // for tracker.query the "## Query" section.
 func (s *Server) trackerRefusal(tool string, problems []string) string {
 	if tool != "tracker.query" {
-		return commandRefusal(tool, problems, s.trackerPlaybookSection("## Commands"), trackerPlaybookName)
+		return s.commandRefusal(tool, problems, s.trackerPlaybookSection("## Commands"), trackerPlaybookName)
 	}
 	var sb strings.Builder
 	writeRefusalProblems(&sb, tool, problems)
 	if grammar := s.trackerPlaybookSection("## Query"); grammar != "" {
 		sb.WriteString("\n" + grammar + "\n")
 	} else {
-		fmt.Fprintf(&sb, "\nRead the %s playbook with %s/playbook.read for the input format.\n", trackerPlaybookName, RuntimeNamespace())
+		fmt.Fprintf(&sb, "\nRead the %s playbook with %s/playbook.read for the input format.\n", trackerPlaybookName, s.runtimeNamespace())
 	}
 	return sb.String()
 }
@@ -1215,11 +1214,11 @@ func (s *Server) trackerRefusal(tool string, problems []string) string {
 // trackerPlaybookSection returns the tracker playbook's section under
 // heading; "" when it cannot be read.
 func (s *Server) trackerPlaybookSection(heading string) string {
-	rsrcRoot, err := resolveRsrcRoot("")
+	rsrcRoot, err := s.resolveRsrcRoot("")
 	if err != nil {
 		return ""
 	}
-	body, _, err := renderPlaybookBody(s, rsrcRoot, trackerPlaybookName, nil, wsconfig.Options{}, "", "", "", nil, "")
+	body, _, err := renderPlaybookBody(s, rsrcRoot, trackerPlaybookName, nil, s.configOptions(), "", "", "", nil, "")
 	if err != nil {
 		return ""
 	}
@@ -1230,7 +1229,7 @@ func (s *Server) trackerPlaybookSection(heading string) string {
 // the tracker playbook's content under "### Tracker" (its title dropped,
 // its headings demoted under the section), so the lead needs no extra read.
 func trackerManualSection(s *Server, rsrcRoot string) (string, error) {
-	playbook, _, err := renderPlaybookBody(s, rsrcRoot, trackerPlaybookName, nil, wsconfig.Options{}, "", "", "", nil, "")
+	playbook, _, err := renderPlaybookBody(s, rsrcRoot, trackerPlaybookName, nil, s.configOptions(), "", "", "", nil, "")
 	if err != nil {
 		return "", fmt.Errorf("render %s playbook: %w", trackerPlaybookName, err)
 	}

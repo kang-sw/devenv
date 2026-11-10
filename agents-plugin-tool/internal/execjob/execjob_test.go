@@ -74,6 +74,33 @@ func TestLaunchResultRawReadersAndWorkingDir(t *testing.T) {
 	}
 }
 
+// A job runs under LaunchOptions.Environ, the hosting connection's
+// environment, with Env on top; nothing of this process's environment leaks
+// in once a base is given.
+func TestLaunchEnvironOverridesTheProcessEnvironment(t *testing.T) {
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("EXECJOB_BASE", "process")
+	root := gitRoot(t)
+	base := []string{"EXECJOB_BASE=hello", "GO_WANT_HELPER_PROCESS=1", "PATH=" + os.Getenv("PATH")}
+	if tmp := os.Getenv("TMPDIR"); tmp != "" {
+		base = append(base, "TMPDIR="+tmp)
+	}
+	res, err := Launch(LaunchOptions{Root: root, Cmd: os.Args[0], Args: []string{"-test.run=TestHelperProcess", "--", "env"}, Environ: base, Env: map[string]string{"EXECJOB_OVERLAY": "arg"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != stateSucceeded || strings.TrimSpace(res.Stdout) != "hello/arg" {
+		t.Fatalf("launch response = %#v, want stdout hello/arg", res)
+	}
+	res, err = Launch(LaunchOptions{Root: root, Cmd: os.Args[0], Args: []string{"-test.run=TestHelperProcess", "--", "env"}, Env: map[string]string{"GO_WANT_HELPER_PROCESS": "1", "EXECJOB_OVERLAY": "arg"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(res.Stdout) != "process/arg" {
+		t.Fatalf("without Environ the process environment is the base: %#v", res)
+	}
+}
+
 func TestLongLargeAndAbort(t *testing.T) {
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 	root := gitRoot(t)
@@ -293,6 +320,8 @@ func TestHelperProcess(t *testing.T) {
 				_, _ = os.Stdout.WriteString("done\n")
 			case "large":
 				_, _ = os.Stdout.WriteString(strings.Repeat("x", 5000))
+			case "env":
+				_, _ = os.Stdout.WriteString(os.Getenv("EXECJOB_BASE") + "/" + os.Getenv("EXECJOB_OVERLAY") + "\n")
 			case "spawnparent":
 				// args: -- spawnparent <childPidFile>
 				runSpawnParent(args[i+2])

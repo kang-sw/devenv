@@ -306,12 +306,13 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
                 calls.append((source, destination))
                 raise PermissionError("target is busy")
 
-            launcher.os.replace = fake_replace
-            # Disable the sleep so the retry loop runs fast in tests.
-            launcher.time.sleep = lambda _: None
             launcher.runtime_fully_compatible = lambda got_binary, contract, runtime_dir, **kwargs: got_binary == binary
 
-            installed = launcher.install_tmp_runtime(tmp, binary, {"plugin_version": "0.18.1"}, temp, "installed")
+            # os and time are the shared modules, so the patches must be
+            # scoped or every later test's os.replace and sleep break; the
+            # sleep is disabled so the retry loop runs fast.
+            with mock.patch.object(launcher.os, "replace", fake_replace), mock.patch.object(launcher.time, "sleep", lambda _: None):
+                installed = launcher.install_tmp_runtime(tmp, binary, {"plugin_version": "0.18.1"}, temp, "installed")
 
             self.assertFalse(installed)
             # All 5 retry attempts must have been made (_replace_attempts = 5).

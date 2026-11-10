@@ -3,7 +3,6 @@ package mcp
 import (
 	"context"
 	"fmt"
-	"os"
 	"runtime/debug"
 	"strings"
 	"sync"
@@ -88,29 +87,29 @@ type mailboxRuntimeState struct {
 
 func (s *Server) mailboxIdentityResolved() mailboxIdentity {
 	s.mailbox.identityOnce.Do(func() {
-		s.mailbox.identityValue = computeMailboxIdentity()
+		s.mailbox.identityValue = s.computeMailboxIdentity()
 	})
 	return s.mailbox.identityValue
 }
 
-func computeMailboxIdentity() mailboxIdentity {
-	if raw := strings.TrimSpace(os.Getenv(envMailbox)); raw != "" {
+func (s *Server) computeMailboxIdentity() mailboxIdentity {
+	if raw := strings.TrimSpace(s.getenv(envMailbox)); raw != "" {
 		name, scope, err := wsmailbox.ParseSlugScope(raw)
 		if err != nil {
-			appendDebugEvent("mailbox.identity_invalid", map[string]any{"source": envMailbox, "value": raw, "error": err.Error()})
+			s.debugEvent("mailbox.identity_invalid", map[string]any{"source": envMailbox, "value": raw, "error": err.Error()})
 			return mailboxIdentity{}
 		}
 		return mailboxIdentity{Active: true, Name: name, Scope: scope}
 	}
-	if raw := strings.TrimSpace(os.Getenv(envMailboxAuto)); raw != "" {
+	if raw := strings.TrimSpace(s.getenv(envMailboxAuto)); raw != "" {
 		scopeRaw := strings.ToLower(raw)
 		if !wsmailbox.IsValidScope(scopeRaw) {
-			appendDebugEvent("mailbox.identity_invalid", map[string]any{"source": envMailboxAuto, "value": raw})
+			s.debugEvent("mailbox.identity_invalid", map[string]any{"source": envMailboxAuto, "value": raw})
 			return mailboxIdentity{}
 		}
 		stem, err := wskey.Generate()
 		if err != nil {
-			appendDebugEvent("mailbox.identity_invalid", map[string]any{"source": envMailboxAuto, "error": err.Error()})
+			s.debugEvent("mailbox.identity_invalid", map[string]any{"source": envMailboxAuto, "error": err.Error()})
 			return mailboxIdentity{}
 		}
 		// wskey.Generate's word-pool output is expected to already satisfy
@@ -120,7 +119,7 @@ func computeMailboxIdentity() mailboxIdentity {
 		// same defensive posture ParseSlugScope already applies to an
 		// explicit WS_MAILBOX value.
 		if !wsmailbox.IsValidName(stem) {
-			appendDebugEvent("mailbox.identity_invalid", map[string]any{"source": envMailboxAuto, "value": stem, "error": "auto-minted stem is not a valid mailbox name"})
+			s.debugEvent("mailbox.identity_invalid", map[string]any{"source": envMailboxAuto, "value": stem, "error": "auto-minted stem is not a valid mailbox name"})
 			return mailboxIdentity{}
 		}
 		return mailboxIdentity{Active: true, Name: stem, Scope: wsmailbox.Scope(scopeRaw), Auto: true}
@@ -217,11 +216,11 @@ func (s *Server) ensureMailboxRegistered(root string) {
 		s.mailbox.registeredMu.Unlock()
 		path, err := wsmailbox.PathForScope(identity.Scope, root)
 		if err != nil {
-			appendDebugEvent("mailbox.register_error", map[string]any{"error": err.Error()})
+			s.debugEvent("mailbox.register_error", map[string]any{"error": err.Error()})
 			return
 		}
 		now := mailboxNow()
-		pid := os.Getpid()
+		pid := s.pid()
 		fresh := s.ownedMailboxPresence(identity, root, now.Format(time.RFC3339))
 		werr := wsmailbox.WithLock(path, func(store *wsmailbox.StoreFile) error {
 			if existing, ok := store.Presence[identity.Name]; ok && existing.PID != pid && mailboxPresenceLive(existing, now) {
@@ -234,7 +233,7 @@ func (s *Server) ensureMailboxRegistered(root string) {
 			return nil
 		})
 		if werr != nil {
-			appendDebugEvent("mailbox.register_error", map[string]any{"error": werr.Error()})
+			s.debugEvent("mailbox.register_error", map[string]any{"error": werr.Error()})
 		}
 	})
 }
@@ -247,7 +246,7 @@ func (s *Server) ownedMailboxPresence(identity mailboxIdentity, root, nowStr str
 	return wsmailbox.Presence{
 		Name: identity.Name, Scope: identity.Scope,
 		Harness: s.currentHarness(), Cwd: root, StartedAt: nowStr, LastSeen: nowStr,
-		PID: os.Getpid(), Auto: identity.Auto,
+		PID: s.pid(), Auto: identity.Auto,
 	}
 }
 
@@ -299,7 +298,7 @@ func (s *Server) writeMailboxPresenceLastSeen(identity mailboxIdentity, root str
 		return
 	}
 	nowStr := mailboxNowString()
-	pid := os.Getpid()
+	pid := s.pid()
 	_ = wsmailbox.WithLock(path, func(store *wsmailbox.StoreFile) error {
 		p, ok := store.Presence[identity.Name]
 		if !ok || p.PID != pid {
@@ -537,7 +536,7 @@ func (s *Server) rebindMailboxOwnerAtFerrule(newSessionKey, parentKey string, sc
 	}
 	s.ensureMailboxRegistered(root)
 	if s.mailboxHasConflict() {
-		appendDebugEvent("mailbox.rebind_skipped_conflict", map[string]any{"name": identity.Name, "scope": string(identity.Scope)})
+		s.debugEvent("mailbox.rebind_skipped_conflict", map[string]any{"name": identity.Name, "scope": string(identity.Scope)})
 		return
 	}
 	path, err := wsmailbox.PathForScope(identity.Scope, root)
@@ -546,7 +545,7 @@ func (s *Server) rebindMailboxOwnerAtFerrule(newSessionKey, parentKey string, sc
 	}
 	now := mailboxNow()
 	nowStr := now.Format(time.RFC3339)
-	pid := os.Getpid()
+	pid := s.pid()
 	bound := false
 	werr := wsmailbox.WithLock(path, func(store *wsmailbox.StoreFile) error {
 		p, ok := store.Presence[identity.Name]

@@ -975,8 +975,8 @@ func TestWhiteboardKnobSessionScope(t *testing.T) {
 		t.Helper()
 		return toolText(t, f.call(t, "playbook.read", map[string]any{"name": name, "session_key": key}))
 	}
-	capture := withNamespace(whiteboardCaptureLine)
-	bullet := withNamespace(lineTicketQueueBoard)
+	capture := withNamespace(whiteboardCaptureLine, RuntimeNamespace())
+	bullet := withNamespace(lineTicketQueueBoard, RuntimeNamespace())
 	if !strings.Contains(read(f.key, "lead-discuss"), capture) || !strings.Contains(read(f.key, "lead-ticket"), bullet) {
 		t.Fatalf("lead-discuss and lead-ticket must carry the knob-on variants for the session that set it")
 	}
@@ -1200,13 +1200,13 @@ func TestWhiteboardWorkflowTextFollowsKnob(t *testing.T) {
 			t.Fatalf("knob on, %s: the syntax section must sit at ### ahead of the whiteboard section", name)
 		}
 	}
-	capture := withNamespace(whiteboardCaptureLine)
+	capture := withNamespace(whiteboardCaptureLine, RuntimeNamespace())
 	discussOn := read("lead-discuss")
 	if !strings.Contains(discussOn, capture) || strings.Contains(discussOn, "nothing here is persisted") {
 		t.Fatalf("knob on: lead-discuss must carry the capture line instead:\n%s", discussOn)
 	}
 	ticketOn := read("lead-ticket")
-	bullet := withNamespace(lineTicketQueueBoard)
+	bullet := withNamespace(lineTicketQueueBoard, RuntimeNamespace())
 	idx := strings.Index(ticketOn, bullet)
 	if idx < 0 || idx > strings.Index(ticketOn, "### Trace a change before writing it") || idx < strings.Index(ticketOn, "### Queue state") {
 		t.Fatalf("knob on: lead-ticket must carry the queue step inside Queue state:\n%s", ticketOn)

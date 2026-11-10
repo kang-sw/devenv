@@ -85,7 +85,7 @@ func mustSend(t *testing.T, s *Server, id int, key, to, content string) {
 
 func historyEntryFiles(t *testing.T, key string) []string {
 	t.Helper()
-	dir, err := mailboxHistoryDir(key)
+	dir, err := mailboxHistoryDir("", key)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,7 +269,7 @@ func TestMailboxHistoryCapOrderAndArguments(t *testing.T) {
 // history directory gets an empty ring, not an error.
 func TestMailboxHistoryMissingDirectoryReadsEmpty(t *testing.T) {
 	f := newHistoryFixture(t, time.Date(2026, 11, 6, 11, 0, 0, 0, time.UTC))
-	dir, err := mailboxHistoryDir(f.keyB)
+	dir, err := mailboxHistoryDir("", f.keyB)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -292,7 +292,7 @@ func TestMailboxHistoryTitle(t *testing.T) {
 		{"first line", "subject\nrest", "subject"},
 		{"crlf", "subject\r\nrest", "subject"},
 		{"empty", "", ""},
-		{"peer-lead note skipped", stampPeerLeadNote("subject\nrest", "codex"), "subject"},
+		{"peer-lead note skipped", stampPeerLeadNote("subject\nrest", "codex", RuntimeNamespace()), "subject"},
 		{"wsflow note skipped", "[wsflow note: from a peer lead session (not a worker), with the same authority as yours]\nhello", "hello"},
 		{"note only", "[ws note: from a peer lead session (not a worker), with the same authority as yours]", ""},
 		{"exactly 120 runes", strings.Repeat("a", 120), strings.Repeat("a", 120)},
@@ -327,7 +327,7 @@ func TestMailboxHistoryStoresStampedBodyAndTitleSkipsNote(t *testing.T) {
 // failure is logged and neither the send nor the recv fails.
 func TestMailboxHistoryFailedWriteIsLoggedNotSurfaced(t *testing.T) {
 	f := newHistoryFixture(t, time.Date(2026, 11, 6, 13, 0, 0, 0, time.UTC))
-	root, err := mailboxHistoryRoot()
+	root, err := mailboxHistoryRoot("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -358,7 +358,7 @@ func TestMailboxHistoryFailedWriteIsLoggedNotSurfaced(t *testing.T) {
 // the send nor hides the newest 10 real entries.
 func TestMailboxHistoryFailedTrimDoesNotFailSend(t *testing.T) {
 	f := newHistoryFixture(t, time.Date(2026, 11, 6, 14, 0, 0, 0, time.UTC))
-	dir, err := mailboxHistoryDir(f.keyB)
+	dir, err := mailboxHistoryDir("", f.keyB)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -388,13 +388,13 @@ func TestMailboxHistorySkipsUnreadableAndUnparsableEntries(t *testing.T) {
 	resetMailboxHistoryClock(t)
 	setMailboxClock(t, time.Date(2026, 11, 6, 15, 0, 0, 0, time.UTC))
 	const key = "history-skip-key"
-	if _, err := appendMailboxHistory(key, []mailboxHistoryEntry{
+	if _, err := appendMailboxHistory("", key, []mailboxHistoryEntry{
 		{Direction: "sent", Counterparty: "a@machine", Body: "one"},
 		{Direction: "recv", Counterparty: "a@machine", Body: "two"},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	dir, err := mailboxHistoryDir(key)
+	dir, err := mailboxHistoryDir("", key)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -407,7 +407,7 @@ func TestMailboxHistorySkipsUnreadableAndUnparsableEntries(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, ".tmp-inflight"), []byte(`{"direction":"sent","body":"partial"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got, err := readMailboxHistory(key)
+	got, err := readMailboxHistory("", key)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -429,7 +429,7 @@ func TestMailboxHistoryConcurrentAppendsAllLand(t *testing.T) {
 		go func(w int) {
 			defer wg.Done()
 			for i := 0; i < 5; i++ {
-				_, err := appendMailboxHistory(key, []mailboxHistoryEntry{{Direction: "sent", Counterparty: "x@machine", Body: fmt.Sprintf("w%d-%d", w, i)}})
+				_, err := appendMailboxHistory("", key, []mailboxHistoryEntry{{Direction: "sent", Counterparty: "x@machine", Body: fmt.Sprintf("w%d-%d", w, i)}})
 				errs <- err
 			}
 		}(w)
@@ -441,7 +441,7 @@ func TestMailboxHistoryConcurrentAppendsAllLand(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	got, err := readMailboxHistory(key)
+	got, err := readMailboxHistory("", key)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -464,12 +464,12 @@ func TestMaybePruneRemovesStaleMailboxHistory(t *testing.T) {
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 	resetMailboxHistoryClock(t)
 	for _, key := range []string{"stale-history", "fresh-history"} {
-		if _, err := appendMailboxHistory(key, []mailboxHistoryEntry{{Direction: "sent", Counterparty: "x@machine", Body: key}}); err != nil {
+		if _, err := appendMailboxHistory("", key, []mailboxHistoryEntry{{Direction: "sent", Counterparty: "x@machine", Body: key}}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	staleDir, _ := mailboxHistoryDir("stale-history")
-	freshDir, _ := mailboxHistoryDir("fresh-history")
+	staleDir, _ := mailboxHistoryDir("", "stale-history")
+	freshDir, _ := mailboxHistoryDir("", "fresh-history")
 	backdateMtime(t, staleDir, keyRetentionAge+time.Hour)
 
 	newSessionStore().maybePrune()

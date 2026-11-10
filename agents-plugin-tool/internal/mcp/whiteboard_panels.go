@@ -181,13 +181,13 @@ func mailboxPanel(in whiteboardPanelInput) (wswhiteboard.Panel, bool) {
 		named = in.mailbox.identity.address()
 	}
 	if in.watch != nil {
-		if dir, err := mailboxHistoryDir(in.sessionKey); err == nil {
+		if dir, err := mailboxHistoryDir(in.cacheHome, in.sessionKey); err == nil {
 			in.watch(dir)
 		}
 	}
 	readHistory := in.history
 	if readHistory == nil {
-		readHistory = func() ([]mailboxHistoryRecord, error) { return readMailboxHistory(in.sessionKey) }
+		readHistory = func() ([]mailboxHistoryRecord, error) { return readMailboxHistory(in.cacheHome, in.sessionKey) }
 	}
 	history, _ := readHistory()
 	if named == "" && len(history) == 0 {

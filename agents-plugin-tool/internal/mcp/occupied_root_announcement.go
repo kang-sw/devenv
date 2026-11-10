@@ -23,8 +23,8 @@ import (
 // it would otherwise be told "do not commit here" about the very branch it
 // owns. The discriminator is the session record's parent — a top-level lead key
 // has an empty parent — so the caller injects this only for a parent-less key.
-func occupiedRootAnnouncement(root string) string {
-	out, err := wsgit.ExecRunner{}.RunGit(context.Background(), root, "symbolic-ref", "--quiet", "--short", "HEAD")
+func occupiedRootAnnouncement(runner wsgit.Runner, root string) string {
+	out, err := runner.RunGit(context.Background(), root, "symbolic-ref", "--quiet", "--short", "HEAD")
 	if err != nil {
 		return ""
 	}

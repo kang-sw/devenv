@@ -53,7 +53,7 @@ func (s *Server) loadOwnershipView(root string, cachedOnly bool) *ownershipView 
 		}
 		return nil
 	}
-	caller := resolveIndexCaller(ctx, root, "")
+	caller := resolveIndexCaller(ctx, s.gitRunner(), root, "")
 	caller.owner.CloneID = cl.ExistingCloneID(ctx)
 	v := &ownershipView{
 		state:        view.State,
@@ -65,7 +65,7 @@ func (s *Server) loadOwnershipView(root string, cachedOnly bool) *ownershipView 
 		leases:       map[string]*wsindex.Lease{},
 		provisional:  map[string]bool{},
 		originClosed: cl.OriginTicketsAt(ctx, cl.OriginTrack(ctx)).Closed,
-		worktrees:    localTrackWorktrees(ctx, root),
+		worktrees:    localTrackWorktrees(ctx, s.gitRunner(), root),
 	}
 	if view.State == wsindex.ViewUnknown {
 		return v
@@ -94,8 +94,8 @@ func (s *Server) loadOwnershipView(root string, cachedOnly bool) *ownershipView 
 // localTrackWorktrees maps each worktree's track (its branch's merge root) to
 // its path. A worktree on the track branch itself wins over an impl branch
 // rooted there.
-func localTrackWorktrees(ctx context.Context, root string) map[string]string {
-	entries, err := listWorktrees(ctx, wsgit.ExecRunner{}, root)
+func localTrackWorktrees(ctx context.Context, runner wsgit.Runner, root string) map[string]string {
+	entries, err := listWorktrees(ctx, runner, root)
 	if err != nil {
 		return nil
 	}

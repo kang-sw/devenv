@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/kang-sw/devenv/internal/wsagent"
-	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
 )
@@ -51,7 +50,7 @@ func (s *Server) trackerSupport(key string, entry sessionEntry) (trackerSupportS
 	if entry.scope != roleDelegate || entry.parent != "" {
 		return trackerSupportScope{}, false
 	}
-	dir, err := wsdashboard.Dir("")
+	dir, err := wsdashboard.Dir(s.dashboard.cacheHome)
 	if err != nil {
 		return trackerSupportScope{}, false
 	}
@@ -59,7 +58,7 @@ func (s *Server) trackerSupport(key string, entry sessionEntry) (trackerSupportS
 	if err != nil || rec.WSKey != key || rec.ClosedAt != "" || canonicalDir(rec.Root) != canonicalDir(entry.root) {
 		return trackerSupportScope{}, false
 	}
-	rp, err := wsagent.ResolveProfile(wsconfig.Options{}, rec.Root, rec.Profile)
+	rp, err := wsagent.ResolveProfile(s.configOptions(), rec.Root, rec.Profile)
 	if err != nil {
 		return trackerSupportScope{}, false
 	}

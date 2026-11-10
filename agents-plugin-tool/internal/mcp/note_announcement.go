@@ -28,13 +28,14 @@ const (
 // machine, worktree, clone, and repo layers. Thin wrapper over
 // wsnote.Compute, mirroring computeManuals's shape (see
 // manuals_announcement.go): pure, root-in, and silent on any resolution error.
-func computeNotesBlock(root string) wsnote.Block {
-	return wsnote.Compute(root, wsconfig.Options{}, notesInjectionCap, notesKeyOnlyCap)
+// opts carries the caller's config and cache homes.
+func computeNotesBlock(root string, opts wsconfig.Options) wsnote.Block {
+	return wsnote.Compute(root, opts, notesInjectionCap, notesKeyOnlyCap)
 }
 
 // computeNotes is computeNotesBlock's text, for renders that raise no warning.
-func computeNotes(root string) string {
-	return computeNotesBlock(root).Text
+func computeNotes(root string, opts wsconfig.Options) string {
+	return computeNotesBlock(root, opts).Text
 }
 
 // notesCleanupThrottleFile, in the git common dir, records when the
@@ -59,12 +60,12 @@ var notesCleanupNow = func() time.Time { return time.Now().UTC() }
 // before it reaches the model (a setup that finishes after its caller stopped
 // waiting) still consumes the slot. The next day's first lead call shows the
 // warning again, so this self-heals.
-func notesCleanupWarning(root string, block wsnote.Block, now time.Time) string {
+func notesCleanupWarning(runner wsgit.Runner, root string, block wsnote.Block, now time.Time) string {
 	total := block.HiddenTotal()
 	if total == 0 || strings.TrimSpace(root) == "" {
 		return ""
 	}
-	out, err := wsgit.ExecRunner{}.RunGit(context.Background(), root, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	out, err := runner.RunGit(context.Background(), root, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	if err != nil {
 		return ""
 	}

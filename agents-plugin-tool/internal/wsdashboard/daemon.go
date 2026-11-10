@@ -56,6 +56,9 @@ type DaemonOptions struct {
 	// BuildTime is reported by /health (ExecutableBuildTime); zero is
 	// unknown and is omitted.
 	BuildTime int64
+	// Proxy builds the MCP sessions the daemon hosts for the launchers
+	// that connect to ProxyPath (proxy.go); nil leaves the route off.
+	Proxy ProxyHandler
 	// LockWait bounds the wait for the single-instance lock; zero means
 	// DefaultLockWait.
 	LockWait time.Duration
@@ -174,6 +177,14 @@ type Daemon struct {
 	files *fileListCache
 	// support serves SupportRoutePrefix, nil without the routes.
 	support http.Handler
+	// proxy builds the hosted MCP sessions (proxy.go), nil without the
+	// route; proxyConns are the open ones, proxyWG counts their
+	// goroutines, and proxyDraining refuses new ones once Close began.
+	proxy         ProxyHandler
+	proxyMu       sync.Mutex
+	proxyConns    map[*proxyConn]struct{}
+	proxyWG       sync.WaitGroup
+	proxyDraining bool
 
 	closeOnce sync.Once
 	stop      chan struct{}
@@ -262,6 +273,7 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 		lan:             opts.LAN,
 		pprof:           opts.Pprof,
 		buildTime:       opts.BuildTime,
+		proxy:           opts.Proxy,
 		openSystem:      opts.openSystem,
 		worktrees:       opts.Worktrees,
 		sizes:           newSizeCache(),
@@ -452,8 +464,17 @@ func (d *Daemon) Done() <-chan struct{} { return d.done }
 func (d *Daemon) Close() {
 	d.closeOnce.Do(func() {
 		close(d.stop)
+		// Shutdown closes the listener at once, so no new session or page
+		// connects, and the hosted sessions drain meanwhile (proxy.go):
+		// the whole stop stays under the successor's lock wait.
 		ctx, cancel := context.WithTimeout(context.Background(), shutdownDeadline)
-		_ = d.server.Shutdown(ctx)
+		shutdownDone := make(chan struct{})
+		go func() {
+			_ = d.server.Shutdown(ctx)
+			close(shutdownDone)
+		}()
+		d.drainProxy()
+		<-shutdownDone
 		cancel()
 		// Shutdown closes only the listeners Serve has registered, and Serve
 		// runs on its own goroutine: a Close before that goroutine is
@@ -490,6 +511,9 @@ func (d *Daemon) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", d.handleHealth)
 	mux.HandleFunc("/shutdown", d.handleShutdown)
+	if d.proxy != nil {
+		mux.HandleFunc(ProxyPath, d.handleProxy)
+	}
 	mux.HandleFunc("/nudge", d.handleNudge)
 	mux.HandleFunc("/events", d.handleIndexEvents)
 	mux.HandleFunc("/s/", d.handleSessionRoutes)
