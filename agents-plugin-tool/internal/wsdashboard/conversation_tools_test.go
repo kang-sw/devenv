@@ -31,7 +31,7 @@ func TestToolsEntryRendersACollapsedSummaryRow(t *testing.T) {
 		ringRecord(2, wslive.RingEntry{Kind: wslive.RingTools, Tools: toolsSummary()}),
 		ringRecord(3, wslive.RingEntry{Kind: wslive.RingReply, Text: "done"}),
 	}
-	set, err := renderSessionRegions(historyView(ring, "", PageContent{}, nil), newEntryCache())
+	set, err := renderSessionRegions(historyView(ring, "", PageContent{}, sessionLookup{}), newEntryCache())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func TestToolsEntryRendersACollapsedSummaryRow(t *testing.T) {
 // listed name accounts for any call.
 func TestToolsRowWithoutNamedToolsShowsTheCallTotal(t *testing.T) {
 	ring := []wslive.RingRecord{ringRecord(1, wslive.RingEntry{Kind: wslive.RingTools, Tools: &wslive.ToolSummary{Calls: 2, OtherCalls: 2, Batches: []wslive.ToolBatch{{Calls: 2}}}})}
-	set, err := renderSessionRegions(historyView(ring, "", PageContent{}, nil), newEntryCache())
+	set, err := renderSessionRegions(historyView(ring, "", PageContent{}, sessionLookup{}), newEntryCache())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +119,7 @@ func TestExactToolsRowShowsTokensDurationsAndRepeats(t *testing.T) {
 		Usage: &wslive.TokenUsage{Input: 12_300, Output: 1_100, CacheRead: 210_400},
 	}
 	ring := []wslive.RingRecord{ringRecord(1, wslive.RingEntry{Kind: wslive.RingTools, Tools: summary})}
-	set, err := renderSessionRegions(historyView(ring, "", PageContent{}, nil), newEntryCache())
+	set, err := renderSessionRegions(historyView(ring, "", PageContent{}, sessionLookup{}), newEntryCache())
 	if err != nil {
 		t.Fatal(err)
 	}

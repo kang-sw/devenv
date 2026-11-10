@@ -5,7 +5,9 @@ import (
 	"encoding/hex"
 	"fmt"
 	"hash"
+	"io"
 	"os"
+	"path/filepath"
 	"slices"
 	"sync"
 
@@ -173,13 +175,66 @@ func (c *pageCache) get(p *sharedPage, src pageSource, refresh bool) (pageRender
 // statStamp folds one path's state into h: whether it exists, its
 // modification time, and its size. An in-place edit moves the file's own
 // time; a file added or removed moves its directory's.
-func statStamp(h hash.Hash, path string) {
+func statStamp(h io.Writer, path string) {
 	info, err := os.Stat(path)
 	if err != nil {
 		fmt.Fprintf(h, "%s\x00-\x01", path)
 		return
 	}
 	fmt.Fprintf(h, "%s\x00%d\x00%d\x01", path, info.ModTime().UnixNano(), info.Size())
+}
+
+// StampWatched folds the state of each watched path into h: a watched
+// directory that also has watched files directly inside it (the ticket
+// panel's status directories and their ticket files) is stamped by its
+// listing, each entry's name, size, and modification time, and those files
+// are covered by it, so a directory of tickets costs one listing instead of
+// a stat per file; every other path folds its own stat (statStamp). An
+// in-place edit of a covered file moves its listed size or time, as its
+// own stat would. A path is matched to its directory as named, so a watch
+// list naming the same directory two ways stats each path itself.
+func StampWatched(h io.Writer, watch []string) {
+	watched := make(map[string]bool, len(watch))
+	for _, path := range watch {
+		watched[path] = true
+	}
+	listed := map[string]bool{}
+	for _, path := range watch {
+		if dir := filepath.Dir(path); dir != path && watched[dir] {
+			listed[dir] = true
+		}
+	}
+	for _, path := range watch {
+		switch {
+		case listed[path]:
+			// Listed even when its own directory is listed too: that listing
+			// shows this directory's time, which an edit inside it keeps.
+			listStamp(h, path)
+		case listed[filepath.Dir(path)] && filepath.Dir(path) != path:
+			// Covered by its directory's listing.
+		default:
+			statStamp(h, path)
+		}
+	}
+}
+
+// listStamp folds a directory's listing into h: each entry's name, size,
+// and modification time, from the listing alone (one lstat per entry on
+// Linux, none on Windows), or that it does not list.
+func listStamp(h io.Writer, dir string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		fmt.Fprintf(h, "%s\x00list\x00-\x01", dir)
+		return
+	}
+	fmt.Fprintf(h, "%s\x00list\x01", dir)
+	for _, e := range entries {
+		if info, err := e.Info(); err == nil {
+			fmt.Fprintf(h, "%s\x00%d\x00%d\x00%t\x02", e.Name(), info.ModTime().UnixNano(), info.Size(), e.IsDir())
+		} else {
+			fmt.Fprintf(h, "%s\x00-\x02", e.Name())
+		}
+	}
 }
 
 // processAlive reports whether a watched process runs (a test seam).

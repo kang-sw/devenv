@@ -246,7 +246,7 @@ type SubagentCount struct {
 // ReplyID lookup resolves to a session with a live adapter adds that
 // session's running agents, at every depth and through its own delegates,
 // to Deep; a session already counted (self included) is not counted again.
-func subagentCounts(self string, agents []wslive.Agent, lookup func(string) (Session, *wslive.Snapshot, bool), now time.Time) SubagentCount {
+func subagentCounts(self string, agents []wslive.Agent, lookup sessionLookup, now time.Time) SubagentCount {
 	var c SubagentCount
 	visited := map[string]bool{self: true}
 	var linked func(agents []wslive.Agent)
@@ -256,7 +256,10 @@ func subagentCounts(self string, agents []wslive.Agent, lookup func(string) (Ses
 				continue
 			}
 			visited[a.ReplyID] = true
-			if _, snap, ok := lookup(a.ReplyID); ok && adapterPresent(snap, now) {
+			if _, ok := lookup.get(a.ReplyID); !ok {
+				continue
+			}
+			if snap := lookup.snap(a.ReplyID); adapterPresent(snap, now) {
 				for _, b := range snap.Agents {
 					if b.Status == wslive.StatusRunning {
 						c.Deep++
@@ -328,9 +331,34 @@ type pageInputs struct {
 	AttachDir string
 	Now       time.Time
 	Version   string
-	// Lookup returns a session this daemon serves and its snapshot (nil when
-	// it has none).
-	Lookup func(replyID string) (Session, *wslive.Snapshot, bool)
+	// Lookup resolves the other sessions this daemon serves that the view
+	// names.
+	Lookup sessionLookup
+}
+
+// sessionLookup resolves the sessions a page view names: session reads the
+// index alone, and snapshot reads a session's live snapshot (nil when it has
+// none), so a caller that uses only whether a session is served, or whether
+// it has a board, reads no snapshot. The zero value serves none.
+type sessionLookup struct {
+	session  func(replyID string) (Session, bool)
+	snapshot func(replyID string) *wslive.Snapshot
+}
+
+// get returns a session this daemon serves.
+func (l sessionLookup) get(replyID string) (Session, bool) {
+	if l.session == nil {
+		return Session{}, false
+	}
+	return l.session(replyID)
+}
+
+// snap returns a served session's live snapshot; nil when it has none.
+func (l sessionLookup) snap(replyID string) *wslive.Snapshot {
+	if l.snapshot == nil {
+		return nil
+	}
+	return l.snapshot(replyID)
 }
 
 // adapterPresent is wslive.AdapterPresent on an already read snapshot.
@@ -360,9 +388,6 @@ func buildSessionView(in pageInputs) SessionView {
 		return v
 	}
 	lookup := in.Lookup
-	if lookup == nil {
-		lookup = func(string) (Session, *wslive.Snapshot, bool) { return Session{}, nil, false }
-	}
 	v.Lead = leadView(in.Snapshot.Lead)
 	v.Band = bandView(in.Snapshot)
 	v.Tree.Agents = agentTree(in.Snapshot.Agents, lookup)
@@ -445,7 +470,7 @@ func liveSlots(perm *wslive.Permission, finished []wslive.BatchView, running *ws
 // agentTree nests the snapshot's flat agent list by parent id, keeping the
 // snapshot's order among siblings. An agent whose parent is not in the list
 // hangs from the root, so retention never hides a running grandchild.
-func agentTree(agents []wslive.Agent, lookup func(string) (Session, *wslive.Snapshot, bool)) []AgentNode {
+func agentTree(agents []wslive.Agent, lookup sessionLookup) []AgentNode {
 	known := map[string]bool{}
 	for _, a := range agents {
 		known[a.ID] = true
@@ -474,7 +499,7 @@ func agentTree(agents []wslive.Agent, lookup func(string) (Session, *wslive.Snap
 				node.Slots = liveSlots(node.Permission, node.Finished, node.Running, node.Generating)
 			}
 			if a.ReplyID != "" {
-				if s, _, ok := lookup(a.ReplyID); ok && s.HasBoard {
+				if s, ok := lookup.get(a.ReplyID); ok && s.HasBoard {
 					node.Linked = true
 				}
 			}
@@ -508,7 +533,7 @@ func resolvedContacts(contacts []Contact, self string) []Contact {
 // (compared after filepath.Clean, no symlink resolution) keeps its full live
 // state; a live served peer elsewhere is a Compact row and its subagent tree
 // is never read (only its running count). Live peers list same-worktree first.
-func peerGroup(contacts []Contact, project string, lookup func(string) (Session, *wslive.Snapshot, bool), now time.Time) PeerGroup {
+func peerGroup(contacts []Contact, project string, lookup sessionLookup, now time.Time) PeerGroup {
 	type merged struct {
 		row          PeerRow
 		named        bool
@@ -545,7 +570,7 @@ func peerGroup(contacts []Contact, project string, lookup func(string) (Session,
 		m := rows[key]
 		row := m.row
 		if row.ReplyID != "" {
-			if s, snap, ok := lookup(row.ReplyID); ok {
+			if s, ok := lookup.get(row.ReplyID); ok {
 				row.Served = true
 				row.Live = s.Live
 				row.Harness = s.Harness
@@ -554,7 +579,7 @@ func peerGroup(contacts []Contact, project string, lookup func(string) (Session,
 				}
 				row.SameWorktree = s.Project != "" && filepath.Clean(s.Project) == filepath.Clean(project)
 				row.Compact = s.Live && !row.SameWorktree
-				if adapterPresent(snap, now) {
+				if snap := lookup.snap(row.ReplyID); adapterPresent(snap, now) {
 					row.Adapter = true
 					if row.Live {
 						for _, a := range snap.Agents {
@@ -637,7 +662,7 @@ func replyMarkdown(root, replyID string) replyRender {
 // its body while the mailbox history still holds it and a link to its peer's
 // page when this daemon serves the peer. A lead reply's markdown is left to
 // the entry render (renderEntries), which caches it.
-func conversation(lead wslive.Lead, ring []wslive.RingRecord, bodies map[string]string, contacts []Contact, lookup func(string) (Session, *wslive.Snapshot, bool), render replyRender) ConversationView {
+func conversation(lead wslive.Lead, ring []wslive.RingRecord, bodies map[string]string, contacts []Contact, lookup sessionLookup, render replyRender) ConversationView {
 	byAddress := map[string]string{}
 	for _, c := range contacts {
 		if c.ReplyID != "" {
@@ -665,7 +690,7 @@ func conversation(lead wslive.Lead, ring []wslive.RingRecord, bodies map[string]
 				rid = r.Peer[len(wsmailbox.ReplyIDPrefix):]
 			}
 			if rid != "" {
-				if _, _, ok := lookup(rid); ok {
+				if _, ok := lookup.get(rid); ok {
 					e.PeerReplyID, e.PeerLinked = rid, true
 				}
 			}

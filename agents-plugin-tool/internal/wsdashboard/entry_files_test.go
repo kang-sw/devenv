@@ -170,6 +170,11 @@ func TestStreamsServesSeamCounters(t *testing.T) {
 			t.Errorf("streams %s = %d, want %d (%v)", k, got[k], v, got)
 		}
 	}
+	for _, k := range []string{"snapshot_cache_hits", "snapshot_cache_misses"} {
+		if _, ok := got[k]; !ok {
+			t.Errorf("streams lacks %s (%v)", k, got)
+		}
+	}
 	if got["signals"] == 999 {
 		t.Error("a seam's counter replaced the daemon's own")
 	}

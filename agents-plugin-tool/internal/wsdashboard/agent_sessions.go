@@ -3,7 +3,6 @@ package wsdashboard
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"html/template"
 	"io"
@@ -43,6 +42,8 @@ type agentSessions struct {
 	inner SessionSource
 	dir   string
 	now   func() time.Time
+	// snaps is the daemon's snapshot cache; nil reads every time.
+	snaps *SnapshotCache
 }
 
 func (s agentSessions) ReadSession(reg Registration) (SessionData, bool) {
@@ -53,7 +54,7 @@ func (s agentSessions) ReadSession(reg Registration) (SessionData, bool) {
 		return SessionData{}, false
 	}
 	h := sha256.New()
-	updatedAt := HashLiveStores(h, s.dir, reg.ReplyID, s.now())
+	updatedAt := s.snaps.HashLiveStores(h, s.dir, reg.ReplyID, s.now())
 	return SessionData{Fingerprint: hex.EncodeToString(h.Sum(nil)[:16]), SnapshotUpdatedAt: updatedAt}, true
 }
 
@@ -86,6 +87,18 @@ func (s agentSessions) ReadContacts(reg Registration) ([]Contact, bool) {
 	return nil, false
 }
 
+// MailPrint forwards to the configured source (MailPrintSource); an agent
+// conversation has no mailbox.
+func (s agentSessions) MailPrint(reg Registration) (string, bool) {
+	if reg.Agent {
+		return "", true
+	}
+	if ms, ok := s.inner.(MailPrintSource); ok {
+		return ms.MailPrint(reg)
+	}
+	return "", false
+}
+
 // Counters forwards to the configured source (CounterSource).
 func (s agentSessions) Counters() map[string]int64 {
 	if cs, ok := s.inner.(CounterSource); ok {
@@ -111,27 +124,29 @@ func (s agentSessions) ReadClosedTopics(reg Registration, lang string, from, n i
 }
 
 // HashLiveStores folds the live stores of session replyID under stateDir
-// into h and returns the snapshot's updatedAt. It is the change detector both
-// session kinds share: ws-mcp's source for a lead session and agentSessions
-// for an agent conversation. The snapshot is hashed without updatedAt but
-// with its staleness at now, so a heartbeat rewrite is no change while a
-// writer that stopped is one; the ring and the board-answer inbox (held and
-// drained) are hashed by their entry names, since an entry file is never
-// rewritten, so held and drained names tell a send (a new held name, or a
-// merge replacing one) and a drain apart.
+// into h and returns the snapshot's updatedAt, reading every file afresh
+// (SnapshotCache.HashLiveStores with no cache).
 func HashLiveStores(h io.Writer, stateDir, replyID string, now time.Time) time.Time {
+	return (*SnapshotCache)(nil).HashLiveStores(h, stateDir, replyID, now)
+}
+
+// HashLiveStores folds the live stores of session replyID under stateDir
+// into h and returns the snapshot's updatedAt, reading the snapshot through
+// the cache. It is the change detector both session kinds share: ws-mcp's
+// source for a lead session and agentSessions for an agent conversation.
+// The snapshot is hashed without updatedAt but with its staleness at now,
+// so a heartbeat rewrite is no change while a writer that stopped is one;
+// the ring and the board-answer inbox (held and drained) are hashed by their
+// entry names, since an entry file is never rewritten, so held and drained
+// names tell a send (a new held name, or a merge replacing one) and a drain
+// apart.
+func (c *SnapshotCache) HashLiveStores(h io.Writer, stateDir, replyID string, now time.Time) time.Time {
 	sessionDir := SessionDir(stateDir, replyID)
 	var updatedAt time.Time
-	if raw, err := os.ReadFile(wslive.SnapshotPath(sessionDir)); err == nil {
-		var doc map[string]any
-		var snap wslive.Snapshot
-		if json.Unmarshal(raw, &doc) == nil && json.Unmarshal(raw, &snap) == nil {
-			delete(doc, "updatedAt")
-			canonical, _ := json.Marshal(doc)
-			fmt.Fprintf(h, "\x00snapshot stale=%t\x00%s", snap.Stale(now), canonical)
-			if snap.UpdatedAt > 0 {
-				updatedAt = time.UnixMilli(snap.UpdatedAt)
-			}
+	if p, err := c.read(wslive.SnapshotPath(sessionDir)); err == nil && p.docOK {
+		fmt.Fprintf(h, "\x00snapshot stale=%t\x00%s", p.snap.Stale(now), p.canonical)
+		if p.snap.UpdatedAt > 0 {
+			updatedAt = time.UnixMilli(p.snap.UpdatedAt)
 		}
 	}
 	for _, list := range []struct {
