@@ -161,6 +161,20 @@ func TestStampWatchedListsTicketDirectories(t *testing.T) {
 		}
 	})
 	step("unlisted file's time", func() { ageFile(t, other, 10*time.Minute) })
+
+	// A covered ticket that is a symbolic link follows its target.
+	target := filepath.Join(root, "target.md")
+	if err := os.WriteFile(target, []byte("text"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ageFile(t, target, time.Hour)
+	link := filepath.Join(ready, "d.md")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("no symbolic links: %v", err)
+	}
+	watch = append(watch, link)
+	last = stamp()
+	step("a linked ticket's target", func() { ageFile(t, target, 20*time.Minute) })
 }
 
 // TestSnapshotCacheFollowsTheSession: the daemon's page renders read an

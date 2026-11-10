@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"hash"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -220,7 +221,8 @@ func StampWatched(h io.Writer, watch []string) {
 
 // listStamp folds a directory's listing into h: each entry's name, size,
 // and modification time, from the listing alone (one lstat per entry on
-// Linux, none on Windows), or that it does not list.
+// Linux, none on Windows), or that it does not list. A symbolic link is
+// followed (a stat), as a covered file's own stat would follow it.
 func listStamp(h io.Writer, dir string) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -229,7 +231,11 @@ func listStamp(h io.Writer, dir string) {
 	}
 	fmt.Fprintf(h, "%s\x00list\x01", dir)
 	for _, e := range entries {
-		if info, err := e.Info(); err == nil {
+		info, err := e.Info()
+		if err == nil && e.Type()&fs.ModeSymlink != 0 {
+			info, err = os.Stat(filepath.Join(dir, e.Name()))
+		}
+		if err == nil {
 			fmt.Fprintf(h, "%s\x00%d\x00%d\x00%t\x02", e.Name(), info.ModTime().UnixNano(), info.Size(), e.IsDir())
 		} else {
 			fmt.Fprintf(h, "%s\x00-\x02", e.Name())

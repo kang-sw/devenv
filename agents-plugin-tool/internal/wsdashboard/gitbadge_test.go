@@ -639,13 +639,15 @@ func TestBadgeGitCommandUsesResolvedGit(t *testing.T) {
 	ctx := context.Background()
 	dir1, git1 := fakeGitDir()
 	t.Setenv("PATH", dir1)
-	if cmd := badgeGitCommand(ctx, t.TempDir(), "status"); cmd.Path != git1 {
-		t.Fatalf("command runs %q, want the resolved %q", cmd.Path, git1)
+	// Args[0] tells a resolved path from a bare "git": exec resolves a bare
+	// name's Path itself, so Path alone would pass without the resolver.
+	if cmd := badgeGitCommand(ctx, t.TempDir(), "status"); cmd.Path != git1 || cmd.Args[0] != git1 {
+		t.Fatalf("command runs %q (args[0] %q), want the resolved %q", cmd.Path, cmd.Args[0], git1)
 	}
 	dir2, git2 := fakeGitDir()
 	t.Setenv("PATH", dir2)
-	if cmd := badgeGitCommand(ctx, t.TempDir(), "status"); cmd.Path != git2 {
-		t.Fatalf("after a PATH change the command runs %q, want %q", cmd.Path, git2)
+	if cmd := badgeGitCommand(ctx, t.TempDir(), "status"); cmd.Path != git2 || cmd.Args[0] != git2 {
+		t.Fatalf("after a PATH change the command runs %q (args[0] %q), want %q", cmd.Path, cmd.Args[0], git2)
 	}
 	t.Setenv("PATH", t.TempDir())
 	cmd := badgeGitCommand(ctx, t.TempDir(), "status")

@@ -191,8 +191,10 @@ func TestWatchSeesAnotherProcessPush(t *testing.T) {
 	}
 }
 
-// TestStoreStampStatsLooseRefs: a replaced loose ref and a changed
-// packed-refs move the stamp, and no loose ref is ever read.
+// TestStoreStampStatsLooseRefs: a replaced loose ref moves the stamp by its
+// time, while new loose-ref bytes under an unchanged size and time do not
+// (the content is never read); packed-refs stays content-based, so new bytes
+// under an unchanged size and time move it.
 func TestStoreStampStatsLooseRefs(t *testing.T) {
 	dir := t.TempDir()
 	repo := filepath.Join(dir, "repo.git")
@@ -237,8 +239,14 @@ func TestStoreStampStatsLooseRefs(t *testing.T) {
 	if afterRef == before {
 		t.Fatal("a replaced loose ref did not move the stamp")
 	}
-	// packed-refs is hashed by content: same time, new bytes.
-	writeAt(packed, "# pack-refs with: peeled sorted\n", base)
+	// New loose-ref bytes under the same size and time: a stat stamp, so
+	// no move.
+	writeAt(branch, strings.Repeat("d", 40)+"\n", base.Add(time.Second))
+	if storeStamp(dir) != afterRef {
+		t.Fatal("loose-ref content under an unchanged size and time moved the stamp: it was read")
+	}
+	// packed-refs is hashed by content: same size and time, new bytes.
+	writeAt(packed, "# pack-refs with: peeLED\n", base)
 	if storeStamp(dir) == afterRef {
 		t.Fatal("a packed-refs content change did not move the stamp")
 	}
