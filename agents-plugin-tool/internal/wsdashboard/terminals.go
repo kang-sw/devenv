@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/kang-sw/devenv/internal/wsholder"
 )
@@ -62,9 +63,11 @@ type terminalSession struct {
 
 // TerminalHost is the holder manager as the terminals use it
 // (*wsholder.Manager): a HolderHost that also starts a holder, hands out
-// its attach connection, and takes another sink for its events.
+// its attach connection, takes another sink for its events, and scans for
+// the holders a predecessor left on request.
 type TerminalHost interface {
 	HolderHost
+	Scan()
 	Launch(session json.RawMessage) (string, error)
 	Client(id string) *wsholder.Client
 	AddSink(sink wsholder.Sink)
@@ -104,10 +107,39 @@ type terminals struct {
 	// plain are the holders known to host something else: their events are
 	// dropped without another listing.
 	plain map[string]bool
+	// scanned is closed once the manager's first scan is done: until then
+	// the terminals a predecessor left running are not all known.
+	scanned  chan struct{}
+	scanWait time.Duration
 }
 
+// terminalScanWait bounds how long a terminal route waits for the first
+// scan before it answers 503; a scan is slow only while a holder that does
+// not answer is tried.
+const terminalScanWait = 5 * time.Second
+
 func newTerminals(host TerminalHost, log io.Writer) *terminals {
-	return &terminals{host: host, log: log, byID: map[string]*terminal{}, plain: map[string]bool{}}
+	return &terminals{host: host, log: log, byID: map[string]*terminal{}, plain: map[string]bool{}, scanned: make(chan struct{}), scanWait: terminalScanWait}
+}
+
+// firstScan runs the manager's first scan and marks the registry ready.
+// The daemon calls it once, before the manager's own rescans.
+func (ts *terminals) firstScan() {
+	ts.host.Scan()
+	ts.sync()
+	close(ts.scanned)
+}
+
+// ready waits for the first scan; it reports false when the scan is still
+// running after the wait. A page asked what terminals there are
+// before the scan would be told that the ones it shows are gone.
+func (ts *terminals) ready() bool {
+	select {
+	case <-ts.scanned:
+		return true
+	case <-time.After(ts.scanWait):
+		return false
+	}
 }
 
 // HolderEvent receives every attached holder's events (wsholder.Sink), on
@@ -509,7 +541,8 @@ func (t *terminal) end() {
 }
 
 // input writes a viewer's keystrokes to the shell and makes it the viewer
-// whose size the PTY takes.
+// whose size the PTY takes. It returns errTerminalLost when the daemon has
+// no connection to the holder to write them on.
 func (t *terminal) input(v *termViewer, data []byte) error {
 	t.opMu.Lock()
 	defer t.opMu.Unlock()
@@ -521,7 +554,23 @@ func (t *terminal) input(v *termViewer, data []byte) error {
 	if conn == nil {
 		return errTerminalLost
 	}
-	return conn.Input(data, false)
+	err := conn.Input(data, false)
+	if err != nil {
+		select {
+		case <-conn.Done():
+			return errTerminalLost
+		default:
+		}
+	}
+	return err
+}
+
+// lost reports a terminal whose holder the daemon is not attached to, as
+// of the registry's last sync.
+func (t *terminal) lost() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return !t.attached && !t.ended
 }
 
 // focus makes v the viewer whose size the PTY takes.

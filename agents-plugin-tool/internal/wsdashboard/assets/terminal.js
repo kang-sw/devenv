@@ -28,6 +28,8 @@
   // keeps; FIT_WAIT the resize debounce in ms; RETRY the reconnect delays
   // in ms, the last one repeating.
   var ROWS = 14, SCROLLBACK = 5000, FIT_WAIT = 150, RETRY = [300, 700, 1500, 3000, 6000, 10000];
+  // IN_MAX is the most text one input frame carries, in UTF-16 units.
+  var IN_MAX = 64 * 1024;
   // GUESS is a row's height in px before the emulator has measured one.
   var GUESS = 17;
   var hooks = {}, loading = null, cellH = 0, ui = {}, folders = null, listSeq = 0;
@@ -140,9 +142,12 @@
     if (d.rows !== s.term.rows || d.cols !== s.term.cols) s.term.resize(d.cols, d.rows);
     sendSize(c);
   }
+  // sendSize sends the emulator's size unless the daemon has it. A folded
+  // or hidden card sends none, on a new connection too: its emulator was
+  // never fitted, and its size would become the PTY's.
   function sendSize(c) {
     var s = c.t;
-    if (!s.term || s.exited) return;
+    if (!s.term || s.exited || !shows(c)) return;
     var r = s.term.rows, k = s.term.cols;
     if (s.sent && s.sent.rows === r && s.sent.cols === k) return;
     if (send(c, { t: "size", rows: r, cols: k })) s.sent = { rows: r, cols: k };
@@ -334,7 +339,16 @@
     // In the maximize sheet Esc returns the terminal to its card (the
     // framework's Escape); in the card it reaches the shell.
     term.attachCustomKeyEventHandler(function (e) { return !(e.key === "Escape" && c.el.hasAttribute("data-max")); });
-    term.onData(function (data) { if (!s.exited) send(c, { t: "in", data: data }); });
+    term.onData(function (data) {
+      if (s.exited) return;
+      // A long paste goes in pieces under the daemon's frame limit, cut
+      // between characters.
+      for (var i = 0, n; i < data.length; i = n) {
+        n = Math.min(i + IN_MAX, data.length);
+        if (n < data.length && (data.charCodeAt(n - 1) & 0xfc00) === 0xd800) n--;
+        send(c, { t: "in", data: data.slice(i, n) });
+      }
+    });
     term.onBinary(function (data) { if (!s.exited) send(c, { t: "in", bin: btoa(data) }); });
     // The viewer that last focused the terminal sizes the PTY: a focus, a
     // click into a terminal that already has the focus, and the window

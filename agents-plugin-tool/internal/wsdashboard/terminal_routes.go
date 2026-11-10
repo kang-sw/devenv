@@ -66,7 +66,9 @@ import (
 // page keeps the last sequence it took and connects again with from set to
 // the one after it; from=0 (or none) asks for everything the ring holds. A
 // connection the daemon drops without "closed" (a viewer too far behind,
-// a holder it lost) is one to connect again.
+// a holder it lost) is one to connect again. While the daemon is not
+// attached to the terminal's holder, or has not finished looking for the
+// terminals a predecessor left, the routes answer 503.
 //
 // Page to daemon:
 //
@@ -185,12 +187,17 @@ func (d *Daemon) terminalSession(w http.ResponseWriter, r *http.Request, replyID
 		return Session{}, false
 	}
 	if d.index != nil && ValidReplyID(replyID) {
-		if s, ok = d.index.Session(replyID); ok {
-			return s, true
-		}
+		s, ok = d.index.Session(replyID)
 	}
-	http.Error(w, "unknown session", http.StatusNotFound)
-	return Session{}, false
+	if !ok {
+		http.Error(w, "unknown session", http.StatusNotFound)
+		return Session{}, false
+	}
+	if !d.terminals.ready() {
+		http.Error(w, "the daemon is still finding its terminals", http.StatusServiceUnavailable)
+		return Session{}, false
+	}
+	return s, true
 }
 
 // handleTerminals serves the terminal routes of one session; rest is the
@@ -248,6 +255,11 @@ func (d *Daemon) handleTerminals(w http.ResponseWriter, r *http.Request, replyID
 	t := d.terminals.get(id)
 	if t == nil {
 		http.Error(w, "unknown terminal", http.StatusNotFound)
+		return
+	}
+	if t.lost() {
+		// The page tries again; the manager's rescan may attach again.
+		http.Error(w, errTerminalLost.Error(), http.StatusServiceUnavailable)
 		return
 	}
 	if _, ok := w.(http.Hijacker); !ok {
@@ -371,8 +383,12 @@ func (d *Daemon) serveTerminal(w http.ResponseWriter, r *http.Request, t *termin
 					}
 					// A refused write (the shell has exited) is not the
 					// connection's end: the page learns of the exit from
-					// the stream.
-					_ = t.input(v, data)
+					// the stream. A holder the daemon has lost sends
+					// nothing more, so the connection ends and the page
+					// asks again.
+					if errors.Is(t.input(v, data), errTerminalLost) {
+						return
+					}
 				case "size":
 					if in.Rows > 0 && in.Cols > 0 {
 						t.resize(v, in.Rows, in.Cols)
@@ -402,7 +418,11 @@ func (d *Daemon) serveTerminal(w http.ResponseWriter, r *http.Request, t *termin
 					break write
 				}
 			case <-keepAlive.C:
-				if send(`{"t":"ping"}`) != nil {
+				// An idle viewer learns here that the holder is gone
+				// (the sync ends the terminal, which queues "closed") or
+				// that the daemon lost it (the connection ends).
+				d.terminals.sync()
+				if t.lost() || send(`{"t":"ping"}`) != nil {
 					break write
 				}
 			case <-v.gone:

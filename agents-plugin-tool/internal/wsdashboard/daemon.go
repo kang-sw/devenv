@@ -423,7 +423,12 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 	// The holder scans start only now, under the single-instance lock: a
 	// predecessor has let go of its holders before this daemon attaches.
 	if d.holders != nil {
-		go d.holders.Run()
+		go func() {
+			if d.terminals != nil {
+				d.terminals.firstScan()
+			}
+			d.holders.Run()
+		}()
 	}
 	fmt.Fprintf(d.log, "dashboard: version %s listening on %s (lan %v, pid %d)\n", d.endpoint.Version, listener.Addr(), d.lan, d.endpoint.PID)
 	return d, nil

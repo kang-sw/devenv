@@ -791,3 +791,78 @@ func (f *termFixture) do2(t *testing.T, id string) string {
 	})
 	return string(raw)
 }
+
+// slowScanHost is a holder manager whose scans wait to be released.
+type slowScanHost struct {
+	*wsholder.Manager
+	release chan struct{}
+}
+
+func (h *slowScanHost) Scan() {
+	<-h.release
+	h.Manager.Scan()
+}
+
+// TestTerminalRoutesWaitForTheFirstScan pins what a page is told while a
+// new daemon has not yet found the terminals its predecessor left: 503, not
+// a list without them, which would have the page drop its cards.
+func TestTerminalRoutesWaitForTheFirstScan(t *testing.T) {
+	host := &slowScanHost{Manager: wsholder.New(wsholder.Options{Dir: filepath.Join(t.TempDir(), wsholder.DirName)}), release: make(chan struct{})}
+	f := startPageFixture(t, withHolders(host))
+	f.d.terminals.scanWait = 50 * time.Millisecond
+	local := "127.0.0.1:" + strconv.Itoa(f.d.Endpoint().Port)
+	list := func() int {
+		return termRequest(f.d, "127.0.0.1:50000", local, http.MethodGet, "/s/livesession/terminals", "", nil).Code
+	}
+	if code := list(); code != http.StatusServiceUnavailable {
+		t.Errorf("the list before the first scan = %d, want 503", code)
+	}
+	if code := handshake(t, f.base, "/s/livesession/terminals/hguardtest/ws", local, map[string]string{"Origin": "http://" + local}); code != http.StatusServiceUnavailable {
+		t.Errorf("the WebSocket handshake before the first scan = %d, want 503", code)
+	}
+	close(host.release)
+	waitFor(t, "the list after the first scan", func() bool { return list() == http.StatusOK })
+}
+
+// TestTerminalViewerLearnsOfALostHolder pins what a viewer sees when the
+// terminal's holder dies under the daemon: its connection ends on the next
+// keystroke without "closed", so the page asks again, and the terminal no
+// longer upgrades (503 while the manager still lists the holder, 404 once
+// it has forgotten it).
+func TestTerminalViewerLearnsOfALostHolder(t *testing.T) {
+	holdersDir, python := termHoldersDir(t)
+	f := startTermFixture(t, holdersDir, python, 0)
+	info := f.create(t, `{}`)
+	c := f.open(t, info.ID, 0)
+	c.typeLine(t, "echo up-$((1+1))")
+	c.waitText(t, "up-2")
+	var pid int
+	for _, h := range f.manager.List().Holders {
+		if h.ID == info.ID {
+			pid = h.PID
+		}
+	}
+	proc, err := os.FindProcess(pid)
+	if pid <= 0 || err != nil {
+		t.Fatalf("the terminal's holder has no process: pid %d, %v", pid, err)
+	}
+	if err := proc.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	termWait(t, "the manager to lose the holder", func() bool { return f.manager.Client(info.ID) == nil })
+	// The page may have a keystroke on its way; the write fails or is
+	// refused, and either ends the connection.
+	_ = websocket.Message.Send(c.conn, `{"t":"in","data":"x"}`)
+	termWait(t, "the viewer's connection to end", func() bool { c.mu.Lock(); defer c.mu.Unlock(); return c.ended })
+	c.mu.Lock()
+	closed := c.closed
+	c.mu.Unlock()
+	local := "127.0.0.1:" + strconv.Itoa(f.d.Endpoint().Port)
+	code := handshake(t, f.base, "/s/livesession/terminals/"+info.ID+"/ws", local, map[string]string{"Origin": "http://" + local})
+	if code != http.StatusServiceUnavailable && code != http.StatusNotFound {
+		t.Errorf("the handshake for a lost terminal = %d, want 503 or 404", code)
+	}
+	if closed && code != http.StatusNotFound {
+		t.Errorf("the viewer was told the terminal closed while the daemon still lists it (handshake %d)", code)
+	}
+}
