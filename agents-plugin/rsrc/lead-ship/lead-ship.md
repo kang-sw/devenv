@@ -64,7 +64,8 @@ Applies when the project's `AGENTS.md` `### Review Policy` declares
    when the review left a blocked remainder, because only content at or below
    the cut point ships. Otherwise it stops: nothing is newly cleared. The
    user's explicit override still means shipping uncleared content: its cut
-   point is the review-track tip at override time.
+   point is the review-track tip at override time. A step-3 decline still
+   stops.
 6. This gate never calls `review.stamp`; apart from the step-3 bootstrap the
    marker advances only through the review skill. An override leaves it where
    it was.
@@ -88,9 +89,10 @@ Applies when the project's `AGENTS.md` `### Review Policy` declares
    the delta. The cleared head is the tip after the gate's own lead-review
    returns, its ledger commit included; pinning before that commit would
    re-run the gate forever. A gate that did not apply leaves nothing to
-   re-check. A cut-point release skips this re-check: what publishes is the
-   pinned cut point and the release branch head on top of it, so review-track
-   movement during the release changes nothing that ships.
+   re-check. A cut-point release skips this re-check and runs the config's
+   Promote step: what publishes is the pinned cut point and the release
+   branch head on top of it, so review-track movement during the release
+   changes nothing that ships.
 4. Push the tag when the config's `Tag` section asks for it; the step-2
    confirmation covers that push. Run post-ship steps; a cut-point release
    runs the config's merge of the release branch back into the review track,

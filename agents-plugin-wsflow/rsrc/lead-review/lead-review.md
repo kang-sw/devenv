@@ -71,8 +71,9 @@ you resolve the target, adjudicate their findings, and carry the decisions.
    the full range as `block`; otherwise stamp only the full range and report
    `<base>..<head>` as uncleared, with no further search.
 7. Range scenario only: commit the stamped ledger with
-   `{{.McpNamespace}}/git.commit`, recording every finding the verdict
-   accepts without a fix as a `followups` entry of category `review`: an
+   `{{.McpNamespace}}/git.commit`, recording every finding the verdict (and a
+   step-6 prefix review's verdict) accepts without a fix as a `followups`
+   entry of category `review`: an
    accepted Minor at level `minor`, an overridden Important at level
    `important`, content `<path>:<line> <one-line summary>`. Otherwise an
    accepted finding survives only in the untracked review cache;

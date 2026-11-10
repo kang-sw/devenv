@@ -157,7 +157,9 @@ precedes every push — all pushes below are reversible-only-before-they-run.
       `all` leg and each Windows shard — must conclude `success`.
 
    **CI red, cancelled, or skipped** (any leg not `success`, including a
-   timeout): stop. `main` and the tag stay unpushed. Fix forward on `develop`
+   timeout): stop. `main` and the tag stay unpushed. Release the release
+   worktree (`ws/worktree.release(path: <worktree>)`), which frees
+   `release/<version>` for the restart's delete. Fix forward on `develop`
    through ordinary review, then restart Pre-flight from the top, which
    recreates `release/<version>` at the new cut point. The version's tag was
    never pushed, so Version Strategy derives the same version again.

@@ -2071,7 +2071,8 @@ func TestPlaybookPrintGoldenLeadShip(t *testing.T) {
 		"before any version bump checks that the release target is an ancestor of the cut point",
 		"or stops when the config declares none",
 		"A version bump the config's strategy makes lands on the release branch",
-		"A cut-point release skips this re-check",
+		"A step-3 decline still stops",
+		"A cut-point release skips this re-check and runs the config's Promote step",
 		"runs the config's merge of the release branch back into the review track",
 		"## Release Branch ← optional",
 	} {
@@ -2318,6 +2319,7 @@ func TestPlaybookPrintGoldenLeadReview(t *testing.T) {
 		"stamp `<base>..<cut>` with it, then the full range as `block`",
 		"report `<base>..<head>` as uncleared, with no further search",
 		"after a step-6 prefix stamp, the cut is that base",
+		"every finding the verdict (and a step-6 prefix review's verdict) accepts without a fix",
 	} {
 		if !strings.Contains(normalizedReview, want) {
 			t.Errorf("body missing lead-review plan contract %q", want)
