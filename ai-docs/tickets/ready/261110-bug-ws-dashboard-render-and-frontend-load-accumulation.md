@@ -386,6 +386,50 @@ triggers one drawer render, and none while the drawer and item window are
 closed; and (f) an unchanged `.sentdata` swap does not touch `sent-*`
 classes.
 
+### Result (d67107d59) - 2026-11-10
+
+- Decision 6: the per-second tick visits only since/ago times and usage
+  paces, writes only on change, and skips while `document.hidden` (catching
+  up on show); clock/weekday text and titles are formatted once per element
+  and again on a language change.
+- Decision 7: session and support-chat entry boxes keep a key set, cap at
+  150 entries (3x RingCap) while pinned, reset on a gap, and run image
+  sweep, open-state restore, and mermaid detection on inserted nodes only;
+  the history cursor resets on eviction/gap with an epoch guard; replayed
+  support-chat `ui` lines do not act.
+- Decision 8: `page.tmpl` topic sections carry an escaped `data-topic`; a
+  board swap keeps a topic whose incoming HTML is unchanged (node and
+  iframe); expanded closed pages survive swaps, deduped against the capped
+  section; the closed-page refetch is gone. `form.js` now binds each control
+  once and looks up the reply bar late (kept topics would double-bind).
+- Decision 9: coalescing in the `AD.onChange` subscriber with a timer;
+  synchronous `render()` cancels it; with no drawer, page, or item window
+  open a render updates only handles and marks and keeps `X.rendered`
+  current. Deviation: a bare `setTimeout(0)` measured 2-3 redraws per
+  multi-store revision (each store view lands in its own task), so
+  `tkReadAll`'s per-store notifies pass a "more coming" hint
+  (`tkNotify(true)`) and the subscriber holds such a notice up to 100 ms;
+  the final notice renders on the next tick. Notify order is unchanged
+  (readall test green); partial-store rows may show up to 100 ms later.
+- Decision 10: hidden tab keeps the main and support streams open, records
+  only the newest region HTML/hash (reported by `held()`), applies once on
+  show; mode and tracker events and live `ui` lines still act.
+- Decision 11: `applySent` skips on an unchanged `.sentdata` signature
+  unless a board swap forces it.
+- Verification: `node --check`; `go test ./...` via ws-rgo green (new
+  `TestRenderPageTopicKeyAttribute`); headless chrome-headless-shell on an
+  isolated daemon covered (a)-(f) as specified (hidden state emulated by
+  overriding `document.hidden` + `visibilitychange`; (f) via injected
+  convlive events), plus the tracker mockup.
+- Lite review (329b7cf7f): clean, two minors. Fixed: memo test now covers
+  a liveness-only marker change. Open: a poll round that only moved a
+  store's `SyncedAt` no longer notifies, so the sync popover's absolute
+  "synced at" time (and the ribbon age, which uses the server read time)
+  stays at the last re-read until another change; folding `SyncedAt` in
+  would notify every successful round.
+- Open: a topic deleted from the capped closed section while closed pages
+  are expanded stays shown until reload.
+
 ## Sage Review Round 1 (2026-11-10)
 
 ### Design Reviewer — block
