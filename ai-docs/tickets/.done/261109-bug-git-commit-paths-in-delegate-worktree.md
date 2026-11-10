@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 398e6a37489a43dd
 sage-review-completeness-reviewed: 398e6a37489a43dd
+completed: 2026-11-10
 ---
 
 # ws/git.commit resolves paths against the main checkout for a delegate's session
@@ -109,3 +110,36 @@ worktree before changing anything.
 - Decision 2: `validateCommitPath` has no root parameter, so pass the root
   in or wrap the error at its caller; assert the refusal text names the
   base directory in `internal/wsgit/git_test.go`.
+
+### Result (151ffac04) - 2026-11-10
+
+- Reproduction: a worker key bound to a linked ws worktree rendered
+  `delegate-implementer`; the minted delegate key's `key.json` root was that
+  same worktree. Decision 1 already held, so nothing in the binding changed.
+- Regression test `TestRenderFromWorktreeSessionCommitsInThatWorktree`
+  (`internal/mcp/playbook_render_surface_test.go`): a child key rendered by a
+  worktree-bound worker key inherits the worktree, `root_override` wins, and
+  `git.commit` with the child key and a repo-relative path commits on the
+  worktree's branch while the main checkout's HEAD stays put.
+- Decision 2: `validateCommitPath(root, path)` now runs in `Commit` (its only
+  caller of `normalizeCommitOptions`, so the validation order did not change).
+  The "must be relative" and "must stay inside" refusals name the commit root
+  that every path resolves against. An absolute path under that root also gets
+  its relative spelling (`pass "src/file.go"`). Absolute paths are still
+  refused, never rebased. Pinned in `internal/wsgit/git_test.go`.
+- Decision 3 finding (likely cause): the binding was correct. Subagent
+  shells start in the main checkout, and harnesses tell subagents to use
+  absolute paths. The old refusal said only "must be relative" and named no
+  base directory, so the delegate inferred that relative paths resolve
+  against its shell cwd (the main checkout) and fell back to plain
+  `git commit`. The new refusal text removes that inference. No caller-side
+  playbook change was needed.
+- Not done (possible policy follow-up): accepting absolute paths under the
+  root. That would reverse the deliberate absolute-path refusal from
+  dcaa0366.
+- Review (lite): clean. One Minor finding is not fixed: in the CLI path, the
+  root can stay `.` when neither `--root` nor `WS_MCP_PROJECT_ROOT` is set, so
+  the refusal reads "commit root ." with no relative suggestion. The MCP path
+  always passes an absolute session root.
+- Verification: `go test ./internal/wsgit/` ok, plus the targeted mcp tests
+  and `go test ./...` in `agents-plugin-tool` (see the commit range).
