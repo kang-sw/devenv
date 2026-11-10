@@ -23,8 +23,9 @@ import (
 // its preview cards show a file, read-only.
 //
 //	GET  /s/<reply-id>/fs/list?dir=<dir>[&root=<abs>]     one directory's entries
-//	GET  /s/<reply-id>/fs/preview?path=<p>[&root=<abs>]   what a preview card shows
+//	GET  /s/<reply-id>/fs/preview?path=<p>[&root=<abs>]   what a preview card shows (text=1: as plain text)
 //	GET  /s/<reply-id>/fs/raw?path=<p>[&root=<abs>]       an image's or a video's bytes
+//	GET  /s/<reply-id>/fs/find, /fs/search                name and content search (fs_search.go)
 //	GET  /s/<reply-id>/fs/cap/<capability>/<p>            the sandboxed HTML preview (fs_capability.go)
 //	POST /s/<reply-id>/fs/act                             open or reveal on the host (fs_act_route.go)
 //
@@ -62,6 +63,14 @@ type fsEntry struct {
 	Link bool `json:"link,omitempty"`
 	// Ignored marks an entry git's ignore rules exclude, and .git itself.
 	Ignored bool `json:"ign,omitempty"`
+	// Status is the entry's git status mark (gitMarks): "M", "A", "U", or
+	// "D" on a file, "U" on an untracked directory, and "*" on a directory
+	// that holds changes.
+	Status string `json:"st,omitempty"`
+	// Gone marks an entry that is not on disk: a deleted file, or a
+	// directory whose changes are all deletions. It is listed for its mark
+	// and never opened.
+	Gone bool `json:"gone,omitempty"`
 }
 
 // fsListAnswer is the listing route's answer. Root is the browsing root as
@@ -248,17 +257,101 @@ func gitIgnored(dir string, names []string) (ignored map[string]bool, repo bool)
 	return ignored, true
 }
 
+// statusMarks reads a `git status --porcelain=v1 -z --no-renames` output
+// for the directory at prefix (its path from the repository's top, with a
+// trailing slash, or "" for the top): each changed entry of that directory
+// by name, with its mark. A file is "M" modified, "A" added, "D" deleted,
+// or "U" untracked; a directory is "U" when git reports it untracked as a
+// whole and "*" when it holds changes. gone names the entries whose every
+// change is a deletion, which may not be on disk any more.
+func statusMarks(status []byte, prefix string) (marks map[string]string, dirs, gone map[string]bool) {
+	marks, dirs, gone = map[string]string{}, map[string]bool{}, map[string]bool{}
+	kept := map[string]bool{}
+	fields := strings.Split(string(status), "\x00")
+	for i := 0; i < len(fields); i++ {
+		e := fields[i]
+		if len(e) < 4 {
+			continue
+		}
+		x, y, path := e[0], e[1], e[3:]
+		if x == 'R' || x == 'C' {
+			i++ // the original path follows; renames are off, so this is defensive
+		}
+		untracked := x == '?' && y == '?'
+		if untracked && strings.HasSuffix(path, "/") && strings.HasPrefix(prefix, path) {
+			// The listed directory is inside an untracked one: all of it is.
+			marks[""] = "U"
+			continue
+		}
+		rest, ok := strings.CutPrefix(path, prefix)
+		if !ok || rest == "" {
+			continue
+		}
+		name, deeper, nested := strings.Cut(rest, "/")
+		deleted := !untracked && (x == 'D' || y == 'D') && x != 'A' && y != 'A'
+		switch {
+		case nested && deeper == "" && untracked:
+			marks[name], dirs[name] = "U", true
+		case nested:
+			if marks[name] != "U" {
+				marks[name] = "*"
+			}
+			dirs[name] = true
+		case untracked:
+			marks[name] = "U"
+		case deleted:
+			marks[name] = "D"
+		case x == 'A' || (x == '?' && y == 'A'):
+			marks[name] = "A"
+		default:
+			marks[name] = "M"
+		}
+		if deleted {
+			if !kept[name] {
+				gone[name] = true
+			}
+		} else {
+			kept[name] = true
+			delete(gone, name)
+		}
+	}
+	return marks, dirs, gone
+}
+
+// gitMarks reads the git status marks of the entries of the directory dir,
+// asked from dir itself, as gitIgnored asks; nil when git cannot tell.
+func gitMarks(dir string) (marks map[string]string, dirs, gone map[string]bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), fsIgnoreTimeout)
+	defer cancel()
+	run := &gitBadgeRunner{timeout: fsIgnoreTimeout}
+	prefix, err := run.RunGit(ctx, dir, "rev-parse", "--show-prefix")
+	if err != nil {
+		return nil, nil, nil
+	}
+	status, err := run.RunGit(ctx, dir, "--no-optional-locks", "status", "--porcelain=v1", "-z", "--no-renames", "--untracked-files=normal", "--", ".")
+	if err != nil {
+		return nil, nil, nil
+	}
+	return statusMarks(status, strings.TrimRight(string(prefix), "\r\n"))
+}
+
 // listDir lists the directory full: directories first, then by name
-// without case, at most fsListMax entries.
+// without case, at most fsListMax entries, each with its ignore and git
+// status marks. An entry git reports deleted is listed too, marked gone.
 func listDir(full string) (entries []fsEntry, more, repo bool, err error) {
 	read, err := os.ReadDir(full)
 	if err != nil {
 		return nil, false, false, err
 	}
+	marks, markDirs, gone := gitMarks(full)
 	entries = make([]fsEntry, 0, len(read))
 	for _, e := range read {
 		link := e.Type()&fs.ModeSymlink != 0
 		entries = append(entries, fsEntry{Name: e.Name(), Dir: e.IsDir() && !link, Link: link})
+		delete(gone, e.Name())
+	}
+	for name := range gone {
+		entries = append(entries, fsEntry{Name: name, Dir: markDirs[name], Gone: true})
 	}
 	sort.Slice(entries, func(i, j int) bool {
 		a, b := entries[i], entries[j]
@@ -285,6 +378,13 @@ func listDir(full string) (entries []fsEntry, more, repo bool, err error) {
 		// The repository's own directory is no content of the tree: it is
 		// marked as ignored entries are, so the default view hides it.
 		e.Ignored = e.Name == ".git" || ignored[e.Name]
+		switch mark := marks[e.Name]; {
+		case e.Ignored:
+		case mark != "" && (e.Dir == markDirs[e.Name] || e.Gone):
+			e.Status = mark
+		case marks[""] != "":
+			e.Status = marks[""]
+		}
 	}
 	return entries, more, repo, nil
 }
@@ -313,6 +413,10 @@ func (d *Daemon) handleFSRoutes(w http.ResponseWriter, r *http.Request, replyID,
 		d.handleFSPreview(w, r, replyID)
 	case sub == "raw":
 		d.handleFSRaw(w, r, replyID)
+	case sub == "find":
+		d.handleFSFind(w, r, replyID)
+	case sub == "search":
+		d.handleFSSearch(w, r, replyID)
 	case strings.HasPrefix(sub, "cap/"):
 		d.handleFSCapability(w, r, replyID, strings.TrimPrefix(sub, "cap/"))
 	default:
@@ -471,8 +575,11 @@ func (d *Daemon) handleFSPreview(w http.ResponseWriter, r *http.Request, replyID
 	_, image := imageType(rel)
 	_, video := videoType(rel)
 	framed := framedFile(rel)
+	// text=1 asks for the file as plain text whatever it is, which a jump
+	// to a line needs (a content search's match).
+	plain := r.URL.Query().Get("text") == "1"
 	switch {
-	case framed && session:
+	case framed && session && !plain:
 		a.Kind = "frame"
 		a.Frame, a.TTL = d.fsCapabilityURL(replyID, root, rel), int(fsCapabilityTTL/time.Second)
 	case image && !framed:
@@ -493,6 +600,8 @@ func (d *Daemon) handleFSPreview(w http.ResponseWriter, r *http.Request, replyID
 			a.Kind, a.Reason = "none", wsi18n.T(lang, "file.reason.binary")
 		default:
 			switch ext := strings.ToLower(filepath.Ext(rel)); {
+			case plain:
+				a.Kind, a.Text = "text", string(data)
 			case framed:
 				// Under a root that is not the session's no capability is
 				// minted, so the file shows as its source.
