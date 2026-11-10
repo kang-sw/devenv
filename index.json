@@ -340,6 +340,9 @@
     "261110-chore-ws-mcp-ci-windows-rest-shard-speed": {
       "registered_at": "2026-11-10T13:20:08Z"
     },
+    "261110-chore-ws-mcp-hosted-test-fixtures-agentless-default": {
+      "registered_at": "2026-11-10T13:35:45Z"
+    },
     "261110-chore-ws-mcp-test-suite-runtime": {
       "registered_at": "2026-11-09T15:09:05Z"
     },
