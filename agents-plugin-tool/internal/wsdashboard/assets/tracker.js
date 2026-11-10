@@ -1121,7 +1121,7 @@
     else if (qt) {
       searchFor(ui.store, qt);
       var sr = searchState(ui.store);
-      if (sr.err) SERR = sr.err;
+      if (sr.err) { if (sr.q === qt) SERR = sr.err; } // a newer query's answer is pending: no stale message
       else if (sr.ids) { SQ = qt.toLowerCase(); SIDS = sr.ids; }
     } else searchFor(ui.store, '');
     FILT = !!(TF || SQ);

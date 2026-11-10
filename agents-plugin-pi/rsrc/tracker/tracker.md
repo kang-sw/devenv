@@ -68,8 +68,8 @@ tracker.query payload: {store?, scope?, item?, kind?, status?, project?, text?, 
   `kind:topic`, `project:<project>` (exact), `due:<date>` and
   `priority:<level>` (equality, or after `<`, `>`, `<=`, or `>=`; dates are
   `YYYY-MM-DD`; an item without a due date never matches a `due:` token).
-  A word or `"quoted phrase"` matches the title, body, project, ID, or the
-  text of the item's comments. A token with another key (`foo:bar`, a URL)
+  A word or `"quoted phrase"` matches the title, body, project, ID, alias,
+  or the text of the item's shown comments. A token with another key (`foo:bar`, a URL)
   is plain text; a listed key with a malformed value (`due:<tomorrow`) is
   refused, naming the token.
 - `format: "json"` with `store` alone returns the store's full state as JSON
