@@ -356,7 +356,10 @@ dialog shows it. The routes, JSON in and out with errors as `{"error"}`:
 `GET /tracker/stores` (`{stores, rev}`), `GET /tracker/stores/<id>/view`
 (`{view, seen}`; the view adds `html {items, comments}`, item bodies and
 comment texts rendered as markdown under untrusted-text rules: only http(s)
-links and in-page fragments become anchors, tags stay text), `POST
+links and in-page fragments become anchors, tags stay text), `GET
+/tracker/stores/<id>/search?q=` (`{ids}`: the items passing the tracker
+search grammar, `wstracker.ParseQuery`, the one `tracker.query`'s `q` takes;
+a malformed query is 400 with the message the Items panel shows), `POST
 /tracker/stores/<id>/dispatch {events}` (origin forced
 to `human`, `"$N"` names the batch's Nth event; a refusal is 409 with
 `refusal {index, type, reason}`), `POST .../check` and `.../sync` (a report; an
