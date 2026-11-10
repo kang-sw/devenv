@@ -71,6 +71,10 @@ func (d *Daemon) handleHolders(w http.ResponseWriter, r *http.Request) {
 	}
 	switch err := d.holders.Stop(id); {
 	case err == nil:
+		if d.terminals != nil {
+			// A stopped terminal's viewers learn of it now.
+			d.terminals.sync()
+		}
 		w.WriteHeader(http.StatusNoContent)
 	case errors.Is(err, wsholder.ErrUnknownHolder):
 		http.NotFound(w, r)

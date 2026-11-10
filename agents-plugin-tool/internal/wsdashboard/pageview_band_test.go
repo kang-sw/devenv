@@ -168,7 +168,7 @@ func TestBandRegionsSitAroundTheMessageBox(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	page, err := renderSessionPage(view, regions, false)
+	page, err := renderSessionPage(view, regions, false, "")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kang-sw/devenv/internal/wsholder"
 	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
 
@@ -72,6 +73,11 @@ func serve(d *Daemon, v viewer, method, target, body string) *httptest.ResponseR
 	rec := httptest.NewRecorder()
 	d.Handler().ServeHTTP(rec, req.WithContext(ctx))
 	return rec
+}
+
+func xtermName() string {
+	name, _ := XtermAsset()
+	return name
 }
 
 // refusedByGuard reports whether the access guard refused the request, as
@@ -151,6 +157,16 @@ func guardedRoutes() []struct{ method, path, body string } {
 		// fixture knows no holder, so a passing stop ends nothing.
 		{http.MethodGet, "/holders", ""},
 		{http.MethodPost, "/holders/guardtest/stop", ""},
+		// The terminal routes and the emulator script, served when the
+		// fixture's holder host can run terminals. No request starts a
+		// shell: the folder is refused and the terminal unknown. Which
+		// viewer a route then answers is its own gate's
+		// (TestTerminalRoutesAnswerOnlyTheDaemonsOwnLocalPage).
+		{http.MethodGet, "/s/" + xtermName(), ""},
+		{http.MethodGet, "/s/livesession/terminals", ""},
+		{http.MethodPost, "/s/livesession/terminals", `{"folder":"path","path":"not/absolute"}`},
+		{http.MethodPost, "/s/livesession/terminals/hguardtest/close", ""},
+		{http.MethodGet, "/s/livesession/terminals/hguardtest/ws", ""},
 		{http.MethodGet, "/tracker/profiles", ""},
 		{http.MethodPost, "/tracker/profiles", `{"given":"Ada"}`},
 		{http.MethodPost, "/tracker/register", `{"id":"new"}`},
@@ -194,7 +210,12 @@ func TestLANModeServesTheMermaidScriptToAll(t *testing.T) {
 // Host, need the token like any other request; the token passes by query
 // parameter or cookie, and the endpoint file's shutdown token does not.
 func TestLANModeGuardsEveryRoute(t *testing.T) {
-	f := startPageFixture(t, lanMode, withTracker(newFakeTracker()), withWorkspaces(t), func(o *DaemonOptions) { o.Worktrees = &fakeWorktrees{}; o.Holders = newFakeHolders() })
+	f := startPageFixture(t, lanMode, withTracker(newFakeTracker()), withWorkspaces(t), func(o *DaemonOptions) {
+		o.Worktrees = &fakeWorktrees{}
+		// A real manager over an empty directory: it starts no holder, and
+		// with it the daemon serves the terminal routes.
+		o.Holders = wsholder.New(wsholder.Options{Dir: filepath.Join(t.TempDir(), wsholder.DirName)})
+	})
 	if err := os.WriteFile(filepath.Join(f.project, "shot.png"), []byte("png"), 0o644); err != nil {
 		t.Fatal(err)
 	}

@@ -118,7 +118,10 @@ type pageAssetsData struct {
 	CardsScript   template.JS
 	PreviewScript template.JS
 	FilesScript   template.JS
-	LucideSprite  template.HTML
+	// XtermCSS is the vendored terminal emulator's stylesheet, which a
+	// page that offers terminals inlines (sessionPageData.Terminal).
+	XtermCSS     template.CSS
+	LucideSprite template.HTML
 }
 
 var (
@@ -193,6 +196,7 @@ func buildDashboardAssets(read func(name string) ([]byte, error)) (*dashboardAss
 		CardsScript:      template.JS(get("cards.js")),
 		PreviewScript:    template.JS(get("preview.js")),
 		FilesScript:      template.JS(get("files.js")),
+		XtermCSS:         xtermStyle(),
 		LucideSprite:     lucide,
 		WhiteboardCSS:    wb.CSS,
 		WhiteboardSprite: wb.Sprite,
@@ -465,7 +469,11 @@ type sessionPageData struct {
 	// page was asked for by a browser on this machine. It is outside every
 	// region, since regions are shared by every viewer's stream.
 	SysOpen bool
-	regions regionSet
+	// Terminal offers terminals: it is the emulator script's name beside
+	// the page (XtermAsset) when the daemon runs terminals and the page
+	// was asked for by a browser on this machine, and empty otherwise.
+	Terminal string
+	regions  regionSet
 }
 
 func (p sessionPageData) regionByName(name string) renderedRegion { return p.regions[name] }
@@ -538,14 +546,15 @@ func renderedEntries(entries []ConvEntry) string {
 }
 
 // renderSessionPage renders the whole session page around its regions;
-// sysOpen offers the system-open link action (sessionPageData.SysOpen).
-func renderSessionPage(view SessionView, regions regionSet, sysOpen bool) (string, error) {
+// sysOpen offers the system-open link action (sessionPageData.SysOpen), and
+// terminal, when not empty, terminals (sessionPageData.Terminal).
+func renderSessionPage(view SessionView, regions regionSet, sysOpen bool, terminal string) (string, error) {
 	a, err := loadDashboardAssets()
 	if err != nil {
 		return "", err
 	}
 	var buf bytes.Buffer
-	err = a.templateFor(view.Lang).ExecuteTemplate(&buf, "session", sessionPageData{SessionView: view, Assets: a.data, SysOpen: sysOpen, regions: regions})
+	err = a.templateFor(view.Lang).ExecuteTemplate(&buf, "session", sessionPageData{SessionView: view, Assets: a.data, SysOpen: sysOpen, Terminal: terminal, regions: regions})
 	return buf.String(), err
 }
 
@@ -861,6 +870,9 @@ func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 	} else if sub == "open" {
 		d.handleSystemOpen(w, r, replyID)
 		return
+	} else if sub == "terminals" || strings.HasPrefix(sub, "terminals/") {
+		d.handleTerminals(w, r, replyID, strings.TrimPrefix(sub, "terminals"))
+		return
 	} else if sub == "fs/act" {
 		d.handleFSAct(w, r, replyID)
 		return
@@ -879,6 +891,10 @@ func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 	}
 	if name, _ := wswhiteboard.MermaidAsset(); rest == name {
 		serveMermaid(w)
+		return
+	}
+	if name, _ := XtermAsset(); rest == name {
+		serveXterm(w)
 		return
 	}
 	replyID, sub, slash := strings.Cut(rest, "/")
@@ -944,7 +960,11 @@ func (d *Daemon) handleSessionPage(w http.ResponseWriter, r *http.Request, reply
 	}
 	if err == nil {
 		var html string
-		if html, err = renderSessionPage(view, regions, localViewer(r)); err == nil {
+		terminal := ""
+		if d.offersTerminals(r) {
+			terminal, _ = XtermAsset()
+		}
+		if html, err = renderSessionPage(view, regions, localViewer(r), terminal); err == nil {
 			writeHTML(w, html)
 			return
 		}
