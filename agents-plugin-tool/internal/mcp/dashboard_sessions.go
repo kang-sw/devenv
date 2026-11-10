@@ -5,14 +5,15 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"runtime/debug"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsdashboard"
@@ -422,6 +423,40 @@ type DashboardSessionSource struct {
 
 	// boards memoizes each session's board render (dashboard_page.go).
 	boards boardMemo
+	// history caches the mailbox history entries the pages read.
+	history mailboxHistoryCache
+
+	// prints is each session's last ReadSession fingerprint, which tells a
+	// changed re-read from an unchanged one for the counters; guarded by mu.
+	prints map[string]string
+	// readsChanged and readsUnchanged count ReadSession calls whose
+	// fingerprint changed (the index then wakes the session's pages, whose
+	// re-read renders the board) and ones that found no change.
+	readsChanged, readsUnchanged atomic.Int64
+}
+
+var (
+	_ wsdashboard.CounterSource    = (*DashboardSessionSource)(nil)
+	_ wsdashboard.SessionForgetter = (*DashboardSessionSource)(nil)
+)
+
+// Counters returns the source's counters (wsdashboard.CounterSource).
+func (src *DashboardSessionSource) Counters() map[string]int64 {
+	return map[string]int64{
+		"session_reads_changed":   src.readsChanged.Load(),
+		"session_reads_unchanged": src.readsUnchanged.Load(),
+	}
+}
+
+// ForgetSession drops what the source keeps of a session the daemon's index
+// dropped: its last fingerprint, its mailbox history entries, and its board
+// renders (wsdashboard.SessionForgetter).
+func (src *DashboardSessionSource) ForgetSession(replyID string) {
+	src.mu.Lock()
+	delete(src.prints, replyID)
+	src.mu.Unlock()
+	src.history.forget(replyID)
+	src.boards.forget(replyID)
 }
 
 // NewDashboardSessionSource returns a source over this machine's key store.
@@ -437,14 +472,16 @@ const dashboardRescanAfter = 5 * time.Second
 // ReadSession reads the session record behind reg. It reports false when no
 // top-level lead record rooted at reg.Project maps to reg.ReplyID.
 //
-// The fingerprint covers everything the session page shows: the record, the
-// live stores (snapshot, ring, and the board-answer inbox's held and drained
-// entry names), the board's panels as the served page builds them (ticket
-// directories, mailbox queues, and the listening marker live outside the
-// record), the mailbox history entry names, and the resolved contacts (cwd
-// included: it labels the peer row). A contact's liveness is left out: it
-// is derived from the clock, and a re-read that differs only by the time is
-// no change.
+// The fingerprint covers everything the session page shows: the record
+// (the board, todos, and agenda), the live stores (snapshot, ring, and the
+// board-answer inbox's held and drained entry names), the inputs of the
+// board's panels that live outside the record (boardPrint), the mailbox
+// history entry names, and the resolved contacts (cwd included: it labels
+// the peer row). It builds no panel: a nudge arrives up to several times a
+// second, and the panels read every listed ticket in full, so only the page
+// read a changed fingerprint wakes renders them. A contact's liveness is
+// left out: it is derived from the clock, and a re-read that differs only
+// by the time is no change.
 func (src *DashboardSessionSource) ReadSession(reg wsdashboard.Registration) (wsdashboard.SessionData, bool) {
 	key, raw, record, ok := src.lookupRecord(reg)
 	if !ok {
@@ -453,9 +490,9 @@ func (src *DashboardSessionSource) ReadSession(reg wsdashboard.Registration) (ws
 	h := sha256.New()
 	h.Write(raw)
 	updatedAt := src.hashLiveStores(h, reg.ReplyID)
+	replies, repliesOK := loadReplyRegistry()
 	if record.Whiteboard != nil {
-		panels, _ := json.Marshal(servedWhiteboardPanels(record, key, reg.ReplyID, "", nil))
-		fmt.Fprintf(h, "\x00panels\x00%s", panels)
+		boardPrint(h, key, record, reg.ReplyID, replies, repliesOK)
 	}
 	io.WriteString(h, "\x00history")
 	if dir, err := mailboxHistoryDir(key); err == nil {
@@ -465,15 +502,77 @@ func (src *DashboardSessionSource) ReadSession(reg wsdashboard.Registration) (ws
 		}
 	}
 	io.WriteString(h, "\x00contacts")
-	for _, c := range src.readContacts(reg) {
-		fmt.Fprintf(h, "\x00%s\x01%s\x01%s\x01%s", c.Address, c.ReplyID, c.LastExchange.UTC().Format(time.RFC3339), c.Cwd)
+	if repliesOK {
+		for _, c := range src.contactsFrom(reg, replies) {
+			fmt.Fprintf(h, "\x00%s\x01%s\x01%s\x01%s", c.Address, c.ReplyID, c.LastExchange.UTC().Format(time.RFC3339), c.Cwd)
+		}
+	}
+	fp := hex.EncodeToString(h.Sum(nil)[:16])
+	src.mu.Lock()
+	prev, had := src.prints[reg.ReplyID]
+	if src.prints == nil {
+		src.prints = map[string]string{}
+	}
+	src.prints[reg.ReplyID] = fp
+	src.mu.Unlock()
+	if had && prev == fp {
+		src.readsUnchanged.Add(1)
+	} else {
+		src.readsChanged.Add(1)
 	}
 	return wsdashboard.SessionData{
 		HasBoard:          record.Whiteboard != nil,
 		CountPolicy:       record.Whiteboard.OpenPolicyCount(),
-		Fingerprint:       hex.EncodeToString(h.Sum(nil)[:16]),
+		Fingerprint:       fp,
 		SnapshotUpdatedAt: updatedAt,
 	}, true
+}
+
+// boardPrint folds into h the inputs of the served board's panels that
+// live outside the session record, from metadata alone: the board memo's
+// non-file inputs (boardMemoBase: the mailbox listening marker's presence,
+// process, and liveness), the ticket directories' listing (ticketBoardPrint),
+// and the session's reply-id unread count. The mailbox history and the
+// contacts are folded by ReadSession itself; the served panels read no
+// named mailbox store (servedWhiteboardPanels).
+func boardPrint(h io.Writer, key string, record sessionRecord, replyID string, replies wsmailbox.ReplyStore, repliesOK bool) {
+	fmt.Fprintf(h, "\x00board\x00%s", boardMemoBase(key, record, "", nil))
+	ticketBoardPrint(h, record.Root)
+	if repliesOK {
+		fmt.Fprintf(h, "\x00unread\x00%d", len(replies.Queues[replyID]))
+	} else {
+		io.WriteString(h, "\x00unread\x00-")
+	}
+}
+
+// ticketBoardStatuses are the ticket directories the ticket panel lists.
+var ticketBoardStatuses = []string{"ready", "todo"}
+
+// ticketBoardPrint folds the ticket panel's directories into h: each
+// ticket file's name, size, and modification time, read from the directory
+// listing alone, so an add, remove, rename, or edit changes it without a
+// ticket being read. An edit that keeps both size and modification time
+// within the filesystem's timestamp resolution is missed until the next
+// change.
+func ticketBoardPrint(h io.Writer, root string) {
+	for _, status := range ticketBoardStatuses {
+		entries, err := os.ReadDir(filepath.Join(root, "ai-docs", "tickets", status))
+		if err != nil {
+			fmt.Fprintf(h, "\x00tickets\x00%s\x00-", status)
+			continue
+		}
+		fmt.Fprintf(h, "\x00tickets\x00%s", status)
+		for _, e := range entries {
+			if e.IsDir() || filepath.Ext(e.Name()) != ".md" {
+				continue
+			}
+			if info, err := e.Info(); err == nil {
+				fmt.Fprintf(h, "\x00%s\x01%d\x01%d", e.Name(), info.Size(), info.ModTime().UnixNano())
+			} else {
+				fmt.Fprintf(h, "\x00%s\x01-", e.Name())
+			}
+		}
+	}
 }
 
 // lookupRecord finds the session record behind reg: the top-level lead

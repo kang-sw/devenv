@@ -220,30 +220,39 @@ func readMailboxHistory(sessionKey string) ([]mailboxHistoryRecord, error) {
 	}
 	records := make([]mailboxHistoryRecord, 0, len(names))
 	for _, name := range names {
-		stamp, _, ok := strings.Cut(name, "-")
-		if !ok {
-			continue
+		if rec, ok := readMailboxHistoryEntry(dir, name); ok {
+			records = append(records, rec)
 		}
-		at, perr := time.Parse(mailboxHistoryStampLayout, stamp)
-		if perr != nil {
-			continue
-		}
-		raw, rerr := os.ReadFile(filepath.Join(dir, name))
-		if rerr != nil {
-			continue
-		}
-		var entry mailboxHistoryEntry
-		if json.Unmarshal(raw, &entry) != nil {
-			continue
-		}
-		records = append(records, mailboxHistoryRecord{
-			mailboxHistoryEntry: entry,
-			Time:                at.UTC().Format(time.RFC3339),
-			Title:               mailboxHistoryTitle(entry.Body),
-			Name:                name,
-		})
 	}
 	return records, nil
+}
+
+// readMailboxHistoryEntry reads the one ring entry name at dir; false when
+// it cannot be read or parsed or its name carries no valid stamp. An entry
+// file is never rewritten, so a reader may keep a read entry by its name.
+func readMailboxHistoryEntry(dir, name string) (mailboxHistoryRecord, bool) {
+	stamp, _, ok := strings.Cut(name, "-")
+	if !ok {
+		return mailboxHistoryRecord{}, false
+	}
+	at, err := time.Parse(mailboxHistoryStampLayout, stamp)
+	if err != nil {
+		return mailboxHistoryRecord{}, false
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, name))
+	if err != nil {
+		return mailboxHistoryRecord{}, false
+	}
+	var entry mailboxHistoryEntry
+	if json.Unmarshal(raw, &entry) != nil {
+		return mailboxHistoryRecord{}, false
+	}
+	return mailboxHistoryRecord{
+		mailboxHistoryEntry: entry,
+		Time:                at.UTC().Format(time.RFC3339),
+		Title:               mailboxHistoryTitle(entry.Body),
+		Name:                name,
+	}, true
 }
 
 // mailboxHistoryTitle is the one title rule for a ring entry: the first line

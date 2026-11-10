@@ -35,7 +35,26 @@ type dashboardTracker struct {
 	err error
 }
 
-var _ wsdashboard.TrackerHost = (*dashboardTracker)(nil)
+var (
+	_ wsdashboard.TrackerHost   = (*dashboardTracker)(nil)
+	_ wsdashboard.CounterSource = (*dashboardTracker)(nil)
+)
+
+// Counters returns the tracker host's reload counters
+// (wsdashboard.CounterSource): the page reads' background reloads, those a
+// read stopped waiting for, and those of the latter that signalled a
+// change. A host that could not be created has none.
+func (t *dashboardTracker) Counters() map[string]int64 {
+	if t.err != nil || t.h == nil {
+		return nil
+	}
+	s := t.h.ReloadStats()
+	return map[string]int64{
+		"tracker_reloads":              s.Reloads,
+		"tracker_late_reloads":         s.Late,
+		"tracker_late_reloads_changed": s.LateChanged,
+	}
+}
 
 // redacted returns err with credentials redacted from its message; nil
 // stays nil.

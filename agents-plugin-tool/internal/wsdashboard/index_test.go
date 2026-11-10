@@ -468,3 +468,76 @@ func TestIndexSnapshotAgeIsNotAChange(t *testing.T) {
 		t.Fatalf("after a snapshot change: %+v, changes %v", s, *changes)
 	}
 }
+
+// TestRefreshSkipsAnAppliedEndedRegistration pins the refresh skip: an
+// ended registration is re-read by the first refresh after it ended and
+// then skipped while unchanged; a nudge still re-reads it, a resumed
+// session is re-read again, a session whose project root is gone is still
+// dropped, and one that only stopped heartbeating is never skipped.
+func TestRefreshSkipsAnAppliedEndedRegistration(t *testing.T) {
+	dir := t.TempDir()
+	project := t.TempDir()
+	now := testNow
+	src := newFakeSource()
+	alpha := register(t, dir, "alpha", project, now)
+	register(t, dir, "bravo", t.TempDir(), now.Add(-time.Hour)) // stale heartbeat, never ended
+	idx, _ := newTestIndex(t, dir, src, &now)
+	idx.Refresh()
+	reads := func(id string) int { return src.readCounts()[id] }
+
+	end := func(reg Registration) Registration {
+		t.Helper()
+		reg.EndedAt = stampFor(now)
+		if err := WriteRegistration(dir, reg); err != nil {
+			t.Fatal(err)
+		}
+		return reg
+	}
+	alpha = end(alpha)
+	before := reads("alpha")
+	idx.Refresh()
+	if got := reads("alpha"); got != before+1 {
+		t.Fatalf("the first refresh after the session ended read it %d times, want once", got-before)
+	}
+	if s, _ := idx.Session("alpha"); s.EndedAt == "" {
+		t.Fatalf("the ended registration was not applied: %+v", s)
+	}
+	bravoBefore := reads("bravo")
+	idx.Refresh()
+	idx.Refresh()
+	if got := reads("alpha"); got != before+1 {
+		t.Fatalf("an applied ended registration was re-read %d times by later refreshes", got-before-1)
+	}
+	if got := reads("bravo"); got != bravoBefore+2 {
+		t.Fatalf("a session that only stopped heartbeating was read %d times by 2 refreshes", got-bravoBefore)
+	}
+
+	if !idx.Nudge("alpha", project) {
+		t.Fatal("a nudge for an ended session was ignored")
+	}
+	if got := reads("alpha"); got != before+2 {
+		t.Fatal("a nudge must still re-read an ended session")
+	}
+
+	// Resumed: the serving ws-mcp clears EndedAt and heartbeats.
+	alpha.EndedAt = ""
+	alpha.HeartbeatAt = stampFor(now)
+	if err := WriteRegistration(dir, alpha); err != nil {
+		t.Fatal(err)
+	}
+	idx.Refresh()
+	idx.Refresh()
+	if got := reads("alpha"); got != before+4 {
+		t.Fatalf("a resumed session was read %d times by 2 refreshes, want 2", got-before-2)
+	}
+
+	end(alpha)
+	idx.Refresh() // applies the ended registration
+	if err := os.RemoveAll(project); err != nil {
+		t.Fatal(err)
+	}
+	idx.Refresh()
+	if _, ok := idx.Session("alpha"); ok {
+		t.Fatal("an ended session whose project root is gone must still be dropped")
+	}
+}

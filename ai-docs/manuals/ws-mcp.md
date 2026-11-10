@@ -167,7 +167,15 @@ tools never depend on it. Its state lives under `<cache root>/dashboard/`:
   ws-mcp serves it and it has no session record.
 
 After a store write the serving ws-mcp sends `POST /nudge {reply_id,
-project}`; the daemon also re-reads every session every 30 seconds.
+project}`; the daemon also re-reads every session every 30 seconds, except
+an ended one it already read since it ended (a nudge or a resume still
+re-reads it). A re-read compares a fingerprint taken from metadata (the
+session record, live-store and mailbox-history entry names, the ticket
+directories' file names, sizes, and modification times, the unread count,
+the contacts, the listening marker) and builds no panel; the board renders
+only when a page reads the changed session. Ring, drained-inbox, and
+mailbox-history entry files are parsed once per daemon and kept by name for
+the window the page shows.
 
 The daemon serves its pages with no CORS: `/` lists sessions by project
 (ended ones for a day), `/s/<reply-id>` shows one session, and `/events` and
@@ -382,9 +390,11 @@ redacted. The tracker revision bumps after a route's write (and after a
 check or sync, even a failed one), after the daemon's first poll round and
 each later round that changed something (`wstrackerhost` `StartPoll`,
 `PollOnce`), when the 2 s store watch sees a write by another process, and
-when a reload that a page read stopped waiting for lands: a page read waits
-at most 500 ms behind a push or fetch holding the store's lock, then serves
-the last folded state (`ViewWithin`). Both pages' SSE streams send `event:
+when a reload that a page read stopped waiting for lands with a view other
+than the one that read was served (`now` aside): a page read waits at most
+500 ms behind a push or fetch holding the store's lock, or a slow reload,
+then serves the last folded state (`ViewWithin`). The daemon's tracker git
+runs resolve the git executable once per `PATH`. Both pages' SSE streams send `event:
 tracker` with `{"rev": N}` when it differs from what that stream last sent
 (once on connect too), and the page re-reads.
 
@@ -549,6 +559,11 @@ token is refused (403), and with the variable unset the routes do not exist
 route is the same restart as dev assets: `POST /shutdown`, then
 `WS_MCP_DASHBOARD_PPROF=1 ws-mcp dashboard --port 29417`, then
 `go tool pprof -top 'http://127.0.0.1:29417/debug/pprof/profile?seconds=30'`.
+`/debug/pprof/streams` answers the live-update counters since the daemon
+started as JSON: wakes by source, signals, renders, `nudges`,
+`session_reads_changed` and `session_reads_unchanged` (re-reads whose
+fingerprint did or did not change), and `tracker_reloads`,
+`tracker_late_reloads`, and `tracker_late_reloads_changed`.
 
 ## Plugin-Managed Startup
 

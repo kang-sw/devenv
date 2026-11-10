@@ -137,6 +137,8 @@ type Daemon struct {
 	trackerRev atomic.Int64
 	// entries caches rendered conversation entries per session.
 	entries *entryCache
+	// entryFiles caches the parsed ring and drained entries per session.
+	entryFiles *entryFiles
 	// inboxMu serializes the daemon's own inbox writes (sends and cancels).
 	inboxMu sync.Mutex
 	// lan is LAN mode; tokenMu serializes reading and minting the LAN token.
@@ -243,6 +245,7 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 		stats:           stats,
 		refreshInterval: opts.refreshInterval,
 		entries:         newEntryCache(),
+		entryFiles:      newEntryFiles(),
 		lan:             opts.LAN,
 		pprof:           opts.Pprof,
 		buildTime:       opts.BuildTime,
@@ -366,11 +369,16 @@ func newToken() (string, error) {
 
 // sessionChanged is the index's change hook: it wakes the streams whose
 // page shows the session, and drops a session's cached conversation entries
-// once it left the index.
+// and entry files, and the source's caches of it (SessionForgetter), once it
+// left the index.
 func (d *Daemon) sessionChanged(replyID string) {
 	if d.index != nil {
 		if _, ok := d.index.Session(replyID); !ok {
 			d.entries.drop(replyID)
+			d.entryFiles.drop(replyID)
+			if f, ok := d.source.(SessionForgetter); ok {
+				f.ForgetSession(replyID)
+			}
 		}
 	}
 	d.stats.WakeSession.Add(1)
@@ -477,7 +485,7 @@ func (d *Daemon) Handler() http.Handler {
 		mux.Handle(SupportRoutePrefix+"/", d.support)
 	}
 	if d.pprof {
-		mux.Handle(pprofPrefix, pprofHandler(d.stats))
+		mux.Handle(pprofPrefix, pprofHandler(d.serveStreams))
 	}
 	mux.HandleFunc("/", d.handleIndex)
 	if d.lan {
@@ -556,6 +564,7 @@ func (d *Daemon) handleNudge(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	d.stats.Nudges.Add(1)
 	var body NudgeBody
 	if err := json.NewDecoder(io.LimitReader(r.Body, nudgeBodyLimit)).Decode(&body); err != nil {
 		http.Error(w, "malformed nudge", http.StatusBadRequest)

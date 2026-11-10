@@ -292,6 +292,12 @@ func ReadRingPage(dir, before string, n int) (RingPage, error) {
 	return page, nil
 }
 
+// ReadRingEntry reads the one committed entry name of the ring at dir;
+// false when it cannot be read or parsed or its name carries no valid
+// stamp. An entry file is never rewritten, so a reader may keep a read
+// entry by its name.
+func ReadRingEntry(dir, name string) (RingRecord, bool) { return readRingEntry(dir, name) }
+
 func readRingEntry(dir, name string) (RingRecord, bool) {
 	stamp, _, ok := strings.Cut(name, "-")
 	if !ok {

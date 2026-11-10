@@ -56,7 +56,7 @@ func (src *DashboardSessionSource) ReadPageLang(reg wsdashboard.Registration, la
 		Contacts:   src.readContacts(reg),
 		MailBodies: map[string]string{},
 	}
-	if history, err := readMailboxHistory(key); err == nil {
+	if history, err := src.history.read(reg.ReplyID, key); err == nil {
 		for _, r := range history {
 			page.MailBodies[r.Name] = wslive.ScrubSessionKeys(r.Body, key)
 		}
@@ -105,6 +105,17 @@ type boardMemoEntry struct {
 	// than this render's: the next read renders again.
 	stampOK bool
 	board   boardRender
+}
+
+// forget drops the renders of session replyID, in every language.
+func (m *boardMemo) forget(replyID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for k := range m.entries {
+		if strings.HasPrefix(k, replyID+"\x00") {
+			delete(m.entries, k)
+		}
+	}
 }
 
 // boardMemoMax bounds the entries; a new key past it starts the memo over.
@@ -210,7 +221,9 @@ func (src *DashboardSessionSource) renderBoardNow(key string, record sessionReco
 		watch(docImagePath(record.Root, path))
 		return inline(path)
 	}
-	in.Panels = servedWhiteboardPanels(record, key, replyID, lang, watch)
+	in.Panels = servedWhiteboardPanels(record, key, replyID, lang, watch, func() ([]mailboxHistoryRecord, error) {
+		return src.history.read(replyID, key)
+	})
 	// An armed wait shows as long as its process runs, and a process can
 	// die leaving its marker: no watched file reports that, so the page
 	// names the process.
@@ -289,8 +302,9 @@ func docImagePath(root, path string) string {
 // identity: the mailbox panel shows the session's reply-id address and its
 // reply-id unread count, never a named inbox the session may own. watch,
 // when not nil, is told each file and directory the panels read that a
-// writer may change without a nudge (whiteboardPanelInput.watch).
-func servedWhiteboardPanels(record sessionRecord, key, replyID, lang string, watch func(path string)) []wswhiteboard.Panel {
+// writer may change without a nudge (whiteboardPanelInput.watch). history,
+// when not nil, reads the mailbox history (whiteboardPanelInput.history).
+func servedWhiteboardPanels(record sessionRecord, key, replyID, lang string, watch func(path string), history func() ([]mailboxHistoryRecord, error)) []wswhiteboard.Panel {
 	return whiteboardPanels(whiteboardPanelInput{
 		rec:        record,
 		layout:     wswhiteboard.LayoutFull,
@@ -300,6 +314,7 @@ func servedWhiteboardPanels(record sessionRecord, key, replyID, lang string, wat
 		served:     true,
 		lang:       lang,
 		watch:      watch,
+		history:    history,
 	})
 }
 
@@ -337,14 +352,29 @@ func servedFileText(root string) func(string) string {
 // else the contact record's. An unreadable store leaves the fields it would
 // fill empty.
 func (src *DashboardSessionSource) readContacts(reg wsdashboard.Registration) []wsdashboard.Contact {
+	replies, ok := loadReplyRegistry()
+	if !ok {
+		return nil
+	}
+	return src.contactsFrom(reg, replies)
+}
+
+// loadReplyRegistry loads the machine reply-id registry; false when it
+// cannot be read.
+func loadReplyRegistry() (wsmailbox.ReplyStore, bool) {
 	path, err := wsmailbox.ReplyRegistryPath()
 	if err != nil {
-		return nil
+		return wsmailbox.ReplyStore{}, false
 	}
 	replies, err := wsmailbox.LoadReplyStore(path)
 	if err != nil {
-		return nil
+		return wsmailbox.ReplyStore{}, false
 	}
+	return replies, true
+}
+
+// contactsFrom is readContacts over a reply registry already loaded.
+func (src *DashboardSessionSource) contactsFrom(reg wsdashboard.Registration, replies wsmailbox.ReplyStore) []wsdashboard.Contact {
 	sorted := wsmailbox.SortedContacts(replies.Entries[reg.ReplyID].Contacts)
 	if len(sorted) == 0 {
 		return nil
