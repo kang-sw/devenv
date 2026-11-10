@@ -130,7 +130,7 @@ type AgentNode struct {
 
 // liveSlotCount is the fixed number of live rows under a running agent, so
 // the panel's height changes only when an agent starts or ends.
-const liveSlotCount = 2
+const liveSlotCount = 1
 
 // LiveSlot is one live row under a running agent. At most one field is set;
 // none set is a placeholder row.
@@ -412,9 +412,9 @@ func splitBatches(batches []wslive.BatchView) (finished []wslive.BatchView, runn
 
 // liveSlots picks a running agent's liveSlotCount rows: the latest entries of
 // its finished batches, then the running call, then a tool call generating its
-// arguments, oldest at the top. A pending permission prompt takes the top slot
-// above the newest entry. Thinking and replying add no entry, so the slots
-// keep the latest calls; placeholders fill the bottom.
+// arguments, oldest first. A pending permission prompt takes the slot in place
+// of the newest entry. Thinking and replying add no entry, so the slot keeps
+// the latest call; a placeholder fills it when there is none.
 func liveSlots(perm *wslive.Permission, finished []wslive.BatchView, running *wslive.RunningView, generating *wslive.GeneratingView) []LiveSlot {
 	var entries []LiveSlot
 	for i := range finished {

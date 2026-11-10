@@ -791,8 +791,8 @@ func TestTreeRowsAreDense(t *testing.T) {
 	if strings.Contains(tree, "1 calls") || strings.Contains(tree, "writing") {
 		t.Errorf("tree carries a plural or a live row repeating the phase: %s", tree)
 	}
-	// The thinking agent's live list holds only its two placeholders.
-	if ph := `<li class="brow ph"><span class="mk">-</span></li>`; !strings.Contains(tree, `<ol class="brows live bguide">`+ph+ph+`</ol>`) {
+	// The thinking agent's live list holds only its one placeholder.
+	if ph := `<li class="brow ph"><span class="mk">-</span></li>`; !strings.Contains(tree, `<ol class="brows live bguide">`+ph+`</ol>`) {
 		t.Errorf("thinking agent has a live row: %s", tree)
 	}
 }

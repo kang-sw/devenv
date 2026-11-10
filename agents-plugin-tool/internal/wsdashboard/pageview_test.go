@@ -555,10 +555,10 @@ func liveList(t *testing.T, html string) (list string, rows []string) {
 	return list, rows
 }
 
-// TestRunningAgentHasTwoFixedLiveSlots pins the fixed live rows: a running
-// agent always shows exactly two, the latest entries oldest first, a pending
-// permission prompt on top of the newest call, placeholders at the bottom.
-func TestRunningAgentHasTwoFixedLiveSlots(t *testing.T) {
+// TestRunningAgentHasOneLiveSlot pins the fixed live row: a running agent
+// always shows exactly one, the latest entry, a pending permission prompt in
+// place of it, a placeholder when there is nothing.
+func TestRunningAgentHasOneLiveSlot(t *testing.T) {
 	now := testNow
 	ms := now.UnixMilli()
 	fin := func(tool string) wslive.BatchView {
@@ -573,18 +573,18 @@ func TestRunningAgentHasTwoFixedLiveSlots(t *testing.T) {
 		name    string
 		batches []wslive.BatchView
 		perm    *wslive.Permission
-		want    [2]string // a tool name each row shows, or ph
+		want    [1]string // the tool name the row shows, or ph
 	}{
-		{"no batches", nil, nil, [2]string{ph, ph}},
-		{"thinking only", []wslive.BatchView{thinking}, nil, [2]string{ph, ph}},
-		{"one finished", []wslive.BatchView{fin("F1")}, nil, [2]string{"F1", ph}},
-		{"three finished", []wslive.BatchView{fin("F1"), fin("F2"), fin("F3")}, nil, [2]string{"F2", "F3"}},
-		{"finished then thinking", []wslive.BatchView{fin("F1"), fin("F2"), thinking}, nil, [2]string{"F1", "F2"}},
-		{"running and finished", []wslive.BatchView{fin("F1"), fin("F2"), running}, nil, [2]string{"F2", "RunTool"}},
-		{"generating and running", []wslive.BatchView{fin("F1"), running, generating}, nil, [2]string{"RunTool", "GenTool"}},
-		{"permission, running, generating", []wslive.BatchView{fin("F1"), running, generating}, perm, [2]string{"PermTool", "GenTool"}},
-		{"permission, finished", []wslive.BatchView{fin("F1"), fin("F2")}, perm, [2]string{"PermTool", "F2"}},
-		{"permission alone", nil, perm, [2]string{"PermTool", ph}},
+		{"no batches", nil, nil, [1]string{ph}},
+		{"thinking only", []wslive.BatchView{thinking}, nil, [1]string{ph}},
+		{"one finished", []wslive.BatchView{fin("F1")}, nil, [1]string{"F1"}},
+		{"three finished", []wslive.BatchView{fin("F1"), fin("F2"), fin("F3")}, nil, [1]string{"F3"}},
+		{"finished then thinking", []wslive.BatchView{fin("F1"), fin("F2"), thinking}, nil, [1]string{"F2"}},
+		{"running and finished", []wslive.BatchView{fin("F1"), fin("F2"), running}, nil, [1]string{"RunTool"}},
+		{"generating and running", []wslive.BatchView{fin("F1"), running, generating}, nil, [1]string{"GenTool"}},
+		{"permission, running, generating", []wslive.BatchView{fin("F1"), running, generating}, perm, [1]string{"PermTool"}},
+		{"permission, finished", []wslive.BatchView{fin("F1"), fin("F2")}, perm, [1]string{"PermTool"}},
+		{"permission alone", nil, perm, [1]string{"PermTool"}},
 	}
 	for _, c := range cases {
 		agent := wslive.Agent{ID: "a1", Status: wslive.StatusRunning, StartedAt: ms,
@@ -594,8 +594,8 @@ func TestRunningAgentHasTwoFixedLiveSlots(t *testing.T) {
 			t.Errorf("%s: Slots = %d, want %d", c.name, got, liveSlotCount)
 		}
 		_, rows := liveList(t, renderTree(t, v))
-		if len(rows) != 2 {
-			t.Errorf("%s: live rows = %d, want 2: %v", c.name, len(rows), rows)
+		if len(rows) != 1 {
+			t.Errorf("%s: live rows = %d, want 1: %v", c.name, len(rows), rows)
 			continue
 		}
 		for i, want := range c.want {
