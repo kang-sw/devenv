@@ -348,7 +348,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-10T00:34:18Z"
+        "touched_at": "2026-11-10T00:35:24Z",
+        "impl": {
+          "branch": "impl/develop/cola-tweak-drown"
+        }
       }
     },
     "261109-research-windows-code-signing-signpath": {
