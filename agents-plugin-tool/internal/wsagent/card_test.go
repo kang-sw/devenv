@@ -181,7 +181,7 @@ func TestRunnerCallsTrackerChangedOnTrackerWrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	eventually(t, "process start", func() bool { return h.backend.startCount() == 1 })
-	p := h.backend.proc(0)
+	p := h.backend.waitProc(t, 0)
 	p.nextSent(t)
 	p.events <- Event{TrackerWrite: true}
 	p.reply("done")
@@ -193,7 +193,7 @@ func TestRunnerCallsTrackerChangedOnTrackerWrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	eventually(t, "process start", func() bool { return bare.backend.startCount() == 1 })
-	q := bare.backend.proc(0)
+	q := bare.backend.waitProc(t, 0)
 	q.nextSent(t)
 	q.events <- Event{TrackerWrite: true}
 	q.reply("done")

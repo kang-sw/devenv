@@ -25,6 +25,58 @@ type fakeBackend struct {
 	// exe is the executable Executable reports (ChoiceLister); empty is
 	// "fake".
 	exe string
+	// startGate, when set, holds every Start until released (gateStarts).
+	startGate *gate
+}
+
+// gate holds the calls of a fake until released, announcing each on
+// entered; release also disarms it, so later calls pass.
+type gate struct {
+	entered chan struct{}
+	ch      chan struct{}
+	once    sync.Once
+	disarm  func()
+}
+
+func newGate(t *testing.T, disarm func()) *gate {
+	g := &gate{entered: make(chan struct{}, 16), ch: make(chan struct{}), disarm: disarm}
+	t.Cleanup(g.release)
+	return g
+}
+
+func (g *gate) wait() {
+	g.entered <- struct{}{}
+	<-g.ch
+}
+
+// awaitEntered waits until a held call began.
+func (g *gate) awaitEntered(t *testing.T) {
+	t.Helper()
+	select {
+	case <-g.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("no held call began")
+	}
+}
+
+func (g *gate) release() {
+	g.once.Do(func() {
+		g.disarm()
+		close(g.ch)
+	})
+}
+
+// gateStarts holds every Start until the gate is released.
+func (b *fakeBackend) gateStarts(t *testing.T) *gate {
+	g := newGate(t, func() {
+		b.mu.Lock()
+		b.startGate = nil
+		b.mu.Unlock()
+	})
+	b.mu.Lock()
+	b.startGate = g
+	b.mu.Unlock()
+	return g
 }
 
 func (b *fakeBackend) Executable() string {
@@ -39,6 +91,12 @@ func (b *fakeBackend) Choices(context.Context) ([]ModelChoice, []string, error) 
 }
 
 func (b *fakeBackend) Start(_ context.Context, spec StartSpec) (Process, error) {
+	b.mu.Lock()
+	g := b.startGate
+	b.mu.Unlock()
+	if g != nil {
+		g.wait()
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.startErr != nil {
@@ -68,6 +126,14 @@ func (b *fakeBackend) proc(i int) *fakeProc {
 	return b.procs[i]
 }
 
+// waitProc waits for the i-th process to start (a send starts it in the
+// conversation's loop, after the send returned) and returns it.
+func (b *fakeBackend) waitProc(t *testing.T, i int) *fakeProc {
+	t.Helper()
+	eventually(t, fmt.Sprintf("process %d to start", i), func() bool { return b.startCount() > i })
+	return b.proc(i)
+}
+
 type fakeProc struct {
 	events  chan Event
 	sent    chan string
@@ -78,6 +144,21 @@ type fakeProc struct {
 	interrupts int
 	models     []string
 	once       sync.Once
+	// closeGate, when set, holds Close until released (gateClose).
+	closeGate *gate
+}
+
+// gateClose holds the process's Close until the gate is released.
+func (p *fakeProc) gateClose(t *testing.T) *gate {
+	g := newGate(t, func() {
+		p.mu.Lock()
+		p.closeGate = nil
+		p.mu.Unlock()
+	})
+	p.mu.Lock()
+	p.closeGate = g
+	p.mu.Unlock()
+	return g
 }
 
 func (p *fakeProc) Events() <-chan Event { return p.events }
@@ -107,6 +188,12 @@ func (p *fakeProc) SetModel(model string) error {
 func (p *fakeProc) SetEffort(string) error { return ErrUnsupported }
 
 func (p *fakeProc) Close() error {
+	p.mu.Lock()
+	g := p.closeGate
+	p.mu.Unlock()
+	if g != nil {
+		g.wait()
+	}
 	p.once.Do(func() {
 		p.mu.Lock()
 		p.closed = true
@@ -147,9 +234,33 @@ type fakeKeys struct {
 	mu      sync.Mutex
 	n       int
 	ensured []string
+	// mintGates hold the Mint calls for a root until released (gateMint).
+	mintGates map[string]*gate
+}
+
+// gateMint holds Mint for root until the gate is released.
+func (k *fakeKeys) gateMint(t *testing.T, root string) *gate {
+	g := newGate(t, func() {
+		k.mu.Lock()
+		delete(k.mintGates, root)
+		k.mu.Unlock()
+	})
+	k.mu.Lock()
+	if k.mintGates == nil {
+		k.mintGates = map[string]*gate{}
+	}
+	k.mintGates[root] = g
+	k.mu.Unlock()
+	return g
 }
 
 func (k *fakeKeys) Mint(root string) (string, error) {
+	k.mu.Lock()
+	g := k.mintGates[root]
+	k.mu.Unlock()
+	if g != nil {
+		g.wait()
+	}
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	k.n++

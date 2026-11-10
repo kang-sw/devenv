@@ -119,13 +119,13 @@ func (r *Runner) Start(notify func(replyID, project string)) {
 			}
 			continue
 		}
-		r.mu.Lock()
 		if rec.ClosedAt != "" {
+			r.mu.Lock()
 			r.closed[rec.ReplyID] = rec
+			r.mu.Unlock()
 		} else {
 			r.startConv(rec)
 		}
-		r.mu.Unlock()
 	}
 }
 
@@ -138,13 +138,11 @@ func (r *Runner) Close() {
 
 // InboxChanged tells the runner a conversation's inbox changed from the
 // session page (a message, cancel, steer, or interrupt), so it delivers or
-// interrupts as for its own routes. An unknown reply-id is ignored.
+// interrupts as for its own routes. It returns at once: the loop does the
+// work (inboxChanged). An unknown reply-id is ignored.
 func (r *Runner) InboxChanged(replyID string) {
 	if c := r.conv(replyID); c != nil {
-		c.do(func() {
-			c.checkInterrupt()
-			c.kick()
-		})
+		c.signalInbox()
 	}
 }
 
@@ -154,23 +152,29 @@ func (r *Runner) conv(replyID string) *conv {
 	return r.convs[replyID]
 }
 
-// startConv starts serving rec; r.mu is held.
+// startConv starts serving rec. It writes the registration and the
+// snapshot, and tells the daemon, before it takes r.mu to list the
+// conversation, so no other conversation's Get, List, or act waits on
+// those writes; r.mu is not held.
 func (r *Runner) startConv(rec Record) *conv {
 	dir := wsdashboard.SessionDir(r.opts.Dir, rec.ReplyID)
 	c := &conv{
-		r:     r,
-		dir:   dir,
-		inbox: wsinbox.Dir(dir),
-		rec:   rec,
-		live:  newLiveWriter(dir, rec.WSKey, rec.Backend, r.opts.Now, r.opts.Log),
-		reqs:  make(chan func()),
-		done:  make(chan struct{}),
+		r:      r,
+		dir:    dir,
+		inbox:  wsinbox.Dir(dir),
+		rec:    rec,
+		live:   newLiveWriter(dir, rec.WSKey, rec.Backend, r.opts.Now, r.opts.Log),
+		reqs:   make(chan func()),
+		inboxC: make(chan struct{}, 1),
+		done:   make(chan struct{}),
 	}
-	r.convs[rec.ReplyID] = c
 	c.writeRegistration()
 	c.live.writeSnapshot()
+	r.mu.Lock()
+	r.convs[rec.ReplyID] = c
 	r.wg.Add(1)
 	go c.loop()
+	r.mu.Unlock()
 	return c
 }
 
@@ -231,10 +235,7 @@ func (r *Runner) Create(profile, root string) (State, error) {
 	if err := writeRecord(dir, rec); err != nil {
 		return State{}, err
 	}
-	r.mu.Lock()
-	c := r.startConv(rec)
-	r.mu.Unlock()
-	return c.state(), nil
+	return r.startConv(rec).state(), nil
 }
 
 // resolve resolves profile through root and checks everything a launch
@@ -302,17 +303,35 @@ func (r *Runner) List() []State {
 // Send holds text as the conversation's next user message. It is submitted
 // now when no turn runs, else when the running turn ends; held sends merge
 // into one message. It reports whether the message is still held.
+//
+// Send returns once the message is in the conversation's inbox: it neither
+// waits for the loop nor starts the process, which the loop does on its
+// signal (inboxChanged), so a busy loop or a slow start never holds the
+// caller. A start failure reaches the conversation's State.Error, not this
+// answer. The inbox write is serialized against close under c.mu, so a send
+// racing CloseConversation either lands before the close (which drops it
+// as it drops every held message) or is refused, never written into a
+// closed conversation's inbox that nothing reads.
 func (r *Runner) Send(id, text string) (State, error) {
 	if strings.TrimSpace(text) == "" {
 		return State{}, badRequest("text is empty")
 	}
-	return r.act(id, func(c *conv) error {
-		if _, _, err := wsinbox.Send(c.inbox, wsinbox.Entry{Parts: []string{text}}, r.opts.Now()); err != nil {
-			return err
-		}
-		c.kick()
-		return nil
-	})
+	c, err := r.open(id)
+	if err != nil {
+		return State{}, err
+	}
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return State{}, errClosed
+	}
+	_, _, err = wsinbox.Send(c.inbox, wsinbox.Entry{Parts: []string{text}}, r.opts.Now())
+	c.mu.Unlock()
+	if err != nil {
+		return State{}, err
+	}
+	c.signalInbox()
+	return c.state(), nil
 }
 
 // Interrupt stops the running turn, if any, and takes back the held
@@ -378,19 +397,28 @@ func (r *Runner) SetSettings(id string, model, effort *string) (State, error) {
 	})
 }
 
-// act runs fn in the conversation's loop and returns its state after.
-func (r *Runner) act(id string, fn func(c *conv) error) (State, error) {
+// open returns the open conversation id: errClosed for a closed one,
+// errUnknown for one the runner never had.
+func (r *Runner) open(id string) (*conv, error) {
 	r.mu.Lock()
 	c, open := r.convs[id]
 	_, closed := r.closed[id]
 	r.mu.Unlock()
-	if !open {
-		if closed {
-			return State{}, errClosed
-		}
-		return State{}, errUnknown
+	switch {
+	case open:
+		return c, nil
+	case closed:
+		return nil, errClosed
 	}
-	var err error
+	return nil, errUnknown
+}
+
+// act runs fn in the conversation's loop and returns its state after.
+func (r *Runner) act(id string, fn func(c *conv) error) (State, error) {
+	c, err := r.open(id)
+	if err != nil {
+		return State{}, err
+	}
 	if !c.do(func() {
 		if c.closed {
 			err = errClosed
@@ -443,16 +471,22 @@ func closedState(rec Record) State {
 }
 
 // conv is one open conversation. Its loop goroutine owns the process and
-// every write; other goroutines read through state() and act through do().
+// every write but Send's inbox write; other goroutines read through state(),
+// act through do(), and tell the loop of an inbox change through
+// signalInbox().
 type conv struct {
 	r     *Runner
 	dir   string
 	inbox string
 	live  *liveWriter
 	reqs  chan func()
-	done  chan struct{}
+	// inboxC (one slot) tells the loop the inbox changed (signalInbox).
+	inboxC chan struct{}
+	done   chan struct{}
 
-	// mu guards what state() reads: rec and the status fields below.
+	// mu guards what state() reads: rec and the status fields below. Send
+	// holds it across its closed check and inbox write; close sets closed
+	// under it before it drops the held messages.
 	mu      sync.Mutex
 	rec     Record
 	proc    Process
@@ -481,6 +515,22 @@ func (c *conv) do(fn func()) bool {
 	}
 }
 
+// signalInbox tells the loop the inbox changed, without waiting; signals
+// sent before the loop takes one fold into it.
+func (c *conv) signalInbox() {
+	select {
+	case c.inboxC <- struct{}{}:
+	default:
+	}
+}
+
+// inboxChanged takes the inbox's interrupt requests and submits the held
+// messages, starting the process when needed (kick). It runs in the loop.
+func (c *conv) inboxChanged() {
+	c.checkInterrupt()
+	c.kick()
+}
+
 func (c *conv) loop() {
 	defer c.r.wg.Done()
 	defer close(c.done)
@@ -493,7 +543,17 @@ func (c *conv) loop() {
 		}
 		select {
 		case fn := <-c.reqs:
+			// An inbox change signaled before the request is handled
+			// first, so a request sees what a send that returned before
+			// it was made did, as when sends ran in the loop.
+			select {
+			case <-c.inboxC:
+				c.inboxChanged()
+			default:
+			}
 			fn()
+		case <-c.inboxC:
+			c.inboxChanged()
 		case ev, ok := <-c.events:
 			if !ok {
 				c.processExited()
@@ -871,8 +931,14 @@ func (c *conv) stopIdle() {
 	}
 }
 
-// close ends the conversation for good.
+// close ends the conversation for good. It marks the conversation closed
+// first, under mu, so a Send either wrote before (and its message is
+// dropped below with the other held ones) or is refused.
 func (c *conv) close() {
+	c.update(func(rec *Record) {
+		rec.ClosedAt = c.r.opts.Now().UTC().Format(time.RFC3339)
+		c.closed = true
+	})
 	c.stopProcess("")
 	if held, err := wsinbox.Held(c.inbox); err == nil {
 		for _, rec := range held {
@@ -880,8 +946,6 @@ func (c *conv) close() {
 		}
 	}
 	_, _ = wsinbox.DrainInterrupt(c.inbox)
-	c.update(func(rec *Record) { rec.ClosedAt = c.r.opts.Now().UTC().Format(time.RFC3339) })
-	c.setStatus(func() { c.closed = true })
 	c.live.setAdapter("")
 	c.writeRegistration()
 }

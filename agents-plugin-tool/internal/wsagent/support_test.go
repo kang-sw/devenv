@@ -115,7 +115,7 @@ func TestSupportKeepsOneConversationPerStore(t *testing.T) {
 	if first.Profile != SupportProfileClaude || first.Backend != BackendClaude || first.Root != sh.stores["alpha"] {
 		t.Fatalf("first conversation = %+v, want the claude support profile at the store root", first)
 	}
-	p := sh.claude.proc(0)
+	p := sh.claude.waitProc(t, 0)
 	if got := p.nextSent(t); got != "hello" {
 		t.Fatalf("first turn = %q", got)
 	}
@@ -138,7 +138,7 @@ func TestSupportKeepsOneConversationPerStore(t *testing.T) {
 	if st := sh.send("alpha", "after restart"); st.ID != first.ID {
 		t.Fatalf("send after restart opened %s, want %s", st.ID, first.ID)
 	}
-	if got := sh.claude.proc(1).nextSent(t); got != "after restart" {
+	if got := sh.claude.waitProc(t, 1).nextSent(t); got != "after restart" {
 		t.Fatalf("resumed turn = %q", got)
 	}
 	if c := sh.storeConv("beta"); c != nil {
@@ -556,7 +556,7 @@ func TestSupportRoutesEndToEnd(t *testing.T) {
 	if strings.Contains(r.body, "fake-agent-key") {
 		t.Fatalf("a support route revealed the ws session key: %s", r.body)
 	}
-	if got := sh.claude.proc(0).nextSent(t); got != "hello" {
+	if got := sh.claude.waitProc(t, 0).nextSent(t); got != "hello" {
 		t.Fatalf("turn = %q", got)
 	}
 	var store StoreAnswer

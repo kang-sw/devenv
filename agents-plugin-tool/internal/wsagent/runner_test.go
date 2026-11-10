@@ -73,7 +73,7 @@ func TestSendRunsTurnAndHeldSendsMerge(t *testing.T) {
 		t.Fatal(err)
 	}
 	eventually(t, "process start", func() bool { return h.backend.startCount() == 1 })
-	p := h.backend.proc(0)
+	p := h.backend.waitProc(t, 0)
 	if got := p.nextSent(t); got != "first" {
 		t.Fatalf("first turn = %q", got)
 	}
@@ -134,7 +134,7 @@ func TestIdleTimerEndsProcessAndNextSendResumes(t *testing.T) {
 	id := h.create("chat").ID
 	h.runner.Send(id, "hello")
 	eventually(t, "start", func() bool { return h.backend.startCount() == 1 })
-	p := h.backend.proc(0)
+	p := h.backend.waitProc(t, 0)
 	p.nextSent(t)
 	p.events <- Event{SessionID: "backend-1"}
 	p.reply("hi")
@@ -145,7 +145,7 @@ func TestIdleTimerEndsProcessAndNextSendResumes(t *testing.T) {
 	if got := h.backend.start(1).SessionID; got != "backend-1" {
 		t.Fatalf("the next send should resume the backend session, got %q", got)
 	}
-	if got := h.backend.proc(1).nextSent(t); got != "again" {
+	if got := h.backend.waitProc(t, 1).nextSent(t); got != "again" {
 		t.Fatalf("resumed turn = %q", got)
 	}
 }
@@ -155,7 +155,7 @@ func TestIdleTimeoutZeroNeverExits(t *testing.T) {
 	id := h.create("chat").ID
 	h.runner.Send(id, "hello")
 	eventually(t, "start", func() bool { return h.backend.startCount() == 1 })
-	p := h.backend.proc(0)
+	p := h.backend.waitProc(t, 0)
 	p.nextSent(t)
 	p.reply("hi")
 	time.Sleep(1200 * time.Millisecond)
@@ -169,7 +169,7 @@ func TestRecordSurvivesDaemonRestart(t *testing.T) {
 	id := h.create("chat").ID
 	h.runner.Send(id, "hello")
 	eventually(t, "start", func() bool { return h.backend.startCount() == 1 })
-	p := h.backend.proc(0)
+	p := h.backend.waitProc(t, 0)
 	p.nextSent(t)
 	p.events <- Event{SessionID: "backend-7"}
 	eventually(t, "session id", func() bool {
@@ -198,7 +198,7 @@ func TestRecordSurvivesDaemonRestart(t *testing.T) {
 	if spec.SessionID != "backend-7" || spec.Model != "sonnet" {
 		t.Fatalf("the resumed process should carry the recorded session and model: %+v", spec)
 	}
-	if got := h.backend.proc(1).nextSent(t); got != "held over\n\nnew" {
+	if got := h.backend.waitProc(t, 1).nextSent(t); got != "held over\n\nnew" {
 		t.Fatalf("the held send should merge with the next one, got %q", got)
 	}
 	rec, _ := readRecord(wsdashboard.SessionDir(h.dir, id))
@@ -224,7 +224,7 @@ func TestStopKeepsHeldAndResumes(t *testing.T) {
 	id := h.create("chat").ID
 	h.runner.Send(id, "one")
 	eventually(t, "start", func() bool { return h.backend.startCount() == 1 })
-	p := h.backend.proc(0)
+	p := h.backend.waitProc(t, 0)
 	p.nextSent(t)
 	p.events <- Event{SessionID: "s1"}
 	h.runner.Send(id, "two")
@@ -240,7 +240,7 @@ func TestStopKeepsHeldAndResumes(t *testing.T) {
 	if h.backend.start(1).SessionID != "s1" {
 		t.Fatalf("after stop the next send resumes the session")
 	}
-	if got := h.backend.proc(1).nextSent(t); got != "two\n\nthree" {
+	if got := h.backend.waitProc(t, 1).nextSent(t); got != "two\n\nthree" {
 		t.Fatalf("got %q", got)
 	}
 }
@@ -250,7 +250,7 @@ func TestCloseEndsConversationForGood(t *testing.T) {
 	id := h.create("chat").ID
 	h.runner.Send(id, "one")
 	eventually(t, "start", func() bool { return h.backend.startCount() == 1 })
-	p := h.backend.proc(0)
+	p := h.backend.waitProc(t, 0)
 	p.nextSent(t)
 	h.runner.Send(id, "held")
 	st, err := h.runner.CloseConversation(id)
@@ -292,7 +292,7 @@ func TestInterruptTakesBackHeldAndStopsTurn(t *testing.T) {
 	id := h.create("chat").ID
 	h.runner.Send(id, "one")
 	eventually(t, "start", func() bool { return h.backend.startCount() == 1 })
-	p := h.backend.proc(0)
+	p := h.backend.waitProc(t, 0)
 	p.nextSent(t)
 	h.runner.Send(id, "held")
 	st, returned, err := h.runner.Interrupt(id)
@@ -322,7 +322,7 @@ func TestSettingsApplyAtTurnBoundary(t *testing.T) {
 	id := h.create("chat").ID
 	h.runner.Send(id, "one")
 	eventually(t, "start", func() bool { return h.backend.startCount() == 1 })
-	p := h.backend.proc(0)
+	p := h.backend.waitProc(t, 0)
 	p.nextSent(t)
 	st, err := h.runner.SetSettings(id, ptr("sonnet"), nil)
 	if err != nil || st.Model != "sonnet" {
@@ -376,7 +376,7 @@ func TestFailuresSurfaceInState(t *testing.T) {
 	h.backend.mu.Unlock()
 	h.runner.Send(id, "two")
 	eventually(t, "start", func() bool { return h.backend.startCount() == 1 })
-	p := h.backend.proc(0)
+	p := h.backend.waitProc(t, 0)
 	if got := p.nextSent(t); got != "one\n\ntwo" {
 		t.Fatalf("got %q", got)
 	}
@@ -388,7 +388,7 @@ func TestFailuresSurfaceInState(t *testing.T) {
 
 	h.runner.Send(id, "three")
 	eventually(t, "restart", func() bool { return h.backend.startCount() == 2 })
-	p = h.backend.proc(1)
+	p = h.backend.waitProc(t, 1)
 	p.nextSent(t)
 	p.exit()
 	eventually(t, "crash", func() bool {
