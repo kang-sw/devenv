@@ -28,6 +28,20 @@ is a `tk:item.status` in the same batch.
 1. **The quick-add row gains optional status, assignee, and schedule (due)
    controls (user, note on (560)).** Left untouched, the row behaves as
    the idea-status ticket's Decision 11 says.
+2. **The values travel as ordinary commands in the create's batch
+   (`item.create`, `item.assign`, `item.status`, `item.edit` due) ((573)).**
+   The idea-status ticket's Decision 10 already chose no create-time status
+   attribute, and no API surface is added. A control left at its default
+   adds no command beyond the idea-status ticket's Decision 11 batch (the
+   creator is already the derived holder there, its Decision 7). Rejected:
+   new create-time attributes.
+3. **The controls are compact chips on the row (status, assignee, due) that
+   open the same pickers the item window uses, defaulting to idea / me /
+   none ((574)).** One row stays the quick path, and the pickers already
+   exist. Rejected: a second, expanded form.
+4. **This lands as its own ticket with a `related:` link to the idea-status
+   ticket, not a phase there ((572)).** The idea-status ticket's scope is
+   the assignment invariant.
 
 ## Constraints
 
@@ -44,10 +58,3 @@ The controls on the Items panel's new row, sent with the create in one
 batch. Verification: `go test ./...` under `agents-plugin-tool` (i18n
 parity) and a headless-browser check on an isolated daemon that a quick-add
 with each control set lands with that status, assignee, and due date.
-
-## Open Decision Queue
-Last ID: (574)
-
-(572) [open] [announced] This lands as its own `todo/` ticket with a `related:` link to the idea-status ticket, not a phase there - the 2026-11-10 tickets' placement ((567), user: "다 todo로요"), and the idea-status ticket's scope is the assignment invariant.
-(573) [open] [technical] The values travel as ordinary commands in the create's batch (`item.create`, `item.assign`, `item.status`, `item.edit` due), over new create-time attributes - the idea-status ticket's Decision 10 already chose no create-time status attribute, and no API surface is added.
-(574) [open] [technical] The controls are compact chips on the row (status, assignee, due) that open the same pickers the item window uses, defaulting to idea / me / none, over a second expanded form - one row stays the quick path, and the pickers already exist.
