@@ -107,7 +107,7 @@ type boardMemoEntry struct {
 	board   boardRender
 }
 
-// boardMemoMax bounds the entries; past it the memo starts over.
+// boardMemoMax bounds the entries; a new key past it starts the memo over.
 const boardMemoMax = 64
 
 // renderBoard renders the board of record (session key key, reply-id
@@ -145,7 +145,7 @@ func (src *DashboardSessionSource) renderBoard(key string, record sessionRecord,
 	// A first render has none, and the next read renders once more.
 	entry := boardMemoEntry{base: base, board: board, stamp: stamp, stampOK: had && slices.Equal(prev.board.watch, board.watch)}
 	m.mu.Lock()
-	if m.entries == nil || len(m.entries) >= boardMemoMax {
+	if _, replaces := m.entries[memoKey]; m.entries == nil || !replaces && len(m.entries) >= boardMemoMax {
 		m.entries = map[string]boardMemoEntry{}
 	}
 	m.entries[memoKey] = entry
