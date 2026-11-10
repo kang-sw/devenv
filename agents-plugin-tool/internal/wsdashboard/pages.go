@@ -560,6 +560,9 @@ type pageReader struct {
 	source  SessionSource
 	version string
 	now     func() time.Time
+	// entries holds the ring and drained entries already read (nil reads
+	// every entry each time).
+	entries *entryFiles
 }
 
 func (r pageReader) clock() time.Time {
@@ -643,10 +646,10 @@ func (r pageReader) readSession(replyID string) (SessionView, refreshInputs, boo
 	looked := map[string]bool{replyID: true}
 	inputs := refreshInputs{watch: slices.Clone(page.Watch), pids: slices.Clone(page.WatchPIDs)}
 	if adapterPresent(in.Snapshot, in.Now) {
-		in.Ring, _ = wslive.ReadRing(wslive.RingDir(SessionDir(r.dir, replyID)))
+		in.Ring, _ = r.entries.readRing(replyID, wslive.RingDir(SessionDir(r.dir, replyID)))
 		inbox := sessionInbox(r.dir, replyID)
 		in.Held, _ = wsinbox.Held(inbox)
-		in.Drained, _ = wsinbox.Drained(inbox)
+		in.Drained, _ = r.entries.readDrained(replyID, inbox)
 		in.AttachDir = wsinbox.AttachmentsDir(inbox)
 		lookup := r.lookup()
 		in.Lookup = func(id string) (Session, *wslive.Snapshot, bool) {
@@ -774,7 +777,7 @@ func (r pageReader) indexView() IndexView {
 }
 
 func (d *Daemon) pages() pageReader {
-	return pageReader{dir: d.dir, index: d.index, source: d.source, version: d.endpoint.Version}
+	return pageReader{dir: d.dir, index: d.index, source: d.source, version: d.endpoint.Version, entries: d.entryFiles}
 }
 
 // pagesIn is pages reading in the viewer's language.

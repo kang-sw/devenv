@@ -106,6 +106,9 @@ type whiteboardPanelInput struct {
 	// files, the mailbox stores, history directory, and listening marker),
 	// which a served page names for its refresh check.
 	watch func(path string)
+	// history, when not nil, reads the session's mailbox history in place
+	// of readMailboxHistory (the served page's cached read).
+	history func() ([]mailboxHistoryRecord, error)
 }
 
 type whiteboardMailbox struct {

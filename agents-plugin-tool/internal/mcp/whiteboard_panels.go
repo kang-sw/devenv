@@ -43,7 +43,7 @@ func ticketPanel(in whiteboardPanelInput) (wswhiteboard.Panel, bool) {
 			in.watch(filepath.Join(in.root, "ai-docs", "tickets", status))
 		}
 	}
-	tickets, err := wsdoc.TicketsList(in.root, wsdoc.TicketListOptions{Statuses: statuses})
+	tickets, err := whiteboardTicketsList(in.root, wsdoc.TicketListOptions{Statuses: statuses})
 	if err != nil {
 		return wswhiteboard.Panel{}, false
 	}
@@ -102,6 +102,10 @@ func ticketPanel(in whiteboardPanelInput) (wswhiteboard.Panel, bool) {
 	}
 	return wswhiteboard.Panel{ID: "tickets", Title: wsi18n.T(in.lang, "panel.tickets"), Icon: "board", Count: count, Lanes: lanes}, true
 }
+
+// whiteboardTicketsList lists the tickets a ticket panel shows (a test
+// seam: it reads every listed ticket in full).
+var whiteboardTicketsList = wsdoc.TicketsList
 
 // ticketCategory is the category word of a ticket stem (<date>-<category>-
 // <slug>: feat, bug, epic, research, ...), empty when the stem has none.
@@ -181,7 +185,11 @@ func mailboxPanel(in whiteboardPanelInput) (wswhiteboard.Panel, bool) {
 			in.watch(dir)
 		}
 	}
-	history, _ := readMailboxHistory(in.sessionKey)
+	readHistory := in.history
+	if readHistory == nil {
+		readHistory = func() ([]mailboxHistoryRecord, error) { return readMailboxHistory(in.sessionKey) }
+	}
+	history, _ := readHistory()
 	if named == "" && len(history) == 0 {
 		return wswhiteboard.Panel{}, false
 	}

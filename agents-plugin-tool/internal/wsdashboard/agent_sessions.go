@@ -86,6 +86,21 @@ func (s agentSessions) ReadContacts(reg Registration) ([]Contact, bool) {
 	return nil, false
 }
 
+// Counters forwards to the configured source (CounterSource).
+func (s agentSessions) Counters() map[string]int64 {
+	if cs, ok := s.inner.(CounterSource); ok {
+		return cs.Counters()
+	}
+	return nil
+}
+
+// ForgetSession forwards to the configured source (SessionForgetter).
+func (s agentSessions) ForgetSession(replyID string) {
+	if f, ok := s.inner.(SessionForgetter); ok {
+		f.ForgetSession(replyID)
+	}
+}
+
 // ReadClosedTopics forwards to the configured source; an agent conversation
 // has no board.
 func (s agentSessions) ReadClosedTopics(reg Registration, lang string, from, n int) (template.HTML, bool) {

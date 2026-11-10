@@ -25,6 +25,16 @@ type streamStats struct {
 	RefreshSkips atomic.Int64
 	// Sends counts region events written to streams.
 	Sends atomic.Int64
+	// Nudges counts the nudges received (POST /nudge), well-formed or not.
+	Nudges atomic.Int64
+}
+
+// CounterSource is an optional interface of a TrackerHost or a
+// SessionSource: work counters of its own (tracker reloads, session
+// re-reads), which the streams route serves beside the daemon's. Keys are
+// snake_case; a key the daemon's own counters use is ignored.
+type CounterSource interface {
+	Counters() map[string]int64
 }
 
 // snapshot is the counters as a JSON-ready map.
@@ -41,10 +51,25 @@ func (s *streamStats) snapshot() map[string]int64 {
 		"shared":          s.Shared.Load(),
 		"refresh_skips":   s.RefreshSkips.Load(),
 		"sends":           s.Sends.Load(),
+		"nudges":          s.Nudges.Load(),
 	}
 }
 
-func (s *streamStats) serve(w http.ResponseWriter, r *http.Request) {
+// serveStreams answers pprofPrefix+"streams": the daemon's counters plus
+// those of each seam that keeps its own (CounterSource).
+func (d *Daemon) serveStreams(w http.ResponseWriter, r *http.Request) {
+	out := d.stats.snapshot()
+	for _, seam := range []any{d.tracker, d.source} {
+		cs, ok := seam.(CounterSource)
+		if !ok {
+			continue
+		}
+		for k, v := range cs.Counters() {
+			if _, own := out[k]; !own {
+				out[k] = v
+			}
+		}
+	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusOK, s.snapshot())
+	writeJSON(w, http.StatusOK, out)
 }

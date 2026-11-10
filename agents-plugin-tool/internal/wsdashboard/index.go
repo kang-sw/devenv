@@ -37,6 +37,13 @@ type SessionSource interface {
 	ReadSession(reg Registration) (data SessionData, ok bool)
 }
 
+// SessionForgetter is an optional interface of a SessionSource that keeps
+// per-session caches: the daemon calls ForgetSession once a session left
+// the index, so they do not outlive it.
+type SessionForgetter interface {
+	ForgetSession(replyID string)
+}
+
 // Session is one entry of the session index. It carries the reply-id and
 // never the session key.
 type Session struct {
@@ -97,7 +104,10 @@ func NewIndex(opts IndexOptions) *Index {
 	return &Index{opts: opts, sessions: map[string]*indexEntry{}}
 }
 
-// Refresh re-reads every registered session: the polling backstop.
+// Refresh re-reads every registered session: the polling backstop. An
+// ended session the index already holds with this same registration is not
+// re-read (endedApplied): nothing serves it, so only a nudge or a resume
+// changes it, and a resume rewrites its registration.
 func (x *Index) Refresh() {
 	x.rereadMu.Lock()
 	defer x.rereadMu.Unlock()
@@ -110,6 +120,9 @@ func (x *Index) Refresh() {
 	var changed []string
 	for _, reg := range regs {
 		seen[reg.ReplyID] = true
+		if x.endedApplied(reg) {
+			continue
+		}
 		if x.apply(reg.ReplyID, &reg) {
 			changed = append(changed, reg.ReplyID)
 		}
@@ -128,6 +141,27 @@ func (x *Index) Refresh() {
 		}
 	}
 	x.notify(changed)
+}
+
+// endedApplied reports whether reg is an ended registration the index
+// already applied unchanged and whose project root still exists, so a
+// refresh may skip re-reading it. The first refresh after a session ended
+// still re-reads it (the entry holds the registration from before), and a
+// removed root still drops it. A session that only stopped heartbeating
+// (no EndedAt) is re-read as before.
+func (x *Index) endedApplied(reg Registration) bool {
+	if reg.EndedAt == "" {
+		return false
+	}
+	x.mu.Lock()
+	entry, ok := x.sessions[reg.ReplyID]
+	same := ok && entry.session.Registration == reg
+	x.mu.Unlock()
+	if !same {
+		return false
+	}
+	_, err := os.Stat(reg.Project)
+	return !errors.Is(err, os.ErrNotExist)
 }
 
 // Nudge re-reads the one session a nudge names. It returns false, and

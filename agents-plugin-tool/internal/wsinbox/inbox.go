@@ -1119,6 +1119,17 @@ func Held(dir string) ([]Record, error) {
 // Drained reads the drained records of the inbox at dir, oldest first.
 func Drained(dir string) ([]Record, error) { return readAll(DrainedDir(dir)) }
 
+// ReadDrained reads the one drained record name of the inbox at dir. A
+// drained entry file is never rewritten, so a reader may keep a read record
+// by its name.
+func ReadDrained(dir, name string) (Record, error) {
+	entry, err := readEntry(filepath.Join(DrainedDir(dir), name))
+	if err != nil {
+		return Record{}, err
+	}
+	return Record{Name: name, Entry: entry}, nil
+}
+
 func readAll(dir string) ([]Record, error) {
 	names, err := Names(dir)
 	if err != nil {

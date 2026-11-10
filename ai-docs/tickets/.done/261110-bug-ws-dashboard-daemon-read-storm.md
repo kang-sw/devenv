@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 3bf93d831f667f8c
 sage-review-completeness-reviewed: 3bf93d831f667f8c
+completed: 2026-11-10
 ---
 
 # Dashboard daemon read storm
@@ -227,3 +228,48 @@ Verification expectations:
 - After the hotfix ships, the lead re-measures the downstream daemon with the
   same Win32 I/O probe and `/debug/pprof/streams`; that check is the lead's,
   not the worker's.
+
+### Result (e8916a258) - 2026-11-10
+
+Implemented Decisions 3-7 in two commits (3343077ef tracker host, e8916a258
+dashboard).
+
+- Decision 3: a late reload signals only when its view (JSON of `StoreView`
+  with `View.Now` cleared) differs from a view served to a late reader; a
+  late read whose context ended counts as differing (old behavior kept).
+  Compared against the views actually served rather than the snapshot
+  before the swap, so a reader late on `next` while `cur` landed a change
+  still gets its signal.
+- Decision 4: git resolved once per `PATH`+`PATHEXT` (keyed after the
+  fake-git `PATH` tests showed a process-wide cache pins the first git); a
+  failed lookup is not cached and falls back to bare `git`. `wsgit.ExecRunner`
+  left unchanged.
+- Decision 5: `ReadSession` fingerprints from metadata (record, live-store
+  hashes, ready/todo listing name/size/mtime, board memo base incl. marker,
+  reply-id unread count, history names, contacts; one registry load) with no
+  panel build. Only the reply-registry queue is fingerprinted: served panels
+  never read the named mailbox store. Refresh skips an applied unchanged
+  ended registration while its project root exists.
+- Decision 6: ring/drained (wsdashboard `entryFiles`) and mailbox history
+  (mcp `mailboxHistoryCache`) cached by name, pruned to the shown window,
+  dropped on index removal via the optional `SessionForgetter`.
+- Decision 7: `nudges`, `session_reads_changed`/`_unchanged`,
+  `tracker_reloads`/`_late_reloads`/`_late_reloads_changed` on
+  `/debug/pprof/streams` via optional `wsdashboard.CounterSource`.
+- `ai-docs/manuals/ws-mcp.md` dashboard, tracker, and profiling paragraphs
+  updated.
+
+Verification: remote `ws-rgo` test and vet of `./internal/wstrackerhost/
+./internal/wsdashboard/ ./internal/mcp/ ./cmd/ws-mcp/ ./internal/wslive/
+./internal/wsinbox/` pass; new tests also pass `-race -count=4`. Lite
+review: clean, three Minor left open:
+
+- An ended session whose session record vanished now stays in the index
+  until its registration is pruned (previously dropped on refresh).
+- A page render racing a session removal can re-create that session's
+  entry/history cache (bounded, one window per race).
+- A client aborting every fetch keeps forcing late-reload signals (old
+  behavior, loop still settles).
+
+Forward: the lead re-measures the downstream daemon with the Win32 I/O probe
+and `/debug/pprof/streams` after the hotfix ships.

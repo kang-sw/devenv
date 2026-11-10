@@ -32,9 +32,9 @@ const pprofPrefix = "/debug/pprof/"
 //
 // It also serves the daemon's live-update counters (streamStats) as JSON at
 // pprofPrefix+"streams".
-func pprofHandler(stats *streamStats) http.Handler {
+func pprofHandler(streams http.HandlerFunc) http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc(pprofPrefix+"streams", stats.serve)
+	mux.HandleFunc(pprofPrefix+"streams", streams)
 	mux.HandleFunc(pprofPrefix, pprof.Index)
 	mux.HandleFunc(pprofPrefix+"cmdline", pprof.Cmdline)
 	mux.HandleFunc(pprofPrefix+"profile", pprof.Profile)
