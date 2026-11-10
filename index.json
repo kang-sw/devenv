@@ -361,7 +361,7 @@
         "email": "ki6080@gmail.com",
         "clone_id": "28ef83e379b353cc",
         "track": "goal/develop/amber-ladle-orbit",
-        "phase": "active",
+        "phase": "closed",
         "touched_at": "2026-11-10T13:18:34Z",
         "impl": {
           "branch": "impl/goal/develop/amber-ladle-orbit/savor-bash-puma"
