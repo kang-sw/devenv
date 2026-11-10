@@ -426,7 +426,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "goal/develop/amber-ladle-orbit",
         "phase": "active",
-        "touched_at": "2026-11-10T15:25:35Z"
+        "touched_at": "2026-11-10T15:26:10Z",
+        "impl": {
+          "branch": "impl/goal/develop/amber-ladle-orbit/flame-cameo-till"
+        }
       }
     },
     "261110-feat-ws-dashboard-workspaces": {
