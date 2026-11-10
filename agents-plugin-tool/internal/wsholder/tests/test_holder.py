@@ -522,6 +522,34 @@ class DescriptorTest(HolderTestCase):
         if not WINDOWS:
             self.assertEqual(os.stat(path).st_mode & 0o777, 0o600)
 
+    def test_log_line_racing_the_exit_does_not_leave_the_directory_behind(self):
+        holder = self.start_holder()
+        late = []
+
+        def slow_rmtree(path, ignore_errors=False):
+            # The window a real removal has: the files are gone, the
+            # directory is not yet. A thread logs right inside it.
+            for name in os.listdir(path):
+                retry_sharing(lambda: os.unlink(os.path.join(path, name)))
+            writer = threading.Thread(target=holder.log, args=("a line written during the exit",), daemon=True)
+            writer.start()
+            late.append(writer)
+            writer.join(timeout=0.5)
+            try:
+                os.rmdir(path)
+            except OSError:
+                if not ignore_errors:
+                    raise
+
+        with mock.patch.object(holder_mod.shutil, "rmtree", slow_rmtree):
+            holder.request_stop()
+            holder.thread.join(timeout=TIMEOUT)
+        self.assertFalse(holder.thread.is_alive())
+        self.assertEqual(len(late), 1)
+        late[0].join(timeout=TIMEOUT)
+        self.assertFalse(late[0].is_alive())
+        self.assertFalse(os.path.exists(holder.dir), "the state directory outlived the holder")
+
 
 if __name__ == "__main__":
     unittest.main()

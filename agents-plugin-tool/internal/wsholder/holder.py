@@ -791,6 +791,10 @@ class Holder:
         self.idle_since = time.monotonic()
         self.stopping = False
         self.exit_event = threading.Event()
+        # Guards the log against the removal of the state directory: a line
+        # written while shutdown() removes the directory would leave it behind.
+        self.log_lock = threading.Lock()
+        self.log_closed = False
         self.exit_code = 0
         self.listener: socket.socket | None = None
         self.port = 0
@@ -844,7 +848,9 @@ class Holder:
         child = self.child
         if child is not None and self.child_status["state"] == "exited":
             child.close()
-        shutil.rmtree(self.dir, ignore_errors=True)
+        with self.log_lock:
+            self.log_closed = True
+            shutil.rmtree(self.dir, ignore_errors=True)
 
     # -- descriptor --
 
@@ -886,11 +892,14 @@ class Holder:
             self.log(f"descriptor rewrite failed: {exc}")
 
     def log(self, text: str) -> None:
-        try:
-            with open(os.path.join(self.dir, LOG_NAME), "a", encoding="utf-8") as f:
-                f.write(time.strftime("%Y-%m-%dT%H:%M:%S%z") + " " + text + "\n")
-        except OSError:
-            pass
+        with self.log_lock:
+            if self.log_closed:
+                return
+            try:
+                with open(os.path.join(self.dir, LOG_NAME), "a", encoding="utf-8") as f:
+                    f.write(time.strftime("%Y-%m-%dT%H:%M:%S%z") + " " + text + "\n")
+            except OSError:
+                pass
 
     # -- connections --
 
