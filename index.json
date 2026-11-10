@@ -337,6 +337,9 @@
     "261110-bug-ws-tracker-store-lock-network-split": {
       "registered_at": "2026-11-10T07:31:45Z"
     },
+    "261110-bug-ws-whiteboard-query-output-noise": {
+      "registered_at": "2026-11-10T10:49:27Z"
+    },
     "261110-chore-ws-mcp-test-suite-runtime": {
       "registered_at": "2026-11-09T15:09:05Z"
     },
