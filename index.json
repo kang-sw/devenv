@@ -339,7 +339,14 @@
       "registered_at": "2026-11-08T07:47:49Z"
     },
     "261108-bug-ws-route-resolve-implement-target-nesting-undocumented": {
-      "registered_at": "2026-11-08T05:50:36Z"
+      "registered_at": "2026-11-08T05:50:36Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "28ef83e379b353cc",
+        "track": "develop",
+        "phase": "closed",
+        "touched_at": "2026-11-10T00:30:50Z"
+      }
     },
     "261108-bug-ws-whiteboard-item-raw-html": {
       "registered_at": "2026-11-08T04:42:23Z"
