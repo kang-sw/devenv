@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 770913c17719f476
 sage-review-completeness-reviewed: 770913c17719f476
+completed: 2026-11-10
 ---
 
 # ws-mcp: daemon-hosted MCP behind a thin proxy launcher
@@ -440,3 +441,21 @@ smoke. Windows `ws-mcp-ci` shards: not run; the workflow runs on
 `pull_request`/`workflow_dispatch` only and the worker never pushes, so the
 lead dispatches it after the push (deferred). Acceptance on the user's
 Windows machine stays with the user at the release gate.
+
+Lite review (one pass, one reviewer): 1 Critical and 4 Important fixed in
+the follow-up commit: relative path values in the hello environment
+(Codex's `./config-manifest.json`) are made absolute against the launcher's
+cwd (`hello_env`; the Go smoke now passes a relative manifest and asserts
+the lead session registers); a client that leaves during a reconnect ends
+the successor stream instead of hanging the launcher (`replay_into`);
+`Server.Close` frees the nudge goroutine and tracker host of an ended hosted
+session; `canonicalGitRoot` runs through the connection's git runner; the
+compatibility probe runs the staged copy on the daemon path, so the
+plugin-directory binary never executes (Decision 4). Minor, recorded only:
+concurrent cold starts can race in `stage_daemon_binary` (the loser takes
+the direct path); a daemon that dies after a CLI-mode wait has started
+returns exit 1 rather than falling back to the direct CLI; long-wait
+cancellation on drain is pinned against the echo stub, not `mcp.Server`
+(no MCP tool blocks long today); `WS_WORKTREE_DIR` isolation has no
+dedicated assertion. The tracker runner's `core.sshCommand` probe now runs
+under the host environment and compares Windows keys case-insensitively.
