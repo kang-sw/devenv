@@ -371,7 +371,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-10T00:34:03Z"
+        "touched_at": "2026-11-10T00:35:22Z",
+        "impl": {
+          "branch": "impl/develop/feel-hug-dash"
+        }
       }
     },
     "261110-chore-ws-mcp-test-suite-runtime": {
