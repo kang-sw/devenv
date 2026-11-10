@@ -333,6 +333,36 @@ at today's latency); `go test ./...` under `agents-plugin-tool` through
 `ws-rgo`; and a before/after CPU measurement (see Constraints for the
 harness), reported in the Result.
 
+#### Result (b0e680e23) - 2026-11-10
+
+- Board memo in `DashboardSessionSource` (mcp), per reply-id and language,
+  keyed by board Seq, todos, agenda, re-ask times, language, and the
+  listening marker's PID and liveness, and verified by a stat stamp of the
+  files the render named (taken before the render, trusted only when the
+  new render named the same files). Off with dev assets. Contacts stay
+  outside the memo.
+- `ReadSession` carries `CountPolicy`; the index reads no session page and
+  the reply-id+Rev board-count memo is removed (fixes the leave/rejoin
+  stale count).
+- `PageContent.Volatile` replaced by `WatchPIDs`; the refresh stamp folds
+  each PID's liveness, and every render after the first takes its stamp
+  first, so a woken render is not repeated on the next tick.
+- `ImageDataURL` caches by resolved file + size + mtime in a 64 MiB LRU;
+  over-cap results are cached as empty, read errors are not cached.
+- Git watcher wakes `gitDep` only when the badge (ignoring its read time)
+  changed. `PollOnce` reports change; `StartPoll` notifies only on change
+  and on its first round. The 2 s watch, 15 s tick, and 30 s index refresh
+  are unchanged.
+- Decision 5: an intake batch whose every change is a `KindAgent` event
+  with an `AgentID` waits up to `debounceAgent` (1 s); permission prompts
+  (including a subagent's), lead batches, and status keep 100/250 ms.
+- Verification: new tests for each item above; `go test ./...` via ws-rgo
+  green. CPU (remote server, isolated daemon, 18 PNGs ~3 MB, ~20 subagent
+  events/s), before -> after: images on, session+index 192.6% -> 19.9%,
+  session 130.8% -> 20.6%, index 135.4% -> 10.0%; images off,
+  session+index 28.0% -> 13.7%; idle <= 0.5% both. No-stream driving
+  (the intake process itself) 6.9-12.3% -> 10.2-11.1%, within run noise.
+
 ### Phase 2: frontend accumulation
 
 Decisions 6-11. Verification: `node --check` on the changed assets; `go test
