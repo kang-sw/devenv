@@ -301,19 +301,6 @@
     "261106-bug-git-commit-trailer-placement": {
       "registered_at": "2026-11-06T07:33:45Z"
     },
-    "261106-bug-sage-stamp-missing-restamp-loop": {
-      "registered_at": "2026-11-06T08:56:03Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-10T00:35:21Z",
-        "impl": {
-          "branch": "impl/develop/late-twice-blob"
-        }
-      }
-    },
     "261106-epic-ws-dashboard-serve-daemon": {
       "registered_at": "2026-11-06T04:24:28Z"
     },
@@ -369,6 +356,9 @@
           "branch": "impl/develop/feel-hug-dash"
         }
       }
+    },
+    "261110-bug-ws-mcp-move-close-guard-flake-and-suite-timeout": {
+      "registered_at": "2026-11-10T01:04:17Z"
     },
     "261110-chore-ws-mcp-test-suite-runtime": {
       "registered_at": "2026-11-09T15:09:05Z"
