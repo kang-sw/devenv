@@ -338,7 +338,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-10T01:51:20Z"
+        "touched_at": "2026-11-10T01:51:57Z",
+        "impl": {
+          "branch": "impl/develop/smock-judo-dial"
+        }
       }
     },
     "261110-bug-ws-mcp-move-close-guard-flake-and-suite-timeout": {
