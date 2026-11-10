@@ -184,3 +184,336 @@ Verification:
   history and acts on later `ui` markers, including on a hidden tab; the
   connection indicator shows a drop and a recovery.
 - The wsdashboard tests pass remotely through `ws-rgo`.
+
+### Result (a2140c571) - 2026-11-10
+
+Landed: the page stream (`connect`, session and index pages) and the
+support chat's conversation stream (`supOpen`) open a WebSocket through one
+helper, `openStream` in `dashboard.js`; the page opens no `EventSource`. The
+daemon's stream routes (`/events`, `/s/<id>/events`) upgrade a WebSocket
+handshake and serve SSE to every other request, over one shared loop in
+`sse.go` (`Daemon.stream`, now framing through a `streamSink`: `sseSink`
+or `wsSink` in the new `stream_ws.go`). The SSE bytes are unchanged.
+
+Probe (Decision 5), run first: premise holds. Google Chrome for Testing
+148.0.7778.96 (Playwright's `chromium-1223` build, `--headless`, Linux)
+against a Node `http` HTTP/1.1 server on `localhost`, driven over CDP
+`Runtime.evaluate`. Each trial opens N streams, waits until all are open,
+then times one `fetch('/ping')` capped at 5 s:
+
+| streams | fetch |
+|---|---|
+| 5 SSE | 200 in 4 ms |
+| 6 SSE | aborted at 5001 ms (never sent) |
+| 6 WebSocket | 200 in 3 ms |
+| 10 WebSocket | 200 in 4 ms |
+
+The script (`node probe.mjs <chrome binary>` with `<details><summary>probe.mjs</summary>
+
+```js
+// Decision 5 probe: with N open SSE streams vs N open WebSockets to one
+// HTTP/1.1 host, does a plain fetch to the same host complete promptly?
+// Usage: node probe.mjs <chrome-binary>
+import http from 'node:http';
+import crypto from 'node:crypto';
+import { spawn } from 'node:child_process';
+
+const chromeBin = process.argv[2];
+const sockets = new Set();
+const server = http.createServer((req, res) => {
+  if (req.url === '/') {
+    res.writeHead(200, { 'content-type': 'text/html' });
+    res.end('<!doctype html><title>probe</title>');
+  } else if (req.url.startsWith('/sse')) {
+    res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store' });
+    res.write('retry: 3000\n\n');
+    res.write('event: hello\ndata: {}\n\n');
+  } else if (req.url.startsWith('/ping')) {
+    res.writeHead(200, { 'content-type': 'text/plain' });
+    res.end('ok');
+  } else {
+    res.writeHead(404); res.end();
+  }
+});
+server.on('connection', (s) => { sockets.add(s); s.on('close', () => sockets.delete(s)); });
+server.on('upgrade', (req, sock) => {
+  const accept = crypto.createHash('sha1')
+    .update(req.headers['sec-websocket-key'] + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64');
+  sock.write('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n' +
+    `Sec-WebSocket-Accept: ${accept}\r\n\r\n`);
+  // One unmasked text frame "hi".
+  sock.write(Buffer.from([0x81, 2, 0x68, 0x69]));
+  sock.on('data', () => {});
+  sock.on('error', () => {});
+});
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
+const port = server.address().port;
+
+const chrome = spawn(chromeBin, ['--headless', '--no-sandbox', '--remote-debugging-port=0',
+  '--user-data-dir=' + process.env.PROBE_PROFILE, `http://localhost:${port}/`], { stdio: ['ignore', 'ignore', 'pipe'] });
+const wsURL = await new Promise((resolve, reject) => {
+  let buf = '';
+  chrome.stderr.on('data', (d) => {
+    buf += d;
+    const m = buf.match(/DevTools listening on (ws:\/\/\S+)/);
+    if (m) resolve(m[1]);
+  });
+  setTimeout(() => reject(new Error('no devtools url: ' + buf)), 20000);
+});
+const devPort = new URL(wsURL).port;
+let target;
+for (let i = 0; i < 50 && !target; i++) {
+  const list = await (await fetch(`http://127.0.0.1:${devPort}/json/list`)).json();
+  target = list.find((t) => t.type === 'page' && t.url.includes(`localhost:${port}`));
+  if (!target) await new Promise((r) => setTimeout(r, 200));
+}
+const cdp = new WebSocket(target.webSocketDebuggerUrl);
+await new Promise((r) => cdp.addEventListener('open', r));
+let id = 0;
+const pending = new Map();
+cdp.addEventListener('message', (ev) => {
+  const msg = JSON.parse(ev.data);
+  if (pending.has(msg.id)) { pending.get(msg.id)(msg); pending.delete(msg.id); }
+});
+const evaluate = (expression) => new Promise((resolve) => {
+  const mid = ++id;
+  pending.set(mid, resolve);
+  cdp.send(JSON.stringify({ id: mid, method: 'Runtime.evaluate', params: { expression, awaitPromise: true, returnByValue: true } }));
+});
+
+// Opens n streams of kind, waits for them all to open, then times one
+// fetch with a 5 s cap. Closes the streams afterwards.
+const trial = (kind, n) => `(async () => {
+  const opened = [];
+  const streams = [];
+  for (let i = 0; i < ${n}; i++) {
+    opened.push(new Promise((res) => {
+      if ('${kind}' === 'sse') { const es = new EventSource('/sse?i=' + i); streams.push(es); es.addEventListener('hello', res); }
+      else { const ws = new WebSocket('ws://' + location.host + '/ws?i=' + i); streams.push(ws); ws.onmessage = res; }
+    }));
+  }
+  const openAll = await Promise.race([Promise.all(opened).then(() => 'all-open'),
+    new Promise((r) => setTimeout(() => r('open-timeout'), 5000))]);
+  const t0 = performance.now();
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 5000);
+  let fetchResult;
+  try { const r = await fetch('/ping?t=' + Math.random(), { signal: ctl.signal, cache: 'no-store' }); fetchResult = 'status ' + r.status; }
+  catch (e) { fetchResult = 'failed: ' + e.name; }
+  clearTimeout(timer);
+  const ms = Math.round(performance.now() - t0);
+  streams.forEach((s) => s.close());
+  await new Promise((r) => setTimeout(r, 500));
+  return { kind: '${kind}', streams: ${n}, openAll, fetch: fetchResult, ms };
+})()`;
+
+for (let i = 0; i < 100; i++) {
+  const st = await evaluate('location.href + " " + document.readyState');
+  const v = st.result?.result?.value || '';
+  if (v.includes('localhost:' + port) && v.endsWith('complete')) break;
+  await new Promise((r) => setTimeout(r, 200));
+}
+const results = [];
+for (const [kind, n] of [['sse', 5], ['sse', 6], ['ws', 6], ['ws', 10]]) {
+  const r = await evaluate(trial(kind, n));
+  results.push(r.result?.result?.value ?? r);
+}
+const version = await evaluate('navigator.userAgent');
+console.log(JSON.stringify({ userAgent: version.result.result.value, results }, null, 2));
+cdp.close();
+chrome.kill();
+for (const s of sockets) s.destroy();
+server.close();
+process.exit(0);
+```
+
+</details>_PROFILE` set to a
+scratch profile directory):
+
+<details><summary>probe.mjs</summary>
+
+```js
+// Decision 5 probe: with N open SSE streams vs N open WebSockets to one
+// HTTP/1.1 host, does a plain fetch to the same host complete promptly?
+// Usage: node probe.mjs <chrome-binary>
+import http from 'node:http';
+import crypto from 'node:crypto';
+import { spawn } from 'node:child_process';
+
+const chromeBin = process.argv[2];
+const sockets = new Set();
+const server = http.createServer((req, res) => {
+  if (req.url === '/') {
+    res.writeHead(200, { 'content-type': 'text/html' });
+    res.end('<!doctype html><title>probe</title>');
+  } else if (req.url.startsWith('/sse')) {
+    res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store' });
+    res.write('retry: 3000\n\n');
+    res.write('event: hello\ndata: {}\n\n');
+  } else if (req.url.startsWith('/ping')) {
+    res.writeHead(200, { 'content-type': 'text/plain' });
+    res.end('ok');
+  } else {
+    res.writeHead(404); res.end();
+  }
+});
+server.on('connection', (s) => { sockets.add(s); s.on('close', () => sockets.delete(s)); });
+server.on('upgrade', (req, sock) => {
+  const accept = crypto.createHash('sha1')
+    .update(req.headers['sec-websocket-key'] + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64');
+  sock.write('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n' +
+    `Sec-WebSocket-Accept: ${accept}\r\n\r\n`);
+  // One unmasked text frame "hi".
+  sock.write(Buffer.from([0x81, 2, 0x68, 0x69]));
+  sock.on('data', () => {});
+  sock.on('error', () => {});
+});
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
+const port = server.address().port;
+
+const chrome = spawn(chromeBin, ['--headless', '--no-sandbox', '--remote-debugging-port=0',
+  '--user-data-dir=' + process.env.PROBE_PROFILE, `http://localhost:${port}/`], { stdio: ['ignore', 'ignore', 'pipe'] });
+const wsURL = await new Promise((resolve, reject) => {
+  let buf = '';
+  chrome.stderr.on('data', (d) => {
+    buf += d;
+    const m = buf.match(/DevTools listening on (ws:\/\/\S+)/);
+    if (m) resolve(m[1]);
+  });
+  setTimeout(() => reject(new Error('no devtools url: ' + buf)), 20000);
+});
+const devPort = new URL(wsURL).port;
+let target;
+for (let i = 0; i < 50 && !target; i++) {
+  const list = await (await fetch(`http://127.0.0.1:${devPort}/json/list`)).json();
+  target = list.find((t) => t.type === 'page' && t.url.includes(`localhost:${port}`));
+  if (!target) await new Promise((r) => setTimeout(r, 200));
+}
+const cdp = new WebSocket(target.webSocketDebuggerUrl);
+await new Promise((r) => cdp.addEventListener('open', r));
+let id = 0;
+const pending = new Map();
+cdp.addEventListener('message', (ev) => {
+  const msg = JSON.parse(ev.data);
+  if (pending.has(msg.id)) { pending.get(msg.id)(msg); pending.delete(msg.id); }
+});
+const evaluate = (expression) => new Promise((resolve) => {
+  const mid = ++id;
+  pending.set(mid, resolve);
+  cdp.send(JSON.stringify({ id: mid, method: 'Runtime.evaluate', params: { expression, awaitPromise: true, returnByValue: true } }));
+});
+
+// Opens n streams of kind, waits for them all to open, then times one
+// fetch with a 5 s cap. Closes the streams afterwards.
+const trial = (kind, n) => `(async () => {
+  const opened = [];
+  const streams = [];
+  for (let i = 0; i < ${n}; i++) {
+    opened.push(new Promise((res) => {
+      if ('${kind}' === 'sse') { const es = new EventSource('/sse?i=' + i); streams.push(es); es.addEventListener('hello', res); }
+      else { const ws = new WebSocket('ws://' + location.host + '/ws?i=' + i); streams.push(ws); ws.onmessage = res; }
+    }));
+  }
+  const openAll = await Promise.race([Promise.all(opened).then(() => 'all-open'),
+    new Promise((r) => setTimeout(() => r('open-timeout'), 5000))]);
+  const t0 = performance.now();
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 5000);
+  let fetchResult;
+  try { const r = await fetch('/ping?t=' + Math.random(), { signal: ctl.signal, cache: 'no-store' }); fetchResult = 'status ' + r.status; }
+  catch (e) { fetchResult = 'failed: ' + e.name; }
+  clearTimeout(timer);
+  const ms = Math.round(performance.now() - t0);
+  streams.forEach((s) => s.close());
+  await new Promise((r) => setTimeout(r, 500));
+  return { kind: '${kind}', streams: ${n}, openAll, fetch: fetchResult, ms };
+})()`;
+
+for (let i = 0; i < 100; i++) {
+  const st = await evaluate('location.href + " " + document.readyState');
+  const v = st.result?.result?.value || '';
+  if (v.includes('localhost:' + port) && v.endsWith('complete')) break;
+  await new Promise((r) => setTimeout(r, 200));
+}
+const results = [];
+for (const [kind, n] of [['sse', 5], ['sse', 6], ['ws', 6], ['ws', 10]]) {
+  const r = await evaluate(trial(kind, n));
+  results.push(r.result?.result?.value ?? r);
+}
+const version = await evaluate('navigator.userAgent');
+console.log(JSON.stringify({ userAgent: version.result.result.value, results }, null, 2));
+cdp.close();
+chrome.kill();
+for (const s of sockets) s.destroy();
+server.close();
+process.exit(0);
+```
+
+</details>
+
+Decisions taken:
+
+- Frame format: one text frame per event, `{"event": <SSE event name>,
+  "data": <the SSE data bytes>}`, built by concatenation so the data bytes
+  equal the SSE line's exactly. Heartbeat: the daemon sends
+  `{"event":"ping"}` every keep-alive period (`sseKeepAlive`, 25 s, the
+  SSE comment period); the page answers `{"event":"pong"}`. The daemon's
+  read loop drops a connection that sends no frame within
+  `wsReadWindow` (3) periods, so 75 s; a close frame or read error ends it
+  at once. Frame writes carry a 10 s deadline; a page frame is capped at
+  1 KiB.
+- The Origin check runs before any render and only for an upgrade:
+  `Origin` absent or `sameOrigin(r)`, else 403. A plain SSE request is
+  served as before whatever its Origin (CORS already keeps a foreign page
+  from reading it). The upgrade uses `websocket.Server` with no
+  `Handshake`, since the check already ran.
+- The upgrade needs `http.Hijacker` and SSE `http.Flusher`; a request whose
+  writer lacks the one it needs gets 500, as SSE did.
+- A stream's write error now ends it on both framings (SSE ignored write
+  errors before and ended only on the request context).
+- `DaemonOptions.keepAlive` (unexported, test-only, like
+  `refreshInterval`) drives the idle-frame period and with it the read
+  window.
+- The support chat's `c.es`/`c.esFor` became `c.st`/`c.stFor`, the stream
+  handle `openStream` returns; the batch guard (`c.st !== st` in `onRegion`
+  and `supActUI`) compares that handle. `openStream` calls `drop` at most
+  once per connection (error and close both route to it) and never after
+  the caller's `close()`, so `gone` followed by the close stays final.
+- No new module: `golang.org/x/net/websocket` from the already-required
+  `golang.org/x/net v0.35.0`; `go.mod`/`go.sum` unchanged.
+
+Verification:
+
+- `stream_ws_test.go`: `TestWebSocketStreamsSendWhatSSESends` (an SSE and
+  a WebSocket stream per path, compared event for event: full session
+  page, `?regions=entries,convlive`, `?h=` with every region held, the
+  index; on connect with the `{"rev":0}` sentinel, after
+  `TrackerChanged`, after a board change, and `gone` then close on the
+  session paths), `TestWebSocketHandshakeChecksOriginAndSession` (foreign,
+  `null`, and other-port Origin 403; own and absent Origin 101; unknown
+  session 404 before the upgrade; a plain request gets SSE),
+  `TestWebSocketStreamNeedsTheLANToken` (LAN Host without the token 401,
+  with the cookie 101), `TestWebSocketStreamDropsASilentPeer` (a peer not
+  answering pings is closed within the window and its broker subscription
+  is gone; an answering peer stays past twice the window; a closing peer's
+  stream ends).
+- `stream_page_test.go` `TestPageStreamsRideWebSocket` (node harness over
+  the extracted `openStream`, `connected`/`connect`, `supOpen`/`supClose`,
+  `supActUI` with a fake WebSocket and virtual clock): no `EventSource` in
+  `dashboard.js`; URL with `h`; ping answered; regions swap, held on a
+  hidden tab while `tracker` nudges; a drop turns the indicator off,
+  calls `trackerLost`, reconnects once after 3 s with the hashes held
+  then, and the indicator recovers on open; `gone` is final; the support
+  chat's first entries region per connect is history and later ones act
+  on their ui line with the tab hidden; a drop retries once after 2 s;
+  `gone` closes for good.
+- `ws-rgo ... test ./internal/wsdashboard/... -count=1 -timeout 30m`:
+  `ok github.com/kang-sw/devenv/internal/wsdashboard 68.042s`;
+  `ws-rgo ... vet ./internal/wsdashboard/`: clean; `node --check
+  dashboard.js`: clean.
+- Lite review (one pass): no correctness or security finding. Noted for
+  the record: a background tab Chromium freezes (Energy Saver, Memory
+  Saver) cannot answer pings, so the daemon drops it after 75 s and the
+  page reconnects with its held hashes on thaw (the indicator shows the
+  drop and recovery); under SSE such a tab kept its stream. Self-healing,
+  so left as is.
