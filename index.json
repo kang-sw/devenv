@@ -342,7 +342,14 @@
       }
     },
     "261110-bug-ws-dashboard-sse-connection-budget": {
-      "registered_at": "2026-11-10T07:31:41Z"
+      "registered_at": "2026-11-10T07:31:41Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "28ef83e379b353cc",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-10T07:59:59Z"
+      }
     },
     "261110-bug-ws-mcp-move-close-guard-flake-and-suite-timeout": {
       "registered_at": "2026-11-10T01:04:17Z"
