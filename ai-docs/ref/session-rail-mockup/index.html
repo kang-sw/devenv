@@ -72,6 +72,7 @@ h1{font-size:16px;margin:0 0 4px}
 .ws+.ws{margin-top:8px}
 .wsbar{display:flex;align-items:center;gap:8px;padding:3px 12px;min-height:28px;background:var(--wb-topic);color:var(--wb-on-topic);cursor:pointer;user-select:none}
 .wsbar .nm{font-size:13px;font-weight:700}
+.wsbar .wsi{width:14px;height:14px;flex:none;opacity:.8;margin-right:-2px}
 .wsbar .pp{font-family:var(--wb-mono);font-size:11px;opacity:.65;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 .wsbar .ct{font-size:11px;font-weight:700;padding:0 7px;border-radius:999px;background:rgb(127 127 127 / .28)}
 .ws.col .wsbody{display:none}
@@ -118,7 +119,7 @@ h1{font-size:16px;margin:0 0 4px}
 @keyframes blink{50%{opacity:.25}}
 .bots{display:inline-flex;align-items:center;gap:2px;min-width:22px;flex:none;font-size:11px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--wb-muted-fg)}
 .bots svg{width:12px;height:12px;flex:none}
-.bots.zero{visibility:hidden}
+.bots.zero{display:none}
 .sess.cur .bots{color:var(--wb-fg)}
 .bots.on{color:var(--wb-fg)}.bots.on svg{color:var(--wb-primary);animation:blink 1.4s ease-in-out infinite}
 .endedrow{font-size:11.5px;color:var(--wb-muted-fg);padding:4px 12px 2px 32px;cursor:pointer}
@@ -200,7 +201,7 @@ h1{font-size:16px;margin:0 0 4px}
 </style>
 </head>
 <body>
-<h1>세션 레일 목업 v13</h1>
+<h1>세션 레일 목업 v14</h1>
 <p class="lede">대시보드의 색, 글꼴, 카드, 칩, 단계 알약 토큰을 그대로 가져왔습니다. 위계는 워크스페이스 → 워크트리 → 세션 → 에이전트 네 단계입니다. 세션 행은 별, 하네스 배지(리드 상태), 로봇(서브에이전트 상태와 수), ID, 마지막 도구 호출 시각, 마지막 메시지 한 줄로 이루어집니다. 데이터는 예시입니다.</p>
 
 <div class="toolbar">폭
@@ -255,7 +256,7 @@ h1{font-size:16px;margin:0 0 4px}
       <div class="rlist">
 
         <div class="ws">
-          <div class="wsbar"><span class="nm">devenv</span><span class="pp">~/devenv</span><button class="add" data-add="wt" title="워크트리 추가" aria-label="워크트리 추가"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8 3.5v9M3.5 8h9"/></svg></button><span class="ct">4</span></div>
+          <div class="wsbar"><svg class="wsi" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-label="저장소"><path d="M3.5 2.5h8.5v9H5a1.5 1.5 0 0 0-1.5 1.5z"/><path d="M3.5 13a1.5 1.5 0 0 0 1.5 1.5h7v-3"/><path d="M6 5h4"/></svg><span class="nm">devenv</span><span class="pp">~/devenv</span><button class="add" data-add="wt" title="워크트리 추가" aria-label="워크트리 추가"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8 3.5v9M3.5 8h9"/></svg></button><span class="ct">4</span></div>
           <div class="wsbody">
             <div class="wt">
               <div class="wthd"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="5" cy="3.5" r="1.5"/><circle cx="5" cy="12.5" r="1.5"/><circle cx="11" cy="6" r="1.5"/><path d="M5 5v6M11 7.5c0 2-6 1.5-6 3.5"/></svg><span class="br">develop</span><span class="wf">· 루트</span><button class="add" data-add="sess" title="새 세션" aria-label="새 세션"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8 3.5v9M3.5 8h9"/></svg></button><span class="gs">±2</span></div>
@@ -287,7 +288,7 @@ h1{font-size:16px;margin:0 0 4px}
         </div>
 
         <div class="ws">
-          <div class="wsbar"><span class="nm">kb-site</span><span class="pp">~/work/kb-site</span><button class="add" data-add="wt" title="워크트리 추가" aria-label="워크트리 추가"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8 3.5v9M3.5 8h9"/></svg></button><span class="ct">1</span></div>
+          <div class="wsbar"><svg class="wsi" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-label="저장소"><path d="M3.5 2.5h8.5v9H5a1.5 1.5 0 0 0-1.5 1.5z"/><path d="M3.5 13a1.5 1.5 0 0 0 1.5 1.5h7v-3"/><path d="M6 5h4"/></svg><span class="nm">kb-site</span><span class="pp">~/work/kb-site</span><button class="add" data-add="wt" title="워크트리 추가" aria-label="워크트리 추가"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8 3.5v9M3.5 8h9"/></svg></button><span class="ct">1</span></div>
           <div class="wsbody">
             <div class="wt">
               <div class="wthd"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="5" cy="3.5" r="1.5"/><circle cx="5" cy="12.5" r="1.5"/><circle cx="11" cy="6" r="1.5"/><path d="M5 5v6M11 7.5c0 2-6 1.5-6 3.5"/></svg><span class="br">main</span><span class="wf">· 루트</span><button class="add" data-add="sess" title="새 세션" aria-label="새 세션"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8 3.5v9M3.5 8h9"/></svg></button></div>
@@ -302,7 +303,7 @@ h1{font-size:16px;margin:0 0 4px}
         </div>
 
         <div class="ws">
-          <div class="wsbar"><span class="nm">notes</span><span class="pp">~/notes</span><button class="add" data-add="sess" title="새 세션" aria-label="새 세션"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8 3.5v9M3.5 8h9"/></svg></button><span class="ct">1</span></div>
+          <div class="wsbar"><svg class="wsi" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-label="폴더"><path d="M2 4.5a1 1 0 0 1 1-1h3.2l1.4 1.5H13a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z"/></svg><span class="nm">notes</span><span class="pp">~/notes</span><button class="add" data-add="sess" title="새 세션" aria-label="새 세션"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8 3.5v9M3.5 8h9"/></svg></button><span class="ct">1</span></div>
           <div class="wsbody">
             <div class="wt">
               <div class="sessions" data-home="h4" style="margin-left:12px">

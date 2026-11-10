@@ -6,8 +6,8 @@ related:
   261110-feat-ws-dashboard-agent-panel-telemetry: "sibling multi-session UX child; independent"
 sage-review-design: completed
 sage-review-completeness: completed
-sage-review-design-reviewed: 462e98035149a6e0
-sage-review-completeness-reviewed: 462e98035149a6e0
+sage-review-design-reviewed: 26a645c5c36fb444
+sage-review-completeness-reviewed: 26a645c5c36fb444
 ---
 
 # Dashboard session rail
@@ -62,7 +62,7 @@ under `agents-plugin-tool/internal/`):
   open (`wsdashboard/gitbadge.go` header). Pooled worktrees are told apart
   by the `worktree_pool` roots (`mcp/dashboard_worktrees.go`, `underAnyPool`).
 
-Mockup the user confirmed (v13, 2026-11-10 whiteboard, topic "세션 레일
+Mockup the user confirmed (v13, adjusted to v14 after promotion; 2026-11-10 whiteboard, topic "세션 레일
 목업"): `ai-docs/ref/session-rail-mockup/index.html` (three widths, the
 rail sliding out, sample data; the + buttons and their popovers in it
 belong to `261110-feat-ws-dashboard-workspaces`). An earlier artifact
@@ -133,15 +133,17 @@ mockup (https://claude.ai/artifact/TboGt3LPM37sSVSknTMZbE) is superseded.
      Rejected: changing the index's count to match the rail in this
      ticket.
    - While at least one level-1 subagent runs, the robot blinks and its
-     count shows; with none, the robot and count are hidden and keep their
-     space.
-   - The badge has a fixed width so the robot and reply ID line up across
-     rows (CLAUDE and PI differ in length).
+     count shows; with none, the robot and count take no space, so the
+     reply ID sits right after the badge (user, 2026-11-10 whiteboard,
+     after v13; mockup v14).
+   - The badge has a fixed width so the reply ID starts at the same place
+     in rows without subagents (CLAUDE and PI differ in length).
    - Under `prefers-reduced-motion: reduce` the ring is drawn whole and
      still, and the robot shows in the accent color without blinking.
    Rejected: a separate dual status glyph beside the badge (outer arc for
    the lead, inner dot for subagents; mockups v6-v11), replaced at the
-   user's request; badge width following its text.
+   user's request; badge width following its text; keeping the robot's
+   space when no subagent runs (v13), which left the reply ID floating.
 8. **Starred sessions (user, (51) c; announced, (52) ok; user, v13).** A
    star at the row's left marks a preferred session. Starred sessions are
    pinned to the top of their own worktree group, in their original order;
@@ -153,8 +155,10 @@ mockup (https://claude.ai/artifact/TboGt3LPM37sSVSknTMZbE) is superseded.
    star state.
 9. **The rail groups by workspace, then worktree (user, (62) a).**
    - A workspace is a repository (its root worktree) or a plain non-git
-     folder, per the epic. Its bar shows the name, the path, and the live
-     session count, and collapses on click.
+     folder, per the epic. Its bar shows an icon (a repository icon for a
+     repository, a folder icon for a plain folder; user, 2026-11-10
+     whiteboard, mockup v14), the name, the path, and the live session
+     count, and collapses on click.
    - Under a repository, every worktree that `git worktree list` reports
      is a row with a branch icon, the branch, the folder name ("root" for
      the root worktree), and the change count; a worktree with no session
