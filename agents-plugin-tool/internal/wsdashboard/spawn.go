@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 )
 
 // stagedBinDir holds the copies a daemon runs from on Windows.
@@ -65,12 +66,19 @@ func StageExecutable(exe, binDir string) (string, error) {
 	return target, nil
 }
 
+// stagedPruneGrace keeps an entry younger than this from a prune: a
+// launcher may be staging it this moment (a .tmp file, or a copy it is
+// about to start) for a daemon of its own, which the lock will sort out.
+const stagedPruneGrace = 2 * time.Minute
+
 // PruneStagedExecutables removes every entry of dir's staged-binary
 // directory except the one exe names, when exe lives there. The daemon
-// calls it once it holds the lock: only then is every other copy known
-// unused (the previous daemon is gone, and a copy staged for a start that
-// lost the lock race is not needed). A copy still running cannot be
-// deleted on Windows; that failure is ignored and a later daemon removes it.
+// calls it once it holds the lock: only then is every other settled copy
+// known unused (the previous daemon is gone, and a copy staged for a start
+// that lost the lock race is not needed). Temp files and entries younger
+// than stagedPruneGrace stay: another launcher's staging in flight is not
+// settled yet. A copy still running cannot be deleted on Windows; that
+// failure is ignored and a later daemon removes it.
 func PruneStagedExecutables(dir, exe string) {
 	binDir := filepath.Join(dir, stagedBinDir)
 	if filepath.Dir(exe) != binDir {
@@ -81,9 +89,14 @@ func PruneStagedExecutables(dir, exe string) {
 		return
 	}
 	for _, entry := range entries {
-		if entry.Name() != filepath.Base(exe) {
-			_ = os.RemoveAll(filepath.Join(binDir, entry.Name()))
+		name := entry.Name()
+		if name == filepath.Base(exe) || strings.HasSuffix(name, ".tmp") {
+			continue
 		}
+		if info, err := entry.Info(); err != nil || time.Since(info.ModTime()) < stagedPruneGrace {
+			continue
+		}
+		_ = os.RemoveAll(filepath.Join(binDir, name))
 	}
 }
 
