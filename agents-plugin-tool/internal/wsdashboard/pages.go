@@ -31,7 +31,7 @@ import (
 // (wswhiteboard.RenderRegions); the rest render from the view model
 // (pageview.go).
 
-//go:embed assets/dashboard.tmpl assets/dashboard.css assets/dashboard.js assets/sprite.svg assets/tracker.css assets/tracker.js assets/mention.js assets/toast.js assets/rail.js
+//go:embed assets/dashboard.tmpl assets/dashboard.css assets/dashboard.js assets/sprite.svg assets/tracker.css assets/tracker.js assets/mention.js assets/toast.js assets/rail.js assets/cards.js assets/preview.js
 var dashboardFS embed.FS
 
 // Region names. The session page's regions in order; the index page has one.
@@ -109,6 +109,13 @@ type pageAssetsData struct {
 	// window.WsRail): per-session drafts, stars, and the rail's own
 	// toggles, which the session page's script uses.
 	RailScript template.JS
+	// CardsScript is the board card framework (cards.js, window.WsCards) and
+	// PreviewScript its file preview kind (preview.js, window.WsPreview);
+	// LucideSprite holds the vendored icons both draw (lucide.go). A session
+	// page loads them before its own script, which mounts the framework.
+	CardsScript   template.JS
+	PreviewScript template.JS
+	LucideSprite  template.HTML
 }
 
 var (
@@ -167,6 +174,10 @@ func buildDashboardAssets(read func(name string) ([]byte, error)) (*dashboardAss
 		return nil, werr
 	}
 	mermaidName, _ := wswhiteboard.MermaidAsset()
+	lucide, lerr := lucideSprite()
+	if lerr != nil {
+		return nil, lerr
+	}
 	a := &dashboardAssets{data: pageAssetsData{
 		CSS:              template.CSS(get("dashboard.css")),
 		Script:           template.JS(get("dashboard.js")),
@@ -176,6 +187,9 @@ func buildDashboardAssets(read func(name string) ([]byte, error)) (*dashboardAss
 		MentionScript:    template.JS(get("mention.js")),
 		ToastScript:      template.JS(get("toast.js")),
 		RailScript:       template.JS(get("rail.js")),
+		CardsScript:      template.JS(get("cards.js")),
+		PreviewScript:    template.JS(get("preview.js")),
+		LucideSprite:     lucide,
 		WhiteboardCSS:    wb.CSS,
 		WhiteboardSprite: wb.Sprite,
 		FormScript:       wb.FormScript,

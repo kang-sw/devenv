@@ -5,7 +5,7 @@
 <style>{{.Assets.WhiteboardCSS}}</style>
 <style>{{.Assets.CSS}}</style>
 <style>{{.Assets.TrackerCSS}}</style></head>
-<body class="dash {{.Mode}}">{{.Assets.WhiteboardSprite}}{{.Assets.Sprite}}<div class="dwrap">
+<body class="dash {{.Mode}}">{{.Assets.WhiteboardSprite}}{{.Assets.Sprite}}{{.Assets.LucideSprite}}<div class="dwrap">
 <div class="top"><a class="back" id="railbtn" href="/" title="{{t "nav.sessions"}}" aria-label="{{t "nav.sessions"}}" aria-controls="rail" aria-expanded="false">{{icon "back"}}</a>{{region . "head"}}{{template "sse"}}{{template "qsslot"}}</div>
 {{template "drawer" .}}
 <div class="banner" id="dash-banner" hidden></div>
@@ -29,6 +29,8 @@ window.wbMermaidFile = {{.Assets.MermaidFile}};</script>
 <script>{{.Assets.TrackerScript}}</script>
 <script>{{.Assets.MentionScript}}</script>
 <script>{{.Assets.RailScript}}</script>
+<script>{{.Assets.CardsScript}}</script>
+<script>{{.Assets.PreviewScript}}</script>
 <script>{{.Assets.Script}}</script>
 </body></html>
 {{end}}

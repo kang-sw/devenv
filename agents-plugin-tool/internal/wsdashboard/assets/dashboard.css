@@ -466,6 +466,76 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 /* a page with the agent composer sends the board's answers from there, so its copy-answers bar (and the bulk-ack checkbox in it) stays hidden; display only, because the composer reads #reply-text. A page without a composer keeps the bar, and rail.js stacks the bottom capsules above it */
 .dgrid:has(> #composer) > .bcol .reply { display: none; }
 
+/* ===== board cards (cards.js) =====
+   A card stands among the board's topics with their gap. Its inner box is
+   what draws: maximized ([data-max]) the inner box is fixed over both
+   columns, under the top bar, while the card keeps its place and height in
+   the board. .li draws a vendored Lucide icon (lucide.go). */
+.li { width: 14px; height: 14px; flex: none; display: block; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.ibtn { width: 24px; height: 24px; flex: none; display: inline-grid; place-items: center; border: 0; padding: 0; border-radius: 6px; background: transparent; color: var(--wb-muted-fg); cursor: pointer; opacity: .6; }
+.ibtn:hover { opacity: 1; background: var(--wb-muted); }
+.ibtn:focus-visible { opacity: 1; }
+.ibtn[aria-pressed="true"] { opacity: 1; color: var(--wb-primary); }
+.ibtn .li { width: 13px; height: 13px; }
+.bcard { margin-bottom: 16px; }
+.bc-in { background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); overflow: hidden; display: flex; flex-direction: column; }
+.bc-hd { display: flex; align-items: center; gap: 7px; padding: 4px 6px 4px 12px; min-height: 32px; font-size: 12.5px; min-width: 0; }
+.bc-hd:hover .ibtn { opacity: .9; }
+.bc-ic { flex: none; color: var(--wb-muted-fg); display: inline-flex; }
+.bc-nm { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; min-width: 3ch; }
+.bc-sub { font-family: var(--wb-mono); font-size: 11.5px; color: var(--wb-muted-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 0; }
+.bc-kind { flex: none; font-size: 10.5px; font-weight: 800; padding: 0 6px; border-radius: 4px; background: var(--wb-muted); color: var(--wb-muted-fg); white-space: nowrap; }
+.bc-acts { display: inline-flex; flex: none; }
+.bc-min { display: none; }
+.bc-folded:empty { display: none; }
+.bc-folded { display: none; font: 11.5px/1.4 var(--wb-mono); color: var(--wb-muted-fg); padding: 0 12px 6px 33px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bc-body { overflow: auto; border-top: 1px solid var(--wb-muted); min-height: 0; }
+.bc-grip { height: 9px; flex: none; cursor: ns-resize; display: grid; place-items: center; touch-action: none; outline: 0; }
+.bc-grip::after { content: ""; width: 28px; height: 3px; border-radius: 2px; background: var(--wb-muted); transition: background .15s; }
+.bc-grip:hover::after, .bcard.drag .bc-grip::after, .bc-grip:focus-visible::after { background: var(--wb-primary); }
+.bcard[data-size="fold"] .bc-body, .bcard[data-size="fold"] .bc-grip { display: none; }
+.bcard[data-size="fold"] .bc-folded:not(:empty) { display: block; }
+.bcard[data-size="fold"] .bc-fold .li { transform: rotate(-90deg); }
+/* a frame in the body would take the pointer mid-drag */
+.bcard.drag .bc-body { pointer-events: none; }
+.bcard.flash .bc-in { animation: bc-flash .9s ease-out; }
+@keyframes bc-flash { from { box-shadow: 0 0 0 2px var(--wb-primary), var(--wb-shadow-hi); } to { box-shadow: var(--wb-shadow); } }
+.bc-scrim { position: fixed; inset: 0; z-index: 47; background: var(--scrim); }
+.bc-scrim[hidden] { display: none; }
+.bcard[data-max] .bc-in { position: fixed; z-index: 48; top: 52px; left: 16px; right: 16px; bottom: 12px; box-shadow: var(--wb-shadow-hi); }
+.bcard[data-max] .bc-body { display: block; flex: 1 1 0; height: auto !important; }
+.bcard[data-max] .bc-folded, .bcard[data-max] .bc-grip, .bcard[data-max] .bc-pin, .bcard[data-max] .bc-fold, .bcard[data-max] .bc-max, .bcard[data-max] .bc-close { display: none; }
+.bcard[data-max] .bc-min { display: inline-grid; }
+@media (max-width: 640px) { .bcard[data-max] .bc-in { top: 46px; left: 8px; right: 8px; bottom: 8px; } }
+@media (prefers-reduced-motion: reduce) { .bcard.flash .bc-in { animation: none; } .bc-grip::after { transition: none; } }
+
+/* ===== preview cards (preview.js) =====
+   What a preview card's body holds, one per kind the preview route
+   answers. The text view's line height is fixed (preview.js LINE), since a
+   jump to a line multiplies it. */
+.pv-img { display: grid; place-items: center; min-height: 100%; padding: 10px; background: repeating-conic-gradient(var(--wb-muted) 0 25%, transparent 0 50%) 0 0 / 16px 16px; }
+.pv-img img { max-width: 100%; height: auto; display: block; }
+.pv-vid { height: 100%; background: #0e0f12; display: grid; }
+.pv-vid video { width: 100%; height: 100%; min-height: 0; display: block; }
+.pv-sand { height: 100%; display: flex; flex-direction: column; }
+.pv-cap { flex: none; font-size: 10.5px; color: var(--wb-muted-fg); padding: 3px 10px; border-bottom: 1px dashed color-mix(in srgb, var(--wb-fg) 22%, transparent); }
+.pv-sand iframe { flex: 1 1 0; min-height: 0; width: 100%; border: 0; background: #fff; display: block; }
+.pv-md { padding: 10px 16px 14px; overflow-wrap: anywhere; }
+.pv-md > :first-child { margin-top: 0; }
+.pv-md h1, .pv-md h2, .pv-md h3, .pv-md h4 { font-weight: 700; margin: 14px 0 6px; }
+.pv-md h1 { font-size: 1.4em; } .pv-md h2 { font-size: 1.25em; } .pv-md h3 { font-size: 1.1em; }
+.pv-md hr { border: 0; border-top: 1px solid var(--wb-muted); margin: 12px 0; }
+.pv-dfile + .pv-dfile { border-top: 1px solid var(--wb-muted); }
+.pv-dpath { position: sticky; left: 0; padding: 5px 12px; font: 700 12px var(--wb-mono); color: var(--wb-muted-fg); overflow-wrap: anywhere; }
+.pv-diff { min-width: 100%; width: max-content; }
+.pv-txtbox { min-width: 100%; width: max-content; }
+.pv-lines { position: relative; padding: 8px 0; }
+.pv-txt { margin: 0; padding: 0 12px; font: 12px/18px var(--wb-mono); white-space: pre; tab-size: 4; color: var(--wb-fg); background: transparent; }
+.pv-mark { position: absolute; left: 0; right: 0; height: 18px; margin-top: 8px; background: color-mix(in srgb, var(--wb-policy) 20%, transparent); pointer-events: none; }
+.pv-none { padding: 18px 16px; display: flex; flex-direction: column; align-items: flex-start; gap: 10px; color: var(--wb-muted-fg); font-size: 13px; }
+.pv-none p { margin: 0; }
+.pv-none .btn { color: var(--wb-fg); height: 26px; }
+
 /* ===== session layout =====
    live: one grid whose children are the tab bar, the tree, the splitter, the
    conversation, the composer, and the board column (the panels are in the
