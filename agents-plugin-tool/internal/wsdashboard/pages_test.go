@@ -301,10 +301,14 @@ func TestSessionPagesCarryScriptHooks(t *testing.T) {
 			}
 		}
 	}
-	// Both pages run the open-question pill beside the answer form.
+	// Both pages run the open-question pill and the topic rail beside the
+	// answer form.
 	for name, page := range map[string]string{"live": live, "board-first": board} {
 		if !strings.Contains(page, "data-wb-title") {
 			t.Errorf("%s page lacks the open-question pill script", name)
+		}
+		if !strings.Contains(page, "window.wbRail") {
+			t.Errorf("%s page lacks the topic rail script", name)
 		}
 	}
 }

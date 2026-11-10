@@ -428,7 +428,7 @@ details.panel .body { container-type: inline-size; }
 
 /* open-question pill: a zero-height sticky wrapper at each end of the board's scroll area carries the pill, so showing it moves nothing; the bottom offset is set by pill.js to clear the reply bar */
 .oq-wrap { position: sticky; height: 0; z-index: 4; pointer-events: none; text-align: center; }
-.oq-wrap.top { top: 10px; }
+.oq-wrap.top { top: calc(10px + var(--wb-rail-h, 0px)); }
 .oq-wrap.bot { bottom: 10px; }
 .oq-pill { position: absolute; left: 50%; transform: translateX(-50%); pointer-events: auto; cursor: pointer; border: 0; height: 28px; padding: 0 14px; border-radius: 999px; background: var(--wb-policy); color: var(--wb-on-policy); box-shadow: 0 0 0 2px var(--wb-bg), var(--wb-shadow-hi); font-size: 12.5px; font-weight: 700; line-height: 1; white-space: nowrap; }
 .oq-pill[hidden] { display: none; }
@@ -436,6 +436,37 @@ details.panel .body { container-type: inline-size; }
 .oq-wrap.bot .oq-pill { bottom: 0; }
 .oq-pill:hover { filter: brightness(1.1); }
 .oq-pill:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 2px; }
+
+/* topic rail (rail.js): the current topic's bar sticks under the top capsules
+   (--wb-rail-top), and zero-height sticky wrappers at each end of the board
+   carry the jump capsules. The topic clips rather than hides its overflow, so
+   it is no scroll container and its bar sticks to the board's scroller. The
+   capsule height, gap, and paddings are mirrored in rail.js (CAP, GAP, PAD,
+   FADE): change them together. */
+.wb-rail .topic { overflow: hidden; overflow: clip; }
+.wb-rail .topic > .tbar { position: sticky; top: var(--wb-rail-top, 0px); z-index: 1; }
+.wb-rail .topic:not(.quiet) > .tbar { border-radius: var(--wb-radius) var(--wb-radius) 0 0; }
+.wb-rail .topic > .tbar.wb-stuck { box-shadow: var(--wb-shadow); }
+/* the book button stays at the card's top and scrolls away under a stuck bar, so the bar gives back the room it reserved for it (the :has() outweighs the has-doc padding rules) */
+.wb-rail .topic.has-doc:has(> details.tdoc) > .tbar.wb-stuck { padding-right: 12px; }
+.wb-rail .topic > details.tdoc > summary { z-index: 2; }
+.wb-rail-wrap { position: sticky; height: 0; z-index: 1; pointer-events: none; }
+.wb-rail-wrap.up { top: 0; z-index: 3; }
+.wb-rail-wrap.dn { bottom: 0; }
+.wb-rail-stack { position: absolute; left: 0; right: 0; display: flex; flex-direction: column; gap: 3px; }
+.wb-rail-stack[hidden] { display: none; }
+/* the shadow carries the band's fill over the scroller's top padding, which a sticky inset counts from */
+.wb-rail-wrap.up .wb-rail-stack { top: 0; padding: 4px 0 3px; background: var(--wb-bg); box-shadow: 0 -8px 0 var(--wb-bg); }
+.wb-rail-wrap.dn .wb-rail-stack { bottom: 0; padding: 14px 0 4px; background: linear-gradient(to bottom, transparent, var(--wb-bg) 14px); }
+.wb-cap { pointer-events: auto; display: flex; align-items: center; gap: 6px; height: 17px; margin: 0 6px; padding: 0 10px; border: 0; border-radius: 999px; background: var(--wb-topic); color: var(--wb-on-topic); font-size: 10.5px; font-weight: 700; line-height: 1; text-align: left; cursor: pointer; }
+.wb-cap.far { margin: 0 18px; font-size: 10px; font-weight: 600; opacity: .6; }
+.wb-cap.quiet { background: var(--wb-muted); color: var(--wb-muted-fg); }
+.wb-cap:hover { opacity: 1; }
+.wb-cap:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 1px; opacity: 1; }
+.wb-cap .cn { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-cap .cp { flex: none; display: inline-flex; align-items: center; height: 12px; padding: 0 5px; border-radius: 999px; background: var(--wb-policy); color: var(--wb-on-policy); font-size: 9.5px; font-weight: 700; }
+.wb-cap .cx { flex: none; opacity: .75; font-variant-numeric: tabular-nums; }
+.wb-cap[hidden], .wb-cap > [hidden] { display: none; }
 
 /* update banner (full page) and in-page link target highlight */
 .banner { display: none; position: sticky; top: 0; z-index: 5; margin: -16px -16px 12px; padding: 6px 16px; background: var(--wb-now); color: var(--wb-on-now); text-align: center; font-size: 16px; font-weight: 700; cursor: pointer; box-shadow: var(--wb-shadow-hi); }

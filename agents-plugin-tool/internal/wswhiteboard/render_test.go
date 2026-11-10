@@ -968,6 +968,23 @@ func TestOpenQuestionPillIsOnTheFullPageOnly(t *testing.T) {
 	}
 }
 
+// TestTopicRailIsOnTheFullPageOnly pins where the topic rail (the sticky
+// current-topic bar and its jump capsules) ships: the full page and the
+// dashboard's shared form script carry its script, the embed does not, and
+// the shared stylesheet carries its rules.
+func TestTopicRailIsOnTheFullPageOnly(t *testing.T) {
+	if out := render(t, sampleView(LayoutFull)); !strings.Contains(out, "window.wbRail") || !strings.Contains(out, ".wb-rail-wrap") {
+		t.Errorf("full page lacks the topic rail script or style")
+	}
+	if out := render(t, sampleView(LayoutEmbed)); strings.Contains(out, "window.wbRail") {
+		t.Errorf("embed carries the topic rail script")
+	}
+	assets, err := PageAssets()
+	if err != nil || !strings.Contains(string(assets.FormScript), "window.wbRail") {
+		t.Errorf("shared form script lacks the topic rail (err %v)", err)
+	}
+}
+
 // A standalone page renders in the language its view names: the static text
 // (tooltips, the folded count) comes from the language's table, the board's
 // own content (titles, panel rows) stays as written, and the page carries the
