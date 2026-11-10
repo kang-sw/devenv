@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: eb0988dd8a51a423
 sage-review-design-reviewed: eb0988dd8a51a423
+completed: 2026-11-10
 ---
 
 # Dashboard daemon read amplification
@@ -269,3 +270,49 @@ Verification:
 Lead follow-up after merge and release (not a phase gate): remeasure the
 Windows daemon (the restart needs the user's approval) and decide on the
 Decision 1 follow-ups.
+
+### Result (ceaeeb66f) - 2026-11-10
+
+Landed in ffa20da9c (Decisions 6, 7), 89eb4b898 (wsdashboard side of 2, 3, 4, 5, 8),
+c1afbe86c (mcp source side of 2, 3, 4, 8; ws-mcp.md), and ceaeeb66f (review fixes).
+
+- Decision 2: `wsdashboard.FileCache[T]` (exported, generic) is a stat-checked
+  parse cache: stat before load, size+mtime equality, failures never cached, a
+  file that does not stat goes to its loader uncached and counts as neither hit
+  nor miss. Added beyond the ticket: a file modified within 2 s of the read is
+  returned but not cached (racy-git guard), so the accepted same-granule miss
+  cannot occur. `wsdashboard.SnapshotCache` caches the parsed snapshot and the
+  canonical document `HashLiveStores` folds; the daemon holds one (pages,
+  stamps, agent re-reads) and the mcp source another (its `HashLiveStores`).
+  The mcp source caches record parts (bytes kept for the fingerprint) through
+  a new `loadRecordWith` reader seam, the reply registry, and scope stores.
+  Entries drop on session removal (`Daemon.sessionChanged`, `ForgetSession`).
+- Decision 3: `wsdashboard.StampWatched` uses the generic rule: a watched
+  directory with watched files directly inside is stamped by its listing and
+  covers those files; `sessionStamp` and `boardWatchStamp` both use it. A
+  symlinked entry is followed with `os.Stat`.
+- Decision 4: the reply registry left the board's watch list; the board memo
+  key and the ReadSession board print fold `replyPrint` (this session's
+  `Contacts` and `len(Queues[replyID])`). New optional seam
+  `wsdashboard.MailPrintSource` (forwarded by `agentSessions`) feeds the same
+  print into every page's refresh stamp.
+- Decision 5: page lookups are a `sessionLookup` (index-only `get`, lazy
+  `snap`); `agentTree` and `conversation` read no snapshot.
+- Decision 6: `wsgit.Executable()`; the badge's `badgeGitCommand` and the
+  tracker host use it; the resolver test moved to wsgit.
+- Decision 7: loose refs are stamped by name, size, and mtime;
+  `packed-refs`/`tables.list` stay content-based.
+- Decision 8: `/debug/pprof/streams` serves `snapshot_cache_*` (daemon) and
+  `record_cache_*`, `reply_registry_cache_*`, `scope_store_cache_*`,
+  `source_snapshot_cache_*` (source), each `_hits`/`_misses`.
+
+Verification (remote, ws-rgo): `go test ./internal/mcp/ ./internal/wsdashboard/
+./internal/wstrackerhost/ ./internal/wsgit/ ./cmd/... -count=1` ok; `go vet` on
+the four packages clean; `go test -race` on the dashboard-focused subsets of mcp
+and wsdashboard ok; after the review fixes, mcp, wsdashboard, and wstrackerhost
+re-run ok. Lite review: two Important test-integrity findings fixed (badge
+test now checks `Args[0]`; loose-ref test proves content is not read).
+
+Open (minor, from review): `ForgetSession` evicts record-cache entries by the
+keys `byReply` holds at forget time; a key pruned and rescanned out of
+`byReply` before its registration leaves the index keeps its cached parts.
