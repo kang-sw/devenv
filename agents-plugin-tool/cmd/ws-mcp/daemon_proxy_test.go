@@ -407,3 +407,43 @@ func TestHostedConnectionSeeingALANChangeReplacesTheDaemon(t *testing.T) {
 		t.Fatalf("initialize on the successor = %v", init)
 	}
 }
+
+// TestHostedMailboxWaitWokenByMailExitsZeroOnTheStream pins the final frame
+// of a wait a mail wakes: exit_code is present and zero. The field used to
+// be omitted when zero, and the launcher read a missing code as 1, so a
+// delivered mail looked like a failed wait to the mod and the Pi waiter and
+// the mail push never fired.
+func TestHostedMailboxWaitWokenByMailExitsZeroOnTheStream(t *testing.T) {
+	h := startHostedDaemon(t)
+	const waitKey = "amber-tide-fox"
+	root, err := wsstate.CacheRoot(wsstate.Options{CacheHome: h.cache})
+	if err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(root, "mailbox-listening", waitKey+".json")
+	wait := connectHosted(t, h.ep, h.hello(wsdashboard.ProxyModeCLI, []string{"mailbox", "wait", "--session-key", waitKey, "--timeout", "30s", "--format", "json"}, os.Getpid(), nil))
+	waitUntil(t, 5*time.Second, "listening marker written", func() bool { _, err := os.Stat(marker); return err == nil })
+
+	sender := connectHosted(t, h.ep, h.hello(wsdashboard.ProxyModeMCP, []string{"serve", "--stdio"}, os.Getpid(), nil))
+	key := sender.login(h.project)
+	sender.tool("mailbox.send", map[string]any{"session_key": key, "to": wsmailbox.ReplyIDPrefix + wsmailbox.ReplyID(waitKey), "content": "wake up"})
+
+	var final map[string]any
+	for {
+		frame, ok := wait.readLine(15 * time.Second)
+		if !ok {
+			t.Fatal("stream ended before the final frame")
+		}
+		if frame["final"] == true {
+			final = frame
+			break
+		}
+	}
+	code, present := final["exit_code"]
+	if !present {
+		t.Fatalf("the final frame carries no exit_code (the launcher would read 1): %v", final)
+	}
+	if code.(float64) != 0 || !strings.Contains(final["data"].(string), `"timed_out":false`) {
+		t.Fatalf("final frame = %v, want exit_code 0 with the mail", final)
+	}
+}

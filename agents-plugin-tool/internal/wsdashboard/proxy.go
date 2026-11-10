@@ -91,10 +91,11 @@ type ProxyCLIFrame struct {
 	// final frame.
 	Stream string `json:"stream,omitempty"`
 	Data   string `json:"data,omitempty"`
-	// ExitCode is set on the final frame only (Final says so, as the code
-	// may be zero).
+	// ExitCode is meaningful on the final frame only. It is never omitted:
+	// a success is code 0, and a launcher that saw no code would have to
+	// guess (and guessed 1, which made a delivered mail look like an error).
 	Final    bool `json:"final,omitempty"`
-	ExitCode int  `json:"exit_code,omitempty"`
+	ExitCode int  `json:"exit_code"`
 }
 
 // ProxyHandler builds the session for an accepted hello. The daemon cannot

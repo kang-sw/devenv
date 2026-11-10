@@ -72,13 +72,15 @@ def load_launcher():
 class FakeDaemon:
     """The daemon's side of /health and the MCP route, on a loopback port."""
 
-    def __init__(self, *, version="0.48.16", build_time=2_000_000_000_000, name="daemon", refuse_reason="", slow_methods=(), lan=False):
+    def __init__(self, *, version="0.48.16", build_time=2_000_000_000_000, name="daemon", refuse_reason="", slow_methods=(), lan=False, cli_exit_code=7):
         self.version = version
         self.build_time = build_time
         self.name = name
         self.refuse_reason = refuse_reason
         self.slow_methods = set(slow_methods)
         self.lan = lan
+        # None: the final frame carries no exit_code at all.
+        self.cli_exit_code = cli_exit_code
         self.token = "f" * 64
         self.hellos = []
         self.requests = []  # (method, id) per hosted request
@@ -159,7 +161,10 @@ class FakeDaemon:
     def serve_cli(self, conn, hello):
         conn.sendall(json.dumps({"stream": "stderr", "data": "fake: waiting\n"}).encode() + b"\n")
         result = {"served_by": self.name, "args": hello["argv"][2:], "owner_pid": hello["owner_pid"]}
-        conn.sendall(json.dumps({"final": True, "exit_code": 7, "data": json.dumps(result) + "\n"}).encode() + b"\n")
+        final = {"final": True, "data": json.dumps(result) + "\n"}
+        if self.cli_exit_code is not None:
+            final["exit_code"] = self.cli_exit_code
+        conn.sendall(json.dumps(final).encode() + b"\n")
 
     def serve_mcp(self, conn, reader, hello):
         while True:
@@ -520,6 +525,18 @@ class LauncherProxyTest(unittest.TestCase):
         self.assertEqual(daemon.hellos[0]["mode"], "cli")
         self.assertEqual(daemon.hellos[0]["argv"], ["mailbox", "wait", "--session-key", "k", "--format", "json"])
         self.assertEqual(self.runtime_log(), [])
+
+    def test_mailbox_wait_success_reaches_the_caller_as_exit_zero(self):
+        # A wait that a mail wakes exits 0; the mod and the Pi waiter treat
+        # any code but 0 and 3 as an error and never push the mail. A final
+        # frame with the code written out, and one from a daemon that
+        # omitted the zero, both read as success.
+        for daemon in (self.daemon(cli_exit_code=0), self.daemon(cli_exit_code=None)):
+            daemon.write_endpoint(self.daemon_dir)
+            stdout = io.StringIO()
+            code = self.launcher.proxy_cli(self.link(), ["mailbox", "wait", "--session-key", "k", "--format", "json"], stdout, io.StringIO())
+            self.assertEqual(code, 0, f"exit code with cli_exit_code={daemon.cli_exit_code}")
+            self.assertEqual(json.loads(stdout.getvalue())["served_by"], "daemon")
 
     def test_mailbox_wait_falls_back_to_the_direct_path(self):
         self.point_start_at(fail=True)

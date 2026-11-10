@@ -1535,8 +1535,11 @@ def proxy_cli(link: DaemonLink, argv: list[str], stdout, stderr) -> int | None:
             stdout.write(data)
             stdout.flush()
             stream.close()
-            code = frame.get("exit_code")
-            return code if isinstance(code, int) else 1
+            # The daemon always sends the code; a final frame without one
+            # can only come from a daemon that omitted a zero, so it reads
+            # as success rather than turning a delivered mail into an error.
+            code = frame.get("exit_code", 0)
+            return code if isinstance(code, int) and not isinstance(code, bool) else 1
 
 
 def compat_probe_binary(binary: Path, env: dict, mode) -> Path:
