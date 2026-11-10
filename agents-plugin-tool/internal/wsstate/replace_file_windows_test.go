@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// TestAtomicReplaceFileWindowsReplacesExisting verifies that atomicReplaceFile
+// TestAtomicReplaceFileWindowsReplacesExisting verifies that AtomicReplaceFile
 // succeeds when the destination already exists and the new contents are visible
 // after the call.
 func TestAtomicReplaceFileWindowsReplacesExisting(t *testing.T) {
@@ -23,8 +23,8 @@ func TestAtomicReplaceFileWindowsReplacesExisting(t *testing.T) {
 		t.Fatalf("WriteFile tmp: %v", err)
 	}
 
-	if err := atomicReplaceFile(tmp, dst); err != nil {
-		t.Fatalf("atomicReplaceFile: %v", err)
+	if err := AtomicReplaceFile(tmp, dst); err != nil {
+		t.Fatalf("AtomicReplaceFile: %v", err)
 	}
 
 	got, err := os.ReadFile(dst)

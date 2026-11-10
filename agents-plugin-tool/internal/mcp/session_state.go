@@ -592,10 +592,11 @@ func withPendingStatus(items []todoItem) []todoItem {
 // --- store-bound read-modify-write wrappers ----------------------------------
 
 // mutateRecord runs fn against the session record for sessionKey under s.mu and
-// persists the parts in write atomically, reading key.json and those parts
-// first. It is the shared read-modify-write primitive for every session
-// record mutation, so fn must change only fields of the parts it names: a
-// change to any other part is not written.
+// the key's cross-process record lock, and persists the parts in write
+// atomically, reading key.json and those parts first. It is the shared
+// read-modify-write primitive for every session record mutation, so fn must
+// change only fields of the parts it names: a change to any other part is not
+// written. A record lock not acquired within its timeout is an error.
 func (s *sessionStore) mutateRecord(sessionKey string, write recordPart, fn func(*sessionRecord) error) error {
 	return s.mutateRecordParts(sessionKey, write, write, fn)
 }
@@ -616,6 +617,14 @@ func (s *sessionStore) mutateRecordParts(sessionKey string, read, write recordPa
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	unlock, err := s.lockExistingRecord(d, sessionKey)
+	if errors.Is(err, errSessionNotFound) {
+		return fmt.Errorf("session key not found: %s", sessionKey)
+	}
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	record, legacy, err := s.loadRecord(d, sessionKey, read|write, nil)
 	if errors.Is(err, errSessionNotFound) {
 		return fmt.Errorf("session key not found: %s", sessionKey)

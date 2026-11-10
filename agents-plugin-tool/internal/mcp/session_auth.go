@@ -150,9 +150,16 @@ var sessionKeyFilenamePattern = regexp.MustCompile(`^[a-z0-9-]{1,128}$`)
 type sessionStore struct {
 	// mu serializes same-process read-modify-write and the mint claim loop.
 	// Cross-process safety rests on filesystem primitives: an exclusive
-	// directory create for the unique mint claim, atomic temp+rename per part
-	// file for updates.
+	// directory create for the unique mint claim, the key directory's record
+	// lock (lockRecord) around every content write, and an atomic temp+replace
+	// per part file.
 	mu sync.Mutex
+
+	// lockTimeout bounds the wait for a key's record lock; zero means
+	// recordLockTimeout. replace swaps a part file's temp file into place;
+	// nil means wsstate.AtomicReplaceFile. Both are test seams.
+	lockTimeout time.Duration
+	replace     func(tmp, path string) error
 }
 
 func newSessionStore() *sessionStore {

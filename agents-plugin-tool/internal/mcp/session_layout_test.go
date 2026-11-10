@@ -3,11 +3,16 @@ package mcp
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/gofrs/flock"
 
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
@@ -125,8 +130,8 @@ func TestSplitLayoutMintLookupChildrenAndMtime(t *testing.T) {
 		t.Fatalf("key.json = %v", stored)
 	}
 	entries, err := os.ReadDir(filepath.Dir(keyPath))
-	if err != nil || len(entries) != 1 {
-		t.Fatalf("a minted key holds key.json alone, got %v (%v)", entries, err)
+	if err != nil || len(entries) != 2 || entries[0].Name() != partKey.fileName() || entries[1].Name() != recordLockName {
+		t.Fatalf("a minted key holds key.json and its record lock alone, got %v (%v)", entries, err)
 	}
 	if exists(filepath.Join(cache, legacyKeysDirName)) {
 		t.Fatal("mint must not create the legacy keys/ directory")
@@ -193,17 +198,21 @@ func TestLegacyRecordServesWithoutMigrating(t *testing.T) {
 	if err != nil || len(children) != 1 || children[0].key != "legacy-child-00" || children[0].note != "a note" {
 		t.Fatalf("children over a legacy child = %+v, %v", children, err)
 	}
-	// A no-op mutation writes nothing, so it does not migrate either.
-	if err := s.deleteOverride("legacy-child-00", "absent.item"); err != nil {
-		t.Fatalf("deleteOverride(absent): %v", err)
-	}
-
 	d, _ := s.dirs()
 	if exists(d.keyDir("legacy-child-00")) {
 		t.Fatal("a read created the legacy key's split directory")
 	}
 	if !exists(legacyPath) {
 		t.Fatal("a read removed the legacy record file")
+	}
+
+	// A no-op mutation writes nothing, so it does not migrate either. It
+	// still takes the record lock, which lives in the key's directory.
+	if err := s.deleteOverride("legacy-child-00", "absent.item"); err != nil {
+		t.Fatalf("deleteOverride(absent): %v", err)
+	}
+	if exists(d.partPath("legacy-child-00", partKey)) || !exists(legacyPath) {
+		t.Fatal("a no-op mutation migrated the legacy record")
 	}
 }
 
@@ -596,5 +605,158 @@ func TestDashboardSourceSeesBothLayouts(t *testing.T) {
 	d, _ := s.dirs()
 	if exists(d.keyDir(legacyKey)) || !exists(legacyPath) {
 		t.Fatal("dashboard reads must not migrate a legacy record")
+	}
+}
+
+// TestRecordLockSerializesWritersAcrossStores pins the cross-process record
+// lock: separate stores share no s.mu, as separate processes would not, and
+// their concurrent writes to different agenda keys and to the todo list of one
+// key all survive.
+func TestRecordLockSerializesWritersAcrossStores(t *testing.T) {
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	key, err := newSessionStore().mint("/work", roleLead, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const stores, writes = 6, 15
+	var wg sync.WaitGroup
+	for i := 0; i < stores; i++ {
+		// A generous timeout: this pins lost updates, not lock latency.
+		s := &sessionStore{lockTimeout: time.Minute}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < writes; j++ {
+				name := fmt.Sprintf("s%d-w%d", i, j)
+				if err := s.setAgenda(key, name, json.RawMessage(`{"v":1}`)); err != nil {
+					t.Errorf("setAgenda(%s): %v", name, err)
+				}
+				if err := s.mutateTodos(key, func(list []todoItem) ([]todoItem, error) {
+					return append(list, todoItem{Key: name, Title: name, Status: todoPending}), nil
+				}); err != nil {
+					t.Errorf("mutateTodos(%s): %v", name, err)
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	rec, ok := newSessionStore().readState(key, partAll)
+	if !ok {
+		t.Fatal("record unreadable after concurrent writes")
+	}
+	if len(rec.Agenda) != stores*writes || len(rec.Todos) != stores*writes {
+		t.Fatalf("lost updates: %d agenda keys and %d todos, want %d each", len(rec.Agenda), len(rec.Todos), stores*writes)
+	}
+}
+
+// TestFailedReplaceKeepsPreviousRecord pins that a write whose replace fails
+// returns the error and leaves the previous part files readable, unchanged,
+// and free of temp files.
+func TestFailedReplaceKeepsPreviousRecord(t *testing.T) {
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	s := newSessionStore()
+	key, err := s.mint("/work", roleLead, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.enterMode(key, "implement", json.RawMessage(`{"v":1}`), []todoItem{{Key: "a", Title: "A", Status: todoPending}}); err != nil {
+		t.Fatal(err)
+	}
+	d, _ := s.dirs()
+	before := map[recordPart][]byte{}
+	for _, part := range recordParts {
+		if exists(d.partPath(key, part)) {
+			before[part] = readFileForTest(t, d.partPath(key, part))
+		}
+	}
+	want, _ := s.readState(key, partAll)
+
+	replaceErr := errors.New("replace refused")
+	failing := &sessionStore{replace: func(string, string) error { return replaceErr }}
+	if err := failing.enterMode(key, "implement", json.RawMessage(`{"v":2}`), []todoItem{{Key: "b", Title: "B", Status: todoPending}}); !errors.Is(err, replaceErr) {
+		t.Fatalf("enterMode with a failing replace = %v, want %v", err, replaceErr)
+	}
+	if err := failing.setOverride(key, "item", "v"); !errors.Is(err, replaceErr) {
+		t.Fatalf("setOverride with a failing replace = %v, want %v", err, replaceErr)
+	}
+
+	for part, data := range before {
+		if got := readFileForTest(t, d.partPath(key, part)); !bytes.Equal(got, data) {
+			t.Fatalf("%s changed by a failed write: %s, want %s", part.fileName(), got, data)
+		}
+	}
+	got, ok := s.readState(key, partAll)
+	if !ok {
+		t.Fatal("record unreadable after a failed write")
+	}
+	assertRecordContent(t, got, want)
+	entries, err := os.ReadDir(d.keyDir(key))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".tmp") {
+			t.Fatalf("a failed write left temp file %s", entry.Name())
+		}
+	}
+	// The lock was released: a working store writes next.
+	if err := s.setAgenda(key, "after", json.RawMessage(`{}`)); err != nil {
+		t.Fatalf("write after a failed write: %v", err)
+	}
+}
+
+// TestRecordLockTimeoutIsAnError pins that a record lock held past the
+// timeout fails the write, from the store and from a tool call, and writes
+// nothing.
+func TestRecordLockTimeoutIsAnError(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	server := NewServer(root, "test")
+	key, _ := parseLoginResponse(t, callLogin(t, server, 905000, root, nil))
+	d, _ := server.sessions.dirs()
+
+	holder := flock.New(filepath.Join(d.keyDir(key), recordLockName))
+	if locked, err := holder.TryLock(); err != nil || !locked {
+		t.Fatalf("hold the record lock: %v, %v", locked, err)
+	}
+	defer holder.Unlock() //nolint:errcheck
+
+	server.sessions.lockTimeout = 100 * time.Millisecond
+	err := server.sessions.setAgenda(key, "notes", json.RawMessage(`{}`))
+	if err == nil || !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("setAgenda under a held lock = %v, want a timeout error", err)
+	}
+	if got := callToolWithKey(t, server, 5001, key, "agenda.set", map[string]any{
+		"key": "notes", "value": map[string]any{"v": 1},
+	}); !strings.Contains(got, "waiting for session record lock") {
+		t.Fatalf("agenda.set under a held lock: %s", got)
+	}
+	if rec, ok := server.sessions.readState(key, partAll); !ok || rec.Agenda != nil {
+		t.Fatalf("a timed-out write changed the record: %+v, %v", rec, ok)
+	}
+}
+
+// TestWriteToUnknownKeyCreatesNothing pins that the record lock is taken only
+// for a key that has a record: a write to an unknown key fails and leaves no
+// key directory, while a legacy key gets its directory, lock, and migration.
+func TestWriteToUnknownKeyCreatesNothing(t *testing.T) {
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	s := newSessionStore()
+	d, _ := s.dirs()
+	if err := s.setAgenda("unknown-key-00", "a", json.RawMessage(`{}`)); err == nil || !strings.Contains(err.Error(), "session key not found") {
+		t.Fatalf("setAgenda(unknown) = %v, want session key not found", err)
+	}
+	if exists(d.keyDir("unknown-key-00")) {
+		t.Fatal("a write to an unknown key created its directory")
+	}
+
+	writeLegacyRecordForTest(t, s, "legacy-lock-00", fullLegacyRecord("/w", ""))
+	if err := s.setAgenda("legacy-lock-00", "a", json.RawMessage(`{}`)); err != nil {
+		t.Fatalf("setAgenda(legacy): %v", err)
+	}
+	if !exists(filepath.Join(d.keyDir("legacy-lock-00"), recordLockName)) || !exists(d.partPath("legacy-lock-00", partKey)) {
+		t.Fatal("a legacy write must lock in, and migrate to, the key's directory")
 	}
 }

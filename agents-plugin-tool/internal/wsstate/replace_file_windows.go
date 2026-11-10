@@ -8,12 +8,12 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// atomicReplaceFile replaces path with tmp using MoveFileEx(REPLACE_EXISTING),
+// AtomicReplaceFile replaces path with tmp using MoveFileEx(REPLACE_EXISTING),
 // which is atomic on NTFS. When a concurrent reader (AV scanner, dashboard)
 // holds the destination and the system returns ERROR_SHARING_VIOLATION, we
 // retry a small number of times with brief exponential back-off before giving
 // up.
-func atomicReplaceFile(tmp, path string) error {
+func AtomicReplaceFile(tmp, path string) error {
 	from, err := windows.UTF16PtrFromString(tmp)
 	if err != nil {
 		return err
