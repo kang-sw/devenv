@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -103,8 +104,27 @@ type launcherClient struct {
 	cmd    *exec.Cmd
 	stdin  *os.File
 	out    *bufio.Reader
-	stderr *bytes.Buffer
+	stderr *lockedBuffer
 	nextID int
+}
+
+// lockedBuffer is the launcher's stderr: exec's copy goroutine writes it
+// while the test reads it, so both go through one mutex.
+type lockedBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (l *lockedBuffer) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.Write(p)
+}
+
+func (l *lockedBuffer) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.String()
 }
 
 func startLauncher(t *testing.T, launcher, dir string, env []string, args ...string) *launcherClient {
@@ -121,8 +141,8 @@ func startLauncher(t *testing.T, launcher, dir string, env []string, args ...str
 	if err != nil {
 		t.Fatal(err)
 	}
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
+	stderr := &lockedBuffer{}
+	cmd.Stderr = stderr
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +154,7 @@ func startLauncher(t *testing.T, launcher, dir string, env []string, args ...str
 			_ = cmd.Wait()
 		}
 	})
-	return &launcherClient{t: t, cmd: cmd, stdin: stdinW, out: bufio.NewReader(stdout), stderr: &stderr}
+	return &launcherClient{t: t, cmd: cmd, stdin: stdinW, out: bufio.NewReader(stdout), stderr: stderr}
 }
 
 func (c *launcherClient) call(method string, params any) map[string]any {
