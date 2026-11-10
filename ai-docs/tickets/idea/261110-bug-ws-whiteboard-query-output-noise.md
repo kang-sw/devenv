@@ -61,11 +61,20 @@ leaving options, recommendation, rationale, quote, and time to `full` or an
 explicit `fields` list. Whether it becomes the default for `topic` and `ids`
 targets is open.
 
+## Topic key (user, 2026-11-10, board item 656)
+
+Each topic gets a short stable key (stem) chosen by the lead, separate from its
+title; the title becomes an editable label. `wb:topic` and `topic` queries
+take the stem. A topic with no stem, such as one on a board a downstream
+project already runs, keeps working with its label as the key. This settles
+observation 7.
+
+Rejected: a server-minted topic number (shortest, but the lead must query to
+learn it every time); prefix or substring matching on the title (breaks when
+the title changes).
+
 ## Open Questions
 
-- Give each topic a short stable key (stem) separate from its title, with the
-  title as an editable label, so `wb:topic` and `topic` queries take the key
-  instead of the exact title? Board item (656). (Supersedes 7 if adopted.)
 - Make the middle level the default for `topic` and `ids` targets, keeping
   `full` as the explicit maximum?
 - For a settled policy item, print the chosen option text in place of the
