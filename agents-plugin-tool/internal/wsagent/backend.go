@@ -93,6 +93,9 @@ type Event struct {
 	// Card is a tracker card the lead showed: a successful tracker.show call
 	// of the attached ws-mcp whose result opens with its card line.
 	Card *wslive.CardRef
+	// UI is a dashboard UI command the lead sent: a successful tracker.ui
+	// call of the attached ws-mcp whose result opens with its ui line.
+	UI *wslive.UICommand
 	// TrackerWrite: a successful tracker.update call of the attached ws-mcp
 	// (TrackerWriteTool) returned, so a tracker store may have changed.
 	TrackerWrite bool

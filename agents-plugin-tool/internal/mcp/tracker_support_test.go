@@ -274,12 +274,12 @@ func TestTrackerShowCardsOwnStoreOnly(t *testing.T) {
 	}
 }
 
-// TestHiddenToolsListedOnlyWhenAllowlisted: tracker.show and git.search
-// never show in an ordinary session's tool list or capabilities, nor answer
+// TestHiddenToolsListedOnlyWhenAllowlisted: tracker.show, tracker.ui, and
+// git.search never show in an ordinary session's tool list or capabilities, nor answer
 // a call there; an allowlist naming them lists them.
 func TestHiddenToolsListedOnlyWhenAllowlisted(t *testing.T) {
 	f := newTrackerSupportFixture(t)
-	hidden := []string{trackerShowTool, gitSearchTool}
+	hidden := []string{trackerShowTool, trackerUITool, gitSearchTool}
 	list := callToolsList(t, f.s)
 	for _, name := range hidden {
 		if strings.Contains(list, `"`+name+`"`) {
@@ -296,9 +296,14 @@ func TestHiddenToolsListedOnlyWhenAllowlisted(t *testing.T) {
 	if !strings.Contains(resp, "tool not available") {
 		t.Fatalf("a hidden tool must not answer without the allowlist: %s", resp)
 	}
+	if resp := f.call(t, trackerUITool, f.as(f.support, map[string]any{"op": "scope", "scope": "all"})); !strings.Contains(resp, "tool not available") {
+		t.Fatalf("tracker.ui must not answer without the allowlist: %s", resp)
+	}
 	t.Setenv("WS_MCP_ALLOWED_TOOLS", supportAllowlist)
 	list = callToolsList(t, f.s)
-	if !strings.Contains(list, `"`+trackerShowTool+`"`) || !slices.Contains(LeadToolNames(), trackerShowTool) {
-		t.Fatalf("an allowlist naming tracker.show should list it: %s", list)
+	for _, name := range []string{trackerShowTool, trackerUITool} {
+		if !strings.Contains(list, `"`+name+`"`) || !slices.Contains(LeadToolNames(), name) {
+			t.Fatalf("an allowlist naming %s should list it: %s", name, list)
+		}
 	}
 }

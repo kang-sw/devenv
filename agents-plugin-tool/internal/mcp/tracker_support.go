@@ -27,7 +27,7 @@ const gitSearchTool = "git.search"
 // nothing from these, and listing them everywhere would widen every
 // session's tool surface.
 func hiddenUnlessAllowlisted(name string) bool {
-	return name == trackerShowTool || name == gitSearchTool
+	return name == trackerShowTool || name == trackerUITool || name == gitSearchTool
 }
 
 // trackerSupportScope is what an admitted support conversation key may do.
