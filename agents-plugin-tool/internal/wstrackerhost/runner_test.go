@@ -93,3 +93,61 @@ func TestBatchRunnerRunsGitFromItsEnvironment(t *testing.T) {
 		t.Fatalf("output = %q, want the process environment without environ", got)
 	}
 }
+
+// The ssh command probe reads GIT_SSH_COMMAND, GIT_SSH, and core.sshCommand
+// from the environment it is given (a hosted session's), not the process's:
+// the config probe runs the git on that environment's PATH, under that
+// environment.
+func TestBatchSSHCommandReadsTheGivenEnvironment(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake git is a POSIX shell script")
+	}
+	fakeDir := t.TempDir()
+	// The fake answers the core.sshCommand probe from its own environment
+	// and fails every other command, so a probe on the process environment
+	// (no SSH_FROM) is visible as a different answer.
+	script := "#!/bin/sh\nif [ \"$3\" = config ] && [ -n \"$SSH_FROM\" ]; then echo \"ssh-from-$SSH_FROM\"; exit 0; fi\nexit 1\n"
+	if err := os.WriteFile(filepath.Join(fakeDir, "git"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", fakeDir)
+	t.Setenv("SSH_FROM", "process")
+	t.Setenv("GIT_SSH_COMMAND", "process-ssh")
+	t.Setenv("GIT_SSH", "")
+	ctx := context.Background()
+	root := t.TempDir()
+
+	env := []string{"PATH=" + fakeDir, "SSH_FROM=hosted"}
+	if got := batchSSHCommand(ctx, env, root); got != "ssh-from-hosted -o BatchMode=yes -o ConnectTimeout=5" {
+		t.Fatalf("core.sshCommand probe = %q, want the answer from the given environment", got)
+	}
+	env = append(env, "GIT_SSH_COMMAND=hosted-ssh")
+	if got := batchSSHCommand(ctx, env, root); got != "hosted-ssh -o BatchMode=yes -o ConnectTimeout=5" {
+		t.Fatalf("GIT_SSH_COMMAND from the given environment = %q", got)
+	}
+	if got := batchSSHCommand(ctx, []string{"PATH=" + fakeDir, "GIT_SSH=plink"}, root); got != "'plink' -batch" {
+		t.Fatalf("GIT_SSH from the given environment = %q", got)
+	}
+}
+
+// Windows environment variable names are case-insensitive, so a hello
+// environment spelling Git_Ssh_Command still names the ssh command there;
+// elsewhere the name is exact.
+func TestLookupEnvFoldsCaseOnlyWhenAsked(t *testing.T) {
+	env := []string{"Git_Ssh_Command=folded", "PATH=/bin", "GIT_SSH=exact"}
+	if got := lookupEnv(env, "GIT_SSH_COMMAND", true); got != "folded" {
+		t.Fatalf("folded lookup = %q", got)
+	}
+	if got := lookupEnv(env, "GIT_SSH_COMMAND", false); got != "" {
+		t.Fatalf("exact lookup found a differently cased key: %q", got)
+	}
+	if got := lookupEnv(env, "GIT_SSH", false); got != "exact" {
+		t.Fatalf("exact lookup = %q", got)
+	}
+	if got := lookupEnv(env, "git_ssh", true); got != "exact" {
+		t.Fatalf("folded lookup of a lower-case key = %q", got)
+	}
+	if got := lookupEnv(env, "MISSING", true); got != "" {
+		t.Fatalf("missing key = %q", got)
+	}
+}
