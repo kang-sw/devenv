@@ -622,7 +622,8 @@ or it refuses the token. `GET /holders` lists every holder with its state
 and cause, the recent holder start failures, and whether the viewer may
 stop one; the drawer's holders card shows the unattached holders, the ones
 marked not restart-safe (a Windows holder that could not leave its
-starter's job object), and the start failures. `POST /holders/<id>/stop`
+starter's job object), and the start failures, with a stop button on each
+unattached one. `POST /holders/<id>/stop`
 ends a holder and its child: through the protocol when attached, otherwise
 by killing the holder's process group (POSIX) or process tree (Windows),
 and only while the OS creation time of the PID is within 2 seconds of the

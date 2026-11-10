@@ -253,3 +253,26 @@ func TestDaemonRunsAndReleasesItsHolderHost(t *testing.T) {
 		t.Fatalf("closing the daemon stopped %v", got)
 	}
 }
+
+// TestHoldersCardInTheDrawer pins the drawer's holders card: on a session
+// page of a daemon that runs a holder host, after the worktrees card and
+// before the settings card, with its list, count chip, and note line; a
+// daemon without a holder host has no card.
+func TestHoldersCardInTheDrawer(t *testing.T) {
+	f := startPageFixture(t, func(o *DaemonOptions) { o.Worktrees = &fakeWorktrees{} }, withHolders(newFakeHolders()))
+	_, page := get(t, f.base+"/s/livesession")
+	worktrees, card, settings := strings.Index(page, `id="p-worktrees"`), strings.Index(page, `id="p-holders"`), strings.Index(page, `id="p-settings"`)
+	if worktrees < 0 || card < worktrees || settings < card {
+		t.Fatalf("drawer order: worktrees %d, holders %d, settings %d", worktrees, card, settings)
+	}
+	for _, want := range []string{`id="hdlist" aria-live="polite"`, `id="hdcount" hidden`, `id="hdnote" role="status"`, `Session holders`} {
+		if !strings.Contains(page, want) {
+			t.Errorf("session page lacks %q", want)
+		}
+	}
+
+	bare := startPageFixture(t)
+	if _, page := get(t, bare.base+"/s/livesession"); strings.Contains(page, `id="p-holders"`) || !strings.Contains(page, `id="p-settings"`) {
+		t.Errorf("a daemon without a holder host: holders card present or settings card missing")
+	}
+}
