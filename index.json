@@ -353,7 +353,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "goal/develop/amber-ladle-orbit",
         "phase": "active",
-        "touched_at": "2026-11-10T13:17:56Z"
+        "touched_at": "2026-11-10T13:18:34Z",
+        "impl": {
+          "branch": "impl/goal/develop/amber-ladle-orbit/savor-bash-puma"
+        }
       }
     },
     "261110-feat-ws-dashboard-file-preview": {
