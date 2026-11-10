@@ -1,8 +1,8 @@
 ---
-title: "Tracker: an idea assignment status replaces the review stage; every task and todo always has an assignee; rule-request fixes"
+title: "Tracker: an idea assignment status replaces the review stage; every task always has an assignee; rule-request fixes"
 related:
   261109-feat-ws-tracker-review-stage-and-assignment-defaults: "introduced the review stage (its board (22) a, (52) ok); this ticket retires it"
-  261110-feat-ws-tracker-topic-ownership-and-kind-merge: "owned by another session; changes topic assignment and merges task/todo - coordinate, do not edit it from here"
+  261110-feat-ws-tracker-topic-ownership-and-kind-merge: "done (bbb14e07c): topics have one holder and no status; the todo kind merged into task"
 ---
 
 # Tracker: idea status, the assignment invariant, and rule-request fixes
@@ -43,10 +43,14 @@ All Go paths are under `agents-plugin-tool/internal/`.
    longer written. Rejected: keeping `stage` and only renaming it to idea
    ((543) a), and adding idea as a second stage before review ((543) b).
    Both kept unassigned pre-todo items, which Decision 2 forbids.
-2. **Every task and todo always has an assignee (user, (552) a).** When an
-   item's last live or pending assignment ends (unassign, decline, the
-   lead's return, member removal), the creator holds it; when the creator
-   was removed, an admin does. Rejected: leaving `unassigned` as a visible
+2. **Every task always has an assignee (user, (552) a; tasks only, (557)).**
+   When an item's last live or pending assignment ends (unassign, decline,
+   the lead's return, member removal), the creator holds it; when the
+   creator was removed, an admin does. The todo kind merged into task
+   (bbb14e07c), and a topic has no status and a single holder who may
+   release it (`261110-feat-ws-tracker-topic-ownership-and-kind-merge`
+   Decisions 4, 5, 5a), so a topic may be held by nobody and this invariant
+   does not touch topics. Rejected: leaving `unassigned` as a visible
    exception state ((552) b).
 3. **Idea items are left out of progress roll-ups (user, (551)),** as the
    review stage and pending are today (`view.go:418`).
@@ -58,11 +62,49 @@ All Go paths are under `agents-plugin-tool/internal/`.
 5. **A pending rule request does not count as status `pending` (user,
    (535) b).** Go `itemStatus` and the mockup `engine.js` follow the README.
    Rejected: changing the README to match the code ((535) a).
+6. **An item whose only open assignment is a pending rule request is held
+   by its creator until the request is accepted or declined (user, (554) a).**
+   Its status is the idea or todo the creator set, and it shows in the
+   creator's "mine". Rejected: counting the pending rule request as an
+   assignment for the invariant, with a new derived status such as
+   "requested" left out of roll-ups ((554) b).
+7. **The creator fallback is derived in the fold, not written as an assign
+   event ((555)).** Assignment ends come from other writers' events (an
+   admin's member removal, a lead's return, concurrent machines); a derived
+   holder cannot conflict or double-assign, and old unassigned items gain a
+   holder with no migration write. The fold gives the fallback assignment a
+   deterministic record id so later status events find it. Rejected:
+   writing an assign event when an assignment ends.
+8. **Item-level statuses `unassigned`, `declined`, and `returned` stop
+   occurring, and the kanban "all" columns for them and for `review` go
+   ((556), a consequence of Decision 2).** The answer still shows in
+   "received requests" and in notifications; the scope list follows the
+   mockup README line 152.
+9. **`tk:item.create` and `tk:item.edit` drop the `stage` attribute and
+   refuse it ((558)).** Old events still fold (Decision 13). Rejected:
+   accepting `stage` as an alias for idea, which keeps a retired concept in
+   the API.
+10. **No create-time status attribute ((559)).** Creating straight into idea
+    is `tk:item.create` plus `tk:item.status status="idea"` in one batch.
+    Rejected: a new `status` attribute on create (new API surface).
+11. **The dashboard quick-add (Title + Enter, `tracker.js:3317-3333`)
+    creates the task assigned to its creator with status idea ((560)),**
+    keeping 261109's (53) intent (quick capture lands before todo) under
+    Decision 2. Choosing status, assignee, and schedule at quick-add time is
+    a separate follow-up
+    (`261110-feat-ws-dashboard-tracker-quick-add-fields`).
+12. **The fallback assignment starts at status todo ((561)).** Nobody is
+    working on it any more, and demoting it to idea would hide committed
+    work. Rejected: idea, or the ended assignment's status. Old stage events
+    are the exception (Decision 13).
+13. **Old events carrying `stage: "review"` fold as "held by the creator,
+    status idea" ((562)),** keeping their pre-todo meaning; the holder comes
+    from Decision 7's fold derivation. Rejected: folding them as todo.
 
 ## Constraints
 
 - Stores are event logs shared across machines. Old events carrying
-  `stage: "review"` must still fold; how they read is queued as (562).
+  `stage: "review"` must still fold, as Decision 13 states.
 - `tk:` command docs and tool descriptions are shipped text: read
   `ai-docs/manuals/shipped-surface-boundary.md` and `ai-docs/manuals/ws-mcp.md`
   before editing `internal/mcp/`.
@@ -90,21 +132,3 @@ retiring the stage field; the creator fallback. Verification: `go test ./...`,
 scenario tests for each assignment-ending path landing on the creator (and
 on an admin when the creator was removed), and for an old `stage: "review"`
 event folding as specified.
-
-## Open Decision Queue
-Last ID: (567)
-
-(554) [open] [policy] An item whose only open assignment is a pending rule request is held by its creator until the request is accepted or declined.
-- Context: (535) b says a rule request does not count as `pending`, because it assigns nobody yet; (552) a forbids an item with no assignee. Together the item needs a holder while the request waits.
-- Alternative a: the creator holds it (status idea/todo as they set it); it shows in the creator's "mine".
-- Alternative b: a pending rule request counts as an assignment for the invariant, with a new derived status (e.g. "requested") left out of roll-ups.
-> a: consistent with (535) b's reason, and adds no new derived status.
-(555) [open] [technical] The creator fallback is derived in the fold, not written as an assign event - ends come from other writers' events (member removal by an admin, a lead's return, concurrent machines), and a derived holder cannot conflict or double-assign; old unassigned items gain a holder with no migration write. Uncertain: the fold must give the fallback assignment a deterministic record id so later status events find it.
-(556) [open] [announced] Item-level statuses `unassigned`, `declined`, and `returned` stop occurring, and the kanban "all" columns for them and for `review` go; the answer still shows in "received requests" and notifications - direct consequence of (552) a, with the scope list in the mockup README line 152.
-(557) [open] [announced] The invariant covers tasks and todos only; topics follow `261110-feat-ws-tracker-topic-ownership-and-kind-merge` - user, 2026-11-10: capture tickets only and do not touch the other session's work.
-(558) [open] [technical] `tk:item.create` and `tk:item.edit` drop the `stage` attribute and refuse it, over accepting it as an alias for idea - an alias keeps a retired concept in the API; old events still fold.
-(559) [open] [technical] No create-time status attribute: creating straight into idea is `tk:item.create` plus `tk:item.status status="idea"` in one batch, over a new `status` attribute on create - no new API surface.
-(560) [open] [announced] The dashboard quick-add (Title + Enter, `tracker.js:3317-3333`) creates the task assigned to its creator with status idea - keeps 261109's (53) intent (quick capture lands before todo) under (552) a.
-(561) [open] [technical] The fallback assignment starts at status todo, over idea or the ended assignment's status - nobody is working on it any more, and demoting it to idea would hide committed work. Old stage events are the exception ((562)).
-(562) [open] [technical] Old events carrying `stage: "review"` fold as "held by the creator, status idea", over folding them as todo - it keeps their pre-todo meaning, and the fold already derives the holder per (555).
-(567) [open] [announced] The 2026-11-10 tickets land in `todo/`, standalone with `related:` links - user, 2026-11-10: "다 todo로요"; ready promotion needs fact population and Sage review, not asked for tonight.

@@ -3,6 +3,7 @@ title: whiteboard - a lead-confirmed status for items settled without a user ans
 related:
   - 261105-feat-lead-ticket-review-auto-ack
   - 261030-feat-session-whiteboard-mode
+dropped: 2026-11-10
 ---
 
 # whiteboard - a lead-confirmed status for items settled without a user answer
@@ -24,3 +25,8 @@ because it changes the whiteboard store contract.
   or an `answer` variant that allows a missing `answer_quote` when flagged?
 - How the page shows it, so the user can still object and reopen the item
   under its ID ((127) in the auto-ack ticket).
+
+
+## Resolution (2026-11-10)
+
+Superseded by the whiteboard `assumed` answer status (`wb:answer assumed="true"`), which records a lead's reading of a vague reply as a settled, vetoable row. User, 2026-11-10 board (568) a.

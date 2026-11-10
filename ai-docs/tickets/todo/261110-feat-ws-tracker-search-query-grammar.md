@@ -27,12 +27,23 @@ priority cannot be searched, nor can comments.
    priority, plus comment and thread text, in the current store (user,
    (542) b).** Rejected: item fields only ((542) a); searching across every
    registered store ((542) c), which needs its own result and permission UI.
+3. **The grammar is `key:value` tokens plus free text, every token AND-ed
+   ((565)):** `status:doing`, `assignee:maya`, `kind:task`, `project:x`,
+   `due:<2026-11-20` (also `>`, `<=`, `>=`, and a bare date for equality),
+   `priority:>=3`, and `"quoted phrase"`; bare words match title, body,
+   project, ID, alias, and comment text. Rejected: a structured filter form
+   (the `key:value` box is the familiar issue-tracker convention and is
+   typed in the box that exists).
+4. **`tracker.query` gains a `q` payload field parsed by the same grammar,
+   and `text` keeps its substring meaning (user, (566) b),** so agents get
+   the screen's results. Rejected: parsing `text` itself by the grammar
+   ((566) a, a semantic change to an existing field: a colon in a search
+   would start parsing as a filter); a dashboard-only change ((566) c).
 
 ## Constraints
 
 - Read `ai-docs/manuals/shipped-surface-boundary.md` and
-  `ai-docs/manuals/ws-mcp.md` before editing `internal/mcp/` (if the
-  `tracker.query` change in the queue lands).
+  `ai-docs/manuals/ws-mcp.md` before editing `internal/mcp/` (Decision 4).
 - Status names come from the tracker fold; the idea status and the retired
   review stage arrive with
   `261110-feat-ws-tracker-idea-status-and-assignment-invariant`.
@@ -42,19 +53,7 @@ priority cannot be searched, nor can comments.
 ### Phase 1: grammar, route, and panel
 
 The Go parser and matcher, the route, the panel switch-over with debounce,
-and the `tracker.query` change settled in the queue. Verification: `go test
+and the `tracker.query` `q` field (Decision 4). Verification: `go test
 ./...` under `agents-plugin-tool` with a table of queries (each field
 filter, quoted phrases, comment matches), and a headless-browser check of
 the panel.
-
-## Open Decision Queue
-Last ID: (567)
-
-(565) [open] [technical] The grammar is `key:value` tokens plus free text, every token AND-ed: `status:doing`, `assignee:maya`, `kind:task`, `project:x`, `due:<2026-11-20` (also `>`, `<=`, `>=`, a bare date for equality), `priority:>=3`, `"quoted phrase"`; bare words match title, body, project, ID, alias, and comment text. Over a structured filter form - the familiar issue-tracker convention, typed in the box that exists.
-(566) [open] [policy] `tracker.query` gains a `q` payload field parsed by the same grammar, and `text` keeps its substring meaning.
-- Context: (541)'s reason for one parser was that agents and the screen should agree.
-- Alternative a: `text` itself is parsed by the grammar, a semantic change to an existing API field (a colon in a search would start parsing as a filter).
-- Alternative b: a new `q` field, additive; `text` unchanged.
-- Alternative c: dashboard only; `tracker.query` unchanged.
-> b: agents get the same results as the screen without changing what `text` means today.
-(567) [open] [announced] The 2026-11-10 tickets land in `todo/`, standalone with `related:` links - user, 2026-11-10: "다 todo로요".

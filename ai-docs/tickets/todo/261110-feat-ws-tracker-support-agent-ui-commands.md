@@ -32,6 +32,18 @@ conversation ring (`wslive`), and drawn by the dashboard.
    (540) note).** Rejected: a notification filter the agent applies
    ((540) a, and the persistent mute rules of (540) b). For "look at
    these", the agent shows cards in the chat instead.
+3. **The first command set is navigation only (user, (563) a):** open the
+   search box with a query, focus an item and its thread, open a
+   notification's target, and switch store, scope, or view. Every write
+   (accept, status, comment) already has a tracker tool the agent calls
+   directly. Rejected: also pressing UI buttons that write, such as accept
+   or close ((563) b), which duplicates the tracker tools and puts a write
+   behind a UI step.
+4. **A new support tool (working name `tracker.ui`) carries the commands
+   ((564)):** its result's first line `ui <op> <args>` is parsed by the
+   stream the way `cardEvent` parses `card`. Rejected: overloading
+   `tracker.show`; keeping "show a card" and "move the view" separate lets
+   the allowlist name exactly what the agent may do.
 
 ## Constraints
 
@@ -45,19 +57,8 @@ conversation ring (`wslive`), and drawn by the dashboard.
 
 ### Phase 1: UI command channel and the first command set
 
-The marker, the fire-once guard, the dashboard handlers, and the commands
-settled in the queue below. Verification: `go test ./...` under
+The marker, the fire-once guard, the dashboard handlers, and Decision 3's
+navigation commands through Decision 4's tool. Verification: `go test ./...` under
 `agents-plugin-tool` (stream parsing for both backends, replay not
 re-firing), plus a headless-browser check that a command moves only the
 tab hosting the conversation.
-
-## Open Decision Queue
-Last ID: (567)
-
-(563) [open] [policy] The first command set is navigation only: open the search box with a query, focus an item and its thread, open a notification's target, and switch store, scope, or view.
-- Context: (540) asked for "operations the user can do in the UI"; writes (accept, status, comment) are already tracker tools the agent calls directly.
-- Alternative a: navigation only, as above.
-- Alternative b: a plus pressing UI buttons that write (accept, close), which duplicates the tracker tools and puts a write behind a UI step.
-> a: every write already has a tool; the UI channel adds what the agent cannot do today, moving the user's view.
-(564) [open] [technical] A new support tool (working name `tracker.ui`) whose result's first line `ui <op> <args>` the stream parses as `cardEvent` parses `card`, over overloading `tracker.show` - keeps "show a card" and "move the view" separate, and the allowlist names exactly what the agent may do.
-(567) [open] [announced] The 2026-11-10 tickets (this one, `261110-feat-ws-tracker-idea-status-and-assignment-invariant`, `261110-feat-ws-tracker-search-query-grammar`, `261110-research-ws-dashboard-background-task-visibility`) land in `todo/`, standalone with `related:` links - user, 2026-11-10: "다 todo로요"; ready promotion needs fact population and Sage review, which the user did not ask for tonight.

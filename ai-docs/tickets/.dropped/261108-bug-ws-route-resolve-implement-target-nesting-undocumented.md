@@ -1,5 +1,6 @@
 ---
 title: route.resolve_implement rejects a top-level target; worker playbook does not say it nests under params
+dropped: 2026-11-10
 ---
 
 # route.resolve_implement rejects a top-level target; worker playbook does not say it nests under params
@@ -18,3 +19,8 @@ literally fails the first call.
 Either accept a top-level `target` as an alias, or state the `params`
 nesting where the playbook names the call. Verify which shape the schema
 advertises in `tools/list` before choosing.
+
+
+## Resolution (2026-11-10)
+
+Does not reproduce: since 2026-10-30 (4d6b807d2) the route.resolve_implement schema accepts a top-level `target` (`additionalProperties: true`; `routeEnvelope` in `internal/mcp/session_state.go` accepts the unwrapped form), the playbooks document the top-level form, and this session's workers called it that way successfully. User, 2026-11-10 board (571) ok.
