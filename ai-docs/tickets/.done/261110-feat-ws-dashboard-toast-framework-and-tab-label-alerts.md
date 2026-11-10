@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: 5d43de5bce4f1a66
 sage-review-design-reviewed: 5d43de5bce4f1a66
+completed: 2026-11-10
 ---
 
 # Dashboard toast framework and tab-label alerts
@@ -262,3 +263,52 @@ Verification:
   4 s and tracker toasts after 8 s; hover pauses; the title prefix appears,
   updates, and clears at 0; a hidden-then-visible cycle with new
   notifications yields exactly one summary toast.
+
+### Result (49a054f71) - 2026-11-10
+
+Landed:
+
+- `internal/wsdashboard/assets/toast.js` (`window.WsToast.show(content,
+  {html, kind: info|notice|summary, duration, onClick})`), inlined by both
+  dashboard templates through `pages.go` `ToastScript`, ahead of the tracker
+  and page scripts. Styles in `dashboard.css` (`.wstoasts`, `.wstoast`,
+  notice bar, summary dot); `.ltoast` is gone.
+- `dashboard.js` link/copy toasts call `WsToast` as text. The tracker's
+  `toast(html)` forwards to `WsToast` with `{html: true}`; `#tktoast` is
+  built only on a page without `WsToast` (the tracker mockup), so its ~35
+  call sites keep their escaping unchanged.
+- `dashboard.js` tab-label block (`tl*`): the one `document.title` writer,
+  `(N) <base>`, N = tracker unread + board asks + permission prompts, each
+  source cached where it changes; written only when N changes. Held region
+  updates of counted regions (session: board, convlive, tree; index:
+  sessions) are parsed detached via `frag()` once per new hash while hidden.
+- `pill.js`: on a `data-wb-titlehost` page it reports to
+  `window.wbTitleCount` and never writes the title; standalone unchanged.
+- Tracker API: `opts.onRender(u)`, `api.unread()` (`{store, ready,
+  entries[{store, item, ev, key, kind, label, title, author}]}`, plain
+  text), `api.openNotice(entry)`, `api.openNotify(store)`.
+- i18n `js.toast.newnotes.one/.other` in all 11 locales.
+
+Verification: `nice -n 19 node --check` on toast.js, tracker.js,
+dashboard.js, pill.js: ok. `ws-rgo ... test ./internal/wsdashboard/
+./internal/wswhiteboard/ ./internal/wsi18n/ -count=1`: all ok; the new
+node-backed tests `TestToastStack`, `TestTabLabelCount`,
+`TestPagesCarryTheToastStackAndTitleHost`, `TestPillTitleDefersToTheDashboard`
+ran (PASS, not skipped). These node harnesses are the headless check (stack
+cap 3 / newest on top, 4 s / 8 s, hover pause, prefix appears / updates /
+clears at 0, one summary toast after a hidden cycle). Tracker fallback toast
+checked by a local node run over the extracted function. Lite review: no
+Critical or Important; one Minor fixed in dfcc1ff27 (eager `#tktoast` on
+fallback pages for the mockup's error path).
+
+Decisions:
+
+- Permission units are keyed by `closest(".agent, .peer")`, so a peer
+  row's prompt counts as its own unit, not folded into the lead's element it
+  is nested in.
+- Tracker baselines are per store for the page's lifetime: switching back
+  to a store already rendered toasts keys that arrived meanwhile; a store's
+  first loaded render (and any render before it loads) is silent.
+- The summary toast counts hidden-time arrivals still unread on return.
+- No isolated dev-daemon visual check was run; the node harnesses stand in
+  for it.

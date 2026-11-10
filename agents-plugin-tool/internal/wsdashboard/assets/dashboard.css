@@ -902,8 +902,16 @@ a[data-wl="file"]:not([href]) { color: inherit; }
 .lmenu { position: fixed; z-index: 60; min-width: 190px; background: var(--wb-card); border-radius: 10px; box-shadow: var(--wb-shadow-hi); padding: 5px; display: grid; gap: 2px; }
 .lmenu button { border: 0; background: transparent; border-radius: 7px; padding: 6px 9px; text-align: left; cursor: pointer; color: inherit; font: inherit; font-size: 13px; }
 .lmenu button:hover, .lmenu button:focus-visible { background: var(--wb-muted); outline: none; }
-.ltoast { position: fixed; z-index: 61; left: 50%; bottom: 18px; transform: translateX(-50%); max-width: min(560px, calc(100vw - 32px)); background: var(--wb-fg); color: var(--wb-card); border-radius: 8px; padding: 7px 12px; font-size: 12.5px; box-shadow: var(--wb-shadow-hi); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ltoast[hidden] { display: none; }
+/* the shared toast stack (toast.js): bottom-right, newest on top, inverted
+   like the page's text; a tracker notification carries a policy bar on its
+   left, the hidden-time summary a primary dot before its text */
+.wstoasts { position: fixed; z-index: 91; right: 16px; bottom: 18px; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; max-width: min(420px, calc(100vw - 32px)); pointer-events: none; }
+.wstoast { pointer-events: auto; position: relative; background: var(--wb-fg); color: var(--wb-card); border-radius: 8px; padding: 7px 12px; font-size: 12.5px; line-height: 1.4; box-shadow: var(--wb-shadow-hi); overflow-wrap: anywhere; }
+.wstoast.click { cursor: pointer; }
+.wstoast.click:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 2px; }
+.wstoast.notice { padding-left: 15px; overflow: hidden; }
+.wstoast.notice::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--wb-policy); }
+.wstoast.summary .wst-body::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--wb-primary); margin-right: 7px; vertical-align: 1px; }
 
 /* conversation images open in the viewer (viewer.js) */
 .thumbs img, .bub img { cursor: zoom-in; }

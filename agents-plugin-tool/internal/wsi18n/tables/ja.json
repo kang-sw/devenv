@@ -981,6 +981,8 @@
   "js.tk.wk.yours": "あなたの版",
   "js.toast.copied": "{0} をコピーしました",
   "js.toast.copyfail": "コピーできませんでした: {0}",
+  "js.toast.newnotes.one": "新しい通知 1 件",
+  "js.toast.newnotes.other": "新しい通知 {0} 件",
   "js.toast.opened": "システムのブラウザーで開きました",
   "js.toast.openednative": "既定のアプリで開きました",
   "js.toast.openfail": "開けませんでした: {0}",

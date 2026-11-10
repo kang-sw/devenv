@@ -1,5 +1,5 @@
 {{define "session"}}<!DOCTYPE html>
-<html data-mode="{{.Mode}}" data-rid="{{.ReplyID}}" data-lang="{{lang}}" data-langpref="{{.LangPref}}"{{with .Theme}} data-theme="{{.}}"{{end}}{{if .SysOpen}} data-sysopen="1"{{end}}>
+<html data-mode="{{.Mode}}" data-rid="{{.ReplyID}}" data-wb-titlehost data-lang="{{lang}}" data-langpref="{{.LangPref}}"{{with .Theme}} data-theme="{{.}}"{{end}}{{if .SysOpen}} data-sysopen="1"{{end}}>
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{.ReplyID}} - ws dashboard</title>
 <style>{{.Assets.WhiteboardCSS}}</style>
@@ -24,6 +24,7 @@ window.wbMermaid = function () {
 {{.Assets.MermaidInit}}};
 window.wbMermaidFile = {{.Assets.MermaidFile}};</script>
 <script>{{.Assets.ViewerScript}}</script>
+<script>{{.Assets.ToastScript}}</script>
 <script>{{.Assets.TrackerScript}}</script>
 <script>{{.Assets.MentionScript}}</script>
 <script>{{.Assets.Script}}</script>
@@ -172,7 +173,7 @@ region. */}}
 {{define "mailhead"}}<span class="arr">{{if eq .Direction "sent"}}→{{else}}←{{end}}</span>{{if .PeerLinked}}<a class="mpeer" href="/s/{{.PeerReplyID}}">{{.Peer}}</a>{{else}}<span class="mpeer">{{.Peer}}</span>{{end}}<span class="mfirst">: {{.Title}}</span>{{template "clock" .At}}{{end}}
 
 {{define "index"}}<!DOCTYPE html>
-<html data-mode="index" data-lang="{{lang}}" data-langpref="{{.LangPref}}"{{with .Theme}} data-theme="{{.}}"{{end}}>
+<html data-mode="index" data-wb-titlehost data-lang="{{lang}}" data-langpref="{{.LangPref}}"{{with .Theme}} data-theme="{{.}}"{{end}}>
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ws dashboard</title>
 <style>{{.Assets.WhiteboardCSS}}</style>
@@ -184,6 +185,7 @@ region. */}}
 {{region . "sessions"}}
 </div>
 <script>{{i18n}}</script>
+<script>{{.Assets.ToastScript}}</script>
 <script>{{.Assets.TrackerScript}}</script>
 <script>{{.Assets.Script}}</script>
 </body></html>

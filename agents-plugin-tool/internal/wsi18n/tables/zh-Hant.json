@@ -981,6 +981,8 @@
   "js.tk.wk.yours": "你的版本",
   "js.toast.copied": "已複製 {0}",
   "js.toast.copyfail": "無法複製：{0}",
+  "js.toast.newnotes.one": "1 則新通知",
+  "js.toast.newnotes.other": "{0} 則新通知",
   "js.toast.opened": "已在系統瀏覽器中開啟",
   "js.toast.openednative": "已在預設應用程式中開啟",
   "js.toast.openfail": "無法開啟：{0}",
