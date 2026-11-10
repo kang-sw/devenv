@@ -381,7 +381,14 @@
       "registered_at": "2026-11-10T06:49:12Z"
     },
     "261110-feat-ws-whiteboard-query-depth-and-fields": {
-      "registered_at": "2026-11-10T07:01:09Z"
+      "registered_at": "2026-11-10T07:01:09Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "28ef83e379b353cc",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-10T07:34:40Z"
+      }
     },
     "261110-research-ws-dashboard-agent-host-foundations": {
       "registered_at": "2026-11-09T15:09:40Z"
