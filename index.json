@@ -337,7 +337,7 @@
         "email": "ki6080@gmail.com",
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
-        "phase": "active",
+        "phase": "closed",
         "touched_at": "2026-11-10T07:07:42Z",
         "impl": {
           "branch": "impl/develop/art-lucid-zen"
