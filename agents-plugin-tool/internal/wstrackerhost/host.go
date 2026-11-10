@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gofrs/flock"
@@ -74,6 +75,10 @@ type Host struct {
 	// seenMu serializes this process's reads and writes of the stores'
 	// ui-seen.json files (seen.go).
 	seenMu sync.Mutex
+
+	// reloads, lateReloads, and lateChanges count ViewWithin's background
+	// reloads (ReloadStats).
+	reloads, lateReloads, lateChanges atomic.Int64
 }
 
 // store is one registered store as this process holds it. mu serializes

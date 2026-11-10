@@ -2,6 +2,7 @@ package wstrackerhost
 
 import (
 	"context"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"sync/atomic"
@@ -242,6 +243,12 @@ func TestViewWithinQueuesBehindAReloadThatStartedReading(t *testing.T) {
 		lock.Unlock()
 		t.Fatal("a read after the reload started reading must queue the next reload")
 	}
+	// A sync-state change while the reads wait, so the reloads that land
+	// fold a view other than the one the late reads were handed.
+	if err := writeJSON(filepath.Join(res.Entry.Dir, syncStateFile), syncState{Error: "offline meanwhile"}); err != nil {
+		lock.Unlock()
+		t.Fatal(err)
+	}
 	lock.Unlock()
 	waitFor(t, 10*time.Second, "both reloads to land", func() bool {
 		st.viewMu.Lock()
@@ -250,5 +257,180 @@ func TestViewWithinQueuesBehindAReloadThatStartedReading(t *testing.T) {
 	})
 	if changes.get() == 0 {
 		t.Fatal("the late reloads must signal")
+	}
+}
+
+// slowRunner is the real git runner made slow: once armed, every git run
+// first waits delay, so a reload outlasts any page read's wait (a machine
+// where spawning git is slow).
+type slowRunner struct {
+	armed atomic.Bool
+	delay time.Duration
+}
+
+func (r *slowRunner) RunGit(ctx context.Context, root string, args ...string) ([]byte, error) {
+	if r.armed.Load() {
+		select {
+		case <-time.After(r.delay):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return batchRunner{}.RunGit(ctx, root, args...)
+}
+
+// TestLateReloadSignalsOnlyAChangedView: on a host whose every reload
+// outlasts the page read's wait, a page that re-reads on each change signal
+// settles. A late reload that folds the same view does not call the change
+// callback; one that folds a changed view does, once, including a
+// journal-only write by another process (same refs, one new uncommitted
+// event) and a host-sync.json change; and the re-read that signal causes
+// does not keep the loop going.
+func TestLateReloadSignalsOnlyAChangedView(t *testing.T) {
+	w := newWorld(t)
+	runner := &slowRunner{delay: 80 * time.Millisecond}
+	daemon, err := New(Options{Root: filepath.Join(w.dir, "ada"), Clock: w.clock, Runner: runner})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer daemon.Close()
+	res := w.register(daemon, "team", "ada", &wstracker.Profile{Given: "Ada"})
+	other := sameRoot(t, w, "ada")
+	st, err := daemon.store("team")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const wait = 10 * time.Millisecond
+	var changes counter
+	// inflight counts the page's reads still running (a WaitGroup would
+	// race: a signal adds a read while settle waits).
+	var inflight, reads atomic.Int64
+	read := func() {
+		reads.Add(1)
+		inflight.Add(1)
+		go func() {
+			defer inflight.Add(-1)
+			_, _ = daemon.ViewWithin(context.Background(), "team", 0, wait)
+		}()
+	}
+	// The page: every change signal makes it read again.
+	stop := daemon.StartWatch(time.Hour, func() { changes.inc(); read() })
+	defer stop()
+	settle := func(what string) {
+		t.Helper()
+		for i := 0; i < 2; i++ {
+			waitFor(t, 20*time.Second, what, func() bool {
+				st.viewMu.Lock()
+				defer st.viewMu.Unlock()
+				return inflight.Load() == 0 && st.cur == nil && st.next == nil
+			})
+			time.Sleep(50 * time.Millisecond) // a signal racing the check
+		}
+	}
+
+	if _, err := daemon.ViewWithin(context.Background(), "team", 0, wait); err != nil {
+		t.Fatal(err) // no folded state yet: waits
+	}
+	runner.armed.Store(true)
+
+	// Unchanged: the late reload lands with the view the read was handed.
+	base := daemon.ReloadStats()
+	read()
+	settle("the unchanged late reload")
+	stats := daemon.ReloadStats()
+	if stats.Late-base.Late == 0 {
+		t.Fatal("the read must have stopped waiting (the reload is slower than its wait)")
+	}
+	if n := changes.reset(); n != 0 {
+		t.Fatalf("a late reload of an unchanged view called the change callback %d times", n)
+	}
+	if stats.LateChanged != base.LateChanged {
+		t.Fatal("an unchanged late reload must not count as a change")
+	}
+
+	cases := []struct {
+		name  string
+		write func()
+	}{
+		{"journal-only write by another process", func() {
+			refs := storeRefs(t, res.Entry.Dir)
+			createItem(t, other, "team", "uncommitted elsewhere")
+			if storeRefs(t, res.Entry.Dir) != refs {
+				t.Fatal("the write must stay in the journal (same refs)")
+			}
+		}},
+		{"host-sync.json change", func() {
+			if err := writeJSON(filepath.Join(res.Entry.Dir, syncStateFile), syncState{Error: "remote went away"}); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	}
+	for _, tc := range cases {
+		tc.write()
+		base := daemon.ReloadStats()
+		before := reads.Load()
+		read()
+		settle("the late reload after a " + tc.name)
+		if n := changes.reset(); n != 1 {
+			t.Fatalf("%s: the late reload must call the change callback once, got %d", tc.name, n)
+		}
+		stats := daemon.ReloadStats()
+		if got := stats.LateChanged - base.LateChanged; got != 1 {
+			t.Fatalf("%s: %d late reloads counted as a change, want 1", tc.name, got)
+		}
+		// The first read and the one re-read the signal caused.
+		if got := reads.Load() - before; got != 2 {
+			t.Fatalf("%s: the page read %d times, want 2", tc.name, got)
+		}
+		if got := stats.Reloads - base.Reloads; got > 3 {
+			t.Fatalf("%s: %d reloads ran; the loop did not settle", tc.name, got)
+		}
+	}
+	fresh, err := daemon.ViewWithin(context.Background(), "team", 0, 10*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fresh.Sync.Error != "remote went away" {
+		t.Fatalf("the settled view must carry the sync change, got %q", fresh.Sync.Error)
+	}
+}
+
+// storeRefs lists the refs of a store's repository.
+func storeRefs(t *testing.T, dir string) string {
+	t.Helper()
+	out, err := exec.Command("git", "-C", filepath.Join(dir, "repo.git"), "for-each-ref").CombinedOutput()
+	if err != nil {
+		t.Fatalf("for-each-ref: %v: %s", err, out)
+	}
+	return string(out)
+}
+
+// TestViewIdentityIgnoresNow: two views that differ only in View.Now have
+// one identity; any other difference changes it.
+func TestViewIdentityIgnoresNow(t *testing.T) {
+	a := &StoreView{View: &wstracker.View{Now: "2026-01-01T00:00:00Z"}}
+	b := &StoreView{View: &wstracker.View{Now: "2026-01-02T00:00:00Z"}}
+	if string(viewIdentity(a)) != string(viewIdentity(b)) {
+		t.Fatal("views differing only in Now must share an identity")
+	}
+	if a.View.Now != "2026-01-01T00:00:00Z" {
+		t.Fatal("the identity must not change the view")
+	}
+	c := &StoreView{View: &wstracker.View{Now: a.View.Now}, Sync: SyncInfo{Error: "x"}}
+	if string(viewIdentity(a)) == string(viewIdentity(c)) {
+		t.Fatal("a sync change must change the identity")
+	}
+	r := &reload{}
+	r.serve(a)
+	if r.differs(b) {
+		t.Fatal("a landed view equal but for Now does not differ")
+	}
+	if !r.differs(c) {
+		t.Fatal("a landed view with another sync state differs")
+	}
+	r.serve(nil)
+	if !r.differs(b) {
+		t.Fatal("a late read handed nothing always counts as a difference")
 	}
 }
