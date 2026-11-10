@@ -141,5 +141,9 @@ worktree before changing anything.
   root can stay `.` when neither `--root` nor `WS_MCP_PROJECT_ROOT` is set, so
   the refusal reads "commit root ." with no relative suggestion. The MCP path
   always passes an absolute session root.
-- Verification: `go test ./internal/wsgit/` ok, plus the targeted mcp tests
-  and `go test ./...` in `agents-plugin-tool` (see the commit range).
+- Verification: on the remote build server, `ws-rgo -- test ./internal/mcp/
+  ./internal/wsgit/ -count=1 -timeout 30m` in `agents-plugin-tool` gave
+  `internal/mcp` ok (104.0s) and `internal/wsgit` ok (0.2s). Locally,
+  `go vet ./internal/wsgit/ ./internal/mcp/` was clean. A local
+  `go test ./...` was cut short before it reached `internal/mcp`, so no
+  full-suite pass is claimed.
