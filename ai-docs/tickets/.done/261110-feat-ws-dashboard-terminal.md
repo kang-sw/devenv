@@ -10,6 +10,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 17a95b70b45181ea
 sage-review-completeness-reviewed: 17a95b70b45181ea
+completed: 2026-11-11
 ---
 
 # Dashboard terminal
@@ -232,3 +233,97 @@ Verification:
 - A daemon restart with an open shell on Linux, macOS, and native Windows
   (`ai-docs/manuals/windows-dogfood.md`): the shell survives and its earlier
   output reappears after reattach.
+
+### Result (818879863) - 2026-11-11
+
+Landed, base `2950c3e9c`:
+
+- `internal/wsholder`: `Manager.AddSink` (a second receiver of holder events
+  beside the one `New` was given), `Options.RingBytes` (a new holder's ring
+  size), and loss counted once: a gap a consumer's own replay reports again
+  no longer inflates `Info.Lost`.
+- `internal/wsdashboard/terminals.go`: the terminal registry over holder
+  PTYs. A terminal is its holder; the holder's session description carries
+  the terminal marker, the opening session's reply ID, and the folder. No
+  daemon buffer: one holder stream is fanned out by sequence, each viewer
+  takes exactly the record it needs next, and a late joiner or a reconnecting
+  page has the holder replay from the lowest sequence any viewer needs.
+- `terminal_routes.go`: `GET`/`POST /s/<reply-id>/terminals`,
+  `POST .../terminals/<id>/close`, and the WebSocket
+  `.../terminals/<id>/ws?from=<sequence>` (JSON text frames, base64 output;
+  the protocol is the file's header comment). Every route and the upgrade
+  sit behind `localViewer` (else 404) and the daemon's own Origin (else 403).
+- `terminal_shell.go`: the Decision 7 shell rule as a pure function of the
+  OS, the environment, and a lookup.
+- `assets/xterm/`: `@xterm/xterm` 5.5.0 and `@xterm/addon-fit` 0.10.0,
+  unchanged, with both licenses; served as one hash-named script beside the
+  page, the stylesheet inlined, and only to a browser on the daemon's machine.
+- `assets/terminal.js`: the `terminal` card kind on the existing board card
+  framework, the board header row with "+ Terminal" and its folder popover,
+  the reconcile with the list route, and the drawer's orphan rows (attach
+  and stop). `assets/cards.js` gained three generic kind hooks (a `closing`
+  veto, `base` as a function of the card, an open time on `open`).
+  `assets/files.js` gained "Open terminal here" on folder rows.
+- i18n: 29 keys in each of the 11 tables.
+
+Decisions taken (the ticket left them open, or the implementation narrowed
+them):
+
+- "Another folder" is a typed absolute path only. A browser has no folder
+  dialog that yields an absolute path (the same reason the file explorer's
+  change root is typed), so the "by dialog" half of Decision 11 is not built.
+- The list is a `GET`, and a browser sends no Origin with a same-origin
+  `GET`; it refuses a foreign Origin or a `Sec-Fetch-Site` other than
+  `same-origin`/`none` instead of requiring the header. `POST` and the
+  WebSocket handshake require the daemon's Origin.
+- The list answers this session's terminals plus the orphans (terminals
+  whose session record is gone); an orphan attaches on the page being viewed.
+- The PTY takes the size of the viewer that last typed or focused; until one
+  has, the last size any viewer sent. A size equal to the PTY's is not sent.
+- A viewer whose backlog passes 16 MiB is dropped and connects again from
+  the sequence it reached.
+- The routes wait up to 5 s for the daemon's first holder scan and answer
+  503 after; a terminal whose holder the daemon is not attached to answers
+  503 on the upgrade, and the page shows it as reconnecting.
+- Windows shells are started by their resolved path.
+- Esc in the maximize sheet returns to the card and does not reach the
+  shell (Ctrl+[ still sends ESC); in the card, Esc reaches the shell.
+- Closing a running shell asks a browser confirm; an exited shell closes
+  without the question.
+- A gap shows as a marker in the output and as a dismissible strip above it,
+  since the replay that follows scrolls the marker out of the scrollback.
+- The folded line is the last non-empty screen line, prompt included.
+- "Open terminal here" is offered on a folder row of the file explorer.
+
+Verification:
+
+- Remote builder, at `818879863`: `go test ./internal/wsdashboard/
+  ./internal/wsholder/ ./internal/wsi18n/ ./cmd/... -count=1`: `ok` for all
+  four; the terminal tests also `ok` under `-race -count=3`. `go build ./...`
+  and `go vet ./internal/wsdashboard/` clean. `go test ./... -count=1` at
+  `7eda9ad11` (before the review fixes): `ok` for all 31 packages.
+- The Go tests cover every item of the Go list: the gate on every route and
+  the real handshake (`TestTerminalRoutesAnswerOnlyTheDaemonsOwnLocalPage`),
+  the routes in `TestLANModeGuardsEveryRoute`, the round trip of input,
+  output, resize, and exit status against a real holder, the reattach under a
+  second daemon with a reported gap, the late joiner and the reconnecting
+  viewer without a duplicate, the size rule with two viewers, the lost
+  holder, the first-scan wait, the shell rule, and the folder refusals. The
+  holder tests are skipped where no python 3.10 or newer is on PATH.
+- Headless Chromium against a fixture daemon with real holders: 57 checks,
+  all passing, covering every item of the headless list (popover folders and
+  inline errors, type and output, fold with no resize, 14-row base, drag with
+  one size frame, maximize and Esc, pin, close confirm, exit status, two
+  viewers, the gap, reload restore, a board update with the same socket, the
+  drawer orphan attach and stop, a daemon restart with the same shell PID and
+  its earlier output, "Open terminal here", dark theme, narrow width). The
+  Files tab entry was exercised on a mounted explorer, since the fixture
+  sessions have no live adapter and so no Files tab.
+- Daemon restart on Linux: beside the in-process restart above, the fixture
+  daemon's process was killed with SIGKILL; the holder stayed alive and a new
+  process attached to it and listed the terminal as running. Not run on
+  macOS or native Windows.
+- Lite review, one pass: two Important findings (a folded card sent a size
+  on connect; a viewer was not told of a lost holder), both fixed in
+  `818879863` with two of the Minor ones (the first-scan race, the paste
+  limit).

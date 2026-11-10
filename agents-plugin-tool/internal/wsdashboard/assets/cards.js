@@ -11,8 +11,12 @@
   // A kind registers before the page mounts the framework:
   //
   //   WsCards.register(name, {
-  //     base: 260,            // the body's base height in px (optional)
+  //     base: 260,            // the body's base height in px, or a function
+  //                           // of the card that returns it (optional)
   //     open(card) {},        // build card.body, call card.title(...)
+  //     closing(card) {},     // the close button was pressed: false keeps
+  //                           // the card, and the kind may close it later
+  //                           // (optional)
   //     close(card) {},       // the card is going away (optional)
   //     folded(card) {},      // a node shown under a folded header, or null (optional)
   //     sized(card) {},       // the body's size changed (optional)
@@ -21,7 +25,9 @@
   //
   // and works through the card it is handed: card.data (the kind's own
   // record, kept in storage: plain JSON), card.body, card.title, card.actions,
-  // card.save, card.bump, card.show, card.fold, card.close, card.pinned.
+  // card.save, card.bump, card.show, card.fold, card.close, card.pinned, and
+  // card.paint (draws the view state again: a kind whose base height
+  // changed calls it).
   //
   // Placement is one rule for every kind. Pinned cards stand first, in the
   // order they were pinned. An unpinned card enters at the head of the
@@ -181,7 +187,7 @@
     c.foldBtn.addEventListener("click", function () { c.fold(!c.folded); });
     c.maxBtn.addEventListener("click", function () { maximize(c); });
     c.minBtn.addEventListener("click", function () { maximize(null); });
-    c.closeBtn.addEventListener("click", function () { c.close(); });
+    c.closeBtn.addEventListener("click", function () { if (!c.k.closing || c.k.closing(c) !== false) c.close(); });
     c.wireGrip();
     c.paint();
   };
@@ -192,7 +198,7 @@
     if (c.pinned) c.el.setAttribute("data-pinned", ""); else c.el.removeAttribute("data-pinned");
     c.pinBtn.setAttribute("aria-pressed", String(!!c.pinned));
     c.foldBtn.setAttribute("aria-expanded", String(!c.folded));
-    c.body.style.height = (c.h || c.k.base || BASE) + "px";
+    c.body.style.height = (c.h || (typeof c.k.base === "function" ? c.k.base(c) : c.k.base) || BASE) + "px";
     c.foldEl.textContent = "";
     var f = c.folded && c.k.folded ? c.k.folded(c) : null;
     if (f) c.foldEl.appendChild(f);
@@ -357,10 +363,12 @@
       persist();
     },
     // open adds a card of a registered kind at the head of the unpinned
-    // flow; data is the kind's record.
-    open: function (kind, data) {
+    // flow; data is the kind's record. at, when given, is the card's open
+    // time (epoch ms) instead: a card for something that began earlier
+    // stands where a card opened then would.
+    open: function (kind, data, at) {
       if (!board || !kinds[kind]) return null;
-      var c = add(kind, { data: data });
+      var c = add(kind, { data: data, at: at });
       arrange(null);
       persist();
       return c;

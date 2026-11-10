@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -38,8 +39,12 @@ type Options struct {
 	Log io.Writer
 	// RescanInterval is Run's period; zero means DefaultRescanInterval.
 	RescanInterval time.Duration
-	// Sink receives the attached holders' events; nil drops them.
+	// Sink receives the attached holders' events; nil drops them. AddSink
+	// adds another.
 	Sink Sink
+	// RingBytes is the size of the output ring a new holder keeps; zero is
+	// the holder's own default.
+	RingBytes int
 
 	// holderArgs are extra holder arguments, so a test shortens its
 	// periods. startTimeout bounds the wait for a started holder's
@@ -135,7 +140,9 @@ type Manager struct {
 	opMu sync.Mutex
 	mu   sync.Mutex
 	// entries are the known holders by id.
-	entries  map[string]*entry
+	entries map[string]*entry
+	// sinks receive the attached holders' events (Options.Sink, AddSink).
+	sinks    []Sink
 	failures []StartFailure
 	closed   bool
 	stop     chan struct{}
@@ -176,7 +183,21 @@ func New(opts Options) *Manager {
 	if opts.kill == nil {
 		opts.kill = killHolder
 	}
-	return &Manager{opts: opts, entries: map[string]*entry{}, stop: make(chan struct{})}
+	m := &Manager{opts: opts, entries: map[string]*entry{}, stop: make(chan struct{})}
+	if opts.Sink != nil {
+		m.sinks = []Sink{opts.Sink}
+	}
+	return m
+}
+
+// AddSink adds a receiver of the attached holders' events, after the ones
+// already there. A consumer that needs the manager itself (to answer an
+// event with an operation) adds itself here before the first Scan or Run,
+// so it misses no event.
+func (m *Manager) AddSink(sink Sink) {
+	m.mu.Lock()
+	m.sinks = append(m.sinks[:len(m.sinks):len(m.sinks)], sink)
+	m.mu.Unlock()
 }
 
 func (m *Manager) logf(format string, args ...any) {
@@ -382,6 +403,7 @@ func (m *Manager) attach(desc Descriptor) error {
 
 // event records what an attached holder sent and passes it to the sink.
 func (m *Manager) event(id string, ev Event) {
+	var newlyLost uint64
 	m.mu.Lock()
 	if e := m.entries[id]; e != nil {
 		switch ev.Event {
@@ -395,20 +417,29 @@ func (m *Manager) event(id string, ev Event) {
 			}
 			e.child.State, e.child.ExitCode, e.child.Signal = "exited", ev.ExitCode, ev.Signal
 		case "gap":
-			if ev.To > ev.From {
-				e.lost += ev.To - ev.From
+			// Only records this process never received are lost: a
+			// replay a consumer asked for from an earlier sequence
+			// (Client.Replay) reports again the ones long gone.
+			from := ev.From
+			if from <= e.lastSeq {
+				from = e.lastSeq + 1
+			}
+			if ev.To > from {
+				newlyLost = ev.To - from
+				e.lost += newlyLost
 			}
 			if ev.To > 0 && ev.To-1 > e.lastSeq {
 				e.lastSeq = ev.To - 1
 			}
 		}
 	}
+	sinks := m.sinks
 	m.mu.Unlock()
-	if ev.Event == "gap" {
-		m.logf("holder %s lost records %d..%d: they left its ring while no daemon was attached", id, ev.From, ev.To-1)
+	if newlyLost > 0 {
+		m.logf("holder %s lost %d records before %d: they left its ring while no daemon was attached", id, newlyLost, ev.To)
 	}
-	if m.opts.Sink != nil {
-		m.opts.Sink.HolderEvent(id, ev)
+	for _, sink := range sinks {
+		sink.HolderEvent(id, ev)
 	}
 }
 
@@ -522,7 +553,11 @@ func (m *Manager) launch(session json.RawMessage) (string, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}
-	args := append([]string{scriptPath, "--dir", dir, "--id", id, "--session", string(session)}, m.opts.holderArgs...)
+	args := []string{scriptPath, "--dir", dir, "--id", id, "--session", string(session)}
+	if m.opts.RingBytes > 0 {
+		args = append(args, "--ring-bytes", strconv.Itoa(m.opts.RingBytes))
+	}
+	args = append(args, m.opts.holderArgs...)
 	// The holder runs in the holders directory, not its own, so it can
 	// remove its own directory when it exits.
 	cmd, err := m.opts.start(python, args, m.opts.Dir, *m.opts.breakaway)

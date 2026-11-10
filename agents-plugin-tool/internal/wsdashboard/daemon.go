@@ -107,6 +107,9 @@ type DaemonOptions struct {
 	// (fs_act_route.go), so a test never opens a window; nil is the host
 	// the daemon runs on.
 	hostFiles *hostFiles
+	// terminalShell replaces the shell a new terminal runs, so a test's
+	// shell does not depend on the machine's; nil picks daemonShell.
+	terminalShell func() terminalShell
 	// gitRead replaces the git handle's read, so a test never runs git; nil
 	// runs readGitBadge. noGitBadge turns the handle off: no read and no
 	// handle, for the tests that pin which regions a stream sends.
@@ -214,6 +217,11 @@ type Daemon struct {
 	// holders is the session holder manager, nil without the routes
 	// (holders.go).
 	holders HolderHost
+	// terminals are the shells on holder PTYs the session pages show, nil
+	// unless the holder manager can host them (terminals.go); shell picks a
+	// new one's shell.
+	terminals *terminals
+	shell     func() terminalShell
 	// proxy builds the hosted MCP sessions (proxy.go), nil without the
 	// route; proxyConns are the open ones, proxyWG counts their
 	// goroutines, and proxyDraining refuses new ones once Close began.
@@ -348,6 +356,15 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 	if d.hostFiles == nil {
 		d.hostFiles = defaultHostFiles()
 	}
+	if host, ok := opts.Holders.(TerminalHost); ok {
+		// The terminals take the holders' events before the first scan
+		// (Run, below), so they see a predecessor's terminals attach.
+		d.terminals = newTerminals(host, logw)
+		host.AddSink(d.terminals)
+		if d.shell = opts.terminalShell; d.shell == nil {
+			d.shell = daemonShell
+		}
+	}
 	if !opts.noGitBadge {
 		read := opts.gitRead
 		if read == nil {
@@ -406,7 +423,12 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 	// The holder scans start only now, under the single-instance lock: a
 	// predecessor has let go of its holders before this daemon attaches.
 	if d.holders != nil {
-		go d.holders.Run()
+		go func() {
+			if d.terminals != nil {
+				d.terminals.firstScan()
+			}
+			d.holders.Run()
+		}()
 	}
 	fmt.Fprintf(d.log, "dashboard: version %s listening on %s (lan %v, pid %d)\n", d.endpoint.Version, listener.Addr(), d.lan, d.endpoint.PID)
 	return d, nil
@@ -575,7 +597,9 @@ func (d *Daemon) Close() {
 // (workspace_routes.go: the stored list, and git worktree add), and its
 // system-open route (sysopen_route.go) the only route
 // that runs a host command beside git and the agent runner's harnesses (with
-// a holder manager, the holder stop route, holders.go, ends a holder): a
+// a holder manager, the holder stop route, holders.go, ends a holder, and
+// the terminal routes, terminal_routes.go, run shells for a browser on this
+// machine): a
 // session stream keeps its root's git handle read, the git route
 // (gitbadge.go) asks for a read at once without running git itself, and the
 // git status route (gitdrawer.go) reads the root's changed files. With

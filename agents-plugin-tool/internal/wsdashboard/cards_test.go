@@ -7,7 +7,7 @@ import (
 )
 
 // cardScripts are the page scripts that draw vendored Lucide icons.
-var cardScripts = []string{"assets/cards.js", "assets/preview.js", "assets/files.js"}
+var cardScripts = []string{"assets/cards.js", "assets/preview.js", "assets/files.js", "assets/terminal.js"}
 
 // TestLucideIconsAreVendoredWithTheirLicense pins the vendored icon set:
 // the package's license file ships beside the icons, the sprite holds a
