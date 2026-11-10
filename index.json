@@ -334,6 +334,9 @@
     "261110-bug-ws-tickets-query-point-resolve-hides-done": {
       "registered_at": "2026-11-10T04:35:59Z"
     },
+    "261110-bug-ws-tracker-item-window-drops-unsaved-edits": {
+      "registered_at": "2026-11-10T13:38:46Z"
+    },
     "261110-bug-ws-tracker-store-lock-network-split": {
       "registered_at": "2026-11-10T07:31:45Z"
     },
