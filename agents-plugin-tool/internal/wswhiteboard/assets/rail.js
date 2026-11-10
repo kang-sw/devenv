@@ -26,15 +26,19 @@
   // with n capsules, which is where the current topic's bar sticks.
   var CAP = 17, GAP = 3, PAD = 4, FADE = 14;
   function capH(n) { return n ? PAD + n * (CAP + GAP) : 0; }
-  // The bottom stack's height with both capsules: a topic whose bar does not
-  // clear it counts as not yet in view.
+  // The bottom stack's height with both capsules, fade included: a fixed
+  // reserve, so the line below does not move with the capsule count.
   var BOT = FADE + 2 * CAP + GAP + PAD;
 
+  // The edge classes are up and dn, not top and bot: a bare .top is the
+  // page header's class on both pages, whose flex and margin rules would
+  // give the zero-height wrapper a flow gap.
   function wrapper(edge) {
-    var w = box.querySelector(":scope > .wb-rail-wrap." + edge);
+    var cls = edge === "top" ? "up" : "dn";
+    var w = box.querySelector(":scope > .wb-rail-wrap." + cls);
     if (!w) {
       w = d.createElement("div");
-      w.className = "wb-rail-wrap " + edge;
+      w.className = "wb-rail-wrap " + cls;
       var s = d.createElement("div");
       s.className = "wb-rail-stack";
       s.hidden = true;
@@ -98,11 +102,13 @@
     for (var k = 0; k < n && rects[k].top <= vt + capH(Math.min(2, k)) + 1; k++) i = k;
     var cur = i >= 0 && rects[i].bottom > vt + capH(Math.min(2, i)) + 1 ? i : -1;
     var above = cur >= 0 ? cur : i + 1, nTop = Math.min(2, above), top = capH(nTop);
-    // Bottom: the next topics whose bar does not clear the bottom stack (and
-    // the reply bar, when it shows).
+    // Bottom: the next topics whose bar's top edge is at or below the
+    // bottom stack's top edge (over the reply bar, when it shows), i.e.
+    // hidden behind the stack or further down. A bar that shows above the
+    // stack gets no capsule, so the stack may hold fewer than two.
     var reply = box.querySelector(".reply"), replyOff = reply && reply.offsetHeight ? reply.offsetHeight + 14 : 0;
     var line = vb - replyOff - BOT, below = [];
-    for (k = above + (cur >= 0 ? 1 : 0); k < n; k++) if (rects[k].top + 24 > line) below.push(k);
+    for (k = above + (cur >= 0 ? 1 : 0); k < n; k++) if (rects[k].top >= line) below.push(k);
     draw({
       top: top,
       cur: cur,

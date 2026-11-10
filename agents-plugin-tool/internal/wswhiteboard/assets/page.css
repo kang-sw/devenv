@@ -447,15 +447,17 @@ details.panel .body { container-type: inline-size; }
 .wb-rail .topic > .tbar { position: sticky; top: var(--wb-rail-top, 0px); z-index: 1; }
 .wb-rail .topic:not(.quiet) > .tbar { border-radius: var(--wb-radius) var(--wb-radius) 0 0; }
 .wb-rail .topic > .tbar.wb-stuck { box-shadow: var(--wb-shadow); }
+/* the book button stays at the card's top and scrolls away under a stuck bar, so the bar gives back the room it reserved for it (the :has() outweighs the has-doc padding rules) */
+.wb-rail .topic.has-doc:has(> details.tdoc) > .tbar.wb-stuck { padding-right: 12px; }
 .wb-rail .topic > details.tdoc > summary { z-index: 2; }
 .wb-rail-wrap { position: sticky; height: 0; z-index: 1; pointer-events: none; }
-.wb-rail-wrap.top { top: 0; z-index: 3; }
-.wb-rail-wrap.bot { bottom: 0; }
+.wb-rail-wrap.up { top: 0; z-index: 3; }
+.wb-rail-wrap.dn { bottom: 0; }
 .wb-rail-stack { position: absolute; left: 0; right: 0; display: flex; flex-direction: column; gap: 3px; }
 .wb-rail-stack[hidden] { display: none; }
 /* the shadow carries the band's fill over the scroller's top padding, which a sticky inset counts from */
-.wb-rail-wrap.top .wb-rail-stack { top: 0; padding: 4px 0 3px; background: var(--wb-bg); box-shadow: 0 -8px 0 var(--wb-bg); }
-.wb-rail-wrap.bot .wb-rail-stack { bottom: 0; padding: 14px 0 4px; background: linear-gradient(to bottom, transparent, var(--wb-bg) 14px); }
+.wb-rail-wrap.up .wb-rail-stack { top: 0; padding: 4px 0 3px; background: var(--wb-bg); box-shadow: 0 -8px 0 var(--wb-bg); }
+.wb-rail-wrap.dn .wb-rail-stack { bottom: 0; padding: 14px 0 4px; background: linear-gradient(to bottom, transparent, var(--wb-bg) 14px); }
 .wb-cap { pointer-events: auto; display: flex; align-items: center; gap: 6px; height: 17px; margin: 0 6px; padding: 0 10px; border: 0; border-radius: 999px; background: var(--wb-topic); color: var(--wb-on-topic); font-size: 10.5px; font-weight: 700; line-height: 1; text-align: left; cursor: pointer; }
 .wb-cap.far { margin: 0 18px; font-size: 10px; font-weight: 600; opacity: .6; }
 .wb-cap.quiet { background: var(--wb-muted); color: var(--wb-muted-fg); }
