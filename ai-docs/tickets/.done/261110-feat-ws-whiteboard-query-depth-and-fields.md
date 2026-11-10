@@ -4,6 +4,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 07719ec8ac5a6ec0
 sage-review-completeness-reviewed: 07719ec8ac5a6ec0
+completed: 2026-11-10
 ---
 
 # whiteboard.query: depth and content control
@@ -196,3 +197,34 @@ Verification:
   the playbook grammar.
 - The mcp whiteboard tool tests and the rendered-text tests that pin
   `lineTicketQueueBoard` pass remotely through `ws-rgo`.
+
+### Result (cca49a60a) - 2026-11-10
+
+Landed Decisions 1-7. `Query` and its formatter (now `FormatQuery`) moved
+to `agents-plugin-tool/internal/wswhiteboard/query.go` with the payload
+value checks, building a `QueryResult` topic -> item -> detail tree; the
+handler prints it; the playbook `## Query` section (with a per-target
+defaults table) and call description changed, with byte-identical wsflow
+and Pi mirrors and the three rsrc manifest hashes; `lineTicketQueueBoard`
+now queries with `ids` set to the queue's item IDs.
+
+Verification (remote, `ws-rgo`): `go test ./internal/wswhiteboard/...
+-count=1` ok; `go test ./internal/mcp/... ./internal/wsrsrc/... -count=1`
+ok; local `node --test test/version-check.test.ts` in `agents-plugin-pi`
+8/8 pass. New `query_test.go` covers each depth, `fields`, `body`,
+`closed`, `text`, list-valued `topic`/`status`, `id`/`ids` union, the
+omission line, explicit overrides, and refusals.
+
+Decisions taken:
+- The closed-topic fold count and the omission line are one last
+  `omitted:` line, so the fold count is not printed twice.
+- Omission counts cover only default-driven omissions (the unfiltered
+  open-only status at depth `items`/`full`, and folded closed topics).
+- `ids` and `text` list only topics holding a match; `topic` and
+  unfiltered calls list every topic they reach (the unfiltered call is a
+  topic map). Topics print in first-item-added order, body-only topics
+  after.
+- Empty strings and empty lists are refused for `topic`, `status`,
+  `fields`, `ids`, and `text`; `fields` also takes a single string.
+- `id: 0` now filters for item 0 (no match) instead of meaning no filter,
+  as the old `id != 0` check did (lite review, Minor; IDs start at 1).
