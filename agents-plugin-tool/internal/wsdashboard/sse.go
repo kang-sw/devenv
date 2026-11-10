@@ -228,7 +228,17 @@ func (d *Daemon) handleSessionEvents(w http.ResponseWriter, r *http.Request, rep
 		release := d.git.watch(s.Project)
 		defer release()
 	}
-	d.stream(w, r, d.sessionPageSource(replyID, lang, requestTheme(r)), only)
+	// The session rail is a render of its own, shared by every session
+	// page, sent over the same stream; its worktree lists are read while
+	// some stream shows it.
+	var side *pageSource
+	if only.has(regionRail) {
+		release := d.rail.watch()
+		defer release()
+		rail := d.railPageSource(lang, requestTheme(r))
+		side = &rail
+	}
+	d.stream(w, r, d.sessionPageSource(replyID, lang, requestTheme(r)), only, side)
 }
 
 // sessionPageSource renders replyID's session page in lang and theme for
@@ -331,7 +341,7 @@ func (d *Daemon) handleIndexEvents(w http.ResponseWriter, r *http.Request) {
 			return pageRender{regions: regions, ok: true}
 		},
 		stamp: func(refreshInputs) (string, bool) { return pages.indexStamp() },
-	}, nil)
+	}, nil, nil)
 }
 
 // stream runs one stream connection: it sends the regions of src's shared
@@ -342,7 +352,13 @@ func (d *Daemon) handleIndexEvents(w http.ResponseWriter, r *http.Request) {
 // WebSocket upgrade, too); one gone later sends "gone". A WebSocket handshake
 // upgrades (stream_ws.go) and every other request is served SSE: the events
 // and their data are the same, only the framing differs.
-func (d *Daemon) stream(w http.ResponseWriter, r *http.Request, src pageSource, only regionFilter) {
+//
+// side, when not nil, is a further shared page whose regions the stream
+// sends too (the session rail on a session page): it has its own
+// subscription and is re-rendered only on a wake it hears or a refresh
+// tick, so a change that reaches one page never re-renders the other. Only
+// src decides that the page is gone.
+func (d *Daemon) stream(w http.ResponseWriter, r *http.Request, src pageSource, only regionFilter, side *pageSource) {
 	upgrade := wsUpgrade(r)
 	if upgrade && !wsOriginAllowed(r) {
 		http.Error(w, "cross-origin stream refused", http.StatusForbidden)
@@ -366,6 +382,15 @@ func (d *Daemon) stream(w http.ResponseWriter, r *http.Request, src pageSource, 
 		return
 	}
 	held := parseHeld(r.URL.Query().Get("h"))
+	var parts []sidePart
+	if side != nil {
+		part := sidePart{src: *side, page: d.cache.acquire(side.key)}
+		defer d.cache.release(side.key, part.page)
+		var cancelSide func()
+		part.sub, cancelSide = d.broker.subscribe()
+		defer cancelSide()
+		parts = append(parts, part)
+	}
 
 	run := func(sink streamSink) {
 		// sentRev is the tracker revision this stream last sent; the
@@ -380,18 +405,9 @@ func (d *Daemon) stream(w http.ResponseWriter, r *http.Request, src pageSource, 
 			}
 			regions := only.apply(pr.regions)
 			sent := false
-			for _, name := range sortedRegionNames(regions) {
-				region := regions[name]
-				if held[name] == region.Hash {
-					continue
-				}
-				payload, _ := json.Marshal(regionEvent{Name: name, Hash: region.Hash, HTML: string(region.HTML)})
-				if sink.event("region", payload) != nil {
-					return false
-				}
-				d.stats.Sends.Add(1)
-				held[name] = region.Hash
-				sent = true
+			sent, ok := d.sendRegions(sink, regions, held)
+			if !ok {
+				return false
 			}
 			if d.tracker != nil {
 				if rev := d.trackerRev.Load(); rev != sentRev {
@@ -404,8 +420,29 @@ func (d *Daemon) stream(w http.ResponseWriter, r *http.Request, src pageSource, 
 			}
 			return !sent || sink.flush() == nil
 		}
+		// sendSide sends a side page's render, which never ends the page.
+		sendSide := func(part sidePart, pr pageRender, at uint64) bool {
+			d.broker.follow(part.sub, pr.deps, at)
+			if !pr.ok {
+				return true
+			}
+			sent, ok := d.sendRegions(sink, only.apply(pr.regions), held)
+			return ok && (!sent || sink.flush() == nil)
+		}
 		if !send(first, at) {
 			return
+		}
+		for _, part := range parts {
+			pr, at := d.cache.get(part.page, part.src, false)
+			if !sendSide(part, pr, at) {
+				return
+			}
+		}
+		// sideWake is the side page's wake channel; nil (never ready)
+		// without one.
+		var sideWake <-chan struct{}
+		if len(parts) > 0 {
+			sideWake = parts[0].sub.ch
 		}
 		refresh := time.NewTicker(d.refreshInterval)
 		defer refresh.Stop()
@@ -413,7 +450,7 @@ func (d *Daemon) stream(w http.ResponseWriter, r *http.Request, src pageSource, 
 		defer keepAlive.Stop()
 		var last time.Time
 		for {
-			tick := false
+			tick, primary, sideWoken := false, false, false
 			select {
 			case <-sink.gone():
 				return
@@ -427,6 +464,9 @@ func (d *Daemon) stream(w http.ResponseWriter, r *http.Request, src pageSource, 
 			case <-refresh.C:
 				tick = true
 			case <-sub.ch:
+				primary = true
+			case <-sideWake:
+				sideWoken = true
 			}
 			if wait := sseMinInterval - time.Since(last); wait > 0 {
 				select {
@@ -436,16 +476,35 @@ func (d *Daemon) stream(w http.ResponseWriter, r *http.Request, src pageSource, 
 					return
 				case <-time.After(wait):
 				}
-				// Wakes that arrived while waiting are folded into this render.
-				select {
-				case <-sub.ch:
-				default:
-				}
+			}
+			// Wakes that arrived while waiting are folded into this render,
+			// and so is the other part's signal of the same wake (the broker
+			// signals every subscription under one lock): the page renders
+			// first, so a page that is gone never sends a side render first.
+			select {
+			case <-sub.ch:
+				primary = true
+			default:
+			}
+			select {
+			case <-sideWake:
+				sideWoken = true
+			default:
 			}
 			last = time.Now()
-			pr, at := d.cache.get(page, src, tick)
-			if !send(pr, at) {
-				return
+			if primary || tick {
+				pr, at := d.cache.get(page, src, tick)
+				if !send(pr, at) {
+					return
+				}
+			}
+			if sideWoken || tick {
+				for _, part := range parts {
+					pr, at := d.cache.get(part.page, part.src, tick)
+					if !sendSide(part, pr, at) {
+						return
+					}
+				}
 			}
 		}
 	}
@@ -460,6 +519,34 @@ func (d *Daemon) stream(w http.ResponseWriter, r *http.Request, src pageSource, 
 	fmt.Fprint(w, "retry: 3000\n\n")
 	flusher.Flush()
 	run(&sseSink{w: w, flusher: flusher, done: r.Context().Done()})
+}
+
+// sidePart is one side page of a stream (see stream): its source, its
+// shared page, and its own subscription.
+type sidePart struct {
+	src  pageSource
+	page *sharedPage
+	sub  *subscription
+}
+
+// sendRegions writes the regions whose hash differs from what the browser
+// holds, recording each sent hash in held; sent reports that one was
+// written, ok false that the connection failed.
+func (d *Daemon) sendRegions(sink streamSink, regions regionSet, held map[string]string) (sent, ok bool) {
+	for _, name := range sortedRegionNames(regions) {
+		region := regions[name]
+		if held[name] == region.Hash {
+			continue
+		}
+		payload, _ := json.Marshal(regionEvent{Name: name, Hash: region.Hash, HTML: string(region.HTML)})
+		if sink.event("region", payload) != nil {
+			return sent, false
+		}
+		d.stats.Sends.Add(1)
+		held[name] = region.Hash
+		sent = true
+	}
+	return sent, true
 }
 
 // streamSink is one stream connection's framing.
@@ -508,7 +595,7 @@ func sortedRegionNames(regions regionSet) []string {
 	if _, ok := regions[regionMode]; ok {
 		names = append(names, regionMode)
 	}
-	for _, name := range append(sessionRegions(modeLive), regionSessions) {
+	for _, name := range append(sessionRegions(modeLive), regionSessions, regionRail) {
 		if _, ok := regions[name]; ok {
 			names = append(names, name)
 		}

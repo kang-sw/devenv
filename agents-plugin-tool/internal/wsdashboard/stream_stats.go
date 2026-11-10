@@ -16,9 +16,10 @@ type streamStats struct {
 	WakeSession, WakeAgent, WakeGit, WakeInbox, WakeTracker atomic.Int64
 	// Signals counts the wake signals delivered to streams.
 	Signals atomic.Int64
-	// SessionRenders and IndexRenders count page renders actually run (a
-	// read of the page's state and a render of every region).
-	SessionRenders, IndexRenders atomic.Int64
+	// SessionRenders, IndexRenders, and RailRenders count page renders
+	// actually run (a read of the page's state and a render of every
+	// region; the session rail's shared render is its own).
+	SessionRenders, IndexRenders, RailRenders atomic.Int64
 	// Shared counts stream rounds served from another stream's render.
 	Shared atomic.Int64
 	// RefreshSkips counts refresh ticks that found nothing to re-render.
@@ -48,6 +49,7 @@ func (s *streamStats) snapshot() map[string]int64 {
 		"signals":         s.Signals.Load(),
 		"session_renders": s.SessionRenders.Load(),
 		"index_renders":   s.IndexRenders.Load(),
+		"rail_renders":    s.RailRenders.Load(),
 		"shared":          s.Shared.Load(),
 		"refresh_skips":   s.RefreshSkips.Load(),
 		"sends":           s.Sends.Load(),

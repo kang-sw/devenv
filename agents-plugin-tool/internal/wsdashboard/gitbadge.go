@@ -37,6 +37,13 @@ import (
 // last read, the stream that rendered it asks for a read (follow), so the
 // two agree once the badge's read lands. The interval stays the fallback for
 // a root whose session is gone.
+//
+// One exception reads git for roots no stream watches: the session rail's
+// worktree lists (railworktrees.go) run git worktree list --porcelain for
+// the repositories of the sessions the rail shows, while some page shows
+// the rail. That command reads only the repository's worktree records,
+// never a working tree, and never fetches; the rail's change counts come
+// from the sessions' own snapshots.
 
 const (
 	// gitReadInterval is the period between a watched root's reads.

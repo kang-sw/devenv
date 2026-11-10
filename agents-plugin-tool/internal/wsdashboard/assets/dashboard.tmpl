@@ -6,9 +6,10 @@
 <style>{{.Assets.CSS}}</style>
 <style>{{.Assets.TrackerCSS}}</style></head>
 <body class="dash {{.Mode}}">{{.Assets.WhiteboardSprite}}{{.Assets.Sprite}}<div class="dwrap">
-<div class="top"><a class="back" href="/" title="{{t "nav.sessions"}}" aria-label="{{t "nav.sessions"}}">{{icon "back"}}</a>{{region . "head"}}{{template "sse"}}{{template "qsslot"}}</div>
+<div class="top"><a class="back" id="railbtn" href="/" title="{{t "nav.sessions"}}" aria-label="{{t "nav.sessions"}}" aria-controls="rail" aria-expanded="false">{{icon "back"}}</a>{{region . "head"}}{{template "sse"}}{{template "qsslot"}}</div>
 {{template "drawer" .}}
 <div class="banner" id="dash-banner" hidden></div>
+<div class="dbody"><aside id="rail" class="rail" aria-label="{{t "rail.title"}}">{{region . "rail"}}</aside><div class="rscrim" id="rscrim"></div>
 <main id="grid" class="dgrid {{.Mode}}">
 {{if .Adapter}}<nav id="tabbar" class="tabbar"><button data-tab="convo" aria-pressed="true">{{icon "chat"}}{{t "tab.conversation"}}<span class="tdot"></span></button><button data-tab="board" aria-pressed="false">{{icon "board"}}{{t "tab.board"}}<span class="tdot"></span></button></nav>
 {{region . "tree"}}
@@ -16,7 +17,7 @@
 <div id="convo" class="convo">{{region . "entries"}}{{region . "convlive"}}</div>
 <div id="composer" class="composer"><div class="cbadges"><button type="button" class="ibadge" id="ibadge" title="{{t "js.interrupt.title"}}" hidden><span class="istop"></span><span class="ilabel">{{t "js.interrupt"}}</span></button>{{template "subbadge"}}</div>{{region . "ctx"}}<div class="cimgs" id="cimgs"></div><div class="cchips" id="cchips"></div><div class="crow"><div class="cfield"><div class="chl" id="chl" aria-hidden="true"></div><textarea id="ctext" rows="1" aria-description="{{t "composer.aria"}}" placeholder="{{t "js.hint.enter"}}"></textarea></div><button type="button" class="csend" id="csend" title="{{t "composer.send"}}" aria-label="{{t "composer.send"}}">{{icon "send"}}</button></div>{{region . "sline"}}<div class="cnote" id="cnote"></div></div>
 {{end}}<div id="bcol" class="bcol">{{region . "board"}}</div>
-</main></div>
+</main></div></div>
 <script>{{i18n}}</script>
 <script>window.wbForm = function () {
 {{.Assets.FormScript}}};
@@ -27,6 +28,7 @@ window.wbMermaidFile = {{.Assets.MermaidFile}};</script>
 <script>{{.Assets.ToastScript}}</script>
 <script>{{.Assets.TrackerScript}}</script>
 <script>{{.Assets.MentionScript}}</script>
+<script>{{.Assets.RailScript}}</script>
 <script>{{.Assets.Script}}</script>
 </body></html>
 {{end}}
@@ -194,6 +196,17 @@ region. */}}
 {{define "r-sessions"}}<div class="totals"><span class="chip">{{t "index.live" .Live}}</span><span class="chip">{{t "index.working" .Busy}}</span></div>{{range .Projects}}<section class="project"><div class="pbar"><span class="pname">{{.Name}}</span><span class="ppath">{{.Path}}</span><span class="chip">{{len .Sessions}}</span></div>{{range .Sessions}}{{template "srow" .}}{{end}}{{if .Ended}}<div class="endedhead">{{t "head.ended"}}</div>{{range .Ended}}{{template "srow" .}}{{end}}{{end}}{{with .HiddenEnded}}<div class="thidden">{{t "index.hidden" .}}</div>{{end}}</section>{{else}}<div class="empty">{{t "index.empty"}}</div>{{end}}{{end}}
 
 {{define "srow"}}<a class="sess{{if not .Live}} ended{{end}}" href="/s/{{.ReplyID}}"><span class="who"><span class="rid">{{.ReplyID}}</span><span class="sub">{{if .Tool}}<span class="tn">{{.Tool}}</span>{{end}}{{with .RunningAgents}}<span class="agents-mini">{{t "srow.agents" .}}</span>{{end}}{{if not .HasBoard}}<span class="agents-mini">{{t "srow.noboard"}}</span>{{end}}</span></span>{{with .Harness}}<span class="host">{{.}}</span>{{else}}<span></span>{{end}}{{if .Adapter}}{{template "phase" .Phase}}{{else}}<span class="phase none" title="{{t "srow.nolive.title"}}">{{t "srow.nolive"}}</span>{{end}}<span class="qs">{{with .CountPolicy}}<span class="chip policy" title="{{t "chip.answer"}}">{{icon "ask"}}{{.}}</span>{{end}}</span><span class="when">{{template "ago" .LastSeen}}</span></a>{{end}}
+
+{{/* The session rail (pageview_rail.go): every session page's left card,
+one shared render without the viewed session (the page marks its own row,
+.cur, and pins starred rows, both on the client). A workspace is a
+repository, its sessions under its worktrees, or a plain folder; each row is
+two lines, the star outside the row's link. */}}
+{{define "r-rail"}}<div class="rhd"><b class="rtitle">{{t "rail.title"}}</b><span class="rsp"></span><span class="chip" title="{{t "rail.live.title"}}">{{t "index.live" .Live}}</span>{{with .CountPolicy}}<span class="chip policy" title="{{t "chip.answer"}}">{{icon "ask"}}{{.}}</span>{{end}}<button type="button" class="rref" id="railref" title="{{t "rail.refresh"}}" aria-label="{{t "rail.refresh"}}">{{icon "reload"}}</button></div><div class="rlist" id="rlist">{{range .Workspaces}}<section class="rws" data-ws="{{.Path}}"><button type="button" class="wsbar" aria-expanded="true" title="{{.Path}}">{{if .Repo}}<span class="wsi" title="{{t "rail.repo"}}">{{icon "repo"}}</span>{{else}}<span class="wsi" title="{{t "rail.folder"}}">{{icon "wsfolder"}}</span>{{end}}<span class="nm">{{.Name}}</span><span class="pp">{{.Path}}</span><span class="ct" title="{{t "rail.live.title"}}">{{.Live}}</span></button><div class="wsbody">{{if .Repo}}{{range .Worktrees}}<div class="rwt{{if .Empty}} empty{{end}}"><div class="wthd" title="{{.Path}}">{{icon "branch"}}<span class="br">{{if .Detached}}{{t "rail.detached"}}{{else}}{{.Branch}}{{end}}</span><span class="wf">· {{if .Root}}{{t "rail.root"}}{{else}}{{.Folder}}{{end}}</span>{{if .HasChanges}}<span class="gs" title="{{t "rail.changes"}}">±{{.Changes}}</span>{{end}}</div>{{template "rsessions" .}}</div>{{end}}{{else}}{{template "rsessions" .}}{{end}}</div></section>{{else}}<div class="empty">{{t "index.empty"}}</div>{{end}}</div><div class="rfoot"><a href="/">{{t "nav.sessions"}}</a></div>{{end}}
+
+{{define "rsessions"}}{{if or .Sessions .Ended}}<div class="rsessions">{{range .Sessions}}{{template "rrow" .}}{{end}}{{with .Ended}}<details class="rended" data-key="rended:{{$.Path}}"><summary>{{t "rail.ended" (len .)}}</summary><div class="rsessions">{{range .}}{{template "rrow" .}}{{end}}</div></details>{{end}}</div>{{end}}{{end}}
+
+{{define "rrow"}}<div class="rs{{if not .Live}} ended{{end}}" data-rid="{{.ReplyID}}"><button type="button" class="star" aria-pressed="false" title="{{t "rail.star"}}" aria-label="{{t "rail.star"}}">{{icon "pin"}}</button><a class="rl" href="/s/{{.ReplyID}}"><span class="s1"><span class="host sm hb{{if .Working}} run{{end}}" title="{{if .Working}}{{t "rail.working"}}{{else}}{{t "rail.waiting"}}{{end}}">{{with .Harness}}{{.}}{{else}}?{{end}}{{if .Working}}<svg class="ring" aria-hidden="true"><rect class="rtrk"/><rect class="rrun" pathLength="100"/></svg>{{end}}</span>{{with .Subagents}}<span class="bots" title="{{t "srow.agents" .}}">{{icon "robot"}}{{.}}</span>{{end}}<span class="rid">{{.ReplyID}}</span><span class="rsp"></span>{{with .CountPolicy}}<span class="chip policy" title="{{t "chip.answer"}}">{{icon "ask"}}{{.}}</span>{{end}}{{with .LastTool}}<time class="when t" data-ms="{{.}}" data-f="rel" data-tl="{{t "rail.lasttool"}}">{{clock .}}</time>{{end}}</span>{{with .Message}}<span class="s2">{{if $.User}}<b class="who">{{t "rail.you"}}</b>{{end}}{{.}}</span>{{end}}</a></div>{{end}}
 
 {{/* The file view's pages (file_route.go): a rendered markdown file, and the
 "not viewable" page that offers the path copies only. Neither is a region;

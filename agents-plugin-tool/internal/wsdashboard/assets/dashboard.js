@@ -29,24 +29,36 @@
     if (m < 60) return m + "m " + (s % 60) + "s";
     return Math.floor(m / 60) + "h " + (m % 60) + "m";
   }
+  // relAge is an age in one short unit: "now" under five seconds, then
+  // seconds, minutes, hours, days (the session rail's last tool call).
+  function relAge(ms) {
+    var s = Math.max(0, Math.floor(ms / 1000));
+    if (s < 5) return wsT("js.rel.now");
+    if (s < 60) return wsT("js.rel.s", s);
+    if (s < 3600) return wsT("js.rel.m", Math.floor(s / 60));
+    if (s < 86400) return wsT("js.rel.h", Math.floor(s / 3600));
+    return wsT("js.rel.d", Math.floor(s / 86400));
+  }
   // A clock or weekday time and every time's title never change while the
   // page shows them, so each element formats them once (wsFmt marks it with
   // the language it used; only a language change formats it again). The
-  // relative times ("since", "ago") follow the clock, and are written only
-  // when their text changed.
+  // relative times ("since", "ago", "rel") follow the clock, and are
+  // written only when their text changed.
   function fmtTime(t, now) {
     var ms = +t.getAttribute("data-ms");
     if (!ms) return;
-    var f = t.getAttribute("data-f"), rel = f === "since" || f === "ago";
+    var f = t.getAttribute("data-f"), rel = f === "since" || f === "ago" || f === "rel";
     if (rel) {
-      var s = f === "since" ? dur(now - ms) : wsT("js.ago", dur(now - ms));
+      var s = f === "since" ? dur(now - ms) : f === "rel" ? relAge(now - ms) : wsT("js.ago", dur(now - ms));
       if (t.textContent !== s) t.textContent = s;
     }
     if (t.wsFmt === wsI18n.lang) return;
     t.wsFmt = wsI18n.lang;
     if (f === "wd") t.textContent = new Date(ms).toLocaleDateString(wsI18n.lang, { weekday: "short" });
     else if (!rel) { var d = new Date(ms); t.textContent = two(d.getHours()) + ":" + two(d.getMinutes()); }
-    t.title = new Date(ms).toLocaleString(wsI18n.lang);
+    // data-tl names what the time is; the title leads with it.
+    var tl = t.getAttribute("data-tl");
+    t.title = (tl ? tl + " \u00b7 " : "") + new Date(ms).toLocaleString(wsI18n.lang);
   }
   // fmtTimes formats every time under el, for content just put on the page.
   function fmtTimes(el) {
@@ -75,7 +87,7 @@
   function tickTimes() {
     if (doc.hidden) return;
     var now = Date.now();
-    q('time[data-ms][data-f="since"], time[data-ms][data-f="ago"]').forEach(function (t) { fmtTime(t, now); });
+    q('time[data-ms][data-f="since"], time[data-ms][data-f="ago"], time[data-ms][data-f="rel"]').forEach(function (t) { fmtTime(t, now); });
     q("em.u-pace[data-reset]").forEach(function (e) { pace(e, now); });
   }
   setInterval(tickTimes, 1000);
@@ -383,6 +395,7 @@
     var pin = (name === "entries" || name === "convlive") && pinned();
     var scroll = scrollState();
     var answers = board ? readAnswers(el) : null;
+    var railTop = name === "rail" ? railScrollTop() : null;
     var frameH = board ? frameHeights(el) : null;
     var before = board && !still && !reducedMotion() ? topicHeights(el) : null;
     // The entries merge and the board morph prepare only the nodes they
@@ -428,6 +441,7 @@
     if (TL_REGIONS[name]) { delete tlHeld[name]; tlCount(); }
     if (name === "convlive") syncBadge();
     if (name === "head" && !sseOn) connected(false);
+    if (name === "rail") { railMarks(); railScrollTo(railTop); }
   }
 
   // --- board morph: unchanged topics keep their nodes -------------------------
@@ -1187,6 +1201,9 @@
         n.el.dispatchEvent(new Event("input", { bubbles: true }));
       });
       renderChips();
+      // The sent draft is gone; what was typed during the send is saved
+      // again as the next draft.
+      clearDraft();
       syncNote(wsT(res.merged ? "js.send.merged" : "js.send.ok"));
     });
   }
@@ -3972,6 +3989,175 @@
     location.reload();
   }
 
+  // --- session rail ------------------------------------------------------------
+  // The rail (r-rail) is one render shared by every session page: the page
+  // marks its own row, pins the starred rows, and collapses the workspaces
+  // the user collapsed (rail.js keeps those in storage). From 1600px the
+  // rail is a column; below it the top-left arrow slides it in over the
+  // page, and Esc, the scrim, or picking a session closes it. The arrow
+  // stays a link to the sessions index for a modified click.
+  var railEl = $("rail"), railBtn = $("railbtn"), rscrim = $("rscrim"), WsRail = window.WsRail;
+  var railStore = { load: load, save: save };
+  var starSet = WsRail ? WsRail.stars(railStore) : null, colSet = WsRail ? WsRail.collapsed(railStore) : null;
+  var RAIL_WIDE = window.matchMedia ? window.matchMedia("(min-width: 1600px)") : null;
+  var RAIL_SCROLL_KEY = "ws.dashboard.railscroll";
+  function railWide() { return !!(RAIL_WIDE && RAIL_WIDE.matches); }
+  function railShown() { return root.classList.contains("rail-open"); }
+  function railOpen(open) {
+    if (!railEl) return;
+    root.classList.toggle("rail-open", !!open);
+    if (railBtn) railBtn.setAttribute("aria-expanded", String(!!open || railWide()));
+  }
+  function railScrollTop() { var l = $("rlist"); return l ? l.scrollTop : null; }
+  function railScrollTo(top) { var l = $("rlist"); if (l && top !== null && top !== undefined && l.scrollTop !== top) l.scrollTop = top; }
+  // railMarks applies the page's marks to the rail as rendered: after
+  // load and after every rail swap.
+  function railMarks() {
+    var r = region("rail");
+    if (!r || !WsRail) return;
+    q(".rsessions", r).forEach(function (box) { WsRail.pin(box, starSet); });
+    WsRail.markCurrent(q(".rs", r), rid);
+    q(".rws", r).forEach(function (ws) {
+      var col = colSet.has(ws.getAttribute("data-ws") || ""), bar = ws.querySelector(".wsbar");
+      ws.classList.toggle("col", col);
+      if (bar) bar.setAttribute("aria-expanded", String(!col));
+    });
+  }
+  if (railEl && WsRail) {
+    if (railBtn) railBtn.addEventListener("click", function (e) {
+      if (e.button || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      e.preventDefault();
+      railOpen(!railShown());
+    });
+    if (rscrim) rscrim.addEventListener("click", function () { railOpen(false); });
+    doc.addEventListener("keydown", function (e) { if (e.key === "Escape" && railShown()) railOpen(false); });
+    if (RAIL_WIDE && RAIL_WIDE.addEventListener) RAIL_WIDE.addEventListener("change", function () { railOpen(false); });
+    railEl.addEventListener("click", function (e) {
+      var t = e.target;
+      var star = t.closest && t.closest(".star");
+      if (star) {
+        e.preventDefault();
+        var row = star.closest(".rs");
+        if (row) starSet.toggle(row.getAttribute("data-rid") || "");
+        railMarks();
+        return;
+      }
+      var bar = t.closest && t.closest(".wsbar");
+      if (bar) {
+        var ws = bar.closest(".rws");
+        if (ws) colSet.toggle(ws.getAttribute("data-ws") || "");
+        railMarks();
+        return;
+      }
+      var ref = t.closest && t.closest("#railref");
+      if (ref) {
+        if (!window.fetch || ref.classList.contains("busy")) return;
+        ref.classList.add("busy");
+        fetch("/rail/refresh", { method: "POST", credentials: "same-origin" }).then(function () { ref.classList.remove("busy"); }, function () { ref.classList.remove("busy"); });
+        return;
+      }
+      // Picking a session navigates; the draft is saved first and the
+      // overlay closes, so a back navigation finds the page as it was.
+      if (t.closest && t.closest("a[href]")) { saveDraft(); railOpen(false); }
+    });
+    // The rail list keeps its scroll across navigations.
+    var savedRailTop = parseInt(load(RAIL_SCROLL_KEY), 10);
+    window.addEventListener("pagehide", function () { var top = railScrollTop(); if (top !== null) save(RAIL_SCROLL_KEY, String(Math.round(top))); });
+    railMarks();
+    if (isFinite(savedRailTop)) railScrollTo(savedRailTop);
+    railOpen(false);
+  }
+
+  // --- per-session drafts ---------------------------------------------------------
+  // What the user typed or picked on this session's page and has not sent,
+  // and the page's view state around it, is kept per session in storage
+  // (rail.js drafts), so switching sessions in the rail and coming back
+  // finds it: the composer's text, mentions, and selection, the board
+  // answers and topic notes, the answer chips, the images that reference
+  // written attachments, the open details, and the tab. Pasted images are
+  // not kept: a restored draft says so, and while the page holds one,
+  // leaving it asks first (the browser's leave-page confirmation).
+  var draftStore = WsRail && rid ? WsRail.drafts(railStore) : null, draftTimer = null, restoring = false;
+  function readDraft() {
+    var b = region("board"), open = {};
+    Object.keys(openState).forEach(function (k) { if (openState[k]) open[k] = true; });
+    var d = {
+      text: ctext ? ctext.value : "",
+      mentions: mentions.map(function (m) { return { start: m.start, end: m.end, text: m.text }; }),
+      answers: b ? readAnswers(b) : {},
+      chips: chipList(),
+      refs: imgs.filter(function (p) { return !!p.ref; }).map(function (p) { return { ref: p.ref, name: p.name, n: p.n }; }),
+      lost: imgs.filter(function (p) { return !p.ref; }).map(function (p) { return p.n; }),
+      open: open,
+      tab: live ? grid.getAttribute("data-tab") || "" : ""
+    };
+    if (ctext && d.text) d.sel = [ctext.selectionStart, ctext.selectionEnd];
+    return d;
+  }
+  function saveDraft() {
+    if (!draftStore || restoring) return;
+    clearTimeout(draftTimer);
+    draftTimer = null;
+    draftStore.save(rid, readDraft());
+  }
+  function queueDraft() {
+    if (!draftStore || restoring) return;
+    clearTimeout(draftTimer);
+    draftTimer = setTimeout(saveDraft, 400);
+  }
+  function clearDraft() {
+    if (!draftStore) return;
+    draftStore.clear(rid);
+    queueDraft();
+  }
+  function restoreDraft() {
+    var d = draftStore && draftStore.load(rid);
+    if (!d) return;
+    restoring = true;
+    try {
+      if (d.open && typeof d.open === "object") {
+        Object.keys(d.open).forEach(function (k) { if (!Object.prototype.hasOwnProperty.call(openState, k)) openState[k] = true; });
+        restoreOpen(doc);
+      }
+      var b = region("board");
+      if (b && d.answers && typeof d.answers === "object") {
+        writeAnswers(b, d.answers);
+        if (window.wbForm) window.wbForm();
+      }
+      if (cchips && Array.isArray(d.chips)) {
+        d.chips.forEach(function (c) { if (c && c.id && !chips[c.id]) { putChip(c); setItem(c.id, c); } });
+        syncChips();
+      }
+      var lost = Array.isArray(d.lost) ? d.lost : [];
+      if (ctext && typeof d.text === "string" && d.text && !ctext.value) {
+        var s = WsRail.stripMarkers(d.text, Array.isArray(d.mentions) ? d.mentions : [], lost);
+        ctext.value = s.text;
+        mentions = s.mentions.filter(function (m) { return liveMention(m, s.text); });
+        mentionWas = ctext.value;
+        (Array.isArray(d.refs) ? d.refs : []).forEach(function (p) {
+          if (!p || !p.ref || !markerNums(s.text)[p.n]) return;
+          imgs.push({ name: p.name || p.ref, url: attachSrc(p.ref), data: null, ref: p.ref, n: p.n });
+          imgSeq = Math.max(imgSeq, p.n);
+        });
+        imgs.sort(function (a, b) { return a.n - b.n; });
+        grow();
+        paintMentions();
+        renderImgs();
+        if (Array.isArray(d.sel)) { try { ctext.setSelectionRange(d.sel[0], d.sel[1]); } catch (e) { /* out of range */ } }
+      }
+      if (live && d.tab === "board") setTab("board");
+      if (lost.length) syncNote(wsT("js.draft.imgslost", lost.length));
+    } finally {
+      restoring = false;
+    }
+  }
+  if (draftStore) {
+    ["input", "change", "click", "toggle"].forEach(function (t) { doc.addEventListener(t, queueDraft, true); });
+    window.addEventListener("pagehide", saveDraft);
+    doc.addEventListener("visibilitychange", function () { if (doc.hidden) saveDraft(); });
+    window.addEventListener("beforeunload", WsRail.leaveGuard(function () { return imgs.some(function (p) { return !p.ref; }); }));
+  }
+
   if (live) {
     setLayout(load(LAYOUT_KEY));
     setSplit(savedSplit());
@@ -3984,6 +4170,7 @@
   q("iframe.doc-frame").forEach(function (f) { if (f.contentWindow) f.contentWindow.postMessage({ wbDoc: "size" }, "*"); });
   if (window.wbForm) window.wbForm();
   applySent();
+  restoreDraft();
   tlCount();
   syncBadge();
   fmtTimes(doc);

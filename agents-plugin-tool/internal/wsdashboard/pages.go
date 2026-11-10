@@ -31,7 +31,7 @@ import (
 // (wswhiteboard.RenderRegions); the rest render from the view model
 // (pageview.go).
 
-//go:embed assets/dashboard.tmpl assets/dashboard.css assets/dashboard.js assets/sprite.svg assets/tracker.css assets/tracker.js assets/mention.js assets/toast.js
+//go:embed assets/dashboard.tmpl assets/dashboard.css assets/dashboard.js assets/sprite.svg assets/tracker.css assets/tracker.js assets/mention.js assets/toast.js assets/rail.js
 var dashboardFS embed.FS
 
 // Region names. The session page's regions in order; the index page has one.
@@ -105,6 +105,10 @@ type pageAssetsData struct {
 	// ToastScript is the shared toast stack (toast.js, window.WsToast),
 	// inlined ahead of the tracker and page scripts that both use it.
 	ToastScript template.JS
+	// RailScript is the session rail's browser-side state (rail.js,
+	// window.WsRail): per-session drafts, stars, and the rail's own
+	// toggles, which the session page's script uses.
+	RailScript template.JS
 }
 
 var (
@@ -171,6 +175,7 @@ func buildDashboardAssets(read func(name string) ([]byte, error)) (*dashboardAss
 		TrackerScript:    template.JS(get("tracker.js")),
 		MentionScript:    template.JS(get("mention.js")),
 		ToastScript:      template.JS(get("toast.js")),
+		RailScript:       template.JS(get("rail.js")),
 		WhiteboardCSS:    wb.CSS,
 		WhiteboardSprite: wb.Sprite,
 		FormScript:       wb.FormScript,
@@ -905,6 +910,14 @@ func (d *Daemon) handleSessionPage(w http.ResponseWriter, r *http.Request, reply
 	view.Git = d.git.badge(view.Project)
 	view.Worktrees = d.worktrees != nil
 	regions, err := renderSessionRegions(view, d.entries)
+	if err == nil {
+		// The rail is rendered as its stream renders it, outside the
+		// session's own regions (railPageSource).
+		var rail renderedRegion
+		if rail, err = renderRailRegion(d.railView(d.pagesIn(lang)), lang); err == nil {
+			regions[regionRail] = rail
+		}
+	}
 	if err == nil {
 		var html string
 		if html, err = renderSessionPage(view, regions, localViewer(r)); err == nil {

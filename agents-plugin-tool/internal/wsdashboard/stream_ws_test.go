@@ -286,7 +286,10 @@ func TestWebSocketStreamDropsASilentPeer(t *testing.T) {
 		for range live.events {
 		}
 	}()
-	waitFor(t, "both streams to subscribe", func() bool { return f.d.broker.subscriptions() == 2 })
+	// A session stream holds two subscriptions: its page's and the shared
+	// session rail's.
+	const perStream = 2
+	waitFor(t, "both streams to subscribe", func() bool { return f.d.broker.subscriptions() == 2*perStream })
 
 	deadline := time.After(wsReadWindow*keepAlive + 3*time.Second)
 	for open := true; open; {
@@ -296,11 +299,11 @@ func TestWebSocketStreamDropsASilentPeer(t *testing.T) {
 			t.Fatal("the silent peer was not dropped")
 		}
 	}
-	waitFor(t, "the silent peer's stream to end", func() bool { return f.d.broker.subscriptions() == 1 })
+	waitFor(t, "the silent peer's stream to end", func() bool { return f.d.broker.subscriptions() == perStream })
 
 	time.Sleep(2 * wsReadWindow * keepAlive)
-	if n := f.d.broker.subscriptions(); n != 1 {
-		t.Fatalf("the answering peer's stream count = %d, want 1", n)
+	if n := f.d.broker.subscriptions(); n != perStream {
+		t.Fatalf("the answering peer's subscription count = %d, want %d", n, perStream)
 	}
 	live.conn.Close()
 	waitFor(t, "the closed peer's stream to end", func() bool { return f.d.broker.subscriptions() == 0 })

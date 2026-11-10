@@ -279,6 +279,23 @@ session to clean up unused worktrees, then the pool as text, cut at 48 KiB
 with a `... N more worktrees` line (singular for one). The dashboard never
 removes or releases a worktree itself.
 
+Every session page carries the session rail (`internal/wsdashboard/rail.go`,
+`pageview_rail.go`): the listed sessions grouped by repository (or plain
+folder) and worktree. It is one shared render (region `rail`, keyed by
+language and theme, no reply-id) that each session stream sends beside its
+page with a broker subscription of its own, so a session's change renders
+the rail once for all open pages and no other session's page. A session's
+repository comes from the registration's `git_common_dir` (ws-mcp's one
+`rev-parse --git-common-dir` at first registration), else from its root's
+`.git` on disk. The worktree rows come from `git worktree list --porcelain`
+through the source's optional `RepoWorktreeSource` (pooled worktrees under
+the `worktree_pool` roots show only while they hold a session), read only
+while a page streams the rail: on the first such stream, every 3 minutes,
+for a newly shown repository alone, and on `POST /rail/refresh` (own Origin;
+409 with no streaming page). Change counts come from the newest session
+snapshot in the worktree; the rail never reads a working tree. Drafts,
+stars, and collapsed workspaces are browser-local (`assets/rail.js`).
+
 On the served board and in the conversation's lead
 replies, a file link renders as an action link (`data-wl="file"`, titled with
 its repo-relative path) and an http(s) link is marked `data-wl="url"`: a
