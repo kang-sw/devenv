@@ -109,6 +109,8 @@
 //                        measured (view is null while the store is not loaded)
 //   h, the helper bag ext functions get: esc, attr, btn, card, fld, fmtTs, fmtSize,
 //     nm, nmo, memberOpts, profileFields, profileText, asciiId, crefHtml,
+//     uiCommand(id, {op, arg, comment}) (a support chat's UI command on store id's view:
+//     search, focus, scope, or view, as the user would; see uiCommand),
 //     openDialog(kind, d), closeDialog(), wrote(results) (a write the host made itself:
 //     the last-write line and the per-event toast, as after a dialog), toast(html),
 //     refresh(forget) (re-render; forget also clears the last-write line)
@@ -259,6 +261,9 @@
   // A side card offers only the modes that fit it; a card missing from CARD_MODES has one layout.
   // Each entry is [key, name key(, tooltip key)]: the names are table keys, looked up where drawn.
   var ASSIGN_MODES = [['list', "js.tk.mode.list"], ['kanban', "js.tk.mode.kanban"], ['gantt', "js.tk.mode.gantt"], ['calendar', "js.tk.mode.calendar"]];
+  // The scope keys and the mode keys SCOPE_MODES offers are copied in Go (wslive
+  // UIScopes and UIViewModes, which a support agent's UI commands are checked against);
+  // a wsdashboard test fails when the two sites differ.
   var SCOPES = [['mine', "js.tk.scope.mine", "js.tk.scope.mine.tip"],
     ['received', "js.tk.scope.received", "js.tk.scope.received.tip"],
     ['given', "js.tk.scope.given", "js.tk.scope.given.tip"],
@@ -3819,6 +3824,42 @@
     return true;
   }
   function showItem(id, opener, focus) { openItemWindow(ui.store, id, { opener: opener, focus: focus }); }
+  // uiCommand performs a store support chat's UI command (h.uiCommand) on store id's view,
+  // as the user's own operation would: search puts cmd.arg in the Items search box and
+  // filters at once (no typing to wait out), focus opens the item whose alias is cmd.arg
+  // (at the thread comment whose alias is cmd.comment, when given), scope and view switch
+  // the Items scope and view mode. Search, scope, and view bring the Items panel up: the
+  // Items tab when narrow (where it replaces the chat's tab), the items side of the
+  // Items | Wiki switch when wide. A command for a store other than the one shown, or one
+  // the view cannot follow (an unknown item or comment, a scope or mode the panel does not
+  // offer now), does nothing. Returns whether it acted.
+  function uiCommand(id, cmd) {
+    var sv = id === ui.store && AD.view(id);
+    if (!sv || !cmd) return false;
+    var findAlias = function (ids, a) { var hit = null; ids.some(function (k) { if (alias(k) === a) { hit = k; return true; } return false; }); return hit; };
+    if (cmd.op === 'focus') {
+      var iid = findAlias(Object.keys(sv.items), cmd.arg);
+      if (!iid) return false;
+      var cid = cmd.comment ? findAlias(listOf(sv.items[iid].thread).filter(function (k) { return sv.comments[k]; }), cmd.comment) : null;
+      return openItemWindow(id, iid, cid ? { focus: cid } : null);
+    }
+    VS = sv; // scopeList reads the viewer's team from the shown view
+    var ps = panelState();
+    if (cmd.op === 'search') ps.q = String(cmd.arg || '');
+    else if (cmd.op === 'scope') {
+      if (!scopeList().some(function (x) { return x[0] === cmd.arg; })) return false;
+      ps.scope = cmd.arg;
+    } else if (cmd.op === 'view') {
+      var sc = scopeOf();
+      if (!SCOPE_MODES[sc].some(function (x) { return x[0] === cmd.arg; })) return false;
+      ps.modes[sc] = cmd.arg; dsSave('panel.modes', ui.pmodes);
+    } else return false;
+    if (ui.layout === 'narrow') tabState().narrow = 'items';
+    else if (AD.wiki) wk().mode = 'items';
+    ui.sel = null;
+    render();
+    return true;
+  }
   // A selector for the element focus returns to: the row, feed entry, or reference that
   // opened the window survives a re-render under the same data-rk / data-nkey / data-cref.
   function returnSel(el) {
@@ -4437,7 +4478,7 @@
     ui.drh = dsLoad('drawer.h'); ui.cmodes = dsLoad('card.modes'); ui.pmodes = dsLoad('panel.modes'); ui.closedOpen = dsLoad('closed'); ui.tfold = dsLoad('tree.fold');
     mergeTabs();
     H = { esc: esc, attr: attr, btn: btn, card: card, fld: fld, fmtTs: fmtTs, fmtSize: fmtSize, nm: nm, nmo: nmo, memberOpts: memberOpts,
-      profileFields: profileFields, profileText: profileText, asciiId: asciiId, crefHtml: crefHtml,
+      profileFields: profileFields, profileText: profileText, asciiId: asciiId, crefHtml: crefHtml, uiCommand: uiCommand,
       openDialog: openDialog, closeDialog: closeDialog, wrote: wrote, toast: toast,
       refresh: function (forget) { if (forget) ui.last = null; render(); } };
     buildDom();

@@ -40,6 +40,9 @@ const (
 	// RingCard is a tracker card reference the lead showed (CardRef): a
 	// store conversation's chat draws the item as a mini card.
 	RingCard = "card"
+	// RingUI is a dashboard UI command a store's support conversation sent
+	// (UICommand): its chat moves the tracker view once, live (see UICommand).
+	RingUI = "ui"
 )
 
 // Mail directions.
@@ -53,7 +56,7 @@ const ringStampLayout = "20060102T150405.000000000Z"
 
 // RingEntry is one ring file.
 type RingEntry struct {
-	// Kind is user, reply, turn, mail, compact, tools, or card.
+	// Kind is user, reply, turn, mail, compact, tools, card, or ui.
 	Kind string `json:"kind"`
 	// Origin tags a user message (terminal, whiteboard) or a turn summary
 	// (terminal, whiteboard, mail; empty when unknown).
@@ -82,6 +85,8 @@ type RingEntry struct {
 	CompactFailed bool   `json:"compactFailed,omitempty"`
 	// Card is a card line's item reference.
 	Card *CardRef `json:"card,omitempty"`
+	// UI is a ui line's dashboard command.
+	UI *UICommand `json:"ui,omitempty"`
 }
 
 // CardRef is a tracker item a conversation showed as a card: the store it

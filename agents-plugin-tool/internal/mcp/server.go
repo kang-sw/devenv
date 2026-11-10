@@ -24,6 +24,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wsdoc"
 	"github.com/kang-sw/devenv/internal/wsgit"
 	"github.com/kang-sw/devenv/internal/wsindex"
+	"github.com/kang-sw/devenv/internal/wslive"
 	"github.com/kang-sw/devenv/internal/wsrationale"
 	"github.com/kang-sw/devenv/internal/wsreview"
 	"github.com/kang-sw/devenv/internal/wsrsrc"
@@ -719,8 +720,8 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			// A store's support conversation passes like a top-level lead for
 			// the tracker and wiki tools its profile names (its writes are
 			// pinned to its store in handleTrackerUpdate, and the wiki tools
-			// reach its store alone); tracker.show is its own.
-			if (isTrackerTool(params.Name) || isWikiTool(params.Name) || params.Name == trackerShowTool) && !entry.isTopLevelLead() && !s.trackerSupportAdmits(keyStr, entry, params.Name) {
+			// reach its store alone); tracker.show and tracker.ui are its own.
+			if (isTrackerTool(params.Name) || isWikiTool(params.Name) || params.Name == trackerShowTool || params.Name == trackerUITool) && !entry.isTopLevelLead() && !s.trackerSupportAdmits(keyStr, entry, params.Name) {
 				return errorResponse(req.ID, -32601, trackerLeadOnlyDenial(params.Name))
 			}
 			if entry.isTopLevelLead() {
@@ -1684,6 +1685,8 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		return s.handleTrackerUpdate(ctx, req.ID, params.Arguments)
 	case trackerShowTool:
 		return s.handleTrackerShow(ctx, req.ID, params.Arguments)
+	case trackerUITool:
+		return s.handleTrackerUI(ctx, req.ID, params.Arguments)
 	case gitSearchTool:
 		return s.handleGitSearch(ctx, req.ID, params.Arguments)
 	case "tracker.query":
@@ -4982,6 +4985,23 @@ func tools() []map[string]any {
 					"item":        stringProperty("The item's ID as tracker.query prints it, such as maya.pc-5."),
 				},
 				"required": []string{"session_key", "item"},
+			},
+		},
+		{
+			"name":        trackerUITool,
+			"description": "Move the user's tracker view of your store, as the user could: search types a query into the Items search box (it keeps the current scope's items whose title, body, project, or ID contains the query), focus opens an item's window, at one of its thread's comments when comment is given, scope switches the Items scope, and view switches the Items view mode. For a store's support conversation only. The view moves only while the user has your chat open; a search, scope, or view switch may hide the chat on a narrow screen, so send UI commands as the last step of your reply. It never writes and never leaves your store.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's ws session key."),
+					"op":          enumStringProperty("The operation.", wslive.UIOps),
+					"query":       stringProperty("search only, and required for it: the search box text, one line."),
+					"item":        stringProperty("focus only, and required for it: an item of your store, its ID as tracker.query prints it, such as maya.pc-5."),
+					"comment":     stringProperty("focus only, optional: a comment on that item's thread, its ID as tracker.query prints it among the item's comments."),
+					"scope":       enumStringProperty("scope only, and required for it.", wslive.UIScopes),
+					"mode":        enumStringProperty("view only, and required for it. The all scope's tree is list; received offers list alone.", wslive.UIViewModes),
+				},
+				"required": []string{"session_key", "op"},
 			},
 		},
 		{

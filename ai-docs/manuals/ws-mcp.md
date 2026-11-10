@@ -454,7 +454,14 @@ and `tk:register` and `tk:sync` stay refused; every other spawned key is
 refused as before. `tracker.show {item}` is that conversation's card call:
 an item of its own store answers `card <store> <alias>` plus the mini-card
 fields, which the chat draws as a card; another store's item is answered as
-text; a lead gets a refusal. `git.search` runs `log`, `show`, `grep`,
+text; a lead gets a refusal. `tracker.ui {op, ...}` is its dashboard UI
+command: `search {query}`, `focus {item, comment?}`, `scope {scope}`, or
+`view {mode}`, checked first (an item of its own store, a comment on that
+item's thread, the scope and mode keys of `wslive.UIScopes` /
+`UIViewModes`), answering `ui <op> <arg>`; the runner writes that as a `ui`
+ring entry, and the store chat acts on it once, only when it arrives live
+after the stream's first (history) entries region, so a reload or reconnect
+draws it as an inert line. `git.search` runs `log`, `show`, `grep`,
 `blame`, or `ls-files` read-only (a per-subcommand flag allowlist, no git
 global options, external diff and textconv off, no pager, a 20 s timeout and
 64 KiB of output) in a repository at or under an allowed root: the project
@@ -594,7 +601,7 @@ Current launcher inputs:
 | `WS_MCP_DASHBOARD_PPROF` | Read by `ws-mcp dashboard`: `1`/`true`/`yes`/`on` serves `net/http/pprof` under `/debug/pprof/` to loopback viewers only, never to a LAN-token request (see Dashboard daemon, Profiling). Unset is off: the routes do not exist. |
 | `WS_MCP_NO_AGENT` | Product-mode gate for agentless distributions such as wsflow. |
 | `WS_MCP_NO_DASHBOARD` | `1`/`true`/`yes`/`on` turns the dashboard off for this ws-mcp whatever `dashboard.enabled` resolves: no daemon start, no session registration, no prune. The agent runner sets it on the ws-mcp it attaches to a conversation. |
-| `WS_MCP_ALLOWED_TOOLS` | Comma list of ws tool names; when set, `tools/list` advertises and `tools/call` accepts only these. The agent runner sets it to a profile's ws tools. `tracker.show` and `git.search` are listed and callable only when it names them. |
+| `WS_MCP_ALLOWED_TOOLS` | Comma list of ws tool names; when set, `tools/list` advertises and `tools/call` accepts only these. The agent runner sets it to a profile's ws tools. `tracker.show`, `tracker.ui`, and `git.search` are listed and callable only when it names them. |
 | `WS_MCP_NAMESPACE` | User-facing MCP namespace text override; empty or unset defaults to `ws`. |
 | `WS_MCP_SETUP_TOOL` | Advertised setup tool name override; empty or unset defaults to `ws.setup`. |
 | `WS_MCP_CONFIG_MANIFESTS` | Adapter config key manifests, separated by the platform path-list separator (`:` POSIX, `;` Windows); `;` is accepted on every platform, which the static launcher configs use. Declared keys become `config.tune`-writable, cataloged by `config.list`, and typed in `config.get`; a rejected manifest is logged to stderr and listed by `config.list`. The ws and wsflow packages each ship their own `config-manifest.json` (namespace `claude.`; the same keys, differing only in `default`, pinned by `TestShippedClaudeManifestsDifferOnlyInDefaults`) and set it in both launch configs: `.mcp.json` (Codex) as `./config-manifest.json`, resolved against `cwd: "."` (the plugin root), and `.claude-plugin/plugin.json` as `${CLAUDE_PLUGIN_ROOT}/config-manifest.json`. Each package (ws, wsflow, Pi) also lists its `dashboard-config-manifest.json` (namespace `dashboard.`: `dashboard.enabled`, default on in ws and Pi, off in wsflow; `dashboard.port`, default 29417; `dashboard.lan_enabled`, global-only and default off in every package) beside its own manifest; the Pi bridge joins the two with the platform separator. A path that does not resolve fails nothing: the keys stay undeclared, so check `config.list` after changing either. |

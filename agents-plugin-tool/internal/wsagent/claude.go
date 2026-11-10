@@ -569,13 +569,8 @@ func (m *claudeMapper) toolResults(raw json.RawMessage, now int64) []Event {
 		if b.Type == "tool_result" {
 			name := m.batches.callName(b.ToolUseID)
 			out = append(out, m.batches.endCall(b.ToolUseID, b.IsError, now)...)
-			if !b.IsError && name == claudeMCPToolName(ReservedMCPServer, CardTool) {
-				if ev := cardEvent(claudeResultText(b.Content)); ev != nil {
-					out = append(out, *ev)
-				}
-			}
-			if !b.IsError && name == claudeMCPToolName(ReservedMCPServer, TrackerWriteTool) {
-				out = append(out, Event{TrackerWrite: true})
+			if tool := resultTool(name, claudeMCPToolName); !b.IsError && tool != "" {
+				out = append(out, resultEvents(tool, claudeResultText(b.Content))...)
 			}
 		}
 	}

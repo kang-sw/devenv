@@ -2975,10 +2975,12 @@
   // merged by key, convlive replaced), open only while the chat shows. A
   // card line (the agent called tracker.show) becomes the item's mini card
   // from the store's view, which opens the item window as any card
-  // reference does. The chip opens the selection popover: the harness (a
-  // switch starts a new conversation, after a warning), the model (fuzzy
-  // searched), and the effort (a knob snapping to the levels); the runner
-  // lists the choices and remembers the last one as the next default.
+  // reference does. A ui line (the agent called tracker.ui) moves the
+  // store's view once, when it arrives live (supActUI). The chip opens the
+  // selection popover: the harness (a switch starts a new conversation,
+  // after a warning), the model (fuzzy searched), and the effort (a knob
+  // snapping to the levels); the runner lists the choices and remembers the
+  // last one as the next default.
   var supChats = {}, supChoices = null, supChoicesBusy = false, supH = null, supStore = null, supView = null;
   function supUrl(id, op) { return "/support/stores/" + encodeURIComponent(id) + (op ? "/" + op : ""); }
   function supEsc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
@@ -3106,13 +3108,18 @@
     var slot = c.root.parentNode;
     if (!c.conv || !window.EventSource || !supShown(slot) || (c.es && c.esFor === c.conv.id)) return;
     supClose(c);
-    var id = c.conv.id, es = c.es = new EventSource(c.conv.page + "/events?regions=entries,convlive");
+    var id = c.conv.id, es = c.es = new EventSource(c.conv.page + "/events?regions=entries,convlive"), primed = false;
     c.esFor = id;
+    // The stream's first entries region is the conversation's history (on a
+    // first open, a reload, or a reconnect alike); only the entries regions
+    // after it are live, so only they act on the ui lines they bring.
     es.addEventListener("region", function (e) {
       var ev;
       try { ev = JSON.parse(e.data); } catch (x) { return; }
       if (c.es !== es) return;
-      supRegion(c, ev.name, ev.html || "");
+      var live = primed;
+      if (ev.name === "entries") primed = true;
+      supRegion(c, ev.name, ev.html || "", live ? es : null);
     });
     // A conversation the index does not list yet (just opened) or a dropped
     // stream: try again shortly while the chat still shows.
@@ -3127,10 +3134,16 @@
     if (c.retry) { clearTimeout(c.retry); c.retry = null; }
     if (c.es) { c.es.close(); c.es = null; c.esFor = null; }
   }
-  function supRegion(c, name, html) {
-    var stick = c.root.isConnected ? c.log.scrollTop + c.log.clientHeight >= c.log.scrollHeight - 24 : c.stick;
+  // supRegion applies a region of the chat's stream; es is that stream when
+  // the region arrived live (see supOpen), else null.
+  function supRegion(c, name, html, es) {
+    var stick = c.root.isConnected ? c.log.scrollTop + c.log.clientHeight >= c.log.scrollHeight - 24 : c.stick, before = null;
     if (name === "entries") {
       var nbox = frag(html).querySelector(".centries");
+      if (es) {
+        before = {};
+        Array.prototype.forEach.call(c.box.children, function (n) { before[n.getAttribute("data-entry")] = true; });
+      }
       if (nbox) mergeEntries(c.box, nbox);
       sweepOutImgs(c.box);
       supCards(c);
@@ -3143,6 +3156,21 @@
     } else return;
     supDraw(c);
     if (stick && c.root.isConnected) { c.log.scrollTop = c.log.scrollHeight; c.stick = true; }
+    if (before) supActUI(c, before, es);
+  }
+  // supActUI performs, in order, the ui lines (a tracker.ui call: the agent
+  // moving this store's view) that a live entries region added; every line,
+  // acted on or not, stays the same inert line in the log, so a reload or a
+  // reconnect, whose first region is history, never acts again. A command
+  // that hides the chat (a search, scope, or view switch in the narrow
+  // layout, where Items and the chat share one pane) closes its stream, and
+  // the lines after it are left for the next open to meet as history.
+  function supActUI(c, before, es) {
+    if (!supH || !supH.uiCommand) return;
+    q(".uiline[data-entry]", c.box).forEach(function (el) {
+      if (before[el.getAttribute("data-entry")] || c.es !== es) return;
+      supH.uiCommand(c.id, { op: el.getAttribute("data-ui-op"), arg: el.getAttribute("data-ui-arg") || "", comment: el.getAttribute("data-ui-comment") || "" });
+    });
   }
   // supCards draws each card line as the item's mini card while the store's
   // view holds the item, else as the server drew it. The view is the one

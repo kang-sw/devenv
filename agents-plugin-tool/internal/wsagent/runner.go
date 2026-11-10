@@ -725,6 +725,10 @@ func (c *conv) handle(ev Event) {
 		if c.live.card(*ev.Card) {
 			c.r.notify(c.rec.ReplyID, c.rec.Root)
 		}
+	case ev.UI != nil:
+		if c.live.ui(*ev.UI) {
+			c.r.notify(c.rec.ReplyID, c.rec.Root)
+		}
 	case ev.TrackerWrite:
 		if f := c.r.opts.TrackerChanged; f != nil {
 			f()
