@@ -45,14 +45,15 @@ type Options struct {
 	// periods. startTimeout bounds the wait for a started holder's
 	// descriptor; zero means defaultStartTimeout. The rest replace OS
 	// calls: lookPath (exec.LookPath), start (startDetached), breakaway
-	// (breakawayApplies), procStart (processStartTime), alive
-	// (processAlive), and kill (killHolder).
+	// (breakawayApplies), procStart (processStartTime), procTicks
+	// (processStartTicks), alive (processAlive), and kill (killHolder).
 	holderArgs   []string
 	startTimeout time.Duration
 	lookPath     func(string) (string, error)
 	start        func(exe string, args []string, dir string, breakaway bool) (*exec.Cmd, error)
 	breakaway    *bool
 	procStart    func(pid int) (time.Time, error)
+	procTicks    func(pid int) (uint64, error)
 	alive        func(pid int) bool
 	kill         func(pid int) error
 }
@@ -165,6 +166,9 @@ func New(opts Options) *Manager {
 	}
 	if opts.procStart == nil {
 		opts.procStart = processStartTime
+	}
+	if opts.procTicks == nil {
+		opts.procTicks = processStartTicks
 	}
 	if opts.alive == nil {
 		opts.alive = processAlive
@@ -600,13 +604,8 @@ func (m *Manager) Stop(id string) error {
 		_ = os.RemoveAll(dir)
 		return nil
 	}
-	started, err := m.opts.procStart(desc.PID)
-	if err != nil {
-		return fmt.Errorf("the start time of process %d could not be read, so it was not killed: %w", desc.PID, err)
-	}
-	recorded := time.Unix(0, int64(desc.StartedAt*float64(time.Second)))
-	if diff := started.Sub(recorded); math.Abs(float64(diff)) > float64(startTimeTolerance) {
-		return ErrStartTimeMismatch
+	if err := m.sameProcess(desc); err != nil {
+		return err
 	}
 	if err := m.opts.kill(desc.PID); err != nil {
 		m.logf("kill holder %s (pid %d): %v", id, desc.PID, err)
@@ -617,6 +616,34 @@ func (m *Manager) Stop(id string) error {
 	m.forget(id)
 	_ = os.RemoveAll(dir)
 	m.logf("killed holder %s (pid %d) and its child", id, desc.PID)
+	return nil
+}
+
+// sameProcess returns nil when the process under desc.PID is the holder
+// that wrote desc, and the reason a kill is refused otherwise. The boot-clock
+// start decides where the holder recorded one and the OS reports one; the
+// wall-clock start, within startTimeTolerance, decides everywhere else.
+func (m *Manager) sameProcess(desc Descriptor) error {
+	if desc.StartTicks != 0 {
+		ticks, err := m.opts.procTicks(desc.PID)
+		if err != nil {
+			return fmt.Errorf("the start time of process %d could not be read, so it was not killed: %w", desc.PID, err)
+		}
+		if ticks != 0 {
+			if ticks != desc.StartTicks {
+				return ErrStartTimeMismatch
+			}
+			return nil
+		}
+	}
+	started, err := m.opts.procStart(desc.PID)
+	if err != nil {
+		return fmt.Errorf("the start time of process %d could not be read, so it was not killed: %w", desc.PID, err)
+	}
+	recorded := time.Unix(0, int64(desc.StartedAt*float64(time.Second)))
+	if diff := started.Sub(recorded); math.Abs(float64(diff)) > float64(startTimeTolerance) {
+		return ErrStartTimeMismatch
+	}
 	return nil
 }
 

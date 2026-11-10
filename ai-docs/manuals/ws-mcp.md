@@ -604,7 +604,8 @@ starts; a running holder keeps the file it started from, and at start the
 daemon removes staged scripts that no live holder's descriptor names. Each
 holder has its own directory `<dashboard dir>/holders/<holder id>/` with
 `descriptor.json` (owner-only; PID, loopback port, attach token, protocol
-version, start time, script hash, restart-safe flag, and the consumer's
+version, start time (wall clock, plus boot-clock ticks on Linux), script
+hash, restart-safe flag, and the consumer's
 session description) and `holder.log`. The holder rewrites a deleted
 descriptor within a minute, removes its directory when it exits, and exits
 on its own 24 hours after the last detach once its child has exited, never
@@ -626,9 +627,12 @@ starter's job object), and the start failures, with a stop button on each
 unattached one. `POST /holders/<id>/stop`
 ends a holder and its child: through the protocol when attached, otherwise
 by killing the holder's process group (POSIX) or process tree (Windows),
-and only while the OS creation time of the PID is within 2 seconds of the
-start time the descriptor records, which guards against a reused PID (409
-with the reason otherwise). The stop route answers only a browser on this
+and only while the process under the PID is still the one the descriptor
+records, which guards against a reused PID (409 with the reason otherwise):
+on Linux the process's start in boot-clock ticks must equal the recorded
+`start_ticks`, because the creation time Linux reports is derived from the
+boot clock and moves with every wall-clock step; elsewhere the OS creation
+time must be within 2 seconds of the recorded wall-clock start. The stop route answers only a browser on this
 machine that sends the daemon's own Origin; a LAN viewer sees the card
 without the stop button. Closing the daemon detaches and ends no holder.
 

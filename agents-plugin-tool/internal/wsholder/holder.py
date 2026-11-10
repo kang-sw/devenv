@@ -15,6 +15,7 @@ State directory (one per holder, mode 0700): <dir>/descriptor.json (0600)
     {"schema": 1, "id": "<holder id>", "pid": <holder pid>,
      "port": <loopback TCP port>, "token": "<hex>", "protocol": 1,
      "started_at": <wall-clock start, epoch seconds>,
+     "start_ticks": <start in clock ticks since boot; Linux only>,
      "script_hash": "<sha256 of this script>", "restart_safe": true,
      "session": {...}}
 
@@ -98,6 +99,26 @@ PROTOCOL_VERSION = 1
 SCHEMA_VERSION = 1
 DESCRIPTOR_NAME = "descriptor.json"
 LOG_NAME = "holder.log"
+
+
+def _start_ticks():
+    """This process's start in clock ticks since boot, where the OS has it.
+
+    Linux only (/proc/self/stat, field 22). The daemon derives a Linux
+    process's creation time from the boot clock, so the wall-clock start
+    stops matching it once the wall clock steps; the ticks never change.
+    """
+    try:
+        with open("/proc/self/stat", encoding="ascii", errors="replace") as f:
+            text = f.read()
+        # The command name, in parentheses, may hold spaces and parentheses.
+        fields = text[text.rindex(")") + 1 :].split()
+        return int(fields[22 - 3])
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+START_TICKS = _start_ticks() if sys.platform.startswith("linux") else None
 
 RING_BYTES = 4 << 20
 MAX_RECORD_BYTES = 1 << 20
@@ -855,7 +876,7 @@ class Holder:
     # -- descriptor --
 
     def descriptor(self) -> dict:
-        return {
+        doc = {
             "schema": SCHEMA_VERSION,
             "id": self.id,
             "pid": os.getpid(),
@@ -867,6 +888,9 @@ class Holder:
             "restart_safe": self.restart_safe,
             "session": self.session,
         }
+        if START_TICKS:
+            doc["start_ticks"] = START_TICKS
+        return doc
 
     def write_descriptor(self) -> None:
         os.makedirs(self.dir, mode=0o700, exist_ok=True)

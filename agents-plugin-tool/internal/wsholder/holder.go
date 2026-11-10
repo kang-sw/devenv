@@ -76,6 +76,12 @@ type Descriptor struct {
 	// StartedAt is the holder's own wall-clock start in epoch seconds; a
 	// guarded kill compares it with the OS creation time of PID.
 	StartedAt float64 `json:"started_at"`
+	// StartTicks is the holder's start on the boot clock, in clock ticks
+	// since boot, where the OS derives a creation time from that clock
+	// (Linux); zero elsewhere. A guarded kill matches on it when both sides
+	// have one, because there the derived creation time moves with every
+	// step of the wall clock and the ticks do not.
+	StartTicks uint64 `json:"start_ticks,omitempty"`
 	// ScriptHash is the sha256 of the script the holder runs.
 	ScriptHash string `json:"script_hash"`
 	// RestartSafe is false for a holder that could not leave its starter's

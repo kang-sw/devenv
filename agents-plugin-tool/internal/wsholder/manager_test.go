@@ -404,9 +404,18 @@ func TestGuardedKillIsRefusedOnAStartTimeMismatch(t *testing.T) {
 
 	killed := false
 	m := testManager(t, dir, nil, func(o *Options) {
+		// Both clocks disagree with the descriptor, so the refusal holds
+		// whichever one this OS matches on.
 		o.procStart = func(pid int) (time.Time, error) {
 			real, err := processStartTime(pid)
 			return real.Add(startTimeTolerance + time.Second), err
+		}
+		o.procTicks = func(pid int) (uint64, error) {
+			real, err := processStartTicks(pid)
+			if real != 0 {
+				real++
+			}
+			return real, err
 		}
 		o.kill = func(pid int) error { killed = true; return killHolder(pid) }
 	})
@@ -425,6 +434,32 @@ func TestGuardedKillIsRefusedOnAStartTimeMismatch(t *testing.T) {
 	}
 }
 
+// TestGuardedKillHoldsAfterAWallClockStep pins the boot-clock match: where
+// the OS derives a creation time from the boot clock, a wall clock that
+// stepped after the holder started moves that time away from the recorded
+// start, and the holder is still recognized and killed.
+func TestGuardedKillHoldsAfterAWallClockStep(t *testing.T) {
+	dir := testHoldersDir(t)
+	desc, child := launchWithChild(t, dir)
+	if desc.StartTicks == 0 {
+		t.Skip("this OS keeps a stored creation time; a holder records no boot-clock start")
+	}
+	unattachable(t, dir, desc, CauseToken)
+
+	m := testManager(t, dir, nil, func(o *Options) {
+		o.procStart = func(pid int) (time.Time, error) {
+			real, err := processStartTime(pid)
+			return real.Add(-10 * time.Second), err
+		}
+	})
+	m.Scan()
+	if err := m.Stop(desc.ID); err != nil {
+		t.Fatalf("Stop after a wall-clock step = %v, want the holder killed", err)
+	}
+	waitFor(t, "the holder to end", func() bool { return !processAlive(desc.PID) })
+	waitFor(t, "the child to end with its holder", func() bool { return !processAlive(child.PID) })
+}
+
 // TestRecordedStartMatchesTheOSCreationTime pins what the guard relies on:
 // the start time a holder records sits within the tolerance of the creation
 // time the OS reports for its process.
@@ -438,6 +473,13 @@ func TestRecordedStartMatchesTheOSCreationTime(t *testing.T) {
 	recorded := time.Unix(0, int64(desc.StartedAt*float64(time.Second)))
 	if diff := started.Sub(recorded); diff > startTimeTolerance || diff < -startTimeTolerance {
 		t.Fatalf("OS creation time %s and recorded start %s differ by %s, more than the %s tolerance", started, recorded, diff, startTimeTolerance)
+	}
+	ticks, err := processStartTicks(desc.PID)
+	if err != nil {
+		t.Fatalf("processStartTicks: %v", err)
+	}
+	if ticks != desc.StartTicks {
+		t.Fatalf("OS start ticks %d, recorded start ticks %d", ticks, desc.StartTicks)
 	}
 }
 

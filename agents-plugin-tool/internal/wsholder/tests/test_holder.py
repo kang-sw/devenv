@@ -522,6 +522,17 @@ class DescriptorTest(HolderTestCase):
         if not WINDOWS:
             self.assertEqual(os.stat(path).st_mode & 0o777, 0o600)
 
+    def test_descriptor_records_the_boot_clock_start_where_the_os_has_one(self):
+        holder = self.start_holder()
+        desc = read_json(self.descriptor_path(holder))
+        if not sys.platform.startswith("linux"):
+            self.assertNotIn("start_ticks", desc)
+            return
+        with open(f"/proc/{os.getpid()}/stat", encoding="ascii") as f:
+            stat = f.read()
+        # Field 22 of the stat line, counted past the parenthesized name.
+        self.assertEqual(desc["start_ticks"], int(stat[stat.rindex(")") + 1 :].split()[19]))
+
     def test_log_line_racing_the_exit_does_not_leave_the_directory_behind(self):
         holder = self.start_holder()
         late = []
