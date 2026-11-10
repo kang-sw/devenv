@@ -357,7 +357,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-10T06:19:31Z"
+        "touched_at": "2026-11-10T06:20:14Z",
+        "impl": {
+          "branch": "impl/develop/savor-think-snide"
+        }
       }
     },
     "261110-feat-ws-tracker-item-move-reparent": {
