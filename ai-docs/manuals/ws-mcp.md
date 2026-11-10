@@ -378,10 +378,15 @@ refused edit 422), and `GET .../wiki/<name>/attachments/<sha256>`.
 An unknown store id is 404. Every POST requires an `Origin` equal to the
 daemon's own and a body under 256 KiB, and runs to completion even when the
 page closes mid-request. Every string a route returns has credentials
-redacted. After each write the routes ran, and after each poll round, the
-tracker revision bumps; both pages' SSE streams send `event: tracker` with
-`{"rev": N}` when it differs from what that stream last sent (once on connect
-too), and the page re-reads.
+redacted. The tracker revision bumps after a route's write (and after a
+check or sync, even a failed one), after the daemon's first poll round and
+each later round that changed something (`wstrackerhost` `StartPoll`,
+`PollOnce`), when the 2 s store watch sees a write by another process, and
+when a reload that a page read stopped waiting for lands: a page read waits
+at most 500 ms behind a push or fetch holding the store's lock, then serves
+the last folded state (`ViewWithin`). Both pages' SSE streams send `event:
+tracker` with `{"rev": N}` when it differs from what that stream last sent
+(once on connect too), and the page re-reads.
 
 The daemon also hosts headless agent conversations (the agent runner,
 `internal/wsagent`, wired in by `cmd/ws-mcp/dashboard.go`): a Claude Code or
