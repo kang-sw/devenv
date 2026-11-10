@@ -344,6 +344,9 @@
         }
       }
     },
+    "261110-bug-ws-dashboard-sse-connection-budget": {
+      "registered_at": "2026-11-10T07:31:41Z"
+    },
     "261110-bug-ws-mcp-move-close-guard-flake-and-suite-timeout": {
       "registered_at": "2026-11-10T01:04:17Z"
     },
