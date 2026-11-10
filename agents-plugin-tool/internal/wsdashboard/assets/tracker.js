@@ -91,7 +91,10 @@
 //                        host is unavailable), or null; the "+ store" dialog shows it
 //                        and offers nothing else
 //   onChange(fn)         the renderer subscribes once; the adapter calls fn()
-//                        whenever stores(), a view(), or seen() changed
+//                        whenever stores(), a view(), or seen() changed; fn(true)
+//                        marks a change more of which follows shortly (one store's
+//                        view of a read of several), which the renderer holds back
+//                        briefly to draw with the rest
 //   caps                 {origin, attach, addMember} booleans, false when absent:
 //                        origin shows the origin pickers (human / agent); attach
 //                        the composer's attachment drafting and the simulated
@@ -3717,7 +3720,21 @@
     });
   }
 
+  // dropEditorState forgets the previews and uploads of editors that are gone; open says
+  // whether the item window shows.
+  function dropEditorState(open) {
+    // an editor's preview ends with the editor: an edit saved or cancelled, a comment posted, another item
+    if (!ui.iedit) { delete ui.edpv['iw-ebody']; delete ui.eatt['iw-ebody']; }
+    if (!ui.cedit) { delete ui.edpv.tkcedit; delete ui.eatt.tkcedit; }
+    // the wiki editor's preview and uploads go when no store's wiki edit is open (another store's edit keeps them)
+    if (!Object.keys(ui.wiki).some(function (k) { return !!ui.wiki[k].edit; })) { delete ui.edpv['wk-ebody']; delete ui.eatt['wk-ebody']; }
+    if (!open || ui.itemChanged || ui.clearDraft) { delete ui.edpv.cbox; delete ui.eatt.cbox; }
+  }
+  // renderDue: a change notification asked for a render that has not run yet (see mount); any
+  // render meets it, so a synchronous render() takes the pending one's place.
+  var renderDue = false, changeTimer = 0;
   function render() {
+    renderDue = false;
     syncHandles();
     order.forEach(function (n) { vss[n] = AD.view(n); });
     if (order.indexOf(ui.store) < 0) ui.store = order[0] || null;
@@ -3748,6 +3765,22 @@
     VS.events.forEach(function (e) { if (e.status === 'flagged' && e.thread && VS.items[e.thread]) FLAGGED[e.thread] = (FLAGGED[e.thread] || 0) + 1; });
     var rm = readMap();
     feedEntries(v).forEach(function (x) { if (!rm[x.key]) UNREAD[x.item] = (UNREAD[x.item] || 0) + 1; });
+    // With no drawer, store page, or item window open, nothing of the store shows but its
+    // handle: the marks above and the host's rendered hook stay current, the drawer is left as
+    // it is (the render that opens it draws it), and nothing is measured but the handle row.
+    if (!ui.open && !ui.page && !ui.win) {
+      hideTip();
+      HV = null;
+      $('tkwin').hidden = true; setInert(false);
+      if (sb.firstChild) sb.innerHTML = '';
+      dropEditorState(false);
+      if (MN && MN.kind === 'sync') { $('tkmenu').innerHTML = syncPopHtml(); placeMenu(); }
+      else if (MN && !VS.items[MN.item]) closeMenu(false);
+      ui.itemChanged = false; ui.clearDraft = false;
+      if (X.rendered) X.rendered(name, VS, H);
+      measure();
+      return;
+    }
 
     var draft = $('cbox') ? $('cbox').value : '';
     // cards scroll inside; keep each card's scroll and the focused row across the re-render
@@ -3783,12 +3816,7 @@
     $('tkwin').hidden = !open;
     $('tkwin').firstElementChild.setAttribute('aria-labelledby', 'iw-title');
     setInert(open);
-    // an editor's preview ends with the editor: an edit saved or cancelled, a comment posted, another item
-    if (!ui.iedit) { delete ui.edpv['iw-ebody']; delete ui.eatt['iw-ebody']; }
-    if (!ui.cedit) { delete ui.edpv.tkcedit; delete ui.eatt.tkcedit; }
-    // the wiki editor's preview and uploads go when no store's wiki edit is open (another store's edit keeps them)
-    if (!Object.keys(ui.wiki).some(function (k) { return !!ui.wiki[k].edit; })) { delete ui.edpv['wk-ebody']; delete ui.eatt['wk-ebody']; }
-    if (!open || ui.itemChanged || ui.clearDraft) { delete ui.edpv.cbox; delete ui.eatt.cbox; }
+    dropEditorState(open);
     if (open) {
       sb.innerHTML = windowHtml(v, VS.items[ui.item]);
       wkMarkLinks(sb);
@@ -4551,7 +4579,22 @@
     };
     syncHandles();
     ui.store = order[0] || null;
-    AD.onChange(function () { wkRefresh(); render(); });
+    // A change notification renders (and re-reads the wiki shown) on the next timer tick, so
+    // the notifications that arrive meanwhile land as one redraw. The views of a read of
+    // several stores land in separate tasks, a tick apart or more, so a change with more to
+    // come waits up to MORE_HOLD for the rest; the last one (or any other change) brings the
+    // redraw forward to the next tick, and a store slower than the hold still draws the others
+    // first. A timer, not an animation frame: a hidden tab pauses frames, and the handle badges
+    // should still follow there.
+    var MORE_HOLD = 100, changeAt = 0;
+    AD.onChange(function (more) {
+      renderDue = true;
+      var at = Date.now() + (more ? MORE_HOLD : 0);
+      if (changeTimer && changeAt <= at) return;
+      clearTimeout(changeTimer);
+      changeAt = at;
+      changeTimer = setTimeout(function () { changeTimer = 0; wkRefresh(); if (renderDue) render(); }, at - Date.now());
+    });
     applyRoute();
     // read-only hook for scripted checks (headless verification); not part of the model
     window.__tracker = { ui: ui, vs: function () { return VS; }, openItemWindow: openItemWindow };

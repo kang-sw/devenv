@@ -29,18 +29,29 @@
     if (m < 60) return m + "m " + (s % 60) + "s";
     return Math.floor(m / 60) + "h " + (m % 60) + "m";
   }
+  // A clock or weekday time and every time's title never change while the
+  // page shows them, so each element formats them once (wsFmt marks it with
+  // the language it used; only a language change formats it again). The
+  // relative times ("since", "ago") follow the clock, and are written only
+  // when their text changed.
+  function fmtTime(t, now) {
+    var ms = +t.getAttribute("data-ms");
+    if (!ms) return;
+    var f = t.getAttribute("data-f"), rel = f === "since" || f === "ago";
+    if (rel) {
+      var s = f === "since" ? dur(now - ms) : wsT("js.ago", dur(now - ms));
+      if (t.textContent !== s) t.textContent = s;
+    }
+    if (t.wsFmt === wsI18n.lang) return;
+    t.wsFmt = wsI18n.lang;
+    if (f === "wd") t.textContent = new Date(ms).toLocaleDateString(wsI18n.lang, { weekday: "short" });
+    else if (!rel) { var d = new Date(ms); t.textContent = two(d.getHours()) + ":" + two(d.getMinutes()); }
+    t.title = new Date(ms).toLocaleString(wsI18n.lang);
+  }
+  // fmtTimes formats every time under el, for content just put on the page.
   function fmtTimes(el) {
     var now = Date.now();
-    q("time[data-ms]", el).forEach(function (t) {
-      var ms = +t.getAttribute("data-ms");
-      if (!ms) return;
-      var f = t.getAttribute("data-f");
-      if (f === "since") t.textContent = dur(now - ms);
-      else if (f === "ago") t.textContent = wsT("js.ago", dur(now - ms));
-      else if (f === "wd") t.textContent = new Date(ms).toLocaleDateString(wsI18n.lang, { weekday: "short" });
-      else { var d = new Date(ms); t.textContent = two(d.getHours()) + ":" + two(d.getMinutes()); }
-      t.title = new Date(ms).toLocaleString(wsI18n.lang);
-    });
+    q("time[data-ms]", el).forEach(function (t) { fmtTime(t, now); });
     q("em.u-pace[data-reset]", el).forEach(function (e) { pace(e, now); });
   }
   // A usage limit's pace: its percent used against the straight line from
@@ -58,7 +69,17 @@
     if (e.textContent !== text) e.textContent = text;
     if (e.className !== cls) e.className = cls;
   }
-  setInterval(function () { fmtTimes(doc); }, 1000);
+  // The per-second tick visits only what follows the clock: the relative
+  // times and the usage paces. A hidden tab skips it, and showing the tab
+  // again catches up at once rather than on the next tick.
+  function tickTimes() {
+    if (doc.hidden) return;
+    var now = Date.now();
+    q('time[data-ms][data-f="since"], time[data-ms][data-f="ago"]').forEach(function (t) { fmtTime(t, now); });
+    q("em.u-pace[data-reset]").forEach(function (e) { pace(e, now); });
+  }
+  setInterval(tickTimes, 1000);
+  doc.addEventListener("visibilitychange", tickTimes);
 
   function region(name) { return $("r-" + name); }
   function visible(el) { return !!el && el.getClientRects().length > 0; }
@@ -339,11 +360,15 @@
 
   // --- region swap -----------------------------------------------------------
   // The mode pseudo-region's hash is unknown to the page until the first
-  // event carries it; an empty hash makes the server send it once.
-  var modeHash = "";
+  // event carries it; an empty hash makes the server send it once. A region
+  // update held back while the tab is hidden (hiddenRegions, see connect)
+  // counts as held: a reconnect meanwhile names its hash, and the update
+  // still lands when the tab shows.
+  var modeHash = "", hiddenRegions = {};
   function held() {
     return q("[data-region]").map(function (el) {
-      return el.getAttribute("data-region") + "." + el.getAttribute("data-h");
+      var name = el.getAttribute("data-region"), p = hiddenRegions[name];
+      return name + "." + (p ? p.hash : el.getAttribute("data-h"));
     }).concat(mode !== "index" ? ["mode." + modeHash] : []).join(",");
   }
   function swap(name, hash, html) {
@@ -357,26 +382,35 @@
     var scroll = scrollState();
     var answers = board ? readAnswers(el) : null;
     var frameH = board ? frameHeights(el) : null;
-    // A finished reply's mermaid fences draw once merged; the streaming
-    // reply (convlive) keeps them code blocks.
-    if (name === "entries") { mergeEntriesRegion(el, html); mermaid(); }
-    else {
+    // The entries merge and the board morph prepare only the nodes they
+    // insert; any other region is replaced whole. A finished reply's mermaid
+    // fences draw once merged; the streaming reply (convlive) keeps them
+    // code blocks.
+    var ins = null;
+    if (name === "entries") mergeEntriesRegion(el, html, pin);
+    else if (board) {
+      ins = morphBoard(el, html);
+      ins.forEach(function (n) {
+        restoreOpen(n);
+        fmtTimes(n);
+        sweepOutImgs(n);
+        setFrameHeights(n, frameH);
+        writeAnswers(n, answers);
+      });
+    } else {
       el.innerHTML = html;
       restoreOpen(el);
       fmtTimes(el);
+      sweepOutImgs(el);
     }
     el.setAttribute("data-h", hash);
-    sweepOutImgs(el);
     if (board) {
-      setFrameHeights(el, frameH);
-      writeAnswers(el, answers);
       if (window.wbForm) window.wbForm();
-      mermaid();
+      mermaid(ins);
       syncChips();
       syncNote();
-      refetchClosed(el);
     }
-    if (board || name === "convlive") applySent();
+    if (board || name === "convlive") applySent(board);
     if (name === "panels") drawerSync();
     if (name === "git") gitSwapped();
     restoreScroll(scroll);
@@ -391,19 +425,107 @@
     if (name === "head" && !sseOn) connected(false);
   }
 
+  // --- board morph: unchanged topics keep their nodes -------------------------
+  // Each topic section carries data-topic, its name. A board swap keeps a
+  // topic's section, and with it the body frame (no reload, no second
+  // mermaid load, no second image relay), when the section's incoming HTML
+  // equals the HTML it last arrived with (boardSeen). The comparison is
+  // never against the live DOM, which the page changes after a swap (times,
+  // sent marks, answers, frame themes and heights). Everything else the
+  // board holds (the closed-topic control, the reply bar) is replaced. The
+  // initial record is the board as served, read before anything changes it.
+  var boardSeen = {};
+  function topicKey(n) {
+    return n.nodeType === 1 && n.tagName === "SECTION" && n.classList.contains("topic") && n.hasAttribute("data-topic") ? n.getAttribute("data-topic") : null;
+  }
+  (function () {
+    var b = region("board");
+    if (b) Array.prototype.forEach.call(b.children, function (n) { var k = topicKey(n); if (k !== null) boardSeen["t:" + k] = n.outerHTML; });
+  })();
+  // morphBoard applies a board region event to el and returns the element
+  // nodes it inserted, in order, for the caller to prepare.
+  function morphBoard(el, html) {
+    var src = frag(html), seen = {}, want = [], ins = [], live = {}, liveClosed = [], pages = [], more = null;
+    Array.prototype.forEach.call(el.children, function (n) {
+      var k = topicKey(n);
+      if (k !== null) { live["t:" + k] = n; if (n.classList.contains("closed")) liveClosed.push(n); }
+      else if (n.classList.contains("closed-page")) pages.push(n);
+    });
+    Array.prototype.slice.call(src.childNodes).forEach(function (n) {
+      var k = topicKey(n);
+      if (k === null) {
+        want.push(n);
+        if (n.nodeType !== 1) return;
+        ins.push(n);
+        if (n.matches("button.closed-more[data-closed-next]")) more = n;
+        return;
+      }
+      var h = n.outerHTML, key = "t:" + k;
+      seen[key] = h;
+      if (live[key] && boardSeen[key] === h) { want.push(live[key]); delete live[key]; }
+      else { want.push(n); ins.push(n); }
+    });
+    boardSeen = seen;
+    // Closed topics fetched past the cap (closed pages, each nested in the
+    // one before it) stay across swaps in the new control's place, since the
+    // board renders only its capped section again. Closed-topic indices
+    // follow close order, so a topic that newly closes pushes the oldest
+    // capped one past the cap: that one moves to the head of the pages, a
+    // fetched topic the new board shows itself leaves them, and the pages'
+    // own control counts on from what is shown. No topic shows twice, and
+    // none drops out between the capped section and the pages. A board with
+    // no control holds every closed topic, and the pages go.
+    if (pages.length && more) {
+      var shown = {}, shifted = liveClosed.filter(function (n) { return !seen["t:" + topicKey(n)]; }), count = shifted.length;
+      Object.keys(seen).forEach(function (key) { shown[key] = true; });
+      shifted.forEach(function (n) { shown["t:" + topicKey(n)] = true; });
+      pages.forEach(function (p) {
+        q(".closed-page > section.topic[data-topic]", p).forEach(function (t) {
+          var key = "t:" + t.getAttribute("data-topic");
+          if (shown[key]) t.parentNode.removeChild(t);
+          else { shown[key] = true; count++; }
+        });
+      });
+      var anchor = pages[0].firstChild;
+      shifted.forEach(function (n) { pages[0].insertBefore(n, anchor); });
+      var tail = q("button.closed-more[data-closed-next]", pages[pages.length - 1]).pop();
+      if (tail) tail.setAttribute("data-closed-next", String(+more.getAttribute("data-closed-next") + count));
+      want.splice.apply(want, [want.indexOf(more), 1].concat(pages));
+      ins.splice(ins.indexOf(more), 1);
+    }
+    // Stale nodes go first, so the kept ones that stay in order are never
+    // moved: moving a frame reloads it.
+    var keep = new Set(want);
+    Array.prototype.slice.call(el.childNodes).forEach(function (n) { if (!keep.has(n)) el.removeChild(n); });
+    var cur = el.firstChild;
+    want.forEach(function (n) {
+      if (n === cur) cur = cur.nextSibling;
+      else el.insertBefore(n, cur);
+    });
+    return ins;
+  }
+
   // --- conversation entries: merged by key, never re-rendered ----------------
   // Each entry element carries data-entry, its ring entry name; names sort in
   // time order. Only the entries container is searched: held bubbles in the
   // convlive region carry data-entry too (their inbox id) and are not
-  // entries.
+  // entries. A box keeps the names it holds (entryKeys) across merges, so a
+  // merge reads only the incoming entries.
   function entriesBox() { var r = region("entries"); return r && r.querySelector(".centries"); }
   function frag(html) { var t = doc.createElement("template"); t.innerHTML = html; return t.content; }
+  function entryKeys(box) {
+    if (!box.wsKeys) {
+      box.wsKeys = Object.create(null);
+      Array.prototype.forEach.call(box.children, function (c) { var k = c.getAttribute("data-entry"); if (k) box.wsKeys[k] = true; });
+    }
+    return box.wsKeys;
+  }
+  function resetEntries(box) { box.textContent = ""; box.wsKeys = Object.create(null); }
   // mergeEntries inserts each node of src whose name box lacks at its sorted
-  // place and returns how many it inserted; an entry already shown is kept
-  // as it is.
+  // place and returns the inserted nodes, in order; an entry already shown
+  // is kept as it is.
   function mergeEntries(box, src) {
-    var have = {}, added = 0;
-    Array.prototype.forEach.call(box.children, function (c) { have[c.getAttribute("data-entry")] = true; });
+    var have = entryKeys(box), added = [];
     Array.prototype.slice.call(src.children).forEach(function (n) {
       var k = n.getAttribute("data-entry");
       if (!k || have[k]) return;
@@ -413,28 +535,62 @@
       while (c && (c.getAttribute("data-entry") || "") > k) c = c.previousElementSibling;
       box.insertBefore(n, c ? c.nextSibling : box.firstChild);
       have[k] = true;
-      added++;
+      added.push(n);
       restoreOpen(n);
       fmtTimes(n);
     });
     return added;
   }
+  // gapped reports a newest window (nbox) that does not reach what box
+  // holds: its oldest entry is newer than box's newest, so entries between
+  // them, missed while a stream was down, are in neither.
+  function gapped(box, nbox) {
+    var last = box.lastElementChild, first = nbox.firstElementChild;
+    return !!(last && first && (first.getAttribute("data-entry") || "") > (last.getAttribute("data-entry") || ""));
+  }
+  // ENTRY_CAP bounds a conversation box while the user keeps it at the
+  // bottom: three of the server's newest windows (its ring size, 50).
+  // evictEntries drops the oldest entries past it and reports whether it
+  // dropped any.
+  var ENTRY_CAP = 150;
+  function evictEntries(box) {
+    var n = box.children.length - ENTRY_CAP, keys = entryKeys(box);
+    if (n <= 0) return false;
+    for (; n > 0; n--) {
+      var c = box.firstElementChild;
+      delete keys[c.getAttribute("data-entry")];
+      box.removeChild(c);
+    }
+    return true;
+  }
   // mergeEntriesRegion applies an entries region event: the title bar (its
-  // counts) is replaced, and the entries are merged.
-  function mergeEntriesRegion(el, html) {
+  // counts) is replaced, and the entries are merged. A window past a gap
+  // starts the box over; a box at the bottom (pin) sheds its oldest entries
+  // past the cap. Either way the older history is loaded again from what the
+  // box then holds.
+  function mergeEntriesRegion(el, html, pin) {
     var src = frag(html), box = entriesBox(), head = el.querySelector(".thead"), nhead = src.querySelector(".thead");
     var nbox = src.querySelector(".centries");
-    if (!box || !nbox) { el.innerHTML = html; restoreOpen(el); fmtTimes(el); return; }
+    if (!box || !nbox) { el.innerHTML = html; restoreOpen(el); fmtTimes(el); sweepOutImgs(el); mermaid(el); histReset(); return; }
     if (head && nhead) { head.parentNode.replaceChild(nhead, head); fmtTimes(nhead); }
-    mergeEntries(box, nbox);
+    if (gapped(box, nbox)) { resetEntries(box); histReset(); }
+    var added = mergeEntries(box, nbox);
+    added.forEach(sweepOutImgs);
+    mermaid(added);
+    if (pin && evictEntries(box)) histReset();
   }
 
   // --- older history: loaded a page at a time when scrolled to the top -------
   // The region draws the newest entries; older ones come from the history
-  // route, are prepended with the scroll position kept, and are never
-  // evicted. histBefore is the next page's cursor ("" asks for the newest
-  // page, so a page that drew no entries can still start loading).
-  var histBefore = null, histEnd = false, histBusy = false;
+  // route and are prepended with the scroll position kept. histBefore is the
+  // next page's cursor ("" asks for the newest page, so a page that drew no
+  // entries can still start loading); null takes it from the box's oldest
+  // entry. histReset forgets the cursor and the end once the box's oldest
+  // entry changed under it (evicted, or the box started over), and its epoch
+  // drops a page still in flight, which would no longer join what the box
+  // holds.
+  var histBefore = null, histEnd = false, histBusy = false, histEpoch = 0;
+  function histReset() { histBefore = null; histEnd = false; histBusy = false; histEpoch++; }
   function loadHistory() {
     if (histEnd || histBusy || !window.fetch || !convo || !visible(convo)) return;
     var box = entriesBox();
@@ -444,25 +600,28 @@
       histBefore = first ? first.getAttribute("data-entry") || "" : "";
     }
     histBusy = true;
+    var epoch = histEpoch;
     var url = "/s/" + rid + "/history?n=50" + (histBefore ? "&before=" + encodeURIComponent(histBefore) : "");
     fetch(url, { credentials: "same-origin", cache: "no-store" }).then(function (r) {
       if (!r.ok) throw new Error("HTTP " + r.status);
       return r.json();
     }).then(function (res) {
+      if (epoch !== histEpoch) return;
       histBusy = false;
       var h = convo.scrollHeight, top = convo.scrollTop;
-      mergeEntries(box, frag(res.html || ""));
+      var added = mergeEntries(box, frag(res.html || ""));
+      added.forEach(sweepOutImgs);
       // Keep what the user was reading in place: the prepended height goes
       // above the scroll offset.
       convo.scrollTop = top + (convo.scrollHeight - h);
-      mermaid();
+      mermaid(added);
       if (res.before) histBefore = res.before;
       if (res.end || !res.before) histEnd = true;
       nearTop();
     }, function () {
       // A failed fetch (daemon replaced, network) is retried on the next
       // scroll to the top, after a pause.
-      setTimeout(function () { histBusy = false; }, 3000);
+      if (epoch === histEpoch) setTimeout(function () { if (epoch === histEpoch) histBusy = false; }, 3000);
     });
   }
   // nearTop loads older entries when the conversation is scrolled to (or
@@ -472,10 +631,13 @@
 
   // mermaid draws every undrawn mermaid block, loading the shared script
   // once; a call while it loads is covered by the draw its onload runs, and
-  // a failed load (daemon restarting) is retried by the next call.
+  // a failed load (daemon restarting) is retried by the next call. roots
+  // (an element or a list of them: what a swap just inserted) limits the
+  // look for undrawn blocks to them; omitted, the whole page is looked at.
   var mermaidLoading = false;
-  function mermaid() {
-    if (!q("pre.mermaid:not([data-processed])").length || !window.wbMermaidFile) return;
+  function mermaid(roots) {
+    var list = roots == null ? [doc] : Array.isArray(roots) ? roots : [roots];
+    if (!window.wbMermaidFile || !list.some(function (r) { return !!r.querySelector("pre.mermaid:not([data-processed])"); })) return;
     if (window.mermaid) { window.wbMermaid(); return; }
     if (mermaidLoading) return;
     mermaidLoading = true;
@@ -490,33 +652,27 @@
   // The board renders the most recently closed topics up to its cap, then a
   // show-more control naming the next index (data-closed-next); a click
   // fetches the next page from the closed route into the control's place,
-  // ending with the next control when more remain. closedUpTo is the index
-  // past the last topic fetched, so a board swap, which renders the capped
-  // board again, fetches the same topics back in one request.
-  var closedUpTo = 0;
-  function loadClosed(btn, n) {
+  // ending with the next control when more remain. The fetched pages stay
+  // across board swaps (morphBoard).
+  function loadClosed(btn) {
     if (!window.fetch || btn.disabled) return;
     btn.disabled = true;
     var from = +btn.getAttribute("data-closed-next");
-    fetch("/s/" + rid + "/closed?from=" + from + (n ? "&n=" + n : ""), { credentials: "same-origin", cache: "no-store" }).then(function (r) {
+    fetch("/s/" + rid + "/closed?from=" + from, { credentials: "same-origin", cache: "no-store" }).then(function (r) {
       if (!r.ok) throw new Error("HTTP " + r.status);
       return r.json();
     }).then(function (res) {
       var page = frag(res.html || "").firstElementChild;
-      // A board swap meanwhile replaced the control, and refetches itself.
-      if (!btn.parentNode || !page) { btn.disabled = false; return; }
+      // A board swap meanwhile replaced the control, or moved the index it
+      // names (a topic closed or reopened): the page fetched may not follow
+      // what shows now, and the control is clicked again.
+      if (!btn.parentNode || !page || +btn.getAttribute("data-closed-next") !== from) { btn.disabled = false; return; }
       btn.parentNode.replaceChild(page, btn);
-      closedUpTo = Math.max(closedUpTo, from + page.querySelectorAll(".topic").length);
       restoreOpen(page);
       if (window.wbBindBoard) window.wbBindBoard(page);
       if (window.wbAgo) window.wbAgo(page);
-      mermaid();
+      mermaid(page);
     }, function () { btn.disabled = false; });
-  }
-  function refetchClosed(el) {
-    var btn = el.querySelector("button.closed-more[data-closed-next]");
-    var from = btn ? +btn.getAttribute("data-closed-next") : 0;
-    if (btn && closedUpTo > from) loadClosed(btn, closedUpTo - from);
   }
 
   // --- composer: never inside a region, so a swap never touches it ---------
@@ -1062,10 +1218,19 @@
   // applySent marks each board item the session was sent an answer for, or
   // holds one for, from the inbox records the conversation region carries,
   // and dims the item's answer area (sent-sent, sent-held) until the board
-  // re-renders it answered; each run recomputes both from scratch.
-  function applySent() {
+  // re-renders it answered; each run recomputes both from scratch. A run
+  // over the same records as the last (sentSig) leaves the board alone unless
+  // a board swap asks (force): putting back the same classes would only wake
+  // the open-question pill's class observer.
+  var sentSig = null;
+  function applySent(force) {
     var b = region("board");
     if (!b) return;
+    var sig = q(".sentdata i[data-id]").map(function (i) {
+      return [i.getAttribute("data-id"), i.getAttribute("data-state"), i.getAttribute("data-answer"), i.getAttribute("data-note")].join("\u0001");
+    }).join("\u0002");
+    if (!force && sig === sentSig) return;
+    sentSig = sig;
     q(".sentmark", b).forEach(function (m) { m.parentNode.removeChild(m); });
     q(".sent-sent, .sent-held", b).forEach(function (el) { el.classList.remove("sent-sent", "sent-held"); });
     q(".sentdata i[data-id]").forEach(function (i) {
@@ -1822,8 +1987,9 @@
       relayImage(f, m);
     }
   });
-  // A swap re-creates every frame, which starts at no height until it posts
-  // one; it takes the old frame of the same topic's height meanwhile.
+  // A swap re-creates a changed topic's frame, which starts at no height
+  // until it posts one; it takes the old frame of the same topic's height
+  // meanwhile.
   function frameHeights(el) {
     var h = {};
     q("iframe.doc-frame", el).forEach(function (f) { if (f.style.height) h[f.getAttribute("data-doc")] = f.style.height; });
@@ -2754,7 +2920,10 @@
     (badge || []).forEach(function (k) { s.badge[k] = true; });
     (read || []).forEach(function (k) { s.read[k] = true; });
   }
-  function tkNotify() { tkSubs.forEach(function (fn) { fn(); }); }
+  // tkNotify tells the renderer that the cache changed; more marks a change
+  // more of which lands shortly (see tkReadAll), which the renderer may hold
+  // back briefly to draw together with the rest.
+  function tkNotify(more) { tkSubs.forEach(function (fn) { fn(!!more); }); }
   // tkLoadView reads store id's view and seen marks into the cache.
   function tkLoadView(id, done) {
     tkFetch(tkUrl(id, "view"), undefined, function (status, v) {
@@ -2771,9 +2940,10 @@
   }
   // tkReadAll reads the store list, calls listed(status), and with a list
   // reads every store's view in parallel before done(). The renderer, once
-  // mounted, is told as each view but the last lands, so a slow store holds
-  // back only its own rows (it keeps its previous view, or the loading state,
-  // meanwhile); the last view is left to done's caller to announce.
+  // mounted, is told as each view but the last lands (as a change with more
+  // to come), so a slow store holds back only its own rows (it keeps its
+  // previous view, or the loading state, meanwhile); the last view is left to
+  // done's caller to announce.
   function tkReadAll(listed, done) {
     tkFetch("/tracker/stores", undefined, function (status, v) {
       if (status === 503) { tkHostErr = tkErrText(status, v); tkOrder = []; }
@@ -2792,7 +2962,7 @@
       tkOrder.forEach(function (id) {
         tkLoadView(id, function () {
           if (--left === 0) done();
-          else if (tkApi) tkNotify();
+          else if (tkApi) tkNotify(true);
         });
       });
     });
@@ -3107,7 +3277,7 @@
     c.conv = now;
     if ((now && now.id) !== was) {
       supClose(c);
-      c.box.innerHTML = ""; c.live.innerHTML = ""; c.stick = true;
+      resetEntries(c.box); c.live.innerHTML = ""; c.stick = true;
     }
     supOpen(c);
   }
@@ -3143,17 +3313,22 @@
     if (c.es) { c.es.close(); c.es = null; c.esFor = null; }
   }
   // supRegion applies a region of the chat's stream; es is that stream when
-  // the region arrived live (see supOpen), else null.
+  // the region arrived live (see supOpen), else null. The entries merge as
+  // the session conversation's do (mergeEntriesRegion), with no history to
+  // page back to: what a chat at the bottom sheds past the cap is gone until
+  // the chat opens again, as a reopen shows only the newest window. A window
+  // past a gap starts the log over, and what that puts back is replayed
+  // history, never a live arrival: its ui lines do not act.
   function supRegion(c, name, html, es) {
-    var stick = c.root.isConnected ? c.log.scrollTop + c.log.clientHeight >= c.log.scrollHeight - 24 : c.stick, before = null;
+    var stick = c.root.isConnected ? c.log.scrollTop + c.log.clientHeight >= c.log.scrollHeight - 24 : c.stick, added = null, reset = false;
     if (name === "entries") {
       var nbox = frag(html).querySelector(".centries");
-      if (es) {
-        before = {};
-        Array.prototype.forEach.call(c.box.children, function (n) { before[n.getAttribute("data-entry")] = true; });
+      if (nbox) {
+        if (gapped(c.box, nbox)) { resetEntries(c.box); reset = true; }
+        added = mergeEntries(c.box, nbox);
+        added.forEach(sweepOutImgs);
+        if (stick) evictEntries(c.box);
       }
-      if (nbox) mergeEntries(c.box, nbox);
-      sweepOutImgs(c.box);
       supCards(c);
     } else if (name === "convlive") {
       c.live.innerHTML = html;
@@ -3164,7 +3339,7 @@
     } else return;
     supDraw(c);
     if (stick && c.root.isConnected) { c.log.scrollTop = c.log.scrollHeight; c.stick = true; }
-    if (before) supActUI(c, before, es);
+    if (es && added && !reset) supActUI(c, added, es);
   }
   // supActUI performs, in order, the ui lines (a tracker.ui call: the agent
   // moving this store's view) that a live entries region added; every line,
@@ -3173,10 +3348,10 @@
   // that hides the chat (a search, scope, or view switch in the narrow
   // layout, where Items and the chat share one pane) closes its stream, and
   // the lines after it are left for the next open to meet as history.
-  function supActUI(c, before, es) {
+  function supActUI(c, added, es) {
     if (!supH || !supH.uiCommand) return;
-    q(".uiline[data-entry]", c.box).forEach(function (el) {
-      if (before[el.getAttribute("data-entry")] || c.es !== es) return;
+    added.forEach(function (el) {
+      if (c.es !== es || !el.matches(".uiline[data-entry]")) return;
       supH.uiCommand(c.id, { op: el.getAttribute("data-ui-op"), arg: el.getAttribute("data-ui-arg") || "", comment: el.getAttribute("data-ui-comment") || "" });
     });
   }
@@ -3512,6 +3687,14 @@
         syncBadge();
         return;
       }
+      // A hidden tab keeps only each region's newest update and applies none;
+      // showing the tab applies them (showRegions). The stream stays open, so
+      // the light events (tracker) still arrive and act.
+      if (doc.hidden) {
+        delete hiddenRegions[ev.name];
+        hiddenRegions[ev.name] = { hash: ev.hash, html: ev.html };
+        return;
+      }
       swap(ev.name, ev.hash, ev.html);
     });
     es.addEventListener("tracker", function (e) {
@@ -3525,6 +3708,15 @@
       banner(wsT("js.banner.gone"));
     });
   }
+  // showRegions applies, once each and in arrival order, the region updates
+  // a hidden tab held back.
+  function showRegions() {
+    if (doc.hidden) return;
+    var p = hiddenRegions;
+    hiddenRegions = {};
+    Object.keys(p).forEach(function (name) { swap(name, p[name].hash, p[name].html); });
+  }
+  doc.addEventListener("visibilitychange", showRegions);
   function banner(text) {
     var b = $("dash-banner");
     if (!b) return;
