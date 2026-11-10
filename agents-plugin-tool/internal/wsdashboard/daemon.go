@@ -236,6 +236,9 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 		_ = lock.Unlock()
 		return nil, err
 	}
+	if opts.Pprof {
+		enableContentionProfiles()
+	}
 	stats := &streamStats{}
 	d := &Daemon{
 		dir:             opts.Dir,
