@@ -9,9 +9,14 @@ import {
   CALL_TIMEOUT_MS,
   callArgs,
   createDashboard,
+  createOutputRate,
+  effortOfType,
   FLUSH_INTERVAL_MS,
   HELD_AGENT_CAP,
   labelWhiteboard,
+  OUTPUT_RATE_MIN_SPAN_MS,
+  OUTPUT_RATE_MIN_TOKENS,
+  OUTPUT_RATE_WINDOW,
   parseInboxDrain,
   parseInterruptDrain,
   PERMISSION_PROMPT,
@@ -697,6 +702,133 @@ describe('subagents', () => {
     const resent = h.calls.at(-1)!.events.filter((e) => e.kind === 'agent' && e.agentId !== undefined).map((e) => e.agentId)
     expect(resent).toContain('keep')
     expect(resent.filter((id) => String(id).startsWith('f'))).toEqual(['f3', 'f4', 'f5', 'f6', 'f7'])
+  })
+})
+
+describe('subagent telemetry', () => {
+  /** One request: each block's chunks as [index, arrival] pairs, then its output tokens and answering model. */
+  const request = (rate: ReturnType<typeof createOutputRate>, chunks: [number, number][], tokens: number | undefined, model?: string) => {
+    rate.begin()
+    for (const [index, at] of chunks) rate.chunk(index, at)
+    rate.finish(tokens, model)
+  }
+  /** A rate equal to `want` but for floating-point rounding. */
+  const expectNear = (got: number | undefined, want: number) => expect(got !== undefined && Math.abs(got - want) < 1e-9 ? want : got).toBe(want)
+  const TELEMETRY = ['model', 'effort', 'contextTokens', 'outputTps']
+  const telemetryOf = (e: DashboardEvent | undefined) => Object.fromEntries(TELEMETRY.filter((k) => e !== undefined && k in e).map((k) => [k, e![k]]))
+
+  test('the rate counts every output token over the summed span of each block, first chunk to last; gaps between blocks do not count', () => {
+    const rate = createOutputRate()
+    expect(rate.rate()).toBeUndefined()
+    // Block 0 spans 300 ms, block 1 (a tool and its argument chunks) 700 ms; the 100 ms between them is no block's.
+    request(rate, [[0, 0], [0, 150], [0, 300], [1, 400], [1, 900], [1, 1100]], 100, 'm')
+    expectNear(rate.rate(), 100)
+  })
+
+  test('a request with no usage, too short a span, or too few tokens adds no sample', () => {
+    const rate = createOutputRate()
+    request(rate, [[0, 0], [0, 1000]], undefined, 'm')
+    request(rate, [[0, 0], [0, OUTPUT_RATE_MIN_SPAN_MS - 1], [1, 2000]], 500, 'm')
+    request(rate, [[0, 0], [0, 1000]], OUTPUT_RATE_MIN_TOKENS - 1, 'm')
+    expect(rate.rate()).toBeUndefined()
+    request(rate, [[0, 0], [0, OUTPUT_RATE_MIN_SPAN_MS]], OUTPUT_RATE_MIN_TOKENS, 'm')
+    expectNear(rate.rate(), OUTPUT_RATE_MIN_TOKENS / (OUTPUT_RATE_MIN_SPAN_MS / 1000))
+  })
+
+  test('the rate is token-weighted over the last OUTPUT_RATE_WINDOW requests', () => {
+    const rate = createOutputRate()
+    // 100 t/s over 1 s and 300 t/s over 3 s: 1000 tokens over 4 s, not the mean of the two rates.
+    request(rate, [[0, 0], [0, 1000]], 100, 'm')
+    request(rate, [[0, 0], [0, 3000]], 900, 'm')
+    expectNear(rate.rate(), 250)
+    const windowed = createOutputRate()
+    request(windowed, [[0, 0], [0, 1000]], 5000, 'm')
+    for (let i = 0; i < OUTPUT_RATE_WINDOW; i++) request(windowed, [[0, 0], [0, 1000]], 50, 'm')
+    expectNear(windowed.rate(), 50)
+  })
+
+  test('a new answering model starts the window over; a new request drops an unfinished one\'s spans', () => {
+    const rate = createOutputRate()
+    request(rate, [[0, 0], [0, 1000]], 500, 'a')
+    request(rate, [[0, 0], [0, 1000]], 40, 'b')
+    expectNear(rate.rate(), 40)
+    rate.begin()
+    rate.chunk(0, 0)
+    request(rate, [[0, 5000], [0, 5500]], 30, 'b')
+    expectNear(rate.rate(), 70 / 1.5)
+  })
+
+  test('an effort-carrier agent type names its effort, under any plugin prefix; any other type none', () => {
+    expect(effortOfType('ws:effort-high')).toBe('high')
+    expect(effortOfType('other:effort-xhigh')).toBe('xhigh')
+    expect(effortOfType('effort-max')).toBe('max')
+    expect(effortOfType('general-purpose')).toBeUndefined()
+    expect(effortOfType('ws:effort-highest')).toBeUndefined()
+    expect(effortOfType('my-effort-low')).toBeUndefined()
+    expect(effortOfType(undefined)).toBeUndefined()
+  })
+
+  test('the spawn seeds model and effort; each request then names the actual ones, a numeric effort as text', async () => {
+    const { dash, after } = await started()
+    let events = await after(() => dash.agentSpawned({ agentId: 's1', subagentType: 'ws:effort-high', model: 'claude-sonnet-x' }))
+    expect(telemetryOf(lastAgent(events, 's1'))).toEqual({ model: 'claude-sonnet-x', effort: 'high' })
+    events = await after(() => dash.stepBegan('s1', 's/0', { model: 'claude-opus-y', effort: 'max' }))
+    expect(telemetryOf(lastAgent(events, 's1'))).toEqual({ model: 'claude-opus-y', effort: 'max' })
+    events = await after(() => dash.stepBegan('s1', 's/1', { model: 'claude-opus-y', effort: 12000 }))
+    expect(telemetryOf(lastAgent(events, 's1'))).toEqual({ model: 'claude-opus-y', effort: '12000' })
+  })
+
+  test('a request made before the spawn resolved keeps its model and effort over the spawn\'s seed', async () => {
+    const { dash, after } = await started()
+    dash.turnStarted('s2')
+    dash.stepBegan('s2', 's/0', { model: 'claude-opus-y', effort: 'low' })
+    const events = await after(() => dash.agentSpawned({ agentId: 's2', subagentType: 'ws:effort-high', model: 'claude-sonnet-x' }))
+    expect(telemetryOf(lastAgent(events, 's2'))).toEqual({ model: 'claude-opus-y', effort: 'low' })
+  })
+
+  test('a request\'s usage gives the context size and its chunks the rate; a request with no usage keeps both', async () => {
+    const { h, dash, after } = await started()
+    dash.agentSpawned({ agentId: 's3', subagentType: 'Explore' })
+    dash.stepBegan('s3', 's/0', { model: 'm' })
+    const t = h.now
+    dash.stepChunk('s3', 's/0', { kind: 'text', index: 0, text: 'a' })
+    h.now = t + 400
+    dash.stepChunk('s3', 's/0', { kind: 'text', index: 0, text: 'b' })
+    h.now = t + 500
+    dash.stepChunk('s3', 's/0', { kind: 'tool', index: 1, id: 'x1', name: 'Read' })
+    h.now = t + 1100
+    dash.stepChunk('s3', 's/0', { kind: 'input', index: 1, json: '{}' })
+    dash.stepChunk('s3', 's/0', { kind: 'stop' })
+    let events = await after(() =>
+      dash.stepEnded('s3', 's/0', {
+        answer: '',
+        toolUses: [{ name: 'Read', input: {} }],
+        usage: { input_tokens: 10, output_tokens: 120, cache_read_input_tokens: 30_000, cache_creation_input_tokens: 2_000, model: 'm' },
+      }),
+    )
+    // 120 tokens over 400 + 600 ms of block spans.
+    expect(telemetryOf(lastAgent(events, 's3'))).toEqual({ model: 'm', contextTokens: 32_010, outputTps: 120 })
+    dash.stepBegan('s3', 's/1', { model: 'm' })
+    events = await after(() => dash.stepEnded('s3', 's/1', { answer: 'done', toolUses: [], usage: null }))
+    expect(telemetryOf(lastAgent(events, 's3'))).toEqual({ model: 'm', contextTokens: 32_010, outputTps: 120 })
+  })
+
+  test('a subagent the hooks told nothing of carries none of the fields; the lead\'s event never does', async () => {
+    const { dash, after } = await started()
+    let events = await after(() => {
+      dash.agentSpawned({ agentId: 's4', subagentType: 'general-purpose' })
+      dash.stepBegan('s4', 's/0')
+      dash.stepEnded('s4', 's/0', { answer: '', toolUses: [], usage: null })
+    })
+    expect(telemetryOf(lastAgent(events, 's4'))).toEqual({})
+    events = await after(() => {
+      dash.turnStarted(undefined)
+      dash.stepBegan(undefined, 't/0', { model: 'claude-opus-y', effort: 'high' })
+      dash.stepChunk(undefined, 't/0', { kind: 'text', index: 0, text: 'hi' })
+      dash.stepEnded(undefined, 't/0', { answer: 'hi', toolUses: [], usage: { input_tokens: 5, output_tokens: 900, cache_read_input_tokens: 100, model: 'claude-opus-y' } })
+    })
+    expect(lastLead(events)).toBeDefined()
+    expect(events.filter((e) => e.kind === 'agent' && e.agentId === undefined).map(telemetryOf)).toEqual(events.filter((e) => e.kind === 'agent' && e.agentId === undefined).map(() => ({})))
   })
 })
 

@@ -16,7 +16,10 @@
 //   `agent.spawn` announced or the session's agent list (`$.agent.list()`)
 //   names, keyed by the host's native agent id, with its label, parent,
 //   status, and the ws session key a delegate passes to this plugin's tools;
-//   the server shows that key's reply-id and never stores the key;
+//   the server shows that key's reply-id and never stores the key; a
+//   subagent's event also carries, once known, its model and effort, its
+//   current context size, and its output rate (see the subagent telemetry
+//   section below), each left out while the hooks have not supplied it;
 // - the lead's streamed reply text (the step's text so far) and each
 //   finished reply (`final: true`);
 // - each finished user message with its origin;
@@ -476,6 +479,103 @@ export function batchViews(buf: Buffer): BatchView[] {
   return views
 }
 
+// ---- Subagent telemetry ----------------------------------------------------
+
+/** Model requests a subagent's output rate is token-weighted over. */
+export const OUTPUT_RATE_WINDOW = 8
+/** A request whose summed block spans are shorter is burst-flushed and would inflate the rate. */
+export const OUTPUT_RATE_MIN_SPAN_MS = 250
+/** A request with fewer output tokens is too small to measure. */
+export const OUTPUT_RATE_MIN_TOKENS = 8
+
+/** An effort-carrier agent type: one whose name (after any `<plugin>:` prefix) is `effort-<level>`. */
+const EFFORT_CARRIER_TYPE = /(^|:)effort-(low|medium|high|xhigh|max)$/
+
+/** The effort an effort-carrier agent type fixes, or undefined for any other type. */
+export function effortOfType(type: string | undefined): string | undefined {
+  return type === undefined ? undefined : EFFORT_CARRIER_TYPE.exec(type.trim())?.[2]
+}
+
+/** A request's effort as the intake takes it: a level as named, a number as its text; undefined when absent. */
+export function effortText(effort: unknown): string | undefined {
+  if (typeof effort === 'number') return Number.isFinite(effort) ? String(effort) : undefined
+  return typeof effort === 'string' && effort.trim() !== '' ? effort.trim() : undefined
+}
+
+/** A request's context size: its uncached input plus cache reads and cache writes (output not included). */
+export function contextTokensOf(t: TokenUsage): number {
+  return t.input + t.cacheRead + t.cacheWrite
+}
+
+/**
+ * One agent's output decode rate (tokens per second), following the Pi
+ * adapter's output-rate tracker on its branch for usage without a reasoning
+ * breakdown (Claude reports none): per model request, every output token over the
+ * summed span of every content block (text, thinking, a tool call with its
+ * argument chunks), so latency before the first block and gaps between blocks
+ * never count; token-weighted over the last OUTPUT_RATE_WINDOW eligible
+ * requests, the window starting over when the answering model changes.
+ *
+ * The hooks stream chunks but no block start or end, so a block's span is
+ * estimated from its first and last chunk's arrival. That leaves out the
+ * first chunk's own decode time, and a block that arrives as one chunk spans
+ * nothing, so this rate reads somewhat higher than a tracker that times real
+ * block edges.
+ */
+export interface OutputRate {
+  /** A model request begins: the spans of an earlier one that never finished are dropped. */
+  begin: () => void
+  /** A chunk of block `index` arrived at `now`. */
+  chunk: (index: number, now: number) => void
+  /** The request ended with `outputTokens` (undefined when it reported no usage), answered by `model`. */
+  finish: (outputTokens: number | undefined, model: string | undefined) => void
+  /** Tokens per second over the window, or undefined before the first eligible request. */
+  rate: () => number | undefined
+}
+
+export function createOutputRate(): OutputRate {
+  let blocks = new Map<number, { first: number; last: number }>()
+  let window: { tokens: number; ms: number }[] = []
+  let windowModel: string | undefined
+  return {
+    begin() {
+      blocks = new Map()
+    },
+    chunk(index, now) {
+      const block = blocks.get(index)
+      if (block) block.last = Math.max(block.last, now)
+      else blocks.set(index, { first: now, last: now })
+    },
+    finish(outputTokens, model) {
+      let ms = 0
+      for (const block of blocks.values()) ms += block.last - block.first
+      blocks = new Map()
+      if (outputTokens === undefined || !Number.isFinite(outputTokens)) return
+      if (ms < OUTPUT_RATE_MIN_SPAN_MS || outputTokens < OUTPUT_RATE_MIN_TOKENS) return
+      const answered = model ?? ''
+      if (answered !== windowModel) {
+        window = []
+        windowModel = answered
+      }
+      window.push({ tokens: outputTokens, ms })
+      if (window.length > OUTPUT_RATE_WINDOW) window.shift()
+    },
+    rate() {
+      if (window.length === 0) return undefined
+      let tokens = 0
+      let ms = 0
+      for (const sample of window) {
+        tokens += sample.tokens
+        ms += sample.ms
+      }
+      return ms > 0 ? tokens / (ms / 1000) : undefined
+    },
+  }
+}
+
+/** The chunk kinds that belong to a content block by `index`. */
+const BLOCK_CHUNKS = new Set(['text', 'thinking', 'tool', 'input'])
+
 // ---- Usage status ----------------------------------------------------------
 
 /** The optional event kind that carries usage figures, sent only while the intake names it. */
@@ -544,6 +644,9 @@ export type IntakeResult = { ok: boolean; text: string }
 /** One agent of the session's agent list, as the feed reads `$.agent.list()`'s records. */
 export type ListedAgent = { id: string; description?: string; type?: string; status?: string; parentId?: string }
 
+/** A step result's usage: the token counts and the model that answered. */
+export type StepUsage = (NonNullable<Parameters<typeof stepTokens>[0]> & { model?: unknown }) | null | undefined
+
 export interface DashboardEdges {
   /** The session key the feed reports under: the conversation's lead key, else undefined (held until one arrives). */
   key: () => string | undefined
@@ -576,6 +679,13 @@ type AgentRec = {
   permissionSent: string
   /** Whether the record is in the tree: the lead always, a subagent once its `agent.spawn` or the agent list named it. */
   announced: boolean
+  /** A subagent's model and effort: its latest request's, seeded by its spawn before the first. */
+  model?: string
+  effort?: string
+  /** A subagent's context size as its latest request that reported usage left it. */
+  contextTokens?: number
+  /** A subagent's output rate tracker; the lead keeps none. */
+  rate?: OutputRate
 }
 
 /** Agent list statuses seeded into the tree at start: a loop running a turn or held on its own work. */
@@ -621,18 +731,20 @@ export interface Dashboard {
   userMessage: (text: string, origin: 'terminal' | 'whiteboard') => void
   turnStarted: (agentId: string | undefined) => void
   turnCompleted: (agentId: string | undefined, answer: string, reason: string) => void
-  stepBegan: (agentId: string | undefined, step: string) => void
+  /** A model request begins; `request` is the model and effort it names, which a subagent's record takes. */
+  stepBegan: (agentId: string | undefined, step: string, request?: { model?: string; effort?: string | number }) => void
   stepChunk: (agentId: string | undefined, step: string, chunk: { kind: string; index?: number; text?: string; id?: string; name?: string; json?: string }) => void
   stepEnded: (
     agentId: string | undefined,
     step: string,
-    result: { answer?: string; toolUses?: readonly { name: string; input: unknown }[]; usage?: Parameters<typeof stepTokens>[0] },
+    result: { answer?: string; toolUses?: readonly { name: string; input: unknown }[]; usage?: StepUsage },
   ) => void
   toolBegan: (agentId: string | undefined, id: string | undefined, tool: string, args: Record<string, unknown>) => void
   toolEnded: (agentId: string | undefined, id: string | undefined, isError: boolean) => void
   toolChecked: (check: { agentId?: string; id?: string; tool: string; input: unknown; approver?: string }, decision: string) => void
   notified: (type: string) => void
-  agentSpawned: (spawn: { agentId: string; parentId?: string; description?: string; subagentType?: string }) => void
+  /** A subagent started; `model` is what its spawn resolved it to run on. */
+  agentSpawned: (spawn: { agentId: string; parentId?: string; description?: string; subagentType?: string; model?: string }) => void
   /** The session's latest usage figures: held, and sent while the intake accepts `status`. */
   status: (figures: StatusFigures) => void
   /** A main-conversation compaction begins: held while it runs, and its start sent while the intake accepts `compact`. */
@@ -848,6 +960,10 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
         ...(r.label ? { label: r.label } : {}),
         ...(r.sessionKey ? { sessionKey: r.sessionKey } : {}),
         ...(r.caption !== undefined ? { caption: r.caption } : {}),
+        ...(r.model !== undefined ? { model: r.model } : {}),
+        ...(r.effort !== undefined ? { effort: r.effort } : {}),
+        ...(r.contextTokens !== undefined ? { contextTokens: r.contextTokens } : {}),
+        ...outputRate(r),
         status: r.status,
         batches,
       })
@@ -859,6 +975,25 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
       r.permissionSent = permission
     }
     return out
+  }
+
+  function outputRate(r: AgentRec): { outputTps?: number } {
+    const tps = r.rate?.rate()
+    return tps !== undefined ? { outputTps: tps } : {}
+  }
+
+  /** Sets a subagent's model and effort where given; returns whether either changed. */
+  function setModel(r: AgentRec, model: string | undefined, effort: string | undefined): boolean {
+    let changed = false
+    if (model !== undefined && model !== r.model) {
+      r.model = model
+      changed = true
+    }
+    if (effort !== undefined && effort !== r.effort) {
+      r.effort = effort
+      changed = true
+    }
+    return changed
   }
 
   function streamedText(r: { blocks: Map<number, string> }): string {
@@ -1190,15 +1325,23 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
       turnOpen = false
       settleBefore({ kind: 'turn_end', at: now })
     }),
-    stepBegan: guard('step start', (agentId: string | undefined, step: string) => {
+    stepBegan: guard('step start', (agentId: string | undefined, step: string, request?: Parameters<Dashboard['stepBegan']>[2]) => {
       const id = idOf(agentId)
-      stepBegan(rec(id).buf, step, edges.now())
+      const r = rec(id)
+      stepBegan(r.buf, step, edges.now())
       if (id === LEAD) reply = { step, blocks: new Map() }
+      else {
+        const model = typeof request?.model === 'string' && request.model.trim() !== '' ? request.model.trim() : undefined
+        setModel(r, model, effortText(request?.effort))
+        ;(r.rate ??= createOutputRate()).begin()
+      }
       markDirty(id)
     }),
     stepChunk: guard('step chunk', (agentId: string | undefined, step: string, chunk: Parameters<Dashboard['stepChunk']>[2]) => {
       const id = idOf(agentId)
-      if (stepChunk(rec(id).buf, step, chunk, edges.now())) markDirty(id)
+      const r = rec(id)
+      if (r.rate && r.buf.streaming === step && BLOCK_CHUNKS.has(chunk.kind) && typeof chunk.index === 'number') r.rate.chunk(chunk.index, edges.now())
+      if (stepChunk(r.buf, step, chunk, edges.now())) markDirty(id)
       if (id === LEAD && chunk.kind === 'text' && reply?.step === step && typeof chunk.text === 'string') {
         const index = typeof chunk.index === 'number' ? chunk.index : 0
         reply.blocks.set(index, (reply.blocks.get(index) ?? '') + chunk.text)
@@ -1208,7 +1351,16 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
     }),
     stepEnded: guard('step end', (agentId: string | undefined, step: string, result: Parameters<Dashboard['stepEnded']>[2]) => {
       const id = idOf(agentId)
-      if (stepEnded(rec(id).buf, step, result.toolUses ?? [], edges.now(), stepTokens(result.usage))) markDirty(id)
+      const r = rec(id)
+      const tokens = stepTokens(result.usage)
+      const telemetry = id !== LEAD && r.buf.streaming === step
+      if (telemetry) {
+        // A request with no usage keeps the context size and adds no rate sample.
+        if (tokens) r.contextTokens = contextTokensOf(tokens)
+        const answered = result.usage?.model
+        r.rate?.finish(tokens?.output, typeof answered === 'string' && answered !== '' ? answered : r.model)
+      }
+      if (stepEnded(r.buf, step, result.toolUses ?? [], edges.now(), tokens) || telemetry) markDirty(id)
       if (id !== LEAD) return
       const answer = typeof result.answer === 'string' ? result.answer : ''
       if (answer !== '') {
@@ -1252,7 +1404,10 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
       }
     }),
     agentSpawned: guard('agent spawn', (spawn: Parameters<Dashboard['agentSpawned']>[0]) => {
-      announce(spawn.agentId, { parentId: spawn.parentId, description: spawn.description, type: spawn.subagentType })
+      const r = announce(spawn.agentId, { parentId: spawn.parentId, description: spawn.description, type: spawn.subagentType })
+      // Seeds only: a request already made (its turn can run before its spawn resolves) names the actual model and effort.
+      const model = typeof spawn.model === 'string' && spawn.model.trim() !== '' ? spawn.model.trim() : undefined
+      setModel(r, r.model === undefined ? model : undefined, r.effort === undefined ? effortOfType(spawn.subagentType) : undefined)
     }),
     status: guard('status', (figures: StatusFigures) => {
       const json = JSON.stringify(figures)
