@@ -6,6 +6,7 @@ related:
   261110-bug-ws-dashboard-daemon-read-amplification: "sibling: that ticket shrinks the work done under these locks; this one shrinks what the locks cover. Neither depends on the other."
 sage-review-design-reviewed: dc17df7d7704a982
 sage-review-completeness-reviewed: dc17df7d7704a982
+completed: 2026-11-10
 ---
 
 # Dashboard daemon lock scope
@@ -216,3 +217,46 @@ Verification:
   opt-in sets the mutex and block profile rates.
 - The wsdashboard, wsagent, wstrackerhost, and mcp dashboard tests pass
   remotely through `ws-rgo` with `-race`.
+
+### Result (ab91d1587) - 2026-11-10
+
+Implemented in four commits: b10d2da64 (Decision 6), 8466bde78 (Decision 5),
+291bb82ca (Decisions 1-index, 2, 4), ab91d1587 (Decisions 1-runner, 3).
+
+- Index: the daemon-wide reread lock is replaced by per-session,
+  reference-counted lanes. Each lane's mutex covers the registration read,
+  ReadSession, apply, and OnChange. Nudge, agent writes, and inbox writes
+  schedule one coalescing drain worker per session and return. Nudge keeps
+  its registration lookup and project check synchronous, so /nudge still
+  answers 404 for an unknown session. Refresh treats its listing as
+  discovery only: it re-reads each registration under the lane and drops a
+  missing session only if its registration is still gone. A test-only
+  `Settle` waits for the drain workers.
+- Runner: Send writes the inbox under the conversation's mutex, checks
+  `closed`, and signals the loop through a one-slot channel. kick and
+  startProcess run only in the loop. The loop handles a pending inbox signal
+  before each act request, so close and interrupt see sends that returned
+  earlier. close() sets `closed` under the mutex first. startConv writes
+  the registration and notifies outside the runner lock.
+- Support: per-store operation locks plus a state-only mutex. A send in
+  one store does not wait on another store, and it cannot race New or a
+  harness switch in the same store.
+- mcp source: a reply-id miss rescans keys outside `src.mu`, and
+  concurrent misses share one in-flight scan.
+- Tracker: dashboard wiki and image reads give up after a 500 ms store-lock
+  wait (`WithLockWait`/`ErrStoreBusy`) and answer 503 with `Retry-After: 1`.
+  tracker.js retries a busy wiki load (1 s, up to 5 times) and reloads a
+  failed store image (1.5 s, up to 3 times). MCP tool paths still wait
+  without a bound.
+- pprof opt-in: block profile rate is 1 ms and mutex fraction is 5.
+- Verification: `ws-rgo ... test ./internal/wsdashboard/ ./internal/wsagent/
+  ./internal/mcp/ ./internal/wstrackerhost/ ./cmd/ws-mcp/ -count=1 -race`
+  passed for all five packages, and a `-v` run confirmed that the new
+  concurrency tests executed. Lite review was clean, with 2 minor findings
+  left open: `Daemon.Close` does not wait for drain workers (adding `Settle`
+  there would let one blocked read hang shutdown), and Send after
+  `Runner.Close` without a conversation close is accepted into the on-disk
+  inbox (shutdown only).
+- Deviation: tracker.js waits a fixed 1 s rather than reading Retry-After,
+  because the dashboard.js tracker adapter does not forward response
+  headers.
