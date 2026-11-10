@@ -11,7 +11,6 @@ import (
 	goruntime "runtime"
 	"strconv"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -390,47 +389,36 @@ func TestHostedConnectionSeeingALANChangeReplacesTheDaemon(t *testing.T) {
 	before.call("initialize", map[string]any{"protocolVersion": "2025-03-26", "capabilities": map[string]any{}})
 
 	// A CLI wait blocked on mail, and a tool call that outlives the drain
-	// budget: the fake git holds `status` for longer than the budget.
+	// budget: the fake git holds `status` for longer than the budget, then
+	// until the test releases it. On Windows the fake git is unavailable
+	// (a POSIX script) and only the slow-call assertions are skipped.
 	waiting := connectHosted(t, h.ep, h.hello(wsdashboard.ProxyModeCLI, []string{"mailbox", "wait", "--session-key", "drain-wait-key", "--timeout", "60s", "--format", "json"}, os.Getpid(), nil))
 	slowGit := slowGitDir(t, "status", 3*wsdashboard.DefaultLockWait/2)
-	slow := connectHosted(t, h.ep, h.hello(wsdashboard.ProxyModeMCP, []string{"serve", "--stdio"}, os.Getpid(), map[string]string{"PATH": slowGit + string(os.PathListSeparator) + os.Getenv("PATH")}))
-	slowKey := slow.login(h.project)
+	var slow *hostedConn
+	var slowKey string
+	if slowGit != "" {
+		slow = connectHosted(t, h.ep, h.hello(wsdashboard.ProxyModeMCP, []string{"serve", "--stdio"}, os.Getpid(), map[string]string{"PATH": slowGit + string(os.PathListSeparator) + os.Getenv("PATH")}))
+		slowKey = slow.login(h.project)
+	}
 
 	config := `{"schema_version": 1, "overrides": {"dashboard.lan_enabled": "true"}}`
 	if err := os.WriteFile(filepath.Join(h.configHome, "config.json"), []byte(config), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// A hello whose session the dashboard does not apply to, or whose
-	// global config is another one, never triggers the replacement: it
-	// declares no dashboard manifest, sets WS_MCP_NO_DASHBOARD=1, or
-	// carries a WS_CONFIG_HOME other than the daemon's.
-	for name, overrides := range map[string]map[string]string{
-		"no manifest":       {"WS_MCP_CONFIG_MANIFESTS": ""},
-		"dashboard off":     {"WS_MCP_NO_DASHBOARD": "1"},
-		"other config home": {"WS_CONFIG_HOME": t.TempDir()},
-	} {
-		c := connectHosted(t, h.ep, h.hello(wsdashboard.ProxyModeMCP, []string{"serve", "--stdio"}, os.Getpid(), overrides))
-		if init := c.call("initialize", map[string]any{"protocolVersion": "2025-03-26", "capabilities": map[string]any{}}); init["result"] == nil {
-			t.Fatalf("%s: initialize = %v", name, init)
-		}
-		c.conn.Close()
-	}
-	for end := time.Now().Add(2 * time.Second); time.Now().Before(end); time.Sleep(100 * time.Millisecond) {
-		ep, err := wsdashboard.ReadEndpoint(h.dir)
-		if err != nil || ep.PID != h.ep.PID {
-			t.Fatalf("a session the LAN change does not apply to replaced the daemon: %+v, %v", ep, err)
-		}
-	}
-	if info, err := wsdashboard.Health(context.Background(), dashboardTestClient, h.ep); err != nil || info.LAN {
-		t.Fatalf("health after the ignored hellos = %+v, %v", info, err)
-	}
 
 	// The slow call starts before the trigger; its answer must still come.
-	slow.nextID++
-	slowCallID := slow.nextID
-	slow.send(map[string]any{"jsonrpc": "2.0", "id": slowCallID, "method": "tools/call", "params": map[string]any{"name": "git.status", "arguments": map[string]any{"session_key": slowKey}}})
-	slowSentAt := time.Now()
-	time.Sleep(300 * time.Millisecond)
+	var slowCallID int
+	var slowSentAt time.Time
+	if slow != nil {
+		slow.nextID++
+		slowCallID = slow.nextID
+		slow.send(map[string]any{"jsonrpc": "2.0", "id": slowCallID, "method": "tools/call", "params": map[string]any{"name": "git.status", "arguments": map[string]any{"session_key": slowKey}}})
+		slowSentAt = time.Now()
+		waitUntil(t, 10*time.Second, "the slow git to start", func() bool {
+			_, err := os.Stat(filepath.Join(slowGit, "started"))
+			return err == nil
+		})
+	}
 
 	// The next session sees the new global value; the daemon replaces
 	// itself and drains the sessions it hosts.
@@ -476,9 +464,16 @@ func TestHostedConnectionSeeingALANChangeReplacesTheDaemon(t *testing.T) {
 		}
 	}
 	// The successor serves while the predecessor still runs the slow call:
-	// the lock and endpoint were released before that call ended.
-	if !processExists(h.ep.PID) {
-		t.Fatal("the predecessor exited before its slow call ended")
+	// the lock and endpoint were released before that call ended. The fake
+	// git holds the call until the release file exists, so a slow runner
+	// cannot end the call before this check.
+	if slow != nil {
+		if !wsstate.ProcessAlive(h.ep.PID) {
+			t.Fatal("the predecessor exited before its slow call ended")
+		}
+		if err := os.WriteFile(filepath.Join(slowGit, "release"), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 	after := connectHosted(t, successor, h.hello(wsdashboard.ProxyModeMCP, []string{"serve", "--stdio"}, os.Getpid(), nil))
 	init := after.call("initialize", map[string]any{"protocolVersion": "2025-03-26", "capabilities": map[string]any{}})
@@ -486,34 +481,71 @@ func TestHostedConnectionSeeingALANChangeReplacesTheDaemon(t *testing.T) {
 		t.Fatalf("initialize on the successor = %v", init)
 	}
 	// ... and the slow call's answer is delivered before its stream ends.
-	for {
-		resp, ok := slow.readLine(3 * wsdashboard.DefaultLockWait)
-		if !ok {
-			t.Fatal("the slow session's stream ended before its call was answered")
+	if slow != nil {
+		for {
+			resp, ok := slow.readLine(3 * wsdashboard.DefaultLockWait)
+			if !ok {
+				t.Fatal("the slow session's stream ended before its call was answered")
+			}
+			if id, _ := resp["id"].(float64); int(id) == slowCallID {
+				if resp["error"] != nil || !strings.Contains(toolText(t, resp), "master") {
+					t.Fatalf("slow git.status answer = %v", resp)
+				}
+				if held := time.Since(slowSentAt); held < 3*wsdashboard.DefaultLockWait/2-500*time.Millisecond {
+					t.Fatalf("the slow call answered after %v; the fake git did not hold it", held)
+				}
+				break
+			}
 		}
-		if id, _ := resp["id"].(float64); int(id) == slowCallID {
-			if resp["error"] != nil || !strings.Contains(toolText(t, resp), "master") {
-				t.Fatalf("slow git.status answer = %v", resp)
-			}
-			if held := time.Since(slowSentAt); held < 3*wsdashboard.DefaultLockWait/2-500*time.Millisecond {
-				t.Fatalf("the slow call answered after %v; the fake git did not hold it", held)
-			}
-			break
+		if _, ok := slow.readLine(wsdashboard.DefaultLockWait); ok {
+			t.Fatal("a line after the slow session's answer")
 		}
 	}
-	if _, ok := slow.readLine(wsdashboard.DefaultLockWait); ok {
-		t.Fatal("a line after the slow session's answer")
+	waitUntil(t, 10*time.Second, "the predecessor to exit", func() bool { return !wsstate.ProcessAlive(h.ep.PID) })
+
+	// A hello whose session the dashboard does not apply to, or whose
+	// global config is another one, never triggers a replacement: it
+	// declares no dashboard manifest, sets WS_MCP_NO_DASHBOARD=1, or
+	// carries a WS_CONFIG_HOME other than the daemon's. Each resolves
+	// lan_enabled=false against the LAN successor (the global file now says
+	// false too), so only the guards keep the successor in place.
+	config = `{"schema_version": 1, "overrides": {"dashboard.lan_enabled": "false"}}`
+	if err := os.WriteFile(filepath.Join(h.configHome, "config.json"), []byte(config), 0o644); err != nil {
+		t.Fatal(err)
 	}
-	waitUntil(t, 10*time.Second, "the predecessor to exit", func() bool { return !processExists(h.ep.PID) })
+	for name, overrides := range map[string]map[string]string{
+		"no manifest":       {"WS_MCP_CONFIG_MANIFESTS": ""},
+		"dashboard off":     {"WS_MCP_NO_DASHBOARD": "1"},
+		"other config home": {"WS_CONFIG_HOME": t.TempDir()},
+	} {
+		c := connectHosted(t, successor, h.hello(wsdashboard.ProxyModeMCP, []string{"serve", "--stdio"}, os.Getpid(), overrides))
+		if init := c.call("initialize", map[string]any{"protocolVersion": "2025-03-26", "capabilities": map[string]any{}}); init["result"] == nil {
+			t.Fatalf("%s: initialize = %v", name, init)
+		}
+		c.conn.Close()
+	}
+	for end := time.Now().Add(2 * time.Second); time.Now().Before(end); time.Sleep(100 * time.Millisecond) {
+		ep, err := wsdashboard.ReadEndpoint(h.dir)
+		if err != nil || ep.PID != successor.PID {
+			t.Fatalf("a session the LAN change does not apply to replaced the daemon: %+v, %v", ep, err)
+		}
+	}
+	if info, err := wsdashboard.Health(context.Background(), dashboardTestClient, successor); err != nil || !info.LAN {
+		t.Fatalf("health after the ignored hellos = %+v, %v", info, err)
+	}
 }
 
-// slowGitDir is a directory with a git that holds the given subcommand for
-// delay before running the real git with the same arguments, marking its
-// stderr so a caller can tell it ran.
+// slowGitDir is a directory with a git that, for the given subcommand,
+// creates the directory's "started" file, sleeps delay, then waits (up to
+// 30 s) for its "release" file before running the real git with the same
+// arguments, marking its stderr so a caller can tell it ran. On Windows the
+// script cannot run and the result is "", which a caller treats as no slow
+// git (the POSIX script is the only shim; a .cmd shim has no portable
+// sleep or file wait).
 func slowGitDir(t *testing.T, subcommand string, delay time.Duration) string {
 	t.Helper()
 	if goruntime.GOOS == "windows" {
-		t.Skip("the slow git is a POSIX shell script")
+		return ""
 	}
 	realGit, err := exec.LookPath("git")
 	if err != nil {
@@ -521,21 +553,17 @@ func slowGitDir(t *testing.T, subcommand string, delay time.Duration) string {
 	}
 	dir := t.TempDir()
 	script := "#!/bin/sh\n" +
-		"for a in \"$@\"; do if [ \"$a\" = " + subcommand + " ]; then sleep " + strconv.FormatFloat(delay.Seconds(), 'f', 1, 64) + "; echo SLOW-GIT-DONE >&2; break; fi; done\n" +
+		"for a in \"$@\"; do if [ \"$a\" = " + subcommand + " ]; then\n" +
+		"  : > \"" + filepath.Join(dir, "started") + "\"\n" +
+		"  sleep " + strconv.FormatFloat(delay.Seconds(), 'f', 1, 64) + "\n" +
+		"  i=0; while [ ! -e \"" + filepath.Join(dir, "release") + "\" ] && [ $i -lt 300 ]; do sleep 0.1; i=$((i+1)); done\n" +
+		"  echo SLOW-GIT-DONE >&2; break\n" +
+		"fi; done\n" +
 		"exec " + realGit + " \"$@\"\n"
 	if err := os.WriteFile(filepath.Join(dir, "git"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	return dir
-}
-
-// processExists reports whether pid is alive (Unix: signal 0).
-func processExists(pid int) bool {
-	p, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	return p.Signal(syscall.Signal(0)) == nil
 }
 
 // TestHostedMailboxWaitResolvesARelativeRootAgainstTheHelloCwd: a relative

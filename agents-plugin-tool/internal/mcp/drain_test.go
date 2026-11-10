@@ -41,7 +41,16 @@ func TestDrainEndsAnExecResultWaitAtOnce(t *testing.T) {
 
 	drained := make(chan bool, 1)
 	go func() {
-		time.Sleep(300 * time.Millisecond)
+		// Drain once the exec.result call below is in flight, not after a
+		// fixed delay a loaded runner may outrun.
+		for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
+			server.inflightMu.Lock()
+			started := server.inflight > 0
+			server.inflightMu.Unlock()
+			if started {
+				break
+			}
+		}
 		drained <- server.Drain(context.Background())
 	}()
 	start := time.Now()

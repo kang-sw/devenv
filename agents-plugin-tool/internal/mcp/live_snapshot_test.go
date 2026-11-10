@@ -74,6 +74,20 @@ func intake(t *testing.T, s *Server, key string, events ...map[string]any) strin
 	return callToolWithKey(t, s, 9, key, dashboardIntakeTool, map[string]any{"adapter": "pi", "events": list})
 }
 
+// retryFS runs op until it succeeds or a short deadline passes: a rename
+// or removal of a file a concurrent reader has open fails on Windows with
+// a sharing violation, which the next attempt outlives.
+func retryFS(t *testing.T, op func() error) {
+	t.Helper()
+	var err error
+	for deadline := time.Now().Add(3 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		if err = op(); err == nil {
+			return
+		}
+	}
+	t.Fatal(err)
+}
+
 func waitFor(t *testing.T, what string, cond func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
@@ -707,26 +721,33 @@ func TestLiveSessionSurvivesAnUnreadableRecord(t *testing.T) {
 		t.Fatal(err)
 	}
 	record := d.partPath(f.keyA, partKey)
+	var writes atomic.Int32
+	previous := setLiveSeams(func(s *liveSeams) {
+		inner := s.writeSnapshot
+		s.writeSnapshot = func(path string, data []byte) error {
+			writes.Add(1)
+			return inner(path, data)
+		}
+	})
+	t.Cleanup(func() { setLiveSeams(func(s *liveSeams) { *s = previous }) })
 
-	intake(t, f.server, f.keyA, map[string]any{"kind": "agent", "batches": []any{map[string]any{"epoch": "e", "seq": 1, "toolNames": []any{"Bash"}, "callCount": 3, "failed": 0, "startedAt": 1100, "endedAt": 1200}}})
 	// The record is unreadable (a directory in its place) while the timer
-	// fires.
-	if err := os.Rename(record, record+".aside"); err != nil {
-		t.Fatal(err)
-	}
+	// fires. The rename and removal retry: on Windows a reader of the
+	// moment (the timer's own activity check) holds the file against them.
+	intake(t, f.server, f.keyA, map[string]any{"kind": "agent", "batches": []any{map[string]any{"epoch": "e", "seq": 1, "toolNames": []any{"Bash"}, "callCount": 3, "failed": 0, "startedAt": 1100, "endedAt": 1200}}})
+	retryFS(t, func() error { return os.Rename(record, record+".aside") })
 	if err := os.Mkdir(record, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if _, found, transient := f.server.sessions.inspect(f.keyA); found || !transient {
 		t.Fatalf("inspect of an unreadable record = found %v, transient %v", found, transient)
 	}
-	time.Sleep(200 * time.Millisecond)
-	if err := os.Remove(record); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Rename(record+".aside", record); err != nil {
-		t.Fatal(err)
-	}
+	// At least one timer tick fires against the unreadable record and
+	// still writes the snapshot.
+	before := writes.Load()
+	waitFor(t, "a snapshot write while the record is unreadable", func() bool { return writes.Load() > before })
+	retryFS(t, func() error { return os.Remove(record) })
+	retryFS(t, func() error { return os.Rename(record+".aside", record) })
 	if ls := f.server.live.existing(f.keyA); ls == nil || ls.isStopped() {
 		t.Fatal("an unreadable record stopped the live session")
 	}
@@ -737,9 +758,7 @@ func TestLiveSessionSurvivesAnUnreadableRecord(t *testing.T) {
 	}
 
 	// A record that is gone ends the session at the next timer.
-	if err := os.Remove(record); err != nil {
-		t.Fatal(err)
-	}
+	retryFS(t, func() error { return os.Remove(record) })
 	if _, found, transient := f.server.sessions.inspect(f.keyA); found || transient {
 		t.Fatalf("inspect of a removed record = found %v, transient %v", found, transient)
 	}
