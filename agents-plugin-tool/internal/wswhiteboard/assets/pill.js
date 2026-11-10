@@ -102,9 +102,10 @@
     show("top", above);
     show("bot", below);
     retitle();
-    // Keep the bottom pill clear of the sticky reply bar.
+    // Keep the bottom pill clear of the sticky reply bar and of the topic
+    // rail's bottom capsules (rail.js sets --wb-rail-bot on the host).
     var reply = host.querySelector(".reply");
-    wraps.bot.style.bottom = (reply && reply.offsetHeight ? reply.offsetHeight + 18 : 10) + "px";
+    wraps.bot.style.bottom = "calc(" + (reply && reply.offsetHeight ? reply.offsetHeight + 18 : 10) + "px + var(--wb-rail-bot, 0px))";
   }
 
   var io = new IntersectionObserver(function (entries) {
