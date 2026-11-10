@@ -177,6 +177,11 @@ type Daemon struct {
 	// measures their worktrees' disk use (worktrees.go).
 	worktrees WorktreeSource
 	sizes     *sizeCache
+	// rail reads the session rail's worktree lists while a page shows the
+	// rail (railworktrees.go); railMsgs holds each session's last message
+	// for it (railmessages.go).
+	rail     *railLister
+	railMsgs *railMessages
 	// files caches each session root's file list for the files route
 	// (files_route.go).
 	files *fileListCache
@@ -321,6 +326,12 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 			d.broker.wake(gitDep(root))
 		}, d.stop)
 	}
+	var railRead func(string, []Registration) (RepoWorktrees, error)
+	if src, ok := opts.Worktrees.(RepoWorktreeSource); ok {
+		railRead = src.ReadRepoWorktrees
+	}
+	d.railMsgs = newRailMessages()
+	d.rail = newRailLister(railRead, func() { d.broker.wake(railListRepoKey) }, d.stop)
 	if d.lan {
 		// Mint the token now, so the localhost index shows it before any
 		// LAN request; a failure leaves every LAN request refused.
@@ -415,6 +426,7 @@ func (d *Daemon) sessionChanged(replyID string) {
 		if _, ok := d.index.Session(replyID); !ok {
 			d.entries.drop(replyID)
 			d.entryFiles.drop(replyID)
+			d.railMsgs.drop(replyID)
 			d.snapshots.Forget(d.dir, replyID)
 			if f, ok := d.source.(SessionForgetter); ok {
 				f.ForgetSession(replyID)
@@ -530,6 +542,7 @@ func (d *Daemon) Handler() http.Handler {
 	mux.HandleFunc("/nudge", d.handleNudge)
 	mux.HandleFunc("/events", d.handleIndexEvents)
 	mux.HandleFunc("/s/", d.handleSessionRoutes)
+	mux.HandleFunc(railRoute, d.handleRailRefresh)
 	if d.tracker != nil {
 		mux.HandleFunc("/tracker/", d.handleTracker)
 	}

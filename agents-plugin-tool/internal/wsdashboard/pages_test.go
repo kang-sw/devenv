@@ -225,6 +225,9 @@ func TestSessionHeadLeadsWithTheProjectAndLightsTheHarnessBadge(t *testing.T) {
 	f.src.setPage("noharness", PageContent{HasBoard: true, Seq: 1, Board: boardRegions(t, "plain")})
 	f.d.Index().Refresh()
 	_, plain := get(t, f.base+"/s/noharness")
+	// The session rail lists every session with its own harness badge; the
+	// head is what comes before it.
+	plain, _, _ = strings.Cut(plain, `id="rail"`)
 	if strings.Contains(plain, `class="host`) || !strings.Contains(plain, `id="sse"`) {
 		t.Errorf("a page without a harness should keep the bare dot and no badge")
 	}

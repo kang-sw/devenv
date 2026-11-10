@@ -986,3 +986,105 @@ a[data-wl="file"]:not([href]) { color: inherit; }
 .tk .kdot { position: absolute; top: 4px; width: 10px; height: 10px; margin-left: -5px; border-radius: 50%; background: var(--wb-card); box-shadow: inset 0 0 0 1.5px var(--wb-muted-fg); }
 .tk .kthumb { position: absolute; top: 1px; width: 16px; height: 16px; margin-left: -8px; border-radius: 50%; background: var(--wb-primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--wb-primary) 22%, transparent); transition: left .08s; pointer-events: none; }
 .tk .kends { display: flex; justify-content: space-between; margin-top: 2px; font-size: 11px; color: var(--wb-muted-fg); font-family: var(--wb-mono); }
+
+/* ===== session rail: every session page's card of sessions =====
+   From 1600px (the tracker drawer's three-column threshold) the rail is a
+   340px column left of the page's grid, whatever the layout menu says, and
+   the top-left arrow hides. Below it the rail is an overlay the arrow
+   slides in from the left over a scrim (rail-open on the root). The rail
+   is one shared render; the page script marks the viewed row (.cur), pins
+   starred rows, and collapses workspaces (.col). */
+:root { --scrim: rgb(0 0 0 / .28); --star: #c98a00; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --scrim: rgb(0 0 0 / .5); --star: #f2b632; } }
+:root[data-theme="dark"] { --scrim: rgb(0 0 0 / .5); --star: #f2b632; }
+.dbody { display: contents; }
+.rail { background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; }
+.rail > .r-rail { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.rscrim { display: none; }
+@media (min-width: 1600px) {
+  .dbody { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 0 16px; align-items: start; }
+  .dash.live .dbody { flex: 1 1 0; min-height: 0; align-items: stretch; }
+  .dash.live .dbody > .dgrid.live { min-height: 0; }
+  .dash:not(.live) .rail { position: sticky; top: 12px; max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px); }
+  .top > .back { display: none; }
+}
+@media (max-width: 1599.98px) {
+  .rail { position: fixed; z-index: 45; top: 12px; bottom: 12px; left: 12px; width: 340px; max-width: calc(100vw - 24px); box-shadow: var(--wb-shadow-hi); transform: translateX(calc(-100% - 20px)); visibility: hidden; transition: transform .22s cubic-bezier(.2, .7, .3, 1), visibility 0s linear .22s; }
+  .rail-open .rail { transform: none; visibility: visible; transition: transform .22s cubic-bezier(.2, .7, .3, 1); }
+  .rscrim { display: block; position: fixed; inset: 0; z-index: 44; background: var(--scrim); opacity: 0; pointer-events: none; transition: opacity .22s; }
+  .rail-open .rscrim { opacity: 1; pointer-events: auto; }
+}
+.rail .rhd { flex: none; display: flex; align-items: center; gap: 6px; padding: 8px 8px 8px 12px; font-size: 12px; font-weight: 800; color: var(--wb-muted-fg); }
+.rail .rsp { flex: 1; }
+.rail .chip { height: 18px; font-size: 11px; padding: 0 7px; flex: none; }
+.rail .chip .i { width: 11px; height: 11px; }
+.rail .rref { display: inline-grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--wb-muted-fg); cursor: pointer; }
+.rail .rref:hover, .rail .rref:focus-visible { color: var(--wb-primary); background: var(--wb-muted); }
+.rail .rref.busy { opacity: .5; cursor: progress; }
+.rail .rlist { flex: 1 1 auto; min-height: 0; overflow: auto; padding-bottom: 6px; }
+.rail .rlist > .empty { padding: 10px 12px; font-size: 12.5px; color: var(--wb-muted-fg); }
+.rail .rws + .rws { margin-top: 8px; }
+.rail .wsbar { display: flex; align-items: center; gap: 8px; width: 100%; padding: 3px 12px; min-height: 28px; border: 0; font: inherit; text-align: left; background: var(--wb-topic); color: var(--wb-on-topic); cursor: pointer; user-select: none; }
+.rail .wsbar .wsi { display: inline-flex; flex: none; opacity: .8; margin-right: -2px; }
+.rail .wsbar .nm { font-size: 13px; font-weight: 700; white-space: nowrap; }
+.rail .wsbar .pp { font-family: var(--wb-mono); font-size: 11px; opacity: .65; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 auto; }
+.rail .wsbar .ct { margin-left: auto; font-size: 11px; font-weight: 700; padding: 0 7px; border-radius: 999px; background: rgb(127 127 127 / .28); flex: none; }
+.rail .rws.col .wsbody { display: none; }
+.rail .wsbody { padding-top: 2px; }
+.rail .rwt { padding: 4px 0 2px; }
+.rail .rwt.empty .wthd { opacity: .6; }
+.rail .wthd { display: flex; align-items: center; gap: 6px; padding: 2px 12px; font-size: 12px; font-weight: 800; color: var(--wb-muted-fg); min-width: 0; }
+.rail .wthd .i { width: 12px; height: 12px; }
+.rail .wthd .br { font-family: var(--wb-mono); font-weight: 700; color: var(--wb-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.rail .wthd .wf { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 0 1 auto; }
+.rail .wthd .gs { margin-left: auto; font-weight: 600; font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rail .wsbody > .rsessions { margin-top: 4px; }
+.rail .rsessions { margin: 0 8px 0 18px; padding-left: 4px; border-left: 2px solid var(--wb-muted); }
+.rail .rended .rsessions { margin: 0; padding: 0; border: 0; }
+.rail .rended > summary { list-style: none; font-size: 11.5px; color: var(--wb-muted-fg); padding: 4px 8px 2px 14px; cursor: pointer; }
+.rail .rended > summary::-webkit-details-marker { display: none; }
+.rail .rended > summary::after { content: " \25b8"; }
+.rail .rended[open] > summary::after { content: " \25be"; }
+.rail .rended > summary:hover { color: var(--wb-primary); }
+.rail .rs { position: relative; display: flex; align-items: flex-start; gap: 0; border-radius: 6px; }
+.rail .rs:hover { background: color-mix(in srgb, var(--wb-primary) 6%, var(--wb-card)); }
+.rail .rs.cur { background: color-mix(in srgb, var(--wb-primary) 12%, var(--wb-card)); }
+.rail .rs.ended { opacity: .75; }
+.rail .star { width: 16px; height: 16px; margin: 6px 5px 0 4px; flex: none; display: inline-grid; place-items: center; border: 0; padding: 0; background: transparent; border-radius: 4px; color: var(--wb-muted-fg); cursor: pointer; transition: opacity .12s; }
+.rail .star .i { width: 13px; height: 13px; stroke-width: 1.4; }
+.rail .star:hover { background: var(--wb-muted); }
+.rail .star[aria-pressed="true"] { opacity: 1; color: var(--star); }
+.rail .star[aria-pressed="true"] .i { fill: currentColor; }
+.rail .star[aria-pressed="false"] { opacity: 0; }
+.rail .rs:hover .star[aria-pressed="false"], .rail .rs:focus-within .star[aria-pressed="false"] { opacity: .6; }
+.rail .rs .star[aria-pressed="false"]:hover, .rail .star[aria-pressed="false"]:focus-visible { opacity: 1; }
+@media (hover: none) { .rail .star[aria-pressed="false"] { opacity: .35; } }
+.rail .rl { display: block; flex: 1 1 auto; min-width: 0; padding: 5px 8px 5px 0; color: inherit; text-decoration: none; border-radius: 6px; }
+.rail .rl:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: -1px; }
+.rail .s1 { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.rail .rid { font-family: var(--wb-mono); font-size: 12.5px; font-weight: 700; color: var(--wb-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 0 1 auto; }
+.rail .rs.cur .rid { color: var(--wb-fg); }
+.rail .when { font-size: 11px; color: var(--wb-muted-fg); font-variant-numeric: tabular-nums; white-space: nowrap; flex: none; }
+.rail .s2 { display: block; margin-top: 1px; font-size: 12px; color: var(--wb-muted-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.rail .s2 .who { font-weight: 700; margin-right: 4px; }
+/* status: a light orbits the harness badge while the lead works; the robot
+   blinks while level-1 subagents run, its count beside it, and takes no
+   space when none does. The badge has a fixed width so reply ids line up. */
+.rail .hb { position: relative; width: 54px; padding: 0; text-align: center; box-sizing: border-box; text-transform: uppercase; overflow: visible; }
+.rail .hb .ring { position: absolute; inset: -2px; width: calc(100% + 4px); height: calc(100% + 4px); overflow: visible; pointer-events: none; }
+.rail .hb .ring rect { x: 1px; y: 1px; width: calc(100% - 2px); height: calc(100% - 2px); rx: 5px; fill: none; stroke-width: 1.5; }
+.rail .hb .rtrk { stroke: color-mix(in srgb, var(--wb-primary) 22%, transparent); }
+.rail .hb .rrun { stroke: var(--wb-primary); stroke-linecap: round; stroke-dasharray: 24 76; animation: rail-orbit 1.3s linear infinite; }
+.rail .hb.run { color: var(--wb-fg); }
+.rail .bots { display: inline-flex; align-items: center; gap: 2px; flex: none; font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--wb-fg); }
+.rail .bots .i { width: 12px; height: 12px; stroke-width: 1.4; color: var(--wb-primary); animation: rail-blink 1.4s ease-in-out infinite; }
+@keyframes rail-orbit { from { stroke-dashoffset: 100; } to { stroke-dashoffset: 0; } }
+@keyframes rail-blink { 50% { opacity: .25; } }
+.rail .rfoot { flex: none; display: flex; align-items: center; gap: 8px; padding: 7px 12px; border-top: 1px solid var(--wb-muted); font-size: 12px; }
+.rail .rfoot a { color: var(--wb-muted-fg); text-decoration: none; }
+.rail .rfoot a:hover { color: var(--wb-primary); }
+@media (prefers-reduced-motion: reduce) {
+  .rail, .rail-open .rail, .rscrim { transition: none; }
+  .rail .bots .i { animation: none; }
+  .rail .hb .rrun { animation: none; stroke-dasharray: none; }
+}

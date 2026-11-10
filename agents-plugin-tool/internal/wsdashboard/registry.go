@@ -67,7 +67,14 @@ type Registration struct {
 	Project string `json:"project"`
 	// Harness names the host the session runs in (claude, codex, pi), when
 	// the serving ws-mcp knows it.
-	Harness      string `json:"harness,omitempty"`
+	Harness string `json:"harness,omitempty"`
+	// GitCommonDir is the session root's git common directory (git
+	// rev-parse --git-common-dir, absolute), which the serving ws-mcp reads
+	// once when it registers, so the session rail groups a linked worktree
+	// under its repository without running git per session. Empty when the
+	// root is not in a repository, and from an older ws-mcp; the rail then
+	// reads the root's .git itself (railRepoRoot).
+	GitCommonDir string `json:"git_common_dir,omitempty"`
 	RegisteredAt string `json:"registered_at,omitempty"`
 	// HeartbeatAt is refreshed every HeartbeatInterval while the serving
 	// ws-mcp runs and the session made a keyed call recently.
