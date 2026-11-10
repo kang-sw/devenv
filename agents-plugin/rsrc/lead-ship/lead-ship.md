@@ -19,6 +19,15 @@ without an explicit strategy in it, and never add a step it does not list.
 The release gate below is the one exception and cannot be omitted by a
 config.
 
+A config with a `## Release Branch` section makes every gated release a
+cut-point release: it ships the review frontier head (the cut point) through a
+release branch while the review track keeps taking merges, so a blocked merge
+late in the range does not stall the release; where the release gate does
+not apply, the cut point is the review-track tip. Without that section, the
+release promotes the review-track tip. The config's steps decide where the
+release branch is checked out; steps that name no place use the current
+checkout.
+
 ## Release gate
 
 Applies when the project's `AGENTS.md` `### Review Policy` declares
@@ -49,7 +58,15 @@ Applies when the project's `AGENTS.md` `### Review Policy` declares
    Otherwise `{{.SkillNamespace}}:lead-review` over `range:
    <frontier-head>..HEAD`; a clearing verdict proceeds, anything else stops
    for the user's explicit override with a recommendation against it.
-5. This gate never calls `review.stamp`; apart from the step-3 bootstrap the
+5. A cut-point release replaces the outcome of steps 3 and 4: once they
+   finish, read `review.marker` again; its head is the cut point. The gate
+   proceeds when the cut point is not an ancestor of the release target, even
+   when the review left a blocked remainder, because only content at or below
+   the cut point ships. Otherwise it stops: nothing is newly cleared. The
+   user's explicit override still means shipping uncleared content: its cut
+   point is the review-track tip at override time. A step-3 decline still
+   stops.
+6. This gate never calls `review.stamp`; apart from the step-3 bootstrap the
    marker advances only through the review skill. An override leaves it where
    it was.
 
@@ -57,26 +74,39 @@ Applies when the project's `AGENTS.md` `### Review Policy` declares
 
 1. Delegate pre-flight, version derivation, tag creation (not pushed), and
    build/package to a subagent with the config path; it returns version,
-   tag, and the full output of each command.
-2. Confirm with the user: version, tag, publish targets. Wait for explicit
-   approval.
+   tag, and the full output of each command. For a cut-point release, also
+   pass the cut point: the delegate runs the config's Cut step there, and
+   before any version bump checks that the release target is an ancestor of
+   the cut point. When it is not (the cut predates the previous release's
+   merge back), the delegate runs the config's merge of the release target
+   into the release branch first, or stops when the config declares none. A
+   version bump the config's strategy makes lands on the release branch.
+2. Confirm with the user: version, tag, publish targets, and for a cut-point
+   release the cut point and the release branch. Wait for explicit approval.
 3. Publish per the config. When a publish step promotes one branch into
    another, pin the head the gate cleared and re-check the source branch tip
    immediately before the merge; if it moved, abort and re-run the gate over
    the delta. The cleared head is the tip after the gate's own lead-review
    returns, its ledger commit included; pinning before that commit would
    re-run the gate forever. A gate that did not apply leaves nothing to
-   re-check.
+   re-check. A cut-point release skips this re-check and runs the config's
+   Promote step: what publishes is the pinned cut point and the release
+   branch head on top of it, so review-track movement during the release
+   changes nothing that ships.
 4. Push the tag when the config's `Tag` section asks for it; the step-2
-   confirmation covers that push. Run post-ship steps.
+   confirmation covers that push. Run post-ship steps; a cut-point release
+   runs the config's merge of the release branch back into the review track,
+   which keeps the release target an ancestor of the review track for the
+   next release.
 
 ## No config
 
 Ask for the sub-project, public or private target, version strategy (manual
 semver, auto-increment patch, date-based, `git describe`, or another explicit
 rule), build and publish commands, tag format and whether the tag is pushed,
-and post-ship steps; write the config to the matching path and confirm it
-before executing.
+post-ship steps, and whether releases ship a cut point through a release
+branch; write the config to the matching path and confirm it before
+executing.
 
 ### Ship Config Format
 
@@ -95,6 +125,12 @@ before executing.
 ## Publish
 - <publish command and target>
 
+## Release Branch                      ← optional; makes every gated release a cut-point release
+- Cut: <create the release branch at the cut point, and where it is checked out>
+- Merge release target: <merge the release target into the release branch>
+- Promote: <publish step: fast-forward the release target to the release branch head>
+- Merge back: <post-ship step: merge the release branch into the review track>
+
 ## Tag
 Format: `<prefix><version>` (e.g. `v1.2.3` or `proj-2024.04.19`)
 Push: yes
@@ -112,5 +148,5 @@ branch.
 
 ## Output
 
-What shipped: version, tag, targets, deviations. Config and version files in
-English.
+What shipped: version, tag, targets, the cut point of a cut-point release,
+deviations. Config and version files in English.

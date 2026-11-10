@@ -241,6 +241,7 @@ class SkillDispatchContractsTest(unittest.TestCase):
         self.assertIn("## Deep Review", review)
         self.assertIn("### Ship Config Format", ship)
         self.assertIn("## Version Strategy", ship)
+        self.assertIn("## Release Branch", ship)
 
     def test_workflow_manual_requires_english_agent_prompts(self):
         text = (RSRC_DIR / "lead-workflow-manual" / "lead-workflow-manual.md").read_text(encoding="utf-8")

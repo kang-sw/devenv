@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 00088ca9f60975ca
 sage-review-completeness-reviewed: 00088ca9f60975ca
+completed: 2026-11-10
 ---
 
 # Ship a release from a review-cleared cut point while develop keeps moving
@@ -248,3 +249,69 @@ Verification:
   release branch, bump, ff, merge back, then a second release whose cut
   predates the merge-back and takes the D9 merge) follows the playbook without
   contradiction.
+
+### Result (96fe1e6b9) - 2026-11-10
+
+Landed in 96fe1e6b9 plus lite-review fixes in a62695a03.
+
+- `lead-ship`: a ship config with an optional `## Release Branch` section
+  (Cut / Merge release target / Promote / Merge back, added to Ship Config
+  Format and asked for under No config) makes every gated release a cut-point
+  release. Release gate step 5 (new) re-reads `review.marker` after steps 3-4.
+  The marker head is the cut point. The gate proceeds when the cut point is
+  not an ancestor of the release target, even over a blocked remainder, and
+  otherwise stops with "nothing is newly cleared". An override's cut point is
+  the review-track tip; a step-3 decline still stops. Execute step 1 passes
+  the cut point to the delegate. The delegate checks the ancestor guard before
+  any bump, runs the config's merge or stops when the config has none, and
+  bumps on the release branch. Step 2 names the cut point and the release
+  branch. Step 3 keeps the tip re-check text for tip-promotion configs, while
+  a cut-point release skips the re-check and runs Promote. Step 4 runs the
+  merge back. Where the gate does not apply, the cut point is the tip.
+- `lead-review` step 6: a NEEDS FIX that stamps `block` maps its
+  Critical/Important findings to first-parent segments
+  (`git log --first-parent <base>..<head> -- <path>`; earliest segment; no
+  path or untouched path means no prefix). The candidate cut is the first
+  parent of the earliest mapped segment. The reviewers re-run once over
+  `<base>..<cut>`. A `pass`/`concern` result is stamped before the full-range
+  `block`; otherwise only the block is stamped and the range is reported
+  uncleared. Step 7 records prefix-review Minors as follow-ups. A NEEDS FIX
+  re-review after a prefix stamp uses the cut as its base.
+- `ai-docs/ship/ws.md`: release-branch work in a `ws/worktree.acquire`
+  `full` worktree; the D9 merge of `main` before Version Strategy; the branch
+  renamed to `release/<version>` once the version is known; tests and checks
+  on the release head; CI dispatched with `--ref release/<version>`, with
+  headSha equal to the release head; `main` `--ff-only` to it, tagged and
+  pushed; merge back into develop whenever the release head is not in
+  develop; remote branch deleted. On red CI the worktree is released and the
+  restart deletes and recreates `release/<version>`. The R4 pin/re-assert and
+  the develop-linear-descendant check are removed; a local `main ==
+  origin/main` check was added. `ws-mcp-release.yml` hint and comment updated.
+- wsflow and Pi rsrc copies and manifests are byte-identical to ws.
+
+Verification:
+- ws-rgo `go test ./internal/wsrsrc/... ./internal/wsreview/...
+  ./internal/mcp/ -count=1 -run 'Review|Playbook|Mirror|Manifest|Shipped|Retired|Pi|Wsflow'`:
+  ok (the LeadShip/LeadReview goldens carry new cut-point pins;
+  TestShippedManifestUpToDate, TestWsflowRsrcMirrorUpToDate,
+  TestPiMirrorUpToDate pass).
+- `nice -n 19 python3 -m unittest` on test_skill_dispatch_contracts and
+  test_shipped_surfaces_downstream_neutral: 25 OK; wsflow package tests:
+  20 OK.
+- Scratch-repo dry run: release 1 was cut below a blocked commit, bumped,
+  `main` fast-forwarded, and merged back after develop moved. Release 2's cut
+  predated the merge back and took the D9 merge (version 0.1.0 at the cut,
+  0.1.1 after the merge, bumped to 0.1.2). The ff-only promotion succeeded and
+  `main` stayed an ancestor of develop.
+
+Decisions:
+- Release-branch detection is an explicit `## Release Branch` config section
+  rather than inferred from scattered steps (D5 needs a deterministic test).
+- The prefix candidate maps Critical/Important findings only, and only on a
+  `block` stamp. A Minor in the prefix would otherwise forfeit it; D8's
+  re-review still surfaces it as `concern`.
+- ws.md merges back whenever the release head is not in develop (a bump or
+  the D9 merge), not only on a bump.
+- Mirrors and manifest hashes were byte-copied and computed locally instead
+  of the Go regen commands, because ws-rgo does not sync outputs back. The
+  drift tests confirm the result.
