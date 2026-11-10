@@ -346,6 +346,9 @@
     "261110-bug-ws-whiteboard-option-quote-parse": {
       "registered_at": "2026-11-10T14:07:44Z"
     },
+    "261110-chore-ws-claude-mod-dashboard-engine-test-load-flake": {
+      "registered_at": "2026-11-10T14:09:31Z"
+    },
     "261110-chore-ws-mcp-ci-windows-rest-shard-speed": {
       "registered_at": "2026-11-10T13:20:08Z"
     },
