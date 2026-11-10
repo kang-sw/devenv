@@ -702,8 +702,13 @@ dialog.tk-dlg p { margin: 0; font-size: 12.5px; color: var(--wb-muted-fg); }
 .tk-menu .mi.danger, .tk-menu .mi.danger .i { color: var(--tk-fail); }
 .tk-menu .mi .av { margin-left: 0; width: 18px; height: 18px; font-size: 8.5px; }
 .tk-menu .msep { height: 1px; margin: 4px 2px; background: var(--wb-line); }
-.tk-menu .mst { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2px; padding: 2px; }
-.tk-menu .mst .mr { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 5px 2px 4px; border: 0; border-radius: 8px; background: transparent; color: var(--wb-muted-fg); font: inherit; font-size: 11.5px; cursor: pointer; }
+/* the status options sit on one row and the menu widens to fit them (up to the window); the
+   title gives up its say in the width so a long one still ellipsizes; a window too narrow for
+   the row scrolls it sideways instead of wrapping */
+.tk.tk-menu:has(.mst) { max-width: calc(100vw - 12px); }
+.tk-menu:has(.mst) .mh { contain: inline-size; }
+.tk-menu .mst { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(max-content, 1fr); gap: 2px; padding: 2px; overflow-x: auto; }
+.tk-menu .mst .mr { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 5px 6px 4px; border: 0; border-radius: 8px; background: transparent; color: var(--wb-muted-fg); font: inherit; font-size: 11.5px; cursor: pointer; }
 .tk-menu .mst .mr span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
 .tk-menu .mst .mr:hover, .tk-menu .mst .mr:focus-visible { background: var(--wb-muted); color: var(--wb-fg); outline: none; }
 .tk-menu .mst .mr[aria-checked="true"] { background: color-mix(in srgb, var(--wb-primary) 16%, var(--wb-card)); color: var(--wb-primary); font-weight: 700; }
