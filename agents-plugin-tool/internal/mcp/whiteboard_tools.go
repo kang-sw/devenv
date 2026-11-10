@@ -109,6 +109,10 @@ type whiteboardPanelInput struct {
 	// history, when not nil, reads the session's mailbox history in place
 	// of readMailboxHistory (the served page's cached read).
 	history func() ([]mailboxHistoryRecord, error)
+	// replies, when not nil, reads the reply-id registry in place of
+	// wsmailbox.LoadReplyStore (the served page's cached read); false when
+	// it cannot be read.
+	replies func() (wsmailbox.ReplyStore, bool)
 }
 
 type whiteboardMailbox struct {

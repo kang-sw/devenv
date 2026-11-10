@@ -139,6 +139,9 @@ type Daemon struct {
 	entries *entryCache
 	// entryFiles caches the parsed ring and drained entries per session.
 	entryFiles *entryFiles
+	// snapshots caches the parsed live snapshots the pages, their refresh
+	// stamps, and agent conversation re-reads read.
+	snapshots *SnapshotCache
 	// inboxMu serializes the daemon's own inbox writes (sends and cancels).
 	inboxMu sync.Mutex
 	// lan is LAN mode; tokenMu serializes reading and minting the LAN token.
@@ -246,6 +249,7 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 		refreshInterval: opts.refreshInterval,
 		entries:         newEntryCache(),
 		entryFiles:      newEntryFiles(),
+		snapshots:       &SnapshotCache{},
 		lan:             opts.LAN,
 		pprof:           opts.Pprof,
 		buildTime:       opts.BuildTime,
@@ -290,7 +294,7 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 		}
 	}
 	if opts.Sessions != nil {
-		d.source = agentSessions{inner: opts.Sessions, dir: opts.Dir, now: time.Now}
+		d.source = agentSessions{inner: opts.Sessions, dir: opts.Dir, now: time.Now, snaps: d.snapshots}
 		d.index = NewIndex(IndexOptions{Dir: opts.Dir, Source: d.source, Log: logw, OnChange: d.sessionChanged})
 	}
 	d.server = &http.Server{Handler: d.Handler(), ReadHeaderTimeout: 10 * time.Second}
@@ -368,14 +372,15 @@ func newToken() (string, error) {
 }
 
 // sessionChanged is the index's change hook: it wakes the streams whose
-// page shows the session, and drops a session's cached conversation entries
-// and entry files, and the source's caches of it (SessionForgetter), once it
-// left the index.
+// page shows the session, and drops a session's cached conversation entries,
+// entry files, and snapshot, and the source's caches of it
+// (SessionForgetter), once it left the index.
 func (d *Daemon) sessionChanged(replyID string) {
 	if d.index != nil {
 		if _, ok := d.index.Session(replyID); !ok {
 			d.entries.drop(replyID)
 			d.entryFiles.drop(replyID)
+			d.snapshots.Forget(d.dir, replyID)
 			if f, ok := d.source.(SessionForgetter); ok {
 				f.ForgetSession(replyID)
 			}

@@ -126,9 +126,17 @@ type gitBadgeRunner struct {
 	timeout time.Duration
 }
 
-func (r *gitBadgeRunner) RunGit(ctx context.Context, root string, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", root}, args...)...)
+// badgeGitCommand is git in root under the C locale, run by the path
+// wsgit.Executable resolved, so a badge read does not search PATH on every
+// spawn.
+func badgeGitCommand(ctx context.Context, root string, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, wsgit.Executable(), append([]string{"-C", root}, args...)...)
 	cmd.Env = append(os.Environ(), "LC_ALL=C")
+	return cmd
+}
+
+func (r *gitBadgeRunner) RunGit(ctx context.Context, root string, args ...string) ([]byte, error) {
+	cmd := badgeGitCommand(ctx, root, args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()

@@ -30,10 +30,13 @@ func endedSession(id, project string, now time.Time) Session {
 }
 
 // lookupOf serves sessions and snapshots from maps.
-func lookupOf(sessions map[string]Session, snaps map[string]*wslive.Snapshot) func(string) (Session, *wslive.Snapshot, bool) {
-	return func(id string) (Session, *wslive.Snapshot, bool) {
-		s, ok := sessions[id]
-		return s, snaps[id], ok
+func lookupOf(sessions map[string]Session, snaps map[string]*wslive.Snapshot) sessionLookup {
+	return sessionLookup{
+		session: func(id string) (Session, bool) {
+			s, ok := sessions[id]
+			return s, ok
+		},
+		snapshot: func(id string) *wslive.Snapshot { return snaps[id] },
 	}
 }
 
@@ -56,6 +59,35 @@ func TestAdapterPresenceChoosesTheMode(t *testing.T) {
 		if got := buildSessionView(in).Mode(); got != c.want {
 			t.Errorf("%s: mode = %s, want %s", name, got, c.want)
 		}
+	}
+}
+
+// TestLookupReadsNoSnapshotForPresenceOnly: a view that uses a looked-up
+// session only for whether it is served (a mail line's peer link) or has a
+// board (a linked agent row) reads no snapshot of it.
+func TestLookupReadsNoSnapshotForPresenceOnly(t *testing.T) {
+	now := testNow
+	snap := liveSnap(now, wslive.Lead{}, wslive.Agent{ID: "a1", Label: "worker", Status: wslive.StatusDone, ReplyID: "linked"})
+	sessions := map[string]Session{
+		"linked":   liveSession("linked", "/p", now),
+		"mailpeer": liveSession("mailpeer", "/p", now),
+	}
+	var read []string
+	lookup := lookupOf(sessions, nil)
+	lookup.snapshot = func(id string) *wslive.Snapshot {
+		read = append(read, id)
+		return nil
+	}
+	ring := []wslive.RingRecord{{Name: "m1", At: now.Add(-time.Minute), RingEntry: wslive.RingEntry{Kind: wslive.RingMail, Direction: wslive.MailRecv, Peer: "id:mailpeer", Title: "hi"}}}
+	v := buildSessionView(pageInputs{Session: liveSession("self", "/p", now), Snapshot: snap, Ring: ring, Now: now, Lookup: lookup})
+	if len(v.Tree.Agents) != 1 || !v.Tree.Agents[0].Linked {
+		t.Fatalf("agents = %+v, want a1 linked", v.Tree.Agents)
+	}
+	if len(v.Conversation.Entries) != 1 || !v.Conversation.Entries[0].PeerLinked {
+		t.Fatalf("entries = %+v, want the mail line linked", v.Conversation.Entries)
+	}
+	if len(read) != 0 {
+		t.Fatalf("a presence-only lookup read snapshots %v", read)
 	}
 }
 

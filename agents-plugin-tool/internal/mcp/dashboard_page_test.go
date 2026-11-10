@@ -275,8 +275,9 @@ func TestDashboardReadPageWatchesUnnudgedFiles(t *testing.T) {
 
 // TestDashboardReadPageWatchesTheMailboxPanel pins the mailbox panel's
 // refresh inputs: a sender's mail nudges only the sender, so the page
-// names the history directory and the reply store the panel reads, and an
-// armed wait, whose process may die leaving its marker, names that process
+// names the history directory the panel reads but not the reply store
+// (the board memo keys on what the panel shows of it), and an armed wait,
+// whose process may die leaving its marker, names that process
 // (PageContent.WatchPIDs).
 func TestDashboardReadPageWatchesTheMailboxPanel(t *testing.T) {
 	hf := newHistoryFixture(t, time.Date(2026, 11, 6, 9, 0, 0, 0, time.UTC))
@@ -304,13 +305,20 @@ func TestDashboardReadPageWatchesTheMailboxPanel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{history, replies, marker} {
+	for _, want := range []string{history, marker} {
 		found := false
 		for _, path := range page.Watch {
 			found = found || path == want
 		}
 		if !found {
 			t.Errorf("Watch lacks %s: %v", want, page.Watch)
+		}
+	}
+	// The reply registry is keyed into the board memo by what the panel
+	// shows of it (replyPrint), never watched as a file.
+	for _, path := range page.Watch {
+		if path == replies {
+			t.Errorf("Watch names the reply registry: %v", page.Watch)
 		}
 	}
 	if len(page.WatchPIDs) != 0 {
@@ -842,6 +850,12 @@ func TestDashboardBoardMemoKeysEveryBoardInput(t *testing.T) {
 		bump := filepath.Join(f.root, "ai-docs", "tickets", "ready")
 		at := time.Now().Add(time.Second)
 		os.Chtimes(bump, at, at)
+	})
+	misses("ticket edited in place", func() {
+		path := filepath.Join(f.root, "ai-docs", "tickets", "ready", "261101-feat-ready-one.md")
+		writeTicket(t, f.root, "ready", "261101-feat-ready-one", "Ready one, retitled")
+		at := time.Now().Add(2 * time.Second)
+		os.Chtimes(path, at, at)
 	})
 	misses("marker present", func() {
 		if err := wsmailbox.WriteListeningMarker(wsmailbox.ListeningMarker{SessionKey: f.key, PID: os.Getpid(), StartedAt: time.Now().Format(time.RFC3339)}); err != nil {

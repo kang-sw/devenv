@@ -209,15 +209,24 @@ func mailboxPanel(in whiteboardPanelInput) (wswhiteboard.Panel, bool) {
 			}
 		}
 	}
+	// The reply registry is not watched: a served board's memo keys on the
+	// part of it the panel shows (replyPrint), so a rewrite for another
+	// session or a heartbeat rebuilds no board.
 	var entry wsmailbox.ReplyEntry
-	if path, err := wsmailbox.ReplyRegistryPath(); err == nil {
-		if in.watch != nil {
-			in.watch(path)
+	readReplies := in.replies
+	if readReplies == nil {
+		readReplies = func() (wsmailbox.ReplyStore, bool) {
+			path, err := wsmailbox.ReplyRegistryPath()
+			if err != nil {
+				return wsmailbox.ReplyStore{}, false
+			}
+			store, err := wsmailbox.LoadReplyStore(path)
+			return store, err == nil
 		}
-		if store, err := wsmailbox.LoadReplyStore(path); err == nil {
-			unread += len(store.Queues[in.replyID])
-			entry = store.Entries[in.replyID]
-		}
+	}
+	if store, ok := readReplies(); ok {
+		unread += len(store.Queues[in.replyID])
+		entry = store.Entries[in.replyID]
 	}
 	panel := wswhiteboard.Panel{ID: "mailbox", Title: wsi18n.T(in.lang, "panel.mailbox"), Icon: "mail", Count: wsi18n.T(in.lang, "panel.mail.unread", unread)}
 	status := wsi18n.T(in.lang, "panel.mail.unread", unread)

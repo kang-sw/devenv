@@ -19,7 +19,7 @@ func TestCardEntryRendersTheItemReference(t *testing.T) {
 		ringRecord(1, wslive.RingEntry{Kind: wslive.RingReply, Text: "This one first:"}),
 		ringRecord(2, wslive.RingEntry{Kind: wslive.RingCard, Card: &wslive.CardRef{Store: "live", Alias: "ada.c89-3", Title: "Fix <the> ribbon"}}),
 	}
-	set, err := renderSessionRegions(historyView(ring, "", PageContent{}, nil), newEntryCache())
+	set, err := renderSessionRegions(historyView(ring, "", PageContent{}, sessionLookup{}), newEntryCache())
 	if err != nil {
 		t.Fatal(err)
 	}

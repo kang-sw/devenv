@@ -21,7 +21,7 @@ func TestUIEntryRendersTheCommandLine(t *testing.T) {
 		ringRecord(4, wslive.RingEntry{Kind: wslive.RingUI, UI: &wslive.UICommand{Op: wslive.UIScope, Arg: "team"}}),
 		ringRecord(5, wslive.RingEntry{Kind: wslive.RingUI, UI: &wslive.UICommand{Op: wslive.UIView, Arg: "kanban"}}),
 	}
-	set, err := renderSessionRegions(historyView(ring, "", PageContent{}, nil), newEntryCache())
+	set, err := renderSessionRegions(historyView(ring, "", PageContent{}, sessionLookup{}), newEntryCache())
 	if err != nil {
 		t.Fatal(err)
 	}

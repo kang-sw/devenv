@@ -551,7 +551,8 @@ func renderIndexPage(view IndexView, regions regionSet, lan *LANAccess) (string,
 // pageReader reads what the pages render from the index and disk. It holds
 // no state of its own: every read re-reads, so a replacement daemon renders
 // the same pages from the same files. (The streams share their renders in
-// memory, which only skips reads; stream_cache.go.)
+// memory, and the daemon's caches serve unchanged files, which only skips
+// reads; stream_cache.go, entry_files.go, file_cache.go.)
 type pageReader struct {
 	// lang is the viewer's language, passed to a LangPageSource.
 	lang    string
@@ -563,6 +564,8 @@ type pageReader struct {
 	// entries holds the ring and drained entries already read (nil reads
 	// every entry each time).
 	entries *entryFiles
+	// snapshots holds the snapshots already parsed (nil reads each time).
+	snapshots *SnapshotCache
 }
 
 func (r pageReader) clock() time.Time {
@@ -572,13 +575,11 @@ func (r pageReader) clock() time.Time {
 	return time.Now()
 }
 
-// readSnapshot reads a session's live snapshot; nil when it has none.
+// readSnapshot reads a session's live snapshot; nil when it has none. The
+// snapshot may be shared with other readers (SnapshotCache): the caller
+// only reads it.
 func (r pageReader) readSnapshot(replyID string) *wslive.Snapshot {
-	snap, err := wslive.ReadSnapshot(wslive.SnapshotPath(SessionDir(r.dir, replyID)))
-	if err != nil {
-		return nil
-	}
-	return &snap
+	return r.snapshots.Snapshot(r.dir, replyID)
 }
 
 func (r pageReader) readPage(s Session) (PageContent, bool) {
@@ -608,21 +609,25 @@ func (r pageReader) served(replyID string) (Session, PageContent, bool) {
 	return s, page, true
 }
 
-// lookup returns a served session and its snapshot, reading each snapshot
-// once per lookup function.
-func (r pageReader) lookup() func(id string) (Session, *wslive.Snapshot, bool) {
+// lookup resolves served sessions, reading a session's snapshot only when
+// a caller asks for it, and once per lookup.
+func (r pageReader) lookup() sessionLookup {
 	snaps := map[string]*wslive.Snapshot{}
-	return func(id string) (Session, *wslive.Snapshot, bool) {
-		peer, ok := r.index.Session(id)
-		if !ok {
-			return Session{}, nil, false
-		}
-		snap, read := snaps[id]
-		if !read {
-			snap = r.readSnapshot(id)
-			snaps[id] = snap
-		}
-		return peer, snap, true
+	return sessionLookup{
+		session: func(id string) (Session, bool) {
+			if r.index == nil {
+				return Session{}, false
+			}
+			return r.index.Session(id)
+		},
+		snapshot: func(id string) *wslive.Snapshot {
+			snap, read := snaps[id]
+			if !read {
+				snap = r.readSnapshot(id)
+				snaps[id] = snap
+			}
+			return snap
+		},
 	}
 }
 
@@ -652,9 +657,12 @@ func (r pageReader) readSession(replyID string) (SessionView, refreshInputs, boo
 		in.Drained, _ = r.entries.readDrained(replyID, inbox)
 		in.AttachDir = wsinbox.AttachmentsDir(inbox)
 		lookup := r.lookup()
-		in.Lookup = func(id string) (Session, *wslive.Snapshot, bool) {
-			looked[id] = true
-			return lookup(id)
+		in.Lookup = sessionLookup{
+			session: func(id string) (Session, bool) {
+				looked[id] = true
+				return lookup.get(id)
+			},
+			snapshot: lookup.snap,
 		}
 		inputs.watch = append(inputs.watch, in.AttachDir)
 		inputs.contacts = len(page.Contacts) > 0
@@ -677,10 +685,10 @@ func (r pageReader) readSession(replyID string) (SessionView, refreshInputs, boo
 // sessionStamp is the refresh stamp of replyID's session page over the
 // inputs of its last read (stream_cache.go): for each session it looked up,
 // whether the index holds it, its revision, its liveness, and whether its
-// snapshot names a present adapter, all at call time; the state of each
-// watched path; the liveness of each watched process; and the contacts as
-// re-read now. ok is false when the page shows contacts the source cannot
-// re-read.
+// snapshot names a present adapter, all at call time; the state of the
+// watched paths (StampWatched); the liveness of each watched process; the
+// session's mail print (MailPrintSource); and the contacts as re-read now.
+// ok is false when the page shows contacts the source cannot re-read.
 func (r pageReader) sessionStamp(replyID string, in refreshInputs) (string, bool) {
 	if r.index == nil {
 		return "", false
@@ -692,11 +700,16 @@ func (r pageReader) sessionStamp(replyID string, in refreshInputs) (string, bool
 		present := ok && adapterPresent(r.readSnapshot(id), now)
 		fmt.Fprintf(h, "%s\x00%t\x00%d\x00%t\x00%t\x01", id, ok, s.Rev, ok && s.Registration.Live(now), present)
 	}
-	for _, path := range in.watch {
-		statStamp(h, path)
-	}
+	StampWatched(h, in.watch)
 	for _, pid := range in.pids {
 		fmt.Fprintf(h, "pid\x00%d\x00%t\x01", pid, processAlive(pid))
+	}
+	if src, ok := r.source.(MailPrintSource); ok {
+		if s, ok := r.index.Session(replyID); ok {
+			if print, ok := src.MailPrint(s.Registration); ok {
+				fmt.Fprintf(h, "mail\x00%s\x01", print)
+			}
+		}
 	}
 	if in.contacts {
 		src, ok := r.source.(ContactSource)
@@ -777,7 +790,7 @@ func (r pageReader) indexView() IndexView {
 }
 
 func (d *Daemon) pages() pageReader {
-	return pageReader{dir: d.dir, index: d.index, source: d.source, version: d.endpoint.Version, entries: d.entryFiles}
+	return pageReader{dir: d.dir, index: d.index, source: d.source, version: d.endpoint.Version, entries: d.entryFiles, snapshots: d.snapshots}
 }
 
 // pagesIn is pages reading in the viewer's language.

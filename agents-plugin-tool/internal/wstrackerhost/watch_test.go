@@ -3,8 +3,10 @@ package wstrackerhost
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -186,5 +188,75 @@ func TestWatchSeesAnotherProcessPush(t *testing.T) {
 	waitFor(t, 5*time.Second, "the change callback after another process's push", func() bool { return changes.get() > 0 })
 	if v := view(t, daemon, "team"); len(v.Sync.Unpushed) != 0 {
 		t.Fatalf("after the push the daemon must read nothing unpushed: %+v", v.Sync.Unpushed)
+	}
+}
+
+// TestStoreStampStatsLooseRefs: a replaced loose ref moves the stamp by its
+// time, while new loose-ref bytes under an unchanged size and time do not
+// (the content is never read); packed-refs stays content-based, so new bytes
+// under an unchanged size and time move it.
+func TestStoreStampStatsLooseRefs(t *testing.T) {
+	dir := t.TempDir()
+	repo := filepath.Join(dir, "repo.git")
+	heads := filepath.Join(repo, "refs", "heads")
+	known := filepath.Join(repo, "refs", "ledger", "known", "origin")
+	for _, d := range []string{heads, known} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeAt := func(path, data string, at time.Time) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(path, at, at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	base := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	branch := filepath.Join(heads, "tracker")
+	writeAt(branch, strings.Repeat("a", 40)+"\n", base)
+	writeAt(filepath.Join(known, "tracker"), strings.Repeat("b", 40)+"\n", base)
+	packed := filepath.Join(repo, "packed-refs")
+	writeAt(packed, "# pack-refs with: peeled\n", base)
+
+	var read []string
+	prev := stampReadFile
+	stampReadFile = func(path string) ([]byte, error) {
+		read = append(read, path)
+		return prev(path)
+	}
+	t.Cleanup(func() { stampReadFile = prev })
+
+	before := storeStamp(dir)
+	if again := storeStamp(dir); again != before {
+		t.Fatal("an unchanged store moved the stamp")
+	}
+	// A replaced loose ref keeps its size; its modification time moves.
+	writeAt(branch, strings.Repeat("c", 40)+"\n", base.Add(time.Second))
+	afterRef := storeStamp(dir)
+	if afterRef == before {
+		t.Fatal("a replaced loose ref did not move the stamp")
+	}
+	// New loose-ref bytes under the same size and time: a stat stamp, so
+	// no move.
+	writeAt(branch, strings.Repeat("d", 40)+"\n", base.Add(time.Second))
+	if storeStamp(dir) != afterRef {
+		t.Fatal("loose-ref content under an unchanged size and time moved the stamp: it was read")
+	}
+	// packed-refs is hashed by content: same size and time, new bytes.
+	writeAt(packed, "# pack-refs with: peeLED\n", base)
+	if storeStamp(dir) == afterRef {
+		t.Fatal("a packed-refs content change did not move the stamp")
+	}
+	refs := filepath.Join(repo, "refs") + string(filepath.Separator)
+	for _, path := range read {
+		if strings.HasPrefix(path, refs) {
+			t.Fatalf("storeStamp read loose ref %s", path)
+		}
+	}
+	if !slices.Contains(read, packed) {
+		t.Fatalf("storeStamp did not read packed-refs through the seam: %q", read)
 	}
 }

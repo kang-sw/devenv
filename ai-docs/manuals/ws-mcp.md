@@ -180,7 +180,15 @@ directories' file names, sizes, and modification times, the unread count,
 the contacts, the listening marker) and builds no panel; the board renders
 only when a page reads the changed session. Ring, drained-inbox, and
 mailbox-history entry files are parsed once per daemon and kept by name for
-the window the page shows.
+the window the page shows. The small files every read and render re-reads
+(session snapshots, the session record's part files, the reply registry,
+the named scopes' mailbox stores) are kept parsed while a stat shows the
+same size and modification time; a file modified within the last 2 seconds
+is not kept, and a session's entries drop when it leaves the index. A
+page's refresh stamp and the board memo stamp a ticket status directory by
+its listing rather than each ticket file, and key the board on the
+session's own reply-registry contacts and unread count rather than the
+whole registry file.
 
 The daemon serves its pages with no CORS: `/` lists sessions by project
 (ended ones for a day), `/s/<reply-id>` shows one session, and `/events` and
@@ -567,8 +575,11 @@ route is the same restart as dev assets: `POST /shutdown`, then
 `/debug/pprof/streams` answers the live-update counters since the daemon
 started as JSON: wakes by source, signals, renders, `nudges`,
 `session_reads_changed` and `session_reads_unchanged` (re-reads whose
-fingerprint did or did not change), and `tracker_reloads`,
-`tracker_late_reloads`, and `tracker_late_reloads_changed`.
+fingerprint did or did not change), `tracker_reloads`,
+`tracker_late_reloads`, and `tracker_late_reloads_changed`, and each parse
+cache's `<kind>_cache_hits` and `<kind>_cache_misses` (a miss reads the
+file): `snapshot` (the daemon's pages), `source_snapshot` (session
+re-reads), `record`, `reply_registry`, and `scope_store`.
 
 ## Plugin-Managed Startup
 

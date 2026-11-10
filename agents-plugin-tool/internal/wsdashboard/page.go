@@ -99,6 +99,16 @@ type ContactSource interface {
 	ReadContacts(reg Registration) (contacts []Contact, ok bool)
 }
 
+// MailPrintSource is an optional SessionSource seam: a print of what a
+// session's page shows from its own mail state outside any watched file (in
+// ws-mcp, its reply-registry entry's contacts and its reply-id unread
+// count). Mail to a reply-id sends the recipient no nudge, so a stream's
+// refresh stamp folds the print, for every page, live or not. ok false
+// means the source cannot print it; the stamp then folds nothing for it.
+type MailPrintSource interface {
+	MailPrint(reg Registration) (print string, ok bool)
+}
+
 // Contact is one mail correspondent of a session, resolved at read time.
 type Contact struct {
 	// Address is the correspondent's literal address: "id:<reply-id>" or a

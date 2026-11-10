@@ -16,7 +16,7 @@ import (
 
 // historyView builds a live session view whose ring holds the records and
 // whose lead streams reply (empty for none).
-func historyView(ring []wslive.RingRecord, reply string, page PageContent, lookup func(string) (Session, *wslive.Snapshot, bool)) SessionView {
+func historyView(ring []wslive.RingRecord, reply string, page PageContent, lookup sessionLookup) SessionView {
 	now := testNow
 	lead := wslive.Lead{Activity: wslive.Activity{Phase: wslive.PhaseReplying}}
 	if reply != "" {
@@ -40,7 +40,7 @@ func TestStreamingTickChangesOnlyTheLiveRegion(t *testing.T) {
 	cache := newEntryCache()
 	render := func(ring []wslive.RingRecord, reply string) regionSet {
 		t.Helper()
-		set, err := renderSessionRegions(historyView(ring, reply, PageContent{}, nil), cache)
+		set, err := renderSessionRegions(historyView(ring, reply, PageContent{}, sessionLookup{}), cache)
 		if err != nil {
 			t.Fatal(err)
 		}

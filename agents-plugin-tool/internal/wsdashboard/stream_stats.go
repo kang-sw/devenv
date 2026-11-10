@@ -55,10 +55,12 @@ func (s *streamStats) snapshot() map[string]int64 {
 	}
 }
 
-// serveStreams answers pprofPrefix+"streams": the daemon's counters plus
-// those of each seam that keeps its own (CounterSource).
+// serveStreams answers pprofPrefix+"streams": the daemon's counters (the
+// snapshot cache's hits and misses among them) plus those of each seam that
+// keeps its own (CounterSource).
 func (d *Daemon) serveStreams(w http.ResponseWriter, r *http.Request) {
 	out := d.stats.snapshot()
+	out["snapshot_cache_hits"], out["snapshot_cache_misses"] = d.snapshots.Counts()
 	for _, seam := range []any{d.tracker, d.source} {
 		cs, ok := seam.(CounterSource)
 		if !ok {

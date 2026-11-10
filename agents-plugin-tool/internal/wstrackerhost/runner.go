@@ -6,9 +6,9 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-	"sync"
 
 	"github.com/kang-sw/devenv/internal/gitbatch"
+	"github.com/kang-sw/devenv/internal/wsgit"
 	"github.com/kang-sw/devenv/internal/wsledger"
 )
 
@@ -41,40 +41,9 @@ func (batchRunner) RunGit(ctx context.Context, root string, args ...string) ([]b
 // gitCommand is git in root, bounded by ctx (gitbatch.Bound), so a hung
 // transport cannot outlast the check's timeout and keep the store's lock.
 func gitCommand(ctx context.Context, root string, args ...string) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, gitExecutable(), append([]string{"-C", root}, args...)...)
+	cmd := exec.CommandContext(ctx, wsgit.Executable(), append([]string{"-C", root}, args...)...)
 	gitbatch.Bound(cmd)
 	return cmd
-}
-
-// gitLookPath resolves the git executable (a test seam).
-var gitLookPath = exec.LookPath
-
-// gitResolved is the git executable gitExecutable resolved and the search
-// path it was resolved under; path is empty until a resolution succeeds.
-var gitResolved struct {
-	sync.Mutex
-	path, under string
-}
-
-// gitExecutable is the git executable's path, resolved once per search
-// path: a bare "git" makes every command search each PATH entry (and, on
-// Windows, each PATHEXT extension), and a dashboard reload spawns several.
-// A changed PATH or PATHEXT resolves again. A failed resolution is not
-// kept: it returns "git", so the command resolves it itself as before and
-// a later PATH fix still takes.
-func gitExecutable() string {
-	under := os.Getenv("PATH") + "\x00" + os.Getenv("PATHEXT")
-	gitResolved.Lock()
-	defer gitResolved.Unlock()
-	if gitResolved.path == "" || gitResolved.under != under {
-		path, err := gitLookPath("git")
-		if err != nil {
-			gitResolved.path = ""
-			return "git"
-		}
-		gitResolved.path, gitResolved.under = path, under
-	}
-	return gitResolved.path
 }
 
 // isRemoteCommand reports whether args run a git subcommand that reaches the

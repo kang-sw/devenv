@@ -79,12 +79,22 @@ func (h *Host) watchStamps() map[string]uint64 {
 	return out
 }
 
+// stampReadFile reads the one-file ref lists storeStamp hashes by content
+// (a test seam).
+var stampReadFile = os.ReadFile
+
 // storeStamp hashes what a write to the store directory moves: each journal
 // (journal.<stream>.jsonl, appended by Append) by size and modification
-// time, the repository's branch refs (wsledger's tracker, attachment, and
-// wiki refs, under refs/heads/), and the refs/ledger/known/ refs a push
-// moves (the view's unpushed list reads them), by content, loose or packed,
-// in either ref backend. A missing file stamps as absent.
+// time, and the repository's branch refs (wsledger's tracker, attachment,
+// and wiki refs, under refs/heads/) and the refs/ledger/known/ refs a push
+// moves (the view's unpushed list reads them), in either ref backend.
+// packed-refs and reftable/tables.list are one file each and hash by
+// content; a loose ref hashes by name, size, and modification time, never
+// read, so the 2 s watch does not read every ref file per store per tick.
+// A ref update replaces the file and moves its modification time; the
+// accepted miss is two updates of one ref within one timestamp granule with
+// a watch tick between them, caught by the next change. A missing file
+// stamps as absent.
 func storeStamp(dir string) uint64 {
 	sum := fnv.New64a()
 	field := func(parts ...[]byte) {
@@ -108,7 +118,7 @@ func storeStamp(dir string) uint64 {
 	}
 	repo := filepath.Join(dir, "repo.git")
 	for _, name := range []string{"packed-refs", filepath.Join("reftable", "tables.list")} {
-		if data, err := os.ReadFile(filepath.Join(repo, name)); err == nil {
+		if data, err := stampReadFile(filepath.Join(repo, name)); err == nil {
 			field([]byte(name), data)
 		}
 	}
@@ -118,9 +128,9 @@ func storeStamp(dir string) uint64 {
 			if err != nil || d.IsDir() {
 				return nil
 			}
-			if data, err := os.ReadFile(path); err == nil {
+			if info, err := d.Info(); err == nil {
 				rel, _ := filepath.Rel(refs, path)
-				field([]byte(filepath.ToSlash(rel)), data)
+				field([]byte(filepath.ToSlash(rel)), num(info.Size()), num(info.ModTime().UnixNano()))
 			}
 			return nil
 		})
