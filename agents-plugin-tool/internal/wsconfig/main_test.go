@@ -22,6 +22,6 @@ func runTestMain(m *testing.M) int {
 		return 1
 	}
 	defer os.RemoveAll(configHome)
-	_ = os.Setenv(envConfigHome, configHome)
+	_ = os.Setenv(EnvConfigHome, configHome)
 	return m.Run()
 }

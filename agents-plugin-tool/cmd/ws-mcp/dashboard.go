@@ -72,6 +72,7 @@ func dashboardCommand(args []string) {
 		BuildTime: *buildTime,
 		LockWait:  *lockWait,
 		Log:       logw,
+		Proxy:     &proxyHost{dir: dir, port: *port, lan: *lan, buildTime: *buildTime, logw: logw},
 		Pprof:     wsdashboard.PprofEnabled(os.Getenv(wsdashboard.PprofEnv)),
 		Sessions:  sessions,
 		Worktrees: sessions,

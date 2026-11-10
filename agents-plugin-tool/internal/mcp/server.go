@@ -53,6 +53,19 @@ type Server struct {
 	dashboard dashboardLink
 	// tracker is this process's tracker host (tracker_host.go).
 	tracker trackerLink
+	// env is the caller process's environment; nil reads this process's
+	// live (process_env.go). ownerPID is the caller's PID; zero means this
+	// process. debug is the caller's debug ring.
+	env      *procEnv
+	ownerPID int
+	debug    *debugRing
+	// inflight counts the requests being handled; draining refuses new
+	// ones, and inflightDone closes once a draining server goes idle
+	// (Drain).
+	inflightMu   sync.Mutex
+	inflight     int
+	draining     bool
+	inflightDone chan struct{}
 }
 
 // gitStatusResult keeps the generic git observation intact while allowing the
@@ -159,12 +172,11 @@ const (
 	// dashboard daemon's agent runner sets it on the ws-mcp it attaches to
 	// an agent conversation, which the daemon itself hosts.
 	envNoDashboard = "WS_MCP_NO_DASHBOARD"
+	// envDebugLog names a file every debug event is appended to.
+	envDebugLog = "WS_MCP_DEBUG_LOG"
+	// envAllowedTools is the comma-separated tool allowlist.
+	envAllowedTools = "WS_MCP_ALLOWED_TOOLS"
 )
-
-var debugEvents = struct {
-	sync.Mutex
-	events []map[string]any
-}{}
 
 // testPanicHook is always nil in production. Only _test.go files in this
 // package set it, to exercise goroutine-level panic recovery (server.go's
@@ -172,17 +184,14 @@ var debugEvents = struct {
 // instead of a synthetic panic.
 var testPanicHook func(toolName string)
 
+// NewServer builds a server for this process: its environment, read live,
+// its PID, and the process debug ring.
 func NewServer(root, version string, sourceCommit ...string) *Server {
-	commit := "dev"
-	if len(sourceCommit) > 0 && sourceCommit[0] != "" {
+	commit := ""
+	if len(sourceCommit) > 0 {
 		commit = sourceCommit[0]
 	}
-	cleanRoot := filepath.Clean(root)
-	declared := loadDeclaredConfig(os.Getenv(envConfigManifests))
-	for _, rejected := range declared.rejected {
-		fmt.Fprintf(os.Stderr, "ws-mcp: config manifest rejected: %s\n", rejected)
-	}
-	return &Server{root: cleanRoot, version: version, sourceCommit: commit, sessions: newSessionStore(), declared: declared}
+	return NewServerWithOptions(ServerOptions{Root: root, Version: version, SourceCommit: commit})
 }
 
 func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) error {
@@ -230,7 +239,7 @@ func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) er
 		}
 		var req request
 		if err := json.Unmarshal(line, &req); err != nil {
-			appendDebugEvent("parse_error", map[string]any{"error": err.Error()})
+			s.debugEvent("parse_error", map[string]any{"error": err.Error()})
 			if err := writeResponse(errorResponse(nil, -32700, "parse error")); err != nil {
 				return err
 			}
@@ -240,13 +249,24 @@ func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) er
 			s.handleNotification(req, &requests)
 			continue
 		}
-		appendDebugEvent("request.received", map[string]any{"id": rawMessageString(req.ID), "method": req.Method})
-		reqCtx, cancel := context.WithCancel(ctx)
+		s.debugEvent("request.received", map[string]any{"id": rawMessageString(req.ID), "method": req.Method})
 		id := rawMessageString(req.ID)
+		finish, ok := s.requestStarted()
+		if !ok {
+			// The daemon hosting this server is draining: the proxy
+			// reconnects to its successor and replays, so refuse rather
+			// than start work this stream will not live to answer.
+			if err := writeResponse(errorResponse(req.ID, -32000, "server draining")); err != nil {
+				return err
+			}
+			continue
+		}
+		reqCtx, cancel := context.WithCancel(ctx)
 		requests.Store(id, cancel)
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			defer finish()
 			defer cancel()
 			defer requests.Delete(id)
 			// This defer is appended after the three above, so on unwind it
@@ -257,15 +277,15 @@ func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) er
 			defer func() {
 				if r := recover(); r != nil {
 					stack := debug.Stack()
-					recordPanic(req.Method, id, r, stack)
+					s.recordPanic(req.Method, id, r, stack)
 					resp := errorResponse(req.ID, -32000, fmt.Sprintf("internal error: request handler panicked (%s)", req.Method))
 					if err := writeResponse(resp); err != nil {
-						appendDebugEvent("response.write_error", map[string]any{"id": id, "error": err.Error()})
+						s.debugEvent("response.write_error", map[string]any{"id": id, "error": err.Error()})
 					}
 				}
 			}()
 			if err := writeResponse(s.handle(reqCtx, req)); err != nil {
-				appendDebugEvent("response.write_error", map[string]any{"id": id, "error": err.Error()})
+				s.debugEvent("response.write_error", map[string]any{"id": id, "error": err.Error()})
 			}
 		}()
 	}
@@ -295,9 +315,9 @@ func (s *Server) handleNotification(req request, requests *sync.Map) {
 				}
 			}
 		}
-		appendDebugEvent("notification.cancelled", fields)
+		s.debugEvent("notification.cancelled", fields)
 	default:
-		appendDebugEvent("notification.ignored", map[string]any{"method": req.Method})
+		s.debugEvent("notification.ignored", map[string]any{"method": req.Method})
 	}
 }
 
@@ -332,35 +352,11 @@ func (s *Server) handle(ctx context.Context, req request) response {
 	}
 }
 
+// appendDebugEvent records an event that belongs to no server: the
+// process ring (processDebug). A server's own events go through
+// Server.debugEvent, so a hosted server's ring holds only its connection's.
 func appendDebugEvent(event string, fields map[string]any) {
-	record := map[string]any{
-		"ts":    time.Now().UTC().Format(time.RFC3339Nano),
-		"event": event,
-	}
-	for key, value := range fields {
-		record[key] = value
-	}
-	debugEvents.Lock()
-	debugEvents.events = append(debugEvents.events, record)
-	if len(debugEvents.events) > maxDebugEvents {
-		debugEvents.events = append([]map[string]any(nil), debugEvents.events[len(debugEvents.events)-maxDebugEvents:]...)
-	}
-	debugEvents.Unlock()
-
-	path := strings.TrimSpace(os.Getenv("WS_MCP_DEBUG_LOG"))
-	if path == "" {
-		return
-	}
-	raw, err := json.Marshal(record)
-	if err != nil {
-		return
-	}
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
-		return
-	}
-	defer file.Close()
-	_, _ = file.Write(append(raw, '\n'))
+	processDebug.append(event, fields)
 }
 
 // crashLogPath resolves the always-on, cross-platform panic-trace sink under
@@ -402,6 +398,16 @@ func crashDir() (string, error) {
 // resolve or write the crash file falls back to stderr so a broken/unwritable
 // cache home never fully swallows the trace.
 func recordPanic(method, id string, recovered any, stack []byte) {
+	processDebug.append("request.panic", recordPanicToCrashLog(method, id, recovered, stack))
+}
+
+// recordPanic is the package function's server form: the crash file plus
+// this server's ring.
+func (s *Server) recordPanic(method, id string, recovered any, stack []byte) {
+	s.debugEvent("request.panic", recordPanicToCrashLog(method, id, recovered, stack))
+}
+
+func recordPanicToCrashLog(method, id string, recovered any, stack []byte) map[string]any {
 	fields := map[string]any{
 		"id":     id,
 		"method": method,
@@ -432,8 +438,7 @@ func recordPanic(method, id string, recovered any, stack []byte) {
 	} else {
 		fmt.Fprintf(os.Stderr, "mcp: failed to marshal crash record: %v\n", err)
 	}
-
-	appendDebugEvent("request.panic", fields)
+	return fields
 }
 
 // RecordLifecycleEvent persists a serve-process lifecycle event (e.g. detected
@@ -474,33 +479,7 @@ func RecordLifecycleEvent(event string, fields map[string]any) {
 	appendDebugEvent(event, fields)
 }
 
-func recentDebugEvents(limit int) []map[string]any {
-	if limit <= 0 || limit > maxDebugEvents {
-		limit = maxDebugEvents
-	}
-	debugEvents.Lock()
-	defer debugEvents.Unlock()
-	start := len(debugEvents.events) - limit
-	if start < 0 {
-		start = 0
-	}
-	out := make([]map[string]any, len(debugEvents.events[start:]))
-	copy(out, debugEvents.events[start:])
-	return out
-}
-
-func debugEventsJSONL(limit int) (string, error) {
-	var b strings.Builder
-	for _, event := range recentDebugEvents(limit) {
-		raw, err := json.Marshal(event)
-		if err != nil {
-			return "", err
-		}
-		b.Write(raw)
-		b.WriteByte('\n')
-	}
-	return b.String(), nil
-}
+func recentDebugEvents(limit int) []map[string]any { return processDebug.recent(limit) }
 
 func rawMessageString(raw json.RawMessage) string {
 	if len(raw) == 0 {
@@ -775,7 +754,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		}
 		return toolTextResponse(req.ID, formatRuntimeInfo(info), nil)
 	case "runtime.debug_events":
-		text, err := debugEventsJSONL(intFromArgument(params.Arguments["limit"], 80))
+		text, err := s.debug.jsonl(intFromArgument(params.Arguments["limit"], 80))
 		return toolTextResponse(req.ID, text, err)
 	case "session.set_default_root":
 		return toolTextResponse(req.ID, "", fmt.Errorf("session default roots were removed; if you are the lead, obtain a session_key per ws:workflow-manual and pass it"))
@@ -5700,8 +5679,10 @@ func appendRenderContext(body string, context map[string]string) string {
 	return body + sb.String()
 }
 
-func explicitAllowedTools() map[string]bool {
-	raw := strings.TrimSpace(os.Getenv("WS_MCP_ALLOWED_TOOLS"))
+func explicitAllowedTools() map[string]bool { return parseAllowedTools(os.Getenv(envAllowedTools)) }
+
+func parseAllowedTools(raw string) map[string]bool {
+	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return nil
 	}

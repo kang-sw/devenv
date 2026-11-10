@@ -968,7 +968,7 @@ func TestGenerateRealManifest(t *testing.T) {
 // ResolveRoot requires WS_RSRC_ROOT; exercise the path-returns-env-value branch.
 func TestResolveRootEnv(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv(envRsrcRoot, root)
+	t.Setenv(EnvRsrcRoot, root)
 	got, err := ResolveRoot()
 	if err != nil {
 		t.Fatalf("ResolveRoot: %v", err)
@@ -984,7 +984,7 @@ func TestResolveRootFallsBackToExecutablePath(t *testing.T) {
 	// (the test environment does not have a <bin>/../rsrc layout), but
 	// ResolveRoot itself must not error; manifest-missing failures happen later
 	// in wsrsrc.Load.
-	t.Setenv(envRsrcRoot, "")
+	t.Setenv(EnvRsrcRoot, "")
 	got, err := ResolveRoot()
 	if err != nil {
 		t.Fatalf("ResolveRoot: %v", err)
@@ -1001,7 +1001,7 @@ func TestResolveRootFallsBackToExecutablePath(t *testing.T) {
 // ResolveSkillsRoot requires WS_SKILLS_ROOT; exercise the path-returns-env-value branch.
 func TestResolveSkillsRootEnv(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv(envSkillsRoot, root)
+	t.Setenv(EnvSkillsRoot, root)
 	got, err := ResolveSkillsRoot()
 	if err != nil {
 		t.Fatalf("ResolveSkillsRoot: %v", err)
@@ -1017,7 +1017,7 @@ func TestResolveSkillsRootFallsBackToExecutablePath(t *testing.T) {
 	// disk (the test environment does not have a <bin>/../skills layout), but
 	// ResolveSkillsRoot itself must not error; missing-file failures happen
 	// later in LoadSkillBody.
-	t.Setenv(envSkillsRoot, "")
+	t.Setenv(EnvSkillsRoot, "")
 	got, err := ResolveSkillsRoot()
 	if err != nil {
 		t.Fatalf("ResolveSkillsRoot: %v", err)

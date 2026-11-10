@@ -16,8 +16,9 @@ import (
 
 const (
 	defaultCacheDirName = "ws@kang-sw-devenv"
-	envCacheHome        = "WS_CACHE_HOME"
-	schemaVersion       = 1
+	// EnvCacheHome names the cache root override a caller process carries.
+	EnvCacheHome  = "WS_CACHE_HOME"
+	schemaVersion = 1
 )
 
 type Clock func() time.Time
@@ -85,7 +86,7 @@ func CacheRoot(opts Options) (string, error) {
 	if opts.CacheHome != "" {
 		return canonicalPath(opts.CacheHome)
 	}
-	if env := os.Getenv(envCacheHome); env != "" {
+	if env := os.Getenv(EnvCacheHome); env != "" {
 		return canonicalPath(env)
 	}
 	home, err := os.UserHomeDir()

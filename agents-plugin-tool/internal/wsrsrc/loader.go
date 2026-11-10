@@ -7,8 +7,9 @@ import (
 	"strings"
 )
 
-const envRsrcRoot = "WS_RSRC_ROOT"
-const envSkillsRoot = "WS_SKILLS_ROOT"
+// EnvRsrcRoot and EnvSkillsRoot name the resource and skills tree overrides.
+const EnvRsrcRoot = "WS_RSRC_ROOT"
+const EnvSkillsRoot = "WS_SKILLS_ROOT"
 
 // ResolveRoot returns the rsrc tree root directory.
 //
@@ -27,7 +28,7 @@ const envSkillsRoot = "WS_SKILLS_ROOT"
 // If the derived path does not contain a valid manifest, callers will see
 // ErrManifestMissing at Load time rather than a silent fallback.
 func ResolveRoot() (string, error) {
-	if env := os.Getenv(envRsrcRoot); env != "" {
+	if env := os.Getenv(EnvRsrcRoot); env != "" {
 		return env, nil
 	}
 	exe, err := os.Executable()
@@ -44,7 +45,7 @@ func ResolveRoot() (string, error) {
 //  2. Plugin-path default: filepath.Join(filepath.Dir(os.Executable()), "..", "skills"),
 //     sibling to the rsrc root derived by ResolveRoot.
 func ResolveSkillsRoot() (string, error) {
-	if env := os.Getenv(envSkillsRoot); env != "" {
+	if env := os.Getenv(EnvSkillsRoot); env != "" {
 		return env, nil
 	}
 	exe, err := os.Executable()

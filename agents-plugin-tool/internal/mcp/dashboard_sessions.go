@@ -268,7 +268,7 @@ func (s *Server) startDashboardHeartbeat(ctx context.Context) <-chan struct{} {
 		defer close(done)
 		defer func() {
 			if r := recover(); r != nil {
-				recordPanic("dashboard.heartbeat", "", r, debug.Stack())
+				s.recordPanic("dashboard.heartbeat", "", r, debug.Stack())
 			}
 		}()
 		ticker := time.NewTicker(dashboardHeartbeatInterval)

@@ -140,7 +140,7 @@ type sessionDirs struct {
 // the location. The legacy root is never created: only an older ws-mcp
 // writes there.
 func (s *sessionStore) dirs() (sessionDirs, error) {
-	cacheRoot, err := wsstate.CacheRoot(wsstate.Options{})
+	cacheRoot, err := wsstate.CacheRoot(wsstate.Options{CacheHome: s.cacheHome})
 	if err != nil {
 		return sessionDirs{}, err
 	}

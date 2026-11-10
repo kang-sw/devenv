@@ -260,15 +260,29 @@ const mailboxWaitCommandGeneric = "ws-mcp mailbox wait --session-key <your key> 
 // bin/ on PATH — it stays unset and the resolved binary path is used.
 const envCLIName = "WS_MCP_CLI_NAME"
 
+// envRuntimeBinary is the launcher's record of the runtime binary it runs
+// or proxies for.
+const envRuntimeBinary = "WS_MCP_RUNTIME_BINARY"
+
 // CLICommandName returns the command name that printed, agent-runnable CLI
 // invocations start with: WS_MCP_CLI_NAME when declared, else os.Args[0]. The
 // declared shim name is short, version-stable, and allowlistable; os.Args[0]
 // is the versioned runtime binary path. Neither writes a package-internal
 // launcher path into shipped text (shipped-surface-boundary.md). The server
 // cannot discover the shim itself: its own PATH does not carry plugin bin/.
-func CLICommandName() string {
-	if name := strings.TrimSpace(os.Getenv(envCLIName)); name != "" {
+func CLICommandName() string { return CLICommandNameFrom(os.Getenv) }
+
+// CLICommandNameFrom is CLICommandName under the environment getenv reads:
+// the declared shim name, else the runtime binary the launcher recorded in
+// WS_MCP_RUNTIME_BINARY, else this process's own argv[0]. A server hosted
+// by the dashboard daemon must not print the daemon's staged copy as the
+// command, so the launcher's record comes before argv[0].
+func CLICommandNameFrom(getenv func(string) string) string {
+	if name := strings.TrimSpace(getenv(envCLIName)); name != "" {
 		return name
+	}
+	if bin := strings.TrimSpace(getenv(envRuntimeBinary)); bin != "" {
+		return bin
 	}
 	return strings.TrimSpace(os.Args[0])
 }

@@ -48,6 +48,16 @@ func CompareVersions(a, b string) int {
 	return strings.Compare(pa, pb)
 }
 
+// SameMinor reports whether a and b share a major.minor: the range within
+// which a launcher connects to a daemon it did not build (the MCP wire
+// surface changes only across minors). An unparseable version matches
+// nothing.
+func SameMinor(a, b string) bool {
+	ca, _, oka := parseVersion(a)
+	cb, _, okb := parseVersion(b)
+	return oka && okb && ca[0] == cb[0] && ca[1] == cb[1]
+}
+
 func parseVersion(v string) (core [3]int, pre string, ok bool) {
 	v = strings.TrimPrefix(strings.TrimSpace(v), "v")
 	if i := strings.IndexByte(v, '-'); i >= 0 {

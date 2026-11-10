@@ -22,17 +22,22 @@ type Runner interface {
 	RunGit(ctx context.Context, root string, args ...string) ([]byte, error)
 }
 
-// ExecRunner runs the user's git. Env, when set, is appended to the process
-// environment of every run (a caller that must pin a GIT_* variable, such
-// as a ledger that forbids lazy fetches, sets it here).
+// ExecRunner runs the user's git. Environ, when set, is the base
+// environment of every run (the caller process's, for a server the
+// dashboard daemon hosts for another process); nil means this process's.
+// Env, when set, is appended to it (a caller that must pin a GIT_* variable,
+// such as a ledger that forbids lazy fetches, sets it here).
 type ExecRunner struct {
-	Env []string
+	Environ func() []string
+	Env     []string
 }
 
 func (r ExecRunner) RunGit(ctx context.Context, root string, args ...string) ([]byte, error) {
 	argv := append([]string{"-C", root}, args...)
 	cmd := exec.CommandContext(ctx, "git", argv...)
-	if len(r.Env) > 0 {
+	if r.Environ != nil {
+		cmd.Env = append(r.Environ(), r.Env...)
+	} else if len(r.Env) > 0 {
 		cmd.Env = append(os.Environ(), r.Env...)
 	}
 	out, err := cmd.CombinedOutput()

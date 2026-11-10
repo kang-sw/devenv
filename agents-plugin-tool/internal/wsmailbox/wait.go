@@ -1,6 +1,7 @@
 package wsmailbox
 
 import (
+	"errors"
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsinbox"
@@ -103,7 +104,15 @@ type WaitOptions struct {
 	Now func() time.Time
 	// Sleep defaults to time.Sleep.
 	Sleep func(time.Duration)
+	// Done, when set, ends the wait early: Wait returns ErrWaitCancelled
+	// once it closes, within one Poll. A wait the dashboard daemon hosts
+	// for a launcher sets it to the stream's end.
+	Done <-chan struct{}
 }
+
+// ErrWaitCancelled reports that WaitOptions.Done closed before mail
+// arrived or Timeout elapsed.
+var ErrWaitCancelled = errors.New("mailbox wait cancelled")
 
 // Wait performs target's level-triggered check: an immediate peek, returned
 // at once if either queue already holds unread mail, or a watched inbox a held entry (Decision 6's lost-
@@ -119,6 +128,23 @@ func Wait(target WaitTarget, opts WaitOptions) (WaitResult, error) {
 	sleep := opts.Sleep
 	if sleep == nil {
 		sleep = time.Sleep
+	}
+	if opts.Done != nil {
+		// A cancellable wait sleeps on the timer and Done together, so the
+		// cancel takes at once instead of after the current tick.
+		inner := sleep
+		sleep = func(d time.Duration) {
+			if opts.Sleep != nil {
+				inner(d)
+				return
+			}
+			t := time.NewTimer(d)
+			defer t.Stop()
+			select {
+			case <-t.C:
+			case <-opts.Done:
+			}
+		}
 	}
 	poll := opts.Poll
 	if poll <= 0 {
@@ -146,6 +172,13 @@ func Wait(target WaitTarget, opts WaitOptions) (WaitResult, error) {
 	}
 
 	for {
+		if opts.Done != nil {
+			select {
+			case <-opts.Done:
+				return WaitResult{}, ErrWaitCancelled
+			default:
+			}
+		}
 		result, err := resolved.peek()
 		if err != nil {
 			return WaitResult{}, err
