@@ -302,7 +302,14 @@
       "registered_at": "2026-11-06T07:33:45Z"
     },
     "261106-bug-sage-stamp-missing-restamp-loop": {
-      "registered_at": "2026-11-06T08:56:03Z"
+      "registered_at": "2026-11-06T08:56:03Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "28ef83e379b353cc",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-10T00:34:13Z"
+      }
     },
     "261106-epic-ws-dashboard-serve-daemon": {
       "registered_at": "2026-11-06T04:24:28Z"
