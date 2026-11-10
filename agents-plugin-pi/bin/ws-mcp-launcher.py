@@ -863,6 +863,14 @@ PROXY_PROTOCOL = 1
 PROXY_REPLAY_ID_PREFIX = "ws-mcp-launcher-replay-"
 DAEMON_DEFAULT_START_WAIT = 10.0  # wsdashboard.DefaultStartWait, seconds
 PROXY_LOST_REQUEST_CODE = -32000
+# A daemon connection that ends within this many seconds of being made is a
+# quick close; after this many quick closes in a row the proxy stops
+# reconnecting and hands over to a direct `serve --stdio` child.
+PROXY_QUICK_CLOSE_SECONDS = 2.0
+PROXY_MAX_QUICK_CLOSES = 3
+# After the client closed its stdin, how long the proxy keeps reading the
+# answers to the requests still in flight before closing the connection.
+PROXY_DRAIN_SECONDS = 10.0
 
 
 class ProxyFallback(Exception):
@@ -889,21 +897,32 @@ def proxy_daemon_dir(env: dict) -> Path:
     return proxy_cache_root(env) / DAEMON_DIR_NAME
 
 
+def go_ext(name: str) -> str:
+    """Go's filepath.Ext: from the last dot of the base name to its end.
+
+    Path.suffix differs on the edges (a trailing dot, a dot-file), and the
+    staged name must match the Go side byte for byte.
+    """
+    base = os.path.basename(name)
+    dot = base.rfind(".")
+    return base[dot:] if dot >= 0 else ""
+
+
 def staged_daemon_name(binary: Path, digest: str | None = None) -> str:
     """The name wsdashboard.StageExecutable gives binary's staged copy."""
     if digest is None:
         digest = sha256_file(binary)
-    return f"ws-mcp-dashboard-{digest[:16]}{binary.suffix.lower()}"
+    return f"ws-mcp-dashboard-{digest[:16]}{go_ext(binary.name).lower()}"
 
 
 def stage_daemon_binary(binary: Path, bin_dir: Path) -> Path:
     """Copy binary into bin_dir under its staged name, as StageExecutable does.
 
     The copy is written beside its target and renamed into place, so a
-    concurrent starter never runs a half-written file; every other entry of
-    bin_dir is removed best-effort (a running older daemon keeps its unlinked
-    executable on POSIX; on Windows the removal of a running one fails and is
-    ignored).
+    concurrent starter never runs a half-written file. Other entries are left
+    alone: one of them is the executable the running daemon was started from
+    (it respawns itself from that path on a LAN mode change), and the daemon
+    that holds the lock prunes the directory down to its own executable.
     """
     digest = sha256_file(binary)
     name = staged_daemon_name(binary, digest)
@@ -919,19 +938,6 @@ def stage_daemon_binary(binary: Path, bin_dir: Path) -> Path:
         shutil.copyfile(binary, tmp)
         os.chmod(tmp, 0o755)
         os.replace(tmp, target)
-    try:
-        for entry in bin_dir.iterdir():
-            if entry.name == name:
-                continue
-            try:
-                if entry.is_dir() and not entry.is_symlink():
-                    shutil.rmtree(entry, ignore_errors=True)
-                else:
-                    entry.unlink()
-            except OSError:
-                pass
-    except OSError:
-        pass
     return target
 
 
@@ -996,9 +1002,19 @@ def read_daemon_endpoint(daemon_dir: Path) -> dict | None:
     return payload
 
 
+class DaemonHung(Exception):
+    """The daemon's port accepted but nothing answered within the timeout."""
+
+
 def daemon_health(port: int, timeout: float) -> dict | None:
-    """GET /health on the daemon's port; None when nothing compatible answers."""
+    """GET /health on the daemon's port; None when nothing compatible answers.
+
+    Raises DaemonHung when the port accepts the connection but the answer
+    does not arrive within timeout: a daemon that is alive but wedged, which
+    is the one case the launcher gives up on instead of starting another.
+    """
     import http.client
+    import socket as socket_module
 
     conn = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
     try:
@@ -1008,6 +1024,8 @@ def daemon_health(port: int, timeout: float) -> dict | None:
         if resp.status != 200:
             return None
         payload = json.loads(body)
+    except socket_module.timeout as exc:
+        raise DaemonHung(f"daemon on port {port} did not answer within {timeout:.0f}s") from exc
     except (OSError, ValueError, http.client.HTTPException):
         return None
     finally:
@@ -1094,6 +1112,15 @@ class SocketStream:
         except (OSError, ValueError):
             return False
 
+    def close_write(self) -> None:
+        """Tell the daemon the client is done; its answers still arrive."""
+        import socket as socket_module
+
+        try:
+            self.sock.shutdown(socket_module.SHUT_WR)
+        except OSError:
+            pass
+
     def close(self) -> None:
         import socket as socket_module
 
@@ -1130,6 +1157,9 @@ class ProcessStream:
             return True
         except (OSError, ValueError):
             return False
+
+    def close_write(self) -> None:
+        self.close()
 
     def close(self) -> None:
         try:
@@ -1221,9 +1251,20 @@ class DaemonLink:
             self.build_time = binary.stat().st_mtime_ns // 1_000_000
         except OSError:
             self.build_time = 0
+        self._content_hash: str | None = None
         self.started = False
 
+    def content_hash(self) -> str:
+        """The runtime binary's sha256, computed once and only when needed."""
+        if self._content_hash is None:
+            try:
+                self._content_hash = sha256_file(self.binary)
+            except OSError:
+                self._content_hash = ""
+        return self._content_hash
+
     def probe(self, timeout: float) -> tuple[dict | None, dict | None]:
+        """The endpoint file and the daemon's health; DaemonHung when it accepts but never answers."""
         endpoint = read_daemon_endpoint(self.daemon_dir)
         if endpoint is None:
             return None, None
@@ -1232,7 +1273,10 @@ class DaemonLink:
     def wait_healthy(self, budget: float) -> tuple[dict | None, dict | None]:
         deadline = time.monotonic() + budget
         while True:
-            endpoint, health = self.probe(min(1.0, max(0.1, deadline - time.monotonic())))
+            try:
+                endpoint, health = self.probe(min(1.0, max(0.1, deadline - time.monotonic())))
+            except DaemonHung:
+                endpoint, health = None, None
             if health is not None:
                 return endpoint, health
             if time.monotonic() >= deadline:
@@ -1240,12 +1284,24 @@ class DaemonLink:
             time.sleep(0.2)
 
     def needs_start(self, health: dict) -> bool:
-        """Older daemon, or the same version from an older build."""
+        """Older daemon, or the same version from an older build of other content.
+
+        Same version and same content hash never replace: Claude, Codex, and
+        Pi each install their own copy of one binary, whose mtimes differ,
+        and a replacement drains every session on the machine. The build time
+        breaks the tie only when the hashes differ (or the daemon reports
+        none).
+        """
         order = compare_daemon_versions(str(health.get("version", "")), self.runtime_version)
         if order != 0:
             return order < 0
         build_time = health.get("build_time")
-        return isinstance(build_time, int) and 0 < self.build_time and build_time < self.build_time
+        if not (isinstance(build_time, int) and 0 < self.build_time and build_time < self.build_time):
+            return False
+        content_hash = health.get("content_hash")
+        if isinstance(content_hash, str) and content_hash and content_hash == self.content_hash():
+            return False
+        return True
 
     def start_daemon(self) -> bool:
         """Run the staged binary's daemon-start entry; True when it reports a daemon."""
@@ -1282,14 +1338,29 @@ class DaemonLink:
 
         grace is how long a daemon that answers nothing is given before one is
         started: a reconnect under a replacement gives the successor a moment.
+        Without grace, a daemon whose port accepts but never answers within
+        the answer budget is a wedged daemon: no start is attempted (its lock
+        would make the start wait out the whole start budget), the caller
+        runs the direct path.
         """
-        endpoint, health = self.wait_healthy(grace) if grace > 0 else self.probe(self.answer_budget)
+        if grace > 0:
+            endpoint, health = self.wait_healthy(grace)
+        else:
+            try:
+                endpoint, health = self.probe(self.answer_budget)
+            except DaemonHung as exc:
+                raise ProxyFallback(str(exc)) from exc
         if health is None or self.needs_start(health):
             if not self.start_daemon():
                 raise ProxyFallback("no daemon could be started")
             endpoint, health = self.wait_healthy(self.start_budget)
             if health is None or endpoint is None:
                 raise ProxyFallback(f"no daemon answered within {self.start_budget:.0f}s of starting one")
+            if self.needs_start(health):
+                # daemon-start reported a daemon, but the one answering is
+                # still the older one (it refused to stop, or won the lock
+                # race): never settle on it.
+                raise ProxyFallback(f"daemon {health.get('version', '')} (build {health.get('build_time', 0)}) is older than this plugin's runtime and was not replaced")
         version = str(health.get("version", ""))
         if not same_minor(version, self.runtime_version):
             raise ProxyFallback(f"daemon {version} is outside this plugin's minor ({self.runtime_version})")
@@ -1334,9 +1405,15 @@ class McpProxy:
         self.replay_key: str | None = None
         self.replays = 0
         self.stdin_closed = False
+        # connected_at is when the current stream was made; quick_closes
+        # counts the streams in a row that ended within
+        # PROXY_QUICK_CLOSE_SECONDS of being made (a daemon in a crash loop).
+        self.connected_at = time.monotonic()
+        self.quick_closes = 0
 
     def run(self, stream) -> int:
         self.stream = stream
+        self.connected_at = time.monotonic()
         pump = threading.Thread(target=self.pump_client, name="ws-mcp-launcher-stdin", daemon=True)
         pump.start()
         exit_code = 0
@@ -1386,7 +1463,14 @@ class McpProxy:
         with self.lock:
             self.stdin_closed = True
             stream = self.stream
-        stream.close()
+        # Half-close: the server sees EOF, finishes the requests in flight,
+        # and closes when it is done; run() delivers those answers meanwhile
+        # and ends at the server's close. A server that never closes is cut
+        # off after PROXY_DRAIN_SECONDS.
+        stream.close_write()
+        cutoff = threading.Timer(PROXY_DRAIN_SECONDS, stream.close)
+        cutoff.daemon = True
+        cutoff.start()
 
     def deliver(self, line: bytes) -> bool:
         """Bookkeeping for a server line; False drops it."""
@@ -1407,17 +1491,30 @@ class McpProxy:
         if isinstance(old, ProcessStream):
             return None
         old.close()
-        try:
-            stream = self.link.connect(self.hello, grace=1.5)
-            note("daemon connection lost; reconnected")
-        except ProxyFallback as exc:
-            print(f"ws-mcp-launcher: daemon connection lost and not recovered ({exc}); continuing on the direct path", file=self.stderr, flush=True)
+        if time.monotonic() - self.connected_at < PROXY_QUICK_CLOSE_SECONDS:
+            self.quick_closes += 1
+        else:
+            self.quick_closes = 0
+        stream = None
+        if self.quick_closes >= PROXY_MAX_QUICK_CLOSES:
+            print(f"ws-mcp-launcher: the daemon closed {self.quick_closes} connections in a row right after accepting them; continuing on the direct path", file=self.stderr, flush=True)
+        else:
+            if self.quick_closes:
+                # Back off between quick closes: 0.5 s, then 1 s.
+                time.sleep(0.5 * self.quick_closes)
+            try:
+                stream = self.link.connect(self.hello, grace=1.5)
+                note("daemon connection lost; reconnected")
+            except ProxyFallback as exc:
+                print(f"ws-mcp-launcher: daemon connection lost and not recovered ({exc}); continuing on the direct path", file=self.stderr, flush=True)
+        if stream is None:
             try:
                 stream = ProcessStream(self.direct_argv, self.link.env)
             except OSError as exc2:
                 print(f"ws-mcp-launcher: direct path failed: {exc2}", file=self.stderr, flush=True)
                 return None
         self.replay_into(stream)
+        self.connected_at = time.monotonic()
         return stream
 
     def replay_into(self, stream) -> None:
@@ -1507,19 +1604,30 @@ def proxy_serve(link: DaemonLink, argv: list[str], stdin, stdout, stderr) -> int
     return McpProxy(link, hello, [str(link.binary), *argv], stdin, stdout, stderr).run(stream)
 
 
+def write_bytes(stream, text: str) -> None:
+    """Write text to a binary stream as UTF-8, unchanged: the daemon's output
+    goes out byte for byte, with no console code page and no newline
+    translation (Windows text-mode stdout would apply both)."""
+    stream.write(text.encode("utf-8"))
+    stream.flush()
+
+
 def proxy_cli(link: DaemonLink, argv: list[str], stdout, stderr) -> int | None:
-    """Run argv (a `mailbox wait`) in the daemon; None means run it directly."""
+    """Run argv (a `mailbox wait`) in the daemon; None means run it directly.
+
+    stdout and stderr are binary streams (sys.stdout.buffer, sys.stderr.buffer).
+    """
     hello = proxy_hello("cli", argv, link.env, link.runtime_version)
     try:
         stream = link.connect(hello)
     except ProxyFallback as exc:
-        print(f"ws-mcp-launcher: {exc}; running the direct path", file=stderr, flush=True)
+        write_bytes(stderr, f"ws-mcp-launcher: {exc}; running the direct path\n")
         return None
     watch_parent_exit(stream.close)
     while True:
         line = stream.read_line()
         if not line:
-            print("ws-mcp-launcher: daemon connection closed before the command finished", file=stderr, flush=True)
+            write_bytes(stderr, "ws-mcp-launcher: daemon connection closed before the command finished\n")
             stream.close()
             return 1
         frame = parse_jsonrpc_line(line)
@@ -1529,11 +1637,9 @@ def proxy_cli(link: DaemonLink, argv: list[str], stdout, stderr) -> int | None:
         if not isinstance(data, str):
             data = ""
         if frame.get("stream") == "stderr" and data:
-            stderr.write(data)
-            stderr.flush()
+            write_bytes(stderr, data)
         if frame.get("final"):
-            stdout.write(data)
-            stdout.flush()
+            write_bytes(stdout, data)
             stream.close()
             # The daemon always sends the code; a final frame without one
             # can only come from a daemon that omitted a zero, so it reads
@@ -1630,7 +1736,7 @@ def main() -> int:
         if mode == "mcp":
             code = proxy_serve(link, sys.argv[1:], sys.stdin.buffer, sys.stdout.buffer, sys.stderr)
         else:
-            code = proxy_cli(link, sys.argv[1:], sys.stdout, sys.stderr)
+            code = proxy_cli(link, sys.argv[1:], sys.stdout.buffer, sys.stderr.buffer)
         if code is not None:
             return code
     args = [str(binary), *sys.argv[1:]]
