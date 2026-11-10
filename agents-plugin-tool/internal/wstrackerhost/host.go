@@ -84,7 +84,7 @@ type Host struct {
 // store is one registered store as this process holds it. mu serializes
 // this process's operations on it; the ledger serializes across processes.
 type store struct {
-	mu      sync.Mutex
+	mu      storeLock
 	entry   StoreEntry
 	ledger  *wsledger.Ledger
 	tracker *wstracker.Tracker
@@ -178,13 +178,82 @@ func (h *Host) open(ctx context.Context, st *store) error {
 	return nil
 }
 
-// with runs fn on the opened store id under its lock.
+// ErrStoreBusy is the answer of a call whose context carries a lock wait
+// (WithLockWait) when its store's lock stayed held that long, as it is
+// across a fetch or push. Nothing was read or written; the call may be
+// retried.
+var ErrStoreBusy = errors.New("tracker: store busy")
+
+type lockWaitKey struct{}
+
+// WithLockWait returns ctx bounding how long a Host call run with it waits
+// for its store's lock: a call that waited d answers ErrStoreBusy. A call
+// whose context carries no bound waits until the lock is free, which is
+// up to a network timeout while a fetch or push holds it.
+func WithLockWait(ctx context.Context, d time.Duration) context.Context {
+	return context.WithValue(ctx, lockWaitKey{}, d)
+}
+
+// storeLock is a mutex whose acquisition can give up after a bound
+// (lockWithin), which a sync.Mutex cannot do without polling. The zero
+// value is unlocked.
+type storeLock struct {
+	once sync.Once
+	ch   chan struct{}
+}
+
+func (l *storeLock) c() chan struct{} {
+	l.once.Do(func() { l.ch = make(chan struct{}, 1) })
+	return l.ch
+}
+
+func (l *storeLock) Lock() { l.c() <- struct{}{} }
+
+func (l *storeLock) Unlock() {
+	select {
+	case <-l.c():
+	default:
+		panic("wstrackerhost: unlock of unlocked store lock")
+	}
+}
+
+// lockWithin takes the lock unless it stays held for d (ErrStoreBusy) or
+// ctx ends first (ctx's error).
+func (l *storeLock) lockWithin(ctx context.Context, d time.Duration) error {
+	select {
+	case l.c() <- struct{}{}:
+		return nil
+	default:
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case l.c() <- struct{}{}:
+		return nil
+	case <-t.C:
+		return ErrStoreBusy
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// with runs fn on the opened store id under its lock, waiting for the lock
+// at most the bound ctx carries (WithLockWait).
 func (h *Host) with(ctx context.Context, id string, fn func(*store) error) error {
 	st, err := h.store(id)
 	if err != nil {
 		return err
 	}
-	st.mu.Lock()
+	if d, ok := ctx.Value(lockWaitKey{}).(time.Duration); ok {
+		if err := st.mu.lockWithin(ctx, d); err != nil {
+			if errors.Is(err, ErrStoreBusy) {
+				return fmt.Errorf("%w: %q", ErrStoreBusy, id)
+			}
+			return err
+		}
+	} else {
+		st.mu.Lock()
+	}
 	defer st.mu.Unlock()
 	if err := h.open(ctx, st); err != nil {
 		return err

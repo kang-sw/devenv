@@ -104,7 +104,20 @@ var (
 	// name, path, or edit; a new wiki that exists; a page already there or
 	// gone; a pasted image whose staged copy expired); the message says why.
 	ErrTrackerWikiRefused = errors.New("wiki save refused")
+	// ErrTrackerBusy: a wiki or image read gave up waiting for the store,
+	// held by a fetch or push; the route answers 503 with Retry-After.
+	ErrTrackerBusy = errors.New("store busy")
 )
+
+// trackerBusyRetry is the Retry-After, in seconds, of a busy read's 503.
+const trackerBusyRetry = "1"
+
+// trackerBusy answers a read that found the store busy: 503 with
+// Retry-After, so the page reads again shortly.
+func trackerBusy(w http.ResponseWriter, err error) {
+	w.Header().Set("Retry-After", trackerBusyRetry)
+	trackerError(w, http.StatusServiceUnavailable, err.Error())
+}
 
 // TrackerHost is the daemon's tracker host: the stores the user registered
 // and the operations the tracker drawer runs on them. Every string it
@@ -146,7 +159,8 @@ type TrackerHost interface {
 	// store's attachments.max_bytes.
 	StageAttachment(ctx context.Context, id, name string, data []byte) (TrackerAttachment, error)
 	// ReadAttachment returns the content of attachment oid of store id, or
-	// ErrTrackerAttachmentNotFound.
+	// ErrTrackerAttachmentNotFound. This read and the wiki reads below may
+	// answer ErrTrackerBusy instead of waiting long for a busy store.
 	ReadAttachment(ctx context.Context, id, oid string) ([]byte, error)
 	// ReadWikiImage returns the content of image oid of wiki of store id, or
 	// ErrTrackerAttachmentNotFound when the wiki or the image is absent.
@@ -627,7 +641,7 @@ func (d *Daemon) handleTracker(w http.ResponseWriter, r *http.Request) {
 	case op == "wiki":
 		wikis, err := d.tracker.WikiList(r.Context(), storeID)
 		if err != nil {
-			trackerError(w, http.StatusInternalServerError, err.Error())
+			trackerWikiError(w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"wikis": nonNil(wikis)})
@@ -673,9 +687,11 @@ func (d *Daemon) handleTracker(w http.ResponseWriter, r *http.Request) {
 }
 
 // trackerWikiError answers a wiki read or save error: 404 for an unknown
-// wiki or page, 422 for a refused save, else 500.
+// wiki or page, 422 for a refused save, 503 for a busy store, else 500.
 func trackerWikiError(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, ErrTrackerBusy):
+		trackerBusy(w, err)
 	case errors.Is(err, ErrTrackerWikiNotFound):
 		trackerError(w, http.StatusNotFound, err.Error())
 	case errors.Is(err, ErrTrackerWikiRefused):
@@ -783,10 +799,15 @@ func (d *Daemon) trackerReadWikiImage(w http.ResponseWriter, r *http.Request, id
 }
 
 // serveTrackerImage answers an image read: data when it sniffs as an
-// accepted image type, else 404, as for ErrTrackerAttachmentNotFound.
+// accepted image type, else 404, as for ErrTrackerAttachmentNotFound; 503
+// for a busy store.
 func serveTrackerImage(w http.ResponseWriter, data []byte, err error) {
 	if errors.Is(err, ErrTrackerAttachmentNotFound) {
 		trackerError(w, http.StatusNotFound, "not found")
+		return
+	}
+	if errors.Is(err, ErrTrackerBusy) {
+		trackerBusy(w, err)
 		return
 	}
 	if err != nil {
