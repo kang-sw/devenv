@@ -468,6 +468,32 @@ func TestPollSyncsTwoClones(t *testing.T) {
 	}
 }
 
+// TestPollOnceReportsOnlyAChange: a poll round that fetches another
+// clone's new write reports a change; a round after it that fetched
+// nothing new and kept the sync standing reports none, though it stamped a
+// new attempt and success time.
+func TestPollOnceReportsOnlyAChange(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+	a, b := w.machine("a"), w.machine("b")
+	w.register(a, "team", "ada", &wstracker.Profile{Given: "Ada"})
+	w.register(b, "team", "bo", &wstracker.Profile{Given: "Bo"})
+	b.PollOnce(ctx) // settle b's own first fetch
+
+	item := createItem(t, a, "team", "seen by the poll")
+	syncStore(t, a, "team")
+	if !b.PollOnce(ctx) {
+		t.Fatal("a round that fetched a new item reported no change")
+	}
+	if !hasItem(view(t, b, "team"), item) {
+		t.Fatal("the round did not bring the item")
+	}
+	w.clock.Advance(time.Minute)
+	if b.PollOnce(ctx) {
+		t.Fatal("a round that fetched nothing new reported a change")
+	}
+}
+
 // TestPollRunsAtOnce: the poll lock turns every pre-read into a no-op, so
 // the poll fetches as soon as it takes the lock rather than one interval
 // later; otherwise reads stay stale for a whole interval after it starts.

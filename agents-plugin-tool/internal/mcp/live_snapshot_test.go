@@ -59,7 +59,9 @@ func (f liveFixture) sessionDir(replyID string) string {
 // test's way.
 func fastLive(t *testing.T, debounce time.Duration) {
 	t.Helper()
-	previous := setLiveSeams(func(s *liveSeams) { s.debounceUrgent, s.debounce, s.heartbeat = debounce, debounce, time.Hour })
+	previous := setLiveSeams(func(s *liveSeams) {
+		s.debounceUrgent, s.debounce, s.debounceAgent, s.heartbeat = debounce, debounce, debounce, time.Hour
+	})
 	t.Cleanup(func() { setLiveSeams(func(s *liveSeams) { *s = previous }) })
 }
 
@@ -173,6 +175,60 @@ func TestDashboardIntakeDebounceCoalescesABurst(t *testing.T) {
 	snap, err := wslive.ReadSnapshot(wslive.SnapshotPath(f.sessionDir(f.replyA)))
 	if err != nil || snap.Lead.Reply == nil || len(snap.Lead.Reply.Text) != 15 {
 		t.Fatalf("coalesced snapshot = %+v, %v", snap.Lead.Reply, err)
+	}
+}
+
+// TestDashboardIntakeCoalescesSubagentOnlyChangesLonger pins the agent-only
+// window: a batch whose every change is a subagent's own row waits
+// debounceAgent, while a permission prompt, a lead-level agent event, and a
+// status event go out within the usual window.
+func TestDashboardIntakeCoalescesSubagentOnlyChangesLonger(t *testing.T) {
+	f := newLiveFixture(t, true)
+	fastLive(t, 20*time.Millisecond)
+	const agentWindow = 900 * time.Millisecond
+	writes := make(chan time.Time, 64)
+	orig := currentLiveSeams().writeSnapshot
+	setLiveSeams(func(s *liveSeams) {
+		s.debounceAgent = agentWindow
+		s.writeSnapshot = func(path string, data []byte) error { writes <- time.Now(); return orig(path, data) }
+	})
+	nextWrite := func(within time.Duration) (time.Duration, bool) {
+		t.Helper()
+		start := time.Now()
+		select {
+		case at := <-writes:
+			return at.Sub(start), true
+		case <-time.After(within):
+			return 0, false
+		}
+	}
+	intake(t, f.server, f.keyA, map[string]any{"kind": "reset"})
+	if _, ok := nextWrite(3 * time.Second); !ok {
+		t.Fatal("no first snapshot write")
+	}
+
+	intake(t, f.server, f.keyA, map[string]any{"kind": "agent", "agentId": "sub-1", "label": "worker", "batches": []any{map[string]any{"epoch": "e", "seq": 1, "toolNames": []any{"Bash"}, "callCount": 1, "startedAt": 1100}}})
+	if _, ok := nextWrite(agentWindow / 3); ok {
+		t.Fatal("a subagent-only change was written inside the usual window")
+	}
+	if _, ok := nextWrite(3 * time.Second); !ok {
+		t.Fatal("the subagent-only change was never written")
+	}
+
+	for name, ev := range map[string]map[string]any{
+		"permission prompt":          {"kind": "permission", "tool": "Bash", "args": map[string]any{"command": "ls"}},
+		"lead agent event":           {"kind": "agent", "batches": []any{map[string]any{"epoch": "l", "seq": 1, "toolNames": []any{"Read"}, "callCount": 1, "startedAt": 1200}}},
+		"status event":               {"kind": "status", "context": map[string]any{"tokens": 1000, "window": 200000}},
+		"subagent permission prompt": {"kind": "permission", "agentId": "sub-1", "tool": "Edit"},
+	} {
+		intake(t, f.server, f.keyA, ev)
+		if _, ok := nextWrite(agentWindow / 2); !ok {
+			t.Fatalf("a %s waited past the usual window", name)
+		}
+		time.Sleep(50 * time.Millisecond)
+		for len(writes) > 0 {
+			<-writes
+		}
 	}
 }
 

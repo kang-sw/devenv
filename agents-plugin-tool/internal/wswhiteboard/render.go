@@ -91,6 +91,11 @@ var devAssets atomic.Pointer[wsdevassets.Root]
 // mermaid bundle stays embedded either way (MermaidAsset names it by hash).
 func SetDevAssets(root *wsdevassets.Root) { devAssets.Store(root) }
 
+// DevAssetsOn reports whether dev assets are on (SetDevAssets): the
+// templates are then re-read on every render, so a render's output is not a
+// function of its view alone.
+func DevAssetsOn() bool { return devAssets.Load() != nil }
+
 // devAssetDir is where the whiteboard assets live under a dev source root.
 const devAssetDir = "internal/wswhiteboard/assets"
 

@@ -136,7 +136,8 @@ func startTrackerWatch(h *wstrackerhost.Host, newErr error, onChange func()) (st
 // startTrackerPoll runs the tracker's background poll in the daemon on h:
 // every wstrackerhost.DefaultPollInterval, a fetch of every registered
 // store, whatever workflow.tracker_enabled says (the knob gates only manual
-// text), and onRound after each round. While it runs, a ws-mcp's pre-read
+// text), and onRound after the first round and each later one that changed
+// something (wstrackerhost.Host.PollOnce). While it runs, a ws-mcp's pre-read
 // check leaves the network to it. newErr is h's creation error: it is
 // logged once, and the daemon runs without the poll. The caller closes h.
 func startTrackerPoll(h *wstrackerhost.Host, newErr error, onRound func(), logw io.Writer) (stop func()) {

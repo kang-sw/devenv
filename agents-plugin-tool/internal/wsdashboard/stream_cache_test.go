@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -373,10 +374,11 @@ func bumpTime(t *testing.T, path string) {
 	}
 }
 
-// TestIndexRendersReadOnlyTheChangedSession: the sessions index re-reads
-// the page of a session whose Rev moved, for its board counts, and reuses
-// the counts of every other session; a moved count still shows.
-func TestIndexRendersReadOnlyTheChangedSession(t *testing.T) {
+// TestIndexReadsNoSessionPage: the sessions index shows a session's board
+// counts from the index's own read (SessionData.CountPolicy) and reads no
+// session page for them; a moved count still shows, and a session that
+// leaves and rejoins shows its current count.
+func TestIndexReadsNoSessionPage(t *testing.T) {
 	f := startPageFixture(t)
 	other := t.TempDir()
 	f.addSession(t, "lonersession", other, "alone")
@@ -389,24 +391,78 @@ func TestIndexRendersReadOnlyTheChangedSession(t *testing.T) {
 	page.Board.CountPolicy = 7
 	f.src.setPage("lonersession", page)
 	f.d.index.Nudge("lonersession", other)
-	waitRegionHolding(t, index, regionSessions, "7")
+	waitRegionHolding(t, index, regionSessions, `>7</span></span><span class="when">`)
 	time.Sleep(settle)
-	if got := f.src.readCount("lonersession"); got != lonerReads+1 {
-		t.Errorf("the index read the changed session %d times, want once", got-lonerReads)
+	if got := f.src.readCount("lonersession"); got != lonerReads {
+		t.Errorf("the index read the changed session's page %d times, want none", got-lonerReads)
 	}
 	if got := f.src.readCount("livesession"); got != liveReads {
-		t.Errorf("the index re-read an unchanged session %d times", got-liveReads)
+		t.Errorf("the index read an unchanged session's page %d times", got-liveReads)
 	}
+
+	// Leave and rejoin with another count: the index shows the new one.
+	f.src.mu.Lock()
+	f.src.gone["lonersession"] = true
+	f.src.mu.Unlock()
+	f.d.index.Nudge("lonersession", other)
+	waitFor(t, "lonersession to leave", func() bool { _, ok := f.d.Index().Session("lonersession"); return !ok })
+	f.src.mu.Lock()
+	delete(f.src.gone, "lonersession")
+	f.src.mu.Unlock()
+	page.Board.CountPolicy = 9
+	f.src.setPage("lonersession", page)
+	f.d.index.Nudge("lonersession", other)
+	waitRegionHolding(t, index, regionSessions, `>9</span></span><span class="when">`)
 }
 
-// TestRefreshTickRereadsAVolatilePage: a page whose source marks it
-// volatile (content no watched file covers) is re-read on every tick.
-func TestRefreshTickRereadsAVolatilePage(t *testing.T) {
+// TestRefreshTickFollowsAWatchedProcess: a page that names a process
+// (PageContent.WatchPIDs) skips its ticks while the process's liveness
+// holds, and re-renders when it dies, with no wake and no file change.
+func TestRefreshTickFollowsAWatchedProcess(t *testing.T) {
+	var mu sync.Mutex
+	alive := true
+	prev := processAlive
+	processAlive = func(pid int) bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return pid == 4242 && alive
+	}
+	t.Cleanup(func() { processAlive = prev })
+
 	f := startPageFixture(t, withRefresh)
-	f.src.setPage("boardsession", PageContent{HasBoard: true, Seq: 1, Board: boardRegions(t, "volatile"), Volatile: true})
+	f.src.setPage("boardsession", PageContent{HasBoard: true, Seq: 1, Board: boardRegions(t, "waiting"), WatchPIDs: []int{4242}})
 	f.d.index.Nudge("boardsession", f.project)
 	events := openStream(t, f.base+"/s/boardsession/events")
-	waitRegionHolding(t, events, regionBoard, "volatile")
+	waitRegionHolding(t, events, regionBoard, "waiting")
+
+	f.waitSkipping(t)
 	reads := f.src.readCount("boardsession")
-	waitFor(t, "ticks to re-read the page", func() bool { return f.src.readCount("boardsession") >= reads+3 })
+	time.Sleep(4 * 300 * time.Millisecond)
+	if got := f.src.readCount("boardsession"); got != reads {
+		t.Fatalf("ticks over a live process read the page %d times, want none", got-reads)
+	}
+	f.src.putPage("boardsession", PageContent{HasBoard: true, Seq: 1, Board: boardRegions(t, "wait ended"), WatchPIDs: []int{4242}})
+	mu.Lock()
+	alive = false
+	mu.Unlock()
+	waitRegionHolding(t, events, regionBoard, "wait ended")
+}
+
+// TestWokenPageSkipsTheNextTick: a page a wake re-rendered takes its
+// refresh stamp before that render, so the next tick over unchanged state
+// skips it rather than rendering it again.
+func TestWokenPageSkipsTheNextTick(t *testing.T) {
+	f := startPageFixture(t, withRefresh)
+	events := openStream(t, f.base+"/s/boardsession/events")
+	quiet(t, events)
+	f.waitSkipping(t)
+
+	f.change(t, "boardsession", f.project, "woken", 2)
+	waitRegionHolding(t, events, regionBoard, "woken")
+	reads := f.src.readCount("boardsession")
+	skips := f.d.stats.RefreshSkips.Load()
+	waitFor(t, "a tick after the wake", func() bool { return f.d.stats.RefreshSkips.Load() > skips })
+	if got := f.src.readCount("boardsession"); got != reads {
+		t.Fatalf("the tick after a wake read the page %d times, want none", got-reads)
+	}
 }

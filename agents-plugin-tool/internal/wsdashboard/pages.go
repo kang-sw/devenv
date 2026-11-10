@@ -556,9 +556,6 @@ type pageReader struct {
 	source  SessionSource
 	version string
 	now     func() time.Time
-	// boards memoizes what the index shows of each session's board; nil
-	// reads every page.
-	boards *boardCounts
 }
 
 func (r pageReader) clock() time.Time {
@@ -640,7 +637,7 @@ func (r pageReader) readSession(replyID string) (SessionView, refreshInputs, boo
 	}
 	in := pageInputs{Session: s, Page: page, Snapshot: r.readSnapshot(replyID), Now: r.clock(), Version: r.version}
 	looked := map[string]bool{replyID: true}
-	inputs := refreshInputs{watch: slices.Clone(page.Watch), volatile: page.Volatile}
+	inputs := refreshInputs{watch: slices.Clone(page.Watch), pids: slices.Clone(page.WatchPIDs)}
 	if adapterPresent(in.Snapshot, in.Now) {
 		in.Ring, _ = wslive.ReadRing(wslive.RingDir(SessionDir(r.dir, replyID)))
 		inbox := sessionInbox(r.dir, replyID)
@@ -665,6 +662,8 @@ func (r pageReader) readSession(replyID string) (SessionView, refreshInputs, boo
 	inputs.ids = append([]string{replyID}, inputs.ids...)
 	slices.Sort(inputs.watch)
 	inputs.watch = slices.Compact(inputs.watch)
+	slices.Sort(inputs.pids)
+	inputs.pids = slices.Compact(inputs.pids)
 	return view, inputs, true
 }
 
@@ -672,10 +671,11 @@ func (r pageReader) readSession(replyID string) (SessionView, refreshInputs, boo
 // inputs of its last read (stream_cache.go): for each session it looked up,
 // whether the index holds it, its revision, its liveness, and whether its
 // snapshot names a present adapter, all at call time; the state of each
-// watched path; and the contacts as re-read now. ok is false when the page
-// shows contacts the source cannot re-read, or volatile content.
+// watched path; the liveness of each watched process; and the contacts as
+// re-read now. ok is false when the page shows contacts the source cannot
+// re-read.
 func (r pageReader) sessionStamp(replyID string, in refreshInputs) (string, bool) {
-	if r.index == nil || in.volatile {
+	if r.index == nil {
 		return "", false
 	}
 	now := r.clock()
@@ -687,6 +687,9 @@ func (r pageReader) sessionStamp(replyID string, in refreshInputs) (string, bool
 	}
 	for _, path := range in.watch {
 		statStamp(h, path)
+	}
+	for _, pid := range in.pids {
+		fmt.Fprintf(h, "pid\x00%d\x00%t\x01", pid, processAlive(pid))
 	}
 	if in.contacts {
 		src, ok := r.source.(ContactSource)
@@ -750,7 +753,9 @@ func (r pageReader) history(replyID, before string, n int) (ConversationView, ws
 	return cv, ring, true, nil
 }
 
-// indexView builds the / view.
+// indexView builds the / view. It reads no session page: what it shows of
+// a board (whether there is one, its open policy items) comes with the
+// session from the index (SessionData.CountPolicy).
 func (r pageReader) indexView() IndexView {
 	var inputs []indexInput
 	if r.index != nil {
@@ -758,68 +763,14 @@ func (r pageReader) indexView() IndexView {
 			if s.Unlisted {
 				continue
 			}
-			page, ok := r.indexPage(s)
-			if !ok {
-				continue
-			}
-			inputs = append(inputs, indexInput{Session: s, Snapshot: r.readSnapshot(s.ReplyID), Page: page})
+			inputs = append(inputs, indexInput{Session: s, Snapshot: r.readSnapshot(s.ReplyID)})
 		}
 	}
 	return buildIndexView(inputs, r.clock(), r.version)
 }
 
-// indexPage is the part of s's page the index shows (whether it has a
-// board and the board's open policy items), from r.boards when s has not
-// changed since it was read.
-func (r pageReader) indexPage(s Session) (PageContent, bool) {
-	if r.boards == nil {
-		return r.readPage(s)
-	}
-	if page, ok := r.boards.get(s); ok {
-		return page, true
-	}
-	page, ok := r.readPage(s)
-	if ok {
-		page = PageContent{HasBoard: page.HasBoard, Board: wswhiteboard.Regions{CountPolicy: page.Board.CountPolicy}}
-		r.boards.put(s, page)
-	}
-	return page, ok
-}
-
-// boardCounts memoizes each session's index page by its Rev. The session
-// fingerprint covers the stored board, so an unchanged Rev means unchanged
-// counts; without it, every index render re-read and re-rendered every
-// listed session's whole page for two numbers.
-type boardCounts struct {
-	mu sync.Mutex
-	m  map[string]boardCount
-}
-
-type boardCount struct {
-	rev  uint64
-	page PageContent
-}
-
-func newBoardCounts() *boardCounts { return &boardCounts{m: map[string]boardCount{}} }
-
-func (b *boardCounts) get(s Session) (PageContent, bool) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	c, ok := b.m[s.ReplyID]
-	return c.page, ok && c.rev == s.Rev
-}
-
-// put stores s's index page. A session's entry is replaced as its Rev
-// moves; one the index drops stays until the daemon exits, as small as
-// the index row it stood for.
-func (b *boardCounts) put(s Session, page PageContent) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.m[s.ReplyID] = boardCount{rev: s.Rev, page: page}
-}
-
 func (d *Daemon) pages() pageReader {
-	return pageReader{dir: d.dir, index: d.index, source: d.source, version: d.endpoint.Version, boards: d.boards}
+	return pageReader{dir: d.dir, index: d.index, source: d.source, version: d.endpoint.Version}
 }
 
 // pagesIn is pages reading in the viewer's language.

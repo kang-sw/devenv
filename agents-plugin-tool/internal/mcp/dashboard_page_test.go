@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -15,8 +16,10 @@ import (
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsdashboard"
+	"github.com/kang-sw/devenv/internal/wsdevassets"
 	"github.com/kang-sw/devenv/internal/wsi18n"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
+	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
 
 // dashboardPageSource is a source over the test's key store whose clock
@@ -272,8 +275,8 @@ func TestDashboardReadPageWatchesUnnudgedFiles(t *testing.T) {
 // TestDashboardReadPageWatchesTheMailboxPanel pins the mailbox panel's
 // refresh inputs: a sender's mail nudges only the sender, so the page
 // names the history directory and the reply store the panel reads, and an
-// armed wait, whose process may die leaving its marker, makes the page
-// volatile.
+// armed wait, whose process may die leaving its marker, names that process
+// (PageContent.WatchPIDs).
 func TestDashboardReadPageWatchesTheMailboxPanel(t *testing.T) {
 	hf := newHistoryFixture(t, time.Date(2026, 11, 6, 9, 0, 0, 0, time.UTC))
 	if out := callToolWithKey(t, hf.serverB, 40, hf.keyB, "whiteboard.update", map[string]any{"commands": `<wb:topic name="t"><wb:add class="technical"><wb:title>q</wb:title></wb:add></wb:topic>`}); strings.Contains(out, "error") {
@@ -309,15 +312,15 @@ func TestDashboardReadPageWatchesTheMailboxPanel(t *testing.T) {
 			t.Errorf("Watch lacks %s: %v", want, page.Watch)
 		}
 	}
-	if page.Volatile {
-		t.Error("a page with no armed wait is volatile")
+	if len(page.WatchPIDs) != 0 {
+		t.Errorf("a page with no armed wait watches processes %v", page.WatchPIDs)
 	}
 
 	if err := wsmailbox.WriteListeningMarker(wsmailbox.ListeningMarker{SessionKey: hf.keyB, PID: os.Getpid(), StartedAt: time.Now().Format(time.RFC3339)}); err != nil {
 		t.Fatal(err)
 	}
-	if !readPageOK(t, src, reg).Volatile {
-		t.Error("a page with an armed wait is not volatile")
+	if got := readPageOK(t, src, reg).WatchPIDs; len(got) != 1 || got[0] != os.Getpid() {
+		t.Errorf("a page with an armed wait watches processes %v, want the wait's %d", got, os.Getpid())
 	}
 }
 
@@ -742,5 +745,228 @@ func TestDashboardReadClosedTopicsPastTheCap(t *testing.T) {
 	}
 	if strings.Contains(rest, f.key) {
 		t.Error("the closed topics carry the session key")
+	}
+}
+
+// boardRenders is how many board renders src ran.
+func boardRenders(src *DashboardSessionSource) int {
+	src.boards.mu.Lock()
+	defer src.boards.mu.Unlock()
+	return src.boards.renders
+}
+
+// TestDashboardBoardMemoKeysEveryBoardInput pins the board memo: a re-read
+// that changed nothing the board shows reuses the last render (a live
+// snapshot change alone re-renders no board), and each input to the board
+// render, changed alone, renders it again: the board's update sequence,
+// the todos and the agenda (written here without the board refresh that
+// would also move the sequence), the re-ask times, the language, a watched
+// file, and the listening marker's presence and its process's liveness. A
+// memo hit still returns the render's watched files and processes.
+func TestDashboardBoardMemoKeysEveryBoardInput(t *testing.T) {
+	f := newWhiteboardFixture(t)
+	src := dashboardPageSource(t, nil)
+	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
+	writeTicket(t, f.root, "ready", "261101-feat-ready-one", "Ready one")
+	f.update(t, `<wb:topic name="t"><wb:add class="technical"><wb:title>q one</wb:title></wb:add></wb:topic>`)
+
+	// settle reads until the memo holds a verified render, then expects the
+	// next read to reuse it.
+	settle := func(step string) wsdashboard.PageContent {
+		t.Helper()
+		readPageOK(t, src, reg)
+		readPageOK(t, src, reg)
+		before := boardRenders(src)
+		page := readPageOK(t, src, reg)
+		if got := boardRenders(src) - before; got != 0 {
+			t.Fatalf("%s: an unchanged re-read rendered the board %d times", step, got)
+		}
+		return page
+	}
+	misses := func(step string, change func()) {
+		t.Helper()
+		settle(step + " (before)")
+		before := boardRenders(src)
+		change()
+		readPageOK(t, src, reg)
+		if boardRenders(src) == before {
+			t.Fatalf("%s: the re-read reused the memoized board", step)
+		}
+	}
+
+	page := settle("first")
+	if len(page.Watch) == 0 {
+		t.Fatal("a memo hit lost the render's watched files")
+	}
+
+	// A live snapshot change is no board input.
+	dir, _ := src.stateDir()
+	if err := os.MkdirAll(wsdashboard.SessionDir(dir, reg.ReplyID), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wsdashboard.SessionDir(dir, reg.ReplyID), "snapshot.json"), []byte(`{"schemaVersion":1}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before := boardRenders(src)
+	readPageOK(t, src, reg)
+	if boardRenders(src) != before {
+		t.Fatal("a live snapshot change re-rendered the board")
+	}
+
+	misses("seq", func() {
+		f.update(t, `<wb:topic name="t"><wb:add class="technical"><wb:title>q two</wb:title></wb:add></wb:topic>`)
+	})
+	misses("todos", func() {
+		if err := f.s.sessions.mutateTodos(f.key, func(todos []todoItem) ([]todoItem, error) {
+			return append(todos, todoItem{Key: "k", Title: "a step", Status: todoPending}), nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	misses("agenda", func() {
+		if err := f.s.sessions.setAgenda(f.key, "plan", json.RawMessage(`{"a":1}`)); err != nil {
+			t.Fatal(err)
+		}
+	})
+	misses("re-ask times", func() {
+		if err := f.s.sessions.mutateRecord(f.key, partWhiteboard, func(r *sessionRecord) error {
+			r.Whiteboard.Items[0].ReaskedAt = time.Now().UTC().Format(time.RFC3339Nano)
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	misses("watched file", func() {
+		writeTicket(t, f.root, "ready", "261102-feat-ready-two", "Ready two")
+		bump := filepath.Join(f.root, "ai-docs", "tickets", "ready")
+		at := time.Now().Add(time.Second)
+		os.Chtimes(bump, at, at)
+	})
+	misses("marker present", func() {
+		if err := wsmailbox.WriteListeningMarker(wsmailbox.ListeningMarker{SessionKey: f.key, PID: os.Getpid(), StartedAt: time.Now().Format(time.RFC3339)}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if got := settle("marker hit").WatchPIDs; len(got) != 1 || got[0] != os.Getpid() {
+		t.Fatalf("a memo hit returned processes %v, want the wait's", got)
+	}
+	misses("marker process died", func() {
+		dead := exec.Command("true")
+		if err := dead.Run(); err != nil {
+			t.Skipf("no process to outlive: %v", err)
+		}
+		if err := wsmailbox.WriteListeningMarker(wsmailbox.ListeningMarker{SessionKey: f.key, PID: dead.Process.Pid, StartedAt: time.Now().Format(time.RFC3339)}); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	settle("language (before)")
+	before = boardRenders(src)
+	if _, ok := src.ReadPageLang(reg, "ko"); !ok {
+		t.Fatal("ReadPageLang failed")
+	}
+	if boardRenders(src) == before {
+		t.Fatal("another language reused the memoized board")
+	}
+}
+
+// TestDashboardBoardMemoKeepsContactsCurrent: contacts are outside the
+// memo, so a contact's liveness that follows the clock alone changes the
+// returned contacts while the board render is reused.
+func TestDashboardBoardMemoKeepsContactsCurrent(t *testing.T) {
+	t0 := time.Date(2026, 11, 6, 9, 0, 0, 0, time.UTC)
+	hf := newHistoryFixture(t, t0)
+	replyA := wsmailbox.ReplyID(hf.keyA)
+	if out := callToolWithKey(t, hf.serverB, 40, hf.keyB, "whiteboard.update", map[string]any{"commands": `<wb:topic name="t"><wb:add class="technical"><wb:title>q</wb:title></wb:add></wb:topic>`}); strings.Contains(out, "error") {
+		t.Fatalf("whiteboard.update: %s", out)
+	}
+	mustSend(t, hf.serverB, 50, hf.keyB, wsmailbox.ReplyIDPrefix+replyA, "to the reply id")
+	recB, ok := hf.serverB.sessions.readState(hf.keyB, partAll)
+	if !ok {
+		t.Fatal("no record for B")
+	}
+	reg := wsdashboard.Registration{ReplyID: wsmailbox.ReplyID(hf.keyB), Project: recB.Root}
+	replyPath, err := wsmailbox.ReplyRegistryPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := wsmailbox.WithReplyLock(replyPath, func(st *wsmailbox.ReplyStore) error {
+		entry := st.Entries[replyA]
+		entry.LastSeen = t0.Format(time.RFC3339)
+		st.Entries[replyA] = entry
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	now := t0.Add(5 * time.Minute)
+	src := dashboardPageSource(t, &now)
+	live := func() bool {
+		t.Helper()
+		for _, c := range readPageOK(t, src, reg).Contacts {
+			if c.ReplyID == replyA {
+				return c.PresenceLive
+			}
+		}
+		t.Fatal("no contact for A")
+		return false
+	}
+	live()
+	live()
+	if !live() {
+		t.Fatal("A is not live at +5m")
+	}
+	before := boardRenders(src)
+	now = t0.Add(11 * time.Minute)
+	if live() {
+		t.Fatal("A is still live at +11m")
+	}
+	if got := boardRenders(src) - before; got != 0 {
+		t.Fatalf("a contacts-only change rendered the board %d times", got)
+	}
+}
+
+// TestDashboardBoardMemoOffWithDevAssets: with dev assets on the templates
+// are re-read per render, so every read renders the board.
+func TestDashboardBoardMemoOffWithDevAssets(t *testing.T) {
+	f := newWhiteboardFixture(t)
+	src := dashboardPageSource(t, nil)
+	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
+	f.update(t, `<wb:topic name="t"><wb:add class="technical"><wb:title>q</wb:title></wb:add></wb:topic>`)
+	root, err := wsdevassets.Open(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wswhiteboard.SetDevAssets(root)
+	t.Cleanup(func() { wswhiteboard.SetDevAssets(nil) })
+	readPageOK(t, src, reg)
+	readPageOK(t, src, reg)
+	before := boardRenders(src)
+	readPageOK(t, src, reg)
+	if boardRenders(src) == before {
+		t.Fatal("a read with dev assets on reused a memoized board")
+	}
+}
+
+// TestDashboardReadSessionCountsOpenPolicyItems: the index's board count
+// comes with the session read, without rendering the board.
+func TestDashboardReadSessionCountsOpenPolicyItems(t *testing.T) {
+	f := newWhiteboardFixture(t)
+	src := dashboardPageSource(t, nil)
+	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
+	f.update(t, `<wb:topic name="t"><wb:add class="policy"><wb:title>p1</wb:title><wb:option>a</wb:option><wb:option>b</wb:option></wb:add><wb:add class="policy"><wb:title>p2</wb:title><wb:option>a</wb:option><wb:option>b</wb:option></wb:add><wb:add class="technical"><wb:title>q</wb:title></wb:add></wb:topic>`)
+	before := boardRenders(src)
+	data, ok := src.ReadSession(reg)
+	if !ok {
+		t.Fatal("ReadSession failed")
+	}
+	if !data.HasBoard || data.CountPolicy != 2 {
+		t.Fatalf("ReadSession = %+v, want a board with 2 open policy items", data)
+	}
+	if boardRenders(src) != before {
+		t.Fatal("ReadSession rendered the board")
+	}
+	if page := readPageOK(t, src, reg); page.Board.CountPolicy != data.CountPolicy {
+		t.Fatalf("the rendered board counts %d, ReadSession %d", page.Board.CountPolicy, data.CountPolicy)
 	}
 }

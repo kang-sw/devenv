@@ -2,6 +2,8 @@ package wstrackerhost
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -73,15 +75,35 @@ func (h *Host) CheckAll(ctx context.Context) {
 }
 
 // PollOnce is one round of the background poll: an unthrottled fetch of
-// every registered store with a remote.
-func (h *Host) PollOnce(ctx context.Context) {
+// every registered store with a remote. It reports whether the round moved
+// anything a page shows (pollStamp): a round that fetched nothing new and
+// kept every store's sync standing changed nothing.
+func (h *Host) PollOnce(ctx context.Context) (changed bool) {
 	h.forEachStore(ctx, func(st *store) {
+		before := pollStamp(st.entry.Dir)
 		h.trySweep(st)
-		if st.entry.Remote == "" {
-			return
+		if st.entry.Remote != "" {
+			_ = h.attempt(ctx, st, networkTimeout, st.ledger.Fetch)
 		}
-		_ = h.attempt(ctx, st, networkTimeout, st.ledger.Fetch)
+		if pollStamp(st.entry.Dir) != before {
+			changed = true
+		}
 	})
+	return changed
+}
+
+// pollStamp is what a poll round can move that a page shows: the store's
+// ledger state (storeStamp) and its sync standing (whether it ever reached
+// the remote, the last error, the wiki warnings), but not the attempt and
+// success times every round stamps.
+func pollStamp(dir string) string {
+	s := readSyncState(dir)
+	standing, _ := json.Marshal(struct {
+		Synced bool
+		Error  string
+		Wiki   []string
+	}{!s.SyncedAt.IsZero(), s.Error, s.WikiWarnings})
+	return fmt.Sprintf("%x\x00%s", storeStamp(dir), standing)
 }
 
 // forEachStore runs fn on every registered store this process can open,
@@ -106,7 +128,9 @@ func (h *Host) forEachStore(ctx context.Context, fn func(*store)) {
 // takes the poll lock (retrying each tick while another process holds it),
 // and runs PollOnce at once and then every interval while it holds the
 // lock, re-reading the registry each round. onRound, when not nil, runs after
-// each round this process ran, that is, only while it holds the poll lock.
+// each round this process ran (that is, only while it holds the poll lock)
+// that changed something (PollOnce), and after the first one it ran
+// whatever it found, since pages read before the poll began.
 // stop ends the poll and releases the lock. The dashboard daemon runs it, so
 // while the daemon runs, PreRead leaves the network to it.
 func (h *Host) StartPoll(interval time.Duration, onRound func()) (stop func()) {
@@ -127,6 +151,7 @@ func (h *Host) StartPoll(interval time.Duration, onRound func()) (stop func()) {
 				_ = fl.Unlock()
 			}
 		}()
+		ran := false
 		round := func() {
 			if !held {
 				// Fails while another process polls.
@@ -135,8 +160,9 @@ func (h *Host) StartPoll(interval time.Duration, onRound func()) (stop func()) {
 				}
 			}
 			if held {
-				h.PollOnce(ctx)
-				if onRound != nil && ctx.Err() == nil {
+				changed := h.PollOnce(ctx) || !ran
+				ran = true
+				if changed && onRound != nil && ctx.Err() == nil {
 					onRound()
 				}
 			}

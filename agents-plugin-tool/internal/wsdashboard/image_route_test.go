@@ -183,6 +183,88 @@ func TestImageDataURLInlinesContainedImages(t *testing.T) {
 	}
 }
 
+// TestImageDataURLCachesByResolvedFile pins the inlined-image cache: an
+// unchanged image is read once whatever path spells it (a symlink inside the
+// root shares the real file's entry), an over-cap image's empty answer is
+// cached too, an edit (size or time) reads again, and the containment check
+// still runs on every lookup, so a symlink retargeted outside the root is
+// refused although its old target is cached.
+func TestImageDataURLCachesByResolvedFile(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	writeFile(t, filepath.Join(root, "shots", "a.png"), "ABC")
+	writeFile(t, filepath.Join(root, "big.png"), strings.Repeat("x", imageDataMax+1))
+	writeFile(t, filepath.Join(outside, "secret.png"), "SECRET")
+	link := os.Symlink(filepath.Join(root, "shots", "a.png"), filepath.Join(root, "alias.png")) == nil
+	reads := func() int64 { return imageDataReads.Load() }
+
+	start := reads()
+	for range 3 {
+		if got := ImageDataURL(root, "shots/a.png"); got != "data:image/png;base64,QUJD" {
+			t.Fatalf("ImageDataURL = %.60q", got)
+		}
+		if link {
+			if got := ImageDataURL(root, "alias.png"); got != "data:image/png;base64,QUJD" {
+				t.Fatalf("ImageDataURL through the alias = %.60q", got)
+			}
+		}
+		if got := ImageDataURL(root, "big.png"); got != "" {
+			t.Fatalf("over-cap ImageDataURL = %.60q", got)
+		}
+	}
+	if got := reads() - start; got != 2 {
+		t.Fatalf("three rounds read %d files, want 2 (a.png and big.png once each)", got)
+	}
+
+	writeFile(t, filepath.Join(root, "shots", "a.png"), "ABCD")
+	if got := ImageDataURL(root, "shots/a.png"); got != "data:image/png;base64,QUJDRA==" {
+		t.Fatalf("after an edit ImageDataURL = %.60q", got)
+	}
+	if got := reads() - start; got != 3 {
+		t.Fatalf("the edit read %d files in all, want 3", got)
+	}
+
+	if link {
+		if err := os.Remove(filepath.Join(root, "alias.png")); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(filepath.Join(outside, "secret.png"), filepath.Join(root, "alias.png")); err != nil {
+			t.Fatal(err)
+		}
+		if got := ImageDataURL(root, "alias.png"); got != "" {
+			t.Fatalf("a symlink retargeted outside the root = %.60q", got)
+		}
+	}
+}
+
+// TestImageDataCacheStaysBounded: past its byte cap the cache drops the
+// least recently used entries, and a newer state of a file replaces its
+// older one.
+func TestImageDataCacheStaysBounded(t *testing.T) {
+	c := newImageDataCache(10)
+	c.put(imageDataKey{file: "a", size: 1}, "aaaa")
+	c.put(imageDataKey{file: "b", size: 1}, "bbbb")
+	c.get(imageDataKey{file: "a", size: 1}) // a is now the most recent
+	c.put(imageDataKey{file: "c", size: 1}, "cccc")
+	if _, ok := c.get(imageDataKey{file: "b", size: 1}); ok {
+		t.Error("the least recently used entry survived past the cap")
+	}
+	if _, ok := c.get(imageDataKey{file: "a", size: 1}); !ok {
+		t.Error("a recently used entry was dropped")
+	}
+	c.put(imageDataKey{file: "a", size: 2}, "AA")
+	if _, ok := c.get(imageDataKey{file: "a", size: 1}); ok {
+		t.Error("an older state of a file stayed beside its newer one")
+	}
+	if c.bytes > 10 {
+		t.Errorf("cache holds %d bytes, cap 10", c.bytes)
+	}
+	c.put(imageDataKey{file: "huge"}, strings.Repeat("x", 11))
+	if _, ok := c.get(imageDataKey{file: "huge"}); ok {
+		t.Error("a URL over the whole cap was kept")
+	}
+}
+
 // imageAs fetches the image route for path as a request from peer to host,
 // with the LAN token cookie (when set) and Sec-Fetch-Site (when set).
 func imageAs(d *Daemon, peer, host, cookie, fetchSite, path string) *httptest.ResponseRecorder {

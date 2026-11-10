@@ -131,8 +131,6 @@ type Daemon struct {
 	// refreshInterval is the streams' refresh tick.
 	cache           *pageCache
 	refreshInterval time.Duration
-	// boards memoizes the index's per-session board counts (pages.go).
-	boards *boardCounts
 	// tracker is the tracker host, nil without one; trackerRev is the
 	// revision TrackerChanged bumps and the streams send.
 	tracker    TrackerHost
@@ -265,7 +263,6 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 		},
 	}
 	d.cache = newPageCache(d.broker, stats)
-	d.boards = newBoardCounts()
 	if d.refreshInterval <= 0 {
 		d.refreshInterval = sseRefreshInterval
 	}

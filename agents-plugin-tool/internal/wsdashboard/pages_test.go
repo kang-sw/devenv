@@ -77,7 +77,7 @@ func (p *pageFake) setPage(id string, page PageContent) {
 	p.pages[id] = page
 	p.mu.Unlock()
 	raw, _ := json.Marshal(page)
-	p.set(id, SessionData{HasBoard: page.HasBoard, Fingerprint: string(raw)})
+	p.set(id, SessionData{HasBoard: page.HasBoard, CountPolicy: page.Board.CountPolicy, Fingerprint: string(raw)})
 }
 
 func writeSnapshot(t *testing.T, dir, id string, snap *wslive.Snapshot) {

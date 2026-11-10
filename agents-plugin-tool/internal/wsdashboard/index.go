@@ -19,6 +19,9 @@ const DefaultPollInterval = 30 * time.Second
 type SessionData struct {
 	// HasBoard reports whether the session has a whiteboard.
 	HasBoard bool
+	// CountPolicy is the board's open policy items, which the sessions
+	// index shows beside the board link; zero without a board.
+	CountPolicy int
 	// Fingerprint changes whenever anything the source read changed, so the
 	// index can tell a re-read that found a change from one that did not.
 	Fingerprint string
@@ -41,6 +44,8 @@ type Session struct {
 	// Live is Registration.Live at the time the index was read.
 	Live     bool
 	HasBoard bool
+	// CountPolicy is SessionData.CountPolicy as of the last read.
+	CountPolicy int
 	// SnapshotUpdatedAt ages the session's live snapshot (SessionData). A
 	// change of it alone is a heartbeat, not a session change: it does not
 	// raise Rev.
@@ -179,7 +184,7 @@ func (x *Index) apply(replyID string, reg *Registration) bool {
 		fmt.Fprintf(x.opts.Log, "dashboard: session %s removed (project %s)\n", replyID, entry.session.Project)
 		return true
 	}
-	next := Session{Registration: *reg, Live: reg.Live(now), HasBoard: data.HasBoard, SnapshotUpdatedAt: data.SnapshotUpdatedAt}
+	next := Session{Registration: *reg, Live: reg.Live(now), HasBoard: data.HasBoard, CountPolicy: data.CountPolicy, SnapshotUpdatedAt: data.SnapshotUpdatedAt}
 	if !known {
 		next.Rev = 1
 		x.sessions[replyID] = &indexEntry{session: next, fingerprint: data.Fingerprint}

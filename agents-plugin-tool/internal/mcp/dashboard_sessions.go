@@ -419,6 +419,9 @@ type DashboardSessionSource struct {
 	byReply map[string][]string
 	scanned time.Time
 	dirMods [2]time.Time
+
+	// boards memoizes each session's board render (dashboard_page.go).
+	boards boardMemo
 }
 
 // NewDashboardSessionSource returns a source over this machine's key store.
@@ -467,6 +470,7 @@ func (src *DashboardSessionSource) ReadSession(reg wsdashboard.Registration) (ws
 	}
 	return wsdashboard.SessionData{
 		HasBoard:          record.Whiteboard != nil,
+		CountPolicy:       record.Whiteboard.OpenPolicyCount(),
 		Fingerprint:       hex.EncodeToString(h.Sum(nil)[:16]),
 		SnapshotUpdatedAt: updatedAt,
 	}, true
