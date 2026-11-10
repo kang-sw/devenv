@@ -328,6 +328,9 @@
     "261109-research-windows-code-signing-signpath": {
       "registered_at": "2026-11-09T00:46:52Z"
     },
+    "261110-bug-ws-dashboard-conversation-switch-stale-page": {
+      "registered_at": "2026-11-10T14:09:28Z"
+    },
     "261110-bug-ws-mcp-move-close-guard-flake-and-suite-timeout": {
       "registered_at": "2026-11-10T01:04:17Z"
     },
