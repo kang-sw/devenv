@@ -220,7 +220,9 @@ func (m *Manager) Close() {
 
 // Scan reads the holders directory and attaches to every holder this
 // daemon is not attached to. A descriptor whose process is gone is removed
-// with its directory, as is a directory left without a descriptor.
+// with its directory, as is a directory left without a descriptor. So is one
+// whose PID now belongs to another process: its endpoint does not answer and
+// the process under the PID did not start when the descriptor says.
 func (m *Manager) Scan() {
 	m.opMu.Lock()
 	defer m.opMu.Unlock()
@@ -267,7 +269,19 @@ func (m *Manager) scan() {
 			seen[id] = false
 			continue
 		}
-		m.attach(desc)
+		// A holder that died without removing its directory (a reboot, a
+		// kill) leaves a descriptor whose PID the OS hands to another
+		// process. Nothing could ever stop that entry, since the guarded
+		// kill rightly refuses the stranger, so it is cleared here. Both
+		// signs are required: a start mismatch alone is not proof on an OS
+		// matched by wall clock, and a live holder answers its endpoint.
+		if err := m.attach(desc); err != nil && attachCause(err) == CauseNoAnswer && !errors.Is(err, ErrDetached) &&
+			errors.Is(m.sameProcess(desc), ErrStartTimeMismatch) {
+			m.logf("holder %s is gone and pid %d belongs to another process; removing its descriptor", id, desc.PID)
+			_ = os.RemoveAll(dir)
+			m.forget(id)
+			seen[id] = false
+		}
 	}
 	// A holder whose directory vanished stays while attached (it rewrites
 	// its descriptor); an unattached one is forgotten.
@@ -294,6 +308,15 @@ func (m *Manager) forget(id string) {
 	if e != nil && e.client != nil {
 		e.client.Close()
 	}
+}
+
+// attachCause is why a failed attach left the holder unattached.
+func attachCause(err error) Cause {
+	var attachErr *AttachError
+	if errors.As(err, &attachErr) {
+		return attachErr.Cause
+	}
+	return CauseNoAnswer
 }
 
 // attach attaches to the holder desc names and starts its record stream,
@@ -323,11 +346,7 @@ func (m *Manager) attach(desc Descriptor) error {
 	defer cancel()
 	client, info, err := Attach(ctx, desc, func(ev Event) { m.event(id, ev) })
 	if err != nil {
-		cause := CauseNoAnswer
-		var attachErr *AttachError
-		if errors.As(err, &attachErr) {
-			cause = attachErr.Cause
-		}
+		cause := attachCause(err)
 		m.mu.Lock()
 		changed := e.cause != cause
 		e.cause = cause

@@ -434,6 +434,41 @@ func TestGuardedKillIsRefusedOnAStartTimeMismatch(t *testing.T) {
 	}
 }
 
+// TestScanClearsADescriptorWhoseProcessIsAnother pins the cleanup of a
+// holder that died without removing its directory: once its PID belongs to
+// another process, which neither answers the endpoint nor started when the
+// descriptor says, the scan removes the directory and lists nothing. A
+// holder that merely does not answer is kept
+// (TestUnattachedHolderIsListedWithItsCauseAndKilledUnderTheGuard).
+func TestScanClearsADescriptorWhoseProcessIsAnother(t *testing.T) {
+	dir := testHoldersDir(t)
+	holderDir := filepath.Join(dir, "departed")
+	if err := os.MkdirAll(holderDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// The PID is alive (this test's own process) but started long after
+	// the recorded start.
+	desc, _ := json.Marshal(Descriptor{Schema: 1, ID: "departed", PID: os.Getpid(), Port: closedPort(t), Token: "t", Protocol: 1, StartedAt: 1, ScriptHash: "h"})
+	if err := os.WriteFile(filepath.Join(holderDir, descriptorName), desc, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	killed := false
+	m := testManager(t, dir, nil, func(o *Options) {
+		o.kill = func(int) error { killed = true; return nil }
+	})
+	m.Scan()
+	if rest := m.List().Holders; len(rest) != 0 {
+		t.Errorf("listing = %+v, want the departed holder cleared", rest)
+	}
+	if _, err := os.Stat(holderDir); !os.IsNotExist(err) {
+		t.Errorf("the departed holder's directory still exists: %v", err)
+	}
+	if killed {
+		t.Error("clearing a departed holder killed the process that now has its PID")
+	}
+}
+
 // TestGuardedKillHoldsAfterAWallClockStep pins the boot-clock match: where
 // the OS derives a creation time from the boot clock, a wall clock that
 // stepped after the holder started moves that time away from the recorded
@@ -720,7 +755,15 @@ func TestStagedScriptsNoLiveHolderRunsArePrunedAtStart(t *testing.T) {
 	if err := os.MkdirAll(holderDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	desc, _ := json.Marshal(Descriptor{Schema: 1, ID: "older", PID: os.Getpid(), Port: closedPort(t), Token: "t", Protocol: 1, StartedAt: 1, ScriptHash: liveHash})
+	self, err := processStartTime(os.Getpid())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ticks, err := processStartTicks(os.Getpid())
+	if err != nil {
+		t.Fatal(err)
+	}
+	desc, _ := json.Marshal(Descriptor{Schema: 1, ID: "older", PID: os.Getpid(), Port: closedPort(t), Token: "t", Protocol: 1, StartedAt: float64(self.UnixNano()) / 1e9, StartTicks: ticks, ScriptHash: liveHash})
 	if err := os.WriteFile(filepath.Join(holderDir, descriptorName), desc, 0o600); err != nil {
 		t.Fatal(err)
 	}

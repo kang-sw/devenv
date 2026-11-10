@@ -617,6 +617,9 @@ replays the holder's output ring (4 MiB, sequenced; a reattach within one
 daemon process continues after the last sequence it saw, a new daemon
 process replays the whole ring). The newest authenticated attach takes over,
 so a replaced daemon and its successor never both write to one child. A
+descriptor whose process is gone is removed with its directory, and so is
+one whose PID now belongs to another process (the endpoint does not answer
+and the process under the PID did not start when the descriptor says). A
 live holder stays unattached for one of three causes: its endpoint does not
 answer, its protocol is neither the daemon's version nor the one before it,
 or it refuses the token. `GET /holders` lists every holder with its state
