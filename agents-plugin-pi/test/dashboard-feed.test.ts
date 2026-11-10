@@ -33,6 +33,8 @@ import {
 } from "../src/dashboard-feed.ts";
 import { ADAPTER_MESSAGE_LABEL, WHITEBOARD_MESSAGE_LABEL, labelAdapterText, labelWhiteboardText, whiteboardLabeledBody, whiteboardSubmissionText } from "../src/adapter-label.ts";
 import { createBatchBuffer, observeBatchEvent } from "../src/agent-batches.ts";
+import { agentDisplayDetail } from "../src/agent-display.ts";
+import { createOutputRateTracker } from "../src/output-rate.ts";
 import { ADAPTER_ONLY_RAW_TOOLS, filterOutAdapterOnlyTools, filterOutMercenaryTools } from "../src/bridge.ts";
 import { markAgentExited, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
 
@@ -329,6 +331,25 @@ describe("subagent feed", () => {
     assert.deepEqual(calls.at(-1)!.args.events.map((event) => [event.agentId, event.status]), [["w1", "done"]]);
   });
 
+  test("a subagent's model, effort, context tokens, and output rate ride its agent event; unknown ones are left out", async () => {
+    let entries: DashboardAgentEntry[] = [entry({ model: "anthropic/claude-x", effort: "high", contextTokens: 48_211, outputTps: 61.5 }), entry({ agentId: "a2" })];
+    const { feed, events, advance } = harness({ agents: () => entries });
+    feed.start();
+    await advance(0);
+    const a1 = events().find((event) => event.kind === "agent" && event.agentId === "a1")!;
+    assert.equal(a1.model, "anthropic/claude-x");
+    assert.equal(a1.effort, "high");
+    assert.equal(a1.contextTokens, 48_211);
+    assert.equal(a1.outputTps, 61.5);
+    const a2 = events().find((event) => event.kind === "agent" && event.agentId === "a2")!;
+    for (const field of ["model", "effort", "contextTokens", "outputTps"]) assert.equal(field in a2, false, `${field} sent while unknown`);
+    // A changed rate alone resends the agent.
+    entries = [entry({ model: "anthropic/claude-x", effort: "high", contextTokens: 48_211, outputTps: 70 }), entry({ agentId: "a2" })];
+    feed.agentsChanged();
+    await advance(FLUSH_INTERVAL_MS);
+    assert.equal(events().at(-1)!.outputTps, 70);
+  });
+
   test("a failed agent is sent failed; one that leaves the registry while running ends done", async () => {
     let entries: DashboardAgentEntry[] = [entry({ agentId: "a1" }), entry({ agentId: "a2" })];
     const { feed, events, advance } = harness({ agents: () => entries });
@@ -409,6 +430,35 @@ describe("dashboardAgentEntries", () => {
     assert.equal(f1.label, "side");
     assert.equal(byId.get("x1")!.status, "failed");
     assert.equal(byId.get("x1")!.parentId, undefined);
+  });
+});
+
+describe("dashboardAgentEntries telemetry", () => {
+  function rec(agentId: string, overrides: Partial<RpcAgentRecord> = {}): RpcAgentRecord {
+    return { agentId, sessionPath: "/tmp/x/session.jsonl", wsToolNames: [], toolGroup: "full-worker", streaming: false, running: true, runStartedAt: 50, reportLog: [], client: {} as never, ...overrides };
+  }
+
+  test("each entry carries the values the agent gutter shows for the same record, and a relayed descendant its owner's", () => {
+    const outputRate = createOutputRateTracker();
+    outputRate.observe({ type: "message_start", message: { role: "assistant" } }, 1_000);
+    outputRate.observe({ type: "message_update", assistantMessageEvent: { type: "text_start", contentIndex: 0 } }, 1_000);
+    outputRate.observe({ type: "message_update", assistantMessageEvent: { type: "text_end", contentIndex: 0 } }, 3_000);
+    outputRate.observe({ type: "message_end", message: { role: "assistant", provider: "p", model: "m", usage: { output: 120 } } }, 3_000);
+    const w1 = rec("w1", {
+      observedModel: "p/m", observedEffort: "medium", observedContextTokens: 31_000, outputRate,
+      subtreeDescendants: [{ id: "g1", parentId: null, depth: 0, role: "explore", live: true, display: { name: "scout", state: "running", runStartedAt: 60, lastOutputAt: 0, model: "p/n", effort: "low", contextTokens: 9_000, outputTps: 42 } }],
+    });
+    const bare = rec("b1");
+    const entries = dashboardAgentEntries(new Map([["w1", w1], ["b1", bare]]));
+    const byId = new Map(entries.map((item) => [item.agentId, item]));
+    const gutter = agentDisplayDetail(w1)!;
+    assert.equal(gutter.outputTps, 60);
+    const e1 = byId.get("w1")!;
+    assert.deepEqual([e1.model, e1.effort, e1.contextTokens, e1.outputTps], [gutter.model, gutter.effort, gutter.contextTokens, gutter.outputTps]);
+    const g1 = byId.get("g1")!;
+    assert.deepEqual([g1.model, g1.effort, g1.contextTokens, g1.outputTps], ["p/n", "low", 9_000, 42]);
+    const b1 = byId.get("b1")!;
+    for (const field of ["model", "effort", "contextTokens", "outputTps"] as const) assert.equal(b1[field], undefined, `${field} present while unknown`);
   });
 });
 

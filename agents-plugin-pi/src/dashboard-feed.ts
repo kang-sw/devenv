@@ -16,8 +16,9 @@
  *   usage, and stays listed past the newest five until a delivered call
  *   carried it, so ws-mcp counts every batch once;
  * - one `agent` event per subagent whose state changed, keyed by its native
- *   agent id, and a `permission` event while an execute-worker waits on an
- *   approval;
+ *   agent id, with the model, effort, context tokens, and output rate its
+ *   agent gutter shows (each left out while unknown), and a `permission`
+ *   event while an execute-worker waits on an approval;
  * - the lead's streamed reply text (the full text so far) and each finished
  *   reply with `final: true`;
  * - each finished user message with its origin;
@@ -69,7 +70,7 @@ import type { CumulativeCost } from "./agent-telemetry.ts";
 import { buildAgentViewModel } from "./agent-view.ts";
 import type { GoalLoopConfig } from "./goal-loop.ts";
 import { GATED_EXEC_TOOL_NAME, type RpcAgentRegistry } from "./spawner.ts";
-import { selectSubtreeDescendants, type SubtreeDescendantRole } from "./subtree-lifecycle.ts";
+import { selectSubtreeDescendants, type SubtreeDescendant, type SubtreeDescendantRole } from "./subtree-lifecycle.ts";
 
 /** The ws-mcp intake tool. Adapter-only: the bridge never registers it as a model tool. */
 export const DASHBOARD_INTAKE_TOOL = "dashboard.intake";
@@ -129,6 +130,11 @@ export interface DashboardAgentEntry {
   caption: string;
   batches: BatchView[];
   permission?: DashboardPermission;
+  /** The values the agent gutter shows for the agent; each is left out while unknown. */
+  model?: string;
+  effort?: string;
+  contextTokens?: number;
+  outputTps?: number;
 }
 
 export interface DashboardTarget {
@@ -333,11 +339,27 @@ export function dashboardAgentEntries(registry: RpcAgentRegistry): DashboardAgen
       status,
       caption: caption(row.role, state),
       batches: views.get(row.id) ?? [],
+      ...telemetryOf(row.display),
     };
     const approval = record?.pendingApproval;
     if (approval && approval.decision !== "sent") entry.permission = { tool: GATED_EXEC_TOOL_NAME, args: { command: approval.command } };
     return entry;
   });
+}
+
+/**
+ * The gutter's telemetry for one row: a direct child's own display detail or
+ * the one its owner relayed for a deeper descendant, the same values the agent
+ * widget draws (`agentDisplayDetail`). A value the detail lacks is left out.
+ */
+function telemetryOf(display: SubtreeDescendant["display"]): Pick<DashboardAgentEntry, "model" | "effort" | "contextTokens" | "outputTps"> {
+  if (!display) return {};
+  return {
+    ...(display.model ? { model: display.model } : {}),
+    ...(display.effort ? { effort: display.effort } : {}),
+    ...(display.contextTokens !== undefined ? { contextTokens: display.contextTokens } : {}),
+    ...(display.outputTps !== undefined ? { outputTps: display.outputTps } : {}),
+  };
 }
 
 interface SentAgent {
@@ -463,6 +485,10 @@ export function createDashboardFeed(options: DashboardFeedOptions): DashboardFee
         status: entry.status,
         caption: entry.caption,
         batches: entry.batches,
+        ...(entry.model ? { model: entry.model } : {}),
+        ...(entry.effort ? { effort: entry.effort } : {}),
+        ...(entry.contextTokens !== undefined ? { contextTokens: entry.contextTokens } : {}),
+        ...(entry.outputTps !== undefined ? { outputTps: entry.outputTps } : {}),
       };
       const key = JSON.stringify(event);
       const permission = entry.permission ? JSON.stringify(entry.permission) : "";
