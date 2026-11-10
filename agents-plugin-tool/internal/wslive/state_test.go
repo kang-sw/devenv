@@ -669,3 +669,79 @@ func TestCardFollowsTheReplyItEnds(t *testing.T) {
 		}
 	}
 }
+
+// TestSubagentTelemetryRoundTripsAndKeepsAbsentFields pins a subagent's
+// telemetry: an agent event's model, effort, context tokens, and output rate
+// reach the snapshot JSON and read back; a later event that omits a field,
+// or carries a blank or out-of-range one, keeps the held value; the rate
+// goes once the subagent ends while the rest stays; and the lead takes none.
+func TestSubagentTelemetryRoundTripsAndKeepsAbsentFields(t *testing.T) {
+	st := NewState(ownerKey)
+	mustApply(t, st, Event{Kind: KindAgent, AgentID: "a1", Label: "worker", Status: StatusRunning,
+		Model: "claude-opus-5-5", Effort: "high", ContextTokens: f64p(48_211.4), OutputTps: f64p(61.5)}, 1_000)
+	mustApply(t, st, Event{Kind: KindAgent, AgentID: "a1", Model: "  ", ContextTokens: f64p(-1), OutputTps: f64p(MaxOutputTps + 1)}, 1_100)
+
+	path := filepath.Join(t.TempDir(), SnapshotName)
+	raw, err := json.Marshal(st.Snapshot(1_200))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"model":"claude-opus-5-5"`, `"effort":"high"`, `"contextTokens":48211`, `"outputTps":61.5`} {
+		if !strings.Contains(string(raw), want) {
+			t.Fatalf("snapshot JSON lacks %s: %s", want, raw)
+		}
+	}
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	snap, err := ReadSnapshot(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := snap.Agents[0]
+	if a.Model != "claude-opus-5-5" || a.Effort != "high" || a.ContextTokens != 48_211 || a.OutputTps != 61.5 {
+		t.Fatalf("read back %+v", a)
+	}
+
+	mustApply(t, st, Event{Kind: KindAgent, AgentID: "a1", Status: StatusDone, OutputTps: f64p(70)}, 2_000)
+	a = st.Snapshot(2_000).Agents[0]
+	if a.OutputTps != 0 || a.Model != "claude-opus-5-5" || a.Effort != "high" || a.ContextTokens != 48_211 {
+		t.Fatalf("ended agent = %+v, want the rate gone and the rest kept", a)
+	}
+	raw, _ = json.Marshal(a)
+	if strings.Contains(string(raw), "outputTps") {
+		t.Fatalf("ended agent JSON still names a rate: %s", raw)
+	}
+
+	// A subagent no adapter reported telemetry for shows none.
+	mustApply(t, st, Event{Kind: KindAgent, AgentID: "a2", Status: StatusRunning}, 2_100)
+	raw, _ = json.Marshal(st.Snapshot(2_100).Agents[1])
+	for _, field := range []string{"model", "effort", "contextTokens", "outputTps"} {
+		if strings.Contains(string(raw), `"`+field+`"`) {
+			t.Fatalf("agent without telemetry names %s: %s", field, raw)
+		}
+	}
+
+	if _, err := st.Apply(Event{Kind: KindAgent, Model: "m"}, 3_000); err == nil {
+		t.Fatal("the lead took a model")
+	}
+}
+
+// TestBatchViewJSONIsUnchangedByTelemetry pins that a snapshot batch's JSON
+// still leaves out its calls and usage: subagent telemetry travels on the
+// agent, never through the batch view.
+func TestBatchViewJSONIsUnchangedByTelemetry(t *testing.T) {
+	st := NewState(ownerKey)
+	b := finished(1, 1, 0, "Read")
+	b["calls"] = []any{map[string]any{"name": "Read", "startedAt": 1001, "endedAt": 1500}}
+	b["usage"] = map[string]any{"input": 10, "output": 20, "cacheRead": 30}
+	mustApply(t, st, Event{Kind: KindAgent, AgentID: "a1", Status: StatusRunning, Model: "m", ContextTokens: f64p(60), Batches: batchesJSON(t, b)}, 3_000)
+	raw, err := json.Marshal(st.Snapshot(3_000).Agents[0].Batches)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `[{"epoch":"ep1","seq":1,"toolNames":["Read"],"callCount":1,"failed":0,"startedAt":1001,"endedAt":2001}]`
+	if string(raw) != want {
+		t.Fatalf("batch JSON = %s, want %s", raw, want)
+	}
+}
