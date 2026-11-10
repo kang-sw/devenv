@@ -51,9 +51,11 @@ alone.
   when you pass `comment`), `scope` switches the Items scope, and `view`
   switches the Items view mode. Use it when the user asks to be shown or
   taken somewhere; to point at items in your answer, show cards instead.
-- The search box keeps the items of the current scope whose title, body,
-  project, or ID contains its text, so switch the scope to `all` first when
-  the item may be anywhere.
+- The search box takes the same search grammar as `tracker.query`'s `q`
+  (the tracker playbook spells it out) and lists the matching items of the
+  current scope. Find the items with `tracker.query` `q` first, then search
+  with that query, after switching the scope to `all` when the items may be
+  anywhere.
 - It never writes: make a change with `tracker.update`, never through the
   view. It cannot open another store; for an item of another store, answer
   in text and name the store.

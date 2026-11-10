@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/kang-sw/devenv/internal/wslive"
+	"github.com/kang-sw/devenv/internal/wstracker"
 	"github.com/kang-sw/devenv/internal/wstrackerhost"
 )
 
@@ -53,6 +54,9 @@ func (s *Server) handleTrackerUI(ctx context.Context, id json.RawMessage, args m
 		}
 		if utf8.RuneCountInString(q) > wslive.UIQueryRunes {
 			return refuse("the query is longer than %d characters", wslive.UIQueryRunes)
+		}
+		if _, err := wstracker.ParseQuery(q); err != nil {
+			return refuse("the query is not valid search grammar: %v", err)
 		}
 		cmd.Arg = q
 		does = fmt.Sprintf("types %q into the Items search box", q)

@@ -836,15 +836,17 @@
   }
   // a store's search state: want / wantView, the query and view object the last request was
   // made for; seq, the request counter (an answer to an older request is dropped); q, ids, err,
-  // the last answer; timer, the pending debounced request
-  function searchState(n) { return (ui.psr[n] = ui.psr[n] || { seq: 0, want: null, wantView: null, q: null, ids: null, err: '', timer: null }); }
+  // the last answer; timer, the pending debounced request; now, the next changed query was set
+  // whole (a support chat's search command), not typed, so it skips the debounce
+  function searchState(n) { return (ui.psr[n] = ui.psr[n] || { seq: 0, want: null, wantView: null, q: null, ids: null, err: '', timer: null, now: false }); }
   // Called by each render of the panel with the trimmed query: (re)sends the request when the
-  // query or the view object changed since the last one, debounced when the query changed.
+  // query or the view object changed since the last one, debounced when the query was typed.
   function searchFor(n, q) {
-    var st = searchState(n);
+    var st = searchState(n), now = st.now;
+    st.now = false;
     if (!q) { clearTimeout(st.timer); ui.psr[n] = null; return; }
     if (st.want === q && st.wantView === VS) return;
-    var typed = st.want !== q;
+    var typed = st.want !== q && !now;
     st.want = q; st.wantView = VS;
     clearTimeout(st.timer);
     st.timer = setTimeout(function () {
@@ -3878,7 +3880,7 @@
   function showItem(id, opener, focus) { openItemWindow(ui.store, id, { opener: opener, focus: focus }); }
   // uiCommand performs a store support chat's UI command (h.uiCommand) on store id's view,
   // as the user's own operation would: search puts cmd.arg in the Items search box and
-  // filters at once (no typing to wait out), focus opens the item whose alias is cmd.arg
+  // sends it at once (no typing debounce to wait out; searchFor), focus opens the item whose alias is cmd.arg
   // (at the thread comment whose alias is cmd.comment, when given), scope and view switch
   // the Items scope and view mode. Search, scope, and view bring the Items panel up: the
   // Items tab when narrow (where it replaces the chat's tab), the items side of the
@@ -3897,7 +3899,7 @@
     }
     VS = sv; // scopeList reads the viewer's team from the shown view
     var ps = panelState();
-    if (cmd.op === 'search') ps.q = String(cmd.arg || '');
+    if (cmd.op === 'search') { ps.q = String(cmd.arg || ''); searchState(id).now = true; }
     else if (cmd.op === 'scope') {
       if (!scopeList().some(function (x) { return x[0] === cmd.arg; })) return false;
       ps.scope = cmd.arg;

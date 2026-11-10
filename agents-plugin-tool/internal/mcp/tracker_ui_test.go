@@ -18,6 +18,7 @@ func TestTrackerUICommandLines(t *testing.T) {
 		line string
 	}{
 		{map[string]any{"op": "search", "query": "  parser fix "}, "ui search parser fix"},
+		{map[string]any{"op": "search", "query": `status:todo "the parser"`}, `ui search status:todo "the parser"`},
 		{map[string]any{"op": "focus", "item": f.meItem}, "ui focus " + f.meItem},
 		{map[string]any{"op": "focus", "item": f.meItem, "comment": comment}, "ui focus " + f.meItem + " " + comment},
 		{map[string]any{"op": "focus", "item": strings.Replace(f.meItem, "-", "#", 1)}, "ui focus " + f.meItem},
@@ -53,6 +54,7 @@ func TestTrackerUIRefusals(t *testing.T) {
 		{map[string]any{"op": "search"}, "needs a query"},
 		{map[string]any{"op": "search", "query": "two\nlines"}, "one line"},
 		{map[string]any{"op": "search", "query": strings.Repeat("x", 201)}, "longer than 200"},
+		{map[string]any{"op": "search", "query": "fix due:<tomorrow"}, "not valid search grammar"},
 		{map[string]any{"op": "scope", "scope": "everyone"}, `scope "everyone" is not an Items scope`},
 		{map[string]any{"op": "view", "mode": "tree"}, `mode "tree" is not an Items view mode`},
 		{map[string]any{"op": "focus"}, "needs an item"},
