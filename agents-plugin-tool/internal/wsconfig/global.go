@@ -29,6 +29,18 @@ func GlobalPath(opts Options) (string, error) {
 	return filepath.Join(home, defaultConfigDirName, "config.json"), nil
 }
 
+// GlobalOverride is the raw value key holds in the global config file's
+// overrides, and whether it is set: the file's own text, through no
+// manifest and no resolution. A missing file is an unset key.
+func GlobalOverride(opts Options, key string) (string, bool) {
+	cfg, err := loadGlobalConfig(opts)
+	if err != nil {
+		return "", false
+	}
+	value, ok := cfg.Overrides[key]
+	return value, ok
+}
+
 // loadGlobalConfig reads the global config file. A missing file returns an
 // empty Config (equivalent to "no global overrides"), mirroring the project
 // Load pattern.
