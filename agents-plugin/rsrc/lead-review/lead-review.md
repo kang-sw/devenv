@@ -57,6 +57,19 @@ you resolve the target, adjudicate their findings, and carry the decisions.
    `concern`; `ref` is the routed ticket stem, required on `block`). Never
    pass the marker entry's base: it drifts to the bootstrap commit. This step
    is the ledger's only writer.
+   A NEEDS FIX that stamps `block` first looks for a cleared prefix, so a
+   blocking merge late in the range does not hold back the commits before it.
+   Map each Critical and Important finding to the first-parent segment that
+   introduced it (`git log --first-parent <base>..<head> -- <path>`; a path
+   several segments touch maps to the earliest of them); a finding with no
+   path, or with a path no segment touched, leaves no prefix. The candidate
+   cut is the first parent of the earliest mapped segment; there is no prefix
+   when that is `<base>`. Run the reviewers once more over `<base>..<cut>` as
+   its own range, because they judge the head state of a range and the
+   aggregate findings cannot vouch for an earlier state. When that review's
+   verdict maps to `pass` or `concern`, stamp `<base>..<cut>` with it, then
+   the full range as `block`; otherwise stamp only the full range and report
+   `<base>..<head>` as uncleared, with no further search.
 7. Range scenario only: commit the stamped ledger with
    `{{.McpNamespace}}/git.commit`, recording every finding the verdict
    accepts without a fix as a `followups` entry of category `review`: an
@@ -83,7 +96,8 @@ you resolve the target, adjudicate their findings, and carry the decisions.
   repair route completes, invoke `{{.SkillNamespace}}:lead-review` again on
   the repaired target; for a range, retain the original base and include the
   repair commits in the head so the findings and range are independently
-  verified. Contributor → the config's Comment Method, else hand over the path.
+  verified; after a step-6 prefix stamp, the cut is that base.
+  Contributor → the config's Comment Method, else hand over the path.
 - **OPEN**: judgment needed before a fix decision →
   `{{.SkillNamespace}}:lead-discuss` with the findings path.
 

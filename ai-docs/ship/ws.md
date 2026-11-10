@@ -1,94 +1,104 @@
 # Ship: ws
 
-Ships the `ws` / `wsflow` plugin packages by promoting `develop` to `main` and
-pushing a `v<version>` tag, which triggers the `ws-mcp release` GitHub Actions
-workflow (`.github/workflows/ws-mcp-release.yml`) to build cross-platform
-`ws-mcp` assets and publish a GitHub release.
+Ships the `ws` / `wsflow` plugin packages as a cut-point release: a
+`release/<version>` branch cut at the review frontier head carries the version
+bump, `main` fast-forwards to it, and a `v<version>` tag on it triggers the
+`ws-mcp release` GitHub Actions workflow (`.github/workflows/ws-mcp-release.yml`)
+to build cross-platform `ws-mcp` assets and publish a GitHub release. `develop`
+keeps taking merges for the whole release; the release branch is merged back
+into it afterwards, which keeps `main` an ancestor of `develop`.
 
 ## Version Strategy
 
 Each ship owns exactly one patch-version bump, and a version counts as claimed
-only once its `v<version>` tag exists on origin. After confirming that local
-`develop` contains `origin/develop`, read the current version from
+only once its `v<version>` tag exists on origin. Read the version on the
+release branch after Release Branch's Cut and Merge release target steps, so a
+merged `main` brings in the previous release's version: read
 `agents-plugin/runtime.json` `.plugin_version` and run
 `git ls-remote --tags origin v<current>`:
 
 - Non-empty (the normal case: the previous ship tagged it): increment the patch
   component and run `agents-plugin-tool/scripts/bump-ws-version.sh
-  <next-version>`. Commit the script-generated version edits on `develop`
-  before testing or tagging.
-- Empty (an earlier ship bumped to this version but stopped before pushing the
-  tag, e.g. at Publish's CI gate): reuse `<current>` as this ship's version. No
-  bump script run, no new version commit.
+  <next-version>`. Commit the script-generated version edits on the release
+  branch before testing or tagging.
+- Empty (an earlier bump reached the cut point but its tag was never pushed):
+  reuse `<current>` as this ship's version. No bump script run, no new version
+  commit.
 
 Ordinary merges into `develop` do not bump the version. The tag is `.release_tag`
 (`v<plugin_version>`). Ship refuses if `.release_tag != "v" + .plugin_version`
 for either `agents-plugin/runtime.json` or `agents-plugin-wsflow/runtime.json`
 (the workflow enforces the same contract).
 
+## Release Branch
+
+All release-branch work runs in a dedicated worktree, never in the main
+checkout: parallel lead sessions share that checkout, and moving its HEAD would
+land their commits on the release branch.
+
+- Cut: `ws/worktree.acquire(base: <cut>, target_branch:
+  release/pending-<short cut sha>, profile: "full")`; run every release-branch
+  command below in the returned worktree. Once Version Strategy has the
+  version, rename the branch there with `git branch -m release/<version>`.
+- Merge release target: when `git merge-base --is-ancestor main <cut>` fails
+  (the cut predates the previous release's merge back), run `git merge --no-ff
+  main` on the release branch before Version Strategy reads the version. A
+  conflict stops the ship.
+- Promote (Publish): `git checkout main && git merge --ff-only
+  <release-head>` in the release worktree.
+- Merge back (Post-ship): merge `release/<version>` into `develop`.
+
 ## Pre-flight
 
-**Sync develop against origin FIRST — never ship from stale local refs.** This
-is the recurring failure mode: a parallel session ships a patch, `origin/develop`
-and the `v<version>` tag advance, and a local ship that skipped `fetch` promotes
-stale `develop` (colliding on the version/tag). Every check below runs against
-freshly fetched state.
+**Sync against origin FIRST — never ship from stale local refs.** This is the
+recurring failure mode: a parallel session ships a patch, `origin/main` and the
+`v<version>` tag advance, and a local ship that skipped `fetch` cuts from stale
+refs (colliding on the version/tag). Every check below runs against freshly
+fetched state.
 
-- **Release gate** (this project declares `release-boundary: present` in
-  `AGENTS.md` `### Review Policy` — see `lead-ship`'s Release gate section):
-  call `review.marker(format: json)` to resolve the review-watermark
-  frontier. Check `found` **first, before any rev-list call** — an empty
-  `head` substituted into `git rev-list --count <frontier-head>..develop`
-  resolves the empty side to `develop`'s own tip and silently reports `0`,
-  which would wrongly read as clear.
-  - `found: false` (no ledger entry yet — this project's first ship): treat
-    all prior history as review-skipped, **not clear**, and **stop for an
-    explicit decision** between (i) `review.marker(bootstrap: true)` to
-    accept prior history as unreviewed (seeds `<HEAD>..<HEAD>`, equivalent to
-    an override, nothing reviewed — this is itself the explicit accept, so it
-    proceeds directly) or (ii) an explicit `lead-review` over
-    `range: <chosen-base>..develop` for a human-supplied base, which stamps
-    and advances the marker. These do not compose. Option (ii) is a real
-    review, not an accept-as-is: apply the same clears/not-clear handling as
-    the `found: true` branch below to its outcome — a `block`/non-clearing
-    result must stop for another explicit decision, not auto-proceed.
-  - `found: true`: run `git rev-list --count <frontier-head>..develop`.
-    Empty — proceed. Non-empty — trigger `lead-review` over
-    `range: <frontier-head>..develop`; if it still doesn't clear, surface a
-    strong recommendation and stop for an explicit decision.
-  - An override at any of these stops proceeds without stamping the marker
-    (only `lead-review`'s own `review.stamp` step ever advances it).
 - `git fetch origin --tags` — refresh remote-tracking refs and tags before any
   other check.
-- Develop is up to date: `git merge-base --is-ancestor origin/develop develop` —
-  local `develop` must contain all of `origin/develop`. If it fails,
-  `origin/develop` advanced (a parallel ship or merge): **stop and reconcile
-  first** — `git merge origin/develop` into `develop`, then restart Pre-flight.
-  Never promote a `develop` that is behind `origin/develop`.
-- Resolve this ship's version per Version Strategy: bump through
-  `bump-ws-version.sh` and commit the generated version edits on `develop`
-  when the current version's tag is claimed; reuse the current version when it
-  is not.
+- Local refs are up to date: `git merge-base --is-ancestor origin/develop
+  develop` (local `develop` contains all of `origin/develop`), and
+  `git rev-parse main` equals `git rev-parse origin/main`. If either fails,
+  **stop and reconcile first** (`git merge origin/develop` into `develop`;
+  fast-forward local `main` to `origin/main`), then restart Pre-flight.
+- **Release gate** (this project declares `release-boundary: present` in
+  `AGENTS.md` `### Review Policy`): run `lead-ship`'s Release gate over
+  `develop`. Check `review.marker(format: json)` `found` **first, before any
+  rev-list call** — an empty `head` substituted into `git rev-list --count
+  <frontier-head>..develop` resolves the empty side to `develop`'s own tip and
+  silently reports `0`, which would wrongly read as clear. An override at any
+  gate stop proceeds without stamping the marker (only `lead-review`'s own
+  `review.stamp` step ever advances it).
+- Resolve the cut point: `<cut>` is the `review.marker` head read after the
+  gate's review (for an override, `develop`'s tip at override time). Proceed
+  only when `git merge-base --is-ancestor <cut> main` fails; otherwise nothing
+  is newly cleared and the ship stops.
+- Release Branch: Cut at `<cut>`, then Merge release target when its guard
+  fails.
+- Resolve this ship's version per Version Strategy on the release branch, bump
+  and commit when the current version's tag is claimed, then rename the branch
+  to `release/<version>`. A `release/<version>` an earlier attempt left (a red
+  CI gate) is deleted first, locally (`git branch -D release/<version>`) and on
+  origin (`git push origin --delete release/<version>`): its bump never reached
+  `develop`, so Version Strategy derives the same version again.
 - Version tag unclaimed: `git ls-remote --tags origin v<version>` is empty for the
   bumped or reused version. A non-empty result means a concurrent release claimed the
   version; increment the patch again, commit the regenerated version edits,
-  re-run tests, and restart the tag check.
-- `git merge-base --is-ancestor main develop` — develop must be a linear
-  descendant of main (fast-forwardable); abort otherwise.
-- `cd agents-plugin-tool && go test ./...` — all packages green.
-- Release contract: for `agents-plugin/runtime.json` and
-  `agents-plugin-wsflow/runtime.json`, assert `.release_tag == "v" + .plugin_version`.
-- Marketplace sanity: `.plugins[].name` in both
+  rename the branch, re-run tests, and restart the tag check.
+- `cd agents-plugin-tool && go test ./...` on the release branch head — all
+  packages green.
+- Release contract on the release branch head: for
+  `agents-plugin/runtime.json` and `agents-plugin-wsflow/runtime.json`, assert
+  `.release_tag == "v" + .plugin_version`.
+- Marketplace sanity on the release branch head: `.plugins[].name` in both
   `.agents/plugins/marketplace.json` and `.claude-plugin/marketplace.json` is
   exactly `ws wsflow`.
-- **R4 pin**: once every check above passes (including the version-bump
-  commit, when this ship made one), record `git rev-parse develop` as
-  `<reviewed-through-sha>` — the tip this ship run has actually vetted,
-  version bump included. The pin-and-re-assert in Publish (below) re-checks
-  against this value immediately before the develop push, not against the
-  pre-bump gate-time tip, so the ship's own version-bump commit never trips
-  it. The CI gate and the main promotion in Publish also target this exact
-  SHA.
+- Record `git rev-parse HEAD` in the release worktree as `<release-head>`. The
+  CI gate, the main promotion, and the tag in Publish all target this exact
+  SHA. `develop` moving afterwards changes nothing that ships, so there is no
+  tip re-check.
 
 ## Build
 
@@ -102,66 +112,62 @@ freshly fetched state.
 ## Tag
 
 Format: `v<version>` (e.g. `v0.42.1`), read from `agents-plugin/runtime.json`
-`.release_tag`. Placed on the `main` tip after Publish's CI gate passes and
-main is promoted. Push: yes (covered by Publish's single final-gate approval).
+`.release_tag`. Placed on `<release-head>` after Publish's CI gate passes and
+main is promoted to it. Push: yes (covered by Publish's single final-gate
+approval).
 
 ## Publish
 
-Order is deliberate: publish the synced `develop` first, let `ws-mcp CI`
-(`.github/workflows/ws-mcp-ci.yml`, ubuntu + sharded windows matrix) pass on the exact
-pinned commit, and only then promote `main` and push the tag. `origin/main`
-never advances ahead of `origin/develop`, and neither `main` nor the tag is
-published before the release commit is green on Linux and Windows, which the
-local Pre-flight `go test` cannot vouch for. The final gate precedes every push
-— all pushes below are reversible-only-before-they-run.
+Order is deliberate: publish the release branch first, let `ws-mcp CI`
+(`.github/workflows/ws-mcp-ci.yml`, ubuntu + sharded windows matrix) pass on
+`<release-head>`, and only then promote `main` and push the tag. Neither `main`
+nor the tag is published before the release commit is green on Linux and
+Windows, which the local Pre-flight `go test` cannot vouch for. The final gate
+precedes every push — all pushes below are reversible-only-before-they-run.
 
-- Final gate: show version, tag, `<reviewed-through-sha>`, and the publish
-  sequence below; wait for explicit approval. This single approval covers the
-  whole sequence (develop push, CI wait, main + tag push): a green CI gate
-  proceeds to the main and tag pushes without another prompt, and a failed one
-  stops without further pushes.
-- **R4 re-assert**: re-run `git rev-parse develop` and compare it to the
-  `<reviewed-through-sha>` recorded by Pre-flight's R4 pin. A match means no
-  new commit landed on `develop` since Pre-flight finished — proceed. A
-  mismatch means the tip moved (a parallel merge landed during the Confirm
-  wait-for-approval gap or later): **abort this Publish step** and re-run
-  Pre-flight's Release gate over just the delta
-  (`<reviewed-through-sha>..develop`) before retrying.
-- `git push origin develop` — publish the synced develop first. This claims no
-  version and publishes no release.
-- **CI gate** on `<reviewed-through-sha>`. A develop push starts no
-  `ws-mcp CI` run (the workflow runs only on pull requests and manual
-  dispatch), so the gate dispatches one on the pinned commit.
-  1. Reuse a run only when it already passed: `gh run list --workflow
-     ws-mcp-ci.yml --commit <reviewed-through-sha> --json
-     databaseId,headSha,event,status,conclusion`, and take the newest entry
-     whose `conclusion` is `success` and whose jobs (`gh run view <run-id>
-     --json jobs --jq '.jobs[] | [.name, .conclusion]'`) are not `skipped`.
-     Then continue with step 3 (`gh run watch` returns at once for a finished
-     run).
-  2. No such run: dispatch one with
-     `gh workflow run ws-mcp-ci.yml --ref develop`, then take the newest run
-     from `gh run list --workflow ws-mcp-ci.yml --event workflow_dispatch
-     --json databaseId,headSha,status,conclusion` and confirm its `headSha`
-     equals `<reviewed-through-sha>`. A different `headSha` means
-     `origin/develop` moved after the push: abort as in the R4 re-assert.
-  3. `gh run watch <run-id> --exit-status` (the Windows shards run in
-     parallel), then `gh run view <run-id> --json jobs --jq '.jobs[] |
-     [.name, .conclusion]'`: every `go test (<os>, <shard>)` job — the ubuntu
-     `all` leg and each Windows shard — must conclude `success`.
-- **CI red, cancelled, or skipped** (any leg not `success`, including a
-  timeout): stop.
-  `main` and the tag stay unpushed; the pushed `develop` stays as is. Fix
-  forward on `develop`, then restart Pre-flight from the top. The version's
-  tag was never pushed, so Version Strategy reuses the same version instead of
-  bumping again.
-- `git checkout main && git merge --ff-only <reviewed-through-sha>` — promote
-  the CI-vetted commit to main (matches the historical release shape: main's
-  tip is develop's tip, no extra merge commit). The target is the pinned SHA,
-  not `develop`, because local `develop` may move during the CI wait. Local
-  only.
-- `git push origin main` — promote the release branch.
-- `git push origin v<version>` — triggers the GitHub release workflow.
+- Final gate: show version, tag, `<cut>`, `release/<version>` at
+  `<release-head>`, and the publish sequence below; wait for explicit approval.
+  This single approval covers the whole sequence (release branch push, CI
+  wait, main + tag push): a green CI gate proceeds to the main and tag pushes
+  without another prompt, and a failed one stops without further pushes.
+
+1. `git push origin release/<version>`. This claims no version and publishes
+   no release.
+2. **CI gate** on `<release-head>`. A branch push starts no `ws-mcp CI` run
+   (the workflow runs only on pull requests and manual dispatch), so the gate
+   dispatches one on the release branch.
+   1. Reuse a run only when it already passed: `gh run list --workflow
+      ws-mcp-ci.yml --commit <release-head> --json
+      databaseId,headSha,event,status,conclusion`, and take the newest entry
+      whose `conclusion` is `success` and whose jobs (`gh run view <run-id>
+      --json jobs --jq '.jobs[] | [.name, .conclusion]'`) are not `skipped`.
+      Then continue with step 3 (`gh run watch` returns at once for a finished
+      run).
+   2. No such run: dispatch one with
+      `gh workflow run ws-mcp-ci.yml --ref release/<version>`, then take the
+      newest run from `gh run list --workflow ws-mcp-ci.yml --event
+      workflow_dispatch --json databaseId,headSha,status,conclusion` and
+      confirm its `headSha` equals `<release-head>`, the commit that gets
+      tagged (`ws-mcp-release.yml` requires a green ws-mcp CI run on the tag's
+      commit). A different `headSha` means `origin/release/<version>` moved
+      after the push: stop.
+   3. `gh run watch <run-id> --exit-status` (the Windows shards run in
+      parallel), then `gh run view <run-id> --json jobs --jq '.jobs[] |
+      [.name, .conclusion]'`: every `go test (<os>, <shard>)` job — the ubuntu
+      `all` leg and each Windows shard — must conclude `success`.
+
+   **CI red, cancelled, or skipped** (any leg not `success`, including a
+   timeout): stop. `main` and the tag stay unpushed. Fix forward on `develop`
+   through ordinary review, then restart Pre-flight from the top, which
+   recreates `release/<version>` at the new cut point. The version's tag was
+   never pushed, so Version Strategy derives the same version again.
+3. Once every job is green: Release Branch's Promote (`main` `--ff-only` to
+   `<release-head>`), `git tag v<version> <release-head>`, then
+   `git push origin main` and `git push origin v<version>` — the tag push
+   triggers the GitHub release workflow.
+
+There is no "push develop first" step: develop pushes are ordinary and
+independent of the release.
 
 ## Post-ship
 
@@ -172,6 +178,13 @@ local Pre-flight `go test` cannot vouch for. The final gate precedes every push
   its failing job/step. Monitoring is read-only and pushes nothing, so it never
   needs a confirmation gate. (`gh run watch <run-id> --exit-status` attaches and
   exits non-zero on failure.)
-- Return to `develop` (`git checkout develop`). The next develop merge resumes
-  normal development without a version bump; the next ship owns the next patch
-  bump.
+- Release the release worktree (`ws/worktree.release(path: <worktree>)`).
+- Release Branch's Merge back, when `git merge-base --is-ancestor
+  <release-head> develop` fails (the release branch carries a bump commit or
+  the merged `main`): from a checkout of `develop`,
+  `ws/git.merge(branch: "release/<version>", target: "develop")`, then
+  `git push origin develop`. Without it, `main` would stop being an ancestor
+  of `develop` and the next release would need the Merge release target step.
+- Delete the release branch: `git push origin --delete release/<version>` and
+  `git branch -D release/<version>`. The next develop merge resumes normal
+  development without a version bump; the next ship owns the next patch bump.

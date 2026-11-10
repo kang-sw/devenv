@@ -2055,6 +2055,30 @@ func TestPlaybookPrintGoldenLeadShip(t *testing.T) {
 	if !strings.Contains(body, "`resolves`") || !strings.Contains(body, "`chore(review)` commit") {
 		t.Errorf("release gate must carry follow-up resolutions on a ship commit:\n%s", body)
 	}
+	// A config with a Release Branch section ships the review frontier head
+	// (the cut point) through a release branch: the gate proceeds on newly
+	// cleared content even over a blocked remainder, the release target must
+	// be an ancestor of the cut point before the bump, and the tip re-check is
+	// dropped because the moving tip never ships.
+	normalizedShip := strings.Join(strings.Fields(body), " ")
+	for _, want := range []string{
+		"A config with a `## Release Branch` section makes every gated release a cut-point release",
+		"where the release gate does not apply, the cut point is the review-track tip",
+		"read `review.marker` again; its head is the cut point",
+		"The gate proceeds when the cut point is not an ancestor of the release target, even when the review left a blocked remainder",
+		"Otherwise it stops: nothing is newly cleared",
+		"its cut point is the review-track tip at override time",
+		"before any version bump checks that the release target is an ancestor of the cut point",
+		"or stops when the config declares none",
+		"A version bump the config's strategy makes lands on the release branch",
+		"A cut-point release skips this re-check",
+		"runs the config's merge of the release branch back into the review track",
+		"## Release Branch ← optional",
+	} {
+		if !strings.Contains(normalizedShip, want) {
+			t.Errorf("body missing lead-ship cut-point text %q", want)
+		}
+	}
 }
 
 func TestPlaybookDocumentAuditProducts(t *testing.T) {
@@ -2283,6 +2307,17 @@ func TestPlaybookPrintGoldenLeadReview(t *testing.T) {
 		// and then age out, so the verdict re-grades it before acceptance.
 		"re-grade as Important, counting toward NEEDS FIX, each reviewer Minor describing a defect a caller or user can hit today",
 		"only coverage gaps and tidy-ups stay acceptable as `minor` follow-ups",
+		// A blocking finding late in the range no longer holds back a clean
+		// prefix: the prefix is re-reviewed as its own range and stamped
+		// before the full-range block, and a later NEEDS FIX re-review starts
+		// from that cut.
+		"A NEEDS FIX that stamps `block` first looks for a cleared prefix",
+		"`git log --first-parent <base>..<head> -- <path>`",
+		"a finding with no path, or with a path no segment touched, leaves no prefix",
+		"Run the reviewers once more over `<base>..<cut>` as its own range",
+		"stamp `<base>..<cut>` with it, then the full range as `block`",
+		"report `<base>..<head>` as uncleared, with no further search",
+		"after a step-6 prefix stamp, the cut is that base",
 	} {
 		if !strings.Contains(normalizedReview, want) {
 			t.Errorf("body missing lead-review plan contract %q", want)
