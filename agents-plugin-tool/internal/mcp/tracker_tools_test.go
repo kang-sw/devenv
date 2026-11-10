@@ -763,37 +763,23 @@ func trackerPlan(t *testing.T, commands string) *trackerBatch {
 	return b
 }
 
-// stage="review" on a create or an edit writes stage review, clear="stage"
-// writes null (promotion), and a stage-only edit is a change.
-func TestTrackerUpdateStageAttribute(t *testing.T) {
-	b := trackerPlan(t, `<tk:item.create kind="task" title="t" stage="review"/>`+
-		`<tk:item.edit item="$1" clear="stage"/>`+
-		`<tk:item.edit item="$1" stage="review"/>`)
-	if len(b.events) != 3 {
-		t.Fatalf("a review-stage create gets no self-assignment: %d events", len(b.events))
+// stage is retired: the writer refuses it on a create or an edit and as a
+// clear field, and item.status takes idea.
+func TestTrackerUpdateRefusesStage(t *testing.T) {
+	b := trackerPlan(t, `<tk:item.create kind="task" title="t"/><tk:item.status item="$1" status="idea"/>`)
+	if got := b.events[1].payload["status"]; got != "idea" {
+		t.Fatalf("item.status idea = %v", got)
 	}
-	if got := b.events[0].payload["stage"]; got != "review" {
-		t.Fatalf("create stage = %v", got)
-	}
-	if got, ok := b.events[1].payload["stage"]; !ok || got != nil {
-		t.Fatalf("clear=\"stage\" must write stage null: %v (present %v)", got, ok)
-	}
-	if got := b.events[2].payload["stage"]; got != "review" {
-		t.Fatalf("edit stage = %v", got)
-	}
-
 	var problems wsxmlcmd.Problems
-	planTrackerBatch(&problems, `<tk:store name="team"><tk:item.create kind="task" title="t" stage="todo"/>`+
-		`<tk:item.edit item="$1" stage="done"/>`+
-		`<tk:item.edit item="$1" stage="review" clear="stage"/>`+
-		`<tk:item.edit item="$1" clear="title"/></tk:store>`, []wstrackerhost.StoreEntry{{ID: "team", Member: "ada"}})
+	planTrackerBatch(&problems, `<tk:store name="team"><tk:item.create kind="task" title="t" stage="review"/>`+
+		`<tk:item.edit item="$1" stage="review"/>`+
+		`<tk:item.edit item="$1" clear="stage"/></tk:store>`, []wstrackerhost.StoreEntry{{ID: "team", Member: "ada"}})
 	for _, want := range []string{
-		`command 1 <tk:item.create> (line 1) stage: must be review (without stage the item starts in todo); got "todo"`,
-		`command 2 <tk:item.edit> (line 1) stage: must be review (clear="stage" moves the item to todo); got "done"`,
-		`command 3 <tk:item.edit> (line 1): clear="stage" with a stage attribute; send one or the other`,
-		`command 4 <tk:item.edit> (line 1) clear: must list body, due, or stage; got "title"`,
+		`command 1 <tk:item.create> (line 1): unknown attribute stage (known: `,
+		`command 2 <tk:item.edit> (line 1): unknown attribute stage (known: `,
+		`command 3 <tk:item.edit> (line 1) clear: must list body or due; got "stage"`,
 	} {
-		if !slices.Contains(problems.List, want) {
+		if !slices.ContainsFunc(problems.List, func(p string) bool { return strings.HasPrefix(p, want) }) {
 			t.Errorf("problems missing %q:\n%q", want, problems.List)
 		}
 	}
@@ -820,18 +806,17 @@ func TestTrackerUpdateCompletionDefault(t *testing.T) {
 	}
 }
 
-// An item the batch creates and does not assign is self-assigned right
-// after its create, a topic too (the writer holds it) and a create still
-// written as todo; a review-stage create and a create the batch assigns by
-// $N get none, and every $N still names its command's event.
+// A topic the batch creates and does not assign is self-assigned right
+// after its create (the writer holds it); a task, or a create still written
+// as todo, gets none (the store holds it for its creator), nor does a topic
+// the batch assigns by $N, and every $N still names its command's event.
 func TestTrackerUpdateSelfAssignsCreates(t *testing.T) {
 	b := trackerPlan(t, `<tk:item.create kind="task" title="a"/>`+
 		`<tk:item.create kind="todo" title="b" parent="$1" origin="agent-auto"/>`+
 		`<tk:item.create kind="topic" title="c"/>`+
-		`<tk:item.create kind="task" title="d" stage="review"/>`+
-		`<tk:item.create kind="task" title="e"/>`+
-		`<tk:item.assign item="$5" people="bo"/>`+
-		`<tk:comment.add item="$2" refs="$1 $5">hi</tk:comment.add>`)
+		`<tk:item.create kind="topic" title="d"/>`+
+		`<tk:item.assign item="$4" people="bo"/>`+
+		`<tk:comment.add item="$2" refs="$1 $4">hi</tk:comment.add>`)
 	next := wsledger.EventID{Member: "ada", Clone: "pc", Seq: 10}
 	evs, err := b.newEvents(next)
 	if err != nil {
@@ -843,15 +828,12 @@ func TestTrackerUpdateSelfAssignsCreates(t *testing.T) {
 		payload     map[string]any
 	}{
 		{wstracker.TypeItemCreate, wstracker.OriginAgent, map[string]any{"kind": "task", "title": "a"}},
-		{wstracker.TypeItemAssign, wstracker.OriginAgent, map[string]any{"item": id(10), "mode": "chosen", "people": []any{"ada"}, "completion": "assignee"}},
 		{wstracker.TypeItemCreate, wstracker.OriginAgentAuto, map[string]any{"kind": "todo", "title": "b", "parent": id(10)}},
-		{wstracker.TypeItemAssign, wstracker.OriginAgentAuto, map[string]any{"item": id(12), "mode": "chosen", "people": []any{"ada"}, "completion": "assignee"}},
 		{wstracker.TypeItemCreate, wstracker.OriginAgent, map[string]any{"kind": "topic", "title": "c"}},
-		{wstracker.TypeItemAssign, wstracker.OriginAgent, map[string]any{"item": id(14), "mode": "chosen", "people": []any{"ada"}, "completion": "assignee"}},
-		{wstracker.TypeItemCreate, wstracker.OriginAgent, map[string]any{"kind": "task", "title": "d", "stage": "review"}},
-		{wstracker.TypeItemCreate, wstracker.OriginAgent, map[string]any{"kind": "task", "title": "e"}},
-		{wstracker.TypeItemAssign, wstracker.OriginAgent, map[string]any{"item": id(17), "mode": "chosen", "people": []any{"bo"}, "completion": "assigner"}},
-		{wstracker.TypeCommentAdd, wstracker.OriginAgent, map[string]any{"item": id(12), "refs": []any{id(10), id(17)}, "body": "hi"}},
+		{wstracker.TypeItemAssign, wstracker.OriginAgent, map[string]any{"item": id(12), "mode": "chosen", "people": []any{"ada"}, "completion": "assignee"}},
+		{wstracker.TypeItemCreate, wstracker.OriginAgent, map[string]any{"kind": "topic", "title": "d"}},
+		{wstracker.TypeItemAssign, wstracker.OriginAgent, map[string]any{"item": id(14), "mode": "chosen", "people": []any{"bo"}, "completion": "assigner"}},
+		{wstracker.TypeCommentAdd, wstracker.OriginAgent, map[string]any{"item": id(11), "refs": []any{id(10), id(14)}, "body": "hi"}},
 	}
 	if len(evs) != len(want) {
 		t.Fatalf("got %d events, want %d", len(evs), len(want))
@@ -865,40 +847,36 @@ func TestTrackerUpdateSelfAssignsCreates(t *testing.T) {
 			t.Errorf("event %d = %s %s %s, want %s %s %v", i, evs[i].Type, evs[i].Origin, evs[i].Payload, w.typ, w.origin, w.payload)
 		}
 	}
-	if !b.events[1].selfAssign || b.events[1].cmd.Pos != 1 || !b.events[3].selfAssign || b.events[3].cmd.Pos != 2 ||
-		!b.events[5].selfAssign || b.events[5].cmd.Pos != 3 {
-		t.Fatalf("each self-assignment is marked and carries its create's command")
+	if !b.events[3].selfAssign || b.events[3].cmd.Pos != 3 || b.events[5].selfAssign {
+		t.Fatalf("the topic's self-assignment is marked and carries its create's command")
 	}
 }
 
-// Through the tool: the self-assignment is written and reported under its
-// create's position, a review-stage item shows status review until it is
-// promoted, and moving an assigned item to review is refused.
-func TestTrackerUpdateReviewStageAndSelfAssignment(t *testing.T) {
+// Through the tool: a created task is written alone and held by its
+// creator at todo, item.status idea in the same batch makes it an idea, and
+// that holding cannot be unassigned; assigning someone else replaces it.
+func TestTrackerUpdateCreatorHoldsAnUnassignedTask(t *testing.T) {
 	f := newTrackerLeadFixture(t)
 	f.trackerUpdate(t, trackerPersonal)
 	out := f.trackerUpdate(t, `<tk:store name="me">
 <tk:item.create kind="task" title="mine"/>
-<tk:item.create kind="task" title="later" stage="review"/>
+<tk:item.create kind="task" title="later"/>
+<tk:item.status item="$2" status="idea"/>
 </tk:store>`)
 	ids := trackerWrote(t, out)
 	mine, later := ids["1"], ids["2"]
-	if !strings.Contains(out, "me: wrote 3 events") || !regexp.MustCompile(`(?m)^1 tk:item\.assign \S+ \(self-assignment\)$`).MatchString(out) {
-		t.Fatalf("the self-assignment must be written and reported under command 1:\n%s", out)
+	if !strings.Contains(out, "me: wrote 3 events") || strings.Contains(out, "self-assignment") {
+		t.Fatalf("a created task gets no self-assignment:\n%s", out)
 	}
 	if got := f.trackerQuery(t, map[string]any{"store": "me", "item": mine}); !strings.Contains(got, "status todo") || !strings.Contains(got, "ada todo (by ada)") {
-		t.Fatalf("a created task is its creator's:\n%s", got)
+		t.Fatalf("a created task is its creator's at todo:\n%s", got)
 	}
-	if got := f.trackerQuery(t, map[string]any{"store": "me", "scope": "all", "status": "review"}); !strings.Contains(got, later+" [task review]") || strings.Contains(got, mine) {
-		t.Fatalf("the review-stage item alone shows status review:\n%s", got)
+	if got := f.trackerQuery(t, map[string]any{"store": "me", "scope": "all", "status": "idea"}); !strings.Contains(got, later+" [task idea]") || strings.Contains(got, mine) {
+		t.Fatalf("the idea item alone shows status idea:\n%s", got)
 	}
-	f.trackerUpdate(t, `<tk:store name="me"><tk:item.edit item="`+later+`" clear="stage"/></tk:store>`)
-	if got := f.trackerQuery(t, map[string]any{"store": "me", "item": later}); !strings.Contains(got, "status unassigned") {
-		t.Fatalf("clear=\"stage\" promotes the item to todo:\n%s", got)
-	}
-	text := f.trackerRefused(t, "tracker.update", map[string]any{"commands": `<tk:store name="me"><tk:item.edit item="` + mine + `" stage="review"/></tk:store>`})
-	if !strings.Contains(text, "the store would flag this write:") || !strings.Contains(text, "has live or pending assignments (ada)") {
-		t.Fatalf("moving an assigned item to review must be refused:\n%s", text)
+	text := f.trackerRefused(t, "tracker.update", map[string]any{"commands": `<tk:store name="me"><tk:item.unassign item="` + mine + `" assignee="ada"/></tk:store>`})
+	if !strings.Contains(text, "the store would flag this write:") {
+		t.Fatalf("the creator's holding cannot be unassigned:\n%s", text)
 	}
 }
 
