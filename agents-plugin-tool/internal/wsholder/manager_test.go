@@ -822,3 +822,61 @@ func TestScriptIsStagedUnderItsContentHash(t *testing.T) {
 		t.Fatalf("a damaged staged copy was not replaced")
 	}
 }
+
+// TestAConsumersReplayIsNoLoss pins what a consumer of the manager's events
+// gets beside the manager's own bookkeeping: a sink added after New receives
+// the holders' events beside the one New was given, RingBytes sizes a new holder's ring, and a replay the
+// consumer asks for from a sequence the ring has dropped reports the gap to
+// the sink without counting records lost, since the manager had received
+// them all.
+func TestAConsumersReplayIsNoLoss(t *testing.T) {
+	dir := testHoldersDir(t)
+	given := newCollector()
+	m := testManager(t, dir, given, func(o *Options) { o.RingBytes = 512 })
+	sink := newCollector()
+	m.AddSink(sink)
+	id, err := m.Launch(json.RawMessage(`{"kind":"test"}`))
+	if err != nil {
+		t.Fatalf("Launch: %v", err)
+	}
+	spawnTicker(t, m, id)
+	// Far more than 512 bytes of ticks: the ring has dropped its first
+	// records by now, and the sink has received every one of them.
+	waitFor(t, "the ticker to outrun its ring", func() bool { return len(sink.seqs(id)) > 200 })
+	if seqs := sink.seqs(id); !contiguousFrom(seqs, 1) {
+		t.Fatalf("the sink's sequences = %v..., want 1.. without holes", seqs[:min(len(seqs), 8)])
+	}
+	if len(given.seqs(id)) < 200 {
+		t.Errorf("the sink New was given received %d records, want what the added one received", len(given.seqs(id)))
+	}
+	lost := func() uint64 {
+		for _, h := range m.List().Holders {
+			if h.ID == id {
+				return h.Lost
+			}
+		}
+		t.Fatalf("holder %s is not listed", id)
+		return 0
+	}
+	if n := lost(); n != 0 {
+		t.Fatalf("before the replay the holder has lost %d records, want none", n)
+	}
+	first, _, err := m.Client(id).Replay(1)
+	if err != nil {
+		t.Fatalf("Replay: %v", err)
+	}
+	if first <= 1 {
+		t.Fatalf("the ring's first sequence after 200 records in 512 bytes = %d, want the ring to have dropped records", first)
+	}
+	waitFor(t, "the replay's gap to reach the sink", func() bool {
+		for _, ev := range sink.snapshot(id) {
+			if ev.Event == "gap" && ev.From == 1 && ev.To == first {
+				return true
+			}
+		}
+		return false
+	})
+	if n := lost(); n != 0 {
+		t.Errorf("after a consumer's replay the holder has lost %d records, want none: the manager received them all", n)
+	}
+}
