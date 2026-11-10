@@ -328,19 +328,6 @@
     "261108-bug-ws-whiteboard-item-raw-html": {
       "registered_at": "2026-11-08T04:42:23Z"
     },
-    "261109-bug-git-commit-paths-in-delegate-worktree": {
-      "registered_at": "2026-11-09T04:57:34Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-10T00:35:24Z",
-        "impl": {
-          "branch": "impl/develop/cola-tweak-drown"
-        }
-      }
-    },
     "261109-research-windows-code-signing-signpath": {
       "registered_at": "2026-11-09T00:46:52Z"
     },
@@ -374,19 +361,6 @@
     },
     "261110-feat-ws-tracker-item-move-reparent": {
       "registered_at": "2026-11-09T15:09:01Z"
-    },
-    "261110-feat-ws-tracker-search-query-grammar": {
-      "registered_at": "2026-11-09T15:23:30Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-10T00:46:47Z",
-        "impl": {
-          "branch": "impl/develop/truth-amaze-many"
-        }
-      }
     },
     "261110-feat-ws-tracker-support-agent-ui-commands": {
       "registered_at": "2026-11-09T15:23:24Z",
