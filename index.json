@@ -296,7 +296,14 @@
       "registered_at": "2026-10-30T14:07:33Z"
     },
     "261105-feat-whiteboard-lead-confirmed-status": {
-      "registered_at": "2026-11-05T01:20:45Z"
+      "registered_at": "2026-11-05T01:20:45Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "28ef83e379b353cc",
+        "track": "develop",
+        "phase": "closed",
+        "touched_at": "2026-11-10T00:30:46Z"
+      }
     },
     "261106-bug-claude-mod-startup-config-get-permission-flood": {
       "registered_at": "2026-11-06T10:11:03Z"
