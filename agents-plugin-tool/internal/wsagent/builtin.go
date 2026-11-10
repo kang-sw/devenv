@@ -25,9 +25,10 @@ const (
 )
 
 // SupportWSTools are the ws tools the support profiles allow: the tracker
-// tools, the store's wiki tools, the read-only git search, and
-// playbook.read for the tracker playbook's grammar.
-var SupportWSTools = []string{"tracker.query", "tracker.update", "tracker.show", "wiki.query", "wiki.update", "git.search", "playbook.read"}
+// tools (tracker.show and tracker.ui draw in and drive the store's chat),
+// the store's wiki tools, the read-only git search, and playbook.read for
+// the tracker playbook's grammar.
+var SupportWSTools = []string{"tracker.query", "tracker.update", "tracker.show", "tracker.ui", "wiki.query", "wiki.update", "git.search", "playbook.read"}
 
 // SupportClaudeTools are the built-in tools the Claude support profile
 // allows: Agent alone, so the agent may spawn subagents. Claude applies the

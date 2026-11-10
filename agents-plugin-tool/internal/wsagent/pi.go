@@ -430,7 +430,7 @@ type piLine struct {
 	Message    json.RawMessage `json:"message"`
 	ToolCallID string          `json:"toolCallId"`
 	ToolName   string          `json:"toolName"`
-	// Result is a tool_execution_end's result, read only for a card call:
+	// Result is a tool_execution_end's result, read only for a card or UI call:
 	// left raw so no other line's result shape can fail the line's decode.
 	Result  json.RawMessage `json:"result"`
 	IsError bool            `json:"isError"`
@@ -502,21 +502,21 @@ func (m *piMapper) mapLine(line []byte, replies lineReplies) []Event {
 		var result struct {
 			Content []piBlock `json:"content"`
 		}
-		if !l.IsError && l.ToolName == piMCPToolName(ReservedMCPServer, CardTool) && json.Unmarshal(l.Result, &result) == nil {
-			var parts []string
+		tool := resultTool(l.ToolName, piMCPToolName)
+		if l.IsError || tool == "" {
+			return out
+		}
+		// A result that does not decode reads as empty text: a tracker
+		// write still counts, and no card or UI line parses.
+		var parts []string
+		if json.Unmarshal(l.Result, &result) == nil {
 			for _, b := range result.Content {
 				if b.Type == "text" {
 					parts = append(parts, b.Text)
 				}
 			}
-			if ev := cardEvent(strings.Join(parts, "\n")); ev != nil {
-				out = append(out, *ev)
-			}
 		}
-		if !l.IsError && l.ToolName == piMCPToolName(ReservedMCPServer, TrackerWriteTool) {
-			out = append(out, Event{TrackerWrite: true})
-		}
-		return out
+		return append(out, resultEvents(tool, strings.Join(parts, "\n"))...)
 	case "compaction_start", "compaction_end":
 		trigger := ""
 		switch l.Reason {

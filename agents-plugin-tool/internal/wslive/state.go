@@ -344,6 +344,14 @@ func (st *State) Card(ref CardRef, now int64) (Result, error) {
 	if !cardIDPattern.MatchString(ref.Store) || !cardIDPattern.MatchString(ref.Alias) {
 		return Result{}, fmt.Errorf("card store and alias must be 1-128 letters, digits, or ._- starting with a letter or digit")
 	}
+	ref.Title = cleanLine(st.scrub.scrub(ref.Title), CardTitleRunes)
+	return st.lineAfterReply(RingEntry{Kind: RingCard, Card: &ref}, now), nil
+}
+
+// lineAfterReply writes entry at now after the reply streamed so far and
+// the open tool gap, so the line follows the text and the calls that led
+// to it (a card line, a ui line).
+func (st *State) lineAfterReply(entry RingEntry, now int64) Result {
 	leadReply := st.reply
 	var res Result
 	if st.reply != nil {
@@ -351,14 +359,13 @@ func (st *State) Card(ref CardRef, now int64) (Result, error) {
 		res.Ring = append(res.Ring, st.finishReply(""))
 	}
 	st.flushTools(&res)
-	ref.Title = cleanLine(st.scrub.scrub(ref.Title), CardTitleRunes)
-	res.Ring = append(res.Ring, RingEntry{Kind: RingCard, Card: &ref})
+	res.Ring = append(res.Ring, entry)
 	res.Changed = true
 	st.refreshPhases(now)
 	if st.reply != leadReply {
 		res.Urgent = true
 	}
-	return res, nil
+	return res
 }
 
 func turnOrigin(origin string) (string, error) {

@@ -24,8 +24,9 @@ import (
 // successful call turns that knob on at session scope, which adds the
 // tracker section to the workflow manual. The command table and rules live
 // in the tracker playbook, which the manual section, the refusals, and
-// playbook.read all quote. tracker.show (tracker_show.go) is listed only
-// where a support conversation's profile allows it; the same gate admits it
+// playbook.read all quote. tracker.show (tracker_show.go) and tracker.ui
+// (tracker_ui.go) are listed only where a support conversation's profile
+// allows them; the same gate admits it
 // for that conversation alone, and trackerLeadOnlyDenial refuses it to any
 // other spawned session.
 
@@ -44,6 +45,9 @@ func isTrackerTool(name string) bool {
 func trackerLeadOnlyDenial(name string) string {
 	if name == trackerShowTool {
 		return fmt.Sprintf("%s is not available to a spawned session: only a tracker store's support conversation draws item cards, in that store's chat.", name)
+	}
+	if name == trackerUITool {
+		return fmt.Sprintf("%s is not available to a spawned session: only a tracker store's support conversation moves the tracker view, from that store's chat.", name)
 	}
 	return fmt.Sprintf("%s is not available to a spawned session: the tracker records the user's work through the top-level lead. Put progress in your final report; your lead records it.", name)
 }

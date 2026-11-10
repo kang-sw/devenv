@@ -151,6 +151,12 @@ func (w *liveWriter) card(ref wslive.CardRef) bool {
 	return w.write(res, err, wslive.RingCard)
 }
 
+// ui applies a dashboard UI command the lead sent, as apply does.
+func (w *liveWriter) ui(cmd wslive.UICommand) bool {
+	res, err := w.st.UI(cmd, w.now().UnixMilli())
+	return w.write(res, err, wslive.RingUI)
+}
+
 // write writes what an applied change of kind brought; a refused one (err)
 // is logged and dropped.
 func (w *liveWriter) write(res wslive.Result, err error, kind string) bool {

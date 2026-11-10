@@ -411,6 +411,10 @@ func (t *batchTracker) callName(id string) string {
 // CardTool is the ws tool whose result a support chat draws as a card.
 const CardTool = "tracker.show"
 
+// UITool is the ws tool whose result a support chat reads as a dashboard
+// UI command.
+const UITool = "tracker.ui"
+
 // TrackerWriteTool is the ws tool that writes tracker stores; a successful
 // call of it raises an Event with TrackerWrite set.
 const TrackerWriteTool = "tracker.update"
@@ -436,6 +440,62 @@ func cardEvent(result string) *Event {
 		}
 	}
 	return &Event{Card: &ref}
+}
+
+// uiEvent reads a UITool result: a first line "ui <op> <arg>", where a
+// search's arg is the rest of the line and a focus may add a comment alias
+// ("ui focus <alias> [<comment>]"). The ring write validates the command;
+// a result without the line raises nothing: nil.
+func uiEvent(result string) *Event {
+	line, _, _ := strings.Cut(result, "\n")
+	rest, ok := strings.CutPrefix(line, "ui ")
+	if !ok {
+		return nil
+	}
+	op, arg, _ := strings.Cut(strings.TrimSpace(rest), " ")
+	cmd := wslive.UICommand{Op: op, Arg: strings.TrimSpace(arg)}
+	if op == wslive.UIFocus {
+		if alias, comment, ok := strings.Cut(cmd.Arg, " "); ok {
+			cmd.Arg, cmd.Comment = alias, strings.TrimSpace(comment)
+		}
+	}
+	return &Event{UI: &cmd}
+}
+
+// resultTools are the ws tools whose successful results raise events
+// (resultEvents).
+var resultTools = []string{CardTool, UITool, TrackerWriteTool}
+
+// resultTool is the result-reading ws tool a backend's tool name names
+// under that backend's MCP naming (mcpName) on the attached ws-mcp, or ""
+// for any other tool, another server's of the same name included.
+func resultTool(name string, mcpName func(server, tool string) string) string {
+	for _, tool := range resultTools {
+		if name == mcpName(ReservedMCPServer, tool) {
+			return tool
+		}
+	}
+	return ""
+}
+
+// resultEvents are the events a successful call of the attached ws-mcp's
+// tool name raises from its result text: a card line, a UI command, or a
+// tracker write.
+func resultEvents(name, text string) []Event {
+	var out []Event
+	switch name {
+	case CardTool:
+		if ev := cardEvent(text); ev != nil {
+			out = append(out, *ev)
+		}
+	case UITool:
+		if ev := uiEvent(text); ev != nil {
+			out = append(out, *ev)
+		}
+	case TrackerWriteTool:
+		out = append(out, Event{TrackerWrite: true})
+	}
+	return out
 }
 
 // argsPreview is a tool call's arguments as one line: the first string

@@ -270,6 +270,10 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .sysline.running .spin { width: 10px; height: 10px; }
 .sysline.fail .mk { color: var(--wb-fail); }
 .sysline .t { font-size: 11px; font-weight: 400; font-variant-numeric: tabular-nums; }
+/* a support chat's ui line: a dashboard command the agent sent, drawn alike
+   whether the chat acted on it live or met it in history */
+.sysline.uiline { max-width: 92%; font-weight: 500; overflow-wrap: anywhere; }
+.sysline.uiline .mk { color: var(--wb-primary); }
 .caret { display: inline-block; width: 7px; height: 13px; background: currentColor; vertical-align: -2px; margin-left: 2px; animation: dash-blink 1s steps(1) infinite; }
 @keyframes dash-blink { 50% { opacity: 0; } }
 .permwait { display: flex; gap: 8px; align-items: center; background: color-mix(in srgb, var(--wb-ph-perm) 16%, var(--wb-card)); border-radius: 10px; padding: 7px 11px; font-size: 13px; }
