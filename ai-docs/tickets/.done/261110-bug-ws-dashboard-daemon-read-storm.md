@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 3bf93d831f667f8c
 sage-review-completeness-reviewed: 3bf93d831f667f8c
+completed: 2026-11-10
 ---
 
 # Dashboard daemon read storm
