@@ -927,6 +927,7 @@
   "js.tk.wk.history.tools": "履歴と復元はエージェントのツール（wiki_query, wiki_update）から行います",
   "js.tk.wk.key.chg": "片側のみの変更",
   "js.tk.wk.key.conf": "重なり",
+  "js.tk.wk.leave": "保存していない wiki の編集を破棄しますか？",
   "js.tk.wk.match": "{1} ページ中 {0} ページが一致",
   "js.tk.wk.missing": "ページがありません: クリックで作成",
   "js.tk.wk.more": "その他",

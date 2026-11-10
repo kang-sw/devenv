@@ -927,6 +927,7 @@
   "js.tk.wk.history.tools": "歷史與還原透過代理工具（wiki_query、wiki_update）進行",
   "js.tk.wk.key.chg": "僅一側變更",
   "js.tk.wk.key.conf": "重疊",
+  "js.tk.wk.leave": "捨棄未儲存的 wiki 編輯？",
   "js.tk.wk.match": "{1} 個頁面中有 {0} 個符合",
   "js.tk.wk.missing": "頁面不存在：點擊建立",
   "js.tk.wk.more": "更多",

@@ -927,6 +927,7 @@
   "js.tk.wk.history.tools": "El historial y la restauración pasan por las herramientas del agente (wiki_query, wiki_update)",
   "js.tk.wk.key.chg": "cambiado solo en un lado",
   "js.tk.wk.key.conf": "solapamiento",
+  "js.tk.wk.leave": "¿Descartar tu edición de la wiki sin guardar?",
   "js.tk.wk.match": "{0} de {1} páginas coinciden",
   "js.tk.wk.missing": "no existe esa página: clic para crearla",
   "js.tk.wk.more": "Más",
