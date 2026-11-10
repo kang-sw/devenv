@@ -52,6 +52,8 @@ if args[:1] == ["daemon-start"]:
 if args == ["serve", "--stdio"]:
     for line in sys.stdin:
         msg = json.loads(line)
+        with open(os.path.join(cache, "fake-runtime.log"), "a", encoding="utf-8") as log:
+            log.write(json.dumps({"recv": msg.get("method"), "id": msg.get("id")}) + "\\n")
         if "id" in msg and "method" in msg:
             print(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": {"served_by": "direct", "method": msg["method"]}}), flush=True)
     sys.exit(0)
@@ -72,13 +74,20 @@ def load_launcher():
 class FakeDaemon:
     """The daemon's side of /health and the MCP route, on a loopback port."""
 
-    def __init__(self, *, version="0.48.16", build_time=2_000_000_000_000, name="daemon", refuse_reason="", slow_methods=(), lan=False):
+    def __init__(self, *, version="0.48.16", build_time=2_000_000_000_000, name="daemon", refuse_reason="", slow_methods=(), slow_seconds=30.0, lan=False, cli_exit_code=7, content_hash="", drop_mcp=False):
         self.version = version
         self.build_time = build_time
+        # content_hash: reported in /health when set. drop_mcp: an accepted
+        # MCP stream is closed at once, as a daemon in a crash loop would.
+        self.content_hash = content_hash
+        self.drop_mcp = drop_mcp
+        self.slow_seconds = slow_seconds
         self.name = name
         self.refuse_reason = refuse_reason
         self.slow_methods = set(slow_methods)
         self.lan = lan
+        # None: the final frame carries no exit_code at all.
+        self.cli_exit_code = cli_exit_code
         self.token = "f" * 64
         self.hellos = []
         self.requests = []  # (method, id) per hosted request
@@ -124,7 +133,10 @@ class FakeDaemon:
             parts = head.split()
             path = parts[1] if len(parts) > 1 else ""
             if path == "/health":
-                body = json.dumps({"service": "ws-dashboard", "version": self.version, "pid": 4242, "port": self.port, "started_at": "x", "lan": self.lan, "build_time": self.build_time}).encode()
+                health = {"service": "ws-dashboard", "version": self.version, "pid": 4242, "port": self.port, "started_at": "x", "lan": self.lan, "build_time": self.build_time}
+                if self.content_hash:
+                    health["content_hash"] = self.content_hash
+                body = json.dumps(health).encode()
                 conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: " + str(len(body)).encode() + b"\r\nConnection: close\r\n\r\n" + body)
                 return
             if path != "/mcp":
@@ -147,6 +159,8 @@ class FakeDaemon:
             if hello.get("mode") == "cli":
                 self.serve_cli(conn, hello)
                 return
+            if self.drop_mcp:
+                return
             self.serve_mcp(conn, reader, hello)
         except (OSError, ValueError):
             return
@@ -159,7 +173,10 @@ class FakeDaemon:
     def serve_cli(self, conn, hello):
         conn.sendall(json.dumps({"stream": "stderr", "data": "fake: waiting\n"}).encode() + b"\n")
         result = {"served_by": self.name, "args": hello["argv"][2:], "owner_pid": hello["owner_pid"]}
-        conn.sendall(json.dumps({"final": True, "exit_code": 7, "data": json.dumps(result) + "\n"}).encode() + b"\n")
+        final = {"final": True, "data": json.dumps(result) + "\n"}
+        if self.cli_exit_code is not None:
+            final["exit_code"] = self.cli_exit_code
+        conn.sendall(json.dumps(final).encode() + b"\n")
 
     def serve_mcp(self, conn, reader, hello):
         while True:
@@ -175,7 +192,7 @@ class FakeDaemon:
             if "id" not in msg or method is None:
                 continue
             if method in self.slow_methods:
-                time.sleep(30)
+                time.sleep(self.slow_seconds)
             result = {"served_by": self.name, "method": method}
             if method == "initialize":
                 result["serverInfo"] = {"name": "ws", "version": self.version}
@@ -250,11 +267,14 @@ class ProxyClient:
             raise AssertionError("no line from the proxy within the timeout")
         return json.loads(box["line"])
 
-    def close(self, timeout=5.0):
+    def close_stdin(self):
         try:
             self.writer.close()
         except OSError:
             pass
+
+    def close(self, timeout=5.0):
+        self.close_stdin()
         self.thread.join(timeout)
         if self.thread.is_alive():
             raise AssertionError("proxy_serve did not return after stdin closed")
@@ -406,9 +426,43 @@ class LauncherProxyTest(unittest.TestCase):
         stderr = io.StringIO()
         started = time.monotonic()
         self.assertIsNone(self.launcher.proxy_serve(self.link(answer_budget=0.5), ["serve", "--stdio"], io.BytesIO(), io.BytesIO(), stderr))
-        self.assertLess(time.monotonic() - started, 4.0)
-        self.assertIn("no daemon could be started; running the direct path", stderr.getvalue())
+        # The answer budget alone: a wedged daemon holds the lock, so a start
+        # would only add the whole start budget before the same fallback.
+        self.assertLess(time.monotonic() - started, 2.0)
+        self.assertIn("did not answer within 0s; running the direct path", stderr.getvalue())
+        self.assertEqual(self.runtime_log(), [], "no daemon-start against a daemon that is alive but wedged")
+
+    def test_a_start_that_leaves_the_older_daemon_answering_falls_back(self):
+        # M1: daemon-start reports success, but the daemon answering is still
+        # the older build (it refused to stop, or won the lock race). The
+        # launcher must not settle on it.
+        old = self.daemon(build_time=1_000_000_000_000)
+        old.write_endpoint(self.daemon_dir)
+        self.point_start_at(old)
+        stderr = io.StringIO()
+        self.assertIsNone(self.launcher.proxy_serve(self.link(), ["serve", "--stdio"], io.BytesIO(), io.BytesIO(), stderr))
+        self.assertIn("was not replaced; running the direct path", stderr.getvalue())
         self.assertEqual([r["args"][0] for r in self.runtime_log()], ["daemon-start"])
+        self.assertEqual(old.hellos, [], "the older daemon never hosted the session")
+
+    def test_a_same_version_daemon_of_the_same_content_is_kept_whatever_its_build_time(self):
+        # L1: Claude, Codex, and Pi install separate copies of one binary,
+        # so their mtimes differ; only a different content hash lets the
+        # build time replace the daemon.
+        digest = self.launcher.sha256_file(self.binary)
+        same = self.daemon(build_time=1_000_000_000_000, content_hash=digest)
+        same.write_endpoint(self.daemon_dir)
+        client = ProxyClient(self.launcher, self.link())
+        client.send("initialize")
+        self.assertEqual(client.recv()["result"]["served_by"], "daemon")
+        self.assertEqual(client.close(), 0)
+        self.assertEqual(self.runtime_log(), [], "same content: no replacement")
+        link = self.link()
+        self.assertFalse(link.needs_start({"version": "0.48.16", "build_time": 1_000_000_000_000, "content_hash": digest}))
+        self.assertTrue(link.needs_start({"version": "0.48.16", "build_time": 1_000_000_000_000, "content_hash": "0" * 64}), "another content, older build: replaced")
+        self.assertTrue(link.needs_start({"version": "0.48.16", "build_time": 1_000_000_000_000}), "a daemon that reports no hash: the build time decides")
+        self.assertFalse(link.needs_start({"version": "0.48.16", "build_time": 2_000_000_000_000, "content_hash": "0" * 64}), "an equal build is never replaced")
+        self.assertFalse(link.needs_start({"version": "0.48.17", "build_time": 1, "content_hash": "0" * 64}), "a newer version is never replaced")
 
     # --- the paths under traffic --------------------------------------------------
 
@@ -474,6 +528,30 @@ class LauncherProxyTest(unittest.TestCase):
         self.assertEqual([r["args"][0] for r in self.runtime_log()], ["daemon-start"])
         self.assertEqual([m for m, _ in new.requests][:1], ["initialize"])
 
+    def test_a_daemon_that_drops_every_connection_hands_over_to_direct_serve_after_bounded_retries(self):
+        daemon = self.daemon(drop_mcp=True)
+        daemon.write_endpoint(self.daemon_dir)
+        client = ProxyClient(self.launcher, self.link())
+        init_id = client.send("initialize")
+        lost = client.recv(timeout=10.0)
+        self.assertEqual(lost["id"], init_id)
+        self.assertEqual(lost["error"]["code"], -32000)
+        # A ping sent while the daemon keeps dropping the stream is lost too
+        # (-32000, as the client is told); the proxy gives up within the
+        # limit and the next ping is served directly.
+        for _ in range(10):
+            ping_id = client.send("ping")
+            answer = client.recv(timeout=15.0)
+            self.assertEqual(answer["id"], ping_id)
+            if "result" in answer:
+                break
+            self.assertEqual(answer["error"]["code"], -32000)
+        self.assertEqual(answer["result"]["served_by"], "direct")
+        self.assertEqual(client.close(), 0)
+        self.assertEqual(len(daemon.hellos), self.launcher.PROXY_MAX_QUICK_CLOSES, "the reconnects stop after the quick-close limit")
+        self.assertIn("in a row right after accepting them; continuing on the direct path", client.stderr.getvalue())
+        self.assertEqual([r["args"] for r in self.runtime_log() if "args" in r], [["serve", "--stdio"]], "no daemon-start: the daemon answers /health")
+
     def test_a_daemon_that_dies_with_no_successor_and_no_restart_hands_over_to_direct_serve(self):
         old = self.daemon(name="old", slow_methods={"slow"})
         old.write_endpoint(self.daemon_dir)
@@ -493,8 +571,11 @@ class LauncherProxyTest(unittest.TestCase):
         self.assertEqual(answer["result"]["served_by"], "direct")
         self.assertEqual(answer["result"]["method"], "ping")
         self.assertEqual(client.close(), 0)
+        received = [r for r in self.runtime_log() if "recv" in r]
+        self.assertEqual([r["recv"] for r in received][:3], ["initialize", "notifications/initialized", "ping"])
+        self.assertTrue(str(received[0]["id"]).startswith(self.launcher.PROXY_REPLAY_ID_PREFIX), received[0])
         self.assertIn("continuing on the direct path", client.stderr.getvalue())
-        self.assertEqual([r["args"] for r in self.runtime_log()], [["daemon-start", "--build-time", "2000000000000"], ["serve", "--stdio"]])
+        self.assertEqual([r["args"] for r in self.runtime_log() if "args" in r], [["daemon-start", "--build-time", "2000000000000"], ["serve", "--stdio"]])
 
     def test_stdin_close_ends_the_session(self):
         daemon = self.daemon()
@@ -506,26 +587,68 @@ class LauncherProxyTest(unittest.TestCase):
         deadline = time.monotonic() + 3
         while time.monotonic() < deadline and any(not c._closed for c in daemon.conns):
             time.sleep(0.05)
+        self.assertTrue(all(c._closed for c in daemon.conns), "the daemon saw the session end")
+        self.assertEqual(len(daemon.conns), 2, "one /health probe and one session")
+
+    def test_stdin_close_still_delivers_the_answers_in_flight(self):
+        # M6: the client closes its side while a call runs; the proxy
+        # half-closes, so the answer still comes through before the end.
+        daemon = self.daemon(slow_methods={"slow"}, slow_seconds=0.5)
+        daemon.write_endpoint(self.daemon_dir)
+        client = ProxyClient(self.launcher, self.link())
+        client.send("initialize")
+        client.recv()
+        slow_id = client.send("slow")
+        client.close_stdin()
+        answer = client.recv(timeout=5.0)
+        self.assertEqual(answer["id"], slow_id)
+        self.assertEqual(answer["result"]["served_by"], "daemon")
+        client.thread.join(5.0)
+        self.assertFalse(client.thread.is_alive())
+        self.assertEqual(client.result.get("code"), 0)
 
     # --- mailbox wait -------------------------------------------------------------
 
     def test_mailbox_wait_runs_in_the_daemon_with_its_frames_unpacked(self):
         daemon = self.daemon()
         daemon.write_endpoint(self.daemon_dir)
-        stdout, stderr = io.StringIO(), io.StringIO()
+        stdout, stderr = io.BytesIO(), io.BytesIO()
         code = self.launcher.proxy_cli(self.link(), ["mailbox", "wait", "--session-key", "k", "--format", "json"], stdout, stderr)
         self.assertEqual(code, 7)
         self.assertEqual(json.loads(stdout.getvalue()), {"served_by": "daemon", "args": ["--session-key", "k", "--format", "json"], "owner_pid": os.getpid()})
-        self.assertEqual(stderr.getvalue(), "fake: waiting\n")
+        # Bytes, UTF-8, the daemon's newlines as sent: no console code page
+        # and no newline translation on any platform.
+        self.assertEqual(stderr.getvalue(), b"fake: waiting\n")
         self.assertEqual(daemon.hellos[0]["mode"], "cli")
         self.assertEqual(daemon.hellos[0]["argv"], ["mailbox", "wait", "--session-key", "k", "--format", "json"])
         self.assertEqual(self.runtime_log(), [])
 
+    def test_mailbox_wait_success_reaches_the_caller_as_exit_zero(self):
+        # A wait that a mail wakes exits 0; the mod and the Pi waiter treat
+        # any code but 0 and 3 as an error and never push the mail. A final
+        # frame with the code written out, and one from a daemon that
+        # omitted the zero, both read as success.
+        for daemon in (self.daemon(cli_exit_code=0), self.daemon(cli_exit_code=None)):
+            daemon.write_endpoint(self.daemon_dir)
+            stdout = io.BytesIO()
+            code = self.launcher.proxy_cli(self.link(), ["mailbox", "wait", "--session-key", "k", "--format", "json"], stdout, io.BytesIO())
+            self.assertEqual(code, 0, f"exit code with cli_exit_code={daemon.cli_exit_code}")
+            self.assertEqual(json.loads(stdout.getvalue())["served_by"], "daemon")
+
     def test_mailbox_wait_falls_back_to_the_direct_path(self):
         self.point_start_at(fail=True)
-        stderr = io.StringIO()
-        self.assertIsNone(self.launcher.proxy_cli(self.link(), ["mailbox", "wait", "--session-key", "k"], io.StringIO(), stderr))
-        self.assertIn("running the direct path", stderr.getvalue())
+        stderr = io.BytesIO()
+        argv = ["mailbox", "wait", "--session-key", "k"]
+        self.assertIsNone(self.launcher.proxy_cli(self.link(), argv, io.BytesIO(), stderr))
+        self.assertIn(b"running the direct path", stderr.getvalue())
+        # None hands the same argv to the runtime binary (what main does
+        # next); the direct run's output and exit code reach the caller.
+        import subprocess
+
+        direct = subprocess.run([str(self.binary), *argv], env=self.env, capture_output=True, text=True, check=False)
+        self.assertEqual(direct.returncode, 3)
+        self.assertEqual(json.loads(direct.stdout), {"served_by": "direct", "args": ["--session-key", "k"]})
+        self.assertEqual([r["args"][0] for r in self.runtime_log()], ["daemon-start", "mailbox"])
 
     def test_proxy_mode_covers_only_serve_stdio_and_mailbox_wait(self):
         self.assertEqual(self.launcher.proxy_mode(["serve", "--stdio"]), "mcp")
@@ -562,15 +685,38 @@ class LauncherProxyTest(unittest.TestCase):
         digest = self.launcher.sha256_file(self.binary)
         self.assertEqual(self.launcher.staged_daemon_name(self.binary), f"ws-mcp-dashboard-{digest[:16]}.16-abcdef123456")
         self.assertEqual(self.launcher.staged_daemon_name(Path("ws-mcp-0.48.16-abc.EXE"), "a" * 64), "ws-mcp-dashboard-aaaaaaaaaaaaaaaa.exe")
+        # filepath.Ext, not Path.suffix: a trailing dot is ".", a dot-file is
+        # its whole name, and the directory never takes part.
+        go_ext = self.launcher.go_ext
+        self.assertEqual(go_ext("ws-mcp."), ".")
+        self.assertEqual(go_ext(".bashrc"), ".bashrc")
+        self.assertEqual(go_ext("noext"), "")
+        self.assertEqual(go_ext(os.path.join("dir.d", "noext")), "")
+        self.assertEqual(self.launcher.staged_daemon_name(Path("ws-mcp."), "b" * 64), "ws-mcp-dashboard-bbbbbbbbbbbbbbbb.")
 
-    def test_staging_writes_the_copy_once_and_clears_other_entries(self):
+    def test_the_default_start_wait_matches_the_go_constant(self):
+        tool = Path(__file__).resolve().parents[2] / "agents-plugin-tool" / "internal" / "wsdashboard"
+        daemon_src = (tool / "daemon.go").read_text(encoding="utf-8")
+        ensure_src = (tool / "ensure.go").read_text(encoding="utf-8")
+        import re
+
+        lock = re.search(r"DefaultLockWait = (\d+) \* time\.Second", daemon_src)
+        extra = re.search(r"DefaultStartWait = DefaultLockWait \+ (\d+)\*time\.Second", ensure_src)
+        self.assertIsNotNone(lock, "DefaultLockWait not found in daemon.go")
+        self.assertIsNotNone(extra, "DefaultStartWait not found in ensure.go")
+        self.assertEqual(self.launcher.DAEMON_DEFAULT_START_WAIT, float(int(lock.group(1)) + int(extra.group(1))))
+
+    def test_staging_writes_the_copy_once_and_leaves_other_entries_alone(self):
+        # The other entry may be the running daemon's own executable, which
+        # it respawns itself from on a LAN change; only the daemon that holds
+        # the lock prunes the directory.
         bin_dir = self.daemon_dir / "bin"
         bin_dir.mkdir(parents=True)
-        (bin_dir / "ws-mcp-dashboard-stale").write_text("old", encoding="utf-8")
+        (bin_dir / "ws-mcp-dashboard-running").write_text("old", encoding="utf-8")
         staged = self.launcher.stage_daemon_binary(self.binary, bin_dir)
         self.assertEqual(staged.read_bytes(), self.binary.read_bytes())
         self.assertTrue(os.access(staged, os.X_OK))
-        self.assertEqual([p.name for p in bin_dir.iterdir()], [staged.name])
+        self.assertEqual(sorted(p.name for p in bin_dir.iterdir()), sorted([staged.name, "ws-mcp-dashboard-running"]))
         first = staged.stat().st_mtime_ns
         self.assertEqual(self.launcher.stage_daemon_binary(self.binary, bin_dir), staged)
         self.assertEqual(staged.stat().st_mtime_ns, first, "an up-to-date staged copy is left alone")

@@ -302,11 +302,11 @@ var routeFactGroups = map[string]string{
 // contract instead. Every failure resolves to a named status with unknown
 // facts rather than an error, so a fact problem is reported in the verdict the
 // caller reads rather than swallowing the branch plan the caller also needs.
-func loadImplementRouteFacts(root string, target implementTargetInput) implementRouteFactsSource {
+func loadImplementRouteFacts(root string, target implementTargetInput, env []string) implementRouteFactsSource {
 	if target.Kind != "ticket" {
 		return implementRouteFactsSource{Status: "ad-hoc"}
 	}
-	info, label, err := implementTicketInfo(root, target)
+	info, label, err := implementTicketInfo(root, target, env)
 	if label == "" {
 		return implementRouteFactsSource{Status: "absent", Detail: "ticket target carries no ticket_path or ticket_stem to read facts from"}
 	}
@@ -369,7 +369,7 @@ func loadImplementRouteFacts(root string, target implementTargetInput) implement
 // verdict names it by. A path is authoritative when the caller gives one;
 // otherwise the stem is resolved against the board, since the tool accepts a
 // target carrying only a stem and such a target is no less routable.
-func implementTicketInfo(root string, target implementTargetInput) (wsdoc.TicketInfo, string, error) {
+func implementTicketInfo(root string, target implementTargetInput, env []string) (wsdoc.TicketInfo, string, error) {
 	if path := strings.TrimSpace(target.TicketPath); path != "" {
 		info, err := wsdoc.TicketAt(root, path)
 		return info, path, err
@@ -378,7 +378,7 @@ func implementTicketInfo(root string, target implementTargetInput) (wsdoc.Ticket
 	if stem == "" {
 		return wsdoc.TicketInfo{}, "", fs.ErrNotExist
 	}
-	info, err := wsdoc.TicketsStatus(root, wsdoc.TicketStatusOptions{TicketStem: stem, Resolve: true})
+	info, err := wsdoc.TicketsStatus(root, wsdoc.TicketStatusOptions{TicketStem: stem, Resolve: true, Env: env})
 	if err != nil {
 		return wsdoc.TicketInfo{}, stem, fs.ErrNotExist
 	}

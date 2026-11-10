@@ -63,6 +63,9 @@ type dashboardLink struct {
 
 	nudgeOnce sync.Once
 	nudges    chan wsdashboard.NudgeBody
+	// nudgesDone is closed when the nudge goroutine has exited (after
+	// Close closed nudges); nil while the goroutine was never started.
+	nudgesDone chan struct{}
 	// nudgesClosed is set by Close; a nudge queued after it is dropped.
 	nudgesClosed bool
 }
@@ -319,7 +322,11 @@ func (s *Server) queueDashboardNudge(sess *dashboardSession) {
 	}
 	d.nudgeOnce.Do(func() {
 		d.nudges = make(chan wsdashboard.NudgeBody, dashboardNudgeQueue)
-		go s.runDashboardNudges(d.nudges)
+		d.nudgesDone = make(chan struct{})
+		go func() {
+			defer close(d.nudgesDone)
+			s.runDashboardNudges(d.nudges)
+		}()
 	})
 	select {
 	case d.nudges <- wsdashboard.NudgeBody{ReplyID: sess.replyID, Project: sess.project}:
@@ -343,7 +350,13 @@ func (s *Server) runDashboardNudges(queue <-chan wsdashboard.NudgeBody) {
 	drain:
 		for {
 			select {
-			case next := <-queue:
+			case next, ok := <-queue:
+				if !ok {
+					// Close closed the queue while this batch was folding: a
+					// closed channel answers at once, forever, so without
+					// this the fold never ends.
+					break drain
+				}
 				if !seen[next] {
 					seen[next] = true
 					batch = append(batch, next)

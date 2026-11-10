@@ -8,14 +8,23 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/kang-sw/devenv/internal/mcp"
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wsrsrc"
 )
+
+// hostedCallLinger bounds how long the daemon process stays, after it has
+// released its lock and endpoint, for a hosted call that outlived the
+// drain budget (wsdashboard.Daemon.WaitProxy): long enough for a git
+// merge or a ticket close, short enough that a wedged call never leaves a
+// daemon process behind for good.
+const hostedCallLinger = 2 * time.Minute
 
 // proxy.go hosts the MCP sessions the dashboard daemon serves for the
 // launchers that connect to its MCP route (internal/wsdashboard/proxy.go).
@@ -27,15 +36,26 @@ import (
 
 // proxyHost is the daemon's ProxyHandler.
 type proxyHost struct {
-	dir       string
-	port      int
-	lan       bool
-	buildTime int64
-	logw      io.Writer
+	dir         string
+	port        int
+	lan         bool
+	buildTime   int64
+	contentHash string
+	logw        io.Writer
+	// configPath is the global config file this daemon's own environment
+	// resolves to; a session anchored at another one (its WS_CONFIG_HOME)
+	// reads a dashboard.lan_enabled that is not this daemon's to follow.
+	configPath string
 	// replacing is set once a connection's global dashboard.lan_enabled
-	// differs from this daemon's mode and the replacement began.
-	replacing atomic.Bool
+	// differs from this daemon's mode and the replacement began; background
+	// counts the replacement goroutine, which the daemon process waits for
+	// before it exits (it spawns the successor).
+	replacing  atomic.Bool
+	background sync.WaitGroup
 }
+
+// wait blocks until the replacement goroutine, if any, has ended.
+func (h *proxyHost) wait() { h.background.Wait() }
 
 // Accept builds the session for hello: an MCP server over the stream, or a
 // `mailbox wait` run.
@@ -68,7 +88,7 @@ func (h *proxyHost) Accept(hello wsdashboard.ProxyHello) (wsdashboard.ProxySessi
 		if len(hello.Argv) < 2 || hello.Argv[0] != "mailbox" || hello.Argv[1] != "wait" {
 			return nil, fmt.Errorf("the daemon runs only `mailbox wait` for a launcher, not %q", strings.Join(hello.Argv, " "))
 		}
-		return &proxyCLISession{args: hello.Argv[2:], ownerPID: hello.OwnerPID, getenv: func(key string) string { return hello.Env[key] }}, nil
+		return &proxyCLISession{args: hello.Argv[2:], cwd: hello.Cwd, ownerPID: hello.OwnerPID, getenv: func(key string) string { return hello.Env[key] }}, nil
 	}
 	return nil, fmt.Errorf("unsupported mode %q", hello.Mode)
 }
@@ -77,7 +97,19 @@ func (h *proxyHost) Accept(hello wsdashboard.ProxyHello) (wsdashboard.ProxySessi
 // connection's server: a value that differs from this daemon's mode
 // replaces the daemon, once, through the drain path (Ensure asks this
 // daemon to stop and starts a successor; the launchers reconnect to it).
+//
+// Only a session that takes part in the dashboard has a say: one whose
+// manifests declare no dashboard keys, or that sets WS_MCP_NO_DASHBOARD,
+// reads the key's default rather than the user's value, and one anchored at
+// another WS_CONFIG_HOME reads another user's config file. Each of those
+// used to flip the daemon back and forth with every connection.
 func (h *proxyHost) applyLANChange(server *mcp.Server) {
+	if !server.DashboardApplies() {
+		return
+	}
+	if path, err := server.GlobalConfigPath(); err != nil || filepath.Clean(path) != h.configPath {
+		return
+	}
 	settings := server.DashboardSettings()
 	if settings.LAN == h.lan || h.replacing.Swap(true) {
 		return
@@ -87,7 +119,9 @@ func (h *proxyHost) applyLANChange(server *mcp.Server) {
 	if port <= 0 {
 		port = h.port
 	}
+	h.background.Add(1)
 	go func() {
+		defer h.background.Done()
 		defer func() { _ = recover() }()
 		spawn := func(args []string) error {
 			exe, err := os.Executable()
@@ -97,13 +131,14 @@ func (h *proxyHost) applyLANChange(server *mcp.Server) {
 			return wsdashboard.SpawnDetached(exe, args, h.dir)
 		}
 		outcome, err := wsdashboard.Ensure(context.Background(), wsdashboard.EnsureOptions{
-			Dir:       h.dir,
-			Version:   version,
-			BuildTime: h.buildTime,
-			Port:      port,
-			LAN:       settings.LAN,
-			Spawn:     spawn,
-			Log:       h.logw,
+			Dir:         h.dir,
+			Version:     version,
+			BuildTime:   h.buildTime,
+			ContentHash: h.contentHash,
+			Port:        port,
+			LAN:         settings.LAN,
+			Spawn:       spawn,
+			Log:         h.logw,
 		})
 		if err != nil || outcome == wsdashboard.OutcomeUnavailable {
 			fmt.Fprintf(h.logw, "dashboard: LAN mode change did not take (%s, %v)\n", outcome, err)
@@ -141,14 +176,17 @@ func (s *proxyMCPSession) Serve(ctx context.Context, stream io.ReadWriteCloser) 
 	s.server.Close()
 }
 
-func (s *proxyMCPSession) Drain(ctx context.Context) { s.server.Drain(ctx) }
+func (s *proxyMCPSession) Drain(ctx context.Context) bool { return s.server.Drain(ctx) }
 
 // proxyCLISession runs `mailbox wait` for a launcher: stderr lines go out
 // as they are written, and the final frame carries the exit code with the
 // whole stdout. The stream's end (the launcher closed, or the daemon
-// drains) cancels the wait at once, which clears its listening marker.
+// drains) cancels the wait at once, which clears its listening marker. cwd
+// is the launcher's working directory, against which a relative --root
+// resolves (the daemon's own is meaningless to the caller).
 type proxyCLISession struct {
 	args     []string
+	cwd      string
 	ownerPID int
 	getenv   func(string) string
 
@@ -183,21 +221,23 @@ func (s *proxyCLISession) Serve(ctx context.Context, stream io.ReadWriteCloser) 
 	}
 	var stdout bytes.Buffer
 	stderr := &frameWriter{emit: func(data string) { writeFrame(wsdashboard.ProxyCLIFrame{Stream: "stderr", Data: data}) }}
-	code := runMailboxWait(ctx, s.args, &stdout, stderr, s.ownerPID, s.getenv)
+	code := runMailboxWait(ctx, s.args, &stdout, stderr, s.cwd, s.ownerPID, s.getenv)
 	writeFrame(wsdashboard.ProxyCLIFrame{Final: true, ExitCode: code, Data: stdout.String()})
 }
 
-func (s *proxyCLISession) Drain(ctx context.Context) {
+func (s *proxyCLISession) Drain(ctx context.Context) bool {
 	s.mu.Lock()
 	cancel, done := s.cancel, s.done
 	s.mu.Unlock()
 	if cancel == nil {
-		return
+		return true
 	}
 	cancel()
 	select {
 	case <-done:
+		return true
 	case <-ctx.Done():
+		return false
 	}
 }
 
@@ -245,14 +285,15 @@ func daemonStart(args []string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*wsdashboard.DefaultStartWait+*startWait)
 	defer cancel()
 	outcome, err := wsdashboard.Ensure(ctx, wsdashboard.EnsureOptions{
-		Dir:       dir,
-		Version:   version,
-		BuildTime: *buildTime,
-		Port:      settings.Port,
-		LAN:       settings.LAN,
-		Spawn:     spawn,
-		StartWait: *startWait,
-		Log:       os.Stderr,
+		Dir:         dir,
+		Version:     version,
+		BuildTime:   *buildTime,
+		ContentHash: wsdashboard.ExecutableContentHash(exe),
+		Port:        settings.Port,
+		LAN:         settings.LAN,
+		Spawn:       spawn,
+		StartWait:   *startWait,
+		Log:         os.Stderr,
 	})
 	if err != nil {
 		fatal("daemon-start", err)

@@ -680,7 +680,7 @@ func TestActiveImplTicketAndGitStatusFormatting(t *testing.T) {
 	suffix := wskey.Derive(stem, 3)
 	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "ready", stem+".md"), "---\ntitle: Active owner\n---\n")
 
-	active, err := activeImplTicket(root, "impl/feature/base/"+suffix)
+	active, err := activeImplTicket(root, "impl/feature/base/"+suffix, nil)
 	if err != nil {
 		t.Fatalf("activeImplTicket active: %v", err)
 	}
@@ -692,7 +692,7 @@ func TestActiveImplTicketAndGitStatusFormatting(t *testing.T) {
 		t.Fatalf("active text = %q", got)
 	}
 
-	missing, err := activeImplTicket(root, "impl/feature/base/no-match")
+	missing, err := activeImplTicket(root, "impl/feature/base/no-match", nil)
 	if err != nil || missing == nil || missing.State != "missing" {
 		t.Fatalf("missing = %#v, %v", missing, err)
 	}
@@ -701,7 +701,7 @@ func TestActiveImplTicketAndGitStatusFormatting(t *testing.T) {
 	}
 
 	mustWrite(t, root, filepath.Join("ai-docs", "tickets", "todo", stem+".md"), "---\ntitle: Duplicate owner\n---\n")
-	ambiguous, err := activeImplTicket(root, "impl/feature/base/"+suffix)
+	ambiguous, err := activeImplTicket(root, "impl/feature/base/"+suffix, nil)
 	if err != nil || ambiguous == nil || ambiguous.State != "ambiguous" {
 		t.Fatalf("ambiguous = %#v, %v", ambiguous, err)
 	}
@@ -709,7 +709,7 @@ func TestActiveImplTicketAndGitStatusFormatting(t *testing.T) {
 		t.Fatalf("ambiguous text = %q", got)
 	}
 
-	nonImpl, err := activeImplTicket(root, "feature/base")
+	nonImpl, err := activeImplTicket(root, "feature/base", nil)
 	if err != nil || nonImpl != nil {
 		t.Fatalf("non-impl = %#v, %v", nonImpl, err)
 	}
@@ -721,7 +721,7 @@ func TestActiveImplTicketAndGitStatusFormatting(t *testing.T) {
 func TestActiveImplTicketFailsClosedOnUnreadableInventory(t *testing.T) {
 	root := t.TempDir()
 	initGit(t, root)
-	if _, err := activeImplTicket(root, "impl/feature/base/no-match"); err == nil {
+	if _, err := activeImplTicket(root, "impl/feature/base/no-match", nil); err == nil {
 		t.Fatal("activeImplTicket unexpectedly treated a missing ticket inventory as missing ownership")
 	}
 }

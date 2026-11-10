@@ -64,6 +64,11 @@ type Server struct {
 	inflight     int
 	draining     bool
 	inflightDone chan struct{}
+	// drainCtx ends when Drain begins: the blocking waits a tool call holds
+	// (exec.result's timeout) select on it, so a drain cancels them at once
+	// instead of waiting them out.
+	drainCtx    context.Context
+	drainCancel context.CancelFunc
 }
 
 // gitStatusResult keeps the generic git observation intact while allowing the
@@ -704,6 +709,11 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			if entry.isTopLevelLead() {
 				// Registers the session on the dashboard, or keeps it off.
 				s.dashboardTouch(keyStr, entry.root, false)
+				// A worktree/clone mailbox identity registers at the first
+				// call that carries a root: the ferrule login, or, for a
+				// server hosted again for a session already logged in, this
+				// keyed call.
+				s.ensureMailboxRegistered(entry.root)
 				if params.Name == "config.tune" {
 					defer func() {
 						s.dashboardTouch(keyStr, entry.root, true)
@@ -843,7 +853,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		}
 		key, _ := params.Arguments["exec_key"].(string)
 		timeout := durationFromSeconds(params.Arguments["timeout_seconds"])
-		result, err := execjob.ResultWithTimeout(root, key, timeout)
+		result, err := execjob.ResultWithContext(s.drainContext(), root, key, timeout)
 		return execResponse(req.ID, result, err, true)
 	case "exec.abort":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
@@ -1208,7 +1218,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		implTicket, err := activeImplTicket(root, result.Branch.Head)
+		implTicket, err := activeImplTicket(root, result.Branch.Head, s.environ())
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
@@ -1373,7 +1383,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		if err != nil {
 			return toolTextResponse(req.ID, "", fmt.Errorf("worktree.acquire: %w", err))
 		}
-		result, err := provisionWorktree(context.Background(), s.gitRunner(), entry.root, base, targetBranch, profile, poolRV.Value)
+		result, err := provisionWorktree(context.Background(), s.gitRunner(), s.environ(), entry.root, base, targetBranch, profile, poolRV.Value)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
@@ -1592,7 +1602,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			}
 			resolveWarnings = warnings
 		}
-		result, err := wsgit.Client{Runner: s.gitRunner(), Verifier: verifyAdapter}.Commit(context.Background(), root, wsgit.CommitOptions{
+		result, err := wsgit.Client{Runner: s.gitRunner(), Verifier: s.verifyAdapter}.Commit(context.Background(), root, wsgit.CommitOptions{
 			Paths:             stringList(params.Arguments["paths"]),
 			Title:             title,
 			Description:       description,
@@ -1601,7 +1611,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			Followups:         followups,
 			Resolves:          resolves,
 			ExpectedBranch:    expectedBranch,
-			SparseScopeActive: wsdoc.SparseCheckoutActive(root),
+			SparseScopeActive: wsdoc.SparseCheckoutActiveEnv(root, s.environ()),
 		})
 		if err == nil {
 			result.Warnings = append(result.Warnings, resolveWarnings...)
@@ -1627,7 +1637,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		text, err := wsdoc.ProjectTree(root)
+		text, err := wsdoc.ProjectTreeEnv(root, s.environ())
 		if err == nil {
 			// Appended here rather than threaded into ProjectTree: the
 			// parent-nested ticket tree is filesystem-only and project_tree has
@@ -1701,6 +1711,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		// discovery shape.
 		if strings.TrimSpace(ticketStem) != "" && strings.TrimSpace(query) == "" && strings.TrimSpace(mentionsTicketStem) == "" && len(statuses) == 0 {
 			result, err := wsdoc.TicketsStatus(root, wsdoc.TicketStatusOptions{
+				Env:            s.environ(),
 				TicketStem:     ticketStem,
 				IncludeDone:    boolArgument(params.Arguments["include_done"]),
 				IncludeDropped: boolArgument(params.Arguments["include_dropped"]),
@@ -1718,7 +1729,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			// this stem" resolve into an error — since the promotion closure is
 			// the other half of the same gate.
 			if err == nil && result != nil {
-				if block, blockErr := wsdoc.DispatchBlockFor(root, *result); blockErr == nil {
+				if block, blockErr := wsdoc.DispatchBlockForEnv(root, *result, s.environ()); blockErr == nil {
 					result.DispatchBlocked = block
 				}
 				// The warning token rides both projections whenever the feature is
@@ -1775,6 +1786,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			}
 		}
 		result, err := wsdoc.TicketsFind(root, wsdoc.TicketFindOptions{
+			Env:                s.environ(),
 			Statuses:           statuses,
 			IncludeDone:        boolArgument(params.Arguments["include_done"]),
 			IncludeDropped:     boolArgument(params.Arguments["include_dropped"]),
@@ -1823,6 +1835,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			return toolTextResponse(req.ID, "", err)
 		}
 		result, err := wsdoc.TicketsClose(root, s.gitRunner(), wsdoc.TicketCloseOptions{
+			Env:        s.environ(),
 			TicketStem: stem,
 			Status:     status,
 			Resolution: resolution,
@@ -1847,7 +1860,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		if nudge := implementCloseMergeReviewNudge(s.gitClient(), root); nudge != "" {
 			text += "next_instruction: " + nudge + "\n"
 		}
-		if reviewNudge := wsreview.CheckpointNudge(context.Background(), root); reviewNudge != "" {
+		if reviewNudge := wsreview.CheckpointNudgeWith(context.Background(), s.gitRunner(), root); reviewNudge != "" {
 			text += "review-watermark: " + reviewNudge + "\n"
 		}
 		return toolTextResponse(req.ID, text, nil)
@@ -1857,7 +1870,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			return toolTextResponse(req.ID, "", err)
 		}
 		if boolArgument(params.Arguments["bootstrap"]) {
-			_, created, err := wsreview.Bootstrap(context.Background(), root)
+			_, created, err := wsreview.BootstrapWith(context.Background(), s.gitRunner(), root)
 			if err != nil {
 				return toolTextResponse(req.ID, "", err)
 			}
@@ -1926,6 +1939,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			return toolTextResponse(req.ID, "", err)
 		}
 		result, err := wsdoc.TicketsMove(root, s.gitRunner(), wsdoc.TicketMoveOptions{
+			Env:        s.environ(),
 			TicketStem: stem,
 			To:         to,
 			SageReview: sageReview,
@@ -1964,6 +1978,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		}
 		rawSetAssignee, setAssigneePresent := params.Arguments["set_assignee"]
 		result, err := wsdoc.TicketCreate(root, wsdoc.TicketCreateOptions{
+			Env:          s.environ(),
 			Stem:         stem,
 			InitialState: initialState,
 			SageReview:   sageReview,
@@ -1999,6 +2014,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			return toolTextResponse(req.ID, "", err)
 		}
 		result, err := wsdoc.SageGate(root, wsdoc.SageGateOptions{
+			Env:        s.environ(),
 			TicketStem: stem,
 			Landing:    landing,
 			Answer:     answer,
@@ -2048,7 +2064,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		result, err := wsdoc.TicketVerify(root, stringList(params.Arguments["paths"]))
+		result, err := wsdoc.TicketVerifyEnv(root, stringList(params.Arguments["paths"]), s.environ())
 		if wantsJSON(params.Arguments) {
 			return toolJSONResponse(req.ID, result, err)
 		}
@@ -3299,7 +3315,7 @@ func formatGitStatusWithImplTicket(result wsgit.StatusResult, implTicket *implTi
 // activeImplTicket finds an active ticket only for a name-rooted implementation
 // branch. Resolve mode includes active tickets hidden by a sparse checkout; an
 // unreadable inventory is unsafe to label missing and therefore returns error.
-func activeImplTicket(root, branch string) (*implTicketStatus, error) {
+func activeImplTicket(root, branch string, env []string) (*implTicketStatus, error) {
 	_, suffix, ok := parseImplBranchRoot(branch)
 	if !ok {
 		return nil, nil
@@ -3308,6 +3324,7 @@ func activeImplTicket(root, branch string) (*implTicketStatus, error) {
 		return nil, err
 	}
 	candidates, err := wsdoc.TicketsFind(root, wsdoc.TicketFindOptions{
+		Env:      env,
 		Statuses: []string{"idea", "todo", "ready"}, Resolve: true,
 	})
 	if err != nil {
@@ -3510,7 +3527,17 @@ func ticketMutateNextInstruction(verb string, result wsdoc.TicketMutateResult) s
 // and the advisory set are identical on both paths, which is what
 // {#260723-tickets-verify-tool}'s identical-verdict guarantee requires.
 func verifyAdapter(root string, paths []string) ([]string, error) {
-	result, err := wsdoc.TicketVerify(root, paths)
+	return verifyAdapterEnv(nil, root, paths)
+}
+
+// verifyAdapter is verifyAdapter with git run on this server's caller
+// environment.
+func (s *Server) verifyAdapter(root string, paths []string) ([]string, error) {
+	return verifyAdapterEnv(s.environ(), root, paths)
+}
+
+func verifyAdapterEnv(env []string, root string, paths []string) ([]string, error) {
+	result, err := wsdoc.TicketVerifyEnv(root, paths, env)
 	if err != nil {
 		return nil, err
 	}

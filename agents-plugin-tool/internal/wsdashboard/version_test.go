@@ -37,8 +37,9 @@ func TestCompareVersions(t *testing.T) {
 }
 
 // TestStageExecutableCopiesAndPrunes: the daemon's binary copy is
-// content-addressed, reused for the same content, and every other copy in the
-// directory is deleted (on Windows, a running copy survives until later).
+// content-addressed and reused for the same content; staging leaves the
+// other copies alone (the running daemon's among them), and the daemon
+// prunes them once it holds the lock, keeping its own.
 func TestStageExecutableCopiesAndPrunes(t *testing.T) {
 	src := filepath.Join(t.TempDir(), "ws-mcp.exe")
 	if err := os.WriteFile(src, []byte("binary-v1"), 0o755); err != nil {
@@ -67,8 +68,33 @@ func TestStageExecutableCopiesAndPrunes(t *testing.T) {
 		t.Fatalf("stage v2 = %s, %v", second, err)
 	}
 	entries, _ := os.ReadDir(binDir)
+	if len(entries) != 2 {
+		t.Fatalf("bin dir holds %v, want the v1 copy kept beside v2 (the running daemon may be v1)", entries)
+	}
+	PruneStagedExecutables(filepath.Dir(binDir), second)
+	entries, _ = os.ReadDir(binDir)
 	if len(entries) != 1 || filepath.Join(binDir, entries[0].Name()) != second {
-		t.Fatalf("bin dir holds %v, want only %s", entries, second)
+		t.Fatalf("after the daemon's prune the bin dir holds %v, want only %s", entries, second)
+	}
+	// A daemon that runs from outside the staged directory (POSIX, where
+	// the Go side never stages) prunes nothing.
+	PruneStagedExecutables(filepath.Dir(binDir), src)
+	if entries, _ = os.ReadDir(binDir); len(entries) != 1 {
+		t.Fatalf("a prune from outside the bin dir changed it: %v", entries)
+	}
+}
+
+func TestExecutableContentHashIsTheFileSHA256(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "ws-mcp")
+	if err := os.WriteFile(path, []byte("binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	got := ExecutableContentHash(path)
+	if want, _ := fileSHA256(path); len(got) != 64 || got != want {
+		t.Fatalf("ExecutableContentHash = %q, want %q", got, want)
+	}
+	if ExecutableContentHash(filepath.Join(t.TempDir(), "absent")) != "" {
+		t.Fatal("a missing file must hash to the empty (unknown) string")
 	}
 }
 

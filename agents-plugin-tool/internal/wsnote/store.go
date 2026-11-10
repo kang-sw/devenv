@@ -40,9 +40,13 @@ func MachinePath(opts wsconfig.Options) (string, error) {
 }
 
 // WorktreePath resolves the worktree-layer note store path under the
-// existing per-worktree wsstate cache directory for the canonical root.
-func WorktreePath(root string) (string, error) {
-	layout, _, _, err := wsstate.NewManager(wsstate.Options{}).Ensure(root)
+// existing per-worktree wsstate cache directory for the canonical root, in
+// this process's cache home.
+func WorktreePath(root string) (string, error) { return WorktreePathIn(wsstate.Options{}, root) }
+
+// WorktreePathIn is WorktreePath under the cache home opts names.
+func WorktreePathIn(opts wsstate.Options, root string) (string, error) {
+	layout, _, _, err := wsstate.NewManager(opts).Ensure(root)
 	if err != nil {
 		return "", err
 	}
@@ -66,8 +70,11 @@ func WorktreePath(root string) (string, error) {
 // that must stay distinct from the canonical worktree's own per-worktree
 // files living in that same physical directory (see LocksDir's identical
 // collision-avoidance use of SharedDir).
-func ClonePath(root string) (string, error) {
-	layout, _, _, err := wsstate.NewManager(wsstate.Options{}).Ensure(root)
+func ClonePath(root string) (string, error) { return ClonePathIn(wsstate.Options{}, root) }
+
+// ClonePathIn is ClonePath under the cache home opts names.
+func ClonePathIn(opts wsstate.Options, root string) (string, error) {
+	layout, _, _, err := wsstate.NewManager(opts).Ensure(root)
 	if err != nil {
 		return "", err
 	}

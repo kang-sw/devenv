@@ -651,23 +651,55 @@ Finding and starting the daemon (`DaemonLink` in the launcher):
    `~/.cache/ws@kang-sw-devenv`, as `wsstate.CacheRoot` resolves it; the test
    `test_cache_root_and_staged_name_follow_the_go_rules` pins the parity.
 2. `endpoint.json` names the port and token; `GET /health` answers the
-   daemon's version and `build_time`. A daemon that answers nothing within
-   5 s (10 s on Windows) counts as absent.
+   daemon's version, `build_time`, and `content_hash` (the sha256 of the
+   daemon's executable). A daemon whose endpoint answers nothing within
+   5 s (10 s on Windows) counts as absent; a port that accepts the
+   connection but never answers within that budget is a hung daemon, and
+   the launcher runs the direct path rather than starting a second one.
 3. The daemon is started, or replaced, only when none answers, the running
    one's version is older than the plugin's (`runtime.json`
    `plugin_version`), or equal with an older `build_time` than the runtime
-   binary's mtime. The launcher copies the runtime binary to
+   binary's mtime *and* a different `content_hash`: the same bytes never
+   replace a daemon whatever their mtime (Claude, Codex, and Pi each
+   install their own copy of one binary, and a replacement drains every
+   session on the machine), so build time breaks the tie only between
+   different builds (`keepRunning` in Go, `needs_start` in the launcher).
+   The launcher copies the runtime binary to
    `<daemon dir>/bin/ws-mcp-dashboard-<sha256[:16]><ext>` (the name
-   `StageExecutable` produces; other entries are removed) and runs
-   `<staged> daemon-start --build-time <mtime ms>` with its own environment:
-   Go resolves `dashboard.port` and `dashboard.lan_enabled` from config as
-   `serve` did and runs the `Ensure` handoff, printing one JSON line
-   (`outcome`, `port`, `pid`, `version`). The launcher then waits up to
-   `DefaultStartWait` + 5 s (Windows + 10 s) for a healthy daemon.
+   `StageExecutable` produces) and runs `<staged> daemon-start --build-time
+   <mtime ms>` with its own environment: Go resolves `dashboard.port` and
+   `dashboard.lan_enabled` from config as `serve` did and runs the `Ensure`
+   handoff, printing one JSON line (`outcome`, `port`, `pid`, `version`).
+   The launcher leaves the other staged entries alone (one of them is the
+   running daemon's own executable, which it respawns from on a LAN mode
+   change); the daemon that wins the lock prunes the directory down to its
+   own. The launcher then waits up to `DefaultStartWait` + 5 s (Windows
+   + 10 s) for a healthy daemon and applies the replace rule to the one
+   that answers: when that is still the older daemon (it refused to stop,
+   or won the lock race) the launcher runs the direct path rather than
+   settle on it.
 4. A daemon in another minor is never used: the launcher runs the direct
    path. The same minor, newer, is used as is (its tool set may be larger
    than `runtime.json` lists; compatibility on this path is the version rule
    only).
+
+A hosted session's global `dashboard.lan_enabled` can switch the daemon's
+LAN mode (the daemon respawns itself with the other setting), but only a
+session that takes part in the dashboard has a say: a hello whose server
+declares no dashboard manifest, sets `WS_MCP_NO_DASHBOARD=1`, or reads a
+global config other than the daemon's (a different `WS_CONFIG_HOME`) never
+changes the mode, so two harnesses with different config homes cannot flip
+the daemon back and forth.
+
+Drain: a daemon being replaced drains its hosted sessions within
+`DefaultLockWait` − 1.8 s, then releases its lock and endpoint so the
+successor proceeds, and only then waits for the calls still running (up to
+two minutes, `hostedCallLinger`) before the process exits: a `git.commit`,
+`git.merge`, or `tickets.close` in flight finishes and its answer is
+delivered on the old connection before it closes. A draining server refuses
+a new request with `-32000` "server draining", and the drain cancels a
+blocked `exec.result` wait at once, which answers with the job state it
+finds. A CLI-mode `mailbox wait` is cancelled by the drain (exit 130).
 
 On the daemon path the compatibility probe (`runtime capabilities` on a
 stamp miss, see Runtime Repair And Drift) also runs the staged copy, so the
@@ -687,9 +719,19 @@ request under an id of its own (`ws-mcp-launcher-replay-<n>`, so a late
 answer from the old daemon can never be mistaken for it) and drops its
 answer, re-sends `notifications/initialized`, and answers every request that
 was in flight with a JSON-RPC error (`-32000`, "ws-mcp daemon connection was
-replaced"); the client never sees the server go away. When no daemon comes
+replaced"); the client never sees the server go away. Reconnecting is
+bounded: a connection the daemon closes within 2 s of accepting it counts
+as a quick close, each further attempt waits 0.5 s × the count, and after
+three in a row the proxy continues on the direct path. When no daemon comes
 back within the start budget, a direct `serve --stdio` child takes over the
-same way.
+same way. A hosted server for a reconnected session re-registers that
+session's mailbox presence on its first keyed call and keeps the owner
+pointer and the `WS_MAILBOX_AUTO` stem its predecessor published.
+
+Client EOF: when the client closes the proxy's stdin, the proxy half-closes
+the daemon stream for writing and keeps copying answers to its stdout until
+the daemon closes the stream or 10 s pass (`PROXY_DRAIN_SECONDS`), so a
+response to the client's last request is not dropped.
 
 Wire format (`internal/wsdashboard/proxy.go`): `GET /mcp HTTP/1.1` with
 `Upgrade: ws-mcp`, `Connection: Upgrade`, and `Authorization: Bearer <token
@@ -732,14 +774,17 @@ harness is detected from `initialize` as on stdio; the hello's `harness` is
 an optional hint. Closing the connection ends the session: its dashboard
 session, its mailbox presence, and any wait it holds.
 
-In `cli` mode the daemon runs `mailbox wait` with `argv[2:]` and answers in
-frames, one JSON object per line: `{"stream": "stderr", "data": "..."}` for
-each stderr write as it happens, then one `{"final": true, "exit_code": <n>,
-"data": "<the whole stdout>"}`. The launcher writes them to its own stderr and
-stdout and exits with `exit_code`, so the mod and the Pi waiter see the same
-output and codes as from the direct CLI; closing the connection (the
-launcher exits, or the daemon drains) cancels the wait at once and clears
-its listening marker (`exit_code` 130, "interrupted").
+In `cli` mode the daemon runs `mailbox wait` with `argv[2:]` (a relative
+`--root` resolves against the hello's `cwd`, and the wait's stores follow
+the hello's `WS_CONFIG_HOME`/`WS_CACHE_HOME`) and answers in frames, one
+JSON object per line: `{"stream": "stderr", "data": "..."}` for each stderr
+write as it happens, then one `{"final": true, "exit_code": <n>, "data":
+"<the whole stdout>"}`, `exit_code` always present (0 included). The
+launcher writes them as UTF-8 bytes to its own stderr and stdout and exits
+with `exit_code`, so the mod and the Pi waiter see the same output and codes
+as from the direct CLI; closing the connection (the launcher exits, or the
+daemon drains) cancels the wait at once and clears its listening marker
+(`exit_code` 130, "interrupted").
 
 ## Launcher Environment
 

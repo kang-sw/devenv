@@ -86,18 +86,22 @@ func gitExecutable(env []string) string {
 	return wsgit.Executable()
 }
 
+// lookupEnv is key's value in env, matched case-insensitively when fold is
+// set (Windows environment variable names), or "" when absent.
+func lookupEnv(env []string, key string, fold bool) string {
+	for _, kv := range env {
+		k, v, ok := strings.Cut(kv, "=")
+		if ok && (k == key || (fold && strings.EqualFold(k, key))) {
+			return v
+		}
+	}
+	return ""
+}
+
 // batchSSHCommand is gitbatch.SSHCommand over env and the store clone's
 // core.sshCommand.
 func batchSSHCommand(ctx context.Context, env []string, root string) string {
-	getenv := func(key string) string {
-		for _, kv := range env {
-			k, v, ok := strings.Cut(kv, "=")
-			if ok && (k == key || (runtime.GOOS == "windows" && strings.EqualFold(k, key))) {
-				return v
-			}
-		}
-		return ""
-	}
+	getenv := func(key string) string { return lookupEnv(env, key, runtime.GOOS == "windows") }
 	return gitbatch.SSHCommand(getenv, func() string {
 		probe := gitCommand(ctx, env, root, "config", "--get", "core.sshCommand")
 		probe.Env = env

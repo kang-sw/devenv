@@ -273,7 +273,7 @@ func (s *Server) handleIndexVerb(id json.RawMessage, args, meta map[string]any, 
 			if caller.owner.Email == "" {
 				return fmt.Errorf("%s: git user.email is not set; the lease records the owner's email", tool)
 			}
-			if _, _, _, err := wsdoc.FindTicketPath(root, stem); errors.Is(err, wsdoc.ErrTicketNotFound) {
+			if _, _, _, err := wsdoc.FindTicketPathEnv(root, stem, s.environ()); errors.Is(err, wsdoc.ErrTicketNotFound) {
 				return fmt.Errorf("%s: ticket %s does not exist in this checkout", tool, stem)
 			} else if err != nil {
 				return fmt.Errorf("%s: look up ticket %s: %w", tool, stem, err)

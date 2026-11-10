@@ -233,6 +233,25 @@ func (s *sessionStore) lookup(key string) (sessionEntry, bool) {
 	}, true
 }
 
+// inspect is lookup without the activity touch, for a reader that is not a
+// call (the live session's timer). transient reports a record that exists
+// but could not be read this time (errSessionUnreadable), which is neither
+// found nor gone.
+func (s *sessionStore) inspect(key string) (entry sessionEntry, found, transient bool) {
+	d, err := s.dirs()
+	if err != nil {
+		return sessionEntry{}, false, true
+	}
+	record, _, err := s.loadRecord(d, key, partKey, nil)
+	if errors.Is(err, errSessionUnreadable) {
+		return sessionEntry{}, false, true
+	}
+	if err != nil {
+		return sessionEntry{}, false, false
+	}
+	return sessionEntry{root: record.Root, scope: toolRole(record.Scope), parent: record.Parent}, true, false
+}
+
 // recordMtime returns the mtime of key's activity mark (key.json, or a legacy
 // record file) and whether the record exists and parses. Unlike lookup it
 // never touches the record: an inspection read (such as worktree.list

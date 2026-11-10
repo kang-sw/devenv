@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -29,6 +28,7 @@ import (
 type ticketScope struct {
 	root   string
 	gitDir string
+	env    []string // the environment its git runs on; see gitCommand
 
 	pathsLoaded bool
 	paths       []string
@@ -58,6 +58,11 @@ const TicketsDir = "ai-docs/tickets"
 // explicitly false core.sparseCheckout that every config file agrees on is
 // terminal, and git is consulted whenever the files leave the answer open.
 func newTicketScope(root string) *ticketScope {
+	return newTicketScopeEnv(root, nil)
+}
+
+// newTicketScopeEnv is newTicketScope with the scope's git run on env.
+func newTicketScopeEnv(root string, env []string) *ticketScope {
 	gitDir := resolveGitDir(root)
 	if gitDir == "" {
 		return nil
@@ -71,7 +76,7 @@ func newTicketScope(root string) *ticketScope {
 	if sparseCheckoutDisabledInConfigFiles(gitDir) {
 		return nil
 	}
-	scope := &ticketScope{root: root, gitDir: gitDir}
+	scope := &ticketScope{root: root, gitDir: gitDir, env: env}
 	out, err := scope.run("", "config", "--type=bool", "--get", "core.sparseCheckout")
 	if err != nil {
 		// git exits 1 with no output when the key was never set.
@@ -237,7 +242,7 @@ func resolveGitDir(root string) string {
 }
 
 func (s *ticketScope) run(stdin string, args ...string) ([]byte, error) {
-	cmd := exec.Command("git", append([]string{"-C", s.root}, args...)...)
+	cmd := gitCommand(s.env, s.root, args...)
 	if stdin != "" {
 		cmd.Stdin = strings.NewReader(stdin)
 	}
@@ -458,12 +463,22 @@ func SparseCheckoutActive(root string) bool {
 	return newTicketScope(root) != nil
 }
 
+// SparseCheckoutActiveEnv is SparseCheckoutActive with git run on env.
+func SparseCheckoutActiveEnv(root string, env []string) bool {
+	return newTicketScopeEnv(root, env) != nil
+}
+
 // TicketScope counts the tickets under statuses that live in the index but not
 // on disk. statuses is the effective status list (empty means the default open
 // set ready/todo/idea). With core.sparseCheckout unset it returns
 // {Active: false, Hidden: 0} after at most two os.Stat calls.
 func TicketScope(root string, statuses []string) (TicketScopeInfo, error) {
-	scope := newTicketScope(root)
+	return TicketScopeEnv(root, statuses, nil)
+}
+
+// TicketScopeEnv is TicketScope with git run on env.
+func TicketScopeEnv(root string, statuses []string, env []string) (TicketScopeInfo, error) {
+	scope := newTicketScopeEnv(root, env)
 	if scope == nil {
 		return TicketScopeInfo{}, nil
 	}

@@ -73,7 +73,7 @@ func (s *Server) handleMailboxSend(id json.RawMessage, args map[string]any) resp
 	if addr.Kind == wsmailbox.AddressSlug {
 		counterparty = addr.Name + "@" + string(addr.Scope)
 	}
-	replyID, err := s.publishReplyID(sessionKey, entry.root, ownNamed, mailboxContactFor(counterparty, entry.root))
+	replyID, err := s.publishReplyID(sessionKey, entry.root, ownNamed, mailboxContactFor(s.mailboxPaths(), counterparty, entry.root))
 	if err != nil {
 		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
 	}
@@ -92,7 +92,7 @@ func (s *Server) handleMailboxSend(id json.RawMessage, args map[string]any) resp
 
 	switch addr.Kind {
 	case wsmailbox.AddressSlug:
-		path, perr := wsmailbox.PathForScope(addr.Scope, entry.root)
+		path, perr := s.mailboxPaths().ForScope(addr.Scope, entry.root)
 		if perr != nil {
 			return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, perr))
 		}
@@ -103,7 +103,7 @@ func (s *Server) handleMailboxSend(id json.RawMessage, args map[string]any) resp
 			return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, werr))
 		}
 	case wsmailbox.AddressReplyID:
-		path, perr := wsmailbox.ReplyRegistryPath()
+		path, perr := s.mailboxPaths().ReplyRegistry()
 		if perr != nil {
 			return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, perr))
 		}
@@ -161,7 +161,7 @@ func (s *Server) handleMailboxRecv(id json.RawMessage, args map[string]any) resp
 		readErrs = append(readErrs, fmt.Errorf("named-inbox owner check: %w", oerr))
 	} else if isOwner {
 		ownNamed = identity.address()
-		if path, perr := wsmailbox.PathForScope(identity.Scope, entry.root); perr != nil {
+		if path, perr := s.mailboxPaths().ForScope(identity.Scope, entry.root); perr != nil {
 			readErrs = append(readErrs, fmt.Errorf("named-inbox path: %w", perr))
 		} else {
 			var ownerDrained []wsmailbox.Envelope
@@ -187,7 +187,7 @@ func (s *Server) handleMailboxRecv(id json.RawMessage, args map[string]any) resp
 	// caller's own session_key (Decision 3's carve-out), independent of
 	// owner status. Same drain-after-confirmed-write discipline as above.
 	replyID := s.mailboxReplyID(sessionKey)
-	if path, perr := wsmailbox.ReplyRegistryPath(); perr != nil {
+	if path, perr := s.mailboxPaths().ReplyRegistry(); perr != nil {
 		readErrs = append(readErrs, fmt.Errorf("reply-id registry path: %w", perr))
 	} else {
 		var replyDrained []wsmailbox.Envelope
@@ -257,7 +257,7 @@ func (s *Server) recordMailboxRecvContacts(sessionKey, root, ownNamed string, dr
 			continue
 		}
 		seen[handle] = true
-		contacts = append(contacts, mailboxContactFor(handle, root))
+		contacts = append(contacts, mailboxContactFor(s.mailboxPaths(), handle, root))
 	}
 	if len(contacts) == 0 {
 		return
@@ -327,7 +327,7 @@ func (s *Server) handleMailboxLookupPeers(id json.RawMessage, args map[string]an
 	}
 	scope := wsmailbox.Scope(scopeRaw)
 
-	path, perr := wsmailbox.PathForScope(scope, entry.root)
+	path, perr := s.mailboxPaths().ForScope(scope, entry.root)
 	if perr != nil {
 		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, perr))
 	}
@@ -436,7 +436,7 @@ func (s *Server) handleMailboxLookupPeers(id json.RawMessage, args map[string]an
 	// (delivery, not enumeration): other sessions' reply-ids stay
 	// undiscoverable.
 	correspondents := []mailboxCorrespondentOut{}
-	if path, perr := wsmailbox.ReplyRegistryPath(); perr == nil {
+	if path, perr := s.mailboxPaths().ReplyRegistry(); perr == nil {
 		if registry, lerr := wsmailbox.LoadReplyStore(path); lerr == nil {
 			for _, c := range wsmailbox.SortedContacts(registry.Entries[s.mailboxReplyID(sessionKey)].Contacts) {
 				correspondents = append(correspondents, mailboxCorrespondentOut{
@@ -571,7 +571,7 @@ func (s *Server) mailboxPiggybackBadge(sessionKey string) string {
 	if identity.Active {
 		s.refreshMailboxPresenceHeartbeat(record.Root)
 		if isOwner, _, oerr := s.mailboxOwnerCheck(sessionKey, record.Root); oerr == nil && isOwner {
-			if path, perr := wsmailbox.PathForScope(identity.Scope, record.Root); perr == nil {
+			if path, perr := s.mailboxPaths().ForScope(identity.Scope, record.Root); perr == nil {
 				if store, lerr := wsmailbox.Load(path); lerr == nil {
 					if queue := store.Queues[identity.Name]; len(queue) > 0 {
 						unread += len(queue)
@@ -584,7 +584,7 @@ func (s *Server) mailboxPiggybackBadge(sessionKey string) string {
 
 	if checkReply {
 		replyID := s.mailboxReplyID(sessionKey)
-		if path, perr := wsmailbox.ReplyRegistryPath(); perr == nil {
+		if path, perr := s.mailboxPaths().ReplyRegistry(); perr == nil {
 			if store, lerr := wsmailbox.LoadReplyStore(path); lerr == nil {
 				if queue := store.Queues[replyID]; len(queue) > 0 {
 					unread += len(queue)

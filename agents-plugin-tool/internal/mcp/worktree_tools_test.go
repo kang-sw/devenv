@@ -132,7 +132,7 @@ func TestPathUnder(t *testing.T) {
 
 func TestProvisionWorktreeCreateNew(t *testing.T) {
 	root, base := worktreeFixture(t)
-	res, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/alpha", builtinProfile(t, worktreeProfileFull), "")
+	res, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, nil, root, base, "impl/test/alpha", builtinProfile(t, worktreeProfileFull), "")
 	if err != nil {
 		t.Fatalf("provision: %v", err)
 	}
@@ -158,7 +158,7 @@ func TestProvisionWorktreeCreateNew(t *testing.T) {
 	if data, err := os.ReadFile(excl); err == nil && strings.Contains(string(data), ".ws-worktrees") {
 		t.Fatalf("out-of-tree default pool wrongly registered in exclude:\n%s", data)
 	}
-	if _, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/beta", builtinProfile(t, worktreeProfileFull), ""); err != nil {
+	if _, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, nil, root, base, "impl/test/beta", builtinProfile(t, worktreeProfileFull), ""); err != nil {
 		t.Fatalf("second provision: %v", err)
 	}
 }
@@ -169,7 +169,7 @@ func TestProvisionWorktreeCreateNew(t *testing.T) {
 // out-of-tree.
 func TestProvisionWorktreeInTreeOverrideRegistersExclude(t *testing.T) {
 	root, base := worktreeFixture(t)
-	if _, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/alpha", builtinProfile(t, worktreeProfileFull), legacyInTreePoolTemplate); err != nil {
+	if _, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, nil, root, base, "impl/test/alpha", builtinProfile(t, worktreeProfileFull), legacyInTreePoolTemplate); err != nil {
 		t.Fatalf("provision: %v", err)
 	}
 	excl := filepath.Join(root, ".git", "info", "exclude")
@@ -177,7 +177,7 @@ func TestProvisionWorktreeInTreeOverrideRegistersExclude(t *testing.T) {
 	if err != nil || !strings.Contains(string(data), "/.ws-worktrees/") {
 		t.Fatalf("pool not registered in .git/info/exclude: %v\n%s", err, data)
 	}
-	if _, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/beta", builtinProfile(t, worktreeProfileFull), legacyInTreePoolTemplate); err != nil {
+	if _, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, nil, root, base, "impl/test/beta", builtinProfile(t, worktreeProfileFull), legacyInTreePoolTemplate); err != nil {
 		t.Fatalf("second provision: %v", err)
 	}
 	data2, _ := os.ReadFile(excl)
@@ -188,14 +188,14 @@ func TestProvisionWorktreeInTreeOverrideRegistersExclude(t *testing.T) {
 
 func TestProvisionWorktreeReuseIdle(t *testing.T) {
 	root, base := worktreeFixture(t)
-	res1, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/alpha", builtinProfile(t, worktreeProfileFull), "")
+	res1, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, nil, root, base, "impl/test/alpha", builtinProfile(t, worktreeProfileFull), "")
 	if err != nil {
 		t.Fatalf("provision 1: %v", err)
 	}
 	if _, err := releaseWorktree(context.Background(), wsgit.ExecRunner{}, res1.Path, "", builtinProfileLookup(t)); err != nil {
 		t.Fatalf("release: %v", err)
 	}
-	res2, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/beta", builtinProfile(t, worktreeProfileFull), "")
+	res2, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, nil, root, base, "impl/test/beta", builtinProfile(t, worktreeProfileFull), "")
 	if err != nil {
 		t.Fatalf("provision 2: %v", err)
 	}
@@ -214,11 +214,11 @@ func TestProvisionWorktreeSkipBranchCheckedOut(t *testing.T) {
 	root, base := worktreeFixture(t)
 	// res1 stays checked out on a branch (not released → not detached), so it is
 	// not reuse-eligible; the next acquire must create a distinct worktree.
-	res1, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/alpha", builtinProfile(t, worktreeProfileFull), "")
+	res1, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, nil, root, base, "impl/test/alpha", builtinProfile(t, worktreeProfileFull), "")
 	if err != nil {
 		t.Fatalf("provision 1: %v", err)
 	}
-	res2, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/beta", builtinProfile(t, worktreeProfileFull), "")
+	res2, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, nil, root, base, "impl/test/beta", builtinProfile(t, worktreeProfileFull), "")
 	if err != nil {
 		t.Fatalf("provision 2: %v", err)
 	}
@@ -229,7 +229,7 @@ func TestProvisionWorktreeSkipBranchCheckedOut(t *testing.T) {
 
 func TestProvisionWorktreeSkipDirty(t *testing.T) {
 	root, base := worktreeFixture(t)
-	res1, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/alpha", builtinProfile(t, worktreeProfileFull), "")
+	res1, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, nil, root, base, "impl/test/alpha", builtinProfile(t, worktreeProfileFull), "")
 	if err != nil {
 		t.Fatalf("provision 1: %v", err)
 	}
@@ -241,7 +241,7 @@ func TestProvisionWorktreeSkipDirty(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(res1.Path, "cruft.txt"), []byte("x\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	res2, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/beta", builtinProfile(t, worktreeProfileFull), "")
+	res2, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, nil, root, base, "impl/test/beta", builtinProfile(t, worktreeProfileFull), "")
 	if err != nil {
 		t.Fatalf("provision 2: %v", err)
 	}
@@ -253,7 +253,7 @@ func TestProvisionWorktreeSkipDirty(t *testing.T) {
 func TestProvisionWorktreeHygieneResetToBase(t *testing.T) {
 	root, base := worktreeFixture(t)
 	// Prior run commits a file on alpha, then releases the worktree.
-	res1, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/alpha", builtinProfile(t, worktreeProfileFull), "")
+	res1, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, nil, root, base, "impl/test/alpha", builtinProfile(t, worktreeProfileFull), "")
 	if err != nil {
 		t.Fatalf("provision 1: %v", err)
 	}
@@ -274,7 +274,7 @@ func TestProvisionWorktreeHygieneResetToBase(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Reuse for a fresh branch on base: the prior branch's content must not leak.
-	res2, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/beta", builtinProfile(t, worktreeProfileFull), "")
+	res2, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, nil, root, base, "impl/test/beta", builtinProfile(t, worktreeProfileFull), "")
 	if err != nil {
 		t.Fatalf("provision 2: %v", err)
 	}
@@ -291,7 +291,7 @@ func TestProvisionWorktreeHygieneResetToBase(t *testing.T) {
 
 func TestReleaseWorktreeDetaches(t *testing.T) {
 	root, base := worktreeFixture(t)
-	res, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/alpha", builtinProfile(t, worktreeProfileFull), "")
+	res, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, nil, root, base, "impl/test/alpha", builtinProfile(t, worktreeProfileFull), "")
 	if err != nil {
 		t.Fatalf("provision: %v", err)
 	}
@@ -338,7 +338,7 @@ func TestProvisionWorktreePoolResolvesFromLinkedWorktree(t *testing.T) {
 	linked := filepath.Join(t.TempDir(), "linked")
 	runGit(t, root, "worktree", "add", "--detach", linked, base)
 
-	res, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, linked, base, "impl/test/gamma", builtinProfile(t, worktreeProfileFull), "")
+	res, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, nil, linked, base, "impl/test/gamma", builtinProfile(t, worktreeProfileFull), "")
 	if err != nil {
 		t.Fatalf("provision from linked worktree: %v", err)
 	}
@@ -354,7 +354,7 @@ func TestProvisionWorktreePoolResolvesFromLinkedWorktree(t *testing.T) {
 func TestProvisionWorktreeAbsolutePoolOverride(t *testing.T) {
 	root, base := worktreeFixture(t)
 	pool := filepath.Join(t.TempDir(), "shared-pool")
-	res, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/alpha", builtinProfile(t, worktreeProfileFull), pool)
+	res, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, nil, root, base, "impl/test/alpha", builtinProfile(t, worktreeProfileFull), pool)
 	if err != nil {
 		t.Fatalf("provision: %v", err)
 	}
@@ -425,7 +425,7 @@ func TestProvisionWorktreeDefaultFallsBackWhenParentUnwritable(t *testing.T) {
 			}
 			t.Cleanup(func() { _ = os.Chmod(parent, 0o755) })
 
-			res, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/alpha", builtinProfile(t, worktreeProfileFull), poolConfigValue)
+			res, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, nil, root, base, "impl/test/alpha", builtinProfile(t, worktreeProfileFull), poolConfigValue)
 			if err != nil {
 				t.Fatalf("provisioning must fall back, not hard-fail, on an unwritable sibling parent: %v", err)
 			}
@@ -587,7 +587,7 @@ func TestProvisionWorktreeHousekeepingProfile(t *testing.T) {
 	root := sparseWorktreeFixture(t)
 	// target_branch omitted: base (develop) is checked out directly, materializing
 	// only the ai-docs cone.
-	res, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, "develop", "", builtinProfile(t, worktreeProfileHousekeeping), "")
+	res, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, nil, root, "develop", "", builtinProfile(t, worktreeProfileHousekeeping), "")
 	if err != nil {
 		t.Fatalf("provision: %v", err)
 	}
@@ -615,14 +615,14 @@ func TestProvisionWorktreeReusePartitionsByProfile(t *testing.T) {
 	runner := wsgit.ExecRunner{}
 
 	// A released housekeeping worktree is reused by a housekeeping request.
-	sparse1, err := provisionWorktree(ctx, runner, root, "develop", "impl/develop/a", builtinProfile(t, worktreeProfileHousekeeping), "")
+	sparse1, err := provisionWorktree(ctx, runner, nil, root, "develop", "impl/develop/a", builtinProfile(t, worktreeProfileHousekeeping), "")
 	if err != nil {
 		t.Fatalf("provision sparse 1: %v", err)
 	}
 	if _, err := releaseWorktree(ctx, runner, sparse1.Path, "", builtinProfileLookup(t)); err != nil {
 		t.Fatalf("release sparse 1: %v", err)
 	}
-	sparse2, err := provisionWorktree(ctx, runner, root, "develop", "impl/develop/b", builtinProfile(t, worktreeProfileHousekeeping), "")
+	sparse2, err := provisionWorktree(ctx, runner, nil, root, "develop", "impl/develop/b", builtinProfile(t, worktreeProfileHousekeeping), "")
 	if err != nil {
 		t.Fatalf("provision sparse 2: %v", err)
 	}
@@ -640,7 +640,7 @@ func TestProvisionWorktreeReusePartitionsByProfile(t *testing.T) {
 	if _, err := releaseWorktree(ctx, runner, sparse2.Path, "", builtinProfileLookup(t)); err != nil {
 		t.Fatalf("release sparse 2: %v", err)
 	}
-	full, err := provisionWorktree(ctx, runner, root, "develop", "impl/develop/c", builtinProfile(t, worktreeProfileFull), "")
+	full, err := provisionWorktree(ctx, runner, nil, root, "develop", "impl/develop/c", builtinProfile(t, worktreeProfileFull), "")
 	if err != nil {
 		t.Fatalf("provision full: %v", err)
 	}
@@ -658,7 +658,7 @@ func TestProvisionWorktreeReusePartitionsByProfile(t *testing.T) {
 	if _, err := releaseWorktree(ctx, runner, full.Path, "", builtinProfileLookup(t)); err != nil {
 		t.Fatalf("release full: %v", err)
 	}
-	sparse3, err := provisionWorktree(ctx, runner, root, "develop", "impl/develop/d", builtinProfile(t, worktreeProfileHousekeeping), "")
+	sparse3, err := provisionWorktree(ctx, runner, nil, root, "develop", "impl/develop/d", builtinProfile(t, worktreeProfileHousekeeping), "")
 	if err != nil {
 		t.Fatalf("provision sparse 3: %v", err)
 	}
@@ -676,7 +676,7 @@ func TestProvisionWorktreeBaseDirectCheckout(t *testing.T) {
 	runner := wsgit.ExecRunner{}
 	before := strings.TrimSpace(string(runGitOutput(t, root, "rev-parse", "refs/heads/develop")))
 
-	res, err := provisionWorktree(ctx, runner, root, "develop", "", builtinProfile(t, worktreeProfileFull), "")
+	res, err := provisionWorktree(ctx, runner, nil, root, "develop", "", builtinProfile(t, worktreeProfileFull), "")
 	if err != nil {
 		t.Fatalf("provision: %v", err)
 	}
@@ -700,7 +700,7 @@ func TestProvisionWorktreeBaseDirectCheckoutRefusesHeldBranch(t *testing.T) {
 	root := sparseWorktreeFixture(t)
 	// impl/develop/foo is checked out in the primary worktree, so a direct-base
 	// checkout of it must fail loudly rather than steal or duplicate the branch.
-	_, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, "impl/develop/foo", "", builtinProfile(t, worktreeProfileFull), "")
+	_, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, nil, root, "impl/develop/foo", "", builtinProfile(t, worktreeProfileFull), "")
 	if err == nil {
 		t.Fatal("direct-base checkout of a branch held in another worktree must be refused")
 	}
@@ -807,7 +807,7 @@ func submoduleWorktreeFixture(t *testing.T) (root, base string) {
 func TestWorktreeAcquireSubmoduleRecurseTrue(t *testing.T) {
 	root, base := submoduleWorktreeFixture(t)
 	ctx := context.Background()
-	res, err := provisionWorktree(ctx, wsgit.ExecRunner{}, root, base, "impl/test/sub", builtinProfile(t, worktreeProfileFull), "")
+	res, err := provisionWorktree(ctx, wsgit.ExecRunner{}, nil, root, base, "impl/test/sub", builtinProfile(t, worktreeProfileFull), "")
 	if err != nil {
 		t.Fatalf("fresh acquire under submodule.recurse=true: %v", err)
 	}
@@ -820,7 +820,7 @@ func TestWorktreeAcquireSubmoduleRecurseTrue(t *testing.T) {
 	if _, err := releaseWorktree(ctx, wsgit.ExecRunner{}, res.Path, "", builtinProfileLookup(t)); err != nil {
 		t.Fatalf("release under submodule.recurse=true: %v", err)
 	}
-	again, err := provisionWorktree(ctx, wsgit.ExecRunner{}, root, base, "impl/test/sub2", builtinProfile(t, worktreeProfileFull), "")
+	again, err := provisionWorktree(ctx, wsgit.ExecRunner{}, nil, root, base, "impl/test/sub2", builtinProfile(t, worktreeProfileFull), "")
 	if err != nil {
 		t.Fatalf("reusing acquire under submodule.recurse=true: %v", err)
 	}

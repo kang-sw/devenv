@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -31,8 +30,8 @@ type sageReviewFreshness struct {
 //     — caller resets the answer and proceeds to resolve remaining stages.
 //   - stale + answer "" (unanswered): consumed=true, the `check_review_required`
 //     result — caller returns it immediately.
-func sageGateFreshnessResult(root, ticketRel string, stages []string, answer string) (SageGateResult, bool, error) {
-	freshness, err := sageReviewFreshnessCheck(root, ticketRel, stages)
+func sageGateFreshnessResult(env []string, root, ticketRel string, stages []string, answer string) (SageGateResult, bool, error) {
+	freshness, err := sageReviewFreshnessCheck(env, root, ticketRel, stages)
 	if err != nil || len(freshness.Stages) == 0 {
 		return SageGateResult{}, false, err
 	}
@@ -63,7 +62,7 @@ func sageGateFreshnessResult(root, ticketRel string, stages []string, answer str
 	}
 }
 
-func sageReviewFreshnessCheck(root, ticketRel string, stages []string) (sageReviewFreshness, error) {
+func sageReviewFreshnessCheck(env []string, root, ticketRel string, stages []string) (sageReviewFreshness, error) {
 	ticketRel = filepath.ToSlash(filepath.Clean(ticketRel))
 	if ticketRel == "." || ticketRel == "" || !strings.HasPrefix(ticketRel, "ai-docs/tickets/") {
 		return sageReviewFreshness{}, nil
@@ -71,7 +70,7 @@ func sageReviewFreshnessCheck(root, ticketRel string, stages []string) (sageRevi
 	if _, err := os.Stat(filepath.Join(root, ".git")); err != nil {
 		return sageReviewFreshness{}, nil
 	}
-	currentRaw, err := sageReviewCurrentTicketContent(root, ticketRel)
+	currentRaw, err := sageReviewCurrentTicketContent(env, root, ticketRel)
 	if err != nil {
 		return sageReviewFreshness{}, nil
 	}
@@ -94,7 +93,7 @@ func sageReviewFreshnessCheck(root, ticketRel string, stages []string) (sageRevi
 		}
 		// Fallback (legacy, no recorded digest): git-history baseline corrected
 		// to the latest completed-transition, body-only compared.
-		baseline, baselineRaw, ok, err := sageReviewStageBaseline(root, ticketRel, stage)
+		baseline, baselineRaw, ok, err := sageReviewStageBaseline(env, root, ticketRel, stage)
 		if err != nil {
 			return sageReviewFreshness{}, err
 		}
@@ -118,8 +117,8 @@ func sageReviewFreshnessCheck(root, ticketRel string, stages []string) (sageRevi
 	}, nil
 }
 
-func sageReviewStageBaseline(root, ticketRel, stage string) (commit, text string, ok bool, err error) {
-	history, err := sageReviewTicketHistory(root, ticketRel)
+func sageReviewStageBaseline(env []string, root, ticketRel, stage string) (commit, text string, ok bool, err error) {
+	history, err := sageReviewTicketHistory(env, root, ticketRel)
 	if err != nil {
 		return "", "", false, nil
 	}
@@ -133,7 +132,7 @@ func sageReviewStageBaseline(root, ticketRel, stage string) (commit, text string
 	raws := make([]string, len(history))
 	have := make([]bool, len(history))
 	for i, entry := range history {
-		raw, showErr := sageGitOutput(root, "show", entry.Commit+":"+entry.Path)
+		raw, showErr := sageGitOutput(env, root, "show", entry.Commit+":"+entry.Path)
 		if showErr != nil {
 			continue
 		}
@@ -175,8 +174,8 @@ type sageReviewHistoryEntry struct {
 	Path   string
 }
 
-func sageReviewTicketHistory(root, ticketRel string) ([]sageReviewHistoryEntry, error) {
-	logOut, err := sageGitOutput(root, "log", "--follow", "--find-renames", "--format=%H", "--name-status", "--", ticketRel)
+func sageReviewTicketHistory(env []string, root, ticketRel string) ([]sageReviewHistoryEntry, error) {
+	logOut, err := sageGitOutput(env, root, "log", "--follow", "--find-renames", "--format=%H", "--name-status", "--", ticketRel)
 	if err != nil {
 		return nil, err
 	}
@@ -232,11 +231,11 @@ func sageReviewTicketHistory(root, ticketRel string) ([]sageReviewHistoryEntry, 
 	return entries, nil
 }
 
-func sageReviewCurrentTicketContent(root, ticketRel string) ([]byte, error) {
-	if staged, err := sageGitOutput(root, "diff", "--cached", "--name-only", "--", ticketRel); err == nil && strings.TrimSpace(string(staged)) != "" {
-		return sageGitOutput(root, "show", ":"+ticketRel)
+func sageReviewCurrentTicketContent(env []string, root, ticketRel string) ([]byte, error) {
+	if staged, err := sageGitOutput(env, root, "diff", "--cached", "--name-only", "--", ticketRel); err == nil && strings.TrimSpace(string(staged)) != "" {
+		return sageGitOutput(env, root, "show", ":"+ticketRel)
 	}
-	if unstaged, err := sageGitOutput(root, "diff", "--name-only", "--", ticketRel); err == nil && strings.TrimSpace(string(unstaged)) != "" {
+	if unstaged, err := sageGitOutput(env, root, "diff", "--name-only", "--", ticketRel); err == nil && strings.TrimSpace(string(unstaged)) != "" {
 		return os.ReadFile(filepath.Join(root, filepath.FromSlash(ticketRel)))
 	}
 	return os.ReadFile(filepath.Join(root, filepath.FromSlash(ticketRel)))
@@ -284,8 +283,8 @@ func sageReviewCurrentBodyDigest(path string) (string, error) {
 	return sageReviewBodyDigest(string(raw)), nil
 }
 
-func sageGitOutput(root string, args ...string) ([]byte, error) {
-	cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+func sageGitOutput(env []string, root string, args ...string) ([]byte, error) {
+	cmd := gitCommand(env, root, args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("git %s failed: %v\n%s", strings.Join(args, " "), err, bytes.TrimSpace(out))

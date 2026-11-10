@@ -80,7 +80,7 @@ func TestWorktreeListDispatch(t *testing.T) {
 	ctx := context.Background()
 
 	// Pre-change worktree: provisioned without a lease, still branch-held.
-	legacy, err := provisionWorktree(ctx, wsgit.ExecRunner{}, root, base, "impl/test/legacy", builtinProfile(t, worktreeProfileFull), "")
+	legacy, err := provisionWorktree(ctx, wsgit.ExecRunner{}, nil, root, base, "impl/test/legacy", builtinProfile(t, worktreeProfileFull), "")
 	if err != nil {
 		t.Fatalf("provision legacy: %v", err)
 	}

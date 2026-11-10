@@ -20,18 +20,27 @@ import (
 // never as fatal — this is advisory-only best-effort resolution, not a hard
 // dependency.
 func ResolveTrack(ctx context.Context, root string) (string, error) {
+	return ResolveTrackWith(ctx, wsgit.ExecRunner{}, root)
+}
+
+// ResolveTrackWith is ResolveTrack running git through runner.
+func ResolveTrackWith(ctx context.Context, runner wsgit.Runner, root string) (string, error) {
 	if policy := ReadAgentsReviewPolicy(root); policy.ReviewTrack != "" {
 		return policy.ReviewTrack, nil
 	}
-	return ResolveTrackFallback(ctx, root)
+	return ResolveTrackFallbackWith(ctx, runner, root)
 }
 
 // ResolveTrackFallback is ResolveTrack's git-default heuristic alone, without
 // the local AGENTS.md declaration: `origin/HEAD`'s symbolic-ref target, then
 // local `main`, then `master`.
 func ResolveTrackFallback(ctx context.Context, root string) (string, error) {
-	runner := wsgit.ExecRunner{}
+	return ResolveTrackFallbackWith(ctx, wsgit.ExecRunner{}, root)
+}
 
+// ResolveTrackFallbackWith is ResolveTrackFallback running git through
+// runner.
+func ResolveTrackFallbackWith(ctx context.Context, runner wsgit.Runner, root string) (string, error) {
 	if out, err := runner.RunGit(ctx, root, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"); err == nil {
 		if ref := strings.TrimPrefix(strings.TrimSpace(string(out)), "origin/"); ref != "" {
 			return ref, nil

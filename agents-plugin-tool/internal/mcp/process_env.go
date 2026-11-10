@@ -14,6 +14,7 @@ import (
 
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsgit"
+	"github.com/kang-sw/devenv/internal/wsmailbox"
 	"github.com/kang-sw/devenv/internal/wsrsrc"
 	"github.com/kang-sw/devenv/internal/wsstate"
 )
@@ -119,6 +120,7 @@ func NewServerWithOptions(opts ServerOptions) *Server {
 		s.debug = processDebug
 	}
 	s.inflightDone = make(chan struct{})
+	s.drainCtx, s.drainCancel = context.WithCancel(context.Background())
 	s.sessions = newSessionStore()
 	s.sessions.cacheHome = s.getenv(wsstate.EnvCacheHome)
 	s.declared = loadDeclaredConfig(s.getenv(envConfigManifests))
@@ -171,7 +173,13 @@ func (s *Server) configOptions() wsconfig.Options {
 
 // stateOptions anchors wsstate at the caller's WS_CACHE_HOME.
 func (s *Server) stateOptions() wsstate.Options {
-	return wsstate.Options{CacheHome: s.getenv(wsstate.EnvCacheHome)}
+	return wsstate.Options{CacheHome: s.getenv(wsstate.EnvCacheHome), Env: s.environ()}
+}
+
+// mailboxPaths anchors the mailbox stores, reply registry, and listening
+// markers at the caller's config and cache homes.
+func (s *Server) mailboxPaths() wsmailbox.Paths {
+	return wsmailbox.Paths{Config: s.configOptions(), State: s.stateOptions()}
 }
 
 // gitClient is the git client whose subprocesses run under the caller's
@@ -223,6 +231,19 @@ func envFlagOn(value string) bool {
 // dashboard off.
 func (s *Server) noDashboardMode() bool { return envFlagOn(s.getenv(envNoDashboard)) }
 
+// DashboardApplies reports whether this server's caller takes part in the
+// dashboard at all: a loaded manifest declares the dashboard keys and the
+// caller does not set WS_MCP_NO_DASHBOARD. A caller outside it has no say
+// over the daemon (its global dashboard.lan_enabled reads as the manifest
+// default, not as a decision).
+func (s *Server) DashboardApplies() bool { return s.dashboardDeclared() && !s.noDashboardMode() }
+
+// GlobalConfigPath is the global config file this server's caller reads,
+// anchored at its WS_CONFIG_HOME.
+func (s *Server) GlobalConfigPath() (string, error) {
+	return wsconfig.GlobalPath(s.configOptions())
+}
+
 // noAgentMode reports whether the caller runs the agentless profile.
 func (s *Server) noAgentMode() bool { return envFlagOn(s.getenv(envNoAgent)) }
 
@@ -271,10 +292,25 @@ func (s *Server) signalIdle() {
 	}
 }
 
-// Drain stops the server taking new requests and waits for the requests in
-// flight to finish, or for ctx to end. It reports whether the server went
-// idle. The caller closes the stream afterwards; ServeStdio returns then.
+// drainContext ends when Drain begins. A tool call that blocks for a
+// deadline of its own (exec.result with timeout_seconds) waits on it, so
+// the drain cancels the wait at once and the call answers with the state
+// it found, rather than holding the daemon for the rest of its deadline.
+func (s *Server) drainContext() context.Context {
+	if s.drainCtx == nil {
+		return context.Background()
+	}
+	return s.drainCtx
+}
+
+// Drain stops the server taking new requests, cancels the long waits in
+// flight (drainContext), and waits for the requests in flight to finish,
+// or for ctx to end. It reports whether the server went idle. The caller
+// closes the stream afterwards; ServeStdio returns then.
 func (s *Server) Drain(ctx context.Context) bool {
+	if s.drainCancel != nil {
+		s.drainCancel()
+	}
 	s.inflightMu.Lock()
 	s.draining = true
 	if s.inflight == 0 {

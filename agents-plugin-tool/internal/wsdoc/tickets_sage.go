@@ -38,6 +38,9 @@ type SageGateOptions struct {
 	TicketStem string
 	Landing    string // "idea" | "todo" | "ready"
 	Answer     string // optional ask follow-up: "yes" | "no"
+	// Env is the environment the freshness check's git runs on; nil means
+	// this process's own.
+	Env []string
 }
 
 // SageGateResult is the gate decision. Action is the primary control value the
@@ -175,7 +178,7 @@ func SageGate(root string, opts SageGateOptions, cfg SageReviewConfig) (SageGate
 		}
 		design, _ := effectiveSageReviewPostures(frontmatter(ticketAbs))
 		if design == "completed" {
-			if result, consumed, err := sageGateFreshnessResult(root, ticketRel, []string{"design"}, answer); err != nil {
+			if result, consumed, err := sageGateFreshnessResult(opts.Env, root, ticketRel, []string{"design"}, answer); err != nil {
 				return SageGateResult{}, err
 			} else if consumed {
 				if result.Action != "" {
@@ -225,7 +228,7 @@ func SageGate(root string, opts SageGateOptions, cfg SageReviewConfig) (SageGate
 		// is already terminal.
 		if design == "completed" || design == "skipped" {
 			if design == "completed" {
-				if result, consumed, err := sageGateFreshnessResult(root, ticketRel, []string{"design"}, answer); err != nil {
+				if result, consumed, err := sageGateFreshnessResult(opts.Env, root, ticketRel, []string{"design"}, answer); err != nil {
 					return SageGateResult{}, err
 				} else if consumed {
 					if result.Action != "" {
@@ -253,7 +256,7 @@ func SageGate(root string, opts SageGateOptions, cfg SageReviewConfig) (SageGate
 			completed = append(completed, "completeness")
 		}
 		if len(completed) > 0 {
-			if result, consumed, err := sageGateFreshnessResult(root, ticketRel, completed, answer); err != nil {
+			if result, consumed, err := sageGateFreshnessResult(opts.Env, root, ticketRel, completed, answer); err != nil {
 				return SageGateResult{}, err
 			} else if consumed {
 				if result.Action != "" {

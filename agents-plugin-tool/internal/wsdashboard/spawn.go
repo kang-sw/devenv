@@ -42,9 +42,11 @@ func DaemonExecutable(exe, dir string) (string, error) {
 }
 
 // StageExecutable copies exe into binDir under a content-addressed name,
-// reusing an existing copy, and deletes every other copy there. A copy that is
-// still running cannot be deleted on Windows; that failure is ignored and the
-// copy is removed by a later call.
+// reusing an existing copy. Other entries are left alone: one of them is
+// the executable the running daemon was started from (it respawns itself
+// from that path on a LAN mode change), and the daemon that holds the lock
+// prunes the directory to its own executable (PruneStagedExecutables). The
+// launcher's stage_daemon_binary does the same.
 func StageExecutable(exe, binDir string) (string, error) {
 	sum, err := fileSHA256(exe)
 	if err != nil {
@@ -60,14 +62,40 @@ func StageExecutable(exe, binDir string) (string, error) {
 			return "", err
 		}
 	}
-	if entries, err := os.ReadDir(binDir); err == nil {
-		for _, entry := range entries {
-			if entry.Name() != name {
-				_ = os.RemoveAll(filepath.Join(binDir, entry.Name()))
-			}
+	return target, nil
+}
+
+// PruneStagedExecutables removes every entry of dir's staged-binary
+// directory except the one exe names, when exe lives there. The daemon
+// calls it once it holds the lock: only then is every other copy known
+// unused (the previous daemon is gone, and a copy staged for a start that
+// lost the lock race is not needed). A copy still running cannot be
+// deleted on Windows; that failure is ignored and a later daemon removes it.
+func PruneStagedExecutables(dir, exe string) {
+	binDir := filepath.Join(dir, stagedBinDir)
+	if filepath.Dir(exe) != binDir {
+		return
+	}
+	entries, err := os.ReadDir(binDir)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if entry.Name() != filepath.Base(exe) {
+			_ = os.RemoveAll(filepath.Join(binDir, entry.Name()))
 		}
 	}
-	return target, nil
+}
+
+// ExecutableContentHash is the sha256 of the file at path, the daemon's
+// content identity for /health (HealthInfo.ContentHash); "" when the file
+// cannot be read.
+func ExecutableContentHash(path string) string {
+	sum, err := fileSHA256(path)
+	if err != nil {
+		return ""
+	}
+	return sum
 }
 
 func fileSHA256(path string) (string, error) {

@@ -1038,7 +1038,7 @@ func (s *Server) handleEnter(id json.RawMessage, tool, mode string, args map[str
 	}
 	text := fmt.Sprintf("entered %s mode; todo list replaced (%d items)\n%s\n", mode, len(todos), renderTodos(todos, false))
 	if record, ok := s.sessions.readState(sessionKey, partKey); ok {
-		if reviewNudge := wsreview.CheckpointNudge(context.Background(), record.Root); reviewNudge != "" {
+		if reviewNudge := wsreview.CheckpointNudgeWith(context.Background(), s.gitRunner(), record.Root); reviewNudge != "" {
 			text += "review-watermark: " + reviewNudge + "\n"
 		}
 	}
@@ -1067,7 +1067,7 @@ func (s *Server) handleEnterImplement(id json.RawMessage, args map[string]any) r
 	if err != nil {
 		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
 	}
-	source := loadImplementRouteFacts(record.Root, input.Target)
+	source := loadImplementRouteFacts(record.Root, input.Target, s.environ())
 	normalized, _ := normalizeImplementFacts(input)
 	peek, err := observeImplementBranch(s.gitClient(), record.Root, "")
 	if err != nil {
@@ -1103,7 +1103,7 @@ func (s *Server) handleEnterImplement(id json.RawMessage, args map[string]any) r
 		return toolTextResponse(id, text, err)
 	}
 	raw := result.Raw
-	if reviewNudge := wsreview.CheckpointNudge(context.Background(), record.Root); reviewNudge != "" {
+	if reviewNudge := wsreview.CheckpointNudgeWith(context.Background(), s.gitRunner(), record.Root); reviewNudge != "" {
 		raw += "review-watermark: " + reviewNudge + "\n"
 	}
 	return toolTextResponse(id, raw, nil)

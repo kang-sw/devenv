@@ -15,18 +15,21 @@ import (
 
 	"github.com/kang-sw/devenv/internal/mcp"
 	"github.com/kang-sw/devenv/internal/wsagent"
+	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wstrackerhost"
 )
 
 // dashboardCommand runs the machine-wide dashboard daemon in the foreground.
-// ws-mcp serve starts it detached; running it by hand is for diagnosis and,
-// with WS_MCP_DASHBOARD_DEV_SOURCE set, for editing the page assets live.
+// The launcher's `daemon-start` (and a direct `ws-mcp serve`) starts it
+// detached through wsdashboard.Ensure; running it by hand is for diagnosis
+// and, with WS_MCP_DASHBOARD_DEV_SOURCE set, for editing the page assets
+// live.
 func dashboardCommand(args []string) {
 	fs := flag.NewFlagSet("dashboard", flag.ExitOnError)
 	port := fs.Int("port", wsdashboard.DefaultPort, "preferred loopback port; 0 lets the OS choose, and a taken port falls back to an OS-chosen one")
-	lan := fs.Bool("lan", false, "listen on every network interface and admit a request from another device only with the LAN access token; ws-mcp serve passes it when the global dashboard.lan_enabled value is on")
-	buildTime := fs.Int64("build-time", 0, "the ws-mcp build time in Unix milliseconds to report in /health; ws-mcp serve passes its own executable's, and 0 reads this executable's")
+	lan := fs.Bool("lan", false, "listen on every network interface and admit a request from another device only with the LAN access token; the starter (daemon-start, or ws-mcp serve) passes it when the global dashboard.lan_enabled value is on")
+	buildTime := fs.Int64("build-time", 0, "the ws-mcp build time in Unix milliseconds to report in /health; the starter passes the time of the executable it measured, and 0 reads this executable's")
 	lockWait := fs.Duration("lock-wait", wsdashboard.DefaultLockWait, "how long to wait for another daemon to release the single-instance lock")
 	_ = fs.Parse(args)
 
@@ -37,11 +40,18 @@ func dashboardCommand(args []string) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		fatal("dashboard", err)
 	}
-	if *buildTime <= 0 {
-		if exe, err := os.Executable(); err == nil {
-			*buildTime = wsdashboard.ExecutableBuildTime(exe)
-		}
+	exe, _ := os.Executable()
+	if *buildTime <= 0 && exe != "" {
+		*buildTime = wsdashboard.ExecutableBuildTime(exe)
 	}
+	// The content hash is this executable's own: the staged copy a launcher
+	// made has the plugin binary's content, so the launcher's and the
+	// starter's hashes of their binaries compare against it.
+	contentHash := ""
+	if exe != "" {
+		contentHash = wsdashboard.ExecutableContentHash(exe)
+	}
+	configPath, _ := wsconfig.GlobalPath(wsconfig.Options{})
 	logw := openDashboardLog(dir)
 	// Dev assets switch on before the daemon serves its first request. The
 	// notice waits for StartDaemon: the lazy log truncates on first write, and
@@ -64,20 +74,22 @@ func dashboardCommand(args []string) {
 	// runner's tracker-changed callback is bound once the daemon exists.
 	var trackerChanged lateFunc
 	agents := newAgentRunner(dir, logw, trackerChanged.call)
+	host := &proxyHost{dir: dir, port: *port, lan: *lan, buildTime: *buildTime, contentHash: contentHash, logw: logw, configPath: filepath.Clean(configPath)}
 	daemon, err := wsdashboard.StartDaemon(wsdashboard.DaemonOptions{
-		Dir:       dir,
-		Port:      *port,
-		LAN:       *lan,
-		Version:   version,
-		BuildTime: *buildTime,
-		LockWait:  *lockWait,
-		Log:       logw,
-		Proxy:     &proxyHost{dir: dir, port: *port, lan: *lan, buildTime: *buildTime, logw: logw},
-		Pprof:     wsdashboard.PprofEnabled(os.Getenv(wsdashboard.PprofEnv)),
-		Sessions:  sessions,
-		Worktrees: sessions,
-		Agents:    agents,
-		Tracker:   &dashboardTracker{h: tracker, err: trackerErr},
+		Dir:         dir,
+		Port:        *port,
+		LAN:         *lan,
+		Version:     version,
+		BuildTime:   *buildTime,
+		ContentHash: contentHash,
+		LockWait:    *lockWait,
+		Log:         logw,
+		Proxy:       host,
+		Pprof:       wsdashboard.PprofEnabled(os.Getenv(wsdashboard.PprofEnv)),
+		Sessions:    sessions,
+		Worktrees:   sessions,
+		Agents:      agents,
+		Tracker:     &dashboardTracker{h: tracker, err: trackerErr},
 		Support: wsagent.NewSupport(wsagent.SupportOptions{
 			Runner:    agents,
 			Dir:       dir,
@@ -94,6 +106,11 @@ func dashboardCommand(args []string) {
 		fatal("dashboard", err)
 	}
 	wsdashboard.LogDevAssets(logw, devRoot)
+	// Holding the lock, this daemon is the one the staged copies were for;
+	// every copy but its own is unused now.
+	if exe != "" {
+		wsdashboard.PruneStagedExecutables(dir, exe)
+	}
 	trackerChanged.set(daemon.TrackerChanged)
 	stopPoll := startTrackerPoll(tracker, trackerErr, daemon.TrackerChanged, logw)
 	stopWatch := startTrackerWatch(tracker, trackerErr, daemon.TrackerChanged)
@@ -104,6 +121,16 @@ func dashboardCommand(args []string) {
 		daemon.Close()
 	case <-daemon.Done():
 	}
+	// The lock and endpoint are released (the successor is starting); a
+	// hosted call that outlived the drain budget still runs and ends on its
+	// own, and the replacement goroutine, when one runs, spawns the
+	// successor. Both finish before this process exits.
+	linger, cancel := context.WithTimeout(context.Background(), hostedCallLinger)
+	if !daemon.WaitProxy(linger) {
+		fmt.Fprintf(logw, "dashboard: a hosted call still runs after %s; exiting\n", hostedCallLinger)
+	}
+	cancel()
+	host.wait()
 	stopWatch()
 	stopPoll()
 	closeTracker()
@@ -223,18 +250,19 @@ type dashboardSpawner func(args []string) error
 // other mode, or from an older build time, is replaced). It never fails or
 // delays serve: the caller runs it on its own goroutine, and every error is
 // a stderr line.
-func startDashboard(ctx context.Context, settings mcp.DashboardSettings, dir string, buildTime int64, spawn dashboardSpawner, logw io.Writer) wsdashboard.Outcome {
+func startDashboard(ctx context.Context, settings mcp.DashboardSettings, dir string, buildTime int64, contentHash string, spawn dashboardSpawner, logw io.Writer) wsdashboard.Outcome {
 	if !settings.Enabled {
 		return ""
 	}
 	outcome, err := wsdashboard.Ensure(ctx, wsdashboard.EnsureOptions{
-		Dir:       dir,
-		Version:   version,
-		BuildTime: buildTime,
-		Port:      settings.Port,
-		LAN:       settings.LAN,
-		Spawn:     spawn,
-		Log:       logw,
+		Dir:         dir,
+		Version:     version,
+		BuildTime:   buildTime,
+		ContentHash: contentHash,
+		Port:        settings.Port,
+		LAN:         settings.LAN,
+		Spawn:       spawn,
+		Log:         logw,
 	})
 	if err != nil {
 		fmt.Fprintf(logw, "ws-mcp: dashboard unavailable: %v\n", err)
@@ -261,10 +289,13 @@ func serveDashboard(server *mcp.Server) {
 		return
 	}
 	// The build time comes from the original executable, before
-	// DaemonExecutable may stage a copy whose mtime is the copy time.
+	// DaemonExecutable may stage a copy whose mtime is the copy time; the
+	// content hash is the same for both.
 	var buildTime int64
+	var contentHash string
 	if exe, err := os.Executable(); err == nil {
 		buildTime = wsdashboard.ExecutableBuildTime(exe)
+		contentHash = wsdashboard.ExecutableContentHash(exe)
 	}
 	spawn := func(args []string) error {
 		exe, err := os.Executable()
@@ -277,5 +308,5 @@ func serveDashboard(server *mcp.Server) {
 		}
 		return wsdashboard.SpawnDetached(exe, args, dir)
 	}
-	startDashboard(context.Background(), settings, dir, buildTime, spawn, os.Stderr)
+	startDashboard(context.Background(), settings, dir, buildTime, contentHash, spawn, os.Stderr)
 }

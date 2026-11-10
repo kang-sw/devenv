@@ -229,6 +229,28 @@ func (s *Server) liveSessionDir(sessionKey string) (string, bool) {
 	return wsdashboard.SessionDir(dir, wsmailbox.ReplyID(sessionKey)), true
 }
 
+// liveSessionActive reports whether the live session behind sessionKey may
+// still write to dir: liveSessionDir's answer for a timer, which reads the
+// session record without touching it (a timer's read is not activity). A
+// record that exists but cannot be read right now (Windows: a reader meeting
+// the record's replace in flight) keeps the session running: stopping it on
+// a transient failure drops the turn state until the next intake, and a mail
+// line sent meanwhile finds no tool row to flush.
+func (s *Server) liveSessionActive(sessionKey, dir string) bool {
+	entry, found, transient := s.sessions.inspect(sessionKey)
+	if transient {
+		return true
+	}
+	if !found || !entry.isTopLevelLead() || !s.liveDashboardEnabled(sessionKey) {
+		return false
+	}
+	current, err := s.dashboard.stateDir()
+	if err != nil {
+		return true
+	}
+	return wsdashboard.SessionDir(current, wsmailbox.ReplyID(sessionKey)) == dir
+}
+
 // liveDashboardEnabled is the session's dashboard.enabled for the live
 // layer, which asks on every intake call (about ten a second while a reply
 // streams) and every snapshot write. A resolution is trusted for
@@ -290,10 +312,7 @@ func (s *Server) handleDashboardIntake(id json.RawMessage, args map[string]any) 
 		return toolTextResponse(id, "dashboard off: nothing recorded\n", nil)
 	}
 
-	ls := s.live.session(key, dir, entry.root, func() { s.dashboardNudge(key) }, func() bool {
-		current, on := s.liveSessionDir(key)
-		return on && current == dir
-	}, s.debugEvent)
+	ls := s.live.session(key, dir, entry.root, func() { s.dashboardNudge(key) }, func() bool { return s.liveSessionActive(key, dir) }, s.debugEvent)
 	now := time.Now().UnixMilli()
 	var (
 		ring     []wslive.RingEntry

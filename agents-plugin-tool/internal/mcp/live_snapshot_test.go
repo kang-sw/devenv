@@ -692,3 +692,59 @@ func gitCmd(t *testing.T, dir string, args ...string) {
 		t.Fatalf("git %s: %v: %s", strings.Join(args, " "), err, out)
 	}
 }
+
+// TestLiveSessionSurvivesAnUnreadableRecord pins the activity check behind
+// the snapshot timer: a session record that exists but cannot be read for
+// a moment (on Windows, a reader meeting the record's replace in flight)
+// does not stop the live session, so the tool row still flushes ahead of
+// the next mail line; a record that is gone does stop it.
+func TestLiveSessionSurvivesAnUnreadableRecord(t *testing.T) {
+	f := newLiveFixture(t, true)
+	fastLive(t, 20*time.Millisecond)
+	resetMailboxHistoryClock(t)
+	d, err := f.server.sessions.dirs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := d.partPath(f.keyA, partKey)
+
+	intake(t, f.server, f.keyA, map[string]any{"kind": "agent", "batches": []any{map[string]any{"epoch": "e", "seq": 1, "toolNames": []any{"Bash"}, "callCount": 3, "failed": 0, "startedAt": 1100, "endedAt": 1200}}})
+	// The record is unreadable (a directory in its place) while the timer
+	// fires.
+	if err := os.Rename(record, record+".aside"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(record, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, found, transient := f.server.sessions.inspect(f.keyA); found || !transient {
+		t.Fatalf("inspect of an unreadable record = found %v, transient %v", found, transient)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if err := os.Remove(record); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(record+".aside", record); err != nil {
+		t.Fatal(err)
+	}
+	if ls := f.server.live.existing(f.keyA); ls == nil || ls.isStopped() {
+		t.Fatal("an unreadable record stopped the live session")
+	}
+	mustSend(t, f.server, 3, f.keyA, wsmailbox.ReplyIDPrefix+f.replyB, "Status update")
+	ring := readLiveRing(t, f.sessionDir(f.replyA))
+	if len(ring) != 2 || ring[0].Kind != wslive.RingTools || ring[0].Tools.Calls != 3 || ring[1].Kind != wslive.RingMail {
+		t.Fatalf("ring = %+v", ring)
+	}
+
+	// A record that is gone ends the session at the next timer.
+	if err := os.Remove(record); err != nil {
+		t.Fatal(err)
+	}
+	if _, found, transient := f.server.sessions.inspect(f.keyA); found || transient {
+		t.Fatalf("inspect of a removed record = found %v, transient %v", found, transient)
+	}
+	waitFor(t, "the live session to stop", func() bool {
+		ls := f.server.live.existing(f.keyA)
+		return ls == nil || ls.isStopped()
+	})
+}

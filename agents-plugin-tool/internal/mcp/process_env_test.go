@@ -213,10 +213,15 @@ func TestHostedServersReadOnlyTheirOwnEnvironment(t *testing.T) {
 		t.Fatal("alpha's global write landed in the process config home")
 	}
 
-	// Mailbox presence records the owner PID, not this process's.
-	path, err := wsmailbox.MachinePath()
+	// Mailbox presence: under alpha's own config home (the machine store is
+	// the global config's sibling), never the process's, and it records the
+	// owner PID, not this process's.
+	path, err := wsmailbox.Paths{Config: wsconfig.Options{ConfigHome: alpha.configHome}}.Machine()
 	if err != nil {
 		t.Fatal(err)
+	}
+	if filepath.Dir(path) != alpha.configHome {
+		t.Fatalf("alpha's machine store = %s, want under %s", path, alpha.configHome)
 	}
 	store, err := wsmailbox.Load(path)
 	if err != nil {
@@ -224,10 +229,17 @@ func TestHostedServersReadOnlyTheirOwnEnvironment(t *testing.T) {
 	}
 	presence, ok := store.Presence["alpha"]
 	if !ok {
-		t.Fatalf("alpha@machine presence not registered: %#v", store.Presence)
+		t.Fatalf("alpha@machine presence not registered under alpha's config home: %#v", store.Presence)
 	}
 	if presence.PID != os.Getppid() || presence.PID == os.Getpid() {
 		t.Fatalf("presence PID = %d, want owner PID %d (process %d)", presence.PID, os.Getppid(), os.Getpid())
+	}
+	if procPath, err := wsmailbox.MachinePath(); err == nil {
+		if procStore, err := wsmailbox.Load(procPath); err == nil {
+			if _, leaked := procStore.Presence["alpha"]; leaked {
+				t.Fatalf("alpha's presence landed in the process config home's store %s", procPath)
+			}
+		}
 	}
 }
 
@@ -289,5 +301,90 @@ func TestHostedServerSubprocessUsesHelloEnvironment(t *testing.T) {
 	stdioKey, _ := parseLoginResponse(t, callLogin(t, stdio, 3, root, nil))
 	if text := toolText(t, keyedCall(t, stdio, 4, stdioKey, "git.status", nil)); strings.Contains(text, "FAKE-GIT-HOSTED") {
 		t.Fatalf("stdio git.status ran the hosted env's git: %s", text)
+	}
+}
+
+// TestHostedReconnectKeepsMailboxOwnershipAndAutoStem pins the mailbox
+// identity across a replaced connection: a second server for the same
+// owner process (the launcher reconnected after the daemon was replaced)
+// finds the owner's presence record under its own PID and keeps its owner
+// pointer, its start, and, for WS_MAILBOX_AUTO, the stem the first server
+// minted; and it registers on the first keyed call, with no new ferrule.
+func TestHostedReconnectKeepsMailboxOwnershipAndAutoStem(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		env  map[string]string
+	}{
+		{"explicit worktree", map[string]string{envMailbox: "amber@worktree"}},
+		{"auto worktree", map[string]string{envMailboxAuto: "worktree"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			processEnvFixture(t)
+			root := t.TempDir()
+			mustWrite(t, root, "README.md", "# Test\n")
+			initGit(t, root)
+			cacheHome := filepath.Join(t.TempDir(), "cache")
+			set := map[string]string{
+				wsconfig.EnvConfigHome: filepath.Join(t.TempDir(), "config"),
+				wsstate.EnvCacheHome:   cacheHome,
+				wsrsrc.EnvRsrcRoot:     absRsrcRoot(t),
+				"PATH":                 os.Getenv("PATH"),
+			}
+			for k, v := range tc.env {
+				set[k] = v
+			}
+			opts := ServerOptions{Root: root, Version: "test", Env: hostedEnv(set), OwnerPID: os.Getppid()}
+			first := NewServerWithOptions(opts)
+			key, _ := parseLoginResponse(t, callLogin(t, first, 1, root, nil))
+			identity := first.mailboxIdentityResolved()
+			if !identity.Active {
+				t.Fatalf("identity = %#v", identity)
+			}
+			path, err := wsmailbox.Paths{State: wsstate.Options{CacheHome: cacheHome}}.Worktree(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			before := loadPresence(t, path, identity.Name)
+			if before.Owner != key || before.PID != os.Getppid() {
+				t.Fatalf("presence after login = %+v, want owner %s pid %d", before, key, os.Getppid())
+			}
+			if isOwner, _, err := first.mailboxOwnerCheck(key, root); err != nil || !isOwner {
+				t.Fatalf("first server owner check = %v, %v", isOwner, err)
+			}
+
+			// The connection is replaced: a new server for the same owner
+			// answers the replayed session's next keyed call.
+			second := NewServerWithOptions(opts)
+			if resp := keyedCall(t, second, 2, key, "todo.list", nil); toolIsError(t, resp) {
+				t.Fatalf("todo.list on the second server: %s", resp)
+			}
+			again := second.mailboxIdentityResolved()
+			if again.Name != identity.Name || again.Scope != identity.Scope {
+				t.Fatalf("second server identity = %#v, want the first's %#v", again, identity)
+			}
+			after := loadPresence(t, path, identity.Name)
+			if after.Owner != key || after.PID != os.Getppid() || after.StartedAt != before.StartedAt {
+				t.Fatalf("presence after the reconnect = %+v, want owner %s, pid %d, start %s", after, key, os.Getppid(), before.StartedAt)
+			}
+			if isOwner, _, err := second.mailboxOwnerCheck(key, root); err != nil || !isOwner {
+				t.Fatalf("second server owner check = %v, %v", isOwner, err)
+			}
+			second.mailbox.registeredMu.Lock()
+			registered, registeredRoot := second.mailbox.registered, second.mailbox.registeredRoot
+			second.mailbox.registeredMu.Unlock()
+			if !registered || registeredRoot == "" {
+				t.Fatalf("second server not registered for the presence ticker: %v %q", registered, registeredRoot)
+			}
+			if second.mailboxHasConflict() {
+				t.Fatal("the owner's own record was taken for a conflict")
+			}
+			if store, err := wsmailbox.Load(path); err == nil {
+				for name, p := range store.Presence {
+					if p.PID == os.Getppid() && name != identity.Name {
+						t.Fatalf("a second record %q was minted for the same owner: %+v", name, store.Presence)
+					}
+				}
+			}
+		})
 	}
 }

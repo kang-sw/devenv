@@ -93,6 +93,35 @@ func (p recordPart) fileName() string {
 // errSessionNotFound is loadRecord's answer for a key with no readable record.
 var errSessionNotFound = errors.New("session key not found")
 
+// errSessionUnreadable marks a record that exists but could not be read this
+// time: an I/O error other than absence, such as a Windows reader meeting
+// the record's replace in flight. loadRecord returns it wrapped in a
+// sessionUnreadableError, which every caller matching errSessionNotFound
+// still sees as not found; only a caller that must not act on a transient
+// failure (the live session's activity check) asks for this one.
+var errSessionUnreadable = errors.New("session record unreadable")
+
+type sessionUnreadableError struct{ err error }
+
+func (e sessionUnreadableError) Error() string {
+	return errSessionUnreadable.Error() + ": " + e.err.Error()
+}
+func (e sessionUnreadableError) Unwrap() error { return e.err }
+func (e sessionUnreadableError) Is(target error) bool {
+	return target == errSessionNotFound || target == errSessionUnreadable
+}
+
+// recordNotFound classifies a record file's read error: a path error other
+// than absence is a transient unreadable record; anything else (absent,
+// malformed) is not found.
+func recordNotFound(err error) error {
+	var pathErr *fs.PathError
+	if errors.As(err, &pathErr) && !errors.Is(err, fs.ErrNotExist) {
+		return sessionUnreadableError{err: err}
+	}
+	return errSessionNotFound
+}
+
 // errRecordUnchanged, returned by a mutateRecord fn, ends the mutation with
 // nothing written and no error.
 var errRecordUnchanged = errors.New("session record unchanged")
@@ -203,7 +232,7 @@ func loadRecordWith(d sessionDirs, key string, parts recordPart, raw io.Writer, 
 	if errors.Is(err, fs.ErrNotExist) {
 		data, v, err = read(d.legacyPath(key), func() any { return new(sessionRecord) })
 		if err != nil {
-			return sessionRecord{}, false, errSessionNotFound
+			return sessionRecord{}, false, recordNotFound(err)
 		}
 		record = *v.(*sessionRecord)
 		if raw != nil {
@@ -212,7 +241,7 @@ func loadRecordWith(d sessionDirs, key string, parts recordPart, raw io.Writer, 
 		return record, true, nil
 	}
 	if err != nil {
-		return sessionRecord{}, false, errSessionNotFound
+		return sessionRecord{}, false, recordNotFound(err)
 	}
 	record.sessionKeyRecord = *v.(*sessionKeyRecord)
 	writeRawPart(raw, partKey, data)

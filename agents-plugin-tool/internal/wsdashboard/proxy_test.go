@@ -21,14 +21,15 @@ import (
 // SLOW_MS milliseconds per line when the env says so, or blocks until
 // drained when the env carries LONG_WAIT.
 type echoHandler struct {
-	mu     sync.Mutex
-	hellos []ProxyHello
+	mu       sync.Mutex
+	hellos   []ProxyHello
+	sessions []*echoSession
 }
 
 func (h *echoHandler) Accept(hello ProxyHello) (ProxySession, error) {
 	h.mu.Lock()
+	defer h.mu.Unlock()
 	h.hellos = append(h.hellos, hello)
-	h.mu.Unlock()
 	if reason := hello.Env["REFUSE"]; reason != "" {
 		return nil, errors.New(reason)
 	}
@@ -37,6 +38,7 @@ func (h *echoHandler) Accept(hello ProxyHello) (ProxySession, error) {
 		n, _ := strconv.Atoi(ms)
 		s.slow = time.Duration(n) * time.Millisecond
 	}
+	h.sessions = append(h.sessions, s)
 	return s, nil
 }
 
@@ -57,13 +59,17 @@ func (s *echoSession) Serve(ctx context.Context, stream io.ReadWriteCloser) {
 		if err != nil {
 			return
 		}
+		s.inflight.Add(1)
 		if s.longWait {
+			// A long wait is a call in flight too: the drain cancels it
+			// and its answer is written before the session reports idle,
+			// as a cancelled mailbox wait writes its final frame.
 			<-s.drained
 			s.endedAt = time.Now()
 			_, _ = stream.Write([]byte("cancelled\n"))
+			s.inflight.Done()
 			continue
 		}
-		s.inflight.Add(1)
 		if s.slow > 0 {
 			time.Sleep(s.slow)
 		}
@@ -72,9 +78,11 @@ func (s *echoSession) Serve(ctx context.Context, stream io.ReadWriteCloser) {
 	}
 }
 
-func (s *echoSession) Drain(ctx context.Context) {
-	s.drainedAt = time.Now()
-	s.once.Do(func() { close(s.drained) })
+func (s *echoSession) Drain(ctx context.Context) bool {
+	s.once.Do(func() {
+		s.drainedAt = time.Now()
+		close(s.drained)
+	})
 	done := make(chan struct{})
 	go func() {
 		s.inflight.Wait()
@@ -82,8 +90,17 @@ func (s *echoSession) Drain(ctx context.Context) {
 	}()
 	select {
 	case <-done:
+		return true
 	case <-ctx.Done():
+		return false
 	}
+}
+
+// session returns the i-th accepted session.
+func (h *echoHandler) session(i int) *echoSession {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.sessions[i]
 }
 
 func startProxyTestDaemon(t *testing.T, h ProxyHandler) *Daemon {
@@ -334,6 +351,15 @@ func TestProxyDrainFinishesCallsInFlightAndCancelsLongWaits(t *testing.T) {
 	if _, err := slowR.ReadByte(); err != io.EOF {
 		t.Fatalf("stream after drain: %v, want EOF", err)
 	}
+	// The long wait ended at the drain, not after the in-flight call: its
+	// end follows its Drain by far less than the 400 ms call.
+	wait := h.session(1)
+	if wait.endedAt.Before(wait.drainedAt) || wait.endedAt.Sub(wait.drainedAt) > 200*time.Millisecond {
+		t.Fatalf("long wait: drained at %s, ended at %s; want cancelled at once", wait.drainedAt, wait.endedAt)
+	}
+	if !d.WaitProxy(context.Background()) {
+		t.Fatal("WaitProxy did not report every session ended")
+	}
 	// No session is admitted while draining or after.
 	conn, err := net.Dial("tcp", "127.0.0.1:"+strconv.Itoa(d.Endpoint().Port))
 	if err == nil {
@@ -342,24 +368,50 @@ func TestProxyDrainFinishesCallsInFlightAndCancelsLongWaits(t *testing.T) {
 	}
 }
 
-func TestProxyDrainGivesUpOnACallThatOutlivesTheBudget(t *testing.T) {
+// TestProxyDrainReleasesTheLockBeforeACallThatOutlivesTheBudgetEnds (L3):
+// Close returns within the successor's lock wait with the long call still
+// running, its stream open; the call's answer is delivered when it ends,
+// then the stream closes, and WaitProxy reports the session ended.
+func TestProxyDrainReleasesTheLockBeforeACallThatOutlivesTheBudgetEnds(t *testing.T) {
 	h := &echoHandler{}
 	d := startProxyTestDaemon(t, h)
 	conn, r, _ := proxyUpgrade(t, d, d.Endpoint().Token)
-	if accept := sendHello(t, conn, r, testHello(map[string]string{"SLOW_MS": "20000"})); !accept.OK {
+	slow := proxyDrainBudget + 1500*time.Millisecond
+	if accept := sendHello(t, conn, r, testHello(map[string]string{"SLOW_MS": strconv.Itoa(int(slow / time.Millisecond))})); !accept.OK {
 		t.Fatal(accept.Reason)
 	}
-	if _, err := conn.Write([]byte("stuck\n")); err != nil {
+	if _, err := conn.Write([]byte("long\n")); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(50 * time.Millisecond)
 	started := time.Now()
 	d.Close()
-	if elapsed := time.Since(started); elapsed >= DefaultLockWait-time.Second {
-		t.Fatalf("Close took %s, must stay under %s", elapsed, DefaultLockWait-time.Second)
+	closed := time.Since(started)
+	if closed >= DefaultLockWait-time.Second {
+		t.Fatalf("Close took %s, must stay under %s", closed, DefaultLockWait-time.Second)
+	}
+	// The lock and endpoint are released while the call still runs.
+	if _, err := ReadEndpoint(d.dir); err == nil {
+		t.Fatal("the endpoint file survived Close")
+	}
+	short, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	if d.WaitProxy(short) {
+		t.Fatal("WaitProxy reported the session ended while its call still runs")
+	}
+	cancel()
+	if echoed, err := r.ReadString('\n'); err != nil || echoed != "long\n" {
+		t.Fatalf("the long call's answer = %q, %v; it must be delivered, not cut", echoed, err)
+	}
+	if since := time.Since(started); since < slow-200*time.Millisecond {
+		t.Fatalf("the answer came after %s, before the %s call could have ended", since, slow)
 	}
 	if _, err := r.ReadByte(); err != io.EOF {
-		t.Fatalf("stream after drain: %v, want EOF", err)
+		t.Fatalf("stream after the call ended: %v, want EOF", err)
+	}
+	all, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if !d.WaitProxy(all) {
+		t.Fatal("WaitProxy did not report every session ended after the call")
 	}
 }
 

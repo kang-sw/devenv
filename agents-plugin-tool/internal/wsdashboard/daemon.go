@@ -56,6 +56,9 @@ type DaemonOptions struct {
 	// BuildTime is reported by /health (ExecutableBuildTime); zero is
 	// unknown and is omitted.
 	BuildTime int64
+	// ContentHash is the daemon executable's sha256 (ExecutableContentHash),
+	// reported by /health; empty is unknown and is omitted.
+	ContentHash string
 	// Proxy builds the MCP sessions the daemon hosts for the launchers
 	// that connect to ProxyPath (proxy.go); nil leaves the route off.
 	Proxy ProxyHandler
@@ -158,7 +161,9 @@ type Daemon struct {
 	// pprof serves the pprof routes (pprofHandler).
 	pprof bool
 	// buildTime is the build time /health reports; zero is unknown.
-	buildTime int64
+	// contentHash is the executable hash it reports; empty is unknown.
+	buildTime   int64
+	contentHash string
 	// openSystem opens a system-open route's target (systemOpen).
 	openSystem func(target string) error
 	// git reads the git handle of the roots open session pages show
@@ -204,6 +209,11 @@ type HealthInfo struct {
 	// (ExecutableBuildTime); an older daemon omits it, which reads as older
 	// than any known build.
 	BuildTime int64 `json:"build_time,omitempty"`
+	// ContentHash is the sha256 of the daemon's executable. At an equal
+	// version it decides whether the build time matters at all: the same
+	// content is the same build, whatever the file's mtime (each plugin
+	// install is its own copy of one binary). An older daemon omits it.
+	ContentHash string `json:"content_hash,omitempty"`
 }
 
 // StartDaemon takes the single-instance lock, binds the port, writes the
@@ -273,6 +283,7 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 		lan:             opts.LAN,
 		pprof:           opts.Pprof,
 		buildTime:       opts.BuildTime,
+		contentHash:     opts.ContentHash,
 		proxy:           opts.Proxy,
 		openSystem:      opts.openSystem,
 		worktrees:       opts.Worktrees,
@@ -460,7 +471,9 @@ func (d *Daemon) Done() <-chan struct{} { return d.done }
 
 // Close stops the daemon. The endpoint file is removed before the lock is
 // released, so a successor that takes the lock never has its own file
-// deleted. Close is idempotent.
+// deleted. Close is idempotent. A hosted call that outlives the drain
+// budget is still running when Close returns (drainProxy); WaitProxy waits
+// for it.
 func (d *Daemon) Close() {
 	d.closeOnce.Do(func() {
 		close(d.stop)
@@ -573,13 +586,14 @@ func (d *Daemon) handleHealth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, HealthInfo{
-		Service:   healthService,
-		Version:   d.endpoint.Version,
-		PID:       d.endpoint.PID,
-		Port:      d.endpoint.Port,
-		StartedAt: d.endpoint.StartedAt,
-		LAN:       d.lan,
-		BuildTime: d.buildTime,
+		Service:     healthService,
+		Version:     d.endpoint.Version,
+		PID:         d.endpoint.PID,
+		Port:        d.endpoint.Port,
+		StartedAt:   d.endpoint.StartedAt,
+		LAN:         d.lan,
+		BuildTime:   d.buildTime,
+		ContentHash: d.contentHash,
 	})
 }
 

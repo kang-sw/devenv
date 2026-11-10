@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -103,8 +104,27 @@ type launcherClient struct {
 	cmd    *exec.Cmd
 	stdin  *os.File
 	out    *bufio.Reader
-	stderr *bytes.Buffer
+	stderr *lockedBuffer
 	nextID int
+}
+
+// lockedBuffer is the launcher's stderr: exec's copy goroutine writes it
+// while the test reads it, so both go through one mutex.
+type lockedBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (l *lockedBuffer) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.Write(p)
+}
+
+func (l *lockedBuffer) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.String()
 }
 
 func startLauncher(t *testing.T, launcher, dir string, env []string, args ...string) *launcherClient {
@@ -121,8 +141,8 @@ func startLauncher(t *testing.T, launcher, dir string, env []string, args ...str
 	if err != nil {
 		t.Fatal(err)
 	}
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
+	stderr := &lockedBuffer{}
+	cmd.Stderr = stderr
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +154,7 @@ func startLauncher(t *testing.T, launcher, dir string, env []string, args ...str
 			_ = cmd.Wait()
 		}
 	})
-	return &launcherClient{t: t, cmd: cmd, stdin: stdinW, out: bufio.NewReader(stdout), stderr: &stderr}
+	return &launcherClient{t: t, cmd: cmd, stdin: stdinW, out: bufio.NewReader(stdout), stderr: stderr}
 }
 
 func (c *launcherClient) call(method string, params any) map[string]any {
@@ -238,9 +258,27 @@ func TestLauncherServesThroughTheDaemonItStartsFromTheStagedCopy(t *testing.T) {
 	// The daemon runs from the staged copy, and it alone.
 	dir, _ := wsdashboard.Dir(cache)
 	ep := waitForEndpoint(t, dir, version, 5*time.Second)
+	// Its name follows Go's StageExecutable rule for the runtime binary the
+	// launcher staged (a copy of bin under the runtime dir, named
+	// ws-mcp-<version>-<hash>): sha256[:16] of the content plus
+	// filepath.Ext of that name, lower-cased.
+	runtimeEntries, err := os.ReadDir(envValue(t, env, "WS_MCP_RUNTIME_DIR"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtimeName := ""
+	for _, e := range runtimeEntries {
+		if strings.HasPrefix(e.Name(), "ws-mcp-") {
+			runtimeName = e.Name()
+		}
+	}
+	if runtimeName == "" {
+		t.Fatalf("runtime dir entries = %v, want the staged runtime binary", runtimeEntries)
+	}
+	wantStaged := "ws-mcp-dashboard-" + wsdashboard.ExecutableContentHash(bin)[:16] + strings.ToLower(filepath.Ext(runtimeName))
 	entries, err := os.ReadDir(filepath.Join(dir, "bin"))
-	if err != nil || len(entries) != 1 || !strings.HasPrefix(entries[0].Name(), "ws-mcp-dashboard-") {
-		t.Fatalf("staged binaries = %v (%v), want exactly one ws-mcp-dashboard-* entry", entries, err)
+	if err != nil || len(entries) != 1 || entries[0].Name() != wantStaged {
+		t.Fatalf("staged binaries = %v (%v), want exactly %s (the Python staging must name the copy as Go's StageExecutable does)", entries, err, wantStaged)
 	}
 	if ep.PID == client.cmd.Process.Pid {
 		t.Fatal("the daemon is the launcher process")

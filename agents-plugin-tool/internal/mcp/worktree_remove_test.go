@@ -55,14 +55,14 @@ func TestRemoveWorktreeRefusals(t *testing.T) {
 		}
 	}
 
-	dirty, err := provisionWorktree(ctx, runner, root, "develop", "impl/develop/dirty", profile, "")
+	dirty, err := provisionWorktree(ctx, runner, nil, root, "develop", "impl/develop/dirty", profile, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	writeFileForTest(t, dirty.Path, "src/wip.go", "package y\n")
 	refuse(dirty.Path, now, "uncommitted changes or untracked files")
 
-	unique, err := provisionWorktree(ctx, runner, root, "develop", "impl/develop/unique", profile, "")
+	unique, err := provisionWorktree(ctx, runner, nil, root, "develop", "impl/develop/unique", profile, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestRemoveWorktreeRefusals(t *testing.T) {
 	runGit(t, unique.Path, "commit", "-m", "unmerged")
 	refuse(unique.Path, now, "holds 1 commit(s) no other branch reaches")
 
-	detached, err := provisionWorktree(ctx, runner, root, "develop", "", profile, "")
+	detached, err := provisionWorktree(ctx, runner, nil, root, "develop", "", profile, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +86,7 @@ func TestRemoveWorktreeRefusals(t *testing.T) {
 	runGit(t, root, "worktree", "add", "--detach", outside, "develop")
 	refuse(canonicalRootForTest(t, outside), now, "not under the owned worktree pool")
 
-	leased, err := provisionWorktree(ctx, runner, root, "develop", "impl/develop/leased", profile, "")
+	leased, err := provisionWorktree(ctx, runner, nil, root, "develop", "impl/develop/leased", profile, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +122,7 @@ func TestRemoveWorktreeFailingPreRemoveKeepsWorktree(t *testing.T) {
 	profile := hookProfile(t, "build", nil, map[string][]map[string]any{
 		worktreeHookPreRemove: {hook(hookArgv(t, "exit", "7"))},
 	})
-	res, err := provisionWorktree(ctx, runner, root, "develop", "", profile, "")
+	res, err := provisionWorktree(ctx, runner, nil, root, "develop", "", profile, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +149,7 @@ func TestRemoveWorktreeQuarantinedAndVanishedProfile(t *testing.T) {
 		worktreeHookPostAcquire: {hook(hookArgv(t, "exit", "3"))},
 		worktreeHookPreRemove:   {hook(hookArgv(t, "env", "out/pre_remove.txt"))},
 	})
-	if _, err := provisionWorktree(ctx, runner, root, "develop", "impl/develop/a", broken, ""); err == nil {
+	if _, err := provisionWorktree(ctx, runner, nil, root, "develop", "impl/develop/a", broken, ""); err == nil {
 		t.Fatal("setup: post_acquire must fail")
 	}
 	quarantined := ""
@@ -170,7 +170,7 @@ func TestRemoveWorktreeQuarantinedAndVanishedProfile(t *testing.T) {
 		t.Fatalf("quarantined remove result = %+v", res)
 	}
 
-	orphan, err := provisionWorktree(ctx, runner, root, "develop", "", customProfile(t, "gone", `{}`), "")
+	orphan, err := provisionWorktree(ctx, runner, nil, root, "develop", "", customProfile(t, "gone", `{}`), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,7 +224,7 @@ func TestReleaseRecordsPreservedBytes(t *testing.T) {
 	ctx := context.Background()
 	runner := wsgit.ExecRunner{}
 	build := customProfile(t, "build", `{"preserve":["out/"]}`)
-	res, err := provisionWorktree(ctx, runner, root, "develop", "impl/develop/a", build, "")
+	res, err := provisionWorktree(ctx, runner, nil, root, "develop", "impl/develop/a", build, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -249,11 +249,11 @@ func TestPoolNudgeThrottleAndThresholds(t *testing.T) {
 	runner := wsgit.ExecRunner{}
 	build := customProfile(t, "build", `{"preserve":["out/"]}`)
 
-	held, err := provisionWorktree(ctx, runner, root, "develop", "impl/develop/held", build, "")
+	held, err := provisionWorktree(ctx, runner, nil, root, "develop", "impl/develop/held", build, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	big, err := provisionWorktree(ctx, runner, root, "develop", "impl/develop/big", build, "")
+	big, err := provisionWorktree(ctx, runner, nil, root, "develop", "impl/develop/big", build, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -309,7 +309,7 @@ func TestWorktreeNudgeKnobsAndAcquireWiring(t *testing.T) {
 	}
 
 	// A branch worktree whose HEAD commit is a week old is stale under 3 days.
-	old, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/old", builtinProfile(t, worktreeProfileFull), "")
+	old, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, nil, root, base, "impl/test/old", builtinProfile(t, worktreeProfileFull), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -337,7 +337,7 @@ func TestRemoveWorktreeWithInitializedSubmodule(t *testing.T) {
 	root, base := submoduleWorktreeFixture(t)
 	ctx := context.Background()
 	runner := wsgit.ExecRunner{}
-	res, err := provisionWorktree(ctx, runner, root, base, "impl/test/sub", builtinProfile(t, worktreeProfileFull), "")
+	res, err := provisionWorktree(ctx, runner, nil, root, base, "impl/test/sub", builtinProfile(t, worktreeProfileFull), "")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -68,6 +68,11 @@ var (
 // commit-gate caller is responsible for turning a non-OK VerifyResult into
 // its own blocking error.
 func TicketVerify(root string, paths []string) (VerifyResult, error) {
+	return TicketVerifyEnv(root, paths, nil)
+}
+
+// TicketVerifyEnv is TicketVerify with git run on env (see gitCommand).
+func TicketVerifyEnv(root string, paths []string, env []string) (VerifyResult, error) {
 	if len(paths) == 0 {
 		return VerifyResult{}, fmt.Errorf("paths requires at least one path")
 	}
@@ -85,13 +90,13 @@ func TicketVerify(root string, paths []string) (VerifyResult, error) {
 			Status: status,
 			Stem:   stem,
 		})
-		verifyTicketFile(root, path, status, stem, &result)
+		verifyTicketFile(env, root, path, status, stem, &result)
 	}
 	// A whole-board graph load can fail on a malformed file unrelated to this
 	// commit. Such a failure drops the advisories and lets the
 	// commit proceed; it must never become an error return, or the non-blocking
 	// invariant would be violated by the very code meant to honor it.
-	if advisories, err := ticketGraphAdvisories(root, verified); err == nil {
+	if advisories, err := ticketGraphAdvisories(env, root, verified); err == nil {
 		result.Advisories = advisories
 	}
 	result.OK = len(result.Findings) == 0
@@ -120,7 +125,7 @@ func ticketVerifyPathShape(path string) (status, stem string, ok bool) {
 	return parts[0], stem, true
 }
 
-func verifyTicketFile(root, path, status, stem string, result *VerifyResult) {
+func verifyTicketFile(env []string, root, path, status, stem string, result *VerifyResult) {
 	addFinding := func(guardrail, message string) {
 		result.Findings = append(result.Findings, VerifyFinding{Path: path, Guardrail: guardrail, Message: message})
 	}
@@ -170,7 +175,7 @@ func verifyTicketFile(root, path, status, stem string, result *VerifyResult) {
 		if completenessRequired && completeness == "completed" {
 			completed = append(completed, "completeness")
 		}
-		if freshness, err := sageReviewFreshnessCheck(root, "ai-docs/tickets/"+status+"/"+stem+".md", completed); err == nil && len(freshness.Stages) > 0 {
+		if freshness, err := sageReviewFreshnessCheck(env, root, "ai-docs/tickets/"+status+"/"+stem+".md", completed); err == nil && len(freshness.Stages) > 0 {
 			addWarning("sage-review-freshness", sageReviewFreshnessWarningMessage(freshness))
 		}
 	}

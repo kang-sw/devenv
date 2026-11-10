@@ -49,6 +49,12 @@ const SizeThresholdCommits = 20
 //     (StalenessKnob), returning "" when the range is small and fresh
 //     (quiet).
 func CheckpointNudge(ctx context.Context, root string) string {
+	return CheckpointNudgeWith(ctx, wsgit.ExecRunner{}, root)
+}
+
+// CheckpointNudgeWith is CheckpointNudge running git through runner (a
+// hosted server's runner carries its caller's environment).
+func CheckpointNudgeWith(ctx context.Context, runner wsgit.Runner, root string) string {
 	entry, found, err := Frontier(root)
 	if err != nil {
 		return ""
@@ -57,12 +63,12 @@ func CheckpointNudge(ctx context.Context, root string) string {
 		return "no review ledger yet for this project; run a sweep (lead-review range: <base>..<head>) to establish a baseline"
 	}
 
-	track, err := ResolveTrack(ctx, root)
+	track, err := ResolveTrackWith(ctx, runner, root)
 	if err != nil {
 		return ""
 	}
 
-	count := commitsAheadOfMarker(ctx, root, entry.Head, track)
+	count := commitsAheadOfMarker(ctx, runner, root, entry.Head, track)
 	staleness := StalenessKnob(root)
 
 	switch {
@@ -86,12 +92,12 @@ func CheckpointNudge(ctx context.Context, root string) string {
 // `rev-list --count <merge-base>..<track>`. Fails open to 0 on any git
 // error (unresolvable ref, unrelated histories) — consistent with that
 // function's own fail-open posture.
-func commitsAheadOfMarker(ctx context.Context, root, marker, track string) int {
-	result, err := wsgit.NewClient().MergeBase(ctx, root, marker, track)
+func commitsAheadOfMarker(ctx context.Context, runner wsgit.Runner, root, marker, track string) int {
+	result, err := wsgit.Client{Runner: runner}.MergeBase(ctx, root, marker, track)
 	if err != nil {
 		return 0
 	}
-	out, err := (wsgit.ExecRunner{}).RunGit(ctx, root, "rev-list", "--count", result.MergeBase+".."+track)
+	out, err := runner.RunGit(ctx, root, "rev-list", "--count", result.MergeBase+".."+track)
 	if err != nil {
 		return 0
 	}

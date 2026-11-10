@@ -22,6 +22,9 @@ type TicketCloseOptions struct {
 	Status     string // "done" | "dropped"
 	Resolution string // optional
 	Today      string // YYYY-MM-DD, caller-supplied for testability
+	// Env is the environment a sparse-checkout scope's git runs on; nil
+	// means this process's own.
+	Env []string
 }
 
 type TicketMoveOptions struct {
@@ -29,6 +32,7 @@ type TicketMoveOptions struct {
 	To         string           // "idea" | "todo" | "ready"
 	SageReview SageReviewConfig // resolved per-stage sage review config
 	Today      string           // kept for symmetry; unused in the initial implementation
+	Env        []string         // see TicketCloseOptions.Env
 }
 
 type TicketMutateResult struct {
@@ -97,7 +101,7 @@ func TicketsClose(root string, runner GitRunner, opts TicketCloseOptions) (Ticke
 		return TicketMutateResult{}, fmt.Errorf("status must be done or dropped")
 	}
 
-	scope := newTicketScope(root)
+	scope := newTicketScopeEnv(root, opts.Env)
 	oldPath, curStatus, hidden, err := findTicketPath(root, scope, stem)
 	if err != nil {
 		return TicketMutateResult{}, err
@@ -177,7 +181,7 @@ func TicketsMove(root string, runner GitRunner, opts TicketMoveOptions) (TicketM
 		return TicketMutateResult{}, fmt.Errorf("to must be idea, todo, or ready")
 	}
 
-	scope := newTicketScope(root)
+	scope := newTicketScopeEnv(root, opts.Env)
 	oldPath, curStatus, hidden, err := findTicketPath(root, scope, stem)
 	if err != nil {
 		return TicketMutateResult{}, err
@@ -306,7 +310,7 @@ func TicketsMove(root string, runner GitRunner, opts TicketMoveOptions) (TicketM
 		// allows — a typed blocked-by prerequisite in ready/ but not yet
 		// code-landed. Non-blocking; fails open on a scan error since the
 		// dispatch gate backstops the hard cases.
-		if warning, werr := blockedByPromotionWarning(root, filepath.Join(root, filepath.FromSlash(newPath))); werr == nil && warning != "" {
+		if warning, werr := blockedByPromotionWarning(opts.Env, root, filepath.Join(root, filepath.FromSlash(newPath))); werr == nil && warning != "" {
 			result.Tip = appendTip(result.Tip, warning)
 		}
 	}
