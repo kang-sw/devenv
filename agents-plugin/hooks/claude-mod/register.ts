@@ -1312,6 +1312,10 @@ export const register: Register = (on) => {
     } catch (err) {
       $.ui.log(`${$.plugin.name} band: tool call handling failed: ${String(err)}`, { to: 'debug' })
     }
+    // The dashboard feed re-reads the usage on the band's cadence, so the
+    // page's figures move mid-turn with the band's; the mod's own calls make
+    // no model request. Unchanged figures are not sent again.
+    if (modelCall) feedStatus()
     return res
   })
 

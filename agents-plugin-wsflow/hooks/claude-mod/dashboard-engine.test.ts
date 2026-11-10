@@ -683,7 +683,33 @@ test('status goes once a result names it, follows each measure, stops after a re
   expect(statuses(w).at(-1)?.context).toEqual({ tokens: 120_000, window: 200_000, percent: 60 })
 })
 
-test('a resync sends the held status again behind its reset', { timeoutMs: 20_000 }, async ($, on) => {
+test('status follows each model tool call mid-turn, as the band does; the mod\'s own calls read nothing', { timeoutMs: 20_000 }, async ($, on) => {
+  const w = world(on, { dashboard: true })
+  w.acceptsStatus = true
+  await start($, w)
+  await flush(w)
+  await $.turn.start({ text: 'x', turnId: 't1' })
+  await flush(w)
+  const count = statuses(w).length
+  // The mod's own mailbox read while the turn runs: no fresh figures go.
+  w.usage.context.tokens = 80_000
+  w.recvAnswers.push(mailAnswer('hello'))
+  w.exits.at(-1)!(0, ['mail'])
+  await w.clock.advance(50)
+  await flush(w)
+  expect(statuses(w).length).toBe(count)
+  // A model tool call, with no measure behind it: the page gets the context as it reads now.
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'u1', command: 'ls' } as never)
+  await flush(w)
+  expect(statuses(w).length).toBe(count + 1)
+  expect(statuses(w).at(-1)?.context).toEqual({ tokens: 80_000, window: 200_000, percent: 40 })
+  // Unchanged figures after the next call are not sent again.
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'u2', command: 'ls' } as never)
+  await flush(w)
+  expect(statuses(w).length).toBe(count + 1)
+})
+
+test('a resync sends the held status again behind its reset',{ timeoutMs: 20_000 }, async ($, on) => {
   const w = world(on, { dashboard: true })
   w.acceptsStatus = true
   await start($, w)
