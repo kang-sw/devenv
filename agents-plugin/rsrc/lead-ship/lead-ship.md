@@ -52,20 +52,27 @@ Applies when the project's `AGENTS.md` `### Review Policy` declares
 3. `found: false`: all prior history is unreviewed. Stop for the user's
    choice: **bootstrap** (`review.marker(bootstrap: true)` accepts history as
    unreviewed and proceeds), or **review** (ask for an explicit base, then
-   `{{.SkillNamespace}}:lead-review` over `range: <base>..HEAD`). Declining
-   both stops here.
+   `{{.SkillNamespace}}:lead-review` over `range: <base>..HEAD`, whose verdict
+   proceeds or stops as in step 4). Declining both stops here.
 4. `found: true`: `git rev-list --count <frontier-head>..HEAD`. `0` proceeds.
    Otherwise `{{.SkillNamespace}}:lead-review` over `range:
    <frontier-head>..HEAD`; a clearing verdict proceeds, anything else stops
    for the user's explicit override with a recommendation against it.
-5. A cut-point release replaces the outcome of steps 3 and 4: once they
-   finish, read `review.marker` again; its head is the cut point. The gate
-   proceeds when the cut point is not an ancestor of the release target, even
-   when the review left a blocked remainder, because only content at or below
-   the cut point ships. Otherwise it stops: nothing is newly cleared. The
-   user's explicit override still means shipping uncleared content: its cut
-   point is the review-track tip at override time. A step-3 decline still
-   stops.
+5. A cut-point release replaces the outcome of steps 3 and 4. When the gate
+   ran a review, only a `pass` or `concern` stamp that review wrote clears a
+   cut point, and the cut point is that stamp's head: the clean-prefix
+   stamp's when the review wrote one. A `bootstrap` entry written during the
+   gate, including the seed the review writes on an empty ledger, clears
+   nothing, so a review that wrote no `pass` or `concern` stamp stops for the
+   user's explicit override as in step 4; the seed would otherwise make the
+   blocked head look cleared. A step-4 count of `0` runs no review and makes
+   the frontier head the cut point. The gate proceeds when the cut point is
+   not an ancestor of the release target, even when the review left a
+   blocked remainder, because only content at or below the cut point ships.
+   Otherwise it stops: nothing is newly cleared. The user's explicit override
+   still means shipping uncleared content: its cut point is the review-track
+   tip at override time, and the step-3 bootstrap is such an override. A
+   step-3 decline still stops.
 6. This gate never calls `review.stamp`; apart from the step-3 bootstrap the
    marker advances only through the review skill. An override leaves it where
    it was.
@@ -74,13 +81,17 @@ Applies when the project's `AGENTS.md` `### Review Policy` declares
 
 1. Delegate pre-flight, version derivation, tag creation (not pushed), and
    build/package to a subagent with the config path; it returns version,
-   tag, and the full output of each command. For a cut-point release, also
-   pass the cut point: the delegate runs the config's Cut step there, and
-   before any version bump checks that the release target is an ancestor of
-   the cut point. When it is not (the cut predates the previous release's
-   merge back), the delegate runs the config's merge of the release target
-   into the release branch first, or stops when the config declares none. A
-   version bump the config's strategy makes lands on the release branch.
+   tag, and the full output of each command. You run yourself, in the
+   config's order, each config step that needs a capability only the lead
+   holds, such as a lead-only tool (a delegate's call to one is refused), and
+   hand the delegate what it produced; the delegate runs the mechanical
+   steps. For a cut-point release, also pass the cut point: the config's Cut
+   step runs there, and the delegate before any version bump checks that the
+   release target is an ancestor of the cut point. When it is not (the cut
+   predates the previous release's merge back), the delegate runs the
+   config's merge of the release target into the release branch first, or
+   stops when the config declares none. A version bump the config's strategy
+   makes lands on the release branch.
 2. Confirm with the user: version, tag, publish targets, and for a cut-point
    release the cut point and the release branch. Wait for explicit approval.
 3. Publish per the config. When a publish step promotes one branch into

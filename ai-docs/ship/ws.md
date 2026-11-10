@@ -34,19 +34,57 @@ for either `agents-plugin/runtime.json` or `agents-plugin-wsflow/runtime.json`
 
 All release-branch work runs in a dedicated worktree, never in the main
 checkout: parallel lead sessions share that checkout, and moving its HEAD would
-land their commits on the release branch.
+land their commits on the release branch. Steps marked **(lead)** call
+lead-only tools (`ws/worktree.*`, `ws/git.merge`) or hand work to
+`ws:lead-delegate`, so they run in the lead session; the Execute delegate runs
+the rest of Pre-flight in the worktree the lead hands it.
 
-- Cut: `ws/worktree.acquire(base: <cut>, target_branch:
-  release/pending-<short cut sha>, profile: "full")`; run every release-branch
-  command below in the returned worktree. Once Version Strategy has the
-  version, rename the branch there with `git branch -m release/<version>`.
+- Cut **(lead)**: first clear what an earlier attempt left, because a leftover
+  lease or branch refuses the acquire and the later rename: release each
+  `ws/worktree.list` worktree whose branch is `release/*`
+  (`ws/worktree.release(path: <worktree>)`), then delete each local
+  `release/*` branch (`git branch -D`), `release/pending-<short cut sha>`
+  included. Then `ws/worktree.acquire(base: <cut>, target_branch:
+  release/pending-<short cut sha>, profile: "full")`; run every
+  release-branch command below in the returned worktree. Once Version
+  Strategy has the version, rename the branch there with
+  `git branch -m release/<version>`.
 - Merge release target: when `git merge-base --is-ancestor main <cut>` fails
   (the cut predates the previous release's merge back), run `git merge --no-ff
-  main` on the release branch before Version Strategy reads the version. A
-  conflict stops the ship.
+  main` on the release branch before Version Strategy reads the version,
+  resolving any conflict per Conflicts below.
 - Promote (Publish): `git checkout main && git merge --ff-only
   <release-head>` in the release worktree.
-- Merge back (Post-ship): merge `release/<version>` into `develop`.
+- Merge back (Post-ship), when `git merge-base --is-ancestor <release-head>
+  develop` fails (the release branch carries a bump commit or the merged
+  `main`). Without it, `main` would stop being an ancestor of `develop` and
+  the next release would need the Merge release target step.
+  1. In the release worktree, `git checkout release/<version> && git merge
+     --no-ff develop`, resolving any conflict per Conflicts below.
+  2. **(lead)** When `git merge-base --is-ancestor develop release/<version>`
+     fails (`develop` moved after step 1), repeat step 1, so this merge
+     cannot conflict and leave an in-progress merge in the shared main
+     checkout. Then, from the main checkout, `ws/git.merge(branch:
+     "release/<version>", target: "develop")` and `git push origin develop`.
+- Conflicts (Merge release target and Merge back) resolve in the release
+  worktree. On a line `bump-ws-version.sh` writes, take the higher version;
+  hand any other conflict **(lead)** to `ws:lead-delegate` with the worktree
+  path. Commit the merge, then rerun Pre-flight's release-contract check on
+  the release branch head. A conflict is never a stop: a restart cuts at the
+  same point and meets the same conflict.
+- Stops **(lead)**: every stop after Cut releases the release worktree
+  (`ws/worktree.release(path: <worktree>)`), which detaches its HEAD and frees
+  the release branch for the restart's Cut. That covers a red Pre-flight
+  test, a failed release-contract or marketplace check, a conflict
+  `ws:lead-delegate` could not resolve, a declined final gate, a rejected
+  push, and a red CI gate. A rejected `main` push also restores local `main`
+  with `git branch -f main origin/main` once the worktree is released, and
+  deletes the unpushed local tag (`git tag -d v<version>`), so the restart's
+  ref check passes. A stop before the tag push restarts Pre-flight from the
+  top, after a fix forward on `develop` through ordinary review when a check
+  was red; the version's tag was never pushed, so Version Strategy derives
+  the same version again. A Merge back stop keeps `release/<version>` for a
+  later Merge back.
 
 ## Pre-flight
 
@@ -63,26 +101,32 @@ fetched state.
   `git rev-parse main` equals `git rev-parse origin/main`. If either fails,
   **stop and reconcile first** (`git merge origin/develop` into `develop`;
   fast-forward local `main` to `origin/main`), then restart Pre-flight.
-- **Release gate** (this project declares `release-boundary: present` in
-  `AGENTS.md` `### Review Policy`): run `lead-ship`'s Release gate over
-  `develop`. Check `review.marker(format: json)` `found` **first, before any
-  rev-list call** — an empty `head` substituted into `git rev-list --count
-  <frontier-head>..develop` resolves the empty side to `develop`'s own tip and
-  silently reports `0`, which would wrongly read as clear. An override at any
+- **Release gate** **(lead)** (this project declares `release-boundary:
+  present` in `AGENTS.md` `### Review Policy`): run `lead-ship`'s Release
+  gate over `develop`. Check `review.marker(format: json)` `found` **first,
+  before any rev-list call** — an empty `head` substituted into `git rev-list
+  --count <frontier-head>..develop` resolves the empty side to `develop`'s own
+  tip and silently reports `0`, which would wrongly read as clear. An override at any
   gate stop proceeds without stamping the marker (only `lead-review`'s own
   `review.stamp` step ever advances it).
-- Resolve the cut point: `<cut>` is the `review.marker` head read after the
-  gate's review (for an override, `develop`'s tip at override time). Proceed
-  only when `git merge-base --is-ancestor <cut> main` fails; otherwise nothing
-  is newly cleared and the ship stops.
-- Release Branch: Cut at `<cut>`, then Merge release target when its guard
-  fails.
+- Resolve the cut point **(lead)**: `<cut>` is the head of the `pass` or
+  `concern` stamp the gate's review wrote (the clean-prefix stamp's when it
+  wrote one), or the frontier head when the gate ran no review. The
+  `bootstrap` entry the review seeds on an empty ledger clears nothing: a
+  review that wrote no `pass` or `concern` stamp stops for an explicit
+  override. For an override, or the gate's own bootstrap choice, `<cut>` is
+  `develop`'s tip at that decision. Proceed only when `git merge-base
+  --is-ancestor <cut> main` fails; otherwise nothing is newly cleared and the
+  ship stops.
+- Release Branch: Cut **(lead)** at `<cut>` and hand the worktree to the
+  delegate, which runs Merge release target when its guard fails and the
+  steps below.
 - Resolve this ship's version per Version Strategy on the release branch, bump
   and commit when the current version's tag is claimed, then rename the branch
-  to `release/<version>`. A `release/<version>` an earlier attempt left (a red
-  CI gate) is deleted first, locally (`git branch -D release/<version>`) and on
-  origin (`git push origin --delete release/<version>`): its bump never reached
-  `develop`, so Version Strategy derives the same version again.
+  to `release/<version>`. A `release/<version>` an earlier attempt left is
+  gone locally (Cut deleted it) and is replaced on origin by Publish's
+  force-push: its bump never reached `develop`, so Version Strategy derives
+  the same version again.
 - Version tag unclaimed: `git ls-remote --tags origin v<version>` is empty for the
   bumped or reused version. A non-empty result means a concurrent release claimed the
   version; increment the patch again, commit the regenerated version edits,
@@ -131,8 +175,9 @@ precedes every push — all pushes below are reversible-only-before-they-run.
   wait, main + tag push): a green CI gate proceeds to the main and tag pushes
   without another prompt, and a failed one stops without further pushes.
 
-1. `git push origin release/<version>`. This claims no version and publishes
-   no release.
+1. `git push --force origin release/<version>`. This claims no version and
+   publishes no release; `--force` replaces a `release/<version>` an earlier
+   stopped attempt pushed.
 2. **CI gate** on `<release-head>`. A branch push starts no `ws-mcp CI` run
    (the workflow runs only on pull requests and manual dispatch), so the gate
    dispatches one on the release branch.
@@ -157,12 +202,8 @@ precedes every push — all pushes below are reversible-only-before-they-run.
       `all` leg and each Windows shard — must conclude `success`.
 
    **CI red, cancelled, or skipped** (any leg not `success`, including a
-   timeout): stop. `main` and the tag stay unpushed. Release the release
-   worktree (`ws/worktree.release(path: <worktree>)`), which frees
-   `release/<version>` for the restart's delete. Fix forward on `develop`
-   through ordinary review, then restart Pre-flight from the top, which
-   recreates `release/<version>` at the new cut point. The version's tag was
-   never pushed, so Version Strategy derives the same version again.
+   timeout): stop per Release Branch's Stops; `main` and the tag stay
+   unpushed.
 3. Once every job is green: Release Branch's Promote (`main` `--ff-only` to
    `<release-head>`), `git tag v<version> <release-head>`, then
    `git push origin main` and `git push origin v<version>` — the tag push
@@ -180,13 +221,10 @@ independent of the release.
   its failing job/step. Monitoring is read-only and pushes nothing, so it never
   needs a confirmation gate. (`gh run watch <run-id> --exit-status` attaches and
   exits non-zero on failure.)
-- Release the release worktree (`ws/worktree.release(path: <worktree>)`).
-- Release Branch's Merge back, when `git merge-base --is-ancestor
-  <release-head> develop` fails (the release branch carries a bump commit or
-  the merged `main`): from a checkout of `develop`,
-  `ws/git.merge(branch: "release/<version>", target: "develop")`, then
-  `git push origin develop`. Without it, `main` would stop being an ancestor
-  of `develop` and the next release would need the Merge release target step.
+- Release Branch's Merge back, in the release worktree, then from the main
+  checkout.
+- **(lead)** Release the release worktree
+  (`ws/worktree.release(path: <worktree>)`).
 - Delete the release branch: `git push origin --delete release/<version>` and
   `git branch -D release/<version>`. The next develop merge resumes normal
   development without a version bump; the next ship owns the next patch bump.
