@@ -335,7 +335,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-10T07:06:52Z"
+        "touched_at": "2026-11-10T07:07:42Z",
+        "impl": {
+          "branch": "impl/develop/art-lucid-zen"
+        }
       }
     },
     "261110-bug-ws-mcp-move-close-guard-flake-and-suite-timeout": {
