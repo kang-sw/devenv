@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 537812b2c7cf2430
 sage-review-completeness-reviewed: 537812b2c7cf2430
+completed: 2026-11-10
 ---
 
 # sage_stamp re-stamp instruction loops on a missing-issue block
@@ -113,3 +114,31 @@ shipped `lead-ticket.md` line that defers to the stamp result (ws, wsflow,
 and Pi copies, near L142-L144) only if its wording conflicts, running the
 rsrc after-edit checklist in `ai-docs/manuals/wsflow-mirroring.md`. Verification: `go test ./internal/mcp/...`
 under `agents-plugin-tool`.
+
+### Result (d7304e381) - 2026-11-10
+
+- `sageRecordIssueRouting` now closes a block's routing clause, for any mix of
+  issues, with `sageNoSameVerdictRestamp`, which warns that a re-stamp with
+  the same verdicts records the same block. This branch keys on
+  `result.Verdict == "block"`, not on `Missing > 0`. Non-block stamps keep
+  `sageRestampAfterFixes` in their autonomous-only and mixed branches, as
+  0d132ea4 decided.
+- The block direction in `formatSageRecord` names the reviewer(s) whose
+  fresh verdicts clear the block. `sageBlockedReviewers` reads them off the
+  posture fields set to `blocked`: design, completeness, or both after a
+  combined block. The direction orders a delta review on the revised ticket
+  and forbids committing or handing off as if the block were cleared. It
+  keeps "stop and report the blocker" for a lead that cannot address the
+  block now. The 2c36f422 "no recovery loop" comment was rewritten to match.
+- New test `TestFormatSageRecordBlockOrdersDeltaReview` covers block stamps
+  that are autonomous-only, mixed, missing-only, combined-mixed, and
+  issue-free, plus a mixed `concern` stamp that keeps the same-verdict
+  re-stamp.
+- Shipped `lead-ticket.md` (ws, wsflow, Pi) is unchanged. Its line "fix and
+  re-stamp as the stamp result directs" defers to the stamp result, so it
+  does not conflict.
+- Verification: `go test ./internal/mcp/ -run Sage` passed. The full
+  `go test ./internal/mcp/... -timeout 900s` run took 760s, so it overruns
+  the default 10m timeout. Its only failure was `TestMoveCloseGuard` (a
+  ticket-index lease warning, unrelated to this change), which passed 3 of 3
+  runs in isolation (`-run TestMoveCloseGuard -count=3`). Lite review: clean.
