@@ -189,10 +189,11 @@ func TestPrecheckRefusalEmitsDebugEvent(t *testing.T) {
 // TestPrecheckDefersHandlerGuidedRequired pins that a missing
 // handler-guided required property skips the precheck refusal.
 func TestPrecheckDefersHandlerGuidedRequired(t *testing.T) {
-	if _, ok := precheckToolArguments("worktree.acquire", map[string]any{"session_key": "k", "base": "develop"}); !ok {
+	server := NewServer(t.TempDir(), "test")
+	if _, ok := server.precheckToolArguments("worktree.acquire", map[string]any{"session_key": "k", "base": "develop"}); !ok {
 		t.Fatal("worktree.acquire without profile was refused by the precheck; the handler owns that answer")
 	}
-	if _, ok := precheckToolArguments("worktree.acquire", map[string]any{"session_key": "k", "profile": "full"}); ok {
+	if _, ok := server.precheckToolArguments("worktree.acquire", map[string]any{"session_key": "k", "profile": "full"}); ok {
 		t.Fatal("worktree.acquire without base was not refused")
 	}
 }

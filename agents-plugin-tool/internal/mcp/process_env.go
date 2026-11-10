@@ -114,6 +114,7 @@ func NewServerWithOptions(opts ServerOptions) *Server {
 		s.env = newProcEnv(opts.Env)
 		logPath := strings.TrimSpace(s.env.get(envDebugLog))
 		s.debug = &debugRing{logPath: func() string { return logPath }}
+		s.dashboard.cacheHome = s.env.get(wsstate.EnvCacheHome)
 	} else {
 		s.debug = processDebug
 	}
@@ -176,7 +177,13 @@ func (s *Server) stateOptions() wsstate.Options {
 // gitClient is the git client whose subprocesses run under the caller's
 // environment.
 func (s *Server) gitClient() wsgit.Client {
-	return wsgit.Client{Runner: wsgit.ExecRunner{Environ: s.environ}}
+	return wsgit.Client{Runner: s.gitRunner()}
+}
+
+// gitRunner is the git runner whose subprocesses run under the caller's
+// environment, for the call sites that take a bare wsgit.Runner.
+func (s *Server) gitRunner() wsgit.ExecRunner {
+	return wsgit.ExecRunner{Environ: s.environ}
 }
 
 // rsrcRoot is the caller's resource tree. A hosted server takes it from

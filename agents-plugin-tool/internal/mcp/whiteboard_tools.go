@@ -20,6 +20,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wsgit"
 	"github.com/kang-sw/devenv/internal/wsi18n"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
+	"github.com/kang-sw/devenv/internal/wsstate"
 	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
 
@@ -89,6 +90,9 @@ type whiteboardPanelInput struct {
 	root       string
 	sessionKey string
 	replyID    string
+	// cacheHome is the WS_CACHE_HOME the session's mailbox history ring
+	// lives under; empty means this process's.
+	cacheHome string
 	// mailbox is this process's mailbox identity and whether the session
 	// holds its named inbox (mailboxOwnerCheck), which the own address and
 	// the named-inbox unread count depend on.
@@ -316,14 +320,14 @@ func (s *Server) handleWhiteboardQuery(id json.RawMessage, args map[string]any) 
 // this: it sees only the advertised argument names.
 func (s *Server) whiteboardRefusal(tool string, problems []string) string {
 	if tool != "whiteboard.query" {
-		return commandRefusal(tool, problems, s.whiteboardPlaybookSection("## Commands"), whiteboardPlaybookName)
+		return s.commandRefusal(tool, problems, s.whiteboardPlaybookSection("## Commands"), whiteboardPlaybookName)
 	}
 	var sb strings.Builder
 	writeRefusalProblems(&sb, tool, problems)
 	if grammar := s.whiteboardPlaybookSection("## Query"); grammar != "" {
 		sb.WriteString("\n" + grammar + "\n")
 	} else {
-		fmt.Fprintf(&sb, "\nRead the %s playbook with %s/playbook.read for the input format.\n", whiteboardPlaybookName, RuntimeNamespace())
+		fmt.Fprintf(&sb, "\nRead the %s playbook with %s/playbook.read for the input format.\n", whiteboardPlaybookName, s.runtimeNamespace())
 	}
 	return sb.String()
 }
@@ -331,11 +335,11 @@ func (s *Server) whiteboardRefusal(tool string, problems []string) string {
 // whiteboardPlaybookSection returns the playbook's section under heading
 // (heading through the line before the next heading of its level or higher).
 func (s *Server) whiteboardPlaybookSection(heading string) string {
-	rsrcRoot, err := resolveRsrcRoot("")
+	rsrcRoot, err := s.resolveRsrcRoot("")
 	if err != nil {
 		return ""
 	}
-	body, _, err := renderPlaybookBody(s, rsrcRoot, whiteboardPlaybookName, nil, wsconfig.Options{}, "", "", "", nil, "")
+	body, _, err := renderPlaybookBody(s, rsrcRoot, whiteboardPlaybookName, nil, s.configOptions(), "", "", "", nil, "")
 	if err != nil {
 		return ""
 	}
@@ -395,7 +399,7 @@ func (s *Server) refreshWhiteboardAfter(args map[string]any, resp response) {
 		return err
 	})
 	if err != nil && !errors.Is(err, errNoWhiteboard) {
-		appendDebugEvent("whiteboard.refresh_failed", map[string]any{"error": err.Error()})
+		s.debugEvent("whiteboard.refresh_failed", map[string]any{"error": err.Error()})
 	}
 }
 
@@ -424,7 +428,7 @@ func (s *Server) renderWhiteboard(rec *sessionRecord, sessionKey string, withEmb
 	if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
 		// Exclude first: a failed registration leaves no folder behind, so
 		// the next render retries it instead of skipping it forever.
-		if err := registerWhiteboardExclude(rec.Root, dir); err != nil {
+		if err := registerWhiteboardExclude(s.gitRunner(), rec.Root, dir); err != nil {
 			return out, fmt.Errorf("register %s in the git exclude file: %w", whiteboardDirRel, err)
 		}
 		if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -436,6 +440,7 @@ func (s *Server) renderWhiteboard(rec *sessionRecord, sessionKey string, withEmb
 		root:       rec.Root,
 		sessionKey: sessionKey,
 		replyID:    replyID,
+		cacheHome:  s.getenv(wsstate.EnvCacheHome),
 		mailbox:    s.whiteboardMailbox(sessionKey, rec.Root),
 	}
 	viewInput := func(layout wswhiteboard.Layout) wswhiteboard.ViewInput {
@@ -631,8 +636,8 @@ func renameSharingViolation(err error) bool {
 // registerWhiteboardExclude adds /ai-docs/whiteboards/ to the repository's
 // local exclude file in the common git dir, so every worktree is covered and
 // nothing is committed. A root outside git has nothing to exclude.
-func registerWhiteboardExclude(root, dir string) error {
-	out, err := wsgit.ExecRunner{}.RunGit(context.Background(), root, "rev-parse", "--path-format=absolute", "--git-common-dir")
+func registerWhiteboardExclude(runner wsgit.Runner, root, dir string) error {
+	out, err := runner.RunGit(context.Background(), root, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	if err != nil {
 		return nil
 	}

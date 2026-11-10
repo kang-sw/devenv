@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kang-sw/devenv/internal/wsgit"
 	"github.com/kang-sw/devenv/internal/wskey"
 )
 
@@ -299,7 +300,7 @@ func TestObserveImplementBranchFailsClosedWhenAheadStateCannotBeVerified(t *test
 	root := t.TempDir()
 	initGit(t, root)
 	runGit(t, root, "checkout", "-b", "impl/missing-root/owner")
-	if _, err := observeImplementBranch(root, ""); err == nil {
+	if _, err := observeImplementBranch(wsgit.NewClient(), root, ""); err == nil {
 		t.Fatal("observeImplementBranch unexpectedly treated an unresolvable merge root as zero commits ahead")
 	}
 }
@@ -442,7 +443,7 @@ func TestObserveImplementBranchMeasuresLeftoverTargetAheadState(t *testing.T) {
 			}
 			runGit(t, root, "checkout", "develop")
 
-			obs, err := observeImplementBranch(root, target)
+			obs, err := observeImplementBranch(wsgit.NewClient(), root, target)
 			if err != nil {
 				t.Fatalf("observeImplementBranch: %v", err)
 			}

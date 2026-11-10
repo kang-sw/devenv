@@ -1069,12 +1069,12 @@ func (s *Server) handleEnterImplement(id json.RawMessage, args map[string]any) r
 	}
 	source := loadImplementRouteFacts(record.Root, input.Target)
 	normalized, _ := normalizeImplementFacts(input)
-	peek, err := observeImplementBranch(record.Root, "")
+	peek, err := observeImplementBranch(s.gitClient(), record.Root, "")
 	if err != nil {
 		return toolTextResponse(id, "", fmt.Errorf("%s: branch preflight failed: %w", tool, err))
 	}
 	targetBranch := implementTargetBranchName(implementMergeRootFor(peek.CurrentBranch), normalized.ScopeSlug)
-	obs, err := observeImplementBranch(record.Root, targetBranch)
+	obs, err := observeImplementBranch(s.gitClient(), record.Root, targetBranch)
 	if err != nil {
 		return toolTextResponse(id, "", fmt.Errorf("%s: branch preflight failed: %w", tool, err))
 	}

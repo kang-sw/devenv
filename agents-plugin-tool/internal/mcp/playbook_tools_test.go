@@ -202,7 +202,7 @@ func TestPlaybookPrintUnknownHarness(t *testing.T) {
 		t.Fatalf("printPlaybook: %v", err)
 	}
 
-	neutral := terminologyForHarness("")
+	neutral := terminologyForHarness("", RuntimeNamespace())
 	for _, varName := range []string{"ExploreAgent", "SpawnIdiom", "ContinueIdiom"} {
 		if !strings.Contains(body, neutral[varName]) {
 			t.Errorf("body %q: expected neutral %s %q", body, varName, neutral[varName])
@@ -225,14 +225,14 @@ func TestPlaybookPrintClaudeHarness(t *testing.T) {
 		t.Fatalf("printPlaybook: %v", err)
 	}
 
-	claudeTerm := terminologyForHarness("claude")
+	claudeTerm := terminologyForHarness("claude", RuntimeNamespace())
 	for _, varName := range []string{"ExploreAgent", "SpawnIdiom", "ContinueIdiom"} {
 		if !strings.Contains(body, claudeTerm[varName]) {
 			t.Errorf("body %q: expected claude %s %q", body, varName, claudeTerm[varName])
 		}
 	}
 	// Codex terms must NOT appear for any var (proves harness selection on all vars).
-	codexTerm := terminologyForHarness("codex")
+	codexTerm := terminologyForHarness("codex", RuntimeNamespace())
 	for _, varName := range []string{"ExploreAgent", "SpawnIdiom", "ContinueIdiom"} {
 		if claudeTerm[varName] != codexTerm[varName] {
 			if strings.Contains(body, codexTerm[varName]) {
@@ -301,7 +301,7 @@ func TestPlaybookPrintPiHarnessUsesPiTerminology(t *testing.T) {
 		"SpawnIdiom":    "ws-agent-spawn",
 		"ContinueIdiom": "ws-agent-send to the same alias or agent id",
 	}
-	piTerm := terminologyForHarness("pi")
+	piTerm := terminologyForHarness("pi", RuntimeNamespace())
 	for varName, term := range want {
 		if piTerm[varName] != term {
 			t.Errorf("terminologyForHarness(pi)[%s] = %q, want %q", varName, piTerm[varName], term)
@@ -318,7 +318,7 @@ func TestPlaybookPrintPiHarnessUsesPiTerminology(t *testing.T) {
 func TestPlaybookPrintPiDelegationFlowPlaybooks(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "pi")
-	piTerm := terminologyForHarness("pi")
+	piTerm := terminologyForHarness("pi", RuntimeNamespace())
 
 	cases := map[string][]string{
 		"lead-discuss":  {"ExploreAgent", "ContinueIdiom"},
@@ -351,7 +351,7 @@ func TestPlaybookPrintCodexHarness(t *testing.T) {
 		t.Fatalf("printPlaybook: %v", err)
 	}
 
-	codexTerm := terminologyForHarness("codex")
+	codexTerm := terminologyForHarness("codex", RuntimeNamespace())
 	for _, varName := range []string{"ExploreAgent", "SpawnIdiom", "ContinueIdiom"} {
 		if !strings.Contains(body, codexTerm[varName]) {
 			t.Errorf("body %q: expected codex %s %q", body, varName, codexTerm[varName])
@@ -377,7 +377,7 @@ func TestPlaybookPrintDelegatesTipPresent(t *testing.T) {
 		t.Errorf("body %q: expected delegation tip for delegates:true playbook", body)
 	}
 	// Tip must include the claude ContinueIdiom.
-	claudeTerm := terminologyForHarness("claude")
+	claudeTerm := terminologyForHarness("claude", RuntimeNamespace())
 	if !strings.Contains(body, claudeTerm["ContinueIdiom"]) {
 		t.Errorf("body %q: expected tip to include claude ContinueIdiom %q", body, claudeTerm["ContinueIdiom"])
 	}
@@ -467,7 +467,7 @@ func TestPlaybookRenderWritesTmpFile(t *testing.T) {
 		t.Fatalf("read rendered file: %v", err)
 	}
 	body := string(data)
-	claudeTerm := terminologyForHarness("claude")
+	claudeTerm := terminologyForHarness("claude", RuntimeNamespace())
 	if !strings.Contains(body, claudeTerm["ExploreAgent"]) {
 		t.Errorf("file body %q: expected claude ExploreAgent %q", body, claudeTerm["ExploreAgent"])
 	}
@@ -688,7 +688,7 @@ func TestPlaybookPrintGoldenLeadWorkflowManualScopedExplorationTierModels(t *tes
 			if err != nil {
 				t.Fatalf("printPlaybook: %v", err)
 			}
-			exploreAgent := terminologyForHarness(tc.harness)["ExploreAgent"]
+			exploreAgent := terminologyForHarness(tc.harness, RuntimeNamespace())["ExploreAgent"]
 			wantSentence := "Use " + exploreAgent + " when bounded evidence gathering materially benefits from\n" +
 				"an independent read. Choose " + tc.smallModel + " by default and\n" + tc.mediumModel
 			if !strings.Contains(body, wantSentence) {
@@ -1056,7 +1056,7 @@ func TestProductModeBlockSelection(t *testing.T) {
 	}, "\n")
 
 	t.Setenv(envNoAgent, "1")
-	wsflow := renderProductModePlaybookBody(input)
+	wsflow := renderProductModePlaybookBody(input, NoAgentMode())
 	for _, forbidden := range []string{"full-only text", fullOnlyStart, wsflowOnlyStart} {
 		if strings.Contains(wsflow, forbidden) {
 			t.Fatalf("wsflow render contains forbidden %q:\n%s", forbidden, wsflow)
@@ -1069,7 +1069,7 @@ func TestProductModeBlockSelection(t *testing.T) {
 	}
 
 	t.Setenv(envNoAgent, "")
-	full := renderProductModePlaybookBody(input)
+	full := renderProductModePlaybookBody(input, NoAgentMode())
 	if strings.Contains(full, "wsflow-only text") || strings.Contains(full, fullOnlyStart) || strings.Contains(full, wsflowOnlyStart) {
 		t.Fatalf("full render kept wsflow-only text or marker comments:\n%s", full)
 	}
@@ -1401,7 +1401,7 @@ func TestPlaybookPrintGoldenDelegateSampleClaudeHarness(t *testing.T) {
 	}
 
 	// Derived checks (broad coverage).
-	claudeTerm := terminologyForHarness("claude")
+	claudeTerm := terminologyForHarness("claude", RuntimeNamespace())
 	for _, varName := range []string{"ExploreAgent", "SpawnIdiom", "ContinueIdiom"} {
 		if !strings.Contains(body, claudeTerm[varName]) {
 			t.Errorf("golden body %q: expected claude %s %q", body, varName, claudeTerm[varName])
@@ -1430,7 +1430,7 @@ func TestPlaybookPrintGoldenDelegateSampleCodexHarness(t *testing.T) {
 	}
 
 	// Derived checks.
-	codexTerm := terminologyForHarness("codex")
+	codexTerm := terminologyForHarness("codex", RuntimeNamespace())
 	for _, varName := range []string{"ExploreAgent", "SpawnIdiom", "ContinueIdiom"} {
 		if !strings.Contains(body, codexTerm[varName]) {
 			t.Errorf("golden body %q: expected codex %s %q", body, varName, codexTerm[varName])
@@ -1457,7 +1457,7 @@ func TestPlaybookPrintGoldenDelegateSampleUnknownHarness(t *testing.T) {
 		t.Fatalf("printPlaybook: %v", err)
 	}
 
-	neutralTerm := terminologyForHarness("")
+	neutralTerm := terminologyForHarness("", RuntimeNamespace())
 	for _, varName := range []string{"ExploreAgent", "SpawnIdiom", "ContinueIdiom"} {
 		if !strings.Contains(body, neutralTerm[varName]) {
 			t.Errorf("golden body %q: expected neutral %s %q", body, varName, neutralTerm[varName])
@@ -1497,7 +1497,7 @@ func TestPlaybookPrintGoldenExploreClaudeHarness(t *testing.T) {
 	}
 
 	// Derived checks (broad coverage).
-	claudeTerm := terminologyForHarness("claude")
+	claudeTerm := terminologyForHarness("claude", RuntimeNamespace())
 	for _, varName := range []string{"ExploreAgent", "SpawnIdiom", "ContinueIdiom"} {
 		if !strings.Contains(body, claudeTerm[varName]) {
 			t.Errorf("golden body %q: expected claude %s %q", body, varName, claudeTerm[varName])
@@ -1525,7 +1525,7 @@ func TestPlaybookPrintGoldenExploreCodexHarness(t *testing.T) {
 	}
 
 	// Derived checks.
-	codexTerm := terminologyForHarness("codex")
+	codexTerm := terminologyForHarness("codex", RuntimeNamespace())
 	for _, varName := range []string{"ExploreAgent", "SpawnIdiom", "ContinueIdiom"} {
 		if !strings.Contains(body, codexTerm[varName]) {
 			t.Errorf("golden body %q: expected codex %s %q", body, varName, codexTerm[varName])
@@ -1552,7 +1552,7 @@ func TestPlaybookPrintGoldenExploreUnknownHarness(t *testing.T) {
 		t.Fatalf("printPlaybook: %v", err)
 	}
 
-	neutralTerm := terminologyForHarness("")
+	neutralTerm := terminologyForHarness("", RuntimeNamespace())
 	for _, varName := range []string{"ExploreAgent", "SpawnIdiom", "ContinueIdiom"} {
 		if !strings.Contains(body, neutralTerm[varName]) {
 			t.Errorf("golden body %q: expected neutral %s %q", body, varName, neutralTerm[varName])
@@ -1580,7 +1580,7 @@ func TestPlaybookPrintGoldenExploreJunkHarness(t *testing.T) {
 	}
 
 	// Unrecognized harness falls back to host-neutral table.
-	neutralTerm := terminologyForHarness("")
+	neutralTerm := terminologyForHarness("", RuntimeNamespace())
 	for _, varName := range []string{"ExploreAgent", "SpawnIdiom", "ContinueIdiom"} {
 		if !strings.Contains(body, neutralTerm[varName]) {
 			t.Errorf("golden body %q: expected neutral %s %q for junk harness", body, varName, neutralTerm[varName])
@@ -1610,7 +1610,7 @@ func TestTerminologyTableCoverage(t *testing.T) {
 			continue
 		}
 		// The effective table: claude's SpawnIdiom is added at resolve time.
-		tbl := terminologyForHarness(harness)
+		tbl := terminologyForHarness(harness, RuntimeNamespace())
 		for _, varName := range []string{"ExploreAgent", "SpawnIdiom", "ContinueIdiom"} {
 			v, ok := tbl[varName]
 			if !ok || v == "" {
@@ -1624,9 +1624,9 @@ func TestTerminologyTableCoverage(t *testing.T) {
 // for each terminology variable, so a copy-paste collapse in the neutral table
 // does not go undetected even when tautological golden tests pass.
 func TestTermsDifferThreeWay(t *testing.T) {
-	claude := terminologyForHarness("claude")
-	codex := terminologyForHarness("codex")
-	neutral := terminologyForHarness("")
+	claude := terminologyForHarness("claude", RuntimeNamespace())
+	codex := terminologyForHarness("codex", RuntimeNamespace())
+	neutral := terminologyForHarness("", RuntimeNamespace())
 	for _, varName := range []string{"ExploreAgent", "SpawnIdiom", "ContinueIdiom"} {
 		if claude[varName] == codex[varName] {
 			t.Errorf("claude == codex for %q: %q — update terminology table", varName, claude[varName])
@@ -2772,7 +2772,7 @@ func TestClaudeSpawnIdiomRendersAtEverySite(t *testing.T) {
 		t.Run(namespace, func(t *testing.T) {
 			t.Setenv(envNamespace, namespace)
 			want := wantClaudeSpawnIdiom(namespace)
-			if got := terminologyForHarness("claude")["SpawnIdiom"]; got != want {
+			if got := terminologyForHarness("claude", RuntimeNamespace())["SpawnIdiom"]; got != want {
 				t.Fatalf("claude SpawnIdiom = %q, want %q", got, want)
 			}
 			s := newTestServerWithHarness(t, "claude")
@@ -2856,8 +2856,8 @@ func TestLeadWorkflowManualClaudeSpawnBindingOverlay(t *testing.T) {
 			if got := strings.Count(body, "## Claude delegate spawn"); got != 1 {
 				t.Errorf("Claude overlay rendered %d times, want 1", got)
 			}
-			if terminologyForHarness("claude")["ExploreAgent"] != "the Explore agent" {
-				t.Errorf("claude ExploreAgent changed: %q", terminologyForHarness("claude")["ExploreAgent"])
+			if terminologyForHarness("claude", RuntimeNamespace())["ExploreAgent"] != "the Explore agent" {
+				t.Errorf("claude ExploreAgent changed: %q", terminologyForHarness("claude", RuntimeNamespace())["ExploreAgent"])
 			}
 			if !strings.Contains(body, "Use the Explore agent when bounded evidence gathering") {
 				t.Errorf("Claude workflow manual lost the built-in Explore agent wording:\n%s", body)

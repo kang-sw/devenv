@@ -34,11 +34,17 @@ type ExecRunner struct {
 
 func (r ExecRunner) RunGit(ctx context.Context, root string, args ...string) ([]byte, error) {
 	argv := append([]string{"-C", root}, args...)
-	cmd := exec.CommandContext(ctx, "git", argv...)
+	var cmd *exec.Cmd
 	if r.Environ != nil {
-		cmd.Env = append(r.Environ(), r.Env...)
-	} else if len(r.Env) > 0 {
-		cmd.Env = append(os.Environ(), r.Env...)
+		// The git binary comes from the caller's PATH too (see LookPathEnv).
+		base := r.Environ()
+		cmd = exec.CommandContext(ctx, LookPathEnv("git", base), argv...)
+		cmd.Env = append(base, r.Env...)
+	} else {
+		cmd = exec.CommandContext(ctx, "git", argv...)
+		if len(r.Env) > 0 {
+			cmd.Env = append(os.Environ(), r.Env...)
+		}
 	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {

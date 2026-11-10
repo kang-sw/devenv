@@ -68,15 +68,15 @@ func appendCommandSyntax(rsrcRoot, body string) (string, error) {
 // the shared command syntax and the tool's own command section, so one retry
 // can fix the call. commands is that section's text; when it or the shared
 // section cannot be read, a pointer to playbook stands in for both.
-func commandRefusal(tool string, problems []string, commands, playbook string) string {
+func (s *Server) commandRefusal(tool string, problems []string, commands, playbook string) string {
 	var sb strings.Builder
 	writeRefusalProblems(&sb, tool, problems)
 	syntax := ""
-	if rsrcRoot, err := resolveRsrcRoot(""); err == nil {
+	if rsrcRoot, err := s.resolveRsrcRoot(""); err == nil {
 		syntax, _ = commandSyntaxSection(rsrcRoot)
 	}
 	if syntax == "" || commands == "" {
-		fmt.Fprintf(&sb, "\nRead the %s playbook with %s/playbook.read for the input format.\n", playbook, RuntimeNamespace())
+		fmt.Fprintf(&sb, "\nRead the %s playbook with %s/playbook.read for the input format.\n", playbook, s.runtimeNamespace())
 		return sb.String()
 	}
 	sb.WriteString("\n" + syntax + "\n\n" + commands + "\n")

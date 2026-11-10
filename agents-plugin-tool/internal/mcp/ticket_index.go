@@ -41,7 +41,14 @@ func (s *Server) indexNow() time.Time {
 // openTicketIndex binds the index client for root; nil when root is not a git
 // checkout (which is index-absent by definition).
 func (s *Server) openTicketIndex(root string) *wsindex.Client {
-	cl, err := wsindex.Open(context.Background(), root, s.indexOpts)
+	opts := s.indexOpts
+	if opts.Getenv == nil {
+		opts.Getenv = s.getenv
+	}
+	if opts.Runner == nil {
+		opts.Runner = wsindex.ExecRunner{Environ: s.environ}
+	}
+	cl, err := wsindex.Open(context.Background(), root, opts)
 	if err != nil {
 		return nil
 	}
@@ -56,9 +63,9 @@ type indexCaller struct {
 	branch string // "" on a detached HEAD
 }
 
-func resolveIndexCaller(ctx context.Context, root, explicitTrack string) indexCaller {
-	c := indexCaller{owner: wsindex.Owner{Email: wsgit.CurrentUserEmail(ctx, wsgit.ExecRunner{}, root)}}
-	if out, err := (wsgit.ExecRunner{}).RunGit(ctx, root, "symbolic-ref", "--quiet", "--short", "HEAD"); err == nil {
+func resolveIndexCaller(ctx context.Context, runner wsgit.Runner, root, explicitTrack string) indexCaller {
+	c := indexCaller{owner: wsindex.Owner{Email: wsgit.CurrentUserEmail(ctx, runner, root)}}
+	if out, err := runner.RunGit(ctx, root, "symbolic-ref", "--quiet", "--short", "HEAD"); err == nil {
 		c.branch = strings.TrimSpace(string(out))
 	}
 	if track := strings.TrimSpace(explicitTrack); track != "" {
@@ -119,7 +126,7 @@ func (s *Server) indexPiggyback(root, op, stem string, override *wsindex.Overrid
 		return ""
 	}
 	ctx := context.Background()
-	caller := resolveIndexCaller(ctx, root, "")
+	caller := resolveIndexCaller(ctx, s.gitRunner(), root, "")
 	sub := &wsindex.Submission{
 		Entry:   wsindex.PendingEntry{Op: op, Stem: stem, Owner: caller.owner, Worktree: root, Override: override},
 		Applier: &wsindex.Applier{Now: s.indexNow()},
@@ -234,7 +241,7 @@ func (s *Server) handleIndexVerb(id json.RawMessage, args, meta map[string]any, 
 	reason = strings.TrimSpace(reason)
 
 	ctx := context.Background()
-	caller := resolveIndexCaller(ctx, root, explicitTrack)
+	caller := resolveIndexCaller(ctx, s.gitRunner(), root, explicitTrack)
 	entry := wsindex.PendingEntry{Op: op, Stem: stem, Owner: caller.owner, Worktree: root}
 	if op == wsindex.OpAcquire {
 		entry.ImplBranch = caller.implBranch()

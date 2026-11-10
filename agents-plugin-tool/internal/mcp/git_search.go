@@ -16,6 +16,7 @@ import (
 
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdashboard"
+	"github.com/kang-sw/devenv/internal/wsgit"
 )
 
 // git.search is a hosted agent's read-only window into the user's local
@@ -418,7 +419,7 @@ func (s *Server) gitSearchRoots(sessionKey string) (roots []gitSearchRoot, ignor
 			roots = append(roots, gitSearchRoot{path: path, source: source})
 		}
 	}
-	if dir, err := wsdashboard.Dir(""); err == nil {
+	if dir, err := wsdashboard.Dir(s.dashboard.cacheHome); err == nil {
 		regs, _ := wsdashboard.ReadRegistrations(dir)
 		now := time.Now()
 		var projects []string
@@ -655,13 +656,13 @@ func gitSearchArgs(req gitSearchRequest) []string {
 	return append(args, req.paths...)
 }
 
-// gitSearchEnv is the process environment with every GIT_* variable
+// gitSearchEnv is the caller environment with every GIT_* variable
 // dropped, so no inherited GIT_DIR, GIT_CONFIG_*, or GIT_EXTERNAL_DIFF
 // steers git, and repository discovery stopped above root. LC_ALL stays
 // as inherited: forcing C would break case folding of non-ASCII patterns.
-func gitSearchEnv(root string) []string {
+func gitSearchEnv(environ []string, root string) []string {
 	var env []string
-	for _, kv := range os.Environ() {
+	for _, kv := range environ {
 		if strings.HasPrefix(kv, "GIT_") {
 			continue
 		}
@@ -740,7 +741,7 @@ func (s *Server) handleGitSearch(ctx context.Context, id json.RawMessage, args m
 	if err != nil {
 		return toolErrorTextResponse(id, fmt.Sprintf("%s: %v", tool, err))
 	}
-	text, err := runGitSearch(ctx, repo, matched, req)
+	text, err := runGitSearch(ctx, s.environ(), repo, matched, req)
 	if err != nil {
 		return toolErrorTextResponse(id, fmt.Sprintf("%s: %v", tool, err))
 	}
@@ -748,13 +749,14 @@ func (s *Server) handleGitSearch(ctx context.Context, id json.RawMessage, args m
 }
 
 // runGitSearch runs req in repo, discovery bounded by root, and returns its
-// output, capped, or git's stderr as the error.
-func runGitSearch(ctx context.Context, repo, root string, req gitSearchRequest) (string, error) {
+// output, capped, or git's stderr as the error. environ is the caller
+// process's environment; git is resolved from its PATH.
+func runGitSearch(ctx context.Context, environ []string, repo, root string, req gitSearchRequest) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, gitSearchTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", gitSearchArgs(req)...)
+	cmd := exec.CommandContext(ctx, wsgit.LookPathEnv("git", environ), gitSearchArgs(req)...)
 	cmd.Dir = repo
-	cmd.Env = gitSearchEnv(root)
+	cmd.Env = gitSearchEnv(environ, root)
 	stdout := &gitSearchBuffer{limit: gitSearchOutputCap, full: cancel}
 	stderr := &gitSearchBuffer{limit: gitSearchStderrCap}
 	cmd.Stdout = stdout

@@ -62,7 +62,7 @@ func (s *sessionStore) maybePrune() {
 	now := time.Now()
 	pruneSessionDirs(d.sessions, now)
 	pruneLegacyRecords(d.legacy, now)
-	pruneMailboxHistory(now)
+	pruneMailboxHistory(s.cacheHome, now)
 }
 
 // pruneSessionDirs removes, whole, every key directory whose key.json mtime is
@@ -119,8 +119,8 @@ func pruneLegacyRecords(dir string, now time.Time) {
 // mtime is older than keyRetentionAge, mtime-only like the key records:
 // creating, renaming, and removing entry files refresh the directory's mtime,
 // so an active ring is never reaped. Errors are ignored.
-func pruneMailboxHistory(now time.Time) {
-	root, err := mailboxHistoryRoot()
+func pruneMailboxHistory(cacheHome string, now time.Time) {
+	root, err := mailboxHistoryRoot(cacheHome)
 	if err != nil {
 		return
 	}

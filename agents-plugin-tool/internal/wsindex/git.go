@@ -19,6 +19,7 @@ import (
 	"strings"
 
 	"github.com/kang-sw/devenv/internal/gitbatch"
+	"github.com/kang-sw/devenv/internal/wsgit"
 )
 
 // Namespace is the protocol-named ref namespace. It is deliberately not
@@ -99,16 +100,26 @@ func (e *GitError) Error() string {
 
 func (e *GitError) Unwrap() error { return e.Err }
 
-// ExecRunner runs the real git binary.
-type ExecRunner struct{}
+// ExecRunner runs the real git binary. Environ, when set, is the base
+// environment of every run, git resolved from its PATH (the caller
+// process's, for a server the dashboard daemon hosts for another process);
+// nil means this process's.
+type ExecRunner struct {
+	Environ func() []string
+}
 
 // Run executes git in dir. A context deadline kills git; WaitDelay bounds the
 // wait for a lingering child (an ssh subprocess can hold the pipes open after
 // git itself is killed), so a hard timeout is a hard timeout.
-func (ExecRunner) Run(ctx context.Context, dir string, c Command) ([]byte, error) {
+func (r ExecRunner) Run(ctx context.Context, dir string, c Command) ([]byte, error) {
 	argv := append([]string{"-C", dir}, c.Args...)
-	cmd := exec.CommandContext(ctx, "git", argv...)
-	cmd.Env = append(os.Environ(), c.Env...)
+	base, bin := os.Environ(), "git"
+	if r.Environ != nil {
+		base = r.Environ()
+		bin = wsgit.LookPathEnv("git", base)
+	}
+	cmd := exec.CommandContext(ctx, bin, argv...)
+	cmd.Env = append(base, c.Env...)
 	gitbatch.Bound(cmd)
 	if c.Stdin != nil {
 		cmd.Stdin = bytes.NewReader(c.Stdin)

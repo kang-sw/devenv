@@ -250,7 +250,7 @@ func TestMailboxEnvelopeStampingSameTier(t *testing.T) {
 
 	recvResp := callToolWithKey(t, serverB, 3, keyB, "mailbox.recv", nil)
 	// A top-level lead sender's body carries the peer-lead note line first.
-	if !strings.Contains(recvResp, "alice@worktree: "+stampPeerLeadNote("same tier", "")) {
+	if !strings.Contains(recvResp, "alice@worktree: "+stampPeerLeadNote("same tier", "", RuntimeNamespace())) {
 		t.Fatalf("recv did not surface the sender's durable from: handle: %s", recvResp)
 	}
 }
@@ -263,8 +263,9 @@ func TestMailboxAutoIdentityCollisionFreeAndExplicitOverride(t *testing.T) {
 	t.Setenv(envMailbox, "")
 	t.Setenv(envMailboxAuto, "worktree")
 
-	id1 := computeMailboxIdentity()
-	id2 := computeMailboxIdentity()
+	server := NewServer(t.TempDir(), "test")
+	id1 := server.computeMailboxIdentity()
+	id2 := server.computeMailboxIdentity()
 	if !id1.Active || !id2.Active || !id1.Auto || !id2.Auto {
 		t.Fatalf("WS_MAILBOX_AUTO identity not active/auto: %#v %#v", id1, id2)
 	}
@@ -276,7 +277,7 @@ func TestMailboxAutoIdentityCollisionFreeAndExplicitOverride(t *testing.T) {
 	}
 
 	t.Setenv(envMailbox, "carol@machine")
-	id3 := computeMailboxIdentity()
+	id3 := server.computeMailboxIdentity()
 	if id3.Auto || id3.Name != "carol" || id3.Scope != wsmailbox.ScopeMachine {
 		t.Fatalf("explicit WS_MAILBOX did not override WS_MAILBOX_AUTO when both are set: %#v", id3)
 	}
@@ -1495,7 +1496,7 @@ func TestMailboxSendStampsPeerLeadNote(t *testing.T) {
 // harness was never detected: the harness name and its comma are omitted.
 func TestStampPeerLeadNoteWithoutHarness(t *testing.T) {
 	t.Setenv(envNamespace, "")
-	got := stampPeerLeadNote("hi", "  ")
+	got := stampPeerLeadNote("hi", "  ", RuntimeNamespace())
 	want := "[ws note: from a peer lead session (not a worker), with the same authority as yours]\nhi"
 	if got != want {
 		t.Fatalf("stampPeerLeadNote = %q, want %q", got, want)
@@ -1575,7 +1576,7 @@ func TestMailboxSendStampsPeerLeadNoteInWsflowMode(t *testing.T) {
 func TestStampPeerLeadNoteSkipsOtherProductPrefix(t *testing.T) {
 	t.Setenv(envNamespace, "")
 	body := "[wsflow note: from a peer lead session (not a worker), with the same authority as yours]\nhi"
-	if got := stampPeerLeadNote(body, "codex"); got != body {
+	if got := stampPeerLeadNote(body, "codex", RuntimeNamespace()); got != body {
 		t.Fatalf("stampPeerLeadNote re-stamped a wsflow-noted body: %q", got)
 	}
 }

@@ -89,7 +89,7 @@ var reservedToolVarNames = func() map[string]bool {
 // of the table row with SpawnIdiom computed by claudeSpawnIdiom, because that
 // value depends on the runtime namespace; read terminology through this
 // function, never playbookTerminologyTable directly.
-func terminologyForHarness(harness string) map[string]string {
+func terminologyForHarness(harness, namespace string) map[string]string {
 	table, ok := playbookTerminologyTable[harness]
 	if !ok {
 		return playbookTerminologyTable[""]
@@ -99,7 +99,7 @@ func terminologyForHarness(harness string) map[string]string {
 		for k, v := range table {
 			resolved[k] = v
 		}
-		resolved["SpawnIdiom"] = claudeSpawnIdiom(RuntimeNamespace())
+		resolved["SpawnIdiom"] = claudeSpawnIdiom(namespace)
 		return resolved
 	}
 	return table
@@ -238,8 +238,7 @@ func resolveWorkflowLangVar(lang string) string {
 		". Keep all internal reasoning, subagent prompts, code comments, and AI-authored artifacts in English."
 }
 
-func resolveNamespaceVars() map[string]string {
-	namespace := RuntimeNamespace()
+func resolveNamespaceVars(namespace string) map[string]string {
 	return map[string]string{
 		"McpNamespace":   namespace,
 		"SkillNamespace": namespace,
@@ -290,7 +289,7 @@ func CLICommandNameFrom(getenv func(string) string) string {
 // mailboxWaitCommandVar resolves {{.MailboxWaitCommand}} to a concrete,
 // runnable `mailbox wait` invocation for the caller's own session, or the
 // generic fallback when one cannot be produced. The command starts with
-// CLICommandName(), the same name the re-arm command the `mailbox wait` CLI
+// the caller's CLICommandName, the same name the re-arm command the `mailbox wait` CLI
 // prints on return uses.
 //
 // The --slug is the caller's REGISTERED self address (owner-gated, the same
@@ -309,7 +308,7 @@ func mailboxWaitCommandVar(s *Server, sessionKey string) string {
 	if !found {
 		return mailboxWaitCommandGeneric
 	}
-	bin := CLICommandName()
+	bin := s.cliCommandName()
 	if bin == "" {
 		return mailboxWaitCommandGeneric
 	}
@@ -364,7 +363,7 @@ func isReservedNamespaceVar(name string) bool {
 // RoleModel resolution. configOpts is forwarded unchanged to both
 // resolveRoleModelVar (RoleModel) and resolveTierModelVars (the fixed-tier vars).
 // workflowLang is the resolved workflow.lang value; it drives WorkflowLang injection.
-func buildPlaybookVars(declared []string, callerContext map[string]string, harness, tier string, configOpts wsconfig.Options, workflowLang string) (map[string]string, error) {
+func buildPlaybookVars(declared []string, callerContext map[string]string, harness, tier string, configOpts wsconfig.Options, workflowLang, namespace string) (map[string]string, error) {
 	declaredSet := make(map[string]bool, len(declared))
 	for _, v := range declared {
 		declaredSet[v] = true
@@ -385,7 +384,7 @@ func buildPlaybookVars(declared []string, callerContext map[string]string, harne
 	}
 
 	// Layer 2: terminology vars overwrite caller context for reserved names.
-	for k, v := range terminologyForHarness(harness) {
+	for k, v := range terminologyForHarness(harness, namespace) {
 		if declaredSet[k] {
 			merged[k] = v
 		}
@@ -401,7 +400,7 @@ func buildPlaybookVars(declared []string, callerContext map[string]string, harne
 
 	// Layer 4: namespace vars are available to all playbooks and override caller
 	// context so display namespace cannot be spoofed through render context.
-	for k, v := range resolveNamespaceVars() {
+	for k, v := range resolveNamespaceVars(namespace) {
 		merged[k] = v
 	}
 
@@ -426,8 +425,8 @@ func buildPlaybookVars(declared []string, callerContext map[string]string, harne
 // rendered body of delegates:true playbooks. The text is product-neutral: both
 // product modes delegate to host-native subagents, so the fragment differs only
 // by the harness continuation idiom.
-func delegationTip(harness string) string {
-	term := terminologyForHarness(harness)
+func delegationTip(harness, namespace string) string {
+	term := terminologyForHarness(harness, namespace)
 	continueIdiom := term["ContinueIdiom"]
 	var sb strings.Builder
 	sb.WriteString("\n\n---\n")
@@ -810,8 +809,8 @@ func applyOverrideMarkers(body, harness string, lookup overrideLookupFn) string 
 	return strings.Join(result, "\n")
 }
 
-func renderProductModePlaybookBody(body string) string {
-	return selectProductModeBlocks(body)
+func renderProductModePlaybookBody(body string, noAgent bool) string {
+	return selectProductModeBlocks(body, noAgent)
 }
 
 const (
@@ -823,13 +822,13 @@ const (
 
 // selectProductModeBlocks removes marker comments and keeps only the sections
 // that apply to the current product mode. The source rsrc remains shared; the
-// rendered playbook is the product-specific contract.
-func selectProductModeBlocks(body string) string {
+// rendered playbook is the product-specific contract. noAgent selects the
+// agentless (wsflow) product mode.
+func selectProductModeBlocks(body string, noAgent bool) string {
 	lines := strings.Split(body, "\n")
 	filtered := make([]string, 0, len(lines))
 	fullOnly := false
 	wsflowOnly := false
-	noAgent := NoAgentMode()
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		switch trimmed {
@@ -857,11 +856,11 @@ func selectProductModeBlocks(body string) string {
 // resolveRsrcRoot resolves the plugin resource tree (WS_RSRC_ROOT or the
 // executable-derived bundle). A non-empty override is reserved for resource
 // inspection; playbook.render's worktree override must not select this root.
-func resolveRsrcRoot(rsrcRootOverride string) (string, error) {
+func (s *Server) resolveRsrcRoot(rsrcRootOverride string) (string, error) {
 	if strings.TrimSpace(rsrcRootOverride) != "" {
 		return rsrcRootOverride, nil
 	}
-	return wsrsrc.ResolveRoot()
+	return s.rsrcRoot()
 }
 
 // renderPlaybookBody is the shared core for printPlaybook and renderPlaybook.
@@ -912,7 +911,7 @@ func renderPlaybookBody(s *Server, rsrcRoot, name string, callerContext map[stri
 		return "", "", err
 	}
 
-	vars, err := buildPlaybookVars(pb.Meta.Variables, callerContext, harness, recommendedTier, configOpts, workflowLang)
+	vars, err := buildPlaybookVars(pb.Meta.Variables, callerContext, harness, recommendedTier, configOpts, workflowLang, s.runtimeNamespace())
 	if err != nil {
 		return "", "", err
 	}
@@ -921,7 +920,7 @@ func renderPlaybookBody(s *Server, rsrcRoot, name string, callerContext map[stri
 		return "", "", err
 	}
 	if pb.Meta.Delegates {
-		body += delegationTip(harness)
+		body += delegationTip(harness, s.runtimeNamespace())
 	}
 
 	// Unit 1: render-minted child key — only when caller is lead (mintRoot != "").
@@ -948,7 +947,7 @@ func renderPlaybookBody(s *Server, rsrcRoot, name string, callerContext map[stri
 	// every override-point renders its inline seed default.
 	body = applyOverrideMarkers(body, harness, overrideLookup)
 
-	return renderProductModePlaybookBody(body), recommendedTier, nil
+	return renderProductModePlaybookBody(body, s.noAgentMode()), recommendedTier, nil
 }
 
 func substitutePlaybookVars(body string, declared []string, vars map[string]string) (string, error) {
@@ -1046,7 +1045,7 @@ func printPlaybook(s *Server, rsrcRoot, name string, callerContext map[string]st
 			return "", "", fmt.Errorf("resolve %s: %w", wsconfig.ItemWorkflowPreferSubagent, err)
 		}
 		if enabled {
-			body += "\n\nUse `" + RuntimeNamespace() + ":lead-delegate` for bounded investigation, diagnosis, drafting, and low-impact operational work."
+			body += "\n\nUse `" + s.runtimeNamespace() + ":lead-delegate` for bounded investigation, diagnosis, drafting, and low-impact operational work."
 		}
 	}
 	return body, recommendedTier, nil
@@ -1079,7 +1078,7 @@ func renderPlaybook(s *Server, rsrcRoot, worktreeRoot, name string, callerContex
 func renderPlaybookWithPlan(s *Server, rsrcRoot, worktreeRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, parentKey string, workflowLang string, overrideLookup overrideLookupFn, tierOverride string, planStem string) (promptPath string, planPath string, recommendedTier string, err error) {
 	templateContext := callerContext
 	var renderContext map[string]string
-	if NoAgentMode() && wsflowRenderEligibleStems[name] && len(callerContext) > 0 {
+	if s.noAgentMode() && wsflowRenderEligibleStems[name] && len(callerContext) > 0 {
 		// Phase 2 of wsflow convergence: legacy wsflow delegate callers pass
 		// arbitrary context as prompt data. Preserve that behavior for undeclared
 		// keys while allowing declared variables to render normally.
@@ -1094,7 +1093,7 @@ func renderPlaybookWithPlan(s *Server, rsrcRoot, worktreeRoot, name string, call
 		return "", "", "", err
 	}
 	body = appendRenderContext(body, renderContext)
-	manager := wsstate.NewManager(wsstate.Options{})
+	manager := wsstate.NewManager(s.stateOptions())
 	if planStem != "" {
 		plans, err := manager.GeneratePaths(worktreeRoot, "plan", []string{planStem})
 		if err != nil {

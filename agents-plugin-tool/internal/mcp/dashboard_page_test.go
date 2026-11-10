@@ -293,7 +293,7 @@ func TestDashboardReadPageWatchesTheMailboxPanel(t *testing.T) {
 	src := dashboardPageSource(t, nil)
 
 	page := readPageOK(t, src, reg)
-	history, err := mailboxHistoryDir(hf.keyB)
+	history, err := mailboxHistoryDir("", hf.keyB)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -554,7 +554,7 @@ func TestDashboardFingerprintCoversPageStores(t *testing.T) {
 	}
 	step("a ticket file", func() { writeTicket(t, f.root, "ready", "261103-feat-new", "New") })
 	step("a mailbox history entry", func() {
-		if _, err := appendMailboxHistory(f.key, []mailboxHistoryEntry{{Direction: mailboxHistorySent, Counterparty: "id:peer", Body: "hi"}}); err != nil {
+		if _, err := appendMailboxHistory("", f.key, []mailboxHistoryEntry{{Direction: mailboxHistorySent, Counterparty: "id:peer", Body: "hi"}}); err != nil {
 			t.Fatal(err)
 		}
 	})

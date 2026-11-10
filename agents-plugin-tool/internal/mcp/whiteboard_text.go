@@ -3,8 +3,6 @@ package mcp
 import (
 	"fmt"
 	"strings"
-
-	"github.com/kang-sw/devenv/internal/wsconfig"
 )
 
 // Knob-on workflow text for workflow.whiteboard_enabled. It is applied
@@ -53,8 +51,8 @@ const (
 		"The rest of this section is the `whiteboard` playbook.\n"
 )
 
-func withNamespace(text string) string {
-	return strings.ReplaceAll(text, "{{ns}}", RuntimeNamespace())
+func withNamespace(text, namespace string) string {
+	return strings.ReplaceAll(text, "{{ns}}", namespace)
 }
 
 // replaceOrAppend replaces the first old in body with replacement, or
@@ -103,16 +101,16 @@ func applyWhiteboardVariants(s *Server, rsrcRoot, name, body string, enabled boo
 	}
 	switch name {
 	case workflowManualPlaybookName:
-		body = replaceOrAppend(body, lineDiscussionNoCounter, withNamespace(lineDiscussionStoreCounter))
+		body = replaceOrAppend(body, lineDiscussionNoCounter, withNamespace(lineDiscussionStoreCounter, s.runtimeNamespace()))
 		section, err := whiteboardManualSection(s, rsrcRoot)
 		if err != nil {
 			return "", err
 		}
 		body = strings.TrimRight(body, "\n") + "\n\n" + section
 	case "lead-discuss":
-		body = replaceOrAppend(body, lineDiscussNotPersisted, "No block format and no queue.\n  "+withNamespace(whiteboardCaptureLine))
+		body = replaceOrAppend(body, lineDiscussNotPersisted, "No block format and no queue.\n  "+withNamespace(whiteboardCaptureLine, s.runtimeNamespace()))
 	case "lead-ticket":
-		bullet := withNamespace(lineTicketQueueBoard)
+		bullet := withNamespace(lineTicketQueueBoard, s.runtimeNamespace())
 		if strings.Contains(body, lineTicketQueueStateEnd) {
 			body = strings.Replace(body, lineTicketQueueStateEnd, "\n"+bullet+lineTicketQueueStateEnd, 1)
 		} else {
@@ -126,12 +124,12 @@ func applyWhiteboardVariants(s *Server, rsrcRoot, name, body string, enabled boo
 // the whiteboard playbook's own content (its title dropped, its headings
 // demoted under the section), so the lead needs no extra read.
 func whiteboardManualSection(s *Server, rsrcRoot string) (string, error) {
-	playbook, _, err := renderPlaybookBody(s, rsrcRoot, whiteboardPlaybookName, nil, wsconfig.Options{}, "", "", "", nil, "")
+	playbook, _, err := renderPlaybookBody(s, rsrcRoot, whiteboardPlaybookName, nil, s.configOptions(), "", "", "", nil, "")
 	if err != nil {
 		return "", fmt.Errorf("render %s playbook: %w", whiteboardPlaybookName, err)
 	}
 	var sb strings.Builder
-	sb.WriteString(withNamespace(whiteboardManualMandate))
+	sb.WriteString(withNamespace(whiteboardManualMandate, s.runtimeNamespace()))
 	inFence := false
 	for _, line := range strings.Split(strings.TrimSpace(playbook), "\n") {
 		if strings.HasPrefix(line, "```") {

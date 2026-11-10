@@ -9,7 +9,6 @@ import (
 
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsreview"
-	"github.com/kang-sw/devenv/internal/wsrsrc"
 )
 
 // freshOnlyStart and freshOnlyEnd are the dedicated mode-gating marker tokens
@@ -263,7 +262,7 @@ func (s *Server) handleWorkflowState(id json.RawMessage, args map[string]any) re
 	//    for every resolved session. That byte-identity is the invariant: a
 	//    change to either renderer must be made in both, or workflow_state
 	//    silently diverges from the manual it mirrors.
-	return toolTextResponse(id, renderSessionState(rec)+"\n\n"+computeNotes(rec.Root)+"\n", nil)
+	return toolTextResponse(id, renderSessionState(rec)+"\n\n"+computeNotes(rec.Root, s.configOptions())+"\n", nil)
 }
 
 // handleWorkflowManual implements the ws.workflow_manual tool. A valid
@@ -299,7 +298,7 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 
 	// Render the manual body (FRESH + CONTINUE only) through the same pipeline as
 	// playbook.read.
-	rsrcRoot, err := resolveRsrcRoot("")
+	rsrcRoot, err := s.resolveRsrcRoot("")
 	if err != nil {
 		return toolTextResponse(id, "", fmt.Errorf("workflow_manual: resolve rsrc root: %w", err))
 	}
@@ -330,14 +329,16 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 		}
 	}
 
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, wsconfig.Options{}, workflowLang, overrideLookup)
+	body, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, s.configOptions(), workflowLang, overrideLookup)
 	if err != nil {
 		return toolTextResponse(id, "", fmt.Errorf("workflow_manual: render playbook: %w", err))
 	}
 	knobResolver := s.sessionResolver(key, builtinConfigDefaults())
 	if canonical != "" {
 		knobAdapter := sessionConfigAdapter{s: s.sessions}
-		knobResolver = wsconfig.NewResolver(wsconfig.Options{RepoRoot: canonical}, builtinConfigDefaults(), knobAdapter, knobAdapter)
+		knobOpts := s.configOptions()
+		knobOpts.RepoRoot = canonical
+		knobResolver = wsconfig.NewResolver(knobOpts, builtinConfigDefaults(), knobAdapter, knobAdapter)
 	}
 	whiteboardOn, err := s.whiteboardEnabled(&knobResolver, key)
 	if err != nil {
@@ -368,7 +369,9 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 			//     instruct them to call ferrule), and return the key inline.
 			// Resolved before the mint, so a bad profile fails the call without
 			// leaving a minted key the caller never received.
-			profilesBlock, err := worktreeProfilesForManual(wsconfig.Options{RepoRoot: canonical})
+			profileOpts := s.configOptions()
+			profileOpts.RepoRoot = canonical
+			profilesBlock, err := worktreeProfilesForManual(profileOpts)
 			if err != nil {
 				return toolTextResponse(id, "", err)
 			}
@@ -390,24 +393,24 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 			body = injectSessionKeyLine(body, mintedKey)
 			body += "\n\n## Session Key\n" + mintedKey
 			body += "\n\n" + renderSessionState(sessionRecord{})
-			notes := computeNotesBlock(canonical)
+			notes := computeNotesBlock(canonical, s.configOptions())
 			body += "\n\n" + notes.Text
 			if skepticalPosture {
 				body = injectSkepticalPosture(body)
 			}
-			if skillsRoot, srErr := wsrsrc.ResolveSkillsRoot(); srErr == nil {
+			if skillsRoot, srErr := s.skillsRoot(); srErr == nil {
 				warningAdapter := sessionConfigAdapter{s: s.sessions}
-				warningResolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), warningAdapter, warningAdapter)
+				warningResolver := wsconfig.NewResolver(s.configOptions(), builtinConfigDefaults(), warningAdapter, warningAdapter)
 				warning := bootstrapStalenessWarning(canonical, skillsRoot, &warningResolver, mintedKey)
 				body = injectBootstrapStalenessWarning(body, warning)
 			}
 			// FRESH-with-root mints a parent-less top-lead key (parent: ""), so
 			// the occupied-root banner is always safe to inject here.
-			body = injectBootstrapStalenessWarning(body, occupiedRootAnnouncement(canonical))
+			body = injectBootstrapStalenessWarning(body, occupiedRootAnnouncement(s.gitRunner(), canonical))
 			body = injectBootstrapStalenessWarning(body, mailboxAddressAnnouncement(s, mintedKey, canonical))
 			// The minted key is a top-level lead, so it may spend the clone's
 			// daily cleanup-warning slot.
-			body = injectBootstrapStalenessWarning(body, notesCleanupWarning(canonical, notes, notesCleanupNow()))
+			body = injectBootstrapStalenessWarning(body, notesCleanupWarning(s.gitRunner(), canonical, notes, notesCleanupNow()))
 			body = injectBootstrapStalenessWarning(body, computeManuals(canonical))
 			body = injectBootstrapStalenessWarning(body, wsreview.CheckpointNudge(context.Background(), canonical))
 			if nudge := reviewTrackNudge(canonical); nudge != "" {
@@ -434,16 +437,16 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 		body = injectSessionKeyLine(body, key)
 		body += "\n\n## Session Key\n" + key
 		body += "\n\n" + renderSessionState(rec)
-		notes := computeNotesBlock(rec.Root)
+		notes := computeNotesBlock(rec.Root, s.configOptions())
 		body += "\n\n" + notes.Text
 		if skepticalPosture {
 			body = injectSkepticalPosture(body)
 		}
 		if rec.Root != "" {
 			s.maybeCollectWhiteboards(rec.Root)
-			if skillsRoot, srErr := wsrsrc.ResolveSkillsRoot(); srErr == nil {
+			if skillsRoot, srErr := s.skillsRoot(); srErr == nil {
 				warningAdapter := sessionConfigAdapter{s: s.sessions}
-				warningResolver := wsconfig.NewResolver(wsconfig.Options{}, builtinConfigDefaults(), warningAdapter, warningAdapter)
+				warningResolver := wsconfig.NewResolver(s.configOptions(), builtinConfigDefaults(), warningAdapter, warningAdapter)
 				warning := bootstrapStalenessWarning(rec.Root, skillsRoot, &warningResolver, key)
 				body = injectBootstrapStalenessWarning(body, warning)
 			}
@@ -452,7 +455,7 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 			// its own impl/* root the banner would tell it "do not commit here"
 			// about the branch it owns.
 			if rec.Parent == "" {
-				body = injectBootstrapStalenessWarning(body, occupiedRootAnnouncement(rec.Root))
+				body = injectBootstrapStalenessWarning(body, occupiedRootAnnouncement(s.gitRunner(), rec.Root))
 			}
 			// A top-level lead's revive is a session start too; the check's
 			// throttle keeps a quick revive from fetching again.
@@ -464,7 +467,7 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 			// cleanup-warning slot: a worker is note read-only and could
 			// neither act on the warning nor leave it for its lead.
 			if (sessionEntry{scope: toolRole(rec.Scope), parent: rec.Parent}).isTopLevelLead() {
-				body = injectBootstrapStalenessWarning(body, notesCleanupWarning(rec.Root, notes, notesCleanupNow()))
+				body = injectBootstrapStalenessWarning(body, notesCleanupWarning(s.gitRunner(), rec.Root, notes, notesCleanupNow()))
 			}
 			body = injectBootstrapStalenessWarning(body, computeManuals(rec.Root))
 			body = injectBootstrapStalenessWarning(body, wsreview.CheckpointNudge(context.Background(), rec.Root))

@@ -140,7 +140,7 @@ func TestDashboardHistoryCacheReadsEachEntryOnce(t *testing.T) {
 		for i := range entries {
 			entries[i] = mailboxHistoryEntry{Direction: mailboxHistorySent, Counterparty: "id:peer", Body: "message body"}
 		}
-		if _, err := appendMailboxHistory(f.key, entries); err != nil {
+		if _, err := appendMailboxHistory("", f.key, entries); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -168,7 +168,7 @@ func TestDashboardHistoryCacheReadsEachEntryOnce(t *testing.T) {
 	if got := parsed(); got != 3 || len(page.MailBodies) != 3 {
 		t.Fatalf("a new entry: parsed %d (want 3), %d bodies", got, len(page.MailBodies))
 	}
-	want, err := readMailboxHistory(f.key)
+	want, err := readMailboxHistory("", f.key)
 	if err != nil {
 		t.Fatal(err)
 	}

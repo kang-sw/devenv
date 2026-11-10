@@ -133,6 +133,8 @@ type liveSession struct {
 	active  func() bool
 	// onStop removes the stopped session from its hub.
 	onStop func()
+	// debug records into the owning server's debug ring.
+	debug func(event string, fields map[string]any)
 
 	mu    sync.Mutex
 	state *wslive.State
@@ -156,7 +158,7 @@ type liveSession struct {
 	repoAt time.Time
 }
 
-func (h *liveHub) session(key, dir, root string, nudge func(), active func() bool) *liveSession {
+func (h *liveHub) session(key, dir, root string, nudge func(), active func() bool, debug func(string, map[string]any)) *liveSession {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.sessions == nil {
@@ -170,7 +172,7 @@ func (h *liveHub) session(key, dir, root string, nudge func(), active func() boo
 		ls.stop()
 	}
 	state := wslive.NewState(key)
-	ls = &liveSession{dir: dir, root: root, replyID: state.ReplyID(), nudge: nudge, active: active, state: state}
+	ls = &liveSession{dir: dir, root: root, replyID: state.ReplyID(), nudge: nudge, active: active, debug: debug, state: state}
 	created := ls
 	ls.onStop = func() { h.drop(key, created) }
 	h.sessions[key] = ls
@@ -250,7 +252,7 @@ func (s *Server) liveDashboardEnabled(sessionKey string) bool {
 	}
 	on, err := resolve(sessionKey)
 	if err != nil {
-		appendDebugEvent("dashboard.enabled_resolve_error", map[string]any{"error": err.Error()})
+		s.debugEvent("dashboard.enabled_resolve_error", map[string]any{"error": err.Error()})
 		if !known {
 			return false
 		}
@@ -291,7 +293,7 @@ func (s *Server) handleDashboardIntake(id json.RawMessage, args map[string]any) 
 	ls := s.live.session(key, dir, entry.root, func() { s.dashboardNudge(key) }, func() bool {
 		current, on := s.liveSessionDir(key)
 		return on && current == dir
-	})
+	}, s.debugEvent)
 	now := time.Now().UnixMilli()
 	var (
 		ring     []wslive.RingEntry
@@ -416,7 +418,7 @@ func (ls *liveSession) fire() {
 	}
 	ls.writeMu.Unlock()
 	if err != nil {
-		appendDebugEvent("dashboard.snapshot_write_error", map[string]any{"error": err.Error()})
+		ls.debug("dashboard.snapshot_write_error", map[string]any{"error": err.Error()})
 	} else {
 		ls.nudge()
 	}
@@ -481,7 +483,7 @@ func writeLiveSnapshot(dir string, data []byte) error {
 // directory dir and nudges; a failed write is logged, never surfaced.
 func (s *Server) appendLiveRing(sessionKey, dir string, entries []wslive.RingEntry) {
 	if err := currentLiveSeams().appendRing(wslive.RingDir(dir), entries); err != nil {
-		appendDebugEvent("dashboard.ring_write_error", map[string]any{"error": err.Error()})
+		s.debugEvent("dashboard.ring_write_error", map[string]any{"error": err.Error()})
 		return
 	}
 	s.dashboardNudge(sessionKey)

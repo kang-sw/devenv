@@ -4,6 +4,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/kang-sw/devenv/internal/wsgit"
 )
 
 // implRootRepo builds a repo with a base commit, a `develop` branch, and leaves
@@ -24,7 +26,7 @@ func implRootRepo(t *testing.T, headBranch string) string {
 func TestOccupiedRootAnnouncementTextVariants(t *testing.T) {
 	// impl/<parent>/<stem>: names the parent as a quoted base.
 	withParent := implRootRepo(t, "impl/develop/foo")
-	got := occupiedRootAnnouncement(withParent)
+	got := occupiedRootAnnouncement(wsgit.ExecRunner{}, withParent)
 	if !strings.Contains(got, "Occupied root.") {
 		t.Fatalf("impl/develop/foo must produce the banner: %q", got)
 	}
@@ -37,7 +39,7 @@ func TestOccupiedRootAnnouncementTextVariants(t *testing.T) {
 
 	// Rootless impl/<stem>: no parent segment, so no quoted base.
 	rootless := implRootRepo(t, "impl/foo")
-	gotRootless := occupiedRootAnnouncement(rootless)
+	gotRootless := occupiedRootAnnouncement(wsgit.ExecRunner{}, rootless)
 	if !strings.Contains(gotRootless, "Occupied root.") {
 		t.Fatalf("impl/foo must produce the banner: %q", gotRootless)
 	}
@@ -51,14 +53,14 @@ func TestOccupiedRootAnnouncementTextVariants(t *testing.T) {
 	// A non-impl branch is not an occupied root.
 	onDevelop := implRootRepo(t, "impl/develop/foo")
 	runGit(t, onDevelop, "switch", "develop")
-	if got := occupiedRootAnnouncement(onDevelop); got != "" {
+	if got := occupiedRootAnnouncement(wsgit.ExecRunner{}, onDevelop); got != "" {
 		t.Fatalf("non-impl branch must yield no banner: %q", got)
 	}
 
 	// Detached HEAD yields no banner (git symbolic-ref --quiet exits non-zero).
 	detached := implRootRepo(t, "impl/develop/foo")
 	runGit(t, detached, "checkout", "--detach")
-	if got := occupiedRootAnnouncement(detached); got != "" {
+	if got := occupiedRootAnnouncement(wsgit.ExecRunner{}, detached); got != "" {
 		t.Fatalf("detached HEAD must yield no banner: %q", got)
 	}
 }
