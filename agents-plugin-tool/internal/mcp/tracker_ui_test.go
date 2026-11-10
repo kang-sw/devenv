@@ -49,7 +49,7 @@ func TestTrackerUIRefusals(t *testing.T) {
 		want string
 	}{
 		{map[string]any{"op": "press", "query": "accept"}, `unknown op "press"`},
-		{map[string]any{}, `unknown op ""`},
+		{map[string]any{}, "missing required: op"},
 		{map[string]any{"op": "search"}, "needs a query"},
 		{map[string]any{"op": "search", "query": "two\nlines"}, "one line"},
 		{map[string]any{"op": "search", "query": strings.Repeat("x", 201)}, "longer than 200"},
