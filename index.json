@@ -348,7 +348,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-10T07:59:59Z"
+        "touched_at": "2026-11-10T08:00:32Z",
+        "impl": {
+          "branch": "impl/develop/value-suave-delay"
+        }
       }
     },
     "261110-bug-ws-mcp-move-close-guard-flake-and-suite-timeout": {
