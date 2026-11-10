@@ -2059,12 +2059,22 @@ func TestPlaybookPrintGoldenLeadShip(t *testing.T) {
 	// (the cut point) through a release branch: the gate proceeds on newly
 	// cleared content even over a blocked remainder, the release target must
 	// be an ancestor of the cut point before the bump, and the tip re-check is
-	// dropped because the moving tip never ships.
+	// dropped because the moving tip never ships. Only a pass/concern stamp
+	// the gate's own review wrote clears a cut point: the bootstrap seed a
+	// review writes on an empty ledger would otherwise move the frontier to
+	// the blocked head, and the step-3 review path keeps step 4's stop.
+	// Config steps needing a lead-only tool stay with the lead, because a
+	// delegate's call to one is refused.
 	normalizedShip := strings.Join(strings.Fields(body), " ")
 	for _, want := range []string{
 		"A config with a `## Release Branch` section makes every gated release a cut-point release",
 		"where the release gate does not apply, the cut point is the review-track tip",
-		"read `review.marker` again; its head is the cut point",
+		"over `range: <base>..HEAD`, whose verdict proceeds or stops as in step 4",
+		"When the gate ran a review, only a `pass` or `concern` stamp that review wrote clears a cut point, and the cut point is that stamp's head",
+		"including the seed the review writes on an empty ledger, clears nothing, so a review that wrote no `pass` or `concern` stamp stops for the user's explicit override as in step 4",
+		"A step-4 count of `0` runs no review and makes the frontier head the cut point",
+		"the step-3 bootstrap is such an override",
+		"each config step that needs a capability only the lead holds, such as a lead-only tool (a delegate's call to one is refused), and hand the delegate what it produced",
 		"The gate proceeds when the cut point is not an ancestor of the release target, even when the review left a blocked remainder",
 		"Otherwise it stops: nothing is newly cleared",
 		"its cut point is the review-track tip at override time",
