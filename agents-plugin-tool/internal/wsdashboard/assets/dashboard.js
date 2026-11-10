@@ -3220,7 +3220,7 @@
   // supChat returns store id's chat, building its root on first use.
   function supChat(id) {
     if (supChats[id]) return supChats[id];
-    var c = supChats[id] = { id: id, conv: null, sel: null, loaded: false, loading: false, es: null, esFor: null, retry: null,
+    var c = supChats[id] = { id: id, conv: null, sel: null, loaded: false, loading: false, st: null, stFor: null, retry: null,
       stick: true, top: 0, focus: null, sending: false, pop: false, pending: null, q: "", qi: -1, err: "" };
     var r = c.root = doc.createElement("div");
     r.className = "supchat";
@@ -3324,42 +3324,42 @@
   // supOpen opens the conversation's region stream while the chat shows.
   function supOpen(c) {
     var slot = c.root.parentNode;
-    if (!c.conv || !window.EventSource || !supShown(slot) || (c.es && c.esFor === c.conv.id)) return;
+    if (!c.conv || !window.WebSocket || !supShown(slot) || (c.st && c.stFor === c.conv.id)) return;
     supClose(c);
-    var id = c.conv.id, es = c.es = new EventSource(c.conv.page + "/events?regions=entries,convlive"), primed = false;
-    c.esFor = id;
+    var primed = false, st;
     // The stream's first entries region is the conversation's history (on a
     // first open, a reload, or a reconnect alike); only the entries regions
     // after it are live, so only they act on the ui lines they bring.
-    es.addEventListener("region", function (e) {
-      var ev;
-      try { ev = JSON.parse(e.data); } catch (x) { return; }
-      if (c.es !== es) return;
+    function onRegion(ev) {
+      if (c.st !== st || !ev) return;
       var live = primed;
       if (ev.name === "entries") primed = true;
-      supRegion(c, ev.name, ev.html || "", live ? es : null);
+      supRegion(c, ev.name, ev.html || "", live ? st : null);
+    }
+    st = c.st = openStream(c.conv.page + "/events?regions=entries,convlive", {
+      // A conversation the index does not list yet (just opened) or a
+      // dropped stream: try again shortly while the chat still shows.
+      drop: function () {
+        if (c.st !== st) return;
+        supClose(c);
+        c.retry = setTimeout(function () { c.retry = null; supOpen(c); }, 2000);
+      },
+      events: { region: onRegion, gone: function () { if (c.st === st) supClose(c); } }
     });
-    // A conversation the index does not list yet (just opened) or a dropped
-    // stream: try again shortly while the chat still shows.
-    es.onerror = function () {
-      if (c.es !== es) return;
-      supClose(c);
-      c.retry = setTimeout(function () { c.retry = null; supOpen(c); }, 2000);
-    };
-    es.addEventListener("gone", function () { if (c.es === es) supClose(c); });
+    c.stFor = c.conv.id;
   }
   function supClose(c) {
     if (c.retry) { clearTimeout(c.retry); c.retry = null; }
-    if (c.es) { c.es.close(); c.es = null; c.esFor = null; }
+    if (c.st) { c.st.close(); c.st = null; c.stFor = null; }
   }
-  // supRegion applies a region of the chat's stream; es is that stream when
+  // supRegion applies a region of the chat's stream; st is that stream when
   // the region arrived live (see supOpen), else null. The entries merge as
   // the session conversation's do (mergeEntriesRegion), with no history to
   // page back to: what a chat at the bottom sheds past the cap is gone until
   // the chat opens again, as a reopen shows only the newest window. A window
   // past a gap starts the log over, and what that puts back is replayed
   // history, never a live arrival: its ui lines do not act.
-  function supRegion(c, name, html, es) {
+  function supRegion(c, name, html, st) {
     var stick = c.root.isConnected ? c.log.scrollTop + c.log.clientHeight >= c.log.scrollHeight - 24 : c.stick, added = null, reset = false;
     if (name === "entries") {
       var nbox = frag(html).querySelector(".centries");
@@ -3379,7 +3379,7 @@
     } else return;
     supDraw(c);
     if (stick && c.root.isConnected) { c.log.scrollTop = c.log.scrollHeight; c.stick = true; }
-    if (es && added && !reset) supActUI(c, added, es);
+    if (st && added && !reset) supActUI(c, added, st);
   }
   // supActUI performs, in order, the ui lines (a tracker.ui call: the agent
   // moving this store's view) that a live entries region added; every line,
@@ -3388,10 +3388,10 @@
   // that hides the chat (a search, scope, or view switch in the narrow
   // layout, where Items and the chat share one pane) closes its stream, and
   // the lines after it are left for the next open to meet as history.
-  function supActUI(c, added, es) {
+  function supActUI(c, added, st) {
     if (!supH || !supH.uiCommand) return;
     added.forEach(function (el) {
-      if (c.es !== es || !el.matches(".uiline[data-entry]")) return;
+      if (c.st !== st || !el.matches(".uiline[data-entry]")) return;
       supH.uiCommand(c.id, { op: el.getAttribute("data-ui-op"), arg: el.getAttribute("data-ui-arg") || "", comment: el.getAttribute("data-ui-comment") || "" });
     });
   }
@@ -3820,21 +3820,53 @@
       el.title = wsT(on ? "js.sse.title.on" : "js.sse.title.off");
     });
   }
-  function connect() {
-    if (!window.EventSource) return;
-    var path = mode === "index" ? "/events" : "/s/" + rid + "/events";
-    var es = new EventSource(path + "?h=" + encodeURIComponent(held()));
-    es.onopen = function () { connected(true); };
-    es.onerror = function () {
-      connected(false);
-      trackerLost();
-      // EventSource would retry with the URL it opened; reopen with the
-      // hashes held now, so a reconnect sends only what changed since.
-      es.close();
-      setTimeout(connect, 3000);
+  // openStream opens a live stream (the daemon's sse.go and stream_ws.go)
+  // over WebSocket: a browser counts WebSocket connections apart from the six
+  // HTTP/1.1 connections it keeps per host, so open streams (one per tab, one
+  // more for an open support chat) never hold up the page GETs, tracker
+  // reads, and sends that share those six. Each frame is {event, data}, the
+  // SSE stream's event name and data; a ping is answered with a pong, which
+  // keeps the daemon from dropping the connection as dead. on.open runs when
+  // the connection opens, on.events[name](data) per event, and on.drop once
+  // when the connection fails or closes, never after the returned close().
+  function openStream(path, on) {
+    var ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + path), over = false;
+    function drop() {
+      if (over) return;
+      over = true;
+      try { ws.close(); } catch (x) {}
+      if (on.drop) on.drop();
+    }
+    ws.onopen = function () { if (!over && on.open) on.open(); };
+    ws.onerror = drop;
+    ws.onclose = drop;
+    ws.onmessage = function (e) {
+      if (over) return;
+      var m = null;
+      try { m = JSON.parse(e.data); } catch (x) { return; }
+      if (!m || typeof m.event !== "string") return;
+      if (m.event === "ping") { try { ws.send('{"event":"pong"}'); } catch (x) {} return; }
+      var fn = on.events && Object.prototype.hasOwnProperty.call(on.events, m.event) && on.events[m.event];
+      if (typeof fn === "function") fn(m.data);
     };
-    es.addEventListener("region", function (e) {
-      var ev = JSON.parse(e.data);
+    return { close: function () { over = true; try { ws.close(); } catch (x) {} } };
+  }
+  function connect() {
+    if (!window.WebSocket) return;
+    var path = mode === "index" ? "/events" : "/s/" + rid + "/events";
+    var st = openStream(path + "?h=" + encodeURIComponent(held()), {
+      open: function () { connected(true); },
+      // Reopen with the hashes held now, so a reconnect sends only what
+      // changed since.
+      drop: function () {
+        connected(false);
+        trackerLost();
+        setTimeout(connect, 3000);
+      },
+      events: { region: onRegion, tracker: onTracker, gone: onGone }
+    });
+    function onRegion(ev) {
+      if (!ev) return;
       if (ev.name === "mode") {
         if (ev.html !== mode) modeChanged(ev.html);
         modeHash = ev.hash;
@@ -3852,17 +3884,16 @@
         return;
       }
       swap(ev.name, ev.hash, ev.html);
-    });
-    es.addEventListener("tracker", function (e) {
-      var ev = null;
-      try { ev = JSON.parse(e.data); } catch (x) { return; }
+    }
+    function onTracker(ev) {
       if (ev && typeof ev.rev === "number") trackerNudge(ev.rev);
-    });
-    es.addEventListener("gone", function () {
-      es.close();
+    }
+    // The session left: the close that follows is final.
+    function onGone() {
+      st.close();
       connected(false);
       banner(wsT("js.banner.gone"));
-    });
+    }
   }
   // showRegions applies, once each and in arrival order, the region updates
   // a hidden tab held back.
