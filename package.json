@@ -1,6 +1,6 @@
 {
   "name": "ws-pi-bridge",
-  "version": "0.48.15",
+  "version": "0.48.16",
   "private": true,
   "pi": {
     "extensions": [
