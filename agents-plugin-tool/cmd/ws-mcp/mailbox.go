@@ -10,14 +10,17 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/kang-sw/devenv/internal/mcp"
+	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wsinbox"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
+	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
 // mailbox.go implements the host-neutral wake CLI
@@ -84,16 +87,18 @@ func mailboxWait(args []string) {
 		})
 		cancelOnParentExit()
 	})
-	os.Exit(runMailboxWait(ctx, args, os.Stdout, os.Stderr, os.Getpid(), os.Getenv))
+	os.Exit(runMailboxWait(ctx, args, os.Stdout, os.Stderr, "", os.Getpid(), os.Getenv))
 }
 
 // runMailboxWait is `mailbox wait` as a function: the flags in args, the
-// result on stdout, diagnostics on stderr, the exit code returned. ownerPID
-// owns the listening marker (the launcher's PID when the dashboard daemon
-// runs the wait for a launcher, this process's otherwise), and getenv reads
-// the caller's environment. A ctx that ends cancels the wait at once and
-// clears the marker, as a signal does.
-func runMailboxWait(ctx context.Context, args []string, stdout, stderr io.Writer, ownerPID int, getenv func(string) string) int {
+// result on stdout, diagnostics on stderr, the exit code returned. cwd is
+// the caller's working directory, against which a relative --root resolves
+// (empty means this process's own); ownerPID owns the listening marker (the
+// launcher's PID when the dashboard daemon runs the wait for a launcher,
+// this process's otherwise), and getenv reads the caller's environment. A
+// ctx that ends cancels the wait at once and clears the marker, as a signal
+// does.
+func runMailboxWait(ctx context.Context, args []string, stdout, stderr io.Writer, cwd string, ownerPID int, getenv func(string) string) int {
 	fs := flag.NewFlagSet("mailbox wait", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	root := fs.String("root", ".", "caller's own worktree/clone root; only needed to resolve a worktree/clone-scope --slug")
@@ -123,9 +128,19 @@ func runMailboxWait(ctx context.Context, args []string, stdout, stderr io.Writer
 		return failed(fmt.Errorf("--board-inbox and --board-steer cannot be combined: --board-inbox already wakes on every held message"))
 	}
 
-	target := wsmailbox.WaitTarget{SessionKey: *sessionKey, Root: defaultRootFrom(*root, getenv), Slug: strings.TrimSpace(*slug)}
+	waitRoot := defaultRootFrom(*root, getenv)
+	if cwd != "" && !filepath.IsAbs(waitRoot) {
+		waitRoot = filepath.Join(cwd, waitRoot)
+	}
+	// The stores follow the caller's environment: the daemon that runs this
+	// wait for a launcher has a config and cache home of its own.
+	paths := wsmailbox.Paths{
+		Config: wsconfig.Options{ConfigHome: getenv(wsconfig.EnvConfigHome), CacheHome: getenv(wsstate.EnvCacheHome)},
+		State:  wsstate.Options{CacheHome: getenv(wsstate.EnvCacheHome)},
+	}
+	target := wsmailbox.WaitTarget{SessionKey: *sessionKey, Root: waitRoot, Slug: strings.TrimSpace(*slug), Paths: paths}
 	if *boardInbox || *boardSteer || *boardInterrupt {
-		stateDir, err := wsdashboard.Dir("")
+		stateDir, err := wsdashboard.Dir(getenv(wsstate.EnvCacheHome))
 		if err != nil {
 			return failed(err)
 		}
@@ -156,12 +171,12 @@ func runMailboxWait(ctx context.Context, args []string, stdout, stderr io.Writer
 	if *timeout > 0 {
 		marker.TimeoutAt = time.Now().UTC().Add(*timeout).Format(time.RFC3339)
 	}
-	if err := wsmailbox.WriteListeningMarker(marker); err != nil {
+	if err := paths.WriteListeningMarker(marker); err != nil {
 		return failed(err)
 	}
 	// Owner-checked: a replacement wait on the same session_key may already
 	// have rewritten the marker, and this exit must not delete it.
-	defer func() { _ = wsmailbox.ClearListeningMarker(*sessionKey, marker.PID) }()
+	defer func() { _ = paths.ClearListeningMarker(*sessionKey, marker.PID) }()
 
 	// Reprint this invocation's own command name plus the wait-scoping flags
 	// it received, so every return path can hand the caller a runnable re-arm

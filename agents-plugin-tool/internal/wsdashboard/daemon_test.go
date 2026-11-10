@@ -454,10 +454,15 @@ func TestEnsureFromAnOlderWsMcpLeavesANewerDaemonInTheOtherLANMode(t *testing.T)
 	}
 }
 
-// startBuiltDaemon starts a daemon reporting buildTime.
-func startBuiltDaemon(t *testing.T, dir, version string, buildTime int64) *Daemon {
+// startBuiltDaemon starts a daemon reporting buildTime and, when given,
+// a content hash.
+func startBuiltDaemon(t *testing.T, dir, version string, buildTime int64, contentHash ...string) *Daemon {
 	t.Helper()
-	d, err := StartDaemon(DaemonOptions{Dir: dir, Port: 0, Version: version, BuildTime: buildTime, LockWait: 200 * time.Millisecond})
+	hash := ""
+	if len(contentHash) > 0 {
+		hash = contentHash[0]
+	}
+	d, err := StartDaemon(DaemonOptions{Dir: dir, Port: 0, Version: version, BuildTime: buildTime, ContentHash: hash, LockWait: 200 * time.Millisecond})
 	if err != nil {
 		t.Fatalf("StartDaemon(%s): %v", version, err)
 	}
@@ -517,6 +522,67 @@ func TestEnsureHandoffOrdersSameVersionBuildsByBuildTime(t *testing.T) {
 				t.Fatalf("second Ensure = %s, %v, %d spawns; the replacement must not flap", outcome, err, len(sp.calls))
 			}
 		})
+	}
+}
+
+// TestEnsureKeepsASameContentDaemonWhateverItsBuildTime (L1): at an equal
+// version, a daemon reporting the client's own content hash stays however
+// old its build time is: the Claude, Codex, and Pi installs are separate
+// copies of one binary with their own mtimes, and a replacement drains
+// every session on the machine. The build time decides only between
+// different contents, or when either side reports no hash.
+func TestEnsureKeepsASameContentDaemonWhateverItsBuildTime(t *testing.T) {
+	const same = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	const other = "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+	for _, tc := range []struct {
+		name         string
+		daemonHash   string
+		clientHash   string
+		wantReplaced bool
+	}{
+		{"same content, older build: kept", same, same, false},
+		{"other content, older build: replaced", other, same, true},
+		{"daemon reports no hash: the build time decides", "", same, true},
+		{"client knows no hash: the build time decides", same, "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			old := startBuiltDaemon(t, dir, "0.48.0", 1000, tc.daemonHash)
+			sp := &inProcessSpawner{t: t, dir: dir, versions: []string{"0.48.0"}}
+			defer sp.closeAll()
+			opts := ensureOpts(dir, "0.48.0", sp.spawn)
+			opts.BuildTime = 2000
+			opts.ContentHash = tc.clientHash
+			outcome, err := Ensure(context.Background(), opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.wantReplaced {
+				if outcome != OutcomeReplaced || len(sp.calls) != 1 {
+					t.Fatalf("Ensure = %s, %d spawns; want a replacement", outcome, len(sp.calls))
+				}
+				waitDone(t, old)
+				return
+			}
+			if outcome != OutcomeRunning || len(sp.calls) != 0 {
+				t.Fatalf("Ensure = %s, %d spawns; want the daemon left running", outcome, len(sp.calls))
+			}
+			select {
+			case <-old.Done():
+				t.Fatal("the same-content daemon stopped")
+			default:
+			}
+			if info, err := Health(context.Background(), testClient(), old.Endpoint()); err != nil || info.ContentHash != same {
+				t.Fatalf("health = %+v, %v; want content_hash reported", info, err)
+			}
+		})
+	}
+	// The hash never overrides a LAN mode change or a version order.
+	if keepRunning(HealthInfo{Version: "0.48.0", BuildTime: 1000, ContentHash: same}, EnsureOptions{Version: "0.48.0", BuildTime: 2000, ContentHash: same, LAN: true}) {
+		t.Fatal("the same content in the other LAN mode must still be replaced")
+	}
+	if keepRunning(HealthInfo{Version: "0.47.0", BuildTime: 9000, ContentHash: same}, EnsureOptions{Version: "0.48.0", BuildTime: 1000, ContentHash: same}) {
+		t.Fatal("an older version must still be replaced whatever the hash")
 	}
 }
 

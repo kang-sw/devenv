@@ -46,8 +46,15 @@ type EnsureOptions struct {
 	Version string
 	// BuildTime is this ws-mcp's build time (ExecutableBuildTime); zero is
 	// unknown. It breaks a version tie: a daemon of the same version with an
-	// older (or no reported) build time is replaced.
+	// older (or no reported) build time is replaced, unless ContentHash says
+	// it runs the same content.
 	BuildTime int64
+	// ContentHash is this ws-mcp's executable hash (ExecutableContentHash);
+	// empty is unknown. A same-version daemon reporting the same hash is
+	// never replaced for its build time: Claude, Codex, and Pi each install
+	// their own copy of one binary, so their mtimes differ while the
+	// content is one, and a replacement drains every session on the machine.
+	ContentHash string
 	// Port is the configured dashboard.port, passed to a started daemon as
 	// its --port flag.
 	Port int
@@ -156,15 +163,22 @@ func Ensure(ctx context.Context, opts EnsureOptions) (Outcome, error) {
 
 // keepRunning reports whether the healthy daemon info describes may stay:
 // it is newer than this ws-mcp, or as new and in the LAN mode opts asks for.
-// At an equal version the newer build wins: a daemon whose build time is
-// older than opts.BuildTime (a missing one counts as older) is replaced, and
-// an unknown opts.BuildTime never replaces.
+// At an equal version the same content always stays (ContentHash equal),
+// and otherwise the newer build wins: a daemon whose build time is older
+// than opts.BuildTime (a missing one counts as older) is replaced, and an
+// unknown opts.BuildTime never replaces.
 func keepRunning(info HealthInfo, opts EnsureOptions) bool {
 	switch cmp := CompareVersions(info.Version, opts.Version); {
 	case cmp > 0:
 		return true
 	case cmp == 0:
-		return info.LAN == opts.LAN && (opts.BuildTime <= 0 || info.BuildTime >= opts.BuildTime)
+		if info.LAN != opts.LAN {
+			return false
+		}
+		if opts.ContentHash != "" && info.ContentHash == opts.ContentHash {
+			return true
+		}
+		return opts.BuildTime <= 0 || info.BuildTime >= opts.BuildTime
 	}
 	return false
 }

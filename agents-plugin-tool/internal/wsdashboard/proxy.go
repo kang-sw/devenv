@@ -41,9 +41,11 @@ const (
 	ProxyModeCLI = "cli"
 	// proxyHelloTimeout bounds the wait for the hello line after the 101.
 	proxyHelloTimeout = 10 * time.Second
-	// proxyDrainBudget bounds how long Close lets calls in flight finish:
-	// strictly less than DefaultLockWait - 1s, so the successor daemon that
-	// waits for the lock always gets it.
+	// proxyDrainBudget bounds how long Close lets calls in flight finish
+	// before it releases the lock and endpoint: strictly less than
+	// DefaultLockWait - 1s, so the successor daemon that waits for the lock
+	// always gets it. A call still running then keeps its stream until it
+	// ends (WaitProxy); it is never cut.
 	proxyDrainBudget = DefaultLockWait - 1800*time.Millisecond
 	// proxyCloseTail bounds the wait for the session goroutines after their
 	// streams are closed.
@@ -114,9 +116,11 @@ type ProxySession interface {
 	// closes the stream when Serve returns.
 	Serve(ctx context.Context, stream io.ReadWriteCloser)
 	// Drain tells the session the daemon stops: it cancels long waits at
-	// once, lets calls in flight finish, and returns when idle or when ctx
-	// ends; the daemon closes the stream afterwards.
-	Drain(ctx context.Context)
+	// once, lets calls in flight finish, and returns when idle (true) or
+	// when ctx ends first (false). The daemon closes the stream once the
+	// session is idle. Drain may be called again on a session that was not
+	// idle, to wait for it without a deadline.
+	Drain(ctx context.Context) bool
 }
 
 // proxyConn is one accepted stream and its session.
@@ -299,9 +303,14 @@ func (d *Daemon) ProxySessions() int {
 }
 
 // drainProxy is Close's hosted-session step: no new session is admitted,
-// every session drains (long waits cancelled at once, calls in flight
-// finished) within proxyDrainBudget, then every stream is closed. The
-// launchers see the close and reconnect to the successor.
+// and every session drains (long waits cancelled at once, calls in flight
+// finished). A session idle within proxyDrainBudget has its stream closed;
+// the launcher sees the close and reconnects to the successor. A session
+// with a call still running when the budget ends keeps its stream: Close
+// goes on to release the lock and endpoint (the successor must not wait),
+// and the stream closes when that call has ended, so a git commit, merge,
+// or tickets.close is never cut midway. The process that runs the daemon
+// waits for those sessions (WaitProxy) before it exits.
 func (d *Daemon) drainProxy() {
 	d.proxyMu.Lock()
 	d.proxyDraining = true
@@ -321,13 +330,18 @@ func (d *Daemon) drainProxy() {
 		wg.Add(1)
 		go func(pc *proxyConn) {
 			defer wg.Done()
-			pc.session.Drain(ctx)
+			if pc.session.Drain(ctx) {
+				_ = pc.stream.Close()
+				return
+			}
+			fmt.Fprintf(d.log, "dashboard: a hosted call outlives the drain budget; its session closes when it ends\n")
+			go func() {
+				pc.session.Drain(context.Background())
+				_ = pc.stream.Close()
+			}()
 		}(pc)
 	}
 	wg.Wait()
-	for _, pc := range conns {
-		_ = pc.stream.Close()
-	}
 	done := make(chan struct{})
 	go func() {
 		d.proxyWG.Wait()
@@ -336,5 +350,23 @@ func (d *Daemon) drainProxy() {
 	select {
 	case <-done:
 	case <-time.After(proxyCloseTail):
+	}
+}
+
+// WaitProxy waits for every hosted session to end, or for ctx; it reports
+// whether all ended. After Close (Done), the sessions left are the ones
+// whose call outlived the drain budget; the daemon's process waits for them
+// before it exits.
+func (d *Daemon) WaitProxy(ctx context.Context) bool {
+	done := make(chan struct{})
+	go func() {
+		d.proxyWG.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return true
+	case <-ctx.Done():
+		return false
 	}
 }

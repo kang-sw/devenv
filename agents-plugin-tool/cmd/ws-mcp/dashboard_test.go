@@ -26,7 +26,7 @@ var dashboardTestClient = &http.Client{Timeout: 2 * time.Second}
 func TestStartDashboardWithTheKeyOffSpawnsNothing(t *testing.T) {
 	dir := t.TempDir()
 	calls := 0
-	outcome := startDashboard(context.Background(), mcp.DashboardSettings{Enabled: false, Port: 12345}, dir, 0, func([]string) error { calls++; return nil }, io.Discard)
+	outcome := startDashboard(context.Background(), mcp.DashboardSettings{Enabled: false, Port: 12345}, dir, 0, "", func([]string) error { calls++; return nil }, io.Discard)
 	if calls != 0 || outcome != "" {
 		t.Fatalf("key off: %d spawns, outcome %q", calls, outcome)
 	}
@@ -38,7 +38,7 @@ func TestStartDashboardWithTheKeyOffSpawnsNothing(t *testing.T) {
 func TestStartDashboardPassesThePortKeyAsTheDaemonFlag(t *testing.T) {
 	var got []string
 	var log bytes.Buffer
-	outcome := startDashboard(context.Background(), mcp.DashboardSettings{Enabled: true, Port: 12345}, t.TempDir(), 0, func(args []string) error {
+	outcome := startDashboard(context.Background(), mcp.DashboardSettings{Enabled: true, Port: 12345}, t.TempDir(), 0, "", func(args []string) error {
 		got = args
 		return errors.New("spawn refused in test")
 	}, &log)
@@ -53,7 +53,7 @@ func TestStartDashboardPassesThePortKeyAsTheDaemonFlag(t *testing.T) {
 func TestStartDashboardPassesLANAsTheDaemonFlag(t *testing.T) {
 	for _, lan := range []bool{true, false} {
 		var got []string
-		startDashboard(context.Background(), mcp.DashboardSettings{Enabled: true, Port: 12345, LAN: lan}, t.TempDir(), 0, func(args []string) error {
+		startDashboard(context.Background(), mcp.DashboardSettings{Enabled: true, Port: 12345, LAN: lan}, t.TempDir(), 0, "", func(args []string) error {
 			got = args
 			return errors.New("spawn refused in test")
 		}, io.Discard)
@@ -69,7 +69,7 @@ func TestStartDashboardPassesLANAsTheDaemonFlag(t *testing.T) {
 
 func TestStartDashboardPassesTheBuildTimeAsTheDaemonFlag(t *testing.T) {
 	var got []string
-	startDashboard(context.Background(), mcp.DashboardSettings{Enabled: true, Port: 12345}, t.TempDir(), 1700000000000, func(args []string) error {
+	startDashboard(context.Background(), mcp.DashboardSettings{Enabled: true, Port: 12345}, t.TempDir(), 1700000000000, "", func(args []string) error {
 		got = args
 		return errors.New("spawn refused in test")
 	}, io.Discard)
@@ -81,10 +81,19 @@ func TestStartDashboardPassesTheBuildTimeAsTheDaemonFlag(t *testing.T) {
 // buildDashboardTestBin builds ws-mcp, optionally stamping another version.
 func buildDashboardTestBin(t *testing.T, stampVersion string) string {
 	t.Helper()
+	if stampVersion == "" {
+		return buildDashboardTestBinLD(t, "")
+	}
+	return buildDashboardTestBinLD(t, "-X main.version="+stampVersion)
+}
+
+// buildDashboardTestBinLD builds the binary with ldflags (empty for none).
+func buildDashboardTestBinLD(t *testing.T, ldflags string) string {
+	t.Helper()
 	bin := wsMCPTestBin(t)
 	args := []string{"build", "-o", bin}
-	if stampVersion != "" {
-		args = append(args, "-ldflags", "-X main.version="+stampVersion)
+	if ldflags != "" {
+		args = append(args, "-ldflags", ldflags)
 	}
 	build := exec.Command("go", append(args, ".")...)
 	if out, err := build.CombinedOutput(); err != nil {
@@ -330,10 +339,10 @@ func TestServeReplacesAnOlderDaemonThatThenOutlivesServe(t *testing.T) {
 }
 
 // TestServeReplacesAnOlderBuildOfTheSameVersion: a daemon of the same version
-// from an older build (by executable mtime) is replaced by a newer build's
-// serve, and the new daemon reports that build's time.
+// from an older build (by executable mtime) of different content is replaced
+// by a newer build's serve, and the new daemon reports that build's time.
 func TestServeReplacesAnOlderBuildOfTheSameVersion(t *testing.T) {
-	oldBin := buildDashboardTestBin(t, "")
+	oldBin := buildDashboardTestBinLD(t, "-X main.sourceCommit=older-build")
 	newBin := buildDashboardTestBin(t, "")
 	hourAgo := time.Now().Add(-time.Hour)
 	if err := os.Chtimes(oldBin, hourAgo, hourAgo); err != nil {
@@ -409,4 +418,56 @@ func TestServeAnswersToolsWithoutADaemon(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestServeKeepsASameContentDaemonOfAnOlderBuild: a daemon running the same
+// bytes as the serve's executable is kept whatever its build time. Claude,
+// Codex, and Pi each install their own copy of one release, and the copies'
+// mtimes differ; replacing on mtime alone drained every session each time
+// another harness started.
+func TestServeKeepsASameContentDaemonOfAnOlderBuild(t *testing.T) {
+	newBin := buildDashboardTestBin(t, "")
+	oldBin := filepath.Join(t.TempDir(), filepath.Base(newBin))
+	data, err := os.ReadFile(newBin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(oldBin, data, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	hourAgo := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(oldBin, hourAgo, hourAgo); err != nil {
+		t.Fatal(err)
+	}
+	env, dir := dashboardTestEnv(t)
+
+	old := exec.Command(oldBin, "dashboard", "--port", "0")
+	old.Env = env
+	if err := old.Start(); err != nil {
+		t.Fatal(err)
+	}
+	oldEp := waitForEndpoint(t, dir, version, 10*time.Second)
+	if info, err := wsdashboard.Health(context.Background(), dashboardTestClient, oldEp); err != nil || info.ContentHash != wsdashboard.ExecutableContentHash(newBin) {
+		t.Fatalf("old daemon health = %+v, %v; want the content hash of %s", info, err, newBin)
+	}
+
+	serveEnv := append(env, "WS_MCP_CONFIG_MANIFESTS="+writeDashboardTestManifest(t, true))
+	serve, stdin := startServe(t, newBin, serveEnv)
+	// startServe returned once the serve answered tools/list, after its
+	// Ensure ran; the daemon it found is the one it keeps.
+	for end := time.Now().Add(2 * time.Second); time.Now().Before(end); time.Sleep(100 * time.Millisecond) {
+		ep, err := wsdashboard.ReadEndpoint(dir)
+		if err != nil || ep.PID != oldEp.PID || ep.Token != oldEp.Token {
+			t.Fatalf("the same-content daemon was replaced: %+v, %v", ep, err)
+		}
+	}
+	if info, err := wsdashboard.Health(context.Background(), dashboardTestClient, oldEp); err != nil || info.PID != oldEp.PID || info.BuildTime != hourAgo.UnixMilli() {
+		t.Fatalf("old daemon after serve = %+v, %v", info, err)
+	}
+	_ = stdin.Close()
+	if err := waitExit(t, serve, 10*time.Second); err != nil {
+		t.Fatalf("serve exit: %v", err)
+	}
+	_ = wsdashboard.RequestShutdown(context.Background(), dashboardTestClient, oldEp)
+	_ = waitExit(t, old, 10*time.Second)
 }

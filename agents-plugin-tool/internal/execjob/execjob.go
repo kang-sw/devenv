@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/kang-sw/devenv/internal/textreader"
+	"github.com/kang-sw/devenv/internal/wsgit"
 	"github.com/kang-sw/devenv/internal/wsstate"
 	"github.com/kang-sw/devenv/internal/wsstore"
 )
@@ -149,6 +150,17 @@ func Launch(opts LaunchOptions) (Response, error) {
 	var cmd *exec.Cmd
 	now := ts()
 	rec := Record{SchemaVersion: schemaVersion, ExecKey: key, Status: stateRunning, Root: filepath.Clean(opts.Root), WorkingDir: wd, StartedAt: now, UpdatedAt: now}
+	env := overlayEnv(opts.Environ, opts.Env)
+	// A bare program name resolves on the PATH the job runs under, not on
+	// this process's: with Environ set (a server the dashboard daemon hosts
+	// for another process) exec.Command's own lookup would use the daemon's
+	// PATH and start the daemon's binary under the caller's environment.
+	program := func(name string) string {
+		if opts.Environ == nil {
+			return name
+		}
+		return wsgit.LookPathEnv(name, env)
+	}
 	if opts.ShellMode {
 		shell, argv := shellCommand(opts.Shell, opts.Command)
 		if opts.Command == "" {
@@ -157,7 +169,7 @@ func Launch(opts LaunchOptions) (Response, error) {
 			_ = combined.Close()
 			return Response{}, errors.New("command is required")
 		}
-		cmd = exec.Command(shell, argv...)
+		cmd = exec.Command(program(shell), argv...)
 		rec.Command = opts.Command
 		rec.Shell = shell
 	} else {
@@ -168,11 +180,11 @@ func Launch(opts LaunchOptions) (Response, error) {
 			return Response{}, errors.New("cmd is required")
 		}
 		argv := append([]string{opts.Cmd}, opts.Args...)
-		cmd = exec.Command(opts.Cmd, opts.Args...)
+		cmd = exec.Command(program(opts.Cmd), opts.Args...)
 		rec.Argv = argv
 	}
 	cmd.Dir = wd
-	cmd.Env = overlayEnv(opts.Environ, opts.Env)
+	cmd.Env = env
 	rec.Env = opts.Env
 	if opts.Stdin != "" {
 		cmd.Stdin = strings.NewReader(opts.Stdin)
@@ -230,6 +242,14 @@ func Result(root, key string) (Response, error) {
 }
 
 func ResultWithTimeout(root, key string, timeout time.Duration) (Response, error) {
+	return ResultWithContext(context.Background(), root, key, timeout)
+}
+
+// ResultWithContext is ResultWithTimeout whose wait also ends when ctx
+// does: the job's current state is returned then, as at the timeout. The
+// server a dashboard daemon hosts passes the context its drain cancels, so
+// a daemon replacement never waits out a caller's timeout.
+func ResultWithContext(ctx context.Context, root, key string, timeout time.Duration) (Response, error) {
 	deadline := time.Time{}
 	if timeout > 0 {
 		deadline = time.Now().Add(timeout)
@@ -244,7 +264,7 @@ func ResultWithTimeout(root, key string, timeout time.Duration) (Response, error
 		}
 		r := responseFor(root, rec, false)
 		r.Guidance = guidance()
-		if timeout <= 0 || time.Now().After(deadline) {
+		if timeout <= 0 || time.Now().After(deadline) || ctx.Err() != nil {
 			return r, nil
 		}
 		sleep := 100 * time.Millisecond
@@ -254,7 +274,12 @@ func ResultWithTimeout(root, key string, timeout time.Duration) (Response, error
 		if sleep <= 0 {
 			return r, nil
 		}
-		time.Sleep(sleep)
+		timer := time.NewTimer(sleep)
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			timer.Stop()
+		}
 	}
 }
 func Abort(root, key string) (Response, error) {

@@ -11,6 +11,7 @@ import (
 	goruntime "runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -333,11 +334,25 @@ func TestHostedMailboxWaitEndsWithItsConnection(t *testing.T) {
 	// owner pid: the daemon's stands in) takes the marker over; the old
 	// wait's end must not remove it.
 	second := connectHosted(t, h.ep, h.hello(wsdashboard.ProxyModeCLI, argv, h.ep.PID, nil))
-	time.Sleep(500 * time.Millisecond)
+	markerPID := func() int {
+		raw, err := os.ReadFile(marker)
+		if err != nil {
+			return 0
+		}
+		var m wsmailbox.ListeningMarker
+		if json.Unmarshal(raw, &m) != nil {
+			return 0
+		}
+		return m.PID
+	}
+	waitUntil(t, 5*time.Second, "the replacement wait owns the marker", func() bool { return markerPID() == h.ep.PID })
 	first.conn.Close()
-	time.Sleep(time.Second)
-	if !exists() {
-		t.Fatal("the old wait's cleanup removed the replacement wait's marker")
+	// The first wait's end (its connection is gone) must leave the
+	// replacement's marker alone, for as long as that end can take.
+	for end := time.Now().Add(time.Second); time.Now().Before(end); time.Sleep(50 * time.Millisecond) {
+		if markerPID() != h.ep.PID {
+			t.Fatal("the old wait's cleanup removed the replacement wait's marker")
+		}
 	}
 
 	// The remaining wait ends with its connection, clearing its marker; no
@@ -374,14 +389,73 @@ func TestHostedConnectionSeeingALANChangeReplacesTheDaemon(t *testing.T) {
 	before := connectHosted(t, h.ep, h.hello(wsdashboard.ProxyModeMCP, []string{"serve", "--stdio"}, os.Getpid(), nil))
 	before.call("initialize", map[string]any{"protocolVersion": "2025-03-26", "capabilities": map[string]any{}})
 
+	// A CLI wait blocked on mail, and a tool call that outlives the drain
+	// budget: the fake git holds `status` for longer than the budget.
+	waiting := connectHosted(t, h.ep, h.hello(wsdashboard.ProxyModeCLI, []string{"mailbox", "wait", "--session-key", "drain-wait-key", "--timeout", "60s", "--format", "json"}, os.Getpid(), nil))
+	slowGit := slowGitDir(t, "status", 3*wsdashboard.DefaultLockWait/2)
+	slow := connectHosted(t, h.ep, h.hello(wsdashboard.ProxyModeMCP, []string{"serve", "--stdio"}, os.Getpid(), map[string]string{"PATH": slowGit + string(os.PathListSeparator) + os.Getenv("PATH")}))
+	slowKey := slow.login(h.project)
+
 	config := `{"schema_version": 1, "overrides": {"dashboard.lan_enabled": "true"}}`
 	if err := os.WriteFile(filepath.Join(h.configHome, "config.json"), []byte(config), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// A hello whose session the dashboard does not apply to, or whose
+	// global config is another one, never triggers the replacement: it
+	// declares no dashboard manifest, sets WS_MCP_NO_DASHBOARD=1, or
+	// carries a WS_CONFIG_HOME other than the daemon's.
+	for name, overrides := range map[string]map[string]string{
+		"no manifest":       {"WS_MCP_CONFIG_MANIFESTS": ""},
+		"dashboard off":     {"WS_MCP_NO_DASHBOARD": "1"},
+		"other config home": {"WS_CONFIG_HOME": t.TempDir()},
+	} {
+		c := connectHosted(t, h.ep, h.hello(wsdashboard.ProxyModeMCP, []string{"serve", "--stdio"}, os.Getpid(), overrides))
+		if init := c.call("initialize", map[string]any{"protocolVersion": "2025-03-26", "capabilities": map[string]any{}}); init["result"] == nil {
+			t.Fatalf("%s: initialize = %v", name, init)
+		}
+		c.conn.Close()
+	}
+	for end := time.Now().Add(2 * time.Second); time.Now().Before(end); time.Sleep(100 * time.Millisecond) {
+		ep, err := wsdashboard.ReadEndpoint(h.dir)
+		if err != nil || ep.PID != h.ep.PID {
+			t.Fatalf("a session the LAN change does not apply to replaced the daemon: %+v, %v", ep, err)
+		}
+	}
+	if info, err := wsdashboard.Health(context.Background(), dashboardTestClient, h.ep); err != nil || info.LAN {
+		t.Fatalf("health after the ignored hellos = %+v, %v", info, err)
+	}
+
+	// The slow call starts before the trigger; its answer must still come.
+	slow.nextID++
+	slowCallID := slow.nextID
+	slow.send(map[string]any{"jsonrpc": "2.0", "id": slowCallID, "method": "tools/call", "params": map[string]any{"name": "git.status", "arguments": map[string]any{"session_key": slowKey}}})
+	slowSentAt := time.Now()
+	time.Sleep(300 * time.Millisecond)
+
 	// The next session sees the new global value; the daemon replaces
 	// itself and drains the sessions it hosts.
 	trigger := connectHosted(t, h.ep, h.hello(wsdashboard.ProxyModeMCP, []string{"serve", "--stdio"}, os.Getpid(), nil))
 	trigger.call("initialize", map[string]any{"protocolVersion": "2025-03-26", "capabilities": map[string]any{}})
+	triggeredAt := time.Now()
+
+	// The blocked CLI wait is cancelled at once: its final frame carries
+	// the interrupted code well inside the drain budget.
+	var final map[string]any
+	for final == nil {
+		frame, ok := waiting.readLine(wsdashboard.DefaultLockWait)
+		if !ok {
+			t.Fatal("the waiting stream ended without a final frame")
+		}
+		if frame["final"] == true {
+			final = frame
+		}
+	}
+	if code, _ := final["exit_code"].(float64); int(code) != mailboxWaitExitInterrupted {
+		t.Fatalf("drained wait's final frame = %v", final)
+	}
+	if time.Since(triggeredAt) > wsdashboard.DefaultLockWait {
+		t.Fatalf("the drained wait ended %v after the trigger", time.Since(triggeredAt))
+	}
 
 	var successor wsdashboard.Endpoint
 	waitUntil(t, 30*time.Second, "a LAN daemon with a new pid", func() bool {
@@ -401,10 +475,98 @@ func TestHostedConnectionSeeingALANChangeReplacesTheDaemon(t *testing.T) {
 			t.Fatalf("%s: a line instead of the drained stream's end", name)
 		}
 	}
+	// The successor serves while the predecessor still runs the slow call:
+	// the lock and endpoint were released before that call ended.
+	if !processExists(h.ep.PID) {
+		t.Fatal("the predecessor exited before its slow call ended")
+	}
 	after := connectHosted(t, successor, h.hello(wsdashboard.ProxyModeMCP, []string{"serve", "--stdio"}, os.Getpid(), nil))
 	init := after.call("initialize", map[string]any{"protocolVersion": "2025-03-26", "capabilities": map[string]any{}})
 	if init["result"] == nil {
 		t.Fatalf("initialize on the successor = %v", init)
+	}
+	// ... and the slow call's answer is delivered before its stream ends.
+	for {
+		resp, ok := slow.readLine(3 * wsdashboard.DefaultLockWait)
+		if !ok {
+			t.Fatal("the slow session's stream ended before its call was answered")
+		}
+		if id, _ := resp["id"].(float64); int(id) == slowCallID {
+			if resp["error"] != nil || !strings.Contains(toolText(t, resp), "master") {
+				t.Fatalf("slow git.status answer = %v", resp)
+			}
+			if held := time.Since(slowSentAt); held < 3*wsdashboard.DefaultLockWait/2-500*time.Millisecond {
+				t.Fatalf("the slow call answered after %v; the fake git did not hold it", held)
+			}
+			break
+		}
+	}
+	if _, ok := slow.readLine(wsdashboard.DefaultLockWait); ok {
+		t.Fatal("a line after the slow session's answer")
+	}
+	waitUntil(t, 10*time.Second, "the predecessor to exit", func() bool { return !processExists(h.ep.PID) })
+}
+
+// slowGitDir is a directory with a git that holds the given subcommand for
+// delay before running the real git with the same arguments, marking its
+// stderr so a caller can tell it ran.
+func slowGitDir(t *testing.T, subcommand string, delay time.Duration) string {
+	t.Helper()
+	if goruntime.GOOS == "windows" {
+		t.Skip("the slow git is a POSIX shell script")
+	}
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git not on PATH")
+	}
+	dir := t.TempDir()
+	script := "#!/bin/sh\n" +
+		"for a in \"$@\"; do if [ \"$a\" = " + subcommand + " ]; then sleep " + strconv.FormatFloat(delay.Seconds(), 'f', 1, 64) + "; echo SLOW-GIT-DONE >&2; break; fi; done\n" +
+		"exec " + realGit + " \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "git"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// processExists reports whether pid is alive (Unix: signal 0).
+func processExists(pid int) bool {
+	p, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	return p.Signal(syscall.Signal(0)) == nil
+}
+
+// TestHostedMailboxWaitResolvesARelativeRootAgainstTheHelloCwd: a relative
+// --root names a directory under the launcher's cwd, not the daemon's. The
+// worktree-scope slug makes the root matter: the wait resolves that store
+// under the root, which exists only under the project.
+func TestHostedMailboxWaitResolvesARelativeRootAgainstTheHelloCwd(t *testing.T) {
+	h := startHostedDaemon(t)
+	if err := os.MkdirAll(filepath.Join(h.project, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat("sub"); err == nil {
+		t.Fatal("the daemon's cwd has a sub directory too; the test cannot tell the roots apart")
+	}
+	argv := []string{"mailbox", "wait", "--session-key", "relative-root-key", "--root", "sub", "--slug", "amber@worktree", "--timeout", "1s", "--format", "json"}
+	c := connectHosted(t, h.ep, h.hello(wsdashboard.ProxyModeCLI, argv, os.Getpid(), nil))
+	var final map[string]any
+	var stderr strings.Builder
+	for final == nil {
+		frame, ok := c.readLine(10 * time.Second)
+		if !ok {
+			t.Fatalf("stream ended before the final frame; stderr: %s", stderr.String())
+		}
+		if frame["final"] == true {
+			final = frame
+		} else if data, _ := frame["data"].(string); frame["stream"] == "stderr" {
+			stderr.WriteString(data)
+		}
+	}
+	if code, _ := final["exit_code"].(float64); int(code) != mailboxWaitExitTimeout {
+		t.Fatalf("final frame = %v; stderr: %s", final, stderr.String())
 	}
 }
 

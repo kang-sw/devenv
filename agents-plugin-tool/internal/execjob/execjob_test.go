@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -449,5 +450,57 @@ func writeLegacyState(t *testing.T, root, key string, rec Record, stdout, stderr
 	}
 	if err := os.WriteFile(filepath.Join(dir, "state.json"), append(raw, '\n'), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestLaunchResolvesABareCommandOnTheEnvironPATH: with Environ set, a bare
+// Cmd is looked up on that environment's PATH, not this process's. A server
+// the dashboard daemon hosts runs the launcher's tools, not the daemon's.
+func TestLaunchResolvesABareCommandOnTheEnvironPATH(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake command is a POSIX shell script")
+	}
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	root := gitRoot(t)
+	fakeDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(fakeDir, "execjob-only-on-environ"), []byte("#!/bin/sh\necho from-environ-path\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	res, err := Launch(LaunchOptions{Root: root, Cmd: "execjob-only-on-environ", Environ: []string{"PATH=" + fakeDir + string(os.PathListSeparator) + os.Getenv("PATH")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != stateSucceeded || strings.TrimSpace(res.Stdout) != "from-environ-path" {
+		t.Fatalf("launch on the environ PATH = %#v", res)
+	}
+	if res, err := Launch(LaunchOptions{Root: root, Cmd: "execjob-only-on-environ"}); err == nil && res.Status == stateSucceeded {
+		t.Fatalf("the process PATH resolved a command only the environ PATH has: %#v", res)
+	}
+}
+
+// TestResultWithContextEndsAWaitWhenTheContextEnds: a blocking result wait
+// returns the still-running job as soon as ctx ends, not at its timeout.
+// Server.Drain cancels that context so a drain never waits out a long
+// timeout_seconds.
+func TestResultWithContextEndsAWaitWhenTheContextEnds(t *testing.T) {
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	root := gitRoot(t)
+	res, err := Launch(LaunchOptions{Root: root, Cmd: os.Args[0], Args: []string{"-test.run=TestHelperProcess", "--", "slowabort"}, Env: map[string]string{"GO_WANT_HELPER_PROCESS": "1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _, _ = Abort(root, res.ExecKey) }()
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(300*time.Millisecond, cancel)
+	start := time.Now()
+	out, err := ResultWithContext(ctx, root, res.ExecKey, 20*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(start); elapsed > 3*time.Second {
+		t.Fatalf("the wait ran %v past a context that ended at 300ms", elapsed)
+	}
+	if terminal(out.Status) {
+		t.Fatalf("status = %s, want the job still running", out.Status)
 	}
 }

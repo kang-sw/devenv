@@ -238,9 +238,27 @@ func TestLauncherServesThroughTheDaemonItStartsFromTheStagedCopy(t *testing.T) {
 	// The daemon runs from the staged copy, and it alone.
 	dir, _ := wsdashboard.Dir(cache)
 	ep := waitForEndpoint(t, dir, version, 5*time.Second)
+	// Its name follows Go's StageExecutable rule for the runtime binary the
+	// launcher staged (a copy of bin under the runtime dir, named
+	// ws-mcp-<version>-<hash>): sha256[:16] of the content plus
+	// filepath.Ext of that name, lower-cased.
+	runtimeEntries, err := os.ReadDir(envValue(t, env, "WS_MCP_RUNTIME_DIR"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtimeName := ""
+	for _, e := range runtimeEntries {
+		if strings.HasPrefix(e.Name(), "ws-mcp-") {
+			runtimeName = e.Name()
+		}
+	}
+	if runtimeName == "" {
+		t.Fatalf("runtime dir entries = %v, want the staged runtime binary", runtimeEntries)
+	}
+	wantStaged := "ws-mcp-dashboard-" + wsdashboard.ExecutableContentHash(bin)[:16] + strings.ToLower(filepath.Ext(runtimeName))
 	entries, err := os.ReadDir(filepath.Join(dir, "bin"))
-	if err != nil || len(entries) != 1 || !strings.HasPrefix(entries[0].Name(), "ws-mcp-dashboard-") {
-		t.Fatalf("staged binaries = %v (%v), want exactly one ws-mcp-dashboard-* entry", entries, err)
+	if err != nil || len(entries) != 1 || entries[0].Name() != wantStaged {
+		t.Fatalf("staged binaries = %v (%v), want exactly %s (the Python staging must name the copy as Go's StageExecutable does)", entries, err, wantStaged)
 	}
 	if ep.PID == client.cmd.Process.Pid {
 		t.Fatal("the daemon is the launcher process")

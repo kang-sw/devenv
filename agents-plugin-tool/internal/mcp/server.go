@@ -64,6 +64,11 @@ type Server struct {
 	inflight     int
 	draining     bool
 	inflightDone chan struct{}
+	// drainCtx ends when Drain begins: the blocking waits a tool call holds
+	// (exec.result's timeout) select on it, so a drain cancels them at once
+	// instead of waiting them out.
+	drainCtx    context.Context
+	drainCancel context.CancelFunc
 }
 
 // gitStatusResult keeps the generic git observation intact while allowing the
@@ -848,7 +853,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		}
 		key, _ := params.Arguments["exec_key"].(string)
 		timeout := durationFromSeconds(params.Arguments["timeout_seconds"])
-		result, err := execjob.ResultWithTimeout(root, key, timeout)
+		result, err := execjob.ResultWithContext(s.drainContext(), root, key, timeout)
 		return execResponse(req.ID, result, err, true)
 	case "exec.abort":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
