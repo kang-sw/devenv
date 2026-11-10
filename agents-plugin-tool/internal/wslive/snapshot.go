@@ -65,6 +65,14 @@ const (
 	// CaptionRunes and LabelRunes bound an agent's caption and label.
 	CaptionRunes = 200
 	LabelRunes   = 120
+	// ModelRunes and EffortRunes bound a subagent's model and reasoning
+	// effort; MaxOutputTps bounds its output rate, past which a reported
+	// rate is a measuring error and dropped.
+	ModelRunes   = 80
+	EffortRunes  = 16
+	MaxOutputTps = 100_000
+	// MaxContextTokens bounds a subagent's reported context size.
+	MaxContextTokens = 1e12
 	// TextBytes bounds a streamed reply in the snapshot and a user message or
 	// reply in the ring; a longer text keeps its head and is marked truncated.
 	TextBytes = 64 << 10
@@ -257,6 +265,15 @@ type Agent struct {
 	Status    string `json:"status"`
 	StartedAt int64  `json:"startedAt,omitempty"`
 	EndedAt   int64  `json:"endedAt,omitempty"`
+	// Model and Effort are what the subagent runs on and its reasoning
+	// effort, ContextTokens its current context size (the latest model
+	// request's whole input), and OutputTps its output tokens per second,
+	// as its adapter last reported them. Each is absent while unknown;
+	// OutputTps is also absent once the subagent ended.
+	Model         string  `json:"model,omitempty"`
+	Effort        string  `json:"effort,omitempty"`
+	ContextTokens int64   `json:"contextTokens,omitempty"`
+	OutputTps     float64 `json:"outputTps,omitempty"`
 }
 
 // Permission is a tool permission prompt the agent waits on. The approval

@@ -1,8 +1,11 @@
 {
+  "agent.context": "上下文：{0} token",
   "agent.done": "已完成",
   "agent.failed": "失敗",
+  "agent.model": "模型：{0}",
   "agent.name": "代理程式 {0}",
   "agent.open": "開啟此委派代理程式的頁面（{0}）",
+  "agent.rate": "輸出：{0} token/秒",
   "band.cache": "CH {0}",
   "band.cache.title": "上一次回應的提示快取命中率",
   "band.cost": "工作階段費用",
