@@ -8,6 +8,8 @@ import (
 	"os"
 	"slices"
 	"sync"
+
+	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
 // Shared page renders. Every stream of one page (one session, or the
@@ -41,12 +43,13 @@ type refreshInputs struct {
 	ids      []string
 	watch    []string
 	contacts bool
-	// volatile is PageContent.Volatile: no stamp covers the page.
-	volatile bool
+	// pids are PageContent.WatchPIDs, sorted: the stamp folds each one's
+	// liveness.
+	pids []int
 }
 
 func (a refreshInputs) equal(b refreshInputs) bool {
-	return a.contacts == b.contacts && a.volatile == b.volatile && slices.Equal(a.ids, b.ids) && slices.Equal(a.watch, b.watch)
+	return a.contacts == b.contacts && slices.Equal(a.ids, b.ids) && slices.Equal(a.watch, b.watch) && slices.Equal(a.pids, b.pids)
 }
 
 // pageRender is one render of a page.
@@ -102,8 +105,9 @@ type sharedPage struct {
 	r  pageRender
 	// stamp is the refresh stamp taken before the render read anything,
 	// valid only when stampOK: the render's inputs equal the ones it was
-	// taken from. A wake-driven render leaves it unknown, and the next
-	// refresh tick re-renders.
+	// taken from. Every render after the first takes it, a wake-driven one
+	// included; the first has no inputs to take it from, so the next
+	// refresh tick re-renders once.
 	stamp   string
 	stampOK bool
 }
@@ -134,7 +138,8 @@ func (c *pageCache) release(key pageKey, p *sharedPage) {
 // get returns the page's current render and the broker sequence it was
 // taken at. It renders only when a wake since the last render named one of
 // its dependencies, or, on a refresh tick (refresh), when the refresh stamp
-// is unknown or changed.
+// is unknown or changed. A stamp taken before a render and unchanged since
+// means a change during that render is still seen: it moves the stamp.
 func (c *pageCache) get(p *sharedPage, src pageSource, refresh bool) (pageRender, uint64) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -143,9 +148,11 @@ func (c *pageCache) get(p *sharedPage, src pageSource, refresh bool) (pageRender
 		c.stats.Shared.Add(1)
 		return p.r, p.at
 	}
+	// The stamp is taken before any render, a wake-driven one included,
+	// so the next refresh tick skips a page this render left current.
 	var stamp string
 	var stampOK bool
-	if p.rendered && refresh {
+	if p.rendered {
 		stamp, stampOK = src.stamp(p.r.inputs)
 		if current && stampOK && p.stampOK && stamp == p.stamp {
 			c.stats.RefreshSkips.Add(1)
@@ -174,6 +181,9 @@ func statStamp(h hash.Hash, path string) {
 	}
 	fmt.Fprintf(h, "%s\x00%d\x00%d\x01", path, info.ModTime().UnixNano(), info.Size())
 }
+
+// processAlive reports whether a watched process runs (a test seam).
+var processAlive = wsstate.ProcessAlive
 
 func sumHex(h hash.Hash) string { return hex.EncodeToString(h.Sum(nil)[:16]) }
 

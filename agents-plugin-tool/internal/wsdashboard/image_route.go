@@ -1,6 +1,7 @@
 package wsdashboard
 
 import (
+	"container/list"
 	"encoding/base64"
 	"io"
 	"net/http"
@@ -8,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 
 	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
@@ -212,24 +215,120 @@ const imageDataMax = 2 << 20
 // (containedImage), for a topic body's sandboxed frame: the frame's opaque
 // origin sends no cookie, so in LAN mode the image route would refuse it. It
 // is empty when the route would refuse the path or the file is larger than
-// imageDataMax; the page then falls back to the route's URL (ImageSrc). The
-// file is read on every render, which is what keeps the inlined image
-// current.
+// imageDataMax; the page then falls back to the route's URL (ImageSrc).
+// The containment checks run on every call; the encoded result is cached by
+// the resolved file's path, size, and modification time (imageDataCache),
+// so an unchanged image is read once while an edited one is read again.
 func ImageDataURL(root, path string) string {
-	file, ctype, ok := containedImage(root, path)
+	file, ctype, info, ok := containedImageInfo(root, path)
 	if !ok {
 		return ""
 	}
+	key := imageDataKey{file: file, size: info.Size(), mod: info.ModTime().UnixNano()}
+	if url, ok := imageData.get(key); ok {
+		return url
+	}
+	url, ok := readImageDataURL(file, ctype)
+	if ok {
+		imageData.put(key, url)
+	}
+	return url
+}
+
+// readImageDataURL reads file as a data: URL of type ctype. ok reports a
+// result worth caching: the URL, or "" for a file over imageDataMax; a
+// failed read is not.
+func readImageDataURL(file, ctype string) (url string, ok bool) {
+	imageDataReads.Add(1)
 	f, err := os.Open(file)
 	if err != nil {
-		return ""
+		return "", false
 	}
 	defer f.Close()
 	data, err := io.ReadAll(io.LimitReader(f, imageDataMax+1))
-	if err != nil || len(data) > imageDataMax {
-		return ""
+	if err != nil {
+		return "", false
 	}
-	return "data:" + ctype + ";base64," + base64.StdEncoding.EncodeToString(data)
+	if len(data) > imageDataMax {
+		return "", true
+	}
+	return "data:" + ctype + ";base64," + base64.StdEncoding.EncodeToString(data), true
+}
+
+// imageDataReads counts readImageDataURL's file reads (a test probe).
+var imageDataReads atomic.Int64
+
+// imageDataCacheMax bounds the bytes of data: URLs imageData holds; past
+// it the least recently used go first.
+const imageDataCacheMax = 64 << 20
+
+// imageData is the process's inlined-image cache.
+var imageData = newImageDataCache(imageDataCacheMax)
+
+// imageDataKey names one state of a resolved image file: the real path
+// containedImage returns after resolving every symlink, so two spellings of
+// one file share an entry, and its size and modification time, so an edit
+// misses.
+type imageDataKey struct {
+	file      string
+	size, mod int64
+}
+
+// imageDataCache is a bounded LRU of inlined images by imageDataKey.
+type imageDataCache struct {
+	mu    sync.Mutex
+	max   int
+	bytes int
+	order *list.List // of *imageDataEntry, most recent first
+	byKey map[imageDataKey]*list.Element
+}
+
+type imageDataEntry struct {
+	key imageDataKey
+	url string
+}
+
+func newImageDataCache(max int) *imageDataCache {
+	return &imageDataCache{max: max, order: list.New(), byKey: map[imageDataKey]*list.Element{}}
+}
+
+func (c *imageDataCache) get(key imageDataKey) (string, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	el, ok := c.byKey[key]
+	if !ok {
+		return "", false
+	}
+	c.order.MoveToFront(el)
+	return el.Value.(*imageDataEntry).url, true
+}
+
+// put stores url under key, dropping any older state of the same file and
+// then the least recently used entries past max. A URL larger than max is
+// not kept.
+func (c *imageDataCache) put(key imageDataKey, url string) {
+	if len(url) > c.max {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for k, el := range c.byKey {
+		if k.file == key.file {
+			c.remove(el)
+		}
+	}
+	c.byKey[key] = c.order.PushFront(&imageDataEntry{key: key, url: url})
+	c.bytes += len(url)
+	for c.bytes > c.max {
+		c.remove(c.order.Back())
+	}
+}
+
+func (c *imageDataCache) remove(el *list.Element) {
+	e := el.Value.(*imageDataEntry)
+	c.order.Remove(el)
+	delete(c.byKey, e.key)
+	c.bytes -= len(e.url)
 }
 
 // relativeInside lexically resolves path against root and returns it
@@ -272,33 +371,40 @@ func insideRel(rel string) bool {
 // containedImage resolves path to the regular image file the route may serve
 // for root, with its content type.
 func containedImage(root, path string) (file, ctype string, ok bool) {
+	file, ctype, _, ok = containedImageInfo(root, path)
+	return file, ctype, ok
+}
+
+// containedImageInfo is containedImage with the resolved file's stat.
+func containedImageInfo(root, path string) (file, ctype string, info os.FileInfo, ok bool) {
 	rel, ok := relativeInside(root, path)
 	if !ok {
-		return "", "", false
+		return "", "", nil, false
 	}
 	ctype, ok = imageType(rel)
 	if !ok {
-		return "", "", false
+		return "", "", nil, false
 	}
 	realRoot, err := filepath.EvalSymlinks(root)
 	if err != nil {
-		return "", "", false
+		return "", "", nil, false
 	}
 	real, err := filepath.EvalSymlinks(filepath.Join(root, rel))
 	if err != nil {
-		return "", "", false
+		return "", "", nil, false
 	}
 	if realRel, err := filepath.Rel(realRoot, real); err != nil || !insideRel(realRel) {
-		return "", "", false
+		return "", "", nil, false
 	}
 	if _, ok := imageType(real); !ok {
-		return "", "", false
+		return "", "", nil, false
 	}
 	// Stat before opening: opening a FIFO would block the handler.
-	if info, err := os.Stat(real); err != nil || !info.Mode().IsRegular() {
-		return "", "", false
+	info, err = os.Stat(real)
+	if err != nil || !info.Mode().IsRegular() {
+		return "", "", nil, false
 	}
-	return real, ctype, true
+	return real, ctype, info, true
 }
 
 // handleImage serves the image route of one session.

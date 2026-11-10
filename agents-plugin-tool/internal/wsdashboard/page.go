@@ -81,10 +81,12 @@ type PageContent struct {
 	// The paths are the daemon's alone (some carry a session key) and never
 	// reach a page, so they are kept out of any encoding.
 	Watch []string `json:"-"`
-	// Volatile reports page content no watched file covers, such as a
-	// process's liveness (an armed mailbox wait whose process may die and
-	// leave its marker): every refresh tick re-reads such a page.
-	Volatile bool
+	// WatchPIDs names the processes whose liveness the page shows and no
+	// watched file covers (an armed mailbox wait whose process may die and
+	// leave its marker): a stream's refresh stamp folds each one's liveness
+	// at tick time, so a death re-reads the page. Like Watch, they never
+	// reach a page.
+	WatchPIDs []int `json:"-"`
 }
 
 // ContactSource is a PageSource that re-reads a session's contacts alone

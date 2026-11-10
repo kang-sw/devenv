@@ -8,6 +8,7 @@ related:
   261110-feat-ws-tracker-support-agent-ui-commands: "its ui markers act only when they arrive live on the support chat stream, which Decision 10 must not drop"
 sage-review-design-reviewed: c1c9683997baf0a1
 sage-review-completeness-reviewed: c1c9683997baf0a1
+completed: 2026-11-10
 ---
 
 # Dashboard render cost and frontend load accumulation
@@ -333,6 +334,36 @@ at today's latency); `go test ./...` under `agents-plugin-tool` through
 `ws-rgo`; and a before/after CPU measurement (see Constraints for the
 harness), reported in the Result.
 
+### Result (b0e680e23) - 2026-11-10
+
+- Board memo in `DashboardSessionSource` (mcp), per reply-id and language,
+  keyed by board Seq, todos, agenda, re-ask times, language, and the
+  listening marker's PID and liveness, and verified by a stat stamp of the
+  files the render named (taken before the render, trusted only when the
+  new render named the same files). Off with dev assets. Contacts stay
+  outside the memo.
+- `ReadSession` carries `CountPolicy`; the index reads no session page and
+  the reply-id+Rev board-count memo is removed (fixes the leave/rejoin
+  stale count).
+- `PageContent.Volatile` replaced by `WatchPIDs`; the refresh stamp folds
+  each PID's liveness, and every render after the first takes its stamp
+  first, so a woken render is not repeated on the next tick.
+- `ImageDataURL` caches by resolved file + size + mtime in a 64 MiB LRU;
+  over-cap results are cached as empty, read errors are not cached.
+- Git watcher wakes `gitDep` only when the badge (ignoring its read time)
+  changed. `PollOnce` reports change; `StartPoll` notifies only on change
+  and on its first round. The 2 s watch, 15 s tick, and 30 s index refresh
+  are unchanged.
+- Decision 5: an intake batch whose every change is a `KindAgent` event
+  with an `AgentID` waits up to `debounceAgent` (1 s); permission prompts
+  (including a subagent's), lead batches, and status keep 100/250 ms.
+- Verification: new tests for each item above; `go test ./...` via ws-rgo
+  green. CPU (remote server, isolated daemon, 18 PNGs ~3 MB, ~20 subagent
+  events/s), before -> after: images on, session+index 192.6% -> 19.9%,
+  session 130.8% -> 20.6%, index 135.4% -> 10.0%; images off,
+  session+index 28.0% -> 13.7%; idle <= 0.5% both. No-stream driving
+  (the intake process itself) 6.9-12.3% -> 10.2-11.1%, within run noise.
+
 ### Phase 2: frontend accumulation
 
 Decisions 6-11. Verification: `node --check` on the changed assets; `go test
@@ -355,6 +386,50 @@ newest content; (e) a multi-store tracker revision
 triggers one drawer render, and none while the drawer and item window are
 closed; and (f) an unchanged `.sentdata` swap does not touch `sent-*`
 classes.
+
+### Result (d67107d59) - 2026-11-10
+
+- Decision 6: the per-second tick visits only since/ago times and usage
+  paces, writes only on change, and skips while `document.hidden` (catching
+  up on show); clock/weekday text and titles are formatted once per element
+  and again on a language change.
+- Decision 7: session and support-chat entry boxes keep a key set, cap at
+  150 entries (3x RingCap) while pinned, reset on a gap, and run image
+  sweep, open-state restore, and mermaid detection on inserted nodes only;
+  the history cursor resets on eviction/gap with an epoch guard; replayed
+  support-chat `ui` lines do not act.
+- Decision 8: `page.tmpl` topic sections carry an escaped `data-topic`; a
+  board swap keeps a topic whose incoming HTML is unchanged (node and
+  iframe); expanded closed pages survive swaps, deduped against the capped
+  section; the closed-page refetch is gone. `form.js` now binds each control
+  once and looks up the reply bar late (kept topics would double-bind).
+- Decision 9: coalescing in the `AD.onChange` subscriber with a timer;
+  synchronous `render()` cancels it; with no drawer, page, or item window
+  open a render updates only handles and marks and keeps `X.rendered`
+  current. Deviation: a bare `setTimeout(0)` measured 2-3 redraws per
+  multi-store revision (each store view lands in its own task), so
+  `tkReadAll`'s per-store notifies pass a "more coming" hint
+  (`tkNotify(true)`) and the subscriber holds such a notice up to 100 ms;
+  the final notice renders on the next tick. Notify order is unchanged
+  (readall test green); partial-store rows may show up to 100 ms later.
+- Decision 10: hidden tab keeps the main and support streams open, records
+  only the newest region HTML/hash (reported by `held()`), applies once on
+  show; mode and tracker events and live `ui` lines still act.
+- Decision 11: `applySent` skips on an unchanged `.sentdata` signature
+  unless a board swap forces it.
+- Verification: `node --check`; `go test ./...` via ws-rgo green (new
+  `TestRenderPageTopicKeyAttribute`); headless chrome-headless-shell on an
+  isolated daemon covered (a)-(f) as specified (hidden state emulated by
+  overriding `document.hidden` + `visibilitychange`; (f) via injected
+  convlive events), plus the tracker mockup.
+- Lite review (329b7cf7f): clean, two minors. Fixed: memo test now covers
+  a liveness-only marker change. Open: a poll round that only moved a
+  store's `SyncedAt` no longer notifies, so the sync popover's absolute
+  "synced at" time (and the ribbon age, which uses the server read time)
+  stays at the last re-read until another change; folding `SyncedAt` in
+  would notify every successful round.
+- Open: a topic deleted from the capped closed section while closed pages
+  are expanded stays shown until reload.
 
 ## Sage Review Round 1 (2026-11-10)
 

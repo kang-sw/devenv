@@ -73,8 +73,8 @@ type GitBadge struct {
 	// Err is a failed read's git message.
 	Err string
 	// At is when the read finished (epoch ms; 0 before the first). It is in
-	// the badge's markup, so each read changes the region and a page that
-	// asked for a read sees its answer arrive even when nothing changed.
+	// the badge's markup, but a read that differs from the last one only by
+	// At wakes no page (sameBadge), so a page may show an older At.
 	At int64
 }
 
@@ -348,10 +348,22 @@ func (g *gitWatcher) run(key string, r *gitRoot) {
 		badge.At = last.UnixMilli()
 		tick = g.after(g.interval)
 		g.mu.Lock()
+		same := r.badge != nil && sameBadge(*r.badge, badge)
 		r.badge = &badge
 		g.mu.Unlock()
-		g.changed(key)
+		// A read that found what the last one did wakes no page: every
+		// session page on the root would re-render for nothing.
+		if !same {
+			g.changed(key)
+		}
 	}
+}
+
+// sameBadge reports whether two reads found the same standing: every field
+// but At, which each read stamps.
+func sameBadge(a, b GitBadge) bool {
+	a.At, b.At = 0, 0
+	return a == b
 }
 
 // viewed reports whether r still has a viewer and the daemon runs, dropping

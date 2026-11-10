@@ -24,6 +24,8 @@ type fakeGit struct {
 
 	mu    sync.Mutex
 	count map[string]int
+	// still, when set, makes every read report the same standing.
+	still bool
 }
 
 type fakeWait struct {
@@ -42,6 +44,9 @@ func (f *fakeGit) read(root string) GitBadge {
 	f.mu.Lock()
 	f.count[root]++
 	n := f.count[root]
+	if f.still {
+		n = 1
+	}
 	f.mu.Unlock()
 	f.reads <- root
 	return GitBadge{State: gitOK, Root: root, Repo: wslive.Repo{Branch: "main", Upstream: "origin/main", Ahead: n}}
@@ -154,6 +159,33 @@ func TestGitWatcherReadsWhileViewedOnly(t *testing.T) {
 	}
 	if f.readCount("/repo") != 2 {
 		t.Fatalf("reads = %d, want 2", f.readCount("/repo"))
+	}
+}
+
+// TestGitWatcherWakesOnlyOnAChangedRead: a read that finds the standing
+// the last one found (only its At differs) tells no change, so no page on
+// the root re-renders; the badge still holds the newer read.
+func TestGitWatcherWakesOnlyOnAChangedRead(t *testing.T) {
+	f := newFakeGit()
+	f.still = true
+	g, changed := newTestWatcher(t, f)
+	release := g.watch("/repo")
+	defer release()
+	expectRead(t, f, "/repo")
+	<-changed // the first read always changes the pending badge
+	first := g.badge("/repo").At
+
+	time.Sleep(5 * time.Millisecond) // a later At
+	nextWait(t, f, gitReadInterval).ch <- time.Now()
+	expectRead(t, f, "/repo")
+	nextWait(t, f, gitReadInterval)
+	select {
+	case got := <-changed:
+		t.Fatalf("an unchanged read told a change of %q", got)
+	case <-time.After(100 * time.Millisecond):
+	}
+	if b := g.badge("/repo"); b.At <= first {
+		t.Fatalf("badge At = %d after the second read, want past %d", b.At, first)
 	}
 }
 

@@ -49,11 +49,14 @@ const dashboardIntakeTool = "dashboard.intake"
 
 // liveSeams are the writer's timings and file writers (test seams).
 // debounceUrgent applies to a change of the lead's phase or streamed reply,
-// debounce to every other change; changes inside one window coalesce into one
-// write. Timer goroutines read the seams, so they sit behind a lock.
+// debounceAgent to a batch whose every change is a subagent's own activity
+// (agentOnlyEvent), and debounce to every other change; changes inside one
+// window coalesce into one write, and an earlier pending write is never
+// pushed back. Timer goroutines read the seams, so they sit behind a lock.
 type liveSeams struct {
 	debounceUrgent time.Duration
 	debounce       time.Duration
+	debounceAgent  time.Duration
 	heartbeat      time.Duration
 	writeSnapshot  func(path string, data []byte) error
 	appendRing     func(dir string, entries []wslive.RingEntry) error
@@ -65,6 +68,7 @@ var (
 	liveSeam   = liveSeams{
 		debounceUrgent: 100 * time.Millisecond,
 		debounce:       250 * time.Millisecond,
+		debounceAgent:  time.Second,
 		heartbeat:      wslive.HeartbeatInterval,
 		writeSnapshot:  writeWhiteboardFile,
 		appendRing:     wslive.AppendRing,
@@ -295,9 +299,12 @@ func (s *Server) handleDashboardIntake(id json.RawMessage, args map[string]any) 
 		applied  int
 		changed  bool
 		urgent   bool
+		// agentOnly stays true while every change is a subagent's own.
+		agentOnly bool
 	)
 	ls.mu.Lock()
 	changed = ls.state.SetAdapter(adapter)
+	agentOnly = !changed
 	for i, raw := range rawEvents {
 		ev, derr := decodeLiveEvent(raw)
 		if derr == nil {
@@ -307,6 +314,9 @@ func (s *Server) handleDashboardIntake(id json.RawMessage, args map[string]any) 
 				applied++
 				changed = changed || res.Changed
 				urgent = urgent || res.Urgent
+				if res.Changed || len(res.Ring) > 0 {
+					agentOnly = agentOnly && agentOnlyEvent(ev)
+				}
 				ring = append(ring, res.Ring...)
 				continue
 			}
@@ -316,8 +326,11 @@ func (s *Server) handleDashboardIntake(id json.RawMessage, args map[string]any) 
 	if changed {
 		seams := currentLiveSeams()
 		delay := seams.debounce
-		if urgent {
+		switch {
+		case urgent:
 			delay = seams.debounceUrgent
+		case agentOnly:
+			delay = seams.debounceAgent
 		}
 		ls.scheduleLocked(delay)
 	}
@@ -335,6 +348,15 @@ func (s *Server) handleDashboardIntake(id json.RawMessage, args map[string]any) 
 		b.WriteString("skipped " + p + "\n")
 	}
 	return toolTextResponse(id, b.String(), nil)
+}
+
+// agentOnlyEvent reports an event that moves only a subagent's own row (and
+// the subagent counts the page derives from the rows): an agent event that
+// names an agent. Its snapshot write may wait debounceAgent. A permission
+// prompt, a lead-level agent event (the lead's batches), a status event, and
+// every other kind go out at the usual latency.
+func agentOnlyEvent(ev wslive.Event) bool {
+	return ev.Kind == wslive.KindAgent && ev.AgentID != ""
 }
 
 func decodeLiveEvent(raw any) (wslive.Event, error) {

@@ -716,7 +716,6 @@ type IndexRow struct {
 type indexInput struct {
 	Session  Session
 	Snapshot *wslive.Snapshot
-	Page     PageContent
 }
 
 // buildIndexView groups sessions by project. A live session is listed; an
@@ -737,8 +736,8 @@ func buildIndexView(sessions []indexInput, now time.Time, version string) IndexV
 			ReplyID:     reg.ReplyID,
 			Harness:     reg.Harness,
 			Live:        reg.Live(now),
-			HasBoard:    in.Page.HasBoard,
-			CountPolicy: in.Page.Board.CountPolicy,
+			HasBoard:    in.Session.HasBoard,
+			CountPolicy: in.Session.CountPolicy,
 			LastSeen:    reg.LastSeen().UnixMilli(),
 		}
 		if adapterPresent(in.Snapshot, now) {

@@ -1,14 +1,22 @@
 package mcp
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
 	"html/template"
+	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wslive"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
+	"github.com/kang-sw/devenv/internal/wsstate"
 	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
 
@@ -59,32 +67,165 @@ func (src *DashboardSessionSource) ReadPageLang(reg wsdashboard.Registration, la
 	page.HasBoard = true
 	page.Seq = record.Whiteboard.Seq
 	page.Reasked = record.Whiteboard.ReaskTimes()
+	board, ok := src.renderBoard(key, record, reg.ReplyID, lang, page.Reasked)
+	if ok {
+		page.Board = board.regions
+		page.Watch = slices.Clone(board.watch)
+		page.WatchPIDs = slices.Clone(board.pids)
+	}
+	return page, true
+}
+
+// boardRender is one render of a session's board and panels, with what the
+// stream path reads beside the regions: the files the render named
+// (PageContent.Watch) and the processes whose liveness it showed
+// (PageContent.WatchPIDs).
+type boardRender struct {
+	regions wswhiteboard.Regions
+	watch   []string
+	pids    []int
+}
+
+// boardMemo holds each session's latest board render per language, so a
+// page re-read that changed nothing the board shows (a live-snapshot change
+// re-renders only the live regions) reuses it. An entry is used only while
+// its key, taken before the render read anything, still matches
+// (boardMemoBase) and every file the render named still stats the same.
+type boardMemo struct {
+	mu      sync.Mutex
+	entries map[string]boardMemoEntry
+	// renders counts the board renders run (a test probe).
+	renders int
+}
+
+type boardMemoEntry struct {
+	base  string
+	stamp string
+	// stampOK is false when the stamp was taken over another watch list
+	// than this render's: the next read renders again.
+	stampOK bool
+	board   boardRender
+}
+
+// boardMemoMax bounds the entries; past it the memo starts over.
+const boardMemoMax = 64
+
+// renderBoard renders the board of record (session key key, reply-id
+// replyID) in lang, or reuses the memoized render when none of its inputs
+// changed; false when the render failed.
+//
+// The inputs are every input to the board render other than the live
+// snapshot (boardMemoBase): an input found later joins the key. With dev
+// assets on, the templates themselves change between renders, so nothing
+// is memoized.
+func (src *DashboardSessionSource) renderBoard(key string, record sessionRecord, replyID, lang string, reasked map[int]int64) (boardRender, bool) {
+	if wswhiteboard.DevAssetsOn() {
+		return src.renderBoardNow(key, record, replyID, lang)
+	}
+	memoKey := replyID + "\x00" + lang
+	base := boardMemoBase(key, record, lang, reasked)
+	m := &src.boards
+	m.mu.Lock()
+	prev, had := m.entries[memoKey]
+	m.mu.Unlock()
+	var stamp string
+	if had {
+		stamp = boardWatchStamp(prev.board.watch)
+		if prev.base == base && prev.stampOK && stamp == prev.stamp {
+			return prev.board, true
+		}
+	}
+	board, ok := src.renderBoardNow(key, record, replyID, lang)
+	if !ok {
+		return board, false
+	}
+	// The stamp was taken before this render, over the previous render's
+	// watch list, so a file changed during the render still misses next
+	// time; it is this render's stamp only when the list did not change.
+	// A first render has none, and the next read renders once more.
+	entry := boardMemoEntry{base: base, board: board, stamp: stamp, stampOK: had && slices.Equal(prev.board.watch, board.watch)}
+	m.mu.Lock()
+	if m.entries == nil || len(m.entries) >= boardMemoMax {
+		m.entries = map[string]boardMemoEntry{}
+	}
+	m.entries[memoKey] = entry
+	m.mu.Unlock()
+	return board, true
+}
+
+// boardMemoBase fingerprints the board render's inputs that are not files
+// it names: the board's update sequence (every store write bumps it), the
+// todo and agenda contents the panels read (they sit outside the board
+// state, and Seq covers them only when the board's refresh after their
+// write succeeds), the language, the mailbox listening marker's presence,
+// process, and that process's liveness (an armed wait shows only while it
+// runs), and the re-ask times. The mailbox owner and identity are not in
+// it: the served page never sets them (servedWhiteboardPanels).
+func boardMemoBase(key string, record sessionRecord, lang string, reasked map[int]int64) string {
+	h := sha256.New()
+	fmt.Fprintf(h, "seq\x00%d\x00lang\x00%s\x00", record.Whiteboard.Seq, lang)
+	todos, _ := json.Marshal(record.Todos)
+	agenda, _ := json.Marshal(record.Agenda)
+	asked, _ := json.Marshal(reasked)
+	fmt.Fprintf(h, "todos\x00%s\x00agenda\x00%s\x00reasked\x00%s\x00", todos, agenda, asked)
+	if marker, ok, _ := wsmailbox.ReadListeningMarker(key); ok {
+		fmt.Fprintf(h, "marker\x00%d\x00%t\x00", marker.PID, markerAlive(marker.PID))
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// markerAlive reports whether a listening marker's process runs (a test
+// seam).
+var markerAlive = wsstate.ProcessAlive
+
+// boardWatchStamp stats every file a board render named: whether it
+// exists, its modification time, and its size.
+func boardWatchStamp(watch []string) string {
+	h := sha256.New()
+	for _, path := range watch {
+		if info, err := os.Stat(path); err == nil {
+			fmt.Fprintf(h, "%s\x00%d\x00%d\x01", path, info.ModTime().UnixNano(), info.Size())
+		} else {
+			fmt.Fprintf(h, "%s\x00-\x01", path)
+		}
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// renderBoardNow renders the board and panels of record under the served
+// page's link rule.
+func (src *DashboardSessionSource) renderBoardNow(key string, record sessionRecord, replyID, lang string) (boardRender, bool) {
+	src.boards.mu.Lock()
+	src.boards.renders++
+	src.boards.mu.Unlock()
+	var out boardRender
 	// BuildView only reads the state: the served page never begins a render
 	// or writes a file, so the stored board and the static page are untouched.
 	// The ticket files the panels list and the images a topic body inlines
 	// change without a nudge, so the page names them (PageContent.Watch).
-	watch := func(path string) { page.Watch = append(page.Watch, path) }
-	in := servedViewInput(record, reg.ReplyID)
+	watch := func(path string) { out.watch = append(out.watch, path) }
+	in := servedViewInput(record, replyID)
 	inline := in.DocImageSrc
 	in.DocImageSrc = func(path string) string {
 		watch(docImagePath(record.Root, path))
 		return inline(path)
 	}
-	in.Panels = servedWhiteboardPanels(record, key, reg.ReplyID, lang, watch)
+	in.Panels = servedWhiteboardPanels(record, key, replyID, lang, watch)
 	// An armed wait shows as long as its process runs, and a process can
-	// die leaving its marker: no watched file reports that.
-	if _, ok, _ := wsmailbox.ReadListeningMarker(key); ok {
-		page.Volatile = true
+	// die leaving its marker: no watched file reports that, so the page
+	// names the process.
+	if marker, ok, _ := wsmailbox.ReadListeningMarker(key); ok {
+		out.pids = []int{marker.PID}
 	}
 	view := wswhiteboard.BuildView(record.Whiteboard, in)
 	view.Lang = lang
 	regions, err := wswhiteboard.RenderRegions(view)
 	if err != nil {
 		appendDebugEvent("dashboard.page_render_failed", map[string]any{"error": err.Error()})
-		return page, true
+		return boardRender{}, false
 	}
-	page.Board = regions
-	return page, true
+	out.regions = regions
+	return out, true
 }
 
 var _ wsdashboard.ClosedTopicsSource = (*DashboardSessionSource)(nil)

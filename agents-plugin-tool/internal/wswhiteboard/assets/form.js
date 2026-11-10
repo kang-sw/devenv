@@ -3,15 +3,32 @@
   var doc = document;
   function q(sel, root) { return Array.prototype.slice.call((root || doc).querySelectorAll(sel)); }
   var dirty = false, copied = false, onCopied = null;
-  var ta = doc.getElementById("reply-text"), hint = doc.getElementById("reply-hint");
+  var ta, hint, all;
+  // replyEls looks the reply bar's controls up again: a dashboard board swap
+  // can replace the bar while it keeps the topics, whose controls stay wired
+  // to the run of this script that bound them.
+  function replyEls() {
+    ta = doc.getElementById("reply-text");
+    hint = doc.getElementById("reply-hint");
+    all = doc.getElementById("ack-all");
+  }
+  replyEls();
 
   // --- answer form -------------------------------------------------------
   // bind wires the controls under root; the page binds the whole document
   // once, and a served page binds the closed topics it fetches later
-  // (window.wbBindBoard), so no control is wired twice.
+  // (window.wbBindBoard). A dashboard board swap runs this script again
+  // over a document whose unchanged topics it kept, so each control is
+  // marked when wired (once) and never wired twice.
+  function once(el) {
+    if (el.wbBound) return false;
+    el.wbBound = true;
+    return true;
+  }
   function bind(root) {
     q(".card.policy", root).forEach(function (card) {
       q(".opt", card).forEach(function (btn) {
+        if (!once(btn)) return;
         function pick() {
           var on = btn.getAttribute("aria-pressed") === "true";
           q(".opt", card).forEach(function (b) { b.setAttribute("aria-pressed", "false"); });
@@ -30,7 +47,7 @@
       });
     });
     q(".note-toggle", root).forEach(function (t) {
-      t.addEventListener("click", function () {
+      if (once(t)) t.addEventListener("click", function () {
         var n = t.closest(".card, .arow, .srow").querySelector(".note");
         n.hidden = !n.hidden; if (!n.hidden) { grow(n); n.focus(); }
       });
@@ -38,21 +55,25 @@
     // A topic's pen opens the note under its bar: a comment or question on
     // the topic as a whole, which the reply carries as "[topic] text".
     q(".tnote-toggle", root).forEach(function (t) {
-      t.addEventListener("click", function () {
+      if (once(t)) t.addEventListener("click", function () {
         var n = t.closest(".topic").querySelector(".tnote");
         n.hidden = !n.hidden; if (!n.hidden) { grow(n); n.focus(); }
       });
     });
-    q(".note", root).forEach(function (el) { el.addEventListener("input", function () { grow(el); }); });
-    q(".note, .ack input", root).forEach(function (el) { el.addEventListener("input", build); el.addEventListener("change", build); });
+    q(".note, .ack input", root).forEach(function (el) {
+      if (!once(el)) return;
+      if (el.classList.contains("note")) el.addEventListener("input", function () { grow(el); });
+      el.addEventListener("input", build);
+      el.addEventListener("change", build);
+    });
     inPageLinks(root);
   }
   // Size a note textarea to its content; scrollHeight is 0 while hidden.
   function grow(n) { n.style.height = "auto"; if (n.scrollHeight) n.style.height = n.scrollHeight + "px"; }
   // Bulk acknowledge: checks every ack row. Policy items stay manual.
-  var all = doc.getElementById("ack-all");
-  if (all) all.addEventListener("change", function () {
-    q(".ack input").forEach(function (c) { c.checked = all.checked; });
+  if (all && once(all)) all.addEventListener("change", function () {
+    var on = this.checked;
+    q(".ack input").forEach(function (c) { c.checked = on; });
     build();
   });
   function syncAll() {
@@ -68,6 +89,7 @@
   // acknowledgements grouped as "(nn), (mm) ok", parts joined by "; ", then
   // one "[topic] text" line per topic note.
   function build() {
+    replyEls();
     if (!ta) return;
     var parts = [], acked = [];
     q(".card.policy").forEach(function (card) {
@@ -120,7 +142,8 @@
   // Copy: execCommand only; the async clipboard API is denied in sandboxed hosts.
   // When the command fails the reply stays selected for a manual copy.
   var copy = doc.getElementById("reply-copy");
-  if (copy) copy.addEventListener("click", function () {
+  if (copy && once(copy)) copy.addEventListener("click", function () {
+    replyEls();
     if (!ta.value) { hint.textContent = "∅"; return; }
     ta.focus(); ta.select();
     var ok = false;
@@ -138,7 +161,7 @@
   // --- in-page item links: open the collapsed blocks around the target ---
   function inPageLinks(root) {
     q('a[href^="#item-"]', root).forEach(function (a) {
-      a.addEventListener("click", function (e) {
+      if (once(a)) a.addEventListener("click", function (e) {
         var el = doc.getElementById(a.getAttribute("href").slice(1));
         if (!el) return;
         e.preventDefault();

@@ -147,6 +147,23 @@ type Item struct {
 // precision of the dashboard inbox's send times it is compared with.
 const reaskLayout = "2006-01-02T15:04:05.000Z07:00"
 
+// OpenPolicyCount is the number of open policy items, the count the full
+// page's header shows (pageData.CountPolicy): every open policy item renders,
+// since a topic that waits on one is never cut by the closed-topic cap. A nil
+// state has none.
+func (s *State) OpenPolicyCount() int {
+	if s == nil {
+		return 0
+	}
+	n := 0
+	for _, item := range s.Items {
+		if item.Status == StatusOpen && item.Class == ClassPolicy {
+			n++
+		}
+	}
+	return n
+}
+
 // ReaskTimes maps each re-asked item's ID to its latest re-ask time in epoch
 // milliseconds; an item never re-asked, or with an unreadable time, is
 // absent. A nil state has none.

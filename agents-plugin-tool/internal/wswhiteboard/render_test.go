@@ -245,7 +245,7 @@ func TestRenderPageContentOnlyTopic(t *testing.T) {
 	st := &State{}
 	mustApply(t, st, topicXML("notes", "# Plan\n\n- one"))
 	out := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
-	wantAll(t, out, `<section class="topic has-doc"><div class="tbar"><span class="tlead"><span class="tname">notes</span></span>`,
+	wantAll(t, out, `<section class="topic has-doc" data-topic="notes"><div class="tbar"><span class="tlead"><span class="tname">notes</span></span>`,
 		`<details class="tdoc" data-key="doc:notes" open>`, "<h1>Plan</h1>", "<li>one</li>")
 	wantNone(t, out, `class="tbody"`)
 	// Nothing to answer: the reply bar waits hidden for a topic note.
@@ -253,9 +253,26 @@ func TestRenderPageContentOnlyTopic(t *testing.T) {
 
 	mustApply(t, st, `<wb:topic name="notes"><wb:close result="done"/></wb:topic>`)
 	out = render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
-	wantAll(t, out, `<section class="topic quiet closed has-doc"><div class="tbar"><span class="tlead"><span class="tname" title="closed">notes</span><span class="tresult" title="how the topic ended">done</span></span>`,
+	wantAll(t, out, `<section class="topic quiet closed has-doc" data-topic="notes"><div class="tbar"><span class="tlead"><span class="tname" title="closed">notes</span><span class="tresult" title="how the topic ended">done</span></span>`,
 		`<details class="tdoc" data-key="doc:notes"><summary`, "<h1>Plan</h1>")
 	wantNone(t, out, `data-key="doc:notes" open`)
+}
+
+// TestRenderPageTopicKeyAttribute: every topic section carries its name as
+// data-topic, escaped as an attribute value, the key a live page matches
+// topics by across board swaps.
+func TestRenderPageTopicKeyAttribute(t *testing.T) {
+	for name, layout := range layouts() {
+		st := sampleState()
+		st.Topics = []TopicDoc{{Name: `say "hi" & <go>`, Body: "notes", Changed: 12}}
+		out := render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r"}))
+		if !strings.Contains(out, `<section class="topic has-doc" data-topic="say &#34;hi&#34; &amp; &lt;go&gt;"><div class="tbar">`) {
+			t.Errorf("%s: topic key attribute missing or unescaped", name)
+		}
+		if strings.Count(out, `<section class="topic`) != len(regexp.MustCompile(`<section class="topic[^"]*" data-topic="`).FindAllString(out, -1)) {
+			t.Errorf("%s: a topic section without data-topic", name)
+		}
+	}
 }
 
 // TestRenderPageTopicBodyToggleBelongsToTheBar pins the toggle's hook: a topic
@@ -267,7 +284,7 @@ func TestRenderPageTopicBodyToggleBelongsToTheBar(t *testing.T) {
 		st := sampleState()
 		st.Topics = []TopicDoc{{Name: "embed layout", Body: "layout notes", Changed: 12}}
 		out := render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r"}))
-		wantAll(t, out, `<section class="topic has-doc"><div class="tbar"><span class="tlead"><span class="tname">embed layout</span></span>`,
+		wantAll(t, out, `<section class="topic has-doc" data-topic="embed layout"><div class="tbar"><span class="tlead"><span class="tname">embed layout</span></span>`,
 			`.topic.has-doc > .tbar { padding-right:`, `details.tdoc > summary { position: absolute;`)
 		start := strings.Index(out, `<span class="tname">embed retention</span>`)
 		if start < 0 {
@@ -504,7 +521,7 @@ func TestRenderPageAssumedItemIsASettledRow(t *testing.T) {
 		t.Fatalf("close changed the assumed item to %s", got)
 	}
 	closed := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
-	wantAll(t, closed, `<section class="topic quiet closed">`,
+	wantAll(t, closed, `<section class="topic quiet closed" data-topic="t">`,
 		`<div class="srow" id="item-1" data-id="01">`,
 		`<button class="btn mini note-toggle" title="note"><svg class="i" aria-hidden="true"><use href="#i-pen"/></svg></button><textarea class="note" rows="1" placeholder="✎" title="correction" hidden></textarea></div>`,
 		`<div class="reply solo" data-idle hidden>`)
@@ -589,7 +606,7 @@ func TestRenderPageQuietAndCollapsedSettled(t *testing.T) {
 	full := render(t, sampleView(LayoutFull))
 	// The closed topic's settled items sit behind a collapsed chip in its one
 	// title line.
-	start := strings.Index(full, `<section class="topic quiet closed">`)
+	start := strings.Index(full, `<section class="topic quiet closed" data-topic="`)
 	if start < 0 {
 		t.Fatal("closed settled-only topic is not quiet")
 	}
@@ -630,7 +647,7 @@ func TestRenderPageQuietAndCollapsedSettled(t *testing.T) {
 	}
 
 	embed := render(t, sampleView(LayoutEmbed))
-	if !strings.Contains(embed, `<section class="topic quiet"><div class="tbar"><span class="tlead"><span class="tname">tool surface</span></span>`) {
+	if !strings.Contains(embed, `<section class="topic quiet" data-topic="tool surface"><div class="tbar"><span class="tlead"><span class="tname">tool surface</span></span>`) {
 		t.Errorf("embed: settled-only topic with nothing new is not quiet")
 	}
 }
