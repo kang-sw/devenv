@@ -341,7 +341,14 @@
       "registered_at": "2026-11-09T15:16:05Z"
     },
     "261110-bug-ws-git-merge-ticket-dir-rename-false-conflict": {
-      "registered_at": "2026-11-09T15:36:52Z"
+      "registered_at": "2026-11-09T15:36:52Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "28ef83e379b353cc",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-10T00:34:03Z"
+      }
     },
     "261110-chore-ws-mcp-test-suite-runtime": {
       "registered_at": "2026-11-09T15:09:05Z"
