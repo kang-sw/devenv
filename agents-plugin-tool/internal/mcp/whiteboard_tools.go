@@ -91,8 +91,11 @@ type whiteboardPanelInput struct {
 	sessionKey string
 	replyID    string
 	// cacheHome is the WS_CACHE_HOME the session's mailbox history ring
-	// lives under; empty means this process's.
+	// lives under; empty means this process's. paths resolves the mailbox
+	// stores, reply registry, and listening marker; the zero value is this
+	// process's environment (the daemon's served page).
 	cacheHome string
+	paths     wsmailbox.Paths
 	// mailbox is this process's mailbox identity and whether the session
 	// holds its named inbox (mailboxOwnerCheck), which the own address and
 	// the named-inbox unread count depend on.
@@ -441,6 +444,7 @@ func (s *Server) renderWhiteboard(rec *sessionRecord, sessionKey string, withEmb
 		sessionKey: sessionKey,
 		replyID:    replyID,
 		cacheHome:  s.getenv(wsstate.EnvCacheHome),
+		paths:      s.mailboxPaths(),
 		mailbox:    s.whiteboardMailbox(sessionKey, rec.Root),
 	}
 	viewInput := func(layout wswhiteboard.Layout) wswhiteboard.ViewInput {

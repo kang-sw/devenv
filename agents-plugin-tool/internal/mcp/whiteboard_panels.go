@@ -200,7 +200,7 @@ func mailboxPanel(in whiteboardPanelInput) (wswhiteboard.Panel, bool) {
 
 	unread := 0
 	if named != "" {
-		if path, err := wsmailbox.PathForScope(in.mailbox.identity.Scope, in.root); err == nil {
+		if path, err := in.paths.ForScope(in.mailbox.identity.Scope, in.root); err == nil {
 			if in.watch != nil {
 				in.watch(path)
 			}
@@ -216,7 +216,7 @@ func mailboxPanel(in whiteboardPanelInput) (wswhiteboard.Panel, bool) {
 	readReplies := in.replies
 	if readReplies == nil {
 		readReplies = func() (wsmailbox.ReplyStore, bool) {
-			path, err := wsmailbox.ReplyRegistryPath()
+			path, err := in.paths.ReplyRegistry()
 			if err != nil {
 				return wsmailbox.ReplyStore{}, false
 			}
@@ -236,11 +236,11 @@ func mailboxPanel(in whiteboardPanelInput) (wswhiteboard.Panel, bool) {
 	}
 
 	if in.watch != nil {
-		if path, err := wsmailbox.ListeningMarkerPath(in.sessionKey); err == nil {
+		if path, err := in.paths.ListeningMarker(in.sessionKey); err == nil {
 			in.watch(path)
 		}
 	}
-	if whiteboardMailboxListening(in.sessionKey) {
+	if whiteboardMailboxListening(in.paths, in.sessionKey) {
 		status = wsi18n.T(in.lang, "panel.mail.unread.wait", unread)
 	}
 	panel.Rows = append(panel.Rows, wswhiteboard.PanelRow{Label: address, Text: status})
@@ -260,8 +260,8 @@ func mailboxPanel(in whiteboardPanelInput) (wswhiteboard.Panel, bool) {
 // whiteboardMailboxListening reports an armed mailbox wait: a listening
 // marker whose process still runs. A wait that crashed leaves its marker
 // behind, and that is not waiting.
-func whiteboardMailboxListening(sessionKey string) bool {
-	marker, ok, err := wsmailbox.ReadListeningMarker(sessionKey)
+func whiteboardMailboxListening(paths wsmailbox.Paths, sessionKey string) bool {
+	marker, ok, err := paths.ReadListeningMarker(sessionKey)
 	if err != nil || !ok {
 		return false
 	}

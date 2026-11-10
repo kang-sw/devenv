@@ -43,6 +43,10 @@ type WaitTarget struct {
 	// already knows (from the workflow ambient block or lookup_peers' self
 	// entry) instead.
 	Slug string
+	// Paths resolves the stores; the zero value is this process's
+	// environment. A wait the dashboard daemon runs for a launcher sets it
+	// from the launcher's environment.
+	Paths Paths
 	// InboxDir is the session's board-answer inbox directory (internal/
 	// wsinbox) to also watch; empty means not watched. The caller derives it
 	// because the dashboard's state directory is not this package's to know.
@@ -233,7 +237,7 @@ func resolveWaitTarget(target WaitTarget) (resolvedWaitTarget, error) {
 		if err != nil {
 			return resolvedWaitTarget{}, err
 		}
-		path, err := PathForScope(scope, target.Root)
+		path, err := target.Paths.ForScope(scope, target.Root)
 		if err != nil {
 			return resolvedWaitTarget{}, err
 		}
@@ -242,7 +246,7 @@ func resolveWaitTarget(target WaitTarget) (resolvedWaitTarget, error) {
 	}
 
 	r.replyID = ReplyID(target.SessionKey)
-	replyPath, err := ReplyRegistryPath()
+	replyPath, err := target.Paths.ReplyRegistry()
 	if err != nil {
 		return resolvedWaitTarget{}, err
 	}
@@ -305,7 +309,7 @@ func NamedInboxStatus(target WaitTarget) (present, owned bool, err error) {
 	if err != nil {
 		return false, false, err
 	}
-	path, err := PathForScope(scope, target.Root)
+	path, err := target.Paths.ForScope(scope, target.Root)
 	if err != nil {
 		return false, false, err
 	}

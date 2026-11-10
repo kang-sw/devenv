@@ -27,6 +27,7 @@ import (
 
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsnote"
+	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
 // Scope identifies which storage tier a mailbox name lives in. Unlike
@@ -103,56 +104,80 @@ const MaxQueueLen = 200
 // mirroring wsnote/store.go's lockTimeout.
 const LockTimeout = 2 * time.Second
 
-// MachinePath resolves the machine-scope mailbox store path: sibling of
-// the machine-layer note store (typically ~/.ws/mailbox.json).
-func MachinePath() (string, error) {
-	notesPath, err := wsnote.MachinePath(wsconfig.Options{})
+// Paths resolves the mailbox files for one caller's environment: the
+// machine store beside the global config (Config's WS_CONFIG_HOME), and the
+// worktree and clone stores, the reply-id registry, and the listening
+// markers under the cache root (State's WS_CACHE_HOME). The zero value
+// reads this process's environment; a server the dashboard daemon hosts
+// for another process builds one from that process's variables, so its
+// mail never lands in the daemon's own stores.
+type Paths struct {
+	Config wsconfig.Options
+	State  wsstate.Options
+}
+
+// Machine resolves the machine-scope mailbox store path: sibling of the
+// machine-layer note store (typically ~/.ws/mailbox.json).
+func (p Paths) Machine() (string, error) {
+	notesPath, err := wsnote.MachinePath(p.Config)
 	if err != nil {
 		return "", err
 	}
 	return sibling(notesPath), nil
 }
 
-// WorktreePath resolves the worktree-scope mailbox store path for root:
-// sibling of that worktree's note store.
-func WorktreePath(root string) (string, error) {
-	notesPath, err := wsnote.WorktreePath(root)
+// Worktree resolves the worktree-scope mailbox store path for root: sibling
+// of that worktree's note store.
+func (p Paths) Worktree(root string) (string, error) {
+	notesPath, err := wsnote.WorktreePathIn(p.State, root)
 	if err != nil {
 		return "", err
 	}
 	return sibling(notesPath), nil
 }
 
-// ClonePath resolves the clone-scope mailbox store path for root: sibling
-// of that project's clone-layer note store (shared across every worktree
-// of the project).
-func ClonePath(root string) (string, error) {
-	notesPath, err := wsnote.ClonePath(root)
+// Clone resolves the clone-scope mailbox store path for root: sibling of
+// that project's clone-layer note store (shared across every worktree of
+// the project).
+func (p Paths) Clone(root string) (string, error) {
+	notesPath, err := wsnote.ClonePathIn(p.State, root)
 	if err != nil {
 		return "", err
 	}
 	return sibling(notesPath), nil
 }
 
-func sibling(notesPath string) string {
-	return filepath.Join(filepath.Dir(notesPath), storeFileName)
-}
-
-// PathForScope resolves the store path for scope, given the caller's own
-// root (used only for worktree/clone; ignored for machine). This is the
-// single dispatch point every mailbox_runtime.go call site uses instead of
+// ForScope resolves the store path for scope, given the caller's own root
+// (used only for worktree/clone; ignored for machine). This is the single
+// dispatch point every mailbox_runtime.go call site uses instead of
 // switching on Scope itself.
-func PathForScope(scope Scope, root string) (string, error) {
+func (p Paths) ForScope(scope Scope, root string) (string, error) {
 	switch scope {
 	case ScopeMachine:
-		return MachinePath()
+		return p.Machine()
 	case ScopeWorktree:
-		return WorktreePath(root)
+		return p.Worktree(root)
 	case ScopeClone:
-		return ClonePath(root)
+		return p.Clone(root)
 	default:
 		return "", fmt.Errorf("wsmailbox: invalid scope %q", scope)
 	}
+}
+
+// MachinePath is Paths{}.Machine: this process's environment.
+func MachinePath() (string, error) { return Paths{}.Machine() }
+
+// WorktreePath is Paths{}.Worktree: this process's environment.
+func WorktreePath(root string) (string, error) { return Paths{}.Worktree(root) }
+
+// ClonePath is Paths{}.Clone: this process's environment.
+func ClonePath(root string) (string, error) { return Paths{}.Clone(root) }
+
+// PathForScope is Paths{}.ForScope: this process's environment.
+func PathForScope(scope Scope, root string) (string, error) { return Paths{}.ForScope(scope, root) }
+
+func sibling(notesPath string) string {
+	return filepath.Join(filepath.Dir(notesPath), storeFileName)
 }
 
 // Load reads the store file at path. A missing file returns an empty,

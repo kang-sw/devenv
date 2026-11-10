@@ -77,6 +77,11 @@ type mailboxRuntimeState struct {
 	registeredMu   sync.Mutex
 	registered     bool
 	registeredRoot string
+	// adoptedName, when set, replaces the minted auto stem: the name of
+	// this owner's live auto record found at registration (a server the
+	// daemon hosts again for the same launcher keeps the address its
+	// predecessor published).
+	adoptedName string
 
 	heartbeatMu sync.Mutex
 	heartbeatAt time.Time
@@ -89,7 +94,15 @@ func (s *Server) mailboxIdentityResolved() mailboxIdentity {
 	s.mailbox.identityOnce.Do(func() {
 		s.mailbox.identityValue = s.computeMailboxIdentity()
 	})
-	return s.mailbox.identityValue
+	identity := s.mailbox.identityValue
+	if identity.Auto {
+		s.mailbox.registeredMu.Lock()
+		if s.mailbox.adoptedName != "" {
+			identity.Name = s.mailbox.adoptedName
+		}
+		s.mailbox.registeredMu.Unlock()
+	}
+	return identity
 }
 
 func (s *Server) computeMailboxIdentity() mailboxIdentity {
@@ -214,7 +227,7 @@ func (s *Server) ensureMailboxRegistered(root string) {
 		s.mailbox.registered = true
 		s.mailbox.registeredRoot = root
 		s.mailbox.registeredMu.Unlock()
-		path, err := wsmailbox.PathForScope(identity.Scope, root)
+		path, err := s.mailboxPaths().ForScope(identity.Scope, root)
 		if err != nil {
 			s.debugEvent("mailbox.register_error", map[string]any{"error": err.Error()})
 			return
@@ -223,11 +236,33 @@ func (s *Server) ensureMailboxRegistered(root string) {
 		pid := s.pid()
 		fresh := s.ownedMailboxPresence(identity, root, now.Format(time.RFC3339))
 		werr := wsmailbox.WithLock(path, func(store *wsmailbox.StoreFile) error {
-			if existing, ok := store.Presence[identity.Name]; ok && existing.PID != pid && mailboxPresenceLive(existing, now) {
-				s.setMailboxConflict(true)
-				existing.Conflict = true
-				store.Presence[identity.Name] = existing
-				return nil
+			if identity.Auto {
+				// This owner's own auto record, under whatever stem it
+				// minted before: a server hosted again for the same
+				// launcher keeps the address its peers already know.
+				for name, p := range store.Presence {
+					if p.Auto && p.PID == pid && p.Scope == identity.Scope && name != identity.Name {
+						identity.Name, fresh.Name = name, name
+						s.mailbox.registeredMu.Lock()
+						s.mailbox.adoptedName = name
+						s.mailbox.registeredMu.Unlock()
+						break
+					}
+				}
+			}
+			if existing, ok := store.Presence[identity.Name]; ok {
+				if existing.PID != pid && mailboxPresenceLive(existing, now) {
+					s.setMailboxConflict(true)
+					existing.Conflict = true
+					store.Presence[identity.Name] = existing
+					return nil
+				}
+				if existing.PID == pid {
+					// The same owner registered before (its server was
+					// replaced): the owner pointer and the start stay, so
+					// the session keeps its named inbox.
+					fresh.Owner, fresh.StartedAt = existing.Owner, existing.StartedAt
+				}
 			}
 			store.Presence[identity.Name] = fresh
 			return nil
@@ -293,7 +328,7 @@ func (s *Server) writeMailboxPresenceLastSeen(identity mailboxIdentity, root str
 	if identity.Scope != wsmailbox.ScopeMachine && strings.TrimSpace(root) == "" {
 		return
 	}
-	path, err := wsmailbox.PathForScope(identity.Scope, root)
+	path, err := s.mailboxPaths().ForScope(identity.Scope, root)
 	if err != nil {
 		return
 	}
@@ -416,7 +451,7 @@ type mailboxContact struct {
 // counterparty's presence record from its scope store (resolved against the
 // caller's root). An unreadable store or missing record leaves the
 // metadata empty: it is descriptive only.
-func mailboxContactFor(address, root string) mailboxContact {
+func mailboxContactFor(paths wsmailbox.Paths, address, root string) mailboxContact {
 	c := mailboxContact{Address: address}
 	if strings.HasPrefix(address, wsmailbox.ReplyIDPrefix) {
 		return c
@@ -425,7 +460,7 @@ func mailboxContactFor(address, root string) mailboxContact {
 	if err != nil || (scope != wsmailbox.ScopeMachine && strings.TrimSpace(root) == "") {
 		return c
 	}
-	path, err := wsmailbox.PathForScope(scope, root)
+	path, err := paths.ForScope(scope, root)
 	if err != nil {
 		return c
 	}
@@ -450,7 +485,7 @@ func mailboxContactFor(address, root string) mailboxContact {
 // caller's own reply-id is skipped (self-exclusion).
 func (s *Server) publishReplyID(callerSessionKey, root, ownNamed string, contacts ...mailboxContact) (string, error) {
 	replyID := s.mailboxReplyID(callerSessionKey)
-	path, err := wsmailbox.ReplyRegistryPath()
+	path, err := s.mailboxPaths().ReplyRegistry()
 	if err != nil {
 		return "", err
 	}
@@ -539,7 +574,7 @@ func (s *Server) rebindMailboxOwnerAtFerrule(newSessionKey, parentKey string, sc
 		s.debugEvent("mailbox.rebind_skipped_conflict", map[string]any{"name": identity.Name, "scope": string(identity.Scope)})
 		return
 	}
-	path, err := wsmailbox.PathForScope(identity.Scope, root)
+	path, err := s.mailboxPaths().ForScope(identity.Scope, root)
 	if err != nil {
 		return
 	}
@@ -598,7 +633,7 @@ func (s *Server) mailboxOwnerCheck(callerSessionKey string, root string) (isOwne
 	if identity.Scope != wsmailbox.ScopeMachine && strings.TrimSpace(root) == "" {
 		return false, identity, nil
 	}
-	path, perr := wsmailbox.PathForScope(identity.Scope, root)
+	path, perr := s.mailboxPaths().ForScope(identity.Scope, root)
 	if perr != nil {
 		return false, identity, perr
 	}

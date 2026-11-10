@@ -704,6 +704,11 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			if entry.isTopLevelLead() {
 				// Registers the session on the dashboard, or keeps it off.
 				s.dashboardTouch(keyStr, entry.root, false)
+				// A worktree/clone mailbox identity registers at the first
+				// call that carries a root: the ferrule login, or, for a
+				// server hosted again for a session already logged in, this
+				// keyed call.
+				s.ensureMailboxRegistered(entry.root)
 				if params.Name == "config.tune" {
 					defer func() {
 						s.dashboardTouch(keyStr, entry.root, true)

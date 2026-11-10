@@ -14,6 +14,7 @@ import (
 
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsgit"
+	"github.com/kang-sw/devenv/internal/wsmailbox"
 	"github.com/kang-sw/devenv/internal/wsrsrc"
 	"github.com/kang-sw/devenv/internal/wsstate"
 )
@@ -172,6 +173,12 @@ func (s *Server) configOptions() wsconfig.Options {
 // stateOptions anchors wsstate at the caller's WS_CACHE_HOME.
 func (s *Server) stateOptions() wsstate.Options {
 	return wsstate.Options{CacheHome: s.getenv(wsstate.EnvCacheHome)}
+}
+
+// mailboxPaths anchors the mailbox stores, reply registry, and listening
+// markers at the caller's config and cache homes.
+func (s *Server) mailboxPaths() wsmailbox.Paths {
+	return wsmailbox.Paths{Config: s.configOptions(), State: s.stateOptions()}
 }
 
 // gitClient is the git client whose subprocesses run under the caller's

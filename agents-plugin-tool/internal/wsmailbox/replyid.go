@@ -107,14 +107,18 @@ type ReplyStore struct {
 	Queues        map[string][]Envelope `json:"queues,omitempty"`
 }
 
-// ReplyRegistryPath resolves the machine-tier reply-id registry file path.
-func ReplyRegistryPath() (string, error) {
-	root, err := wsstate.CacheRoot(wsstate.Options{})
+// ReplyRegistry resolves the machine-tier reply-id registry file path
+// under p's cache root.
+func (p Paths) ReplyRegistry() (string, error) {
+	root, err := wsstate.CacheRoot(p.State)
 	if err != nil {
 		return "", err
 	}
 	return filepath.Join(root, replyRegistryName), nil
 }
+
+// ReplyRegistryPath is Paths{}.ReplyRegistry: this process's environment.
+func ReplyRegistryPath() (string, error) { return Paths{}.ReplyRegistry() }
 
 // LoadReplyStore reads the reply-id registry. A missing file returns an
 // empty, non-nil ReplyStore.

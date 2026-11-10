@@ -47,25 +47,43 @@ type ListeningMarker struct {
 	TimeoutAt  string `json:"timeout_at,omitempty"`
 }
 
-// ListeningMarkerPath resolves the marker file path for sessionKey, after
-// validating sessionKey against listeningKeyPattern (path-safety: rejects
-// separators/traversal such as "../../etc/passwd").
-func ListeningMarkerPath(sessionKey string) (string, error) {
+// ListeningMarker resolves the marker file path for sessionKey under p's
+// cache root, after validating sessionKey against listeningKeyPattern
+// (path-safety: rejects separators/traversal such as "../../etc/passwd").
+func (p Paths) ListeningMarker(sessionKey string) (string, error) {
 	if !listeningKeyPattern.MatchString(sessionKey) {
 		return "", fmt.Errorf("wsmailbox: invalid session_key %q for a listening marker path", sessionKey)
 	}
-	root, err := wsstate.CacheRoot(wsstate.Options{})
+	root, err := wsstate.CacheRoot(p.State)
 	if err != nil {
 		return "", err
 	}
 	return filepath.Join(root, listeningDirName, sessionKey+".json"), nil
 }
 
+// ListeningMarkerPath is Paths{}.ListeningMarker: this process's environment.
+func ListeningMarkerPath(sessionKey string) (string, error) {
+	return Paths{}.ListeningMarker(sessionKey)
+}
+
+// WriteListeningMarker is Paths{}.WriteListeningMarker.
+func WriteListeningMarker(marker ListeningMarker) error { return Paths{}.WriteListeningMarker(marker) }
+
+// ClearListeningMarker is Paths{}.ClearListeningMarker.
+func ClearListeningMarker(sessionKey string, ownerPID int) error {
+	return Paths{}.ClearListeningMarker(sessionKey, ownerPID)
+}
+
+// ReadListeningMarker is Paths{}.ReadListeningMarker.
+func ReadListeningMarker(sessionKey string) (marker ListeningMarker, ok bool, err error) {
+	return Paths{}.ReadListeningMarker(sessionKey)
+}
+
 // WriteListeningMarker writes marker to disk (temp-file + atomic rename,
 // mirroring store.go/replyid.go's write discipline), creating the listening
 // directory on first use.
-func WriteListeningMarker(marker ListeningMarker) error {
-	path, err := ListeningMarkerPath(marker.SessionKey)
+func (p Paths) WriteListeningMarker(marker ListeningMarker) error {
+	path, err := p.ListeningMarker(marker.SessionKey)
 	if err != nil {
 		return err
 	}
@@ -112,12 +130,12 @@ func WriteListeningMarker(marker ListeningMarker) error {
 // The read-compare-remove sequence is not atomic: a replacement written
 // between the read and the remove is still deleted. That window is accepted;
 // the overlap it guards against lasts minutes, the window microseconds.
-func ClearListeningMarker(sessionKey string, ownerPID int) error {
-	path, err := ListeningMarkerPath(sessionKey)
+func (p Paths) ClearListeningMarker(sessionKey string, ownerPID int) error {
+	path, err := p.ListeningMarker(sessionKey)
 	if err != nil {
 		return err
 	}
-	marker, ok, err := ReadListeningMarker(sessionKey)
+	marker, ok, err := p.ReadListeningMarker(sessionKey)
 	if err != nil {
 		return err
 	}
@@ -132,8 +150,8 @@ func ClearListeningMarker(sessionKey string, ownerPID int) error {
 
 // ReadListeningMarker reads sessionKey's marker, reporting ok=false (err=nil)
 // when no wait is currently armed for it.
-func ReadListeningMarker(sessionKey string) (marker ListeningMarker, ok bool, err error) {
-	path, perr := ListeningMarkerPath(sessionKey)
+func (p Paths) ReadListeningMarker(sessionKey string) (marker ListeningMarker, ok bool, err error) {
+	path, perr := p.ListeningMarker(sessionKey)
 	if perr != nil {
 		return ListeningMarker{}, false, perr
 	}
