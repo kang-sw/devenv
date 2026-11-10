@@ -173,7 +173,7 @@ func (s *Server) configOptions() wsconfig.Options {
 
 // stateOptions anchors wsstate at the caller's WS_CACHE_HOME.
 func (s *Server) stateOptions() wsstate.Options {
-	return wsstate.Options{CacheHome: s.getenv(wsstate.EnvCacheHome)}
+	return wsstate.Options{CacheHome: s.getenv(wsstate.EnvCacheHome), Env: s.environ()}
 }
 
 // mailboxPaths anchors the mailbox stores, reply registry, and listening

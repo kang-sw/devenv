@@ -334,7 +334,7 @@ func TestBlockedByPromotionWarning(t *testing.T) {
 			consumerRel := "ai-docs/tickets/ready/260101-feat-consumer.md"
 			mustWrite(t, root, filepath.FromSlash(consumerRel),
 				"---\ntitle: Consumer\n"+tc.consumerFM+"---\n\n# Consumer\n\n## Phases\n\n### Phase 1: X\n")
-			warning, err := blockedByPromotionWarning(root, filepath.Join(root, filepath.FromSlash(consumerRel)))
+			warning, err := blockedByPromotionWarning(nil, root, filepath.Join(root, filepath.FromSlash(consumerRel)))
 			if err != nil {
 				t.Fatalf("blockedByPromotionWarning: %v", err)
 			}

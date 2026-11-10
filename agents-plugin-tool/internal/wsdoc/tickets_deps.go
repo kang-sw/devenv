@@ -167,11 +167,12 @@ func edgeLanded(edge BlockedByEdge, prereq TicketInfo, found bool) (bool, string
 // the conservative pick, since a less-landed prerequisite blocks rather than
 // clears. Shared by the dispatch gate and the promotion-time advisory warning so
 // the two read the board through one live scan and never diverge.
-func boardByStem(root string) (map[string]TicketInfo, error) {
+func boardByStem(env []string, root string) (map[string]TicketInfo, error) {
 	tickets, err := scanTickets(root, ticketScanOptions{
 		IncludeDone:    true,
 		IncludeDropped: true,
 		Resolve:        resolveFull,
+		Env:            env,
 	})
 	if err != nil {
 		return nil, err
@@ -193,10 +194,15 @@ func boardByStem(root string) (map[string]TicketInfo, error) {
 // and `.dropped/`, and index-hidden entries under a sparse-checkout scope) is
 // scanned live so the predicate never goes stale.
 func DispatchBlockFor(root string, info TicketInfo) (*DispatchBlock, error) {
+	return DispatchBlockForEnv(root, info, nil)
+}
+
+// DispatchBlockForEnv is DispatchBlockFor with the scope's git run on env.
+func DispatchBlockForEnv(root string, info TicketInfo, env []string) (*DispatchBlock, error) {
 	if len(info.BlockedBy) == 0 {
 		return nil, nil
 	}
-	byStem, err := boardByStem(root)
+	byStem, err := boardByStem(env, root)
 	if err != nil {
 		return nil, err
 	}
@@ -255,12 +261,12 @@ func blockedByPromotionError(root string, scope *ticketScope, absTicketPath stri
 // already blocked there — so this soft layer stays silent on it rather than
 // double-reporting, and it fails open on a scan error (the dispatch gate
 // backstops the hard cases). The empty string means no advisory.
-func blockedByPromotionWarning(root, absTicketPath string) (string, error) {
+func blockedByPromotionWarning(env []string, root, absTicketPath string) (string, error) {
 	edges := blockedByEntries(frontmatter(absTicketPath)["blocked-by"])
 	if len(edges) == 0 {
 		return "", nil
 	}
-	byStem, err := boardByStem(root)
+	byStem, err := boardByStem(env, root)
 	if err != nil {
 		return "", err
 	}

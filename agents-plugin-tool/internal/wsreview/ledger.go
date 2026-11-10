@@ -270,6 +270,11 @@ func formatEntry(e Entry) string {
 // review-skipped, not reviewed" straight off the verdict, with no separate
 // flag needed.
 func Bootstrap(ctx context.Context, root string) (Entry, bool, error) {
+	return BootstrapWith(ctx, wsgit.ExecRunner{}, root)
+}
+
+// BootstrapWith is Bootstrap resolving HEAD through runner.
+func BootstrapWith(ctx context.Context, runner wsgit.Runner, root string) (Entry, bool, error) {
 	existing, found, err := Read(root)
 	if err != nil {
 		return Entry{}, false, err
@@ -278,7 +283,7 @@ func Bootstrap(ctx context.Context, root string) (Entry, bool, error) {
 		return existing, false, nil
 	}
 
-	out, err := (wsgit.ExecRunner{}).RunGit(ctx, root, "rev-parse", "HEAD")
+	out, err := runner.RunGit(ctx, root, "rev-parse", "HEAD")
 	if err != nil {
 		return Entry{}, false, fmt.Errorf("resolve HEAD for review ledger bootstrap: %w", err)
 	}

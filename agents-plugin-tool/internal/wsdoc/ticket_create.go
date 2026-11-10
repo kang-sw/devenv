@@ -39,6 +39,9 @@ type TicketCreateOptions struct {
 	// unassigned (assign-any). Emails are emitted verbatim (case preserved);
 	// blank entries are skipped.
 	Assignee []string
+	// Env is the environment a sparse-checkout scope's git runs on; nil
+	// means this process's own.
+	Env []string
 }
 
 type TicketCreateResult struct {
@@ -109,7 +112,7 @@ func TicketCreate(root string, opts TicketCreateOptions) (TicketCreateResult, er
 	// would silently clobber a ticket the caller cannot see. The check stays
 	// destination-path-only — a same-stem ticket in a *different* status
 	// directory does not block creation today either.
-	scope := newTicketScope(root)
+	scope := newTicketScopeEnv(root, opts.Env)
 	if scope != nil {
 		exists, err := scope.hasIndexPath(relPath)
 		if err != nil {

@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/kang-sw/devenv/internal/wsexec"
 )
 
 const (
@@ -26,6 +28,9 @@ type Clock func() time.Time
 type Options struct {
 	CacheHome string
 	Now       Clock
+	// Env, when set, is the environment the manager's git runs under (and
+	// resolves git against); nil means this process's own.
+	Env []string
 }
 
 type Layout struct {
@@ -97,7 +102,7 @@ func CacheRoot(opts Options) (string, error) {
 }
 
 func (m Manager) Resolve(repoPath string) (Layout, ProjectMetadata, WorktreeMetadata, error) {
-	root, commonRoot, err := gitIdentity(repoPath)
+	root, commonRoot, err := gitIdentity(m.opts.Env, repoPath)
 	if err != nil {
 		return Layout{}, ProjectMetadata{}, WorktreeMetadata{}, err
 	}
@@ -228,12 +233,12 @@ func validWorktreeKey(value string) bool {
 	return true
 }
 
-func gitIdentity(repoPath string) (worktreeRoot string, commonRoot string, err error) {
+func gitIdentity(env []string, repoPath string) (worktreeRoot string, commonRoot string, err error) {
 	abs, err := canonicalPath(repoPath)
 	if err != nil {
 		return "", "", err
 	}
-	root, err := git(abs, "rev-parse", "--show-toplevel")
+	root, err := git(env, abs, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return "", "", err
 	}
@@ -241,7 +246,7 @@ func gitIdentity(repoPath string) (worktreeRoot string, commonRoot string, err e
 	if err != nil {
 		return "", "", err
 	}
-	commonGitDir, err := git(abs, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	commonGitDir, err := git(env, abs, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	if err != nil {
 		return "", "", err
 	}
@@ -256,7 +261,7 @@ func gitIdentity(repoPath string) (worktreeRoot string, commonRoot string, err e
 	// Probing only on this error path is deliberate: every layout that resolves
 	// today still takes its original code path, so submodule support cannot
 	// reclassify it, and ordinary roots pay no extra git process.
-	superprojectRoot, probeErr := git(abs, "rev-parse", "--show-superproject-working-tree")
+	superprojectRoot, probeErr := git(env, abs, "rev-parse", "--show-superproject-working-tree")
 	if probeErr != nil || superprojectRoot == "" {
 		// Not a submodule, or the probe itself failed: preserve the original
 		// fail-loud error. A worktree created inside a submodule normally lands
@@ -282,8 +287,8 @@ func commonRootFromGitDir(gitDir string) (string, error) {
 	return canonicalPath(filepath.Dir(gitDir))
 }
 
-func git(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
+func git(env []string, dir string, args ...string) (string, error) {
+	cmd := wsexec.Command(env, "git", args...)
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {

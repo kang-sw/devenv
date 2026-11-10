@@ -64,7 +64,7 @@ func TestReleaseWorktreeToleratesMissingLease(t *testing.T) {
 	root, base := worktreeFixture(t)
 	// provisionWorktree alone writes no lease: the shape of a worktree acquired
 	// before worktree leases existed.
-	res, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, base, "impl/test/alpha", builtinProfile(t, worktreeProfileFull), "")
+	res, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, nil, root, base, "impl/test/alpha", builtinProfile(t, worktreeProfileFull), "")
 	if err != nil {
 		t.Fatalf("provision: %v", err)
 	}
@@ -110,7 +110,7 @@ func TestWorktreeAcquireFailedLeaseWriteDetaches(t *testing.T) {
 func TestWriteWorktreeLeaseOverwritesUnreleasedLease(t *testing.T) {
 	root, base := worktreeFixture(t)
 	ctx := context.Background()
-	res, err := provisionWorktree(ctx, wsgit.ExecRunner{}, root, base, "impl/test/alpha", builtinProfile(t, worktreeProfileFull), "")
+	res, err := provisionWorktree(ctx, wsgit.ExecRunner{}, nil, root, base, "impl/test/alpha", builtinProfile(t, worktreeProfileFull), "")
 	if err != nil {
 		t.Fatalf("provision: %v", err)
 	}

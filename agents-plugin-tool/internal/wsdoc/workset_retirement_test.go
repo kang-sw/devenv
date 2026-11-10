@@ -58,7 +58,7 @@ func TestLegacyWorksetsRemainReadableAndClosable(t *testing.T) {
 				if err != nil || info.Status != wantStatus {
 					t.Fatalf("legacy status = %+v, %v", info, err)
 				}
-				graph, err := loadTicketGraph(root)
+				graph, err := loadTicketGraph(nil, root)
 				if err != nil {
 					t.Fatal(err)
 				}

@@ -37,13 +37,21 @@ func ParseTicketPath(rel string) (status, stem string, ok bool) {
 // worktree's sparse-checkout scope is still found, through the git index,
 // with hidden set.
 func FindTicketPath(root, stem string) (path, status string, hidden bool, err error) {
-	return findTicketPath(root, newTicketScope(root), stem)
+	return FindTicketPathEnv(root, stem, nil)
+}
+
+// FindTicketPathEnv is FindTicketPath with the scope's git run on env.
+func FindTicketPathEnv(root, stem string, env []string) (path, status string, hidden bool, err error) {
+	return findTicketPath(root, newTicketScopeEnv(root, env), stem)
 }
 
 type TicketListOptions struct {
 	Statuses       []string
 	IncludeDone    bool
 	IncludeDropped bool
+	// Env is the environment a sparse-checkout scope's git runs on; nil
+	// means this process's own. The same on every options type below.
+	Env []string
 }
 
 type TicketFindOptions struct {
@@ -75,6 +83,7 @@ type TicketFindOptions struct {
 	// pagination, so a caller-side filter (the ticket index's ownership
 	// filter) pages over the filtered set rather than thinning a page.
 	Exclude func(TicketInfo) bool
+	Env     []string
 }
 
 type TicketStatusOptions struct {
@@ -83,6 +92,7 @@ type TicketStatusOptions struct {
 	IncludeDropped bool
 	// Resolve — see TicketFindOptions.Resolve.
 	Resolve bool
+	Env     []string
 }
 
 type TicketInfo struct {
@@ -194,6 +204,7 @@ func TicketsList(root string, opts TicketListOptions) ([]TicketInfo, error) {
 		Statuses:       opts.Statuses,
 		IncludeDone:    opts.IncludeDone,
 		IncludeDropped: opts.IncludeDropped,
+		Env:            opts.Env,
 	})
 }
 
@@ -203,6 +214,7 @@ func TicketsFind(root string, opts TicketFindOptions) ([]TicketInfo, error) {
 		IncludeDone:    opts.IncludeDone,
 		IncludeDropped: opts.IncludeDropped,
 		Resolve:        resolveModeFor(opts.Resolve),
+		Env:            opts.Env,
 	})
 	if err != nil {
 		return nil, err
@@ -291,6 +303,7 @@ func TicketsStatus(root string, opts TicketStatusOptions) (*TicketInfo, error) {
 		IncludeDone:    opts.IncludeDone,
 		IncludeDropped: opts.IncludeDropped,
 		Resolve:        resolveModeFor(opts.Resolve),
+		Env:            opts.Env,
 	})
 	if err != nil {
 		return nil, err
@@ -334,6 +347,7 @@ type ticketScanOptions struct {
 	IncludeDone    bool
 	IncludeDropped bool
 	Resolve        ticketResolveMode
+	Env            []string
 }
 
 func scanTickets(root string, opts ticketScanOptions) ([]TicketInfo, error) {
@@ -352,7 +366,7 @@ func scanTickets(root string, opts ticketScanOptions) ([]TicketInfo, error) {
 func scanTicketsWithBodies(root string, opts ticketScanOptions) ([]TicketInfo, map[string]string, error) {
 	var scope *ticketScope
 	if opts.Resolve != resolveOff {
-		scope = newTicketScope(root)
+		scope = newTicketScopeEnv(root, opts.Env)
 	}
 
 	ticketsRoot := filepath.Join(root, "ai-docs", "tickets")

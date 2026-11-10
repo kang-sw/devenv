@@ -129,7 +129,7 @@ func TestWorktreeHooksEnvCwdAndProvenance(t *testing.T) {
 		worktreeHookPreRelease:    {hook(hookArgv(t, "env", "out/release.txt"))},
 	})
 
-	first, err := provisionWorktree(ctx, runner, root, "develop", "impl/develop/a", profile, "")
+	first, err := provisionWorktree(ctx, runner, nil, root, "develop", "impl/develop/a", profile, "")
 	if err != nil {
 		t.Fatalf("provision: %v", err)
 	}
@@ -168,7 +168,7 @@ func TestWorktreeHooksEnvCwdAndProvenance(t *testing.T) {
 		t.Fatalf("pre_release env = %q, want empty base and the checked-out branch", relEnv)
 	}
 
-	second, err := provisionWorktree(ctx, runner, root, "develop", "", profile, "")
+	second, err := provisionWorktree(ctx, runner, nil, root, "develop", "", profile, "")
 	if err != nil {
 		t.Fatalf("re-provision: %v", err)
 	}
@@ -191,7 +191,7 @@ func TestWorktreeHookSparseWideningSurvivesReuse(t *testing.T) {
 	profile := hookProfile(t, "docs", map[string]any{"sparse": map[string]any{"mode": "cone", "paths": []string{"ai-docs"}}}, map[string][]map[string]any{
 		worktreeHookPostProvision: {hook(hookArgv(t, "sparse-add", "src"))},
 	})
-	first, err := provisionWorktree(ctx, runner, root, "develop", "impl/develop/a", profile, "")
+	first, err := provisionWorktree(ctx, runner, nil, root, "develop", "impl/develop/a", profile, "")
 	if err != nil {
 		t.Fatalf("provision: %v", err)
 	}
@@ -200,7 +200,7 @@ func TestWorktreeHookSparseWideningSurvivesReuse(t *testing.T) {
 	if _, err := releaseWorktree(ctx, runner, first.Path, "", lookupOf(profile)); err != nil {
 		t.Fatal(err)
 	}
-	second, err := provisionWorktree(ctx, runner, root, "develop", "impl/develop/b", profile, "")
+	second, err := provisionWorktree(ctx, runner, nil, root, "develop", "impl/develop/b", profile, "")
 	if err != nil || !second.Reused || second.Provisioned {
 		t.Fatalf("plain reuse = %+v, %v", second, err)
 	}
@@ -215,7 +215,7 @@ func TestWorktreeHookPostProvisionPreserveWarning(t *testing.T) {
 	profile := hookProfile(t, "build", map[string]any{"preserve": []string{"out/"}}, map[string][]map[string]any{
 		worktreeHookPostProvision: {hook(hookArgv(t, "write", "cache/gen.txt")), hook(hookArgv(t, "write", "out/keep.txt"))},
 	})
-	res, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, "develop", "impl/develop/a", profile, "")
+	res, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, nil, root, "develop", "impl/develop/a", profile, "")
 	if err != nil {
 		t.Fatalf("provision: %v", err)
 	}
@@ -235,7 +235,7 @@ func TestWorktreeHookPostAcquireFailureQuarantines(t *testing.T) {
 	broken := hookProfile(t, "build", nil, map[string][]map[string]any{
 		worktreeHookPostAcquire: {hook(hookArgv(t, "exit", "3"))},
 	})
-	_, err := provisionWorktree(ctx, runner, root, "develop", "impl/develop/a", broken, "")
+	_, err := provisionWorktree(ctx, runner, nil, root, "develop", "impl/develop/a", broken, "")
 	if err == nil {
 		t.Fatal("a failing post_acquire must fail acquire")
 	}
@@ -248,13 +248,13 @@ func TestWorktreeHookPostAcquireFailureQuarantines(t *testing.T) {
 	runGit(t, root, "switch", "impl/develop/a")
 	runGit(t, root, "switch", "impl/develop/foo")
 
-	_, err = provisionWorktree(ctx, runner, root, "develop", "impl/develop/b", broken, "")
+	_, err = provisionWorktree(ctx, runner, nil, root, "develop", "impl/develop/b", broken, "")
 	if err == nil || !strings.Contains(err.Error(), "2 worktree(s) of profile \"build\"") || !strings.Contains(err.Error(), "defect in the profile") {
 		t.Fatalf("second failure must count two quarantined worktrees: %v", err)
 	}
 
 	fixed := hookProfile(t, "build", nil, nil)
-	res, err := provisionWorktree(ctx, runner, root, "develop", "impl/develop/c", fixed, "")
+	res, err := provisionWorktree(ctx, runner, nil, root, "develop", "impl/develop/c", fixed, "")
 	if err != nil {
 		t.Fatalf("provision with fixed profile: %v", err)
 	}
@@ -305,7 +305,7 @@ func TestWorktreeHookPostProvisionFailureQuarantines(t *testing.T) {
 	// Re-adoption: a healthy worktree whose profile definition changes to a
 	// failing post_provision is quarantined on its next claim.
 	healthy := hookProfile(t, "lint", nil, nil)
-	first, err := provisionWorktree(ctx, runner, root, "develop", "impl/develop/b", healthy, "")
+	first, err := provisionWorktree(ctx, runner, nil, root, "develop", "impl/develop/b", healthy, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -315,7 +315,7 @@ func TestWorktreeHookPostProvisionFailureQuarantines(t *testing.T) {
 	changed := hookProfile(t, "lint", nil, map[string][]map[string]any{
 		worktreeHookPostProvision: {hook(hookArgv(t, "exit", "5"))},
 	})
-	if _, err := provisionWorktree(ctx, runner, root, "develop", "impl/develop/c", changed, ""); err == nil || !strings.Contains(err.Error(), "quarantined") {
+	if _, err := provisionWorktree(ctx, runner, nil, root, "develop", "impl/develop/c", changed, ""); err == nil || !strings.Contains(err.Error(), "quarantined") {
 		t.Fatalf("re-adoption with a failing post_provision must quarantine: %v", err)
 	}
 	m, err := readWorktreeMarker(ctx, runner, first.Path)
@@ -339,7 +339,7 @@ func TestWorktreeHookPreReleaseFailureLeavesWorktree(t *testing.T) {
 	profile := hookProfile(t, "build", nil, map[string][]map[string]any{
 		worktreeHookPreRelease: {hook(hookArgv(t, "exit", "6"))},
 	})
-	res, err := provisionWorktree(ctx, runner, root, "develop", "impl/develop/a", profile, "")
+	res, err := provisionWorktree(ctx, runner, nil, root, "develop", "impl/develop/a", profile, "")
 	if err != nil {
 		t.Fatal(err)
 	}

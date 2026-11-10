@@ -92,7 +92,7 @@ func TestProvisionWorktreePreserveSurvivesHygiene(t *testing.T) {
 	runner := wsgit.ExecRunner{}
 	build := customProfile(t, "build", `{"preserve":["out/"]}`)
 
-	first, err := provisionWorktree(ctx, runner, root, "develop", "impl/develop/a", build, "")
+	first, err := provisionWorktree(ctx, runner, nil, root, "develop", "impl/develop/a", build, "")
 	if err != nil {
 		t.Fatalf("provision: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestProvisionWorktreePreserveSurvivesHygiene(t *testing.T) {
 	assertExists(t, first.Path, "cache/drop.bin", false)
 
 	writeFileForTest(t, first.Path, "cache/drop2.bin", "scratch")
-	second, err := provisionWorktree(ctx, runner, root, "develop", "impl/develop/b", build, "")
+	second, err := provisionWorktree(ctx, runner, nil, root, "develop", "impl/develop/b", build, "")
 	if err != nil {
 		t.Fatalf("re-provision: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestProvisionWorktreeDefinitionChangeReadopts(t *testing.T) {
 	runner := wsgit.ExecRunner{}
 	v1 := customProfile(t, "build", `{"description":"v1"}`)
 
-	first, err := provisionWorktree(ctx, runner, root, "develop", "impl/develop/a", v1, "")
+	first, err := provisionWorktree(ctx, runner, nil, root, "develop", "impl/develop/a", v1, "")
 	if err != nil || !first.Provisioned {
 		t.Fatalf("fresh provision = %+v, %v", first, err)
 	}
@@ -133,7 +133,7 @@ func TestProvisionWorktreeDefinitionChangeReadopts(t *testing.T) {
 		t.Fatal(err)
 	}
 	renamed := customProfile(t, "build", `{"description":"v1 reworded"}`)
-	second, err := provisionWorktree(ctx, runner, root, "develop", "impl/develop/b", renamed, "")
+	second, err := provisionWorktree(ctx, runner, nil, root, "develop", "impl/develop/b", renamed, "")
 	if err != nil || !second.Reused || second.Provisioned {
 		t.Fatalf("description-only change must reuse without re-provisioning: %+v, %v", second, err)
 	}
@@ -141,7 +141,7 @@ func TestProvisionWorktreeDefinitionChangeReadopts(t *testing.T) {
 		t.Fatal(err)
 	}
 	v2 := customProfile(t, "build", `{"description":"v2","sparse":{"mode":"patterns","paths":["/*","!/deps/"]}}`)
-	third, err := provisionWorktree(ctx, runner, root, "develop", "impl/develop/c", v2, "")
+	third, err := provisionWorktree(ctx, runner, nil, root, "develop", "impl/develop/c", v2, "")
 	if err != nil {
 		t.Fatalf("provision v2: %v", err)
 	}
@@ -158,7 +158,7 @@ func TestProvisionWorktreeDefinitionChangeReadopts(t *testing.T) {
 func TestProvisionWorktreePatternsProfileExcludesDir(t *testing.T) {
 	root := profileWorktreeFixture(t)
 	build := customProfile(t, "build", `{"sparse":{"mode":"patterns","paths":["/*","!/deps/"]}}`)
-	res, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, "develop", "impl/develop/a", build, "")
+	res, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, nil, root, "develop", "impl/develop/a", build, "")
 	if err != nil {
 		t.Fatalf("provision: %v", err)
 	}
@@ -185,11 +185,11 @@ func TestProvisionWorktreeAdoptsLegacyIntoBuiltinsOnly(t *testing.T) {
 	full := builtinProfile(t, worktreeProfileFull)
 	lookup := builtinProfileLookup(t)
 
-	sparse, err := provisionWorktree(ctx, runner, root, "develop", "impl/develop/a", housekeeping, "")
+	sparse, err := provisionWorktree(ctx, runner, nil, root, "develop", "impl/develop/a", housekeeping, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	plain, err := provisionWorktree(ctx, runner, root, "develop", "impl/develop/b", full, "")
+	plain, err := provisionWorktree(ctx, runner, nil, root, "develop", "impl/develop/b", full, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +202,7 @@ func TestProvisionWorktreeAdoptsLegacyIntoBuiltinsOnly(t *testing.T) {
 	// An arbitrary prior cone, as the retired ticket-scope flow could leave.
 	runGit(t, sparse.Path, "sparse-checkout", "set", "--cone", "src")
 
-	custom, err := provisionWorktree(ctx, runner, root, "develop", "impl/develop/c", customProfile(t, "build", `{}`), "")
+	custom, err := provisionWorktree(ctx, runner, nil, root, "develop", "impl/develop/c", customProfile(t, "build", `{}`), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,7 +210,7 @@ func TestProvisionWorktreeAdoptsLegacyIntoBuiltinsOnly(t *testing.T) {
 		t.Fatalf("a custom profile must never adopt an unmarked worktree: %+v", custom)
 	}
 
-	adopted, err := provisionWorktree(ctx, runner, root, "develop", "impl/develop/d", housekeeping, "")
+	adopted, err := provisionWorktree(ctx, runner, nil, root, "develop", "impl/develop/d", housekeeping, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +225,7 @@ func TestProvisionWorktreeAdoptsLegacyIntoBuiltinsOnly(t *testing.T) {
 		t.Fatal("adoption must stamp the housekeeping marker")
 	}
 
-	adoptedFull, err := provisionWorktree(ctx, runner, root, "develop", "impl/develop/e", full, "")
+	adoptedFull, err := provisionWorktree(ctx, runner, nil, root, "develop", "impl/develop/e", full, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -240,7 +240,7 @@ func TestProvisionWorktreeAdoptsLegacyIntoBuiltinsOnly(t *testing.T) {
 func TestProvisionWorktreeHiddenTicketBoardFails(t *testing.T) {
 	root := profileWorktreeFixture(t)
 	narrow := customProfile(t, "narrow", `{"sparse":{"mode":"cone","paths":["src"]}}`)
-	_, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, "develop", "impl/develop/a", narrow, "")
+	_, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, nil, root, "develop", "impl/develop/a", narrow, "")
 	if err == nil {
 		t.Fatal("a profile hiding the ticket board must fail acquire")
 	}
@@ -261,7 +261,7 @@ func TestProvisionWorktreeHookNarrowedTicketBoardFails(t *testing.T) {
 	narrowing := hookProfile(t, "narrowing", nil, map[string][]map[string]any{
 		"post_acquire": {hook(hookArgv(t, "sparse-set", "src"))},
 	})
-	_, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, root, "develop", "impl/develop/a", narrowing, "")
+	_, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, nil, root, "develop", "impl/develop/a", narrowing, "")
 	if err == nil {
 		t.Fatal("a post_acquire hook hiding the ticket board must fail acquire")
 	}
@@ -283,7 +283,7 @@ func TestReleaseWorktreeLegacyAndVanishedProfile(t *testing.T) {
 	runner := wsgit.ExecRunner{}
 	build := customProfile(t, "build", `{"preserve":["out/"]}`)
 
-	legacy, err := provisionWorktree(ctx, runner, root, "develop", "impl/develop/a", build, "")
+	legacy, err := provisionWorktree(ctx, runner, nil, root, "develop", "impl/develop/a", build, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -304,7 +304,7 @@ func TestReleaseWorktreeLegacyAndVanishedProfile(t *testing.T) {
 		t.Fatalf("legacy release must drop the lease: %+v", lease)
 	}
 
-	vanished, err := provisionWorktree(ctx, runner, root, "develop", "impl/develop/b", build, "")
+	vanished, err := provisionWorktree(ctx, runner, nil, root, "develop", "impl/develop/b", build, "")
 	if err != nil {
 		t.Fatal(err)
 	}

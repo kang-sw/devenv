@@ -259,7 +259,7 @@ func registerPoolExclude(commonDir, mainRoot, poolRoot string) error {
 // root is the caller's repository root; it may be the main worktree or any
 // linked worktree. The pool always resolves against the primary root, so a call
 // from a linked worktree never nests a per-worktree pool.
-func provisionWorktree(ctx context.Context, runner wsgit.Runner, root, base, targetBranch string, profile resolvedWorktreeProfile, poolConfigValue string) (worktreeAcquireResult, error) {
+func provisionWorktree(ctx context.Context, runner wsgit.Runner, env []string, root, base, targetBranch string, profile resolvedWorktreeProfile, poolConfigValue string) (worktreeAcquireResult, error) {
 	var res worktreeAcquireResult
 	base = strings.TrimSpace(base)
 	targetBranch = strings.TrimSpace(targetBranch)
@@ -340,7 +340,7 @@ func provisionWorktree(ctx context.Context, runner wsgit.Runner, root, base, tar
 			if marker.Profile != profile.Name || marker.Quarantine != nil {
 				continue
 			}
-		} else if legacyWorktreeProfile(e.Path) != profile.Name {
+		} else if legacyWorktreeProfile(env, e.Path) != profile.Name {
 			continue
 		}
 		status, err := wtRun(ctx, runner, e.Path, "status", "--porcelain")
@@ -386,7 +386,7 @@ func provisionWorktree(ctx context.Context, runner wsgit.Runner, root, base, tar
 		}
 		// Declared sparse is applied only here, on entry, so sparse changes a
 		// hook makes afterwards persist across reuse.
-		if err := applyDeclaredSparse(ctx, runner, wtPath, def.Sparse); err != nil {
+		if err := applyDeclaredSparse(ctx, runner, env, wtPath, def.Sparse); err != nil {
 			return res, err
 		}
 		res.Provisioned = true
@@ -491,8 +491,8 @@ func provisionWorktree(ctx context.Context, runner wsgit.Runner, root, base, tar
 // profiles: any active sparse-checkout => housekeeping, otherwise full. The
 // first claim re-provisions it, normalizing an arbitrary prior cone to the
 // builtin's declared sparse.
-func legacyWorktreeProfile(wtPath string) string {
-	if wsdoc.SparseCheckoutActive(wtPath) {
+func legacyWorktreeProfile(env []string, wtPath string) string {
+	if wsdoc.SparseCheckoutActiveEnv(wtPath, env) {
 		return worktreeProfileHousekeeping
 	}
 	return worktreeProfileFull
@@ -502,10 +502,10 @@ func legacyWorktreeProfile(wtPath string) string {
 // shape: none (a full checkout), cone, or non-cone patterns. set rewrites both
 // the pattern file and core.sparseCheckoutCone, so a worktree previously in
 // the other mode switches cleanly.
-func applyDeclaredSparse(ctx context.Context, runner wsgit.Runner, wtPath string, sparse *worktreeProfileSparse) error {
+func applyDeclaredSparse(ctx context.Context, runner wsgit.Runner, env []string, wtPath string, sparse *worktreeProfileSparse) error {
 	switch {
 	case sparse == nil:
-		if !wsdoc.SparseCheckoutActive(wtPath) {
+		if !wsdoc.SparseCheckoutActiveEnv(wtPath, env) {
 			return nil
 		}
 		_, err := wtRun(ctx, runner, wtPath, noSubmoduleRecurse("sparse-checkout", "disable")...)

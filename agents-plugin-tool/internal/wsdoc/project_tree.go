@@ -3,7 +3,6 @@ package wsdoc
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -12,6 +11,11 @@ import (
 )
 
 func ProjectTree(root string) (string, error) {
+	return ProjectTreeEnv(root, nil)
+}
+
+// ProjectTreeEnv is ProjectTree with git run on env (see gitCommand).
+func ProjectTreeEnv(root string, env []string) (string, error) {
 	aiDocs := filepath.Join(root, "ai-docs")
 	info, err := os.Stat(aiDocs)
 	if err != nil {
@@ -22,7 +26,7 @@ func ProjectTree(root string) (string, error) {
 	}
 
 	var b strings.Builder
-	ignored := gitIgnoreMatcher(root)
+	ignored := gitIgnoreMatcher(env, root)
 	renderAIDocs(&b, aiDocs, ignored)
 	b.WriteString("\n\n")
 	if isDir(filepath.Join(aiDocs, "tickets")) {
@@ -94,8 +98,8 @@ func renderDirTree(b *strings.Builder, root string, indent int, ignored func(str
 	}
 }
 
-func gitIgnoreMatcher(repoRoot string) func(string) bool {
-	if err := exec.Command("git", "-C", repoRoot, "rev-parse", "--is-inside-work-tree").Run(); err != nil {
+func gitIgnoreMatcher(env []string, repoRoot string) func(string) bool {
+	if err := gitCommand(env, repoRoot, "rev-parse", "--is-inside-work-tree").Run(); err != nil {
 		return func(string) bool { return false }
 	}
 	cache := map[string]bool{}
@@ -108,7 +112,7 @@ func gitIgnoreMatcher(repoRoot string) func(string) bool {
 		if ignored, ok := cache[rel]; ok {
 			return ignored
 		}
-		err = exec.Command("git", "-C", repoRoot, "check-ignore", "-q", "--", rel).Run()
+		err = gitCommand(env, repoRoot, "check-ignore", "-q", "--", rel).Run()
 		ignored := err == nil
 		cache[rel] = ignored
 		return ignored

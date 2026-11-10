@@ -75,13 +75,13 @@ func (g *ticketGraph) verifiedInfo(ticket verifiedTicket) (TicketInfo, bool) {
 	return info, ok
 }
 
-func loadTicketGraph(root string) (*ticketGraph, error) {
+func loadTicketGraph(env []string, root string) (*ticketGraph, error) {
 	// resolveGraph, not resolveOff: the integrity checks resolve `parent:` and
 	// `related:` against the whole board, so a worktree that only checks out
 	// part of ai-docs/tickets/ would otherwise report a hidden-but-present stem
 	// as dangling. TicketVerify's signature and all of its call sites stay
 	// untouched — resolution is a property of this call, threaded here.
-	tickets, err := scanTickets(root, ticketScanOptions{IncludeDone: true, IncludeDropped: true, Resolve: resolveGraph})
+	tickets, err := scanTickets(root, ticketScanOptions{IncludeDone: true, IncludeDropped: true, Resolve: resolveGraph, Env: env})
 	if err != nil {
 		return nil, err
 	}
@@ -132,11 +132,11 @@ type boardAncestor struct {
 // ticketGraphAdvisories is the entry point for the cross-file pass. It returns
 // the graph-load error unchanged; swallowing it is TicketVerify's job, and the
 // swallow is the named degrade-to-silence path.
-func ticketGraphAdvisories(root string, verified []verifiedTicket) ([]VerifyAdvisory, error) {
+func ticketGraphAdvisories(env []string, root string, verified []verifiedTicket) ([]VerifyAdvisory, error) {
 	if len(verified) == 0 {
 		return nil, nil
 	}
-	graph, err := loadTicketGraph(root)
+	graph, err := loadTicketGraph(env, root)
 	if err != nil {
 		return nil, err
 	}
