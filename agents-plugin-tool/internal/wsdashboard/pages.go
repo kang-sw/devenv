@@ -31,7 +31,7 @@ import (
 // (wswhiteboard.RenderRegions); the rest render from the view model
 // (pageview.go).
 
-//go:embed assets/dashboard.tmpl assets/dashboard.css assets/dashboard.js assets/sprite.svg assets/tracker.css assets/tracker.js assets/mention.js
+//go:embed assets/dashboard.tmpl assets/dashboard.css assets/dashboard.js assets/sprite.svg assets/tracker.css assets/tracker.js assets/mention.js assets/toast.js
 var dashboardFS embed.FS
 
 // Region names. The session page's regions in order; the index page has one.
@@ -102,6 +102,9 @@ type pageAssetsData struct {
 	// MentionScript is the @ file-mention popup module (mention.js), which
 	// the session page's composer attaches.
 	MentionScript template.JS
+	// ToastScript is the shared toast stack (toast.js, window.WsToast),
+	// inlined ahead of the tracker and page scripts that both use it.
+	ToastScript template.JS
 }
 
 var (
@@ -167,6 +170,7 @@ func buildDashboardAssets(read func(name string) ([]byte, error)) (*dashboardAss
 		TrackerCSS:       template.CSS(get("tracker.css")),
 		TrackerScript:    template.JS(get("tracker.js")),
 		MentionScript:    template.JS(get("mention.js")),
+		ToastScript:      template.JS(get("toast.js")),
 		WhiteboardCSS:    wb.CSS,
 		WhiteboardSprite: wb.Sprite,
 		FormScript:       wb.FormScript,

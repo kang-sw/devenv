@@ -134,9 +134,11 @@
 //                    own conversation column and session drawer
 //   storagePrefix    browser-storage key prefix for display state (view modes, drawer
 //                    height, recently-closed fold, tree folds); default "ws.tracker."
+//   onRender(u)      called after every render with the rendered store's unread
+//                    notifications, u = api.unread()
 //
 // The renderer creates its own nodes (tkdrawer, tkclip, tkbody, tkhandles, tkpage,
-// tkwin, tkdlg, tkmenu, tktoast, tktip, tkqs, ...); each root carries the class tk, which
+// tkwin, tkdlg, tkmenu, tktip, tkqs, ...); each root carries the class tk, which
 // scopes tracker.css. Its handle row sits at the top right, left of the host's own
 // handle: right = --dpad + --drhw (the host's handle width) + 6px. The renderer sets
 // --tkhw on the root element to the row's width plus that gap (0 when the row is
@@ -156,7 +158,18 @@
 //   viewerChanged(id)         the adapter's viewer of a store changed: checks it
 //                             and marks seen when the store is on screen, clears
 //                             the last-write line, re-renders
-//   toast(html)               a transient message
+//   toast(html)               a transient message: the page's shared toast stack
+//                             (window.WsToast) when it has one, else the renderer's
+//                             own #tktoast
+//   unread()                  {store, ready, entries}: the rendered store's unread
+//                             notifications, newest first, each {store, item, ev, key,
+//                             kind, label, title, author} in plain text (never the
+//                             feed's HTML); ready is false while the store is not
+//                             loaded, when entries is empty
+//   openNotice(entry)         open an unread() entry's item at what it refers to and
+//                             mark it read, as a click on its Notify row does
+//   openNotify(id)            bring store id's Notify tab up (its drawer, or its store
+//                             page when one shows)
 // window.__tracker = {ui, vs(), openItemWindow} is a read-only hook for scripted checks.
 (function () {
   'use strict';
@@ -2810,7 +2823,9 @@
 
   var toastTimer = null;
   function toast(html) {
+    if (window.WsToast) { window.WsToast.show(html, { html: true }); return; }
     var t = $('tktoast');
+    if (!t) document.body.appendChild(t = el('div', { class: 'tk tk-toast', id: 'tktoast', hidden: '' }));
     t.innerHTML = html; t.hidden = false;
     clearTimeout(toastTimer);
     toastTimer = setTimeout(function () { t.hidden = true; }, 6000);
@@ -3716,7 +3731,7 @@
   function setInert(on) {
     if (!on) { inerted.forEach(function (el) { el.inert = false; }); inerted = []; return; }
     if (inerted.length) return;
-    var keep = [$('tkwin'), $('tkdlg'), $('tktoast'), $('tktip'), $('tkmenu')];
+    var keep = [$('tkwin'), $('tkdlg'), $('tktoast'), $('wstoasts'), $('tktip'), $('tkmenu')];
     Array.prototype.forEach.call(document.body.children, function (el) {
       if (keep.indexOf(el) < 0 && !el.inert) { el.inert = true; inerted.push(el); }
     });
@@ -3735,6 +3750,13 @@
   // renderDue: a change notification asked for a render that has not run yet (see mount); any
   // render meets it, so a synchronous render() takes the pending one's place.
   var renderDue = false, changeTimer = 0;
+  // UNREADS: the rendered store's unread notifications as api.unread() returns them,
+  // rebuilt by every render. afterRender runs the host's hooks once a render is done.
+  var UNREADS = { store: null, ready: false, entries: [] };
+  function afterRender(name) {
+    if (X.rendered) X.rendered(name, VS, H);
+    if (O.onRender) O.onRender(UNREADS);
+  }
   function render() {
     renderDue = false;
     syncHandles();
@@ -3743,6 +3765,7 @@
     if (ui.open && order.indexOf(ui.open) < 0) ui.open = null;
     var name = ui.store;
     VS = name ? vss[name] : null; EV = {};
+    UNREADS = { store: name, ready: false, entries: [] };
     renderHandles();
     $('tkdrawer').classList.toggle('open', !!ui.open);
 
@@ -3755,7 +3778,7 @@
       body.innerHTML = '<div class="tk-wait">' + esc(name ? AD.error(name) || wsT("js.tk.loading") : wsT("js.tk.nostore")) + '</div>';
       ui.win = false; $('tkwin').hidden = true; sb.innerHTML = ''; setInert(false);
       if (!ui.page) fitDrawer();
-      if (X.rendered) X.rendered(name, null, H);
+      afterRender(name);
       measure();
       return;
     }
@@ -3766,7 +3789,13 @@
     FLAGGED = {}; UNREAD = {};
     VS.events.forEach(function (e) { if (e.status === 'flagged' && e.thread && VS.items[e.thread]) FLAGGED[e.thread] = (FLAGGED[e.thread] || 0) + 1; });
     var rm = readMap();
-    feedEntries(v).forEach(function (x) { if (!rm[x.key]) UNREAD[x.item] = (UNREAD[x.item] || 0) + 1; });
+    UNREADS.ready = true;
+    feedEntries(v).forEach(function (x) {
+      if (rm[x.key]) return;
+      UNREAD[x.item] = (UNREAD[x.item] || 0) + 1;
+      var src = x.ev && (VS.comments[x.ev] || EV[x.ev]), who = src && (src.author || src.member);
+      UNREADS.entries.push({ store: name, item: x.item, ev: x.ev, key: x.key, kind: x.kind, label: wsT(NK[x.kind]), title: VS.items[x.item].title || alias(x.item), author: who ? nm(who) : '' });
+    });
     // With no drawer, store page, or item window open, nothing of the store shows but its
     // handle: the marks above and the host's rendered hook stay current, the drawer is left as
     // it is (the render that opens it draws it), and nothing is measured but the handle row.
@@ -3779,7 +3808,7 @@
       if (MN && MN.kind === 'sync') { $('tkmenu').innerHTML = syncPopHtml(); placeMenu(); }
       else if (MN && !VS.items[MN.item]) closeMenu(false);
       ui.itemChanged = false; ui.clearDraft = false;
-      if (X.rendered) X.rendered(name, VS, H);
+      afterRender(name);
       measure();
       return;
     }
@@ -3847,7 +3876,7 @@
       if (mIn) { var mf = $('tkmenu').querySelector('button'); if (mf) mf.focus({ preventScroll: true }); }
     } else if (MN && !VS.items[MN.item]) closeMenu(false);
     ui.itemChanged = false; ui.clearDraft = false;
-    if (X.rendered) X.rendered(name, VS, H);
+    afterRender(name);
     measure();
   }
 
@@ -3905,6 +3934,20 @@
     ui.focus = focus ? { ev: focus, flash: true } : null;
     render();
     $('tkwin').firstElementChild.focus({ preventScroll: true });
+    return true;
+  }
+  // openNotify(storeId) brings a store's Notify tab up: on its store page when a store page
+  // shows, else in its drawer, opened when it is not. The wide layout shows notifications
+  // in a column of their own, which the side-tab choice leaves alone.
+  function openNotify(storeId) {
+    if ((AD.stores() || []).indexOf(storeId) < 0) return false;
+    var ts = (ui.tab[storeId] = ui.tab[storeId] || { side: 'notify', narrow: 'items' });
+    ts.side = 'notify'; ts.narrow = 'notify';
+    if (ui.page) {
+      if (ui.page !== storeId) { history.pushState(null, '', '#/' + encodeURIComponent(storeId)); applyRoute(); }
+      else render();
+    } else if (ui.open !== storeId) openStore(storeId);
+    else render();
     return true;
   }
   function showItem(id, opener, focus) { openItemWindow(ui.store, id, { opener: opener, focus: focus }); }
@@ -4187,7 +4230,6 @@
     b.appendChild(el('div', { class: 'tk tk-iwin-back', id: 'tkwin', hidden: '' }, '<div class="iwin" role="dialog" aria-modal="true" tabindex="-1"><div class="iwin-in" id="tkwinbody"></div></div>' +
       '<ul class="tk-mpop" id="tkmpop" role="listbox" aria-label="' + wsT("js.tk.composer.mention.tip") + '" hidden></ul>'));
     b.appendChild(el('dialog', { class: 'tk tk-dlg', id: 'tkdlg' }));
-    b.appendChild(el('div', { class: 'tk tk-toast', id: 'tktoast', hidden: '' }));
     b.appendChild(el('div', { class: 'tk tk-tip', id: 'tktip', role: 'tooltip', hidden: '' }));
     b.appendChild(el('div', { class: 'tk tk-menu', id: 'tkmenu', role: 'menu', hidden: '' }));
     O.qsSlot.appendChild(el('span', { class: 'tk tk-qswrap' },
@@ -4577,7 +4619,10 @@
         if (id === ui.store && viewing()) bringUp(id);
         render();
       },
-      toast: toast
+      toast: toast,
+      unread: function () { return UNREADS; },
+      openNotice: function (x) { if (x && openItemWindow(x.store, x.item, x.ev ? { focus: x.ev } : null)) markRead([x.key]); },
+      openNotify: openNotify
     };
     syncHandles();
     ui.store = order[0] || null;

@@ -421,6 +421,7 @@
     }
     if (name === "panels") drawerSwapped();
     if (name === "tree" || name === "convlive") drawerWait();
+    if (TL_REGIONS[name]) { delete tlHeld[name]; tlCount(); }
     if (name === "convlive") syncBadge();
     if (name === "head" && !sseOn) connected(false);
   }
@@ -1355,7 +1356,7 @@
   // machine), and a data-out link opens at all only there; the daemon checks
   // both again. The markup is the same for every viewer: entries render once
   // for all of them.
-  var lmenu = null, lmenuFrom = null, ltoast = null, ltoastTimer = 0;
+  var lmenu = null, lmenuFrom = null;
   function closeLinkMenu(refocus) {
     if (!lmenu) return;
     lmenu.parentNode.removeChild(lmenu);
@@ -1363,18 +1364,7 @@
     if (refocus && lmenuFrom && lmenuFrom.isConnected) lmenuFrom.focus();
     lmenuFrom = null;
   }
-  function toast(text) {
-    if (!ltoast) {
-      ltoast = doc.createElement("div");
-      ltoast.className = "ltoast";
-      ltoast.setAttribute("role", "status");
-      doc.body.appendChild(ltoast);
-    }
-    ltoast.textContent = text;
-    ltoast.hidden = false;
-    clearTimeout(ltoastTimer);
-    ltoastTimer = setTimeout(function () { ltoast.hidden = true; }, 2200);
-  }
+  function toast(text) { if (window.WsToast) window.WsToast.show(text); }
   // copyText copies s: the Clipboard API where the page is a secure context,
   // else (a LAN address over plain http has no navigator.clipboard) a hidden
   // textarea and the copy command.
@@ -3122,7 +3112,7 @@
     if (!header || !slot || !wrap) return;
     header.classList.add("tk-room");
     if (tkSupport) tkAdapter.ext = supExt();
-    tkApi = window.WsTracker.mount(tkAdapter, { header: header, qsSlot: slot, pageParent: wrap, storagePrefix: "ws.tracker." });
+    tkApi = window.WsTracker.mount(tkAdapter, { header: header, qsSlot: slot, pageParent: wrap, storagePrefix: "ws.tracker.", onRender: tlTracker });
   }
   function trackerStart() {
     if (window.WsTracker && window.fetch) tkReload();
@@ -3657,6 +3647,121 @@
   // The stream state shows on every indicator in the top bar: the bare dot,
   // and the harness badge's LED, which a head region swap redraws lit, so
   // the swap reapplies the state (swap above).
+  // --- tab label: the count of work waiting on the user ---------------------
+  // This page owns document.title (the html element's data-wb-titlehost tells
+  // the board's open-question pill script to report its count here instead
+  // of writing the title). The label is "(N) <base>", no prefix at 0, where N
+  // sums three sources, each cached where it changes so a recount is a sum:
+  //   - the rendered tracker store's unread notifications (tlTk, from the
+  //     renderer's onRender);
+  //   - board asks: on a session page the pill's open set (tlPill), on the
+  //     index the sessions' policy chips;
+  //   - permission prompts: one per agent (or peer) in the tree that shows
+  //     one, the conversation's wait folded into the lead; on the index the
+  //     sessions' approval phases.
+  // N drops only when an item is handled (read, answered, resolved), since
+  // every source is recounted, never decremented by focus. A hidden tab holds
+  // region updates back (connect), so a held update of a counted region is
+  // parsed detached instead, once per new hash (tlHeld), and the counts read
+  // it in place of the live region until the tab shows again.
+  var TL_REGIONS = mode === "index" ? { sessions: 1 } : { board: 1, convlive: 1, tree: 1 };
+  var TL_ASK = '.card.policy[id^="item-"], .arow[id^="item-"]';
+  var tlHeld = {}, tlPill = 0, tlTk = 0, tlAsks = -1, tlPerm = 0, tlN = -1, tlBase = null;
+  function tlRetitle() {
+    var n = tlTk + tlPerm + (tlAsks >= 0 ? tlAsks : tlPill);
+    if (n === tlN) return;
+    tlN = n;
+    if (tlBase === null) {
+      tlBase = root.getAttribute("data-wb-title");
+      if (tlBase === null) { tlBase = doc.title.replace(/^\(\d+\) /, ""); root.setAttribute("data-wb-title", tlBase); }
+    }
+    doc.title = (n ? "(" + n + ") " : "") + tlBase;
+  }
+  window.wbTitleCount = function (n) { tlPill = n; tlRetitle(); };
+  function tlRoot(name) { return tlHeld[name] ? tlHeld[name].root : region(name); }
+  // tlDrafted: the pill's reply rule (a pick, a ticked ack, or a note).
+  function tlDrafted(el) {
+    var box = el.querySelector(".ack input"), n = el.querySelector(".note");
+    return !!(el.querySelector('.opt[aria-pressed="true"]') || (box && box.checked) || (n && n.value.trim()));
+  }
+  // tlHeldAsks counts a held board the pill's way without its DOM: its asks,
+  // less those drafted in the live board and those the newest sent records
+  // (in the held conversation when one waits, else the live one) name.
+  function tlHeldAsks() {
+    var b = tlRoot("board"), live = region("board"), c = tlRoot("convlive"), drafted = {}, sent = {};
+    if (!b) return 0;
+    if (live) q(TL_ASK, live).forEach(function (el) { if (tlDrafted(el)) drafted[el.getAttribute("data-id")] = 1; });
+    if (c) q(".sentdata i[data-id]", c).forEach(function (i) { sent[i.getAttribute("data-id")] = 1; });
+    return q(TL_ASK, b).filter(function (el) { var id = el.getAttribute("data-id"); return !drafted[id] && !sent[id]; }).length;
+  }
+  function tlPerms() {
+    var t = tlRoot("tree"), c = tlRoot("convlive"), units = [];
+    function add(u) { if (units.indexOf(u) < 0) units.push(u); }
+    if (t) q(".phase.permission, .brow.perm", t).forEach(function (el) { add(el.closest(".agent, .peer") || "lead"); });
+    if (c && c.querySelector(".permwait")) add((t && t.querySelector(".agent.root")) || "lead");
+    return units.length;
+  }
+  // tlCount recounts the region-borne sources from the live regions, or the
+  // held parse of one.
+  function tlCount() {
+    if (mode === "index") {
+      var r = tlRoot("sessions");
+      tlAsks = r ? q(".sess .chip.policy", r).reduce(function (a, el) { return a + (parseInt(el.textContent, 10) || 0); }, 0) : 0;
+      tlPerm = r ? q(".sess .phase.permission", r).length : 0;
+    } else {
+      tlAsks = tlHeld.board || tlHeld.convlive ? tlHeldAsks() : -1;
+      tlPerm = tlPerms();
+    }
+    tlRetitle();
+  }
+  // tlHold parses a held update of a counted region, once per new hash.
+  function tlHold(name, hash, html) {
+    if (!TL_REGIONS[name]) return;
+    var was = tlHeld[name], el = region(name);
+    if (was ? was.hash === hash : !el || el.getAttribute("data-h") === hash) return;
+    tlHeld[name] = { hash: hash, root: frag(html) };
+    tlCount();
+  }
+  // The tracker term and its new arrivals: each store's first loaded render
+  // sets its baseline of unread keys silently; a later key not in it is new.
+  // A new one toasts while the tab shows, and waits in tlHidden for one
+  // summary toast while it is hidden (tlShown).
+  var tlBaseKeys = {}, tlHidden = [], tlLastU = null;
+  function tlTracker(u) {
+    tlLastU = u;
+    tlTk = u && u.ready ? u.entries.length : 0;
+    if (u && u.ready) {
+      var base = tlBaseKeys[u.store];
+      if (!base) {
+        base = tlBaseKeys[u.store] = {};
+        u.entries.forEach(function (x) { base[x.key] = 1; });
+      } else {
+        u.entries.forEach(function (x) {
+          if (base[x.key]) return;
+          base[x.key] = 1;
+          if (doc.hidden) tlHidden.push(x);
+          else tlNotice(x);
+        });
+      }
+    }
+    tlRetitle();
+  }
+  function tlNotice(x) {
+    if (!window.WsToast) return;
+    var text = x.label + " · " + x.title + (x.author ? " · " + x.author : "");
+    window.WsToast.show(text, { kind: "notice", onClick: function () { if (tkApi) tkApi.openNotice(x); } });
+  }
+  function tlShown() {
+    if (doc.hidden) return;
+    var u = tlLastU, still = {};
+    if (u && u.ready) u.entries.forEach(function (x) { still[x.store + "\n" + x.key] = 1; });
+    var n = tlHidden.filter(function (x) { return still[x.store + "\n" + x.key]; }).length;
+    tlHidden = [];
+    if (!n || !window.WsToast) return;
+    var store = u.store;
+    window.WsToast.show(wsTn("js.toast.newnotes", n), { kind: "summary", onClick: function () { if (tkApi) tkApi.openNotify(store); } });
+  }
+
   var sseOn = true;
   function connected(on) {
     sseOn = on;
@@ -3693,6 +3798,7 @@
       if (doc.hidden) {
         delete hiddenRegions[ev.name];
         hiddenRegions[ev.name] = { hash: ev.hash, html: ev.html };
+        tlHold(ev.name, ev.hash, ev.html);
         return;
       }
       swap(ev.name, ev.hash, ev.html);
@@ -3715,6 +3821,9 @@
     var p = hiddenRegions;
     hiddenRegions = {};
     Object.keys(p).forEach(function (name) { swap(name, p[name].hash, p[name].html); });
+    tlHeld = {};
+    tlCount();
+    tlShown();
   }
   doc.addEventListener("visibilitychange", showRegions);
   function banner(text) {
@@ -3748,6 +3857,7 @@
   q("iframe.doc-frame").forEach(function (f) { if (f.contentWindow) f.contentWindow.postMessage({ wbDoc: "size" }, "*"); });
   if (window.wbForm) window.wbForm();
   applySent();
+  tlCount();
   syncBadge();
   fmtTimes(doc);
   mermaid();

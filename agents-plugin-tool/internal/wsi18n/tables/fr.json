@@ -981,6 +981,8 @@
   "js.tk.wk.yours": "Le vôtre",
   "js.toast.copied": "{0} copié",
   "js.toast.copyfail": "Impossible de copier : {0}",
+  "js.toast.newnotes.one": "1 nouvelle notification",
+  "js.toast.newnotes.other": "{0} nouvelles notifications",
   "js.toast.opened": "Ouvert dans le navigateur système",
   "js.toast.openednative": "Ouvert dans l'application par défaut",
   "js.toast.openfail": "Impossible d'ouvrir : {0}",

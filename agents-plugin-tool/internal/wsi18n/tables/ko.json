@@ -981,6 +981,8 @@
   "js.tk.wk.yours": "내 글",
   "js.toast.copied": "복사함: {0}",
   "js.toast.copyfail": "복사하지 못함: {0}",
+  "js.toast.newnotes.one": "새 알림 1건",
+  "js.toast.newnotes.other": "새 알림 {0}건",
   "js.toast.opened": "시스템 브라우저에서 열었습니다",
   "js.toast.openednative": "기본 앱에서 열었습니다",
   "js.toast.openfail": "열지 못함: {0}",

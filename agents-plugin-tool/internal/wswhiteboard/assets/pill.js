@@ -33,12 +33,19 @@
     return responded(el) || el.classList.contains("sent-sent") || el.classList.contains("sent-held");
   }
 
-  // The title prefix is the still-open total, whatever is in view.
-  var html = d.documentElement;
-  var base = html.getAttribute("data-wb-title");
-  if (base === null) { base = d.title.replace(/^\(\d+\) /, ""); html.setAttribute("data-wb-title", base); }
+  // The title prefix is the still-open total, whatever is in view. A page
+  // whose html element carries data-wb-titlehost (the dashboard) owns the
+  // title itself: the total goes to its window.wbTitleCount hook instead,
+  // and this script never writes the title there, even before the hook
+  // exists.
+  var html = d.documentElement, hosted = html.hasAttribute("data-wb-titlehost"), base = null;
+  if (!hosted) {
+    base = html.getAttribute("data-wb-title");
+    if (base === null) { base = d.title.replace(/^\(\d+\) /, ""); html.setAttribute("data-wb-title", base); }
+  }
   function retitle() {
     var n = items.filter(function (el) { return !answered(el); }).length;
+    if (hosted) { if (window.wbTitleCount) window.wbTitleCount(n); return; }
     d.title = (n ? "(" + n + ") " : "") + base;
   }
 
