@@ -331,21 +331,11 @@
     "261109-research-windows-code-signing-signpath": {
       "registered_at": "2026-11-09T00:46:52Z"
     },
-    "261110-bug-ws-dashboard-render-and-frontend-load-accumulation": {
-      "registered_at": "2026-11-10T01:21:54Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-10T01:51:57Z",
-        "impl": {
-          "branch": "impl/develop/smock-judo-dial"
-        }
-      }
-    },
     "261110-bug-ws-mcp-move-close-guard-flake-and-suite-timeout": {
       "registered_at": "2026-11-10T01:04:17Z"
+    },
+    "261110-bug-ws-tickets-query-point-resolve-hides-done": {
+      "registered_at": "2026-11-10T04:35:59Z"
     },
     "261110-chore-ws-mcp-test-suite-runtime": {
       "registered_at": "2026-11-09T15:09:05Z"
