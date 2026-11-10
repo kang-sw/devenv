@@ -268,8 +268,8 @@ details.more[open] > summary { margin-bottom: 2px; }
 .srow { padding: 2px 4px; }
 .srow .id { font-size: 12px; color: var(--wb-muted-fg); }
 .srow .stext > .id, .srow .stext > .amark, .srow .stext > .new { margin-right: 6px; }
-/* assumed: the lead's reading, settled like an answer; a small muted tag, not a role fill */
-.srow .amark { font-size: 10.5px; font-weight: 700; letter-spacing: .04em; color: color-mix(in srgb, var(--wb-accent-assumed) 75%, var(--wb-muted-fg)); }
+/* assumed: the lead's reading, settled like an answer; a small pill so it separates from the ID and text, not a role fill */
+.srow .amark { display: inline-block; vertical-align: baseline; font-size: 10.5px; font-weight: 700; line-height: 1.5; padding: 0 7px; border-radius: 999px; white-space: nowrap; background: color-mix(in srgb, var(--wb-accent-assumed) 18%, transparent); color: color-mix(in srgb, var(--wb-accent-assumed) 75%, var(--wb-muted-fg)); }
 .srow .stext > b { font-weight: 600; }
 .srow .stext { display: block; overflow-wrap: anywhere; }
 /* an assumed row keeps a pen: the user can still veto or comment through a note */
