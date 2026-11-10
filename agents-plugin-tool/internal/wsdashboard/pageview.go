@@ -79,6 +79,9 @@ type SessionView struct {
 	// Worktrees reports that the daemon reads worktree pools, which adds
 	// the drawer's pooled-worktree card. Set per request, like Git.
 	Worktrees bool
+	// Holders reports that the daemon runs a session holder manager, which
+	// adds the drawer's holders card. Set per request, like Git.
+	Holders bool
 }
 
 // ThemedBoard is Board with its topic-body frames pinned to Theme.

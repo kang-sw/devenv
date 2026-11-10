@@ -882,10 +882,11 @@
   }
   function grow() { ctext.style.height = "auto"; ctext.style.height = Math.min(160, ctext.scrollHeight) + "px"; }
   // post sends a write route's JSON body; done(ok, answer) gets the parsed
-  // answer, or the server's refusal text.
+  // answer, or the server's refusal text. A route is the session's own
+  // unless it starts with "/", a daemon-wide route.
   function post(route, body, done) {
     if (!window.fetch) { done(false, wsT("js.post.nobrowser")); return; }
-    fetch("/s/" + rid + "/" + route, {
+    fetch(route.charAt(0) === "/" ? route : "/s/" + rid + "/" + route, {
       method: "POST", credentials: "same-origin", cache: "no-store",
       headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
     }).then(function (r) {
@@ -1696,10 +1697,13 @@
     });
   }
   cardTab("worktrees");
+  cardTab("holders");
   cardTab("settings");
-  // The worktrees card's nodes (wtLoad, below): set here, ahead of the
-  // drawer's first drApply, which a drawer left open calls on load.
+  // The worktrees and holders cards' nodes (wtLoad, hdLoad, below): set
+  // here, ahead of the drawer's first drApply, which a drawer left open
+  // calls on load.
   var wtlist = $("wtlist"), wtcount = $("wtcount"), wtnote = $("wtnote"), wtclean = $("wtclean"), wtSeq = 0;
+  var hdlist = $("hdlist"), hdcount = $("hdcount"), hdnote = $("hdnote"), hdSeq = 0;
 
   function drPresent() { return drEntries.filter(function (t) { return !!t.content(); }); }
   // drawerSync re-reads the entries: each card kept open, the handle's
@@ -1841,12 +1845,13 @@
     ghSync();
     drTitle();
     drFill();
-    // Each opening of a sheet reads its data again: the worktree pool for
-    // the panels, the changed files for the git sheet.
+    // Each opening of a sheet reads its data again: the worktree pool and
+    // the session holders for the panels, the changed files for the git
+    // sheet.
     var shown = drOpen ? drMode : "";
     if (shown !== drShown) {
       drShown = shown;
-      if (shown === "panels") wtLoad();
+      if (shown === "panels") { wtLoad(); hdLoad(); }
       else if (shown === "git") gitOpened();
     }
   }
@@ -2223,6 +2228,101 @@
       drSetOpen(false);
     });
   });
+
+  // --- session holders: the drawer card over the holders route ------------
+  // Each drawer opening reads the holders (holders.go): a row for each
+  // holder no daemon is attached to and each one that is not restart-safe,
+  // then an error row for each failed holder start. An unattached row has a
+  // stop button when the route lets this viewer stop one (a browser on this
+  // machine); it ends the holder and its child, then reads the list again.
+  // The daemon itself never ends a holder.
+  var HD_CAUSE = { no_answer: "js.hd.cause.noanswer", protocol: "js.hd.cause.protocol", token: "js.hd.cause.token" };
+  function hdLoad() {
+    if (!hdlist || !window.fetch) return;
+    var seq = ++hdSeq;
+    if (!hdlist.firstChild) hdlist.textContent = wsT("js.hd.loading");
+    fetch("/holders", { credentials: "same-origin", cache: "no-store" }).then(function (r) {
+      return r.text().then(function (s) {
+        if (seq !== hdSeq) return;
+        if (!r.ok) { hdFail(s.trim() || "HTTP " + r.status); return; }
+        try { hdDraw(JSON.parse(s)); } catch (e) { hdFail("malformed answer"); }
+      });
+    }, function () { if (seq === hdSeq) hdFail(wsT("js.post.unreachable")); });
+  }
+  function hdFail(msg) {
+    hdlist.textContent = "";
+    hdlist.appendChild(mk("div", "wtempty", wsT("js.hd.fail", msg)));
+  }
+  // hdLabel is a holder's session label, or its id without one.
+  function hdLabel(h) {
+    var l = h.session && typeof h.session.label === "string" ? h.session.label.trim() : "";
+    return l || h.id;
+  }
+  function hdRow(h, canStop) {
+    var row = mk("div", "wtrow hdrow" + (h.attached ? "" : " lost")), meta = mk("span", "hdmeta");
+    row.title = h.id;
+    row.appendChild(mk("span", "wtdot"));
+    row.appendChild(mk("b", "wtname", hdLabel(h)));
+    if (h.started_at) {
+      var age = mk("span", "wtage", wtAge(h.started_at));
+      age.title = wsT("js.hd.started", wtStamp(h.started_at));
+      row.appendChild(age);
+    }
+    meta.appendChild(mk("span", null, wsT("js.hd.pid", h.pid)));
+    if (!h.attached) meta.appendChild(mk("span", "hdcause", wsT(HD_CAUSE[h.cause] || "js.hd.cause.unknown", h.protocol)));
+    if (h.restart_safe === false) {
+      var rs = mk("span", "hdunsafe", wsT("js.hd.unsafe"));
+      rs.title = wsT("js.hd.unsafe.title");
+      meta.appendChild(rs);
+    }
+    row.appendChild(meta);
+    if (!h.attached && canStop) {
+      var b = mk("button", "btn hdstop", wsT("js.hd.stop"));
+      b.type = "button";
+      b.title = wsT("js.hd.stop.title");
+      b.addEventListener("click", function () { hdStop(h.id, b); });
+      row.appendChild(b);
+    }
+    return row;
+  }
+  function hdFailRow(f) {
+    var row = mk("div", "wtrow hdrow hdfail");
+    row.appendChild(mk("span", "wtdot"));
+    var msg = mk("span", "hdmsg", f.message);
+    msg.title = f.message;
+    row.appendChild(msg);
+    if (f.at) {
+      var age = mk("span", "wtage", wtAge(f.at));
+      age.title = wsT("js.hd.failed", wtStamp(f.at));
+      row.appendChild(age);
+    }
+    return row;
+  }
+  function hdDraw(list) {
+    var holders = list.holders || [], failures = list.failures || [], lost = 0;
+    hdlist.textContent = "";
+    holders.forEach(function (h) {
+      if (!h.attached) lost++;
+      if (!h.attached || h.restart_safe === false) hdlist.appendChild(hdRow(h, !!list.can_stop));
+    });
+    if (!lost) hdlist.insertBefore(mk("div", "wtempty", wsT("js.hd.empty")), hdlist.firstChild);
+    failures.forEach(function (f) { hdlist.appendChild(hdFailRow(f)); });
+    if (hdcount) {
+      hdcount.hidden = !lost;
+      hdcount.textContent = String(lost);
+      hdcount.title = wsTn("js.hd.count", lost);
+    }
+  }
+  function hdStop(id, b) {
+    if (b.disabled) return;
+    b.disabled = true;
+    if (hdnote) hdnote.textContent = "";
+    post("/holders/" + encodeURIComponent(id) + "/stop", {}, function (ok, res) {
+      b.disabled = false;
+      if (!ok) { if (hdnote) hdnote.textContent = wsT("js.hd.stopfail", res); return; }
+      hdLoad();
+    });
+  }
 
   // --- git drawer: the action panel over the git routes ---------------------
   // Each opening of the git sheet asks the daemon to read the handle again

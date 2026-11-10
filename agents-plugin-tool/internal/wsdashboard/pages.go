@@ -909,6 +909,7 @@ func (d *Daemon) handleSessionPage(w http.ResponseWriter, r *http.Request, reply
 	view.Lang, view.LangPref, view.Theme = lang, pref, requestTheme(r)
 	view.Git = d.git.badge(view.Project)
 	view.Worktrees = d.worktrees != nil
+	view.Holders = d.holders != nil
 	regions, err := renderSessionRegions(view, d.entries)
 	if err == nil {
 		// The rail is rendered as its stream renders it, outside the

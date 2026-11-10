@@ -86,6 +86,9 @@ type DaemonOptions struct {
 	// SupportRoutePrefix (the agent runner's per-store conversations); nil
 	// serves none.
 	Support http.Handler
+	// Holders is the session holder manager (holders.go): the daemon runs
+	// its scans and serves the holders routes; nil runs none.
+	Holders HolderHost
 	// Pprof serves net/http/pprof under /debug/pprof/ to loopback viewers
 	// only (pprof_route.go; PprofEnv); false serves no such route.
 	Pprof bool
@@ -196,6 +199,9 @@ type Daemon struct {
 	files *fileListCache
 	// support serves SupportRoutePrefix, nil without the routes.
 	support http.Handler
+	// holders is the session holder manager, nil without the routes
+	// (holders.go).
+	holders HolderHost
 	// proxy builds the hosted MCP sessions (proxy.go), nil without the
 	// route; proxyConns are the open ones, proxyWG counts their
 	// goroutines, and proxyDraining refuses new ones once Close began.
@@ -304,6 +310,7 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 		sizes:           newSizeCache(),
 		files:           newFileListCache(),
 		support:         opts.Support,
+		holders:         opts.Holders,
 		stop:            make(chan struct{}),
 		done:            make(chan struct{}),
 		endpoint: Endpoint{
@@ -379,6 +386,11 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 	}()
 	if d.index != nil {
 		go d.poll(opts.PollInterval)
+	}
+	// The holder scans start only now, under the single-instance lock: a
+	// predecessor has let go of its holders before this daemon attaches.
+	if d.holders != nil {
+		go d.holders.Run()
 	}
 	fmt.Fprintf(d.log, "dashboard: version %s listening on %s (lan %v, pid %d)\n", d.endpoint.Version, listener.Addr(), d.lan, d.endpoint.PID)
 	return d, nil
@@ -523,6 +535,10 @@ func (d *Daemon) Close() {
 		if d.agents != nil {
 			d.agents.Close()
 		}
+		// Detaches only: the holders and their children outlive the daemon.
+		if d.holders != nil {
+			d.holders.Close()
+		}
 		removeEndpointIfOwned(d.dir, d.endpoint.Token)
 		_ = d.lock.Unlock()
 		fmt.Fprintf(d.log, "dashboard: stopped (pid %d)\n", d.endpoint.PID)
@@ -542,7 +558,8 @@ func (d *Daemon) Close() {
 // (gitpush.go) and, with stored workspaces, the rail's workspace routes
 // (workspace_routes.go: the stored list, and git worktree add), and its
 // system-open route (sysopen_route.go) the only route
-// that runs a host command beside git and the agent runner's harnesses: a
+// that runs a host command beside git and the agent runner's harnesses (with
+// a holder manager, the holder stop route, holders.go, ends a holder): a
 // session stream keeps its root's git handle read, the git route
 // (gitbadge.go) asks for a read at once without running git itself, and the
 // git status route (gitdrawer.go) reads the root's changed files. With
@@ -573,6 +590,10 @@ func (d *Daemon) Handler() http.Handler {
 	if d.support != nil {
 		mux.Handle(SupportRoutePrefix, d.support)
 		mux.Handle(SupportRoutePrefix+"/", d.support)
+	}
+	if d.holders != nil {
+		mux.HandleFunc("/holders", d.handleHolders)
+		mux.HandleFunc("/holders/", d.handleHolders)
 	}
 	if d.pprof {
 		mux.Handle(pprofPrefix, pprofHandler(d.serveStreams))

@@ -137,6 +137,10 @@ func guardedRoutes() []struct{ method, path, body string } {
 		{http.MethodGet, "/tracker/stores/team/wiki/notes/pages", ""},
 		{http.MethodGet, "/tracker/stores/team/wiki/notes/page?path=home", ""},
 		{http.MethodPost, "/tracker/stores/team/wiki/notes/save", `{"newWiki":true,"op":"write","path":"home","content":"x"}`},
+		// The holder routes, served when the fixture has a holder host; the
+		// fixture knows no holder, so a passing stop ends nothing.
+		{http.MethodGet, "/holders", ""},
+		{http.MethodPost, "/holders/guardtest/stop", ""},
 		{http.MethodGet, "/tracker/profiles", ""},
 		{http.MethodPost, "/tracker/profiles", `{"given":"Ada"}`},
 		{http.MethodPost, "/tracker/register", `{"id":"new"}`},
@@ -180,7 +184,7 @@ func TestLANModeServesTheMermaidScriptToAll(t *testing.T) {
 // Host, need the token like any other request; the token passes by query
 // parameter or cookie, and the endpoint file's shutdown token does not.
 func TestLANModeGuardsEveryRoute(t *testing.T) {
-	f := startPageFixture(t, lanMode, withTracker(newFakeTracker()), withWorkspaces(t), func(o *DaemonOptions) { o.Worktrees = &fakeWorktrees{} })
+	f := startPageFixture(t, lanMode, withTracker(newFakeTracker()), withWorkspaces(t), func(o *DaemonOptions) { o.Worktrees = &fakeWorktrees{}; o.Holders = newFakeHolders() })
 	if err := os.WriteFile(filepath.Join(f.project, "shot.png"), []byte("png"), 0o644); err != nil {
 		t.Fatal(err)
 	}
