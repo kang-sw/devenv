@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/kang-sw/devenv/internal/wsconfig"
+	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
 // layeredRecord tags a Record with the layer it was loaded from, purely for
@@ -49,6 +50,13 @@ func (b Block) HiddenTotal() int {
 // as "no notes on that layer" and degrades to whatever the other layers
 // have, rather than failing the whole block.
 func Compute(root string, opts wsconfig.Options, bodyLimit, keyLimit int) Block {
+	return ComputeIn(root, opts, wsstate.Options{}, bodyLimit, keyLimit)
+}
+
+// ComputeIn is Compute with the worktree and clone layers resolved under
+// state (the caller's cache home and environment, for a server the
+// dashboard daemon hosts for another process) rather than this process's.
+func ComputeIn(root string, opts wsconfig.Options, state wsstate.Options, bodyLimit, keyLimit int) Block {
 	var all []layeredRecord
 
 	if machinePath, err := MachinePath(opts); err == nil {
@@ -60,7 +68,7 @@ func Compute(root string, opts wsconfig.Options, bodyLimit, keyLimit int) Block 
 	}
 
 	if root != "" {
-		if worktreePath, err := WorktreePath(root); err == nil {
+		if worktreePath, err := WorktreePathIn(state, root); err == nil {
 			if records, err := Load(worktreePath); err == nil {
 				for _, rec := range records {
 					all = append(all, layeredRecord{Record: rec, Layer: LayerWorktree})
@@ -70,7 +78,7 @@ func Compute(root string, opts wsconfig.Options, bodyLimit, keyLimit int) Block 
 	}
 
 	if root != "" {
-		if clonePath, err := ClonePath(root); err == nil {
+		if clonePath, err := ClonePathIn(state, root); err == nil {
 			if records, err := Load(clonePath); err == nil {
 				for _, rec := range records {
 					all = append(all, layeredRecord{Record: rec, Layer: LayerClone})

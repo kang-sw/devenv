@@ -109,7 +109,7 @@ func TestHostedServerCanonicalizesRootsThroughItsOwnGit(t *testing.T) {
 		t.Fatalf("git.merge retry: %s", out)
 	}
 	log := readGitLog(t, logPath)
-	if !strings.Contains(log, "rev-parse --show-toplevel") || !strings.Contains(log, "merge") {
+	if !strings.Contains(log, "rev-parse --show-toplevel") || !strings.Contains(log, "merge --no-ff") {
 		t.Fatalf("git.merge did not run through the connection's git:\n%s", log)
 	}
 }
@@ -152,11 +152,17 @@ func TestHostedConnectionsActOnTheirOwnRoots(t *testing.T) {
 	}
 }
 
-// TestHostedToolsRunGitOnTheConnectionPATH pins I4's remaining subprocess
-// sites: the wsdoc board readers (project_tree's ignore matcher, a
-// tickets.verify freshness check), wsreview (review.marker bootstrap), and
-// wsstate's repository identity (path.generate) run git from the hosted
-// server's environment PATH, not the daemon process's.
+// TestHostedToolsRunGitOnTheConnectionPATH pins the subprocess sites of a
+// hosted server's tools: the wsdoc board readers (project_tree's ignore
+// matcher, the sparse-checkout ticket scope a tickets.query point resolve
+// reads through, tickets.sage_gate's freshness history), wsreview
+// (review.marker bootstrap, then the review track and
+// checkpoint nudge workflow_manual renders), and wsstate's repository
+// identity (path.generate, the worktree note layer note.write, note.query
+// and the workflow_manual Notes block resolve, and exec.spawn's job
+// directory) run git from the hosted server's environment PATH, not the
+// daemon process's. The order matters: the bootstrap marker is what makes
+// the checkpoint nudge consult git.
 func TestHostedToolsRunGitOnTheConnectionPATH(t *testing.T) {
 	processEnvFixture(t)
 	logPath := filepath.Join(t.TempDir(), "git.log")
@@ -164,28 +170,45 @@ func TestHostedToolsRunGitOnTheConnectionPATH(t *testing.T) {
 	root := t.TempDir()
 	mustWrite(t, root, "README.md", "# Test\n")
 	mustWrite(t, root, "ai-docs/tickets/idea/260101-feat-alpha.md", ixTicket("Alpha"))
+	// An epic whose design review is recorded without a digest: sage_gate
+	// walks the ticket's git history for the baseline.
+	mustWrite(t, root, "ai-docs/tickets/todo/260102-epic-beta.md", "---\ntitle: Beta\nsage-review-design: completed\n---\n# Beta\n")
 	initGit(t, root)
 	runGit(t, root, "add", ".")
 	runGit(t, root, "commit", "-q", "-m", "init")
-	env := hostedServerEnv(t, "hosted", map[string]string{"PATH": gitDir, "WS_TEST_GIT_LOG": logPath})
+	// A sparse checkout makes every ticket read consult git for the scope.
+	runGit(t, root, "sparse-checkout", "set", "ai-docs")
+	// Not agentless: the exec tools are agent-backed.
+	env := hostedServerEnv(t, "hosted", map[string]string{"PATH": gitDir, "WS_TEST_GIT_LOG": logPath, envNoAgent: ""})
 	s := NewServerWithOptions(ServerOptions{Root: root, Version: "test", Env: env, OwnerPID: os.Getppid()})
 	key, _ := parseLoginResponse(t, callLogin(t, s, 1, root, nil))
 
+	const sparseScope = "config --type=bool --get core.sparseCheckout"
 	for i, c := range []struct {
 		tool string
 		args map[string]any
-		want string
+		want []string
 	}{
-		{"project_tree", nil, "rev-parse --is-inside-work-tree"},
-		{"review.marker", map[string]any{"bootstrap": true}, "rev-parse HEAD"},
-		{"path.generate", map[string]any{"kind": "plan", "stems": []string{"alpha"}}, "--git-common-dir"},
+		{"project_tree", nil, []string{"rev-parse --is-inside-work-tree"}},
+		{"tickets.query", map[string]any{"ticket_stem": "260101-feat-alpha"}, []string{sparseScope}},
+		{"tickets.sage_gate", map[string]any{"stem": "260102-epic-beta", "landing": "todo"}, []string{"log --follow"}},
+		{"review.marker", map[string]any{"bootstrap": true}, []string{"rev-parse HEAD"}},
+		{"workflow_manual", nil, []string{"symbolic-ref --short refs/remotes/origin/HEAD", "rev-list --count", "--git-common-dir"}},
+		{"path.generate", map[string]any{"kind": "plan", "stems": []string{"alpha"}}, []string{"--git-common-dir"}},
+		{"note.write", map[string]any{"layer": "worktree", "notes": []any{map[string]any{"key": "hosted.note", "value": "v"}}}, []string{"--git-common-dir"}},
+		{"note.query", map[string]any{"layer": "worktree"}, []string{"--git-common-dir"}},
+		{"exec.spawn", map[string]any{"cmd": "git", "args": []any{"--version"}}, []string{"--git-common-dir"}},
 	} {
 		truncateFile(t, logPath)
-		if resp := keyedCall(t, s, 10+i, key, c.tool, c.args); toolIsError(t, resp) {
+		resp := keyedCall(t, s, 10+i, key, c.tool, c.args)
+		if toolIsError(t, resp) {
 			t.Fatalf("%s: %s", c.tool, resp)
 		}
-		if log := readGitLog(t, logPath); !strings.Contains(log, c.want) {
-			t.Fatalf("%s did not run %q through the connection's git:\n%s", c.tool, c.want, log)
+		log := readGitLog(t, logPath)
+		for _, want := range c.want {
+			if !strings.Contains(log, want) {
+				t.Fatalf("%s did not run %q through the connection's git:\n%s\nresponse: %s", c.tool, want, log, resp)
+			}
 		}
 	}
 }

@@ -43,7 +43,7 @@ func ticketPanel(in whiteboardPanelInput) (wswhiteboard.Panel, bool) {
 			in.watch(filepath.Join(in.root, "ai-docs", "tickets", status))
 		}
 	}
-	tickets, err := whiteboardTicketsList(in.root, wsdoc.TicketListOptions{Statuses: statuses})
+	tickets, err := whiteboardTicketsList(in.root, wsdoc.TicketListOptions{Statuses: statuses, Env: in.env})
 	if err != nil {
 		return wswhiteboard.Panel{}, false
 	}

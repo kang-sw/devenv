@@ -525,7 +525,7 @@ func TestEnsureHandoffOrdersSameVersionBuildsByBuildTime(t *testing.T) {
 	}
 }
 
-// TestEnsureKeepsASameContentDaemonWhateverItsBuildTime (L1): at an equal
+// TestEnsureKeepsASameContentDaemonWhateverItsBuildTime: at an equal
 // version, a daemon reporting the client's own content hash stays however
 // old its build time is: the Claude, Codex, and Pi installs are separate
 // copies of one binary with their own mtimes, and a replacement drains

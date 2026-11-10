@@ -278,7 +278,7 @@ func TestWorktreeListIncludesLegacyInTreePoolUnderDefaultConfig(t *testing.T) {
 		t.Fatalf("legacy pool entry facts wrong: %+v", e)
 	}
 	// Symmetric with release: what list shows, release accepts.
-	if _, err := releaseWorktree(context.Background(), wsgit.ExecRunner{}, e.Path, defaultWorktreePoolTemplate, builtinProfileLookup(t)); err != nil {
+	if _, err := releaseWorktree(context.Background(), wsgit.ExecRunner{}, nil, e.Path, defaultWorktreePoolTemplate, builtinProfileLookup(t)); err != nil {
 		t.Fatalf("a listed legacy pool worktree must be releasable: %v", err)
 	}
 }

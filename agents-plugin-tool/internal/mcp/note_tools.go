@@ -98,7 +98,7 @@ func (s *Server) resolveNoteStoreForLayer(toolName string, layer wsnote.Layer, a
 		if err != nil {
 			return nil, err
 		}
-		path, err := wsnote.WorktreePath(root)
+		path, err := wsnote.WorktreePathIn(s.stateOptions(), root)
 		if err != nil {
 			return nil, err
 		}
@@ -108,7 +108,7 @@ func (s *Server) resolveNoteStoreForLayer(toolName string, layer wsnote.Layer, a
 		if err != nil {
 			return nil, err
 		}
-		path, err := wsnote.ClonePath(root)
+		path, err := wsnote.ClonePathIn(s.stateOptions(), root)
 		if err != nil {
 			return nil, err
 		}

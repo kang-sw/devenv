@@ -86,8 +86,11 @@ type whiteboardSectionProvider struct {
 type whiteboardPanelInput struct {
 	rec    sessionRecord
 	layout wswhiteboard.Layout
-	// root is the session root, where the ticket directories live.
+	// root is the session root, where the ticket directories live; env is
+	// the environment the ticket read's git runs under (nil means this
+	// process's, the daemon's served page).
 	root       string
+	env        []string
 	sessionKey string
 	replyID    string
 	// cacheHome is the WS_CACHE_HOME the session's mailbox history ring
@@ -441,6 +444,7 @@ func (s *Server) renderWhiteboard(rec *sessionRecord, sessionKey string, withEmb
 	panelInput := whiteboardPanelInput{
 		rec:        *rec,
 		root:       rec.Root,
+		env:        s.environ(),
 		sessionKey: sessionKey,
 		replyID:    replyID,
 		cacheHome:  s.getenv(wsstate.EnvCacheHome),

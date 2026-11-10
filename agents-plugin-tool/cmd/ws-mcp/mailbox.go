@@ -87,7 +87,7 @@ func mailboxWait(args []string) {
 		})
 		cancelOnParentExit()
 	})
-	os.Exit(runMailboxWait(ctx, args, os.Stdout, os.Stderr, "", os.Getpid(), os.Getenv))
+	os.Exit(runMailboxWait(ctx, args, os.Stdout, os.Stderr, "", os.Getpid(), nil, os.Getenv))
 }
 
 // runMailboxWait is `mailbox wait` as a function: the flags in args, the
@@ -95,10 +95,11 @@ func mailboxWait(args []string) {
 // the caller's working directory, against which a relative --root resolves
 // (empty means this process's own); ownerPID owns the listening marker (the
 // launcher's PID when the dashboard daemon runs the wait for a launcher,
-// this process's otherwise), and getenv reads the caller's environment. A
-// ctx that ends cancels the wait at once and clears the marker, as a signal
-// does.
-func runMailboxWait(ctx context.Context, args []string, stdout, stderr io.Writer, cwd string, ownerPID int, getenv func(string) string) int {
+// this process's otherwise), environ is the caller's environment the
+// stores and their git resolve under (nil means this process's), and getenv
+// reads it. A ctx that ends cancels the wait at once and clears the marker,
+// as a signal does.
+func runMailboxWait(ctx context.Context, args []string, stdout, stderr io.Writer, cwd string, ownerPID int, environ []string, getenv func(string) string) int {
 	fs := flag.NewFlagSet("mailbox wait", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	root := fs.String("root", ".", "caller's own worktree/clone root; only needed to resolve a worktree/clone-scope --slug")
@@ -136,7 +137,7 @@ func runMailboxWait(ctx context.Context, args []string, stdout, stderr io.Writer
 	// wait for a launcher has a config and cache home of its own.
 	paths := wsmailbox.Paths{
 		Config: wsconfig.Options{ConfigHome: getenv(wsconfig.EnvConfigHome), CacheHome: getenv(wsstate.EnvCacheHome)},
-		State:  wsstate.Options{CacheHome: getenv(wsstate.EnvCacheHome)},
+		State:  wsstate.Options{CacheHome: getenv(wsstate.EnvCacheHome), Env: environ},
 	}
 	target := wsmailbox.WaitTarget{SessionKey: *sessionKey, Root: waitRoot, Slug: strings.TrimSpace(*slug), Paths: paths}
 	if *boardInbox || *boardSteer || *boardInterrupt {

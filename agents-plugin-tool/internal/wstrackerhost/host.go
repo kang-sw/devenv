@@ -57,8 +57,11 @@ type Options struct {
 
 // Host is one process's handle on the machine's tracker stores.
 type Host struct {
-	root          string
-	runner        wsgit.Runner
+	root   string
+	runner wsgit.Runner
+	// environ is Options.Environ: the environment the stores' ssh-keygen
+	// runs under too.
+	environ       func() []string
 	clock         wsledger.Clock
 	pushDelay     time.Duration
 	checkInterval time.Duration
@@ -121,7 +124,7 @@ func New(opts Options) (*Host, error) {
 			return nil, err
 		}
 	}
-	h := &Host{root: root, runner: opts.Runner, clock: opts.Clock, pushDelay: opts.PushDelay,
+	h := &Host{root: root, runner: opts.Runner, environ: opts.Environ, clock: opts.Clock, pushDelay: opts.PushDelay,
 		checkInterval: opts.CheckInterval, stores: map[string]*store{}}
 	h.ctx, h.cancel = context.WithCancel(context.Background())
 	if h.runner == nil {
@@ -142,8 +145,12 @@ func (h *Host) Root() string { return h.root }
 func (h *Host) now() time.Time { return h.clock.Now().UTC() }
 
 func (h *Host) ledgerOptions(e StoreEntry, name string) wsledger.Options {
+	var env []string
+	if h.environ != nil {
+		env = h.environ()
+	}
 	return wsledger.Options{Dir: e.Dir, Member: e.Member, Name: name, KeyDir: filepath.Join(h.root, keysDir),
-		Clock: h.clock, PushDelay: h.pushDelay, Runner: h.runner}
+		Clock: h.clock, PushDelay: h.pushDelay, Runner: h.runner, Env: env}
 }
 
 // store returns this process's handle on the registered store id, creating

@@ -71,7 +71,7 @@ func TestReleaseWorktreeToleratesMissingLease(t *testing.T) {
 	if lease, err := readWorktreeLease(context.Background(), wsgit.ExecRunner{}, res.Path); err != nil || lease != nil {
 		t.Fatalf("precondition: no lease expected, got %v err=%v", lease, err)
 	}
-	if _, err := releaseWorktree(context.Background(), wsgit.ExecRunner{}, res.Path, "", builtinProfileLookup(t)); err != nil {
+	if _, err := releaseWorktree(context.Background(), wsgit.ExecRunner{}, nil, res.Path, "", builtinProfileLookup(t)); err != nil {
 		t.Fatalf("release without a lease file must succeed: %v", err)
 	}
 	if b := wtBranch(t, res.Path); b != "HEAD" {

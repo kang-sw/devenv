@@ -156,7 +156,7 @@ func TestWorktreeHooksEnvCwdAndProvenance(t *testing.T) {
 		t.Fatalf("acquire text must list hooks:\n%s", first.text())
 	}
 
-	rel, err := releaseWorktree(ctx, runner, first.Path, "", lookupOf(profile))
+	rel, err := releaseWorktree(ctx, runner, nil, first.Path, "", lookupOf(profile))
 	if err != nil {
 		t.Fatalf("release: %v", err)
 	}
@@ -197,7 +197,7 @@ func TestWorktreeHookSparseWideningSurvivesReuse(t *testing.T) {
 	}
 	assertExists(t, first.Path, "src/y.go", true)
 	assertExists(t, first.Path, "deps/z.txt", false)
-	if _, err := releaseWorktree(ctx, runner, first.Path, "", lookupOf(profile)); err != nil {
+	if _, err := releaseWorktree(ctx, runner, nil, first.Path, "", lookupOf(profile)); err != nil {
 		t.Fatal(err)
 	}
 	second, err := provisionWorktree(ctx, runner, nil, root, "develop", "impl/develop/b", profile, "")
@@ -309,7 +309,7 @@ func TestWorktreeHookPostProvisionFailureQuarantines(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := releaseWorktree(ctx, runner, first.Path, "", lookupOf(healthy)); err != nil {
+	if _, err := releaseWorktree(ctx, runner, nil, first.Path, "", lookupOf(healthy)); err != nil {
 		t.Fatal(err)
 	}
 	changed := hookProfile(t, "lint", nil, map[string][]map[string]any{
@@ -347,7 +347,7 @@ func TestWorktreeHookPreReleaseFailureLeavesWorktree(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeFileForTest(t, res.Path, "src/wip.go", "package y\n")
-	_, err = releaseWorktree(ctx, runner, res.Path, "", lookupOf(profile))
+	_, err = releaseWorktree(ctx, runner, nil, res.Path, "", lookupOf(profile))
 	if err == nil || !strings.Contains(err.Error(), "pre_release") || !strings.Contains(err.Error(), "exit status 6") {
 		t.Fatalf("release must fail on pre_release: %v", err)
 	}

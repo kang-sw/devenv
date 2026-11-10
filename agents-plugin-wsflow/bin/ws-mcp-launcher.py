@@ -850,7 +850,8 @@ def apply_skills_root_env(plugin_dir: Path, env: dict) -> None:
 # the only ws-mcp executable that runs is that staged copy, once per version.
 # When no daemon can be reached within the budgets below, or the daemon is in
 # another minor, the launcher runs the direct path (the runtime binary itself)
-# and says so once on stderr. Wire format: ai-docs/manuals/ws-mcp.md.
+# and says so once on stderr. Wire format: internal/wsdashboard/proxy.go in
+# the ws-mcp source (the hello line, then MCP bytes or CLI frames).
 # ---------------------------------------------------------------------------
 
 DEFAULT_CACHE_DIR_NAME = "ws@kang-sw-devenv"  # wsstate.defaultCacheDirName

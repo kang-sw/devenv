@@ -12,6 +12,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsgit"
 	"github.com/kang-sw/devenv/internal/wsnote"
+	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
 // notesInjectionCap bounds how many non-machine notes the workflow_manual
@@ -28,14 +29,15 @@ const (
 // machine, worktree, clone, and repo layers. Thin wrapper over
 // wsnote.Compute, mirroring computeManuals's shape (see
 // manuals_announcement.go): pure, root-in, and silent on any resolution error.
-// opts carries the caller's config and cache homes.
-func computeNotesBlock(root string, opts wsconfig.Options) wsnote.Block {
-	return wsnote.Compute(root, opts, notesInjectionCap, notesKeyOnlyCap)
+// opts carries the caller's config and cache homes; state resolves the
+// worktree and clone layers under the caller's cache home and environment.
+func computeNotesBlock(root string, opts wsconfig.Options, state wsstate.Options) wsnote.Block {
+	return wsnote.ComputeIn(root, opts, state, notesInjectionCap, notesKeyOnlyCap)
 }
 
 // computeNotes is computeNotesBlock's text, for renders that raise no warning.
-func computeNotes(root string, opts wsconfig.Options) string {
-	return computeNotesBlock(root, opts).Text
+func computeNotes(root string, opts wsconfig.Options, state wsstate.Options) string {
+	return computeNotesBlock(root, opts, state).Text
 }
 
 // notesCleanupThrottleFile, in the git common dir, records when the

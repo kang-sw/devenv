@@ -462,7 +462,7 @@ func TestWikiHistoryReportsUnverifiedCommits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	foreignKey, _, _, err := ensureKey(ctx, filepath.Join(w.root, "keys", "mallory"))
+	foreignKey, _, _, err := ensureKey(ctx, filepath.Join(w.root, "keys", "mallory"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

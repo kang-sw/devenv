@@ -43,7 +43,7 @@ func (r worktreeRemoveResult) text() string {
 // holding commits no ref reaches, and a lease whose activity is newer than
 // staleAfter (a live worker's tree). It also refuses what release refuses: the
 // primary worktree and any path outside the owned pool.
-func removeWorktree(ctx context.Context, runner wsgit.Runner, wtPath, poolConfigValue string, staleAfter time.Duration, now time.Time, lookup worktreeProfileLookup) (worktreeRemoveResult, error) {
+func removeWorktree(ctx context.Context, runner wsgit.Runner, env []string, wtPath, poolConfigValue string, staleAfter time.Duration, now time.Time, lookup worktreeProfileLookup) (worktreeRemoveResult, error) {
 	var res worktreeRemoveResult
 	target, entry, mainRoot, err := ownedPoolWorktree(ctx, runner, wtPath, poolConfigValue, "worktree.remove")
 	if err != nil {
@@ -113,7 +113,7 @@ func removeWorktree(ctx context.Context, runner wsgit.Runner, wtPath, poolConfig
 		case !found:
 			res.Notes = append(res.Notes, fmt.Sprintf("profile %q no longer resolves; its pre_remove hooks were skipped", marker.Profile))
 		case profile.Definition.Hooks != nil:
-			runs, failure := runWorktreeHooks(ctx, worktreeHookPreRemove, profile.Definition.Hooks.PreRemove, profile.Scope, worktreeHookEnv{WorktreeDir: target, TargetBranch: res.Branch, Environ: hookEnviron(runner)})
+			runs, failure := runWorktreeHooks(ctx, worktreeHookPreRemove, profile.Definition.Hooks.PreRemove, profile.Scope, worktreeHookEnv{WorktreeDir: target, TargetBranch: res.Branch, Environ: env})
 			res.Hooks = runs
 			if failure != nil {
 				return res, fmt.Errorf("worktree.remove: profile %q: %w. %s was not removed; fix the hook or the profile (config.tune), then remove again", marker.Profile, failure, target)

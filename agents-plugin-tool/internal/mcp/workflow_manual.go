@@ -262,7 +262,7 @@ func (s *Server) handleWorkflowState(id json.RawMessage, args map[string]any) re
 	//    for every resolved session. That byte-identity is the invariant: a
 	//    change to either renderer must be made in both, or workflow_state
 	//    silently diverges from the manual it mirrors.
-	return toolTextResponse(id, renderSessionState(rec)+"\n\n"+computeNotes(rec.Root, s.configOptions())+"\n", nil)
+	return toolTextResponse(id, renderSessionState(rec)+"\n\n"+computeNotes(rec.Root, s.configOptions(), s.stateOptions())+"\n", nil)
 }
 
 // handleWorkflowManual implements the ws.workflow_manual tool. A valid
@@ -393,7 +393,7 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 			body = injectSessionKeyLine(body, mintedKey)
 			body += "\n\n## Session Key\n" + mintedKey
 			body += "\n\n" + renderSessionState(sessionRecord{})
-			notes := computeNotesBlock(canonical, s.configOptions())
+			notes := computeNotesBlock(canonical, s.configOptions(), s.stateOptions())
 			body += "\n\n" + notes.Text
 			if skepticalPosture {
 				body = injectSkepticalPosture(body)
@@ -437,7 +437,7 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 		body = injectSessionKeyLine(body, key)
 		body += "\n\n## Session Key\n" + key
 		body += "\n\n" + renderSessionState(rec)
-		notes := computeNotesBlock(rec.Root, s.configOptions())
+		notes := computeNotesBlock(rec.Root, s.configOptions(), s.stateOptions())
 		body += "\n\n" + notes.Text
 		if skepticalPosture {
 			body = injectSkepticalPosture(body)

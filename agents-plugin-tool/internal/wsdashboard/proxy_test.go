@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -47,7 +48,9 @@ type echoSession struct {
 	longWait bool
 	drained  chan struct{}
 	once     sync.Once
-	inflight sync.WaitGroup
+	// inflight counts calls being answered. A WaitGroup would do, except
+	// that Serve's Add races Drain's Wait when the counter is zero.
+	inflight atomic.Int32
 	// drainedAt records when Drain began; endedAt when the long wait ended.
 	drainedAt, endedAt time.Time
 }
@@ -67,14 +70,14 @@ func (s *echoSession) Serve(ctx context.Context, stream io.ReadWriteCloser) {
 			<-s.drained
 			s.endedAt = time.Now()
 			_, _ = stream.Write([]byte("cancelled\n"))
-			s.inflight.Done()
+			s.inflight.Add(-1)
 			continue
 		}
 		if s.slow > 0 {
 			time.Sleep(s.slow)
 		}
 		_, _ = stream.Write(line)
-		s.inflight.Done()
+		s.inflight.Add(-1)
 	}
 }
 
@@ -83,17 +86,14 @@ func (s *echoSession) Drain(ctx context.Context) bool {
 		s.drainedAt = time.Now()
 		close(s.drained)
 	})
-	done := make(chan struct{})
-	go func() {
-		s.inflight.Wait()
-		close(done)
-	}()
-	select {
-	case <-done:
-		return true
-	case <-ctx.Done():
-		return false
+	for s.inflight.Load() > 0 {
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(5 * time.Millisecond):
+		}
 	}
+	return true
 }
 
 // session returns the i-th accepted session.
@@ -368,8 +368,9 @@ func TestProxyDrainFinishesCallsInFlightAndCancelsLongWaits(t *testing.T) {
 	}
 }
 
-// TestProxyDrainReleasesTheLockBeforeACallThatOutlivesTheBudgetEnds (L3):
-// Close returns within the successor's lock wait with the long call still
+// TestProxyDrainReleasesTheLockBeforeACallThatOutlivesTheBudgetEnds: the
+// drain releases the lock and endpoint first and waits for in-flight calls
+// after, so Close returns within the successor's lock wait with the long call still
 // running, its stream open; the call's answer is delivered when it ends,
 // then the stream closes, and WaitProxy reports the session ended.
 func TestProxyDrainReleasesTheLockBeforeACallThatOutlivesTheBudgetEnds(t *testing.T) {

@@ -825,7 +825,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		cmd, _ := params.Arguments["cmd"].(string)
 		workingDir, _ := params.Arguments["working_dir"].(string)
 		stdin, _ := params.Arguments["stdin"].(string)
-		result, err := execjob.Launch(execjob.LaunchOptions{Root: root, WorkingDir: workingDir, Cmd: cmd, Args: stringList(params.Arguments["args"]), Env: stringMapArgument(params.Arguments["env"]), Stdin: stdin, Environ: s.environ()})
+		result, err := s.execStore().Launch(execjob.LaunchOptions{Root: root, WorkingDir: workingDir, Cmd: cmd, Args: stringList(params.Arguments["args"]), Env: stringMapArgument(params.Arguments["env"]), Stdin: stdin, Environ: s.environ()})
 		return execResponse(req.ID, result, err, true)
 	case "exec.shell":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
@@ -836,7 +836,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		workingDir, _ := params.Arguments["working_dir"].(string)
 		stdin, _ := params.Arguments["stdin"].(string)
 		shell, _ := params.Arguments["shell"].(string)
-		result, err := execjob.Launch(execjob.LaunchOptions{Root: root, WorkingDir: workingDir, Command: command, Shell: shell, Env: stringMapArgument(params.Arguments["env"]), Stdin: stdin, ShellMode: true, Environ: s.environ()})
+		result, err := s.execStore().Launch(execjob.LaunchOptions{Root: root, WorkingDir: workingDir, Command: command, Shell: shell, Env: stringMapArgument(params.Arguments["env"]), Stdin: stdin, ShellMode: true, Environ: s.environ()})
 		return execResponse(req.ID, result, err, true)
 	case "exec.status":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
@@ -844,7 +844,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			return toolTextResponse(req.ID, "", err)
 		}
 		key, _ := params.Arguments["exec_key"].(string)
-		result, err := execjob.Status(root, key)
+		result, err := s.execStore().Status(root, key)
 		return execResponse(req.ID, result, err, false)
 	case "exec.result":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
@@ -853,7 +853,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		}
 		key, _ := params.Arguments["exec_key"].(string)
 		timeout := durationFromSeconds(params.Arguments["timeout_seconds"])
-		result, err := execjob.ResultWithContext(s.drainContext(), root, key, timeout)
+		result, err := s.execStore().ResultWithContext(s.drainContext(), root, key, timeout)
 		return execResponse(req.ID, result, err, true)
 	case "exec.abort":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
@@ -861,7 +861,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			return toolTextResponse(req.ID, "", err)
 		}
 		key, _ := params.Arguments["exec_key"].(string)
-		result, err := execjob.Abort(root, key)
+		result, err := s.execStore().Abort(root, key)
 		return execResponse(req.ID, result, err, false)
 	case "exec.raw.tail":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
@@ -870,7 +870,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		}
 		key, _ := params.Arguments["exec_key"].(string)
 		stream, _ := params.Arguments["stream"].(string)
-		result, err := execjob.Tail(root, key, stream, intFromArgument(params.Arguments["lines"], 0))
+		result, err := s.execStore().Tail(root, key, stream, intFromArgument(params.Arguments["lines"], 0))
 		return execRawTailResponse(req.ID, result, err)
 	case "exec.raw.read":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
@@ -879,7 +879,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		}
 		key, _ := params.Arguments["exec_key"].(string)
 		stream, _ := params.Arguments["stream"].(string)
-		result, err := execjob.Read(root, key, stream, int64FromArgument(params.Arguments["offset"], 0), int64FromArgument(params.Arguments["limit"], 0))
+		result, err := s.execStore().Read(root, key, stream, int64FromArgument(params.Arguments["offset"], 0), int64FromArgument(params.Arguments["limit"], 0))
 		return execRawReadResponse(req.ID, result, err)
 	case "exec.raw.grep":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
@@ -889,7 +889,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		key, _ := params.Arguments["exec_key"].(string)
 		stream, _ := params.Arguments["stream"].(string)
 		pattern, _ := params.Arguments["pattern"].(string)
-		result, err := execjob.Grep(root, key, stream, pattern, intFromArgument(params.Arguments["before"], 0), intFromArgument(params.Arguments["after"], 0), intFromArgument(params.Arguments["max_matches"], 0), boolArgument(params.Arguments["regex"]))
+		result, err := s.execStore().Grep(root, key, stream, pattern, intFromArgument(params.Arguments["before"], 0), intFromArgument(params.Arguments["after"], 0), intFromArgument(params.Arguments["max_matches"], 0), boolArgument(params.Arguments["regex"]))
 		return execRawGrepResponse(req.ID, result, err)
 	case "config.list":
 		// Read-only combined config surface (260814 Phase 2): subsumes config.show
@@ -1450,7 +1450,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			profiles, err := resolveWorktreeProfiles(&resolver)
 			return staticProfileLookup(profiles, err)(name)
 		}
-		result, err := releaseWorktree(context.Background(), s.gitRunner(), path, poolRV.Value, lookup)
+		result, err := releaseWorktree(context.Background(), s.gitRunner(), s.environ(), path, poolRV.Value, lookup)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
@@ -1487,7 +1487,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			return staticProfileLookup(profiles, err)(name)
 		}
 		staleAfter, _ := worktreeNudgeThresholds(&resolver, key)
-		result, err := removeWorktree(context.Background(), s.gitRunner(), path, poolRV.Value, staleAfter, time.Now(), lookup)
+		result, err := removeWorktree(context.Background(), s.gitRunner(), s.environ(), path, poolRV.Value, staleAfter, time.Now(), lookup)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}

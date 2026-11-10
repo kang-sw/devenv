@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
@@ -302,6 +303,96 @@ func TestHostedServerSubprocessUsesHelloEnvironment(t *testing.T) {
 	if text := toolText(t, keyedCall(t, stdio, 4, stdioKey, "git.status", nil)); strings.Contains(text, "FAKE-GIT-HOSTED") {
 		t.Fatalf("stdio git.status ran the hosted env's git: %s", text)
 	}
+}
+
+// TestHostedReconnectAdoptsOnlyLiveSamePIDRecords pins the liveness rule
+// on the reconnect path: a presence record under this owner's PID whose
+// last_seen is past the liveness threshold belongs to a process that reused
+// the number, so an auto stem is not adopted from it and a named record's
+// owner pointer is not kept from it; and among several live auto records
+// under one PID the first name in order is the one adopted, every time.
+func TestHostedReconnectAdoptsOnlyLiveSamePIDRecords(t *testing.T) {
+	seed := func(t *testing.T, root string, set map[string]string, records ...wsmailbox.Presence) (ServerOptions, string) {
+		t.Helper()
+		cacheHome := filepath.Join(t.TempDir(), "cache")
+		env := map[string]string{
+			wsconfig.EnvConfigHome: filepath.Join(t.TempDir(), "config"),
+			wsstate.EnvCacheHome:   cacheHome,
+			wsrsrc.EnvRsrcRoot:     absRsrcRoot(t),
+			"PATH":                 os.Getenv("PATH"),
+		}
+		for k, v := range set {
+			env[k] = v
+		}
+		path, err := wsmailbox.Paths{State: wsstate.Options{CacheHome: cacheHome}}.Worktree(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := wsmailbox.WithLock(path, func(store *wsmailbox.StoreFile) error {
+			if store.Presence == nil {
+				store.Presence = map[string]wsmailbox.Presence{}
+			}
+			for _, p := range records {
+				store.Presence[p.Name] = p
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return ServerOptions{Root: root, Version: "test", Env: hostedEnv(env), OwnerPID: os.Getppid()}, path
+	}
+	stale := mailboxNow().Add(-2 * mailboxLivenessThreshold).Format(time.RFC3339)
+	live := mailboxNow().Format(time.RFC3339)
+	record := func(name, lastSeen string, auto bool) wsmailbox.Presence {
+		return wsmailbox.Presence{Name: name, Scope: wsmailbox.ScopeWorktree, Owner: "old-owner", Cwd: "/old", StartedAt: lastSeen, LastSeen: lastSeen, PID: os.Getppid(), Auto: auto}
+	}
+
+	t.Run("a stale auto record is not adopted", func(t *testing.T) {
+		processEnvFixture(t)
+		root := t.TempDir()
+		mustWrite(t, root, "README.md", "# Test\n")
+		initGit(t, root)
+		opts, path := seed(t, root, map[string]string{envMailboxAuto: "worktree"}, record("stale-stem", stale, true))
+		s := NewServerWithOptions(opts)
+		key, _ := parseLoginResponse(t, callLogin(t, s, 1, root, nil))
+		identity := s.mailboxIdentityResolved()
+		if identity.Name == "stale-stem" {
+			t.Fatal("the stale same-PID auto record was adopted")
+		}
+		if p := loadPresence(t, path, identity.Name); p.Owner != key {
+			t.Fatalf("own record = %+v, want owner %s", p, key)
+		}
+	})
+	t.Run("a stale same-PID named record is replaced whole", func(t *testing.T) {
+		processEnvFixture(t)
+		root := t.TempDir()
+		mustWrite(t, root, "README.md", "# Test\n")
+		initGit(t, root)
+		opts, path := seed(t, root, map[string]string{envMailbox: "amber@worktree"}, record("amber", stale, false))
+		s := NewServerWithOptions(opts)
+		key, _ := parseLoginResponse(t, callLogin(t, s, 1, root, nil))
+		p := loadPresence(t, path, "amber")
+		if p.Owner != key || p.StartedAt == stale {
+			t.Fatalf("record after login = %+v, want owner %s and a new start", p, key)
+		}
+		if s.mailboxHasConflict() {
+			t.Fatal("a stale record under this PID was taken for a conflict")
+		}
+	})
+	t.Run("the first live auto record in name order is adopted", func(t *testing.T) {
+		processEnvFixture(t)
+		root := t.TempDir()
+		mustWrite(t, root, "README.md", "# Test\n")
+		initGit(t, root)
+		opts, _ := seed(t, root, map[string]string{envMailboxAuto: "worktree"}, record("zeta-stem", live, true), record("alpha-stem", live, true), record("mid-stem", stale, true))
+		for i := 0; i < 3; i++ {
+			s := NewServerWithOptions(opts)
+			parseLoginResponse(t, callLogin(t, s, 1, root, nil))
+			if got := s.mailboxIdentityResolved().Name; got != "alpha-stem" {
+				t.Fatalf("server %d adopted %q, want alpha-stem", i, got)
+			}
+		}
+	})
 }
 
 // TestHostedReconnectKeepsMailboxOwnershipAndAutoStem pins the mailbox

@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/kang-sw/devenv/internal/mcp"
+	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wsrsrc"
 )
@@ -88,7 +90,7 @@ func (h *proxyHost) Accept(hello wsdashboard.ProxyHello) (wsdashboard.ProxySessi
 		if len(hello.Argv) < 2 || hello.Argv[0] != "mailbox" || hello.Argv[1] != "wait" {
 			return nil, fmt.Errorf("the daemon runs only `mailbox wait` for a launcher, not %q", strings.Join(hello.Argv, " "))
 		}
-		return &proxyCLISession{args: hello.Argv[2:], cwd: hello.Cwd, ownerPID: hello.OwnerPID, getenv: func(key string) string { return hello.Env[key] }}, nil
+		return &proxyCLISession{args: hello.Argv[2:], cwd: hello.Cwd, ownerPID: hello.OwnerPID, environ: mcp.EnvFromMap(hello.Env), getenv: func(key string) string { return hello.Env[key] }}, nil
 	}
 	return nil, fmt.Errorf("unsupported mode %q", hello.Mode)
 }
@@ -188,7 +190,10 @@ type proxyCLISession struct {
 	args     []string
 	cwd      string
 	ownerPID int
-	getenv   func(string) string
+	// environ is the launcher's environment, which the wait's stores and
+	// their git run under; getenv reads it.
+	environ []string
+	getenv  func(string) string
 
 	cancel func()
 	done   chan struct{}
@@ -221,7 +226,7 @@ func (s *proxyCLISession) Serve(ctx context.Context, stream io.ReadWriteCloser) 
 	}
 	var stdout bytes.Buffer
 	stderr := &frameWriter{emit: func(data string) { writeFrame(wsdashboard.ProxyCLIFrame{Stream: "stderr", Data: data}) }}
-	code := runMailboxWait(ctx, s.args, &stdout, stderr, s.cwd, s.ownerPID, s.getenv)
+	code := runMailboxWait(ctx, s.args, &stdout, stderr, s.cwd, s.ownerPID, s.environ, s.getenv)
 	writeFrame(wsdashboard.ProxyCLIFrame{Final: true, ExitCode: code, Data: stdout.String()})
 }
 
@@ -251,13 +256,35 @@ func (f *frameWriter) Write(b []byte) (int, error) {
 	return len(b), nil
 }
 
+// daemonStartLAN is the LAN mode daemon-start asks Ensure for. A starter
+// the dashboard applies to (a dashboard manifest declared, WS_MCP_NO_DASHBOARD
+// unset) resolved settingsLAN from its configuration as serve does, and
+// decides. Any other starter does not decide LAN, the rule applyLANChange
+// applies to a hosted session: a daemon already running keeps its mode
+// (running reports it when one answers), and with none the global
+// dashboard.lan_enabled value under the starter's WS_CONFIG_HOME decides
+// (global), since the daemon it starts inherits that config home. The
+// alternative, settings.LAN read as false, would replace a LAN daemon on
+// every start by a session the dashboard does not apply to.
+func daemonStartLAN(applies, settingsLAN bool, running func() (lan, ok bool), global func() bool) bool {
+	if applies {
+		return settingsLAN
+	}
+	if lan, ok := running(); ok {
+		return lan
+	}
+	return global()
+}
+
 // daemonStart is the entry the launcher runs from the staged daemon binary
 // when no daemon answers, or the running one is older: it resolves the
 // dashboard settings from the launcher's environment and configuration as
 // serve does, and runs the Ensure handoff (a daemon as new or newer stays;
 // an older one, or one in the other LAN mode, is replaced). The dashboard
 // key's own value does not gate it: the daemon always hosts the MCP
-// sessions, and only each session's listing follows the key. It prints the
+// sessions, and only each session's listing follows the key. A starter the
+// dashboard does not apply to does not decide the LAN mode
+// (daemonStartLAN). It prints the
 // outcome as one JSON line and exits non-zero only when no daemon came up.
 func daemonStart(args []string) {
 	fs := flag.NewFlagSet("daemon-start", flag.ExitOnError)
@@ -274,6 +301,21 @@ func daemonStart(args []string) {
 	if err != nil {
 		fatal("daemon-start", err)
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*wsdashboard.DefaultStartWait+*startWait)
+	defer cancel()
+	lan := daemonStartLAN(server.DashboardApplies(), settings.LAN,
+		func() (bool, bool) {
+			ep, err := wsdashboard.ReadEndpoint(dir)
+			if err != nil {
+				return false, false
+			}
+			info, err := wsdashboard.Health(ctx, &http.Client{Timeout: wsdashboard.DefaultHealthTimeout, Transport: &http.Transport{Proxy: nil}}, ep)
+			return info.LAN, err == nil
+		},
+		func() bool {
+			value, _ := wsconfig.GlobalOverride(wsconfig.Options{}, mcp.DashboardLANKey)
+			return value == "true"
+		})
 	exe, err := os.Executable()
 	if err != nil {
 		fatal("daemon-start", err)
@@ -282,15 +324,13 @@ func daemonStart(args []string) {
 		*buildTime = wsdashboard.ExecutableBuildTime(exe)
 	}
 	spawn := func(args []string) error { return wsdashboard.SpawnDetached(exe, args, dir) }
-	ctx, cancel := context.WithTimeout(context.Background(), 2*wsdashboard.DefaultStartWait+*startWait)
-	defer cancel()
 	outcome, err := wsdashboard.Ensure(ctx, wsdashboard.EnsureOptions{
 		Dir:         dir,
 		Version:     version,
 		BuildTime:   *buildTime,
 		ContentHash: wsdashboard.ExecutableContentHash(exe),
 		Port:        settings.Port,
-		LAN:         settings.LAN,
+		LAN:         lan,
 		Spawn:       spawn,
 		StartWait:   *startWait,
 		Log:         os.Stderr,

@@ -754,7 +754,11 @@ func (s *Server) handleGitSearch(ctx context.Context, id json.RawMessage, args m
 func runGitSearch(ctx context.Context, environ []string, repo, root string, req gitSearchRequest) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, gitSearchTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, wsgit.LookPathEnv("git", environ), gitSearchArgs(req)...)
+	bin, lookErr := wsgit.LookPathEnv("git", environ)
+	cmd := exec.CommandContext(ctx, bin, gitSearchArgs(req)...)
+	if lookErr != nil {
+		cmd.Err = lookErr
+	}
 	cmd.Dir = repo
 	cmd.Env = gitSearchEnv(environ, root)
 	stdout := &gitSearchBuffer{limit: gitSearchOutputCap, full: cancel}

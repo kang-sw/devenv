@@ -43,9 +43,12 @@ pwsh -NoProfile -File scripts\install-claude-plugin.ps1
 
 Restart Claude Code. On first MCP load the launcher reads the marker, builds
 `agents-plugin-tool/cmd/ws-mcp` with the clone's `go.exe`, validates the runtime
-contract, and execs it. The plugin version is bumped per dev-merge, so the cache
-invalidates and cold-extracts on reinstall — this is the first-load path under
-test.
+contract, stages a content-hash-named copy under the dashboard daemon's `bin/`
+directory, and connects to the daemon that copy runs (starting it when none
+answers); the launcher itself only proxies stdio to the daemon-hosted MCP
+server (ws-mcp.md, "Daemon-Hosted MCP"). The plugin version is bumped per
+dev-merge, so the cache invalidates and cold-extracts on reinstall — this is
+the first-load path under test.
 
 ## Iteration loop
 
@@ -75,6 +78,8 @@ restart. `WS_MCP_LAUNCHER_DEBUG=1` prints cold-load diagnostics to stderr.
 - `ws.ferrule` login resolves a session key.
 - Process round-trip: `exec.spawn` -> `exec.status` -> `exec.result`, plus
   `exec.abort` (the surviving per-platform process start/snapshot/cancel path).
+  The job runs as a child of the dashboard daemon, under the connection's
+  environment (its PATH and cache home), not as a child of the launcher.
   These tools dispatch but are never advertised in `tools/list`, so the host
   agent cannot be asked to call them: drive this item from a raw JSON-RPC
   stdio client the way `agents-plugin-tool/scripts/smoke-ws-mcp.sh` does.
