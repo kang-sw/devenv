@@ -4230,6 +4230,8 @@
     b.appendChild(el('div', { class: 'tk tk-iwin-back', id: 'tkwin', hidden: '' }, '<div class="iwin" role="dialog" aria-modal="true" tabindex="-1"><div class="iwin-in" id="tkwinbody"></div></div>' +
       '<ul class="tk-mpop" id="tkmpop" role="listbox" aria-label="' + wsT("js.tk.composer.mention.tip") + '" hidden></ul>'));
     b.appendChild(el('dialog', { class: 'tk tk-dlg', id: 'tkdlg' }));
+    // a page without the shared toast stack (the tracker mockup) gets the renderer's own
+    if (!window.WsToast) b.appendChild(el('div', { class: 'tk tk-toast', id: 'tktoast', hidden: '' }));
     b.appendChild(el('div', { class: 'tk tk-tip', id: 'tktip', role: 'tooltip', hidden: '' }));
     b.appendChild(el('div', { class: 'tk tk-menu', id: 'tkmenu', role: 'menu', hidden: '' }));
     O.qsSlot.appendChild(el('span', { class: 'tk tk-qswrap' },
