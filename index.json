@@ -351,7 +351,14 @@
       "registered_at": "2026-11-09T15:09:33Z"
     },
     "261110-feat-ws-dashboard-tracker-quick-add-fields": {
-      "registered_at": "2026-11-10T00:30:16Z"
+      "registered_at": "2026-11-10T00:30:16Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "28ef83e379b353cc",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-10T06:19:31Z"
+      }
     },
     "261110-feat-ws-tracker-item-move-reparent": {
       "registered_at": "2026-11-09T15:09:01Z"
