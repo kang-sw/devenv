@@ -3992,7 +3992,8 @@
   // --- session rail ------------------------------------------------------------
   // The rail (r-rail) is one render shared by every session page: the page
   // marks its own row, pins the starred rows, and collapses the workspaces
-  // the user collapsed (rail.js keeps those in storage). From 1600px the
+  // the user collapsed (rail.js keeps those in storage), and opens the add
+  // popovers (the next block). From 1600px the
   // rail is a column; below it the top-left arrow slides it in over the
   // page, and Esc, the scrim, or picking a session closes it. The arrow
   // stays a link to the sessions index for a modified click.
@@ -4001,6 +4002,9 @@
   var starSet = WsRail ? WsRail.stars(railStore) : null, colSet = WsRail ? WsRail.collapsed(railStore) : null;
   var RAIL_WIDE = window.matchMedia ? window.matchMedia("(min-width: 1600px)") : null;
   var RAIL_SCROLL_KEY = "ws.dashboard.railscroll";
+  // rp is the open rail popover (next block): its controller P, kind, the
+  // workspace it concerns, and the + it hangs from.
+  var rp = { P: null, kind: "", ws: "", btn: null }, rpWs = null, rpWt = null, rpIds = 0;
   function railWide() { return !!(RAIL_WIDE && RAIL_WIDE.matches); }
   function railShown() { return root.classList.contains("rail-open"); }
   function railOpen(open) {
@@ -4018,10 +4022,11 @@
     q(".rsessions", r).forEach(function (box) { WsRail.pin(box, starSet); });
     WsRail.markCurrent(q(".rs", r), rid);
     q(".rws", r).forEach(function (ws) {
-      var col = colSet.has(ws.getAttribute("data-ws") || ""), bar = ws.querySelector(".wsbar");
+      var col = colSet.has(ws.getAttribute("data-ws") || ""), tog = ws.querySelector(".wstog");
       ws.classList.toggle("col", col);
-      if (bar) bar.setAttribute("aria-expanded", String(!col));
+      if (tog) tog.setAttribute("aria-expanded", String(!col));
     });
+    railPopSync();
   }
   if (railEl && WsRail) {
     if (railBtn) railBtn.addEventListener("click", function (e) {
@@ -4042,6 +4047,20 @@
         railMarks();
         return;
       }
+      var add = t.closest && t.closest(".radd");
+      if (add) {
+        e.preventDefault();
+        railPopOpen(add.getAttribute("data-add"), add);
+        return;
+      }
+      var forget = t.closest && t.closest(".rforget");
+      if (forget) {
+        e.preventDefault();
+        railForget(forget);
+        return;
+      }
+      // The whole bar toggles the workspace's collapse; its toggle button
+      // (.wstog) is the keyboard's way to it.
       var bar = t.closest && t.closest(".wsbar");
       if (bar) {
         var ws = bar.closest(".rws");
@@ -4066,6 +4085,398 @@
     railMarks();
     if (isFinite(savedRailTop)) railScrollTo(savedRailTop);
     railOpen(false);
+  }
+
+  // --- rail popovers: add workspace, add worktree, forget ----------------------
+  // On a daemon that keeps stored workspaces the rail header's + adds a
+  // workspace and a repository bar's + adds a worktree, each in a popover;
+  // a stored workspace bar's forget takes it off the stored list at once
+  // (never its files). The rail region is replaced on every update, so the
+  // popovers live outside it: made once, placed fixed against the + that
+  // opened it, and kept open across a swap, re-anchored to the new + by
+  // railMarks. One popover at a time; Esc, an outside click, and cancel close
+  // it. A route's error text is already in the page's language; the rail
+  // shows what an add or a forget changed through the stream.
+  // railPost posts body to a rail route; done(status, answer, text) gets the
+  // HTTP status (0: the daemon was not reached), the parsed JSON answer of a
+  // success ({} when there is none), and the body text of a failure.
+  function railPost(route, body, done) {
+    if (!window.fetch) { done(0, {}, wsT("js.post.nobrowser")); return; }
+    fetch(route, {
+      method: "POST", credentials: "same-origin", cache: "no-store",
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
+    }).then(function (r) {
+      return r.text().then(function (s) {
+        var v = {};
+        if (r.ok) { try { v = s ? JSON.parse(s) : {}; } catch (e) { v = {}; } }
+        done(r.status, v && typeof v === "object" ? v : {}, r.ok ? "" : s.trim());
+      });
+    }, function () { done(0, {}, ""); });
+  }
+  // railErr is a failed rail route's line: its own text, except a 404, which
+  // names a workspace the rail no longer shows.
+  function railErr(status, text) {
+    if (status === 404) return wsT("js.rail.unknown");
+    return text || (status ? "HTTP " + status : wsT("js.post.unreachable"));
+  }
+  function rpId() { return "rpop-" + (++rpIds); }
+  function rpPop(title) {
+    var el = mk("div", "rpop");
+    el.hidden = true;
+    el.setAttribute("role", "dialog");
+    el.setAttribute("aria-label", title);
+    return el;
+  }
+  function rpBtn(cls, text) { var b = mk("button", cls, text); b.type = "button"; return b; }
+  function rpInput(cls, label) {
+    var i = mk("input", cls);
+    i.type = "text";
+    i.spellcheck = false;
+    i.setAttribute("autocomplete", "off");
+    if (label) i.setAttribute("aria-label", label);
+    return i;
+  }
+  // rpLive reports that popover P is still open as it was when gen was
+  // taken: an answer that comes later closes nothing, and shows as a toast.
+  function rpLive(P, gen) { return rp.P === P && P.gen === gen; }
+  function rpEnter(el, fn) { el.addEventListener("keydown", function (e) { if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); fn(); } }); }
+
+  // The add-workspace popover: a pasted absolute path, read by the daemon's
+  // preview while the user types (debounced; a stale answer is dropped).
+  // "Add" is off while the input is empty or the latest preview refuses it;
+  // a preview still on its way leaves it on, as the add reads the path again.
+  function rpWsMake() {
+    var P = { seq: 0, gen: 0, timer: 0, ok: null, busy: false };
+    var el = P.el = rpPop(wsT("js.rail.ws.title"));
+    el.appendChild(mk("div", "sphd", wsT("js.rail.ws.title")));
+    var sec = el.appendChild(mk("div", "spsec"));
+    var lbl = sec.appendChild(mk("label", "splbl", wsT("js.rail.ws.label")));
+    var line = sec.appendChild(mk("div", "spline"));
+    var inp = line.appendChild(rpInput("spq mono"));
+    var go = line.appendChild(rpBtn("pbtn go", wsT("js.rail.ws.add")));
+    var res = sec.appendChild(mk("div", "spres"));
+    inp.id = rpId();
+    lbl.htmlFor = inp.id;
+    inp.placeholder = wsT("js.rail.ws.placeholder");
+    res.id = rpId();
+    res.setAttribute("aria-live", "polite");
+    inp.setAttribute("aria-describedby", res.id);
+    function show(cls, parts) {
+      res.className = "spres" + (cls ? " " + cls : "");
+      res.textContent = "";
+      parts.forEach(function (p) { if (p) res.appendChild(p); });
+    }
+    function hint() { show("", [mk("span", "spnote", wsT("js.rail.ws.hint"))]); }
+    function bad(text) { show("bad", [mk("span", "k", text)]); }
+    function sync() { go.disabled = P.busy || !inp.value.trim() || P.ok === false; }
+    function preview() {
+      var text = inp.value, n = ++P.seq;
+      clearTimeout(P.timer);
+      P.ok = null;
+      if (!text.trim()) { hint(); sync(); return; }
+      sync();
+      P.timer = setTimeout(function () {
+        railPost("/rail/workspaces/preview", { path: text }, function (status, v, s) {
+          if (n !== P.seq) return;
+          if (status !== 200) bad(railErr(status, s));
+          else if (!v.ok) { P.ok = false; bad(String(v.note || "")); }
+          else {
+            P.ok = true;
+            show("", [mk("span", "k", wsT("js.rail.ws.will")), mk("code", null, String(v.root || v.path || "")), v.note ? mk("span", "spnote", String(v.note)) : null]);
+          }
+          sync();
+        });
+      }, 200);
+    }
+    function submit() {
+      sync();
+      if (go.disabled) return;
+      var gen = P.gen;
+      P.busy = true;
+      P.seq++;
+      clearTimeout(P.timer);
+      sync();
+      railPost("/rail/workspaces/add", { path: inp.value }, function (status, v, s) {
+        var live = rpLive(P, gen);
+        if (status === 200) {
+          if (live) railPopClose(false);
+          toast(String(v.message || ""));
+          return;
+        }
+        if (!live) { toast(railErr(status, s)); return; }
+        P.busy = false;
+        if (status === 409) P.ok = false;
+        bad(railErr(status, s));
+        sync();
+      });
+    }
+    inp.addEventListener("input", preview);
+    rpEnter(inp, submit);
+    go.addEventListener("click", submit);
+    P.open = function () { P.gen++; inp.value = ""; P.ok = null; P.busy = false; hint(); sync(); };
+    P.focus = function () { inp.focus(); };
+    P.close = function () { P.seq++; clearTimeout(P.timer); };
+    return P;
+  }
+
+  // The add-worktree popover for one repository workspace: a new branch
+  // (from a base, the root's current branch preselected) or an existing one
+  // no worktree has checked out, and the folder (the daemon's default, or a
+  // custom absolute path). The options load when it opens; a failure, and a
+  // refused or failed add, show in its error line and keep it open.
+  function rpWtMake() {
+    var P = { seq: 0, gen: 0, opts: null, mode: "new", pick: "", custom: false, busy: false, ws: "" };
+    var el = P.el = rpPop(wsT("js.rail.wt.title"));
+    var hd = el.appendChild(mk("div", "sphd", wsT("js.rail.wt.title")));
+    var ctx = hd.appendChild(mk("span", "spctx"));
+    var bsec = el.appendChild(mk("div", "spsec"));
+    bsec.appendChild(mk("div", "splbl", wsT("js.rail.wt.branch")));
+    var seg = bsec.appendChild(mk("div", "spseg"));
+    seg.setAttribute("role", "radiogroup");
+    seg.setAttribute("aria-label", wsT("js.rail.wt.branch"));
+    var modes = { "new": rpBtn("", wsT("js.rail.wt.new")), old: rpBtn("", wsT("js.rail.wt.old")) };
+    Object.keys(modes).forEach(function (k) { modes[k].setAttribute("role", "radio"); modes[k].setAttribute("data-mode", k); seg.appendChild(modes[k]); });
+    var lnew = bsec.appendChild(mk("div", "spline"));
+    var name = lnew.appendChild(rpInput("spq mono", wsT("js.rail.wt.name")));
+    lnew.appendChild(mk("span", "spfrom", wsT("js.rail.wt.from")));
+    var base = lnew.appendChild(mk("select", "spsel"));
+    base.setAttribute("aria-label", wsT("js.rail.wt.base"));
+    var lold = bsec.appendChild(mk("div", "spsec"));
+    var find = lold.appendChild(rpInput("spq mono", wsT("js.rail.wt.old")));
+    find.type = "search";
+    find.placeholder = wsT("js.rail.wt.search");
+    var list = lold.appendChild(mk("ul", "splist"));
+    list.id = rpId();
+    list.setAttribute("role", "listbox");
+    list.setAttribute("aria-label", wsT("js.rail.wt.old"));
+    find.setAttribute("aria-controls", list.id);
+    var fsec = el.appendChild(mk("div", "spsec"));
+    var flbl = fsec.appendChild(mk("div", "splbl", wsT("js.rail.wt.folder")));
+    var tog = flbl.appendChild(rpBtn("spreset", wsT("js.rail.wt.custom")));
+    var def = fsec.appendChild(mk("div", "spdir"));
+    var defPath = def.appendChild(mk("code"));
+    def.appendChild(mk("span", "spnote", wsT("js.rail.wt.default")));
+    var own = fsec.appendChild(mk("div", "spown"));
+    var folder = own.appendChild(rpInput("spq mono", wsT("js.rail.wt.folderpath")));
+    own.appendChild(mk("span", "spnote", wsT("js.rail.wt.customnote")));
+    var err = el.appendChild(mk("p", "spnote err"));
+    err.setAttribute("aria-live", "polite");
+    var row = el.appendChild(mk("div", "sprow"));
+    var status = row.appendChild(mk("span", "spnote"));
+    var cancel = row.appendChild(rpBtn("pbtn", wsT("js.rail.cancel")));
+    var go = row.appendChild(rpBtn("pbtn go", wsT("js.rail.wt.create")));
+    function setErr(text) { err.textContent = text || ""; err.hidden = !text; }
+    function sync() {
+      Object.keys(modes).forEach(function (k) { modes[k].setAttribute("aria-checked", String(P.mode === k)); });
+      lnew.hidden = P.mode !== "new";
+      lold.hidden = P.mode !== "old";
+      def.hidden = P.custom;
+      own.hidden = !P.custom;
+      tog.textContent = wsT(P.custom ? "js.rail.wt.usedefault" : "js.rail.wt.custom");
+      find.disabled = !P.opts || !P.opts.free.length;
+      go.disabled = P.busy || !P.opts || (P.mode === "new" ? !name.value.trim() : !P.pick);
+    }
+    // drawList lists the free branches matching the search, keeping the
+    // pick when it still matches, else picking the first match.
+    function drawList() {
+      var free = P.opts ? P.opts.free : [], hits = WsRail.matchBranches(free, find.value);
+      if (hits.indexOf(P.pick) < 0) P.pick = hits[0] || "";
+      list.textContent = "";
+      find.removeAttribute("aria-activedescendant");
+      if (P.opts && !hits.length) {
+        var none = list.appendChild(mk("li", "spnone", wsT(free.length ? "js.rail.wt.nomatch" : "js.rail.wt.nofree")));
+        none.setAttribute("aria-disabled", "true");
+      }
+      hits.forEach(function (b, i) {
+        var li = list.appendChild(mk("li", null, b));
+        li.id = list.id + "-" + i;
+        li.setAttribute("role", "option");
+        li.setAttribute("aria-selected", String(b === P.pick));
+        li.setAttribute("data-branch", b);
+        if (b === P.pick) find.setAttribute("aria-activedescendant", li.id);
+      });
+      sync();
+    }
+    function step(d) {
+      var hits = WsRail.matchBranches(P.opts ? P.opts.free : [], find.value), i = hits.indexOf(P.pick) + d;
+      if (!hits.length) return;
+      P.pick = hits[Math.max(0, Math.min(hits.length - 1, i))];
+      drawList();
+      var cur = list.querySelector('[aria-selected="true"]');
+      if (cur && cur.scrollIntoView) cur.scrollIntoView({ block: "nearest" });
+    }
+    // edited drops an earlier add's error once the form changed.
+    function edited() { if (!P.busy) setErr(""); sync(); }
+    function setMode(m) {
+      if (P.mode === m) return;
+      P.mode = m;
+      edited();
+      (m === "new" ? name : find).focus();
+    }
+    function submit() {
+      sync();
+      if (go.disabled) return;
+      var gen = P.gen;
+      P.busy = true;
+      setErr("");
+      sync();
+      var body = WsRail.worktreeBody(P.ws, { mode: P.mode, name: name.value, base: base.value, pick: P.pick, custom: P.custom, folder: folder.value });
+      railPost("/rail/worktrees/add", body, function (st, v, s) {
+        var live = rpLive(P, gen);
+        if (st === 200) {
+          if (live) railPopClose(false);
+          toast(String(v.message || ""));
+          return;
+        }
+        if (!live) { toast(railErr(st, s)); return; }
+        P.busy = false;
+        setErr(railErr(st, s));
+        sync();
+      });
+    }
+    seg.addEventListener("click", function (e) { var b = e.target.closest && e.target.closest("[data-mode]"); if (b && !b.disabled) setMode(b.getAttribute("data-mode")); });
+    name.addEventListener("input", edited);
+    rpEnter(name, submit);
+    find.addEventListener("input", function () { drawList(); edited(); });
+    find.addEventListener("keydown", function (e) {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); step(e.key === "ArrowDown" ? 1 : -1); }
+    });
+    rpEnter(find, submit);
+    list.addEventListener("click", function (e) {
+      var li = e.target.closest && e.target.closest("li[data-branch]");
+      if (!li) return;
+      P.pick = li.getAttribute("data-branch");
+      drawList();
+      edited();
+      find.focus();
+    });
+    tog.addEventListener("click", function () {
+      P.custom = !P.custom;
+      if (P.custom && !folder.value && P.opts) folder.value = P.opts.folder;
+      edited();
+      (P.custom ? folder : tog).focus();
+    });
+    folder.addEventListener("input", edited);
+    rpEnter(folder, submit);
+    cancel.addEventListener("click", function () { railPopClose(true); });
+    go.addEventListener("click", submit);
+    P.open = function (ws, label) {
+      var n = ++P.seq;
+      P.gen++;
+      P.ws = ws; P.opts = null; P.mode = "new"; P.pick = ""; P.custom = false; P.busy = false;
+      ctx.textContent = label || ws;
+      ctx.title = ws;
+      name.value = ""; find.value = ""; folder.value = "";
+      base.textContent = "";
+      defPath.textContent = "";
+      status.textContent = wsT("js.rail.wt.loading");
+      setErr("");
+      drawList();
+      railPost("/rail/worktrees/options", { workspace: ws }, function (st, v, s) {
+        if (n !== P.seq) return;
+        status.textContent = "";
+        if (st !== 200) { setErr(railErr(st, s)); sync(); return; }
+        var arr = function (x) { return Array.isArray(x) ? x.filter(function (b) { return typeof b === "string"; }) : []; };
+        P.opts = { current: String(v.current || ""), bases: arr(v.bases), free: arr(v.free), folder: String(v.folder || "") };
+        // A detached root has no current branch: the base then defaults to
+        // its HEAD, sent as an empty base.
+        if (!P.opts.current) base.appendChild(mk("option", null, wsT("js.rail.wt.head"))).value = "";
+        P.opts.bases.forEach(function (b) { base.appendChild(mk("option", null, b)).value = b; });
+        base.value = P.opts.current;
+        defPath.textContent = P.opts.folder;
+        drawList();
+        railPopPlace();
+      });
+    };
+    P.focus = function () { name.focus(); };
+    P.close = function () { P.seq++; };
+    return P;
+  }
+
+  // railPopBtn is the + the open popover belongs to: the one that opened it,
+  // or after a rail swap the + of the same kind and workspace (null when the
+  // rail shows none any more).
+  function railPopBtn() {
+    if (!rp.P) return null;
+    if (rp.btn && rp.btn.isConnected) return rp.btn;
+    var r = region("rail"), found = null;
+    if (r) q('.radd[data-add="' + rp.kind + '"]', r).forEach(function (b) {
+      var ws = b.closest(".rws");
+      if ((ws ? ws.getAttribute("data-ws") || "" : "") === rp.ws) found = b;
+    });
+    rp.btn = found;
+    return found;
+  }
+  function railPopPlace() {
+    var b = railPopBtn();
+    if (!b) return;
+    var el = rp.P.el, at = WsRail.popPlace(b.getBoundingClientRect(), el.offsetWidth, el.offsetHeight, root.clientWidth || window.innerWidth, root.clientHeight || window.innerHeight);
+    el.style.top = at.top + "px";
+    el.style.left = at.left + "px";
+  }
+  // railPopSync runs after a rail swap: the new + shows its popover open, and
+  // a popover whose + is gone (its workspace left the rail) closes.
+  function railPopSync() {
+    if (!rp.P) return;
+    var b = railPopBtn();
+    if (!b) { railPopClose(false); return; }
+    b.setAttribute("aria-expanded", "true");
+    railPopPlace();
+  }
+  function railPopClose(refocus) {
+    if (!rp.P) return;
+    var P = rp.P, b = railPopBtn();
+    P.close();
+    P.el.hidden = true;
+    rp = { P: null, kind: "", ws: "", btn: null };
+    if (b) {
+      b.setAttribute("aria-expanded", "false");
+      if (refocus) b.focus();
+    }
+  }
+  // railPopOpen opens kind's popover ("ws" or "wt") against the + btn; the
+  // open popover's own + closes it instead.
+  function railPopOpen(kind, btn) {
+    var bar = btn.closest(".rws"), ws = bar ? bar.getAttribute("data-ws") || "" : "";
+    if (rp.P && rp.kind === kind && rp.ws === ws) { railPopClose(true); return; }
+    railPopClose(false);
+    var P = kind === "wt" ? rpWt || (rpWt = rpWtMake()) : rpWs || (rpWs = rpWsMake());
+    if (!P.el.parentNode) doc.body.appendChild(P.el);
+    rp = { P: P, kind: kind, ws: ws, btn: btn };
+    btn.setAttribute("aria-expanded", "true");
+    var nm = bar && bar.querySelector(".nm");
+    P.open(ws, nm ? nm.textContent : ws);
+    P.el.hidden = false;
+    railPopPlace();
+    P.focus();
+  }
+  // railForget takes the bar's stored workspace off the list.
+  function railForget(btn) {
+    var bar = btn.closest(".rws"), path = bar ? bar.getAttribute("data-ws") || "" : "", nm = bar && bar.querySelector(".nm");
+    if (!path || btn.disabled) return;
+    btn.disabled = true;
+    railPost("/rail/workspaces/forget", { path: path }, function (status, v, s) {
+      btn.disabled = false;
+      toast(status >= 200 && status < 300 ? wsT("js.rail.forgot", nm ? nm.textContent : path) : railErr(status, s));
+    });
+  }
+  if (railEl && WsRail) {
+    // Escape closes the popover before anything else hears it (the rail
+    // overlay and the drawer would close on it too).
+    window.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && rp.P) { e.preventDefault(); e.stopPropagation(); railPopClose(true); }
+    }, true);
+    // A click outside the popover and its + closes it. Capture sees the
+    // target before the popover's own handlers redraw it.
+    doc.addEventListener("click", function (e) {
+      var t = e.target;
+      if (!rp.P || !t || !t.closest) return;
+      if (rp.P.el.contains(t) || t.closest(".radd")) return;
+      railPopClose(false);
+    }, true);
+    window.addEventListener("resize", railPopPlace);
+    doc.addEventListener("scroll", function () { if (rp.P) railPopPlace(); }, true);
+    if (RAIL_WIDE && RAIL_WIDE.addEventListener) RAIL_WIDE.addEventListener("change", function () { railPopClose(false); });
   }
 
   // --- per-session drafts ---------------------------------------------------------

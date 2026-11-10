@@ -553,3 +553,87 @@ func TestSessionPagesShareOneRailRender(t *testing.T) {
 		t.Errorf("cross-origin refresh = %d, want 403", code)
 	}
 }
+
+// railSection is the rendered rail's section for the workspace at path.
+func railSection(t *testing.T, html, path string) string {
+	t.Helper()
+	_, rest, ok := strings.Cut(html, `<section class="rws" data-ws="`+path+`">`)
+	if !ok {
+		t.Fatalf("the rail has no section for %s:\n%s", path, html)
+	}
+	section, _, _ := strings.Cut(rest, `</section>`)
+	return section
+}
+
+// TestRailMarkupAddButtonsAndForget pins the rail's + buttons and forget:
+// the header's add-workspace + and a repository bar's add-worktree + only on
+// a daemon that keeps stored workspaces, never on a plain folder's bar or a
+// worktree row; forget on a stored bar only, a plain folder's too; and a
+// bar whose collapse toggle holds no other button, so the markup nests
+// validly and each action is its own keyboard stop.
+func TestRailMarkupAddButtonsAndForget(t *testing.T) {
+	row := RailRow{ReplyID: "railrow", Harness: "claude", Live: true}
+	view := RailView{CanAdd: true, Workspaces: []RailWorkspace{
+		{Name: "stored-repo", Path: "/w/stored-repo", Repo: true, Stored: true, Worktrees: []RailWorktree{
+			{Path: "/w/stored-repo", Root: true, Folder: "stored-repo", Branch: "main", Sessions: []RailRow{row}},
+			{Path: "/w/stored-wt", Folder: "stored-wt", Branch: "feat/x"},
+		}},
+		{Name: "derived-repo", Path: "/w/derived-repo", Repo: true, Worktrees: []RailWorktree{{Path: "/w/derived-repo", Root: true, Branch: "main"}}},
+		{Name: "stored-folder", Path: "/w/stored-folder", Stored: true},
+		{Name: "derived-folder", Path: "/w/derived-folder", Sessions: []RailRow{row}},
+	}}
+	region, err := renderRailRegion(view, "en")
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(region.HTML)
+	head, _, _ := strings.Cut(html, `<div class="rlist"`)
+	if !strings.Contains(head, `<button type="button" class="radd" data-add="ws"`) || !strings.Contains(head, `aria-haspopup="dialog"`) {
+		t.Errorf("the rail header lacks the add-workspace +:\n%s", head)
+	}
+	for path, want := range map[string]struct{ add, forget bool }{
+		"/w/stored-repo":    {true, true},
+		"/w/derived-repo":   {true, false},
+		"/w/stored-folder":  {false, true},
+		"/w/derived-folder": {false, false},
+	} {
+		section := railSection(t, html, path)
+		bar, body, _ := strings.Cut(section, `<div class="wsbody">`)
+		if got := strings.Contains(bar, `class="radd" data-add="wt"`); got != want.add {
+			t.Errorf("%s: add-worktree + on the bar = %v, want %v", path, got, want.add)
+		}
+		if got := strings.Contains(bar, `class="rforget"`); got != want.forget {
+			t.Errorf("%s: forget on the bar = %v, want %v", path, got, want.forget)
+		}
+		if strings.Contains(body, `radd`) || strings.Contains(body, `rforget`) {
+			t.Errorf("%s: a + or forget below the bar (a worktree row or a session):\n%s", path, body)
+		}
+		if strings.Contains(bar, `<button type="button" class="wsbar"`) || !strings.HasPrefix(bar, `<div class="wsbar">`) {
+			t.Errorf("%s: the bar is not a container: %s", path, bar)
+		}
+		_, tog, ok := strings.Cut(bar, `<button type="button" class="wstog" aria-expanded="true" title="`+path+`">`)
+		if !ok {
+			t.Fatalf("%s: the bar lacks its collapse toggle: %s", path, bar)
+		}
+		tog, _, _ = strings.Cut(tog, `</button>`)
+		if strings.Contains(tog, `<button`) {
+			t.Errorf("%s: a button nests in the collapse toggle: %s", path, tog)
+		}
+	}
+	if body := railSection(t, html, "/w/stored-folder"); !strings.Contains(body, `<div class="wsbody"></div>`) {
+		t.Errorf("a stored folder without sessions = %s, want a bar with an empty body", body)
+	}
+	if !strings.Contains(railSection(t, html, "/w/stored-repo"), `title="Add a worktree to stored-repo"`) {
+		t.Error("the add-worktree + does not name its workspace")
+	}
+
+	view.CanAdd = false
+	view.Workspaces = view.Workspaces[1:2]
+	region, err = renderRailRegion(view, "en")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(region.HTML), "radd") {
+		t.Errorf("a daemon without stored workspaces shows a +:\n%s", region.HTML)
+	}
+}

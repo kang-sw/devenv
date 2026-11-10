@@ -1024,12 +1024,24 @@ a[data-wl="file"]:not([href]) { color: inherit; }
 .rail .rlist { flex: 1 1 auto; min-height: 0; overflow: auto; padding-bottom: 6px; }
 .rail .rlist > .empty { padding: 10px 12px; font-size: 12.5px; color: var(--wb-muted-fg); }
 .rail .rws + .rws { margin-top: 8px; }
-.rail .wsbar { display: flex; align-items: center; gap: 8px; width: 100%; padding: 3px 12px; min-height: 28px; border: 0; font: inherit; text-align: left; background: var(--wb-topic); color: var(--wb-on-topic); cursor: pointer; user-select: none; }
+.rail .wsbar { display: flex; align-items: center; gap: 8px; padding: 3px 12px; min-height: 28px; background: var(--wb-topic); color: var(--wb-on-topic); cursor: pointer; user-select: none; }
+.rail .wstog { display: flex; align-items: center; gap: 8px; flex: 0 1 auto; min-width: 0; padding: 0; border: 0; border-radius: 4px; font: inherit; text-align: left; background: transparent; color: inherit; cursor: pointer; }
+.rail .wstog:focus-visible { outline: 1.5px solid currentColor; outline-offset: 2px; }
 .rail .wsbar .wsi { display: inline-flex; flex: none; opacity: .8; margin-right: -2px; }
 .rail .wsbar .nm { font-size: 13px; font-weight: 700; white-space: nowrap; }
 .rail .wsbar .pp { font-family: var(--wb-mono); font-size: 11px; opacity: .65; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 auto; }
 .rail .wsbar .ct { margin-left: auto; font-size: 11px; font-weight: 700; padding: 0 7px; border-radius: 999px; background: rgb(127 127 127 / .28); flex: none; }
 .rail .rws.col .wsbody { display: none; }
+/* the + buttons and forget: quiet until their line is hovered or they are
+   focused (faint always on touch screens), full on hover and while their
+   popover is open */
+.rail .radd, .rail .rforget { width: 18px; height: 18px; flex: none; display: inline-grid; place-items: center; border: 0; padding: 0; border-radius: 5px; background: transparent; color: inherit; opacity: 0; cursor: pointer; transition: opacity .12s; }
+.rail .radd .i, .rail .rforget .i { width: 13px; height: 13px; stroke-width: 1.8; }
+.rail .rhd:hover .radd, .rail .wsbar:hover .radd, .rail .wsbar:hover .rforget, .rail .radd:focus-visible, .rail .rforget:focus-visible { opacity: .7; }
+@media (hover: none) { .rail .radd, .rail .rforget { opacity: .5; } }
+.rail .rhd .radd:hover, .rail .wsbar .radd:hover, .rail .wsbar .rforget:hover, .rail .rhd .radd[aria-expanded="true"], .rail .wsbar .radd[aria-expanded="true"] { opacity: 1; background: rgb(127 127 127 / .22); }
+.rail .radd:focus-visible, .rail .rforget:focus-visible { outline: 1.5px solid currentColor; outline-offset: 1px; }
+.rail .rforget:disabled { cursor: progress; }
 .rail .wsbody { padding-top: 2px; }
 .rail .rwt { padding: 4px 0 2px; }
 .rail .rwt.empty .wthd { opacity: .6; }
@@ -1083,6 +1095,53 @@ a[data-wl="file"]:not([href]) { color: inherit; }
 .rail .rfoot { flex: none; display: flex; align-items: center; gap: 8px; padding: 7px 12px; border-top: 1px solid var(--wb-muted); font-size: 12px; }
 .rail .rfoot a { color: var(--wb-muted-fg); text-decoration: none; }
 .rail .rfoot a:hover { color: var(--wb-primary); }
+/* the rail's popovers (add workspace, add worktree): one at a time, made by
+   the page script outside the rail region (which every update replaces)
+   and placed fixed against the + that opened them; the tracker support
+   chat's selection popover look */
+.rpop { position: fixed; z-index: 55; width: 330px; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); max-height: calc(100dvh - 16px); overflow-y: auto; overscroll-behavior: contain; box-sizing: border-box; display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px;
+  background: var(--wb-card); color: var(--wb-fg); border-radius: 10px; box-shadow: var(--wb-shadow-hi), inset 0 0 0 1px var(--wb-line); padding: 10px 12px; font-size: 12.5px; }
+.rpop[hidden] { display: none; }
+.rpop [hidden] { display: none !important; }
+.rpop .sphd { display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: 13px; font-weight: 800; }
+.rpop .spctx { font-family: var(--wb-mono); font-size: 11.5px; font-weight: 600; color: var(--wb-muted-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.rpop .spsec { display: grid; gap: 5px; min-width: 0; }
+.rpop .splbl { display: flex; align-items: baseline; gap: 8px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--wb-muted-fg); }
+.rpop .spreset { font: inherit; font-size: 11px; font-weight: 400; text-transform: none; letter-spacing: 0; border: 0; background: none; padding: 0; color: var(--wb-primary); cursor: pointer; margin-left: auto; }
+.rpop .spreset:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: 1px; border-radius: 3px; }
+.rpop .spseg { display: flex; flex-wrap: wrap; gap: 2px; width: fit-content; background: var(--wb-muted); border-radius: 999px; padding: 2px; }
+.rpop .spseg button { font: inherit; font-size: 12px; font-weight: 600; border: 0; border-radius: 999px; padding: 2px 12px; background: transparent; color: var(--wb-muted-fg); cursor: pointer; }
+.rpop .spseg button[aria-checked="true"] { background: var(--wb-card); color: var(--wb-fg); box-shadow: inset 0 0 0 1px var(--wb-line); }
+.rpop .spseg button:disabled { opacity: .45; cursor: not-allowed; }
+.rpop .spseg button:focus-visible { outline: 1.5px solid var(--wb-primary); }
+.rpop .spline { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.rpop .spq { font: inherit; font-size: 12.5px; width: 100%; min-width: 0; box-sizing: border-box; border: 0; border-radius: 8px; padding: 4px 8px; background: var(--wb-muted); color: inherit; }
+.rpop .spq.mono { font-family: var(--wb-mono); font-size: 12px; }
+.rpop .spq:focus-visible, .rpop .spsel:focus-visible { outline: 1.5px solid var(--wb-primary); }
+.rpop .spfrom { font-size: 11.5px; color: var(--wb-muted-fg); white-space: nowrap; }
+.rpop .spsel { font: 12px var(--wb-mono); max-width: 45%; border: 0; border-radius: 8px; padding: 4px 6px; background: var(--wb-muted); color: inherit; }
+.rpop .splist { list-style: none; margin: 0; padding: 0; max-height: 110px; overflow-y: auto; border-radius: 8px; box-shadow: inset 0 0 0 1px var(--wb-line); }
+.rpop .splist li { padding: 3px 8px; cursor: pointer; font-family: var(--wb-mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rpop .splist li:hover { background: var(--wb-muted); }
+.rpop .splist li[aria-selected="true"] { color: var(--wb-primary); font-weight: 700; }
+.rpop .splist li.spnone { cursor: default; color: var(--wb-muted-fg); font-family: inherit; }
+.rpop .splist li.spnone:hover { background: none; }
+.rpop .spnote { margin: 0; font-size: 11.5px; color: var(--wb-muted-fg); font-weight: 400; text-transform: none; letter-spacing: 0; overflow-wrap: anywhere; }
+.rpop .spnote code, .rpop .spdir code, .rpop .spres code { font-family: var(--wb-mono); font-size: 11px; }
+.rpop .spnote.err { color: var(--wb-fail); }
+.rpop .spdir { display: grid; gap: 3px; padding: 6px 8px; border-radius: 8px; box-shadow: inset 0 0 0 1px var(--wb-line); }
+.rpop .spdir > code, .rpop .spres code { font-size: 12px; overflow-wrap: anywhere; }
+.rpop .spown { display: grid; gap: 3px; }
+.rpop .spres { display: grid; gap: 2px; min-height: 34px; overflow-wrap: anywhere; box-sizing: border-box; padding: 5px 8px; border-radius: 8px; box-shadow: inset 0 0 0 1px var(--wb-line); font-size: 12px; }
+.rpop .spres .k { font-size: 11px; color: var(--wb-muted-fg); }
+.rpop .spres.bad { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-warn-ink) 60%, transparent); }
+.rpop .spres.bad .k { color: var(--wb-warn-ink); }
+.rpop .sprow { display: flex; align-items: center; gap: 6px; }
+.rpop .sprow .spnote { margin-right: auto; min-width: 0; }
+.rpop .pbtn { white-space: nowrap; flex: none; font: inherit; font-size: 12px; font-weight: 700; border: 0; border-radius: 999px; padding: 3px 12px; cursor: pointer; background: var(--wb-muted); color: var(--wb-muted-fg); }
+.rpop .pbtn.go { background: var(--wb-primary); color: var(--wb-primary-fg); }
+.rpop .pbtn:disabled { opacity: .45; cursor: default; }
+.rpop .pbtn:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: 1px; }
 @media (prefers-reduced-motion: reduce) {
   .rail, .rail-open .rail, .rscrim { transition: none; }
   .rail .bots .i { animation: none; }

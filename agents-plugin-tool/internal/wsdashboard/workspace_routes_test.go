@@ -383,3 +383,31 @@ func TestAddWorktreeDefaultFolder(t *testing.T) {
 		t.Errorf("folders = %v, want %s and its -2 and -3", got, first)
 	}
 }
+
+// TestSessionPageOffersTheRailAddButtons pins the session page's rail on a
+// fixture daemon: the add-workspace + and a stored folder's forget once the
+// daemon keeps stored workspaces, neither without.
+func TestSessionPageOffersTheRailAddButtons(t *testing.T) {
+	f := startPageFixture(t, withWorkspaces(t))
+	folder := t.TempDir()
+	if _, err := f.d.workspaces.add(folder, false); err != nil {
+		t.Fatal(err)
+	}
+	f.d.broker.wake(railListRepoKey)
+	var page string
+	waitFor(t, "the stored folder on the rail", func() bool {
+		_, page = get(t, f.base+"/s/livesession")
+		return strings.Contains(page, `data-ws="`+folder+`"`)
+	})
+	if !strings.Contains(page, `class="radd" data-add="ws"`) {
+		t.Error("the rail lacks the add-workspace +")
+	}
+	if section := railSection(t, page, folder); !strings.Contains(section, `class="rforget"`) || strings.Contains(section, `data-add="wt"`) {
+		t.Errorf("a stored plain folder's bar = %s, want forget and no +", section)
+	}
+
+	off := startPageFixture(t)
+	if _, page := get(t, off.base+"/s/livesession"); !strings.Contains(page, `id="rail"`) || strings.Contains(page, `class="radd"`) || strings.Contains(page, `class="rforget"`) {
+		t.Error("a daemon without stored workspaces offers a + or forget on the rail")
+	}
+}

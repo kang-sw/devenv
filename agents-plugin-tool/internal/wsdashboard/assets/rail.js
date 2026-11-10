@@ -6,7 +6,8 @@
   // localStorage under ws.dashboard., through the store the caller passes
   // ({ load(key), save(key, value or null) }, which must not throw), so the
   // page works the same with storage absent; nothing reaches the server.
-  // The DOM helpers touch only the elements they are given.
+  // The DOM helpers touch only the elements they are given; the popover
+  // helpers at the end are pure.
   var DRAFT = "ws.dashboard.draft.", DRAFTS = "ws.dashboard.drafts";
   var STARS = "ws.dashboard.stars", COLLAPSED = "ws.dashboard.railcol";
   // DRAFT_CAP bounds the sessions whose drafts are kept; the oldest saved
@@ -153,6 +154,40 @@
     };
   }
 
+  // popPlace is where a rail popover of size w x h goes in a viewport of vw x
+  // vh, against the anchor rect a ({top, bottom, left, right}, viewport
+  // coordinates): below the anchor, its right edge on the anchor's, else
+  // above it when only that fits, kept 8px inside the viewport.
+  function popPlace(a, w, h, vw, vh) {
+    var m = 8, gap = 4;
+    var left = Math.max(m, Math.min(a.right - w, vw - w - m));
+    var top = a.bottom + gap;
+    if (top + h > vh - m) top = a.top - gap - h >= m ? a.top - gap - h : Math.max(m, vh - h - m);
+    return { top: Math.round(top), left: Math.round(left) };
+  }
+
+  // matchBranches is the branches of list whose name holds query, ignoring
+  // case and surrounding space; an empty query matches every branch.
+  function matchBranches(list, query) {
+    var qv = String(query || "").trim().toLowerCase();
+    return strings(list).filter(function (b) { return !qv || b.toLowerCase().indexOf(qv) >= 0; });
+  }
+
+  // worktreeBody is the add-worktree request for the repository workspace
+  // ws from the form f: mode "new" (name, from base; an empty base is the
+  // root's current HEAD) or "old" (pick, an existing branch), and the folder
+  // when custom is set (empty takes the daemon's default).
+  function worktreeBody(ws, f) {
+    var isNew = f.mode === "new";
+    return {
+      workspace: ws,
+      branch: isNew ? String(f.name || "").trim() : String(f.pick || ""),
+      "new": isNew,
+      base: isNew ? String(f.base || "") : "",
+      folder: f.custom ? String(f.folder || "").trim() : ""
+    };
+  }
+
   window.WsRail = {
     DRAFT_CAP: DRAFT_CAP,
     drafts: drafts,
@@ -162,6 +197,9 @@
     collapsed: collapsed,
     pin: pin,
     markCurrent: markCurrent,
-    leaveGuard: leaveGuard
+    leaveGuard: leaveGuard,
+    popPlace: popPlace,
+    matchBranches: matchBranches,
+    worktreeBody: worktreeBody
   };
 })();

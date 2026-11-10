@@ -113,13 +113,37 @@ check("the viewed row is current", rows.map(function (r) { return [r.classList.c
 R.markCurrent(rows, "r1");
 check("another view moves the mark", rows.map(function (r) { return r.classList.contains("cur"); }), [true, false, false]);
 
+// popPlace: below the anchor, right edges aligned, kept inside the
+// viewport; above it when only that fits; pinned to the bottom margin when
+// neither does.
+var a = { top: 100, bottom: 118, left: 300, right: 318 };
+check("below, right-aligned", R.popPlace(a, 200, 150, 1000, 800), { top: 122, left: 118 });
+check("kept 8px from the left", R.popPlace({ top: 10, bottom: 28, left: 40, right: 58 }, 330, 150, 1000, 800), { top: 32, left: 8 });
+check("kept 8px from the right", R.popPlace({ top: 10, bottom: 28, left: 990, right: 1008 }, 330, 150, 1000, 800), { top: 32, left: 662 });
+check("above when only that fits", R.popPlace({ top: 700, bottom: 718, left: 300, right: 318 }, 200, 300, 1000, 800), { top: 396, left: 118 });
+check("bottom margin when neither fits", R.popPlace({ top: 200, bottom: 218, left: 300, right: 318 }, 200, 700, 1000, 800), { top: 92, left: 118 });
+
+// matchBranches filters the free branches by a case-insensitive substring.
+check("an empty query matches all", R.matchBranches(["main", "feat/A", "fix/b"], " "), ["main", "feat/A", "fix/b"]);
+check("a query filters ignoring case", R.matchBranches(["main", "feat/A", "fix/b", 3], "F"), ["feat/A", "fix/b"]);
+check("no list matches nothing", R.matchBranches(null, "x"), []);
+
+// worktreeBody: a new branch carries its base; an existing one none; the
+// folder only when custom.
+check("new branch, default folder", R.worktreeBody("/w/r", { mode: "new", name: " feat/x ", base: "main", pick: "free", custom: false, folder: "/x" }),
+  { workspace: "/w/r", branch: "feat/x", "new": true, base: "main", folder: "" });
+check("new branch from the detached HEAD", R.worktreeBody("/w/r", { mode: "new", name: "feat/y", base: "" }).base, "");
+check("existing branch, custom folder", R.worktreeBody("/w/r", { mode: "old", name: "ignored", base: "main", pick: "free", custom: true, folder: " /w/wt " }),
+  { workspace: "/w/r", branch: "free", "new": false, base: "", folder: "/w/wt" });
+
 if (bad.length) console.log(bad.join("\n"));
 `
 
 // TestRailScript runs rail.js under node: per-session drafts with their
 // cap, the stripping of lost image markers, the leave guard, starred-row
-// pinning and its undo, the persisted stars and collapsed workspaces, and
-// the viewed row's mark.
+// pinning and its undo, the persisted stars and collapsed workspaces, the
+// viewed row's mark, and the add popovers' placement, branch filter, and
+// add-worktree request.
 func TestRailScript(t *testing.T) {
 	data, err := dashboardFS.ReadFile("assets/rail.js")
 	if err != nil {
