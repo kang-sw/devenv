@@ -257,6 +257,55 @@ Verification:
 - Remote `go test ./... -count=1` and `go vet ./...` pass; the three playbook
   copies are sha256-identical and each `rsrc/manifest.json` pins the new hash.
 
+### Result (8b60d2113) - 2026-11-10
+
+Landed in 39fdc7ef6 (code), 82b0ca9a4 (playbook), 8b60d2113 (review fix).
+
+- D1-D7: `internal/wswhiteboard/query.go` adds `DepthSummary`
+  (`writeSummary`/`decodedAnswer`), the `answered_at` field, grouped-quote
+  folding (`same as (nn)`), `writeIndented` for continuation lines,
+  `[match: <fields>]` on text matches, and `Plain` (in `inline_tags.go`) for
+  item fields, labels, and close results; body and `answer_quote` print as
+  stored. `ids`/`id` and `topic` default to `summary`.
+- D8/D9: `wsxmlcmd.Group.Extra` is an opt-in optional group attribute; a
+  group carrying it comes out of `Parse` as a Pos-0 command
+  (`Command.IsGroup`) ahead of its commands and may be empty. The whiteboard
+  grammar sets `Extra: "label"`. New `internal/wswhiteboard/topics.go`
+  holds `State.Labels` (stem -> label), `resolveTopic` (stem, then stemless
+  key, then label; shared by every group and the query `topic` filter),
+  `applyLabel` (rename, in-place adoption, adoption by label, new topic;
+  collision and empty-create refusals), `renameTopic`, and `pruneLabels`
+  (end of every accepted batch, after archive eviction). Query headers print
+  `topic <stem> "<label>"` / `topic "<label>"`.
+- D10: `TopicView.Label`; the template keeps the key in `data-topic` (section
+  and topic note) and shows the label in `.tname`. Senders are unchanged.
+- Playbook Commands/Query/Answers sections updated in all three
+  byte-identical copies; manifests pin sha256 257ddf0a....
+
+Verification: remote `go test ./... -count=1` passes; `go vet ./...` clean;
+`python3 -m unittest discover agents-plugin-wsflow/tests` OK (20 tests);
+`node --test test/version-check.test.ts` in agents-plugin-pi passes. New
+tests: `TestQuerySummary`, `TestQueryFullOutputShape`,
+`TestQueryTextMatchFields`, `TestPlain`, `topics_test.go` (create/address/
+rename, adoption by label and in place, stale close state, refusals,
+label pruning incl. archive eviction, query headers and label addressing,
+pre-stem store load), `TestStemmedTopicPageNamesItsKey`,
+`TestGroupExtraAttribute`; existing query/MCP tests updated for the summary
+default.
+
+Decisions:
+- D5 continuation lines indent to the line's own indentation (4 spaces for
+  detail lines, 2 for the item line), per the ticket wording.
+- `rail.js` now shows the `.tname` label rather than `data-topic`, since
+  `data-topic` carries a stemmed topic's key; a display fix, not a sender
+  change.
+- `Plain` replaces tags one by one without pairing them; a stray `</code>`
+  becomes a backtick, which is harmless in text output.
+- Lite review minors left as is: a group that adopts a topic and edits its
+  body in the same batch records no body change marks (base keys the body
+  under the old title; page highlight only), and dashboard topic-note chips
+  show the stem for a stemmed topic (D10 as specified).
+
 ## Sage Review Round 1 (2026-11-10)
 
 ### Design Reviewer — block
