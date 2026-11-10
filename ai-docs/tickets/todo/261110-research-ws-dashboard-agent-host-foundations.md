@@ -98,6 +98,9 @@ To investigate:
 
 ## Topic 5: desktop shell
 
+Deferred (user, 2026-11-10, (18) note, (19)): not a target of this epic;
+reviewed only after the browser dashboard is complete.
+
 To investigate:
 - Tauri against Electron, or another option, for wrapping the existing web
   UI with the daemon as a sidecar: bundle size, WebView consistency across
@@ -132,6 +135,36 @@ To investigate:
   (241 b). It also rejects the dropped MVP's browser terminal, file
   explorer, and editor.
 
+- The archived terminal did not survive daemon restarts. `TerminalRegistry`
+  lived in daemon memory and the daemon owned each PTY child
+  (`git show archive/ws-dashboard:ws-dashboard/crates/daemon/src/terminal.rs`);
+  `260523-feat-ws-dashboard-terminal-tab-restore` accepted that live
+  terminal processes need not survive daemon death and restored tabs as new
+  shells.
+- python3 is a prerequisite on every host: `agents-plugin/.mcp.json` starts
+  `python3 ./bin/ws-mcp-launcher.py`, the Pi bridge spawns the same launcher
+  (`agents-plugin-pi/src/mcp-stdio-client.ts`), and Windows needs `python3`
+  on PATH (`ai-docs/manuals/ws-mcp.md`).
+- `claude` 2.1.322 `--help`: under `--print`, `--permission-prompts host`
+  (the default) lets the SDK host or `--permission-prompt-tool` answer
+  permission prompts; `none` denies anything that would prompt.
+  `--permission-mode` accepts acceptEdits, auto, bypassPermissions, manual,
+  dontAsk, plan.
+- Claude mod and Pi extension under a daemon host (Explore, 2026-11-10):
+  mailbox push, the board-inbox drain, and interrupt handling claim the
+  same messages a daemon would deliver (recv claims); the dashboard feed
+  duplicates the stream the daemon reads; key minting, manual injection,
+  key adoption, preload expansion, and `request_compaction` (works under
+  `-p` through `$.command.run('compact')`) do not conflict.
+  `request_mcp_reconnect` fails under `-p` (`claude-mod/reconnect.ts`
+  `commandRefusal`). No per-process switch disables the mod or the Pi
+  mailbox waiter; the Pi waiter arms whenever the role is unset and a key
+  exists, with no RPC-mode gate (`agents-plugin-pi/src/index.ts`,
+  `mailbox-waiter.ts` `shouldArmMailboxWaiter`).
+- The daemon now hosts every MCP server behind a Python proxy launcher and
+  is replaced on version change; the proxy reconnects transparently
+  (`261110-feat-ws-mcp-daemon-hosted-proxy-launcher` Decisions 1, 7).
+
 ### Confirmed Decisions
 - Pursue the full agent-host scope as one epic, terminal and desktop shell
   included (user, 2026-11-10, whiteboard (538) b). This partially reverses
@@ -139,26 +172,48 @@ To investigate:
 - Include the archived ws-dashboard terminal work in this research (user,
   2026-11-10, (538) note).
 
+- Two tracks in one epic: agent management and ADE surfaces (user,
+  2026-11-10, (01); (02)).
+- "Resident" sessions mean process survival across daemon restarts through
+  a per-session Python holder ((03) a, (06) a and note, (09), (10), (25));
+  child `261110-feat-ws-dashboard-session-holder`.
+- Daemon leads are headless ((12) b); the daemon injects input ((16)),
+  approves through the SDK host from a trusted origin only ((05), (13)),
+  defaults to `auto` with prompts waiting unanswered ((14) a), recovers MCP
+  by restart and resume ((22)), and stops idle processes by default once it
+  owns delivery ((17)); child
+  `261110-feat-ws-dashboard-headless-lead-sessions`.
+- One hosted-session env flag turns off input delivery and the feed in the
+  Claude mod and the Pi extension; the daemon mints the key ((20), (21));
+  child `261110-feat-ws-hosted-session-mode-flag`.
+- A workspace is a root worktree or a plain folder ((08) b, (11));
+  conversation handoff works both ways between CLI and daemon ((15) a);
+  child `261110-feat-ws-dashboard-workspaces`.
+- The terminal runs on holder PTYs behind the trusted-origin boundary; the
+  archived Rust PTY code is not carried over ((05), (23)); child
+  `261110-feat-ws-dashboard-terminal`.
+- File browsing is read-only with HTML, image, and video preview; editing is
+  out of scope; HTML and SVG render isolated ((04) a, (07)); child
+  `261110-feat-ws-dashboard-file-preview`.
+- The desktop shell is only reviewed after the browser dashboard is complete
+  ((18), (19)). Orca is not a design target ((24)).
+
 ### Proposals
-- Stage the work: headless lead sessions first, then the permission
-  boundary, then the terminal, then the desktop shell.
-- Allow approval only from loopback or a desktop-shell origin, never on the
-  LAN token alone.
 - Keep CLI-created terminal sessions first-class next to daemon-hosted ones,
   because `-p` lacks some TUI features.
-- Prefer Tauri for the desktop shell, on bundle size.
 
 ### Open Questions
-- Port the archived terminal to Go, run it as a Rust sidecar, or rewrite?
 - Which TUI-only Claude features must the dashboard re-provide for headless
-  leads to be usable day to day?
-- What is a "workspace" in the dashboard's model?
-- Does the desktop shell replace the browser dashboard, or sit beside it
-  (LAN and mobile access)?
-- Is Orca still a supported host after this, and what does the ws plugin
-  keep for it?
+  leads to be usable day to day? Verify under `-p`: slash commands and
+  skills, manual compaction, and the ws session-start hooks.
+- Pi parity in `--mode rpc` for each feature the headless lead child relies
+  on.
+- How did the archived MVP gate terminal access? (input to the terminal
+  child's gate design)
 
 ### Rejected Alternatives
+- Conversation-only survival across daemon restarts ((06) b, c); a TUI in a
+  PTY for daemon leads ((12) a); file editing in the dashboard ((04) b, c).
 - A research ticket limited to headless lead sessions and the permission
   boundary ((538) a). Keeping CLI-created sessions as the only kind
   ((538) c).
