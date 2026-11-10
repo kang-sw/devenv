@@ -343,6 +343,9 @@
     "261110-epic-ws-tracker-team-feedback": {
       "registered_at": "2026-11-10T06:49:09Z"
     },
+    "261110-feat-ws-tracker-daemon-event-hook": {
+      "registered_at": "2026-11-10T06:49:16Z"
+    },
     "261110-feat-ws-tracker-item-move-reparent": {
       "registered_at": "2026-11-09T15:09:01Z"
     },
