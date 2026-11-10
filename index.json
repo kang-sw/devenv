@@ -364,7 +364,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-10T00:34:09Z"
+        "touched_at": "2026-11-10T00:35:22Z",
+        "impl": {
+          "branch": "impl/develop/gap-lent-voice"
+        }
       }
     },
     "261110-bug-ws-git-merge-ticket-dir-rename-false-conflict": {
