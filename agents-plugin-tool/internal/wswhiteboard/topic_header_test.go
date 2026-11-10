@@ -245,3 +245,27 @@ func TestClosedTopicCapRenders(t *testing.T) {
 	}
 	wantAll(t, string(html), `<button class="btn closed-more" data-closed-next="32">show more closed topics (3)</button></div>`)
 }
+
+// TestStemmedTopicPageNamesItsKey pins how a stemmed topic renders: the
+// section's and the topic note's data-topic carry the key (the stem), which
+// the page's "[<topic>] text" note lines are built from, and the visible
+// name is the label; a stemless topic's key is its label.
+func TestStemmedTopicPageNamesItsKey(t *testing.T) {
+	st := &State{}
+	mustApply(t, st, `<wb:topic name="ship-gate" label="출시 게이트"><wb:add class="technical"><wb:title>x</wb:title></wb:add></wb:topic>`+addXML(ClassTechnical, "Plain title", "y"))
+	for _, layout := range layouts() {
+		out := render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r"}))
+		wantAll(t, out,
+			`<section class="topic" data-topic="ship-gate"><div class="tbar"><span class="tlead"><span class="tname">출시 게이트</span>`,
+			`<textarea class="note tnote" data-topic="ship-gate"`,
+			`<section class="topic" data-topic="Plain title"><div class="tbar"><span class="tlead"><span class="tname">Plain title</span>`)
+	}
+	// The note line takes the topic from data-topic, not the visible name.
+	formJS, err := embeddedAsset("form.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(formJS), `"[" + n.getAttribute("data-topic") + "] "`) {
+		t.Fatalf("form.js no longer builds topic-note lines from data-topic")
+	}
+}

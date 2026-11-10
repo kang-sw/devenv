@@ -510,7 +510,7 @@ func TestWhiteboardRefusalsCarryProblemsAndGrammar(t *testing.T) {
 	// Every problem is listed in one refusal, with the grammar.
 	resp = f.call(t, "whiteboard.query", map[string]any{"payload": map[string]any{"depth": "deep", "fields": []any{"answer", "bogus"}, "extra": 1}})
 	text = toolText(t, resp)
-	for _, want := range []string{"payload.depth: must be one of topics, items, full", "payload.fields[1]: must be one of", "payload.extra: unknown field", "whiteboard.query payload:"} {
+	for _, want := range []string{"payload.depth: must be one of topics, items, summary, full", "payload.fields[1]: must be one of", "payload.extra: unknown field", "whiteboard.query payload:"} {
 		if !isToolError(resp) || !strings.Contains(text, want) {
 			t.Fatalf("query refusal missing %q: %s", want, text)
 		}

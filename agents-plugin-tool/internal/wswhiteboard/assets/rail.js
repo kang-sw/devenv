@@ -75,7 +75,10 @@
     b.hidden = !t;
     b.wbTopic = t || null;
     if (!t) return;
-    var name = t.getAttribute("data-topic"), pol = t.querySelector(":scope > .tbar > .chip.policy");
+    // The rail shows the topic's visible name (.tname, its label), not
+    // data-topic, which carries the key a stemmed topic is addressed by.
+    var tn = t.querySelector(":scope > .tbar .tname");
+    var name = tn ? tn.textContent : t.getAttribute("data-topic"), pol = t.querySelector(":scope > .tbar > .chip.policy");
     var n = pol ? pol.textContent.trim() : "";
     b.classList.toggle("quiet", t.classList.contains("quiet"));
     b.firstChild.textContent = name;

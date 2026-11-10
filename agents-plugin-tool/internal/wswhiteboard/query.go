@@ -10,24 +10,28 @@ import (
 )
 
 // Query depths: one line per topic, then one line per item under its topic,
-// then the item's detail lines.
+// then the item's detail lines. Summary sits between items and full: an
+// open item prints its full ask, a settled one only its answer.
 const (
-	DepthTopics = "topics"
-	DepthItems  = "items"
-	DepthFull   = "full"
+	DepthTopics  = "topics"
+	DepthItems   = "items"
+	DepthSummary = "summary"
+	DepthFull    = "full"
 )
 
 var (
 	queryFields       = []string{"topic", "ids", "id", "status", "text", "depth", "fields", "body", "closed"}
-	depthValues       = []string{DepthTopics, DepthItems, DepthFull}
-	detailFieldValues = []string{"options", "recommendation", "rationale", "answer", "answer_quote", "links"}
+	depthValues       = []string{DepthTopics, DepthItems, DepthSummary, DepthFull}
+	detailFieldValues = []string{"options", "recommendation", "rationale", "answer", "answered_at", "answer_quote", "links"}
 )
 
 // QueryTopic is one topic of a query result.
 type QueryTopic struct {
-	Name        string
-	Closed      bool
-	CloseResult string
+	// Name is the topic's key; Stem repeats it for a stemmed topic and is
+	// "" for a stemless one. Label is the name the topic shows.
+	Name, Stem, Label string
+	Closed            bool
+	CloseResult       string
 	// Counts counts every item of the topic by status, whatever the filters.
 	Counts map[string]int
 	// BodyLen is the body's length in characters; Body is the body itself,
@@ -54,6 +58,9 @@ type QueryResult struct {
 	// FoldedTopics and FoldedItems count the closed topics left out, and
 	// their items, when closed topics are not listed.
 	FoldedTopics, FoldedItems int
+	// Matches names, per item a text filter matched, the fields it matched
+	// in; nil without a text filter.
+	Matches map[int][]string
 }
 
 // queryFilter is a validated query payload with its defaults applied.
@@ -130,7 +137,7 @@ func parseQuery(p *problems, payload any) queryFilter {
 	}
 	f.depth = DepthItems
 	if target == "ids" || target == "topic" {
-		f.depth = DepthFull
+		f.depth = DepthSummary
 	}
 	if hasDepth {
 		f.depth = depth
@@ -163,6 +170,13 @@ func Query(state *State, payload any) (QueryResult, []string) {
 	if state == nil {
 		return r, nil
 	}
+	if f.topics != nil {
+		resolved := map[string]bool{}
+		for name := range f.topics {
+			resolved[state.resolveTopic(name)] = true
+		}
+		f.topics = resolved
+	}
 	items := append([]Item(nil), state.Items...)
 	sort.Slice(items, func(i, j int) bool { return items[i].ID < items[j].ID })
 	var order []string
@@ -192,7 +206,8 @@ func Query(state *State, payload any) (QueryResult, []string) {
 				continue
 			}
 			all = append(all, item)
-			if !f.matches(item) {
+			fields, ok := f.matches(item)
+			if !ok {
 				continue
 			}
 			if f.statuses != nil && !f.statuses[item.Status] {
@@ -200,6 +215,12 @@ func Query(state *State, payload any) (QueryResult, []string) {
 				continue
 			}
 			matched = append(matched, item)
+			if fields != nil {
+				if r.Matches == nil {
+					r.Matches = map[int][]string{}
+				}
+				r.Matches[item.ID] = fields
+			}
 		}
 		if namesItems && len(matched) == 0 {
 			continue
@@ -210,7 +231,10 @@ func Query(state *State, payload any) (QueryResult, []string) {
 			r.FoldedItems += len(all)
 			continue
 		}
-		t := QueryTopic{Name: name, Closed: closed, Counts: map[string]int{}}
+		t := QueryTopic{Name: name, Label: state.TopicLabel(name), Closed: closed, Counts: map[string]int{}}
+		if state.stemmed(name) {
+			t.Stem = name
+		}
 		if closed {
 			t.CloseResult = state.CloseResults[name]
 		}
@@ -250,41 +274,63 @@ func Query(state *State, payload any) (QueryResult, []string) {
 	return r, nil
 }
 
-// matches applies every item filter but status: ids and text.
-func (f queryFilter) matches(item Item) bool {
+// matches applies every item filter but status: ids and text. With a text
+// filter it also returns the fields the text matched in, in a fixed order.
+// Matching reads the stored text, markup included.
+func (f queryFilter) matches(item Item) ([]string, bool) {
 	if f.ids != nil && !f.ids[item.ID] {
-		return false
+		return nil, false
 	}
 	if f.text == "" {
-		return true
+		return nil, true
 	}
-	hay := append([]string{item.Title, item.Rationale, item.Answer}, item.Options...)
-	for _, s := range hay {
-		if strings.Contains(strings.ToLower(s), f.text) {
-			return true
-		}
+	has := func(s string) bool { return strings.Contains(strings.ToLower(s), f.text) }
+	var fields []string
+	if has(item.Title) {
+		fields = append(fields, "title")
 	}
-	return false
+	if slices.ContainsFunc(item.Options, has) {
+		fields = append(fields, "options")
+	}
+	if has(item.Rationale) {
+		fields = append(fields, "rationale")
+	}
+	if has(item.Answer) {
+		fields = append(fields, "answer")
+	}
+	return fields, len(fields) > 0
 }
 
 // FormatQuery renders a query result as compact text: per topic a header
 // line, its body between marker lines when printed, then an indented line
-// per item and, at depth full, a further indented line per non-empty detail
-// field selected; a last line names what the defaults left out.
+// per item and its detail lines (depth summary or full); a last line names
+// what the defaults left out. Item fields, the topic label, and the close
+// result print board markup as plain text (Plain); the body and an answer
+// quote print as stored.
 func FormatQuery(r QueryResult) string {
 	var sb strings.Builder
 	if len(r.Topics) == 0 {
 		sb.WriteString("no matching items\n")
 	}
+	// quoted maps a printed answer quote and its answer time to the item
+	// that printed it, so a grouped answer's quote prints once.
+	quoted := map[[2]string]int{}
 	for _, t := range r.Topics {
 		sb.WriteString(topicLine(t) + "\n")
 		if t.Body != "" {
 			sb.WriteString("topic body:\n<<<\n" + t.Body + "\n>>>\n")
 		}
 		for _, item := range t.Items {
-			fmt.Fprintf(&sb, "  %s [%s] [%s] %s\n", FormatID(item.ID), item.Status, item.Class, item.Title)
-			if r.Depth == DepthFull {
-				writeDetails(&sb, item, r.Fields)
+			line := fmt.Sprintf("%s [%s] [%s] %s", FormatID(item.ID), item.Status, item.Class, Plain(item.Title))
+			if fields := r.Matches[item.ID]; len(fields) > 0 {
+				line += " [match: " + strings.Join(fields, ", ") + "]"
+			}
+			writeIndented(&sb, "  ", line)
+			switch r.Depth {
+			case DepthFull:
+				writeDetails(&sb, item, r.Fields, quoted)
+			case DepthSummary:
+				writeSummary(&sb, item, quoted)
 			}
 		}
 	}
@@ -307,9 +353,13 @@ func topicLine(t QueryTopic) string {
 		parts = append(parts, "changed: "+t.LastChange)
 	}
 	if t.CloseResult != "" {
-		parts = append(parts, "result: "+t.CloseResult)
+		parts = append(parts, "result: "+Plain(t.CloseResult))
 	}
-	return fmt.Sprintf("topic %q [%s] %s", t.Name, state, strings.Join(parts, "; "))
+	name := fmt.Sprintf("%q", Plain(t.Label))
+	if t.Stem != "" {
+		name = t.Stem + " " + name
+	}
+	return fmt.Sprintf("topic %s [%s] %s", name, state, strings.Join(parts, "; "))
 }
 
 // statusCounts lists the non-zero counts in status order, "none" when all
@@ -327,36 +377,87 @@ func statusCounts(counts map[string]int) string {
 	return strings.Join(parts, ", ")
 }
 
-func writeDetails(sb *strings.Builder, item Item, fields []string) {
+// writeIndented writes line at indent, every continuation line of a
+// multi-line value at the same indent, so it never reads as a line of its
+// own at column 0.
+func writeIndented(sb *strings.Builder, indent, line string) {
+	sb.WriteString(indent + strings.ReplaceAll(line, "\n", "\n"+indent) + "\n")
+}
+
+// writeDetails writes an item's detail lines at depth full, the fields
+// selected (all for nil).
+func writeDetails(sb *strings.Builder, item Item, fields []string, quoted map[[2]string]int) {
 	want := func(name string) bool { return fields == nil || slices.Contains(fields, name) }
 	detail := func(name, value string) {
 		if value != "" {
-			fmt.Fprintf(sb, "    %s: %s\n", name, value)
+			writeIndented(sb, "    ", name+": "+value)
 		}
 	}
 	if want("options") {
 		for i, option := range item.Options {
-			fmt.Fprintf(sb, "    %s) %s\n", OptionLetterFor(i), option)
+			writeIndented(sb, "    ", OptionLetterFor(i)+") "+Plain(option))
 		}
 	}
 	if want("recommendation") {
-		detail("recommendation", item.Recommendation)
+		detail("recommendation", Plain(item.Recommendation))
 	}
 	if want("rationale") {
-		detail("rationale", item.Rationale)
+		detail("rationale", Plain(item.Rationale))
 	}
 	if want("answer") {
-		detail("answer", item.Answer)
+		detail("answer", Plain(item.Answer))
 	}
 	if want("answer_quote") && item.AnswerQuote != "" {
-		detail("answer_quote", fmt.Sprintf("%q", item.AnswerQuote))
+		key := [2]string{item.AnswerQuote, item.AnsweredAt}
+		if first, ok := quoted[key]; ok {
+			detail("answer_quote", "same as "+FormatID(first))
+		} else {
+			quoted[key] = item.ID
+			detail("answer_quote", fmt.Sprintf("%q", item.AnswerQuote))
+		}
 	}
-	if want("answer") {
+	if want("answered_at") {
 		detail("answered_at", item.AnsweredAt)
 	}
 	if want("links") && len(item.Links) > 0 {
-		detail("links", strings.Join(item.Links, ", "))
+		links := make([]string, len(item.Links))
+		for i, link := range item.Links {
+			links[i] = Plain(link)
+		}
+		detail("links", strings.Join(links, ", "))
 	}
+}
+
+// writeSummary writes an item's detail lines at depth summary: an open
+// item's full ask, an answered or assumed item's one decoded answer line,
+// and nothing for a withdrawn or superseded one.
+func writeSummary(sb *strings.Builder, item Item, quoted map[[2]string]int) {
+	switch item.Status {
+	case StatusOpen:
+		writeDetails(sb, item, nil, quoted)
+	case StatusAnswered, StatusAssumed:
+		line := "answer: " + decodedAnswer(item)
+		if item.Status == StatusAssumed {
+			line += " (assumed)"
+		}
+		writeIndented(sb, "    ", line)
+	}
+}
+
+// decodedAnswer reads a policy answer that starts with an option letter as
+// "<letter>: <option text>", then " - <note>" when the value carries text
+// after the letter; any other value prints as stored.
+func decodedAnswer(item Item) string {
+	if item.Class == ClassPolicy && len(item.Options) > 0 {
+		if letter, note := SplitLetter(item.Answer, len(item.Options)); letter != "" {
+			out := letter + ": " + Plain(item.Options[letter[0]-'a'])
+			if note != "" {
+				out += " - " + Plain(note)
+			}
+			return out
+		}
+	}
+	return Plain(item.Answer)
 }
 
 // omittedLine names what the defaults left out and the filter that shows

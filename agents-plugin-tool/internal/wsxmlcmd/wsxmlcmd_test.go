@@ -299,3 +299,53 @@ func TestGroupRules(t *testing.T) {
 		t.Fatalf("problems = %q", problems)
 	}
 }
+
+// extraGrammar is groupGrammar with an optional extra group attribute.
+var extraGrammar = Grammar{
+	Prefix:   "tr:",
+	Group:    &Group{Name: "in", Attr: "name", Extra: "label", Hint: groupGrammar.Group.Hint},
+	Commands: groupGrammar.Commands,
+}
+
+// A group carrying the grammar's extra attribute comes out as a Command of
+// its own ahead of its commands and may hold none; one without it still
+// needs a command. The extra attribute is opt-in: groupGrammar refuses it.
+func TestGroupExtraAttribute(t *testing.T) {
+	cmds, problems := parse(extraGrammar, `<tr:in name="a" label="A &amp; B"><tr:note>x</tr:note></tr:in><tr:in name="b" label="B"/><tr:in name="c" label="C"> </tr:in><tr:in name="d"><tr:note>y</tr:note></tr:in>`)
+	if len(problems) > 0 {
+		t.Fatalf("problems: %q", problems)
+	}
+	if len(cmds) != 5 {
+		t.Fatalf("commands = %+v", cmds)
+	}
+	for i, want := range []struct {
+		tag, scope, extra string
+		group, hasExtra   bool
+		commands          int
+	}{
+		{"tr:in", "a", "A & B", true, true, 1},
+		{"tr:note", "a", "A & B", false, true, 1},
+		{"tr:in", "b", "B", true, true, 0},
+		{"tr:in", "c", "C", true, true, 0},
+		{"tr:note", "d", "", false, false, 1},
+	} {
+		c := cmds[i]
+		if c.Tag != want.tag || c.IsGroup() != want.group || c.Scope.Value != want.scope || c.Scope.Extra != want.extra || c.Scope.HasExtra != want.hasExtra || c.Scope.Commands != want.commands {
+			t.Errorf("command %d = %+v scope %+v", i, c, c.Scope)
+		}
+	}
+	if cmds[0].Scope != cmds[1].Scope || cmds[0].Pos != 0 || cmds[1].Pos != 1 || cmds[4].Pos != 2 {
+		t.Fatalf("positions/scopes = %+v / %+v", cmds[0], cmds[1])
+	}
+	if got := cmds[2].Label(); got != "<tr:in> (line 1)" {
+		t.Fatalf("group label = %q", got)
+	}
+	_, problems = parse(extraGrammar, `<tr:in name="a"/>`)
+	if want := []string{`<tr:in> (line 1): holds no commands; write <tr:in name="..."><tr:note>...</tr:note></tr:in>`}; !slices.Equal(problems, want) {
+		t.Fatalf("empty unlabelled group: %q", problems)
+	}
+	cmds, problems = parse(groupGrammar, `<tr:in name="a" label="A"><tr:note>x</tr:note></tr:in>`)
+	if want := []string{"<tr:in> (line 1): unknown attribute label (known: name)"}; !slices.Equal(problems, want) || len(cmds) != 1 || cmds[0].IsGroup() {
+		t.Fatalf("grammar without Extra: problems %q, commands %+v", problems, cmds)
+	}
+}

@@ -89,27 +89,40 @@ func TestQueryDepths(t *testing.T) {
 	wantText(t, "depth full", text, []string{"  (01) [open] [policy] pick one\n    a) optx first\n    b) second\n    recommendation: a: smaller\n"}, []string{"(02)"})
 }
 
-// fields picks the detail lines at depth full; answered_at travels with
-// answer.
+// fields picks the detail lines at depth full; answered_at is a field of
+// its own, which answer no longer carries.
 func TestQueryFields(t *testing.T) {
 	st := queryBoard(t)
-	text := queryText(t, st, `{"ids":[1,2],"fields":["answer"]}`)
+	text := queryText(t, st, `{"ids":[1,2],"depth":"full","fields":["answer"]}`)
 	wantText(t, "fields answer", text,
-		[]string{"  (02) [answered] [technical] settled q\n    answer: ok\n    answered_at: 2026-11-04T09:00:00Z\n"},
-		[]string{"a) optx", "recommendation:", "rationale:", "answer_quote:"})
-	text = queryText(t, st, `{"id":2,"fields":["rationale","answer_quote"]}`)
+		[]string{"  (02) [answered] [technical] settled q\n    answer: ok\n"},
+		[]string{"a) optx", "recommendation:", "rationale:", "answer_quote:", "answered_at"})
+	text = queryText(t, st, `{"id":2,"depth":"full","fields":["answer","answered_at"]}`)
+	wantText(t, "fields answer and time", text, []string{"    answer: ok\n    answered_at: 2026-11-04T09:00:00Z\n"}, nil)
+	text = queryText(t, st, `{"id":2,"depth":"full","fields":["rationale","answer_quote"]}`)
 	wantText(t, "fields rationale quote", text, []string{"    rationale: because zeta\n", `    answer_quote: "(02) ok"`}, []string{"answer: ok", "answered_at"})
+	// fields selects at depth full only: summary ignores it.
+	text = queryText(t, st, `{"id":2,"fields":["rationale"]}`)
+	wantText(t, "fields at summary", text, []string{"    answer: ok\n"}, []string{"rationale:"})
 	// fields alone keeps the unfiltered depth items: no detail lines.
 	text = queryText(t, st, `{"fields":"options"}`)
 	wantText(t, "fields alone", text, []string{"  (01) [open] [policy] pick one\n"}, []string{"a) optx"})
 }
 
-// id and ids print their items at depth full, every status, with no body,
-// and union.
+// id and ids print their items at depth summary, every status, with no
+// body, and union; an explicit depth full prints every detail.
 func TestQueryIDs(t *testing.T) {
 	st := queryBoard(t)
 	text := queryText(t, st, `{"id":2}`)
 	want := `topic "a" [open] items: open 1, answered 1, assumed 1; ` + changedAt + `
+  (02) [answered] [technical] settled q
+    answer: ok
+`
+	if text != want {
+		t.Fatalf("id query:\n%s\nwant:\n%s", text, want)
+	}
+	text = queryText(t, st, `{"id":2,"depth":"full"}`)
+	want = `topic "a" [open] items: open 1, answered 1, assumed 1; ` + changedAt + `
   (02) [answered] [technical] settled q
     rationale: because zeta
     answer: ok
@@ -117,7 +130,7 @@ func TestQueryIDs(t *testing.T) {
     answered_at: 2026-11-04T09:00:00Z
 `
 	if text != want {
-		t.Fatalf("id query:\n%s\nwant:\n%s", text, want)
+		t.Fatalf("id query at depth full:\n%s\nwant:\n%s", text, want)
 	}
 	text = queryText(t, st, `{"id":2,"ids":[4,5]}`)
 	wantText(t, "id and ids", text, []string{"(02) [answered]", `topic "b" [open]`, "(04) [open]", `topic "c" [closed]`, "(05) [withdrawn]"}, []string{"(01)", "(03)", `topic "d"`, "topic body:", "omitted:"})
@@ -127,7 +140,7 @@ func TestQueryIDs(t *testing.T) {
 }
 
 // topic prints the topic body after its topic line and every item at depth
-// full; a named closed topic is listed with its result.
+// summary; a named closed topic is listed with its result.
 func TestQueryTopic(t *testing.T) {
 	st := queryBoard(t)
 	text := queryText(t, st, `{"topic":"b"}`)
@@ -157,14 +170,14 @@ func TestQueryTopic(t *testing.T) {
 func TestQueryText(t *testing.T) {
 	st := queryBoard(t)
 	text := queryText(t, st, `{"text":"ZETA"}`)
-	if text != `topic "a" [open] items: open 1, answered 1, assumed 1; `+changedAt+"\n  (02) [answered] [technical] settled q\n" {
+	if text != `topic "a" [open] items: open 1, answered 1, assumed 1; `+changedAt+"\n  (02) [answered] [technical] settled q [match: rationale]\n" {
 		t.Fatalf("text over rationale:\n%s", text)
 	}
 	wantText(t, "text over options", queryText(t, st, `{"text":"OPTX"}`), []string{"(01)"}, []string{"(02)", "a) optx"})
 	wantText(t, "text over title in a closed topic", queryText(t, st, `{"text":"close me"}`), []string{`topic "c" [closed]`, "(05) [withdrawn]"}, []string{`topic "a"`, "omitted:"})
 	wantText(t, "text over answer", queryText(t, st, `{"text":"OK"}`), []string{"(02)", "(03)"}, []string{"(01)", "(04)"})
 	// topic with text takes the topic defaults with text ANDed in.
-	wantText(t, "topic and text", queryText(t, st, `{"topic":"a","text":"zeta"}`), []string{"(02) [answered]", "    rationale: because zeta"}, []string{"(01)", "(03)"})
+	wantText(t, "topic and text", queryText(t, st, `{"topic":"a","text":"zeta"}`), []string{"(02) [answered] [technical] settled q [match: rationale]\n    answer: ok\n"}, []string{"(01)", "(03)"})
 	if text := queryText(t, st, `{"topic":"b","text":"zeta"}`); text != "no matching items\n" {
 		t.Fatalf("topic and text with no match: %q", text)
 	}
@@ -218,8 +231,8 @@ func TestQueryRefusesBadPayloads(t *testing.T) {
 		`{"status":"done"}`:               {"payload.status: must be one of open, answered, assumed, withdrawn, superseded"},
 		`{"status":{"a":1}}`:              {"payload.status: must be a string or a list of strings; got object"},
 		`{"status":["open","done"]}`:      {"payload.status[1]: must be one of"},
-		`{"depth":"deep"}`:                {"payload.depth: must be one of topics, items, full"},
-		`{"fields":["answer","bogus"]}`:   {"payload.fields[1]: must be one of options, recommendation, rationale, answer, answer_quote, links"},
+		`{"depth":"deep"}`:                {"payload.depth: must be one of topics, items, summary, full"},
+		`{"fields":["answer","bogus"]}`:   {"payload.fields[1]: must be one of options, recommendation, rationale, answer, answered_at, answer_quote, links"},
 		`{"ids":3}`:                       {"payload.ids: must be a list of numbers; got number"},
 		`{"ids":[1.5]}`:                   {"payload.ids[0]: must be a whole number"},
 		`{"id":"2"}`:                      {"payload.id: must be a number; got string"},
@@ -236,5 +249,116 @@ func TestQueryRefusesBadPayloads(t *testing.T) {
 	}
 	if _, problems := Query(nil, `{}`); !hasProblem(problems, "payload: must be an object; got string") {
 		t.Fatalf("string payload problems = %v", problems)
+	}
+}
+
+// summaryBoard holds topic s: an answered policy item (01) with a note, an
+// open policy item (02), an assumed technical item (03), a withdrawn item
+// (04), an option-less policy item (05) answered in free text, and three
+// technical items (06)-(08) answered together.
+func summaryBoard(t *testing.T) *State {
+	t.Helper()
+	st := &State{}
+	mustApply(t, st, `<wb:topic name="s"><wb:body>body <code>kept</code> <b>as is</b></wb:body>
+<wb:add class="policy"><wb:title>Order <code>parse</code> or <b>emit</b>?</wb:title><wb:option>Emitter first</wb:option><wb:option>Parser <i>first</i></wb:option><wb:recommend>b</wb:recommend><wb:why>line one
+line two</wb:why></wb:add>
+<wb:add class="policy"><wb:title>open ask</wb:title><wb:option>yes</wb:option><wb:option>no</wb:option><wb:recommend>a: simpler</wb:recommend><wb:why>first
+second</wb:why><wb:link>https://example.com</wb:link></wb:add>
+<wb:add class="technical"><wb:title>assumed one</wb:title></wb:add>
+<wb:add class="technical"><wb:title>dropped one</wb:title></wb:add>
+<wb:add class="policy"><wb:title>free form</wb:title></wb:add>
+<wb:add class="technical"><wb:title>g1</wb:title></wb:add>
+<wb:add class="technical"><wb:title>g2</wb:title></wb:add>
+<wb:add class="technical"><wb:title>g3</wb:title></wb:add></wb:topic>`)
+	mustApply(t, st, `<wb:answer id="1" value="b, note text">b <code>please</code></wb:answer>
+<wb:answer id="3" value="ok" assumed="true">fine</wb:answer>
+<wb:patch id="4" status="withdrawn"/>
+<wb:answer id="5" value="go ahead">go ahead</wb:answer>
+<wb:answer ids="6 7 8" value="ok">all ok</wb:answer>`)
+	return st
+}
+
+// Depth summary prints a settled item as one decoded answer line and an
+// open item as depth full does.
+func TestQuerySummary(t *testing.T) {
+	st := summaryBoard(t)
+	text := queryText(t, st, `{"topic":"s"}`)
+	want := `topic "s" [open] items: open 1, answered 5, assumed 1, withdrawn 1; body: 35 chars; ` + changedAt + `
+topic body:
+<<<
+body <code>kept</code> <b>as is</b>
+>>>
+  (01) [answered] [policy] Order ` + "`parse`" + ` or emit?
+    answer: b: Parser first - note text
+  (02) [open] [policy] open ask
+    a) yes
+    b) no
+    recommendation: a: simpler
+    rationale: first
+    second
+    links: https://example.com
+  (03) [assumed] [technical] assumed one
+    answer: ok (assumed)
+  (04) [withdrawn] [technical] dropped one
+  (05) [answered] [policy] free form
+    answer: go ahead
+  (06) [answered] [technical] g1
+    answer: ok
+  (07) [answered] [technical] g2
+    answer: ok
+  (08) [answered] [technical] g3
+    answer: ok
+`
+	if text != want {
+		t.Fatalf("summary:\n%s\nwant:\n%s", text, want)
+	}
+	if got := queryText(t, st, `{"topic":"s","depth":"summary"}`); got != text {
+		t.Fatalf("explicit summary differs from the topic default:\n%s", got)
+	}
+	// An open item at summary prints exactly as at full.
+	if summary, full := queryText(t, st, `{"id":2}`), queryText(t, st, `{"id":2,"depth":"full"}`); summary != full {
+		t.Fatalf("open item summary:\n%s\nfull:\n%s", summary, full)
+	}
+	wantText(t, "summary drops the settled ask", text, nil, []string{"a) Emitter", "rationale: line one", "answer_quote", "answered_at"})
+}
+
+// At depth full a grouped answer's quote prints once, a multi-line value
+// indents every line, and markup renders as plain text outside the body and
+// the answer quote.
+func TestQueryFullOutputShape(t *testing.T) {
+	st := summaryBoard(t)
+	text := queryText(t, st, `{"topic":"s","depth":"full"}`)
+	wantText(t, "full", text, []string{
+		"  (01) [answered] [policy] Order `parse` or emit?\n    a) Emitter first\n    b) Parser first\n    recommendation: b\n    rationale: line one\n    line two\n    answer: b, note text\n    answer_quote: \"b <code>please</code>\"\n",
+		"topic body:\n<<<\nbody <code>kept</code> <b>as is</b>\n>>>\n",
+		"  (06) [answered] [technical] g1\n    answer: ok\n    answer_quote: \"all ok\"\n",
+		"  (07) [answered] [technical] g2\n    answer: ok\n    answer_quote: same as (06)\n",
+		"  (08) [answered] [technical] g3\n    answer: ok\n    answer_quote: same as (06)\n",
+	}, []string{"<i>", "Order <code>"})
+	// The quote prints in full again in a query that does not print (06).
+	wantText(t, "quote without its first", queryText(t, st, `{"ids":[7,8],"depth":"full"}`),
+		[]string{"(07) [answered] [technical] g2\n    answer: ok\n    answer_quote: \"all ok\"\n", "answer_quote: same as (07)"}, nil)
+}
+
+// A text match names the fields it matched; matching reads stored text.
+func TestQueryTextMatchFields(t *testing.T) {
+	st := summaryBoard(t)
+	wantText(t, "text over title and options", queryText(t, st, `{"text":"first"}`),
+		[]string{"  (01) [answered] [policy] Order `parse` or emit? [match: options]\n", "  (02) [open] [policy] open ask [match: rationale]\n"}, []string{"(03)"})
+	wantText(t, "text over markup", queryText(t, st, `{"text":"<code>parse"}`), []string{"(01) [answered] [policy] Order `parse` or emit? [match: title]"}, nil)
+	wantText(t, "text over title and answer", queryText(t, st, `{"text":"g"}`), []string{"(05) [answered] [policy] free form [match: answer]", "(06) [answered] [technical] g1 [match: title]"}, nil)
+}
+
+func TestPlain(t *testing.T) {
+	for in, want := range map[string]string{
+		"<code>x</code> and <B>y</B>":                      "`x` and y",
+		"a<br>b<br/>c<br />d":                              "a b c d",
+		"<strong>s</strong><em>e</em><kbd>k</kbd><i>i</i>": "seki",
+		`<b class="x">kept</b> <div>kept</div>`:            `<b class="x">kept <div>kept</div>`,
+		"no tags":                                          "no tags",
+	} {
+		if got := Plain(in); got != want {
+			t.Errorf("Plain(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
