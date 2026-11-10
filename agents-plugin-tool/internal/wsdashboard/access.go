@@ -39,10 +39,10 @@ import (
 //
 // The token travels as the "token" query parameter of the address the
 // localhost index page shows. A request that passes by it gets the token back
-// as an HttpOnly cookie, which the page's links, its SSE stream (EventSource
-// sends cookies but cannot set headers), its images, and its message and
-// cancel posts then carry on their own, so no rendered URL or region ever
-// holds the token.
+// as an HttpOnly cookie, which the page's links, its stream (a WebSocket
+// handshake, like an EventSource, sends cookies but cannot set headers), its
+// images, and its message and cancel posts then carry on their own, so no
+// rendered URL or region ever holds the token.
 
 const (
 	// LANTokenFileName names the LAN access token's file in the state

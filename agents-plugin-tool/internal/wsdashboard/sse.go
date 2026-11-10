@@ -10,12 +10,13 @@ import (
 	"time"
 )
 
-// Live page updates over SSE. A stream re-renders its page when a change
-// its page can show is reported (a session's own change, or a change of a
-// session its page looks up: a peer, a delegate; the sessions index shows
-// every session) and sends only the regions whose HTML hash differs from
-// what that browser holds, so an unchanged region is never resent. The
-// streams of one page share one render per change (stream_cache.go).
+// Live page updates over SSE, or over WebSocket with the same events
+// (stream_ws.go). A stream re-renders its page when a change its page can
+// show is reported (a session's own change, or a change of a session its
+// page looks up: a peer, a delegate; the sessions index shows every session)
+// and sends only the regions whose HTML hash differs from what that browser
+// holds, so an unchanged region is never resent. The streams of one page
+// share one render per change (stream_cache.go).
 //
 // The browser names the hashes it holds in the stream URL (?h=name.hash,...),
 // so a stream that opens after the page was rendered, or that reconnects,
@@ -45,8 +46,9 @@ const (
 	// reads files no wake reports, so each tick re-renders unless the page's
 	// refresh stamp shows nothing changed (stream_cache.go).
 	sseRefreshInterval = 15 * time.Second
-	// sseKeepAlive is the comment-line period that keeps an idle stream open
-	// through proxies and lets the server notice a closed one.
+	// sseKeepAlive is the idle-frame period: the SSE comment line that keeps
+	// an idle stream open through proxies and lets the server notice a closed
+	// one, and the WebSocket ping the page answers (stream_ws.go).
 	sseKeepAlive = 25 * time.Second
 )
 
@@ -332,15 +334,23 @@ func (d *Daemon) handleIndexEvents(w http.ResponseWriter, r *http.Request) {
 	}, nil)
 }
 
-// stream runs one SSE connection: it sends the regions of src's shared page
-// that differ from the held hashes, then, on every wake the page depends on
-// and every refresh tick, at most once per sseMinInterval, takes the page's
+// stream runs one stream connection: it sends the regions of src's shared
+// page that differ from the held hashes, then, on every wake the page depends
+// on and every refresh tick, at most once per sseMinInterval, takes the page's
 // current render and sends what changed, until the client leaves or the
-// daemon stops. A page gone before the first render answers 404; one gone
-// later sends "gone".
+// daemon stops. A page gone before the first render answers 404 (before a
+// WebSocket upgrade, too); one gone later sends "gone". A WebSocket handshake
+// upgrades (stream_ws.go) and every other request is served SSE: the events
+// and their data are the same, only the framing differs.
 func (d *Daemon) stream(w http.ResponseWriter, r *http.Request, src pageSource, only regionFilter) {
-	flusher, ok := w.(http.Flusher)
-	if !ok {
+	upgrade := wsUpgrade(r)
+	if upgrade && !wsOriginAllowed(r) {
+		http.Error(w, "cross-origin stream refused", http.StatusForbidden)
+		return
+	}
+	flusher, canFlush := w.(http.Flusher)
+	_, canHijack := w.(http.Hijacker)
+	if (upgrade && !canHijack) || (!upgrade && !canFlush) {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
 		return
 	}
@@ -355,95 +365,141 @@ func (d *Daemon) stream(w http.ResponseWriter, r *http.Request, src pageSource, 
 		http.Error(w, "unknown session", http.StatusNotFound)
 		return
 	}
+	held := parseHeld(r.URL.Query().Get("h"))
 
+	run := func(sink streamSink) {
+		// sentRev is the tracker revision this stream last sent; the
+		// sentinel -1 sends revision 0 on connect too.
+		sentRev := int64(-1)
+		send := func(pr pageRender, at uint64) bool {
+			d.broker.follow(sub, pr.deps, at)
+			if !pr.ok {
+				_ = sink.event("gone", []byte("{}"))
+				_ = sink.flush()
+				return false
+			}
+			regions := only.apply(pr.regions)
+			sent := false
+			for _, name := range sortedRegionNames(regions) {
+				region := regions[name]
+				if held[name] == region.Hash {
+					continue
+				}
+				payload, _ := json.Marshal(regionEvent{Name: name, Hash: region.Hash, HTML: string(region.HTML)})
+				if sink.event("region", payload) != nil {
+					return false
+				}
+				d.stats.Sends.Add(1)
+				held[name] = region.Hash
+				sent = true
+			}
+			if d.tracker != nil {
+				if rev := d.trackerRev.Load(); rev != sentRev {
+					if sink.event("tracker", fmt.Appendf(nil, `{"rev":%d}`, rev)) != nil {
+						return false
+					}
+					sentRev = rev
+					sent = true
+				}
+			}
+			return !sent || sink.flush() == nil
+		}
+		if !send(first, at) {
+			return
+		}
+		refresh := time.NewTicker(d.refreshInterval)
+		defer refresh.Stop()
+		keepAlive := time.NewTicker(d.keepAlive)
+		defer keepAlive.Stop()
+		var last time.Time
+		for {
+			tick := false
+			select {
+			case <-sink.gone():
+				return
+			case <-d.stop:
+				return
+			case <-keepAlive.C:
+				if sink.keepAlive() != nil {
+					return
+				}
+				continue
+			case <-refresh.C:
+				tick = true
+			case <-sub.ch:
+			}
+			if wait := sseMinInterval - time.Since(last); wait > 0 {
+				select {
+				case <-sink.gone():
+					return
+				case <-d.stop:
+					return
+				case <-time.After(wait):
+				}
+				// Wakes that arrived while waiting are folded into this render.
+				select {
+				case <-sub.ch:
+				default:
+				}
+			}
+			last = time.Now()
+			pr, at := d.cache.get(page, src, tick)
+			if !send(pr, at) {
+				return
+			}
+		}
+	}
+	if upgrade {
+		d.serveWebSocket(w, r, run)
+		return
+	}
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprint(w, "retry: 3000\n\n")
 	flusher.Flush()
-
-	held := parseHeld(r.URL.Query().Get("h"))
-	// sentRev is the tracker revision this stream last sent; the sentinel
-	// -1 sends revision 0 on connect too.
-	sentRev := int64(-1)
-
-	send := func(pr pageRender, at uint64) bool {
-		d.broker.follow(sub, pr.deps, at)
-		if !pr.ok {
-			fmt.Fprint(w, "event: gone\ndata: {}\n\n")
-			flusher.Flush()
-			return false
-		}
-		regions := only.apply(pr.regions)
-		sent := false
-		for _, name := range sortedRegionNames(regions) {
-			region := regions[name]
-			if held[name] == region.Hash {
-				continue
-			}
-			payload, _ := json.Marshal(regionEvent{Name: name, Hash: region.Hash, HTML: string(region.HTML)})
-			fmt.Fprintf(w, "event: region\ndata: %s\n\n", payload)
-			d.stats.Sends.Add(1)
-			held[name] = region.Hash
-			sent = true
-		}
-		if d.tracker != nil {
-			if rev := d.trackerRev.Load(); rev != sentRev {
-				fmt.Fprintf(w, "event: tracker\ndata: {\"rev\":%d}\n\n", rev)
-				sentRev = rev
-				sent = true
-			}
-		}
-		if sent {
-			flusher.Flush()
-		}
-		return true
-	}
-	if !send(first, at) {
-		return
-	}
-	refresh := time.NewTicker(d.refreshInterval)
-	defer refresh.Stop()
-	keepAlive := time.NewTicker(sseKeepAlive)
-	defer keepAlive.Stop()
-	var last time.Time
-	for {
-		tick := false
-		select {
-		case <-r.Context().Done():
-			return
-		case <-d.stop:
-			return
-		case <-keepAlive.C:
-			fmt.Fprint(w, ": keep-alive\n\n")
-			flusher.Flush()
-			continue
-		case <-refresh.C:
-			tick = true
-		case <-sub.ch:
-		}
-		if wait := sseMinInterval - time.Since(last); wait > 0 {
-			select {
-			case <-r.Context().Done():
-				return
-			case <-d.stop:
-				return
-			case <-time.After(wait):
-			}
-			// Wakes that arrived while waiting are folded into this render.
-			select {
-			case <-sub.ch:
-			default:
-			}
-		}
-		last = time.Now()
-		pr, at := d.cache.get(page, src, tick)
-		if !send(pr, at) {
-			return
-		}
-	}
+	run(&sseSink{w: w, flusher: flusher, done: r.Context().Done()})
 }
+
+// streamSink is one stream connection's framing.
+type streamSink interface {
+	// event writes one event: its name and its JSON data.
+	event(name string, data []byte) error
+	// flush pushes the events written so far to the peer.
+	flush() error
+	// keepAlive writes the idle frame that keeps the connection open and
+	// lets a dead peer be noticed.
+	keepAlive() error
+	// gone is closed once the peer left.
+	gone() <-chan struct{}
+}
+
+// sseSink frames events as SSE ("event: name\ndata: json\n\n").
+type sseSink struct {
+	w       http.ResponseWriter
+	flusher http.Flusher
+	done    <-chan struct{}
+}
+
+func (s *sseSink) event(name string, data []byte) error {
+	_, err := fmt.Fprintf(s.w, "event: %s\ndata: %s\n\n", name, data)
+	return err
+}
+
+func (s *sseSink) flush() error {
+	s.flusher.Flush()
+	return nil
+}
+
+func (s *sseSink) keepAlive() error {
+	if _, err := fmt.Fprint(s.w, ": keep-alive\n\n"); err != nil {
+		return err
+	}
+	return s.flush()
+}
+
+func (s *sseSink) gone() <-chan struct{} { return s.done }
 
 // sortedRegionNames orders the mode pseudo-region first, so a page learns
 // that its layout changed before it applies regions of the new layout.

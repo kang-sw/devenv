@@ -98,6 +98,9 @@ type DaemonOptions struct {
 	// refreshInterval replaces sseRefreshInterval, so a test drives the
 	// refresh tick; zero is sseRefreshInterval.
 	refreshInterval time.Duration
+	// keepAlive replaces sseKeepAlive, so a test drives the streams' idle
+	// frame and the WebSocket read window; zero is sseKeepAlive.
+	keepAlive time.Duration
 }
 
 // nudgeBodyLimit bounds a /nudge request body.
@@ -128,9 +131,11 @@ type Daemon struct {
 	// stats counts the live-update work (stream_stats.go).
 	stats *streamStats
 	// cache holds the renders open streams share (stream_cache.go);
-	// refreshInterval is the streams' refresh tick.
+	// refreshInterval is the streams' refresh tick, keepAlive their idle
+	// frame's period.
 	cache           *pageCache
 	refreshInterval time.Duration
+	keepAlive       time.Duration
 	// tracker is the tracker host, nil without one; trackerRev is the
 	// revision TrackerChanged bumps and the streams send.
 	tracker    TrackerHost
@@ -250,6 +255,7 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 		broker:          newBroker(stats),
 		stats:           stats,
 		refreshInterval: opts.refreshInterval,
+		keepAlive:       opts.keepAlive,
 		entries:         newEntryCache(),
 		entryFiles:      newEntryFiles(),
 		snapshots:       &SnapshotCache{},
@@ -275,6 +281,9 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 	d.cache = newPageCache(d.broker, stats)
 	if d.refreshInterval <= 0 {
 		d.refreshInterval = sseRefreshInterval
+	}
+	if d.keepAlive <= 0 {
+		d.keepAlive = sseKeepAlive
 	}
 	if d.openSystem == nil {
 		d.openSystem = systemOpen
@@ -464,7 +473,7 @@ func (d *Daemon) Close() {
 // Handler is the daemon's HTTP surface. Every route first passes the access
 // guard (the loopback Host guard, or in LAN mode the guard that also admits
 // the LAN token; access.go); the daemon sends no CORS headers. The pages (/,
-// /s/<reply-id>, their SSE streams, and a session's image, file view, and
+// /s/<reply-id>, their SSE or WebSocket streams, and a session's image, file view, and
 // history routes) are read-only; a session's message, cancel, steer, and interrupt
 // routes (inbox_routes.go), with a tracker host the tracker POST routes
 // (tracker_routes.go), and with a support handler the support POST routes
