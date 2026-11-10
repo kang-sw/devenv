@@ -228,6 +228,7 @@ func TestDashboardKeyOffAndKeyOnServersOnOneRoot(t *testing.T) {
 	if !idx.Nudge(wsmailbox.ReplyID(keyOn), loginRoot) {
 		t.Fatal("nudge for the key-on session was ignored")
 	}
+	idx.Settle()
 	if s, _ := idx.Session(wsmailbox.ReplyID(keyOn)); !s.HasBoard || s.Rev != 2 {
 		t.Fatalf("session after board write = %+v", s)
 	}

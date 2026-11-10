@@ -416,10 +416,17 @@ type DashboardSessionSource struct {
 	// now is the clock that judges snapshot staleness; nil uses time.Now.
 	now func() time.Time
 
+	// mu guards byReply, scanned, dirMods, and scan, and is never held
+	// across a key directory scan: scan is the rescan in flight, which
+	// concurrent misses share (keysFor).
 	mu      sync.Mutex
 	byReply map[string][]string
 	scanned time.Time
 	dirMods [2]time.Time
+	scan    *keyScan
+	// listKeys replaces the key store's listing, so a test can hold a
+	// rescan; nil lists the store.
+	listKeys func(d sessionDirs) ([]string, error)
 
 	// boards memoizes each session's board render (dashboard_page.go).
 	boards boardMemo
@@ -664,28 +671,58 @@ func (src *DashboardSessionSource) resolveStateDir() (string, error) {
 	return wsdashboard.Dir("")
 }
 
+// keyScan is one rescan of the key store; done is closed when it landed.
+type keyScan struct {
+	done chan struct{}
+}
+
 // keysFor returns the session keys whose reply-id is replyID. A miss, or
 // rescan, rebuilds the map when a key directory changed or the map is older
-// than dashboardRescanAfter.
+// than dashboardRescanAfter. The rebuild lists the key directories without
+// holding mu, so a lookup of a known reply-id never waits on it; a miss
+// while a rebuild runs waits for that one instead of starting another.
 func (src *DashboardSessionSource) keysFor(d sessionDirs, replyID string, rescan bool) []string {
 	src.mu.Lock()
-	defer src.mu.Unlock()
-	if keys, ok := src.byReply[replyID]; ok && !rescan {
+	keys, known := src.byReply[replyID]
+	src.mu.Unlock()
+	if known && !rescan {
 		return keys
 	}
 	mods, ok := keyStoreMods(d)
 	if !ok {
 		return nil
 	}
+	src.mu.Lock()
 	if src.byReply != nil && mods == src.dirMods && time.Since(src.scanned) < dashboardRescanAfter {
+		keys := src.byReply[replyID]
+		src.mu.Unlock()
+		return keys
+	}
+	if scan := src.scan; scan != nil {
+		src.mu.Unlock()
+		<-scan.done
+		src.mu.Lock()
+		defer src.mu.Unlock()
 		return src.byReply[replyID]
 	}
-	keys, err := src.store.listKeys(d)
+	scan := &keyScan{done: make(chan struct{})}
+	src.scan = scan
+	src.mu.Unlock()
+	defer close(scan.done)
+
+	list := src.listKeys
+	if list == nil {
+		list = src.store.listKeys
+	}
+	listed, err := list(d)
+	src.mu.Lock()
+	defer src.mu.Unlock()
+	src.scan = nil
 	if err != nil {
 		return nil
 	}
 	byReply := map[string][]string{}
-	for _, key := range keys {
+	for _, key := range listed {
 		id := wsmailbox.ReplyID(key)
 		byReply[id] = append(byReply[id], key)
 	}

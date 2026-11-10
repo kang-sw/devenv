@@ -594,6 +594,7 @@ func TestStreamSendsOnlyChangedRegions(t *testing.T) {
 	// The board changes; a nudge sends exactly the board region.
 	f.src.setPage("boardsession", PageContent{HasBoard: true, Seq: 2, Board: boardRegions(t, "the board changed")})
 	f.d.index.Nudge("boardsession", f.project)
+	f.d.index.Settle()
 	var got []string
 	for {
 		ev, ok := nextRegion(t, events, 800*time.Millisecond)

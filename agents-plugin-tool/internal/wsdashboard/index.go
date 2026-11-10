@@ -69,7 +69,9 @@ type IndexOptions struct {
 	// Now is the clock; nil uses time.Now.
 	Now func() time.Time
 	// OnChange is called, outside the index lock, with the reply-id of each
-	// session a re-read found changed, added, or removed.
+	// session a re-read found changed, added, or removed. It runs on the
+	// re-read's goroutine under that session's lane, so calls for different
+	// sessions may run concurrently, and calls for one session never do.
 	OnChange func(replyID string)
 	// Log receives one line per session added to or removed from the index;
 	// nil discards them.
@@ -81,11 +83,34 @@ type IndexOptions struct {
 type Index struct {
 	opts IndexOptions
 
-	// rereadMu serializes Refresh and Nudge, so an older read of a session
-	// never lands after a newer one.
-	rereadMu sync.Mutex
+	// lanesMu guards lanes and inflight; idle is signaled when inflight
+	// drops to zero (Settle).
+	lanesMu  sync.Mutex
+	lanes    map[string]*lane
+	inflight int
+	idle     *sync.Cond
+
 	mu       sync.Mutex
 	sessions map[string]*indexEntry
+}
+
+// lane is one session's re-read state. Re-reads are serialized per session,
+// never across sessions, so a slow read of one session delays no other.
+type lane struct {
+	// mu is held across one re-read of the session: its registration read,
+	// its store read, the apply, and the change hook. That keeps an older
+	// read of the session from landing after a newer one, and lets a
+	// Refresh sweep confirm a removal against the registration as it is
+	// now rather than as its listing saw it.
+	mu sync.Mutex
+	// The rest is guarded by Index.lanesMu. refs counts the lane's holders
+	// (a Refresh step, a drain worker); the lane is forgotten with its last.
+	// running reports a drain worker; queued reports a re-read requested
+	// that the worker has not started yet, so requests arriving while one
+	// re-read runs fold into one more.
+	refs    int
+	running bool
+	queued  bool
 }
 
 type indexEntry struct {
@@ -101,31 +126,34 @@ func NewIndex(opts IndexOptions) *Index {
 	if opts.Log == nil {
 		opts.Log = io.Discard
 	}
-	return &Index{opts: opts, sessions: map[string]*indexEntry{}}
+	x := &Index{opts: opts, sessions: map[string]*indexEntry{}, lanes: map[string]*lane{}}
+	x.idle = sync.NewCond(&x.lanesMu)
+	return x
 }
 
-// Refresh re-reads every registered session: the polling backstop. An
-// ended session the index already holds with this same registration is not
-// re-read (endedApplied): nothing serves it, so only a nudge or a resume
-// changes it, and a resume rewrites its registration.
+// Refresh re-reads every registered session: the polling backstop. It runs
+// on its caller, one session at a time, each under that session's lane
+// only. The listing it starts from only finds the sessions to re-read:
+// each re-read reads the registration again, and a session missing from
+// the listing is removed only when its registration is still gone, so a
+// session registered, resumed, or ended during the sweep is never removed
+// or rolled back by the sweep's older listing. An ended session the index
+// already holds with this same registration is not re-read (endedApplied):
+// nothing serves it, so only a nudge or a resume changes it, and a resume
+// rewrites its registration.
 func (x *Index) Refresh() {
-	x.rereadMu.Lock()
-	defer x.rereadMu.Unlock()
 	regs, err := ReadRegistrations(x.opts.Dir)
 	if err != nil {
 		fmt.Fprintf(x.opts.Log, "dashboard: read session registry: %v\n", err)
 		return
 	}
 	seen := map[string]bool{}
-	var changed []string
 	for _, reg := range regs {
 		seen[reg.ReplyID] = true
 		if x.endedApplied(reg) {
 			continue
 		}
-		if x.apply(reg.ReplyID, &reg) {
-			changed = append(changed, reg.ReplyID)
-		}
+		x.reread(reg.ReplyID, false)
 	}
 	x.mu.Lock()
 	var gone []string
@@ -136,11 +164,9 @@ func (x *Index) Refresh() {
 	}
 	x.mu.Unlock()
 	for _, id := range gone {
-		if x.apply(id, nil) {
-			changed = append(changed, id)
-		}
+		// The listing skips an unreadable registration, which drops it.
+		x.reread(id, true)
 	}
-	x.notify(changed)
 }
 
 // endedApplied reports whether reg is an ended registration the index
@@ -164,32 +190,148 @@ func (x *Index) endedApplied(reg Registration) bool {
 	return !errors.Is(err, os.ErrNotExist)
 }
 
-// Nudge re-reads the one session a nudge names. It returns false, and
-// changes nothing, when the reply-id is malformed, the session is not
-// registered, or the registration names a different project.
+// Nudge schedules a re-read of the one session a nudge names (Reread) and
+// returns without waiting for it. It returns false, and schedules nothing
+// for a session the index does not hold, when the reply-id is malformed,
+// the session is not registered, or the registration names a different
+// project; a registration removed since the last poll schedules the re-read
+// that drops it.
 func (x *Index) Nudge(replyID, project string) bool {
 	if !ValidReplyID(replyID) || project == "" {
 		return false
 	}
-	x.rereadMu.Lock()
-	defer x.rereadMu.Unlock()
 	reg, err := ReadRegistration(x.opts.Dir, replyID)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			// A registration removed since the last poll leaves the index now.
-			if x.apply(replyID, nil) {
-				x.notify([]string{replyID})
-			}
+		if errors.Is(err, os.ErrNotExist) && x.holds(replyID) {
+			x.schedule(replyID)
 		}
 		return false
 	}
 	if filepath.Clean(reg.Project) != filepath.Clean(project) {
 		return false
 	}
-	if x.apply(replyID, &reg) {
-		x.notify([]string{replyID})
-	}
+	x.schedule(replyID)
 	return true
+}
+
+// Reread schedules a re-read of one session off the caller: the session's
+// registration and stores are read again on a worker of that session's
+// own, and the change hook runs there. Requests that arrive while the
+// session's re-read runs fold into one more re-read; sessions re-read in
+// parallel. A malformed reply-id is ignored.
+func (x *Index) Reread(replyID string) {
+	if ValidReplyID(replyID) {
+		x.schedule(replyID)
+	}
+}
+
+// Settle waits until every re-read Nudge and Reread scheduled has landed,
+// including the ones scheduled while it waits.
+func (x *Index) Settle() {
+	x.lanesMu.Lock()
+	for x.inflight > 0 {
+		x.idle.Wait()
+	}
+	x.lanesMu.Unlock()
+}
+
+// holds reports whether the index holds replyID.
+func (x *Index) holds(replyID string) bool {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	_, ok := x.sessions[replyID]
+	return ok
+}
+
+// hold returns replyID's lane with one more holder; lanesMu is held.
+func (x *Index) hold(replyID string) *lane {
+	l := x.lanes[replyID]
+	if l == nil {
+		l = &lane{}
+		x.lanes[replyID] = l
+	}
+	l.refs++
+	return l
+}
+
+// unhold drops one holder of replyID's lane, forgetting the lane with its
+// last; lanesMu is held.
+func (x *Index) unhold(replyID string, l *lane) {
+	l.refs--
+	if l.refs == 0 {
+		delete(x.lanes, replyID)
+	}
+}
+
+// schedule asks for one more re-read of replyID, starting the session's
+// drain worker when none runs.
+func (x *Index) schedule(replyID string) {
+	x.lanesMu.Lock()
+	defer x.lanesMu.Unlock()
+	l := x.lanes[replyID]
+	if l != nil && l.running {
+		l.queued = true
+		return
+	}
+	l = x.hold(replyID)
+	l.running, l.queued = true, true
+	x.inflight++
+	go x.drain(replyID, l)
+}
+
+// drain is a session's re-read worker: it re-reads while re-reads are
+// queued, then ends.
+func (x *Index) drain(replyID string, l *lane) {
+	for {
+		x.lanesMu.Lock()
+		if !l.queued {
+			l.running = false
+			x.unhold(replyID, l)
+			x.inflight--
+			if x.inflight == 0 {
+				x.idle.Broadcast()
+			}
+			x.lanesMu.Unlock()
+			return
+		}
+		l.queued = false
+		x.lanesMu.Unlock()
+		x.readLane(replyID, l, false)
+	}
+}
+
+// reread re-reads one session under its lane on the caller.
+func (x *Index) reread(replyID string, dropUnreadable bool) {
+	x.lanesMu.Lock()
+	l := x.hold(replyID)
+	x.lanesMu.Unlock()
+	x.readLane(replyID, l, dropUnreadable)
+	x.lanesMu.Lock()
+	x.unhold(replyID, l)
+	x.lanesMu.Unlock()
+}
+
+// readLane re-reads one session from its registration as it is now: a
+// removed registration drops it, and so does an unreadable one when
+// dropUnreadable is set; otherwise an unreadable registration leaves the
+// entry as it is. It holds the lane's mu across the read and the change
+// hook.
+func (x *Index) readLane(replyID string, l *lane, dropUnreadable bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	reg, err := ReadRegistration(x.opts.Dir, replyID)
+	var changed bool
+	switch {
+	case err == nil:
+		changed = x.apply(replyID, &reg)
+	case errors.Is(err, os.ErrNotExist) || dropUnreadable:
+		changed = x.apply(replyID, nil)
+	default:
+		fmt.Fprintf(x.opts.Log, "dashboard: read registration %s: %v\n", replyID, err)
+	}
+	if changed && x.opts.OnChange != nil {
+		x.opts.OnChange(replyID)
+	}
 }
 
 // apply re-reads one session from its registration (nil when it has none)
@@ -236,15 +378,6 @@ func (x *Index) apply(replyID string, reg *Registration) bool {
 	entry.session = next
 	entry.fingerprint = data.Fingerprint
 	return true
-}
-
-func (x *Index) notify(ids []string) {
-	if x.opts.OnChange == nil {
-		return
-	}
-	for _, id := range ids {
-		x.opts.OnChange(id)
-	}
 }
 
 // Sessions returns every indexed session ordered by project, then reply-id,

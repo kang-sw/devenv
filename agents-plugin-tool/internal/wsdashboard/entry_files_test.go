@@ -156,6 +156,7 @@ func TestStreamsServesSeamCounters(t *testing.T) {
 			t.Fatalf("nudge = %d", rec.Code)
 		}
 	}
+	d.Index().Settle()
 	rec := serve(d, local, http.MethodGet, "/debug/pprof/streams", "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("streams = %d", rec.Code)

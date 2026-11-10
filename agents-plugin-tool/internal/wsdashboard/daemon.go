@@ -393,11 +393,15 @@ func (d *Daemon) sessionChanged(replyID string) {
 	d.broker.wake(replyID)
 }
 
-// agentChanged is the agent runner's write hook: it re-reads the one
-// conversation, as a ws-mcp's nudge does for a lead session.
-func (d *Daemon) agentChanged(replyID, project string) {
+// agentChanged is the agent runner's write hook, called from the
+// conversation's loop for every write: it schedules a re-read of the one
+// conversation, as a ws-mcp's nudge does for a lead session, and returns
+// without waiting for it (Index.Reread). The page wakes at once, since its
+// stream reads the conversation's own live files; the re-read's change, if
+// any, wakes it again when it lands.
+func (d *Daemon) agentChanged(replyID, _ string) {
 	if d.index != nil {
-		d.index.Nudge(replyID, project)
+		d.index.Reread(replyID)
 	}
 	d.stats.WakeAgent.Add(1)
 	d.broker.wake(replyID)
@@ -564,9 +568,10 @@ func (d *Daemon) handleShutdown(w http.ResponseWriter, r *http.Request) {
 	go d.Close()
 }
 
-// handleNudge re-reads the one session the body names. It needs no
-// credential: all it can cause is a re-read of disk. A malformed body is 400,
-// an unknown session 404, and a re-read 204; the sender ignores the answer.
+// handleNudge schedules a re-read of the one session the body names
+// (Index.Nudge) and answers without waiting for it. It needs no credential:
+// all it can cause is a re-read of disk. A malformed body is 400, an unknown
+// session 404, and a scheduled re-read 204; the sender ignores the answer.
 func (d *Daemon) handleNudge(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

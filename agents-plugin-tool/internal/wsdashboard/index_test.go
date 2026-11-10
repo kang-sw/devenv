@@ -302,6 +302,7 @@ func TestNudgeRereadsExactlyOneSession(t *testing.T) {
 	if !idx.Nudge("alpha", project+string(filepath.Separator)) {
 		t.Fatal("nudge for a registered session was ignored")
 	}
+	idx.Settle()
 	after := src.readCounts()
 	if after["alpha"] != before["alpha"]+1 || after["bravo"] != before["bravo"] {
 		t.Fatalf("reads before %v after %v; want exactly one alpha re-read", before, after)
@@ -318,6 +319,7 @@ func TestNudgeRereadsExactlyOneSession(t *testing.T) {
 	if !idx.Nudge("delta", project) {
 		t.Fatal("nudge for a new registration was ignored")
 	}
+	idx.Settle()
 	if _, ok := idx.Session("delta"); !ok {
 		t.Fatal("delta not indexed after its nudge")
 	}
@@ -336,6 +338,7 @@ func TestNudgeRereadsExactlyOneSession(t *testing.T) {
 			t.Errorf("nudge %+v was accepted", n)
 		}
 	}
+	idx.Settle()
 	if after := src.readCounts(); len(after) != len(before) || after["alpha"] != before["alpha"] {
 		t.Fatalf("ignored nudges read sessions: before %v after %v", before, after)
 	}
@@ -400,6 +403,7 @@ func TestNudgeRoute(t *testing.T) {
 	if err := SendNudge(context.Background(), client, ep, NudgeBody{ReplyID: "alpha", Project: project}); err != nil {
 		t.Fatalf("SendNudge: %v", err)
 	}
+	d.Index().Settle()
 	if s, _ := d.Index().Session("alpha"); !s.HasBoard {
 		t.Fatalf("nudge did not re-read alpha: %+v", s)
 	}
@@ -515,6 +519,7 @@ func TestRefreshSkipsAnAppliedEndedRegistration(t *testing.T) {
 	if !idx.Nudge("alpha", project) {
 		t.Fatal("a nudge for an ended session was ignored")
 	}
+	idx.Settle()
 	if got := reads("alpha"); got != before+2 {
 		t.Fatal("a nudge must still re-read an ended session")
 	}
