@@ -1,8 +1,11 @@
 {
+  "agent.context": "コンテキスト: {0} トークン",
   "agent.done": "完了",
   "agent.failed": "失敗",
+  "agent.model": "モデル: {0}",
   "agent.name": "エージェント {0}",
   "agent.open": "この委任エージェントのページを開く（{0}）",
+  "agent.rate": "出力: {0} トークン/秒",
   "band.cache": "CH {0}",
   "band.cache.title": "直前の応答のプロンプトキャッシュヒット率",
   "band.cost": "セッションのコスト",

@@ -1,8 +1,11 @@
 {
+  "agent.context": "context: {0} tokens",
   "agent.done": "done",
   "agent.failed": "failed",
+  "agent.model": "model: {0}",
   "agent.name": "agent {0}",
   "agent.open": "open this delegate's page ({0})",
+  "agent.rate": "output: {0} tokens/s",
   "band.cache": "CH {0}",
   "band.cache.title": "prompt cache hit rate of the last response",
   "band.cost": "session cost",

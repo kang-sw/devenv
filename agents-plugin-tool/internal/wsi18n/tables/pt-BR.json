@@ -1,8 +1,11 @@
 {
+  "agent.context": "contexto: {0} tokens",
   "agent.done": "concluído",
   "agent.failed": "falhou",
+  "agent.model": "modelo: {0}",
   "agent.name": "agente {0}",
   "agent.open": "abrir a página deste delegado ({0})",
+  "agent.rate": "saída: {0} tokens/s",
   "band.cache": "CH {0}",
   "band.cache.title": "taxa de acertos do cache de prompt na última resposta",
   "band.cost": "custo da sessão",

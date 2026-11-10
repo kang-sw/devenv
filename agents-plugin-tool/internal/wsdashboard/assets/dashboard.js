@@ -425,6 +425,7 @@
     }
     if (name === "panels") drawerSwapped();
     if (name === "tree" || name === "convlive") drawerWait();
+    if (name === "tree") agentTipSwapped();
     if (TL_REGIONS[name]) { delete tlHeld[name]; tlCount(); }
     if (name === "convlive") syncBadge();
     if (name === "head" && !sseOn) connected(false);
@@ -2541,6 +2542,50 @@
       });
     }, function () { if (seq === gl.seq) { gl.busy = false; glFail(wsT("js.post.unreachable"), append); } });
   }
+  // --- agent stats hover card ----------------------------------------------
+  // A narrow agents panel hides a subagent row's stats (template astat, its
+  // container query); hovering the row then shows them in a card built like
+  // the git graph's tooltip, one line per stat from its title. A tree swap
+  // rebuilds the card from the same agent's new row, so it keeps live values.
+  var atip = null, atipKey = null;
+  function agentTipHide() { if (atip) atip.hidden = true; atipKey = null; }
+  function agentTip(head) {
+    var st = head.querySelector(".astat"), key = head.parentNode.getAttribute("data-key");
+    if (!st || !key || getComputedStyle(st).display !== "none") { agentTipHide(); return; }
+    if (key === atipKey && atip && !atip.hidden) return;
+    if (!atip) { atip = mk("div", "gltip atip"); atip.hidden = true; doc.body.appendChild(atip); }
+    atipKey = key;
+    atip.textContent = "";
+    var name = head.querySelector(".aname");
+    atip.appendChild(mk("div", "ts", name ? name.textContent : ""));
+    var tm = mk("div", "tm");
+    Array.prototype.forEach.call(st.children, function (s) { tm.appendChild(mk("span", "", s.getAttribute("title") || s.textContent)); });
+    atip.appendChild(tm);
+    atip.hidden = false;
+    var r = head.getBoundingClientRect(), y = r.bottom + 4, th = atip.offsetHeight;
+    if (y + th > window.innerHeight - 8) y = r.top - th - 4;
+    atip.style.left = Math.max(8, Math.min(r.left + 20, window.innerWidth - atip.offsetWidth - 8)) + "px";
+    atip.style.top = y + "px";
+  }
+  function agentTipSwapped() {
+    if (!atipKey) return;
+    var key = atipKey, heads = doc.querySelectorAll("#r-tree details > summary.ahead");
+    atipKey = null;
+    for (var i = 0; i < heads.length; i++) {
+      if (heads[i].parentNode.getAttribute("data-key") === key) { agentTip(heads[i]); return; }
+    }
+    agentTipHide();
+  }
+  (function () {
+    var tree = $("r-tree");
+    if (!tree) return;
+    tree.addEventListener("mouseover", function (e) {
+      var head = e.target.closest && e.target.closest("summary.ahead");
+      if (head && head.querySelector(".astat")) agentTip(head); else agentTipHide();
+    });
+    tree.addEventListener("mouseleave", agentTipHide);
+    tree.addEventListener("scroll", agentTipHide);
+  })();
   // The tooltip: subject, refs, author, age, short hash, under the row.
   var gltip = null;
   function glTipHide() { if (gltip) gltip.hidden = true; gl.tipRow = null; }

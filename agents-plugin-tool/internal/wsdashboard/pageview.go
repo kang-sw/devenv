@@ -2,6 +2,7 @@ package wsdashboard
 
 import (
 	"html/template"
+	"math"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -145,6 +146,33 @@ type LiveSlot struct {
 // IsRunning reports a running agent.
 func (a AgentNode) IsRunning() bool { return a.Status == wslive.StatusRunning }
 
+// ModelText is the agent's model and reasoning effort as one stat ("<model>
+// <effort>"), either alone when only one is known; empty when neither is.
+func (a AgentNode) ModelText() string { return strings.TrimSpace(a.Model + " " + a.Effort) }
+
+// ContextText is the agent's context size in compact form; empty while
+// unknown.
+func (a AgentNode) ContextText() string {
+	if a.ContextTokens <= 0 {
+		return ""
+	}
+	return compactTokens(a.ContextTokens)
+}
+
+// Rate is the agent's output rate in whole tokens per second while it runs;
+// 0 while unknown and once it ended.
+func (a AgentNode) Rate() int64 {
+	if !a.IsRunning() || a.OutputTps <= 0 {
+		return 0
+	}
+	return max(int64(math.Round(a.OutputTps)), 1)
+}
+
+// HasStats reports whether the row shows any telemetry stat.
+func (a AgentNode) HasStats() bool {
+	return a.ModelText() != "" || a.ContextText() != "" || a.Rate() > 0
+}
+
 // PeerGroup is the lead's peer leads: every live peer and the most recent
 // ended ones, each ordered by last exchange, newest first. Live lists the
 // same-worktree peers before the others.
@@ -171,6 +199,12 @@ type PeerRow struct {
 	// WorktreeMain is the main repository root when Path is a git linked
 	// worktree (worktreeMain), else empty; it names the label prefix.
 	WorktreeMain string
+	// Branch and Detached are a served peer's branch as its snapshot's repo
+	// state holds it (the commit id when Detached); empty for an unserved
+	// peer, a peer whose root is no repository, and before its ws-mcp's
+	// first read. The daemon never runs git for a peer.
+	Branch   string
+	Detached bool
 	// ReplyID is the peer session; empty for a named address with no owner.
 	ReplyID string
 	// Served reports that this daemon indexes the peer, so the row links to
@@ -582,7 +616,11 @@ func peerGroup(contacts []Contact, project string, lookup sessionLookup, now tim
 				}
 				row.SameWorktree = s.Project != "" && filepath.Clean(s.Project) == filepath.Clean(project)
 				row.Compact = s.Live && !row.SameWorktree
-				if snap := lookup.snap(row.ReplyID); adapterPresent(snap, now) {
+				snap := lookup.snap(row.ReplyID)
+				if snap != nil && snap.Repo != nil {
+					row.Branch, row.Detached = snap.Repo.Branch, snap.Repo.Detached
+				}
+				if adapterPresent(snap, now) {
 					row.Adapter = true
 					if row.Live {
 						for _, a := range snap.Agents {
@@ -623,6 +661,15 @@ func peerGroup(contacts []Contact, project string, lookup sessionLookup, now tim
 		group.Ended = group.Ended[:endedPeerCap]
 	}
 	return group
+}
+
+// BranchHandle is the row's branch chip label, as the session page's git
+// handle draws a branch (branchHandle); the zero label when Branch is empty.
+func (r PeerRow) BranchHandle() GitHandle {
+	if r.Branch == "" {
+		return GitHandle{}
+	}
+	return branchHandle(r.Branch, r.Detached)
 }
 
 // Folder is the row's label prefix: Path's last element, as

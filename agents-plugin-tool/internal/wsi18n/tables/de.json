@@ -1,8 +1,11 @@
 {
+  "agent.context": "Kontext: {0} Tokens",
   "agent.done": "fertig",
   "agent.failed": "fehlgeschlagen",
+  "agent.model": "Modell: {0}",
   "agent.name": "Agent {0}",
   "agent.open": "Seite dieses Delegaten öffnen ({0})",
+  "agent.rate": "Ausgabe: {0} Tokens/s",
   "band.cache": "CH {0}",
   "band.cache.title": "Prompt-Cache-Trefferquote der letzten Antwort",
   "band.cost": "Sitzungskosten",

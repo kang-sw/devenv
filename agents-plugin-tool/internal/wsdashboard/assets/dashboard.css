@@ -181,6 +181,16 @@ summary.ahead::-webkit-details-marker { display: none; }
 details[open] > .ahead .am > .i { transform: rotate(180deg); }
 .ahead .acap { flex: 1 1 0; min-width: 0; font-size: 11px; color: var(--wb-muted-fg); font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* the lead row's live detail: the running or approval-waiting tool, one line */
+/* a subagent's telemetry (template astat); the agents panel is the
+   container, so a narrow panel (a side column, the session rail's three
+   columns) moves the stats into the hover card (agentTip) whatever the
+   viewport is */
+.r-tree { container: atree / inline-size; }
+.ahead .astat { flex: none; display: inline-flex; gap: 7px; align-items: center; font-size: 11px; color: var(--wb-muted-fg); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ahead .astat .amodel { font-family: var(--wb-mono); font-size: 10.5px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
+.ahead .astat .atps { color: var(--wb-primary); font-weight: 700; }
+@container atree (max-width: 559px) { .ahead .astat { display: none; } }
+.atip .tm { display: grid; gap: 2px; }
 .ahead .ldet { flex: 1 1 0; min-width: 0; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ahead .ldet .tn { font-family: var(--wb-mono); font-weight: 700; font-size: 11.5px; }
 .ahead .ldet .args { font-size: 11.5px; }
@@ -207,6 +217,9 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .peer a.pname:hover { text-decoration: underline; }
 .peer span.pname { color: var(--wb-fg); }
 .peer .pname .pfolder { color: var(--wb-muted-fg); font-weight: 500; }
+.peer .pbr { flex: 0 1 auto; min-width: 0; max-width: 45%; display: inline-flex; align-items: center; gap: 3px; padding: 0 5px; border-radius: 4px; background: var(--wb-muted); color: var(--wb-muted-fg); font-size: 10.5px; }
+.peer .pbr .i { width: 11px; height: 11px; flex: none; }
+.peer .pbr .pbt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--wb-mono); }
 .peer .pline { min-width: 0; display: inline-flex; gap: 6px; align-items: center; overflow: hidden; white-space: nowrap; }
 .peer .ptool { font-family: var(--wb-mono); font-size: 11.5px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; }
 .peer .pstate { font-size: 11.5px; color: var(--wb-muted-fg); font-style: italic; overflow: hidden; text-overflow: ellipsis; }
