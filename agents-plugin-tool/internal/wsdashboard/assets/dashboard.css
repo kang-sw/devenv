@@ -536,6 +536,52 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .pv-none p { margin: 0; }
 .pv-none .btn { color: var(--wb-fg); height: 26px; }
 
+/* ===== terminal cards (terminal.js) =====
+   The body holds the emulator and, once the shell has ended, the exit
+   line. The emulator's own padding (.tm-host .xterm) is part of the base
+   height terminal.js computes (its PAD), and the fit addon subtracts it.
+   The board column's header row holds "+ Terminal" and its folder
+   popover; it stays at the column's top while the cards scroll. */
+.bcard[data-kind="terminal"] .bc-body, .bcard[data-kind="terminal"][data-max] .bc-body { display: flex; flex-direction: column; overflow: hidden; }
+.bcard[data-kind="terminal"][data-size="fold"] .bc-body { display: none; }
+.tm-host { flex: 1 1 0; min-height: 0; overflow: hidden; background: var(--wb-card); }
+.tm-host .xterm { height: 100%; padding: 4px 0 4px 10px; }
+.tm-host .xterm-viewport { background: transparent !important; }
+.tm-gap { flex: none; display: flex; align-items: center; gap: 8px; padding: 3px 6px 3px 12px; font-size: 12px; color: var(--wb-warn-ink); background: color-mix(in srgb, var(--wb-warn) 12%, var(--wb-card)); }
+.tm-gap[hidden] { display: none; }
+.tm-gap > span { flex: 1 1 auto; min-width: 0; }
+.tm-note { padding: 14px 16px; font-size: 13px; color: var(--wb-muted-fg); }
+.tm-end { flex: none; display: flex; align-items: center; gap: 10px; padding: 5px 8px 5px 12px; border-top: 1px solid var(--wb-muted); font-size: 12.5px; }
+.tm-end[hidden] { display: none; }
+.tm-endtx { flex: 1 1 auto; min-width: 0; font-weight: 700; color: var(--wb-muted-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tm-end .btn { flex: none; height: 24px; font-size: 12px; font-weight: 700; color: var(--wb-fg); }
+.bcard[data-exited] .bc-kind { background: color-mix(in srgb, var(--wb-fail) 14%, var(--wb-card)); color: var(--wb-fail); }
+.tm-fold { overflow: hidden; text-overflow: ellipsis; white-space: pre; }
+.bhead { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; justify-content: flex-end; gap: 6px; min-height: 30px; margin: -2px -4px 6px -2px; padding: 2px 4px 2px 2px; background: var(--wb-bg); }
+.bnew { height: 26px; gap: 5px; padding: 0 11px 0 8px; font-size: 12.5px; font-weight: 700; color: var(--wb-fg); }
+.bnew .li { width: 13px; height: 13px; }
+.bnew[aria-expanded="true"] { background: var(--wb-primary); color: var(--wb-primary-fg); }
+.tpop { position: absolute; top: calc(100% + 2px); right: 4px; z-index: 20; width: 340px; max-width: calc(100% - 8px); background: var(--wb-card); color: var(--wb-fg); border-radius: 10px; box-shadow: var(--wb-shadow-hi); padding: 8px; }
+.tpop[hidden] { display: none; }
+.tpop .lb { font-size: 11px; font-weight: 800; color: var(--wb-muted-fg); margin: 2px 4px 6px; }
+.tpop .lb + .topts { margin-bottom: 8px; }
+.topts { display: grid; gap: 2px; }
+.topt { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: baseline; gap: 10px; border: 0; background: transparent; color: inherit; text-align: left; padding: 6px 8px; border-radius: 7px; cursor: pointer; font: inherit; font-size: 13px; }
+.topt:hover, .topt:focus-visible { background: var(--wb-muted); outline: none; }
+.topt .tnm { font-weight: 700; white-space: nowrap; }
+.topt .tpath { font: 11.5px var(--wb-mono); color: var(--wb-muted-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tprow { display: flex; gap: 6px; }
+.tprow .fpin { flex: 1 1 auto; min-width: 0; }
+.tprow .btn { flex: none; height: 26px; font-size: 12px; font-weight: 700; }
+.tprow .btn.pr { background: var(--wb-primary); color: var(--wb-primary-fg); }
+.tpop.busy { cursor: progress; }
+.tpop button:disabled, .tpop input:disabled { opacity: .6; }
+/* the holder card's terminals whose session is gone */
+.hdterms { display: grid; gap: 2px; }
+.hdsub { font-size: 11.5px; font-weight: 800; color: var(--wb-muted-fg); padding: 0 2px; }
+.hdrow > .hdbtns { grid-area: stop; display: inline-flex; gap: 4px; }
+.hdcwd { font-family: var(--wb-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+
 /* ===== session layout =====
    live: one grid whose children are the tab bar, the tree, the splitter, the
    conversation, the composer, and the board column (the panels are in the

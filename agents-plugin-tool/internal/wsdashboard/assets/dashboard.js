@@ -492,13 +492,17 @@
   // and restores the cards this browser kept for the session. Showing a
   // card switches to the board tab where the view shows one column at a
   // time.
+  // Terminal cards (terminal.js) exist only on a page the server marked
+  // data-term; their module adds the board column's header row.
   var cardBoard = mode !== "index" && window.WsCards ? region("board") : null;
   if (cardBoard) {
     if (window.WsPreview) window.WsPreview.setup({ renderDiff: gwRender, post: post, toast: toast });
+    if (window.WsTerm) window.WsTerm.setup({ post: post, toast: toast });
     window.WsCards.mount(cardBoard, {
       key: "ws.dashboard.cards." + rid, load: load, save: save,
       reveal: function () { if (live && !tabShown("board")) setTab("board"); }
     });
+    if (window.WsTerm) window.WsTerm.mount($("bcol"));
   }
   // --- the Files pane (files.js): mounted once, loaded when first shown -------
   if (live && fpane && window.WsFiles) {
@@ -2302,6 +2306,10 @@
   // stop button when the route lets this viewer stop one (a browser on this
   // machine); it ends the holder and its child, then reads the list again.
   // The daemon itself never ends a holder.
+  //
+  // On a page that offers terminals (terminal.js), the card also lists the
+  // live terminals whose opening session is gone from the index: attach
+  // opens one as a card on this page, stop ends it after a confirm.
   var HD_CAUSE = { no_answer: "js.hd.cause.noanswer", protocol: "js.hd.cause.protocol", token: "js.hd.cause.token" };
   function hdLoad() {
     if (!hdlist || !window.fetch) return;
@@ -2311,9 +2319,58 @@
       return r.text().then(function (s) {
         if (seq !== hdSeq) return;
         if (!r.ok) { hdFail(s.trim() || "HTTP " + r.status); return; }
-        try { hdDraw(JSON.parse(s)); } catch (e) { hdFail("malformed answer"); }
+        try { hdDraw(JSON.parse(s)); } catch (e) { hdFail("malformed answer"); return; }
+        hdTerms(seq);
       });
     }, function () { if (seq === hdSeq) hdFail(wsT("js.post.unreachable")); });
+  }
+  function hdTerms(seq) {
+    if (!window.WsTerm) return;
+    window.WsTerm.list(function (err, v) {
+      if (seq !== hdSeq || err || !v || !(v.orphans || []).length) return;
+      var box = mk("div", "hdterms");
+      box.appendChild(mk("div", "hdsub", wsT("js.hd.term.title")));
+      v.orphans.forEach(function (t) { box.appendChild(hdTermRow(t)); });
+      hdlist.appendChild(box);
+    });
+  }
+  function hdTermRow(t) {
+    var row = mk("div", "wtrow hdrow hdterm"), meta = mk("span", "hdmeta"), acts = mk("span", "hdbtns");
+    row.title = t.id;
+    row.appendChild(mk("span", "wtdot"));
+    var name = t.cwd ? t.cwd.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || t.cwd : t.id;
+    row.appendChild(mk("b", "wtname", name));
+    if (t.started_at) {
+      var age = mk("span", "wtage", wtAge(t.started_at));
+      age.title = wsT("js.hd.started", wtStamp(t.started_at));
+      row.appendChild(age);
+    }
+    var cwd = mk("span", "hdcwd", t.cwd || "");
+    cwd.title = t.cwd || "";
+    meta.appendChild(cwd);
+    if (t.state === "exited") meta.appendChild(mk("span", null, wsT("js.term.state.exited")));
+    row.appendChild(meta);
+    var at = mk("button", "btn hdstop", wsT("js.hd.term.attach"));
+    at.type = "button";
+    at.title = wsT("js.hd.term.attach.title");
+    at.addEventListener("click", function () { window.WsTerm.attach(t); });
+    var b = mk("button", "btn hdstop", wsT("js.hd.stop"));
+    b.type = "button";
+    b.title = wsT("js.hd.term.stop.title");
+    b.addEventListener("click", function () {
+      if (b.disabled || (t.state !== "exited" && !window.confirm(wsT("js.term.confirm")))) return;
+      b.disabled = true;
+      if (hdnote) hdnote.textContent = "";
+      post("terminals/" + encodeURIComponent(t.id) + "/close", {}, function (ok, res) {
+        b.disabled = false;
+        if (!ok) { if (hdnote) hdnote.textContent = wsT("js.hd.stopfail", res); return; }
+        hdLoad();
+      });
+    });
+    acts.appendChild(at);
+    acts.appendChild(b);
+    row.appendChild(acts);
+    return row;
   }
   function hdFail(msg) {
     hdlist.textContent = "";

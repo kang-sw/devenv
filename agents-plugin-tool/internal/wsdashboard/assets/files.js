@@ -388,8 +388,9 @@
   }
   // openMenu opens a row's menu at x, y: preview (a file), the two host
   // actions (a browser on the daemon's machine only; the daemon checks
-  // again), and the two copy entries. A deleted entry offers only the copy
-  // entries.
+  // again), a terminal in a folder (a page that offers terminals,
+  // terminal.js), and the two copy entries. A deleted entry offers only the
+  // copy entries.
   function openMenu(r, x, y) {
     closeMenu(false);
     closePop(false);
@@ -399,6 +400,12 @@
       if (local()) {
         items.push([wsT("js.preview.openext"), function () { act(path, "open"); }]);
         items.push([wsT("js.files.menu.reveal"), function () { act(path, "reveal"); }]);
+      }
+      if (e.dir && l && l.abs && window.WsTerm) {
+        var dirAbs = absPath(l.abs, l.sep || "/", e.name);
+        items.push([wsT("js.files.menu.terminal"), function () {
+          window.WsTerm.create({ folder: "path", path: dirAbs }, function (err) { if (err) toast(err); });
+        }]);
       }
     }
     if (items.length) items.push(null);
