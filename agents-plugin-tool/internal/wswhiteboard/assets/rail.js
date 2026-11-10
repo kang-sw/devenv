@@ -141,11 +141,17 @@
     fill(slots.bot.far, topics[down[1]], s ? s.downMore : 0);
     wraps.top.firstChild.hidden = !up.length;
     wraps.bot.firstChild.hidden = !down.length;
-    wraps.bot.firstChild.style.bottom = (s ? s.replyOff : 0) + "px";
+    // The bottom stack stays at the edge and pads its capsules up over the
+    // reply bar (which draws above it), so its fill also covers the gaps
+    // around the bar and the capsules read as sitting on it, not floating
+    // over the board. --wb-rail-bot is the capsule part alone: pill.js adds
+    // the reply bar's own clearance.
+    var replyOff = s ? s.replyOff : 0;
+    wraps.bot.firstChild.style.paddingBottom = replyOff ? replyOff + PAD + "px" : "";
     var barH = bar ? bar.offsetHeight : 0;
     host.style.setProperty("--wb-rail-top", (s ? s.top : 0) + "px");
     host.style.setProperty("--wb-rail-h", (s ? s.top + barH : 0) + "px");
-    host.style.setProperty("--wb-rail-bot", (down.length ? wraps.bot.firstChild.offsetHeight : 0) + "px");
+    host.style.setProperty("--wb-rail-bot", (down.length ? wraps.bot.firstChild.offsetHeight - replyOff : 0) + "px");
   }
   // The names of the topics at the given indices: the draw key holds names,
   // not indices, so a re-queried board (closed topics fetched in, a topic
