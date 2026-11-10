@@ -350,7 +350,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-10T04:39:15Z"
+        "touched_at": "2026-11-10T04:39:51Z",
+        "impl": {
+          "branch": "impl/develop/yin-shelf-saved"
+        }
       }
     },
     "261110-feat-ws-dashboard-tracker-quick-add-fields": {
