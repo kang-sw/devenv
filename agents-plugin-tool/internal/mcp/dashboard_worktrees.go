@@ -39,6 +39,53 @@ func (src *DashboardSessionSource) ReadWorktrees(reg wsdashboard.Registration) (
 	return readDashboardPool(ctx, wsgit.ExecRunner{}, record.Root, poolRV.Value)
 }
 
+// ReadRepoWorktrees lists the worktrees of the repository at repo for the
+// dashboard's session rail, with its worktree pool roots: the roots
+// worktree.list owns for the worktree_pool value the first of regs whose
+// session record resolves takes, else for the default value (which covers
+// the legacy in-tree pool too). It runs git worktree list alone, which
+// reads only the repository's worktree records.
+func (src *DashboardSessionSource) ReadRepoWorktrees(repo string, regs []wsdashboard.Registration) (wsdashboard.RepoWorktrees, error) {
+	poolValue := ""
+	for _, reg := range regs {
+		key, _, record, ok := src.lookupRecord(reg)
+		if !ok {
+			continue
+		}
+		adapter := sessionConfigAdapter{s: src.store}
+		resolver := wsconfig.NewResolver(wsconfig.Options{RepoRoot: record.Root}, builtinConfigDefaults(), adapter, adapter)
+		if rv, err := resolver.Get(key, wsconfig.ItemWorktreePool); err == nil {
+			poolValue = rv.Value
+			break
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), dashboardPoolTimeout)
+	defer cancel()
+	return readRepoWorktrees(ctx, wsgit.ExecRunner{}, repo, poolValue)
+}
+
+// readRepoWorktrees is ReadRepoWorktrees' read: repo's worktrees as git
+// lists them, the primary first, and the pool roots poolConfigValue owns
+// under the primary.
+func readRepoWorktrees(ctx context.Context, runner wsgit.Runner, repo, poolConfigValue string) (wsdashboard.RepoWorktrees, error) {
+	entries, err := listWorktrees(ctx, runner, repo)
+	if err != nil {
+		return wsdashboard.RepoWorktrees{}, err
+	}
+	if len(entries) == 0 {
+		return wsdashboard.RepoWorktrees{}, fmt.Errorf("could not resolve the primary worktree for %q", repo)
+	}
+	out := wsdashboard.RepoWorktrees{Pools: ownedPoolRoots(poolConfigValue, entries[0].Path)}
+	for _, e := range entries {
+		wt := wsdashboard.RepoWorktree{Path: e.Path, Detached: e.Detached, Prunable: e.Prunable}
+		if !e.Detached {
+			wt.Branch = strings.TrimPrefix(e.Branch, "refs/heads/")
+		}
+		out.Worktrees = append(out.Worktrees, wt)
+	}
+	return out, nil
+}
+
 // readDashboardPool lists root's pooled worktrees as listPoolWorktrees
 // selects them, with the facts the dashboard card shows. A fact that cannot
 // be read is left empty rather than failing the read.
