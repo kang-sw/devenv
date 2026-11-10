@@ -1,0 +1,396 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Session Rail Mockup</title>
+<style>
+/* Tokens copied from the dashboard (wswhiteboard/assets/page.css, wsdashboard/assets/dashboard.css), so the mockup reads in the dashboard's own tone. */
+:root{
+  --wb-bg:#f3f3f0; --wb-fg:#1b1d21; --wb-card:#ffffff; --wb-muted:#e9e8e3; --wb-muted-fg:#5f646b;
+  --wb-primary:#2b62d9; --wb-topic:#2c3038; --wb-on-topic:#ffffff;
+  --wb-policy:#b25000; --wb-on-policy:#ffffff;
+  --wb-ph-think:#6a4fc4; --wb-on-ph-think:#fff; --wb-ph-tool:#2457c5; --wb-on-ph-tool:#fff; --wb-ph-perm:#a35f00; --wb-on-ph-perm:#fff;
+  --wb-ok:#1d7348; --star:#c98a00; --wb-line:color-mix(in srgb,var(--wb-fg) 16%,transparent); --tk-warn:#b25000;
+  --wb-shadow:0 1px 2px rgb(0 0 0 / .14),0 2px 6px rgb(0 0 0 / .06);
+  --wb-shadow-hi:0 2px 4px rgb(0 0 0 / .16),0 6px 18px rgb(0 0 0 / .10);
+  --wb-radius:12px; --wb-mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --scrim:rgb(0 0 0 / .28);
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --wb-bg:#141518; --wb-fg:#e7e7e4; --wb-card:#1e2024; --wb-muted:#2b2d32; --wb-muted-fg:#a2a6ad;
+  --wb-primary:#7aa2ff; --wb-topic:#2a2d33; --wb-on-topic:#e4e5e8;
+  --wb-policy:#5b3a1c; --wb-on-policy:#f6d9bd;
+  --wb-ph-think:#3d2f6b; --wb-on-ph-think:#ddd3fb; --wb-ph-tool:#26385e; --wb-on-ph-tool:#d2dcf6; --wb-ph-perm:#55400f; --wb-on-ph-perm:#f6dfae;
+  --wb-ok:#6cc39a; --star:#f2b632;
+  --wb-shadow:0 1px 2px rgb(0 0 0 / .5),0 2px 8px rgb(0 0 0 / .3);
+  --wb-shadow-hi:0 2px 4px rgb(0 0 0 / .55),0 8px 22px rgb(0 0 0 / .4);
+  --scrim:rgb(0 0 0 / .5); color-scheme:dark}}
+:root[data-theme="dark"]{
+  --wb-bg:#141518; --wb-fg:#e7e7e4; --wb-card:#1e2024; --wb-muted:#2b2d32; --wb-muted-fg:#a2a6ad;
+  --wb-primary:#7aa2ff; --wb-topic:#2a2d33; --wb-on-topic:#e4e5e8;
+  --wb-policy:#5b3a1c; --wb-on-policy:#f6d9bd;
+  --wb-ph-think:#3d2f6b; --wb-on-ph-think:#ddd3fb; --wb-ph-tool:#26385e; --wb-on-ph-tool:#d2dcf6; --wb-ph-perm:#55400f; --wb-on-ph-perm:#f6dfae;
+  --wb-ok:#6cc39a; --star:#f2b632;
+  --wb-shadow:0 1px 2px rgb(0 0 0 / .5),0 2px 8px rgb(0 0 0 / .3);
+  --wb-shadow-hi:0 2px 4px rgb(0 0 0 / .55),0 8px 22px rgb(0 0 0 / .4);
+  --scrim:rgb(0 0 0 / .5); color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:var(--wb-bg);color:var(--wb-fg);font:14px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans KR",sans-serif;padding:16px}
+h1{font-size:16px;margin:0 0 4px}
+.lede{color:var(--wb-muted-fg);margin:0 0 12px;max-width:76ch;font-size:13px}
+.toolbar{display:flex;gap:6px;align-items:center;margin-bottom:12px;font-size:12px;color:var(--wb-muted-fg)}
+.tb{font:inherit;font-size:12px;font-weight:700;border:0;border-radius:999px;padding:2px 10px;background:var(--wb-muted);color:var(--wb-muted-fg);cursor:pointer}
+.tb[aria-pressed="true"]{background:color-mix(in srgb,var(--wb-primary) 18%,var(--wb-card));color:var(--wb-primary)}
+.stage{overflow-x:auto}
+/* ---------- page frame ---------- */
+.frame{position:relative;overflow:hidden;background:var(--wb-bg);border-radius:var(--wb-radius);outline:1px solid color-mix(in srgb,var(--wb-fg) 10%,transparent);height:700px;display:flex;flex-direction:column;padding:12px 16px}
+.frame[data-mode="wide"]{min-width:1260px}.frame[data-mode="normal"]{min-width:860px}.frame[data-mode="narrow"]{width:400px;min-width:400px;padding:10px}
+.top{display:flex;align-items:center;gap:10px;margin-bottom:10px;min-width:0}
+.railbtn{display:inline-flex;align-items:center;gap:4px;border:0;background:transparent;color:var(--wb-muted-fg);font:inherit;font-size:12.5px;cursor:pointer;padding:2px 4px;border-radius:6px}
+.railbtn:hover{color:var(--wb-primary)}
+.frame[data-mode="wide"] .railbtn{display:none}
+.host{font-size:11px;font-weight:800;letter-spacing:.04em;padding:1px 7px;border-radius:4px;background:var(--wb-muted);color:var(--wb-muted-fg);white-space:nowrap}
+.host.sm{font-size:10px;padding:0 5px;flex:none}
+.ttl{font-family:var(--wb-mono);font-weight:700;font-size:14px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.grid{flex:1;min-height:0;display:grid;gap:12px}
+.frame[data-mode="wide"] .grid{grid-template-columns:340px 5fr 7fr}
+.frame[data-mode="normal"] .grid{grid-template-columns:5fr 7fr}
+.frame[data-mode="narrow"] .grid{grid-template-columns:1fr}
+.frame[data-mode="narrow"] .bcol{display:none}
+.panel{background:var(--wb-card);border-radius:var(--wb-radius);box-shadow:var(--wb-shadow);min-height:0;min-width:0;display:flex;flex-direction:column;overflow:hidden}
+.phd{display:flex;align-items:center;gap:6px;padding:8px 12px;font-size:12px;font-weight:800;color:var(--wb-muted-fg)}
+.ghost{flex:1;display:grid;place-items:center;color:var(--wb-muted-fg);opacity:.6;font-size:12px}
+/* ---------- rail ---------- */
+.rail{transition:transform .22s cubic-bezier(.2,.7,.3,1)}
+.frame:not([data-mode="wide"]) .rail{position:absolute;z-index:5;top:52px;bottom:12px;left:12px;width:340px;max-width:calc(100% - 24px);box-shadow:var(--wb-shadow-hi);transform:translateX(calc(-100% - 20px))}
+.frame.open:not([data-mode="wide"]) .rail{transform:none}
+.scrim{position:absolute;inset:0;background:var(--scrim);opacity:0;pointer-events:none;transition:opacity .22s;z-index:4}
+.frame.open:not([data-mode="wide"]) .scrim{opacity:1;pointer-events:auto}
+.rlist{overflow:auto;flex:1;min-height:0;padding-bottom:6px}
+/* level 1: workspace = the index page's project bar */
+.ws+.ws{margin-top:8px}
+.wsbar{display:flex;align-items:center;gap:8px;padding:3px 12px;min-height:28px;background:var(--wb-topic);color:var(--wb-on-topic);cursor:pointer;user-select:none}
+.wsbar .nm{font-size:13px;font-weight:700}
+.wsbar .pp{font-family:var(--wb-mono);font-size:11px;opacity:.65;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.wsbar .ct{font-size:11px;font-weight:700;padding:0 7px;border-radius:999px;background:rgb(127 127 127 / .28)}
+.ws.col .wsbody{display:none}
+/* level 2: worktree */
+.wt{padding:4px 0 2px}
+.wt.empty .wthd{opacity:.6}
+.wthd{display:flex;align-items:center;gap:6px;padding:2px 12px;font-size:12px;font-weight:800;color:var(--wb-muted-fg);min-width:0}
+.wthd svg{width:12px;height:12px;flex:none}
+.wthd .br{font-family:var(--wb-mono);font-weight:700;color:var(--wb-fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.wthd .wf{font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:0 1 auto}
+.wthd .gs{margin-left:auto;font-weight:600;font-size:11px;font-variant-numeric:tabular-nums;white-space:nowrap}
+/* level 3: session, on the worktree's guide line */
+.sessions{margin:0 0 0 18px;padding-left:4px;border-left:2px solid var(--wb-muted)}
+.sess{display:block;padding:5px 8px 5px 4px;border-radius:6px;cursor:pointer;color:inherit;text-decoration:none}
+.sess:hover{background:color-mix(in srgb,var(--wb-primary) 6%,var(--wb-card))}
+.sess.cur{background:color-mix(in srgb,var(--wb-primary) 12%,var(--wb-card))}
+.s1{display:flex;align-items:center;gap:6px;min-width:0}
+.star{width:16px;height:16px;flex:none;display:inline-grid;place-items:center;border:0;padding:0;background:transparent;border-radius:4px;color:var(--wb-muted-fg);opacity:.6;cursor:pointer}
+.star svg{width:13px;height:13px}
+.star:hover{opacity:1;background:var(--wb-muted)}
+.star[aria-pressed="true"]{opacity:1;color:var(--star)}
+.star[aria-pressed="false"]{opacity:0;transition:opacity .12s}
+.sess:hover .star[aria-pressed="false"],.sess:focus-within .star[aria-pressed="false"]{opacity:.6}
+.sess .star[aria-pressed="false"]:hover{opacity:1}
+@media (hover:none){.star[aria-pressed="false"]{opacity:.35}}
+.star[aria-pressed="true"] path{fill:currentColor}
+.rid{font-family:var(--wb-mono);font-size:12.5px;font-weight:700;color:var(--wb-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:0 1 auto}
+.sess.cur .rid{color:var(--wb-fg)}
+.s1 .sp{flex:1}
+.when{font-size:11px;color:var(--wb-muted-fg);font-variant-numeric:tabular-nums;white-space:nowrap;flex:none}
+.msg{padding-left:21px;margin-top:1px;font-size:12px;color:var(--wb-muted-fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.msg .who{font-weight:700;margin-right:4px}
+.chip{display:inline-flex;align-items:center;gap:3px;height:18px;font-size:11px;font-weight:700;padding:0 7px;border-radius:999px;background:var(--wb-muted);color:var(--wb-muted-fg);white-space:nowrap;flex:none}
+.chip.policy{background:var(--wb-policy);color:var(--wb-on-policy)}
+/* status: harness badge ring runs while the lead works; robot blinks while level-1 subagents work, count beside it */
+.gut{display:inline-flex;align-items:center;flex:none;gap:5px}
+.hb{position:relative;width:54px;padding:0;text-align:center;box-sizing:border-box}
+.hb .ring{position:absolute;inset:-2px;width:calc(100% + 4px);height:calc(100% + 4px);overflow:visible;pointer-events:none}
+.hb .ring rect{x:1px;y:1px;width:calc(100% - 2px);height:calc(100% - 2px);rx:5px;fill:none;stroke-width:1.5}
+.hb .rtrk{stroke:color-mix(in srgb,var(--wb-primary) 22%,transparent)}
+.hb .rrun{stroke:var(--wb-primary);stroke-linecap:round;stroke-dasharray:24 76;animation:orbit 1.3s linear infinite}
+.hb.run{color:var(--wb-fg)}
+@keyframes orbit{from{stroke-dashoffset:100}to{stroke-dashoffset:0}}
+@keyframes blink{50%{opacity:.25}}
+.bots{display:inline-flex;align-items:center;gap:2px;min-width:22px;flex:none;font-size:11px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--wb-muted-fg)}
+.bots svg{width:12px;height:12px;flex:none}
+.bots.zero{visibility:hidden}
+.sess.cur .bots{color:var(--wb-fg)}
+.bots.on{color:var(--wb-fg)}.bots.on svg{color:var(--wb-primary);animation:blink 1.4s ease-in-out infinite}
+.endedrow{font-size:11.5px;color:var(--wb-muted-fg);padding:4px 12px 2px 32px;cursor:pointer}
+.endedrow:hover{color:var(--wb-primary)}
+.rfoot{display:flex;align-items:center;gap:8px;padding:7px 12px;border-top:1px solid var(--wb-muted);font-size:12px}
+.rfoot a{color:var(--wb-muted-fg);text-decoration:none}.rfoot a:hover{color:var(--wb-primary)}
+/* add buttons: quiet until hovered */
+.add{width:18px;height:18px;flex:none;display:inline-grid;place-items:center;border:0;padding:0;border-radius:5px;background:transparent;color:inherit;opacity:0;cursor:pointer;transition:opacity .12s}
+.phd:hover .add,.wsbar:hover .add,.wthd:hover .add,.add:focus-visible{opacity:.7}
+@media (hover:none){.add{opacity:.5}}
+.add svg{width:13px;height:13px}
+.add:hover,.add[aria-expanded="true"]{opacity:1 !important;background:rgb(127 127 127 / .22)}
+.wthd .add,.wsbar .add,.phd .add{margin-left:0}
+.wsbar .add{margin-right:auto}
+.wsbar .pp:has(+.add){flex:0 1 auto}
+/* popovers: the dashboard's card look */
+.pop{position:absolute;z-index:20;min-width:180px;background:var(--wb-card);color:var(--wb-fg);border-radius:10px;box-shadow:var(--wb-shadow-hi);padding:4px;font-size:12.5px;display:none}
+.pop.on{display:block}
+.pop .mi{display:flex;align-items:center;gap:8px;width:100%;border:0;background:transparent;color:inherit;font:inherit;text-align:left;padding:5px 8px;border-radius:6px;cursor:pointer}
+.pop .mi:hover{background:color-mix(in srgb,var(--wb-primary) 10%,var(--wb-card))}
+.pop .mi .host{font-size:10px;padding:0 5px}
+.pop .mh{font-size:11px;font-weight:800;color:var(--wb-muted-fg);padding:4px 8px 2px}
+.pop.form{padding:10px 12px;min-width:250px}
+.pop.form label{display:block;font-size:11px;font-weight:800;color:var(--wb-muted-fg);margin:6px 0 2px}
+.pop.form input{width:100%;font:12px var(--wb-mono);padding:4px 7px;border-radius:6px;border:1px solid var(--wb-muted);background:var(--wb-bg);color:var(--wb-fg)}
+.pop.form .row{display:flex;justify-content:flex-end;gap:6px;margin-top:10px}
+.pbtn{white-space:nowrap;flex:none;font:inherit;font-size:12px;font-weight:700;border:0;border-radius:999px;padding:3px 12px;cursor:pointer;background:var(--wb-muted);color:var(--wb-muted-fg)}
+.pbtn.go{background:var(--wb-primary);color:#fff}
+.pbtn:disabled{opacity:.45;cursor:default}
+.pop .hint{font-size:11.5px;color:var(--wb-muted-fg);line-height:1.5;max-width:250px;padding:4px 6px}
+/* selection popover: the tracker support chat's .suppop look (dashboard.css .tk .sp*) */
+.pop.sp{width:330px;padding:10px 12px;display:none;gap:10px;box-shadow:var(--wb-shadow-hi),inset 0 0 0 1px var(--wb-line)}
+.pop.sp.on{display:grid}
+.sphd{font-size:13px;font-weight:800;display:flex;align-items:baseline;gap:8px}
+.spctx{font-family:var(--wb-mono);font-size:11.5px;font-weight:600;color:var(--wb-muted-fg)}
+.spsec{display:grid;gap:5px}
+.splbl{display:flex;align-items:baseline;gap:8px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--wb-muted-fg)}
+.spval{font-weight:600;text-transform:none;letter-spacing:0;color:var(--wb-fg);font-family:var(--wb-mono)}
+.spreset{font:inherit;font-size:11px;font-weight:400;text-transform:none;letter-spacing:0;border:0;background:none;padding:0;color:var(--wb-primary);cursor:pointer;margin-left:auto}
+.spseg{display:flex;flex-wrap:wrap;gap:2px;width:fit-content;background:var(--wb-muted);border-radius:999px;padding:2px}
+.spseg button{font:inherit;font-size:12px;font-weight:600;border:0;border-radius:999px;padding:2px 12px;background:transparent;color:var(--wb-muted-fg);cursor:pointer}
+.spseg button[aria-checked="true"]{background:var(--wb-card);color:var(--wb-fg);box-shadow:inset 0 0 0 1px var(--wb-line)}
+.spseg button:disabled{opacity:.45;cursor:not-allowed}
+.spq{font:inherit;font-size:12.5px;width:100%;border:0;border-radius:8px;padding:4px 8px;background:var(--wb-muted);color:inherit;min-width:0}
+.spq.mono{font-family:var(--wb-mono);font-size:12px}
+.splist{list-style:none;margin:0;padding:0;max-height:110px;overflow-y:auto;border-radius:8px;box-shadow:inset 0 0 0 1px var(--wb-line)}
+.splist li{padding:3px 8px;cursor:pointer;font-family:var(--wb-mono);font-size:12px}
+.splist li i{font-family:system-ui,sans-serif;color:var(--wb-muted-fg)}
+.splist li:hover{background:var(--wb-muted)}
+.splist li[aria-selected="true"]{color:var(--wb-primary);font-weight:700}
+.spnote{margin:0;font-size:11.5px;color:var(--wb-muted-fg);font-weight:400;text-transform:none;letter-spacing:0}
+.spnote code,.spdir code{font-family:var(--wb-mono);font-size:11px}
+.knob{padding:4px 9px 0}
+.ktrack{position:relative;height:18px;margin:0 2px}
+.ktrack::before{content:"";position:absolute;left:0;right:0;top:8px;height:2px;border-radius:1px;background:var(--wb-line)}
+.kdot{position:absolute;top:4px;width:10px;height:10px;margin-left:-5px;border-radius:50%;background:var(--wb-card);box-shadow:inset 0 0 0 1.5px var(--wb-muted-fg)}
+.kthumb{position:absolute;top:1px;width:16px;height:16px;margin-left:-8px;border-radius:50%;background:var(--wb-primary);box-shadow:0 0 0 3px color-mix(in srgb,var(--wb-primary) 22%,transparent)}
+.kends{display:flex;justify-content:space-between;font-size:11px;color:var(--wb-muted-fg);margin-top:2px}
+.sprow{display:flex;align-items:center;gap:6px}.sprow .spnote{margin-right:auto}
+.spline{display:flex;align-items:center;gap:6px}
+.spline[hidden],#dir-own[hidden],.spdir[hidden]{display:none}
+.spfrom{font-size:11.5px;color:var(--wb-muted-fg);white-space:nowrap}
+.spsel{font:12px var(--wb-mono);border:0;border-radius:8px;padding:4px 6px;background:var(--wb-muted);color:inherit}
+.spdir{display:grid;gap:3px;padding:6px 8px;border-radius:8px;box-shadow:inset 0 0 0 1px var(--wb-line)}
+.spdir>code{font-size:12px;overflow-wrap:anywhere}
+#dir-own{display:grid;gap:3px}
+.spres{display:grid;gap:2px;min-height:34px;padding:5px 8px;border-radius:8px;box-shadow:inset 0 0 0 1px var(--wb-line);font-size:12px}
+.spres code{font-size:12px;overflow-wrap:anywhere}.spres .k{font-size:11px;color:var(--wb-muted-fg)}.spres.bad{box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--tk-warn) 60%,transparent)}.spres.bad .k{color:var(--tk-warn)}
+.spdemo .mono{font:11.5px var(--wb-mono)}
+.spdemo{display:flex;gap:6px;flex-wrap:wrap}
+.toasts{position:absolute;left:50%;bottom:16px;transform:translateX(-50%);display:grid;gap:6px;z-index:30;pointer-events:none}
+.toast{background:var(--wb-card);color:var(--wb-fg);box-shadow:var(--wb-shadow-hi),inset 0 0 0 1px var(--wb-line);border-radius:10px;padding:7px 12px;font-size:12.5px;border-left:3px solid var(--wb-ok);white-space:nowrap}
+.toast.info{border-left-color:var(--wb-muted-fg)}
+/* legend */
+.notes{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px;margin-top:14px}
+.notes div{background:var(--wb-card);border-radius:10px;box-shadow:var(--wb-shadow);padding:10px 12px;font-size:12.5px;line-height:1.55}
+.notes b{display:block;margin-bottom:2px;font-size:13px}
+@media (prefers-reduced-motion:reduce){.rail,.scrim{transition:none}.bots.on svg{animation:none}.hb .rrun{animation:none;stroke-dasharray:none}}
+</style>
+</head>
+<body>
+<h1>세션 레일 목업 v13</h1>
+<p class="lede">대시보드의 색, 글꼴, 카드, 칩, 단계 알약 토큰을 그대로 가져왔습니다. 위계는 워크스페이스 → 워크트리 → 세션 → 에이전트 네 단계입니다. 세션 행은 별, 하네스 배지(리드 상태), 로봇(서브에이전트 상태와 수), ID, 마지막 도구 호출 시각, 마지막 메시지 한 줄로 이루어집니다. 데이터는 예시입니다.</p>
+
+<div class="toolbar">폭
+  <button class="tb" data-m="wide" aria-pressed="true">wide</button>
+  <button class="tb" data-m="normal" aria-pressed="false">normal</button>
+  <button class="tb" data-m="narrow" aria-pressed="false">narrow</button>
+</div>
+
+<div class="stage">
+<div class="frame" id="frame" data-mode="wide">
+  <div class="top">
+    <button class="railbtn" id="railbtn" aria-expanded="false" aria-label="세션 목록">
+      <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M10 3 5 8l5 5"/></svg>세션</button>
+    <span class="host">CLAUDE</span>
+    <span class="ttl">camcordersenoritahandgunpatchwork</span>
+  </div>
+  <div class="scrim" id="scrim"></div>
+<div class="pop sp" id="pop-sess" role="dialog" aria-label="새 세션">
+  <div class="sphd">새 세션 <span class="spctx" id="sessctx">devenv · develop</span></div>
+  <div class="spsec"><div class="splbl">하네스</div>
+    <div class="spseg" role="radiogroup"><button role="radio" aria-checked="true">claude</button><button role="radio" aria-checked="false">pi</button><button role="radio" aria-checked="false" disabled title="codex를 찾을 수 없음">codex</button></div></div>
+  <div class="spsec"><div class="splbl">모델</div><input class="spq" type="search" placeholder="모델 검색" spellcheck="false">
+    <ul class="splist"><li><i>기본값</i></li><li aria-selected="true">claude-opus-5-5</li><li>claude-sonnet-5-5</li><li>claude-haiku-5-5</li><li>claude-fable-5-2</li></ul></div>
+  <div class="spsec"><div class="splbl">노력 수준<span class="spval">high</span><button class="spreset">기본값 사용</button></div>
+    <div class="knob"><div class="ktrack"><span class="kdot" style="left:0%"></span><span class="kdot" style="left:25%"></span><span class="kdot on" style="left:50%"></span><span class="kdot" style="left:75%"></span><span class="kdot" style="left:100%"></span><span class="kthumb" style="left:50%"></span></div><div class="kends"><span>low</span><span>max</span></div></div></div>
+  <div class="sprow"><span class="spnote">마지막 선택이 다음 기본값이 됩니다</span><button class="pbtn" data-close>취소</button><button class="pbtn go" data-close data-toast="새 세션을 시작했습니다">시작</button></div>
+</div>
+<div class="pop sp" id="pop-wt" role="dialog" aria-label="워크트리 추가">
+  <div class="sphd">워크트리 추가 <span class="spctx">devenv</span></div>
+  <div class="spsec"><div class="splbl">브랜치</div>
+    <div class="spseg" role="radiogroup" id="brmode"><button role="radio" aria-checked="true" data-br="new">새 브랜치</button><button role="radio" aria-checked="false" data-br="old">기존 브랜치</button></div>
+    <div id="br-new" class="spline"><input class="spq mono" value="feat/" spellcheck="false" aria-label="새 브랜치 이름"><span class="spfrom">기준</span><select class="spsel" aria-label="기준 브랜치"><option>develop</option><option>main</option></select></div>
+    <div id="br-old" class="spline" hidden><input class="spq mono" type="search" placeholder="브랜치 검색" spellcheck="false" aria-label="기존 브랜치"></div></div>
+  <div class="spsec"><div class="splbl">폴더<button class="spreset" id="dirmode">직접 지정</button></div>
+    <div class="spdir" id="dir-def"><code>~/.ws-dashboard-worktrees/devenv/261110-2047</code><span class="spnote">기본값: 루트 옆 <code>../.ws-dashboard-worktrees/&lt;루트 폴더 이름&gt;/&lt;YYMMDD-HHMM&gt;</code></span></div>
+    <div id="dir-own" hidden><input class="spq mono" value="/home/me/" spellcheck="false" aria-label="폴더 절대 경로"><span class="spnote">절대 경로만 받습니다. 없는 폴더는 만듭니다</span></div></div>
+  <div class="sprow"><span class="spnote"></span><button class="pbtn" data-close>취소</button><button class="pbtn go" data-close data-toast="워크트리 feat/…를 만들었습니다">만들기</button></div>
+</div>
+<div class="pop sp" id="pop-ws" role="dialog" aria-label="워크스페이스 추가">
+  <div class="sphd">워크스페이스 추가</div>
+  <div class="spsec"><div class="splbl">폴더 절대 경로</div>
+    <div class="spline"><input id="wspath" class="spq mono" placeholder="C:\work\api 또는 /home/me/work/api" spellcheck="false" autocomplete="off" aria-label="폴더 절대 경로" aria-describedby="wsres"><button id="wsgo" class="pbtn go" data-close>추가</button></div>
+    <div class="spres" id="wsres" aria-live="polite"><span class="spnote">탐색기 주소창이나 "경로로 복사"한 값을 그대로 붙여 넣으세요</span></div></div>
+  <div class="spsec"><div class="splbl">붙여 넣기 예시</div>
+    <div class="spdemo" id="wsex"><button class="pbtn mono" data-p='"C:\Users\me\work\api"'>"C:\…\api"</button><button class="pbtn mono" data-p="/c/Users/me/work/api">/c/…</button><button class="pbtn mono" data-p="\\wsl.localhost\Ubuntu\home\me\devenv-rail">\\wsl.localhost\…</button><button class="pbtn mono" data-p="~/kb-old">~/kb-old</button><button class="pbtn mono" data-p="work/api">work/api</button></div></div>
+</div>
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+  <div class="grid">
+    <aside class="panel rail" id="rail" aria-label="세션 목록">
+      <div class="phd">세션<button class="add" data-add="ws" title="워크스페이스 추가" aria-label="워크스페이스 추가"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8 3.5v9M3.5 8h9"/></svg></button><span style="flex:1"></span><span class="chip">실시간 5</span><span class="chip policy">? 2</span></div>
+      <div class="rlist">
+
+        <div class="ws">
+          <div class="wsbar"><span class="nm">devenv</span><span class="pp">~/devenv</span><button class="add" data-add="wt" title="워크트리 추가" aria-label="워크트리 추가"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8 3.5v9M3.5 8h9"/></svg></button><span class="ct">4</span></div>
+          <div class="wsbody">
+            <div class="wt">
+              <div class="wthd"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="5" cy="3.5" r="1.5"/><circle cx="5" cy="12.5" r="1.5"/><circle cx="11" cy="6" r="1.5"/><path d="M5 5v6M11 7.5c0 2-6 1.5-6 3.5"/></svg><span class="br">develop</span><span class="wf">· 루트</span><button class="add" data-add="sess" title="새 세션" aria-label="새 세션"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8 3.5v9M3.5 8h9"/></svg></button><span class="gs">±2</span></div>
+              <div class="sessions" data-home="h1">
+                <div data-home="h1" class="sess cur" tabindex="0">
+                  <div class="s1"><span class="gut"><button class="star" aria-pressed="false" title="선호 에이전트" aria-label="선호 에이전트"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .7 4.3L8 11.6l-3.8 2 .7-4.3-3.1-3 4.3-.6z"/></svg></button><span class="host sm hb run" title="Claude · 리드 작업 중">CLAUDE<svg class="ring" aria-hidden="true"><rect class="rtrk"/><rect class="rrun" pathLength="100"/></svg></span><span class="bots on" title="실행 중인 서브에이전트 1개"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M8 2.2v2"/><circle cx="8" cy="1.8" r=".9" fill="currentColor" stroke="none"/><rect x="2.8" y="4.6" width="10.4" height="8.4" rx="2.4"/><circle cx="6" cy="8.6" r="1.05" fill="currentColor" stroke="none"/><circle cx="10" cy="8.6" r="1.05" fill="currentColor" stroke="none"/><path d="M1.2 8v2.2M14.8 8v2.2"/></svg>1</span></span><span class="rid">camcordersenoritahandgunpatchwork</span><span class="sp"></span><span class="when" title="마지막 도구 호출">지금</span></div>
+                  <div class="msg">목업 v4를 올렸습니다. 어색한 부분은 토픽 메모로 주세요.</div>
+                </div>
+                <div data-home="h1" class="sess" tabindex="0">
+                  <div class="s1"><span class="gut"><button class="star" aria-pressed="true" title="선호 에이전트" aria-label="선호 에이전트"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .7 4.3L8 11.6l-3.8 2 .7-4.3-3.1-3 4.3-.6z"/></svg></button><span class="host sm hb" title="Claude · 리드 대기">CLAUDE</span><span class="bots on" title="실행 중인 서브에이전트 2개"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M8 2.2v2"/><circle cx="8" cy="1.8" r=".9" fill="currentColor" stroke="none"/><rect x="2.8" y="4.6" width="10.4" height="8.4" rx="2.4"/><circle cx="6" cy="8.6" r="1.05" fill="currentColor" stroke="none"/><circle cx="10" cy="8.6" r="1.05" fill="currentColor" stroke="none"/><path d="M1.2 8v2.2M14.8 8v2.2"/></svg>2</span></span><span class="rid">lemonlaggingstumppreheated</span><span class="sp"></span><span class="chip policy">? 1</span><span class="when" title="마지막 도구 호출">1분</span></div>
+                  <div class="msg">남은 질문 하나에 답을 주시면 티켓을 ready로 올리겠습니다.</div>
+                </div>
+              </div>
+            </div>
+            <div class="wt">
+              <div class="wthd"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="5" cy="3.5" r="1.5"/><circle cx="5" cy="12.5" r="1.5"/><circle cx="11" cy="6" r="1.5"/><path d="M5 5v6M11 7.5c0 2-6 1.5-6 3.5"/></svg><span class="br">feat/session-rail</span><span class="wf">· devenv-rail</span><button class="add" data-add="sess" title="새 세션" aria-label="새 세션"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8 3.5v9M3.5 8h9"/></svg></button></div>
+              <div class="sessions" data-home="h2">
+                <div data-home="h2" class="sess" tabindex="0">
+                  <div class="s1"><span class="gut"><button class="star" aria-pressed="false" title="선호 에이전트" aria-label="선호 에이전트"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .7 4.3L8 11.6l-3.8 2 .7-4.3-3.1-3 4.3-.6z"/></svg></button><span class="host sm hb run" title="Pi · 리드 작업 중">PI<svg class="ring" aria-hidden="true"><rect class="rtrk"/><rect class="rrun" pathLength="100"/></svg></span><span class="bots on" title="실행 중인 서브에이전트 7개"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M8 2.2v2"/><circle cx="8" cy="1.8" r=".9" fill="currentColor" stroke="none"/><rect x="2.8" y="4.6" width="10.4" height="8.4" rx="2.4"/><circle cx="6" cy="8.6" r="1.05" fill="currentColor" stroke="none"/><circle cx="10" cy="8.6" r="1.05" fill="currentColor" stroke="none"/><path d="M1.2 8v2.2M14.8 8v2.2"/></svg>7</span></span><span class="rid">haikugraspshut</span><span class="sp"></span><span class="when" title="마지막 도구 호출">12초</span></div>
+                  <div class="msg">테스트 세 개를 추가하고 원격 빌드를 돌리는 중입니다.</div>
+                </div>
+              </div>
+            </div>
+            <div class="wt empty">
+              <div class="wthd"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="5" cy="3.5" r="1.5"/><circle cx="5" cy="12.5" r="1.5"/><circle cx="11" cy="6" r="1.5"/><path d="M5 5v6M11 7.5c0 2-6 1.5-6 3.5"/></svg><span class="br">fix/proxy-launcher</span><span class="wf">· devenv-proxy</span><button class="add" data-add="sess" title="새 세션" aria-label="새 세션"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8 3.5v9M3.5 8h9"/></svg></button><span class="gs">±5</span></div>
+            </div>
+            <div class="endedrow">종료된 세션 1개 ▸</div>
+          </div>
+        </div>
+
+        <div class="ws">
+          <div class="wsbar"><span class="nm">kb-site</span><span class="pp">~/work/kb-site</span><button class="add" data-add="wt" title="워크트리 추가" aria-label="워크트리 추가"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8 3.5v9M3.5 8h9"/></svg></button><span class="ct">1</span></div>
+          <div class="wsbody">
+            <div class="wt">
+              <div class="wthd"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="5" cy="3.5" r="1.5"/><circle cx="5" cy="12.5" r="1.5"/><circle cx="11" cy="6" r="1.5"/><path d="M5 5v6M11 7.5c0 2-6 1.5-6 3.5"/></svg><span class="br">main</span><span class="wf">· 루트</span><button class="add" data-add="sess" title="새 세션" aria-label="새 세션"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8 3.5v9M3.5 8h9"/></svg></button></div>
+              <div class="sessions" data-home="h3">
+                <div data-home="h3" class="sess" tabindex="0">
+                  <div class="s1"><span class="gut"><button class="star" aria-pressed="false" title="선호 에이전트" aria-label="선호 에이전트"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .7 4.3L8 11.6l-3.8 2 .7-4.3-3.1-3 4.3-.6z"/></svg></button><span class="host sm hb" title="Claude · 리드 대기">CLAUDE</span><span class="bots zero" title="실행 중인 서브에이전트 0개"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M8 2.2v2"/><circle cx="8" cy="1.8" r=".9" fill="currentColor" stroke="none"/><rect x="2.8" y="4.6" width="10.4" height="8.4" rx="2.4"/><circle cx="6" cy="8.6" r="1.05" fill="currentColor" stroke="none"/><circle cx="10" cy="8.6" r="1.05" fill="currentColor" stroke="none"/><path d="M1.2 8v2.2M14.8 8v2.2"/></svg></span></span><span class="rid">quietamberlantern</span><span class="sp"></span><span class="when" title="마지막 도구 호출">12분</span></div>
+                  <div class="msg">dist 폴더는 지워도 되나요? 승인을 기다립니다.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="ws">
+          <div class="wsbar"><span class="nm">notes</span><span class="pp">~/notes</span><button class="add" data-add="sess" title="새 세션" aria-label="새 세션"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8 3.5v9M3.5 8h9"/></svg></button><span class="ct">1</span></div>
+          <div class="wsbody">
+            <div class="wt">
+              <div class="sessions" data-home="h4" style="margin-left:12px">
+                <div data-home="h4" class="sess" tabindex="0">
+                  <div class="s1"><span class="gut"><button class="star" aria-pressed="false" title="선호 에이전트" aria-label="선호 에이전트"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .7 4.3L8 11.6l-3.8 2 .7-4.3-3.1-3 4.3-.6z"/></svg></button><span class="host sm hb" title="Claude · 리드 대기">CLAUDE</span><span class="bots zero" title="실행 중인 서브에이전트 0개"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M8 2.2v2"/><circle cx="8" cy="1.8" r=".9" fill="currentColor" stroke="none"/><rect x="2.8" y="4.6" width="10.4" height="8.4" rx="2.4"/><circle cx="6" cy="8.6" r="1.05" fill="currentColor" stroke="none"/><circle cx="10" cy="8.6" r="1.05" fill="currentColor" stroke="none"/><path d="M1.2 8v2.2M14.8 8v2.2"/></svg></span></span><span class="rid">foldedpaperheron</span><span class="sp"></span><span class="when" title="마지막 도구 호출">2시간</span></div>
+                  <div class="msg"><span class="who">나</span>오늘 회의 메모 정리해줘</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+      <div class="rfoot"><a href="#" onclick="return false">전체 목록 페이지 →</a></div>
+    </aside>
+    <section class="panel"><div class="phd">에이전트 · 대화</div><div class="ghost">변경 없음</div></section>
+    <section class="panel bcol"><div class="phd">화이트보드</div><div class="ghost">변경 없음</div></section>
+  </div>
+</div>
+</div>
+
+<div class="notes">
+  <div><b>1. 워크스페이스</b>목록 페이지의 프로젝트 바와 같은 어두운 바입니다. 이름, 경로, 실시간 세션 수가 있고, 누르면 접힙니다. 에픽의 정의대로 루트 워크트리 또는 일반 폴더 단위입니다.</div>
+  <div><b>2. 워크트리</b><code>git worktree list</code>에 나오는 워크트리는 세션이 없어도 모두 보입니다(세션 없는 fix/proxy-launcher는 흐리게). ws가 acquire/release로 빌려 주는 풀 워크트리는 보이지 않습니다. 브랜치 아이콘과 브랜치 이름, 흐린 폴더명(루트는 "루트"), 오른쪽 변경 수. git이 아닌 폴더(notes)는 이 단계를 건너뜁니다.</div>
+  <div><b>3. 세션</b>왼쪽 ☆은 "선호 에이전트" 표시입니다. 꺼진 별은 마우스를 올린 행에서만 보이고(키보드 포커스 포함, 터치 화면에서는 흐리게 항상), 누르면 ★로 켜져 늘 보입니다. 자리는 비워 두어 정렬이 흔들리지 않습니다. 첫 줄 오른쪽 시각은 마지막 도구 호출 시각입니다. 둘째 줄은 마지막 메시지 한 줄이고, 사용자가 마지막으로 말한 경우 앞에 "나"가 붙습니다(foldedpaperheron). 정책 질문 수 칩은 남겼습니다.</div>
+  <div><b>+ 버튼</b>마우스를 올린 줄에서만 보입니다(터치 화면에서는 흐리게 항상). 레일 머리의 +는 워크스페이스 추가, 워크스페이스 바의 +는 워크트리 추가, 브랜치 줄의 +는 새 세션입니다. git이 아닌 폴더(notes)는 바의 +가 바로 새 세션입니다.</div>
+  <div><b>새 세션 창</b>트래커 지원 채팅의 선택 팝업(하네스 / 모델 검색 / 노력 수준 손잡이, dashboard.js <code>supDrawPop</code>)을 그대로 쓰고, 어느 워크트리에서 시작하는지와 시작 버튼만 더했습니다. 선택지 목록도 같은 <code>/support/choices</code>에서 옵니다.</div>
+  <div><b>워크트리 추가 창</b>새 브랜치(기준 브랜치 선택) 또는 기존 브랜치. 폴더 기본값은 <code>../.ws-dashboard-worktrees/&lt;루트 폴더 이름&gt;/&lt;YYMMDD-HHMM&gt;</code>이고, "직접 지정"으로 절대 경로를 넣을 수 있습니다.</div>
+  <div><b>워크스페이스 추가 창</b>폴더 선택 창 없이 절대 경로만 받습니다(대시보드를 다른 PC에서 보면 선택 창이 엉뚱한 화면에 뜨기 때문). 붙여 넣은 값은 입력 중에 데몬 쪽 경로로 풀어 보여 줍니다: 앞뒤 따옴표 제거, <code>C:\</code>·<code>/c/</code>·<code>/mnt/c/</code> → <code>/mnt/c/</code>, <code>\\wsl$\배포판\</code>·<code>\\wsl.localhost\배포판\</code> → 리눅스 경로, <code>~</code> → 홈, 역슬래시 → 슬래시, 끝 슬래시 제거. 상대 경로는 거절합니다. 추가 결과는 알림으로(추가됨 / 이미 워크트리라 변경 없음 / 합쳐짐). 예시 버튼으로 바로 볼 수 있습니다.</div>
+  <div><b>선호 핀</b>별을 켠 세션은 자기 워크트리 안에서 맨 위로 고정됩니다(develop의 lemonlaggingstumppreheated). 별을 끄면 원래 순서로 돌아갑니다.</div>
+  <div><b>4. 상태 표시</b>하네스 배지(CLAUDE / PI) 테두리를 빛이 돌면 리드가 일하는 중입니다. 로봇이 깜빡이면 서브에이전트가 일하는 중이고, 옆 숫자는 리드가 직접 띄운(1단계) 실행 중 서브에이전트 수입니다. 없으면 로봇과 숫자 자리만 비워 둡니다. 배지 폭을 고정해서 줄마다 로봇과 ID가 같은 세로선에 섭니다. 마지막 메시지 줄은 배지 시작선에 맞췄습니다.<div style="margin-top:8px;box-shadow:none;padding:0;display:flex;flex-wrap:wrap;gap:8px 16px"><span style="display:inline-flex;align-items:center;gap:6px"><span class="gut"><span class="host sm hb">CLAUDE</span><span class="bots zero"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M8 2.2v2"/><circle cx="8" cy="1.8" r=".9" fill="currentColor" stroke="none"/><rect x="2.8" y="4.6" width="10.4" height="8.4" rx="2.4"/><circle cx="6" cy="8.6" r="1.05" fill="currentColor" stroke="none"/><circle cx="10" cy="8.6" r="1.05" fill="currentColor" stroke="none"/><path d="M1.2 8v2.2M14.8 8v2.2"/></svg></span></span>대기</span><span style="display:inline-flex;align-items:center;gap:6px"><span class="gut"><span class="host sm hb run">CLAUDE<svg class="ring" aria-hidden="true"><rect class="rtrk"/><rect class="rrun" pathLength="100"/></svg></span><span class="bots zero"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M8 2.2v2"/><circle cx="8" cy="1.8" r=".9" fill="currentColor" stroke="none"/><rect x="2.8" y="4.6" width="10.4" height="8.4" rx="2.4"/><circle cx="6" cy="8.6" r="1.05" fill="currentColor" stroke="none"/><circle cx="10" cy="8.6" r="1.05" fill="currentColor" stroke="none"/><path d="M1.2 8v2.2M14.8 8v2.2"/></svg></span></span>리드 작업</span><span style="display:inline-flex;align-items:center;gap:6px"><span class="gut"><span class="host sm hb">CLAUDE</span><span class="bots on"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M8 2.2v2"/><circle cx="8" cy="1.8" r=".9" fill="currentColor" stroke="none"/><rect x="2.8" y="4.6" width="10.4" height="8.4" rx="2.4"/><circle cx="6" cy="8.6" r="1.05" fill="currentColor" stroke="none"/><circle cx="10" cy="8.6" r="1.05" fill="currentColor" stroke="none"/><path d="M1.2 8v2.2M14.8 8v2.2"/></svg>2</span></span>서브에이전트 작업</span><span style="display:inline-flex;align-items:center;gap:6px"><span class="gut"><span class="host sm hb run">CLAUDE<svg class="ring" aria-hidden="true"><rect class="rtrk"/><rect class="rrun" pathLength="100"/></svg></span><span class="bots on"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M8 2.2v2"/><circle cx="8" cy="1.8" r=".9" fill="currentColor" stroke="none"/><rect x="2.8" y="4.6" width="10.4" height="8.4" rx="2.4"/><circle cx="6" cy="8.6" r="1.05" fill="currentColor" stroke="none"/><circle cx="10" cy="8.6" r="1.05" fill="currentColor" stroke="none"/><path d="M1.2 8v2.2M14.8 8v2.2"/></svg>2</span></span>둘 다</span></div></div>
+</div>
+
+<script>
+const fr=document.getElementById('frame');
+function rail(open){fr.classList.toggle('open',open);document.getElementById('railbtn').setAttribute('aria-expanded',String(open));}
+document.querySelectorAll('[data-m]').forEach(b=>b.addEventListener('click',()=>{fr.dataset.mode=b.dataset.m;rail(false);
+  document.querySelectorAll('[data-m]').forEach(x=>x.setAttribute('aria-pressed',String(x===b)));}));
+document.getElementById('railbtn').addEventListener('click',()=>rail(!fr.classList.contains('open')));
+document.getElementById('scrim').addEventListener('click',()=>rail(false));
+document.addEventListener('keydown',e=>{if(e.key==='Escape')rail(false)});
+document.querySelectorAll('.wsbar').forEach(b=>b.addEventListener('click',e=>{if(!e.target.closest('.add'))b.parentElement.classList.toggle('col');}));
+document.querySelectorAll('.sess').forEach((r,i)=>r.dataset.ord=i);
+function pin(box){[...box.querySelectorAll(':scope>.sess')].sort((a,b)=>{const sa=a.querySelector('.star').getAttribute('aria-pressed')==='true',sb=b.querySelector('.star').getAttribute('aria-pressed')==='true';return (sb-sa)||(a.dataset.ord-b.dataset.ord);}).forEach(r=>box.appendChild(r));}
+document.querySelectorAll('.star').forEach(b=>b.addEventListener('click',e=>{e.stopPropagation();b.setAttribute('aria-pressed',String(b.getAttribute('aria-pressed')!=='true'));pin(b.closest('.sessions'));}));
+document.querySelectorAll('.sessions').forEach(pin);
+document.querySelectorAll('.sess').forEach(s=>s.addEventListener('click',()=>{
+  document.querySelectorAll('.sess').forEach(x=>x.classList.remove('cur'));s.classList.add('cur');
+  document.querySelector('.ttl').textContent=s.querySelector('.rid').textContent;rail(false);}));
+let openPop=null,openBtn=null;
+function closePop(){if(openPop){openPop.classList.remove('on');openBtn.setAttribute('aria-expanded','false');openPop=openBtn=null;}}
+document.querySelectorAll('.add').forEach(b=>b.addEventListener('click',e=>{e.stopPropagation();
+  const p=document.getElementById('pop-'+b.dataset.add);if(openPop===p){closePop();return;}closePop();
+  const fr=document.getElementById('frame').getBoundingClientRect(),r=b.getBoundingClientRect();
+  p.classList.add('on');p.style.top=Math.min(r.bottom-fr.top+4,fr.height-p.offsetHeight-8)+'px';p.style.left=Math.max(8,Math.min(r.right-fr.left-p.offsetWidth,fr.width-p.offsetWidth-8))+'px';
+  b.setAttribute('aria-expanded','true');openPop=p;openBtn=b;}));
+document.querySelectorAll('.pop').forEach(p=>p.addEventListener('click',e=>{e.stopPropagation();if(e.target.closest('.mi,[data-close]'))closePop();}));
+document.addEventListener('click',closePop);
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closePop()});
+document.querySelectorAll('.pop').forEach(p=>p.addEventListener('click',e=>{const t=e.target.closest('[data-toast]');if(t)toast(t.dataset.toast,t.dataset.kind);
+  const r=e.target.closest('.spseg [role=radio]:not(:disabled)');if(r){r.parentElement.querySelectorAll('[role=radio]').forEach(x=>x.setAttribute('aria-checked',String(x===r)));
+    if(r.dataset.br){document.getElementById('br-new').hidden=r.dataset.br!=='new';document.getElementById('br-old').hidden=r.dataset.br!=='old';}}
+  const li=e.target.closest('.splist li');if(li)li.parentElement.querySelectorAll('li').forEach(x=>x.setAttribute('aria-selected',String(x===li)));
+  const kd=e.target.closest('.kdot');if(kd){const lv=['low','medium','high','xhigh','max'],i=[...kd.parentElement.querySelectorAll('.kdot')].indexOf(kd);kd.parentElement.querySelector('.kthumb').style.left=kd.style.left;p.querySelector('.spval').textContent=lv[i];}
+  if(e.target.id==='dirmode'){const own=document.getElementById('dir-own');own.hidden=!own.hidden;document.getElementById('dir-def').hidden=!own.hidden;e.target.textContent=own.hidden?'직접 지정':'기본값 사용';}}));
+function toast(msg,kind){const t=document.createElement('div');t.className='toast'+(kind?' '+kind:'');t.textContent=msg;document.getElementById('toasts').appendChild(t);setTimeout(()=>t.remove(),2600);}
+document.querySelectorAll('.wthd .add').forEach(b=>b.addEventListener('click',()=>{const ws=b.closest('.ws').querySelector('.nm').textContent,br=b.closest('.wthd').querySelector('.br').textContent;document.getElementById('sessctx').textContent=ws+' · '+br;},true));
+document.querySelectorAll('.wsbar [data-add=sess]').forEach(b=>b.addEventListener('click',()=>{document.getElementById('sessctx').textContent=b.closest('.wsbar').querySelector('.nm').textContent;},true));
+
+function normPath(raw){let v=raw.trim().replace(/^["']+|["']+$/g,'').trim();if(!v)return null;
+  let m;
+  if(m=v.match(/^\\\\(?:wsl\$|wsl\.localhost)\\[^\\\/]+(.*)$/i)||v.match(/^\/\/(?:wsl\$|wsl\.localhost)\/[^\\\/]+(.*)$/i))v=(m[1]||'/').replace(/\\/g,'/');
+  else if(m=v.match(/^([A-Za-z]):[\\\/]?(.*)$/))v='/mnt/'+m[1].toLowerCase()+'/'+m[2].replace(/\\/g,'/');
+  else if(m=v.match(/^\/([A-Za-z])(\/.*)?$/))v='/mnt/'+m[1].toLowerCase()+(m[2]||'/');
+  else if(m=v.match(/^\/mnt\/([A-Za-z])(\/.*)?$/))v='/mnt/'+m[1].toLowerCase()+(m[2]||'/');
+  else if(v==='~'||v.startsWith('~/')||v.startsWith('~\\'))v='/home/me'+v.slice(1).replace(/\\/g,'/');
+  else if(v.startsWith('\\\\'))return {err:'다른 PC의 공유 폴더는 받지 않습니다'};
+  else if(!v.startsWith('/'))return {err:'절대 경로가 아닙니다'};
+  v=v.replace(/\/{2,}/g,'/');if(v.length>1)v=v.replace(/\/$/,'');return {path:v};}
+const RES={'/home/me/devenv-rail':['info','~/devenv-rail은 이미 devenv의 워크트리라 바뀐 것이 없습니다'],'/home/me/kb-old':['','kb-old가 kb-site의 워크트리라서 kb-site 아래로 합쳤습니다']};
+const wsp=document.getElementById('wspath'),wsr=document.getElementById('wsres'),wsg=document.getElementById('wsgo');
+function showNorm(){const r=normPath(wsp.value);wsr.classList.toggle('bad',!!(r&&r.err));wsg.disabled=!(r&&r.path);
+  wsr.innerHTML=!r?'<span class="spnote">탐색기 주소창이나 "경로로 복사"한 값을 그대로 붙여 넣으세요</span>':r.err?'<span class="k">'+r.err+'</span>':'<span class="k">이 경로로 추가합니다</span><code></code>';
+  if(r&&r.path)wsr.querySelector('code').textContent=r.path;}
+wsp.addEventListener('input',showNorm);showNorm();
+document.getElementById('wsex').addEventListener('click',e=>{const b=e.target.closest('[data-p]');if(b){wsp.value=b.dataset.p;showNorm();wsp.focus();}});
+wsg.addEventListener('click',()=>{const r=normPath(wsp.value);if(!r||!r.path)return;const x=RES[r.path]||['','워크스페이스 '+r.path.replace(/^\/home\/me/,'~')+'를 추가했습니다'];toast(x[1],x[0]);});
+wsp.addEventListener('keydown',e=>{if(e.key==='Enter'&&!wsg.disabled){wsg.click();closePop();}});
+</script>
+</body>
+</html>

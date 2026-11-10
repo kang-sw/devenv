@@ -37,7 +37,21 @@ complete ((18) a and note, (19)).
 ## Child Tickets
 
 Order ((27) c): the holder first, then the two tracks in parallel; file
-preview at any time.
+preview at any time. Sequence (user, 2026-11-10, (68) a; announced, (70)):
+
+1. `261110-feat-ws-dashboard-session-rail`, with the research ticket's
+   remaining verifications running alongside (they read, not write).
+2. `261110-feat-ws-dashboard-agent-panel-telemetry`.
+3. `261110-feat-ws-dashboard-session-holder` and
+   `261110-feat-ws-hosted-session-mode-flag` in parallel; workspaces
+   Phase 1 may run beside them ((69) a).
+4. `261110-feat-ws-dashboard-headless-lead-sessions` and
+   `261110-feat-ws-dashboard-terminal` in parallel. The research
+   verifications finish before headless-lead-sessions is promoted to
+   `ready/` ((70)).
+5. `261110-feat-ws-dashboard-workspaces` Phase 2.
+
+`261110-feat-ws-dashboard-file-preview` fills gaps at any point.
 
 - `261110-feat-ws-dashboard-session-holder` - shared foundation: a Python
   holder that owns agent processes and PTYs across daemon restarts.
@@ -47,15 +61,17 @@ preview at any time.
 - `261110-feat-ws-dashboard-headless-lead-sessions` - track A: spawn,
   input injection, approval, recovery, idle stop. After the holder and the
   flag.
-- `261110-feat-ws-dashboard-workspaces` - track A: the workspace model,
-  per-workspace sessions, CLI/daemon handoff. After the headless leads.
+- `261110-feat-ws-dashboard-workspaces` - track A: stored workspaces and
+  the rail's + buttons. Phase 1 (add workspace, add worktree) has no
+  prerequisite; Phase 2 (new session, CLI/daemon handoff) comes after the
+  headless leads ((69) a).
 - `261110-feat-ws-dashboard-terminal` - track B: browser terminal on holder
   PTYs. After the holder.
 - `261110-feat-ws-dashboard-file-preview` - track B: read-only browser and
   previews. No prerequisite.
 - `261110-feat-ws-dashboard-session-rail` - track A, multi-session UX for
-  today's sessions: the session rail and per-session draft restore. No
-  prerequisite.
+  today's sessions: the session rail grouped by workspace and worktree
+  ((62) a), and per-session draft restore. No prerequisite.
 - `261110-feat-ws-dashboard-agent-panel-telemetry` - track A, multi-session
   UX: peer lead branch, subagent model, effort, context tokens, and output
   rate. No prerequisite.
@@ -98,7 +114,8 @@ preview at any time.
   stop their own delivery and feed under one hosted-session flag and keep
   the rest. Rejected: excluding the mod or extension entirely.
 - **Workspace = root worktree or plain folder** (user, (08) b; (11)).
-  Linked worktrees show under their root.
+  Linked worktrees show under their root; idle ws pooled worktrees are not
+  shown ((54)); one that holds a session shows while it does ((71) a).
 
 ## Completion Criteria
 
