@@ -44,7 +44,7 @@ several `wb:topic` groups.
 
 | command | attributes | content |
 |---|---|---|
-| `wb:topic` | `name` | group of `wb:body`, `wb:edit`, `wb:add`, `wb:close` |
+| `wb:topic` | `name`, `label?` | group of `wb:body`, `wb:edit`, `wb:add`, `wb:close`; none with `label` |
 | `wb:body` | none | the topic's body, replaced whole; empty clears it |
 | `wb:edit` | `replace_all?` | fields `wb:old`, `wb:new` |
 | `wb:add` | `id?`, `class` | fields `wb:title`, `wb:option`..., `wb:recommend?`, `wb:why?`, `wb:link`... |
@@ -55,7 +55,7 @@ several `wb:topic` groups.
 | `wb:embed-dir` | `path` | none |
 
 ```xml
-<wb:topic name="Rollout">
+<wb:topic name="rollout" label="Rollout">
 <wb:body>
 ## Context
 Markdown up to the closing tag.
@@ -76,6 +76,18 @@ Markdown up to the closing tag.
 </wb:topic>
 ```
 
+- Topic stem: `<wb:topic name="ship-gate" label="Release gate">` keys the
+  topic by the stem `ship-gate` (lowercase letters, digits, and hyphens, at
+  most 40) and shows `label` as its name; later groups write
+  `<wb:topic name="ship-gate">` alone. Give a topic a stem when you create
+  it, so a long or changing title is never retyped. A group with `label`
+  on a stemmed topic renames the label, and one whose stem is new but whose
+  `label` is an existing stemless topic's name adopts that topic under the
+  stem; either may be sent alone as `<wb:topic name="..." label="..."/>`.
+  A topic without a stem is keyed by its name. A `name` resolves to a stem
+  first, then a stemless topic's name, then a stemmed topic's label, so an
+  old title still reaches an adopted topic. Stems and labels are one
+  namespace: a stem or label another topic already uses is refused.
 - `class`: `policy`, `technical`, or `announced`, the classes of the workflow
   manual's `### Asking the user`. An item belongs to its group's topic,
   which groups items on the page; `wb:title` is one line.
@@ -180,14 +192,21 @@ whiteboard.query payload: {topic?, ids?, id?, status?, text?, depth?, fields?, b
 - `payload` is a JSON object, every field optional. The filters `topic`,
   `id`, `ids`, `status`, and `text` AND together, except that `id` (a
   number) and `ids` (a list of numbers) union. `topic` and `status` take one
-  string or a list; `status` takes any of the five statuses. `text` matches
-  an item's title, options, rationale, or answer, ignoring case.
+  string or a list; `topic` resolves each name as `wb:topic name` does, and
+  `status` takes any of the five statuses. `text` matches a substring of an
+  item's title, options, rationale, or answer, ignoring case, and each
+  matching item line ends with `[match: <fields>]`.
 - `depth`: `topics` prints one line per topic: open or closed, its item
   counts by status, its body length, its last change, and its close result
   when closed. `items` adds a line per item under its topic: ID, status,
-  class, title. `full` adds the item's details; `fields`, a list from
-  `options`, `recommendation`, `rationale`, `answer` (with its time),
-  `answer_quote`, and `links`, picks which, all when omitted.
+  class, title. `summary` adds, under an open item, its full ask, and under
+  an answered or assumed item one decoded answer line (`answer: b: <option
+  text> - <note>`, ` (assumed)` appended); a withdrawn or superseded item
+  keeps only its line. `full` adds every detail; `fields`, a list from
+  `options`, `recommendation`, `rationale`, `answer`, `answered_at`,
+  `answer_quote`, and `links`, picks which, all when omitted. Items
+  answered together print their shared `answer_quote` once, then `same as
+  (nn)`.
 - `body: true` prints each listed topic's body after its topic line.
   `closed: true` lists closed topics, whose items follow the same depth and
   status as any topic's; otherwise one `omitted:` count stands for them.
@@ -196,14 +215,19 @@ whiteboard.query payload: {topic?, ids?, id?, status?, text?, depth?, fields?, b
 
   | target | depth | status | body | closed topics |
   |---|---|---|---|---|
-  | `ids` or `id` | `full` | all | no | listed |
-  | `topic` | `full` | all | yes | listed |
+  | `ids` or `id` | `summary` | all | no | listed |
+  | `topic` | `summary` | all | yes | listed |
   | `text` | `items` | all | no | listed |
   | none | `items` | `open` | no | folded |
 
   So `{"status": "answered"}` prints answered items at depth `items`; add
-  `"depth": "full"` for their details. `ids` and `text` list only the topics
-  holding a match.
+  `"depth": "full"` for their details, such as the `answer_quote` a ticket
+  quotes. `ids` and `text` list only the topics holding a match.
+- A topic line names a stemmed topic `topic <stem> "<label>"` and a
+  stemless one `topic "<name>"`. Item fields, labels, and close results
+  print `<code>` as backticks and `<br>` as a space, and drop the other
+  inline tags; the topic body and `answer_quote` print as stored, so a
+  `wb:edit` quote copies the body exactly.
 - Topics print in the order their first item was added, items in ID order.
   A last `omitted:` line counts what the defaults left out and names the
   filter that shows it.
@@ -240,7 +264,9 @@ reply: `(64) a, note: <text>` records the value `a, <text>`, and `(44), (45)
 ok` records `ok` on both with one `ids="44 45"` command (an `assumed` policy
 item records its option letter again), quoting the whole group. A reply that
 names no ID gets your reading with `assumed="true"`. A `[<topic>] <text>`
-line is the user's comment or question about that topic, from its note pen;
-answer it in that topic, with no item ID needed.
+line is the user's comment or question about that topic, from its note pen,
+naming the topic by its stem, or its name when it has none, which a
+`wb:topic name` takes as is; answer it in that topic, with no item ID
+needed.
 
 Confirmed decisions reach a ticket only through `{{.SkillNamespace}}:lead-ticket`, once the user moves to capture; the board clears with the session key.

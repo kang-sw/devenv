@@ -602,9 +602,14 @@ background body-marker line
 	if !strings.Contains(string(page), "body-marker") {
 		t.Fatalf("the body must survive an update that does not touch it")
 	}
+	// An id query defaults to depth summary: the settled item's answer only.
 	text := toolText(t, f.call(t, "whiteboard.query", map[string]any{"payload": map[string]any{"id": 1}}))
-	if !strings.Contains(text, "topic \"t\" [open]") || !strings.Contains(text, "\n  (01) [answered] [technical] settle me\n") || !strings.Contains(text, `answer_quote: "(01) ok"`) {
+	if !strings.Contains(text, "topic \"t\" [open]") || !strings.Contains(text, "\n  (01) [answered] [technical] settle me\n    answer: ok\n") || strings.Contains(text, "answer_quote") {
 		t.Fatalf("query output:\n%s", text)
+	}
+	text = toolText(t, f.call(t, "whiteboard.query", map[string]any{"payload": map[string]any{"id": 1, "depth": "full"}}))
+	if !strings.Contains(text, `answer_quote: "(01) ok"`) {
+		t.Fatalf("query output at depth full:\n%s", text)
 	}
 	if strings.Contains(text, "topic body:") {
 		t.Fatalf("a query without topic must not print a body:\n%s", text)
