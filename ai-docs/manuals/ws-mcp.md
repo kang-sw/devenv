@@ -62,7 +62,12 @@ Each session key is a directory, `<cache root>/sessions/<key>/`, holding
 config overrides, the child note, and the once-only flags), `agenda.json`,
 `todos.json`, and `whiteboard.json`. An absent part file is that part
 empty. A write replaces only the part files it changes, each atomically, and
-the lookup every keyed call makes reads `key.json` alone. `key.json` is also
+the lookup every keyed call makes reads `key.json` alone. Every content write,
+mint's claim included, holds the key's record lock (`key.json.lock` in its
+directory) across its read-modify-write, so ws processes serving one key do
+not lose each other's updates; a lock not acquired within 2 s fails the tool
+call. Readers take no lock, so a write of two parts (a mode switch's agenda
+and todos) can be seen half-applied from another process. `key.json` is also
 the key's claim (mint creates the directory exclusively) and its activity
 mark: keyed calls refresh its mtime at most hourly, and the prune that
 `ws.ferrule` runs at most daily deletes a key directory whose `key.json` is

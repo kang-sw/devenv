@@ -365,7 +365,7 @@ func upsertJSON(path string, next any) error {
 }
 
 func replaceFile(tmp, path string) error {
-	return atomicReplaceFile(tmp, path)
+	return AtomicReplaceFile(tmp, path)
 }
 
 func readProjectMetadata(path string) (ProjectMetadata, bool) {

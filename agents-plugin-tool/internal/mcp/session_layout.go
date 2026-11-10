@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +12,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/gofrs/flock"
 
 	"github.com/kang-sw/devenv/internal/wsstate"
 )
@@ -35,10 +38,24 @@ import (
 // (migrateRecord). Reads never move it: a reader may be a process that
 // outlives an update (the dashboard daemon) while the session's older ws-mcp,
 // which knows only keys/, still serves the key.
+//
+// More than one process can serve one key (a worker spawned with its lead's
+// key), so every write of a record's content holds the key's record lock,
+// sessions/<key>/key.json.lock (lockRecord), across the whole read-modify-write;
+// the in-process s.mu alone would let two processes lose each other's update.
+// The lock serializes writers only: readers take no lock, and a multi-part
+// write (an agenda and todos together) is still one replace per part, so a
+// reader in another process can see the first part replaced and not the next.
 
 const (
 	sessionsDirName   = "sessions"
 	legacyKeysDirName = "keys"
+
+	// recordLockName is the record lock file in a key's directory.
+	recordLockName = "key.json.lock"
+	// recordLockTimeout bounds the wait for a record lock, matching
+	// wsmailbox.LockTimeout.
+	recordLockTimeout = 2 * time.Second
 )
 
 // recordPart is a set of a session record's part files.
@@ -206,8 +223,9 @@ func (s *sessionStore) readRecord(d sessionDirs, key string, parts recordPart) (
 }
 
 // writeParts writes the parts in parts of record into key's directory, each
-// atomically (temp file and rename in the same directory) and in recordParts
-// order, and removes the file of an empty part. The caller holds s.mu.
+// atomically (temp file and replace in the same directory) and in recordParts
+// order, and removes the file of an empty part. The caller holds s.mu and the
+// key's record lock.
 func (s *sessionStore) writeParts(d sessionDirs, key string, record *sessionRecord, parts recordPart) error {
 	for _, part := range recordParts {
 		if parts&part == 0 {
@@ -224,7 +242,7 @@ func (s *sessionStore) writeParts(d sessionDirs, key string, record *sessionReco
 		if err != nil {
 			return err
 		}
-		if err := writeFileAtomic(path, payload); err != nil {
+		if err := s.writeFileAtomic(path, payload); err != nil {
 			return err
 		}
 	}
@@ -235,7 +253,7 @@ func (s *sessionStore) writeParts(d sessionDirs, key string, record *sessionReco
 // then key.json, then the legacy file's removal. A crash between steps leaves
 // both layouts: before key.json lands the legacy file still serves, after it
 // the split record wins on read, and the next write removes the legacy file.
-// The caller holds s.mu.
+// The caller holds s.mu and the key's record lock.
 func (s *sessionStore) migrateRecord(d sessionDirs, key string, record *sessionRecord) error {
 	if err := os.MkdirAll(d.keyDir(key), 0o755); err != nil {
 		return fmt.Errorf("create session dir: %w", err)
@@ -259,7 +277,9 @@ func removeLegacyRecord(d sessionDirs, key string) {
 // or reports false when the key is taken: a legacy record file of that name
 // exists, or its directory does (a split record, or another minter's claim).
 // Creating the directory is the claim: os.Mkdir fails with EEXIST for every
-// concurrent minter of the same candidate but one.
+// concurrent minter of the same candidate but one. The winner writes key.json
+// under the record lock, taken only after the claim: a lock file created first
+// would make the candidate look taken.
 func (s *sessionStore) claimKey(d sessionDirs, key string, payload []byte) (bool, error) {
 	if _, err := os.Lstat(d.legacyPath(key)); !errors.Is(err, fs.ErrNotExist) {
 		return false, nil
@@ -271,21 +291,74 @@ func (s *sessionStore) claimKey(d sessionDirs, key string, payload []byte) (bool
 		}
 		return false, fmt.Errorf("create session key dir: %w", err)
 	}
-	f, err := os.OpenFile(d.partPath(key, partKey), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	unlock, err := s.lockRecord(d, key)
+	if err == nil {
+		err = writeClaimFile(d.partPath(key, partKey), payload)
+		unlock() // before RemoveAll: Windows cannot delete an open lock file
+	}
 	if err != nil {
-		os.RemoveAll(dir)
-		return false, fmt.Errorf("create session key file: %w", err)
+		os.RemoveAll(dir) // do not leave a half-written claim behind
+		return false, err
+	}
+	return true, nil
+}
+
+// writeClaimFile creates a newly claimed key's key.json exclusively.
+func writeClaimFile(path string, payload []byte) error {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if err != nil {
+		return fmt.Errorf("create session key file: %w", err)
 	}
 	if _, err := f.Write(payload); err != nil {
 		f.Close()
-		os.RemoveAll(dir) // do not leave a half-written claim behind
-		return false, fmt.Errorf("write session key file: %w", err)
+		return fmt.Errorf("write session key file: %w", err)
 	}
 	if err := f.Close(); err != nil {
-		os.RemoveAll(dir)
-		return false, fmt.Errorf("close session key file: %w", err)
+		return fmt.Errorf("close session key file: %w", err)
 	}
-	return true, nil
+	return nil
+}
+
+// lockRecord takes key's record lock (recordLockName in its directory, which
+// must exist), waiting up to the store's lock timeout, and returns its
+// release. A wait past the timeout is an error, so a caller never writes
+// without the lock.
+func (s *sessionStore) lockRecord(d sessionDirs, key string) (func(), error) {
+	timeout := s.lockTimeout
+	if timeout <= 0 {
+		timeout = recordLockTimeout
+	}
+	lockPath := filepath.Join(d.keyDir(key), recordLockName)
+	fl := flock.New(lockPath)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	locked, err := fl.TryLockContext(ctx, 50*time.Millisecond)
+	if errors.Is(err, context.DeadlineExceeded) || (err == nil && !locked) {
+		return nil, fmt.Errorf("timed out after %s waiting for session record lock %s", timeout, lockPath)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("acquire session record lock: %w", err)
+	}
+	return func() { _ = fl.Unlock() }, nil
+}
+
+// lockExistingRecord takes the record lock of a key that has a record. A
+// legacy record has no key directory yet, so it is created for the lock, but
+// only once the legacy file is confirmed: a key with no record in either
+// layout is errSessionNotFound and leaves nothing behind.
+func (s *sessionStore) lockExistingRecord(d sessionDirs, key string) (func(), error) {
+	if !sessionKeyFilenamePattern.MatchString(key) {
+		return nil, errSessionNotFound
+	}
+	if _, err := os.Stat(d.partPath(key, partKey)); errors.Is(err, fs.ErrNotExist) {
+		if _, err := os.Stat(d.legacyPath(key)); err != nil {
+			return nil, errSessionNotFound
+		}
+		if err := os.MkdirAll(d.keyDir(key), 0o755); err != nil {
+			return nil, fmt.Errorf("create session dir: %w", err)
+		}
+	}
+	return s.lockRecord(d, key)
 }
 
 // listKeys returns every key with a directory in the split layout or a record
@@ -355,9 +428,16 @@ func (s *sessionStore) touch(d sessionDirs, key string) {
 	_ = os.Chtimes(path, now, now)
 }
 
-// writeFileAtomic replaces path via a temp file in its directory and a rename,
-// so a concurrent reader never observes a partial file.
-func writeFileAtomic(path string, payload []byte) error {
+// writeFileAtomic replaces path via a temp file in its directory and the
+// store's replace (wsstate.AtomicReplaceFile, which retries a Windows sharing
+// violation against a reader in another process), so a concurrent reader
+// never observes a partial file. A failed replace leaves path's previous
+// content and removes the temp file.
+func (s *sessionStore) writeFileAtomic(path string, payload []byte) error {
+	replace := s.replace
+	if replace == nil {
+		replace = wsstate.AtomicReplaceFile
+	}
 	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+"-*.tmp")
 	if err != nil {
 		return err
@@ -372,7 +452,7 @@ func writeFileAtomic(path string, payload []byte) error {
 		os.Remove(tmpName)
 		return err
 	}
-	if err := os.Rename(tmpName, path); err != nil {
+	if err := replace(tmpName, path); err != nil {
 		os.Remove(tmpName)
 		return err
 	}
