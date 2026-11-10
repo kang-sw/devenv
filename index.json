@@ -337,19 +337,6 @@
     "261110-bug-ws-tracker-store-lock-network-split": {
       "registered_at": "2026-11-10T07:31:45Z"
     },
-    "261110-bug-ws-whiteboard-query-output-noise": {
-      "registered_at": "2026-11-10T10:49:27Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-10T11:18:38Z",
-        "impl": {
-          "branch": "impl/develop/spore-whiff-cake"
-        }
-      }
-    },
     "261110-chore-ws-mcp-test-suite-runtime": {
       "registered_at": "2026-11-09T15:09:05Z"
     },
@@ -389,7 +376,7 @@
         "email": "ki6080@gmail.com",
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
-        "phase": "active",
+        "phase": "closed",
         "touched_at": "2026-11-10T11:39:42Z",
         "impl": {
           "branch": "impl/develop/motor-dose-ashes"
