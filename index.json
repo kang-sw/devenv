@@ -420,7 +420,14 @@
       }
     },
     "261110-feat-ws-dashboard-terminal": {
-      "registered_at": "2026-11-10T10:36:10Z"
+      "registered_at": "2026-11-10T10:36:10Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "28ef83e379b353cc",
+        "track": "goal/develop/amber-ladle-orbit",
+        "phase": "active",
+        "touched_at": "2026-11-10T15:25:35Z"
+      }
     },
     "261110-feat-ws-dashboard-workspaces": {
       "registered_at": "2026-11-10T10:36:07Z",
