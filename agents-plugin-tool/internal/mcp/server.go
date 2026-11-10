@@ -5037,7 +5037,7 @@ func tools() []map[string]any {
 					"query":       stringProperty("search only, and required for it: the search box text, one line, in tracker.query's q grammar."),
 					"item":        stringProperty("focus only, and required for it: an item of your store, its ID as tracker.query prints it, such as maya.pc-5."),
 					"comment":     stringProperty("focus only, optional: a comment on that item's thread, its ID as tracker.query prints it among the item's comments."),
-					"scope":       enumStringProperty("scope only, and required for it.", wslive.UIScopes),
+					"scope":       enumStringProperty("scope only, and required for it. given is the set tracker.query's scope calls assigned.", wslive.UIScopes),
 					"mode":        enumStringProperty("view only, and required for it. The all scope's tree is list; received offers list alone.", wslive.UIViewModes),
 				},
 				"required": []string{"session_key", "op"},
