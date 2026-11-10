@@ -25,11 +25,19 @@ import (
 //     DNS-rebinding page;
 //   - it carries the LAN access token.
 //
-// One route needs neither: GET and HEAD of the shared mermaid script
-// (publicAsset), which a topic body's sandboxed frame loads from an opaque
-// origin that sends no cookie. That frame also inlines its images as data:
-// URLs (ImageDataURL, up to 2 MiB); a larger image falls back to the image
-// route, which a LAN viewer's frame cannot load.
+// Two routes need neither, both because a sandboxed frame's opaque origin
+// sends no cookie:
+//
+//   - GET and HEAD of the shared mermaid script (publicAsset), which a topic
+//     body's sandboxed frame loads. That frame also inlines its images as
+//     data: URLs (ImageDataURL, up to 2 MiB); a larger image falls back to
+//     the image route, which a LAN viewer's frame cannot load.
+//   - GET and HEAD of the HTML preview's capability route
+//     (previewCapability, fs_capability.go), which a preview card's
+//     sandboxed frame loads with its relative assets. It is admitted by the
+//     short-lived, root-scoped capability its path carries instead: the
+//     guard passes the route by its shape and the route answers 404 without
+//     a valid capability.
 //
 // The LAN token is not the endpoint file's shutdown token and is never
 // written to the endpoint file, so a LAN browser never holds the shutdown
@@ -85,7 +93,7 @@ func (d *Daemon) lanToken() (string, error) {
 // lanGuard is LAN mode's access guard (see the file comment).
 func (d *Daemon) lanGuard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if localViewer(r) || publicAsset(r) {
+		if localViewer(r) || publicAsset(r) || previewCapability(r) {
 			next.ServeHTTP(w, r)
 			return
 		}

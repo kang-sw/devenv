@@ -5,13 +5,15 @@
 <style>{{.Assets.WhiteboardCSS}}</style>
 <style>{{.Assets.CSS}}</style>
 <style>{{.Assets.TrackerCSS}}</style></head>
-<body class="dash {{.Mode}}">{{.Assets.WhiteboardSprite}}{{.Assets.Sprite}}<div class="dwrap">
+<body class="dash {{.Mode}}">{{.Assets.WhiteboardSprite}}{{.Assets.Sprite}}{{.Assets.LucideSprite}}<div class="dwrap">
 <div class="top"><a class="back" id="railbtn" href="/" title="{{t "nav.sessions"}}" aria-label="{{t "nav.sessions"}}" aria-controls="rail" aria-expanded="false">{{icon "back"}}</a>{{region . "head"}}{{template "sse"}}{{template "qsslot"}}</div>
 {{template "drawer" .}}
 <div class="banner" id="dash-banner" hidden></div>
 <div class="dbody"><aside id="rail" class="rail" aria-label="{{t "rail.title"}}">{{region . "rail"}}</aside><div class="rscrim" id="rscrim"></div>
 <main id="grid" class="dgrid {{.Mode}}">
 {{if .Adapter}}<nav id="tabbar" class="tabbar"><button data-tab="convo" aria-pressed="true">{{icon "chat"}}{{t "tab.conversation"}}<span class="tdot"></span></button><button data-tab="board" aria-pressed="false">{{icon "board"}}{{t "tab.board"}}<span class="tdot"></span></button></nav>
+<nav id="ctabs" class="ctabs" aria-label="{{t "tab.column"}}"><button type="button" data-ctab="convo" aria-pressed="true">{{t "tab.conversation"}}<span class="tdot"></span></button><button type="button" data-ctab="files" aria-pressed="false">{{t "tab.files"}}</button></nav>
+<section id="files" class="fpane" aria-label="{{t "tab.files"}}"></section>
 {{region . "tree"}}
 <div id="splitter" class="splitter" role="separator" aria-orientation="horizontal" aria-label="{{t "splitter.label"}}" tabindex="0" title="{{t "splitter.title"}}"></div>
 <div id="convo" class="convo">{{region . "entries"}}{{region . "convlive"}}</div>
@@ -29,6 +31,9 @@ window.wbMermaidFile = {{.Assets.MermaidFile}};</script>
 <script>{{.Assets.TrackerScript}}</script>
 <script>{{.Assets.MentionScript}}</script>
 <script>{{.Assets.RailScript}}</script>
+<script>{{.Assets.CardsScript}}</script>
+<script>{{.Assets.PreviewScript}}</script>
+<script>{{.Assets.FilesScript}}</script>
 <script>{{.Assets.Script}}</script>
 </body></html>
 {{end}}

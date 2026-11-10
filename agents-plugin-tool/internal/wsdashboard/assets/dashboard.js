@@ -165,10 +165,17 @@
   // TAB maps a region to the tab that shows it; PANE names the element whose
   // visibility tells whether a tab is shown in the current view. The panels
   // live in the drawer, whose handle carries their dot instead.
+  // The conversation column itself switches "Conversation | Files"
+  // (ctabs): its Files pane (files.js) stands in for the agents tree, the
+  // conversation, and the composer, which are only hidden meanwhile, so
+  // their scroll, the draft, and the tree's state survive the switch. The
+  // conversation tab counts as shown while either of the two shows.
   var TAB = { tree: "convo", entries: "convo", convlive: "convo", board: "board" };
   var PANE = { convo: "convo", board: "bcol" };
-  function tabShown(t) { return visible($(PANE[t])); }
+  var fpane = $("files"), filesSeen = false;
+  function tabShown(t) { return visible($(PANE[t])) || (t === "convo" && visible(fpane)); }
   function tabDot(t) { var b = doc.querySelector('#tabbar [data-tab="' + t + '"]'); return b && b.querySelector(".tdot"); }
+  function ctabDot() { return doc.querySelector('#ctabs [data-ctab="convo"] .tdot'); }
   function revealPanes() {
     PANES.forEach(function (id) {
       var el = $(id);
@@ -177,6 +184,15 @@
     pinConvo();
     nearTop(); // a conversation shown too short to scroll still loads older entries
     Object.keys(PANE).forEach(function (t) { var d = tabDot(t); if (d && tabShown(t)) d.classList.remove("on"); });
+    if (visible(convo) && ctabDot()) ctabDot().classList.remove("on");
+    // The Files pane hears each time it comes into view (a tab, a layout,
+    // or a resize showed it) and each time it leaves.
+    var fs = visible(fpane);
+    if (fs !== filesSeen && window.WsFiles) {
+      if (fs) window.WsFiles.shown();
+      else window.WsFiles.hidden();
+    }
+    filesSeen = fs;
   }
   function setLayout(v) {
     if (v !== "split" && v !== "tabs") v = "auto";
@@ -255,6 +271,14 @@
   function setTab(t) {
     grid.setAttribute("data-tab", t);
     q("#tabbar [data-tab]").forEach(function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-tab") === t)); });
+    revealPanes();
+  }
+  // setCtab switches the conversation column between the conversation and
+  // the Files pane; it is not kept across a reload.
+  function setCtab(t) {
+    if (t !== "files" || !fpane || !window.WsFiles) t = "convo";
+    grid.setAttribute("data-ctab", t);
+    q("#ctabs [data-ctab]").forEach(function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-ctab") === t)); });
     revealPanes();
   }
   if (live) {
@@ -436,6 +460,7 @@
       var dot = tabDot(TAB[name]);
       if (dot) dot.classList.add("on");
     }
+    if (live && TAB[name] === "convo" && !visible(convo) && visible(fpane) && ctabDot()) ctabDot().classList.add("on");
     if (name === "panels") drawerSwapped();
     if (name === "tree" || name === "convlive") drawerWait();
     if (name === "tree") agentTipSwapped();
@@ -462,6 +487,26 @@
     var b = region("board");
     if (b) Array.prototype.forEach.call(b.children, function (n) { var k = topicKey(n); if (k !== null) boardSeen["t:" + k] = n.outerHTML; });
   })();
+  // --- board cards (cards.js): the page's own cards among the topics --------
+  // The framework mounts on the board region once, before any board swap,
+  // and restores the cards this browser kept for the session. Showing a
+  // card switches to the board tab where the view shows one column at a
+  // time.
+  var cardBoard = mode !== "index" && window.WsCards ? region("board") : null;
+  if (cardBoard) {
+    if (window.WsPreview) window.WsPreview.setup({ renderDiff: gwRender, post: post, toast: toast });
+    window.WsCards.mount(cardBoard, {
+      key: "ws.dashboard.cards." + rid, load: load, save: save,
+      reveal: function () { if (live && !tabShown("board")) setTab("board"); }
+    });
+  }
+  // --- the Files pane (files.js): mounted once, loaded when first shown -------
+  if (live && fpane && window.WsFiles) {
+    window.WsFiles.mount(fpane, {
+      rid: rid, load: load, save: save, post: post, toast: toast, copy: copyText,
+      local: function () { return root.hasAttribute("data-sysopen"); }
+    });
+  }
   // morphBoard applies a board region event to el and returns the element
   // nodes it inserted, in order, for the caller to prepare.
   function morphBoard(el, html) {
@@ -513,15 +558,12 @@
       want.splice.apply(want, [want.indexOf(more), 1].concat(pages));
       ins.splice(ins.indexOf(more), 1);
     }
-    // Stale nodes go first, so the kept ones that stay in order are never
-    // moved: moving a frame reloads it.
-    var keep = new Set(want);
-    Array.prototype.slice.call(el.childNodes).forEach(function (n) { if (!keep.has(n)) el.removeChild(n); });
-    var cur = el.firstChild;
-    want.forEach(function (n) {
-      if (n === cur) cur = cur.nextSibling;
-      else el.insertBefore(n, cur);
-    });
+    // The page's own cards (cards.js) stand among the topics: they are
+    // woven into the wanted nodes at their places, and the board settles
+    // around them. Stale nodes go first, so the kept ones that stay in
+    // order are never moved (moving a frame reloads it), and a card is
+    // never moved at all.
+    window.WsCards.settle(el, window.WsCards.weave(want));
     return ins;
   }
   // Topic motion: a board swap's inserted topic sections grow from the
@@ -1456,6 +1498,8 @@
     if (b) { save(LAYOUT_KEY, b.getAttribute("data-layout")); setLayout(b.getAttribute("data-layout")); return; }
     b = t.closest("#tabbar [data-tab]");
     if (b) { setTab(b.getAttribute("data-tab")); return; }
+    b = t.closest("#ctabs [data-ctab]");
+    if (b) { setCtab(b.getAttribute("data-ctab")); return; }
   });
 
   // --- link actions: the menu a served page's marked links open ------------
@@ -1464,7 +1508,9 @@
   // no other anchor is touched. An image file link is also marked data-img;
   // an absolute image path outside the root is marked data-out, with the
   // image route as its href, which the daemon serves only to a browser on
-  // its own machine. A plain click opens the menu; Cmd/Ctrl+click on a link
+  // its own machine. A plain click opens the menu, or, on a file link the
+  // preview card can show (previews), the preview slot, with the menu on
+  // the right click and the keyboard activation instead; Cmd/Ctrl+click on a link
   // the page can open is left to the browser, which opens a new tab, and
   // opens the menu otherwise. The system-browser and native-app items show
   // only on a page the server marked data-sysopen (a browser on the daemon's
@@ -1505,12 +1551,22 @@
   function linkOpens(a) {
     return !!a.getAttribute("href") && (!a.hasAttribute("data-out") || root.hasAttribute("data-sysopen"));
   }
+  // previews reports a file link the preview card (preview.js) can show,
+  // decided from what the page already knows: a file inside the session
+  // root whose extension is not one no preview shows. What the server then
+  // finds binary or too large opens the card in its "not viewable" state.
+  function previews(a) {
+    var rel = a.getAttribute("data-rel");
+    return !!window.WsPreview && !!cardBoard && a.getAttribute("data-wl") === "file" && !!a.getAttribute("href") &&
+      !a.hasAttribute("data-out") && !!rel && window.WsPreview.takes(rel);
+  }
   function openLinkMenu(a, x, y) {
     closeLinkMenu(false);
     var kind = a.getAttribute("data-wl"), href = a.getAttribute("href");
     var rel = a.getAttribute("data-rel"), abs = a.getAttribute("data-abs"), url = a.href;
     var sys = root.hasAttribute("data-sysopen"), out = a.hasAttribute("data-out");
     var items = [];
+    if (previews(a)) items.push([wsT("js.menu.preview"), function () { window.WsPreview.open(rel); }]);
     if (linkOpens(a)) items.push([wsT("js.menu.newtab"), function () { window.open(url, "_blank", "noopener"); }]);
     if (href && sys && !out) {
       items.push([wsT("js.menu.sysopen"), function () {
@@ -1564,8 +1620,18 @@
     if (!a) return;
     if (linkOpens(a) && (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)) return;
     e.preventDefault();
+    // A pointer click on a link the preview can show opens the preview
+    // slot; its menu is on the right click and on the keyboard activation
+    // (a click event with no detail).
+    if (e.detail !== 0 && previews(a)) { window.WsPreview.open(a.getAttribute("data-rel")); return; }
     linkAt(a, e);
   }, true);
+  doc.addEventListener("contextmenu", function (e) {
+    var a = e.target && e.target.closest && e.target.closest("a[data-wl]");
+    if (!a || !previews(a)) return;
+    e.preventDefault();
+    openLinkMenu(a, e.clientX, e.clientY);
+  });
   // An image outside the session root (img[data-out]) loads only for a
   // browser on the daemon's machine; where it fails (a LAN viewer, a missing
   // file) its alt text and its absolute path, as a copy-only link, take its
@@ -4719,6 +4785,7 @@
     setSplit(savedSplit());
     setInput(load(INPUT_KEY));
     setTab("convo");
+    setCtab("convo");
   }
   restoreOpen(doc);
   // A body frame that posted its height before the listener above existed

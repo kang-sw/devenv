@@ -94,6 +94,16 @@ func guardedRoutes() []struct{ method, path, body string } {
 		{http.MethodGet, "/s/livesession/image?path=shot.png", ""},
 		{http.MethodGet, "/s/livesession/file?path=shot.png", ""},
 		{http.MethodGet, "/s/livesession/history", ""},
+		// The file browser's reads, and its host route with an action the
+		// route refuses, so a passing request runs no host command. Its
+		// capability route is admitted by the capability, not the guard
+		// (TestFSCapabilityRoute).
+		{http.MethodGet, "/s/livesession/fs/list", ""},
+		{http.MethodGet, "/s/livesession/fs/preview?path=shot.png", ""},
+		{http.MethodGet, "/s/livesession/fs/raw?path=shot.png", ""},
+		{http.MethodGet, "/s/livesession/fs/find?q=shot", ""},
+		{http.MethodGet, "/s/livesession/fs/search?q=shot", ""},
+		{http.MethodPost, "/s/livesession/fs/act", `{"path":"shot.png","action":"guard"}`},
 		{http.MethodGet, "/s/livesession/attachment/0123456789abcdef-1.png", ""},
 		{http.MethodPost, "/s/livesession/message", `{"text":"from the guard test"}`},
 		{http.MethodPost, "/s/livesession/cancel", `{"id":"x"}`},
