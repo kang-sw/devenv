@@ -331,19 +331,6 @@
     "261109-research-windows-code-signing-signpath": {
       "registered_at": "2026-11-09T00:46:52Z"
     },
-    "261110-bug-ws-dashboard-daemon-read-storm": {
-      "registered_at": "2026-11-10T05:25:31Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-10T05:35:43Z",
-        "impl": {
-          "branch": "impl/develop/shut-rink-swarm"
-        }
-      }
-    },
     "261110-bug-ws-mcp-move-close-guard-flake-and-suite-timeout": {
       "registered_at": "2026-11-10T01:04:17Z"
     },
