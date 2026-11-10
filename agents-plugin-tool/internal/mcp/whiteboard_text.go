@@ -32,11 +32,12 @@ const (
 
 	lineTicketQueueStateEnd = "\n\n### Trace a change before writing it"
 	lineTicketQueueBoard    = "- When you open or resume a queue, put its open items on the whiteboard:\n" +
-		"  `{{ns}}/whiteboard.query` the board, then in one `{{ns}}/whiteboard.update`\n" +
-		"  `wb:add` every open queue item the query does not return, under its ticket\n" +
-		"  ID (`id`), with a `wb:floor` at the queue's last-ID line so the store never\n" +
-		"  re-mints an ID already settled into `## Decisions`. Apply each settled\n" +
-		"  answer to the store through `wb:answer` as well as to the ticket."
+		"  `{{ns}}/whiteboard.query` with `ids` set to the queue's item IDs, then in one\n" +
+		"  `{{ns}}/whiteboard.update` `wb:add` each open queue item\n" +
+		"  the query does not return, under its ticket ID (`id`), with\n" +
+		"  a `wb:floor` at the queue's last-ID line so the store never re-mints an ID\n" +
+		"  already settled into `## Decisions`. Apply each settled answer to the store\n" +
+		"  through `wb:answer` as well as to the ticket."
 
 	whiteboardManualMandate = "### Whiteboard\n\n" +
 		"The whiteboard is your primary channel for what you ask the user. Every item\n" +

@@ -507,6 +507,14 @@ func TestWhiteboardRefusalsCarryProblemsAndGrammar(t *testing.T) {
 	if !strings.Contains(text, "## Query") || !strings.Contains(text, "whiteboard.query payload:") || strings.Contains(text, "## Commands") || strings.Contains(text, "## Command syntax") {
 		t.Fatalf("query refusal must repeat the Query section and not the Commands section: %s", text)
 	}
+	// Every problem is listed in one refusal, with the grammar.
+	resp = f.call(t, "whiteboard.query", map[string]any{"payload": map[string]any{"depth": "deep", "fields": []any{"answer", "bogus"}, "extra": 1}})
+	text = toolText(t, resp)
+	for _, want := range []string{"payload.depth: must be one of topics, items, full", "payload.fields[1]: must be one of", "payload.extra: unknown field", "whiteboard.query payload:"} {
+		if !isToolError(resp) || !strings.Contains(text, want) {
+			t.Fatalf("query refusal missing %q: %s", want, text)
+		}
+	}
 }
 
 // The retired payload argument goes through the full tools/call path, whose
@@ -595,7 +603,7 @@ background body-marker line
 		t.Fatalf("the body must survive an update that does not touch it")
 	}
 	text := toolText(t, f.call(t, "whiteboard.query", map[string]any{"payload": map[string]any{"id": 1}}))
-	if !strings.Contains(text, "(01) [answered] [technical] t: settle me") || !strings.Contains(text, `answer_quote: "(01) ok"`) {
+	if !strings.Contains(text, "topic \"t\" [open]") || !strings.Contains(text, "\n  (01) [answered] [technical] settle me\n") || !strings.Contains(text, `answer_quote: "(01) ok"`) {
 		t.Fatalf("query output:\n%s", text)
 	}
 	if strings.Contains(text, "topic body:") {
@@ -605,8 +613,10 @@ background body-marker line
 	if !strings.Contains(text, "topic body:") || !strings.Contains(text, "background body-marker line") || !strings.Contains(text, "settle me") {
 		t.Fatalf("query with topic must print the body and the items:\n%s", text)
 	}
-	if text := toolText(t, f.call(t, "whiteboard.query", map[string]any{})); !strings.Contains(text, "(01)") {
-		t.Fatalf("query with no payload must list every item:\n%s", text)
+	// With no payload the query lists open items only and names the answered
+	// one it left out.
+	if text := toolText(t, f.call(t, "whiteboard.query", map[string]any{})); strings.Contains(text, "(01)") || !strings.Contains(text, "topic \"t\" [open]") || !strings.Contains(text, "omitted: 1 item not open (answered 1)") {
+		t.Fatalf("query with no payload must list the topic and omit the answered item:\n%s", text)
 	}
 	// wb:edit changes the stored body, and the next query shows the change.
 	f.update(t, `<wb:topic name="t"><wb:edit><wb:old>body-marker</wb:old><wb:new>edited-marker</wb:new></wb:edit></wb:topic>`)
@@ -1201,7 +1211,7 @@ func TestWhiteboardWorkflowTextFollowsKnob(t *testing.T) {
 	if idx < 0 || idx > strings.Index(ticketOn, "### Trace a change before writing it") || idx < strings.Index(ticketOn, "### Queue state") {
 		t.Fatalf("knob on: lead-ticket must carry the queue step inside Queue state:\n%s", ticketOn)
 	}
-	for _, want := range []string{"a `wb:floor` at the queue's last-ID line", "the query does not return"} {
+	for _, want := range []string{"a `wb:floor` at the queue's last-ID line", "the query does not return", "with `ids` set to the queue's item IDs"} {
 		if !strings.Contains(bullet, want) {
 			t.Fatalf("queue step missing %q", want)
 		}

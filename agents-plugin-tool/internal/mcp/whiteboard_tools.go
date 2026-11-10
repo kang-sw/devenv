@@ -301,11 +301,11 @@ func (s *Server) handleWhiteboardQuery(id json.RawMessage, args map[string]any) 
 	if !ok {
 		return toolTextResponse(id, "", fmt.Errorf("%s: session key not found: %s", tool, key))
 	}
-	items, body, problems := wswhiteboard.Query(rec.Whiteboard, args["payload"])
+	result, problems := wswhiteboard.Query(rec.Whiteboard, args["payload"])
 	if len(problems) > 0 {
 		return toolErrorTextResponse(id, s.whiteboardRefusal(tool, problems))
 	}
-	return toolTextResponse(id, wswhiteboard.FormatItems(items, body), nil)
+	return toolTextResponse(id, wswhiteboard.FormatQuery(result), nil)
 }
 
 // whiteboardRefusal lists every problem and then the tool's own input
