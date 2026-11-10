@@ -326,6 +326,58 @@ Verification (Go tests, remote):
   the daemon through the drain path.
 - `dashboard.enabled` follows the rule of Decision 6.
 
+### Result (b9f4fb8) - 2026-11-10
+
+Commits `61e32d7` (spine: upgrade route, hello, per-connection `mcp.Server`
+seam, `daemon-start`, drain), `7c3a8c5` (every process-global read in
+`internal/mcp` routed through the seam; `wsgit.LookPathEnv` so a hosted
+server's git is the caller's PATH's), `b9f4fb8` (exec jobs and the tracker
+host's git under the connection environment; hosted-session tests through
+the real daemon).
+
+Hello wire format (Decision 10), pinned in `internal/wsdashboard/proxy.go`
+and documented under `## Daemon-Hosted MCP` in `ai-docs/manuals/ws-mcp.md`:
+`GET /mcp HTTP/1.1` with `Upgrade: ws-mcp`, `Connection: Upgrade`,
+`Authorization: Bearer <endpoint token>`, from a loopback peer with no
+`Origin`; `101 Switching Protocols` (401 token, 403 peer/Origin, 426 no
+upgrade headers, 503 no proxy handler), then a raw newline-delimited stream.
+First line from the launcher:
+`{"protocol": 1, "mode": "mcp"|"cli", "argv": [...], "cwd", "project_root",
+"env": {whole environment}, "harness": "" (optional hint), "owner_pid",
+"version"}`. Daemon answer: `{"ok": true, "version", "pid"}` or
+`{"ok": false, "reason"}` then close. `mcp` mode: the stream is the MCP
+session of a server built from the hello (`NewServerWithOptions`). `cli`
+mode (argv `mailbox wait ...` only): frames `{"stream": "stderr", "data"}`
+as written, then `{"final": true, "exit_code", "data": <stdout>}`; the
+connection's end cancels the wait (`WaitOptions.Done`, exit 130) and clears
+its pid-owned listening marker.
+
+Decisions taken: the hello `harness` is a hint only, the server still
+detects the harness from `initialize`; `owner_pid` replaces `os.Getpid()`
+for mailbox presence and listening markers (a replacement wait by another
+launcher keeps its marker: `ClearListeningMarker` is pid-gated);
+`WS_MCP_NO_DASHBOARD` now means no registration/prune only, the daemon is
+the launcher's business; `DashboardSessionSource` readers, the crash sinks
+(`crashDir`, package `recordPanic`, `RecordLifecycleEvent`), `LeadToolNames`
+(the CLI's capabilities list) and the wsagent runner (a daemon component)
+stay process-level; the wsmailbox machine store path and wsconfig/wsstate
+fall back to the daemon environment when the hello carries no
+`WS_CONFIG_HOME`/`WS_CACHE_HOME`, which the launcher's daemon dir resolution
+makes the same root.
+
+Verification: `ws-rgo test ./... -count=1` ok, `vet ./...` clean, `gofmt -l`
+only the pre-existing `internal/wstracker` hits. Covered by
+`internal/wsdashboard/proxy_test.go` (route refusals, hello refusal reasons,
+drain in-flight/long-wait/budget), `internal/mcp/process_env_test.go` (two
+hosted servers isolated by env, owner pid in presence, subprocess on the hello
+PATH), `cmd/ws-mcp/daemon_proxy_test.go` (session end marks the registration
+ended and leaves a stale presence; same-name claim conflicts; dashboard-off
+session registers nothing and replaces nothing; hosted wait cancelled by its
+connection, replacement marker kept, timed-out wait answers in frames with
+exit 3; global `lan_enabled` change replaces the daemon through drain and
+the drained streams end). `WS_WORKTREE_DIR` isolation is covered by the
+cache-home isolation of the session-key store, not by a dedicated assertion.
+
 ### Phase 2: proxy launcher, Pi, and acceptance
 
 The launcher side of Decisions 1, 4, 5, 7 (proxy, staged start,
@@ -353,3 +405,38 @@ Verification:
   gate: the daemon runs from the staged `dashboard/bin/` executable, a
   session spawns no plugin-copy executable, and the protector prompts at
   most once per version.
+
+### Result (09b041e) - 2026-11-10
+
+Commit `09b041e`. The launcher's `DaemonLink`/`McpProxy` block (stdlib only,
+three byte-identical copies) does Decisions 1, 4, 5, 7, 8; Pi
+`serverVersionAcceptable` (same minor, equal or newer); manifest
+descriptions reworded in all three packages (wsflow still differs only in
+`dashboard.enabled`'s default); `ws-mcp.md` gained `## Daemon-Hosted MCP`
+and the `WS_MCP_LAUNCHER_DIRECT` row.
+
+Decisions taken: the launcher's runtime version for the daemon comparison
+is `runtime.json` `plugin_version` (no second executable run); build time is
+the runtime binary's mtime in ms; a reconnect gives a successor 1.5 s before
+running `daemon-start`; `WS_MCP_LAUNCHER_DIRECT=1` opts out of the proxy;
+the replayed `initialize` carries a launcher-owned id
+(`ws-mcp-launcher-replay-<n>`) and its answer is dropped; parent-death watch
+on Windows only (`_winapi`), as in Go.
+
+Verification: `agents-plugin/tests` 99 tests ok (18 new in
+`test_ws_mcp_launcher_proxy.py` over a fake daemon: present, staged start,
+unanswering, cross-minor, refused, newer same-minor with extra tools,
+replacement reconnect with replay and in-flight errors, died with and
+without a successor, mailbox wait frames and fallback, cache root/daemon
+dir/staged name parity with Go); Pi 9/9; Go end-to-end
+`cmd/ws-mcp/launcher_proxy_test.go`: the real launcher stages the binary,
+starts the daemon from the staged copy (the only entry in `dashboard/bin/`),
+serves `initialize`, `tools/list`, `runtime.read`, a second session reuses
+the daemon, and `mailbox wait` through the launcher answers like the direct
+CLI (same JSON but the re-arm command's program name, same exit 3). The
+server sends no server-initiated notification of its own, so notification
+pass-through is covered by the fake-daemon test (`notify-me`), not the
+smoke. Windows `ws-mcp-ci` shards: not run; the workflow runs on
+`pull_request`/`workflow_dispatch` only and the worker never pushes, so the
+lead dispatches it after the push (deferred). Acceptance on the user's
+Windows machine stays with the user at the release gate.
