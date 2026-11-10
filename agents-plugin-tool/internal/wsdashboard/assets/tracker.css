@@ -782,6 +782,14 @@ body.tk-menuon .tk .ir-more { visibility: hidden !important; }
 .tk .nrow .i { color: var(--wb-primary); }
 .tk .subrow .ind { color: var(--wb-muted-fg); }
 .tk .nrow input, .tk .subrow input { flex: 1 1 auto; min-width: 0; height: 24px; border: 0; outline: 0; background: transparent; color: var(--wb-fg); font: inherit; font-size: 13px; }
+/* the quick-add row's chips (status, assignee, due): muted while at their defaults */
+.tk .nrow .nch { flex: 0 1 auto; display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 140px; height: 22px; padding: 0 7px; border-radius: 999px; border: 1px solid var(--wb-line); background: var(--wb-card); color: var(--wb-fg); font: inherit; font-size: 11.5px; cursor: pointer; }
+.tk .nrow .nch > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tk .nrow .nch svg { width: 13px; height: 13px; flex: none; }
+.tk .nrow .nch .av { width: 16px; height: 16px; margin-left: -3px; font-size: 7.5px; }
+.tk .nrow .nch.dflt { color: var(--wb-muted-fg); }
+.tk .nrow .nch.dflt .i { color: inherit; }
+.tk .nrow .nch:hover, .tk .nrow .nch[aria-expanded="true"], .tk .nrow .nch:focus-visible { border-color: var(--wb-primary); outline: none; }
 .tk .nrow select { font: inherit; font-size: 11.5px; height: 22px; border-radius: 6px; border: 1px solid var(--wb-line); background: var(--wb-card); color: var(--wb-fg); }
 .tk .srows > .subrow { margin: 4px 0; }
 .tk .grow-row + .subrow { margin-left: 0; }

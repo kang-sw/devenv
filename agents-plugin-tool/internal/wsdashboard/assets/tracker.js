@@ -2977,10 +2977,10 @@
   }
   function drawMenu() {
     var m = $('tkmenu');
-    m.innerHTML = MN.kind === 'sync' ? syncPopHtml() : menuHtml();
+    m.innerHTML = MN.kind === 'sync' ? syncPopHtml() : MN.kind === 'new' ? newMenuHtml() : menuHtml();
     m.className = 'tk tk-menu' + (MN.kind === 'sync' ? ' spopw' : MN.step === 'assign' ? ' wide' : '');
     m.setAttribute('role', MN.kind === 'sync' || MN.step === 'assign' ? 'dialog' : 'menu');
-    m.setAttribute('aria-label', MN.kind === 'sync' ? wsT("js.tk.rib.tip") : wsT("js.tk.menu.aria", VS.items[MN.item] ? VS.items[MN.item].title : ''));
+    m.setAttribute('aria-label', MN.kind === 'sync' ? wsT("js.tk.rib.tip") : wsT("js.tk.menu.aria", mnItem() ? mnItem().title : ''));
     m.hidden = false;
     placeMenu();
     var first = m.querySelector('[data-autofocus]') || m.querySelector('[data-mi]:not([disabled]), button:not([disabled]), input');
@@ -3146,8 +3146,8 @@
       var sub = subtreeOf(root);
       return { t: 'r', root: root, levels: levels, n: inRange(sub, levels), pend: root !== v && !R[root], off: ruleCovered(it, root, levels) };
     }
-    var topic = it.kind === 'topic';
-    if (!q && !topic) {
+    var topic = it.kind === 'topic', norule = topic || it.draft; // the quick-add row assigns people only
+    if (!q && !norule) {
       var depth = Math.max.apply(null, [0].concat(vals(R)));
       if (depth) {
         out.push({ g: wsT("js.tk.ap.myteam") }, rule(v, 1));
@@ -3159,7 +3159,7 @@
       if (a === v || b === v) return a === v ? -1 : 1;
       return (R[a] || 99) - (R[b] || 99) || (a < b ? -1 : 1);
     });
-    if (q && !topic) {
+    if (q && !norule) {
       var leads = ids.filter(function (id) { return id !== v && inRange(subtreeOf(id), null); });
       if (leads.length) out.push({ g: wsT("js.tk.ap.teams") });
       leads.forEach(function (id) { out.push(rule(id, null)); });
@@ -3204,7 +3204,7 @@
   }
   // the list, the chips, and the apply button again; the search field (and an IME composition in it) stays
   function asgDraw() {
-    var it = VS.items[MN.item], S = asgState();
+    var it = mnItem(), S = asgState();
     if (!it || !$('tkalist')) return;
     $('tkalist').innerHTML = asgListHtml(it);
     $('tkachips').innerHTML = asgChipsHtml();
@@ -3218,7 +3218,7 @@
     var S = asgState(), o = S.opts.filter(function (x) { return !x.g && !x.off; })[i];
     if (!o) return;
     var k = asgKey(o), had = S.sel.some(function (x) { return asgKey(x) === k; });
-    var one = VS.items[MN.item] && VS.items[MN.item].kind === 'topic';
+    var one = mnItem() && mnItem().kind === 'topic';
     S.sel = one ? [] : S.sel.filter(function (x) { return asgKey(x) !== k && !(o.t === 'r' && x.t === 'r' && x.root === o.root); });
     if (!had) S.sel.push({ t: o.t, id: o.id, root: o.root, levels: o.levels });
     S.idx = i;
@@ -3226,8 +3226,10 @@
   }
   // people first, then rules ({root, levels?}; whole subtree without levels), as one item.assign
   function asgApply() {
-    var S = asgState(), it = VS.items[MN.item];
+    var S = asgState(), it = mnItem();
     if (!it || !S.sel.length) return;
+    // a chip's picker: the picks go to the row, sent with its create
+    if (it.draft) { var n = ui.nrow[ui.store]; n.who = S.sel.map(function (o) { return o.id; }); n.compl = S.compl; return newPicked(); }
     var people = S.sel.filter(function (o) { return o.t === 'p'; }).map(function (o) { return o.id; });
     var rules = S.sel.filter(function (o) { return o.t === 'r'; }).map(function (o) { return o.levels == null ? { root: o.root } : { root: o.root, levels: o.levels }; });
     commit([['item.assign', { item: it.id, targets: people.concat(rules), completion: asgCompl(S) }]]);
@@ -3268,9 +3270,10 @@
   }
   // The menu's own acts (m-*); the rest of a menu item's data-act goes through the shared handlers.
   function menuAct(k, a) {
-    var id = MN.item, it = VS.items[id];
+    var id = MN.item, it = mnItem();
     if (k === 'm-back') return menuBack();
     if (!it) return closeMenu(true);
+    if (MN.kind === 'new' && !/^m-(atog|ax|acm|aapply)$/.test(k)) return newAct(k, a);
     switch (k) {
       case 'm-atog': asgToggle(Number(a.getAttribute('data-ai'))); return $('tkaq').focus();
       case 'm-ax': {
@@ -3367,27 +3370,115 @@
 
   // ------------------------------------------------------------ inline writes
 
-  // A new item: an input row in the Items list (ui.nrow[store] = { val, kind, parent?, after?, at?, depth? }
-  // while it shows). The "+" that ends the panel opens it there (no `at`: it appends a root item);
-  // the hover insert opens it in a gap between rows (`at` names the row it sits against, and
-  // `parent` / `after` place the item where the row shows). Title + Enter creates the item; a task
-  // or todo is assigned to its creator in the same write (529); the row stays for the next one,
-  // which then goes after the one just made; Esc closes it. Priority, due, and assignees are set
-  // afterwards from the new row's menu.
+  // A new item: an input row in the Items list (ui.nrow[store] = { val, kind, st, who, compl, due,
+  // parent?, after?, at?, depth? } while it shows). The "+" that ends the panel opens it there (no
+  // `at`: it appends a root item); the hover insert opens it in a gap between rows (`at` names the
+  // row it sits against, and `parent` / `after` place the item where the row shows). Title + Enter
+  // creates the item; the row stays for the next one, which then goes after the one just made;
+  // Esc closes it. Priority is set afterwards from the new item's menu.
+  // The row's chips set status, assignee, and due before Enter (nrowChips, newMenu). Left at
+  // their defaults (idea, the viewer, none) the row sends the create plus the creator's status
+  // idea (asIdea), or for a topic the create plus the creator's assign (heldTopic). The chips keep
+  // their values across creates while the row stays open; closing it restores the defaults.
+  function nrowFill(n) {
+    if (!n.who) { n.st = 'idea'; n.who = [VS.viewer.member]; n.compl = null; n.due = ''; }
+    return n;
+  }
+  // a row opened from another (the hover insert moving it) keeps its text, kind, and chips
+  function nrowNew(o, place) {
+    var n = { val: o ? o.val : '', kind: o ? o.kind : 'task' };
+    if (o && o.who) { n.st = o.st; n.who = o.who; n.compl = o.compl; n.due = o.due; }
+    Object.keys(place || {}).forEach(function (k) { n[k] = place[k]; });
+    return nrowFill(n);
+  }
+  function nrowMine(n) { return n.who.length === 1 && n.who[0] === VS.viewer.member; }
+  // The status chip shows only while the viewer alone is the assignee: item.status writes only its
+  // author's own assignment, so anyone else starts in the store's own state (todo for someone
+  // within reach, pending otherwise). A topic has no status or due: only its one holder shows.
+  function nrowChips(n) {
+    var v = VS.viewer.member, topic = n.kind === 'topic', h = '';
+    function chip(id, step, label, inner, dflt) {
+      return '<button type="button" class="nch' + (dflt ? ' dflt' : '') + '" id="' + id + '"' + attr('act', 'nchip') + attr('step', step) +
+        ' aria-haspopup="' + (step === 'assign' ? 'dialog' : 'menu') + '" aria-expanded="false" aria-label="' + esc(label) + '"' + tipAttr(label) + '>' + inner + '</button>';
+    }
+    if (!topic && nrowMine(n)) h += chip('tknst', 'status', wsT("js.tk.new.st", stLabel(n.st)), SI.svg(n.st) + '<span>' + esc(stLabel(n.st)) + '</span>', n.st === 'idea');
+    var one = n.who.length === 1, wl = one ? nm(n.who[0]) : wsTn("js.tk.ap.n", n.who.length);
+    h += chip('tknwho', 'assign', wsT("js.tk.new.who", wl), one ? '<i class="av' + (n.who[0] === v ? ' me' : '') + '">' + esc(initials(n.who[0])) + '</i><span>' + esc(wl) + '</span>' :
+      '<svg class="i"><use href="#tki-assign"/></svg><span>' + esc(wl) + '</span>', nrowMine(n));
+    if (!topic) h += chip('tkndue', 'due', wsT("js.tk.new.due", n.due || wsT("js.tk.new.due.none")), '<svg class="i"><use href="#tki-calendar"/></svg>' + (n.due ? '<span>' + esc(n.due) + '</span>' : ''), !n.due);
+    return h;
+  }
   function newRowHtml() {
     var n = ui.nrow[ui.store];
     if (!n) return '';
+    nrowFill(n);
     return '<div class="nrow"' + (n.depth ? ' style="--ind:' + n.depth + '"' : '') + '><svg class="i"><use href="#tki-plus"/></svg><input type="text" id="tknew" data-keep autocomplete="off" value="' + esc(n.val) + '" placeholder="' + wsT("js.tk.new.ph") + '" aria-label="' + wsT("js.tk.new.aria") + '">' +
+      nrowChips(n) +
       '<select id="tknewkind" aria-label="' + wsT("js.tk.form.kind") + '">' + ['task', 'topic'].map(function (k) { return '<option value="' + k + '"' + (k === n.kind ? ' selected' : '') + '>' + esc(kindName(k)) + '</option>'; }).join('') + '</select>' +
       '<button type="button" class="ia"' + attr('act', 'new-x') + ' aria-label="' + wsT("js.tk.dlg.cancel") + '"' + tipAttr(wsT("js.tk.new.close")) + '><svg class="i"><use href="#tki-x"/></svg></button></div>';
+  }
+  // The kind select: a topic takes one holder, so several picked people fall back to the viewer.
+  function nrowKind(kind) {
+    var n = ui.nrow[ui.store];
+    if (!n) return;
+    nrowFill(n).kind = kind;
+    if (kind === 'topic' && n.who.length !== 1) n.who = [VS.viewer.member];
+    render();
+    if ($('tknewkind')) $('tknewkind').focus({ preventScroll: true });
+  }
+  // A chip's picker: the item menu's own step (MN.kind 'new') over the row's draft instead of an item.
+  function newMenu(step, anchor) {
+    var n = ui.nrow[ui.store];
+    if (!n) return;
+    nrowFill(n);
+    var as = step === 'assign' ? { q: '', sel: n.who.map(function (id) { return { t: 'p', id: id }; }), compl: n.compl, idx: 0, opts: [] } : null;
+    openMenu({ kind: 'new', step: step, from: null, q: '', as: as }, anchor);
+  }
+  // the item the asg* steps read: the row's draft (no records, no id) for a chip's picker
+  function draftItem() {
+    var n = ui.nrow[ui.store];
+    return n ? { id: '', kind: n.kind, title: n.val.trim() || wsT("js.tk.new.item"), assignments: [], draft: true } : null;
+  }
+  function mnItem() { return MN.kind === 'new' ? draftItem() : VS.items[MN.item]; }
+  function newMenuHtml() {
+    var n = ui.nrow[ui.store], d = draftItem();
+    if (!n) return '';
+    var h = '<div class="mh"><b>' + esc(d.title) + '</b></div>';
+    if (MN.step === 'status') {
+      return h + '<div class="mst" role="group" aria-label="' + wsT("js.tk.prop.status") + '">' + ['idea', 'todo', 'doing', 'blocked'].map(function (s) {
+        var on = s === n.st;
+        return '<button type="button" class="mr" role="menuitemradio" aria-checked="' + on + '" data-mi' + attr('act', 'm-status') + attr('status', s) + (on ? ' data-autofocus' : '') + '>' + SI.svg(s) + '<span>' + esc(stLabel(s)) + '</span></button>';
+      }).join('') + '</div>';
+    }
+    if (MN.step === 'due') {
+      return h + '<div class="mrow"><input type="date" id="tkmdue" data-mi data-autofocus value="' + esc(n.due) + '" aria-label="' + wsT("js.tk.menu.due") + '">' +
+        btn('m-due-set', wsT("js.tk.menu.due.set"), {}, 'primary') + '</div>' + (n.due ? mi('m-due-clear', wsT("js.tk.menu.due.clear"), {}, { icon: 'x' }) : '');
+    }
+    return h + asgHtml(d);
+  }
+  function newAct(k, a) {
+    var n = ui.nrow[ui.store];
+    if (!n) return closeMenu(false);
+    if (k === 'm-status') n.st = a.getAttribute('data-status');
+    else if (k === 'm-due-set') n.due = $('tkmdue').value || '';
+    else if (k === 'm-due-clear') n.due = '';
+    else return;
+    newPicked();
+  }
+  // a chip's pick lands: the row draws again and focus goes back to the chip (the title when gone)
+  function newPicked() {
+    var back = MN && MN.backEl ? MN.backEl.id : '';
+    closeMenu(false);
+    render();
+    var el = (back && $(back)) || $('tknew');
+    if (el) el.focus({ preventScroll: true });
   }
   function newBtn() {
     return '<button type="button" class="nadd"' + attr('act', 'create') + ' aria-label="' + wsT("js.tk.drawer.new") + '"' + tipAttr(wsT("js.tk.drawer.new.tip")) + '><svg class="i"><use href="#tki-plus"/></svg></button>';
   }
   function openNewRow() {
     if (!VS) return;
-    var o = ui.nrow[ui.store];
-    ui.nrow[ui.store] = { val: o ? o.val : '', kind: o ? o.kind : 'task' };
+    ui.nrow[ui.store] = nrowNew(ui.nrow[ui.store]);
     if (ui.layout === 'narrow') tabState().narrow = 'items';
     render();
     if ($('tknew')) $('tknew').focus();
@@ -3405,23 +3496,33 @@
   function createNew() {
     var n = ui.nrow[ui.store], title = $('tknew').value.trim(), v = VS.viewer.member;
     if (!n || !title) return;
-    var cp = { kind: n.kind, title: title };
+    nrowFill(n);
+    var cp = { kind: n.kind, title: title }, b;
     if (n.parent) cp.parent = n.parent;
     if (n.after != null) cp.after = n.after;
-    commit(cp.kind === 'topic' ? heldTopic(cp, v) : asIdea(cp), null, function (res) {
+    if (cp.kind === 'topic') b = heldTopic(cp, n.who.length === 1 ? n.who[0] : v);
+    else {
+      if (n.due) cp.due = n.due;
+      // anyone but the viewer alone: one assign, no status; the completion is the picker's, else
+      // assigner (asgCompl's rule: a target other than the viewer)
+      b = nrowMine(n) ? asIdea(cp, n.st) : [['item.create', cp], ['item.assign', { item: '$1', targets: n.who.slice(), completion: n.compl || 'assigner' }]];
+    }
+    commit(b, null, function (res) {
       n.val = '';
       if (n.at && res[0] && res[0].status === 'applied') { n.after = res[0].id; n.at = { item: res[0].id }; }
     });
   }
-  // (560) a quick-added task lands before todo: the create, then the creator's status idea in the
-  // same write. No assign: the store holds a task nobody else holds for its creator.
-  function asIdea(cp) {
-    return [['item.create', cp], ['item.status', { item: '$1', status: 'idea' }]];
+  // (560) a quick-added task lands before todo: the create, then the creator's status idea (or the
+  // status chip's pick) in the same write. No assign: the store holds a task nobody else holds for
+  // its creator.
+  function asIdea(cp, s) {
+    return [['item.create', cp], ['item.status', { item: '$1', status: s || 'idea' }]];
   }
-  // (529) a topic made here is its creator's at once: the create, then the assign that makes the
-  // creator its one holder (a topic has no fallback holder; the store ignores its completion)
-  function heldTopic(cp, v) {
-    return [['item.create', cp], ['item.assign', { item: '$1', mode: 'chosen', people: [v], completion: 'assignee' }]];
+  // (529) a topic made here is its holder's at once (the creator unless the assignee chip picked
+  // another): the create, then the assign that makes them its one holder (a topic has no fallback
+  // holder; the store ignores its completion)
+  function heldTopic(cp, holder) {
+    return [['item.create', cp], ['item.assign', { item: '$1', mode: 'chosen', people: [holder], completion: 'assignee' }]];
   }
   // The "all" kanban's idea column "+": an input row atop that column (ui.knew[store] = { val }).
   // Title + Enter creates a creator-held task at idea (asIdea). The row stays for the next one;
@@ -3517,7 +3618,7 @@
     if (!HV) return;
     var o = HV.opts[HV.pick], at = HV.a ? { rk: HV.a.getAttribute('data-rk') } : { rk: HV.b.getAttribute('data-rk'), before: true }, n = ui.nrow[ui.store];
     insHide();
-    ui.nrow[ui.store] = { val: n ? n.val : '', kind: n ? n.kind : 'task', parent: o.parent, after: o.after, at: at, depth: o.depth };
+    ui.nrow[ui.store] = nrowNew(n, { parent: o.parent, after: o.after, at: at, depth: o.depth });
     render();
     if ($('tknew')) $('tknew').focus();
   }
@@ -3806,7 +3907,7 @@
       if (sb.firstChild) sb.innerHTML = '';
       dropEditorState(false);
       if (MN && MN.kind === 'sync') { $('tkmenu').innerHTML = syncPopHtml(); placeMenu(); }
-      else if (MN && !VS.items[MN.item]) closeMenu(false);
+      else if (MN && (MN.kind === 'new' ? !ui.nrow[ui.store] : !VS.items[MN.item])) closeMenu(false);
       ui.itemChanged = false; ui.clearDraft = false;
       afterRender(name);
       measure();
@@ -3874,7 +3975,7 @@
       var mIn = $('tkmenu').contains(document.activeElement);
       $('tkmenu').innerHTML = syncPopHtml(); placeMenu();
       if (mIn) { var mf = $('tkmenu').querySelector('button'); if (mf) mf.focus({ preventScroll: true }); }
-    } else if (MN && !VS.items[MN.item]) closeMenu(false);
+    } else if (MN && (MN.kind === 'new' ? !ui.nrow[ui.store] : !VS.items[MN.item])) closeMenu(false);
     ui.itemChanged = false; ui.clearDraft = false;
     afterRender(name);
     measure();
@@ -4310,6 +4411,7 @@
         else if (k === 'mdet') { var mk = ui.store + '|' + d.who; ui.mdet[mk] = !ui.mdet[mk]; render(); }
         else if (k === 'idcopy') copyId(a);
         else if (k === 'new-x') closeNewRow();
+        else if (k === 'nchip') newMenu(a.getAttribute('data-step'), a);
         else if (k === 'knew') openKnew();
         else if (k === 'knew-x') closeKnew();
         else if (k === 'sub-x') closeSub();
@@ -4395,7 +4497,7 @@
       else if (t.id === 'f-status') { ui.status = t.value; render(); }
       else if (t.id === 'a-family') { ui.act.family = t.value; render(); }
       else if (t.id === 'a-member') { ui.act.member = t.value; render(); }
-      else if (t.id === 'tknewkind') { if (ui.nrow[ui.store]) ui.nrow[ui.store].kind = t.value; }
+      else if (t.id === 'tknewkind') nrowKind(t.value);
       else if (t.closest('#tkdlg form')) {
         var df = t.closest('form');
         if (t.name === 'saved') { // picking a saved profile fills the fields
