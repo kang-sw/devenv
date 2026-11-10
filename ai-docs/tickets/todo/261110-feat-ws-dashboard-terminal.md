@@ -38,6 +38,13 @@ and tab restore as new shells after a daemon restart. Tickets in `.done/`:
    or a desktop-shell origin, the same boundary as approval in
    `261110-feat-ws-dashboard-headless-lead-sessions`. Rejected: a separate
    terminal boundary (the weaker of two boundaries becomes the real one).
+4. **Each terminal is a card in the board column (user, 2026-11-10 whiteboard
+   note; (37) a and note).** Terminals sit among the whiteboard's topics in
+   the right column. Pinning a terminal card fixes it at the top. An
+   unpinned card keeps its place in the topic flow: its own activity, such
+   as a command finishing, never moves it up; it only moves down as updated
+   topics rise above it. Rejected: unpinned terminals grouped at a fixed
+   position under the pinned ones ((37) b).
 
 ## Prior Art
 
@@ -56,7 +63,7 @@ and tab restore as new shells after a daemon restart. Tickets in `.done/`:
   (`261110-feat-ws-dashboard-workspaces`) once it exists; before then, the
   terminal opens in a folder the user picks.
 - To settle at promotion: the terminal emulator library; shell selection per
-  platform; scrollback size; tab layout in the session page.
+  platform; scrollback size; the card's size and expansion in the board column.
 - Manuals: `ai-docs/manuals/shipped-surface-boundary.md`,
   `ai-docs/manuals/windows-dogfood.md`.
 

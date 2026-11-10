@@ -53,6 +53,12 @@ preview at any time.
   PTYs. After the holder.
 - `261110-feat-ws-dashboard-file-preview` - track B: read-only browser and
   previews. No prerequisite.
+- `261110-feat-ws-dashboard-session-rail` - track A, multi-session UX for
+  today's sessions: the session rail and per-session draft restore. No
+  prerequisite.
+- `261110-feat-ws-dashboard-agent-panel-telemetry` - track A, multi-session
+  UX: peer lead branch, subagent model, effort, context tokens, and output
+  rate. No prerequisite.
 - `261110-research-ws-dashboard-agent-host-foundations` - remaining
   verifications: `-p` feature coverage and ws hooks under `-p`, Pi parity.
 

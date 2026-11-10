@@ -4,6 +4,7 @@ parent: 261110-epic-ws-dashboard-agent-host
 blocked-by: 261110-feat-ws-dashboard-headless-lead-sessions
 related:
   261110-research-ws-dashboard-agent-host-foundations: "Topic 4 (multi-session and workspace management)"
+  261110-feat-ws-dashboard-session-rail: "the session list this ticket regroups by workspace"
 ---
 
 # Dashboard workspaces
@@ -36,13 +37,14 @@ directory, and the file preview root are all chosen by workspace.
 
 ## Constraints
 
-- The user also asked (2026-11-10) for multi-session management UX that
-  does not depend on the terminal, to be discussed next. Its scope overlaps
-  this ticket's session list; reconcile the two before promotion.
+- The session list starts as the session rail
+  (`261110-feat-ws-dashboard-session-rail`), grouped by project path; this
+  ticket changes the rail's grouping to workspaces rather than building a
+  second list (2026-11-10 whiteboard, (36) ok).
 - To settle at promotion: where workspaces are stored; how an existing
   CLI session is matched to a workspace; the session list per workspace
-  (lead and worker visibility); stop, archive, and remove; how the agents
-  panel and the session page scale to many sessions.
+  (lead and worker visibility) inside the rail; stop, archive, and remove;
+  how the agents panel and the session page scale to many sessions.
 - Manuals: `ai-docs/manuals/shipped-surface-boundary.md`.
 
 ## Phases

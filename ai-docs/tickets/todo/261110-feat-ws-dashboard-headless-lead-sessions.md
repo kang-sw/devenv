@@ -8,6 +8,7 @@ related:
   261110-research-ws-dashboard-background-task-visibility: "decides whether idle stop can see background tasks (Decision 6)"
   261108-feat-ws-tracker-support-agent-chat: "the wsagent runner this generalizes"
   261106-epic-ws-dashboard-serve-daemon: "its Non-Scope 241 b (no browser approval) is reopened under Decision 3"
+  261110-feat-ws-dashboard-agent-panel-telemetry: "agents panel telemetry this ticket supplies from the stream for daemon sessions"
 ---
 
 # Daemon-spawned headless lead sessions
@@ -85,6 +86,11 @@ and its hooks.
   servers. Which `-p` gaps matter (slash commands and skills, manual
   compaction, ws session-start hooks) and Pi parity are the foundations
   research's remaining verifications; settle them before promotion.
+- The dashboard feed is off for daemon sessions, so this ticket supplies
+  the agents panel telemetry of
+  `261110-feat-ws-dashboard-agent-panel-telemetry` (subagent model and
+  effort, context tokens, output rate) from the stream-json output ((41)
+  ok).
 - Daemon sessions and CLI sessions coexist in the session registry and the
   messenger.
 - To settle at promotion: the spawn UI and its options (harness, model,
