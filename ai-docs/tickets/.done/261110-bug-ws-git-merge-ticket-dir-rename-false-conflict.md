@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 2051e9bb7ecc9cf0
 sage-review-completeness-reviewed: 2051e9bb7ecc9cf0
+completed: 2026-11-10
 ---
 
 # Parallel-mode merge preview reports a false directory-rename conflict
@@ -105,3 +106,28 @@ goldens) and the wsflow package tests (`python3 -m pytest agents-plugin-wsflow/t
 `git -c merge.directoryRenames=false merge-tree --write-tree` on a scratch
 repo reproducing the empty-directory shape prints no conflict while the plain
 form does.
+
+### Result (8bb0a14bb) - 2026-11-10
+
+The parallel-mode preview in all three manual copies (ws, wsflow, Pi) now
+reads `git -c merge.directoryRenames=false merge-tree --write-tree <target>
+<branch>`, followed by a clause saying it previews the merge
+`{{.McpNamespace}}/git.merge` makes (directory-rename detection off), so a
+status directory the branch emptied raises no false conflict. The
+`agents-plugin/rsrc/manifest.json` was regenerated, the wsflow rsrc mirror
+synced through its regen test, and the Pi rsrc mirror synced by copying the
+two changed files (no Pi regen entrypoint exists outside
+`bump-ws-version.sh`); `diff -r agents-plugin/rsrc agents-plugin-pi/rsrc` is
+empty.
+
+Verification:
+- Scratch repo with the empty-`ready/` shape: plain `git merge-tree
+  --write-tree` exits 1 with `CONFLICT (file location)`; the
+  `-c merge.directoryRenames=false` form exits 0 with no conflict.
+- `go test ./...` (agents-plugin-tool, local): all packages ok except
+  `internal/mcp`, which hit the 600s timeout under machine load.
+- `go test ./internal/mcp/ -count=1 -timeout 30m` on the remote build server
+  via `ws-rgo` (w5090): `ok internal/mcp 77.441s`.
+- `uv run --with pytest python -m pytest agents-plugin-wsflow/tests -q`:
+  20 passed.
+- Lite review (one pass): clean, no findings.

@@ -350,6 +350,60 @@ func TestFormatSageRecordAutonomousOrdersRestamp(t *testing.T) {
 	}
 }
 
+// TestFormatSageRecordBlockOrdersDeltaReview pins the block branch of the
+// re-stamp rule. A block's recorded verdict comes from the reviewer verdict
+// field, not from the issue counts, so a same-verdict re-stamp after the fixes
+// records the same block and repeats this text: a lead following it loops, or
+// commits a ticket it believes was cleared. Every block, whatever mix of
+// issues it carries, instead orders a delta review by the blocked stage's
+// reviewer(s) and a stamp of those fresh verdicts, with no commit or handoff
+// while blocked.
+func TestFormatSageRecordBlockOrdersDeltaReview(t *testing.T) {
+	const restamp = "call ws/tickets.sage_stamp again with the same verdicts"
+	design := map[string]string{"sage-review-design": "blocked"}
+	combined := map[string]string{"sage-review-design": "blocked", "sage-review-completeness": "blocked"}
+
+	for name, tc := range map[string]struct {
+		result    wsdoc.SageRecordResult
+		reviewers string
+	}{
+		"autonomous-only": {wsdoc.SageRecordResult{Verdict: "block", Posture: design, BlockedSection: "## Blocked", Autonomous: 2}, "rerun the design reviewer"},
+		"mixed":           {wsdoc.SageRecordResult{Verdict: "block", Posture: design, BlockedSection: "## Blocked", Autonomous: 2, Missing: 1}, "rerun the design reviewer"},
+		"missing-only":    {wsdoc.SageRecordResult{Verdict: "block", Posture: map[string]string{"sage-review-completeness": "blocked"}, BlockedSection: "## Blocked", Missing: 1}, "rerun the completeness reviewer"},
+		"combined-mixed":  {wsdoc.SageRecordResult{Verdict: "block", Posture: combined, BlockedSection: "## Blocked", Autonomous: 1, Missing: 1}, "rerun both the design and the completeness reviewers"},
+		"no-issues":       {wsdoc.SageRecordResult{Verdict: "block", Posture: design, BlockedSection: "## Blocked"}, "rerun the design reviewer"},
+	} {
+		out := formatSageRecord(tc.result)
+		if strings.Contains(out, restamp) {
+			t.Fatalf("%s: a block must not prescribe a same-verdict re-stamp, which records the same block:\n%s", name, out)
+		}
+		for _, want := range []string{tc.reviewers, "delta review", "stamp that fresh verdict set", "do not commit or hand off", "stop and report the blocker"} {
+			if !strings.Contains(out, want) {
+				t.Fatalf("%s: block output missing %q:\n%s", name, want, out)
+			}
+		}
+		if tc.result.Autonomous+tc.result.Missing > 0 && !strings.Contains(out, "with these same verdicts after those revisions: it records the same block") {
+			t.Fatalf("%s: a block carrying issues must warn off the same-verdict re-stamp after the revisions:\n%s", name, out)
+		}
+		// The issue routing still leads, ahead of the delta-review direction.
+		if routeIdx, rerunIdx := strings.Index(out, "Open Decision Queue"), strings.Index(out, tc.reviewers); tc.result.Missing > 0 && (routeIdx == -1 || routeIdx > rerunIdx) {
+			t.Fatalf("%s: missing-issue routing must precede the delta review:\n%s", name, out)
+		}
+	}
+
+	// A mixed concern is not blocked: its same-verdict re-stamp is what refreshes
+	// the digest over the fixed body, so it keeps that direction.
+	concern := formatSageRecord(wsdoc.SageRecordResult{
+		Verdict:    "concern",
+		Posture:    map[string]string{"sage-review-design": "completed"},
+		Autonomous: 1,
+		Missing:    1,
+	})
+	if !strings.Contains(concern, restamp) || strings.Contains(concern, "delta review") {
+		t.Fatalf("a mixed concern keeps its same-verdict re-stamp and orders no delta review:\n%s", concern)
+	}
+}
+
 func TestServeStdioSageGateDispatch(t *testing.T) {
 	useLeadProfile(t)
 	root := t.TempDir()

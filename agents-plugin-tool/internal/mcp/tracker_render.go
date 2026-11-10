@@ -93,7 +93,7 @@ func formatTrackerScope(v *wstrackerhost.StoreView, q trackerQuery) string {
 		assignments("my assignments", v.My.Assignments)
 		items("created by me, assigned to nobody", v.My.Created, false)
 	}
-	if rows == 0 && (q.kind != "" || q.status != "" || q.project != "" || q.text != "") {
+	if rows == 0 && q.filtered() {
 		sb.WriteString("\nno rows pass the filters\n")
 	}
 	return sb.String()
@@ -142,8 +142,9 @@ func writeTrackerHeader(sb *strings.Builder, v *wstrackerhost.StoreView) {
 	}
 }
 
-// trackerItemMatches reports whether an item passes q's filters. A hidden
-// item passes only status hidden.
+// trackerItemMatches reports whether an item passes q's filters, the q
+// search included. A hidden item passes only status hidden, in the status
+// field or as a status:hidden search token.
 func trackerItemMatches(v *wstrackerhost.StoreView, id string, q trackerQuery) bool {
 	it, ok := v.Items[id]
 	if !ok {
@@ -156,7 +157,7 @@ func trackerItemMatches(v *wstrackerhost.StoreView, id string, q trackerQuery) b
 			return false
 		}
 	case "":
-		if it.Hidden {
+		if it.Hidden && !q.search.WantsHidden() {
 			return false
 		}
 	case "open":
@@ -181,7 +182,7 @@ func trackerItemMatches(v *wstrackerhost.StoreView, id string, q trackerQuery) b
 			return false
 		}
 	}
-	return true
+	return q.search.Match(v.View, id)
 }
 
 // trackerItemStatus is an item's derived status; a topic has none.

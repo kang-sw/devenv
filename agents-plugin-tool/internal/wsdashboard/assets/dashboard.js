@@ -2885,6 +2885,14 @@
         else done({ ok: false, error: tkErrText(status, v) });
       });
     },
+    // The Items search box: the daemon parses the query by the tracker's search grammar
+    // (tracker_routes.go: the search route); a malformed query answers 400 with its message.
+    search: function (id, q, done) {
+      tkFetch(tkUrl(id, "search?q=" + encodeURIComponent(q)), undefined, function (status, v) {
+        if (status === 200 && Array.isArray(v.ids)) done({ ok: true, ids: v.ids });
+        else done({ ok: false, error: tkErrText(status, v) });
+      });
+    },
     // The store's wiki branches (tracker_routes.go: the wiki routes). A save that
     // cannot merge answers 409 with both texts, passed on as res.conflict.
     wiki: {

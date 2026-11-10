@@ -3728,12 +3728,15 @@ func formatSageRecord(result wsdoc.SageRecordResult) string {
 		// handoff" text as a pass, so a block at a todo/ landing was recorded and
 		// then dropped: the caller's only block branch covers the ready/ landing.
 		// This says stop, matching sageGateNextInstruction's stop_blocked branch
-		// and the caller's ready/ branch. It deliberately prescribes no recovery
-		// loop: resolveStage returns stop_blocked for a blocked posture forever,
-		// so sage_gate never names a reviewer again and no fresh verdict can be
-		// produced from inside this procedure. It is also silent on committing or
-		// reverting, which is landing-dependent and the caller's.
-		b.WriteString(" Blocked posture recorded but not committed. A blocked sage review must be addressed before promotion: stop and report the blocker instead of proceeding to commit or handoff. ws/tickets.sage_gate returns stop_blocked while the posture is blocked and will not name a reviewer again, so only a later ws/tickets.sage_stamp carrying fresh verdicts clears it.")
+		// and the caller's ready/ branch. resolveStage returns stop_blocked for a
+		// blocked posture forever, so sage_gate never names a reviewer again: the
+		// one recovery is the caller rerunning the blocked stage's reviewer itself
+		// (a delta review) and stamping those fresh verdicts. A same-verdict
+		// re-stamp is not a recovery: the block comes from the reviewer verdict
+		// field, so it records the same block and repeats this text. The text is
+		// silent on committing versus reverting, which is landing-dependent and
+		// the caller's; it only forbids committing as if the block were cleared.
+		fmt.Fprintf(&b, " Blocked posture recorded but not committed. A blocked sage review must be addressed before promotion: do not commit or hand off as if it were cleared. ws/tickets.sage_gate returns stop_blocked while the posture is blocked and will not name a reviewer again, so only a later ws/tickets.sage_stamp carrying fresh verdicts clears it: once the ticket is revised, rerun %s on it yourself (a delta review) and stamp that fresh verdict set. If you cannot address the block now, stop and report the blocker.", sageBlockedReviewers(result))
 	case "concern":
 		// The missing-decision sentence is gated on an actual missing issue. A
 		// standalone stage records `concern` straight from the reviewer verdict
@@ -3750,7 +3753,7 @@ func formatSageRecord(result wsdoc.SageRecordResult) string {
 	return b.String()
 }
 
-// sageRestampAfterFixes closes every autonomous-issue routing clause: apply the
+// sageRestampAfterFixes closes every non-block autonomous-issue routing clause: apply the
 // fixes, re-stamp with the same verdicts so the recorded digest covers the fixed
 // body, and only then commit.
 const sageRestampAfterFixes = " Once those edits are in the ticket, call ws/tickets.sage_stamp again with the same verdicts: the digest recorded now covers the body as it stands at this stamp, and only the re-stamp makes it cover the fixed body. Commit after that second stamp, not before it."
@@ -3762,19 +3765,55 @@ const sageRestampAfterFixes = " Once those edits are in the ticket, call ws/tick
 // split. Empty when the stage recorded no issues, so a clean pass stays terse.
 //
 // An autonomous fix edits the ticket body after this stamp took its digest, so
-// every autonomous branch also orders a re-stamp: without it the digest this
+// every non-block autonomous branch also orders a re-stamp: without it the digest this
 // call recorded is stale the moment the fixes land, tickets.verify warns, and
 // the next sage_gate asks to rerun the reviewers whose findings were applied.
+//
+// A block is the exception: its recorded verdict comes from the reviewer
+// verdict field, not from the issue counts, so a re-stamp with the same
+// verdicts records the same block whatever mix of issues it carries. A block
+// therefore closes every branch with sageNoSameVerdictRestamp instead, and the
+// block direction in formatSageRecord names the delta review that clears it.
+// The branch keys on the recorded verdict, not on Missing > 0: an
+// autonomous-only block loops the same way, and a mixed concern or pass is not
+// blocked and still needs the re-stamp to refresh its digest.
 func sageRecordIssueRouting(result wsdoc.SageRecordResult) string {
+	closing := sageRestampAfterFixes
+	missingClosing := ""
+	if result.Verdict == "block" {
+		closing = sageNoSameVerdictRestamp
+		missingClosing = sageNoSameVerdictRestamp
+	}
 	switch {
 	case result.Autonomous > 0 && result.Missing > 0:
-		return fmt.Sprintf(" Route the recorded issues first: fix the %d autonomous issue(s) in the ticket yourself, and take the %d missing issue(s) through the Open Decision Queue, each classed by the same rules as any other item.%s", result.Autonomous, result.Missing, sageRestampAfterFixes)
+		return fmt.Sprintf(" Route the recorded issues first: fix the %d autonomous issue(s) in the ticket yourself, and take the %d missing issue(s) through the Open Decision Queue, each classed by the same rules as any other item.%s", result.Autonomous, result.Missing, closing)
 	case result.Autonomous > 0:
-		return fmt.Sprintf(" Fix the %d autonomous issue(s) in the ticket yourself first; none of them need a user decision.%s", result.Autonomous, sageRestampAfterFixes)
+		return fmt.Sprintf(" Fix the %d autonomous issue(s) in the ticket yourself first; none of them need a user decision.%s", result.Autonomous, closing)
 	case result.Missing > 0:
-		return fmt.Sprintf(" Take the %d missing issue(s) through the Open Decision Queue first, each classed by the same rules as any other item.", result.Missing)
+		return fmt.Sprintf(" Take the %d missing issue(s) through the Open Decision Queue first, each classed by the same rules as any other item.%s", result.Missing, missingClosing)
 	}
 	return ""
+}
+
+// sageNoSameVerdictRestamp closes a block's routing clause in place of
+// sageRestampAfterFixes.
+const sageNoSameVerdictRestamp = " Do not call ws/tickets.sage_stamp again with these same verdicts after those revisions: it records the same block."
+
+// sageBlockedReviewers names the reviewer(s) whose fresh verdicts clear this
+// block, read off the posture fields the stamp set to blocked: one field for a
+// standalone stage, both after a combined block.
+func sageBlockedReviewers(result wsdoc.SageRecordResult) string {
+	design := result.Posture["sage-review-design"] == "blocked"
+	completeness := result.Posture["sage-review-completeness"] == "blocked"
+	switch {
+	case design && completeness:
+		return "both the design and the completeness reviewers"
+	case design:
+		return "the design reviewer"
+	case completeness:
+		return "the completeness reviewer"
+	}
+	return "the blocked stage's reviewer"
 }
 
 func parseSageVerdicts(raw any) ([]wsdoc.SageVerdict, error) {

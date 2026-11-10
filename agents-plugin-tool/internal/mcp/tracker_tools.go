@@ -1001,16 +1001,21 @@ func formatTrackerSyncReport(rep wsledger.SyncReport) string {
 type trackerQuery struct {
 	store, scope, item          string
 	kind, status, project, text string
-	json                        bool
+	// q is the payload's search text, parsed into search by the
+	// dashboard search box's grammar (wstracker.ParseQuery).
+	q      string
+	search wstracker.Query
+	json   bool
 }
 
 var (
 	trackerScopes = []string{"mine", "received", "assigned", "team", "all"}
 	// todo is not a filter value: the store folds a todo create as a task.
-	trackerKinds = []string{"task", "topic"}
-	// trackerStatuses are the status filter's values: open (not done) and
-	// hidden, then an item's derived statuses.
-	trackerStatuses = []string{"open", "hidden", "todo", "doing", "blocked", "awaiting", "done", "pending", "review", "unassigned", "declined", "returned"}
+	trackerKinds = wstracker.QueryKinds
+	// trackerStatuses are the status filter's values, shared with the
+	// search grammar's status: key: open (not done) and hidden, then an
+	// item's derived statuses.
+	trackerStatuses = wstracker.QueryStatuses
 )
 
 // parseTrackerQuery reads the payload object and format argument.
@@ -1035,7 +1040,7 @@ func parseTrackerQuery(rawPayload, rawFormat any) (trackerQuery, []string) {
 		}
 		payload = m
 	}
-	fields := map[string]*string{"store": &q.store, "scope": &q.scope, "item": &q.item, "kind": &q.kind, "status": &q.status, "project": &q.project, "text": &q.text}
+	fields := map[string]*string{"store": &q.store, "scope": &q.scope, "item": &q.item, "kind": &q.kind, "status": &q.status, "project": &q.project, "text": &q.text, "q": &q.q}
 	names := make([]string, 0, len(payload))
 	for name := range payload {
 		names = append(names, name)
@@ -1044,7 +1049,7 @@ func parseTrackerQuery(rawPayload, rawFormat any) (trackerQuery, []string) {
 	for _, name := range names {
 		dst, known := fields[name]
 		if !known {
-			add("payload.%s: unknown (known: store, scope, item, kind, status, project, text)", name)
+			add("payload.%s: unknown (known: store, scope, item, kind, status, project, text, q)", name)
 			continue
 		}
 		v, ok := payload[name].(string)
@@ -1068,11 +1073,16 @@ func parseTrackerQuery(rawPayload, rawFormat any) (trackerQuery, []string) {
 	enum("scope", q.scope, trackerScopes)
 	enum("kind", q.kind, trackerKinds)
 	enum("status", q.status, trackerStatuses)
-	narrowed := q.scope != "" || q.item != "" || q.kind != "" || q.status != "" || q.project != "" || q.text != ""
+	if search, err := wstracker.ParseQuery(q.q); err != nil {
+		add("payload.q: %v", err)
+	} else {
+		q.search = search
+	}
+	narrowed := q.scope != "" || q.item != "" || q.filtered()
 	switch {
 	case q.store == "" && narrowed:
 		add("payload: scope, item, and the filters need store")
-	case q.item != "" && (q.scope != "" || q.kind != "" || q.status != "" || q.project != "" || q.text != ""):
+	case q.item != "" && (q.scope != "" || q.filtered()):
 		add("payload.item: shows one item; drop scope and the filters")
 	case q.json && narrowed:
 		add("format: json returns the store's whole view state; drop scope, item, and the filters")
@@ -1088,6 +1098,12 @@ func parseTrackerQuery(rawPayload, rawFormat any) (trackerQuery, []string) {
 		q.scope = "mine"
 	}
 	return q, problems
+}
+
+// filtered reports a query with any item filter: kind, status, project,
+// text, or q.
+func (q trackerQuery) filtered() bool {
+	return q.kind != "" || q.status != "" || q.project != "" || q.text != "" || q.q != ""
 }
 
 // trackerStoreSummary is one row of the store list.

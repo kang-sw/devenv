@@ -87,6 +87,27 @@ func (f *fakeTracker) View(_ context.Context, id string) (TrackerView, error) {
 	return TrackerView{View: json.RawMessage(`{"store":{"name":"` + id + `"}}`), Seen: f.seen}, nil
 }
 
+// Search answers every view item id containing query, and refuses a
+// query starting with "bad:".
+func (f *fakeTracker) Search(_ context.Context, id, query string) ([]string, error) {
+	f.record("search " + id + " " + query)
+	if strings.HasPrefix(query, "bad:") {
+		return nil, &TrackerSearchError{Message: `search "` + query + `": bad takes nothing`}
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.viewErr != nil {
+		return nil, f.viewErr
+	}
+	var out []string
+	for _, it := range []string{"ada.pc#1", "ada.pc#2"} {
+		if strings.Contains(it, query) {
+			out = append(out, it)
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeTracker) Dispatch(_ context.Context, id string, events []TrackerEvent) ([]string, error) {
 	f.record("dispatch " + id)
 	f.mu.Lock()
@@ -393,6 +414,24 @@ func TestTrackerRoutesAnswer(t *testing.T) {
 		t.Fatalf("view = %d %s", code, body)
 	}
 
+	// The query reaches the host decoded; no match is [], not null; a
+	// read does not bump the revision.
+	code, body = call(d, http.MethodGet, "/tracker/stores/team/search?q=%232", "")
+	if code != http.StatusOK || body != `{"ids":["ada.pc#2"]}`+"\n" {
+		t.Fatalf("search = %d %s", code, body)
+	}
+	code, body = call(d, http.MethodGet, "/tracker/stores/team/search?q=none", "")
+	if code != http.StatusOK || body != `{"ids":[]}`+"\n" {
+		t.Fatalf("search without a match = %d %s", code, body)
+	}
+	code, body = call(d, http.MethodGet, "/tracker/stores/team/search?q=bad:x", "")
+	if code != http.StatusBadRequest || body != `{"error":"search \"bad:x\": bad takes nothing"}`+"\n" {
+		t.Fatalf("malformed search = %d %s", code, body)
+	}
+	if rev := trackerRev(t, d); rev != 0 {
+		t.Fatalf("a search bumped the revision to %d", rev)
+	}
+
 	code, body = call(d, http.MethodPost, "/tracker/stores/team/dispatch", `{"events":[{"type":"item.create","payload":{"title":"x"}},{"type":"comment.add","payload":{"item":"$1"}}]}`)
 	if code != http.StatusOK || body != `{"ids":["ada@pc:1","ada@pc:2"]}`+"\n" {
 		t.Fatalf("dispatch = %d %s", code, body)
@@ -442,6 +481,7 @@ func TestTrackerRoutesAnswer(t *testing.T) {
 	for _, wrong := range []struct{ method, path string }{
 		{http.MethodPost, "/tracker/stores"},
 		{http.MethodPost, "/tracker/stores/team/view"},
+		{http.MethodPost, "/tracker/stores/team/search"},
 		{http.MethodGet, "/tracker/stores/team/dispatch"},
 		{http.MethodGet, "/tracker/stores/team/sync"},
 		{http.MethodGet, "/tracker/stores/team/render"},
@@ -465,6 +505,7 @@ func TestTrackerRouteErrors(t *testing.T) {
 
 	for _, r := range []struct{ method, path string }{
 		{http.MethodGet, "/tracker/stores/other/view"},
+		{http.MethodGet, "/tracker/stores/other/search"},
 		{http.MethodPost, "/tracker/stores/other/dispatch"},
 		{http.MethodPost, "/tracker/stores/other/seen"},
 		{http.MethodPost, "/tracker/stores/other/render"},
@@ -481,6 +522,9 @@ func TestTrackerRouteErrors(t *testing.T) {
 	fake.viewErr = errors.New("view broke")
 	if code, body := call(d, http.MethodGet, "/tracker/stores/team/view", ""); code != http.StatusInternalServerError || !strings.Contains(body, `"error":"view broke"`) {
 		t.Errorf("view error = %d %s", code, body)
+	}
+	if code, body := call(d, http.MethodGet, "/tracker/stores/team/search?q=x", ""); code != http.StatusInternalServerError || !strings.Contains(body, `"error":"view broke"`) {
+		t.Errorf("search error = %d %s", code, body)
 	}
 	fake.checkErr = errors.New("check broke")
 	for _, op := range []string{"check", "sync"} {

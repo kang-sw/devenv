@@ -194,8 +194,10 @@ Only a strict dependency (`blocked-by:`, a prerequisite `related:` or
 defer one, because the conflicts that matter are semantic and are checked at
 merge. Merge units one at a time as they finish. When earlier merges moved the
 target, first diff the target against the tree
-`git merge-tree --write-tree <target> <branch>` prints, looking for
-interactions with those merges. An interaction or a merge conflict goes to
+`git -c merge.directoryRenames=false merge-tree --write-tree <target> <branch>`
+prints, looking for interactions with those merges; the option previews the
+merge `{{.McpNamespace}}/git.merge` makes, which disables directory-rename
+detection, so a status directory the branch emptied raises no false conflict. An interaction or a merge conflict goes to
 `{{.SkillNamespace}}:lead-delegate`, which reruns the affected verification;
 the user sees it only when the delegate cannot settle it.
 

@@ -81,6 +81,23 @@ func (t *dashboardTracker) View(ctx context.Context, id string) (wsdashboard.Tra
 	return wsdashboard.TrackerView{View: raw, Seen: wsdashboard.TrackerSeen{Badge: seen.Badge, Read: seen.Read}}, nil
 }
 
+// Search runs the search grammar over the same view the page reads, so
+// the ids it answers name the items the page holds.
+func (t *dashboardTracker) Search(ctx context.Context, id, query string) ([]string, error) {
+	if t.err != nil {
+		return nil, redacted(t.err)
+	}
+	q, err := wstracker.ParseQuery(query)
+	if err != nil {
+		return nil, &wsdashboard.TrackerSearchError{Message: err.Error()}
+	}
+	v, err := t.h.ViewWithin(ctx, id, 0, dashboardViewWait)
+	if err != nil {
+		return nil, redacted(err)
+	}
+	return v.View.Search(q), nil
+}
+
 // dashboardView is the view JSON the tracker drawer reads: the store view
 // plus html, its item bodies and comment texts rendered as markdown. The
 // rendering is added here, not in wstrackerhost's view state, whose shape
