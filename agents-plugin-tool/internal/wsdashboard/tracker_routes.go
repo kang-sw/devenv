@@ -18,6 +18,9 @@ import (
 //
 //	GET  /tracker/stores                 {"stores": [...], "rev": N, "support": B}
 //	GET  /tracker/stores/<id>/view       {"view": ..., "seen": {"badge", "read"}}
+//	GET  /tracker/stores/<id>/search?q=<query>
+//	                                     {"ids": [...]}: the items passing the search, in tree order;
+//	                                     a malformed query is 400 with the host's message
 //	POST /tracker/stores/<id>/dispatch   {"events": [...]} -> {"ids": [...]}; a refusal is 409
 //	POST /tracker/stores/<id>/check      the sync report
 //	POST /tracker/stores/<id>/sync       the sync report
@@ -113,6 +116,11 @@ type TrackerHost interface {
 	Stores() ([]TrackerStore, error)
 	// View returns store id's view and its seen marks.
 	View(ctx context.Context, id string) (TrackerView, error)
+	// Search returns the ids of store id's items that pass query, parsed
+	// by the tracker's search grammar (the one tracker.query's q takes),
+	// in tree order, hidden items included when they pass. A query the
+	// grammar refuses is a *TrackerSearchError.
+	Search(ctx context.Context, id, query string) ([]string, error)
 	// Dispatch appends events to store id in one batch and returns their
 	// ids. A refusal is a *TrackerRefusal error; nothing was written.
 	Dispatch(ctx context.Context, id string, events []TrackerEvent) ([]string, error)
@@ -156,6 +164,14 @@ type TrackerHost interface {
 	// ErrTrackerWikiRefused; any other error is the store's or the remote's.
 	WikiSave(ctx context.Context, id, wiki string, req TrackerWikiSave) (TrackerWikiSaveResult, error)
 }
+
+// TrackerSearchError is a search query the grammar refuses; Message names
+// the token and what its key takes, and the page shows it.
+type TrackerSearchError struct {
+	Message string
+}
+
+func (e *TrackerSearchError) Error() string { return e.Message }
 
 // TrackerRenderRequest is the render route's body: the markdown text an
 // editor holds and the attachments its save would carry (the stored ones
@@ -340,13 +356,15 @@ type TrackerRegisterResult struct {
 }
 
 // trackerStoreOps are the operations of the store route
-// /tracker/stores/<id>/<op>; view and wiki (the wiki list) are the GETs.
+// /tracker/stores/<id>/<op>; view, search, and wiki (the wiki list) are
+// the GETs.
 // The attachment read, /tracker/stores/<id>/attachments/<oid>, is the op
 // "attachment". A route under /tracker/stores/<id>/wiki/<name>/ is a
 // wiki op (trackerWikiOps) with the op prefixed "wiki-"; the image read
 // /tracker/stores/<id>/wiki/<name>/attachments/<oid> is "wiki-image".
 var trackerStoreOps = map[string]string{
 	"view":        http.MethodGet,
+	"search":      http.MethodGet,
 	"dispatch":    http.MethodPost,
 	"check":       http.MethodPost,
 	"sync":        http.MethodPost,
@@ -549,6 +567,19 @@ func (d *Daemon) handleTracker(w http.ResponseWriter, r *http.Request) {
 		}
 		v.Seen = TrackerSeen{Badge: nonNil(v.Seen.Badge), Read: nonNil(v.Seen.Read)}
 		writeJSON(w, http.StatusOK, v)
+	case op == "search":
+		// A read: nothing changed, so the revision stays.
+		ids, err := d.tracker.Search(r.Context(), storeID, r.URL.Query().Get("q"))
+		if err != nil {
+			var bad *TrackerSearchError
+			if errors.As(err, &bad) {
+				trackerError(w, http.StatusBadRequest, bad.Message)
+				return
+			}
+			trackerError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ids": nonNil(ids)})
 	case op == "dispatch":
 		d.trackerDispatch(ctx, w, r, storeID)
 	case op == "check" || op == "sync":

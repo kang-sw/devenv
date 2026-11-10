@@ -259,6 +259,42 @@ func TestDashboardTrackerWithoutAHostReturnsItsError(t *testing.T) {
 	check("Register", err)
 	_, err = dt.Render(ctx, "team", wsdashboard.TrackerRenderRequest{Text: "x"})
 	check("Render", err)
+	_, err = dt.Search(ctx, "team", "x")
+	check("Search", err)
+}
+
+// TestDashboardTrackerSearch: the search route's host runs the shared
+// grammar over the page's view, comment text included, and answers a
+// malformed query as a TrackerSearchError naming the token.
+func TestDashboardTrackerSearch(t *testing.T) {
+	dt, _ := newTestTracker(t)
+	ctx := context.Background()
+	payload := func(m map[string]any) json.RawMessage { b, _ := json.Marshal(m); return b }
+	ids, err := dt.Dispatch(ctx, "team", []wsdashboard.TrackerEvent{
+		{Type: wstracker.TypeItemCreate, Payload: payload(map[string]any{"kind": "task", "title": "Ship", "due": "2026-11-20"})},
+		{Type: wstracker.TypeItemCreate, Payload: payload(map[string]any{"kind": "task", "title": "Docs"})},
+		{Type: wstracker.TypeCommentAdd, Payload: payload(map[string]any{"item": "$2", "body": "see changelog"})},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for q, want := range map[string][]string{
+		"":                 {ids[0], ids[1]},
+		"due:<2026-12-01":  {ids[0]},
+		"changelog":        {ids[1]},
+		"kind:task Ship":   {ids[0]},
+		"http://x.invalid": {},
+	} {
+		got, err := dt.Search(ctx, "team", q)
+		if err != nil || !reflect.DeepEqual(got, want) {
+			t.Errorf("Search(%q) = %v, %v; want %v", q, got, err, want)
+		}
+	}
+	_, err = dt.Search(ctx, "team", "due:<tomorrow")
+	var bad *wsdashboard.TrackerSearchError
+	if !errors.As(err, &bad) || !strings.Contains(bad.Message, `"due:<tomorrow"`) {
+		t.Fatalf("a malformed query = %v, want a TrackerSearchError naming the token", err)
+	}
 }
 
 // TestDashboardTrackerRenderMatchesTheView: an editor's preview renders

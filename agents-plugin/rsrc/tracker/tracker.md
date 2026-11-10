@@ -43,7 +43,7 @@ asks for in its chat: the unasked recording below is a lead's, and
 ## Query
 
 ```text
-tracker.query payload: {store?, scope?, item?, kind?, status?, project?, text?}
+tracker.query payload: {store?, scope?, item?, kind?, status?, project?, text?, q?}
 ```
 
 - `scope`: `mine` (the default: the user's assignments, then the items the
@@ -58,6 +58,20 @@ tracker.query payload: {store?, scope?, item?, kind?, status?, project?, text?}
   `blocked`, `awaiting`, `done`, `pending`, `review`, `unassigned`,
   `declined`, or `returned`. `review` is an item in the review stage, before
   todo; like `pending`, it is left out of progress roll-ups.
+- `q` is a search in the grammar of the dashboard's Items search box, so
+  the tool and the screen list the same items; it is AND-ed with the fields
+  above, and `text` keeps its plain substring meaning. Tokens are separated
+  by spaces and all must match; keys and values ignore case:
+  `status:<status>` (the values of `status` above; the item's status, also
+  in `mine`, whose rows are assignments), `assignee:<member>` (a live or
+  pending assignee whose member ID or name contains it), `kind:task` or
+  `kind:topic`, `project:<project>` (exact), `due:<date>` and
+  `priority:<level>` (equality, or after `<`, `>`, `<=`, or `>=`; dates are
+  `YYYY-MM-DD`; an item without a due date never matches a `due:` token).
+  A word or `"quoted phrase"` matches the title, body, project, ID, or the
+  text of the item's comments. A token with another key (`foo:bar`, a URL)
+  is plain text; a listed key with a malformed value (`due:<tomorrow`) is
+  refused, naming the token.
 - `format: "json"` with `store` alone returns the store's full state as JSON
   (members, keys, events, every item), for what the text omits; without
   `store`, the store list as JSON.
