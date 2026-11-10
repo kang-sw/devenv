@@ -71,6 +71,13 @@ and its hooks.
    Rejected: always-on processes with idle stop off by default (the first
    form of (17), superseded by the note).
 
+## Prior Art
+
+- `wsagent` runner and backends (Background).
+- The trusted-origin gate pattern: `localViewer` (`internal/wsdashboard/access.go`)
+  plus `sameOrigin` (`inbox_routes.go`), as the system-open route
+  (`sysopen_route.go`) applies them.
+
 ## Constraints
 
 - The lead profile is the opposite of the support profile: it loads user

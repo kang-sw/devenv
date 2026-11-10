@@ -28,6 +28,21 @@ the dashboard: browse a folder and preview HTML, images, and video
    authority ((05)). SVG can carry script, so it is treated like HTML.
    Images and video are served statically from the dashboard origin.
 
+## Prior Art
+
+- The session file view, `GET /s/<reply-id>/file?path=`
+  (`internal/wsdashboard/file_route.go` header): root containment with
+  symlink checks; images served under the image route's CSP so an SVG runs
+  no script; Markdown rendered through the board renderer in escaped mode;
+  other UTF-8 text served as `text/plain` under that CSP, so an `.html` file
+  never runs today; binaries get a "not viewable" page. It serves loopback
+  viewers and LAN token holders alike, on the reasoning that the token
+  already lets its holder message a lead that reads any file.
+- The composer's `@` file mention list, `GET /s/<reply-id>/files`
+  (`files_route.go`): git's file list or a capped walk, cached per root.
+- The system-open route (`sysopen_route.go`) opens a path in the host's
+  default app, loopback viewers only.
+
 ## Constraints
 
 - Independent of the session holder and of daemon lead sessions; it can

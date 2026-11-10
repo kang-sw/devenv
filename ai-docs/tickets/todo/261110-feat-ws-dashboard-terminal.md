@@ -39,6 +39,13 @@ and tab restore as new shells after a daemon restart. Tickets in `.done/`:
    `261110-feat-ws-dashboard-headless-lead-sessions`. Rejected: a separate
    terminal boundary (the weaker of two boundaries becomes the real one).
 
+## Prior Art
+
+- The trusted-origin gate already exists for one host-executing route: the
+  system-open route (`internal/wsdashboard/sysopen_route.go`) answers only a
+  browser on this machine (`localViewer`, `access.go`) whose Origin equals
+  the daemon's own (`sameOrigin`, `inbox_routes.go`); a LAN viewer gets 404.
+
 ## Constraints
 
 - Verify how the archived MVP gated terminal access before designing the
