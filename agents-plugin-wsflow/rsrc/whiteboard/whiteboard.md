@@ -24,9 +24,11 @@ host that shows HTML inline. Workers and subagents do not use it.
   `policy` (only a policy item's options are offered as picks), and, at most
   once an hour, open topics unchanged for an hour with nothing waiting on the
   user; close the finished ones with `wb:close`.
-- `{{.McpNamespace}}/whiteboard.query(session_key, payload)` returns stored
-  items, settled ones included, and changes nothing. Query before adding, so
-  a question the board already holds is patched or reused, not added twice.
+- `{{.McpNamespace}}/whiteboard.query(session_key, payload)` prints the
+  board as a topic, item, and detail tree and changes nothing; with no
+  payload, every open topic and its open items. Query before adding, so a
+  question the board already holds is patched or reused, not added twice;
+  `text` also finds one already settled.
 - After the first update, todo and agenda writes, ticket moves, closes, and
   creations, and mailbox sends and receives re-render the full page and bump
   its stamp themselves, with no embed.
@@ -172,12 +174,39 @@ Markdown up to the closing tag.
 ## Query
 
 ```text
-whiteboard.query payload: {topic?, status?, id?}
+whiteboard.query payload: {topic?, ids?, id?, status?, text?, depth?, fields?, body?, closed?}
 ```
 
-- `payload` is a JSON object of filters, all optional; `status` takes any of
-  the five statuses. Items print in ID order; with `topic`, that topic's
-  body prints first.
+- `payload` is a JSON object, every field optional. The filters `topic`,
+  `id`, `ids`, `status`, and `text` AND together, except that `id` (a
+  number) and `ids` (a list of numbers) union. `topic` and `status` take one
+  string or a list; `status` takes any of the five statuses. `text` matches
+  an item's title, options, rationale, or answer, ignoring case.
+- `depth`: `topics` prints one line per topic: open or closed, its item
+  counts by status, its body length, its last change, and its close result
+  when closed. `items` adds a line per item under its topic: ID, status,
+  class, title. `full` adds the item's details; `fields`, a list from
+  `options`, `recommendation`, `rationale`, `answer` (with its time),
+  `answer_quote`, and `links`, picks which, all when omitted.
+- `body: true` prints each listed topic's body after its topic line.
+  `closed: true` lists closed topics, whose items follow the same depth and
+  status as any topic's; otherwise one `omitted:` count stands for them.
+- The defaults come from the most specific target present, and an explicit
+  `depth`, `status`, `body`, or `closed` overrides them:
+
+  | target | depth | status | body | closed topics |
+  |---|---|---|---|---|
+  | `ids` or `id` | `full` | all | no | listed |
+  | `topic` | `full` | all | yes | listed |
+  | `text` | `items` | all | no | listed |
+  | none | `items` | `open` | no | folded |
+
+  So `{"status": "answered"}` prints answered items at depth `items`; add
+  `"depth": "full"` for their details. `ids` and `text` list only the topics
+  holding a match.
+- Topics print in the order their first item was added, items in ID order.
+  A last `omitted:` line counts what the defaults left out and names the
+  filter that shows it.
 
 ## Each turn
 
