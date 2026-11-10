@@ -49,6 +49,10 @@ type Options struct {
 	// CheckInterval throttles the session-start and pre-read checks; zero
 	// means DefaultCheckInterval.
 	CheckInterval time.Duration
+	// Environ is the environment the default runner's git runs under (and
+	// where it is looked up); nil means this process's. A daemon-hosted
+	// server passes its connection's environment.
+	Environ func() []string
 }
 
 // Host is one process's handle on the machine's tracker stores.
@@ -121,7 +125,7 @@ func New(opts Options) (*Host, error) {
 		checkInterval: opts.CheckInterval, stores: map[string]*store{}}
 	h.ctx, h.cancel = context.WithCancel(context.Background())
 	if h.runner == nil {
-		h.runner = batchRunner{}
+		h.runner = batchRunner{environ: opts.Environ}
 	}
 	if h.clock == nil {
 		h.clock = systemClock{}

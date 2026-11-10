@@ -816,7 +816,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		cmd, _ := params.Arguments["cmd"].(string)
 		workingDir, _ := params.Arguments["working_dir"].(string)
 		stdin, _ := params.Arguments["stdin"].(string)
-		result, err := execjob.Launch(execjob.LaunchOptions{Root: root, WorkingDir: workingDir, Cmd: cmd, Args: stringList(params.Arguments["args"]), Env: stringMapArgument(params.Arguments["env"]), Stdin: stdin})
+		result, err := execjob.Launch(execjob.LaunchOptions{Root: root, WorkingDir: workingDir, Cmd: cmd, Args: stringList(params.Arguments["args"]), Env: stringMapArgument(params.Arguments["env"]), Stdin: stdin, Environ: s.environ()})
 		return execResponse(req.ID, result, err, true)
 	case "exec.shell":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)
@@ -827,7 +827,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		workingDir, _ := params.Arguments["working_dir"].(string)
 		stdin, _ := params.Arguments["stdin"].(string)
 		shell, _ := params.Arguments["shell"].(string)
-		result, err := execjob.Launch(execjob.LaunchOptions{Root: root, WorkingDir: workingDir, Command: command, Shell: shell, Env: stringMapArgument(params.Arguments["env"]), Stdin: stdin, ShellMode: true})
+		result, err := execjob.Launch(execjob.LaunchOptions{Root: root, WorkingDir: workingDir, Command: command, Shell: shell, Env: stringMapArgument(params.Arguments["env"]), Stdin: stdin, ShellMode: true, Environ: s.environ()})
 		return execResponse(req.ID, result, err, true)
 	case "exec.status":
 		root, err := s.resolveToolRoot(params.Arguments, params.Meta)

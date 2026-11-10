@@ -46,6 +46,9 @@ type LaunchOptions struct {
 	Env              map[string]string
 	Stdin            string
 	ShellMode        bool
+	// Environ is the environment Env overlays; nil means this process's.
+	// A daemon-hosted server passes its connection's environment.
+	Environ []string
 }
 type Record struct {
 	SchemaVersion   int               `json:"schema_version"`
@@ -169,7 +172,7 @@ func Launch(opts LaunchOptions) (Response, error) {
 		rec.Argv = argv
 	}
 	cmd.Dir = wd
-	cmd.Env = overlayEnv(opts.Env)
+	cmd.Env = overlayEnv(opts.Environ, opts.Env)
 	rec.Env = opts.Env
 	if opts.Stdin != "" {
 		cmd.Stdin = strings.NewReader(opts.Stdin)
@@ -535,8 +538,11 @@ func shellCommand(shell, command string) (string, []string) {
 	}
 	return "/bin/sh", []string{"-c", command}
 }
-func overlayEnv(env map[string]string) []string {
-	out := os.Environ()
+func overlayEnv(base []string, env map[string]string) []string {
+	if base == nil {
+		base = os.Environ()
+	}
+	out := append([]string(nil), base...)
 	for k, v := range env {
 		if strings.TrimSpace(k) != "" {
 			out = append(out, k+"="+v)

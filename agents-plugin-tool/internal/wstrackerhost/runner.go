@@ -17,19 +17,32 @@ import (
 // ticket index uses too (internal/gitbatch): no credential, terminal, or
 // askpass prompt, and BatchMode appended to whatever ssh command the user
 // configured, so a background check never waits on a prompt.
-type batchRunner struct{}
+type batchRunner struct {
+	// environ is the base environment of every git run; nil means the
+	// process environment.
+	environ func() []string
+}
 
-func (batchRunner) RunGit(ctx context.Context, root string, args ...string) ([]byte, error) {
+// env is the runner's base environment.
+func (r batchRunner) env() []string {
+	if r.environ == nil {
+		return os.Environ()
+	}
+	return r.environ()
+}
+
+func (r batchRunner) RunGit(ctx context.Context, root string, args ...string) ([]byte, error) {
 	remote := isRemoteCommand(args)
 	if remote {
 		args = gitbatch.RemoteArgs(args...)
 	}
-	cmd := gitCommand(ctx, root, args...)
+	env := r.env()
+	cmd := gitCommand(ctx, env, root, args...)
 	// wsledger.GitEnv on every run: a store clone is a partial clone, and
 	// only the ledger's explicit attachment read may fetch a missing blob.
-	cmd.Env = append(os.Environ(), wsledger.GitEnv...)
+	cmd.Env = append(append([]string(nil), env...), wsledger.GitEnv...)
 	if remote {
-		cmd.Env = append(cmd.Env, gitbatch.RemoteEnv(batchSSHCommand(ctx, root))...)
+		cmd.Env = append(cmd.Env, gitbatch.RemoteEnv(batchSSHCommand(ctx, env, root))...)
 	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -40,8 +53,9 @@ func (batchRunner) RunGit(ctx context.Context, root string, args ...string) ([]b
 
 // gitCommand is git in root, bounded by ctx (gitbatch.Bound), so a hung
 // transport cannot outlast the check's timeout and keep the store's lock.
-func gitCommand(ctx context.Context, root string, args ...string) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, wsgit.Executable(), append([]string{"-C", root}, args...)...)
+// The executable is looked up on env's PATH.
+func gitCommand(ctx context.Context, env []string, root string, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, gitExecutable(env), append([]string{"-C", root}, args...)...)
 	gitbatch.Bound(cmd)
 	return cmd
 }
@@ -62,11 +76,28 @@ func isRemoteCommand(args []string) bool {
 	return false
 }
 
-// batchSSHCommand is gitbatch.SSHCommand over the process environment and
-// the store clone's core.sshCommand.
-func batchSSHCommand(ctx context.Context, root string) string {
-	return gitbatch.SSHCommand(os.Getenv, func() string {
-		out, err := gitCommand(ctx, root, "config", "--get", "core.sshCommand").Output()
+// gitExecutable is git on env's PATH, or wsgit.Executable() when env is
+// the process environment or names none.
+func gitExecutable(env []string) string {
+	if got := wsgit.LookPathEnv("git", env); got != "git" {
+		return got
+	}
+	return wsgit.Executable()
+}
+
+// batchSSHCommand is gitbatch.SSHCommand over env and the store clone's
+// core.sshCommand.
+func batchSSHCommand(ctx context.Context, env []string, root string) string {
+	getenv := func(key string) string {
+		for _, kv := range env {
+			if k, v, ok := strings.Cut(kv, "="); ok && k == key {
+				return v
+			}
+		}
+		return ""
+	}
+	return gitbatch.SSHCommand(getenv, func() string {
+		out, err := gitCommand(ctx, env, root, "config", "--get", "core.sshCommand").Output()
 		if err != nil {
 			return ""
 		}
