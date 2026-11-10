@@ -2,10 +2,13 @@ package wsdashboard
 
 import (
 	"bufio"
+	"context"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -616,4 +619,40 @@ func TestGitBadgeFollowsTheStreamedSnapshot(t *testing.T) {
 	snapshot("second reply", 17)
 	waitRegion("convlive", "second reply")
 	expectNoRead(t, git)
+}
+
+// TestBadgeGitCommandUsesResolvedGit: the badge runs the git wsgit resolved
+// under the current PATH, resolves again when PATH changes, and leaves the
+// bare name when no git is found.
+func TestBadgeGitCommandUsesResolvedGit(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake git is a shell script")
+	}
+	fakeGitDir := func() (dir, path string) {
+		dir = t.TempDir()
+		path = filepath.Join(dir, "git")
+		if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		return dir, path
+	}
+	ctx := context.Background()
+	dir1, git1 := fakeGitDir()
+	t.Setenv("PATH", dir1)
+	if cmd := badgeGitCommand(ctx, t.TempDir(), "status"); cmd.Path != git1 {
+		t.Fatalf("command runs %q, want the resolved %q", cmd.Path, git1)
+	}
+	dir2, git2 := fakeGitDir()
+	t.Setenv("PATH", dir2)
+	if cmd := badgeGitCommand(ctx, t.TempDir(), "status"); cmd.Path != git2 {
+		t.Fatalf("after a PATH change the command runs %q, want %q", cmd.Path, git2)
+	}
+	t.Setenv("PATH", t.TempDir())
+	cmd := badgeGitCommand(ctx, t.TempDir(), "status")
+	if cmd.Args[0] != "git" {
+		t.Fatalf("a failed resolution must leave the bare name, got %q", cmd.Args[0])
+	}
+	if !slices.Contains(cmd.Env, "LC_ALL=C") {
+		t.Fatalf("command env lacks LC_ALL=C")
+	}
 }
