@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"runtime/debug"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -239,9 +240,20 @@ func (s *Server) ensureMailboxRegistered(root string) {
 			if identity.Auto {
 				// This owner's own auto record, under whatever stem it
 				// minted before: a server hosted again for the same
-				// launcher keeps the address its peers already know.
-				for name, p := range store.Presence {
-					if p.Auto && p.PID == pid && p.Scope == identity.Scope && name != identity.Name {
+				// launcher keeps the address its peers already know. Only
+				// a live record is the owner's own: a PID a reboot or an
+				// exit reused leaves records behind that merely share the
+				// number, and those age past the liveness threshold.
+				// Names are visited in order, so several candidates pick
+				// the same one on every reconnect.
+				names := make([]string, 0, len(store.Presence))
+				for name := range store.Presence {
+					names = append(names, name)
+				}
+				sort.Strings(names)
+				for _, name := range names {
+					p := store.Presence[name]
+					if p.Auto && p.PID == pid && p.Scope == identity.Scope && name != identity.Name && mailboxPresenceLive(p, now) {
 						identity.Name, fresh.Name = name, name
 						s.mailbox.registeredMu.Lock()
 						s.mailbox.adoptedName = name
@@ -250,19 +262,18 @@ func (s *Server) ensureMailboxRegistered(root string) {
 					}
 				}
 			}
-			if existing, ok := store.Presence[identity.Name]; ok {
-				if existing.PID != pid && mailboxPresenceLive(existing, now) {
+			if existing, ok := store.Presence[identity.Name]; ok && mailboxPresenceLive(existing, now) {
+				if existing.PID != pid {
 					s.setMailboxConflict(true)
 					existing.Conflict = true
 					store.Presence[identity.Name] = existing
 					return nil
 				}
-				if existing.PID == pid {
-					// The same owner registered before (its server was
-					// replaced): the owner pointer and the start stay, so
-					// the session keeps its named inbox.
-					fresh.Owner, fresh.StartedAt = existing.Owner, existing.StartedAt
-				}
+				// The same owner registered before (its server was
+				// replaced): the owner pointer and the start stay, so the
+				// session keeps its named inbox. A stale record under this
+				// PID is another process's leftover and is replaced whole.
+				fresh.Owner, fresh.StartedAt = existing.Owner, existing.StartedAt
 			}
 			store.Presence[identity.Name] = fresh
 			return nil
