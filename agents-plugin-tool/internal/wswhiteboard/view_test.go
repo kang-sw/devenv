@@ -1,9 +1,6 @@
 package wswhiteboard
 
-import (
-	"fmt"
-	"testing"
-)
+import "testing"
 
 func topicNames(st *State) []string {
 	var names []string
@@ -37,16 +34,16 @@ func topicView(t *testing.T, st *State, layout Layout, name string) TopicView {
 	return TopicView{}
 }
 
-// Within one rank the topic with the most recent activity comes first, and
-// the rank stays the primary key.
-func TestTopicsOrderByRecencyWithinRank(t *testing.T) {
+// The topic with the most recent activity comes first, whatever waits on the
+// user; a quiet topic is ordered the same way.
+func TestTopicsOrderByRecency(t *testing.T) {
 	st := &State{}
 	mustApply(t, st, addXML(ClassPolicy, "older", "a1", "x", "y")+addXML(ClassPolicy, "older", "a2", "x", "y"))
 	mustApply(t, st, addXML(ClassPolicy, "newer", "b1", "x", "y"))
 	wantTopicOrder(t, st, "newer", "older")
 
-	// Answering an item in the older topic is activity; it stays in the same
-	// rank (a2 is still an open policy item) and rises above the newer one.
+	// Answering an item in the older topic is activity; it rises above the
+	// newer one.
 	mustApply(t, st, `<wb:answer id="1" value="a">go with a</wb:answer>`)
 	wantTopicOrder(t, st, "older", "newer")
 
@@ -66,16 +63,23 @@ func TestTopicsOrderByRecencyWithinRank(t *testing.T) {
 	mustApply(t, st, topicXML("older", "more notes"))
 	wantTopicOrder(t, st, "newer", "older")
 
-	// Rank outranks recency: a quiet topic stays below open ones however
-	// recently it changed.
+	// A quiet topic that changed last leads the open ones.
 	mustApply(t, st, addXML(ClassTechnical, "quiet", "c1"))
 	mustApply(t, st, `<wb:answer id="4" value="ok">fine</wb:answer>`)
-	wantTopicOrder(t, st, "newer", "older", "quiet")
+	wantTopicOrder(t, st, "quiet", "newer", "older")
 }
 
-// A topic with an open body ranks with the expanded topics: below anything
-// waiting on the user, above a quiet one.
-func TestTopicWithABodyRanksAmongExpandedTopics(t *testing.T) {
+// An open policy item does not float its topic: a topic changed more recently
+// with nothing waiting sits above it.
+func TestOpenPolicyItemDoesNotOutrankRecentTopic(t *testing.T) {
+	st := &State{}
+	mustApply(t, st, addXML(ClassPolicy, "waiting", "p", "x", "y"))
+	mustApply(t, st, topicXML("notes", "a body"))
+	wantTopicOrder(t, st, "notes", "waiting")
+}
+
+// A topic with an open body is not Quiet; topics order by recency alone.
+func TestTopicWithABodyIsNotQuiet(t *testing.T) {
 	st := &State{}
 	settleItems(t, st, "quiet", 1)
 	settleItems(t, st, "filler", ExpandedSettled) // pushes the quiet topic's item out of the expanded ten
@@ -94,65 +98,7 @@ func TestTopicWithABodyRanksAmongExpandedTopics(t *testing.T) {
 	if quiet := topicView(t, st, LayoutFull, "quiet"); quiet.Quiet || !quiet.DocOpen(false) {
 		t.Fatalf("a quiet topic that gains an open body is not quiet: %+v", quiet)
 	}
-	wantTopicOrder(t, st, "policy", "quiet", "acks", "notes", "filler")
-}
-
-// A body changed after the board's latest user answer ranks like an open
-// acknowledgement: below open policy topics, above settled and expanded ones.
-// A later answer anywhere on the board drops it back; an assumed answer is
-// not the user's, so it does not.
-func TestChangedBodyRanksLikeAnOpenAcknowledgement(t *testing.T) {
-	st := &State{}
-	settleItems(t, st, "settled", 1)
-	mustApply(t, st, topicXML("notes", "a body"))
-	mustApply(t, st, addXML(ClassPolicy, "policy", "p", "x", "y"))
-	// The settled item's answer predates the body: the body is unread.
-	wantTopicOrder(t, st, "policy", "notes", "settled")
-	if notes := topicView(t, st, LayoutFull, "notes"); notes.Quiet || !notes.DocOpen(false) {
-		t.Fatalf("notes = %+v", notes)
-	}
-	// An assumption is the lead's, not the user's: its item reads as settled
-	// and the body stays unread, still above the settled topic.
-	mustApply(t, st, addXML(ClassTechnical, "settled", "again"))
-	mustApply(t, st, `<wb:answer id="3" value="ok" assumed="true">assumed</wb:answer>`)
-	wantTopicOrder(t, st, "policy", "notes", "settled")
-	if st.AnswerSeq == st.Seq {
-		t.Fatalf("an assumed answer moved AnswerSeq to %d", st.AnswerSeq)
-	}
-	// Any user answer after the change counts as having seen the body.
-	mustApply(t, st, `<wb:answer id="3" value="ok">fine</wb:answer>`)
-	wantTopicOrder(t, st, "policy", "settled", "notes")
-	if st.AnswerSeq != st.Seq {
-		t.Fatalf("AnswerSeq = %d, want the answering render %d", st.AnswerSeq, st.Seq)
-	}
-	// Changing the body again after that answer ranks it once more.
-	mustApply(t, st, topicXML("notes", "a newer body"))
-	if !rankedAbove(t, st, "notes", "settled") {
-		t.Fatalf("a body changed after the last answer should outrank a settled topic: %v", topicNames(st))
-	}
-	// A closed topic's body never ranks.
-	mustApply(t, st, `<wb:topic name="notes"><wb:close result="done"/></wb:topic>`)
-	if rankedAbove(t, st, "notes", "settled") {
-		t.Fatalf("a closed topic's body ranked: %v", topicNames(st))
-	}
-}
-
-func rankedAbove(t *testing.T, st *State, a, b string) bool {
-	t.Helper()
-	names := topicNames(st)
-	ia, ib := -1, -1
-	for i, n := range names {
-		switch n {
-		case a:
-			ia = i
-		case b:
-			ib = i
-		}
-	}
-	if ia < 0 || ib < 0 {
-		t.Fatalf("topics %q, %q not both in %v", a, b, names)
-	}
-	return ia < ib
+	wantTopicOrder(t, st, "quiet", "policy", "acks", "notes", "filler")
 }
 
 // A board stored before AnswerSeq existed derives the answer point from its
@@ -244,38 +190,4 @@ func TestEmbedShowsABodyOpenOnlyWhenChanged(t *testing.T) {
 	if tv := topicView(t, st, LayoutEmbed, "a"); tv.DocOpen(true) || !tv.Closed {
 		t.Fatalf("closed topic on the embed = %+v", tv)
 	}
-}
-
-// One update that records the user's answer and writes a topic body shares one
-// sequence number; the user answered before the body existed, so the body is
-// still unread and ranks like an open acknowledgement. The settled topic is
-// touched in the same batch so only the rank, not recency, can put the body
-// above it.
-func TestBodyWrittenInTheAnswerBatchRanksAsUnread(t *testing.T) {
-	st := &State{}
-	out := mustApply(t, st, addXML(ClassTechnical, "settled", "q"))
-	mustApply(t, st, fmt.Sprintf(`<wb:answer id="%d" value="ok">fine</wb:answer>`+"\n"+topicXML("notes", "new context"), out.IDs[0]))
-	if st.AnswerSeq != st.Seq {
-		t.Fatalf("AnswerSeq = %d, want the batch's render %d", st.AnswerSeq, st.Seq)
-	}
-	if !rankedAbove(t, st, "notes", "settled") {
-		t.Fatalf("a body written with the answer should outrank a settled topic: %v", topicNames(st))
-	}
-}
-
-// With no answer on the board (answered 0), a body that carries a change
-// sequence is unread, but a legacy body stored without one (Changed 0) is
-// read: it ranks with the expanded topics, below an unread body, and by
-// recency among them.
-func TestLegacyBodyWithoutAChangeIsReadOnAnUnansweredBoard(t *testing.T) {
-	st := &State{}
-	mustApply(t, st, topicXML("legacy", "old notes"))
-	mustApply(t, st, addXML(ClassTechnical, "withdrawn", "w"))
-	mustApply(t, st, `<wb:patch id="1" status="withdrawn"/>`)
-	mustApply(t, st, topicXML("fresh", "new notes"))
-	st.Topics[st.topicDocIndex("legacy")].Changed = 0
-	if st.LastAnswerSeq() != 0 {
-		t.Fatalf("precondition: the board has an answer at %d", st.LastAnswerSeq())
-	}
-	wantTopicOrder(t, st, "fresh", "withdrawn", "legacy")
 }
