@@ -927,6 +927,7 @@
   "js.tk.wk.history.tools": "기록과 복원은 에이전트 도구(wiki_query, wiki_update)로 합니다",
   "js.tk.wk.key.chg": "한쪽만 변경",
   "js.tk.wk.key.conf": "겹침",
+  "js.tk.wk.leave": "저장하지 않은 위키 편집을 버릴까요?",
   "js.tk.wk.match": "{1}개 중 {0}개 페이지 일치",
   "js.tk.wk.missing": "없는 페이지: 클릭하면 만듭니다",
   "js.tk.wk.more": "더 보기",

@@ -1439,7 +1439,17 @@
   }
   // The panel shows the wiki: the Items | Wiki switch in the wide layouts, the Wiki tab when narrow.
   function wkShow() { if (ui.layout === 'narrow') { tabState().narrow = 'wiki'; } else wk().mode = 'wiki'; }
+  // An edit is dirty when its text left where it started: the page's text, the seeded heading of
+  // a new page (seed; orig stays '' as the conflict view's merge base), or the refused-save
+  // "theirs" text after Edit again.
+  function wkDirty(ed) { return !!ed && ed.text !== (ed.seed !== undefined ? ed.seed : ed.orig); }
+  // Asked before a navigation that drops the wiki edit; false keeps the editor, draft, and page.
+  // Cancel, Esc, and taking theirs drop the draft on purpose and do not ask.
+  function wkLeaveOk() { return !wkDirty(wk().edit) || window.confirm(wsT("js.tk.wk.leave")); }
   function wkOpenPage(name, path) {
+    if (wkLeaveOk()) wkGoPage(name, path);
+  }
+  function wkGoPage(name, path) {
     var st = wk();
     st.creating = false; st.edit = null; st.conflict = null; st.more = false; st.pick = false; st.ntree = false;
     if (st.name !== name) { st.name = name; st.pages = null; st.q = ''; }
@@ -1451,14 +1461,16 @@
     render();
   }
   function wkOpenLink(name, path) {
+    if (!wkLeaveOk()) return; // declining leaves the item window open too
     if (ui.win) closeItemWindow();
-    wkOpenPage(name, path);
+    wkGoPage(name, path);
   }
   function wkStartEdit(path, isNew, newWiki) {
     var st = wk();
     st.creating = false; st.conflict = null; st.more = false; st.pick = false; st.ntree = false;
     delete ui.edpv['wk-ebody']; delete ui.eatt['wk-ebody'];
-    if (isNew) st.edit = { path: path, isNew: true, newWiki: !!newWiki, base: st.pages ? st.pages.commit : '', text: '# ' + String(path).split('/').pop().replace(/-/g, ' ') + '\n\n', orig: '', newPath: path, note: false };
+    var seed = '# ' + String(path).split('/').pop().replace(/-/g, ' ') + '\n\n';
+    if (isNew) st.edit = { path: path, isNew: true, newWiki: !!newWiki, base: st.pages ? st.pages.commit : '', text: seed, orig: '', seed: seed, newPath: path, note: false };
     else st.edit = { path: path, isNew: false, newWiki: false, base: st.doc.commit, text: st.doc.content, orig: st.doc.content, newPath: '', note: false };
     wkShow();
     render();
@@ -1510,8 +1522,8 @@
     var st = wk();
     if (k === 'wk-mode') { st.mode = a.getAttribute('data-mode'); st.pick = st.more = false; render(); }
     else if (k === 'wk-pickopen') { st.pick = !st.pick; st.more = false; render(); }
-    else if (k === 'wk-pick') { st.pick = false; var nm2 = a.getAttribute('data-wiki'); if (nm2 !== st.name) { st.name = nm2; st.pages = null; st.page = null; st.doc = null; st.docErr = null; st.edit = null; st.conflict = null; st.q = ''; st.creating = false; } render(); }
-    else if (k === 'wk-newwiki') { st.pick = false; st.creating = true; st.edit = null; st.conflict = null; st.wname = ''; render(); if ($('wk-wname')) $('wk-wname').focus(); }
+    else if (k === 'wk-pick') { st.pick = false; var nm2 = a.getAttribute('data-wiki'); if (nm2 !== st.name && wkLeaveOk()) { st.name = nm2; st.pages = null; st.page = null; st.doc = null; st.docErr = null; st.edit = null; st.conflict = null; st.q = ''; st.creating = false; } render(); }
+    else if (k === 'wk-newwiki') { st.pick = false; if (!wkLeaveOk()) { render(); return; } st.creating = true; st.edit = null; st.conflict = null; st.wname = ''; render(); if ($('wk-wname')) $('wk-wname').focus(); }
     else if (k === 'wk-cancelnew') { st.creating = false; render(); }
     else if (k === 'wk-create') wkCreate();
     else if (k === 'wk-open') wkOpenPage(st.name, a.getAttribute('data-path'));

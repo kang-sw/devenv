@@ -927,6 +927,7 @@
   "js.tk.wk.history.tools": "L'historique et la restauration passent par les outils de l'agent (wiki_query, wiki_update)",
   "js.tk.wk.key.chg": "modifié d'un seul côté",
   "js.tk.wk.key.conf": "chevauchement",
+  "js.tk.wk.leave": "Abandonner votre modification du wiki non enregistrée ?",
   "js.tk.wk.match": "{0} page(s) sur {1} correspondent",
   "js.tk.wk.missing": "page absente : cliquer pour la créer",
   "js.tk.wk.more": "Plus",
