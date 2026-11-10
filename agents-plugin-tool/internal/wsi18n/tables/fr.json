@@ -131,6 +131,8 @@
   "js.cancel.fail": "Non annulé : {0}",
   "js.cancel.ok": "Annulé : le message est revenu dans la zone de saisie.",
   "js.chip.remove": "supprimer cette réponse",
+  "js.chip.tnote.open": "afficher cette note de sujet sur le tableau",
+  "js.chip.tnote.remove": "supprimer cette note de sujet",
   "js.drawer.close": "fermer les panneaux latéraux : cliquer ou glisser",
   "js.drawer.open": "ouvrir les panneaux latéraux : cliquer ou glisser",
   "js.drawer.todo.one": "{0} todo ouvert",

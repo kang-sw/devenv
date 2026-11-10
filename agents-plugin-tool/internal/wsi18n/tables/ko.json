@@ -131,6 +131,8 @@
   "js.cancel.fail": "취소하지 못함: {0}",
   "js.cancel.ok": "취소됨: 메시지가 입력란으로 돌아왔습니다.",
   "js.chip.remove": "이 답변 제거",
+  "js.chip.tnote.open": "보드에서 이 주제 메모 보기",
+  "js.chip.tnote.remove": "이 주제 메모 제거",
   "js.drawer.close": "사이드 패널 닫기: 클릭 또는 드래그",
   "js.drawer.open": "사이드 패널 열기: 클릭 또는 드래그",
   "js.drawer.todo.one": "열린 할 일 {0}개",
