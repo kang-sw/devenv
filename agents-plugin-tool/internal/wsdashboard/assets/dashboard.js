@@ -354,7 +354,7 @@
       if (!deferred || editing()) return;
       var d = deferred;
       deferred = null;
-      swap("board", d.hash, d.html);
+      swap("board", d.hash, d.html, true);
     }, 0);
   });
 
@@ -371,7 +371,9 @@
       return name + "." + (p ? p.hash : el.getAttribute("data-h"));
     }).concat(mode !== "index" ? ["mode." + modeHash] : []).join(",");
   }
-  function swap(name, hash, html) {
+  // A deferred board swap lands still (no topic motion), so the board never
+  // moves under a just-blurred input.
+  function swap(name, hash, html, still) {
     var el = region(name);
     if (!el) return;
     var board = name === "board";
@@ -382,6 +384,7 @@
     var scroll = scrollState();
     var answers = board ? readAnswers(el) : null;
     var frameH = board ? frameHeights(el) : null;
+    var before = board && !still && !reducedMotion() ? topicHeights(el) : null;
     // The entries merge and the board morph prepare only the nodes they
     // insert; any other region is replaced whole. A finished reply's mermaid
     // fences draw once merged; the streaming reply (convlive) keeps them
@@ -397,6 +400,7 @@
         setFrameHeights(n, frameH);
         writeAnswers(n, answers);
       });
+      if (before) topicMotion(before, ins).forEach(function (m) { growTopic(m.n, m.from); });
     } else {
       el.innerHTML = html;
       restoreOpen(el);
@@ -504,6 +508,48 @@
       else el.insertBefore(n, cur);
     });
     return ins;
+  }
+  // Topic motion: a board swap's inserted topic sections grow from the
+  // height they had before (a topic the board did not hold grows from 0)
+  // to their natural height. The heights are read before the morph; a
+  // section still animating reads at its rendered height, so a new swap
+  // starts from there. Topics in the closed pages (moved there or out of
+  // there by the closed-page reconciliation) do not move.
+  function reducedMotion() { return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches); }
+  function topicHeights(el) {
+    var h = {};
+    q("section.topic[data-topic]", el).forEach(function (n) { h["t:" + n.getAttribute("data-topic")] = { h: n.getBoundingClientRect().height, paged: n.parentNode !== el }; });
+    return h;
+  }
+  // topicMotion returns, in order, the inserted topic sections that animate
+  // and the height each starts from.
+  function topicMotion(before, ins) {
+    var out = [];
+    ins.forEach(function (n) {
+      var k = topicKey(n);
+      if (k === null) return;
+      var b = before["t:" + k];
+      if (b && b.paged) return;
+      out.push({ n: n, from: b ? b.h : 0 });
+    });
+    return out;
+  }
+  // growTopic runs after the caller prepared the section (frame heights
+  // restored), so its natural height is the target. The animation fills
+  // nothing: once done the section has no fixed height, and a later size
+  // change (a frame posting its height, a details toggle) is never clipped.
+  // A section clips its overflow itself (.topic), and a new one also fades
+  // in with its bottom margin growing.
+  function growTopic(n, from) {
+    if (!n.animate) return;
+    var to = n.getBoundingClientRect().height;
+    if (Math.abs(to - from) < 1) return;
+    var a = { height: from + "px" }, b = { height: to + "px" };
+    if (!from) {
+      a.opacity = 0; b.opacity = 1;
+      a.marginBottom = "0px"; b.marginBottom = getComputedStyle(n).marginBottom;
+    }
+    n.animate([a, b], { duration: 200, easing: "ease-out" });
   }
 
   // --- conversation entries: merged by key, never re-rendered ----------------
