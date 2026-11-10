@@ -131,6 +131,8 @@
   "js.cancel.fail": "Nicht abgebrochen: {0}",
   "js.cancel.ok": "Abgebrochen: Die Nachricht ist wieder im Eingabefeld.",
   "js.chip.remove": "diese Antwort entfernen",
+  "js.chip.tnote.open": "diese Themennotiz auf dem Board zeigen",
+  "js.chip.tnote.remove": "diese Themennotiz entfernen",
   "js.drawer.close": "Seitenleisten schließen: klicken oder ziehen",
   "js.drawer.open": "Seitenleisten öffnen: klicken oder ziehen",
   "js.drawer.todo.one": "{0} offenes Todo",

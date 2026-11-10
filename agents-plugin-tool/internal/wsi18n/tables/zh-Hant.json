@@ -131,6 +131,8 @@
   "js.cancel.fail": "未能取消：{0}",
   "js.cancel.ok": "已取消：訊息已放回輸入框。",
   "js.chip.remove": "移除此回答",
+  "js.chip.tnote.open": "在看板上顯示此主題備註",
+  "js.chip.tnote.remove": "移除此主題備註",
   "js.drawer.close": "關閉側邊面板：點擊或拖曳",
   "js.drawer.open": "開啟側邊面板：點擊或拖曳",
   "js.drawer.todo.one": "{0} 個未完成待辦",

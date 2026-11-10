@@ -131,6 +131,8 @@
   "js.cancel.fail": "Not cancelled: {0}",
   "js.cancel.ok": "Cancelled: the message is back in the composer.",
   "js.chip.remove": "remove this answer",
+  "js.chip.tnote.open": "show this topic note on the board",
+  "js.chip.tnote.remove": "remove this topic note",
   "js.drawer.close": "close the side panels: click or drag",
   "js.drawer.open": "open the side panels: click or drag",
   "js.drawer.todo.one": "{0} open todo",

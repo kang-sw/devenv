@@ -131,6 +131,8 @@
   "js.cancel.fail": "キャンセルできませんでした: {0}",
   "js.cancel.ok": "キャンセルしました: メッセージは入力欄に戻りました。",
   "js.chip.remove": "この回答を削除",
+  "js.chip.tnote.open": "このトピックメモをボードで表示",
+  "js.chip.tnote.remove": "このトピックメモを削除",
   "js.drawer.close": "サイドパネルを閉じる: クリックまたはドラッグ",
   "js.drawer.open": "サイドパネルを開く: クリックまたはドラッグ",
   "js.drawer.todo.one": "未完了の ToDo {0} 件",

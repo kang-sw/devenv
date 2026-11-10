@@ -765,6 +765,50 @@
       el.appendChild(x);
       cchips.appendChild(el);
     });
+    // A topic note is no item's answer, but a send carries it, so it shows
+    // here too: "[topic] text", read from the board on every render.
+    topicNotes().forEach(function (n) {
+      var el = doc.createElement("span"), b = doc.createElement("b"), t = doc.createElement("span"), x = doc.createElement("button");
+      el.className = "achip tchip";
+      el.setAttribute("data-tchip", n.topic);
+      el.title = wsT("js.chip.tnote.open");
+      b.textContent = "[" + n.topic + "]";
+      el.appendChild(b);
+      t.className = "anote";
+      t.textContent = n.value.trim();
+      el.appendChild(t);
+      x.className = "unchip";
+      x.setAttribute("data-untchip", n.topic);
+      x.title = wsT("js.chip.tnote.remove");
+      x.textContent = "×";
+      el.appendChild(x);
+      cchips.appendChild(el);
+    });
+  }
+  // topicNote is the board's note for a topic, matched by attribute value so
+  // a topic name needs no selector escaping.
+  function topicNote(name) {
+    var b = region("board");
+    return (b ? q(".tnote[data-topic]", b) : []).filter(function (el) { return el.getAttribute("data-topic") === name; })[0] || null;
+  }
+  // clearTopicNote empties a topic's note through the input path a typed
+  // edit takes, so the reply line, the chips, and holdsDraft follow.
+  function clearTopicNote(name) {
+    var n = topicNote(name);
+    if (!n) return;
+    n.value = "";
+    n.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+  // focusTopicNote brings a topic's note into view on the board, opening it
+  // through the topic's pen when it is closed.
+  function focusTopicNote(name) {
+    var n = topicNote(name), topic = n && n.closest(".topic");
+    if (!n) return;
+    if (live && !tabShown("board")) setTab("board");
+    if (topic) topic.scrollIntoView({ block: "nearest" });
+    var pen = topic && topic.querySelector(".tnote-toggle");
+    if (n.hidden && pen) pen.click();
+    else n.focus();
   }
   function boardAnswers() {
     if (cchips) return answerBlock(chipList());
@@ -1052,11 +1096,13 @@
   var sending = false;
   // topicNotes are the board's non-empty topic notes. A send carries them
   // as "[topic] text" lines after the typed text, the lines the board's
-  // copy-answers adds; they are no item's answer, so they are no chip.
+  // copy-answers adds; they are no item's answer, so they are no answer
+  // chip, and renderChips shows each as a topic-note chip.
   function topicNotes() {
     var b = region("board");
     return (b ? q(".tnote[data-topic]", b) : []).map(function (el) {
-      return { el: el, value: el.value, line: "[" + el.getAttribute("data-topic") + "] " + el.value.trim() };
+      var topic = el.getAttribute("data-topic");
+      return { el: el, topic: topic, value: el.value, line: "[" + topic + "] " + el.value.trim() };
     }).filter(function (n) { return n.value.trim(); });
   }
   function sendMessage() {
@@ -1321,6 +1367,10 @@
     if (cnote && t.closest("#r-board")) { syncChips(); syncNote(); }
     var u = t.closest("[data-unchip]");
     if (u) { var uid = u.getAttribute("data-unchip"); dropChip(uid); setItem(uid, null); renderChips(); syncNote(); return; }
+    u = t.closest("[data-untchip]");
+    if (u) { clearTopicNote(u.getAttribute("data-untchip")); renderChips(); syncNote(); return; }
+    u = t.closest("[data-tchip]");
+    if (u) { focusTopicNote(u.getAttribute("data-tchip")); return; }
     u = t.closest("[data-unimg]");
     if (u) { unattach(imgs[+u.getAttribute("data-unimg")]); syncNote(); return; }
     u = t.closest("#r-board button.closed-more[data-closed-next]");

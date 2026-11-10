@@ -131,6 +131,8 @@
   "js.cancel.fail": "No se canceló: {0}",
   "js.cancel.ok": "Cancelado: el mensaje volvió al cuadro de mensaje.",
   "js.chip.remove": "quitar esta respuesta",
+  "js.chip.tnote.open": "mostrar esta nota del tema en el tablero",
+  "js.chip.tnote.remove": "quitar esta nota del tema",
   "js.drawer.close": "cerrar los paneles laterales: clic o arrastrar",
   "js.drawer.open": "abrir los paneles laterales: clic o arrastrar",
   "js.drawer.todo.one": "{0} tarea abierta",
