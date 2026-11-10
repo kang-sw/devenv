@@ -8,7 +8,7 @@
   `@xterm/addon-fit` ships its own copy, which differs only in the copyright
   lines (`LICENSE.addon-fit`).
 - Served as one script, `xterm.js` followed by `addon-fit.js`, under a name
-  that carries a hash of the embedded bytes (`terminal_assets.go`), so a new
+  that carries a hash of the embedded bytes (`terminal_routes.go`), so a new
   version is a new file name instead of a changed one. A session page loads it
   when its first terminal card opens. The source maps the scripts name are not
   vendored.
