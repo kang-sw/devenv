@@ -375,7 +375,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "goal/develop/amber-ladle-orbit",
         "phase": "active",
-        "touched_at": "2026-11-10T14:07:08Z"
+        "touched_at": "2026-11-10T14:07:41Z",
+        "impl": {
+          "branch": "impl/goal/develop/amber-ladle-orbit/lake-crave-dole"
+        }
       }
     },
     "261110-feat-ws-dashboard-headless-lead-sessions": {
