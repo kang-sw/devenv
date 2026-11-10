@@ -1314,10 +1314,15 @@ class DaemonLink:
             return False
         argv = [str(staged), "daemon-start", "--build-time", str(self.build_time)]
         note(f"starting the daemon: {' '.join(argv)}")
+        # The daemon starts session holders with the interpreter this launcher
+        # runs under; PATH python3 may be missing or, on Windows, a Store alias.
+        env = dict(self.env)
+        if not env.get("WS_MCP_HOLDER_PYTHON") and sys.executable:
+            env["WS_MCP_HOLDER_PYTHON"] = sys.executable
         try:
             proc = subprocess.run(
                 argv,
-                env=self.env,
+                env=env,
                 stdin=subprocess.DEVNULL,
                 capture_output=True,
                 text=True,
