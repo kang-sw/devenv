@@ -74,17 +74,6 @@ type worktreeHookEnv struct {
 	Environ []string
 }
 
-// hookEnviron is the base environment of the hooks a worktree operation
-// runs: the caller environment its git runner carries (Server.gitRunner),
-// so a hook starts under the same process context as the git commands
-// around it. Any other runner (a test fake) leaves it nil, this process's.
-func hookEnviron(runner wsgit.Runner) []string {
-	if r, ok := runner.(wsgit.ExecRunner); ok && r.Environ != nil {
-		return r.Environ()
-	}
-	return nil
-}
-
 // runWorktreeHooks runs one point's hooks in order, in the worktree (or its
 // relative cwd), without a shell, stopping at the first failure. It returns
 // every executed hook, the failed one last.
@@ -110,11 +99,15 @@ func execWorktreeHook(ctx context.Context, dir string, argv []string, env worktr
 	ctx, cancel := context.WithTimeout(ctx, worktreeHookTimeout)
 	defer cancel()
 	base, bin := os.Environ(), argv[0]
+	var lookErr error
 	if env.Environ != nil {
 		base = append([]string(nil), env.Environ...)
-		bin = wsgit.LookPathEnv(bin, base)
+		bin, lookErr = wsgit.LookPathEnv(bin, base)
 	}
 	cmd := exec.CommandContext(ctx, bin, argv[1:]...)
+	if lookErr != nil {
+		cmd.Err = lookErr
+	}
 	cmd.Args[0] = argv[0]
 	cmd.Dir = dir
 	cmd.Env = append(base,

@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -17,6 +16,7 @@ import (
 
 	"github.com/gofrs/flock"
 
+	"github.com/kang-sw/devenv/internal/wsexec"
 	"github.com/kang-sw/devenv/internal/wsgit"
 )
 
@@ -68,6 +68,11 @@ type Options struct {
 	// runner should set GitEnv too, or a partial clone may fetch a missing
 	// attachment blob implicitly where only ReadAttachment should.
 	Runner wsgit.Runner
+	// Env is the environment ssh-keygen is looked up on and runs under;
+	// nil means this process's. A caller whose Runner carries another
+	// process's environment (a server the dashboard daemon hosts) sets it
+	// too, so key generation follows the same PATH as its git.
+	Env []string
 }
 
 var (
@@ -185,10 +190,10 @@ func newLedger(ctx context.Context, opts Options) (*Ledger, error) {
 	if err := os.MkdirAll(o.Dir, 0o700); err != nil {
 		return nil, err
 	}
-	if err := checkTools(ctx, o.Runner, o.Dir, exec.LookPath); err != nil {
+	if err := checkTools(ctx, o.Runner, o.Dir, func(name string) (string, error) { return wsexec.LookPath(name, o.Env) }); err != nil {
 		return nil, err
 	}
-	keyPath, pub, fp, err := ensureKey(ctx, o.KeyDir)
+	keyPath, pub, fp, err := ensureKey(ctx, o.KeyDir, o.Env)
 	if err != nil {
 		return nil, err
 	}
@@ -392,10 +397,10 @@ func (l *Ledger) ownTip() string {
 
 func (l *Ledger) now() time.Time { return l.opts.Clock.Now().UTC() }
 
-// ensureKey returns the personal key, generating it with ssh-keygen when
-// absent. A file lock in the key directory keeps two processes from
-// generating at once.
-func ensureKey(ctx context.Context, dir string) (path, norm, fp string, err error) {
+// ensureKey returns the personal key, generating it with ssh-keygen (on
+// env's PATH; nil means this process's) when absent. A file lock in the key
+// directory keeps two processes from generating at once.
+func ensureKey(ctx context.Context, dir string, env []string) (path, norm, fp string, err error) {
 	path = filepath.Join(dir, "id_ed25519")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", "", "", err
@@ -406,7 +411,7 @@ func ensureKey(ctx context.Context, dir string) (path, norm, fp string, err erro
 			return "", "", "", err
 		}
 		if _, statErr := os.Stat(path); errors.Is(statErr, os.ErrNotExist) {
-			out, err := exec.CommandContext(ctx, "ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "ws-ledger", "-f", path).CombinedOutput()
+			out, err := wsexec.CommandContext(ctx, env, "ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "ws-ledger", "-f", path).CombinedOutput()
 			if err != nil {
 				fl.Unlock() //nolint:errcheck
 				return "", "", "", fmt.Errorf("ledger: ssh-keygen could not generate %s: %w: %s", path, err, strings.TrimSpace(string(out)))

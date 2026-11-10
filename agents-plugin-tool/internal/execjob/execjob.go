@@ -112,7 +112,41 @@ type activeJob struct {
 	cmd       *exec.Cmd
 }
 
-func Launch(opts LaunchOptions) (Response, error) {
+// Store is the exec-job store under one cache home and environment: job
+// directories (wsstate) and records (wsstore) resolve under State, so a
+// server the dashboard daemon hosts for another process keeps its jobs
+// where that process's own server would. The zero value is this process's
+// cache home and environment, which the package-level functions use.
+type Store struct {
+	State wsstate.Options
+}
+
+func (st Store) open(root string) (*wsstore.Store, error) {
+	return wsstore.NewManager(wsstore.Options{CacheHome: st.State.CacheHome, Env: st.State.Env}).Open(root)
+}
+
+func Launch(opts LaunchOptions) (Response, error) { return Store{}.Launch(opts) }
+func Status(root, key string) (Response, error)   { return Store{}.Status(root, key) }
+func Result(root, key string) (Response, error)   { return Store{}.Result(root, key) }
+func ResultWithTimeout(root, key string, timeout time.Duration) (Response, error) {
+	return Store{}.ResultWithTimeout(root, key, timeout)
+}
+func ResultWithContext(ctx context.Context, root, key string, timeout time.Duration) (Response, error) {
+	return Store{}.ResultWithContext(ctx, root, key, timeout)
+}
+func Abort(root, key string) (Response, error) { return Store{}.Abort(root, key) }
+func Tail(root, key, stream string, lines int) (RawTailResponse, error) {
+	return Store{}.Tail(root, key, stream, lines)
+}
+func Read(root, key, stream string, offset, limit int64) (RawReadResponse, error) {
+	return Store{}.Read(root, key, stream, offset, limit)
+}
+func Grep(root, key, stream, pattern string, before, after, max int, regex bool) (RawGrepResponse, error) {
+	return Store{}.Grep(root, key, stream, pattern, before, after, max, regex)
+}
+func Load(root, key string) (Record, error) { return Store{}.Load(root, key) }
+
+func (st Store) Launch(opts LaunchOptions) (Response, error) {
 	if strings.TrimSpace(opts.Root) == "" {
 		return Response{}, errors.New("root is required")
 	}
@@ -120,11 +154,11 @@ func Launch(opts LaunchOptions) (Response, error) {
 	if err != nil {
 		return Response{}, err
 	}
-	key, err := newKey(opts.Root)
+	key, err := st.newKey(opts.Root)
 	if err != nil {
 		return Response{}, err
 	}
-	dir, err := jobDir(opts.Root, key)
+	dir, err := st.jobDir(opts.Root, key)
 	if err != nil {
 		return Response{}, err
 	}
@@ -154,12 +188,18 @@ func Launch(opts LaunchOptions) (Response, error) {
 	// A bare program name resolves on the PATH the job runs under, not on
 	// this process's: with Environ set (a server the dashboard daemon hosts
 	// for another process) exec.Command's own lookup would use the daemon's
-	// PATH and start the daemon's binary under the caller's environment.
-	program := func(name string) string {
+	// PATH and start the daemon's binary under the caller's environment. A
+	// program that PATH lacks fails the start below (cmd.Err) instead.
+	program := func(name string, args ...string) *exec.Cmd {
 		if opts.Environ == nil {
-			return name
+			return exec.Command(name, args...)
 		}
-		return wsgit.LookPathEnv(name, env)
+		bin, lookErr := wsgit.LookPathEnv(name, env)
+		cmd := exec.Command(bin, args...)
+		if lookErr != nil {
+			cmd.Err = lookErr
+		}
+		return cmd
 	}
 	if opts.ShellMode {
 		shell, argv := shellCommand(opts.Shell, opts.Command)
@@ -169,7 +209,7 @@ func Launch(opts LaunchOptions) (Response, error) {
 			_ = combined.Close()
 			return Response{}, errors.New("command is required")
 		}
-		cmd = exec.Command(program(shell), argv...)
+		cmd = program(shell, argv...)
 		rec.Command = opts.Command
 		rec.Shell = shell
 	} else {
@@ -180,7 +220,7 @@ func Launch(opts LaunchOptions) (Response, error) {
 			return Response{}, errors.New("cmd is required")
 		}
 		argv := append([]string{opts.Cmd}, opts.Args...)
-		cmd = exec.Command(program(opts.Cmd), opts.Args...)
+		cmd = program(opts.Cmd, opts.Args...)
 		rec.Argv = argv
 	}
 	cmd.Dir = wd
@@ -195,7 +235,7 @@ func Launch(opts LaunchOptions) (Response, error) {
 	cmd.Stdout = io.MultiWriter(stdout, lockedCombined)
 	cmd.Stderr = io.MultiWriter(stderr, lockedCombined)
 	configureCommand(cmd)
-	if err := writeRecord(opts.Root, rec); err != nil {
+	if err := st.writeRecord(opts.Root, rec); err != nil {
 		_ = stdout.Close()
 		_ = stderr.Close()
 		_ = combined.Close()
@@ -209,60 +249,60 @@ func Launch(opts LaunchOptions) (Response, error) {
 		rec.Error = err.Error()
 		rec.CompletedAt = ts()
 		rec.UpdatedAt = rec.CompletedAt
-		_ = writeRecord(opts.Root, rec)
-		return responseFor(opts.Root, rec, false), nil
+		_ = st.writeRecord(opts.Root, rec)
+		return st.responseFor(opts.Root, rec, false), nil
 	}
 	rec.PID = cmd.Process.Pid
 	rec.UpdatedAt = ts()
-	_ = writeRecord(opts.Root, rec)
+	_ = st.writeRecord(opts.Root, rec)
 	active.Store(activeKey(opts.Root, key), &activeJob{root: opts.Root, key: key, cmd: cmd})
 	done := make(chan struct{})
-	go func() { finalize(opts.Root, key, cmd, stdout, stderr, combined); close(done) }()
+	go func() { st.finalize(opts.Root, key, cmd, stdout, stderr, combined); close(done) }()
 	select {
 	case <-done:
-		rec, _ = Load(opts.Root, key)
-		return responseFor(opts.Root, rec, true), nil
+		rec, _ = st.Load(opts.Root, key)
+		return st.responseFor(opts.Root, rec, true), nil
 	case <-time.After(ForegroundWindow):
-		rec, _ = refreshSizes(opts.Root, key)
-		r := responseFor(opts.Root, rec, false)
+		rec, _ = st.refreshSizes(opts.Root, key)
+		r := st.responseFor(opts.Root, rec, false)
 		r.Guidance = guidance()
 		return r, nil
 	}
 }
 
-func Status(root, key string) (Response, error) {
-	rec, err := reconcile(root, key)
+func (st Store) Status(root, key string) (Response, error) {
+	rec, err := st.reconcile(root, key)
 	if err != nil {
 		return Response{}, err
 	}
-	return responseFor(root, rec, false), nil
+	return st.responseFor(root, rec, false), nil
 }
-func Result(root, key string) (Response, error) {
-	return ResultWithTimeout(root, key, 0)
+func (st Store) Result(root, key string) (Response, error) {
+	return st.ResultWithTimeout(root, key, 0)
 }
 
-func ResultWithTimeout(root, key string, timeout time.Duration) (Response, error) {
-	return ResultWithContext(context.Background(), root, key, timeout)
+func (st Store) ResultWithTimeout(root, key string, timeout time.Duration) (Response, error) {
+	return st.ResultWithContext(context.Background(), root, key, timeout)
 }
 
 // ResultWithContext is ResultWithTimeout whose wait also ends when ctx
 // does: the job's current state is returned then, as at the timeout. The
 // server a dashboard daemon hosts passes the context its drain cancels, so
 // a daemon replacement never waits out a caller's timeout.
-func ResultWithContext(ctx context.Context, root, key string, timeout time.Duration) (Response, error) {
+func (st Store) ResultWithContext(ctx context.Context, root, key string, timeout time.Duration) (Response, error) {
 	deadline := time.Time{}
 	if timeout > 0 {
 		deadline = time.Now().Add(timeout)
 	}
 	for {
-		rec, err := reconcile(root, key)
+		rec, err := st.reconcile(root, key)
 		if err != nil {
 			return Response{}, err
 		}
 		if terminal(rec.Status) {
-			return responseFor(root, rec, true), nil
+			return st.responseFor(root, rec, true), nil
 		}
-		r := responseFor(root, rec, false)
+		r := st.responseFor(root, rec, false)
 		r.Guidance = guidance()
 		if timeout <= 0 || time.Now().After(deadline) || ctx.Err() != nil {
 			return r, nil
@@ -282,18 +322,18 @@ func ResultWithContext(ctx context.Context, root, key string, timeout time.Durat
 		}
 	}
 }
-func Abort(root, key string) (Response, error) {
-	rec, err := Load(root, key)
+func (st Store) Abort(root, key string) (Response, error) {
+	rec, err := st.Load(root, key)
 	if err != nil {
 		return Response{}, err
 	}
 	if terminal(rec.Status) {
-		return responseFor(root, rec, false), nil
+		return st.responseFor(root, rec, false), nil
 	}
 	rec.CancelRequested = true
 	rec.Status = stateCancelRequested
 	rec.UpdatedAt = ts()
-	_ = writeRecord(root, rec)
+	_ = st.writeRecord(root, rec)
 	pid := 0
 	if v, ok := active.Load(activeKey(root, key)); ok {
 		pid = v.(*activeJob).cmd.Process.Pid
@@ -312,8 +352,8 @@ func Abort(root, key string) (Response, error) {
 		// process that refuses to die never hangs the abort (best-effort contract).
 		waitProcessExit(pid, abortExitTimeout)
 	}
-	rec, _ = refreshSizes(root, key)
-	return responseFor(root, rec, false), nil
+	rec, _ = st.refreshSizes(root, key)
+	return st.responseFor(root, rec, false), nil
 }
 
 // abortExitTimeout bounds how long Abort waits for a cancelled process to exit
@@ -338,43 +378,43 @@ func waitProcessExit(pid int, timeout time.Duration) {
 	}
 }
 
-func Tail(root, key, stream string, lines int) (RawTailResponse, error) {
-	p, st, err := streamPath(root, key, stream)
+func (st Store) Tail(root, key, stream string, lines int) (RawTailResponse, error) {
+	p, name, err := st.streamPath(root, key, stream)
 	if err != nil {
 		return RawTailResponse{}, err
 	}
-	if err := requirePayloadPresent(st, p); err != nil {
-		return RawTailResponse{ExecKey: key, Stream: st}, err
+	if err := requirePayloadPresent(name, p); err != nil {
+		return RawTailResponse{ExecKey: key, Stream: name}, err
 	}
 	txt, err := textreader.Tail(p, lines)
-	return RawTailResponse{ExecKey: key, Stream: st, Text: txt}, err
+	return RawTailResponse{ExecKey: key, Stream: name, Text: txt}, err
 }
-func Read(root, key, stream string, offset, limit int64) (RawReadResponse, error) {
-	p, st, err := streamPath(root, key, stream)
+func (st Store) Read(root, key, stream string, offset, limit int64) (RawReadResponse, error) {
+	p, name, err := st.streamPath(root, key, stream)
 	if err != nil {
 		return RawReadResponse{}, err
 	}
-	if err := requirePayloadPresent(st, p); err != nil {
-		return RawReadResponse{ExecKey: key, Stream: st}, err
+	if err := requirePayloadPresent(name, p); err != nil {
+		return RawReadResponse{ExecKey: key, Stream: name}, err
 	}
 	rr, err := textreader.Read(p, offset, limit)
-	return RawReadResponse{ExecKey: key, Stream: st, ReadResult: rr}, err
+	return RawReadResponse{ExecKey: key, Stream: name, ReadResult: rr}, err
 }
-func Grep(root, key, stream, pattern string, before, after, max int, regex bool) (RawGrepResponse, error) {
-	paths, st, err := streamPaths(root, key, stream)
+func (st Store) Grep(root, key, stream, pattern string, before, after, max int, regex bool) (RawGrepResponse, error) {
+	paths, name, err := st.streamPaths(root, key, stream)
 	if err != nil {
 		return RawGrepResponse{}, err
 	}
 	for _, p := range paths {
-		if err := requirePayloadPresent(st, p); err != nil {
-			return RawGrepResponse{ExecKey: key, Stream: st}, err
+		if err := requirePayloadPresent(name, p); err != nil {
+			return RawGrepResponse{ExecKey: key, Stream: name}, err
 		}
 	}
 	gr, err := textreader.Grep(paths, pattern, before, after, max, regex)
 	for i := range gr.Matches {
 		gr.Matches[i].Path = ""
 	}
-	return RawGrepResponse{ExecKey: key, Stream: st, GrepResult: gr}, err
+	return RawGrepResponse{ExecKey: key, Stream: name, GrepResult: gr}, err
 }
 
 func requirePayloadPresent(stream, path string) error {
@@ -384,7 +424,7 @@ func requirePayloadPresent(stream, path string) error {
 	return nil
 }
 
-func finalize(root, key string, cmd *exec.Cmd, closers ...io.Closer) {
+func (st Store) finalize(root, key string, cmd *exec.Cmd, closers ...io.Closer) {
 	err := cmd.Wait()
 	for _, closer := range closers {
 		_ = closer.Close()
@@ -392,7 +432,7 @@ func finalize(root, key string, cmd *exec.Cmd, closers ...io.Closer) {
 	mu.Lock()
 	defer mu.Unlock()
 	// Drop the active-worker entry only after the terminal status is written
-	// below, inside this same mu critical section. reconcile() is mu-guarded and
+	// below, inside this same mu critical section. st.reconcile() is mu-guarded and
 	// treats "absent from the active map AND process not alive AND status still
 	// running" as a lost worker. cmd.Wait() has already returned, so the process
 	// is gone; deleting the active entry before the terminal status is durable
@@ -404,7 +444,7 @@ func finalize(root, key string, cmd *exec.Cmd, closers ...io.Closer) {
 	// the terminal transition. The defer also covers the loadErr early return so
 	// a worker whose record became unreadable cannot leak a stale active entry.
 	defer active.Delete(activeKey(root, key))
-	rec, loadErr := readRecord(root, key)
+	rec, loadErr := st.readRecord(root, key)
 	if loadErr != nil {
 		return
 	}
@@ -421,35 +461,35 @@ func finalize(root, key string, cmd *exec.Cmd, closers ...io.Closer) {
 	if cmd.ProcessState != nil {
 		rec.ExitCode = cmd.ProcessState.ExitCode()
 	}
-	updateSizes(&rec, root, key)
-	_ = writeRecordLocked(root, rec)
+	st.updateSizes(&rec, root, key)
+	_ = st.writeRecordLocked(root, rec)
 }
-func Load(root, key string) (Record, error) {
+func (st Store) Load(root, key string) (Record, error) {
 	mu.Lock()
 	defer mu.Unlock()
-	return readRecord(root, key)
+	return st.readRecord(root, key)
 }
-func refreshSizes(root, key string) (Record, error) {
+func (st Store) refreshSizes(root, key string) (Record, error) {
 	mu.Lock()
 	defer mu.Unlock()
-	rec, err := readRecord(root, key)
+	rec, err := st.readRecord(root, key)
 	if err != nil {
 		return rec, err
 	}
-	updateSizes(&rec, root, key)
+	st.updateSizes(&rec, root, key)
 	rec.UpdatedAt = ts()
-	_ = writeRecordLocked(root, rec)
+	_ = st.writeRecordLocked(root, rec)
 	return rec, nil
 }
 
-func reconcile(root, key string) (Record, error) {
+func (st Store) reconcile(root, key string) (Record, error) {
 	mu.Lock()
 	defer mu.Unlock()
-	rec, err := readRecord(root, key)
+	rec, err := st.readRecord(root, key)
 	if err != nil {
 		return rec, err
 	}
-	updateSizes(&rec, root, key)
+	st.updateSizes(&rec, root, key)
 	if rec.Status == stateRunning || rec.Status == stateCancelRequested {
 		if _, ok := active.Load(activeKey(root, key)); !ok && !processAlive(rec.PID) {
 			if rec.CancelRequested || rec.Status == stateCancelRequested {
@@ -465,13 +505,13 @@ func reconcile(root, key string) (Record, error) {
 		}
 	}
 	rec.UpdatedAt = ts()
-	_ = writeRecordLocked(root, rec)
+	_ = st.writeRecordLocked(root, rec)
 	return rec, nil
 }
 
-func responseFor(root string, rec Record, include bool) Response {
+func (st Store) responseFor(root string, rec Record, include bool) Response {
 	r := Response{ExecKey: rec.ExecKey, Status: rec.Status, PID: rec.PID, StartedAt: rec.StartedAt, UpdatedAt: rec.UpdatedAt, CompletedAt: rec.CompletedAt, ExitCode: rec.ExitCode, Error: rec.Error, ResultReady: terminal(rec.Status), StdoutBytes: rec.StdoutBytes, StderrBytes: rec.StderrBytes, CombinedBytes: rec.CombinedBytes}
-	if warning := payloadConsistencyWarning(root, rec.ExecKey); warning != "" {
+	if warning := st.payloadConsistencyWarning(root, rec.ExecKey); warning != "" {
 		r.Error = appendError(r.Error, warning)
 	}
 	if !include {
@@ -484,8 +524,8 @@ func responseFor(root string, rec Record, include bool) Response {
 		r.Guidance = guidance()
 		return r
 	}
-	outPath, _, _ := streamPathFromStore(root, rec.ExecKey, "stdout")
-	errPath, _, _ := streamPathFromStore(root, rec.ExecKey, "stderr")
+	outPath, _, _ := st.streamPathFromStore(root, rec.ExecKey, "stdout")
+	errPath, _, _ := st.streamPathFromStore(root, rec.ExecKey, "stderr")
 	out, outErr := os.ReadFile(outPath)
 	er, erErr := os.ReadFile(errPath)
 	if outErr != nil {
@@ -499,10 +539,10 @@ func responseFor(root string, rec Record, include bool) Response {
 	return r
 }
 
-func payloadConsistencyWarning(root, key string) string {
+func (st Store) payloadConsistencyWarning(root, key string) string {
 	var missing []string
 	for _, stream := range []string{"stdout", "stderr", "combined"} {
-		p, _, err := streamPathFromStore(root, key, stream)
+		p, _, err := st.streamPathFromStore(root, key, stream)
 		if err != nil || strings.TrimSpace(p) == "" {
 			continue
 		}
@@ -587,40 +627,40 @@ func (w *lockedWriter) Write(p []byte) (int, error) {
 	return w.w.Write(p)
 }
 
-func jobDir(root, key string) (string, error) {
+func (st Store) jobDir(root, key string) (string, error) {
 	if !keyPattern.MatchString(key) {
 		return "", fmt.Errorf("invalid exec_key %q", key)
 	}
-	layout, _, _, err := wsstate.NewManager(wsstate.Options{}).Ensure(root)
+	layout, _, _, err := wsstate.NewManager(st.State).Ensure(root)
 	if err != nil {
 		return "", err
 	}
 	return filepath.Join(layout.WorktreeDir, "exec-jobs", key), nil
 }
-func streamPath(root, key, stream string) (string, string, error) {
-	paths, st, err := streamPaths(root, key, stream)
+func (st Store) streamPath(root, key, stream string) (string, string, error) {
+	paths, name, err := st.streamPaths(root, key, stream)
 	if err != nil {
-		return "", st, err
+		return "", name, err
 	}
-	return paths[0], st, nil
+	return paths[0], name, nil
 }
-func streamPaths(root, key, stream string) ([]string, string, error) {
-	p, st, err := streamPathFromStore(root, key, stream)
+func (st Store) streamPaths(root, key, stream string) ([]string, string, error) {
+	p, name, err := st.streamPathFromStore(root, key, stream)
 	if err != nil {
-		return nil, st, err
+		return nil, name, err
 	}
-	return []string{p}, st, nil
+	return []string{p}, name, nil
 }
-func statePath(root, key string) (string, error) {
-	dir, err := jobDir(root, key)
+func (st Store) statePath(root, key string) (string, error) {
+	dir, err := st.jobDir(root, key)
 	if err != nil {
 		return "", err
 	}
 	return filepath.Join(dir, "state.json"), nil
 }
 
-func readRecord(root, key string) (Record, error) {
-	store, err := wsstore.NewManager(wsstore.Options{}).Open(root)
+func (st Store) readRecord(root, key string) (Record, error) {
+	store, err := st.open(root)
 	if err == nil {
 		defer store.Close()
 		job, ok, storeErr := store.ExecJob(context.Background(), key)
@@ -633,18 +673,18 @@ func readRecord(root, key string) (Record, error) {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return Record{}, err
 	}
-	rec, err := readLegacyRecord(root, key)
+	rec, err := st.readLegacyRecord(root, key)
 	if err != nil {
 		return rec, err
 	}
-	if err := writeRecordLocked(root, rec); err != nil {
+	if err := st.writeRecordLocked(root, rec); err != nil {
 		return rec, fmt.Errorf("import legacy exec metadata: %w", err)
 	}
 	return rec, nil
 }
 
-func readLegacyRecord(root, key string) (Record, error) {
-	p, err := statePath(root, key)
+func (st Store) readLegacyRecord(root, key string) (Record, error) {
+	p, err := st.statePath(root, key)
 	if err != nil {
 		return Record{}, err
 	}
@@ -673,29 +713,29 @@ func legacyRecoveryRecord(root, key, msg string) Record {
 	return Record{SchemaVersion: schemaVersion, ExecKey: key, Status: stateFailed, Root: filepath.Clean(root), WorkingDir: filepath.Clean(root), StartedAt: now, UpdatedAt: now, CompletedAt: now, Error: msg}
 }
 
-func writeRecord(root string, rec Record) error {
+func (st Store) writeRecord(root string, rec Record) error {
 	mu.Lock()
 	defer mu.Unlock()
-	return writeRecordLocked(root, rec)
+	return st.writeRecordLocked(root, rec)
 }
-func writeRecordLocked(root string, rec Record) error {
+func (st Store) writeRecordLocked(root string, rec Record) error {
 	if rec.SchemaVersion == 0 {
 		rec.SchemaVersion = schemaVersion
 	}
-	store, err := wsstore.NewManager(wsstore.Options{}).Open(root)
+	store, err := st.open(root)
 	if err != nil {
 		return err
 	}
 	defer store.Close()
-	job, err := storeFromRecord(root, rec)
+	job, err := st.storeFromRecord(root, rec)
 	if err != nil {
 		return err
 	}
 	return store.UpsertExecJob(context.Background(), job)
 }
 
-func storeFromRecord(root string, rec Record) (wsstore.ExecJob, error) {
-	dir, err := jobDir(root, rec.ExecKey)
+func (st Store) storeFromRecord(root string, rec Record) (wsstore.ExecJob, error) {
+	dir, err := st.jobDir(root, rec.ExecKey)
 	if err != nil {
 		return wsstore.ExecJob{}, err
 	}
@@ -734,11 +774,11 @@ func recordFromStore(job wsstore.ExecJob) Record {
 	return rec
 }
 
-func streamPathFromStore(root, key, stream string) (string, string, error) {
+func (st Store) streamPathFromStore(root, key, stream string) (string, string, error) {
 	if strings.TrimSpace(stream) == "" {
 		stream = "stdout"
 	}
-	store, err := wsstore.NewManager(wsstore.Options{}).Open(root)
+	store, err := st.open(root)
 	if err == nil {
 		defer store.Close()
 		if job, ok, storeErr := store.ExecJob(context.Background(), key); storeErr != nil {
@@ -756,7 +796,7 @@ func streamPathFromStore(root, key, stream string) (string, string, error) {
 			}
 		}
 	}
-	dir, err := jobDir(root, key)
+	dir, err := st.jobDir(root, key)
 	if err != nil {
 		return "", "", err
 	}
@@ -768,8 +808,8 @@ func streamPathFromStore(root, key, stream string) (string, string, error) {
 	}
 }
 
-func updateSizes(rec *Record, root, key string) {
-	dir, err := jobDir(root, key)
+func (st Store) updateSizes(rec *Record, root, key string) {
+	dir, err := st.jobDir(root, key)
 	if err != nil {
 		return
 	}
@@ -783,14 +823,14 @@ func updateSizes(rec *Record, root, key string) {
 		rec.CombinedBytes = st.Size()
 	}
 }
-func newKey(root string) (string, error) {
+func (st Store) newKey(root string) (string, error) {
 	for i := 0; i < 32; i++ {
 		var b [4]byte
 		if _, err := rand.Read(b[:]); err != nil {
 			return "", err
 		}
 		key := "exec-" + hex.EncodeToString(b[:])
-		exists, err := keyExists(root, key)
+		exists, err := st.keyExists(root, key)
 		if err != nil {
 			return "", err
 		}
@@ -801,8 +841,8 @@ func newKey(root string) (string, error) {
 	return "", errors.New("could not allocate unique exec key")
 }
 
-func keyExists(root, key string) (bool, error) {
-	store, err := wsstore.NewManager(wsstore.Options{}).Open(root)
+func (st Store) keyExists(root, key string) (bool, error) {
+	store, err := st.open(root)
 	if err == nil {
 		defer store.Close()
 		_, ok, storeErr := store.ExecJob(context.Background(), key)
@@ -815,7 +855,7 @@ func keyExists(root, key string) (bool, error) {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return false, err
 	}
-	dir, err := jobDir(root, key)
+	dir, err := st.jobDir(root, key)
 	if err != nil {
 		return false, err
 	}

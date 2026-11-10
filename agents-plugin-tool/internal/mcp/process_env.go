@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kang-sw/devenv/internal/execjob"
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsgit"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
@@ -174,6 +175,12 @@ func (s *Server) configOptions() wsconfig.Options {
 // stateOptions anchors wsstate at the caller's WS_CACHE_HOME.
 func (s *Server) stateOptions() wsstate.Options {
 	return wsstate.Options{CacheHome: s.getenv(wsstate.EnvCacheHome), Env: s.environ()}
+}
+
+// execStore is the exec-job store under the caller's cache home and
+// environment.
+func (s *Server) execStore() execjob.Store {
+	return execjob.Store{State: s.stateOptions()}
 }
 
 // mailboxPaths anchors the mailbox stores, reply registry, and listening

@@ -41,7 +41,8 @@ func Executable() string {
 }
 
 // LookPathEnv resolves name against the PATH (and, on Windows, PATHEXT) of
-// environ rather than this process's; see wsexec.LookPath.
-func LookPathEnv(name string, environ []string) string {
+// environ rather than this process's; see wsexec.LookPath. A name environ's
+// PATH does not hold is an error, never this process's copy of it.
+func LookPathEnv(name string, environ []string) (string, error) {
 	return wsexec.LookPath(name, environ)
 }

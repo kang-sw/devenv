@@ -46,7 +46,7 @@ func TestRemoveWorktreeRefusals(t *testing.T) {
 	lookup := lookupOf(profile)
 	refuse := func(path string, at time.Time, want string) {
 		t.Helper()
-		_, err := removeWorktree(ctx, runner, path, "", testStaleAfter, at, lookup)
+		_, err := removeWorktree(ctx, runner, nil, path, "", testStaleAfter, at, lookup)
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Fatalf("remove(%s) = %v, want refusal containing %q", path, err, want)
 		}
@@ -96,7 +96,7 @@ func TestRemoveWorktreeRefusals(t *testing.T) {
 	refuse(leased.Path, now, "leased to worker k")
 
 	// Thirty days later the same lease is stale, and remove proceeds.
-	res, err := removeWorktree(ctx, runner, leased.Path, "", testStaleAfter, now.Add(30*24*time.Hour), lookup)
+	res, err := removeWorktree(ctx, runner, nil, leased.Path, "", testStaleAfter, now.Add(30*24*time.Hour), lookup)
 	if err != nil {
 		t.Fatalf("remove of a stale-leased worktree: %v", err)
 	}
@@ -126,10 +126,10 @@ func TestRemoveWorktreeFailingPreRemoveKeepsWorktree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := releaseWorktree(ctx, runner, res.Path, "", lookupOf(profile)); err != nil {
+	if _, err := releaseWorktree(ctx, runner, nil, res.Path, "", lookupOf(profile)); err != nil {
 		t.Fatal(err)
 	}
-	_, err = removeWorktree(ctx, runner, res.Path, "", testStaleAfter, time.Now(), lookupOf(profile))
+	_, err = removeWorktree(ctx, runner, nil, res.Path, "", testStaleAfter, time.Now(), lookupOf(profile))
 	if err == nil || !strings.Contains(err.Error(), "pre_remove") || !strings.Contains(err.Error(), "was not removed") {
 		t.Fatalf("remove must fail on pre_remove: %v", err)
 	}
@@ -162,7 +162,7 @@ func TestRemoveWorktreeQuarantinedAndVanishedProfile(t *testing.T) {
 	if quarantined == "" {
 		t.Fatal("setup: no quarantined worktree")
 	}
-	res, err := removeWorktree(ctx, runner, quarantined, "", testStaleAfter, time.Now(), lookupOf(broken))
+	res, err := removeWorktree(ctx, runner, nil, quarantined, "", testStaleAfter, time.Now(), lookupOf(broken))
 	if err != nil {
 		t.Fatalf("remove quarantined: %v", err)
 	}
@@ -174,10 +174,10 @@ func TestRemoveWorktreeQuarantinedAndVanishedProfile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := releaseWorktree(ctx, runner, orphan.Path, "", lookupOf(customProfile(t, "gone", `{}`))); err != nil {
+	if _, err := releaseWorktree(ctx, runner, nil, orphan.Path, "", lookupOf(customProfile(t, "gone", `{}`))); err != nil {
 		t.Fatal(err)
 	}
-	res, err = removeWorktree(ctx, runner, orphan.Path, "", testStaleAfter, time.Now(), builtinProfileLookup(t))
+	res, err = removeWorktree(ctx, runner, nil, orphan.Path, "", testStaleAfter, time.Now(), builtinProfileLookup(t))
 	if err != nil {
 		t.Fatalf("remove with vanished profile: %v", err)
 	}
@@ -231,7 +231,7 @@ func TestReleaseRecordsPreservedBytes(t *testing.T) {
 	writeFileForTest(t, res.Path, "out/a.bin", strings.Repeat("x", 1000))
 	writeFileForTest(t, res.Path, "out/deep/b.bin", strings.Repeat("y", 500))
 	writeFileForTest(t, res.Path, "cache/c.bin", strings.Repeat("z", 9000))
-	if _, err := releaseWorktree(ctx, runner, res.Path, "", lookupOf(build)); err != nil {
+	if _, err := releaseWorktree(ctx, runner, nil, res.Path, "", lookupOf(build)); err != nil {
 		t.Fatal(err)
 	}
 	m, err := readWorktreeMarker(ctx, runner, res.Path)
@@ -258,7 +258,7 @@ func TestPoolNudgeThrottleAndThresholds(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeFileForTest(t, big.Path, "out/a.bin", strings.Repeat("x", 2000))
-	if _, err := releaseWorktree(ctx, runner, big.Path, "", lookupOf(build)); err != nil {
+	if _, err := releaseWorktree(ctx, runner, nil, big.Path, "", lookupOf(build)); err != nil {
 		t.Fatal(err)
 	}
 	pool := held.Pool
@@ -344,7 +344,7 @@ func TestRemoveWorktreeWithInitializedSubmodule(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(res.Path, "deps", "sub", "s.txt")); err != nil {
 		t.Fatalf("setup: submodule not initialized: %v", err)
 	}
-	if _, err := releaseWorktree(ctx, runner, res.Path, "", builtinProfileLookup(t)); err != nil {
+	if _, err := releaseWorktree(ctx, runner, nil, res.Path, "", builtinProfileLookup(t)); err != nil {
 		t.Fatal(err)
 	}
 	out, err := remove(ctx, runner, res.Path, builtinProfileLookup(t))
@@ -354,5 +354,5 @@ func TestRemoveWorktreeWithInitializedSubmodule(t *testing.T) {
 }
 
 func remove(ctx context.Context, runner wsgit.Runner, path string, lookup worktreeProfileLookup) (worktreeRemoveResult, error) {
-	return removeWorktree(ctx, runner, path, "", testStaleAfter, time.Now(), lookup)
+	return removeWorktree(ctx, runner, nil, path, "", testStaleAfter, time.Now(), lookup)
 }

@@ -98,7 +98,7 @@ func TestProvisionWorktreePreserveSurvivesHygiene(t *testing.T) {
 	}
 	writeFileForTest(t, first.Path, "out/keep.bin", "artifact")
 	writeFileForTest(t, first.Path, "cache/drop.bin", "scratch")
-	if _, err := releaseWorktree(ctx, runner, first.Path, "", lookupOf(build)); err != nil {
+	if _, err := releaseWorktree(ctx, runner, nil, first.Path, "", lookupOf(build)); err != nil {
 		t.Fatalf("release: %v", err)
 	}
 	assertExists(t, first.Path, "out/keep.bin", true)
@@ -129,7 +129,7 @@ func TestProvisionWorktreeDefinitionChangeReadopts(t *testing.T) {
 	if err != nil || !first.Provisioned {
 		t.Fatalf("fresh provision = %+v, %v", first, err)
 	}
-	if _, err := releaseWorktree(ctx, runner, first.Path, "", lookupOf(v1)); err != nil {
+	if _, err := releaseWorktree(ctx, runner, nil, first.Path, "", lookupOf(v1)); err != nil {
 		t.Fatal(err)
 	}
 	renamed := customProfile(t, "build", `{"description":"v1 reworded"}`)
@@ -137,7 +137,7 @@ func TestProvisionWorktreeDefinitionChangeReadopts(t *testing.T) {
 	if err != nil || !second.Reused || second.Provisioned {
 		t.Fatalf("description-only change must reuse without re-provisioning: %+v, %v", second, err)
 	}
-	if _, err := releaseWorktree(ctx, runner, second.Path, "", lookupOf(renamed)); err != nil {
+	if _, err := releaseWorktree(ctx, runner, nil, second.Path, "", lookupOf(renamed)); err != nil {
 		t.Fatal(err)
 	}
 	v2 := customProfile(t, "build", `{"description":"v2","sparse":{"mode":"patterns","paths":["/*","!/deps/"]}}`)
@@ -194,7 +194,7 @@ func TestProvisionWorktreeAdoptsLegacyIntoBuiltinsOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, p := range []string{sparse.Path, plain.Path} {
-		if _, err := releaseWorktree(ctx, runner, p, "", lookup); err != nil {
+		if _, err := releaseWorktree(ctx, runner, nil, p, "", lookup); err != nil {
 			t.Fatal(err)
 		}
 		dropWorktreeMarker(t, p)
@@ -292,7 +292,7 @@ func TestReleaseWorktreeLegacyAndVanishedProfile(t *testing.T) {
 	}
 	dropWorktreeMarker(t, legacy.Path)
 	writeFileForTest(t, legacy.Path, "out/keep.bin", "artifact")
-	res, err := releaseWorktree(ctx, runner, legacy.Path, "", lookupOf(build))
+	res, err := releaseWorktree(ctx, runner, nil, legacy.Path, "", lookupOf(build))
 	if err != nil {
 		t.Fatalf("release legacy: %v", err)
 	}
@@ -309,7 +309,7 @@ func TestReleaseWorktreeLegacyAndVanishedProfile(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeFileForTest(t, vanished.Path, "out/keep.bin", "artifact")
-	res, err = releaseWorktree(ctx, runner, vanished.Path, "", builtinProfileLookup(t))
+	res, err = releaseWorktree(ctx, runner, nil, vanished.Path, "", builtinProfileLookup(t))
 	if err != nil {
 		t.Fatalf("release with vanished profile: %v", err)
 	}

@@ -36,9 +36,15 @@ func (r ExecRunner) RunGit(ctx context.Context, root string, args ...string) ([]
 	argv := append([]string{"-C", root}, args...)
 	var cmd *exec.Cmd
 	if r.Environ != nil {
-		// The git binary comes from the caller's PATH too (see LookPathEnv).
+		// The git binary comes from the caller's PATH too (see LookPathEnv);
+		// a PATH without git fails the run rather than running this
+		// process's git.
 		base := r.Environ()
-		cmd = exec.CommandContext(ctx, LookPathEnv("git", base), argv...)
+		bin, lookErr := LookPathEnv("git", base)
+		cmd = exec.CommandContext(ctx, bin, argv...)
+		if lookErr != nil {
+			cmd.Err = lookErr
+		}
 		cmd.Env = append(base, r.Env...)
 	} else {
 		cmd = exec.CommandContext(ctx, "git", argv...)

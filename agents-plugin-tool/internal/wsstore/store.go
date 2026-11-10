@@ -32,6 +32,9 @@ type Clock func() time.Time
 type Options struct {
 	CacheHome string
 	Now       Clock
+	// Env is the environment the layout's git identity runs on; nil means
+	// this process's own.
+	Env []string
 }
 
 type Manager struct {
@@ -135,6 +138,7 @@ func (m Manager) Open(root string) (*Store, error) {
 	layout, _, _, err := wsstate.NewManager(wsstate.Options{
 		CacheHome: m.opts.CacheHome,
 		Now:       wsstate.Clock(m.now),
+		Env:       m.opts.Env,
 	}).Ensure(root)
 	if err != nil {
 		return nil, err

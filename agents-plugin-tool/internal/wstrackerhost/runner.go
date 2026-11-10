@@ -54,9 +54,15 @@ func (r batchRunner) RunGit(ctx context.Context, root string, args ...string) ([
 
 // gitCommand is git in root, bounded by ctx (gitbatch.Bound), so a hung
 // transport cannot outlast the check's timeout and keep the store's lock.
-// The executable is looked up on env's PATH.
+// The executable is looked up on env's PATH; a caller environment without
+// git leaves the command unstartable (cmd.Err) rather than running the
+// daemon's git.
 func gitCommand(ctx context.Context, env []string, root string, args ...string) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, gitExecutable(env), append([]string{"-C", root}, args...)...)
+	bin, lookErr := gitExecutable(env)
+	cmd := exec.CommandContext(ctx, bin, append([]string{"-C", root}, args...)...)
+	if lookErr != nil {
+		cmd.Err = lookErr
+	}
 	gitbatch.Bound(cmd)
 	return cmd
 }
@@ -77,13 +83,13 @@ func isRemoteCommand(args []string) bool {
 	return false
 }
 
-// gitExecutable is git on env's PATH, or wsgit.Executable() when env is
-// the process environment or names none.
-func gitExecutable(env []string) string {
-	if got := wsgit.LookPathEnv("git", env); got != "git" {
-		return got
+// gitExecutable is git on env's PATH (an error when that PATH has none),
+// or wsgit.Executable() for a nil env, the process environment.
+func gitExecutable(env []string) (string, error) {
+	if env == nil {
+		return wsgit.Executable(), nil
 	}
-	return wsgit.Executable()
+	return wsgit.LookPathEnv("git", env)
 }
 
 // lookupEnv is key's value in env, matched case-insensitively when fold is

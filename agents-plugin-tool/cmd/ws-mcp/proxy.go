@@ -88,7 +88,7 @@ func (h *proxyHost) Accept(hello wsdashboard.ProxyHello) (wsdashboard.ProxySessi
 		if len(hello.Argv) < 2 || hello.Argv[0] != "mailbox" || hello.Argv[1] != "wait" {
 			return nil, fmt.Errorf("the daemon runs only `mailbox wait` for a launcher, not %q", strings.Join(hello.Argv, " "))
 		}
-		return &proxyCLISession{args: hello.Argv[2:], cwd: hello.Cwd, ownerPID: hello.OwnerPID, getenv: func(key string) string { return hello.Env[key] }}, nil
+		return &proxyCLISession{args: hello.Argv[2:], cwd: hello.Cwd, ownerPID: hello.OwnerPID, environ: mcp.EnvFromMap(hello.Env), getenv: func(key string) string { return hello.Env[key] }}, nil
 	}
 	return nil, fmt.Errorf("unsupported mode %q", hello.Mode)
 }
@@ -188,7 +188,10 @@ type proxyCLISession struct {
 	args     []string
 	cwd      string
 	ownerPID int
-	getenv   func(string) string
+	// environ is the launcher's environment, which the wait's stores and
+	// their git run under; getenv reads it.
+	environ []string
+	getenv  func(string) string
 
 	cancel func()
 	done   chan struct{}
@@ -221,7 +224,7 @@ func (s *proxyCLISession) Serve(ctx context.Context, stream io.ReadWriteCloser) 
 	}
 	var stdout bytes.Buffer
 	stderr := &frameWriter{emit: func(data string) { writeFrame(wsdashboard.ProxyCLIFrame{Stream: "stderr", Data: data}) }}
-	code := runMailboxWait(ctx, s.args, &stdout, stderr, s.cwd, s.ownerPID, s.getenv)
+	code := runMailboxWait(ctx, s.args, &stdout, stderr, s.cwd, s.ownerPID, s.environ, s.getenv)
 	writeFrame(wsdashboard.ProxyCLIFrame{Final: true, ExitCode: code, Data: stdout.String()})
 }
 

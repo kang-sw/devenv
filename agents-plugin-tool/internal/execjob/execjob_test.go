@@ -199,7 +199,7 @@ func TestReconcileLostRunningWorker(t *testing.T) {
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 	root := gitRoot(t)
 	key := "exec-1-0000000000000001"
-	dir, err := jobDir(root, key)
+	dir, err := (Store{}).jobDir(root, key)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +216,7 @@ func TestReconcileLostRunningWorker(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := ts()
-	if err := writeRecord(root, Record{SchemaVersion: schemaVersion, ExecKey: key, Status: stateRunning, Root: root, WorkingDir: root, PID: 999999999, StartedAt: now, UpdatedAt: now}); err != nil {
+	if err := (Store{}).writeRecord(root, Record{SchemaVersion: schemaVersion, ExecKey: key, Status: stateRunning, Root: root, WorkingDir: root, PID: 999999999, StartedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 	got, err := Status(root, key)
@@ -238,7 +238,7 @@ func TestSQLiteMetadataSurvivesRestartAndNoStateJSONAuthority(t *testing.T) {
 	if res.Status != stateSucceeded || !strings.Contains(res.Stdout, "execjob-sqlite") {
 		t.Fatalf("launch = %#v", res)
 	}
-	state, err := statePath(root, res.ExecKey)
+	state, err := (Store{}).statePath(root, res.ExecKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -274,7 +274,7 @@ func TestShellLaunchUsesSQLiteMetadataAndNoStateJSON(t *testing.T) {
 	if res.Status != stateSucceeded || !strings.Contains(res.Stdout, "shell-sqlite") {
 		t.Fatalf("shell launch = %#v", res)
 	}
-	state, err := statePath(root, res.ExecKey)
+	state, err := (Store{}).statePath(root, res.ExecKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -360,7 +360,7 @@ func TestLegacyFileBackedImportAndCorruptRecovery(t *testing.T) {
 	}
 
 	badKey := "exec-1-00000000000000bb"
-	badDir, err := jobDir(root, badKey)
+	badDir, err := (Store{}).jobDir(root, badKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -393,7 +393,7 @@ func TestMissingPayloadReportedAsRecoverableConsistencyState(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			p, _, err := streamPathFromStore(root, res.ExecKey, tc.stream)
+			p, _, err := (Store{}).streamPathFromStore(root, res.ExecKey, tc.stream)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -429,7 +429,7 @@ func TestMissingPayloadReportedAsRecoverableConsistencyState(t *testing.T) {
 
 func writeLegacyState(t *testing.T, root, key string, rec Record, stdout, stderr, combined []byte) {
 	t.Helper()
-	dir, err := jobDir(root, key)
+	dir, err := (Store{}).jobDir(root, key)
 	if err != nil {
 		t.Fatal(err)
 	}

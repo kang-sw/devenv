@@ -114,11 +114,15 @@ type ExecRunner struct {
 func (r ExecRunner) Run(ctx context.Context, dir string, c Command) ([]byte, error) {
 	argv := append([]string{"-C", dir}, c.Args...)
 	base, bin := os.Environ(), "git"
+	var lookErr error
 	if r.Environ != nil {
 		base = r.Environ()
-		bin = wsgit.LookPathEnv("git", base)
+		bin, lookErr = wsgit.LookPathEnv("git", base)
 	}
 	cmd := exec.CommandContext(ctx, bin, argv...)
+	if lookErr != nil {
+		cmd.Err = lookErr
+	}
 	cmd.Env = append(base, c.Env...)
 	gitbatch.Bound(cmd)
 	if c.Stdin != nil {
