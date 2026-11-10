@@ -432,44 +432,16 @@ func BuildView(state *State, in ViewInput) View {
 	newestFirst := func(list []ItemView) {
 		sort.SliceStable(list, func(i, j int) bool { return settledOrder[list[i].ID] > settledOrder[list[j].ID] })
 	}
-	// A body changed since the user's latest answer is unread and ranks like
-	// an open acknowledgement. Any answer on the board counts as the user
-	// having seen it, so the topic settles back without a dedicated confirm.
-	// A body written in the batch that records that answer (the same
-	// sequence number) was never seen, so it stays unread. A body with no
-	// change sequence (Changed 0, stored before bodies carried one) is read.
-	answered := state.LastAnswerSeq()
-	docChanged := map[string]int{}
-	for _, doc := range state.Topics {
-		docChanged[doc.Name] = doc.Changed
-	}
-	// visible is the rank by what the page shows; Quiet follows it, so an
-	// unread body that stays folded (the embed, an unchanged body) does not
-	// make a topic look active.
-	visible := func(t *TopicView) int {
-		switch {
-		case len(t.Policy) > 0:
-			return 0
-		case len(t.Acks) > 0:
-			return 1
-		case len(t.Expanded) > 0 || t.DocOpen(in.Layout == LayoutEmbed):
-			return 2
-		default:
-			return 3
-		}
-	}
-	rank := func(t *TopicView) int {
-		r := visible(t)
-		if r > 1 && t.Doc != "" && !t.Closed && docChanged[t.Name] > 0 && docChanged[t.Name] >= answered {
-			return 1
-		}
-		return r
+	// Quiet follows what the page shows, so an unread body that stays folded
+	// (the embed, an unchanged body) does not make a topic look active.
+	quiet := func(t *TopicView) bool {
+		return len(t.Policy) == 0 && len(t.Acks) == 0 && len(t.Expanded) == 0 && !t.DocOpen(in.Layout == LayoutEmbed)
 	}
 	for _, name := range order {
 		block := blocks[name]
 		newestFirst(block.Expanded)
 		newestFirst(block.Collapsed)
-		block.Quiet = visible(block) == 3
+		block.Quiet = quiet(block)
 		if len(block.Acks) > 0 {
 			view.BulkAck = true
 		}
@@ -477,8 +449,8 @@ func BuildView(state *State, in ViewInput) View {
 			view.Answerable = true
 		}
 	}
-	// Within one rank, the topic touched most recently rises; equal activity
-	// keeps first-appearance order (the stable sort).
+	// The topic touched most recently rises, whatever waits on the user; equal
+	// activity keeps first-appearance order (the stable sort).
 	activity := map[string]int{}
 	for _, item := range state.Items {
 		activity[item.Topic] = max(activity[item.Topic], item.Changed)
@@ -487,10 +459,6 @@ func BuildView(state *State, in ViewInput) View {
 		activity[doc.Name] = max(activity[doc.Name], doc.Changed)
 	}
 	sort.SliceStable(order, func(i, j int) bool {
-		ri, rj := rank(blocks[order[i]]), rank(blocks[order[j]])
-		if ri != rj {
-			return ri < rj
-		}
 		return activity[order[i]] > activity[order[j]]
 	})
 	// A closed topic with nothing waiting goes last, the most recently
