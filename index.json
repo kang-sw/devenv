@@ -308,7 +308,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-10T00:34:13Z"
+        "touched_at": "2026-11-10T00:35:21Z",
+        "impl": {
+          "branch": "impl/develop/late-twice-blob"
+        }
       }
     },
     "261106-epic-ws-dashboard-serve-daemon": {
