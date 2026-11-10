@@ -15,6 +15,8 @@
 :root {
   --tk-ok: #1d7348; --tk-fail: #c0262d; --tk-on-fail: #ffffff; --tk-warn: #a35f00;
   --tk-teal: #0e7a83;                                     /* pending, requests, mentions */
+  --tk-av-u1: #8f6200; --tk-av-u2: #b54708; --tk-av-u3: #c0262d;   /* avatars: the viewer's leads, 1 / 2 / 3+ up */
+  --tk-av-d1: #1d7348; --tk-av-d2: #2f7a54; --tk-av-d3: #4b7f62;   /* avatars: the viewer's reports, 1 / 2 / 3+ down */
   --tk-agent: #6a4fc4; --tk-on-agent: #ffffff; --tk-agent-ink: #6a4fc4;
   --tk-conc: #e9a100; --tk-on-conc: #1b1d21;              /* concurrent-write markers */
   --tk-topic: #2c3038; --tk-on-topic: #ffffff;            /* admin chip */
@@ -25,6 +27,8 @@
   :root:not([data-theme="light"]) {
     --tk-ok: #6cc39a; --tk-fail: #f0797e; --tk-on-fail: #2a0d0f; --tk-warn: #e0a36c;
     --tk-teal: #6fcdd4;
+    --tk-av-u1: #e3b341; --tk-av-u2: #f0883e; --tk-av-u3: #f0797e;
+    --tk-av-d1: #6cc39a; --tk-av-d2: #8fcdb0; --tk-av-d3: #a9c9b8;
     --tk-agent: #3d2f6b; --tk-on-agent: #ddd3fb; --tk-agent-ink: #b9a6f5;
     --tk-conc: #d1a239; --tk-on-conc: #1b1d21;
     --tk-topic: #d9dbe0; --tk-on-topic: #1b1d21;
@@ -35,6 +39,8 @@
 :root[data-theme="dark"] {
   --tk-ok: #6cc39a; --tk-fail: #f0797e; --tk-on-fail: #2a0d0f; --tk-warn: #e0a36c;
   --tk-teal: #6fcdd4;
+  --tk-av-u1: #e3b341; --tk-av-u2: #f0883e; --tk-av-u3: #f0797e;
+  --tk-av-d1: #6cc39a; --tk-av-d2: #8fcdb0; --tk-av-d3: #a9c9b8;
   --tk-agent: #3d2f6b; --tk-on-agent: #ddd3fb; --tk-agent-ink: #b9a6f5;
   --tk-conc: #d1a239; --tk-on-conc: #1b1d21;
   --tk-topic: #d9dbe0; --tk-on-topic: #1b1d21;
@@ -249,9 +255,20 @@ body.tk-paged .tk-drawer { display: none; }
 .tk .ia .i { width: 15px; height: 15px; }
 .tk .who { display: inline-flex; justify-content: flex-end; flex: none; width: 64px; padding-left: 3px; }
 .tk .av { width: 20px; height: 20px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; flex: none; margin-left: -3px; font-style: normal; font-size: 9px; font-weight: 800; letter-spacing: -.02em;
-  background: color-mix(in srgb, var(--wb-primary) 15%, var(--wb-card)); color: var(--wb-primary); box-shadow: 0 0 0 1.5px var(--wb-card); }
-.tk .av.me { background: var(--wb-primary); color: var(--wb-primary-fg); }
-.tk .av.pend { background: var(--wb-card); color: var(--tk-teal); box-shadow: 0 0 0 1.5px var(--wb-card), inset 0 0 0 1px var(--tk-teal); }
+  --av: var(--wb-primary); --av-mix: 15%;
+  background: color-mix(in srgb, var(--av) var(--av-mix), var(--wb-card)); color: var(--av); box-shadow: 0 0 0 1.5px var(--wb-card); }
+/* relation to the viewer (avRel in tracker.js): warm up the lead chain, deeper tint by rank;
+   green down the reach, softer tint by depth; gray for everyone else */
+.tk .av.r-u1 { --av: var(--tk-av-u1); --av-mix: 18%; }
+.tk .av.r-u2 { --av: var(--tk-av-u2); --av-mix: 21%; }
+.tk .av.r-u3 { --av: var(--tk-av-u3); --av-mix: 24%; }
+.tk .av.r-d1 { --av: var(--tk-av-d1); --av-mix: 22%; }
+.tk .av.r-d2 { --av: var(--tk-av-d2); --av-mix: 15%; }
+.tk .av.r-d3 { --av: var(--tk-av-d3); --av-mix: 10%; }
+.tk .av.r-n { --av: var(--wb-muted-fg); background: var(--wb-muted); }
+.tk .av.me { --av: var(--wb-primary); background: var(--wb-primary); color: var(--wb-primary-fg); }
+/* pending: the outline and initials in the relation color */
+.tk .av.pend { background: var(--wb-card); color: var(--av); box-shadow: 0 0 0 1.5px var(--wb-card), inset 0 0 0 1px var(--av); }
 .tk .av.more { background: var(--wb-muted); color: var(--wb-muted-fg); }
 .tk .pri { flex: none; width: 34px; text-align: center; font-size: 11.5px; color: var(--wb-muted-fg); white-space: nowrap; }
 .tk .pri.hi { color: var(--tk-fail); font-weight: 700; }

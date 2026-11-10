@@ -566,16 +566,38 @@
   function stIcon(s) { return '<span class="sti"' + tipAttr(stDesc(s)) + '>' + SI.svg(s) + '</span>'; }
   // The avatar text comes from the view state (the profile rules live in the data layer).
   function initials(id) { var m = VS.members[id]; return m ? m.avatar : String(id).slice(0, 2).toUpperCase(); }
+  // A person's relation to the viewer in the org tree, for the avatar color: {c: class suffix,
+  // t: tooltip}. Up the viewer's lead chain is warm (r-u1 the direct lead .. r-u3 three or more
+  // levels up), down the viewer's reach green (r-d1 direct reports .. r-d3), anyone else gray.
+  function avRel(id) {
+    var v = VS.viewer.member, m = VS.members[id], d = 0, me = VS.members[v], R = VS.viewer.reach || {};
+    if (id === v) return { c: ' me', t: wsT("js.tk.av.self") };
+    if (!m || m.removed) return { c: ' r-n', t: wsT("js.tk.av.none") };
+    while (me && (me.leads || [])[0] && d < 50) {
+      d++;
+      if (me.leads[0] === id) return { c: ' r-u' + Math.min(d, 3), t: d === 1 ? wsT("js.tk.av.up1") : wsT("js.tk.av.up", d) };
+      me = VS.members[me.leads[0]];
+    }
+    if (R[id]) return { c: ' r-d' + Math.min(R[id], 3), t: R[id] === 1 ? wsT("js.tk.av.dn1") : wsT("js.tk.av.dn", R[id]) };
+    return { c: ' r-n', t: wsT("js.tk.av.none") };
+  }
+  // A person's avatar; every person avatar goes through here so the relation colors stay one rule.
+  // tip: false where an enclosing tooltip already names the relation.
+  function avHtml(id, pend, tip) {
+    var r = avRel(id);
+    return '<i class="av' + (pend ? ' pend' : '') + r.c + '"' + (tip === false ? '' : tipAttr(r.t)) + '>' + esc(initials(id)) + '</i>';
+  }
   function holders(it) { return it.assignments.map(A).filter(function (r) { return r.state === 'live' || r.state === 'pending'; }); }
   // A topic's holder in markup (a pending handoff names its receiver as pending), '' when nobody holds it.
   function holderNames(it) { return holders(it).map(function (r) { return r.state === 'pending' ? wsT("js.tk.row.assignee.pending", whoName(r.to)) : whoName(r.to); }).join(', '); }
   function whoHtml(it) {
-    var as = holders(it), v = VS.viewer.member;
+    var as = holders(it);
     if (!as.length) return '<span class="who"></span>';
     var shown = as.slice(0, 3), more = as.length - shown.length;
-    var tip = wsT("js.tk.row.assignees", as.map(function (r) { return r.state === 'pending' ? wsT("js.tk.row.assignee.pending", nmo(r.to)) : nmo(r.to); }).join(', '));
+    // the avatars fill the group, so the group tooltip names each relation instead of one per avatar
+    var tip = wsT("js.tk.row.assignees", as.map(function (r) { var n = wsT("js.tk.av.who", nmo(r.to), avRel(r.to).t); return r.state === 'pending' ? wsT("js.tk.row.assignee.pending", n) : n; }).join(', '));
     return '<span class="who"' + tipAttr(tip) + '>' + shown.map(function (r) {
-      return '<i class="av' + (r.state === 'pending' ? ' pend' : '') + (r.to === v ? ' me' : '') + '">' + esc(initials(r.to)) + '</i>';
+      return avHtml(r.to, r.state === 'pending', false);
     }).join('') + (more ? '<i class="av more">+' + more + '</i>' : '') + '</span>';
   }
   function priHtml(it) {
@@ -1059,7 +1081,7 @@
       if (p.stale) c.push('<span class="err">' + wsT("js.tk.team.stale", p.stale) + '</span>');
       if (p.pending.length) c.push(wsT("js.tk.team.unaccepted", p.pending.length));
       if (p.waiting.length) c.push('<span' + tipAttr(wsT("js.tk.team.waiting.tip")) + '>' + wsT("js.tk.team.waiting", p.waiting.length) + '</span>');
-      var g = '<div class="tg" style="--d:' + (p.depth - 1) + '"' + attr('person', p.id) + '><div class="tg-head"><i class="av">' + esc(initials(p.id)) + '</i><b>' + whoName(p.id) + '</b>' +
+      var g = '<div class="tg" style="--d:' + (p.depth - 1) + '"' + attr('person', p.id) + '><div class="tg-head">' + avHtml(p.id) + '<b>' + whoName(p.id) + '</b>' +
         '<span class="nid">' + esc(p.id) + ' L' + p.depth + (m.children.length ? wsT("js.tk.team.islead") : '') + '</span><span class="cnt">' + c.join(' &middot; ') + '</span><span class="grow"></span>' +
         '<span class="muted ts"' + tipAttr(wsT("js.tk.team.last.tip")) + '>' + esc(fmtTs(p.last)) + '</span></div>';
       // one tree per person
@@ -1660,7 +1682,7 @@
         (m.joined ? '<span class="chip" title="' + wsT("js.tk.team.joined.tip", esc(alias(m.joined))) + '">' + wsT("js.tk.team.joined") + '</span>' : '') +
         (m.revoked.length ? '<span class="chip flag" title="' + wsT("js.tk.team.revoked.tip") + '">' + wsT("js.tk.team.revoked", m.revoked.length) + '</span>' : '') +
         ((VS.clones[id] || []).length > 1 ? '<span class="chip" title="' + wsT("js.tk.team.clones.tip") + '">' + wsT("js.tk.team.clones", VS.clones[id].length) + '</span>' : '');
-      return '<li><div class="node' + (id === v ? ' me' : '') + '"><i class="av">' + esc(m.avatar) + '</i>' + (m.profile.org ? '<span class="org">' + esc(m.profile.org) + '</span>' : '') +
+      return '<li><div class="node' + (id === v ? ' me' : '') + '">' + avHtml(id) + (m.profile.org ? '<span class="org">' + esc(m.profile.org) + '</span>' : '') +
         '<span class="nm">' + esc(m.name) + '</span><span class="nid">' + esc(id) + '</span>' + chips +
         '<span class="grow"></span><button type="button" class="ia mdet"' + attr('act', 'mdet') + attr('who', id) + ' aria-expanded="' + (open ? 'true' : 'false') + '" aria-label="' + esc(wsT("js.tk.team.details")) + '"' + tipAttr(wsT("js.tk.team.details")) + '><svg class="i"><use href="#tki-more"/></svg></button></div>' +
         (open ? '<div class="mdetails">' + m.keys.map(function (k) { return keyLine(k, false); }).join('') + m.revoked.map(function (x) { return keyLine(x.key, true); }).join('') +
@@ -1791,7 +1813,7 @@
           // quiet cards: title, then initials (the record's assignee off "mine"), priority, due; the source on hover
           var it = VS.items[x.item];
           return '<div class="kcard' + (x.drag ? ' drag' : '') + '"' + (x.drag ? ' draggable="true"' + attr('drag', x.drag) : '') + attr('item', x.item) + attr('rk', 'k:' + c + ':' + (x.rec ? x.rec.id : x.item)) + tipHtml(x.sub) + '>' +
-            '<div class="kc-t">' + titleRef(x.item) + '</div>' + moreBtn(x.item, 'kmore', true) + '<div class="kc-m">' + warnHtml(it) + dotHtml(it) + (x.who ? '<span class="who"><i class="av">' + esc(initials(x.who)) + '</i></span>' : whoHtml(it)) +
+            '<div class="kc-t">' + titleRef(x.item) + '</div>' + moreBtn(x.item, 'kmore', true) + '<div class="kc-m">' + warnHtml(it) + dotHtml(it) + (x.who ? '<span class="who">' + avHtml(x.who) + '</span>' : whoHtml(it)) +
             '<span class="grow"></span>' + priHtml(it) + dueHtml(it, x.rec ? stKey(it, x.rec) : c) + '</div></div>';
         }).join('') + '</div>';
     }).join('');
@@ -2215,7 +2237,7 @@
       if (x.src !== cs) diff.push(cs !== null && x.src.indexOf(cs) === 0 ? x.src.slice(cs.length).trim() : x.src);
       if (x.cm !== cc && x.cm !== null) diff.push(x.cm);
       return '<li class="arow' + (!x.on ? ' gone' : '') + (k >= A_SHOWN ? ' more' : '') + '"' + attr('rec', r.id) + attr('hmember', r.to) + '>' +
-        '<div class="ar-main"><i class="av' + (r.state === 'pending' ? ' pend' : '') + (r.to === v ? ' me' : '') + '">' + esc(initials(r.to)) + '</i><span class="ar-name">' + whoName(r.to) + '</span>' +
+        '<div class="ar-main">' + avHtml(r.to, r.state === 'pending') + '<span class="ar-name">' + whoName(r.to) + '</span>' +
         '<span class="ar-st">' + (topic && r.state === 'live' && !r.ended ? '<span class="chip">' + wsT("js.tk.asg.holder") + '</span>' : recChip(r)) + (r.ended ? ' <span class="muted">' + esc(alias(r.ended.id)) + endedBy(r) + '</span>' : '') + rm + '</span></div>' +
         (note ? '<div class="ar-note">&ldquo;' + esc(note) + '&rdquo;</div>' : '') +
         (diff.length ? '<div class="ar-diff muted">' + diff.join(' &middot; ') + '</div>' : '') +
@@ -2609,7 +2631,7 @@
       var it = ref && VS.items[id];
       return '<li class="mopt' + (i === MP.idx ? ' on' : '') + '" role="option" id="tkmopt-' + i + '" aria-selected="' + (i === MP.idx) + '"' + attr('mp', i) + '>' +
         (ref ? '<span class="sti">' + SI.svg(stKey(it)) + '</span><span class="mn">' + esc(it.title) + '</span><span class="muted">' + esc(it.alias) + '</span>' :
-          '<i class="av">' + esc(initials(id)) + '</i><span class="mn">' + whoName(id) + '</span><span class="muted">' + esc(id) + '</span>') + '</li>';
+          avHtml(id) + '<span class="mn">' + whoName(id) + '</span><span class="muted">' + esc(id) + '</span>') + '</li>';
     }).join('') || '<li class="qnone" role="presentation">' + (ref ? wsT("js.tk.ref.none") : wsT("js.tk.mention.none")) + '</li>';
     p.setAttribute('aria-label', ref ? wsT("js.tk.ref.tip") : wsT("js.tk.composer.mention.tip"));
     p.hidden = false;
@@ -3082,7 +3104,7 @@
     var ids = Object.keys(VS.members).filter(function (id) { var m = VS.members[id]; return id !== from && !m.removed && (!q || (id + ' ' + nmo(id)).toLowerCase().indexOf(q) >= 0); });
     if (!ids.length) return '<p class="mempty">' + wsT("js.tk.menu.nobody") + '</p>';
     return ids.map(function (id) {
-      return '<button type="button" class="mi" role="menuitem" data-mi' + attr('act', 'm-handoff') + attr('to', id) + '><i class="av">' + esc(initials(id)) + '</i><span class="ml">' + whoName(id) + '</span><span class="mv">' + esc(id) + '</span></button>';
+      return '<button type="button" class="mi" role="menuitem" data-mi' + attr('act', 'm-handoff') + attr('to', id) + '>' + avHtml(id) + '<span class="ml">' + whoName(id) + '</span><span class="mv">' + esc(id) + '</span></button>';
     }).join('');
   }
   // The assign popover (530): the item menu's assign step, opened from the menu or anchored at
@@ -3179,7 +3201,7 @@
       if (o.g) return '<li class="agrp" role="presentation">' + esc(o.g) + '</li>';
       var on = !!sel[asgKey(o)], i = o.off ? -1 : ++n, mark = o.off ? '<span class="amk">' + wsT("js.tk.ap.has") + '</span>' :
         o.t === 'p' ? '<span class="amk' + (o.pend ? ' pend' : '') + '">' + reachTag(VS.viewer.member, o.id) + '</span>' : o.pend ? '<span class="amk pend">' + wsT("js.tk.st.pending") + '</span>' : '';
-      var lead = o.t === 'p' ? '<i class="av">' + esc(initials(o.id)) + '</i><span class="an">' + whoName(o.id) + '</span><code class="aid">' + esc(o.id) + '</code>' :
+      var lead = o.t === 'p' ? avHtml(o.id) + '<span class="an">' + whoName(o.id) + '</span><code class="aid">' + esc(o.id) + '</code>' :
         '<svg class="i"><use href="#tki-team"/></svg><span class="an">' + asgLabel(o) + '</span><span class="aid">' + esc(wsTn("js.tk.ap.n", o.n)) + '</span>';
       return '<li class="aopt' + (i === S.idx ? ' on' : '') + (o.off ? ' off' : '') + '" role="option"' + (i >= 0 ? ' id="tkaopt-' + i + '"' + attr('act', 'm-atog') + attr('ai', i) : ' aria-disabled="true"') +
         ' aria-selected="' + on + '"><span class="ack" aria-hidden="true"></span>' + lead + mark + '</li>';
@@ -3188,7 +3210,7 @@
   }
   function asgChipsHtml() {
     return asgState().sel.map(function (o) {
-      return '<span class="achip">' + (o.t === 'p' ? '<i class="av">' + esc(initials(o.id)) + '</i>' : '<svg class="i"><use href="#tki-team"/></svg>') + '<span>' + asgLabel(o) + '</span>' +
+      return '<span class="achip">' + (o.t === 'p' ? avHtml(o.id) : '<svg class="i"><use href="#tki-team"/></svg>') + '<span>' + asgLabel(o) + '</span>' +
         '<button type="button" class="ax"' + attr('act', 'm-ax') + attr('k', asgKey(o)) + ' aria-label="' + esc(wsT("js.tk.ap.rm", o.t === 'p' ? nm(o.id) : asgLabel(o).replace(/<[^>]*>/g, ''))) + '"><svg class="i"><use href="#tki-x"/></svg></button></span>';
     }).join('');
   }
@@ -3396,14 +3418,14 @@
   // author's own assignment, so anyone else starts in the store's own state (todo for someone
   // within reach, pending otherwise). A topic has no status or due: only its one holder shows.
   function nrowChips(n) {
-    var v = VS.viewer.member, topic = n.kind === 'topic', h = '';
+    var topic = n.kind === 'topic', h = '';
     function chip(id, step, label, inner, dflt) {
       return '<button type="button" class="nch' + (dflt ? ' dflt' : '') + '" id="' + id + '"' + attr('act', 'nchip') + attr('step', step) +
         ' aria-haspopup="' + (step === 'assign' ? 'dialog' : 'menu') + '" aria-expanded="false" aria-label="' + esc(label) + '"' + tipAttr(label) + '>' + inner + '</button>';
     }
     if (!topic && nrowMine(n)) h += chip('tknst', 'status', wsT("js.tk.new.st", stLabel(n.st)), SI.svg(n.st) + '<span>' + esc(stLabel(n.st)) + '</span>', n.st === 'idea');
     var one = n.who.length === 1, wl = one ? nm(n.who[0]) : wsTn("js.tk.ap.n", n.who.length);
-    h += chip('tknwho', 'assign', wsT("js.tk.new.who", wl), one ? '<i class="av' + (n.who[0] === v ? ' me' : '') + '">' + esc(initials(n.who[0])) + '</i><span>' + esc(wl) + '</span>' :
+    h += chip('tknwho', 'assign', wsT("js.tk.new.who", wl), one ? avHtml(n.who[0]) + '<span>' + esc(wl) + '</span>' :
       '<svg class="i"><use href="#tki-assign"/></svg><span>' + esc(wl) + '</span>', nrowMine(n));
     if (!topic) h += chip('tkndue', 'due', wsT("js.tk.new.due", n.due || wsT("js.tk.new.due.none")), '<svg class="i"><use href="#tki-calendar"/></svg>' + (n.due ? '<span>' + esc(n.due) + '</span>' : ''), !n.due);
     return h;
