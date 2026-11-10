@@ -335,7 +335,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-10T07:38:14Z"
+        "touched_at": "2026-11-10T07:38:58Z",
+        "impl": {
+          "branch": "impl/develop/clump-sepia-cough"
+        }
       }
     },
     "261110-bug-ws-dashboard-sse-connection-budget": {
