@@ -240,6 +240,11 @@ type State struct {
 	// written while the board had a Now slot keeps its "now" text on disk
 	// until the next write; the field is gone, so nothing reads it.
 	Topics []TopicDoc `json:"topics,omitempty"`
+	// Labels maps each stemmed topic's stem, its key, to its label (see
+	// topics.go). A topic absent here is stemless: its key is its label. An
+	// entry goes when its topic disappears (pruneLabels); a store written
+	// before the field has every topic stemless.
+	Labels map[string]string `json:"labels,omitempty"`
 	// LastEmbedSeq is the render sequence of the previous embed snapshot.
 	LastEmbedSeq int     `json:"last_embed_seq,omitempty"`
 	Embeds       []Embed `json:"embeds,omitempty"`
@@ -496,11 +501,31 @@ func Apply(state *State, commands string, env Env) (Outcome, []string) {
 	embedDir := false
 	// closedBy names, per item a close in this batch withdrew, that close.
 	closedBy := map[int]string{}
+	// keys holds each wb:topic group's resolved topic key, resolved once
+	// when the batch reaches the group so all its commands act on one
+	// topic; "" when the group's name or label was refused.
+	keys := map[*wsxmlcmd.Scope]string{}
+	topicOf := func(cmd command) (string, bool) {
+		name, ok := cmd.Scoped()
+		if !ok {
+			return "", false
+		}
+		key, seen := keys[cmd.Scope]
+		if !seen {
+			key = work.resolveTopic(name)
+			keys[cmd.Scope] = key
+		}
+		return key, key != ""
+	}
 
 	for _, cmd := range cmds {
+		if cmd.IsGroup() {
+			keys[cmd.Scope] = applyLabel(p, work, cmd)
+			continue
+		}
 		switch cmd.Tag {
 		case "wb:add":
-			id := applyAdd(p, work, cmd, mark)
+			id := applyAdd(p, work, cmd, topicOf, mark)
 			out.IDs = append(out.IDs, id)
 			optionWarn = work.noteNonPolicyOptions(optionWarn, id)
 		case "wb:answer":
@@ -508,11 +533,11 @@ func Apply(state *State, commands string, env Env) (Outcome, []string) {
 		case "wb:patch":
 			optionWarn = work.noteNonPolicyOptions(optionWarn, applyPatch(p, work, cmd, mark, env.Now))
 		case "wb:body":
-			applyBody(p, work, state, cmd, mark)
+			applyBody(p, work, state, cmd, topicOf, mark)
 		case "wb:edit":
-			applyEdit(p, work, state, cmd, mark)
+			applyEdit(p, work, state, cmd, topicOf, mark)
 		case "wb:close":
-			withdrawn := applyClose(p, work, cmd, mark)
+			withdrawn := applyClose(p, work, cmd, topicOf, mark)
 			for _, id := range withdrawn {
 				closedBy[id] = cmd.Label()
 			}
@@ -546,6 +571,7 @@ func Apply(state *State, commands string, env Env) (Outcome, []string) {
 		return Outcome{}, p.List
 	}
 	work.evictArchive()
+	work.pruneLabels()
 	work.stampChanges(mark, env.Now)
 	out.Info = joinInfo(withdrawnInfo(out.Withdrawn), nonPolicyOptionsInfo(work, optionWarn), work.staleNudge(env.Now))
 	*state = *work
@@ -558,8 +584,8 @@ func Apply(state *State, commands string, env Env) (Outcome, []string) {
 // now, answer fields kept as history); a later reopen of the topic does not
 // restore them. An assumed item already reads as settled and stays assumed.
 // It returns the withdrawn IDs.
-func applyClose(p *problems, work *State, cmd command, mark int) []int {
-	topic, topicOK := cmd.Scoped()
+func applyClose(p *problems, work *State, cmd command, topicOf topicResolver, mark int) []int {
+	topic, topicOK := topicOf(cmd)
 	result, resultOK := wsxmlcmd.RequiredAttr(p, cmd, "result")
 	if !topicOK || !resultOK {
 		return nil
@@ -689,7 +715,7 @@ func checkOptions(p *problems, cmd command, options []string) []string {
 	return options
 }
 
-func applyAdd(p *problems, work *State, cmd command, mark int) int {
+func applyAdd(p *problems, work *State, cmd command, topicOf topicResolver, mark int) int {
 	item := Item{Status: StatusOpen, Changed: mark}
 	before := len(p.List)
 	if _, present := cmd.Attr("id"); present {
@@ -702,7 +728,7 @@ func applyAdd(p *problems, work *State, cmd command, mark int) int {
 		}
 	}
 	item.Class, _ = wsxmlcmd.EnumAttr(p, cmd, "class", classValues)
-	topic, topicOK := cmd.Scoped()
+	topic, topicOK := topicOf(cmd)
 	item.Topic = topic
 	f := readItemFields(p, cmd)
 	if f.title == nil {
@@ -928,8 +954,8 @@ func applyPatch(p *problems, work *State, cmd command, mark int, now time.Time) 
 
 // applyBody replaces a topic's body whole; an empty (or blank) body clears
 // it. The same body again is no change.
-func applyBody(p *problems, work, base *State, cmd command, mark int) {
-	name, ok := cmd.Scoped()
+func applyBody(p *problems, work, base *State, cmd command, topicOf topicResolver, mark int) {
+	name, ok := topicOf(cmd)
 	if !ok {
 		return
 	}
@@ -947,8 +973,8 @@ func applyBody(p *problems, work, base *State, cmd command, mark int) {
 
 // applyEdit replaces one exact match of old in a topic's body with new, or
 // every match with replace_all="true".
-func applyEdit(p *problems, work, base *State, cmd command, mark int) {
-	name, nameOK := cmd.Scoped()
+func applyEdit(p *problems, work, base *State, cmd command, topicOf topicResolver, mark int) {
+	name, nameOK := topicOf(cmd)
 	all, _ := wsxmlcmd.BoolAttr(p, cmd, "replace_all")
 	old, hasOld := cmd.Single(p, "wb:old")
 	repl, hasNew := cmd.Single(p, "wb:new")

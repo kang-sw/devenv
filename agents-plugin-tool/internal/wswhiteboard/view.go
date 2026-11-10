@@ -126,7 +126,10 @@ type FileAction struct {
 
 // TopicView is one topic block.
 type TopicView struct {
-	Name string
+	// Name is the topic's key (its stem, else its label), which page-to-lead
+	// lines carry (data-topic) so the lead can address the topic with it;
+	// Label is the name the page shows.
+	Name, Label string
 	// Doc is the topic's body, markdown with inline HTML written as is; empty
 	// when it has none. It renders above the items: open unless the topic is
 	// closed on the full page, and open on the embed only when it changed
@@ -378,7 +381,7 @@ func BuildView(state *State, in ViewInput) View {
 	blockOf := func(topic string) *TopicView {
 		block, ok := blocks[topic]
 		if !ok {
-			block = &TopicView{Name: topic, Closed: state.topicClosed(topic)}
+			block = &TopicView{Name: topic, Label: state.TopicLabel(topic), Closed: state.topicClosed(topic)}
 			blocks[topic] = block
 			order = append(order, topic)
 		}

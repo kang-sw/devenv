@@ -205,3 +205,26 @@ func renderKbd(w util.BufWriter, _ []byte, _ ast.Node, entering bool) (ast.WalkS
 	}
 	return ast.WalkContinue, nil
 }
+
+// inlineTagAny matches an allowlisted tag with no attribute anywhere in a
+// string, for Plain.
+var inlineTagAny = regexp.MustCompile(`(?i)<(/?)(code|b|strong|i|em|kbd|br)[ \t]*(/?)>`)
+
+// Plain renders the allowlisted inline tags as plain text for a reader of
+// text output (whiteboard.query): <code> and </code> become a backtick, <br>
+// a space, and the other tags are dropped keeping their text. A tag with an
+// attribute, and every other tag, stays as written.
+func Plain(s string) string {
+	if !strings.Contains(s, "<") {
+		return s
+	}
+	return inlineTagAny.ReplaceAllStringFunc(s, func(tag string) string {
+		switch strings.ToLower(inlineTagAny.FindStringSubmatch(tag)[2]) {
+		case "code":
+			return "`"
+		case "br":
+			return " "
+		}
+		return ""
+	})
+}

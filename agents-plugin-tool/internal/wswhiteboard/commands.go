@@ -12,14 +12,16 @@ var itemFieldNames = []string{"title", "option", "recommend", "why", "link"}
 // grammar is the whiteboard's command language; the commands follow the
 // order of the playbook's table. A wb:topic group names the topic its
 // commands (wb:body, wb:edit, wb:add, wb:close) act on, so a topic's long
-// name is written once per batch. Item fields are plain text, so an escaped
+// name is written once per batch; its optional label attribute makes the
+// name a stem and sets the topic's label (applyLabel), and a labelled group
+// may hold no commands. Item fields are plain text, so an escaped
 // one is decoded; a topic body (raw HTML), wb:edit's old and new (matched
 // against a stored body), and an answer (the user's verbatim words) are not.
 var grammar = wsxmlcmd.Grammar{
 	Prefix: "wb:",
 	// wb:topic once took the body itself; the hint shows the form that
 	// replaced it to a caller still writing the old one.
-	Group: &wsxmlcmd.Group{Name: "topic", Attr: "name", Hint: `a topic body goes in <wb:body> inside the group, and an empty <wb:body/> clears it: <wb:topic name="..."><wb:body>...</wb:body></wb:topic>`},
+	Group: &wsxmlcmd.Group{Name: "topic", Attr: "name", Extra: "label", Hint: `a topic body goes in <wb:body> inside the group, and an empty <wb:body/> clears it: <wb:topic name="..."><wb:body>...</wb:body></wb:topic>`},
 	Commands: map[string]wsxmlcmd.Spec{
 		"body":      {Kind: wsxmlcmd.Leaf, Scoped: true},
 		"edit":      {Kind: wsxmlcmd.Container, Attrs: []string{"replace_all"}, Fields: []string{"old", "new"}, Scoped: true},
