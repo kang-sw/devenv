@@ -227,6 +227,80 @@ func TestRenderDispatchSeparatesResourceAndWorktreeRoots(t *testing.T) {
 	}
 }
 
+// TestRenderFromWorktreeSessionCommitsInThatWorktree pins that a child key
+// rendered by a session bound to a linked worktree (a worker spawned with
+// root_override) inherits that worktree, root_override still wins, and
+// git.commit with the child key stages and commits there with a repo-relative
+// path while the main checkout stays untouched. The key's root is git.commit's
+// only root source; the caller's shell cwd plays no part.
+func TestRenderFromWorktreeSessionCommitsInThatWorktree(t *testing.T) {
+	useLeadProfile(t)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+	t.Setenv("WS_RSRC_ROOT", buildTestRsrcTree(t, map[string]string{
+		"impl-pb/impl-pb.md": implementerPlaybookContent,
+	}))
+	repo := initGitRepo(t)
+	runGit(t, repo, "commit", "--allow-empty", "-m", "initial")
+	worktree := filepath.Join(t.TempDir(), "linked")
+	runGit(t, repo, "worktree", "add", "-b", "worker", worktree)
+	other := filepath.Join(t.TempDir(), "other")
+	runGit(t, repo, "worktree", "add", "-b", "other", other)
+
+	s := NewServer(repo, "test")
+	s.observeHarness("test", "claude")
+	leadKey, err := s.sessions.mint(repo, roleLead, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	workerKey, err := s.sessions.mint(worktree, roleLead, leadKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	render := func(t *testing.T, args map[string]any) string {
+		t.Helper()
+		resp := callToolOnce(t, s, 1, "playbook.render", args)
+		if toolIsError(t, resp) {
+			t.Fatalf("playbook.render: %s", resp)
+		}
+		body, err := os.ReadFile(strings.Split(strings.TrimSpace(toolText(t, resp)), "\n")[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		return extractSplicedKey(t, string(body))
+	}
+
+	overrideKey := render(t, map[string]any{"name": "impl-pb", "session_key": workerKey, "root_override": other})
+	if entry, ok := s.sessions.lookup(overrideKey); !ok || entry.root != other {
+		t.Errorf("root_override child = %+v, found=%v; want bound to %q", entry, ok, other)
+	}
+
+	childKey := render(t, map[string]any{"name": "impl-pb", "session_key": workerKey})
+	entry, ok := s.sessions.lookup(childKey)
+	if !ok || entry.root != worktree || entry.scope != roleDelegate || entry.parent != workerKey {
+		t.Fatalf("child session = %+v, found=%v; want delegate bound to %q with parent %q", entry, ok, worktree, workerKey)
+	}
+
+	mainHead := strings.TrimSpace(string(runGitOutput(t, repo, "rev-parse", "HEAD")))
+	mustWrite(t, worktree, "src.txt", "delegate change\n")
+	resp := callToolOnce(t, s, 2, "git.commit", map[string]any{
+		"session_key":     childKey,
+		"paths":           []string{"src.txt"},
+		"title":           "feat: delegate commit",
+		"ai_context":      []string{"delegate commits in its worktree"},
+		"expected_branch": "worker",
+	})
+	if toolIsError(t, resp) {
+		t.Fatalf("git.commit with child key: %s", resp)
+	}
+	if got := headSubject(t, worktree); got != "feat: delegate commit" {
+		t.Errorf("worktree HEAD subject = %q, want the delegate commit", got)
+	}
+	if got := strings.TrimSpace(string(runGitOutput(t, repo, "rev-parse", "HEAD"))); got != mainHead {
+		t.Errorf("main checkout HEAD moved from %s to %s", mainHead, got)
+	}
+}
+
 // TestPlaybookRenderToolTierOverride drives tier_override through the actual
 // playbook.render MCP tool dispatch (callToolOnce), not renderPlaybookBody
 // directly, so the argument-key wiring at the "playbook.render" case in

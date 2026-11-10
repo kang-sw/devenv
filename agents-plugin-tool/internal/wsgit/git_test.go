@@ -763,10 +763,33 @@ func TestCommitRequiresAIContextAndRelativePaths(t *testing.T) {
 			t.Fatalf("normalize error = %v, want all-blank condition for a single empty-string entry", err)
 		}
 	})
-	_, err := normalizeCommitOptions(CommitOptions{Paths: []string{"../outside"}, Title: "feat: x", AIContext: []string{"context"}, ExpectedBranch: "main"})
-	if err == nil || !strings.Contains(err.Error(), "inside the repository") {
-		t.Fatalf("normalize error = %v, want repository boundary", err)
-	}
+	t.Run("path refusals name the commit root", func(t *testing.T) {
+		for _, tc := range []struct {
+			path string
+			want []string
+		}{
+			{"../outside", []string{"must stay inside the commit root /work/tree-a"}},
+			{"/work/tree-a/src/file.go", []string{"must be relative to the commit root /work/tree-a", `pass "src/file.go"`}},
+			{"/elsewhere/file.go", []string{"must be relative to the commit root /work/tree-a"}},
+		} {
+			runner := &sequenceRunner{}
+			_, err := (Client{Runner: runner}).Commit(context.Background(), "/work/tree-a", CommitOptions{Paths: []string{tc.path}, Title: "feat: x", AIContext: []string{"context"}, ExpectedBranch: "main"})
+			if err == nil {
+				t.Fatalf("Commit(%q) did not refuse", tc.path)
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("Commit(%q) error = %v, want it to contain %q", tc.path, err, want)
+				}
+			}
+			if strings.HasPrefix(tc.path, "/elsewhere") && strings.Contains(err.Error(), "pass ") {
+				t.Errorf("Commit(%q) error = %v suggests a relative spelling for a path outside the root", tc.path, err)
+			}
+			if len(runner.calls) != 0 {
+				t.Errorf("Commit(%q) ran git %#v before refusing the path", tc.path, runner.calls)
+			}
+		}
+	})
 	t.Run("missing expected_branch", func(t *testing.T) {
 		_, err := normalizeCommitOptions(CommitOptions{Paths: []string{"src"}, Title: "feat: x", AIContext: []string{"context"}})
 		if err == nil || !strings.Contains(err.Error(), "expected_branch is required") {
