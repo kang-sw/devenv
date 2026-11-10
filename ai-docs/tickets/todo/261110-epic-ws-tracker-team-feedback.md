@@ -19,9 +19,8 @@ manager side and partly about performance reviews.
 - A daemon-side tracker event hook. Mail integration and per-PC desktop
   notifications are built on it, but they belong to downstream setups, not
   to this repository.
-- A way for a follower to take work themselves (self-assign, or ask to
-  take someone else's assignment). The mechanism is still open on the
-  whiteboard ((617)), and its child is filed once that is settled.
+- A way for a follower to take work themselves: claim an item its creator
+  opened, or ask to take someone else's assignment ((617) c).
 
 ## Non-Scope
 
@@ -38,7 +37,8 @@ manager side and partly about performance reviews.
   workload per member, visible down the org tree ((613), (614)).
 - `261110-feat-ws-tracker-daemon-event-hook` - the daemon runs a configured
   local command with the event JSON on stdin ((615), (616)).
-- Planned: follower self-assign / take-request, after (617) settles.
+- `261110-feat-ws-tracker-self-assign-claim` - a follower claims an item
+  its creator opened, or requests someone else's assignment ((617) c).
 
 ## Cross-Child Decisions
 
