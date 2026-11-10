@@ -8,6 +8,7 @@ related:
   261110-bug-ws-dashboard-daemon-read-amplification: "owns the server-side read caching excluded here"
 sage-review-design-reviewed: 315bd8abac9d953a
 sage-review-completeness-reviewed: 315bd8abac9d953a
+completed: 2026-11-10
 ---
 
 # Dashboard stream connection budget: SSE to WebSocket
