@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 35c40847db279759
 sage-review-completeness-reviewed: 35c40847db279759
+completed: 2026-11-10
 ---
 
 # Tracker: idea status, the assignment invariant, and rule-request fixes
