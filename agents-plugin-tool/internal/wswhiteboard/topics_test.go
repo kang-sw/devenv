@@ -52,6 +52,17 @@ func TestStemAdoptsAStemlessTopicByLabel(t *testing.T) {
 	}
 }
 
+// A close mark left under an unused stem (archive eviction keeps a topic's
+// close state) does not close or double the topic adopted under it.
+func TestStemAdoptionIgnoresAStaleCloseMark(t *testing.T) {
+	st := &State{ClosedTopics: []string{"gone"}, CloseResults: map[string]string{"gone": "old end"}}
+	mustApply(t, st, addXML(ClassTechnical, "Open title", "one"))
+	mustApply(t, st, `<wb:topic name="gone" label="Open title"/>`)
+	if item(t, st, 1).Topic != "gone" || st.topicClosed("gone") || len(st.ClosedTopics) != 0 || st.CloseResults["gone"] != "" {
+		t.Fatalf("stale close state carried over: closed %v, results %v", st.ClosedTopics, st.CloseResults)
+	}
+}
+
 // A stemless topic whose own key fits the stem pattern takes it as its stem
 // when addressed with a label, without a key change.
 func TestStemAdoptsAStemlessTopicInPlace(t *testing.T) {

@@ -130,8 +130,12 @@ func applyLabel(p *problems, work *State, cmd command) string {
 }
 
 // renameTopic moves everything keyed by from to the key to: items, body,
-// close state, and close result.
+// close state, and close result. A close mark or result already under to is
+// stale (archive eviction drops a topic's items but not its close state), so
+// it goes first rather than closing or doubling the moved topic.
 func (s *State) renameTopic(from, to string) {
+	s.reopenTopic(to)
+	delete(s.CloseResults, to)
 	for i := range s.Items {
 		if s.Items[i].Topic == from {
 			s.Items[i].Topic = to
