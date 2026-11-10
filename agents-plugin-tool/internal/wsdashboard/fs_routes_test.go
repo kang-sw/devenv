@@ -106,8 +106,9 @@ func TestFSListStaysInsideTheRoot(t *testing.T) {
 			t.Errorf("%s: root entries = %v, want %v", v.name, got, want)
 		}
 		code, a = fsList(t, f, v, "dir="+url.QueryEscape("docs"))
-		if got := entryNames(a); code != http.StatusOK || a.Dir != "docs" || strings.Join(got, " ") != "deep/ page.html" {
-			t.Errorf("%s: docs listing = %d dir %q %v", v.name, code, a.Dir, got)
+		if got := entryNames(a); code != http.StatusOK || a.Dir != "docs" || strings.Join(got, " ") != "deep/ page.html" ||
+			a.Abs != filepath.Join(f.project, "docs") || a.Sep != string(filepath.Separator) {
+			t.Errorf("%s: docs listing = %d dir %q abs %q sep %q %v", v.name, code, a.Dir, a.Abs, a.Sep, got)
 		}
 		if code, a = fsList(t, f, v, "dir="+url.QueryEscape(filepath.Join(f.project, "docs", "deep"))); code != http.StatusOK || a.Dir != "docs/deep" {
 			t.Errorf("%s: absolute in-root dir = %d dir %q", v.name, code, a.Dir)

@@ -77,12 +77,16 @@ type fsEntry struct {
 // an absolute path with forward slashes, Name its base name, Session
 // whether it is the session's own root, Dir the listed directory relative
 // to Root ("" is the root itself), and Repo whether git told which entries
-// are ignored.
+// are ignored. Abs is the listed directory's absolute path in the host's
+// own spelling and Sep the host's path separator: an entry's absolute path,
+// which the row menu copies, is Abs + Sep + its name.
 type fsListAnswer struct {
 	Root    string    `json:"root"`
 	Name    string    `json:"name"`
 	Session bool      `json:"session"`
 	Dir     string    `json:"dir"`
+	Abs     string    `json:"abs"`
+	Sep     string    `json:"sep"`
 	Repo    bool      `json:"repo"`
 	More    bool      `json:"more,omitempty"`
 	Entries []fsEntry `json:"entries"`
@@ -448,7 +452,7 @@ func (d *Daemon) handleFSList(w http.ResponseWriter, r *http.Request, replyID st
 	}
 	clean := filepath.Clean(root)
 	writeFSJSON(w, !session, fsListAnswer{Root: filepath.ToSlash(clean), Name: filepath.Base(clean), Session: session,
-		Dir: filepath.ToSlash(rel), Repo: repo, More: more, Entries: entries})
+		Dir: filepath.ToSlash(rel), Abs: full, Sep: string(filepath.Separator), Repo: repo, More: more, Entries: entries})
 }
 
 // fsURL is a file browser read route's URL for the file rel under the
