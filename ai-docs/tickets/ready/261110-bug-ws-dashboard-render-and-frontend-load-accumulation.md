@@ -333,7 +333,7 @@ at today's latency); `go test ./...` under `agents-plugin-tool` through
 `ws-rgo`; and a before/after CPU measurement (see Constraints for the
 harness), reported in the Result.
 
-#### Result (b0e680e23) - 2026-11-10
+### Result (b0e680e23) - 2026-11-10
 
 - Board memo in `DashboardSessionSource` (mcp), per reply-id and language,
   keyed by board Seq, todos, agenda, re-ask times, language, and the
