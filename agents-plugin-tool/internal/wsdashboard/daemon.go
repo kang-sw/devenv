@@ -100,6 +100,10 @@ type DaemonOptions struct {
 	// openSystem replaces the system-open route's OS open command, so a
 	// test never starts a browser; nil runs systemOpen.
 	openSystem func(target string) error
+	// hostFiles replaces the host the file browser's host route acts on
+	// (fs_act_route.go), so a test never opens a window; nil is the host
+	// the daemon runs on.
+	hostFiles *hostFiles
 	// gitRead replaces the git handle's read, so a test never runs git; nil
 	// runs readGitBadge. noGitBadge turns the handle off: no read and no
 	// handle, for the tests that pin which regions a stream sends.
@@ -170,6 +174,14 @@ type Daemon struct {
 	contentHash string
 	// openSystem opens a system-open route's target (systemOpen).
 	openSystem func(target string) error
+	// hostFiles is the host the file browser's host route acts on
+	// (fs_act_route.go).
+	hostFiles *hostFiles
+	// fsCapOnce draws fsCapSecret, the key of the HTML preview's
+	// capabilities (fs_capability.go); fsNow replaces their clock in a test.
+	fsCapOnce   sync.Once
+	fsCapSecret []byte
+	fsNow       func() time.Time
 	// git reads the git handle of the roots open session pages show
 	// (gitbadge.go); nil when the handle is off.
 	git *gitWatcher
@@ -300,6 +312,7 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 		contentHash:     opts.ContentHash,
 		proxy:           opts.Proxy,
 		openSystem:      opts.openSystem,
+		hostFiles:       opts.hostFiles,
 		worktrees:       opts.Worktrees,
 		sizes:           newSizeCache(),
 		files:           newFileListCache(),
@@ -324,6 +337,9 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 	}
 	if d.openSystem == nil {
 		d.openSystem = systemOpen
+	}
+	if d.hostFiles == nil {
+		d.hostFiles = defaultHostFiles()
 	}
 	if !opts.noGitBadge {
 		read := opts.gitRead
