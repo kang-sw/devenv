@@ -81,7 +81,7 @@ any group.
 | `tk:item.handoff` | `item`, `to`, `assignee?` | a note |
 | `tk:item.accept`, `tk:item.decline` | `item` | a note |
 | `tk:item.return` | `item`, `assignee` | a note |
-| `tk:item.unassign` | `item`, `assignee?` or `root?` | none |
+| `tk:item.unassign` | `item`, `assignee?`, or `root?` and `rule?` | none |
 | `tk:item.status` | `item`, `status` | a note |
 | `tk:item.close` | `item` | a note |
 | `tk:item.confirm`, `tk:item.reject` | `item`, `assignee` | a note |
@@ -157,8 +157,10 @@ Body text, markdown, written as is.
   - `tk:item.return` (the holder's direct lead) ends an accepted assignment;
     returning an accepted rule request ends its rule.
     `tk:item.unassign` (the assigner) withdraws `assignee`'s assignment, ends
-    the user's rule rooted at `root`, or, without either, withdraws all of the
-    user's assignments and rules on the item.
+    the user's rules rooted at `root`, or, without either, withdraws all of the
+    user's assignments and rules on the item. `rule` names one rule (its ID
+    follows the rule in the item view) and ends only that one, withdrawing it
+    while it is a request.
     `tk:item.reopen` (the assigner or the holder) reopens a done one.
   - A topic has one holder: its `tk:item.assign` names exactly one person in
     `people`, and is refused while anyone holds it or a handoff of it is

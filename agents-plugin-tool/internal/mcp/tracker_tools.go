@@ -138,9 +138,16 @@ var trackerCommands = map[string]trackerCommandDef{
 	wstracker.TypeItemAccept:  {trackerEventSpec(wsxmlcmd.Leaf, "item"), buildItemNote},
 	wstracker.TypeItemDecline: {trackerEventSpec(wsxmlcmd.Leaf, "item"), buildItemNote},
 	wstracker.TypeItemReturn:  {trackerEventSpec(wsxmlcmd.Leaf, "item", "assignee"), buildItemAssigneeNote},
-	wstracker.TypeItemUnassign: {trackerEventSpec(wsxmlcmd.Empty, "item", "assignee", "root"), func(b *trackerBatch, cmd wsxmlcmd.Command, ev *trackerEvent) {
+	wstracker.TypeItemUnassign: {trackerEventSpec(wsxmlcmd.Empty, "item", "assignee", "root", "rule"), func(b *trackerBatch, cmd wsxmlcmd.Command, ev *trackerEvent) {
 		buildItemOptionalAssignee(b, cmd, ev)
 		b.optional(cmd, ev, "root")
+		if v, ok := cmd.Attr("rule"); ok {
+			if id, err := parseTrackerRuleID(strings.TrimSpace(v)); err == nil {
+				ev.payload["rule"] = id
+			} else {
+				b.p.Add("%s: must be a rule ID as the query prints it, such as maya.pc-5~raj; got %q", cmd.At("rule"), v)
+			}
+		}
 	}},
 	wstracker.TypeItemStatus: {trackerEventSpec(wsxmlcmd.Leaf, "item", "status"), func(b *trackerBatch, cmd wsxmlcmd.Command, ev *trackerEvent) {
 		b.itemRef(cmd, ev, "item")
@@ -601,6 +608,24 @@ func parseTrackerID(s string) (string, error) {
 		return "", errors.New("not an event id")
 	}
 	return id.String(), nil
+}
+
+// parseTrackerRuleID returns the stored form of a rule id given in either
+// form: the assign event's id, then ~root for a targets rule (maya.pc-5~raj
+// or maya.pc#5~raj); an older levels rule is the event id alone.
+func parseTrackerRuleID(s string) (string, error) {
+	ev, root, hasRoot := strings.Cut(s, "~")
+	id, err := parseTrackerID(ev)
+	if err != nil {
+		return "", err
+	}
+	if !hasRoot {
+		return id, nil
+	}
+	if root == "" {
+		return "", errors.New("no root")
+	}
+	return id + "~" + root, nil
 }
 
 // trackerCount is n with noun, plural unless n is 1.

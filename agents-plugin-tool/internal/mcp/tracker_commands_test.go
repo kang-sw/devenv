@@ -460,7 +460,7 @@ func TestTrackerUpdateWritesStructureAttributes(t *testing.T) {
 	if ru := v.Rules[rid]; ru.State != "pending" || ru.Levels != nil || !ru.IncludeRoot {
 		t.Fatalf("rule %s = %+v, want a pending whole-subtree rule with its root", rid, ru)
 	}
-	if r := w.trackerQuery(t, map[string]any{"store": "team", "item": w.ids["r"]}); !strings.Contains(r, "bo pending (by ada, rule request bo+:*, assigner closes)") || !strings.Contains(r, "ada todo (by ada, assigner closes)") {
+	if r := w.trackerQuery(t, map[string]any{"store": "team", "item": w.ids["r"]}); !strings.Contains(r, "bo pending (by ada, rule request bo+:* "+trackerAlias(rid)+", assigner closes)") || !strings.Contains(r, "ada todo (by ada, assigner closes)") {
 		t.Fatalf("the item view prints the rule request and the person:\n%s", r)
 	}
 	w.byBo(t, "", wstracker.TypeItemAccept, map[string]any{"item": "{r}"})
@@ -468,11 +468,12 @@ func TestTrackerUpdateWritesStructureAttributes(t *testing.T) {
 	if v.Rules[rid].State != "live" || v.Assignments[rid+">bo"].State != "live" {
 		t.Fatalf("after bo accepts: rule %+v, bo's record %+v", v.Rules[rid], v.Assignments[rid+">bo"])
 	}
-	if r := w.trackerQuery(t, map[string]any{"store": "team", "item": w.ids["r"]}); !strings.Contains(r, "bo todo (by ada, rule bo+:*, assigner closes)") {
+	if r := w.trackerQuery(t, map[string]any{"store": "team", "item": w.ids["r"]}); !strings.Contains(r, "bo todo (by ada, rule bo+:* "+trackerAlias(rid)+", assigner closes)") {
 		t.Fatalf("the item view prints the rule's record:\n%s", r)
 	}
-	w.ada(t, trackerWriteStep{`<tk:store name="team"><tk:item.unassign item="{r}" root="bo"/></tk:store>`, []trackerWantEvent{
-		{typ: wstracker.TypeItemUnassign, payload: map[string]any{"item": "{r}", "root": "bo"}},
+	// rule names the one rule to end, in the form the query prints.
+	w.ada(t, trackerWriteStep{`<tk:store name="team"><tk:item.unassign item="{r}" root="bo" rule="` + trackerAlias(rid) + `"/></tk:store>`, []trackerWantEvent{
+		{typ: wstracker.TypeItemUnassign, payload: map[string]any{"item": "{r}", "root": "bo", "rule": rid}},
 	}})
 	v = w.view(t)
 	if v.Rules[rid].State != "ended" || v.Assignments[rid+">bo"].State != "unassigned" || v.Assignments[w.ids["asg"]+">ada"].State != "live" {
@@ -484,6 +485,7 @@ func TestTrackerUpdateWritesStructureAttributes(t *testing.T) {
 <tk:item.assign item="ada.pc-1" levels="1" rules="bo:1"/>
 <tk:item.assign item="ada.pc-1" completion="assigner"/>
 <tk:item.create kind="task" title="x" refs="nope $9"/>
+<tk:item.unassign item="ada.pc-1" rule="nope~bo"/>
 </tk:store>`})
 	for _, want := range []string{
 		`command 1 <tk:item.assign> (line 2) rules: "bo:0" must be member:N`,
@@ -493,6 +495,7 @@ func TestTrackerUpdateWritesStructureAttributes(t *testing.T) {
 		"command 3 <tk:item.assign> (line 4): takes people, rules, or both",
 		`command 4 <tk:item.create> (line 5) refs: must be an item ID such as maya.pc-5, or $N; got "nope"`,
 		"command 4 <tk:item.create> (line 5) refs: $N names an earlier command of this batch by position",
+		`command 5 <tk:item.unassign> (line 6) rule: must be a rule ID as the query prints it, such as maya.pc-5~raj; got "nope~bo"`,
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("refusal missing %q:\n%s", want, text)

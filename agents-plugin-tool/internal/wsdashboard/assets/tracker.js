@@ -600,8 +600,8 @@
       if (r.state === 'live' && r.by === v && r.status === 'awaiting')
         out.push(['confirm', 'confirm', wsT("js.tk.act.confirm", nm(r.to)), { item: id, who: r.to }, 1], ['note', 'reject', wsT("js.tk.act.reject", nm(r.to)), { item: id, who: r.to, op: 'item.reject' }]);
       if (r.state === 'live' && r.accepted && lead === v) out.push(['note', 'return', wsT("js.tk.act.return", nm(r.to)), { item: id, who: r.to, op: 'item.return' }]);
-      // a rule request is withdrawn by its rule's root, not as a person (the store refuses that)
-      if (r.state === 'pending' && (r.by === v || r.sender === v) && r.to !== v) out.push(['unassign', 'withdraw', wsT("js.tk.act.withdraw", nm(r.to)), r.ruleRequest ? { item: id, root: r.to } : { item: id, who: r.to }]);
+      // a rule request is withdrawn as its one rule, not as a person (the store refuses that)
+      if (r.state === 'pending' && (r.by === v || r.sender === v) && r.to !== v) out.push(['unassign', 'withdraw', wsT("js.tk.act.withdraw", nm(r.to)), r.ruleRequest ? { item: id, root: r.to, rule: r.rule } : { item: id, who: r.to }]);
     });
     return out;
   }
@@ -2811,7 +2811,7 @@
     function put(evs, extra) { commit(evs, null, extra); }
     switch (k) {
       case 'confirm': put([['item.confirm', { item: item, assignee: who }]]); break;
-      case 'unassign': put([['item.unassign', a.hasAttribute('data-root') ? { item: item, root: a.getAttribute('data-root') } : { item: item, assignee: who }]]); break;
+      case 'unassign': put([['item.unassign', a.hasAttribute('data-rule') ? { item: item, root: a.getAttribute('data-root'), rule: a.getAttribute('data-rule') } : { item: item, assignee: who }]]); break;
       case 'accept': put([['item.accept', { item: item }]]); break;
       case 'ihide': put([['item.hide', { item: item }]]); break;
       case 'chide': put([['comment.hide', { comment: cid }]]); break;

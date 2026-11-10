@@ -245,6 +245,7 @@ func formatTrackerAssignment(v *wstrackerhost.StoreView, a wstracker.Assignment)
 			} else {
 				s += ", rule " + trackerRuleLabel(r)
 			}
+			s += " " + trackerAlias(r.ID)
 		}
 	}
 	if a.Completion == "assigner" {
