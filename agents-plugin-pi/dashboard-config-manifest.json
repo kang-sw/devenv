@@ -6,7 +6,7 @@
       "key": "dashboard.enabled",
       "type": "boolean",
       "default": true,
-      "description": "When true, this MCP server checks at startup for the machine's dashboard daemon (one per OS environment, serving local web pages for the workflow sessions on it) and starts it in the background when it is absent or older than this server, and it lists each top-level lead session it serves on the dashboard; when false, it does neither. The startup check reads the value once at server startup, from the project, global, and built-in values only, so a change applies from the next server start. Whether a session is listed is read for that session, a session-scope tune included: the session's own tune applies at once, any other change at the session's next tool call a minute or more later, and turning it off also applies within a few minutes without one. A session whose value is false is never listed, and this server sends the daemon nothing about it. MCP tools behave the same either way, and a daemon that fails to start never fails a tool. When this key's manifest fails to load, the dashboard stays off."
+      "description": "When true, this MCP server lists the top-level lead session it serves on the machine's dashboard (one daemon per OS environment, serving local web pages for the workflow sessions on it) and opens the browser for it; when false, it does neither. The daemon itself runs either way: the plugin launcher starts it when none runs and keeps it current, since the daemon also hosts every session's MCP server, so this key never starts, stops, or replaces it. Whether a session is listed is read for that session, a session-scope tune included: the session's own tune applies at once, any other change at the session's next tool call a minute or more later, and turning it off also applies within a few minutes without one. A session whose value is false is never listed, and this server sends the daemon nothing about it. MCP tools behave the same either way. When this key's manifest fails to load, the dashboard stays off."
     },
     {
       "key": "dashboard.port",
@@ -14,14 +14,14 @@
       "minimum": 0,
       "maximum": 65535,
       "default": 29417,
-      "description": "TCP port the dashboard daemon listens on, on the loopback interface; 0 always uses a port the OS assigns. When the port is taken, the daemon falls back to the port the last daemon used, then to an OS-assigned port, so a restart keeps its address while the configured port stays taken; a free configured port always wins, and the daemon records the port it uses in its endpoint file. Passed to the daemon when an MCP server starts it, so a running daemon keeps its port until it is next started. Read once at server startup; only the project, global, and built-in values apply."
+      "description": "TCP port the dashboard daemon listens on, on the loopback interface; 0 always uses a port the OS assigns. When the port is taken, the daemon falls back to the port the last daemon used, then to an OS-assigned port, so a restart keeps its address while the configured port stays taken; a free configured port always wins, and the daemon records the port it uses in its endpoint file. Read from the project, global, and built-in values when the plugin launcher starts the daemon (none running, or an older one), so a running daemon keeps its port until it is next started."
     },
     {
       "key": "dashboard.lan_enabled",
       "type": "boolean",
       "default": false,
       "default_scope": "global",
-      "description": "When true, the dashboard daemon listens on this machine's network interfaces as well, so another device on the network can open its pages with an access token, while a browser on this machine still opens them at localhost with no token. Only the global value applies: a project, repo, or session value is refused on write and ignored, since one daemon serves every session on the machine. Read once at server startup; a server whose value differs from the running daemon's mode replaces the daemon, so a change applies from the next server start. The access token is shown only on the dashboard's index page viewed on this machine and persists across daemon restarts in the daemon's state directory; deleting its file issues a new one."
+      "description": "When true, the dashboard daemon listens on this machine's network interfaces as well, so another device on the network can open its pages with an access token, while a browser on this machine still opens them at localhost with no token. Only the global value applies: a project, repo, or session value is refused on write and ignored, since one daemon serves every session on the machine. The daemon re-reads the value whenever a session connects to it and, when the value differs from its own mode, replaces itself with one in the new mode, letting the calls in flight finish and reconnecting its sessions, so a change applies at the next session start. The access token is shown only on the dashboard's index page viewed on this machine and persists across daemon restarts in the daemon's state directory; deleting its file issues a new one."
     }
   ]
 }
