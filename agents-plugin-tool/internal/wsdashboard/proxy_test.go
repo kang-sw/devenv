@@ -368,8 +368,9 @@ func TestProxyDrainFinishesCallsInFlightAndCancelsLongWaits(t *testing.T) {
 	}
 }
 
-// TestProxyDrainReleasesTheLockBeforeACallThatOutlivesTheBudgetEnds (L3):
-// Close returns within the successor's lock wait with the long call still
+// TestProxyDrainReleasesTheLockBeforeACallThatOutlivesTheBudgetEnds: the
+// drain releases the lock and endpoint first and waits for in-flight calls
+// after, so Close returns within the successor's lock wait with the long call still
 // running, its stream open; the call's answer is delivered when it ends,
 // then the stream closes, and WaitProxy reports the session ended.
 func TestProxyDrainReleasesTheLockBeforeACallThatOutlivesTheBudgetEnds(t *testing.T) {

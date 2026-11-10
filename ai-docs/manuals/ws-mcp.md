@@ -580,8 +580,9 @@ Profiling: with `WS_MCP_DASHBOARD_PPROF=1` (also `true`/`yes`/`on`) in the
 environment of `ws-mcp dashboard`, the daemon serves `net/http/pprof` under
 `/debug/pprof/` to loopback viewers only; a LAN-mode request carrying the LAN
 token is refused (403), and with the variable unset the routes do not exist
-(404). A `serve`-started daemon inherits `serve`'s environment, so the simplest
-route is the same restart as dev assets: `POST /shutdown`, then
+(404). The daemon the launcher starts inherits the launcher's environment
+(the daemon-start step runs under it), so the simplest route is the same
+restart as dev assets: `POST /shutdown`, then
 `WS_MCP_DASHBOARD_PPROF=1 ws-mcp dashboard --port 29417`, then
 `go tool pprof -top 'http://127.0.0.1:29417/debug/pprof/profile?seconds=30'`.
 `/debug/pprof/streams` answers the live-update counters since the daemon
@@ -670,10 +671,16 @@ Finding and starting the daemon (`DaemonLink` in the launcher):
    <mtime ms>` with its own environment: Go resolves `dashboard.port` and
    `dashboard.lan_enabled` from config as `serve` did and runs the `Ensure`
    handoff, printing one JSON line (`outcome`, `port`, `pid`, `version`).
+   A starter the dashboard does not apply to (no dashboard manifest, or
+   `WS_MCP_NO_DASHBOARD=1`) does not decide the LAN mode, the same rule as
+   for a hosted session below: a running daemon keeps its mode, and with
+   none running the global file's `dashboard.lan_enabled` decides.
    The launcher leaves the other staged entries alone (one of them is the
    running daemon's own executable, which it respawns from on a LAN mode
    change); the daemon that wins the lock prunes the directory down to its
-   own. The launcher then waits up to `DefaultStartWait` + 5 s (Windows
+   own, keeping `.tmp` files and entries younger than two minutes, which
+   another launcher may still be staging. The launcher then waits up to
+   `DefaultStartWait` + 5 s (Windows
    + 10 s) for a healthy daemon and applies the replace rule to the one
    that answers: when that is still the older daemon (it refused to stop,
    or won the lock race) the launcher runs the direct path rather than
@@ -710,7 +717,10 @@ Direct fallback: when the daemon cannot be reached or started within those
 budgets, or refuses the hello, the launcher writes one `ws-mcp-launcher: ...;
 running the direct path` line to stderr and runs the runtime binary as
 before (`serve --stdio`, or the `mailbox wait`). `WS_MCP_LAUNCHER_DIRECT=1`
-forces the direct path.
+forces the direct path. A direct-serve child takes a new mailbox owner
+identity (its own PID, not the launcher's), so an address the hosted session
+held conflicts until the stale lease expires; the direct path is the rare
+exception, and this is an accepted limitation.
 
 Reconnect: when the connection ends while the client is still attached (the
 daemon was replaced or died), the proxy connects again (giving a successor
@@ -726,7 +736,10 @@ three in a row the proxy continues on the direct path. When no daemon comes
 back within the start budget, a direct `serve --stdio` child takes over the
 same way. A hosted server for a reconnected session re-registers that
 session's mailbox presence on its first keyed call and keeps the owner
-pointer and the `WS_MAILBOX_AUTO` stem its predecessor published.
+pointer and the `WS_MAILBOX_AUTO` stem its predecessor published, provided
+that record is still live (its PID alive and `last_seen` within the ten-minute
+liveness threshold); a stale record under a reused PID is replaced whole, and
+among several live auto records the first name in order is the one kept.
 
 Client EOF: when the client closes the proxy's stdin, the proxy half-closes
 the daemon stream for writing and keeps copying answers to its stdout until
