@@ -372,7 +372,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "goal/develop/amber-ladle-orbit",
         "phase": "active",
-        "touched_at": "2026-11-10T13:17:52Z"
+        "touched_at": "2026-11-10T13:18:37Z",
+        "impl": {
+          "branch": "impl/goal/develop/amber-ladle-orbit/bunny-blade-pluck"
+        }
       }
     },
     "261110-feat-ws-dashboard-session-rail": {
