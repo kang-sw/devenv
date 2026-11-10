@@ -169,10 +169,14 @@ func boardMemoBase(key string, record sessionRecord, lang string, reasked map[in
 	asked, _ := json.Marshal(reasked)
 	fmt.Fprintf(h, "todos\x00%s\x00agenda\x00%s\x00reasked\x00%s\x00", todos, agenda, asked)
 	if marker, ok, _ := wsmailbox.ReadListeningMarker(key); ok {
-		fmt.Fprintf(h, "marker\x00%d\x00%t\x00", marker.PID, wsstate.ProcessAlive(marker.PID))
+		fmt.Fprintf(h, "marker\x00%d\x00%t\x00", marker.PID, markerAlive(marker.PID))
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }
+
+// markerAlive reports whether a listening marker's process runs (a test
+// seam).
+var markerAlive = wsstate.ProcessAlive
 
 // boardWatchStamp stats every file a board render named: whether it
 // exists, its modification time, and its size.

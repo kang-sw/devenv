@@ -19,6 +19,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wsdevassets"
 	"github.com/kang-sw/devenv/internal/wsi18n"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
+	"github.com/kang-sw/devenv/internal/wsstate"
 	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
 
@@ -850,6 +851,11 @@ func TestDashboardBoardMemoKeysEveryBoardInput(t *testing.T) {
 	if got := settle("marker hit").WatchPIDs; len(got) != 1 || got[0] != os.Getpid() {
 		t.Fatalf("a memo hit returned processes %v, want the wait's", got)
 	}
+	misses("marker process liveness", func() {
+		markerAlive = func(int) bool { return false }
+		t.Cleanup(func() { markerAlive = wsstate.ProcessAlive })
+	})
+	markerAlive = wsstate.ProcessAlive
 	misses("marker process died", func() {
 		dead := exec.Command("true")
 		if err := dead.Run(); err != nil {
