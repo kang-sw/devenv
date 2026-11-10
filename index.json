@@ -221,7 +221,14 @@
       "registered_at": "2026-10-07T05:20:30Z"
     },
     "261007-bug-session-record-cross-process-write-race": {
-      "registered_at": "2026-10-07T05:35:57Z"
+      "registered_at": "2026-10-07T05:35:57Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "28ef83e379b353cc",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-10T06:19:30Z"
+      }
     },
     "261007-feat-stale-agenda-pruning-nudge": {
       "registered_at": "2026-10-07T05:36:00Z"
