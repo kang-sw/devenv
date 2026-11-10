@@ -127,3 +127,49 @@ after the debounce; the result combines with the Today filter; a matched
 row's non-matching ancestors still show greyed through `ctxTree`; Esc
 behaves as 78af82e6 states; a malformed query shows its message; and a
 write that changes a match refreshes the list.
+
+### Result (6d0736cb7) - 2026-11-10
+
+Landed in 91bf22ca8 and 6d0736cb7.
+
+- `internal/wstracker/query.go`: `ParseQuery`, `Query.Match`,
+  `View.Search`, `QueryError`, and `QueryStatuses` / `QueryKinds` (the single
+  status and kind lists; `mcp`'s `trackerStatuses` / `trackerKinds` alias
+  them). Free text also matches the item's shown thread comments, ID in both
+  forms, and alias.
+- `tracker.query` takes `payload.q`, AND-ed with `kind`, `status`, `project`,
+  and `text`; `text` keeps substring meaning; a malformed token refuses as
+  `payload.q: search "<token>": <what the key takes>`.
+- Dashboard: `GET /tracker/stores/<id>/search?q=` -> `{ids}` (400 with the
+  message on a malformed query) through a new `TrackerHost.Search`,
+  implemented in `cmd/ws-mcp` so `wsdashboard` stays free of the tracker
+  packages (cosmetic deviation from Decision 5's wording). The panel calls
+  `adapter.search`, debounced 250 ms; it re-sends at once when the store's
+  view object changes; a malformed query shows the message under the box and
+  leaves the list unfiltered. Adapters without `search` (the mockup) keep the
+  substring match.
+- Tracker playbook (ws, wsflow, pi copies) documents `q`; `ws-mcp.md` lists
+  the route.
+
+Decisions: a query without a status token keeps hidden items, and
+`tracker.query` keeps them only for `status:hidden` (field or token);
+`assignee:` matches part of a live or pending assignee's member id or name;
+`project:` is exact (case-insensitive); `priority:` compares the level.
+
+Verification: `go test ./... -count=1` under `agents-plugin-tool` on the
+remote build server: all 29 packages ok; after the review fixes, `wsrsrc`,
+`wsdashboard`, `mcp` ok. Tests added: `wstracker` query table (each field
+filter, quoted phrases, comment matches, unknown key as free text, every
+malformed known key), `TestTrackerQuerySearchField` (`q` with `status` and
+`text`, mine scope, hidden), route and adapter tests, and the node-run
+`TestTrackerSearchRequests`. Headless browser on an isolated daemon: 12/12
+checks (debounce, comment match, ctxTree greyed ancestor, Today combination
+and empty state, Esc clears and keeps focus, malformed message with an
+unfiltered list, refresh after a write). Lite review: no Critical or
+Important; minors 1 and 3 fixed in 6d0736cb7; minor 2 (`status:hidden`
+lists ids the panel never draws as rows) left: the panel's hidden-row policy
+is out of scope.
+
+Follow-up for the support-UI ticket: it lands second, so it updates the
+`tracker.ui` description and support prompt to name this grammar and
+`tracker.query` `q`.
