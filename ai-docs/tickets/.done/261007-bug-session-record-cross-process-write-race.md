@@ -4,6 +4,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 2baace36e8a09149
 sage-review-completeness-reviewed: 2baace36e8a09149
+completed: 2026-11-10
 ---
 
 # Session record writes race across MCP processes and fail on Windows
@@ -136,3 +137,30 @@ the Windows-safe replace. Test:
 - a failed replace leaves the previous record readable and unchanged;
 - a held lock past the timeout returns an explicit error;
 - existing session-state tests stay green.
+
+### Result (3653dd27b) - 2026-11-10
+
+Landed:
+- `mutateRecordParts` takes a per-key `gofrs/flock` lock, `sessions/<key>/key.json.lock`, for the whole load, modify, and write (migration included). It takes the lock after `s.mu`. The lock waits 2 s (`recordLockTimeout`, the same value as `wsmailbox.LockTimeout`) and a timeout fails the call with "timed out after ... waiting for session record lock".
+- `claimKey` (used by `mint` and `AgentKeyStore.Ensure`) takes the same lock after the `os.Mkdir` claim, writes `key.json` while holding it, and releases it before cleanup.
+- `lockExistingRecord` creates `sessions/<key>/` for a legacy key only after it confirms the legacy file exists. An unknown key creates nothing.
+- `wsstate.atomicReplaceFile` is renamed to the exported `wsstate.AtomicReplaceFile` (unix and windows files, `paths.go`, windows test). `writeFileAtomic` now replaces part files through it.
+- The lock timeout and the replace function are `sessionStore` fields (`lockTimeout`, `replace`) so tests can set them per store.
+- The ws-mcp manual's session key store section now describes the lock.
+
+Tests in `session_layout_test.go`:
+- `TestRecordLockSerializesWritersAcrossStores`: 6 separate stores write different agenda keys and todos at the same time, and no update is lost.
+- `TestFailedReplaceKeepsPreviousRecord`: after a failed replace the part files are byte-identical, no temp file is left, and the lock is released.
+- `TestRecordLockTimeoutIsAnError`: with the lock held, both the store call and the `agenda.set` tool return an error.
+- `TestWriteToUnknownKeyCreatesNothing`: a write to an unknown key leaves no directory, and a legacy key gets its directory, its lock, and the migration.
+
+Verification: `ws-rgo -- test ./internal/mcp/ ./internal/wsstate/ -count=1` passed for both packages. `ws-rgo -- vet ./internal/mcp/ ./internal/wsstate/` was clean. The Windows build was not exercised; the rename is identical in both build files.
+
+Decisions:
+- A no-op mutation of a legacy key now leaves `sessions/<key>/` holding only the lock file, with no migration; reads still fall back to the legacy file. `TestLegacyRecordServesWithoutMigrating` now checks that the key was not migrated, not that no directory exists.
+- The minted-key directory-contents assertion now expects `key.json` plus the lock file.
+- The lock file is never deleted. Deleting it while another process holds it would let two holders lock different inodes.
+
+Lite review: no Critical or Important findings. Two minor observations remain:
+- On Windows, the prune `RemoveAll` does not take the lock and can leave a directory with no `key.json`. This race existed before this change.
+- No test covers the `claimKey` lock or write failure cleanup path.
