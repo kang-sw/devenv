@@ -399,7 +399,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-10T00:45:24Z"
+        "touched_at": "2026-11-10T00:46:41Z",
+        "impl": {
+          "branch": "impl/develop/last-sepia-denim"
+        }
       }
     },
     "261110-feat-ws-tracker-item-move-reparent": {
