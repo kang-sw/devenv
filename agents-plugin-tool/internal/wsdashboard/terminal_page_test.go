@@ -68,11 +68,21 @@ func TestTerminalCardScriptMatchesTheRoutes(t *testing.T) {
 // is a fixed-height sticky row, the column sets the rail's inset to that
 // height only while it holds the row, and the rail (wswhiteboard rail.js,
 // page.css) sticks its top capsules and the current bar below the inset.
+// The row is opaque up to the column's top edge (its shadow fills the
+// column's top padding, above where it sticks), and a card's body is its
+// own stacking context, so nothing a card's body stacks shows through the
+// row.
 func TestBoardHeaderRowKeepsTheRailBelowIt(t *testing.T) {
 	css := mustAsset(t, "dashboard.css")
 	row := regexp.MustCompile(`(?m)^\.bhead \{[^}]*\}`).FindString(css)
 	if !strings.Contains(row, "position: sticky; top: 0;") || !strings.Contains(row, "height: 28px;") {
 		t.Errorf("the board header row is not a 28px sticky row: %q", row)
+	}
+	if !strings.Contains(row, "background: var(--wb-bg); box-shadow: 0 -8px 0 var(--wb-bg);") {
+		t.Errorf("the board header row does not fill the column's top padding above it: %q", row)
+	}
+	if !strings.Contains(css, "\n.bc-body, .bc-folded { isolation: isolate; }\n") {
+		t.Error("a board card's body is not its own stacking context")
 	}
 	if !strings.Contains(css, ".bcol:has(> .bhead) { --wb-rail-inset: 28px; }") {
 		t.Error("the board column does not set the rail's inset to the header row's height while it holds the row")
