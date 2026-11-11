@@ -137,9 +137,10 @@ type Item struct {
 	// time.
 	Settled int `json:"settled,omitempty"`
 	// ReaskedAt is the wall-clock time (RFC 3339, millisecond precision) of
-	// the item's latest re-ask: a patch that changed its class or options, or
-	// set it back to open from settled or assumed. Empty when it was never
-	// re-asked. The dashboard drops sent marks older than it (ReaskTimes).
+	// the item's latest re-ask: a patch that changed its title, class, or
+	// options and left it open, or set it back to open from settled or
+	// assumed. Empty when it was never re-asked. The dashboard drops sent
+	// marks older than it (ReaskTimes).
 	ReaskedAt string `json:"reasked_at,omitempty"`
 }
 
@@ -195,13 +196,18 @@ type Embed struct {
 	Name string `json:"name"`
 }
 
-// TopicDoc is a topic's body: block markdown with inline HTML written as is,
-// rendered above the topic's items.
+// TopicDoc is a topic's content beside its items: its body, block markdown
+// with inline HTML written as is, rendered above the topic's items, and its
+// recap, a short status line rendered above the body. The two are
+// independent parts, each with its own change mark and time, and the
+// topic's recency is the later of the two; an entry holds at least one of
+// them (dropTopicDoc).
 type TopicDoc struct {
 	Name string `json:"name"`
 	Body string `json:"body"`
 	// Changed is the render sequence of the update that last changed the
 	// body; it counts toward the topic's recency like an item's Changed.
+	// Zero while the entry has no body.
 	Changed int `json:"changed"`
 	// ChangedAt is the wall-clock time of that update, as an item's.
 	ChangedAt string `json:"changed_at,omitempty"`
@@ -209,7 +215,20 @@ type TopicDoc struct {
 	// a body edit replaces them: the first body has none, the same body again
 	// keeps them, and no other write touches them.
 	Marks []BlockMark `json:"marks,omitempty"`
+	// Recap is the topic's recap, rendered by the item block-field rule
+	// (itemField); "" when it has none.
+	Recap string `json:"recap,omitempty"`
+	// RecapChanged is the render sequence of the update that last changed
+	// the recap's text, counted toward the topic's recency as Changed is,
+	// and RecapAt that update's wall-clock time (RFC 3339), stamped with
+	// ChangedAt (stampChanges). A body change moves neither, and a recap
+	// change moves neither Changed nor ChangedAt.
+	RecapChanged int    `json:"recap_changed,omitempty"`
+	RecapAt      string `json:"recap_at,omitempty"`
 }
+
+// Recency is the entry's latest change mark, the body's or the recap's.
+func (d TopicDoc) Recency() int { return max(d.Changed, d.RecapChanged) }
 
 // State is the whole whiteboard of one session. The MCP layer stores it in
 // the session state record; a nil State means the session has no board.
@@ -236,7 +255,8 @@ type State struct {
 	// it only while the topic is closed) and the next close replaces it; a
 	// topic closed before the field has none.
 	CloseResults map[string]string `json:"close_results,omitempty"`
-	// Topics holds the topics that have a body, in first-set order. A store
+	// Topics holds the topics that have a body or a recap, in first-set
+	// order. A store
 	// written while the board had a Now slot keeps its "now" text on disk
 	// until the next write; the field is gone, so nothing reads it.
 	Topics []TopicDoc `json:"topics,omitempty"`
@@ -312,7 +332,8 @@ func (s *State) index(id int) int {
 	return -1
 }
 
-// topicKnown reports whether topic has an item or a body.
+// topicKnown reports whether topic has an item, a body, or a recap (a
+// Topics entry holds at least one of the two).
 func (s *State) topicKnown(topic string) bool {
 	for _, item := range s.Items {
 		if item.Topic == topic {
@@ -351,44 +372,117 @@ func (s *State) TopicBody(topic string) string {
 	return ""
 }
 
-// setTopicBody sets topic's body; a change marks the topic changed and, as
-// an added item does, reopens a closed topic. Change marks are per update
-// batch: base is the state as the batch began, and the marks diff against
-// the body it held there, so several edits to one topic in a batch keep all
-// their marks and a body the batch created marks nothing. Edits that bring
-// the body back to the one the batch began with change nothing: the topic
-// keeps that body's marks and Changed.
-func (s *State) setTopicBody(topic, body string, mark int, base *State) {
-	i := s.topicDocIndex(topic)
-	if i >= 0 && s.Topics[i].Body == body {
-		return
+// TopicRecap returns topic's recap, "" when it has none.
+func (s *State) TopicRecap(topic string) string {
+	if s == nil {
+		return ""
 	}
+	if i := s.topicDocIndex(topic); i >= 0 {
+		return s.Topics[i].Recap
+	}
+	return ""
+}
+
+// topicDoc returns topic's entry, adding an empty one when it has none.
+func (s *State) topicDoc(topic string) *TopicDoc {
+	i := s.topicDocIndex(topic)
 	if i < 0 {
 		s.Topics = append(s.Topics, TopicDoc{Name: topic})
 		i = len(s.Topics) - 1
 	}
+	return &s.Topics[i]
+}
+
+// baseDoc returns topic's entry in base, the state a batch began with, and
+// whether it had one.
+func baseDoc(base *State, topic string) (TopicDoc, bool) {
 	if base != nil {
-		if bi := base.topicDocIndex(topic); bi >= 0 && base.Topics[bi].Body == body {
-			s.Topics[i] = base.Topics[bi]
-			return
+		if i := base.topicDocIndex(topic); i >= 0 {
+			return base.Topics[i], true
 		}
 	}
-	s.Topics[i].Marks = nil
-	if prev := base.TopicBody(topic); prev != "" {
-		s.Topics[i].Marks = diffBodies(prev, body)
+	return TopicDoc{}, false
+}
+
+// setTopicBody sets topic's body; a change marks the body changed and, as
+// an added item does, reopens a closed topic. Change marks are per update
+// batch: base is the state as the batch began, and the marks diff against
+// the body it held there, so several edits to one topic in a batch keep all
+// their marks and a body the batch created marks nothing. Edits that bring
+// the body back to the one the batch began with change nothing: the body
+// keeps that body's marks, Changed, and ChangedAt. The recap is never
+// touched, so a wb:recap earlier in the batch stands.
+func (s *State) setTopicBody(topic, body string, mark int, base *State) {
+	if i := s.topicDocIndex(topic); i >= 0 && s.Topics[i].Body == body {
+		return
 	}
-	s.Topics[i].Body = body
-	s.Topics[i].Changed = mark
+	d := s.topicDoc(topic)
+	if b, ok := baseDoc(base, topic); ok && b.Body == body {
+		d.Body, d.Marks, d.Changed, d.ChangedAt = b.Body, b.Marks, b.Changed, b.ChangedAt
+		return
+	}
+	d.Marks = nil
+	if prev := base.TopicBody(topic); prev != "" {
+		d.Marks = diffBodies(prev, body)
+	}
+	d.Body = body
+	d.Changed = mark
 	if s.topicClosed(topic) {
 		s.reopenTopic(topic)
 	}
 }
 
-// clearTopicBody drops topic's body. A topic left with no item is gone, so
-// its closed mark goes too.
+// setTopicRecap sets topic's recap as setTopicBody sets a body: a change
+// marks the recap changed (RecapChanged, so the topic's recency moves) and
+// reopens a closed topic; the same recap again is no change. A recap the
+// batch brings back to the one it began with keeps that recap's change mark
+// and time. The body is never touched.
+func (s *State) setTopicRecap(topic, recap string, mark int, base *State) {
+	if s.TopicRecap(topic) == recap {
+		return
+	}
+	d := s.topicDoc(topic)
+	if b, ok := baseDoc(base, topic); ok && b.Recap == recap {
+		d.Recap, d.RecapChanged, d.RecapAt = b.Recap, b.RecapChanged, b.RecapAt
+		return
+	}
+	d.Recap = recap
+	d.RecapChanged = mark
+	if s.topicClosed(topic) {
+		s.reopenTopic(topic)
+	}
+}
+
+// clearTopicBody drops topic's body with its marks and change time; the
+// recap stays.
 func (s *State) clearTopicBody(topic string) {
 	i := s.topicDocIndex(topic)
 	if i < 0 {
+		return
+	}
+	d := &s.Topics[i]
+	d.Body, d.Marks, d.Changed, d.ChangedAt = "", nil, 0, ""
+	s.dropTopicDoc(topic)
+}
+
+// clearTopicRecap drops topic's recap with its change time; the body stays.
+// Like clearing a body, it is no new content: it neither moves the topic's
+// recency forward nor reopens a closed topic.
+func (s *State) clearTopicRecap(topic string) {
+	i := s.topicDocIndex(topic)
+	if i < 0 {
+		return
+	}
+	s.Topics[i].Recap, s.Topics[i].RecapChanged, s.Topics[i].RecapAt = "", 0, ""
+	s.dropTopicDoc(topic)
+}
+
+// dropTopicDoc drops topic's entry once it holds neither a body nor a
+// recap. A topic left with no item either is gone, so its closed mark goes
+// too.
+func (s *State) dropTopicDoc(topic string) {
+	i := s.topicDocIndex(topic)
+	if i < 0 || s.Topics[i].Body != "" || s.Topics[i].Recap != "" {
 		return
 	}
 	s.Topics = append(s.Topics[:i], s.Topics[i+1:]...)
@@ -536,6 +630,8 @@ func Apply(state *State, commands string, env Env) (Outcome, []string) {
 			applyBody(p, work, state, cmd, topicOf, mark)
 		case "wb:edit":
 			applyEdit(p, work, state, cmd, topicOf, mark)
+		case "wb:recap":
+			applyRecap(work, state, cmd, topicOf, mark)
 		case "wb:close":
 			withdrawn := applyClose(p, work, cmd, topicOf, mark)
 			for _, id := range withdrawn {
@@ -591,7 +687,7 @@ func applyClose(p *problems, work *State, cmd command, topicOf topicResolver, ma
 		return nil
 	}
 	if !work.topicKnown(topic) {
-		p.Add("%s: no item or topic body has topic %q", cmd.Label(), topic)
+		p.Add("%s: no item, topic body, or recap has topic %q", cmd.Label(), topic)
 		return nil
 	}
 	if !work.topicClosed(topic) {
@@ -855,8 +951,10 @@ var patchClearValues = []string{"options", "links"}
 // patch's own status change applies, so one patch can reopen a settled item,
 // reclass it, and give it new options: a stored answer means something only
 // under the class and options it was given. A patch that really changes the
-// class or the options, or sets a settled or assumed item back to open, is a
-// re-ask and stamps ReaskedAt with now.
+// title, the class, or the options of an item open after the patch, or sets a
+// settled or assumed item back to open, is a re-ask and stamps ReaskedAt with
+// now: the title and the options carry the question, so a rewritten title asks
+// it again. A title fix on an item the patch leaves settled stamps nothing.
 func applyPatch(p *problems, work *State, cmd command, mark int, now time.Time) int {
 	before := len(p.List)
 	idx, id := -1, 0
@@ -945,7 +1043,8 @@ func applyPatch(p *problems, work *State, cmd command, mark int, now time.Time) 
 			work.settle(&next)
 		}
 	}
-	if reopened || next.Class != prev.Class || !slices.Equal(next.Options, prev.Options) {
+	retitled := next.Status == StatusOpen && next.Title != prev.Title
+	if reopened || retitled || next.Class != prev.Class || !slices.Equal(next.Options, prev.Options) {
 		next.ReaskedAt = now.UTC().Format(reaskLayout)
 	}
 	work.Items[idx] = next
@@ -971,6 +1070,22 @@ func applyBody(p *problems, work, base *State, cmd command, topicOf topicResolve
 	work.setTopicBody(name, body, mark, base)
 }
 
+// applyRecap replaces a topic's recap whole; an empty (or blank) body
+// clears it. The recap is stored trimmed, so the same recap again, however
+// it is padded, is no change.
+func applyRecap(work, base *State, cmd command, topicOf topicResolver, mark int) {
+	name, ok := topicOf(cmd)
+	if !ok {
+		return
+	}
+	recap := strings.TrimSpace(cmd.Body)
+	if recap == "" {
+		work.clearTopicRecap(name)
+		return
+	}
+	work.setTopicRecap(name, recap, mark, base)
+}
+
 // applyEdit replaces one exact match of old in a topic's body with new, or
 // every match with replace_all="true".
 func applyEdit(p *problems, work, base *State, cmd command, topicOf topicResolver, mark int) {
@@ -990,7 +1105,7 @@ func applyEdit(p *problems, work, base *State, cmd command, topicOf topicResolve
 		return
 	}
 	i := work.topicDocIndex(name)
-	if i < 0 {
+	if i < 0 || work.Topics[i].Body == "" {
 		p.Add("%s: topic %q has no body; set one with <wb:body>", cmd.Label(), name)
 		return
 	}

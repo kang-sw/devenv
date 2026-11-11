@@ -193,7 +193,7 @@ func TestApplyRefusedBatchAppliesNothingAndReportsEveryProblem(t *testing.T) {
 	}
 	// A valid command ahead of a bad one is not applied either.
 	problems = refused(t, st, addXML(ClassTechnical, "t", "fine")+"\n"+`<wb:topic name="nowhere"><wb:close result="done"/></wb:topic>`)
-	wantProblems(t, problems, `command 2 <wb:close> (line 2): no item or topic body has topic "nowhere"`)
+	wantProblems(t, problems, `command 2 <wb:close> (line 2): no item, topic body, or recap has topic "nowhere"`)
 }
 
 func TestApplyAddFieldRules(t *testing.T) {
@@ -492,7 +492,7 @@ func TestRotationKeepsTenMostRecentSettledBoardWide(t *testing.T) {
 		}
 	}
 	problems := refused(t, st, `<wb:topic name="missing"><wb:close result="done"/></wb:topic>`)
-	wantProblems(t, problems, `no item or topic body has topic "missing"`)
+	wantProblems(t, problems, `no item, topic body, or recap has topic "missing"`)
 	// Closing twice keeps one mark; a close sits in its topic's group.
 	mustApply(t, st, `<wb:topic name="a"><wb:close result="done"/></wb:topic>`)
 	if len(st.ClosedTopics) != 1 {
@@ -902,7 +902,7 @@ func TestApplyTopicEmptyBodyClears(t *testing.T) {
 	if st.topicKnown("only body") {
 		t.Fatal("a topic with neither items nor body must be gone")
 	}
-	wantProblems(t, refused(t, st, `<wb:topic name="only body"><wb:close result="done"/></wb:topic>`), `no item or topic body has topic "only body"`)
+	wantProblems(t, refused(t, st, `<wb:topic name="only body"><wb:close result="done"/></wb:topic>`), `no item, topic body, or recap has topic "only body"`)
 	// A body set again afterwards starts open.
 	mustApply(t, st, topicXML("only body", "back"))
 	if st.topicClosed("only body") {

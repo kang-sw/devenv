@@ -521,6 +521,12 @@ type topicData struct {
 // TopicOf pairs a topic with the page for the topic template.
 func (p *pageData) TopicOf(t TopicView) topicData { return topicData{TopicView: t, Page: p} }
 
+// RecapHTML renders the topic's recap through itemField, as an item's block
+// fields render, salted with the topic's key.
+func (p *pageData) RecapHTML(t TopicView) template.HTML {
+	return p.itemField(t.Recap, "topic/"+t.Name+"/recap")
+}
+
 // itemData is one item with the page it sits on.
 type itemData struct {
 	ItemView

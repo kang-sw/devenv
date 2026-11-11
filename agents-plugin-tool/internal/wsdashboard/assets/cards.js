@@ -62,11 +62,12 @@
   }
   function isCard(n) { return !!n && n.nodeType === 1 && n.hasAttribute("data-card"); }
 
-  // topicAt is an open topic's last update (epoch ms), or null for any
-  // other node: a closed topic, the closed-topic control, the reply bar.
+  // topicAt is an open topic's last update (epoch ms), the time in its bar
+  // (a recap line carries a time of its own), or null for any other node: a
+  // closed topic, the closed-topic control, the reply bar.
   function topicAt(n) {
     if (n.nodeType !== 1 || !n.hasAttribute("data-topic") || n.classList.contains("closed")) return null;
-    var t = n.querySelector("time.tago[data-at]");
+    var t = n.querySelector(".tbar time.tago[data-at]");
     return t ? +t.getAttribute("data-at") || 0 : 0;
   }
   // order weaves the cards in list into base, the board's own nodes in
