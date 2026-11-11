@@ -140,6 +140,18 @@ type TopicView struct {
 	DocMarks []BlockMark
 	// DocNew marks a body changed since the previous embed (embed only).
 	DocNew bool
+	// Recap is the topic's recap, rendered by the item block-field rule;
+	// empty when it has none. It shows at the top of the topic, above the
+	// body, on both layouts while the topic is open (RecapOpen), and folds
+	// with the body once the topic is closed (RecapFolded). RecapAt,
+	// RecapMs, and RecapClock are its update time as UpdatedAt, UpdatedMs,
+	// and UpdatedClock are the topic's; RecapStamp is its local date and
+	// time, the time's hover title.
+	Recap      string
+	RecapAt    string
+	RecapMs    int64
+	RecapClock string
+	RecapStamp string
 	// Policy and Acks are the topic's items waiting on the user; they never
 	// collapse.
 	Policy []ItemView
@@ -153,7 +165,8 @@ type TopicView struct {
 	// count chip. Newest first.
 	Collapsed []ItemView
 	// Quiet marks a block with nothing waiting, nothing expanded, and no body
-	// showing; it collapses to one title line (and a closed body's fold).
+	// or recap showing; it collapses to one title line (and a closed body's
+	// fold).
 	Quiet bool
 	// Closed marks a topic the lead closed.
 	Closed bool
@@ -161,7 +174,7 @@ type TopicView struct {
 	// open or when its close gave none (a store written before results).
 	Result string
 	// UpdatedAt is the topic's latest change, the newest change time among
-	// its items and body (RFC 3339, UTC), empty when none has one. UpdatedMs
+	// its items, body, and recap (RFC 3339, UTC), empty when none has one. UpdatedMs
 	// is the same instant in Unix milliseconds for the page script, and
 	// UpdatedClock its local HH:MM, which the embed shows.
 	UpdatedAt    string
@@ -178,6 +191,18 @@ func (t TopicView) DocOpen(embed bool) bool {
 	}
 	return !embed || t.DocNew
 }
+
+// RecapOpen reports whether the recap shows at the top of the topic: it has
+// one and is open.
+func (t TopicView) RecapOpen() bool { return t.Recap != "" && !t.Closed }
+
+// RecapFolded reports whether the recap folds with the body: it has one and
+// is closed.
+func (t TopicView) RecapFolded() bool { return t.Recap != "" && t.Closed }
+
+// HasFold reports whether the topic renders the body's fold: it has a body,
+// or a recap folded into it.
+func (t TopicView) HasFold() bool { return t.Doc != "" || t.RecapFolded() }
 
 // SettledCount is the topic's settled total, the count chip's number.
 func (t TopicView) SettledCount() int {
@@ -416,7 +441,8 @@ func BuildView(state *State, in ViewInput) View {
 		block := blockOf(doc.Name)
 		block.Doc = doc.Body
 		block.DocMarks = doc.Marks
-		block.DocNew = in.Layout == LayoutEmbed && doc.Changed > state.LastEmbedSeq
+		block.DocNew = in.Layout == LayoutEmbed && doc.Body != "" && doc.Changed > state.LastEmbedSeq
+		block.Recap = doc.Recap
 	}
 	stampUpdated(state, blocks, in.Location)
 	for _, block := range blocks {
@@ -435,7 +461,7 @@ func BuildView(state *State, in ViewInput) View {
 	// Quiet follows what the page shows, so an unread body that stays folded
 	// (the embed, an unchanged body) does not make a topic look active.
 	quiet := func(t *TopicView) bool {
-		return len(t.Policy) == 0 && len(t.Acks) == 0 && len(t.Expanded) == 0 && !t.DocOpen(in.Layout == LayoutEmbed)
+		return len(t.Policy) == 0 && len(t.Acks) == 0 && len(t.Expanded) == 0 && !t.DocOpen(in.Layout == LayoutEmbed) && !t.RecapOpen()
 	}
 	for _, name := range order {
 		block := blocks[name]
@@ -456,7 +482,7 @@ func BuildView(state *State, in ViewInput) View {
 		activity[item.Topic] = max(activity[item.Topic], item.Changed)
 	}
 	for _, doc := range state.Topics {
-		activity[doc.Name] = max(activity[doc.Name], doc.Changed)
+		activity[doc.Name] = max(activity[doc.Name], doc.Recency())
 	}
 	sort.SliceStable(order, func(i, j int) bool {
 		return activity[order[i]] > activity[order[j]]
@@ -493,8 +519,8 @@ func BuildView(state *State, in ViewInput) View {
 }
 
 // stampUpdated sets each block's latest change from the change times of its
-// items and body; a time that does not parse (a store written before change
-// times) counts as none.
+// items, body, and recap, and its recap's own update time; a time that does
+// not parse (a store written before change times) counts as none.
 func stampUpdated(state *State, blocks map[string]*TopicView, loc *time.Location) {
 	if loc == nil {
 		loc = time.Local
@@ -510,6 +536,14 @@ func stampUpdated(state *State, blocks map[string]*TopicView, loc *time.Location
 	}
 	for _, doc := range state.Topics {
 		touch(doc.Name, doc.ChangedAt)
+		touch(doc.Name, doc.RecapAt)
+		if t, err := time.Parse(time.RFC3339, doc.RecapAt); err == nil && doc.Recap != "" {
+			block := blocks[doc.Name]
+			block.RecapAt = t.UTC().Format(time.RFC3339)
+			block.RecapMs = t.UnixMilli()
+			block.RecapClock = t.In(loc).Format("15:04")
+			block.RecapStamp = t.In(loc).Format("2006-01-02 15:04")
+		}
 	}
 	for topic, t := range latest {
 		block := blocks[topic]

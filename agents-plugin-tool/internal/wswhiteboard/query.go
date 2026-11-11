@@ -38,8 +38,12 @@ type QueryTopic struct {
 	// set only when the query prints bodies.
 	BodyLen int
 	Body    string
-	// LastChange is the latest ChangedAt of the topic's items and body, RFC
-	// 3339 UTC, "" when none is recorded.
+	// Recap is the topic's recap as stored and RecapAt its update time (RFC
+	// 3339 UTC), printed at every depth whatever the body filter, for a
+	// closed topic too; "" when the topic has none.
+	Recap, RecapAt string
+	// LastChange is the latest change time of the topic's items, body, and
+	// recap, RFC 3339 UTC, "" when none is recorded.
 	LastChange string
 	// Items are the matching items in ID order; none at depth topics.
 	Items []Item
@@ -254,11 +258,14 @@ func Query(state *State, payload any) (QueryResult, []string) {
 			touch(item.ChangedAt)
 		}
 		if i := state.topicDocIndex(name); i >= 0 {
-			t.BodyLen = utf8.RuneCountInString(state.Topics[i].Body)
-			touch(state.Topics[i].ChangedAt)
+			doc := state.Topics[i]
+			t.BodyLen = utf8.RuneCountInString(doc.Body)
+			touch(doc.ChangedAt)
+			touch(doc.RecapAt)
 			if f.body {
-				t.Body = state.Topics[i].Body
+				t.Body = doc.Body
 			}
+			t.Recap, t.RecapAt = doc.Recap, doc.RecapAt
 		}
 		if !latest.IsZero() {
 			t.LastChange = latest.UTC().Format(time.RFC3339)
@@ -307,13 +314,13 @@ func (f queryFilter) matches(item Item) ([]string, bool) {
 }
 
 // FormatQuery renders a query result as compact text: per topic a header
-// line, its body between marker lines when printed, then an indented line
-// per item and its detail lines (depth summary or full); a last line names
+// line, its recap line, its body between marker lines when printed, then an
+// indented line per item and its detail lines (depth summary or full); a last line names
 // what the defaults left out. Item fields, the topic label, and the close
 // result print board markup as plain text: the title, links, label, result,
 // and answer through Plain, options, recommendation, and rationale through
-// PlainHTML, matching what the page renders as markup in each; the body and
-// an answer quote print as stored.
+// PlainHTML, matching what the page renders as markup in each; the recap,
+// the body, and an answer quote print as stored.
 func FormatQuery(r QueryResult) string {
 	var sb strings.Builder
 	if len(r.Topics) == 0 {
@@ -324,6 +331,15 @@ func FormatQuery(r QueryResult) string {
 	quoted := map[[2]string]int{}
 	for _, t := range r.Topics {
 		sb.WriteString(topicLine(t) + "\n")
+		if t.Recap != "" {
+			at := ""
+			if t.RecapAt != "" {
+				at = " (changed: " + t.RecapAt + ")"
+			}
+			// Continuation lines are indented, so a multi-line recap never
+			// reads as a topic or body line of its own.
+			sb.WriteString("recap" + at + ": " + strings.ReplaceAll(t.Recap, "\n", "\n  ") + "\n")
+		}
 		if t.Body != "" {
 			sb.WriteString("topic body:\n<<<\n" + t.Body + "\n>>>\n")
 		}
