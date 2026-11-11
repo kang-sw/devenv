@@ -835,7 +835,8 @@ state outside it.
      ends "; written concurrently, the first in fold order wins". Check-time
      folds skip it by the same test, so later verdicts match a full replay.
      This covers a second claim of one opening, a claim after the opening's
-     concurrent withdrawal or assign, an opening after a concurrent assign,
+     concurrent withdrawal or assign, an opening after a concurrent assign
+     or opening,
      and an approval of a request that a concurrent approval, denial, or
      withdrawal answered or whose assignment ended first. A concurrent deny,
      withdraw, or unopen of something already ended is a no-op instead.

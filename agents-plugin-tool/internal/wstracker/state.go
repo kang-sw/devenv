@@ -1753,9 +1753,9 @@ func (s *state) applyAssign(n *node) {
 	}
 }
 
-// applyOpen opens a task to its scope. A creator's assign concurrent with
-// the opening and earlier in fold order already holds the item: the opening
-// is flagged and takes no effect.
+// applyOpen opens a task to its scope. A creator's assign or another
+// opening concurrent with it and earlier in fold order already holds or
+// opened the item: the opening is flagged and takes no effect.
 func (s *state) applyOpen(n *node) {
 	it := s.items[n.p.str("item")]
 	if it == nil {
@@ -1763,6 +1763,10 @@ func (s *state) applyOpen(n *node) {
 	}
 	if held := s.holders(it); len(held) > 0 {
 		s.foldFlag(n, rejection(it.alias+" has live or pending assignments ("+strings.Join(held, ", ")+"); only a task nobody else holds is opened"+concurrently))
+		return
+	}
+	if o := s.activeOpen(it); o != nil {
+		s.foldFlag(n, rejection(it.alias+" is already open ("+o.node.alias+")"+concurrently))
 		return
 	}
 	it.open = &opening{node: n, by: n.member, scope: n.p.str("scope")}

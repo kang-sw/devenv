@@ -1140,13 +1140,15 @@
   // effect. A check-time fold skips it by the same test without flagging, so
   // later verdicts see what a full replay shows.
   function foldFlag(n, reason, C) { if (C) { n.status = 'flagged'; n.reason = reason; } }
-  // item.open; a creator's assign concurrent with it and earlier in fold order
-  // already holds the item, so the opening is flagged.
+  // item.open; a creator's assign or another opening concurrent with it and
+  // earlier in fold order already holds or opened the item, so it is flagged.
   function applyOpen(S, n, C) {
     var it = S.items[n.p.item];
     if (!it) return;
     var held = holders(S, it);
     if (held.length) { foldFlag(n, it.alias + ' has live or pending assignments (' + held.join(', ') + '); only a task nobody else holds is opened' + CONCURRENTLY, C); return; }
+    var ao = activeOpen(S, it);
+    if (ao) { foldFlag(n, it.alias + ' is already open (' + alias(ao.node.id) + ')' + CONCURRENTLY, C); return; }
     it.open = { node: n, by: n.author, scope: n.p.scope, ended: null };
   }
   // item.claim: a live record by the opener, which displaces the fallback and ends
