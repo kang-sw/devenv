@@ -444,7 +444,9 @@ details.panel .body { container-type: inline-size; }
    capsules and the bar stick below it. The topic clips rather than hides its overflow, so
    it is no scroll container and its bar sticks to the board's scroller. The
    capsule height, gap, and paddings are mirrored in rail.js (CAP, GAP, PAD,
-   FADE): change them together. */
+   FADE): change them together. A host that rails its own board nodes
+   (data-rail, rail.js) sticks their bars itself, at --wb-rail-top, and
+   styles their .wb-stuck shadow. */
 .wb-rail .topic { overflow: hidden; overflow: clip; }
 .wb-rail .topic > .tbar { position: sticky; top: var(--wb-rail-top, 0px); z-index: 1; }
 .wb-rail .topic:not(.quiet) > .tbar { border-radius: var(--wb-radius) var(--wb-radius) 0 0; }
@@ -468,6 +470,8 @@ details.panel .body { container-type: inline-size; }
 .wb-cap.quiet { background: var(--wb-muted); color: var(--wb-muted-fg); }
 .wb-cap:hover { opacity: 1; }
 .wb-cap:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 1px; opacity: 1; }
+.wb-cap .ci { flex: none; display: inline-flex; }
+.wb-cap .ci svg { width: 11px; height: 11px; }
 .wb-cap .cn { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wb-cap .cp { flex: none; display: inline-flex; align-items: center; height: 12px; padding: 0 5px; border-radius: 999px; background: var(--wb-policy); color: var(--wb-on-policy); font-size: 9.5px; font-weight: 700; }
 .wb-cap .cx { flex: none; opacity: .75; font-variant-numeric: tabular-nums; }

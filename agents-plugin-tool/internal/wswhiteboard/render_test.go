@@ -1018,6 +1018,43 @@ func TestTopicRailBarCapsuleMotion(t *testing.T) {
 	}
 }
 
+// TestTopicRailRailsHostItems pins the rail's generic item hook: besides
+// the topics it rails any board node the host marks with data-rail, in
+// board order, leaves out an item with no height, takes a marked node's
+// bar, capsule text, and capsule icon from data-rail-bar, data-rail-name,
+// and data-rail-icon, keys the draw by item key so a topic and a marked
+// node never collide, and keeps a marked node's name and icon through the
+// bar-to-capsule morph.
+func TestTopicRailRailsHostItems(t *testing.T) {
+	assets, err := PageAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	js, css := string(assets.FormScript), string(assets.CSS)
+	for _, want := range []string{
+		`var ITEMS = "section.topic[data-topic], [data-rail]";`,
+		`function barOf(t) { return t.querySelector(isTopic(t) ? ":scope > .tbar" : "[data-rail-bar]"); }`,
+		`function keyOf(t) { return isTopic(t) ? t.getAttribute("data-topic") : "\u0001" + t.getAttribute("data-rail"); }`,
+		`if (dirty) { found = Array.prototype.slice.call(box.querySelectorAll(ITEMS)); dirty = false; }`,
+		`if (r.height) { topics.push(t); rects.push(r); }`,
+		`var nm = t.querySelector("[data-rail-name]"), ic = t.querySelector("[data-rail-icon]");`,
+		`bar: cur >= 0 ? barOf(topics[cur]) : null,`,
+		`return topics[i] ? keyOf(topics[i]) : "";`,
+		`!c.hasAttribute("data-rail-name") && !c.hasAttribute("data-rail-icon")`,
+		`<span class="ci" hidden></span><span class="cn"></span>`,
+	} {
+		if !strings.Contains(js, want) {
+			t.Errorf("the rail script lacks %q", want)
+		}
+	}
+	if strings.Contains(js, `querySelector(":scope > .tbar") : null`) || strings.Contains(js, "b.children[1]") {
+		t.Error("the rail script still reads a topic's bar or a capsule's slots directly")
+	}
+	if !strings.Contains(css, ".wb-cap .ci { flex: none; display: inline-flex; }") {
+		t.Error("the shared stylesheet does not lay out a capsule's icon")
+	}
+}
+
 // A standalone page renders in the language its view names: the static text
 // (tooltips, the folded count) comes from the language's table, the board's
 // own content (titles, panel rows) stays as written, and the page carries the

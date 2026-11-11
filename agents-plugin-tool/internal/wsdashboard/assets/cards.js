@@ -162,8 +162,15 @@
     el.setAttribute("data-card", c.id);
     el.setAttribute("data-kind", c.kind);
     c.el = el;
+    // The topic rail (wswhiteboard rail.js) rails the card beside the
+    // topics: a capsule with the header's icon and name once it scrolls
+    // past, and the header sticking while it is current.
+    el.setAttribute("data-rail", c.id);
+    head.setAttribute("data-rail-bar", "");
     c.icon = mk("span", "bc-ic");
+    c.icon.setAttribute("data-rail-icon", "");
     c.name = mk("span", "bc-nm");
+    c.name.setAttribute("data-rail-name", "");
     c.sub = mk("span", "bc-sub");
     c.badge = mk("span", "bc-kind");
     c.acts = mk("span", "bc-acts");

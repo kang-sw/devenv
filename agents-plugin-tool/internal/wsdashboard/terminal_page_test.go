@@ -100,3 +100,34 @@ func TestBoardHeaderRowKeepsTheRailBelowIt(t *testing.T) {
 		}
 	}
 }
+
+// TestBoardCardsJoinTheTopicRail pins the board cards' place in the topic
+// rail (wswhiteboard rail.js's data-rail hook): every card is a rail item
+// whose header is its bar and whose header icon and name make its capsule,
+// and the card's header sticks at the rail's line with the stuck shadow, as
+// a topic's bar does, except in a maximized card's sheet. The card clips
+// rather than hides its overflow, so it is no scroll container for the
+// sticky header.
+func TestBoardCardsJoinTheTopicRail(t *testing.T) {
+	js := mustAsset(t, "cards.js")
+	for _, want := range []string{
+		`el.setAttribute("data-rail", c.id);`,
+		`head.setAttribute("data-rail-bar", "");`,
+		`c.icon.setAttribute("data-rail-icon", "");`,
+		`c.name.setAttribute("data-rail-name", "");`,
+	} {
+		if !strings.Contains(js, want) {
+			t.Errorf("cards.js lacks %q", want)
+		}
+	}
+	css := mustAsset(t, "dashboard.css")
+	for _, want := range []string{
+		"overflow: hidden; overflow: clip; display: flex; flex-direction: column; }",
+		".wb-rail .bcard:not([data-max]) .bc-hd { position: sticky; top: var(--wb-rail-top, 0px); z-index: 1; background: var(--wb-card);",
+		".wb-rail .bcard:not([data-max]) .bc-hd.wb-stuck { box-shadow: var(--wb-shadow); z-index: 3; }",
+	} {
+		if !strings.Contains(css, want) {
+			t.Errorf("dashboard.css lacks %q", want)
+		}
+	}
+}
