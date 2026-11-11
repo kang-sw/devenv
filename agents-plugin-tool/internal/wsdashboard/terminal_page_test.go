@@ -94,7 +94,7 @@ func TestBoardHeaderRowKeepsTheRailBelowIt(t *testing.T) {
 	if !strings.Contains(string(wb.CSS), ".wb-rail-wrap.up { top: var(--wb-rail-inset, 0px);") {
 		t.Error("the rail's top capsules do not stick below the host's inset")
 	}
-	for _, want := range []string{`getPropertyValue("--wb-rail-inset")`, `root.getBoundingClientRect().top + padTop + inset`, `host.style.setProperty("--wb-rail-top", inset + `, `host.style.setProperty("--wb-rail-h", inset + `} {
+	for _, want := range []string{`getPropertyValue("--wb-rail-inset")`, `root.getBoundingClientRect().top + padTop + inset`, `vals.top = inset + (s ? s.top : 0) + "px";`, `vals.h = inset + (s ? s.top + barH : 0) + "px";`, `put(barOf(t), "--wb-rail-top", vals.top);`, `put(host.querySelector(".oq-wrap.top"), "--wb-rail-h", vals.h);`} {
 		if !strings.Contains(string(wb.FormScript), want) {
 			t.Errorf("the rail script lacks %q", want)
 		}

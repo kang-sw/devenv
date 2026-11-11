@@ -1019,7 +1019,7 @@ func TestTopicRailBarCapsuleMotion(t *testing.T) {
 	js, css := string(assets.FormScript), string(assets.CSS)
 	for _, want := range []string{
 		`function motion() { return !!d.body.animate && !(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches); }`,
-		`var pre = motion() ? before(s) : null;`,
+		`var pre = motion() && member !== moved ? before(s) : null;`,
 		"if (pre) after(pre);\n    drawn = !!s;",
 		`if (!drawn || !s) return p;`,
 		`if (bnear && !s.down.some(function (i) { return topics[i] === bnear; })) p.bot = capGhost(slots.bot.near);`,
@@ -1082,7 +1082,7 @@ func TestTopicRailRailsHostItems(t *testing.T) {
 		`var ITEMS = "section.topic[data-topic], [data-rail]";`,
 		`function barOf(t) { return t.querySelector(isTopic(t) ? ":scope > .tbar" : "[data-rail-bar]"); }`,
 		`function keyOf(t) { return isTopic(t) ? t.getAttribute("data-topic") : "\u0001" + t.getAttribute("data-rail"); }`,
-		`if (dirty) { found = Array.prototype.slice.call(box.querySelectorAll(ITEMS)); dirty = false; }`,
+		`if (dirty) { found = Array.prototype.slice.call(box.querySelectorAll(ITEMS)); dirty = false; fresh = true; }`,
 		`if (r.height) { topics.push(t); rects.push(r); }`,
 		`var nm = t.querySelector("[data-rail-name]"), ic = t.querySelector("[data-rail-icon]");`,
 		`bar: cur >= 0 ? barOf(topics[cur]) : null,`,

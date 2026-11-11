@@ -137,10 +137,26 @@
   // (hidden only while the frame shows the git sheet), so a panels swap
   // keeps its offset whether the drawer is open or closed.
   var PANES = ["bcol", "r-tree", "convo", "drbody"];
-  var paneScroll = {};
+  // A scroll only marks its pane; the offset is read once per frame, in a
+  // frame callback beside the board rail's, so the visibility check and
+  // the scrollTop read share the frame's layout rather than force one of
+  // their own from inside every scroll event.
+  var paneScroll = {}, paneMoved = {}, paneFrame = 0;
+  function notePanes() {
+    paneFrame = 0;
+    PANES.forEach(function (id) {
+      if (!paneMoved[id]) return;
+      paneMoved[id] = false;
+      var el = $(id);
+      if (visible(el)) paneScroll[id] = el.scrollTop;
+    });
+  }
   PANES.forEach(function (id) {
     var el = $(id);
-    if (el) el.addEventListener("scroll", function () { if (visible(el)) paneScroll[id] = el.scrollTop; });
+    if (el) el.addEventListener("scroll", function () {
+      paneMoved[id] = true;
+      if (!paneFrame) paneFrame = requestAnimationFrame(notePanes);
+    }, { passive: true });
   });
   function scrollState() {
     var s = [];

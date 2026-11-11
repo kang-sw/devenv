@@ -10,10 +10,10 @@
   // board region and are reused.
   var d = document;
   if (d.body.classList.contains("embed") || !window.requestAnimationFrame) return;
-  // host carries the rail class and its offsets (the dashboard's board
-  // column, the full page's wrapper, the same element pill.js uses, so the
-  // open-question pill reads the offsets too); box holds the topics and the
-  // wrappers.
+  // host carries the rail class (the dashboard's board column, the full
+  // page's wrapper, the same element pill.js puts its wrappers in); box
+  // holds the topics and the wrappers. The rail's offsets go on the
+  // elements that read them, not on host (offsets, below).
   var host = d.getElementById("bcol"), box = host;
   if (!host) { host = d.querySelector("body.full .wrap"); box = host && host.querySelector("main"); }
   if (!box) return;
@@ -76,7 +76,7 @@
   // dashboard's board header row): the top capsules and the current bar
   // stick below it. It is read on every run, since the row can come after
   // the rail.
-  var topics = [], found = [], dirty = true, last = "", stuck = null, raf = 0, inset = 0;
+  var topics = [], found = [], dirty = true, fresh = false, last = "", moved = null, stuck = null, raf = 0, inset = 0;
   function readInset() { inset = root ? parseFloat(getComputedStyle(host).getPropertyValue("--wb-rail-inset")) || 0 : 0; }
   // scrollRest is how far the scroller can still scroll down, in px.
   function scrollRest() {
@@ -129,7 +129,7 @@
   function run() {
     raf = 0;
     readInset();
-    if (dirty) { found = Array.prototype.slice.call(box.querySelectorAll(ITEMS)); dirty = false; }
+    if (dirty) { found = Array.prototype.slice.call(box.querySelectorAll(ITEMS)); dirty = false; fresh = true; }
     var rects = [];
     topics = [];
     found.forEach(function (t) { var r = t.getBoundingClientRect(); if (r.height) { topics.push(t); rects.push(r); } });
@@ -172,15 +172,24 @@
 
   function draw(s) {
     var key = s ? [inset, s.top, s.upMore, s.downMore, s.replyOff, s.stuck, names(s.up), names(s.down), names([s.cur])].join("|") : "" + inset;
-    if (key === last) return;
+    // A re-queried board can hold bars that never got the offset.
+    if (key === last) { if (fresh) offsets(); return; }
     last = key;
-    var pre = motion() ? before(s) : null;
+    // The motion's reads are skipped when no capsule can move: the same
+    // items in the same slots (a change of the stuck shadow or a "+N"
+    // count alone).
+    var member = s ? [inset, s.replyOff, names(s.up), names(s.down), names([s.cur])].join("|") : "";
+    var pre = motion() && member !== moved ? before(s) : null;
+    moved = member;
     var bar = s && s.bar, shadow = s && s.stuck ? bar : null;
     if (stuck !== shadow) {
       if (stuck) stuck.classList.remove("wb-stuck");
       if (shadow) shadow.classList.add("wb-stuck");
       stuck = shadow;
     }
+    // The bar's height is read before the capsule writes below, so the
+    // read restyles only what the shadow toggle touched.
+    var barH = bar ? bar.offsetHeight : 0;
     var up = s ? s.up : [], down = s ? s.down : [];
     fill(slots.top.near, topics[up[0]], 0);
     fill(slots.top.far, topics[up[1]], s ? s.upMore : 0);
@@ -191,17 +200,40 @@
     // The bottom stack stays at the edge and pads its capsules up over the
     // reply bar (which draws above it), so its fill also covers the gaps
     // around the bar and the capsules read as sitting on it, not floating
-    // over the board. --wb-rail-bot is the capsule part alone: pill.js adds
-    // the reply bar's own clearance.
+    // over the board. --wb-rail-bot is the capsule part alone, computed
+    // from the stack's geometry rather than read back after the writes:
+    // pill.js adds the reply bar's own clearance.
     var replyOff = s ? s.replyOff : 0;
     wraps.bot.firstChild.style.paddingBottom = replyOff ? replyOff + PAD + "px" : "";
-    var barH = bar ? bar.offsetHeight : 0;
-    host.style.setProperty("--wb-rail-top", inset + (s ? s.top : 0) + "px");
-    host.style.setProperty("--wb-rail-h", inset + (s ? s.top + barH : 0) + "px");
-    host.style.setProperty("--wb-rail-bot", (down.length ? wraps.bot.firstChild.offsetHeight - replyOff : 0) + "px");
+    vals.top = inset + (s ? s.top : 0) + "px";
+    vals.h = inset + (s ? s.top + barH : 0) + "px";
+    vals.bot = (down.length ? FADE + down.length * CAP + (down.length - 1) * GAP + PAD : 0) + "px";
+    offsets();
     curTopic = s && s.cur >= 0 ? topics[s.cur] : null;
     if (pre) after(pre);
     drawn = !!s;
+  }
+
+  // offsets puts the rail's offsets on the elements that read them: every
+  // item's bar gets --wb-rail-top (where it sticks, under the host's own
+  // sticky rule), the open-question pill's top wrapper --wb-rail-h (the
+  // stack and the current bar), and its bottom wrapper --wb-rail-bot (the
+  // bottom capsules). Never on host: a custom property there is inherited
+  // by every node of the board, so each write restyled the whole board.
+  // A value an element already holds is not written again.
+  var vals = { top: "0px", h: "0px", bot: "0px" };
+  function put(el, name, v) {
+    if (!el) return;
+    var had = el.wbRail || (el.wbRail = {});
+    if (had[name] === v) return;
+    had[name] = v;
+    el.style.setProperty(name, v);
+  }
+  function offsets() {
+    fresh = false;
+    found.forEach(function (t) { put(barOf(t), "--wb-rail-top", vals.top); });
+    put(host.querySelector(".oq-wrap.top"), "--wb-rail-h", vals.h);
+    put(host.querySelector(".oq-wrap.bot"), "--wb-rail-bot", vals.bot);
   }
 
   // --- motion: a bar turning into a capsule and back --------------------------
@@ -275,7 +307,11 @@
     else if (next && btns("bot").map(shown).indexOf(next) < 0) p.bot = barGhost(next, true);
     return p;
   }
+  // after reads every box the motion needs first (one layout, after the
+  // redraw's writes) and only then starts the animations, so no animation
+  // or copy dirties the layout between two reads.
   function after(p) {
+    var slides = [], morphs = [];
     ["top", "bot"].forEach(function (e) {
       var g = p[e];
       btns(e).forEach(function (b) {
@@ -283,13 +319,13 @@
         for (var i = 0; i < p.caps.length; i++) {
           if (p.caps[i].e !== e || p.caps[i].t !== b.wbTopic) continue;
           var dy = p.caps[i].r.top - b.getBoundingClientRect().top;
-          if (Math.abs(dy) >= 1) b.animate([{ transform: "translateY(" + dy + "px)" }, { transform: "none" }], { duration: DUR, easing: EASE });
+          if (Math.abs(dy) >= 1) slides.push([b, dy]);
           return;
         }
       });
       if (!g) return;
       if (g.kind === "bar") {
-        if (shown(slots[e].near) === g.t) morph(g, slots[e].near, e);
+        if (shown(slots[e].near) === g.t) morphs.push(measure(g, slots[e].near, e));
         return;
       }
       // A capsule grows into the bar of the topic it stood for: at the top
@@ -297,8 +333,10 @@
       // stack and shows.
       var tb = barOf(g.t);
       if (!tb || (e === "top" ? g.t !== curTopic : btns("bot").map(shown).indexOf(g.t) >= 0 || !seen(tb.getBoundingClientRect()))) return;
-      morph(g, tb, e);
+      morphs.push(measure(g, tb, e));
     });
+    slides.forEach(function (x) { x[0].animate([{ transform: "translateY(" + x[1] + "px)" }, { transform: "none" }], { duration: DUR, easing: EASE }); });
+    morphs.forEach(morph);
   }
   function dropGhost(edge) {
     (edge ? [edge] : ["top", "bot"]).forEach(function (e) {
@@ -314,11 +352,17 @@
   // under it until it ends; nothing else fades. A stuck bar has its item's
   // body scrolling under it, so while it hides, a page-coloured plate takes
   // its box and the copy grows over that, not over the body.
-  function morph(g, into, edge) {
-    dropGhost(edge);
+  // measure reads what morph needs (the wrapper's and into's boxes, into's
+  // look); morph only writes.
+  function measure(g, into, edge) {
     var wrap = wraps[edge], w = wrap.getBoundingClientRect(), from = g.r, to = into.getBoundingClientRect(), bar = g.kind === "bar";
     if (!bar && edge === "top") to = shows(to);
-    var a = g.src, b = look(into), el = d.createElement("div");
+    return { g: g, into: into, edge: edge, wrap: wrap, w: w, from: from, to: to, bar: bar, b: look(into) };
+  }
+  function morph(m) {
+    var g = m.g, into = m.into, edge = m.edge, wrap = m.wrap, w = m.w, from = m.from, to = m.to, bar = m.bar;
+    dropGhost(edge);
+    var a = g.src, b = m.b, el = d.createElement("div");
     el.className = "wb-rail-ghost";
     el.setAttribute("aria-hidden", "true");
     el.style.left = to.left - w.left + "px";
