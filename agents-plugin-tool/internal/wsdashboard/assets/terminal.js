@@ -32,6 +32,14 @@
   var IN_MAX = 64 * 1024;
   // GUESS is a row's height in px before the emulator has measured one.
   var GUESS = 17;
+  // SYMBOLS is the symbols-only Nerd Font the page's inlined stylesheet
+  // declares (terminal_routes.go termSymbolsFamily: change the two
+  // together). The emulator lists it after the page's monospace stack, so
+  // letters keep that font and a prompt's powerline separators and icons
+  // come from this one. FONT_WAIT bounds the wait for it in ms: the
+  // emulator measures its cells when it opens, so it opens once the font
+  // is in or the wait is over.
+  var SYMBOLS = "WsNerdSymbols", FONT_WAIT = 1500;
   var hooks = {}, loading = null, cellH = 0, ui = {}, folders = null, listSeq = 0;
 
   function mk(tag, cls, text) {
@@ -49,11 +57,12 @@
     return a;
   }
 
-  // emulator loads the vendored xterm.js once; it resolves when
-  // window.Terminal and window.FitAddon are there.
+  // emulator loads the vendored xterm.js and the symbols font once; it
+  // resolves when window.Terminal and window.FitAddon are there and the
+  // font is in, failed, or past FONT_WAIT.
   function emulator() {
     if (!loading) {
-      loading = new Promise(function (ok, fail) {
+      var code = new Promise(function (ok, fail) {
         if (window.Terminal && window.FitAddon) { ok(); return; }
         var s = doc.createElement("script");
         s.src = "/s/" + encodeURIComponent(script);
@@ -61,6 +70,12 @@
         s.onerror = function () { loading = null; fail(); };
         doc.head.appendChild(s);
       });
+      var font = new Promise(function (ok) {
+        if (!doc.fonts || !doc.fonts.load) { ok(); return; }
+        setTimeout(ok, FONT_WAIT);
+        doc.fonts.load('13px "' + SYMBOLS + '"', "\ue0b0").then(ok, ok);
+      });
+      loading = Promise.all([code, font]);
     }
     return loading;
   }
@@ -324,7 +339,7 @@
     var s = c.t, cs = getComputedStyle(root);
     var term = s.term = new window.Terminal({
       scrollback: SCROLLBACK,
-      fontFamily: cs.getPropertyValue("--wb-mono").trim() || "monospace",
+      fontFamily: (cs.getPropertyValue("--wb-mono").trim() || "monospace") + ', "' + SYMBOLS + '"',
       fontSize: 13,
       lineHeight: 1.15,
       cursorBlink: true,

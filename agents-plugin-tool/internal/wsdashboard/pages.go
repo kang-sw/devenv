@@ -902,6 +902,10 @@ func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 		serveXterm(w)
 		return
 	}
+	if name, _ := TermSymbolsAsset(); rest == name {
+		serveTermSymbols(w)
+		return
+	}
 	replyID, sub, slash := strings.Cut(rest, "/")
 	switch {
 	case !slash:
