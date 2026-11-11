@@ -123,6 +123,11 @@
     if (el.tagName === "DETAILS") restoreOpenOne(el);
     q("details", el).forEach(restoreOpenOne);
   }
+  // forgetOpen drops what the user chose for the keyed details inside el,
+  // so the next restoreOpen leaves the server's markup as it arrived.
+  function forgetOpen(el) {
+    q("details[data-key]", el).forEach(function (d) { delete openState[openKey(d)]; });
+  }
 
   // --- scroll offsets -------------------------------------------------------
   // The panes that scroll on their own; the page itself scrolls on / and on
@@ -553,6 +558,11 @@
       }
       var h = n.outerHTML, key = "t:" + k;
       seen[key] = h;
+      // A topic that closes while the page shows it folds once: the
+      // server folds a closed topic's body and settled rows under the same
+      // keys an open topic uses, so the user's earlier choices for them are
+      // forgotten here, and later toggles are kept again.
+      if (live[key] && n.classList.contains("closed") && !live[key].classList.contains("closed")) { forgetOpen(live[key]); forgetOpen(n); }
       if (live[key] && boardSeen[key] === h) { want.push(live[key]); delete live[key]; }
       else { want.push(n); ins.push(n); }
     });
