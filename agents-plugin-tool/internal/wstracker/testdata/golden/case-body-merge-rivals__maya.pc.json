@@ -404,7 +404,8 @@
     "backrefs": [],
     "open": null,
     "claimable": false,
-    "requests": []
+    "requests": [],
+    "cc": []
    },
    "ada.pc#3": {
     "id": "ada.pc#3",
@@ -463,7 +464,8 @@
     "backrefs": [],
     "open": null,
     "claimable": false,
-    "requests": []
+    "requests": [],
+    "cc": []
    }
   },
   "itemOrder": [
@@ -885,7 +887,13 @@
    "badge": [
     "a:ada.pc#2>maya",
     "a:ada.pc#4>maya"
-   ]
+   ],
+   "related": {
+    "cc": [],
+    "mentioned": [],
+    "closed": []
+   },
+   "ccNotices": []
   },
   "stats": {
    "events": 10,

@@ -431,6 +431,7 @@ func (s *state) bodyExtras(it *item, f *bodyFold) {
 	}
 	it.mentions, it.attachments, it.refs = []string{}, []attachment{}, []string{}
 	var last *node
+	defer func() { it.mentionsAt = last }()
 	for _, w := range f.writes {
 		if !in[w] {
 			continue

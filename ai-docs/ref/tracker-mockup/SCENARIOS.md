@@ -316,7 +316,9 @@ file, then one with a 2048-byte file; view as `ivy`.
 Outcome: maya's tab lists ten entries, all unread, newest first: due today,
 two mentions (bo's topic body, lena's comment), a confirm, a pending
 assignment, a reply, completion and blocked of work she assigned, a
-reference notice, and a forced assignment. The click opened the item window
+reference notice, and a forced assignment; with the CC field, two CC
+notices join them (tia's comment on "Infra capacity plan" and pia's blocked
+on "Cache layer", both items maya is CC'd on), outside the handle badge. The click opened the item window
 (focus inside it) scrolled to and marked what the entry is about (here the
 topic's body, where bo mentioned her; for a mention in a comment, that
 comment, flashing briefly and keeping a thin left mark) and cleared that entry

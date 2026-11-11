@@ -196,3 +196,39 @@ func TestQueryIsClaimable(t *testing.T) {
 		}
 	}
 }
+
+// cc:<m> matches a CC'd member by id or display name; cc:me is the viewer
+// first, even beside a member whose name contains "me" (omar, renamed Mei);
+// a member CC'd and removed again matches nothing.
+func TestQueryCC(t *testing.T) {
+	steps := []step{
+		{"ada.pc", "member.profile", map[string]any{"member": "omar", "profile": map[string]any{"given": "Mei"}}},
+		task("ada.pc", "Ship"),
+		task("ada.pc", "Docs"),
+		task("ada.pc", "Gone"),
+		{"raj.pc", "item.cc", map[string]any{"item": "ada.pc#2", "member": "omar"}},
+		{"raj.pc", "item.cc", map[string]any{"item": "ada.pc#3", "member": "lena"}},
+		{"raj.pc", "item.cc", map[string]any{"item": "ada.pc#4", "member": "bo"}},
+		{"raj.pc", "item.uncc", map[string]any{"item": "ada.pc#4", "member": "bo"}},
+	}
+	v := topicView(t, "lena.pc", steps)
+	for s, want := range map[string][]string{
+		"cc:me":   {"ada.pc#3"},
+		"CC:ME":   {"ada.pc#3"},
+		"cc:mei":  {"ada.pc#2"},
+		"cc:omar": {"ada.pc#2"},
+		"cc:Lena": {"ada.pc#3"},
+		"cc:bo":   nil,
+	} {
+		q, err := ParseQuery(s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := v.Search(q); !slices.Equal(got, want) && !(len(got) == 0 && len(want) == 0) {
+			t.Errorf("%s = %v, want %v", s, got, want)
+		}
+	}
+	if _, err := ParseQuery("cc:"); err == nil {
+		t.Error(`ParseQuery("cc:") accepted, want "cc takes a value"`)
+	}
+}

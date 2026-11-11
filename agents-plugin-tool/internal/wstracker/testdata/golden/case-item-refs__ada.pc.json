@@ -579,7 +579,8 @@
     ],
     "open": null,
     "claimable": false,
-    "requests": []
+    "requests": [],
+    "cc": []
    },
    "ada.pc#2": {
     "id": "ada.pc#2",
@@ -635,7 +636,8 @@
     ],
     "open": null,
     "claimable": false,
-    "requests": []
+    "requests": [],
+    "cc": []
    },
    "ada.pc#3": {
     "id": "ada.pc#3",
@@ -691,7 +693,8 @@
     "backrefs": [],
     "open": null,
     "claimable": false,
-    "requests": []
+    "requests": [],
+    "cc": []
    },
    "ada.pc#5": {
     "id": "ada.pc#5",
@@ -745,7 +748,8 @@
     "backrefs": [],
     "open": null,
     "claimable": false,
-    "requests": []
+    "requests": [],
+    "cc": []
    },
    "ada.pc#7": {
     "id": "ada.pc#7",
@@ -798,7 +802,8 @@
     "backrefs": [],
     "open": null,
     "claimable": false,
-    "requests": []
+    "requests": [],
+    "cc": []
    }
   },
   "itemOrder": [
@@ -1493,7 +1498,13 @@
     "incoming": [],
     "outgoing": []
    },
-   "badge": []
+   "badge": [],
+   "related": {
+    "cc": [],
+    "mentioned": [],
+    "closed": []
+   },
+   "ccNotices": []
   },
   "stats": {
    "events": 14,

@@ -961,6 +961,28 @@ func (s *state) check(n *node) rejection {
 			return rejection("only the requester (" + q.by + ") withdraws " + alias(q.id))
 		}
 
+	case TypeItemCC, TypeItemUncc:
+		// Open to every member, whoever may edit the item: a CC carries no
+		// duty. Adding a member already CC'd, or removing one who is not, is
+		// a no-op. A removed member's CC may still be removed.
+		it, r := needIt()
+		if r != "" {
+			return r
+		}
+		if it.hidden {
+			return rejection(it.alias + " is hidden")
+		}
+		m, ok := p["member"].(string)
+		if !ok || m == "" {
+			return "member must be a member id"
+		}
+		if n.typ == TypeItemCC {
+			return s.needMember(m)
+		}
+		if s.members[m] == nil {
+			return rejection(`unknown member "` + m + `"`)
+		}
+
 	case TypeItemAccept, TypeItemDecline:
 		it, r := needIt()
 		if r != "" {

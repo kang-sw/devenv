@@ -741,6 +741,18 @@
         if (q.by !== a) rej('only the requester (' + q.by + ') withdraws ' + alias(q.id));
         break;
 
+      // CC is open to every member, whoever may edit the item: it carries no duty.
+      // Adding a member already CC'd, or removing one who is not, is a no-op. A
+      // removed member's CC may still be removed.
+      case 'item.cc':
+      case 'item.uncc':
+        it = needItem(S, p.item);
+        if (it.hidden) rej(it.alias + ' is hidden');
+        if (typeof p.member !== 'string' || !p.member) rej('member must be a member id');
+        if (n.type === 'item.cc') needMember(S, p.member);
+        else if (!S.members[p.member]) rej('unknown member "' + p.member + '"');
+        break;
+
       case 'item.accept':
       case 'item.decline':
         it = needItem(S, p.item);
@@ -951,6 +963,7 @@
     if (v && typeof v === 'object' && !Array.isArray(v)) {
       if (v.move) return (v.parent ? 'under ' + alias(v.parent) : 'top level') + ', ' +
         (v.after === undefined ? 'last' : v.after === null ? 'first' : 'after ' + alias(v.after));
+      if (has(v, 'cc')) return v.cc ? 'CC\'d' : 'not CC\'d';
       if (v.labels) return v.labels.length ? v.labels.map(alias).join(', ') : '(none)';
       if (v.names) return v.names.join(' / ') + ' (default ' + v.names[v.default] + ')';
       return v.status + (v.note ? ' ("' + v.note + '")' : '');
@@ -1444,6 +1457,7 @@
       refsOf(w.p).forEach(function (t) { if (it.refs.indexOf(t) < 0) it.refs.push(t); });
     });
     if (last) it.mentions = mentionsOf(last.p);
+    it.mentionsAt = last; // the body write the mentions come from: a body mention dates from it
   }
   // An item's body revision: its body register's head ids.
   function bodyRev(S, id) { return (S.reg['it:' + id + ':body'] || []).map(function (h) { return h.n.id; }); }
@@ -1456,7 +1470,7 @@
         S.items[n.id] = { id: n.id, alias: n.alias, kind: p.kind === 'todo' ? 'task' : p.kind, title: p.title, body: p.body || '', project: p.project || '',
           due: p.due || null, priority: p.priority != null ? p.priority : S.prio.default,
           parent: p.parent || null, after: has(p, 'after') ? (p.after || null) : undefined, author: a, ts: n.ts, hidden: false, edited: null, node: n,
-          mentions: mentionsOf(p), attachments: attachmentsOf(p), refs: refsOf(p), labels: labelsOf(p) };
+          mentions: mentionsOf(p), attachments: attachmentsOf(p), refs: refsOf(p), labels: labelsOf(p), cc: [] };
         S.items[n.id].placedBy = S.items[n.id].parentBy = n;
         // The create is the item's first body write: the register's first head, and
         // every line's source until an edit replaces it.
@@ -1468,6 +1482,20 @@
       case 'item.move':
         applyMove(S, n, C);
         break;
+      case 'item.cc': case 'item.uncc': {
+        // One register per item and member, so a concurrent add and remove of one
+        // member fold by the register winner. The member joins the CC list when the
+        // shown value turns on, since the winning add, and leaves it when it turns off.
+        it = S.items[p.item];
+        var cm = typeof p.member === 'string' ? p.member : '';
+        if (!it || !cm) break;
+        var ck = 'cc:' + it.id + ':' + cm, at = -1;
+        var on = write(S, ck, 'CC of ' + cm + ' on ' + it.alias, n, { cc: n.type === 'item.cc' }, C).cc;
+        it.cc.forEach(function (e, i) { if (e.member === cm) at = i; });
+        if (on && at < 0) it.cc.push({ member: cm, since: regWinner(S, ck) });
+        else if (!on && at >= 0) it.cc.splice(at, 1);
+        break;
+      }
       case 'item.edit':
         it = S.items[p.item]; if (!it) break;
         ITEM_FIELDS.forEach(function (f) {
@@ -1751,7 +1779,7 @@
     });
 
     return { S: S, members: S.members, admins: S.admins, items: S.items, asg: S.asg, rules: S.rules, comments: S.comments, prio: S.prio, att: S.att,
-      log: log, byId: byId, children: childrenMap(S.members), heads: headSeqs(nodes) };
+      log: log, order: order, byId: byId, children: childrenMap(S.members), heads: headSeqs(nodes) };
   }
 
   // Highest valid seq received per stream: the `seen` of a commit written now, and
@@ -1825,6 +1853,8 @@
   }
   // The statuses a team row's load counts (613 a): the work in the member's hands.
   var TEAM_LOAD = ['todo', 'doing', 'blocked'];
+  // The event types a CC'd member is notified of: status writes and comments.
+  var CC_NOTICE = { 'item.status': 1, 'item.close': 1, 'item.confirm': 1, 'item.reject': 1, 'item.reopen': 1, 'comment.add': 1 };
   function daysBetween(a, b) { return (Date.parse(b) - Date.parse(a)) / 86400000; }
 
   // The one read path for a view: everything a viewer's page shows, as plain JSON
@@ -1921,7 +1951,8 @@
         thread: threads[it.id] || [], concurrent: (threads[it.id] || []).filter(function (id) { return g.byId[id].markers.length; }).length,
         depth: chain.length - 1, chain: chain.slice().reverse(), mentions: it.mentions.slice(), attachments: clone(it.attachments),
         refs: it.refs.slice(), backrefs: backrefs[it.id] || [], open: null, claimable: false,
-        requests: S.rorder.filter(function (id) { return S.reqs[id].item === it.id; }) };
+        requests: S.rorder.filter(function (id) { return S.reqs[id].item === it.id; }),
+        cc: it.cc.filter(function (e) { return liveMember(S, e.member); }).map(function (e) { return e.member; }) };
       var o = activeOpen(S, it);
       if (o) {
         items[it.id].open = { id: o.node.id, by: o.by, scope: o.scope, ts: o.node.ts };
@@ -2076,6 +2107,66 @@
     reqsMine.incoming.forEach(function (id) { badge.push('q:' + id); });
     notices.forEach(function (x) { badge.push(x.key); });
 
+    // The "related to me" scope. Both lists leave out hidden, done, and dropped items, and
+    // items the viewer created or holds a live or pending record on. cc: the items the
+    // viewer is CC'd on, the latest CC add first. mentioned: the other items whose
+    // shown body or a shown comment (not the viewer's own) mentions the viewer, the
+    // newest mention first; a body mention dates from the body write the item's
+    // mentions come from (bodyExtras), a comment mention from the write that set the comment's shown text.
+    // closed: the done or dropped items either list would hold, in fold order.
+    function involved(it) {
+      return it.author === v || recsOn(S, it.id).some(function (r) { return r.to === v && (r.state === 'live' || r.state === 'pending'); });
+    }
+    function relShown(it) { return !it.hidden && !involved(it); }
+    function ccOf(it) { return it.cc.filter(function (e) { return e.member === v; })[0] || null; }
+    function written(key, first) { return S.reg[key] && S.reg[key].length ? regWinner(S, key) : first; }
+    var related = { cc: [], mentioned: [], closed: [] }, relCC = [], relMen = [], mentionedIn = {};
+    // the shown comments by others that mention the viewer, by item
+    vals(S.comments).forEach(function (q) {
+      if (!q.hidden && q.author !== v && q.mentions.indexOf(v) >= 0) (mentionedIn[q.item] = mentionedIn[q.item] || []).push(q);
+    });
+    vals(S.items).forEach(function (it) {
+      if (!relShown(it)) return;
+      var e = ccOf(it), done = wrapped(items[it.id].status);
+      if (e) {
+        if (done) related.closed.push(it.id); else relCC.push({ id: it.id, at: String(e.since.ts) });
+        return;
+      }
+      var at = null;
+      if (it.mentions.indexOf(v) >= 0 && it.mentionsAt) at = String(it.mentionsAt.ts);
+      (mentionedIn[it.id] || []).forEach(function (q) {
+        var t = String(written('cm:' + q.id, q.node).ts);
+        if (at === null || t > at) at = t;
+      });
+      if (at === null) return;
+      if (done) related.closed.push(it.id); else relMen.push({ id: it.id, at: at });
+    });
+    function newest(x, y) { return x.at < y.at ? 1 : x.at > y.at ? -1 : 0; }
+    related.cc = relCC.sort(newest).map(function (d) { return d.id; });
+    related.mentioned = relMen.sort(newest).map(function (d) { return d.id; });
+    // CC notices: status writes and comments on an item the viewer is CC'd on, written
+    // after the viewer was CC'd, in fold order; none for the viewer's own events, an
+    // item the viewer created or holds, or a comment that mentions the viewer or
+    // replies to the viewer's comment (those notify on their own). Not in the badge.
+    var foldPos = new Map(), ccNotices = [];
+    g.order.forEach(function (n, i) { foldPos.set(n, i); });
+    g.order.forEach(function (n) {
+      if (n.status !== 'applied' || n.author === v || !CC_NOTICE[n.type]) return;
+      var it = S.items[n.p.item];
+      if (!it || !relShown(it)) return;
+      var e = ccOf(it);
+      if (!e || foldPos.get(n) <= foldPos.get(e.since)) return;
+      var nt = { key: 'cc:' + n.id, type: n.type, item: it.id, event: n.id, by: n.author, to: null, status: null, ts: n.ts };
+      if (n.type === 'comment.add') {
+        var q = S.comments[n.id], rt = q && q.reply_to && S.comments[q.reply_to];
+        if (!q || q.hidden || q.mentions.indexOf(v) >= 0 || (rt && rt.author === v)) return;
+      } else {
+        nt.to = n.type !== 'item.close' && n.p.assignee ? n.p.assignee : n.author; // item.status: an org superior's write names the assignee
+        if (n.type === 'item.status') nt.status = n.p.status || null;
+      }
+      ccNotices.push(nt);
+    });
+
     var commits = 0;
     Object.keys(input.commits || {}).forEach(function (k) { commits += input.commits[k].length; });
 
@@ -2090,7 +2181,7 @@
         assignments: ids(mine.sort(byRank)),
         today: { work: ids(mine.filter(function (r) { return !wrapped(r.status) && r.status !== 'in-review' && notTopic(r); }).sort(byUrgency)), pending: ids(pendingToMe.sort(byUrgency)), confirms: ids(confirms) },
         received: { pending: ids(pendingToMe), answered: ids(answered), sent: ids(sent) },
-        given: given, created: created, team: team, requests: reqsMine, badge: badge
+        given: given, created: created, team: team, requests: reqsMine, badge: badge, related: related, ccNotices: ccNotices
       },
       stats: { events: events.length, commits: commits,
         flagged: events.filter(function (e) { return e.status !== 'applied'; }).length,

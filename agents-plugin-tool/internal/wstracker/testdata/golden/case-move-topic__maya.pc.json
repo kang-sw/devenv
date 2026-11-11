@@ -250,7 +250,8 @@
     "backrefs": [],
     "open": null,
     "claimable": false,
-    "requests": []
+    "requests": [],
+    "cc": []
    },
    "ada.pc#2": {
     "id": "ada.pc#2",
@@ -302,7 +303,8 @@
     "backrefs": [],
     "open": null,
     "claimable": false,
-    "requests": []
+    "requests": [],
+    "cc": []
    },
    "maya.pc#1": {
     "id": "maya.pc#1",
@@ -354,7 +356,8 @@
     "backrefs": [],
     "open": null,
     "claimable": false,
-    "requests": []
+    "requests": [],
+    "cc": []
    }
   },
   "itemOrder": [
@@ -643,7 +646,13 @@
     "incoming": [],
     "outgoing": []
    },
-   "badge": []
+   "badge": [],
+   "related": {
+    "cc": [],
+    "mentioned": [],
+    "closed": []
+   },
+   "ccNotices": []
   },
   "stats": {
    "events": 6,

@@ -864,7 +864,8 @@
     "backrefs": [],
     "open": null,
     "claimable": false,
-    "requests": []
+    "requests": [],
+    "cc": []
    },
    "ada.pc#2": {
     "id": "ada.pc#2",
@@ -916,7 +917,8 @@
     "backrefs": [],
     "open": null,
     "claimable": false,
-    "requests": []
+    "requests": [],
+    "cc": []
    },
    "ada.pc#3": {
     "id": "ada.pc#3",
@@ -968,7 +970,8 @@
     "backrefs": [],
     "open": null,
     "claimable": false,
-    "requests": []
+    "requests": [],
+    "cc": []
    },
    "ada.pc#4": {
     "id": "ada.pc#4",
@@ -1019,7 +1022,8 @@
     "backrefs": [],
     "open": null,
     "claimable": false,
-    "requests": []
+    "requests": [],
+    "cc": []
    },
    "ada.pc#5": {
     "id": "ada.pc#5",
@@ -1071,7 +1075,8 @@
     "backrefs": [],
     "open": null,
     "claimable": false,
-    "requests": []
+    "requests": [],
+    "cc": []
    },
    "ada.pc#6": {
     "id": "ada.pc#6",
@@ -1123,7 +1128,8 @@
     "backrefs": [],
     "open": null,
     "claimable": false,
-    "requests": []
+    "requests": [],
+    "cc": []
    },
    "ada.pc#7": {
     "id": "ada.pc#7",
@@ -1173,7 +1179,8 @@
     "backrefs": [],
     "open": null,
     "claimable": false,
-    "requests": []
+    "requests": [],
+    "cc": []
    },
    "ada.pc#8": {
     "id": "ada.pc#8",
@@ -1226,7 +1233,8 @@
     "backrefs": [],
     "open": null,
     "claimable": false,
-    "requests": []
+    "requests": [],
+    "cc": []
    },
    "ada.pc#9": {
     "id": "ada.pc#9",
@@ -1278,7 +1286,8 @@
     "backrefs": [],
     "open": null,
     "claimable": false,
-    "requests": []
+    "requests": [],
+    "cc": []
    },
    "ada.pc#10": {
     "id": "ada.pc#10",
@@ -1329,7 +1338,8 @@
     "backrefs": [],
     "open": null,
     "claimable": false,
-    "requests": []
+    "requests": [],
+    "cc": []
    },
    "ada.pc#20": {
     "id": "ada.pc#20",
@@ -1381,7 +1391,8 @@
     "backrefs": [],
     "open": null,
     "claimable": false,
-    "requests": []
+    "requests": [],
+    "cc": []
    },
    "kai.pc#7": {
     "id": "kai.pc#7",
@@ -1431,7 +1442,8 @@
     "backrefs": [],
     "open": null,
     "claimable": false,
-    "requests": []
+    "requests": [],
+    "cc": []
    },
    "kai.pc#8": {
     "id": "kai.pc#8",
@@ -1482,7 +1494,8 @@
     "backrefs": [],
     "open": null,
     "claimable": false,
-    "requests": []
+    "requests": [],
+    "cc": []
    },
    "bo.pc#1": {
     "id": "bo.pc#1",
@@ -1535,7 +1548,8 @@
     "backrefs": [],
     "open": null,
     "claimable": false,
-    "requests": []
+    "requests": [],
+    "cc": []
    },
    "bo.pc#3": {
     "id": "bo.pc#3",
@@ -1586,7 +1600,8 @@
     "backrefs": [],
     "open": null,
     "claimable": false,
-    "requests": []
+    "requests": [],
+    "cc": []
    }
   },
   "itemOrder": [
@@ -3209,7 +3224,13 @@
     "w:ada.pc#16>kai:done:2026-11-01T10:00:00Z",
     "w:ada.pc#17>kai:done:2026-11-01T10:00:00Z",
     "w:ada.pc#21>kai:dropped:2026-11-05T11:00:00Z"
-   ]
+   ],
+   "related": {
+    "cc": [],
+    "mentioned": [],
+    "closed": []
+   },
+   "ccNotices": []
   },
   "stats": {
    "events": 36,

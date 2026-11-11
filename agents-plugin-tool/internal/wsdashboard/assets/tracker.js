@@ -312,11 +312,12 @@
   // UIScopes and UIViewModes, which a support agent's UI commands are checked against);
   // a wsdashboard test fails when the two sites differ.
   var SCOPES = [['mine', "js.tk.scope.mine", "js.tk.scope.mine.tip"],
+    ['related', "js.tk.scope.related", "js.tk.scope.related.tip"],
     ['received', "js.tk.scope.received", "js.tk.scope.received.tip"],
     ['given', "js.tk.scope.given", "js.tk.scope.given.tip"],
     ['team', "js.tk.scope.team", "js.tk.scope.team.tip"],
     ['all', "js.tk.scope.all", "js.tk.scope.all.tip"]];
-  var SCOPE_MODES = { mine: ASSIGN_MODES, received: [['list', "js.tk.mode.list"]], given: ASSIGN_MODES, team: ASSIGN_MODES,
+  var SCOPE_MODES = { mine: ASSIGN_MODES, related: [['list', "js.tk.mode.list"]], received: [['list', "js.tk.mode.list"]], given: ASSIGN_MODES, team: ASSIGN_MODES,
     all: [['list', "js.tk.mode.tree"], ['kanban', "js.tk.mode.kanban"], ['gantt', "js.tk.mode.gantt"], ['calendar', "js.tk.mode.calendar"]] };
   var CARD_MODES = { activity: [['list', "js.tk.mode.list"], ['activity', "js.tk.mode.activity"]] };
 
@@ -534,6 +535,8 @@
         return wsT(n.type === 'item.approve' ? "js.tk.ev.approve" : "js.tk.ev.deny", esc(rq ? rq.by : alias(p.request)), ref(p.item)) + tail(p.note);
       }
       case 'item.unrequest': return wsT("js.tk.ev.unrequest", esc(alias(p.request)), ref(p.item));
+      case 'item.cc': return wsT("js.tk.ev.cc", esc(p.member), ref(p.item));
+      case 'item.uncc': return wsT("js.tk.ev.uncc", esc(p.member), ref(p.item));
       case 'comment.add': return wsT("js.tk.ev.comment", ref(p.item)) + (inThread ? '' : tail(String(p.body || '').slice(0, 90))) + extrasTxt(p);
       case 'comment.edit': return wsT("js.tk.ev.cedit", esc(alias(p.comment)), inThread ? '' : ref(n.thread || '')) + extrasTxt(p);
       case 'comment.hide': return wsT("js.tk.ev.chide", esc(alias(p.comment)));
@@ -956,7 +959,7 @@
   // UI state per viewer clone, like the handle badge's `seen`; no event is written
   // (in the product the daemon keeps it per clone on the local filesystem).
   var NK = { assigned: "js.tk.nk.assigned", pending: "js.tk.nk.pending", answer: "js.tk.nk.answer", reference: "js.tk.nk.reference", done: "js.tk.nk.done", blocked: "js.tk.nk.blocked", dropped: "js.tk.nk.dropped",
-    confirm: "js.tk.nk.confirm", reply: "js.tk.nk.reply", due: "js.tk.nk.due", mention: "js.tk.nk.mention", request: "js.tk.nk.request" };
+    confirm: "js.tk.nk.confirm", reply: "js.tk.nk.reply", due: "js.tk.nk.due", mention: "js.tk.nk.mention", request: "js.tk.nk.request", cc: "js.tk.nk.cc" };
   function snippet(s) { s = String(s || ''); return '&ldquo;' + esc(s.length > 80 ? s.slice(0, 77) + '...' : s) + '&rdquo;'; }
   // Every entry also carries `ev`, the event it is about (none for a due date, which has
   // none), so a click can open the item window at what the entry refers to (focusTarget).
@@ -968,6 +971,17 @@
     var l = VS.events.filter(function (e) { return STATUS_EV[e.type] && e.status === 'applied' && e.payload.item === r.item && assigneeOf(e) === r.to; });
     var at = l.filter(function (e) { return e.ts === r.lastUpdate; });
     return (at.length ? at : l).slice(-1).map(function (e) { return e.id; })[0] || null;
+  }
+  // A CC notice's sentence (my.ccNotices: status writes and comments on an item the viewer is
+  // CC'd on); a status write's note and a comment's text ride along as its tail.
+  var CC_KEY = { 'item.status': "js.tk.feed.cc.status", 'item.close': "js.tk.feed.cc.close", 'item.confirm': "js.tk.feed.cc.confirm",
+    'item.reject': "js.tk.feed.cc.reject", 'item.reopen': "js.tk.feed.cc.reopen", 'comment.add': "js.tk.feed.cc.comment" };
+  function ccNoticeTxt(x) {
+    var e = EV[x.event], p = (e && e.payload) || {}, by = esc(nm(x.by)), to = esc(nm(x.to));
+    if (x.type === 'comment.add') { var c = VS.comments[x.event]; return wsT("js.tk.feed.cc.comment", by, snippet(c ? c.body : p.body)); }
+    if (!CC_KEY[x.type]) return null;
+    var txt = x.type === 'item.status' ? (x.by === x.to ? wsT("js.tk.feed.cc.status.own", by, esc(stLabel(x.status))) : wsT("js.tk.feed.cc.status", by, to, esc(stLabel(x.status)))) : wsT(CC_KEY[x.type], by, to);
+    return txt + (p.note ? wsT("js.tk.ev.tail", snippet(p.note)) : '');
   }
   function feedEntries(v) {
     var out = [], t = today();
@@ -1020,6 +1034,11 @@
     vals(VS.items).forEach(function (it) {
       var ts = it.edited ? it.edited.ts : it.ts;
       if (it.author !== v && it.mentions.indexOf(v) >= 0) add('m:' + it.id + ':' + ts, 'mention', it.id, ts, wsT("js.tk.feed.mention.body", esc(nm(it.author))), it.edited ? it.edited.id : it.id);
+    });
+    // CC notices: the view already leaves out what notifies on its own; they are not in the badge
+    listOf(VS.my.ccNotices).forEach(function (x) {
+      var txt = ccNoticeTxt(x);
+      if (txt) add(x.key, 'cc', x.item, x.ts, txt, x.event);
     });
     return out.sort(function (a, b) { return a.ts < b.ts ? 1 : a.ts > b.ts ? -1 : a.key < b.key ? -1 : 1; });
   }
@@ -1321,6 +1340,24 @@
     if (sent.length) h += sub(wsT("js.tk.list.rcv.sent"), sent.length) + rows(sent, 'rcv:s:', function (r) { return wsT("js.tk.list.rcv.sentto", esc(nm(r.to))); });
     return h;
   }
+  // Related to me: the view's related lists (my.related), the CC section above the mentions
+  // section, each in the view's order and foldable (relSecHtml); the done items either section
+  // would hold (related.closed) go to the recently-closed section like any scope's closed rows.
+  function listRelated() {
+    var R = VS.my.related || {}, cc = listOf(R.cc).filter(keepItem), mn = listOf(R.mentioned).filter(keepItem);
+    listOf(R.closed).filter(keepItem).forEach(function (id) { addClosed(closeTs(VS.items[id]), 1, irow({ rk: 'rel:x:' + id, item: id, closed: true })); });
+    if (FILT && !cc.length && !mn.length) return filterEmpty();
+    return relSecHtml('cc', wsT("js.tk.list.rel.cc"), cc, wsT("js.tk.list.rel.cc.none")) + relSecHtml('mentioned', wsT("js.tk.list.rel.mentioned"), mn, wsT("js.tk.list.rel.mentioned.none"));
+  }
+  // One related section: a fold header with its count, open unless folded (panelState().relFold,
+  // display state, never stored), then its rows as a context tree. Under a filter an empty section is left out.
+  function relSecHtml(key, label, ids, none) {
+    if (FILT && !ids.length) return '';
+    var rf = panelState().relFold = panelState().relFold || {}, on = !rf[key], pre = 'rel:' + key + ':';
+    return '<section class="rsec' + (on ? ' open' : '') + '"' + attr('rsec', key) + '><button type="button" class="rs-head" aria-expanded="' + on + '"' + attr('act', 'rel-fold') + attr('set', key) + attr('fk', 'rsec:' + key) + '>' +
+      '<svg class="i"><use href="#tki-chev"/></svg>' + label + ' <span class="subn">' + ids.length + '</span></button>' +
+      (on ? (ids.length ? treeRows(ids.map(function (id) { return { rk: pre + id, item: id }; }), pre) : '<p class="muted">' + none + '</p>') : '') + '</section>';
+  }
   function listGiven() {
     var v = VS.viewer.member, given = VS.my.given.filter(keepItem), open = [];
     if (!VS.my.given.length) return '<div class="empty">' + wsT("js.tk.list.given.never") + '</div>';
@@ -1471,6 +1508,7 @@
   }
   function scopeChip(s) {
     if (s === 'mine') return wsT("js.tk.team.open", VS.my.assignments.map(A).filter(function (r) { return !wrapped(r.status) && VS.items[r.item].kind !== 'topic'; }).length);
+    if (s === 'related') { var rl = VS.my.related || {}; return wsTn("js.tk.scope.chip.items", listOf(rl.cc).length + listOf(rl.mentioned).length); }
     if (s === 'received') return wsT("js.tk.scope.chip.pending", VS.my.received.pending.length);
     if (s === 'given') return wsTn("js.tk.scope.chip.items", VS.my.given.length) + (VS.my.today.confirms.length ? ', ' + wsT("js.tk.scope.chip.confirm", VS.my.today.confirms.length) : '');
     if (s === 'team') {
@@ -1481,7 +1519,7 @@
     }
     return wsT("js.tk.scope.chip.of", allRows(panelMode('all') === 'kanban').length, Object.keys(VS.items).length);
   }
-  var LISTS = { mine: listMine, received: listReceived, given: listGiven, team: listTeam, all: listAll };
+  var LISTS = { mine: listMine, related: listRelated, received: listReceived, given: listGiven, team: listTeam, all: listAll };
   function panelBody(s, m, v) { return m === 'list' ? LISTS[s](v) : modeBody(s, m, v); }
   // the panel as a spec: the header is two rows: scopes and the scope chip,
   // then the view icons and the search box. It is the card header when the panel stands alone,
@@ -2483,7 +2521,8 @@
   // or reopen -> that assignee's row in Assignees; an assignment or handoff -> the holders
   // line of the property card; an accept -> the accepter's row; a decline, return, or unassign ->
   // the assignees row that ended (the holders line no longer lists it), or that member's row when
-  // the list hid the ended record (visibleRecs); a body edit or the
+  // the list hid the ended record (visibleRecs); a CC add or removal -> that member's CC row, else
+  // the CC section; a body edit or the
   // item's creation -> the body; an edit that only adds attachments -> the first new chip.
   // Anything else falls back to its own line in the thread, and null when the window has none.
   function focusTarget(root, evId) {
@@ -2496,6 +2535,7 @@
     else if (e.type === 'item.assign' || e.type === 'item.handoff' || e.type === 'item.claim' || e.type === 'item.approve') el = holders;
     else if (e.type === 'item.request' || e.type === 'item.deny' || e.type === 'item.unrequest') el = by('data-req', e.type === 'item.request' ? e.id : p.request);
     else if (e.type === 'item.open' || e.type === 'item.unopen') el = root.querySelector('[data-focus="opening"]');
+    else if (e.type === 'item.cc' || e.type === 'item.uncc') el = by('data-ccmember', p.member) || root.querySelector('[data-focus="cc"]');
     else if (e.type === 'item.accept') el = by('data-hmember', e.member) || holders;
     else if (e.type === 'item.decline' || e.type === 'item.return' || e.type === 'item.unassign') {
       var gone = vals(VS.assignments).filter(function (r) { return r.ended && r.ended.id === e.id; })[0];
@@ -2630,6 +2670,19 @@
       '<ul class="alist' + (open ? '' : ' folded') + '">' + list + '</ul>' +
       (hid > 0 ? '<div class="a-fold">' + btn('afold', open ? wsT("js.tk.asg.fewer") : wsT("js.tk.asg.more", hid), {}) + '</div>' : '') + '</section>';
   }
+  // CC in the item window: the item's CC'd members (it.cc, in CC order), each with a remove
+  // badge, and a "+" that opens the item menu's people step (item.cc). Any member may add or
+  // remove anyone; a hidden item takes neither, and shows its list only when it has one.
+  function ccHtml(it) {
+    var cc = listOf(it.cc), live = !it.hidden;
+    if (!cc.length && !live) return '';
+    var add = live ? '<button type="button" class="ia a-add"' + attr('act', 'cc') + attr('item', it.id) + ' aria-haspopup="menu" aria-label="' + esc(wsT("js.tk.cc.add")) + '"' + tipAttr(wsT("js.tk.cc.add")) + '><svg class="i"><use href="#tki-plus"/></svg></button>' : '';
+    return '<section class="iw-asg iw-cc"' + attr('focus', 'cc') + '><h3>' + wsT("js.tk.cc.title") + (cc.length ? ' <span class="cnt">' + cc.length + '</span>' : '') + '<span class="grow"></span>' + add + '</h3>' +
+      (cc.length ? '<ul class="alist">' + cc.map(function (id) {
+        var rm = live ? '<button type="button" class="rmb"' + attr('act', 'uncc') + attr('item', it.id) + attr('who', id) + ' aria-label="' + esc(wsT("js.tk.cc.remove", nm(id))) + '"' + tipAttr(wsT("js.tk.cc.remove", nm(id))) + '><svg class="i"><use href="#tki-minus"/></svg></button>' : '';
+        return '<li class="arow"' + attr('ccmember', id) + '><div class="ar-main">' + avHtml(id) + '<span class="ar-name">' + whoName(id) + '</span><span class="ar-st">' + rm + '</span></div></li>';
+      }).join('') + '</ul>' : '<div class="empty">' + wsT("js.tk.cc.none") + '</div>') + '</section>';
+  }
   // Taking work in the item window: the opening (scope, opener, and Claim / Withdraw when the
   // viewer may) and the take requests on the item, pending first, each with the answers the
   // viewer may give. Drawn only when the item is open or has requests.
@@ -2729,7 +2782,7 @@
       // with caps.attach, attachment metadata typed in by hand (a stand-in oid is computed)
       (CAPS.attach ? '<div class="cextra"><input id="catt-name" type="text" placeholder="' + wsT("js.tk.composer.attname") + '"><input id="catt-size" type="number" min="0" placeholder="' + wsT("js.tk.composer.attsize") + '">' +
       btn('att-add', wsT("js.tk.composer.attach"), {}) + '<span class="muted">' + wsT("js.tk.composer.limit", fmtSize(VS.attachments.max_bytes)) + '</span></div>' : '') + '</div>';
-    h += '</div><div class="iw-side">' + propertyCard(it) + assigneesHtml(v, it, recs) + takeHtml(v, it) + '</div></div>';
+    h += '</div><div class="iw-side">' + propertyCard(it) + assigneesHtml(v, it, recs) + ccHtml(it) + takeHtml(v, it) + '</div></div>';
     return h;
   }
   // The header's common actions, left of the "⋯" menu: the viewer's status as a segmented control
@@ -3556,6 +3609,7 @@
       case 'unopen': put([['item.unopen', { item: item }]]); break;
       case 'approve': put([['item.approve', { item: item, request: a.getAttribute('data-req') }]]); break;
       case 'unrequest': put([['item.unrequest', { item: item, request: a.getAttribute('data-req') }]]); break;
+      case 'uncc': put([['item.uncc', { item: item, member: who }]]); break;
       case 'ihide': put([['item.hide', { item: item }]]); break;
       case 'chide': put([['comment.hide', { comment: cid }]]); break;
       case 'comment': {
@@ -3687,6 +3741,11 @@
         '<div class="mrow"><input type="text" id="tkmq" data-mi data-autofocus autocomplete="off" spellcheck="false" placeholder="' + wsT("js.tk.menu.search") + '" aria-label="' + wsT("js.tk.menu.search") + '" value="' + esc(MN.q || '') + '"></div>' +
         '<div class="mlist" role="group">' + handoffList(it, hfrom) + '</div>' + noteField(wsT("js.tk.form.note.opt"));
     }
+    if (step === 'cc') {
+      return h + back + '<div class="mtitle">' + wsT("js.tk.dlg.cc.title", esc(it.alias)) + '</div><p class="mintro">' + wsT("js.tk.dlg.cc.intro") + '</p>' +
+        '<div class="mrow"><input type="text" id="tkmq" data-mi data-autofocus autocomplete="off" spellcheck="false" placeholder="' + wsT("js.tk.menu.search") + '" aria-label="' + wsT("js.tk.menu.search") + '" value="' + esc(MN.q || '') + '"></div>' +
+        '<div class="mlist" role="group">' + ccPickList(it) + '</div>';
+    }
     if (step === 'opening') {
       return h + back + '<div class="mtitle">' + wsT("js.tk.dlg.open.title", esc(it.alias)) + '</div><p class="mintro">' + wsT("js.tk.dlg.open.intro") + '</p>' +
         '<div role="group">' + mi('m-opening', esc(wsT("js.tk.open.scope.team")), { scope: 'team' }, { icon: 'team', val: esc(wsT("js.tk.open.scope.team.sub")) }) +
@@ -3769,6 +3828,17 @@
       return '<button type="button" class="mi" role="menuitem" data-mi' + attr('act', 'm-handoff') + attr('to', id) + '>' + avHtml(id) + '<span class="ml">' + whoName(id) + '</span><span class="mv">' + esc(id) + '</span></button>';
     }).join('');
   }
+  // The CC step's people: every member not removed and not CC'd yet, the viewer included, filtered by the search.
+  function ccPickList(it) {
+    var q = String(MN.q || '').trim().toLowerCase(), cc = listOf(it.cc);
+    var ids = Object.keys(VS.members).filter(function (id) { return !VS.members[id].removed && cc.indexOf(id) < 0 && (!q || (id + ' ' + nmo(id)).toLowerCase().indexOf(q) >= 0); });
+    if (!ids.length) return '<p class="mempty">' + wsT("js.tk.menu.nobody") + '</p>';
+    return ids.map(function (id) {
+      return '<button type="button" class="mi" role="menuitem" data-mi' + attr('act', 'm-cc') + attr('to', id) + '>' + avHtml(id) + '<span class="ml">' + whoName(id) + '</span><span class="mv">' + esc(id) + '</span></button>';
+    }).join('');
+  }
+  // the people list a search box (#tkmq) filters: the CC step's or the handoff step's
+  function mqList(it) { return MN.step === 'cc' ? ccPickList(it) : handoffList(it, MN.who || VS.viewer.member); }
   // "Move to..." (ticket decision 8): the item menu's move step, the keyboard and touch path of the
   // move drag. A searchable tree of the destinations the store takes (moveWhy) plus the top level;
   // an item that takes none shows only as the context line of one that does, so the item's own
@@ -4046,6 +4116,7 @@
         return commit([['item.edit', { item: id, due: dv }]]);
       }
       case 'm-due-clear': return commit([['item.edit', { item: id, due: null }]]);
+      case 'm-cc': return commit([['item.cc', { item: id, member: a.getAttribute('data-to') }]]);
       case 'm-handoff': {
         var hp = { item: id, to: a.getAttribute('data-to') }, note = menuNote();
         if (MN.who && MN.who !== VS.viewer.member) hp.assignee = MN.who;
@@ -4110,7 +4181,7 @@
       if (t.id === 'tkmnote' && MN.step === 'note') { e.preventDefault(); menuAct('m-note-send', t); return; }
       if (t.id === 'tkmnote' && MN.step === 'request') { e.preventDefault(); var p0 = m.querySelector('[data-act="m-request"]'); if (p0) p0.click(); return; }
       if (t.id === 'tkmdue') { e.preventDefault(); menuAct('m-due-set', t); return; }
-      if (t.id === 'tkmq') { e.preventDefault(); var p1 = m.querySelector('[data-act="m-handoff"]'); if (p1) p1.click(); return; }
+      if (t.id === 'tkmq') { e.preventDefault(); var p1 = m.querySelector('[data-act="m-handoff"], [data-act="m-cc"]'); if (p1) p1.click(); return; }
       if (t.id === 'tkmvq') { e.preventDefault(); var p2 = m.querySelector('[data-act="m-move"]'); if (p2) p2.click(); return; }
       return; // a button: its click; a form field: the form's submit
     }
@@ -5254,9 +5325,9 @@
   function placeShownMore() { Array.prototype.forEach.call(document.querySelectorAll('.tk .irow:hover, .tk .irow:focus-within, .tk .irow.sel'), placeMore); }
   var lastPointer = 'mouse', lastInput = 'pointer'; // the focused row is restored after a re-render only for keyboard use
 
-  var QUICK = { confirm: 1, unassign: 1, accept: 1, ihide: 1, chide: 1, comment: 1, claim: 1, unopen: 1, approve: 1, unrequest: 1 };
+  var QUICK = { confirm: 1, unassign: 1, accept: 1, ihide: 1, chide: 1, comment: 1, claim: 1, unopen: 1, approve: 1, unrequest: 1, uncc: 1 };
   // the item menu's steps an action button opens (in the menu, or a menu anchored to the button)
-  var STEPS = { note: 1, handoff: 1, assign: 1, pri: 1, due: 1, move: 1, opening: 1, request: 1, wrap: 1 };
+  var STEPS = { note: 1, handoff: 1, assign: 1, pri: 1, due: 1, move: 1, opening: 1, request: 1, wrap: 1, cc: 1 };
 
   // ------------------------------------------------------------- display state
 
@@ -5465,6 +5536,7 @@
         }
         else if (k === 'scope') { panelState().scope = a.getAttribute('data-scope'); ui.sel = null; render(); }
         else if (k === 'pmode') { panelState().modes[scopeOf()] = a.getAttribute('data-mode'); dsSave('panel.modes', ui.pmodes); render(); }
+        else if (k === 'rel-fold') { var rfs = panelState(), rk0 = a.getAttribute('data-set'); rfs.relFold = rfs.relFold || {}; rfs.relFold[rk0] = !rfs.relFold[rk0]; render(); }
         else if (k === 'closed-toggle') { var cps = panelState(); cps.closedOpen = !cps.closedOpen; ui.closedOpen[ui.store] = cps.closedOpen; dsSave('closed', ui.closedOpen); render(); }
         else if (k === 'tree-closed') { var to = panelState().treeOpen, pid = a.getAttribute('data-parent'); to[pid] = !to[pid]; render(); }
         else if (k === 'tfold') { var fk = ui.store + '|' + a.getAttribute('data-node'), fto = a.getAttribute('data-to'); if (fto) ui.tfold[fk] = fto; else delete ui.tfold[fk]; dsSave('tree.fold', ui.tfold); render(); }
@@ -5557,7 +5629,7 @@
       else if (t.id === 'tkknew' && ui.knew[ui.store]) ui.knew[ui.store].val = t.value;
       else if (t.id === 'tksub' && ui.sub) ui.sub.val = t.value;
       else if (t.id === 'tkaq' && MN && MN.step === 'assign') { var as = asgState(); as.q = t.value; as.idx = 0; asgDraw(); }
-      else if (t.id === 'tkmq' && MN) { MN.q = t.value; var ml = $('tkmenu').querySelector('.mlist'); if (ml) ml.innerHTML = handoffList(VS.items[MN.item], MN.who || VS.viewer.member); }
+      else if (t.id === 'tkmq' && MN) { MN.q = t.value; var ml = $('tkmenu').querySelector('.mlist'); if (ml) ml.innerHTML = mqList(VS.items[MN.item]); }
       else if (t.id === 'tkmvq' && MN && MN.mv) { MN.q = t.value; var mvl = $('tkmenu').querySelector('.mlist'); if (mvl) mvl.innerHTML = moveList(MN.mv); }
       else edKeep(t);
       if (mentionBox(t)) mentionSync(); // also mid-composition: the popup filters on the composing text

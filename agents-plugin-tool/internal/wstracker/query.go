@@ -11,8 +11,8 @@ import (
 // payload field share: one parser, so the screen and the tool agree.
 //
 // A query is whitespace-separated tokens, every token AND-ed. A key:value
-// token whose key is one of status, assignee, kind, project, label, due,
-// priority, or is is a field filter; any other token, a pasted URL or foo:bar
+// token whose key is one of status, assignee, cc, kind, project, label,
+// due, priority, or is is a field filter; any other token, a pasted URL or foo:bar
 // included, is free text. A "quoted phrase" is one free-text token, and a
 // filter value may be quoted (project:"two words"). Keys and values are
 // case-insensitive.
@@ -22,6 +22,9 @@ import (
 //	              older name of in-review, is accepted as its alias)
 //	assignee:<m>  a live or pending assignee whose member id or display
 //	              name contains m
+//	cc:<m>        a CC'd member (ItemView.CC) whose member id or display
+//	              name contains m; cc:me is the viewer, before any member
+//	              whose id or name contains "me" (assignee: has no me)
 //	kind:<k>      one of QueryKinds
 //	project:<p>   the item's project, exactly
 //	label:<l>     a live label of the item named l, exactly (a removed
@@ -181,7 +184,7 @@ func parseQueryToken(tok queryToken) (queryTerm, error) {
 			return refuse("is takes one of " + strings.Join(QueryIs, ", "))
 		}
 		return queryTerm{key: key, value: v}, nil
-	case "assignee", "project", "label":
+	case "assignee", "cc", "project", "label":
 		if v == "" {
 			return refuse(key + " takes a value")
 		}
@@ -290,6 +293,16 @@ func (t queryTerm) match(v *View, it ItemView) bool {
 				continue
 			}
 			if strings.Contains(strings.ToLower(a.To), t.value) || strings.Contains(strings.ToLower(v.Members[a.To].Name), t.value) {
+				return true
+			}
+		}
+		return false
+	case "cc":
+		if t.value == "me" {
+			return containsString(it.CC, v.Viewer.Member)
+		}
+		for _, m := range it.CC {
+			if strings.Contains(strings.ToLower(m), t.value) || strings.Contains(strings.ToLower(v.Members[m].Name), t.value) {
 				return true
 			}
 		}

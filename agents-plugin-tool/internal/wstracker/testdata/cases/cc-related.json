@@ -1,0 +1,875 @@
+{
+ "name": "cc-related",
+ "comment": "CC and the related scope. raj, who cannot edit ada's Ship, CCs lena; lena's own repeated add is a no-op. lena is notified of maya's doing, bo's plain comment, maya's close, raj's close / reject / close / confirm on Review (completion assigner), and raj's late comment on Infra; not of ada's body edit or assignment, bo's comment mentioning her, maya's comment written before the CC, her own comment, or a comment on the item she created. Review is done, so it is under closed. Infra is CC'd and mentions lena: CC only. Design's body and Docs' comment mention lena (Docs newer); sven's CC of Design is removed again, so it is back under mentioned. Own (lena's), Old (hidden) and Fix (done) are left out of the lists, Fix under closed. maya holds Ship and is CC'd on it: nothing for her. sven is CC'd then removed: the item's cc list drops him, and raj removes his CC.",
+ "viewers": [
+  "lena.pc",
+  "maya.pc",
+  "ada.pc"
+ ],
+ "now": "2026-11-02T09:00:00Z",
+ "genesis": {
+  "admins": [
+   "ada",
+   "bo"
+  ],
+  "members": [
+   {
+    "id": "ada",
+    "name": "Ada",
+    "keys": [
+     "ada-k1"
+    ],
+    "leads": []
+   },
+   {
+    "id": "maya",
+    "name": "Maya",
+    "keys": [
+     "maya-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "raj",
+    "name": "Raj",
+    "keys": [
+     "raj-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "bo",
+    "name": "Bo",
+    "keys": [
+     "bo-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "lena",
+    "name": "Lena",
+    "keys": [
+     "lena-k1"
+    ],
+    "leads": [
+     "maya"
+    ]
+   },
+   {
+    "id": "omar",
+    "name": "Omar",
+    "keys": [
+     "omar-k1"
+    ],
+    "leads": [
+     "maya"
+    ]
+   },
+   {
+    "id": "sven",
+    "name": "Sven",
+    "keys": [
+     "sven-k1"
+    ],
+    "leads": [
+     "raj"
+    ]
+   }
+  ]
+ },
+ "commits": {
+  "ada.pc": [
+   {
+    "ts": "2026-11-01T09:01:00Z",
+    "seen": {},
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Ship"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:02:00Z",
+    "seen": {},
+    "events": [
+     [
+      "item.assign",
+      {
+       "item": "ada.pc#1",
+       "targets": [
+        "maya"
+       ],
+       "completion": "assignee"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:06:00Z",
+    "seen": {
+     "raj.pc": 1,
+     "lena.pc": 1,
+     "maya.pc": 1
+    },
+    "events": [
+     [
+      "item.edit",
+      {
+       "item": "ada.pc#1",
+       "body": "new body"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:07:00Z",
+    "seen": {
+     "raj.pc": 1,
+     "lena.pc": 1,
+     "maya.pc": 1
+    },
+    "events": [
+     [
+      "item.assign",
+      {
+       "item": "ada.pc#1",
+       "targets": [
+        "omar"
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:11:00Z",
+    "seen": {
+     "raj.pc": 1,
+     "lena.pc": 1,
+     "maya.pc": 2,
+     "bo.pc": 2
+    },
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Review"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:12:00Z",
+    "seen": {
+     "raj.pc": 1,
+     "lena.pc": 1,
+     "maya.pc": 2,
+     "bo.pc": 2
+    },
+    "events": [
+     [
+      "item.assign",
+      {
+       "item": "ada.pc#5",
+       "targets": [
+        "raj"
+       ],
+       "completion": "assigner"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:15:00Z",
+    "seen": {
+     "raj.pc": 2,
+     "lena.pc": 1,
+     "maya.pc": 2,
+     "bo.pc": 2,
+     "sven.pc": 1
+    },
+    "events": [
+     [
+      "item.reject",
+      {
+       "item": "ada.pc#5",
+       "assignee": "raj",
+       "note": "more tests"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:17:00Z",
+    "seen": {
+     "raj.pc": 3,
+     "lena.pc": 1,
+     "maya.pc": 2,
+     "bo.pc": 2,
+     "sven.pc": 1
+    },
+    "events": [
+     [
+      "item.confirm",
+      {
+       "item": "ada.pc#5",
+       "assignee": "raj"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:29:00Z",
+    "seen": {
+     "raj.pc": 7,
+     "lena.pc": 3,
+     "maya.pc": 4,
+     "bo.pc": 3,
+     "sven.pc": 1,
+     "omar.pc": 2
+    },
+    "events": [
+     [
+      "item.cc",
+      {
+       "item": "ada.pc#1",
+       "member": "maya"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:37:00Z",
+    "seen": {
+     "raj.pc": 7,
+     "lena.pc": 3,
+     "maya.pc": 6,
+     "bo.pc": 6,
+     "sven.pc": 3,
+     "omar.pc": 2
+    },
+    "events": [
+     [
+      "item.cc",
+      {
+       "item": "ada.pc#1",
+       "member": "omar"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:38:00Z",
+    "seen": {
+     "raj.pc": 7,
+     "lena.pc": 3,
+     "maya.pc": 6,
+     "bo.pc": 6,
+     "sven.pc": 3,
+     "omar.pc": 2
+    },
+    "events": [
+     [
+      "item.cc",
+      {
+       "item": "ada.pc#1",
+       "member": "sven"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:39:00Z",
+    "seen": {
+     "raj.pc": 7,
+     "lena.pc": 3,
+     "maya.pc": 6,
+     "bo.pc": 6,
+     "sven.pc": 3,
+     "omar.pc": 2
+    },
+    "events": [
+     [
+      "roles.remove_member",
+      {
+       "member": "sven"
+      }
+     ]
+    ]
+   }
+  ],
+  "raj.pc": [
+   {
+    "ts": "2026-11-01T09:03:00Z",
+    "seen": {
+     "ada.pc": 2
+    },
+    "events": [
+     [
+      "item.cc",
+      {
+       "item": "ada.pc#1",
+       "member": "lena"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:14:00Z",
+    "seen": {
+     "ada.pc": 6,
+     "lena.pc": 1,
+     "maya.pc": 2,
+     "bo.pc": 2,
+     "sven.pc": 1
+    },
+    "events": [
+     [
+      "item.close",
+      {
+       "item": "ada.pc#5"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:16:00Z",
+    "seen": {
+     "ada.pc": 7,
+     "lena.pc": 1,
+     "maya.pc": 2,
+     "bo.pc": 2,
+     "sven.pc": 1
+    },
+    "events": [
+     [
+      "item.close",
+      {
+       "item": "ada.pc#5"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:21:00Z",
+    "seen": {
+     "ada.pc": 8,
+     "lena.pc": 1,
+     "maya.pc": 3,
+     "bo.pc": 2,
+     "sven.pc": 1,
+     "omar.pc": 2
+    },
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Infra",
+       "body": "@lena",
+       "mentions": [
+        "lena"
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:24:00Z",
+    "seen": {
+     "ada.pc": 8,
+     "lena.pc": 1,
+     "maya.pc": 4,
+     "bo.pc": 3,
+     "sven.pc": 1,
+     "omar.pc": 2
+    },
+    "events": [
+     [
+      "comment.add",
+      {
+       "item": "raj.pc#4",
+       "body": "late"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:27:00Z",
+    "seen": {
+     "ada.pc": 8,
+     "lena.pc": 3,
+     "maya.pc": 4,
+     "bo.pc": 3,
+     "sven.pc": 1,
+     "omar.pc": 2
+    },
+    "events": [
+     [
+      "item.cc",
+      {
+       "item": "lena.pc#3",
+       "member": "lena"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:28:00Z",
+    "seen": {
+     "ada.pc": 8,
+     "lena.pc": 3,
+     "maya.pc": 4,
+     "bo.pc": 3,
+     "sven.pc": 1,
+     "omar.pc": 2
+    },
+    "events": [
+     [
+      "comment.add",
+      {
+       "item": "lena.pc#3",
+       "body": "on own"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:40:00Z",
+    "seen": {
+     "ada.pc": 12,
+     "lena.pc": 3,
+     "maya.pc": 6,
+     "bo.pc": 6,
+     "sven.pc": 3,
+     "omar.pc": 2
+    },
+    "events": [
+     [
+      "item.uncc",
+      {
+       "item": "ada.pc#1",
+       "member": "sven"
+      }
+     ]
+    ]
+   }
+  ],
+  "lena.pc": [
+   {
+    "ts": "2026-11-01T09:04:00Z",
+    "seen": {
+     "ada.pc": 2,
+     "raj.pc": 1
+    },
+    "events": [
+     [
+      "item.cc",
+      {
+       "item": "ada.pc#1",
+       "member": "lena"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:25:00Z",
+    "seen": {
+     "ada.pc": 8,
+     "raj.pc": 5,
+     "maya.pc": 4,
+     "bo.pc": 3,
+     "sven.pc": 1,
+     "omar.pc": 2
+    },
+    "events": [
+     [
+      "comment.add",
+      {
+       "item": "ada.pc#1",
+       "body": "mine"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:26:00Z",
+    "seen": {
+     "ada.pc": 8,
+     "raj.pc": 5,
+     "maya.pc": 4,
+     "bo.pc": 3,
+     "sven.pc": 1,
+     "omar.pc": 2
+    },
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Own"
+      }
+     ]
+    ]
+   }
+  ],
+  "maya.pc": [
+   {
+    "ts": "2026-11-01T09:05:00Z",
+    "seen": {
+     "ada.pc": 2,
+     "raj.pc": 1,
+     "lena.pc": 1
+    },
+    "events": [
+     [
+      "item.status",
+      {
+       "item": "ada.pc#1",
+       "status": "doing"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:10:00Z",
+    "seen": {
+     "ada.pc": 4,
+     "raj.pc": 1,
+     "lena.pc": 1,
+     "bo.pc": 2
+    },
+    "events": [
+     [
+      "item.close",
+      {
+       "item": "ada.pc#1"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:18:00Z",
+    "seen": {
+     "ada.pc": 8,
+     "raj.pc": 3,
+     "lena.pc": 1,
+     "bo.pc": 2,
+     "sven.pc": 1
+    },
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Design",
+       "body": "@lena ideas?",
+       "mentions": [
+        "lena"
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:22:00Z",
+    "seen": {
+     "ada.pc": 8,
+     "raj.pc": 4,
+     "lena.pc": 1,
+     "bo.pc": 2,
+     "sven.pc": 1,
+     "omar.pc": 2
+    },
+    "events": [
+     [
+      "comment.add",
+      {
+       "item": "raj.pc#4",
+       "body": "early"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:35:00Z",
+    "seen": {
+     "ada.pc": 9,
+     "raj.pc": 7,
+     "lena.pc": 3,
+     "bo.pc": 6,
+     "sven.pc": 3,
+     "omar.pc": 2
+    },
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Fix",
+       "body": "@lena",
+       "mentions": [
+        "lena"
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:36:00Z",
+    "seen": {
+     "ada.pc": 9,
+     "raj.pc": 7,
+     "lena.pc": 3,
+     "bo.pc": 6,
+     "sven.pc": 3,
+     "omar.pc": 2
+    },
+    "events": [
+     [
+      "item.close",
+      {
+       "item": "maya.pc#5"
+      }
+     ]
+    ]
+   }
+  ],
+  "bo.pc": [
+   {
+    "ts": "2026-11-01T09:08:00Z",
+    "seen": {
+     "ada.pc": 4,
+     "raj.pc": 1,
+     "lena.pc": 1,
+     "maya.pc": 1
+    },
+    "events": [
+     [
+      "comment.add",
+      {
+       "item": "ada.pc#1",
+       "body": "hello"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:09:00Z",
+    "seen": {
+     "ada.pc": 4,
+     "raj.pc": 1,
+     "lena.pc": 1,
+     "maya.pc": 1
+    },
+    "events": [
+     [
+      "comment.add",
+      {
+       "item": "ada.pc#1",
+       "body": "@lena look",
+       "mentions": [
+        "lena"
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:23:00Z",
+    "seen": {
+     "ada.pc": 8,
+     "raj.pc": 4,
+     "lena.pc": 1,
+     "maya.pc": 4,
+     "sven.pc": 1,
+     "omar.pc": 2
+    },
+    "events": [
+     [
+      "item.cc",
+      {
+       "item": "raj.pc#4",
+       "member": "lena"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:30:00Z",
+    "seen": {
+     "ada.pc": 9,
+     "raj.pc": 7,
+     "lena.pc": 3,
+     "maya.pc": 4,
+     "sven.pc": 1,
+     "omar.pc": 2
+    },
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Old"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:31:00Z",
+    "seen": {
+     "ada.pc": 9,
+     "raj.pc": 7,
+     "lena.pc": 3,
+     "maya.pc": 4,
+     "sven.pc": 1,
+     "omar.pc": 2
+    },
+    "events": [
+     [
+      "item.cc",
+      {
+       "item": "bo.pc#4",
+       "member": "lena"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:32:00Z",
+    "seen": {
+     "ada.pc": 9,
+     "raj.pc": 7,
+     "lena.pc": 3,
+     "maya.pc": 4,
+     "sven.pc": 1,
+     "omar.pc": 2
+    },
+    "events": [
+     [
+      "item.hide",
+      {
+       "item": "bo.pc#4"
+      }
+     ]
+    ]
+   }
+  ],
+  "sven.pc": [
+   {
+    "ts": "2026-11-01T09:13:00Z",
+    "seen": {
+     "ada.pc": 6,
+     "raj.pc": 1,
+     "lena.pc": 1,
+     "maya.pc": 2,
+     "bo.pc": 2
+    },
+    "events": [
+     [
+      "item.cc",
+      {
+       "item": "ada.pc#5",
+       "member": "lena"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:33:00Z",
+    "seen": {
+     "ada.pc": 9,
+     "raj.pc": 7,
+     "lena.pc": 3,
+     "maya.pc": 4,
+     "bo.pc": 6,
+     "omar.pc": 2
+    },
+    "events": [
+     [
+      "item.cc",
+      {
+       "item": "maya.pc#3",
+       "member": "lena"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:34:00Z",
+    "seen": {
+     "ada.pc": 9,
+     "raj.pc": 7,
+     "lena.pc": 3,
+     "maya.pc": 4,
+     "bo.pc": 6,
+     "omar.pc": 2
+    },
+    "events": [
+     [
+      "item.uncc",
+      {
+       "item": "maya.pc#3",
+       "member": "lena"
+      }
+     ]
+    ]
+   }
+  ],
+  "omar.pc": [
+   {
+    "ts": "2026-11-01T09:19:00Z",
+    "seen": {
+     "ada.pc": 8,
+     "raj.pc": 3,
+     "lena.pc": 1,
+     "maya.pc": 3,
+     "bo.pc": 2,
+     "sven.pc": 1
+    },
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Docs"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:20:00Z",
+    "seen": {
+     "ada.pc": 8,
+     "raj.pc": 3,
+     "lena.pc": 1,
+     "maya.pc": 3,
+     "bo.pc": 2,
+     "sven.pc": 1
+    },
+    "events": [
+     [
+      "comment.add",
+      {
+       "item": "omar.pc#1",
+       "body": "@lena?",
+       "mentions": [
+        "lena"
+       ]
+      }
+     ]
+    ]
+   }
+  ]
+ }
+}

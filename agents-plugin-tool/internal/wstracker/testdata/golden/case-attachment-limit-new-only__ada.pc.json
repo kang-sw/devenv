@@ -522,7 +522,8 @@
     "backrefs": [],
     "open": null,
     "claimable": false,
-    "requests": []
+    "requests": [],
+    "cc": []
    }
   },
   "itemOrder": [
@@ -853,7 +854,13 @@
     "incoming": [],
     "outgoing": []
    },
-   "badge": []
+   "badge": [],
+   "related": {
+    "cc": [],
+    "mentioned": [],
+    "closed": []
+   },
+   "ccNotices": []
   },
   "stats": {
    "events": 6,

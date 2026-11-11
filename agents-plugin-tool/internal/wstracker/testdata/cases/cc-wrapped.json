@@ -1,0 +1,154 @@
+{
+ "name": "cc-wrapped",
+ "comment": "ada, maya's org superior, sets maya's status on maya's item that lena is CC'd on: lena's CC notices name maya as the assignee and ada as the writer. Dropped is wrapped like done: the item leaves the CC list for closed.",
+ "viewers": [
+  "lena.pc"
+ ],
+ "now": "2026-11-02T09:00:00Z",
+ "genesis": {
+  "admins": [
+   "ada",
+   "bo"
+  ],
+  "members": [
+   {
+    "id": "ada",
+    "name": "Ada",
+    "keys": [
+     "ada-k1"
+    ],
+    "leads": []
+   },
+   {
+    "id": "maya",
+    "name": "Maya",
+    "keys": [
+     "maya-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "raj",
+    "name": "Raj",
+    "keys": [
+     "raj-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "bo",
+    "name": "Bo",
+    "keys": [
+     "bo-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "lena",
+    "name": "Lena",
+    "keys": [
+     "lena-k1"
+    ],
+    "leads": [
+     "maya"
+    ]
+   },
+   {
+    "id": "omar",
+    "name": "Omar",
+    "keys": [
+     "omar-k1"
+    ],
+    "leads": [
+     "maya"
+    ]
+   },
+   {
+    "id": "sven",
+    "name": "Sven",
+    "keys": [
+     "sven-k1"
+    ],
+    "leads": [
+     "raj"
+    ]
+   }
+  ]
+ },
+ "commits": {
+  "maya.pc": [
+   {
+    "ts": "2026-11-01T09:01:00Z",
+    "seen": {},
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Mine"
+      }
+     ]
+    ]
+   }
+  ],
+  "raj.pc": [
+   {
+    "ts": "2026-11-01T09:02:00Z",
+    "seen": {
+     "maya.pc": 1
+    },
+    "events": [
+     [
+      "item.cc",
+      {
+       "item": "maya.pc#1",
+       "member": "lena"
+      }
+     ]
+    ]
+   }
+  ],
+  "ada.pc": [
+   {
+    "ts": "2026-11-01T09:03:00Z",
+    "seen": {
+     "maya.pc": 1,
+     "raj.pc": 1
+    },
+    "events": [
+     [
+      "item.status",
+      {
+       "item": "maya.pc#1",
+       "status": "blocked",
+       "assignee": "maya"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:04:00Z",
+    "seen": {
+     "maya.pc": 1,
+     "raj.pc": 1
+    },
+    "events": [
+     [
+      "item.status",
+      {
+       "item": "maya.pc#1",
+       "status": "dropped",
+       "assignee": "maya"
+      }
+     ]
+    ]
+   }
+  ]
+ }
+}

@@ -1,0 +1,208 @@
+{
+ "name": "cc-concurrent",
+ "comment": "Concurrent CC adds and removes of one member fold by the register winner. sven adds bo while raj, not having seen it, removes bo: raj's later remove wins and bo is not CC'd. maya CCs lena; omar removes lena while bo, not having seen the remove, adds her again: bo's later add wins, lena is CC'd since bo's add, and both pairs carry concurrent-change markers. ada's later status write notifies lena.",
+ "viewers": [
+  "lena.pc",
+  "ada.pc"
+ ],
+ "now": "2026-11-02T09:00:00Z",
+ "genesis": {
+  "admins": [
+   "ada",
+   "bo"
+  ],
+  "members": [
+   {
+    "id": "ada",
+    "name": "Ada",
+    "keys": [
+     "ada-k1"
+    ],
+    "leads": []
+   },
+   {
+    "id": "maya",
+    "name": "Maya",
+    "keys": [
+     "maya-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "raj",
+    "name": "Raj",
+    "keys": [
+     "raj-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "bo",
+    "name": "Bo",
+    "keys": [
+     "bo-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "lena",
+    "name": "Lena",
+    "keys": [
+     "lena-k1"
+    ],
+    "leads": [
+     "maya"
+    ]
+   },
+   {
+    "id": "omar",
+    "name": "Omar",
+    "keys": [
+     "omar-k1"
+    ],
+    "leads": [
+     "maya"
+    ]
+   },
+   {
+    "id": "sven",
+    "name": "Sven",
+    "keys": [
+     "sven-k1"
+    ],
+    "leads": [
+     "raj"
+    ]
+   }
+  ]
+ },
+ "commits": {
+  "ada.pc": [
+   {
+    "ts": "2026-11-01T09:01:00Z",
+    "seen": {},
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Ship"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:07:00Z",
+    "seen": {
+     "maya.pc": 1,
+     "sven.pc": 1,
+     "raj.pc": 1,
+     "omar.pc": 1,
+     "bo.pc": 1
+    },
+    "events": [
+     [
+      "item.status",
+      {
+       "item": "ada.pc#1",
+       "status": "doing"
+      }
+     ]
+    ]
+   }
+  ],
+  "maya.pc": [
+   {
+    "ts": "2026-11-01T09:02:00Z",
+    "seen": {
+     "ada.pc": 1
+    },
+    "events": [
+     [
+      "item.cc",
+      {
+       "item": "ada.pc#1",
+       "member": "lena"
+      }
+     ]
+    ]
+   }
+  ],
+  "sven.pc": [
+   {
+    "ts": "2026-11-01T09:03:00Z",
+    "seen": {
+     "ada.pc": 1
+    },
+    "events": [
+     [
+      "item.cc",
+      {
+       "item": "ada.pc#1",
+       "member": "bo"
+      }
+     ]
+    ]
+   }
+  ],
+  "raj.pc": [
+   {
+    "ts": "2026-11-01T09:04:00Z",
+    "seen": {
+     "ada.pc": 1
+    },
+    "events": [
+     [
+      "item.uncc",
+      {
+       "item": "ada.pc#1",
+       "member": "bo"
+      }
+     ]
+    ]
+   }
+  ],
+  "omar.pc": [
+   {
+    "ts": "2026-11-01T09:05:00Z",
+    "seen": {
+     "ada.pc": 1,
+     "maya.pc": 1
+    },
+    "events": [
+     [
+      "item.uncc",
+      {
+       "item": "ada.pc#1",
+       "member": "lena"
+      }
+     ]
+    ]
+   }
+  ],
+  "bo.pc": [
+   {
+    "ts": "2026-11-01T09:06:00Z",
+    "seen": {
+     "ada.pc": 1,
+     "maya.pc": 1
+    },
+    "events": [
+     [
+      "item.cc",
+      {
+       "item": "ada.pc#1",
+       "member": "lena"
+      }
+     ]
+    ]
+   }
+  ]
+ }
+}

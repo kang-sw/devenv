@@ -52,7 +52,10 @@ tracker.query payload: {store?, scope?, item?, kind?, status?, project?, text?, 
   answer or filed), `received` (assignments sent to the
   user, the user's answers, and the ones the user sent), `assigned` (items the
   user assigned or handed to others), `team` (the work of the members the user
-  leads, by person), or `all` (every item, in tree order).
+  leads, by person), `related` (the items the user is CC'd on, the latest CC
+  first, then the other items whose body or a comment mentions the user, the
+  newest mention first; both leave out done, dropped, and hidden items and the user's
+  own: created or assigned), or `all` (every item, in tree order).
 - `item`: one item in full, with its assignments, opening, take requests,
   children, and comments.
 - `kind`, `status`, `project`, and `text` (part of the title, body, project,
@@ -68,7 +71,9 @@ tracker.query payload: {store?, scope?, item?, kind?, status?, project?, text?, 
   by spaces and all must match; keys and values ignore case:
   `status:<status>` (the values of `status` above; the item's status, also
   in `mine`, whose rows are assignments), `assignee:<member>` (a live or
-  pending assignee whose member ID or name contains it), `kind:task` or
+  pending assignee whose member ID or name contains it), `cc:<member>` (a
+  CC'd member whose ID or name contains it; `cc:me` is the user, even beside
+  a member whose name contains "me"), `kind:task` or
   `kind:topic`, `project:<project>` (exact), `label:<label name>` (exact),
   `due:<date>` and
   `priority:<level>` (equality, or after `<`, `>`, `<=`, or `>=`; dates are
@@ -112,6 +117,7 @@ cannot be rolled back, so each stands alone in its batch, outside any group.
 | `tk:item.request` | `item`, `assignee` | a note |
 | `tk:item.approve`, `tk:item.deny` | `item`, `request` | a note |
 | `tk:item.unrequest` | `item`, `request` | none |
+| `tk:item.cc`, `tk:item.uncc` | `item`, `member` | none |
 | `tk:comment.add` | `item`, `reply_to?`, `mentions?`, `refs?` | the comment |
 | `tk:comment.edit` | `comment`, `mentions?`, `refs?` | the new text |
 | `tk:comment.hide` | `comment` | none |
@@ -247,6 +253,12 @@ Body text, markdown, written as is.
   - Two claims of one opening, or two approvals for one assignment, written
     before either reached the other: the first in the store's event order
     wins, and the later is flagged with a reason naming what took it first.
+- CC: `tk:item.cc` adds `member` to an item's CC list and `tk:item.uncc`
+  removes them; any member may add or remove anyone, on any item that is not
+  hidden, whoever may edit it. A CC'd member follows the item (the `related`
+  scope, and the dashboard notifies them of its status changes, closes, and
+  comments) but gets no assignment, status, or completion; assigning stays
+  the creator's. The item view prints its `cc:` line.
 - `clear` on `tk:item.edit`: `body`, `due`, or both
   (`clear="body due"`); an absent body leaves the body as it is.
 - `tk:item.edit` (the item's creator or a live assignee) writes the whole

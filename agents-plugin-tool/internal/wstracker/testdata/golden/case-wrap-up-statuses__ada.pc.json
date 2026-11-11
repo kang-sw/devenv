@@ -1330,7 +1330,8 @@
     "backrefs": [],
     "open": null,
     "claimable": false,
-    "requests": []
+    "requests": [],
+    "cc": []
    },
    "maya.pc#1": {
     "id": "maya.pc#1",
@@ -1385,7 +1386,8 @@
     "backrefs": [],
     "open": null,
     "claimable": false,
-    "requests": []
+    "requests": [],
+    "cc": []
    },
    "ada.pc#4": {
     "id": "ada.pc#4",
@@ -1438,7 +1440,8 @@
     "backrefs": [],
     "open": null,
     "claimable": false,
-    "requests": []
+    "requests": [],
+    "cc": []
    },
    "bo.pc#1": {
     "id": "bo.pc#1",
@@ -1492,7 +1495,8 @@
     "backrefs": [],
     "open": null,
     "claimable": false,
-    "requests": []
+    "requests": [],
+    "cc": []
    },
    "bo.pc#3": {
     "id": "bo.pc#3",
@@ -1545,7 +1549,8 @@
     "backrefs": [],
     "open": null,
     "claimable": false,
-    "requests": []
+    "requests": [],
+    "cc": []
    },
    "lena.pc#7": {
     "id": "lena.pc#7",
@@ -1598,7 +1603,8 @@
     "backrefs": [],
     "open": null,
     "claimable": false,
-    "requests": []
+    "requests": [],
+    "cc": []
    },
    "lena.pc#11": {
     "id": "lena.pc#11",
@@ -1651,7 +1657,8 @@
     "backrefs": [],
     "open": null,
     "claimable": false,
-    "requests": []
+    "requests": [],
+    "cc": []
    },
    "ada.pc#7": {
     "id": "ada.pc#7",
@@ -1703,7 +1710,8 @@
     "backrefs": [],
     "open": null,
     "claimable": false,
-    "requests": []
+    "requests": [],
+    "cc": []
    },
    "ada.pc#9": {
     "id": "ada.pc#9",
@@ -1757,7 +1765,8 @@
     "backrefs": [],
     "open": null,
     "claimable": false,
-    "requests": []
+    "requests": [],
+    "cc": []
    },
    "ada.pc#11": {
     "id": "ada.pc#11",
@@ -1810,7 +1819,8 @@
     "backrefs": [],
     "open": null,
     "claimable": false,
-    "requests": []
+    "requests": [],
+    "cc": []
    },
    "ada.pc#13": {
     "id": "ada.pc#13",
@@ -1867,7 +1877,8 @@
     "backrefs": [],
     "open": null,
     "claimable": false,
-    "requests": []
+    "requests": [],
+    "cc": []
    },
    "ada.pc#14": {
     "id": "ada.pc#14",
@@ -1920,7 +1931,8 @@
     "backrefs": [],
     "open": null,
     "claimable": false,
-    "requests": []
+    "requests": [],
+    "cc": []
    },
    "ada.pc#16": {
     "id": "ada.pc#16",
@@ -1973,7 +1985,8 @@
     "backrefs": [],
     "open": null,
     "claimable": false,
-    "requests": []
+    "requests": [],
+    "cc": []
    },
    "ada.pc#18": {
     "id": "ada.pc#18",
@@ -2025,7 +2038,8 @@
     "backrefs": [],
     "open": null,
     "claimable": false,
-    "requests": []
+    "requests": [],
+    "cc": []
    },
    "maya.pc#9": {
     "id": "maya.pc#9",
@@ -2078,7 +2092,8 @@
     "backrefs": [],
     "open": null,
     "claimable": false,
-    "requests": []
+    "requests": [],
+    "cc": []
    },
    "lena.pc#16": {
     "id": "lena.pc#16",
@@ -2129,7 +2144,8 @@
     "backrefs": [],
     "open": null,
     "claimable": false,
-    "requests": []
+    "requests": [],
+    "cc": []
    }
   },
   "itemOrder": [
@@ -4374,7 +4390,13 @@
     "w:ada.pc#15>maya:dropped:2026-11-01T09:46:00Z",
     "w:ada.pc#17>raj:done:2026-11-01T09:49:00Z",
     "w:ada.pc#19>maya:done:2026-11-01T09:52:00Z"
-   ]
+   ],
+   "related": {
+    "cc": [],
+    "mentioned": [],
+    "closed": []
+   },
+   "ccNotices": []
   },
   "stats": {
    "events": 58,
