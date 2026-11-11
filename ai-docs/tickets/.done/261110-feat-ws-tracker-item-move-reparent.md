@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: a18352117bd14bfb
 sage-review-completeness-reviewed: a18352117bd14bfb
+completed: 2026-11-11
 ---
 
 # Tracker item.move: reparent and reorder an existing item
