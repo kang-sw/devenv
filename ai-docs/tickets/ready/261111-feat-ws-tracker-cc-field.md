@@ -4,8 +4,8 @@ related:
   261111-feat-ws-tracker-assignee-edit-and-body-merge: "origin: its (235) a chose a CC field over relaxing assign; CC itself is open to every member (Decision 3), independent of that ticket's item.edit widening"
 sage-review-design: completed
 sage-review-completeness: completed
-sage-review-completeness-reviewed: 4b8626267632e915
-sage-review-design-reviewed: 4b8626267632e915
+sage-review-completeness-reviewed: 9940211c702267ff
+sage-review-design-reviewed: 9940211c702267ff
 ---
 
 # Tracker: CC field
@@ -27,7 +27,8 @@ concept.
 
 1. **A CC item field; assign stays creator-only ((235) a).** CC is an item
    field listing members who keep tracking the item. CC'd members see the
-   item in a CC list on the MY view and get change notifications. A CC entry
+   item in the CC section of the "related to me" scope (Decision 5) and get
+   change notifications. A CC entry
    has no status, accept, or completion.
    Rejected: letting the live assignee assign ((235) b), since delegation
    already works through subtasks the assignee creates and assigns, each
@@ -63,19 +64,50 @@ concept.
    review). Rejected: also body edits and
    assignment changes ((250) b), which make the notifications noisy for a
    watcher.
-5. **A separate collapsed CC section in the MY view (technical, (251)).**
-   Rows carry no CC mark; the item window lists the CC members. An item
-   the member already sees as its creator or an assignee does not repeat
-   in the CC section, and a hidden item leaves the CC section as it leaves
-   the other MY lists (technical, completeness review). Rejected:
-   mixing CC rows into the assigned list, where rows without a status duty
-   read as work; a row chip, low information for its space.
+5. **A "related to me" scope holds CC items, with mentions below (user,
+   (307) a, (308) b with note; replaces the earlier collapsed MY-view CC
+   section of (251)).** The dashboard tracker's scope chips (`mine`,
+   `received`, `given`, `team`, `all`, `tracker.js` `SCOPES`, copied in
+   `wslive/ui.go` `UIScopes`) gain a `related` scope
+   beside `mine` (Korean "나와 관련"). It shows two sections: CC items on
+   top, and items that mention the viewer below, separate from the CC rows
+   (user note on (308)). Rows carry no CC mark; the item window lists the
+   CC members. The MY view gets no CC section. Rejected: the collapsed CC
+   section inside the MY view ((307) c), which keeps no-duty rows next to
+   work; both places ((307) b); CC only ((308) a); CC, mentions, and every
+   item the viewer commented on ((308) c), which approaches the full list.
+   - The mentions section lists items whose shown body or a visible comment
+     mentions the viewer, newest mention first; an item already in the CC
+     section is not repeated there (technical, (309)). Rejected: one merged
+     list, which the user's note on (308) keeps apart.
+   - Both sections leave out items the viewer already sees as creator or
+     assignee, and hidden items (technical, (310)). Rejected: a per-section
+     rule, which lets a row show twice across scopes.
+   - The lists are computed in the view fold (Go `view.go` and the reference
+     engine): a `related` block with `cc` and `mentioned` item lists in the
+     viewer's view, so golden parity pins them and `tracker.query` callers
+     read the same lists (technical, (311)). Rejected: deriving them in
+     `tracker.js`.
+   - Both sections open expanded with a count on each header (technical,
+     (312)). Rejected: collapsed sections, since the scope exists only to
+     show these lists.
+   - Details settled at design review (technical, autonomous): the CC
+     section orders by the latest CC add, newest first. A body mention
+     dates from the event that wrote the shown body carrying it, a comment
+     mention from the comment. Closed items follow the existing scopes'
+     closed handling rather than staying in either list, so the mentions
+     list stays bounded. The scope is list-only in `SCOPE_MODES`, like
+     `received`; its chip count is the two sections' total, and it has no
+     today marker. `tracker.query`'s text `scope` gains `related`, rendered
+     as the same two sections in `formatTrackerScope`, so agents read the
+     lists without `format: json`. Rejected: JSON as the only agent path.
+
 6. **A `cc:<member>` filter (technical, (252)).** `tracker.query` and the
    dashboard filter gain `cc:<member>`, `cc:me` included, shaped like the
    assignee filter. `cc:me` resolves to the viewer and takes precedence
    over a member whose id or name contains "me"; `assignee:` gains no `me`
    alias here. The query doc comment and the tracker playbook document it
-   (technical, design review). Rejected: MY-view-only visibility, which leaves agents
+   (technical, design review). Rejected: dashboard-only visibility, which leaves agents
    no query path.
 7. **Mirroring and one phase (announced, (253)).** CC events are mirrored in
    the reference engine and its golden cases and documented in the tracker
@@ -89,8 +121,8 @@ concept.
 - Quiet dashboard tone: `--wb-*` tokens.
 - Korean UI strings live in `internal/wsi18n/tables/ko.json`; every table
   holds every English key.
-- Golden files: view JSON fields carry no `omitempty`, so a view `cc` field
-  changes every golden; regenerate them from the reference engine after
+- Golden files: view JSON fields carry no `omitempty`, so the item view's `cc`
+  field and the viewer view's `related` block change every golden; regenerate them from the reference engine after
   each merge, never merge them by hand, and give new case files a distinct
   name prefix. This applies whichever of this ticket and
   `261110-feat-ws-tracker-superior-settable-status-and-new-statuses` lands
@@ -115,13 +147,13 @@ concept.
 
 | fact | value | evidence |
 |---|---|---|
-| scope.span | multi-file | agents-plugin-tool/internal/wstracker/ check.go view.go query.go, ai-docs/ref/tracker-mockup/engine.js, wstracker/testdata/gen-golden.js, internal/mcp tracker tools, wsdashboard/assets/tracker.js, rsrc/tracker/tracker.md in agents-plugin, agents-plugin-wsflow, agents-plugin-pi |
+| scope.span | multi-file | agents-plugin-tool/internal/wstracker/ check.go view.go query.go, ai-docs/ref/tracker-mockup/engine.js, wstracker/testdata/gen-golden.js, internal/mcp tracker tools, wsdashboard/assets/tracker.js, wslive/ui.go UIScopes, mcp/tracker_tools.go trackerScopes and mcp/tracker_render.go formatTrackerScope, rsrc/tracker/tracker.md in agents-plugin, agents-plugin-wsflow, agents-plugin-pi |
 | scope.surface | public-interface | tracker.update grammar and tracker.query cc: filter are MCP-visible; ledger event types are a store contract |
 | scope.new_public_symbol | yes | new CC add and remove item events and the cc:<member> query key in wstracker/query.go |
-| scope.new_type_contract | yes | CC event payload and a CC list on item and MY views; none exists today, grep cc or watcher in wstracker and engine.js returned nothing |
+| scope.new_type_contract | yes | CC event payload and a CC list on the item view and a related block (CC and mentioned lists) in the viewer view; none exists today, grep cc or watcher in wstracker and engine.js returned nothing |
 | scope.test_surface | existing | agents-plugin-tool/internal/wstracker/query_test.go, golden_test.go with testdata/golden, internal/mcp/tracker_tools_test.go |
 | complexity.reuse_points | confirmed | assignee filter in wstracker/query.go L14-L22 and L155 L246; mention notification feed in wsdashboard/assets/tracker.js L794-L798; creator check pattern in check.go L486-L487 |
-| complexity.side_effect_risk | moderate | new event type folds in Go and engine.js and must stay golden-equal; notification feed and MY view change for every member |
+| complexity.side_effect_risk | moderate | new event type folds in Go and engine.js and must stay golden-equal; notification feed and the new related scope change for every member |
 | risk.correctness | moderate | notification selection must include status, close, comment and exclude body edit and assignment change; the open-to-all permission must not leak into item.edit or item.assign checks |
 | risk.fit | moderate | spans domain, reference engine, MCP grammar, dashboard UI, and three mirrored playbooks |
 | risk.test | moderate | needs Go tests, regenerated golden cases agreeing with engine.js, query tests, and a browser check |
@@ -136,8 +168,9 @@ Scope:
   (Decision 3), in the Go domain, the reference engine
   (`ai-docs/ref/tracker-mockup/engine.js`) with its golden cases, the
   `tracker.update` grammar, and the playbook in all three packages.
-- Notifications for CC'd members (Decision 4), the MY view CC section and
-  the item window's CC list (Decision 5), and the `cc:` filter in
+- Notifications for CC'd members (Decision 4), the "related to me" scope
+  with its CC and mentions sections and the item window's CC list
+  (Decision 5), and the `cc:` filter in
   `tracker.query` and the dashboard (Decision 6).
 
 Verification:
@@ -148,10 +181,17 @@ Verification:
   accept, or completion; a repeated add is a no-op; a concurrent add and
   remove folds by the register winner; a creator or assignee who is also
   CC'd gets no duplicate row or notification; a hidden item leaves the CC
-  section.
+  section; a body or comment mention puts the item in the mentions section,
+  and an item both CC'd and mentioning the viewer shows only under CC; the
+  mentions section leaves out items the viewer created or is assigned, and
+  hidden items, and orders newest mention first; the CC section orders by
+  the latest CC add; a closed item leaves both lists.
+- `tracker.query` with scope `related` renders the CC and mentions sections,
+  and its JSON view carries the `related` block.
 - Golden cases from the reference engine agree with the Go domain.
 - `cc:<member>` and `cc:me` query tests, including a member whose name
-  contains "me"; a browser check of the MY view CC section and the item
-  window's list with its add and remove control.
+  contains "me"; a browser check of the "related to me" scope chip with its
+  CC section above the mentions section, and the item window's list with
+  its add and remove control.
 - The three tracker playbook copies stay in parity, and `ko.json` holds the
   new UI keys.
