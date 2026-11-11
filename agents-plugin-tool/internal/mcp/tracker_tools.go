@@ -76,11 +76,12 @@ func (s *Server) trackerSessionKey(tool string, args map[string]any) (string, *t
 }
 
 // supportPinProblems records what a support conversation's batch may not
-// do: reach the network (register or sync), or write to a store other than
-// the conversation's own.
+// do: send a store command (register, sync, unregister, relabel, hide, or
+// unhide; the conversation runs in a store's clone, so it must not remove
+// or rename one), or write to a store other than the conversation's own.
 func supportPinProblems(p *wsxmlcmd.Problems, b *trackerBatch, store string) {
-	if b.network != nil {
-		p.Add("%s: a store's support conversation cannot register or sync a store; the user does that from the tracker drawer", b.network.Label())
+	if b.storeCmd != nil {
+		p.Add("%s: a store's support conversation cannot register, sync, unregister, relabel, hide, or unhide a store; the user does that from the dashboard's tracker", b.storeCmd.Label())
 	}
 	// A batch writes to the one store its <tk:store> group names (b.store);
 	// a second group is already refused by the parse.
@@ -99,16 +100,20 @@ func supportPinProblems(p *wsxmlcmd.Problems, b *trackerBatch, store string) {
 var trackerOrigins = []string{wstracker.OriginAgent, wstracker.OriginAgentAuto}
 
 // trackerCommandDef is one tk: command: its grammar, and how it maps onto
-// its event's payload. build is nil for the two commands that are not
-// events (register, sync).
+// its event's payload. build is nil for the store commands, which are not
+// events (register, sync, unregister, relabel, hide, unhide).
 type trackerCommandDef struct {
 	spec  wsxmlcmd.Spec
 	build func(b *trackerBatch, cmd wsxmlcmd.Command, ev *trackerEvent)
 }
 
 const (
-	trackerRegister = "register"
-	trackerSync     = "sync"
+	trackerRegister   = "register"
+	trackerSync       = "sync"
+	trackerUnregister = "unregister"
+	trackerRelabel    = "relabel"
+	trackerHide       = "hide"
+	trackerUnhide     = "unhide"
 )
 
 // trackerEventAttrs are the attributes every event command takes besides
@@ -125,7 +130,7 @@ func trackerEventSpec(kind wsxmlcmd.Kind, attrs ...string) wsxmlcmd.Spec {
 
 // trackerCommands is the command table, keyed by name without the prefix:
 // each event type of the tracker's write schema under its own name, plus
-// register and sync. A body is the event's text field: the item body, the
+// the store commands. A body is the event's text field: the item body, the
 // comment, or the note.
 var trackerCommands = map[string]trackerCommandDef{
 	wstracker.TypeItemCreate: {trackerEventSpec(wsxmlcmd.Leaf, "kind", "title", "project", "due", "priority", "parent", "after", "mentions", "refs"), buildItemCreate},
@@ -213,6 +218,12 @@ var trackerCommands = map[string]trackerCommandDef{
 	}},
 	trackerRegister: {spec: wsxmlcmd.Spec{Kind: wsxmlcmd.Empty, Attrs: []string{"store", "member", "remote", "label", "org", "family", "given"}}},
 	trackerSync:     {spec: wsxmlcmd.Spec{Kind: wsxmlcmd.Empty, Attrs: []string{"store"}}},
+	// The machine-local store commands: they change this machine's registry
+	// (and, for unregister, delete the local clone), never the store.
+	trackerUnregister: {spec: wsxmlcmd.Spec{Kind: wsxmlcmd.Empty, Attrs: []string{"store", "confirm"}}},
+	trackerRelabel:    {spec: wsxmlcmd.Spec{Kind: wsxmlcmd.Empty, Attrs: []string{"store", "label"}}},
+	trackerHide:       {spec: wsxmlcmd.Spec{Kind: wsxmlcmd.Empty, Attrs: []string{"store"}}},
+	trackerUnhide:     {spec: wsxmlcmd.Spec{Kind: wsxmlcmd.Empty, Attrs: []string{"store"}}},
 }
 
 // trackerGrammar is the tk: language: the command table, and the tk:store
@@ -469,8 +480,9 @@ type trackerBatch struct {
 	byPos   map[int]wsxmlcmd.Command
 	eventOf map[int]int
 	store   string
-	// network is the register or sync command, when the batch is one.
-	network *wsxmlcmd.Command
+	// storeCmd is the store command (register, sync, unregister, relabel,
+	// hide, unhide), when the batch is one.
+	storeCmd *wsxmlcmd.Command
 }
 
 func (b *trackerBatch) required(cmd wsxmlcmd.Command, ev *trackerEvent, name string) {
@@ -658,9 +670,13 @@ func planTrackerBatch(p *wsxmlcmd.Problems, commands string, registered []wstrac
 		def := trackerCommands[name]
 		if def.build == nil {
 			if len(b.cmds) > 1 {
-				p.Add("%s: reaches the network and cannot be rolled back, so it stands alone in its batch", cmd.Label())
+				if name == trackerRegister || name == trackerSync {
+					p.Add("%s: reaches the network and cannot be rolled back, so it stands alone in its batch", cmd.Label())
+				} else {
+					p.Add("%s: changes this machine's store registry, not the store, and cannot be rolled back with a batch, so it stands alone in its batch", cmd.Label())
+				}
 			}
-			b.network = &b.cmds[i]
+			b.storeCmd = &b.cmds[i]
 			switch name {
 			case trackerRegister:
 				if store, ok := wsxmlcmd.RequiredAttr(p, cmd, "store"); ok && known[store] {
@@ -674,6 +690,14 @@ func planTrackerBatch(p *wsxmlcmd.Problems, commands string, registered []wstrac
 					}
 				} else if len(ids) == 0 {
 					p.Add("%s: no store is registered", cmd.Label())
+				}
+			case trackerUnregister, trackerRelabel, trackerHide, trackerUnhide:
+				if store, ok := wsxmlcmd.RequiredAttr(p, cmd, "store"); ok && !known[store] {
+					unknownStore(cmd.At("store"), store)
+				}
+				// label="" clears the label, so only its absence is refused.
+				if _, ok := cmd.Attr("label"); name == trackerRelabel && !ok {
+					p.Add("%s: required (label=\"\" clears the label back to the store id)", cmd.At("label"))
 				}
 			}
 			continue
@@ -847,11 +871,21 @@ func (s *Server) handleTrackerUpdate(ctx context.Context, id json.RawMessage, ar
 		return toolErrorTextResponse(id, s.trackerRefusal(tool, problems.List))
 	}
 	var text string
-	switch {
-	case b.network != nil && strings.TrimPrefix(b.network.Tag, trackerPrefix) == trackerRegister:
-		text, err = trackerRegisterCommand(ctx, h, *b.network)
-	case b.network != nil:
-		text, err = trackerSyncCommand(ctx, h, *b.network, registered)
+	storeCmd := ""
+	if b.storeCmd != nil {
+		storeCmd = strings.TrimPrefix(b.storeCmd.Tag, trackerPrefix)
+	}
+	switch storeCmd {
+	case trackerRegister:
+		text, err = trackerRegisterCommand(ctx, h, *b.storeCmd)
+	case trackerSync:
+		text, err = trackerSyncCommand(ctx, h, *b.storeCmd, registered)
+	case trackerUnregister:
+		text, err = trackerUnregisterCommand(ctx, h, *b.storeCmd, registered)
+	case trackerRelabel:
+		text, err = trackerRelabelCommand(h, *b.storeCmd)
+	case trackerHide, trackerUnhide:
+		text, err = trackerHideCommand(h, *b.storeCmd, storeCmd == trackerHide)
 	default:
 		var ids []wsledger.EventID
 		ids, err = h.DispatchWith(ctx, b.store, b.newEvents)
@@ -969,6 +1003,68 @@ func trackerSyncCommand(ctx context.Context, h *wstrackerhost.Host, cmd wsxmlcmd
 		return "", fmt.Errorf("%s: %d of %d stores failed to sync; nothing was lost, and the unpushed writes push on the next sync\n%s", cmd.Label(), failed, len(targets), strings.TrimRight(sb.String(), "\n"))
 	}
 	return sb.String(), nil
+}
+
+// trackerUnregisterCommand removes a store from this machine: its registry
+// entry and its local clone. The remote, when there is one, is left as it
+// is; a store with no remote holds its only copy here, so the host removes
+// it only when confirm names it. A refusal leaves the store as it was.
+func trackerUnregisterCommand(ctx context.Context, h *wstrackerhost.Host, cmd wsxmlcmd.Command, registered []wstrackerhost.StoreEntry) (string, error) {
+	store, _ := cmd.Attr("store")
+	confirm, _ := cmd.Attr("confirm")
+	var entry wstrackerhost.StoreEntry
+	for _, e := range registered {
+		if e.ID == store {
+			entry = e
+		}
+	}
+	err := h.Unregister(ctx, store, confirm)
+	var refusal *wstrackerhost.UnregisterRefusal
+	if errors.As(err, &refusal) {
+		if refusal.Kind == wstrackerhost.UnregisterNeedsConfirm {
+			return "", fmt.Errorf("%s: %q was not unregistered: %s. Its data is lost permanently; only when the user asked for that, send <%s%s store=%q confirm=%q/>", cmd.Label(), store, refusal.Reason, trackerPrefix, trackerUnregister, store, store)
+		}
+		return "", fmt.Errorf("%s: %q was not unregistered: %s", cmd.Label(), store, refusal.Reason)
+	}
+	if err != nil {
+		return "", fmt.Errorf("%s: %w. Nothing was removed", cmd.Label(), err)
+	}
+	if entry.Remote == "" {
+		return fmt.Sprintf("unregistered %s: removed from this machine, and its data deleted (it had no remote)\n", store), nil
+	}
+	return fmt.Sprintf("unregistered %s: removed from this machine, its local copy deleted; the remote %s was left as it is, so <%s%s> can register the store again\n", store, wstrackerhost.RedactCredentials(entry.Remote), trackerPrefix, trackerRegister), nil
+}
+
+// trackerRelabelCommand sets a store's display label on this machine;
+// label="" clears it back to the store id.
+func trackerRelabelCommand(h *wstrackerhost.Host, cmd wsxmlcmd.Command) (string, error) {
+	store, _ := cmd.Attr("store")
+	label, _ := cmd.Attr("label")
+	e, err := h.Relabel(store, label)
+	if errors.Is(err, wstrackerhost.ErrBadLabel) {
+		return "", fmt.Errorf("%s: %w; at most %d characters and no control character. Nothing changed", cmd.At("label"), err, wstrackerhost.MaxLabelLen)
+	}
+	if err != nil {
+		return "", fmt.Errorf("%s: %w. Nothing changed", cmd.Label(), err)
+	}
+	if e.Label == "" {
+		return fmt.Sprintf("relabeled %s: label cleared, shown as its id\n", e.ID), nil
+	}
+	return fmt.Sprintf("relabeled %s: label %q\n", e.ID, e.Label), nil
+}
+
+// trackerHideCommand hides or shows a store on this machine's dashboard; a
+// hidden store keeps working for every tracker read and write.
+func trackerHideCommand(h *wstrackerhost.Host, cmd wsxmlcmd.Command, hidden bool) (string, error) {
+	store, _ := cmd.Attr("store")
+	e, err := h.SetHidden(store, hidden)
+	if err != nil {
+		return "", fmt.Errorf("%s: %w. Nothing changed", cmd.Label(), err)
+	}
+	if hidden {
+		return fmt.Sprintf("hid %s: the dashboard leaves it out of its store list on this machine; the tracker tools still read and write it\n", e.ID), nil
+	}
+	return fmt.Sprintf("unhid %s: the dashboard lists it again\n", e.ID), nil
 }
 
 func formatTrackerSyncReport(rep wsledger.SyncReport) string {
@@ -1262,6 +1358,9 @@ func trackerStoreListJSON(summaries []trackerStoreSummary, profiles wstrackerhos
 		if e.Remote != "" {
 			row["remote"] = wstrackerhost.RedactCredentials(e.Remote)
 		}
+		if e.Hidden {
+			row["hidden"] = true
+		}
 		if sum.View != nil {
 			sum.View.Redact()
 			row["sync"] = sum.View.Sync
@@ -1275,7 +1374,7 @@ func trackerStoreListJSON(summaries []trackerStoreSummary, profiles wstrackerhos
 }
 
 // formatTrackerStoreList is the store list's text: one block per store
-// (its id and label, member, remote and sync state, and the user's open
+// (its id and label, member, whether it is hidden, remote and sync state, and the user's open
 // work counts), then the saved profiles, the one used last first.
 func formatTrackerStoreList(summaries []trackerStoreSummary, profiles wstrackerhost.SavedProfiles) string {
 	var sb strings.Builder
@@ -1291,6 +1390,10 @@ func formatTrackerStoreList(summaries []trackerStoreSummary, profiles wstrackerh
 			fmt.Fprintf(&sb, " (%s)", e.Label)
 		}
 		fmt.Fprintf(&sb, ", member %s", e.Member)
+		if e.Hidden {
+			// Hidden only from the dashboard's store list; still read here.
+			sb.WriteString(", hidden on the dashboard")
+		}
 		if sum.View == nil {
 			fmt.Fprintf(&sb, ", unreadable: %s\n", wstrackerhost.RedactCredentials(fmt.Sprint(sum.Err)))
 			continue

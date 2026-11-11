@@ -42,8 +42,11 @@ type supportHarness struct {
 	*harness
 	claude, pi *fakeBackend
 	stores     map[string]string
-	support    *Support
-	now        time.Time
+	// rootErr, when set, is what storeRoot answers for an unlisted store
+	// in place of ErrStoreUnregistered: a registry that cannot be read.
+	rootErr error
+	support *Support
+	now     time.Time
 }
 
 func newSupportHarness(t *testing.T) *supportHarness {
@@ -66,7 +69,10 @@ func (sh *supportHarness) storeRoot(id string) (string, error) {
 	if root, ok := sh.stores[id]; ok {
 		return root, nil
 	}
-	return "", fmt.Errorf("no registered store %q", id)
+	if err := sh.rootErr; err != nil {
+		return "", err
+	}
+	return "", fmt.Errorf("%w: %q", ErrStoreUnregistered, id)
 }
 
 // restart replaces the runner and the Support with fresh ones over the
@@ -188,6 +194,60 @@ func TestSupportNewConversationClosesTheOld(t *testing.T) {
 	// New with no open conversation just opens one.
 	if st, err := sh.support.New("beta"); err != nil || st.Root != sh.stores["beta"] {
 		t.Fatalf("New(beta) = %+v, %v", st, err)
+	}
+}
+
+// TestSupportCloseUnregisteredEndsARemovedStoresConversation: a store that
+// is no longer registered has its conversation closed and its mapping
+// dropped, also on disk; a registered store keeps its conversation; with no
+// store mapped nothing is read.
+func TestSupportCloseUnregisteredEndsARemovedStoresConversation(t *testing.T) {
+	sh := newSupportHarness(t)
+	reads := 0
+	sh.support.opts.StoreRoot = func(id string) (string, error) { reads++; return sh.storeRoot(id) }
+	if dropped := sh.support.CloseUnregistered(); len(dropped) != 0 || reads != 0 {
+		t.Fatalf("with no store mapped: dropped %v after %d store reads, want none and none", dropped, reads)
+	}
+	alpha := sh.send("alpha", "hello")
+	beta := sh.send("beta", "hi")
+	if dropped := sh.support.CloseUnregistered(); len(dropped) != 0 {
+		t.Fatalf("with every store registered, dropped %v", dropped)
+	}
+
+	delete(sh.stores, "alpha")
+	// A registry that cannot be read says nothing about the store.
+	sh.rootErr = errors.New("registry unreadable")
+	if dropped := sh.support.CloseUnregistered(); len(dropped) != 0 || sh.state(alpha.ID).Status == StatusClosed {
+		t.Fatalf("an unreadable registry dropped %v", dropped)
+	}
+	sh.rootErr = nil
+	if dropped := sh.support.CloseUnregistered(); !reflect.DeepEqual(dropped, []string{"alpha"}) {
+		t.Fatalf("dropped %v, want [alpha]", dropped)
+	}
+	if st := sh.state(alpha.ID); st.Status != StatusClosed {
+		t.Fatalf("the unregistered store's conversation is %s, want closed", st.Status)
+	}
+	if st := sh.state(beta.ID); st.Status == StatusClosed {
+		t.Fatal("a registered store's conversation was closed")
+	}
+	if c := sh.storeConv("beta"); c == nil || c.ID != beta.ID {
+		t.Fatalf("beta maps %+v, want %s", c, beta.ID)
+	}
+	raw, err := os.ReadFile(filepath.Join(sh.dir, supportFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var saved supportState
+	if err := json.Unmarshal(raw, &saved); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := saved.Stores["alpha"]; ok || saved.Stores["beta"] != beta.ID {
+		t.Fatalf("support.json maps %v, want beta alone", saved.Stores)
+	}
+	// A store registered again under the id starts a fresh conversation.
+	sh.stores["alpha"] = t.TempDir()
+	if st := sh.send("alpha", "back"); st.ID == alpha.ID {
+		t.Fatalf("the re-registered store reopened the closed conversation %s", st.ID)
 	}
 }
 

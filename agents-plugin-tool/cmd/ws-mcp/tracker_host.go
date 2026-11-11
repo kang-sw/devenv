@@ -20,6 +20,11 @@ import (
 // same bound a tk:register gets for a clone of the remote.
 const dashboardRegisterTimeout = 3 * time.Minute
 
+// dashboardUnregisterTimeout bounds an unregister from the dashboard: the
+// host refuses within seconds when the store is busy, so the rest is the
+// deletion of the local clone, which a large store can stretch.
+const dashboardUnregisterTimeout = time.Minute
+
 // dashboardViewWait bounds how long a page read waits for a store's reload
 // before it serves the last folded state (wstrackerhost.ViewWithin): a
 // reload can wait behind a push or fetch holding the store's lock.
@@ -56,10 +61,12 @@ func readError(err error) error {
 // wstrackerhost.Host, the host its background poll also runs on. err is
 // wstrackerhost.New's error: then every method returns it, so the tracker
 // routes answer 503 and the page's "+ store" dialog shows why. Every string
-// it hands the dashboard has credentials redacted.
+// it hands the dashboard has credentials redacted. unregistered, when set,
+// runs after each unregister that removed a store.
 type dashboardTracker struct {
-	h   *wstrackerhost.Host
-	err error
+	h            *wstrackerhost.Host
+	err          error
+	unregistered func()
 }
 
 var (
@@ -102,9 +109,73 @@ func (t *dashboardTracker) Stores() ([]wsdashboard.TrackerStore, error) {
 	}
 	out := make([]wsdashboard.TrackerStore, 0, len(entries))
 	for _, e := range entries {
-		out = append(out, wsdashboard.TrackerStore{ID: e.ID, Label: e.Label, Member: e.Member, Remote: wstrackerhost.RedactCredentials(e.Remote)})
+		out = append(out, dashboardStore(e))
 	}
 	return out, nil
+}
+
+// dashboardStore is a registry entry as the stores route lists it, its
+// remote redacted.
+func dashboardStore(e wstrackerhost.StoreEntry) wsdashboard.TrackerStore {
+	return wsdashboard.TrackerStore{ID: e.ID, Label: e.Label, Member: e.Member, Remote: wstrackerhost.RedactCredentials(e.Remote), Hidden: e.Hidden}
+}
+
+// registryError maps a registry write's error onto the dashboard's: a
+// store no longer registered is ErrTrackerUnknownStore, a refused label
+// ErrTrackerBadLabel, each keeping the redacted message; the rest is only
+// redacted.
+func registryError(err error) error {
+	for _, m := range []struct{ host, dash error }{
+		{wstrackerhost.ErrNotRegistered, wsdashboard.ErrTrackerUnknownStore},
+		{wstrackerhost.ErrBadLabel, wsdashboard.ErrTrackerBadLabel},
+	} {
+		if errors.Is(err, m.host) {
+			return fmt.Errorf("%w: %v", m.dash, redacted(err))
+		}
+	}
+	return redacted(err)
+}
+
+// Unregister removes the store from this machine. A refusal becomes the
+// dashboard's, its reason a sentence that names the store.
+func (t *dashboardTracker) Unregister(ctx context.Context, id, confirm string) error {
+	if t.err != nil {
+		return redacted(t.err)
+	}
+	ctx, cancel := context.WithTimeout(ctx, dashboardUnregisterTimeout)
+	defer cancel()
+	err := t.h.Unregister(ctx, id, confirm)
+	if err == nil && t.unregistered != nil {
+		t.unregistered()
+	}
+	var refusal *wstrackerhost.UnregisterRefusal
+	if errors.As(err, &refusal) {
+		return &wsdashboard.TrackerUnregisterRefusal{Kind: refusal.Kind,
+			Message: wstrackerhost.RedactCredentials(fmt.Sprintf("The store %s was not unregistered: %s.", refusal.Store, refusal.Reason))}
+	}
+	return registryError(err)
+}
+
+func (t *dashboardTracker) Relabel(id, label string) (wsdashboard.TrackerStore, error) {
+	if t.err != nil {
+		return wsdashboard.TrackerStore{}, redacted(t.err)
+	}
+	e, err := t.h.Relabel(id, label)
+	if err != nil {
+		return wsdashboard.TrackerStore{}, registryError(err)
+	}
+	return dashboardStore(e), nil
+}
+
+func (t *dashboardTracker) SetHidden(id string, hidden bool) (wsdashboard.TrackerStore, error) {
+	if t.err != nil {
+		return wsdashboard.TrackerStore{}, redacted(t.err)
+	}
+	e, err := t.h.SetHidden(id, hidden)
+	if err != nil {
+		return wsdashboard.TrackerStore{}, registryError(err)
+	}
+	return dashboardStore(e), nil
 }
 
 func (t *dashboardTracker) View(ctx context.Context, id string) (wsdashboard.TrackerView, error) {

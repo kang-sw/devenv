@@ -22,8 +22,9 @@ alone.
   user's own member identity and marked as an agent's, so leave `origin` at
   its default.
 - `tracker.update` writes to your store alone: a command naming another store
-  is refused, and so are `tk:register` and `tk:sync`. The store pushes your
-  writes on its own schedule, and the user can sync it from the drawer.
+  is refused, and so are the store commands `tk:register`, `tk:sync`,
+  `tk:unregister`, `tk:relabel`, `tk:hide`, and `tk:unhide`. The store pushes
+  your writes on its own schedule, and the user can sync it from the drawer.
 - Your store's wikis are read with `wiki.query` and edited with `wiki.update`,
   which reach your store alone: read a page first, then save with the `base`
   commit the read returned.

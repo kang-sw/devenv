@@ -260,3 +260,44 @@ func TestStoreStampStatsLooseRefs(t *testing.T) {
 		t.Fatalf("storeStamp did not read packed-refs through the seam: %q", read)
 	}
 }
+
+// TestWatchSeesRegistryOnlyChanges: a relabel, a hide, and an unregister by
+// another process each move no journal or ref of the store, yet each calls
+// the change callback, and the unregister retires the daemon's handle.
+func TestWatchSeesRegistryOnlyChanges(t *testing.T) {
+	w := newWorld(t)
+	daemon := w.machine("ada")
+	w.register(daemon, "team", "ada", &wstracker.Profile{Given: "Ada"})
+	syncStore(t, daemon, "team")
+	other := sameRoot(t, w, "ada")
+	_ = view(t, daemon, "team")
+	st := daemon.stores["team"]
+
+	var changes counter
+	stop := daemon.StartWatch(20*time.Millisecond, changes.inc)
+	defer stop()
+	step := func(what string, do func() error) {
+		t.Helper()
+		time.Sleep(100 * time.Millisecond)
+		changes.reset()
+		if err := do(); err != nil {
+			t.Fatalf("%s: %v", what, err)
+		}
+		waitFor(t, 5*time.Second, "the change callback after "+what, func() bool { return changes.get() > 0 })
+	}
+	step("a relabel", func() error { _, err := other.Relabel("team", "Board"); return err })
+	step("a hide", func() error { _, err := other.SetHidden("team", true); return err })
+	step("a show", func() error { _, err := other.SetHidden("team", false); return err })
+	step("an unregister", func() error { return other.Unregister(context.Background(), "team", "") })
+	waitFor(t, 5*time.Second, "the daemon's handle to be retired", func() bool {
+		daemon.mu.Lock()
+		defer daemon.mu.Unlock()
+		return len(daemon.stores) == 0
+	})
+	st.mu.Lock()
+	retired := st.retired && st.ledger == nil
+	st.mu.Unlock()
+	if !retired {
+		t.Fatal("the daemon must close the ledger of a store another process unregistered")
+	}
+}

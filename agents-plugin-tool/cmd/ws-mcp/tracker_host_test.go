@@ -261,6 +261,70 @@ func TestDashboardTrackerWithoutAHostReturnsItsError(t *testing.T) {
 	check("Render", err)
 	_, err = dt.Search(ctx, "team", "x")
 	check("Search", err)
+	check("Unregister", dt.Unregister(ctx, "team", "team"))
+	_, err = dt.Relabel("team", "x")
+	check("Relabel", err)
+	_, err = dt.SetHidden("team", true)
+	check("SetHidden", err)
+}
+
+// TestDashboardTrackerRegistryWrites: relabel and hide answer the store as
+// written and the store list carries the hidden flag; a refused label maps
+// onto ErrTrackerBadLabel, a store gone onto ErrTrackerUnknownStore; an
+// unregister of the no-remote store without the typed id is the
+// dashboard's refusal of kind "confirm", naming the store, and with it
+// removes the store and runs the unregistered hook once.
+func TestDashboardTrackerRegistryWrites(t *testing.T) {
+	dt, _ := newTestTracker(t)
+	ctx := context.Background()
+	hooked := 0
+	dt.unregistered = func() { hooked++ }
+
+	st, err := dt.Relabel("team", "  Renamed  ")
+	if err != nil || st != (wsdashboard.TrackerStore{ID: "team", Label: "Renamed", Member: "ada"}) {
+		t.Fatalf("Relabel = %+v, %v", st, err)
+	}
+	for _, bad := range []string{strings.Repeat("x", wstrackerhost.MaxLabelLen+1), "two\nlines"} {
+		if _, err := dt.Relabel("team", bad); !errors.Is(err, wsdashboard.ErrTrackerBadLabel) {
+			t.Errorf("Relabel(%q) = %v, want ErrTrackerBadLabel", bad, err)
+		}
+	}
+	if st, err = dt.SetHidden("team", true); err != nil || !st.Hidden {
+		t.Fatalf("SetHidden = %+v, %v", st, err)
+	}
+	if stores, err := dt.Stores(); err != nil || len(stores) != 1 || !stores[0].Hidden || stores[0].Label != "Renamed" {
+		t.Fatalf("Stores after relabel and hide = %+v, %v", stores, err)
+	}
+
+	err = dt.Unregister(ctx, "team", "")
+	var refusal *wsdashboard.TrackerUnregisterRefusal
+	if !errors.As(err, &refusal) || refusal.Kind != wsdashboard.TrackerUnregisterConfirm || !strings.Contains(refusal.Message, "team") {
+		t.Fatalf("Unregister without the typed id = %#v (%v), want a confirm refusal naming the store", err, err)
+	}
+	if hooked != 0 {
+		t.Fatalf("a refused unregister ran the hook %d times", hooked)
+	}
+	if err := dt.Unregister(ctx, "team", "team"); err != nil {
+		t.Fatalf("Unregister with the typed id = %v", err)
+	}
+	if hooked != 1 {
+		t.Fatalf("the unregistered hook ran %d times, want 1", hooked)
+	}
+	if stores, err := dt.Stores(); err != nil || len(stores) != 0 {
+		t.Fatalf("Stores after unregister = %+v, %v", stores, err)
+	}
+	if err := dt.Unregister(ctx, "team", "team"); !errors.Is(err, wsdashboard.ErrTrackerUnknownStore) {
+		t.Errorf("Unregister of a removed store = %v, want ErrTrackerUnknownStore", err)
+	}
+	if _, err := dt.Relabel("team", "x"); !errors.Is(err, wsdashboard.ErrTrackerUnknownStore) {
+		t.Errorf("Relabel of a removed store = %v, want ErrTrackerUnknownStore", err)
+	}
+	if _, err := dt.SetHidden("team", false); !errors.Is(err, wsdashboard.ErrTrackerUnknownStore) {
+		t.Errorf("SetHidden of a removed store = %v, want ErrTrackerUnknownStore", err)
+	}
+	if hooked != 1 {
+		t.Fatalf("a failed unregister ran the hook: %d runs", hooked)
+	}
 }
 
 // TestDashboardTrackerSearch: the search route's host runs the shared

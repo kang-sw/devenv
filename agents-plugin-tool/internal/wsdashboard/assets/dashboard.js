@@ -3334,8 +3334,10 @@
   // below; the stream's "tracker" event reloads it, one reload in flight
   // and at most one queued. Seen marks are only ever added, so a read unites
   // the daemon's marks with the local copy, which may hold marks still being
-  // posted.
-  var tkApi = null, tkOrder = [], tkViews = {}, tkErrs = {}, tkSeen = {}, tkHostErr = null, tkSubs = [];
+  // posted. A store hidden on this machine is left out of tkOrder (the
+  // handles) and its view is not read; tkHidden lists it for the "+ store"
+  // dialog, and tkInfo holds every listed store's registry entry.
+  var tkApi = null, tkOrder = [], tkHidden = [], tkInfo = {}, tkViews = {}, tkErrs = {}, tkSeen = {}, tkHostErr = null, tkSubs = [];
   var tkSupport = false, tkBusy = false, tkQueued = false, tkNext = [], tkLastRev = null, tkNudgedRev = null;
   function tkUrl(id, op) { return "/tracker/stores/" + encodeURIComponent(id) + "/" + op; }
   // tkFetch calls a tracker route, a POST when body is given; done(status,
@@ -3386,12 +3388,17 @@
   // done's caller to announce.
   function tkReadAll(listed, done) {
     tkFetch("/tracker/stores", undefined, function (status, v) {
-      if (status === 503) { tkHostErr = tkErrText(status, v); tkOrder = []; }
+      if (status === 503) { tkHostErr = tkErrText(status, v); tkOrder = []; tkHidden = []; tkInfo = {}; }
       if (status === 200) {
         tkHostErr = null;
         tkSupport = !!v.support;
         if (typeof v.rev === "number") tkLastRev = v.rev;
-        tkOrder = (Array.isArray(v.stores) ? v.stores : []).map(function (s) { return String(s.id); });
+        tkOrder = []; tkHidden = []; tkInfo = {};
+        (Array.isArray(v.stores) ? v.stores : []).forEach(function (s) {
+          var id = String(s.id);
+          tkInfo[id] = { id: id, label: String(s.label || ""), remote: String(s.remote || ""), hidden: !!s.hidden };
+          (s.hidden ? tkHidden : tkOrder).push(id);
+        });
         var keep = {};
         tkOrder.forEach(function (id) { keep[id] = true; });
         [tkViews, tkErrs, tkSeen].forEach(function (m) { Object.keys(m).forEach(function (id) { if (!keep[id]) delete m[id]; }); });
@@ -3431,11 +3438,25 @@
       if (tkQueued) tkReload();
     });
   }
+  // tkRegistryWrite posts one of a store's registry writes (label, hidden,
+  // unregister) and answers done after the reload that shows it; a refusal
+  // passes on its message and kind.
+  function tkRegistryWrite(id, op, body, done) {
+    tkFetch(tkUrl(id, op), body, function (status, v) {
+      if (status === 200 || status === 204) tkReload(function () { done({ ok: true }); });
+      else done({ ok: false, error: tkErrText(status, v), kind: String(v.kind || "") });
+    });
+  }
   var tkAdapter = {
     stores: function () { return tkOrder.slice(); },
     view: function (id) { return tkViews[id] || null; },
     error: function (id) { return tkViews[id] ? null : tkErrs[id] || null; },
     hostError: function () { return tkHostErr; },
+    hidden: function () { return tkHidden.slice(); },
+    info: function (id) { return tkInfo[id] || null; },
+    relabel: function (id, label, done) { tkRegistryWrite(id, "label", { label: label }, done); },
+    setHidden: function (id, hidden, done) { tkRegistryWrite(id, "hidden", { hidden: !!hidden }, done); },
+    unregister: function (id, confirm, done) { tkRegistryWrite(id, "unregister", { confirm: confirm || "" }, done); },
     seen: function (id) { return tkMarks(tkSeen[id]); },
     markSeen: function (id, add) {
       var badge = (add && add.badge) || [], read = (add && add.read) || [];
@@ -3684,6 +3705,12 @@
     Object.keys(supChats).forEach(function (id) {
       var c = supChats[id];
       if (id !== name || !supShown(slot)) { supClose(c); if (c.pop) supPop(c, false); }
+      // a store no longer listed (hidden, or unregistered, which ended its
+      // conversation) drops its chat with its draft and log
+      if (tkOrder.indexOf(id) < 0) {
+        if (c.root.parentNode) c.root.parentNode.removeChild(c.root);
+        delete supChats[id];
+      }
     });
     if (!supShown(slot)) return;
     var c = supChat(name);
@@ -4179,6 +4206,10 @@
   var tlBaseKeys = {}, tlHidden = [], tlLastU = null;
   function tlTracker(u) {
     tlLastU = u;
+    // a store no longer listed forgets its baseline and waiting arrivals;
+    // listed again, it sets a new baseline silently
+    Object.keys(tlBaseKeys).forEach(function (s) { if (tkOrder.indexOf(s) < 0) delete tlBaseKeys[s]; });
+    tlHidden = tlHidden.filter(function (x) { return tkOrder.indexOf(x.store) >= 0; });
     tlTk = u && u.ready ? u.entries.length : 0;
     if (u && u.ready) {
       var base = tlBaseKeys[u.store];

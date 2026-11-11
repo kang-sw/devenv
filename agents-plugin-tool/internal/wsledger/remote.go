@@ -631,7 +631,7 @@ func (l *Ledger) onDeadline() {
 // and no claim. ErrIDTaken means another join claimed the member id first;
 // any other failure after the push landed is a *PushedError.
 func Register(ctx context.Context, opts Options, url string) (*Ledger, error) {
-	l, err := newLedger(ctx, opts)
+	l, err := newLedger(ctx, opts, true)
 	if err != nil {
 		return nil, err
 	}

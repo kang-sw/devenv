@@ -521,7 +521,9 @@ lead when the daemon holds an open agent record for the key's reply-id that
 names this key at the key's root, and that record's profile, resolved at
 call time, names the tool. Its writes are pinned to the store whose
 canonical registry `Dir` equals that root (any other `store` is refused),
-and `tk:register` and `tk:sync` stay refused; every other spawned key is
+and the store commands (`tk:register`, `tk:sync`, `tk:unregister`,
+`tk:relabel`, `tk:hide`, `tk:unhide`) stay refused, since the conversation
+runs in its store's clone; every other spawned key is
 refused as before. `tracker.show {item}` is that conversation's card call:
 an item of its own store answers `card <store> <alias>` plus the mini-card
 fields, which the chat draws as a card; another store's item is answered as

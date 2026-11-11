@@ -2,6 +2,8 @@ package wstrackerhost
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -91,10 +93,20 @@ type Host struct {
 // store is one registered store as this process holds it. mu serializes
 // this process's operations on it; the ledger serializes across processes.
 type store struct {
-	mu      storeLock
+	mu storeLock
+	// id and nonce name the registration the handle was made for
+	// (StoreEntry.ID and Nonce). They never change, so they are read
+	// without mu.
+	id, nonce string
+	// entry is the registry entry as last read under mu (lockStore).
 	entry   StoreEntry
 	ledger  *wsledger.Ledger
 	tracker *wstracker.Tracker
+	// retired: the registration this handle was made for is gone (the
+	// store was unregistered, here or by another process), so the handle
+	// left the host's map with its ledger closed; whoever still holds it
+	// asks the host again. Guarded by mu.
+	retired bool
 	// lastSweep is when the staged-attachment sweep last ran
 	// (attachments.go).
 	lastSweep time.Time
@@ -114,8 +126,9 @@ func (systemClock) AfterFunc(d time.Duration, f func()) wsledger.Timer {
 	return time.AfterFunc(d, f)
 }
 
-// New returns a Host over opts.Root. It touches nothing on disk until a
-// store is registered or opened.
+// New returns a Host over opts.Root. It writes nothing on disk until a
+// store is registered or opened, apart from deleting what an interrupted
+// Unregister left behind (sweepRemoved).
 func New(opts Options) (*Host, error) {
 	root := opts.Root
 	if root == "" {
@@ -136,6 +149,7 @@ func New(opts Options) (*Host, error) {
 	if h.checkInterval <= 0 {
 		h.checkInterval = DefaultCheckInterval
 	}
+	h.sweepRemoved()
 	return h, nil
 }
 
@@ -168,7 +182,7 @@ func (h *Host) store(id string) (*store, error) {
 	if err != nil {
 		return nil, err
 	}
-	st := &store{entry: e}
+	st := &store{id: e.ID, nonce: e.Nonce, entry: e}
 	h.stores[id] = st
 	return st, nil
 }
@@ -220,6 +234,16 @@ func (l *storeLock) c() chan struct{} {
 
 func (l *storeLock) Lock() { l.c() <- struct{}{} }
 
+// tryLock takes the lock when it is free right now.
+func (l *storeLock) tryLock() bool {
+	select {
+	case l.c() <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
 func (l *storeLock) Unlock() {
 	select {
 	case <-l.c():
@@ -251,25 +275,124 @@ func (l *storeLock) lockWithin(ctx context.Context, d time.Duration) error {
 // with runs fn on the opened store id under its lock, waiting for the lock
 // at most the bound ctx carries (WithLockWait).
 func (h *Host) with(ctx context.Context, id string, fn func(*store) error) error {
-	st, err := h.store(id)
+	wait, bounded := ctx.Value(lockWaitKey{}).(time.Duration)
+	st, err := h.lockStore(ctx, id, wait, bounded)
 	if err != nil {
 		return err
 	}
-	if d, ok := ctx.Value(lockWaitKey{}).(time.Duration); ok {
-		if err := st.mu.lockWithin(ctx, d); err != nil {
-			if errors.Is(err, ErrStoreBusy) {
-				return fmt.Errorf("%w: %q", ErrStoreBusy, id)
-			}
-			return err
-		}
-	} else {
-		st.mu.Lock()
-	}
 	defer st.mu.Unlock()
-	if err := h.open(ctx, st); err != nil {
+	if err = h.open(ctx, st); err == nil {
+		err = fn(st)
+	}
+	if err != nil {
+		// A store another process unregistered while the call ran fails on
+		// its missing directory; the caller is told what happened instead.
+		if _, gone := h.Entry(id); errors.Is(gone, ErrNotRegistered) {
+			h.retire(st)
+			return gone
+		}
+	}
+	return err
+}
+
+// lockStore returns this process's handle on the registered store id with
+// its mu held; bounded gives up after wait (ErrStoreBusy).
+//
+// Another process may have unregistered the store, and registered the id
+// again, since this one cached the handle, so the registry entry is read
+// again under the lock and its registration nonce compared. A handle whose
+// registration is gone is retired (ledger closed, idle push timer stopped):
+// the call then answers ErrNotRegistered, or goes on with a fresh handle on
+// the new registration. An entry that is the same registration replaces the
+// cached one, which is how a relabel reaches an open store.
+func (h *Host) lockStore(ctx context.Context, id string, wait time.Duration, bounded bool) (*store, error) {
+	for {
+		st, err := h.store(id)
+		if err != nil {
+			return nil, err
+		}
+		if bounded {
+			if err := st.mu.lockWithin(ctx, wait); err != nil {
+				if errors.Is(err, ErrStoreBusy) {
+					return nil, fmt.Errorf("%w: %q", ErrStoreBusy, id)
+				}
+				return nil, err
+			}
+		} else {
+			st.mu.Lock()
+		}
+		cur, err := h.Entry(id)
+		if err == nil && !st.retired && cur.Nonce == st.nonce {
+			st.entry = cur
+			return st, nil
+		}
+		if err != nil && !errors.Is(err, ErrNotRegistered) {
+			st.mu.Unlock()
+			return nil, err
+		}
+		h.retire(st)
+		st.mu.Unlock()
+		if err != nil {
+			return nil, err
+		}
+	}
+}
+
+// retire closes st's ledger, which stops its idle push timer, and takes st
+// out of the host's map. Callers hold st.mu.
+func (h *Host) retire(st *store) {
+	if st.ledger != nil {
+		st.ledger.Close()
+		st.ledger, st.tracker = nil, nil
+	}
+	st.retired = true
+	h.mu.Lock()
+	if h.stores[st.id] == st {
+		delete(h.stores, st.id)
+	}
+	h.mu.Unlock()
+}
+
+// retireStale retires every cached handle whose registration is not among
+// entries, skipping one that is busy (its next call retires it).
+func (h *Host) retireStale(entries []StoreEntry) {
+	nonces := make(map[string]string, len(entries))
+	for _, e := range entries {
+		nonces[e.ID] = e.Nonce
+	}
+	h.mu.Lock()
+	var stale []*store
+	for id, st := range h.stores {
+		if nonce, ok := nonces[id]; !ok || nonce != st.nonce {
+			stale = append(stale, st)
+		}
+	}
+	h.mu.Unlock()
+	for _, st := range stale {
+		if !st.mu.tryLock() {
+			continue
+		}
+		// The registry may have moved since entries was read.
+		if cur, err := h.Entry(st.id); errors.Is(err, ErrNotRegistered) || (err == nil && cur.Nonce != st.nonce) {
+			h.retire(st)
+		}
+		st.mu.Unlock()
+	}
+}
+
+// checkRegistered fails unless st is still the registration the registry
+// holds under its id. A write runs it once it holds the store's write lock:
+// Unregister holds that lock from before its unpushed check until the entry
+// is gone, so a write that passes cannot land in a store being removed.
+func (h *Host) checkRegistered(st *store) error {
+	cur, err := h.Entry(st.id)
+	if err != nil {
 		return err
 	}
-	return fn(st)
+	if cur.Nonce != st.nonce {
+		return fmt.Errorf("tracker: store %q was unregistered and registered again during the call; retry", st.id)
+	}
+	return nil
 }
 
 // Close stops the background reloads and closes every open store. Unpushed
@@ -376,7 +499,12 @@ func (h *Host) Register(ctx context.Context, req RegisterRequest) (RegisterResul
 	if _, err := h.Entry(req.ID); err == nil {
 		return res, fmt.Errorf("tracker: store %q is already registered", req.ID)
 	}
-	entry := StoreEntry{ID: req.ID, Label: req.Label, Remote: req.Remote, Dir: filepath.Join(h.root, req.ID), Member: req.Member}
+	// A handle this process still caches for an earlier registration of the
+	// id, which another process unregistered, is retired first.
+	if stores, err := h.Stores(); err == nil {
+		h.retireStale(stores)
+	}
+	entry := StoreEntry{ID: req.ID, Label: req.Label, Remote: req.Remote, Dir: filepath.Join(h.root, req.ID), Member: req.Member, Nonce: newNonce()}
 	if err := os.MkdirAll(h.root, 0o700); err != nil {
 		return res, err
 	}
@@ -391,7 +519,7 @@ func (h *Host) Register(ctx context.Context, req RegisterRequest) (RegisterResul
 	// written, so a concurrent check that finds the new registry entry waits
 	// for this registration instead of opening a second ledger on the
 	// directory.
-	st := &store{entry: entry}
+	st := &store{id: entry.ID, nonce: entry.Nonce, entry: entry}
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	h.mu.Lock()
@@ -457,6 +585,15 @@ func (h *Host) Register(ctx context.Context, req RegisterRequest) (RegisterResul
 	res.Entry = entry
 	_ = h.SaveProfile(profile) // the store is registered; a lost profile save costs only the default
 	return res, nil
+}
+
+// newNonce returns a fresh registration nonce (StoreEntry.Nonce).
+func newNonce() string {
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		panic(err)
+	}
+	return hex.EncodeToString(b)
 }
 
 // writeProfile writes a member.profile carrying the fields of want that
@@ -530,6 +667,9 @@ func (h *Host) DispatchWith(ctx context.Context, id string, build func(next wsle
 			return fmt.Errorf("tracker: store write lock %s not acquired: %v", fl.Path(), err)
 		}
 		defer fl.Unlock() //nolint:errcheck
+		if err := h.checkRegistered(st); err != nil {
+			return err
+		}
 		if _, err := st.ledger.Reload(ctx); err != nil {
 			return err
 		}

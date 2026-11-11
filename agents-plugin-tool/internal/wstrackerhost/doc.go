@@ -10,7 +10,7 @@
 // the global config file, so it follows $WS_CONFIG_HOME like the machine
 // note layer (default ~/.ws/tracker).
 //
-//	<root>/stores.json      the registry: id, label, remote URL, directory, member id
+//	<root>/stores.json      the registry: id, label, remote URL, directory, member id, hidden flag, registration nonce
 //	<root>/profiles.json    machine-local saved profiles; never written to a ledger
 //	<root>/keys/            the personal signing key, passed to wsledger as KeyDir
 //	<root>/<store id>/      one store's wsledger directory (its bare repository is repo.git)
@@ -18,6 +18,7 @@
 //	<root>/<store id>/write.lock      held across one write's reload, build, and append
 //	<root>/<store id>/ui-seen.json    what the viewer has seen: badge and read marks, written by the daemon only
 //	<root>/poll.lock        held by the process that runs the background poll
+//	<root>/.removed-*       a store directory Unregister renamed away and is deleting
 //
 // All of a user's registered stores are shown in every session; the
 // registry is per machine, not per project.
@@ -49,9 +50,11 @@
 // a push or fetch holding the store's lock, and calls the same callback
 // when the reload it left behind lands. View, the MCP tools' read, waits.
 //
-// A Host keeps every store it opened open until Close, so wsledger's
-// in-process idle push still fires in a process that wrote, with or without
-// the daemon. Every read and write first reloads the store directory
+// A Host keeps every store it opened open until Close or until the store is
+// unregistered, so wsledger's in-process idle push still fires in a process
+// that wrote, with or without the daemon. Another process may unregister a
+// store this one holds open (Unregister), so every call re-reads the
+// store's registry entry before it reuses the open store (lockStore). Every read and write first reloads the store directory
 // (wsledger Reload), because the daemon and other sessions' processes share
 // it.
 package wstrackerhost

@@ -54,12 +54,12 @@ func readSeen(dir string) (Seen, error) {
 // Seen returns store id's seen marks; a store with no ui-seen.json has
 // none. An unregistered id is an error.
 func (h *Host) Seen(id string) (Seen, error) {
+	h.seenMu.Lock()
+	defer h.seenMu.Unlock()
 	e, err := h.Entry(id)
 	if err != nil {
 		return Seen{}, err
 	}
-	h.seenMu.Lock()
-	defer h.seenMu.Unlock()
 	return readSeen(e.Dir)
 }
 
@@ -69,14 +69,16 @@ func (h *Host) Seen(id string) (Seen, error) {
 // It takes only seenMu, never the store's mu or its ledger: a store's mu
 // is held across network calls of up to a minute, and a mark must not wait
 // for one. Only the dashboard daemon, a single instance per machine,
-// writes this file, so one in-process mutex is the whole exclusion.
+// writes this file, so one in-process mutex is the whole exclusion. The
+// entry is read under it, and Unregister holds it around the removal, so a
+// mark never lands in a directory this process is removing.
 func (h *Host) MarkSeen(id string, add Seen) error {
+	h.seenMu.Lock()
+	defer h.seenMu.Unlock()
 	e, err := h.Entry(id)
 	if err != nil {
 		return err
 	}
-	h.seenMu.Lock()
-	defer h.seenMu.Unlock()
 	have, err := readSeen(e.Dir)
 	if err != nil {
 		return err
