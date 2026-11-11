@@ -412,19 +412,6 @@
     "261110-feat-ws-tracker-superior-settable-status-and-new-statuses": {
       "registered_at": "2026-11-10T06:18:04Z"
     },
-    "261110-feat-ws-tracker-workload-balance-view": {
-      "registered_at": "2026-11-10T06:49:12Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-11T07:53:59Z",
-        "impl": {
-          "branch": "impl/develop/spied-quirk-satin"
-        }
-      }
-    },
     "261110-feat-ws-whiteboard-item-field-html": {
       "registered_at": "2026-11-10T11:16:39Z",
       "lease": {
