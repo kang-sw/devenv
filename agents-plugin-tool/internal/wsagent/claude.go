@@ -397,6 +397,41 @@ func (p claudeProcess) SetPermissionMode(mode string) error {
 	return p.request("set_permission_mode", map[string]any{"subtype": "set_permission_mode", "mode": mode})
 }
 
+// mcpReconnectTimeout bounds the wait for an mcp_reconnect's answer, which
+// comes once the server has started again.
+var mcpReconnectTimeout = time.Minute
+
+// MCPStatus asks a lead's harness for its MCP servers and their status
+// (Claude Code's mcp_status control).
+func (p claudeProcess) MCPStatus() ([]MCPServer, error) {
+	if !p.lead {
+		return nil, ErrUnsupported
+	}
+	body, err := p.requestBody("mcp_status", map[string]any{"subtype": "mcp_status"}, controlTimeout)
+	if err != nil {
+		return nil, err
+	}
+	var d struct {
+		MCPServers []MCPServer `json:"mcpServers"`
+	}
+	if len(body) > 0 && json.Unmarshal(body, &d) != nil {
+		return nil, errors.New("unreadable mcp_status answer")
+	}
+	return d.MCPServers, nil
+}
+
+// ReconnectMCP reconnects one of a lead's MCP servers in-stream (Claude
+// Code's mcp_reconnect control, which answers once the server is back or
+// failed again). The /mcp reconnect command is refused under print mode;
+// the control is not.
+func (p claudeProcess) ReconnectMCP(server string) error {
+	if !p.lead {
+		return ErrUnsupported
+	}
+	_, err := p.requestBody("mcp_reconnect", map[string]any{"subtype": "mcp_reconnect", "serverName": server}, mcpReconnectTimeout)
+	return err
+}
+
 // AnswerApproval answers a can_use_tool request on the child's input: allow
 // hands the tool call's input back unchanged, deny carries the message the
 // model reads.
@@ -474,10 +509,29 @@ type claudeMapper struct {
 	// approvals are the can_use_tool requests not seen settled, request id
 	// by tool call id.
 	approvals map[string]string
+
+	// retrying is set from an api_retry line until a response or the turn's
+	// end settles it.
+	retrying bool
+	// rejected are the usage limits the last rate-limit lines reported as
+	// refusing requests, each with its reset time (epoch ms; 0 unknown).
+	rejected map[string]int64
+	// spawns are the lead's Agent calls not yet started as a task (their
+	// requested model and effort), and subs the running subagent tasks'
+	// telemetry; both by the Agent call's tool call id.
+	spawns map[string]claudeSpawn
+	subs   map[string]*claudeSub
+}
+
+// claudeSpawn is what a lead's Agent call asked of its subagent: the model
+// (the call's model parameter) and the effort its subagent type carries.
+type claudeSpawn struct {
+	model, effort string
 }
 
 func newClaudeMapper(spec StartSpec) *claudeMapper {
-	return &claudeMapper{spec: spec, now: time.Now, batches: newBatchTracker("c"), limits: map[string]wslive.UsageLimit{}, tasks: map[string]bool{}, approvals: map[string]string{}}
+	return &claudeMapper{spec: spec, now: time.Now, batches: newBatchTracker("c"), limits: map[string]wslive.UsageLimit{}, tasks: map[string]bool{}, approvals: map[string]string{},
+		rejected: map[string]int64{}, spawns: map[string]claudeSpawn{}, subs: map[string]*claudeSub{}}
 }
 
 // lead reports a lead conversation's mapper.
@@ -499,6 +553,26 @@ type claudeLine struct {
 	PermissionMode string `json:"permissionMode"`
 	// Tasks is a background_tasks_changed line's whole current list.
 	Tasks *[]json.RawMessage `json:"tasks"`
+	// ToolUseID and SubagentType are a task_started line's: the Agent call
+	// that started it, and the subagent type it asked for.
+	ToolUseID    string `json:"tool_use_id"`
+	SubagentType string `json:"subagent_type"`
+	// CompactResult and CompactError report a compaction that failed.
+	CompactResult string `json:"compact_result"`
+	CompactError  string `json:"compact_error"`
+	// Error, APIError, and APIErrorParams are a failed request's typed
+	// error: on an assistant line (authentication_failed, model_not_found,
+	// rate_limit; usage_limit_reached) and on an api_retry line, with that
+	// line's Attempt, MaxRetries, and ErrorStatus. Kept raw: a shape this
+	// mapper does not expect must not cost the whole line.
+	Error          json.RawMessage `json:"error"`
+	APIError       json.RawMessage `json:"api_error"`
+	APIErrorParams *struct {
+		RateLimit *claudeRateLimit `json:"rate_limit_info"`
+	} `json:"api_error_params"`
+	Attempt     json.RawMessage `json:"attempt"`
+	MaxRetries  json.RawMessage `json:"max_retries"`
+	ErrorStatus json.RawMessage `json:"error_status"`
 	// ParentToolUseID names the Agent call whose subagent wrote the line.
 	ParentToolUseID string `json:"parent_tool_use_id"`
 	// TaskID, TaskType, Description, Status, and Patch describe a
@@ -512,18 +586,12 @@ type claudeLine struct {
 		Status string `json:"status"`
 	} `json:"patch"`
 	Response struct {
-		Subtype   string `json:"subtype"`
-		RequestID string `json:"request_id"`
-		Error     string `json:"error"`
+		Subtype   string          `json:"subtype"`
+		RequestID string          `json:"request_id"`
+		Error     string          `json:"error"`
+		Response  json.RawMessage `json:"response"`
 	} `json:"response"`
-	RateLimit *struct {
-		RateLimitType  string `json:"rateLimitType"`
-		ResetsAt       int64  `json:"resetsAt"`
-		UnifiedWindows map[string]struct {
-			Utilization *float64 `json:"utilization"`
-			ResetsAt    int64    `json:"resetsAt"`
-		} `json:"unifiedWindows"`
-	} `json:"rate_limit_info"`
+	RateLimit *claudeRateLimit `json:"rate_limit_info"`
 	IsError       bool     `json:"is_error"`
 	Result        string   `json:"result"`
 	Errors        []string `json:"errors"`
@@ -537,8 +605,23 @@ type claudeLine struct {
 	} `json:"compact_metadata"`
 }
 
+// claudeRateLimit is a rate-limit report: a rate_limit_event's, or the one
+// a usage-limit refusal carries.
+type claudeRateLimit struct {
+	Status         string `json:"status"`
+	RateLimitType  string `json:"rateLimitType"`
+	ResetsAt       int64  `json:"resetsAt"`
+	OverageStatus  string `json:"overageStatus"`
+	IsUsingOverage bool   `json:"isUsingOverage"`
+	UnifiedWindows map[string]struct {
+		Utilization *float64 `json:"utilization"`
+		ResetsAt    int64    `json:"resetsAt"`
+	} `json:"unifiedWindows"`
+}
+
 type claudeMessage struct {
 	ID      string          `json:"id"`
+	Model   string          `json:"model"`
 	Content json.RawMessage `json:"content"`
 	Usage   *struct {
 		InputTokens              int64 `json:"input_tokens"`
@@ -588,7 +671,7 @@ func (m *claudeMapper) mapLine(line []byte, replies lineReplies) []Event {
 	now := m.now().UnixMilli()
 	switch l.Type {
 	case "control_response":
-		replies.answer(l.Response.RequestID, controlAnswer{ok: l.Response.Subtype == "success", err: l.Response.Error})
+		replies.answer(l.Response.RequestID, controlAnswer{ok: l.Response.Subtype == "success", err: l.Response.Error, body: l.Response.Response})
 	case "control_request":
 		if m.lead() {
 			return m.approval(l, now, replies)
@@ -604,7 +687,23 @@ func (m *claudeMapper) mapLine(line []byte, replies lineReplies) []Event {
 			return []Event{{ApprovalDone: l.RequestID}}
 		}
 	case "system":
+		if l.CompactResult == "failed" {
+			// A compaction that failed: it settles as a failed compaction
+			// line carrying the harness's own error text.
+			m.compacted = false
+			return []Event{{Live: &wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactFailed, Text: l.CompactError}}}
+		}
 		switch l.Subtype {
+		case "api_retry":
+			if !m.lead() {
+				return nil
+			}
+			m.retrying = true
+			r := wslive.Retry{Attempt: rawInt(l.Attempt), MaxRetries: rawInt(l.MaxRetries), Error: rawString(l.Error), Status: rawInt(l.ErrorStatus)}
+			if r.MaxRetries < r.Attempt {
+				r.MaxRetries = 0
+			}
+			return []Event{{Retry: &r}}
 		case "init":
 			var init claudeInit
 			if json.Unmarshal(line, &init) != nil {
@@ -669,7 +768,18 @@ func (m *claudeMapper) mapLine(line []byte, replies lineReplies) []Event {
 		case "task_started":
 			if l.TaskType == claudeAgentTask && l.TaskID != "" {
 				m.tasks[l.TaskID] = true
-				return []Event{{Live: &wslive.Event{Kind: wslive.KindAgent, AgentID: l.TaskID, Status: wslive.StatusRunning, Label: l.Description}}}
+				ev := wslive.Event{Kind: wslive.KindAgent, AgentID: l.TaskID, Status: wslive.StatusRunning, Label: l.Description}
+				if m.lead() && l.ToolUseID != "" {
+					spawn, ok := m.spawns[l.ToolUseID]
+					if !ok {
+						typ, _ := json.Marshal(map[string]string{"subagent_type": l.SubagentType})
+						spawn = claudeSpawnOf(typ)
+					}
+					delete(m.spawns, l.ToolUseID)
+					m.subs[l.ToolUseID] = &claudeSub{task: l.TaskID}
+					ev.Model, ev.Effort = spawn.model, spawn.effort
+				}
+				return []Event{{Live: &ev}}
 			}
 		case "task_updated", "task_notification":
 			status := l.Status
@@ -678,12 +788,17 @@ func (m *claudeMapper) mapLine(line []byte, replies lineReplies) []Event {
 			}
 			if end := claudeTaskEnd(status); end != "" && m.tasks[l.TaskID] {
 				delete(m.tasks, l.TaskID)
+				for toolUse, sub := range m.subs {
+					if sub.task == l.TaskID {
+						delete(m.subs, toolUse)
+					}
+				}
 				return []Event{{Live: &wslive.Event{Kind: wslive.KindAgent, AgentID: l.TaskID, Status: end}}}
 			}
 		}
 	case "assistant":
 		if l.ParentToolUseID != "" {
-			return nil
+			return m.subagentReply(l, now)
 		}
 		if l.UUID != "" {
 			if slices.Contains(m.uuids, l.UUID) {
@@ -697,8 +812,16 @@ func (m *claudeMapper) mapLine(line []byte, replies lineReplies) []Event {
 				}
 			}
 		}
-		out := m.assistant(l.Message, now)
+		alert := m.alert(l)
+		out := m.assistant(l.Message, now, alert != nil)
+		if alert != nil {
+			out = append(out, Event{Alert: alert})
+		}
 		if m.lead() {
+			if m.retrying {
+				m.retrying = false
+				out = append([]Event{{RetryEnd: true}}, out...)
+			}
 			// The harness works: a turn runs, whether or not a send began it.
 			out = append([]Event{{TurnStart: true}}, out...)
 		}
@@ -711,6 +834,7 @@ func (m *claudeMapper) mapLine(line []byte, replies lineReplies) []Event {
 		return append(settled, m.toolResults(l.Message, now)...)
 	case "rate_limit_event":
 		if l.RateLimit != nil {
+			m.rateLimit(*l.RateLimit)
 			for kind, w := range l.RateLimit.UnifiedWindows {
 				if (kind == wslive.LimitFiveHour || kind == wslive.LimitSevenDay) && w.Utilization != nil {
 					m.limits[kind] = wslive.UsageLimit{Kind: kind, Percent: *w.Utilization * 100, ResetsAt: w.ResetsAt * 1000}
@@ -720,6 +844,10 @@ func (m *claudeMapper) mapLine(line []byte, replies lineReplies) []Event {
 		}
 	case "result":
 		out := m.closeTurn(now)
+		if m.retrying {
+			m.retrying = false
+			out = append(out, Event{RetryEnd: true})
+		}
 		for _, mu := range l.ModelUsage {
 			if mu.ContextWindow > m.window {
 				m.window = mu.ContextWindow
@@ -773,8 +901,8 @@ func (m *claudeMapper) closeTurn(now int64) []Event {
 }
 
 // leadInit maps a lead's init message, which every user turn brings: the
-// session id, the turn's start, and the permission mode the harness reports
-// (it may differ from the one asked for).
+// session id, the turn's start, the permission mode the harness reports
+// (it may differ from the one asked for), and its MCP servers' status.
 func (m *claudeMapper) leadInit(init claudeInit) []Event {
 	var out []Event
 	if init.SessionID != "" {
@@ -783,6 +911,13 @@ func (m *claudeMapper) leadInit(init claudeInit) []Event {
 	out = append(out, Event{TurnStart: true})
 	if init.PermissionMode != "" {
 		out = append(out, Event{PermissionMode: init.PermissionMode})
+	}
+	if len(init.MCPServers) > 0 {
+		servers := make([]MCPServer, 0, len(init.MCPServers))
+		for _, s := range init.MCPServers {
+			servers = append(servers, MCPServer{Name: s.Name, Status: s.Status})
+		}
+		out = append(out, Event{MCPServers: servers})
 	}
 	return out
 }
@@ -879,12 +1014,15 @@ func claudeTaskEnd(status string) string {
 	return wslive.StatusFailed
 }
 
-func (m *claudeMapper) assistant(raw json.RawMessage, now int64) []Event {
+// assistant maps the lead's assistant message: its text (left out when
+// alerted, since the alert's line carries it) and its tool calls.
+func (m *claudeMapper) assistant(raw json.RawMessage, now int64, alerted bool) []Event {
 	var msg claudeMessage
 	if json.Unmarshal(raw, &msg) != nil {
 		return nil
 	}
-	if msg.Usage != nil {
+	if msg.Usage != nil && !alerted {
+		// An alert's message is the harness's own, with no real usage.
 		tokens := msg.Usage.InputTokens + msg.Usage.CacheReadInputTokens + msg.Usage.CacheCreationInputTokens + msg.Usage.OutputTokens
 		m.context = &wslive.UsageContext{Tokens: &tokens}
 	}
@@ -896,11 +1034,22 @@ func (m *claudeMapper) assistant(raw json.RawMessage, now int64) []Event {
 	for _, b := range blocks {
 		switch b.Type {
 		case "text":
-			if strings.TrimSpace(b.Text) != "" {
+			if strings.TrimSpace(b.Text) != "" && !alerted {
 				out = append(out, Event{Live: &wslive.Event{Kind: wslive.KindReply, Text: b.Text, Final: true}})
 			}
 		case "tool_use":
 			out = append(out, m.batches.addCall(msg.ID, b.ID, b.Name, argsPreview(b.Input), now)...)
+			if !m.lead() {
+				continue
+			}
+			if b.Name == "Agent" || b.Name == "Task" {
+				m.spawns[b.ID] = claudeSpawnOf(b.Input)
+			}
+			if strings.HasSuffix(b.Name, claudeReconnectLever) {
+				// The lead asks for an MCP reconnect: a server it needs is
+				// gone, whatever the harness last reported.
+				out = append(out, Event{MCPCheck: true})
+			}
 		}
 	}
 	return out
@@ -920,6 +1069,10 @@ func (m *claudeMapper) toolResults(raw json.RawMessage, now int64) []Event {
 		if b.Type == "tool_result" {
 			name := m.batches.callName(b.ToolUseID)
 			out = append(out, m.batches.endCall(b.ToolUseID, b.IsError, now)...)
+			if m.lead() && b.IsError && strings.HasPrefix(name, "mcp__") {
+				// A failed MCP tool call may be a server that went away.
+				out = append(out, Event{MCPCheck: true})
+			}
 			if tool := resultTool(name, claudeMCPToolName); !b.IsError && tool != "" {
 				out = append(out, resultEvents(tool, claudeResultText(b.Content))...)
 			}

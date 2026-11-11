@@ -551,6 +551,19 @@ func (r *Runner) Stop(id string) (State, error) {
 	})
 }
 
+// Restart ends a lead conversation's process and starts a new one on the
+// same backend session at once: the way back from an MCP connection that
+// did not recover in-stream. It ends the session's background work with
+// the process, so the dashboard asks first.
+func (r *Runner) Restart(id string) (State, error) {
+	return r.act(id, func(c *conv) error {
+		if !c.rec.Lead {
+			return badRequest("restart applies to a lead session only")
+		}
+		return c.restartProcess()
+	})
+}
+
 // IsLead reports whether id is a lead conversation, open or closed: one
 // whose control writes take the trusted gate.
 func (r *Runner) IsLead(id string) bool {
@@ -719,6 +732,12 @@ type State struct {
 	// ActionNeeded is set while the harness reports that it waits on the
 	// user with no prompt in Approvals to answer; it says what to do.
 	ActionNeeded string `json:"action_needed,omitempty"`
+	// Failure is the typed failure (a login needed, a model unavailable, a
+	// usage limit) the harness last reported, until a turn succeeds.
+	Failure *wslive.Notice `json:"failure,omitempty"`
+	// MCPBroken names the harness's MCP servers whose connection broke and
+	// did not come back in-stream; a restart (Restart) is the way back.
+	MCPBroken []string `json:"mcp_broken,omitempty"`
 	// CanControl reports whether the asking viewer may use the lead control
 	// routes (a browser on this machine); the routes set it per request.
 	CanControl bool `json:"can_control,omitempty"`
@@ -758,6 +777,9 @@ type conv struct {
 	bgTasks    int
 	// actionNeeded is State.ActionNeeded.
 	actionNeeded string
+	// failure and mcpBroken are State.Failure and State.MCPBroken.
+	failure   *wslive.Notice
+	mcpBroken []string
 
 	// loop-owned.
 	events      <-chan Event
@@ -790,9 +812,20 @@ type conv struct {
 	// while it waits on the user with no prompt to show (checkAction).
 	harnessState string
 	actionTimer  *time.Timer
-	// mcpDown is set when the harness reported a broken MCP connection: the
-	// process restarts at the next idle point.
-	mcpDown bool
+	// The process's MCP recovery (runner_recovery.go). mcpSeen are the
+	// servers it reported connected; mcpDown is set when one of them broke
+	// and did not come back in-stream: the process restarts at the next
+	// idle point. mcpChecking runs while a check is off the loop, and
+	// mcpAgain asks for one more after it, for mcpAgainNames.
+	mcpSeen       map[string]bool
+	mcpDown       bool
+	mcpChecking   bool
+	mcpAgain      bool
+	mcpAgainNames []string
+	// retry is the API request retry under way; alerted that the running
+	// turn brought a typed failure, so its end clears none.
+	retry   *wslive.Retry
+	alerted bool
 }
 
 // do runs fn in the loop and waits for it; false when the loop has ended.
@@ -977,6 +1010,11 @@ func (c *conv) state() State {
 	if c.rec.Lead {
 		st.ActiveMode, st.BackgroundTasks, st.ActionNeeded = c.activeMode, c.bgTasks, c.actionNeeded
 		st.Approvals = append([]ApprovalRequest(nil), c.approvals...)
+		if c.failure != nil {
+			f := *c.failure
+			st.Failure = &f
+		}
+		st.MCPBroken = slices.Clone(c.mcpBroken)
 	}
 	return st
 }
@@ -1432,10 +1470,23 @@ func (c *conv) handle(ev Event) {
 	case ev.BackgroundTasks != nil:
 		if n := *ev.BackgroundTasks; n != c.bgTasks {
 			c.setStatus(func() { c.bgTasks = n })
+			c.syncHost(quiet)
 			c.changed(quiet)
 			if n == 0 && !c.turn && !quiet {
 				c.armIdle()
+				c.restartIfDue()
 			}
+		}
+	case ev.Alert != nil:
+		c.alert(*ev.Alert, quiet)
+	case ev.Retry != nil || ev.RetryEnd:
+		c.retry = ev.Retry
+		c.syncHost(quiet)
+	case ev.MCPServers != nil:
+		c.mcpReported(ev.MCPServers, quiet)
+	case ev.MCPCheck:
+		if !quiet {
+			c.checkMCP(nil)
 		}
 	}
 }
@@ -1475,6 +1526,7 @@ func (c *conv) endTurn(turnErr string, quiet bool) {
 		c.setStatus(func() { c.turn = false })
 		c.apply(wslive.Event{Kind: wslive.KindTurnEnd}, quiet)
 	}
+	c.turnSettled(turnErr, quiet)
 	if quiet {
 		return
 	}
@@ -1485,6 +1537,7 @@ func (c *conv) endTurn(turnErr string, quiet bool) {
 		return
 	}
 	c.applySettings()
+	c.restartIfDue()
 	c.kick()
 	if !c.turn {
 		c.armIdle()
@@ -1690,7 +1743,10 @@ func (c *conv) processEnded() {
 	c.clearApprovals()
 	c.harnessState = ""
 	c.checkAction(false)
-	c.setStatus(func() { c.activeMode, c.bgTasks = "", 0 })
+	c.setStatus(func() { c.activeMode, c.bgTasks, c.mcpBroken = "", 0, nil })
+	c.mcpSeen, c.mcpDown, c.mcpChecking, c.mcpAgain, c.mcpAgainNames = nil, false, false, false, nil
+	c.retry, c.alerted = nil, false
+	c.syncHost(true)
 	c.live.endAgents()
 	c.live.writeSnapshot()
 	c.r.notify(c.rec.ReplyID, c.rec.Root)

@@ -104,10 +104,30 @@ type fakeHolders struct {
 	// other control request written to a child is answered with success,
 	// as a harness answers it.
 	refuse map[string]string
+	// bodies is the response payload a success answer to a control request
+	// of a subtype carries (raw JSON); setControl changes both while a
+	// runner runs.
+	bodies map[string]string
 }
 
 func newFakeHolders() *fakeHolders {
-	return &fakeHolders{holders: map[string]*fakeHolder{}, callTimeout: 5 * time.Second, refuse: map[string]string{}}
+	return &fakeHolders{holders: map[string]*fakeHolder{}, callTimeout: 5 * time.Second, refuse: map[string]string{}, bodies: map[string]string{}}
+}
+
+// setControl sets how the children answer control requests of subtype: an
+// error answer with refuse when it is not "", else success with body (raw
+// JSON; "" for none).
+func (f *fakeHolders) setControl(subtype, refuse, body string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.refuse, subtype)
+	delete(f.bodies, subtype)
+	if refuse != "" {
+		f.refuse[subtype] = refuse
+	}
+	if body != "" {
+		f.bodies[subtype] = body
+	}
 }
 
 func (f *fakeHolders) AddSink(sink wsholder.Sink) {
@@ -267,6 +287,9 @@ func (f *fakeHolders) Input(id string, data []byte, eof bool) error {
 		}
 		if json.Unmarshal(line, &d) == nil && d.Type == "control_request" {
 			response := map[string]any{"subtype": "success", "request_id": d.RequestID}
+			if body, ok := f.bodies[d.Request.Subtype]; ok {
+				response["response"] = json.RawMessage(body)
+			}
 			if msg, ok := f.refuse[d.Request.Subtype]; ok {
 				response = map[string]any{"subtype": "error", "request_id": d.RequestID, "error": msg}
 			}

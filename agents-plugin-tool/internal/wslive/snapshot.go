@@ -148,6 +148,9 @@ type Snapshot struct {
 	// Repo is the session root's folder and branch state, which the writing
 	// ws-mcp reads itself; absent until its first read.
 	Repo *Repo `json:"repo,omitempty"`
+	// Host is what a host that runs the session's harness itself (the
+	// agent runner) reports about it; absent for an adapter-fed session.
+	Host *Host `json:"host,omitempty"`
 }
 
 // Usage limit kinds: the plan's rolling 5-hour and weekly limits.

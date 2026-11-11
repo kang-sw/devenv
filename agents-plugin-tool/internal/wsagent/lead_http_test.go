@@ -64,6 +64,7 @@ func leadControlWrites(root, id string) map[string]struct {
 		"model":           {"/agents/" + id + "/settings", map[string]any{"model": "opus"}},
 		"effort":          {"/agents/" + id + "/settings", map[string]any{"effort": "max"}},
 		"stop":            {"/agents/" + id + "/stop", nil},
+		"restart":         {"/agents/" + id + "/restart", nil},
 		"close":           {"/agents/" + id + "/close", nil},
 		"approval":        {"/agents/" + id + "/approvals/req-1", map[string]any{"behavior": "allow"}},
 	}

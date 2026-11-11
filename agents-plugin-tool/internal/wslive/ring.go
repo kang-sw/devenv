@@ -56,12 +56,12 @@ const ringStampLayout = "20060102T150405.000000000Z"
 
 // RingEntry is one ring file.
 type RingEntry struct {
-	// Kind is user, reply, turn, mail, compact, tools, card, or ui.
+	// Kind is user, reply, turn, mail, compact, tools, card, ui, or notice.
 	Kind string `json:"kind"`
 	// Origin tags a user message (terminal, whiteboard) or a turn summary
 	// (terminal, whiteboard, mail; empty when unknown).
 	Origin string `json:"origin,omitempty"`
-	// Text is a user message or a lead reply.
+	// Text is a user message, a lead reply, or a failed compaction's error.
 	Text      string `json:"text,omitempty"`
 	Truncated bool   `json:"truncated,omitempty"`
 	// Done, Failed, and DurationMs summarize a turn: its tool calls and its
@@ -87,6 +87,8 @@ type RingEntry struct {
 	Card *CardRef `json:"card,omitempty"`
 	// UI is a ui line's dashboard command.
 	UI *UICommand `json:"ui,omitempty"`
+	// Notice is a notice line's typed failure.
+	Notice *Notice `json:"notice,omitempty"`
 }
 
 // CardRef is a tracker item a conversation showed as a card: the store it

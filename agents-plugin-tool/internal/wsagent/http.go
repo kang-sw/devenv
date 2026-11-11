@@ -166,6 +166,9 @@ func (r *Runner) serve(w http.ResponseWriter, req *http.Request) {
 	case action == "stop":
 		st, err := r.Stop(id)
 		writeAnswer(w, http.StatusOK, view(st), err)
+	case action == "restart":
+		st, err := r.Restart(id)
+		writeAnswer(w, http.StatusOK, view(st), err)
 	case action == "close":
 		st, err := r.CloseConversation(id)
 		writeAnswer(w, http.StatusOK, view(st), err)
@@ -198,7 +201,7 @@ func (r *Runner) serve(w http.ResponseWriter, req *http.Request) {
 // leadControl reports whether action is one of a lead session's control
 // writes, which take the trusted gate; send and interrupt do not.
 func leadControl(action string) bool {
-	return action == "stop" || action == "close" || action == "settings" || strings.HasPrefix(action, "approvals/")
+	return action == "stop" || action == "restart" || action == "close" || action == "settings" || strings.HasPrefix(action, "approvals/")
 }
 
 // writeAllowed is the POST rule: a JSON body, and no Origin or the

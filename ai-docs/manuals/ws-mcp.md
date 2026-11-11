@@ -556,7 +556,33 @@ conversation:
   The record holds the current values, and every resume launches with them.
   Permission modes: `auto` (the default), `default`, `acceptEdits`, `plan`,
   `dontAsk`, `bypassPermissions`; a Pi lead has none.
-- **Access.** Spawn, settings, stop, close, and an approval answer take the
+- **Recovery and failures.** A Claude lead's init line lists its MCP
+  servers. A server reported `failed`, a failed `mcp__*` tool call, or the
+  lead's call of a `*__request_mcp_reconnect` tool makes the runner ask the
+  harness in-stream, off the loop: `mcp_status` for the failed servers
+  when none is named, then `mcp_reconnect {serverName}` and `mcp_status`
+  for each. A server back as `connected` restarts nothing. One that is not
+  is listed in the state's `mcp_broken` (and the snapshot's
+  `host.mcpBroken`); if this process had it connected, the process restarts
+  on the same backend session at the first idle point with no background
+  task (`stop` then a `--resume` start), else nothing restarts on its own.
+  `POST /agents/<id>/restart` restarts by hand. A typed failure on an
+  assistant line (`error`: `authentication_failed`, `model_not_found`,
+  `rate_limit`; `api_error: usage_limit_reached`, with the reset time from
+  the refusal's or the last rejected `rate_limit_event`'s `resetsAt`) is a
+  `notice` ring line and the state's `failure` (snapshot `host.failure`)
+  until a turn ends with no failure; an `api_retry` line is the snapshot's
+  `host.retry` until output resumes or the turn ends; a compaction that
+  failed carries its `compact_error` on the compaction line. The
+  background task count (`background_tasks_changed`, subagents included)
+  is in the state and `host.backgroundTasks`; a subagent the lead's Agent
+  call started takes its effort from an `effort-<level>` subagent type and
+  its model and context size from its own assistant lines. The stream
+  gives no output rate (no partial messages: each block arrives whole,
+  with the request's starting output count). Idle stop is the profile's
+  `idle_timeout_seconds` (a Claude lead 600, a Pi lead off) and waits for
+  the background task count to be zero.
+- **Access.** Spawn, settings, stop, restart, close, and an approval answer take the
   trusted gate (`wsdashboard.TrustedWrite`): 404 to any viewer that is not a
   browser on this machine, 403 without the daemon's own `Origin`. A LAN
   viewer reads the session and may send and interrupt; the state's

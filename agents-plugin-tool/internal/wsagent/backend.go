@@ -105,6 +105,27 @@ type modeSetter interface {
 	SetPermissionMode(mode string) error
 }
 
+// mcpController is a Process whose harness reports its MCP servers'
+// status and reconnects one in-stream; a lead's claude process is one.
+type mcpController interface {
+	MCPStatus() ([]MCPServer, error)
+	ReconnectMCP(server string) error
+}
+
+// MCPServer is one MCP server of a harness and its connection status, in
+// Claude Code's words (MCPConnected, MCPFailed, and others: pending,
+// needs-auth, disabled).
+type MCPServer struct {
+	Name   string `json:"name"`
+	Status string `json:"status"`
+}
+
+// MCP server statuses the runner acts on.
+const (
+	MCPConnected = "connected"
+	MCPFailed    = "failed"
+)
+
 // steerer is a Process that takes a user message while its turn runs: the
 // harness works it in at its next step, inside the same turn.
 type steerer interface {
@@ -178,6 +199,21 @@ type Event struct {
 	// BackgroundTasks is the harness's current background task count, when
 	// the line reported the whole list.
 	BackgroundTasks *int
+	// Alert is a typed failure the harness reported for the lead's request
+	// (a login needed, a model unavailable, a usage limit): a conversation
+	// line, and the session's failure state until a turn succeeds.
+	Alert *wslive.Notice
+	// Retry is an API request retry the harness started; RetryEnd that the
+	// retrying is over (a response came, or the turn ended).
+	Retry    *wslive.Retry
+	RetryEnd bool
+	// MCPServers is the MCP server list the harness reported with each
+	// server's status (an init line).
+	MCPServers []MCPServer
+	// MCPCheck: something on the stream suggests an MCP server broke (a
+	// failed MCP tool call, the lead asking for a reconnect), so the runner
+	// asks the harness for its servers' status.
+	MCPCheck bool
 
 	// Live is a content event for the conversation's wslive state: a reply,
 	// the lead's tool batches, or usage figures. The runner applies turn

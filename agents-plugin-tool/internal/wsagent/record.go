@@ -188,6 +188,24 @@ func (w *liveWriter) ui(cmd wslive.UICommand) bool {
 	return w.write(res, err, wslive.RingUI)
 }
 
+// notice writes a typed failure line, as apply does.
+func (w *liveWriter) notice(n wslive.Notice) bool {
+	res, err := w.st.Notice(n, w.now().UnixMilli())
+	return w.write(res, err, wslive.RingNotice)
+}
+
+// setHost replaces the snapshot's host state and, unless quiet, writes the
+// snapshot when it changed, which it reports.
+func (w *liveWriter) setHost(h *wslive.Host, quiet bool) bool {
+	if !w.st.SetHost(h) {
+		return false
+	}
+	if !quiet {
+		w.writeSnapshot()
+	}
+	return true
+}
+
 // write writes what an applied change of kind brought; a refused one (err)
 // is logged and dropped.
 func (w *liveWriter) write(res wslive.Result, err error, kind string) bool {
