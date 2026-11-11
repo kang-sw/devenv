@@ -49,6 +49,18 @@ them.
   events, reply text, user messages, permission waits, and usage; it sends
   nothing for background shells (`agents-plugin/hooks/claude-mod/dashboard.ts`
   header comment).
+- Claude `-p` stream-json reports background tasks
+  (live probe 2026-11-11, recorded in
+  `261110-research-ws-dashboard-agent-host-foundations`):
+  `system/background_tasks_changed` carries the full current list
+  (`task_id`, `task_type` `local_bash`, `description`) on every change and
+  an empty list when none run, so a daemon-hosted session's count is the
+  list's length. Monitor reports as the same task type.
+- Pi core reports no background tasks; the ws Pi extension's background
+  tasks are visible only as tool events and a pushed completion message,
+  and their count exists only in process
+  (`agents-plugin-pi/src/background-tasks.ts` `countBackgroundTasks`, used
+  in the pushed status line). Ending the session kills them.
 
 ### Confirmed Decisions
 - Show "N background tasks" in the top agents panel and next to the bottom
@@ -58,7 +70,12 @@ them.
 - None yet.
 
 ### Open Questions
-- Topics 1 to 3 above.
+- Topic 1 for CLI sessions: whether the mod API or a hook reports
+  background tasks (the stream answer above covers daemon-hosted sessions
+  only); whether subagents (`local_agent`), ScheduleWakeup, and cron
+  appear in `background_tasks_changed`.
+- Topic 2 reporting path: how the Pi extension would publish its count.
+- Topic 3: per-task rows and stopping a task from the dashboard.
 
 ### Rejected Alternatives
 - None yet.

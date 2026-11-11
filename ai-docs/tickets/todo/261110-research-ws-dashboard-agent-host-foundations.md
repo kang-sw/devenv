@@ -165,6 +165,54 @@ To investigate:
   is replaced on version change; the proxy reconnects transparently
   (`261110-feat-ws-mcp-daemon-hosted-proxy-launcher` Decisions 1, 7).
 
+- Live probe, 2026-11-11 (claude 2.1.322, ws 0.48.17, pi 1.0.4; scratch
+  repo; logs under the lead session's scratchpad `probe-hosted/`):
+  - Under `claude -p` stream-json the ws mod loads (`ui_log` "ws mailbox:
+    armed"), spawns `mailbox wait --board-inbox --board-interrupt`, mints a
+    key, injects the workflow manual, expands preload, registers the
+    session, and runs the dashboard feed (`dashboard_intake`). Key adoption
+    on revive re-arms the wait on the new key. The `SessionStart:compact`
+    hook runs. `system/init` is emitted on every user turn and carries
+    `slash_commands`, `terminal_slash_commands`, `mcp_servers`, and
+    `permissionMode`.
+  - Slash commands sent as user turns work: skills expand, built-ins
+    (`/context`, `/compact`) run locally and end with a `result` that has
+    `num_turns: 0` and a null `terminal_reason`, and an unknown command
+    reaches the model as text.
+  - Manual compaction works by `/compact` and by the mod's
+    `request_compaction` lever. After compaction the stream re-emits the
+    last assistant message without an `isReplay` flag. The lever's
+    compaction runs after its turn ended and ends with a `result` no send
+    caused.
+  - Permission prompts: with stream-json in and out and no
+    `--permission-prompt-tool`, a prompt is auto-denied
+    (`system/permission_denied`); `--permission-prompts host` alone does not
+    route it to stdin. With `--permission-prompt-tool stdio` the prompt
+    arrives as `control_request` `can_use_tool` (tool, input, description,
+    `permission_suggestions`, `tool_use_id`) and is answered on stdin by a
+    `control_response` with `behavior` `allow` (with `updatedInput`) or
+    `deny` (with `message`). There is no timeout (answered after 90 s), and
+    the stream carries no waiting marker.
+  - Background tasks: `system/background_tasks_changed` carries the full
+    current task list on every change (empty when none run), with
+    `task_started`, `task_updated`, and `task_notification` around it.
+    Background completions and Monitor events start turns with no input.
+  - Pi `--mode rpc` with the ws extension: key minting, manual injection
+    through the system prompt, `/skill:` expansion, and key adoption on
+    revive work. The mailbox waiter arms with `--board-inbox
+    --board-interrupt` and drains and aborts in RPC mode (no RPC gate). The
+    RPC `compact` command and the `ws-compact` tool reach Pi's compaction,
+    but every attempt refused a too-small session, so a successful RPC
+    compaction is unverified; a typed `/compact` is not a Pi RPC built-in.
+    Pi core reports no background tasks in the stream; the ws extension's
+    background tasks show only as tool events and a pushed completion
+    message, and their count exists only in process
+    (`agents-plugin-pi/src/background-tasks.ts` `countBackgroundTasks`).
+    A Pi lead gets no human permission prompts: native bash and read are
+    removed from the lead (`execute-gateway.ts` `computeLeadActiveTools`)
+    and mutation goes through lead-approved `ws-execute` workers (code read,
+    not probed).
+
 ### Confirmed Decisions
 - Pursue the full agent-host scope as one epic, terminal and desktop shell
   included (user, 2026-11-10, whiteboard (538) b). This partially reverses
@@ -203,13 +251,11 @@ To investigate:
   because `-p` lacks some TUI features.
 
 ### Open Questions
-- Which TUI-only Claude features must the dashboard re-provide for headless
-  leads to be usable day to day? Verify under `-p`: slash commands and
-  skills, manual compaction, and the ws session-start hooks.
-- Pi parity in `--mode rpc` for each feature the headless lead child relies
-  on.
-- How did the archived MVP gate terminal access? (input to the terminal
-  child's gate design)
+- Not probed under `-p`: `/clear`, `/model`, `/mcp`, `/effort`, plan mode,
+  the SDK `initialize` route as an alternative to
+  `--permission-prompt-tool stdio`, answers carrying `updatedPermissions`,
+  and whether background tasks survive a process stop and `--resume`.
+- A successful Pi RPC compaction on a session large enough to compact.
 
 ### Rejected Alternatives
 - Conversation-only survival across daemon restarts ((06) b, c); a TUI in a
