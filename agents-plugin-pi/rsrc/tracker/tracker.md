@@ -275,3 +275,51 @@ runs. `tk:sync` pushes the user's unpushed writes and fetches at once, for
 `store` or, without it, every store; send it after writes others should see
 now and before you end the session. Others' writes are fetched before each
 query.
+
+## Event Hooks
+
+The dashboard daemon runs local commands on tracker events, as the user asks
+for (a desktop notification, a mail). Write or edit their file only when the
+user asks: it chooses what runs on this machine. The file is
+`tracker-hooks.json` in the daemon's state directory, `dashboard/` under the
+ws cache root (`$WS_CACHE_HOME` when set), next to the daemon's
+`endpoint.json`:
+
+```json
+{"hooks": [{"command": ["notify-tracker", "--quiet"], "scope": "mine"}],
+ "due_soon_hours": 24}
+```
+
+- `command` is an argv run without a shell, in the state directory, with the
+  daemon's environment. `scope` is `mine` (the default: events that concern
+  the store's local member, not the member's own actions) or `all` (every
+  event of the store). `due_soon_hours` (default 24) is how long before an
+  item's due date its `due_soon` event fires. Each hook applies to every
+  registered store. The daemon reloads the file when it changes; an invalid
+  file runs no hook, and the daemon log says why.
+- Each run gets one event as JSON on stdin. A hook's runs are serial and in
+  order, each stopped after 30 seconds; a failure is logged and not retried.
+  After the daemon was down, it delivers what arrived meanwhile, up to 24
+  hours old.
+
+The event:
+
+- `v`: 1. Adding a field keeps it; changing a field's meaning bumps it.
+- `id`: the tracker event's id, `due:<item id>:<due date>` for `due_soon`.
+  An event that assigns several members gives one event per member with the
+  same `id`.
+- `kind`: `assigned` (also a claim, or an approved take request, for its
+  taker), `assign_pending` (a request or handoff awaiting acceptance),
+  `take_request` (a member asks for the assignment `target` holds),
+  `take_denied` (to the requester, `target`), `comment`, `status`,
+  `closed`, `due_soon`. A script ignores a kind it does not know; new kinds
+  come without a `v` bump.
+- `ts`: RFC 3339.
+- `store`: `{id, name}`; `item`: `{id, alias, title, kind}`.
+- `actor`: `{id, name}` of the member who acted; null for `due_soon`.
+- `target`: `{id, name}` of the member the event is aimed at (the assignee,
+  the holder asked, or the requester denied), when there is one.
+- `detail`: `status` (for `status` and `closed`), `comment` (its first 500
+  characters), `due` (RFC 3339, when the item has a due date); absent fields
+  are omitted.
+- `url`: opens the item in this machine's dashboard.

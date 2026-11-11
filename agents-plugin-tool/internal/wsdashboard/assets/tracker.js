@@ -270,6 +270,7 @@
     store: null,          // the store the item window and the dialogs refer to
     open: null,           // the store whose drawer is open, or null
     page: null,           // the store shown full-page by the route #/<storeId>, or null
+    routeItem: null,      // { store, item } a #/<storeId>/<itemId> link opens once the view holds it
     fresh: {},            // badge keys that were new when the drawer last opened
     loaded: {},           // "store|stream" -> { attachment oid: true } "loaded" by that viewer's clone (simulated, page lifetime)
     mdraft: [], adraft: [], // composer drafts: member ids picked with @, attachment metadata to post
@@ -4971,16 +4972,37 @@
 
   // The store page: the route #/<storeId> shows that store full-page, with the same Items
   // panel and tab pane layout, in place of the conversation and the drawer. It is the only
-  // route the renderer owns (no item routes: an item URL would point at the viewer's own
-  // daemon, so sharing it across people does not work). Entering a page checks and shows
-  // what is new, like opening the drawer; leaving it pushes, like a collapse. Clearing the
-  // hash, the browser back button, or "Back" returns to the host's own view. A
-  // hash that is not a #/ route is the host page's and is left alone.
+  // route the renderer keeps. Entering a page checks and shows what is new, like opening
+  // the drawer; leaving it pushes, like a collapse. Clearing the hash, the browser back
+  // button, or "Back" returns to the host's own view. A hash that is not a #/ route is the
+  // host page's and is left alone.
+  // The link #/<storeId>/<itemId> (a tracker event hook's url, which points at this
+  // machine's own daemon) enters that store page and opens the item once the store's view
+  // holds it: applyRoute replaces it with the store page's route at once, so the item is not
+  // a route of its own, and back leaves the page.
   function routeStore() {
     var m = /^#\/([^/]+)$/.exec(location.hash), id = m && decodeURIComponent(m[1]);
     return id && (AD.stores() || []).indexOf(id) >= 0 ? id : null;
   }
+  function routeItem() {
+    var m = /^#\/([^/]+)\/([^/]+)$/.exec(location.hash);
+    if (!m) return null;
+    try { return { store: decodeURIComponent(m[1]), item: decodeURIComponent(m[2]) }; } catch (e) { return null; }
+  }
+  // openRouteItem opens the item a link named (ui.routeItem) once its store's view has
+  // arrived; an item the view does not hold is dropped.
+  function openRouteItem() {
+    var r = ui.routeItem, sv = r && AD.view(r.store);
+    if (!sv) return;
+    ui.routeItem = null;
+    if (sv.items[r.item] && ui.page === r.store) openItemWindow(r.store, r.item);
+  }
   function applyRoute() {
+    var ri = routeItem();
+    if (ri && (AD.stores() || []).indexOf(ri.store) >= 0) {
+      ui.routeItem = ri;
+      history.replaceState(null, '', location.pathname + location.search + '#/' + encodeURIComponent(ri.store));
+    }
     var s = routeStore();
     if (/^#\/./.test(location.hash) && !s) toast(wsT("js.tk.toast.nostore", esc(location.hash.slice(2))));
     if (s !== ui.page) {
@@ -4994,6 +5016,7 @@
       ui.page = s;
     }
     render();
+    openRouteItem();
   }
   function leavePage() { history.pushState(null, '', location.pathname + location.search); applyRoute(); }
 
@@ -5664,7 +5687,7 @@
       if (changeTimer && changeAt <= at) return;
       clearTimeout(changeTimer);
       changeAt = at;
-      changeTimer = setTimeout(function () { changeTimer = 0; wkRefresh(); if (renderDue) render(); }, at - Date.now());
+      changeTimer = setTimeout(function () { changeTimer = 0; wkRefresh(); if (renderDue) render(); openRouteItem(); }, at - Date.now());
     });
     applyRoute();
     // read-only hook for scripted checks (headless verification); not part of the model
