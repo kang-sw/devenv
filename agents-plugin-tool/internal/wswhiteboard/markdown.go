@@ -27,15 +27,18 @@ import (
 
 // Lead-authored item text renders as markdown: titles and ack-row reasons
 // inline only, options, rationale, and recommendations as blocks. goldmark's
-// output reaches the page template as trusted HTML, so this file and
-// inline_tags.go are the whole escaping boundary on that text: neither the
-// block nor the inline pipeline has an HTML parser, so a tag the lead types
-// is escaped text unless it is one of inline_tags.go's allowlisted tags on
-// a board page, which become markdown nodes with no attribute (html.WithUnsafe
-// stays off as the backstop), and every link, autolink, and image destination goes
-// through resolveTarget's allow-list. The raw pipeline passes HTML
-// through and serves two callers only: topic bodies, written as is, and a
-// finished lead reply, which sanitize.go filters afterwards.
+// output reaches the page template as trusted HTML. Titles and ack-row
+// reasons go through the inline pipeline, which has no HTML parser, so a tag
+// the lead types is escaped text unless it is one of inline_tags.go's
+// allowlisted tags, which become markdown nodes with no attribute
+// (html.WithUnsafe stays off as the backstop). Option, rationale, and
+// recommendation text (itemField) goes through the raw pipeline and then
+// sanitize.go, the same trust boundary as a finished lead reply. Every link,
+// autolink, and image destination goes through resolveTarget's allow-list.
+// The raw pipeline passes HTML through and serves three callers: topic
+// bodies, written as is, and item block fields and a finished lead reply,
+// which sanitize.go filters afterwards. Block, the escaping block pipeline,
+// is RenderText's for text other authors write.
 
 // mermaidJS is the vendored mermaid build (assets/mermaid/README.md). Pages
 // never inline it: the page writer stores it once per folder under
@@ -195,7 +198,7 @@ func (p *pageData) renderDoc(s string, marks []BlockMark) template.HTML {
 	if len(marks) == 0 {
 		return p.convert(p.rawMarkdown(), s)
 	}
-	return p.convertWith(p.rawMarkdown(), s, func(doc ast.Node, src []byte) { applyMarks(doc, src, marks) })
+	return p.convertWith(p.rawMarkdown(), s, "", func(doc ast.Node, src []byte) { applyMarks(doc, src, marks) })
 }
 
 // Inline renders s as inline markdown: emphasis, code, links, and item
@@ -204,11 +207,25 @@ func (p *pageData) Inline(s string) template.HTML {
 	return p.convert(p.markdown().inline, s)
 }
 
-// Block renders s as block markdown with hard-wrapped lines. Text that is
-// one paragraph renders without the <p> wrapper, so it sits inline beside an
-// option letter or a recommendation star.
+// Block renders s as block markdown with hard-wrapped lines, every tag the
+// author types escaped. Text that is one paragraph renders without the <p>
+// wrapper, so it sits inline beside an option letter or a recommendation
+// star.
 func (p *pageData) Block(s string) template.HTML {
 	return p.convert(p.markdown().block, s)
+}
+
+// itemField renders an item's option, rationale, or recommendation text:
+// block markdown with raw HTML, filtered by the reply sanitizer, unwrapped
+// as Block is when it is one paragraph. salt names the field on the page
+// (item, field kind, option letter), so two identical texts on one page get
+// distinct footnote and SVG id prefixes.
+func (p *pageData) itemField(s, salt string) template.HTML {
+	p.trusted = &[]trustedTarget{}
+	// trusted must not outlive this field: a link written while it is set
+	// carries a data-wbref mark only the sanitizer strips.
+	defer func() { p.trusted = nil }()
+	return p.sanitizeReply(string(p.convertWith(p.rawMarkdown(), s, salt, nil)), salt)
 }
 
 // FirstLine renders the first non-blank line of s as inline markdown, the
@@ -222,12 +239,14 @@ func (p *pageData) FirstLine(s string) template.HTML {
 	return ""
 }
 
-// IsBlock reports whether s holds block markdown: anything but one
-// paragraph, or one paragraph that shows an image. An item whose options
-// hold any block stacks them as cards.
+// IsBlock reports whether s, read as an item field (itemField), holds block
+// content: anything but one paragraph, or one paragraph that shows an image
+// or holds a raw HTML tag outside phrasingTags. An item whose options hold
+// any block stacks them as cards, so a table or an image never lands inside
+// an option's native <button>.
 func (p *pageData) IsBlock(s string) bool {
 	source := []byte(s)
-	doc := p.markdown().block.Parser().Parse(text.NewReader(source))
+	doc := p.rawMarkdown().Parser().Parse(text.NewReader(source))
 	first := doc.FirstChild()
 	if first == nil {
 		return false
@@ -235,37 +254,66 @@ func (p *pageData) IsBlock(s string) bool {
 	if first.NextSibling() != nil || first.Kind() != ast.KindParagraph {
 		return true
 	}
-	image := false
+	block := false
 	_ = ast.Walk(first, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
-		if entering && n.Kind() == ast.KindImage {
-			image = true
+		if !entering {
+			return ast.WalkContinue, nil
+		}
+		switch n.Kind() {
+		case ast.KindImage:
+			block = true
+		case ast.KindRawHTML:
+			segments := n.(*ast.RawHTML).Segments
+			if segments.Len() > 0 {
+				seg := segments.At(0)
+				m := rawTagName.FindSubmatch(seg.Value(source))
+				block = m != nil && !phrasingTags[strings.ToLower(string(m[1]))]
+			}
+		}
+		if block {
 			return ast.WalkStop, nil
 		}
 		return ast.WalkContinue, nil
 	})
-	return image
+	return block
 }
 
+// rawTagName is the element name a raw HTML inline node opens or closes; a
+// comment or declaration has none.
+var rawTagName = regexp.MustCompile(`^</?([A-Za-z][A-Za-z0-9-]*)`)
+
+// phrasingTags are the elements an inline option may hold inside its
+// <button> and stay inline.
+var phrasingTags = setOf("a", "abbr", "b", "bdi", "bdo", "br", "cite", "code", "data", "del", "dfn", "em",
+	"i", "ins", "kbd", "mark", "q", "s", "samp", "small", "span", "strong", "sub", "sup", "time", "u", "var", "wbr")
+
 // footnoteIDPrefix is the id prefix of the footnotes in one text: a hash of
-// that text, so two texts on one page that each define [^1] link to their
-// own note. Identical texts share it, and their links meet the first copy.
-func footnoteIDPrefix(s string) string {
+// salt and that text, so two texts on one page that each define [^1] link to
+// their own note. Identical texts with the same salt share it, and their
+// links meet the first copy; item fields salt it with their place on the
+// page (itemField), and other texts pass an empty salt.
+func footnoteIDPrefix(salt, s string) string {
 	h := fnv.New32a()
+	if salt != "" {
+		h.Write([]byte(salt))
+		h.Write([]byte{0})
+	}
 	h.Write([]byte(s))
 	return fmt.Sprintf("%s%08x-", footnoteIDPrefixBase, h.Sum32())
 }
 
 // convert renders s through md, one of the page's pipelines.
 func (p *pageData) convert(md goldmark.Markdown, s string) template.HTML {
-	return p.convertWith(md, s, nil)
+	return p.convertWith(md, s, "", nil)
 }
 
-// convertWith is convert with a step between parsing and rendering: prepare
-// may edit the parsed document.
-func (p *pageData) convertWith(md goldmark.Markdown, s string, prepare func(doc ast.Node, src []byte)) template.HTML {
+// convertWith is convert with a footnote prefix salt (footnoteIDPrefix) and
+// a step between parsing and rendering: prepare may edit the parsed
+// document.
+func (p *pageData) convertWith(md goldmark.Markdown, s, salt string, prepare func(doc ast.Node, src []byte)) template.HTML {
 	// Rendering is sequential per page; the footnote renderer reads the prefix
 	// through its closure (blockMarkdown).
-	p.footnotePrefix = footnoteIDPrefix(s)
+	p.footnotePrefix = footnoteIDPrefix(salt, s)
 	var buf bytes.Buffer
 	var err error
 	if prepare == nil {

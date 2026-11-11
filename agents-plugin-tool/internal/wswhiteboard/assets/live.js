@@ -22,7 +22,7 @@
   var banner = doc.getElementById("wb-banner");
   function formBusy() {
     var a = doc.activeElement;
-    return (dirty && !copied) || (a && (a.classList.contains("note") || a.id === "reply-text")) || !!doc.querySelector(".wbv:not([hidden])");
+    return (dirty && !copied) || (a && (a.matches("textarea.note") || a.id === "reply-text")) || !!doc.querySelector("body > .wbv:not([hidden])");
   }
   function reloadNow() {
     if (store) store.setItem("wb-scroll", String(window.scrollY));

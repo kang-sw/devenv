@@ -136,6 +136,7 @@ var trackerCommands = map[string]trackerCommandDef{
 	wstracker.TypeItemCreate: {trackerEventSpec(wsxmlcmd.Leaf, "kind", "title", "project", "labels", "due", "priority", "parent", "after", "mentions", "refs"), buildItemCreate},
 	wstracker.TypeItemEdit:   {trackerEventSpec(wsxmlcmd.Leaf, "item", "title", "project", "labels", "due", "priority", "mentions", "refs", "clear"), buildItemEdit},
 	wstracker.TypeItemHide:   {trackerEventSpec(wsxmlcmd.Empty, "item"), buildItemOnly},
+	wstracker.TypeItemMove:   {trackerEventSpec(wsxmlcmd.Empty, "item", "parent", "after"), buildItemMove},
 	wstracker.TypeItemAssign: {trackerEventSpec(wsxmlcmd.Empty, "item", "people", "rules", "levels", "completion"), buildItemAssign},
 	wstracker.TypeItemHandoff: {trackerEventSpec(wsxmlcmd.Leaf, "item", "to", "assignee"), func(b *trackerBatch, cmd wsxmlcmd.Command, ev *trackerEvent) {
 		b.itemRef(cmd, ev, "item")
@@ -334,6 +335,26 @@ func buildItemEdit(b *trackerBatch, cmd wsxmlcmd.Command, ev *trackerEvent) {
 	}
 	if changed == 0 {
 		b.p.Add("%s: changes nothing; set an attribute, a body, or clear", cmd.Label())
+	}
+}
+
+// buildItemMove reads item.move: parent is required, "" for top level
+// (null in the payload); after as on item.create.
+func buildItemMove(b *trackerBatch, cmd wsxmlcmd.Command, ev *trackerEvent) {
+	b.itemRef(cmd, ev, "item")
+	if v, ok := cmd.Attr("parent"); !ok {
+		b.p.Add("%s: required (an item ID, or \"\" for top level)", cmd.At("parent"))
+	} else if strings.TrimSpace(v) == "" {
+		ev.payload["parent"] = nil
+	} else {
+		b.itemRef(cmd, ev, "parent")
+	}
+	if v, ok := cmd.Attr("after"); ok {
+		if strings.TrimSpace(v) == "" {
+			ev.payload["after"] = ""
+		} else {
+			b.itemRef(cmd, ev, "after")
+		}
 	}
 }
 

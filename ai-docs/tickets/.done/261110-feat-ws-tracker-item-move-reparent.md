@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: a18352117bd14bfb
 sage-review-completeness-reviewed: a18352117bd14bfb
+completed: 2026-11-11
 ---
 
 # Tracker item.move: reparent and reorder an existing item
@@ -218,3 +219,56 @@ Verification:
   selection leaving the mode, a selection drag keeping tree order, a
   selection drop with a refused root, and the picker on one item and on a
   selection.
+
+### Result (eb1164232) - 2026-11-11
+
+Landed in 55cfaff3f (domain + engine), c9c4578e2 (tracker.update +
+playbooks), 90cd1c3ee (dashboard), eb1164232 (review fixes).
+
+- Payload `item.move {item, parent, after?}`: `parent` is required (an item
+  id, or null for top level); `after` follows `item.create` (absent = last,
+  `""`/null = first, id = after that sibling, which must be a child of the
+  new parent at write).
+- Reason texts (all in `reasons.json`, engine parity): the item and
+  destination ownership rule reuse `item.create`'s "`<parent >X` is neither
+  assigned to nor created by `<m>`" through one helper
+  (`needCreatorOrAssignee`, Go and engine) for 261111 to share; plus "X is
+  hidden", "parent required (...)", "X cannot move under itself", "parent X
+  is a topic; a topic takes no children", "parent X is in Y's own subtree",
+  "X cannot follow itself", "after X is not a child of <parent | the top
+  level>". The concurrent-cycle flag reads "moving X under Y would close a
+  cycle with a concurrent move; ignored".
+- Fold: parent and after are one position register (`it:<id>:place`), so
+  concurrent moves of one item follow the register's winner rule with the
+  usual field / superseded marks. A placement is replayed by the view only
+  when the shown winner changes; sibling order now replays creates and shown
+  moves in fold order, and a moved item leaves a vacated slot so rows
+  anchored on it stay (anchor lookup: the live slot, else the last vacated).
+  Stores without moves produce identical goldens.
+- Move vs unassign (the Constraints' planning item): the move stays applied
+  and is marked "subtask under <parent>" against the unassign in either fold
+  order (`endRec` keys on the event that set the parent; `applyMove` marks an
+  already-ended record).
+- Check-time fold (`stateBefore`) for an `item.move` also folds every create
+  and move, since the subtree rule walks ancestors outside the named threads.
+- Dashboard: list-view row drag with 25/50/25 bands (halves when the row
+  takes no children), reusing `insOpts` for the edge bands; checkbox
+  selection mode per Decision 6; selection drag moving only selection roots
+  in tree order, chained by `after`, refused roots named in the drop marker
+  and the toast; "Move to..." picker in the item menu (single item or
+  selection); `item.move` thread line; 24 i18n keys in every locale.
+  Client rules mirror `checkMove`, so a refused move is never offered.
+- Verification: `ws-rgo test ./internal/wstracker/` ok (reasons.json 193
+  cases agree with the engine; new `case-move-tree`, `case-move-concurrent`
+  goldens cover the concurrent cycle, two concurrent moves of one item incl.
+  the winner rule beating fold order, move vs unassign in both orders, move
+  vs hide of its destination, `after` on a hidden sibling, vacated slots;
+  `TestMoveByCreatorAndLiveAssignee`, `TestMoveSubtreeTravels`,
+  `TestMoveVerdictsEqualFullReplay`); `ws-rgo test ./internal/mcp/` ok
+  (`tk:item.move` in the every-command walk); `./internal/wsi18n/...`,
+  `./internal/wsdashboard/...`, `./internal/wsrsrc/...` ok; `node --check
+  tracker.js`; lite review: no Critical or Important, three Minor fixed.
+- Not done: the browser check in the MY view (no browser available to the
+  worker). Drag is wired for the list view only (the picker is the
+  keyboard/touch path); rows of a collapsed closed section and the top of a
+  later section take no drop.

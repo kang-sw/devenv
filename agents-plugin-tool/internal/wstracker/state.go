@@ -112,17 +112,21 @@ type item struct {
 	parent, author       string
 	// after is the sibling anchor (528) when afterSet: "" = first. Unset
 	// (every item created before the field) = last.
-	after       string
-	afterSet    bool
-	ts          time.Time
-	hidden      bool
-	edited      *node
-	node        *node
-	mentions    []string
-	attachments []attachment
-	refs        []string
-	labels      labelSet // label ids as written; the view drops removed ones
-	open        *opening // the latest item.open; active while its ended is nil
+	after    string
+	afterSet bool
+	// placedBy is the event of the current place (the create, or the
+	// item.move whose register write is shown); parentBy the one that set
+	// the current parent.
+	placedBy, parentBy *node
+	ts                 time.Time
+	hidden             bool
+	edited             *node
+	node               *node
+	mentions           []string
+	attachments        []attachment
+	refs               []string
+	labels             labelSet // label ids as written; the view drops removed ones
+	open               *opening // the latest item.open; active while its ended is nil
 }
 
 // opening is an item.open: the creator (or the admin standing in for a
@@ -146,6 +150,20 @@ type takeReq struct {
 	of, note, answerNote string
 	state                string
 	ended                *node
+}
+
+// placement is one sibling placement (528) in fold order: a create, or an
+// item.move that changed what the item's position register shows. The view
+// replays them to order siblings.
+type placement struct {
+	id, parent, after string
+	afterSet          bool
+}
+
+// placeVal is an item.move's position register value.
+type placeVal struct {
+	parent, after string
+	afterSet      bool
 }
 
 // labelSet is an item's labels register value: label ids, in the order
@@ -257,6 +275,7 @@ type state struct {
 	aorder   []string
 	items    map[string]*item
 	iorder   []string
+	place    []placement
 	asg      map[string]*rec
 	recs     []*rec
 	byItem   map[string][]*rec
@@ -782,8 +801,9 @@ func (s *state) inScope(o *opening, who string) bool {
 // foldFlag flags n in the final fold (marks): a write whose causal-past check
 // passed but that an event earlier in fold order, concurrent with it, has
 // already overtaken (a second claim of one opening, an approval of a request
-// already answered). It takes no effect. A check-time fold skips it by the
-// same test without flagging, so later verdicts see what a full replay shows.
+// already answered, a move closing a cycle with a concurrent move). It takes
+// no effect. A check-time fold skips it by the same test without flagging, so
+// later verdicts see what a full replay shows.
 func (s *state) foldFlag(n *node, reason rejection) {
 	if s.marks {
 		n.status, n.reason = "flagged", string(reason)
@@ -950,6 +970,18 @@ func show(v any) string {
 			return "hidden"
 		}
 		return "false"
+	case placeVal:
+		at := "top level"
+		if x.parent != "" {
+			at = "under " + alias(x.parent)
+		}
+		switch {
+		case !x.afterSet:
+			return at + ", last"
+		case x.after == "":
+			return at + ", first"
+		}
+		return at + ", after " + alias(x.after)
 	case int:
 		return itoa(x)
 	case string:
@@ -1017,6 +1049,17 @@ func (s *state) write(key, label string, n *node, v any) any {
 		}
 	}
 	return w.v
+}
+
+// peek is the value write(key, _, n, v) would show, without writing.
+func (s *state) peek(key string, n *node, v any) any {
+	heads := []head{{n, v}}
+	for _, h := range s.reg[key] {
+		if !s.hb(h.n, n) {
+			heads = append(heads, h)
+		}
+	}
+	return winner(heads).v
 }
 
 // regWinner is the shown write of a register: mentions, attachments, and
@@ -1125,12 +1168,12 @@ func (s *state) endRec(r *rec, n *node, st string) {
 	parent := s.items[r.item]
 	for _, id := range s.iorder {
 		it := s.items[id]
-		if it.parent != r.item || it.author != r.to || parent == nil || parent.author == r.to || s.hb(it.node, n) {
+		if it.parent != r.item || it.parentBy.member != r.to || parent == nil || parent.author == r.to || s.hb(it.parentBy, n) {
 			continue
 		}
 		f := "subtask under " + alias(r.item)
-		mark(it.node, n, "subtask", f, n.id, "", "")
-		mark(n, it.node, "subtask", f, n.id, "", "")
+		mark(it.parentBy, n, "subtask", f, n.id, "", "")
+		mark(n, it.parentBy, "subtask", f, n.id, "", "")
 	}
 }
 
@@ -1218,8 +1261,10 @@ func (s *state) apply(n *node) {
 		it.mentions, it.attachments, it.refs = mentionsOf(p), attachmentsOf(p), refsOf(p)
 		it.labels = labelsOf(p)
 		it.after, it.afterSet = p.str("after"), p.has("after")
+		it.placedBy, it.parentBy = n, n
 		if s.items[n.id] == nil {
 			s.iorder = append(s.iorder, n.id)
+			s.place = append(s.place, placement{n.id, it.parent, it.after, it.afterSet})
 		}
 		s.items[n.id] = it
 	case TypeItemEdit:
@@ -1286,6 +1331,8 @@ func (s *state) apply(n *node) {
 		if it := s.items[p.str("item")]; it != nil {
 			it.hidden = s.write("it:"+it.id+":hidden", it.alias+" hidden", n, true).(bool)
 		}
+	case TypeItemMove:
+		s.applyMove(n)
 	case TypeItemAssign:
 		s.applyAssign(n)
 	case TypeItemHandoff:
@@ -1617,6 +1664,48 @@ func (s *state) apply(n *node) {
 		s.settle(n.id, n)
 	case strings.HasPrefix(n.typ, "item."):
 		s.settle(p.str("item"), n)
+	}
+}
+
+// applyMove folds item.move into the item's position register: concurrent
+// moves of one item keep the register's winner, the other marked. A move
+// whose shown place would sit in the item's own subtree, which only a
+// concurrent move can cause, is flagged and ignored, the later in fold
+// order losing. A parent change by an assignee concurrent with the end of
+// their assignment on the new parent is marked as a subtask, as endRec
+// marks a create.
+func (s *state) applyMove(n *node) {
+	p := n.p
+	it := s.items[p.str("item")]
+	if it == nil {
+		return
+	}
+	key := "it:" + it.id + ":place"
+	v := placeVal{parent: p.str("parent"), after: p.str("after"), afterSet: p.has("after")}
+	if shown := s.peek(key, n, v).(placeVal); s.underItem(shown.parent, it) {
+		s.foldFlag(n, rejection("moving "+it.alias+" under "+alias(shown.parent)+" would close a cycle with a concurrent move; ignored"))
+		return
+	}
+	w := s.write(key, "position of "+it.alias, n, v).(placeVal)
+	wn := s.regWinner(key)
+	if wn == it.placedBy {
+		return
+	}
+	if w.parent != it.parent {
+		it.parentBy = wn
+	}
+	it.parent, it.after, it.afterSet, it.placedBy = w.parent, w.after, w.afterSet, wn
+	s.place = append(s.place, placement{it.id, w.parent, w.after, w.afterSet})
+	par := s.items[it.parent]
+	if !s.marks || wn != n || it.parentBy != n || par == nil || par.author == n.member {
+		return
+	}
+	for _, r := range s.byItem[par.id] {
+		if r.to == n.member && r.ended != nil && !r.fallback && !s.hb(r.ended, n) {
+			f := "subtask under " + alias(par.id)
+			mark(n, r.ended, "subtask", f, r.ended.id, "", "")
+			mark(r.ended, n, "subtask", f, r.ended.id, "", "")
+		}
 	}
 }
 

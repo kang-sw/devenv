@@ -357,7 +357,7 @@
   function readAnswers(el) {
     var out = {};
     q(".card[data-id], .arow[data-id], .srow[data-id]", el).forEach(function (item) {
-      var s = {}, note = item.querySelector(".note"), box = item.querySelector(".ack input");
+      var s = {}, note = item.querySelector("textarea.note"), box = item.querySelector("label.ack > input");
       var pick = item.querySelector('.opt[data-opt][aria-pressed="true"], .btn[data-v][aria-pressed="true"]');
       if (pick) s.pick = pickKey(pick);
       if (note && note.value) s.note = note.value;
@@ -381,7 +381,7 @@
     q(".card[data-id], .arow[data-id], .srow[data-id]", el).forEach(function (item) {
       var s = saved[item.getAttribute("data-id")];
       if (!s) return;
-      var note = item.querySelector(".note"), box = item.querySelector(".ack input");
+      var note = item.querySelector("textarea.note"), box = item.querySelector("label.ack > input");
       if (s.pick) q(".opt[data-opt], .btn[data-v]", item).forEach(function (b) { if (pickKey(b) === s.pick) b.setAttribute("aria-pressed", "true"); });
       if (note && (s.note || s.noteOpen)) openNote(note, s);
       if (box && s.checked) box.checked = true;
@@ -871,7 +871,7 @@
   // readItem is a board item's answer as a chip; null when it has none.
   function readItem(item) {
     var pick = item.querySelector('.opt[data-opt][aria-pressed="true"], .btn[data-v][aria-pressed="true"]');
-    var box = item.querySelector(".ack input"), note = item.querySelector(".note");
+    var box = item.querySelector("label.ack > input"), note = item.querySelector("textarea.note");
     var c = { id: item.getAttribute("data-id"), answer: "", note: note ? note.value.trim() : "" };
     if (pick) c.answer = pick.getAttribute("data-opt") || pick.getAttribute("data-v");
     else if (box && box.checked) c.answer = "ok";
@@ -886,7 +886,7 @@
       var v = b.getAttribute("data-opt") || b.getAttribute("data-v");
       b.setAttribute("aria-pressed", String(!!c && v === c.answer));
     });
-    var box = item.querySelector(".ack input"), note = item.querySelector(".note");
+    var box = item.querySelector("label.ack > input"), note = item.querySelector("textarea.note");
     if (box) box.checked = !!c && c.answer === "ok";
     if (note) {
       note.value = c && c.note ? c.note : "";
@@ -4160,8 +4160,8 @@
   function tlRoot(name) { return tlHeld[name] ? tlHeld[name].root : region(name); }
   // tlDrafted: the pill's reply rule (a pick, a ticked ack, or a note).
   function tlDrafted(el) {
-    var box = el.querySelector(".ack input"), n = el.querySelector(".note");
-    return !!(el.querySelector('.opt[aria-pressed="true"]') || (box && box.checked) || (n && n.value.trim()));
+    var box = el.querySelector("label.ack > input"), n = el.querySelector("textarea.note");
+    return !!(el.querySelector('.opt[data-opt][aria-pressed="true"]') || (box && box.checked) || (n && n.value.trim()));
   }
   // tlHeldAsks counts a held board the pill's way without its DOM: its asks,
   // less those drafted in the live board and those the newest sent records

@@ -523,6 +523,7 @@ attachment the store accepts, in bytes (339); without it the limit is 10 MiB
 |---|---|---|
 | `item.create` | `kind` (`task`/`topic`; `todo` is still accepted and folds as `task`, 154 a), `title`, `body?`, `project?`, `due?`, `priority?`, `parent?`, `after?`, `mentions?`, `attachments?`, `refs?` | A `parent` must be assigned to or created by the author. `project` is one free-text string, the only grouping (no labels or tags). `due` is a `YYYY-MM-DD` date. `priority` is a level in the author's current range; omitted, the item starts at the store's default level. `after` places it among its siblings (528), below. A new write carrying `stage` is refused (retired); an older event's stage folds as described under Derived state. |
 | `item.edit` | `item`, any of `title`/`body`/`project`/`due`/`priority`; `mentions?`, `attachments?` and `refs?` with `body` | Creator only; an admin may also edit an item whose creator was removed (292). `due: null` clears the date; priority cannot be cleared. A new write carrying `stage` is refused (retired). Each field merges by the (203) rule. `mentions` or `attachments` without `body` is flagged, and so is `refs`. |
+| `item.move` | `item`, `parent` (an item id, or `null` for top level; required), `after?` | Reparents or reorders an item with its subtree; a reorder is a move under the same parent. The item's creator or a member holding a live assignment on it; an admin may also move an item whose creator was removed. Only when the parent changes, the destination must pass `item.create`'s parent rules (not hidden, created by or assigned to the mover) and must not be a topic (a topic takes no children) or in the item's own subtree; a reorder under the same parent, and a move to top level, check only the item rule. `after` places it among its new siblings as on `item.create`, and a non-empty `after` must be a child of the new parent. Flagged on a hidden item. Assignments, comments, and history stay with the item. |
 | `item.hide` | `item` | Creator only; an admin may also hide an item whose creator was removed (292). A tombstone: the content stays in history. Flagged while someone else holds an open (live or pending) assignment on the item. |
 | `item.assign` | `item`, `targets` (a list of member ids and rules `{root, include_root?, levels?}`) or the older `mode` (`all`/`chosen`), `levels` (all), `people` (chosen); `completion` (`assignee`/`assigner`; absent reads as `assignee`, and writers fill it in: `assigner` when anyone but the author is a target, `assignee` when the author is the only one) | Creator only; an admin may also assign an item whose creator was removed. A person may be anyone in the store: the author, or someone the author reaches (the author is in their lead chain, any depth), is a **forced** assignment, live at once; anyone else gets a **pending** assignment. A rule (490)-(492) targets everyone below `root` (within `levels`, absent = the whole subtree; `root` too with `include_root`), forced, and stays live: anyone who later enters the range inherits it. A rule rooted at the author or below is live at once; one rooted elsewhere is a **rule request** pending to `root`. The older `chosen` is `targets` of people and `all` is one rule `{root: author, levels}`, with the event id as the rule id. Flagged: both `targets` and `mode`, an empty list, a malformed target, two rules on one root, a rule with nobody in it, a rule another live rule of the author's on the item already covers, or every person chosen (with no rule) already holding a live or pending assignment. On a topic (153 b) an assign names exactly one person (`targets: [id]`, or `chosen` with one person) and makes its **holder**: flagged otherwise (`all`, a rule, or more than one), and flagged while the topic has any live or pending assignment, a pending handoff included; its `completion` is accepted and not stored. Any applied assign (the creator included) displaces a task's fallback holding. |
 | `item.handoff` | `item`, `to`, `assignee?`, `note?` | The holder of a live assignment hands it to anyone; an admin may hand off any member's live assignment by naming its holder in `assignee` (286), so open work can be taken over before the member is removed. It makes a pending assignment to `to` with the original's assigner and completion mode; on accept the original assignment ends (`handed`) and the new one starts with the original's status and note (290). Flagged on a done assignment, when `to` is the holder or already holds one, or while another handoff of it is pending. |
@@ -580,9 +581,20 @@ order, each under its parent (or at the root); an anchor that is missing, not
 a sibling, or not placed yet appends. A hidden anchor keeps its slot, so
 hiding a row moves no other row. Two inserts after one anchor that do not see
 each other order by the fold: the later one lands nearer the anchor. A
-non-string `after` is flagged; nothing else is. Reorder and reparent are not
-modelled; a later `item.move {item, parent?, after}` can carry the same
-anchor, its latest write winning like a field.
+non-string `after` is flagged; nothing else is on a create.
+
+`item.move` places an item again: its parent and `after` are one position
+register, so concurrent moves of one item resolve by the (203) rule, the
+other marked. The view replays every placement (a create, or a move the
+register shows) in fold order; a moved item leaves a vacated slot, so a row
+anchored on it stays where it was, and an anchor found only as vacated
+slots takes the last of them. A move whose shown place would sit in the
+item's own subtree, which only a concurrent move can cause (two moves that
+together form a cycle), is flagged and ignored: the later in fold order
+loses. Write checks read the causal past, so a destination hidden, or its
+creator removed, concurrently with a move does not flag it. A parent change
+by an assignee concurrent with the end of their assignment on the new
+parent is marked as a subtask under it, as a create is.
 
 `agent-auto` is valid only on `item.status` and `item.close` for the author's
 own assignment. It is always invalid on accept, decline, return, and handoff:

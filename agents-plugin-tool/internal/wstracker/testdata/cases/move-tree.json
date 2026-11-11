@@ -1,0 +1,285 @@
+{
+ "name": "move-tree",
+ "comment": "item.move in a linear history. B moves under A between A.1 and A.2; D, anchored after B, keeps B's vacated slot, and E, created after B at top level later, anchors on that slot. A.2 moves to top level after the hidden C; A.1 reorders after B inside A; T.2 reorders first under the topic T (a same-parent reorder checks only the item rule). maya, B's live assignee, moves her M under B and then moves B (with M) to top level; B keeps its comment and assignment. Last, A moves with its subtree under D.",
+ "viewers": [
+  "ada.pc",
+  "maya.pc"
+ ],
+ "now": "2026-11-02T09:00:00Z",
+ "genesis": {
+  "admins": [
+   "ada"
+  ],
+  "members": [
+   {
+    "id": "ada",
+    "name": "Ada",
+    "keys": [
+     "ada-k1"
+    ],
+    "leads": []
+   },
+   {
+    "id": "maya",
+    "name": "Maya",
+    "keys": [
+     "maya-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "raj",
+    "name": "Raj",
+    "keys": [
+     "raj-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "bo",
+    "name": "Bo",
+    "keys": [
+     "bo-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "lena",
+    "name": "Lena",
+    "keys": [
+     "lena-k1"
+    ],
+    "leads": [
+     "maya"
+    ]
+   },
+   {
+    "id": "omar",
+    "name": "Omar",
+    "keys": [
+     "omar-k1"
+    ],
+    "leads": [
+     "maya"
+    ]
+   },
+   {
+    "id": "sven",
+    "name": "Sven",
+    "keys": [
+     "sven-k1"
+    ],
+    "leads": [
+     "raj"
+    ]
+   }
+  ]
+ },
+ "commits": {
+  "ada.pc": [
+   {
+    "ts": "2026-11-01T09:00:00Z",
+    "seen": {},
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "A"
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "B"
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "C"
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "A.1",
+       "parent": "ada.pc#1"
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "A.2",
+       "parent": "ada.pc#1",
+       "after": "ada.pc#4"
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "D",
+       "after": "ada.pc#2"
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "topic",
+       "title": "T"
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "T.1",
+       "parent": "ada.pc#7"
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "T.2",
+       "parent": "ada.pc#7"
+      }
+     ],
+     [
+      "item.assign",
+      {
+       "item": "ada.pc#2",
+       "targets": [
+        "maya"
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:05:00Z",
+    "seen": {},
+    "events": [
+     [
+      "item.move",
+      {
+       "item": "ada.pc#2",
+       "parent": "ada.pc#1",
+       "after": "ada.pc#4"
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "E",
+       "after": "ada.pc#2"
+      }
+     ],
+     [
+      "comment.add",
+      {
+       "item": "ada.pc#2",
+       "body": "still here"
+      }
+     ],
+     [
+      "item.hide",
+      {
+       "item": "ada.pc#3"
+      }
+     ],
+     [
+      "item.move",
+      {
+       "item": "ada.pc#5",
+       "parent": null,
+       "after": "ada.pc#3"
+      }
+     ],
+     [
+      "item.move",
+      {
+       "item": "ada.pc#4",
+       "parent": "ada.pc#1",
+       "after": "ada.pc#2"
+      }
+     ],
+     [
+      "item.move",
+      {
+       "item": "ada.pc#9",
+       "parent": "ada.pc#7",
+       "after": ""
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:15:00Z",
+    "seen": {
+     "maya.pc": 4
+    },
+    "events": [
+     [
+      "item.move",
+      {
+       "item": "ada.pc#1",
+       "parent": "ada.pc#6"
+      }
+     ]
+    ]
+   }
+  ],
+  "maya.pc": [
+   {
+    "ts": "2026-11-01T09:10:00Z",
+    "seen": {
+     "ada.pc": 17
+    },
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "M"
+      }
+     ],
+     [
+      "item.move",
+      {
+       "item": "maya.pc#1",
+       "parent": "ada.pc#2",
+       "after": ""
+      }
+     ],
+     [
+      "item.move",
+      {
+       "item": "ada.pc#2",
+       "parent": null
+      }
+     ],
+     [
+      "item.status",
+      {
+       "item": "ada.pc#2",
+       "status": "doing"
+      }
+     ]
+    ]
+   }
+  ]
+ }
+}

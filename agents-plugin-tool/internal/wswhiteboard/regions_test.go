@@ -103,7 +103,7 @@ func TestImageSrcServesFileImages(t *testing.T) {
 	out := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r",
 		FileText: func(p string) string { return "REL:" + p }, ImageSrc: imageSrc}))
 	wantAll(t, out,
-		`<img src="/s/r/image?path=shots%2Fa.png" alt="diagram">`,
+		`<img src="/s/r/image?path=shots%2Fa.png" alt="diagram"/>`,
 		`<span class="img-text">outside <code class="fpath">REL:/abs/b.png</code></span>`,
 		`the plan <code class="fpath">REL:shots/a.png</code>`,
 	)
@@ -363,7 +363,7 @@ func TestFramedBodyImagesTakeDocImageSrc(t *testing.T) {
 	}
 	doc := frameDocs(t, string(regions.Board))["doc"]
 	wantAll(t, doc, `<img src="data:image/png;base64,QUJD" alt="a">`, `<img src="/route/big.png" alt="big">`)
-	wantAll(t, string(regions.Board), `<img src="/route/a.png" alt="item">`)
+	wantAll(t, string(regions.Board), `<img src="/route/a.png" alt="item"/>`)
 	wantNone(t, string(regions.Board), `src="data:image/png;base64,QUJD" alt="item"`)
 
 	page := render(t, BuildView(st, in))
@@ -486,7 +486,7 @@ func TestOutsideImageServesItemsAndRelaysFramedBodyImages(t *testing.T) {
 	}
 	board := string(regions.Board)
 	wantAll(t, board,
-		`<img src="/s/r/image?path=/x/out.png" data-out="" data-abs="/x/out.png" alt="out">`,
+		`<img src="/s/r/image?path=/x/out.png" data-out="" data-abs="/x/out.png" alt="out"/>`,
 		`<a href="/s/r/image?path=/x/out.png" data-wl="file" data-abs="/x/out.png" data-img="" data-out="" title="/x/out.png">lnk</a>`,
 		`<span class="img-text">bad <a tabindex="0" data-wl="file" data-abs="/x/bad.png" title="/x/bad.png"><code class="fpath">/x/bad.png</code></a></span>`,
 		`<a href="/s/r/file?path=shots/a.png" data-wl="file" data-rel="shots/a.png" data-abs="/root/shots/a.png" data-img="" title="shots/a.png">in</a>`,

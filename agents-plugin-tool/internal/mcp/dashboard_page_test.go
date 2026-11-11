@@ -108,8 +108,8 @@ func TestDashboardReadPageServesTheBoard(t *testing.T) {
 		// written absolute, is the image route too, marked data-out with its
 		// absolute path (the route serves it to a loopback viewer only, and
 		// the page puts the path back where it fails to load).
-		`<img src="/s/` + reg.ReplyID + `/image?path=shots%2Fa.png" alt="shot">`,
-		`<img src="/s/` + reg.ReplyID + `/image?path=` + url.QueryEscape(outside) + `" data-out="" data-abs="` + filepath.FromSlash(outside) + `" alt="away">`,
+		`<img src="/s/` + reg.ReplyID + `/image?path=shots%2Fa.png" alt="shot"/>`,
+		`<img src="/s/` + reg.ReplyID + `/image?path=` + url.QueryEscape(outside) + `" data-out="" data-abs="` + filepath.FromSlash(outside) + `" alt="away"/>`,
 		`<span class="chip cat feat">feat</span><a href="/s/` + reg.ReplyID + `/file?path=ai-docs%2Ftickets%2Fready%2F261101-feat-ready-one.md" data-wl="file" data-rel="ai-docs/tickets/ready/261101-feat-ready-one.md" data-abs="` + filepath.Join(f.root, "ai-docs", "tickets", "ready", "261101-feat-ready-one.md") + `" title="ai-docs/tickets/ready/261101-feat-ready-one.md">Ready one</a></span>`,
 		`<span class="chip cat feat">feat</span><a href="/s/` + reg.ReplyID + `/file?path=ai-docs%2Ftickets%2Ftodo%2F261102-feat-todo-one.md" data-wl="file" data-rel="ai-docs/tickets/todo/261102-feat-todo-one.md" data-abs="` + filepath.Join(f.root, "ai-docs", "tickets", "todo", "261102-feat-todo-one.md") + `" title="ai-docs/tickets/todo/261102-feat-todo-one.md">Todo one</a></span>`,
 		"1 ready, 1 todo", // the full layout's ticket count
