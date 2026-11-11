@@ -132,9 +132,46 @@ func serveXterm(w http.ResponseWriter) {
 	_, _ = w.Write(data)
 }
 
-// xtermStyle is the emulator's stylesheet, which a page that offers
-// terminals inlines.
-func xtermStyle() template.CSS { return template.CSS(xtermCSS) }
+// termSymbolsWOFF2 is the symbols-only Nerd Font (assets/nerdfont/README.md)
+// the terminal card lists after the page's monospace stack, so a prompt's
+// powerline separators and icons draw instead of empty boxes.
+//
+//go:embed assets/nerdfont/SymbolsNerdFontMono-Regular.woff2
+var termSymbolsWOFF2 []byte
+
+// termSymbolsLicense embeds the font's license beside it.
+//
+//go:embed assets/nerdfont/LICENSE
+var termSymbolsLicense embed.FS
+
+// termSymbolsFamily is the family the font is declared under. terminal.js
+// names it in the emulator's font list: change the two together.
+const termSymbolsFamily = "WsNerdSymbols"
+
+var termSymbolsName = sync.OnceValue(func() string {
+	sum := sha256.Sum256(termSymbolsWOFF2)
+	return "nerd-symbols-" + hex.EncodeToString(sum[:6]) + ".woff2"
+})
+
+// TermSymbolsAsset is the terminal's symbols font: the file a page that
+// offers terminals loads from beside itself when a terminal first draws,
+// and its name, which carries a hash of the bytes.
+func TermSymbolsAsset() (name string, data []byte) { return termSymbolsName(), termSymbolsWOFF2 }
+
+// serveTermSymbols serves the symbols font; its name never changes under
+// its content.
+func serveTermSymbols(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "font/woff2")
+	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	_, _ = w.Write(termSymbolsWOFF2)
+}
+
+// xtermStyle is the emulator's stylesheet with the symbols font's face,
+// which a page that offers terminals inlines. The browser fetches a face
+// only when text first uses its family, so the board never waits for it.
+func xtermStyle() template.CSS {
+	return template.CSS(xtermCSS + "\n@font-face { font-family: \"" + termSymbolsFamily + "\"; src: url(\"/s/" + termSymbolsName() + "\") format(\"woff2\"); font-display: swap; }\n")
+}
 
 // terminalFolders are the folders the "+ Terminal" popover offers for a
 // session.

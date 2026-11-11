@@ -174,6 +174,39 @@ func TestTerminalsAreOfferedToALocalViewerOnly(t *testing.T) {
 	}
 }
 
+// TestTerminalSymbolsFont pins the terminal's symbols font: a page that
+// offers terminals declares its face under a content-hash name beside the
+// page, a LAN viewer's page does not, the font is served as woff2, cached
+// for good, and its license is embedded beside it.
+func TestTerminalSymbolsFont(t *testing.T) {
+	name, data := TermSymbolsAsset()
+	if !strings.HasPrefix(name, "nerd-symbols-") || !strings.HasSuffix(name, ".woff2") || !bytes.HasPrefix(data, []byte("wOF2")) || len(data) > 2<<20 {
+		t.Fatalf("TermSymbolsAsset = %q (%d bytes), want a woff2 of at most 2 MiB under a hash name", name, len(data))
+	}
+	if raw, err := termSymbolsLicense.ReadFile("assets/nerdfont/LICENSE"); err != nil || !strings.Contains(string(raw), "Ryan L McIntyre") || !strings.Contains(string(raw), "Permission is hereby granted, free of charge") {
+		t.Errorf("assets/nerdfont/LICENSE is not the Nerd Fonts MIT license: %v", err)
+	}
+	manager := wsholder.New(wsholder.Options{Dir: filepath.Join(t.TempDir(), wsholder.DirName)})
+	f := startPageFixture(t, lanMode, withHolders(manager))
+	port := strconv.Itoa(f.d.Endpoint().Port)
+	local := viewer{peer: "127.0.0.1:50000", host: "127.0.0.1:" + port}
+	lan := viewer{peer: "192.168.7.30:50000", host: "192.168.7.20:" + port, cookie: readLANToken(t, f.dir)}
+	face := `@font-face { font-family: "` + termSymbolsFamily + `"; src: url("/s/` + name + `") format("woff2"); font-display: swap; }`
+	if page := serve(f.d, local, http.MethodGet, "/s/livesession", "").Body.String(); !strings.Contains(page, face) {
+		t.Errorf("a local viewer's page lacks the symbols font face %s", face)
+	}
+	if page := serve(f.d, lan, http.MethodGet, "/s/livesession", "").Body.String(); strings.Contains(page, termSymbolsFamily) {
+		t.Error("a LAN viewer's page declares the terminal's symbols font")
+	}
+	rec := serve(f.d, local, http.MethodGet, "/s/"+name, "")
+	if rec.Code != http.StatusOK || !bytes.Equal(rec.Body.Bytes(), data) || !strings.Contains(rec.Header().Get("Cache-Control"), "immutable") || rec.Header().Get("Content-Type") != "font/woff2" {
+		t.Errorf("GET /s/%s = %d (%d bytes, %q, %q), want the font, cached for good", name, rec.Code, rec.Body.Len(), rec.Header().Get("Content-Type"), rec.Header().Get("Cache-Control"))
+	}
+	if js, err := dashboardFS.ReadFile("assets/terminal.js"); err != nil || !strings.Contains(string(js), `"`+termSymbolsFamily+`"`) {
+		t.Errorf("terminal.js does not name the symbols family %q in its font list", termSymbolsFamily)
+	}
+}
+
 // TestPickShell pins the shell rule: $SHELL then /bin/sh on POSIX; pwsh,
 // powershell, %COMSPEC%, then cmd.exe on Windows; and a TERM that names no
 // capable terminal becomes xterm-256color while a capable one is kept.

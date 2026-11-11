@@ -6,13 +6,15 @@ import (
 	"testing"
 )
 
-// TestBoardTopicMotion pins the board swap's topic motion (dashboard.js
-// topicMotion, growTopic, and their swap wiring): a topic the board did not
-// hold grows from 0, a changed topic grows from its old rendered height,
-// topics reconciled through the closed pages and non-topic nodes stay
-// still; a deferred (editing) swap and reduced motion read no heights, so
-// nothing animates; the animation fills nothing, so no fixed height stays
-// behind. The cases execute under node when it is installed.
+// TestBoardTopicMotion pins the board swap's motion (dashboard.js
+// topicMotion, growTopic, slideBoard, and their swap wiring): a topic the
+// board did not hold grows from 0, a changed topic grows from its old
+// rendered height, topics reconciled through the closed pages and non-topic
+// nodes stay still; every topic and card standing in the board slides from
+// its old offset to its new place, but a maximized card; a deferred
+// (editing) swap and reduced motion read no spots, so nothing animates; the
+// animations fill nothing, so no fixed height or transform stays behind.
+// The cases execute under node when it is installed.
 func TestBoardTopicMotion(t *testing.T) {
 	data, err := dashboardFS.ReadFile("assets/dashboard.js")
 	if err != nil {
@@ -22,15 +24,16 @@ func TestBoardTopicMotion(t *testing.T) {
 	key := regexp.MustCompile(`(?s)\n  function topicKey\(n\) \{.*?\n  \}\n`).FindString(js)
 	motion := regexp.MustCompile(`(?s)\n  function topicMotion\(before, ins\) \{.*?\n  \}\n`).FindString(js)
 	grow := regexp.MustCompile(`(?s)\n  function growTopic\(n, from\) \{.*?\n  \}\n`).FindString(js)
+	slide := regexp.MustCompile(`(?s)\n  function slideBoard\(el, before\) \{.*?\n  \}\n`).FindString(js)
 	before := regexp.MustCompile(`\n    var before = board [^\n]*\n`).FindString(js)
-	if key == "" || motion == "" || grow == "" || before == "" {
-		t.Fatal("dashboard.js holds no topicKey / topicMotion / growTopic / swap before-heights line")
+	if key == "" || motion == "" || grow == "" || slide == "" || before == "" {
+		t.Fatal("dashboard.js holds no topicKey / topicMotion / growTopic / slideBoard / swap before-spots line")
 	}
 	if !strings.Contains(js, `swap("board", d.hash, d.html, true);`) {
 		t.Error("the deferred board swap does not land still")
 	}
-	if !strings.Contains(js, `if (before) topicMotion(before, ins).forEach(function (m) { growTopic(m.n, m.from); });`) {
-		t.Error("swap does not animate the inserted topics after preparing them")
+	if !strings.Contains(js, "        topicMotion(before, ins).forEach(function (m) { growTopic(m.n, m.from); });\n        slideBoard(el, before);\n") {
+		t.Error("swap does not grow the inserted topics after preparing them, then slide the board")
 	}
 	runNode(t, "board topic motion", `
 var bad = [];
@@ -42,10 +45,10 @@ function N(tag, topic, cls) {
 }
 N.prototype.hasAttribute = function (k) { return k in this.attrs; };
 N.prototype.getAttribute = function (k) { return k in this.attrs ? this.attrs[k] : null; };
-N.prototype.getBoundingClientRect = function () { return { height: this.h }; };
+N.prototype.getBoundingClientRect = function () { return { height: this.h, top: this.y || 0 }; };
 N.prototype.animate = function (k, o) { this.anims.push([k, o]); };
 function getComputedStyle() { return { marginBottom: "16px" }; }
-`+key+motion+grow+`
+`+key+motion+grow+slide+`
 var fresh = new N("SECTION", "New", ["topic"]), changed = new N("SECTION", "Old", ["topic"]), paged = new N("SECTION", "Paged", ["topic", "closed"]), bar = new N("DIV", undefined, ["reply"]);
 var heights = { "t:Old": { h: 120, paged: false }, "t:Paged": { h: 40, paged: true }, "t:Gone": { h: 30, paged: false } };
 check("new from 0, changed from its old height, paged and non-topic still",
@@ -61,14 +64,28 @@ check("a changed topic interpolates from its old height, filling nothing", chang
 var same = new N("SECTION", "Same", ["topic"]); same.h = 50; growTopic(same, 50.4);
 check("an unchanged height does not animate", same.anims, []);
 
+var board = { y: 100, children: [] };
+board.getBoundingClientRect = function () { return { top: this.y }; };
+function at(n, y) { n.y = y; board.children.push(n); return n; }
+function card(id, max) { var c = new N("DIV", undefined, ["bcard"]); c.attrs["data-card"] = id; if (max) c.attrs["data-max"] = ""; return c; }
+var up = at(new N("SECTION", "Up", ["topic"]), 100), down = at(new N("SECTION", "Down", ["topic"]), 180), crd = at(card("c1"), 260),
+  maxed = at(card("c2", true), 300), born = at(new N("SECTION", "Born", ["topic"]), 340), unpaged = at(new N("SECTION", "Unpaged", ["topic", "closed"]), 400),
+  stay = at(new N("SECTION", "Stay", ["topic"]), 420), other = at(new N("DIV", undefined, ["closed-more"]), 500);
+slideBoard(board, { "t:Up": { h: 50, y: 230 }, "t:Down": { h: 70, y: 0 }, "c:c1": { y: 80 }, "c:c2": { y: 10 }, "t:Unpaged": { h: 20, y: 30, paged: true }, "t:Stay": { h: 20, y: 320.5 } });
+check("a topic slides from its old offset", up.anims, [[[{ transform: "translateY(230px)" }, { transform: "none" }], { duration: 200, easing: "ease-out" }]]);
+check("a shifted topic slides back", down.anims, [[[{ transform: "translateY(-80px)" }, { transform: "none" }], { duration: 200, easing: "ease-out" }]]);
+check("a card slides", crd.anims, [[[{ transform: "translateY(-80px)" }, { transform: "none" }], { duration: 200, easing: "ease-out" }]]);
+check("a maximized card, a new topic, one out of the closed pages, an unmoved one, and other nodes stay still",
+  [maxed, born, unpaged, stay, other].map(function (n) { return n.anims.length; }), [0, 0, 0, 0, 0]);
+
 function decide(board, still, rm) {
   var el = {};
   function reducedMotion() { return rm; }
-  function topicHeights() { return "heights"; }
+  function boardSpots() { return "heights"; }
 `+before+`
   return before;
 }
-check("a live board swap reads heights", decide(true, undefined, false), "heights");
+check("a live board swap reads spots", decide(true, undefined, false), "heights");
 check("a deferred swap is still", decide(true, true, false), null);
 check("reduced motion is still", decide(true, undefined, true), null);
 check("another region reads none", decide(false, undefined, false), null);

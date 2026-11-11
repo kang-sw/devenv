@@ -7,8 +7,10 @@ import (
 )
 
 // TestFilesTabOnTheSessionPage pins where the file explorer lives: a live
-// session page's conversation column carries the "Conversation | Files"
-// switch and the Files pane, and loads the explorer script after the
+// session page's conversation panel header, between the splitter and the
+// conversation, carries the "Conversation | Files" switch, the Files pane
+// takes the conversation's place under its tab while the agents tree and
+// the composer stay, and the page loads the explorer script after the
 // preview kind it opens files in and before the page script that mounts
 // it. A board-first page (no conversation column) and the index page carry
 // none of it.
@@ -16,7 +18,8 @@ func TestFilesTabOnTheSessionPage(t *testing.T) {
 	f := startPageFixture(t)
 	_, live := get(t, f.base+"/s/livesession")
 	for _, want := range []string{
-		`<nav id="ctabs" class="ctabs"`, `data-ctab="convo" aria-pressed="true"`, `data-ctab="files" aria-pressed="false"`,
+		`<div id="chead" class="thead chead"><nav id="ctabs" class="ctabs"`, `data-ctab="convo" aria-pressed="true"`, `data-ctab="files" aria-pressed="false"`,
+		`<span class="csum"></span><span class="fsum"></span></div>`,
 		`<section id="files" class="fpane"`, "window.WsFiles = {",
 	} {
 		if !strings.Contains(live, want) {
@@ -26,8 +29,8 @@ func TestFilesTabOnTheSessionPage(t *testing.T) {
 	if i, j, k := strings.Index(live, "window.WsPreview = {"), strings.Index(live, "window.WsFiles = {"), strings.Index(live, "The dashboard page script"); i < 0 || j < i || k < j {
 		t.Error("the explorer script is not between the preview kind and the page script")
 	}
-	if i, j := strings.Index(live, `id="ctabs"`), strings.Index(live, `data-region="tree"`); i < 0 || j < i {
-		t.Error("the conversation column's tabs do not head the column")
+	if i, j, k := strings.Index(live, `id="splitter"`), strings.Index(live, `id="ctabs"`), strings.Index(live, `<div id="convo" class="convo">`); i < 0 || j < i || k < j {
+		t.Error("the conversation panel's tabs do not head the conversation, below the splitter")
 	}
 	_, board := get(t, f.base+"/s/boardsession")
 	if strings.Contains(board, `id="ctabs"`) || strings.Contains(board, `id="files"`) {
@@ -38,10 +41,13 @@ func TestFilesTabOnTheSessionPage(t *testing.T) {
 	}
 	css := mustAsset(t, "dashboard.css")
 	for _, want := range []string{
-		// hidden, never removed: the conversation column's panes under the Files tab
-		`.dgrid.live[data-ctab="files"] > .r-tree, .dgrid.live[data-ctab="files"] > .splitter, .dgrid.live[data-ctab="files"] > .convo`,
+		// the Files pane in the conversation's place; the conversation hidden, never removed
+		`.dgrid.live > .fpane { grid-area: convo; display: none; }`,
+		`.dgrid.live[data-ctab="files"] > .convo { display: none; }`,
 		`.dgrid.live[data-layout="split"][data-ctab="files"] > .fpane { display: flex; }`,
 		`.dgrid.live:not([data-layout="tabs"])[data-ctab="files"] > .fpane { display: flex; }`,
+		// the header shows the conversation's counts or the Files pane's root
+		`.dgrid[data-ctab="files"] > .chead .csum, .dgrid:not([data-ctab="files"]) > .chead .fsum { display: none; }`,
 	} {
 		if !strings.Contains(css, want) {
 			t.Errorf("the stylesheet lacks %q", want)

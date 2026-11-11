@@ -157,12 +157,13 @@ func guardedRoutes() []struct{ method, path, body string } {
 		// fixture knows no holder, so a passing stop ends nothing.
 		{http.MethodGet, "/holders", ""},
 		{http.MethodPost, "/holders/guardtest/stop", ""},
-		// The terminal routes and the emulator script, served when the
-		// fixture's holder host can run terminals. No request starts a
-		// shell: the folder is refused and the terminal unknown. Which
-		// viewer a route then answers is its own gate's
+		// The terminal routes, the emulator script, and its symbols font,
+		// served when the fixture's holder host can run terminals. No
+		// request starts a shell: the folder is refused and the terminal
+		// unknown. Which viewer a route then answers is its own gate's
 		// (TestTerminalRoutesAnswerOnlyTheDaemonsOwnLocalPage).
 		{http.MethodGet, "/s/" + xtermName(), ""},
+		{http.MethodGet, "/s/" + termSymbolsName(), ""},
 		{http.MethodGet, "/s/livesession/terminals", ""},
 		{http.MethodPost, "/s/livesession/terminals", `{"folder":"path","path":"not/absolute"}`},
 		{http.MethodPost, "/s/livesession/terminals/hguardtest/close", ""},
