@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: c1edf076db34c0ef
 sage-review-completeness-reviewed: c1edf076db34c0ef
+completed: 2026-11-11
 ---
 
 # Whiteboard item fields accept sanitized HTML
@@ -179,3 +180,46 @@ Verification:
   markup as plain text, with no tags left, no `<script>` or `<style>`
   content, and image alt, SVG, and table cell text kept.
 - The playbook mirror test passes for the edited whiteboard playbook.
+
+### Result (29feba493) - 2026-11-11
+
+Landed in 29feba493 with review fixes in 0ba8b4fc2.
+
+- `itemField` (markdown.go) renders option, rationale, and recommendation
+  text through the raw pipeline and `sanitizeReply`. Its trusted-target
+  table only lives as long as one field. The salt is `<id>/option/<letter>`,
+  `<id>/why`, or `<id>/recommend`, and both `footnoteIDPrefix` and the SVG id
+  prefix take it. An empty salt hashes as before, so reply and topic-body
+  ids are unchanged. `Block` stays the escaping pipeline that `RenderText`
+  uses without HTML.
+- `IsBlock` reads the raw parse. A single paragraph stays inline only if
+  every raw tag in it is phrasing content (`phrasingTags`). An image, table,
+  SVG, div, or stray closing tag stacks the options. Titles and ack rows
+  still go through `Inline` (D2, D6).
+- `.opt, .ctx, .rec-line { contain: paint; }` (D4).
+- `PlainHTML` (sanitize.go) prints options, recommendations, and rationale
+  in `whiteboard.query`. It drops tags and keeps their text, prints an image
+  as its alt text, and prints nothing for script or style. Code spans and
+  code blocks stay literal (`protectCode`). `Plain` still handles titles,
+  links, labels, and answers, which the page shows as text (D7).
+- Playbook item-field and query paragraphs rewritten (D5). The rsrc
+  manifest and the wsflow and Pi mirrors were synced.
+- Verification: `ws-rgo go test ./...` (agents-plugin-tool) passed after
+  29feba493. After 0ba8b4fc2, `wswhiteboard`, `wsdashboard`, `wsrsrc`
+  (`-count=1`), and `mcp` passed. One `mcp` run hit an unrelated failure in
+  `TestHostedReconnectAdoptsOnlyLiveSamePIDRecords`, which passed `-count=3`
+  in isolation and in the following full `mcp` run.
+  `python3 -m unittest discover agents-plugin-wsflow/tests` passed.
+- Decisions beyond the ticket:
+  - `PlainHTML` is a new function rather than a widened `Plain`, so that
+    titles keep text like `Vec<T>`.
+  - The settled row's picked chip renders `FirstLine(PlainHTML(option))`,
+    so an image option shows its alt text, not escaped tags.
+  - In form.js, a click on a `<summary>` inside an option no longer picks
+    the option.
+  - Lite review fix: item fields keep `class`, so form.js, live.js, and
+    dashboard.js now select controls by data-* or aria-pressed attributes
+    and by textarea, button, or label elements. A field that reuses
+    `class="note"` used to break reply building.
+  - Item field HTML is re-serialized by x/net/html (`<br/>`, `<img .../>`,
+    `&#34;` in attributes), and test expectations follow that form.
