@@ -280,8 +280,8 @@ build, no server, no dependencies.
   item window. A click on a row opens it with a mouse. The selection is local
   UI state.
 - **Status icons** (355). Each status differs by shape as well as colour: todo
-  ring, doing half-filled, blocked slashed ring, awaiting confirm hourglass,
-  done filled check, pending dashed ring with `?`, unassigned dotted ring,
+  ring, doing half-filled, blocked slashed ring, in-review hourglass,
+  done filled check, dropped muted filled circle with a bar, pending dashed ring with `?`, unassigned dotted ring,
   declined / returned / handed off / withdrawn as muted rings with a mark, and
   a speech bubble for a topic. Icons, initials, priority, due, and action
   buttons share one immediate custom tooltip (not the browser's delayed
@@ -530,10 +530,10 @@ attachment the store accepts, in bytes (339); without it the limit is 10 MiB
 | `item.accept` / `item.decline` | `item`, `note?` | The target of a pending assignment, on it. Accept makes it live; for a handoff it also ends the original. Decline ends it as `declined`. A pending handoff whose original ends another way is withdrawn with it (295), so a later accept or decline finds no pending assignment. |
 | `item.return` | `item`, `assignee`, `note?` | Only the assignee's direct lead, on an accepted (formerly pending) live assignment. Ends it as `returned`; the assigner may send again. Returning an accepted handoff restores the original assignment with its prior status (291), unless its holder was removed or holds another assignment on the item by then. |
 | `item.unassign` | `item`, `assignee?`, or `root?` and `rule?` | By the assigner; the sender of a pending assignment may also withdraw it, and the holder of a topic may release their own live one (153 b). An admin may also unassign when the assignee or assigner was removed. With `root`, it ends the author's open rules rooted there (a pending rule request is withdrawn). With `rule` (a rule id), it ends that one rule of the author's on the item, with its request and records; flagged when it is not an open rule on the item, is another member's, sits beside `assignee`, or has a root other than a given `root`. Without any, it withdraws all of the author's assignments on the item and ends their rules. |
-| `item.status` | `item`, `status` (`idea`/`todo`/`doing`/`blocked`), `note?` | Assignee only (live), the fallback holder included. Allowed while awaiting confirmation, which withdraws the close. Not allowed on done, or on a topic (153 b). |
-| `item.close` | `item`, `note?` | Assignee. Moves to `done`, or to `awaiting` when completion is `assigner`. Not allowed on a topic (153 b). |
-| `item.confirm` / `item.reject` | `item`, `assignee`, `note?` | Assigner, on an `awaiting` assignment. Moves to `done` / back to `doing`. |
-| `item.reopen` | `item`, `assignee?`, `note?` | The assigner or the assignee reopens a `done` assignment, back to `doing`. |
+| `item.status` | `item`, `status`, `assignee?`, `note?` | Without `assignee` (or naming the author): the assignee's own live record, the fallback holder included; `idea`/`todo`/`doing`/`blocked`/`in-review`/`dropped`, `dropped` only under completion `assignee` or when the author is the assigner. Allowed while in review, which withdraws the review. With another member's `assignee`: an org superior of that member sets `blocked`, `done` (final, no review), or `dropped` on their live record; the assigner who is not a superior sets only `dropped`. Never on a pending record, on done or dropped (reopen first), or on a topic (153 b). `agent-auto` names no other assignee. |
+| `item.close` | `item`, `note?` | Assignee. Moves to `done`, or to `in-review` when completion is `assigner`. Not allowed on done, dropped, an `in-review` under completion `assigner`, or a topic (153 b). |
+| `item.confirm` / `item.reject` | `item`, `assignee`, `note?` | The assigner or any org superior of the assignee, on an `in-review` assignment (any completion mode). Moves to `done` / back to `doing`. |
+| `item.reopen` | `item`, `assignee?`, `note?` | The assigner or the assignee reopens a `done` or `dropped` assignment, back to `doing`. |
 | `item.open` | `item`, `scope` (`team` or `store`) | The creator (the fallback admin when the creator was removed) opens a task nobody else holds for claiming: `team` admits the opener's org subtree, `store` every member. Flagged on a topic, a hidden or done task, one already open, or one with a live or pending assignment besides the fallback. |
 | `item.unopen` | `item` | The creator withdraws an open opening. Folding after the opening ended (a concurrent claim or assign), it is a no-op. |
 | `item.claim` | `item` | A member in the opening's scope, other than the fallback holder, takes an open task: a live record `<claim event>><claimer>` by the opener, starting at todo, not forced, which displaces the fallback and ends the opening. |
@@ -636,10 +636,11 @@ forced (author, or someone the author reaches) starts live
   when it is declined or, once accepted, returned; for a returned handoff the
   original assigner gets one too. Notices are derived from the assignment
   records, never events.
-- **Done and blocked notices.** The assigner of a live assignment gets a
-  notice (`done` / `blocked`, key `w:<assignment>:<status>:<lastUpdate>`)
-  when someone else set it done or blocked; an awaiting close is in the
-  confirm list instead, and a status the assigner set (a confirm) is none.
+- **Done, blocked, and dropped notices.** The assigner of a live assignment
+  gets a notice (`done` / `blocked` / `dropped`, key
+  `w:<assignment>:<status>:<lastUpdate>`) when someone else set that status;
+  an in-review one is in the assigner's confirm list instead, and a status
+  the assigner set (a confirm) is none.
 - `returned` and `declined` are terminal: the assigner may assign again.
 - Completion mode (assignee closes / assigner confirms) stays per assignment.
 - **Rules** ((490)-(492)). A rule's id is `<assign event id>~<root>` (the
@@ -676,9 +677,11 @@ rule rooted elsewhere:  request pending --accept--> live --request returned / un
 
 ### Derived state
 
-- An assignment's status is `todo`, `doing`, `blocked`, `awaiting`, or `done`
-  while live. An item's own status comes from its live assignments: all done
-  means `done`, any blocked means `blocked`, then awaiting, then doing, then
+- An assignment's status is `idea`, `todo`, `doing`, `blocked`, `in-review`,
+  `done`, or `dropped` while live. An item's own status comes from its live
+  assignments, dropped ones left out (all dropped: `dropped`, left out of
+  roll-ups like idea): all done means `done` (a done/dropped mix is done),
+  any blocked means `blocked`, then in-review, then doing, then
   todo, then `idea` when every live holder is at idea. A task normally has
   a live holder (the fallback below), so with no live assignment it is
   `pending` (a pending one shadows the fallback), or `todo` when no
@@ -775,10 +778,10 @@ subtree in tree order, `depth` from the viewer; for an admin, then every other
 live member walked from the org-tree roots, `outside: true`, `depth` from the
 root (a root is 0). `counts` are the member's live assignments per status, a
 creator-fallback holding left out ((262 a): nobody took that work); `load` is
-those at todo, doing, or blocked (idea, awaiting, and done are not work in
-hand); `stale` and `overdue` (the item's `due` before
+those at todo, doing, or blocked (idea, in-review, done, and dropped are not
+work in hand); `stale` and `overdue` (the item's `due` before
 today's date) are subsets of `load`; `fallback` counts the live fallback
-holdings not done. A held topic is in no list or count.
+holdings neither done nor dropped. A held topic is in no list or count.
 
 `name` is derived from the profile, never stored: kept in the view state so a
 view reads one string where it names a person. **Display rules** ((383 b),
@@ -884,9 +887,12 @@ Flagged reasons, as the engine words them:
   requester
 - status, close, or reopen by a non-assignee, before acceptance, or after the
   assignment ended
-- status or close on a done assignment, or close while already awaiting
-- confirm or reject by a non-assigner, when not awaiting, or when no
-  confirmation is required
+- status or close on a done or dropped assignment, or close while already in
+  review under completion `assigner`; a dropped write by the assignee under
+  completion `assigner`; a status on another member's assignment by anyone
+  but an org superior (blocked, done, dropped) or the assigner (dropped)
+- confirm or reject by anyone but the assigner or an org superior of the
+  assignee, or when not in review
 - a reply to a comment that is unseen, hidden, or in another thread
 - a mention that is not a list of ids, or names someone who is not a member
   or was removed; mentions or attachments on an item edit without a body
@@ -958,7 +964,7 @@ page clock starts at 2026-11-06 09:00. The fixtures show:
     `ivy.pc-6` to her own lead maya (on maya's Today chips: *answer*)
   - handoff: `lena.pc-2` to raj (pending, raj accepts, ada gets a notice), raj
     hands it to sven, sven accepts (lena, the assigner, gets a notice)
-  - awaiting confirm: ivy's close of "Tokenizer" waits for maya
+  - in review: ivy's close of "Tokenizer" waits for maya
 - mentions and attachments: lena's comment `lena.pc-6` on "Index builder"
   mentions maya and omar and attaches `index-layout-v2.png`; her next comment
   `lena.pc-7` attaches a 50 MiB trace and is flagged over the 10 MiB limit;
@@ -1022,7 +1028,7 @@ creation, and it has a topic and a blocked subtask.
 | 155 | One `origin`: `human` / `agent` / `agent-auto`. |
 | 186-189 | Peer requests to anyone. Pending requests are not counted. Accepting needs no approval, but the recipient's lead may return. An agent never accepts or declines. Requests became pending assignments by 279, 280. |
 | 201 | A member whose key was revoked continues under the same id after `roles.add_key`. |
-| 202 | Changing status while awaiting the assigner's confirm cancels the completion request. |
+| 202 | Changing status while awaiting the assigner's confirm cancels the completion request (awaiting is now in-review, 11-11). |
 | 203 | Concurrent writes to one field: the display winner is the later ts, then member id, then seq. Both values are kept and shown. |
 | 204 | An event whose `seen` names an unreceived event is waiting: no verdict until the gap fills. |
 | 205 | A broken event (seq gap or duplicate, wrong ref, bad signature) consumes no seq. |
@@ -1133,6 +1139,7 @@ creation, and it has a topic and a blocked subtask.
 | 153 b (11-10) | A topic takes an ownership-only assignment: one holder (`targets: [id]` or `chosen` with one person), refused otherwise and while any live or pending assignment exists; no status or close, no completion mode stored; the holder may unassign their own record, so a handoff receiver can release it too; accept, decline, handoff, and return are unchanged. A held topic shows in the holder's assignments only, never in status lists or counts. Every creation path assigns a new topic to its creator (supersedes 529's topic exception and 151 a); topics created before stay unheld. |
 | 154 a (11-10) | `task` and `todo` merge: the fold stores `task` for a `todo` create, so views, filters, and checks see one kind; `todo` stays valid on input so old events replay unflagged. The `kind` field stays for a later subcategory. |
 | 555-561 (11-10) | Every task has a holder: a task nobody else holds is held by its creator (the first admin when the creator was removed) through a fold-derived fallback record, one per period, each starting at todo; any assign displaces it, and it cannot be unassigned, handed off, or returned. `idea` is a settable status before todo, left out of roll-ups; an item is idea only when every live holder is. The review stage is retired: new `stage` writes are refused, older ones fold onto the fallback (review = idea). Item statuses review, unassigned, declined, and returned no longer occur. Both quick-add rows create a task its creator holds at idea; dashboard and MCP task creates no longer self-assign (topics still do). Supersedes the 11-09 review-stage rows and 529 for tasks. |
+| 242-248, 277-285 (11-11) | An org superior (any ancestor) of an assignee may set `blocked`, `done` (final, no review), or `dropped` on their live record through `item.status` with `assignee`; the assigner stays a separate concept and may only drop. `in-review` replaces awaiting: a close under completion `assigner` enters it, the assignee may enter it on any assignment and leave it with a status write, and the assigner or any org superior confirms or rejects it. `dropped` is a terminal assignment status outside roll-ups that reopens like done; an item is dropped when every live assignment is, done when the rest are done. Writers default completion by relationship: `assigner` for an org subordinate (or a rule rooted at the writer or below), `assignee` for oneself or a peer, one assign event per class (supersedes 20 b's "anyone else defaults to assigner"); the fold's absent-means-`assignee` stays. Query adds `status:in-review` and `status:dropped`, keeps `status:awaiting` as an alias, and `open` leaves out dropped. |
 
 ## Open questions
 
