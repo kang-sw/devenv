@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 564d6329db2f1b33
 sage-review-completeness-reviewed: 564d6329db2f1b33
+completed: 2026-11-11
 ---
 
 # Hosted-session mode flag
@@ -206,3 +207,73 @@ Verification:
   and a connection without the env is unchanged.
 - One live `claude -p` and one `pi --mode rpc` run with the flag set,
   showing no `mailbox wait` child process.
+
+### Result (d09b414e0) - 2026-11-11
+
+Implemented across ff312f485 (ws-mcp), 1b12122f6 (Claude mod + wsflow
+mirror), 4add08ee7 (Pi), d09b414e0 (review fixes).
+
+- Env contract: `WS_HOSTED_SESSION` truthy (1/true/yes/on, trimmed,
+  case-insensitive) plus a non-empty `WS_HOSTED_SESSION_KEY` is hosted
+  mode; the flag without a key gates nothing and warns (mod transcript
+  line, Pi UI warning).
+- Claude mod: under the flag no watcher is created (no wait at any arm,
+  no board drain, no interrupt), `mailbox_watch` is not registered, the
+  dashboard knob is not read and no intake is sent; manual setup takes the
+  hosted key the way it takes a late open's held key (re-login, never
+  mint) and a refusal is a transcript line. Push reads as available so the
+  manual row keeps "launch no mailbox wait" (review fix: a model-launched
+  wait would race the daemon). The gate sits in `register.ts`/`manual.ts`;
+  `dashboard.ts` needed no change. `$.env.get` takes literal names at the
+  call site, so `register.ts` spells them inline.
+- Pi: the owner lead's bridge re-logs in with the hosted key instead of
+  reusing or minting (refusal warns, mints nothing); `index.ts` skips the
+  feed and the mailbox slot under the flag, which covers first arm and
+  every adoption re-arm; `mailbox-waiter.ts` needed no change. Policy
+  children never read the hosted key.
+- ws-mcp: `hostedSessionKey()` via `s.getenv`; `dashboardTouch` returns
+  before register/remove/prune (not folded into `noDashboardMode`); in
+  ferrule a different relogin key is refused naming the hosted key, a
+  parent-less lead mint becomes a re-login with the hosted key, parent or
+  delegate/leaf mints are fresh; `workflow_manual` refuses the sentinel,
+  unknown keys and other parent-less keys naming the hosted key, and
+  passes any key whose record carries a parent (worker playbooks' child
+  keys keep working). `AgentKeyStore.MintLead(root)` canonicalizes the
+  root as ferrule does and writes a parent-less lead record; not wired
+  into a spawn.
+- Loss audit (the phase asked to confirm the nudge is the only loss): it
+  is not. Under the flag, without this server's registration: whiteboard
+  nudges from every whiteboard-dirtying tool, `dashboard_inbox_drain`, and
+  direct-path live snapshot writes; `whiteboard.update` names the file
+  instead of the page URL (`dashboardPageURL`); no heartbeat or ended
+  marking for the row; a `config.tune` of `dashboard.enabled` to false no
+  longer unlists. Unaffected: `dashboardMailNudge`, and `git.search` roots
+  (read from on-disk registrations, so a daemon row with `Project` works).
+
+Verification:
+- Claude mod: `claude plugin test .` in `agents-plugin` and in
+  `agents-plugin-wsflow`: 710 pass, 0 fail each (new: `hosted.test.ts`,
+  hosted cases in `engine.test.ts` and `manual-engine.test.ts`).
+- Pi: `test/hosted-session.integration.test.ts` 4/4 pass (hosted,
+  refused key, flag-without-key positive control). Full `npm test`:
+  2597 pass, 33 fail; the 33 are an identical set with this phase's
+  `src/` changes stashed (web-search/agent-channel/persistent-explore,
+  pi-web-access absent from the worktree layout), so unrelated.
+- Go (remote runner): `go test ./internal/mcp/` ok, `go vet
+  ./internal/mcp/` clean, `go test ./internal/wsrsrc/` ok (mirror).
+- Live, scratch projects outside the repo, process tree of the probe
+  only: `pi --mode rpc` control showed one `mailbox wait` child; with the
+  flag (valid key and unknown key) none, and the unknown key warned with
+  no mint. `claude -p --plugin-dir agents-plugin` in a ws project: control
+  showed one `mailbox wait` child; with the flag and a valid key none.
+
+Forward:
+- A harness process started from a hosted session (e.g. a Bash `claude
+  -p`) inherits both variables and would claim the hosted key; Pi RPC
+  children inherit them too (harmless while they carry a parent key).
+  The daemon spawn or the hosts may want to scrub them for children.
+- A parent-less delegate/leaf key minted on a hosted connection is refused
+  by `workflow_manual`; widen the exception if a playbook relies on it.
+- The hosted bootstrap follows re-login, so it does not start the tracker
+  session check a fresh mint starts (the throttled check still runs on the
+  manual load).
