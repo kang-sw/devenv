@@ -450,14 +450,21 @@ details.panel .body { container-type: inline-size; }
 .wb-rail .topic { overflow: hidden; overflow: clip; }
 .wb-rail .topic > .tbar { position: sticky; top: var(--wb-rail-top, 0px); z-index: 1; }
 .wb-rail .topic:not(.quiet) > .tbar { border-radius: var(--wb-radius) var(--wb-radius) 0 0; }
-/* a stuck bar draws above the top capsule stack, so the card's end pushes it up over the stack, where it turns into a capsule (rail.js motion) */
-.wb-rail .topic > .tbar.wb-stuck { box-shadow: var(--wb-shadow); z-index: 3; }
+/* A stuck bar stays under the top capsule stack (z-index 1 < the wrapper's
+   3): a bar that its card's end pushes up slides under the stack, and the
+   morph copy (rail.js motion) draws the turn into a capsule over it. Drawn
+   above the stack, a short topic (a quiet one is all bar, so its bar cannot
+   stick lower) straddling the stick line covered every capsule. */
+.wb-rail .topic > .tbar.wb-stuck { box-shadow: var(--wb-shadow); }
 /* the book button stays at the card's top and scrolls away under a stuck bar, so the bar gives back the room it reserved for it (the :has() outweighs the has-doc padding rules) */
 .wb-rail .topic.has-doc:has(> details.tdoc) > .tbar.wb-stuck { padding-right: 12px; }
 .wb-rail .topic > details.tdoc > summary { z-index: 2; }
 .wb-rail-wrap { position: sticky; height: 0; z-index: 1; pointer-events: none; }
 .wb-rail-wrap.up { top: var(--wb-rail-inset, 0px); z-index: 3; }
-.wb-rail-wrap.dn { bottom: 0; }
+/* The bottom wrapper ends the board, so its top margin is the board's
+   bottom scroll margin: room for the last item to scroll fully clear of
+   the bottom stack (rail.js BOT: FADE + 2 CAP + GAP + PAD) with a 16px gap. */
+.wb-rail-wrap.dn { bottom: 0; margin-top: calc(14px + 2 * 17px + 3px + 4px + 16px); }
 .wb-rail-stack { position: absolute; left: 0; right: 0; display: flex; flex-direction: column; gap: 3px; }
 .wb-rail-stack[hidden] { display: none; }
 /* the copy of a bar or a capsule that morphs between the two (rail.js); fill:forwards on its children ends with it */

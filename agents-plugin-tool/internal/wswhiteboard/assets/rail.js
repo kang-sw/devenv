@@ -28,7 +28,9 @@
   var CAP = 17, GAP = 3, PAD = 4, FADE = 14;
   function capH(n) { return n ? PAD + n * (CAP + GAP) : 0; }
   // The bottom stack's height with both capsules, fade included: a fixed
-  // reserve, so the line below does not move with the capsule count.
+  // reserve, so the line below does not move with the capsule count. The
+  // bottom wrapper's top margin (page.css), the board's bottom scroll
+  // margin, is built from it.
   var BOT = FADE + 2 * CAP + GAP + PAD;
 
   // The edge classes are up and dn, not top and bot: a bare .top is the
@@ -76,6 +78,11 @@
   // the rail.
   var topics = [], found = [], dirty = true, last = "", stuck = null, raf = 0, inset = 0;
   function readInset() { inset = root ? parseFloat(getComputedStyle(host).getPropertyValue("--wb-rail-inset")) || 0 : 0; }
+  // scrollRest is how far the scroller can still scroll down, in px.
+  function scrollRest() {
+    var e = root || d.scrollingElement || d.documentElement;
+    return Math.max(0, e.scrollHeight - e.clientHeight - e.scrollTop);
+  }
   function viewTop() { return root ? root.getBoundingClientRect().top + padTop + inset : 0; }
 
   // The rail's items are the board's topics and any other node the host
@@ -141,10 +148,13 @@
     // Bottom: the next topics whose bar's top edge is at or below the
     // bottom stack's top edge (over the reply bar, when it shows), i.e.
     // hidden behind the stack or further down. A bar that shows above the
-    // stack gets no capsule, so the stack may hold fewer than two.
+    // stack gets no capsule, so the stack may hold fewer than two. Nor does
+    // a bar in view that the rest of the scroll cannot lift above the line
+    // (a short last item at the end of the board): it is as high as it will
+    // ever go, and a capsule would only cover it.
     var reply = box.querySelector(".reply"), replyOff = reply && reply.offsetHeight ? reply.offsetHeight + 14 : 0;
-    var line = vb - replyOff - BOT, below = [];
-    for (k = above + (cur >= 0 ? 1 : 0); k < n; k++) if (rects[k].top >= line) below.push(k);
+    var line = vb - replyOff - BOT, below = [], rest = scrollRest();
+    for (k = above + (cur >= 0 ? 1 : 0); k < n; k++) if (rects[k].top >= line && !(rects[k].top < vb && rects[k].top - rest >= line)) below.push(k);
     draw({
       top: top,
       cur: cur,
@@ -196,8 +206,9 @@
 
   // --- motion: a bar turning into a capsule and back --------------------------
   // At the top, when the current topic's card scrolls past, its bar (pushed
-  // up over the top stack by the card's end: a stuck bar draws above the
-  // stack) turns into the stack's near capsule: a copy of the bar shrinks
+  // up under the top stack by the card's end: a stuck bar draws below the
+  // stack, so a short topic never covers the capsules) turns into the
+  // stack's near capsule: a copy of the bar, drawn over the stack, shrinks
   // from where the bar is to the capsule's box, its details fading and
   // sliding out and its title shrinking to the capsule's size, while the
   // capsule fades in under it. Scrolling back, a copy of the capsule grows

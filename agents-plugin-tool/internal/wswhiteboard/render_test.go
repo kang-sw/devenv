@@ -988,8 +988,9 @@ func TestTopicRailIsOnTheFullPageOnly(t *testing.T) {
 // TestTopicRailBarCapsuleMotion pins the rail's bar-to-capsule motion
 // (rail.js morph): it runs only without reduced motion and never on a
 // run's first draw, reads its starting boxes before a redraw and animates
-// after it, a stuck bar draws above the top capsule stack so the card's end
-// pushes it over the stack, both edges morph (the bottom stack's near
+// after it, a stuck bar draws below the top capsule stack (z-index 1 under
+// the wrapper's 3) so the card's end pushes it under the stack and a short
+// topic straddling the stick line never covers the capsules, both edges morph (the bottom stack's near
 // capsule grows into a bar that leaves the stack, and a shown bar sinking
 // behind it shrinks into the capsule), the copy that morphs stands out of
 // flow in its edge's wrapper, and the rail's teardown drops both copies.
@@ -1016,7 +1017,9 @@ func TestTopicRailBarCapsuleMotion(t *testing.T) {
 		}
 	}
 	for _, want := range []string{
-		`.wb-rail .topic > .tbar.wb-stuck { box-shadow: var(--wb-shadow); z-index: 3; }`,
+		`.wb-rail .topic > .tbar.wb-stuck { box-shadow: var(--wb-shadow); }`,
+		`.wb-rail .topic > .tbar { position: sticky; top: var(--wb-rail-top, 0px); z-index: 1; }`,
+		`.wb-rail-wrap.up { top: var(--wb-rail-inset, 0px); z-index: 3; }`,
 		`.wb-rail-wrap .wb-rail-ghost { position: absolute;`,
 	} {
 		if !strings.Contains(css, want) {
@@ -1059,6 +1062,33 @@ func TestTopicRailRailsHostItems(t *testing.T) {
 	}
 	if !strings.Contains(css, ".wb-cap .ci { flex: none; display: inline-flex; }") {
 		t.Error("the shared stylesheet does not lay out a capsule's icon")
+	}
+}
+
+// TestTopicRailEndOfBoard pins the rail at the end of the board: a bar in
+// view that the rest of the scroll cannot lift above the bottom stack's
+// line (a short last item at max scroll) gets no bottom capsule, which
+// would only cover it (and, with the bottom morph, shrink it into the
+// capsule). The bottom wrapper's top margin is the board's bottom scroll
+// margin: the bottom stack's reserve (rail.js BOT) plus a gap, so the last
+// item can scroll fully clear of the stack.
+func TestTopicRailEndOfBoard(t *testing.T) {
+	assets, err := PageAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	js := string(assets.FormScript)
+	if !strings.Contains(string(assets.CSS), ".wb-rail-wrap.dn { bottom: 0; margin-top: calc(14px + 2 * 17px + 3px + 4px + 16px); }") || !strings.Contains(js, "var CAP = 17, GAP = 3, PAD = 4, FADE = 14;") || !strings.Contains(js, "var BOT = FADE + 2 * CAP + GAP + PAD;") {
+		t.Error("the board's bottom scroll margin is not the bottom stack's reserve plus a gap")
+	}
+	for _, want := range []string{
+		"return Math.max(0, e.scrollHeight - e.clientHeight - e.scrollTop);",
+		"var line = vb - replyOff - BOT, below = [], rest = scrollRest();",
+		"if (rects[k].top >= line && !(rects[k].top < vb && rects[k].top - rest >= line)) below.push(k);",
+	} {
+		if !strings.Contains(js, want) {
+			t.Errorf("the rail script lacks %q", want)
+		}
 	}
 }
 
