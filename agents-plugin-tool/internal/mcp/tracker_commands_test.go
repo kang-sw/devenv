@@ -349,6 +349,18 @@ func TestTrackerUpdateWritesEveryEventCommand(t *testing.T) {
 		t.Fatalf("T6 must be hidden")
 	}
 
+	// Move: T5 under T4, first; then T4 to top level (parent="").
+	step(trackerWriteStep{`<tk:store name="team">
+<tk:item.move item="{t5}" parent="{t4}" after=""/>
+<tk:item.move item="{t4}" parent=""/>
+</tk:store>`, []trackerWantEvent{
+		{typ: wstracker.TypeItemMove, payload: map[string]any{"item": "{t5}", "parent": "{t4}", "after": ""}},
+		{typ: wstracker.TypeItemMove, payload: map[string]any{"item": "{t4}", "parent": nil}},
+	}})
+	if v = w.view(t); v.Items[w.ids["t5"]].Parent == nil || *v.Items[w.ids["t5"]].Parent != w.ids["t4"] || v.Items[w.ids["t4"]].Parent != nil {
+		t.Fatalf("after the moves: T5 parent %v, T4 parent %v", v.Items[w.ids["t5"]].Parent, v.Items[w.ids["t4"]].Parent)
+	}
+
 	// Comments: add with mentions, edit, hide.
 	step(trackerWriteStep{`<tk:store name="team">
 <tk:comment.add item="{t1}" mentions="bo">first</tk:comment.add>

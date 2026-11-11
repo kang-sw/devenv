@@ -92,6 +92,7 @@ cannot be rolled back, so each stands alone in its batch, outside any group.
 | `tk:item.create` | `kind`, `title`, `project?`, `due?`, `priority?`, `parent?`, `after?`, `mentions?`, `refs?` | the body |
 | `tk:item.edit` | `item`, `title?`, `project?`, `due?`, `priority?`, `mentions?`, `refs?`, `clear?` | a new body |
 | `tk:item.hide` | `item` | none |
+| `tk:item.move` | `item`, `parent`, `after?` | none |
 | `tk:item.assign` | `item`, `people?` and `rules?` (one or both), or `levels`; `completion?` | none |
 | `tk:item.handoff` | `item`, `to`, `assignee?` | a note |
 | `tk:item.accept`, `tk:item.decline` | `item` | a note |
@@ -129,8 +130,12 @@ Body text, markdown, written as is.
 - `item`, `parent`, `after`, `reply_to`, `comment`, and each `refs` entry: an
   ID as the query or an update prints it, or `$N` for the item or comment
   that command `N` (counting from 1) of the same batch creates.
-- `after`: the sibling (same parent) the new item goes right after;
-  `after=""` puts it first; without `after` it goes last.
+- `after`: the sibling (same parent) the new or moved item goes right
+  after; `after=""` puts it first; without `after` it goes last.
+- `tk:item.move` places an existing item, with its subtree, under `parent`
+  (`parent=""`: top level); a move under the same parent reorders it. Move a
+  misplaced item rather than recreate it, which loses its comments,
+  assignments, and history.
 - `refs`: the items the text references, each written `#<ID>` in the text.
   `mentions` and `refs` ride with the body: a new body replaces both, so an
   edit that keeps them repeats them.
