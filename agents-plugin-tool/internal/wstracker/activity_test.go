@@ -67,7 +67,7 @@ func TestActivityAssignmentsCommentsAndStatus(t *testing.T) {
 	wantActs(t, got, 5, "status actor=lena target= status=doing concerns=lena,maya")
 	wantActs(t, got, 6, "comment actor=lena target= status= concerns=lena,maya")
 	// assigner completion: the close awaits maya's confirm.
-	wantActs(t, got, 7, "closed actor=lena target= status=awaiting concerns=lena,maya")
+	wantActs(t, got, 7, "closed actor=lena target= status=in-review concerns=lena,maya")
 	wantActs(t, got, 8, "status actor=maya target=lena status=doing concerns=lena,maya")
 	wantActs(t, got, 10, "closed actor=maya target=lena status=done concerns=lena,maya")
 	wantActs(t, got, 11)
@@ -75,6 +75,22 @@ func TestActivityAssignmentsCommentsAndStatus(t *testing.T) {
 	// is the creator.
 	wantActs(t, got, 12, "comment actor=omar target= status= concerns=maya")
 	wantActs(t, got, 13)
+}
+
+// A status set on another member's assignment, by an org superior or the
+// assigner, names that member as Target; a drop is a status of dropped.
+func TestActivityStatusOnAnothersAssignment(t *testing.T) {
+	got := activityOf(t, []step{
+		{"maya.pc", "item.create", map[string]any{"kind": "task", "title": "Index"}},                             // 1
+		{"maya.pc", "item.assign", map[string]any{"item": "maya.pc#1", "targets": []any{"lena"}}},                // 2
+		{"ada.pc", "item.status", map[string]any{"item": "maya.pc#1", "assignee": "lena", "status": "blocked"}},  // 3
+		{"lena.pc", "item.status", map[string]any{"item": "maya.pc#1", "status": "dropped"}},                     // 4
+		{"lena.pc", "item.reopen", map[string]any{"item": "maya.pc#1"}},                                          // 5
+		{"maya.pc", "item.status", map[string]any{"item": "maya.pc#1", "assignee": "lena", "status": "dropped"}}, // 6
+	})
+	wantActs(t, got, 3, "status actor=ada target=lena status=blocked concerns=lena,maya")
+	wantActs(t, got, 4, "status actor=lena target= status=dropped concerns=lena,maya")
+	wantActs(t, got, 6, "status actor=maya target=lena status=dropped concerns=lena,maya")
 }
 
 func TestActivityRuleRequestAndAccept(t *testing.T) {

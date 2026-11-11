@@ -337,7 +337,8 @@ The event:
 - `actor`: `{id, name}` of the member who acted; null for `due_soon`.
 - `target`: `{id, name}` of the member the event is aimed at (the assignee,
   the holder asked, or the requester denied), when there is one.
-- `detail`: `status` (for `status` and `closed`), `comment` (its first 500
-  characters), `due` (RFC 3339, when the item has a due date); absent fields
-  are omitted.
+- `detail`: `status` (for `status` and `closed`: the status written, so
+  `in-review` for a close the assigner confirms and `dropped` for a drop),
+  `comment` (its first 500 characters), `due` (RFC 3339, when the item has
+  a due date); absent fields are omitted.
 - `url`: opens the item in this machine's dashboard.

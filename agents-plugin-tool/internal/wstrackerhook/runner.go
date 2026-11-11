@@ -391,7 +391,7 @@ func dueCandidates(e wstrackerhost.StoreEntry, v *wstracker.View, st *storeState
 		}
 		var holders []string
 		for _, aid := range it.Assignments {
-			if a, ok := v.Assignments[aid]; ok && a.State == "live" && a.Status != "done" {
+			if a, ok := v.Assignments[aid]; ok && a.State == "live" && a.Status != "done" && a.Status != "dropped" {
 				holders = append(holders, a.To)
 			}
 		}

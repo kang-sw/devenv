@@ -9,14 +9,14 @@ import (
 )
 
 var (
-	kinds    = []string{"task", "todo", "topic"}
+	kinds = []string{"task", "todo", "topic"}
 	// settable are the statuses an assignee writes on their own assignment
 	// (done goes through item.close); superiorSettable those an org superior
 	// of the assignee writes on it, the superior's wrap-up: done is final, no
 	// review step.
 	settable         = []string{"idea", "todo", "doing", "blocked", "in-review", "dropped"}
 	superiorSettable = []string{"blocked", "done", "dropped"}
-	origins  = []string{OriginHuman, OriginAgent, OriginAgentAuto}
+	origins          = []string{OriginHuman, OriginAgent, OriginAgentAuto}
 	// itemFields are the item.edit fields, in the engine's order. stage is
 	// retired: only older events carry it (see apply), so editFields, the
 	// list a refusal names, leaves it out.
