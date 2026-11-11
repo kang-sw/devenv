@@ -488,7 +488,10 @@ type indexPageData struct {
 	Assets pageAssetsData
 	// LAN is the LAN access block, set only for a local viewer in LAN mode.
 	// It is outside every region, so no SSE update ever carries the token.
-	LAN     *LANAccess
+	LAN *LANAccess
+	// Local marks a page asked for by a browser on this machine, like
+	// sessionPageData.SysOpen.
+	Local   bool
 	regions regionSet
 }
 
@@ -575,13 +578,13 @@ func renderIndexRegions(view IndexView) (regionSet, error) {
 	return regionSet{regionSessions: newRegion(buf.String())}, nil
 }
 
-func renderIndexPage(view IndexView, regions regionSet, lan *LANAccess) (string, error) {
+func renderIndexPage(view IndexView, regions regionSet, lan *LANAccess, local bool) (string, error) {
 	a, err := loadDashboardAssets()
 	if err != nil {
 		return "", err
 	}
 	var buf bytes.Buffer
-	err = a.templateFor(view.Lang).ExecuteTemplate(&buf, "index", indexPageData{IndexView: view, Assets: a.data, LAN: lan, regions: regions})
+	err = a.templateFor(view.Lang).ExecuteTemplate(&buf, "index", indexPageData{IndexView: view, Assets: a.data, LAN: lan, Local: local, regions: regions})
 	return buf.String(), err
 }
 
@@ -891,7 +894,7 @@ func (d *Daemon) handleIndex(w http.ResponseWriter, r *http.Request) {
 	regions, err := renderIndexRegions(view)
 	if err == nil {
 		var html string
-		if html, err = renderIndexPage(view, regions, d.lanAccessFor(r)); err == nil {
+		if html, err = renderIndexPage(view, regions, d.lanAccessFor(r), localViewer(r)); err == nil {
 			writeHTML(w, html)
 			return
 		}

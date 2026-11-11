@@ -136,14 +136,32 @@ check("new branch from the detached HEAD", R.worktreeBody("/w/r", { mode: "new",
 check("existing branch, custom folder", R.worktreeBody("/w/r", { mode: "old", name: "ignored", base: "main", pick: "free", custom: true, folder: " /w/wt " }),
   { workspace: "/w/r", branch: "free", "new": false, base: "", folder: "/w/wt" });
 
+// leadBody: only the picked options go out, and a permission mode only to
+// Claude.
+check("defaults send the harness alone", R.leadBody("/w/r", { harness: "claude", model: "", effort: "", mode: "" }), { root: "/w/r", harness: "claude" });
+check("picked options", R.leadBody("/w/r", { harness: "claude", model: "opus", effort: "high", mode: "plan" }),
+  { root: "/w/r", harness: "claude", model: "opus", effort: "high", permission_mode: "plan" });
+check("pi takes no permission mode", R.leadBody("/w/r", { harness: "pi", model: "m", effort: "off", mode: "auto" }), { root: "/w/r", harness: "pi", model: "m", effort: "off" });
+
+// approvalText: the readable part of a tool input.
+check("a shell command", R.approvalText({ command: "git push origin develop", description: "push" }), "git push origin develop");
+check("an edit", R.approvalText({ file_path: "/w/a.go", old_string: "a\nb", new_string: "c" }), "/w/a.go\n- a\n- b\n+ c");
+check("a write", R.approvalText({ file_path: "/w/a.txt", content: "hello" }), "/w/a.txt\nhello");
+check("a read names the file", R.approvalText({ file_path: "/w/a.txt" }), "/w/a.txt");
+check("a fetch", R.approvalText({ url: "https://example.com", prompt: "x" }), "https://example.com");
+check("another input is indented JSON", R.approvalText({ pattern: "x", n: 2 }), '{\n  "pattern": "x",\n  "n": 2\n}');
+check("no input", [R.approvalText(null), R.approvalText({}), R.approvalText(undefined)], ["", "", ""]);
+check("a long input is capped", R.approvalText({ command: new Array(5000).join("x") }).length, 4001);
+
 if (bad.length) console.log(bad.join("\n"));
 `
 
 // TestRailScript runs rail.js under node: per-session drafts with their
 // cap, the stripping of lost image markers, the leave guard, starred-row
 // pinning and its undo, the persisted stars and collapsed workspaces, the
-// viewed row's mark, and the add popovers' placement, branch filter, and
-// add-worktree request.
+// viewed row's mark, the add popovers' placement, branch filter, and
+// add-worktree request, the spawn request, and an approval card's input
+// preview.
 func TestRailScript(t *testing.T) {
 	data, err := dashboardFS.ReadFile("assets/rail.js")
 	if err != nil {

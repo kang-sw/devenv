@@ -61,6 +61,7 @@ func (d *Daemon) railView(r pageReader) RailView {
 	}
 	view := buildRailView(inputs, d.rail.lists(wanted), stored, now)
 	view.CanAdd = d.workspaces != nil
+	view.CanSpawn = d.agents != nil
 	return view
 }
 
