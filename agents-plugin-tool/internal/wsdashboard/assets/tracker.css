@@ -255,6 +255,17 @@ body.tk-paged .tk-drawer { display: none; }
 .tk .irow:is(:hover, :focus-within, .sel) .ir-acts { display: inline-flex; }
 .tk .irow:is(:hover, :focus-within, .sel) > .ir-more { visibility: visible; }
 .tk .irow:focus-visible > .ir-main, .tk .irow:has(.ia:focus-visible) > .ir-main, .tk .irow.sel > .ir-main { box-shadow: inset 0 0 0 1.5px var(--wb-primary); }
+/* the selection checkbox (renderer mselClick): its column is kept, the box shows on hover, focus, or
+   tap-selection, and on every row while anything is selected (selection mode) */
+.tk .mcb { flex: none; position: relative; width: 13px; height: 13px; margin-right: -3px; padding: 0; border: 1.5px solid var(--wb-muted-fg); border-radius: 3px; background: transparent; cursor: pointer; visibility: hidden; }
+.tk .irow:is(:hover, :focus-within, .sel) .mcb, .tk #card-items[data-msel] .mcb { visibility: visible; }
+.tk .mcb:hover { border-color: var(--wb-primary); }
+.tk .mcb[aria-checked="true"] { border-color: var(--wb-primary); background: var(--wb-primary); }
+.tk .mcb[aria-checked="true"]::after { content: ""; position: absolute; left: 3px; top: 0; width: 3px; height: 7px; border: solid var(--wb-primary-fg); border-width: 0 1.5px 1.5px 0; transform: rotate(45deg); }
+.tk .irow.msel > .ir-main { background: color-mix(in srgb, var(--wb-primary) 10%, transparent); }
+.tk #card-items[data-msel] .irow { user-select: none; }
+.tk .chip.mselc { padding-right: 2px; background: color-mix(in srgb, var(--wb-primary) 12%, var(--wb-card)); color: var(--wb-primary); }
+.tk .chip.mselc .psx { width: 16px; height: 16px; color: inherit; }
 .tk .sti { display: inline-flex; flex: none; width: 16px; height: 16px; }
 .tk .sti-svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 .tk .ia { width: 26px; height: 22px; border: 0; border-radius: 6px; background: transparent; color: var(--wb-muted-fg); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; padding: 0; }
@@ -782,6 +793,11 @@ body.tk-menuon .tk .ir-more { visibility: hidden !important; }
 .tk-menu .mintro { margin: 2px 8px 6px; font-size: 12px; color: var(--wb-muted-fg); }
 .tk-menu .mempty { margin: 4px 8px 6px; font-size: 12px; color: var(--wb-muted-fg); }
 .tk-menu .mlist { max-height: 220px; overflow: auto; }
+/* the "Move to..." step's tree: destinations as menu items, the ancestors that take nothing as context lines */
+.tk-menu .mi.mvo { padding-left: calc(8px + var(--ind, 0) * 14px); }
+.tk-menu .mvctx { display: flex; align-items: center; gap: 6px; min-height: 24px; padding: 0 8px 0 calc(8px + var(--ind, 0) * 14px); font-size: 12px; color: var(--wb-muted-fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tk-menu .mvctx .mv { font-size: 11.5px; }
+.tk-menu .mvstuck { color: var(--tk-warn); }
 /* the assign popover (asgHtml): chips, the search field, the people and rule rows, then completion and apply */
 .tk-menu .ap { display: grid; gap: 6px; padding: 0 4px 4px; }
 .tk-menu .ap-chips { display: flex; flex-wrap: wrap; gap: 4px; }
@@ -859,6 +875,17 @@ body.tk-menuon .tk .ir-more { visibility: hidden !important; }
 .tk .hins .hb .i { width: 11px; height: 11px; stroke-width: 2.2; }
 .tk .hins .hhit { position: absolute; top: 0; left: 0; height: 10px; padding: 0; border: 0; background: transparent; cursor: copy; pointer-events: auto; }
 .tk .plist.hins-on .ir-more { visibility: hidden !important; }
+/* the move drag (renderer mvShow): a line at the gap, indented to the place's depth (past the
+   checkbox column), or the target row outlined for its middle band; "N of M move" when some stay */
+.tk .mvdrop { position: absolute; left: 0; right: 0; height: 2px; z-index: 4; pointer-events: none; }
+.tk .mvdrop[hidden] { display: none; }
+.tk .mvdrop .hl { position: absolute; top: 0; bottom: 0; left: calc(4px + var(--ind, 0) * 16px + 17px); right: 4px; border-radius: 1px; background: var(--wb-primary); }
+.tk .mvdrop.in .hl { left: 0; right: 0; border-radius: 6px; background: color-mix(in srgb, var(--wb-primary) 8%, transparent); box-shadow: inset 0 0 0 1.5px var(--wb-primary); }
+.tk .mvdrop .mvn { position: absolute; right: 8px; top: -9px; padding: 1px 6px; border-radius: 999px; font-size: 11px; line-height: 1.3; background: var(--wb-card); color: var(--wb-primary); box-shadow: inset 0 0 0 1px var(--wb-primary); max-width: min(70%, 520px); }
+.tk .mvdrop.in .mvn { top: 50%; transform: translateY(-50%); }
+.tk .mvdrop .mvn:empty { display: none; }
+.tk .irow.mvsrc > .ir-main { opacity: .45; }
+.tk #card-items.mv-on .ir-more { visibility: hidden !important; }
 
 /* item references: a #<alias> token in a body or a comment (refLinks), and "Referenced by" */
 .tk .iref { color: var(--wb-primary); text-decoration: none; font-family: var(--wb-mono); font-size: .92em; }

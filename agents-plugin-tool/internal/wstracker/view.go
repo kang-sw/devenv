@@ -533,37 +533,64 @@ func (r *replayed) view(stream string, now time.Time, staleDays int) *View {
 			}
 		}
 	}
-	// (528) Sibling order: each item, in fold order, goes right after its
-	// after anchor, first for "", last when the field is absent (every item
+	// (528) Sibling order: each placement (a create, or a move the item's
+	// position register shows), in fold order, goes right after its after
+	// anchor, first for "", last when the field is absent (every item
 	// created before it existed) or the anchor is not a sibling placed so
 	// far. A hidden anchor keeps its place, so hiding a row moves no other
-	// row. Concurrent inserts after one anchor: the later in fold order lands
-	// nearer the anchor.
-	sib := map[string][]string{}
-	for _, id := range S.iorder {
-		it := S.items[id]
-		key := ""
-		if it.parent != "" && S.items[it.parent] != nil {
-			key = it.parent
-		}
-		l, at := sib[key], -1
-		if it.afterSet && it.after != "" {
-			for i, x := range l {
-				if x == it.after {
-					at = i
+	// row; a moved item leaves a vacated slot behind, so a row anchored on it
+	// stays where it was, and an anchor found only as vacated slots takes the
+	// last of them. Concurrent inserts after one anchor: the later in fold
+	// order lands nearer the anchor.
+	type slot struct {
+		id   string
+		gone bool
+	}
+	slots := map[string][]slot{}
+	where := map[string]string{}
+	for _, pl := range S.place {
+		if old, ok := where[pl.id]; ok {
+			for i := range slots[old] {
+				if x := &slots[old][i]; x.id == pl.id && !x.gone {
+					x.gone = true
 					break
 				}
 			}
 		}
-		switch {
-		case it.afterSet && it.after == "":
-			l = append([]string{id}, l...)
-		case at < 0:
-			l = append(l, id)
-		default:
-			l = append(l[:at+1], append([]string{id}, l[at+1:]...)...)
+		key := ""
+		if pl.parent != "" && S.items[pl.parent] != nil {
+			key = pl.parent
 		}
-		sib[key] = l
+		l, at := slots[key], -1
+		if pl.afterSet && pl.after != "" {
+			for i, x := range l {
+				if x.id == pl.after {
+					at = i
+					if !x.gone {
+						break
+					}
+				}
+			}
+		}
+		x := slot{id: pl.id}
+		switch {
+		case pl.afterSet && pl.after == "":
+			l = append([]slot{x}, l...)
+		case at < 0:
+			l = append(l, x)
+		default:
+			l = append(l[:at+1], append([]slot{x}, l[at+1:]...)...)
+		}
+		slots[key] = l
+		where[pl.id] = key
+	}
+	sib := map[string][]string{}
+	for key, l := range slots {
+		for _, x := range l {
+			if !x.gone {
+				sib[key] = append(sib[key], x.id)
+			}
+		}
 	}
 	// (531) Backlinks: the shown items, then the shown comments on shown
 	// items, that reference an item, each once, in fold order; an item's own

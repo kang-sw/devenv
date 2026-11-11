@@ -1,0 +1,2578 @@
+{
+ "store": "case-move-concurrent",
+ "viewer": "ada.pc",
+ "now": "2026-11-02T09:00:00Z",
+ "staleDays": 3,
+ "genesis": {
+  "admins": [
+   "ada"
+  ],
+  "members": [
+   {
+    "id": "ada",
+    "name": "Ada",
+    "keys": [
+     "ada-k1"
+    ],
+    "leads": []
+   },
+   {
+    "id": "maya",
+    "name": "Maya",
+    "keys": [
+     "maya-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "raj",
+    "name": "Raj",
+    "keys": [
+     "raj-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "bo",
+    "name": "Bo",
+    "keys": [
+     "bo-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "lena",
+    "name": "Lena",
+    "keys": [
+     "lena-k1"
+    ],
+    "leads": [
+     "maya"
+    ]
+   },
+   {
+    "id": "omar",
+    "name": "Omar",
+    "keys": [
+     "omar-k1"
+    ],
+    "leads": [
+     "maya"
+    ]
+   },
+   {
+    "id": "sven",
+    "name": "Sven",
+    "keys": [
+     "sven-k1"
+    ],
+    "leads": [
+     "raj"
+    ]
+   }
+  ]
+ },
+ "events": [
+  {
+   "member": "ada",
+   "clone": "pc",
+   "seq": 1,
+   "ts": "2026-11-01T09:00:00Z",
+   "type": "item.create",
+   "payload": {
+    "kind": "task",
+    "title": "X"
+   },
+   "seen": {},
+   "verdict": "valid"
+  },
+  {
+   "member": "ada",
+   "clone": "pc",
+   "seq": 2,
+   "ts": "2026-11-01T09:00:00Z",
+   "type": "item.create",
+   "payload": {
+    "kind": "task",
+    "title": "Y"
+   },
+   "seen": {},
+   "verdict": "valid"
+  },
+  {
+   "member": "ada",
+   "clone": "pc",
+   "seq": 3,
+   "ts": "2026-11-01T09:00:00Z",
+   "type": "item.create",
+   "payload": {
+    "kind": "task",
+    "title": "Q"
+   },
+   "seen": {},
+   "verdict": "valid"
+  },
+  {
+   "member": "ada",
+   "clone": "pc",
+   "seq": 4,
+   "ts": "2026-11-01T09:00:00Z",
+   "type": "item.assign",
+   "payload": {
+    "item": "ada.pc#3",
+    "targets": [
+     "maya"
+    ]
+   },
+   "seen": {},
+   "verdict": "valid"
+  },
+  {
+   "member": "ada",
+   "clone": "pc",
+   "seq": 5,
+   "ts": "2026-11-01T09:00:00Z",
+   "type": "item.create",
+   "payload": {
+    "kind": "task",
+    "title": "Z"
+   },
+   "seen": {},
+   "verdict": "valid"
+  },
+  {
+   "member": "ada",
+   "clone": "pc",
+   "seq": 6,
+   "ts": "2026-11-01T09:00:00Z",
+   "type": "item.assign",
+   "payload": {
+    "item": "ada.pc#5",
+    "targets": [
+     "maya"
+    ]
+   },
+   "seen": {},
+   "verdict": "valid"
+  },
+  {
+   "member": "maya",
+   "clone": "pc",
+   "seq": 1,
+   "ts": "2026-11-01T09:01:00Z",
+   "type": "item.create",
+   "payload": {
+    "kind": "task",
+    "title": "P"
+   },
+   "seen": {
+    "ada.pc": 6
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "maya",
+   "clone": "pc",
+   "seq": 2,
+   "ts": "2026-11-01T09:01:00Z",
+   "type": "item.create",
+   "payload": {
+    "kind": "task",
+    "title": "R"
+   },
+   "seen": {
+    "ada.pc": 6
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "maya",
+   "clone": "pc",
+   "seq": 3,
+   "ts": "2026-11-01T09:01:00Z",
+   "type": "item.create",
+   "payload": {
+    "kind": "task",
+    "title": "S"
+   },
+   "seen": {
+    "ada.pc": 6
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "ada",
+   "clone": "pc",
+   "seq": 7,
+   "ts": "2026-11-01T09:05:00Z",
+   "type": "item.move",
+   "payload": {
+    "item": "ada.pc#1",
+    "parent": "ada.pc#2"
+   },
+   "seen": {
+    "maya.pc": 3
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "ada",
+   "clone": "pc",
+   "seq": 8,
+   "ts": "2026-11-01T09:05:00Z",
+   "type": "item.move",
+   "payload": {
+    "item": "ada.pc#5",
+    "parent": null,
+    "after": ""
+   },
+   "seen": {
+    "maya.pc": 3
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "ada",
+   "clone": "pc",
+   "seq": 9,
+   "ts": "2026-11-01T09:05:00Z",
+   "type": "item.unassign",
+   "payload": {
+    "item": "ada.pc#3",
+    "assignee": "maya"
+   },
+   "seen": {
+    "maya.pc": 3
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "ada",
+   "clone": "lap",
+   "seq": 1,
+   "ts": "2026-11-01T09:06:00Z",
+   "type": "item.move",
+   "payload": {
+    "item": "ada.pc#2",
+    "parent": "ada.pc#1"
+   },
+   "seen": {
+    "ada.pc": 6
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "maya",
+   "clone": "pc",
+   "seq": 4,
+   "ts": "2026-11-01T09:06:00Z",
+   "type": "item.move",
+   "payload": {
+    "item": "ada.pc#5",
+    "parent": null,
+    "after": "ada.pc#2"
+   },
+   "seen": {
+    "ada.pc": 6
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "maya",
+   "clone": "pc",
+   "seq": 5,
+   "ts": "2026-11-01T09:06:00Z",
+   "type": "item.move",
+   "payload": {
+    "item": "maya.pc#2",
+    "parent": "ada.pc#3"
+   },
+   "seen": {
+    "ada.pc": 6
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "maya",
+   "clone": "pc",
+   "seq": 6,
+   "ts": "2026-11-01T09:06:00Z",
+   "type": "item.move",
+   "payload": {
+    "item": "maya.pc#3",
+    "parent": "maya.pc#1"
+   },
+   "seen": {
+    "ada.pc": 6
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "maya",
+   "clone": "lap",
+   "seq": 1,
+   "ts": "2026-11-01T09:07:00Z",
+   "type": "item.hide",
+   "payload": {
+    "item": "maya.pc#1"
+   },
+   "seen": {
+    "ada.pc": 6,
+    "maya.pc": 3
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "maya",
+   "clone": "pc",
+   "seq": 7,
+   "ts": "2026-11-01T09:20:00Z",
+   "type": "item.create",
+   "payload": {
+    "kind": "task",
+    "title": "W"
+   },
+   "seen": {
+    "ada.pc": 9,
+    "ada.lap": 1,
+    "maya.lap": 1
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "maya",
+   "clone": "pc",
+   "seq": 8,
+   "ts": "2026-11-01T09:20:00Z",
+   "type": "item.move",
+   "payload": {
+    "item": "maya.pc#7",
+    "parent": null,
+    "after": "maya.pc#1"
+   },
+   "seen": {
+    "ada.pc": 9,
+    "ada.lap": 1,
+    "maya.lap": 1
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "ada",
+   "clone": "pc",
+   "seq": 10,
+   "ts": "2026-11-01T09:30:00Z",
+   "type": "item.create",
+   "payload": {
+    "kind": "task",
+    "title": "V"
+   },
+   "seen": {
+    "maya.pc": 8,
+    "ada.lap": 1,
+    "maya.lap": 1
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "ada",
+   "clone": "pc",
+   "seq": 11,
+   "ts": "2026-11-01T09:30:00Z",
+   "type": "item.assign",
+   "payload": {
+    "item": "ada.pc#10",
+    "targets": [
+     "maya"
+    ]
+   },
+   "seen": {
+    "maya.pc": 8,
+    "ada.lap": 1,
+    "maya.lap": 1
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "maya",
+   "clone": "pc",
+   "seq": 9,
+   "ts": "2026-11-01T09:31:00Z",
+   "type": "item.create",
+   "payload": {
+    "kind": "task",
+    "title": "U"
+   },
+   "seen": {
+    "ada.pc": 11,
+    "ada.lap": 1,
+    "maya.lap": 1
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "maya",
+   "clone": "pc",
+   "seq": 10,
+   "ts": "2026-11-01T09:35:00Z",
+   "type": "item.move",
+   "payload": {
+    "item": "maya.pc#9",
+    "parent": "ada.pc#10"
+   },
+   "seen": {
+    "ada.pc": 11,
+    "ada.lap": 1,
+    "maya.lap": 1
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "ada",
+   "clone": "pc",
+   "seq": 12,
+   "ts": "2026-11-01T09:36:00Z",
+   "type": "item.unassign",
+   "payload": {
+    "item": "ada.pc#10",
+    "assignee": "maya"
+   },
+   "seen": {
+    "maya.pc": 9,
+    "ada.lap": 1,
+    "maya.lap": 1
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "maya",
+   "clone": "pc",
+   "seq": 11,
+   "ts": "2026-11-01T09:40:00Z",
+   "type": "item.create",
+   "payload": {
+    "kind": "task",
+    "title": "K"
+   },
+   "seen": {
+    "ada.pc": 12,
+    "ada.lap": 1,
+    "maya.lap": 1
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "maya",
+   "clone": "pc",
+   "seq": 12,
+   "ts": "2026-11-01T09:41:00Z",
+   "type": "item.move",
+   "payload": {
+    "item": "maya.pc#11",
+    "parent": null,
+    "after": ""
+   },
+   "seen": {
+    "ada.pc": 12,
+    "ada.lap": 1,
+    "maya.lap": 1
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "maya",
+   "clone": "lap",
+   "seq": 2,
+   "ts": "2026-11-01T09:42:00Z",
+   "type": "item.move",
+   "payload": {
+    "item": "maya.pc#11",
+    "parent": null,
+    "after": "maya.pc#7"
+   },
+   "seen": {
+    "ada.pc": 12,
+    "ada.lap": 1,
+    "maya.pc": 11
+   },
+   "verdict": "valid",
+   "origin": "agent"
+  }
+ ],
+ "expected": {
+  "viewer": {
+   "member": "ada",
+   "stream": "ada.pc",
+   "name": "Ada",
+   "profile": {
+    "org": "",
+    "family": "",
+    "given": "Ada"
+   },
+   "admin": true,
+   "lead": null,
+   "followers": [
+    "maya",
+    "raj",
+    "bo"
+   ],
+   "reach": {
+    "maya": 1,
+    "raj": 1,
+    "bo": 1,
+    "lena": 2,
+    "omar": 2,
+    "sven": 2
+   },
+   "isMember": true
+  },
+  "priority": {
+   "names": [
+    "Notice",
+    "Task",
+    "Urgent"
+   ],
+   "default": 1
+  },
+  "attachments": {
+   "max_bytes": 10485760
+  },
+  "labels": [],
+  "members": {
+   "ada": {
+    "id": "ada",
+    "name": "Ada",
+    "profile": {
+     "org": "",
+     "family": "",
+     "given": "Ada"
+    },
+    "avatar": "AD",
+    "leads": [],
+    "keys": [
+     "ada-k1"
+    ],
+    "revoked": [],
+    "removed": null,
+    "joined": null,
+    "admin": true,
+    "children": [
+     "maya",
+     "raj",
+     "bo"
+    ],
+    "depth": null,
+    "role": "root"
+   },
+   "maya": {
+    "id": "maya",
+    "name": "Maya",
+    "profile": {
+     "org": "",
+     "family": "",
+     "given": "Maya"
+    },
+    "avatar": "MA",
+    "leads": [
+     "ada"
+    ],
+    "keys": [
+     "maya-k1"
+    ],
+    "revoked": [],
+    "removed": null,
+    "joined": null,
+    "admin": false,
+    "children": [
+     "lena",
+     "omar"
+    ],
+    "depth": 1,
+    "role": "lead"
+   },
+   "raj": {
+    "id": "raj",
+    "name": "Raj",
+    "profile": {
+     "org": "",
+     "family": "",
+     "given": "Raj"
+    },
+    "avatar": "RA",
+    "leads": [
+     "ada"
+    ],
+    "keys": [
+     "raj-k1"
+    ],
+    "revoked": [],
+    "removed": null,
+    "joined": null,
+    "admin": false,
+    "children": [
+     "sven"
+    ],
+    "depth": 1,
+    "role": "lead"
+   },
+   "bo": {
+    "id": "bo",
+    "name": "Bo",
+    "profile": {
+     "org": "",
+     "family": "",
+     "given": "Bo"
+    },
+    "avatar": "BO",
+    "leads": [
+     "ada"
+    ],
+    "keys": [
+     "bo-k1"
+    ],
+    "revoked": [],
+    "removed": null,
+    "joined": null,
+    "admin": false,
+    "children": [],
+    "depth": 1,
+    "role": "member"
+   },
+   "lena": {
+    "id": "lena",
+    "name": "Lena",
+    "profile": {
+     "org": "",
+     "family": "",
+     "given": "Lena"
+    },
+    "avatar": "LE",
+    "leads": [
+     "maya"
+    ],
+    "keys": [
+     "lena-k1"
+    ],
+    "revoked": [],
+    "removed": null,
+    "joined": null,
+    "admin": false,
+    "children": [],
+    "depth": 2,
+    "role": "member"
+   },
+   "omar": {
+    "id": "omar",
+    "name": "Omar",
+    "profile": {
+     "org": "",
+     "family": "",
+     "given": "Omar"
+    },
+    "avatar": "OM",
+    "leads": [
+     "maya"
+    ],
+    "keys": [
+     "omar-k1"
+    ],
+    "revoked": [],
+    "removed": null,
+    "joined": null,
+    "admin": false,
+    "children": [],
+    "depth": 2,
+    "role": "member"
+   },
+   "sven": {
+    "id": "sven",
+    "name": "Sven",
+    "profile": {
+     "org": "",
+     "family": "",
+     "given": "Sven"
+    },
+    "avatar": "SV",
+    "leads": [
+     "raj"
+    ],
+    "keys": [
+     "sven-k1"
+    ],
+    "revoked": [],
+    "removed": null,
+    "joined": null,
+    "admin": false,
+    "children": [],
+    "depth": 2,
+    "role": "member"
+   }
+  },
+  "admins": [
+   "ada"
+  ],
+  "rolesProblems": [],
+  "items": {
+   "ada.pc#1": {
+    "id": "ada.pc#1",
+    "alias": "ada.pc-1",
+    "kind": "task",
+    "title": "X",
+    "body": "",
+    "project": "",
+    "labels": [],
+    "due": null,
+    "priority": 1,
+    "priorityLevel": 1,
+    "priorityName": "Task",
+    "parent": "ada.pc#2",
+    "author": "ada",
+    "ts": "2026-11-01T09:00:00Z",
+    "hidden": false,
+    "edited": null,
+    "status": "todo",
+    "counted": true,
+    "rollup": {
+     "total": 0,
+     "counts": {},
+     "blocked": []
+    },
+    "lastActivity": "2026-11-01T09:05:00Z",
+    "started": null,
+    "children": [],
+    "assignments": [
+     "ada.pc#1@ada.pc#1>ada"
+    ],
+    "pending": [],
+    "thread": [
+     "ada.pc#1",
+     "ada.pc#7"
+    ],
+    "concurrent": 0,
+    "depth": 1,
+    "chain": [
+     "ada",
+     "ada"
+    ],
+    "mentions": [],
+    "attachments": [],
+    "refs": [],
+    "backrefs": []
+   },
+   "ada.pc#2": {
+    "id": "ada.pc#2",
+    "alias": "ada.pc-2",
+    "kind": "task",
+    "title": "Y",
+    "body": "",
+    "project": "",
+    "labels": [],
+    "due": null,
+    "priority": 1,
+    "priorityLevel": 1,
+    "priorityName": "Task",
+    "parent": null,
+    "author": "ada",
+    "ts": "2026-11-01T09:00:00Z",
+    "hidden": false,
+    "edited": null,
+    "status": "todo",
+    "counted": true,
+    "rollup": {
+     "total": 1,
+     "counts": {
+      "todo": 1
+     },
+     "blocked": []
+    },
+    "lastActivity": "2026-11-01T09:00:00Z",
+    "started": null,
+    "children": [
+     "ada.pc#1"
+    ],
+    "assignments": [
+     "ada.pc#2@ada.pc#2>ada"
+    ],
+    "pending": [],
+    "thread": [
+     "ada.pc#2",
+     "ada.lap#1"
+    ],
+    "concurrent": 0,
+    "depth": 0,
+    "chain": [
+     "ada"
+    ],
+    "mentions": [],
+    "attachments": [],
+    "refs": [],
+    "backrefs": []
+   },
+   "ada.pc#3": {
+    "id": "ada.pc#3",
+    "alias": "ada.pc-3",
+    "kind": "task",
+    "title": "Q",
+    "body": "",
+    "project": "",
+    "labels": [],
+    "due": null,
+    "priority": 1,
+    "priorityLevel": 1,
+    "priorityName": "Task",
+    "parent": null,
+    "author": "ada",
+    "ts": "2026-11-01T09:00:00Z",
+    "hidden": false,
+    "edited": null,
+    "status": "todo",
+    "counted": true,
+    "rollup": {
+     "total": 1,
+     "counts": {
+      "todo": 1
+     },
+     "blocked": []
+    },
+    "lastActivity": "2026-11-01T09:05:00Z",
+    "started": null,
+    "children": [
+     "maya.pc#2"
+    ],
+    "assignments": [
+     "ada.pc#4>maya",
+     "ada.pc#9@ada.pc#3>ada"
+    ],
+    "pending": [],
+    "thread": [
+     "ada.pc#3",
+     "ada.pc#4",
+     "ada.pc#9"
+    ],
+    "concurrent": 1,
+    "depth": 0,
+    "chain": [
+     "ada"
+    ],
+    "mentions": [],
+    "attachments": [],
+    "refs": [],
+    "backrefs": []
+   },
+   "ada.pc#5": {
+    "id": "ada.pc#5",
+    "alias": "ada.pc-5",
+    "kind": "task",
+    "title": "Z",
+    "body": "",
+    "project": "",
+    "labels": [],
+    "due": null,
+    "priority": 1,
+    "priorityLevel": 1,
+    "priorityName": "Task",
+    "parent": null,
+    "author": "ada",
+    "ts": "2026-11-01T09:00:00Z",
+    "hidden": false,
+    "edited": null,
+    "status": "todo",
+    "counted": true,
+    "rollup": {
+     "total": 0,
+     "counts": {},
+     "blocked": []
+    },
+    "lastActivity": "2026-11-01T09:06:00Z",
+    "started": null,
+    "children": [],
+    "assignments": [
+     "ada.pc#6>maya"
+    ],
+    "pending": [],
+    "thread": [
+     "ada.pc#5",
+     "ada.pc#6",
+     "ada.pc#8",
+     "maya.pc#4"
+    ],
+    "concurrent": 2,
+    "depth": 0,
+    "chain": [
+     "ada"
+    ],
+    "mentions": [],
+    "attachments": [],
+    "refs": [],
+    "backrefs": []
+   },
+   "maya.pc#1": {
+    "id": "maya.pc#1",
+    "alias": "maya.pc-1",
+    "kind": "task",
+    "title": "P",
+    "body": "",
+    "project": "",
+    "labels": [],
+    "due": null,
+    "priority": 1,
+    "priorityLevel": 1,
+    "priorityName": "Task",
+    "parent": null,
+    "author": "maya",
+    "ts": "2026-11-01T09:01:00Z",
+    "hidden": true,
+    "edited": null,
+    "status": "todo",
+    "counted": true,
+    "rollup": {
+     "total": 1,
+     "counts": {
+      "todo": 1
+     },
+     "blocked": []
+    },
+    "lastActivity": "2026-11-01T09:07:00Z",
+    "started": null,
+    "children": [
+     "maya.pc#3"
+    ],
+    "assignments": [
+     "maya.pc#1@maya.pc#1>maya"
+    ],
+    "pending": [],
+    "thread": [
+     "maya.pc#1",
+     "maya.lap#1"
+    ],
+    "concurrent": 0,
+    "depth": 0,
+    "chain": [
+     "maya"
+    ],
+    "mentions": [],
+    "attachments": [],
+    "refs": [],
+    "backrefs": []
+   },
+   "maya.pc#2": {
+    "id": "maya.pc#2",
+    "alias": "maya.pc-2",
+    "kind": "task",
+    "title": "R",
+    "body": "",
+    "project": "",
+    "labels": [],
+    "due": null,
+    "priority": 1,
+    "priorityLevel": 1,
+    "priorityName": "Task",
+    "parent": "ada.pc#3",
+    "author": "maya",
+    "ts": "2026-11-01T09:01:00Z",
+    "hidden": false,
+    "edited": null,
+    "status": "todo",
+    "counted": true,
+    "rollup": {
+     "total": 0,
+     "counts": {},
+     "blocked": []
+    },
+    "lastActivity": "2026-11-01T09:06:00Z",
+    "started": null,
+    "children": [],
+    "assignments": [
+     "maya.pc#2@maya.pc#2>maya"
+    ],
+    "pending": [],
+    "thread": [
+     "maya.pc#2",
+     "maya.pc#5"
+    ],
+    "concurrent": 1,
+    "depth": 1,
+    "chain": [
+     "ada",
+     "maya"
+    ],
+    "mentions": [],
+    "attachments": [],
+    "refs": [],
+    "backrefs": []
+   },
+   "maya.pc#3": {
+    "id": "maya.pc#3",
+    "alias": "maya.pc-3",
+    "kind": "task",
+    "title": "S",
+    "body": "",
+    "project": "",
+    "labels": [],
+    "due": null,
+    "priority": 1,
+    "priorityLevel": 1,
+    "priorityName": "Task",
+    "parent": "maya.pc#1",
+    "author": "maya",
+    "ts": "2026-11-01T09:01:00Z",
+    "hidden": false,
+    "edited": null,
+    "status": "todo",
+    "counted": true,
+    "rollup": {
+     "total": 0,
+     "counts": {},
+     "blocked": []
+    },
+    "lastActivity": "2026-11-01T09:06:00Z",
+    "started": null,
+    "children": [],
+    "assignments": [
+     "maya.pc#3@maya.pc#3>maya"
+    ],
+    "pending": [],
+    "thread": [
+     "maya.pc#3",
+     "maya.pc#6"
+    ],
+    "concurrent": 0,
+    "depth": 1,
+    "chain": [
+     "maya",
+     "maya"
+    ],
+    "mentions": [],
+    "attachments": [],
+    "refs": [],
+    "backrefs": []
+   },
+   "maya.pc#7": {
+    "id": "maya.pc#7",
+    "alias": "maya.pc-7",
+    "kind": "task",
+    "title": "W",
+    "body": "",
+    "project": "",
+    "labels": [],
+    "due": null,
+    "priority": 1,
+    "priorityLevel": 1,
+    "priorityName": "Task",
+    "parent": null,
+    "author": "maya",
+    "ts": "2026-11-01T09:20:00Z",
+    "hidden": false,
+    "edited": null,
+    "status": "todo",
+    "counted": true,
+    "rollup": {
+     "total": 0,
+     "counts": {},
+     "blocked": []
+    },
+    "lastActivity": "2026-11-01T09:20:00Z",
+    "started": null,
+    "children": [],
+    "assignments": [
+     "maya.pc#7@maya.pc#7>maya"
+    ],
+    "pending": [],
+    "thread": [
+     "maya.pc#7",
+     "maya.pc#8"
+    ],
+    "concurrent": 0,
+    "depth": 0,
+    "chain": [
+     "maya"
+    ],
+    "mentions": [],
+    "attachments": [],
+    "refs": [],
+    "backrefs": []
+   },
+   "ada.pc#10": {
+    "id": "ada.pc#10",
+    "alias": "ada.pc-10",
+    "kind": "task",
+    "title": "V",
+    "body": "",
+    "project": "",
+    "labels": [],
+    "due": null,
+    "priority": 1,
+    "priorityLevel": 1,
+    "priorityName": "Task",
+    "parent": null,
+    "author": "ada",
+    "ts": "2026-11-01T09:30:00Z",
+    "hidden": false,
+    "edited": null,
+    "status": "todo",
+    "counted": true,
+    "rollup": {
+     "total": 1,
+     "counts": {
+      "todo": 1
+     },
+     "blocked": []
+    },
+    "lastActivity": "2026-11-01T09:36:00Z",
+    "started": null,
+    "children": [
+     "maya.pc#9"
+    ],
+    "assignments": [
+     "ada.pc#11>maya",
+     "ada.pc#12@ada.pc#10>ada"
+    ],
+    "pending": [],
+    "thread": [
+     "ada.pc#10",
+     "ada.pc#11",
+     "ada.pc#12"
+    ],
+    "concurrent": 1,
+    "depth": 0,
+    "chain": [
+     "ada"
+    ],
+    "mentions": [],
+    "attachments": [],
+    "refs": [],
+    "backrefs": []
+   },
+   "maya.pc#9": {
+    "id": "maya.pc#9",
+    "alias": "maya.pc-9",
+    "kind": "task",
+    "title": "U",
+    "body": "",
+    "project": "",
+    "labels": [],
+    "due": null,
+    "priority": 1,
+    "priorityLevel": 1,
+    "priorityName": "Task",
+    "parent": "ada.pc#10",
+    "author": "maya",
+    "ts": "2026-11-01T09:31:00Z",
+    "hidden": false,
+    "edited": null,
+    "status": "todo",
+    "counted": true,
+    "rollup": {
+     "total": 0,
+     "counts": {},
+     "blocked": []
+    },
+    "lastActivity": "2026-11-01T09:35:00Z",
+    "started": null,
+    "children": [],
+    "assignments": [
+     "maya.pc#9@maya.pc#9>maya"
+    ],
+    "pending": [],
+    "thread": [
+     "maya.pc#9",
+     "maya.pc#10"
+    ],
+    "concurrent": 1,
+    "depth": 1,
+    "chain": [
+     "ada",
+     "maya"
+    ],
+    "mentions": [],
+    "attachments": [],
+    "refs": [],
+    "backrefs": []
+   },
+   "maya.pc#11": {
+    "id": "maya.pc#11",
+    "alias": "maya.pc-11",
+    "kind": "task",
+    "title": "K",
+    "body": "",
+    "project": "",
+    "labels": [],
+    "due": null,
+    "priority": 1,
+    "priorityLevel": 1,
+    "priorityName": "Task",
+    "parent": null,
+    "author": "maya",
+    "ts": "2026-11-01T09:40:00Z",
+    "hidden": false,
+    "edited": null,
+    "status": "todo",
+    "counted": true,
+    "rollup": {
+     "total": 0,
+     "counts": {},
+     "blocked": []
+    },
+    "lastActivity": "2026-11-01T09:42:00Z",
+    "started": null,
+    "children": [],
+    "assignments": [
+     "maya.pc#11@maya.pc#11>maya"
+    ],
+    "pending": [],
+    "thread": [
+     "maya.pc#11",
+     "maya.pc#12",
+     "maya.lap#2"
+    ],
+    "concurrent": 0,
+    "depth": 0,
+    "chain": [
+     "maya"
+    ],
+    "mentions": [],
+    "attachments": [],
+    "refs": [],
+    "backrefs": []
+   }
+  },
+  "itemOrder": [
+   "maya.pc#11",
+   "ada.pc#2",
+   "ada.pc#1",
+   "ada.pc#5",
+   "ada.pc#3",
+   "maya.pc#2",
+   "maya.pc#1",
+   "maya.pc#3",
+   "maya.pc#7",
+   "ada.pc#10",
+   "maya.pc#9"
+  ],
+  "assignments": {
+   "ada.pc#1@ada.pc#1>ada": {
+    "id": "ada.pc#1@ada.pc#1>ada",
+    "item": "ada.pc#1",
+    "to": "ada",
+    "by": "ada",
+    "sender": "ada",
+    "completion": "assignee",
+    "state": "live",
+    "forced": true,
+    "status": "todo",
+    "note": null,
+    "noteBy": null,
+    "via": "ada.pc#1",
+    "ts": "2026-11-01T09:00:00Z",
+    "inherited": false,
+    "ruleLevels": null,
+    "rule": null,
+    "ruleRequest": false,
+    "fallback": true,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": null,
+    "restored": null,
+    "restores": null,
+    "accepted": null,
+    "leadAtAccept": null,
+    "ended": null,
+    "depth": 0,
+    "statusOrigin": null,
+    "statusBy": null,
+    "lastUpdate": "2026-11-01T09:00:00Z",
+    "stale": false
+   },
+   "ada.pc#2@ada.pc#2>ada": {
+    "id": "ada.pc#2@ada.pc#2>ada",
+    "item": "ada.pc#2",
+    "to": "ada",
+    "by": "ada",
+    "sender": "ada",
+    "completion": "assignee",
+    "state": "live",
+    "forced": true,
+    "status": "todo",
+    "note": null,
+    "noteBy": null,
+    "via": "ada.pc#2",
+    "ts": "2026-11-01T09:00:00Z",
+    "inherited": false,
+    "ruleLevels": null,
+    "rule": null,
+    "ruleRequest": false,
+    "fallback": true,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": null,
+    "restored": null,
+    "restores": null,
+    "accepted": null,
+    "leadAtAccept": null,
+    "ended": null,
+    "depth": 0,
+    "statusOrigin": null,
+    "statusBy": null,
+    "lastUpdate": "2026-11-01T09:00:00Z",
+    "stale": false
+   },
+   "ada.pc#4>maya": {
+    "id": "ada.pc#4>maya",
+    "item": "ada.pc#3",
+    "to": "maya",
+    "by": "ada",
+    "sender": "ada",
+    "completion": "assignee",
+    "state": "unassigned",
+    "forced": true,
+    "status": "todo",
+    "note": null,
+    "noteBy": null,
+    "via": "ada.pc#4",
+    "ts": "2026-11-01T09:00:00Z",
+    "inherited": false,
+    "ruleLevels": null,
+    "rule": null,
+    "ruleRequest": false,
+    "fallback": false,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": null,
+    "restored": null,
+    "restores": null,
+    "accepted": null,
+    "leadAtAccept": null,
+    "ended": {
+     "id": "ada.pc#9",
+     "type": "item.unassign",
+     "ts": "2026-11-01T09:05:00Z",
+     "by": "ada"
+    },
+    "depth": 1,
+    "statusOrigin": null,
+    "statusBy": null,
+    "lastUpdate": "2026-11-01T09:00:00Z",
+    "stale": false
+   },
+   "ada.pc#6>maya": {
+    "id": "ada.pc#6>maya",
+    "item": "ada.pc#5",
+    "to": "maya",
+    "by": "ada",
+    "sender": "ada",
+    "completion": "assignee",
+    "state": "live",
+    "forced": true,
+    "status": "todo",
+    "note": null,
+    "noteBy": null,
+    "via": "ada.pc#6",
+    "ts": "2026-11-01T09:00:00Z",
+    "inherited": false,
+    "ruleLevels": null,
+    "rule": null,
+    "ruleRequest": false,
+    "fallback": false,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": null,
+    "restored": null,
+    "restores": null,
+    "accepted": null,
+    "leadAtAccept": null,
+    "ended": null,
+    "depth": 1,
+    "statusOrigin": null,
+    "statusBy": null,
+    "lastUpdate": "2026-11-01T09:00:00Z",
+    "stale": false
+   },
+   "maya.pc#1@maya.pc#1>maya": {
+    "id": "maya.pc#1@maya.pc#1>maya",
+    "item": "maya.pc#1",
+    "to": "maya",
+    "by": "maya",
+    "sender": "maya",
+    "completion": "assignee",
+    "state": "live",
+    "forced": true,
+    "status": "todo",
+    "note": null,
+    "noteBy": null,
+    "via": "maya.pc#1",
+    "ts": "2026-11-01T09:01:00Z",
+    "inherited": false,
+    "ruleLevels": null,
+    "rule": null,
+    "ruleRequest": false,
+    "fallback": true,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": null,
+    "restored": null,
+    "restores": null,
+    "accepted": null,
+    "leadAtAccept": null,
+    "ended": null,
+    "depth": 0,
+    "statusOrigin": null,
+    "statusBy": null,
+    "lastUpdate": "2026-11-01T09:01:00Z",
+    "stale": false
+   },
+   "maya.pc#2@maya.pc#2>maya": {
+    "id": "maya.pc#2@maya.pc#2>maya",
+    "item": "maya.pc#2",
+    "to": "maya",
+    "by": "maya",
+    "sender": "maya",
+    "completion": "assignee",
+    "state": "live",
+    "forced": true,
+    "status": "todo",
+    "note": null,
+    "noteBy": null,
+    "via": "maya.pc#2",
+    "ts": "2026-11-01T09:01:00Z",
+    "inherited": false,
+    "ruleLevels": null,
+    "rule": null,
+    "ruleRequest": false,
+    "fallback": true,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": null,
+    "restored": null,
+    "restores": null,
+    "accepted": null,
+    "leadAtAccept": null,
+    "ended": null,
+    "depth": 0,
+    "statusOrigin": null,
+    "statusBy": null,
+    "lastUpdate": "2026-11-01T09:01:00Z",
+    "stale": false
+   },
+   "maya.pc#3@maya.pc#3>maya": {
+    "id": "maya.pc#3@maya.pc#3>maya",
+    "item": "maya.pc#3",
+    "to": "maya",
+    "by": "maya",
+    "sender": "maya",
+    "completion": "assignee",
+    "state": "live",
+    "forced": true,
+    "status": "todo",
+    "note": null,
+    "noteBy": null,
+    "via": "maya.pc#3",
+    "ts": "2026-11-01T09:01:00Z",
+    "inherited": false,
+    "ruleLevels": null,
+    "rule": null,
+    "ruleRequest": false,
+    "fallback": true,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": null,
+    "restored": null,
+    "restores": null,
+    "accepted": null,
+    "leadAtAccept": null,
+    "ended": null,
+    "depth": 0,
+    "statusOrigin": null,
+    "statusBy": null,
+    "lastUpdate": "2026-11-01T09:01:00Z",
+    "stale": false
+   },
+   "ada.pc#9@ada.pc#3>ada": {
+    "id": "ada.pc#9@ada.pc#3>ada",
+    "item": "ada.pc#3",
+    "to": "ada",
+    "by": "ada",
+    "sender": "ada",
+    "completion": "assignee",
+    "state": "live",
+    "forced": true,
+    "status": "todo",
+    "note": null,
+    "noteBy": null,
+    "via": "ada.pc#9",
+    "ts": "2026-11-01T09:05:00Z",
+    "inherited": false,
+    "ruleLevels": null,
+    "rule": null,
+    "ruleRequest": false,
+    "fallback": true,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": null,
+    "restored": null,
+    "restores": null,
+    "accepted": null,
+    "leadAtAccept": null,
+    "ended": null,
+    "depth": 0,
+    "statusOrigin": null,
+    "statusBy": null,
+    "lastUpdate": "2026-11-01T09:05:00Z",
+    "stale": false
+   },
+   "maya.pc#7@maya.pc#7>maya": {
+    "id": "maya.pc#7@maya.pc#7>maya",
+    "item": "maya.pc#7",
+    "to": "maya",
+    "by": "maya",
+    "sender": "maya",
+    "completion": "assignee",
+    "state": "live",
+    "forced": true,
+    "status": "todo",
+    "note": null,
+    "noteBy": null,
+    "via": "maya.pc#7",
+    "ts": "2026-11-01T09:20:00Z",
+    "inherited": false,
+    "ruleLevels": null,
+    "rule": null,
+    "ruleRequest": false,
+    "fallback": true,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": null,
+    "restored": null,
+    "restores": null,
+    "accepted": null,
+    "leadAtAccept": null,
+    "ended": null,
+    "depth": 0,
+    "statusOrigin": null,
+    "statusBy": null,
+    "lastUpdate": "2026-11-01T09:20:00Z",
+    "stale": false
+   },
+   "ada.pc#11>maya": {
+    "id": "ada.pc#11>maya",
+    "item": "ada.pc#10",
+    "to": "maya",
+    "by": "ada",
+    "sender": "ada",
+    "completion": "assignee",
+    "state": "unassigned",
+    "forced": true,
+    "status": "todo",
+    "note": null,
+    "noteBy": null,
+    "via": "ada.pc#11",
+    "ts": "2026-11-01T09:30:00Z",
+    "inherited": false,
+    "ruleLevels": null,
+    "rule": null,
+    "ruleRequest": false,
+    "fallback": false,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": null,
+    "restored": null,
+    "restores": null,
+    "accepted": null,
+    "leadAtAccept": null,
+    "ended": {
+     "id": "ada.pc#12",
+     "type": "item.unassign",
+     "ts": "2026-11-01T09:36:00Z",
+     "by": "ada"
+    },
+    "depth": 1,
+    "statusOrigin": null,
+    "statusBy": null,
+    "lastUpdate": "2026-11-01T09:30:00Z",
+    "stale": false
+   },
+   "maya.pc#9@maya.pc#9>maya": {
+    "id": "maya.pc#9@maya.pc#9>maya",
+    "item": "maya.pc#9",
+    "to": "maya",
+    "by": "maya",
+    "sender": "maya",
+    "completion": "assignee",
+    "state": "live",
+    "forced": true,
+    "status": "todo",
+    "note": null,
+    "noteBy": null,
+    "via": "maya.pc#9",
+    "ts": "2026-11-01T09:31:00Z",
+    "inherited": false,
+    "ruleLevels": null,
+    "rule": null,
+    "ruleRequest": false,
+    "fallback": true,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": null,
+    "restored": null,
+    "restores": null,
+    "accepted": null,
+    "leadAtAccept": null,
+    "ended": null,
+    "depth": 0,
+    "statusOrigin": null,
+    "statusBy": null,
+    "lastUpdate": "2026-11-01T09:31:00Z",
+    "stale": false
+   },
+   "ada.pc#12@ada.pc#10>ada": {
+    "id": "ada.pc#12@ada.pc#10>ada",
+    "item": "ada.pc#10",
+    "to": "ada",
+    "by": "ada",
+    "sender": "ada",
+    "completion": "assignee",
+    "state": "live",
+    "forced": true,
+    "status": "todo",
+    "note": null,
+    "noteBy": null,
+    "via": "ada.pc#12",
+    "ts": "2026-11-01T09:36:00Z",
+    "inherited": false,
+    "ruleLevels": null,
+    "rule": null,
+    "ruleRequest": false,
+    "fallback": true,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": null,
+    "restored": null,
+    "restores": null,
+    "accepted": null,
+    "leadAtAccept": null,
+    "ended": null,
+    "depth": 0,
+    "statusOrigin": null,
+    "statusBy": null,
+    "lastUpdate": "2026-11-01T09:36:00Z",
+    "stale": false
+   },
+   "maya.pc#11@maya.pc#11>maya": {
+    "id": "maya.pc#11@maya.pc#11>maya",
+    "item": "maya.pc#11",
+    "to": "maya",
+    "by": "maya",
+    "sender": "maya",
+    "completion": "assignee",
+    "state": "live",
+    "forced": true,
+    "status": "todo",
+    "note": null,
+    "noteBy": null,
+    "via": "maya.pc#11",
+    "ts": "2026-11-01T09:40:00Z",
+    "inherited": false,
+    "ruleLevels": null,
+    "rule": null,
+    "ruleRequest": false,
+    "fallback": true,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": null,
+    "restored": null,
+    "restores": null,
+    "accepted": null,
+    "leadAtAccept": null,
+    "ended": null,
+    "depth": 0,
+    "statusOrigin": null,
+    "statusBy": null,
+    "lastUpdate": "2026-11-01T09:40:00Z",
+    "stale": false
+   }
+  },
+  "rules": {},
+  "comments": {},
+  "events": [
+   {
+    "id": "ada.pc#1",
+    "alias": "ada.pc-1",
+    "stream": "ada.pc",
+    "member": "ada",
+    "seq": 1,
+    "ts": "2026-11-01T09:00:00Z",
+    "type": "item.create",
+    "origin": "human",
+    "payload": {
+     "kind": "task",
+     "title": "X"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "ada.pc#1",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "ada.pc#2",
+    "alias": "ada.pc-2",
+    "stream": "ada.pc",
+    "member": "ada",
+    "seq": 2,
+    "ts": "2026-11-01T09:00:00Z",
+    "type": "item.create",
+    "origin": "human",
+    "payload": {
+     "kind": "task",
+     "title": "Y"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "ada.pc#2",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "ada.pc#3",
+    "alias": "ada.pc-3",
+    "stream": "ada.pc",
+    "member": "ada",
+    "seq": 3,
+    "ts": "2026-11-01T09:00:00Z",
+    "type": "item.create",
+    "origin": "human",
+    "payload": {
+     "kind": "task",
+     "title": "Q"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "ada.pc#3",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "ada.pc#4",
+    "alias": "ada.pc-4",
+    "stream": "ada.pc",
+    "member": "ada",
+    "seq": 4,
+    "ts": "2026-11-01T09:00:00Z",
+    "type": "item.assign",
+    "origin": "human",
+    "payload": {
+     "item": "ada.pc#3",
+     "targets": [
+      "maya"
+     ]
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "ada.pc#3",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "ada.pc#5",
+    "alias": "ada.pc-5",
+    "stream": "ada.pc",
+    "member": "ada",
+    "seq": 5,
+    "ts": "2026-11-01T09:00:00Z",
+    "type": "item.create",
+    "origin": "human",
+    "payload": {
+     "kind": "task",
+     "title": "Z"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "ada.pc#5",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "ada.pc#6",
+    "alias": "ada.pc-6",
+    "stream": "ada.pc",
+    "member": "ada",
+    "seq": 6,
+    "ts": "2026-11-01T09:00:00Z",
+    "type": "item.assign",
+    "origin": "human",
+    "payload": {
+     "item": "ada.pc#5",
+     "targets": [
+      "maya"
+     ]
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "ada.pc#5",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "maya.pc#1",
+    "alias": "maya.pc-1",
+    "stream": "maya.pc",
+    "member": "maya",
+    "seq": 1,
+    "ts": "2026-11-01T09:01:00Z",
+    "type": "item.create",
+    "origin": "human",
+    "payload": {
+     "kind": "task",
+     "title": "P"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "maya.pc#1",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "maya.pc#2",
+    "alias": "maya.pc-2",
+    "stream": "maya.pc",
+    "member": "maya",
+    "seq": 2,
+    "ts": "2026-11-01T09:01:00Z",
+    "type": "item.create",
+    "origin": "human",
+    "payload": {
+     "kind": "task",
+     "title": "R"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "maya.pc#2",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "maya.pc#3",
+    "alias": "maya.pc-3",
+    "stream": "maya.pc",
+    "member": "maya",
+    "seq": 3,
+    "ts": "2026-11-01T09:01:00Z",
+    "type": "item.create",
+    "origin": "human",
+    "payload": {
+     "kind": "task",
+     "title": "S"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "maya.pc#3",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "ada.pc#7",
+    "alias": "ada.pc-7",
+    "stream": "ada.pc",
+    "member": "ada",
+    "seq": 7,
+    "ts": "2026-11-01T09:05:00Z",
+    "type": "item.move",
+    "origin": "human",
+    "payload": {
+     "item": "ada.pc#1",
+     "parent": "ada.pc#2"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "ada.pc#1",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "ada.pc#8",
+    "alias": "ada.pc-8",
+    "stream": "ada.pc",
+    "member": "ada",
+    "seq": 8,
+    "ts": "2026-11-01T09:05:00Z",
+    "type": "item.move",
+    "origin": "human",
+    "payload": {
+     "item": "ada.pc#5",
+     "parent": null,
+     "after": ""
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [
+     {
+      "kind": "field",
+      "field": "position of ada.pc-5",
+      "other": "maya.pc#4",
+      "otherMember": "maya",
+      "winner": "maya.pc#4",
+      "mine": "top level, first",
+      "theirs": "top level, after ada.pc-2"
+     }
+    ],
+    "superseded": [],
+    "thread": "ada.pc#5",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "ada.pc#9",
+    "alias": "ada.pc-9",
+    "stream": "ada.pc",
+    "member": "ada",
+    "seq": 9,
+    "ts": "2026-11-01T09:05:00Z",
+    "type": "item.unassign",
+    "origin": "human",
+    "payload": {
+     "item": "ada.pc#3",
+     "assignee": "maya"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [
+     {
+      "kind": "subtask",
+      "field": "subtask under ada.pc-3",
+      "other": "maya.pc#5",
+      "otherMember": "maya",
+      "winner": "ada.pc#9",
+      "mine": null,
+      "theirs": null
+     }
+    ],
+    "superseded": [],
+    "thread": "ada.pc#3",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "ada.lap#1",
+    "alias": "ada.lap-1",
+    "stream": "ada.lap",
+    "member": "ada",
+    "seq": 1,
+    "ts": "2026-11-01T09:06:00Z",
+    "type": "item.move",
+    "origin": "human",
+    "payload": {
+     "item": "ada.pc#2",
+     "parent": "ada.pc#1"
+    },
+    "status": "flagged",
+    "reason": "moving ada.pc-2 under ada.pc-1 would close a cycle with a concurrent move; ignored",
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "ada.pc#2",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "maya.pc#4",
+    "alias": "maya.pc-4",
+    "stream": "maya.pc",
+    "member": "maya",
+    "seq": 4,
+    "ts": "2026-11-01T09:06:00Z",
+    "type": "item.move",
+    "origin": "human",
+    "payload": {
+     "item": "ada.pc#5",
+     "parent": null,
+     "after": "ada.pc#2"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [
+     {
+      "kind": "field",
+      "field": "position of ada.pc-5",
+      "other": "ada.pc#8",
+      "otherMember": "ada",
+      "winner": "maya.pc#4",
+      "mine": "top level, after ada.pc-2",
+      "theirs": "top level, first"
+     }
+    ],
+    "superseded": [],
+    "thread": "ada.pc#5",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "maya.pc#5",
+    "alias": "maya.pc-5",
+    "stream": "maya.pc",
+    "member": "maya",
+    "seq": 5,
+    "ts": "2026-11-01T09:06:00Z",
+    "type": "item.move",
+    "origin": "human",
+    "payload": {
+     "item": "maya.pc#2",
+     "parent": "ada.pc#3"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [
+     {
+      "kind": "subtask",
+      "field": "subtask under ada.pc-3",
+      "other": "ada.pc#9",
+      "otherMember": "ada",
+      "winner": "ada.pc#9",
+      "mine": null,
+      "theirs": null
+     }
+    ],
+    "superseded": [],
+    "thread": "maya.pc#2",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "maya.pc#6",
+    "alias": "maya.pc-6",
+    "stream": "maya.pc",
+    "member": "maya",
+    "seq": 6,
+    "ts": "2026-11-01T09:06:00Z",
+    "type": "item.move",
+    "origin": "human",
+    "payload": {
+     "item": "maya.pc#3",
+     "parent": "maya.pc#1"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "maya.pc#3",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "maya.lap#1",
+    "alias": "maya.lap-1",
+    "stream": "maya.lap",
+    "member": "maya",
+    "seq": 1,
+    "ts": "2026-11-01T09:07:00Z",
+    "type": "item.hide",
+    "origin": "human",
+    "payload": {
+     "item": "maya.pc#1"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "maya.pc#1",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "maya.pc#7",
+    "alias": "maya.pc-7",
+    "stream": "maya.pc",
+    "member": "maya",
+    "seq": 7,
+    "ts": "2026-11-01T09:20:00Z",
+    "type": "item.create",
+    "origin": "human",
+    "payload": {
+     "kind": "task",
+     "title": "W"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "maya.pc#7",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "maya.pc#8",
+    "alias": "maya.pc-8",
+    "stream": "maya.pc",
+    "member": "maya",
+    "seq": 8,
+    "ts": "2026-11-01T09:20:00Z",
+    "type": "item.move",
+    "origin": "human",
+    "payload": {
+     "item": "maya.pc#7",
+     "parent": null,
+     "after": "maya.pc#1"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "maya.pc#7",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "ada.pc#10",
+    "alias": "ada.pc-10",
+    "stream": "ada.pc",
+    "member": "ada",
+    "seq": 10,
+    "ts": "2026-11-01T09:30:00Z",
+    "type": "item.create",
+    "origin": "human",
+    "payload": {
+     "kind": "task",
+     "title": "V"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "ada.pc#10",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "ada.pc#11",
+    "alias": "ada.pc-11",
+    "stream": "ada.pc",
+    "member": "ada",
+    "seq": 11,
+    "ts": "2026-11-01T09:30:00Z",
+    "type": "item.assign",
+    "origin": "human",
+    "payload": {
+     "item": "ada.pc#10",
+     "targets": [
+      "maya"
+     ]
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "ada.pc#10",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "maya.pc#9",
+    "alias": "maya.pc-9",
+    "stream": "maya.pc",
+    "member": "maya",
+    "seq": 9,
+    "ts": "2026-11-01T09:31:00Z",
+    "type": "item.create",
+    "origin": "human",
+    "payload": {
+     "kind": "task",
+     "title": "U"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "maya.pc#9",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "maya.pc#10",
+    "alias": "maya.pc-10",
+    "stream": "maya.pc",
+    "member": "maya",
+    "seq": 10,
+    "ts": "2026-11-01T09:35:00Z",
+    "type": "item.move",
+    "origin": "human",
+    "payload": {
+     "item": "maya.pc#9",
+     "parent": "ada.pc#10"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [
+     {
+      "kind": "subtask",
+      "field": "subtask under ada.pc-10",
+      "other": "ada.pc#12",
+      "otherMember": "ada",
+      "winner": "ada.pc#12",
+      "mine": null,
+      "theirs": null
+     }
+    ],
+    "superseded": [],
+    "thread": "maya.pc#9",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "ada.pc#12",
+    "alias": "ada.pc-12",
+    "stream": "ada.pc",
+    "member": "ada",
+    "seq": 12,
+    "ts": "2026-11-01T09:36:00Z",
+    "type": "item.unassign",
+    "origin": "human",
+    "payload": {
+     "item": "ada.pc#10",
+     "assignee": "maya"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [
+     {
+      "kind": "subtask",
+      "field": "subtask under ada.pc-10",
+      "other": "maya.pc#10",
+      "otherMember": "maya",
+      "winner": "ada.pc#12",
+      "mine": null,
+      "theirs": null
+     }
+    ],
+    "superseded": [],
+    "thread": "ada.pc#10",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "maya.pc#11",
+    "alias": "maya.pc-11",
+    "stream": "maya.pc",
+    "member": "maya",
+    "seq": 11,
+    "ts": "2026-11-01T09:40:00Z",
+    "type": "item.create",
+    "origin": "human",
+    "payload": {
+     "kind": "task",
+     "title": "K"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "maya.pc#11",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "maya.pc#12",
+    "alias": "maya.pc-12",
+    "stream": "maya.pc",
+    "member": "maya",
+    "seq": 12,
+    "ts": "2026-11-01T09:41:00Z",
+    "type": "item.move",
+    "origin": "human",
+    "payload": {
+     "item": "maya.pc#11",
+     "parent": null,
+     "after": ""
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "maya.pc#11",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "maya.lap#2",
+    "alias": "maya.lap-2",
+    "stream": "maya.lap",
+    "member": "maya",
+    "seq": 2,
+    "ts": "2026-11-01T09:42:00Z",
+    "type": "item.move",
+    "origin": "agent",
+    "payload": {
+     "item": "maya.pc#11",
+     "parent": null,
+     "after": "maya.pc#7"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [
+     {
+      "field": "position of maya.pc-11",
+      "by": "maya.pc#12",
+      "why": "human"
+     }
+    ],
+    "thread": "maya.pc#11",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   }
+  ],
+  "notices": [],
+  "my": {
+   "assignments": [
+    "ada.pc#1@ada.pc#1>ada",
+    "ada.pc#2@ada.pc#2>ada",
+    "ada.pc#9@ada.pc#3>ada",
+    "ada.pc#12@ada.pc#10>ada"
+   ],
+   "today": {
+    "work": [
+     "ada.pc#1@ada.pc#1>ada",
+     "ada.pc#2@ada.pc#2>ada",
+     "ada.pc#9@ada.pc#3>ada",
+     "ada.pc#12@ada.pc#10>ada"
+    ],
+    "pending": [],
+    "confirms": []
+   },
+   "received": {
+    "pending": [],
+    "answered": [],
+    "sent": []
+   },
+   "given": [
+    "ada.pc#5"
+   ],
+   "created": [],
+   "team": [
+    {
+     "id": "maya",
+     "depth": 1,
+     "outside": false,
+     "open": [
+      "ada.pc#6>maya",
+      "maya.pc#2@maya.pc#2>maya",
+      "maya.pc#3@maya.pc#3>maya",
+      "maya.pc#7@maya.pc#7>maya",
+      "maya.pc#9@maya.pc#9>maya",
+      "maya.pc#11@maya.pc#11>maya"
+     ],
+     "pending": [],
+     "waiting": [],
+     "counts": {
+      "todo": 1
+     },
+     "load": 1,
+     "stale": 0,
+     "overdue": 0,
+     "fallback": 5,
+     "last": "2026-11-01T09:40:00Z"
+    },
+    {
+     "id": "lena",
+     "depth": 2,
+     "outside": false,
+     "open": [],
+     "pending": [],
+     "waiting": [],
+     "counts": {},
+     "load": 0,
+     "stale": 0,
+     "overdue": 0,
+     "fallback": 0,
+     "last": null
+    },
+    {
+     "id": "omar",
+     "depth": 2,
+     "outside": false,
+     "open": [],
+     "pending": [],
+     "waiting": [],
+     "counts": {},
+     "load": 0,
+     "stale": 0,
+     "overdue": 0,
+     "fallback": 0,
+     "last": null
+    },
+    {
+     "id": "raj",
+     "depth": 1,
+     "outside": false,
+     "open": [],
+     "pending": [],
+     "waiting": [],
+     "counts": {},
+     "load": 0,
+     "stale": 0,
+     "overdue": 0,
+     "fallback": 0,
+     "last": null
+    },
+    {
+     "id": "sven",
+     "depth": 2,
+     "outside": false,
+     "open": [],
+     "pending": [],
+     "waiting": [],
+     "counts": {},
+     "load": 0,
+     "stale": 0,
+     "overdue": 0,
+     "fallback": 0,
+     "last": null
+    },
+    {
+     "id": "bo",
+     "depth": 1,
+     "outside": false,
+     "open": [],
+     "pending": [],
+     "waiting": [],
+     "counts": {},
+     "load": 0,
+     "stale": 0,
+     "overdue": 0,
+     "fallback": 0,
+     "last": null
+    }
+   ],
+   "badge": []
+  },
+  "stats": {
+   "events": 27,
+   "commits": 14,
+   "flagged": 1,
+   "concurrent": 6
+  },
+  "heads": {
+   "ada.pc": 12,
+   "ada.lap": 1,
+   "maya.pc": 12,
+   "maya.lap": 2
+  },
+  "now": "2026-11-02T09:00:00Z"
+ }
+}

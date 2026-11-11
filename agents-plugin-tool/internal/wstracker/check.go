@@ -38,6 +38,98 @@ func (s *state) creatorGone(it *item, a string) bool {
 	return s.admins[a] && cr != nil && cr.removed != nil
 }
 
+// needCreatorOrAssignee is the creator-or-live-assignee rule: a holds it
+// when a created it or holds a live assignment on it (the fallback
+// included). what prefixes the item in the reason ("parent " on a
+// destination, "" on the item itself).
+func (s *state) needCreatorOrAssignee(it *item, a, what string) rejection {
+	if it.author == a || s.liveRec(it.id, a) != nil {
+		return ""
+	}
+	return rejection(what + it.alias + " is neither assigned to nor created by " + a)
+}
+
+// underItem reports that id is it or sits in its subtree, walking parents
+// up from id.
+func (s *state) underItem(id string, it *item) bool {
+	for cur, n := id, 0; cur != "" && n <= len(s.items); n++ {
+		if cur == it.id {
+			return true
+		}
+		x := s.items[cur]
+		if x == nil {
+			return false
+		}
+		cur = x.parent
+	}
+	return false
+}
+
+// checkMove judges item.move: the item rule (creator or live assignee, the
+// creator-gone fallback included), then, only when the parent changes, the
+// destination rule (item.create's parent rules, and a topic takes no
+// children), the subtree rule, and the after anchor.
+func (s *state) checkMove(p obj, a string) rejection {
+	it, r := s.needItem(p.disp("item"), "item")
+	if r != "" {
+		return r
+	}
+	if r := s.needCreatorOrAssignee(it, a, ""); r != "" && !s.creatorGone(it, a) {
+		return r
+	}
+	if it.hidden {
+		return rejection(it.alias + " is hidden")
+	}
+	if !p.has("parent") {
+		return "parent required (an item id, or null for top level)"
+	}
+	if _, ok := p["parent"].(string); !ok && !p.null("parent") {
+		return "parent must be an item id, or null for top level"
+	}
+	parent := p.str("parent")
+	if parent != it.parent && parent != "" {
+		if parent == it.id {
+			return rejection(it.alias + " cannot move under itself")
+		}
+		par, r := s.needItem(parent, "parent")
+		if r != "" {
+			return r
+		}
+		if par.hidden {
+			return rejection("parent " + par.alias + " is hidden")
+		}
+		if r := s.needCreatorOrAssignee(par, a, "parent "); r != "" {
+			return r
+		}
+		if par.kind == "topic" {
+			return rejection("parent " + par.alias + " is a topic; a topic takes no children")
+		}
+		if s.underItem(par.id, it) {
+			return rejection("parent " + par.alias + " is in " + it.alias + "'s own subtree")
+		}
+	}
+	if _, ok := p["after"].(string); !ok && !p.null("after") {
+		return "after must be a sibling item id"
+	}
+	if after := p.str("after"); after != "" {
+		if after == it.id {
+			return rejection(it.alias + " cannot follow itself")
+		}
+		sib, r := s.needItem(after, "after")
+		if r != "" {
+			return r
+		}
+		if sib.parent != parent {
+			at := "the top level"
+			if parent != "" {
+				at = alias(parent)
+			}
+			return rejection("after " + sib.alias + " is not a child of " + at)
+		}
+	}
+	return ""
+}
+
 func (s *state) needAdmin(a string) rejection {
 	if !s.admins[a] {
 		return rejection("roles events are admin-only (" + a + " is not an admin)")
@@ -467,8 +559,8 @@ func (s *state) check(n *node) rejection {
 			if par.hidden {
 				return rejection("parent " + par.alias + " is hidden")
 			}
-			if par.author != a && s.liveRec(par.id, a) == nil {
-				return rejection("parent " + par.alias + " is neither assigned to nor created by " + a)
+			if r := s.needCreatorOrAssignee(par, a, "parent "); r != "" {
+				return r
 			}
 		}
 		// (528) the sibling it follows; null or "" = first. An anchor that is
@@ -537,6 +629,9 @@ func (s *state) check(n *node) rejection {
 		if len(open) > 0 {
 			return rejection("unassign the open assignments first (" + strings.Join(open, ", ") + ")")
 		}
+
+	case TypeItemMove:
+		return s.checkMove(p, a)
 
 	case TypeItemAssign:
 		it, r := needIt()

@@ -1,0 +1,421 @@
+{
+ "name": "move-concurrent",
+ "comment": "Concurrent item.move. ada.pc moves X under Y while ada.lap, not seeing it, moves Y under X: the later in fold order (ada.lap) closes a cycle and is flagged and ignored. ada and maya move Z concurrently: the position register's winner (maya, the later ts) shows and both are marked. maya moves R under Q, authorized by her live assignment on Q, concurrently with ada unassigning her from Q: the move applies and is marked as a subtask under Q. maya.pc moves S under P while maya.lap hides P: the move was valid in its causal past and stays applied. maya.pc then anchors W after the hidden P at top level. The same race with the move first in fold order: maya moves U under V, ada unassigning her from V without seeing it; the unassign marks the move. Last, the winner rule rather than fold order: maya.pc (human) moves K first while maya.lap, not seeing it, moves K after W as an agent; the agent move folds later but loses to the same member's human write, so K stays first.",
+ "viewers": [
+  "ada.pc",
+  "maya.pc"
+ ],
+ "now": "2026-11-02T09:00:00Z",
+ "genesis": {
+  "admins": [
+   "ada"
+  ],
+  "members": [
+   {
+    "id": "ada",
+    "name": "Ada",
+    "keys": [
+     "ada-k1"
+    ],
+    "leads": []
+   },
+   {
+    "id": "maya",
+    "name": "Maya",
+    "keys": [
+     "maya-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "raj",
+    "name": "Raj",
+    "keys": [
+     "raj-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "bo",
+    "name": "Bo",
+    "keys": [
+     "bo-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "lena",
+    "name": "Lena",
+    "keys": [
+     "lena-k1"
+    ],
+    "leads": [
+     "maya"
+    ]
+   },
+   {
+    "id": "omar",
+    "name": "Omar",
+    "keys": [
+     "omar-k1"
+    ],
+    "leads": [
+     "maya"
+    ]
+   },
+   {
+    "id": "sven",
+    "name": "Sven",
+    "keys": [
+     "sven-k1"
+    ],
+    "leads": [
+     "raj"
+    ]
+   }
+  ]
+ },
+ "commits": {
+  "ada.pc": [
+   {
+    "ts": "2026-11-01T09:00:00Z",
+    "seen": {},
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "X"
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Y"
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Q"
+      }
+     ],
+     [
+      "item.assign",
+      {
+       "item": "ada.pc#3",
+       "targets": [
+        "maya"
+       ]
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Z"
+      }
+     ],
+     [
+      "item.assign",
+      {
+       "item": "ada.pc#5",
+       "targets": [
+        "maya"
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:05:00Z",
+    "seen": {
+     "maya.pc": 3
+    },
+    "events": [
+     [
+      "item.move",
+      {
+       "item": "ada.pc#1",
+       "parent": "ada.pc#2"
+      }
+     ],
+     [
+      "item.move",
+      {
+       "item": "ada.pc#5",
+       "parent": null,
+       "after": ""
+      }
+     ],
+     [
+      "item.unassign",
+      {
+       "item": "ada.pc#3",
+       "assignee": "maya"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:30:00Z",
+    "seen": {
+     "maya.pc": 8,
+     "ada.lap": 1,
+     "maya.lap": 1
+    },
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "V"
+      }
+     ],
+     [
+      "item.assign",
+      {
+       "item": "ada.pc#10",
+       "targets": [
+        "maya"
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:36:00Z",
+    "seen": {
+     "maya.pc": 9,
+     "ada.lap": 1,
+     "maya.lap": 1
+    },
+    "events": [
+     [
+      "item.unassign",
+      {
+       "item": "ada.pc#10",
+       "assignee": "maya"
+      }
+     ]
+    ]
+   }
+  ],
+  "ada.lap": [
+   {
+    "ts": "2026-11-01T09:06:00Z",
+    "seen": {
+     "ada.pc": 6
+    },
+    "events": [
+     [
+      "item.move",
+      {
+       "item": "ada.pc#2",
+       "parent": "ada.pc#1"
+      }
+     ]
+    ]
+   }
+  ],
+  "maya.pc": [
+   {
+    "ts": "2026-11-01T09:01:00Z",
+    "seen": {
+     "ada.pc": 6
+    },
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "P"
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "R"
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "S"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:06:00Z",
+    "seen": {
+     "ada.pc": 6
+    },
+    "events": [
+     [
+      "item.move",
+      {
+       "item": "ada.pc#5",
+       "parent": null,
+       "after": "ada.pc#2"
+      }
+     ],
+     [
+      "item.move",
+      {
+       "item": "maya.pc#2",
+       "parent": "ada.pc#3"
+      }
+     ],
+     [
+      "item.move",
+      {
+       "item": "maya.pc#3",
+       "parent": "maya.pc#1"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:20:00Z",
+    "seen": {
+     "ada.pc": 9,
+     "ada.lap": 1,
+     "maya.lap": 1
+    },
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "W"
+      }
+     ],
+     [
+      "item.move",
+      {
+       "item": "maya.pc#7",
+       "parent": null,
+       "after": "maya.pc#1"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:31:00Z",
+    "seen": {
+     "ada.pc": 11,
+     "ada.lap": 1,
+     "maya.lap": 1
+    },
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "U"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:35:00Z",
+    "seen": {
+     "ada.pc": 11,
+     "ada.lap": 1,
+     "maya.lap": 1
+    },
+    "events": [
+     [
+      "item.move",
+      {
+       "item": "maya.pc#9",
+       "parent": "ada.pc#10"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:40:00Z",
+    "seen": {
+     "ada.pc": 12,
+     "ada.lap": 1,
+     "maya.lap": 1
+    },
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "K"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:41:00Z",
+    "seen": {
+     "ada.pc": 12,
+     "ada.lap": 1,
+     "maya.lap": 1
+    },
+    "events": [
+     [
+      "item.move",
+      {
+       "item": "maya.pc#11",
+       "parent": null,
+       "after": ""
+      }
+     ]
+    ]
+   }
+  ],
+  "maya.lap": [
+   {
+    "ts": "2026-11-01T09:07:00Z",
+    "seen": {
+     "ada.pc": 6,
+     "maya.pc": 3
+    },
+    "events": [
+     [
+      "item.hide",
+      {
+       "item": "maya.pc#1"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:42:00Z",
+    "seen": {
+     "ada.pc": 12,
+     "ada.lap": 1,
+     "maya.pc": 11
+    },
+    "events": [
+     [
+      "item.move",
+      {
+       "item": "maya.pc#11",
+       "parent": null,
+       "after": "maya.pc#7"
+      },
+      "agent"
+     ]
+    ]
+   }
+  ]
+ }
+}

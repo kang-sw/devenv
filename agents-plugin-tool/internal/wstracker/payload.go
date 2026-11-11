@@ -15,6 +15,7 @@ const (
 	TypeItemCreate        = "item.create"
 	TypeItemEdit          = "item.edit"
 	TypeItemHide          = "item.hide"
+	TypeItemMove          = "item.move"
 	TypeItemAssign        = "item.assign"
 	TypeItemHandoff       = "item.handoff"
 	TypeItemAccept        = "item.accept"
@@ -79,6 +80,15 @@ type ItemCreate struct {
 	Attachments []Attachment `json:"attachments,omitempty"`
 	Refs        []string     `json:"refs,omitempty"`
 	Labels      []string     `json:"labels,omitempty"` // label ids from the store's list
+}
+
+// ItemMove is the payload of item.move: it places Item under Parent (nil:
+// top level) after the sibling After (nil leaves it last, "" puts it
+// first). A reorder is a move under the same parent.
+type ItemMove struct {
+	Item   string  `json:"item"`
+	Parent *string `json:"parent"`
+	After  *string `json:"after,omitempty"`
 }
 
 // ItemAssign is the payload of item.assign: Targets, or the older Mode with
