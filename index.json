@@ -420,7 +420,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-11T01:46:32Z"
+        "touched_at": "2026-11-11T01:47:11Z",
+        "impl": {
+          "branch": "impl/develop/croak-vowed-deuce"
+        }
       }
     },
     "261111-refactor-ws-minimize-recurring-fs-touches": {
