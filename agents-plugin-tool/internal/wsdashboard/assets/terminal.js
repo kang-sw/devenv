@@ -36,7 +36,11 @@
   // declares (terminal_routes.go termSymbolsFamily: change the two
   // together). The emulator lists it after the page's monospace stack, so
   // letters keep that font and a prompt's powerline separators and icons
-  // come from this one. FONT_WAIT bounds the wait for it in ms: the
+  // come from this one. The emulator's DOM renderer draws a fallback glyph
+  // at its font's own width and only fixes its advance to the cell, so the
+  // font's glyphs are redrawn to fit a cell (assets/nerdfont/fit.py); a 1em
+  // glyph would spill into the next cell and show cut in half under that
+  // cell's background. FONT_WAIT bounds the wait for it in ms: the
   // emulator measures its cells when it opens, so it opens once the font
   // is in or the wait is over.
   var SYMBOLS = "WsNerdSymbols", FONT_WAIT = 1500;

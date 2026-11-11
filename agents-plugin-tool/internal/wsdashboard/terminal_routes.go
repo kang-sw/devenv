@@ -132,11 +132,12 @@ func serveXterm(w http.ResponseWriter) {
 	_, _ = w.Write(data)
 }
 
-// termSymbolsWOFF2 is the symbols-only Nerd Font (assets/nerdfont/README.md)
-// the terminal card lists after the page's monospace stack, so a prompt's
-// powerline separators and icons draw instead of empty boxes.
+// termSymbolsWOFF2 is the symbols-only Nerd Font, its glyphs fitted to a
+// terminal cell (assets/nerdfont/README.md), that the terminal card lists
+// after the page's monospace stack, so a prompt's powerline separators and
+// icons draw whole instead of as empty boxes.
 //
-//go:embed assets/nerdfont/SymbolsNerdFontMono-Regular.woff2
+//go:embed assets/nerdfont/WsNerdSymbols-Regular.woff2
 var termSymbolsWOFF2 []byte
 
 // termSymbolsLicense embeds the font's license beside it.
