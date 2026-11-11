@@ -68,8 +68,14 @@
   // A sticky inset counts from the scroll container's padding edge.
   var padTop = root ? parseFloat(getComputedStyle(root).paddingTop) || 0 : 0;
 
-  var topics = [], dirty = true, last = "", stuck = null, raf = 0;
-  function viewTop() { return root ? root.getBoundingClientRect().top + padTop : 0; }
+  // inset is the room the host keeps at the top of its scroll area for a
+  // sticky row of its own (--wb-rail-inset on the host, in px; the
+  // dashboard's board header row): the top capsules and the current bar
+  // stick below it. It is read on every run, since the row can come after
+  // the rail.
+  var topics = [], dirty = true, last = "", stuck = null, raf = 0, inset = 0;
+  function readInset() { inset = root ? parseFloat(getComputedStyle(host).getPropertyValue("--wb-rail-inset")) || 0 : 0; }
+  function viewTop() { return root ? root.getBoundingClientRect().top + padTop + inset : 0; }
 
   function fill(b, t, extra) {
     b.hidden = !t;
@@ -92,6 +98,7 @@
 
   function run() {
     raf = 0;
+    readInset();
     if (dirty) { topics = Array.prototype.slice.call(box.querySelectorAll("section.topic[data-topic]")); dirty = false; }
     var n = topics.length, rects = topics.map(function (t) { return t.getBoundingClientRect(); });
     // Nothing rendered (the board tab is hidden) or nothing to rail.
@@ -128,7 +135,7 @@
   }
 
   function draw(s) {
-    var key = s ? [s.top, s.upMore, s.downMore, s.replyOff, s.stuck, names(s.up), names(s.down), names([s.cur])].join("|") : "";
+    var key = s ? [inset, s.top, s.upMore, s.downMore, s.replyOff, s.stuck, names(s.up), names(s.down), names([s.cur])].join("|") : "" + inset;
     if (key === last) return;
     last = key;
     var bar = s && s.bar, shadow = s && s.stuck ? bar : null;
@@ -152,8 +159,8 @@
     var replyOff = s ? s.replyOff : 0;
     wraps.bot.firstChild.style.paddingBottom = replyOff ? replyOff + PAD + "px" : "";
     var barH = bar ? bar.offsetHeight : 0;
-    host.style.setProperty("--wb-rail-top", (s ? s.top : 0) + "px");
-    host.style.setProperty("--wb-rail-h", (s ? s.top + barH : 0) + "px");
+    host.style.setProperty("--wb-rail-top", inset + (s ? s.top : 0) + "px");
+    host.style.setProperty("--wb-rail-h", inset + (s ? s.top + barH : 0) + "px");
     host.style.setProperty("--wb-rail-bot", (down.length ? wraps.bot.firstChild.offsetHeight - replyOff : 0) + "px");
   }
   // The names of the topics at the given indices: the draw key holds names,

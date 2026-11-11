@@ -557,7 +557,13 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .tm-end .btn { flex: none; height: 24px; font-size: 12px; font-weight: 700; color: var(--wb-fg); }
 .bcard[data-exited] .bc-kind { background: color-mix(in srgb, var(--wb-fail) 14%, var(--wb-card)); color: var(--wb-fail); }
 .tm-fold { overflow: hidden; text-overflow: ellipsis; white-space: pre; }
-.bhead { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; justify-content: flex-end; gap: 6px; min-height: 30px; margin: -2px -4px 6px -2px; padding: 2px 4px 2px 2px; background: var(--wb-bg); }
+/* the board column's header row (terminal.js): its own sticky row at the
+   column's top, right-aligned. The topic rail's capsules and the current
+   topic's bar stick below it (--wb-rail-inset, page.css), so its height is
+   fixed and the two values change together; it draws over the capsule
+   stack's top fill. A page without terminals has no such row and no inset. */
+.bhead { position: sticky; top: 0; z-index: 4; display: flex; align-items: center; justify-content: flex-end; gap: 6px; height: 28px; margin: -2px -4px 6px -2px; padding: 1px 4px 1px 2px; background: var(--wb-bg); }
+.bcol:has(> .bhead) { --wb-rail-inset: 28px; }
 .bnew { height: 26px; gap: 5px; padding: 0 11px 0 8px; font-size: 12.5px; font-weight: 700; color: var(--wb-fg); }
 .bnew .li { width: 13px; height: 13px; }
 .bnew[aria-expanded="true"] { background: var(--wb-primary); color: var(--wb-primary-fg); }

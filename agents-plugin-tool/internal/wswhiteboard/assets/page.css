@@ -439,7 +439,9 @@ details.panel .body { container-type: inline-size; }
 
 /* topic rail (rail.js): the current topic's bar sticks under the top capsules
    (--wb-rail-top), and zero-height sticky wrappers at each end of the board
-   carry the jump capsules. The topic clips rather than hides its overflow, so
+   carry the jump capsules. A host that keeps a sticky row of its own at the
+   top of its scroll area sets --wb-rail-inset to its height: the top
+   capsules and the bar stick below it. The topic clips rather than hides its overflow, so
    it is no scroll container and its bar sticks to the board's scroller. The
    capsule height, gap, and paddings are mirrored in rail.js (CAP, GAP, PAD,
    FADE): change them together. */
@@ -451,7 +453,7 @@ details.panel .body { container-type: inline-size; }
 .wb-rail .topic.has-doc:has(> details.tdoc) > .tbar.wb-stuck { padding-right: 12px; }
 .wb-rail .topic > details.tdoc > summary { z-index: 2; }
 .wb-rail-wrap { position: sticky; height: 0; z-index: 1; pointer-events: none; }
-.wb-rail-wrap.up { top: 0; z-index: 3; }
+.wb-rail-wrap.up { top: var(--wb-rail-inset, 0px); z-index: 3; }
 .wb-rail-wrap.dn { bottom: 0; }
 .wb-rail-stack { position: absolute; left: 0; right: 0; display: flex; flex-direction: column; gap: 3px; }
 .wb-rail-stack[hidden] { display: none; }
