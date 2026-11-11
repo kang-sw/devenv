@@ -292,7 +292,7 @@ func TestTrackerUpdateWritesEveryEventCommand(t *testing.T) {
 	step(trackerWriteStep{`<tk:store name="team"><tk:item.reject item="{t1}" assignee="bo">not yet</tk:item.reject></tk:store>`, []trackerWantEvent{
 		{typ: wstracker.TypeItemReject, payload: map[string]any{"item": "{t1}", "assignee": "bo", "note": "not yet"}},
 	}})
-	if got := recStates(w.view(t).Assignments, w.ids["t1"], "bo"); len(got) != 1 || strings.HasSuffix(got[0], "/awaiting") {
+	if got := recStates(w.view(t).Assignments, w.ids["t1"], "bo"); len(got) != 1 || strings.HasSuffix(got[0], "/in-review") {
 		t.Fatalf("a rejected close must leave the assignment open again: %v", got)
 	}
 	w.byBo(t, "", wstracker.TypeItemClose, map[string]any{"item": "{t1}"})
@@ -636,5 +636,52 @@ func TestTrackerUpdateWritesStructureAttributes(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Fatalf("refusal missing %q:\n%s", want, text)
 		}
+	}
+}
+
+// TestTrackerUpdateCompletionDefaultAndSuperiorWrapUp writes through
+// tracker.update against the two-member team store: an assign to a peer
+// defaults to completion assignee (pending until accepted), one to a member
+// below the writer defaults to assigner, and the writer, as that member's
+// org superior, sets done on their assignment with assignee=, final with no
+// review step.
+func TestTrackerUpdateCompletionDefaultAndSuperiorWrapUp(t *testing.T) {
+	w := &trackerWalk{trackerSessionFixture: newTrackerSessionFixture(t), ids: map[string]string{}}
+	w.adaSync(t) // ada learns bo's join
+
+	// bo is not below ada yet: a peer.
+	w.ada(t, trackerWriteStep{`<tk:store name="team">
+<tk:item.create kind="task" title="Peer"/>
+<tk:item.assign item="$1" people="bo"/>
+</tk:store>`, []trackerWantEvent{
+		{typ: wstracker.TypeItemCreate, name: "peer", payload: map[string]any{"kind": "task", "title": "Peer"}},
+		{typ: wstracker.TypeItemAssign, payload: map[string]any{"item": "{peer}", "mode": "chosen", "people": []any{"bo"}, "completion": "assignee"}},
+	}})
+	if got := recStates(w.view(t).Assignments, w.ids["peer"], "bo"); !reflect.DeepEqual(got, []string{"pending/todo"}) {
+		t.Fatalf("bo's assignment from a peer: %v", got)
+	}
+
+	w.ada(t, trackerWriteStep{`<tk:store name="team"><tk:roles.set_lead member="bo" leads="ada"/></tk:store>`, []trackerWantEvent{
+		{typ: wstracker.TypeSetLead, payload: map[string]any{"member": "bo", "leads": []any{"ada"}}},
+	}})
+	w.ada(t, trackerWriteStep{`<tk:store name="team">
+<tk:item.create kind="task" title="Sub"/>
+<tk:item.assign item="$1" people="bo"/>
+<tk:item.status item="$1" assignee="bo" status="done">wrapped up</tk:item.status>
+</tk:store>`, []trackerWantEvent{
+		{typ: wstracker.TypeItemCreate, name: "sub", payload: map[string]any{"kind": "task", "title": "Sub"}},
+		{typ: wstracker.TypeItemAssign, payload: map[string]any{"item": "{sub}", "mode": "chosen", "people": []any{"bo"}, "completion": "assigner"}},
+		{typ: wstracker.TypeItemStatus, payload: map[string]any{"item": "{sub}", "assignee": "bo", "status": "done", "note": "wrapped up"}},
+	}})
+	v := w.view(t)
+	if got := recStates(v.Assignments, w.ids["sub"], "bo"); !reflect.DeepEqual(got, []string{"live/done"}) {
+		t.Fatalf("bo's assignment after the superior's done: %v", got)
+	}
+	if st := v.Items[w.ids["sub"]].Status; st == nil || *st != "done" {
+		t.Fatalf("the item after the superior's done: %v", st)
+	}
+	// A done record takes no further status write.
+	if text := w.trackerRefused(t, "tracker.update", map[string]any{"commands": w.expand(`<tk:store name="team"><tk:item.status item="{sub}" assignee="bo" status="dropped"/></tk:store>`)}); !strings.Contains(text, "the store would flag this write: assignment is done; reopen it first") {
+		t.Fatalf("a status on a done assignment must be flagged:\n%s", text)
 	}
 }
