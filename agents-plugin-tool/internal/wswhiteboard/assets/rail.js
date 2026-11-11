@@ -138,6 +138,7 @@
     var key = s ? [inset, s.top, s.upMore, s.downMore, s.replyOff, s.stuck, names(s.up), names(s.down), names([s.cur])].join("|") : "" + inset;
     if (key === last) return;
     last = key;
+    var pre = motion() ? before(s) : null;
     var bar = s && s.bar, shadow = s && s.stuck ? bar : null;
     if (stuck !== shadow) {
       if (stuck) stuck.classList.remove("wb-stuck");
@@ -162,6 +163,93 @@
     host.style.setProperty("--wb-rail-top", inset + (s ? s.top : 0) + "px");
     host.style.setProperty("--wb-rail-h", inset + (s ? s.top + barH : 0) + "px");
     host.style.setProperty("--wb-rail-bot", (down.length ? wraps.bot.firstChild.offsetHeight - replyOff : 0) + "px");
+    curTopic = s && s.cur >= 0 ? topics[s.cur] : null;
+    if (pre) after(pre);
+  }
+
+  // --- motion: a bar turning into a capsule and back --------------------------
+  // When the current topic's card scrolls past, its bar (pushed up over the
+  // top stack by the card's end: a stuck bar draws above the stack) turns
+  // into the stack's near capsule: a copy of the bar shrinks from where the
+  // bar is to the capsule's box, its details fading and sliding out and its
+  // title shrinking to the capsule's size, while the capsule fades in under
+  // it. Scrolling back, a copy of the capsule grows into the bar's box and
+  // fades while the bar fades in. Capsules that stay in the stack slide from
+  // their old slot to their new one. The copies stand in the top wrapper,
+  // out of flow, so nothing below moves; every animation fills nothing.
+  // None of it runs under reduced motion.
+  var DUR = 180, EASE = "ease-out", curTopic = null, ghostEl = null;
+  function motion() { return !!d.body.animate && !(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches); }
+  function topBtns() { return [slots.top.far, slots.top.near]; }
+  // before reads, ahead of a redraw, what the motion starts from: the
+  // shown top capsules' boxes by topic, and the bar or the capsule that is
+  // about to turn into the other.
+  function before(s) {
+    var now = s && s.cur >= 0 ? topics[s.cur] : null, near = slots.top.near.hidden ? null : slots.top.near.wbTopic;
+    var p = { caps: [], prev: curTopic, now: now, ghost: null };
+    topBtns().forEach(function (b) { if (!b.hidden && b.wbTopic) p.caps.push({ t: b.wbTopic, r: b.getBoundingClientRect() }); });
+    if (curTopic && curTopic !== now && s && topics[s.up[0]] === curTopic) {
+      var tb = curTopic.querySelector(":scope > .tbar");
+      if (tb) p.ghost = { kind: "bar", src: tb, copy: tb.cloneNode(true), r: tb.getBoundingClientRect() };
+    } else if (now && now === near && now !== curTopic) {
+      p.ghost = { kind: "cap", src: slots.top.near, copy: slots.top.near.cloneNode(true), r: slots.top.near.getBoundingClientRect() };
+    }
+    return p;
+  }
+  function after(p) {
+    topBtns().forEach(function (b) {
+      if (b.hidden || !b.wbTopic || (p.ghost && p.ghost.kind === "bar" && b.wbTopic === p.prev)) return;
+      for (var i = 0; i < p.caps.length; i++) {
+        if (p.caps[i].t !== b.wbTopic) continue;
+        var dy = p.caps[i].r.top - b.getBoundingClientRect().top;
+        if (Math.abs(dy) >= 1) b.animate([{ transform: "translateY(" + dy + "px)" }, { transform: "none" }], { duration: DUR, easing: EASE });
+        return;
+      }
+    });
+    var g = p.ghost;
+    if (!g) return;
+    if (g.kind === "bar") {
+      var cap = slots.top.near;
+      if (cap.hidden || cap.wbTopic !== p.prev) return;
+      morph(g, cap, cap.getBoundingClientRect());
+    } else {
+      var tb = p.now.querySelector(":scope > .tbar");
+      if (tb) morph(g, tb, tb.getBoundingClientRect());
+    }
+  }
+  function dropGhost() {
+    if (ghostEl && ghostEl.parentNode) ghostEl.parentNode.removeChild(ghostEl);
+    ghostEl = null;
+  }
+  // morph animates the copy g.copy from g.r to the box to, the element
+  // into fading in under it.
+  function morph(g, into, to) {
+    dropGhost();
+    var w = wraps.top.getBoundingClientRect(), from = g.r, bar = g.kind === "bar";
+    var el = g.copy, cs = getComputedStyle(g.src);
+    el.className += " wb-rail-ghost";
+    el.hidden = false;
+    el.setAttribute("aria-hidden", "true");
+    el.setAttribute("tabindex", "-1");
+    el.style.margin = "0";
+    el.style.background = cs.backgroundColor;
+    el.style.color = cs.color;
+    wraps.top.appendChild(el);
+    ghostEl = el;
+    function box(r, radius) { return { left: r.left - w.left + "px", top: r.top - w.top + "px", width: r.width + "px", height: r.height + "px", borderRadius: radius }; }
+    var a = box(from, bar ? cs.borderRadius : from.height / 2 + "px"), b = box(to, bar ? to.height / 2 + "px" : getComputedStyle(into).borderRadius);
+    a.opacity = 1;
+    b.opacity = 0;
+    el.animate([a, b], { duration: DUR, easing: EASE }).onfinish = function () { if (ghostEl === el) dropGhost(); };
+    into.animate([{ opacity: 0 }, { opacity: 1 }], { duration: DUR, easing: EASE });
+    if (!bar) return;
+    // The bar's details fade and slide out; its title shrinks to the
+    // capsule's type size.
+    Array.prototype.forEach.call(el.children, function (c) {
+      if (!c.classList.contains("tlead")) c.animate([{ opacity: 1, transform: "none" }, { opacity: 0, transform: "translateY(-4px)" }], { duration: DUR * 0.6, easing: EASE, fill: "forwards" });
+    });
+    var tn = el.querySelector(".tname"), sn = g.src.querySelector(".tname"), cn = into.querySelector(".cn");
+    if (tn && sn && cn) tn.animate([{ fontSize: getComputedStyle(sn).fontSize }, { fontSize: getComputedStyle(cn).fontSize }], { duration: DUR, easing: EASE, fill: "forwards" });
   }
   // The names of the topics at the given indices: the draw key holds names,
   // not indices, so a re-queried board (closed topics fetched in, a topic
@@ -206,5 +294,6 @@
     wraps.bot.removeEventListener("click", jump);
     if (stuck) stuck.classList.remove("wb-stuck");
     stuck = null;
+    dropGhost();
   };
 })();

@@ -985,6 +985,39 @@ func TestTopicRailIsOnTheFullPageOnly(t *testing.T) {
 	}
 }
 
+// TestTopicRailBarCapsuleMotion pins the rail's bar-to-capsule motion
+// (rail.js morph): it runs only without reduced motion, reads its starting
+// boxes before a redraw and animates after it, a stuck bar draws above the
+// top capsule stack so the card's end pushes it over the stack, the copy
+// that morphs stands out of flow in the top wrapper, and the rail's
+// teardown drops it.
+func TestTopicRailBarCapsuleMotion(t *testing.T) {
+	assets, err := PageAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	js, css := string(assets.FormScript), string(assets.CSS)
+	for _, want := range []string{
+		`function motion() { return !!d.body.animate && !(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches); }`,
+		`var pre = motion() ? before(s) : null;`,
+		`if (pre) after(pre);`,
+		`wraps.top.appendChild(el);`,
+		"stuck = null;\n    dropGhost();\n  };",
+	} {
+		if !strings.Contains(js, want) {
+			t.Errorf("the rail script lacks %q", want)
+		}
+	}
+	for _, want := range []string{
+		`.wb-rail .topic > .tbar.wb-stuck { box-shadow: var(--wb-shadow); z-index: 3; }`,
+		`.wb-rail-wrap .wb-rail-ghost { position: absolute;`,
+	} {
+		if !strings.Contains(css, want) {
+			t.Errorf("the shared stylesheet lacks %q", want)
+		}
+	}
+}
+
 // A standalone page renders in the language its view names: the static text
 // (tooltips, the folded count) comes from the language's table, the board's
 // own content (titles, panel rows) stays as written, and the page carries the
