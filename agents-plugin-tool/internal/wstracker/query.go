@@ -12,7 +12,7 @@ import (
 //
 // A query is whitespace-separated tokens, every token AND-ed. A key:value
 // token whose key is one of status, assignee, kind, project, label, due,
-// or priority is a field filter; any other token, a pasted URL or foo:bar
+// priority, or is is a field filter; any other token, a pasted URL or foo:bar
 // included, is free text. A "quoted phrase" is one free-text token, and a
 // filter value may be quoted (project:"two words"). Keys and values are
 // case-insensitive.
@@ -28,6 +28,9 @@ import (
 //	due:<op><d>   d is YYYY-MM-DD; op is <, >, <=, >=, or none for equality;
 //	              an item with no due date never matches
 //	priority:<op><n>  the item's priority level n (0 is the first level)
+//	is:claimable  the viewer may claim the item now (ItemView.Claimable): it
+//	              is open, the viewer is in its scope and not its fallback
+//	              holder; one of QueryIs
 //
 // Free text matches the item's title, body, project, ID (also in the
 // maya.pc-5 form), alias, and the text of the shown comments of its
@@ -41,6 +44,9 @@ var QueryStatuses = []string{"open", "hidden", "idea", "todo", "doing", "blocked
 // QueryKinds are the values kind: and tracker.query's kind filter take. A
 // todo create folds as a task, so todo is not one.
 var QueryKinds = []string{"task", "topic"}
+
+// QueryIs are the values is: takes: properties of the item for the viewer.
+var QueryIs = []string{"claimable"}
 
 // QueryError is a query whose Token has a known key and a value that key
 // does not take; Reason says what it takes.
@@ -154,6 +160,11 @@ func parseQueryToken(tok queryToken) (queryTerm, error) {
 			return refuse("kind takes one of " + strings.Join(QueryKinds, ", "))
 		}
 		return queryTerm{key: key, value: v}, nil
+	case "is":
+		if !containsString(QueryIs, v) {
+			return refuse("is takes one of " + strings.Join(QueryIs, ", "))
+		}
+		return queryTerm{key: key, value: v}, nil
 	case "assignee", "project", "label":
 		if v == "" {
 			return refuse(key + " takes a value")
@@ -243,6 +254,8 @@ func (t queryTerm) match(v *View, it ItemView) bool {
 		return !it.Hidden && status == t.value
 	case "kind":
 		return it.Kind == t.value
+	case "is":
+		return it.Claimable
 	case "project":
 		return strings.ToLower(it.Project) == t.value
 	case "label":

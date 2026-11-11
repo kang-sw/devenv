@@ -224,7 +224,7 @@
 
   function genesis(roles) {
     var S = { members: {}, admins: {}, items: {}, place: [], asg: {}, rules: {}, comments: {}, reg: {}, prio: normPriority(roles.priority),
-      att: normAttachments(roles.attachments), labels: {}, lorder: [] };
+      att: normAttachments(roles.attachments), labels: {}, lorder: [], reqs: {}, rorder: [] };
     (roles.members || []).forEach(function (m) {
       S.members[m.id] = { id: m.id, profile: normProfile(m, m.id), keys: (m.keys || []).slice(), revoked: {}, leads: (m.leads || []).slice(), removed: null, joined: null };
     });
@@ -506,6 +506,47 @@
     return r;
   }
 
+  // Taking work. An opening (it.open, the latest item.open: node, by, scope, ended)
+  // lets one member in its scope (team: the opener's org subtree; store: every
+  // member) claim a task nobody else holds. It ends when the item is claimed or
+  // assigned, when anyone else comes to hold it, or when it is withdrawn
+  // (item.unopen); ended is that event. A take request (S.reqs, its id the
+  // item.request event's) asks for the live assignment `of` that `holder` holds:
+  // pending -> approved | denied | withdrawn (item.unrequest, or the requester
+  // removed) | lapsed (the assignment ended first).
+  function activeOpen(S, it) { return it.open && !it.open.ended && liveFallback(S, it.id) ? it.open : null; }
+  function inScope(S, o, who) { return liveMember(S, who) && (o.scope === 'store' || below(S.members, o.by, who)); }
+  function holders(S, it) {
+    var held = [];
+    openRecs(S, it.id).forEach(function (x) { if (!x.ruleRequest && held.indexOf(x.to) < 0) held.push(x.to); });
+    return held;
+  }
+  // Why it cannot be claimed: never opened, or the event that ended its opening.
+  function notOpen(S, it) {
+    var o = it.open;
+    if (!o || (!o.ended && !liveFallback(S, it.id))) return it.alias + ' is not open for claiming';
+    var e = o.ended;
+    if (e.type === 'item.claim') return e.author + ' already claimed ' + it.alias + ' (' + alias(e.id) + ')';
+    if (e.type === 'item.unopen') return e.author + ' withdrew the opening of ' + it.alias + ' (' + alias(e.id) + ')';
+    if (e.type === 'item.assign') return e.author + ' assigned ' + it.alias + ' (' + alias(e.id) + '), which ended its opening';
+    return 'the opening of ' + it.alias + ' ended (' + alias(e.id) + ')';
+  }
+  function needReq(S, it, id) {
+    var q = has(S.reqs, String(id)) ? S.reqs[id] : null;
+    if (!q || q.item !== it.id) rej(alias(String(id)) + ' is not a take request on ' + it.alias);
+    return q;
+  }
+  // Why q is no longer pending.
+  function reqEnded(q) {
+    var e = q.ended, rq = alias(q.id);
+    if (q.state === 'approved') return e.author + ' already approved ' + rq + ' (' + alias(e.id) + ')';
+    if (q.state === 'denied') return e.author + ' denied ' + rq + ' (' + alias(e.id) + ')';
+    if (q.state === 'withdrawn') return rq + ' was withdrawn (' + alias(e.id) + ')';
+    return rq + ' lapsed: ' + q.holder + '\'s assignment on ' + alias(q.item) + ' ended (' + alias(e.id) + ')';
+  }
+  // The suffix of a fold-time flag (see foldFlag).
+  var CONCURRENTLY = '; written concurrently, the first in fold order wins';
+
   // An older item.edit stage change, checked as it was when stages were written:
   // tasks and todos only, review or null (todo). Moving to review needs an item with
   // no live or pending assignment (the fallback is neither). A new write carrying
@@ -621,6 +662,70 @@
         if (pend) rej('a handoff of this assignment to ' + pend.to + ' is already pending (' + alias(pend.via) + ')');
         break;
       }
+
+      case 'item.open': {
+        it = needItem(S, p.item);
+        if (it.hidden) rej(it.alias + ' is hidden');
+        if (it.author !== a && !creatorGone(S, it, a)) rej('only the creator (' + it.author + ') opens ' + it.alias + ' for claiming');
+        if (it.kind === 'topic') rej('a topic is not opened for claiming; its creator assigns its one holder');
+        if (p.scope !== 'team' && p.scope !== 'store') rej('scope must be team (the opener\'s org subtree) or store (every member)');
+        var ao = activeOpen(S, it);
+        if (ao) rej(it.alias + ' is already open (' + alias(ao.node.id) + ')');
+        var hd = holders(S, it);
+        if (hd.length) rej(it.alias + ' has live or pending assignments (' + hd.join(', ') + '); only a task nobody else holds is opened');
+        var fbo = liveFallback(S, it.id);
+        if (fbo && fbo.status === 'done') rej(it.alias + ' is done; nothing to open');
+        break;
+      }
+
+      case 'item.unopen':
+        it = needItem(S, p.item);
+        if (it.author !== a && !creatorGone(S, it, a)) rej('only the creator (' + it.author + ') withdraws the opening of ' + it.alias);
+        if (!activeOpen(S, it)) rej(notOpen(S, it));
+        break;
+
+      case 'item.claim': {
+        it = needItem(S, p.item);
+        if (it.hidden) rej(it.alias + ' is hidden');
+        var o = activeOpen(S, it);
+        if (!o) rej(notOpen(S, it));
+        if (liveFallback(S, it.id).to === a) rej(a + ' already holds ' + it.alias);
+        if (!inScope(S, o, a)) rej(a + ' is not in ' + o.by + '\'s org subtree; ' + it.alias + ' is open to that team only');
+        break;
+      }
+
+      case 'item.request': {
+        it = needItem(S, p.item);
+        if (it.hidden) rej(it.alias + ' is hidden');
+        if (!p.assignee) rej('assignee required (the holder of the assignment to take)');
+        if (p.assignee === a) rej(a + ' cannot request their own assignment');
+        r = needRec(S, it.id, p.assignee);
+        if (r.fallback) rej(p.assignee + ' holds ' + it.alias + ' only because nobody else does; it is taken by a claim once its creator opens it');
+        if (r.status === 'done') rej('assignment is done; nothing to take');
+        if (openRec(S, it.id, a)) rej(a + ' already holds a live or pending assignment on ' + it.alias);
+        S.rorder.forEach(function (id) {
+          q = S.reqs[id];
+          if (q.by === a && q.of === r.id && q.state === 'pending')
+            rej(a + '\'s request for ' + p.assignee + '\'s assignment on ' + it.alias + ' is already pending (' + alias(q.id) + ')');
+        });
+        break;
+      }
+
+      case 'item.approve':
+      case 'item.deny':
+        it = needItem(S, p.item);
+        q = needReq(S, it, p.request);
+        if (q.state !== 'pending') rej(reqEnded(q));
+        if (a !== q.holder && it.author !== a && !creatorGone(S, it, a))
+          rej('only ' + q.holder + ' (the assignment\'s holder) or the creator (' + it.author + ') ' + (n.type === 'item.approve' ? 'approves' : 'denies') + ' ' + alias(q.id));
+        break;
+
+      case 'item.unrequest':
+        it = needItem(S, p.item);
+        q = needReq(S, it, p.request);
+        if (q.state !== 'pending') rej(reqEnded(q));
+        if (q.by !== a) rej('only the requester (' + q.by + ') withdraws ' + alias(q.id));
+        break;
 
       case 'item.accept':
       case 'item.decline':
@@ -942,7 +1047,11 @@
       if (r.fallback) { if (r.state === 'live') fb = r; }
       else if ((r.state === 'live' || r.state === 'pending') && !r.ruleRequest) held = true;
     });
-    if (held) { if (fb) endRec(S, fb, n, 'displaced', C); return; }
+    if (held) {
+      if (fb) endRec(S, fb, n, 'displaced', C);
+      if (it.open && !it.open.ended) it.open.ended = n; // an opening never outlives the fallback hold
+      return;
+    }
     var h = fallbackHolder(S, it);
     if (fb || !h) return;
     addRec(S, n, id, h, h, 'assignee', { id: n.id + '@' + id + '>' + h, fallback: true, start: n,
@@ -976,6 +1085,10 @@
     if (r.ruleRequest && S.rules[r.rule] && !S.rules[r.rule].ended) S.rules[r.rule].ended = n.id; // a withdrawn request ends its rule
     vals(S.asg).forEach(function (x) {
       if (x.handoffOf === r.id && x.state === 'pending') { x.state = 'withdrawn'; x.ended = n; }
+    });
+    S.rorder.forEach(function (id) { // a take request names one assignment
+      var q = S.reqs[id];
+      if (q.of === r.id && q.state === 'pending') { q.state = 'lapsed'; q.ended = n; }
     });
     if (!C) return;
     var label = r.to + '\'s assignment on ' + alias(r.item);
@@ -1020,6 +1133,69 @@
     return q;
   }
 
+  // A write whose causal-past check passed but that an event earlier in fold
+  // order, concurrent with it, has already overtaken (a second claim of one
+  // opening, an approval of a request already answered, a move closing a cycle
+  // with a concurrent move) is flagged in the final fold (C) and takes no
+  // effect. A check-time fold skips it by the same test without flagging, so
+  // later verdicts see what a full replay shows.
+  function foldFlag(n, reason, C) { if (C) { n.status = 'flagged'; n.reason = reason; } }
+  // item.open; a creator's assign or another opening concurrent with it and
+  // earlier in fold order already holds or opened the item, so it is flagged.
+  function applyOpen(S, n, C) {
+    var it = S.items[n.p.item];
+    if (!it) return;
+    var held = holders(S, it);
+    if (held.length) { foldFlag(n, it.alias + ' has live or pending assignments (' + held.join(', ') + '); only a task nobody else holds is opened' + CONCURRENTLY, C); return; }
+    var ao = activeOpen(S, it);
+    if (ao) { foldFlag(n, it.alias + ' is already open (' + alias(ao.node.id) + ')' + CONCURRENTLY, C); return; }
+    it.open = { node: n, by: n.author, scope: n.p.scope, ended: null };
+  }
+  // item.claim: a live record by the opener, which displaces the fallback and ends
+  // the opening; a claim whose opening an earlier event ended is flagged.
+  function applyClaim(S, n, C) {
+    var it = S.items[n.p.item];
+    if (!it || !it.open) return;
+    var o = activeOpen(S, it);
+    if (!o) { foldFlag(n, notOpen(S, it) + CONCURRENTLY, C); return; }
+    var a = n.author;
+    if (!liveMember(S, a)) return;
+    addRec(S, n, it.id, a, o.by, 'assignee', { forced: false, sender: a, accepted: n }); // no accepted notice: nobody asked
+    o.ended = n;
+  }
+  // item.request: for the live assignment its assignee holds; when that ended
+  // earlier in fold order, the request lapses at once.
+  function applyRequest(S, n) {
+    var p = n.p, it = S.items[p.item];
+    if (!it || has(S.reqs, n.id)) return;
+    var q = { node: n, id: n.id, item: it.id, by: n.author, holder: p.assignee, of: null, note: p.note || null, answerNote: null, state: 'pending', ended: null };
+    var r = liveRec(S, it.id, p.assignee);
+    if (r && !r.fallback) q.of = r.id;
+    else {
+      q.state = 'lapsed'; q.ended = n;
+      r = lastEndedRec(S, it.id, p.assignee);
+      if (r && !r.fallback) { q.of = r.id; q.ended = r.ended; }
+    }
+    S.reqs[n.id] = q; S.rorder.push(n.id);
+  }
+  // item.approve: the named assignment ends handed and the requester's new record
+  // starts live with its assigner, completion, status, and note, as an accepted
+  // handoff does (290); a requester holding a record by then gets no second one.
+  // An approval of a request an earlier event answered, withdrew, or let lapse is
+  // flagged.
+  function applyApprove(S, n, C) {
+    var p = n.p, q = has(S.reqs, String(p.request)) ? S.reqs[p.request] : null;
+    if (!q || q.item !== p.item) return;
+    if (q.state !== 'pending') { foldFlag(n, reqEnded(q) + CONCURRENTLY, C); return; }
+    q.state = 'approved'; q.ended = n; q.answerNote = p.note || null;
+    var old = S.asg[q.of];
+    if (!old || old.state !== 'live') return;
+    endRec(S, old, n, 'handed', C);
+    if (openRec(S, q.item, q.by) || !liveMember(S, q.by)) return;
+    addRec(S, n, q.item, q.by, old.by, old.completion, { forced: false, sender: n.author, handoffOf: old.id, accepted: n,
+      status: old.status, note: old.note, noteBy: old.noteBy });
+  }
+
   // item.move folds into the item's position register: concurrent moves of one item
   // keep the register's winner, the other marked. A move whose shown place would sit
   // in the item's own subtree, which only a concurrent move can cause, is flagged and
@@ -1032,7 +1208,7 @@
     var key = 'it:' + it.id + ':place', v = { move: true, parent: p.parent || null, after: has(p, 'after') ? (p.after || null) : undefined };
     var shown = peek(S, key, n, v);
     if (underItem(S, shown.parent, it)) {
-      if (C) { n.status = 'flagged'; n.reason = 'moving ' + it.alias + ' under ' + alias(shown.parent) + ' would close a cycle with a concurrent move; ignored'; }
+      foldFlag(n, 'moving ' + it.alias + ' under ' + alias(shown.parent) + ' would close a cycle with a concurrent move; ignored', C);
       return;
     }
     var w = write(S, key, 'position of ' + it.alias, n, v, C), wn = regWinner(S, key);
@@ -1091,6 +1267,7 @@
         break;
       case 'item.assign': {
         if (!S.items[p.item]) break;
+        if (S.items[p.item].open && !S.items[p.item].open.ended) S.items[p.item].open.ended = n; // delegated another way
         // a topic record carries no status, so no completion mode either
         var completion = S.items[p.item].kind === 'topic' ? '' : p.completion || 'assignee';
         if (p.targets != null) (Array.isArray(p.targets) ? p.targets : []).forEach(function (x) {
@@ -1189,6 +1366,21 @@
         r.status = w.status; r.note = w.note; r.noteBy = w.by; r.last = w.n;
         break;
       }
+      case 'item.open': applyOpen(S, n, C); break;
+      case 'item.unopen': // after a claim or an assign folded first, a no-op
+        it = S.items[p.item];
+        if (it && it.open && !it.open.ended) it.open.ended = n;
+        break;
+      case 'item.claim': applyClaim(S, n, C); break;
+      case 'item.request': applyRequest(S, n); break;
+      case 'item.approve': applyApprove(S, n, C); break;
+      case 'item.deny': case 'item.unrequest': // after the request was answered or lapsed, a no-op
+        q = has(S.reqs, String(p.request)) ? S.reqs[p.request] : null;
+        if (q && q.item === p.item && q.state === 'pending') {
+          q.state = n.type === 'item.deny' ? 'denied' : 'withdrawn'; q.ended = n;
+          if (n.type === 'item.deny') q.answerNote = p.note || null;
+        }
+        break;
       case 'comment.add':
         S.comments[n.id] = { id: n.id, alias: n.alias, item: p.item, author: a, body: p.body, reply_to: p.reply_to || null,
           hidden: false, edited: null, ts: n.ts, node: n, mentions: mentionsOf(p), attachments: attachmentsOf(p), refs: refsOf(p) };
@@ -1232,6 +1424,10 @@
         vals(S.asg).forEach(function (x) { if (x.to === p.member && handedConc(x, n)) reverseHanded(S, x, n, C); });
         vals(S.asg).forEach(function (x) {
           if (x.to === p.member && (x.state === 'live' || x.state === 'pending')) endRec(S, x, n, x.state === 'pending' ? 'withdrawn' : 'unassigned', C);
+        });
+        S.rorder.forEach(function (id) {
+          q = S.reqs[id];
+          if (q.by === p.member && q.state === 'pending') { q.state = 'withdrawn'; q.ended = n; }
         });
         break;
       case 'roles.set_priority_levels':
@@ -1493,7 +1689,19 @@
         pending: recs.filter(function (r) { return r.state === 'pending'; }).map(function (r) { return r.id; }),
         thread: threads[it.id] || [], concurrent: (threads[it.id] || []).filter(function (id) { return g.byId[id].markers.length; }).length,
         depth: chain.length - 1, chain: chain.slice().reverse(), mentions: it.mentions.slice(), attachments: clone(it.attachments),
-        refs: it.refs.slice(), backrefs: backrefs[it.id] || [] };
+        refs: it.refs.slice(), backrefs: backrefs[it.id] || [], open: null, claimable: false,
+        requests: S.rorder.filter(function (id) { return S.reqs[id].item === it.id; }) };
+      var o = activeOpen(S, it);
+      if (o) {
+        items[it.id].open = { id: o.node.id, by: o.by, scope: o.scope, ts: o.node.ts };
+        items[it.id].claimable = !it.hidden && liveFallback(S, it.id).to !== v && inScope(S, o, v);
+      }
+    });
+    var requests = {};
+    S.rorder.forEach(function (id) {
+      var q = S.reqs[id];
+      requests[id] = { id: id, item: q.item, by: q.by, assignee: q.holder, assignment: q.of, state: q.state, note: q.note,
+        answerNote: q.answerNote, ts: q.node.ts, ended: q.ended ? { id: q.ended.id, type: q.ended.type, ts: q.ended.ts, by: q.ended.author } : null };
     });
     var comments = {};
     vals(S.comments).forEach(function (q) {
@@ -1618,9 +1826,21 @@
       Object.keys(S.members).forEach(function (id) { if (!S.members[id].removed) outside([id], 0); });
     }
 
+    // Pending take requests on shown items: incoming, those the viewer may answer
+    // (the named assignment's holder or the item's creator) and did not file;
+    // outgoing, those the viewer filed.
+    var reqsMine = { incoming: [], outgoing: [] };
+    S.rorder.forEach(function (id) {
+      var q = S.reqs[id], it = S.items[q.item];
+      if (q.state !== 'pending' || !it || it.hidden) return;
+      if (q.by === v) reqsMine.outgoing.push(id);
+      else if (q.holder === v || it.author === v || creatorGone(S, it, v)) reqsMine.incoming.push(id);
+    });
+
     var badge = [];
     mine.forEach(function (r) { if (r.by !== v && r.forced && r.status === 'todo' && notTopic(r)) badge.push('a:' + r.id); });
     pendingToMe.forEach(function (r) { badge.push('p:' + r.id); });
+    reqsMine.incoming.forEach(function (id) { badge.push('q:' + id); });
     notices.forEach(function (x) { badge.push(x.key); });
 
     var commits = 0;
@@ -1632,12 +1852,12 @@
       priority: clone(S.prio), attachments: clone(S.att),
       labels: S.lorder.filter(function (id) { return !!liveLabel(S, id); }).map(function (id) { var l = S.labels[id]; return { id: id, name: l.name, color: l.color }; }),
       members: members, admins: Object.keys(S.admins), rolesProblems: rolesProblems(input.roles),
-      items: items, itemOrder: itemOrder, assignments: assignments, rules: rules, comments: comments, events: events, notices: notices,
+      items: items, itemOrder: itemOrder, assignments: assignments, requests: requests, rules: rules, comments: comments, events: events, notices: notices,
       my: {
         assignments: ids(mine.sort(byRank)),
         today: { work: ids(mine.filter(function (r) { return r.status !== 'done' && r.status !== 'awaiting' && notTopic(r); }).sort(byUrgency)), pending: ids(pendingToMe.sort(byUrgency)), confirms: ids(confirms) },
         received: { pending: ids(pendingToMe), answered: ids(answered), sent: ids(sent) },
-        given: given, created: created, team: team, badge: badge
+        given: given, created: created, team: team, requests: reqsMine, badge: badge
       },
       stats: { events: events.length, commits: commits,
         flagged: events.filter(function (e) { return e.status !== 'applied'; }).length,

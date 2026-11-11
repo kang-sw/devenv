@@ -731,7 +731,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "ada.pc#1": {
     "id": "ada.pc#1",
@@ -780,7 +783,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "maya.pc#3": {
     "id": "maya.pc#3",
@@ -831,7 +837,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "maya.pc#5": {
     "id": "maya.pc#5",
@@ -877,7 +886,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "maya.pc#7": {
     "id": "maya.pc#7",
@@ -924,7 +936,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "maya.pc#9": {
     "id": "maya.pc#9",
@@ -971,7 +986,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    }
   },
   "itemOrder": [
@@ -1590,6 +1608,7 @@
     "stale": false
    }
   },
+  "requests": {},
   "rules": {
    "maya.pc#2~maya": {
     "id": "maya.pc#2~maya",
@@ -2214,6 +2233,10 @@
      "last": "2026-11-01T09:14:00Z"
     }
    ],
+   "requests": {
+    "incoming": [],
+    "outgoing": []
+   },
    "badge": []
   },
   "stats": {

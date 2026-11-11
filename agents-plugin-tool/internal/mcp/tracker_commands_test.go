@@ -405,6 +405,74 @@ func TestTrackerUpdateWritesEveryEventCommand(t *testing.T) {
 		t.Fatalf("the comment after edit and hide: %+v", c)
 	}
 
+	// Taking work. ada opens T7, withdraws, and reopens it to the store; the
+	// fallback holder cannot claim it, so is:claimable leaves it out and a
+	// claim is flagged.
+	step(trackerWriteStep{`<tk:store name="team">
+<tk:item.create kind="task" title="T7"/>
+<tk:item.open item="$1" scope="team"/>
+<tk:item.unopen item="$1"/>
+<tk:item.open item="$1" scope="store"/>
+</tk:store>`, []trackerWantEvent{
+		{typ: wstracker.TypeItemCreate, name: "t7", payload: map[string]any{"kind": "task", "title": "T7"}},
+		{typ: wstracker.TypeItemOpen, payload: map[string]any{"item": "{t7}", "scope": "team"}},
+		{typ: wstracker.TypeItemUnopen, payload: map[string]any{"item": "{t7}"}},
+		{typ: wstracker.TypeItemOpen, name: "open7", payload: map[string]any{"item": "{t7}", "scope": "store"}},
+	}})
+	if it := w.view(t).Items[w.ids["t7"]]; it.Open == nil || it.Open.Scope != "store" || it.Claimable {
+		t.Fatalf("T7 after the reopen: open %+v, claimable %v", it.Open, it.Claimable)
+	}
+	if got := w.trackerQuery(t, map[string]any{"store": "team", "item": w.ids["t7"]}); !strings.Contains(got, "open for claiming to store by ada ("+trackerAlias(w.ids["open7"])+")\n") {
+		t.Fatalf("the item view prints the opening:\n%s", got)
+	}
+	if text := w.trackerRefused(t, "tracker.update", map[string]any{"commands": w.expand(`<tk:store name="team"><tk:item.claim item="{t7}"/></tk:store>`)}); !strings.Contains(text, "the store would flag this write: ada already holds") {
+		t.Fatalf("the fallback holder's claim must be flagged:\n%s", text)
+	}
+	// bo opens T8 to the store: claimable for ada, who claims it.
+	w.byBo(t, "t8", wstracker.TypeItemCreate, map[string]any{"kind": "task", "title": "T8"})
+	w.byBo(t, "", wstracker.TypeItemOpen, map[string]any{"item": "{t8}", "scope": "store"})
+	claimable := w.trackerQuery(t, map[string]any{"store": "team", "scope": "all", "q": "is:claimable"})
+	if !strings.Contains(claimable, trackerAlias(w.ids["t8"])+" [task todo] P") || !strings.Contains(claimable, "open to store, claimable by me") || strings.Contains(claimable, trackerAlias(w.ids["t7"])+" [") {
+		t.Fatalf("is:claimable lists T8 and not T7:\n%s", claimable)
+	}
+	step(trackerWriteStep{`<tk:store name="team"><tk:item.claim item="{t8}"/></tk:store>`, []trackerWantEvent{
+		{typ: wstracker.TypeItemClaim, payload: map[string]any{"item": "{t8}"}},
+	}})
+	if got := recStates(w.view(t).Assignments, w.ids["t8"], "ada"); !reflect.DeepEqual(got, []string{"live/todo"}) {
+		t.Fatalf("ada's claim of T8: %v", got)
+	}
+	// bo claims T7; ada files take requests for it: one withdrawn, one
+	// denied ($N names a request of the batch), one approved by its ID.
+	w.byBo(t, "", wstracker.TypeItemClaim, map[string]any{"item": "{t7}"})
+	step(trackerWriteStep{`<tk:store name="team">
+<tk:item.request item="{t7}" assignee="bo">let me</tk:item.request>
+<tk:item.unrequest item="{t7}" request="$1"/>
+<tk:item.request item="{t7}" assignee="bo"/>
+<tk:item.deny item="{t7}" request="$3">not this</tk:item.deny>
+<tk:item.request item="{t7}" assignee="bo">please</tk:item.request>
+</tk:store>`, []trackerWantEvent{
+		{typ: wstracker.TypeItemRequest, name: "rq1", payload: map[string]any{"item": "{t7}", "assignee": "bo", "note": "let me"}},
+		{typ: wstracker.TypeItemUnrequest, payload: map[string]any{"item": "{t7}", "request": "{rq1}"}},
+		{typ: wstracker.TypeItemRequest, name: "rq2", payload: map[string]any{"item": "{t7}", "assignee": "bo"}},
+		{typ: wstracker.TypeItemDeny, payload: map[string]any{"item": "{t7}", "request": "{rq2}", "note": "not this"}},
+		{typ: wstracker.TypeItemRequest, name: "rq3", payload: map[string]any{"item": "{t7}", "assignee": "bo", "note": "please"}},
+	}})
+	if got := w.trackerQuery(t, map[string]any{"store": "team", "item": w.ids["t7"]}); !strings.Contains(got, "take requests:\n- "+trackerAlias(w.ids["rq1"])+" ada asks for bo's assignment, withdrawn") ||
+		!strings.Contains(got, trackerAlias(w.ids["rq2"])+" ada asks for bo's assignment, denied, answer \"not this\"") ||
+		!strings.Contains(got, trackerAlias(w.ids["rq3"])+" ada asks for bo's assignment, pending, note \"please\"") {
+		t.Fatalf("the item view prints the take requests:\n%s", got)
+	}
+	if mine := w.trackerQuery(t, map[string]any{"store": "team"}); !strings.Contains(mine, "my take requests, waiting for an answer:\n- "+trackerAlias(w.ids["t7"])+" P") {
+		t.Fatalf("mine lists ada's pending request:\n%s", mine)
+	}
+	step(trackerWriteStep{`<tk:store name="team"><tk:item.approve item="{t7}" request="` + trackerAlias(w.ids["rq3"]) + `">ok</tk:item.approve></tk:store>`, []trackerWantEvent{
+		{typ: wstracker.TypeItemApprove, payload: map[string]any{"item": "{t7}", "request": "{rq3}", "note": "ok"}},
+	}})
+	v = w.view(t)
+	if ada, bo := recStates(v.Assignments, w.ids["t7"], "ada"), recStates(v.Assignments, w.ids["t7"], "bo"); !reflect.DeepEqual(ada, []string{"live/todo"}) || !reflect.DeepEqual(bo, []string{"handed/todo"}) {
+		t.Fatalf("T7 after the approval: ada %v, bo %v", ada, bo)
+	}
+
 	// Identity: admin role, a key added and revoked, a member removed.
 	spare := trackerSpareKey()
 	step(trackerWriteStep{`<tk:store name="team">
@@ -545,5 +613,28 @@ func TestTrackerUpdateWritesStructureAttributes(t *testing.T) {
 	}
 	if strings.Contains(text, `"bo:*"`) {
 		t.Fatalf("bo:* is a valid rule:\n%s", text)
+	}
+
+	// The take-work commands' grammar.
+	text = w.trackerRefused(t, "tracker.update", map[string]any{"commands": `<tk:store name="team">
+<tk:item.create kind="task" title="x"/>
+<tk:item.open item="$1" scope="org"/>
+<tk:item.open item="$1"/>
+<tk:item.request item="$1">no assignee</tk:item.request>
+<tk:item.approve item="$1" request="$1"/>
+<tk:item.deny item="$1"/>
+<tk:item.unrequest item="$1" request="nope"/>
+</tk:store>`})
+	for _, want := range []string{
+		`command 2 <tk:item.open> (line 3) scope: must be one of team, store; got "org"`,
+		"command 3 <tk:item.open> (line 4) scope: required",
+		"command 4 <tk:item.request> (line 5) assignee: required",
+		"command 5 <tk:item.approve> (line 6) request: $1 names command 1, which creates no request; $N must name a <tk:item.request>",
+		"command 6 <tk:item.deny> (line 7) request: required",
+		`command 7 <tk:item.unrequest> (line 8) request: must be a request ID such as maya.pc-5, or $N; got "nope"`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("refusal missing %q:\n%s", want, text)
+		}
 	}
 }

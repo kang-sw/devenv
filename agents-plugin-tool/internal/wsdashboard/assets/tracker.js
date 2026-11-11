@@ -396,6 +396,14 @@
   function labelChips(it, act) {
     return (it.labels || []).map(labelOf).filter(Boolean).map(function (l) { return labelChip(l, act); }).join('');
   }
+  // An opened item's "open" chip (items[].open): who opened it to which scope, and whether the
+  // viewer may claim it (the accent). A click shows the claimable items (the Items filter).
+  function openChip(it) {
+    var o = it.open;
+    if (!o) return '';
+    var tip = (o.scope === 'store' ? wsT("js.tk.open.tip.store", nm(o.by)) : wsT("js.tk.open.tip.team", nm(o.by))) + ' ' + (it.claimable ? wsT("js.tk.open.tip.mine") : wsT("js.tk.open.tip.notmine"));
+    return '<button type="button" class="chip opn' + (it.claimable ? ' mine' : '') + '"' + attr('act', 'claimf') + ' tabindex="-1"' + tipAttr(tip) + '>' + esc(wsT(it.claimable ? "js.tk.chip.claimable" : "js.tk.chip.open")) + '</button>';
+  }
   function kindChip(it) {
     return '<span class="chip kind">' + esc(kindName(it.kind)) + '</span>' + (it.pending.length ? '<span class="chip req">' + wsT("js.tk.chip.pendingassign") + '</span>' : '') +
       (it.hidden ? '<span class="chip hid">' + wsT("js.tk.chip.hidden") + '</span>' : '');
@@ -509,6 +517,15 @@
       case 'item.confirm': return wsT("js.tk.ev.confirm", esc(p.assignee), ref(p.item)) + tail(p.note);
       case 'item.reject': return wsT("js.tk.ev.reject", esc(p.assignee), ref(p.item)) + tail(p.note);
       case 'item.reopen': return wsT("js.tk.ev.reopen", esc(p.assignee || n.member), ref(p.item)) + tail(p.note);
+      case 'item.open': return wsT(p.scope === 'store' ? "js.tk.ev.open.store" : "js.tk.ev.open.team", ref(p.item));
+      case 'item.unopen': return wsT("js.tk.ev.unopen", ref(p.item));
+      case 'item.claim': return wsT("js.tk.ev.claim", ref(p.item));
+      case 'item.request': return wsT("js.tk.ev.request", esc(p.assignee), ref(p.item)) + tail(p.note);
+      case 'item.approve': case 'item.deny': {
+        var rq = (VS.requests || {})[p.request];
+        return wsT(n.type === 'item.approve' ? "js.tk.ev.approve" : "js.tk.ev.deny", esc(rq ? rq.by : alias(p.request)), ref(p.item)) + tail(p.note);
+      }
+      case 'item.unrequest': return wsT("js.tk.ev.unrequest", esc(alias(p.request)), ref(p.item));
       case 'comment.add': return wsT("js.tk.ev.comment", ref(p.item)) + (inThread ? '' : tail(String(p.body || '').slice(0, 90))) + extrasTxt(p);
       case 'comment.edit': return wsT("js.tk.ev.cedit", esc(alias(p.comment)), inThread ? '' : ref(n.thread || '')) + extrasTxt(p);
       case 'comment.hide': return wsT("js.tk.ev.chide", esc(alias(p.comment)));
@@ -701,15 +718,44 @@
       // a rule request is withdrawn as its one rule, not as a person (the store refuses that)
       if (r.state === 'pending' && (r.by === v || r.sender === v) && r.to !== v) out.push(['unassign', 'withdraw', wsT("js.tk.act.withdraw", nm(r.to)), r.ruleRequest ? { item: id, root: r.to, rule: r.rule } : { item: id, who: r.to }]);
     });
+    if (it.claimable) out.push(['claim', 'accept', wsT("js.tk.act.claim"), { item: id }, 1]);
+    reqsOf(it).forEach(function (q) {
+      if (canAnswer(it, q)) out.push(['approve', 'accept', wsT("js.tk.act.approve", nm(q.by)), { item: id, req: q.id }, 1], ['note', 'decline', wsT("js.tk.act.deny", nm(q.by)), { item: id, who: q.by, req: q.id, op: 'item.deny' }]);
+      if (q.state === 'pending' && q.by === v) out.push(['unrequest', 'withdraw', wsT("js.tk.act.unrequest", nm(q.assignee)), { item: id, req: q.id }]);
+    });
     return out;
   }
   // The viewer's own live assignment on the item, if any.
   function mineLive(it) { var v = VS.viewer.member; return it.assignments.map(A).filter(function (r) { return r.to === v && r.state === 'live'; })[0]; }
   // The creator edits and hides an item; an admin may too once the creator was removed.
-  function canEdit(it) {
-    var v = VS.viewer.member, gone = VS.viewer.admin && VS.members[it.author] && VS.members[it.author].removed;
-    return (it.author === v || !!gone) && !it.hidden;
+  function canEdit(it) { return isCreator(it) && !it.hidden; }
+  // The creator, or an admin once the creator was removed (check.go creatorGone).
+  function isCreator(it) {
+    var gone = VS.viewer.admin && VS.members[it.author] && VS.members[it.author].removed;
+    return it.author === VS.viewer.member || !!gone;
   }
+  // Taking work, as the store judges it (check.go): the creator opens a task nobody but the
+  // fallback holds (not a topic, not hidden, not already open, the fallback not done) to a scope,
+  // and withdraws an open opening; claiming is items[].claimable, computed per viewer. A take
+  // request names one live, explicit, not-done assignment of someone else, and is refused while
+  // the viewer holds a live or pending record on the item or already asked for that assignment;
+  // the named assignment's holder or the creator answers it, and its requester withdraws it.
+  function fallbackRec(it) { return it.assignments.map(A).filter(function (r) { return r.fallback && r.state === 'live'; })[0] || null; }
+  function holdsOn(it, who) { return it.assignments.map(A).some(function (r) { return r.to === who && (r.state === 'live' || r.state === 'pending') && !r.fallback && !r.ruleRequest; }); }
+  function canOpen(it) {
+    if (!isCreator(it) || it.hidden || it.kind === 'topic' || it.open) return false;
+    var fb = fallbackRec(it);
+    return !!fb && fb.status !== 'done' && !it.assignments.map(A).some(function (r) { return (r.state === 'live' || r.state === 'pending') && !r.fallback && !r.ruleRequest; });
+  }
+  function canUnopen(it) { return !!it.open && isCreator(it); }
+  function reqsOf(it) { var all = VS.requests || {}; return listOf(it.requests).map(function (id) { return all[id]; }).filter(Boolean); }
+  function reqTargets(it) {
+    var v = VS.viewer.member, asked = {};
+    if (it.hidden || !VS.viewer.isMember || holdsOn(it, v)) return [];
+    reqsOf(it).forEach(function (q) { if (q.by === v && q.state === 'pending') asked[q.assignment] = true; });
+    return it.assignments.map(A).filter(function (r) { return r.state === 'live' && !r.fallback && !r.ruleRequest && r.status !== 'done' && r.to !== v && !asked[r.id]; });
+  }
+  function canAnswer(it, q) { return q.state === 'pending' && (q.assignee === VS.viewer.member || isCreator(it)); }
   // A subtask's parent is assigned to or created by its author.
   function canSplit(it) { return (!!mineLive(it) || it.author === VS.viewer.member) && it.kind !== 'topic' && !it.hidden; }
   function canStatus(it) { var r = !it.hidden && it.kind !== 'topic' && mineLive(it); return !!r && r.status !== 'done'; }
@@ -856,7 +902,7 @@
     return '<div class="irow' + (ui.sel === o.rk ? ' sel' : '') + (ms ? ' msel' : '') + (o.closed ? ' closed' : '') + (o.ctx ? ' ctx' : '') + '" tabindex="0"' + (ms || canMove(it) ? ' draggable="true"' : '') +
       attr('item', it.id) + attr('rk', o.rk) + (r ? attr('rec', r.id) : '') +
       (o.depth ? ' style="--ind:' + o.depth + '"' : '') + '><div class="ir-main">' + mcbHtml(it, ms) + (o.tw != null ? o.tw : o.depth ? '<span class="ind">&#8627;</span>' : '') + stBtn(st, it, r) +
-      '<a class="title" href="#" tabindex="-1"' + attr('item', it.id) + '>' + esc(it.title) + '</a>' + (o.tsub || '') + labelChips(it, 'lsearch') + warnHtml(it) + dotHtml(it) + '<span class="grow"></span>' +
+      '<a class="title" href="#" tabindex="-1"' + attr('item', it.id) + '>' + esc(it.title) + '</a>' + (o.tsub || '') + openChip(it) + labelChips(it, 'lsearch') + warnHtml(it) + dotHtml(it) + '<span class="grow"></span>' +
       '<span class="ir-acts">' + moreBtn(it.id, '', true) + '</span>' + whoHtml(it) + priHtml(it) + dueHtml(it, st) + '</div>' +
       '<div class="ir-more">' + detailsHtml(it, r, o.more) + '</div></div>';
   }
@@ -870,7 +916,7 @@
   // UI state per viewer clone, like the handle badge's `seen`; no event is written
   // (in the product the daemon keeps it per clone on the local filesystem).
   var NK = { assigned: "js.tk.nk.assigned", pending: "js.tk.nk.pending", answer: "js.tk.nk.answer", reference: "js.tk.nk.reference", done: "js.tk.nk.done", blocked: "js.tk.nk.blocked",
-    confirm: "js.tk.nk.confirm", reply: "js.tk.nk.reply", due: "js.tk.nk.due", mention: "js.tk.nk.mention" };
+    confirm: "js.tk.nk.confirm", reply: "js.tk.nk.reply", due: "js.tk.nk.due", mention: "js.tk.nk.mention", request: "js.tk.nk.request" };
   function snippet(s) { s = String(s || ''); return '&ldquo;' + esc(s.length > 80 ? s.slice(0, 77) + '...' : s) + '&rdquo;'; }
   // Every entry also carries `ev`, the event it is about (none for a due date, which has
   // none), so a click can open the item window at what the entry refers to (focusTarget).
@@ -898,6 +944,11 @@
     });
     VS.my.received.pending.map(A).forEach(function (r) {
       add('p:' + r.id, 'pending', r.item, r.ts, r.handoffOf ? wsT("js.tk.feed.pending.handoff", esc(nm(r.sender))) : wsT("js.tk.feed.pending", esc(nm(r.sender))), r.via);
+    });
+    // take requests I may answer: the handle badge's "q:" keys
+    listOf((VS.my.requests || {}).incoming).forEach(function (id) {
+      var q = (VS.requests || {})[id];
+      if (q) add('q:' + id, 'request', q.item, q.ts, (q.assignee === v ? wsT("js.tk.feed.request", esc(nm(q.by))) : wsT("js.tk.feed.request.of", esc(nm(q.by)), esc(nm(q.assignee)))) + (q.note ? wsT("js.tk.ev.tail", snippet(q.note)) : ''), id);
     });
     // the model's derived notices; done / blocked: work I assigned, set by someone else
     VS.notices.forEach(function (x) {
@@ -1023,6 +1074,7 @@
     // the plain-substring fallback still honours one label:<name> token, the query a label chip sets
     var lq = /^label:"?([^"]*)"?$/.exec(SQ);
     if (lq) return (it.labels || []).some(function (x) { var l = labelOf(x); return !!l && l.name.toLowerCase() === lq[1]; });
+    if (SQ === 'is:claimable') return !!it.claimable; // and the is:claimable token, the query of the search grammar
     return [it.title, it.body, it.project, it.id, it.alias].concat((it.labels || []).map(labelName)).some(function (x) { return String(x == null ? '' : x).toLowerCase().indexOf(SQ) >= 0; });
   }
   // A label chip's click: the Items search becomes label:"<name>", set whole (no debounce).
@@ -1032,6 +1084,14 @@
     if (ui.win) closeItemWindow();
     panelState().q = 'label:"' + l.name + '"';
     searchState(ui.store).now = true;
+    if (ui.layout === 'narrow') tabState().narrow = 'items';
+    ui.sel = null;
+    render();
+  }
+  // An "open" chip's click: the Items panel shows every item, filtered to the claimable ones.
+  function claimableFilter() {
+    if (ui.win) closeItemWindow();
+    panelState().scope = 'all'; ui.kind = 'claimable';
     if (ui.layout === 'narrow') tabState().narrow = 'items';
     ui.sel = null;
     render();
@@ -1969,7 +2029,7 @@
     return card(wsT("js.tk.tab.org"), wsTn("js.tk.team.members", nMem), h, '', 'card-org');
   }
 
-  function kindFilter(it) { return ui.kind === 'request' ? !!it.pending.length : ui.kind === 'all' || it.kind === ui.kind; }
+  function kindFilter(it) { return ui.kind === 'request' ? !!it.pending.length : ui.kind === 'claimable' ? !!it.claimable : ui.kind === 'all' || it.kind === ui.kind; }
   function itemFilter(it) {
     if (!kindFilter(it)) return false;
     var s = it.status;
@@ -1988,7 +2048,7 @@
     }).join('') + '</select>';
   }
   function itemFilterBar(kindOnly) {
-    return wsT("js.tk.filter.kind") + ' ' + sel('f-kind', ui.kind, [['all', wsT("js.tk.filter.all")], ['task', kindName('task')], ['topic', kindName('topic')], ['request', wsT("js.tk.filter.request")]]) +
+    return wsT("js.tk.filter.kind") + ' ' + sel('f-kind', ui.kind, [['all', wsT("js.tk.filter.all")], ['task', kindName('task')], ['topic', kindName('topic')], ['request', wsT("js.tk.filter.request")], ['claimable', wsT("js.tk.filter.claimable")]]) +
       (kindOnly ? '' : ' ' + wsT("js.tk.filter.status") + ' ' + sel('f-status', ui.status, [['all', wsT("js.tk.filter.all")], ['open', wsT("js.tk.filter.open")], ['idea', stLabel('idea')], ['blocked', stLabel('blocked')], ['done', stLabel('done')], ['hidden', wsT("js.tk.chip.hidden")]]));
   }
   function cardActivity() {
@@ -2389,7 +2449,9 @@
     if (e.type === 'comment.add') el = by('data-ev', e.id);
     else if (e.type === 'comment.edit' || e.type === 'comment.hide') el = by('data-ev', p.comment);
     else if (STATUS_EV[e.type]) el = by('data-hmember', assigneeOf(e)) || holders;
-    else if (e.type === 'item.assign' || e.type === 'item.handoff') el = holders;
+    else if (e.type === 'item.assign' || e.type === 'item.handoff' || e.type === 'item.claim' || e.type === 'item.approve') el = holders;
+    else if (e.type === 'item.request' || e.type === 'item.deny' || e.type === 'item.unrequest') el = by('data-req', e.type === 'item.request' ? e.id : p.request);
+    else if (e.type === 'item.open' || e.type === 'item.unopen') el = root.querySelector('[data-focus="opening"]');
     else if (e.type === 'item.accept') el = by('data-hmember', e.member) || holders;
     else if (e.type === 'item.decline' || e.type === 'item.return' || e.type === 'item.unassign') {
       var gone = vals(VS.assignments).filter(function (r) { return r.ended && r.ended.id === e.id; })[0];
@@ -2491,7 +2553,8 @@
       rows.forEach(function (x) { n[x[key]] = (n[x[key]] || 0) + 1; if (n[x[key]] > 1 && (best === null || n[x[key]] > n[best])) best = x[key]; });
       return best;
     }
-    var cs = common('src'), cc = common('cm'), open = ui.aopen === it.id, hid = rows.length - A_SHOWN;
+    var cs = common('src'), cc = common('cm'), open = ui.aopen === it.id, hid = rows.length - A_SHOWN, reqT = {};
+    reqTargets(it).forEach(function (r) { reqT[r.id] = true; });
     var head = cs !== null || cc !== null ? '<div class="a-common muted">' + [cs, cc].filter(function (x) { return x !== null; }).join(' &middot; ') + '</div>' : '';
     var list = rows.map(function (x, k) {
       var r = x.r, b = '', rm = '';
@@ -2504,6 +2567,7 @@
         // a fallback holding (nobody else holds the task) is not unassigned or handed off: assign instead
         if (!r.fallback && (r.by === v || (departed && VS.viewer.admin))) rm = rmBadge(r.by === v ? wsT("js.tk.asg.unassign") : wsT("js.tk.asg.unassign.admin"), r);
         if (VS.viewer.admin && r.to !== v && r.status !== 'done' && !r.fallback && !it.hidden) b += btn('handoff', wsT("js.tk.asg.handoff.admin"), { item: r.item, who: r.to });
+        if (reqT[r.id]) b += btn('request', esc(wsT("js.tk.asg.request")), { item: r.item, who: r.to });
       } else if (r.state === 'pending' && r.to === v && (r.by === v || r.sender === v)) rm = rmBadge(wsT("js.tk.asg.withdraw"), r);
       var note = r.note || r.answerNote, diff = [];
       if (x.src !== cs) diff.push(cs !== null && x.src.indexOf(cs) === 0 ? x.src.slice(cs.length).trim() : x.src);
@@ -2518,6 +2582,31 @@
     return '<section class="iw-asg"><h3>' + wsT("js.tk.asg.title") + ' <span class="cnt">' + rows.length + '</span><span class="grow"></span>' + assignAddBtn(it, v) + '</h3>' + head +
       '<ul class="alist' + (open ? '' : ' folded') + '">' + list + '</ul>' +
       (hid > 0 ? '<div class="a-fold">' + btn('afold', open ? wsT("js.tk.asg.fewer") : wsT("js.tk.asg.more", hid), {}) + '</div>' : '') + '</section>';
+  }
+  // Taking work in the item window: the opening (scope, opener, and Claim / Withdraw when the
+  // viewer may) and the take requests on the item, pending first, each with the answers the
+  // viewer may give. Drawn only when the item is open or has requests.
+  var REQ_ST = { pending: "js.tk.req.st.pending", approved: "js.tk.req.st.approved", denied: "js.tk.req.st.denied", withdrawn: "js.tk.req.st.withdrawn", lapsed: "js.tk.req.st.lapsed" };
+  function takeHtml(v, it) {
+    var o = it.open, qs = reqsOf(it).slice().sort(function (a, b) { return (b.state === 'pending') - (a.state === 'pending') || (a.ts < b.ts ? 1 : a.ts > b.ts ? -1 : 0); });
+    if (!o && !qs.length) return '';
+    var h = '<section class="iw-asg iw-take"><h3>' + wsT("js.tk.take.title") + (qs.length ? ' <span class="cnt">' + qs.length + '</span>' : '') + '</h3><ul class="alist">';
+    if (o) {
+      var b = (it.claimable ? btn('claim', esc(wsT("js.tk.act.claim")), { item: it.id }, 'primary') : '') + (canUnopen(it) ? btn('unopen', esc(wsT("js.tk.act.unopen")), { item: it.id }) : '');
+      h += '<li class="arow"' + attr('focus', 'opening') + '><div class="ar-main">' + openChip(it) + '<span class="ar-name">' + (o.scope === 'store' ? wsT("js.tk.take.open.store", whoName(o.by)) : wsT("js.tk.take.open.team", whoName(o.by))) + '</span>' +
+        '<span class="ar-st muted">' + esc(fmtTs(o.ts)) + '</span></div>' + (!it.claimable && o.by !== v ? '<div class="ar-diff muted">' + wsT("js.tk.open.tip.notmine") + '</div>' : '') + (b ? '<div class="tb">' + b + '</div>' : '') + '</li>';
+    }
+    h += qs.map(function (q) {
+      var b = '';
+      if (canAnswer(it, q)) b += btn('approve', esc(wsT("js.tk.req.approve")), { item: it.id, req: q.id }, 'primary') + btn('note', esc(wsT("js.tk.req.deny")), { item: it.id, who: q.by, req: q.id, op: 'item.deny' });
+      if (q.state === 'pending' && q.by === v) b += btn('unrequest', esc(wsT("js.tk.req.withdraw")), { item: it.id, req: q.id });
+      return '<li class="arow' + (q.state === 'pending' ? '' : ' gone') + '"' + attr('req', q.id) + '><div class="ar-main">' + avHtml(q.by, q.state === 'pending') +
+        '<span class="ar-name">' + wsT("js.tk.req.line", whoName(q.by), whoName(q.assignee)) + '</span><span class="ar-st"><span class="chip' + (q.state === 'pending' ? ' req' : ' ended') + '">' + esc(wsT(REQ_ST[q.state] || "js.tk.req.st.pending")) + '</span>' +
+        (q.ended ? ' <span class="muted">' + esc(alias(q.ended.id)) + '</span>' : '') + '</span></div>' +
+        (q.note ? '<div class="ar-note">&ldquo;' + esc(q.note) + '&rdquo;</div>' : '') + (q.answerNote ? '<div class="ar-note muted">&ldquo;' + esc(q.answerNote) + '&rdquo; (' + esc(nm(q.ended ? q.ended.by : '')) + ')</div>' : '') +
+        (b ? '<div class="tb">' + b + '</div>' : '') + '</li>';
+    }).join('');
+    return h + '</ul></section>';
   }
   // Subtasks: the item's whole subtree, each row opening that item. Every node with children folds
   // with ▸/▾: the first level (the item's children) starts open, so their children show, and deeper
@@ -2563,7 +2652,7 @@
       (ed ? '<h2 id="iw-title" class="iw-edt"><input type="text" id="iw-etitle" data-keep autocomplete="off" value="' + esc(ed.title) + '" aria-label="' + wsT("js.tk.form.title") + '"></h2>' : '<h2 id="iw-title">' + esc(it.title) + '</h2>') +
       headActs(it) + moreBtn(it.id, 'iw-more', true) +
       '<button type="button" class="ia iw-x" data-act="win-close" aria-label="' + wsT("js.tk.win.close") + '"' + tipAttr(wsT("js.tk.win.close")) + '><svg class="i"><use href="#tki-x"/></svg></button></div>' +
-      '<div class="iw-chips">' + kindChip(it) + idCopyBtn(it) + (it.kind === 'topic' ? '' : stChip(it.status) + prChip(it) + dueChip(it) + rollupHtml(it)) + labelChips(it, 'lsearch') + warnHtml(it) + '</div></div>';
+      '<div class="iw-chips">' + kindChip(it) + idCopyBtn(it) + (it.kind === 'topic' ? '' : stChip(it.status) + prChip(it) + dueChip(it) + rollupHtml(it)) + openChip(it) + labelChips(it, 'lsearch') + warnHtml(it) + '</div></div>';
     h += '<div class="iw-grid"><div class="iw-main">';
     if (ed) h += '<div class="iw-body iw-edit">' + editorHtml('iw-ebody', { value: ed.body, rows: 5, label: wsT("js.tk.form.body"), pv: 'sh-body' }) +
       '<input type="text" id="iw-eproj" data-keep autocomplete="off" value="' + esc(ed.project) + '" placeholder="' + wsT("js.tk.form.project") + '" aria-label="' + wsT("js.tk.form.project") + '">' + labelPickHtml(ed) +
@@ -2593,7 +2682,7 @@
       // with caps.attach, attachment metadata typed in by hand (a stand-in oid is computed)
       (CAPS.attach ? '<div class="cextra"><input id="catt-name" type="text" placeholder="' + wsT("js.tk.composer.attname") + '"><input id="catt-size" type="number" min="0" placeholder="' + wsT("js.tk.composer.attsize") + '">' +
       btn('att-add', wsT("js.tk.composer.attach"), {}) + '<span class="muted">' + wsT("js.tk.composer.limit", fmtSize(VS.attachments.max_bytes)) + '</span></div>' : '') + '</div>';
-    h += '</div><div class="iw-side">' + propertyCard(it) + assigneesHtml(v, it, recs) + '</div></div>';
+    h += '</div><div class="iw-side">' + propertyCard(it) + assigneesHtml(v, it, recs) + takeHtml(v, it) + '</div></div>';
     return h;
   }
   // The header's common actions, left of the "⋯" menu: the viewer's status as a segmented control
@@ -3416,6 +3505,10 @@
       case 'confirm': put([['item.confirm', { item: item, assignee: who }]]); break;
       case 'unassign': put([['item.unassign', a.hasAttribute('data-rule') ? { item: item, root: a.getAttribute('data-root'), rule: a.getAttribute('data-rule') } : { item: item, assignee: who }]]); break;
       case 'accept': put([['item.accept', { item: item }]]); break;
+      case 'claim': put([['item.claim', { item: item }]]); break;
+      case 'unopen': put([['item.unopen', { item: item }]]); break;
+      case 'approve': put([['item.approve', { item: item, request: a.getAttribute('data-req') }]]); break;
+      case 'unrequest': put([['item.unrequest', { item: item, request: a.getAttribute('data-req') }]]); break;
       case 'ihide': put([['item.hide', { item: item }]]); break;
       case 'chide': put([['comment.hide', { comment: cid }]]); break;
       case 'comment': {
@@ -3444,7 +3537,8 @@
   //     where "add subtask" puts its input row), pt (the pointer, for a right-click) or rect, pick }
   // The item menu's steps: 'main' (status radios, note, and the actions the viewer may take),
   // 'pri' and 'due' (priority radios, a date), 'handoff' (a people list), 'note' (decline,
-  // reject, reopen, return with a note), 'assign' (the assign form: the anchored assign
+  // reject, reopen, return, deny a take request with a note), 'opening' (open for claiming: the
+  // scope), 'request' (a take request: whose assignment, with a note), 'assign' (the assign form: the anchored assign
   // popover). 'sync' is the Items card ribbon's status popover; 'store' is the store menu of a
   // store's title row (MN.store: its id; see storeMenuHtml). Arrow keys move, Enter or
   // Space applies, ArrowRight opens a step, ArrowLeft or Esc goes back, Esc on the first step
@@ -3466,10 +3560,10 @@
     if (!VS || !VS.items[id]) return;
     opts = opts || {};
     if (MN && MN.kind === 'item' && anchor && $('tkmenu').contains(anchor)) {
-      MN.from = MN.step; MN.step = opts.step || 'main'; MN.op = opts.op || null; MN.who = opts.who || null; MN.q = ''; MN.as = null; MN.mv = null;
+      MN.from = MN.step; MN.step = opts.step || 'main'; MN.op = opts.op || null; MN.who = opts.who || null; MN.req = opts.req || null; MN.q = ''; MN.as = null; MN.mv = null;
       drawMenu(); return;
     }
-    openMenu({ kind: 'item', item: id, step: opts.step || 'main', op: opts.op || null, who: opts.who || null, statusOnly: !!opts.statusOnly, from: null, q: '' }, anchor, pt);
+    openMenu({ kind: 'item', item: id, step: opts.step || 'main', op: opts.op || null, who: opts.who || null, req: opts.req || null, statusOnly: !!opts.statusOnly, from: null, q: '' }, anchor, pt);
   }
   function closeMenu(refocus) {
     if (!MN) return;
@@ -3485,7 +3579,7 @@
   }
   function menuBack() {
     if (!MN.from) { closeMenu(true); return; }
-    MN.step = MN.from; MN.from = null; MN.op = null; MN.who = null; MN.q = ''; MN.as = null; MN.mv = null;
+    MN.step = MN.from; MN.from = null; MN.op = null; MN.who = null; MN.req = null; MN.q = ''; MN.as = null; MN.mv = null;
     drawMenu();
   }
   function drawMenu() {
@@ -3546,9 +3640,22 @@
         '<div class="mrow"><input type="text" id="tkmq" data-mi data-autofocus autocomplete="off" spellcheck="false" placeholder="' + wsT("js.tk.menu.search") + '" aria-label="' + wsT("js.tk.menu.search") + '" value="' + esc(MN.q || '') + '"></div>' +
         '<div class="mlist" role="group">' + handoffList(it, hfrom) + '</div>' + noteField(wsT("js.tk.form.note.opt"));
     }
+    if (step === 'opening') {
+      return h + back + '<div class="mtitle">' + wsT("js.tk.dlg.open.title", esc(it.alias)) + '</div><p class="mintro">' + wsT("js.tk.dlg.open.intro") + '</p>' +
+        '<div role="group">' + mi('m-opening', esc(wsT("js.tk.open.scope.team")), { scope: 'team' }, { icon: 'team', val: esc(wsT("js.tk.open.scope.team.sub")) }) +
+        mi('m-opening', esc(wsT("js.tk.open.scope.store")), { scope: 'store' }, { icon: 'tasks', val: esc(wsT("js.tk.open.scope.store.sub")) }) + '</div>';
+    }
+    if (step === 'request') {
+      var tg = reqTargets(it).filter(function (r) { return !MN.who || r.to === MN.who; });
+      return h + back + '<div class="mtitle">' + wsT("js.tk.dlg.request.title", esc(it.alias)) + '</div><p class="mintro">' + wsT("js.tk.dlg.request.intro") + '</p>' +
+        '<div class="mlist" role="group">' + (tg.length ? tg.map(function (r) {
+          return '<button type="button" class="mi" role="menuitem" data-mi' + attr('act', 'm-request') + attr('to', r.to) + '>' + avHtml(r.to) + '<span class="ml">' + whoName(r.to) + '</span><span class="mv">' + esc(stLabel(r.status)) + '</span></button>';
+        }).join('') : '<p class="mempty">' + wsT("js.tk.menu.nobody") + '</p>') + '</div>' + noteField(wsT("js.tk.form.note.opt"));
+    }
     if (step === 'note') {
       var L = { 'item.reject': ["js.tk.dlg.reject.title", "js.tk.dlg.reject.intro"], 'item.reopen': ["js.tk.dlg.reopen.title", "js.tk.dlg.reopen.intro"],
-        'item.decline': ["js.tk.dlg.decline.title", "js.tk.dlg.decline.intro"], 'item.return': ["js.tk.dlg.return.title", "js.tk.dlg.return.intro"] }[MN.op];
+        'item.decline': ["js.tk.dlg.decline.title", "js.tk.dlg.decline.intro"], 'item.return': ["js.tk.dlg.return.title", "js.tk.dlg.return.intro"],
+        'item.deny': ["js.tk.dlg.deny.title", "js.tk.dlg.deny.intro"] }[MN.op];
       return h + back + '<div class="mtitle">' + wsT(L[0], esc(nm(MN.who || v)), esc(it.alias)) + '</div><p class="mintro">' + wsT(L[1]) + '</p>' +
         '<div class="mrow">' + noteField(wsT("js.tk.form.note")) + btn('m-note-send', wsT("js.tk.dlg.note.submit"), {}, 'primary') + '</div>';
     }
@@ -3582,6 +3689,9 @@
     // a topic's holder releases it: item.unassign of their own record
     if (mineR && !task && !it.hidden) more.push(mi('unassign', esc(wsT("js.tk.act.release")), { item: it.id, who: v }, { icon: 'withdraw' }));
     if (canAssign(it, v)) more.push(mi('assign', esc(wsT("js.tk.act.assign")), { item: it.id }, { icon: 'assign', sub: 1 }));
+    if (canOpen(it)) more.push(mi('opening', esc(wsT("js.tk.act.open")), { item: it.id }, { icon: 'team', sub: 1 }));
+    if (canUnopen(it)) more.push(mi('unopen', esc(wsT("js.tk.act.unopen")), { item: it.id }, { icon: 'withdraw' }));
+    if (reqTargets(it).length) more.push(mi('request', esc(wsT("js.tk.act.request")), { item: it.id }, { icon: 'handoff', sub: 1 }));
     var mvr = mvMenuRoots(it.id);
     if (mvr.some(function (r) { return canMove(VS.items[r]); })) more.push(mi('move', esc(mvr.length > 1 ? wsTn("js.tk.mv.menu.sel", mvr.length) : wsT("js.tk.mv.menu")), { item: it.id }, { icon: 'tree', sub: 1 }));
     if (more.length) parts.push(more.join(''));
@@ -3860,9 +3970,16 @@
       }
       case 'm-note-send': {
         var np = { item: id }, nt = menuNote();
-        if (MN.who && MN.op !== 'item.decline') np.assignee = MN.who;
+        if (MN.op === 'item.deny') np.request = MN.req;
+        else if (MN.who && MN.op !== 'item.decline') np.assignee = MN.who;
         if (nt) np.note = nt;
         return commit([[MN.op, np]]);
+      }
+      case 'm-opening': return commit([['item.open', { item: id, scope: a.getAttribute('data-scope') }]]);
+      case 'm-request': {
+        var rp = { item: id, assignee: a.getAttribute('data-to') }, rn = menuNote();
+        if (rn) rp.note = rn;
+        return commit([['item.request', rp]]);
       }
       case 'm-sub': {
         // under a list, tree, gantt, or subtask row; a kanban card or a calendar entry has no room
@@ -3902,6 +4019,7 @@
     if (k === 'Enter' && !e.isComposing) {
       if (t.id === 'tkmnote' && MN.step === 'main') { e.preventDefault(); applyStatus(MN.pick || (VS.items[MN.item] && (function (r) { return r ? (r.status === 'awaiting' ? 'done' : r.status) : ''; })(mineLive(VS.items[MN.item])))); return; }
       if (t.id === 'tkmnote' && MN.step === 'note') { e.preventDefault(); menuAct('m-note-send', t); return; }
+      if (t.id === 'tkmnote' && MN.step === 'request') { e.preventDefault(); var p0 = m.querySelector('[data-act="m-request"]'); if (p0) p0.click(); return; }
       if (t.id === 'tkmdue') { e.preventDefault(); menuAct('m-due-set', t); return; }
       if (t.id === 'tkmq') { e.preventDefault(); var p1 = m.querySelector('[data-act="m-handoff"]'); if (p1) p1.click(); return; }
       if (t.id === 'tkmvq') { e.preventDefault(); var p2 = m.querySelector('[data-act="m-move"]'); if (p2) p2.click(); return; }
@@ -4998,9 +5116,9 @@
   function placeShownMore() { Array.prototype.forEach.call(document.querySelectorAll('.tk .irow:hover, .tk .irow:focus-within, .tk .irow.sel'), placeMore); }
   var lastPointer = 'mouse', lastInput = 'pointer'; // the focused row is restored after a re-render only for keyboard use
 
-  var QUICK = { confirm: 1, unassign: 1, accept: 1, ihide: 1, chide: 1, comment: 1 };
+  var QUICK = { confirm: 1, unassign: 1, accept: 1, ihide: 1, chide: 1, comment: 1, claim: 1, unopen: 1, approve: 1, unrequest: 1 };
   // the item menu's steps an action button opens (in the menu, or a menu anchored to the button)
-  var STEPS = { note: 1, handoff: 1, assign: 1, pri: 1, due: 1, move: 1 };
+  var STEPS = { note: 1, handoff: 1, assign: 1, pri: 1, due: 1, move: 1, opening: 1, request: 1 };
 
   // ------------------------------------------------------------- display state
 
@@ -5159,7 +5277,7 @@
       var a = t.closest('[data-act]');
       if (a) {
         e.preventDefault(); e.stopPropagation();
-        var k = a.getAttribute('data-act'), d = { item: a.getAttribute('data-item'), who: a.getAttribute('data-who'), op: a.getAttribute('data-op'), cid: a.getAttribute('data-cid'), label: a.getAttribute('data-label') };
+        var k = a.getAttribute('data-act'), d = { item: a.getAttribute('data-item'), who: a.getAttribute('data-who'), op: a.getAttribute('data-op'), req: a.getAttribute('data-req'), cid: a.getAttribute('data-cid'), label: a.getAttribute('data-label') };
         if (k.indexOf('wk-') === 0) wkAct(k, a);
         else if (k === 'win-close') closeItemWindow();
         else if (k === 'page-back') leavePage();
@@ -5167,11 +5285,12 @@
         else if (k === 'menu') itemMenu(d.item, a);
         else if (k === 'mstatus') itemMenu(d.item, a, null, { statusOnly: true });
         else if (k.indexOf('m-') === 0) { if (MN) menuAct(k, a); }
-        else if (STEPS[k]) itemMenu(d.item, a, null, { step: k, op: d.op, who: d.who });
+        else if (STEPS[k]) itemMenu(d.item, a, null, { step: k, op: d.op, who: d.who, req: d.req });
         else if (k === 'edit') { closeMenu(false); startEdit(d.item); }
         else if (k === 'iedit-save') saveEdit();
         else if (k === 'ilabel' && ui.iedit) { var il = ui.iedit.labels, ix = il.indexOf(d.label); if (ix >= 0) il.splice(ix, 1); else il.push(d.label); render(); }
         else if (k === 'lsearch') labelSearch(d.label);
+        else if (k === 'claimf') claimableFilter();
         else if (k === 'slabel-rm') { var rl = labelOf(d.label); if (rl && window.confirm(wsT("js.tk.set.labels.confirm", rl.name))) commit([['roles.remove_label', { label: rl.id }]]); }
         else if (k === 'iedit-x') endEdit();
         else if (k === 'cedit') startCedit(d.cid);

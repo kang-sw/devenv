@@ -96,6 +96,21 @@ func formatTrackerScope(v *wstrackerhost.StoreView, q trackerQuery) string {
 	default:
 		assignments("my assignments", v.My.Assignments)
 		items("created by me, assigned to nobody", v.My.Created, false)
+		requests := func(title string, ids []string) {
+			var lines []string
+			for _, id := range ids {
+				if r, ok := v.Requests[id]; ok && keep(r.Item) {
+					lines = append(lines, "- "+formatTrackerRequestRow(v, r)+"\n")
+				}
+			}
+			if len(lines) > 0 {
+				section(title)
+				sb.WriteString(strings.Join(lines, ""))
+				rows += len(lines)
+			}
+		}
+		requests("take requests for me to answer (tk:item.approve or tk:item.deny)", v.My.Requests.Incoming)
+		requests("my take requests, waiting for an answer", v.My.Requests.Outgoing)
 	}
 	if rows == 0 && q.filtered() {
 		sb.WriteString("\nno rows pass the filters\n")
@@ -294,6 +309,13 @@ func formatTrackerItemRow(v *wstrackerhost.StoreView, it wstracker.ItemView) str
 	if it.Rollup.Total > 0 {
 		extra = append(extra, fmt.Sprintf("%d/%d subtasks done", it.Rollup.Counts["done"], it.Rollup.Total))
 	}
+	if it.Open != nil {
+		open := "open to " + it.Open.Scope
+		if it.Claimable {
+			open += ", claimable by me"
+		}
+		extra = append(extra, open)
+	}
 	if len(extra) > 0 {
 		s += " (" + strings.Join(extra, ", ") + ")"
 	}
@@ -349,6 +371,26 @@ func formatTrackerAssignment(v *wstrackerhost.StoreView, a wstracker.Assignment)
 		s += fmt.Sprintf(", answer %q", *a.AnswerNote)
 	}
 	return s
+}
+
+// formatTrackerRequest is one take request: its ID (what tk:item.approve,
+// tk:item.deny, and tk:item.unrequest take as request), requester, the
+// holder asked, state, and notes.
+func formatTrackerRequest(r wstracker.RequestView) string {
+	s := fmt.Sprintf("%s %s asks for %s's assignment, %s", trackerAlias(r.ID), r.By, r.Assignee, r.State)
+	if r.Note != nil && *r.Note != "" {
+		s += fmt.Sprintf(", note %q", *r.Note)
+	}
+	if r.AnswerNote != nil && *r.AnswerNote != "" {
+		s += fmt.Sprintf(", answer %q", *r.AnswerNote)
+	}
+	return s
+}
+
+// formatTrackerRequestRow is a take request with its item.
+func formatTrackerRequestRow(v *wstrackerhost.StoreView, r wstracker.RequestView) string {
+	it := v.Items[r.Item]
+	return fmt.Sprintf("%s P%d %s: %s", it.Alias, it.PriorityLevel, it.Title, formatTrackerRequest(r))
 }
 
 // trackerRuleLabel is a rule as tk:item.assign's rules attribute writes
@@ -444,6 +486,21 @@ func formatTrackerItem(v *wstrackerhost.StoreView, id string) string {
 		for _, aid := range it.Assignments {
 			if a, ok := v.Assignments[aid]; ok {
 				sb.WriteString("- " + formatTrackerAssignment(v, a) + "\n")
+			}
+		}
+	}
+	if o := it.Open; o != nil {
+		fmt.Fprintf(&sb, "open for claiming to %s by %s (%s)", o.Scope, o.By, trackerAlias(o.ID))
+		if it.Claimable {
+			sb.WriteString(", claimable by me")
+		}
+		sb.WriteString("\n")
+	}
+	if len(it.Requests) > 0 {
+		sb.WriteString("take requests:\n")
+		for _, rid := range it.Requests {
+			if r, ok := v.Requests[rid]; ok {
+				sb.WriteString("- " + formatTrackerRequest(r) + "\n")
 			}
 		}
 	}

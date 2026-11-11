@@ -568,7 +568,10 @@
     "backrefs": [
      "ada.pc#3",
      "maya.pc#6"
-    ]
+    ],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "ada.pc#2": {
     "id": "ada.pc#2",
@@ -618,7 +621,10 @@
     "refs": [],
     "backrefs": [
      "ada.pc#3"
-    ]
+    ],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "ada.pc#3": {
     "id": "ada.pc#3",
@@ -668,7 +674,10 @@
      "ada.pc#1",
      "ada.pc#2"
     ],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "ada.pc#5": {
     "id": "ada.pc#5",
@@ -716,7 +725,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "ada.pc#7": {
     "id": "ada.pc#7",
@@ -763,7 +775,10 @@
     "refs": [
      "ada.pc#1"
     ],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    }
   },
   "itemOrder": [
@@ -911,6 +926,7 @@
     "stale": false
    }
   },
+  "requests": {},
   "rules": {},
   "comments": {
    "maya.pc#1": {
@@ -1389,6 +1405,10 @@
      "last": null
     }
    ],
+   "requests": {
+    "incoming": [],
+    "outgoing": []
+   },
    "badge": []
   },
   "stats": {

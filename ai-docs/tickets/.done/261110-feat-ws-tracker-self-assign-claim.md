@@ -9,6 +9,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 1399950f881604c3
 sage-review-completeness-reviewed: 1399950f881604c3
+completed: 2026-11-11
 ---
 
 # Tracker: self-assign claim and take request
@@ -209,3 +210,48 @@ Verification:
 - Golden cases from the reference engine agree with the Go domain.
 - `tracker.query` claimable filter test; a browser check of open, claim,
   request, and approve.
+
+### Result (c00ce343c) - 2026-11-11
+
+- Events: `item.open {item, scope: team|store}`, `item.unopen {item}`,
+  `item.claim {item}`, `item.request {item, assignee, note?}`,
+  `item.approve` / `item.deny {item, request, note?}`,
+  `item.unrequest {item, request}`; the request id is the item.request
+  event id. `item.deny` is a new name so it stays distinct from the
+  pending-assignment `item.decline`.
+- Fold (Go and engine.js in lockstep): an opening is active while not
+  ended and the item is fallback-held; settle ends it whenever the fallback
+  is displaced, and an assign ends it, so it never revives. A claim adds a
+  live, unforced record `<claim>><claimer>` by the opener at todo. Approval
+  ends the named record as `handed` and adds `<approve>><requester>` with
+  its assigner, completion, status, note, and `handoffOf`, so a lead's
+  return restores the previous holder; none when the requester already
+  holds a record. A request lapses in endRec when its assignment ends and
+  is withdrawn when the requester is removed. Claim and approve set no
+  `leadAtAccept`, so no "accepted" notice fires.
+- Fold-time flag: `foldFlag` (state.go / engine.js) flags only in the final
+  fold, and check-time folds skip the event by the same test. It flags a
+  second claim, a claim after a concurrent unopen or assign, an open after
+  a concurrent assign or open, and an approval of a request already
+  answered or lapsed; reasons end "; written concurrently, the first in
+  fold order wins". A late deny, unrequest, or unopen is a silent no-op.
+  item.move's inline cycle flag now calls the same helper (merge 69d27e56b).
+- View: item `open {id, by, scope, ts}`, viewer-relative `claimable`, item
+  `requests`; top-level `requests`; `my.requests {incoming, outgoing}`;
+  badge `q:<request>` for incoming. Query token `is:claimable`.
+- Surfaces: tracker.update grammar (`request` takes stored, printed, or
+  `$N` ids, `$N` only to an in-batch `tk:item.request`), tracker.query
+  rendering of openings and requests (including two `mine` sections),
+  tracker.md in ws, wsflow, and Pi with manifest hashes; the dashboard item
+  menu, item window "Taking work" section, open/claimable chip, "claimable
+  by me" Items filter, `q:` feed entries, and event sentences, with 48
+  `js.tk.*` keys in all 11 tables and i18n-en.js regenerated.
+- Verification: 41 new reasons.json cases (every new rejection and fold
+  flag), claim-open and claim-request golden cases covering every
+  concurrent order the Verification names, claim_test.go,
+  TestQueryIsClaimable, tracker_commands_test.go walks; remote go test of
+  wstracker, mcp, wsrsrc, wsdashboard, wsi18n ok; headless Chromium over
+  the mockup exercised open, claim, request, approve, deny, withdraw with
+  no console errors.
+- The daemon event hook ticket has not landed; it adds take requests,
+  claims, and approvals to its "concerns me" set when it does.

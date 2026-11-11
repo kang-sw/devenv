@@ -719,7 +719,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "ada.pc#2": {
     "id": "ada.pc#2",
@@ -770,7 +773,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "ada.pc#3": {
     "id": "ada.pc#3",
@@ -815,7 +821,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "ada.pc#4": {
     "id": "ada.pc#4",
@@ -861,7 +870,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "ada.pc#5": {
     "id": "ada.pc#5",
@@ -910,7 +922,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "ada.pc#6": {
     "id": "ada.pc#6",
@@ -959,7 +974,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "ada.pc#7": {
     "id": "ada.pc#7",
@@ -1005,7 +1023,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "ada.pc#8": {
     "id": "ada.pc#8",
@@ -1053,7 +1074,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "ada.pc#9": {
     "id": "ada.pc#9",
@@ -1102,7 +1126,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    }
   },
   "itemOrder": [
@@ -1424,6 +1451,7 @@
     "stale": false
    }
   },
+  "requests": {},
   "rules": {},
   "comments": {},
   "events": [
@@ -2240,6 +2268,10 @@
      "last": null
     }
    ],
+   "requests": {
+    "incoming": [],
+    "outgoing": []
+   },
    "badge": [
     "w:ada.pc#12>maya:blocked:2026-11-01T09:20:00Z",
     "w:ada.pc#13>raj:done:2026-11-01T09:21:00Z"

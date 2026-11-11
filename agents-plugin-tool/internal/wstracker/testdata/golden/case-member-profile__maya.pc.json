@@ -498,6 +498,7 @@
   "items": {},
   "itemOrder": [],
   "assignments": {},
+  "requests": {},
   "rules": {},
   "comments": {},
   "events": [
@@ -737,6 +738,10 @@
      "last": null
     }
    ],
+   "requests": {
+    "incoming": [],
+    "outgoing": []
+   },
    "badge": []
   },
   "stats": {

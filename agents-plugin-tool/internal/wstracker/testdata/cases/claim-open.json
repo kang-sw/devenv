@@ -1,0 +1,360 @@
+{
+ "name": "claim-open",
+ "comment": "Opening and claiming (Decisions 1-3, 8, 9). A: maya and lena claim concurrently; maya folds first and lena's claim is flagged. B: sven claims a store-scoped opening before ada's concurrent withdrawal, which is a no-op. C: ada's withdrawal folds before raj's concurrent claim, which is flagged. D: ada's assign folds before omar's concurrent claim, which is flagged. E: omar's claim folds before ada's concurrent assign, which adds raj beside omar. F: opened and withdrawn. G: maya's team opening is claimable by lena, not by raj or ada, and raj's claim of it is rejected.",
+ "viewers": [
+  "ada.pc",
+  "maya.pc",
+  "raj.pc",
+  "lena.pc"
+ ],
+ "now": "2026-11-02T09:00:00Z",
+ "genesis": {
+  "admins": [
+   "ada",
+   "bo"
+  ],
+  "members": [
+   {
+    "id": "ada",
+    "name": "Ada",
+    "keys": [
+     "ada-k1"
+    ],
+    "leads": []
+   },
+   {
+    "id": "maya",
+    "name": "Maya",
+    "keys": [
+     "maya-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "raj",
+    "name": "Raj",
+    "keys": [
+     "raj-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "bo",
+    "name": "Bo",
+    "keys": [
+     "bo-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "lena",
+    "name": "Lena",
+    "keys": [
+     "lena-k1"
+    ],
+    "leads": [
+     "maya"
+    ]
+   },
+   {
+    "id": "omar",
+    "name": "Omar",
+    "keys": [
+     "omar-k1"
+    ],
+    "leads": [
+     "maya"
+    ]
+   },
+   {
+    "id": "sven",
+    "name": "Sven",
+    "keys": [
+     "sven-k1"
+    ],
+    "leads": [
+     "raj"
+    ]
+   }
+  ]
+ },
+ "commits": {
+  "ada.pc": [
+   {
+    "ts": "2026-11-01T09:00:00Z",
+    "seen": {},
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "A"
+      }
+     ],
+     [
+      "item.open",
+      {
+       "item": "ada.pc#1",
+       "scope": "team"
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "B"
+      }
+     ],
+     [
+      "item.open",
+      {
+       "item": "ada.pc#3",
+       "scope": "store"
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "C"
+      }
+     ],
+     [
+      "item.open",
+      {
+       "item": "ada.pc#5",
+       "scope": "team"
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "D"
+      }
+     ],
+     [
+      "item.open",
+      {
+       "item": "ada.pc#7",
+       "scope": "team"
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "E"
+      }
+     ],
+     [
+      "item.open",
+      {
+       "item": "ada.pc#9",
+       "scope": "team"
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "F"
+      }
+     ],
+     [
+      "item.open",
+      {
+       "item": "ada.pc#11",
+       "scope": "store"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:12:00Z",
+    "seen": {},
+    "events": [
+     [
+      "item.unopen",
+      {
+       "item": "ada.pc#5"
+      }
+     ],
+     [
+      "item.assign",
+      {
+       "item": "ada.pc#7",
+       "targets": [
+        "bo"
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:20:00Z",
+    "seen": {
+     "maya.pc": 2
+    },
+    "events": [
+     [
+      "item.unopen",
+      {
+       "item": "ada.pc#3"
+      }
+     ],
+     [
+      "item.assign",
+      {
+       "item": "ada.pc#9",
+       "targets": [
+        "raj"
+       ]
+      }
+     ],
+     [
+      "item.unopen",
+      {
+       "item": "ada.pc#11"
+      }
+     ]
+    ]
+   }
+  ],
+  "maya.pc": [
+   {
+    "ts": "2026-11-01T09:01:00Z",
+    "seen": {},
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "G"
+      }
+     ],
+     [
+      "item.open",
+      {
+       "item": "maya.pc#1",
+       "scope": "team"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:10:00Z",
+    "seen": {
+     "ada.pc": 12
+    },
+    "events": [
+     [
+      "item.claim",
+      {
+       "item": "ada.pc#1"
+      }
+     ],
+     [
+      "item.status",
+      {
+       "item": "ada.pc#1",
+       "status": "doing"
+      }
+     ]
+    ]
+   }
+  ],
+  "lena.pc": [
+   {
+    "ts": "2026-11-01T09:11:00Z",
+    "seen": {
+     "ada.pc": 12,
+     "maya.pc": 2
+    },
+    "events": [
+     [
+      "item.claim",
+      {
+       "item": "ada.pc#1"
+      }
+     ]
+    ]
+   }
+  ],
+  "sven.pc": [
+   {
+    "ts": "2026-11-01T09:15:00Z",
+    "seen": {
+     "ada.pc": 12
+    },
+    "events": [
+     [
+      "item.claim",
+      {
+       "item": "ada.pc#3"
+      }
+     ]
+    ]
+   }
+  ],
+  "raj.pc": [
+   {
+    "ts": "2026-11-01T09:14:00Z",
+    "seen": {
+     "ada.pc": 12,
+     "maya.pc": 2
+    },
+    "events": [
+     [
+      "item.claim",
+      {
+       "item": "ada.pc#5"
+      }
+     ],
+     [
+      "item.claim",
+      {
+       "item": "maya.pc#1"
+      }
+     ]
+    ]
+   }
+  ],
+  "omar.pc": [
+   {
+    "ts": "2026-11-01T09:12:00Z",
+    "seen": {
+     "ada.pc": 12
+    },
+    "events": [
+     [
+      "item.claim",
+      {
+       "item": "ada.pc#9"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:16:00Z",
+    "seen": {
+     "ada.pc": 12
+    },
+    "events": [
+     [
+      "item.claim",
+      {
+       "item": "ada.pc#7"
+      }
+     ]
+    ]
+   }
+  ]
+ }
+}
