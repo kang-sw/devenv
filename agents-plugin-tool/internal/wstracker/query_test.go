@@ -109,6 +109,7 @@ func TestQueryMalformedKnownKeyRefused(t *testing.T) {
 		"kind:epic":      "kind takes one of task, topic",
 		"assignee:":      "assignee takes a value",
 		"project:":       "project takes a value",
+		"is:open":        "is takes one of claimable",
 	} {
 		_, err := ParseQuery("ship " + tok)
 		var qe *QueryError
@@ -129,6 +130,30 @@ func TestQueryWantsHidden(t *testing.T) {
 		}
 		if q.WantsHidden() != want {
 			t.Errorf("WantsHidden(%q) = %v, want %v", s, !want, want)
+		}
+	}
+}
+
+// is:claimable follows ItemView.Claimable for the viewer: maya opens a task
+// to her team; omar, inside it, matches; raj, outside it, and maya, its
+// fallback holder, do not; nor does an item nobody opened.
+func TestQueryIsClaimable(t *testing.T) {
+	steps := []step{
+		task("maya.pc", "Free"),
+		{"maya.pc", "item.open", map[string]any{"item": "maya.pc#1", "scope": "team"}},
+		task("maya.pc", "Closed"),
+	}
+	q, err := ParseQuery("IS:Claimable")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for viewer, want := range map[string][]string{
+		"omar.pc": {"maya.pc#1"},
+		"raj.pc":  nil,
+		"maya.pc": nil,
+	} {
+		if got := topicView(t, viewer, steps).Search(q); !slices.Equal(got, want) && !(len(got) == 0 && len(want) == 0) {
+			t.Errorf("is:claimable for %s = %v, want %v", viewer, got, want)
 		}
 	}
 }
