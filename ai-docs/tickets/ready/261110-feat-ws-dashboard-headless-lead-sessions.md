@@ -12,8 +12,8 @@ related:
   261110-feat-ws-dashboard-workspaces: "its Phase 2 (conversation handoff) waits on this ticket's Phase 1; this ticket builds the new-session + buttons and popover ((189))"
 sage-review-design: completed
 sage-review-completeness: completed
-sage-review-design-reviewed: 6bc5b7e4ab4ac97d
-sage-review-completeness-reviewed: 6bc5b7e4ab4ac97d
+sage-review-design-reviewed: 5d3c13bb2ddd0a2c
+sage-review-completeness-reviewed: 5d3c13bb2ddd0a2c
 ---
 
 # Daemon-spawned headless lead sessions
@@ -53,8 +53,22 @@ and its hooks.
    `permission_suggestions`, `tool_use_id`) and the daemon answers it on
    stdin with a `control_response`: `allow` with `updatedInput`, or `deny`
    with `message`. A session is awaiting approval exactly while a
-   `can_use_tool` request is pending, since the stream carries no waiting
-   marker ((170)). Answers are accepted only from loopback (`localViewer`
+   `can_use_tool` request is pending; the `requires_action` session state
+   (Decision 7) cross-checks it. A request for a tool that needs the user's
+   answers rather than an approval (`AskUserQuestion`, `ExitPlanMode`, or
+   one flagged `requiresUserInteraction`) is denied with a message telling
+   the model to ask in chat and end its turn (user, (199) b), since a plain
+   allow without `updatedInput.answers` breaks the tool (Orca ADE,
+   `claude-structured-prompt-replies.ts`); the `ExitPlanMode` denial tells
+   the model to present the plan in chat, and the way out of `plan` mode is
+   the header menu's in-stream mode change (Decision 11). A
+   `requires_action` with no `can_use_tool` pending (an inherited prompt,
+   or another `control_request` subtype such as an MCP elicitation) never
+   stalls silently: the session shows a visible state and the event is
+   logged, and an unhandled `control_request` subtype gets an error reply;
+   the exact form, whether the spawn form offers `plan`, and where
+   `requiresUserInteraction` sits in the payload are chosen in planning.
+   Answers are accepted only from loopback (`localViewer`
    plus `sameOrigin`), the boundary the dashboard terminal landed with
    (`agents-plugin-tool/internal/wsdashboard/terminal_routes.go#L44-L49`,
    `261110-feat-ws-dashboard-terminal` Decision 5); a desktop-shell origin
@@ -64,7 +78,8 @@ and its hooks.
    Rejected: `--permission-prompts host` alone, which the 2026-11-11 probe
    showed auto-denies every prompt under stream-json
    (`261110-research-ws-dashboard-agent-host-foundations` Verified
-   Findings).
+   Findings); rendering the question tool's options on the card in this
+   ticket ((199) a), deferred.
 4. **Permission mode chosen at spawn, default `auto`; unanswered prompts
    wait (user, (14) a); the wait notifies inside the dashboard (user, (179)
    a).** A prompt waits for an answer with no timeout. The session shows an
@@ -78,13 +93,29 @@ and its hooks.
    mode and allowlist only ((14) c); an OS notification from the daemon
    ((179) b), a new external channel the browser notification makes
    unnecessary.
-5. **MCP recovery by restart and resume (technical, (22)).** `/mcp reconnect`
-   fails under `-p` (`agents-plugin/hooks/claude-mod/reconnect.ts`
-   `commandRefusal`). When a daemon session's MCP connection is broken, the
-   daemon restarts its process at an idle point and resumes it through the
-   backend session ID. The signal that marks a connection broken (for
-   example the init event's MCP server status, or tool errors naming the
-   server) is chosen in planning.
+5. **MCP recovery by in-stream reconnect, restart as the fallback
+   (technical, (22), (204); user, (202) a).** The `/mcp reconnect` slash
+   command fails under `-p` (`agents-plugin/hooks/claude-mod/reconnect.ts`
+   `commandRefusal`), but the stream-json control request
+   `{"subtype":"mcp_reconnect","serverName":...}` works: the lead probe
+   2026-11-11 on CLI 2.1.322 answered it for `plugin:ws:ws` with `success`,
+   and `mcp_status` then listed the server `connected`. When a daemon
+   session's MCP server is broken, the daemon sends `mcp_reconnect` for it.
+   The reconnect failed when the control response is an error or a
+   follow-up `mcp_status` still does not list the server `connected` (the
+   probe exercised only a healthy server). Only then does it restart the
+   process and resume it through the backend session ID, and it does so
+   automatically only at an idle point with an empty background-task list;
+   until then the session shows an MCP-broken state, the header chip menu
+   offers a manual restart, and the daemon checks again at each later idle
+   point, restarting once the list is empty.
+   The signal that marks a server broken (`mcp_status`, the init event's
+   server status, or tool errors naming the server) is chosen in planning.
+   The user reports that headless Claude also recovers a server by itself
+   at tool-call time; this is unverified.
+   Rejected: a process restart as the first step (the earlier form of this
+   decision); an automatic restart at any idle point regardless of
+   background work ((202) b); no automatic restart at all ((202) c).
 6. **Idle stop: on for Claude, off for Pi (technical, (17); user, (17) note;
    announced, (174), (175)).** A Claude session stops its process when no
    turn is running and the last `background_tasks_changed` list was empty,
@@ -98,20 +129,36 @@ and its hooks.
    the daemon now delivers it.
    Rejected: always-on processes with idle stop off by default (the first
    form of (17), superseded by the note).
-7. **Turns no send started are first-class (technical, (172), (173)).** Any
-   `result` closes the current turn, including a local command's
-   `num_turns: 0` result; held sends flush at any turn end; the session
-   shows as working while such a turn runs. The mapper drops the
+7. **Turns no send started are first-class (technical, (172), (173);
+   session state, user, (197) a).** The lead profile sets
+   `CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1`, and the CLI then emits
+   `{"type":"system","subtype":"session_state_changed","state":...}` with
+   `running`, `requires_action`, and `idle` (lead probe 2026-11-11, CLI
+   2.1.322: `running` first, `requires_action` before a pending
+   `can_use_tool`, `idle` after `result`; none without the variable). For
+   Claude, `running` opens a turn whether or not a send started it, and
+   `idle`, which the CLI schema calls the authoritative turn-over signal,
+   closes it and flushes held sends; a `running` after `requires_action`
+   within a turn opens no second turn. Without the events (an older CLI),
+   a turn opens on a send or on the first stream event after a `result`,
+   and `result` closes it. For Pi, turns follow its RPC events. Any `result` closes the current turn, including
+   a local command's `num_turns: 0` result when no session-state events
+   arrive; held sends flush at any turn end; the session shows as working while such a turn runs. The mapper drops the
    re-emitted last assistant message between `compact_boundary` and the
    compaction's `result`, which carries no `isReplay` flag.
-   Rejected: send-driven turn tracking, which misses the turns compaction,
+   Rejected: closing at `result` while the events are on, which lets the
+   previous turn's trailing `idle` close a send-started turn that the
+   flush opened; send-driven turn tracking, which misses the turns compaction,
    background completions, Monitor events, and Pi push batches start on
    their own; showing the replay, which duplicates the final reply.
 8. **Stop and close follow wsagent (announced, (176), (185)).** Stop ends
    the process and the next send resumes it; a stopped session stays in the
    rail's live list. Close ends the conversation for good, after a
    confirmation, and the session moves to ended sessions
-   (`261108-feat-ws-daemon-agent-runner` Decisions, (328) a).
+   (`261108-feat-ws-daemon-agent-runner` Decisions, (328) a). Once Phase 2
+   provides the background-task count, stop and close first confirm when
+   the session has running background tasks, naming their count (technical,
+   (203)).
 9. **Slash commands pass through as text (technical, (177)).** No shim;
    a `/compact` typed for a Pi session maps to the RPC `compact` command.
    Phase 1 has no command palette; `init.slash_commands` stays available
@@ -147,11 +194,30 @@ and its hooks.
     and in the session header's harness chip menu. It maps to Claude's
     `--effort <level>` and Pi's `--thinking <level>` (off, minimal, low,
     medium, high, xhigh, max), each list taken from its own harness;
-    "default" passes no flag. A model or effort change in the header menu
-    stops the process and the next send resumes it with `--resume` and the
-    new flag (85b9da5f).
-    Rejected: a live change, since both CLIs take effort only as a launch
-    flag and the stream has no set_effort.
+    "default" passes no flag. A model, effort, or permission-mode change in
+    the header menu applies in-stream from the next turn (user, (198) a):
+    Claude takes `set_model`, `apply_flag_settings` with
+    `{"settings":{"effortLevel":...}}`, and `set_permission_mode` with
+    `{"mode":...}`, after which a `status` frame reports the new
+    `permissionMode`; Pi takes `set_model` and `set_thinking_level`
+    (wsagent `SetModel` and `SetEffort`). A return to "default" first tries
+    the in-stream clear (`apply_flag_settings` with a null `effortLevel`,
+    which the CLI accepts, and the matching model reset). The runner records
+    the session's current model, effort, and mode, and every resume (stop,
+    idle stop, MCP fallback restart) relaunches with those, not the spawn
+    values. Restarting the process is the last resort: only a change with
+    no in-stream form (a default that will not clear in-stream, a Pi model
+    pattern that is not an exact id) stops the process and resumes it with
+    `--resume` and the new flag, because a
+    restart kills the session's linked background work, its shells and
+    child sessions (user, (198) note). The lead probe 2026-11-11 on CLI
+    2.1.322 answered `apply_flag_settings` and `set_permission_mode` with
+    `success`, and `get_settings` then reported the applied effort. Moving
+    Claude `SetEffort` off `ErrUnsupported` also changes the tracker support
+    agent, which shares that backend, and its restart-expecting tests.
+    Rejected: stop and resume for every effort or mode change ((198) b,
+    85b9da5f, whose premise that Claude has no in-stream effort control
+    held only for the `set_effort` subtype).
 12. **Hosted-session UI (technical, (185)).** A hosted marker icon follows
     the harness badge; session states reuse the badge ring, with an
     approval-colour ring and an "approve" chip while a prompt waits. The
@@ -189,14 +255,34 @@ and its hooks.
     the mod and the Pi extension, which read only the env vars today
     (`agents-plugin/hooks/claude-mod/hosted.ts`), need a way to reach the
     row; and the row's PID is rewritten on every respawn (stop and resume,
-    a model or effort change, Phase 2's MCP restart and idle resume).
+    a change with no in-stream form (Decision 11), Phase 2's MCP restart
+    and idle resume).
     Rejected: deferring it as a known limitation ((190) b); scrubbing at
     spawn alone, since the daemon cannot reach the environment the
     harness's own Bash tool passes on.
+16. **Typed error states (user, (200) b; technical, completeness review
+    2026-11-11).** Phase 2 maps five stream errors to typed states: login
+    needed (`assistant.error` `authentication_failed`), model unavailable
+    (`model_not_found`), usage limit with its reset time (the carrying event
+    and field are identified in planning from Orca ADE
+    `src/main/claude/claude-usage-limits.ts`), API retrying attempt N of M
+    (`system/api_retry`), and a failed compaction's `compact_error` text.
+    Each shows as a conversation row with its text (reset time, attempt N
+    of M); login needed, model unavailable, and usage limit also put the
+    badge ring in an error state until the next turn succeeds. Mapper
+    fixtures are built from the shapes Orca ADE parses and the SDK types,
+    since the 2026-11-11 probes captured none of these events; a live
+    capture replaces a fixture when one occurs.
+    Rejected: building them in Phase 1 ((200) a); leaving them out ((200) c).
 
 ## Prior Art
 
 - `wsagent` runner and backends (Background).
+- Orca ADE (github.com/stablyai/orca, MIT, commit bb1d4789c), the source
+  of the question-tool denial (Decision 3) and the typed error states
+  (Decision 16): `src/main/claude/claude-structured-prompt-replies.ts`,
+  `claude-assistant-failures.ts`, `claude-usage-limits.ts`,
+  `claude-api-retry-row.ts`, `claude-command-turn.ts`.
 - The trusted-origin gate pattern: `localViewer` (`internal/wsdashboard/access.go`)
   plus `sameOrigin` (`inbox_routes.go`), as the system-open route
   (`sysopen_route.go`) applies them.
@@ -233,6 +319,10 @@ and its hooks.
   stream-json output ((41) ok).
 - Daemon sessions and CLI sessions coexist in the session registry and the
   messenger.
+- Restarting the harness process is a last resort in every case, because
+  it kills the session's linked background work, its shells and child
+  sessions (user, (198) note): an in-stream path is used wherever one
+  exists (Decisions 5, 11).
 - Quiet dashboard tone: `--wb-*` tokens, card and shadow, no flashy
   animation.
 - Manuals: `ai-docs/manuals/shipped-surface-boundary.md`,
@@ -243,12 +333,12 @@ and its hooks.
 ## Prior Decisions
 
 - 261110-epic-ws-dashboard-agent-host (2026-11-10, Cross-Child Decisions): "One trusted-origin boundary (technical, (05); announced, (13)). Tool approval and the terminal are both execution authority and share one boundary: loopback or a desktop-shell origin by default, never the LAN token alone." — bearing: supports
-- 261110-research-ws-dashboard-agent-host-foundations (2026-11-10, Confirmed Decisions): "Daemon leads are headless ((12) b); the daemon injects input ((16)), approves through the SDK host from a trusted origin only ((05), (13)), defaults to auto with prompts waiting unanswered ((14) a), recovers MCP by restart and resume" — bearing: supports
+- 261110-research-ws-dashboard-agent-host-foundations (2026-11-10, Confirmed Decisions): "Daemon leads are headless ((12) b); the daemon injects input ((16)), approves through the SDK host from a trusted origin only ((05), (13)), defaults to auto with prompts waiting unanswered ((14) a), recovers MCP by restart and resume" — bearing: supports (MCP recovery narrowed to the fallback by Decision 5)
 - 261110-feat-ws-hosted-session-mode-flag (2026-11-11, Result d09b414e0): "A harness process started from a hosted session (e.g. a Bash `claude -p`) inherits both variables and would claim the hosted key ... The daemon spawn or the hosts may want to scrub them for children." — bearing: constrains
 - ff312f48 (2026-11-11, commit): "MintLead canonicalizes with wsgit.ExecRunner{} through canonicalSetupRoot so a later in-session relogin's root comparison matches. It is not wired into any daemon spawn; that belongs to the consumer ticket." — bearing: supports
 - 261110-feat-ws-dashboard-terminal (2026-11-10, Decisions): "Gate: localViewer plus sameOrigin (technical, (101) ok). ... Recognizing a desktop-shell origin waits until a shell exists ((19))." — bearing: constrains
 - 261108-feat-ws-daemon-agent-runner (2026-11-08, Decisions): "stop and close are separate (board (328) a): stop ends the process only, and the conversation resumes lazily on the next send like an idle exit; close ends the conversation for good" — bearing: constrains
-- 85b9da5f (2026-11-08, commit): "Effort has no in-stream control (set_effort unsupported), so an effort change stops the process and the next send restarts it with --resume. REST writes require application/json and either no Origin or the dashboard's own origin." — bearing: constrains
+- 85b9da5f (2026-11-08, commit): "Effort has no in-stream control (set_effort unsupported), so an effort change stops the process and the next send restarts it with --resume. REST writes require application/json and either no Origin or the dashboard's own origin." — bearing: superseded for effort by Decision 11 (REST write rule still constrains)
 - 261110-bug-ws-dashboard-daemon-lock-scope (2026-11-10, Decisions): "Agent writes wake the page without waiting on the index re-read. agentChanged marks the conversation dirty and returns; the coalescing re-read runs off the caller, so neither the conversation loop nor r.mu waits on rereadMu" — bearing: constrains
 
 ## Route Facts
@@ -262,8 +352,8 @@ and its hooks.
 | scope.test_surface | existing | wsagent/runner_test.go claude_test.go pi_test.go stream_test.go profile_test.go, wsdashboard/holders_test.go terminal_routes_test.go |
 | complexity.reuse_points | confirmed | wsagent Runner Create Send Interrupt and armIdle at runner.go#L199 #L315 #L339 #L920, localViewer access.go#L144, sameOrigin inbox_routes.go#L122, AgentKeyStore.MintLead agent_keys.go#L36, supDrawPop and GET /support/choices |
 | complexity.side_effect_risk | high | spawns long-lived lead processes with the user's settings, plugins, hooks, and auto permission mode under holders that outlive the daemon, and writes daemon-owned Registration rows |
-| risk.correctness | high | turn tracking for unsolicited results, held sends, approval waits, MCP restart-and-resume, and idle stop interact across daemon restarts |
-| risk.fit | moderate | Phase 1 is settled by Decisions 1-15; Phase 2 idle stop follows Decision 6 from the 2026-11-11 probe (261110-research-ws-dashboard-background-task-visibility is informational) and Pi RPC compaction is unverified |
+| risk.correctness | high | turn tracking for unsolicited results, held sends, approval waits, MCP reconnect with restart fallback, session-state events, and idle stop interact across daemon restarts |
+| risk.fit | moderate | Phase 1 is settled by Decisions 1-15 and Phase 2's errors by Decision 16; Phase 2 idle stop follows Decision 6 from the 2026-11-11 probe (261110-research-ws-dashboard-background-task-visibility is informational) and Pi RPC compaction is unverified |
 | risk.test | high | real claude -p and Pi RPC behavior, permission prompts, and background-task visibility need live-harness checks beyond unit fakes |
 | risk.security_or_contract | high | browser approval of tool execution reopens 261106 Non-Scope 241 b and must hold the loopback-plus-sameOrigin boundary against LAN viewers |
 
@@ -297,13 +387,25 @@ Scope:
 - The approval wire: `can_use_tool` to the page, the approval card, the
   loopback-only answer route, the awaiting-approval state and browser
   notification (Decisions 3, 4, 12).
-- Stop and close, and the header chip menu (Decisions 8, 11, 12), all
-  behind the loopback gate (Decision 14).
+- Stop and close, and the header chip menu with in-stream model, effort,
+  and permission-mode changes (Decisions 8, 11, 12), all behind the
+  loopback gate (Decision 14).
+- The session-state variable and its turn handling (Decision 7), and the
+  question-tool denial (Decision 3).
 
 Verification:
 - Mapper tests on fixtures cut from the 2026-11-11 probe logs:
   `can_use_tool` and its `control_response`, an unsolicited `result`, a
-  `num_turns: 0` result, and the compaction replay.
+  `num_turns: 0` result, and the compaction replay; on fixtures from the
+  CLI 2.1.322 probe, `session_state_changed` `running` opening a turn no
+  send started, `idle` closing a turn, and `requires_action` beside a
+  pending `can_use_tool`; `result`, a held-send flush, then the trailing
+  `idle` (the flushed send's turn stays open); `requires_action`,
+  `can_use_tool`, deny, `running` (one turn); a `requires_action` with no
+  pending `can_use_tool` showing its visible state; a question-tool
+  `can_use_tool` answered with a deny and its message.
+- A profile test that the lead profile sets
+  `CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1`.
 - Route tests: spawn, a permission-mode, model, or effort change, stop,
   close, and an approval answer from a LAN-token request are each refused;
   the same requests from loopback reach the process.
@@ -317,22 +419,37 @@ Verification:
   daemon restart mid-session reattaches to the holder with no duplicate
   conversation entries and no second process, and a `can_use_tool` pending
   across the restart still shows its awaiting-approval state and card and
-  can be answered. A Pi spawn sends and receives.
+  can be answered. A model, effort, and permission-mode change from the
+  header menu applies without restarting the process (the harness PID
+  stays the same); after an in-stream effort change, a stop and a send
+  resume a process that runs with the changed effort. A Pi spawn sends and
+  receives.
 - A browser check of the popover, the approval card, and the LAN viewer at
   the rail's widths, and of the awaiting-approval browser notification,
   including the LAN tab's "answer on the dashboard PC" line.
 
 ### Phase 2: recovery, idle stop, and telemetry
 
-Scope: MCP restart and resume (Decision 5), idle stop (Decision 6), and the
-agents panel telemetry and background-task count from the stream
-(Constraints).
+Scope: MCP recovery by in-stream reconnect with the restart fallback, the
+MCP-broken state, and the header menu's manual restart behind the
+loopback gate (Decisions 5, 14); idle stop (Decision 6); the agents panel
+telemetry and background-task count from the stream (Constraints); the
+stop and close confirmation naming the running background-task count
+(Decision 8); and the typed error states (Decision 16).
 
-Verification: mapper tests on `background_tasks_changed` fixtures and on
-the telemetry fields (subagent model and effort, context tokens, output
-rate) mapped from the stream; a test that idle stop waits while a
-background task runs and stays off for a Pi session; a live checklist that a
-broken MCP connection restarts and resumes at an idle point, and that an
+Verification: mapper tests on `background_tasks_changed` fixtures, on
+each typed error state (Decision 16's fixtures), and on the telemetry
+fields (subagent model and effort, context tokens, output rate) mapped
+from the stream; a test that idle stop waits while a background task runs
+and stays off for a Pi session; MCP recovery tests that a successful
+`mcp_reconnect` restarts nothing, that a failed one (an error response, or
+`mcp_status` still not `connected`) restarts at an idle point with an
+empty background-task list, and that while a background task runs the
+session shows the MCP-broken state, offers the manual restart (refused
+from a LAN-token request), and restarts at the first idle point after the
+list empties; a route or UI test that stop and close with running
+background tasks confirm first and show the count; a browser check of the
+typed error rows and badge ring; a live checklist that a broken MCP
+server reconnects in-stream with the same harness PID, and that an
 idle-stopped Claude session resumes on mail, each resumed process still
 running hosted.
-
