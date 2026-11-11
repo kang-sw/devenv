@@ -18,6 +18,7 @@ import (
 
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wsgit"
+	"github.com/kang-sw/devenv/internal/wslive"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
 )
 
@@ -350,9 +351,31 @@ func (s *Server) dashboardNudge(sessionKey string) {
 	}
 }
 
+// dashboardMailNudge is the nudge after a mailbox send on the direct path:
+// a mailbox wait the daemon hosts learns of mail written outside the daemon
+// only from a nudge, so it is sent whether or not the sender is registered,
+// in the same body as a registered session's (its reply-id, its root as
+// the project). Without a daemon endpoint it is dropped like any other.
+func (s *Server) dashboardMailNudge(sessionKey, root string) {
+	d := &s.dashboard
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	sessionKey = strings.TrimSpace(sessionKey)
+	if sess, ok := d.sessions[sessionKey]; ok && sess.reg.ReplyID != "" {
+		s.queueDashboardNudge(sess)
+		return
+	}
+	s.queueNudgeBody(wsdashboard.NudgeBody{ReplyID: wsmailbox.ReplyID(sessionKey), Project: root})
+}
+
 // queueDashboardNudge enqueues a nudge without blocking; the caller holds
 // d.mu.
 func (s *Server) queueDashboardNudge(sess *dashboardSession) {
+	s.queueNudgeBody(wsdashboard.NudgeBody{ReplyID: sess.replyID, Project: sess.project})
+}
+
+// queueNudgeBody enqueues body without blocking; the caller holds d.mu.
+func (s *Server) queueNudgeBody(body wsdashboard.NudgeBody) {
 	d := &s.dashboard
 	if d.nudgesClosed {
 		return
@@ -366,7 +389,7 @@ func (s *Server) queueDashboardNudge(sess *dashboardSession) {
 		}()
 	})
 	select {
-	case d.nudges <- wsdashboard.NudgeBody{ReplyID: sess.replyID, Project: sess.project}:
+	case d.nudges <- body:
 	default:
 	}
 }
@@ -557,6 +580,18 @@ func (src *DashboardSessionSource) ForgetSession(replyID string) {
 	if dir, err := src.resolveStateDir(); err == nil {
 		src.snapshots.Forget(dir, replyID)
 	}
+}
+
+// SetLiveSnapshot implements wsdashboard.LiveSnapshotHolder: the change
+// detector's snapshot reads (HashLiveStores) follow a hosted session's
+// in-memory copy.
+func (src *DashboardSessionSource) SetLiveSnapshot(stateDir, replyID string, snap wslive.Snapshot) {
+	src.snapshots.SetLive(stateDir, replyID, snap)
+}
+
+// ClearLiveSnapshot implements wsdashboard.LiveSnapshotHolder.
+func (src *DashboardSessionSource) ClearLiveSnapshot(stateDir, replyID string) {
+	src.snapshots.ClearLive(stateDir, replyID)
 }
 
 // NewDashboardSessionSource returns a source over this machine's key store.

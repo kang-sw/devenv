@@ -22,6 +22,8 @@ import (
 	"github.com/gofrs/flock"
 )
 
+var _ LiveHost = (*Daemon)(nil)
+
 // ErrLocked reports that another daemon holds the single-instance lock.
 var ErrLocked = errors.New("another dashboard daemon holds the lock")
 
@@ -96,6 +98,11 @@ type DaemonOptions struct {
 	// which belongs in the config home; empty keeps no stored workspace and
 	// serves no workspace route (workspace_routes.go).
 	WorkspacesFile string
+	// MailWake wakes the mailbox waits this process hosts: Wake after a
+	// board-answer inbox write the routes made, Nudge on every /nudge
+	// before its session is checked, since the nudge's sender may have
+	// written mail any waiter watches. Nil wakes none.
+	MailWake MailWaker
 
 	// bindHost overrides the address the daemon binds, so a test runs LAN
 	// mode on loopback; empty derives it from LAN.
@@ -123,6 +130,14 @@ type DaemonOptions struct {
 	keepAlive time.Duration
 }
 
+// MailWaker receives the daemon's mailbox wake signals (DaemonOptions.MailWake).
+type MailWaker interface {
+	// Wake signals a write made in this process.
+	Wake()
+	// Nudge signals that another process reported a store change.
+	Nudge()
+}
+
 // nudgeBodyLimit bounds a /nudge request body.
 const nudgeBodyLimit = 4 << 10
 
@@ -148,6 +163,8 @@ type Daemon struct {
 	source   SessionSource
 	agents   AgentHost
 	broker   *broker
+	// mailWake is DaemonOptions.MailWake, nil without one.
+	mailWake MailWaker
 	// stats counts the live-update work (stream_stats.go).
 	stats *streamStats
 	// cache holds the renders open streams share (stream_cache.go);
@@ -167,6 +184,8 @@ type Daemon struct {
 	// snapshots caches the parsed live snapshots the pages, their refresh
 	// stamps, and agent conversation re-reads read.
 	snapshots *SnapshotCache
+	// live is the hosted sessions' snapshot slots (live_hosted.go).
+	live hostedSlots
 	// inboxMu serializes the daemon's own inbox writes (sends and cancels).
 	inboxMu sync.Mutex
 	// lan is LAN mode; tokenMu serializes reading and minting the LAN token.
@@ -312,6 +331,7 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 		listener:        listener,
 		log:             logw,
 		agents:          opts.Agents,
+		mailWake:        opts.MailWake,
 		tracker:         opts.Tracker,
 		broker:          newBroker(stats),
 		stats:           stats,
@@ -491,6 +511,7 @@ func (d *Daemon) sessionChanged(replyID string) {
 			d.entries.drop(replyID)
 			d.entryFiles.drop(replyID)
 			d.railMsgs.drop(replyID)
+			d.live.drop(replyID)
 			d.snapshots.Forget(d.dir, replyID)
 			if f, ok := d.source.(SessionForgetter); ok {
 				f.ForgetSession(replyID)
@@ -722,6 +743,11 @@ func (d *Daemon) handleNudge(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(io.LimitReader(r.Body, nudgeBodyLimit)).Decode(&body); err != nil {
 		http.Error(w, "malformed nudge", http.StatusBadRequest)
 		return
+	}
+	// Before the registration check: a mail sender need not be a
+	// registered session, and each woken wait rechecks its own target.
+	if d.mailWake != nil {
+		d.mailWake.Nudge()
 	}
 	if d.index == nil || !d.index.Nudge(body.ReplyID, body.Project) {
 		http.Error(w, "unknown session", http.StatusNotFound)

@@ -198,7 +198,11 @@ func (d sessionDirs) legacyPath(key string) string { return filepath.Join(d.lega
 // errSessionNotFound; an unparsable part file is its own error. raw, when not
 // nil, receives every file read, for a change fingerprint.
 func (s *sessionStore) loadRecord(d sessionDirs, key string, parts recordPart, raw io.Writer) (record sessionRecord, legacy bool, err error) {
-	return loadRecordWith(d, key, parts, raw, readRecordFile)
+	read := s.readFile
+	if read == nil {
+		read = readRecordFile
+	}
+	return loadRecordWith(d, key, parts, raw, read)
 }
 
 // recordFileReader reads one record file and decodes it into a value

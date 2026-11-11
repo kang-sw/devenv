@@ -114,6 +114,20 @@ func (s agentSessions) ForgetSession(replyID string) {
 	}
 }
 
+// SetLiveSnapshot forwards to the configured source (LiveSnapshotHolder).
+func (s agentSessions) SetLiveSnapshot(stateDir, replyID string, snap wslive.Snapshot) {
+	if h, ok := s.inner.(LiveSnapshotHolder); ok {
+		h.SetLiveSnapshot(stateDir, replyID, snap)
+	}
+}
+
+// ClearLiveSnapshot forwards to the configured source (LiveSnapshotHolder).
+func (s agentSessions) ClearLiveSnapshot(stateDir, replyID string) {
+	if h, ok := s.inner.(LiveSnapshotHolder); ok {
+		h.ClearLiveSnapshot(stateDir, replyID)
+	}
+}
+
 // ReadClosedTopics forwards to the configured source; an agent conversation
 // has no board.
 func (s agentSessions) ReadClosedTopics(reg Registration, lang string, from, n int) (template.HTML, bool) {

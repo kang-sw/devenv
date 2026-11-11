@@ -12,8 +12,13 @@ import (
 // pprofPrefix+"streams" (pprofHandler).
 type streamStats struct {
 	// Wakes by source: the index's change hook, the agent runner, the git
-	// watcher, an inbox write, and the tracker.
-	WakeSession, WakeAgent, WakeGit, WakeInbox, WakeTracker atomic.Int64
+	// watcher, an inbox write, the tracker, and a hosted session's live
+	// hand-off (live_hosted.go).
+	WakeSession, WakeAgent, WakeGit, WakeInbox, WakeTracker, WakeLive atomic.Int64
+	// LiveRenders counts the session renders a live-only wake ran, which
+	// reused the page's previous store reads (SessionRenders counts them
+	// too).
+	LiveRenders atomic.Int64
 	// Signals counts the wake signals delivered to streams.
 	Signals atomic.Int64
 	// SessionRenders, IndexRenders, and RailRenders count page renders
@@ -46,6 +51,8 @@ func (s *streamStats) snapshot() map[string]int64 {
 		"wake_git":        s.WakeGit.Load(),
 		"wake_inbox":      s.WakeInbox.Load(),
 		"wake_tracker":    s.WakeTracker.Load(),
+		"wake_live":       s.WakeLive.Load(),
+		"live_renders":    s.LiveRenders.Load(),
 		"signals":         s.Signals.Load(),
 		"session_renders": s.SessionRenders.Load(),
 		"index_renders":   s.IndexRenders.Load(),

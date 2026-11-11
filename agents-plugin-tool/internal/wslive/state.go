@@ -160,6 +160,9 @@ type State struct {
 
 	agents map[string]*agentState
 	usage  *Usage
+	// batchesEnded counts the tool batches finished so far, the lead's and
+	// every subagent's (BatchesEnded).
+	batchesEnded uint64
 	// evicted names the finished subagents retain dropped, oldest first (at
 	// most evictedCap), so a late event for one does not bring it back as a
 	// running agent (staleEvent).
@@ -178,6 +181,11 @@ func NewState(sessionKey string) *State {
 	st.lead.phase = PhaseIdle
 	return st
 }
+
+// BatchesEnded counts the tool batches finished so far, the lead's and
+// every subagent's: it moves whenever a tool call may have changed the
+// working tree, and never moves back (a reset keeps it).
+func (st *State) BatchesEnded() uint64 { return st.batchesEnded }
 
 // ReplyID is the session's reply-id.
 func (st *State) ReplyID() string { return st.replyID }
@@ -211,7 +219,7 @@ func (st *State) Apply(ev Event, now int64) (Result, error) {
 	var res Result
 	switch ev.Kind {
 	case KindReset:
-		*st = State{replyID: st.replyID, adapter: st.adapter, scrub: st.scrub, agents: map[string]*agentState{}}
+		*st = State{replyID: st.replyID, adapter: st.adapter, scrub: st.scrub, agents: map[string]*agentState{}, batchesEnded: st.batchesEnded}
 		st.lead.phase = PhaseIdle
 		res.Changed = true
 	case KindTurnStart:
@@ -235,7 +243,9 @@ func (st *State) Apply(ev Event, now int64) (Result, error) {
 			st.flushTools(&res)
 			res.Ring = append(res.Ring, st.finishReply(""))
 		}
-		st.gapAdd(closeBatches(&st.lead, at))
+		fresh := closeBatches(&st.lead, at)
+		st.batchesEnded += uint64(len(fresh))
+		st.gapAdd(fresh)
 		st.lead.permission = nil
 		st.flushTools(&res)
 		if st.turnStartedAt > 0 {
@@ -480,7 +490,7 @@ func (st *State) applyAgent(ev Event, at int64) error {
 		}
 		a.status = ev.Status
 		a.permission = nil
-		closeBatches(&a.activityState, at)
+		st.batchesEnded += uint64(len(closeBatches(&a.activityState, at)))
 	}
 	if a.status != StatusRunning {
 		// An ended subagent produces no output, so it shows no rate.
@@ -514,6 +524,7 @@ func (st *State) setTelemetry(a *agentState, ev Event) {
 func (st *State) setActivity(act *activityState, ev Event, batches []BatchView) {
 	if ev.Batches != nil {
 		fresh := act.setBatches(batches)
+		st.batchesEnded += uint64(len(fresh))
 		if act == &st.lead {
 			st.gapAdd(fresh)
 		}

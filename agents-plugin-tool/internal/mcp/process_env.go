@@ -14,6 +14,7 @@ import (
 
 	"github.com/kang-sw/devenv/internal/execjob"
 	"github.com/kang-sw/devenv/internal/wsconfig"
+	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wsgit"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
 	"github.com/kang-sw/devenv/internal/wsrsrc"
@@ -52,6 +53,11 @@ type ServerOptions struct {
 	// Diag receives construction-time diagnostics (a rejected config
 	// manifest); nil means stderr.
 	Diag io.Writer
+	// Live is the dashboard daemon hosting this server: the dashboard live
+	// layer hands each session's snapshot to it in memory, and writes the
+	// snapshot file only for recovery (live_snapshot.go). nil is the direct
+	// path, a ws-mcp in its own process, which writes the file and nudges.
+	Live wsdashboard.LiveHost
 }
 
 // procEnv is a snapshot of one process's environment.
@@ -112,6 +118,7 @@ func NewServerWithOptions(opts ServerOptions) *Server {
 		diag = os.Stderr
 	}
 	s := &Server{root: filepath.Clean(opts.Root), version: opts.Version, sourceCommit: commit, ownerPID: opts.OwnerPID}
+	s.live.host = opts.Live
 	if opts.Env != nil {
 		s.env = newProcEnv(opts.Env)
 		logPath := strings.TrimSpace(s.env.get(envDebugLog))
@@ -333,11 +340,13 @@ func (s *Server) Drain(ctx context.Context) bool {
 }
 
 // Close releases what a server holds beyond its serve loop: the dashboard
-// nudge sender's goroutine and the tracker host. A stdio server's process
-// exit frees these; a daemon-hosted server must release them itself, or
-// every ended session keeps its Server alive for the daemon's lifetime.
-// Call it after ServeStdio has returned.
+// live sessions (a hosted one flushes its snapshot file and releases the
+// daemon's copy), the dashboard nudge sender's goroutine, and the tracker
+// host. A stdio server's process exit frees these; a daemon-hosted server
+// must release them itself, or every ended session keeps its Server alive
+// for the daemon's lifetime. Call it after ServeStdio has returned.
 func (s *Server) Close() {
+	s.live.close()
 	d := &s.dashboard
 	d.mu.Lock()
 	if d.nudges != nil && !d.nudgesClosed {

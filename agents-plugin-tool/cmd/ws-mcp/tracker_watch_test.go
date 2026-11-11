@@ -40,6 +40,9 @@ func TestTrackerWatchBumpsTheDaemonRevision(t *testing.T) {
 		}
 		return body.Rev
 	}
+	previous := trackerWatchInterval
+	trackerWatchInterval = 200 * time.Millisecond
+	t.Cleanup(func() { trackerWatchInterval = previous })
 	stop := startTrackerWatch(dt.h, nil, d.TrackerChanged)
 	defer stop()
 	before := rev()
@@ -53,10 +56,10 @@ func TestTrackerWatchBumpsTheDaemonRevision(t *testing.T) {
 	if _, err := other.Dispatch(context.Background(), "team", []wsledger.NewEvent{{Type: wstracker.TypeItemCreate, Payload: payload}}); err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.Now().Add(4 * wstrackerhost.DefaultWatchInterval)
+	deadline := time.Now().Add(4 * time.Second)
 	for rev() == before {
 		if time.Now().After(deadline) {
-			t.Fatalf("the tracker revision did not move within %v of another process's write", 4*wstrackerhost.DefaultWatchInterval)
+			t.Fatalf("the tracker revision did not move within %v of another process's write", 4*time.Second)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}

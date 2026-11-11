@@ -36,6 +36,19 @@ import (
 // fire-and-forget nudge (dashboardNudge). With the session's
 // dashboard.enabled off, nothing is written at all.
 //
+// A server the dashboard daemon hosts (ServerOptions.Live) hands each
+// snapshot to the daemon in memory instead (wsdashboard.HostedSlot): the
+// debounced fire that writes the file on the direct path publishes the
+// snapshot, and the file is written only for recovery, on its own clock: at
+// a fire or heartbeat once a heartbeat interval passed since the last file
+// write and the state changed since it, at a turn's end, and once more when
+// the server closes (liveHub.close), which also releases the daemon's copy.
+// A hosted heartbeat with nothing changed writes nothing and sends no
+// nudge; its publish only moves the copy's updatedAt, so the session never
+// reads as stale. A ring append signals the slot instead of nudging. A
+// session whose directory the daemon does not serve (another cache home)
+// stays on the direct path.
+//
 // The snapshot's repo fields (the session root's folder, branch, and
 // upstream standing, and working-tree counts) are read here, not sent by the
 // adapter: a few git reads, cached per session and refreshed at most once per
@@ -43,7 +56,9 @@ import (
 // writeMu, so an intake call never waits on git; the snapshot write that
 // finds the cache missing or a heartbeat interval old does wait (up to
 // repoReadTimeout): a session's first snapshot, and at most one write per
-// heartbeat interval after it, change or heartbeat alike.
+// heartbeat interval after it, change or heartbeat alike, and only when a
+// tool batch ended since the last read (wslive.State.BatchesEnded): the
+// working tree changes through tool calls, so an idle session runs no git.
 
 const dashboardIntakeTool = "dashboard.intake"
 
@@ -61,6 +76,9 @@ type liveSeams struct {
 	writeSnapshot  func(path string, data []byte) error
 	appendRing     func(dir string, entries []wslive.RingEntry) error
 	readRepo       func(root string) wslive.Repo
+	// now is the clock of the snapshots' updatedAt and the hosted flush
+	// clock.
+	now func() time.Time
 }
 
 var (
@@ -73,6 +91,7 @@ var (
 		writeSnapshot:  writeWhiteboardFile,
 		appendRing:     wslive.AppendRing,
 		readRepo:       readSessionRepo,
+		now:            time.Now,
 	}
 )
 
@@ -97,6 +116,10 @@ func setLiveSeams(change func(*liveSeams)) liveSeams {
 type liveHub struct {
 	mu       sync.Mutex
 	sessions map[string]*liveSession
+	// closed is set by close: a session created after it (an intake still
+	// running when its server closed) opens no hosted slot, which nothing
+	// would release.
+	closed bool
 
 	// enabledMu guards enabled, each session's last resolved
 	// dashboard.enabled (liveDashboardEnabled).
@@ -105,6 +128,10 @@ type liveHub struct {
 	// resolveEnabled resolves one session's dashboard.enabled; nil uses
 	// Server.dashboardSessionResolve (test seam).
 	resolveEnabled func(sessionKey string) (bool, error)
+
+	// host is the daemon hosting this server (ServerOptions.Live); nil on
+	// the direct path.
+	host wsdashboard.LiveHost
 }
 
 // liveEnabled is one session's cached dashboard.enabled and when it was
@@ -135,6 +162,10 @@ type liveSession struct {
 	onStop func()
 	// debug records into the owning server's debug ring.
 	debug func(event string, fields map[string]any)
+	// slot is the hosting daemon's in-memory hand-off of this session's
+	// snapshot; nil on the direct path, which writes the file and nudges at
+	// every fire. Set at creation, never changed.
+	slot wsdashboard.HostedSlot
 
 	mu    sync.Mutex
 	state *wslive.State
@@ -143,6 +174,10 @@ type liveSession struct {
 	// stopped is set once the session went inactive; its timer never arms
 	// again and the hub replaces it on the next intake.
 	stopped bool
+	// The hosted flush clock: dirty reports a change since the last file
+	// write, flushNow a turn end since it, and lastFlush is its time.
+	dirty, flushNow bool
+	lastFlush       time.Time
 
 	// writeMu serializes snapshot writes, so a slow write is never
 	// overtaken by an older marshal.
@@ -156,6 +191,8 @@ type liveSession struct {
 	repoMu sync.Mutex
 	repo   *wslive.Repo
 	repoAt time.Time
+	// repoEnds is the state's BatchesEnded at the last read.
+	repoEnds uint64
 }
 
 func (h *liveHub) session(key, dir, root string, nudge func(), active func() bool, debug func(string, map[string]any)) *liveSession {
@@ -173,6 +210,11 @@ func (h *liveHub) session(key, dir, root string, nudge func(), active func() boo
 	}
 	state := wslive.NewState(key)
 	ls = &liveSession{dir: dir, root: root, replyID: state.ReplyID(), nudge: nudge, active: active, debug: debug, state: state}
+	if h.host != nil && !h.closed {
+		if slot, ok := h.host.OpenHostedSlot(dir); ok {
+			ls.slot = slot
+		}
+	}
 	created := ls
 	ls.onStop = func() { h.drop(key, created) }
 	h.sessions[key] = ls
@@ -202,15 +244,74 @@ func (ls *liveSession) isStopped() bool {
 }
 
 // stop ends the session's writes: its pending timer is cancelled and never
-// re-armed.
+// re-armed, and a hosted session's daemon copy is released (its file
+// renders again).
 func (ls *liveSession) stop() {
+	ls.halt()
+	if ls.slot != nil {
+		ls.slot.Close()
+	}
+}
+
+// halt marks the session stopped and cancels its timer; it reports whether
+// the session was running.
+func (ls *liveSession) halt() bool {
 	ls.mu.Lock()
 	defer ls.mu.Unlock()
+	was := !ls.stopped
 	ls.stopped = true
 	ls.due = time.Time{}
 	if ls.timer != nil {
 		ls.timer.Stop()
 	}
+	return was
+}
+
+// close ends every session of the hub when its server closes
+// (Server.Close): a hosted session writes its snapshot file once more, so a
+// later reader (a restarted daemon, or the daemon once the copy is gone)
+// starts from the last state, and releases the daemon's copy.
+func (h *liveHub) close() {
+	h.mu.Lock()
+	sessions := make([]*liveSession, 0, len(h.sessions))
+	for _, ls := range h.sessions {
+		sessions = append(sessions, ls)
+	}
+	h.sessions = nil
+	h.closed = true
+	h.mu.Unlock()
+	for _, ls := range sessions {
+		ls.finish()
+	}
+}
+
+// finish stops the session; a hosted one flushes its snapshot file first
+// and then releases its slot.
+func (ls *liveSession) finish() {
+	if !ls.halt() || ls.slot == nil {
+		return
+	}
+	ls.repoMu.Lock()
+	var repo *wslive.Repo
+	if ls.repo != nil {
+		r := *ls.repo
+		repo = &r
+	}
+	ls.repoMu.Unlock()
+	ls.writeMu.Lock()
+	ls.mu.Lock()
+	snap := ls.state.Snapshot(currentLiveSeams().now().UnixMilli())
+	ls.mu.Unlock()
+	snap.Repo = repo
+	data, err := json.Marshal(snap)
+	if err == nil {
+		err = writeLiveSnapshot(ls.dir, data)
+	}
+	ls.writeMu.Unlock()
+	if err != nil {
+		ls.debug("dashboard.snapshot_write_error", map[string]any{"error": err.Error()})
+	}
+	ls.slot.Close()
 }
 
 // liveSessionDir returns the registry directory that holds the live stores
@@ -219,7 +320,16 @@ func (ls *liveSession) stop() {
 // state directory.
 func (s *Server) liveSessionDir(sessionKey string) (string, bool) {
 	entry, found := s.sessions.lookup(sessionKey)
-	if !found || !entry.isTopLevelLead() || !s.liveDashboardEnabled(sessionKey) {
+	if !found {
+		return "", false
+	}
+	return s.liveSessionDirOf(sessionKey, entry)
+}
+
+// liveSessionDirOf is liveSessionDir for a session whose entry the caller
+// already resolved (intake, from the intake cache).
+func (s *Server) liveSessionDirOf(sessionKey string, entry sessionEntry) (string, bool) {
+	if !entry.isTopLevelLead() || !s.liveDashboardEnabled(sessionKey) {
 		return "", false
 	}
 	dir, err := s.dashboard.stateDir()
@@ -230,14 +340,16 @@ func (s *Server) liveSessionDir(sessionKey string) (string, bool) {
 }
 
 // liveSessionActive reports whether the live session behind sessionKey may
-// still write to dir: liveSessionDir's answer for a timer, which reads the
-// session record without touching it (a timer's read is not activity). A
-// record that exists but cannot be read right now (Windows: a reader meeting
-// the record's replace in flight) keeps the session running: stopping it on
-// a transient failure drops the turn state until the next intake, and a mail
-// line sent meanwhile finds no tool row to flush.
+// still write to dir: liveSessionDir's answer for a timer, which resolves
+// the session through the intake cache without touching its record (a
+// timer's read is not activity), so a removed key stops the session within
+// intakeRecheck. A record that exists but cannot be read right now
+// (Windows: a reader meeting the record's replace in flight) keeps the
+// session running: stopping it on a transient failure drops the turn state
+// until the next intake, and a mail line sent meanwhile finds no tool row to
+// flush.
 func (s *Server) liveSessionActive(sessionKey, dir string) bool {
-	entry, found, transient := s.sessions.inspect(sessionKey)
+	entry, found, transient := s.sessions.intakeInspect(sessionKey)
 	if transient {
 		return true
 	}
@@ -295,7 +407,10 @@ func (s *Server) handleDashboardIntake(id json.RawMessage, args map[string]any) 
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
-	entry, found := s.sessions.lookup(key)
+	// The intake cache, not key.json: this runs about ten times a second
+	// while a reply streams, and a removed key stops it within
+	// intakeRecheck.
+	entry, found := s.sessions.intakeLookup(key)
 	if !found {
 		return toolTextResponse(id, "", fmt.Errorf("%s: unknown_session: session key not found", tool))
 	}
@@ -307,13 +422,13 @@ func (s *Server) handleDashboardIntake(id json.RawMessage, args map[string]any) 
 	if !ok {
 		return toolTextResponse(id, "", fmt.Errorf("%s: events must be an array of event objects", tool))
 	}
-	dir, ok := s.liveSessionDir(key)
+	dir, ok := s.liveSessionDirOf(key, entry)
 	if !ok {
 		return toolTextResponse(id, "dashboard off: nothing recorded\n", nil)
 	}
 
 	ls := s.live.session(key, dir, entry.root, func() { s.dashboardNudge(key) }, func() bool { return s.liveSessionActive(key, dir) }, s.debugEvent)
-	now := time.Now().UnixMilli()
+	now := currentLiveSeams().now().UnixMilli()
 	var (
 		ring     []wslive.RingEntry
 		problems []string
@@ -338,6 +453,10 @@ func (s *Server) handleDashboardIntake(id json.RawMessage, args map[string]any) 
 				if res.Changed || len(res.Ring) > 0 {
 					agentOnly = agentOnly && agentOnlyEvent(ev)
 				}
+				if ev.Kind == wslive.KindTurnEnd {
+					// A flush point of the hosted file (liveSession.fire).
+					ls.flushNow = true
+				}
 				ring = append(ring, res.Ring...)
 				continue
 			}
@@ -353,12 +472,13 @@ func (s *Server) handleDashboardIntake(id json.RawMessage, args map[string]any) 
 		case agentOnly:
 			delay = seams.debounceAgent
 		}
+		ls.dirty = true
 		ls.scheduleLocked(delay)
 	}
 	ls.ringMu.Lock()
 	ls.mu.Unlock()
 	if len(ring) > 0 {
-		s.appendLiveRing(key, ls.dir, ring)
+		s.appendLiveRing(key, ls.dir, ls.slot, ring)
 	}
 	ls.ringMu.Unlock()
 
@@ -413,53 +533,101 @@ func (ls *liveSession) scheduleLocked(delay time.Duration) {
 	ls.timer.Reset(delay)
 }
 
-// fire writes the snapshot, nudges, and arms the heartbeat unless a change
-// is already pending. A session that went inactive (its dashboard key turned
-// off, or its directory moved) is stopped instead, so the heartbeat neither
-// writes for a key-off session nor keeps a session that no intake drives
-// reading live forever: the next intake call starts it afresh.
+// fire hands the snapshot over, and arms the heartbeat unless a change is
+// already pending. On the direct path it writes the snapshot file and
+// nudges, every time; a hosted session publishes it to its slot and writes
+// the file only at a flush point (the flush clock in the file comment). A
+// session that went inactive (its dashboard key turned off, or its
+// directory moved) is stopped instead, so the heartbeat neither writes for a
+// key-off session nor keeps a session that no intake drives reading live
+// forever: the next intake call starts it afresh.
 func (ls *liveSession) fire() {
 	if !ls.active() {
 		ls.stop()
 		ls.onStop()
 		return
 	}
-	repo := ls.currentRepo()
+	seams := currentLiveSeams()
+	now := seams.now()
+	ls.mu.Lock()
+	ends := ls.state.BatchesEnded()
+	ls.mu.Unlock()
+	repo, repoChanged := ls.currentRepo(now, ends)
 	ls.writeMu.Lock()
 	ls.mu.Lock()
 	ls.due = time.Time{}
-	snap := ls.state.Snapshot(time.Now().UnixMilli())
+	if ls.stopped {
+		// Closed meanwhile (finish wrote the last state).
+		ls.mu.Unlock()
+		ls.writeMu.Unlock()
+		return
+	}
+	snap := ls.state.Snapshot(now.UnixMilli())
+	write := true
+	// The flush clock before this write, restored when it fails.
+	wasFlushNow, wasLastFlush := ls.flushNow, ls.lastFlush
+	if ls.slot != nil {
+		ls.dirty = ls.dirty || repoChanged
+		write = ls.flushNow || (ls.dirty && now.Sub(ls.lastFlush) >= seams.heartbeat)
+		if write {
+			// Cleared before the write, so a change landing during it
+			// marks the state dirty again.
+			ls.dirty, ls.flushNow, ls.lastFlush = false, false, now
+		}
+	}
 	ls.mu.Unlock()
 	snap.Repo = repo
-	data, err := json.Marshal(snap)
-	if err == nil {
-		err = writeLiveSnapshot(ls.dir, data)
+	if ls.slot != nil {
+		ls.slot.Publish(snap)
+	}
+	var err error
+	if write {
+		var data []byte
+		data, err = json.Marshal(snap)
+		if err == nil {
+			err = writeLiveSnapshot(ls.dir, data)
+		}
 	}
 	ls.writeMu.Unlock()
-	if err != nil {
+	switch {
+	case err != nil:
 		ls.debug("dashboard.snapshot_write_error", map[string]any{"error": err.Error()})
-	} else {
+		if ls.slot != nil && write {
+			// Not on disk yet: the next fire or heartbeat tries again.
+			ls.mu.Lock()
+			ls.dirty = true
+			ls.flushNow = ls.flushNow || wasFlushNow
+			if ls.lastFlush.Equal(now) {
+				ls.lastFlush = wasLastFlush
+			}
+			ls.mu.Unlock()
+		}
+	case write && ls.slot == nil:
 		ls.nudge()
 	}
 	ls.mu.Lock()
 	if ls.due.IsZero() {
-		ls.scheduleLocked(currentLiveSeams().heartbeat)
+		ls.scheduleLocked(seams.heartbeat)
 	}
 	ls.mu.Unlock()
 }
 
-// currentRepo is the session root's cached repo read, refreshed when it is
-// a heartbeat interval old or was never read.
-func (ls *liveSession) currentRepo() *wslive.Repo {
+// currentRepo is the session root's cached repo read at now, and whether
+// this call read it afresh with a different result. It reads when it never
+// read, or when its read is a heartbeat interval old and a tool batch ended
+// since it (ends, the state's BatchesEnded, moved).
+func (ls *liveSession) currentRepo(now time.Time, ends uint64) (*wslive.Repo, bool) {
 	ls.repoMu.Lock()
 	defer ls.repoMu.Unlock()
 	seams := currentLiveSeams()
-	if ls.repo == nil || time.Since(ls.repoAt) >= seams.heartbeat {
+	changed := false
+	if ls.repo == nil || (now.Sub(ls.repoAt) >= seams.heartbeat && ends != ls.repoEnds) {
 		repo := wslive.CleanRepo(seams.readRepo(ls.root))
-		ls.repo, ls.repoAt = &repo, time.Now()
+		changed = ls.repo == nil || *ls.repo != repo
+		ls.repo, ls.repoAt, ls.repoEnds = &repo, now, ends
 	}
 	repo := *ls.repo
-	return &repo
+	return &repo, changed
 }
 
 // repoReadTimeout bounds one session's git reads.
@@ -499,10 +667,16 @@ func writeLiveSnapshot(dir string, data []byte) error {
 }
 
 // appendLiveRing writes entries to the conversation ring in the session
-// directory dir and nudges; a failed write is logged, never surfaced.
-func (s *Server) appendLiveRing(sessionKey, dir string, entries []wslive.RingEntry) {
+// directory dir and tells the daemon: through slot, the session's hosted
+// hand-off, or with a nudge when it is nil. A failed write is logged, never
+// surfaced.
+func (s *Server) appendLiveRing(sessionKey, dir string, slot wsdashboard.HostedSlot, entries []wslive.RingEntry) {
 	if err := currentLiveSeams().appendRing(wslive.RingDir(dir), entries); err != nil {
 		s.debugEvent("dashboard.ring_write_error", map[string]any{"error": err.Error()})
+		return
+	}
+	if slot != nil {
+		slot.RingAppended()
 		return
 	}
 	s.dashboardNudge(sessionKey)
@@ -527,11 +701,14 @@ func (s *Server) recordLiveMail(sessionKey string, entries []mailboxHistoryEntry
 	// session with no live state has no tool calls to flush.
 	ls := s.live.existing(sessionKey)
 	var ring []wslive.RingEntry
+	var slot wsdashboard.HostedSlot
 	if ls != nil {
+		slot = ls.slot
 		ls.mu.Lock()
 		ring = ls.state.FlushTools()
 		if len(ring) > 0 {
 			// The snapshot's open gap just emptied.
+			ls.dirty = true
 			ls.scheduleLocked(currentLiveSeams().debounce)
 		}
 		ls.ringMu.Lock()
@@ -547,5 +724,5 @@ func (s *Server) recordLiveMail(sessionKey string, entries []mailboxHistoryEntry
 		}
 		ring = append(ring, line)
 	}
-	s.appendLiveRing(sessionKey, dir, ring)
+	s.appendLiveRing(sessionKey, dir, slot, ring)
 }

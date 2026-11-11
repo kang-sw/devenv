@@ -26,8 +26,8 @@ import type { EngineInterface, RenderChildren, SessionUsage } from 'claude-code'
 
 export const ENABLED_KEY = 'claude.status_band_enabled'
 
-/** A tool call refreshes git at most this often; a turn end always does. */
-export const GIT_THROTTLE_MS = 2000
+/** A model tool call refreshes git at most this often; a turn end always does. */
+export const GIT_THROTTLE_MS = 10_000
 /** How often the clock the budget deltas read moves on. */
 export const TICK_MS = 10_000
 /** The context bar shrinks to this many cells before a row 2 capsule drops. */
@@ -675,7 +675,7 @@ export type Band = {
   /**
    * A settled tool call. `tool` is its model-facing name and `server` the ws
    * MCP server's; `byModel` is false for the mod's own calls, which trigger
-   * no ws or usage read.
+   * no ws, usage, or git read (they never change the working tree).
    */
   toolCalled: (tool: string, server: string | undefined, byModel: boolean) => void
   /** A session.measure: the usage moved. */
@@ -948,9 +948,11 @@ export function createBand(): Band {
         if (name.startsWith('todo_') || name.startsWith('agenda_')) readWs(e)
         if (name.startsWith('mailbox_')) readAddress(e)
       }
+      // The mod's own calls (intake, drains, lookups) neither change the
+      // working tree nor make a model request: git and the fill stay put.
+      if (!byModel) return
       readGit(e, false)
-      // The mod's own calls make no model request, so the fill stays put.
-      if (byModel) readUsage(e)
+      readUsage(e)
     },
     measured() {
       if (edges) readUsage(edges)

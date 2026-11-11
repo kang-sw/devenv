@@ -13,7 +13,10 @@ import (
 
 // DefaultWatchInterval is the store watch period: how soon a write by
 // another process (a lead session's or an agent's ws-mcp) reaches a page.
-const DefaultWatchInterval = 2 * time.Second
+// A write through the daemon's own routes or tracker host bumps the
+// revision at once, so the watch only bounds the cross-process latency, and
+// is kept at the 10 s floor of the daemon's recurring polls.
+const DefaultWatchInterval = 10 * time.Second
 
 // StartWatch runs the store watch in this process: every interval it stamps
 // each registered store's ledger state (the journal files' sizes and times

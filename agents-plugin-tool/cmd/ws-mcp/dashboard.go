@@ -19,6 +19,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wsholder"
 	"github.com/kang-sw/devenv/internal/wstrackerhost"
+	"github.com/kang-sw/devenv/internal/wswake"
 )
 
 // dashboardCommand runs the machine-wide dashboard daemon in the foreground.
@@ -91,6 +92,7 @@ func dashboardCommand(args []string) {
 		WorkspacesFile: wsdashboard.WorkspacesFilePath(configPath),
 		Sessions:       sessions,
 		Worktrees:      sessions,
+		MailWake:       wswake.Mailbox,
 		Agents:         agents,
 		Tracker:        &dashboardTracker{h: tracker, err: trackerErr},
 		// The holders a predecessor left running are found in the state
@@ -122,6 +124,7 @@ func dashboardCommand(args []string) {
 		wsdashboard.PruneStagedExecutables(dir, exe)
 	}
 	trackerChanged.set(daemon.TrackerChanged)
+	host.live.Store(daemon)
 	stopPoll := startTrackerPoll(tracker, trackerErr, daemon.TrackerChanged, logw)
 	stopWatch := startTrackerWatch(tracker, trackerErr, daemon.TrackerChanged)
 	signals := make(chan os.Signal, 1)
@@ -158,9 +161,13 @@ func (l *lateFunc) call() {
 	}
 }
 
+// trackerWatchInterval is the daemon's tracker store watch period (a test
+// seam).
+var trackerWatchInterval = wstrackerhost.DefaultWatchInterval
+
 // startTrackerWatch runs the tracker's store watch in the daemon on h, so a
 // write by another process (a lead session's or a support agent's ws-mcp)
-// calls onChange within wstrackerhost.DefaultWatchInterval; onChange is
+// calls onChange within trackerWatchInterval; onChange is
 // also what a page read that served the last state calls when the store's
 // reload lands. newErr is h's creation error: the daemon runs without the
 // watch. The caller closes h.
@@ -168,7 +175,7 @@ func startTrackerWatch(h *wstrackerhost.Host, newErr error, onChange func()) (st
 	if newErr != nil {
 		return func() {}
 	}
-	return h.StartWatch(wstrackerhost.DefaultWatchInterval, onChange)
+	return h.StartWatch(trackerWatchInterval, onChange)
 }
 
 // startTrackerPoll runs the tracker's background poll in the daemon on h:

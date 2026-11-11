@@ -680,18 +680,57 @@ func (r pageReader) session(replyID string) (SessionView, bool) {
 // source named and the attachments directory its conversation reads, and
 // whether it shows contacts (only a live page does).
 func (r pageReader) readSession(replyID string) (SessionView, refreshInputs, bool) {
-	s, page, ok := r.served(replyID)
-	if !ok {
-		return SessionView{}, refreshInputs{}, false
+	view, inputs, _, ok := r.readSessionWith(replyID, nil, true)
+	return view, inputs, ok
+}
+
+// sessionReads are the store reads one session page read made, which a
+// live render reuses (liveRender): the page source's content (the board
+// panels, the contacts) and, once an adapter showed, the conversation's
+// ring and the board-answer inbox's held and drained entries.
+type sessionReads struct {
+	page          PageContent
+	conversation  bool
+	ring          []wslive.RingRecord
+	held, drained []wsinbox.Record
+}
+
+// readSessionWith is readSession for a render that may reuse prev, the
+// reads of the page's previous render (nil reads everything): the index
+// entry and the snapshots are read again, every other store is taken from
+// prev, the ring included unless ringChanged. A conversation prev did not
+// read (no adapter showed then) is read now. It returns the reads it used.
+func (r pageReader) readSessionWith(replyID string, prev *sessionReads, ringChanged bool) (SessionView, refreshInputs, *sessionReads, bool) {
+	var s Session
+	var page PageContent
+	ok := false
+	if prev != nil && r.index != nil && ValidReplyID(replyID) {
+		s, ok = r.index.Session(replyID)
+		page = prev.page
+	} else {
+		s, page, ok = r.served(replyID)
 	}
+	if !ok {
+		return SessionView{}, refreshInputs{}, nil, false
+	}
+	reads := &sessionReads{page: page}
 	in := pageInputs{Session: s, Page: page, Snapshot: r.readSnapshot(replyID), Now: r.clock(), Version: r.version}
 	looked := map[string]bool{replyID: true}
 	inputs := refreshInputs{watch: slices.Clone(page.Watch), pids: slices.Clone(page.WatchPIDs)}
 	if adapterPresent(in.Snapshot, in.Now) {
-		in.Ring, _ = r.entries.readRing(replyID, wslive.RingDir(SessionDir(r.dir, replyID)))
 		inbox := sessionInbox(r.dir, replyID)
-		in.Held, _ = wsinbox.Held(inbox)
-		in.Drained, _ = r.entries.readDrained(replyID, inbox)
+		reads.conversation = true
+		if prev != nil && prev.conversation {
+			reads.held, reads.drained, reads.ring = prev.held, prev.drained, prev.ring
+			if ringChanged {
+				reads.ring, _ = r.entries.readRing(replyID, wslive.RingDir(SessionDir(r.dir, replyID)))
+			}
+		} else {
+			reads.ring, _ = r.entries.readRing(replyID, wslive.RingDir(SessionDir(r.dir, replyID)))
+			reads.held, _ = r.entries.readHeld(inbox)
+			reads.drained, _ = r.entries.readDrained(replyID, inbox)
+		}
+		in.Ring, in.Held, in.Drained = reads.ring, reads.held, reads.drained
 		in.AttachDir = wsinbox.AttachmentsDir(inbox)
 		lookup := r.lookup()
 		in.Lookup = sessionLookup{
@@ -716,7 +755,7 @@ func (r pageReader) readSession(replyID string) (SessionView, refreshInputs, boo
 	inputs.watch = slices.Compact(inputs.watch)
 	slices.Sort(inputs.pids)
 	inputs.pids = slices.Compact(inputs.pids)
-	return view, inputs, true
+	return view, inputs, reads, true
 }
 
 // sessionStamp is the refresh stamp of replyID's session page over the

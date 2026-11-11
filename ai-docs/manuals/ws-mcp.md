@@ -62,7 +62,11 @@ Each session key is a directory, `<cache root>/sessions/<key>/`, holding
 config overrides, the child note, and the once-only flags), `agenda.json`,
 `todos.json`, and `whiteboard.json`. An absent part file is that part
 empty. A write replaces only the part files it changes, each atomically, and
-the lookup every keyed call makes reads `key.json` alone. Every content write,
+the lookup every keyed call makes reads `key.json` alone, except
+`dashboard.intake`'s: intake and the live snapshot writer's activity check
+keep each key's identity (root, scope, parent, written only at mint) in
+memory and stat `key.json` at most every 10 s, so a removed key stops intake
+within 10 s while every other tool's gate sees it at once. Every content write,
 mint's claim included, holds the key's record lock (`key.json.lock` in its
 directory) across its read-modify-write, so ws processes serving one key do
 not lose each other's updates; a lock not acquired within 2 s fails the tool
@@ -140,10 +144,11 @@ under `<cache root>/dashboard/`:
   modified, staged, and untracked working-tree entries) come from ws-mcp's own
   `rev-parse`, `symbolic-ref`, `rev-list --left-right --count`, and
   `status --porcelain` reads, cached per session and refreshed at most once
-  per heartbeat interval from the writer's timer, never on an intake call; the
-  snapshot write that finds the cache missing or stale (a session's first,
-  then at most one per heartbeat interval, change or heartbeat alike) waits
-  for the refresh, up to its 5 s timeout. There is no automatic fetch, so
+  per heartbeat interval from the writer's timer, never on an intake call, and
+  only when a tool batch ended since the last read (an idle session runs no
+  git); the snapshot write that finds the cache missing or stale (a session's
+  first, then at most one per heartbeat interval, change or heartbeat alike)
+  waits for the refresh, up to its 5 s timeout. There is no automatic fetch, so
   behind reflects the last one. The status read takes no optional
   lock and shares the 5 s timeout; when it fails the counts stay zero. The
   page's status band shows only the folder; the git handle reads the rest
@@ -176,7 +181,21 @@ under `<cache root>/dashboard/`:
   ws-mcp serves it and it has no session record.
 
 After a store write the serving ws-mcp sends `POST /nudge {reply_id,
-project}`; the daemon also re-reads every session every 30 seconds, except
+project}`. A mailbox send by a ws-mcp outside the daemon (the direct path)
+nudges too, registered or not, because the daemon wakes every `mailbox wait`
+it hosts on each nudge before it checks the named session (at most one
+recheck per wait per second, plus a trailing one). A server the daemon
+hosts (Daemon-Hosted MCP below) instead hands each live snapshot to the
+daemon in memory (`wsdashboard.HostedSlot`): the daemon serves that copy in
+place of `snapshot.json` and wakes the session's pages with a live-only
+wake, whose render re-reads only the snapshot (and the ring after an append,
+which the slot signals in place of a nudge). The hosted writer still writes
+`snapshot.json` for recovery: once per heartbeat interval while the state
+changed, at each turn end, and when its server closes (which also drops the
+copy, so the file renders again); an idle heartbeat writes nothing and only
+moves the copy's `updatedAt`. A session whose directory the daemon does not
+serve stays on the file-and-nudge path. The daemon also re-reads every
+session every 30 seconds, except
 an ended one it already read since it ended (a nudge or a resume still
 re-reads it). A re-read compares a fingerprint taken from metadata (the
 session record, live-store and mailbox-history entry names, the ticket
@@ -423,7 +442,7 @@ page closes mid-request. Every string a route returns has credentials
 redacted. The tracker revision bumps after a route's write (and after a
 check or sync, even a failed one), after the daemon's first poll round and
 each later round that changed something (`wstrackerhost` `StartPoll`,
-`PollOnce`), when the 2 s store watch sees a write by another process, and
+`PollOnce`), when the 10 s store watch sees a write by another process, and
 when a reload that a page read stopped waiting for lands with a view other
 than the one that read was served (`now` aside): a page read waits at most
 500 ms behind a push or fetch holding the store's lock, or a slow reload,
@@ -867,7 +886,10 @@ launcher writes them as UTF-8 bytes to its own stderr and stdout and exits
 with `exit_code`, so the mod and the Pi waiter see the same output and codes
 as from the direct CLI; closing the connection (the launcher exits, or the
 daemon drains) cancels the wait at once and clears its listening marker
-(`exit_code` 130, "interrupted").
+(`exit_code` 130, "interrupted"). A hosted wait rechecks on an in-process
+signal (a mailbox send by a server the daemon hosts, a board-answer inbox
+write, or a nudge) with a 10 s backstop poll; the direct CLI wait polls
+every 500 ms.
 
 ## Launcher Environment
 

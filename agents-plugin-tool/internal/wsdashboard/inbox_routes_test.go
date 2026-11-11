@@ -466,3 +466,20 @@ func TestStreamSendsTheConversationAfterASend(t *testing.T) {
 	}
 	t.Fatal("no conversation region with the held bubble after a send")
 }
+
+// TestInboxWriteWakesMailWaits pins the hard wake of a board-answer inbox
+// write: a successful write signals it, a refused one does not.
+func TestInboxWriteWakesMailWaits(t *testing.T) {
+	wake := &countingMailWake{}
+	f := startPageFixture(t, func(o *DaemonOptions) { o.MailWake = wake })
+	if code, _, _ := postJSON(t, f.base+"/s/livesession/message", f.base, `{"text":""}`); code == http.StatusOK {
+		t.Fatal("an empty message was accepted")
+	}
+	if wakes, _ := wake.counts(); wakes != 0 {
+		t.Fatalf("a refused write woke %d times", wakes)
+	}
+	f.send(t, `{"text":"hello"}`)
+	if wakes, nudges := wake.counts(); wakes != 1 || nudges != 0 {
+		t.Fatalf("after a send: %d wakes, %d nudges; want 1, 0", wakes, nudges)
+	}
+}

@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
 	"github.com/kang-sw/devenv/internal/wsstate"
@@ -635,5 +636,65 @@ func TestHostedMailboxWaitWokenByMailExitsZeroOnTheStream(t *testing.T) {
 	}
 	if code.(float64) != 0 || !strings.Contains(final["data"].(string), `"timed_out":false`) {
 		t.Fatalf("final frame = %v, want exit_code 0 with the mail", final)
+	}
+}
+
+// TestHostedMailboxWaitWakesOnANudge pins the wake for mail written outside
+// the daemon: a hosted wait on a named-store address returns within about a
+// second of a /nudge, well inside its 10 s backstop, even when the nudge
+// names no registered session (the daemon answers it 404).
+func TestHostedMailboxWaitWakesOnANudge(t *testing.T) {
+	h := startHostedDaemon(t)
+	const waitKey = "amber-tide-fox"
+	paths := wsmailbox.Paths{
+		Config: wsconfig.Options{ConfigHome: h.configHome, CacheHome: h.cache},
+		State:  wsstate.Options{CacheHome: h.cache},
+	}
+	store, err := paths.Machine()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := wsmailbox.WithLock(store, func(s *wsmailbox.StoreFile) error {
+		s.Presence["alice"] = wsmailbox.Presence{Name: "alice", Scope: wsmailbox.ScopeMachine, Owner: waitKey, LastSeen: time.Now().UTC().Format(time.RFC3339)}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	root, err := wsstate.CacheRoot(wsstate.Options{CacheHome: h.cache})
+	if err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(root, "mailbox-listening", waitKey+".json")
+	wait := connectHosted(t, h.ep, h.hello(wsdashboard.ProxyModeCLI, []string{"mailbox", "wait", "--session-key", waitKey, "--slug", "alice@machine", "--timeout", "30s", "--format", "json"}, os.Getpid(), nil))
+	waitUntil(t, 5*time.Second, "listening marker written", func() bool { _, err := os.Stat(marker); return err == nil })
+	// Past the wait's first peek, so the mail below is found by a recheck.
+	time.Sleep(300 * time.Millisecond)
+
+	// Written from this process: the daemon sees no in-process write.
+	if err := wsmailbox.WithLock(store, func(s *wsmailbox.StoreFile) error {
+		s.Queues = wsmailbox.AppendQueue(s.Queues, "alice", wsmailbox.Envelope{Content: "outside mail", SentAt: time.Now().UTC().Format(time.RFC3339)})
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	if err := wsdashboard.SendNudge(context.Background(), dashboardTestClient, h.ep, wsdashboard.NudgeBody{ReplyID: "unregistered", Project: h.project}); err == nil || !strings.Contains(err.Error(), "404") {
+		t.Fatalf("unregistered nudge err = %v, want 404", err)
+	}
+	var final map[string]any
+	for final == nil {
+		frame, ok := wait.readLine(15 * time.Second)
+		if !ok {
+			t.Fatal("stream ended before the final frame")
+		}
+		if frame["final"] == true {
+			final = frame
+		}
+	}
+	if elapsed := time.Since(start); elapsed > 3*time.Second {
+		t.Fatalf("the wait returned %v after the nudge, want about a second at most", elapsed)
+	}
+	if code, _ := final["exit_code"].(float64); code != 0 || !strings.Contains(final["data"].(string), "outside mail") {
+		t.Fatalf("final frame = %v, want exit_code 0 with the outside mail", final)
 	}
 }

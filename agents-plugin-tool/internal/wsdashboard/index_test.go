@@ -546,3 +546,48 @@ func TestRefreshSkipsAnAppliedEndedRegistration(t *testing.T) {
 		t.Fatal("an ended session whose project root is gone must still be dropped")
 	}
 }
+
+// countingMailWake counts the daemon's mailbox wake signals.
+type countingMailWake struct {
+	mu            sync.Mutex
+	wakes, nudges int
+}
+
+func (c *countingMailWake) Wake()  { c.mu.Lock(); c.wakes++; c.mu.Unlock() }
+func (c *countingMailWake) Nudge() { c.mu.Lock(); c.nudges++; c.mu.Unlock() }
+
+func (c *countingMailWake) counts() (wakes, nudges int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.wakes, c.nudges
+}
+
+// TestNudgeWakesMailWaitsBeforeTheRegistrationCheck pins the nudge's mail
+// wake: every well-formed nudge signals it, a nudge naming no registered
+// session included (still answered 404), and a malformed one does not.
+func TestNudgeWakesMailWaitsBeforeTheRegistrationCheck(t *testing.T) {
+	dir := t.TempDir()
+	project := t.TempDir()
+	src := newFakeSource()
+	register(t, dir, "alpha", project, time.Now())
+	wake := &countingMailWake{}
+	d := startIndexedDaemon(t, dir, src, time.Hour, func(o *DaemonOptions) { o.MailWake = wake })
+	waitFor(t, "first poll", func() bool { _, ok := d.Index().Session("alpha"); return ok })
+	client := testClient()
+
+	if err := SendNudge(context.Background(), client, d.Endpoint(), NudgeBody{ReplyID: "nobody", Project: project}); err == nil || !strings.Contains(err.Error(), "404") {
+		t.Fatalf("unregistered nudge err = %v, want 404", err)
+	}
+	if wakes, nudges := wake.counts(); nudges != 1 || wakes != 0 {
+		t.Fatalf("after an unregistered nudge: %d wakes, %d nudges; want 0, 1", wakes, nudges)
+	}
+	if err := SendNudge(context.Background(), client, d.Endpoint(), NudgeBody{ReplyID: "alpha", Project: project}); err != nil {
+		t.Fatalf("SendNudge: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/nudge", bytes.NewBufferString(`{not json`))
+	req.Host = "127.0.0.1"
+	d.Handler().ServeHTTP(httptest.NewRecorder(), req)
+	if wakes, nudges := wake.counts(); nudges != 2 || wakes != 0 {
+		t.Fatalf("after a registered and a malformed nudge: %d wakes, %d nudges; want 0, 2", wakes, nudges)
+	}
+}
