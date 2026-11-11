@@ -1747,6 +1747,10 @@ def main() -> int:
     note(f"project_root={os.environ.get('WS_MCP_PROJECT_ROOT', '')}")
 
     os.environ["WS_MCP_RUNTIME_BINARY"] = str(binary)
+    # The process that started this launcher is the harness whose session the
+    # runtime serves. The runtime reads it from here on both paths (its own
+    # environment, or the hello's), so an inherited value never stands.
+    os.environ["WS_MCP_HARNESS_PID"] = str(os.getppid())
     wait_for_rsrc_tree(plugin_dir)
     apply_rsrc_root_env(plugin_dir, os.environ)
     apply_skills_root_env(plugin_dir, os.environ)

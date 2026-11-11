@@ -57,6 +57,13 @@ type Server struct {
 	env      *procEnv
 	ownerPID int
 	debug    *debugRing
+	// diag receives this server's own warnings: stderr, or the daemon's log
+	// for a proxy connection.
+	diag io.Writer
+	// hostedKey is the caller's hosted-session resolution, made once at the
+	// first hostedSessionKey call.
+	hostedOnce sync.Once
+	hostedKey  string
 	// inflight counts the requests being handled; draining refuses new
 	// ones, and inflightDone closes once a draining server goes idle
 	// (Drain).
@@ -175,12 +182,21 @@ const (
 	// dashboard daemon's agent runner sets it on the ws-mcp it attaches to
 	// an agent conversation, which the daemon itself hosts.
 	envNoDashboard = "WS_MCP_NO_DASHBOARD"
-	// envHostedSession marks a session the dashboard daemon hosts, and
-	// envHostedSessionKey carries the lead key the daemon minted for it
-	// (hostedSessionKey). Under both, this ws-mcp leaves the session's
-	// registration to the daemon and holds the session to that key.
+	// envHostedSession marks a session the dashboard daemon hosts,
+	// envHostedSessionKey carries the lead key the daemon minted for it, and
+	// envHostedSessionRow names the session's registration file, whose
+	// host_pid is the one harness process the flag holds for. Every process
+	// below that harness inherits all three, so this ws-mcp honours them
+	// only when its own harness (envHarnessPID) is the one the row names
+	// (hostedSessionKey); it then leaves the session's registration to the
+	// daemon and holds the session to that key.
 	envHostedSession    = "WS_HOSTED_SESSION"
 	envHostedSessionKey = "WS_HOSTED_SESSION_KEY"
+	envHostedSessionRow = "WS_HOSTED_SESSION_ROW"
+	// envHarnessPID is the PID of the process that started this ws-mcp's
+	// launcher: the harness. The launcher sets it on every start, to its
+	// own parent, never an inherited value.
+	envHarnessPID = "WS_MCP_HARNESS_PID"
 	// envDebugLog names a file every debug event is appended to.
 	envDebugLog = "WS_MCP_DEBUG_LOG"
 	// envAllowedTools is the comma-separated tool allowlist.

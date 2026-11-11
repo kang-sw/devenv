@@ -40,11 +40,17 @@ const railMessageRunes = 160
 type RailView struct {
 	Workspaces []RailWorkspace
 	// Live counts the live sessions; CountPolicy sums their open policy
-	// items.
-	Live, CountPolicy int
+	// items, and CountApproval counts those waiting on a tool approval
+	// (RailRow.Approval).
+	Live, CountPolicy, CountApproval int
 	// CanAdd reports a daemon that keeps stored workspaces: the page then
 	// shows the add-workspace and add-worktree buttons.
 	CanAdd bool
+	// CanSpawn reports a daemon that hosts lead sessions: the page then
+	// shows the new-session button on every worktree row and plain-folder
+	// bar. The rail is one render for every viewer, so the page itself
+	// hides the button from a viewer the spawn route would refuse.
+	CanSpawn bool
 }
 
 // RailWorkspace is one repository or plain folder.
@@ -57,9 +63,10 @@ type RailWorkspace struct {
 	// Stored marks a workspace in the stored list; the page offers to
 	// forget it.
 	Stored bool
-	// Live counts the workspace's live sessions.
-	Live      int
-	Worktrees []RailWorktree
+	// Live counts the workspace's live sessions, and Approvals those of
+	// them waiting on a tool approval.
+	Live, Approvals int
+	Worktrees       []RailWorktree
 	// Sessions are the live sessions, Ended the ended ones still inside
 	// endedSessionWindow, of a plain folder.
 	Sessions, Ended []RailRow
@@ -111,6 +118,32 @@ type RailRow struct {
 	// User marks a user message.
 	Message string
 	User    bool
+	// Hosted marks a lead session the daemon spawned and feeds
+	// (Registration.Hosted).
+	Hosted bool
+	// Approval is the tool approval a live hosted session waits on, which
+	// the dashboard answers; nil when it waits on none.
+	Approval *ApprovalWait
+}
+
+// ApprovalWait is the tool approval a hosted session waits on, as a row
+// shows it: the tool and its arguments, one line.
+type ApprovalWait struct {
+	Tool, Args string
+}
+
+// approvalWait is the approval a hosted session waits on: its lead's
+// permission wait, as a present adapter reports it. Any other session's
+// permission wait is answered in its terminal, and is none here.
+func approvalWait(reg Registration, snap *wslive.Snapshot) *ApprovalWait {
+	if !reg.Hosted || snap.Lead.Phase != wslive.PhasePermission {
+		return nil
+	}
+	wait := &ApprovalWait{}
+	if p := snap.Lead.Permission; p != nil {
+		wait.Tool, wait.Args = p.ToolName, p.ArgsPreview
+	}
+	return wait
 }
 
 // railInput is one listed session with what the rail shows of it.
@@ -208,6 +241,9 @@ func buildRailView(sessions []railInput, repos map[string]railRepo, stored []sto
 		if live {
 			view.Live++
 			view.CountPolicy += row.CountPolicy
+			if row.Approval != nil {
+				view.CountApproval++
+			}
 		}
 	}
 	for _, w := range stored {
@@ -230,6 +266,9 @@ func buildRailView(sessions []railInput, repos map[string]railRepo, stored []sto
 		for _, m := range members {
 			if m.row.Live {
 				ws.Live++
+			}
+			if m.row.Approval != nil {
+				ws.Approvals++
 			}
 		}
 		if !ws.Repo {
@@ -379,6 +418,7 @@ func railRow(in railInput, live bool, now time.Time) RailRow {
 		CountPolicy: in.Session.CountPolicy,
 		Message:     in.Message.Text,
 		User:        in.Message.User,
+		Hosted:      reg.Hosted,
 	}
 	snap := in.Snapshot
 	if snap == nil {
@@ -388,6 +428,9 @@ func railRow(in railInput, live bool, now time.Time) RailRow {
 	if adapterPresent(snap, now) {
 		row.Working = leadWorking(snap.Lead.Phase)
 		row.Subagents = levelOneRunning(snap.Agents)
+		if live {
+			row.Approval = approvalWait(reg, snap)
+		}
 	}
 	return row
 }

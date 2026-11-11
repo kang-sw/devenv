@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -50,8 +51,8 @@ type ServerOptions struct {
 	// Harness is the harness kind the caller reported, when known; the
 	// server still detects it from the initialize handshake.
 	Harness string
-	// Diag receives construction-time diagnostics (a rejected config
-	// manifest); nil means stderr.
+	// Diag receives the server's diagnostics (a rejected config manifest at
+	// construction, a hosted session it could not confirm); nil means stderr.
 	Diag io.Writer
 	// Live is the dashboard daemon hosting this server: the dashboard live
 	// layer hands each session's snapshot to it in memory, and writes the
@@ -117,7 +118,7 @@ func NewServerWithOptions(opts ServerOptions) *Server {
 	if diag == nil {
 		diag = os.Stderr
 	}
-	s := &Server{root: filepath.Clean(opts.Root), version: opts.Version, sourceCommit: commit, ownerPID: opts.OwnerPID}
+	s := &Server{root: filepath.Clean(opts.Root), version: opts.Version, sourceCommit: commit, ownerPID: opts.OwnerPID, diag: diag}
 	s.live.host = opts.Live
 	if opts.Env != nil {
 		s.env = newProcEnv(opts.Env)
@@ -245,15 +246,94 @@ func envFlagOn(value string) bool {
 // dashboard off.
 func (s *Server) noDashboardMode() bool { return envFlagOn(s.getenv(envNoDashboard)) }
 
-// hostedSessionKey is the daemon-minted lead key of a session the dashboard
-// daemon hosts: the caller's envHostedSessionKey while envHostedSession is
-// on, else empty. A flag without a key is empty too, so such a session
-// behaves as an unhosted one (its host warns about the missing key).
+// hostedRowPoll and hostedRowWait pace the wait for a hosted session's
+// registration to name its harness process (resolveHostedSession).
+var (
+	hostedRowPoll = 100 * time.Millisecond
+	hostedRowWait = 3 * time.Second
+)
+
+// hostedSessionKey is the daemon-minted lead key of the session this server
+// serves, when the dashboard daemon hosts that session; empty for every
+// other caller. It is resolved at the first call and never again: a server
+// that resolved as an ordinary one stays one, whatever the registration
+// says later.
 func (s *Server) hostedSessionKey() string {
+	s.hostedOnce.Do(func() { s.hostedKey = s.resolveHostedSession() })
+	return s.hostedKey
+}
+
+// resolveHostedSession reads the caller's hosted-session variables. The
+// daemon sets them on the harness it spawns, and every process below that
+// harness inherits them: a second harness the session starts, a CLI call
+// from its shell. So the key holds only for a server whose harness is the
+// process the session's registration names as host_pid:
+//
+//   - envHostedSession off, or no key, row path, or harness PID: not hosted.
+//     The harness PID comes from the launcher, so a ws-mcp started without
+//     it is never hosted.
+//   - host_pid equal to the harness PID: hosted.
+//   - host_pid another process: not hosted, silently. The variables were
+//     inherited.
+//   - host_pid zero or absent, or the row unreadable: the daemon writes the
+//     PID right after it starts the harness, so this waits hostedRowWait
+//     for it, then gives up with one warning.
+func (s *Server) resolveHostedSession() string {
 	if !envFlagOn(s.getenv(envHostedSession)) {
 		return ""
 	}
-	return strings.TrimSpace(s.getenv(envHostedSessionKey))
+	key := strings.TrimSpace(s.getenv(envHostedSessionKey))
+	row := strings.TrimSpace(s.getenv(envHostedSessionRow))
+	harness, _ := strconv.Atoi(strings.TrimSpace(s.getenv(envHarnessPID)))
+	if key == "" || row == "" || harness <= 0 {
+		return ""
+	}
+	deadline := time.Now().Add(hostedRowWait)
+	for {
+		switch pid := hostedRowPID(row); {
+		case pid == harness:
+			return key
+		case pid > 0:
+			return ""
+		}
+		if !time.Now().Before(deadline) {
+			break
+		}
+		time.Sleep(hostedRowPoll)
+	}
+	diag := s.diag
+	if diag == nil {
+		diag = os.Stderr
+	}
+	fmt.Fprintf(diag, "ws-mcp: %s is set, but %s named no harness process within %s; serving an ordinary session\n", envHostedSession, row, hostedRowWait)
+	s.debugEvent("hosted_session.unconfirmed", map[string]any{"row": row, "harness_pid": harness})
+	return ""
+}
+
+// hostedRowPID is the host_pid of the registration file at path; zero when
+// the file is unreadable, does not parse, or names none.
+func hostedRowPID(path string) int {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return 0
+	}
+	var row wsdashboard.Registration
+	if err := json.Unmarshal(raw, &row); err != nil {
+		return 0
+	}
+	return row.HostPID
+}
+
+// DropHarnessSessionEnv removes from this process's environment the
+// variables that tie a ws-mcp to one harness session: the hosted-session
+// variables and the harness PID. The dashboard daemon calls it at start. Its
+// environment is that of whichever session's launcher started it, and the
+// conversations it spawns, with the ws-mcp each attaches without a
+// launcher, would otherwise read that session's as their own.
+func DropHarnessSessionEnv() {
+	for _, name := range []string{envHostedSession, envHostedSessionKey, envHostedSessionRow, envHarnessPID} {
+		_ = os.Unsetenv(name)
+	}
 }
 
 // DashboardApplies reports whether this server's caller takes part in the

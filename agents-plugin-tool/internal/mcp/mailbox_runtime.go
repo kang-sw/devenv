@@ -506,7 +506,11 @@ func (s *Server) publishReplyID(callerSessionKey, root, ownNamed string, contact
 		reapStaleReplyIDs(store, mailboxNow())
 		entry := store.Entries[replyID]
 		entry.LastSeen = nowStr
-		entry.Harness = harness
+		// A caller that does not know its harness (the dashboard daemon
+		// claiming mail for a session it hosts) keeps the recorded one.
+		if harness != "" {
+			entry.Harness = harness
+		}
 		entry.Cwd = root
 		for _, c := range contacts {
 			if c.Address == "" || c.Address == wsmailbox.ReplyIDPrefix+replyID || (ownNamed != "" && c.Address == ownNamed) {

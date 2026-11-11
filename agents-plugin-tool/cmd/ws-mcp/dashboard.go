@@ -35,6 +35,9 @@ func dashboardCommand(args []string) {
 	lockWait := fs.Duration("lock-wait", wsdashboard.DefaultLockWait, "how long to wait for another daemon to release the single-instance lock")
 	_ = fs.Parse(args)
 
+	// Before anything reads the environment or spawns from it: the session
+	// that started this daemon is not one it hosts.
+	mcp.DropHarnessSessionEnv()
 	dir, err := wsdashboard.Dir("")
 	if err != nil {
 		fatal("dashboard", err)
@@ -75,7 +78,16 @@ func dashboardCommand(args []string) {
 	// StartDaemon starts the runner before it returns the daemon, so the
 	// runner's tracker-changed callback is bound once the daemon exists.
 	var trackerChanged lateFunc
-	agents := newAgentRunner(dir, logw, trackerChanged.call)
+	// The holders a predecessor left running are found in the state
+	// directory; the interpreter for a new one is the launcher's own. The
+	// runner takes the manager first: it rejoins its lead sessions'
+	// processes before the manager's first scan replays their records.
+	holders := wsholder.New(wsholder.Options{
+		Dir:    filepath.Join(dir, wsholder.DirName),
+		Python: os.Getenv(wsholder.PythonEnv),
+		Log:    logw,
+	})
+	agents := newAgentRunner(dir, logw, trackerChanged.call, holders)
 	host := &proxyHost{dir: dir, port: *port, lan: *lan, buildTime: *buildTime, contentHash: contentHash, logw: logw, configPath: filepath.Clean(configPath)}
 	// A store's support conversation runs in the store's clone, so an
 	// unregister ends it: right after the dashboard's own, and on the store
@@ -103,14 +115,8 @@ func dashboardCommand(args []string) {
 		MailWake:       wswake.Mailbox,
 		Agents:         agents,
 		Tracker:        &dashboardTracker{h: tracker, err: trackerErr, unregistered: func() { support.CloseUnregistered() }},
-		// The holders a predecessor left running are found in the state
-		// directory; the interpreter for a new one is the launcher's own.
-		Holders: wsholder.New(wsholder.Options{
-			Dir:    filepath.Join(dir, wsholder.DirName),
-			Python: os.Getenv(wsholder.PythonEnv),
-			Log:    logw,
-		}),
-		Support: support,
+		Holders:        holders,
+		Support:        support,
 	})
 	if errors.Is(err, wsdashboard.ErrLocked) {
 		closeTracker()
@@ -224,11 +230,19 @@ func trackerStoreRoot(h *wstrackerhost.Host, newErr error) func(id string) (stri
 // ws-mcp's key store for conversation keys, and this executable as the
 // ws-mcp it attaches to a conversation whose profile allows ws tools.
 // trackerChanged runs after a conversation's successful tracker write.
-func newAgentRunner(dir string, logw io.Writer, trackerChanged func()) *wsagent.Runner {
+func newAgentRunner(dir string, logw io.Writer, trackerChanged func(), holders *wsholder.Manager) *wsagent.Runner {
+	keys := mcp.NewAgentKeyStore()
 	return wsagent.NewRunner(wsagent.Options{
 		Dir:      dir,
 		Backends: map[string]wsagent.Backend{wsagent.BackendClaude: wsagent.ClaudeBackend{}, wsagent.BackendPi: wsagent.PiBackend{}},
-		Keys:     mcp.NewAgentKeyStore(),
+		Keys:     keys,
+		// A lead session's process runs under a session holder with a lead
+		// key of its own.
+		Holders:  wsagent.ManagerHost{Manager: holders},
+		LeadKeys: keys,
+		// The daemon, not the session's own mailbox wait, delivers a lead
+		// session's mail.
+		Mail: mcp.NewLeadMailbox(dir),
 		WSMCP: func(root string) (wsagent.MCPCommand, error) {
 			exe, err := os.Executable()
 			if err != nil {

@@ -116,7 +116,7 @@ func signalOf(t *testing.T, p *streamProcess) (syscall.Signal, bool) {
 		// code, so there is no signal to check.
 		t.Skip("no signals on Windows")
 	}
-	ws, ok := p.cmd.ProcessState.Sys().(syscall.WaitStatus)
+	ws, ok := p.child.(*execChild).cmd.ProcessState.Sys().(syscall.WaitStatus)
 	if !ok {
 		t.Skip("no wait status on this platform")
 	}
@@ -124,7 +124,7 @@ func signalOf(t *testing.T, p *streamProcess) (syscall.Signal, bool) {
 }
 
 // commandName is how a Fatal names p's command: "sh", or "sh.exe" on Windows.
-func commandName(p *streamProcess) string { return filepath.Base(p.cmd.Path) }
+func commandName(p *streamProcess) string { return filepath.Base(p.child.(*execChild).cmd.Path) }
 
 func TestNonZeroExitIsFatalWithStderrTail(t *testing.T) {
 	p := startScript(t, "head -c 5000 /dev/zero | tr '\\0' a >&2; echo boom >&2; exit 3")
@@ -202,8 +202,8 @@ func TestCloseEscalates(t *testing.T) {
 				p := startScript(t, "echo ready; "+holdOn())
 				awaitLine(t, p, "ready")
 				p.Close()
-				if p.cmd.ProcessState.Success() {
-					t.Fatalf("a child ignoring EOF should end killed, got %v", p.cmd.ProcessState)
+				if p.child.(*execChild).cmd.ProcessState.Success() {
+					t.Fatalf("a child ignoring EOF should end killed, got %v", p.child.(*execChild).cmd.ProcessState)
 				}
 				return
 			}
@@ -212,8 +212,8 @@ func TestCloseEscalates(t *testing.T) {
 			p.Close()
 			sig, signaled := signalOf(t, p)
 			switch {
-			case c.signal == 0 && (signaled || !p.cmd.ProcessState.Success()):
-				t.Fatalf("want a clean exit at EOF, got %v", p.cmd.ProcessState)
+			case c.signal == 0 && (signaled || !p.child.(*execChild).cmd.ProcessState.Success()):
+				t.Fatalf("want a clean exit at EOF, got %v", p.child.(*execChild).cmd.ProcessState)
 			case c.signal != 0 && (!signaled || sig != c.signal):
 				t.Fatalf("child ended by %v (signaled %v), want %v", sig, signaled, c.signal)
 			}

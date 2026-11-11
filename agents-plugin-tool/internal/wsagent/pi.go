@@ -238,6 +238,9 @@ func writePiBridge(dir string, servers map[string]any) (string, error) {
 // piArgs is the pi command line for spec, without the executable; bridge
 // is the MCP bridge extension's path, or "" when no MCP server is allowed.
 func piArgs(spec StartSpec, bridge string) []string {
+	if spec.Lead != nil {
+		return piLeadArgs(spec)
+	}
 	p := spec.Profile
 	args := []string{
 		"--mode", "rpc",
@@ -271,11 +274,40 @@ func piArgs(spec StartSpec, bridge string) []string {
 	return args
 }
 
+// piLeadArgs is the pi command line of a lead conversation: RPC mode on the
+// conversation's own session file, with the user's extensions, skills, and
+// context files as an ordinary pi session loads them.
+func piLeadArgs(spec StartSpec) []string {
+	args := []string{
+		"--mode", "rpc",
+		"--session", piSessionFile(spec.Dir),
+		"--session-dir", piDir(spec.Dir),
+	}
+	if spec.Model != "" {
+		args = append(args, "--model", spec.Model)
+	}
+	if spec.Effort != "" {
+		args = append(args, "--thinking", spec.Effort)
+	}
+	return args
+}
+
 // piEnv is the child's environment: env without the ws Pi package's
 // process-role and bootstrap variables a parent Pi session leaves behind,
 // and without a mailbox identity.
 func piEnv(env []string) []string {
 	return harnessEnv(env, []string{"WS_PI_", "WS_MAILBOX"}, nil, map[string]string{"PI_SKIP_VERSION_CHECK": "1"})
+}
+
+// piLeadEnv is a lead conversation's environment: piEnv without the ws
+// variables of the session that started the daemon (leadDropEnv), plus the
+// hosted-session variables.
+func piLeadEnv(spec StartSpec) []string {
+	set := map[string]string{"PI_SKIP_VERSION_CHECK": "1"}
+	for name, value := range spec.Lead.Env {
+		set[name] = value
+	}
+	return harnessEnv(spec.Env, append([]string{"WS_PI_"}, leadDropEnv...), nil, set)
 }
 
 // checkPiToolEntries refuses permission rules: pi's --tools allows whole
@@ -291,6 +323,9 @@ func checkPiToolEntries(p Profile) error {
 
 // Start launches the pi process for spec.
 func (b PiBackend) Start(ctx context.Context, spec StartSpec) (Process, error) {
+	if spec.Lead != nil {
+		return b.startLead(spec)
+	}
 	if err := checkPiToolEntries(spec.Profile); err != nil {
 		return nil, err
 	}
@@ -319,11 +354,36 @@ func (b PiBackend) Start(ctx context.Context, spec StartSpec) (Process, error) {
 	cmd.Dir = spec.Root
 	cmd.Env = piEnv(spec.Env)
 	m := newPiMapper(spec)
-	p, err := startStreamProcess(cmd, m, piProtocol{})
+	p, err := startChild(spec, cmd, m, piProtocol{})
 	if err != nil {
 		return nil, err
 	}
 	return &piProcess{streamProcess: p, mapper: m, effort: spec.Effort}, nil
+}
+
+// startLead launches (or, with a holder to attach to, rejoins) the pi
+// process of a lead conversation.
+func (b PiBackend) startLead(spec StartSpec) (Process, error) {
+	command := b.Command
+	if command == "" {
+		path, err := lookPath("pi")
+		if err != nil {
+			return nil, fmt.Errorf("pi backend: %w", err)
+		}
+		command = path
+	}
+	if err := os.MkdirAll(piDir(spec.Dir), 0o700); err != nil {
+		return nil, err
+	}
+	cmd := exec.Command(command, piLeadArgs(spec)...)
+	cmd.Dir = spec.Root
+	cmd.Env = piLeadEnv(spec)
+	m := newPiMapper(spec)
+	p, err := startChild(spec, cmd, m, piProtocol{})
+	if err != nil {
+		return nil, err
+	}
+	return &piProcess{streamProcess: p, mapper: m, effort: spec.Effort, lead: true}, nil
 }
 
 // piProtocol writes Pi's RPC commands.
@@ -348,11 +408,40 @@ type piProcess struct {
 
 	mu     sync.Mutex
 	effort string
+	// lead marks a lead conversation's process.
+	lead bool
 }
 
 func (p *piProcess) Send(text string) error {
 	p.mapper.aborted.Store(false)
+	if rest, ok := piCompactCommand(text); p.lead && ok {
+		// A typed /compact is no RPC built-in: it is the compact command.
+		line := map[string]any{"type": "compact"}
+		if rest != "" {
+			line["customInstructions"] = rest
+		}
+		return p.writeLine(line)
+	}
 	return p.streamProcess.Send(text)
+}
+
+// piCompactCommand reports whether text is a typed /compact, and returns
+// the instructions after it.
+func piCompactCommand(text string) (string, bool) {
+	text = strings.TrimSpace(text)
+	if text == "/compact" {
+		return "", true
+	}
+	if rest, ok := strings.CutPrefix(text, "/compact "); ok && !strings.Contains(rest, "\n") {
+		return strings.TrimSpace(rest), true
+	}
+	return "", false
+}
+
+// Steer is pi's steer command: the running agent takes the message after
+// its current tool calls, before its next model request.
+func (p *piProcess) Steer(text string) error {
+	return p.writeLine(map[string]any{"type": "steer", "message": text})
 }
 
 // Interrupt aborts the running prompt. Pi answers abort only once the run
@@ -494,6 +583,27 @@ func (m *piMapper) mapLine(line []byte, replies lineReplies) []Event {
 			if l.Success {
 				return m.stats(l.Data)
 			}
+		case "compact":
+			// A lead's typed /compact ran as this command: its answer ends
+			// the turn the send began.
+			if m.spec.Lead != nil {
+				errText := ""
+				if !l.Success {
+					errText = "compact refused: " + l.Error
+				}
+				return m.endTurn(now, errText)
+			}
+		case "steer":
+			// The message was taken from the inbox already; a refusal is
+			// all that is left of it.
+			if !l.Success {
+				return []Event{{Notice: "pi refused a steered message: " + l.Error}}
+			}
+		}
+	case "agent_start":
+		// A lead's run may start with no send (a pushed batch).
+		if m.spec.Lead != nil {
+			return []Event{{TurnStart: true}}
 		}
 	case "message_end":
 		return m.message(l.Message, now)
@@ -568,8 +678,11 @@ func (m *piMapper) message(raw json.RawMessage, now int64) []Event {
 		for _, t := range msg.ToolsAdded {
 			added = append(added, t.Name)
 		}
-		if err := checkPiTools(added, m.surface); err != nil {
-			return []Event{{Fatal: err}}
+		// A lead runs the user's own loadout; only a profile's is checked.
+		if m.spec.Lead == nil {
+			if err := checkPiTools(added, m.surface); err != nil {
+				return []Event{{Fatal: err}}
+			}
 		}
 	case "assistant":
 		m.messages++

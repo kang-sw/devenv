@@ -88,6 +88,22 @@ type Registration struct {
 	// Unlisted keeps the session out of the index page; its own page is
 	// still served.
 	Unlisted bool `json:"unlisted,omitempty"`
+	// Hosted marks a lead session the daemon's agent runner spawned and
+	// feeds (a headless harness under a session holder). The runner, not a
+	// ws-mcp, writes this row; the session keeps its session record, so the
+	// daemon reads it as any lead session.
+	Hosted bool `json:"hosted,omitempty"`
+	// HostPID is the hosted session's harness process: the one process the
+	// hosted-session flag holds for. The runner writes 0 before each spawn
+	// and the child's PID right after it, so a harness reading 0 waits
+	// briefly and one reading another PID runs as a plain session.
+	HostPID int `json:"host_pid,omitempty"`
+}
+
+// RegistrationPath is the registration file of session replyID under dir:
+// what a hosted session's harness reads to check HostPID.
+func RegistrationPath(dir, replyID string) string {
+	return filepath.Join(SessionDir(dir, replyID), registrationFileName)
 }
 
 // Live is the served-session liveness rule: a session is live while it has

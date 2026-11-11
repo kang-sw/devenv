@@ -7,7 +7,8 @@
   // ({ load(key), save(key, value or null) }, which must not throw), so the
   // page works the same with storage absent; nothing reaches the server.
   // The DOM helpers touch only the elements they are given; the popover
-  // helpers at the end are pure.
+  // helpers at the end, and the approval card's input preview after them,
+  // are pure.
   var DRAFT = "ws.dashboard.draft.", DRAFTS = "ws.dashboard.drafts";
   var STARS = "ws.dashboard.stars", COLLAPSED = "ws.dashboard.railcol";
   // DRAFT_CAP bounds the sessions whose drafts are kept; the oldest saved
@@ -188,6 +189,40 @@
     };
   }
 
+  // leadBody is the spawn request for a hosted lead session in root from
+  // the form f: the harness, and a model, effort, and permission mode only
+  // when one was picked (none leaves the harness's own). Only a Claude
+  // session takes a permission mode.
+  function leadBody(root, f) {
+    var body = { root: root, harness: String(f.harness || "") };
+    if (f.model) body.model = String(f.model);
+    if (f.effort) body.effort = String(f.effort);
+    if (f.mode && body.harness === "claude") body.permission_mode = String(f.mode);
+    return body;
+  }
+
+  // APPROVAL_CAP bounds an approval card's input preview.
+  var APPROVAL_CAP = 4000;
+  // approvalText is a tool call's input as an approval card shows it: a
+  // shell call's command; a file call's path, then what it writes (an
+  // edit's old lines under "-" and new ones under "+", a write's content);
+  // a fetch's address; any other input as indented JSON. Capped at
+  // APPROVAL_CAP characters.
+  function approvalText(input) {
+    var text = "";
+    function lines(mark, s) { return String(s).split("\n").map(function (l) { return mark + l; }).join("\n"); }
+    if (input === null || input === undefined) text = "";
+    else if (typeof input !== "object" || Array.isArray(input)) text = typeof input === "string" ? input : JSON.stringify(input, null, 2);
+    else if (typeof input.command === "string") text = input.command;
+    else if (typeof input.file_path === "string") {
+      text = input.file_path;
+      if (typeof input.new_string === "string") text += "\n" + (input.old_string ? lines("- ", input.old_string) + "\n" : "") + lines("+ ", input.new_string);
+      else if (typeof input.content === "string") text += "\n" + input.content;
+    } else if (typeof input.url === "string") text = input.url;
+    else if (Object.keys(input).length) text = JSON.stringify(input, null, 2);
+    return text.length > APPROVAL_CAP ? text.slice(0, APPROVAL_CAP) + "\u2026" : text;
+  }
+
   window.WsRail = {
     DRAFT_CAP: DRAFT_CAP,
     drafts: drafts,
@@ -200,6 +235,8 @@
     leaveGuard: leaveGuard,
     popPlace: popPlace,
     matchBranches: matchBranches,
-    worktreeBody: worktreeBody
+    worktreeBody: worktreeBody,
+    leadBody: leadBody,
+    approvalText: approvalText
   };
 })();

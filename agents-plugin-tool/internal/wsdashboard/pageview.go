@@ -51,6 +51,10 @@ type SessionView struct {
 	// the page shows the lead bar, the subagent tree, the conversation, the
 	// composer, and the layout control. Without one the page is board-first.
 	Adapter bool
+	// Hosted marks a lead session the daemon spawned and feeds
+	// (Registration.Hosted): the page answers its tool approvals and
+	// carries its process controls.
+	Hosted  bool
 	Version string
 	// Lang is the page language (wsi18n); empty renders the default. LangPref
 	// is the language the browser chose in the gear menu, empty when it
@@ -415,6 +419,7 @@ func buildSessionView(in pageInputs) SessionView {
 		Harness:     reg.Harness,
 		Live:        reg.Live(in.Now),
 		Adapter:     adapterPresent(in.Snapshot, in.Now),
+		Hosted:      reg.Hosted,
 		Version:     in.Version,
 		HasBoard:    in.Page.HasBoard,
 		Seq:         in.Page.Seq,
@@ -803,6 +808,9 @@ type IndexRow struct {
 	CountPolicy   int
 	// LastSeen is the registration's latest stamp (epoch ms).
 	LastSeen int64
+	// Hosted and Approval are the rail row's (RailRow).
+	Hosted   bool
+	Approval *ApprovalWait
 }
 
 // indexInput is one indexed session with what / shows of it.
@@ -832,9 +840,13 @@ func buildIndexView(sessions []indexInput, now time.Time, version string) IndexV
 			HasBoard:    in.Session.HasBoard,
 			CountPolicy: in.Session.CountPolicy,
 			LastSeen:    reg.LastSeen().UnixMilli(),
+			Hosted:      reg.Hosted,
 		}
 		if adapterPresent(in.Snapshot, now) {
 			row.Adapter = true
+			if row.Live {
+				row.Approval = approvalWait(reg, in.Snapshot)
+			}
 			row.Phase = in.Snapshot.Lead.Phase
 			if row.Phase == "" {
 				row.Phase = wslive.PhaseIdle

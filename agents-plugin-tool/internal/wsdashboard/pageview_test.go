@@ -643,6 +643,84 @@ func TestIndexViewListsLiveAndRecentlyEndedSessions(t *testing.T) {
 	}
 }
 
+// TestHostedSessionMarks pins what a hosted session's page and index row
+// carry. The page: the hosted mark in the head and on <html> (which the
+// page script reads), the box its approval cards go in, and a permission
+// line that does not send the user to a terminal. The index row: the
+// hosted mark, and while the lead waits on an approval the attributes the
+// page's notification reads. A session the daemon does not host has none
+// of these and keeps its terminal wording. The index page marks a browser
+// on the daemon's machine, as a session page does.
+func TestHostedSessionMarks(t *testing.T) {
+	now := testNow
+	wait := wslive.Lead{Activity: wslive.Activity{Phase: wslive.PhasePermission, Permission: &wslive.Permission{ToolName: "Bash", ArgsPreview: "git push", StartedAt: now.UnixMilli()}}}
+	hosted := liveSession("hosted", "/a", now)
+	hosted.Hosted = true
+	cli := liveSession("cli", "/a", now)
+	page := func(s Session) (head, live, html string) {
+		t.Helper()
+		v := buildSessionView(pageInputs{Session: s, Snapshot: liveSnap(now, wait), Now: now, Lookup: lookupOf(nil, nil)})
+		if v.Hosted != s.Hosted {
+			t.Errorf("%s: view hosted = %v", s.ReplyID, v.Hosted)
+		}
+		regions, err := renderSessionRegions(v, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if html, err = renderSessionPage(v, regions, true, ""); err != nil {
+			t.Fatal(err)
+		}
+		return string(regions[regionHead].HTML), string(regions[regionConvLive].HTML), html
+	}
+	head, live, html := page(hosted)
+	if !strings.Contains(head, `<span class="hosted" title="session the dashboard runs">`) {
+		t.Errorf("hosted head lacks the hosted mark: %s", head)
+	}
+	if !strings.Contains(live, `<div class="permwait apslot">`) || !strings.Contains(live, `<b>waiting for approval</b>`) || strings.Contains(live, "terminal") {
+		t.Errorf("hosted permission line: %s", live)
+	}
+	if !strings.Contains(html, ` data-hosted="1"`) || !strings.Contains(html, `<div class="apbox" id="apbox" hidden></div>`) {
+		t.Error("hosted page lacks its mark or the approval box")
+	}
+	head, live, html = page(cli)
+	if strings.Contains(head, `class="hosted"`) || !strings.Contains(live, `<div class="permwait">`) || !strings.Contains(live, `<b>waiting for approval in the terminal</b>`) {
+		t.Errorf("a session the daemon does not host: head %s, permission line %s", head, live)
+	}
+	if strings.Contains(html, ` data-hosted="1"`) || strings.Contains(html, `id="apbox"`) {
+		t.Error("a session the daemon does not host carries the hosted mark or the approval box")
+	}
+
+	view := buildIndexView([]indexInput{
+		{Session: hosted, Snapshot: liveSnap(now, wait)},
+		{Session: cli, Snapshot: liveSnap(now, wait)},
+	}, now, "1.0.0")
+	for _, r := range view.Projects[0].Sessions {
+		if r.Hosted != (r.ReplyID == "hosted") || (r.Approval != nil) != r.Hosted || (r.Approval != nil && *r.Approval != (ApprovalWait{Tool: "Bash", Args: "git push"})) {
+			t.Errorf("index row %s = %+v (approval %+v)", r.ReplyID, r, r.Approval)
+		}
+	}
+	regions, err := renderIndexRegions(view)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := string(regions[regionSessions].HTML)
+	if !strings.Contains(rows, `href="/s/hosted" data-rid="hosted" data-ap="1" data-ap-tool="Bash" data-ap-args="git push">`) || !strings.Contains(rows, `href="/s/cli" data-rid="cli">`) {
+		t.Errorf("index rows: %s", rows)
+	}
+	if n := strings.Count(rows, `<span class="hosted" title="session the dashboard runs">`); n != 1 {
+		t.Errorf("hosted marks on the index = %d, want 1: %s", n, rows)
+	}
+	for local, want := range map[bool]bool{true: true, false: false} {
+		index, err := renderIndexPage(view, regions, nil, local)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.Contains(index, `data-sysopen="1"`); got != want {
+			t.Errorf("index page for a local viewer %v: local mark = %v", local, got)
+		}
+	}
+}
+
 // renderNamed renders one named template of the page set.
 func renderNamed(t *testing.T, name string, data any) string {
 	t.Helper()

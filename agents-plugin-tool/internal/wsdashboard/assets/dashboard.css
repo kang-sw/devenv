@@ -1155,7 +1155,7 @@ body.tk-paged #grid, body.tk-paged #drawer, body.tk-paged #dash-banner, body.tk-
 .pbar .pname { font-size: 14px; font-weight: 700; }
 .pbar .ppath { font-family: var(--wb-mono); font-size: 11.5px; opacity: .7; margin-right: auto; overflow-wrap: anywhere; min-width: 0; }
 .pbar .chip { background: rgb(127 127 127 / .28); color: inherit; }
-.sess { display: grid; grid-template-columns: minmax(0, 1.6fr) 62px 118px 96px 84px; gap: 12px; align-items: center; padding: 8px 12px; text-decoration: none; color: inherit; }
+.sess { display: grid; grid-template-columns: minmax(0, 1.6fr) 80px 118px 96px 84px; gap: 12px; align-items: center; padding: 8px 12px; text-decoration: none; color: inherit; }
 .sess + .sess, .endedhead + .sess { border-top: 1px solid var(--wb-muted); }
 .sess:hover { background: color-mix(in srgb, var(--wb-primary) 6%, var(--wb-card)); }
 .sess.ended { opacity: .6; }
@@ -1418,6 +1418,87 @@ a[data-wl="file"]:not([href]) { color: inherit; }
 .rpop .pbtn.go { background: var(--wb-primary); color: var(--wb-primary-fg); }
 .rpop .pbtn:disabled { opacity: .45; cursor: default; }
 .rpop .pbtn:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: 1px; }
+/* daemon-hosted lead sessions: the hosted mark beside a harness badge; the
+   new-session button at the end of a worktree row and a plain-folder bar,
+   which only a browser on the daemon's machine sees (the spawn route
+   refuses any other); the awaiting-approval ring, chip, and second line of
+   a rail row; the spawn popover's rows, which the header chip's session
+   menu shares; and the approval cards under the conversation */
+.hosted { flex: none; display: inline-grid; place-items: center; width: 14px; height: 14px; color: var(--wb-muted-fg); }
+.hosted .i { width: 12px; height: 12px; stroke-width: 1.5; }
+.sess .hostc { display: inline-flex; align-items: center; gap: 4px; justify-self: start; min-width: 0; }
+.chip.perm { background: var(--wb-ph-perm); color: var(--wb-on-ph-perm); }
+.rail .hb.perm { color: var(--wb-perm-ink); }
+.rail .hb.perm .rtrk { stroke: var(--wb-perm-ink); }
+.rail .s2.ap .who { color: var(--wb-perm-ink); }
+.rail .rnew { margin-left: auto; flex: none; display: inline-flex; align-items: center; gap: 2px; height: 18px; padding: 0 6px 0 4px; border: 0; border-radius: 5px; font: inherit; font-size: 11px; font-weight: 700; white-space: nowrap; background: transparent; color: var(--wb-muted-fg); cursor: pointer; opacity: .7; }
+.rail .rnew .i { width: 11px; height: 11px; stroke-width: 2; }
+.rail .rnew:hover, .rail .rnew[aria-expanded="true"] { opacity: 1; color: var(--wb-primary); background: var(--wb-muted); }
+.rail .rnew:focus-visible { outline: 1.5px solid currentColor; outline-offset: 1px; }
+.rail .wthd .gs + .rnew { margin-left: 0; }
+.rail .wsbar .rnew { margin-left: 0; color: inherit; }
+.rail .wsbar .rnew:hover, .rail .wsbar .rnew[aria-expanded="true"] { color: inherit; background: rgb(127 127 127 / .22); }
+.rail .wsbar .chip.perm + .ct { margin-left: 0; }
+.rail .wsbar .chip.perm { margin-left: auto; }
+html:not([data-sysopen]) .rail .rnew { display: none; }
+.rpop .sploc { display: flex; align-items: center; gap: 5px; min-width: 0; margin-top: -4px; font-size: 11.5px; color: var(--wb-muted-fg); white-space: nowrap; }
+.rpop .sploc .i { width: 12px; height: 12px; flex: none; }
+.rpop .sploc b { font-family: var(--wb-mono); font-weight: 700; color: var(--wb-fg); overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1 auto; }
+.rpop .sploc span { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.rpop .sploc code { font-family: var(--wb-mono); font-size: 11px; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1 1 0; }
+.rpop .spopts { display: grid; gap: 3px; padding-top: 6px; border-top: 1px solid var(--wb-muted); min-width: 0; }
+.rpop .sprc { display: flex; align-items: center; gap: 8px; min-height: 26px; min-width: 0; }
+.rpop .sprc > label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--wb-muted-fg); white-space: nowrap; }
+.rpop .sprc.off > label { opacity: .55; }
+.rpop .spsm { margin-left: auto; width: 160px; max-width: 60%; box-sizing: border-box; font: inherit; font-size: 12px; border: 0; border-radius: 7px; padding: 3px 6px; background: var(--wb-muted); color: inherit; }
+.rpop .spsm.mono { font-family: var(--wb-mono); }
+.rpop .spsm:disabled { opacity: .5; }
+.rpop .spsm:focus-visible { outline: 1.5px solid var(--wb-primary); }
+.rpop .spdesc { margin: -2px 0 2px; font-size: 11.5px; color: var(--wb-muted-fg); text-align: right; overflow-wrap: anywhere; }
+.rpop .spdesc.warn { color: var(--wb-warn-ink); }
+.rpop .spdesc:empty { display: none; }
+.rpop .spacts { display: grid; gap: 2px; padding-top: 6px; border-top: 1px solid var(--wb-muted); }
+.rpop .spact { display: flex; align-items: flex-start; gap: 9px; border: 0; background: transparent; border-radius: 8px; padding: 6px 8px; text-align: left; cursor: pointer; color: inherit; font: inherit; font-size: 13px; }
+.rpop .spact:hover:not(:disabled) { background: var(--wb-muted); }
+.rpop .spact:disabled { opacity: .45; cursor: default; }
+.rpop .spact:focus-visible { outline: 1.5px solid var(--wb-primary); }
+.rpop .spact .i { width: 14px; height: 14px; flex: none; margin-top: 2px; }
+.rpop .spact .gs { display: block; font-size: 11.5px; color: var(--wb-muted-fg); font-weight: 400; }
+.rpop .spact.danger { color: var(--wb-fail); }
+.host.hbtn { cursor: pointer; }
+.host.hbtn .i { width: 11px; height: 11px; stroke-width: 2; }
+.host.hbtn:hover, .host.hbtn[aria-expanded="true"] { background: color-mix(in srgb, var(--wb-primary) 16%, var(--wb-muted)); color: var(--wb-fg); }
+.host.hbtn:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: 1px; }
+.apbox { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 0 12px 10px; }
+.apbox[hidden] { display: none; }
+.apbox [hidden] { display: none !important; }
+.convo.ap-on .permwait.apslot { display: none; }
+.apcard { background: var(--wb-card); border-radius: 10px; box-shadow: var(--wb-shadow), inset 0 0 0 1.5px color-mix(in srgb, var(--wb-ph-perm) 55%, transparent); overflow: hidden; font-size: 13px; }
+.apcard .aph { display: flex; align-items: center; gap: 7px; padding: 7px 11px; background: color-mix(in srgb, var(--wb-ph-perm) 16%, var(--wb-card)); min-width: 0; }
+.apcard .aph > .i { width: 14px; height: 14px; flex: none; color: var(--wb-perm-ink); }
+.apcard .aph code { font-family: var(--wb-mono); font-size: 12px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.apcard .apn, .apcard .apsub { flex: none; font-size: 11px; font-weight: 700; padding: 0 6px; border-radius: 999px; background: var(--wb-muted); color: var(--wb-muted-fg); }
+.apcard .aph .t { margin-left: auto; flex: none; font-size: 11.5px; color: var(--wb-muted-fg); font-variant-numeric: tabular-nums; }
+.apcard .apb { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; padding: 8px 11px 0; }
+.apcard .apb:empty { display: none; }
+.apcard .apdesc { color: var(--wb-muted-fg); font-size: 12.5px; overflow-wrap: anywhere; }
+.apcard .apin { margin: 0; padding: 6px 8px; border-radius: 8px; background: var(--wb-muted); font: 12px/1.45 var(--wb-mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 16em; overflow-y: auto; }
+.apcard .apact, .apcard .apdeny .aprow { display: flex; align-items: center; gap: 6px; padding: 8px 11px; }
+.apcard .btn { gap: 5px; font-size: 12.5px; font-weight: 700; padding: 4px 13px; color: inherit; }
+.apcard .btn .i { width: 13px; height: 13px; stroke-width: 2; }
+.apcard .btn.allow, .apcard .btn.go { background: var(--wb-primary); color: var(--wb-primary-fg); }
+.apcard .btn.go.deny { background: var(--wb-fail); color: var(--wb-card); }
+.apcard .btn:disabled { opacity: .5; cursor: default; }
+.apcard .btn:focus-visible, .apcard .apmsg:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: 1px; }
+.apcard .apdeny { display: grid; grid-template-columns: minmax(0, 1fr); padding: 0 11px; border-top: 1px solid var(--wb-muted); }
+.apcard .apmsg { margin-top: 8px; width: 100%; box-sizing: border-box; min-height: 52px; resize: vertical; font: inherit; font-size: 13px; border: 0; border-radius: 8px; padding: 6px 8px; background: var(--wb-muted); color: inherit; }
+.apcard .apdeny .aprow { padding: 8px 0; }
+.apcard .aprow .apnote { margin-right: auto; min-width: 0; font-size: 11.5px; color: var(--wb-muted-fg); }
+.apcard .aperr { margin: 0; padding: 0 11px 8px; font-size: 11.5px; color: var(--wb-fail); overflow-wrap: anywhere; }
+.apcard .apro, .apneed { display: flex; align-items: flex-start; gap: 7px; padding: 8px 11px; font-size: 12.5px; color: var(--wb-muted-fg); }
+.apcard .apro .i, .apneed .i { width: 13px; height: 13px; flex: none; margin-top: 2px; }
+.apneed { background: color-mix(in srgb, var(--wb-ph-perm) 16%, var(--wb-card)); border-radius: 10px; color: inherit; font-size: 13px; }
+.apneed .i { color: var(--wb-perm-ink); }
 @media (prefers-reduced-motion: reduce) {
   .rail, .rail-open .rail, .rscrim { transition: none; }
   .rail .bots .i { animation: none; }

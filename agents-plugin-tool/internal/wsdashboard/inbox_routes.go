@@ -171,7 +171,7 @@ func (d *Daemon) inboxAnswered(w http.ResponseWriter, s Session, status int, ans
 		if d.mailWake != nil {
 			d.mailWake.Wake()
 		}
-		if s.Agent && d.agents != nil {
+		if (s.Agent || s.Hosted) && d.agents != nil {
 			d.agents.InboxChanged(s.ReplyID)
 		}
 		w.Header().Set("Cache-Control", "no-store")

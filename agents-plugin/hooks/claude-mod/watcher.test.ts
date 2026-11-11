@@ -2255,6 +2255,27 @@ describe('pure helpers', () => {
     )
   })
 
+  // The dashboard daemon delivers a hosted session's mail itself and builds
+  // this same prompt in ws-mcp; its suite pins this literal too. Change the
+  // two together.
+  test('the batch prompt, as the daemon reproduces it for a session it hosts', () => {
+    const note = '[ws note: from a peer lead session (claude, not a worker), with the same authority as yours]\nplease review the branch'
+    expect(formatBatch('ws mailbox', 'mailbox.recv', 'lead-key', [{ reply_to: 'id:abc123', content: note, sent_at: '2026-01-02T03:04:05Z' }])).toBe(
+      '[ws mailbox] 1 message(s) arrived for session_key lead-key. They were already received through mailbox.recv; do not call it again for these.' +
+        '\n\nmail from id:abc123 (2026-01-02T03:04:05Z):\n' +
+        '[ws note: from a peer lead session (claude, not a worker), with the same authority as yours]\nplease review the branch',
+    )
+    expect(
+      formatBatch('ws mailbox', 'mailbox.recv', 'lead-key', [
+        { from: ' alice@machine ', reply_to: 'id:ignored', content: 'first', sent_at: '2026-01-02T03:04:05Z' },
+        { content: 'second' },
+      ]),
+    ).toBe(
+      '[ws mailbox] 2 message(s) arrived for session_key lead-key. They were already received through mailbox.recv; do not call it again for these.' +
+        '\n\nmail from alice@machine (2026-01-02T03:04:05Z):\nfirst\n\nmail from unknown:\nsecond',
+    )
+  })
+
   test('the own named-inbox address comes from lookup_peers self.address', () => {
     const json = (v: unknown) => ({ result: undefined, text: JSON.stringify(v) }) as never
     expect(selfAddress(json({ self: { address: 'lead-ab12@worktree', auto: true }, peers: [] }))).toBe('lead-ab12@worktree')
