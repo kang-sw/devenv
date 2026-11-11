@@ -5,6 +5,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 48e74a17552cf078
 sage-review-completeness-reviewed: 48e74a17552cf078
+completed: 2026-11-11
 ---
 
 # Tracker: daemon event hook
@@ -186,3 +187,49 @@ Verification:
   killed; an event with an old `ts` seen while running is delivered.
 - The event JSON carries `v: 1` and the Decision 9 fields; the command runs
   without a shell in the daemon state directory.
+
+### Result (17c241f70) - 2026-11-11
+
+Implemented in four commits (5732a78de, b2308cbce, 7cc8a772d, 17c241f70):
+
+- `wstracker.Tracker.Activity` derives what one applied event did
+  (`assigned`, `assign_pending`, `comment`, `status`, `closed`) and whom it
+  concerns, from the state folded over the event's causal past
+  (`stateBefore`) plus the record diff of applying it, so a re-read reaches
+  the same verdict. `wstrackerhost.Host.ReadActivity` reads a store's events
+  since a ledger cursor with that activity and the current view.
+- New package `internal/wstrackerhook`, wired from `cmd/ws-mcp/dashboard.go`
+  (not `wsdashboard`, which does not import the host): hooks file
+  `tracker-hooks.json` in the dashboard state directory
+  (`{"hooks": [{command, scope}], "due_soon_hours"}`), strict parsing,
+  reload by size/mtime every 10 s; per-store state
+  `tracker-hooks/<store>.json` (cursor, processed ids, due marks, keyed by
+  registration nonce); one serial queue per hook; `RunCommand` runs argv
+  without a shell in the state directory, 30 s timeout with a process-tree
+  kill (`execjob.KillTree`), no console window on Windows. Reads run on the
+  daemon's store watch and poll signals and every minute (due clock).
+- No hooks file: nothing is read or written. A file appearing while the
+  daemon runs starts every store at its head. An invalid file runs no hook
+  while cursors advance.
+- One ledger event assigning several members gives one hook event per
+  member sharing the ledger `id`. The `due_soon` instant is the start of the
+  due date in local time, and it fires within
+  `[due - threshold, due + 24h)` while a live assignment is not done.
+- The dashboard page opens `#/<store>/<item>` (the event `url`) by entering
+  the store page, replacing the hash with `#/<store>`, and opening the item
+  once the view holds it.
+- The tracker playbook has an Event Hooks section (file, scopes, execution,
+  the v1 event shape, ignore unknown kinds). It is mirrored to the wsflow and
+  pi rsrc trees, with the manifest recomputed.
+
+Verification: remote `go test -count=1` passed for wstracker, wstrackerhost,
+wstrackerhook (also under `-race`), execjob, cmd/ws-mcp, wsdashboard
+(node-executed route test ran), and wsrsrc. `go vet` was clean. The Windows
+build was not compiled (no cross-GOOS run is available).
+
+Lite review: clean with 3 minor findings, left as is. (1) An event older than
+24 h whose ledger mark changes after its id was pruned can still be
+delivered outside a catch-up. This is the accepted edge, and it also reaches
+the mine scope. (2) A popstate-only item-link concern; the `hashchange`
+handler already routes it. (3) No runner-level timeout case; the runner
+treats every exec error alike, and the exec-level test covers the kill.
