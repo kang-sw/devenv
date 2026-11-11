@@ -160,6 +160,9 @@ type State struct {
 
 	agents map[string]*agentState
 	usage  *Usage
+	// host is what a host that runs the harness itself reports (SetHost);
+	// an adapter's reset keeps it.
+	host *Host
 	// batchesEnded counts the tool batches finished so far, the lead's and
 	// every subagent's (BatchesEnded).
 	batchesEnded uint64
@@ -219,7 +222,7 @@ func (st *State) Apply(ev Event, now int64) (Result, error) {
 	var res Result
 	switch ev.Kind {
 	case KindReset:
-		*st = State{replyID: st.replyID, adapter: st.adapter, scrub: st.scrub, agents: map[string]*agentState{}, batchesEnded: st.batchesEnded}
+		*st = State{replyID: st.replyID, adapter: st.adapter, scrub: st.scrub, agents: map[string]*agentState{}, batchesEnded: st.batchesEnded, host: st.host}
 		st.lead.phase = PhaseIdle
 		res.Changed = true
 	case KindTurnStart:
@@ -336,7 +339,12 @@ func (st *State) Apply(ev Event, now int64) (Result, error) {
 				trigger = st.compactTrigger
 			}
 			st.flushTools(&res)
-			res.Ring = append(res.Ring, RingEntry{Kind: RingCompact, Trigger: trigger, CompactFailed: ev.Phase == CompactFailed})
+			entry := RingEntry{Kind: RingCompact, Trigger: trigger, CompactFailed: ev.Phase == CompactFailed}
+			if entry.CompactFailed {
+				// A failed compaction's own error text, when the host has it.
+				entry.Text = cleanLine(st.scrub.scrub(ev.Text), NoticeTextRunes)
+			}
+			res.Ring = append(res.Ring, entry)
 			st.compactStartedAt, st.compactTrigger = 0, ""
 		default:
 			return Result{}, fmt.Errorf("compact phase must be %q, %q, or %q", CompactStart, CompactEnd, CompactFailed)
@@ -760,6 +768,7 @@ func (st *State) Snapshot(now int64) Snapshot {
 	}
 	snap.Lead.ToolGap = st.gap.summary()
 	snap.Usage = st.usage.clone()
+	snap.Host = st.host.clone()
 	for _, a := range st.agents {
 		snap.Agents = append(snap.Agents, Agent{
 			Activity:  a.view(),

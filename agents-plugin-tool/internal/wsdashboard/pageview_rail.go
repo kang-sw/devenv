@@ -47,9 +47,11 @@ type RailView struct {
 	// shows the add-workspace and add-worktree buttons.
 	CanAdd bool
 	// CanSpawn reports a daemon that hosts lead sessions: the page then
-	// shows the new-session button on every worktree row and plain-folder
-	// bar. The rail is one render for every viewer, so the page itself
-	// hides the button from a viewer the spawn route would refuse.
+	// shows the new-session button on every worktree row. A plain folder's
+	// bar has none, since a lead session starts only at a Git worktree root
+	// and the spawn route refuses any other. The rail is one render for
+	// every viewer, so the page itself hides the button from a viewer the
+	// spawn route would refuse.
 	CanSpawn bool
 }
 
@@ -124,6 +126,10 @@ type RailRow struct {
 	// Approval is the tool approval a live hosted session waits on, which
 	// the dashboard answers; nil when it waits on none.
 	Approval *ApprovalWait
+	// Failure is the typed failure (a login needed, a model unavailable, a
+	// usage limit) that keeps a hosted session from working until a turn
+	// succeeds, as its runner reports it (wslive.Host); nil when none.
+	Failure *wslive.Notice
 }
 
 // ApprovalWait is the tool approval a hosted session waits on, as a row
@@ -430,6 +436,9 @@ func railRow(in railInput, live bool, now time.Time) RailRow {
 		row.Subagents = levelOneRunning(snap.Agents)
 		if live {
 			row.Approval = approvalWait(reg, snap)
+		}
+		if snap.Host != nil {
+			row.Failure = snap.Host.Failure
 		}
 	}
 	return row

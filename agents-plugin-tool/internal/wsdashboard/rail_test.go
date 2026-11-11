@@ -273,6 +273,31 @@ func TestRailRowStatus(t *testing.T) {
 	}
 }
 
+// TestRailRowFailure pins the error state: a row takes the typed failure
+// its runner reports in the snapshot's host state while the adapter is
+// present; a stale snapshot, or one without host state, carries none.
+func TestRailRowFailure(t *testing.T) {
+	now := time.Now()
+	ms := now.UnixMilli()
+	fail := &wslive.Notice{Kind: wslive.NoticeLogin, Text: "please run /login"}
+	snap := &wslive.Snapshot{Adapter: "claude", UpdatedAt: ms, HeartbeatMs: 30000, Host: &wslive.Host{Failure: fail}}
+	hosted := railSession("h", "/p", now, time.Time{})
+	hosted.Hosted = true
+	if row := railRow(railInput{Session: hosted, Snapshot: snap}, true, now); row.Failure == nil || *row.Failure != *fail {
+		t.Errorf("a failed session's row = %+v, want its failure", row.Failure)
+	}
+	stale := *snap
+	stale.UpdatedAt = ms - time.Hour.Milliseconds()
+	if row := railRow(railInput{Session: hosted, Snapshot: &stale}, true, now); row.Failure != nil {
+		t.Errorf("a stale snapshot = %+v, want no failure", row.Failure)
+	}
+	bare := *snap
+	bare.Host = &wslive.Host{BackgroundTasks: 1}
+	if row := railRow(railInput{Session: hosted, Snapshot: &bare}, true, now); row.Failure != nil {
+		t.Errorf("host state without a failure = %+v, want none", row.Failure)
+	}
+}
+
 // TestRailRowApproval pins the awaiting-approval state: a live hosted
 // session whose lead waits on a permission carries the tool and its
 // arguments, and does not count as working; a session the daemon does not
@@ -702,18 +727,21 @@ func TestRailMarkupAddButtonsAndForget(t *testing.T) {
 
 // TestRailMarkupHostedSessions pins what the rail shows of hosted sessions.
 // On a daemon that hosts them, whether or not it keeps stored workspaces,
-// every worktree row and every plain folder's bar ends in the new-session
-// button, naming the folder a session would start in; a repository's bar
-// has none. A hosted row carries the hosted mark. A row waiting on an
-// approval has a still ring in place of the working one, the approve chip,
-// the tool and its arguments as its second line, and the attributes the
-// page's notification reads; its bar and the header count it.
+// every worktree row ends in the new-session button, naming the folder a
+// session would start in; a repository's bar and a plain folder's bar have
+// none, since a lead session starts only at a Git worktree root. A hosted
+// row carries the hosted mark. A row waiting on an approval has a still
+// ring in place of the working one, the approve chip, the tool and its
+// arguments as its second line, and the attributes the page's notification
+// reads; its bar and the header count it. A row whose session stopped on a
+// typed failure has a still error ring titled with the failure's kind.
 func TestRailMarkupHostedSessions(t *testing.T) {
 	wait := RailRow{ReplyID: "waits", Harness: "claude", Live: true, Hosted: true, Message: "last reply", Approval: &ApprovalWait{Tool: "mcp__ws__tracker_update", Args: "git push origin develop"}}
 	plain := RailRow{ReplyID: "plain", Harness: "pi", Live: true, Working: true, Message: "hi"}
-	view := RailView{CanSpawn: true, Live: 2, CountApproval: 1, Workspaces: []RailWorkspace{
-		{Name: "repo", Path: "/w/repo", Repo: true, Live: 2, Approvals: 1, Worktrees: []RailWorktree{
-			{Path: "/w/repo", Root: true, Folder: "repo", Branch: "main", HasChanges: true, Changes: 2, Sessions: []RailRow{wait, plain}},
+	failed := RailRow{ReplyID: "failed", Harness: "claude", Live: true, Hosted: true, Failure: &wslive.Notice{Kind: wslive.NoticeUsageLimit, Text: "limit reached"}}
+	view := RailView{CanSpawn: true, Live: 3, CountApproval: 1, Workspaces: []RailWorkspace{
+		{Name: "repo", Path: "/w/repo", Repo: true, Live: 3, Approvals: 1, Worktrees: []RailWorktree{
+			{Path: "/w/repo", Root: true, Folder: "repo", Branch: "main", HasChanges: true, Changes: 2, Sessions: []RailRow{wait, plain, failed}},
 			{Path: "/w/repo-wt", Folder: "repo-wt", Detached: true},
 		}},
 		{Name: "folder", Path: "/w/folder"},
@@ -742,8 +770,8 @@ func TestRailMarkupHostedSessions(t *testing.T) {
 	if n := strings.Count(body, `class="rnew"`); n != 2 {
 		t.Errorf("new-session buttons under the repository = %d, want one per worktree row", n)
 	}
-	if bar, _, _ := strings.Cut(railSection(t, html, "/w/folder"), `<div class="wsbody">`); !strings.Contains(bar, `<button type="button" class="rnew" data-root="/w/folder" data-name="folder" title="Start a session in folder"`) || strings.Contains(bar, chip) {
-		t.Errorf("a plain folder's bar = %s, want the new-session button and no count", bar)
+	if folder := railSection(t, html, "/w/folder"); strings.Contains(folder, `class="rnew"`) || strings.Contains(folder, chip) {
+		t.Errorf("a plain folder = %s, want no new-session button and no count", folder)
 	}
 	rowOf := func(id string) string {
 		_, rest, ok := strings.Cut(body, `data-rid="`+id+`"`)
@@ -776,6 +804,12 @@ func TestRailMarkupHostedSessions(t *testing.T) {
 	}
 	if !strings.Contains(other, "rrun") || !strings.Contains(other, `<span class="s2">hi</span>`) {
 		t.Errorf("the working row lost its ring or message:\n%s", other)
+	}
+	if f := rowOf("failed"); !strings.Contains(f, `<span class="host sm hb err" title="usage limit reached">claude<svg class="ring" aria-hidden="true"><rect class="rtrk"/></svg></span>`) || strings.Contains(f, "rrun") {
+		t.Errorf("the failed row lacks its error ring:\n%s", f)
+	}
+	if strings.Contains(waits, "hb err") || strings.Contains(other, "hb err") {
+		t.Error("a row with no failure shows the error ring")
 	}
 
 	view.CanSpawn = false

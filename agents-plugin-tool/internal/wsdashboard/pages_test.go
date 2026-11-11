@@ -236,7 +236,7 @@ func TestSessionHeadLeadsWithTheProjectAndLightsTheHarnessBadge(t *testing.T) {
 // TestSessionPagesCarryScriptHooks pins the elements and attributes the page
 // script and stylesheet read: the board column, the drawer that holds the
 // panels, the tab bar and its dots, the layout menu, the composer and its
-// interrupt badge and subagent badge, its mention layer behind the message
+// interrupt badge, subagent badge, and background-task badge, its mention layer behind the message
 // box and the file-mention module loaded ahead of the page script, the lead's
 // phase and running subagent counts on the convlive region, the stream
 // indicators, and the banner.
@@ -252,7 +252,7 @@ func TestSessionPagesCarryScriptHooks(t *testing.T) {
 		`class="gmenu gcard"`, `data-layout="auto"`, `data-layout="split"`, `data-layout="tabs"`,
 		`id="ctext"`, `id="cnote"`, `id="csend"`, `aria-label="send"`, `id="sse"`, `id="dash-banner"`,
 		`<div id="composer" class="composer"><div class="cbadges"><button type="button" class="ibadge" id="ibadge"`, `<span class="ilabel">Interrupt</span>`,
-		`</button><span class="sbadge" id="sbadge" title="running subagents: the lead&#39;s own, and (&#43;) those they started" hidden><span class="spin"></span><svg class="i" aria-hidden="true"><use href="#i-agents"/></svg><span class="slabel"></span></span></div>`,
+		`</button><span class="sbwrap"><span class="sbadge" id="sbadge" title="running subagents: the lead&#39;s own, and (&#43;) those they started" hidden><span class="spin"></span><svg class="i" aria-hidden="true"><use href="#i-agents"/></svg><span class="slabel"></span></span><span class="bgbadge" id="bgbadge" title="background tasks the harness runs: shells, monitors, and background subagents" hidden><svg class="i" aria-hidden="true"><use href="#i-clock"/></svg><span class="blabel"></span></span></span></div>`,
 		`<div class="conv clive" data-phase="replying" data-sub="0" data-subdeep="0">`,
 		`<div class="cfield"><div class="chl" id="chl" aria-hidden="true"></div><textarea id="ctext"`,
 	} {
@@ -712,7 +712,8 @@ func TestRenderedPermissionWaitAndEndedSessions(t *testing.T) {
 // TestRenderedCompaction pins the compaction rows: while the lead compacts,
 // the conversation's live region shows one running compaction line in place
 // of the generic activity line and the tree's lead row shows the phase; a
-// landed or failed compaction is a ring entry line naming its trigger.
+// landed or failed compaction is a ring entry line naming its trigger, and a
+// failed one shows the harness's error when the ring entry carries it.
 func TestRenderedCompaction(t *testing.T) {
 	now := testNow
 	started := now.Add(-3 * time.Second).UnixMilli()
@@ -721,6 +722,7 @@ func TestRenderedCompaction(t *testing.T) {
 		{RingEntry: wslive.RingEntry{Kind: wslive.RingCompact, Trigger: wslive.TriggerAuto}, Name: "20261107T000000.000000001Z-a1.json", At: now},
 		{RingEntry: wslive.RingEntry{Kind: wslive.RingCompact, Trigger: wslive.TriggerManual}, Name: "20261107T000000.000000002Z-a2.json", At: now},
 		{RingEntry: wslive.RingEntry{Kind: wslive.RingCompact, CompactFailed: true}, Name: "20261107T000000.000000003Z-a3.json", At: now},
+		{RingEntry: wslive.RingEntry{Kind: wslive.RingCompact, CompactFailed: true, Text: "Conversation too long"}, Name: "20261107T000000.000000004Z-a4.json", At: now},
 	}
 	view := buildSessionView(pageInputs{Session: liveSession("self", "/p", now), Snapshot: liveSnap(now, lead), Ring: ring, Now: now})
 	set, err := renderSessionRegions(view, nil)
@@ -741,7 +743,8 @@ func TestRenderedCompaction(t *testing.T) {
 	for _, want := range []string{
 		`<div class="sysline compaction" data-entry="20261107T000000.000000001Z-a1.json"><span class="mk">✓</span>context compacted (auto)`,
 		`<div class="sysline compaction" data-entry="20261107T000000.000000002Z-a2.json"><span class="mk">✓</span>context compacted (manual)`,
-		`<div class="sysline compaction fail" data-entry="20261107T000000.000000003Z-a3.json"><span class="mk">✗</span>context compaction failed<time`,
+		`<div class="sysline compaction fail" data-entry="20261107T000000.000000003Z-a3.json"><span class="mk">✗</span><span class="nt">context compaction failed</span><time`,
+		`<div class="sysline compaction fail" data-entry="20261107T000000.000000004Z-a4.json"><span class="mk">✗</span><span class="nt">context compaction failed: Conversation too long</span><time`,
 	} {
 		if !strings.Contains(entries, want) {
 			t.Errorf("entries region lacks %q: %s", want, entries)

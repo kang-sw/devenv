@@ -40,6 +40,8 @@ type lineMapper interface {
 type controlAnswer struct {
 	ok  bool
 	err string
+	// body is a success answer's response payload, when it has one.
+	body json.RawMessage
 }
 
 // child is the started process a streamProcess drives: an exec.Cmd of the
@@ -291,6 +293,13 @@ func (p *streamProcess) nextID() string {
 // request sends a request named name and waits for its response. An error
 // answer that says the request is unsupported wraps ErrUnsupported.
 func (p *streamProcess) request(name string, req map[string]any) error {
+	_, err := p.requestBody(name, req, controlTimeout)
+	return err
+}
+
+// requestBody is request that also returns a success answer's response
+// payload, waiting at most timeout.
+func (p *streamProcess) requestBody(name string, req map[string]any, timeout time.Duration) (json.RawMessage, error) {
 	id := p.nextID()
 	ch := make(chan controlAnswer, 1)
 	p.ctlMu.Lock()
@@ -302,21 +311,21 @@ func (p *streamProcess) request(name string, req map[string]any) error {
 		p.ctlMu.Unlock()
 	}()
 	if err := p.writeLine(p.proto.requestLine(id, req)); err != nil {
-		return err
+		return nil, err
 	}
 	select {
 	case a := <-ch:
 		if !a.ok {
 			if strings.Contains(strings.ToLower(a.err), "unsupported") {
-				return fmt.Errorf("%w: %s", ErrUnsupported, a.err)
+				return nil, fmt.Errorf("%w: %s", ErrUnsupported, a.err)
 			}
-			return errors.New(a.err)
+			return nil, errors.New(a.err)
 		}
-		return nil
+		return a.body, nil
 	case <-p.exited:
-		return errors.New("the process exited")
-	case <-time.After(controlTimeout):
-		return fmt.Errorf("no answer to %s within %s", name, controlTimeout)
+		return nil, errors.New("the process exited")
+	case <-time.After(timeout):
+		return nil, fmt.Errorf("no answer to %s within %s", name, timeout)
 	}
 }
 

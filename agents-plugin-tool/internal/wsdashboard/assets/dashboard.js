@@ -55,6 +55,7 @@
     if (t.wsFmt === wsI18n.lang) return;
     t.wsFmt = wsI18n.lang;
     if (f === "wd") t.textContent = new Date(ms).toLocaleDateString(wsI18n.lang, { weekday: "short" });
+    else if (f === "dt") t.textContent = new Date(ms).toLocaleString(wsI18n.lang, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
     else if (!rel) { var d = new Date(ms); t.textContent = two(d.getHours()) + ":" + two(d.getMinutes()); }
     // data-tl names what the time is; the title leads with it.
     var tl = t.getAttribute("data-tl");
@@ -1404,6 +1405,7 @@
   }
   function syncBadge() {
     subBadge(sbadge, doc.querySelector("#r-convlive .clive"), liveMode);
+    bgBadge(doc.querySelector("#r-convlive .clive"));
     if (!ibadge) return;
     var on = liveMode && leadWorking();
     if (!on) interrupting = false;
@@ -1430,6 +1432,27 @@
     var label = wsTn("js.subagents", n + m, m > 0 ? n + "(+" + m + ")" : String(n));
     var el = badge.querySelector(".slabel");
     if (el && el.textContent !== label) el.textContent = label;
+  }
+  // --- background-task badge ---------------------------------------------------
+  // Beside the subagent badge: the clock and the count while the harness of
+  // a session the daemon runs reports running background tasks (its shells,
+  // monitors, and background subagents), from the convlive region's
+  // data-bg; zero, or a session with no such report, hides it. The column
+  // it shares with the subagent badge is too narrow for both full labels,
+  // so "N background tasks" is its title and accessible name (the agents
+  // panel head shows it in full).
+  var bgbadge = $("bgbadge"), bgTitle = bgbadge ? bgbadge.title : "";
+  function bgBadge(clive) {
+    if (!bgbadge) return;
+    var n = clive ? Number(clive.getAttribute("data-bg")) || 0 : 0;
+    bgbadge.hidden = !(liveMode && n > 0);
+    if (bgbadge.hidden) return;
+    var label = wsTn("js.bgtasks", n), el = bgbadge.querySelector(".blabel");
+    if (el && el.textContent !== String(n)) el.textContent = String(n);
+    if (bgbadge.getAttribute("aria-label") !== label) {
+      bgbadge.setAttribute("aria-label", label);
+      bgbadge.title = label + (bgTitle ? " \u00b7 " + bgTitle : "");
+    }
   }
   function interruptTurn() {
     if (interrupting) return;
@@ -5105,9 +5128,13 @@
   // The session menu of the viewed hosted session, on the head's harness
   // chip: model, permission mode, and effort (a pick is sent at once and
   // applies from the next turn), stop (the process ends; the next message
-  // or mail starts it again), and close (the conversation ends for good,
-  // after a confirmation). A refused change shows in the menu's error line,
-  // and the rows return to what the session has.
+  // or mail starts it again), restart (shown while an MCP server stays
+  // broken: the process ends and a new one resumes the conversation), and
+  // close (the conversation ends for good, after a confirmation). Stop and
+  // restart confirm first while the harness runs background tasks, which
+  // they end, and close's confirmation then names their count too. A
+  // refused change shows in the menu's error line, and the rows return to
+  // what the session has.
   function rpSessMake() {
     var P = { gen: 0, busy: false };
     var el = P.el = rpPop(wsT("js.lead.menu"));
@@ -5127,8 +5154,10 @@
       var s = b.appendChild(mk("span", null, title));
       return { b: b, note: s.appendChild(mk("span", "gs")) };
     }
-    var stop = actBtn("stop", "", wsT("js.lead.stop")), close = actBtn("power", " danger", wsT("js.lead.close"));
+    var stop = actBtn("stop", "", wsT("js.lead.stop")), restart = actBtn("reload", "", wsT("js.lead.restart")), close = actBtn("power", " danger", wsT("js.lead.close"));
     close.note.textContent = wsT("js.lead.close.note");
+    // bgTasks is the background task count of the last read state.
+    function bgTasks() { return Number(lead.st && lead.st.background_tasks) || 0; }
     var err = el.appendChild(mk("p", "spnote err"));
     err.setAttribute("aria-live", "polite");
     var failed = "";
@@ -5152,8 +5181,18 @@
         leadFetch();
       });
     }
-    stop.b.addEventListener("click", function () { act("stop", {}); });
-    close.b.addEventListener("click", function () { if (window.confirm(wsT("js.lead.close.confirm"))) act("close", {}); });
+    stop.b.addEventListener("click", function () {
+      var n = bgTasks();
+      if (n < 1 || window.confirm(wsTn("js.lead.stop.confirm", n))) act("stop", {});
+    });
+    restart.b.addEventListener("click", function () {
+      var n = bgTasks();
+      if (n < 1 || window.confirm(wsTn("js.lead.restart.confirm", n))) act("restart", {});
+    });
+    close.b.addEventListener("click", function () {
+      var n = bgTasks();
+      if (window.confirm(n > 0 ? wsTn("js.lead.close.confirm.bg", n) : wsT("js.lead.close.confirm"))) act("close", {});
+    });
     // draw shows the session's state; it runs when the menu opens and after
     // every read of the state while it is open.
     P.draw = function () {
@@ -5165,6 +5204,10 @@
       if (st.backend === "claude") rows.mode.disabled = P.busy;
       stop.b.disabled = P.busy || !st.process;
       stop.note.textContent = wsT(st.process ? "js.lead.stop.note" : "js.lead.stopped");
+      var broken = Array.isArray(st.mcp_broken) ? st.mcp_broken.map(String) : [];
+      restart.b.hidden = !broken.length;
+      restart.b.disabled = P.busy;
+      restart.note.textContent = broken.length ? wsT("js.lead.restart.note", broken.join(", ")) : "";
       close.b.disabled = P.busy;
       err.textContent = text;
       err.hidden = !text;
