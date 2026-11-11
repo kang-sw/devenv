@@ -16,7 +16,7 @@ import {
   type DashboardEvent,
   type IntakeResult,
 } from './dashboard'
-import { hostedMode, missingKeyWarning, type HostedMode } from './hosted'
+import { HARNESS_PID_ARGV, missingKeyWarning, parsePid, resolveHostedMode, unconfirmedWarning, type HostedMode } from './hosted'
 import { createManual, type ReadFamily } from './manual'
 import { expandPreload } from './preload'
 import { createReconnect, reconnectDescription, TOOL_NAME as RECONNECT_TOOL } from './reconnect'
@@ -99,13 +99,16 @@ import {
 //   reply id when it owns no named inbox), each refreshed by events (see
 //   band.tsx).
 //
-// Hosted-session mode (WS_HOSTED_SESSION with WS_HOSTED_SESSION_KEY, set by
-// the dashboard daemon on a session it spawns and feeds, see hosted.ts) turns
-// off input delivery and the feed: no mailbox wait at any arm (so no board
-// drain and no interrupt handling) and no mailbox_watch tool, and no
-// dashboard feed, whatever the knobs read; the manual feature re-logs in
-// with the daemon's key instead of minting. Everything else runs as usual.
-// The flag without a key gates nothing and only warns in the transcript.
+// Hosted-session mode (WS_HOSTED_SESSION with WS_HOSTED_SESSION_KEY and
+// WS_HOSTED_SESSION_ROW, set by the dashboard daemon on a session it spawns
+// and feeds, see hosted.ts) turns off input delivery and the feed: no mailbox
+// wait at any arm (so no board drain and no interrupt handling) and no
+// mailbox_watch tool, and no dashboard feed, whatever the knobs read; the
+// manual feature re-logs in with the daemon's key instead of minting.
+// Everything else runs as usual. It holds only in the harness process the
+// session's registration names, never in one that inherited the variables;
+// the flag without a key, or with a registration that never names a process,
+// gates nothing and only warns in the transcript.
 //
 // Claude Code accepts one hooks module per plugin and one unmatched hook per
 // event in it, so the lifecycle events (session.start, session.end,
@@ -544,6 +547,12 @@ export const register: Register = (on) => {
    */
   let wsGate: Promise<boolean> | undefined
   /**
+   * Hosted-session mode, resolved at the first session.start and kept for
+   * this module instance: a process that resolved as an ordinary session
+   * never becomes a hosted one at a later start.
+   */
+  let hostedGate: Promise<HostedMode> | undefined
+  /**
    * Set when the first manual knob read failed (server unresolved, or the
    * read errored or was refused): the next successful server resolution
    * (a later start, a reconnect) reads it once more. A read that returned a
@@ -761,18 +770,35 @@ export const register: Register = (on) => {
     })
     serverResolved = resolved
 
-    // Hosted-session mode, read once per start; a failed read is an ordinary session.
-    // The engine wants literal variable names here (hosted.ts HOSTED_FLAG_ENV / HOSTED_KEY_ENV).
-    const hostedRead: Promise<HostedMode> = Promise.all([$.env.get('WS_HOSTED_SESSION'), $.env.get('WS_HOSTED_SESSION_KEY')]).then(
-      ([flag, key]) => hostedMode(flag, key),
-      (err) => {
-        $.ui.log(`${$.plugin.name} mod: hosted-session variables not read (${String(err)}); running as an ordinary session`, { to: 'debug' })
-        return { mode: 'off' } as HostedMode
-      },
-    )
-    void hostedRead.then((hosted) => {
-      if (hosted.mode === 'missing-key') $.ui.log(missingKeyWarning($.plugin.name))
-    })
+    // Hosted-session mode; a failed read is an ordinary session.
+    // The engine wants literal variable names here (hosted.ts HOSTED_FLAG_ENV / HOSTED_KEY_ENV / HOSTED_ROW_ENV).
+    hostedGate ??= Promise.all([$.env.get('WS_HOSTED_SESSION'), $.env.get('WS_HOSTED_SESSION_KEY'), $.env.get('WS_HOSTED_SESSION_ROW')])
+      .then(([flag, key, row]) =>
+        resolveHostedMode(
+          { flag, key, row },
+          {
+            // A host command's parent is this harness process.
+            pid: async () => {
+              const ran = await $.process.run(HARNESS_PID_ARGV, { timeoutMs: 10_000 })
+              return ran.exitCode === 0 ? parsePid(ran.stdout) : undefined
+            },
+            readRow: (path) => $.fs.read(path),
+            sleep: (ms) => $.clock.sleep(ms),
+          },
+        ),
+      )
+      .then(
+        (hosted) => {
+          if (hosted.mode === 'missing-key') $.ui.log(missingKeyWarning($.plugin.name))
+          if (hosted.mode === 'unconfirmed') $.ui.log(unconfirmedWarning($.plugin.name, hosted.reason))
+          return hosted
+        },
+        (err) => {
+          $.ui.log(`${$.plugin.name} mod: hosted-session variables not read (${String(err)}); running as an ordinary session`, { to: 'debug' })
+          return { mode: 'off' } as HostedMode
+        },
+      )
+    const hostedRead = hostedGate
 
     // The project check first: outside a ws project the manual knob is never read.
     wsGate ??= (async () => {

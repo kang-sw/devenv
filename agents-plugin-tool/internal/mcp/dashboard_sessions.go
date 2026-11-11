@@ -86,6 +86,10 @@ type dashboardSession struct {
 	lastCall  time.Time
 	// reg is the registration last written; zero while not registered.
 	reg wsdashboard.Registration
+	// hosted marks the session the dashboard daemon hosts
+	// (hostedSessionKey): the daemon registered it, so reg stays zero and
+	// this server never writes its row, yet the daemon serves its page.
+	hosted bool
 	// idle is set once the heartbeat stopped for dashboardIdleCutoff.
 	idle bool
 	// servedPort is the daemon port this session's most recent nudge round
@@ -93,6 +97,10 @@ type dashboardSession struct {
 	// returned. whiteboard.update's pointer line reads it (dashboardPageURL).
 	servedPort int
 }
+
+// served reports whether the daemon has a registration for the session:
+// one this server wrote, or the daemon's own for the session it hosts.
+func (sess *dashboardSession) served() bool { return sess.reg.ReplyID != "" || sess.hosted }
 
 func (d *dashboardLink) clock() time.Time {
 	if d.now != nil {
@@ -177,9 +185,14 @@ func (s *Server) dashboardTouch(sessionKey, root string, force bool) {
 	if !s.dashboardDeclared() {
 		return // no dashboard manifest loaded: the dashboard is off
 	}
-	if s.hostedSessionKey() != "" {
+	if hosted := s.hostedSessionKey(); hosted != "" {
 		// The daemon owns a hosted session's registration: it writes the row
-		// at spawn, so this server neither writes, removes, nor prunes.
+		// at spawn, so this server neither writes, removes, nor prunes. It
+		// still tells the daemon of the session's store changes, and learns
+		// from the answers that the daemon serves the session's page.
+		if sessionKey == hosted {
+			s.dashboardTouchHosted(sessionKey, root)
+		}
 		return
 	}
 	d := &s.dashboard
@@ -241,6 +254,24 @@ func (s *Server) dashboardTouch(sessionKey, root string, force bool) {
 	}
 	sess.reg = reg
 	sess.idle = false
+	s.queueDashboardNudge(sess)
+}
+
+// dashboardTouchHosted records the hosted session's keyed call: its first
+// one sends the nudge a registration would have sent, so the page URL is
+// known by the session's first whiteboard.update. Nothing is written.
+func (s *Server) dashboardTouchHosted(sessionKey, root string) {
+	d := &s.dashboard
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.sessions == nil {
+		d.sessions = map[string]*dashboardSession{}
+	}
+	if _, known := d.sessions[sessionKey]; known {
+		return
+	}
+	sess := &dashboardSession{replyID: wsmailbox.ReplyID(sessionKey), project: root, hosted: true}
+	d.sessions[sessionKey] = sess
 	s.queueDashboardNudge(sess)
 }
 
@@ -346,12 +377,13 @@ func dashboardNudgingTool(name string) bool {
 
 // dashboardNudge tells the daemon, fire and forget, that a store of the
 // session behind sessionKey changed. Nothing is sent for a session that is
-// not registered, which includes every session whose dashboard key is off.
+// not registered, which includes every session whose dashboard key is off;
+// the session the daemon hosts counts as registered.
 func (s *Server) dashboardNudge(sessionKey string) {
 	d := &s.dashboard
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if sess, ok := d.sessions[strings.TrimSpace(sessionKey)]; ok && sess.reg.ReplyID != "" {
+	if sess, ok := d.sessions[strings.TrimSpace(sessionKey)]; ok && sess.served() {
 		s.queueDashboardNudge(sess)
 	}
 }
@@ -366,7 +398,7 @@ func (s *Server) dashboardMailNudge(sessionKey, root string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	sessionKey = strings.TrimSpace(sessionKey)
-	if sess, ok := d.sessions[sessionKey]; ok && sess.reg.ReplyID != "" {
+	if sess, ok := d.sessions[sessionKey]; ok && sess.served() {
 		s.queueDashboardNudge(sess)
 		return
 	}
@@ -471,8 +503,8 @@ func (s *Server) recordDashboardNudges(batch []wsdashboard.NudgeBody, port int) 
 }
 
 // dashboardPageURL is the session's dashboard page URL when the daemon
-// serves it: the session is registered (its dashboard key is on) and its
-// most recent nudge round trip succeeded. It reads only recorded state, so
+// serves it: the session is registered (its dashboard key is on, or the
+// daemon hosts it) and its most recent nudge round trip succeeded. It reads only recorded state, so
 // whiteboard.update never waits on, or fails through, the daemon. The
 // accepted lag: the answer reflects the previous nudge, so the first update
 // after the daemon dies may still name the URL once, and a session's first
@@ -482,7 +514,7 @@ func (s *Server) dashboardPageURL(sessionKey string) (string, bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	sess, ok := d.sessions[strings.TrimSpace(sessionKey)]
-	if !ok || sess.reg.ReplyID == "" || sess.servedPort <= 0 {
+	if !ok || !sess.served() || sess.servedPort <= 0 {
 		return "", false
 	}
 	return fmt.Sprintf("http://127.0.0.1:%d/s/%s", sess.servedPort, sess.replyID), true

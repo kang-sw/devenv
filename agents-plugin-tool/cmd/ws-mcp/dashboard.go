@@ -35,6 +35,9 @@ func dashboardCommand(args []string) {
 	lockWait := fs.Duration("lock-wait", wsdashboard.DefaultLockWait, "how long to wait for another daemon to release the single-instance lock")
 	_ = fs.Parse(args)
 
+	// Before anything reads the environment or spawns from it: the session
+	// that started this daemon is not one it hosts.
+	mcp.DropHarnessSessionEnv()
 	dir, err := wsdashboard.Dir("")
 	if err != nil {
 		fatal("dashboard", err)

@@ -249,7 +249,7 @@ import { assertPolicyTool, readDelegationPolicy } from "./delegation-policy.ts";
 import { registerScopedWriteTools } from "./write-scopes.ts";
 import { registerWebTools } from "./web-tools.ts";
 import { publishSubtree, SubtreeUpstream } from "./subtree-lifecycle.ts";
-import { MISSING_HOSTED_KEY_WARNING, readHostedMode } from "./hosted-session.ts";
+import { MISSING_HOSTED_KEY_WARNING, hostedMode, unconfirmedHostedWarning, type HostedMode } from "./hosted-session.ts";
 import { createDashboardFeed, dashboardAgentEntries, dashboardStatus, registerDashboardLeadEvents, resolveDashboardEnabled, type DashboardFeed } from "./dashboard-feed.ts";
 import { whiteboardSubmissionText } from "./adapter-label.ts";
 
@@ -684,6 +684,8 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
   // slow bridge bootstrap or self-slug lookup cannot install a superseded
   // bridge after a newer startup (or shutdown) has taken ownership.
   let sessionStartEpoch = 0;
+  // The unconfirmed hosted-session warning (hosted-session.ts) shows once, not at every session start.
+  let unconfirmedHostedWarned = false;
   type BridgeGeneration = {
     handle: BridgeHandle;
     tools: AgentToolsHandle;
@@ -849,6 +851,9 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     // `pi-tui.ts`'s `loadHostPiTui()` now (see that file's Addendum doc
     // comment).
     toolPreviewTuiRef.current = await loadToolResultTuiModules();
+    // Hosted session (hosted-session.ts): resolved once per process, before
+    // the bridge reads it for the lead key. Only the owner lead can be one.
+    const hosted: HostedMode = sessionRole === undefined ? await hostedMode() : { mode: "off" };
 
     // 260907 Phase 1: guard the seam so a `startBridge`/`registerAgentTools`
     // failure never falls through into a partial/toolless registration — see
@@ -921,8 +926,11 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     agentDashboardRefreshRef.current = undefined;
     // Hosted session (hosted-session.ts): the daemon feeds the lead and reads
     // its output, so neither the feed nor the mailbox waiter below runs.
-    const hosted = readSpawnRole(process.env) === undefined ? readHostedMode(process.env) : { mode: "off" as const };
     if (hosted.mode === "missing-key") ctx.ui.notify(MISSING_HOSTED_KEY_WARNING, "warning");
+    if (hosted.mode === "unconfirmed" && !unconfirmedHostedWarned) {
+      unconfirmedHostedWarned = true;
+      ctx.ui.notify(unconfirmedHostedWarning(hosted.reason), "warning");
+    }
     if (readSpawnRole(process.env) === undefined && hosted.mode !== "hosted") {
       // Owner lead only: a child is already shown through its parent's feed.
       const feedRegistry = agentTools.rpcRegistry;

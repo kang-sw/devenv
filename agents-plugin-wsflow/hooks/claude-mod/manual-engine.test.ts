@@ -1,6 +1,6 @@
 import { expect, mock, test, type TestBody } from 'claude-code/testing'
 
-import { HOSTED_FLAG_ENV, HOSTED_KEY_ENV, missingKeyWarning } from './hosted'
+import { HARNESS_PID_ARGV, HOSTED_FLAG_ENV, HOSTED_KEY_ENV, HOSTED_ROW_ENV, missingKeyWarning } from './hosted'
 import { adoptionNotice, inlinedPointerText, KEY_STORE_PREFIX, KEY_WAIT_MS, MAILBOX_LINE, pointerText, preloadPointerLine, rowText } from './manual'
 import { KEY_PLACEHOLDER } from './preload'
 import { KNOB } from './register'
@@ -26,6 +26,10 @@ const NO_STATE = '## Session State\n(no restorable state for session key "gone")
 
 type World = ReturnType<typeof world>
 
+/** The world's harness process, and the registration file of the session the daemon hosts in it. */
+const HARNESS_PID = 4242
+const HOSTED_ROW = '/state/sessions/hosted/registration.json'
+
 function world(
   on: On,
   opts: {
@@ -50,8 +54,10 @@ function world(
     sessionScoped?: boolean
     /** The start's mcp.connect answers not connected. */
     serverDown?: boolean
-    /** The session's environment variables (the hosted-session pair among them). */
+    /** The session's environment variables (the hosted-session ones among them). */
     env?: Record<string, string>
+    /** The process the hosted session's registration names; unset: the world's harness. */
+    hostPid?: number
   } = {},
 ) {
   const clock = mock.clock(on, { now: 1_800_000_000_000 })
@@ -119,11 +125,15 @@ function world(
   on('session.end', ($, e) => ({ sessionId: e.sessionId }))
   on('turn.start', ($, e) => ({ turnId: e.turnId }))
   on('turn.complete', ($, e) => ({ text: e.answer }))
-  on('process.run', async () => {
+  on('process.run', async ($, e) => {
     if (!opts.processOk) return { deny: 'no host commands on this surface' }
+    const ran = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+    // The mod asking for its own process id (hosted.ts).
+    if (e.argv.join(' ') === HARNESS_PID_ARGV.join(' ')) return ran(`${HARNESS_PID}\n`)
     if (opts.probeDelayMs) await clock.sleep(opts.probeDelayMs)
-    return { value: { exitCode: 0, stdout: 'Python 3.12.0\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    return ran('Python 3.12.0\n')
   })
+  on('fs.read', ($, e, next) => (e.path === HOSTED_ROW ? { value: JSON.stringify({ reply_id: 'hosted', hosted: true, host_pid: opts.hostPid ?? HARNESS_PID }) } : next(e)))
   on('process.spawn', async function* ($, e, next) {
     const index = w.spawns.length
     w.spawns.push([...e.argv])
@@ -1081,7 +1091,9 @@ test('preload dedupe: a keyed lead-use-mailbox read between two expansions leave
 // every input, so the conversation re-logs in with that key and never mints,
 // no mailbox wait runs at any arm, and the dashboard feed stays off.
 
-const HOSTED = { [HOSTED_FLAG_ENV]: '1', [HOSTED_KEY_ENV]: 'hosted-key' }
+// It holds only in the harness process the session's registration names;
+// the mod reads its own process id through a host command.
+const HOSTED = { [HOSTED_FLAG_ENV]: '1', [HOSTED_KEY_ENV]: 'hosted-key', [HOSTED_ROW_ENV]: HOSTED_ROW }
 const intakeCalls = (w: World) => w.mcpCalls.filter((c) => c.tool === 'dashboard_intake')
 const dashboardReads = (w: World) => w.configCalls.filter((a) => a.key === KNOB.dashboard)
 
@@ -1109,7 +1121,7 @@ test('hosted: the daemon key is re-logged in at start and nothing is minted; no 
 })
 
 test('hosted: a stored key from an earlier run loses to the daemon key', async ($, on) => {
-  const w = world(on, { knobs: ON, env: HOSTED, store: { [`${KEY_STORE_PREFIX}sess-1`]: { sessionKey: 'kept-key', at: 1_800_000_000_000 } } })
+  const w = world(on, { knobs: ON, processOk: true, env: HOSTED, store: { [`${KEY_STORE_PREFIX}sess-1`]: { sessionKey: 'kept-key', at: 1_800_000_000_000 } } })
   w.known.add('hosted-key')
   w.known.add('kept-key')
   await start($, w)
@@ -1118,7 +1130,7 @@ test('hosted: a stored key from an earlier run loses to the daemon key', async (
 })
 
 test('hosted: a refused re-login with the daemon key mints nothing, says so in the transcript, and expansions pass through', async ($, on) => {
-  const w = world(on, { knobs: ON, env: HOSTED })
+  const w = world(on, { knobs: ON, processOk: true, env: HOSTED })
   await start($, w)
   expect(ferruleArgs(w)).toEqual([{ root: '/repo/sub', format: 'json', relogin_session_key: 'hosted-key' }])
   expect(w.minted).toBe(0)
@@ -1156,12 +1168,33 @@ test('dashboard knob on: an ordinary session sends its turns to the intake under
 })
 
 test('hosted with the dashboard knob on: the knob is not read and nothing reaches the intake', async ($, on) => {
-  const w = world(on, { knobs: { ...ON, [KNOB.dashboard]: true }, env: HOSTED })
+  const w = world(on, { knobs: { ...ON, [KNOB.dashboard]: true }, processOk: true, env: HOSTED })
   w.known.add('hosted-key')
   await start($, w)
   await turn($, w)
   expect(dashboardReads(w)).toEqual([])
   expect(intakeCalls(w)).toEqual([])
+})
+
+test('hosted variables inherited by another harness process gate nothing, with no warning: a minted key, an automatic bind, and the feed', LIVE_CHILD, async ($, on) => {
+  const w = world(on, { knobs: { ...ON, [KNOB.dashboard]: true }, processOk: true, env: HOSTED, hostPid: 5555 })
+  w.known.add('hosted-key')
+  await start($, w)
+  expect(w.logs.filter((l) => l.to === 'transcript' && l.text.includes(HOSTED_FLAG_ENV))).toEqual([])
+  expect(ferruleArgs(w)).toEqual([{ root: '/repo/sub', format: 'json' }])
+  expect(boundKeys(w)).toEqual(['minted-1'])
+  await turn($, w)
+  expect(intakeCalls(w).length).toBeGreaterThan(0)
+  expect(intakeCalls(w).every((c) => c.args.session_key === 'minted-1')).toBe(true)
+})
+
+test('hosted variables where no host command runs: the process id is unknown, so a transcript warning and an ordinary session', async ($, on) => {
+  const w = world(on, { knobs: ON, env: HOSTED })
+  w.known.add('hosted-key')
+  await start($, w)
+  expect(w.logs.filter((l) => l.to === 'transcript' && l.text.includes(HOSTED_FLAG_ENV)).length).toBe(1)
+  expect(ferruleArgs(w)).toEqual([{ root: '/repo/sub', format: 'json' }])
+  expect(w.minted).toBe(1)
 })
 
 test('the flag without a key gates nothing: a transcript warning, a minted key, an automatic bind, and the feed', LIVE_CHILD, async ($, on) => {

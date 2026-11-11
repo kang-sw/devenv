@@ -1,6 +1,7 @@
 import importlib.util
 import hashlib
 import json
+import os
 import subprocess
 import tempfile
 import unittest
@@ -435,6 +436,35 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
 
         self.assertEqual(captured["env"]["WS_RSRC_ROOT"], str(plugin_dir / "rsrc"))
         self.assertEqual(captured["env"]["WS_SKILLS_ROOT"], str(plugin_dir / "skills"))
+
+    def test_main_exports_its_parent_as_the_harness_pid_over_an_inherited_one(self):
+        launcher = load_launcher()
+        captured = {}
+
+        def fake_execvpe(binary, args, env):
+            captured["env"] = dict(env)
+
+        launcher.host_os = lambda: "linux"
+        launcher.host_arch = lambda: "amd64"
+        launcher.bootstrap_runtime_forced = lambda: False
+        launcher.local_devenv_runtime_enabled = lambda plugin_dir, os_name: False
+        launcher.runtime_install_forced = lambda plugin_dir, os_name, local_enabled: False
+        launcher.compatibility_stamp_current = lambda *args: True
+        launcher.set_breadcrumb_dir = lambda runtime_dir: None
+        launcher.clear_launch_breadcrumb = lambda: None
+        launcher.detect_project_root = lambda plugin_dir: None
+        launcher.wait_for_rsrc_tree = lambda plugin_dir: None
+        launcher.note = lambda message: None
+
+        # A launcher started below another one inherits that one's value.
+        with mock.patch.object(launcher.os, "execvpe", fake_execvpe):
+            with mock.patch.dict(launcher.os.environ, {"WS_MCP_HARNESS_PID": "1"}, clear=True):
+                self.assertEqual(launcher.main(), 1)
+
+        self.assertEqual(captured["env"]["WS_MCP_HARNESS_PID"], str(os.getppid()))
+        # The daemon path sends the same environment in its hello.
+        hello = launcher.proxy_hello("mcp", ["serve", "--stdio"], captured["env"], "0.0.0")
+        self.assertEqual(hello["env"]["WS_MCP_HARNESS_PID"], str(os.getppid()))
 
     def test_windows_abnormal_exit_writes_complementary_breadcrumb(self):
         launcher = load_launcher()

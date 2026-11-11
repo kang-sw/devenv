@@ -1,6 +1,7 @@
 import { expect, mock, test, type Plugin, type TestBody } from 'claude-code/testing'
 
 import { ENABLED_KEY, FLUSH_MS, OWN_SETTLE_MS } from './captions'
+import { HARNESS_PID_ARGV, ROW_POLL_MS, ROW_WAIT_MS } from './hosted'
 import { KNOB } from './register'
 import { batchPrompt, formatNotice, mailboxLabel, noticeLine, parseRecvText } from './watcher'
 
@@ -23,6 +24,11 @@ const batch = (): Recv => ({
 })
 
 type Drain = 'direct' | 'notice'
+
+/** The world's harness process, and the variables of a session the daemon hosts in it. */
+const HARNESS_PID = 4242
+const HOSTED_ROW = '/state/sessions/hosted/registration.json'
+const HOSTED = { WS_HOSTED_SESSION: '1', WS_HOSTED_SESSION_KEY: 'hosted-key', WS_HOSTED_SESSION_ROW: HOSTED_ROW }
 const DRAINS = ['direct', 'notice'] as const
 
 /** How one mcp.connect answers: after a delay (ms on the mock clock), not connected, or with a rejection. */
@@ -44,6 +50,8 @@ function world(
     envDelays?: number[]
     /** The caption switch (claude.display_summary_enabled) reads true. */
     captions?: boolean
+    /** The process the hosted session's registration names; unset: the world's harness, 0: none yet. */
+    hostPid?: number
   } = {},
 ) {
   const clock = mock.clock(on)
@@ -92,7 +100,12 @@ function world(
     requests: [] as string[],
     /** The next caption replies' text, in order; absent: no answer. */
     replies: [] as string[],
+    /** The process the hosted session's registration names now; a test may write it late. */
+    hostPid: opts.hostPid ?? HARNESS_PID,
+    /** How often the mod asked for its own process id. */
+    pidProbes: 0,
   }
+  on('fs.read', ($, e, next) => (e.path === HOSTED_ROW ? { value: JSON.stringify({ reply_id: 'hosted', hosted: true, host_pid: w.hostPid }) } : next(e)))
   on('store.get', ($, e) => ({ value: w.store.get(e.key) }))
   on('store.set', ($, e) => (w.store.set(e.key, e.value), { value: undefined }))
   on('store.delete', ($, e) => (w.store.delete(e.key), { value: undefined }))
@@ -124,11 +137,12 @@ function world(
     if ((e as { command?: unknown }).command === INTERRUPT) await clock.sleep(100)
     return { result: 'ok' } as never
   })
-  on('process.run', () =>
-    opts.processOk === false
-      ? { deny: 'no host commands on this surface' }
-      : { value: { exitCode: 0, stdout: 'Python 3.12.0\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } },
-  )
+  on('process.run', ($, e) => {
+    if (opts.processOk === false) return { deny: 'no host commands on this surface' }
+    const isPidProbe = e.argv.join(' ') === HARNESS_PID_ARGV.join(' ')
+    if (isPidProbe) w.pidProbes += 1
+    return { value: { exitCode: 0, stdout: isPidProbe ? `${HARNESS_PID}\n` : 'Python 3.12.0\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
   on('tool.register', ($, e, next) => {
     w.plugin = next.origin.plugin
     w.registered.push(e.name)
@@ -555,7 +569,7 @@ test('a start whose env read outlasts a newer start assigns no watcher of its ow
 })
 
 test('hosted session: no mailbox_watch tool, no wait, and no drain knob read, outside a ws project too', async ($, on) => {
-  const w = world(on, { drain: 'direct', env: { WS_HOSTED_SESSION: '1', WS_HOSTED_SESSION_KEY: 'hosted-key' } })
+  const w = world(on, { drain: 'direct', env: HOSTED })
   await start($, w)
   expect(mailboxTools(w)).toEqual([])
   expect(w.spawns).toEqual([])
@@ -563,6 +577,66 @@ test('hosted session: no mailbox_watch tool, no wait, and no drain knob read, ou
   // The reconnect and compaction levers register as everywhere.
   expect(w.registered).toContain('request_compaction')
   expect(w.registered).toContain('request_mcp_reconnect')
+  // Resolved once: a later start reads neither the process id nor a rewritten registration.
+  w.hostPid = 5555
+  await start($, w)
+  expect(w.pidProbes).toBe(1)
+  expect(mailboxTools(w)).toEqual([])
+  expect(w.spawns).toEqual([])
+})
+
+test('hosted variables inherited by another harness process change nothing, with no warning: the bind tool registers and binds a wait', async ($, on) => {
+  const w = world(on, { env: HOSTED, hostPid: 5555 })
+  await start($, w)
+  expect(mailboxTools(w)).toEqual(['mailbox_watch'])
+  await bind($, w, 'k1')
+  expect(w.spawns.length).toBe(1)
+  expect(transcript(w).filter((line) => line.includes('WS_HOSTED_SESSION'))).toEqual([])
+  // Resolved once: the registration naming this process later hosts nothing.
+  w.hostPid = HARNESS_PID
+  await start($, w)
+  expect(w.pidProbes).toBe(1)
+  expect(mailboxTools(w)).toEqual(['mailbox_watch', 'mailbox_watch'])
+})
+
+test('hosted variables without a registration path change nothing, and no process id is read', async ($, on) => {
+  const w = world(on, { env: { WS_HOSTED_SESSION: '1', WS_HOSTED_SESSION_KEY: 'hosted-key' } })
+  await start($, w)
+  expect(mailboxTools(w)).toEqual(['mailbox_watch'])
+  expect(w.pidProbes).toBe(0)
+  expect(transcript(w).filter((line) => line.includes('WS_HOSTED_SESSION'))).toEqual([])
+})
+
+test('a registration that names no process yet holds the mailbox setup until it does: hosted once it names this one', async ($, on) => {
+  const w = world(on, { env: HOSTED, hostPid: 0 })
+  await start($, w)
+  await w.clock.advance(5 * ROW_POLL_MS)
+  expect(mailboxTools(w)).toEqual([])
+  w.hostPid = HARNESS_PID
+  await w.clock.advance(ROW_POLL_MS)
+  expect(mailboxTools(w)).toEqual([])
+  expect(w.spawns).toEqual([])
+  expect(transcript(w).filter((line) => line.includes('WS_HOSTED_SESSION'))).toEqual([])
+  // Past the wait nothing more happens: the mode is settled.
+  await w.clock.advance(ROW_WAIT_MS)
+  expect(mailboxTools(w)).toEqual([])
+})
+
+test('a registration that never names a process: an ordinary session after the wait, with one transcript warning', async ($, on) => {
+  const w = world(on, { env: HOSTED, hostPid: 0 })
+  await start($, w)
+  await w.clock.advance(ROW_WAIT_MS - ROW_POLL_MS)
+  expect(mailboxTools(w)).toEqual([])
+  await w.clock.advance(ROW_POLL_MS)
+  expect(mailboxTools(w)).toEqual(['mailbox_watch'])
+  const warned = () => transcript(w).filter((line) => line.includes('WS_HOSTED_SESSION'))
+  expect(warned().length).toBe(1)
+  expect(warned()[0]).toContain(HOSTED_ROW)
+  // A later start neither waits nor warns again, whatever the registration says by then.
+  w.hostPid = HARNESS_PID
+  await start($, w)
+  expect(mailboxTools(w)).toEqual(['mailbox_watch', 'mailbox_watch'])
+  expect(warned().length).toBe(1)
 })
 
 test('the hosted flag without a key changes nothing: the bind tool registers and binds a wait', async ($, on) => {
