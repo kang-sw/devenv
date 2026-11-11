@@ -815,7 +815,6 @@
   "js.tk.mv.why.hidden": "{0} 已隱藏",
   "js.tk.mv.why.mine": "{0} 既不是你建立的，也沒有指派給你",
   "js.tk.mv.why.sub": "{0} 會進入它自己的子樹",
-  "js.tk.mv.why.topic": "{0} 是主題；主題不接受子項目",
   "js.tk.new.aria": "新項目標題",
   "js.tk.new.close": "關閉 (Esc)",
   "js.tk.new.due": "截止日期：{0}",
