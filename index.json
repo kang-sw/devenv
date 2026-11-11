@@ -383,19 +383,6 @@
     "261110-feat-ws-git-commit-attribution-trailers": {
       "registered_at": "2026-11-10T14:07:46Z"
     },
-    "261110-feat-ws-hosted-session-mode-flag": {
-      "registered_at": "2026-11-10T10:36:04Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-11T02:54:26Z",
-        "impl": {
-          "branch": "impl/develop/yummy-blade-spoof"
-        }
-      }
-    },
     "261110-feat-ws-tracker-daemon-event-hook": {
       "registered_at": "2026-11-10T06:49:16Z"
     },
@@ -422,32 +409,6 @@
     },
     "261111-bug-ws-launcher-dev-daemon-never-replaced": {
       "registered_at": "2026-11-11T00:10:56Z"
-    },
-    "261111-feat-ws-tracker-store-unregister-relabel": {
-      "registered_at": "2026-11-11T01:02:29Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-11T01:47:11Z",
-        "impl": {
-          "branch": "impl/develop/croak-vowed-deuce"
-        }
-      }
-    },
-    "261111-refactor-ws-minimize-recurring-fs-touches": {
-      "registered_at": "2026-11-11T00:33:24Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-11T00:52:37Z",
-        "impl": {
-          "branch": "impl/develop/wagon-depth-morse"
-        }
-      }
     }
   }
 }
