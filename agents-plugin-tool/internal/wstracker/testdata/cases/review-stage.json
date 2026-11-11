@@ -1,6 +1,6 @@
 {
  "name": "review-stage",
- "comment": "Review stage and done/blocked notices. ada.pc-1 is created in review, promoted, demoted, then assigned to maya (the assign promotes it). ada.pc-3 is a review subtask its parent's roll-up leaves out. ada.pc-5: a demote concurrent with an assign that folds after it is dropped; ada.pc-6: a concurrent demote folded before the assign is cleared by it; both end todo. maya blocks ada.pc-1 and raj closes ada.pc-7, so ada gets a blocked and a done notice; maya closes ada.pc-8 (awaiting, in the confirm list) and ada confirms it, which is no notice since ada set it.",
+ "comment": "Review stage and done/blocked notices. ada.pc-1 is created in review, promoted, demoted, then assigned to maya (the assign promotes it). ada.pc-3 is a review subtask its parent's roll-up leaves out. ada.pc-5: a demote concurrent with an assign that folds after it is dropped; ada.pc-6: a concurrent demote folded before the assign is cleared by it; both end todo. maya blocks ada.pc-1 and raj closes ada.pc-7, so ada gets a blocked and a done notice; maya closes ada.pc-8 (in-review, in the confirm list) and ada confirms it, which is no notice since ada set it.",
  "viewers": [
   "ada.pc",
   "maya.pc"

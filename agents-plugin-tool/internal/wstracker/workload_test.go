@@ -63,21 +63,22 @@ func TestAdminTeamAddsTheOutsideGroup(t *testing.T) {
 
 // Counts per status leave out the creator-fallback holding and the held
 // topic; load is todo, doing, and blocked; stale and overdue are inside
-// load (a done or fallback item past its due date is not overdue); idea,
-// awaiting, and fallback stay out of it.
+// load (a done, dropped, or fallback item past its due date is not
+// overdue); idea, in-review, dropped, and fallback stay out of it, each
+// status with its own count.
 func TestTeamRowCounts(t *testing.T) {
 	v := workloadView(t, "ada.pc")
 	kai := teamRow(t, v, "kai")
-	wantCounts := map[string]int{"todo": 2, "doing": 1, "blocked": 1, "awaiting": 1, "idea": 1, "done": 2}
+	wantCounts := map[string]int{"todo": 2, "doing": 1, "blocked": 1, "in-review": 1, "idea": 1, "done": 2, "dropped": 1}
 	if !maps.Equal(kai.Counts, wantCounts) {
 		t.Fatalf("kai counts = %v, want %v", kai.Counts, wantCounts)
 	}
-	wantEq(t, "kai load (awaiting is not)", kai.Load, 4)
+	wantEq(t, "kai load (in-review and dropped are not)", kai.Load, 4)
 	wantEq(t, "kai stale (the doing set five days ago; the blocked set a day ago is not)", kai.Stale, 1)
-	wantEq(t, "kai overdue (the todo past due; the awaiting, the done, and the fallback past due are not)", kai.Overdue, 1)
+	wantEq(t, "kai overdue (the todo past due; the in-review, the dropped, the done, and the fallback past due are not)", kai.Overdue, 1)
 	wantEq(t, "kai fallback-held (the closed fallback is not)", kai.Fallback, 1)
 	wantEq(t, "kai pending (bo's request)", len(kai.Pending), 1)
-	// open lists every live holding not done: the four load rows, the awaiting, the idea, the fallback
+	// open lists every live holding neither done nor dropped: the four load rows, the in-review, the idea, the fallback
 	wantEq(t, "kai open", len(kai.Open), 7)
 	wantEq(t, "bo waiting", len(teamRow(t, v, "bo").Waiting), 1)
 	wantEq(t, "zed load", teamRow(t, v, "zed").Load, 1)

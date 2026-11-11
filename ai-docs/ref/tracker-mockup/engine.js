@@ -28,7 +28,14 @@
   'use strict';
 
   var KINDS = ['task', 'todo', 'topic'];
-  var SETTABLE = ['idea', 'todo', 'doing', 'blocked'];
+  // SETTABLE: what an assignee writes on their own assignment (done goes through
+  // item.close); SUPERIOR_SETTABLE: what an org superior of the assignee writes on
+  // it, the superior's wrap-up (done is final, no review step).
+  var SETTABLE = ['idea', 'todo', 'doing', 'blocked', 'in-review', 'dropped'];
+  var SUPERIOR_SETTABLE = ['blocked', 'done', 'dropped'];
+  // A done or dropped assignment is wrapped up: no status write, handoff, or take
+  // request until it is reopened, and no longer work in anyone's hands.
+  function wrapped(st) { return st === 'done' || st === 'dropped'; }
   var ORIGINS = ['human', 'agent', 'agent-auto'];
   // stage is retired: only older events carry it (see apply), so EDIT_FIELDS, the
   // list a refusal names, leaves it out.
@@ -570,7 +577,7 @@
     if (ORIGINS.indexOf(n.origin) < 0) rej('origin must be human, agent or agent-auto');
     if (n.origin === 'agent-auto' && /^item\.(accept|decline|return|handoff)$/.test(n.type))
       rej('an agent never accepts, declines, returns or hands off an assignment on its own (agent-auto is invalid here)');
-    if (n.origin === 'agent-auto' && n.type !== 'item.status' && n.type !== 'item.close')
+    if (n.origin === 'agent-auto' && (n.type !== 'item.status' && n.type !== 'item.close' || n.type === 'item.status' && p.assignee && p.assignee !== a))
       rej('agent-auto is limited to item.status and item.close on the author\'s own assignment');
 
     switch (n.type) {
@@ -614,7 +621,7 @@
         it = needItem(S, p.item);
         if (it.author !== a && !creatorGone(S, it, a)) rej('only the creator (' + it.author + ') hides ' + it.alias);
         if (it.hidden) rej(it.alias + ' is already hidden');
-        var open = openRecs(S, it.id).filter(function (x) { return x.to !== a && x.status !== 'done'; });
+        var open = openRecs(S, it.id).filter(function (x) { return x.to !== a && !wrapped(x.status); });
         if (open.length) rej('unassign the open assignments first (' + open.map(function (x) { return x.to; }).join(', ') + ')');
         break;
       }
@@ -653,7 +660,7 @@
         if (from !== a && !S.admins[a]) rej('only the assignee (' + from + ') hands off their assignment; an admin may hand off any member\'s');
         r = needRec(S, it.id, from);
         if (r.fallback) rej(from + ' holds ' + it.alias + ' only because nobody else does; assign it instead');
-        if (r.status === 'done') rej('assignment is done; nothing to hand off');
+        if (wrapped(r.status)) rej('assignment is ' + r.status + '; nothing to hand off');
         if (!p.to) rej('to required');
         if (p.to === from) rej('hand off to someone else');
         needMember(S, p.to);
@@ -674,7 +681,7 @@
         var hd = holders(S, it);
         if (hd.length) rej(it.alias + ' has live or pending assignments (' + hd.join(', ') + '); only a task nobody else holds is opened');
         var fbo = liveFallback(S, it.id);
-        if (fbo && fbo.status === 'done') rej(it.alias + ' is done; nothing to open');
+        if (fbo && wrapped(fbo.status)) rej(it.alias + ' is ' + fbo.status + '; nothing to open');
         break;
       }
 
@@ -701,7 +708,7 @@
         if (p.assignee === a) rej(a + ' cannot request their own assignment');
         r = needRec(S, it.id, p.assignee);
         if (r.fallback) rej(p.assignee + ' holds ' + it.alias + ' only because nobody else does; it is taken by a claim once its creator opens it');
-        if (r.status === 'done') rej('assignment is done; nothing to take');
+        if (wrapped(r.status)) rej('assignment is ' + r.status + '; nothing to take');
         if (openRec(S, it.id, a)) rej(a + ' already holds a live or pending assignment on ' + it.alias);
         S.rorder.forEach(function (id) {
           q = S.reqs[id];
@@ -771,20 +778,35 @@
           rej(a + ' has no assignments to withdraw on ' + it.alias);
         break;
 
-      case 'item.status':
+      case 'item.status': {
         it = needItem(S, p.item);
         if (it.kind === 'topic') rej('topics have no status');
-        if (SETTABLE.indexOf(p.status) < 0) rej('status must be idea, todo, doing or blocked (done goes through item.close)');
+        var sw = p.assignee || a;
+        if (sw !== a) { // an org superior's wrap-up, or the assigner's drop, on sw's assignment
+          if (SUPERIOR_SETTABLE.indexOf(p.status) < 0) rej('status on another member\'s assignment must be blocked, done or dropped');
+          r = needRec(S, it.id, sw);
+          if (!below(S.members, a, sw)) {
+            if (r.by !== a) rej('only ' + sw + ' or an org superior of ' + sw + ' sets the status of ' + sw + '\'s assignment');
+            if (p.status !== 'dropped') rej('the assigner (' + a + ') only drops ' + sw + '\'s assignment; ' + p.status + ' is for an org superior of ' + sw);
+          }
+          if (wrapped(r.status)) rej('assignment is ' + r.status + '; reopen it first');
+          break;
+        }
+        if (SETTABLE.indexOf(p.status) < 0) rej('status must be idea, todo, doing, blocked, in-review or dropped (done goes through item.close)');
         r = needRec(S, it.id, a);
-        if (r.status === 'done') rej('assignment is done; reopen it first');
+        if (wrapped(r.status)) rej('assignment is ' + r.status + '; reopen it first');
+        if (p.status === 'dropped' && r.completion === 'assigner' && r.by !== a)
+          rej('the assigner (' + r.by + ') confirms this assignment; only they or an org superior of ' + a + ' drop it');
         break;
+      }
 
       case 'item.close':
         it = needItem(S, p.item);
         if (it.kind === 'topic') rej('topics have no status');
         r = needRec(S, it.id, a);
         if (r.status === 'done') rej('assignment is already done');
-        if (r.status === 'awaiting') rej('already awaiting confirmation by ' + r.by);
+        if (r.status === 'dropped') rej('assignment is dropped; reopen it first');
+        if (r.status === 'in-review' && r.completion === 'assigner') rej('already in review by ' + r.by);
         break;
 
       case 'item.confirm':
@@ -792,9 +814,9 @@
         it = needItem(S, p.item);
         r = liveRec(S, it.id, p.assignee);
         if (!r) rej('no live assignment of ' + it.alias + ' to ' + p.assignee);
-        if (r.by !== a) rej('only the assigner (' + r.by + ') ' + (n.type === 'item.confirm' ? 'confirms' : 'rejects'));
-        if (r.completion !== 'assigner') rej('this assignment does not require confirmation');
-        if (r.status !== 'awaiting') rej('assignment is ' + r.status + ', not awaiting confirmation');
+        if (r.by !== a && !below(S.members, a, r.to))
+          rej('only the assigner (' + r.by + ') or an org superior of ' + r.to + ' ' + (n.type === 'item.confirm' ? 'confirms' : 'rejects'));
+        if (r.status !== 'in-review') rej('assignment is ' + r.status + ', not in review');
         break;
 
       case 'item.reopen':
@@ -802,7 +824,7 @@
         r = liveRec(S, it.id, p.assignee || a);
         if (!r) rej(notAssignee(S, it, p.assignee || a));
         if (r.by !== a && r.to !== a) rej('only the assigner (' + r.by + ') or the assignee (' + r.to + ') reopens');
-        if (r.status !== 'done') rej('assignment is ' + r.status + ', not done');
+        if (!wrapped(r.status)) rej('assignment is ' + r.status + ', not done or dropped');
         break;
 
       case 'comment.add':
@@ -1355,12 +1377,12 @@
         }
         break;
       case 'item.status': case 'item.close': case 'item.confirm': case 'item.reject': case 'item.reopen': {
-        var who = (n.type === 'item.status' || n.type === 'item.close') ? a : (p.assignee || a);
+        var who = n.type === 'item.close' ? a : (p.assignee || a); // item.status: an org superior's write on who's assignment
         r = liveRec(S, p.item, who);
         if (r && r.fallback && r.start !== n && !hb(r.start, n)) r = null; // n had not seen the fallback start: it was meant for the record that ended
         if (!r) { onEnded(S, p.item, who, n, C); break; } // folded onto an assignment a concurrent event ended
         r.writes.push(n);
-        var v = n.type === 'item.status' ? p.status : n.type === 'item.close' ? (r.completion === 'assigner' ? 'awaiting' : 'done') :
+        var v = n.type === 'item.status' ? p.status : n.type === 'item.close' ? (r.completion === 'assigner' ? 'in-review' : 'done') :
           n.type === 'item.confirm' ? 'done' : 'doing';
         var w = write(S, 'st:' + r.id, 'status of ' + who + ' on ' + alias(p.item), n, { status: v, note: p.note || null, by: a, n: n }, C);
         r.status = w.status; r.note = w.note; r.noteBy = w.by; r.last = w.n;
@@ -1565,19 +1587,22 @@
       // a pending rule request holds nothing, so it does not make the item pending
       return recs.some(function (r) { return r.state === 'pending' && !r.ruleRequest; }) ? 'pending' : 'todo';
     }
-    var s = live.map(function (r) { return r.status; });
+    // a dropped assignment is outside the roll-up: the item derives from the rest
+    // (a mix of done and dropped is done), and is dropped only when all are
+    var s = live.map(function (r) { return r.status; }).filter(function (x) { return x !== 'dropped'; });
+    if (!s.length) return 'dropped';
     if (s.every(function (x) { return x === 'done'; })) return 'done';
     if (s.indexOf('blocked') >= 0) return 'blocked';
-    if (s.indexOf('awaiting') >= 0) return 'awaiting';
+    if (s.indexOf('in-review') >= 0) return 'in-review';
     if (s.some(function (x) { return x === 'doing' || x === 'done'; })) return 'doing';
     if (s.every(function (x) { return x === 'idea'; })) return 'idea';
     return 'todo';
   }
   // Pending assignments are excluded from status and roll-up: an item whose only
-  // assignments are pending is not counted; nor is an item at idea.
+  // assignments are pending is not counted; nor is an item at idea, nor a dropped one.
   function counted(g, it) {
     var s = itemStatus(g, it);
-    return it.kind !== 'topic' && s !== 'pending' && s !== 'idea';
+    return it.kind !== 'topic' && s !== 'pending' && s !== 'idea' && s !== 'dropped';
   }
   function subtasksOf(g, id) { return vals(g.items).filter(function (i) { return i.parent === id && !i.hidden; }); }
   function rollup(g, it) {
@@ -1727,7 +1752,7 @@
     });
 
     // ---- viewer-specific lists
-    var A = vals(assignments), RANK = { blocked: 0, doing: 1, todo: 2, idea: 3, awaiting: 4, done: 5 };
+    var A = vals(assignments), RANK = { blocked: 0, doing: 1, todo: 2, idea: 3, 'in-review': 4, done: 5, dropped: 6 };
     function visible(r) { return items[r.item] && !items[r.item].hidden; }
     // (153 b) a held topic is ownership only: in my.assignments, received and the
     // pending badge, never in a status-based list or count
@@ -1744,7 +1769,9 @@
     var pendingToMe = A.filter(function (r) { return r.to === v && r.state === 'pending' && visible(r); });
     var answered = A.filter(function (r) { return r.to === v && !r.forced && r.state !== 'pending' && (r.accepted || r.state === 'declined') && visible(r); });
     var sent = A.filter(function (r) { return r.sender === v && r.to !== v && !r.forced && visible(r); });
-    var confirms = A.filter(function (r) { return r.by === v && r.to !== v && r.state === 'live' && r.status === 'awaiting'; });
+    // the assigner's review list; a self-assigned in-review is its holder's to resolve
+    // as its assigner. An org superior resolves one from the item.
+    var confirms = A.filter(function (r) { return r.by === v && r.state === 'live' && r.status === 'in-review'; });
     var given = Object.keys(items).filter(function (id) {
       return !items[id].hidden && A.some(function (r) { return r.item === id && (r.by === v || r.sender === v) && r.to !== v && (r.state === 'live' || r.state === 'pending'); });
     });
@@ -1755,8 +1782,8 @@
 
     // Notices are derived, never events. accepted: to the accepter's lead at accept
     // time; handoff: to the original assigner when a handoff is accepted; done /
-    // blocked: to the assigner when someone else set that status on a live assignment
-    // (an awaiting one is in the confirm list), keyed by status and time so a later
+    // blocked / dropped: to the assigner when someone else set that status on a live
+    // assignment (an in-review one is in the confirm list), keyed by status and time so a later
     // write of the same status is a new notice; declined / returned (285): to the
     // sender, and for a returned handoff also to the original assigner (291).
     var notices = [];
@@ -1767,7 +1794,7 @@
         if (r.leadAtAccept === v) notices.push(Object.assign({ key: 'acc:' + r.id, kind: 'accepted' }, b1));
         else if (r.handoffOf && assignments[r.handoffOf] && assignments[r.handoffOf].by === v) notices.push(Object.assign({ key: 'ho:' + r.id, kind: 'handoff', from: r.handoffFrom }, b1));
       }
-      if (r.by === v && r.to !== v && r.state === 'live' && (r.status === 'done' || r.status === 'blocked') && r.statusBy && r.statusBy !== v)
+      if (r.by === v && r.to !== v && r.state === 'live' && (wrapped(r.status) || r.status === 'blocked') && r.statusBy && r.statusBy !== v)
         notices.push(Object.assign({ key: 'w:' + r.id + ':' + r.status + ':' + r.lastUpdate, kind: r.status, ts: r.lastUpdate }, base));
       if (r.to === v || !r.ended) return;
       var b2 = Object.assign({ ts: r.ended.ts, endedBy: r.ended.by, note: r.answerNote, from: r.handoffFrom, restores: r.restores }, base);
@@ -1780,22 +1807,22 @@
     // the outside group (outside: true, depth from the org-tree root: a root is 0).
     // Per member: the open, pending, and waiting lists; counts, the member's live
     // assignments per status, a creator-fallback holding left out ((262 a): nobody took
-    // that work); load, those at todo, doing, or blocked (idea, awaiting, and done are
-    // not the member's work in hand); stale and overdue (the item's due
-    // date passed), subsets of load; fallback, the live fallback holdings not done.
+    // that work); load, those at todo, doing, or blocked (idea, in-review, done, and
+    // dropped are not the member's work in hand); stale and overdue (the item's due
+    // date passed), subsets of load; fallback, the live fallback holdings not done or dropped.
     var today = String(now).slice(0, 10), team = [], inTeam = {};
     inTeam[v] = true;
     function teamRow(id, depth, outside) {
       inTeam[id] = true;
       var recs = A.filter(function (r) { return r.to === id && visible(r) && notTopic(r); });
-      var open = recs.filter(function (r) { return r.state === 'live' && r.status !== 'done'; }).sort(byRank);
+      var open = recs.filter(function (r) { return r.state === 'live' && !wrapped(r.status); }).sort(byRank);
       var pend = recs.filter(function (r) { return r.state === 'pending'; });
       var waiting = A.filter(function (r) { return r.sender === id && r.to !== id && r.state === 'pending' && visible(r) && notTopic(r); });
       var row = { id: id, depth: depth, outside: outside, open: ids(open), pending: ids(pend), waiting: ids(waiting),
         counts: {}, load: 0, stale: 0, overdue: 0, fallback: 0, last: recs.map(function (r) { return r.lastUpdate; }).sort().pop() || null };
       recs.forEach(function (r) {
         if (r.state !== 'live') return;
-        if (r.fallback) { if (r.status !== 'done') row.fallback++; return; }
+        if (r.fallback) { if (!wrapped(r.status)) row.fallback++; return; }
         row.counts[r.status] = (row.counts[r.status] || 0) + 1;
         if (TEAM_LOAD.indexOf(r.status) < 0) return;
         row.load++;
@@ -1855,7 +1882,7 @@
       items: items, itemOrder: itemOrder, assignments: assignments, requests: requests, rules: rules, comments: comments, events: events, notices: notices,
       my: {
         assignments: ids(mine.sort(byRank)),
-        today: { work: ids(mine.filter(function (r) { return r.status !== 'done' && r.status !== 'awaiting' && notTopic(r); }).sort(byUrgency)), pending: ids(pendingToMe.sort(byUrgency)), confirms: ids(confirms) },
+        today: { work: ids(mine.filter(function (r) { return !wrapped(r.status) && r.status !== 'in-review' && notTopic(r); }).sort(byUrgency)), pending: ids(pendingToMe.sort(byUrgency)), confirms: ids(confirms) },
         received: { pending: ids(pendingToMe), answered: ids(answered), sent: ids(sent) },
         given: given, created: created, team: team, requests: reqsMine, badge: badge
       },
@@ -2023,7 +2050,7 @@
   }
 
   window.TrackerEngine = {
-    KINDS: KINDS, SETTABLE: SETTABLE, ORIGINS: ORIGINS, DEFAULT_PRIORITY: DEFAULT_PRIORITY, STALE_DAYS: STALE_DAYS,
+    KINDS: KINDS, SETTABLE: SETTABLE, SUPERIOR_SETTABLE: SUPERIOR_SETTABLE, ORIGINS: ORIGINS, DEFAULT_PRIORITY: DEFAULT_PRIORITY, STALE_DAYS: STALE_DAYS,
     DEFAULT_ATTACHMENT_MAX: DEFAULT_ATTACHMENT_MAX,
     displayName: displayName, avatar: avatar, normProfile: normProfile,
     alias: alias, memberOf: memberOf, cloneOf: cloneOf, refOf: refOf, reach: reach,

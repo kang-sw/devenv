@@ -1,6 +1,6 @@
 {
  "name": "workload-balance",
- "comment": "The team roll-up (613 a). ada (admin, root) leads maya > lena > omar > kai, so kai is four levels below ada; bo is a second root with zed below. lena is an admin inside the tree: her subtree (omar, kai) comes first, then the outside group from the roots (ada 0, maya 1, bo 0, zed 1). kai is non-lead, non-admin: no team. kai holds every status: todo (ada.pc#1, and ada.pc#4 overdue: due 2026-11-05), doing gone stale (ada.pc#2, set five days before now), blocked set a day ago (ada.pc#3, not stale), idea (ada.pc#5), done (ada.pc#6, and ada.pc#9 whose due passed: done is never overdue), awaiting past its due date (ada.pc#8: neither load nor overdue), a held topic (ada.pc#10, in no count), a creator-fallback task of his own with a passed due date (kai.pc#7: fallback, not load, not overdue), a closed fallback (kai.pc#8: in no count), and bo request (bo.pc#1: pending, and waiting in bo row).",
+ "comment": "The team roll-up (613 a). ada (admin, root) leads maya > lena > omar > kai, so kai is four levels below ada; bo is a second root with zed below. lena is an admin inside the tree: her subtree (omar, kai) comes first, then the outside group from the roots (ada 0, maya 1, bo 0, zed 1). kai is non-lead, non-admin: no team. kai holds every status: todo (ada.pc#1, and ada.pc#4 overdue: due 2026-11-05), doing gone stale (ada.pc#2, set five days before now), blocked set a day ago (ada.pc#3, not stale), idea (ada.pc#5), done (ada.pc#6, and ada.pc#9 whose due passed: done is never overdue), in-review past its due date (ada.pc#8: neither load nor overdue), dropped past its due date (ada.pc#20: its own count, neither load, overdue, nor open), a held topic (ada.pc#10, in no count), a creator-fallback task of his own with a passed due date (kai.pc#7: fallback, not load, not overdue), a closed fallback (kai.pc#8: in no count), and bo request (bo.pc#1: pending, and waiting in bo row).",
  "viewers": [
   "ada.pc",
   "lena.pc",
@@ -142,7 +142,7 @@
       "item.create",
       {
        "kind": "task",
-       "title": "Kai awaiting",
+       "title": "Kai in review",
        "due": "2026-11-05"
       }
      ],
@@ -250,6 +250,29 @@
       }
      ]
     ]
+   },
+   {
+    "ts": "2026-11-01T09:02:00Z",
+    "seen": {},
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Kai dropped",
+       "due": "2026-11-05"
+      }
+     ],
+     [
+      "item.assign",
+      {
+       "item": "ada.pc#20",
+       "targets": [
+        "kai"
+       ]
+      }
+     ]
+    ]
    }
   ],
   "kai.pc": [
@@ -333,6 +356,22 @@
       {
        "item": "ada.pc#3",
        "status": "blocked"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-05T11:00:00Z",
+    "seen": {
+     "ada.pc": 21,
+     "bo.pc": 4
+    },
+    "events": [
+     [
+      "item.status",
+      {
+       "item": "ada.pc#20",
+       "status": "dropped"
       }
      ]
     ]

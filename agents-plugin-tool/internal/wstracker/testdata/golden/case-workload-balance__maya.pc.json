@@ -178,7 +178,7 @@
    "type": "item.create",
    "payload": {
     "kind": "task",
-    "title": "Kai awaiting",
+    "title": "Kai in review",
     "due": "2026-11-05"
    },
    "seen": {},
@@ -343,6 +343,35 @@
      "kai"
     ],
     "completion": "assigner"
+   },
+   "seen": {},
+   "verdict": "valid"
+  },
+  {
+   "member": "ada",
+   "clone": "pc",
+   "seq": 20,
+   "ts": "2026-11-01T09:02:00Z",
+   "type": "item.create",
+   "payload": {
+    "kind": "task",
+    "title": "Kai dropped",
+    "due": "2026-11-05"
+   },
+   "seen": {},
+   "verdict": "valid"
+  },
+  {
+   "member": "ada",
+   "clone": "pc",
+   "seq": 21,
+   "ts": "2026-11-01T09:02:00Z",
+   "type": "item.assign",
+   "payload": {
+    "item": "ada.pc#20",
+    "targets": [
+     "kai"
+    ]
    },
    "seen": {},
    "verdict": "valid"
@@ -555,6 +584,22 @@
    },
    "seen": {
     "ada.pc": 19,
+    "bo.pc": 4
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "kai",
+   "clone": "pc",
+   "seq": 11,
+   "ts": "2026-11-05T11:00:00Z",
+   "type": "item.status",
+   "payload": {
+    "item": "ada.pc#20",
+    "status": "dropped"
+   },
+   "seen": {
+    "ada.pc": 21,
     "bo.pc": 4
    },
    "verdict": "valid"
@@ -1112,7 +1157,7 @@
     "id": "ada.pc#8",
     "alias": "ada.pc-8",
     "kind": "task",
-    "title": "Kai awaiting",
+    "title": "Kai in review",
     "body": "",
     "project": "",
     "labels": [],
@@ -1125,7 +1170,7 @@
     "ts": "2026-11-01T09:00:00Z",
     "hidden": false,
     "edited": null,
-    "status": "awaiting",
+    "status": "in-review",
     "counted": true,
     "rollup": {
      "total": 0,
@@ -1241,6 +1286,55 @@
     "thread": [
      "ada.pc#10",
      "ada.pc#18"
+    ],
+    "concurrent": 0,
+    "depth": 0,
+    "chain": [
+     "ada"
+    ],
+    "mentions": [],
+    "attachments": [],
+    "refs": [],
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
+   },
+   "ada.pc#20": {
+    "id": "ada.pc#20",
+    "alias": "ada.pc-20",
+    "kind": "task",
+    "title": "Kai dropped",
+    "body": "",
+    "project": "",
+    "labels": [],
+    "due": "2026-11-05",
+    "priority": 1,
+    "priorityLevel": 1,
+    "priorityName": "Task",
+    "parent": null,
+    "author": "ada",
+    "ts": "2026-11-01T09:02:00Z",
+    "hidden": false,
+    "edited": null,
+    "status": "dropped",
+    "counted": false,
+    "rollup": {
+     "total": 0,
+     "counts": {},
+     "blocked": []
+    },
+    "lastActivity": "2026-11-05T11:00:00Z",
+    "started": null,
+    "children": [],
+    "assignments": [
+     "ada.pc#21>kai"
+    ],
+    "pending": [],
+    "thread": [
+     "ada.pc#20",
+     "ada.pc#21",
+     "kai.pc#11"
     ],
     "concurrent": 0,
     "depth": 0,
@@ -1460,6 +1554,7 @@
    "ada.pc#8",
    "ada.pc#9",
    "ada.pc#10",
+   "ada.pc#20",
    "kai.pc#7",
    "kai.pc#8",
    "bo.pc#1",
@@ -1781,7 +1876,7 @@
     "completion": "assigner",
     "state": "live",
     "forced": true,
-    "status": "awaiting",
+    "status": "in-review",
     "note": null,
     "noteBy": "kai",
     "via": "ada.pc#19",
@@ -1804,6 +1899,40 @@
     "statusOrigin": "human",
     "statusBy": "kai",
     "lastUpdate": "2026-11-01T10:00:00Z",
+    "stale": false
+   },
+   "ada.pc#21>kai": {
+    "id": "ada.pc#21>kai",
+    "item": "ada.pc#20",
+    "to": "kai",
+    "by": "ada",
+    "sender": "ada",
+    "completion": "assignee",
+    "state": "live",
+    "forced": true,
+    "status": "dropped",
+    "note": null,
+    "noteBy": "kai",
+    "via": "ada.pc#21",
+    "ts": "2026-11-01T09:02:00Z",
+    "inherited": false,
+    "ruleLevels": null,
+    "rule": null,
+    "ruleRequest": false,
+    "fallback": false,
+    "handoffOf": null,
+    "handoffFrom": null,
+    "handoffNote": null,
+    "answerNote": null,
+    "restored": null,
+    "restores": null,
+    "accepted": null,
+    "leadAtAccept": null,
+    "ended": null,
+    "depth": 4,
+    "statusOrigin": "human",
+    "statusBy": "kai",
+    "lastUpdate": "2026-11-05T11:00:00Z",
     "stale": false
    },
    "kai.pc#7@kai.pc#7>kai": {
@@ -2127,7 +2256,7 @@
     "origin": "human",
     "payload": {
      "kind": "task",
-     "title": "Kai awaiting",
+     "title": "Kai in review",
      "due": "2026-11-05"
     },
     "status": "applied",
@@ -2420,6 +2549,57 @@
     "markers": [],
     "superseded": [],
     "thread": "ada.pc#8",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "ada.pc#20",
+    "alias": "ada.pc-20",
+    "stream": "ada.pc",
+    "member": "ada",
+    "seq": 20,
+    "ts": "2026-11-01T09:02:00Z",
+    "type": "item.create",
+    "origin": "human",
+    "payload": {
+     "kind": "task",
+     "title": "Kai dropped",
+     "due": "2026-11-05"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "ada.pc#20",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "ada.pc#21",
+    "alias": "ada.pc-21",
+    "stream": "ada.pc",
+    "member": "ada",
+    "seq": 21,
+    "ts": "2026-11-01T09:02:00Z",
+    "type": "item.assign",
+    "origin": "human",
+    "payload": {
+     "item": "ada.pc#20",
+     "targets": [
+      "kai"
+     ]
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "ada.pc#20",
     "parentThread": null,
     "local": false,
     "open": false,
@@ -2761,6 +2941,30 @@
     "local": false,
     "open": false,
     "late": false
+   },
+   {
+    "id": "kai.pc#11",
+    "alias": "kai.pc-11",
+    "stream": "kai.pc",
+    "member": "kai",
+    "seq": 11,
+    "ts": "2026-11-05T11:00:00Z",
+    "type": "item.status",
+    "origin": "human",
+    "payload": {
+     "item": "ada.pc#20",
+     "status": "dropped"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "ada.pc#20",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
    }
   ],
   "notices": [],
@@ -2830,13 +3034,14 @@
       "blocked": 1,
       "idea": 1,
       "done": 2,
-      "awaiting": 1
+      "in-review": 1,
+      "dropped": 1
      },
      "load": 4,
      "stale": 1,
      "overdue": 1,
      "fallback": 1,
-     "last": "2026-11-05T10:00:00Z"
+     "last": "2026-11-05T11:00:00Z"
     }
    ],
    "requests": {
@@ -2846,14 +3051,14 @@
    "badge": []
   },
   "stats": {
-   "events": 33,
-   "commits": 5,
+   "events": 36,
+   "commits": 7,
    "flagged": 0,
    "concurrent": 0
   },
   "heads": {
-   "ada.pc": 19,
-   "kai.pc": 10,
+   "ada.pc": 21,
+   "kai.pc": 11,
    "bo.pc": 4
   },
   "now": "2026-11-06T09:00:00Z"
