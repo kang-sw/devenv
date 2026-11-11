@@ -431,6 +431,9 @@
     "261111-bug-ws-launcher-dev-daemon-never-replaced": {
       "registered_at": "2026-11-11T00:10:56Z"
     },
+    "261111-bug-ws-route-facts-invalid-value-passes-ready-gate": {
+      "registered_at": "2026-11-11T09:10:32Z"
+    },
     "261111-bug-ws-tickets-promotion-accepts-invalid-route-fact-enum": {
       "registered_at": "2026-11-11T07:02:07Z"
     },
