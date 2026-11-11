@@ -178,6 +178,28 @@ Verification:
   dialog showing only the selected type's fields under human-readable type
   names, with the priority-level and attachment-limit types gone from it.
 
+### Result
+
+- The Team card ends with a "Store settings" section (`settingsHtml` in
+  `tracker.js`): priority levels (lowest first, default marked) and the
+  attachment limit, each with an Edit button only for an admin; a
+  non-admin reads the same rows with a read-only note. The Team summary
+  line no longer repeats the two settings.
+- Two dialogs write the settings: `sprio` (one name row per level plus
+  blank rows up to the 9-level cap, a radio for the default; blank rows are
+  dropped, an unchanged save is a no-op toast) and `satt` (a byte count).
+- The roles-event dialog offers only the seven membership types, as
+  readable names (`js.tk.rtype.*`), and shows only the selected type's
+  fields (`rfld` wrappers with `data-rt`, toggled by `rtypeShow` on open and
+  on type change).
+- `tracker.query`'s `priority:` line ends with where the levels are
+  changed; all three `rsrc/tracker/tracker.md` copies say the same for both
+  settings.
+- Tests: `TestTrackerQueryPriorityLineNamesWhereLevelsChange` (mcp) and
+  `TestTrackerStoreSettingsLeaveTheRolesDialog` (wsdashboard, a source pin
+  of the dialog and section). The browser check is pending and runs with
+  Phase 2's.
+
 ### Phase 2: labels
 
 Scope:

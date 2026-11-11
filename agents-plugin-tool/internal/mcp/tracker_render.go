@@ -107,6 +107,9 @@ func trackerIndent(scope string, it wstracker.ItemView) int {
 	return 0
 }
 
+// trackerPriorityHint ends the priority line: where the levels are changed.
+const trackerPriorityHint = "an admin changes the levels in the store settings of the dashboard's Team tab, or with tk:roles.set_priority_levels"
+
 // writeTrackerHeader writes the store, viewer, sync, priority, and today
 // lines every store view starts with.
 func writeTrackerHeader(sb *strings.Builder, v *wstrackerhost.StoreView) {
@@ -134,7 +137,9 @@ func writeTrackerHeader(sb *strings.Builder, v *wstrackerhost.StoreView) {
 			levels[i] += " (default)"
 		}
 	}
-	fmt.Fprintf(sb, "priority: %s\n", strings.Join(levels, ", "))
+	// The hint answers "where are the levels changed", which the levels
+	// alone left agents unable to tell the user.
+	fmt.Fprintf(sb, "priority: %s; %s\n", strings.Join(levels, ", "), trackerPriorityHint)
 	t := v.My.Today
 	fmt.Fprintf(sb, "today: my work %d, to answer %d, to confirm %d\n", len(t.Work), len(t.Pending), len(t.Confirms))
 	for _, p := range v.RolesProblems {

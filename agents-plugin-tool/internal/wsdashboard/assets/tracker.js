@@ -1694,13 +1694,23 @@
     else if (k === 'wk-full') { st.full = !st.full; render(); }
   }
 
+  // The store settings: the store-wide values that are not roles, apart from the roles-event
+  // dialog so they can be found. Every member reads them here; an admin's Edit opens the
+  // setting's own dialog.
+  function settingsHtml(admin) {
+    function row(label, value, act) {
+      return '<div class="srow"><span class="slabel">' + label + '</span><span class="sval">' + value + '</span>' + (admin ? btn(act, wsT("js.tk.act.edit"), {}) : '') + '</div>';
+    }
+    var prio = VS.priority.names.map(function (x, i) { return i === VS.priority.default ? wsT("js.tk.team.default", esc(x)) : esc(x); }).join(' &lt; ');
+    return '<div class="tkset"><h3>' + wsT("js.tk.set.title") + '</h3><p class="muted">' + (admin ? wsT("js.tk.set.intro.admin") : wsT("js.tk.set.intro.member")) + '</p>' +
+      row(wsT("js.tk.set.prio"), prio, 'sprio') + row(wsT("js.tk.set.att"), esc(fmtSize(VS.attachments.max_bytes)), 'satt') + '</div>';
+  }
+
   function cardTeam(v) {
     var me = VS.members[v] || {}, R = VS.viewer.reach, levels = {}, seen = {};
     Object.keys(R).forEach(function (k) { levels[R[k]] = (levels[R[k]] || 0) + 1; });
     var summary = wsT("js.tk.team.summary", esc(VS.admins.join(', ')), VS.viewer.lead ? wsT("js.tk.team.lead", esc(VS.viewer.lead)) : wsT("js.tk.team.root"),
-      Object.keys(R).length ? wsT("js.tk.team.reach", Object.keys(levels).map(function (d) { return wsT("js.tk.team.reachat", levels[d], d); }).join(', ')) : wsT("js.tk.team.nofollowers"),
-      VS.priority.names.map(function (x, i) { return i === VS.priority.default ? wsT("js.tk.team.default", esc(x)) : esc(x); }).join(' &lt; '),
-      fmtSize(VS.attachments.max_bytes));
+      Object.keys(R).length ? wsT("js.tk.team.reach", Object.keys(levels).map(function (d) { return wsT("js.tk.team.reachat", levels[d], d); }).join(', ')) : wsT("js.tk.team.nofollowers"));
     function shortKey(k) {
       var w = String(k).split(/\s+/), b = w[1] || w[0];
       if (String(k).length <= 32) return String(k);
@@ -1736,6 +1746,7 @@
     if (lost.length) h += '<p class="err">' + wsT("js.tk.team.unreachable", esc(lost.join(', '))) + '</p>';
     h += '<div class="toolbar" style="margin-top:8px">' + btn('admin', wsT("js.tk.team.adminbtn"), {}) + (X.teamTools ? X.teamTools(ui.store, VS, H) : '') +
       '<span class="muted">' + (me.admin ? wsT("js.tk.team.isadmin") : wsT("js.tk.team.notadmin")) + '</span></div>';
+    h += settingsHtml(!!me.admin);
     var nMem = Object.keys(VS.members).filter(function (id) { return !VS.members[id].removed; }).length;
     return card(wsT("js.tk.tab.org"), wsTn("js.tk.team.members", nMem), h, '', 'card-org');
   }
@@ -2765,11 +2776,22 @@
     pv.classList.toggle('warn', !pr.given);
     pv.textContent = pr.given ? (pr.org ? wsT("js.tk.profile.view.org", displayName(pr), pr.org, avatar(pr)) : wsT("js.tk.profile.view", displayName(pr), avatar(pr))) : wsT("js.tk.profile.required");
   }
-  var ROLE_TYPES = ['roles.add_member', 'roles.set_lead', 'roles.add_admin', 'roles.remove_admin', 'roles.add_key', 'roles.revoke_key', 'roles.remove_member', 'roles.set_priority_levels', 'roles.set_attachment_limit'];
+  // The roles-event dialog's types, each under its readable name. The store settings
+  // (priority levels, attachment limit) have their own dialogs (settingsHtml).
+  var ROLE_TYPES = ['roles.add_member', 'roles.set_lead', 'roles.add_admin', 'roles.remove_admin', 'roles.add_key', 'roles.revoke_key', 'roles.remove_member'];
+  var ROLE_NAME = { 'roles.add_member': "js.tk.rtype.addmember", 'roles.set_lead': "js.tk.rtype.setlead", 'roles.add_admin': "js.tk.rtype.addadmin", 'roles.remove_admin': "js.tk.rtype.removeadmin",
+    'roles.add_key': "js.tk.rtype.addkey", 'roles.revoke_key': "js.tk.rtype.revokekey", 'roles.remove_member': "js.tk.rtype.removemember" };
+  // a roles-event field, shown only while the type select names one of its types (rtypeShow)
+  function rfld(types, label, inner) { return '<div class="fld"' + attr('rt', types) + '><span>' + label + '</span>' + inner + '</div>'; }
+  function rtypeShow(form) {
+    var t = form.elements.rtype && form.elements.rtype.value;
+    if (!t) return;
+    Array.prototype.forEach.call(form.querySelectorAll('[data-rt]'), function (el) { el.style.display = el.getAttribute('data-rt').split(' ').indexOf(t) >= 0 ? '' : 'none'; });
+  }
 
   // the dialog kinds a data-act opens (a host adds its own through ext.dialogs); every item
   // action is the context menu's or inline, so only the store-wide forms stay modal
-  var DIALOGS = { profile: 1, admin: 1 };
+  var DIALOGS = { profile: 1, admin: 1, sprio: 1, satt: 1 };
   function dialogHtml(kind, d) {
     if (kind === 'register') return formHtml(kind, d, registerT(d)); // these need no store view
     if (kind === 'relabel') return formHtml(kind, d, relabelT(d));
@@ -2784,16 +2806,31 @@
           profileFields(pm.profile) + '<input type="hidden" name="who" value="' + esc(pw) + '">', wsT("js.tk.dlg.save")];
         break;
       }
-      case 'admin':
+      case 'admin': {
+        var mt = 'roles.set_lead roles.add_admin roles.remove_admin roles.add_key roles.revoke_key roles.remove_member';
         T = [wsT("js.tk.dlg.admin.title"), wsT("js.tk.dlg.admin.intro", esc(viewerOf(ui.store))),
-          fld(wsT("js.tk.form.type"), '<select name="rtype">' + ROLE_TYPES.filter(function (t) { return CAPS.addMember || t !== 'roles.add_member'; }).map(function (t) { return '<option>' + t + '</option>'; }).join('') + '</select>') +
-          fld(wsT("js.tk.form.member"), '<select name="member">' + memberOpts('') + '</select>') +
-          fld(wsT("js.tk.form.lead"), '<select name="lead"><option value="">' + wsT("js.tk.form.lead.none") + '</option>' + memberOpts(v) + '</select>') +
-          fld(wsT("js.tk.form.key"), '<input type="text" name="key" placeholder="' + wsT("js.tk.form.key.ph") + '">') +
-          (CAPS.addMember ? fld(wsT("js.tk.form.newmember"), '<div class="fld inline"><input type="text" name="nid" placeholder="' + wsT("js.tk.prop.id") + '"><input type="text" name="norg" placeholder="' + wsT("js.tk.field.org") + '"><input type="text" name="nfamily" placeholder="' + wsT("js.tk.field.family") + '"><input type="text" name="ngiven" placeholder="' + wsT("js.tk.field.given") + '"></div>') : '') +
-          fld(wsT("js.tk.form.pnames"), '<input type="text" name="pnames" value="' + esc(VS.priority.names.join(', ')) + '">') +
-          fld(wsT("js.tk.form.pdefault"), '<input type="number" name="pdefault" min="0" value="' + VS.priority.default + '">') +
-          fld(wsT("js.tk.form.maxbytes"), '<input type="number" name="maxbytes" min="1" value="' + VS.attachments.max_bytes + '">'), wsT("js.tk.dlg.admin.submit")];
+          fld(wsT("js.tk.form.type"), '<select name="rtype">' + ROLE_TYPES.filter(function (t) { return CAPS.addMember || t !== 'roles.add_member'; }).map(function (t) { return '<option value="' + esc(t) + '">' + wsT(ROLE_NAME[t]) + '</option>'; }).join('') + '</select>') +
+          rfld(mt, wsT("js.tk.form.member"), '<select name="member">' + memberOpts('') + '</select>') +
+          rfld('roles.add_member roles.set_lead', wsT("js.tk.form.lead"), '<select name="lead"><option value="">' + wsT("js.tk.form.lead.none") + '</option>' + memberOpts(v) + '</select>') +
+          rfld('roles.add_member roles.add_key roles.revoke_key', wsT("js.tk.form.key"), '<input type="text" name="key" placeholder="' + wsT("js.tk.form.key.ph") + '">') +
+          (CAPS.addMember ? rfld('roles.add_member', wsT("js.tk.form.newmember"), '<div class="fld inline"><input type="text" name="nid" placeholder="' + wsT("js.tk.prop.id") + '"><input type="text" name="norg" placeholder="' + wsT("js.tk.field.org") + '"><input type="text" name="nfamily" placeholder="' + wsT("js.tk.field.family") + '"><input type="text" name="ngiven" placeholder="' + wsT("js.tk.field.given") + '"></div>') : ''),
+          wsT("js.tk.dlg.admin.submit")];
+        break;
+      }
+      case 'sprio': {
+        // one row per level, lowest first, plus blank rows up to the 9-level cap; blank rows
+        // are dropped on save, and the radio picks the default
+        var pn = VS.priority.names, rows = '';
+        for (var pi = 0; pi < Math.min(9, pn.length + 2); pi++) {
+          rows += '<div class="fld inline plevel"><input type="radio" name="pdef" value="' + pi + '"' + (pi === VS.priority.default ? ' checked' : '') + ' aria-label="' + esc(wsT("js.tk.form.pdefault", pi)) + '"' + tipAttr(wsT("js.tk.form.pdefault", pi)) + '>' +
+            '<input type="text" name="pname' + pi + '" value="' + esc(pn[pi] || '') + '" placeholder="' + esc(wsT("js.tk.form.plevel", pi)) + '" aria-label="' + esc(wsT("js.tk.form.plevel", pi)) + '"></div>';
+        }
+        T = [wsT("js.tk.dlg.prio.title"), wsT("js.tk.dlg.prio.intro"), rows, wsT("js.tk.dlg.save")];
+        break;
+      }
+      case 'satt':
+        T = [wsT("js.tk.dlg.att.title"), wsT("js.tk.dlg.att.intro", esc(fmtSize(VS.attachments.max_bytes))),
+          fld(wsT("js.tk.form.maxbytes"), '<input type="number" name="maxbytes" min="1" step="1" value="' + esc(VS.attachments.max_bytes) + '">'), wsT("js.tk.dlg.save")];
         break;
       default: {
         // a host dialog (ext.dialogs)
@@ -3026,6 +3063,7 @@
     dl.innerHTML = dialogHtml(kind, d || {});
     var f = dl.querySelector('form');
     profileView(f);
+    rtypeShow(f);
     if (kind === 'unregister') unregReady(f);
     if (!dl.open) dl.showModal();
     var first = f.querySelector('input[type="text"], textarea, select');
@@ -3096,14 +3134,32 @@
         var t = val('rtype'), rp = {};
         if (t === 'roles.add_member' && !CAPS.addMember) return;
         if (t === 'roles.add_member') rp.member = { id: val('nid'), profile: { org: val('norg'), family: val('nfamily'), given: val('ngiven') }, keys: val('key') ? [val('key')] : [], leads: val('lead') ? [val('lead')] : [] };
-        else if (t === 'roles.set_priority_levels') { rp.names = val('pnames').split(',').map(function (x) { return x.trim(); }).filter(Boolean); rp.default = Number(val('pdefault')); }
-        else if (t === 'roles.set_attachment_limit') rp.max_bytes = Number(val('maxbytes'));
         else {
           rp.member = val('member');
           if (t === 'roles.set_lead') rp.leads = val('lead') ? [val('lead')] : [];
           if (t === 'roles.add_key' || t === 'roles.revoke_key') rp.key = val('key');
         }
         evs.push([t, rp]);
+        break;
+      }
+      case 'sprio': {
+        var names = [], def = -1, picked = form.querySelector('input[name="pdef"]:checked');
+        for (var i = 0; el['pname' + i]; i++) {
+          var pname = val('pname' + i).trim();
+          if (!pname) continue;
+          if (picked && picked.value === String(i)) def = names.length;
+          names.push(pname);
+        }
+        if (!names.length) return toast(wsT("js.tk.toast.prio.none"));
+        if (def < 0) return toast(wsT("js.tk.toast.prio.default"));
+        if (names.join('\n') === VS.priority.names.join('\n') && def === VS.priority.default) { closeDialog(); return toast(wsT("js.tk.toast.unchanged")); }
+        evs.push(['roles.set_priority_levels', { names: names, default: def }]);
+        break;
+      }
+      case 'satt': {
+        var mb = Number(val('maxbytes'));
+        if (mb === VS.attachments.max_bytes) { closeDialog(); return toast(wsT("js.tk.toast.unchanged")); }
+        evs.push(['roles.set_attachment_limit', { max_bytes: mb }]);
         break;
       }
       default: if (X.dialogs && X.dialogs[kind]) X.dialogs[kind].submit(ui.store, form, H); return;
@@ -4752,6 +4808,7 @@
           var o = t.options[t.selectedIndex], sp = o && o.getAttribute('data-p');
           if (sp) { var pr = JSON.parse(sp); df.elements.org.value = pr.org; df.elements.family.value = pr.family; df.elements.given.value = pr.given; if (df.elements.nid) df.elements.nid.value = asciiId(pr.given); }
         }
+        if (t.name === 'rtype') rtypeShow(df);
         profileView(df);
       }
     });

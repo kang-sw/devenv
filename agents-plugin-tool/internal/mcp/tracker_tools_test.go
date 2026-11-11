@@ -395,6 +395,18 @@ func TestTrackerUpdateWritesRawBodiesAndBatchReferences(t *testing.T) {
 	}
 }
 
+// The priority line names where the levels are changed, so an agent asked
+// "where do I change the priorities" can answer from the query alone.
+func TestTrackerQueryPriorityLineNamesWhereLevelsChange(t *testing.T) {
+	f := newTrackerLeadFixture(t)
+	f.trackerUpdate(t, trackerPersonal)
+	out := f.trackerQuery(t, map[string]any{"store": "me"})
+	want := "\npriority: 0 Notice, 1 Task (default), 2 Urgent; an admin changes the levels in the store settings of the dashboard's Team tab, or with tk:roles.set_priority_levels\n"
+	if !strings.Contains(out, want) {
+		t.Fatalf("priority line must carry the hint %q:\n%s", want, out)
+	}
+}
+
 // payload.q takes the dashboard search grammar and AND-s with kind,
 // status, project, and text; text keeps its substring meaning; a malformed
 // known key is refused naming the token.

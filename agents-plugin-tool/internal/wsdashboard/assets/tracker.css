@@ -403,6 +403,15 @@ body.tk-paged .tk-drawer { display: none; }
 .tk .tree .kline code { font-family: var(--wb-mono); font-size: 11px; color: var(--wb-muted-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tk .tree .kline.rev code { text-decoration: line-through; }
 
+/* store settings (Team tab) */
+.tk .tkset { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--wb-line); }
+.tk .tkset h3 { margin: 0 0 2px; font-size: 12px; font-weight: 800; color: var(--wb-muted-fg); text-transform: uppercase; letter-spacing: .04em; }
+.tk .tkset > p { margin: 0 0 6px; font-size: 12px; }
+.tk .tkset .srow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 3px 0; font-size: 12.5px; }
+.tk .tkset .slabel { color: var(--wb-muted-fg); min-width: 110px; }
+.tk .tkset .sval { flex: 1 1 0; min-width: 0; }
+.tk .fld.plevel input[type=radio] { flex: 0 0 auto; margin: 0; accent-color: var(--wb-primary); }
+
 /* activity */
 .tk .ev { padding: 4px 0; border-top: 1px solid var(--wb-muted); font-size: 12.5px; }
 .tk .ev:first-child { border-top: 0; }

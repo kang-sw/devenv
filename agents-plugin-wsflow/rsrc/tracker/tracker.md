@@ -195,7 +195,10 @@ Body text, markdown, written as is.
   unasked, valid only on `tk:item.status` and `tk:item.close`; see Recording).
 - `tk:roles.*` and another member's `tk:member.profile` are admin commands.
   `key`: an SSH public key line. `names`: the level names, lowest first;
-  `default`: a level number. `max_bytes`: a byte count.
+  `default`: a level number. `max_bytes`: a byte count. The priority levels
+  and the attachment limit are store settings: an admin changes them in the
+  store settings of the dashboard's Team tab, or with
+  `tk:roles.set_priority_levels` and `tk:roles.set_attachment_limit`.
 - The store checks every command against the user's role and the item's
   state. If it refuses one, nothing is written and the refusal gives the
   reason: correct the batch and resend, or tell the user when the user's role
