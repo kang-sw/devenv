@@ -46,6 +46,22 @@ func (a *AgentKeyStore) MintLead(root string) (string, error) {
 // written again with the same key in the split layout, and a record rooted
 // elsewhere or of another scope is an error.
 func (a *AgentKeyStore) Ensure(root, key string) error {
+	return a.ensure(root, key, roleDelegate)
+}
+
+// LeadRoot is root's canonical git root, the root MintLead records; it
+// fails for a folder outside a git worktree.
+func (a *AgentKeyStore) LeadRoot(root string) (string, error) {
+	return canonicalSetupRoot(wsgit.ExecRunner{}, root)
+}
+
+// EnsureLead is Ensure for a hosted lead session's key: canonical is the
+// root MintLead recorded (LeadRoot).
+func (a *AgentKeyStore) EnsureLead(canonical, key string) error {
+	return a.ensure(canonical, key, roleLead)
+}
+
+func (a *AgentKeyStore) ensure(root, key string, scope toolRole) error {
 	if !sessionKeyFilenamePattern.MatchString(key) {
 		return fmt.Errorf("malformed session key")
 	}
@@ -54,13 +70,13 @@ func (a *AgentKeyStore) Ensure(root, key string) error {
 		return err
 	}
 	if record, ok := a.store.readRecord(d, key, partKey); ok {
-		if record.Root != root || record.Scope != string(roleDelegate) || record.Parent != "" {
+		if record.Root != root || record.Scope != string(scope) || record.Parent != "" {
 			return fmt.Errorf("session key record is not this conversation's (root %s, scope %s)", record.Root, record.Scope)
 		}
 		a.store.touch(d, key)
 		return nil
 	}
-	payload, err := json.Marshal(sessionKeyRecord{SchemaVersion: sessionRecordSchemaVersion, Root: root, Scope: string(roleDelegate)})
+	payload, err := json.Marshal(sessionKeyRecord{SchemaVersion: sessionRecordSchemaVersion, Root: root, Scope: string(scope)})
 	if err != nil {
 		return err
 	}

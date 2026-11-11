@@ -2,6 +2,7 @@ package wsagent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -47,6 +48,21 @@ type StartSpec struct {
 	// Env is the environment the child starts from; the backend removes the
 	// harness variables an inherited parent session leaves behind.
 	Env []string
+	// Lead is set for a lead conversation (Profile.Lead): the process starts
+	// as the user's own session does, under a session holder.
+	Lead *LeadSpec
+}
+
+// LeadSpec is what a lead conversation's process starts with.
+type LeadSpec struct {
+	// PermissionMode is the permission mode to launch in (claude).
+	PermissionMode string
+	// Env is set on the child over the backend's own scrub: the
+	// hosted-session variables.
+	Env map[string]string
+	// Holder runs the child under a session holder; a backend passes the
+	// spec to startChild, which uses it.
+	Holder *holderChild
 }
 
 // MCPCommand is a stdio MCP server's launch command.
@@ -78,13 +94,70 @@ type Process interface {
 	Close() error
 }
 
+// approvalAnswerer is a Process that takes the answer to a tool permission
+// prompt, and modeSetter one whose permission mode changes in-stream
+// (ErrUnsupported when it cannot); a lead's claude process is both.
+type approvalAnswerer interface {
+	AnswerApproval(req ApprovalRequest, allow bool, message string) error
+}
+
+type modeSetter interface {
+	SetPermissionMode(mode string) error
+}
+
 // ErrUnsupported is a Process's answer to a control it has no in-stream
 // form of.
 var ErrUnsupported = errors.New("not supported in-stream")
 
+// ApprovalRequest is a tool permission prompt a lead's harness waits on
+// (claude's can_use_tool control request). Field names are the record's
+// on-disk format and the route's answer.
+type ApprovalRequest struct {
+	// ID is the harness's request id: what an answer names.
+	ID   string `json:"id"`
+	Tool string `json:"tool"`
+	// Input is the tool call's input as the harness sent it; an allow hands
+	// it back unchanged.
+	Input       json.RawMessage `json:"input,omitempty"`
+	Description string          `json:"description,omitempty"`
+	// ToolUseID is the tool call the prompt is for; its tool result settles
+	// the prompt when the answer itself was not seen (a replay).
+	ToolUseID string `json:"tool_use_id,omitempty"`
+	// AgentID names the subagent whose tool call asks; empty is the lead.
+	AgentID   string `json:"agent_id,omitempty"`
+	StartedAt int64  `json:"started_at,omitempty"`
+}
+
 // Event is one item of a process's output. Exactly one of its parts is set,
-// except that a TurnEnd may carry TurnError.
+// except that a TurnEnd may carry TurnError and that Seq and Replay mark
+// any event of a process under a session holder.
 type Event struct {
+	// Seq is the holder record sequence of the line the event came from;
+	// 0 for the daemon's own child. Replay marks a line the runner already
+	// applied under an earlier daemon: it rebuilds state and writes
+	// nothing. LineEnd (no other part) follows a holder line's last event.
+	Seq     uint64
+	Replay  bool
+	LineEnd bool
+	// ReplayDone (no other part): every record the holder held when the
+	// daemon attached again has been delivered.
+	ReplayDone bool
+	// TurnStart: the harness began a turn. A lead's backend sends it for
+	// every turn, since a turn may start with no send (a background task's
+	// completion, a compaction, a pushed batch); the runner starts one
+	// unless its own send already did.
+	TurnStart bool
+	// Approval is a tool permission prompt now waiting; ApprovalDone names
+	// one (by request id) that is settled: withdrawn by the harness, or its
+	// tool call returned.
+	Approval     *ApprovalRequest
+	ApprovalDone string
+	// PermissionMode is the permission mode the harness reports it runs in.
+	PermissionMode string
+	// BackgroundTasks is the harness's current background task count, when
+	// the line reported the whole list.
+	BackgroundTasks *int
+
 	// Live is a content event for the conversation's wslive state: a reply,
 	// the lead's tool batches, or usage figures. The runner applies turn
 	// boundaries and user messages itself; a backend never sends

@@ -40,6 +40,25 @@ type Record struct {
 	Listed    bool   `json:"listed,omitempty"`
 	CreatedAt string `json:"created_at"`
 	ClosedAt  string `json:"closed_at,omitempty"`
+
+	// Lead marks a hosted lead session (Profile.Lead when it was opened):
+	// WSKey is a lead key, Root its canonical git root, and the fields
+	// below apply.
+	Lead bool `json:"lead,omitempty"`
+	// PermissionMode is the permission mode the next process launches in.
+	PermissionMode string `json:"permission_mode,omitempty"`
+	// HolderID is the session holder the conversation's process runs under,
+	// empty when it has none; HostPID is that process. No new process
+	// starts while this holder's child still runs.
+	HolderID string `json:"holder_id,omitempty"`
+	HostPID  int    `json:"host_pid,omitempty"`
+	// HolderSeq is the last record sequence of HolderID the runner applied
+	// whole: after a daemon restart the holder replays its ring, and
+	// records up to this one rebuild state without being written again.
+	HolderSeq uint64 `json:"holder_seq,omitempty"`
+	// Mail holds the mailbox messages claimed for the session and not yet
+	// delivered as a turn, each as the text the model reads.
+	Mail []string `json:"mail,omitempty"`
 }
 
 func recordPath(sessionDir string) string { return filepath.Join(sessionDir, recordFileName) }
@@ -145,6 +164,13 @@ func (w *liveWriter) apply(ev wslive.Event) bool {
 	return w.write(res, err, ev.Kind)
 }
 
+// applyQuiet applies a replayed event to the state alone: its ring entries
+// were written under an earlier daemon, and the snapshot is written once
+// the replay ends.
+func (w *liveWriter) applyQuiet(ev wslive.Event) {
+	_, _ = w.st.Apply(ev, w.now().UnixMilli())
+}
+
 // card applies a tracker card reference the lead showed, as apply does.
 func (w *liveWriter) card(ref wslive.CardRef) bool {
 	res, err := w.st.Card(ref, w.now().UnixMilli())
@@ -213,6 +239,13 @@ func registration(rec Record, now time.Time) wsdashboard.Registration {
 		HeartbeatAt:  now.UTC().Format(time.RFC3339),
 		Agent:        true,
 		Unlisted:     !rec.Listed,
+	}
+	if rec.Lead {
+		// A lead session is an ordinary dashboard session: it has a session
+		// record (its board, mail, and contacts are read as any lead's) and
+		// is always listed. Only the writer of this row differs.
+		reg.Agent, reg.Unlisted = false, false
+		reg.Hosted, reg.HostPID = true, rec.HostPID
 	}
 	if rec.ClosedAt != "" {
 		reg.EndedAt = rec.ClosedAt

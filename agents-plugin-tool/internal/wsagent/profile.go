@@ -108,11 +108,46 @@ type Profile struct {
 	// ListInIndex lists the profile's conversations in the dashboard
 	// session index; they are hidden from it by default.
 	ListInIndex bool `json:"list_in_index,omitempty"`
+	// Lead makes the profile's conversations hosted lead sessions: the
+	// harness starts as the user's own session does (user and project
+	// settings, plugins, hooks, memory, and MCP servers all load) under a
+	// session holder, holds a lead ws session key, and asks the dashboard
+	// for tool permission. The capability fields above (tools, ws_tools,
+	// mcp_servers, plugins, skills, instructions, list_in_index) do not
+	// apply to it and must be absent.
+	Lead bool `json:"lead,omitempty"`
+	// PermissionMode is a lead conversation's starting permission mode
+	// (LeadPermissionModes); empty is DefaultLeadPermissionMode. It applies
+	// to the claude backend only: pi asks for no permission.
+	PermissionMode string `json:"permission_mode,omitempty"`
 }
 
-// IdleTimeout is the profile's idle timeout; zero means never.
+// DefaultLeadPermissionMode is a lead conversation's permission mode when
+// neither the spawn nor the profile names one.
+const DefaultLeadPermissionMode = "auto"
+
+// LeadPermissionModes are the permission modes a lead conversation may run
+// in, as the claude CLI's --permission-mode names them.
+var LeadPermissionModes = []string{"auto", "default", "acceptEdits", "plan", "dontAsk", "bypassPermissions"}
+
+// ValidLeadPermissionMode reports whether mode is one of LeadPermissionModes.
+func ValidLeadPermissionMode(mode string) bool {
+	for _, m := range LeadPermissionModes {
+		if m == mode {
+			return true
+		}
+	}
+	return false
+}
+
+// IdleTimeout is the profile's idle timeout; zero means never. A lead
+// profile's default is off on a backend that reports no background tasks
+// (pi): an idle process there cannot be told from one waiting on a task.
 func (p Profile) IdleTimeout() time.Duration {
 	if p.IdleTimeoutSeconds == nil {
+		if p.Lead && p.Backend != BackendClaude {
+			return 0
+		}
 		return DefaultIdleTimeout
 	}
 	return time.Duration(*p.IdleTimeoutSeconds) * time.Second
@@ -253,6 +288,19 @@ func (p Profile) validate() error {
 	if p.IdleTimeoutSeconds != nil && *p.IdleTimeoutSeconds < 0 {
 		return fmt.Errorf("idle_timeout_seconds must be 0 (never) or more")
 	}
+	if p.PermissionMode != "" {
+		if !p.Lead {
+			return fmt.Errorf("permission_mode applies to a lead profile only (lead: true)")
+		}
+		if !ValidLeadPermissionMode(p.PermissionMode) {
+			return fmt.Errorf("permission_mode %q must be one of %s", p.PermissionMode, strings.Join(LeadPermissionModes, ", "))
+		}
+	}
+	if p.Lead {
+		if len(p.Tools) > 0 || len(p.WSTools) > 0 || len(p.MCPServers) > 0 || len(p.Plugins) > 0 || p.Skills || p.Instructions != "" || p.ListInIndex {
+			return fmt.Errorf("a lead profile loads the user's own harness setup: tools, ws_tools, mcp_servers, plugins, skills, instructions, and list_in_index must be absent")
+		}
+	}
 	return nil
 }
 
@@ -287,6 +335,11 @@ func CheckProfileScope(p Profile, scope wsconfig.Scope) error {
 	}
 	if len(p.Plugins) > 0 {
 		fields = append(fields, "plugins")
+	}
+	if p.Lead {
+		// A lead session runs the user's whole harness setup with a
+		// permission mode the profile picks.
+		fields = append(fields, "lead")
 	}
 	if len(fields) == 0 {
 		return nil
@@ -401,8 +454,10 @@ func ProfileValueSchema() map[string]any {
 			"plugins":              stringList("Plugin directories (claude) or extension paths (pi) to load; relative paths resolve against the working root. Absent loads none. Not allowed in a repo-scope profile."),
 			"skills":               map[string]any{"type": "boolean", "description": "Keep the harness's skills and slash commands on; off by default."},
 			"instructions":         map[string]any{"type": "string", "minLength": 1, "description": "Task instruction file appended to the harness's own system prompt; a relative path resolves against the working root, and builtin:<name> names an instruction text embedded in ws-mcp (" + strings.Join(BuiltinInstructionNames(), ", ") + ")."},
-			"idle_timeout_seconds": map[string]any{"type": "integer", "minimum": 0, "description": "End the sustained process after this many seconds with no running turn and no input; 0 never ends it; absent is 600."},
+			"idle_timeout_seconds": map[string]any{"type": "integer", "minimum": 0, "description": "End the sustained process after this many seconds with no running turn and no input (for a lead, also no background task); 0 never ends it; absent is 600, or never for a pi lead."},
 			"list_in_index":        map[string]any{"type": "boolean", "description": "List this profile's conversations in the dashboard session index; hidden by default."},
+			"lead":                 map[string]any{"type": "boolean", "description": "Host the profile's conversations as lead sessions: the harness loads the user's own settings, plugins, hooks, memory, and MCP servers, runs under a session holder with a lead ws session key, and asks the dashboard for tool permission. The capability fields (tools, ws_tools, mcp_servers, plugins, skills, instructions, list_in_index) must be absent. Not allowed in a repo-scope profile."},
+			"permission_mode":      map[string]any{"enum": LeadPermissionModes, "description": "A lead conversation's starting permission mode (claude only); absent is auto."},
 		},
 	}
 }

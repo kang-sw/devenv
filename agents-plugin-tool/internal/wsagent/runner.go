@@ -2,6 +2,7 @@ package wsagent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdashboard"
+	"github.com/kang-sw/devenv/internal/wsholder"
 	"github.com/kang-sw/devenv/internal/wsinbox"
 	"github.com/kang-sw/devenv/internal/wslive"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
@@ -30,6 +32,41 @@ type KeyStore interface {
 	// writes it again when the key store pruned it.
 	Ensure(root, key string) error
 }
+
+// LeadKeyStore mints and keeps the lead ws session key of each hosted lead
+// session (Profile.Lead); ws-mcp's key store implements it.
+type LeadKeyStore interface {
+	// LeadRoot is root's canonical git root, where a lead key lives; it
+	// fails for a folder outside git.
+	LeadRoot(root string) (string, error)
+	// MintLead creates a parent-less lead key at root's canonical git root.
+	MintLead(root string) (string, error)
+	// EnsureLead keeps the lead key usable for its canonical root, as
+	// KeyStore.Ensure does for a conversation key.
+	EnsureLead(canonical, key string) error
+}
+
+// LeadMail is a hosted lead session's ws mailbox as the runner uses it: the
+// daemon, not the session's own mailbox wait, delivers its mail.
+type LeadMail interface {
+	// Watch calls changed whenever the mailbox of key may hold new mail,
+	// from any goroutine, until the returned stop is called. While watched,
+	// the session reads to its peers as listening.
+	Watch(root, key string, changed func()) (stop func())
+	// Drain claims every message waiting for key and returns each as the
+	// text the session's model reads for it.
+	Drain(root, key string) ([]string, error)
+}
+
+// Env names the runner sets on a hosted lead session's harness. The flag
+// and the key are what the hosted-session mode reads; the row is the
+// session's registration file, whose host_pid names the one process the
+// flag holds for.
+const (
+	EnvHostedSession    = "WS_HOSTED_SESSION"
+	EnvHostedSessionKey = "WS_HOSTED_SESSION_KEY"
+	EnvHostedSessionRow = "WS_HOSTED_SESSION_ROW"
+)
 
 // Env names the runner sets on an attached ws-mcp.
 const (
@@ -62,6 +99,17 @@ type Options struct {
 	Now func() time.Time
 	// Log receives diagnostics; nil discards them.
 	Log io.Writer
+	// Holders is the session holder manager lead conversations run under,
+	// LeadKeys their key store, and Mail their mailbox; a lead profile is
+	// refused without the first two, and gets no mail without the third.
+	Holders  HolderHost
+	LeadKeys LeadKeyStore
+	Mail     LeadMail
+	// Trusted is the gate of a lead conversation's control writes (spawn,
+	// settings, stop, close, approval answers); nil is
+	// wsdashboard.TrustedWrite: a browser on this machine that sends the
+	// daemon's own Origin.
+	Trusted func(req *http.Request) (local, own bool)
 	// TrackerChanged, when not nil, is called after a conversation's
 	// successful tracker write (an Event with TrackerWrite set), so the
 	// daemon re-reads its tracker stores. It may be called from any
@@ -82,6 +130,9 @@ type Runner struct {
 	quit   chan struct{}
 	wg     sync.WaitGroup
 	once   sync.Once
+
+	// holders routes the session holders' events to the lead processes.
+	holders holderTable
 }
 
 // NewRunner returns a runner; Start loads its conversations.
@@ -95,7 +146,16 @@ func NewRunner(opts Options) *Runner {
 	if opts.heartbeat <= 0 {
 		opts.heartbeat = wslive.HeartbeatInterval
 	}
-	return &Runner{opts: opts, convs: map[string]*conv{}, closed: map[string]Record{}, quit: make(chan struct{}), notify: func(string, string) {}}
+	if opts.Trusted == nil {
+		opts.Trusted = wsdashboard.TrustedWrite
+	}
+	r := &Runner{opts: opts, convs: map[string]*conv{}, closed: map[string]Record{}, quit: make(chan struct{}), notify: func(string, string) {}}
+	if opts.Holders != nil {
+		// Before the manager's first scan, so a predecessor's holders are
+		// seen attaching.
+		opts.Holders.AddSink(&r.holders)
+	}
+	return r
 }
 
 // Start loads every conversation record from the session registry, with no
@@ -124,13 +184,65 @@ func (r *Runner) Start(notify func(replyID, project string)) {
 			r.closed[rec.ReplyID] = rec
 			r.mu.Unlock()
 		} else {
-			r.startConv(rec)
+			c := r.startConv(rec)
+			if rec.Lead && rec.HolderID != "" {
+				// The process may still run under its holder: rejoin it
+				// before the scan below replays the holder's records.
+				c.do(c.reattach)
+			}
+		}
+	}
+	if r.opts.Holders != nil {
+		r.wg.Add(1)
+		go func() {
+			defer r.wg.Done()
+			r.opts.Holders.Scan()
+			r.holdersScanned()
+		}()
+	}
+}
+
+// holdersScanned follows the first holder scan of this daemon: each
+// rejoined process learns where its replay ends (or that its holder is
+// gone), and a lead holder no conversation runs under is ended, so no
+// second process of a session stays behind a crash between a spawn and its
+// record.
+func (r *Runner) holdersScanned() {
+	r.mu.Lock()
+	convs := make([]*conv, 0, len(r.convs))
+	for _, c := range r.convs {
+		convs = append(convs, c)
+	}
+	r.mu.Unlock()
+	// Listed before the conversations are asked: a holder a start launched
+	// meanwhile is in its record by the time the conversation's loop
+	// answers.
+	listed := r.opts.Holders.List().Holders
+	owned := map[string]bool{}
+	for _, c := range convs {
+		c.do(func() {
+			c.checkReattach()
+			if id := c.rec.HolderID; id != "" {
+				owned[id] = true
+			}
+		})
+	}
+	for _, info := range listed {
+		var meta holderSession
+		if json.Unmarshal(info.Session, &meta) != nil || meta.Kind != holderKindLead || owned[info.ID] {
+			continue
+		}
+		fmt.Fprintf(r.opts.Log, "agent: ending lead holder %s of %s: no open conversation runs under it\n", info.ID, meta.ReplyID)
+		if err := r.opts.Holders.Stop(info.ID); err != nil {
+			fmt.Fprintf(r.opts.Log, "agent: stop holder %s: %v\n", info.ID, err)
 		}
 	}
 }
 
 // Close ends every conversation's process and stops the runner; the
 // conversations stay open on disk and resume lazily under the next daemon.
+// A lead conversation's process is let go, not ended: it runs on under its
+// session holder, and the next daemon rejoins it.
 func (r *Runner) Close() {
 	r.once.Do(func() { close(r.quit) })
 	r.wg.Wait()
@@ -166,6 +278,7 @@ func (r *Runner) startConv(rec Record) *conv {
 		live:   newLiveWriter(dir, rec.WSKey, rec.Backend, r.opts.Now, r.opts.Log),
 		reqs:   make(chan func()),
 		inboxC: make(chan struct{}, 1),
+		mailC:  make(chan struct{}, 1),
 		done:   make(chan struct{}),
 	}
 	c.writeRegistration()
@@ -175,6 +288,11 @@ func (r *Runner) startConv(rec Record) *conv {
 	r.wg.Add(1)
 	go c.loop()
 	r.mu.Unlock()
+	if rec.Lead && r.opts.Mail != nil {
+		// Mail that waited while no daemon ran is found by the first check.
+		c.stopMail = r.opts.Mail.Watch(rec.Root, rec.WSKey, c.signalMail)
+		c.signalMail()
+	}
 	return c
 }
 
@@ -193,10 +311,44 @@ func badRequest(format string, args ...any) error {
 var errUnknown = &requestError{status: http.StatusNotFound, msg: "unknown agent conversation"}
 var errClosed = &requestError{status: http.StatusConflict, msg: "the conversation is closed"}
 
+// LeadOptions are a lead conversation's spawn choices; an empty one takes
+// the profile's value (the harness default when it has none).
+type LeadOptions struct {
+	Model          string
+	Effort         string
+	PermissionMode string
+}
+
 // Create opens a conversation of profile bound to root. It resolves and
 // checks the profile (backend, instruction file) now, so a bad launch fails
-// here; the process itself starts on the first send.
+// here; the process itself starts on the first send. A lead profile is
+// refused: its conversations open through CreateLead, behind the trusted
+// gate.
 func (r *Runner) Create(profile, root string) (State, error) {
+	return r.create(profile, root, nil)
+}
+
+// CreateLead opens a hosted lead session of harness backend on root, with
+// the builtin lead profile of that harness (or the user's definition of the
+// same name). The caller has passed the trusted gate.
+func (r *Runner) CreateLead(backend, root string, opts LeadOptions) (State, error) {
+	profile := LeadProfileFor(strings.TrimSpace(backend))
+	if profile == "" {
+		return State{}, badRequest("harness must be %q or %q; got %q", BackendClaude, BackendPi, backend)
+	}
+	if opts.Model != "" && !modelPattern.MatchString(opts.Model) {
+		return State{}, badRequest("model %q must match %s", opts.Model, modelPattern.String())
+	}
+	if opts.Effort != "" && !effortPattern.MatchString(opts.Effort) {
+		return State{}, badRequest("effort %q must be a lowercase word", opts.Effort)
+	}
+	if opts.PermissionMode != "" && !ValidLeadPermissionMode(opts.PermissionMode) {
+		return State{}, badRequest("permission_mode %q must be one of %s", opts.PermissionMode, strings.Join(LeadPermissionModes, ", "))
+	}
+	return r.create(profile, root, &opts)
+}
+
+func (r *Runner) create(profile, root string, lead *LeadOptions) (State, error) {
 	root = strings.TrimSpace(root)
 	if !filepath.IsAbs(root) {
 		return State{}, badRequest("root must be an absolute path; got %q", root)
@@ -209,8 +361,23 @@ func (r *Runner) Create(profile, root string) (State, error) {
 	if err != nil {
 		return State{}, err
 	}
-	key, err := r.opts.Keys.Mint(root)
-	if err != nil {
+	if rp.Definition.Lead != (lead != nil) {
+		if lead == nil {
+			return State{}, &requestError{status: http.StatusForbidden, msg: fmt.Sprintf("agent profile %q is a lead profile: a lead session is spawned from the dashboard on this machine", rp.Name)}
+		}
+		return State{}, badRequest("agent profile %q is not a lead profile (lead: true)", rp.Name)
+	}
+	var key string
+	if lead != nil {
+		// A lead key lives at the canonical git root, which is then the
+		// session's root: its registration and session record must agree.
+		if root, err = r.opts.LeadKeys.LeadRoot(root); err != nil {
+			return State{}, badRequest("a lead session needs a git worktree: %v", err)
+		}
+		if key, err = r.opts.LeadKeys.MintLead(root); err != nil {
+			return State{}, fmt.Errorf("mint the lead session key: %w", err)
+		}
+	} else if key, err = r.opts.Keys.Mint(root); err != nil {
 		return State{}, fmt.Errorf("mint ws session key: %w", err)
 	}
 	now := r.opts.Now()
@@ -224,6 +391,22 @@ func (r *Runner) Create(profile, root string) (State, error) {
 		WSKey:     key,
 		Listed:    rp.Definition.ListInIndex,
 		CreatedAt: now.UTC().Format(time.RFC3339),
+	}
+	if lead != nil {
+		rec.Lead = true
+		rec.PermissionMode = rp.Definition.PermissionMode
+		if lead.Model != "" {
+			rec.Model = lead.Model
+		}
+		if lead.Effort != "" {
+			rec.Effort = lead.Effort
+		}
+		if lead.PermissionMode != "" {
+			rec.PermissionMode = lead.PermissionMode
+		}
+		if rec.Backend != BackendClaude {
+			rec.PermissionMode = ""
+		}
 	}
 	if !wsdashboard.ValidReplyID(rec.ReplyID) {
 		return State{}, fmt.Errorf("minted key gives an invalid reply-id %q", rec.ReplyID)
@@ -257,6 +440,9 @@ func (r *Runner) resolve(profile, root string) (ResolvedProfile, error) {
 	}
 	if len(rp.Definition.WSTools) > 0 && r.opts.WSMCP == nil {
 		return ResolvedProfile{}, badRequest("agent profile %q allows ws tools, but this daemon cannot attach ws-mcp", rp.Name)
+	}
+	if rp.Definition.Lead && (r.opts.Holders == nil || r.opts.LeadKeys == nil) {
+		return ResolvedProfile{}, badRequest("agent profile %q is a lead profile, but this daemon runs no session holders", rp.Name)
 	}
 	return rp, nil
 }
@@ -357,6 +543,54 @@ func (r *Runner) Interrupt(id string) (State, []string, error) {
 func (r *Runner) Stop(id string) (State, error) {
 	return r.act(id, func(c *conv) error {
 		c.stopProcess("")
+		return nil
+	})
+}
+
+// IsLead reports whether id is a lead conversation, open or closed: one
+// whose control writes take the trusted gate.
+func (r *Runner) IsLead(id string) bool {
+	r.mu.Lock()
+	c, open := r.convs[id]
+	rec, closed := r.closed[id]
+	r.mu.Unlock()
+	if open {
+		return c.record().Lead
+	}
+	return closed && rec.Lead
+}
+
+// AnswerApproval answers the waiting tool permission prompt requestID of a
+// lead conversation: allow runs the tool call as asked, deny refuses it
+// with message for the model. A prompt is answered once: an id that is not
+// waiting (answered from another tab, withdrawn, or of an ended process) is
+// a conflict.
+func (r *Runner) AnswerApproval(id, requestID string, allow bool, message string) (State, error) {
+	return r.act(id, func(c *conv) error {
+		return c.answerApproval(requestID, allow, message)
+	})
+}
+
+// SetPermissionMode changes a claude lead conversation's permission mode.
+// Like a model or effort change it applies at the next turn boundary,
+// in-stream when the harness takes it; the mode the harness then reports is
+// State.ActiveMode.
+func (r *Runner) SetPermissionMode(id, mode string) (State, error) {
+	if !ValidLeadPermissionMode(mode) {
+		return State{}, badRequest("permission_mode %q must be one of %s", mode, strings.Join(LeadPermissionModes, ", "))
+	}
+	return r.act(id, func(c *conv) error {
+		if !c.rec.Lead || c.rec.Backend != BackendClaude {
+			return badRequest("the permission mode applies to a claude lead session only")
+		}
+		if mode == c.rec.PermissionMode {
+			return nil
+		}
+		c.update(func(rec *Record) { rec.PermissionMode = mode })
+		c.dirtyMode = true
+		if !c.turn {
+			c.applySettings()
+		}
 		return nil
 	})
 }
@@ -464,10 +698,27 @@ type State struct {
 	Error     string `json:"error,omitempty"`
 	CreatedAt string `json:"created_at"`
 	ClosedAt  string `json:"closed_at,omitempty"`
+
+	// Lead marks a hosted lead session; the fields below are its own.
+	Lead bool `json:"lead,omitempty"`
+	// PermissionMode is the mode the next process launches in, and
+	// ActiveMode the one the running harness last reported (it may fall
+	// back from the one asked for).
+	PermissionMode string `json:"permission_mode,omitempty"`
+	ActiveMode     string `json:"active_mode,omitempty"`
+	// Approvals are the tool permission prompts waiting for an answer,
+	// oldest first.
+	Approvals []ApprovalRequest `json:"approvals,omitempty"`
+	// BackgroundTasks counts the harness's running background tasks, as its
+	// stream last reported them.
+	BackgroundTasks int `json:"background_tasks,omitempty"`
+	// CanControl reports whether the asking viewer may use the lead control
+	// routes (a browser on this machine); the routes set it per request.
+	CanControl bool `json:"can_control,omitempty"`
 }
 
 func closedState(rec Record) State {
-	return State{ID: rec.ReplyID, Profile: rec.Profile, Backend: rec.Backend, Root: rec.Root, Status: StatusClosed, Model: rec.Model, Effort: rec.Effort, Page: "/s/" + rec.ReplyID, CreatedAt: rec.CreatedAt, ClosedAt: rec.ClosedAt}
+	return State{ID: rec.ReplyID, Profile: rec.Profile, Backend: rec.Backend, Root: rec.Root, Status: StatusClosed, Model: rec.Model, Effort: rec.Effort, Page: "/s/" + rec.ReplyID, CreatedAt: rec.CreatedAt, ClosedAt: rec.ClosedAt, Lead: rec.Lead, PermissionMode: rec.PermissionMode}
 }
 
 // conv is one open conversation. Its loop goroutine owns the process and
@@ -493,6 +744,11 @@ type conv struct {
 	turn    bool
 	lastErr string
 	closed  bool
+	// approvals are a lead's waiting tool permission prompts, oldest first;
+	// activeMode and bgTasks are what its harness last reported.
+	approvals  []ApprovalRequest
+	activeMode string
+	bgTasks    int
 
 	// loop-owned.
 	events      <-chan Event
@@ -500,7 +756,27 @@ type conv struct {
 	idleAfter   time.Duration
 	dirtyModel  bool
 	dirtyEffort bool
+	dirtyMode   bool
 	lastReg     time.Time
+
+	// A lead's own, loop-owned. mailC (one slot) tells the loop the
+	// mailbox may hold mail (signalMail); stopMail ends the watch.
+	mailC    chan struct{}
+	stopMail func()
+	// replaying is set from a rejoin of the holder's process (reattach)
+	// until its replay ends: no turn is submitted meanwhile, since the
+	// replay is what tells whether one runs.
+	replaying   bool
+	replayAsked bool
+	// seq is the last holder record sequence applied whole; seqDirty that
+	// the record does not hold it yet, and ringDirty that a ring entry was
+	// written since, which makes the next line end persist it at once.
+	seq       uint64
+	seqDirty  bool
+	ringDirty bool
+	// mcpDown is set when the harness reported a broken MCP connection: the
+	// process restarts at the next idle point.
+	mcpDown bool
 }
 
 // do runs fn in the loop and waits for it; false when the loop has ended.
@@ -522,6 +798,33 @@ func (c *conv) signalInbox() {
 	case c.inboxC <- struct{}{}:
 	default:
 	}
+}
+
+// signalMail tells the loop the session's mailbox may hold mail, without
+// waiting.
+func (c *conv) signalMail() {
+	select {
+	case c.mailC <- struct{}{}:
+	default:
+	}
+}
+
+// mailChanged claims the session's waiting mail into the record, so a
+// message taken from the mailbox survives until it is delivered, and
+// submits it with the held messages (kick). It runs in the loop.
+func (c *conv) mailChanged() {
+	if c.closed || c.r.opts.Mail == nil {
+		return
+	}
+	texts, err := c.r.opts.Mail.Drain(c.rec.Root, c.rec.WSKey)
+	if err != nil {
+		fmt.Fprintf(c.r.opts.Log, "agent %s: mailbox: %v\n", c.rec.ReplyID, err)
+	}
+	if len(texts) == 0 {
+		return
+	}
+	c.update(func(rec *Record) { rec.Mail = append(rec.Mail, texts...) })
+	c.kick()
 }
 
 // inboxChanged takes the inbox's interrupt requests and submits the held
@@ -554,6 +857,8 @@ func (c *conv) loop() {
 			fn()
 		case <-c.inboxC:
 			c.inboxChanged()
+		case <-c.mailC:
+			c.mailChanged()
 		case ev, ok := <-c.events:
 			if !ok {
 				c.processExited()
@@ -562,19 +867,27 @@ func (c *conv) loop() {
 			}
 		case <-idleC:
 			c.idle = nil
-			if !c.turn {
+			if c.idleNow() {
 				c.stopProcess("")
 			}
 		case <-beat.C:
 			c.live.writeSnapshot()
+			c.persistSeq()
+			if c.replaying {
+				// A holder that attached late (a rescan) is found here.
+				c.checkReattach()
+			}
 			if c.r.opts.Now().Sub(c.lastReg) >= wsdashboard.HeartbeatInterval {
 				c.writeRegistration()
 			}
 		case <-c.r.quit:
-			c.stopProcess("")
+			c.letGo()
 			return
 		}
 		if c.closed {
+			if c.stopMail != nil {
+				c.stopMail()
+			}
 			return
 		}
 	}
@@ -593,8 +906,12 @@ func (c *conv) state() State {
 		st.Status, st.ClosedAt = StatusClosed, c.rec.ClosedAt
 	}
 	st.Process = c.proc != nil
-	st.Held = len(held)
+	st.Held = len(held) + len(c.rec.Mail)
 	st.Error = c.lastErr
+	if c.rec.Lead {
+		st.ActiveMode, st.BackgroundTasks = c.activeMode, c.bgTasks
+		st.Approvals = append([]ApprovalRequest(nil), c.approvals...)
+	}
 	return st
 }
 
@@ -631,22 +948,29 @@ func (c *conv) writeRegistration() {
 	c.r.notify(rec.ReplyID, rec.Root)
 }
 
-// apply applies a wslive event and tells the daemon when it wrote.
-func (c *conv) apply(ev wslive.Event) {
+// apply applies a wslive event and tells the daemon when it wrote. quiet
+// (a replayed holder record) applies it to the state alone.
+func (c *conv) apply(ev wslive.Event, quiet ...bool) {
+	if len(quiet) > 0 && quiet[0] {
+		c.live.applyQuiet(ev)
+		return
+	}
 	if c.live.apply(ev) {
+		c.ringDirty = true
 		c.r.notify(c.rec.ReplyID, c.rec.Root)
 	}
 }
 
-// kick submits the held messages as the next turn when no turn runs,
-// starting the process first when there is none. A failed start leaves the
-// messages held.
+// kick submits the held messages, and a lead's claimed mail, as the next
+// turn when no turn runs, starting the process first when there is none. A
+// failed start leaves them held.
 func (c *conv) kick() {
-	if c.closed || c.turn {
+	if c.closed || c.turn || c.replaying {
 		return
 	}
 	held, err := wsinbox.Held(c.inbox)
-	if err != nil || len(held) == 0 {
+	mail := c.rec.Mail
+	if (err != nil || len(held) == 0) && len(mail) == 0 {
 		return
 	}
 	if c.proc == nil {
@@ -665,20 +989,30 @@ func (c *conv) kick() {
 			parts = append(parts, text)
 		}
 	}
-	if err != nil || len(parts) == 0 {
+	if (err != nil || len(parts) == 0) && len(mail) == 0 {
 		// A cancel took the message after the start: the process waits for
 		// input like after a turn.
 		c.armIdle()
 		return
 	}
-	text := strings.Join(parts, "\n\n")
 	c.stopIdle()
 	c.setStatus(func() { c.turn, c.lastErr = true, "" })
-	c.apply(wslive.Event{Kind: wslive.KindUser, Origin: wslive.OriginWhiteboard, Text: text})
-	c.apply(wslive.Event{Kind: wslive.KindTurnStart, Origin: wslive.OriginWhiteboard})
-	if err := c.proc.Send(text); err != nil {
+	// Mail shows on the page through the session's mail history, so only
+	// the dashboard's own text is a user entry; a turn of mail alone is
+	// marked as mail's.
+	origin := wslive.OriginMail
+	if len(parts) > 0 {
+		origin = wslive.OriginWhiteboard
+		c.apply(wslive.Event{Kind: wslive.KindUser, Origin: origin, Text: strings.Join(parts, "\n\n")})
+	}
+	c.apply(wslive.Event{Kind: wslive.KindTurnStart, Origin: origin})
+	if err := c.proc.Send(strings.Join(append(parts, mail...), "\n\n")); err != nil {
 		c.setStatus(func() { c.lastErr = "send turn: " + err.Error() })
 		c.stopProcess("")
+		return
+	}
+	if len(mail) > 0 {
+		c.update(func(rec *Record) { rec.Mail = nil })
 	}
 }
 
@@ -693,6 +1027,9 @@ func (c *conv) startProcess() error {
 	}
 	if rp.Definition.Backend != rec.Backend {
 		return fmt.Errorf("agent profile %q now selects backend %q; this conversation runs on %q", rec.Profile, rp.Definition.Backend, rec.Backend)
+	}
+	if rec.Lead {
+		return c.startLead(rec, rp.Definition, false)
 	}
 	if err := c.r.opts.Keys.Ensure(rec.Root, rec.WSKey); err != nil {
 		return fmt.Errorf("ws session key: %w", err)
@@ -745,6 +1082,181 @@ func (c *conv) startProcess() error {
 	return nil
 }
 
+// startLead starts a lead conversation's process under a new session
+// holder, or with attach rejoins the one the record names (a daemon
+// restart). The harness loads the user's own setup; what makes it this
+// session is the hosted environment: the flag, the lead key, and the path
+// of the registration row whose host_pid names the one process the flag
+// holds for. The row says 0 until the process exists, so a harness that
+// reads it early waits rather than misreading an older PID.
+func (c *conv) startLead(rec Record, def Profile, attach bool) error {
+	host := c.r.opts.Holders
+	holder := &holderChild{host: host, table: &c.r.holders, session: holderSession{Kind: holderKindLead, ReplyID: rec.ReplyID, Cwd: rec.Root, Label: rec.Profile}}
+	if attach {
+		holder.id, holder.skipTo = rec.HolderID, rec.HolderSeq
+	} else {
+		// One process per session: whatever holder the record still names
+		// (a stop that failed, a crash) ends before --resume runs again.
+		if err := c.retireHolder(); err != nil {
+			return err
+		}
+		if err := c.r.opts.LeadKeys.EnsureLead(rec.Root, rec.WSKey); err != nil {
+			return fmt.Errorf("ws session key: %w", err)
+		}
+		c.writeRegistration()
+	}
+	spec := StartSpec{
+		Root:      rec.Root,
+		Dir:       c.dir,
+		Profile:   def,
+		Model:     rec.Model,
+		Effort:    rec.Effort,
+		SessionID: rec.SessionID,
+		Env:       environ(),
+		Lead: &LeadSpec{
+			PermissionMode: rec.PermissionMode,
+			Holder:         holder,
+			Env: map[string]string{
+				EnvHostedSession:    "1",
+				EnvHostedSessionKey: rec.WSKey,
+				EnvHostedSessionRow: wsdashboard.RegistrationPath(c.r.opts.Dir, rec.ReplyID),
+			},
+		},
+	}
+	proc, err := c.r.opts.Backends[rec.Backend].Start(context.Background(), spec)
+	if err != nil {
+		return err
+	}
+	hp, ok := proc.(holderProcess)
+	id, pid, held := "", 0, false
+	if ok {
+		id, pid, held = hp.HolderInfo()
+	}
+	if !held {
+		_ = proc.Close()
+		return fmt.Errorf("the %s backend did not start the process under a session holder", rec.Backend)
+	}
+	c.setStatus(func() { c.proc = proc })
+	c.events = proc.Events()
+	c.idleAfter = def.IdleTimeout()
+	if attach {
+		c.replaying, c.seq = true, rec.HolderSeq
+		return nil
+	}
+	c.dirtyModel, c.dirtyEffort, c.dirtyMode = false, false, false
+	c.seq, c.seqDirty, c.ringDirty = 0, false, false
+	c.update(func(rec *Record) { rec.HolderID, rec.HostPID, rec.HolderSeq = id, pid, 0 })
+	c.writeRegistration()
+	return nil
+}
+
+// retireHolder ends the holder the record names, if it still exists, and
+// forgets it; an error means its process may still run, and no new one
+// starts.
+func (c *conv) retireHolder() error {
+	id := c.rec.HolderID
+	if id == "" {
+		return nil
+	}
+	for _, info := range c.r.opts.Holders.List().Holders {
+		if info.ID != id {
+			continue
+		}
+		if err := c.r.opts.Holders.Stop(id); err != nil && !errors.Is(err, wsholder.ErrUnknownHolder) {
+			return fmt.Errorf("the session's previous process could not be ended (holder %s): %w", id, err)
+		}
+	}
+	c.update(func(rec *Record) { rec.HolderID, rec.HostPID, rec.HolderSeq = "", 0, 0 })
+	c.writeRegistration()
+	return nil
+}
+
+// reattach rejoins the process that kept running under the record's holder
+// while no daemon ran. It runs before the holder manager's first scan, so
+// the holder's whole replay reaches the process; checkReattach follows the
+// scan.
+func (c *conv) reattach() {
+	rec := c.record()
+	def := Profile{Backend: rec.Backend, Lead: true}
+	if rp, err := c.r.resolve(rec.Profile, rec.Root); err == nil && rp.Definition.Backend == rec.Backend {
+		def = rp.Definition
+	}
+	if err := c.startLead(rec, def, true); err != nil {
+		// The holder stays in the record: the next start ends it first.
+		fmt.Fprintf(c.r.opts.Log, "agent %s: rejoin holder %s: %v\n", rec.ReplyID, rec.HolderID, err)
+	}
+}
+
+// checkReattach tells a rejoined process where the holder's replay ends,
+// once the holder is attached; a holder that is gone ended with its
+// process while no daemon ran. Until one of the two is known the
+// conversation submits nothing (replaying).
+func (c *conv) checkReattach() {
+	if !c.replaying || c.replayAsked || c.proc == nil {
+		return
+	}
+	hp, ok := c.proc.(holderProcess)
+	if !ok {
+		return
+	}
+	id, _, _ := hp.HolderInfo()
+	listed, attached := false, false
+	for _, info := range c.r.opts.Holders.List().Holders {
+		if info.ID == id {
+			listed, attached = true, info.Attached
+		}
+	}
+	if !listed {
+		c.processGone()
+		return
+	}
+	if !attached {
+		return
+	}
+	st, err := c.r.opts.Holders.Status(id)
+	if err != nil {
+		return
+	}
+	c.replayAsked = true
+	hp.ReplayUntil(st.NextSeq - 1)
+}
+
+// replayDone ends a rejoin: the state the holder's records rebuilt is
+// written, and the conversation takes input again.
+func (c *conv) replayDone() {
+	c.replaying, c.replayAsked = false, false
+	c.live.writeSnapshot()
+	c.r.notify(c.rec.ReplyID, c.rec.Root)
+	if !c.turn {
+		c.applySettings()
+		c.kick()
+		if !c.turn {
+			c.armIdle()
+		}
+	}
+}
+
+// lineEnd records that every event of holder record seq is applied. The
+// sequence reaches the record at once when the line wrote a conversation
+// entry, so a replay after a daemon restart does not write it again.
+func (c *conv) lineEnd(seq uint64) {
+	if seq <= c.seq {
+		return
+	}
+	c.seq, c.seqDirty = seq, true
+	if c.ringDirty {
+		c.persistSeq()
+	}
+}
+
+func (c *conv) persistSeq() {
+	if !c.seqDirty {
+		return
+	}
+	c.seqDirty, c.ringDirty = false, false
+	c.update(func(rec *Record) { rec.HolderSeq = c.seq })
+}
+
 // composeInstructions writes the instruction file a process appends to the
 // harness's own system prompt: the profile's instruction file or builtin
 // text and, when the profile allows ws tools, the conversation's ws session
@@ -774,52 +1286,190 @@ func composeInstructions(dir string, rec Record, p Profile) (string, error) {
 }
 
 func (c *conv) handle(ev Event) {
+	quiet := ev.Replay
 	switch {
+	case ev.LineEnd:
+		c.lineEnd(ev.Seq)
+	case ev.ReplayDone:
+		c.replayDone()
 	case ev.SessionID != "":
 		if ev.SessionID != c.rec.SessionID {
 			c.update(func(rec *Record) { rec.SessionID = ev.SessionID })
 		}
 	case ev.Live != nil:
-		c.apply(*ev.Live)
+		c.apply(*ev.Live, quiet)
 	case ev.Card != nil:
-		if c.live.card(*ev.Card) {
+		if !quiet && c.live.card(*ev.Card) {
+			c.ringDirty = true
 			c.r.notify(c.rec.ReplyID, c.rec.Root)
 		}
 	case ev.UI != nil:
-		if c.live.ui(*ev.UI) {
+		if !quiet && c.live.ui(*ev.UI) {
+			c.ringDirty = true
 			c.r.notify(c.rec.ReplyID, c.rec.Root)
 		}
 	case ev.TrackerWrite:
-		if f := c.r.opts.TrackerChanged; f != nil {
+		if f := c.r.opts.TrackerChanged; f != nil && !quiet {
 			f()
 		}
 	case ev.Fatal != nil:
+		if quiet {
+			return
+		}
 		c.setStatus(func() { c.lastErr = ev.Fatal.Error() })
 		fmt.Fprintf(c.r.opts.Log, "agent %s: %v\n", c.rec.ReplyID, ev.Fatal)
 		c.stopProcess("")
+	case ev.TurnStart:
+		c.beginTurn(quiet)
 	case ev.TurnEnd:
-		c.endTurn(ev.TurnError)
+		c.endTurn(ev.TurnError, quiet)
+	case ev.Approval != nil:
+		c.addApproval(*ev.Approval, quiet)
+	case ev.ApprovalDone != "":
+		c.dropApproval(ev.ApprovalDone, quiet)
+	case ev.PermissionMode != "":
+		if ev.PermissionMode != c.activeMode {
+			c.setStatus(func() { c.activeMode = ev.PermissionMode })
+			c.changed(quiet)
+		}
+	case ev.BackgroundTasks != nil:
+		if n := *ev.BackgroundTasks; n != c.bgTasks {
+			c.setStatus(func() { c.bgTasks = n })
+			c.changed(quiet)
+			if n == 0 && !c.turn && !quiet {
+				c.armIdle()
+			}
+		}
 	}
+}
+
+// changed tells the daemon a lead's state outside its live snapshot moved
+// (pending approvals, the reported mode, the background task count).
+func (c *conv) changed(quiet bool) {
+	if !quiet {
+		c.r.notify(c.rec.ReplyID, c.rec.Root)
+	}
+}
+
+// beginTurn opens a turn the harness began with no send of the runner's: a
+// background task's completion, a compaction, a pushed message. A turn the
+// runner's own send opened is already running.
+func (c *conv) beginTurn(quiet bool) {
+	if c.turn {
+		return
+	}
+	c.stopIdle()
+	c.setStatus(func() {
+		c.turn = true
+		if !quiet {
+			c.lastErr = ""
+		}
+	})
+	c.apply(wslive.Event{Kind: wslive.KindTurnStart}, quiet)
 }
 
 // endTurn closes the running turn, applies settings changed during it, and
 // submits the messages held meanwhile.
-func (c *conv) endTurn(turnErr string) {
-	if !c.turn {
+func (c *conv) endTurn(turnErr string, quiet bool) {
+	if !c.turn && !c.rec.Lead {
 		return
 	}
-	c.setStatus(func() {
-		c.turn = false
-		if turnErr != "" {
-			c.lastErr = turnErr
-		}
-	})
-	c.apply(wslive.Event{Kind: wslive.KindTurnEnd})
+	if c.turn {
+		c.setStatus(func() { c.turn = false })
+		c.apply(wslive.Event{Kind: wslive.KindTurnEnd}, quiet)
+	}
+	if quiet {
+		return
+	}
+	if turnErr != "" {
+		c.setStatus(func() { c.lastErr = turnErr })
+	}
+	if c.replaying {
+		return
+	}
 	c.applySettings()
 	c.kick()
 	if !c.turn {
 		c.armIdle()
 	}
+}
+
+// addApproval records a waiting tool permission prompt; the session shows
+// as awaiting approval while any waits.
+func (c *conv) addApproval(a ApprovalRequest, quiet bool) {
+	for _, have := range c.approvals {
+		if have.ID == a.ID {
+			return
+		}
+	}
+	c.setStatus(func() { c.approvals = append(c.approvals, a) })
+	c.showApprovals(quiet)
+}
+
+// dropApproval forgets a prompt that needs no answer any more, and reports
+// whether it was waiting.
+func (c *conv) dropApproval(id string, quiet bool) bool {
+	for i, have := range c.approvals {
+		if have.ID == id {
+			c.setStatus(func() { c.approvals = append(c.approvals[:i:i], c.approvals[i+1:]...) })
+			c.showApprovals(quiet)
+			return true
+		}
+	}
+	return false
+}
+
+// clearApprovals settles every waiting prompt with no answer: the process
+// they came from is gone.
+func (c *conv) clearApprovals() {
+	if len(c.approvals) == 0 {
+		return
+	}
+	c.setStatus(func() { c.approvals = nil })
+	c.showApprovals(false)
+}
+
+// showApprovals carries the oldest waiting prompt to the live state as its
+// permission wait, or ends the wait when none is left.
+func (c *conv) showApprovals(quiet bool) {
+	ev := wslive.Event{Kind: wslive.KindPermission, Clear: true}
+	if len(c.approvals) > 0 {
+		a := c.approvals[0]
+		var args any
+		if json.Unmarshal(a.Input, &args) != nil {
+			args = nil
+		}
+		ev = wslive.Event{Kind: wslive.KindPermission, Tool: a.Tool, Args: args}
+	}
+	c.apply(ev, quiet)
+	c.changed(quiet)
+}
+
+// answerApproval writes the answer to the waiting prompt id. The prompt is
+// forgotten before the write, so it is answered at most once.
+func (c *conv) answerApproval(id string, allow bool, message string) error {
+	conflict := func(msg string) error { return &requestError{status: http.StatusConflict, msg: msg} }
+	if c.replaying {
+		return conflict("the session is rejoining its process; answer again in a moment")
+	}
+	var req *ApprovalRequest
+	for i := range c.approvals {
+		if c.approvals[i].ID == id {
+			a := c.approvals[i]
+			req = &a
+		}
+	}
+	answerer, ok := c.proc.(approvalAnswerer)
+	if req == nil || c.proc == nil || !ok {
+		return conflict("that permission prompt is not waiting: it was answered, withdrawn, or its process ended")
+	}
+	c.dropApproval(id, false)
+	if err := answerer.AnswerApproval(*req, allow, message); err != nil {
+		c.setStatus(func() { c.lastErr = "answer the permission prompt: " + err.Error() })
+		c.stopProcess("")
+		return fmt.Errorf("answer the permission prompt: %w", err)
+	}
+	return nil
 }
 
 // processExited handles a process whose output ended without the runner
@@ -828,6 +1478,7 @@ func (c *conv) processExited() {
 	c.events = nil
 	if c.proc != nil {
 		_ = c.proc.Close()
+		c.releaseHolder(c.proc)
 	}
 	c.setStatus(func() {
 		c.proc = nil
@@ -835,14 +1486,62 @@ func (c *conv) processExited() {
 			c.lastErr = "the backend process exited"
 		}
 	})
+	c.processEnded()
+	if rejoining := c.replaying; rejoining {
+		// The process ended while no daemon ran: what waited goes to a new
+		// one.
+		c.replaying, c.replayAsked = false, false
+		c.kick()
+	}
+}
+
+// processGone handles a rejoin whose holder no longer exists: the process
+// ended with it while no daemon ran.
+func (c *conv) processGone() {
+	proc := c.proc
+	c.events = nil
+	if hp, ok := proc.(holderProcess); ok {
+		hp.Detach()
+	}
+	c.setStatus(func() { c.proc = nil })
+	c.update(func(rec *Record) { rec.HolderID, rec.HostPID, rec.HolderSeq = "", 0, 0 })
+	c.writeRegistration()
+	c.replaying, c.replayAsked = false, false
+	c.processEnded()
+	c.kick()
+}
+
+// processEnded settles what ends with a process: its turn, its waiting
+// prompts, and what it last reported.
+func (c *conv) processEnded() {
 	c.stopIdle()
 	if c.turn {
 		c.setStatus(func() { c.turn = false })
 		c.apply(wslive.Event{Kind: wslive.KindTurnEnd})
 	}
+	c.clearApprovals()
+	c.setStatus(func() { c.activeMode, c.bgTasks = "", 0 })
 	c.live.endAgents()
 	c.live.writeSnapshot()
 	c.r.notify(c.rec.ReplyID, c.rec.Root)
+}
+
+// releaseHolder forgets the holder of an ended lead process, unless it
+// could not be ended: then the record keeps it, and the next start ends it
+// before anything runs (retireHolder).
+func (c *conv) releaseHolder(proc Process) {
+	hp, ok := proc.(holderProcess)
+	if !ok || c.rec.HolderID == "" {
+		return
+	}
+	if err := hp.StopError(); err != nil {
+		c.setStatus(func() { c.lastErr = "end the session's process: " + err.Error() })
+		fmt.Fprintf(c.r.opts.Log, "agent %s: stop holder %s: %v\n", c.rec.ReplyID, c.rec.HolderID, err)
+		return
+	}
+	c.seqDirty, c.ringDirty = false, false
+	c.update(func(rec *Record) { rec.HolderID, rec.HostPID, rec.HolderSeq = "", 0, 0 })
+	c.writeRegistration()
 }
 
 // stopProcess ends the process, if any; a running turn ends with it.
@@ -855,13 +1554,30 @@ func (c *conv) stopProcess(string) {
 	c.events = nil
 	_ = proc.Close()
 	c.setStatus(func() { c.proc = nil })
-	if c.turn {
-		c.setStatus(func() { c.turn = false })
-		c.apply(wslive.Event{Kind: wslive.KindTurnEnd})
+	c.releaseHolder(proc)
+	c.replaying, c.replayAsked = false, false
+	c.processEnded()
+}
+
+// letGo is the daemon's shutdown: a lead's process runs on under its
+// holder, with the sequence applied so far in the record for the next
+// daemon's rejoin; any other process ends.
+func (c *conv) letGo() {
+	if hp, ok := c.proc.(holderProcess); ok && c.rec.Lead {
+		c.persistSeq()
+		if hp.Detach() {
+			c.live.writeSnapshot()
+			return
+		}
 	}
-	c.live.endAgents()
-	c.live.writeSnapshot()
-	c.r.notify(c.rec.ReplyID, c.rec.Root)
+	c.stopProcess("")
+}
+
+// idleNow reports whether the idle timer may stop the process: no turn
+// runs and the harness reports no background task, whose work a stop would
+// end.
+func (c *conv) idleNow() bool {
+	return !c.turn && !c.replaying && c.bgTasks == 0
 }
 
 // checkInterrupt takes the inbox's interrupt requests and interrupts the
@@ -895,13 +1611,17 @@ func (c *conv) setSettings(model, effort *string) error {
 }
 
 // applySettings carries changed settings to the process at a turn
-// boundary: in-stream when the backend can, else by stopping the process so
-// the next turn restarts it with the new values on the same backend
-// session.
+// boundary: in-stream when the backend can, and only otherwise by stopping
+// the process so the next turn restarts it with the new values on the same
+// backend session. A restart ends the session's background work with the
+// process, so it is the last resort.
 func (c *conv) applySettings() {
-	model, effort := c.dirtyModel, c.dirtyEffort
-	c.dirtyModel, c.dirtyEffort = false, false
-	if c.proc == nil || (!model && !effort) {
+	model, effort, mode := c.dirtyModel, c.dirtyEffort, c.dirtyMode
+	if c.replaying {
+		return
+	}
+	c.dirtyModel, c.dirtyEffort, c.dirtyMode = false, false, false
+	if c.proc == nil || (!model && !effort && !mode) {
 		return
 	}
 	rec := c.record()
@@ -911,6 +1631,11 @@ func (c *conv) applySettings() {
 	}
 	if effort && !restart && c.proc.SetEffort(rec.Effort) != nil {
 		restart = true
+	}
+	if mode && !restart {
+		if ms, ok := c.proc.(modeSetter); !ok || ms.SetPermissionMode(rec.PermissionMode) != nil {
+			restart = true
+		}
 	}
 	if restart {
 		c.stopProcess("")
@@ -940,6 +1665,9 @@ func (c *conv) close() {
 		c.closed = true
 	})
 	c.stopProcess("")
+	if len(c.rec.Mail) > 0 {
+		c.update(func(rec *Record) { rec.Mail = nil })
+	}
 	if held, err := wsinbox.Held(c.inbox); err == nil {
 		for _, rec := range held {
 			_, _ = wsinbox.Cancel(c.inbox, rec.Name)

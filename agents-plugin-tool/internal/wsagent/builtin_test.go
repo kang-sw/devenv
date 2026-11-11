@@ -55,9 +55,75 @@ func TestBuiltinSupportProfilesResolve(t *testing.T) {
 	}
 	resolver := wsconfig.NewResolver(opts, nil, nil, nil)
 	all, err := ResolveProfiles(&resolver)
-	if err != nil || len(all) != 2 {
-		t.Fatalf("ResolveProfiles with no config should list the two builtin profiles: %+v, %v", all, err)
+	if err != nil || len(all) != 4 {
+		t.Fatalf("ResolveProfiles with no config should list the builtin support and lead profiles: %+v, %v", all, err)
 	}
+}
+
+// TestBuiltinLeadProfilesResolve: each harness has a builtin lead profile
+// that names no capability of its own (the harness loads the user's setup),
+// stays off the session index, and starts claude in the default permission
+// mode; a user may not define a lead profile in a repository's config.
+func TestBuiltinLeadProfilesResolve(t *testing.T) {
+	opts := testConfig(t)
+	root := t.TempDir()
+	for backend, name := range map[string]string{BackendClaude: LeadProfileClaude, BackendPi: LeadProfilePi} {
+		if LeadProfileFor(backend) != name {
+			t.Fatalf("LeadProfileFor(%s) = %q, want %q", backend, LeadProfileFor(backend), name)
+		}
+		rp, err := ResolveProfile(opts, root, name)
+		if err != nil {
+			t.Fatalf("ResolveProfile(%s): %v", name, err)
+		}
+		p := rp.Definition
+		if !p.Lead || p.Backend != backend || rp.Scope != wsconfig.ScopeBuiltin {
+			t.Fatalf("%s = %+v (scope %s), want a builtin lead profile on %s", name, p, rp.Scope, backend)
+		}
+		if len(p.Tools)+len(p.WSTools)+len(p.MCPServers)+len(p.Plugins) != 0 || p.Skills || p.ListInIndex || p.InstructionsPath(root) != "" {
+			t.Errorf("%s should name no capability and stay off the index: %+v", name, p)
+		}
+	}
+	if LeadProfileFor("other") != "" {
+		t.Fatal("LeadProfileFor should name no profile for an unknown harness")
+	}
+	claude, pi := builtinProfile(t, LeadProfileClaude), builtinProfile(t, LeadProfilePi)
+	if claude.PermissionMode != DefaultLeadPermissionMode || pi.PermissionMode != "" {
+		t.Fatalf("permission modes = %q, %q; want the default for claude and none for pi", claude.PermissionMode, pi.PermissionMode)
+	}
+	// Idle stop: on for claude, whose stream reports background tasks; off
+	// for pi, where an idle process cannot be told from a waiting one.
+	if claude.IdleTimeout() != DefaultIdleTimeout || pi.IdleTimeout() != 0 {
+		t.Fatalf("idle timeouts = %s, %s; want %s and off", claude.IdleTimeout(), pi.IdleTimeout(), DefaultIdleTimeout)
+	}
+	for _, bad := range []string{
+		`{"backend":"claude","permission_mode":"auto"}`,
+		`{"backend":"claude","lead":true,"permission_mode":"yolo"}`,
+		`{"backend":"claude","lead":true,"tools":["Bash"]}`,
+		`{"backend":"claude","lead":true,"list_in_index":true}`,
+	} {
+		if _, err := ParseProfile(json.RawMessage(bad)); err == nil {
+			t.Errorf("ParseProfile(%s) should be refused", bad)
+		}
+	}
+	lead, err := ParseProfile(json.RawMessage(`{"backend":"claude","lead":true,"permission_mode":"plan"}`))
+	if err != nil {
+		t.Fatalf("a user lead profile should parse: %v", err)
+	}
+	if err := CheckProfileScope(lead, wsconfig.ScopeRepo); err == nil {
+		t.Fatal("a lead profile in a repository's config should be refused")
+	}
+	if err := CheckProfileScope(lead, wsconfig.ScopeGlobal); err != nil {
+		t.Fatalf("a lead profile in the user's own config should be allowed: %v", err)
+	}
+}
+
+func builtinProfile(t *testing.T, name string) Profile {
+	t.Helper()
+	var p Profile
+	if err := json.Unmarshal(BuiltinProfiles()[ProfilePrefix+name], &p); err != nil {
+		t.Fatalf("builtin %s: %v", name, err)
+	}
+	return p
 }
 
 // TestBuiltinSupportProfileOverriddenWhole: a global profile of the same

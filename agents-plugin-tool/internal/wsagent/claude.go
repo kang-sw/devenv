@@ -1,6 +1,7 @@
 package wsagent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -8,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -70,8 +72,62 @@ func claudeEnv(env []string) []string {
 	return harnessEnv(env, []string{"CLAUDE", "WS_MAILBOX"}, claudeKeptEnv, nil)
 }
 
+// leadDropEnv are the variable prefixes a lead conversation's child starts
+// without, beyond its harness's own: the daemon's environment is that of
+// whichever session's launcher started it, and its mailbox identity, its
+// ws-mcp launcher state (project root, runtime binary, resource tree), and
+// its own hosted-session variables must not reach another session. The
+// user's state locations (WS_CACHE_HOME, WS_CONFIG_HOME) stay.
+var leadDropEnv = []string{"WS_MAILBOX", "WS_MCP_", "WS_RSRC", "WS_HOSTED_"}
+
+// claudeLeadEnv is a lead conversation's environment: env without the
+// parent harness session's CLAUDE* variables and leadDropEnv, plus the
+// hosted-session variables.
+func claudeLeadEnv(spec StartSpec) []string {
+	// The session-state lines are what tell a turn nobody sent from an idle
+	// harness (session_state_changed in mapLine).
+	set := map[string]string{"CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS": "1"}
+	for name, value := range spec.Lead.Env {
+		set[name] = value
+	}
+	return harnessEnv(spec.Env, append([]string{"CLAUDE"}, leadDropEnv...), claudeKeptEnv, set)
+}
+
+// claudeLeadArgs is the command line of a lead conversation: print mode
+// with stream-json both ways and nothing held back, so user and project
+// settings, plugins, hooks, memory, and MCP servers load as in the user's
+// own session. Tool permission prompts come to the daemon
+// (--permission-prompt-tool stdio) as can_use_tool control requests.
+func claudeLeadArgs(spec StartSpec) []string {
+	mode := spec.Lead.PermissionMode
+	if mode == "" {
+		mode = DefaultLeadPermissionMode
+	}
+	args := []string{
+		"-p",
+		"--input-format", "stream-json",
+		"--output-format", "stream-json",
+		"--verbose",
+		"--permission-mode", mode,
+		"--permission-prompt-tool", "stdio",
+	}
+	if spec.Model != "" {
+		args = append(args, "--model", spec.Model)
+	}
+	if spec.Effort != "" {
+		args = append(args, "--effort", spec.Effort)
+	}
+	if spec.SessionID != "" {
+		args = append(args, "--resume", spec.SessionID)
+	}
+	return args
+}
+
 // claudeArgs is the claude command line for spec, without the executable.
 func claudeArgs(spec StartSpec) ([]string, error) {
+	if spec.Lead != nil {
+		return claudeLeadArgs(spec), nil
+	}
 	p := spec.Profile
 	mcpConfig, err := claudeMCPConfig(spec)
 	if err != nil {
@@ -267,11 +323,14 @@ func (b ClaudeBackend) Start(ctx context.Context, spec StartSpec) (Process, erro
 	cmd := exec.Command(command, args...)
 	cmd.Dir = spec.Root
 	cmd.Env = claudeEnv(spec.Env)
-	p, err := startStreamProcess(cmd, newClaudeMapper(spec), claudeProtocol{})
+	if spec.Lead != nil {
+		cmd.Env = claudeLeadEnv(spec)
+	}
+	p, err := startChild(spec, cmd, newClaudeMapper(spec), claudeProtocol{})
 	if err != nil {
 		return nil, err
 	}
-	return claudeProcess{p}, nil
+	return claudeProcess{streamProcess: p, lead: spec.Lead != nil}, nil
 }
 
 // claudeProtocol writes Claude Code's stream-json input lines.
@@ -286,7 +345,11 @@ func (claudeProtocol) requestLine(id string, request map[string]any) any {
 }
 
 // claudeProcess adds Claude Code's control requests to a stream process.
-type claudeProcess struct{ *streamProcess }
+type claudeProcess struct {
+	*streamProcess
+	// lead marks a lead conversation's process.
+	lead bool
+}
 
 func (p claudeProcess) Interrupt() error {
 	return p.request("interrupt", map[string]any{"subtype": "interrupt"})
@@ -301,10 +364,57 @@ func (p claudeProcess) SetModel(model string) error {
 	return p.request("set_model", map[string]any{"subtype": "set_model", "model": model})
 }
 
-// SetEffort has no in-stream form in Claude Code (2.1.319 answers
-// set_effort with "Unsupported control request subtype"), so an effort
-// change restarts the process with --effort on the same session.
-func (claudeProcess) SetEffort(string) error { return ErrUnsupported }
+// SetEffort changes a lead's effort with Claude Code's apply_flag_settings
+// control (2.1.322 answers it with a bare success), which applies from the
+// next turn; returning to the default has no in-stream form. A profile's
+// process launches with its own --settings, which this control would
+// touch, so its effort change restarts the process with --effort on the
+// same session.
+func (p claudeProcess) SetEffort(effort string) error {
+	if !p.lead || effort == "" {
+		return ErrUnsupported
+	}
+	return p.request("apply_flag_settings", map[string]any{"subtype": "apply_flag_settings", "settings": map[string]any{"effortLevel": effort}})
+}
+
+// SetPermissionMode changes a lead's permission mode with Claude Code's
+// set_permission_mode control. The mode the harness then runs in comes back
+// on its stream (a status line's permissionMode).
+func (p claudeProcess) SetPermissionMode(mode string) error {
+	if !p.lead || mode == "" {
+		return ErrUnsupported
+	}
+	return p.request("set_permission_mode", map[string]any{"subtype": "set_permission_mode", "mode": mode})
+}
+
+// AnswerApproval answers a can_use_tool request on the child's input: allow
+// hands the tool call's input back unchanged, deny carries the message the
+// model reads.
+func (p claudeProcess) AnswerApproval(req ApprovalRequest, allow bool, message string) error {
+	return p.writeLine(claudeApprovalResponse(req, allow, message))
+}
+
+// claudeApprovalResponse is the control_response line that answers req.
+func claudeApprovalResponse(req ApprovalRequest, allow bool, message string) any {
+	answer := map[string]any{"behavior": "deny", "message": message}
+	if allow {
+		input := req.Input
+		if len(input) == 0 {
+			input = json.RawMessage("{}")
+		}
+		answer = map[string]any{"behavior": "allow", "updatedInput": input}
+	} else if strings.TrimSpace(message) == "" {
+		answer["message"] = "The user denied this tool call."
+	}
+	return map[string]any{"type": "control_response", "response": map[string]any{"subtype": "success", "request_id": req.ID, "response": answer}}
+}
+
+// claudeChatOnlyTools are the tools whose prompt is a question to the
+// user, not a permission: an allow without the user's answers breaks them,
+// and the dashboard renders no such form, so a lead is told to ask in chat.
+var claudeChatOnlyTools = map[string]bool{"AskUserQuestion": true, "ExitPlanMode": true}
+
+const claudeChatOnlyDenial = "This session has no interactive form for this tool. Put the question or the plan in your reply as plain text and end your turn; the user answers in the chat."
 
 // claudeMapper maps Claude Code's stream-json output to runner events: the
 // init message to the session id (after the init check), assistant text to
@@ -324,16 +434,46 @@ type claudeMapper struct {
 	limits  map[string]wslive.UsageLimit
 	cost    *wslive.UsageCost
 	window  int64
+
+	// compacted is set from a compact_boundary to the next result: the
+	// stream re-emits the last assistant message in between, with no replay
+	// flag but under the line uuid it had before, and it is dropped. uuids
+	// are the recent assistant lines' (claudeSeenUUIDs of them), so a real
+	// message after an automatic compaction mid-turn is kept.
+	compacted bool
+	uuids     []string
+	// open is set while the stream says a lead's turn runs: from a running
+	// state, an init, an assistant message, or a compaction's start, to
+	// the turn's result (or an idle state with no result before it).
+	open bool
+	// approvals are the can_use_tool requests not seen settled, request id
+	// by tool call id.
+	approvals map[string]string
 }
 
 func newClaudeMapper(spec StartSpec) *claudeMapper {
-	return &claudeMapper{spec: spec, now: time.Now, batches: newBatchTracker("c"), limits: map[string]wslive.UsageLimit{}, tasks: map[string]bool{}}
+	return &claudeMapper{spec: spec, now: time.Now, batches: newBatchTracker("c"), limits: map[string]wslive.UsageLimit{}, tasks: map[string]bool{}, approvals: map[string]string{}}
 }
+
+// lead reports a lead conversation's mapper.
+func (m *claudeMapper) lead() bool { return m.spec.Lead != nil }
 
 type claudeLine struct {
 	Type    string          `json:"type"`
 	Subtype string          `json:"subtype"`
 	Message json.RawMessage `json:"message"`
+	// UUID is the line's own id; a re-emitted line keeps it.
+	UUID string `json:"uuid"`
+	// RequestID and Request are a control_request's (can_use_tool) and a
+	// control_cancel_request's.
+	RequestID string          `json:"request_id"`
+	Request   json.RawMessage `json:"request"`
+	// State is a session_state_changed line's: running, requires_action,
+	// or idle. PermissionMode is a status line's, after a mode change.
+	State          string `json:"state"`
+	PermissionMode string `json:"permissionMode"`
+	// Tasks is a background_tasks_changed line's whole current list.
+	Tasks *[]json.RawMessage `json:"tasks"`
 	// ParentToolUseID names the Agent call whose subagent wrote the line.
 	ParentToolUseID string `json:"parent_tool_use_id"`
 	// TaskID, TaskType, Description, Status, and Patch describe a
@@ -424,6 +564,20 @@ func (m *claudeMapper) mapLine(line []byte, replies lineReplies) []Event {
 	switch l.Type {
 	case "control_response":
 		replies.answer(l.Response.RequestID, controlAnswer{ok: l.Response.Subtype == "success", err: l.Response.Error})
+	case "control_request":
+		if m.lead() {
+			return m.approval(l, now, replies)
+		}
+	case "control_cancel_request":
+		// The harness withdrew a prompt: it is settled with no answer.
+		if m.lead() && l.RequestID != "" {
+			for toolUse, id := range m.approvals {
+				if id == l.RequestID {
+					delete(m.approvals, toolUse)
+				}
+			}
+			return []Event{{ApprovalDone: l.RequestID}}
+		}
 	case "system":
 		switch l.Subtype {
 		case "init":
@@ -431,13 +585,53 @@ func (m *claudeMapper) mapLine(line []byte, replies lineReplies) []Event {
 			if json.Unmarshal(line, &init) != nil {
 				return []Event{{Fatal: errors.New("launch refused: unreadable claude init message")}}
 			}
+			if m.lead() {
+				return m.leadInit(init)
+			}
 			if err := checkClaudeInit(init, m.spec); err != nil {
 				return []Event{{Fatal: err}}
 			}
 			if init.SessionID != "" {
 				return []Event{{SessionID: init.SessionID}}
 			}
+		case "session_state_changed":
+			// running opens a turn whether or not a send began it (a
+			// background task's result, a pushed message); idle closes one
+			// no result closed. An idle after a result is that turn's, and
+			// must not close the next one a flushed send has begun.
+			if !m.lead() {
+				return nil
+			}
+			switch l.State {
+			case "running":
+				m.open = true
+				return []Event{{TurnStart: true}}
+			case "idle":
+				if m.open {
+					return append(m.closeTurn(now), m.status(), Event{TurnEnd: true})
+				}
+			}
+		case "status":
+			if !m.lead() {
+				return nil
+			}
+			var out []Event
+			if l.PermissionMode != "" {
+				out = append(out, Event{PermissionMode: l.PermissionMode})
+			}
+			// A compaction is a turn of its own when no send started it.
+			if l.Status == "compacting" {
+				m.open = true
+				out = append(out, Event{TurnStart: true}, Event{Live: &wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactStart}})
+			}
+			return out
+		case "background_tasks_changed":
+			if m.lead() && l.Tasks != nil {
+				n := len(*l.Tasks)
+				return []Event{{BackgroundTasks: &n}}
+			}
 		case "compact_boundary":
+			m.compacted = true
 			trigger := ""
 			if l.CompactMetadata != nil && (l.CompactMetadata.Trigger == wslive.TriggerAuto || l.CompactMetadata.Trigger == wslive.TriggerManual) {
 				trigger = l.CompactMetadata.Trigger
@@ -462,12 +656,31 @@ func (m *claudeMapper) mapLine(line []byte, replies lineReplies) []Event {
 		if l.ParentToolUseID != "" {
 			return nil
 		}
-		return m.assistant(l.Message, now)
-	case "user":
-		if l.ParentToolUseID != "" {
-			return nil
+		if l.UUID != "" {
+			if slices.Contains(m.uuids, l.UUID) {
+				if m.compacted {
+					return nil
+				}
+			} else {
+				m.uuids = append(m.uuids, l.UUID)
+				if len(m.uuids) > claudeSeenUUIDs {
+					m.uuids = m.uuids[len(m.uuids)-claudeSeenUUIDs:]
+				}
+			}
 		}
-		return m.toolResults(l.Message, now)
+		out := m.assistant(l.Message, now)
+		if m.lead() {
+			// The harness works: a turn runs, whether or not a send began it.
+			m.open = true
+			out = append([]Event{{TurnStart: true}}, out...)
+		}
+		return out
+	case "user":
+		settled := m.settled(l.Message)
+		if l.ParentToolUseID != "" {
+			return settled
+		}
+		return append(settled, m.toolResults(l.Message, now)...)
 	case "rate_limit_event":
 		if l.RateLimit != nil {
 			for kind, w := range l.RateLimit.UnifiedWindows {
@@ -478,10 +691,7 @@ func (m *claudeMapper) mapLine(line []byte, replies lineReplies) []Event {
 			return []Event{m.status()}
 		}
 	case "result":
-		var out []Event
-		if b := m.batches.finish(now, true); b != nil {
-			out = append(out, *b)
-		}
+		out := m.closeTurn(now)
 		for _, mu := range l.ModelUsage {
 			if mu.ContextWindow > m.window {
 				m.window = mu.ContextWindow
@@ -510,6 +720,103 @@ func (m *claudeMapper) mapLine(line []byte, replies lineReplies) []Event {
 	}
 	return nil
 }
+
+// closeTurn is what any end of a turn settles: a prompt still open will
+// never be answered, and the open tool batch is done.
+func (m *claudeMapper) closeTurn(now int64) []Event {
+	var out []Event
+	m.open, m.compacted = false, false
+	for toolUse, id := range m.approvals {
+		delete(m.approvals, toolUse)
+		out = append(out, Event{ApprovalDone: id})
+	}
+	if b := m.batches.finish(now, true); b != nil {
+		out = append(out, *b)
+	}
+	return out
+}
+
+// leadInit maps a lead's init message, which every user turn brings: the
+// session id, the turn's start, and the permission mode the harness reports
+// (it may differ from the one asked for).
+func (m *claudeMapper) leadInit(init claudeInit) []Event {
+	var out []Event
+	if init.SessionID != "" {
+		out = append(out, Event{SessionID: init.SessionID})
+	}
+	m.open = true
+	out = append(out, Event{TurnStart: true})
+	if init.PermissionMode != "" {
+		out = append(out, Event{PermissionMode: init.PermissionMode})
+	}
+	return out
+}
+
+// claudeCanUseTool is a can_use_tool control request's body.
+type claudeCanUseTool struct {
+	Subtype     string          `json:"subtype"`
+	ToolName    string          `json:"tool_name"`
+	Input       json.RawMessage `json:"input"`
+	Description string          `json:"description"`
+	ToolUseID   string          `json:"tool_use_id"`
+	AgentID     string          `json:"agent_id"`
+	// RequiresUserInteraction marks a tool whose prompt is a question to
+	// the user (either spelling).
+	RequiresUserInteraction  bool `json:"requires_user_interaction"`
+	RequiresUserInteraction2 bool `json:"requiresUserInteraction"`
+}
+
+// approval maps a can_use_tool control request to a waiting prompt. A
+// request that names no tool, tool call, or input is denied at once rather
+// than left hanging, and so is a tool whose prompt is a question to the
+// user (claudeChatOnlyTools). Any other control request is not answered.
+func (m *claudeMapper) approval(l claudeLine, now int64, replies lineReplies) []Event {
+	var req claudeCanUseTool
+	if json.Unmarshal(l.Request, &req) != nil || req.Subtype != "can_use_tool" || l.RequestID == "" {
+		return nil
+	}
+	ar := ApprovalRequest{ID: l.RequestID, Tool: req.ToolName, Input: req.Input, Description: req.Description, ToolUseID: req.ToolUseID, AgentID: req.AgentID, StartedAt: now}
+	input := bytes.TrimSpace(req.Input)
+	switch {
+	case req.ToolName == "" || req.ToolUseID == "" || len(input) == 0 || input[0] != '{':
+		replies.send(claudeApprovalResponse(ar, false, "The permission request was malformed (no tool name, tool call id, or input), so it was denied."))
+		return nil
+	case claudeChatOnlyTools[req.ToolName] || req.RequiresUserInteraction || req.RequiresUserInteraction2:
+		replies.send(claudeApprovalResponse(ar, false, claudeChatOnlyDenial))
+		return nil
+	}
+	m.approvals[req.ToolUseID] = l.RequestID
+	return []Event{{Approval: &ar}}
+}
+
+// settled returns an ApprovalDone for each waiting prompt whose tool call a
+// user message brings the result of: the prompt was answered. A subagent's
+// tool results count too.
+func (m *claudeMapper) settled(raw json.RawMessage) []Event {
+	if len(m.approvals) == 0 {
+		return nil
+	}
+	var msg claudeMessage
+	if json.Unmarshal(raw, &msg) != nil {
+		return nil
+	}
+	var blocks []claudeBlock
+	if json.Unmarshal(msg.Content, &blocks) != nil {
+		return nil
+	}
+	var out []Event
+	for _, b := range blocks {
+		if id, ok := m.approvals[b.ToolUseID]; ok && b.Type == "tool_result" {
+			delete(m.approvals, b.ToolUseID)
+			out = append(out, Event{ApprovalDone: id})
+		}
+	}
+	return out
+}
+
+// claudeSeenUUIDs is how many recent assistant line uuids the mapper keeps
+// to recognise a compaction's re-emitted message.
+const claudeSeenUUIDs = 64
 
 // claudeAgentTask is the task type of a subagent the Agent tool started.
 // Claude 2.1.319 runs it in the background: the Agent call's tool_result

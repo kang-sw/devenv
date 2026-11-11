@@ -454,7 +454,7 @@ func TestClaudeProcessControls(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p := claudeProcess{sp}
+	p := claudeProcess{streamProcess: sp}
 	go func() {
 		for range p.Events() {
 		}

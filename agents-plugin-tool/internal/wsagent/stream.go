@@ -42,25 +42,77 @@ type controlAnswer struct {
 	err string
 }
 
+// child is the started process a streamProcess drives: an exec.Cmd of the
+// daemon's own (execChild), or a session holder's child (holderChild).
+type child interface {
+	// name is the command's base name, for messages.
+	name() string
+	// write writes one input line (the newline included).
+	write(line []byte) error
+	// kill ends the child at once, without waiting: a refused launch never
+	// gets to run a tool call. It may be called from the goroutine that
+	// feeds the process.
+	kill()
+	// stop ends the child in order (input EOF, then a signal) and returns
+	// once it has gone; exited is closed when the child's exit was seen.
+	stop(exited <-chan struct{})
+}
+
 // streamProcess is a child speaking line-delimited JSON on stdin and
 // stdout, parsed by a lineMapper.
 type streamProcess struct {
-	cmd     *exec.Cmd
-	stdin   io.WriteCloser
+	child   child
 	proto   lineProtocol
+	mapper  lineMapper
 	events  chan Event
 	closing chan struct{}
 	exited  chan struct{}
-	read    chan struct{}
+	// stderr keeps the tail of the child's standard error for its exit
+	// message.
+	stderr *tailBuffer
+
+	// feedMu serializes feed and finish, so events is never closed under a
+	// send; a send blocked on a full channel ends when closing closes.
+	feedMu   sync.Mutex
+	finished bool
 
 	writeMu sync.Mutex
 	ctlMu   sync.Mutex
 	ctlSeq  int
 	waiters map[string]chan controlAnswer
 	once    sync.Once
+
+	// holder is set for a process under a session holder (holder.go).
+	holder *holderChild
 }
 
+func newStreamProcess(mapper lineMapper, proto lineProtocol) *streamProcess {
+	return &streamProcess{
+		proto: proto, mapper: mapper,
+		events:  make(chan Event, 256),
+		closing: make(chan struct{}),
+		exited:  make(chan struct{}),
+		stderr:  &tailBuffer{max: 4 << 10},
+		waiters: map[string]chan controlAnswer{},
+	}
+}
+
+// startChild starts cmd and maps its output: under a session holder when
+// spec asks for one (a lead conversation), else as the daemon's own child.
+func startChild(spec StartSpec, cmd *exec.Cmd, mapper lineMapper, proto lineProtocol) (*streamProcess, error) {
+	if spec.Lead != nil && spec.Lead.Holder != nil {
+		p := newStreamProcess(mapper, proto)
+		if err := spec.Lead.Holder.start(p, cmd); err != nil {
+			return nil, err
+		}
+		return p, nil
+	}
+	return startStreamProcess(cmd, mapper, proto)
+}
+
+// startStreamProcess starts cmd as the daemon's own child.
 func startStreamProcess(cmd *exec.Cmd, mapper lineMapper, proto lineProtocol) (*streamProcess, error) {
+	p := newStreamProcess(mapper, proto)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err
@@ -69,8 +121,7 @@ func startStreamProcess(cmd *exec.Cmd, mapper lineMapper, proto lineProtocol) (*
 	if err != nil {
 		return nil, err
 	}
-	stderr := &tailBuffer{max: 4 << 10}
-	cmd.Stderr = stderr
+	cmd.Stderr = p.stderr
 	// A grandchild that inherited stderr (a tool process, a stdio MCP
 	// server) would otherwise hold Wait, and the conversation's stop, open
 	// after the child itself exited.
@@ -78,67 +129,130 @@ func startStreamProcess(cmd *exec.Cmd, mapper lineMapper, proto lineProtocol) (*
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start %s: %w", filepath.Base(cmd.Path), err)
 	}
-	p := &streamProcess{
-		cmd: cmd, stdin: stdin, proto: proto,
-		events:  make(chan Event, 256),
-		closing: make(chan struct{}),
-		exited:  make(chan struct{}),
-		read:    make(chan struct{}),
-		waiters: map[string]chan controlAnswer{},
-	}
+	p.child = &execChild{cmd: cmd, stdin: stdin}
+	read := make(chan struct{})
 	go func() {
-		defer close(p.read)
+		defer close(read)
 		sc := bufio.NewScanner(stdout)
 		sc.Buffer(make([]byte, min(64<<10, maxLineBytes)), maxLineBytes)
 		for sc.Scan() {
-			for _, ev := range mapper.mapLine(sc.Bytes(), p) {
-				if ev.Fatal != nil {
-					// A refused launch never gets to run a tool call.
-					_ = cmd.Process.Kill()
-				}
-				select {
-				case p.events <- ev:
-				case <-p.closing:
-				}
-			}
+			p.feed(sc.Bytes(), 0, false)
 		}
 		if err := sc.Err(); err != nil {
 			// A line over maxLineBytes or a failed read ends the reader; the
 			// child, left writing to a pipe nobody reads, would block and hold
 			// the turn open, so it is ended here with the error.
-			_ = cmd.Process.Kill()
-			select {
-			case p.events <- Event{Fatal: fmt.Errorf("reading %s output: %w", filepath.Base(cmd.Path), err)}:
-			case <-p.closing:
-			}
+			p.child.kill()
+			p.emit(Event{Fatal: fmt.Errorf("reading %s output: %w", p.child.name(), err)})
 		}
 	}()
 	go func() {
-		<-p.read
+		<-read
 		err := cmd.Wait()
 		if errors.Is(err, exec.ErrWaitDelay) {
 			// The child exited cleanly; only its stderr was still held.
 			err = nil
 		}
-		close(p.exited)
-		select {
-		case <-p.closing:
-		default:
-			if err != nil {
-				msg := strings.TrimSpace(stderr.String())
-				if msg == "" {
-					msg = err.Error()
-				}
-				select {
-				case p.events <- Event{Fatal: fmt.Errorf("%s exited: %s", filepath.Base(cmd.Path), msg)}:
-				case <-p.closing:
-				}
-			}
-		}
-		close(p.events)
+		p.finish(err)
 	}()
 	return p, nil
 }
+
+// feed maps one output line and delivers its events. seq is the line's
+// holder record sequence (0 for the daemon's own child); a replayed line
+// (one the runner applied under an earlier daemon) rebuilds the mapper's
+// and the runner's state and answers nothing. A holder line that brought
+// events is followed by a LineEnd event, so the runner knows the line is
+// applied whole.
+func (p *streamProcess) feed(line []byte, seq uint64, replay bool) {
+	p.feedMu.Lock()
+	defer p.feedMu.Unlock()
+	if p.finished {
+		return
+	}
+	var replies lineReplies = p
+	if replay {
+		replies = silentReplies{}
+	}
+	evs := p.mapper.mapLine(line, replies)
+	for _, ev := range evs {
+		if ev.Fatal != nil && !replay {
+			p.child.kill()
+		}
+		ev.Seq, ev.Replay = seq, replay
+		p.emit(ev)
+	}
+	if seq > 0 && len(evs) > 0 {
+		p.emit(Event{Seq: seq, Replay: replay, LineEnd: true})
+	}
+}
+
+func (p *streamProcess) emit(ev Event) {
+	select {
+	case p.events <- ev:
+	case <-p.closing:
+	}
+}
+
+// deliver sends an event from outside feed (a holder's replay mark, an
+// oversized line), unless the stream has ended.
+func (p *streamProcess) deliver(ev Event) {
+	p.feedMu.Lock()
+	defer p.feedMu.Unlock()
+	if !p.finished {
+		p.emit(ev)
+	}
+}
+
+// finish ends the event stream: the child has exited. A failed exit (err)
+// the runner did not ask for is reported first, with the child's last
+// standard error lines.
+func (p *streamProcess) finish(err error) {
+	p.feedMu.Lock()
+	defer p.feedMu.Unlock()
+	if p.finished {
+		return
+	}
+	p.finished = true
+	close(p.exited)
+	select {
+	case <-p.closing:
+	default:
+		if err != nil {
+			msg := strings.TrimSpace(p.stderr.String())
+			if msg == "" {
+				msg = err.Error()
+			}
+			p.emit(Event{Fatal: fmt.Errorf("%s exited: %s", p.child.name(), msg)})
+		}
+	}
+	close(p.events)
+}
+
+// silentReplies drops what a mapper sends back while a replayed line is
+// mapped: the answer was given, or the request made, under an earlier
+// daemon.
+type silentReplies struct{}
+
+func (silentReplies) answer(string, controlAnswer) {}
+func (silentReplies) send(any)                     {}
+
+// execChild is a child the daemon started itself.
+type execChild struct {
+	cmd   *exec.Cmd
+	stdin io.WriteCloser
+}
+
+func (c *execChild) name() string { return filepath.Base(c.cmd.Path) }
+
+func (c *execChild) write(line []byte) error {
+	_, err := c.stdin.Write(line)
+	return err
+}
+
+func (c *execChild) kill() { _ = c.cmd.Process.Kill() }
+
+func (c *execChild) stop(exited <-chan struct{}) { stopChild(c.cmd, c.stdin.Close, exited) }
 
 func (p *streamProcess) Events() <-chan Event { return p.events }
 
@@ -149,8 +263,7 @@ func (p *streamProcess) writeLine(v any) error {
 	}
 	p.writeMu.Lock()
 	defer p.writeMu.Unlock()
-	_, err = p.stdin.Write(append(raw, '\n'))
-	return err
+	return p.child.write(append(raw, '\n'))
 }
 
 func (p *streamProcess) Send(text string) error { return p.writeLine(p.proto.userLine(text)) }
@@ -218,11 +331,34 @@ func (p *streamProcess) answer(id string, a controlAnswer) {
 func (p *streamProcess) Close() error {
 	p.once.Do(func() {
 		close(p.closing)
-		stopChild(p.cmd, p.stdin.Close, p.exited)
+		p.child.stop(p.exited)
+		if p.holder != nil {
+			// The holder is gone; an exit record it could not send ends
+			// the stream here.
+			p.holder.release()
+			p.finish(nil)
+		}
 	})
 	for range p.events {
 	}
 	return nil
+}
+
+// Detach lets go of a process under a session holder without ending it:
+// the child keeps running for the next daemon. It reports false for the
+// daemon's own child, which the caller closes instead.
+func (p *streamProcess) Detach() bool {
+	if p.holder == nil {
+		return false
+	}
+	p.once.Do(func() {
+		close(p.closing)
+		p.holder.release()
+		p.finish(nil)
+	})
+	for range p.events {
+	}
+	return true
 }
 
 // tailBuffer keeps the last max bytes written to it.
