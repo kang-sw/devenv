@@ -165,14 +165,25 @@
   // TAB maps a region to the tab that shows it; PANE names the element whose
   // visibility tells whether a tab is shown in the current view. The panels
   // live in the drawer, whose handle carries their dot instead.
-  // The conversation column itself switches "Conversation | Files"
-  // (ctabs): its Files pane (files.js) stands in for the agents tree, the
-  // conversation, and the composer, which are only hidden meanwhile, so
-  // their scroll, the draft, and the tree's state survive the switch. The
-  // conversation tab counts as shown while either of the two shows.
+  // The conversation panel's header (chead) switches "Conversation |
+  // Files" (ctabs): the Files pane (files.js) stands in for the
+  // conversation below the header, which is only hidden meanwhile, so its
+  // scroll and pin survive the switch; the agents tree and the composer
+  // stay. The conversation tab counts as shown while either of the two
+  // shows.
   var TAB = { tree: "convo", entries: "convo", convlive: "convo", board: "board" };
   var PANE = { convo: "convo", board: "bcol" };
-  var fpane = $("files"), filesSeen = false;
+  var fpane = $("files"), chead = $("chead"), filesSeen = false;
+  // syncChead moves the conversation's counts from the entries region's
+  // own title bar, which a live page hides, into the panel's header; it
+  // runs on load and after each entries swap.
+  function syncChead() {
+    var slot = chead && chead.querySelector(".csum"), sum = doc.querySelector("#r-entries > .thead > .sum");
+    if (!slot || !sum) return;
+    slot.textContent = "";
+    slot.appendChild(sum);
+  }
+  syncChead();
   function tabShown(t) { return visible($(PANE[t])) || (t === "convo" && visible(fpane)); }
   function tabDot(t) { var b = doc.querySelector('#tabbar [data-tab="' + t + '"]'); return b && b.querySelector(".tdot"); }
   function ctabDot() { return doc.querySelector('#ctabs [data-ctab="convo"] .tdot'); }
@@ -216,10 +227,13 @@
   // shareAt turns a pointer's y into the tree's share of the room the two
   // panes divide (their span less the splitter), with the same pixel floors
   // the stylesheet sets.
+  // The conversation's header stands between the splitter and the pane
+  // below it (the conversation, or the Files pane under its tab), outside
+  // the shares.
   function shareAt(y) {
-    var t = $("r-tree"), c = $("convo");
+    var t = $("r-tree"), c = visible($("convo")) ? $("convo") : fpane;
     if (!visible(t) || !visible(c) || !splitter) return null;
-    var top = t.getBoundingClientRect().top, room = c.getBoundingClientRect().bottom - top - splitter.offsetHeight;
+    var top = t.getBoundingClientRect().top, room = c.getBoundingClientRect().bottom - top - splitter.offsetHeight - (visible(chead) ? chead.offsetHeight : 0);
     if (room <= 0) return null;
     var f = (y - top - splitter.offsetHeight / 2) / room, lo = 56 / room, hi = 1 - 96 / room;
     if (lo < hi) f = Math.min(hi, Math.max(lo, f));
@@ -470,6 +484,7 @@
     if (name === "tree") agentTipSwapped();
     if (TL_REGIONS[name]) { delete tlHeld[name]; tlCount(); }
     if (name === "convlive") syncBadge();
+    if (name === "entries") syncChead();
     if (name === "head" && !sseOn) connected(false);
     if (name === "rail") { railMarks(); railScrollTo(railTop); }
   }
@@ -512,6 +527,7 @@
   if (live && fpane && window.WsFiles) {
     window.WsFiles.mount(fpane, {
       rid: rid, load: load, save: save, post: post, toast: toast, copy: copyText,
+      rootSlot: chead && chead.querySelector(".fsum"),
       local: function () { return root.hasAttribute("data-sysopen"); }
     });
   }

@@ -600,7 +600,7 @@
     el.setAttribute("data-fm", mode);
     var head = mk("div", "fhd");
     ui.root = mk("span", "froot");
-    head.appendChild(ui.root);
+    (h.rootSlot || head).appendChild(ui.root);
     ui.rootBtn = iconBtn("folder-input", wsT("js.files.root.change"));
     ui.collapse = iconBtn("chevrons-down-up", wsT("js.files.collapse"));
     ui.refresh = iconBtn("refresh-cw", wsT("js.files.refresh"));
@@ -816,7 +816,9 @@
     // mount builds the explorer in el. o: rid (the session), load and save
     // (the page's guarded storage), post (a session write route), toast,
     // copy (copies a text and says so), local (a function: whether this
-    // browser is on the daemon's machine).
+    // browser is on the daemon's machine), and rootSlot (optional: the
+    // element that shows the root's name, the conversation panel's header,
+    // instead of the pane's own header).
     mount: function (node, o) {
       if (el) return;
       el = node;

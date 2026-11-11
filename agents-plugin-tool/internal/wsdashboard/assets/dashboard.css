@@ -595,8 +595,8 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .dash.live .dwrap { height: 100vh; height: 100dvh; display: flex; flex-direction: column; }
 .dash.live .top { flex: none; }
 .dgrid.live { flex: 1 1 0; min-height: 0; display: grid; gap: 0 16px; --sa: 250fr; --sb: 750fr;
-  grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(56px, var(--sa)) 10px minmax(96px, var(--sb)) auto;
-  grid-template-areas: "tabbar" "ctabs" "tree" "split" "convo" "composer"; }
+  grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(56px, var(--sa)) 10px auto minmax(96px, var(--sb)) auto;
+  grid-template-areas: "tabbar" "tree" "split" "chead" "convo" "composer"; }
 .dgrid.live > * { min-width: 0; min-height: 0; }
 .dgrid.live > .tabbar { grid-area: tabbar; margin-bottom: 10px; }
 .dgrid.live > .r-tree { grid-area: tree; overflow: auto; }
@@ -605,53 +605,66 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .dgrid.live > .composer { grid-area: composer; margin-top: 10px; }
 .dgrid.live > .bcol { grid-column: 1; grid-row: tree-start / convo-end; overflow: auto; padding: 2px 4px 0 2px; }
 .dgrid.live[data-tab="board"] > .r-tree, .dgrid.live[data-tab="board"] > .splitter, .dgrid.live[data-tab="board"] > .convo, .dgrid.live:not([data-tab="board"]) > .bcol { display: none; }
-/* The conversation column's own tabs (ctabs): "Conversation | Files". The
-   Files pane spans the column from the tree's row to the composer's, while
-   the tree, the splitter, the conversation, and the composer are hidden
-   (never removed), so their scroll and the draft survive. In the one-column
-   view the column's tabs show only with its Conversation tab; the composer
-   that stands under the board there stays. */
-.dgrid.live > .ctabs { grid-area: ctabs; }
-.dgrid.live > .fpane { grid-column: 1; grid-row: tree-start / composer-end; display: none; }
-.dgrid.live[data-tab="board"] > .ctabs { display: none; }
+/* The conversation panel's header (chead) carries its own tabs (ctabs):
+   "Conversation | Files". Under the Files tab the Files pane takes the
+   conversation's place below the header, while the conversation is hidden
+   (never removed), so its scroll and pin survive; the agents tree, the
+   splitter, and the composer stay. The header shows the conversation's
+   counts under one tab and the Files pane's root under the other. In the
+   one-column view the header shows with the conversation, under its tab. */
+.dgrid.live > .chead { grid-area: chead; }
+.dgrid.live > .fpane { grid-area: convo; display: none; }
+.dgrid.live[data-tab="board"] > .chead { display: none; }
 .dgrid.live[data-ctab="files"]:not([data-tab="board"]) > .fpane { display: flex; }
-.dgrid.live[data-ctab="files"] > .r-tree, .dgrid.live[data-ctab="files"] > .splitter, .dgrid.live[data-ctab="files"] > .convo, .dgrid.live[data-ctab="files"]:not([data-tab="board"]) > .composer { display: none; }
+.dgrid.live[data-ctab="files"] > .convo { display: none; }
 .splitter { position: relative; cursor: row-resize; touch-action: none; outline: 0; }
 .splitter::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 3px; margin-top: -1.5px; border-radius: 2px; background: var(--wb-muted); transition: background .15s; }
 .splitter:hover::before, .splitter.drag::before, .splitter:focus-visible::before { background: var(--wb-primary); }
 @media (min-width: 760px) {
-  .dgrid.live[data-layout="split"] { grid-template-columns: minmax(320px, 5fr) minmax(0, 7fr); grid-template-rows: auto minmax(56px, var(--sa)) 10px minmax(96px, var(--sb)) auto;
-    grid-template-areas: "ctabs board" "tree board" "split board" "convo board" "composer board"; }
+  .dgrid.live[data-layout="split"] { grid-template-columns: minmax(320px, 5fr) minmax(0, 7fr); grid-template-rows: minmax(56px, var(--sa)) 10px auto minmax(96px, var(--sb)) auto;
+    grid-template-areas: "tree board" "split board" "chead board" "convo board" "composer board"; }
   .dgrid.live[data-layout="split"] > .tabbar { display: none; }
   .dgrid.live[data-layout="split"] > .r-tree, .dgrid.live[data-layout="split"] > .splitter, .dgrid.live[data-layout="split"] > .convo, .dgrid.live[data-layout="split"] > .bcol { display: block; }
   .dgrid.live[data-layout="split"] > .bcol { grid-area: board; }
-  .dgrid.live[data-layout="split"] > .ctabs { display: flex; }
+  .dgrid.live[data-layout="split"] > .chead { display: flex; }
   .dgrid.live[data-layout="split"][data-ctab="files"] > .fpane { display: flex; }
-  .dgrid.live[data-layout="split"][data-ctab="files"] > .r-tree, .dgrid.live[data-layout="split"][data-ctab="files"] > .splitter, .dgrid.live[data-layout="split"][data-ctab="files"] > .convo, .dgrid.live[data-layout="split"][data-ctab="files"] > .composer { display: none; }
+  .dgrid.live[data-layout="split"][data-ctab="files"] > .convo { display: none; }
 }
 @media (min-width: 1100px) {
-  .dgrid.live:not([data-layout="tabs"]) { grid-template-columns: minmax(320px, 5fr) minmax(0, 7fr); grid-template-rows: auto minmax(56px, var(--sa)) 10px minmax(96px, var(--sb)) auto;
-    grid-template-areas: "ctabs board" "tree board" "split board" "convo board" "composer board"; }
+  .dgrid.live:not([data-layout="tabs"]) { grid-template-columns: minmax(320px, 5fr) minmax(0, 7fr); grid-template-rows: minmax(56px, var(--sa)) 10px auto minmax(96px, var(--sb)) auto;
+    grid-template-areas: "tree board" "split board" "chead board" "convo board" "composer board"; }
   .dgrid.live:not([data-layout="tabs"]) > .tabbar { display: none; }
   .dgrid.live:not([data-layout="tabs"]) > .r-tree, .dgrid.live:not([data-layout="tabs"]) > .splitter, .dgrid.live:not([data-layout="tabs"]) > .convo, .dgrid.live:not([data-layout="tabs"]) > .bcol { display: block; }
   .dgrid.live:not([data-layout="tabs"]) > .bcol { grid-area: board; }
-  .dgrid.live:not([data-layout="tabs"]) > .ctabs { display: flex; }
+  .dgrid.live:not([data-layout="tabs"]) > .chead { display: flex; }
   .dgrid.live:not([data-layout="tabs"])[data-ctab="files"] > .fpane { display: flex; }
-  .dgrid.live:not([data-layout="tabs"])[data-ctab="files"] > .r-tree, .dgrid.live:not([data-layout="tabs"])[data-ctab="files"] > .splitter, .dgrid.live:not([data-layout="tabs"])[data-ctab="files"] > .convo, .dgrid.live:not([data-layout="tabs"])[data-ctab="files"] > .composer { display: none; }
+  .dgrid.live:not([data-layout="tabs"])[data-ctab="files"] > .convo { display: none; }
 }
 @media (max-width: 640px) {
   .dwrap { padding: 8px 10px; }
 }
 
-/* the conversation column's tabs and its Files pane (files.js) */
-.ctabs { display: flex; gap: 2px; align-items: flex-end; border-bottom: 1px solid var(--wb-line); margin-bottom: 8px; padding: 0 2px; }
-.ctabs button { border: 0; background: transparent; border-radius: 7px 7px 0 0; height: 26px; padding: 0 12px; margin-bottom: -1px; font: inherit; font-size: 12.5px; font-weight: 700; color: var(--wb-muted-fg); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; border-bottom: 2px solid transparent; }
+/* the conversation panel's header with its tabs, and its Files pane
+   (files.js). The header is the panel's top: the conversation or the Files
+   pane below it squares its own top corners. The region's own title bar
+   (r-entries) stays hidden on a live page; its counts are moved into the
+   header (dashboard.js syncChead). */
+.chead { position: static; padding: 0 8px 0 4px; border-radius: var(--wb-radius) var(--wb-radius) 0 0; box-shadow: var(--wb-shadow); min-width: 0; }
+.dgrid.live > .convo, .dgrid.live > .fpane { border-top-left-radius: 0; border-top-right-radius: 0; }
+.dgrid.live > .convo .r-entries > .thead { display: none; }
+.chead .csum, .chead .fsum { margin-left: auto; min-width: 0; display: flex; align-items: center; justify-content: flex-end; }
+.chead .csum > .sum { margin-left: 0; }
+.dgrid[data-ctab="files"] > .chead .csum, .dgrid:not([data-ctab="files"]) > .chead .fsum { display: none; }
+.chead .fsum .froot { flex: 0 1 auto; font-size: 11.5px; color: var(--wb-muted-fg); }
+.chead .fsum .froot.alt { color: var(--wb-primary); }
+.ctabs { display: flex; gap: 2px; align-items: stretch; align-self: stretch; flex: none; }
+.ctabs button { border: 0; background: transparent; height: 30px; padding: 0 8px; font: inherit; font-size: 13px; font-weight: 700; color: var(--wb-muted-fg); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; border-bottom: 2px solid transparent; }
 .ctabs button:hover { color: var(--wb-fg); }
 .ctabs button[aria-pressed="true"] { color: var(--wb-fg); border-bottom-color: var(--wb-primary); }
 .ctabs button:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: -2px; }
 .fpane { position: relative; flex-direction: column; min-height: 0; background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); overflow: hidden; font-size: 12.5px; }
 .fpane .fi { display: inline-flex; flex: none; color: var(--wb-muted-fg); }
-.fhd { display: flex; align-items: center; gap: 2px; padding: 6px 6px 6px 12px; border-bottom: 1px solid var(--wb-line); min-width: 0; }
+.fhd { display: flex; align-items: center; justify-content: flex-end; gap: 2px; padding: 6px 6px 6px 12px; border-bottom: 1px solid var(--wb-line); min-width: 0; }
 .froot { flex: 1; min-width: 0; font: 700 12px var(--wb-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .froot.alt { color: var(--wb-primary); }
 .fseg { display: flex; gap: 2px; margin: 8px 8px 0; padding: 2px; border-radius: 8px; background: var(--wb-muted); }
