@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -166,6 +165,23 @@ func (b *broker) unchangedLocked(deps []string, at uint64) bool {
 	return true
 }
 
+// liveOnlySince reports that wakes after sequence at named deps' live-only
+// tokens alone (liveToken): no other token of deps and no wake naming none.
+// A page with nil deps (every wake) is never live-only.
+func (b *broker) liveOnlySince(deps []string, at uint64) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if deps == nil || b.allWake > at {
+		return false
+	}
+	for _, token := range deps {
+		if !liveToken(token) && b.changed[token] > at {
+			return false
+		}
+	}
+	return true
+}
+
 // follow narrows sub to the tokens of the render it just sent, taken at
 // sequence at (nil hears every wake). A wake that landed after at for one of
 // them, which sub may not have heard under its old tokens, signals it now.
@@ -247,17 +263,33 @@ func (d *Daemon) sessionPageSource(replyID, lang, theme string) pageSource {
 	pages := d.pagesIn(lang)
 	return pageSource{
 		key: pageKey{replyID: replyID, lang: lang, theme: theme},
-		render: func() pageRender {
-			view, inputs, ok := pages.readSession(replyID)
+		render: func(live *liveRender) pageRender {
+			var prev *sessionReads
+			ringChanged := true
+			if live != nil {
+				prev, _ = live.prev.reads.(*sessionReads)
+				ringChanged = live.changed(ringDep(replyID))
+			}
+			view, inputs, reads, ok := pages.readSessionWith(replyID, prev, ringChanged)
 			if !ok {
 				return pageRender{deps: []string{replyID}}
 			}
 			d.stats.SessionRenders.Add(1)
-			deps := inputs.ids
-			if d.git != nil && view.Project != "" {
-				deps = append(slices.Clone(deps), gitDep(view.Project))
+			if prev != nil {
+				d.stats.LiveRenders.Add(1)
 			}
-			pr := pageRender{ok: true, deps: deps, inputs: inputs}
+			// Each looked-up session's live-only token beside its own: a
+			// hosted session's snapshot hand-off wakes the pages that show it
+			// without a store re-read (live_hosted.go).
+			deps := make([]string, 0, 2*len(inputs.ids)+2)
+			for _, id := range inputs.ids {
+				deps = append(deps, id, liveDep(id))
+			}
+			deps = append(deps, ringDep(replyID))
+			if d.git != nil && view.Project != "" {
+				deps = append(deps, gitDep(view.Project))
+			}
+			pr := pageRender{ok: true, deps: deps, inputs: inputs, reads: reads}
 			view.Lang, view.Theme = lang, theme
 			view.Git = d.git.badge(view.Project)
 			// The snapshot's repo figures come from the session's ws-mcp;
@@ -329,7 +361,7 @@ func (d *Daemon) handleIndexEvents(w http.ResponseWriter, r *http.Request) {
 	pages := d.pagesIn(lang)
 	d.stream(w, r, pageSource{
 		key: pageKey{lang: lang},
-		render: func() pageRender {
+		render: func(*liveRender) pageRender {
 			d.stats.IndexRenders.Add(1)
 			view := pages.indexView()
 			view.Lang = lang

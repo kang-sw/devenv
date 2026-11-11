@@ -122,6 +122,7 @@ func dashboardCommand(args []string) {
 		wsdashboard.PruneStagedExecutables(dir, exe)
 	}
 	trackerChanged.set(daemon.TrackerChanged)
+	host.live.Store(daemon)
 	stopPoll := startTrackerPoll(tracker, trackerErr, daemon.TrackerChanged, logw)
 	stopWatch := startTrackerWatch(tracker, trackerErr, daemon.TrackerChanged)
 	signals := make(chan os.Signal, 1)

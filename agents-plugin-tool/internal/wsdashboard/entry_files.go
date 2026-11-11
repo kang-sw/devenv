@@ -19,8 +19,11 @@ import (
 type entryFiles struct {
 	mu       sync.Mutex
 	sessions map[string]*sessionFiles
-	// parsed counts the entry files read from disk (a test seam).
-	parsed int
+	// parsed counts the entry files read from disk; ringLists,
+	// drainedLists, and heldReads count the ring listings, drained
+	// listings, and held-entry reads (test seams).
+	parsed                             int
+	ringLists, drainedLists, heldReads int
 }
 
 type sessionFiles struct {
@@ -37,6 +40,9 @@ func (c *entryFiles) readRing(replyID, dir string) ([]wslive.RingRecord, error) 
 	if c == nil {
 		return wslive.ReadRing(dir)
 	}
+	c.mu.Lock()
+	c.ringLists++
+	c.mu.Unlock()
 	names, err := wslive.RingNames(dir)
 	if err != nil {
 		return nil, err
@@ -80,6 +86,9 @@ func (c *entryFiles) readDrained(replyID, dir string) ([]wsinbox.Record, error) 
 	if c == nil {
 		return wsinbox.Drained(dir)
 	}
+	c.mu.Lock()
+	c.drainedLists++
+	c.mu.Unlock()
 	names, err := wsinbox.DrainedNames(dir)
 	if err != nil {
 		return nil, err
@@ -111,6 +120,18 @@ func (c *entryFiles) readDrained(replyID, dir string) ([]wsinbox.Record, error) 
 	c.session(replyID).drained = next
 	c.mu.Unlock()
 	return out, nil
+}
+
+// readHeld is wsinbox.Held of the inbox at dir. Held entries change in
+// place (a merge, a steer), so they are read whole every time; the cache
+// only counts the reads.
+func (c *entryFiles) readHeld(dir string) ([]wsinbox.Record, error) {
+	if c != nil {
+		c.mu.Lock()
+		c.heldReads++
+		c.mu.Unlock()
+	}
+	return wsinbox.Held(dir)
 }
 
 // session returns replyID's entries, creating them; the caller holds mu.

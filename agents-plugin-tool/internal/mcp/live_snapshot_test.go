@@ -691,10 +691,21 @@ func TestDashboardRepoReadOncePerHeartbeat(t *testing.T) {
 		t.Fatalf("snapshot repo = %+v, %v", snap.Repo, err)
 	}
 
-	// Once the cached read is a heartbeat interval old, the next write reads again.
+	// A heartbeat-old read is not refreshed while no tool batch ended: the
+	// working tree changes only through tool calls.
 	setLiveSeams(func(s *liveSeams) { s.heartbeat = 40 * time.Millisecond })
 	time.Sleep(60 * time.Millisecond)
+	before := writes.Load()
 	intake(t, f.server, f.keyA, map[string]any{"kind": "reply", "text": "z"})
+	waitFor(t, "a change snapshot", func() bool { return writes.Load() > before })
+	if n := reads.Load(); n != 1 {
+		t.Fatalf("%d repo reads with no tool batch ended, want 1", n)
+	}
+
+	// Once a batch ended and the cached read is a heartbeat interval old,
+	// the next write reads again.
+	time.Sleep(60 * time.Millisecond)
+	intake(t, f.server, f.keyA, map[string]any{"kind": "agent", "batches": []any{map[string]any{"epoch": "e", "seq": 1, "toolNames": []any{"Bash"}, "callCount": 1, "startedAt": 1100, "endedAt": 1200}}})
 	waitFor(t, "a refreshed repo read", func() bool { return reads.Load() >= 2 })
 }
 

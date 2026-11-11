@@ -22,6 +22,8 @@ import (
 	"github.com/gofrs/flock"
 )
 
+var _ LiveHost = (*Daemon)(nil)
+
 // ErrLocked reports that another daemon holds the single-instance lock.
 var ErrLocked = errors.New("another dashboard daemon holds the lock")
 
@@ -167,6 +169,8 @@ type Daemon struct {
 	// snapshots caches the parsed live snapshots the pages, their refresh
 	// stamps, and agent conversation re-reads read.
 	snapshots *SnapshotCache
+	// live is the hosted sessions' snapshot slots (live_hosted.go).
+	live hostedSlots
 	// inboxMu serializes the daemon's own inbox writes (sends and cancels).
 	inboxMu sync.Mutex
 	// lan is LAN mode; tokenMu serializes reading and minting the LAN token.
@@ -491,6 +495,7 @@ func (d *Daemon) sessionChanged(replyID string) {
 			d.entries.drop(replyID)
 			d.entryFiles.drop(replyID)
 			d.railMsgs.drop(replyID)
+			d.live.drop(replyID)
 			d.snapshots.Forget(d.dir, replyID)
 			if f, ok := d.source.(SessionForgetter); ok {
 				f.ForgetSession(replyID)

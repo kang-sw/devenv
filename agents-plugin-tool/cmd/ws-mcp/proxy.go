@@ -54,6 +54,11 @@ type proxyHost struct {
 	// before it exits (it spawns the successor).
 	replacing  atomic.Bool
 	background sync.WaitGroup
+	// live is the daemon, bound once StartDaemon returned (the host is built
+	// before it): each hosted server hands its live snapshots to it in
+	// memory (mcp.ServerOptions.Live). A connection accepted before the
+	// binding writes its snapshot files as a ws-mcp of its own would.
+	live atomic.Pointer[wsdashboard.Daemon]
 }
 
 // wait blocks until the replacement goroutine, if any, has ended.
@@ -75,7 +80,7 @@ func (h *proxyHost) Accept(hello wsdashboard.ProxyHello) (wsdashboard.ProxySessi
 		if root == "" || root == "." {
 			root = hello.Cwd
 		}
-		server := mcp.NewServerWithOptions(mcp.ServerOptions{
+		opts := mcp.ServerOptions{
 			Root:         root,
 			Version:      version,
 			SourceCommit: sourceCommit,
@@ -83,7 +88,11 @@ func (h *proxyHost) Accept(hello wsdashboard.ProxyHello) (wsdashboard.ProxySessi
 			OwnerPID:     hello.OwnerPID,
 			Harness:      hello.Harness,
 			Diag:         prefixedWriter{w: h.logw, prefix: fmt.Sprintf("dashboard: session pid %d: ", hello.OwnerPID)},
-		})
+		}
+		if d := h.live.Load(); d != nil {
+			opts.Live = d
+		}
+		server := mcp.NewServerWithOptions(opts)
 		h.applyLANChange(server)
 		return &proxyMCPSession{server: server}, nil
 	case wsdashboard.ProxyModeCLI:

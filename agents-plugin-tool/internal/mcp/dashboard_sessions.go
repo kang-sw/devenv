@@ -18,6 +18,7 @@ import (
 
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wsgit"
+	"github.com/kang-sw/devenv/internal/wslive"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
 )
 
@@ -557,6 +558,18 @@ func (src *DashboardSessionSource) ForgetSession(replyID string) {
 	if dir, err := src.resolveStateDir(); err == nil {
 		src.snapshots.Forget(dir, replyID)
 	}
+}
+
+// SetLiveSnapshot implements wsdashboard.LiveSnapshotHolder: the change
+// detector's snapshot reads (HashLiveStores) follow a hosted session's
+// in-memory copy.
+func (src *DashboardSessionSource) SetLiveSnapshot(stateDir, replyID string, snap wslive.Snapshot) {
+	src.snapshots.SetLive(stateDir, replyID, snap)
+}
+
+// ClearLiveSnapshot implements wsdashboard.LiveSnapshotHolder.
+func (src *DashboardSessionSource) ClearLiveSnapshot(stateDir, replyID string) {
+	src.snapshots.ClearLive(stateDir, replyID)
 }
 
 // NewDashboardSessionSource returns a source over this machine's key store.

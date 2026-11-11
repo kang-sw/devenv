@@ -70,12 +70,28 @@ type pageRender struct {
 	deps []string
 	// inputs are what the refresh stamp re-reads.
 	inputs refreshInputs
+	// reads are the store reads the render made, which a live render of
+	// the same page may reuse (liveRender); nil offers none.
+	reads any
+}
+
+// liveRender is what a render may reuse when every wake since the
+// previous render was live-only (broker.liveOnlySince): a hosted session's
+// snapshot hand-off or ring append, after which no store but the snapshot
+// (and the ring, after an append) needs reading again.
+type liveRender struct {
+	// prev is the previous render, whose reads the render may reuse.
+	prev pageRender
+	// changed reports whether a wake named token since prev.
+	changed func(token string) bool
 }
 
 // pageSource renders one page and computes its refresh stamp.
 type pageSource struct {
-	key    pageKey
-	render func() pageRender
+	key pageKey
+	// render renders the page; live is nil for a full render (every read
+	// afresh).
+	render func(live *liveRender) pageRender
 	// stamp hashes, at call time, what in may have changed with no wake;
 	// ok false means the page has inputs the stamp cannot cover, so every
 	// refresh tick re-renders it.
@@ -145,6 +161,13 @@ func (c *pageCache) release(key pageKey, p *sharedPage) {
 // its dependencies, or, on a refresh tick (refresh), when the refresh stamp
 // is unknown or changed. A stamp taken before a render and unchanged since
 // means a change during that render is still seen: it moves the stamp.
+//
+// When every wake since the last render was live-only, the render is a
+// live one (liveRender), which reuses the previous render's store reads;
+// it takes no new stamp and keeps the previous one, which still describes
+// the reused reads, so the next refresh tick re-reads in full whatever
+// changed under them. A refresh tick that finds the stamp changed renders
+// in full.
 func (c *pageCache) get(p *sharedPage, src pageSource, refresh bool) (pageRender, uint64) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -153,25 +176,47 @@ func (c *pageCache) get(p *sharedPage, src pageSource, refresh bool) (pageRender
 		c.stats.Shared.Add(1)
 		return p.r, p.at
 	}
+	liveOnly := !current && p.rendered && p.r.ok && p.r.reads != nil && c.broker.liveOnlySince(p.r.deps, p.at)
+	if liveOnly && !refresh {
+		return c.renderLive(p, src)
+	}
 	// The stamp is taken before any render, a wake-driven one included,
 	// so the next refresh tick skips a page this render left current.
 	var stamp string
 	var stampOK bool
 	if p.rendered {
 		stamp, stampOK = src.stamp(p.r.inputs)
-		if current && stampOK && p.stampOK && stamp == p.stamp {
+		unchanged := stampOK && p.stampOK && stamp == p.stamp
+		if current && unchanged {
 			c.stats.RefreshSkips.Add(1)
 			return p.r, p.at
+		}
+		if liveOnly && unchanged {
+			return c.renderLive(p, src)
 		}
 	}
 	at := c.broker.current()
 	prev := p.r.inputs
-	r := src.render()
+	r := src.render(nil)
 	p.r, p.at, p.rendered = r, at, true
 	// The stamp was taken before this read, from the previous render's
 	// inputs: it is this render's only when the inputs did not change. A
 	// failed render (no regions) keeps none, so the next tick retries it.
 	p.stamp, p.stampOK = stamp, stampOK && r.inputs.equal(prev) && (r.regions != nil || !r.ok)
+	return r, at
+}
+
+// renderLive runs a live render of p (get); p.mu is held. The previous
+// stamp stays, valid while the inputs it was taken from did not change.
+func (c *pageCache) renderLive(p *sharedPage, src pageSource) (pageRender, uint64) {
+	since := p.at
+	at := c.broker.current()
+	prev := p.r
+	r := src.render(&liveRender{prev: prev, changed: func(token string) bool {
+		return !c.broker.unchangedSince([]string{token}, since)
+	}})
+	p.r, p.at = r, at
+	p.stampOK = p.stampOK && r.inputs.equal(prev.inputs) && (r.regions != nil || !r.ok)
 	return r, at
 }
 

@@ -45,7 +45,7 @@ func (d *Daemon) railView(r pageReader) RailView {
 		if in.Repo != "" {
 			in.Linked = worktreeMain(reg.Project) != ""
 		}
-		in.Message = d.railMsgs.last(reg.ReplyID, s.Rev, wslive.RingDir(SessionDir(d.dir, reg.ReplyID)))
+		in.Message = d.railMsgs.last(reg.ReplyID, railRev(s.Rev, d.live.ringGen(reg.ReplyID)), wslive.RingDir(SessionDir(d.dir, reg.ReplyID)))
 		if in.Repo != "" {
 			wanted[in.Repo] = append(wanted[in.Repo], reg)
 		}
@@ -85,7 +85,7 @@ func (d *Daemon) railPageSource(lang, theme string) pageSource {
 	pages := d.pagesIn(lang)
 	return pageSource{
 		key: pageKey{kind: regionRail, lang: lang, theme: theme},
-		render: func() pageRender {
+		render: func(*liveRender) pageRender {
 			d.stats.RailRenders.Add(1)
 			region, err := renderRailRegion(d.railView(pages), lang)
 			if err != nil {

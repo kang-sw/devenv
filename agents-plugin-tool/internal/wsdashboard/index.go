@@ -225,6 +225,18 @@ func (x *Index) Reread(replyID string) {
 	}
 }
 
+// SetSnapshotUpdatedAt sets the indexed session's SnapshotUpdatedAt in
+// place, for a hosted session's in-memory snapshot hand-off
+// (LiveSlot.Publish): like a heartbeat-only re-read, it raises no Rev and
+// calls no change hook. A session the index does not hold is left alone.
+func (x *Index) SetSnapshotUpdatedAt(replyID string, at time.Time) {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	if entry, ok := x.sessions[replyID]; ok {
+		entry.session.SnapshotUpdatedAt = at
+	}
+}
+
 // Settle waits until every re-read Nudge and Reread scheduled has landed,
 // including the ones scheduled while it waits.
 func (x *Index) Settle() {
