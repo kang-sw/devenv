@@ -727,8 +727,10 @@
   }
   // The viewer's own live assignment on the item, if any.
   function mineLive(it) { var v = VS.viewer.member; return it.assignments.map(A).filter(function (r) { return r.to === v && r.state === 'live'; })[0]; }
-  // The creator edits and hides an item; an admin may too once the creator was removed.
-  function canEdit(it) { return isCreator(it) && !it.hidden; }
+  // item.edit, as the store judges it (check.go needCreatorOrAssignee): the creator or a live
+  // assignee (an admin too once the creator was removed). Hiding stays the creator's (canHide).
+  function canEdit(it) { return (isCreator(it) || !!mineLive(it)) && !it.hidden; }
+  function canHide(it) { return isCreator(it) && !it.hidden; }
   // The creator, or an admin once the creator was removed (check.go creatorGone).
   function isCreator(it) {
     var gone = VS.viewer.admin && VS.members[it.author] && VS.members[it.author].removed;
@@ -3695,9 +3697,10 @@
     if (mvr.some(function (r) { return canMove(VS.items[r]); })) more.push(mi('move', esc(mvr.length > 1 ? wsTn("js.tk.mv.menu.sel", mvr.length) : wsT("js.tk.mv.menu")), { item: it.id }, { icon: 'tree', sub: 1 }));
     if (more.length) parts.push(more.join(''));
     var last = [];
-    if (edit) last.push(mi('edit', esc(it.author === v ? wsT("js.tk.act.edit") : wsT("js.tk.act.edit.admin")), { item: it.id }, { icon: 'pen' }));
+    // the admin wording only where the creator-gone fallback is the sole reason the viewer may act
+    if (edit) last.push(mi('edit', esc(it.author === v || mineLive(it) ? wsT("js.tk.act.edit") : wsT("js.tk.act.edit.admin")), { item: it.id }, { icon: 'pen' }));
     if (!(ui.win && ui.item === it.id)) last.push(mi('m-open', esc(wsT("js.tk.menu.open")), { item: it.id }, { icon: 'page' }));
-    if (edit) last.push(mi('ihide', esc(it.author === v ? wsT("js.tk.act.hide") : wsT("js.tk.act.hide.admin")), { item: it.id }, { icon: 'x', cls: 'danger' }));
+    if (canHide(it)) last.push(mi('ihide', esc(it.author === v ? wsT("js.tk.act.hide") : wsT("js.tk.act.hide.admin")), { item: it.id }, { icon: 'x', cls: 'danger' }));
     if (last.length) parts.push(last.join(''));
     return h + (parts.length ? parts.join(msep()) : '<p class="mempty">' + wsT("js.tk.win.noacts", esc(nm(v))) + '</p>');
   }
@@ -4515,7 +4518,8 @@
     var it = VS.items[id];
     if (!it) return;
     if (!(ui.win && ui.item === id)) showItem(id);
-    ui.iedit = { item: id, title: it.title, body: it.body || '', project: it.project || '', labels: (it.labels || []).slice(), mpick: [] };
+    // seen and base pin the body revision the editor started from; body follows the textarea
+    ui.iedit = { item: id, title: it.title, body: it.body || '', seen: it.body || '', base: (it.bodyRev || []).slice(), project: it.project || '', labels: (it.labels || []).slice(), mpick: [] };
     delete ui.edpv['iw-ebody']; delete ui.eatt['iw-ebody'];
     render();
     if ($('iw-etitle')) $('iw-etitle').focus();
@@ -4525,7 +4529,10 @@
     var e = ui.iedit, it = e && VS.items[e.item];
     if (!it) return;
     var ep = { item: it.id }, cur = { title: $('iw-etitle').value, body: $('iw-ebody').value, project: $('iw-eproj').value };
-    ['title', 'body', 'project'].forEach(function (f) { if (cur[f] !== (it[f] || '')) ep[f] = cur[f]; });
+    ['title', 'project'].forEach(function (f) { if (cur[f] !== (it[f] || '')) ep[f] = cur[f]; });
+    // the body is judged against the revision loaded at startEdit, not the live one a concurrent
+    // edit may have moved; sent with base, the store merges it three-way with edits since
+    if (cur.body !== e.seen) { ep.body = cur.body; if (e.base.length) ep.base = e.base; }
     // labels the list no longer holds are dropped from the pick, so an edit never writes one
     var picked = e.labels.filter(function (x) { return !!labelOf(x); });
     if (picked.slice().sort().join(' ') !== (it.labels || []).slice().sort().join(' ')) ep.labels = picked;
