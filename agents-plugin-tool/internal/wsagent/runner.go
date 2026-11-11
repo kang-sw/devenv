@@ -184,12 +184,9 @@ func (r *Runner) Start(notify func(replyID, project string)) {
 			r.closed[rec.ReplyID] = rec
 			r.mu.Unlock()
 		} else {
-			c := r.startConv(rec)
-			if rec.Lead && rec.HolderID != "" {
-				// The process may still run under its holder: rejoin it
-				// before the scan below replays the holder's records.
-				c.do(c.reattach)
-			}
+			// A lead whose process may still run under its holder rejoins
+			// it there, before the scan below replays the holder's records.
+			r.startConv(rec)
 		}
 	}
 	if r.opts.Holders != nil {
@@ -283,6 +280,12 @@ func (r *Runner) startConv(rec Record) *conv {
 	}
 	c.writeRegistration()
 	c.live.writeSnapshot()
+	if rec.Lead && rec.HolderID != "" {
+		// Rejoined before the loop runs: what the loop takes first (waiting
+		// mail, a message from the page) would otherwise start a second
+		// process, and end this one to do it.
+		c.reattach()
+	}
 	r.mu.Lock()
 	r.convs[rec.ReplyID] = c
 	r.wg.Add(1)
@@ -712,6 +715,9 @@ type State struct {
 	// BackgroundTasks counts the harness's running background tasks, as its
 	// stream last reported them.
 	BackgroundTasks int `json:"background_tasks,omitempty"`
+	// ActionNeeded is set while the harness reports that it waits on the
+	// user with no prompt in Approvals to answer; it says what to do.
+	ActionNeeded string `json:"action_needed,omitempty"`
 	// CanControl reports whether the asking viewer may use the lead control
 	// routes (a browser on this machine); the routes set it per request.
 	CanControl bool `json:"can_control,omitempty"`
@@ -749,6 +755,8 @@ type conv struct {
 	approvals  []ApprovalRequest
 	activeMode string
 	bgTasks    int
+	// actionNeeded is State.ActionNeeded.
+	actionNeeded string
 
 	// loop-owned.
 	events      <-chan Event
@@ -774,6 +782,13 @@ type conv struct {
 	seq       uint64
 	seqDirty  bool
 	ringDirty bool
+	// lineOpen is the holder record sequence of a line some of whose events
+	// are applied and whose LineEnd is not; 0 between lines.
+	lineOpen uint64
+	// harnessState is the state the harness last reported; actionTimer runs
+	// while it waits on the user with no prompt to show (checkAction).
+	harnessState string
+	actionTimer  *time.Timer
 	// mcpDown is set when the harness reported a broken MCP connection: the
 	// process restarts at the next idle point.
 	mcpDown bool
@@ -820,11 +835,14 @@ func (c *conv) mailChanged() {
 	if err != nil {
 		fmt.Fprintf(c.r.opts.Log, "agent %s: mailbox: %v\n", c.rec.ReplyID, err)
 	}
-	if len(texts) == 0 {
-		return
+	if len(texts) > 0 {
+		c.update(func(rec *Record) { rec.Mail = append(rec.Mail, texts...) })
 	}
-	c.update(func(rec *Record) { rec.Mail = append(rec.Mail, texts...) })
-	c.kick()
+	// Mail claimed earlier and not yet delivered (a start that failed, a
+	// daemon that ended) goes with it: nothing else would submit it.
+	if len(c.rec.Mail) > 0 {
+		c.kick()
+	}
 }
 
 // inboxChanged takes the inbox's interrupt requests and submits the held
@@ -840,9 +858,12 @@ func (c *conv) loop() {
 	beat := time.NewTicker(c.r.opts.heartbeat)
 	defer beat.Stop()
 	for {
-		var idleC <-chan time.Time
+		var idleC, actionC <-chan time.Time
 		if c.idle != nil {
 			idleC = c.idle.C
+		}
+		if c.actionTimer != nil {
+			actionC = c.actionTimer.C
 		}
 		select {
 		case fn := <-c.reqs:
@@ -870,6 +891,9 @@ func (c *conv) loop() {
 			if c.idleNow() {
 				c.stopProcess("")
 			}
+		case <-actionC:
+			c.actionTimer = nil
+			c.actionDue()
 		case <-beat.C:
 			c.live.writeSnapshot()
 			c.persistSeq()
@@ -909,7 +933,7 @@ func (c *conv) state() State {
 	st.Held = len(held) + len(c.rec.Mail)
 	st.Error = c.lastErr
 	if c.rec.Lead {
-		st.ActiveMode, st.BackgroundTasks = c.activeMode, c.bgTasks
+		st.ActiveMode, st.BackgroundTasks, st.ActionNeeded = c.activeMode, c.bgTasks, c.actionNeeded
 		st.Approvals = append([]ApprovalRequest(nil), c.approvals...)
 	}
 	return st
@@ -1213,18 +1237,26 @@ func (c *conv) checkReattach() {
 	if !attached {
 		return
 	}
-	st, err := c.r.opts.Holders.Status(id)
-	if err != nil {
-		return
-	}
+	// The holder answers on the connection its replayed records arrive on,
+	// one after the other, so the answer may wait behind records this loop
+	// has to take first: the question is asked off the loop.
 	c.replayAsked = true
-	hp.ReplayUntil(st.NextSeq - 1)
+	go func() {
+		st, err := c.r.opts.Holders.Status(id)
+		if err != nil {
+			// The next beat asks again.
+			c.do(func() { c.replayAsked = false })
+			return
+		}
+		hp.ReplayUntil(st.NextSeq - 1)
+	}()
 }
 
 // replayDone ends a rejoin: the state the holder's records rebuilt is
 // written, and the conversation takes input again.
 func (c *conv) replayDone() {
 	c.replaying, c.replayAsked = false, false
+	c.checkAction(false)
 	c.live.writeSnapshot()
 	c.r.notify(c.rec.ReplyID, c.rec.Root)
 	if !c.turn {
@@ -1287,6 +1319,12 @@ func composeInstructions(dir string, rec Record, p Profile) (string, error) {
 
 func (c *conv) handle(ev Event) {
 	quiet := ev.Replay
+	if ev.Seq > 0 && !ev.Replay {
+		c.lineOpen = ev.Seq
+		if ev.LineEnd {
+			c.lineOpen = 0
+		}
+	}
 	switch {
 	case ev.LineEnd:
 		c.lineEnd(ev.Seq)
@@ -1331,6 +1369,20 @@ func (c *conv) handle(ev Event) {
 		if ev.PermissionMode != c.activeMode {
 			c.setStatus(func() { c.activeMode = ev.PermissionMode })
 			c.changed(quiet)
+		}
+		// The mode the harness runs in is the session's own: its next
+		// launch resumes in it. A change of the user's that waits to be
+		// applied stands until it is.
+		if c.rec.Lead && !quiet && !c.dirtyMode && ev.PermissionMode != c.rec.PermissionMode && ValidLeadPermissionMode(ev.PermissionMode) {
+			c.update(func(rec *Record) { rec.PermissionMode = ev.PermissionMode })
+			c.changed(quiet)
+		}
+	case ev.HarnessState != "":
+		c.harnessState = ev.HarnessState
+		c.checkAction(quiet)
+	case ev.Notice != "":
+		if !quiet {
+			fmt.Fprintf(c.r.opts.Log, "agent %s: %s\n", c.rec.ReplyID, ev.Notice)
 		}
 	case ev.BackgroundTasks != nil:
 		if n := *ev.BackgroundTasks; n != c.bgTasks {
@@ -1403,7 +1455,52 @@ func (c *conv) addApproval(a ApprovalRequest, quiet bool) {
 		}
 	}
 	c.setStatus(func() { c.approvals = append(c.approvals, a) })
+	c.checkAction(quiet)
 	c.showApprovals(quiet)
+}
+
+// actionGrace is how long the harness may report that it waits on the user
+// with no prompt for the runner to show before the session says so. The
+// state line arrives just before its prompt's own line, and stays for a
+// moment after a prompt's answer.
+var actionGrace = 2 * time.Second
+
+// actionNeededText is State.ActionNeeded for a wait nobody can answer here.
+const actionNeededText = "The harness waits on an answer this page has no prompt for. Interrupt the turn or stop the session to go on."
+
+// actionNeededTool names that wait in the live state's permission wait.
+const actionNeededTool = "prompt"
+
+// checkAction follows the harness's wait on the user: while it waits with
+// no prompt of the runner's to answer (one this process inherited, or a
+// request the runner has no form for), the session must not look like it
+// works. The wait shows after actionGrace, and ends with the state, with a
+// prompt's arrival, or with the process.
+func (c *conv) checkAction(quiet bool) {
+	if c.harnessState == HarnessWaiting && len(c.approvals) == 0 && c.proc != nil {
+		if c.actionNeeded == "" && c.actionTimer == nil && !quiet {
+			c.actionTimer = time.NewTimer(actionGrace)
+		}
+		return
+	}
+	if c.actionTimer != nil {
+		c.actionTimer.Stop()
+		c.actionTimer = nil
+	}
+	if c.actionNeeded != "" {
+		c.setStatus(func() { c.actionNeeded = "" })
+		c.showApprovals(quiet)
+	}
+}
+
+// actionDue shows the wait once its grace has passed.
+func (c *conv) actionDue() {
+	if c.harnessState != HarnessWaiting || len(c.approvals) > 0 || c.proc == nil || c.actionNeeded != "" {
+		return
+	}
+	fmt.Fprintf(c.r.opts.Log, "agent %s: the harness waits on the user (requires_action) with no permission prompt to answer\n", c.rec.ReplyID)
+	c.setStatus(func() { c.actionNeeded = actionNeededText })
+	c.showApprovals(false)
 }
 
 // dropApproval forgets a prompt that needs no answer any more, and reports
@@ -1412,6 +1509,7 @@ func (c *conv) dropApproval(id string, quiet bool) bool {
 	for i, have := range c.approvals {
 		if have.ID == id {
 			c.setStatus(func() { c.approvals = append(c.approvals[:i:i], c.approvals[i+1:]...) })
+			c.checkAction(quiet)
 			c.showApprovals(quiet)
 			return true
 		}
@@ -1430,9 +1528,13 @@ func (c *conv) clearApprovals() {
 }
 
 // showApprovals carries the oldest waiting prompt to the live state as its
-// permission wait, or ends the wait when none is left.
+// permission wait, or a wait with no prompt to answer (actionNeeded), or
+// ends the wait when neither is left.
 func (c *conv) showApprovals(quiet bool) {
 	ev := wslive.Event{Kind: wslive.KindPermission, Clear: true}
+	if c.actionNeeded != "" {
+		ev = wslive.Event{Kind: wslive.KindPermission, Tool: actionNeededTool}
+	}
 	if len(c.approvals) > 0 {
 		a := c.approvals[0]
 		var args any
@@ -1520,6 +1622,8 @@ func (c *conv) processEnded() {
 		c.apply(wslive.Event{Kind: wslive.KindTurnEnd})
 	}
 	c.clearApprovals()
+	c.harnessState = ""
+	c.checkAction(false)
 	c.setStatus(func() { c.activeMode, c.bgTasks = "", 0 })
 	c.live.endAgents()
 	c.live.writeSnapshot()
@@ -1563,6 +1667,7 @@ func (c *conv) stopProcess(string) {
 // holder, with the sequence applied so far in the record for the next
 // daemon's rejoin; any other process ends.
 func (c *conv) letGo() {
+	c.finishLine()
 	if hp, ok := c.proc.(holderProcess); ok && c.rec.Lead {
 		c.persistSeq()
 		if hp.Detach() {
@@ -1571,6 +1676,25 @@ func (c *conv) letGo() {
 		}
 	}
 	c.stopProcess("")
+}
+
+// finishLine applies the rest of a holder line the loop stands in the
+// middle of, so the sequence the record keeps covers every entry the line
+// wrote and the next daemon's replay writes none of them again. The line's
+// events are already on their way; a stream that stalls is not waited for.
+func (c *conv) finishLine() {
+	wait := time.After(time.Second)
+	for c.lineOpen != 0 && c.events != nil {
+		select {
+		case ev, ok := <-c.events:
+			if !ok {
+				return
+			}
+			c.handle(ev)
+		case <-wait:
+			return
+		}
+	}
 }
 
 // idleNow reports whether the idle timer may stop the process: no turn

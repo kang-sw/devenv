@@ -356,25 +356,30 @@ func (p claudeProcess) Interrupt() error {
 }
 
 // SetModel uses Claude Code's set_model control, which applies from the
-// next turn. Returning to the default model has no in-stream form.
+// next turn. A set_model that names no model returns to the default one:
+// the model a launch with no --model runs, whatever this launch named
+// (seen on 2.1.322).
 func (p claudeProcess) SetModel(model string) error {
-	if model == "" {
-		return ErrUnsupported
+	req := map[string]any{"subtype": "set_model"}
+	if model != "" {
+		req["model"] = model
 	}
-	return p.request("set_model", map[string]any{"subtype": "set_model", "model": model})
+	return p.request("set_model", req)
 }
 
-// SetEffort changes a lead's effort with Claude Code's apply_flag_settings
+// SetEffort changes the effort with Claude Code's apply_flag_settings
 // control (2.1.322 answers it with a bare success), which applies from the
-// next turn; returning to the default has no in-stream form. A profile's
-// process launches with its own --settings, which this control would
-// touch, so its effort change restarts the process with --effort on the
-// same session.
+// next turn. The control merges into the settings the launch's --settings
+// gave, so a profile's process keeps those. A null level clears the
+// override and so returns to the default; the harness then runs the
+// model's own default level until its next launch, which reads the user's
+// settings again.
 func (p claudeProcess) SetEffort(effort string) error {
-	if !p.lead || effort == "" {
-		return ErrUnsupported
+	var level any
+	if effort != "" {
+		level = effort
 	}
-	return p.request("apply_flag_settings", map[string]any{"subtype": "apply_flag_settings", "settings": map[string]any{"effortLevel": effort}})
+	return p.request("apply_flag_settings", map[string]any{"subtype": "apply_flag_settings", "settings": map[string]any{"effortLevel": level}})
 }
 
 // SetPermissionMode changes a lead's permission mode with Claude Code's
@@ -409,12 +414,23 @@ func claudeApprovalResponse(req ApprovalRequest, allow bool, message string) any
 	return map[string]any{"type": "control_response", "response": map[string]any{"subtype": "success", "request_id": req.ID, "response": answer}}
 }
 
-// claudeChatOnlyTools are the tools whose prompt is a question to the
-// user, not a permission: an allow without the user's answers breaks them,
-// and the dashboard renders no such form, so a lead is told to ask in chat.
-var claudeChatOnlyTools = map[string]bool{"AskUserQuestion": true, "ExitPlanMode": true}
+// claudeControlError is the control_response line that refuses the control
+// request id with message.
+func claudeControlError(id, message string) any {
+	return map[string]any{"type": "control_response", "response": map[string]any{"subtype": "error", "request_id": id, "error": message}}
+}
 
-const claudeChatOnlyDenial = "This session has no interactive form for this tool. Put the question or the plan in your reply as plain text and end your turn; the user answers in the chat."
+// A tool whose prompt is a question to the user, not a permission, is
+// denied with a message that tells the model what to do instead: an allow
+// without the user's answers breaks such a tool, and the dashboard renders
+// no form for it. claudeChatOnlyDenial is for a question (AskUserQuestion,
+// or any request flagged as needing user interaction); claudePlanDenial is
+// ExitPlanMode's, since only the user's own mode change leaves plan mode.
+const (
+	claudeChatOnlyDenial  = "This session has no interactive form for this tool. Put the question in your reply as plain text and end your turn; the user answers in the chat."
+	claudePlanDenial      = "This session has no interactive form for approving a plan. Present the plan in your reply as plain text and end your turn. The session stays in plan mode until the user changes the permission mode from the session's menu; do not call ExitPlanMode again before the user says the mode changed."
+	claudeMalformedDenial = "The permission request was malformed (no tool name, tool call id, or input), so it was denied."
+)
 
 // claudeMapper maps Claude Code's stream-json output to runner events: the
 // init message to the session id (after the init check), assistant text to
@@ -442,10 +458,14 @@ type claudeMapper struct {
 	// message after an automatic compaction mid-turn is kept.
 	compacted bool
 	uuids     []string
-	// open is set while the stream says a lead's turn runs: from a running
-	// state, an init, an assistant message, or a compaction's start, to
-	// the turn's result (or an idle state with no result before it).
-	open bool
+	// states is set once the stream carried a session_state_changed line
+	// (a harness that emits them): from then on the idle state ends a
+	// lead's turn, not the result, which an idle always follows and whose
+	// error turnErr holds until then. Ending the turn at the result too
+	// would let that trailing idle end the next turn, which a held message
+	// submitted at the result had already begun.
+	states  bool
+	turnErr string
 	// approvals are the can_use_tool requests not seen settled, request id
 	// by tool call id.
 	approvals map[string]string
@@ -596,20 +616,25 @@ func (m *claudeMapper) mapLine(line []byte, replies lineReplies) []Event {
 			}
 		case "session_state_changed":
 			// running opens a turn whether or not a send began it (a
-			// background task's result, a pushed message); idle closes one
-			// no result closed. An idle after a result is that turn's, and
-			// must not close the next one a flushed send has begun.
+			// background task's result, a pushed message), and again after
+			// a prompt (requires_action) inside one, which the runner takes
+			// as the turn it already runs; idle ends the turn.
 			if !m.lead() {
 				return nil
 			}
 			switch l.State {
-			case "running":
-				m.open = true
-				return []Event{{TurnStart: true}}
-			case "idle":
-				if m.open {
-					return append(m.closeTurn(now), m.status(), Event{TurnEnd: true})
-				}
+			case HarnessRunning:
+				m.states = true
+				return []Event{{HarnessState: l.State}, {TurnStart: true}}
+			case HarnessWaiting:
+				m.states = true
+				return []Event{{HarnessState: l.State}}
+			case HarnessIdle:
+				m.states = true
+				out := append([]Event{{HarnessState: l.State}}, m.closeTurn(now)...)
+				out = append(out, m.status(), Event{TurnEnd: true, TurnError: m.turnErr})
+				m.turnErr = ""
+				return out
 			}
 		case "status":
 			if !m.lead() {
@@ -621,7 +646,6 @@ func (m *claudeMapper) mapLine(line []byte, replies lineReplies) []Event {
 			}
 			// A compaction is a turn of its own when no send started it.
 			if l.Status == "compacting" {
-				m.open = true
 				out = append(out, Event{TurnStart: true}, Event{Live: &wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactStart}})
 			}
 			return out
@@ -671,7 +695,6 @@ func (m *claudeMapper) mapLine(line []byte, replies lineReplies) []Event {
 		out := m.assistant(l.Message, now)
 		if m.lead() {
 			// The harness works: a turn runs, whether or not a send began it.
-			m.open = true
 			out = append([]Event{{TurnStart: true}}, out...)
 		}
 		return out
@@ -701,31 +724,39 @@ func (m *claudeMapper) mapLine(line []byte, replies lineReplies) []Event {
 			m.cost = &wslive.UsageCost{USD: *l.TotalCostUSD, Estimate: true}
 		}
 		out = append(out, m.status())
-		end := Event{TurnEnd: true}
-		// An interrupted turn ends as error_during_execution with an
-		// aborted_* terminal reason (aborted_streaming, aborted_tools); that
-		// is the interrupt asked for, not a failure.
-		interrupted := strings.HasPrefix(l.TerminalState, "aborted")
-		if (l.IsError || l.Subtype != "success") && !interrupted {
-			msg := strings.TrimSpace(l.Result)
-			if msg == "" {
-				msg = strings.Join(l.Errors, "; ")
-			}
-			if msg == "" {
-				msg = "turn failed: " + l.Subtype
-			}
-			end.TurnError = msg
+		if m.states {
+			// The idle state that follows ends the turn.
+			m.turnErr = claudeResultError(l)
+			return out
 		}
-		return append(out, end)
+		return append(out, Event{TurnEnd: true, TurnError: claudeResultError(l)})
 	}
 	return nil
 }
 
-// closeTurn is what any end of a turn settles: a prompt still open will
-// never be answered, and the open tool batch is done.
+// claudeResultError is the error a result line ends its turn with, or
+// empty. An interrupted turn ends as error_during_execution with an
+// aborted_* terminal reason (aborted_streaming, aborted_tools); that is the
+// interrupt asked for, not a failure.
+func claudeResultError(l claudeLine) string {
+	if (!l.IsError && l.Subtype == "success") || strings.HasPrefix(l.TerminalState, "aborted") {
+		return ""
+	}
+	if msg := strings.TrimSpace(l.Result); msg != "" {
+		return msg
+	}
+	if msg := strings.Join(l.Errors, "; "); msg != "" {
+		return msg
+	}
+	return "turn failed: " + l.Subtype
+}
+
+// closeTurn is what a result and any end of a turn settle: a prompt still
+// open will never be answered, the open tool batch is done, and a
+// compaction's re-emitted message has passed.
 func (m *claudeMapper) closeTurn(now int64) []Event {
 	var out []Event
-	m.open, m.compacted = false, false
+	m.compacted = false
 	for toolUse, id := range m.approvals {
 		delete(m.approvals, toolUse)
 		out = append(out, Event{ApprovalDone: id})
@@ -744,7 +775,6 @@ func (m *claudeMapper) leadInit(init claudeInit) []Event {
 	if init.SessionID != "" {
 		out = append(out, Event{SessionID: init.SessionID})
 	}
-	m.open = true
 	out = append(out, Event{TurnStart: true})
 	if init.PermissionMode != "" {
 		out = append(out, Event{PermissionMode: init.PermissionMode})
@@ -766,22 +796,31 @@ type claudeCanUseTool struct {
 	RequiresUserInteraction2 bool `json:"requiresUserInteraction"`
 }
 
-// approval maps a can_use_tool control request to a waiting prompt. A
-// request that names no tool, tool call, or input is denied at once rather
-// than left hanging, and so is a tool whose prompt is a question to the
-// user (claudeChatOnlyTools). Any other control request is not answered.
+// approval maps a lead's control request. A can_use_tool request becomes a
+// waiting prompt; one that names no tool, tool call, or input is denied at
+// once rather than left hanging, and so is a tool whose prompt is a
+// question to the user. Any other control request has no handler here: it
+// is refused with an error answer, so the harness does not wait on it, and
+// noted for the log.
 func (m *claudeMapper) approval(l claudeLine, now int64, replies lineReplies) []Event {
-	var req claudeCanUseTool
-	if json.Unmarshal(l.Request, &req) != nil || req.Subtype != "can_use_tool" || l.RequestID == "" {
+	if l.RequestID == "" {
 		return nil
+	}
+	var req claudeCanUseTool
+	if json.Unmarshal(l.Request, &req) != nil || req.Subtype != "can_use_tool" {
+		replies.send(claudeControlError(l.RequestID, fmt.Sprintf("this session's host does not handle the control request %q", req.Subtype)))
+		return []Event{{Notice: fmt.Sprintf("the harness sent a control request this session does not handle (%q); it was answered with an error", req.Subtype)}}
 	}
 	ar := ApprovalRequest{ID: l.RequestID, Tool: req.ToolName, Input: req.Input, Description: req.Description, ToolUseID: req.ToolUseID, AgentID: req.AgentID, StartedAt: now}
 	input := bytes.TrimSpace(req.Input)
 	switch {
 	case req.ToolName == "" || req.ToolUseID == "" || len(input) == 0 || input[0] != '{':
-		replies.send(claudeApprovalResponse(ar, false, "The permission request was malformed (no tool name, tool call id, or input), so it was denied."))
+		replies.send(claudeApprovalResponse(ar, false, claudeMalformedDenial))
 		return nil
-	case claudeChatOnlyTools[req.ToolName] || req.RequiresUserInteraction || req.RequiresUserInteraction2:
+	case req.ToolName == "ExitPlanMode":
+		replies.send(claudeApprovalResponse(ar, false, claudePlanDenial))
+		return nil
+	case req.ToolName == "AskUserQuestion" || req.RequiresUserInteraction || req.RequiresUserInteraction2:
 		replies.send(claudeApprovalResponse(ar, false, claudeChatOnlyDenial))
 		return nil
 	}

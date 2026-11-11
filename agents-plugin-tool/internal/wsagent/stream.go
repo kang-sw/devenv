@@ -161,9 +161,10 @@ func startStreamProcess(cmd *exec.Cmd, mapper lineMapper, proto lineProtocol) (*
 // feed maps one output line and delivers its events. seq is the line's
 // holder record sequence (0 for the daemon's own child); a replayed line
 // (one the runner applied under an earlier daemon) rebuilds the mapper's
-// and the runner's state and answers nothing. A holder line that brought
-// events is followed by a LineEnd event, so the runner knows the line is
-// applied whole.
+// and the runner's state and answers nothing. A holder line is followed by
+// a LineEnd event, so the runner knows the line is applied whole: also a
+// line with no events, which the mapper may have answered on the child's
+// input and must not answer again after a daemon restart.
 func (p *streamProcess) feed(line []byte, seq uint64, replay bool) {
 	p.feedMu.Lock()
 	defer p.feedMu.Unlock()
@@ -182,7 +183,7 @@ func (p *streamProcess) feed(line []byte, seq uint64, replay bool) {
 		ev.Seq, ev.Replay = seq, replay
 		p.emit(ev)
 	}
-	if seq > 0 && len(evs) > 0 {
+	if seq > 0 && (len(evs) > 0 || !replay) {
 		p.emit(Event{Seq: seq, Replay: replay, LineEnd: true})
 	}
 }

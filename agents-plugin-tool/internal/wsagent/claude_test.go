@@ -444,8 +444,10 @@ for line in sys.stdin:
 `
 
 // TestClaudeProcessControls pins the stream-json input lines: the user line,
-// the interrupt and set_model control requests, and how an error answer maps
-// (an unsupported one to ErrUnsupported, which makes the runner restart).
+// the interrupt, set_model, and apply_flag_settings control requests (a
+// return to a default names no model, or a null effort level), and how an
+// error answer maps (an unsupported one to ErrUnsupported, which makes the
+// runner restart).
 func TestClaudeProcessControls(t *testing.T) {
 	python := lookPython(t)
 	logPath := filepath.Join(t.TempDir(), "input.jsonl")
@@ -469,11 +471,14 @@ func TestClaudeProcessControls(t *testing.T) {
 	if err := p.SetModel("opus"); err != nil {
 		t.Fatalf("SetModel: %v", err)
 	}
-	if err := p.SetModel(""); !errors.Is(err, ErrUnsupported) {
-		t.Fatalf("a return to the default model needs a restart, got %v", err)
+	if err := p.SetModel(""); err != nil {
+		t.Fatalf("a return to the default model is a set_model that names none, got %v", err)
 	}
-	if err := p.SetEffort("high"); !errors.Is(err, ErrUnsupported) {
-		t.Fatalf("effort has no in-stream form, got %v", err)
+	if err := p.SetEffort("high"); err != nil {
+		t.Fatalf("SetEffort: %v", err)
+	}
+	if err := p.SetEffort(""); err != nil {
+		t.Fatalf("a return to the default effort is a null level, got %v", err)
 	}
 	if err := p.SetModel("bogus"); err == nil || errors.Is(err, ErrUnsupported) || err.Error() != "model not found" {
 		t.Fatalf("a refused model is the error, got %v", err)
@@ -489,8 +494,11 @@ func TestClaudeProcessControls(t *testing.T) {
 		`{"message":{"content":"hello","role":"user"},"type":"user"}`,
 		`{"request":{"subtype":"interrupt"},"request_id":"ws-1","type":"control_request"}`,
 		`{"request":{"model":"opus","subtype":"set_model"},"request_id":"ws-2","type":"control_request"}`,
-		`{"request":{"model":"bogus","subtype":"set_model"},"request_id":"ws-3","type":"control_request"}`,
-		`{"request":{"model":"legacy","subtype":"set_model"},"request_id":"ws-4","type":"control_request"}`,
+		`{"request":{"subtype":"set_model"},"request_id":"ws-3","type":"control_request"}`,
+		`{"request":{"settings":{"effortLevel":"high"},"subtype":"apply_flag_settings"},"request_id":"ws-4","type":"control_request"}`,
+		`{"request":{"settings":{"effortLevel":null},"subtype":"apply_flag_settings"},"request_id":"ws-5","type":"control_request"}`,
+		`{"request":{"model":"bogus","subtype":"set_model"},"request_id":"ws-6","type":"control_request"}`,
+		`{"request":{"model":"legacy","subtype":"set_model"},"request_id":"ws-7","type":"control_request"}`,
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("input lines =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))

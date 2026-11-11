@@ -128,6 +128,15 @@ type ApprovalRequest struct {
 	StartedAt int64  `json:"started_at,omitempty"`
 }
 
+// Harness states (Event.HarnessState), under the names Claude Code's
+// session_state_changed line gives them: a turn runs, the harness waits on
+// the user's answer to a prompt, or it waits for input.
+const (
+	HarnessRunning = "running"
+	HarnessWaiting = "requires_action"
+	HarnessIdle    = "idle"
+)
+
 // Event is one item of a process's output. Exactly one of its parts is set,
 // except that a TurnEnd may carry TurnError and that Seq and Replay mark
 // any event of a process under a session holder.
@@ -154,6 +163,12 @@ type Event struct {
 	ApprovalDone string
 	// PermissionMode is the permission mode the harness reports it runs in.
 	PermissionMode string
+	// HarnessState is the state the harness reports it moved to
+	// (HarnessRunning, HarnessWaiting, HarnessIdle).
+	HarnessState string
+	// Notice is a line for the daemon's log: something the harness did
+	// that the conversation does not show.
+	Notice string
 	// BackgroundTasks is the harness's current background task count, when
 	// the line reported the whole list.
 	BackgroundTasks *int
