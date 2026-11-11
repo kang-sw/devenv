@@ -184,6 +184,8 @@ var trackerCommands = map[string]trackerCommandDef{
 	wstracker.TypeItemApprove:   {trackerEventSpec(wsxmlcmd.Leaf, "item", "request"), buildItemRequestNote},
 	wstracker.TypeItemDeny:      {trackerEventSpec(wsxmlcmd.Leaf, "item", "request"), buildItemRequestNote},
 	wstracker.TypeItemUnrequest: {trackerEventSpec(wsxmlcmd.Empty, "item", "request"), buildItemRequest},
+	wstracker.TypeItemCC:        {trackerEventSpec(wsxmlcmd.Empty, "item", "member"), buildItemMember},
+	wstracker.TypeItemUncc:      {trackerEventSpec(wsxmlcmd.Empty, "item", "member"), buildItemMember},
 	wstracker.TypeCommentAdd: {trackerEventSpec(wsxmlcmd.Leaf, "item", "reply_to", "mentions", "refs"), func(b *trackerBatch, cmd wsxmlcmd.Command, ev *trackerEvent) {
 		b.itemRef(cmd, ev, "item")
 		if _, ok := cmd.Attr("reply_to"); ok {
@@ -372,6 +374,13 @@ func buildItemMove(b *trackerBatch, cmd wsxmlcmd.Command, ev *trackerEvent) {
 
 func buildItemOnly(b *trackerBatch, cmd wsxmlcmd.Command, ev *trackerEvent) {
 	b.itemRef(cmd, ev, "item")
+}
+
+// buildItemMember reads tk:item.cc and tk:item.uncc: member is the member
+// ID added to or removed from the item's CC list.
+func buildItemMember(b *trackerBatch, cmd wsxmlcmd.Command, ev *trackerEvent) {
+	b.itemRef(cmd, ev, "item")
+	b.required(cmd, ev, "member")
 }
 
 func buildItemNote(b *trackerBatch, cmd wsxmlcmd.Command, ev *trackerEvent) {
@@ -1198,7 +1207,7 @@ type trackerQuery struct {
 }
 
 var (
-	trackerScopes = []string{"mine", "received", "assigned", "team", "all"}
+	trackerScopes = []string{"mine", "received", "assigned", "team", "related", "all"}
 	// todo is not a filter value: the store folds a todo create as a task.
 	trackerKinds = wstracker.QueryKinds
 	// trackerStatuses are the status filter's values, shared with the

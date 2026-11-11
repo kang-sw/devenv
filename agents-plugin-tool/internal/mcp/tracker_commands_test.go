@@ -473,6 +473,40 @@ func TestTrackerUpdateWritesEveryEventCommand(t *testing.T) {
 		t.Fatalf("T7 after the approval: ada %v, bo %v", ada, bo)
 	}
 
+	// CC: bo's T9 is none of ada's; ada CCs herself and bo, then removes bo.
+	// bo's comment on his T10 mentions ada. The related scope lists T9 under
+	// CC and T10 under mentions, and the item view names the CC list.
+	w.byBo(t, "t9", wstracker.TypeItemCreate, map[string]any{"kind": "task", "title": "T9"})
+	w.byBo(t, "t10", wstracker.TypeItemCreate, map[string]any{"kind": "task", "title": "T10"})
+	w.byBo(t, "", wstracker.TypeCommentAdd, map[string]any{"item": "{t10}", "body": "@ada look", "mentions": []any{"ada"}})
+	step(trackerWriteStep{`<tk:store name="team">
+<tk:item.cc item="{t9}" member="ada"/>
+<tk:item.cc item="{t9}" member="bo"/>
+<tk:item.uncc item="{t9}" member="bo"/>
+</tk:store>`, []trackerWantEvent{
+		{typ: wstracker.TypeItemCC, payload: map[string]any{"item": "{t9}", "member": "ada"}},
+		{typ: wstracker.TypeItemCC, payload: map[string]any{"item": "{t9}", "member": "bo"}},
+		{typ: wstracker.TypeItemUncc, payload: map[string]any{"item": "{t9}", "member": "bo"}},
+	}})
+	if got := w.trackerQuery(t, map[string]any{"store": "team", "item": w.ids["t9"]}); !strings.Contains(got, "\ncc: ada (Ada Kim)\n") {
+		t.Fatalf("the item view names the CC list:\n%s", got)
+	}
+	related := w.trackerQuery(t, map[string]any{"store": "team", "scope": "related"})
+	ccAt := strings.Index(related, "items I am CC'd on, the latest CC first:\n- "+trackerAlias(w.ids["t9"])+" [")
+	menAt := strings.Index(related, "items that mention me, the newest mention first:\n- "+trackerAlias(w.ids["t10"])+" [")
+	if ccAt < 0 || menAt < ccAt {
+		t.Fatalf("related lists T9 under CC, then T10 under mentions:\n%s", related)
+	}
+	var state struct {
+		My struct {
+			Related wstracker.Related `json:"related"`
+		} `json:"my"`
+	}
+	js := toolText(t, w.call(t, "tracker.query", map[string]any{"payload": map[string]any{"store": "team"}, "format": "json"}))
+	if err := json.Unmarshal([]byte(js), &state); err != nil || !reflect.DeepEqual(state.My.Related.CC, []string{w.ids["t9"]}) || !reflect.DeepEqual(state.My.Related.Mentioned, []string{w.ids["t10"]}) {
+		t.Fatalf("the JSON view carries the related block: %v %+v", err, state.My.Related)
+	}
+
 	// Identity: admin role, a key added and revoked, a member removed.
 	spare := trackerSpareKey()
 	step(trackerWriteStep{`<tk:store name="team">

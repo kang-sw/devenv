@@ -125,8 +125,8 @@ type item struct {
 	mentions           []string
 	attachments        []attachment
 	refs               []string
-	labels             labelSet // label ids as written; the view drops removed ones
-	open               *opening // the latest item.open; active while its ended is nil
+	labels             labelSet  // label ids as written; the view drops removed ones
+	open               *opening  // the latest item.open; active while its ended is nil
 	cc                 []ccEntry // the CC'd members, in the order they came to be CC'd
 }
 

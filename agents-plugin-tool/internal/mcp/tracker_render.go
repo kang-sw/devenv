@@ -91,6 +91,9 @@ func formatTrackerScope(v *wstrackerhost.StoreView, q trackerQuery) string {
 				}
 			}
 		}
+	case "related":
+		items("items I am CC'd on, the latest CC first", v.My.Related.CC, false)
+		items("items that mention me, the newest mention first", v.My.Related.Mentioned, false)
 	case "all":
 		items("every item, in tree order", v.ItemOrder, false)
 	default:
@@ -466,6 +469,13 @@ func formatTrackerItem(v *wstrackerhost.StoreView, id string) string {
 	}
 	if len(it.Mentions) > 0 {
 		fmt.Fprintf(&sb, "mentions: %s\n", strings.Join(it.Mentions, " "))
+	}
+	if len(it.CC) > 0 {
+		var cc []string
+		for _, m := range it.CC {
+			cc = append(cc, trackerPerson(v, m))
+		}
+		fmt.Fprintf(&sb, "cc: %s\n", strings.Join(cc, ", "))
 	}
 	for _, refs := range []struct {
 		label string
