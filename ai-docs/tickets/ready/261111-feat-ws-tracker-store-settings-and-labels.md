@@ -2,6 +2,10 @@
 title: "Tracker: a store-settings section for priority levels, the attachment limit, and an admin-defined label list; multi-valued labels on items"
 related:
   261110-epic-ws-tracker-team-feedback: "its Non-Scope recorded priority levels as needing no work; this ticket's Decision 1 is the discoverability work the user asked for later"
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: 78039b04ff2d1959
+sage-review-completeness-reviewed: 78039b04ff2d1959
 ---
 
 # Tracker: store settings and labels
@@ -20,7 +24,8 @@ Current state (read 2026-11-11):
   (`names` lowest to highest, at most 9, and a `default` index;
   `internal/wstracker/check.go` `TypeSetPriorityLevels`). The attachment
   limit is `roles.set_attachment_limit` (`max_bytes`). Both sit in the
-  Team tab's "admin: role events" dialog, which lists raw event names in a
+  Team tab's "Admin: roles event" dialog (button label
+  `js.tk.team.adminbtn`, `agents-plugin-tool/internal/wsi18n/tables/en.json#L946`), which lists raw event names in a
   `<select>` (`ROLE_TYPES`) and shows every field for every type at once
   (`internal/wsdashboard/assets/tracker.js` `dialogHtml` case `admin`).
 - `tracker.query` prints a `priority:` line with the levels and the
@@ -69,11 +74,27 @@ Current state (read 2026-11-11):
    list has a stable id. Renaming or recolouring it updates every item that
    carries it; removing it from the list hides it from items, chips, and
    `label:` results while the event history keeps it.
+   Label names are unique within the store list: an add or rename to a name
+   the list already holds is rejected at write, so `label:<name>` names one
+   label. A removed label frees its name; adding that name again creates a
+   new label with a new id, and items that carried the removed one do not
+   regain it (technical, review-raised). Two concurrent adds or renames to
+   one name both pass the write check; the fold keeps the first in fold
+   order and flags the later with a reason naming the duplicate, pinned by
+   a golden case and a `reasons.json` case (technical, review-raised).
    Rejected: keying labels by name, which breaks every item on a rename and
-   leaves dangling names after a removal.
+   leaves dangling names after a removal; duplicate names with `label:`
+   matching every id of that name, which brings back the scattered names
+   Decision 3 exists to stop; restoring a removed label on re-add, which
+   needs a second lifecycle for one name.
 5. **Labels are an item field like `project` (technical, (209)).** They are
    set in the item window beside `project`, by anyone who may edit that
-   item, under the same rules as `project`. Quick-add stays unchanged.
+   item, under the same rules as `project`. Quick-add stays unchanged. The
+   label write uses the same permission check as `item.edit` (a field of
+   `item.edit`, or the shared creator-or-live-assignee helper), never a copy
+   of today's creator-only check, so the widening in
+   `261111-feat-ws-tracker-assignee-edit-and-body-merge` covers labels in
+   whichever order the two tickets land (technical, review-raised).
    Rejected: a separate label permission, which adds a rule for no stated
    need; a quick-add label field, which is the quick-add ticket's decision.
 6. **Two phases (technical, (207)).** Phase 1 the store-settings section,
@@ -101,6 +122,41 @@ Current state (read 2026-11-11):
   `rsrc/tracker/tracker.md`), as the existing event types are ((210)).
 - Event names, payload shapes, and the label colour format are chosen in
   planning.
+- Golden files: view JSON fields carry no `omitempty`, so an item `labels`
+  field changes every file under `testdata/golden`; regenerate them from
+  the reference engine after each merge, never merge them by hand, and give
+  new case files a distinct name prefix.
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for `agents-plugin/`, `agents-plugin-wsflow/`, `agents-plugin-tool/`)
+- Convention: ai-docs/manuals/skill-authoring.md (declared for `agents-plugin/rsrc/`, `agents-plugin/skills/`, `agents-plugin-wsflow/rsrc/`, `agents-plugin-wsflow/skills/`, `agents-plugin-tool/internal/wsdoc/conventions/`)
+- Convention: ai-docs/manuals/wsflow-mirroring.md (declared for `agents-plugin/rsrc/`, `agents-plugin/skills/`, `agents-plugin/hooks/`, `agents-plugin-wsflow/`)
+- Convention: ai-docs/manuals/ws-mcp.md (declared for `agents-plugin-tool/internal/mcp/`)
+
+## Prior Decisions
+
+- 4871a856 (2026-11-11, commit): "User answers: (195) a, a store-settings section plus per-type dialog fields plus a query hint; (196) a, a new multi-valued label layer, with project and kind unchanged; (205) a, the store defines the label list" — bearing: supports
+- 25d11857 (2026-11-10, commit): "(612) recorded as the lead's assumed reading: the priority question was whether items carry a priority, which they already do (roles.set_priority_levels, up to 9 levels), so it is Non-Scope." — bearing: supports
+- 261111-feat-ws-tracker-assignee-edit-and-body-merge (2026-11-11, Decisions): "`item.edit` opens to the item's creator or a member holding a live assignment on it, for every field, body included ((229) a)." — bearing: constrains
+- 261111-feat-ws-tracker-cc-field (2026-11-11, Decisions): "A CC item field; assign stays creator-only ((235) a). CC is an item field like `project`, edited by whoever may edit the item." — bearing: constrains
+- 757b956f (2026-11-08, commit): "wsledger is untouched: it treats non-protocol roles.* types as opaque payload, so roles.set_attachment_limit flows like roles.set_priority_levels." — bearing: constrains
+- 261108-feat-ws-tracker-ledger-attachments (2026-11-08, Decisions): "the roles-file `attachments.max_bytes` caps an attachment newly added by a write; an attachment carried over unchanged ... is exempt, so lowering the limit never locks old posts." — bearing: constrains
+- e11589f5 (2026-11-08, commit): "(271) no-marker rule is applied to every field register (status, lead, priority levels too), not only body: a member's two clones are one writer." — bearing: constrains
+- 261108-feat-ws-tracker-data-structure (2026-11-08, Decisions): "Admin status, removal, and membership used by domain rules are folded by the domain from the identity events in each event's causal past ... not read from `Identity()`" — bearing: constrains
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin-tool/internal/wstracker/check.go, query.go, payload.go; agents-plugin-tool/internal/wsdashboard/assets/tracker.js; agents-plugin-tool/internal/mcp/tracker_render.go; three rsrc/tracker/tracker.md copies; ai-docs/ref/tracker-mockup/engine.js; testdata/gen-golden.js |
+| scope.surface | cross-module | tracker domain events, MCP query render, dashboard UI, shipped playbook in three packages |
+| scope.new_public_symbol | yes | new label-list and item-label event types in wstracker, event names chosen in planning |
+| scope.new_type_contract | yes | new event payload shapes and label colour format, chosen in planning; item view gains a labels field |
+| scope.test_surface | existing | agents-plugin-tool/internal/mcp/tracker_*_test.go, agents-plugin-tool/internal/wstracker/testdata golden cases |
+| complexity.reuse_points | confirmed | admin gate needAdmin and priority-level field-register pattern in check.go#L856-L883; project field edit path in tracker.js#L2339 |
+| complexity.side_effect_risk | moderate | new ledger event types fold into every store view and must match the reference engine golden output |
+| risk.correctness | moderate | rename and removal by stable id must fold consistently across Go and engine.js |
+| risk.fit | moderate | settings section moves existing controls out of the role-event dialog and adds a filter key to query grammar |
+| risk.test | moderate | browser checks are manual; golden cases must be regenerated from the reference engine |
+| risk.security_or_contract | moderate | new admin-only events and payloads become a persisted ledger contract that ships downstream |
 
 ## Phases
 
@@ -113,12 +169,14 @@ Scope:
 - The role-event dialog shows only the selected type's fields, under
   human-readable type names, and no longer carries the two settings.
 - The `tracker.query` `priority:` line hint, and the tracker playbook's
-  wording of where the levels are changed.
+  wording of where the levels are changed, in all three packages'
+  `rsrc/tracker/tracker.md`.
 
 Verification:
 - A render test that the `priority:` line carries the hint.
 - A browser check of the section as admin and as non-admin, and of the
-  dialog showing only the selected type's fields.
+  dialog showing only the selected type's fields under human-readable type
+  names, with the priority-level and attachment-limit types gone from it.
 
 ### Phase 2: labels
 
@@ -130,7 +188,9 @@ Scope:
 
 Verification:
 - Tracker tests: a non-admin's label-list change is rejected; an item
-  cannot carry a label outside the list; a renamed label shows its new
+  cannot carry a label outside the list; a duplicate label name is
+  rejected; a label set by a non-editor is rejected by the `item.edit`
+  rule; a re-added removed name gets a new id; a renamed label shows its new
   name on items; a removed label leaves items, chips, and `label:`
   results.
 - Golden cases from the reference engine agree with the Go domain.
