@@ -414,7 +414,14 @@
       "registered_at": "2026-11-11T00:10:56Z"
     },
     "261111-feat-ws-tracker-store-unregister-relabel": {
-      "registered_at": "2026-11-11T01:02:29Z"
+      "registered_at": "2026-11-11T01:02:29Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "28ef83e379b353cc",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-11T01:46:32Z"
+      }
     },
     "261111-refactor-ws-minimize-recurring-fs-touches": {
       "registered_at": "2026-11-11T00:33:24Z",
