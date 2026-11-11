@@ -371,7 +371,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-11T04:00:59Z"
+        "touched_at": "2026-11-11T04:01:37Z",
+        "impl": {
+          "branch": "impl/develop/down-gents-rally"
+        }
       }
     },
     "261110-feat-ws-dashboard-workspaces": {
