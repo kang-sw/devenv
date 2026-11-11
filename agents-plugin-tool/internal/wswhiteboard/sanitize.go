@@ -6,9 +6,14 @@ import (
 	"hash/fnv"
 	"html/template"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 
+	"github.com/yuin/goldmark/ast"
+	"github.com/yuin/goldmark/parser"
+	"github.com/yuin/goldmark/text"
 	"github.com/yuin/goldmark/util"
 	xhtml "golang.org/x/net/html"
 	"golang.org/x/net/html/atom"
@@ -491,13 +496,15 @@ func filterStyle(style string) string {
 // every tag is dropped and its text kept, <code> becomes backticks and <br>
 // a space, an image prints its alt text, and the elements the sanitizer
 // drops with their content (replyDropped, replySVGDropped) print nothing.
-// Text with no tag and no entity is returned as stored.
+// Markdown code spans and code blocks, which the page shows as literal
+// text, keep their tags and entities as written (protectCode). Text with no
+// tag and no entity is returned as stored.
 func PlainHTML(s string) string {
 	if !strings.ContainsAny(s, "<&") {
 		return s
 	}
 	context := &xhtml.Node{Type: xhtml.ElementNode, Data: "div", DataAtom: atom.Div}
-	nodes, err := xhtml.ParseFragment(strings.NewReader(s), context)
+	nodes, err := xhtml.ParseFragment(strings.NewReader(protectCode(s)), context)
 	if err != nil {
 		return Plain(s)
 	}
@@ -550,3 +557,57 @@ func writePlain(sb *strings.Builder, n *xhtml.Node) {
 		}
 	}
 }
+
+var (
+	plainParserOnce sync.Once
+	plainParser     parser.Parser
+)
+
+// protectCode escapes "<" and "&" inside the markdown code spans and code
+// blocks of s, as itemField's raw pipeline parses them, so PlainHTML's HTML
+// parse reads them back as the literal text the page shows.
+func protectCode(s string) string {
+	plainParserOnce.Do(func() { plainParser = (&pageData{}).rawMarkdown().Parser() })
+	source := []byte(s)
+	var ranges []text.Segment
+	_ = ast.Walk(plainParser.Parse(text.NewReader(source)), func(n ast.Node, entering bool) (ast.WalkStatus, error) {
+		if !entering {
+			return ast.WalkContinue, nil
+		}
+		switch n.Kind() {
+		case ast.KindCodeSpan:
+			for c := n.FirstChild(); c != nil; c = c.NextSibling() {
+				if t, ok := c.(*ast.Text); ok {
+					ranges = append(ranges, t.Segment)
+				}
+			}
+			return ast.WalkSkipChildren, nil
+		case ast.KindCodeBlock, ast.KindFencedCodeBlock:
+			lines := n.Lines()
+			for i := 0; i < lines.Len(); i++ {
+				ranges = append(ranges, lines.At(i))
+			}
+			return ast.WalkSkipChildren, nil
+		}
+		return ast.WalkContinue, nil
+	})
+	if len(ranges) == 0 {
+		return s
+	}
+	slices.SortFunc(ranges, func(a, b text.Segment) int { return a.Start - b.Start })
+	var sb strings.Builder
+	last := 0
+	for _, r := range ranges {
+		if r.Start < last {
+			continue
+		}
+		sb.Write(source[last:r.Start])
+		sb.WriteString(codeEscaper.Replace(string(source[r.Start:r.Stop])))
+		last = r.Stop
+	}
+	sb.Write(source[last:])
+	return sb.String()
+}
+
+// codeEscaper escapes what an HTML parse would read as markup.
+var codeEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;")

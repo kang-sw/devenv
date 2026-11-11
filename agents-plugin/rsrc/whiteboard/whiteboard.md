@@ -107,11 +107,12 @@ Markdown up to the closing tag.
   breaks kept: lists, code blocks, tables, images, and a `` ```mermaid ``
   fenced block drawn as a diagram, plus HTML such as `<img>`, `<table>`,
   `<details>`, and simple inline SVG, shown as static markup with script,
-  style, frames, form controls, event attributes, and positioning removed.
-  A line that starts with a block tag follows the body's HTML rule below. A
-  link or image path, in markdown or in `href` and `src`, is relative to the
-  session root or absolute; images are local files only, links may also be
-  http(s). An open technical or announced item shows its `wb:why` inline,
+  style, frames, form controls, event attributes, and positioning removed;
+  text such as `Vec<T>` reads as an unknown tag and disappears unless it is
+  in backticks. A line that starts with a block tag follows the body's HTML
+  rule below. A link or image path, in markdown or in `href` and `src`, is
+  relative to the session root or absolute; images are local files only,
+  links may also be http(s). An open technical or announced item shows its `wb:why` inline,
   one line per reason, with only the title's tags rendered.
 - `wb:why`: a technical or announced item's citation or reasoning, or a
   policy item's context. `wb:link`: one per link, such as a ticket stem, a

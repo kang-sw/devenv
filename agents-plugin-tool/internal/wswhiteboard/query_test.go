@@ -393,6 +393,9 @@ func TestPlainHTML(t *testing.T) {
 		"a &lt;b&gt; &amp; c":                           "a <b> & c",
 		"keep<!-- c -->s":                               "keeps",
 		"<noscript>n</noscript><template>t</template>x": "x",
+		"Use `<details>` and `a&amp;b`, not <u>u</u>":   "Use `<details>` and `a&amp;b`, not u",
+		"```html\n<script>s()</script>\n```":            "```html\n<script>s()</script>\n```",
+		"    <b>indented</b>":                           "    <b>indented</b>",
 	} {
 		if got := PlainHTML(in); got != want {
 			t.Errorf("PlainHTML(%q) = %q, want %q", in, got, want)

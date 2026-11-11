@@ -25,13 +25,17 @@
     el.wbBound = true;
     return true;
   }
+  // Item fields hold lead-authored HTML whose class attribute survives the
+  // sanitizer, so every control here is selected by what a field cannot
+  // carry: a data-* attribute, or an element the sanitizer drops (textarea,
+  // button, label).
   function bind(root) {
-    q(".card.policy", root).forEach(function (card) {
-      q(".opt", card).forEach(function (btn) {
+    q(".card.policy[data-id]", root).forEach(function (card) {
+      q(".opt[data-opt]", card).forEach(function (btn) {
         if (!once(btn)) return;
         function pick() {
           var on = btn.getAttribute("aria-pressed") === "true";
-          q(".opt", card).forEach(function (b) { b.setAttribute("aria-pressed", "false"); });
+          q(".opt[data-opt]", card).forEach(function (b) { b.setAttribute("aria-pressed", "false"); });
           btn.setAttribute("aria-pressed", on ? "false" : "true");
           build();
         }
@@ -47,21 +51,21 @@
         });
       });
     });
-    q(".note-toggle", root).forEach(function (t) {
+    q("button.note-toggle", root).forEach(function (t) {
       if (once(t)) t.addEventListener("click", function () {
-        var n = t.closest(".card, .arow, .srow").querySelector(".note");
+        var n = t.closest(".card, .arow, .srow").querySelector("textarea.note");
         n.hidden = !n.hidden; if (!n.hidden) { grow(n); n.focus(); }
       });
     });
     // A topic's pen opens the note under its bar: a comment or question on
     // the topic as a whole, which the reply carries as "[topic] text".
-    q(".tnote-toggle", root).forEach(function (t) {
+    q("button.tnote-toggle", root).forEach(function (t) {
       if (once(t)) t.addEventListener("click", function () {
-        var n = t.closest(".topic").querySelector(".tnote");
+        var n = t.closest(".topic").querySelector("textarea.tnote");
         n.hidden = !n.hidden; if (!n.hidden) { grow(n); n.focus(); }
       });
     });
-    q(".note, .ack input", root).forEach(function (el) {
+    q("textarea.note, label.ack > input", root).forEach(function (el) {
       if (!once(el)) return;
       if (el.classList.contains("note")) el.addEventListener("input", function () { grow(el); });
       el.addEventListener("input", build);
@@ -74,12 +78,12 @@
   // Bulk acknowledge: checks every ack row. Policy items stay manual.
   if (all && once(all)) all.addEventListener("change", function () {
     var on = this.checked;
-    q(".ack input").forEach(function (c) { c.checked = on; });
+    q("label.ack > input").forEach(function (c) { c.checked = on; });
     build();
   });
   function syncAll() {
     if (!all) return;
-    var acks = q(".ack input");
+    var acks = q("label.ack > input");
     var on = acks.filter(function (c) { return c.checked; }).length;
     var total = acks.length;
     all.checked = total > 0 && on === total;
@@ -93,10 +97,10 @@
     replyEls();
     if (!ta) return;
     var parts = [], acked = [];
-    q(".card.policy").forEach(function (card) {
+    q(".card.policy[data-id]").forEach(function (card) {
       var id = card.getAttribute("data-id");
-      var pick = card.querySelector('[aria-pressed="true"]');
-      var noteEl = card.querySelector(".note");
+      var pick = card.querySelector('.opt[data-opt][aria-pressed="true"]');
+      var noteEl = card.querySelector("textarea.note");
       var note = noteEl ? noteEl.value.trim() : "";
       var s = "";
       if (pick) s = "(" + id + ") " + pick.getAttribute("data-opt");
@@ -104,22 +108,22 @@
       if (s) parts.push(s);
     });
     // An acknowledgement with a note leaves the group: "(nn) ok, note: ..." or "(nn) note: ...".
-    q(".arow").forEach(function (row) {
+    q(".arow[data-id]").forEach(function (row) {
       var id = row.getAttribute("data-id");
-      var on = row.querySelector(".ack input").checked;
-      var note = row.querySelector(".note").value.trim();
+      var on = row.querySelector("label.ack > input").checked;
+      var note = row.querySelector("textarea.note").value.trim();
       if (note) parts.push("(" + id + ") " + (on ? "ok, " : "") + "note: " + note);
       else if (on) acked.push("(" + id + ")");
     });
     // An assumed item reads as settled; its pen still takes a veto or a
     // comment, sent as "(nn) note: ...".
     q(".srow[data-id]").forEach(function (row) {
-      var note = row.querySelector(".note").value.trim();
+      var note = row.querySelector("textarea.note").value.trim();
       if (note) parts.push("(" + row.getAttribute("data-id") + ") note: " + note);
     });
     if (acked.length) parts.push(acked.join(", ") + " ok");
     // Topic notes follow the item segments, one line each: "[topic] text".
-    var topics = q(".tnote").map(function (n) {
+    var topics = q("textarea.tnote").map(function (n) {
       var note = n.value.trim();
       return note ? "[" + n.getAttribute("data-topic") + "] " + note : "";
     }).filter(Boolean);
