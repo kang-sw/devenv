@@ -178,7 +178,8 @@
    "type": "item.create",
    "payload": {
     "kind": "task",
-    "title": "Kai awaiting"
+    "title": "Kai awaiting",
+    "due": "2026-11-05"
    },
    "seen": {},
    "verdict": "valid"
@@ -1088,7 +1089,7 @@
     "body": "",
     "project": "",
     "labels": [],
-    "due": null,
+    "due": "2026-11-05",
     "priority": 1,
     "priorityLevel": 1,
     "priorityName": "Task",
@@ -2077,7 +2078,8 @@
     "origin": "human",
     "payload": {
      "kind": "task",
-     "title": "Kai awaiting"
+     "title": "Kai awaiting",
+     "due": "2026-11-05"
     },
     "status": "applied",
     "reason": null,

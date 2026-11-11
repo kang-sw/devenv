@@ -1004,7 +1004,7 @@
   "js.tk.team.lead": "上级 <b>{0}</b>",
   "js.tk.team.levels.tip": "你之下的层数",
   "js.tk.team.load": "负载 {0}",
-  "js.tk.team.load.tip": "既非构想也未完成的进行中工作；仅以创建者身份持有的任务不计入",
+  "js.tk.team.load.tip": "手头的工作（待办、进行中或受阻）；待确认、构想、已完成以及仅以创建者身份持有的任务不计入",
   "js.tk.team.members.one": "1 名成员",
   "js.tk.team.members.other": "{0} 名成员",
   "js.tk.team.nobody": "你之下没有人。",

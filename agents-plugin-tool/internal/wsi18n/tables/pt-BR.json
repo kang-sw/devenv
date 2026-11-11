@@ -1004,7 +1004,7 @@
   "js.tk.team.lead": "líder <b>{0}</b>",
   "js.tk.team.levels.tip": "níveis abaixo de você",
   "js.tk.team.load": "carga {0}",
-  "js.tk.team.load.tip": "trabalho ativo que não é ideia nem concluído; tarefas retidas só como criador ficam de fora",
+  "js.tk.team.load.tip": "trabalho em mãos: a fazer, em andamento ou bloqueado; aguardando confirmação, ideia, concluído e tarefas retidas só como criador ficam de fora",
   "js.tk.team.members.one": "1 membro",
   "js.tk.team.members.other": "{0} membros",
   "js.tk.team.nobody": "Ninguém abaixo de você.",

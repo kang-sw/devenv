@@ -1004,7 +1004,7 @@
   "js.tk.team.lead": "리드 <b>{0}</b>",
   "js.tk.team.levels.tip": "내 아래 단계",
   "js.tk.team.load": "부하 {0}",
-  "js.tk.team.load.tip": "구상도 완료도 아닌 진행 중인 작업이며, 작성자로서만 보유한 작업은 빠집니다",
+  "js.tk.team.load.tip": "손에 든 작업(할 일·진행 중·막힘)이며, 확인 대기·구상·완료와 작성자로서만 보유한 작업은 빠집니다",
   "js.tk.team.members.one": "멤버 1명",
   "js.tk.team.members.other": "멤버 {0}명",
   "js.tk.team.nobody": "내 아래에 아무도 없습니다.",

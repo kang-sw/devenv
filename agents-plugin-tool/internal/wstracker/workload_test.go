@@ -62,9 +62,9 @@ func TestAdminTeamAddsTheOutsideGroup(t *testing.T) {
 }
 
 // Counts per status leave out the creator-fallback holding and the held
-// topic; load is todo, doing, blocked, and awaiting; stale and overdue are
-// inside load (a done or fallback item past its due date is not overdue);
-// idea and fallback stay out of it.
+// topic; load is todo, doing, and blocked; stale and overdue are inside
+// load (a done or fallback item past its due date is not overdue); idea,
+// awaiting, and fallback stay out of it.
 func TestTeamRowCounts(t *testing.T) {
 	v := workloadView(t, "ada.pc")
 	kai := teamRow(t, v, "kai")
@@ -72,12 +72,12 @@ func TestTeamRowCounts(t *testing.T) {
 	if !maps.Equal(kai.Counts, wantCounts) {
 		t.Fatalf("kai counts = %v, want %v", kai.Counts, wantCounts)
 	}
-	wantEq(t, "kai load", kai.Load, 5)
+	wantEq(t, "kai load (awaiting is not)", kai.Load, 4)
 	wantEq(t, "kai stale (the doing set five days ago; the blocked set a day ago is not)", kai.Stale, 1)
-	wantEq(t, "kai overdue (the todo past due; the done and the fallback past due are not)", kai.Overdue, 1)
+	wantEq(t, "kai overdue (the todo past due; the awaiting, the done, and the fallback past due are not)", kai.Overdue, 1)
 	wantEq(t, "kai fallback-held (the closed fallback is not)", kai.Fallback, 1)
 	wantEq(t, "kai pending (bo's request)", len(kai.Pending), 1)
-	// open lists every live holding not done: the five load rows, the idea, the fallback
+	// open lists every live holding not done: the four load rows, the awaiting, the idea, the fallback
 	wantEq(t, "kai open", len(kai.Open), 7)
 	wantEq(t, "bo waiting", len(teamRow(t, v, "bo").Waiting), 1)
 	wantEq(t, "zed load", teamRow(t, v, "zed").Load, 1)
@@ -95,5 +95,5 @@ func TestTeamRowOverdueNeedsAClock(t *testing.T) {
 	kai := teamRow(t, Derive(src, doc.Viewer, time.Time{}, 0), "kai")
 	wantEq(t, "kai overdue with no clock", kai.Overdue, 0)
 	wantEq(t, "kai stale with no clock", kai.Stale, 0)
-	wantEq(t, "kai load with no clock", kai.Load, 5)
+	wantEq(t, "kai load with no clock", kai.Load, 4)
 }

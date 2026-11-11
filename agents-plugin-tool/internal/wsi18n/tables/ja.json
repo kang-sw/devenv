@@ -1004,7 +1004,7 @@
   "js.tk.team.lead": "リード <b>{0}</b>",
   "js.tk.team.levels.tip": "自分より下の階層",
   "js.tk.team.load": "負荷 {0}",
-  "js.tk.team.load.tip": "構想でも完了でもない進行中の作業。作成者としてのみ保有するタスクは含みません",
+  "js.tk.team.load.tip": "手元の作業 (未着手・進行中・ブロック)。確認待ち・構想・完了と、作成者としてのみ保有するタスクは含みません",
   "js.tk.team.members.one": "メンバー 1 人",
   "js.tk.team.members.other": "メンバー {0} 人",
   "js.tk.team.nobody": "自分の下には誰もいません。",

@@ -1004,7 +1004,7 @@
   "js.tk.team.lead": "Lead <b>{0}</b>",
   "js.tk.team.levels.tip": "Ebenen unter dir",
   "js.tk.team.load": "Last {0}",
-  "js.tk.team.load.tip": "laufende Arbeit, die weder Idee noch erledigt ist; nur als Ersteller gehaltene Aufgaben zählen nicht",
+  "js.tk.team.load.tip": "Arbeit in der Hand: offen, in Arbeit oder blockiert; wartet auf Bestätigung, Idee, erledigt und nur als Ersteller gehaltene Aufgaben zählen nicht",
   "js.tk.team.members.one": "1 Mitglied",
   "js.tk.team.members.other": "{0} Mitglieder",
   "js.tk.team.nobody": "Niemand unter dir.",

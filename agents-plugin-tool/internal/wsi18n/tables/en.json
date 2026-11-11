@@ -1004,7 +1004,7 @@
   "js.tk.team.lead": "lead <b>{0}</b>",
   "js.tk.team.levels.tip": "levels below you",
   "js.tk.team.load": "load {0}",
-  "js.tk.team.load.tip": "live work that is neither idea nor done; a task held only as the creator is left out",
+  "js.tk.team.load.tip": "work in hand: todo, doing, or blocked; awaiting confirm, idea, done, and a task held only as the creator are left out",
   "js.tk.team.members.one": "1 member",
   "js.tk.team.members.other": "{0} members",
   "js.tk.team.nobody": "Nobody below you.",

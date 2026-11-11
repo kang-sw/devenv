@@ -151,7 +151,7 @@ build, no server, no dependencies.
   | *mine* | my live assignments (forced, self-assigned, accepted, or taken over by handoff), then items I created and did not assign; the done ones sit in *recently closed* at the bottom | list / kanban (assignment cards, with the pending column) / due timeline / calendar |
   | *received requests* | answers to what I sent (declined, or returned by the accepter's lead), pending assignments to me, the ones I answered, and the ones I sent | list |
   | *assigned by me* | what I assigned or handed to others, live or pending; each assignee's state and note in the row details; done items in *recently closed* | list / kanban / due timeline / calendar |
-  | *my team* (a viewer with followers, or an admin) | grouped by person: the viewer's whole subtree, indented by depth, then for an admin every other member under an "outside your subtree" heading, indented by depth from the org-tree root. Each group header carries that person's load (live assignments neither idea nor done, a creator-fallback holding left out) with its per-status counts, stale and overdue (both inside the load), idea, fallback-held, done, unaccepted, and "waiting on others" counts and last update; clicking a count narrows the scope to that person's rows of that count, and the same count again clears it. Then their open and unaccepted work and the pending assignments they sent that nobody accepted yet | list / kanban / due timeline / calendar |
+  | *my team* (a viewer with followers, or an admin) | grouped by person: the viewer's whole subtree, indented by depth, then for an admin every other member under an "outside your subtree" heading, indented by depth from the org-tree root. Each group header carries that person's load (live assignments at todo, doing, or blocked, a creator-fallback holding left out) with its per-status counts, stale and overdue (both inside the load), idea, fallback-held, done, unaccepted, and "waiting on others" counts and last update; clicking a count narrows the scope to that person's rows of that count, and the same count again clears it. Then their open and unaccepted work and the pending assignments they sent that nobody accepted yet | list / kanban / due timeline / calendar |
   | *all* | the tree of threads, filtered by kind (`request` = items with a pending assignment) and status (open / blocked / done / hidden); under *open*, closed items follow the rules below | tree / kanban (item cards) / due timeline / calendar |
 
   The panel opens on *mine*. The chosen scope and each scope's mode are local
@@ -743,7 +743,8 @@ subtree in tree order, `depth` from the viewer; for an admin, then every other
 live member walked from the org-tree roots, `outside: true`, `depth` from the
 root (a root is 0). `counts` are the member's live assignments per status, a
 creator-fallback holding left out ((262 a): nobody took that work); `load` is
-those neither idea nor done; `stale` and `overdue` (the item's `due` before
+those at todo, doing, or blocked (idea, awaiting, and done are not work in
+hand); `stale` and `overdue` (the item's `due` before
 today's date) are subsets of `load`; `fallback` counts the live fallback
 holdings not done. A held topic is in no list or count.
 

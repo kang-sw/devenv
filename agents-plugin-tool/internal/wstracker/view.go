@@ -321,7 +321,7 @@ type Received struct {
 // viewer's subtree, Depth from the viewer, or, for an admin viewer, a member
 // outside it (Outside, Depth from the org-tree root, a root being 0).
 // Counts are the member's live assignments per status, a creator-fallback
-// holding left out (262 a); Load is those neither idea nor done; Stale and
+// holding left out (262 a); Load is those at a teamLoad status; Stale and
 // Overdue (the item's due date passed) are subsets of Load; Fallback is the
 // live fallback holdings not done. Topic holdings are in no list or count.
 type Team struct {
@@ -804,6 +804,11 @@ func orEmpty(l []string) []string {
 	return l
 }
 
+// teamLoad are the statuses a team row's Load counts (613 a): the work in
+// the member's hands; idea, awaiting (closed, waiting on the assigner's
+// confirm), and done are not.
+var teamLoad = map[string]bool{"todo": true, "doing": true, "blocked": true}
+
 var rank = map[string]int{"blocked": 0, "doing": 1, "todo": 2, "idea": 3, "awaiting": 4, "done": 5}
 
 func ids(l []*Assignment) []string {
@@ -963,7 +968,7 @@ func (r *replayed) viewerLists(vw *View, A []*Assignment, v string, children map
 				continue
 			}
 			t.Counts[a.Status]++
-			if a.Status == "idea" || a.Status == "done" {
+			if !teamLoad[a.Status] {
 				continue
 			}
 			t.Load++

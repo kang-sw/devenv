@@ -1311,6 +1311,8 @@
     })(it.id, 0);
     return { total: kids.length, counts: counts, blocked: blocked };
   }
+  // The statuses a team row's load counts (613 a): the work in the member's hands.
+  var TEAM_LOAD = ['todo', 'doing', 'blocked'];
   function daysBetween(a, b) { return (Date.parse(b) - Date.parse(a)) / 86400000; }
 
   // The one read path for a view: everything a viewer's page shows, as plain JSON
@@ -1475,7 +1477,8 @@
     // the outside group (outside: true, depth from the org-tree root: a root is 0).
     // Per member: the open, pending, and waiting lists; counts, the member's live
     // assignments per status, a creator-fallback holding left out ((262 a): nobody took
-    // that work); load, those neither idea nor done; stale and overdue (the item's due
+    // that work); load, those at todo, doing, or blocked (idea, awaiting, and done are
+    // not the member's work in hand); stale and overdue (the item's due
     // date passed), subsets of load; fallback, the live fallback holdings not done.
     var today = String(now).slice(0, 10), team = [], inTeam = {};
     inTeam[v] = true;
@@ -1491,7 +1494,7 @@
         if (r.state !== 'live') return;
         if (r.fallback) { if (r.status !== 'done') row.fallback++; return; }
         row.counts[r.status] = (row.counts[r.status] || 0) + 1;
-        if (r.status === 'idea' || r.status === 'done') return;
+        if (TEAM_LOAD.indexOf(r.status) < 0) return;
         row.load++;
         if (r.stale) row.stale++;
         var due = items[r.item].due;

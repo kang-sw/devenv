@@ -1136,8 +1136,10 @@
   // Under a Today filter or a search a group with no matching row is left out.
   // A count is a button: it narrows the list to that person's rows of that count (the drill,
   // panelState().drill = { who, key }, list mode only), and the same count again clears it.
-  // The load breakdown's order; a status not listed (and neither idea nor done) follows, sorted.
-  var TEAM_LOAD = ['todo', 'doing', 'blocked', 'awaiting'];
+  // The statuses a team row's load counts, in its breakdown's order (the view's roll-up counts
+  // the same ones); every other status but idea and done shows as its own count after stale
+  // and overdue, sorted.
+  var TEAM_LOAD = ['todo', 'doing', 'blocked'];
   // The records a team head's count stands for, by the rules the view's counts use, so a count
   // and its rows agree. key: a status, 'load', 'stale', 'overdue', 'fallback', 'unaccepted', or
   // 'waiting'; recs: the assignment records by id; items: the items by id; day: today's date.
@@ -1149,7 +1151,7 @@
       if (key === 'fallback') return !!r.fallback && r.status !== 'done';
       if (r.fallback) return false;
       if (key !== 'load' && key !== 'stale' && key !== 'overdue') return r.status === key;
-      if (r.status === 'idea' || r.status === 'done') return false;
+      if (TEAM_LOAD.indexOf(r.status) < 0) return false;
       return key === 'load' || (key === 'stale' ? !!r.stale : !!(day && it.due && it.due < day));
     });
   }
@@ -1166,14 +1168,13 @@
         tipAttr((tip ? tip + '; ' : '') + wsT(sel ? "js.tk.team.drill.off" : "js.tk.team.drill.tip")) + '>' + txt + '</button>';
     }
     function st(s, n) { return cnt(s, wsT("js.tk.team.st", n, esc(SI.info(s).label)), '', s === 'blocked'); }
-    var c = [], seen = { idea: true, done: true }, br = [];
-    TEAM_LOAD.concat(Object.keys(p.counts).sort()).forEach(function (s) {
-      if (!seen[s] && p.counts[s]) br.push(st(s, p.counts[s]));
-      seen[s] = true;
-    });
+    var c = [], seen = { idea: true, done: true }, br = [], other = [];
+    TEAM_LOAD.forEach(function (s) { if (p.counts[s]) br.push(st(s, p.counts[s])); seen[s] = true; });
+    Object.keys(p.counts).sort().forEach(function (s) { if (!seen[s] && p.counts[s]) other.push(st(s, p.counts[s])); });
     if (p.load) c.push(cnt('load', wsT("js.tk.team.load", p.load), wsT("js.tk.team.load.tip")) + (br.length ? ' (' + br.join(' &middot; ') + ')' : ''));
     if (p.stale) c.push(cnt('stale', wsT("js.tk.team.stale", p.stale), wsT("js.tk.team.stale.tip", STALE_DAYS), true));
     if (p.overdue) c.push(cnt('overdue', wsT("js.tk.team.overdue", p.overdue), wsT("js.tk.team.overdue.tip"), true));
+    c = c.concat(other);
     if (p.counts.idea) c.push(st('idea', p.counts.idea));
     if (p.fallback) c.push(cnt('fallback', wsT("js.tk.team.fallback", p.fallback), wsT("js.tk.team.fallback.tip")));
     if (p.counts.done) c.push(st('done', p.counts.done));

@@ -12,8 +12,8 @@ import (
 // (tracker.js teamDrillRecs): a count on a person's group header narrows the
 // list to the records that count stands for, by the rules the view's team
 // roll-up uses. A status key takes the person's live, non-fallback records of
-// that status on a visible, non-topic item; load takes those neither idea nor
-// done; stale and overdue are subsets of load; fallback takes the live
+// that status on a visible, non-topic item; load takes those at todo, doing,
+// or blocked (TEAM_LOAD); stale and overdue are subsets of load; fallback takes the live
 // fallback holdings not done; unaccepted and waiting are the row's own
 // pending and waiting lists. It also pins that listTeam reads the drill and
 // that the header's counts and the clear control dispatch through data-act.
@@ -39,6 +39,12 @@ func TestTrackerTeamDrillMatchesTheCounts(t *testing.T) {
 	if fn == "" {
 		t.Fatal("tracker.js holds no teamDrillRecs")
 	}
+	// teamDrillRecs reads the load statuses from TEAM_LOAD, the list the head's breakdown uses
+	load := regexp.MustCompile(`(?m)^  var TEAM_LOAD = \[[^\]]*\];\n`).FindString(js)
+	if load == "" {
+		t.Fatal("tracker.js holds no TEAM_LOAD")
+	}
+	fn = load + fn
 	node, err := exec.LookPath("node")
 	if err != nil {
 		t.Skip("node not installed; teamDrillRecs cases not executed")
@@ -77,13 +83,14 @@ func TestTrackerTeamDrillMatchesTheCounts(t *testing.T) {
 		{"over>m", "past2", "m", "live", "blocked", false, false},
 		{"over-idea>m", "past3", "m", "live", "idea", false, false},
 		{"over-fb>m", "past4", "m", "live", "todo", true, false},
+		{"over-await>m", "past5", "m", "live", "awaiting", false, false},
 	} {
 		recs[r.ID] = r
 	}
 	items := map[string]item{
 		"t1": {}, "t2": {Due: day("2026-11-11")}, "t3": {Due: day("2026-11-12")}, "t4": {}, "t4b": {}, "t5": {}, "t6": {}, "t7": {}, "t8": {}, "t9": {},
 		"topic": {Kind: "topic"}, "gone": {Hidden: true},
-		"past": {Due: day("2026-11-01")}, "past2": {Due: day("2026-11-10")}, "past3": {Due: day("2026-11-01")}, "past4": {Due: day("2026-11-01")},
+		"past": {Due: day("2026-11-01")}, "past2": {Due: day("2026-11-10")}, "past3": {Due: day("2026-11-01")}, "past4": {Due: day("2026-11-01")}, "past5": {Due: day("2026-11-01")},
 	}
 	person := map[string]any{"id": "m", "pending": []string{"pending>m"}, "waiting": []string{"sent>x"}}
 	recs["sent>x"] = rec{"sent>x", "t1", "x", "pending", "todo", false, false}
@@ -97,10 +104,11 @@ func TestTrackerTeamDrillMatchesTheCounts(t *testing.T) {
 		{"blocked", "2026-11-11", []string{"blocked>m", "over>m"}},
 		{"idea", "2026-11-11", []string{"idea>m", "over-idea>m"}},
 		{"done", "2026-11-11", []string{"done>m", "over-done>m"}},
-		// load: neither idea nor done, no fallback holding
+		{"awaiting", "2026-11-11", []string{"over-await>m"}},
+		// load: todo, doing, or blocked (not idea, awaiting, or done), no fallback holding
 		{"load", "2026-11-11", []string{"todo>m", "doing>m", "blocked>m", "over>m"}},
 		{"stale", "2026-11-11", []string{"doing>m"}},
-		// overdue: due strictly before today, inside the load (a done, idea, or fallback record is not)
+		// overdue: due strictly before today, inside the load (a done, idea, awaiting, or fallback record is not)
 		{"overdue", "2026-11-11", []string{"over>m"}},
 		{"overdue", "2026-11-13", []string{"doing>m", "blocked>m", "over>m"}},
 		{"overdue", "", []string{}},
