@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 78039b04ff2d1959
 sage-review-completeness-reviewed: 78039b04ff2d1959
+completed: 2026-11-11
 ---
 
 # Tracker: store settings and labels
@@ -283,3 +284,15 @@ Verification:
     takes the chip off the item, and the activity sentences.
   - The 390px page's horizontal overflow (401px) comes from the mockup's
     own stub row and is the same at the base commit.
+
+#### Edition (ddf65188d) - 2026-11-11
+
+- Review fix: an add or rename flagged only by the fold-order name clash
+  still counts in later events' causal-past checks, because their writers
+  saw it. An item created or edited with the losing label therefore stays
+  applied, and the view drops the lost label from it. Before the fix the
+  whole item write was flagged. Pinned in
+  `TestConcurrentLabelNameKeepsTheFirstInFoldOrder` and the
+  `labels-concurrent-name` golden case, in both engines.
+- Also fixed: the chip tooltip was double-escaped, and the edit picker
+  compared label order rather than the label set.
