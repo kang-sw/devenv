@@ -426,6 +426,9 @@
     "261111-feat-ws-tracker-assignee-edit-and-body-merge": {
       "registered_at": "2026-11-11T06:13:11Z"
     },
+    "261111-feat-ws-tracker-cc-field": {
+      "registered_at": "2026-11-11T06:17:16Z"
+    },
     "261111-feat-ws-tracker-store-settings-and-labels": {
       "registered_at": "2026-11-11T05:22:54Z"
     }
