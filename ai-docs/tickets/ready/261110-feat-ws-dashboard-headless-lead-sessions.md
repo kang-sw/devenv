@@ -173,10 +173,13 @@ and its hooks.
 10. **The spawn entry and form (user, (178) c, (183) a with note, (184) b,
     (188) a; technical, (185), (189)).** Settled from the mockup (session
     scratchpad `headless-spawn-mockup.html`; not kept). The "+ session" at
-    the end of a worktree row (and on a plain-folder workspace bar,
-    `261110-feat-ws-dashboard-workspaces` Decision 3) is the only spawn
-    entry. It shows on every worktree row and plain-folder bar the rail
-    lists, stored or derived from sessions, and does not depend on the
+    the end of a worktree row is the only spawn entry. It shows on every
+    worktree row the rail lists, stored or derived from sessions; a
+    plain-folder workspace bar (`261110-feat-ws-dashboard-workspaces`
+    Decision 3) does not show it, because a lead session key is minted
+    at a Git worktree root and the spawn route refuses any other root
+    (user, (290) a, reversing the earlier plain-folder entry). It does
+    not depend on the
     workspace store (`DaemonOptions.WorkspacesFile`), so a daemon without
     the store can still spawn; a LAN viewer does not see it (Decision 14).
     It opens a popover that shows the target as one read-only line
@@ -193,7 +196,9 @@ and its hooks.
     session" in the rail footer ((188) b), because the picker repeats the
     rail's own list; model and mode folded behind "more" ((183) c) or left
     to the session menu ((183) b); a first-message field ((184) a); building
-    the popover in both tickets.
+    the popover in both tickets; minting lead keys outside Git so a
+    plain folder can spawn ((290) b), since the key-issue rule is a larger
+    wsflow topic left for later.
 11. **Effort is a session option (user, on (183) and the mockup; technical,
     (187)).** It sits beside model and permission mode, in the spawn form
     and in the session header's harness chip menu. It maps to Claude's
@@ -555,7 +560,8 @@ Open after this phase:
 
 ### Phase 2: recovery, idle stop, and telemetry
 
-Scope: MCP recovery by in-stream reconnect with the restart fallback, the
+Scope: hiding the "+ session" entry on plain-folder bars (Decision 10,
+(290) a); MCP recovery by in-stream reconnect with the restart fallback, the
 MCP-broken state, and the header menu's manual restart behind the
 loopback gate (Decisions 5, 14); idle stop (Decision 6); the agents panel
 telemetry and background-task count from the stream (Constraints); the
@@ -577,4 +583,5 @@ background tasks confirm first and show the count; a browser check of the
 typed error rows and badge ring; a live checklist that a broken MCP
 server reconnects in-stream with the same harness PID, and that an
 idle-stopped Claude session resumes on mail, each resumed process still
-running hosted.
+running hosted. A UI test that a plain-folder bar shows no "+ session"
+while a worktree row does.
