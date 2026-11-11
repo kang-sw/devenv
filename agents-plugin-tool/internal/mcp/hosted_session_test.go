@@ -311,6 +311,45 @@ func TestHostedSessionLeavesTheRegistrationToTheDaemon(t *testing.T) {
 	}
 }
 
+// TestPlainCallerLeavesADaemonRegistrationAlone: a command run from a hosted
+// session's shell with the session's key is not the hosted harness, so its
+// server is an ordinary one. It still must not take over the row the daemon
+// wrote for that key: no rewrite, no removal when the key resolves off, no
+// heartbeat, no end mark.
+func TestPlainCallerLeavesADaemonRegistrationAlone(t *testing.T) {
+	dir := dashboardSessionEnv(t)
+	root := dashboardGitRoot(t)
+	s, key, loginRoot := dashboardSessionServer(t, root, true)
+	daemonRow := wsdashboard.Registration{SchemaVersion: 1, ReplyID: wsmailbox.ReplyID(key), Project: loginRoot, Harness: "claude", HeartbeatAt: dashboardStamp(time.Now().Add(-time.Hour)), Hosted: true, HostPID: hostedHarnessPID}
+	if err := wsdashboard.WriteRegistration(dir, daemonRow); err != nil {
+		t.Fatal(err)
+	}
+	// No hosted variables: an ordinary server.
+	s = NewServer(root, "test")
+	s.sessionHarness = "pi"
+	check := func(when string) {
+		t.Helper()
+		got, ok := readRegistration(t, dir, key)
+		if !ok {
+			t.Fatalf("%s: the daemon's registration was removed", when)
+		}
+		if got != daemonRow {
+			t.Fatalf("%s: the daemon's registration was rewritten:\n got %+v\nwant %+v", when, got, daemonRow)
+		}
+	}
+	dashCall(t, s, "todo.list", map[string]any{"session_key": key})
+	check("a keyed call")
+	s.dashboardHeartbeat()
+	check("a heartbeat")
+	if resp := dashCall(t, s, "config.tune", map[string]any{"session_key": key, "key": DashboardEnabledKey, "value": "false", "scope": "session"}); toolIsError(t, resp) {
+		t.Fatalf("config.tune: %s", resp)
+	}
+	dashCall(t, s, "todo.list", map[string]any{"session_key": key})
+	check("the key turned off")
+	s.DashboardEnd()
+	check("the server's end")
+}
+
 // TestHostedSessionNudgesTheDaemonAndNamesItsPage: the daemon registered
 // the session, so its server writes no row, yet a store change still
 // reaches the daemon and whiteboard.update names the page the daemon

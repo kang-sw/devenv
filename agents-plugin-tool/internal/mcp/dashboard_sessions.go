@@ -90,6 +90,11 @@ type dashboardSession struct {
 	// (hostedSessionKey): the daemon registered it, so reg stays zero and
 	// this server never writes its row, yet the daemon serves its page.
 	hosted bool
+	// daemonRow marks a session whose registration the dashboard daemon
+	// wrote (a row with hosted set) while this server is not its hosted
+	// harness: a command run from the hosted session's shell with the
+	// session's key. The row stays the daemon's; this server writes none.
+	daemonRow bool
 	// idle is set once the heartbeat stopped for dashboardIdleCutoff.
 	idle bool
 	// servedPort is the daemon port this session's most recent nudge round
@@ -219,6 +224,15 @@ func (s *Server) dashboardTouch(sessionKey, root string, force bool) {
 	}
 	dir, err := d.stateDir()
 	if err != nil {
+		return
+	}
+	if sess.reg.ReplyID == "" && !sess.daemonRow {
+		// Before this server's first write or removal for the session.
+		if row, err := wsdashboard.ReadRegistration(dir, sess.replyID); err == nil && row.Hosted {
+			sess.daemonRow = true
+		}
+	}
+	if sess.daemonRow {
 		return
 	}
 	if !sess.enabled {
