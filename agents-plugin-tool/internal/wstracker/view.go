@@ -147,6 +147,9 @@ type ItemView struct {
 	Open      *OpenView `json:"open"`
 	Claimable bool      `json:"claimable"`
 	Requests  []string  `json:"requests"`
+	// CC are the CC'd members who are not removed, in the order they came
+	// to be CC'd.
+	CC []string `json:"cc"`
 }
 
 // OpenView is an open item's opening: the item.open event, its writer, and
@@ -337,6 +340,43 @@ type My struct {
 	Team        []Team   `json:"team"`
 	Requests    MyReqs   `json:"requests"`
 	Badge       []string `json:"badge"`
+	Related     Related  `json:"related"`
+	// CCNotices are the changes on the items in Related.CC (and on CC'd
+	// items that closed) written after the viewer was CC'd, in fold order.
+	// They are not in Badge.
+	CCNotices []CCNotice `json:"ccNotices"`
+}
+
+// Related is the "related to me" scope. Both lists leave out hidden items,
+// done items, and items the viewer created or holds a live or pending
+// assignment on. CC: the items the viewer is CC'd on, the latest CC add
+// first. Mentioned: the other items whose shown body or a shown comment
+// (not the viewer's own) mentions the viewer, the newest mention first; a
+// body mention dates from the write that set the shown body, a comment
+// mention from the write that set the comment's shown text. Closed: the
+// done items either list would hold, in fold order.
+type Related struct {
+	CC        []string `json:"cc"`
+	Mentioned []string `json:"mentioned"`
+	Closed    []string `json:"closed"`
+}
+
+// CCNotice is a change on an item the viewer is CC'd on: a status write
+// (item.status, item.close, item.confirm, item.reject, item.reopen) or a
+// comment (comment.add). Key is "cc:" plus Event. To is the assignee the
+// status write names (nil for a comment); Status is item.status's status.
+// None is made for the viewer's own events, for an item the viewer created
+// or holds, or for a comment that mentions the viewer or replies to the
+// viewer's comment, which notify on their own.
+type CCNotice struct {
+	Key    string  `json:"key"`
+	Type   string  `json:"type"`
+	Item   string  `json:"item"`
+	Event  string  `json:"event"`
+	By     string  `json:"by"`
+	To     *string `json:"to"`
+	Status *string `json:"status"`
+	TS     string  `json:"ts"`
 }
 
 // MyReqs are the pending take requests on shown items, in fold order:
@@ -710,7 +750,12 @@ func (r *replayed) view(stream string, now time.Time, staleDays int) *View {
 			Counted: r.counted(it, status[id]), Children: []string{}, Assignments: orEmpty(recIDs), Pending: orEmpty(pend),
 			Thread: orEmpty(threads[id]), Depth: len(chain) - 1,
 			Mentions: append([]string{}, it.mentions...), Attachments: attachmentViews(it.attachments),
-			Refs: append([]string{}, it.refs...), Backrefs: orEmpty(backrefs[id]), Requests: []string{}}
+			Refs: append([]string{}, it.refs...), Backrefs: orEmpty(backrefs[id]), Requests: []string{}, CC: []string{}}
+		for _, e := range it.cc {
+			if S.liveMember(e.member) {
+				iv.CC = append(iv.CC, e.member)
+			}
+		}
 		if o := S.activeOpen(it); o != nil {
 			iv.Open = &OpenView{ID: o.node.id, By: o.by, Scope: o.scope, TS: ts(o.node.ts)}
 			iv.Claimable = !it.hidden && S.liveFallback(id).to != v && S.inScope(o, v)
@@ -1154,7 +1199,136 @@ func (r *replayed) viewerLists(vw *View, A []*Assignment, v string, children map
 	byUrgency(pendingToMe)
 	my.Today = Today{Work: ids(work), Pending: ids(pendingToMe), Confirms: ids(confirms)}
 	my.Received = Received{Pending: ids(pendingToMe), Answered: ids(answered), Sent: ids(sent)}
+	my.Related, my.CCNotices = r.related(vw, v)
 	vw.My = my
+}
+
+// related derives the viewer's Related lists and CC notices.
+func (r *replayed) related(vw *View, v string) (Related, []CCNotice) {
+	S := r.S
+	rel := Related{CC: []string{}, Mentioned: []string{}, Closed: []string{}}
+	notices := []CCNotice{}
+	// involved: the viewer created the item or holds a live or pending
+	// record on it; those items show in the viewer's own scopes.
+	involved := func(it *item) bool {
+		if it.author == v {
+			return true
+		}
+		for _, x := range S.recsOn(it.id) {
+			if x.to == v && (x.state == "live" || x.state == "pending") {
+				return true
+			}
+		}
+		return false
+	}
+	shown := func(it *item) bool { return !it.hidden && !involved(it) }
+	done := func(id string) bool { st := vw.Items[id].Status; return st != nil && *st == "done" }
+	ccOf := func(it *item) *ccEntry {
+		for i := range it.cc {
+			if it.cc[i].member == v {
+				return &it.cc[i]
+			}
+		}
+		return nil
+	}
+	// written is the event that set a register's shown value, else first.
+	written := func(key string, first *node) *node {
+		if len(S.reg[key]) > 0 {
+			return S.regWinner(key)
+		}
+		return first
+	}
+	type dated struct {
+		id string
+		at time.Time
+	}
+	var cc, men []dated
+	for _, id := range S.iorder {
+		it := S.items[id]
+		if !shown(it) {
+			continue
+		}
+		if e := ccOf(it); e != nil {
+			if done(id) {
+				rel.Closed = append(rel.Closed, id)
+			} else {
+				cc = append(cc, dated{id, e.since.ts})
+			}
+			continue
+		}
+		var at time.Time
+		found := false
+		if contains(it.mentions, v) {
+			at, found = written("it:"+id+":body", it.node).ts, true
+		}
+		for _, cid := range S.corder {
+			q := S.comments[cid]
+			if q.item != id || q.hidden || q.author == v || !contains(q.mentions, v) {
+				continue
+			}
+			if t := written("cm:"+cid, r.byID[cid]).ts; !found || t.After(at) {
+				at, found = t, true
+			}
+		}
+		if !found {
+			continue
+		}
+		if done(id) {
+			rel.Closed = append(rel.Closed, id)
+		} else {
+			men = append(men, dated{id, at})
+		}
+	}
+	for _, l := range []*[]dated{&cc, &men} {
+		x := *l
+		sort.SliceStable(x, func(i, j int) bool { return x[i].at.After(x[j].at) })
+	}
+	for _, d := range cc {
+		rel.CC = append(rel.CC, d.id)
+	}
+	for _, d := range men {
+		rel.Mentioned = append(rel.Mentioned, d.id)
+	}
+
+	for _, n := range r.order {
+		if n.status != "applied" || n.member == v {
+			continue
+		}
+		switch n.typ {
+		case TypeItemStatus, TypeItemClose, TypeItemConfirm, TypeItemReject, TypeItemReopen, TypeCommentAdd:
+		default:
+			continue
+		}
+		it := S.items[n.p.str("item")]
+		if it == nil || !shown(it) {
+			continue
+		}
+		e := ccOf(it)
+		if e == nil || n.pos <= e.since.pos {
+			continue
+		}
+		nt := CCNotice{Key: "cc:" + n.id, Type: n.typ, Item: it.id, Event: n.id, By: n.member, TS: ts(n.ts)}
+		if n.typ == TypeCommentAdd {
+			q := S.comments[n.id]
+			if q == nil || q.hidden || contains(q.mentions, v) {
+				continue
+			}
+			if to := S.comments[q.replyTo]; to != nil && to.author == v {
+				continue
+			}
+		} else {
+			who := n.member
+			if n.typ != TypeItemStatus && n.typ != TypeItemClose && n.p.truthy("assignee") {
+				who = n.p.str("assignee")
+			}
+			nt.To = &who
+			if n.typ == TypeItemStatus {
+				nt.Status = nz(n.p.str("status"))
+			}
+		}
+		notices = append(notices, nt)
+	}
+	return rel, notices
 }
 
 func deref(s *string) string {

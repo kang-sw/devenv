@@ -63,8 +63,9 @@ type Activity struct {
 // settled is false while the event's verdict may still change to applied
 // (it is waiting, or this clone does not hold it): it then has no activity
 // yet. A flagged event is settled with none. Only item.* events other than
-// item.create, and comment.add, have activity: item.open, item.unopen, and
-// item.unrequest have none.
+// item.create, and comment.add, have activity: item.open, item.unopen,
+// item.unrequest, item.cc, and item.uncc have none. A CC'd member is not in
+// Concerns; the view's My.CCNotices tell them.
 func (t *Tracker) Activity(id wsledger.EventID) (acts []Activity, settled bool) {
 	t.Refresh()
 	r := t.r

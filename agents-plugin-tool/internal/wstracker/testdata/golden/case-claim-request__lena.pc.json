@@ -920,7 +920,8 @@
     "claimable": false,
     "requests": [
      "omar.pc#1"
-    ]
+    ],
+    "cc": []
    },
    "ada.pc#3": {
     "id": "ada.pc#3",
@@ -975,7 +976,8 @@
     "claimable": false,
     "requests": [
      "lena.pc#1"
-    ]
+    ],
+    "cc": []
    },
    "ada.pc#5": {
     "id": "ada.pc#5",
@@ -1031,7 +1033,8 @@
     "claimable": false,
     "requests": [
      "raj.pc#2"
-    ]
+    ],
+    "cc": []
    },
    "ada.pc#7": {
     "id": "ada.pc#7",
@@ -1087,7 +1090,8 @@
     "claimable": false,
     "requests": [
      "omar.pc#2"
-    ]
+    ],
+    "cc": []
    },
    "ada.pc#9": {
     "id": "ada.pc#9",
@@ -1141,7 +1145,8 @@
     "claimable": false,
     "requests": [
      "bo.pc#3"
-    ]
+    ],
+    "cc": []
    },
    "ada.pc#11": {
     "id": "ada.pc#11",
@@ -1200,7 +1205,8 @@
      "maya.pc#2",
      "lena.pc#2",
      "sven.pc#3"
-    ]
+    ],
+    "cc": []
    }
   },
   "itemOrder": [
@@ -2824,7 +2830,13 @@
     "incoming": [],
     "outgoing": []
    },
-   "badge": []
+   "badge": [],
+   "related": {
+    "cc": [],
+    "mentioned": [],
+    "closed": []
+   },
+   "ccNotices": []
   },
   "stats": {
    "events": 37,

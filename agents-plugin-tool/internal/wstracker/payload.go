@@ -166,6 +166,22 @@ const (
 	ScopeStore = "store"
 )
 
+// CC: any member adds any store member to an item's CC list, and anyone
+// removes one. A CC'd member keeps tracking the item (the viewer's related
+// lists and CC notices) with no status, accept, or completion; item.assign
+// stays the creator's.
+const (
+	TypeItemCC   = "item.cc"
+	TypeItemUncc = "item.uncc"
+)
+
+// ItemCC is the payload of item.cc and item.uncc: Member is the member
+// added to or removed from Item's CC list.
+type ItemCC struct {
+	Item   string `json:"item"`
+	Member string `json:"member"`
+}
+
 // ItemOpen is the payload of item.open. item.unopen and item.claim take an
 // ItemRef with Item only.
 type ItemOpen struct {

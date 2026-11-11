@@ -127,7 +127,19 @@ type item struct {
 	refs               []string
 	labels             labelSet // label ids as written; the view drops removed ones
 	open               *opening // the latest item.open; active while its ended is nil
+	cc                 []ccEntry // the CC'd members, in the order they came to be CC'd
 }
+
+// ccEntry is one CC'd member of an item; since is the add whose register
+// write made the member CC'd (a repeated add moves nothing).
+type ccEntry struct {
+	member string
+	since  *node
+}
+
+// ccVal is a CC register value (one register per item and member): true
+// while the member is CC'd. Its own type so a marker shows it as a CC.
+type ccVal bool
 
 // opening is an item.open: the creator (or the admin standing in for a
 // removed one) opens a task nobody else holds to a scope, team (the
@@ -955,6 +967,11 @@ func show(v any) string {
 			out[i] = alias(id)
 		}
 		return strings.Join(out, ", ")
+	case ccVal:
+		if x {
+			return "CC'd"
+		}
+		return "not CC'd"
 	case statusVal:
 		if x.note != "" {
 			return x.status + ` ("` + x.note + `")`
@@ -1333,6 +1350,8 @@ func (s *state) apply(n *node) {
 		}
 	case TypeItemMove:
 		s.applyMove(n)
+	case TypeItemCC, TypeItemUncc:
+		s.applyCC(n)
 	case TypeItemAssign:
 		s.applyAssign(n)
 	case TypeItemHandoff:
@@ -1706,6 +1725,31 @@ func (s *state) applyMove(n *node) {
 			mark(n, r.ended, "subtask", f, r.ended.id, "", "")
 			mark(r.ended, n, "subtask", f, r.ended.id, "", "")
 		}
+	}
+}
+
+// applyCC folds an item.cc or item.uncc: one register per item and member,
+// so a concurrent add and remove of one member fold by the register winner.
+// The member joins the item's CC list when the shown value turns on, since
+// the winning add, and leaves it when the value turns off.
+func (s *state) applyCC(n *node) {
+	it, m := s.items[n.p.str("item")], n.p.str("member")
+	if it == nil || m == "" {
+		return
+	}
+	key := "cc:" + it.id + ":" + m
+	on := bool(s.write(key, "CC of "+m+" on "+it.alias, n, ccVal(n.typ == TypeItemCC)).(ccVal))
+	at := -1
+	for i, e := range it.cc {
+		if e.member == m {
+			at = i
+		}
+	}
+	switch {
+	case on && at < 0:
+		it.cc = append(it.cc, ccEntry{member: m, since: s.regWinner(key)})
+	case !on && at >= 0:
+		it.cc = append(it.cc[:at:at], it.cc[at+1:]...)
 	}
 }
 

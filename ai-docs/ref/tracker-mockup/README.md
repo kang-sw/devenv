@@ -540,6 +540,7 @@ attachment the store accepts, in bytes (339); without it the limit is 10 MiB
 | `item.request` | `item`, `assignee`, `note?` | Any member other than `assignee` asks for the live, non-fallback assignment `assignee` holds; flagged when the requester already holds a live or pending record on the item, already has a pending request for it, or the assignment is done. The request id is the event id. |
 | `item.approve` / `item.deny` | `item`, `request`, `note?` | The named assignment's holder or the item's creator answers a pending request. An approval ends the assignment as `handed` and gives the requester a live record `<approve event>><requester>` with its assigner, completion, status, and note (`handoffOf` the old record, so a return restores the holder); a requester already holding a record by then gets none. |
 | `item.unrequest` | `item`, `request` | The requester withdraws a pending request. |
+| `item.cc` / `item.uncc` | `item`, `member` | Any member adds `member` to the item's CC list or removes them, whoever may edit the item; a CC grants no status, accept, or completion, and `item.assign` stays the creator's. `cc` needs a member who is not removed; `uncc` also takes a removed one. Adding a member already CC'd, or removing one who is not, is a no-op. One register per item and member, so a concurrent add and remove fold by (203). Flagged on a hidden item. |
 | `comment.add` | `item`, `body`, `reply_to?`, `mentions?`, `attachments?`, `refs?` | Anyone in the store. `reply_to` is one comment in the same thread (flat timeline, quote reply). |
 | `comment.edit` / `comment.hide` | `comment`, `body`, `mentions?`, `attachments?`, `refs?` (edit) | Comment author only. Hide is a tombstone. |
 | `member.profile` | `profile` (any of `org`, `family`, `given`: strings), `member?` | (392 b) The author's own profile, or with `member` another member's: only an admin may write that, anyone else's write is flagged. Each field present is its own register, so concurrent changes merge by (203), and a write only carries the fields it changes. `given` is required and non-empty whenever it is present; a profile with an unknown or non-string field, or with none of the three, is flagged. The member must exist and not be removed. Shows in Activity with the writer, the admin when an admin made it. |
@@ -667,6 +668,24 @@ forced (author, or someone the author reaches) starts live
   ends first. The view lists requests in `requests` and per item, and
   `my.requests` holds the viewer's pending incoming (they may answer) and
   outgoing ones; each incoming one is a badge entry `q:<request>`.
+- **CC and the related scope.** An item's `cc` lists its CC'd members who
+  are not removed, in the order they came to be CC'd. `my.related` is the
+  viewer's "related to me" scope; both lists leave out hidden and done items
+  and items the viewer created or holds a live or pending assignment on.
+  `cc` holds the items the viewer is CC'd on, the latest CC add first (a
+  repeated add moves nothing). `mentioned` holds the other items whose shown
+  body or a shown comment by someone else mentions the viewer, the newest
+  mention first: a body mention dates from the write that set the shown
+  body, a comment mention from the write that set the comment's shown text.
+  `closed` holds the done items either list would hold, in fold order.
+  `my.ccNotices` are the status writes (`item.status`, `item.close`,
+  `item.confirm`, `item.reject`, `item.reopen`) and comments on an item the
+  viewer is CC'd on, written after the viewer was CC'd, in fold order; none
+  for the viewer's own events, an item the viewer created or holds, or a
+  comment that mentions the viewer or replies to the viewer's comment
+  (those notify on their own). Body edits and assignment changes make none,
+  and CC notices are not in the badge. `to` is the assignee the status
+  write names, `null` for a comment; `status` is `item.status`'s status.
 
 ```text
 rule rooted at the author or below:  live at once --unassign root / all--> ended
@@ -735,7 +754,8 @@ items        { id: { id, alias, kind, title, body, project, due, priority, prior
                      assignments[], pending[], thread[eventId], concurrent, depth, chain[],
                      mentions[memberId], attachments[{oid, name, size, mime}],
                      refs[itemId], backrefs[itemId|commentId],
-                     open{id, by, scope, ts} (null unless open), claimable, requests[requestId] } }
+                     open{id, by, scope, ts} (null unless open), claimable, requests[requestId],
+                     cc[memberId] } }
 itemOrder[]  item ids in tree order, siblings by their after anchors
 assignments  { id: { id, item, to, by, sender, completion, state, forced, status, note, noteBy, via, ts,
                      inherited, ruleLevels, rule, ruleRequest, handoffOf, handoffFrom, handoffNote, answerNote,
@@ -757,7 +777,9 @@ notices[]    { key, kind (accepted|handoff|done|blocked|declined|returned), assi
 my           { assignments[], today{work[], pending[], confirms[]}, received{pending[], answered[], sent[]},
                given[itemId], created[itemId], team[{id, depth, outside, open[], pending[], waiting[],
                counts{status: n}, load, stale, overdue, fallback, last}],
-               requests{incoming[], outgoing[]}, badge[key] }
+               requests{incoming[], outgoing[]}, badge[key],
+               related{cc[itemId], mentioned[itemId], closed[itemId]},
+               ccNotices[{key (cc:<event>), type, item, event, by, to, status, ts}] }
 stats        { events, commits, flagged, concurrent }
 heads        { stream: seq }   the seen a write would carry now
 store        { name, label, remote }
