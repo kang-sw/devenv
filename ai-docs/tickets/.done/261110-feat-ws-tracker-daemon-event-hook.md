@@ -233,3 +233,17 @@ delivered outside a catch-up. This is the accepted edge, and it also reaches
 the mine scope. (2) A popstate-only item-link concern; the `hashchange`
 handler already routes it. (3) No runner-level timeout case; the runner
 treats every exec error alike, and the exec-level test covers the kill.
+
+#### Edition (706c4631d) - 2026-11-11
+
+After merging develop (self-assign claim, 3284c1eee), the Constraint's claim
+coverage was wired into `wstracker.Activity`. `item.request` is a new
+kind, `take_request`, whose target is the holder and which concerns the
+holder and the creator. `item.deny` is a new kind, `take_denied`, whose
+target and concern is the requester. A claim's or approval's new record
+stays `assigned` for its taker and also concerns the opener the claim takes
+from or the holder the approval takes from. `item.open`, `item.unopen`,
+and `item.unrequest` produce no activity. The playbook's kind list was
+updated and the copies synced. The remote test set (wstracker,
+wstrackerhost, wstrackerhook, execjob, cmd/ws-mcp, wsdashboard, wsrsrc,
+mcp) passed, and gen-golden.js reproduced the goldens unchanged.
