@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 0b644c193327ddc7
 sage-review-completeness-reviewed: 0b644c193327ddc7
+completed: 2026-11-11
 ---
 
 # Whiteboard topic recap
@@ -172,3 +173,55 @@ Verification:
   `closed: true`.
 - A browser check on the dashboard: a recap with inline markup and an image
   at the top of a topic, its relative time, and the closed-topic fold.
+
+### Result (b4df8f6cc) - 2026-11-11
+
+Landed `wb:recap`, a Leaf command in the `wb:topic` group. It is stored raw
+and trimmed. An empty or blank recap clears it, and resending the same recap
+is no change.
+
+- **Store and timing.** The body and the recap are independent parts of the
+  topic entry, each with its own change mark and time
+  (`Changed`/`ChangedAt` for the body, `RecapChanged`/`RecapAt` for the
+  recap). `TopicDoc.Recency()` takes the larger of the two. Page order, the
+  topic's update time, query `last change`, and the stale-topic nudge all use
+  it.
+- **Changes versus clears.** Changing a recap reopens a closed topic.
+  Clearing a recap or a body neither reopens the topic nor bumps its recency.
+  That mirrors the existing body clear, so Decision 7 applies to set and
+  replace only.
+- **Batch revert.** A body set back to its starting text within one batch
+  restores only the body's fields, so a recap earlier in that batch still
+  stands.
+- **Page.** The recap line sits at the top of the card, rendered through
+  itemField (sanitized block markdown) with `contain: paint`. Its time is on
+  the right in the topic-bar notation: relative on the full page, local HH:MM
+  on the embed, with the absolute local time as the hover title. A closed
+  topic folds the recap into the `tdoc` fold above the body, and a closed
+  topic that has only a recap gets a fold of its own. `cards.js` `topicAt`
+  now reads `.tbar time.tago[data-at]` only.
+- **Query.** It prints `recap (changed: <time>): ...` after the topic line
+  at every depth, including for closed topics listed with `closed: true`.
+- **Playbook.** All three `whiteboard.md` copies gain the command row, the
+  group lists, a recap bullet with the keep-it-current guidance, and the
+  close/query wording. The copies are byte-identical, and each manifest
+  carries the sha256.
+
+Verification:
+- New `recap_test.go` tests cover the store, render, regions, and query
+  behaviour, and the existing tests were updated for the new close-refusal
+  text and command list.
+- Run remotely through ws-rgo, all ok: `go test` for wswhiteboard,
+  wsdashboard, wsrsrc, mcp, and wsi18n, and `go vet` for wswhiteboard. The
+  wsflow package tests (20) are ok, and `node --check cards.js` passes.
+- Headless chrome-headless-shell renders checked the whiteboard page itself:
+  full layout, embed, dark mode, and the closed fold opened. They show a
+  recap with bold, code, an image, a second line, and relative times.
+- Not done: a check on the live dashboard. A local Go build is not allowed,
+  and the installed binary predates this change. The dashboard board region
+  uses the same templates and CSS (`RenderRegions`), and the regions test
+  pins the recap's position outside the body frame.
+- Lite review: no Critical or Important findings. Minor findings left
+  unfixed: a same-batch recap round-trip on a closed topic still reopens it
+  (the body already behaves the same way), the `topicAt` selector change has
+  no JS test, and there was no dashboard-specific browser render.
