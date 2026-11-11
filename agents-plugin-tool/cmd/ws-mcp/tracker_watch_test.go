@@ -85,3 +85,11 @@ func TestLateFuncBindsAfterConstruction(t *testing.T) {
 		t.Fatalf("bound function ran %d times, want 2", n)
 	}
 }
+
+// TestStartTrackerHooksWithoutAHost: a host that could not be created runs
+// no hooks, and nudge and stop are safe.
+func TestStartTrackerHooksWithoutAHost(t *testing.T) {
+	nudge, stop := startTrackerHooks(nil, context.Canceled, t.TempDir(), 7000, nil)
+	nudge()
+	stop()
+}
