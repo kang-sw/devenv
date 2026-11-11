@@ -206,8 +206,9 @@
 
   // --- motion: a bar turning into a capsule and back --------------------------
   // At the top, when the current topic's card scrolls past, its bar (pushed
-  // up over the top stack by the card's end: a stuck bar draws above the
-  // stack) turns into the stack's near capsule: a copy of the bar shrinks
+  // up under the top stack by the card's end: a stuck bar draws below the
+  // stack, so a short topic never covers the capsules) turns into the
+  // stack's near capsule: a copy of the bar, drawn over the stack, shrinks
   // from where the bar is to the capsule's box, its details fading and
   // sliding out and its title shrinking to the capsule's size, while the
   // capsule fades in under it. Scrolling back, a copy of the capsule grows

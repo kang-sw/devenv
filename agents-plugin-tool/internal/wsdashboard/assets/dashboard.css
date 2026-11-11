@@ -485,7 +485,7 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
    overflow, so it is no scroll container. A maximized card's header stays
    in its sheet. */
 .wb-rail .bcard:not([data-max]) .bc-hd { position: sticky; top: var(--wb-rail-top, 0px); z-index: 1; background: var(--wb-card); border-radius: var(--wb-radius) var(--wb-radius) 0 0; }
-.wb-rail .bcard:not([data-max]) .bc-hd.wb-stuck { box-shadow: var(--wb-shadow); z-index: 3; }
+.wb-rail .bcard:not([data-max]) .bc-hd.wb-stuck { box-shadow: var(--wb-shadow); }
 .bc-hd { display: flex; align-items: center; gap: 7px; padding: 4px 6px 4px 12px; min-height: 32px; font-size: 12.5px; min-width: 0; }
 .bc-hd:hover .ibtn { opacity: .9; }
 .bc-ic { flex: none; color: var(--wb-muted-fg); display: inline-flex; }
