@@ -5,8 +5,10 @@ related:
   261110-feat-ws-tracker-idea-status-and-assignment-invariant: "the creator-fallback hold this ticket's claim ends (Decisions 2 and 7)"
   261110-feat-ws-tracker-workload-balance-view: "may show claim records, under the epic's org-tree visibility"
   261110-feat-ws-tracker-daemon-event-hook: "a claim or take request is an event the hook may deliver"
-sage-review-design: required
-sage-review-completeness: required
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: 1399950f881604c3
+sage-review-completeness-reviewed: 1399950f881604c3
 ---
 
 # Tracker: self-assign claim and take request
@@ -54,11 +56,24 @@ today to take either kind of work themselves.
    `item.assign`).
    Rejected: the current assignee only ((256) a); the creator only
    ((256) b).
+   Any store member except the holder of the named assignment may file a
+   take request (user, (286) a); a member who already holds a live or
+   pending record on the item has nothing to take and is rejected, as
+   `item.handoff`'s target check does. A request takes effect only through
+   an approval, so an open filing leaks no authority, and a team-scoped
+   filing would block the "I want that team's work" signal the incentive
+   angle exists for; unwanted requests are declined or withdrawn.
+   Rejected: members of the creator's org subtree only ((286) b); members
+   under the holder's org superior only ((286) c).
 5. **Approval moves the assignment (announced, (257)).** The current
    assignee's assignment ends and the requester's starts; nothing is kept
    alongside, per Decision 1's "approved before the assignment moves". The
    requester's new record starts live and inherits status and note as an
-   accepted handoff does (technical, review-raised).
+   accepted handoff does (technical, review-raised). When the requester
+   already holds a live or pending record on the item by the time the
+   approval folds (a concurrent or earlier creator assign), the approval
+   still ends the named assignment and adds no second record for the
+   requester (technical, review-raised).
 6. **Finding opened items (technical, (258)).** An opened item shows an
    "open" chip on its row, and the Items filter and `tracker.query` gain a
    claimable condition. The balance view shows nothing extra in this ticket.
@@ -175,7 +190,10 @@ Verification:
   fallback hold ends; an out-of-scope member's claim and a claim on an item
   not opened are rejected; only the creator opens; a take request approved
   by the creator or by the current assignee moves the assignment and ends
-  the old one; a request from or approved by anyone else is rejected.
+  the old one; a request approved by anyone else is rejected; any store
+  member may file a request, except the named assignment's holder and a
+  member already holding a live or pending record on the item, whose
+  requests are rejected.
 - Lifecycle tests: the creator withdraws an opening; an opening ends on
   claim and on assign; a handoff of an opened item is rejected; a request lapses when its assignment ends; the
   holder and the creator decline and the requester withdraws a request; a
