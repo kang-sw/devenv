@@ -191,67 +191,91 @@
     host.style.setProperty("--wb-rail-bot", (down.length ? wraps.bot.firstChild.offsetHeight - replyOff : 0) + "px");
     curTopic = s && s.cur >= 0 ? topics[s.cur] : null;
     if (pre) after(pre);
+    drawn = !!s;
   }
 
   // --- motion: a bar turning into a capsule and back --------------------------
-  // When the current topic's card scrolls past, its bar (pushed up over the
-  // top stack by the card's end: a stuck bar draws above the stack) turns
-  // into the stack's near capsule: a copy of the bar shrinks from where the
-  // bar is to the capsule's box, its details fading and sliding out and its
-  // title shrinking to the capsule's size, while the capsule fades in under
-  // it. Scrolling back, a copy of the capsule grows into the bar's box and
-  // fades while the bar fades in. Capsules that stay in the stack slide from
-  // their old slot to their new one. The copies stand in the top wrapper,
-  // out of flow, so nothing below moves; every animation fills nothing.
-  // None of it runs under reduced motion.
-  var DUR = 180, EASE = "ease-out", curTopic = null, ghostEl = null;
+  // At the top, when the current topic's card scrolls past, its bar (pushed
+  // up over the top stack by the card's end: a stuck bar draws above the
+  // stack) turns into the stack's near capsule: a copy of the bar shrinks
+  // from where the bar is to the capsule's box, its details fading and
+  // sliding out and its title shrinking to the capsule's size, while the
+  // capsule fades in under it. Scrolling back, a copy of the capsule grows
+  // into the bar's box and fades while the bar fades in. The bottom edge
+  // mirrors it: when the bottom stack's near capsule's topic scrolls into
+  // view above the stack, a copy of the capsule grows into its bar, and
+  // when a shown bar sinks behind the stack it shrinks into the near
+  // capsule. Capsules that stay in a stack slide from their old slot to
+  // their new one. The copies stand in their edge's wrapper, out of flow,
+  // so nothing below moves; every animation fills nothing. None of it runs
+  // under reduced motion, on a run's first draw (a load or a board swap),
+  // or on the first draw after the board was hidden.
+  var DUR = 180, EASE = "ease-out", curTopic = null, drawn = false, ghosts = { top: null, bot: null };
   function motion() { return !!d.body.animate && !(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches); }
-  function topBtns() { return [slots.top.far, slots.top.near]; }
+  function btns(edge) { return [slots[edge].far, slots[edge].near]; }
+  function shown(b) { return !b.hidden && b.wbTopic ? b.wbTopic : null; }
+  function seen(r) { return r.height > 0 && r.bottom > viewTop() && r.top < (root ? root.getBoundingClientRect().bottom : window.innerHeight); }
+  function barGhost(t, visible) {
+    var tb = t && barOf(t), r = tb && tb.getBoundingClientRect();
+    return tb && (!visible || seen(r)) ? { kind: "bar", t: t, src: tb, copy: tb.cloneNode(true), r: r } : null;
+  }
+  function capGhost(b) { return { kind: "cap", t: b.wbTopic, src: b, copy: b.cloneNode(true), r: b.getBoundingClientRect() }; }
   // before reads, ahead of a redraw, what the motion starts from: the
-  // shown top capsules' boxes by topic, and the bar or the capsule that is
-  // about to turn into the other.
+  // shown capsules' boxes by edge and topic, and per edge the bar or the
+  // capsule that is about to turn into the other.
   function before(s) {
-    var now = s && s.cur >= 0 ? topics[s.cur] : null, near = slots.top.near.hidden ? null : slots.top.near.wbTopic;
-    var p = { caps: [], prev: curTopic, now: now, ghost: null };
-    topBtns().forEach(function (b) { if (!b.hidden && b.wbTopic) p.caps.push({ t: b.wbTopic, r: b.getBoundingClientRect() }); });
-    if (curTopic && curTopic !== now && s && topics[s.up[0]] === curTopic) {
-      var tb = barOf(curTopic);
-      if (tb) p.ghost = { kind: "bar", src: tb, copy: tb.cloneNode(true), r: tb.getBoundingClientRect() };
-    } else if (now && now === near && now !== curTopic) {
-      p.ghost = { kind: "cap", src: slots.top.near, copy: slots.top.near.cloneNode(true), r: slots.top.near.getBoundingClientRect() };
-    }
+    var now = s && s.cur >= 0 ? topics[s.cur] : null;
+    var p = { caps: [], top: null, bot: null };
+    ["top", "bot"].forEach(function (e) { btns(e).forEach(function (b) { if (shown(b)) p.caps.push({ e: e, t: b.wbTopic, r: b.getBoundingClientRect() }); }); });
+    if (!drawn || !s) return p;
+    var near = shown(slots.top.near);
+    if (curTopic && curTopic !== now && topics[s.up[0]] === curTopic) p.top = barGhost(curTopic, false);
+    else if (now && now === near && now !== curTopic) p.top = capGhost(slots.top.near);
+    // Bottom: the near capsule's topic leaves the stack (its bar now shows
+    // above it), or a topic not in the stack becomes its near capsule
+    // while its bar is still in view.
+    var bnear = shown(slots.bot.near), next = topics[s.down[0]] || null;
+    if (bnear && !s.down.some(function (i) { return topics[i] === bnear; })) p.bot = capGhost(slots.bot.near);
+    else if (next && btns("bot").map(shown).indexOf(next) < 0) p.bot = barGhost(next, true);
     return p;
   }
   function after(p) {
-    topBtns().forEach(function (b) {
-      if (b.hidden || !b.wbTopic || (p.ghost && p.ghost.kind === "bar" && b.wbTopic === p.prev)) return;
-      for (var i = 0; i < p.caps.length; i++) {
-        if (p.caps[i].t !== b.wbTopic) continue;
-        var dy = p.caps[i].r.top - b.getBoundingClientRect().top;
-        if (Math.abs(dy) >= 1) b.animate([{ transform: "translateY(" + dy + "px)" }, { transform: "none" }], { duration: DUR, easing: EASE });
+    ["top", "bot"].forEach(function (e) {
+      var g = p[e];
+      btns(e).forEach(function (b) {
+        if (!shown(b) || (g && g.kind === "bar" && b.wbTopic === g.t)) return;
+        for (var i = 0; i < p.caps.length; i++) {
+          if (p.caps[i].e !== e || p.caps[i].t !== b.wbTopic) continue;
+          var dy = p.caps[i].r.top - b.getBoundingClientRect().top;
+          if (Math.abs(dy) >= 1) b.animate([{ transform: "translateY(" + dy + "px)" }, { transform: "none" }], { duration: DUR, easing: EASE });
+          return;
+        }
+      });
+      if (!g) return;
+      if (g.kind === "bar") {
+        if (shown(slots[e].near) === g.t) morph(g, slots[e].near, e);
         return;
       }
+      // A capsule grows into the bar of the topic it stood for: at the top
+      // the topic that became current, at the bottom one that left the
+      // stack and shows.
+      var tb = barOf(g.t);
+      if (!tb || (e === "top" ? g.t !== curTopic : btns("bot").map(shown).indexOf(g.t) >= 0 || !seen(tb.getBoundingClientRect()))) return;
+      morph(g, tb, e);
     });
-    var g = p.ghost;
-    if (!g) return;
-    if (g.kind === "bar") {
-      var cap = slots.top.near;
-      if (cap.hidden || cap.wbTopic !== p.prev) return;
-      morph(g, cap, cap.getBoundingClientRect());
-    } else {
-      var tb = barOf(p.now);
-      if (tb) morph(g, tb, tb.getBoundingClientRect());
-    }
   }
-  function dropGhost() {
-    if (ghostEl && ghostEl.parentNode) ghostEl.parentNode.removeChild(ghostEl);
-    ghostEl = null;
+  function dropGhost(edge) {
+    (edge ? [edge] : ["top", "bot"]).forEach(function (e) {
+      var el = ghosts[e];
+      if (el && el.parentNode) el.parentNode.removeChild(el);
+      ghosts[e] = null;
+    });
   }
-  // morph animates the copy g.copy from g.r to the box to, the element
-  // into fading in under it.
-  function morph(g, into, to) {
-    dropGhost();
-    var w = wraps.top.getBoundingClientRect(), from = g.r, bar = g.kind === "bar";
+  // morph animates the copy g.copy in edge's wrapper from g.r to into's
+  // box, into fading in under it.
+  function morph(g, into, edge) {
+    dropGhost(edge);
+    var wrap = wraps[edge], w = wrap.getBoundingClientRect(), from = g.r, to = into.getBoundingClientRect(), bar = g.kind === "bar";
     var el = g.copy, cs = getComputedStyle(g.src);
     el.className += " wb-rail-ghost";
     el.hidden = false;
@@ -260,19 +284,20 @@
     el.style.margin = "0";
     el.style.background = cs.backgroundColor;
     el.style.color = cs.color;
-    wraps.top.appendChild(el);
-    ghostEl = el;
+    wrap.appendChild(el);
+    ghosts[edge] = el;
     function box(r, radius) { return { left: r.left - w.left + "px", top: r.top - w.top + "px", width: r.width + "px", height: r.height + "px", borderRadius: radius }; }
     var a = box(from, bar ? cs.borderRadius : from.height / 2 + "px"), b = box(to, bar ? to.height / 2 + "px" : getComputedStyle(into).borderRadius);
     a.opacity = 1;
     b.opacity = 0;
-    el.animate([a, b], { duration: DUR, easing: EASE }).onfinish = function () { if (ghostEl === el) dropGhost(); };
+    el.animate([a, b], { duration: DUR, easing: EASE }).onfinish = function () { if (ghosts[edge] === el) dropGhost(edge); };
     into.animate([{ opacity: 0 }, { opacity: 1 }], { duration: DUR, easing: EASE });
     if (!bar) return;
-    // The bar's details fade and slide out; its title (and an item's icon)
-    // stays, the title shrinking to the capsule's type size.
+    // The bar's details fade and slide out toward its stack; its title (and
+    // an item's icon) stays, the title shrinking to the capsule's type size.
+    var out = edge === "top" ? "translateY(-4px)" : "translateY(4px)";
     Array.prototype.forEach.call(el.children, function (c) {
-      if (!c.classList.contains("tlead") && !c.hasAttribute("data-rail-name") && !c.hasAttribute("data-rail-icon")) c.animate([{ opacity: 1, transform: "none" }, { opacity: 0, transform: "translateY(-4px)" }], { duration: DUR * 0.6, easing: EASE, fill: "forwards" });
+      if (!c.classList.contains("tlead") && !c.hasAttribute("data-rail-name") && !c.hasAttribute("data-rail-icon")) c.animate([{ opacity: 1, transform: "none" }, { opacity: 0, transform: out }], { duration: DUR * 0.6, easing: EASE, fill: "forwards" });
     });
     var TN = ".tname, [data-rail-name]", tn = el.querySelector(TN), sn = g.src.querySelector(TN), cn = into.querySelector(".cn");
     if (tn && sn && cn) tn.animate([{ fontSize: getComputedStyle(sn).fontSize }, { fontSize: getComputedStyle(cn).fontSize }], { duration: DUR, easing: EASE, fill: "forwards" });

@@ -986,11 +986,13 @@ func TestTopicRailIsOnTheFullPageOnly(t *testing.T) {
 }
 
 // TestTopicRailBarCapsuleMotion pins the rail's bar-to-capsule motion
-// (rail.js morph): it runs only without reduced motion, reads its starting
-// boxes before a redraw and animates after it, a stuck bar draws above the
-// top capsule stack so the card's end pushes it over the stack, the copy
-// that morphs stands out of flow in the top wrapper, and the rail's
-// teardown drops it.
+// (rail.js morph): it runs only without reduced motion and never on a
+// run's first draw, reads its starting boxes before a redraw and animates
+// after it, a stuck bar draws above the top capsule stack so the card's end
+// pushes it over the stack, both edges morph (the bottom stack's near
+// capsule grows into a bar that leaves the stack, and a shown bar sinking
+// behind it shrinks into the capsule), the copy that morphs stands out of
+// flow in its edge's wrapper, and the rail's teardown drops both copies.
 func TestTopicRailBarCapsuleMotion(t *testing.T) {
 	assets, err := PageAssets()
 	if err != nil {
@@ -1000,8 +1002,13 @@ func TestTopicRailBarCapsuleMotion(t *testing.T) {
 	for _, want := range []string{
 		`function motion() { return !!d.body.animate && !(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches); }`,
 		`var pre = motion() ? before(s) : null;`,
-		`if (pre) after(pre);`,
-		`wraps.top.appendChild(el);`,
+		"if (pre) after(pre);\n    drawn = !!s;",
+		`if (!drawn || !s) return p;`,
+		`if (bnear && !s.down.some(function (i) { return topics[i] === bnear; })) p.bot = capGhost(slots.bot.near);`,
+		`else if (next && btns("bot").map(shown).indexOf(next) < 0) p.bot = barGhost(next, true);`,
+		`["top", "bot"].forEach(function (e) {`,
+		`var wrap = wraps[edge], w = wrap.getBoundingClientRect()`,
+		`wrap.appendChild(el);`,
 		"stuck = null;\n    dropGhost();\n  };",
 	} {
 		if !strings.Contains(js, want) {
