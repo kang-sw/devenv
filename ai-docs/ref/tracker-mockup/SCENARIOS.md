@@ -287,7 +287,9 @@ Outcome: maya gets no Edit action on items she did not create (only Accept /
 Decline on ivy's, where she is the pending target); her comment lands in the
 thread; ivy's edit applies. The fixture's `maya.pc-10` shows the rule from
 the other side: maya's edit of ada's item is flagged "only the creator (ada)
-edits".
+edits". (Since (229) a, maya holds a live assignment on ada's item, so that
+edit applies; raj's "Cache layer", which she does not hold, still refuses her
+edit.)
 
 Snags:
 

@@ -533,6 +533,9 @@
     "kind": "task",
     "title": "Target",
     "body": "",
+    "bodyRev": [
+     "ada.pc#1"
+    ],
     "project": "",
     "labels": [],
     "due": null,
@@ -584,6 +587,9 @@
     "kind": "task",
     "title": "Other",
     "body": "",
+    "bodyRev": [
+     "ada.pc#2"
+    ],
     "project": "",
     "labels": [],
     "due": null,
@@ -637,6 +643,9 @@
     "kind": "topic",
     "title": "Holder",
     "body": "see #ada.pc-1 and #ada.pc-2",
+    "bodyRev": [
+     "ada.pc#4"
+    ],
     "project": "",
     "labels": [],
     "due": null,
@@ -690,6 +699,9 @@
     "kind": "task",
     "title": "Dropper",
     "body": "nothing now",
+    "bodyRev": [
+     "ada.pc#6"
+    ],
     "project": "",
     "labels": [],
     "due": null,
@@ -741,6 +753,9 @@
     "kind": "task",
     "title": "Hidden ref",
     "body": "#ada.pc-1",
+    "bodyRev": [
+     "ada.pc#7"
+    ],
     "project": "",
     "labels": [],
     "due": null,

@@ -1,0 +1,203 @@
+{
+  "name": "body-merge-rivals",
+  "comment": "item.edit body merge: who an overlap marks. Mix (ada.pc-1): from the create, ada.pc changes L1, maya.pc changes L5, ada.lap changes L1, all concurrent: maya's change survives unmarked, and only the pair that overlapped (ada.pc and ada.lap, one member) resolves, with the quiet note. Tri (ada.pc-3): maya.pc (human) changes T1, ada.pc changes T5, maya.lap as an agent changes T1 and T5, all concurrent: the agent loses T1 to its own member's human write but wins T5 over ada's earlier write; ada and the agent are marked with the agent as winner, and the agent write is superseded by the human one.",
+  "viewers": [
+    "ada.pc",
+    "maya.pc"
+  ],
+  "now": "2026-11-02T09:00:00Z",
+  "genesis": {
+    "admins": [
+      "ada"
+    ],
+    "members": [
+      {
+        "id": "ada",
+        "name": "Ada",
+        "keys": [
+          "ada-k1"
+        ],
+        "leads": []
+      },
+      {
+        "id": "maya",
+        "name": "Maya",
+        "keys": [
+          "maya-k1"
+        ],
+        "leads": [
+          "ada"
+        ]
+      },
+      {
+        "id": "raj",
+        "name": "Raj",
+        "keys": [
+          "raj-k1"
+        ],
+        "leads": [
+          "ada"
+        ]
+      },
+      {
+        "id": "lena",
+        "name": "Lena",
+        "keys": [
+          "lena-k1"
+        ],
+        "leads": [
+          "maya"
+        ]
+      }
+    ]
+  },
+  "commits": {
+    "ada.pc": [
+      {
+        "ts": "2026-11-01T09:00:00Z",
+        "seen": {},
+        "events": [
+          [
+            "item.create",
+            {
+              "kind": "task",
+              "title": "Mix",
+              "body": "L1\nL2\nL3\nL4\nL5"
+            }
+          ],
+          [
+            "item.assign",
+            {
+              "item": "ada.pc#1",
+              "targets": [
+                "maya"
+              ]
+            }
+          ],
+          [
+            "item.create",
+            {
+              "kind": "task",
+              "title": "Tri",
+              "body": "T1\nT2\nT3\nT4\nT5"
+            }
+          ],
+          [
+            "item.assign",
+            {
+              "item": "ada.pc#3",
+              "targets": [
+                "maya"
+              ]
+            }
+          ]
+        ]
+      },
+      {
+        "ts": "2026-11-01T09:10:00Z",
+        "seen": {},
+        "events": [
+          [
+            "item.edit",
+            {
+              "item": "ada.pc#1",
+              "body": "L1 ada\nL2\nL3\nL4\nL5",
+              "base": [
+                "ada.pc#1"
+              ]
+            }
+          ],
+          [
+            "item.edit",
+            {
+              "item": "ada.pc#3",
+              "body": "T1\nT2\nT3\nT4\nT5 ada",
+              "base": [
+                "ada.pc#3"
+              ]
+            }
+          ]
+        ]
+      }
+    ],
+    "maya.pc": [
+      {
+        "ts": "2026-11-01T09:05:00Z",
+        "seen": {
+          "ada.pc": 4
+        },
+        "events": [
+          [
+            "item.edit",
+            {
+              "item": "ada.pc#3",
+              "body": "T1 human\nT2\nT3\nT4\nT5",
+              "base": [
+                "ada.pc#3"
+              ]
+            }
+          ]
+        ]
+      },
+      {
+        "ts": "2026-11-01T09:20:00Z",
+        "seen": {
+          "ada.pc": 4
+        },
+        "events": [
+          [
+            "item.edit",
+            {
+              "item": "ada.pc#1",
+              "body": "L1\nL2\nL3\nL4\nL5 maya",
+              "base": [
+                "ada.pc#1"
+              ]
+            }
+          ]
+        ]
+      }
+    ],
+    "ada.lap": [
+      {
+        "ts": "2026-11-01T09:30:00Z",
+        "seen": {
+          "ada.pc": 4
+        },
+        "events": [
+          [
+            "item.edit",
+            {
+              "item": "ada.pc#1",
+              "body": "L1 lap\nL2\nL3\nL4\nL5",
+              "base": [
+                "ada.pc#1"
+              ]
+            }
+          ]
+        ]
+      }
+    ],
+    "maya.lap": [
+      {
+        "ts": "2026-11-01T09:40:00Z",
+        "seen": {
+          "ada.pc": 4
+        },
+        "events": [
+          [
+            "item.edit",
+            {
+              "item": "ada.pc#3",
+              "body": "T1 agent\nT2\nT3\nT4\nT5 agent",
+              "base": [
+                "ada.pc#3"
+              ]
+            },
+            "agent"
+          ]
+        ]
+      }
+    ]
+  }
+}

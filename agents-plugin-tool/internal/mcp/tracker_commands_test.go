@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"reflect"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wsledger"
 	"github.com/kang-sw/devenv/internal/wstracker"
 	"github.com/kang-sw/devenv/internal/wstrackerhost"
+	"github.com/kang-sw/devenv/internal/wsxmlcmd"
 )
 
 // trackerWriteStep is one tracker.update call of the command walk: the
@@ -683,5 +685,67 @@ func TestTrackerUpdateCompletionDefaultAndSuperiorWrapUp(t *testing.T) {
 	// A done record takes no further status write.
 	if text := w.trackerRefused(t, "tracker.update", map[string]any{"commands": w.expand(`<tk:store name="team"><tk:item.status item="{sub}" assignee="bo" status="dropped"/></tk:store>`)}); !strings.Contains(text, "the store would flag this write: assignment is done; reopen it first") {
 		t.Fatalf("a status on a done assignment must be flagged:\n%s", text)
+	}
+}
+
+// The item's live assignee edits its body with base, the body revision the
+// item view prints: an edit the creator made since merges in instead of
+// being replaced.
+func TestTrackerUpdateAssigneeEditsBodyWithBase(t *testing.T) {
+	w := &trackerWalk{trackerSessionFixture: newTrackerSessionFixture(t), ids: map[string]string{}}
+	w.adaSync(t) // ada learns bo's join
+	w.byBo(t, "it", wstracker.TypeItemCreate, map[string]any{"kind": "task", "title": "Shared", "body": "a\nb\nc"})
+	w.byBo(t, "", wstracker.TypeItemAssign, map[string]any{"item": "{it}", "mode": "chosen", "people": []any{"ada"}})
+	w.ada(t, trackerWriteStep{`<tk:store name="team"><tk:item.accept item="{it}"/></tk:store>`, []trackerWantEvent{
+		{typ: wstracker.TypeItemAccept, payload: map[string]any{"item": "{it}"}},
+	}})
+	seen := trackerAlias(w.ids["it"])
+	if got := w.trackerQuery(t, map[string]any{"store": "team", "item": w.ids["it"]}); !strings.Contains(got, "body revision: "+seen+"\nbody:\na\nb\nc\n") {
+		t.Fatalf("the item view must print the body revision before the body:\n%s", got)
+	}
+	// bo changes the first line; ada, from the revision she saw, the last.
+	w.byBo(t, "", wstracker.TypeItemEdit, map[string]any{"item": "{it}", "body": "A\nb\nc"})
+	w.ada(t, trackerWriteStep{`<tk:store name="team"><tk:item.edit item="{it}" base="` + seen + `">a
+b
+C</tk:item.edit></tk:store>`, []trackerWantEvent{
+		{typ: wstracker.TypeItemEdit, name: "edit", payload: map[string]any{"item": "{it}", "body": "a\nb\nC", "base": []any{"{it}"}}},
+	}})
+	if got := w.view(t).Items[w.ids["it"]].Body; got != "A\nb\nC" {
+		t.Fatalf("the edit must merge with bo's: body %q", got)
+	}
+	if got := w.trackerQuery(t, map[string]any{"store": "team", "item": w.ids["it"]}); !strings.Contains(got, "body revision: "+trackerAlias(w.ids["edit"])+"\n") {
+		t.Fatalf("the revision must follow the merged write:\n%s", got)
+	}
+}
+
+// base takes the body revision's event IDs in either form, written as the
+// stored ids, and only beside a body; it changes nothing alone.
+func TestTrackerUpdateItemEditBase(t *testing.T) {
+	b := trackerPlan(t, `<tk:item.edit item="ada.pc-1" base="maya.pc#5 ada.pc-3">new</tk:item.edit>`+
+		`<tk:item.edit item="ada.pc-1" clear="body" base="ada.pc-3"/>`)
+	if got := b.events[0].payload["base"]; !reflect.DeepEqual(got, []string{"maya.pc#5", "ada.pc#3"}) {
+		t.Fatalf("base = %#v", got)
+	}
+	if got := b.events[1].payload["base"]; !reflect.DeepEqual(got, []string{"ada.pc#3"}) {
+		t.Fatalf("base with clear=body = %#v", got)
+	}
+	var problems wsxmlcmd.Problems
+	planTrackerBatch(&problems, `<tk:store name="team"><tk:item.create kind="task" title="t"/>`+
+		`<tk:item.edit item="ada.pc-1" base="ada.pc-3"/>`+
+		`<tk:item.edit item="ada.pc-1" title="x" base="ada.pc-3"/>`+
+		`<tk:item.edit item="ada.pc-1" base="ada.pc-3 maya">new</tk:item.edit>`+
+		`<tk:item.edit item="ada.pc-1" base="$1">new</tk:item.edit>`+
+		`<tk:item.edit item="ada.pc-1" base=" ">new</tk:item.edit></tk:store>`, []wstrackerhost.StoreEntry{{ID: "team", Member: "ada"}}, trackerTestReach)
+	for _, want := range []string{
+		`command 2 <tk:item.edit> (line 1): changes nothing`,
+		`command 2 <tk:item.edit> (line 1) base: goes with a body or clear="body"`,
+		`command 3 <tk:item.edit> (line 1) base: goes with a body or clear="body"`,
+		`command 4 <tk:item.edit> (line 1) base: must be event IDs of the body revision the item view prints, such as maya.pc-5; got "maya"`,
+		`command 5 <tk:item.edit> (line 1) base: takes the event IDs the item view prints, never $N`,
+		`command 6 <tk:item.edit> (line 1) base: must list the body revision the item view prints`,
+	} {
+		if !slices.ContainsFunc(problems.List, func(p string) bool { return strings.HasPrefix(p, want) }) {
+			t.Errorf("problems missing %q:\n%q", want, problems.List)
+		}
 	}
 }

@@ -106,11 +106,15 @@ type Ref struct {
 }
 
 type ItemView struct {
-	ID            string   `json:"id"`
-	Alias         string   `json:"alias"`
-	Kind          string   `json:"kind"`
-	Title         string   `json:"title"`
-	Body          string   `json:"body"`
+	ID    string `json:"id"`
+	Alias string `json:"alias"`
+	Kind  string `json:"kind"`
+	Title string `json:"title"`
+	Body  string `json:"body"`
+	// BodyRev is the body revision: the ids of the body write heads (the
+	// item.create while no edit has written the body), in fold order. An
+	// editor sends the revision it loaded back as item.edit's base.
+	BodyRev       []string `json:"bodyRev"`
 	Project       string   `json:"project"`
 	Labels        []string `json:"labels"` // live label ids, in the order written
 	Due           *string  `json:"due"`
@@ -715,7 +719,7 @@ func (r *replayed) view(stream string, now time.Time, staleDays int) *View {
 			}
 		}
 		lv := S.prio.level(it.priority)
-		iv := ItemView{ID: id, Alias: it.alias, Kind: it.kind, Title: it.title, Body: it.body, Project: it.project, Labels: S.liveLabels(it.labels),
+		iv := ItemView{ID: id, Alias: it.alias, Kind: it.kind, Title: it.title, Body: it.body, BodyRev: S.bodyRev(id), Project: it.project, Labels: S.liveLabels(it.labels),
 			Due: it.due, Priority: it.priority, PriorityLevel: lv, PriorityName: S.prio.names[lv], Author: it.author,
 			TS: ts(it.ts), Hidden: it.hidden, Edited: ref(it.edited), Status: nz(status[id]),
 			Counted: r.counted(it, status[id]), Children: []string{}, Assignments: orEmpty(recIDs), Pending: orEmpty(pend),

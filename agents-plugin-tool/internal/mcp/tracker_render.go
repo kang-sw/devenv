@@ -478,6 +478,14 @@ func formatTrackerItem(v *wstrackerhost.StoreView, id string) string {
 			}
 		}
 	}
+	// Printed even for an empty body: an edit passes it back as base.
+	if len(it.BodyRev) > 0 {
+		rev := make([]string, len(it.BodyRev))
+		for i, rid := range it.BodyRev {
+			rev[i] = trackerAlias(rid)
+		}
+		fmt.Fprintf(&sb, "body revision: %s\n", strings.Join(rev, " "))
+	}
 	if strings.TrimSpace(it.Body) != "" {
 		sb.WriteString("body:\n" + strings.TrimRight(it.Body, "\n") + "\n")
 	}

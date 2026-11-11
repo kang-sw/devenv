@@ -305,6 +305,9 @@
     "kind": "task",
     "title": "Write talk proposal (event-sourced trackers)",
     "body": "Outline, abstract, bio.",
+    "bodyRev": [
+     "hana.pc#1"
+    ],
     "project": "conf-2027",
     "labels": [],
     "due": "2026-11-20",
@@ -365,6 +368,9 @@
     "kind": "topic",
     "title": "Reading list",
     "body": "Event sourcing, CRDT survey, git internals.",
+    "bodyRev": [
+     "hana.pc#3"
+    ],
     "project": "",
     "labels": [],
     "due": null,
@@ -411,6 +417,9 @@
     "kind": "task",
     "title": "Renew passport",
     "body": "",
+    "bodyRev": [
+     "hana.pc#4"
+    ],
     "project": "",
     "labels": [],
     "due": "2026-11-15",
@@ -460,6 +469,9 @@
     "kind": "task",
     "title": "Try the tracker mockup",
     "body": "",
+    "bodyRev": [
+     "hana.pc#6"
+    ],
     "project": "",
     "labels": [],
     "due": null,
@@ -508,6 +520,9 @@
     "kind": "task",
     "title": "Abstract",
     "body": "",
+    "bodyRev": [
+     "hana.pc#12"
+    ],
     "project": "",
     "labels": [],
     "due": "2026-11-12",

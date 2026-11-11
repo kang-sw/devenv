@@ -139,7 +139,7 @@ func trackerEventSpec(kind wsxmlcmd.Kind, attrs ...string) wsxmlcmd.Spec {
 // comment, or the note.
 var trackerCommands = map[string]trackerCommandDef{
 	wstracker.TypeItemCreate: {trackerEventSpec(wsxmlcmd.Leaf, "kind", "title", "project", "labels", "due", "priority", "parent", "after", "mentions", "refs"), buildItemCreate},
-	wstracker.TypeItemEdit:   {trackerEventSpec(wsxmlcmd.Leaf, "item", "title", "project", "labels", "due", "priority", "mentions", "refs", "clear"), buildItemEdit},
+	wstracker.TypeItemEdit:   {trackerEventSpec(wsxmlcmd.Leaf, "item", "title", "project", "labels", "due", "priority", "mentions", "refs", "clear", "base"), buildItemEdit},
 	wstracker.TypeItemHide:   {trackerEventSpec(wsxmlcmd.Empty, "item"), buildItemOnly},
 	wstracker.TypeItemMove:   {trackerEventSpec(wsxmlcmd.Empty, "item", "parent", "after"), buildItemMove},
 	wstracker.TypeItemAssign: {trackerEventSpec(wsxmlcmd.Empty, "item", "people", "rules", "levels", "completion"), buildItemAssign},
@@ -350,6 +350,8 @@ func buildItemEdit(b *trackerBatch, cmd wsxmlcmd.Command, ev *trackerEvent) {
 			}
 		}
 	}
+	// base qualifies the body write, so it is read after it and changes
+	// nothing on its own.
 	changed := len(ev.payload) + len(ev.refLists)
 	if _, ok := ev.payload["item"]; ok {
 		changed--
@@ -357,6 +359,40 @@ func buildItemEdit(b *trackerBatch, cmd wsxmlcmd.Command, ev *trackerEvent) {
 	if changed == 0 {
 		b.p.Add("%s: changes nothing; set an attribute, a body, or clear", cmd.Label())
 	}
+	b.bodyBase(cmd, ev)
+}
+
+// bodyBase reads item.edit's base: the body revision the editor saw, as the
+// item view prints it, written as the list of stored ids. $N is refused:
+// an event of this batch is never a revision the editor saw.
+func (b *trackerBatch) bodyBase(cmd wsxmlcmd.Command, ev *trackerEvent) {
+	v, ok := cmd.Attr("base")
+	if !ok {
+		return
+	}
+	if _, body := ev.payload["body"]; !body {
+		b.p.Add("%s: goes with a body or clear=\"body\"", cmd.At("base"))
+		return
+	}
+	tokens := strings.Fields(v)
+	if len(tokens) == 0 {
+		b.p.Add("%s: must list the body revision the item view prints, such as maya.pc-5; got %q", cmd.At("base"), v)
+		return
+	}
+	ids := make([]string, 0, len(tokens))
+	for _, tok := range tokens {
+		if strings.HasPrefix(tok, "$") {
+			b.p.Add("%s: takes the event IDs the item view prints, never $N (an event of this batch is no revision you saw); got %q", cmd.At("base"), tok)
+			return
+		}
+		id, err := parseTrackerID(tok)
+		if err != nil {
+			b.p.Add("%s: must be event IDs of the body revision the item view prints, such as maya.pc-5; got %q", cmd.At("base"), tok)
+			return
+		}
+		ids = append(ids, id)
+	}
+	ev.payload["base"] = ids
 }
 
 // buildItemMove reads item.move: parent is required, "" for top level

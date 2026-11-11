@@ -522,7 +522,7 @@ attachment the store accepts, in bytes (339); without it the limit is 10 MiB
 | type | payload | rule |
 |---|---|---|
 | `item.create` | `kind` (`task`/`topic`; `todo` is still accepted and folds as `task`, 154 a), `title`, `body?`, `project?`, `due?`, `priority?`, `parent?`, `after?`, `mentions?`, `attachments?`, `refs?` | A `parent` must be assigned to or created by the author. `project` is one free-text string, the only grouping (no labels or tags). `due` is a `YYYY-MM-DD` date. `priority` is a level in the author's current range; omitted, the item starts at the store's default level. `after` places it among its siblings (528), below. A new write carrying `stage` is refused (retired); an older event's stage folds as described under Derived state. |
-| `item.edit` | `item`, any of `title`/`body`/`project`/`due`/`priority`; `mentions?`, `attachments?` and `refs?` with `body` | Creator only; an admin may also edit an item whose creator was removed (292). `due: null` clears the date; priority cannot be cleared. A new write carrying `stage` is refused (retired). Each field merges by the (203) rule. `mentions` or `attachments` without `body` is flagged, and so is `refs`. |
+| `item.edit` | `item`, any of `title`/`body`/`project`/`due`/`priority`/`labels`; `mentions?`, `attachments?`, `refs?` and `base?` with `body` | The item's creator or a member holding a live assignment on it, for every field (229 a); an admin may also edit an item whose creator was removed (292). `due: null` clears the date; priority cannot be cleared. A new write carrying `stage` is refused (retired). Each field but `body` merges by the (203) rule; `body` merges three-way from `base` (230)-(233), below. `mentions` or `attachments` without `body` is flagged, and so are `refs` and `base`; `base` must be a list of event ids. |
 | `item.move` | `item`, `parent` (an item id, or `null` for top level; required), `after?` | Reparents or reorders an item with its subtree; a reorder is a move under the same parent. The item's creator or a member holding a live assignment on it; an admin may also move an item whose creator was removed. Only when the parent changes, the destination must pass `item.create`'s parent rules (not hidden, created by or assigned to the mover) and must not be in the item's own subtree (a topic takes children like any item); a reorder under the same parent, and a move to top level, check only the item rule. `after` places it among its new siblings as on `item.create`, and a non-empty `after` must be a child of the new parent. Flagged on a hidden item. Assignments, comments, and history stay with the item. |
 | `item.hide` | `item` | Creator only; an admin may also hide an item whose creator was removed (292). A tombstone: the content stays in history. Flagged while someone else holds an open (live or pending) assignment on the item. |
 | `item.assign` | `item`, `targets` (a list of member ids and rules `{root, include_root?, levels?}`) or the older `mode` (`all`/`chosen`), `levels` (all), `people` (chosen); `completion` (`assignee`/`assigner`; absent reads as `assignee`, and writers fill it in: `assigner` when anyone but the author is a target, `assignee` when the author is the only one) | Creator only; an admin may also assign an item whose creator was removed. A person may be anyone in the store: the author, or someone the author reaches (the author is in their lead chain, any depth), is a **forced** assignment, live at once; anyone else gets a **pending** assignment. A rule (490)-(492) targets everyone below `root` (within `levels`, absent = the whole subtree; `root` too with `include_root`), forced, and stays live: anyone who later enters the range inherits it. A rule rooted at the author or below is live at once; one rooted elsewhere is a **rule request** pending to `root`. The older `chosen` is `targets` of people and `all` is one rule `{root: author, levels}`, with the event id as the rule id. Flagged: both `targets` and `mode`, an empty list, a malformed target, two rules on one root, a rule with nobody in it, a rule another live rule of the author's on the item already covers, or every person chosen (with no rule) already holding a live or pending assignment. On a topic (153 b) an assign names exactly one person (`targets: [id]`, or `chosen` with one person) and makes its **holder**: flagged otherwise (`all`, a rule, or more than one), and flagged while the topic has any live or pending assignment, a pending handoff included; its `completion` is accepted and not stored. Any applied assign (the creator included) displaces a task's fallback holding. |
@@ -568,10 +568,35 @@ while an oid the author had not yet seen there counts as new.
 past (a hidden one included). The writer derives `refs` from the text, so an
 edit keeps a ref only while its `#<alias>` (or `#<id>`) stays in the text as
 a whole token. All three lists ride with the body: a
-body write replaces them (absent means empty), and the shown lists are the
-winning body write's, so concurrent edits follow the (203) / (271) winner.
+body write replaces them (absent means empty). The shown attachments and refs
+are the union over the body writes whose lines survive in the folded body
+(fold order, each oid or id once), and the shown mentions the latest such
+write's.
 Only metadata is modelled; storing and fetching the content is a later
 ledger ticket (337). Agent-authored writes may mention.
+
+**Body merge** (230)-(233). An `item.edit` body carries the full new text and,
+optionally, `base`: the body revision the editor saw, which is the view's
+`bodyRev` for the item (the body write heads; the `item.create` while no edit
+has written the body). The base text is the body folded over the causal
+closure of those heads. The fold keeps a running body value, not a register
+winner: when every body write already folded lies in the base's closure, the
+edit replaces the body; otherwise it merges three-way (base text, the folded
+value, the new text) on lines, with a Myers line diff (`diffLines`), and
+changes whose base line ranges intersect or touch form one group. A group
+changed on one side takes that side; a group changed on both (differently)
+is an overlap. Its rivals are the concurrent writes whose lines the folded
+value holds in that group (every concurrent write when the value only
+dropped base lines there, since no line names who). The overlap takes the
+edit's side, since it folds later, except that an agent write loses it when
+a concurrent human write of its own member is among the rivals (288); the
+precedence is per group, so the same agent write still wins another
+member's group. A base-less edit, or one whose base names no body write in
+its causal past, is a whole replace, which overlaps every concurrent write
+(and loses entirely to its member's concurrent human write). An overlap
+marks the edit and each rival as a `field` conflict between members, or
+gives the losing write the quiet superseded note within one member (289); a
+concurrent write the edit did not overlap is unmarked.
 
 **Sibling order** (528). `after` on `item.create` names the sibling the new
 item goes right after: absent appends it after the siblings placed so far
@@ -865,7 +890,9 @@ Flagged reasons, as the engine words them:
 - author not a member, or removed
 - `agent-auto` outside status or close, or on accept, decline, return, or
   handoff
-- edits or hides by anyone other than the creator or comment author
+- edits by anyone other than the creator or a live assignee, hides by anyone
+  other than the creator, and comment edits or hides by anyone other than the
+  comment author
 - a due that is not a date, or a priority outside the author's current range
 - assignment by a non-creator, empty, already covered, or with every chosen
   person already assigned; on a topic, to anything but one person or while it
@@ -923,7 +950,7 @@ page clock starts at 2026-11-06 09:00. The fixtures show:
   profile field, a (203) conflict.
 - threads with comments and quote replies; due dates and priorities on most
   tasks, with overdue, stale (doing or blocked for 3+ days) and blocked work
-- an edit of `ada.pc-1`, and a flagged edit of it by maya (creator only)
+- an edit of `ada.pc-1`, and a later edit of it by maya, its live assignee
 - a hidden comment (`raj.pc-4`), plus a flagged hide by someone else
 - reject (`maya.pc-12`), reopen (`maya.pc-18`), and unassign (`maya.pc-15`)
 - pia's blocked "Cache layer" raising "blocked below" on `raj.pc-1` and
@@ -1139,6 +1166,7 @@ creation, and it has a topic and a blocked subtask.
 | 153 b (11-10) | A topic takes an ownership-only assignment: one holder (`targets: [id]` or `chosen` with one person), refused otherwise and while any live or pending assignment exists; no status or close, no completion mode stored; the holder may unassign their own record, so a handoff receiver can release it too; accept, decline, handoff, and return are unchanged. A held topic shows in the holder's assignments only, never in status lists or counts. Every creation path assigns a new topic to its creator (supersedes 529's topic exception and 151 a); topics created before stay unheld. |
 | 154 a (11-10) | `task` and `todo` merge: the fold stores `task` for a `todo` create, so views, filters, and checks see one kind; `todo` stays valid on input so old events replay unflagged. The `kind` field stays for a later subcategory. |
 | 555-561 (11-10) | Every task has a holder: a task nobody else holds is held by its creator (the first admin when the creator was removed) through a fold-derived fallback record, one per period, each starting at todo; any assign displaces it, and it cannot be unassigned, handed off, or returned. `idea` is a settable status before todo, left out of roll-ups; an item is idea only when every live holder is. The review stage is retired: new `stage` writes are refused, older ones fold onto the fallback (review = idea). Item statuses review, unassigned, declined, and returned no longer occur. Both quick-add rows create a task its creator holds at idea; dashboard and MCP task creates no longer self-assign (topics still do). Supersedes the 11-09 review-stage rows and 529 for tasks. |
+| 229 a, 230-233 (11-11) | `item.edit` opens to the item's creator or a member holding a live assignment on it, for every field (hide and assign stay creator-only). A body edit carries the full text and an optional `base` (the body revision the editor saw); the body folds as a running value that merges three-way on lines from the base text, an overlap going to the later write in fold order except that a human write beats its member's concurrent agent write. Supersedes (274 a) for edits and the (203) winner for the body. |
 | 242-248, 277-285 (11-11) | An org superior (any ancestor) of an assignee may set `blocked`, `done` (final, no review), or `dropped` on their live record through `item.status` with `assignee`; the assigner stays a separate concept and may only drop. `in-review` replaces awaiting: a close under completion `assigner` enters it, the assignee may enter it on any assignment and leave it with a status write, and the assigner or any org superior confirms or rejects it. `dropped` is a terminal assignment status outside roll-ups that reopens like done; an item is dropped when every live assignment is, done when the rest are done. Writers default completion by relationship: `assigner` for an org subordinate (or a rule rooted at the writer or below), `assignee` for oneself or a peer, one assign event per class (supersedes 20 b's "anyone else defaults to assigner"); the fold's absent-means-`assignee` stays. Query adds `status:in-review` and `status:dropped`, keeps `status:awaiting` as an alias, and `open` leaves out dropped. |
 
 ## Open questions
