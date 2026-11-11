@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 12b9c9a12eee6812
 sage-review-completeness-reviewed: 12b9c9a12eee6812
+completed: 2026-11-11
 ---
 
 # Tracker: superior-settable statuses and new statuses
@@ -198,3 +199,65 @@ Verification:
   several assignees.
 - The three tracker playbook copies stay in parity, and `ko.json` holds the
   new UI keys.
+
+### Result (3a04d584d) - 2026-11-11
+
+Landed on `impl/develop/patio-album-job` in commits 6915ebd0f (domain,
+engine, goldens), b00bad68a (MCP), 2c0482b0e (playbooks), a125cdae9
+(dashboard and i18n), 8ee793e38 (mockup docs), 3a04d584d (event-hook
+activity). Develop was merged in at 3dd3c0f6a and 75663bb95.
+
+- Domain and engine: `in-review` replaces `awaiting` (old records fold as
+  in-review) and `dropped` is new; `wrapped` (done or dropped) gates
+  handoff, open, request, hide, notices, and reopen. An org superior of
+  the assignee writes blocked, done, or dropped on the assignment through
+  `item.status` with `assignee`; the assigner of a record drops it. Confirm
+  and reject belong to the assigner or an org superior of the assignee,
+  on an in-review record only. Item status rolls dropped out (all dropped
+  reads dropped); counts leave dropped out; rank puts in-review and done
+  after open work and dropped last. reasons.json gains 12 cases and a new
+  `wrap-up-statuses` golden case; the engine and Go agree.
+- Writers: MCP `tk:item.status` takes `assignee` and the full enum, the
+  completion default follows Decision 6 by the writer's reach (split per
+  class), and the query takes `status:in-review`, `status:dropped`, and
+  `status:awaiting` as an alias. The dashboard has the superior's status
+  menu, the review actions, the dropped filter, and the quick-add chip;
+  every i18n table holds the new keys.
+- Event hook: activity writes `in-review` for a close the assigner
+  confirms, names the assignee of a status written on another member's
+  assignment as `target`, and carries `dropped` under the `status` kind;
+  due_soon skips dropped assignments. The hook had not shipped in a
+  release (f931dda48 is on develop only), so `v` stays 1.
+
+Verification: `ws-rgo test -count=1` on ./internal/wstracker/,
+./internal/wstrackerhook/, ./internal/wstrackerhost/, ./internal/mcp/,
+./internal/wsrsrc/, ./internal/wsdashboard/, ./internal/wsi18n/,
+./cmd/ws-mcp/ all ok after the final merge; vet clean on wstracker,
+wstrackerhook, mcp, and wsdashboard; `gen-golden.js` reports 269
+reasons.json cases agreeing with the engine and leaves the tree clean. A
+browser check passed 76/76 on the superior menu, review actions, dropped
+filter, and quick-add chip.
+
+Decisions taken in implementation:
+
+- The assigner drops a record under either completion mode, which is
+  wider than Decision 4's assigner-completion wording; the assigner made
+  the assignment and dropping it is their wrap-up either way.
+- The confirm list stays the assigner's own records; a superior confirms
+  from the item.
+- A dropped assignment raises a notice like done and blocked.
+- An assignee may close from a voluntary in-review.
+- A self-rooted rule counts as assigner-class for the completion default.
+- The MCP writer reads the viewer's reach before the batch, so a
+  `set_lead` in the same batch does not change that batch's defaults.
+
+Left open:
+
+- A split assignment whose targets all already hold the item is refused
+  rather than skipped.
+- The Today confirm chip opens the "assigned by me" list, which omits
+  self records.
+- Not browser-checked: kanban drag into in-review or dropped, team counts,
+  non-English locales, and the fallback superior menu.
+- `TestClientTableHoldsOnlyClientKeysWithEnglishFallback` depends on test
+  order (preexisting).
