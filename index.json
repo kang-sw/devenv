@@ -403,21 +403,18 @@
         }
       }
     },
-    "261110-feat-ws-tracker-self-assign-claim": {
-      "registered_at": "2026-11-10T06:54:56Z",
+    "261110-feat-ws-tracker-superior-settable-status-and-new-statuses": {
+      "registered_at": "2026-11-10T06:18:04Z",
       "lease": {
         "email": "ki6080@gmail.com",
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-11T08:28:13Z",
+        "phase": "active",
+        "touched_at": "2026-11-11T09:26:44Z",
         "impl": {
-          "branch": "impl/develop/level-robe-dairy"
+          "branch": "impl/develop/patio-album-job"
         }
       }
-    },
-    "261110-feat-ws-tracker-superior-settable-status-and-new-statuses": {
-      "registered_at": "2026-11-10T06:18:04Z"
     },
     "261110-research-ws-dashboard-agent-host-foundations": {
       "registered_at": "2026-11-09T15:09:40Z"
