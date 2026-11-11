@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 08604559db8fcdc0
 sage-review-completeness-reviewed: 08604559db8fcdc0
+completed: 2026-11-11
 ---
 
 # Tracker: assignee editing and body merge
