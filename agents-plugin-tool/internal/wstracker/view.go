@@ -17,6 +17,7 @@ type View struct {
 	Viewer        Viewer                 `json:"viewer"`
 	Priority      PriorityLevels         `json:"priority"`
 	Attachments   AttachmentLimit        `json:"attachments"`
+	Labels        []LabelView            `json:"labels"` // the live label list, in add order
 	Members       map[string]MemberView  `json:"members"`
 	Admins        []string               `json:"admins"`
 	RolesProblems []string               `json:"rolesProblems"`
@@ -45,6 +46,14 @@ type Viewer struct {
 	Followers []string       `json:"followers"`
 	Reach     map[string]int `json:"reach"`
 	IsMember  bool           `json:"isMember"`
+}
+
+// LabelView is one live entry of the store's label list; ID is its
+// roles.add_label event's id, which items carry.
+type LabelView struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Color string `json:"color"`
 }
 
 type PriorityLevels struct {
@@ -102,6 +111,7 @@ type ItemView struct {
 	Title         string   `json:"title"`
 	Body          string   `json:"body"`
 	Project       string   `json:"project"`
+	Labels        []string `json:"labels"` // live label ids, in the order written
 	Due           *string  `json:"due"`
 	Priority      int      `json:"priority"`
 	PriorityLevel int      `json:"priorityLevel"`
@@ -615,7 +625,7 @@ func (r *replayed) view(stream string, now time.Time, staleDays int) *View {
 			}
 		}
 		lv := S.prio.level(it.priority)
-		iv := ItemView{ID: id, Alias: it.alias, Kind: it.kind, Title: it.title, Body: it.body, Project: it.project,
+		iv := ItemView{ID: id, Alias: it.alias, Kind: it.kind, Title: it.title, Body: it.body, Project: it.project, Labels: S.liveLabels(it.labels),
 			Due: it.due, Priority: it.priority, PriorityLevel: lv, PriorityName: S.prio.names[lv], Author: it.author,
 			TS: ts(it.ts), Hidden: it.hidden, Edited: ref(it.edited), Status: nz(status[id]),
 			Counted: r.counted(it, status[id]), Children: []string{}, Assignments: orEmpty(recIDs), Pending: orEmpty(pend),
@@ -738,6 +748,12 @@ func (r *replayed) view(stream string, now time.Time, staleDays int) *View {
 	}
 	vw.Priority = PriorityLevels{Names: append([]string(nil), S.prio.names...), Default: S.prio.def}
 	vw.Attachments = AttachmentLimit{MaxBytes: S.attMax}
+	vw.Labels = []LabelView{}
+	for _, id := range S.lorder {
+		if l := S.liveLabel(id); l != nil {
+			vw.Labels = append(vw.Labels, LabelView{ID: id, Name: l.name, Color: l.color})
+		}
+	}
 	vw.Admins = append([]string{}, S.aorder...)
 
 	r.viewerLists(vw, A, v, children)

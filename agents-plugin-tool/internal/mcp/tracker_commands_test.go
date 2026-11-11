@@ -221,6 +221,36 @@ func TestTrackerUpdateWritesEveryEventCommand(t *testing.T) {
 		t.Fatalf("profiles: ada %+v, bo %+v", v.Members["ada"].Profile, v.Members["bo"].Profile)
 	}
 
+	// The label list, and labels on items: $N names a label added earlier in
+	// the batch, a colour is lower-cased, and labels="" clears.
+	step(trackerWriteStep{`<tk:store name="team">
+<tk:roles.add_label name="bug" color="#D14343"/>
+<tk:roles.add_label name="ui" color="#3366cc"/>
+<tk:roles.edit_label label="$2" name="design"/>
+<tk:item.create kind="task" title="Labelled" labels="$1 $2"/>
+<tk:item.edit item="$4" labels="$2"/>
+<tk:roles.remove_label label="$1"/>
+</tk:store>`, []trackerWantEvent{
+		{typ: wstracker.TypeAddLabel, name: "bug", payload: map[string]any{"name": "bug", "color": "#d14343"}},
+		{typ: wstracker.TypeAddLabel, name: "ui", payload: map[string]any{"name": "ui", "color": "#3366cc"}},
+		{typ: wstracker.TypeEditLabel, payload: map[string]any{"label": "{ui}", "name": "design"}},
+		{typ: wstracker.TypeItemCreate, name: "labelled", payload: map[string]any{"kind": "task", "title": "Labelled", "labels": []any{"{bug}", "{ui}"}}},
+		{typ: wstracker.TypeItemEdit, payload: map[string]any{"item": "{labelled}", "labels": []any{"{ui}"}}},
+		{typ: wstracker.TypeRemoveLabel, payload: map[string]any{"label": "{bug}"}},
+	}})
+	v = w.view(t)
+	if want := []wstracker.LabelView{{ID: w.ids["ui"], Name: "design", Color: "#3366cc"}}; !reflect.DeepEqual(v.Labels, want) {
+		t.Fatalf("label list %+v, want %+v", v.Labels, want)
+	}
+	if got := v.Items[w.ids["labelled"]].Labels; !reflect.DeepEqual(got, []string{w.ids["ui"]}) {
+		t.Fatalf("item labels %v", got)
+	}
+	step(trackerWriteStep{`<tk:store name="team">
+<tk:item.edit item="` + w.ids["labelled"] + `" labels=""/>
+</tk:store>`, []trackerWantEvent{
+		{typ: wstracker.TypeItemEdit, payload: map[string]any{"item": "{labelled}", "labels": []any{}}},
+	}})
+
 	// Create, edit with each clear, and a pending assignment the assigner
 	// confirms (bo is not below ada yet).
 	step(trackerWriteStep{`<tk:store name="team">

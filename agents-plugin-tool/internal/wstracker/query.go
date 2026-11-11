@@ -11,8 +11,8 @@ import (
 // payload field share: one parser, so the screen and the tool agree.
 //
 // A query is whitespace-separated tokens, every token AND-ed. A key:value
-// token whose key is one of status, assignee, kind, project, due, or
-// priority is a field filter; any other token, a pasted URL or foo:bar
+// token whose key is one of status, assignee, kind, project, label, due,
+// or priority is a field filter; any other token, a pasted URL or foo:bar
 // included, is free text. A "quoted phrase" is one free-text token, and a
 // filter value may be quoted (project:"two words"). Keys and values are
 // case-insensitive.
@@ -23,6 +23,8 @@ import (
 //	              name contains m
 //	kind:<k>      one of QueryKinds
 //	project:<p>   the item's project, exactly
+//	label:<l>     a live label of the item named l, exactly (a removed
+//	              label matches nothing)
 //	due:<op><d>   d is YYYY-MM-DD; op is <, >, <=, >=, or none for equality;
 //	              an item with no due date never matches
 //	priority:<op><n>  the item's priority level n (0 is the first level)
@@ -152,7 +154,7 @@ func parseQueryToken(tok queryToken) (queryTerm, error) {
 			return refuse("kind takes one of " + strings.Join(QueryKinds, ", "))
 		}
 		return queryTerm{key: key, value: v}, nil
-	case "assignee", "project":
+	case "assignee", "project", "label":
 		if v == "" {
 			return refuse(key + " takes a value")
 		}
@@ -243,6 +245,15 @@ func (t queryTerm) match(v *View, it ItemView) bool {
 		return it.Kind == t.value
 	case "project":
 		return strings.ToLower(it.Project) == t.value
+	case "label":
+		for _, id := range it.Labels {
+			for _, l := range v.Labels {
+				if l.ID == id && strings.ToLower(l.Name) == t.value {
+					return true
+				}
+			}
+		}
+		return false
 	case "assignee":
 		for _, aid := range it.Assignments {
 			a, ok := v.Assignments[aid]

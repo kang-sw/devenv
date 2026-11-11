@@ -376,6 +376,25 @@
     return '<span class="chip due' + (over ? ' over' : now ? ' now' : '') + '" title="' + (over ? wsT("js.tk.due.tip.over", esc(it.due)) : now ? wsT("js.tk.due.tip.now", esc(it.due)) : wsT("js.tk.due.on", esc(it.due))) + '">' +
       (now ? wsT("js.tk.due.today") : wsT("js.tk.due.on", esc(it.due.slice(5)))) + '</span>';
   }
+  // The store's label list (view.labels, live labels in add order); an item carries label ids.
+  function labelOf(id) { return (VS.labels || []).filter(function (l) { return l.id === id; })[0] || null; }
+  // A removed label is gone from view.labels; the activity log still names it, by its add
+  // event and its applied renames (EV, the events by id).
+  function labelName(id) {
+    var l = labelOf(id), n = EV[id] && EV[id].type === 'roles.add_label' ? EV[id].payload.name : null;
+    if (l) return l.name;
+    VS.events.forEach(function (e) { if (e.type === 'roles.edit_label' && e.status === 'applied' && e.payload.label === id && typeof e.payload.name === 'string') n = e.payload.name; });
+    return typeof n === 'string' ? n : alias(id);
+  }
+  // One label chip, its colour a dot; with act, a button (a row's chip searches label:"name").
+  function labelChip(l, act, extra) {
+    var inner = '<span class="ldot" style="background:' + esc(l.color) + '"></span>' + esc(l.name);
+    if (!act) return '<span class="chip lbl">' + inner + '</span>';
+    return '<button type="button" class="chip lbl"' + attr('act', act) + attr('label', l.id) + (extra || '') + ' tabindex="-1"' + tipAttr(wsT("js.tk.label.search", esc(l.name))) + '>' + inner + '</button>';
+  }
+  function labelChips(it, act) {
+    return (it.labels || []).map(labelOf).filter(Boolean).map(function (l) { return labelChip(l, act); }).join('');
+  }
   function kindChip(it) {
     return '<span class="chip kind">' + esc(kindName(it.kind)) + '</span>' + (it.pending.length ? '<span class="chip req">' + wsT("js.tk.chip.pendingassign") + '</span>' : '') +
       (it.hidden ? '<span class="chip hid">' + wsT("js.tk.chip.hidden") + '</span>' : '');
@@ -445,11 +464,11 @@
   function byRank(a, b) { return RANK[a.status] - RANK[b.status]; }
   function A(id) { return VS.assignments[id]; }
 
-  var EDIT_FIELDS = ['title', 'body', 'project', 'due', 'priority'];
+  var EDIT_FIELDS = ['title', 'body', 'project', 'labels', 'due', 'priority'];
   function listOf(x) { return Array.isArray(x) ? x : []; }
   // Mentions and attachments a write carries, for one-line descriptions.
   // A field name the event sentences print: the table's, else the field itself.
-  var FIELD_KEY = { title: "js.tk.field.title", body: "js.tk.field.body", project: "js.tk.field.project", due: "js.tk.field.due", priority: "js.tk.field.priority",
+  var FIELD_KEY = { title: "js.tk.field.title", body: "js.tk.field.body", project: "js.tk.field.project", labels: "js.tk.field.labels", due: "js.tk.field.due", priority: "js.tk.field.priority",
     org: "js.tk.field.org", family: "js.tk.field.family", given: "js.tk.field.given" };
   function fieldName(f) { return FIELD_KEY[f] ? wsT(FIELD_KEY[f]) : f; }
   function extrasTxt(p) {
@@ -466,10 +485,11 @@
       case 'item.create':
         if (inThread === 'parent') return wsT("js.tk.ev.create.sub", itemRef(n.id), esc(p.title), VS.items[n.id] ? stChip(VS.items[n.id].status) : '');
         return wsT("js.tk.ev.create", esc(kindName(p.kind)), esc(p.title)) + (inThread ? '' : ' (' + itemRef(n.id) + ')') + (p.parent && !inThread ? ' ' + wsT("js.tk.ev.create.under", itemRef(p.parent)) : '') +
-          (p.due ? wsT("js.tk.ev.create.due", esc(p.due)) : '') + (p.priority != null ? wsT("js.tk.ev.create.priority", esc(VS.priority.names[p.priority] || p.priority)) : '') + extrasTxt(p);
+          (p.due ? wsT("js.tk.ev.create.due", esc(p.due)) : '') + (p.priority != null ? wsT("js.tk.ev.create.priority", esc(VS.priority.names[p.priority] || p.priority)) : '') +
+          (listOf(p.labels).length ? wsT("js.tk.ev.create.labels", esc(listOf(p.labels).map(labelName).join(', '))) : '') + extrasTxt(p);
       case 'item.edit':
         return wsT("js.tk.ev.edit", ref(p.item), EDIT_FIELDS.filter(function (f) { return f in p; }).map(function (f) {
-          var v = f === 'priority' ? (VS.priority.names[p[f]] || p[f]) : p[f];
+          var v = f === 'priority' ? (VS.priority.names[p[f]] || p[f]) : f === 'labels' ? (listOf(p[f]).map(labelName).join(', ') || null) : p[f];
           return wsT("js.tk.ev.field", fieldName(f), esc(v == null ? wsT("js.tk.ev.none") : String(v).slice(0, 80)));
         }).join(', ')) + extrasTxt(p);
       case 'item.hide': return wsT("js.tk.ev.hide", ref(p.item));
@@ -507,6 +527,12 @@
       case 'roles.remove_member': return wsT("js.tk.ev.removemember", esc(p.member));
       case 'roles.set_priority_levels': return wsT("js.tk.ev.prioritylevels", esc((p.names || []).join(' / ')), esc((p.names || [])[p.default]));
       case 'roles.set_attachment_limit': return Number.isInteger(p.max_bytes) ? wsT("js.tk.ev.attlimit.size", esc(p.max_bytes), fmtSize(p.max_bytes)) : wsT("js.tk.ev.attlimit", esc(p.max_bytes));
+      case 'roles.add_label': return wsT("js.tk.ev.addlabel", esc(p.name));
+      case 'roles.edit_label':
+        return wsT("js.tk.ev.editlabel", esc(labelName(p.label)), ['name', 'color'].filter(function (f) { return f in p; }).map(function (f) {
+          return wsT("js.tk.ev.field", wsT(f === 'name' ? "js.tk.field.name" : "js.tk.field.color"), esc(p[f]));
+        }).join(', '));
+      case 'roles.remove_label': return wsT("js.tk.ev.removelabel", esc(labelName(p.label)));
       default: return esc(n.type);
     }
   }
@@ -726,7 +752,7 @@
     var it = VS.items[o.item], r = o.rec, st = stKey(it, r);
     return '<div class="irow' + (ui.sel === o.rk ? ' sel' : '') + (o.closed ? ' closed' : '') + (o.ctx ? ' ctx' : '') + '" tabindex="0"' + attr('item', it.id) + attr('rk', o.rk) + (r ? attr('rec', r.id) : '') +
       (o.depth ? ' style="--ind:' + o.depth + '"' : '') + '><div class="ir-main">' + (o.tw != null ? o.tw : o.depth ? '<span class="ind">&#8627;</span>' : '') + stBtn(st, it, r) +
-      '<a class="title" href="#" tabindex="-1"' + attr('item', it.id) + '>' + esc(it.title) + '</a>' + (o.tsub || '') + warnHtml(it) + dotHtml(it) + '<span class="grow"></span>' +
+      '<a class="title" href="#" tabindex="-1"' + attr('item', it.id) + '>' + esc(it.title) + '</a>' + (o.tsub || '') + labelChips(it, 'lsearch') + warnHtml(it) + dotHtml(it) + '<span class="grow"></span>' +
       '<span class="ir-acts">' + moreBtn(it.id, '', true) + '</span>' + whoHtml(it) + priHtml(it) + dueHtml(it, st) + '</div>' +
       '<div class="ir-more">' + detailsHtml(it, r, o.more) + '</div></div>';
   }
@@ -889,7 +915,21 @@
   function matchItem(it) {
     if (!SQ) return true;
     if (SIDS) return !!SIDS[it.id];
-    return [it.title, it.body, it.project, it.id, it.alias].some(function (x) { return String(x == null ? '' : x).toLowerCase().indexOf(SQ) >= 0; });
+    // the plain-substring fallback still honours one label:<name> token, the query a label chip sets
+    var lq = /^label:"?([^"]*)"?$/.exec(SQ);
+    if (lq) return (it.labels || []).some(function (x) { var l = labelOf(x); return !!l && l.name.toLowerCase() === lq[1]; });
+    return [it.title, it.body, it.project, it.id, it.alias].concat((it.labels || []).map(labelName)).some(function (x) { return String(x == null ? '' : x).toLowerCase().indexOf(SQ) >= 0; });
+  }
+  // A label chip's click: the Items search becomes label:"<name>", set whole (no debounce).
+  function labelSearch(id) {
+    var l = labelOf(id);
+    if (!l) return;
+    if (ui.win) closeItemWindow();
+    panelState().q = 'label:"' + l.name + '"';
+    searchState(ui.store).now = true;
+    if (ui.layout === 'narrow') tabState().narrow = 'items';
+    ui.sel = null;
+    render();
   }
   // a store's search state: want / wantView, the query and view object the last request was
   // made for; seq, the request counter (an answer to an older request is dropped); q, ids, err,
@@ -1702,8 +1742,13 @@
       return '<div class="srow"><span class="slabel">' + label + '</span><span class="sval">' + value + '</span>' + (admin ? btn(act, wsT("js.tk.act.edit"), {}) : '') + '</div>';
     }
     var prio = VS.priority.names.map(function (x, i) { return i === VS.priority.default ? wsT("js.tk.team.default", esc(x)) : esc(x); }).join(' &lt; ');
+    var ls = VS.labels || [];
+    var labels = '<div class="srow"><span class="slabel">' + wsT("js.tk.set.labels") + '</span><span class="sval">' + (ls.length ? '' : '<span class="muted">' + wsT("js.tk.set.labels.none") + '</span>') + '</span>' +
+      (admin ? btn('slabel', wsT("js.tk.set.labels.add"), {}) : '') + '</div>' + (ls.length ? '<ul class="slabels">' + ls.map(function (l) {
+        return '<li>' + labelChip(l) + (admin ? '<span class="grow"></span>' + btn('slabel', wsT("js.tk.act.edit"), { label: l.id }) + btn('slabel-rm', wsT("js.tk.set.labels.remove"), { label: l.id }) : '') + '</li>';
+      }).join('') + '</ul>' : '');
     return '<div class="tkset"><h3>' + wsT("js.tk.set.title") + '</h3><p class="muted">' + (admin ? wsT("js.tk.set.intro.admin") : wsT("js.tk.set.intro.member")) + '</p>' +
-      row(wsT("js.tk.set.prio"), prio, 'sprio') + row(wsT("js.tk.set.att"), esc(fmtSize(VS.attachments.max_bytes)), 'satt') + '</div>';
+      row(wsT("js.tk.set.prio"), prio, 'sprio') + row(wsT("js.tk.set.att"), esc(fmtSize(VS.attachments.max_bytes)), 'satt') + labels + '</div>';
   }
 
   function cardTeam(v) {
@@ -2225,6 +2270,7 @@
       (topic ? '' : '<dt>' + wsT("js.tk.prop.due") + '</dt><dd>' + (it.due ? esc(it.due) : '<span class="muted">-</span>') + '</dd>') +
       '<dt>' + wsT("js.tk.prop.creator") + '</dt><dd>' + whoName(it.author) + (VS.members[it.author] && VS.members[it.author].admin ? ' <span class="chip admin">' + wsT("js.tk.team.admin") + '</span>' : '') + '</dd>' +
       '<dt>' + wsT("js.tk.prop.project") + '</dt><dd>' + (it.project ? esc(it.project) : '<span class="muted">-</span>') + '</dd>' +
+      '<dt>' + wsT("js.tk.prop.labels") + '</dt><dd>' + (labelChips(it) || '<span class="muted">-</span>') + '</dd>' +
       '<dt>' + wsT("js.tk.prop.parent") + '</dt><dd>' + (it.parent ? itemRef(it.parent) + ' ' + esc((VS.items[it.parent] || {}).title || '') : '<span class="muted">-</span>') + '</dd>' +
       '<dt>' + wsT("js.tk.prop.id") + '</dt><dd><code>' + esc(it.id) + '</code></dd>' +
       '<dt>' + wsT("js.tk.prop.dates") + '</dt><dd>' + wsT("js.tk.row.created", esc(fmtTs(it.ts))) + (it.edited ? '<br>' + wsT("js.tk.row.edited", esc(fmtTs(it.edited.ts))) : '') + '<br>' + wsT("js.tk.row.activity", esc(fmtTs(it.lastActivity))) + '</dd></dl></section>';
@@ -2344,10 +2390,10 @@
       (ed ? '<h2 id="iw-title" class="iw-edt"><input type="text" id="iw-etitle" data-keep autocomplete="off" value="' + esc(ed.title) + '" aria-label="' + wsT("js.tk.form.title") + '"></h2>' : '<h2 id="iw-title">' + esc(it.title) + '</h2>') +
       headActs(it) + moreBtn(it.id, 'iw-more', true) +
       '<button type="button" class="ia iw-x" data-act="win-close" aria-label="' + wsT("js.tk.win.close") + '"' + tipAttr(wsT("js.tk.win.close")) + '><svg class="i"><use href="#tki-x"/></svg></button></div>' +
-      '<div class="iw-chips">' + kindChip(it) + idCopyBtn(it) + (it.kind === 'topic' ? '' : stChip(it.status) + prChip(it) + dueChip(it) + rollupHtml(it)) + warnHtml(it) + '</div></div>';
+      '<div class="iw-chips">' + kindChip(it) + idCopyBtn(it) + (it.kind === 'topic' ? '' : stChip(it.status) + prChip(it) + dueChip(it) + rollupHtml(it)) + labelChips(it, 'lsearch') + warnHtml(it) + '</div></div>';
     h += '<div class="iw-grid"><div class="iw-main">';
     if (ed) h += '<div class="iw-body iw-edit">' + editorHtml('iw-ebody', { value: ed.body, rows: 5, label: wsT("js.tk.form.body"), pv: 'sh-body' }) +
-      '<input type="text" id="iw-eproj" data-keep autocomplete="off" value="' + esc(ed.project) + '" placeholder="' + wsT("js.tk.form.project") + '" aria-label="' + wsT("js.tk.form.project") + '">' +
+      '<input type="text" id="iw-eproj" data-keep autocomplete="off" value="' + esc(ed.project) + '" placeholder="' + wsT("js.tk.form.project") + '" aria-label="' + wsT("js.tk.form.project") + '">' + labelPickHtml(ed) +
       '<div class="tb">' + btn('iedit-save', wsT("js.tk.dlg.save"), {}, 'primary') + btn('iedit-x', wsT("js.tk.dlg.cancel"), {}) + '<span class="muted">' + wsT("js.tk.edit.hint") + '</span></div></div>';
     else if (it.body || it.mentions.length || it.attachments.length)
       h += '<div class="iw-body">' + (it.body ? textBlock('sh-body', 'items', it.id, it.body, attr('focus', 'body')) : '') + mentionChips(it.mentions) + attChips(it.attachments, true) + '</div>';
@@ -2791,7 +2837,7 @@
 
   // the dialog kinds a data-act opens (a host adds its own through ext.dialogs); every item
   // action is the context menu's or inline, so only the store-wide forms stay modal
-  var DIALOGS = { profile: 1, admin: 1, sprio: 1, satt: 1 };
+  var DIALOGS = { profile: 1, admin: 1, sprio: 1, satt: 1, slabel: 1 };
   function dialogHtml(kind, d) {
     if (kind === 'register') return formHtml(kind, d, registerT(d)); // these need no store view
     if (kind === 'relabel') return formHtml(kind, d, relabelT(d));
@@ -2826,6 +2872,15 @@
             '<input type="text" name="pname' + pi + '" value="' + esc(pn[pi] || '') + '" placeholder="' + esc(wsT("js.tk.form.plevel", pi)) + '" aria-label="' + esc(wsT("js.tk.form.plevel", pi)) + '"></div>';
         }
         T = [wsT("js.tk.dlg.prio.title"), wsT("js.tk.dlg.prio.intro"), rows, wsT("js.tk.dlg.save")];
+        break;
+      }
+      case 'slabel': {
+        // add (no label) or rename / recolour one; the colour input gives #rrggbb in lowercase
+        var el0 = d.label ? labelOf(d.label) : null;
+        T = [wsT(el0 ? "js.tk.dlg.label.edit" : "js.tk.dlg.label.add"), wsT("js.tk.dlg.label.intro"),
+          (el0 ? '<input type="hidden" name="label" value="' + esc(el0.id) + '">' : '') +
+          fld(wsT("js.tk.form.lname"), '<input type="text" name="lname" autocomplete="off" value="' + esc(el0 ? el0.name : '') + '">') +
+          fld(wsT("js.tk.form.lcolor"), '<input type="color" name="lcolor" value="' + esc(el0 ? el0.color : '#6b7280') + '">'), wsT("js.tk.dlg.save")];
         break;
       }
       case 'satt':
@@ -3154,6 +3209,18 @@
         if (def < 0) return toast(wsT("js.tk.toast.prio.default"));
         if (names.join('\n') === VS.priority.names.join('\n') && def === VS.priority.default) { closeDialog(); return toast(wsT("js.tk.toast.unchanged")); }
         evs.push(['roles.set_priority_levels', { names: names, default: def }]);
+        break;
+      }
+      case 'slabel': {
+        var lid = val('label'), ln = val('lname').trim(), lc = val('lcolor').toLowerCase(), cl = lid ? labelOf(lid) : null;
+        if (!ln) return toast(wsT("js.tk.toast.label.name"));
+        if (!lid) { evs.push(['roles.add_label', { name: ln, color: lc }]); break; }
+        if (!cl) { closeDialog(); return; }
+        var lp = { label: lid };
+        if (ln !== cl.name) lp.name = ln;
+        if (lc !== cl.color) lp.color = lc;
+        if (!('name' in lp) && !('color' in lp)) { closeDialog(); return toast(wsT("js.tk.toast.unchanged")); }
+        evs.push(['roles.edit_label', lp]);
         break;
       }
       case 'satt': {
@@ -3929,12 +3996,22 @@
     if (!s || !title) return;
     commit([['item.create', { kind: 'task', title: title, parent: s.item }]], null, function () { s.val = ''; });
   }
+  // The edit mode's label picker: every label of the store's list, each a toggle; the picked
+  // ids live in ui.iedit.labels so a re-render keeps them.
+  function labelPickHtml(ed) {
+    var ls = VS.labels || [];
+    if (!ls.length) return '';
+    return '<div class="lpick" role="group" aria-label="' + esc(wsT("js.tk.form.labels")) + '"><span class="muted">' + wsT("js.tk.form.labels") + '</span>' + ls.map(function (l) {
+      var on = ed.labels.indexOf(l.id) >= 0;
+      return '<button type="button" class="chip lbl' + (on ? ' on' : '') + '"' + attr('act', 'ilabel') + attr('label', l.id) + ' aria-pressed="' + on + '"><span class="ldot" style="background:' + esc(l.color) + '"></span>' + esc(l.name) + '</button>';
+    }).join('') + '</div>';
+  }
   // The item window's edit mode and a comment's edit in place.
   function startEdit(id) {
     var it = VS.items[id];
     if (!it) return;
     if (!(ui.win && ui.item === id)) showItem(id);
-    ui.iedit = { item: id, title: it.title, body: it.body || '', project: it.project || '', mpick: [] };
+    ui.iedit = { item: id, title: it.title, body: it.body || '', project: it.project || '', labels: (it.labels || []).slice(), mpick: [] };
     delete ui.edpv['iw-ebody']; delete ui.eatt['iw-ebody'];
     render();
     if ($('iw-etitle')) $('iw-etitle').focus();
@@ -3945,7 +4022,10 @@
     if (!it) return;
     var ep = { item: it.id }, cur = { title: $('iw-etitle').value, body: $('iw-ebody').value, project: $('iw-eproj').value };
     ['title', 'body', 'project'].forEach(function (f) { if (cur[f] !== (it[f] || '')) ep[f] = cur[f]; });
-    if (!('title' in ep) && !('body' in ep) && !('project' in ep)) { toast(wsT("js.tk.toast.unchanged")); return endEdit(); }
+    // labels the list no longer holds are dropped from the pick, so an edit never writes one
+    var picked = e.labels.filter(function (x) { return !!labelOf(x); });
+    if (picked.join(' ') !== (it.labels || []).join(' ')) ep.labels = picked;
+    if (!('title' in ep) && !('body' in ep) && !('project' in ep) && !('labels' in ep)) { toast(wsT("js.tk.toast.unchanged")); return endEdit(); }
     if ('body' in ep) {
       var km = keptMentions(withPicks(it.mentions, e.mpick), ep.body), ers = refsIn(ep.body);
       if (km.length) ep.mentions = km;
@@ -4692,7 +4772,7 @@
       var a = t.closest('[data-act]');
       if (a) {
         e.preventDefault(); e.stopPropagation();
-        var k = a.getAttribute('data-act'), d = { item: a.getAttribute('data-item'), who: a.getAttribute('data-who'), op: a.getAttribute('data-op'), cid: a.getAttribute('data-cid') };
+        var k = a.getAttribute('data-act'), d = { item: a.getAttribute('data-item'), who: a.getAttribute('data-who'), op: a.getAttribute('data-op'), cid: a.getAttribute('data-cid'), label: a.getAttribute('data-label') };
         if (k.indexOf('wk-') === 0) wkAct(k, a);
         else if (k === 'win-close') closeItemWindow();
         else if (k === 'page-back') leavePage();
@@ -4703,6 +4783,9 @@
         else if (STEPS[k]) itemMenu(d.item, a, null, { step: k, op: d.op, who: d.who });
         else if (k === 'edit') { closeMenu(false); startEdit(d.item); }
         else if (k === 'iedit-save') saveEdit();
+        else if (k === 'ilabel' && ui.iedit) { var il = ui.iedit.labels, ix = il.indexOf(d.label); if (ix >= 0) il.splice(ix, 1); else il.push(d.label); render(); }
+        else if (k === 'lsearch') labelSearch(d.label);
+        else if (k === 'slabel-rm') { var rl = labelOf(d.label); if (rl && window.confirm(wsT("js.tk.set.labels.confirm", rl.name))) commit([['roles.remove_label', { label: rl.id }]]); }
         else if (k === 'iedit-x') endEdit();
         else if (k === 'cedit') startCedit(d.cid);
         else if (k === 'cedit-save') saveCedit();

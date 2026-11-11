@@ -1,0 +1,243 @@
+{
+ "name": "labels-concurrent-name",
+ "comment": "Store labels. ada adds bug and bo concurrently adds Bug: the first in fold order (ada's) keeps the name and bo's add is flagged. ada labels her task bug and ui. bo renames ui to design while ada, concurrently, renames bug to Design: bo's rename is first in fold order, so ada's is flagged. ada removes bug, which leaves the task; bo re-adds bug as a new label the task does not regain and puts it on a new task. Concurrent recolours of ui merge as a register (bo's later write wins, both marked).",
+ "viewers": [
+  "ada.pc"
+ ],
+ "now": "2026-11-02T09:00:00Z",
+ "genesis": {
+  "admins": [
+   "ada",
+   "bo"
+  ],
+  "members": [
+   {
+    "id": "ada",
+    "name": "Ada",
+    "keys": [
+     "ada-k1"
+    ],
+    "leads": []
+   },
+   {
+    "id": "maya",
+    "name": "Maya",
+    "keys": [
+     "maya-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "raj",
+    "name": "Raj",
+    "keys": [
+     "raj-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "bo",
+    "name": "Bo",
+    "keys": [
+     "bo-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "lena",
+    "name": "Lena",
+    "keys": [
+     "lena-k1"
+    ],
+    "leads": [
+     "maya"
+    ]
+   },
+   {
+    "id": "omar",
+    "name": "Omar",
+    "keys": [
+     "omar-k1"
+    ],
+    "leads": [
+     "maya"
+    ]
+   },
+   {
+    "id": "sven",
+    "name": "Sven",
+    "keys": [
+     "sven-k1"
+    ],
+    "leads": [
+     "raj"
+    ]
+   }
+  ]
+ },
+ "commits": {
+  "ada.pc": [
+   {
+    "ts": "2026-11-01T09:00:00Z",
+    "seen": {},
+    "events": [
+     [
+      "roles.add_label",
+      {
+       "name": "bug",
+       "color": "#d14343"
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Ship"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:30:00Z",
+    "seen": {},
+    "events": [
+     [
+      "roles.add_label",
+      {
+       "name": "ui",
+       "color": "#3366cc"
+      }
+     ],
+     [
+      "item.edit",
+      {
+       "item": "ada.pc#2",
+       "labels": [
+        "ada.pc#1",
+        "ada.pc#3"
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T10:10:00Z",
+    "seen": {},
+    "events": [
+     [
+      "roles.edit_label",
+      {
+       "label": "ada.pc#1",
+       "name": "Design"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T11:00:00Z",
+    "seen": {
+     "bo.pc": 2
+    },
+    "events": [
+     [
+      "roles.remove_label",
+      {
+       "label": "ada.pc#1"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T12:00:00Z",
+    "seen": {
+     "bo.pc": 4
+    },
+    "events": [
+     [
+      "roles.edit_label",
+      {
+       "label": "ada.pc#3",
+       "color": "#112233"
+      }
+     ]
+    ]
+   }
+  ],
+  "bo.pc": [
+   {
+    "ts": "2026-11-01T09:05:00Z",
+    "seen": {},
+    "events": [
+     [
+      "roles.add_label",
+      {
+       "name": "Bug",
+       "color": "#000000"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T10:00:00Z",
+    "seen": {
+     "ada.pc": 4
+    },
+    "events": [
+     [
+      "roles.edit_label",
+      {
+       "label": "ada.pc#3",
+       "name": "design"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T11:30:00Z",
+    "seen": {
+     "ada.pc": 6
+    },
+    "events": [
+     [
+      "roles.add_label",
+      {
+       "name": "bug",
+       "color": "#ff8800"
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Fix",
+       "labels": [
+        "bo.pc#3"
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T12:01:00Z",
+    "seen": {
+     "ada.pc": 6
+    },
+    "events": [
+     [
+      "roles.edit_label",
+      {
+       "label": "ada.pc#3",
+       "color": "#445566"
+      }
+     ]
+    ]
+   }
+  ]
+ }
+}

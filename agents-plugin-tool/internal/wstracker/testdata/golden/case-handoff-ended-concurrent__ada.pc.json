@@ -556,6 +556,7 @@
   "attachments": {
    "max_bytes": 10485760
   },
+  "labels": [],
   "members": {
    "ada": {
     "id": "ada",
@@ -738,6 +739,7 @@
     "title": "A",
     "body": "",
     "project": "",
+    "labels": [],
     "due": null,
     "priority": 1,
     "priorityLevel": 1,
@@ -788,6 +790,7 @@
     "title": "B",
     "body": "",
     "project": "",
+    "labels": [],
     "due": null,
     "priority": 1,
     "priorityLevel": 1,
@@ -838,6 +841,7 @@
     "title": "C",
     "body": "",
     "project": "",
+    "labels": [],
     "due": null,
     "priority": 1,
     "priorityLevel": 1,
@@ -886,6 +890,7 @@
     "title": "E",
     "body": "",
     "project": "",
+    "labels": [],
     "due": null,
     "priority": 1,
     "priorityLevel": 1,
@@ -935,6 +940,7 @@
     "title": "D",
     "body": "",
     "project": "",
+    "labels": [],
     "due": null,
     "priority": 1,
     "priorityLevel": 1,

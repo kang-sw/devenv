@@ -199,8 +199,9 @@ function runCase(steps) {
   let t = Date.parse('2026-11-01T00:00:00Z');
   const ids = steps.map(function (st) {
     const stream = st[0], seq = (heads[stream] || 0) + 1, ts = new Date(t += 60000).toISOString().replace('.000Z', 'Z');
-    const seen = {};
+    let seen = {};
     Object.keys(heads).forEach(function (s) { if (s !== stream) seen[s] = heads[s]; });
+    if (st[4]) seen = st[4]; // a step's own seen: a write concurrent with what it leaves out
     const ev = { seq: seq, ts: ts, type: st[1], payload: st[2] };
     if (st[3]) ev.origin = st[3];
     (commits[stream] = commits[stream] || []).push({ stream: stream, ts: ts, signer: stream.split('.')[0] + '-k1', seen: seen, events: [ev] });

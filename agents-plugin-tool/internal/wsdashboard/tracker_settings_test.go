@@ -60,3 +60,45 @@ func TestTrackerStoreSettingsLeaveTheRolesDialog(t *testing.T) {
 		t.Error("the settings dialogs are not dialog kinds")
 	}
 }
+
+// TestTrackerLabelsInTheDashboard pins the label surfaces of tracker.js: the
+// store settings list the labels (admin: add, edit, remove), rows and the
+// item window draw an item's label chips, a chip click searches label:,
+// and the item window's edit mode picks labels and writes them only when
+// they changed.
+func TestTrackerLabelsInTheDashboard(t *testing.T) {
+	data, err := dashboardFS.ReadFile("assets/tracker.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	js := string(data)
+	set := regexp.MustCompile(`function settingsHtml\(admin\) \{\n[\s\S]*?\n  \}\n`).FindString(js)
+	for _, want := range []string{"btn('slabel', wsT(\"js.tk.set.labels.add\")", "btn('slabel-rm', ", "labelChip(l)"} {
+		if !strings.Contains(set, want) {
+			t.Errorf("settingsHtml lacks %q", want)
+		}
+	}
+	irow := regexp.MustCompile(`function irow\(o\) \{\n[\s\S]*?\n  \}\n`).FindString(js)
+	if !strings.Contains(irow, "labelChips(it, 'lsearch')") {
+		t.Error("a row does not draw its label chips")
+	}
+	win := regexp.MustCompile(`function windowHtml\(v, it\) \{\n[\s\S]*?\n  \}\n`).FindString(js)
+	for _, want := range []string{"labelChips(it, 'lsearch')", "labelPickHtml(ed)"} {
+		if !strings.Contains(win, want) {
+			t.Errorf("the item window lacks %q", want)
+		}
+	}
+	search := regexp.MustCompile(`function labelSearch\(id\) \{\n[\s\S]*?\n  \}\n`).FindString(js)
+	if !strings.Contains(search, `panelState().q = 'label:"' + l.name + '"';`) {
+		t.Errorf("a label chip does not search label:\n%s", search)
+	}
+	save := regexp.MustCompile(`function saveEdit\(\) \{\n[\s\S]*?\n  \}\n`).FindString(js)
+	if !strings.Contains(save, "if (picked.join(' ') !== (it.labels || []).join(' ')) ep.labels = picked;") {
+		t.Errorf("saveEdit does not write changed labels:\n%s", save)
+	}
+	for _, typ := range []string{"roles.add_label", "roles.edit_label", "roles.remove_label"} {
+		if !strings.Contains(js, "case '"+typ+"':") {
+			t.Errorf("the activity sentences lack %s", typ)
+		}
+	}
+}
