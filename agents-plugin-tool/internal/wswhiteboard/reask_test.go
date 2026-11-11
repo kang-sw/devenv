@@ -74,7 +74,7 @@ func TestOptionsOnANonPolicyItemWarn(t *testing.T) {
 	}
 }
 
-func TestReaskStampsOnlyARealClassOrOptionsChangeOrAReopen(t *testing.T) {
+func TestReaskStampsOnlyARealTitleClassOrOptionsChangeOrAReopen(t *testing.T) {
 	t0 := time.Date(2026, 11, 9, 10, 0, 0, 0, time.UTC)
 	at := func(d time.Duration) time.Time { return t0.Add(d) }
 	ms := func(d time.Duration) int64 { return at(d).UnixMilli() }
@@ -84,9 +84,9 @@ func TestReaskStampsOnlyARealClassOrOptionsChangeOrAReopen(t *testing.T) {
 		t.Fatalf("a board never re-asked has no re-ask times: %v", got)
 	}
 
-	// Not a re-ask: title, why, recommend, links; the current class; the
-	// identical options.
-	patchAt(t, st, at(time.Second), `<wb:patch id="1"><wb:title>t2</wb:title><wb:why>w</wb:why><wb:link>l</wb:link></wb:patch>`+
+	// Not a re-ask: the current title, why, recommend, links; the current
+	// class; the identical options.
+	patchAt(t, st, at(time.Second), `<wb:patch id="1"><wb:title>tech</wb:title><wb:why>w</wb:why><wb:link>l</wb:link></wb:patch>`+
 		`<wb:patch id="1" class="technical"/><wb:patch id="2"><wb:option>x</wb:option><wb:option>y</wb:option><wb:recommend>a</wb:recommend></wb:patch>`)
 	if got := st.ReaskTimes(); got != nil {
 		t.Fatalf("no patch re-asked: %v", got)
@@ -96,6 +96,11 @@ func TestReaskStampsOnlyARealClassOrOptionsChangeOrAReopen(t *testing.T) {
 	// settled to open each stamp the patch's time, to the millisecond.
 	patchAt(t, st, at(2*time.Second+5*time.Millisecond), `<wb:patch id="1" class="policy"><wb:option>p</wb:option></wb:patch><wb:patch id="2"><wb:option>y</wb:option><wb:option>x</wb:option></wb:patch>`)
 	patchAt(t, st, at(3*time.Second), `<wb:answer id="3" value="ok">ok</wb:answer>`)
+	// A title fix on a settled item leaves it settled and stamps nothing.
+	patchAt(t, st, at(3*time.Second+500*time.Millisecond), `<wb:patch id="3"><wb:title>done, retitled</wb:title></wb:patch>`)
+	if got, ok := st.ReaskTimes()[3]; ok || item(t, st, 3).Status != StatusAnswered {
+		t.Fatalf("a title fix on a settled item: re-ask time %d (stamped %v), item %+v", got, ok, item(t, st, 3))
+	}
 	patchAt(t, st, at(4*time.Second), `<wb:patch id="3" status="open"/>`)
 	want := map[int]int64{1: ms(2*time.Second + 5*time.Millisecond), 2: ms(2*time.Second + 5*time.Millisecond), 3: ms(4 * time.Second)}
 	if got := st.ReaskTimes(); len(got) != 3 || got[1] != want[1] || got[2] != want[2] || got[3] != want[3] {
@@ -113,5 +118,17 @@ func TestReaskStampsOnlyARealClassOrOptionsChangeOrAReopen(t *testing.T) {
 	patchAt(t, st, at(7*time.Second), `<wb:patch id="3" status="open"/>`)
 	if got := st.ReaskTimes(); got[3] != ms(7*time.Second) {
 		t.Fatalf("assumed to open: re-ask times = %v", got)
+	}
+
+	// A rewritten title on an open item is a re-ask; resending it, or editing
+	// only why, recommend, or links, is not.
+	patchAt(t, st, at(8*time.Second), `<wb:patch id="1"><wb:title>t2</wb:title></wb:patch>`)
+	if got := st.ReaskTimes(); got[1] != ms(8*time.Second) {
+		t.Fatalf("title change on an open item: re-ask times = %v", got)
+	}
+	patchAt(t, st, at(9*time.Second), `<wb:patch id="1"><wb:title>t2</wb:title></wb:patch>`+
+		`<wb:patch id="1"><wb:why>w2</wb:why><wb:recommend>a</wb:recommend><wb:link>l2</wb:link></wb:patch>`)
+	if got := st.ReaskTimes(); got[1] != ms(8*time.Second) {
+		t.Fatalf("same title, why, recommend, links: re-ask times = %v", got)
 	}
 }

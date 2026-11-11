@@ -141,14 +141,15 @@ Markdown up to the closing tag.
   since an answer is stored as an option letter under its class: to turn a
   settled item into a policy question under its existing ID, send
   `status="open"`, `class="policy"`, and the options in one `wb:patch`.
-- Re-ask: a `wb:patch` that changes an item's `class` or options, or sets a
-  settled or assumed item back to `open`, asks it again. The dashboard then
-  drops the sent mark of an answer the user sent for it before the patch, so
-  the item shows as waiting on the user. An answer sent before the patch
-  and not yet delivered still reaches you, and it refers to the options it
-  was sent against. A patch that only edits the title, `wb:why`,
-  `wb:recommend`, or links, or resends the current class or options, is not
-  a re-ask.
+- Re-ask: a `wb:patch` that changes the title, `class`, or options of an
+  item open after the patch, or sets a settled or assumed item back to
+  `open`, asks it again. The dashboard then drops the sent mark of an answer
+  the user sent for it before the patch, so the item shows as waiting on the
+  user. An answer sent before the patch and not yet delivered still reaches
+  you, and it refers to the title and options it was sent against. A patch
+  that only edits `wb:why`, `wb:recommend`, or links, or resends the current
+  title, class, or options, is not a re-ask; a title fix on an item the
+  patch leaves settled stamps nothing.
 - `wb:close` collapses a topic's settled items and its body; the topic needs
   an item or a body. `result` is required: one sentence saying how the topic
   ended, shown dimmed beside the closed topic's name. Closing withdraws every
