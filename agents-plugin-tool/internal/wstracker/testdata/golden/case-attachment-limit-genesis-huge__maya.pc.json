@@ -164,6 +164,9 @@
     "kind": "topic",
     "title": "T1",
     "body": "b",
+    "bodyRev": [
+     "maya.pc#1"
+    ],
     "project": "",
     "labels": [],
     "due": null,

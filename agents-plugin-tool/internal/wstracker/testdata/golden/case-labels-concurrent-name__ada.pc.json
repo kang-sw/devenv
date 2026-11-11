@@ -517,6 +517,9 @@
     "kind": "task",
     "title": "Ship",
     "body": "",
+    "bodyRev": [
+     "ada.pc#2"
+    ],
     "project": "",
     "labels": [
      "ada.pc#3"
@@ -570,6 +573,9 @@
     "kind": "task",
     "title": "Polish UI",
     "body": "",
+    "bodyRev": [
+     "maya.pc#1"
+    ],
     "project": "",
     "labels": [],
     "due": null,
