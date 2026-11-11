@@ -474,6 +474,9 @@
     },
     "261110-research-ws-dashboard-background-task-visibility": {
       "registered_at": "2026-11-09T15:23:36Z"
+    },
+    "261111-bug-ws-launcher-dev-daemon-never-replaced": {
+      "registered_at": "2026-11-11T00:10:56Z"
     }
   }
 }
