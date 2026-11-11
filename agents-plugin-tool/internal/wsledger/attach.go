@@ -305,17 +305,81 @@ func (l *Ledger) HasAttachment(oid string) bool {
 	return false
 }
 
+// ErrAttachmentNotLocal: the attachment is stored, but this clone holds no
+// copy of its content yet and the remote may (ReadLocalAttachment).
+var ErrAttachmentNotLocal = errors.New("ledger: attachment content is not in this clone yet")
+
 // ReadAttachment returns the content of attachment oid. It tries every
 // verified attachment tree holding the path, the trees of prefer (the
 // member whose event names the blob) first, then the blobs of this clone's
-// pending writes, fetching a blob this clone lacks from the remote by its
-// id, and serves the first whose content hashes to oid. A blob that does
-// not is never served; a copy another member holds at the same path cannot
-// shadow the right one. ErrAttachmentNotFound when none matches; a fetch
-// that fails is returned as its own error, since the remote may hold it.
+// pending writes, and serves the first whose content hashes to oid. A blob
+// that does not is never served; a copy another member holds at the same
+// path cannot shadow the right one. Only when this clone holds no good
+// copy does it fetch the blobs it lacks from the remote by their ids,
+// under the network lock (a wait WithNetWait bounds), so a read of content
+// already here never waits for a fetch or push in flight.
+// ErrAttachmentNotFound when none matches; a fetch that fails is returned
+// as its own error, since the remote may hold it.
 func (l *Ledger) ReadAttachment(ctx context.Context, oid, prefer string) ([]byte, error) {
+	data, missing, err := l.readAttachment(ctx, oid, prefer)
+	if err == nil || len(missing) == 0 {
+		return data, err
+	}
+	found := false
+	var lastErr, fetchErr error
+	if err := l.withNet(ctx, func() error {
+		for _, blob := range missing {
+			if err := l.git.fetchObject(ctx, blob); err != nil {
+				fetchErr = err
+				continue
+			}
+			got, ok, err := l.git.readBlob(ctx, blob)
+			switch {
+			case err != nil:
+				lastErr = err
+			case !ok:
+				lastErr = fmt.Errorf("blob %s is not in this clone", blob)
+			case blobOID(got) != oid:
+				lastErr = fmt.Errorf("blob %s does not hash to %s", blob, oid)
+			default:
+				data, found = got, true
+				return nil
+			}
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	switch {
+	case found:
+		return data, nil
+	case fetchErr != nil:
+		// The remote may hold it: a transport or credential failure is not
+		// a missing attachment.
+		return nil, fmt.Errorf("ledger: fetch attachment %s: %w", oid, fetchErr)
+	}
+	return nil, fmt.Errorf("%w: %v", ErrAttachmentNotFound, lastErr)
+}
+
+// ReadLocalAttachment is ReadAttachment without the remote: it serves a
+// copy this clone holds and never fetches. ErrAttachmentNotLocal when the
+// attachment is stored but every copy's content is absent here and the
+// store has a remote, which ReadAttachment would ask.
+func (l *Ledger) ReadLocalAttachment(ctx context.Context, oid, prefer string) ([]byte, error) {
+	data, missing, err := l.readAttachment(ctx, oid, prefer)
+	if err != nil && len(missing) > 0 {
+		return nil, fmt.Errorf("%w: %s", ErrAttachmentNotLocal, oid)
+	}
+	return data, err
+}
+
+// readAttachment serves attachment oid from the copies this clone holds.
+// When none is good, missing lists the candidate blobs absent from this
+// clone that the remote may hold (none with no remote), and err is what
+// the read comes to without them: ErrAttachmentNotFound.
+func (l *Ledger) readAttachment(ctx context.Context, oid, prefer string) (data []byte, missing []string, err error) {
 	if !ValidAttachmentOID(oid) {
-		return nil, fmt.Errorf("%w: %q is not an attachment oid", ErrAttachmentNotFound, oid)
+		return nil, nil, fmt.Errorf("%w: %q is not an attachment oid", ErrAttachmentNotFound, oid)
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -342,43 +406,27 @@ func (l *Ledger) ReadAttachment(ctx context.Context, oid, prefer string) ([]byte
 		}
 	}
 	if len(blobs) == 0 {
-		return nil, ErrAttachmentNotFound
+		return nil, nil, ErrAttachmentNotFound
 	}
 	remote := l.hasRemote(ctx)
-	var lastErr, fetchErr error
+	var lastErr error
 	for _, blob := range blobs {
-		data, ok, err := l.git.readBlob(ctx, blob)
-		if err != nil {
+		got, ok, err := l.git.readBlob(ctx, blob)
+		switch {
+		case err != nil:
 			lastErr = err
-			continue
-		}
-		if !ok && remote {
-			if err := l.git.fetchObject(ctx, blob); err != nil {
-				fetchErr = err
-				continue
-			}
-			data, ok, err = l.git.readBlob(ctx, blob)
-			if err != nil {
-				lastErr = err
-				continue
-			}
-		}
-		if !ok {
+		case !ok:
 			lastErr = fmt.Errorf("blob %s is not in this clone", blob)
-			continue
-		}
-		if blobOID(data) != oid {
+			if remote {
+				missing = append(missing, blob)
+			}
+		case blobOID(got) != oid:
 			lastErr = fmt.Errorf("blob %s does not hash to %s", blob, oid)
-			continue
+		default:
+			return got, nil, nil
 		}
-		return data, nil
 	}
-	if fetchErr != nil {
-		// The remote may hold it: a transport or credential failure is not
-		// a missing attachment.
-		return nil, fmt.Errorf("ledger: fetch attachment %s: %w", oid, fetchErr)
-	}
-	return nil, fmt.Errorf("%w: %v", ErrAttachmentNotFound, lastErr)
+	return nil, missing, fmt.Errorf("%w: %v", ErrAttachmentNotFound, lastErr)
 }
 
 // noFilterWarning is the warning a filtered fetch the server ignored

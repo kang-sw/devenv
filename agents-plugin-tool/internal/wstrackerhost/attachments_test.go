@@ -209,7 +209,7 @@ func (r *deadlineRunner) RunGit(ctx context.Context, root string, args ...string
 
 // TestReadAttachmentBoundsTheFetch: a blob the clone lacks is fetched on
 // demand under the network timeout, not only under the caller's context
-// (which may have none), since the fetch holds the store's lock.
+// (which may have none), since the fetch holds the store's network lock.
 func TestReadAttachmentBoundsTheFetch(t *testing.T) {
 	w := newWorld(t)
 	if out, err := exec.Command("git", "-C", w.remote, "config", "uploadpack.allowFilter", "true").CombinedOutput(); err != nil {

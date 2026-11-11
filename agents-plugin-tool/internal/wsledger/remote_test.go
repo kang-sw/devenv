@@ -60,8 +60,10 @@ func (h *hookRunner) RunGit(ctx context.Context, root string, args ...string) ([
 	return h.inner.RunGit(ctx, root, args...)
 }
 
+// isPushOf reports whether args is a push whose last refspec updates ref,
+// from the local ref or from a commit id.
 func isPushOf(args []string, ref string) bool {
-	if len(args) == 0 || strings.TrimPrefix(args[len(args)-1], "+") != ref+":"+ref {
+	if len(args) == 0 || !strings.HasSuffix(args[len(args)-1], ":"+ref) {
 		return false
 	}
 	for _, a := range args {

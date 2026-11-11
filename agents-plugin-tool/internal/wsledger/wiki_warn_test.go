@@ -67,10 +67,10 @@ func TestWikiFetchFailureReportedOnce(t *testing.T) {
 	fr.set("", true)
 	ctx := context.Background()
 	if err := bo.withLock(ctx, func() error {
-		if err := bo.fetchRemote(ctx); err != nil {
+		if err := bo.fetchRemote(ctx, held, nil); err != nil {
 			return err
 		}
-		return bo.fetchRemote(ctx)
+		return bo.fetchRemote(ctx, held, nil)
 	}); err != nil {
 		t.Fatal(err)
 	}

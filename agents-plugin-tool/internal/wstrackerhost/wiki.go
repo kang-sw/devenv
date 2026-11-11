@@ -10,7 +10,8 @@ import (
 
 // Wikis: the host's thin spine over wsledger's wiki branches. Every call
 // runs on the opened store under its lock; a save on a store with a remote
-// is a network call (it fetches and pushes the wiki refs alone), bounded
+// is a network call (it fetches and pushes the wiki refs alone, under the
+// store's network lock, and keeps the store's lock across them), bounded
 // like a sync but not recorded as one: the store's sync state is the
 // ledger's, and a save that landed says nothing about a standing ledger
 // sync error, nor stands in for the next check. A save's own failure is
@@ -183,7 +184,9 @@ func (h *Host) WikiSave(ctx context.Context, id string, s WikiSave) (wsledger.Wi
 		}
 		edit.Images = append(edit.Images, wsledger.WikiImage{OID: attachmentOID(img.Data), Ext: imageExt(mime), Data: img.Data})
 	}
-	err := h.with(ctx, id, func(st *store) error {
+	// The images are checked under the store's lock; the save takes it
+	// again itself (applyGate), after the network lock.
+	prepare := func(st *store) error {
 		if len(s.Staged) > 0 {
 			held, err := st.ledger.WikiImages(ctx, edit.Wiki)
 			if err != nil && !errors.Is(err, wsledger.ErrWikiNotFound) && !errors.Is(err, wsledger.ErrWikiBadName) {
@@ -218,10 +221,16 @@ func (h *Host) WikiSave(ctx context.Context, id string, s WikiSave) (wsledger.Wi
 				}
 			}
 		}
+		return nil
+	}
+	err := h.withNet(ctx, id, func(ctx context.Context, st *store, e StoreEntry, l *wsledger.Ledger) error {
+		if err := h.locked(st, func() error { return prepare(st) }); err != nil {
+			return err
+		}
 		saveCtx, cancel := context.WithTimeout(ctx, networkTimeout)
 		defer cancel()
 		var err error
-		res, err = st.ledger.WikiSave(saveCtx, edit)
+		res, err = l.WikiSave(saveCtx, edit)
 		return err
 	})
 	return res, err

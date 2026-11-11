@@ -40,6 +40,14 @@ import (
 // refs (refs/heads/wiki/<name>, wiki.go) are fetched last, whole, with
 // their own follow-the-remote rules; they are not ledger refs, so a wiki
 // fetch or push failure is a WarnWikiSyncFailed, never a failed sync.
+//
+// Locks: every git fetch and push runs under the network lock (withNet).
+// A fetch writes only objects and the refs/ledger/remote/ snapshot, which
+// no local read looks at, and a push writes nothing here, so Fetch and
+// Sync run them outside the store lock and take it for the steps between:
+// choosing what to push, recording what landed (refs/ledger/known/), and
+// applying the snapshot to the local copies. A reader under the store lock
+// therefore sees a fetch applied whole or not at all.
 
 const (
 	remoteName  = "origin"
@@ -263,30 +271,60 @@ func (l *Ledger) loadKnownOwn(ctx context.Context) error {
 	return nil
 }
 
-// fetchRemote fetches and applies the snapshot to the local copies, then
-// fetches and absorbs the wiki refs. A failed wiki fetch is a warning, not
-// an error: the ledger refs are absorbed already, and the wikis stay as
-// the last fetch left them.
-func (l *Ledger) fetchRemote(ctx context.Context) error {
+// fetched is what the network phase of a fetch learned besides the
+// snapshot refs it moved.
+type fetched struct {
+	noFilter bool  // the server ignored the attachment filter
+	wikiErr  error // the wiki fetch failed; the ledger refs were fetched
+}
+
+// fetchNetwork is the network phase of a fetch: the ledger refs, then the
+// wiki refs, into the snapshot namespace. It touches no local copy, so it
+// needs the network lock only.
+func (l *Ledger) fetchNetwork(ctx context.Context) (fetched, error) {
 	noFilter, err := l.git.fetchRefs(ctx)
 	if err != nil {
-		return fmt.Errorf("ledger: fetch: %w", err)
+		return fetched{}, fmt.Errorf("ledger: fetch: %w", err)
 	}
-	if noFilter && !l.noFilterWarned {
+	return fetched{noFilter: noFilter, wikiErr: l.git.fetchWikiRefs(ctx)}, nil
+}
+
+// absorbFetched is the apply step of a fetch, under the store lock: it
+// applies the snapshot to the local copies, ledger refs and then wikis. A
+// failed wiki fetch is a warning, not an error: the ledger refs are
+// absorbed, and the wikis stay as the last fetch left them.
+func (l *Ledger) absorbFetched(ctx context.Context, f fetched) error {
+	if f.noFilter && !l.noFilterWarned {
 		l.noFilterWarned = true
 		l.pendingWarns = append(l.pendingWarns, noFilterWarning(attachPrefix+"*"))
 	}
 	if err := l.absorbRemote(ctx); err != nil {
 		return err
 	}
-	if err := l.git.fetchWikiRefs(ctx); err != nil {
+	if f.wikiErr != nil {
 		// A Sync can fetch twice before its report drains this (a reissue
 		// publishes again); the report carries the failure once.
 		l.addPending(Warning{Ref: wikiPrefix + "*", Kind: WarnWikiSyncFailed,
-			Detail: "wiki fetch failed: " + err.Error() + "; the wikis stay as the last fetch left them and the next sync retries"})
+			Detail: "wiki fetch failed: " + f.wikiErr.Error() + "; the wikis stay as the last fetch left them and the next sync retries"})
 		return nil
 	}
 	return l.absorbWiki(ctx)
+}
+
+// fetchRemote fetches, then applies the snapshot in one step that goes on
+// with then (nil: nothing more), so what follows the fetch reads the store
+// exactly as the fetch left it.
+func (l *Ledger) fetchRemote(ctx context.Context, step stepFn, then func() error) error {
+	f, err := l.fetchNetwork(ctx)
+	if err != nil {
+		return err
+	}
+	return step(func() error {
+		if err := l.absorbFetched(ctx, f); err != nil || then == nil {
+			return err
+		}
+		return then()
+	})
 }
 
 // addPending queues w for the next report, replacing a queued warning of
@@ -418,41 +456,113 @@ func (l *Ledger) ownJoined() bool {
 	return false
 }
 
+// ledgerRefs lists the local ledger refs and the value of each last known
+// on the remote, both by branch name.
+func (l *Ledger) ledgerRefs(ctx context.Context) (local, known map[string]string, err error) {
+	if local, err = l.git.listLedgerRefs(ctx, "refs/heads/"); err != nil {
+		return nil, nil, err
+	}
+	knownRaw, err := l.git.listLedgerRefs(ctx, knownPrefix)
+	if err != nil {
+		return nil, nil, err
+	}
+	return local, rekey(knownRaw, knownPrefix), nil
+}
+
 // pushAll publishes what this clone wrote: a genesis it created, then the
 // claim of its join, then its own ref, each only after the one before is on
 // the remote. A lost genesis or claim race fetches, so the remote's ref
 // replaces the local one and the view converges with everyone's.
-func (l *Ledger) pushAll(ctx context.Context) (bool, error) {
-	local, err := l.git.listLedgerRefs(ctx, "refs/heads/")
-	if err != nil {
-		return false, err
-	}
-	knownRaw, err := l.git.listLedgerRefs(ctx, knownPrefix)
-	if err != nil {
-		return false, err
-	}
-	known := rekey(knownRaw, knownPrefix)
+//
+// Each push runs between two steps: one that reads the refs and decides,
+// one that records what landed. A create-once ref moves locally only under
+// the network lock, which the caller holds, so it is pushed by name; this
+// clone's own refs move whenever any process closes a batch, so they are
+// pushed as the commits the deciding step read.
+func (l *Ledger) pushAll(ctx context.Context, step stepFn) (bool, error) {
 	lost := func() error {
-		if err := l.fetchRemote(ctx); err != nil {
-			return err
-		}
-		return l.refresh(ctx)
+		return l.fetchRemote(ctx, step, func() error { return l.refresh(ctx) })
 	}
-	if g := local[genesisRef]; g != "" && known[genesisRef] == "" {
+	genesis := ""
+	if err := step(func() error {
+		local, known, err := l.ledgerRefs(ctx)
+		if err == nil && known[genesisRef] == "" {
+			genesis = local[genesisRef]
+		}
+		return err
+	}); err != nil {
+		return false, err
+	}
+	if genesis != "" {
 		out, err := l.git.push(ctx, genesisRef, nil)
 		if err != nil {
 			return false, fmt.Errorf("ledger: push: %w", err)
 		}
 		if out == pushRejected {
-			if err := lost(); err != nil {
-				return false, err
-			}
-		} else if err := l.setKnown(ctx, genesisRef, g); err != nil {
+			err = lost()
+		} else {
+			err = step(func() error { return l.setKnown(ctx, genesisRef, genesis) })
+		}
+		if err != nil {
 			return false, err
 		}
 	}
-	own := l.ownRef()
-	if c := claimRef(l.member); local[own] != "" && local[c] != "" && known[c] == "" && l.ownJoined() {
+	// The claim, and with it what the own ref's push needs: decided in one
+	// step, since most syncs have no claim left to push.
+	var claim, own, attach, tip, atip string
+	var specs []pushSpec
+	plan := func() error {
+		claim, specs = "", nil
+		local, known, err := l.ledgerRefs(ctx)
+		if err != nil {
+			return err
+		}
+		own, attach = l.ownRef(), l.ownAttachRef()
+		c := claimRef(l.member)
+		if local[own] != "" && local[c] != "" && known[c] == "" && l.ownJoined() {
+			claim = local[c]
+			return nil
+		}
+		if l.pendingLocked().IDTaken {
+			return nil
+		}
+		tip, atip = local[own], local[attach]
+		if tip == "" || l.foreign || l.ownBlocked {
+			return nil
+		}
+		if tip == known[own] && (atip == "" || atip == known[attach]) {
+			return nil
+		}
+		if l.ownJoined() && known[c] == "" && local[c] != "" {
+			return nil // the claim did not reach the remote
+		}
+		// Leased on the value last known on the remote rather than a plain
+		// fast-forward, so a Sync that runs before any fetch noticed a deletion
+		// or a rewind (the push-delay timer runs Sync unattended) cannot push
+		// the ref back; only Restore does. The local tip always descends from
+		// that value, which the guard keeps true for this forced push.
+		lease := known[own]
+		if lease != "" && !l.git.isAncestor(ctx, lease, tip) {
+			return nil
+		}
+		// The attachment ref goes in the same atomic push, first in the refspec
+		// list as in the local commit order, so the remote never holds an event
+		// commit without the blobs it names.
+		if atip != "" && atip != known[attach] {
+			alease := known[attach]
+			if alease != "" && !l.git.isAncestor(ctx, alease, atip) {
+				return nil
+			}
+			specs = append(specs, pushSpec{Ref: attach, Lease: &alease, Src: atip})
+		}
+		specs = append(specs, pushSpec{Ref: own, Lease: &lease, Src: tip})
+		return nil
+	}
+	if err := step(plan); err != nil {
+		return false, err
+	}
+	if claim != "" {
+		c := claimRef(l.member)
 		out, err := l.git.push(ctx, c, nil)
 		if err != nil {
 			return false, fmt.Errorf("ledger: push: %w", err)
@@ -460,46 +570,21 @@ func (l *Ledger) pushAll(ctx context.Context) (bool, error) {
 		if out == pushRejected {
 			return false, lost()
 		}
-		if err := l.setKnown(ctx, c, local[c]); err != nil {
+		if err := step(func() error {
+			if err := l.setKnown(ctx, c, claim); err != nil {
+				return err
+			}
+			return plan()
+		}); err != nil {
 			return false, err
 		}
-		known[c] = local[c]
-	}
-	if l.pendingLocked().IDTaken {
-		return false, nil
-	}
-	attach := l.ownAttachRef()
-	tip, atip := local[own], local[attach]
-	if tip == "" || l.foreign || l.ownBlocked {
-		return false, nil
-	}
-	if tip == known[own] && (atip == "" || atip == known[attach]) {
-		return false, nil
-	}
-	if l.ownJoined() && known[claimRef(l.member)] == "" && local[claimRef(l.member)] != "" {
-		return false, nil // the claim did not reach the remote
-	}
-	// Leased on the value last known on the remote rather than a plain
-	// fast-forward, so a Sync that runs before any fetch noticed a deletion
-	// or a rewind (the push-delay timer runs Sync unattended) cannot push
-	// the ref back; only Restore does. The local tip always descends from
-	// that value, which the guard keeps true for this forced push.
-	lease := known[own]
-	if lease != "" && !l.git.isAncestor(ctx, lease, tip) {
-		return false, nil
-	}
-	// The attachment ref goes in the same atomic push, first in the refspec
-	// list as in the local commit order, so the remote never holds an event
-	// commit without the blobs it names.
-	var specs []pushSpec
-	if atip != "" && atip != known[attach] {
-		alease := known[attach]
-		if alease != "" && !l.git.isAncestor(ctx, alease, atip) {
-			return false, nil
+		if claim != "" {
+			return false, nil // the claim is still not known on the remote
 		}
-		specs = append(specs, pushSpec{Ref: attach, Lease: &alease})
 	}
-	specs = append(specs, pushSpec{Ref: own, Lease: &lease})
+	if len(specs) == 0 {
+		return false, nil
+	}
 	out, err := l.git.pushRefs(ctx, specs...)
 	if err != nil {
 		return false, fmt.Errorf("ledger: push: %w", err)
@@ -509,12 +594,14 @@ func (l *Ledger) pushAll(ctx context.Context) (bool, error) {
 		// follows every push tells which and warns.
 		return false, nil
 	}
-	if len(specs) > 1 {
-		if err := l.setKnown(ctx, attach, atip); err != nil {
-			return false, err
+	return true, step(func() error {
+		if len(specs) > 1 {
+			if err := l.setKnown(ctx, attach, atip); err != nil {
+				return err
+			}
 		}
-	}
-	return true, l.setKnown(ctx, own, tip)
+		return l.setKnown(ctx, own, tip)
+	})
 }
 
 // knownOwnMaxSeq is the highest seq of this clone's ref the remote is known
@@ -617,7 +704,11 @@ func (l *Ledger) onDeadline() {
 	defer cancel()
 	if _, err := l.Sync(ctx); err != nil {
 		l.mu.Lock()
-		_ = l.extendDeadline(l.now())
+		// A ledger closed while the sync was on the network (its store was
+		// unregistered) writes no deadline into a directory it has left.
+		if !l.closed {
+			_ = l.extendDeadline(l.now())
+		}
 		l.mu.Unlock()
 	}
 }
@@ -637,7 +728,9 @@ func Register(ctx context.Context, opts Options, url string) (*Ledger, error) {
 	}
 	// pushed is the store's genesis once the push landed, nil before.
 	var pushed json.RawMessage
-	err = l.withLock(ctx, func() error {
+	// A registration keeps the store lock across its network calls: the
+	// store has no reader until it returns.
+	err = l.withNetAndLock(ctx, func() error {
 		if err := l.git.initBare(ctx); err != nil {
 			return err
 		}
@@ -653,7 +746,7 @@ func Register(ctx context.Context, opts Options, url string) (*Ledger, error) {
 		if err := l.initClone(); err != nil {
 			return err
 		}
-		if err := l.fetchRemote(ctx); err != nil {
+		if err := l.fetchRemote(ctx, held, nil); err != nil {
 			return err
 		}
 		refs, err := l.git.listRefs(ctx, genesisRef)
@@ -675,7 +768,7 @@ func Register(ctx context.Context, opts Options, url string) (*Ledger, error) {
 		if err := l.joinLocked(ctx, created); err != nil {
 			return err
 		}
-		landed, err := l.pushAll(ctx)
+		landed, err := l.pushAll(ctx, held)
 		if err != nil {
 			return err
 		}
@@ -689,10 +782,10 @@ func Register(ctx context.Context, opts Options, url string) (*Ledger, error) {
 		// A store that had no remote until now publishes its wikis too; a
 		// wiki the remote refuses is reported (noteUnpublished), and the next
 		// sync retries it.
-		if _, err := l.pushLocalWikis(ctx); err != nil {
+		if _, err := l.pushLocalWikis(ctx, held); err != nil {
 			return err
 		}
-		if err := l.fetchRemote(ctx); err != nil {
+		if err := l.fetchRemote(ctx, held, nil); err != nil {
 			return err
 		}
 		if err := l.refresh(ctx); err != nil {
@@ -738,7 +831,9 @@ func (e *PushedError) Unwrap() error { return e.Err }
 // WarnNotRestored in the next report names the attachment ref, which a
 // clone holding the blobs (the member's own) restores.
 func (l *Ledger) Restore(ctx context.Context, ref string) error {
-	return l.withLock(ctx, func() error {
+	// Its fetch and its push are one decision, so the store lock stays
+	// held between them.
+	return l.withNetAndLock(ctx, func() error {
 		if !l.hasRemote(ctx) {
 			return errors.New("ledger: the store has no remote")
 		}
@@ -828,7 +923,7 @@ func (l *Ledger) Restore(ctx context.Context, ref string) error {
 				return err
 			}
 		}
-		if err := l.fetchRemote(ctx); err != nil {
+		if err := l.fetchRemote(ctx, held, nil); err != nil {
 			return err
 		}
 		return l.refresh(ctx)
@@ -843,7 +938,9 @@ func (l *Ledger) Restore(ctx context.Context, ref string) error {
 // were never published. It returns the new clone id.
 func (l *Ledger) MoveToFreshClone(ctx context.Context) (string, error) {
 	var fresh string
-	err := l.withLock(ctx, func() error {
+	// Under the network lock too, though it never talks to the remote: a
+	// push in flight would publish the commits this takes back.
+	err := l.withNetAndLock(ctx, func() error {
 		if err := l.refresh(ctx); err != nil {
 			return err
 		}

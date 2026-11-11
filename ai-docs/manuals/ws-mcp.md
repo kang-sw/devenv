@@ -447,8 +447,12 @@ each later round that changed something (`wstrackerhost` `StartPoll`,
 `PollOnce`), when the 10 s store watch sees a write by another process, and
 when a reload that a page read stopped waiting for lands with a view other
 than the one that read was served (`now` aside): a page read waits at most
-500 ms behind a push or fetch holding the store's lock, or a slow reload,
-then serves the last folded state (`ViewWithin`). The daemon's tracker git
+500 ms behind whatever holds the store's lock (a wiki save, another
+process's write), or a slow reload, then serves the last folded state
+(`ViewWithin`). A check or sync holds that lock only for its local steps:
+its fetch and push run under the store's network lock (`net.lock`), which
+only a read of an attachment not yet fetched waits for, with the same
+500 ms bound. The daemon's tracker git
 runs resolve the git executable once per `PATH`. Both pages' SSE streams send `event:
 tracker` with `{"rev": N}` when it differs from what that stream last sent
 (once on connect too), and the page re-reads.
