@@ -477,6 +477,9 @@
     },
     "261111-bug-ws-launcher-dev-daemon-never-replaced": {
       "registered_at": "2026-11-11T00:10:56Z"
+    },
+    "261111-refactor-ws-minimize-recurring-fs-touches": {
+      "registered_at": "2026-11-11T00:33:24Z"
     }
   }
 }
