@@ -2593,7 +2593,14 @@
       });
       gfiles.appendChild(sec);
     });
-    if (!any) gfiles.appendChild(mk("div", "gempty", wsT("js.git.clean")));
+    // A clean tree shows a quiet empty state centred in the list's room.
+    gfiles.classList.toggle("clean", !any);
+    if (!any) {
+      var clean = mk("div", "gclean");
+      clean.innerHTML = '<svg class="i" aria-hidden="true"><use href="#i-check"/></svg>';
+      clean.appendChild(mk("span", "", wsT("js.git.clean")));
+      gfiles.appendChild(clean);
+    }
     if (v.truncated) gfiles.appendChild(mk("div", "gempty", wsT("js.git.truncated", 300)));
   }
   function gitMsg(text, err) {

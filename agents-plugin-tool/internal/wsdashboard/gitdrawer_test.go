@@ -395,3 +395,24 @@ func TestGitDrawerRoutes(t *testing.T) {
 	}
 	release()
 }
+
+// TestGitPanelCompactActionsAndCleanState pins the git panel's look: the
+// fetch, pull, and push buttons are chip-sized, and a clean tree shows a
+// quiet empty state centred in the change list's room instead of a list
+// line.
+func TestGitPanelCompactActionsAndCleanState(t *testing.T) {
+	css, js := mustAsset(t, "dashboard.css"), mustAsset(t, "dashboard.js")
+	for _, want := range []string{
+		".gact { height: 20px; padding: 0 9px; gap: 3px; font-size: 12px; }",
+		".gfiles.clean { align-content: center; justify-items: center; }",
+	} {
+		if !strings.Contains(css, want) {
+			t.Errorf("the stylesheet lacks %q", want)
+		}
+	}
+	for _, want := range []string{`gfiles.classList.toggle("clean", !any);`, `var clean = mk("div", "gclean");`, `clean.appendChild(mk("span", "", wsT("js.git.clean")));`} {
+		if !strings.Contains(js, want) {
+			t.Errorf("the page script lacks %q", want)
+		}
+	}
+}
