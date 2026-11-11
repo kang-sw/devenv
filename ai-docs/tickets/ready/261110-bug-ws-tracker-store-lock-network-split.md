@@ -4,8 +4,8 @@ related:
   261110-bug-ws-dashboard-daemon-lock-scope: "its Decision 6 bounds wiki and attachment reads at 500 ms until this split lands"
 sage-review-design: completed
 sage-review-completeness: completed
-sage-review-design-reviewed: 4f80ceb654c8de73
-sage-review-completeness-reviewed: 4f80ceb654c8de73
+sage-review-design-reviewed: 17436bf2ea19af7b
+sage-review-completeness-reviewed: 17436bf2ea19af7b
 ---
 
 # Tracker store lock: split network work from local reads
@@ -93,7 +93,7 @@ after the daemon lock-scope fix, as its own ticket ((633) a).
 |---|---|---|
 | scope.span | multi-file | agents-plugin-tool/internal/wstrackerhost/host.go, poll.go, attachments.go, wiki.go, view.go, pageview.go; agents-plugin-tool/internal/wsledger/store.go (withLock holds l.mu and the flock across Fetch and Sync, store.go#L350-L356) |
 | scope.surface | cross-module | wstrackerhost store locking and wsledger Ledger.withLock (Decisions 2 and 5) |
-| scope.new_public_symbol | likely | a wsledger split of Fetch and Sync into a network phase and an apply step; names chosen in planning |
+| scope.new_public_symbol | yes | a wsledger split of Fetch and Sync into a network phase and an apply step; names chosen in planning |
 | scope.new_type_contract | no | the ledger's event and cursor contracts are unchanged |
 | scope.test_surface | existing | agents-plugin-tool/internal/wstrackerhost/lockwait_test.go, pageview_test.go, wiki_test.go, host_test.go; wsledger store tests |
 | complexity.reuse_points | confirmed | storeLock lockWithin in host.go; the existing `<store>/lock` flock pattern in wsledger for `<store>/net.lock` |
