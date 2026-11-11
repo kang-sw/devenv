@@ -24,6 +24,7 @@ type View struct {
 	Items         map[string]ItemView    `json:"items"`
 	ItemOrder     []string               `json:"itemOrder"`
 	Assignments   map[string]Assignment  `json:"assignments"`
+	Requests      map[string]RequestView `json:"requests"` // take requests
 	Rules         map[string]RuleView    `json:"rules"`
 	Comments      map[string]CommentView `json:"comments"`
 	Events        []EventView            `json:"events"`
@@ -140,6 +141,38 @@ type ItemView struct {
 	// Backrefs are the shown items, then the shown comments on shown items,
 	// that reference this item, in fold order; its own thread is excluded.
 	Backrefs []string `json:"backrefs"`
+	// Open is the item's opening while it is open; Claimable reports that
+	// the viewer may claim it now (in its scope, not its fallback holder, the
+	// item not hidden). Requests are its take requests, in fold order.
+	Open      *OpenView `json:"open"`
+	Claimable bool      `json:"claimable"`
+	Requests  []string  `json:"requests"`
+}
+
+// OpenView is an open item's opening: the item.open event, its writer, and
+// its scope (team: the opener's org subtree; store: every member).
+type OpenView struct {
+	ID    string `json:"id"`
+	By    string `json:"by"`
+	Scope string `json:"scope"`
+	TS    string `json:"ts"`
+}
+
+// RequestView is a take request: By asks for the live assignment
+// Assignment that Assignee holds. State is pending, approved, denied,
+// withdrawn, or lapsed (the assignment ended first); Ended is the event
+// that ended it. Assignment is nil when the request named nothing live.
+type RequestView struct {
+	ID         string  `json:"id"`
+	Item       string  `json:"item"`
+	By         string  `json:"by"`
+	Assignee   string  `json:"assignee"`
+	Assignment *string `json:"assignment"`
+	State      string  `json:"state"`
+	Note       *string `json:"note"`
+	AnswerNote *string `json:"answerNote"`
+	TS         string  `json:"ts"`
+	Ended      *Ended  `json:"ended"`
 }
 
 type Rollup struct {
@@ -302,7 +335,16 @@ type My struct {
 	Given       []string `json:"given"`
 	Created     []string `json:"created"`
 	Team        []Team   `json:"team"`
+	Requests    MyReqs   `json:"requests"`
 	Badge       []string `json:"badge"`
+}
+
+// MyReqs are the pending take requests on shown items, in fold order:
+// Incoming, those the viewer may answer (the named assignment's holder or the
+// item's creator) and did not file; Outgoing, those the viewer filed.
+type MyReqs struct {
+	Incoming []string `json:"incoming"`
+	Outgoing []string `json:"outgoing"`
 }
 
 type Today struct {
@@ -641,7 +683,16 @@ func (r *replayed) view(stream string, now time.Time, staleDays int) *View {
 			Counted: r.counted(it, status[id]), Children: []string{}, Assignments: orEmpty(recIDs), Pending: orEmpty(pend),
 			Thread: orEmpty(threads[id]), Depth: len(chain) - 1,
 			Mentions: append([]string{}, it.mentions...), Attachments: attachmentViews(it.attachments),
-			Refs: append([]string{}, it.refs...), Backrefs: orEmpty(backrefs[id])}
+			Refs: append([]string{}, it.refs...), Backrefs: orEmpty(backrefs[id]), Requests: []string{}}
+		if o := S.activeOpen(it); o != nil {
+			iv.Open = &OpenView{ID: o.node.id, By: o.by, Scope: o.scope, TS: ts(o.node.ts)}
+			iv.Claimable = !it.hidden && S.liveFallback(id).to != v && S.inScope(o, v)
+		}
+		for _, rid := range S.rorder {
+			if S.reqs[rid].item == id {
+				iv.Requests = append(iv.Requests, rid)
+			}
+		}
 		if it.parent != "" && S.items[it.parent] != nil {
 			iv.Parent = &it.parent
 		}
@@ -694,6 +745,17 @@ func (r *replayed) view(stream string, now time.Time, staleDays int) *View {
 		}
 	}
 	walkOrder("")
+
+	vw.Requests = map[string]RequestView{}
+	for _, rid := range S.rorder {
+		q := S.reqs[rid]
+		rv := RequestView{ID: rid, Item: q.item, By: q.by, Assignee: q.holder, Assignment: nz(q.of), State: q.state,
+			Note: nz(q.note), AnswerNote: nz(q.answerNote), TS: ts(q.node.ts)}
+		if q.ended != nil {
+			rv.Ended = &Ended{ID: q.ended.id, Type: q.ended.typ, TS: ts(q.ended.ts), By: q.ended.member}
+		}
+		vw.Requests[rid] = rv
+	}
 
 	vw.Rules = map[string]RuleView{}
 	for _, ru := range S.rules {
@@ -867,7 +929,20 @@ func (r *replayed) viewerLists(vw *View, A []*Assignment, v string, children map
 	confirms := filter(A, func(a *Assignment) bool {
 		return a.By == v && a.To != v && a.State == "live" && a.Status == "awaiting"
 	})
-	my := My{Given: []string{}, Created: []string{}, Team: []Team{}, Badge: []string{}}
+	my := My{Given: []string{}, Created: []string{}, Team: []Team{}, Badge: []string{},
+		Requests: MyReqs{Incoming: []string{}, Outgoing: []string{}}}
+	for _, rid := range r.S.rorder {
+		q := r.S.reqs[rid]
+		it := r.S.items[q.item]
+		if q.state != "pending" || it == nil || it.hidden {
+			continue
+		}
+		if q.by == v {
+			my.Requests.Outgoing = append(my.Requests.Outgoing, rid)
+		} else if q.holder == v || it.author == v || r.S.creatorGone(it, v) {
+			my.Requests.Incoming = append(my.Requests.Incoming, rid)
+		}
+	}
 	for _, id := range r.S.iorder {
 		it := items[id]
 		if it.Hidden {
@@ -1034,6 +1109,9 @@ func (r *replayed) viewerLists(vw *View, A []*Assignment, v string, children map
 	}
 	for _, a := range pendingToMe {
 		my.Badge = append(my.Badge, "p:"+a.ID)
+	}
+	for _, rid := range my.Requests.Incoming {
+		my.Badge = append(my.Badge, "q:"+rid)
 	}
 	for _, nt := range vw.Notices {
 		my.Badge = append(my.Badge, nt.Key)

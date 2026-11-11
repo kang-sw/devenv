@@ -511,13 +511,17 @@
      }
     ],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    }
   },
   "itemOrder": [
    "maya.pc#1"
   ],
   "assignments": {},
+  "requests": {},
   "rules": {},
   "comments": {},
   "events": [
@@ -781,6 +785,10 @@
      "last": null
     }
    ],
+   "requests": {
+    "incoming": [],
+    "outgoing": []
+   },
    "badge": []
   },
   "stats": {

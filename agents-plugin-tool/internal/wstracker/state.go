@@ -112,8 +112,8 @@ type item struct {
 	parent, author       string
 	// after is the sibling anchor (528) when afterSet: "" = first. Unset
 	// (every item created before the field) = last.
-	after    string
-	afterSet bool
+	after       string
+	afterSet    bool
 	ts          time.Time
 	hidden      bool
 	edited      *node
@@ -122,6 +122,30 @@ type item struct {
 	attachments []attachment
 	refs        []string
 	labels      labelSet // label ids as written; the view drops removed ones
+	open        *opening // the latest item.open; active while its ended is nil
+}
+
+// opening is an item.open: the creator (or the admin standing in for a
+// removed one) opens a task nobody else holds to a scope, team (the
+// opener's org subtree) or store, and one member in it claims it. It ends
+// when the item is claimed or assigned, when anyone else comes to hold it,
+// or when it is withdrawn (item.unopen); ended is that event.
+type opening struct {
+	node      *node
+	by, scope string
+	ended     *node
+}
+
+// takeReq is an item.request: by asks for the live assignment of (a record
+// id) that holder holds. state: pending -> approved | denied | withdrawn
+// (item.unrequest, or the requester removed) | lapsed (the assignment
+// ended first); ended is that event.
+type takeReq struct {
+	node                 *node
+	id, item, by, holder string
+	of, note, answerNote string
+	state                string
+	ended                *node
 }
 
 // labelSet is an item's labels register value: label ids, in the order
@@ -240,6 +264,8 @@ type state struct {
 	ruleByID map[string]*rule
 	comments map[string]*comment
 	corder   []string
+	reqs     map[string]*takeReq
+	rorder   []string // take request ids in fold order
 	reg      map[string][]head
 	labels   map[string]*label
 	lorder   []string // label ids in fold order of their adds
@@ -382,7 +408,7 @@ func newState(g *genesis, hb func(x, y *node) bool, marks bool) *state {
 		hb: hb, marks: marks,
 		members: map[string]*member{}, admins: map[string]bool{},
 		items: map[string]*item{}, asg: map[string]*rec{}, byItem: map[string][]*rec{}, ruleByID: map[string]*rule{},
-		comments: map[string]*comment{}, reg: map[string][]head{}, labels: map[string]*label{},
+		comments: map[string]*comment{}, reg: map[string][]head{}, labels: map[string]*label{}, reqs: map[string]*takeReq{},
 		prio:   priority{names: append([]string(nil), g.prio.names...), def: g.prio.def},
 		attMax: g.attMax,
 	}
@@ -735,6 +761,38 @@ func (s *state) liveFallback(item string) *rec {
 	return nil
 }
 
+// activeOpen is item's opening while it is open: not ended, and the item
+// still held by its fallback.
+func (s *state) activeOpen(it *item) *opening {
+	if it.open == nil || it.open.ended != nil || s.liveFallback(it.id) == nil {
+		return nil
+	}
+	return it.open
+}
+
+// inScope reports that who may claim under o: a live member, inside the
+// opener's org subtree for a team opening.
+func (s *state) inScope(o *opening, who string) bool {
+	if !s.liveMember(who) {
+		return false
+	}
+	return o.scope == ScopeStore || s.below(o.by, who)
+}
+
+// foldFlag flags n in the final fold (marks): a write whose causal-past check
+// passed but that an event earlier in fold order, concurrent with it, has
+// already overtaken (a second claim of one opening, an approval of a request
+// already answered). It takes no effect. A check-time fold skips it by the
+// same test without flagging, so later verdicts see what a full replay shows.
+func (s *state) foldFlag(n *node, reason rejection) {
+	if s.marks {
+		n.status, n.reason = "flagged", string(reason)
+	}
+}
+
+// concurrently is the suffix of a fold-time flag's reason.
+const concurrently = "; written concurrently, the first in fold order wins"
+
 // settle keeps every task held after n: a live or pending record other than
 // a rule request displaces the fallback, and with none the fallback holder
 // gets a fresh record "<n>@<item>><holder>" at todo, so each fallback period
@@ -759,6 +817,9 @@ func (s *state) settle(id string, n *node) {
 	if held {
 		if fb != nil {
 			s.endRec(fb, n, "displaced")
+		}
+		if it.open != nil && it.open.ended == nil {
+			it.open.ended = n // an opening never outlives the fallback hold
 		}
 		return
 	}
@@ -1043,6 +1104,11 @@ func (s *state) endRec(r *rec, n *node, st string) {
 	for _, x := range s.byItem[r.item] {
 		if x.handoffOf == r.id && x.state == "pending" {
 			x.state, x.ended = "withdrawn", n
+		}
+	}
+	for _, id := range s.rorder {
+		if q := s.reqs[id]; q.of == r.id && q.state == "pending" {
+			q.state, q.ended = "lapsed", n // a take request names one assignment
 		}
 	}
 	if !s.marks {
@@ -1392,6 +1458,26 @@ func (s *state) apply(n *node) {
 		}
 		w := s.write("st:"+r.id, "status of "+who+" on "+alias(item), n, statusVal{v, p.str("note"), a, n}).(statusVal)
 		r.status, r.note, r.noteBy, r.last = w.status, w.note, w.by, w.n
+	case TypeItemOpen:
+		s.applyOpen(n)
+	case TypeItemUnopen:
+		if it := s.items[p.str("item")]; it != nil && it.open != nil && it.open.ended == nil {
+			it.open.ended = n // after a claim or an assign folded first, a no-op
+		}
+	case TypeItemClaim:
+		s.applyClaim(n)
+	case TypeItemRequest:
+		s.applyRequest(n)
+	case TypeItemApprove:
+		s.applyApprove(n)
+	case TypeItemDeny, TypeItemUnrequest:
+		// after the request was answered or lapsed, a no-op
+		if q := s.reqs[p.str("request")]; q != nil && q.item == p.str("item") && q.state == "pending" {
+			q.state, q.ended = "withdrawn", n
+			if n.typ == TypeItemDeny {
+				q.state, q.answerNote = "denied", p.str("note")
+			}
+		}
 	case TypeCommentAdd:
 		c := &comment{id: n.id, alias: n.alias, item: p.str("item"), author: a, body: jsString(p["body"]),
 			replyTo: p.str("reply_to"), ts: n.ts, mentions: mentionsOf(p), attachments: attachmentsOf(p), refs: refsOf(p)}
@@ -1490,6 +1576,11 @@ func (s *state) apply(n *node) {
 				s.endRec(x, n, endState(x))
 			}
 		}
+		for _, rid := range s.rorder {
+			if q := s.reqs[rid]; q.by == id && q.state == "pending" {
+				q.state, q.ended = "withdrawn", n
+			}
+		}
 	case TypeSetPriorityLevels:
 		d, _ := n.p.intOf("default")
 		s.prio = s.write("prio", "priority levels", n, priority{names: p.strList("names"), def: d}).(priority)
@@ -1535,6 +1626,9 @@ func (s *state) applyAssign(n *node) {
 	if s.items[item] == nil {
 		return
 	}
+	if o := s.items[item].open; o != nil && o.ended == nil {
+		o.ended = n // the creator delegated it another way
+	}
 	completion := p.str("completion")
 	if !p.truthy("completion") {
 		completion = "assignee"
@@ -1568,4 +1662,109 @@ func (s *state) applyAssign(n *node) {
 	for _, t := range p.strList("people") {
 		s.assignPerson(n, item, t, completion)
 	}
+}
+
+// applyOpen opens a task to its scope. A creator's assign concurrent with
+// the opening and earlier in fold order already holds the item: the opening
+// is flagged and takes no effect.
+func (s *state) applyOpen(n *node) {
+	it := s.items[n.p.str("item")]
+	if it == nil {
+		return
+	}
+	if held := s.holders(it); len(held) > 0 {
+		s.foldFlag(n, rejection(it.alias+" has live or pending assignments ("+strings.Join(held, ", ")+"); only a task nobody else holds is opened"+concurrently))
+		return
+	}
+	it.open = &opening{node: n, by: n.member, scope: n.p.str("scope")}
+}
+
+// holders are the members holding a live or pending record on it, the
+// fallback and rule requests left out, each once.
+func (s *state) holders(it *item) []string {
+	var held []string
+	for _, x := range s.openRecs(it.id) {
+		if !x.ruleRequest && !contains(held, x.to) {
+			held = append(held, x.to)
+		}
+	}
+	return held
+}
+
+// applyClaim gives the claimer a live record by the opener, which displaces
+// the fallback and ends the opening (settle). A claim whose opening an
+// earlier event in fold order ended (another claim, an assign, a
+// withdrawal) is flagged and takes no effect.
+func (s *state) applyClaim(n *node) {
+	it := s.items[n.p.str("item")]
+	if it == nil || it.open == nil {
+		return
+	}
+	o := s.activeOpen(it)
+	if o == nil {
+		s.foldFlag(n, s.notOpen(it)+concurrently)
+		return
+	}
+	a := n.member
+	if !s.liveMember(a) {
+		return
+	}
+	s.addRec(n.id, n.ts, n, it.id, a, o.by, "assignee", func(r *rec) {
+		r.forced, r.sender, r.accepted = false, a, n // no accepted notice: nobody asked
+	})
+	o.ended = n
+}
+
+// applyRequest records a take request for the live assignment its assignee
+// holds. When that assignment ended earlier in fold order, the request
+// lapses at once.
+func (s *state) applyRequest(n *node) {
+	p := n.p
+	it := s.items[p.str("item")]
+	if it == nil || s.reqs[n.id] != nil {
+		return
+	}
+	who := p.str("assignee")
+	q := &takeReq{node: n, id: n.id, item: it.id, by: n.member, holder: who, note: p.str("note"), state: "pending"}
+	if r := s.liveRec(it.id, who); r != nil && !r.fallback {
+		q.of = r.id
+	} else {
+		q.state, q.ended = "lapsed", n
+		if r := s.lastEndedRec(it.id, who); r != nil && !r.fallback {
+			q.of, q.ended = r.id, r.ended
+		}
+	}
+	s.reqs[n.id] = q
+	s.rorder = append(s.rorder, n.id)
+}
+
+// applyApprove moves the named assignment to the requester: it ends handed,
+// and the requester's new record starts live with its assigner, completion,
+// status, and note, as an accepted handoff does (290). A requester who holds
+// a record on the item by then gets no second one. An approval of a request
+// that an earlier event in fold order answered, withdrew, or let lapse is
+// flagged and takes no effect.
+func (s *state) applyApprove(n *node) {
+	p := n.p
+	q := s.reqs[p.str("request")]
+	if q == nil || q.item != p.str("item") {
+		return
+	}
+	if q.state != "pending" {
+		s.foldFlag(n, s.reqEnded(q)+concurrently)
+		return
+	}
+	q.state, q.ended, q.answerNote = "approved", n, p.str("note")
+	old := s.asg[q.of]
+	if old == nil || old.state != "live" {
+		return
+	}
+	s.endRec(old, n, "handed")
+	if s.openRec(q.item, q.by) != nil || !s.liveMember(q.by) {
+		return
+	}
+	s.addRec(n.id, n.ts, n, q.item, q.by, old.by, old.completion, func(r *rec) {
+		r.forced, r.sender, r.handoffOf, r.accepted = false, n.member, old.id, n
+		r.status, r.note, r.noteBy = old.status, old.note, old.noteBy
+	})
 }

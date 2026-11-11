@@ -533,6 +533,12 @@ attachment the store accepts, in bytes (339); without it the limit is 10 MiB
 | `item.close` | `item`, `note?` | Assignee. Moves to `done`, or to `awaiting` when completion is `assigner`. Not allowed on a topic (153 b). |
 | `item.confirm` / `item.reject` | `item`, `assignee`, `note?` | Assigner, on an `awaiting` assignment. Moves to `done` / back to `doing`. |
 | `item.reopen` | `item`, `assignee?`, `note?` | The assigner or the assignee reopens a `done` assignment, back to `doing`. |
+| `item.open` | `item`, `scope` (`team` or `store`) | The creator (the fallback admin when the creator was removed) opens a task nobody else holds for claiming: `team` admits the opener's org subtree, `store` every member. Flagged on a topic, a hidden or done task, one already open, or one with a live or pending assignment besides the fallback. |
+| `item.unopen` | `item` | The creator withdraws an open opening. Folding after the opening ended (a concurrent claim or assign), it is a no-op. |
+| `item.claim` | `item` | A member in the opening's scope, other than the fallback holder, takes an open task: a live record `<claim event>><claimer>` by the opener, starting at todo, not forced, which displaces the fallback and ends the opening. |
+| `item.request` | `item`, `assignee`, `note?` | Any member other than `assignee` asks for the live, non-fallback assignment `assignee` holds; flagged when the requester already holds a live or pending record on the item, already has a pending request for it, or the assignment is done. The request id is the event id. |
+| `item.approve` / `item.deny` | `item`, `request`, `note?` | The named assignment's holder or the item's creator answers a pending request. An approval ends the assignment as `handed` and gives the requester a live record `<approve event>><requester>` with its assigner, completion, status, and note (`handoffOf` the old record, so a return restores the holder); a requester already holding a record by then gets none. |
+| `item.unrequest` | `item`, `request` | The requester withdraws a pending request. |
 | `comment.add` | `item`, `body`, `reply_to?`, `mentions?`, `attachments?`, `refs?` | Anyone in the store. `reply_to` is one comment in the same thread (flat timeline, quote reply). |
 | `comment.edit` / `comment.hide` | `comment`, `body`, `mentions?`, `attachments?`, `refs?` (edit) | Comment author only. Hide is a tombstone. |
 | `member.profile` | `profile` (any of `org`, `family`, `given`: strings), `member?` | (392 b) The author's own profile, or with `member` another member's: only an admin may write that, anyone else's write is flagged. Each field present is its own register, so concurrent changes merge by (203), and a write only carries the fields it changes. `given` is required and non-empty whenever it is present; a profile with an unknown or non-string field, or with none of the three, is flagged. The member must exist and not be removed. Shows in Activity with the writer, the admin when an admin made it. |
@@ -639,6 +645,17 @@ forced (author, or someone the author reaches) starts live
   holds on the item. A request holds nothing: it is neither live work nor
   counted in the item status, and it does not make the item pending.
 
+- **Taking work.** An item's opening (`item.open`) is active while it is
+  not ended and the item is still fallback-held; the view shows it as the
+  item's `open` and, per viewer, `claimable`. It ends on a claim, an
+  assign, a withdrawal, or anything else that displaces the fallback (an
+  accepted rule request), and never revives. A take request names one
+  assignment: pending, then `approved`, `denied`, `withdrawn` (by the
+  requester, or the requester removed), or `lapsed` when that assignment
+  ends first. The view lists requests in `requests` and per item, and
+  `my.requests` holds the viewer's pending incoming (they may answer) and
+  outgoing ones; each incoming one is a badge entry `q:<request>`.
+
 ```text
 rule rooted at the author or below:  live at once --unassign root / all--> ended
 rule rooted elsewhere:  request pending --accept--> live --request returned / unassign--> ended
@@ -705,13 +722,16 @@ items        { id: { id, alias, kind, title, body, project, due, priority, prior
                      rollup{total, counts{status: n}, blocked[]}, lastActivity, started,
                      assignments[], pending[], thread[eventId], concurrent, depth, chain[],
                      mentions[memberId], attachments[{oid, name, size, mime}],
-                     refs[itemId], backrefs[itemId|commentId] } }
+                     refs[itemId], backrefs[itemId|commentId],
+                     open{id, by, scope, ts} (null unless open), claimable, requests[requestId] } }
 itemOrder[]  item ids in tree order, siblings by their after anchors
 assignments  { id: { id, item, to, by, sender, completion, state, forced, status, note, noteBy, via, ts,
                      inherited, ruleLevels, rule, ruleRequest, handoffOf, handoffFrom, handoffNote, answerNote,
                      restored{id, ts}, restores, accepted{id, ts},
                      leadAtAccept, ended{id, type, ts, by}, depth, statusOrigin, statusBy,
                      lastUpdate, stale } }
+requests     { id: { id, item, by, assignee, assignment, state (pending|approved|denied|withdrawn|lapsed),
+                     note, answerNote, ts, ended{id, type, ts, by} } }
 rules        { id: { id, item, via, by, root, includeRoot, levels (null: whole subtree), completion,
                      state (live|pending|ended), request, ended, ts } }
 comments     { id: { id, item, author, body, reply_to, ts, edited{id, ts}, hidden,
@@ -725,7 +745,7 @@ notices[]    { key, kind (accepted|handoff|done|blocked|declined|returned), assi
 my           { assignments[], today{work[], pending[], confirms[]}, received{pending[], answered[], sent[]},
                given[itemId], created[itemId], team[{id, depth, outside, open[], pending[], waiting[],
                counts{status: n}, load, stale, overdue, fallback, last}],
-               badge[key] }
+               requests{incoming[], outgoing[]}, badge[key] }
 stats        { events, commits, flagged, concurrent }
 heads        { stream: seq }   the seen a write would carry now
 store        { name, label, remote }
@@ -797,6 +817,16 @@ state outside it.
      rule picks among the rest. The losing same-member write stays in the
      thread with a quiet "superseded by <event>" note (289), not a conflict
      box.
+   - **One winner (fold-time flags).** A write whose causal-past check
+     passed but that an event earlier in fold order, concurrent with it,
+     overtook is flagged in the final fold and takes no effect; the reason
+     ends "; written concurrently, the first in fold order wins". Check-time
+     folds skip it by the same test, so later verdicts match a full replay.
+     This covers a second claim of one opening, a claim after the opening's
+     concurrent withdrawal or assign, an opening after a concurrent assign,
+     and an approval of a request that a concurrent approval, denial, or
+     withdrawal answered or whose assignment ended first. A concurrent deny,
+     withdraw, or unopen of something already ended is a no-op instead.
    - **Removal against writes.** An unassign, return, withdraw, or accepted
      handoff that is concurrent with a status write or close on that
      assignment always wins. Both events are marked, and the write shows as
@@ -830,6 +860,15 @@ Flagged reasons, as the engine words them:
 - accept or decline without a pending assignment (a handoff whose original
   ended is withdrawn, so it is no longer pending)
 - return by anyone but the assignee's direct lead, or of a forced assignment
+- open by a non-creator, of a topic, hidden, done, already open, or held
+  task, or with a scope other than team or store; unopen by a non-creator or
+  of an item not open; a claim of an item not open (or whose opening ended),
+  by its fallback holder, or out of a team opening's scope
+- a take request without an assignee, for the requester's own, a pending,
+  a fallback, or a done assignment, by a member already holding the item, or
+  duplicated; approve or deny by anyone but the holder or the creator, of an
+  unknown request, or of one no longer pending; unrequest by anyone but the
+  requester
 - status, close, or reopen by a non-assignee, before acceptance, or after the
   assignment ended
 - status or close on a done assignment, or close while already awaiting

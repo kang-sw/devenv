@@ -354,7 +354,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "hana.pc#3": {
     "id": "hana.pc#3",
@@ -397,7 +400,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "hana.pc#4": {
     "id": "hana.pc#4",
@@ -443,7 +449,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "hana.pc#6": {
     "id": "hana.pc#6",
@@ -488,7 +497,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "hana.pc#12": {
     "id": "hana.pc#12",
@@ -535,7 +547,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    }
   },
   "itemOrder": [
@@ -683,6 +698,7 @@
     "stale": true
    }
   },
+  "requests": {},
   "rules": {},
   "comments": {
    "hana.pc#10": {
@@ -1090,6 +1106,10 @@
    "given": [],
    "created": [],
    "team": [],
+   "requests": {
+    "incoming": [],
+    "outgoing": []
+   },
    "badge": []
   },
   "stats": {

@@ -714,7 +714,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "ada.pc#2": {
     "id": "ada.pc#2",
@@ -765,7 +768,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "ada.pc#3": {
     "id": "ada.pc#3",
@@ -810,7 +816,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "ada.pc#4": {
     "id": "ada.pc#4",
@@ -856,7 +865,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "ada.pc#5": {
     "id": "ada.pc#5",
@@ -905,7 +917,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "ada.pc#6": {
     "id": "ada.pc#6",
@@ -954,7 +969,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "ada.pc#7": {
     "id": "ada.pc#7",
@@ -1000,7 +1018,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "ada.pc#8": {
     "id": "ada.pc#8",
@@ -1048,7 +1069,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "ada.pc#9": {
     "id": "ada.pc#9",
@@ -1097,7 +1121,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    }
   },
   "itemOrder": [
@@ -1419,6 +1446,7 @@
     "stale": false
    }
   },
+  "requests": {},
   "rules": {},
   "comments": {},
   "events": [
@@ -2134,6 +2162,10 @@
      "last": null
     }
    ],
+   "requests": {
+    "incoming": [],
+    "outgoing": []
+   },
    "badge": []
   },
   "stats": {
