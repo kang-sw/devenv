@@ -454,8 +454,14 @@ details.panel .body { container-type: inline-size; }
    3): a bar that its card's end pushes up slides under the stack, and the
    morph copy (rail.js motion) draws the turn into a capsule over it. Drawn
    above the stack, a short topic (a quiet one is all bar, so its bar cannot
-   stick lower) straddling the stick line covered every capsule. */
-.wb-rail .topic > .tbar.wb-stuck { box-shadow: var(--wb-shadow); }
+   stick lower) straddling the stick line covered every capsule. The
+   second shadow fills the bar's rounded top corners with the page colour
+   (offset up by its spread, so it reaches the corners and not below the
+   bar; the topic clips its sides): the card scrolling under a stuck bar
+   showed through them. A quiet bar is rounded below too, so with a note
+   under it it squares its bottom corners while stuck. */
+.wb-rail .topic > .tbar.wb-stuck { box-shadow: var(--wb-shadow), 0 -6px 0 6px var(--wb-bg); }
+.wb-rail .topic.quiet:has(> .tnote) > .tbar.wb-stuck { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
 /* the book button stays at the card's top and scrolls away under a stuck bar, so the bar gives back the room it reserved for it (the :has() outweighs the has-doc padding rules) */
 .wb-rail .topic.has-doc:has(> details.tdoc) > .tbar.wb-stuck { padding-right: 12px; }
 .wb-rail .topic > details.tdoc > summary { z-index: 2; }
@@ -467,13 +473,20 @@ details.panel .body { container-type: inline-size; }
 .wb-rail-wrap.dn { bottom: 0; margin-top: calc(14px + 2 * 17px + 3px + 4px + 16px); }
 .wb-rail-stack { position: absolute; left: 0; right: 0; display: flex; flex-direction: column; gap: 3px; }
 .wb-rail-stack[hidden] { display: none; }
-/* the copy of a bar or a capsule that morphs between the two (rail.js); fill:forwards on its children ends with it */
-.wb-rail-wrap .wb-rail-ghost { position: absolute; margin: 0; min-height: 0; overflow: hidden; pointer-events: none; z-index: 1; }
+/* the solid copy that morphs between a bar and its capsule by height alone
+   (rail.js morph): it clips the bar's and the capsule's content, both
+   centred in it and crossfading; it carries their fill, so theirs drops */
+.wb-rail-wrap .wb-rail-ghost { position: absolute; margin: 0; overflow: hidden; pointer-events: none; z-index: 1; }
+.wb-rail-ghost > * { position: absolute; left: 0; top: 50%; width: 100%; margin: 0; transform: translateY(-50%); background: transparent; box-shadow: none; border-radius: 0; opacity: 1; }
 /* the shadow carries the band's fill over the scroller's top padding, which a sticky inset counts from */
 .wb-rail-wrap.up .wb-rail-stack { top: 0; padding: 4px 0 3px; background: var(--wb-bg); box-shadow: 0 -8px 0 var(--wb-bg); }
 .wb-rail-wrap.dn .wb-rail-stack { bottom: 0; padding: 14px 0 4px; background: linear-gradient(to bottom, transparent, var(--wb-bg) 14px); }
-.wb-cap { pointer-events: auto; display: flex; align-items: center; gap: 6px; height: 17px; margin: 0 6px; padding: 0 10px; border: 0; border-radius: 999px; background: var(--wb-topic); color: var(--wb-on-topic); font-size: 10.5px; font-weight: 700; line-height: 1; text-align: left; cursor: pointer; }
-.wb-cap.far { margin: 0 18px; font-size: 10px; font-weight: 600; opacity: .6; }
+/* A capsule is as wide as its item's bar (the stack spans the board, as the
+   items do), so it reads as the bar collapsed, and the morph between the
+   two (rail.js) changes only height; the far one stands back by type and
+   opacity alone. */
+.wb-cap { pointer-events: auto; display: flex; align-items: center; gap: 6px; height: 17px; margin: 0; padding: 0 10px; border: 0; border-radius: 999px; background: var(--wb-topic); color: var(--wb-on-topic); font-size: 10.5px; font-weight: 700; line-height: 1; text-align: left; cursor: pointer; }
+.wb-cap.far { font-size: 10px; font-weight: 600; opacity: .6; }
 .wb-cap.quiet { background: var(--wb-muted); color: var(--wb-muted-fg); }
 .wb-cap:hover { opacity: 1; }
 .wb-cap:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 1px; opacity: 1; }
