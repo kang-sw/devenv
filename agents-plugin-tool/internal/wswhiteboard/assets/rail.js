@@ -205,32 +205,54 @@
   }
 
   // --- motion: a bar turning into a capsule and back --------------------------
-  // At the top, when the current topic's card scrolls past, its bar (pushed
-  // up under the top stack by the card's end: a stuck bar draws below the
-  // stack, so a short topic never covers the capsules) turns into the
-  // stack's near capsule: a copy of the bar, drawn over the stack, shrinks
-  // from where the bar is to the capsule's box, its details fading and
-  // sliding out and its title shrinking to the capsule's size, while the
-  // capsule fades in under it. Scrolling back, a copy of the capsule grows
-  // into the bar's box and fades while the bar fades in. The bottom edge
-  // mirrors it: when the bottom stack's near capsule's topic scrolls into
-  // view above the stack, a copy of the capsule grows into its bar, and
-  // when a shown bar sinks behind the stack it shrinks into the near
-  // capsule. Capsules that stay in a stack slide from their old slot to
-  // their new one. The copies stand in their edge's wrapper, out of flow,
-  // so nothing below moves; every animation fills nothing. None of it runs
-  // under reduced motion, on a run's first draw (a load or a board swap),
-  // or on the first draw after the board was hidden.
+  // A capsule is as wide as its item's bar (page.css), so the two differ
+  // only in height, corners, and content, and the motion changes only
+  // those. At the top, when the current topic's card scrolls past, its bar
+  // (pushed up under the top stack by the card's end: a stuck bar draws
+  // below the stack, so a short topic never covers the capsules) turns
+  // into the stack's near capsule: a solid copy changes from the part of
+  // the bar still showing under the stack (shows) to the capsule's top and
+  // height, its corners turning to the capsule's pill, while the bar's
+  // content gives way to the capsule's. Scrolling back, a copy of the
+  // capsule turns into the bar the same way. The bottom edge mirrors it:
+  // when the bottom stack's near capsule's topic scrolls into view above
+  // the stack, a copy of the capsule grows into its bar, and when a shown
+  // bar sinks behind the stack it collapses into the near capsule.
+  // Capsules that stay in a stack slide from their old slot to their new
+  // one. The copies stand in their edge's wrapper, out of flow, so nothing
+  // below moves, and leave when their motion ends; nothing on the board
+  // keeps an animated style. None of it runs under reduced motion, on a
+  // run's first draw (a load or a board swap), or on the first draw after
+  // the board was hidden.
   var DUR = 180, EASE = "ease-out", curTopic = null, drawn = false, ghosts = { top: null, bot: null };
   function motion() { return !!d.body.animate && !(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches); }
   function btns(edge) { return [slots[edge].far, slots[edge].near]; }
   function shown(b) { return !b.hidden && b.wbTopic ? b.wbTopic : null; }
   function seen(r) { return r.height > 0 && r.bottom > viewTop() && r.top < (root ? root.getBoundingClientRect().bottom : window.innerHeight); }
+  // look reads what a copy of el needs to look like it once it stands in a
+  // wrapper, out of its item: its fill, corners, text colour, and the type
+  // size of its name. The capsule's is read before the redraw refills it.
+  var TN = ".tname, [data-rail-name], .cn";
+  function look(el) {
+    var cs = getComputedStyle(el), nm = el.querySelector(TN);
+    return { copy: el.cloneNode(true), bg: cs.backgroundColor, fg: cs.color, radius: cs.borderRadius, size: nm ? getComputedStyle(nm).fontSize : "" };
+  }
   function barGhost(t, visible) {
     var tb = t && barOf(t), r = tb && tb.getBoundingClientRect();
-    return tb && (!visible || seen(r)) ? { kind: "bar", t: t, src: tb, copy: tb.cloneNode(true), r: r } : null;
+    return tb && (!visible || seen(r)) ? { kind: "bar", t: t, src: look(tb), r: r } : null;
   }
-  function capGhost(b) { return { kind: "cap", t: b.wbTopic, src: b, copy: b.cloneNode(true), r: b.getBoundingClientRect() }; }
+  // shows cuts a bar's box to the part that shows under the top stack: the
+  // stack's band covers the rest, and a copy drawn over the band would
+  // cover its capsules. A bar that has slid under the band whole (as one
+  // pushed up by its card's end has, by the time its card is past) leaves a
+  // box of no height at the band's lower edge, so its capsule grows out of
+  // that edge, and shrinks back into it when its bar comes out again.
+  function shows(r) {
+    var s = wraps.top.firstChild, lim = s.hidden ? viewTop() : s.getBoundingClientRect().bottom;
+    var top = Math.max(r.top, lim), bottom = Math.max(r.bottom, lim);
+    return { left: r.left, width: r.width, top: top, bottom: bottom, height: bottom - top };
+  }
+  function capGhost(b) { return { kind: "cap", t: b.wbTopic, src: look(b), r: b.getBoundingClientRect() }; }
   // before reads, ahead of a redraw, what the motion starts from: the
   // shown capsules' boxes by edge and topic, and per edge the bar or the
   // capsule that is about to turn into the other.
@@ -240,7 +262,10 @@
     ["top", "bot"].forEach(function (e) { btns(e).forEach(function (b) { if (shown(b)) p.caps.push({ e: e, t: b.wbTopic, r: b.getBoundingClientRect() }); }); });
     if (!drawn || !s) return p;
     var near = shown(slots.top.near);
-    if (curTopic && curTopic !== now && topics[s.up[0]] === curTopic) p.top = barGhost(curTopic, false);
+    if (curTopic && curTopic !== now && topics[s.up[0]] === curTopic) {
+      p.top = barGhost(curTopic, false);
+      if (p.top) p.top.r = shows(p.top.r);
+    }
     else if (now && now === near && now !== curTopic) p.top = capGhost(slots.top.near);
     // Bottom: the near capsule's topic leaves the stack (its bar now shows
     // above it), or a topic not in the stack becomes its near capsule
@@ -277,41 +302,54 @@
   }
   function dropGhost(edge) {
     (edge ? [edge] : ["top", "bot"]).forEach(function (e) {
-      var el = ghosts[e];
-      if (el && el.parentNode) el.parentNode.removeChild(el);
+      (ghosts[e] || []).forEach(function (el) { if (el.parentNode) el.parentNode.removeChild(el); });
       ghosts[e] = null;
     });
   }
-  // morph animates the copy g.copy in edge's wrapper from g.r to into's
-  // box, into fading in under it.
+  // morph stands a solid copy in edge's wrapper and changes it from g.r to
+  // into's box by height alone: it keeps into's left edge and width
+  // throughout, while its top, height, corners (between the bar's and the
+  // capsule's pill), and fill move. Inside it, g's content gives way to
+  // into's, both centred and clipped to its height. into hides
+  // under it until it ends; nothing else fades. A stuck bar has its item's
+  // body scrolling under it, so while it hides, a page-coloured plate takes
+  // its box and the copy grows over that, not over the body.
   function morph(g, into, edge) {
     dropGhost(edge);
     var wrap = wraps[edge], w = wrap.getBoundingClientRect(), from = g.r, to = into.getBoundingClientRect(), bar = g.kind === "bar";
-    var el = g.copy, cs = getComputedStyle(g.src);
-    el.className += " wb-rail-ghost";
-    el.hidden = false;
+    if (!bar && edge === "top") to = shows(to);
+    var a = g.src, b = look(into), el = d.createElement("div");
+    el.className = "wb-rail-ghost";
     el.setAttribute("aria-hidden", "true");
-    el.setAttribute("tabindex", "-1");
-    el.style.margin = "0";
-    el.style.background = cs.backgroundColor;
-    el.style.color = cs.color;
-    wrap.appendChild(el);
-    ghosts[edge] = el;
-    function box(r, radius) { return { left: r.left - w.left + "px", top: r.top - w.top + "px", width: r.width + "px", height: r.height + "px", borderRadius: radius }; }
-    var a = box(from, bar ? cs.borderRadius : from.height / 2 + "px"), b = box(to, bar ? to.height / 2 + "px" : getComputedStyle(into).borderRadius);
-    a.opacity = 1;
-    b.opacity = 0;
-    el.animate([a, b], { duration: DUR, easing: EASE }).onfinish = function () { if (ghosts[edge] === el) dropGhost(edge); };
-    into.animate([{ opacity: 0 }, { opacity: 1 }], { duration: DUR, easing: EASE });
-    if (!bar) return;
-    // The bar's details fade and slide out toward its stack; its title (and
-    // an item's icon) stays, the title shrinking to the capsule's type size.
-    var out = edge === "top" ? "translateY(-4px)" : "translateY(4px)";
-    Array.prototype.forEach.call(el.children, function (c) {
-      if (!c.classList.contains("tlead") && !c.hasAttribute("data-rail-name") && !c.hasAttribute("data-rail-icon")) c.animate([{ opacity: 1, transform: "none" }, { opacity: 0, transform: out }], { duration: DUR * 0.6, easing: EASE, fill: "forwards" });
+    el.style.left = to.left - w.left + "px";
+    el.style.width = to.width + "px";
+    [a, b].forEach(function (l) {
+      var c = l.copy, nm = c.querySelector(TN);
+      c.hidden = false;
+      c.removeAttribute("id");
+      c.style.color = l.fg;
+      if (nm && l.size) nm.style.fontSize = l.size;
+      el.appendChild(c);
     });
-    var TN = ".tname, [data-rail-name]", tn = el.querySelector(TN), sn = g.src.querySelector(TN), cn = into.querySelector(".cn");
-    if (tn && sn && cn) tn.animate([{ fontSize: getComputedStyle(sn).fontSize }, { fontSize: getComputedStyle(cn).fontSize }], { duration: DUR, easing: EASE, fill: "forwards" });
+    ghosts[edge] = [el];
+    if (!bar && into.classList.contains("wb-stuck")) {
+      var plate = d.createElement("div");
+      plate.className = "wb-rail-ghost";
+      plate.style.cssText = "left:" + el.style.left + ";width:" + el.style.width + ";top:" + (to.top - w.top) + "px;height:" + to.height + "px;background:var(--wb-bg)";
+      wrap.appendChild(plate);
+      ghosts[edge].unshift(plate);
+    }
+    wrap.appendChild(el);
+    var mine = ghosts[edge];
+    el.animate([
+      { top: from.top - w.top + "px", height: from.height + "px", borderRadius: bar ? a.radius : from.height / 2 + "px", backgroundColor: a.bg },
+      { top: to.top - w.top + "px", height: to.height + "px", borderRadius: bar ? to.height / 2 + "px" : b.radius, backgroundColor: b.bg }
+    ], { duration: DUR, easing: EASE, fill: "forwards" }).onfinish = function () { if (ghosts[edge] === mine) dropGhost(edge); };
+    // The two contents take turns, g's out over the first half and into's in
+    // over the second, so their differently placed text never doubles up.
+    el.firstChild.animate([{ opacity: 1 }, { opacity: 0, offset: 0.5 }, { opacity: 0 }], { duration: DUR, fill: "forwards" });
+    el.lastChild.animate([{ opacity: 0 }, { opacity: 0, offset: 0.5 }, { opacity: 1 }], { duration: DUR, fill: "forwards" });
+    into.animate([{ opacity: 0 }, { opacity: 0 }], { duration: DUR });
   }
   // The keys of the items at the given indices: the draw key holds keys,
   // not indices, so a re-queried board (closed topics fetched in, a topic

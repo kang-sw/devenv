@@ -996,6 +996,13 @@ func TestTopicRailIsOnTheFullPageOnly(t *testing.T) {
 // capsule grows into a bar that leaves the stack, and a shown bar sinking
 // behind it shrinks into the capsule), the copy that morphs stands out of
 // flow in its edge's wrapper, and the rail's teardown drops both copies.
+// The morph changes a solid copy by height alone: a capsule is as wide as
+// its item's bar (no inset, the far one standing back by type and opacity
+// only), the copy keeps the target's left edge and width while its top,
+// height, corners, and fill move, the two contents take turns inside it
+// with no fade of the copy itself, a top-edge bar box is cut to the part
+// showing under the stack so the copy never covers the capsules, and a
+// page-coloured plate stands in for a hidden stuck bar.
 func TestTopicRailBarCapsuleMotion(t *testing.T) {
 	assets, err := PageAssets()
 	if err != nil {
@@ -1013,6 +1020,17 @@ func TestTopicRailBarCapsuleMotion(t *testing.T) {
 		`var wrap = wraps[edge], w = wrap.getBoundingClientRect()`,
 		`wrap.appendChild(el);`,
 		"stuck = null;\n    dropGhost();\n  };",
+		`el.style.left = to.left - w.left + "px";`,
+		`el.style.width = to.width + "px";`,
+		`{ top: from.top - w.top + "px", height: from.height + "px", borderRadius: bar ? a.radius : from.height / 2 + "px", backgroundColor: a.bg },`,
+		`{ top: to.top - w.top + "px", height: to.height + "px", borderRadius: bar ? to.height / 2 + "px" : b.radius, backgroundColor: b.bg }`,
+		`el.firstChild.animate([{ opacity: 1 }, { opacity: 0, offset: 0.5 }, { opacity: 0 }], { duration: DUR, fill: "forwards" });`,
+		`el.lastChild.animate([{ opacity: 0 }, { opacity: 0, offset: 0.5 }, { opacity: 1 }], { duration: DUR, fill: "forwards" });`,
+		`into.animate([{ opacity: 0 }, { opacity: 0 }], { duration: DUR });`,
+		`var top = Math.max(r.top, lim), bottom = Math.max(r.bottom, lim);`,
+		`if (p.top) p.top.r = shows(p.top.r);`,
+		`if (!bar && edge === "top") to = shows(to);`,
+		`if (!bar && into.classList.contains("wb-stuck")) {`,
 	} {
 		if !strings.Contains(js, want) {
 			t.Errorf("the rail script lacks %q", want)
@@ -1024,9 +1042,17 @@ func TestTopicRailBarCapsuleMotion(t *testing.T) {
 		`.wb-rail .topic > .tbar { position: sticky; top: var(--wb-rail-top, 0px); z-index: 1; }`,
 		`.wb-rail-wrap.up { top: var(--wb-rail-inset, 0px); z-index: 3; }`,
 		`.wb-rail-wrap .wb-rail-ghost { position: absolute;`,
+		`.wb-rail-ghost > * { position: absolute; left: 0; top: 50%; width: 100%; margin: 0; transform: translateY(-50%); background: transparent;`,
+		`.wb-cap { pointer-events: auto; display: flex; align-items: center; gap: 6px; height: 17px; margin: 0; padding: 0 10px;`,
+		`.wb-cap.far { font-size: 10px; font-weight: 600; opacity: .6; }`,
 	} {
 		if !strings.Contains(css, want) {
 			t.Errorf("the shared stylesheet lacks %q", want)
+		}
+	}
+	for _, gone := range []string{"b.opacity = 0;", "translateY(-4px)", "margin: 0 18px", "margin: 0 6px; padding: 0 10px"} {
+		if strings.Contains(js+css, gone) {
+			t.Errorf("the rail still carries the old fading or inset capsule (%q)", gone)
 		}
 	}
 }
@@ -1036,8 +1062,8 @@ func TestTopicRailBarCapsuleMotion(t *testing.T) {
 // board order, leaves out an item with no height, takes a marked node's
 // bar, capsule text, and capsule icon from data-rail-bar, data-rail-name,
 // and data-rail-icon, keys the draw by item key so a topic and a marked
-// node never collide, and keeps a marked node's name and icon through the
-// bar-to-capsule morph.
+// node never collide, and gives a marked node's name the type size of its
+// bar or capsule in the morph's copies.
 func TestTopicRailRailsHostItems(t *testing.T) {
 	assets, err := PageAssets()
 	if err != nil {
@@ -1053,7 +1079,7 @@ func TestTopicRailRailsHostItems(t *testing.T) {
 		`var nm = t.querySelector("[data-rail-name]"), ic = t.querySelector("[data-rail-icon]");`,
 		`bar: cur >= 0 ? barOf(topics[cur]) : null,`,
 		`return topics[i] ? keyOf(topics[i]) : "";`,
-		`!c.hasAttribute("data-rail-name") && !c.hasAttribute("data-rail-icon")`,
+		`var TN = ".tname, [data-rail-name], .cn";`,
 		`<span class="ci" hidden></span><span class="cn"></span>`,
 	} {
 		if !strings.Contains(js, want) {
