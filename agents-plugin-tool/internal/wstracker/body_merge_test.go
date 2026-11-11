@@ -167,6 +167,27 @@ func TestBodyMergeFold(t *testing.T) {
 			marked: []string{"ada.pc#3", "maya.pc#1"},
 		},
 		{
+			name: "an overlap names only the writes whose lines it touched",
+			steps: []step{
+				edit("ada.pc", "L1 ada\nL2\nL3\nL4\nL5", create, "", fromCreate),
+				edit("maya.pc", "L1\nL2\nL3\nL4\nL5 maya", create, "", fromCreate),
+				edit("ada.lap", "L1 lap\nL2\nL3\nL4\nL5", create, "", fromCreate),
+			},
+			body:       "L1 lap\nL2\nL3\nL4\nL5 maya",
+			superseded: []string{"ada.pc#3"},
+		},
+		{
+			name: "the human precedence holds per hunk: the agent still wins another member's earlier hunk",
+			steps: []step{
+				edit("maya.pc", "L1 human\nL2\nL3\nL4\nL5", create, "", fromCreate),
+				edit("ada.pc", "L1\nL2\nL3\nL4\nL5 ada", create, "", fromCreate),
+				edit("maya.lap", "L1 agent\nL2\nL3\nL4\nL5 agent", create, OriginAgent, fromCreate),
+			},
+			body:       "L1 human\nL2\nL3\nL4\nL5 agent",
+			marked:     []string{"ada.pc#3", "maya.lap#1"},
+			superseded: []string{"maya.lap#1"},
+		},
+		{
 			name: "a same-member overlap gets the quiet note, not a marker",
 			steps: []step{
 				edit("maya.pc", "L1 pc\nL2\nL3\nL4\nL5", create, "", fromCreate),

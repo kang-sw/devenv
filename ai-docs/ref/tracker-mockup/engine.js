@@ -1291,12 +1291,12 @@
 
   // Merges mine (w's new text) and cur (the folded value) from base. Hunks of the two
   // diffs whose base ranges intersect or touch form one group; a group changed on one
-  // side takes that side, a group changed on both takes mine when mineWins, else cur's,
-  // unless both sides read the same. overlap reports a group both sides changed
-  // differently. A kept line keeps its source: cur's outside mine's changes, base's
-  // for lines mine kept inside a group, w for the lines mine wrote.
-  function merge3(base, cur, mine, w, mineWins) {
-    var bt = textsOf(base), hc = diffLines(bt, textsOf(cur)), hm = diffLines(bt, mine), tl = [], bi = 0, overlap = false, out = [];
+  // side takes that side; a group both sides changed to the same lines takes cur's; any
+  // other group both changed is an overlap, which settle judges from cur's lines in it:
+  // mine when it returns true, else cur's. A kept line keeps its source: cur's outside
+  // mine's changes, base's for lines mine kept inside a group, w for the lines mine wrote.
+  function merge3(base, cur, mine, w, settle) {
+    var bt = textsOf(base), hc = diffLines(bt, textsOf(cur)), hm = diffLines(bt, mine), tl = [], bi = 0, out = [];
     hm.forEach(function (h) {
       tl = tl.concat(base.slice(bi, h.a0), mine.slice(h.b0, h.b1).map(function (t) { return { text: t, src: w }; }));
       bi = h.a1;
@@ -1323,10 +1323,10 @@
       if (!inB) out = out.concat(vr);
       else if (!inA) out = out.concat(tr);
       else if (textsOf(vr).join('\n') === textsOf(tr).join('\n') && vr.length === tr.length) out = out.concat(vr);
-      else { overlap = true; out = out.concat(mineWins ? tr : vr); }
+      else out = out.concat(settle(vr) ? tr : vr);
       bi = ge; vi += vLen; ti += tLen;
     }
-    return { out: out.concat(cur.slice(vi)), overlap: overlap };
+    return out.concat(cur.slice(vi));
   }
 
   // x is in the causal closure of heads: a head, or in one's causal past.
@@ -1340,29 +1340,47 @@
   }
 
   // Folds body write w onto cur, the value of prior (the writes folded before it).
-  // Returns the new value (out); conc, the prior writes concurrent with w, when w
-  // overlapped a change and conc is not empty (else null); and win, the write that won
-  // the overlap. A base whose closure holds every prior write is a plain replace. A
-  // base-less (or unknown-base) write is a whole replace, which overlaps every line.
-  // Otherwise the write merges three-way from its base text. An overlap goes to w, the
-  // later in fold order, except that an agent write loses to a concurrent human write
-  // of its own member.
+  // Returns the new value (out); rivals, the concurrent writes w overlapped, in fold
+  // order, each with the overlap's winner ({ x, win }); and lostTo, the human write of
+  // w's own member it lost an overlap to, if any. A base whose closure holds every prior
+  // write is a plain replace. A base-less (or unknown-base) write is a whole replace,
+  // which overlaps every concurrent write. Otherwise the write merges three-way from its
+  // base text, and each overlapping group names its rivals: the concurrent writes whose
+  // lines cur holds there, or, when cur only dropped base lines there (no line tells
+  // who), every concurrent write. An overlap goes to w, the later in fold order, except
+  // that an agent write loses a group to a concurrent human write of its own member
+  // among that group's rivals.
   function bodyStep(f, prior, cur, w) {
-    if (w.type === 'item.create') return { out: linesFrom(bodyText(w), w), conc: null, win: w };
+    if (w.type === 'item.create') return { out: linesFrom(bodyText(w), w), rivals: [], lostTo: null };
     var conc = prior.filter(function (x) { return !hb(x, w); }), human = null;
     if (w.origin !== 'human') conc.forEach(function (x) { if (x.author === w.author && x.origin === 'human') human = x; });
     var heads = baseHeads(prior, w);
-    if (!heads.length) {
-      if (!conc.length) return { out: linesFrom(bodyText(w), w), conc: null, win: w };
-      if (human) return { out: cur, conc: conc, win: human };
-      return { out: linesFrom(bodyText(w), w), conc: conc, win: w };
-    }
-    if (prior.every(function (x) { return inClosure(x, heads); })) return { out: linesFrom(bodyText(w), w), conc: null, win: w };
+    if (!heads.length) return {
+      out: human ? cur : linesFrom(bodyText(w), w),
+      rivals: conc.map(function (x) { return { x: x, win: human ? x : w }; }),
+      lostTo: human
+    };
+    var sub = prior.filter(function (x) { return inClosure(x, heads); });
+    if (sub.length === prior.length) return { out: linesFrom(bodyText(w), w), rivals: [], lostTo: null };
     var base = f.base[w.id];
-    if (!base) base = f.base[w.id] = foldBody(f, prior.filter(function (x) { return inClosure(x, heads); }));
-    var r = merge3(base, cur, bodyText(w).split('\n'), w, !human);
-    if (!r.overlap || !conc.length) return { out: r.out, conc: null, win: w };
-    return { out: r.out, conc: conc, win: human || w };
+    if (!base) base = f.base[w.id] = foldBody(f, sub);
+    var hit = [], lostTo = null;
+    var out = merge3(base, cur, bodyText(w).split('\n'), w, function (vr) {
+      var srcs = vr.map(function (l) { return l.src; }), wins = true;
+      var changed = srcs.some(function (x) { return sub.indexOf(x) < 0; });
+      conc.forEach(function (x) {
+        if (changed && srcs.indexOf(x) < 0) return;
+        if (hit.indexOf(x) < 0) hit.push(x);
+        if (x === human) wins = false;
+      });
+      if (!wins) lostTo = human;
+      return wins;
+    });
+    return {
+      out: out,
+      rivals: conc.filter(function (x) { return hit.indexOf(x) >= 0; }).map(function (x) { return { x: x, win: x === human ? x : w }; }),
+      lostTo: lostTo
+    };
   }
   // The value of writes, a causally closed run in fold order.
   function foldBody(f, writes) {
@@ -1379,13 +1397,14 @@
     f.writes.push(n); f.lines = r.out;
     S.reg[key] = (S.reg[key] || []).filter(function (h) { return !hb(h.n, n); }).concat([{ n: n, v: bodyText(n) }]);
     if (C) {
-      (r.conc || []).forEach(function (x) {
+      r.rivals.forEach(function (v) {
+        var x = v.x;
         if (x.author !== n.author) {
-          mark(x, n, 'field', label, { winner: r.win.id, mine: show(bodyText(x)), theirs: show(bodyText(n)) });
-          mark(n, x, 'field', label, { winner: r.win.id, mine: show(bodyText(n)), theirs: show(bodyText(x)) });
-        } else if (r.win === n) supersede(x, label, n, x.origin !== 'human' && n.origin === 'human' ? 'human' : 'later');
+          mark(x, n, 'field', label, { winner: v.win.id, mine: show(bodyText(x)), theirs: show(bodyText(n)) });
+          mark(n, x, 'field', label, { winner: v.win.id, mine: show(bodyText(n)), theirs: show(bodyText(x)) });
+        } else if (v.win === n) supersede(x, label, n, x.origin !== 'human' && n.origin === 'human' ? 'human' : 'later');
       });
-      if (r.win !== n) supersede(n, label, r.win, 'human');
+      if (r.lostTo) supersede(n, label, r.lostTo, 'human');
     }
     bodyExtras(it, f);
   }

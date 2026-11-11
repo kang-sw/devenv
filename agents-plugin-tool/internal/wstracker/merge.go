@@ -162,12 +162,13 @@ func sameTexts(a, b []bline) bool {
 
 // merge3 merges mine (w's new text) and cur (the folded value) from base.
 // Hunks of the two diffs whose base ranges intersect or touch form one
-// group; a group changed on one side takes that side, a group changed on
-// both takes mine when mineWins, else cur's, unless both sides read the
-// same. overlap reports a group both sides changed differently. A kept
-// line keeps its source: cur's for lines outside mine's changes, base's
-// for lines mine kept inside a group, w for the lines mine wrote.
-func merge3(base, cur []bline, mine []string, w *node, mineWins bool) (out []bline, overlap bool) {
+// group; a group changed on one side takes that side; a group both sides
+// changed to the same lines takes cur's; any other group both changed is
+// an overlap, which settle judges from cur's lines in it: mine when it
+// returns true, else cur's. A kept line keeps its source: cur's for lines
+// outside mine's changes, base's for lines mine kept inside a group, w for
+// the lines mine wrote.
+func merge3(base, cur []bline, mine []string, w *node, settle func(vr []bline) bool) (out []bline) {
 	bt := textsOf(base)
 	hc, hm := diffLines(bt, textsOf(cur)), diffLines(bt, mine)
 	// mine with sources: lines outside its hunks are base's.
@@ -225,8 +226,7 @@ func merge3(base, cur []bline, mine []string, w *node, mineWins bool) (out []bli
 		case sameTexts(vr, tr):
 			out = append(out, vr...)
 		default:
-			overlap = true
-			if mineWins {
+			if settle(vr) {
 				out = append(out, tr...)
 			} else {
 				out = append(out, vr...)
@@ -234,8 +234,7 @@ func merge3(base, cur []bline, mine []string, w *node, mineWins bool) (out []bli
 		}
 		bi, vi, ti = ge, vi+vLen, ti+tLen
 	}
-	out = append(out, cur[vi:]...)
-	return out, overlap
+	return append(out, cur[vi:]...)
 }
 
 // inClosure reports that write x is in the causal closure of heads: a head,
@@ -266,20 +265,28 @@ func (s *state) baseHeads(prior []*node, w *node) []*node {
 	return heads
 }
 
+// rival is a prior write that a body write overlapped, with the write
+// whose lines the overlap kept.
+type rival struct{ x, win *node }
+
 // bodyStep folds body write w onto cur, the value of prior (the writes
-// folded before it). It returns the new value; conc, the prior writes
-// concurrent with w, when w overlapped a change and conc is not empty
-// (else nil); and the write that won the overlap.
+// folded before it). It returns the new value; the concurrent writes w
+// overlapped, in fold order, each with the overlap's winner; and lostTo,
+// the human write of w's own member it lost an overlap to, if any.
 //
 // A base whose closure holds every prior write is a plain replace. A
 // base-less (or unknown-base) write is a whole replace, which overlaps
-// every line. Otherwise the write merges three-way from its base text.
-// An overlap goes to w, the later in fold order, except that an agent
-// write loses to a concurrent human write of its own member.
-func (s *state) bodyStep(f *bodyFold, prior []*node, cur []bline, w *node) (out []bline, conc []*node, win *node) {
+// every concurrent write. Otherwise the write merges three-way from its
+// base text, and each overlapping group names its rivals: the concurrent
+// writes whose lines cur holds there, or, when cur only dropped base lines
+// there (no line tells who), every concurrent write. An overlap goes to w,
+// the later in fold order, except that an agent write loses a group to a
+// concurrent human write of its own member among that group's rivals.
+func (s *state) bodyStep(f *bodyFold, prior []*node, cur []bline, w *node) (out []bline, rivals []rival, lostTo *node) {
 	if w.typ == TypeItemCreate {
-		return linesFrom(bodyText(w), w), nil, w
+		return linesFrom(bodyText(w), w), nil, nil
 	}
+	var conc []*node
 	for _, x := range prior {
 		if !s.hb(x, w) {
 			conc = append(conc, x)
@@ -293,43 +300,78 @@ func (s *state) bodyStep(f *bodyFold, prior []*node, cur []bline, w *node) (out 
 			}
 		}
 	}
-	win = w
-	if human != nil {
-		win = human
-	}
 	heads := s.baseHeads(prior, w)
 	if len(heads) == 0 {
-		if len(conc) == 0 {
-			return linesFrom(bodyText(w), w), nil, w
-		}
+		out = linesFrom(bodyText(w), w)
 		if human != nil {
-			return cur, conc, human
+			out, lostTo = cur, human
 		}
-		return linesFrom(bodyText(w), w), conc, w
+		for _, x := range conc {
+			win := w
+			if human != nil {
+				win = x
+			}
+			rivals = append(rivals, rival{x, win})
+		}
+		return out, rivals, lostTo
 	}
-	inside := true
+	var sub []*node
+	inBase := map[*node]bool{}
 	for _, x := range prior {
-		inside = inside && s.inClosure(x, heads)
+		if s.inClosure(x, heads) {
+			sub = append(sub, x)
+			inBase[x] = true
+		}
 	}
-	if inside {
-		return linesFrom(bodyText(w), w), nil, w
+	if len(sub) == len(prior) {
+		return linesFrom(bodyText(w), w), nil, nil
 	}
 	base, ok := f.base[w.id]
 	if !ok {
-		var sub []*node
-		for _, x := range prior {
-			if s.inClosure(x, heads) {
-				sub = append(sub, x)
-			}
-		}
 		base = s.foldBody(f, sub)
 		f.base[w.id] = base
 	}
-	out, overlap := merge3(base, cur, splitLines(bodyText(w)), w, human == nil)
-	if !overlap || len(conc) == 0 {
-		return out, nil, w
+	hit := map[*node]bool{}
+	settle := func(vr []bline) bool {
+		changed := false
+		for _, l := range vr {
+			changed = changed || !inBase[l.src]
+		}
+		wins := true
+		for _, x := range conc {
+			if changed && !hasSrc(vr, x) {
+				continue
+			}
+			hit[x] = true
+			if x == human {
+				wins = false
+			}
+		}
+		if !wins {
+			lostTo = human
+		}
+		return wins
 	}
-	return out, conc, win
+	out = merge3(base, cur, splitLines(bodyText(w)), w, settle)
+	for _, x := range conc {
+		if hit[x] {
+			win := w
+			if x == human {
+				win = x
+			}
+			rivals = append(rivals, rival{x, win})
+		}
+	}
+	return out, rivals, lostTo
+}
+
+func hasSrc(l []bline, x *node) bool {
+	for _, b := range l {
+		if b.src == x {
+			return true
+		}
+	}
+	return false
 }
 
 // foldBody is the value of writes, a causally closed run in fold order.
@@ -348,7 +390,7 @@ func (s *state) foldBody(f *bodyFold, writes []*node) []bline {
 func (s *state) applyBody(it *item, n *node) {
 	f := s.bodies[it.id]
 	key, label := "it:"+it.id+":body", "body of "+it.alias
-	out, conc, win := s.bodyStep(f, f.writes, f.lines, n)
+	out, rivals, lostTo := s.bodyStep(f, f.writes, f.lines, n)
 	f.writes = append(f.writes, n)
 	f.lines = out
 	var heads []head
@@ -359,11 +401,12 @@ func (s *state) applyBody(it *item, n *node) {
 	}
 	s.reg[key] = append(heads, head{n, bodyText(n)})
 	if s.marks {
-		for _, x := range conc {
+		for _, r := range rivals {
+			x := r.x
 			if x.member != n.member {
-				mark(x, n, "field", label, win.id, show(bodyText(x)), show(bodyText(n)))
-				mark(n, x, "field", label, win.id, show(bodyText(n)), show(bodyText(x)))
-			} else if win == n {
+				mark(x, n, "field", label, r.win.id, show(bodyText(x)), show(bodyText(n)))
+				mark(n, x, "field", label, r.win.id, show(bodyText(n)), show(bodyText(x)))
+			} else if r.win == n {
 				why := "later"
 				if x.origin != OriginHuman && n.origin == OriginHuman {
 					why = "human"
@@ -371,8 +414,8 @@ func (s *state) applyBody(it *item, n *node) {
 				supersede(x, label, n, why)
 			}
 		}
-		if win != n {
-			supersede(n, label, win, "human")
+		if lostTo != nil {
+			supersede(n, label, lostTo, "human")
 		}
 	}
 	s.bodyExtras(it, f)

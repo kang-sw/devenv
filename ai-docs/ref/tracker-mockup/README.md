@@ -585,13 +585,18 @@ edit replaces the body; otherwise it merges three-way (base text, the folded
 value, the new text) on lines, with a Myers line diff (`diffLines`), and
 changes whose base line ranges intersect or touch form one group. A group
 changed on one side takes that side; a group changed on both (differently)
-takes the edit's side, since it folds later, except that an agent write
-loses to a concurrent human write of its own member (288). A base-less edit,
-or one whose base names no body write in its causal past, is a whole
-replace, which overlaps every line. An overlap with a concurrent write marks
-both as a `field` conflict between members, or gives the losing write the
-quiet superseded note within one member (289); a merge without an overlap is
-unmarked.
+is an overlap. Its rivals are the concurrent writes whose lines the folded
+value holds in that group (every concurrent write when the value only
+dropped base lines there, since no line names who). The overlap takes the
+edit's side, since it folds later, except that an agent write loses it when
+a concurrent human write of its own member is among the rivals (288); the
+precedence is per group, so the same agent write still wins another
+member's group. A base-less edit, or one whose base names no body write in
+its causal past, is a whole replace, which overlaps every concurrent write
+(and loses entirely to its member's concurrent human write). An overlap
+marks the edit and each rival as a `field` conflict between members, or
+gives the losing write the quiet superseded note within one member (289); a
+concurrent write the edit did not overlap is unmarked.
 
 **Sibling order** (528). `after` on `item.create` names the sibling the new
 item goes right after: absent appends it after the siblings placed so far
