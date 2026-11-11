@@ -921,7 +921,7 @@
   "js.tk.sup.later": "{0}에 의해 대체됨 (다른 클론에서 나중에 기록): {1}",
   "js.tk.sync.batchnote": "열린 배치는 이 클론이 새 이벤트를 받을 때(seen이 바뀌는 경우) 또는 push 시점에 서명된 커밋 하나로 닫힙니다.",
   "js.tk.sync.clone": "클론 {0}",
-  "js.tk.sync.closebatch": "배치 닫기",
+  "js.tk.sync.closebatch": "지금 반영",
   "js.tk.sync.closed": "닫힌 커밋",
   "js.tk.sync.commitn": "커밋 ({0})",
   "js.tk.sync.list": "push 안 됨: {0}",

@@ -921,7 +921,7 @@
   "js.tk.sup.later": "superseded by {0} (a later write from another clone): {1}",
   "js.tk.sync.batchnote": "The open batch closes into one signed commit when this clone receives new events (its seen would change) or at push.",
   "js.tk.sync.clone": "clone {0}",
-  "js.tk.sync.closebatch": "Close batch",
+  "js.tk.sync.closebatch": "Commit now",
   "js.tk.sync.closed": "closed commit",
   "js.tk.sync.commitn": "commit ({0})",
   "js.tk.sync.list": "unpushed: {0}",
