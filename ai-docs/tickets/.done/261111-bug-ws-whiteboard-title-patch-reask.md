@@ -4,6 +4,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 66551c078560dc18
 sage-review-completeness-reviewed: 66551c078560dc18
+completed: 2026-11-11
 ---
 
 # Title patch re-asks a whiteboard item
@@ -118,3 +119,23 @@ Verification:
 - The sent-mark tests stay green; run the wswhiteboard,
   wsdashboard, and mcp packages plus any playbook or wsflow mirror drift
   tests through `~/.local/bin/ws-rgo`.
+
+### Result (09d6a31ab) - 2026-11-11
+
+- `applyPatch` stamps `ReaskedAt` when the title differs from the stored
+  one on an item open after the patch's own status change
+  (`retitled := next.Status == StatusOpen && next.Title != prev.Title`);
+  the `applyPatch` and `ReaskedAt` comments name the title.
+- `reask_test.go`: the test is renamed
+  `TestReaskStampsOnlyARealTitleClassOrOptionsChangeOrAReopen`; the
+  not-a-re-ask block resends the current title, a title fix on an answered
+  item leaves it answered with no re-ask time, a title change on an open
+  item stamps the patch's time, and resending that title or editing only
+  why/recommend/links keeps it.
+- The whiteboard playbook's `Re-ask:` paragraph names the title among the
+  re-asking changes on an open item, drops it from the not-a-re-ask list,
+  and says an undelivered answer refers to the title and options it was
+  sent against; the ws, wsflow, and Pi copies are byte-identical and all
+  three `rsrc/manifest.json` hashes are `6106eec2...4d3a` (set by
+  sha256sum, since the remote build returns no regenerated files).
+- Verification: `ws-rgo test ./internal/wswhiteboard/... ./internal/wsdashboard/... ./internal/mcp/... ./internal/wsrsrc/... -count=1`: all ok (wsrsrc includes the wsflow and Pi mirror drift tests). Lite review: clean.
