@@ -105,7 +105,7 @@ func TestQueryMalformedKnownKeyRefused(t *testing.T) {
 		"due:2026-13-01": "due takes a date YYYY-MM-DD, optionally after <, >, <=, or >=",
 		"priority:high":  "priority takes a level number, optionally after <, >, <=, or >=",
 		"priority:>=-1":  "priority takes a level number, optionally after <, >, <=, or >=",
-		"status:review2": "status takes one of open, hidden, idea, todo, doing, blocked, awaiting, done, pending",
+		"status:review2": "status takes one of open, hidden, idea, todo, doing, blocked, in-review, done, dropped, pending",
 		"kind:epic":      "kind takes one of task, topic",
 		"assignee:":      "assignee takes a value",
 		"project:":       "project takes a value",
@@ -119,6 +119,45 @@ func TestQueryMalformedKnownKeyRefused(t *testing.T) {
 		if qe.Token != tok || qe.Reason != reason {
 			t.Errorf("ParseQuery(%q) = %+v, want token %q reason %q", tok, qe, tok, reason)
 		}
+	}
+}
+
+// status:dropped and status:in-review match the derived statuses, the older
+// status:awaiting is accepted as in-review's alias, and open leaves out both
+// done and dropped.
+func TestQueryWrapUpStatuses(t *testing.T) {
+	v := topicView(t, "ada.pc", []step{
+		task("ada.pc", "Dropped"),
+		{"ada.pc", "item.assign", map[string]any{"item": "ada.pc#1", "targets": []any{"maya"}, "completion": "assignee"}},
+		{"maya.pc", "item.status", map[string]any{"item": "ada.pc#1", "status": "dropped"}},
+		task("ada.pc", "Review"),
+		{"ada.pc", "item.assign", map[string]any{"item": "ada.pc#3", "targets": []any{"raj"}, "completion": "assigner"}},
+		{"raj.pc", "item.close", map[string]any{"item": "ada.pc#3"}},
+		task("ada.pc", "Done"),
+		{"ada.pc", "item.assign", map[string]any{"item": "ada.pc#5", "targets": []any{"bo"}, "completion": "assignee"}},
+		{"bo.pc", "item.close", map[string]any{"item": "ada.pc#5"}},
+		task("ada.pc", "Doing"),
+		{"ada.pc", "item.assign", map[string]any{"item": "ada.pc#7", "targets": []any{"maya"}, "completion": "assignee"}},
+		{"maya.pc", "item.status", map[string]any{"item": "ada.pc#7", "status": "doing"}},
+	})
+	for q, want := range map[string][]string{
+		"status:dropped":   {"ada.pc#1"},
+		"status:in-review": {"ada.pc#3"},
+		"status:awaiting":  {"ada.pc#3"},
+		"STATUS:Awaiting":  {"ada.pc#3"},
+		"status:done":      {"ada.pc#5"},
+		"status:open":      {"ada.pc#3", "ada.pc#7"},
+	} {
+		pq, err := ParseQuery(q)
+		if err != nil {
+			t.Fatalf("ParseQuery(%q): %v", q, err)
+		}
+		if got := v.Search(pq); !slices.Equal(got, want) {
+			t.Errorf("%s = %v, want %v", q, got, want)
+		}
+	}
+	if st, ok := NormQueryStatus("awaiting"); st != "in-review" || !ok {
+		t.Errorf("NormQueryStatus(awaiting) = %q, %v", st, ok)
 	}
 }
 

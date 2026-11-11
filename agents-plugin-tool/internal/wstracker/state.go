@@ -9,9 +9,14 @@ import (
 )
 
 var (
-	kinds    = []string{"task", "todo", "topic"}
-	settable = []string{"idea", "todo", "doing", "blocked"}
-	origins  = []string{OriginHuman, OriginAgent, OriginAgentAuto}
+	kinds = []string{"task", "todo", "topic"}
+	// settable are the statuses an assignee writes on their own assignment
+	// (done goes through item.close); superiorSettable those an org superior
+	// of the assignee writes on it, the superior's wrap-up: done is final, no
+	// review step.
+	settable         = []string{"idea", "todo", "doing", "blocked", "in-review", "dropped"}
+	superiorSettable = []string{"blocked", "done", "dropped"}
+	origins          = []string{OriginHuman, OriginAgent, OriginAgentAuto}
 	// itemFields are the item.edit fields, in the engine's order. stage is
 	// retired: only older events carry it (see apply), so editFields, the
 	// list a refusal names, leaves it out.
@@ -28,6 +33,11 @@ var defaultPriority = priority{names: []string{"Notice", "Task", "Urgent"}, def:
 
 // DefaultAttachmentMax is attachments.max_bytes when genesis sets none.
 const DefaultAttachmentMax = 10 << 20
+
+// wrapped reports a done or dropped assignment status: the assignment is
+// wrapped up, so it takes no status write, handoff, or take request until it
+// is reopened, and it no longer counts as work in anyone's hands.
+func wrapped(st string) bool { return st == "done" || st == "dropped" }
 
 func contains(l []string, s string) bool {
 	for _, x := range l {
@@ -128,6 +138,7 @@ type item struct {
 	labels             labelSet  // label ids as written; the view drops removed ones
 	open               *opening  // the latest item.open; active while its ended is nil
 	cc                 []ccEntry // the CC'd members, in the order they came to be CC'd
+	mentionsAt         *node     // the body write mentions come from; nil while none
 }
 
 // ccEntry is one CC'd member of an item; since is the add whose register
@@ -298,6 +309,7 @@ type state struct {
 	reqs     map[string]*takeReq
 	rorder   []string // take request ids in fold order
 	reg      map[string][]head
+	bodies   map[string]*bodyFold // item id -> its body as folded (merge.go)
 	labels   map[string]*label
 	lorder   []string // label ids in fold order of their adds
 	prio     priority
@@ -439,7 +451,7 @@ func newState(g *genesis, hb func(x, y *node) bool, marks bool) *state {
 		hb: hb, marks: marks,
 		members: map[string]*member{}, admins: map[string]bool{},
 		items: map[string]*item{}, asg: map[string]*rec{}, byItem: map[string][]*rec{}, ruleByID: map[string]*rule{},
-		comments: map[string]*comment{}, reg: map[string][]head{}, labels: map[string]*label{}, reqs: map[string]*takeReq{},
+		comments: map[string]*comment{}, reg: map[string][]head{}, bodies: map[string]*bodyFold{}, labels: map[string]*label{}, reqs: map[string]*takeReq{},
 		prio:   priority{names: append([]string(nil), g.prio.names...), def: g.prio.def},
 		attMax: g.attMax,
 	}
@@ -1079,8 +1091,8 @@ func (s *state) peek(key string, n *node, v any) any {
 	return winner(heads).v
 }
 
-// regWinner is the shown write of a register: mentions, attachments, and
-// refs follow the body write that won.
+// regWinner is the shown write of a register: a comment's mentions,
+// attachments, and refs follow the text write that won.
 func (s *state) regWinner(key string) *node { return winner(s.reg[key]).n }
 
 func mentionsOf(p obj) []string {
@@ -1265,9 +1277,6 @@ func (s *state) apply(n *node) {
 		}
 		it := &item{id: n.id, alias: n.alias, kind: kind, title: jsString(p["title"]),
 			parent: p.str("parent"), author: a, ts: n.ts, node: n, priority: s.prio.def}
-		if p.truthy("body") {
-			it.body = jsString(p["body"])
-		}
 		it.project = p.str("project")
 		if d, ok := p["due"].(string); ok && d != "" {
 			it.due = &d
@@ -1275,7 +1284,12 @@ func (s *state) apply(n *node) {
 		if v, ok := p.intOf("priority"); ok {
 			it.priority = v
 		}
-		it.mentions, it.attachments, it.refs = mentionsOf(p), attachmentsOf(p), refsOf(p)
+		// The create is the item's first body write: the register's first
+		// head, and every line's source until an edit replaces it.
+		f := &bodyFold{writes: []*node{n}, lines: linesFrom(bodyText(n), n), base: map[string][]bline{}}
+		s.bodies[n.id] = f
+		s.reg["it:"+n.id+":body"] = []head{{n, bodyText(n)}}
+		s.bodyExtras(it, f)
 		it.labels = labelsOf(p)
 		it.after, it.afterSet = p.str("after"), p.has("after")
 		it.placedBy, it.parentBy = n, n
@@ -1297,16 +1311,15 @@ func (s *state) apply(n *node) {
 			switch f {
 			case "title":
 				it.title = s.write(key, label, n, jsString(p[f])).(string)
-			case "body", "project":
+			case "body":
+				// The running fold value, not the register's winner (merge.go).
+				s.applyBody(it, n)
+			case "project":
 				v := ""
 				if !p.null(f) {
 					v = jsString(p[f])
 				}
-				if f == "body" {
-					it.body = s.write(key, label, n, v).(string)
-				} else {
-					it.project = s.write(key, label, n, v).(string)
-				}
+				it.project = s.write(key, label, n, v).(string)
 			case "due":
 				var v any
 				if !p.null(f) {
@@ -1338,10 +1351,6 @@ func (s *state) apply(n *node) {
 				w := s.write("st:"+fb.id, "status of "+fb.to+" on "+alias(it.id), n, statusVal{v, "", a, n}).(statusVal)
 				fb.status, fb.note, fb.noteBy, fb.last = w.status, w.note, w.by, w.n
 			}
-		}
-		if p.has("body") {
-			w := s.regWinner("it:" + it.id + ":body")
-			it.mentions, it.attachments, it.refs = mentionsOf(w.p), attachmentsOf(w.p), refsOf(w.p)
 		}
 		it.edited = n
 	case TypeItemHide:
@@ -1494,8 +1503,8 @@ func (s *state) apply(n *node) {
 		}
 	case TypeItemStatus, TypeItemClose, TypeItemConfirm, TypeItemReject, TypeItemReopen:
 		who := a
-		if n.typ != TypeItemStatus && n.typ != TypeItemClose && p.truthy("assignee") {
-			who = p.str("assignee")
+		if n.typ != TypeItemClose && p.truthy("assignee") {
+			who = p.str("assignee") // item.status: an org superior's write on who's assignment
 		}
 		item := p.str("item")
 		r := s.liveRec(item, who)
@@ -1515,7 +1524,7 @@ func (s *state) apply(n *node) {
 		case TypeItemClose:
 			v = "done"
 			if r.completion == "assigner" {
-				v = "awaiting"
+				v = "in-review"
 			}
 		case TypeItemConfirm:
 			v = "done"

@@ -19,10 +19,12 @@ const (
 	// ActComment: a comment was added to the item.
 	ActComment = "comment"
 	// ActStatus: an assignment's status was set (item.status, item.reject,
-	// item.reopen).
+	// item.reopen); a drop is a status of dropped, and a status an org
+	// superior or the assigner sets on another member's assignment names
+	// that member as Target.
 	ActStatus = "status"
 	// ActClosed: an assignment was closed or confirmed (item.close,
-	// item.confirm); Status says done or awaiting.
+	// item.confirm); Status says done or in-review.
 	ActClosed = "closed"
 	// ActTakeRequest: a member asked for the live assignment its Target
 	// holds (item.request).
@@ -43,8 +45,8 @@ type Activity struct {
 	// Actor is the event's author.
 	Actor string
 	// Target is the member the activity is aimed at: an assignment's
-	// assignee, or the assignee a confirm, reject, or reopen names; empty
-	// when there is none.
+	// assignee, or the assignee a status, confirm, reject, or reopen names;
+	// empty when there is none.
 	Target string
 	// Status is the status the event wrote (ActStatus, ActClosed).
 	Status string
@@ -111,7 +113,7 @@ func (t *Tracker) Activity(id wsledger.EventID) (acts []Activity, settled bool) 
 	case TypeItemStatus, TypeItemClose, TypeItemConfirm, TypeItemReject, TypeItemReopen:
 		// The status the event writes, as apply computes it.
 		who := n.member
-		if n.typ != TypeItemStatus && n.typ != TypeItemClose && n.p.truthy("assignee") {
+		if n.typ != TypeItemClose && n.p.truthy("assignee") {
 			who = n.p.str("assignee")
 		}
 		a := base
@@ -124,7 +126,7 @@ func (t *Tracker) Activity(id wsledger.EventID) (acts []Activity, settled bool) 
 		case TypeItemClose:
 			a.Kind, a.Status = ActClosed, "done"
 			if x := S.liveRec(itemID, who); x != nil && x.completion == "assigner" {
-				a.Status = "awaiting"
+				a.Status = "in-review"
 			}
 		case TypeItemConfirm:
 			a.Kind, a.Status = ActClosed, "done"

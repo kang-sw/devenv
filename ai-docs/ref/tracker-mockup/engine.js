@@ -28,7 +28,14 @@
   'use strict';
 
   var KINDS = ['task', 'todo', 'topic'];
-  var SETTABLE = ['idea', 'todo', 'doing', 'blocked'];
+  // SETTABLE: what an assignee writes on their own assignment (done goes through
+  // item.close); SUPERIOR_SETTABLE: what an org superior of the assignee writes on
+  // it, the superior's wrap-up (done is final, no review step).
+  var SETTABLE = ['idea', 'todo', 'doing', 'blocked', 'in-review', 'dropped'];
+  var SUPERIOR_SETTABLE = ['blocked', 'done', 'dropped'];
+  // A done or dropped assignment is wrapped up: no status write, handoff, or take
+  // request until it is reopened, and no longer work in anyone's hands.
+  function wrapped(st) { return st === 'done' || st === 'dropped'; }
   var ORIGINS = ['human', 'agent', 'agent-auto'];
   // stage is retired: only older events carry it (see apply), so EDIT_FIELDS, the
   // list a refusal names, leaves it out.
@@ -37,6 +44,7 @@
   // event's id, and an item's labels field is a list of those ids.
   var LABEL_LIST = ['roles.add_label', 'roles.edit_label', 'roles.remove_label'], COLOR_RE = /^#[0-9a-f]{6}$/;
   var STAGE_SHAPE = 'stage must be review (null or absent: todo)';
+  var BASE_SHAPE = 'base must be a list of event ids (the body revision the editor saw)';
   // Priority levels are store configuration (roles file, roles.set_priority_levels).
   // Codes are integers 0..n-1, larger = more urgent; names are display names only.
   var DEFAULT_PRIORITY = { names: ['Notice', 'Task', 'Urgent'], default: 1 };
@@ -223,7 +231,7 @@
   // ------------------------------------------------------------------ state
 
   function genesis(roles) {
-    var S = { members: {}, admins: {}, items: {}, place: [], asg: {}, rules: {}, comments: {}, reg: {}, prio: normPriority(roles.priority),
+    var S = { members: {}, admins: {}, items: {}, place: [], asg: {}, rules: {}, comments: {}, reg: {}, bodies: {}, prio: normPriority(roles.priority),
       att: normAttachments(roles.attachments), labels: {}, lorder: [], reqs: {}, rorder: [] };
     (roles.members || []).forEach(function (m) {
       S.members[m.id] = { id: m.id, profile: normProfile(m, m.id), keys: (m.keys || []).slice(), revoked: {}, leads: (m.leads || []).slice(), removed: null, joined: null };
@@ -569,7 +577,7 @@
     if (ORIGINS.indexOf(n.origin) < 0) rej('origin must be human, agent or agent-auto');
     if (n.origin === 'agent-auto' && /^item\.(accept|decline|return|handoff)$/.test(n.type))
       rej('an agent never accepts, declines, returns or hands off an assignment on its own (agent-auto is invalid here)');
-    if (n.origin === 'agent-auto' && n.type !== 'item.status' && n.type !== 'item.close')
+    if (n.origin === 'agent-auto' && (n.type !== 'item.status' && n.type !== 'item.close' || n.type === 'item.status' && p.assignee && p.assignee !== a))
       rej('agent-auto is limited to item.status and item.close on the author\'s own assignment');
 
     switch (n.type) {
@@ -598,7 +606,8 @@
 
       case 'item.edit':
         it = needItem(S, p.item);
-        if (it.author !== a && !creatorGone(S, it, a)) rej('only the creator (' + it.author + ') edits ' + it.alias);
+        // The creator or a live assignee edits every field.
+        try { needCreatorOrAssignee(S, it, a, ''); } catch (e) { if (!(e instanceof Rej) || !creatorGone(S, it, a)) throw e; }
         if (it.hidden) rej(it.alias + ' is hidden');
         if (!ITEM_FIELDS.some(function (f) { return has(p, f); })) rej('nothing to edit (' + EDIT_FIELDS.join(', ') + ')');
         if (has(p, 'priority') && p.priority == null) rej('priority cannot be cleared; set a level');
@@ -606,6 +615,12 @@
         if (has(p, 'stage')) checkStage(S, it, p);
         if ((p.mentions != null || p.attachments != null) && !has(p, 'body')) rej('mentions and attachments go with a body edit');
         if (p.refs != null && !has(p, 'body')) rej('refs go with a body edit');
+        // base is the body revision the editor saw; an id naming no body write folds as
+        // a whole replace, so only its shape is checked.
+        if (p.base != null) {
+          if (!has(p, 'body')) rej('base goes with a body edit');
+          if (!Array.isArray(p.base) || !p.base.every(function (x) { return typeof x === 'string'; })) rej(BASE_SHAPE);
+        }
         checkExtras(S, p, it.attachments);
         break;
 
@@ -613,7 +628,7 @@
         it = needItem(S, p.item);
         if (it.author !== a && !creatorGone(S, it, a)) rej('only the creator (' + it.author + ') hides ' + it.alias);
         if (it.hidden) rej(it.alias + ' is already hidden');
-        var open = openRecs(S, it.id).filter(function (x) { return x.to !== a && x.status !== 'done'; });
+        var open = openRecs(S, it.id).filter(function (x) { return x.to !== a && !wrapped(x.status); });
         if (open.length) rej('unassign the open assignments first (' + open.map(function (x) { return x.to; }).join(', ') + ')');
         break;
       }
@@ -652,7 +667,7 @@
         if (from !== a && !S.admins[a]) rej('only the assignee (' + from + ') hands off their assignment; an admin may hand off any member\'s');
         r = needRec(S, it.id, from);
         if (r.fallback) rej(from + ' holds ' + it.alias + ' only because nobody else does; assign it instead');
-        if (r.status === 'done') rej('assignment is done; nothing to hand off');
+        if (wrapped(r.status)) rej('assignment is ' + r.status + '; nothing to hand off');
         if (!p.to) rej('to required');
         if (p.to === from) rej('hand off to someone else');
         needMember(S, p.to);
@@ -673,7 +688,7 @@
         var hd = holders(S, it);
         if (hd.length) rej(it.alias + ' has live or pending assignments (' + hd.join(', ') + '); only a task nobody else holds is opened');
         var fbo = liveFallback(S, it.id);
-        if (fbo && fbo.status === 'done') rej(it.alias + ' is done; nothing to open');
+        if (fbo && wrapped(fbo.status)) rej(it.alias + ' is ' + fbo.status + '; nothing to open');
         break;
       }
 
@@ -700,7 +715,7 @@
         if (p.assignee === a) rej(a + ' cannot request their own assignment');
         r = needRec(S, it.id, p.assignee);
         if (r.fallback) rej(p.assignee + ' holds ' + it.alias + ' only because nobody else does; it is taken by a claim once its creator opens it');
-        if (r.status === 'done') rej('assignment is done; nothing to take');
+        if (wrapped(r.status)) rej('assignment is ' + r.status + '; nothing to take');
         if (openRec(S, it.id, a)) rej(a + ' already holds a live or pending assignment on ' + it.alias);
         S.rorder.forEach(function (id) {
           q = S.reqs[id];
@@ -782,20 +797,35 @@
           rej(a + ' has no assignments to withdraw on ' + it.alias);
         break;
 
-      case 'item.status':
+      case 'item.status': {
         it = needItem(S, p.item);
         if (it.kind === 'topic') rej('topics have no status');
-        if (SETTABLE.indexOf(p.status) < 0) rej('status must be idea, todo, doing or blocked (done goes through item.close)');
+        var sw = p.assignee || a;
+        if (sw !== a) { // an org superior's wrap-up, or the assigner's drop, on sw's assignment
+          if (SUPERIOR_SETTABLE.indexOf(p.status) < 0) rej('status on another member\'s assignment must be blocked, done or dropped');
+          r = needRec(S, it.id, sw);
+          if (!below(S.members, a, sw)) {
+            if (r.by !== a) rej('only ' + sw + ' or an org superior of ' + sw + ' sets the status of ' + sw + '\'s assignment');
+            if (p.status !== 'dropped') rej('the assigner (' + a + ') only drops ' + sw + '\'s assignment; ' + p.status + ' is for an org superior of ' + sw);
+          }
+          if (wrapped(r.status)) rej('assignment is ' + r.status + '; reopen it first');
+          break;
+        }
+        if (SETTABLE.indexOf(p.status) < 0) rej('status must be idea, todo, doing, blocked, in-review or dropped (done goes through item.close)');
         r = needRec(S, it.id, a);
-        if (r.status === 'done') rej('assignment is done; reopen it first');
+        if (wrapped(r.status)) rej('assignment is ' + r.status + '; reopen it first');
+        if (p.status === 'dropped' && r.completion === 'assigner' && r.by !== a)
+          rej('the assigner (' + r.by + ') confirms this assignment; only they or an org superior of ' + a + ' drop it');
         break;
+      }
 
       case 'item.close':
         it = needItem(S, p.item);
         if (it.kind === 'topic') rej('topics have no status');
         r = needRec(S, it.id, a);
         if (r.status === 'done') rej('assignment is already done');
-        if (r.status === 'awaiting') rej('already awaiting confirmation by ' + r.by);
+        if (r.status === 'dropped') rej('assignment is dropped; reopen it first');
+        if (r.status === 'in-review' && r.completion === 'assigner') rej('already in review by ' + r.by);
         break;
 
       case 'item.confirm':
@@ -803,9 +833,9 @@
         it = needItem(S, p.item);
         r = liveRec(S, it.id, p.assignee);
         if (!r) rej('no live assignment of ' + it.alias + ' to ' + p.assignee);
-        if (r.by !== a) rej('only the assigner (' + r.by + ') ' + (n.type === 'item.confirm' ? 'confirms' : 'rejects'));
-        if (r.completion !== 'assigner') rej('this assignment does not require confirmation');
-        if (r.status !== 'awaiting') rej('assignment is ' + r.status + ', not awaiting confirmation');
+        if (r.by !== a && !below(S.members, a, r.to))
+          rej('only the assigner (' + r.by + ') or an org superior of ' + r.to + ' ' + (n.type === 'item.confirm' ? 'confirms' : 'rejects'));
+        if (r.status !== 'in-review') rej('assignment is ' + r.status + ', not in review');
         break;
 
       case 'item.reopen':
@@ -813,7 +843,7 @@
         r = liveRec(S, it.id, p.assignee || a);
         if (!r) rej(notAssignee(S, it, p.assignee || a));
         if (r.by !== a && r.to !== a) rej('only the assigner (' + r.by + ') or the assignee (' + r.to + ') reopens');
-        if (r.status !== 'done') rej('assignment is ' + r.status + ', not done');
+        if (!wrapped(r.status)) rej('assignment is ' + r.status + ', not done or dropped');
         break;
 
       case 'comment.add':
@@ -990,7 +1020,7 @@
   function attachmentsOf(p) {
     return Array.isArray(p.attachments) ? p.attachments.map(function (x) { return { oid: x.oid, name: x.name, size: x.size, mime: x.mime }; }) : [];
   }
-  // The register's shown write: mentions, attachments and refs follow the body write that won.
+  // The register's shown write: a comment's mentions, attachments and refs follow the text write that won.
   function regWinner(S, key) { return winner(S.reg[key]).n; }
   // The value write(S, key, _, n, v) would show, without writing.
   function peek(S, key, n, v) {
@@ -1237,6 +1267,201 @@
     });
   }
 
+  // ------------------------------------------------------------------ body merge
+  // An item.edit body carries the full new text and, from the editor, base: the body
+  // revision it saw (the body write heads of the value it loaded). The Go port
+  // (wstracker/merge.go) mirrors every function here line for line; the golden cases
+  // pin the two to one result.
+
+  // The body a write carries: item.create's when truthy, an item.edit's unless null.
+  function bodyText(n) {
+    if (n.type === 'item.create') return n.p.body ? String(n.p.body) : '';
+    return n.p.body == null ? '' : String(n.p.body);
+  }
+  function linesFrom(text, src) { return text.split('\n').map(function (t) { return { text: t, src: src }; }); }
+  function joinLines(l) { return l.map(function (x) { return x.text; }).join('\n'); }
+  function textsOf(l) { return l.map(function (x) { return x.text; }); }
+
+  // Myers' greedy line diff of a and b, after the common prefix and suffix are set
+  // aside, as maximal hunks {a0, a1, b0, b1} (base lines [a0, a1) became [b0, b1))
+  // between the matched lines. A step goes down (an insertion) when V[k-1] < V[k+1],
+  // else right (a deletion).
+  function diffLines(a, b) {
+    var pre = 0, suf = 0;
+    while (pre < a.length && pre < b.length && a[pre] === b[pre]) pre++;
+    while (suf < a.length - pre && suf < b.length - pre && a[a.length - 1 - suf] === b[b.length - 1 - suf]) suf++;
+    a = a.slice(pre, a.length - suf); b = b.slice(pre, b.length - suf);
+    var n = a.length, m = b.length, max = n + m, off = max + 1, v = [], trace = [], d, k, x, y, i;
+    for (i = 0; i < 2 * max + 3; i++) v.push(0);
+    found:
+    for (d = 0; d <= max; d++) {
+      trace.push(v.slice(off - d - 1, off + d + 2)); // V before step d, for k in [-d-1, d+1]
+      for (k = -d; k <= d; k += 2) {
+        x = k === -d || (k !== d && v[off + k - 1] < v[off + k + 1]) ? v[off + k + 1] : v[off + k - 1] + 1;
+        y = x - k;
+        while (x < n && y < m && a[x] === b[y]) { x++; y++; }
+        v[off + k] = x;
+        if (x >= n && y >= m) break found;
+      }
+    }
+    var mx = [], my = [];
+    x = n; y = m;
+    for (; d > 0; d--) {
+      var pv = trace[d], po = d + 1;
+      k = x - y;
+      var pk = k === -d || (k !== d && pv[po + k - 1] < pv[po + k + 1]) ? k + 1 : k - 1;
+      var px = pv[po + pk], py = px - pk;
+      while (x > px && y > py) { x--; y--; mx.push(x); my.push(y); }
+      x = px; y = py;
+    }
+    while (x > 0 && y > 0) { x--; y--; mx.push(x); my.push(y); }
+    var out = [], pa = 0, pb = 0;
+    for (i = mx.length - 1; i >= -1; i--) {
+      var ma = i >= 0 ? mx[i] : n, mb = i >= 0 ? my[i] : m;
+      if (ma > pa || mb > pb) out.push({ a0: pre + pa, a1: pre + ma, b0: pre + pb, b1: pre + mb });
+      pa = ma + 1; pb = mb + 1;
+    }
+    return out;
+  }
+
+  // Merges mine (w's new text) and cur (the folded value) from base. Hunks of the two
+  // diffs whose base ranges intersect or touch form one group; a group changed on one
+  // side takes that side; a group both sides changed to the same lines takes cur's; any
+  // other group both changed is an overlap, which settle judges from cur's lines in it:
+  // mine when it returns true, else cur's. A kept line keeps its source: cur's outside
+  // mine's changes, base's for lines mine kept inside a group, w for the lines mine wrote.
+  function merge3(base, cur, mine, w, settle) {
+    var bt = textsOf(base), hc = diffLines(bt, textsOf(cur)), hm = diffLines(bt, mine), tl = [], bi = 0, out = [];
+    hm.forEach(function (h) {
+      tl = tl.concat(base.slice(bi, h.a0), mine.slice(h.b0, h.b1).map(function (t) { return { text: t, src: w }; }));
+      bi = h.a1;
+    });
+    tl = tl.concat(base.slice(bi));
+    var vi = 0, ti = 0, i = 0, j = 0;
+    bi = 0;
+    while (i < hc.length || j < hm.length) {
+      // A group starts at the earliest remaining hunk and takes every hunk starting at or before its end.
+      var gs = j >= hm.length || (i < hc.length && hc[i].a0 <= hm[j].a0) ? hc[i].a0 : hm[j].a0;
+      var ge = gs, inA = false, inB = false, vLen = 0, tLen = 0;
+      for (;;) {
+        var h;
+        if (i < hc.length && hc[i].a0 <= ge) { h = hc[i++]; inA = true; vLen += (h.b1 - h.b0) - (h.a1 - h.a0); }
+        else if (j < hm.length && hm[j].a0 <= ge) { h = hm[j++]; inB = true; tLen += (h.b1 - h.b0) - (h.a1 - h.a0); }
+        else break;
+        if (h.a1 > ge) ge = h.a1;
+      }
+      var same = gs - bi;
+      out = out.concat(cur.slice(vi, vi + same));
+      vi += same; ti += same;
+      vLen += ge - gs; tLen += ge - gs;
+      var vr = cur.slice(vi, vi + vLen), tr = tl.slice(ti, ti + tLen);
+      if (!inB) out = out.concat(vr);
+      else if (!inA) out = out.concat(tr);
+      else if (textsOf(vr).join('\n') === textsOf(tr).join('\n') && vr.length === tr.length) out = out.concat(vr);
+      else out = out.concat(settle(vr) ? tr : vr);
+      bi = ge; vi += vLen; ti += tLen;
+    }
+    return out.concat(cur.slice(vi));
+  }
+
+  // x is in the causal closure of heads: a head, or in one's causal past.
+  function inClosure(x, heads) { return heads.some(function (h) { return x === h || hb(x, h); }); }
+  // The writes of prior that w's base names and that are in w's causal past; none
+  // means w is a whole replace.
+  function baseHeads(prior, w) {
+    if (w.type !== 'item.edit' || w.p.base == null) return [];
+    var ids = Array.isArray(w.p.base) ? w.p.base.map(String) : [];
+    return prior.filter(function (x) { return ids.indexOf(x.id) >= 0 && hb(x, w); });
+  }
+
+  // Folds body write w onto cur, the value of prior (the writes folded before it).
+  // Returns the new value (out); rivals, the concurrent writes w overlapped, in fold
+  // order, each with the overlap's winner ({ x, win }); and lostTo, the human write of
+  // w's own member it lost an overlap to, if any. A base whose closure holds every prior
+  // write is a plain replace. A base-less (or unknown-base) write is a whole replace,
+  // which overlaps every concurrent write. Otherwise the write merges three-way from its
+  // base text, and each overlapping group names its rivals: the concurrent writes whose
+  // lines cur holds there, or, when cur only dropped base lines there (no line tells
+  // who), every concurrent write. An overlap goes to w, the later in fold order, except
+  // that an agent write loses a group to a concurrent human write of its own member
+  // among that group's rivals.
+  function bodyStep(f, prior, cur, w) {
+    if (w.type === 'item.create') return { out: linesFrom(bodyText(w), w), rivals: [], lostTo: null };
+    var conc = prior.filter(function (x) { return !hb(x, w); }), human = null;
+    if (w.origin !== 'human') conc.forEach(function (x) { if (x.author === w.author && x.origin === 'human') human = x; });
+    var heads = baseHeads(prior, w);
+    if (!heads.length) return {
+      out: human ? cur : linesFrom(bodyText(w), w),
+      rivals: conc.map(function (x) { return { x: x, win: human ? x : w }; }),
+      lostTo: human
+    };
+    var sub = prior.filter(function (x) { return inClosure(x, heads); });
+    if (sub.length === prior.length) return { out: linesFrom(bodyText(w), w), rivals: [], lostTo: null };
+    var base = f.base[w.id];
+    if (!base) base = f.base[w.id] = foldBody(f, sub);
+    var hit = [], lostTo = null;
+    var out = merge3(base, cur, bodyText(w).split('\n'), w, function (vr) {
+      var srcs = vr.map(function (l) { return l.src; }), wins = true;
+      var changed = srcs.some(function (x) { return sub.indexOf(x) < 0; });
+      conc.forEach(function (x) {
+        if (changed && srcs.indexOf(x) < 0) return;
+        if (hit.indexOf(x) < 0) hit.push(x);
+        if (x === human) wins = false;
+      });
+      if (!wins) lostTo = human;
+      return wins;
+    });
+    return {
+      out: out,
+      rivals: conc.filter(function (x) { return hit.indexOf(x) >= 0; }).map(function (x) { return { x: x, win: x === human ? x : w }; }),
+      lostTo: lostTo
+    };
+  }
+  // The value of writes, a causally closed run in fold order.
+  function foldBody(f, writes) {
+    var cur = null;
+    writes.forEach(function (w, i) { cur = bodyStep(f, writes.slice(0, i), cur, w).out; });
+    return cur;
+  }
+
+  // Folds item.edit n's body: the merged value, the body revision (the register's
+  // heads), the markers of an overlap, and the lists that follow the body.
+  function applyBody(S, it, n, C) {
+    var f = S.bodies[it.id], key = 'it:' + it.id + ':body', label = 'body of ' + it.alias;
+    var r = bodyStep(f, f.writes, f.lines, n);
+    f.writes.push(n); f.lines = r.out;
+    S.reg[key] = (S.reg[key] || []).filter(function (h) { return !hb(h.n, n); }).concat([{ n: n, v: bodyText(n) }]);
+    if (C) {
+      r.rivals.forEach(function (v) {
+        var x = v.x;
+        if (x.author !== n.author) {
+          mark(x, n, 'field', label, { winner: v.win.id, mine: show(bodyText(x)), theirs: show(bodyText(n)) });
+          mark(n, x, 'field', label, { winner: v.win.id, mine: show(bodyText(n)), theirs: show(bodyText(x)) });
+        } else if (v.win === n) supersede(x, label, n, x.origin !== 'human' && n.origin === 'human' ? 'human' : 'later');
+      });
+      if (r.lostTo) supersede(n, label, r.lostTo, 'human');
+    }
+    bodyExtras(it, f);
+  }
+  // The item's body and the lists that follow it: attachments and refs are the union
+  // over the writes whose lines survive (fold order, each oid / id once), mentions the
+  // latest such write's.
+  function bodyExtras(it, f) {
+    it.body = joinLines(f.lines);
+    var srcs = f.lines.map(function (l) { return l.src; }), last = null;
+    it.mentions = []; it.attachments = []; it.refs = [];
+    f.writes.forEach(function (w) {
+      if (srcs.indexOf(w) < 0) return;
+      last = w;
+      attachmentsOf(w.p).forEach(function (a) { if (!it.attachments.some(function (x) { return x.oid === a.oid; })) it.attachments.push(a); });
+      refsOf(w.p).forEach(function (t) { if (it.refs.indexOf(t) < 0) it.refs.push(t); });
+    });
+    if (last) it.mentions = mentionsOf(last.p);
+    it.mentionsAt = last; // the body write the mentions come from: a body mention dates from it
+  }
+  // An item's body revision: its body register's head ids.
+  function bodyRev(S, id) { return (S.reg['it:' + id + ':body'] || []).map(function (h) { return h.n.id; }); }
+
   function apply(S, n, C) {
     var p = n.p, a = n.author, it, q, m, r;
     switch (n.type) {
@@ -1247,6 +1472,11 @@
           parent: p.parent || null, after: has(p, 'after') ? (p.after || null) : undefined, author: a, ts: n.ts, hidden: false, edited: null, node: n,
           mentions: mentionsOf(p), attachments: attachmentsOf(p), refs: refsOf(p), labels: labelsOf(p), cc: [] };
         S.items[n.id].placedBy = S.items[n.id].parentBy = n;
+        // The create is the item's first body write: the register's first head, and
+        // every line's source until an edit replaces it.
+        S.bodies[n.id] = { writes: [n], lines: linesFrom(bodyText(n), n), base: {} };
+        S.reg['it:' + n.id + ':body'] = [{ n: n, v: bodyText(n) }];
+        bodyExtras(S.items[n.id], S.bodies[n.id]);
         S.place.push({ id: n.id, parent: S.items[n.id].parent, after: S.items[n.id].after });
         break;
       case 'item.move':
@@ -1282,9 +1512,9 @@
             return;
           }
           if (f === 'labels') { it.labels = write(S, 'it:' + it.id + ':labels', 'labels of ' + it.alias, n, { labels: labelsOf(p) }, C).labels; return; }
+          if (f === 'body') { applyBody(S, it, n, C); return; } // the running fold value, not the register's winner
           it[f] = write(S, 'it:' + it.id + ':' + f, f + ' of ' + it.alias, n, p[f] == null ? (f === 'due' ? null : '') : p[f], C);
         });
-        if (has(p, 'body')) { var bw = regWinner(S, 'it:' + it.id + ':body'); it.mentions = mentionsOf(bw.p); it.attachments = attachmentsOf(bw.p); it.refs = refsOf(bw.p); }
         it.edited = n;
         break;
       case 'item.hide':
@@ -1381,12 +1611,12 @@
         }
         break;
       case 'item.status': case 'item.close': case 'item.confirm': case 'item.reject': case 'item.reopen': {
-        var who = (n.type === 'item.status' || n.type === 'item.close') ? a : (p.assignee || a);
+        var who = n.type === 'item.close' ? a : (p.assignee || a); // item.status: an org superior's write on who's assignment
         r = liveRec(S, p.item, who);
         if (r && r.fallback && r.start !== n && !hb(r.start, n)) r = null; // n had not seen the fallback start: it was meant for the record that ended
         if (!r) { onEnded(S, p.item, who, n, C); break; } // folded onto an assignment a concurrent event ended
         r.writes.push(n);
-        var v = n.type === 'item.status' ? p.status : n.type === 'item.close' ? (r.completion === 'assigner' ? 'awaiting' : 'done') :
+        var v = n.type === 'item.status' ? p.status : n.type === 'item.close' ? (r.completion === 'assigner' ? 'in-review' : 'done') :
           n.type === 'item.confirm' ? 'done' : 'doing';
         var w = write(S, 'st:' + r.id, 'status of ' + who + ' on ' + alias(p.item), n, { status: v, note: p.note || null, by: a, n: n }, C);
         r.status = w.status; r.note = w.note; r.noteBy = w.by; r.last = w.n;
@@ -1591,19 +1821,22 @@
       // a pending rule request holds nothing, so it does not make the item pending
       return recs.some(function (r) { return r.state === 'pending' && !r.ruleRequest; }) ? 'pending' : 'todo';
     }
-    var s = live.map(function (r) { return r.status; });
+    // a dropped assignment is outside the roll-up: the item derives from the rest
+    // (a mix of done and dropped is done), and is dropped only when all are
+    var s = live.map(function (r) { return r.status; }).filter(function (x) { return x !== 'dropped'; });
+    if (!s.length) return 'dropped';
     if (s.every(function (x) { return x === 'done'; })) return 'done';
     if (s.indexOf('blocked') >= 0) return 'blocked';
-    if (s.indexOf('awaiting') >= 0) return 'awaiting';
+    if (s.indexOf('in-review') >= 0) return 'in-review';
     if (s.some(function (x) { return x === 'doing' || x === 'done'; })) return 'doing';
     if (s.every(function (x) { return x === 'idea'; })) return 'idea';
     return 'todo';
   }
   // Pending assignments are excluded from status and roll-up: an item whose only
-  // assignments are pending is not counted; nor is an item at idea.
+  // assignments are pending is not counted; nor is an item at idea, nor a dropped one.
   function counted(g, it) {
     var s = itemStatus(g, it);
-    return it.kind !== 'topic' && s !== 'pending' && s !== 'idea';
+    return it.kind !== 'topic' && s !== 'pending' && s !== 'idea' && s !== 'dropped';
   }
   function subtasksOf(g, id) { return vals(g.items).filter(function (i) { return i.parent === id && !i.hidden; }); }
   function rollup(g, it) {
@@ -1706,7 +1939,7 @@
       while (cur && d < 50) { chain.push(cur.author); cur = cur.parent && S.items[cur.parent]; d++; }
       var started = null;
       recs.forEach(function (r) { r.writes.forEach(function (w) { if (w.type === 'item.status' && w.p.status === 'doing' && (!started || String(w.ts) < started)) started = String(w.ts); }); });
-      items[it.id] = { id: it.id, alias: it.alias, kind: it.kind, title: it.title, body: it.body, project: it.project,
+      items[it.id] = { id: it.id, alias: it.alias, kind: it.kind, title: it.title, body: it.body, bodyRev: bodyRev(S, it.id), project: it.project,
         labels: it.labels.filter(function (id) { return !!liveLabel(S, id); }),
         due: it.due, priority: it.priority, priorityLevel: priorityLevel(S.prio, it.priority), priorityName: S.prio.names[priorityLevel(S.prio, it.priority)],
         parent: it.parent && S.items[it.parent] ? it.parent : null, author: it.author, ts: it.ts, hidden: !!it.hidden,
@@ -1756,7 +1989,7 @@
     });
 
     // ---- viewer-specific lists
-    var A = vals(assignments), RANK = { blocked: 0, doing: 1, todo: 2, idea: 3, awaiting: 4, done: 5 };
+    var A = vals(assignments), RANK = { blocked: 0, doing: 1, todo: 2, idea: 3, 'in-review': 4, done: 5, dropped: 6 };
     function visible(r) { return items[r.item] && !items[r.item].hidden; }
     // (153 b) a held topic is ownership only: in my.assignments, received and the
     // pending badge, never in a status-based list or count
@@ -1773,7 +2006,9 @@
     var pendingToMe = A.filter(function (r) { return r.to === v && r.state === 'pending' && visible(r); });
     var answered = A.filter(function (r) { return r.to === v && !r.forced && r.state !== 'pending' && (r.accepted || r.state === 'declined') && visible(r); });
     var sent = A.filter(function (r) { return r.sender === v && r.to !== v && !r.forced && visible(r); });
-    var confirms = A.filter(function (r) { return r.by === v && r.to !== v && r.state === 'live' && r.status === 'awaiting'; });
+    // the assigner's review list; a self-assigned in-review is its holder's to resolve
+    // as its assigner. An org superior resolves one from the item.
+    var confirms = A.filter(function (r) { return r.by === v && r.state === 'live' && r.status === 'in-review'; });
     var given = Object.keys(items).filter(function (id) {
       return !items[id].hidden && A.some(function (r) { return r.item === id && (r.by === v || r.sender === v) && r.to !== v && (r.state === 'live' || r.state === 'pending'); });
     });
@@ -1784,8 +2019,8 @@
 
     // Notices are derived, never events. accepted: to the accepter's lead at accept
     // time; handoff: to the original assigner when a handoff is accepted; done /
-    // blocked: to the assigner when someone else set that status on a live assignment
-    // (an awaiting one is in the confirm list), keyed by status and time so a later
+    // blocked / dropped: to the assigner when someone else set that status on a live
+    // assignment (an in-review one is in the confirm list), keyed by status and time so a later
     // write of the same status is a new notice; declined / returned (285): to the
     // sender, and for a returned handoff also to the original assigner (291).
     var notices = [];
@@ -1796,7 +2031,7 @@
         if (r.leadAtAccept === v) notices.push(Object.assign({ key: 'acc:' + r.id, kind: 'accepted' }, b1));
         else if (r.handoffOf && assignments[r.handoffOf] && assignments[r.handoffOf].by === v) notices.push(Object.assign({ key: 'ho:' + r.id, kind: 'handoff', from: r.handoffFrom }, b1));
       }
-      if (r.by === v && r.to !== v && r.state === 'live' && (r.status === 'done' || r.status === 'blocked') && r.statusBy && r.statusBy !== v)
+      if (r.by === v && r.to !== v && r.state === 'live' && (wrapped(r.status) || r.status === 'blocked') && r.statusBy && r.statusBy !== v)
         notices.push(Object.assign({ key: 'w:' + r.id + ':' + r.status + ':' + r.lastUpdate, kind: r.status, ts: r.lastUpdate }, base));
       if (r.to === v || !r.ended) return;
       var b2 = Object.assign({ ts: r.ended.ts, endedBy: r.ended.by, note: r.answerNote, from: r.handoffFrom, restores: r.restores }, base);
@@ -1809,22 +2044,22 @@
     // the outside group (outside: true, depth from the org-tree root: a root is 0).
     // Per member: the open, pending, and waiting lists; counts, the member's live
     // assignments per status, a creator-fallback holding left out ((262 a): nobody took
-    // that work); load, those at todo, doing, or blocked (idea, awaiting, and done are
-    // not the member's work in hand); stale and overdue (the item's due
-    // date passed), subsets of load; fallback, the live fallback holdings not done.
+    // that work); load, those at todo, doing, or blocked (idea, in-review, done, and
+    // dropped are not the member's work in hand); stale and overdue (the item's due
+    // date passed), subsets of load; fallback, the live fallback holdings not done or dropped.
     var today = String(now).slice(0, 10), team = [], inTeam = {};
     inTeam[v] = true;
     function teamRow(id, depth, outside) {
       inTeam[id] = true;
       var recs = A.filter(function (r) { return r.to === id && visible(r) && notTopic(r); });
-      var open = recs.filter(function (r) { return r.state === 'live' && r.status !== 'done'; }).sort(byRank);
+      var open = recs.filter(function (r) { return r.state === 'live' && !wrapped(r.status); }).sort(byRank);
       var pend = recs.filter(function (r) { return r.state === 'pending'; });
       var waiting = A.filter(function (r) { return r.sender === id && r.to !== id && r.state === 'pending' && visible(r) && notTopic(r); });
       var row = { id: id, depth: depth, outside: outside, open: ids(open), pending: ids(pend), waiting: ids(waiting),
         counts: {}, load: 0, stale: 0, overdue: 0, fallback: 0, last: recs.map(function (r) { return r.lastUpdate; }).sort().pop() || null };
       recs.forEach(function (r) {
         if (r.state !== 'live') return;
-        if (r.fallback) { if (r.status !== 'done') row.fallback++; return; }
+        if (r.fallback) { if (!wrapped(r.status)) row.fallback++; return; }
         row.counts[r.status] = (row.counts[r.status] || 0) + 1;
         if (TEAM_LOAD.indexOf(r.status) < 0) return;
         row.load++;
@@ -1872,31 +2107,34 @@
     reqsMine.incoming.forEach(function (id) { badge.push('q:' + id); });
     notices.forEach(function (x) { badge.push(x.key); });
 
-    // The "related to me" scope. Both lists leave out hidden items, done items, and
+    // The "related to me" scope. Both lists leave out hidden, done, and dropped items, and
     // items the viewer created or holds a live or pending record on. cc: the items the
     // viewer is CC'd on, the latest CC add first. mentioned: the other items whose
     // shown body or a shown comment (not the viewer's own) mentions the viewer, the
-    // newest mention first; a body mention dates from the write that set the shown
-    // body, a comment mention from the write that set the comment's shown text.
-    // closed: the done items either list would hold, in fold order.
+    // newest mention first; a body mention dates from the body write the item's
+    // mentions come from (bodyExtras), a comment mention from the write that set the comment's shown text.
+    // closed: the done or dropped items either list would hold, in fold order.
     function involved(it) {
       return it.author === v || recsOn(S, it.id).some(function (r) { return r.to === v && (r.state === 'live' || r.state === 'pending'); });
     }
     function relShown(it) { return !it.hidden && !involved(it); }
     function ccOf(it) { return it.cc.filter(function (e) { return e.member === v; })[0] || null; }
     function written(key, first) { return S.reg[key] && S.reg[key].length ? regWinner(S, key) : first; }
-    var related = { cc: [], mentioned: [], closed: [] }, relCC = [], relMen = [];
+    var related = { cc: [], mentioned: [], closed: [] }, relCC = [], relMen = [], mentionedIn = {};
+    // the shown comments by others that mention the viewer, by item
+    vals(S.comments).forEach(function (q) {
+      if (!q.hidden && q.author !== v && q.mentions.indexOf(v) >= 0) (mentionedIn[q.item] = mentionedIn[q.item] || []).push(q);
+    });
     vals(S.items).forEach(function (it) {
       if (!relShown(it)) return;
-      var e = ccOf(it), done = items[it.id].status === 'done';
+      var e = ccOf(it), done = wrapped(items[it.id].status);
       if (e) {
         if (done) related.closed.push(it.id); else relCC.push({ id: it.id, at: String(e.since.ts) });
         return;
       }
       var at = null;
-      if (it.mentions.indexOf(v) >= 0) at = String(written('it:' + it.id + ':body', it.node).ts);
-      vals(S.comments).forEach(function (q) {
-        if (q.item !== it.id || q.hidden || q.author === v || q.mentions.indexOf(v) < 0) return;
+      if (it.mentions.indexOf(v) >= 0 && it.mentionsAt) at = String(it.mentionsAt.ts);
+      (mentionedIn[it.id] || []).forEach(function (q) {
         var t = String(written('cm:' + q.id, q.node).ts);
         if (at === null || t > at) at = t;
       });
@@ -1923,7 +2161,7 @@
         var q = S.comments[n.id], rt = q && q.reply_to && S.comments[q.reply_to];
         if (!q || q.hidden || q.mentions.indexOf(v) >= 0 || (rt && rt.author === v)) return;
       } else {
-        nt.to = n.type !== 'item.status' && n.type !== 'item.close' && n.p.assignee ? n.p.assignee : n.author;
+        nt.to = n.type !== 'item.close' && n.p.assignee ? n.p.assignee : n.author; // item.status: an org superior's write names the assignee
         if (n.type === 'item.status') nt.status = n.p.status || null;
       }
       ccNotices.push(nt);
@@ -1941,7 +2179,7 @@
       items: items, itemOrder: itemOrder, assignments: assignments, requests: requests, rules: rules, comments: comments, events: events, notices: notices,
       my: {
         assignments: ids(mine.sort(byRank)),
-        today: { work: ids(mine.filter(function (r) { return r.status !== 'done' && r.status !== 'awaiting' && notTopic(r); }).sort(byUrgency)), pending: ids(pendingToMe.sort(byUrgency)), confirms: ids(confirms) },
+        today: { work: ids(mine.filter(function (r) { return !wrapped(r.status) && r.status !== 'in-review' && notTopic(r); }).sort(byUrgency)), pending: ids(pendingToMe.sort(byUrgency)), confirms: ids(confirms) },
         received: { pending: ids(pendingToMe), answered: ids(answered), sent: ids(sent) },
         given: given, created: created, team: team, requests: reqsMine, badge: badge, related: related, ccNotices: ccNotices
       },
@@ -2109,7 +2347,7 @@
   }
 
   window.TrackerEngine = {
-    KINDS: KINDS, SETTABLE: SETTABLE, ORIGINS: ORIGINS, DEFAULT_PRIORITY: DEFAULT_PRIORITY, STALE_DAYS: STALE_DAYS,
+    KINDS: KINDS, SETTABLE: SETTABLE, SUPERIOR_SETTABLE: SUPERIOR_SETTABLE, ORIGINS: ORIGINS, DEFAULT_PRIORITY: DEFAULT_PRIORITY, STALE_DAYS: STALE_DAYS,
     DEFAULT_ATTACHMENT_MAX: DEFAULT_ATTACHMENT_MAX,
     displayName: displayName, avatar: avatar, normProfile: normProfile,
     alias: alias, memberOf: memberOf, cloneOf: cloneOf, refOf: refOf, reach: reach,

@@ -124,7 +124,7 @@ func formatTrackerScope(v *wstrackerhost.StoreView, q trackerQuery) string {
 // trackerTeamLegend opens a non-empty team scope: what each count of a
 // person's head line counts.
 const trackerTeamLegend = "load counts a person's live assignments at todo, doing, or blocked, broken down by status; " +
-	"stale and overdue (the due date passed) are part of the load; other statuses (awaiting, idea, done) count on their own; " +
+	"stale and overdue (the due date passed) are part of the load; other statuses (in-review, idea, done, dropped) count on their own; " +
 	"fallback-held counts tasks they hold only as the creator, because nobody else holds them, and is not load"
 
 // trackerLoadStatuses are the statuses a team row's load counts, in the
@@ -133,8 +133,8 @@ var trackerLoadStatuses = []string{"todo", "doing", "blocked"}
 
 // formatTrackerTeamHead is one person's head line of the team scope: the
 // load with its per-status breakdown, stale and overdue, every other status
-// but idea and done (sorted), then idea, fallback-held, done, and the last
-// update.
+// but idea and done (sorted; in-review and dropped among them, each only when
+// counted), then idea, fallback-held, done, and the last update.
 func formatTrackerTeamHead(v *wstrackerhost.StoreView, t wstracker.Team) string {
 	var load, other []string
 	seen := map[string]bool{"idea": true, "done": true}
@@ -243,7 +243,7 @@ func trackerItemMatches(v *wstrackerhost.StoreView, id string, q trackerQuery) b
 			return false
 		}
 	case "open":
-		if it.Hidden || status == "done" {
+		if it.Hidden || status == "done" || status == "dropped" {
 			return false
 		}
 	default:
@@ -487,6 +487,14 @@ func formatTrackerItem(v *wstrackerhost.StoreView, id string) string {
 				sb.WriteString("- " + trackerRefRow(v, rid) + "\n")
 			}
 		}
+	}
+	// Printed even for an empty body: an edit passes it back as base.
+	if len(it.BodyRev) > 0 {
+		rev := make([]string, len(it.BodyRev))
+		for i, rid := range it.BodyRev {
+			rev[i] = trackerAlias(rid)
+		}
+		fmt.Fprintf(&sb, "body revision: %s\n", strings.Join(rev, " "))
 	}
 	if strings.TrimSpace(it.Body) != "" {
 		sb.WriteString("body:\n" + strings.TrimRight(it.Body, "\n") + "\n")

@@ -1068,6 +1068,9 @@
     "kind": "task",
     "title": "Ship",
     "body": "new body",
+    "bodyRev": [
+     "ada.pc#3"
+    ],
     "project": "",
     "labels": [],
     "due": null,
@@ -1138,6 +1141,9 @@
     "kind": "task",
     "title": "Review",
     "body": "",
+    "bodyRev": [
+     "ada.pc#5"
+    ],
     "project": "",
     "labels": [],
     "due": null,
@@ -1194,6 +1200,9 @@
     "kind": "task",
     "title": "Design",
     "body": "@lena ideas?",
+    "bodyRev": [
+     "maya.pc#3"
+    ],
     "project": "",
     "labels": [],
     "due": null,
@@ -1246,6 +1255,9 @@
     "kind": "task",
     "title": "Docs",
     "body": "",
+    "bodyRev": [
+     "omar.pc#1"
+    ],
     "project": "",
     "labels": [],
     "due": null,
@@ -1295,6 +1307,9 @@
     "kind": "task",
     "title": "Infra",
     "body": "@lena",
+    "bodyRev": [
+     "raj.pc#4"
+    ],
     "project": "",
     "labels": [],
     "due": null,
@@ -1350,6 +1365,9 @@
     "kind": "task",
     "title": "Own",
     "body": "",
+    "bodyRev": [
+     "lena.pc#3"
+    ],
     "project": "",
     "labels": [],
     "due": null,
@@ -1402,6 +1420,9 @@
     "kind": "task",
     "title": "Old",
     "body": "",
+    "bodyRev": [
+     "bo.pc#4"
+    ],
     "project": "",
     "labels": [],
     "due": null,
@@ -1454,6 +1475,9 @@
     "kind": "task",
     "title": "Fix",
     "body": "@lena",
+    "bodyRev": [
+     "maya.pc#5"
+    ],
     "project": "",
     "labels": [],
     "due": null,

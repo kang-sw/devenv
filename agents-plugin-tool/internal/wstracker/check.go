@@ -338,6 +338,8 @@ func (s *state) checkExtras(p obj, prior []attachment) rejection {
 	return ""
 }
 
+const baseShape = "base must be a list of event ids (the body revision the editor saw)"
+
 const stageShape = "stage must be review (null or absent: todo)"
 
 // retiredStage refuses a new write carrying stage. The review stage is
@@ -545,6 +547,33 @@ func (s *state) needRec(it *item, who string) (*rec, rejection) {
 	return nil, s.notAssignee(it, who)
 }
 
+// checkStatusOf judges item.status on another member's assignment (Decisions
+// of the superior wrap-up): an org superior of who sets blocked, done (final,
+// no review step), or dropped; the assigner, a peer included, only drops it.
+// The record must be live (the fallback included), not pending, and not
+// already wrapped up.
+func (s *state) checkStatusOf(it *item, a, who, st string) rejection {
+	if !contains(superiorSettable, st) {
+		return "status on another member's assignment must be blocked, done or dropped"
+	}
+	rc, r := s.needRec(it, who)
+	if r != "" {
+		return r
+	}
+	if !s.below(a, who) {
+		if rc.by != a {
+			return rejection("only " + who + " or an org superior of " + who + " sets the status of " + who + "'s assignment")
+		}
+		if st != "dropped" {
+			return rejection("the assigner (" + a + ") only drops " + who + "'s assignment; " + st + " is for an org superior of " + who)
+		}
+	}
+	if wrapped(rc.status) {
+		return rejection("assignment is " + rc.status + "; reopen it first")
+	}
+	return ""
+}
+
 // check judges a domain event against the state folded from its causal
 // past. It returns the flagged reason in the reference engine's words, or ""
 // when the event is valid. The envelope, signer, and membership rules are
@@ -559,6 +588,9 @@ func (s *state) check(n *node) rejection {
 		case TypeItemAccept, TypeItemDecline, TypeItemReturn, TypeItemHandoff:
 			return "an agent never accepts, declines, returns or hands off an assignment on its own (agent-auto is invalid here)"
 		case TypeItemStatus, TypeItemClose:
+			if n.typ == TypeItemStatus && p.truthy("assignee") && p.disp("assignee") != a {
+				return "agent-auto is limited to item.status and item.close on the author's own assignment"
+			}
 		default:
 			return "agent-auto is limited to item.status and item.close on the author's own assignment"
 		}
@@ -613,8 +645,9 @@ func (s *state) check(n *node) rejection {
 		if r != "" {
 			return r
 		}
-		if it.author != a && !s.creatorGone(it, a) {
-			return rejection("only the creator (" + it.author + ") edits " + it.alias)
+		// The creator or a live assignee edits every field.
+		if r := s.needCreatorOrAssignee(it, a, ""); r != "" && !s.creatorGone(it, a) {
+			return r
 		}
 		if it.hidden {
 			return rejection(it.alias + " is hidden")
@@ -646,6 +679,22 @@ func (s *state) check(n *node) rejection {
 		if !p.null("refs") && !p.has("body") {
 			return "refs go with a body edit"
 		}
+		// base is the body revision the editor saw; an id naming no body
+		// write folds as a whole replace, so only its shape is checked.
+		if !p.null("base") {
+			if !p.has("body") {
+				return "base goes with a body edit"
+			}
+			l, ok := p.list("base")
+			if !ok {
+				return baseShape
+			}
+			for _, x := range l {
+				if _, ok := x.(string); !ok {
+					return baseShape
+				}
+			}
+		}
 		return s.checkExtras(p, it.attachments)
 
 	case TypeItemHide:
@@ -661,7 +710,7 @@ func (s *state) check(n *node) rejection {
 		}
 		var open []string
 		for _, x := range s.openRecs(it.id) {
-			if x.to != a && x.status != "done" {
+			if x.to != a && !wrapped(x.status) {
 				open = append(open, x.to)
 			}
 		}
@@ -762,8 +811,8 @@ func (s *state) check(n *node) rejection {
 		if rc.fallback {
 			return rejection(from + " holds " + it.alias + " only because nobody else does; assign it instead")
 		}
-		if rc.status == "done" {
-			return "assignment is done; nothing to hand off"
+		if wrapped(rc.status) {
+			return rejection("assignment is " + rc.status + "; nothing to hand off")
 		}
 		if !p.truthy("to") {
 			return "to required"
@@ -807,8 +856,8 @@ func (s *state) check(n *node) rejection {
 		if held := s.holders(it); len(held) > 0 {
 			return rejection(it.alias + " has live or pending assignments (" + strings.Join(held, ", ") + "); only a task nobody else holds is opened")
 		}
-		if fb := s.liveFallback(it.id); fb != nil && fb.status == "done" {
-			return rejection(it.alias + " is done; nothing to open")
+		if fb := s.liveFallback(it.id); fb != nil && wrapped(fb.status) {
+			return rejection(it.alias + " is " + fb.status + "; nothing to open")
 		}
 
 	case TypeItemUnopen:
@@ -864,8 +913,8 @@ func (s *state) check(n *node) rejection {
 		if rc.fallback {
 			return rejection(who + " holds " + it.alias + " only because nobody else does; it is taken by a claim once its creator opens it")
 		}
-		if rc.status == "done" {
-			return "assignment is done; nothing to take"
+		if wrapped(rc.status) {
+			return rejection("assignment is " + rc.status + "; nothing to take")
 		}
 		if s.openRec(it.id, a) != nil {
 			return rejection(a + " already holds a live or pending assignment on " + it.alias)
@@ -1053,15 +1102,26 @@ func (s *state) check(n *node) rejection {
 		if it.kind == "topic" {
 			return "topics have no status"
 		}
-		if st, ok := p["status"].(string); !ok || !contains(settable, st) {
-			return "status must be idea, todo, doing or blocked (done goes through item.close)"
+		st, _ := p["status"].(string)
+		who := a
+		if p.truthy("assignee") {
+			who = p.disp("assignee")
+		}
+		if who != a {
+			return s.checkStatusOf(it, a, who, st)
+		}
+		if !contains(settable, st) {
+			return "status must be idea, todo, doing, blocked, in-review or dropped (done goes through item.close)"
 		}
 		rc, r := s.needRec(it, a)
 		if r != "" {
 			return r
 		}
-		if rc.status == "done" {
-			return "assignment is done; reopen it first"
+		if wrapped(rc.status) {
+			return rejection("assignment is " + rc.status + "; reopen it first")
+		}
+		if st == "dropped" && rc.completion == "assigner" && rc.by != a {
+			return rejection("the assigner (" + rc.by + ") confirms this assignment; only they or an org superior of " + a + " drop it")
 		}
 
 	case TypeItemClose:
@@ -1079,8 +1139,11 @@ func (s *state) check(n *node) rejection {
 		if rc.status == "done" {
 			return "assignment is already done"
 		}
-		if rc.status == "awaiting" {
-			return rejection("already awaiting confirmation by " + rc.by)
+		if rc.status == "dropped" {
+			return "assignment is dropped; reopen it first"
+		}
+		if rc.status == "in-review" && rc.completion == "assigner" {
+			return rejection("already in review by " + rc.by)
 		}
 
 	case TypeItemConfirm, TypeItemReject:
@@ -1093,18 +1156,15 @@ func (s *state) check(n *node) rejection {
 		if rc == nil {
 			return rejection("no live assignment of " + it.alias + " to " + who)
 		}
-		if rc.by != a {
+		if rc.by != a && !s.below(a, rc.to) {
 			verb := "rejects"
 			if n.typ == TypeItemConfirm {
 				verb = "confirms"
 			}
-			return rejection("only the assigner (" + rc.by + ") " + verb)
+			return rejection("only the assigner (" + rc.by + ") or an org superior of " + rc.to + " " + verb)
 		}
-		if rc.completion != "assigner" {
-			return "this assignment does not require confirmation"
-		}
-		if rc.status != "awaiting" {
-			return rejection("assignment is " + rc.status + ", not awaiting confirmation")
+		if rc.status != "in-review" {
+			return rejection("assignment is " + rc.status + ", not in review")
 		}
 
 	case TypeItemReopen:
@@ -1123,8 +1183,8 @@ func (s *state) check(n *node) rejection {
 		if rc.by != a && rc.to != a {
 			return rejection("only the assigner (" + rc.by + ") or the assignee (" + rc.to + ") reopens")
 		}
-		if rc.status != "done" {
-			return rejection("assignment is " + rc.status + ", not done")
+		if !wrapped(rc.status) {
+			return rejection("assignment is " + rc.status + ", not done or dropped")
 		}
 
 	case TypeCommentAdd:

@@ -106,11 +106,15 @@ type Ref struct {
 }
 
 type ItemView struct {
-	ID            string   `json:"id"`
-	Alias         string   `json:"alias"`
-	Kind          string   `json:"kind"`
-	Title         string   `json:"title"`
-	Body          string   `json:"body"`
+	ID    string `json:"id"`
+	Alias string `json:"alias"`
+	Kind  string `json:"kind"`
+	Title string `json:"title"`
+	Body  string `json:"body"`
+	// BodyRev is the body revision: the ids of the body write heads (the
+	// item.create while no edit has written the body), in fold order. An
+	// editor sends the revision it loaded back as item.edit's base.
+	BodyRev       []string `json:"bodyRev"`
 	Project       string   `json:"project"`
 	Labels        []string `json:"labels"` // live label ids, in the order written
 	Due           *string  `json:"due"`
@@ -348,13 +352,13 @@ type My struct {
 }
 
 // Related is the "related to me" scope. Both lists leave out hidden items,
-// done items, and items the viewer created or holds a live or pending
+// done and dropped items, and items the viewer created or holds a live or pending
 // assignment on. CC: the items the viewer is CC'd on, the latest CC add
 // first. Mentioned: the other items whose shown body or a shown comment
 // (not the viewer's own) mentions the viewer, the newest mention first; a
-// body mention dates from the write that set the shown body, a comment
-// mention from the write that set the comment's shown text. Closed: the
-// done items either list would hold, in fold order.
+// body mention dates from the body write the item's mentions come from, a
+// comment mention from the write that set the comment's shown text. Closed: the
+// done or dropped items either list would hold, in fold order.
 type Related struct {
 	CC        []string `json:"cc"`
 	Mentioned []string `json:"mentioned"`
@@ -364,7 +368,8 @@ type Related struct {
 // CCNotice is a change on an item the viewer is CC'd on: a status write
 // (item.status, item.close, item.confirm, item.reject, item.reopen) or a
 // comment (comment.add). Key is "cc:" plus Event. To is the assignee the
-// status write names (nil for a comment); Status is item.status's status.
+// status write names, an org superior's item.status included (nil for a
+// comment); Status is item.status's status.
 // None is made for the viewer's own events, for an item the viewer created
 // or holds, or for a comment that mentions the viewer or replies to the
 // viewer's comment, which notify on their own.
@@ -466,7 +471,9 @@ func memberOf(stream string) string {
 // fallback included, so a task always has one (todo in a store with no
 // holder to fall back on). A pending rule request holds nothing, so it does
 // not make the item pending. idea only when every live holder is at idea:
-// it ranks below todo.
+// it ranks below todo. A dropped assignment is outside the roll-up: the
+// item derives from the rest, done when those are all done (a mix of done
+// and dropped is done), and dropped only when every live one is dropped.
 func (r *replayed) itemStatus(it *item) string {
 	if it.kind == "topic" {
 		return ""
@@ -487,12 +494,21 @@ func (r *replayed) itemStatus(it *item) string {
 		}
 		return "todo"
 	}
-	all, idea, blocked, awaiting, doing := true, true, false, false, false
+	var kept []*rec
 	for _, x := range live {
+		if x.status != "dropped" {
+			kept = append(kept, x)
+		}
+	}
+	if len(kept) == 0 {
+		return "dropped"
+	}
+	all, idea, blocked, review, doing := true, true, false, false, false
+	for _, x := range kept {
 		all = all && x.status == "done"
 		idea = idea && x.status == "idea"
 		blocked = blocked || x.status == "blocked"
-		awaiting = awaiting || x.status == "awaiting"
+		review = review || x.status == "in-review"
 		doing = doing || x.status == "doing" || x.status == "done"
 	}
 	switch {
@@ -500,8 +516,8 @@ func (r *replayed) itemStatus(it *item) string {
 		return "done"
 	case blocked:
 		return "blocked"
-	case awaiting:
-		return "awaiting"
+	case review:
+		return "in-review"
 	case doing:
 		return "doing"
 	case idea:
@@ -512,9 +528,9 @@ func (r *replayed) itemStatus(it *item) string {
 
 // counted: pending assignments are excluded from status and roll-up, so an
 // item whose only assignments are pending is not counted; nor is an item
-// at idea.
+// at idea, nor a dropped one.
 func (r *replayed) counted(it *item, st string) bool {
-	return it.kind != "topic" && st != "pending" && st != "idea"
+	return it.kind != "topic" && st != "pending" && st != "idea" && st != "dropped"
 }
 
 func (r *replayed) view(stream string, now time.Time, staleDays int) *View {
@@ -744,7 +760,7 @@ func (r *replayed) view(stream string, now time.Time, staleDays int) *View {
 			}
 		}
 		lv := S.prio.level(it.priority)
-		iv := ItemView{ID: id, Alias: it.alias, Kind: it.kind, Title: it.title, Body: it.body, Project: it.project, Labels: S.liveLabels(it.labels),
+		iv := ItemView{ID: id, Alias: it.alias, Kind: it.kind, Title: it.title, Body: it.body, BodyRev: S.bodyRev(id), Project: it.project, Labels: S.liveLabels(it.labels),
 			Due: it.due, Priority: it.priority, PriorityLevel: lv, PriorityName: S.prio.names[lv], Author: it.author,
 			TS: ts(it.ts), Hidden: it.hidden, Edited: ref(it.edited), Status: nz(status[id]),
 			Counted: r.counted(it, status[id]), Children: []string{}, Assignments: orEmpty(recIDs), Pending: orEmpty(pend),
@@ -939,11 +955,11 @@ func orEmpty(l []string) []string {
 }
 
 // teamLoad are the statuses a team row's Load counts (613 a): the work in
-// the member's hands; idea, awaiting (closed, waiting on the assigner's
-// confirm), and done are not.
+// the member's hands; idea, in-review (waiting on a reviewer), done, and
+// dropped are not.
 var teamLoad = map[string]bool{"todo": true, "doing": true, "blocked": true}
 
-var rank = map[string]int{"blocked": 0, "doing": 1, "todo": 2, "idea": 3, "awaiting": 4, "done": 5}
+var rank = map[string]int{"blocked": 0, "doing": 1, "todo": 2, "idea": 3, "in-review": 4, "done": 5, "dropped": 6}
 
 func ids(l []*Assignment) []string {
 	out := make([]string, len(l))
@@ -998,8 +1014,10 @@ func (r *replayed) viewerLists(vw *View, A []*Assignment, v string, children map
 		return a.To == v && !a.Forced && a.State != "pending" && (a.Accepted != nil || a.State == "declined") && visible(a)
 	})
 	sent := filter(A, func(a *Assignment) bool { return a.Sender == v && a.To != v && !a.Forced && visible(a) })
+	// the assigner's review list; a self-assigned in-review is its holder's
+	// to resolve as its assigner. An org superior resolves one from the item.
 	confirms := filter(A, func(a *Assignment) bool {
-		return a.By == v && a.To != v && a.State == "live" && a.Status == "awaiting"
+		return a.By == v && a.State == "live" && a.Status == "in-review"
 	})
 	my := My{Given: []string{}, Created: []string{}, Team: []Team{}, Badge: []string{},
 		Requests: MyReqs{Incoming: []string{}, Outgoing: []string{}}}
@@ -1038,8 +1056,9 @@ func (r *replayed) viewerLists(vw *View, A []*Assignment, v string, children map
 
 	// Notices are derived, never events. accepted: to the accepter's lead at
 	// accept time; handoff: to the original assigner when a handoff is
-	// accepted; done / blocked: to the assigner when someone else set that
-	// status on a live assignment (an awaiting one is in the confirm list);
+	// accepted; done / blocked / dropped: to the assigner when someone else
+	// set that status on a live assignment (an in-review one is in the
+	// confirm list);
 	// declined / returned (285): to the sender, and for a returned handoff
 	// also to the original assigner (291).
 	vw.Notices = []Notice{}
@@ -1056,7 +1075,7 @@ func (r *replayed) viewerLists(vw *View, A []*Assignment, v string, children map
 				vw.Notices = append(vw.Notices, nt)
 			}
 		}
-		if a.By == v && a.To != v && a.State == "live" && (a.Status == "done" || a.Status == "blocked") &&
+		if a.By == v && a.To != v && a.State == "live" && (wrapped(a.Status) || a.Status == "blocked") &&
 			a.StatusBy != nil && *a.StatusBy != v {
 			nt := base
 			nt.TS, nt.Kind = a.LastUpdate, a.Status
@@ -1092,7 +1111,7 @@ func (r *replayed) viewerLists(vw *View, A []*Assignment, v string, children map
 	teamRow := func(id string, depth int, outside bool) {
 		inTeam[id] = true
 		recs := filter(A, func(a *Assignment) bool { return a.To == id && visible(a) && notTopic(a) })
-		open := filter(recs, func(a *Assignment) bool { return a.State == "live" && a.Status != "done" })
+		open := filter(recs, func(a *Assignment) bool { return a.State == "live" && !wrapped(a.Status) })
 		byRank(open)
 		pend := filter(recs, func(a *Assignment) bool { return a.State == "pending" })
 		waiting := filter(A, func(a *Assignment) bool {
@@ -1109,7 +1128,7 @@ func (r *replayed) viewerLists(vw *View, A []*Assignment, v string, children map
 				continue
 			}
 			if a.Fallback {
-				if a.Status != "done" {
+				if !wrapped(a.Status) {
 					t.Fallback++
 				}
 				continue
@@ -1194,7 +1213,7 @@ func (r *replayed) viewerLists(vw *View, A []*Assignment, v string, children map
 	// urgency-sorted list.
 	byRank(mine)
 	my.Assignments = ids(mine)
-	work := filter(mine, func(a *Assignment) bool { return a.Status != "done" && a.Status != "awaiting" && notTopic(a) })
+	work := filter(mine, func(a *Assignment) bool { return !wrapped(a.Status) && a.Status != "in-review" && notTopic(a) })
 	byUrgency(work)
 	byUrgency(pendingToMe)
 	my.Today = Today{Work: ids(work), Pending: ids(pendingToMe), Confirms: ids(confirms)}
@@ -1222,7 +1241,7 @@ func (r *replayed) related(vw *View, v string) (Related, []CCNotice) {
 		return false
 	}
 	shown := func(it *item) bool { return !it.hidden && !involved(it) }
-	done := func(id string) bool { st := vw.Items[id].Status; return st != nil && *st == "done" }
+	done := func(id string) bool { st := vw.Items[id].Status; return st != nil && wrapped(*st) }
 	ccOf := func(it *item) *ccEntry {
 		for i := range it.cc {
 			if it.cc[i].member == v {
@@ -1242,6 +1261,14 @@ func (r *replayed) related(vw *View, v string) (Related, []CCNotice) {
 		id string
 		at time.Time
 	}
+	// mentionedIn: the shown comments by others that mention the viewer, by
+	// item, so the item walk does not rescan every comment.
+	mentionedIn := map[string][]string{}
+	for _, cid := range S.corder {
+		if q := S.comments[cid]; !q.hidden && q.author != v && contains(q.mentions, v) {
+			mentionedIn[q.item] = append(mentionedIn[q.item], cid)
+		}
+	}
 	var cc, men []dated
 	for _, id := range S.iorder {
 		it := S.items[id]
@@ -1258,14 +1285,10 @@ func (r *replayed) related(vw *View, v string) (Related, []CCNotice) {
 		}
 		var at time.Time
 		found := false
-		if contains(it.mentions, v) {
-			at, found = written("it:"+id+":body", it.node).ts, true
+		if contains(it.mentions, v) && it.mentionsAt != nil {
+			at, found = it.mentionsAt.ts, true
 		}
-		for _, cid := range S.corder {
-			q := S.comments[cid]
-			if q.item != id || q.hidden || q.author == v || !contains(q.mentions, v) {
-				continue
-			}
+		for _, cid := range mentionedIn[id] {
 			if t := written("cm:"+cid, r.byID[cid]).ts; !found || t.After(at) {
 				at, found = t, true
 			}
@@ -1318,7 +1341,7 @@ func (r *replayed) related(vw *View, v string) (Related, []CCNotice) {
 			}
 		} else {
 			who := n.member
-			if n.typ != TypeItemStatus && n.typ != TypeItemClose && n.p.truthy("assignee") {
+			if n.typ != TypeItemClose && n.p.truthy("assignee") {
 				who = n.p.str("assignee")
 			}
 			nt.To = &who

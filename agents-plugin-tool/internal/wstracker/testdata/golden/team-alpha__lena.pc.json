@@ -4516,8 +4516,11 @@
     "id": "ada.pc#1",
     "alias": "ada.pc-1",
     "kind": "task",
-    "title": "Ship search v2 (index + query path)",
+    "title": "Ship search v2 by Friday",
     "body": "Replace the v1 indexer and the query path. Index format frozen on Wednesday.",
+    "bodyRev": [
+     "ada.pc#5"
+    ],
     "project": "search-service",
     "labels": [],
     "due": "2026-11-20",
@@ -4529,8 +4532,8 @@
     "ts": "2026-11-02T09:00:00Z",
     "hidden": false,
     "edited": {
-     "id": "ada.pc#5",
-     "ts": "2026-11-02T10:40:00Z"
+     "id": "maya.pc#10",
+     "ts": "2026-11-02T20:40:00Z"
     },
     "status": "doing",
     "counted": true,
@@ -4588,6 +4591,9 @@
     "kind": "topic",
     "title": "Q4 priorities",
     "body": "Search v2 first, CI hygiene second, training by end of month.",
+    "bodyRev": [
+     "ada.pc#3"
+    ],
     "project": "",
     "labels": [],
     "due": null,
@@ -4639,6 +4645,10 @@
     "kind": "task",
     "title": "Index builder",
     "body": "Build the v2 index: layout, shard writer, tokenizer, compaction.",
+    "bodyRev": [
+     "maya.lap#1",
+     "maya.pc#20"
+    ],
     "project": "search-service",
     "labels": [],
     "due": "2026-11-13",
@@ -4658,7 +4668,7 @@
     "rollup": {
      "total": 2,
      "counts": {
-      "awaiting": 1,
+      "in-review": 1,
       "doing": 1
      },
      "blocked": []
@@ -4712,6 +4722,9 @@
     "kind": "task",
     "title": "Query path rewrite",
     "body": "",
+    "bodyRev": [
+     "raj.pc#1"
+    ],
     "project": "search-service",
     "labels": [],
     "due": "2026-11-18",
@@ -4772,6 +4785,9 @@
     "kind": "task",
     "title": "Tokenizer",
     "body": "",
+    "bodyRev": [
+     "maya.pc#5"
+    ],
     "project": "",
     "labels": [],
     "due": "2026-11-06",
@@ -4783,7 +4799,7 @@
     "ts": "2026-11-02T11:10:00Z",
     "hidden": false,
     "edited": null,
-    "status": "awaiting",
+    "status": "in-review",
     "counted": true,
     "rollup": {
      "total": 0,
@@ -4840,6 +4856,9 @@
     "kind": "task",
     "title": "Shard writer docs",
     "body": "",
+    "bodyRev": [
+     "maya.pc#7"
+    ],
     "project": "",
     "labels": [],
     "due": "2026-11-10",
@@ -4894,6 +4913,9 @@
     "kind": "task",
     "title": "Rotate CI keys",
     "body": "",
+    "bodyRev": [
+     "bo.pc#1"
+    ],
     "project": "infra",
     "labels": [],
     "due": "2026-11-03",
@@ -4947,6 +4969,9 @@
     "kind": "task",
     "title": "Security training",
     "body": "Finish the module before the 30th.",
+    "bodyRev": [
+     "ada.pc#6"
+    ],
     "project": "",
     "labels": [],
     "due": "2026-11-30",
@@ -5013,6 +5038,9 @@
     "kind": "task",
     "title": "Book offsite venue",
     "body": "",
+    "bodyRev": [
+     "ada.pc#8"
+    ],
     "project": "",
     "labels": [],
     "due": "2026-11-14",
@@ -5063,6 +5091,9 @@
     "kind": "task",
     "title": "Approve GPU budget for index builds",
     "body": "Two more GPU nodes for nightly index builds, about 3k/month.",
+    "bodyRev": [
+     "kai.pc#2"
+    ],
     "project": "search-service",
     "labels": [],
     "due": "2026-11-07",
@@ -5115,6 +5146,9 @@
     "kind": "task",
     "title": "Benchmark harness",
     "body": "",
+    "bodyRev": [
+     "lena.pc#2"
+    ],
     "project": "",
     "labels": [],
     "due": "2026-11-21",
@@ -5168,6 +5202,9 @@
     "kind": "task",
     "title": "Review the query planner PR",
     "body": "PR #412: cost model for the new planner. Needs an index-side reviewer.",
+    "bodyRev": [
+     "sven.pc#3"
+    ],
     "project": "search-service",
     "labels": [],
     "due": "2026-11-04",
@@ -5222,6 +5259,9 @@
     "kind": "task",
     "title": "Cache layer",
     "body": "",
+    "bodyRev": [
+     "raj.pc#7"
+    ],
     "project": "",
     "labels": [],
     "due": "2026-11-12",
@@ -5280,6 +5320,9 @@
     "kind": "task",
     "title": "Load-test the cache layer",
     "body": "One afternoon with the load rig before the cache ships.",
+    "bodyRev": [
+     "tia.pc#3"
+    ],
     "project": "",
     "labels": [],
     "due": "2026-11-12",
@@ -5332,6 +5375,9 @@
     "kind": "task",
     "title": "Explain the tokenizer API to the query team",
     "body": "30 minutes, any day this week.",
+    "bodyRev": [
+     "noa.pc#3"
+    ],
     "project": "",
     "labels": [],
     "due": "2026-11-07",
@@ -5384,6 +5430,9 @@
     "kind": "task",
     "title": "Prepare Friday demo",
     "body": "",
+    "bodyRev": [
+     "maya.lap#2"
+    ],
     "project": "",
     "labels": [],
     "due": "2026-11-06",
@@ -5433,6 +5482,9 @@
     "kind": "task",
     "title": "Review the emoji tokenizer fix",
     "body": "Two-line change in the range table; needs a second pair of eyes before Friday.",
+    "bodyRev": [
+     "ivy.pc#6"
+    ],
     "project": "search-service",
     "labels": [],
     "due": "2026-11-07",
@@ -5484,6 +5536,9 @@
     "kind": "task",
     "title": "Infra capacity plan",
     "body": "Plan node and storage capacity through Q1.",
+    "bodyRev": [
+     "raj.pc#11"
+    ],
     "project": "infra",
     "labels": [],
     "due": "2026-11-27",
@@ -5551,6 +5606,9 @@
     "kind": "task",
     "title": "Collect node metrics",
     "body": "",
+    "bodyRev": [
+     "raj.pc#13"
+    ],
     "project": "infra",
     "labels": [],
     "due": "2026-11-14",
@@ -5602,6 +5660,9 @@
     "kind": "task",
     "title": "Forecast storage growth",
     "body": "",
+    "bodyRev": [
+     "raj.pc#15"
+    ],
     "project": "infra",
     "labels": [],
     "due": "2026-11-18",
@@ -5659,6 +5720,9 @@
     "kind": "task",
     "title": "Review cooling budget",
     "body": "",
+    "bodyRev": [
+     "raj.pc#17"
+    ],
     "project": "infra",
     "labels": [],
     "due": "2026-11-20",
@@ -5710,6 +5774,9 @@
     "kind": "task",
     "title": "Pull 90-day disk usage",
     "body": "",
+    "bodyRev": [
+     "sven.pc#6"
+    ],
     "project": "infra",
     "labels": [],
     "due": "2026-11-12",
@@ -5763,6 +5830,9 @@
     "kind": "task",
     "title": "Renew TLS certificates",
     "body": "",
+    "bodyRev": [
+     "raj.pc#20"
+    ],
     "project": "infra",
     "labels": [],
     "due": "2026-11-30",
@@ -5812,6 +5882,9 @@
     "kind": "task",
     "title": "Refresh onboarding docs",
     "body": "Bring the new-hire guide up to date.",
+    "bodyRev": [
+     "ada.pc#16"
+    ],
     "project": "people-ops",
     "labels": [],
     "due": "2026-11-25",
@@ -5867,6 +5940,9 @@
     "kind": "task",
     "title": "Draft new-hire access list",
     "body": "",
+    "bodyRev": [
+     "ada.pc#18"
+    ],
     "project": "people-ops",
     "labels": [],
     "due": "2026-11-16",
@@ -5917,6 +5993,9 @@
     "kind": "topic",
     "title": "Retro notes: search v2 sprint",
     "body": "@maya @raj please add your part's notes before Monday. The board export is attached.",
+    "bodyRev": [
+     "bo.pc#9"
+    ],
     "project": "",
     "labels": [],
     "due": null,
@@ -6250,7 +6329,7 @@
     "completion": "assigner",
     "state": "live",
     "forced": true,
-    "status": "awaiting",
+    "status": "in-review",
     "note": "emoji ranges fixed",
     "noteBy": "ivy",
     "via": "maya.pc#6",
@@ -9119,8 +9198,8 @@
      "item": "ada.pc#1",
      "title": "Ship search v2 by Friday"
     },
-    "status": "flagged",
-    "reason": "only the creator (ada) edits ada.pc-1",
+    "status": "applied",
+    "reason": null,
     "ignored": false,
     "markers": [],
     "superseded": [],
@@ -11553,7 +11632,7 @@
   "stats": {
    "events": 142,
    "commits": 111,
-   "flagged": 17,
+   "flagged": 16,
    "concurrent": 2
   },
   "heads": {

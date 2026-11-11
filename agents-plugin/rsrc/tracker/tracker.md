@@ -54,16 +54,17 @@ tracker.query payload: {store?, scope?, item?, kind?, status?, project?, text?, 
   user assigned or handed to others), `team` (the work of the members the user
   leads, by person), `related` (the items the user is CC'd on, the latest CC
   first, then the other items whose body or a comment mentions the user, the
-  newest mention first; both leave out done and hidden items and the user's
+  newest mention first; both leave out done, dropped, and hidden items and the user's
   own: created or assigned), or `all` (every item, in tree order).
 - `item`: one item in full, with its assignments, opening, take requests,
   children, and comments.
 - `kind`, `status`, `project`, and `text` (part of the title, body, project,
-  or ID) narrow the rows. `status` is `open` (not done), `hidden` (the only
-  way hidden items show), or a status the rows print: `idea`, `todo`,
-  `doing`, `blocked`, `awaiting`, `done`, or `pending`. `idea` is a task
-  every holder keeps before todo; like `pending`, it is left out of progress
-  roll-ups.
+  or ID) narrow the rows. `status` is `open` (neither done nor dropped),
+  `hidden` (the only way hidden items show), or a status the rows print:
+  `idea`, `todo`, `doing`, `blocked`, `in-review`, `done`, `dropped`, or
+  `pending` (`awaiting`, the older name of `in-review`, is accepted for it).
+  `idea` is a task every holder keeps before todo; like `pending` and
+  `dropped`, it is left out of progress roll-ups.
 - `q` is a search in the grammar of the dashboard's Items search box, so
   the tool and the screen list the same items; it is AND-ed with the fields
   above, and `text` keeps its plain substring meaning. Tokens are separated
@@ -99,7 +100,7 @@ cannot be rolled back, so each stands alone in its batch, outside any group.
 |---|---|---|
 | `tk:store` | `name` | group of every command below but the store commands |
 | `tk:item.create` | `kind`, `title`, `project?`, `labels?`, `due?`, `priority?`, `parent?`, `after?`, `mentions?`, `refs?` | the body |
-| `tk:item.edit` | `item`, `title?`, `project?`, `labels?`, `due?`, `priority?`, `mentions?`, `refs?`, `clear?` | a new body |
+| `tk:item.edit` | `item`, `title?`, `project?`, `labels?`, `due?`, `priority?`, `mentions?`, `refs?`, `clear?`, `base?` | a new body |
 | `tk:item.hide` | `item` | none |
 | `tk:item.move` | `item`, `parent`, `after?` | none |
 | `tk:item.assign` | `item`, `people?` and `rules?` (one or both), or `levels`; `completion?` | none |
@@ -107,7 +108,7 @@ cannot be rolled back, so each stands alone in its batch, outside any group.
 | `tk:item.accept`, `tk:item.decline` | `item` | a note |
 | `tk:item.return` | `item`, `assignee` | a note |
 | `tk:item.unassign` | `item`, `assignee?`, or `root?` and `rule?` | none |
-| `tk:item.status` | `item`, `status` | a note |
+| `tk:item.status` | `item`, `status`, `assignee?` | a note |
 | `tk:item.close` | `item` | a note |
 | `tk:item.confirm`, `tk:item.reject` | `item`, `assignee` | a note |
 | `tk:item.reopen` | `item`, `assignee?` | a note |
@@ -174,14 +175,17 @@ Body text, markdown, written as is.
   at todo. It cannot be unassigned, handed off, or returned; assign or open
   the item instead.
 - `status`: `idea` (before todo, not counted in progress), `todo`, `doing`,
-  or `blocked`. To create a task straight into idea, follow its
+  `blocked`, `in-review` (asks for review before done), `done`, or
+  `dropped` (set aside: like done it is wrapped up, and it is not counted in
+  progress; an item whose assignments are all dropped shows dropped). To
+  create a task straight into idea, follow its
   `tk:item.create` with `tk:item.status item="$N" status="idea"` in the
   same batch.
 - A topic the batch creates is assigned to the user unless the same batch
   assigns it with `tk:item.assign item="$N"`; the update prints that
   assignment under the create's position.
 - People are member IDs; `people`, `rules`, `mentions`, `refs`, `labels`,
-  `leads`, `names`, and `clear` are space-separated.
+  `leads`, `names`, `clear`, and `base` are space-separated.
 - Members form a lead tree; each member has at most one lead.
   `tk:roles.set_lead` sets `member`'s lead (`leads=""` for none).
 - Assignment lifecycle:
@@ -195,12 +199,24 @@ Body text, markdown, written as is.
     is live at once; one rooted at anyone else is a rule request pending to
     that member, live once they accept. `levels="N"` alone is the rule
     `<user>:N`.
-  - The holder of a live assignment sets its `tk:item.status` and closes it
-    with `tk:item.close`. With `completion="assigner"` a close waits until
-    the assigner sends `tk:item.confirm` or `tk:item.reject` naming the
-    holder as `assignee`. Without `completion`, it is filled in and stored:
-    `assignee` when the user is the only target, `assigner` when anyone else
-    is (any rule or `levels` covers someone else).
+  - The holder of a live assignment sets its `tk:item.status` (any status
+    but `done`) and closes it with `tk:item.close`. With
+    `completion="assigner"` a close puts it in `in-review`; the holder may
+    also enter `in-review` on any assignment. The assigner or any org
+    superior of the holder resolves an `in-review` with `tk:item.confirm`
+    (done) or `tk:item.reject` (back to doing), naming the holder as
+    `assignee`.
+  - Without `completion`, it is filled in and stored by who each target is:
+    `assigner` for a member the user leads at any depth and for a rule
+    rooted at the user or at such a member (`levels` too), `assignee` for
+    the user and anyone else. Targets of both kinds are written as two
+    assigns; the update prints the second as split off.
+  - `tk:item.status` with `assignee` writes on that member's live
+    assignment: their org superior (any depth) sets `blocked`, `done`
+    (final, no review), or `dropped`; its assigner, when not their
+    superior, sets only `dropped`. The holder drops their own only under
+    `completion="assignee"` or when they assigned it. A done or dropped
+    assignment takes no status, handoff, or take request until reopened.
   - `tk:item.handoff` passes the user's live assignment to `to`, pending
     until `to` accepts; an admin hands off another member's by naming them as
     `assignee`.
@@ -211,7 +227,8 @@ Body text, markdown, written as is.
     user's assignments and rules on the item. `rule` names one rule (its ID
     follows the rule in the item view) and ends only that one, withdrawing it
     while it is a request.
-    `tk:item.reopen` (the assigner or the holder) reopens a done one.
+    `tk:item.reopen` (the assigner or the holder) reopens a done or dropped
+    one.
   - A topic has one holder: its `tk:item.assign` names exactly one person in
     `people`, and is refused while anyone holds it or a handoff of it is
     pending. It takes no `tk:item.status` or `tk:item.close`. Its holder
@@ -244,8 +261,15 @@ Body text, markdown, written as is.
   the creator's. The item view prints its `cc:` line.
 - `clear` on `tk:item.edit`: `body`, `due`, or both
   (`clear="body due"`); an absent body leaves the body as it is.
+- `tk:item.edit` (the item's creator or a live assignee) writes the whole
+  new body. Set `base` to the item's `body revision` line from the query
+  you edited from, and the store merges it line by line with the edits
+  others made since: where both changed the same lines the later write wins
+  and both are marked as a conflict. Without `base` the body is replaced,
+  dropping those edits.
 - `origin`: `agent` (the user asked; the default) or `agent-auto` (recorded
-  unasked, valid only on `tk:item.status` and `tk:item.close`; see Recording).
+  unasked, valid only on `tk:item.status` and `tk:item.close` of the user's
+  own assignment; see Recording).
 - `tk:roles.*` and another member's `tk:member.profile` are admin commands.
   `key`: an SSH public key line. `names`: the level names, lowest first;
   `default`: a level number. `max_bytes`: a byte count. The priority levels
@@ -331,7 +355,8 @@ The event:
 - `actor`: `{id, name}` of the member who acted; null for `due_soon`.
 - `target`: `{id, name}` of the member the event is aimed at (the assignee,
   the holder asked, or the requester denied), when there is one.
-- `detail`: `status` (for `status` and `closed`), `comment` (its first 500
-  characters), `due` (RFC 3339, when the item has a due date); absent fields
-  are omitted.
+- `detail`: `status` (for `status` and `closed`: the status written, so
+  `in-review` for a close the assigner confirms and `dropped` for a drop),
+  `comment` (its first 500 characters), `due` (RFC 3339, when the item has
+  a due date); absent fields are omitted.
 - `url`: opens the item in this machine's dashboard.

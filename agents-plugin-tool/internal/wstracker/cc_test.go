@@ -114,3 +114,19 @@ func TestCCConcurrentAddRemove(t *testing.T) {
 		t.Fatalf("lena notices = %+v, want ada.pc#2 only", v.My.CCNotices)
 	}
 }
+
+// An org superior's status write on a CC'd item names the assignee it sets,
+// and a dropped item, wrapped like a done one, moves from CC to closed.
+func TestCCSuperiorStatusAndDropped(t *testing.T) {
+	v := ccView(t, "cc-wrapped", "lena.pc")
+	wantIDs(t, "related.cc", v.My.Related.CC, nil)
+	wantIDs(t, "related.closed", v.My.Related.Closed, []string{"maya.pc#1"})
+	if len(v.My.CCNotices) != 2 {
+		t.Fatalf("lena notices = %+v, want two", v.My.CCNotices)
+	}
+	for _, n := range v.My.CCNotices {
+		if n.By != "ada" || n.To == nil || *n.To != "maya" {
+			t.Fatalf("notice %+v, want by ada to maya", n)
+		}
+	}
+}

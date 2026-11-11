@@ -9,8 +9,8 @@ import (
 )
 
 // The team scope prints a legend, each person's load with its per-status
-// breakdown (awaiting outside it), and the stale, overdue, awaiting, idea,
-// fallback-held, and done counts,
+// breakdown (in-review and dropped outside it), and the stale, overdue,
+// dropped, in-review, idea, fallback-held, and done counts,
 // and an admin's outside-subtree members under their own heading.
 func TestTrackerTeamScopeRendersTheWorkloadRollup(t *testing.T) {
 	last := "2026-11-05T10:00:00Z"
@@ -19,7 +19,7 @@ func TestTrackerTeamScopeRendersTheWorkloadRollup(t *testing.T) {
 			Viewer:  wstracker.Viewer{Member: "lena", Admin: true, IsMember: true},
 			Members: map[string]wstracker.MemberView{"kai": {ID: "kai", Name: "Kai"}, "ada": {ID: "ada", Name: "Ada"}},
 			My: wstracker.My{Team: []wstracker.Team{
-				{ID: "kai", Depth: 2, Counts: map[string]int{"todo": 2, "doing": 1, "blocked": 1, "awaiting": 1, "idea": 1, "done": 2},
+				{ID: "kai", Depth: 2, Counts: map[string]int{"todo": 2, "doing": 1, "blocked": 1, "in-review": 1, "dropped": 1, "idea": 1, "done": 2},
 					Load: 4, Stale: 1, Overdue: 1, Fallback: 1, Last: &last},
 				{ID: "ada", Depth: 0, Outside: true, Counts: map[string]int{}, Fallback: 1},
 			}},
@@ -29,7 +29,7 @@ func TestTrackerTeamScopeRendersTheWorkloadRollup(t *testing.T) {
 	out := formatTrackerScope(v, trackerQuery{scope: "team"})
 	for _, want := range []string{
 		"team: " + trackerTeamLegend,
-		"kai (Kai) (depth 2): load 4 (todo 2, doing 1, blocked 1), 1 stale, 1 overdue, 1 awaiting, 1 idea, 1 fallback-held, 2 done, last update " + last,
+		"kai (Kai) (depth 2): load 4 (todo 2, doing 1, blocked 1), 1 stale, 1 overdue, 1 dropped, 1 in-review, 1 idea, 1 fallback-held, 2 done, last update " + last,
 		"outside my subtree (shown to an admin; depth from the org-tree root):\n\nada (Ada) (depth 0): load 0, 0 stale, 0 overdue, 0 idea, 1 fallback-held, 0 done\n",
 	} {
 		if !strings.Contains(out, want) {

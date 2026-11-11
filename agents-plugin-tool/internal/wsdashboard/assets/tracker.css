@@ -103,9 +103,10 @@
 .tk .chip.st-todo { background: color-mix(in srgb, var(--wb-primary) 10%, var(--wb-card)); color: var(--wb-primary); }
 .tk .chip.st-doing { background: color-mix(in srgb, var(--wb-primary) 20%, var(--wb-card)); color: var(--wb-primary); }
 .tk .chip.st-blocked { background: var(--tk-fail); color: var(--tk-on-fail); }
-.tk .chip.st-awaiting { background: color-mix(in srgb, var(--tk-warn) 18%, var(--wb-card)); color: var(--tk-warn); }
+.tk .chip.st-in-review { background: color-mix(in srgb, var(--tk-warn) 18%, var(--wb-card)); color: var(--tk-warn); }
 .tk .chip.st-done { background: color-mix(in srgb, var(--tk-ok) 16%, var(--wb-card)); color: var(--tk-ok); }
 .tk .chip.st-idea, .tk .chip.st-unassigned, .tk .chip.st-declined, .tk .chip.st-returned { background: var(--wb-muted); color: var(--wb-muted-fg); }
+.tk .chip.st-dropped { background: var(--wb-muted); color: var(--wb-muted-fg); text-decoration: line-through; }
 .tk .chip.st-pending { background: color-mix(in srgb, var(--tk-teal) 16%, var(--wb-card)); color: var(--tk-teal); }
 .tk .chip.req { background: transparent; box-shadow: inset 0 0 0 1px var(--tk-teal); color: var(--tk-teal); font-weight: 600; }
 .tk .chip.hid { background: transparent; box-shadow: inset 0 0 0 1px var(--wb-muted-fg); font-weight: 600; }
@@ -487,6 +488,9 @@ body.tk-paged .tk-drawer { display: none; }
 .tk .iw-seg .sg:focus-visible { box-shadow: inset 0 0 0 1.5px var(--wb-primary); }
 .tk .iw-seg .sg[aria-pressed="true"] { background: var(--wb-card); color: var(--wb-primary); font-weight: 700; box-shadow: 0 1px 2px rgb(0 0 0 / .12); }
 .tk .iw-seg .sg:disabled { opacity: .45; cursor: default; }
+/* a disabled choice's reason sits on its wrapper, which takes the hover the button no longer does */
+.tk .iw-seg .sgw { display: inline-flex; }
+.tk .iw-seg .sgw .sg:disabled { pointer-events: none; }
 @container iw (max-width: 759px) {
   .tk .iw-seg .sg { padding: 0 5px; }
   .tk .iw-seg .sl { display: none; }
@@ -615,7 +619,7 @@ dialog.tk-dlg .btn:disabled { opacity: .45; cursor: default; }
 .tk .gbar { position: absolute; top: 2px; height: 11px; border-radius: 3px; background: color-mix(in srgb, var(--wb-primary) 35%, var(--wb-card)); font-size: 9.5px; line-height: 12px; text-align: right; padding-right: 2px; overflow: hidden; color: var(--wb-fg); }
 .tk .gbar.st-done { background: color-mix(in srgb, var(--tk-ok) 35%, var(--wb-card)); }
 .tk .gbar.st-blocked, .tk .gbar.over { background: color-mix(in srgb, var(--tk-fail) 40%, var(--wb-card)); }
-.tk .gbar.st-pending, .tk .gbar.st-idea, .tk .gbar.st-unassigned { background: var(--wb-muted); }
+.tk .gbar.st-pending, .tk .gbar.st-idea, .tk .gbar.st-unassigned, .tk .gbar.st-dropped { background: var(--wb-muted); }
 .tk .cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 3px; }
 .tk .cdow { font-size: 11px; font-weight: 800; color: var(--wb-muted-fg); text-align: center; }
 .tk .cday { background: var(--wb-card); box-shadow: inset 0 0 0 1px var(--wb-muted); border-radius: 6px; min-height: 64px; padding: 2px 4px; font-size: 11.5px; }
@@ -806,6 +810,7 @@ body.tk-menuon .tk .ir-more { visibility: hidden !important; }
 .tk-menu .mrow input[type=date], .tk-menu .mrow input[type=text]:not(#tkmnote) { flex: 1 1 auto; min-width: 0; font: inherit; font-size: 12.5px; height: 26px; padding: 0 8px; border: 1px solid var(--wb-line); border-radius: 8px; background: var(--wb-bg); color: var(--wb-fg); }
 .tk-menu .mtitle { padding: 2px 8px 0; font-weight: 700; font-size: 13px; }
 .tk-menu .mintro { margin: 2px 8px 6px; font-size: 12px; color: var(--wb-muted-fg); }
+.tk-menu .mintro.mwhy { margin-top: 4px; font-size: 11.5px; }
 .tk-menu .mempty { margin: 4px 8px 6px; font-size: 12px; color: var(--wb-muted-fg); }
 .tk-menu .mlist { max-height: 220px; overflow: auto; }
 /* the "Move to..." step's tree: destinations as menu items, the ancestors that take nothing as context lines */
@@ -848,6 +853,7 @@ body.tk-menuon .tk .ir-more { visibility: hidden !important; }
 .tk-menu .ap-cm button { border: 0; border-radius: 6px; padding: 2px 8px; background: transparent; color: var(--wb-muted-fg); font: inherit; font-size: 11.5px; cursor: pointer; }
 .tk-menu .ap-cm button[aria-checked="true"] { background: var(--wb-card); color: var(--wb-fg); font-weight: 700; box-shadow: 0 1px 2px rgba(0, 0, 0, .12); }
 .tk-menu .ap-cm button:focus-visible { outline: none; box-shadow: inset 0 0 0 1.5px var(--wb-primary); }
+.tk-menu .ap-mix { font-size: 11.5px; }
 .tk-menu .ap-foot .btn { margin-left: auto; padding: 3px 14px; }
 .tk-menu .ap-foot .btn:disabled { opacity: .45; cursor: default; }
 .tk-menu .spop { display: grid; gap: 4px; padding: 0 8px 6px; font-size: 12px; color: var(--wb-muted-fg); overflow-wrap: anywhere; }

@@ -60,14 +60,14 @@ func TestDispatchRefusal(t *testing.T) {
 	raw := func(v any) json.RawMessage { b, _ := json.Marshal(v); return b }
 	_, err := trk.Dispatch(context.Background(), []wsledger.NewEvent{
 		{Type: TypeCommentAdd, Payload: raw(map[string]any{"item": "ada.pc#1", "body": "fine"})},
-		{Type: TypeItemEdit, Payload: raw(map[string]any{"item": "ada.pc#1", "title": "mine now"})},
+		{Type: TypeItemEdit, Payload: raw(map[string]any{"item": "raj.pc#7", "title": "mine now"})},
 	})
 	var ref *Refusal
 	if !errors.As(err, &ref) {
 		t.Fatalf("want a refusal, got %v", err)
 	}
 	wantEq(t, "index", ref.Index, 1)
-	wantEq(t, "reason", ref.Reason, "only the creator (ada) edits ada.pc-1")
+	wantEq(t, "reason", ref.Reason, "raj.pc-7 is neither assigned to nor created by maya")
 	wantEq(t, "appended", len(tm.src["maya.pc"].events), before)
 
 	// The assign names the item the same call creates, by NextID.
