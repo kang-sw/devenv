@@ -965,8 +965,9 @@
     var p = n.p, it = S.items[p.item];
     if (!it) return;
     var key = 'it:' + it.id + ':place', v = { move: true, parent: p.parent || null, after: has(p, 'after') ? (p.after || null) : undefined };
-    if (underItem(S, peek(S, key, n, v).parent, it)) {
-      if (C) { n.status = 'flagged'; n.reason = 'moving ' + it.alias + ' under ' + alias(v.parent) + ' would close a cycle with a concurrent move; ignored'; }
+    var shown = peek(S, key, n, v);
+    if (underItem(S, shown.parent, it)) {
+      if (C) { n.status = 'flagged'; n.reason = 'moving ' + it.alias + ' under ' + alias(shown.parent) + ' would close a cycle with a concurrent move; ignored'; }
       return;
     }
     var w = write(S, key, 'position of ' + it.alias, n, v, C), wn = regWinner(S, key);

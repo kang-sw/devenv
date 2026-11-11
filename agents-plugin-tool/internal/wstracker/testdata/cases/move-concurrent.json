@@ -1,6 +1,6 @@
 {
  "name": "move-concurrent",
- "comment": "Concurrent item.move. ada.pc moves X under Y while ada.lap, not seeing it, moves Y under X: the later in fold order (ada.lap) closes a cycle and is flagged and ignored. ada and maya move Z concurrently: the position register's winner (maya, the later ts) shows and both are marked. maya moves R under Q, authorized by her live assignment on Q, concurrently with ada unassigning her from Q: the move applies and is marked as a subtask under Q. maya.pc moves S under P while maya.lap hides P: the move was valid in its causal past and stays applied. maya.pc then anchors W after the hidden P at top level. The same race with the move first in fold order: maya moves U under V, ada unassigning her from V without seeing it; the unassign marks the move.",
+ "comment": "Concurrent item.move. ada.pc moves X under Y while ada.lap, not seeing it, moves Y under X: the later in fold order (ada.lap) closes a cycle and is flagged and ignored. ada and maya move Z concurrently: the position register's winner (maya, the later ts) shows and both are marked. maya moves R under Q, authorized by her live assignment on Q, concurrently with ada unassigning her from Q: the move applies and is marked as a subtask under Q. maya.pc moves S under P while maya.lap hides P: the move was valid in its causal past and stays applied. maya.pc then anchors W after the hidden P at top level. The same race with the move first in fold order: maya moves U under V, ada unassigning her from V without seeing it; the unassign marks the move. Last, the winner rule rather than fold order: maya.pc (human) moves K first while maya.lap, not seeing it, moves K after W as an agent; the agent move folds later but loses to the same member's human write, so K stays first.",
  "viewers": [
   "ada.pc",
   "maya.pc"
@@ -344,6 +344,41 @@
       }
      ]
     ]
+   },
+   {
+    "ts": "2026-11-01T09:40:00Z",
+    "seen": {
+     "ada.pc": 12,
+     "ada.lap": 1,
+     "maya.lap": 1
+    },
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "K"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:41:00Z",
+    "seen": {
+     "ada.pc": 12,
+     "ada.lap": 1,
+     "maya.lap": 1
+    },
+    "events": [
+     [
+      "item.move",
+      {
+       "item": "maya.pc#11",
+       "parent": null,
+       "after": ""
+      }
+     ]
+    ]
    }
   ],
   "maya.lap": [
@@ -359,6 +394,25 @@
       {
        "item": "maya.pc#1"
       }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:42:00Z",
+    "seen": {
+     "ada.pc": 12,
+     "ada.lap": 1,
+     "maya.pc": 11
+    },
+    "events": [
+     [
+      "item.move",
+      {
+       "item": "maya.pc#11",
+       "parent": null,
+       "after": "maya.pc#7"
+      },
+      "agent"
      ]
     ]
    }

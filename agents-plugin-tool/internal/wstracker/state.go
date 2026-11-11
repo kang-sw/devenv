@@ -1507,9 +1507,9 @@ func (s *state) applyMove(n *node) {
 	}
 	key := "it:" + it.id + ":place"
 	v := placeVal{parent: p.str("parent"), after: p.str("after"), afterSet: p.has("after")}
-	if s.underItem(s.peek(key, n, v).(placeVal).parent, it) {
+	if shown := s.peek(key, n, v).(placeVal); s.underItem(shown.parent, it) {
 		if s.marks {
-			n.status, n.reason = "flagged", "moving "+it.alias+" under "+alias(v.parent)+" would close a cycle with a concurrent move; ignored"
+			n.status, n.reason = "flagged", "moving "+it.alias+" under "+alias(shown.parent)+" would close a cycle with a concurrent move; ignored"
 		}
 		return
 	}

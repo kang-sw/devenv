@@ -4085,15 +4085,19 @@
     var band = f < (mid ? 0.25 : 0.5) ? 'top' : f >= (mid ? 0.75 : 0.5) ? 'bot' : 'mid';
     var slot = mvSlot(list, row, band);
     if (!slot) return null;
-    var moving = {}, n = 0;
-    roots.forEach(function (r) { if (!moveWhy(r, slot.parent || null)) { moving[r] = true; n++; } });
+    var moving = {}, n = 0, stuck = [];
+    roots.forEach(function (r) {
+      var why = moveWhy(r, slot.parent || null);
+      if (!why) { moving[r] = true; n++; } else stuck.push(wsT("js.tk.mv.stays", VS.items[r] ? VS.items[r].alias : alias(r), why));
+    });
     if (!n) return null;
     slot.after = band === 'mid' ? mvLastKid(row, moving) : mvAnchor(slot.from, slot.after, moving);
     if (roots.length === 1 && moveNoop(roots[0], slot)) return null;
-    return { el: row, band: band, slot: { parent: slot.parent || null, after: slot.after, depth: slot.depth }, n: n, total: roots.length };
+    return { el: row, band: band, slot: { parent: slot.parent || null, after: slot.after, depth: slot.depth }, n: n, total: roots.length, stuck: stuck };
   }
   // The indicator: a line at the gap, indented to the place's depth, or the target row outlined
-  // for the middle band; "N of M move" when some roots stay.
+  // for the middle band; "N of M move" when some roots stay, naming each with its reason before
+  // the drop (Decision 7).
   function mvShow(list, d) {
     if (MVS && MVS.list !== list) mvHide();
     var s = list.querySelector(':scope > .mvdrop');
@@ -4106,7 +4110,7 @@
     s.style.top = Math.round((mid || d.band === 'top' ? r.top : r.bottom) - lt - (mid ? 0 : 1)) + 'px';
     s.style.height = mid ? Math.round(r.height) + 'px' : '';
     s.style.setProperty('--ind', mid ? rowDepth(d.el) : d.slot.depth);
-    s.querySelector('.mvn').textContent = d.n < d.total ? wsT("js.tk.mv.part", d.n, d.total) : '';
+    s.querySelector('.mvn').textContent = d.n < d.total ? wsT("js.tk.mv.part", d.n, d.total) + ': ' + d.stuck.join('; ') : '';
     s.hidden = false;
     MVS = { list: list, d: d };
   }
