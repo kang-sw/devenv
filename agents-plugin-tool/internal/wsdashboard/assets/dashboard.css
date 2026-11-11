@@ -1362,11 +1362,18 @@ a[data-wl="file"]:not([href]) { color: inherit; }
 .rail .hb .ring { position: absolute; inset: -2px; width: calc(100% + 4px); height: calc(100% + 4px); overflow: visible; pointer-events: none; }
 .rail .hb .ring rect { x: 1px; y: 1px; width: calc(100% - 2px); height: calc(100% - 2px); rx: 5px; fill: none; stroke-width: 1.5; }
 .rail .hb .rtrk { stroke: color-mix(in srgb, var(--wb-primary) 22%, transparent); }
-.rail .hb .rrun { stroke: var(--wb-primary); stroke-linecap: round; stroke-dasharray: 24 76; animation: rail-orbit 1.3s linear infinite; }
+/* The working ring's arc: a wedge of a conic fill turning (transform only,
+   so it runs on the compositor) behind a mask that keeps only the band
+   where the track's stroke draws. Animating the stroke's dash offset
+   instead restyled and repainted the page on every frame. */
+.rail .hb .orb { position: absolute; inset: -1.75px; padding: 1.5px; border-radius: 5.75px; overflow: hidden; pointer-events: none;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); }
+.rail .hb .rrun { position: absolute; left: 50%; top: 50%; width: 72px; height: 72px; margin: -36px 0 0 -36px; background: conic-gradient(var(--wb-primary) 0 24%, transparent 0); animation: rail-orbit 1.3s linear infinite; }
 .rail .hb.run { color: var(--wb-fg); }
 .rail .bots { display: inline-flex; align-items: center; gap: 2px; flex: none; font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--wb-fg); }
 .rail .bots .i { width: 12px; height: 12px; stroke-width: 1.4; color: var(--wb-primary); animation: rail-blink 1.4s ease-in-out infinite; }
-@keyframes rail-orbit { from { stroke-dashoffset: 100; } to { stroke-dashoffset: 0; } }
+@keyframes rail-orbit { to { transform: rotate(360deg); } }
 @keyframes rail-blink { 50% { opacity: .25; } }
 .rail .rfoot { flex: none; display: flex; align-items: center; gap: 8px; padding: 7px 12px; border-top: 1px solid var(--wb-muted); font-size: 12px; }
 .rail .rfoot a { color: var(--wb-muted-fg); text-decoration: none; }
@@ -1502,5 +1509,5 @@ html:not([data-sysopen]) .rail .rnew { display: none; }
 @media (prefers-reduced-motion: reduce) {
   .rail, .rail-open .rail, .rscrim { transition: none; }
   .rail .bots .i { animation: none; }
-  .rail .hb .rrun { animation: none; stroke-dasharray: none; }
+  .rail .hb .rrun { animation: none; background: var(--wb-primary); }
 }

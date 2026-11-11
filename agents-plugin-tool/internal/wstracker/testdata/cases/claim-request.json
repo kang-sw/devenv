@@ -1,0 +1,517 @@
+{
+ "name": "claim-request",
+ "comment": "Take requests (Decisions 4, 5, 8, 9). A: maya and ada approve omar's request concurrently; maya folds first, omar's new record inherits status and note, and ada's approval is flagged. B: bo's accept of raj's handoff folds before ada's concurrent approval of lena's request, which is flagged as lapsed. C: bo approves raj's request while sven's concurrent accept of bo's handoff folds after it. D: on a two-assignee item, ada assigns omar before lena approves omar's request, so lena's assignment ends and omar gets no second record; raj, the other assignee, cannot approve. E: sven approves bo's request before ada's concurrent assign of bo. F: raj denies maya's request, lena withdraws hers, and sven's lapses when ada unassigns raj.",
+ "viewers": [
+  "ada.pc",
+  "maya.pc",
+  "raj.pc",
+  "omar.pc",
+  "lena.pc"
+ ],
+ "now": "2026-11-02T09:00:00Z",
+ "genesis": {
+  "admins": [
+   "ada",
+   "bo"
+  ],
+  "members": [
+   {
+    "id": "ada",
+    "name": "Ada",
+    "keys": [
+     "ada-k1"
+    ],
+    "leads": []
+   },
+   {
+    "id": "maya",
+    "name": "Maya",
+    "keys": [
+     "maya-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "raj",
+    "name": "Raj",
+    "keys": [
+     "raj-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "bo",
+    "name": "Bo",
+    "keys": [
+     "bo-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "lena",
+    "name": "Lena",
+    "keys": [
+     "lena-k1"
+    ],
+    "leads": [
+     "maya"
+    ]
+   },
+   {
+    "id": "omar",
+    "name": "Omar",
+    "keys": [
+     "omar-k1"
+    ],
+    "leads": [
+     "maya"
+    ]
+   },
+   {
+    "id": "sven",
+    "name": "Sven",
+    "keys": [
+     "sven-k1"
+    ],
+    "leads": [
+     "raj"
+    ]
+   }
+  ]
+ },
+ "commits": {
+  "ada.pc": [
+   {
+    "ts": "2026-11-01T09:00:00Z",
+    "seen": {},
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "A"
+      }
+     ],
+     [
+      "item.assign",
+      {
+       "item": "ada.pc#1",
+       "targets": [
+        "maya"
+       ]
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "B"
+      }
+     ],
+     [
+      "item.assign",
+      {
+       "item": "ada.pc#3",
+       "targets": [
+        "raj"
+       ]
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "C"
+      }
+     ],
+     [
+      "item.assign",
+      {
+       "item": "ada.pc#5",
+       "targets": [
+        "bo"
+       ]
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "D"
+      }
+     ],
+     [
+      "item.assign",
+      {
+       "item": "ada.pc#7",
+       "targets": [
+        "lena",
+        "raj"
+       ]
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "E"
+      }
+     ],
+     [
+      "item.assign",
+      {
+       "item": "ada.pc#9",
+       "targets": [
+        "sven"
+       ]
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "F"
+      }
+     ],
+     [
+      "item.assign",
+      {
+       "item": "ada.pc#11",
+       "targets": [
+        "raj"
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:11:00Z",
+    "seen": {
+     "maya.pc": 2,
+     "omar.pc": 2,
+     "lena.pc": 2,
+     "raj.pc": 1
+    },
+    "events": [
+     [
+      "item.approve",
+      {
+       "item": "ada.pc#1",
+       "request": "omar.pc#1"
+      }
+     ],
+     [
+      "item.approve",
+      {
+       "item": "ada.pc#3",
+       "request": "lena.pc#1"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:14:00Z",
+    "seen": {
+     "maya.pc": 2,
+     "omar.pc": 2,
+     "lena.pc": 2,
+     "raj.pc": 1
+    },
+    "events": [
+     [
+      "item.assign",
+      {
+       "item": "ada.pc#7",
+       "targets": [
+        "omar"
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:20:00Z",
+    "seen": {
+     "maya.pc": 2,
+     "omar.pc": 2,
+     "lena.pc": 2,
+     "raj.pc": 1,
+     "bo.pc": 3
+    },
+    "events": [
+     [
+      "item.assign",
+      {
+       "item": "ada.pc#9",
+       "targets": [
+        "bo"
+       ]
+      }
+     ],
+     [
+      "item.unassign",
+      {
+       "item": "ada.pc#11",
+       "assignee": "raj"
+      }
+     ]
+    ]
+   }
+  ],
+  "maya.pc": [
+   {
+    "ts": "2026-11-01T09:02:00Z",
+    "seen": {
+     "ada.pc": 12
+    },
+    "events": [
+     [
+      "item.status",
+      {
+       "item": "ada.pc#1",
+       "status": "doing",
+       "note": "half done"
+      }
+     ],
+     [
+      "item.request",
+      {
+       "item": "ada.pc#11",
+       "assignee": "raj"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:10:00Z",
+    "seen": {
+     "ada.pc": 12,
+     "omar.pc": 2
+    },
+    "events": [
+     [
+      "item.approve",
+      {
+       "item": "ada.pc#1",
+       "request": "omar.pc#1"
+      }
+     ]
+    ]
+   }
+  ],
+  "raj.pc": [
+   {
+    "ts": "2026-11-01T09:03:00Z",
+    "seen": {
+     "ada.pc": 12
+    },
+    "events": [
+     [
+      "item.handoff",
+      {
+       "item": "ada.pc#3",
+       "to": "bo"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:07:00Z",
+    "seen": {
+     "ada.pc": 12,
+     "bo.pc": 2
+    },
+    "events": [
+     [
+      "item.request",
+      {
+       "item": "ada.pc#5",
+       "assignee": "bo"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:16:00Z",
+    "seen": {
+     "ada.pc": 12,
+     "omar.pc": 2,
+     "maya.pc": 2
+    },
+    "events": [
+     [
+      "item.approve",
+      {
+       "item": "ada.pc#7",
+       "request": "omar.pc#2"
+      }
+     ],
+     [
+      "item.deny",
+      {
+       "item": "ada.pc#11",
+       "request": "maya.pc#2",
+       "note": "staying on it"
+      }
+     ]
+    ]
+   }
+  ],
+  "lena.pc": [
+   {
+    "ts": "2026-11-01T09:04:00Z",
+    "seen": {
+     "ada.pc": 12
+    },
+    "events": [
+     [
+      "item.request",
+      {
+       "item": "ada.pc#3",
+       "assignee": "raj"
+      }
+     ],
+     [
+      "item.request",
+      {
+       "item": "ada.pc#11",
+       "assignee": "raj"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:15:00Z",
+    "seen": {
+     "ada.pc": 12,
+     "omar.pc": 2
+    },
+    "events": [
+     [
+      "item.approve",
+      {
+       "item": "ada.pc#7",
+       "request": "omar.pc#2"
+      }
+     ],
+     [
+      "item.unrequest",
+      {
+       "item": "ada.pc#11",
+       "request": "lena.pc#2"
+      }
+     ]
+    ]
+   }
+  ],
+  "omar.pc": [
+   {
+    "ts": "2026-11-01T09:05:00Z",
+    "seen": {
+     "ada.pc": 12,
+     "maya.pc": 2
+    },
+    "events": [
+     [
+      "item.request",
+      {
+       "item": "ada.pc#1",
+       "assignee": "maya",
+       "note": "I can take it"
+      }
+     ],
+     [
+      "item.request",
+      {
+       "item": "ada.pc#7",
+       "assignee": "lena"
+      }
+     ]
+    ]
+   }
+  ],
+  "bo.pc": [
+   {
+    "ts": "2026-11-01T09:06:00Z",
+    "seen": {
+     "ada.pc": 12,
+     "raj.pc": 1
+    },
+    "events": [
+     [
+      "item.accept",
+      {
+       "item": "ada.pc#3"
+      }
+     ],
+     [
+      "item.handoff",
+      {
+       "item": "ada.pc#5",
+       "to": "sven"
+      }
+     ],
+     [
+      "item.request",
+      {
+       "item": "ada.pc#9",
+       "assignee": "sven"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:08:00Z",
+    "seen": {
+     "raj.pc": 2
+    },
+    "events": [
+     [
+      "item.approve",
+      {
+       "item": "ada.pc#5",
+       "request": "raj.pc#2"
+      }
+     ]
+    ]
+   }
+  ],
+  "sven.pc": [
+   {
+    "ts": "2026-11-01T09:09:00Z",
+    "seen": {
+     "ada.pc": 12,
+     "bo.pc": 3
+    },
+    "events": [
+     [
+      "item.accept",
+      {
+       "item": "ada.pc#5"
+      }
+     ],
+     [
+      "item.approve",
+      {
+       "item": "ada.pc#9",
+       "request": "bo.pc#3"
+      }
+     ],
+     [
+      "item.request",
+      {
+       "item": "ada.pc#11",
+       "assignee": "raj"
+      }
+     ]
+    ]
+   }
+  ]
+ }
+}

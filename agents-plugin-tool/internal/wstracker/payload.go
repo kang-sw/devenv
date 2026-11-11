@@ -147,6 +147,48 @@ type ItemRef struct {
 	Note     string `json:"note,omitempty"`
 }
 
+// Taking work: the creator opens a task nobody else holds to a scope and a
+// member in it claims it; a member requests someone's live assignment and
+// its holder or the creator approves or denies the request.
+const (
+	TypeItemOpen      = "item.open"
+	TypeItemUnopen    = "item.unopen"
+	TypeItemClaim     = "item.claim"
+	TypeItemRequest   = "item.request"
+	TypeItemApprove   = "item.approve"
+	TypeItemDeny      = "item.deny"
+	TypeItemUnrequest = "item.unrequest"
+)
+
+// Opening scopes: the opener's org subtree, or every member of the store.
+const (
+	ScopeTeam  = "team"
+	ScopeStore = "store"
+)
+
+// ItemOpen is the payload of item.open. item.unopen and item.claim take an
+// ItemRef with Item only.
+type ItemOpen struct {
+	Item  string `json:"item"`
+	Scope string `json:"scope"` // team, store
+}
+
+// ItemRequest is the payload of item.request: a take request for the live
+// assignment Assignee holds on Item.
+type ItemRequest struct {
+	Item     string `json:"item"`
+	Assignee string `json:"assignee"`
+	Note     string `json:"note,omitempty"`
+}
+
+// RequestRef is the payload of item.approve, item.deny, and item.unrequest:
+// Request is the item.request event's id.
+type RequestRef struct {
+	Item    string `json:"item"`
+	Request string `json:"request"`
+	Note    string `json:"note,omitempty"`
+}
+
 // ItemStatus is the payload of item.status.
 type ItemStatus struct {
 	Item   string `json:"item"`

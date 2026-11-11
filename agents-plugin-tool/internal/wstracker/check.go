@@ -67,8 +67,8 @@ func (s *state) underItem(id string, it *item) bool {
 
 // checkMove judges item.move: the item rule (creator or live assignee, the
 // creator-gone fallback included), then, only when the parent changes, the
-// destination rule (item.create's parent rules, and a topic takes no
-// children), the subtree rule, and the after anchor.
+// destination rule (item.create's parent rules; a topic takes children like
+// any item), the subtree rule, and the after anchor.
 func (s *state) checkMove(p obj, a string) rejection {
 	it, r := s.needItem(p.disp("item"), "item")
 	if r != "" {
@@ -100,9 +100,6 @@ func (s *state) checkMove(p obj, a string) rejection {
 		}
 		if r := s.needCreatorOrAssignee(par, a, "parent "); r != "" {
 			return r
-		}
-		if par.kind == "topic" {
-			return rejection("parent " + par.alias + " is a topic; a topic takes no children")
 		}
 		if s.underItem(par.id, it) {
 			return rejection("parent " + par.alias + " is in " + it.alias + "'s own subtree")
@@ -499,6 +496,48 @@ func (s *state) notAssignee(it *item, who string) rejection {
 	return rejection(who + " is not an assignee of " + it.alias)
 }
 
+// notOpen is why it cannot be claimed: never opened, or the event that
+// ended its opening.
+func (s *state) notOpen(it *item) rejection {
+	o := it.open
+	if o == nil || o.ended == nil && s.liveFallback(it.id) == nil {
+		return rejection(it.alias + " is not open for claiming")
+	}
+	e := o.ended
+	switch e.typ {
+	case TypeItemClaim:
+		return rejection(e.member + " already claimed " + it.alias + " (" + e.alias + ")")
+	case TypeItemUnopen:
+		return rejection(e.member + " withdrew the opening of " + it.alias + " (" + e.alias + ")")
+	case TypeItemAssign:
+		return rejection(e.member + " assigned " + it.alias + " (" + e.alias + "), which ended its opening")
+	}
+	return rejection("the opening of " + it.alias + " ended (" + e.alias + ")")
+}
+
+// needReq is the take request p.request names on it.
+func (s *state) needReq(it *item, p obj) (*takeReq, rejection) {
+	q := s.reqs[p.disp("request")]
+	if q == nil || q.item != it.id {
+		return nil, rejection(alias(p.disp("request")) + " is not a take request on " + it.alias)
+	}
+	return q, ""
+}
+
+// reqEnded is why q is no longer pending.
+func (s *state) reqEnded(q *takeReq) rejection {
+	e, rq := q.ended, alias(q.id)
+	switch q.state {
+	case "approved":
+		return rejection(e.member + " already approved " + rq + " (" + e.alias + ")")
+	case "denied":
+		return rejection(e.member + " denied " + rq + " (" + e.alias + ")")
+	case "withdrawn":
+		return rejection(rq + " was withdrawn (" + e.alias + ")")
+	}
+	return rejection(rq + " lapsed: " + q.holder + "'s assignment on " + alias(q.item) + " ended (" + e.alias + ")")
+}
+
 func (s *state) needRec(it *item, who string) (*rec, rejection) {
 	if r := s.liveRec(it.id, who); r != nil {
 		return r, ""
@@ -743,6 +782,134 @@ func (s *state) check(n *node) rejection {
 			if x.handoffOf == rc.id && x.state == "pending" {
 				return rejection("a handoff of this assignment to " + x.to + " is already pending (" + alias(x.via) + ")")
 			}
+		}
+
+	case TypeItemOpen:
+		it, r := needIt()
+		if r != "" {
+			return r
+		}
+		if it.hidden {
+			return rejection(it.alias + " is hidden")
+		}
+		if it.author != a && !s.creatorGone(it, a) {
+			return rejection("only the creator (" + it.author + ") opens " + it.alias + " for claiming")
+		}
+		if it.kind == "topic" {
+			return "a topic is not opened for claiming; its creator assigns its one holder"
+		}
+		if sc := p["scope"]; sc != ScopeTeam && sc != ScopeStore {
+			return "scope must be team (the opener's org subtree) or store (every member)"
+		}
+		if o := s.activeOpen(it); o != nil {
+			return rejection(it.alias + " is already open (" + o.node.alias + ")")
+		}
+		if held := s.holders(it); len(held) > 0 {
+			return rejection(it.alias + " has live or pending assignments (" + strings.Join(held, ", ") + "); only a task nobody else holds is opened")
+		}
+		if fb := s.liveFallback(it.id); fb != nil && fb.status == "done" {
+			return rejection(it.alias + " is done; nothing to open")
+		}
+
+	case TypeItemUnopen:
+		it, r := needIt()
+		if r != "" {
+			return r
+		}
+		if it.author != a && !s.creatorGone(it, a) {
+			return rejection("only the creator (" + it.author + ") withdraws the opening of " + it.alias)
+		}
+		if s.activeOpen(it) == nil {
+			return s.notOpen(it)
+		}
+
+	case TypeItemClaim:
+		it, r := needIt()
+		if r != "" {
+			return r
+		}
+		if it.hidden {
+			return rejection(it.alias + " is hidden")
+		}
+		o := s.activeOpen(it)
+		if o == nil {
+			return s.notOpen(it)
+		}
+		if fb := s.liveFallback(it.id); fb.to == a {
+			return rejection(a + " already holds " + it.alias)
+		}
+		if !s.inScope(o, a) {
+			return rejection(a + " is not in " + o.by + "'s org subtree; " + it.alias + " is open to that team only")
+		}
+
+	case TypeItemRequest:
+		it, r := needIt()
+		if r != "" {
+			return r
+		}
+		if it.hidden {
+			return rejection(it.alias + " is hidden")
+		}
+		if !p.truthy("assignee") {
+			return "assignee required (the holder of the assignment to take)"
+		}
+		who := p.disp("assignee")
+		if who == a {
+			return rejection(a + " cannot request their own assignment")
+		}
+		rc, r := s.needRec(it, who)
+		if r != "" {
+			return r
+		}
+		if rc.fallback {
+			return rejection(who + " holds " + it.alias + " only because nobody else does; it is taken by a claim once its creator opens it")
+		}
+		if rc.status == "done" {
+			return "assignment is done; nothing to take"
+		}
+		if s.openRec(it.id, a) != nil {
+			return rejection(a + " already holds a live or pending assignment on " + it.alias)
+		}
+		for _, id := range s.rorder {
+			if q := s.reqs[id]; q.by == a && q.of == rc.id && q.state == "pending" {
+				return rejection(a + "'s request for " + who + "'s assignment on " + it.alias + " is already pending (" + alias(q.id) + ")")
+			}
+		}
+
+	case TypeItemApprove, TypeItemDeny:
+		it, r := needIt()
+		if r != "" {
+			return r
+		}
+		q, r := s.needReq(it, p)
+		if r != "" {
+			return r
+		}
+		if q.state != "pending" {
+			return s.reqEnded(q)
+		}
+		if a != q.holder && it.author != a && !s.creatorGone(it, a) {
+			verb := "approves"
+			if n.typ == TypeItemDeny {
+				verb = "denies"
+			}
+			return rejection("only " + q.holder + " (the assignment's holder) or the creator (" + it.author + ") " + verb + " " + alias(q.id))
+		}
+
+	case TypeItemUnrequest:
+		it, r := needIt()
+		if r != "" {
+			return r
+		}
+		q, r := s.needReq(it, p)
+		if r != "" {
+			return r
+		}
+		if q.state != "pending" {
+			return s.reqEnded(q)
+		}
+		if q.by != a {
+			return rejection("only the requester (" + q.by + ") withdraws " + alias(q.id))
 		}
 
 	case TypeItemAccept, TypeItemDecline:

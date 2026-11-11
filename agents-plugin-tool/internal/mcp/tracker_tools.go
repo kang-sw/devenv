@@ -172,6 +172,18 @@ var trackerCommands = map[string]trackerCommandDef{
 		buildItemOptionalAssignee(b, cmd, ev)
 		b.note(cmd, ev)
 	}},
+	wstracker.TypeItemOpen: {trackerEventSpec(wsxmlcmd.Empty, "item", "scope"), func(b *trackerBatch, cmd wsxmlcmd.Command, ev *trackerEvent) {
+		b.itemRef(cmd, ev, "item")
+		if v, ok := wsxmlcmd.EnumAttr(b.p, cmd, "scope", []string{wstracker.ScopeTeam, wstracker.ScopeStore}); ok {
+			ev.payload["scope"] = v
+		}
+	}},
+	wstracker.TypeItemUnopen:    {trackerEventSpec(wsxmlcmd.Empty, "item"), buildItemOnly},
+	wstracker.TypeItemClaim:     {trackerEventSpec(wsxmlcmd.Empty, "item"), buildItemOnly},
+	wstracker.TypeItemRequest:   {trackerEventSpec(wsxmlcmd.Leaf, "item", "assignee"), buildItemAssigneeNote},
+	wstracker.TypeItemApprove:   {trackerEventSpec(wsxmlcmd.Leaf, "item", "request"), buildItemRequestNote},
+	wstracker.TypeItemDeny:      {trackerEventSpec(wsxmlcmd.Leaf, "item", "request"), buildItemRequestNote},
+	wstracker.TypeItemUnrequest: {trackerEventSpec(wsxmlcmd.Empty, "item", "request"), buildItemRequest},
 	wstracker.TypeCommentAdd: {trackerEventSpec(wsxmlcmd.Leaf, "item", "reply_to", "mentions", "refs"), func(b *trackerBatch, cmd wsxmlcmd.Command, ev *trackerEvent) {
 		b.itemRef(cmd, ev, "item")
 		if _, ok := cmd.Attr("reply_to"); ok {
@@ -370,6 +382,18 @@ func buildItemNote(b *trackerBatch, cmd wsxmlcmd.Command, ev *trackerEvent) {
 func buildItemAssigneeNote(b *trackerBatch, cmd wsxmlcmd.Command, ev *trackerEvent) {
 	b.itemRef(cmd, ev, "item")
 	b.required(cmd, ev, "assignee")
+	b.note(cmd, ev)
+}
+
+// buildItemRequest reads a take-request answer or withdrawal: request is
+// the tk:item.request's event ID, or $N for one earlier in the batch.
+func buildItemRequest(b *trackerBatch, cmd wsxmlcmd.Command, ev *trackerEvent) {
+	b.itemRef(cmd, ev, "item")
+	b.ref(cmd, ev, "request", wstracker.TypeItemRequest, "request")
+}
+
+func buildItemRequestNote(b *trackerBatch, cmd wsxmlcmd.Command, ev *trackerEvent) {
+	buildItemRequest(b, cmd, ev)
 	b.note(cmd, ev)
 }
 

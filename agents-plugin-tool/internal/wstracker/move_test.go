@@ -33,7 +33,7 @@ func TestMoveByCreatorAndLiveAssignee(t *testing.T) {
 		{"maya.pc", "item.create", task("M")},
 		{"maya.pc", "item.move", map[string]any{"item": "maya.pc#2", "parent": "ada.pc#2"}},
 		// T.1's live assignee reorders it under the topic T: the same parent,
-		// so neither the topic rule nor T's ownership applies
+		// so T's ownership does not apply
 		{"maya.pc", "item.move", map[string]any{"item": "ada.pc#5", "parent": "ada.pc#4", "after": "ada.pc#6"}},
 		// a reorder inside B back to first
 		{"ada.pc", "item.move", map[string]any{"item": "ada.pc#1", "parent": "ada.pc#2", "after": ""}},

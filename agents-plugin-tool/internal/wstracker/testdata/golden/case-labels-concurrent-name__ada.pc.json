@@ -559,7 +559,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "maya.pc#1": {
     "id": "maya.pc#1",
@@ -607,7 +610,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    }
   },
   "itemOrder": [
@@ -684,6 +690,7 @@
     "stale": false
    }
   },
+  "requests": {},
   "rules": {},
   "comments": {},
   "events": [
@@ -1162,6 +1169,10 @@
      "last": null
     }
    ],
+   "requests": {
+    "incoming": [],
+    "outgoing": []
+   },
    "badge": []
   },
   "stats": {

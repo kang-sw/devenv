@@ -4477,7 +4477,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "ada.pc#3": {
     "id": "ada.pc#3",
@@ -4524,7 +4527,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "maya.pc#1": {
     "id": "maya.pc#1",
@@ -4593,7 +4599,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "raj.pc#1": {
     "id": "raj.pc#1",
@@ -4649,7 +4658,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "maya.pc#5": {
     "id": "maya.pc#5",
@@ -4713,7 +4725,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "maya.pc#7": {
     "id": "maya.pc#7",
@@ -4763,7 +4778,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "bo.pc#1": {
     "id": "bo.pc#1",
@@ -4812,7 +4830,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "ada.pc#6": {
     "id": "ada.pc#6",
@@ -4874,7 +4895,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "ada.pc#8": {
     "id": "ada.pc#8",
@@ -4920,7 +4944,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "kai.pc#2": {
     "id": "kai.pc#2",
@@ -4968,7 +4995,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "lena.pc#2": {
     "id": "lena.pc#2",
@@ -5017,7 +5047,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "sven.pc#3": {
     "id": "sven.pc#3",
@@ -5067,7 +5100,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "raj.pc#7": {
     "id": "raj.pc#7",
@@ -5117,7 +5153,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "tia.pc#3": {
     "id": "tia.pc#3",
@@ -5165,7 +5204,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "noa.pc#3": {
     "id": "noa.pc#3",
@@ -5213,7 +5255,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "maya.lap#2": {
     "id": "maya.lap#2",
@@ -5258,7 +5303,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "ivy.pc#6": {
     "id": "ivy.pc#6",
@@ -5305,7 +5353,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "raj.pc#11": {
     "id": "raj.pc#11",
@@ -5364,7 +5415,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "raj.pc#13": {
     "id": "raj.pc#13",
@@ -5411,7 +5465,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "raj.pc#15": {
     "id": "raj.pc#15",
@@ -5464,7 +5521,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "raj.pc#17": {
     "id": "raj.pc#17",
@@ -5511,7 +5571,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "sven.pc#6": {
     "id": "sven.pc#6",
@@ -5560,7 +5623,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "raj.pc#20": {
     "id": "raj.pc#20",
@@ -5605,7 +5671,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "ada.pc#16": {
     "id": "ada.pc#16",
@@ -5656,7 +5725,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "ada.pc#18": {
     "id": "ada.pc#18",
@@ -5702,7 +5774,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "bo.pc#9": {
     "id": "bo.pc#9",
@@ -5755,7 +5830,10 @@
      }
     ],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    }
   },
   "itemOrder": [
@@ -7316,6 +7394,7 @@
     "stale": false
    }
   },
+  "requests": {},
   "rules": {
    "ada.pc#2": {
     "id": "ada.pc#2",
@@ -11492,6 +11571,10 @@
      "last": "2026-11-05T21:00:00Z"
     }
    ],
+   "requests": {
+    "incoming": [],
+    "outgoing": []
+   },
    "badge": [
     "w:ada.pc#7>kai:done:2026-11-02T17:10:00Z",
     "acc:lena.pc#3>raj"

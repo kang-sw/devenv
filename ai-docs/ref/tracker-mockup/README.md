@@ -523,7 +523,7 @@ attachment the store accepts, in bytes (339); without it the limit is 10 MiB
 |---|---|---|
 | `item.create` | `kind` (`task`/`topic`; `todo` is still accepted and folds as `task`, 154 a), `title`, `body?`, `project?`, `due?`, `priority?`, `parent?`, `after?`, `mentions?`, `attachments?`, `refs?` | A `parent` must be assigned to or created by the author. `project` is one free-text string, the only grouping (no labels or tags). `due` is a `YYYY-MM-DD` date. `priority` is a level in the author's current range; omitted, the item starts at the store's default level. `after` places it among its siblings (528), below. A new write carrying `stage` is refused (retired); an older event's stage folds as described under Derived state. |
 | `item.edit` | `item`, any of `title`/`body`/`project`/`due`/`priority`; `mentions?`, `attachments?` and `refs?` with `body` | Creator only; an admin may also edit an item whose creator was removed (292). `due: null` clears the date; priority cannot be cleared. A new write carrying `stage` is refused (retired). Each field merges by the (203) rule. `mentions` or `attachments` without `body` is flagged, and so is `refs`. |
-| `item.move` | `item`, `parent` (an item id, or `null` for top level; required), `after?` | Reparents or reorders an item with its subtree; a reorder is a move under the same parent. The item's creator or a member holding a live assignment on it; an admin may also move an item whose creator was removed. Only when the parent changes, the destination must pass `item.create`'s parent rules (not hidden, created by or assigned to the mover) and must not be a topic (a topic takes no children) or in the item's own subtree; a reorder under the same parent, and a move to top level, check only the item rule. `after` places it among its new siblings as on `item.create`, and a non-empty `after` must be a child of the new parent. Flagged on a hidden item. Assignments, comments, and history stay with the item. |
+| `item.move` | `item`, `parent` (an item id, or `null` for top level; required), `after?` | Reparents or reorders an item with its subtree; a reorder is a move under the same parent. The item's creator or a member holding a live assignment on it; an admin may also move an item whose creator was removed. Only when the parent changes, the destination must pass `item.create`'s parent rules (not hidden, created by or assigned to the mover) and must not be in the item's own subtree (a topic takes children like any item); a reorder under the same parent, and a move to top level, check only the item rule. `after` places it among its new siblings as on `item.create`, and a non-empty `after` must be a child of the new parent. Flagged on a hidden item. Assignments, comments, and history stay with the item. |
 | `item.hide` | `item` | Creator only; an admin may also hide an item whose creator was removed (292). A tombstone: the content stays in history. Flagged while someone else holds an open (live or pending) assignment on the item. |
 | `item.assign` | `item`, `targets` (a list of member ids and rules `{root, include_root?, levels?}`) or the older `mode` (`all`/`chosen`), `levels` (all), `people` (chosen); `completion` (`assignee`/`assigner`; absent reads as `assignee`, and writers fill it in: `assigner` when anyone but the author is a target, `assignee` when the author is the only one) | Creator only; an admin may also assign an item whose creator was removed. A person may be anyone in the store: the author, or someone the author reaches (the author is in their lead chain, any depth), is a **forced** assignment, live at once; anyone else gets a **pending** assignment. A rule (490)-(492) targets everyone below `root` (within `levels`, absent = the whole subtree; `root` too with `include_root`), forced, and stays live: anyone who later enters the range inherits it. A rule rooted at the author or below is live at once; one rooted elsewhere is a **rule request** pending to `root`. The older `chosen` is `targets` of people and `all` is one rule `{root: author, levels}`, with the event id as the rule id. Flagged: both `targets` and `mode`, an empty list, a malformed target, two rules on one root, a rule with nobody in it, a rule another live rule of the author's on the item already covers, or every person chosen (with no rule) already holding a live or pending assignment. On a topic (153 b) an assign names exactly one person (`targets: [id]`, or `chosen` with one person) and makes its **holder**: flagged otherwise (`all`, a rule, or more than one), and flagged while the topic has any live or pending assignment, a pending handoff included; its `completion` is accepted and not stored. Any applied assign (the creator included) displaces a task's fallback holding. |
 | `item.handoff` | `item`, `to`, `assignee?`, `note?` | The holder of a live assignment hands it to anyone; an admin may hand off any member's live assignment by naming its holder in `assignee` (286), so open work can be taken over before the member is removed. It makes a pending assignment to `to` with the original's assigner and completion mode; on accept the original assignment ends (`handed`) and the new one starts with the original's status and note (290). Flagged on a done assignment, when `to` is the holder or already holds one, or while another handoff of it is pending. |
@@ -534,6 +534,12 @@ attachment the store accepts, in bytes (339); without it the limit is 10 MiB
 | `item.close` | `item`, `note?` | Assignee. Moves to `done`, or to `awaiting` when completion is `assigner`. Not allowed on a topic (153 b). |
 | `item.confirm` / `item.reject` | `item`, `assignee`, `note?` | Assigner, on an `awaiting` assignment. Moves to `done` / back to `doing`. |
 | `item.reopen` | `item`, `assignee?`, `note?` | The assigner or the assignee reopens a `done` assignment, back to `doing`. |
+| `item.open` | `item`, `scope` (`team` or `store`) | The creator (the fallback admin when the creator was removed) opens a task nobody else holds for claiming: `team` admits the opener's org subtree, `store` every member. Flagged on a topic, a hidden or done task, one already open, or one with a live or pending assignment besides the fallback. |
+| `item.unopen` | `item` | The creator withdraws an open opening. Folding after the opening ended (a concurrent claim or assign), it is a no-op. |
+| `item.claim` | `item` | A member in the opening's scope, other than the fallback holder, takes an open task: a live record `<claim event>><claimer>` by the opener, starting at todo, not forced, which displaces the fallback and ends the opening. |
+| `item.request` | `item`, `assignee`, `note?` | Any member other than `assignee` asks for the live, non-fallback assignment `assignee` holds; flagged when the requester already holds a live or pending record on the item, already has a pending request for it, or the assignment is done. The request id is the event id. |
+| `item.approve` / `item.deny` | `item`, `request`, `note?` | The named assignment's holder or the item's creator answers a pending request. An approval ends the assignment as `handed` and gives the requester a live record `<approve event>><requester>` with its assigner, completion, status, and note (`handoffOf` the old record, so a return restores the holder); a requester already holding a record by then gets none. |
+| `item.unrequest` | `item`, `request` | The requester withdraws a pending request. |
 | `comment.add` | `item`, `body`, `reply_to?`, `mentions?`, `attachments?`, `refs?` | Anyone in the store. `reply_to` is one comment in the same thread (flat timeline, quote reply). |
 | `comment.edit` / `comment.hide` | `comment`, `body`, `mentions?`, `attachments?`, `refs?` (edit) | Comment author only. Hide is a tombstone. |
 | `member.profile` | `profile` (any of `org`, `family`, `given`: strings), `member?` | (392 b) The author's own profile, or with `member` another member's: only an admin may write that, anyone else's write is flagged. Each field present is its own register, so concurrent changes merge by (203), and a write only carries the fields it changes. `given` is required and non-empty whenever it is present; a profile with an unknown or non-string field, or with none of the three, is flagged. The member must exist and not be removed. Shows in Activity with the writer, the admin when an admin made it. |
@@ -651,6 +657,17 @@ forced (author, or someone the author reaches) starts live
   holds on the item. A request holds nothing: it is neither live work nor
   counted in the item status, and it does not make the item pending.
 
+- **Taking work.** An item's opening (`item.open`) is active while it is
+  not ended and the item is still fallback-held; the view shows it as the
+  item's `open` and, per viewer, `claimable`. It ends on a claim, an
+  assign, a withdrawal, or anything else that displaces the fallback (an
+  accepted rule request), and never revives. A take request names one
+  assignment: pending, then `approved`, `denied`, `withdrawn` (by the
+  requester, or the requester removed), or `lapsed` when that assignment
+  ends first. The view lists requests in `requests` and per item, and
+  `my.requests` holds the viewer's pending incoming (they may answer) and
+  outgoing ones; each incoming one is a badge entry `q:<request>`.
+
 ```text
 rule rooted at the author or below:  live at once --unassign root / all--> ended
 rule rooted elsewhere:  request pending --accept--> live --request returned / unassign--> ended
@@ -717,13 +734,16 @@ items        { id: { id, alias, kind, title, body, project, due, priority, prior
                      rollup{total, counts{status: n}, blocked[]}, lastActivity, started,
                      assignments[], pending[], thread[eventId], concurrent, depth, chain[],
                      mentions[memberId], attachments[{oid, name, size, mime}],
-                     refs[itemId], backrefs[itemId|commentId] } }
+                     refs[itemId], backrefs[itemId|commentId],
+                     open{id, by, scope, ts} (null unless open), claimable, requests[requestId] } }
 itemOrder[]  item ids in tree order, siblings by their after anchors
 assignments  { id: { id, item, to, by, sender, completion, state, forced, status, note, noteBy, via, ts,
                      inherited, ruleLevels, rule, ruleRequest, handoffOf, handoffFrom, handoffNote, answerNote,
                      restored{id, ts}, restores, accepted{id, ts},
                      leadAtAccept, ended{id, type, ts, by}, depth, statusOrigin, statusBy,
                      lastUpdate, stale } }
+requests     { id: { id, item, by, assignee, assignment, state (pending|approved|denied|withdrawn|lapsed),
+                     note, answerNote, ts, ended{id, type, ts, by} } }
 rules        { id: { id, item, via, by, root, includeRoot, levels (null: whole subtree), completion,
                      state (live|pending|ended), request, ended, ts } }
 comments     { id: { id, item, author, body, reply_to, ts, edited{id, ts}, hidden,
@@ -737,7 +757,7 @@ notices[]    { key, kind (accepted|handoff|done|blocked|declined|returned), assi
 my           { assignments[], today{work[], pending[], confirms[]}, received{pending[], answered[], sent[]},
                given[itemId], created[itemId], team[{id, depth, outside, open[], pending[], waiting[],
                counts{status: n}, load, stale, overdue, fallback, last}],
-               badge[key] }
+               requests{incoming[], outgoing[]}, badge[key] }
 stats        { events, commits, flagged, concurrent }
 heads        { stream: seq }   the seen a write would carry now
 store        { name, label, remote }
@@ -809,6 +829,17 @@ state outside it.
      rule picks among the rest. The losing same-member write stays in the
      thread with a quiet "superseded by <event>" note (289), not a conflict
      box.
+   - **One winner (fold-time flags).** A write whose causal-past check
+     passed but that an event earlier in fold order, concurrent with it,
+     overtook is flagged in the final fold and takes no effect; the reason
+     ends "; written concurrently, the first in fold order wins". Check-time
+     folds skip it by the same test, so later verdicts match a full replay.
+     This covers a second claim of one opening, a claim after the opening's
+     concurrent withdrawal or assign, an opening after a concurrent assign
+     or opening,
+     and an approval of a request that a concurrent approval, denial, or
+     withdrawal answered or whose assignment ended first. A concurrent deny,
+     withdraw, or unopen of something already ended is a no-op instead.
    - **Removal against writes.** An unassign, return, withdraw, or accepted
      handoff that is concurrent with a status write or close on that
      assignment always wins. Both events are marked, and the write shows as
@@ -842,6 +873,15 @@ Flagged reasons, as the engine words them:
 - accept or decline without a pending assignment (a handoff whose original
   ended is withdrawn, so it is no longer pending)
 - return by anyone but the assignee's direct lead, or of a forced assignment
+- open by a non-creator, of a topic, hidden, done, already open, or held
+  task, or with a scope other than team or store; unopen by a non-creator or
+  of an item not open; a claim of an item not open (or whose opening ended),
+  by its fallback holder, or out of a team opening's scope
+- a take request without an assignee, for the requester's own, a pending,
+  a fallback, or a done assignment, by a member already holding the item, or
+  duplicated; approve or deny by anyone but the holder or the creator, of an
+  unknown request, or of one no longer pending; unrequest by anyone but the
+  requester
 - status, close, or reopen by a non-assignee, before acceptance, or after the
   assignment ended
 - status or close on a done assignment, or close while already awaiting
@@ -1081,7 +1121,7 @@ creation, and it has a topic and a blocked subtask.
 | 499 | The comment composer follows the dashboard chat input: a paper-plane send button inside the box at the bottom right, Cmd+Enter / Ctrl+Enter sends and Enter is a newline, a small `@` picker at the bottom left; the composer's status line is gone (the status is the menu's). Supersedes the quick status of (166). |
 | 500 | The store's sync rows under its name become a thin ribbon at the bottom of the Items card (status dot, short text, the apply button only while writes are pending, dimmed when idle); a click opens a popover with the clone ref, counts, and batch contents. The store header keeps one row: the name and the icon-only `Open as page` (its `+ New` left with (528 UI)). |
 | 528 a | Items carry a sibling position: `item.create` takes `after`, a sibling id (`""` / `null`: first; absent: append, so old events keep creation order). The view's `itemOrder` and each `children` list follow the anchors in fold order; a missing, other-parent, or not-yet-placed anchor appends, a hidden one keeps its slot, and of two unseen inserts after one anchor the later lands nearer it. A later `item.move` extends the same field. |
-| 528 UI | The store header's `+ New` goes. In the list view, hovering the left gutter near a row edge shows a `+` badge between rows with a guide line; the mouse's x picks the depth among the gap's choices (root, sibling of the row above or of one of its ancestors, child of the row above; a child only where the row may be split, so never under a topic), shown by the badge's indent. A click opens the inline new-item row in that gap, creating with `parent` and `after`; the row stays, and the next item goes after the one just made. A quiet `+` ends every Items list, an empty one too: a new root item at the end, and the keyboard path (there was no shortcut). The Subtasks section's `+` stays. |
+| 528 UI | The store header's `+ New` goes. In the list view, hovering the left gutter near a row edge shows a `+` badge between rows with a guide line; the mouse's x picks the depth among the gap's choices (root, sibling of the row above or of one of its ancestors, child of the row above; a child only where the row may be split; "never under a topic" here is superseded by 306 a: a topic's creator or holder may split it), shown by the badge's indent. A click opens the inline new-item row in that gap, creating with `parent` and `after`; the row stays, and the next item goes after the one just made. A quiet `+` ends every Items list, an empty one too: a new root item at the end, and the keyboard path (there was no shortcut). The Subtasks section's `+` stays. |
 | 529 | A `task` or `todo` created from the dashboard is assigned to its creator in the same batch (`item.assign` on `$1`, people = the creator, assignee closes); a `topic` is not (superseded by 153 b: a topic is assigned to its creator too). This covers the inline subtask row too, superseding (474)'s "unassigned task". |
 | 530 a | Assign is a search popover anchored at its trigger (the assignee card's `+`, the menu's *Assign ▸*), replacing the checkbox grid: chips for the picked people and rules (each with ×); a search field; with no query, "My team" rule rows (within L1, within L2 when the team is that deep, the whole subtree), each with its head count; with a query, the whole-subtree rule of each matching member who leads anyone, marked pending when outside the viewer's reach; member rows with avatar, name, id, and a forced/pending mark; the completion mode; an apply button disabled while nothing is picked, replacing the "select at least one" message. Already held people and rules a live rule of the viewer's already covers are greyed. Arrows move, Enter toggles, Cmd/Ctrl+Enter applies, Esc closes. It writes `targets`, popover rules without `include_root`. |
 | 531 a | Items and comments carry `refs`, the item ids their text references with `#<alias>`, riding with the body like mentions (the writer keeps a ref only while its token stays in the text). Each ref must be an item in the author's causal past. The view shows `refs` on items and comments, and `backrefs` on items: shown items, then shown comments on shown items, own thread excluded. |

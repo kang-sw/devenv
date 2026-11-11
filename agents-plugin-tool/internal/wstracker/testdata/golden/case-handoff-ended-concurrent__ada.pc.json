@@ -781,7 +781,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "maya.pc#3": {
     "id": "maya.pc#3",
@@ -832,7 +835,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "maya.pc#5": {
     "id": "maya.pc#5",
@@ -881,7 +887,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "maya.pc#7": {
     "id": "maya.pc#7",
@@ -931,7 +940,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    },
    "sven.pc#1": {
     "id": "sven.pc#1",
@@ -982,7 +994,10 @@
     "mentions": [],
     "attachments": [],
     "refs": [],
-    "backrefs": []
+    "backrefs": [],
+    "open": null,
+    "claimable": false,
+    "requests": []
    }
   },
   "itemOrder": [
@@ -1569,6 +1584,7 @@
     "stale": false
    }
   },
+  "requests": {},
   "rules": {},
   "comments": {},
   "events": [
@@ -2520,6 +2536,10 @@
      "last": "2026-11-01T09:15:00Z"
     }
    ],
+   "requests": {
+    "incoming": [],
+    "outgoing": []
+   },
    "badge": [
     "acc:lena.pc#3>bo",
     "acc:lena.pc#4>bo",
