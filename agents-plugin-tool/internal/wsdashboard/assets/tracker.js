@@ -87,6 +87,24 @@
 //                        error}); an error is a malformed query, shown under the box
 //                        with the list left unfiltered. Without it the box matches a
 //                        plain substring of the title, body, project, and id (the mockup)
+//   hidden()          -> optional: the ids of the stores hidden on this machine, which
+//                        stores() leaves out; the "+ store" dialog lists them
+//   info(id)          -> optional: {id, label, remote, hidden}, the registry entry of
+//                        a store in stores() or hidden() (label: '' when the store has
+//                        none), or null; the store menu and its dialogs read it
+//   relabel(id, label, done), setHidden(id, hidden, done)
+//                        optional, for the store menu and the hidden list: set this
+//                        machine's label of the store ('' clears it) or its hidden
+//                        flag. done({ok: true} | {ok: false, error}), after stores(),
+//                        hidden(), and info() show the change
+//   unregister(id, confirm, done)
+//                        optional, for the store menu and the hidden list: delete the
+//                        store's local copy from this machine (the remote keeps it).
+//                        confirm is the typed store id, which a store with no remote
+//                        requires. done({ok: true} | {ok: false, error, kind}), after
+//                        stores() no longer holds it; kind is the refusal's (confirm,
+//                        busy, unpushed, stuck). A store that leaves stores() (hidden or
+//                        unregistered) drops from every state that names it, unsynced
 //   hostError()       -> optional: the reason the store list could not be read (the
 //                        host is unavailable), or null; the "+ store" dialog shows it
 //                        and offers nothing else
@@ -2078,7 +2096,7 @@
     var vs = VS;
     // the Items panel holds the items or, under the header's Items | Wiki switch, the wiki
     var MAKE = { items: function (v) { return AD.wiki && wk().mode === 'wiki' ? cardWiki(v, false) : cardPanel(v); }, wiki: function (v) { return cardWiki(v, true); }, notify: cardNotify, org: cardTeam, activity: cardActivity };
-    var h = '<div class="tk-title">' + storeTitleHtml(vs.store) + '<span class="grow"></span>' +
+    var h = '<div class="tk-title">' + storeTitleHtml(vs.store) + storeMenuBtn(name) + '<span class="grow"></span>' +
       // the drawer links to the store page; the page links back to the session view
       (ui.page ? '<button class="btn" data-act="page-back"' + tipAttr(wsT("js.tk.drawer.back.tip")) + '><svg class="i"><use href="#tki-back"/></svg>' + wsT("js.tk.drawer.back") + '</button>' :
         '<a class="btn ib" href="#/' + esc(encodeURIComponent(name)) + '" aria-label="' + wsT("js.tk.drawer.page") + '"' + tipAttr(wsT("js.tk.drawer.page.tip", name)) + '><svg class="i"><use href="#tki-page"/></svg></a>') + '</div>';
@@ -2753,7 +2771,9 @@
   // action is the context menu's or inline, so only the store-wide forms stay modal
   var DIALOGS = { profile: 1, admin: 1 };
   function dialogHtml(kind, d) {
-    if (kind === 'register') return formHtml(kind, d, registerT(d)); // needs no store
+    if (kind === 'register') return formHtml(kind, d, registerT(d)); // these need no store view
+    if (kind === 'relabel') return formHtml(kind, d, relabelT(d));
+    if (kind === 'unregister') return formHtml(kind, d, unregT(d));
     var v = memberOf(viewerOf(ui.store));
     var T;
     switch (kind) {
@@ -2787,7 +2807,7 @@
   function formHtml(kind, d, T) {
     var btns = T[3] ? '<button type="button" class="btn" data-act="dlg-cancel">' + wsT("js.tk.dlg.cancel") + '</button><button type="submit" class="btn primary">' + T[3] + '</button>'
       : '<button type="button" class="btn primary" data-act="dlg-cancel">' + wsT("js.tk.dlg.close") + '</button>';
-    return '<form' + attr('kind', kind) + attr('fitem', d.item || '') + attr('fcid', d.cid || '') + '><h2>' + T[0] + '</h2><p>' + T[1] + '</p>' + T[2] +
+    return '<form' + attr('kind', kind) + attr('fitem', d.item || '') + attr('fcid', d.cid || '') + (d.store ? attr('fstore', d.store) : '') + '><h2>' + T[0] + '</h2><p>' + T[1] + '</p>' + T[2] +
       '<div class="btns">' + btns + '</div></form>';
   }
 
@@ -2812,7 +2832,7 @@
       fld(wsT("js.tk.dlg.reg.remote"), '<input type="text" name="remote" autocomplete="off" spellcheck="false" placeholder="' + esc(wsT("js.tk.dlg.reg.remote.ph")) + '">') +
       fld(wsT("js.tk.dlg.reg.saved"), saved) + profileFields(p0) +
       fld(wsT("js.tk.dlg.reg.member"), '<input type="text" name="nid" data-auto="1" autocomplete="off" spellcheck="false" value="' + esc(asciiId(p0.given)) + '">') +
-      '<div class="hint" id="regmsg" role="status" hidden></div>',
+      '<div class="hint" id="regmsg" role="status" hidden></div>' + regHiddenHtml(),
       wsT("js.tk.dlg.reg.submit")];
   }
   function openRegister() {
@@ -2853,12 +2873,160 @@
     });
   }
 
+  // The store registry on this machine (adapter.unregister, relabel, setHidden, hidden, info).
+  // The store menu (the "⋯" in a store's title row) relabels, hides, or unregisters the store
+  // shown; the "+ store" dialog lists the hidden stores, each with show and unregister. None of
+  // these writes to the store itself: relabel and hide change this machine's registry entry, and
+  // unregister deletes the local copy (the remote keeps the store). Unregister never syncs
+  // first: a sync in flight would make the host refuse it as busy. A store that leaves the list
+  // (hidden or removed, here or by another process) is dropped from every state naming it on the
+  // next render (dropGone), with no sync, toast, or retry.
+  function regInfo(id) { return (AD.info && AD.info(id)) || { id: id, label: '', remote: '', hidden: false }; }
+  function regTitle(id) { var s = regInfo(id); return s.label && s.label !== id ? s.label + ' (' + id + ')' : id; }
+  function regKnown(id) { return order.indexOf(id) >= 0 || (AD.hidden ? AD.hidden() || [] : []).indexOf(id) >= 0; }
+  function resError(res) { return (res && res.error) || wsT("js.tk.toast.refused"); }
+  function storeMenuBtn(name) {
+    if (!AD.unregister && !AD.relabel && !AD.setHidden) return '';
+    return '<button type="button" class="ia"' + attr('act', 'store-menu') + attr('store', name) + ' aria-haspopup="menu" aria-label="' + esc(wsT("js.tk.store.menu")) + '"' +
+      tipAttr(wsT("js.tk.store.menu")) + '><svg class="i"><use href="#tki-more"/></svg></button>';
+  }
+  function storeMenuHtml() {
+    var h = '<div class="mh"><b>' + esc(regTitle(MN.store)) + '</b></div>';
+    if (AD.relabel) h += mi('m-s-label', esc(wsT("js.tk.store.relabel")), {}, { icon: 'pen' });
+    if (AD.setHidden) h += mi('m-s-hide', esc(wsT("js.tk.store.hide")), {}, { icon: 'minus' });
+    if (AD.unregister) h += msep() + mi('m-s-unreg', esc(wsT("js.tk.store.unreg")), {}, { icon: 'x', cls: 'danger' });
+    return h;
+  }
+  function storeAct(k) {
+    var id = MN.store;
+    closeMenu(false);
+    if (k === 'm-s-hide') hideStore(id);
+    else if (k === 'm-s-label') openDialog('relabel', { store: id });
+    else if (k === 'm-s-unreg') openDialog('unregister', { store: id });
+  }
+  // Hiding the store on screen leaves it the way a collapse or leaving its page does (the
+  // apply path), then the reload drops its handle.
+  function hideStore(id) {
+    if (ui.page === id) leavePage();
+    else if (ui.open === id) collapse();
+    AD.setHidden(id, true, function (res) {
+      if (!res || !res.ok) { toast(esc(resError(res))); return; }
+      toast(wsT("js.tk.toast.hidden", esc(id)));
+    });
+  }
+  // "show" in the register dialog's hidden list: the handle comes back and the list redraws.
+  function showStore(id) {
+    AD.setHidden(id, false, function (res) {
+      if (!res || !res.ok) { toast(esc(resError(res))); return; }
+      var box = $('tkdlg').querySelector('.tkhid');
+      if (box) box.outerHTML = regHiddenHtml();
+    });
+  }
+  function regHiddenHtml() {
+    var hs = AD.hidden ? AD.hidden() || [] : [];
+    if (!hs.length) return '<div class="tkhid" hidden></div>';
+    function b(act, label, id) { return '<button type="button" class="btn mini"' + attr('act', act) + attr('store', id) + '>' + label + '</button>'; }
+    return '<div class="tkhid"><div class="tkhid-h">' + wsT("js.tk.dlg.reg.hidden") + '</div>' + hs.map(function (id) {
+      return '<div class="tkhid-row"><span class="grow">' + esc(regTitle(id)) + '</span>' +
+        (AD.setHidden ? b('store-show', wsT("js.tk.dlg.reg.show"), id) : '') + (AD.unregister ? b('store-unreg', wsT("js.tk.dlg.unreg.submit"), id) : '') + '</div>';
+    }).join('') + '</div>';
+  }
+  // d.store, as the dialog's data-fstore; the label field starts at the registry label (empty: the id shows).
+  function relabelT(d) {
+    var s = regInfo(d.store);
+    return [wsT("js.tk.dlg.relabel.title", esc(d.store)), wsT("js.tk.dlg.relabel.intro"),
+      fld(wsT("js.tk.dlg.reg.label"), '<input type="text" name="label" maxlength="80" autocomplete="off" value="' + esc(s.label || '') + '">') +
+      '<div class="hint" id="regmsg" role="status" hidden></div>', wsT("js.tk.dlg.save")];
+  }
+  function submitRelabel(form) {
+    var id = form.getAttribute('data-fstore'), bt = form.querySelector('button[type="submit"]');
+    if (!bt || bt.disabled) return;
+    var label = form.elements.label.value.trim();
+    if (label === (regInfo(id).label || '')) { closeDialog(); return; }
+    bt.disabled = true;
+    AD.relabel(id, label, function (res) {
+      var here = form.isConnected && $('tkdlg').open;
+      if (res && res.ok) { if (here) closeDialog(); return; }
+      if (!here) { toast(esc(resError(res))); return; }
+      bt.disabled = false;
+      regMsg(form, resError(res), true);
+    });
+  }
+  // A store with no remote holds its only copy here: its data is lost for good, so the store id
+  // must be typed before the button enables, and goes to the host as the confirmation.
+  function unregT(d) {
+    var id = d.store, s = regInfo(id), t = esc(regTitle(id));
+    var body = s.remote ? '' : '<div class="hint warn">' + wsT("js.tk.dlg.unreg.lost", t) + '</div>' +
+      fld(wsT("js.tk.dlg.unreg.confirm", esc(id)), '<input type="text" name="confirm" autocomplete="off" spellcheck="false">');
+    return [wsT("js.tk.dlg.unreg.title", t), s.remote ? wsT("js.tk.dlg.unreg.intro", t) : wsT("js.tk.dlg.unreg.intro.local", t),
+      body + '<div class="hint" id="regmsg" role="status" hidden></div>', wsT("js.tk.dlg.unreg.submit")];
+  }
+  function unregReady(form) {
+    var bt = form.querySelector('button[type="submit"]'), c = form.elements.confirm;
+    if (bt && !form.hasAttribute('data-busy')) bt.disabled = !!c && c.value.trim() !== form.getAttribute('data-fstore');
+  }
+  // A refusal (busy, unpushed events, a stuck store) shows the host's sentence in the dialog.
+  function submitUnregister(form) {
+    var id = form.getAttribute('data-fstore'), bt = form.querySelector('button[type="submit"]'), c = form.elements.confirm;
+    unregReady(form);
+    if (!bt || bt.disabled) return;
+    var label = bt.textContent;
+    form.setAttribute('data-busy', '1');
+    bt.disabled = true; bt.textContent = wsT("js.tk.dlg.unreg.busy");
+    regMsg(form, '', false);
+    AD.unregister(id, c ? c.value.trim() : '', function (res) {
+      var here = form.isConnected && $('tkdlg').open;
+      if (res && res.ok) { if (here) closeDialog(); toast(wsT("js.tk.toast.unreg", esc(id))); return; }
+      if (!here) { toast(esc(resError(res))); return; }
+      form.removeAttribute('data-busy');
+      bt.textContent = label;
+      unregReady(form);
+      regMsg(form, resError(res), true);
+    });
+  }
+  // dropGone runs first in every render, once order is the store list: a store no longer in it
+  // stops being the one shown, open, or routed (the #/ route is cleared without a history entry,
+  // so no "unknown store" notice follows), its menu and dialogs close, and its page-lifetime state
+  // goes, so its wiki and search answers are dropped instead of retried. Nothing syncs: a hidden
+  // store was applied by its hide, an unregistered one has nothing left to sync.
+  var GONE_BY_STORE = ['wiki', 'psr', 'nrow', 'knew', 'tab', 'panel'], GONE_BY_KEY = ['tabSeen', 'loaded', 'mdet', 'wfold'];
+  function dropGone() {
+    function gone(n) { return !!n && order.indexOf(n) < 0; }
+    var lost = gone(ui.store);
+    if (lost) {
+      ui.store = order[0] || null;
+      ui.item = null; ui.win = false; ui.last = null; ui.sel = null; ui.sub = null; ui.iedit = null; ui.cedit = null; ui.replyTo = null; ui.itemChanged = true;
+    } else if (!ui.store) ui.store = order[0] || null;
+    if (gone(ui.open)) ui.open = null;
+    if (gone(ui.page)) {
+      ui.page = null;
+      if (/^#\/./.test(location.hash)) history.replaceState(null, '', location.pathname + location.search);
+    }
+    if (MN && (MN.kind === 'store' ? gone(MN.store) : lost)) closeMenu(false);
+    var dl = $('tkdlg'), f = dl && dl.open && dl.querySelector('form');
+    if (f) {
+      var fs = f.getAttribute('data-fstore');
+      if (fs ? !regKnown(fs) : lost && f.getAttribute('data-kind') !== 'register') closeDialog();
+    }
+    GONE_BY_STORE.forEach(function (k) {
+      Object.keys(ui[k]).forEach(function (n) {
+        if (!gone(n)) return;
+        if (k === 'psr' && ui.psr[n]) clearTimeout(ui.psr[n].timer);
+        delete ui[k][n];
+      });
+    });
+    GONE_BY_KEY.forEach(function (k) {
+      Object.keys(ui[k]).forEach(function (key) { if (gone(key.slice(0, key.indexOf('|')))) delete ui[k][key]; });
+    });
+  }
+
   function asciiId(given) { return String(given || '').toLowerCase().replace(/[^a-z0-9]+/g, '') || 'newcomer'; }
   function openDialog(kind, d) {
     var dl = $('tkdlg');
     dl.innerHTML = dialogHtml(kind, d || {});
     var f = dl.querySelector('form');
     profileView(f);
+    if (kind === 'unregister') unregReady(f);
     if (!dl.open) dl.showModal();
     var first = f.querySelector('input[type="text"], textarea, select');
     if (first) first.focus();
@@ -2908,6 +3076,8 @@
 
   function submit(form) {
     if (form.getAttribute('data-kind') === 'register') return submitRegister(form);
+    if (form.getAttribute('data-kind') === 'relabel') return submitRelabel(form);
+    if (form.getAttribute('data-kind') === 'unregister') return submitUnregister(form);
     var kind = form.getAttribute('data-kind'), el = form.elements, v = memberOf(viewerOf(ui.store));
     function val(n) { return el[n] ? el[n].value : ''; }
     var evs = [];
@@ -2979,7 +3149,8 @@
   // The item menu's steps: 'main' (status radios, note, and the actions the viewer may take),
   // 'pri' and 'due' (priority radios, a date), 'handoff' (a people list), 'note' (decline,
   // reject, reopen, return with a note), 'assign' (the assign form: the anchored assign
-  // popover). 'sync' is the Items card ribbon's status popover. Arrow keys move, Enter or
+  // popover). 'sync' is the Items card ribbon's status popover; 'store' is the store menu of a
+  // store's title row (MN.store: its id; see storeMenuHtml). Arrow keys move, Enter or
   // Space applies, ArrowRight opens a step, ArrowLeft or Esc goes back, Esc on the first step
   // closes it, and focus returns to the opener; Tab cycles inside it.
   var MN = null;
@@ -3023,10 +3194,10 @@
   }
   function drawMenu() {
     var m = $('tkmenu');
-    m.innerHTML = MN.kind === 'sync' ? syncPopHtml() : MN.kind === 'new' ? newMenuHtml() : menuHtml();
+    m.innerHTML = MN.kind === 'sync' ? syncPopHtml() : MN.kind === 'new' ? newMenuHtml() : MN.kind === 'store' ? storeMenuHtml() : menuHtml();
     m.className = 'tk tk-menu' + (MN.kind === 'sync' ? ' spopw' : MN.step === 'assign' ? ' wide' : '');
     m.setAttribute('role', MN.kind === 'sync' || MN.step === 'assign' ? 'dialog' : 'menu');
-    m.setAttribute('aria-label', MN.kind === 'sync' ? wsT("js.tk.rib.tip") : wsT("js.tk.menu.aria", mnItem() ? mnItem().title : ''));
+    m.setAttribute('aria-label', MN.kind === 'sync' ? wsT("js.tk.rib.tip") : MN.kind === 'store' ? wsT("js.tk.store.menu") : wsT("js.tk.menu.aria", mnItem() ? mnItem().title : ''));
     m.hidden = false;
     placeMenu();
     var first = m.querySelector('[data-autofocus]') || m.querySelector('[data-mi]:not([disabled]), button:not([disabled]), input');
@@ -3316,6 +3487,7 @@
   }
   // The menu's own acts (m-*); the rest of a menu item's data-act goes through the shared handlers.
   function menuAct(k, a) {
+    if (MN.kind === 'store') return storeAct(k);
     var id = MN.item, it = mnItem();
     if (k === 'm-back') return menuBack();
     if (!it) return closeMenu(true);
@@ -3486,6 +3658,8 @@
     return n ? { id: '', kind: n.kind, title: n.val.trim() || wsT("js.tk.new.item"), assignments: [], draft: true } : null;
   }
   function mnItem() { return MN.kind === 'new' ? draftItem() : VS.items[MN.item]; }
+  // a menu whose subject left closes on the next render (a store menu's store, see dropGone)
+  function mnStale() { return MN.kind === 'store' ? false : MN.kind === 'new' ? !ui.nrow[ui.store] : !VS.items[MN.item]; }
   function newMenuHtml() {
     var n = ui.nrow[ui.store], d = draftItem();
     if (!n) return '';
@@ -3910,8 +4084,8 @@
     renderDue = false;
     syncHandles();
     order.forEach(function (n) { vss[n] = AD.view(n); });
-    if (order.indexOf(ui.store) < 0) ui.store = order[0] || null;
-    if (ui.open && order.indexOf(ui.open) < 0) ui.open = null;
+    Object.keys(vss).forEach(function (n) { if (order.indexOf(n) < 0) delete vss[n]; });
+    dropGone();
     var name = ui.store;
     VS = name ? vss[name] : null; EV = {};
     UNREADS = { store: name, ready: false, entries: [] };
@@ -3955,7 +4129,7 @@
       if (sb.firstChild) sb.innerHTML = '';
       dropEditorState(false);
       if (MN && MN.kind === 'sync') { $('tkmenu').innerHTML = syncPopHtml(); placeMenu(); }
-      else if (MN && (MN.kind === 'new' ? !ui.nrow[ui.store] : !VS.items[MN.item])) closeMenu(false);
+      else if (MN && mnStale()) closeMenu(false);
       ui.itemChanged = false; ui.clearDraft = false;
       afterRender(name);
       measure();
@@ -4023,7 +4197,7 @@
       var mIn = $('tkmenu').contains(document.activeElement);
       $('tkmenu').innerHTML = syncPopHtml(); placeMenu();
       if (mIn) { var mf = $('tkmenu').querySelector('button'); if (mf) mf.focus({ preventScroll: true }); }
-    } else if (MN && (MN.kind === 'new' ? !ui.nrow[ui.store] : !VS.items[MN.item])) closeMenu(false);
+    } else if (MN && mnStale()) closeMenu(false);
     ui.itemChanged = false; ui.clearDraft = false;
     afterRender(name);
     measure();
@@ -4525,6 +4699,9 @@
         }
         else if (k === 'att-x') { ui.adraft.splice(Number(a.getAttribute('data-idx')), 1); render(); }
         else if (k === 'register') openRegister();
+        else if (k === 'store-menu') openMenu({ kind: 'store', store: a.getAttribute('data-store') }, a);
+        else if (k === 'store-show') showStore(a.getAttribute('data-store'));
+        else if (k === 'store-unreg') openDialog('unregister', { store: a.getAttribute('data-store') });
         else if (QUICK[k]) quick(k, a);
         else if (DIALOGS[k] || (X.dialogs && X.dialogs[k])) openDialog(k, d);
         else if (X.action) X.action(k, a, H);
@@ -4600,6 +4777,10 @@
         else if (t.name === 'given' && df.elements.nid.hasAttribute('data-auto')) df.elements.nid.value = asciiId(t.value);
       }
       profileView(df);
+    });
+    document.addEventListener('input', function (e) {
+      var f = e.target.closest && e.target.closest('#tkdlg form[data-kind="unregister"]');
+      if (f) unregReady(f);
     });
     document.addEventListener('dragstart', function (e) {
       var c = own(e.target) && e.target.closest('[data-drag]');

@@ -118,7 +118,8 @@ process.stdout.write(bad.join("\n"));
 
 // tabLabelPrelude stubs what dashboard.js's tab-label block reads: regions
 // as nodes answering fixed selectors, a detached parse (frag) by HTML key,
-// the toast stack, wsTn, and the mounted tracker's open calls.
+// the toast stack, wsTn, the mounted tracker's open calls, and its listed
+// stores (tkOrder, which the tracker term prunes its baselines by).
 const tabLabelPrelude = `
 var bad = [], toasts = [], opened = [], fragCalls = 0, writes = 0;
 function check(what, got, want) { if (JSON.stringify(got) !== JSON.stringify(want)) bad.push(what + ": got " + JSON.stringify(got) + ", want " + JSON.stringify(want)); }
@@ -138,6 +139,7 @@ function frag(html) { fragCalls++; return FR[html]; }
 var window = { WsToast: { show: function (t, o) { toasts.push({ text: t, kind: (o && o.kind) || "info", click: o && o.onClick }); } } };
 function wsTn(k, n) { return k + ":" + n; }
 var tkApi = { openNotice: function (x) { opened.push("notice:" + x.key); }, openNotify: function (s) { opened.push("notify:" + s); } };
+var tkOrder = ["s"];
 var PERM = ".phase.permission, .brow.perm", ASK = '.card.policy[id^="item-"], .arow[id^="item-"]', SENT = ".sentdata i[data-id]";
 function item(id, draft) { return new N({ attrs: { "data-id": id }, sel: draft ? { '.opt[aria-pressed="true"]': [new N()] } : {} }); }
 function sent(id) { return new N({ attrs: { "data-id": id } }); }
