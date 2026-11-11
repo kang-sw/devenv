@@ -2069,11 +2069,16 @@
     return '<section class="card pane' + (c.cls ? ' ' + c.cls : '') + '" id="' + c.id + '"' + attr('tab', active) + (c.attrs || '') + (c.mode ? attr('view', c.mode) : '') + '><header>' + nav + '</header>' +
       (narrow && active === 'items' ? todayBar() : '') + '<div class="ptools">' + tools + '</div><div class="cbody' + (c.bodyCls ? ' ' + c.bodyCls : '') + '">' + c.body + '</div>' + (active === 'items' || active === 'wiki' ? ribbonHtml() : '') + '</section>';
   }
+  // storeTitle is a store's display label with its id, "Label (id)", or
+  // the id alone when the store has no label (StoreInfo.label then
+  // repeats the name); storeTitleHtml mutes the id.
+  function storeTitle(st) { return st.label && st.label !== st.name ? st.label + ' (' + st.name + ')' : st.name; }
+  function storeTitleHtml(st) { return st.label && st.label !== st.name ? '<b>' + esc(st.label) + '</b> <span class="muted">(' + esc(st.name) + ')</span>' : '<b>' + esc(st.name) + '</b>'; }
   function drawerHtml(name, v) {
     var vs = VS;
     // the Items panel holds the items or, under the header's Items | Wiki switch, the wiki
     var MAKE = { items: function (v) { return AD.wiki && wk().mode === 'wiki' ? cardWiki(v, false) : cardPanel(v); }, wiki: function (v) { return cardWiki(v, true); }, notify: cardNotify, org: cardTeam, activity: cardActivity };
-    var h = '<div class="tk-title"><b>' + esc(vs.store.label) + '</b><span class="grow"></span>' +
+    var h = '<div class="tk-title">' + storeTitleHtml(vs.store) + '<span class="grow"></span>' +
       // the drawer links to the store page; the page links back to the session view
       (ui.page ? '<button class="btn" data-act="page-back"' + tipAttr(wsT("js.tk.drawer.back.tip")) + '><svg class="i"><use href="#tki-back"/></svg>' + wsT("js.tk.drawer.back") + '</button>' :
         '<a class="btn ib" href="#/' + esc(encodeURIComponent(name)) + '" aria-label="' + wsT("js.tk.drawer.page") + '"' + tipAttr(wsT("js.tk.drawer.page.tip", name)) + '><svg class="i"><use href="#tki-page"/></svg></a>') + '</div>';
@@ -3863,7 +3868,9 @@
       badge.hidden = !n; badge.textContent = n;
       if (!vs) { b.querySelector('.hoff').hidden = true; b.title = name + ' - ' + (AD.error(name) || wsT("js.tk.loading")); return; }
       b.querySelector('.hoff').hidden = !!(vs.store.remote && vs.sync.online);
-      b.title = vs.store.label + (n ? wsT("js.tk.handle.new", n) : '') + (vs.store.remote ? (vs.sync.online ? '' : ' - ' + wsT("js.tk.sync.offline")) : ' - ' + wsT("js.tk.handle.noremote"));
+      // A store with a display label shows the label, its id in the tooltip.
+      b.querySelector('.hl').textContent = vs.store.label || name;
+      b.title = storeTitle(vs.store) + (n ? wsT("js.tk.handle.new", n) : '') + (vs.store.remote ? (vs.sync.online ? '' : ' - ' + wsT("js.tk.sync.offline")) : ' - ' + wsT("js.tk.handle.noremote"));
     });
   }
 
