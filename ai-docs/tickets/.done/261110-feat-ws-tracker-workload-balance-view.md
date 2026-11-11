@@ -168,3 +168,19 @@ parity, new `workload_test.go`, updated scenario/topic tests);
 tests). Browser check with headless Chromium on the mockup as an admin
 lead: team scope and a count's drill-down rendered as intended
 (screenshots inspected). Lite review: no Critical or Important findings.
+
+#### Edition (a7c526dae) - 2026-11-11
+
+Lead veto: `load` counts todo, doing, and blocked only (Decision 7's
+parenthetical); awaiting keeps only its own per-status count and stays out
+of load and overdue, matching the superior-settable-status ticket's rule
+that in-review (awaiting's successor) and dropped stay outside the load.
+Applied in `view.go` (`teamLoad`), `engine.js` and `tracker.js`
+(`TEAM_LOAD`), the `tracker.query` head (awaiting listed after stale and
+overdue, not in the load breakdown), the dashboard head and drill
+predicate, and the load tooltip in all 11 tables. The workload-balance case
+gives the awaiting item a passed due date; goldens regenerated from the
+engine; `TestTeamRowCounts` now pins load 4 and overdue excluding awaiting.
+Verification (remote `ws-rgo`): `test ./internal/wstracker/
+./internal/wsdashboard/ ./internal/wsi18n/` ok; `test ./internal/mcp/ -run
+Tracker` ok.
