@@ -283,6 +283,17 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 		return toolTextResponse(id, "", fmt.Errorf("workflow_manual: a valid session_key is required"))
 	}
 
+	// 1b. A hosted session is held to its daemon-minted key: any other key -
+	//     the FRESH sentinel, an unknown key, another parent-less key - is
+	//     refused before anything renders or mints. A key that carries a
+	//     parent passes: it is a child key a subagent on this connection
+	//     holds, and its worker playbooks read this manual.
+	if hosted := s.hostedSessionKey(); hosted != "" && key != hosted {
+		if entry, ok := s.sessions.lookup(key); !ok || entry.parent == "" {
+			return toolTextResponse(id, "", hostedKeyRefusal("workflow_manual", hosted, key))
+		}
+	}
+
 	// 2. FAIL-LOUD up front, BEFORE rendering: a syntactically valid but
 	//    unresolvable, non-sentinel key must NOT receive the manual body at all.
 	//    The body's always-shown per-root rule names ws.ferrule (the lead

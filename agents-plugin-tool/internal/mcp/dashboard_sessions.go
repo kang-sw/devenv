@@ -177,6 +177,11 @@ func (s *Server) dashboardTouch(sessionKey, root string, force bool) {
 	if !s.dashboardDeclared() {
 		return // no dashboard manifest loaded: the dashboard is off
 	}
+	if s.hostedSessionKey() != "" {
+		// The daemon owns a hosted session's registration: it writes the row
+		// at spawn, so this server neither writes, removes, nor prunes.
+		return
+	}
 	d := &s.dashboard
 	commonDir, cached := d.commonDirs.Load(root)
 	if !cached {

@@ -245,6 +245,17 @@ func envFlagOn(value string) bool {
 // dashboard off.
 func (s *Server) noDashboardMode() bool { return envFlagOn(s.getenv(envNoDashboard)) }
 
+// hostedSessionKey is the daemon-minted lead key of a session the dashboard
+// daemon hosts: the caller's envHostedSessionKey while envHostedSession is
+// on, else empty. A flag without a key is empty too, so such a session
+// behaves as an unhosted one (its host warns about the missing key).
+func (s *Server) hostedSessionKey() string {
+	if !envFlagOn(s.getenv(envHostedSession)) {
+		return ""
+	}
+	return strings.TrimSpace(s.getenv(envHostedSessionKey))
+}
+
 // DashboardApplies reports whether this server's caller takes part in the
 // dashboard at all: a loaded manifest declares the dashboard keys and the
 // caller does not set WS_MCP_NO_DASHBOARD. A caller outside it has no say

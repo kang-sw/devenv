@@ -34,6 +34,7 @@ import { assertVersionPin, readRuntimeContract } from "./version-check.ts";
 import { buildLocalDevenvBootstrap, createChildRuntimeEnsurer, runtimeContractHash, type LocalDevenvBuildDeps, type LocalDevenvContext } from "./local-devenv.ts";
 import { ADAPTER_CONFIG_MANIFEST_FILE, DASHBOARD_CONFIG_MANIFEST_FILE, WS_MCP_CONFIG_MANIFESTS_ENV } from "./adapter-config.ts";
 import { WS_PI_PARENT_SESSION_KEY_ENV, isLeadOrFork, readSpawnRole, type SpawnRole } from "./process-role.ts";
+import { HOSTED_KEY_ENV, hostedSessionKey } from "./hosted-session.ts";
 // Value import from spawner.ts is safe: spawner.ts only imports `type
 // BridgeHandle` from this file (type-only, erased at build/runtime), so no
 // runtime circular import is created in either direction.
@@ -979,6 +980,15 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
     pi.appendEntry(LEAD_KEY_ENTRY, data);
     recordedLeadKey = key;
   };
+  // A hosted session (hosted-session.ts) runs under the daemon-minted key:
+  // the owner lead re-logs in with it instead of reusing or minting, and a
+  // refusal leaves the session keyless with a warning, never a fresh mint.
+  const hostedKey = ownsLeadKey ? hostedSessionKey(process.env) : undefined;
+  const reloginHostedKey = async (key: string): Promise<McpToolCallResult> => {
+    const relogin = await reloginLeadKey((name, callArgs) => client.callTool(name, callArgs), opts.cwd, key);
+    if (relogin.ok) return relogin.result;
+    return { isError: true, content: [{ type: "text", text: `the hosted session key ${key} (${HOSTED_KEY_ENV}) was refused (${relogin.reason}); no key was minted` }] };
+  };
   // Re-login with the session's recorded key at bootstrap; a refusal (the
   // key was pruned, or belongs to another root) falls back to a fresh mint
   // with a UI warning only.
@@ -1180,7 +1190,9 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
     try {
       const ferruleResult = policy?.sessionKey
         ? { content: [{ type: "text", text: JSON.stringify({ session_key: policy.sessionKey }) }] }
-        : (await reuseRecordedLeadKey())
+        : hostedKey
+          ? await reloginHostedKey(hostedKey)
+          : (await reuseRecordedLeadKey())
           ?? await client.callTool("ferrule", { root: opts.cwd, format: "json", ...(policy ? { capability: policy.authority, ...(policy.parentSessionKey ? { parent_session_key: policy.parentSessionKey } : {}) } : {}) });
       if (ferruleResult.isError) {
         notify(opts.ui, `ws-pi-bridge: ferrule bootstrap failed: ${firstText(ferruleResult)}`, "warning");

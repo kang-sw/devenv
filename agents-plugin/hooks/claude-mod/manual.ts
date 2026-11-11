@@ -342,6 +342,12 @@ export type ManualEdges = {
    * key it had (undefined when none). The mailbox push binds to `current`.
    */
   keyChanged: (current: string, previous: string | undefined) => void
+  /**
+   * The key a hosted session runs under (hosted.ts), or undefined outside
+   * hosted mode. A setup re-logs in with it and never mints over it, as for
+   * a late open's held key; absent reads as undefined.
+   */
+  hostedKey?: () => Promise<string | undefined>
   /** The ws MCP server's name from the mod's shared resolution, once the start's resolution settled; undefined while unresolved. */
   server: () => Promise<string | undefined>
   /** Call a ws MCP tool: its text blocks joined; rejects on a failed call or an error result. */
@@ -481,10 +487,11 @@ export function createManual(): Manual {
   }
 
   /**
-   * Re-log in with the stored key (or the key the model held at a late open)
-   * or mint one, write the key entry, and tell the listener. A late open over
-   * a held key never mints: a refused re-login there fails the setup, so the
-   * push stays on the key the lead holds.
+   * Re-log in with the stored key (or the key a hosted session runs under, or
+   * the key the model held at a late open) or mint one, write the key entry,
+   * and tell the listener. A hosted key or a late open over a held key never
+   * mints: a refused re-login there fails the setup, so the conversation
+   * stays on the key the daemon or the lead holds.
    */
   const setup = async (gen: number) => {
     const e = edges
@@ -502,10 +509,15 @@ export function createManual(): Manual {
     if (!server) throw new Error('the MCP server was not resolved')
     const [sessionId, root] = await Promise.all([e.sessionId(), e.root()])
     const entry = KEY_STORE_PREFIX + sessionId
-    const held = lateBound
+    const hosted = await e.hostedKey?.()
+    const held = hosted ?? lateBound
     const stored = held ?? storedKey(await e.store.get(entry))
     let key = stored !== undefined && (await relogin(e, server, root, stored)) ? stored : undefined
     if (key === undefined) {
+      if (hosted !== undefined) {
+        // Visible: a hosted conversation left keyless is the daemon's fault to fix, and nothing else says so.
+        e.log(`[${e.plugin}] the hosted session key ${hosted} (WS_HOSTED_SESSION_KEY) was refused; no key was minted, so the workflow manual is not delivered.`, 'transcript')
+      }
       if (held !== undefined) throw new Error(`the re-login with the held key ${held} was refused`)
       key = ferruleKey(await e.call(server, 'ferrule', { root, format: 'json' }))
       if (key === undefined) throw new Error('ferrule answered no session key')

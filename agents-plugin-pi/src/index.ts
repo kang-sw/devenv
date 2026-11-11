@@ -249,6 +249,7 @@ import { assertPolicyTool, readDelegationPolicy } from "./delegation-policy.ts";
 import { registerScopedWriteTools } from "./write-scopes.ts";
 import { registerWebTools } from "./web-tools.ts";
 import { publishSubtree, SubtreeUpstream } from "./subtree-lifecycle.ts";
+import { MISSING_HOSTED_KEY_WARNING, readHostedMode } from "./hosted-session.ts";
 import { createDashboardFeed, dashboardAgentEntries, dashboardStatus, registerDashboardLeadEvents, resolveDashboardEnabled, type DashboardFeed } from "./dashboard-feed.ts";
 import { whiteboardSubmissionText } from "./adapter-label.ts";
 
@@ -918,7 +919,11 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     dashboardFeed?.stop();
     dashboardFeed = undefined;
     agentDashboardRefreshRef.current = undefined;
-    if (readSpawnRole(process.env) === undefined) {
+    // Hosted session (hosted-session.ts): the daemon feeds the lead and reads
+    // its output, so neither the feed nor the mailbox waiter below runs.
+    const hosted = readSpawnRole(process.env) === undefined ? readHostedMode(process.env) : { mode: "off" as const };
+    if (hosted.mode === "missing-key") ctx.ui.notify(MISSING_HOSTED_KEY_WARNING, "warning");
+    if (readSpawnRole(process.env) === undefined && hosted.mode !== "hosted") {
       // Owner lead only: a child is already shown through its parent's feed.
       const feedRegistry = agentTools.rpcRegistry;
       const feed = createDashboardFeed({
@@ -982,7 +987,7 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     const mailboxRole = readSpawnRole(process.env);
     // The owner lead gets a re-armable slot even when bootstrap left it
     // keyless: a later revive adoption can still give it a key to arm with.
-    if (mailboxRole === undefined) {
+    if (mailboxRole === undefined && hosted.mode !== "hosted") {
       const mailboxHandle = handle;
       const mailboxCallTool: MailboxToolCall = (name, args) => mailboxHandle.client.callTool(name, args);
       let staged: StagedMailboxRuntime | undefined;

@@ -16,6 +16,7 @@ import {
   type DashboardEvent,
   type IntakeResult,
 } from './dashboard'
+import { hostedMode, missingKeyWarning, type HostedMode } from './hosted'
 import { createManual, type ReadFamily } from './manual'
 import { expandPreload } from './preload'
 import { createReconnect, reconnectDescription, TOOL_NAME as RECONNECT_TOOL } from './reconnect'
@@ -97,6 +98,14 @@ import {
 //   cost figures, and the held key's todos, agenda and mailbox address (its
 //   reply id when it owns no named inbox), each refreshed by events (see
 //   band.tsx).
+//
+// Hosted-session mode (WS_HOSTED_SESSION with WS_HOSTED_SESSION_KEY, set by
+// the dashboard daemon on a session it spawns and feeds, see hosted.ts) turns
+// off input delivery and the feed: no mailbox wait at any arm (so no board
+// drain and no interrupt handling) and no mailbox_watch tool, and no
+// dashboard feed, whatever the knobs read; the manual feature re-logs in
+// with the daemon's key instead of minting. Everything else runs as usual.
+// The flag without a key gates nothing and only warns in the transcript.
 //
 // Claude Code accepts one hooks module per plugin and one unmatched hook per
 // event in it, so the lifecycle events (session.start, session.end,
@@ -752,6 +761,19 @@ export const register: Register = (on) => {
     })
     serverResolved = resolved
 
+    // Hosted-session mode, read once per start; a failed read is an ordinary session.
+    // The engine wants literal variable names here (hosted.ts HOSTED_FLAG_ENV / HOSTED_KEY_ENV).
+    const hostedRead: Promise<HostedMode> = Promise.all([$.env.get('WS_HOSTED_SESSION'), $.env.get('WS_HOSTED_SESSION_KEY')]).then(
+      ([flag, key]) => hostedMode(flag, key),
+      (err) => {
+        $.ui.log(`${$.plugin.name} mod: hosted-session variables not read (${String(err)}); running as an ordinary session`, { to: 'debug' })
+        return { mode: 'off' } as HostedMode
+      },
+    )
+    void hostedRead.then((hosted) => {
+      if (hosted.mode === 'missing-key') $.ui.log(missingKeyWarning($.plugin.name))
+    })
+
     // The project check first: outside a ws project the manual knob is never read.
     wsGate ??= (async () => {
       const repoRoot = await $.session.repo().then(
@@ -780,6 +802,17 @@ export const register: Register = (on) => {
     const mailboxSetup = (async () => {
       stopWatcher('session.start again')
       watcher = undefined
+      // Hosted: the daemon delivers mail and dashboard messages, so no
+      // watcher exists to arm or re-arm (a key change binds nothing), and
+      // the bind tool stays unregistered.
+      // Push reads available all the same: the daemon's delivery is the push,
+      // so the manual row keeps telling the model to launch no mailbox wait
+      // (its own wait would race the daemon for the same mail).
+      if ((await hostedRead).mode === 'hosted') {
+        settlePush(true)
+        mailboxLog(`hosted session: the daemon delivers input; no mailbox wait runs and ${TOOL_NAME} is not registered`)
+        return
+      }
       // $.process is CLI only: without it there is no wait to run, so the tool
       // stays unregistered and the agent falls back to its shell wait.
       try {
@@ -959,7 +992,13 @@ export const register: Register = (on) => {
     dashUsage = () => $.session.usage({ breakdown: 'summary' })
     dashAgents = () => $.agent.list()
     boardOn = false
-    void readKnob(KNOB.dashboard)
+    // Hosted: the daemon reads the session's output itself, so the feed stays off unread.
+    void hostedRead
+      .then((hosted) => {
+        if (hosted.mode !== 'hosted') return readKnob(KNOB.dashboard)
+        dashLog('hosted session: the daemon reads the session output; the feed stays off')
+        return undefined
+      })
       .then((value) => {
         if (startSeq !== starts) return
         boardOn = value === true
@@ -1160,6 +1199,10 @@ export const register: Register = (on) => {
       manual.start({
         isWsProject: () => gate,
         pushAvailable: () => pushAvailable,
+        hostedKey: async () => {
+          const hosted = await hostedRead
+          return hosted.mode === 'hosted' ? hosted.key : undefined
+        },
         // Only records the key; the bind runs through arm once a watcher
         // exists. A key change after session.end binds nothing: the manual
         // generation drops it, and stopWatcher's armSeq bump cancels a bind
