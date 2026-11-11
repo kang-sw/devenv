@@ -355,6 +355,11 @@ func (p claudeProcess) Interrupt() error {
 	return p.request("interrupt", map[string]any{"subtype": "interrupt"})
 }
 
+// Steer writes text as a user message while a turn runs. Claude Code queues
+// it and takes it up after the running tool call, inside the same turn:
+// one result follows for both messages (seen on 2.1.322).
+func (p claudeProcess) Steer(text string) error { return p.Send(text) }
+
 // SetModel uses Claude Code's set_model control, which applies from the
 // next turn. A set_model that names no model returns to the default one:
 // the model a launch with no --model runs, whatever this launch named

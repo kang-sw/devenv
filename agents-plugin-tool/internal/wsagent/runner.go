@@ -849,7 +849,39 @@ func (c *conv) mailChanged() {
 // messages, starting the process when needed (kick). It runs in the loop.
 func (c *conv) inboxChanged() {
 	c.checkInterrupt()
+	c.steer()
 	c.kick()
+}
+
+// steer writes a lead's steered messages to its process while a turn runs:
+// the user marked them to reach the harness now, not at the turn's end.
+// They join the running turn, so no turn starts. Messages not marked stay
+// held, with no turn running a marked one is an ordinary send (kick), and
+// a backend that takes no message mid-turn keeps it held.
+func (c *conv) steer() {
+	if !c.rec.Lead || !c.turn || c.proc == nil || c.replaying || c.closed {
+		return
+	}
+	st, ok := c.proc.(steerer)
+	if !ok {
+		return
+	}
+	recs, _ := wsinbox.DrainSteer(c.inbox)
+	var parts []string
+	for _, rec := range recs {
+		if text := strings.TrimSpace(rec.Entry.Text()); text != "" {
+			parts = append(parts, text)
+		}
+	}
+	if len(parts) == 0 {
+		return
+	}
+	text := strings.Join(parts, "\n\n")
+	c.apply(wslive.Event{Kind: wslive.KindUser, Origin: wslive.OriginWhiteboard, Text: text})
+	if err := st.Steer(text); err != nil {
+		c.setStatus(func() { c.lastErr = "send the steered message: " + err.Error() })
+		c.stopProcess("")
+	}
 }
 
 func (c *conv) loop() {
@@ -1259,6 +1291,8 @@ func (c *conv) replayDone() {
 	c.checkAction(false)
 	c.live.writeSnapshot()
 	c.r.notify(c.rec.ReplyID, c.rec.Root)
+	// A message steered during the rejoin goes to the turn that still runs.
+	c.steer()
 	if !c.turn {
 		c.applySettings()
 		c.kick()

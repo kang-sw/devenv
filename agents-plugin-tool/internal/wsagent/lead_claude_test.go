@@ -530,6 +530,56 @@ func TestClaudeLeadResultEndsTheTurnWithoutSessionStates(t *testing.T) {
 	}
 }
 
+// TestClaudeLeadSteeredMessageJoinsTheTurn: a user message written while a
+// turn runs is taken up inside that turn (recorded on 2.1.322 with user
+// messages echoed: the second message's echo follows the running tool's
+// result). Its queue lines, its echo, and the one result for both
+// messages open no second turn, and the turn ends once, at the idle state;
+// on a harness that reports no states, at the one result.
+func TestClaudeLeadSteeredMessageJoinsTheTurn(t *testing.T) {
+	lines := readLeadFixture(t, "claude-lead-steer.jsonl")
+	sends := 0
+	for _, l := range lines {
+		if l.in && l.field("type") == "user" {
+			sends++
+		}
+	}
+	idle := findLine(t, lines, 0, "idle", isState(HarnessIdle))
+	if sends != 2 || idle != len(lines)-1 {
+		t.Fatalf("the recording should hold two messages and end idle: %d sends, idle at %d of %d", sends, idle, len(lines))
+	}
+	r := newLeadReplay(t)
+	r.all(lines[:idle])
+	if !r.turn || r.ends != 0 || !slices.Equal(r.opened, []string{"send"}) {
+		t.Fatalf("one turn runs up to the idle state: turn %v, ended %d, opened %v", r.turn, r.ends, r.opened)
+	}
+	r.line(lines[idle])
+	if r.turn || r.ends != 1 || len(r.turnErrs) != 0 || !slices.Equal(r.opened, []string{"send"}) {
+		t.Fatalf("the idle state ends the one turn: turn %v, ended %d, errors %v, opened %v", r.turn, r.ends, r.turnErrs, r.opened)
+	}
+	if got := ringTexts(r.ring, wslive.RingReply); !slices.Equal(got, []string{"PINEAPPLE"}) {
+		t.Fatalf("ring replies = %q", got)
+	}
+	// The echo of a message is no entry: the runner wrote one at the send.
+	if got := ringTexts(r.ring, wslive.RingUser); len(got) != 0 {
+		t.Fatalf("the mapper writes no user entry: %q", got)
+	}
+
+	plain := newLeadReplay(t)
+	for _, l := range lines {
+		if !l.in && l.field("subtype") == "session_state_changed" {
+			continue
+		}
+		evs := plain.line(l)
+		if isResult(l) && (len(evs) == 0 || !evs[len(evs)-1].TurnEnd) {
+			t.Fatalf("with no state lines the result ends the turn: %+v", evs)
+		}
+	}
+	if plain.turn || plain.ends != 1 || !slices.Equal(plain.opened, []string{"send"}) {
+		t.Fatalf("with no state lines: turn %v, ended %d, opened %v", plain.turn, plain.ends, plain.opened)
+	}
+}
+
 // TestClaudeLeadActionWithNoPrompt: the harness says it waits on the user
 // (requires_action) and what arrives is no can_use_tool request. The mapper
 // reports the state, so the runner can show a wait it has no prompt for,

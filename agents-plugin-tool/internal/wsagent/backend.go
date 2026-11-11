@@ -105,6 +105,12 @@ type modeSetter interface {
 	SetPermissionMode(mode string) error
 }
 
+// steerer is a Process that takes a user message while its turn runs: the
+// harness works it in at its next step, inside the same turn.
+type steerer interface {
+	Steer(text string) error
+}
+
 // ErrUnsupported is a Process's answer to a control it has no in-stream
 // form of.
 var ErrUnsupported = errors.New("not supported in-stream")

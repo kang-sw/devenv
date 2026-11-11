@@ -11,6 +11,7 @@ import (
 
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wsholder"
+	"github.com/kang-sw/devenv/internal/wsinbox"
 	"github.com/kang-sw/devenv/internal/wslive"
 )
 
@@ -307,6 +308,141 @@ func TestLeadHeldSendFlushesAtAnUnsolicitedTurnsEnd(t *testing.T) {
 	h.idle(id)
 	if got := ringTexts(h.ring(id), wslive.RingReply); !slices.Equal(got, []string{"first", "the task finished", "second"}) {
 		t.Fatalf("ring replies = %q", got)
+	}
+}
+
+// steerHeld marks the conversation's held message for steering, as the
+// session page's steer route does, without telling the runner.
+func (h *leadHarness) steerHeld(id string) {
+	h.t.Helper()
+	inbox := wsinbox.Dir(wsdashboard.SessionDir(h.dir, id))
+	held, err := wsinbox.Held(inbox)
+	if err != nil || len(held) != 1 {
+		h.t.Fatalf("one held message to steer: %d (%v)", len(held), err)
+	}
+	if _, err := wsinbox.Steer(inbox, held[0].Name); err != nil {
+		h.t.Fatalf("steer: %v", err)
+	}
+}
+
+// TestLeadSteeredMessageReachesTheRunningTurn: a message the user marked
+// for steering is written to the process while its turn runs, as a user
+// entry of that turn; a message not marked stays held until the turn ends.
+func TestLeadSteeredMessageReachesTheRunningTurn(t *testing.T) {
+	h := newLeadHarness(t).start()
+	id, holder := h.runLead("one")
+	h.holders.out(holder, stateLine(HarnessRunning), initLine("sess-1", "auto"), toolUseLine("u1", "toolu_1"))
+	h.sync(id, holder)
+	h.send(id, "now")
+	h.runner.conv(id).do(func() {})
+	if st := h.state(id); st.Held != 1 || len(h.userInputs(holder)) != 1 {
+		t.Fatalf("a message sent during a turn is held: %+v, written %q", st, h.userInputs(holder))
+	}
+	// The second send is what tells the runner: both are held when it looks.
+	h.steerHeld(id)
+	h.send(id, "later")
+	eventually(t, "the steered message", func() bool { return slices.Equal(h.userInputs(holder), []string{"one", "now"}) })
+	h.runner.conv(id).do(func() {})
+	if st := h.state(id); st.Held != 1 || st.Status != StatusRunning || !st.Process {
+		t.Fatalf("the unmarked message stays held and the turn runs on: %+v", st)
+	}
+	if got := ringTexts(h.ring(id), wslive.RingUser); !slices.Equal(got, []string{"one", "now"}) {
+		t.Fatalf("ring user entries = %q", got)
+	}
+	// The harness takes the message up inside the turn; its one result ends
+	// nothing while it reports states.
+	h.holders.out(holder, toolResultLine("toolu_1"), replyLine("u2", "changed course"), resultLine())
+	h.sync(id, holder)
+	if st := h.state(id); st.Held != 1 || st.Status != StatusRunning || len(h.userInputs(holder)) != 2 {
+		t.Fatalf("before the idle state: %+v, written %q", st, h.userInputs(holder))
+	}
+	h.holders.out(holder, stateLine(HarnessIdle))
+	eventually(t, "the held message at the turn's end", func() bool {
+		return slices.Equal(h.userInputs(holder), []string{"one", "now", "later"})
+	})
+	h.holders.out(holder, turnLines("sess-1", "u3", "done")...)
+	h.idle(id)
+	ring := h.ring(id)
+	if !slices.Equal(ringTexts(ring, wslive.RingUser), []string{"one", "now", "later"}) || !slices.Equal(ringTexts(ring, wslive.RingReply), []string{"changed course", "done"}) {
+		t.Fatalf("ring = %+v", ring)
+	}
+	if h.holders.opCount("stop") != 0 || h.holders.opCount("spawn") != 1 {
+		t.Fatalf("holder calls = %v", h.holders.opList())
+	}
+}
+
+// TestPiLeadSteeredMessageIsTheSteerCommand: pi takes a steered message as
+// its steer command, not as a prompt, and a refusal is logged.
+func TestPiLeadSteeredMessageIsTheSteerCommand(t *testing.T) {
+	h := newLeadHarness(t).start()
+	id := h.lead(BackendPi, LeadOptions{}).ID
+	h.send(id, "hello")
+	holder := h.holder(id)
+	h.holders.out(holder, `{"type":"agent_start"}`)
+	h.send(id, "now")
+	h.runner.conv(id).do(func() {})
+	if got := h.holders.inputs(holder, "steer"); len(got) != 0 || h.state(id).Held != 1 {
+		t.Fatalf("a message not marked is held: steer lines %q, state %+v", got, h.state(id))
+	}
+	h.steerHeld(id)
+	h.runner.InboxChanged(id)
+	eventually(t, "the steer command", func() bool { return len(h.holders.inputs(holder, "steer")) == 1 })
+	if got := h.holders.inputs(holder, "steer")[0]; !sameJSON(t, json.RawMessage(got), []byte(`{"type":"steer","message":"now"}`)) || len(h.holders.inputs(holder, "prompt")) != 1 {
+		t.Fatalf("steer line = %s, prompts %q", got, h.holders.inputs(holder, "prompt"))
+	}
+	if st := h.state(id); st.Held != 0 || st.Status != StatusRunning {
+		t.Fatalf("after the steer: %+v", st)
+	}
+	if got := ringTexts(h.ring(id), wslive.RingUser); !slices.Equal(got, []string{"hello", "now"}) {
+		t.Fatalf("ring user entries = %q", got)
+	}
+	h.holders.out(holder, `{"type":"response","command":"steer","success":true,"data":{"disposition":"queued"}}`)
+	h.holders.out(holder, `{"type":"response","command":"steer","success":false,"error":"no run to steer"}`)
+	eventually(t, "the refusal to be logged", func() bool { return strings.Contains(h.log.String(), "no run to steer") })
+	if st := h.state(id); st.Status != StatusRunning || st.Error != "" {
+		t.Fatalf("a steer's answer ends no turn: %+v", st)
+	}
+	h.holders.out(holder, `{"type":"agent_settled"}`)
+	h.idle(id)
+}
+
+// TestSteeredMessageWaitsInAProfileConversation: steering mid-turn is a
+// lead conversation's; any other conversation keeps a marked message held
+// until its turn ends, as before.
+func TestSteeredMessageWaitsInAProfileConversation(t *testing.T) {
+	h := newHarness(t, map[string]string{"chat": chatProfile})
+	id := h.create("chat").ID
+	if _, err := h.runner.Send(id, "first"); err != nil {
+		t.Fatal(err)
+	}
+	p := h.backend.waitProc(t, 0)
+	if got := p.nextSent(t); got != "first" {
+		t.Fatalf("first turn = %q", got)
+	}
+	if _, err := h.runner.Send(id, "now"); err != nil {
+		t.Fatal(err)
+	}
+	inbox := wsinbox.Dir(wsdashboard.SessionDir(h.dir, id))
+	held, err := wsinbox.Held(inbox)
+	if err != nil || len(held) != 1 {
+		t.Fatalf("held = %d (%v)", len(held), err)
+	}
+	if _, err := wsinbox.Steer(inbox, held[0].Name); err != nil {
+		t.Fatal(err)
+	}
+	h.runner.InboxChanged(id)
+	h.runner.conv(id).do(func() {})
+	select {
+	case text := <-p.sent:
+		t.Fatalf("a profile conversation's turn takes no message: %q", text)
+	default:
+	}
+	if st := h.state(id); st.Held != 1 || st.Status != StatusRunning {
+		t.Fatalf("the marked message stays held: %+v", st)
+	}
+	p.reply("answer")
+	if got := p.nextSent(t); got != "now" {
+		t.Fatalf("the held message is the next turn, got %q", got)
 	}
 }
 

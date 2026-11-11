@@ -438,6 +438,12 @@ func piCompactCommand(text string) (string, bool) {
 	return "", false
 }
 
+// Steer is pi's steer command: the running agent takes the message after
+// its current tool calls, before its next model request.
+func (p *piProcess) Steer(text string) error {
+	return p.writeLine(map[string]any{"type": "steer", "message": text})
+}
+
 // Interrupt aborts the running prompt. Pi answers abort only once the run
 // settles, so it is sent without waiting; the turn ends at agent_settled.
 func (p *piProcess) Interrupt() error {
@@ -586,6 +592,12 @@ func (m *piMapper) mapLine(line []byte, replies lineReplies) []Event {
 					errText = "compact refused: " + l.Error
 				}
 				return m.endTurn(now, errText)
+			}
+		case "steer":
+			// The message was taken from the inbox already; a refusal is
+			// all that is left of it.
+			if !l.Success {
+				return []Event{{Notice: "pi refused a steered message: " + l.Error}}
 			}
 		}
 	case "agent_start":
