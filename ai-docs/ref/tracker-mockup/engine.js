@@ -32,7 +32,10 @@
   var ORIGINS = ['human', 'agent', 'agent-auto'];
   // stage is retired: only older events carry it (see apply), so EDIT_FIELDS, the
   // list a refusal names, leaves it out.
-  var ITEM_FIELDS = ['title', 'body', 'project', 'due', 'priority', 'stage'], EDIT_FIELDS = ITEM_FIELDS.slice(0, 5);
+  var ITEM_FIELDS = ['title', 'body', 'project', 'due', 'priority', 'labels', 'stage'], EDIT_FIELDS = ITEM_FIELDS.slice(0, 6);
+  // The store's label list (admin-only roles events); a label's id is its add
+  // event's id, and an item's labels field is a list of those ids.
+  var LABEL_LIST = ['roles.add_label', 'roles.edit_label', 'roles.remove_label'], COLOR_RE = /^#[0-9a-f]{6}$/;
   var STAGE_SHAPE = 'stage must be review (null or absent: todo)';
   // Priority levels are store configuration (roles file, roles.set_priority_levels).
   // Codes are integers 0..n-1, larger = more urgent; names are display names only.
@@ -221,7 +224,7 @@
 
   function genesis(roles) {
     var S = { members: {}, admins: {}, items: {}, asg: {}, rules: {}, comments: {}, reg: {}, prio: normPriority(roles.priority),
-      att: normAttachments(roles.attachments) };
+      att: normAttachments(roles.attachments), labels: {}, lorder: [] };
     (roles.members || []).forEach(function (m) {
       S.members[m.id] = { id: m.id, profile: normProfile(m, m.id), keys: (m.keys || []).slice(), revoked: {}, leads: (m.leads || []).slice(), removed: null, joined: null };
     });
@@ -323,6 +326,49 @@
     if (p.due != null && !(typeof p.due === 'string' && DUE_RE.test(p.due) && !isNaN(Date.parse(p.due)))) rej('due is an optional YYYY-MM-DD date');
     if (p.priority != null && !(Number.isInteger(p.priority) && p.priority >= 0 && p.priority < S.prio.names.length))
       rej('priority must be a level 0..' + (S.prio.names.length - 1) + ' (' + S.prio.names.join(' / ') + ')');
+    if (p.labels != null) {
+      if (!Array.isArray(p.labels)) rej('labels must be a list of label ids');
+      var seen = {};
+      p.labels.forEach(function (x) {
+        if (typeof x !== 'string' || !has(S.labels, x)) rej('label "' + String(x) + '" is not in the store\'s label list');
+        if (S.labels[x].removed) rej('label ' + alias(x) + ' (' + S.labels[x].name + ') was removed');
+        if (seen[x]) rej('label ' + alias(x) + ' is listed twice');
+        seen[x] = true;
+      });
+    }
+  }
+  // The live label other than `except` named `name`, ignoring case (label:<name> is
+  // matched lower-cased).
+  function liveLabel(S, id) { return has(S.labels, id) && !S.labels[id].removed ? S.labels[id] : null; }
+  function labelNamed(S, name, except) {
+    var k = String(name).toLowerCase();
+    for (var i = 0; i < S.lorder.length; i++) {
+      var l = liveLabel(S, S.lorder[i]);
+      if (l && l.id !== except && l.name.toLowerCase() === k) return l;
+    }
+    return null;
+  }
+  // A label name: a non-blank string without surrounding spaces, unique among the
+  // live labels other than `except`, ignoring case.
+  function checkLabelName(S, p, except) {
+    if (typeof p.name !== 'string' || !p.name.trim()) rej('name must be a non-blank string');
+    if (p.name.trim() !== p.name) rej('name has leading or trailing spaces');
+    var l = labelNamed(S, p.name, except);
+    if (l) rej('label "' + p.name + '" already exists (' + alias(l.id) + ')');
+  }
+  function needLabel(S, id) {
+    if (!has(S.labels, String(id))) rej('label "' + String(id) + '" is not in the store\'s label list');
+    var l = S.labels[id];
+    if (l.removed) rej('label ' + alias(l.id) + ' (' + l.name + ') was removed');
+    return l;
+  }
+  // A label add or rename whose name a label already holds in L, the fold-order
+  // label list: the causal check passed, so the holder was written concurrently,
+  // and the first in fold order keeps the name.
+  function labelClash(L, n) {
+    if (n.type === 'roles.remove_label' || !has(n.p, 'name')) return null;
+    var l = labelNamed(L, n.p.name, n.type === 'roles.edit_label' ? n.p.label : '');
+    return l ? 'label "' + n.p.name + '" already exists (' + alias(l.id) + ', written concurrently; the first in fold order keeps the name)' : null;
   }
   // (335) `mentions` is an explicit list of member ids (the text keeps @name for
   // display); (338) `attachments` is metadata only; (531) `refs` is the item ids the
@@ -694,6 +740,23 @@
         needAdmin(S, a);
         if (!Number.isInteger(p.max_bytes) || p.max_bytes <= 0) rej('max_bytes must be a positive integer (bytes)');
         break;
+      case 'roles.add_label':
+        needAdmin(S, a);
+        checkLabelName(S, p, '');
+        if (!(typeof p.color === 'string' && COLOR_RE.test(p.color))) rej('color must be #rrggbb in lowercase hex');
+        break;
+      case 'roles.edit_label': {
+        needAdmin(S, a);
+        var lb = needLabel(S, has(p, 'label') ? p.label : undefined);
+        if (!has(p, 'name') && !has(p, 'color')) rej('nothing to edit (name, color)');
+        if (has(p, 'name')) checkLabelName(S, p, lb.id);
+        if (has(p, 'color') && !(typeof p.color === 'string' && COLOR_RE.test(p.color))) rej('color must be #rrggbb in lowercase hex');
+        break;
+      }
+      case 'roles.remove_label':
+        needAdmin(S, a);
+        needLabel(S, has(p, 'label') ? p.label : undefined);
+        break;
 
       default: rej('unknown event type "' + n.type + '"');
     }
@@ -707,6 +770,7 @@
   function show(v) {
     if (v === null || v === undefined) return '(none)';
     if (v && typeof v === 'object' && !Array.isArray(v)) {
+      if (v.labels) return v.labels.length ? v.labels.map(alias).join(', ') : '(none)';
       if (v.names) return v.names.join(' / ') + ' (default ' + v.names[v.default] + ')';
       return v.status + (v.note ? ' ("' + v.note + '")' : '');
     }
@@ -758,6 +822,7 @@
 
   function mentionsOf(p) { return Array.isArray(p.mentions) ? p.mentions.slice() : []; }
   function refsOf(p) { return Array.isArray(p.refs) ? p.refs.slice() : []; }
+  function labelsOf(p) { return Array.isArray(p.labels) ? p.labels.map(String) : []; }
   function attachmentsOf(p) {
     return Array.isArray(p.attachments) ? p.attachments.map(function (x) { return { oid: x.oid, name: x.name, size: x.size, mime: x.mime }; }) : [];
   }
@@ -912,7 +977,7 @@
         S.items[n.id] = { id: n.id, alias: n.alias, kind: p.kind === 'todo' ? 'task' : p.kind, title: p.title, body: p.body || '', project: p.project || '',
           due: p.due || null, priority: p.priority != null ? p.priority : S.prio.default,
           parent: p.parent || null, after: has(p, 'after') ? (p.after || null) : undefined, author: a, ts: n.ts, hidden: false, edited: null, node: n,
-          mentions: mentionsOf(p), attachments: attachmentsOf(p), refs: refsOf(p) };
+          mentions: mentionsOf(p), attachments: attachmentsOf(p), refs: refsOf(p), labels: labelsOf(p) };
         break;
       case 'item.edit':
         it = S.items[p.item]; if (!it) break;
@@ -929,6 +994,7 @@
             fb.status = sw.status; fb.note = sw.note; fb.noteBy = sw.by; fb.last = sw.n;
             return;
           }
+          if (f === 'labels') { it.labels = write(S, 'it:' + it.id + ':labels', 'labels of ' + it.alias, n, { labels: labelsOf(p) }, C).labels; return; }
           it[f] = write(S, 'it:' + it.id + ':' + f, f + ' of ' + it.alias, n, p[f] == null ? (f === 'due' ? null : '') : p[f], C);
         });
         if (has(p, 'body')) { var bw = regWinner(S, 'it:' + it.id + ':body'); it.mentions = mentionsOf(bw.p); it.attachments = attachmentsOf(bw.p); it.refs = refsOf(bw.p); }
@@ -1089,6 +1155,19 @@
       case 'roles.set_attachment_limit':
         S.att = { max_bytes: write(S, 'att', 'attachment limit', n, p.max_bytes, C) };
         break;
+      case 'roles.add_label':
+        if (!has(S.labels, n.id)) S.lorder.push(n.id);
+        S.labels[n.id] = { id: n.id, name: p.name, color: p.color, removed: null };
+        break;
+      case 'roles.edit_label': { // name and color are field writes, merged like priority levels
+        var l = has(S.labels, String(p.label)) ? S.labels[p.label] : null; if (!l) break;
+        if (has(p, 'name')) l.name = write(S, 'lb:' + l.id + ':name', 'name of label ' + alias(l.id), n, p.name, C);
+        if (has(p, 'color')) l.color = write(S, 'lb:' + l.id + ':color', 'color of label ' + alias(l.id), n, p.color, C);
+        break;
+      }
+      case 'roles.remove_label':
+        if (has(S.labels, String(p.label)) && !S.labels[p.label].removed) S.labels[p.label].removed = n.id;
+        break;
     }
     if (/^roles\./.test(n.type) || n.type === 'item.assign') { refreshLive(S, n); settleAll(S, n, C); }
     else if (n.type === 'item.create') settle(S, n.id, n, C);
@@ -1110,13 +1189,21 @@
     // Verdicts. A pass repeats only when the revocation rule ignores a new event.
     for (var pass = 0; pass < 4; pass++) {
       order.forEach(function (n) {
-        n.status = 'applied'; n.reason = null; n.revokedLate = false;
+        n.status = 'applied'; n.reason = null; n.revokedLate = false; n.clash = false;
         if (ignored[n.id]) { n.status = 'flagged'; n.reason = ignored[n.id]; n.revokedLate = true; return; }
         var S = genesis(st.roles);
-        for (var i = 0; order[i] !== n; i++) if (order[i].status === 'applied' && hb(order[i], n)) apply(S, order[i], null);
+        // an add or rename flagged only by the label-name clash still counts for later checks: their writers saw it
+        for (var i = 0; order[i] !== n; i++) if ((order[i].status === 'applied' || order[i].clash) && hb(order[i], n)) apply(S, order[i], null);
         try { check(S, n); } catch (e) {
           if (!(e instanceof Rej)) throw e;
           n.status = 'flagged'; n.reason = e.reason;
+        }
+        if (n.status === 'applied' && LABEL_LIST.indexOf(n.type) >= 0) {
+          // a name two admins add or rename to concurrently passes both causal checks
+          var L = genesis(st.roles);
+          for (var j = 0; order[j] !== n; j++) if (order[j].status === 'applied' && LABEL_LIST.indexOf(order[j].type) >= 0) apply(L, order[j], null);
+          var clash = labelClash(L, n);
+          if (clash) { n.status = 'flagged'; n.reason = clash; n.clash = true; }
         }
       });
       var more = false;
@@ -1299,6 +1386,7 @@
       var started = null;
       recs.forEach(function (r) { r.writes.forEach(function (w) { if (w.type === 'item.status' && w.p.status === 'doing' && (!started || String(w.ts) < started)) started = String(w.ts); }); });
       items[it.id] = { id: it.id, alias: it.alias, kind: it.kind, title: it.title, body: it.body, project: it.project,
+        labels: it.labels.filter(function (id) { return !!liveLabel(S, id); }),
         due: it.due, priority: it.priority, priorityLevel: priorityLevel(S.prio, it.priority), priorityName: S.prio.names[priorityLevel(S.prio, it.priority)],
         parent: it.parent && S.items[it.parent] ? it.parent : null, author: it.author, ts: it.ts, hidden: !!it.hidden,
         edited: it.edited ? { id: it.edited.id, ts: it.edited.ts } : null, status: itemStatus(g, it), counted: counted(g, it),
@@ -1411,6 +1499,7 @@
       viewer: { member: v, stream: stream, name: me ? displayName(me.profile) : v, profile: me ? clone(me.profile) : null, admin: !!S.admins[v], lead: me ? (me.leads || [])[0] || null : null,
         followers: (g.children[v] || []).slice(), reach: R, isMember: !!(me && !me.removed) },
       priority: clone(S.prio), attachments: clone(S.att),
+      labels: S.lorder.filter(function (id) { return !!liveLabel(S, id); }).map(function (id) { var l = S.labels[id]; return { id: id, name: l.name, color: l.color }; }),
       members: members, admins: Object.keys(S.admins), rolesProblems: rolesProblems(input.roles),
       items: items, itemOrder: itemOrder, assignments: assignments, rules: rules, comments: comments, events: events, notices: notices,
       my: {

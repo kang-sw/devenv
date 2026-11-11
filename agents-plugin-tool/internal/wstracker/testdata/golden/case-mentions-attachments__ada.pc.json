@@ -263,6 +263,7 @@
   "attachments": {
    "max_bytes": 4200
   },
+  "labels": [],
   "members": {
    "ada": {
     "id": "ada",
@@ -446,6 +447,7 @@
     "title": "Design",
     "body": "v2 from the laptop, no mentions",
     "project": "",
+    "labels": [],
     "due": null,
     "priority": 1,
     "priorityLevel": 1,

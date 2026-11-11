@@ -28,6 +28,7 @@ type node struct {
 
 	status, reason       string // applied | flagged | waiting
 	ignored              bool
+	clash                bool // flagged only by the fold-order label-name clash; still in later causal-past checks
 	markers              []marker
 	superseded           []supersession
 	thread, parentThread string
@@ -256,6 +257,11 @@ func (r *replayed) linearize(all []*node, streams map[string]map[int]*node) {
 // Valid stands; a protocol-Valid domain event is judged against the state
 // folded from its causal past.
 func (r *replayed) verdicts(all []*node) {
+	// lf folds only the applied label-list events, in fold order: a label
+	// name two admins add or rename to concurrently passes both causal
+	// checks, and the later one in fold order is flagged here, so the list
+	// never holds a name twice.
+	lf := newState(r.g, r.hb, false)
 	for _, n := range r.order {
 		if r.rolesOnly && !isRoles(n.typ) {
 			n.status = "skipped"
@@ -267,6 +273,12 @@ func (r *replayed) verdicts(all []*node) {
 			if !isIdentity(n.typ) {
 				if rej := r.stateBefore(n).check(n); rej != "" {
 					n.status, n.reason = "flagged", string(rej)
+				} else if isLabelList(n.typ) {
+					if rej := lf.labelClash(n); rej != "" {
+						n.status, n.reason, n.clash = "flagged", string(rej), true
+					} else {
+						lf.apply(n)
+					}
 				}
 			}
 		case wsledger.Ignored:
@@ -296,7 +308,8 @@ func (r *replayed) verdicts(all []*node) {
 // roles and identity events, the threads and comments n names (its refs
 // included), and every item.assign as a trigger of the live rules on those
 // threads. Nothing else can change what check reads, so this equals folding
-// the whole past.
+// the whole past. A label add or rename flagged only by the fold-order name
+// clash folds here too: n's writer saw it, and only the list drops it.
 func (r *replayed) stateBefore(n *node) *state {
 	rel := map[string]bool{}
 	var lists [][]int
@@ -338,7 +351,7 @@ func (r *replayed) stateBefore(n *node) *state {
 		}
 		last = pos
 		x := r.order[pos]
-		if x.status != "applied" {
+		if x.status != "applied" && !x.clash {
 			continue
 		}
 		if x.typ == TypeItemAssign && !rel[x.p.str("item")] {
@@ -355,6 +368,29 @@ func (r *replayed) stateBefore(n *node) *state {
 		}
 	}
 	return S
+}
+
+// isLabelList reports an event that changes the store's label list.
+func isLabelList(t string) bool {
+	return t == TypeAddLabel || t == TypeEditLabel || t == TypeRemoveLabel
+}
+
+// labelClash is the rejection of a label add or rename whose name a label
+// already holds in s, the fold-order label list; the causal check passed, so
+// the holder was written concurrently.
+func (s *state) labelClash(n *node) rejection {
+	if n.typ == TypeRemoveLabel || !n.p.has("name") {
+		return ""
+	}
+	except := ""
+	if n.typ == TypeEditLabel {
+		except = n.p.str("label")
+	}
+	name := n.p.str("name")
+	if l := s.labelNamed(name, except); l != nil {
+		return rejection(`label "` + name + `" already exists (` + alias(l.id) + ", written concurrently; the first in fold order keeps the name)")
+	}
+	return ""
 }
 
 // isRoles reports a roles.* or member.join event: the events the org (and

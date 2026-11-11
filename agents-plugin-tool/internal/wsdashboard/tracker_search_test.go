@@ -33,6 +33,9 @@ function setTimeout(fn, ms) { timers.push({ fn: fn, ms: ms }); return timers.len
 function clearTimeout(id) { if (id) timers[id - 1] = null; }
 function fire() { var due = timers.filter(Boolean); timers = []; due.forEach(function (t) { t.fn(); }); return due.map(function (t) { return t.ms; }); }
 var AD = { search: function (n, q, done) { sent.push({ n: n, q: q, done: done }); } };
+var LABELS = { 'l#1': { id: 'l#1', name: 'Docs' } };
+function labelOf(id) { return LABELS[id] || null; }
+function labelName(id) { return LABELS[id] ? LABELS[id].name : id; }
 ` + block + `
 function check(what, got, want) { if (JSON.stringify(got) !== JSON.stringify(want)) bad.push(what + ': got ' + JSON.stringify(got) + ', want ' + JSON.stringify(want)); }
 
@@ -66,6 +69,11 @@ SQ = 'q'; SIDS = { 'x#2': true };
 check('matchItem by ids', [matchItem({ id: 'x#2' }), matchItem({ id: 'x#1', title: 'q' })], [true, false]);
 SQ = 'q'; SIDS = null;
 check('matchItem substring fallback', matchItem({ id: 'x#1', title: 'Q here' }), true);
+// the fallback matches label names as substrings, and a label chip's label:"<name>" by exact name
+SQ = 'doc';
+check('matchItem fallback on a label name', [matchItem({ id: 'x#1', labels: ['l#1'] }), matchItem({ id: 'x#2', labels: [] })], [true, false]);
+SQ = 'label:"docs"';
+check('matchItem fallback label: token', [matchItem({ id: 'x#1', labels: ['l#1'] }), matchItem({ id: 'x#2', title: 'label:"docs"' })], [true, false]);
 // another store's answer does not render the store shown
 searchFor('B', 'b'); fire(); ui.store = 'A'; renders = 0;
 sent[4].done({ ok: true, ids: ['b#1'] });

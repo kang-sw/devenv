@@ -274,6 +274,7 @@
   "attachments": {
    "max_bytes": 1000
   },
+  "labels": [],
   "members": {
    "ada": {
     "id": "ada",
@@ -457,6 +458,7 @@
     "title": "Design",
     "body": "v3 keeps both",
     "project": "",
+    "labels": [],
     "due": null,
     "priority": 1,
     "priorityLevel": 1,

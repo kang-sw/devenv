@@ -270,6 +270,7 @@
   "attachments": {
    "max_bytes": 10485760
   },
+  "labels": [],
   "members": {
    "hana": {
     "id": "hana",
@@ -305,6 +306,7 @@
     "title": "Write talk proposal (event-sourced trackers)",
     "body": "Outline, abstract, bio.",
     "project": "conf-2027",
+    "labels": [],
     "due": "2026-11-20",
     "priority": 2,
     "priorityLevel": 2,
@@ -361,6 +363,7 @@
     "title": "Reading list",
     "body": "Event sourcing, CRDT survey, git internals.",
     "project": "",
+    "labels": [],
     "due": null,
     "priority": 1,
     "priorityLevel": 1,
@@ -403,6 +406,7 @@
     "title": "Renew passport",
     "body": "",
     "project": "",
+    "labels": [],
     "due": "2026-11-15",
     "priority": 1,
     "priorityLevel": 1,
@@ -448,6 +452,7 @@
     "title": "Try the tracker mockup",
     "body": "",
     "project": "",
+    "labels": [],
     "due": null,
     "priority": 0,
     "priorityLevel": 0,
@@ -492,6 +497,7 @@
     "title": "Abstract",
     "body": "",
     "project": "",
+    "labels": [],
     "due": "2026-11-12",
     "priority": 1,
     "priorityLevel": 1,

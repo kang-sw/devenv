@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 78039b04ff2d1959
 sage-review-completeness-reviewed: 78039b04ff2d1959
+completed: 2026-11-11
 ---
 
 # Tracker: store settings and labels
@@ -178,6 +179,28 @@ Verification:
   dialog showing only the selected type's fields under human-readable type
   names, with the priority-level and attachment-limit types gone from it.
 
+### Result
+
+- The Team card ends with a "Store settings" section (`settingsHtml` in
+  `tracker.js`): priority levels (lowest first, default marked) and the
+  attachment limit, each with an Edit button only for an admin; a
+  non-admin reads the same rows with a read-only note. The Team summary
+  line no longer repeats the two settings.
+- Two dialogs write the settings: `sprio` (one name row per level plus
+  blank rows up to the 9-level cap, a radio for the default; blank rows are
+  dropped, an unchanged save is a no-op toast) and `satt` (a byte count).
+- The roles-event dialog offers only the seven membership types, as
+  readable names (`js.tk.rtype.*`), and shows only the selected type's
+  fields (`rfld` wrappers with `data-rt`, toggled by `rtypeShow` on open and
+  on type change).
+- `tracker.query`'s `priority:` line ends with where the levels are
+  changed; all three `rsrc/tracker/tracker.md` copies say the same for both
+  settings.
+- Tests: `TestTrackerQueryPriorityLineNamesWhereLevelsChange` (mcp) and
+  `TestTrackerStoreSettingsLeaveTheRolesDialog` (wsdashboard, a source pin
+  of the dialog and section). The browser check is pending and runs with
+  Phase 2's.
+
 ### Phase 2: labels
 
 Scope:
@@ -196,3 +219,80 @@ Verification:
 - Golden cases from the reference engine agree with the Go domain.
 - A browser check of the chips, the item window field, and the label list
   editor.
+
+### Result
+
+- Domain (`wstracker`): three admin-only events, `roles.add_label {name,
+  color}` (the label id is the event id), `roles.edit_label {label, name?,
+  color?}`, and `roles.remove_label {label}`. A colour is `#rrggbb` in
+  lowercase hex. A name is unique among live labels ignoring case and
+  carries no surrounding spaces. A rename or recolour is a register, so
+  concurrent edits resolve like every other field, and removal is
+  terminal: re-adding the name makes a new id. `labels` (a list of label
+  ids) is an item field on `item.create` and `item.edit`, so the creator
+  edit rule covers it and `null` clears it. Each id must be a live label
+  and may appear once. The view carries `items[].labels` (live ids only, so
+  a removed label leaves its items) and `labels` (live labels in add
+  order). `label:<name>` matches an exact name, ignoring case.
+- Concurrent duplicate names: two concurrent adds of one name (or a rename
+  to it) each pass their causal-past check. The verdict pass then flags
+  every one after the first in fold order, as `label "X" already exists
+  (<alias>, written concurrently; the first in fold order keeps the
+  name)`. This is a fold-order exception to the stateBefore rule, written
+  down in `doc.go`; the reference engine mirrors it.
+- Reference engine (`ai-docs/ref/tracker-mockup/engine.js`): the same
+  events, checks, and view. All goldens are regenerated, a new case
+  `labels-concurrent-name` is added, and `reasons.json` has 22 label cases.
+  A step's optional fifth element now sets `seen` explicitly, so a case
+  can be concurrent; Go's `history()` and `gen-golden.js` both honour it.
+- MCP: `labels=` (label refs, or `$N` for a `tk:roles.add_label` command
+  of the same batch) on `item.create` and `item.edit`, plus the commands
+  `roles.add_label`, `roles.edit_label`, and `roles.remove_label`.
+  `tracker.query` prints a `labels:` header line when the store has labels
+  and `labels a, b` on item rows and the item detail. All three
+  `tracker.md` copies document the grammar.
+- Dashboard (`tracker.js`, `tracker.css`):
+  - Label chips (an outline chip with a colour dot) on item rows and in
+    the item window. Clicking a chip sets the Items search to
+    `label:"<name>"`.
+  - The item window has a `labels` property row, and its edit mode has a
+    toggle-chip picker that writes `labels` only when the set changed.
+  - The store-settings section lists the labels. An admin gets "+ label",
+    Edit (the `slabel` dialog: a name and an `<input type=color>`,
+    emitting only the changed fields), and Remove (after a confirm).
+  - Activity sentences cover the three events and item labels. A removed
+    label is still named, from its add and rename events.
+  - 21 new i18n keys, in all 11 tables.
+- Tests: `TestItemLabelsFollowTheLabelList` and
+  `TestConcurrentLabelNameKeepsTheFirstInFoldOrder` (wstracker), plus the
+  `reasons.json` label cases (rejections for a non-admin, an
+  outside-the-list label, a duplicate name, a non-editor's labels, a bad
+  colour, and a removed label). In mcp: `TestTrackerQueryShowsLabels` and
+  label steps in `TestTrackerUpdateWritesEveryEventCommand`. In
+  wsdashboard: `TestTrackerLabelsInTheDashboard` (a source pin), plus
+  label cases in `TestTrackerSearchRequests` for the substring fallback.
+- Browser check (headless Chromium over CDP, against the mockup at 1280px
+  and 390px), covering Phase 1's pending check too:
+  - Store settings render read-only for a member (maya) and editable for
+    an admin (ada).
+  - The roles dialog lists the seven membership types by readable name
+    and shows only the selected type's fields.
+  - Priority-level and attachment-limit edits save.
+  - Labels: an add, a duplicate name flagged, the edit picker
+    toggling, row and window chips, a chip click filtering to
+    `label:"docs"`, a rename and a recolour shown on rows, a removal that
+    takes the chip off the item, and the activity sentences.
+  - The 390px page's horizontal overflow (401px) comes from the mockup's
+    own stub row and is the same at the base commit.
+
+#### Edition (ddf65188d) - 2026-11-11
+
+- Review fix: an add or rename flagged only by the fold-order name clash
+  still counts in later events' causal-past checks, because their writers
+  saw it. An item created or edited with the losing label therefore stays
+  applied, and the view drops the lost label from it. Before the fix the
+  whole item write was flagged. Pinned in
+  `TestConcurrentLabelNameKeepsTheFirstInFoldOrder` and the
+  `labels-concurrent-name` golden case, in both engines.
+- Also fixed: the chip tooltip was double-escaped, and the edit picker
+  compared label order rather than the label set.

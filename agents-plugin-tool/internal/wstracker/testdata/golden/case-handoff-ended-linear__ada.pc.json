@@ -380,6 +380,7 @@
   "attachments": {
    "max_bytes": 10485760
   },
+  "labels": [],
   "members": {
    "ada": {
     "id": "ada",
@@ -562,6 +563,7 @@
     "title": "X",
     "body": "",
     "project": "",
+    "labels": [],
     "due": null,
     "priority": 1,
     "priorityLevel": 1,
@@ -611,6 +613,7 @@
     "title": "Y",
     "body": "",
     "project": "",
+    "labels": [],
     "due": null,
     "priority": 1,
     "priorityLevel": 1,
@@ -659,6 +662,7 @@
     "title": "Z",
     "body": "",
     "project": "",
+    "labels": [],
     "due": null,
     "priority": 1,
     "priorityLevel": 1,

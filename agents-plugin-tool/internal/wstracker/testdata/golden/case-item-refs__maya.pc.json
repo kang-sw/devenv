@@ -346,6 +346,7 @@
   "attachments": {
    "max_bytes": 10485760
   },
+  "labels": [],
   "members": {
    "ada": {
     "id": "ada",
@@ -528,6 +529,7 @@
     "title": "Target",
     "body": "",
     "project": "",
+    "labels": [],
     "due": null,
     "priority": 1,
     "priorityLevel": 1,
@@ -575,6 +577,7 @@
     "title": "Other",
     "body": "",
     "project": "",
+    "labels": [],
     "due": null,
     "priority": 1,
     "priorityLevel": 1,
@@ -624,6 +627,7 @@
     "title": "Holder",
     "body": "see #ada.pc-1 and #ada.pc-2",
     "project": "",
+    "labels": [],
     "due": null,
     "priority": 1,
     "priorityLevel": 1,
@@ -673,6 +677,7 @@
     "title": "Dropper",
     "body": "nothing now",
     "project": "",
+    "labels": [],
     "due": null,
     "priority": 1,
     "priorityLevel": 1,
@@ -720,6 +725,7 @@
     "title": "Hidden ref",
     "body": "#ada.pc-1",
     "project": "",
+    "labels": [],
     "due": null,
     "priority": 1,
     "priorityLevel": 1,

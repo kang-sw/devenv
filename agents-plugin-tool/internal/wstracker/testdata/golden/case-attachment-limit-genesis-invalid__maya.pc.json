@@ -104,6 +104,7 @@
   "attachments": {
    "max_bytes": 10485760
   },
+  "labels": [],
   "members": {
    "ada": {
     "id": "ada",
@@ -166,6 +167,7 @@
     "title": "T1",
     "body": "b",
     "project": "",
+    "labels": [],
     "due": null,
     "priority": 1,
     "priorityLevel": 1,

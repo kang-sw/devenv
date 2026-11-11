@@ -275,6 +275,7 @@
   "attachments": {
    "max_bytes": 10485760
   },
+  "labels": [],
   "members": {
    "ada": {
     "id": "ada",

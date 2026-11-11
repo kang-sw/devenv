@@ -15,8 +15,8 @@ var (
 	// itemFields are the item.edit fields, in the engine's order. stage is
 	// retired: only older events carry it (see apply), so editFields, the
 	// list a refusal names, leaves it out.
-	itemFields = []string{"title", "body", "project", "due", "priority", "stage"}
-	editFields = itemFields[:5]
+	itemFields = []string{"title", "body", "project", "due", "priority", "labels", "stage"}
+	editFields = itemFields[:6]
 )
 
 // DefaultStaleDays is the stale threshold (284): a live assignment in doing
@@ -121,6 +121,19 @@ type item struct {
 	mentions    []string
 	attachments []attachment
 	refs        []string
+	labels      labelSet // label ids as written; the view drops removed ones
+}
+
+// labelSet is an item's labels register value: label ids, in the order
+// written. It is its own type so a concurrency marker shows it as labels.
+type labelSet []string
+
+// label is one entry of the store's label list; its id is its
+// roles.add_label event's id. A removed label stays here (removed set) so
+// the items that carry it keep its id; every reader skips it.
+type label struct {
+	id, name, color string
+	removed         *node
 }
 
 // attachment is attachment metadata as folded; oid is the content's sha256.
@@ -228,6 +241,8 @@ type state struct {
 	comments map[string]*comment
 	corder   []string
 	reg      map[string][]head
+	labels   map[string]*label
+	lorder   []string // label ids in fold order of their adds
 	prio     priority
 	attMax   float64 // attachments.max_bytes, the engine's number (posIntOf)
 }
@@ -367,7 +382,7 @@ func newState(g *genesis, hb func(x, y *node) bool, marks bool) *state {
 		hb: hb, marks: marks,
 		members: map[string]*member{}, admins: map[string]bool{},
 		items: map[string]*item{}, asg: map[string]*rec{}, byItem: map[string][]*rec{}, ruleByID: map[string]*rule{},
-		comments: map[string]*comment{}, reg: map[string][]head{},
+		comments: map[string]*comment{}, reg: map[string][]head{}, labels: map[string]*label{},
 		prio:   priority{names: append([]string(nil), g.prio.names...), def: g.prio.def},
 		attMax: g.attMax,
 	}
@@ -850,6 +865,15 @@ func show(v any) string {
 		return "(none)"
 	case priority:
 		return strings.Join(x.names, " / ") + " (default " + x.names[x.def] + ")"
+	case labelSet:
+		if len(x) == 0 {
+			return "(none)"
+		}
+		out := make([]string, len(x))
+		for i, id := range x {
+			out[i] = alias(id)
+		}
+		return strings.Join(out, ", ")
 	case statusVal:
 		if x.note != "" {
 			return x.status + ` ("` + x.note + `")`
@@ -945,6 +969,41 @@ func mentionsOf(p obj) []string {
 		out = append(out, jsString(x))
 	}
 	return out
+}
+
+// labelsOf is a payload's labels: absent or null is none.
+func labelsOf(p obj) labelSet { return labelSet(p.strList("labels")) }
+
+// liveLabel is the label id names when the list holds it and it is not
+// removed, else nil.
+func (s *state) liveLabel(id string) *label {
+	if l := s.labels[id]; l != nil && l.removed == nil {
+		return l
+	}
+	return nil
+}
+
+// liveLabels is ids without the labels the list does not hold live.
+func (s *state) liveLabels(ids labelSet) []string {
+	out := []string{}
+	for _, id := range ids {
+		if s.liveLabel(id) != nil {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// labelNamed is the live label other than except whose name equals name,
+// ignoring case (label:<name> is matched lower-cased), else nil.
+func (s *state) labelNamed(name, except string) *label {
+	k := strings.ToLower(name)
+	for _, id := range s.lorder {
+		if l := s.liveLabel(id); l != nil && id != except && strings.ToLower(l.name) == k {
+			return l
+		}
+	}
+	return nil
 }
 
 func refsOf(p obj) []string {
@@ -1091,6 +1150,7 @@ func (s *state) apply(n *node) {
 			it.priority = v
 		}
 		it.mentions, it.attachments, it.refs = mentionsOf(p), attachmentsOf(p), refsOf(p)
+		it.labels = labelsOf(p)
 		it.after, it.afterSet = p.str("after"), p.has("after")
 		if s.items[n.id] == nil {
 			s.iorder = append(s.iorder, n.id)
@@ -1132,6 +1192,8 @@ func (s *state) apply(n *node) {
 			case "priority":
 				v, _ := p.intOf(f)
 				it.priority = s.write(key, label, n, v).(int)
+			case "labels":
+				it.labels = s.write(key, label, n, labelsOf(p)).(labelSet)
 			case "stage":
 				// An older event: review is the fallback holder's idea status,
 				// null (todo) its todo. Held by anyone else, the item is not in
@@ -1434,6 +1496,27 @@ func (s *state) apply(n *node) {
 	case TypeSetAttachmentLimit:
 		v, _ := p.posIntOf("max_bytes")
 		s.attMax = s.write("att", "attachment limit", n, v).(float64)
+	case TypeAddLabel:
+		if s.labels[n.id] == nil {
+			s.lorder = append(s.lorder, n.id)
+		}
+		s.labels[n.id] = &label{id: n.id, name: p.str("name"), color: p.str("color")}
+	case TypeEditLabel:
+		// name and color are field writes, merged like priority levels
+		l := s.labels[p.str("label")]
+		if l == nil {
+			break
+		}
+		if p.has("name") {
+			l.name = s.write("lb:"+l.id+":name", "name of label "+alias(l.id), n, p.str("name")).(string)
+		}
+		if p.has("color") {
+			l.color = s.write("lb:"+l.id+":color", "color of label "+alias(l.id), n, p.str("color")).(string)
+		}
+	case TypeRemoveLabel:
+		if l := s.labels[p.str("label")]; l != nil && l.removed == nil {
+			l.removed = n
+		}
 	}
 	switch {
 	case strings.HasPrefix(n.typ, "roles.") || n.typ == TypeItemAssign || n.typ == wsledger.TypeMemberJoin:

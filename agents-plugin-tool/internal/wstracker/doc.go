@@ -13,10 +13,20 @@
 // signer and membership flags, and the revocation cut. An event the protocol
 // marks Waiting, Flagged, or Ignored keeps that verdict here. A
 // protocol-Valid domain event (member.profile, roles.set_lead,
-// roles.set_priority_levels, roles.set_attachment_limit, item.*, comment.*)
-// then gets the domain
-// verdict, judged against the state folded from its causal past only, so a
-// late arrival never changes it.
+// roles.set_priority_levels, roles.set_attachment_limit, the label-list
+// events roles.add_label, roles.edit_label, and roles.remove_label, item.*,
+// comment.*) then gets the domain verdict, judged against the state folded
+// from its causal past only, so a late arrival never changes it.
+//
+// One exception: a label name is unique in the store's list, and two admins
+// can add or rename to one name concurrently, each check passing. The fold
+// keeps the first in fold order and flags the later one, naming the label
+// that holds the name. A late arrival earlier in fold order can therefore
+// flag an add or rename that was applied before it came. Such a flag
+// governs the list only: later events' causal-past checks still see the
+// flagged add or rename (their writers did), so an item written with the
+// losing label stays, and the view drops the label from it as it drops a
+// removed one.
 //
 // The domain folds the identity events itself from each event's causal
 // past (admins, removal, keys, joins); genesis leads, priority, and

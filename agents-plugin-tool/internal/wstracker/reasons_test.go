@@ -9,12 +9,15 @@ import (
 	"github.com/kang-sw/devenv/internal/wsledger"
 )
 
-// step is one event of a test history: [stream, type, payload, origin?].
+// step is one event of a test history: [stream, type, payload, origin?,
+// seen?]. An empty origin is none; seen, when given, replaces the event's
+// seen (a write concurrent with what it leaves out).
 type step []any
 
 // history builds the events of a linear history: each event is its own
-// commit and has seen every earlier event; ts advances a minute per event
-// from 2026-11-01T00:00Z. All are protocol-Valid.
+// commit and has seen every earlier event unless its step names a seen; ts
+// advances a minute per event from 2026-11-01T00:00Z. All are
+// protocol-Valid.
 func history(steps []step) []wsledger.Event {
 	heads := map[string]int{}
 	t := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
@@ -37,7 +40,18 @@ func history(steps []step) []wsledger.Event {
 		ev := wsledger.Event{ID: wsledger.EventID{Member: member, Clone: clone, Seq: seq}, TS: t, Type: st[1].(string),
 			Payload: payload, Seen: seen, Verdict: wsledger.Valid}
 		if len(st) > 3 {
-			ev.Origin = st[3].(string)
+			ev.Origin, _ = st[3].(string)
+		}
+		if len(st) > 4 {
+			ev.Seen = map[string]int{}
+			switch x := st[4].(type) {
+			case map[string]int:
+				ev.Seen = x
+			case map[string]any:
+				for s, q := range x {
+					ev.Seen[s] = int(q.(float64))
+				}
+			}
 		}
 		heads[stream] = seq
 		out = append(out, ev)

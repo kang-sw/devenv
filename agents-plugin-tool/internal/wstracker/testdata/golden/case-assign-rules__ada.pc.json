@@ -469,6 +469,7 @@
   "attachments": {
    "max_bytes": 10485760
   },
+  "labels": [],
   "members": {
    "ada": {
     "id": "ada",
@@ -701,6 +702,7 @@
     "title": "Rollout",
     "body": "",
     "project": "",
+    "labels": [],
     "due": null,
     "priority": 1,
     "priorityLevel": 1,
@@ -746,6 +748,7 @@
     "title": "Audit",
     "body": "",
     "project": "",
+    "labels": [],
     "due": null,
     "priority": 1,
     "priorityLevel": 1,
@@ -794,6 +797,7 @@
     "title": "Cross-team",
     "body": "",
     "project": "",
+    "labels": [],
     "due": null,
     "priority": 1,
     "priorityLevel": 1,
@@ -844,6 +848,7 @@
     "title": "Legacy",
     "body": "",
     "project": "",
+    "labels": [],
     "due": null,
     "priority": 1,
     "priorityLevel": 1,
@@ -889,6 +894,7 @@
     "title": "Ask bo",
     "body": "",
     "project": "",
+    "labels": [],
     "due": null,
     "priority": 1,
     "priorityLevel": 1,
@@ -935,6 +941,7 @@
     "title": "Withdraw",
     "body": "",
     "project": "",
+    "labels": [],
     "due": null,
     "priority": 1,
     "priorityLevel": 1,
