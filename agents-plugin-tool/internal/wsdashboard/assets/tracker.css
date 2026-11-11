@@ -231,6 +231,16 @@ body.tk-paged .tk-drawer { display: none; }
 .tk .toolbar select { font: inherit; font-size: 12px; padding: 1px 4px; border-radius: 6px; border: 1px solid var(--wb-line); background: var(--wb-card); color: var(--wb-fg); }
 .tk .sub { margin: 10px 0 4px; font-size: 11.5px; font-weight: 800; color: var(--wb-muted-fg); text-transform: uppercase; letter-spacing: .04em; }
 .tk .sub:first-child { margin-top: 0; }
+/* a related-scope section (CC, mentions): the sub-section heading as a fold toggle, open by default */
+.tk .rsec + .rsec { margin-top: 6px; }
+.tk .rs-head { display: flex; align-items: center; gap: 6px; width: 100%; margin: 6px 0 4px; padding: 2px 0; border: 0; background: transparent; color: var(--wb-muted-fg); font: inherit; font-size: 11.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; text-align: left; cursor: pointer; }
+.tk .rsec:first-child .rs-head { margin-top: 0; }
+.tk .rs-head:hover { color: var(--wb-fg); }
+.tk .rs-head:focus-visible { outline: 1.5px solid var(--wb-primary); }
+.tk .rs-head .i { transition: transform .15s; }
+.tk .rsec:not(.open) .rs-head .i { transform: rotate(-90deg); }
+.tk .rsec > p { margin: 4px 0; font-size: 12.5px; }
+.tk .rs-head + .irow { border-top: 0; }
 
 .tk .row { padding: 6px 0; border-top: 1px solid var(--wb-muted); }
 .tk .row:first-child { border-top: 0; }

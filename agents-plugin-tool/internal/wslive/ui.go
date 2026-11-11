@@ -33,7 +33,7 @@ var UIOps = []string{UISearch, UIFocus, UIScope, UIView}
 // Keep the two sites in step: a wsdashboard test reads tracker.js and fails
 // when they differ.
 var (
-	UIScopes    = []string{"mine", "received", "given", "team", "all"}
+	UIScopes    = []string{"mine", "related", "received", "given", "team", "all"}
 	UIViewModes = []string{"list", "kanban", "gantt", "calendar"}
 )
 

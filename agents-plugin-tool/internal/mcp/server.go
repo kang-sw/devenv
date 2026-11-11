@@ -5102,7 +5102,7 @@ func tools() []map[string]any {
 					"item":        stringProperty("focus only, and required for it: an item of your store, its ID as tracker.query prints it, such as maya.pc-5."),
 					"comment":     stringProperty("focus only, optional: a comment on that item's thread, its ID as tracker.query prints it among the item's comments."),
 					"scope":       enumStringProperty("scope only, and required for it. given is the set tracker.query's scope calls assigned.", wslive.UIScopes),
-					"mode":        enumStringProperty("view only, and required for it. The all scope's tree is list; received offers list alone.", wslive.UIViewModes),
+					"mode":        enumStringProperty("view only, and required for it. The all scope's tree is list; received and related offer list alone.", wslive.UIViewModes),
 				},
 				"required": []string{"session_key", "op"},
 			},
