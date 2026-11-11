@@ -10,6 +10,7 @@ import {
   ENABLED_KEY,
   fitChips,
   folderParts,
+  GIT_THROTTLE_MS,
   parseAgenda,
   parseTodos,
   pctColor,
@@ -780,7 +781,7 @@ test('the switch is read keyless before a key is held, and with the key once it 
   for (const c of w.configCalls.filter((a) => a.key !== ENABLED_KEY)) expect(c.session_key).toBeUndefined()
 })
 
-test('a tool call refreshes git at most every two seconds, a turn end always does', async ($, on) => {
+test('a tool call refreshes git at most every ten seconds, a turn end always does', async ($, on) => {
   const w = world(on)
   await start($, w)
   const statusRuns = () => w.gitRuns.filter((argv) => argv.includes('status')).length
@@ -789,7 +790,11 @@ test('a tool call refreshes git at most every two seconds, a turn end always doe
   await $.tool.call({ tool: 'Bash', command: 'ls' } as never)
   await w.clock.settle()
   expect(statusRuns()).toBe(1)
-  await w.clock.advance(2000)
+  await w.clock.advance(5000)
+  await $.tool.call({ tool: 'Bash', command: 'ls' } as never)
+  await w.clock.settle()
+  expect(statusRuns()).toBe(1)
+  await w.clock.advance(5000)
   await $.tool.call({ tool: 'Bash', command: 'ls' } as never)
   await w.clock.settle()
   expect(statusRuns()).toBe(2)
@@ -884,6 +889,43 @@ test('createBand: a usage read in flight leaves one trailing read, and the mod\'
   await band.idle()
   // Both late arrivals folded into one trailing read.
   expect(usageCalls).toBe(4)
+})
+
+test('createBand: the mod\'s own tool calls read no git, a model call reads it at most every GIT_THROTTLE_MS', async () => {
+  let gitCalls = 0
+  let now = NOW
+  const band = createBand()
+  band.start({
+    readSetting: async () => true,
+    call: async () => '(no todos)\n',
+    address: async () => undefined,
+    git: async () => {
+      gitCalls += 1
+      return null
+    },
+    usage: async () => ({ startedAt: 0, context: { tokens: 1, window: 100 }, rateLimits: [] }) as never,
+    model: async () => 'm',
+    cwd: async () => '/c',
+    root: async () => '/c',
+    now: async () => now,
+    every: () => () => {},
+    redraw: () => {},
+    log: () => {},
+  } as never)
+  await band.idle()
+  expect(gitCalls).toBe(1)
+  now += GIT_THROTTLE_MS
+  // Past the throttle, only the guard keeps the mod's own call from reading.
+  band.toolCalled('mcp__ws__dashboard_intake', 'ws', false)
+  await band.idle()
+  expect(gitCalls).toBe(1)
+  band.toolCalled('Bash', undefined, true)
+  await band.idle()
+  expect(gitCalls).toBe(2)
+  now += GIT_THROTTLE_MS - 1
+  band.toolCalled('Bash', undefined, true)
+  await band.idle()
+  expect(gitCalls).toBe(2)
 })
 
 test('folderParts: either path separator splits the folder name from the path below the root', () => {
