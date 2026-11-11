@@ -588,7 +588,7 @@ func (d *Daemon) handleFSPreview(w http.ResponseWriter, r *http.Request, replyID
 	// to a line needs (a content search's match).
 	plain := r.URL.Query().Get("text") == "1"
 	switch {
-	case framed && session && !plain:
+	case framed && session && !plain && !capDenied(root, rel):
 		a.Kind = "frame"
 		a.Frame, a.TTL = d.fsCapabilityURL(replyID, root, rel), int(fsCapabilityTTL/time.Second)
 	case image && !framed:
@@ -612,8 +612,9 @@ func (d *Daemon) handleFSPreview(w http.ResponseWriter, r *http.Request, replyID
 			case plain:
 				a.Kind, a.Text = "text", string(data)
 			case framed:
-				// Under a root that is not the session's no capability is
-				// minted, so the file shows as its source.
+				// Under a root that is not the session's, or for a file
+				// the capability route refuses (capDenied), no capability
+				// is minted, so the file shows as its source.
 				a.Kind, a.Text, a.Source = "text", string(data), true
 			case ext == ".md" || ext == ".markdown":
 				a.Kind = "markdown"

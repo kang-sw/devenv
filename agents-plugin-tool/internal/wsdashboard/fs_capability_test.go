@@ -1,8 +1,11 @@
 package wsdashboard
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -226,5 +229,101 @@ func TestFSCapabilityURLEscapesThePath(t *testing.T) {
 	f.d.Handler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK || rec.Body.String() != "ODD-NAME" {
 		t.Errorf("GET %s = %d %q", frame, rec.Code, rec.Body.String())
+	}
+}
+
+// TestFSCapabilityRefusesDotAndIgnoredPaths pins that the capability route
+// keeps the whole root as its read scope, so a document's asset in a parent
+// folder loads, but refuses through a valid capability a path with a
+// dot-named segment (as written or through a symlink) and one git ignores;
+// that a root in no repository has no ignored set and refuses dot paths
+// only; that a failed ignore check inside a repository refuses the read;
+// and that the preview route mints no capability for a refused file and
+// shows its source instead.
+func TestFSCapabilityRefusesDotAndIgnoredPaths(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	f := startPageFixture(t, lanMode)
+	local, lan := fsViewers(t, f)
+	for name, body := range map[string]string{
+		"docs/sub/page.html": `<link rel="stylesheet" href="../style.css"><script src="app.js"></script>`,
+		"docs/sub/app.js":    "APP",
+		"docs/style.css":     "STYLE",
+		".env":               "SECRET-ENV",
+		".secrets/key.txt":   "SECRET-KEY",
+		".hidden/page.html":  "<h1>SECRET-HIDDEN</h1>",
+		"build/out.css":      "IGNORED-BUILD",
+		"build/page.html":    "<h1>IGNORED-PAGE</h1>",
+		"debug.log":          "IGNORED-LOG",
+	} {
+		writeFile(t, filepath.Join(f.project, filepath.FromSlash(name)), body)
+	}
+	alias := os.Symlink(filepath.Join(f.project, ".secrets"), filepath.Join(f.project, "docs", "alias")) == nil
+
+	frame := capFrame(t, f, lan, "livesession", "docs/sub/page.html")
+	prefix := strings.TrimSuffix(frame, "docs/sub/page.html")
+	read := func(stage string, path string, want int) {
+		t.Helper()
+		rec := serve(f.d, local, http.MethodGet, prefix+path, "")
+		if rec.Code != want || (want != http.StatusOK && strings.Contains(rec.Body.String(), "SECRET")) {
+			t.Errorf("%s: capability read of %s = %d %q, want %d", stage, path, rec.Code, rec.Body.String(), want)
+		}
+	}
+	preview := func(stage, path string) fsPreviewAnswer {
+		t.Helper()
+		rec := serve(f.d, lan, http.MethodGet, "/s/livesession/fs/preview?path="+path, "")
+		var a fsPreviewAnswer
+		if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &a) != nil {
+			t.Fatalf("%s: preview %s = %d %s", stage, path, rec.Code, rec.Body.String())
+		}
+		return a
+	}
+	sourceOnly := func(stage, path, body string) {
+		t.Helper()
+		if a := preview(stage, path); a.Kind != "text" || !a.Source || a.Frame != "" || a.Text != body {
+			t.Errorf("%s: preview of %s = %+v, want its source and no capability", stage, path, a)
+		}
+	}
+
+	// A root in no repository: no ignored set, the dot rule alone.
+	stage := "no repository"
+	for _, path := range []string{"docs/sub/page.html", "docs/sub/app.js", "docs/style.css", "build/out.css", "debug.log"} {
+		read(stage, path, http.StatusOK)
+	}
+	for _, path := range []string{".env", ".secrets/key.txt", ".hidden/page.html"} {
+		read(stage, path, http.StatusNotFound)
+	}
+	if alias {
+		read(stage, "docs/alias/key.txt", http.StatusNotFound)
+	}
+	sourceOnly(stage, ".hidden/page.html", "<h1>SECRET-HIDDEN</h1>")
+
+	// Inside a repository, a path git ignores is refused too; a file in an
+	// ignored folder is ignored with it.
+	gitRun(t, f.project, "init", "-q")
+	writeFile(t, filepath.Join(f.project, ".gitignore"), "build/\n*.log\n")
+	stage = "repository"
+	for _, path := range []string{"docs/sub/page.html", "docs/sub/app.js", "docs/style.css"} {
+		read(stage, path, http.StatusOK)
+	}
+	for _, path := range []string{".env", ".secrets/key.txt", ".hidden/page.html", ".gitignore", "build/out.css", "build/page.html", "debug.log"} {
+		read(stage, path, http.StatusNotFound)
+	}
+	sourceOnly(stage, ".hidden/page.html", "<h1>SECRET-HIDDEN</h1>")
+	sourceOnly(stage, "build/page.html", "<h1>IGNORED-PAGE</h1>")
+	if a := preview(stage, "docs/sub/page.html"); a.Kind != "frame" || a.Frame == "" {
+		t.Errorf("%s: preview of a served document = %+v, want a capability frame", stage, a)
+	}
+
+	// A repository git cannot answer the ignore check for (an unreadable
+	// index) refuses even a file it would serve.
+	if err := os.WriteFile(filepath.Join(f.project, ".git", "index"), []byte("garbage"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stage = "failed ignore check"
+	read(stage, "docs/style.css", http.StatusNotFound)
+	if a := preview(stage, "docs/sub/page.html"); a.Frame != "" || !a.Source {
+		t.Errorf("%s: preview of a document = %+v, want its source and no capability", stage, a)
 	}
 }

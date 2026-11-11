@@ -1,6 +1,7 @@
 package wsdashboard
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -40,7 +41,11 @@ import (
 //     restart; the card asks for a fresh one when it reloads;
 //   - it is minted only for the session's own root, never for a root the
 //     explorer's "change root" picked (the preview route shows such a
-//     file's source instead).
+//     file's source instead);
+//   - it never reads a file whose path from the root has a dot-named
+//     segment (.env, .git/, .ssh/) or that git reports ignored, where
+//     secrets usually live (capDenied); the preview route mints none for
+//     such a file and shows its source instead.
 //
 // Every response carries a Content-Security-Policy that:
 //
@@ -229,6 +234,10 @@ func (d *Daemon) handleFSCapability(w http.ResponseWriter, r *http.Request, repl
 		return
 	}
 	defer f.Close()
+	if capDenied(s.Project, rel) {
+		fsNotFound(w)
+		return
+	}
 	ctype, ok := capTypes[strings.ToLower(filepath.Ext(rel))]
 	if !ok {
 		ctype = "application/octet-stream"
@@ -241,4 +250,50 @@ func (d *Daemon) handleFSCapability(w http.ResponseWriter, r *http.Request, repl
 	h.Set("Cache-Control", "no-store")
 	h.Set("Referrer-Policy", "no-referrer")
 	http.ServeContent(w, r, "", info.ModTime(), f)
+}
+
+// capDenied reports a file inside root, at rel, that the capability route
+// still refuses: one with a dot-named segment in its path from the root,
+// as written or once resolved through its symlinks, or one git reports
+// ignored. The whole root stays the read scope, so a document's assets in
+// a parent folder load, but a framed document's script cannot fetch a
+// secret from where secrets usually live. It fails closed: when the ignore
+// check fails inside a repository the file is refused; only a root in no
+// repository has no ignored set.
+func capDenied(root, rel string) bool {
+	full := filepath.Join(filepath.Clean(root), rel)
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return true
+	}
+	real, err := filepath.EvalSymlinks(full)
+	if err != nil {
+		return true
+	}
+	realRel, err := filepath.Rel(realRoot, real)
+	if err != nil {
+		return true
+	}
+	for _, p := range []string{rel, realRel} {
+		for _, seg := range strings.Split(filepath.ToSlash(p), "/") {
+			if strings.HasPrefix(seg, ".") {
+				return true
+			}
+		}
+	}
+	dir, name := filepath.Dir(full), filepath.Base(full)
+	if ignored, repo := gitIgnored(dir, []string{name}); repo {
+		return ignored[name]
+	}
+	return !outsideRepo(dir)
+}
+
+// outsideRepo reports that git places dir in no repository. gitIgnored
+// answers no repository for a failure too; this tells the two apart, so a
+// failed ignore check inside a repository refuses the read.
+func outsideRepo(dir string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), fsIgnoreTimeout)
+	defer cancel()
+	_, err := (&gitBadgeRunner{timeout: fsIgnoreTimeout}).RunGit(ctx, dir, "rev-parse", "--is-inside-work-tree")
+	return err != nil && ctx.Err() == nil && strings.Contains(err.Error(), "not a git repository")
 }
