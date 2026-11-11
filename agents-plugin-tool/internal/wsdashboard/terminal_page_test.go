@@ -124,7 +124,7 @@ func TestBoardCardsJoinTheTopicRail(t *testing.T) {
 	for _, want := range []string{
 		"overflow: hidden; overflow: clip; display: flex; flex-direction: column; }",
 		".wb-rail .bcard:not([data-max]) .bc-hd { position: sticky; top: var(--wb-rail-top, 0px); z-index: 1; background: var(--wb-card);",
-		".wb-rail .bcard:not([data-max]) .bc-hd.wb-stuck { box-shadow: var(--wb-shadow); }",
+		".wb-rail .bcard:not([data-max]) .bc-hd.wb-stuck { box-shadow: var(--wb-shadow), 0 -6px 0 6px var(--wb-bg); }",
 	} {
 		if !strings.Contains(css, want) {
 			t.Errorf("dashboard.css lacks %q", want)

@@ -990,7 +990,9 @@ func TestTopicRailIsOnTheFullPageOnly(t *testing.T) {
 // run's first draw, reads its starting boxes before a redraw and animates
 // after it, a stuck bar draws below the top capsule stack (z-index 1 under
 // the wrapper's 3) so the card's end pushes it under the stack and a short
-// topic straddling the stick line never covers the capsules, both edges morph (the bottom stack's near
+// topic straddling the stick line never covers the capsules, a stuck bar's
+// rounded corners are filled with the page colour so the card scrolling
+// under it does not show through them, both edges morph (the bottom stack's near
 // capsule grows into a bar that leaves the stack, and a shown bar sinking
 // behind it shrinks into the capsule), the copy that morphs stands out of
 // flow in its edge's wrapper, and the rail's teardown drops both copies.
@@ -1017,7 +1019,8 @@ func TestTopicRailBarCapsuleMotion(t *testing.T) {
 		}
 	}
 	for _, want := range []string{
-		`.wb-rail .topic > .tbar.wb-stuck { box-shadow: var(--wb-shadow); }`,
+		`.wb-rail .topic > .tbar.wb-stuck { box-shadow: var(--wb-shadow), 0 -6px 0 6px var(--wb-bg); }`,
+		`.wb-rail .topic.quiet:has(> .tnote) > .tbar.wb-stuck { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }`,
 		`.wb-rail .topic > .tbar { position: sticky; top: var(--wb-rail-top, 0px); z-index: 1; }`,
 		`.wb-rail-wrap.up { top: var(--wb-rail-inset, 0px); z-index: 3; }`,
 		`.wb-rail-wrap .wb-rail-ghost { position: absolute;`,
