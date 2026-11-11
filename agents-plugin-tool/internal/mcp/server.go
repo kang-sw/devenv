@@ -175,6 +175,12 @@ const (
 	// dashboard daemon's agent runner sets it on the ws-mcp it attaches to
 	// an agent conversation, which the daemon itself hosts.
 	envNoDashboard = "WS_MCP_NO_DASHBOARD"
+	// envHostedSession marks a session the dashboard daemon hosts, and
+	// envHostedSessionKey carries the lead key the daemon minted for it
+	// (hostedSessionKey). Under both, this ws-mcp leaves the session's
+	// registration to the daemon and holds the session to that key.
+	envHostedSession    = "WS_HOSTED_SESSION"
+	envHostedSessionKey = "WS_HOSTED_SESSION_KEY"
 	// envDebugLog names a file every debug event is appended to.
 	envDebugLog = "WS_MCP_DEBUG_LOG"
 	// envAllowedTools is the comma-separated tool allowlist.
@@ -2306,8 +2312,24 @@ func (s *Server) handleLeadLogin(id json.RawMessage, arguments map[string]any) r
 	scope := parseCapabilityScope(arguments["capability"])
 	parentKey, _ := arguments["parent_session_key"].(string)
 	parentKey = strings.TrimSpace(parentKey)
+	hosted := s.hostedSessionKey()
 	if relogin, _ := arguments["relogin_session_key"].(string); strings.TrimSpace(relogin) != "" {
-		return s.handleLeadRelogin(id, arguments, strings.TrimSpace(relogin), canonical, scope, parentKey)
+		relogin = strings.TrimSpace(relogin)
+		if hosted != "" && relogin != hosted {
+			return toolTextResponse(id, "", hostedKeyRefusal("session bootstrap", hosted, relogin))
+		}
+		return s.handleLeadRelogin(id, arguments, relogin, canonical, scope, parentKey)
+	}
+	if hosted != "" && parentKey == "" && scope == roleLead {
+		// A hosted session's top-lead bootstrap returns the daemon-minted key
+		// instead of minting, so its reply-id and registration never move.
+		// Child mints below stay as they are: a subagent on this connection
+		// never receives the lead key.
+		if reason := s.leadKeyRefusal(hosted, canonical); reason != "" {
+			return toolTextResponse(id, "", fmt.Errorf("session bootstrap: this session is hosted and its session key is fixed, but %s %q %s", envHostedSessionKey, hosted, reason))
+		}
+		s.rebindMailboxOwnerAtFerrule(hosted, "", roleLead, canonical)
+		return s.leadLoginResponse(id, arguments, hosted, canonical)
 	}
 	if parentKey != "" {
 		if _, ok := s.sessions.lookup(parentKey); !ok {
@@ -2360,21 +2382,35 @@ func (s *Server) handleLeadRelogin(id json.RawMessage, arguments map[string]any,
 	if scope != roleLead {
 		return toolTextResponse(id, "", errors.New("session bootstrap: relogin_session_key requires lead capability"))
 	}
-	entry, ok := s.sessions.lookup(key)
-	if !ok {
-		return toolTextResponse(id, "", fmt.Errorf("session bootstrap: relogin_session_key %q is not a known session key", key))
-	}
-	if entry.parent != "" {
-		return toolTextResponse(id, "", fmt.Errorf("session bootstrap: relogin_session_key %q carries a parent; only a parent-less lead key can re-log in", key))
-	}
-	if entry.scope != roleLead {
-		return toolTextResponse(id, "", fmt.Errorf("session bootstrap: relogin_session_key %q is a %s key; only a lead key can re-log in", key, entry.scope))
-	}
-	if entry.root != canonical {
-		return toolTextResponse(id, "", fmt.Errorf("session bootstrap: relogin_session_key %q is bound to another root", key))
+	if reason := s.leadKeyRefusal(key, canonical); reason != "" {
+		return toolTextResponse(id, "", fmt.Errorf("session bootstrap: relogin_session_key %q %s", key, reason))
 	}
 	s.rebindMailboxOwnerAtFerrule(key, "", roleLead, canonical)
 	return s.leadLoginResponse(id, arguments, key, canonical)
+}
+
+// leadKeyRefusal is why key cannot re-log in as the top-level lead at
+// canonical, as the predicate that follows the key in a refusal; empty when
+// it can: a known, parent-less, lead-scope key bound to canonical.
+func (s *Server) leadKeyRefusal(key, canonical string) string {
+	entry, ok := s.sessions.lookup(key)
+	switch {
+	case !ok:
+		return "is not a known session key"
+	case entry.parent != "":
+		return "carries a parent; only a parent-less lead key can re-log in"
+	case entry.scope != roleLead:
+		return fmt.Sprintf("is a %s key; only a lead key can re-log in", entry.scope)
+	case entry.root != canonical:
+		return "is bound to another root"
+	}
+	return ""
+}
+
+// hostedKeyRefusal is the refusal of key in a session hosted under the
+// daemon-minted key hosted: it names the key to use instead.
+func hostedKeyRefusal(tool, hosted, key string) error {
+	return fmt.Errorf("%s: this session is hosted and its session key is fixed: use session_key %q (%s); %q is refused", tool, hosted, envHostedSessionKey, key)
 }
 
 // leadLoginResponse renders the bootstrap tool's result for key bound to

@@ -3,6 +3,8 @@ package mcp
 import (
 	"encoding/json"
 	"fmt"
+
+	"github.com/kang-sw/devenv/internal/wsgit"
 )
 
 // AgentKeyStore mints and keeps the ws session keys of the dashboard
@@ -23,6 +25,20 @@ func NewAgentKeyStore() *AgentKeyStore {
 // Mint creates a new agent key rooted at root.
 func (a *AgentKeyStore) Mint(root string) (string, error) {
 	return a.store.mint(root, roleDelegate, "")
+}
+
+// MintLead creates a parent-less lead key at root's canonical git root, the
+// record a top-lead ferrule mint writes, so the session's later ferrule
+// re-login at the same root accepts it. The daemon mints a hosted lead
+// session's key with it and passes it as WS_HOSTED_SESSION_KEY; the key is
+// never written into the dashboard registry, which records only its
+// reply-id.
+func (a *AgentKeyStore) MintLead(root string) (string, error) {
+	canonical, err := canonicalSetupRoot(wsgit.ExecRunner{}, root)
+	if err != nil {
+		return "", err
+	}
+	return a.store.mint(canonical, roleLead, "")
 }
 
 // Ensure keeps key usable for root: an existing record (either layout) rooted

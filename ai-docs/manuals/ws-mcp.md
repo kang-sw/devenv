@@ -113,9 +113,11 @@ under `<cache root>/dashboard/`:
 - `sessions/<reply-id>/registration.json` - one entry per top-level lead
   session whose `dashboard.enabled` resolves on (session scope included),
   written by the serving ws-mcp at its first keyed call and heartbeated every
-  2 minutes, and one per agent runner conversation (below), written by the
-  runner with `agent: true` (and `unlisted: true` when its profile keeps it
-  off the index page) while the daemon runs. A session counts as live while
+  2 minutes (a session the daemon hosts under `WS_HOSTED_SESSION` is
+  registered by the daemon, not by the serving ws-mcp), and one per agent
+  runner conversation (below), written by the runner with `agent: true`
+  (and `unlisted: true` when its profile keeps it off the index page) while
+  the daemon runs. A session counts as live while
   its heartbeat is under 5 minutes old and it has not ended. The daemon's
   index only reads this registry; ws-mcp prunes entries unseen for 7 days,
   except an agent conversation (an `agent` registration, or a directory
@@ -913,6 +915,8 @@ Current launcher inputs:
 | `WS_MCP_HOLDER_PYTHON` | Read by `ws-mcp dashboard`: the Python interpreter that runs session holders (see Dashboard daemon, Session holders). The launcher sets it to its own interpreter on the daemon-start step unless it is already set; unset, the daemon uses `python3` on PATH. |
 | `WS_MCP_NO_AGENT` | Product-mode gate for agentless distributions such as wsflow. |
 | `WS_MCP_NO_DASHBOARD` | `1`/`true`/`yes`/`on` turns the dashboard off for this ws-mcp whatever `dashboard.enabled` resolves: no session registration, no prune (the daemon itself is started by the launcher, never by this ws-mcp). The agent runner sets it on the ws-mcp it attaches to a conversation. |
+| `WS_HOSTED_SESSION` | `1`/`true`/`yes`/`on` marks a session the dashboard daemon hosts; the daemon sets it, with `WS_HOSTED_SESSION_KEY`, on a session it spawns. With both set, this ws-mcp neither registers nor prunes (the daemon writes the session's registration), `ferrule` returns the hosted key for a parent-less lead bootstrap and refuses a re-login with any other key, and `workflow_manual` refuses any other key except a parent-carrying child key; child mints are unchanged. Set without a key, it changes nothing here. Unset is off. |
+| `WS_HOSTED_SESSION_KEY` | The parent-less lead key the daemon minted for the session it hosts, read only while `WS_HOSTED_SESSION` is on; the session's key stays fixed to it. |
 | `WS_MCP_ALLOWED_TOOLS` | Comma list of ws tool names; when set, `tools/list` advertises and `tools/call` accepts only these. The agent runner sets it to a profile's ws tools. `tracker.show`, `tracker.ui`, and `git.search` are listed and callable only when it names them. |
 | `WS_MCP_NAMESPACE` | User-facing MCP namespace text override; empty or unset defaults to `ws`. |
 | `WS_MCP_SETUP_TOOL` | Advertised setup tool name override; empty or unset defaults to `ws.setup`. |
