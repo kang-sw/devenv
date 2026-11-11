@@ -28,7 +28,9 @@ manager side and partly about performance reviews.
   can carry a priority. It already can: every item has a `priority`, and an
   admin sets the level names, up to 9, through `roles.set_priority_levels`
   (`internal/wstracker/check.go`). The defaults are Notice / Task / Urgent.
-  No work comes from it ((612), recorded as the lead's reading).
+  No work comes from it ((612), recorded as the lead's reading). Making
+  the setting discoverable came later, from the user's own use:
+  `261111-feat-ws-tracker-store-settings-and-labels` ((206)).
 - The mail integration itself, which is downstream work on top of the hook.
 
 ## Child Tickets
