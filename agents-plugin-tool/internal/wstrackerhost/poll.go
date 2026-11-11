@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/gofrs/flock"
+
+	"github.com/kang-sw/devenv/internal/wsledger"
 )
 
 const pollLockFile = "poll.lock"
@@ -36,19 +38,40 @@ func (h *Host) PollerRunning() bool {
 	return true
 }
 
-// checkThrottled fetches st unless any process attempted a check or sync of
-// it within the check interval. Callers hold st.mu.
-func (h *Host) checkThrottled(ctx context.Context, st *store, timeout time.Duration) {
-	if st.entry.Remote == "" {
-		return
-	}
-	// A last attempt in the future (the clock stepped back) does not throttle.
-	if s := readSyncState(st.entry.Dir); !s.AttemptedAt.IsZero() {
-		if since := h.now().Sub(s.AttemptedAt); since >= 0 && since < h.checkInterval {
-			return
+// checkThrottled fetches store id unless it has no remote or any process
+// attempted a check or sync of it within the check interval. Only a store
+// that cannot be opened, or a lock held past the caller's bound
+// (WithLockWait), is an error; a failed fetch is recorded.
+func (h *Host) checkThrottled(ctx context.Context, id string, timeout time.Duration) error {
+	due := func(e StoreEntry) bool {
+		if e.Remote == "" {
+			return false
 		}
+		// A last attempt in the future (the clock stepped back) does not throttle.
+		if s := readSyncState(e.Dir); !s.AttemptedAt.IsZero() {
+			if since := h.now().Sub(s.AttemptedAt); since >= 0 && since < h.checkInterval {
+				return false
+			}
+		}
+		return true
 	}
-	_ = h.attempt(ctx, st, timeout, st.ledger.Fetch)
+	// Asked before the network mutex is: a throttled check never waits for
+	// a fetch or push in flight.
+	fetch := false
+	if err := h.with(ctx, id, func(st *store) error {
+		fetch = due(st.entry)
+		return nil
+	}); err != nil || !fetch {
+		return err
+	}
+	return h.withNet(ctx, id, func(ctx context.Context, st *store, e StoreEntry, l *wsledger.Ledger) error {
+		// Asked again: the call this one waited behind may have been the
+		// attempt.
+		if due(e) {
+			_ = h.attempt(ctx, st, timeout, l.Fetch)
+		}
+		return nil
+	})
 }
 
 // PreRead is the check before a tracker read when no daemon polls: a fetch
@@ -61,17 +84,14 @@ func (h *Host) PreRead(ctx context.Context, id string) error {
 	if h.PollerRunning() {
 		return nil
 	}
-	return h.with(ctx, id, func(st *store) error {
-		h.checkThrottled(ctx, st, preReadTimeout)
-		return nil
-	})
+	return h.checkThrottled(ctx, id, preReadTimeout)
 }
 
 // CheckAll is the lead-session-start check: a throttled fetch of every
 // registered store, whether or not a daemon polls and whatever the tracker
 // knob says. It reports nothing; a store that fails stays as it was.
 func (h *Host) CheckAll(ctx context.Context) {
-	h.forEachStore(ctx, func(st *store) { h.checkThrottled(ctx, st, networkTimeout) })
+	h.forEachStore(ctx, func(id string) { _ = h.checkThrottled(ctx, id, networkTimeout) })
 }
 
 // PollOnce is one round of the background poll: an unthrottled fetch of
@@ -79,15 +99,21 @@ func (h *Host) CheckAll(ctx context.Context) {
 // anything a page shows (pollStamp): a round that fetched nothing new and
 // kept every store's sync standing changed nothing.
 func (h *Host) PollOnce(ctx context.Context) (changed bool) {
-	h.forEachStore(ctx, func(st *store) {
-		before := pollStamp(st.entry.Dir)
-		h.trySweep(st)
-		if st.entry.Remote != "" {
-			_ = h.attempt(ctx, st, networkTimeout, st.ledger.Fetch)
-		}
-		if pollStamp(st.entry.Dir) != before {
-			changed = true
-		}
+	h.forEachStore(ctx, func(id string) {
+		_ = h.withNet(ctx, id, func(ctx context.Context, st *store, e StoreEntry, l *wsledger.Ledger) error {
+			before := pollStamp(e.Dir)
+			_ = h.locked(st, func() error {
+				h.trySweep(st)
+				return nil
+			})
+			if e.Remote != "" {
+				_ = h.attempt(ctx, st, networkTimeout, l.Fetch)
+			}
+			if pollStamp(e.Dir) != before {
+				changed = true
+			}
+			return nil
+		})
 	})
 	return changed
 }
@@ -106,9 +132,8 @@ func pollStamp(dir string) string {
 	return fmt.Sprintf("%x\x00%s", storeStamp(dir), standing)
 }
 
-// forEachStore runs fn on every registered store this process can open,
-// one at a time, skipping the ones it cannot.
-func (h *Host) forEachStore(ctx context.Context, fn func(*store)) {
+// forEachStore runs fn on the id of every registered store, one at a time.
+func (h *Host) forEachStore(ctx context.Context, fn func(id string)) {
 	stores, err := h.Stores()
 	if err != nil {
 		return
@@ -117,10 +142,7 @@ func (h *Host) forEachStore(ctx context.Context, fn func(*store)) {
 		if ctx.Err() != nil {
 			return
 		}
-		_ = h.with(ctx, e.ID, func(st *store) error {
-			fn(st)
-			return nil
-		})
+		fn(e.ID)
 	}
 }
 

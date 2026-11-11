@@ -389,18 +389,32 @@ func (l *Ledger) absorbWiki(ctx context.Context) error {
 // or saves to other wikis. err is a local failure. The refusals are kept
 // in l.wikiPushErrs until the next call, as the reasons noteUnpublished
 // gives.
-func (l *Ledger) pushLocalWikis(ctx context.Context) (failed map[string]error, err error) {
-	local, snap, known, err := l.wikiRefs(ctx)
-	if err != nil {
+func (l *Ledger) pushLocalWikis(ctx context.Context, step stepFn) (failed map[string]error, err error) {
+	// A wiki ref moves locally only under the network lock, which the
+	// caller holds, so each is pushed by name between the step that lists
+	// them and the step that records what landed.
+	var local, snap map[string]string
+	var refs []string
+	if err := step(func() error {
+		var known map[string]string
+		var err error
+		if local, snap, known, err = l.wikiRefs(ctx); err != nil {
+			return err
+		}
+		for ref := range local {
+			if _, ok := wikiNameOf(ref); ok && known[ref] == "" {
+				refs = append(refs, ref)
+			}
+		}
+		if len(refs) == 0 {
+			l.wikiPushErrs = nil
+		}
+		return nil
+	}); err != nil || len(refs) == 0 {
 		return nil, err
 	}
-	refs := make([]string, 0, len(local))
-	for ref := range local {
-		if _, ok := wikiNameOf(ref); ok && known[ref] == "" {
-			refs = append(refs, ref)
-		}
-	}
 	sort.Strings(refs)
+	var landed []string
 	for _, ref := range refs {
 		lease := snap[ref]
 		out, err := l.git.push(ctx, ref, &lease)
@@ -412,13 +426,18 @@ func (l *Ledger) pushLocalWikis(ctx context.Context) (failed map[string]error, e
 			continue
 		}
 		if out == pushOK {
-			if err := l.setKnown(ctx, ref, local[ref]); err != nil {
-				return failed, err
-			}
+			landed = append(landed, ref)
 		}
 	}
-	l.wikiPushErrs = failed
-	return failed, nil
+	return failed, step(func() error {
+		for _, ref := range landed {
+			if err := l.setKnown(ctx, ref, local[ref]); err != nil {
+				return err
+			}
+		}
+		l.wikiPushErrs = failed
+		return nil
+	})
 }
 
 // noteUnpublished re-derives l.wikiPushWarns from the refs: a local wiki
@@ -1206,7 +1225,7 @@ func (l *Ledger) WikiSave(ctx context.Context, e WikiEdit) (WikiSaveResult, erro
 		return res, err
 	}
 	var pushWarns []Warning
-	err := l.withLock(ctx, func() error {
+	save := func() error {
 		remote := l.hasRemote(ctx)
 		if remote {
 			if err := l.fetchWiki(ctx); err != nil {
@@ -1216,7 +1235,7 @@ func (l *Ledger) WikiSave(ctx context.Context, e WikiEdit) (WikiSaveResult, erro
 			// first, so the save below pushes onto a ref the remote holds.
 			// Another wiki the remote refuses is only reported; this one
 			// refuses the save.
-			failed, err := l.pushLocalWikis(ctx)
+			failed, err := l.pushLocalWikis(ctx, held)
 			if err != nil {
 				return err
 			}
@@ -1331,6 +1350,11 @@ func (l *Ledger) WikiSave(ctx context.Context, e WikiEdit) (WikiSaveResult, erro
 				return stale(tip)
 			}
 		}
+	}
+	// One step, network included: a save's fetch, merge, and push are one
+	// decision about one wiki, so the store lock stays held across them.
+	err := l.withNet(ctx, func() error {
+		return l.gated(func() error { return l.withLock(ctx, save) })
 	})
 	l.mu.Lock()
 	res.Warnings = append(append([]Warning(nil), l.wikiWarns...), pushWarns...)

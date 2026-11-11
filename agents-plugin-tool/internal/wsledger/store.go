@@ -73,6 +73,19 @@ type Options struct {
 	// process's environment (a server the dashboard daemon hosts) sets it
 	// too, so key generation follows the same PATH as its git.
 	Env []string
+	// ApplyGate, when set, runs every step in which Fetch, Sync (the idle
+	// push included), or WikiSave reads or changes the store directory
+	// under the store lock. Those calls talk to the remote between such
+	// steps holding no lock a local read needs, so the directory can be
+	// taken away meanwhile (a caller that unregisters stores); the gate is
+	// where its owner checks that. The gate calls step at most once and
+	// returns its error. A gate that does not call step returns an error:
+	// the call stops there, and what its network phase fetched reaches no
+	// local ref. The gate runs with the network lock held and may take
+	// locks of its own, so its owner never calls Fetch, Sync, WikiSave,
+	// Restore, MoveToFreshClone, or ReadAttachment holding one of them.
+	// nil runs the step directly.
+	ApplyGate func(step func() error) error
 }
 
 var (
@@ -90,6 +103,10 @@ type Ledger struct {
 	opts Options
 	git  *gitRepo
 	lock *flock.Flock
+	// netMu and netLock are the network lock (withNet): a one-slot channel
+	// rather than a mutex, so a waiter can give up.
+	netMu   chan struct{}
+	netLock *flock.Flock
 
 	member, clone, stream string
 	keyPath, pubKey, fp   string
@@ -183,9 +200,16 @@ func (o Options) normalize() (Options, error) {
 }
 
 // LockFile, in a store directory, is the file lock every call that reads or
-// moves the directory holds (withLock). A caller that only needs to know
-// whether a sync is in flight may probe it.
+// moves the directory holds (withLock), for as long as one local step
+// takes: never across a fetch or a push, save a wiki save's, a
+// registration's, and a Restore's own.
 const LockFile = "lock"
+
+// NetLockFile, in a store directory, is the file lock a call holds while
+// it talks to the remote (withNet), so two processes sharing the directory
+// never run git fetch or push on it at once. A caller that only needs to
+// know whether a fetch or push is in flight may probe it.
+const NetLockFile = "net.lock"
 
 // newLedger builds the Ledger of opts. create makes a missing store
 // directory; without it a missing directory is an error and stays missing,
@@ -213,6 +237,8 @@ func newLedger(ctx context.Context, opts Options, create bool) (*Ledger, error) 
 		opts:     o,
 		git:      &gitRepo{runner: o.Runner, dir: o.RepoDir, tmp: filepath.Join(o.Dir, "tmp")},
 		lock:     flock.New(filepath.Join(o.Dir, LockFile)),
+		netMu:    make(chan struct{}, 1),
+		netLock:  flock.New(filepath.Join(o.Dir, NetLockFile)),
 		member:   o.Member,
 		keyPath:  keyPath,
 		pubKey:   pub,
@@ -362,7 +388,102 @@ func (l *Ledger) withLock(ctx context.Context, fn func() error) error {
 	return fn()
 }
 
-// ErrBusy: Exclusive gave up waiting for the store lock.
+type netWaitKey struct{}
+
+// WithNetWait returns ctx bounding how long a call run with it waits for
+// the store's network lock, which another fetch or push of the store (in
+// this or another process) holds for up to its whole network time: a call
+// that waited d fails with ErrBusy, having fetched and pushed nothing. A
+// call whose context carries no bound waits as long as ctx allows.
+func WithNetWait(ctx context.Context, d time.Duration) context.Context {
+	return context.WithValue(ctx, netWaitKey{}, d)
+}
+
+// withNet runs fn holding the store's network lock: against this instance
+// and, through a second file lock in the store directory (NetLockFile),
+// against every other process using the directory. Every call that talks
+// to the remote runs inside it, and so does MoveToFreshClone, which must
+// not run under a push. The network lock is always taken before the store
+// lock, never while holding it; inside it a call takes the store lock
+// (withLock) only for its local steps, so a fetch or push in flight keeps
+// no local read waiting.
+func (l *Ledger) withNet(ctx context.Context, fn func() error) error {
+	lockCtx := ctx
+	wait, bounded := ctx.Value(netWaitKey{}).(time.Duration)
+	if bounded {
+		var cancel context.CancelFunc
+		lockCtx, cancel = context.WithTimeout(ctx, wait)
+		defer cancel()
+	}
+	// gaveUp is the error of a wait that ended without the lock: ErrBusy
+	// when only the bound ran out.
+	gaveUp := func() error {
+		if bounded && ctx.Err() == nil {
+			return ErrBusy
+		}
+		return fmt.Errorf("ledger: network lock: %w", lockCtx.Err())
+	}
+	select {
+	case l.netMu <- struct{}{}:
+	case <-lockCtx.Done():
+		return gaveUp()
+	}
+	defer func() { <-l.netMu }()
+	locked, err := l.netLock.TryLockContext(lockCtx, 20*time.Millisecond)
+	switch {
+	case locked:
+	case lockCtx.Err() != nil:
+		return gaveUp()
+	case err != nil:
+		return fmt.Errorf("ledger: network lock: %w", err)
+	default:
+		return errors.New("ledger: network lock not acquired")
+	}
+	defer l.netLock.Unlock() //nolint:errcheck
+	return fn()
+}
+
+// withNetAndLock runs fn holding the network lock and, inside it, the
+// store lock: a call whose network phases are not split from its local
+// steps.
+func (l *Ledger) withNetAndLock(ctx context.Context, fn func() error) error {
+	return l.withNet(ctx, func() error { return l.withLock(ctx, fn) })
+}
+
+// stepFn runs one local step of a call that talks to the remote: the part
+// that reads or changes the store directory, between two network phases.
+type stepFn func(fn func() error) error
+
+// held is the stepFn of a caller that holds the store lock across its
+// whole call, network included (Register, Restore, WikiSave).
+func held(fn func() error) error { return fn() }
+
+// gated runs fn through Options.ApplyGate.
+func (l *Ledger) gated(fn func() error) error {
+	if gate := l.opts.ApplyGate; gate != nil {
+		return gate(fn)
+	}
+	return fn()
+}
+
+// stepper returns the stepFn of a call that holds the store lock only for
+// its local steps (Fetch, Sync): each step runs through the gate and under
+// the store lock, and what it received is counted into rep. Between two
+// steps any process may append, reload, or close a batch, so a step that
+// writes from this instance's view refreshes first.
+func (l *Ledger) stepper(ctx context.Context, rep *SyncReport) stepFn {
+	return func(fn func() error) error {
+		return l.gated(func() error {
+			return l.withLock(ctx, func() error {
+				defer func() { rep.Received += l.received }()
+				return fn()
+			})
+		})
+	}
+}
+
+// ErrBusy: Exclusive gave up waiting for the store lock, or a call bounded
+// by WithNetWait for the network lock.
 var ErrBusy = errors.New("ledger: the store is busy")
 
 // Unpushed is what a clone holds that its remote does not (Exclusive).
@@ -376,11 +497,15 @@ type Unpushed struct {
 // Exclusive runs fn under the store lock with what this clone has not
 // pushed, read from the store directory as it is now (Reload's re-read, so
 // another process's appends are counted). Until fn returns, no other call
-// on this Ledger and no other process's Append, Sync, Fetch, Reload, or
-// idle push runs on the directory, which is what a caller about to remove
-// the directory needs: fn may rename it away. Exclusive waits at most wait
-// for the lock, this Ledger's own running call included, and then fails
-// with ErrBusy, having run nothing.
+// on this Ledger and no other process's Append or Reload, and no local
+// step of a Sync, Fetch, or idle push, runs on the directory, which is
+// what a caller about to remove the directory needs: fn may rename it
+// away. A fetch or push already talking to the remote is not waited for:
+// it holds the network lock, not this one, and writes only objects and
+// remote-tracking refs meanwhile; the step that would apply its result
+// comes after fn, and Options.ApplyGate is where the caller refuses it.
+// Exclusive waits at most wait for the lock, this Ledger's own running
+// step included, and then fails with ErrBusy, having run nothing.
 func (l *Ledger) Exclusive(ctx context.Context, wait time.Duration, fn func(Unpushed) error) error {
 	deadline := time.Now().Add(wait)
 	for !l.mu.TryLock() {
@@ -1115,55 +1240,79 @@ func (l *Ledger) reissue() (int, error) {
 // Sync is the apply path: close the open batch, push this clone's ref
 // (fast-forward only), fetch, verify, and re-issue cut events. A failed
 // sync leaves pending writes in place for the next attempt.
+//
+// It holds the network lock throughout and the store lock only for its
+// local steps: a push sends the commits the step before it chose, and
+// whatever any process appended or closed meanwhile is read again by the
+// step that applies the fetch.
 func (l *Ledger) Sync(ctx context.Context) (SyncReport, error) {
 	var rep SyncReport
-	err := l.withLock(ctx, func() error {
-		defer l.noteUnpublished(ctx)
-		if err := l.refresh(ctx); err != nil {
-			return err
-		}
-		remote := l.hasRemote(ctx)
-		publish := func() error {
+	err := l.withNet(ctx, func() error {
+		step := l.stepper(ctx, &rep)
+		defer l.noteUnpublishedStep(ctx, step)
+		remote := false
+		if err := step(func() error {
+			if err := l.refresh(ctx); err != nil {
+				return err
+			}
+			remote = l.hasRemote(ctx)
 			closed, err := l.closeBatch(ctx)
+			rep.Closed = closed
+			if err != nil || remote {
+				return err
+			}
+			// No remote: nothing is fetched, so the re-issue runs here.
+			n, err := l.reissue()
 			if err != nil {
 				return err
 			}
-			rep.Closed = rep.Closed || closed
-			if !remote {
-				return nil
+			rep.Reissued = n
+			if n > 0 {
+				closed, err = l.closeBatch(ctx)
+				rep.Closed = rep.Closed || closed
 			}
-			pushed, err := l.pushAll(ctx)
+			return err
+		}); err != nil || !remote {
+			return err
+		}
+		for round := 1; ; round++ {
+			pushed, err := l.pushAll(ctx, step)
 			if err != nil {
 				return err
 			}
 			rep.Pushed = rep.Pushed || pushed
 			// A wiki the remote refuses does not stop the ledger's own
 			// fetch; it is reported (noteUnpublished) until a push lands.
-			if _, err := l.pushLocalWikis(ctx); err != nil {
+			if _, err := l.pushLocalWikis(ctx, step); err != nil {
 				return err
 			}
-			if err := l.fetchRemote(ctx); err != nil {
+			again := false
+			if err := l.fetchRemote(ctx, step, func() error {
+				if err := l.refresh(ctx); err != nil {
+					return err
+				}
+				if round == 1 {
+					n, err := l.reissue()
+					if err != nil {
+						return err
+					}
+					rep.Reissued = n
+					if n > 0 {
+						// A second round publishes the re-issued events.
+						again = true
+						closed, err := l.closeBatch(ctx)
+						rep.Closed = rep.Closed || closed
+						return err
+					}
+				}
+				if l.pendingLocked().Count == 0 {
+					return l.clearDeadline()
+				}
+				return nil
+			}); err != nil || !again {
 				return err
 			}
-			return l.refresh(ctx)
 		}
-		if err := publish(); err != nil {
-			return err
-		}
-		n, err := l.reissue()
-		if err != nil {
-			return err
-		}
-		rep.Reissued = n
-		if n > 0 {
-			if err := publish(); err != nil {
-				return err
-			}
-		}
-		if remote && l.pendingLocked().Count == 0 {
-			return l.clearDeadline()
-		}
-		return nil
 	})
 	l.finishReport(&rep)
 	return rep, err
@@ -1171,28 +1320,48 @@ func (l *Ledger) Sync(ctx context.Context) (SyncReport, error) {
 
 // Fetch receives without pushing: fetch, verify, and close the open batch
 // into a local commit when new events arrived. With no remote it verifies
-// local refs.
+// local refs. Like Sync, it holds the store lock only for its local steps.
 func (l *Ledger) Fetch(ctx context.Context) (SyncReport, error) {
 	var rep SyncReport
-	err := l.withLock(ctx, func() error {
-		defer l.noteUnpublished(ctx)
-		if err := l.refresh(ctx); err != nil {
+	err := l.withNet(ctx, func() error {
+		step := l.stepper(ctx, &rep)
+		defer l.noteUnpublishedStep(ctx, step)
+		receive := func() error {
+			closed, err := l.receiveClose(ctx)
+			rep.Closed = closed
 			return err
 		}
-		if l.hasRemote(ctx) {
-			if err := l.fetchRemote(ctx); err != nil {
-				return err
-			}
+		remote := false
+		if err := step(func() error {
 			if err := l.refresh(ctx); err != nil {
 				return err
 			}
+			if remote = l.hasRemote(ctx); remote {
+				return nil
+			}
+			return receive()
+		}); err != nil || !remote {
+			return err
 		}
-		closed, err := l.receiveClose(ctx)
-		rep.Closed = closed
-		return err
+		return l.fetchRemote(ctx, step, func() error {
+			if err := l.refresh(ctx); err != nil {
+				return err
+			}
+			return receive()
+		})
 	})
 	l.finishReport(&rep)
 	return rep, err
+}
+
+// noteUnpublishedStep runs noteUnpublished as the last step of a Fetch or
+// Sync, whatever the call's outcome. A step that cannot run (the gate
+// refuses, ctx is over) leaves the warnings as they were.
+func (l *Ledger) noteUnpublishedStep(ctx context.Context, step stepFn) {
+	_ = step(func() error {
+		l.noteUnpublished(ctx)
+		return nil
+	})
 }
 
 // Reload is Fetch without the network: it re-reads the store directory,
@@ -1200,10 +1369,13 @@ func (l *Ledger) Fetch(ctx context.Context) (SyncReport, error) {
 // this clone's journal and ref, a Fetch that took remote refs), and closes
 // the open batch into a local commit when new events arrived. An open
 // Ledger reads only its own last refresh, so a long-lived reader calls
-// Reload before reading what another process may have changed.
+// Reload before reading what another process may have changed. It never
+// waits for a fetch or push in flight: it sees the directory as the last
+// completed step of one left it.
 func (l *Ledger) Reload(ctx context.Context) (SyncReport, error) {
 	var rep SyncReport
 	err := l.withLock(ctx, func() error {
+		defer func() { rep.Received = l.received }()
 		if err := l.refresh(ctx); err != nil {
 			return err
 		}
@@ -1221,10 +1393,11 @@ func (l *Ledger) Reload(ctx context.Context) (SyncReport, error) {
 	return rep, err
 }
 
+// finishReport fills what a report reads from the ledger once its call is
+// over; Received is counted by the call's own steps.
 func (l *Ledger) finishReport(rep *SyncReport) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	rep.Received = l.received
 	rep.Warnings = append(append(append(rep.Warnings, l.remoteWarns...), l.badRefs...), l.attachWarns...)
 	rep.Warnings = append(append(append(rep.Warnings, l.wikiWarns...), l.wikiPushWarns...), l.pendingWarns...)
 	l.pendingWarns = nil

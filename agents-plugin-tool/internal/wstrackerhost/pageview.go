@@ -33,8 +33,9 @@ func newReload() *reload { return &reload{done: make(chan struct{})} }
 
 // ViewWithin is View for a reader that would rather see a briefly stale
 // view than wait: the dashboard daemon's page, whose store reload can wait
-// behind another process's (or the daemon's own) push or fetch holding the
-// store's lock for up to a network timeout.
+// behind whatever holds the store's lock. A fetch or push holds it only
+// for its local steps; a wiki save holds it across its own fetch and push,
+// up to a network timeout.
 //
 // The reload runs in the background, at most one per store at a time, on
 // a context Close cancels. ViewWithin waits for it at most wait; past that
@@ -165,7 +166,7 @@ func (h *Host) reloadLoop(st *store, id string, staleDays int) {
 		r := st.cur
 		st.viewMu.Unlock()
 		// The same bound a write waits for the store (writeLockWait): the
-		// lock holder may be a sync pushing and fetching.
+		// lock holder may be a wiki save fetching and pushing.
 		ctx, cancel := context.WithTimeout(h.ctx, writeLockWait)
 		v, err := h.view(ctx, id, staleDays, func() {
 			st.viewMu.Lock()

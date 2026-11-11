@@ -311,7 +311,7 @@ func TestUnregisterSeenByAnotherProcess(t *testing.T) {
 	if _, err := ledger.Sync(ctx); err == nil {
 		t.Fatal("a late idle push of a removed store must fail")
 	}
-	if _, err := wstracker.Open(ctx, other.ledgerOptions(st.entry, "")); err == nil {
+	if _, err := wstracker.Open(ctx, other.ledgerOptions(st, "")); err == nil {
 		t.Fatal("opening a removed store must fail")
 	}
 	wantGone(t, a, "team")
