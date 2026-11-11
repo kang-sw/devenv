@@ -407,7 +407,7 @@
       return name + "." + (p ? p.hash : el.getAttribute("data-h"));
     }).concat(mode !== "index" ? ["mode." + modeHash] : []).join(",");
   }
-  // A deferred board swap lands still (no topic motion), so the board never
+  // A deferred board swap lands still (no board motion), so the board never
   // moves under a just-blurred input.
   function swap(name, hash, html, still) {
     var el = region(name);
@@ -421,7 +421,7 @@
     var answers = board ? readAnswers(el) : null;
     var railTop = name === "rail" ? railScrollTop() : null;
     var frameH = board ? frameHeights(el) : null;
-    var before = board && !still && !reducedMotion() ? topicHeights(el) : null;
+    var before = board && !still && !reducedMotion() ? boardSpots(el) : null;
     // The entries merge and the board morph prepare only the nodes they
     // insert; any other region is replaced whole. A finished reply's mermaid
     // fences draw once merged; the streaming reply (convlive) keeps them
@@ -437,7 +437,11 @@
         setFrameHeights(n, frameH);
         writeAnswers(n, answers);
       });
-      if (before) topicMotion(before, ins).forEach(function (m) { growTopic(m.n, m.from); });
+      if (before) {
+        topicMotion(before, ins).forEach(function (m) { growTopic(m.n, m.from); });
+        slideBoard(el, before);
+        ins.forEach(function (n) { q("iframe.doc-frame", n).forEach(function (f) { f.wbGrow = true; }); });
+      }
     } else {
       el.innerHTML = html;
       restoreOpen(el);
@@ -570,16 +574,30 @@
     window.WsCards.settle(el, window.WsCards.weave(want));
     return ins;
   }
-  // Topic motion: a board swap's inserted topic sections grow from the
+  // Board motion: a board swap's inserted topic sections grow from the
   // height they had before (a topic the board did not hold grows from 0)
-  // to their natural height. The heights are read before the morph; a
-  // section still animating reads at its rendered height, so a new swap
-  // starts from there. Topics in the closed pages (moved there or out of
-  // there by the closed-page reconciliation) do not move.
+  // to their natural height, and every topic section and card standing in
+  // the board slides from where it stood to where it stands now (topics
+  // are ordered by their last update, so an update moves its topic to the
+  // head and shifts the rest). The spots are read before the morph; a
+  // section still animating reads at its rendered height and place, so a
+  // new swap starts from there. Topics in the closed pages (moved there or
+  // out of there by the closed-page reconciliation) do not move. A changed
+  // topic's frame starts at its old height and eases to the first height
+  // it reports (the frame message handler, wbGrow).
   function reducedMotion() { return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches); }
-  function topicHeights(el) {
-    var h = {};
-    q("section.topic[data-topic]", el).forEach(function (n) { h["t:" + n.getAttribute("data-topic")] = { h: n.getBoundingClientRect().height, paged: n.parentNode !== el }; });
+  // boardSpots reads each topic section's height and offset from the
+  // board's top, keyed "t:" + its topic, and each card's offset, keyed
+  // "c:" + its id.
+  function boardSpots(el) {
+    var h = {}, top = el.getBoundingClientRect().top;
+    q("section.topic[data-topic]", el).forEach(function (n) {
+      var r = n.getBoundingClientRect();
+      h["t:" + n.getAttribute("data-topic")] = { h: r.height, y: r.top - top, paged: n.parentNode !== el };
+    });
+    Array.prototype.forEach.call(el.children, function (n) {
+      if (n.hasAttribute("data-card")) h["c:" + n.getAttribute("data-card")] = { y: n.getBoundingClientRect().top - top };
+    });
     return h;
   }
   // topicMotion returns, in order, the inserted topic sections that animate
@@ -611,6 +629,25 @@
       a.marginBottom = "0px"; b.marginBottom = getComputedStyle(n).marginBottom;
     }
     n.animate([a, b], { duration: 200, easing: "ease-out" });
+  }
+  // slideBoard moves each topic section and card standing in the board from
+  // its spot before the swap to its place now (FLIP): the layout is
+  // already final, and a transform that starts at the old offset eases to
+  // none. It runs after the growth started, so the places it reads are the
+  // growth's first frame and slide and growth add up to one movement.
+  // Nothing moves in the DOM (moving a frame reloads it), and the
+  // animation fills nothing, so no transform stays behind. A maximized card
+  // stays put: a transform would anchor its fixed inner box to the card.
+  function slideBoard(el, before) {
+    var top = el.getBoundingClientRect().top;
+    Array.prototype.forEach.call(el.children, function (n) {
+      var k = topicKey(n), card = k === null && n.hasAttribute("data-card");
+      var b = k !== null ? before["t:" + k] : card ? before["c:" + n.getAttribute("data-card")] : null;
+      if (!b || b.paged || !n.animate || (card && n.hasAttribute("data-max"))) return;
+      var dy = b.y - (n.getBoundingClientRect().top - top);
+      if (Math.abs(dy) < 1) return;
+      n.animate([{ transform: "translateY(" + dy + "px)" }, { transform: "none" }], { duration: 200, easing: "ease-out" });
+    });
   }
 
   // --- conversation entries: merged by key, never re-rendered ----------------
@@ -2150,7 +2187,16 @@
     if (!f || !m || typeof m !== "object") return;
     if (m.wbDoc === "height") {
       var h = num(m.height);
-      if (h >= 0 && h < 100000) f.style.height = Math.ceil(h) + "px";
+      if (h >= 0 && h < 100000) {
+        var from = f.getBoundingClientRect().height, to = Math.ceil(h);
+        f.style.height = to + "px";
+        // The first height a frame of a moving board swap reports eases
+        // from the height the frame stood at (board motion, slideBoard).
+        if (f.wbGrow) {
+          f.wbGrow = false;
+          if (f.animate && Math.abs(to - from) >= 1) f.animate([{ height: from + "px" }, { height: to + "px" }], { duration: 200, easing: "ease-out" });
+        }
+      }
       // A frame rendered before a theme switch (a board swap on a stream
       // opened earlier) takes the current theme when it first reports.
       postTheme(f);
