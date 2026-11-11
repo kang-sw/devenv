@@ -769,6 +769,9 @@
     "kind": "task",
     "title": "Kai todo",
     "body": "",
+    "bodyRev": [
+     "ada.pc#1"
+    ],
     "project": "",
     "labels": [],
     "due": null,
@@ -817,6 +820,9 @@
     "kind": "task",
     "title": "Kai stale doing",
     "body": "",
+    "bodyRev": [
+     "ada.pc#2"
+    ],
     "project": "",
     "labels": [],
     "due": null,
@@ -866,6 +872,9 @@
     "kind": "task",
     "title": "Kai blocked",
     "body": "",
+    "bodyRev": [
+     "ada.pc#3"
+    ],
     "project": "",
     "labels": [],
     "due": null,
@@ -915,6 +924,9 @@
     "kind": "task",
     "title": "Kai overdue",
     "body": "",
+    "bodyRev": [
+     "ada.pc#4"
+    ],
     "project": "",
     "labels": [],
     "due": "2026-11-05",
@@ -963,6 +975,9 @@
     "kind": "task",
     "title": "Kai idea",
     "body": "",
+    "bodyRev": [
+     "ada.pc#5"
+    ],
     "project": "",
     "labels": [],
     "due": null,
@@ -1012,6 +1027,9 @@
     "kind": "task",
     "title": "Kai done",
     "body": "",
+    "bodyRev": [
+     "ada.pc#6"
+    ],
     "project": "",
     "labels": [],
     "due": null,
@@ -1061,6 +1079,9 @@
     "kind": "task",
     "title": "Unused",
     "body": "",
+    "bodyRev": [
+     "ada.pc#7"
+    ],
     "project": "",
     "labels": [],
     "due": null,
@@ -1108,6 +1129,9 @@
     "kind": "task",
     "title": "Kai awaiting",
     "body": "",
+    "bodyRev": [
+     "ada.pc#8"
+    ],
     "project": "",
     "labels": [],
     "due": "2026-11-05",
@@ -1158,6 +1182,9 @@
     "kind": "task",
     "title": "Kai done past due",
     "body": "",
+    "bodyRev": [
+     "ada.pc#9"
+    ],
     "project": "",
     "labels": [],
     "due": "2026-11-05",
@@ -1207,6 +1234,9 @@
     "kind": "topic",
     "title": "Kai topic",
     "body": "",
+    "bodyRev": [
+     "ada.pc#10"
+    ],
     "project": "",
     "labels": [],
     "due": null,
@@ -1255,6 +1285,9 @@
     "kind": "task",
     "title": "Kai own",
     "body": "",
+    "bodyRev": [
+     "kai.pc#7"
+    ],
     "project": "",
     "labels": [],
     "due": "2026-11-02",
@@ -1302,6 +1335,9 @@
     "kind": "task",
     "title": "Kai own done",
     "body": "",
+    "bodyRev": [
+     "kai.pc#8"
+    ],
     "project": "",
     "labels": [],
     "due": null,
@@ -1350,6 +1386,9 @@
     "kind": "task",
     "title": "Bo asks kai",
     "body": "",
+    "bodyRev": [
+     "bo.pc#1"
+    ],
     "project": "",
     "labels": [],
     "due": null,
@@ -1400,6 +1439,9 @@
     "kind": "task",
     "title": "Zed work",
     "body": "",
+    "bodyRev": [
+     "bo.pc#3"
+    ],
     "project": "",
     "labels": [],
     "due": null,

@@ -338,6 +338,8 @@ func (s *state) checkExtras(p obj, prior []attachment) rejection {
 	return ""
 }
 
+const baseShape = "base must be a list of event ids (the body revision the editor saw)"
+
 const stageShape = "stage must be review (null or absent: todo)"
 
 // retiredStage refuses a new write carrying stage. The review stage is
@@ -613,8 +615,9 @@ func (s *state) check(n *node) rejection {
 		if r != "" {
 			return r
 		}
-		if it.author != a && !s.creatorGone(it, a) {
-			return rejection("only the creator (" + it.author + ") edits " + it.alias)
+		// The creator or a live assignee edits every field.
+		if r := s.needCreatorOrAssignee(it, a, ""); r != "" && !s.creatorGone(it, a) {
+			return r
 		}
 		if it.hidden {
 			return rejection(it.alias + " is hidden")
@@ -645,6 +648,22 @@ func (s *state) check(n *node) rejection {
 		}
 		if !p.null("refs") && !p.has("body") {
 			return "refs go with a body edit"
+		}
+		// base is the body revision the editor saw; an id naming no body
+		// write folds as a whole replace, so only its shape is checked.
+		if !p.null("base") {
+			if !p.has("body") {
+				return "base goes with a body edit"
+			}
+			l, ok := p.list("base")
+			if !ok {
+				return baseShape
+			}
+			for _, x := range l {
+				if _, ok := x.(string); !ok {
+					return baseShape
+				}
+			}
 		}
 		return s.checkExtras(p, it.attachments)
 

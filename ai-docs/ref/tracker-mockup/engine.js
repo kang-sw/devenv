@@ -37,6 +37,7 @@
   // event's id, and an item's labels field is a list of those ids.
   var LABEL_LIST = ['roles.add_label', 'roles.edit_label', 'roles.remove_label'], COLOR_RE = /^#[0-9a-f]{6}$/;
   var STAGE_SHAPE = 'stage must be review (null or absent: todo)';
+  var BASE_SHAPE = 'base must be a list of event ids (the body revision the editor saw)';
   // Priority levels are store configuration (roles file, roles.set_priority_levels).
   // Codes are integers 0..n-1, larger = more urgent; names are display names only.
   var DEFAULT_PRIORITY = { names: ['Notice', 'Task', 'Urgent'], default: 1 };
@@ -223,7 +224,7 @@
   // ------------------------------------------------------------------ state
 
   function genesis(roles) {
-    var S = { members: {}, admins: {}, items: {}, place: [], asg: {}, rules: {}, comments: {}, reg: {}, prio: normPriority(roles.priority),
+    var S = { members: {}, admins: {}, items: {}, place: [], asg: {}, rules: {}, comments: {}, reg: {}, bodies: {}, prio: normPriority(roles.priority),
       att: normAttachments(roles.attachments), labels: {}, lorder: [], reqs: {}, rorder: [] };
     (roles.members || []).forEach(function (m) {
       S.members[m.id] = { id: m.id, profile: normProfile(m, m.id), keys: (m.keys || []).slice(), revoked: {}, leads: (m.leads || []).slice(), removed: null, joined: null };
@@ -598,7 +599,8 @@
 
       case 'item.edit':
         it = needItem(S, p.item);
-        if (it.author !== a && !creatorGone(S, it, a)) rej('only the creator (' + it.author + ') edits ' + it.alias);
+        // The creator or a live assignee edits every field.
+        try { needCreatorOrAssignee(S, it, a, ''); } catch (e) { if (!(e instanceof Rej) || !creatorGone(S, it, a)) throw e; }
         if (it.hidden) rej(it.alias + ' is hidden');
         if (!ITEM_FIELDS.some(function (f) { return has(p, f); })) rej('nothing to edit (' + EDIT_FIELDS.join(', ') + ')');
         if (has(p, 'priority') && p.priority == null) rej('priority cannot be cleared; set a level');
@@ -606,6 +608,12 @@
         if (has(p, 'stage')) checkStage(S, it, p);
         if ((p.mentions != null || p.attachments != null) && !has(p, 'body')) rej('mentions and attachments go with a body edit');
         if (p.refs != null && !has(p, 'body')) rej('refs go with a body edit');
+        // base is the body revision the editor saw; an id naming no body write folds as
+        // a whole replace, so only its shape is checked.
+        if (p.base != null) {
+          if (!has(p, 'body')) rej('base goes with a body edit');
+          if (!Array.isArray(p.base) || !p.base.every(function (x) { return typeof x === 'string'; })) rej(BASE_SHAPE);
+        }
         checkExtras(S, p, it.attachments);
         break;
 
@@ -977,7 +985,7 @@
   function attachmentsOf(p) {
     return Array.isArray(p.attachments) ? p.attachments.map(function (x) { return { oid: x.oid, name: x.name, size: x.size, mime: x.mime }; }) : [];
   }
-  // The register's shown write: mentions, attachments and refs follow the body write that won.
+  // The register's shown write: a comment's mentions, attachments and refs follow the text write that won.
   function regWinner(S, key) { return winner(S.reg[key]).n; }
   // The value write(S, key, _, n, v) would show, without writing.
   function peek(S, key, n, v) {
@@ -1224,6 +1232,200 @@
     });
   }
 
+  // ------------------------------------------------------------------ body merge
+  // An item.edit body carries the full new text and, from the editor, base: the body
+  // revision it saw (the body write heads of the value it loaded). The Go port
+  // (wstracker/merge.go) mirrors every function here line for line; the golden cases
+  // pin the two to one result.
+
+  // The body a write carries: item.create's when truthy, an item.edit's unless null.
+  function bodyText(n) {
+    if (n.type === 'item.create') return n.p.body ? String(n.p.body) : '';
+    return n.p.body == null ? '' : String(n.p.body);
+  }
+  function linesFrom(text, src) { return text.split('\n').map(function (t) { return { text: t, src: src }; }); }
+  function joinLines(l) { return l.map(function (x) { return x.text; }).join('\n'); }
+  function textsOf(l) { return l.map(function (x) { return x.text; }); }
+
+  // Myers' greedy line diff of a and b, after the common prefix and suffix are set
+  // aside, as maximal hunks {a0, a1, b0, b1} (base lines [a0, a1) became [b0, b1))
+  // between the matched lines. A step goes down (an insertion) when V[k-1] < V[k+1],
+  // else right (a deletion).
+  function diffLines(a, b) {
+    var pre = 0, suf = 0;
+    while (pre < a.length && pre < b.length && a[pre] === b[pre]) pre++;
+    while (suf < a.length - pre && suf < b.length - pre && a[a.length - 1 - suf] === b[b.length - 1 - suf]) suf++;
+    a = a.slice(pre, a.length - suf); b = b.slice(pre, b.length - suf);
+    var n = a.length, m = b.length, max = n + m, off = max + 1, v = [], trace = [], d, k, x, y, i;
+    for (i = 0; i < 2 * max + 3; i++) v.push(0);
+    found:
+    for (d = 0; d <= max; d++) {
+      trace.push(v.slice(off - d - 1, off + d + 2)); // V before step d, for k in [-d-1, d+1]
+      for (k = -d; k <= d; k += 2) {
+        x = k === -d || (k !== d && v[off + k - 1] < v[off + k + 1]) ? v[off + k + 1] : v[off + k - 1] + 1;
+        y = x - k;
+        while (x < n && y < m && a[x] === b[y]) { x++; y++; }
+        v[off + k] = x;
+        if (x >= n && y >= m) break found;
+      }
+    }
+    var mx = [], my = [];
+    x = n; y = m;
+    for (; d > 0; d--) {
+      var pv = trace[d], po = d + 1;
+      k = x - y;
+      var pk = k === -d || (k !== d && pv[po + k - 1] < pv[po + k + 1]) ? k + 1 : k - 1;
+      var px = pv[po + pk], py = px - pk;
+      while (x > px && y > py) { x--; y--; mx.push(x); my.push(y); }
+      x = px; y = py;
+    }
+    while (x > 0 && y > 0) { x--; y--; mx.push(x); my.push(y); }
+    var out = [], pa = 0, pb = 0;
+    for (i = mx.length - 1; i >= -1; i--) {
+      var ma = i >= 0 ? mx[i] : n, mb = i >= 0 ? my[i] : m;
+      if (ma > pa || mb > pb) out.push({ a0: pre + pa, a1: pre + ma, b0: pre + pb, b1: pre + mb });
+      pa = ma + 1; pb = mb + 1;
+    }
+    return out;
+  }
+
+  // Merges mine (w's new text) and cur (the folded value) from base. Hunks of the two
+  // diffs whose base ranges intersect or touch form one group; a group changed on one
+  // side takes that side; a group both sides changed to the same lines takes cur's; any
+  // other group both changed is an overlap, which settle judges from cur's lines in it:
+  // mine when it returns true, else cur's. A kept line keeps its source: cur's outside
+  // mine's changes, base's for lines mine kept inside a group, w for the lines mine wrote.
+  function merge3(base, cur, mine, w, settle) {
+    var bt = textsOf(base), hc = diffLines(bt, textsOf(cur)), hm = diffLines(bt, mine), tl = [], bi = 0, out = [];
+    hm.forEach(function (h) {
+      tl = tl.concat(base.slice(bi, h.a0), mine.slice(h.b0, h.b1).map(function (t) { return { text: t, src: w }; }));
+      bi = h.a1;
+    });
+    tl = tl.concat(base.slice(bi));
+    var vi = 0, ti = 0, i = 0, j = 0;
+    bi = 0;
+    while (i < hc.length || j < hm.length) {
+      // A group starts at the earliest remaining hunk and takes every hunk starting at or before its end.
+      var gs = j >= hm.length || (i < hc.length && hc[i].a0 <= hm[j].a0) ? hc[i].a0 : hm[j].a0;
+      var ge = gs, inA = false, inB = false, vLen = 0, tLen = 0;
+      for (;;) {
+        var h;
+        if (i < hc.length && hc[i].a0 <= ge) { h = hc[i++]; inA = true; vLen += (h.b1 - h.b0) - (h.a1 - h.a0); }
+        else if (j < hm.length && hm[j].a0 <= ge) { h = hm[j++]; inB = true; tLen += (h.b1 - h.b0) - (h.a1 - h.a0); }
+        else break;
+        if (h.a1 > ge) ge = h.a1;
+      }
+      var same = gs - bi;
+      out = out.concat(cur.slice(vi, vi + same));
+      vi += same; ti += same;
+      vLen += ge - gs; tLen += ge - gs;
+      var vr = cur.slice(vi, vi + vLen), tr = tl.slice(ti, ti + tLen);
+      if (!inB) out = out.concat(vr);
+      else if (!inA) out = out.concat(tr);
+      else if (textsOf(vr).join('\n') === textsOf(tr).join('\n') && vr.length === tr.length) out = out.concat(vr);
+      else out = out.concat(settle(vr) ? tr : vr);
+      bi = ge; vi += vLen; ti += tLen;
+    }
+    return out.concat(cur.slice(vi));
+  }
+
+  // x is in the causal closure of heads: a head, or in one's causal past.
+  function inClosure(x, heads) { return heads.some(function (h) { return x === h || hb(x, h); }); }
+  // The writes of prior that w's base names and that are in w's causal past; none
+  // means w is a whole replace.
+  function baseHeads(prior, w) {
+    if (w.type !== 'item.edit' || w.p.base == null) return [];
+    var ids = Array.isArray(w.p.base) ? w.p.base.map(String) : [];
+    return prior.filter(function (x) { return ids.indexOf(x.id) >= 0 && hb(x, w); });
+  }
+
+  // Folds body write w onto cur, the value of prior (the writes folded before it).
+  // Returns the new value (out); rivals, the concurrent writes w overlapped, in fold
+  // order, each with the overlap's winner ({ x, win }); and lostTo, the human write of
+  // w's own member it lost an overlap to, if any. A base whose closure holds every prior
+  // write is a plain replace. A base-less (or unknown-base) write is a whole replace,
+  // which overlaps every concurrent write. Otherwise the write merges three-way from its
+  // base text, and each overlapping group names its rivals: the concurrent writes whose
+  // lines cur holds there, or, when cur only dropped base lines there (no line tells
+  // who), every concurrent write. An overlap goes to w, the later in fold order, except
+  // that an agent write loses a group to a concurrent human write of its own member
+  // among that group's rivals.
+  function bodyStep(f, prior, cur, w) {
+    if (w.type === 'item.create') return { out: linesFrom(bodyText(w), w), rivals: [], lostTo: null };
+    var conc = prior.filter(function (x) { return !hb(x, w); }), human = null;
+    if (w.origin !== 'human') conc.forEach(function (x) { if (x.author === w.author && x.origin === 'human') human = x; });
+    var heads = baseHeads(prior, w);
+    if (!heads.length) return {
+      out: human ? cur : linesFrom(bodyText(w), w),
+      rivals: conc.map(function (x) { return { x: x, win: human ? x : w }; }),
+      lostTo: human
+    };
+    var sub = prior.filter(function (x) { return inClosure(x, heads); });
+    if (sub.length === prior.length) return { out: linesFrom(bodyText(w), w), rivals: [], lostTo: null };
+    var base = f.base[w.id];
+    if (!base) base = f.base[w.id] = foldBody(f, sub);
+    var hit = [], lostTo = null;
+    var out = merge3(base, cur, bodyText(w).split('\n'), w, function (vr) {
+      var srcs = vr.map(function (l) { return l.src; }), wins = true;
+      var changed = srcs.some(function (x) { return sub.indexOf(x) < 0; });
+      conc.forEach(function (x) {
+        if (changed && srcs.indexOf(x) < 0) return;
+        if (hit.indexOf(x) < 0) hit.push(x);
+        if (x === human) wins = false;
+      });
+      if (!wins) lostTo = human;
+      return wins;
+    });
+    return {
+      out: out,
+      rivals: conc.filter(function (x) { return hit.indexOf(x) >= 0; }).map(function (x) { return { x: x, win: x === human ? x : w }; }),
+      lostTo: lostTo
+    };
+  }
+  // The value of writes, a causally closed run in fold order.
+  function foldBody(f, writes) {
+    var cur = null;
+    writes.forEach(function (w, i) { cur = bodyStep(f, writes.slice(0, i), cur, w).out; });
+    return cur;
+  }
+
+  // Folds item.edit n's body: the merged value, the body revision (the register's
+  // heads), the markers of an overlap, and the lists that follow the body.
+  function applyBody(S, it, n, C) {
+    var f = S.bodies[it.id], key = 'it:' + it.id + ':body', label = 'body of ' + it.alias;
+    var r = bodyStep(f, f.writes, f.lines, n);
+    f.writes.push(n); f.lines = r.out;
+    S.reg[key] = (S.reg[key] || []).filter(function (h) { return !hb(h.n, n); }).concat([{ n: n, v: bodyText(n) }]);
+    if (C) {
+      r.rivals.forEach(function (v) {
+        var x = v.x;
+        if (x.author !== n.author) {
+          mark(x, n, 'field', label, { winner: v.win.id, mine: show(bodyText(x)), theirs: show(bodyText(n)) });
+          mark(n, x, 'field', label, { winner: v.win.id, mine: show(bodyText(n)), theirs: show(bodyText(x)) });
+        } else if (v.win === n) supersede(x, label, n, x.origin !== 'human' && n.origin === 'human' ? 'human' : 'later');
+      });
+      if (r.lostTo) supersede(n, label, r.lostTo, 'human');
+    }
+    bodyExtras(it, f);
+  }
+  // The item's body and the lists that follow it: attachments and refs are the union
+  // over the writes whose lines survive (fold order, each oid / id once), mentions the
+  // latest such write's.
+  function bodyExtras(it, f) {
+    it.body = joinLines(f.lines);
+    var srcs = f.lines.map(function (l) { return l.src; }), last = null;
+    it.mentions = []; it.attachments = []; it.refs = [];
+    f.writes.forEach(function (w) {
+      if (srcs.indexOf(w) < 0) return;
+      last = w;
+      attachmentsOf(w.p).forEach(function (a) { if (!it.attachments.some(function (x) { return x.oid === a.oid; })) it.attachments.push(a); });
+      refsOf(w.p).forEach(function (t) { if (it.refs.indexOf(t) < 0) it.refs.push(t); });
+    });
+    if (last) it.mentions = mentionsOf(last.p);
+  }
+  // An item's body revision: its body register's head ids.
+  function bodyRev(S, id) { return (S.reg['it:' + id + ':body'] || []).map(function (h) { return h.n.id; }); }
+
   function apply(S, n, C) {
     var p = n.p, a = n.author, it, q, m, r;
     switch (n.type) {
@@ -1234,6 +1436,11 @@
           parent: p.parent || null, after: has(p, 'after') ? (p.after || null) : undefined, author: a, ts: n.ts, hidden: false, edited: null, node: n,
           mentions: mentionsOf(p), attachments: attachmentsOf(p), refs: refsOf(p), labels: labelsOf(p) };
         S.items[n.id].placedBy = S.items[n.id].parentBy = n;
+        // The create is the item's first body write: the register's first head, and
+        // every line's source until an edit replaces it.
+        S.bodies[n.id] = { writes: [n], lines: linesFrom(bodyText(n), n), base: {} };
+        S.reg['it:' + n.id + ':body'] = [{ n: n, v: bodyText(n) }];
+        bodyExtras(S.items[n.id], S.bodies[n.id]);
         S.place.push({ id: n.id, parent: S.items[n.id].parent, after: S.items[n.id].after });
         break;
       case 'item.move':
@@ -1255,9 +1462,9 @@
             return;
           }
           if (f === 'labels') { it.labels = write(S, 'it:' + it.id + ':labels', 'labels of ' + it.alias, n, { labels: labelsOf(p) }, C).labels; return; }
+          if (f === 'body') { applyBody(S, it, n, C); return; } // the running fold value, not the register's winner
           it[f] = write(S, 'it:' + it.id + ':' + f, f + ' of ' + it.alias, n, p[f] == null ? (f === 'due' ? null : '') : p[f], C);
         });
-        if (has(p, 'body')) { var bw = regWinner(S, 'it:' + it.id + ':body'); it.mentions = mentionsOf(bw.p); it.attachments = attachmentsOf(bw.p); it.refs = refsOf(bw.p); }
         it.edited = n;
         break;
       case 'item.hide':
@@ -1677,7 +1884,7 @@
       while (cur && d < 50) { chain.push(cur.author); cur = cur.parent && S.items[cur.parent]; d++; }
       var started = null;
       recs.forEach(function (r) { r.writes.forEach(function (w) { if (w.type === 'item.status' && w.p.status === 'doing' && (!started || String(w.ts) < started)) started = String(w.ts); }); });
-      items[it.id] = { id: it.id, alias: it.alias, kind: it.kind, title: it.title, body: it.body, project: it.project,
+      items[it.id] = { id: it.id, alias: it.alias, kind: it.kind, title: it.title, body: it.body, bodyRev: bodyRev(S, it.id), project: it.project,
         labels: it.labels.filter(function (id) { return !!liveLabel(S, id); }),
         due: it.due, priority: it.priority, priorityLevel: priorityLevel(S.prio, it.priority), priorityName: S.prio.names[priorityLevel(S.prio, it.priority)],
         parent: it.parent && S.items[it.parent] ? it.parent : null, author: it.author, ts: it.ts, hidden: !!it.hidden,

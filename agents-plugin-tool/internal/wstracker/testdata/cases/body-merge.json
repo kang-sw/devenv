@@ -1,0 +1,493 @@
+{
+ "name": "body-merge",
+ "comment": "item.edit body merge from base. Doc (ada.pc-1): ada (creator) and maya (live assignee), offline from each other, change different lines from the create; both survive with no marker, and ada's later edit whose base names both heads replaces plainly. Seq (ada.pc-3): ada writes A (b->B, base the create); maya, offline, writes B (f->F, base the create) and then C (F->FF, base B). B merges into A's value; C's base closure leaves A out, so C merges too and keeps A's change. Clash (ada.pc-5): ada and maya change one line from the create; maya folds later and wins, both marked. Own (ada.pc-7): maya.pc (human) changes h1; maya.lap as an agent, not seeing it, changes h1 and h3: the agent folds later but loses the overlapping h1 to its own member's human write, while its h3 change survives; the agent write is superseded quietly. Replace (ada.pc-9): the same race with the agent write base-less (a whole replace): it loses entirely. Old (ada.pc-11): base-less edits by ada and raj (live assignee) concurrently: whole replaces, the later in fold order shows, both marked. Att (ada.pc-13): merged edits keep the attachments and refs of both surviving writes (each oid once) and the mentions of the latest surviving write. Plain (ada.pc-15): two sequential edits, each based on the last, replace plainly. Unknown (ada.pc-16): maya's base names ada's edit, which is not in her causal past, so her edit is a whole replace and drops ada's change; both marked.",
+ "viewers": [
+  "ada.pc",
+  "maya.pc"
+ ],
+ "now": "2026-11-02T09:00:00Z",
+ "genesis": {
+  "admins": [
+   "ada"
+  ],
+  "members": [
+   {
+    "id": "ada",
+    "name": "Ada",
+    "keys": [
+     "ada-k1"
+    ],
+    "leads": []
+   },
+   {
+    "id": "maya",
+    "name": "Maya",
+    "keys": [
+     "maya-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "raj",
+    "name": "Raj",
+    "keys": [
+     "raj-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "lena",
+    "name": "Lena",
+    "keys": [
+     "lena-k1"
+    ],
+    "leads": [
+     "maya"
+    ]
+   }
+  ]
+ },
+ "commits": {
+  "ada.pc": [
+   {
+    "ts": "2026-11-01T09:00:00Z",
+    "seen": {},
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Doc",
+       "body": "L1\nL2\nL3\nL4\nL5"
+      }
+     ],
+     [
+      "item.assign",
+      {
+       "item": "ada.pc#1",
+       "targets": [
+        "maya"
+       ]
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Seq",
+       "body": "a\nb\nc\nd\ne\nf\ng"
+      }
+     ],
+     [
+      "item.assign",
+      {
+       "item": "ada.pc#3",
+       "targets": [
+        "maya"
+       ]
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Clash",
+       "body": "one\ntwo\nthree"
+      }
+     ],
+     [
+      "item.assign",
+      {
+       "item": "ada.pc#5",
+       "targets": [
+        "maya"
+       ]
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Own",
+       "body": "h1\nh2\nh3"
+      }
+     ],
+     [
+      "item.assign",
+      {
+       "item": "ada.pc#7",
+       "targets": [
+        "maya"
+       ]
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Replace",
+       "body": "r1\nr2"
+      }
+     ],
+     [
+      "item.assign",
+      {
+       "item": "ada.pc#9",
+       "targets": [
+        "maya"
+       ]
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Old",
+       "body": "o1\no2"
+      }
+     ],
+     [
+      "item.assign",
+      {
+       "item": "ada.pc#11",
+       "targets": [
+        "raj"
+       ]
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Att",
+       "body": "p1\np2\np3",
+       "attachments": [
+        {
+         "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+         "name": "a1.png",
+         "size": 10,
+         "mime": "image/png"
+        }
+       ]
+      }
+     ],
+     [
+      "item.assign",
+      {
+       "item": "ada.pc#13",
+       "targets": [
+        "maya"
+       ]
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Plain",
+       "body": "s1\ns2"
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Unknown",
+       "body": "u1\nu2"
+      }
+     ],
+     [
+      "item.assign",
+      {
+       "item": "ada.pc#16",
+       "targets": [
+        "maya"
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:10:00Z",
+    "seen": {},
+    "events": [
+     [
+      "item.edit",
+      {
+       "item": "ada.pc#1",
+       "body": "L1a\nL2\nL3\nL4\nL5",
+       "base": [
+        "ada.pc#1"
+       ]
+      }
+     ],
+     [
+      "item.edit",
+      {
+       "item": "ada.pc#3",
+       "body": "a\nB\nc\nd\ne\nf\ng",
+       "base": [
+        "ada.pc#3"
+       ]
+      }
+     ],
+     [
+      "item.edit",
+      {
+       "item": "ada.pc#5",
+       "body": "one\ntwo-ada\nthree",
+       "base": [
+        "ada.pc#5"
+       ]
+      }
+     ],
+     [
+      "item.edit",
+      {
+       "item": "ada.pc#11",
+       "body": "o1 ada\no2"
+      }
+     ],
+     [
+      "item.edit",
+      {
+       "item": "ada.pc#13",
+       "body": "p1 see #ada.pc-1\np2\np3",
+       "base": [
+        "ada.pc#13"
+       ],
+       "refs": [
+        "ada.pc#1"
+       ],
+       "attachments": [
+        {
+         "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+         "name": "a1.png",
+         "size": 10,
+         "mime": "image/png"
+        },
+        {
+         "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+         "name": "a2.png",
+         "size": 20,
+         "mime": "image/png"
+        }
+       ],
+       "mentions": [
+        "raj"
+       ]
+      }
+     ],
+     [
+      "item.edit",
+      {
+       "item": "ada.pc#15",
+       "body": "s1\ns2 v1",
+       "base": [
+        "ada.pc#15"
+       ]
+      }
+     ],
+     [
+      "item.edit",
+      {
+       "item": "ada.pc#15",
+       "body": "s1 v2\ns2 v1",
+       "base": [
+        "ada.pc#23"
+       ]
+      }
+     ],
+     [
+      "item.edit",
+      {
+       "item": "ada.pc#16",
+       "body": "u1 ada\nu2",
+       "base": [
+        "ada.pc#16"
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T10:00:00Z",
+    "seen": {
+     "maya.pc": 8,
+     "raj.pc": 1,
+     "maya.lap": 2
+    },
+    "events": [
+     [
+      "item.edit",
+      {
+       "item": "ada.pc#1",
+       "body": "L1a\nL2\nL3 final\nL4\nL5m",
+       "base": [
+        "ada.pc#18",
+        "maya.pc#1"
+       ]
+      }
+     ]
+    ]
+   }
+  ],
+  "maya.pc": [
+   {
+    "ts": "2026-11-01T09:20:00Z",
+    "seen": {
+     "ada.pc": 17
+    },
+    "events": [
+     [
+      "item.edit",
+      {
+       "item": "ada.pc#1",
+       "body": "L1\nL2\nL3\nL4\nL5m",
+       "base": [
+        "ada.pc#1"
+       ]
+      }
+     ],
+     [
+      "item.edit",
+      {
+       "item": "ada.pc#3",
+       "body": "a\nb\nc\nd\ne\nF\ng",
+       "base": [
+        "ada.pc#3"
+       ]
+      }
+     ],
+     [
+      "item.edit",
+      {
+       "item": "ada.pc#3",
+       "body": "a\nb\nc\nd\ne\nFF\ng",
+       "base": [
+        "maya.pc#2"
+       ]
+      }
+     ],
+     [
+      "item.edit",
+      {
+       "item": "ada.pc#5",
+       "body": "one\ntwo-maya\nthree",
+       "base": [
+        "ada.pc#5"
+       ]
+      }
+     ],
+     [
+      "item.edit",
+      {
+       "item": "ada.pc#7",
+       "body": "h1 human\nh2\nh3",
+       "base": [
+        "ada.pc#7"
+       ]
+      }
+     ],
+     [
+      "item.edit",
+      {
+       "item": "ada.pc#9",
+       "body": "r1 human\nr2",
+       "base": [
+        "ada.pc#9"
+       ]
+      }
+     ],
+     [
+      "item.edit",
+      {
+       "item": "ada.pc#13",
+       "body": "p1\np2\np3 @lena",
+       "base": [
+        "ada.pc#13"
+       ],
+       "attachments": [
+        {
+         "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+         "name": "a1.png",
+         "size": 10,
+         "mime": "image/png"
+        },
+        {
+         "oid": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+         "name": "a3.png",
+         "size": 30,
+         "mime": "image/png"
+        }
+       ],
+       "mentions": [
+        "lena"
+       ]
+      }
+     ],
+     [
+      "item.edit",
+      {
+       "item": "ada.pc#16",
+       "body": "u1\nu2 maya",
+       "base": [
+        "ada.pc#25"
+       ]
+      }
+     ]
+    ]
+   }
+  ],
+  "raj.pc": [
+   {
+    "ts": "2026-11-01T09:25:00Z",
+    "seen": {
+     "ada.pc": 17
+    },
+    "events": [
+     [
+      "item.edit",
+      {
+       "item": "ada.pc#11",
+       "body": "o1 raj\no2"
+      }
+     ]
+    ]
+   }
+  ],
+  "maya.lap": [
+   {
+    "ts": "2026-11-01T09:30:00Z",
+    "seen": {
+     "ada.pc": 17
+    },
+    "events": [
+     [
+      "item.edit",
+      {
+       "item": "ada.pc#7",
+       "body": "h1 agent\nh2\nh3 agent",
+       "base": [
+        "ada.pc#7"
+       ]
+      },
+      "agent"
+     ],
+     [
+      "item.edit",
+      {
+       "item": "ada.pc#9",
+       "body": "r1 agent\nr2 agent"
+      },
+      "agent"
+     ]
+    ]
+   }
+  ]
+ }
+}

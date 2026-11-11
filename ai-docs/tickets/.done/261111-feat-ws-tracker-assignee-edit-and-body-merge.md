@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 08604559db8fcdc0
 sage-review-completeness-reviewed: 08604559db8fcdc0
+completed: 2026-11-11
 ---
 
 # Tracker: assignee editing and body merge
@@ -202,3 +203,53 @@ Verification:
   body.
 - A browser check: an assignee edits a body; two windows editing one body
   from the same base merge.
+
+### Result (140b46fac) - 2026-11-11
+
+Landed in ee8ec74dd (domain + reference engine), c33416658 (MCP and
+playbook), 15bbccb67 (dashboard), 140b46fac (lite-review fixes).
+
+- `item.edit` is judged by `needCreatorOrAssignee` with the creator-gone
+  fallback, in `check.go` and `engine.js`; hide and assign stay
+  creator-only. The team-alpha fixture's maya.pc-10 edit of ada.pc-1, which
+  had been refused, now applies, so the golden title becomes "Ship search v2
+  by Friday" and the flagged count drops from 17 to 16.
+- New `merge.go`, mirrored in `engine.js`, adds three things. A Myers line
+  diff, with common prefix and suffix trimmed and a compact trace. A
+  three-way merge whose groups are hunks that intersect or touch. A running
+  body fold with line provenance, whose base text is folded over the
+  causal closure of the base heads and memoized per write. A group both
+  sides changed to the same lines is not an overlap.
+- Each overlapping group names its rivals: the concurrent writes whose lines
+  the folded value holds in that group, or every concurrent write when the
+  value only dropped lines there. Human-over-agent precedence for the same
+  member is settled per group. Markers and superseded notes go only to the
+  rivals.
+- Attachments and refs are the union over the writes that still have
+  surviving lines (each oid once). Mentions come from the latest such write.
+- The view gains `bodyRev`. `base` must go with a body and must be a list
+  of id strings; both checks have reasons.json cases.
+- `tk:item.edit` takes `base` (space-separated ids in either form; `$N`,
+  an empty value and base without a body are refused). The item view prints
+  `body revision: <aliases>`. tracker.md documents both in all three
+  packages, and the manifest hashes are updated.
+- Dashboard: `canEdit` now allows the creator or a live assignee, while the
+  new `canHide` stays creator-only. The edit form pins the body it loaded
+  and its `bodyRev`, compares the edited body against the pinned one, and
+  sends `base` with the body.
+
+Verification (ws-rgo): `test ./internal/wstracker/ ./internal/mcp/` ok;
+`test ./internal/wsrsrc/` ok; `test ./internal/wsdashboard/` ok; vet for
+wstracker, mcp and wsdashboard clean. `gen-golden.js` reports reasons.json
+261 cases agree, and the new case-body-merge-rivals golden passes parity.
+Browser check over CDP on the mockup: a live assignee who is not the
+creator gets edit and no hide, and saving a body edit sends `base`, which
+the store applies. The two-window same-base merge was not exercised in the
+browser. The domain golden and Go cases cover that merge.
+
+Open (Minor, from lite review): a cur-side change from a write in the
+edit's causal past but outside its base closure resolves to the later
+write without a mark, which the playbook's "both are marked" overstates.
+`diffLines` keeps an O(D^2) trace and bodies have no size cap. A based edit
+that leaves the text unchanged but adds attachments contributes no
+surviving lines in a merge, so those attachments drop.

@@ -13,7 +13,7 @@ import (
 func TestScenario1MorningCheck(t *testing.T) {
 	tm := newTeam(t)
 	v := tm.view("maya.pc")
-	demo, ship, training := itemID(t, v, "Prepare Friday demo"), itemID(t, v, "Ship search v2 (index + query path)"), itemID(t, v, "Security training")
+	demo, ship, training := itemID(t, v, "Prepare Friday demo"), itemID(t, v, "Ship search v2 by Friday"), itemID(t, v, "Security training")
 	review, tok := itemID(t, v, "Review the emoji tokenizer fix"), itemID(t, v, "Tokenizer")
 
 	// Today: my open work by priority then due, the pending assignment to
@@ -151,7 +151,7 @@ func TestScenario4MemberLeaves(t *testing.T) {
 func TestScenario5AgentStatusHumanCorrection(t *testing.T) {
 	tm := newTeam(t)
 	v := tm.view("lena.pc")
-	ib, ship := itemID(t, v, "Index builder"), itemID(t, v, "Ship search v2 (index + query path)")
+	ib, ship := itemID(t, v, "Index builder"), itemID(t, v, "Ship search v2 by Friday")
 	agent := tm.doAs("lena.pc", TypeItemStatus, map[string]any{"item": ib, "status": "blocked", "note": "CI is red on the shard merger"}, OriginAgentAuto)
 	v = tm.view("lena.pc")
 	a := asg(t, v, "maya.pc#2>lena")
@@ -277,7 +277,7 @@ func TestScenario9TypoInAMembersItem(t *testing.T) {
 	v := tm.view("maya.pc")
 	cache, review, explain := itemID(t, v, "Cache layer"), itemID(t, v, "Review the emoji tokenizer fix"), itemID(t, v, "Explain the tokenizer API to the query team")
 	wantEq(t, "edit raj's item", tm.refused("maya.pc", TypeItemEdit, map[string]any{"item": cache, "body": "fixed"}),
-		"only the creator (raj) edits "+alias(cache))
+		alias(cache)+" is neither assigned to nor created by maya")
 	c := tm.do("maya.pc", TypeCommentAdd, map[string]any{"item": review, "body": "typo: 'tokeniser' in the second line"})
 	e := tm.do("ivy.pc", TypeItemEdit, map[string]any{"item": review, "body": "Review the emoji tokenizer fix (tokenizer spelled right)"})
 	v = tm.view("maya.pc")
@@ -289,7 +289,7 @@ func TestScenario9TypoInAMembersItem(t *testing.T) {
 	tm.do("ada.pc", "roles.remove_member", map[string]any{"member": "noa"})
 	tm.do("ada.pc", TypeItemEdit, map[string]any{"item": explain, "title": "Explain the tokenizer API"})
 	wantEq(t, "non-admin edit", tm.refused("maya.pc", TypeItemEdit, map[string]any{"item": explain, "body": "x"}),
-		"only the creator (noa) edits "+alias(explain))
+		alias(explain)+" is neither assigned to nor created by maya")
 	wantEq(t, "title", tm.view("maya.pc").Items[explain].Title, "Explain the tokenizer API")
 }
 
