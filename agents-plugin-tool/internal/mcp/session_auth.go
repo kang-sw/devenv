@@ -3,6 +3,7 @@ package mcp
 import (
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"os"
 	"regexp"
 	"sort"
@@ -163,6 +164,14 @@ type sessionStore struct {
 	// cacheHome is the caller process's WS_CACHE_HOME; empty means this
 	// process's.
 	cacheHome string
+
+	// intake is the dashboard intake path's in-memory copy of each key's
+	// identity (intakeEntry). now is its clock and readFile reads each
+	// record file; nil means time.Now and readRecordFile. Both are test
+	// seams.
+	intake   intakeCache
+	now      func() time.Time
+	readFile recordFileReader
 }
 
 func newSessionStore() *sessionStore {
@@ -250,6 +259,123 @@ func (s *sessionStore) inspect(key string) (entry sessionEntry, found, transient
 		return sessionEntry{}, false, false
 	}
 	return sessionEntry{root: record.Root, scope: toolRole(record.Scope), parent: record.Parent}, true, false
+}
+
+// intakeRecheck is how long the intake cache trusts that a key still
+// exists before it stats the key's record again: a removed key stops intake
+// and its live session within this window.
+const intakeRecheck = 10 * time.Second
+
+// intakeCache holds, per key, the identity fields the dashboard intake path
+// reads: root, scope, and parent, which only mint writes. The adapter's
+// intake calls (about ten a second while a reply streams) and the live
+// writer's activity check are served from it, so they read no key.json; a
+// key's existence is re-checked by a stat at most once per intakeRecheck.
+// Only those two callers use it: every other keyed call's lookup gates a
+// capability profile and keeps reading key.json, so revocation is never
+// delayed there. Its zero value is ready.
+type intakeCache struct {
+	mu      sync.Mutex
+	entries map[string]*intakeCacheEntry
+}
+
+type intakeCacheEntry struct {
+	entry sessionEntry
+	// checkedAt is when the key was last seen to exist (the store's clock).
+	checkedAt time.Time
+	// markAt is the activity mark's mtime as last known: from the last
+	// recheck's stat, or when this cache last touched it. Zero is unknown,
+	// which the next touching read treats as due.
+	markAt time.Time
+}
+
+func (s *sessionStore) clock() time.Time {
+	if s.now != nil {
+		return s.now()
+	}
+	return time.Now()
+}
+
+// intakeLookup is lookup served from the intake cache, for dashboard.intake
+// alone: its handler and its pass through the keyed gate. It keeps the
+// record's activity mark fresh as lookup does, at most once per
+// touchGuardWindow, deciding from the cached mtime so a warm call stats
+// nothing: an active session fed only by intake must not age out of the
+// prune.
+func (s *sessionStore) intakeLookup(key string) (sessionEntry, bool) {
+	entry, found, _ := s.intakeEntry(key, true)
+	return entry, found
+}
+
+// intakeInspect is inspect served from the intake cache, for the live
+// writer's activity check: no touch (a timer's read is not activity), and
+// transient as inspect reports it.
+func (s *sessionStore) intakeInspect(key string) (entry sessionEntry, found, transient bool) {
+	return s.intakeEntry(key, false)
+}
+
+// intakeEntry resolves key through the intake cache. A key not cached is
+// read from its record (inspect's answer) and cached when found; a cached
+// key is served as is until intakeRecheck passed since it was last seen,
+// and then its activity mark is stat-ed: gone drops it (not found), present
+// renews it, and a failed stat (a transient read) keeps serving it and
+// retries on the next call. touch marks the call as activity.
+func (s *sessionStore) intakeEntry(key string, touch bool) (entry sessionEntry, found, transient bool) {
+	now := s.clock()
+	c := &s.intake
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	cached := c.entries[key]
+	switch {
+	case cached == nil:
+		read, ok, unreadable := s.inspect(key)
+		if !ok {
+			return sessionEntry{}, false, unreadable
+		}
+		cached = &intakeCacheEntry{entry: read, checkedAt: now}
+		if c.entries == nil {
+			c.entries = map[string]*intakeCacheEntry{}
+		}
+		c.entries[key] = cached
+	case now.Sub(cached.checkedAt) >= intakeRecheck:
+		d, err := s.dirs()
+		if err != nil {
+			return cached.entry, true, false
+		}
+		mtime, present, ok := statActivityMark(d, key)
+		if !ok {
+			return cached.entry, true, false
+		}
+		if !present {
+			delete(c.entries, key)
+			return sessionEntry{}, false, false
+		}
+		cached.checkedAt, cached.markAt = now, mtime
+	}
+	if touch && now.Sub(cached.markAt) >= touchGuardWindow {
+		if d, err := s.dirs(); err == nil {
+			s.touch(d, key)
+			cached.markAt = now
+		}
+	}
+	return cached.entry, true, false
+}
+
+// statActivityMark stats key's activity mark (key.json, or a legacy record
+// file): its mtime when one exists, present false when neither does, and ok
+// false when a stat failed otherwise, which is neither present nor gone.
+func statActivityMark(d sessionDirs, key string) (mtime time.Time, present, ok bool) {
+	info, err := os.Stat(d.partPath(key, partKey))
+	if errors.Is(err, fs.ErrNotExist) {
+		info, err = os.Stat(d.legacyPath(key))
+	}
+	switch {
+	case err == nil:
+		return info.ModTime(), true, true
+	case errors.Is(err, fs.ErrNotExist):
+		return time.Time{}, false, true
+	}
+	return time.Time{}, false, false
 }
 
 // recordMtime returns the mtime of key's activity mark (key.json, or a legacy

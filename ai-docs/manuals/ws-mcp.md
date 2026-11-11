@@ -62,7 +62,11 @@ Each session key is a directory, `<cache root>/sessions/<key>/`, holding
 config overrides, the child note, and the once-only flags), `agenda.json`,
 `todos.json`, and `whiteboard.json`. An absent part file is that part
 empty. A write replaces only the part files it changes, each atomically, and
-the lookup every keyed call makes reads `key.json` alone. Every content write,
+the lookup every keyed call makes reads `key.json` alone, except
+`dashboard.intake`'s: intake and the live snapshot writer's activity check
+keep each key's identity (root, scope, parent, written only at mint) in
+memory and stat `key.json` at most every 10 s, so a removed key stops intake
+within 10 s while every other tool's gate sees it at once. Every content write,
 mint's claim included, holds the key's record lock (`key.json.lock` in its
 directory) across its read-modify-write, so ws processes serving one key do
 not lose each other's updates; a lock not acquired within 2 s fails the tool

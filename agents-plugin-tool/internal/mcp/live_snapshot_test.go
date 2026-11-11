@@ -727,6 +727,7 @@ func TestLiveSessionSurvivesAnUnreadableRecord(t *testing.T) {
 	f := newLiveFixture(t, true)
 	fastLive(t, 20*time.Millisecond)
 	resetMailboxHistoryClock(t)
+	advance := intakeClock(f.server)
 	d, err := f.server.sessions.dirs()
 	if err != nil {
 		t.Fatal(err)
@@ -768,8 +769,10 @@ func TestLiveSessionSurvivesAnUnreadableRecord(t *testing.T) {
 		t.Fatalf("ring = %+v", ring)
 	}
 
-	// A record that is gone ends the session at the next timer.
+	// A record that is gone ends the session at the next timer once the
+	// intake cache's recheck is due.
 	retryFS(t, func() error { return os.Remove(record) })
+	advance(intakeRecheck)
 	if _, found, transient := f.server.sessions.inspect(f.keyA); found || transient {
 		t.Fatalf("inspect of a removed record = found %v, transient %v", found, transient)
 	}
@@ -777,4 +780,116 @@ func TestLiveSessionSurvivesAnUnreadableRecord(t *testing.T) {
 		ls := f.server.live.existing(f.keyA)
 		return ls == nil || ls.isStopped()
 	})
+}
+
+// intakeClock moves the intake cache's clock (sessionStore.now) by the
+// returned function's argument, cumulatively. Install it before the
+// server's first intake call: timer goroutines read the clock.
+func intakeClock(s *Server) func(time.Duration) {
+	var offset atomic.Int64
+	s.sessions.now = func() time.Time { return time.Now().Add(time.Duration(offset.Load())) }
+	return func(d time.Duration) { offset.Add(int64(d)) }
+}
+
+// countKeyReads counts reads of key's key.json through the store's record
+// reader. Install it before the server's first intake call.
+func countKeyReads(t *testing.T, s *Server, key string) *atomic.Int32 {
+	t.Helper()
+	d, err := s.sessions.dirs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := d.partPath(key, partKey)
+	var reads atomic.Int32
+	s.sessions.readFile = func(p string, newValue func() any) ([]byte, any, error) {
+		if p == path {
+			reads.Add(1)
+		}
+		return readRecordFile(p, newValue)
+	}
+	return &reads
+}
+
+// TestIntakeWarmCacheReadsNoKeyRecord pins the intake cache's point: once
+// warm, a burst of intake calls, through the keyed gate, the handler, and
+// the live writer's activity check behind it, reads the session's key.json
+// not once.
+func TestIntakeWarmCacheReadsNoKeyRecord(t *testing.T) {
+	f := newLiveFixture(t, true)
+	fastLive(t, 5*time.Millisecond)
+	reads := countKeyReads(t, f.server, f.keyA)
+	status := map[string]any{"kind": "status", "context": map[string]any{"tokens": 1000, "window": 200000}}
+	if out := intake(t, f.server, f.keyA, status); !strings.Contains(out, "ok: 1 of 1 events applied") {
+		t.Fatalf("warm-up intake = %q", out)
+	}
+	path := wslive.SnapshotPath(f.sessionDir(f.replyA))
+	waitFor(t, "the first snapshot", func() bool { _, err := os.Stat(path); return err == nil })
+	reads.Store(0)
+	for i := 0; i < 20; i++ {
+		status["context"] = map[string]any{"tokens": 1000 + i, "window": 200000}
+		if out := intake(t, f.server, f.keyA, status); !strings.Contains(out, "ok: 1 of 1 events applied") {
+			t.Fatalf("intake %d = %q", i, out)
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	// Let the debounced writes (and their activity checks) run.
+	time.Sleep(50 * time.Millisecond)
+	if n := reads.Load(); n != 0 {
+		t.Fatalf("a warm intake burst read key.json %d times, want 0", n)
+	}
+}
+
+// TestIntakeStopsWithinRecheckOfARemovedKey pins the intake cache's
+// revocation bound: a removed key keeps passing intake only until the
+// cache's recheck is due, then intake answers unknown_session and the live
+// session's activity check reads it inactive.
+func TestIntakeStopsWithinRecheckOfARemovedKey(t *testing.T) {
+	f := newLiveFixture(t, true)
+	fastLive(t, 20*time.Millisecond)
+	advance := intakeClock(f.server)
+	if out := intake(t, f.server, f.keyA); strings.Contains(out, "unknown_session") {
+		t.Fatalf("intake before removal = %q", out)
+	}
+	d, err := f.server.sessions.dirs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	retryFS(t, func() error { return os.RemoveAll(d.keyDir(f.keyA)) })
+
+	advance(intakeRecheck - time.Second)
+	if out := intake(t, f.server, f.keyA); strings.Contains(out, "unknown_session") {
+		t.Fatalf("intake inside the recheck window = %q, want it still served", out)
+	}
+	advance(time.Second)
+	if out := intake(t, f.server, f.keyA); !strings.Contains(out, "unknown_session") {
+		t.Fatalf("intake once the recheck is due = %q, want unknown_session", out)
+	}
+	if f.server.liveSessionActive(f.keyA, f.sessionDir(f.replyA)) {
+		t.Fatal("the live session of a removed key still reads active")
+	}
+}
+
+// TestKeyedGateReadsKeyRecordForOtherTools pins the intake cache's limit:
+// every other tool's pass through the keyed gate reads key.json on every
+// call, so revocation is immediate for every capability gate. The handler's
+// own reads are measured apart, so the difference is the gate's.
+func TestKeyedGateReadsKeyRecordForOtherTools(t *testing.T) {
+	f := newLiveFixture(t, true)
+	reads := countKeyReads(t, f.server, f.keyA)
+	args := func() map[string]any { return map[string]any{"session_key": f.keyA} }
+	// Warm the per-minute dashboard and mailbox state the gate keeps.
+	callToolWithKey(t, f.server, 1, f.keyA, dashboardInboxDrainTool, nil)
+
+	reads.Store(0)
+	f.server.handleDashboardInboxDrain(json.RawMessage(`1`), args())
+	handler := reads.Load()
+
+	const calls = 5
+	reads.Store(0)
+	for i := 0; i < calls; i++ {
+		callToolWithKey(t, f.server, 2+i, f.keyA, dashboardInboxDrainTool, nil)
+	}
+	if got, want := reads.Load(), int32(calls)*(handler+1); got != want {
+		t.Fatalf("%d gated calls read key.json %d times, want %d (handler %d + gate 1 each)", calls, got, want, handler)
+	}
 }

@@ -688,8 +688,16 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 	// generic profile text. The whiteboard tools sit beside it for the same
 	// reason: the board is the top-level lead's channel to its user, so a
 	// spawned key can neither write nor read it.
+	//
+	// dashboard.intake alone resolves its key from the intake cache
+	// (intakeLookup), so its call rate reads no key.json; a removed key
+	// still passes here for up to intakeRecheck, for that tool only.
 	if keyStr, ok := params.Arguments["session_key"].(string); ok && strings.TrimSpace(keyStr) != "" {
-		if entry, found := s.sessions.lookup(keyStr); found {
+		lookup := s.sessions.lookup
+		if params.Name == dashboardIntakeTool {
+			lookup = s.sessions.intakeLookup
+		}
+		if entry, found := lookup(keyStr); found {
 			if entry.scope != roleLead && (isLeadOnlyTool(params.Name) || !roleAllowsTool(entry.scope, params.Name)) {
 				return errorResponse(req.ID, -32601, fmt.Sprintf("tool not available in current %s MCP profile: %s", s.runtimeNamespace(), params.Name))
 			}

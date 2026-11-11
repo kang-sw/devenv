@@ -315,7 +315,16 @@ func (ls *liveSession) finish() {
 // state directory.
 func (s *Server) liveSessionDir(sessionKey string) (string, bool) {
 	entry, found := s.sessions.lookup(sessionKey)
-	if !found || !entry.isTopLevelLead() || !s.liveDashboardEnabled(sessionKey) {
+	if !found {
+		return "", false
+	}
+	return s.liveSessionDirOf(sessionKey, entry)
+}
+
+// liveSessionDirOf is liveSessionDir for a session whose entry the caller
+// already resolved (intake, from the intake cache).
+func (s *Server) liveSessionDirOf(sessionKey string, entry sessionEntry) (string, bool) {
+	if !entry.isTopLevelLead() || !s.liveDashboardEnabled(sessionKey) {
 		return "", false
 	}
 	dir, err := s.dashboard.stateDir()
@@ -326,14 +335,16 @@ func (s *Server) liveSessionDir(sessionKey string) (string, bool) {
 }
 
 // liveSessionActive reports whether the live session behind sessionKey may
-// still write to dir: liveSessionDir's answer for a timer, which reads the
-// session record without touching it (a timer's read is not activity). A
-// record that exists but cannot be read right now (Windows: a reader meeting
-// the record's replace in flight) keeps the session running: stopping it on
-// a transient failure drops the turn state until the next intake, and a mail
-// line sent meanwhile finds no tool row to flush.
+// still write to dir: liveSessionDir's answer for a timer, which resolves
+// the session through the intake cache without touching its record (a
+// timer's read is not activity), so a removed key stops the session within
+// intakeRecheck. A record that exists but cannot be read right now
+// (Windows: a reader meeting the record's replace in flight) keeps the
+// session running: stopping it on a transient failure drops the turn state
+// until the next intake, and a mail line sent meanwhile finds no tool row to
+// flush.
 func (s *Server) liveSessionActive(sessionKey, dir string) bool {
-	entry, found, transient := s.sessions.inspect(sessionKey)
+	entry, found, transient := s.sessions.intakeInspect(sessionKey)
 	if transient {
 		return true
 	}
@@ -391,7 +402,10 @@ func (s *Server) handleDashboardIntake(id json.RawMessage, args map[string]any) 
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
-	entry, found := s.sessions.lookup(key)
+	// The intake cache, not key.json: this runs about ten times a second
+	// while a reply streams, and a removed key stops it within
+	// intakeRecheck.
+	entry, found := s.sessions.intakeLookup(key)
 	if !found {
 		return toolTextResponse(id, "", fmt.Errorf("%s: unknown_session: session key not found", tool))
 	}
@@ -403,7 +417,7 @@ func (s *Server) handleDashboardIntake(id json.RawMessage, args map[string]any) 
 	if !ok {
 		return toolTextResponse(id, "", fmt.Errorf("%s: events must be an array of event objects", tool))
 	}
-	dir, ok := s.liveSessionDir(key)
+	dir, ok := s.liveSessionDirOf(key, entry)
 	if !ok {
 		return toolTextResponse(id, "dashboard off: nothing recorded\n", nil)
 	}
