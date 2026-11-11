@@ -126,3 +126,44 @@ Verification:
   (`internal/wsi18n/keys_test.go`) covers the new strings.
 - Golden cases from the reference engine agree with the Go domain.
 - A browser check of the team scope and a count's drill-down.
+
+### Result (4addb08c1) - 2026-11-11
+
+Landed in eb01cb73f (domain, engine, goldens, `tracker.query` render) and
+4addb08c1 (dashboard team scope, i18n).
+
+- `my.team` rows: `{id, depth, outside, open, pending, waiting, counts,
+  load, stale, overdue, fallback, last}`; `done` and `blocked` are replaced
+  by `counts.done` / `counts.blocked`. The walk covers the viewer's whole
+  subtree (depth from the viewer); an admin also gets every other live
+  member as the outside group, walked from the org-tree roots (depth from
+  the root, a root 0), with a branch no root reaches rooted at depth 0.
+- Counts leave out creator-fallback holdings and held topics; load is the
+  live counts neither idea nor done (awaiting included, by Decision 7's
+  "neither idea nor done" rule); stale and overdue (due before the UTC date
+  of now; off with no clock) are inside load; fallback counts live fallback
+  holdings not done. Every live, non-done holding lands in exactly one of
+  load, idea, or fallback.
+- `engine.js` and `view.go` move in lockstep; goldens regenerated from the
+  engine; new case `workload-balance` (deep subtree, admin inside the tree,
+  second root, every count).
+- `tracker.query` team scope: a legend line, per-person load with a
+  per-status breakdown, stale/overdue/idea/fallback-held/done, and an
+  "outside my subtree" heading.
+- Dashboard: group headers show the counts as buttons; a click narrows the
+  scope to that person's rows of that count (panel display state, list
+  mode), the same count or the clear control clears it; outside members
+  render under their own heading with root-depth indent and no `L` label;
+  the scope chip sums load, stale, overdue, unaccepted and adds an
+  "outside your subtree" count for an admin. 15 new keys in all 11 tables,
+  `js.tk.team.done` / `js.tk.team.blocked` removed, mockup `i18n-en.js`
+  regenerated.
+
+Verification (remote `ws-rgo`): `test ./internal/wstracker/` ok (golden
+parity, new `workload_test.go`, updated scenario/topic tests);
+`test ./internal/mcp/ -run Tracker` ok (new `tracker_render_test.go`);
+`test ./internal/wsdashboard/ ./internal/wsi18n/` ok (new
+`tracker_team_drill_test.go` executed under node, i18n key and mockup-table
+tests). Browser check with headless Chromium on the mockup as an admin
+lead: team scope and a count's drill-down rendered as intended
+(screenshots inspected). Lite review: no Critical or Important findings.
