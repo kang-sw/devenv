@@ -237,6 +237,9 @@ func newAgentRunner(dir string, logw io.Writer, trackerChanged func(), holders *
 		// key of its own.
 		Holders:  wsagent.ManagerHost{Manager: holders},
 		LeadKeys: keys,
+		// The daemon, not the session's own mailbox wait, delivers a lead
+		// session's mail.
+		Mail: mcp.NewLeadMailbox(dir),
 		WSMCP: func(root string) (wsagent.MCPCommand, error) {
 			exe, err := os.Executable()
 			if err != nil {

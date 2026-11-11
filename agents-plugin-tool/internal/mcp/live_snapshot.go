@@ -715,6 +715,13 @@ func (s *Server) recordLiveMail(sessionKey string, entries []mailboxHistoryEntry
 		ls.mu.Unlock()
 		defer ls.ringMu.Unlock()
 	}
+	s.appendLiveRing(sessionKey, dir, slot, append(ring, mailRingLines(sessionKey, entries, keys)...))
+}
+
+// mailRingLines is the conversation-ring mail line of each mailbox history
+// entry of sessionKey; keys are the entries' history file names, in order.
+func mailRingLines(sessionKey string, entries []mailboxHistoryEntry, keys []string) []wslive.RingEntry {
+	lines := make([]wslive.RingEntry, 0, len(entries))
 	for i, e := range entries {
 		// The ring reaches the browser: scrub the body before the title cap.
 		title := mailboxHistoryTitle(wslive.ScrubSessionKeys(e.Body, sessionKey))
@@ -722,7 +729,7 @@ func (s *Server) recordLiveMail(sessionKey string, entries []mailboxHistoryEntry
 		if i < len(keys) {
 			line.HistoryKey = keys[i]
 		}
-		ring = append(ring, line)
+		lines = append(lines, line)
 	}
-	s.appendLiveRing(sessionKey, dir, slot, ring)
+	return lines
 }
