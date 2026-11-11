@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 17436bf2ea19af7b
 sage-review-completeness-reviewed: 17436bf2ea19af7b
+completed: 2026-11-11
 ---
 
 # Tracker store lock: split network work from local reads
@@ -127,3 +128,79 @@ Verification ((273)):
   `lockwait_test.go`, and run under `-race`.
 - Existing wsledger and wstrackerhost tests pass, including `DispatchWith`
   `$N` references.
+
+### Result (847121a16) - 2026-11-11
+
+Implemented in one commit (847121a16).
+
+- wsledger: a network lock (an in-process one-slot channel plus the
+  `<store>/net.lock` flock, `NetLockFile`) is held for the whole of `Fetch`,
+  `Sync` (the idle push included), the on-demand attachment fetch,
+  `WikiSave`, `Register`, `Restore`, and `MoveToFreshClone`. `Fetch` and
+  `Sync` take the store lock only for their local steps: deciding what to
+  push, recording what landed, and applying a fetch in one step. The fetch
+  itself writes only objects and remote-tracking refs.
+- wsledger: `Options.ApplyGate` wraps every locked step of `Fetch` and
+  `Sync`; a gate that does not run the step discards the fetched result.
+  `WithNetWait` bounds the network-lock wait (`ErrBusy`).
+  `ReadLocalAttachment` never fetches (`ErrAttachmentNotLocal`);
+  `ReadAttachment` reads locally first and fetches under the network lock.
+- wstrackerhost: `store.net` is the per-store network mutex, taken before
+  `st.mu` and never while holding it; `st.mu` guards local state only.
+  `Check`, `Sync`, `PreRead`, `CheckAll`, `PollOnce`, `WikiSave`, and the
+  remote attachment read run through `withNet`. `applyGate` re-reads the
+  registry entry under `st.mu` and refuses the step of a store unregistered
+  (or registered again) meanwhile, retiring the handle.
+- The dashboard attachment path reads a local copy under the store lock and
+  goes to the network lock only for a copy this clone lacks, with the page's
+  lock-wait bound carried onto both the host mutex and `net.lock`.
+- `DispatchWith`, its write lock, and the `$N` rule are unchanged.
+
+Decisions made while implementing:
+
+- This clone's own ref and attachment refs are pushed by commit id, so the
+  push is exactly what the deciding step read even if another process closes
+  a batch meanwhile; genesis, claim, and wiki refs still go by name.
+- The apply-time registry re-check is a hook the ledger calls
+  (`ApplyGate`), because the idle push runs inside the ledger with no host
+  call around it.
+- `WikiSave`, `Register`, `Restore`, and `MoveToFreshClone` take the network
+  lock but keep the store lock across their own network calls; Decision 5
+  lists none of them among the paths to split, so a wiki save still holds
+  local reads for its duration.
+- `Unregister` does not wait for a fetch in flight (its result is
+  discarded); a push in flight still refuses it as unpushed.
+- `TestViewWithinServesLastStateWhileFetchBlocked` was removed: it asserted
+  that a blocked fetch makes the page view stale, which is the bug. The
+  stale-view path stays covered by
+  `TestViewWithinReturnsWhileAnotherProcessHoldsTheStoreLock`.
+
+Verification (via the remote builder, `go` in `agents-plugin-tool`):
+
+- `go vet ./internal/wsledger/ ./internal/wstrackerhost/ ./internal/wsdashboard/ ./cmd/...`: clean.
+- `go test ./internal/wsledger/ ./internal/wstrackerhost/ -race -count=2`:
+  ok (174.9s, 140.2s).
+- `go test ./internal/wstracker/ ./internal/mcp/ ./cmd/... ./internal/wsdashboard/... -race -count=1`:
+  ok.
+- New tests, one or more per verification bullet:
+  `TestFetchInFlightHoldsNoLocalCall`, `TestPushInFlightHoldsNoLocalCall`,
+  `TestFetchAppliesWhole`, `TestNetworkLockSerializesAcrossLedgers`,
+  `TestApplyGateRefusalDiscardsTheFetch` (wsledger);
+  `TestLocalReadsDoNotWaitForNetwork`,
+  `TestRemoteAttachmentReadAnswersBusyWhileNetworkHeld`,
+  `TestAppendDuringHeldFetchSurvivesAndIsPushed`,
+  `TestUnregisterDuringHeldFetchDiscardsTheResult`,
+  `TestNetworkCallsOfOneStoreRunOneAtATime` (wstrackerhost).
+
+Lite review: clean, three Minor findings left open.
+
+- On Windows an unregister during another process's fetch now fails at the
+  rename (open `net.lock` and git files) with a rename error instead of a
+  busy refusal; the store stays registered.
+- A store unregistered during a fetch and registered again at the same path
+  within one network timeout is not excluded from the old call's remaining
+  git commands; the gate still discards the old result.
+- A bounded call waits its bound separately at the host network mutex, the
+  store lock, and `net.lock`, so a dashboard read of an attachment this
+  clone lacks can wait up to about three times 500 ms before answering
+  busy.
