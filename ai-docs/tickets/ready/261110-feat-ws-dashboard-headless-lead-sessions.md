@@ -45,7 +45,12 @@ and its hooks.
    merged) and interrupt paths. The session runs with the hosted-session
    flag (`261110-feat-ws-hosted-session-mode-flag`, landed 336dde7b3) so the
    mod or extension does not also deliver them. The file-inbox wait stays
-   for CLI sessions only.
+   for CLI sessions only. A message the user steers is written at once
+   rather than held (technical, (211)): Claude queues a mid-turn user
+   message (`command_lifecycle` `queued`) and injects it right after the
+   next tool result in the same turn (`started`), one `result` then closing
+   the turn (lead probe 2026-11-11, CLI 2.1.322); Pi takes the RPC `steer`
+   command (`rpc-types.d.ts`). Unsteered sends stay held to turn end.
 3. **Approval through the stdio prompt tool, answered only from loopback
    (announced, (13), (169), (171); trust boundary (05)).** The lead profile
    passes `--permission-prompt-tool stdio`. Each prompt arrives as a
@@ -399,7 +404,9 @@ Verification:
   `num_turns: 0` result, and the compaction replay; on fixtures from the
   CLI 2.1.322 probe, `session_state_changed` `running` opening a turn no
   send started, `idle` closing a turn, and `requires_action` beside a
-  pending `can_use_tool`; `result`, a held-send flush, then the trailing
+  pending `can_use_tool`; a steered message written mid-turn, injected
+  after the next tool result, with one `result` for both;
+  `result`, a held-send flush, then the trailing
   `idle` (the flushed send's turn stays open); `requires_action`,
   `can_use_tool`, deny, `running` (one turn); a `requires_action` with no
   pending `can_use_tool` showing its visible state; a question-tool
@@ -412,7 +419,8 @@ Verification:
 - A hosted-flag test: a process whose harness PID differs from the row's
   ignores the flag and runs as a plain session.
 - A live `claude -p` checklist: spawn from the popover, send a message and
-  a mail, approve and deny a prompt, stop and resume on the next send
+  a mail, steer a message during a tool-running turn, approve and deny a
+  prompt, stop and resume on the next send
   (the resumed process still runs hosted: the daemon delivers its mail and
   no file-inbox wait starts), close; the session row and page URL stay fixed throughout, as one row.
   A Bash `claude -p` the daemon lead runs does not take the lead's key. A
