@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -68,13 +69,16 @@ func formatTrackerScope(v *wstrackerhost.StoreView, q trackerQuery) string {
 	case "team":
 		if len(v.My.Team) == 0 {
 			sb.WriteString("\nteam: no followers\n")
+		} else {
+			sb.WriteString("\nteam: " + trackerTeamLegend + "\n")
 		}
+		outside := false
 		for _, t := range v.My.Team {
-			head := fmt.Sprintf("%s (depth %d): %d done, %d blocked, %d stale", trackerPerson(v, t.ID), t.Depth, t.Done, t.Blocked, t.Stale)
-			if t.Last != nil {
-				head += ", last update " + *t.Last
+			if t.Outside && !outside {
+				outside = true
+				sb.WriteString("\noutside my subtree (shown to an admin; depth from the org-tree root):\n")
 			}
-			fmt.Fprintf(&sb, "\n%s\n", head)
+			fmt.Fprintf(&sb, "\n%s\n", formatTrackerTeamHead(v, t))
 			for _, group := range []struct {
 				label string
 				ids   []string
@@ -97,6 +101,52 @@ func formatTrackerScope(v *wstrackerhost.StoreView, q trackerQuery) string {
 		sb.WriteString("\nno rows pass the filters\n")
 	}
 	return sb.String()
+}
+
+// trackerTeamLegend opens a non-empty team scope: what each count of a
+// person's head line counts.
+const trackerTeamLegend = "load counts a person's live assignments that are neither idea nor done, broken down by status; " +
+	"stale and overdue (the due date passed) are part of the load; " +
+	"fallback-held counts tasks they hold only as the creator, because nobody else holds them, and is not load"
+
+// trackerLoadStatuses orders a team head's per-status load breakdown; a
+// status not listed here (and neither idea nor done) follows, sorted.
+var trackerLoadStatuses = []string{"todo", "doing", "blocked", "awaiting"}
+
+// formatTrackerTeamHead is one person's head line of the team scope: the
+// load with its per-status breakdown, then stale, overdue, idea,
+// fallback-held, and done, and the last update.
+func formatTrackerTeamHead(v *wstrackerhost.StoreView, t wstracker.Team) string {
+	var parts []string
+	seen := map[string]bool{"idea": true, "done": true}
+	add := func(st string) {
+		if n := t.Counts[st]; n > 0 && !seen[st] {
+			parts = append(parts, fmt.Sprintf("%s %d", st, n))
+		}
+		seen[st] = true
+	}
+	for _, st := range trackerLoadStatuses {
+		add(st)
+	}
+	var rest []string
+	for st := range t.Counts {
+		if !seen[st] {
+			rest = append(rest, st)
+		}
+	}
+	sort.Strings(rest)
+	for _, st := range rest {
+		add(st)
+	}
+	head := fmt.Sprintf("%s (depth %d): load %d", trackerPerson(v, t.ID), t.Depth, t.Load)
+	if len(parts) > 0 {
+		head += " (" + strings.Join(parts, ", ") + ")"
+	}
+	head += fmt.Sprintf(", %d stale, %d overdue, %d idea, %d fallback-held, %d done", t.Stale, t.Overdue, t.Counts["idea"], t.Fallback, t.Counts["done"])
+	if t.Last != nil {
+		head += ", last update " + *t.Last
+	}
+	return head
 }
 
 // trackerIndent is an item row's tree depth in scope all, else 0.

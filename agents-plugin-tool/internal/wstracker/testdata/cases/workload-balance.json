@@ -1,0 +1,383 @@
+{
+ "name": "workload-balance",
+ "comment": "The team roll-up (613 a). ada (admin, root) leads maya > lena > omar > kai, so kai is four levels below ada; bo is a second root with zed below. lena is an admin inside the tree: her subtree (omar, kai) comes first, then the outside group from the roots (ada 0, maya 1, bo 0, zed 1). kai is non-lead, non-admin: no team. kai holds every status: todo (ada.pc#1, and ada.pc#4 overdue: due 2026-11-05), doing gone stale (ada.pc#2, set five days before now), blocked set a day ago (ada.pc#3, not stale), idea (ada.pc#5), done (ada.pc#6, and ada.pc#9 whose due passed: done is never overdue), awaiting (ada.pc#8), a held topic (ada.pc#10, in no count), a creator-fallback task of his own with a passed due date (kai.pc#7: fallback, not load, not overdue), a closed fallback (kai.pc#8: in no count), and bo request (bo.pc#1: pending, and waiting in bo row).",
+ "viewers": [
+  "ada.pc",
+  "lena.pc",
+  "maya.pc",
+  "kai.pc"
+ ],
+ "now": "2026-11-06T09:00:00Z",
+ "genesis": {
+  "admins": [
+   "ada",
+   "lena"
+  ],
+  "members": [
+   {
+    "id": "ada",
+    "name": "Ada",
+    "keys": [
+     "ada-k1"
+    ],
+    "leads": []
+   },
+   {
+    "id": "maya",
+    "name": "Maya",
+    "keys": [
+     "maya-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "lena",
+    "name": "Lena",
+    "keys": [
+     "lena-k1"
+    ],
+    "leads": [
+     "maya"
+    ]
+   },
+   {
+    "id": "omar",
+    "name": "Omar",
+    "keys": [
+     "omar-k1"
+    ],
+    "leads": [
+     "lena"
+    ]
+   },
+   {
+    "id": "kai",
+    "name": "Kai",
+    "keys": [
+     "kai-k1"
+    ],
+    "leads": [
+     "omar"
+    ]
+   },
+   {
+    "id": "bo",
+    "name": "Bo",
+    "keys": [
+     "bo-k1"
+    ],
+    "leads": []
+   },
+   {
+    "id": "zed",
+    "name": "Zed",
+    "keys": [
+     "zed-k1"
+    ],
+    "leads": [
+     "bo"
+    ]
+   }
+  ]
+ },
+ "commits": {
+  "ada.pc": [
+   {
+    "ts": "2026-11-01T09:00:00Z",
+    "seen": {},
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Kai todo"
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Kai stale doing"
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Kai blocked"
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Kai overdue",
+       "due": "2026-11-05"
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Kai idea"
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Kai done"
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Unused"
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Kai awaiting"
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Kai done past due",
+       "due": "2026-11-05"
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "topic",
+       "title": "Kai topic"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:01:00Z",
+    "seen": {},
+    "events": [
+     [
+      "item.assign",
+      {
+       "item": "ada.pc#1",
+       "targets": [
+        "kai"
+       ]
+      }
+     ],
+     [
+      "item.assign",
+      {
+       "item": "ada.pc#2",
+       "targets": [
+        "kai"
+       ]
+      }
+     ],
+     [
+      "item.assign",
+      {
+       "item": "ada.pc#3",
+       "targets": [
+        "kai"
+       ]
+      }
+     ],
+     [
+      "item.assign",
+      {
+       "item": "ada.pc#4",
+       "targets": [
+        "kai"
+       ]
+      }
+     ],
+     [
+      "item.assign",
+      {
+       "item": "ada.pc#5",
+       "targets": [
+        "kai"
+       ]
+      }
+     ],
+     [
+      "item.assign",
+      {
+       "item": "ada.pc#6",
+       "targets": [
+        "kai"
+       ]
+      }
+     ],
+     [
+      "item.assign",
+      {
+       "item": "ada.pc#9",
+       "targets": [
+        "kai"
+       ]
+      }
+     ],
+     [
+      "item.assign",
+      {
+       "item": "ada.pc#10",
+       "targets": [
+        "kai"
+       ]
+      }
+     ],
+     [
+      "item.assign",
+      {
+       "item": "ada.pc#8",
+       "targets": [
+        "kai"
+       ],
+       "completion": "assigner"
+      }
+     ]
+    ]
+   }
+  ],
+  "kai.pc": [
+   {
+    "ts": "2026-11-01T10:00:00Z",
+    "seen": {
+     "ada.pc": 19
+    },
+    "events": [
+     [
+      "item.status",
+      {
+       "item": "ada.pc#2",
+       "status": "doing"
+      }
+     ],
+     [
+      "item.status",
+      {
+       "item": "ada.pc#5",
+       "status": "idea"
+      }
+     ],
+     [
+      "item.close",
+      {
+       "item": "ada.pc#6"
+      }
+     ],
+     [
+      "item.status",
+      {
+       "item": "ada.pc#8",
+       "status": "doing"
+      }
+     ],
+     [
+      "item.close",
+      {
+       "item": "ada.pc#8"
+      }
+     ],
+     [
+      "item.close",
+      {
+       "item": "ada.pc#9"
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Kai own",
+       "due": "2026-11-02"
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Kai own done"
+      }
+     ],
+     [
+      "item.close",
+      {
+       "item": "kai.pc#8"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-05T10:00:00Z",
+    "seen": {
+     "ada.pc": 19,
+     "bo.pc": 4
+    },
+    "events": [
+     [
+      "item.status",
+      {
+       "item": "ada.pc#3",
+       "status": "blocked"
+      }
+     ]
+    ]
+   }
+  ],
+  "bo.pc": [
+   {
+    "ts": "2026-11-02T09:00:00Z",
+    "seen": {
+     "ada.pc": 19
+    },
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Bo asks kai"
+      }
+     ],
+     [
+      "item.assign",
+      {
+       "item": "bo.pc#1",
+       "targets": [
+        "kai"
+       ]
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Zed work"
+      }
+     ],
+     [
+      "item.assign",
+      {
+       "item": "bo.pc#3",
+       "targets": [
+        "zed"
+       ]
+      }
+     ]
+    ]
+   }
+  ]
+ }
+}
