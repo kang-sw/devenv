@@ -14,6 +14,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 5d3c13bb2ddd0a2c
 sage-review-completeness-reviewed: 5d3c13bb2ddd0a2c
+completed: 2026-11-11
 ---
 
 # Daemon-spawned headless lead sessions
@@ -585,3 +586,98 @@ server reconnects in-stream with the same harness PID, and that an
 idle-stopped Claude session resumes on mail, each resumed process still
 running hosted. A UI test that a plain-folder bar shows no "+ session"
 while a worktree row does.
+
+### Result (8b1a67b42) - 2026-11-11
+
+Landed on `impl/develop/down-gents-rally` (`a27d1bf6c..8b1a67b42`):
+
+- **MCP recovery** (`internal/wsagent/runner_recovery.go`): a server that
+  init reports `failed`, a failed `mcp__*` tool call, or the lead's call of
+  a `*__request_mcp_reconnect` tool starts an off-loop check:
+  `mcp_status` when no server is named, then `mcp_reconnect` and
+  `mcp_status` for each. A server back `connected` restarts nothing. One
+  that is not goes to the state's `mcp_broken` and the snapshot's
+  `host.mcpBroken`, and the process restarts on the same backend session
+  (stop, then an immediate `--resume` start) at the first idle point with
+  no background task. Whether a restart is due is read from the broken
+  list, so a server that comes back first cancels it. A server that an
+  automatic restart was for, and that fails again without having
+  connected, restarts nothing more until it connects (loop guard).
+  `POST /agents/<id>/restart` sits behind the trusted gate.
+- **Typed failures** (Decision 16, `claude_alerts.go`): login needed
+  (`authentication_failed`), model unavailable (`model_not_found`), and a
+  usage limit (`api_error: usage_limit_reached`, or `error: rate_limit`
+  with no other typed cause). The reset time comes from the refusal's
+  `rate_limit_info` or the rejected `rate_limit_event` lines, with overage
+  and allowed handled as in Orca ADE. Each is a `notice` ring line plus
+  the state's `failure` and `host.failure` until a turn succeeds.
+  `api_retry` is `host.retry` until output resumes or the turn ends. A
+  failed compaction keeps its `compact_error` on the compaction line.
+- **Telemetry**: a subagent started by the lead's Agent call takes effort
+  from an `effort-<level>` subagent type (the call's or the task's) and
+  the call's model; its own assistant lines give the answering model and
+  the context tokens. The background-task count is the whole
+  `background_tasks_changed` list, subagents included; it is in the state
+  and in `host.backgroundTasks`. Idle stop (already in place) waits for
+  it and stays off for Pi.
+- **wslive**: the `Host` snapshot block and the `notice` ring kind. Both
+  are host-only.
+- **Page UI** (`internal/wsdashboard`):
+  - "+ session" on worktree rows only.
+  - Notice and failed-compaction rows with text and reset time, and a
+    retry row in the live tail.
+  - An error ring on the rail row and the head chip, plus a failure chip.
+  - An MCP-broken chip, and a menu Restart item shown while broken.
+  - Stop and restart confirm when background tasks run, and close always
+    confirms; each names the count.
+  - The background-task count in the agents panel head and as a composer
+    badge.
+  - 21 strings in all 11 tables.
+- **Manual**: `ai-docs/manuals/ws-mcp.md` (recovery and failures, access,
+  page).
+
+Deviations:
+
+- Subagent output rate is not mapped. Without `--include-partial-messages`,
+  each content block arrives whole and its usage keeps the request's
+  starting output count (checked on the recorded fixtures), so the stream
+  has no honest rate. Enabling partial messages would flood the holder
+  ring.
+- The composer badge shows an icon and the count; the full label is its
+  tooltip, because both badges' labels were cut off at the default
+  width. The agents panel head shows the full text.
+- The typed-failure fixtures follow Orca ADE's shapes, as Decision 16
+  planned. `error: rate_limit` with no `api_error` maps to a usage limit
+  until a live capture says otherwise.
+
+Verification:
+
+- `ws-rgo -- test ./internal/wsagent/ ./internal/wslive/
+  ./internal/wsdashboard/ ./internal/wsi18n/ -count=1`: all ok.
+  `ws-rgo -- vet ./...`: clean.
+- New tests:
+  - `TestClaudeLeadTypedFailures`, `TestClaudeLeadRetryAndFailedCompaction`,
+    `TestClaudeLeadMCPSignals`, `TestClaudeLeadSubagentTelemetry`.
+  - `TestLeadMCPReconnectsInStream`, `TestLeadMCPRestartsAtTheFirstIdlePoint`
+    (error answer, and still failed), `TestLeadMCPServerBackRestartsNothing`,
+    `TestLeadMCPRestartsOnceForAServerThatNeverConnects` (manual restart
+    refused from LAN), `TestLeadFailureState`.
+  - The restart write is added to the trusted-gate route tests.
+  - wslive: `TestNoticeFollowsTheReplyItEnds`, `TestHostStateInTheSnapshot`,
+    `TestFailedCompactionKeepsItsError`.
+  - wsdashboard: `TestHostedRecoveryAndFailures`, `TestRailRowFailure`, and
+    the plain-folder "+ session" case in `TestRailMarkupHostedSessions`.
+- Browser check: the rendered hosted page and rail in headless Chromium,
+  with mocked `/agents` and `/support/choices` routes, in light and dark at
+  1500 and 1800 px. 30 checks passed: the rows, rings, and chips, Restart
+  shown only while broken, the confirm texts and the POSTs they send, and
+  no page errors.
+- Live checklist **not run**: an in-stream reconnect with the same PID,
+  and an idle-stopped session resuming on mail while hosted. Both need a
+  real daemon built from this branch, and Go cannot be built locally.
+- Lite review: one Important finding (the restart flag stayed set after a
+  server came back), fixed in 8b1a67b42 with a test. The Minor findings
+  are left as is: the `rate_limit` mapping guess, `spawns` entries for
+  Agent calls that never start (bounded by the process), the check
+  goroutine outliving the runner's close by up to a minute, and
+  sleep-based negative assertions.
