@@ -47,12 +47,14 @@ store commands (`tk:register`, `tk:sync`, `tk:unregister`, `tk:relabel`,
 tracker.query payload: {store?, scope?, item?, kind?, status?, project?, text?, q?}
 ```
 
-- `scope`: `mine` (the default: the user's assignments, then the items the
-  user created and assigned to nobody), `received` (assignments sent to the
+- `scope`: `mine` (the default: the user's assignments, the items the user
+  created and assigned to nobody, then pending take requests the user may
+  answer or filed), `received` (assignments sent to the
   user, the user's answers, and the ones the user sent), `assigned` (items the
   user assigned or handed to others), `team` (the work of the members the user
   leads, by person), or `all` (every item, in tree order).
-- `item`: one item in full, with its assignments, children, and comments.
+- `item`: one item in full, with its assignments, opening, take requests,
+  children, and comments.
 - `kind`, `status`, `project`, and `text` (part of the title, body, project,
   or ID) narrow the rows. `status` is `open` (not done), `hidden` (the only
   way hidden items show), or a status the rows print: `idea`, `todo`,
@@ -69,7 +71,8 @@ tracker.query payload: {store?, scope?, item?, kind?, status?, project?, text?, 
   `kind:topic`, `project:<project>` (exact), `label:<label name>` (exact),
   `due:<date>` and
   `priority:<level>` (equality, or after `<`, `>`, `<=`, or `>=`; dates are
-  `YYYY-MM-DD`; an item without a due date never matches a `due:` token).
+  `YYYY-MM-DD`; an item without a due date never matches a `due:` token),
+  `is:claimable` (an open task the user may claim now).
   A word or `"quoted phrase"` matches the title, body, project, ID, alias,
   or the text of the item's shown comments. A token with another key (`foo:bar`, a URL)
   is plain text; a listed key with a malformed value (`due:<tomorrow`) is
@@ -103,6 +106,11 @@ cannot be rolled back, so each stands alone in its batch, outside any group.
 | `tk:item.close` | `item` | a note |
 | `tk:item.confirm`, `tk:item.reject` | `item`, `assignee` | a note |
 | `tk:item.reopen` | `item`, `assignee?` | a note |
+| `tk:item.open` | `item`, `scope` | none |
+| `tk:item.unopen`, `tk:item.claim` | `item` | none |
+| `tk:item.request` | `item`, `assignee` | a note |
+| `tk:item.approve`, `tk:item.deny` | `item`, `request` | a note |
+| `tk:item.unrequest` | `item`, `request` | none |
 | `tk:comment.add` | `item`, `reply_to?`, `mentions?`, `refs?` | the comment |
 | `tk:comment.edit` | `comment`, `mentions?`, `refs?` | the new text |
 | `tk:comment.hide` | `comment` | none |
@@ -131,9 +139,10 @@ Body text, markdown, written as is.
 </tk:store>
 ```
 
-- `item`, `parent`, `after`, `reply_to`, `comment`, and each `refs` entry: an
-  ID as the query or an update prints it, or `$N` for the item or comment
-  that command `N` (counting from 1) of the same batch creates.
+- `item`, `parent`, `after`, `reply_to`, `comment`, `request`, and each
+  `refs` entry: an ID as the query or an update prints it, or `$N` for the
+  item, comment, or take request that command `N` (counting from 1) of the
+  same batch creates.
 - `after`: the sibling (same parent) the new or moved item goes right
   after; `after=""` puts it first; without `after` it goes last.
 - `tk:item.move` places an existing item, with its subtree, under `parent`
@@ -156,8 +165,8 @@ Body text, markdown, written as is.
   (an admin when the creator was removed), at todo, and that holder sets its
   status and closes it. Assigning anyone, the creator included, replaces
   that holding; when the last assignment ends, the creator holds it again
-  at todo. It cannot be unassigned, handed off, or returned; assign the
-  item instead.
+  at todo. It cannot be unassigned, handed off, or returned; assign or open
+  the item instead.
 - `status`: `idea` (before todo, not counted in progress), `todo`, `doing`,
   or `blocked`. To create a task straight into idea, follow its
   `tk:item.create` with `tk:item.status item="$N" status="idea"` in the
@@ -202,6 +211,25 @@ Body text, markdown, written as is.
     pending. It takes no `tk:item.status` or `tk:item.close`. Its holder
     releases it with `tk:item.unassign` naming themselves as `assignee`, or
     hands it off.
+- Taking work:
+  - Assign a task when the creator knows who should do it; open it when
+    anyone in a group may take it. `tk:item.open` (the creator) offers a task
+    nobody else holds for claiming: `scope="team"` to the creator's org
+    subtree, `scope="store"` to every member. `tk:item.unopen` withdraws the
+    offer; an assign also ends it.
+  - `tk:item.claim` takes an open task the user may claim (its row prints
+    `claimable by me`; `q: "is:claimable"` lists them) as the user's live
+    assignment, with no approval.
+  - `tk:item.request` asks for the live assignment `assignee` holds; a task
+    held only by its creator is claimed once opened, not requested. The
+    item view lists its take requests with their IDs. The holder of that
+    assignment or the item's creator answers with `tk:item.approve`, which
+    moves the assignment to the requester, or `tk:item.deny`; the requester
+    withdraws with `tk:item.unrequest`. A request lapses when the assignment
+    it names ends.
+  - Two claims of one opening, or two approvals for one assignment, written
+    before either reached the other: the first in the store's event order
+    wins, and the later is flagged with a reason naming what took it first.
 - `clear` on `tk:item.edit`: `body`, `due`, or both
   (`clear="body due"`); an absent body leaves the body as it is.
 - `origin`: `agent` (the user asked; the default) or `agent-auto` (recorded
