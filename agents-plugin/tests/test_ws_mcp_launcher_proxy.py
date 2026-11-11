@@ -384,7 +384,7 @@ class LauncherProxyTest(unittest.TestCase):
         self.assertEqual(sorted(p.name for p in (self.daemon_dir / "bin").iterdir()), [staged.name])
 
     def test_an_older_daemon_or_an_older_build_is_replaced_a_newer_one_is_used(self):
-        for version, build_time, want_start in [("0.48.15", 5000, True), ("0.48.16", 1999999999999, True), ("0.48.16", 2000000000000, False), ("0.48.16-dev", 1, False), ("0.48.20", 1, False)]:
+        for version, build_time, want_start in [("0.48.15", 5000, True), ("0.48.16", 1999999999999, True), ("0.48.16", 2000000000000, False), ("0.48.16-dev", 1, True), ("0.48.16-dev", 2000000000000, False), ("0.48.20", 1, False)]:
             with self.subTest(version=version, build_time=build_time):
                 health = {"version": version, "build_time": build_time}
                 self.assertEqual(self.link().needs_start(health), want_start)
@@ -463,6 +463,32 @@ class LauncherProxyTest(unittest.TestCase):
         self.assertTrue(link.needs_start({"version": "0.48.16", "build_time": 1_000_000_000_000}), "a daemon that reports no hash: the build time decides")
         self.assertFalse(link.needs_start({"version": "0.48.16", "build_time": 2_000_000_000_000, "content_hash": "0" * 64}), "an equal build is never replaced")
         self.assertFalse(link.needs_start({"version": "0.48.17", "build_time": 1, "content_hash": "0" * 64}), "a newer version is never replaced")
+
+    def test_a_dev_daemon_at_the_contract_core_is_replaced_by_a_newer_build(self):
+        # The contract's plugin_version carries no suffix while a local-devenv
+        # build reports "-dev"; the suffix order alone would read every such
+        # daemon as newer and never let a reinstall at that core replace it.
+        digest = self.launcher.sha256_file(self.binary)
+        link = self.link()
+        self.assertTrue(link.needs_start({"version": "0.48.16-dev", "build_time": 1_000_000_000_000, "content_hash": "0" * 64}), "-dev daemon, older build of other content: replaced")
+        self.assertFalse(link.needs_start({"version": "0.48.16-dev", "build_time": 1_000_000_000_000, "content_hash": digest}), "-dev daemon of the same content: kept")
+        self.assertFalse(link.needs_start({"version": "0.48.16", "build_time": 1_000_000_000_000, "content_hash": digest}), "same version, same content: kept")
+        self.assertTrue(link.needs_start({"version": "0.48.15-dev", "build_time": 3_000_000_000_000, "content_hash": "0" * 64}), "an older core: replaced")
+        self.assertFalse(link.needs_start({"version": "0.48.17-dev", "build_time": 1, "content_hash": "0" * 64}), "a newer core: kept")
+
+    def test_a_dev_daemon_that_daemon_start_keeps_is_used_not_fallen_back_from(self):
+        # A bare release runtime asks to replace an older-built "-dev" daemon
+        # of its core, but daemon-start (wsdashboard.keepRunning) ranks the
+        # "-dev" daemon newer and keeps it; the launcher then uses it.
+        dev = self.daemon(version="0.48.16-dev", build_time=1_000_000_000_000, content_hash="0" * 64)
+        dev.write_endpoint(self.daemon_dir)
+        self.point_start_at(dev)
+        client = ProxyClient(self.launcher, self.link())
+        client.send("initialize")
+        self.assertEqual(client.recv()["result"]["served_by"], "daemon")
+        self.assertEqual(client.close(), 0)
+        self.assertEqual([r["args"][0] for r in self.runtime_log()], ["daemon-start"])
+        self.assertEqual(len(dev.hellos), 1)
 
     # --- the paths under traffic --------------------------------------------------
 
