@@ -341,7 +341,14 @@
       "registered_at": "2026-11-10T13:38:46Z"
     },
     "261110-bug-ws-tracker-store-lock-network-split": {
-      "registered_at": "2026-11-10T07:31:45Z"
+      "registered_at": "2026-11-10T07:31:45Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "28ef83e379b353cc",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-11T07:00:49Z"
+      }
     },
     "261110-bug-ws-whiteboard-option-quote-parse": {
       "registered_at": "2026-11-10T14:07:44Z"
