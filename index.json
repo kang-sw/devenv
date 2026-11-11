@@ -419,6 +419,9 @@
     },
     "261111-bug-ws-launcher-dev-daemon-never-replaced": {
       "registered_at": "2026-11-11T00:10:56Z"
+    },
+    "261111-feat-ws-dashboard-hosted-usage-limit-continue": {
+      "registered_at": "2026-11-11T04:19:25Z"
     }
   }
 }
