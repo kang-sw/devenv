@@ -390,7 +390,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-11T02:53:53Z"
+        "touched_at": "2026-11-11T02:54:26Z",
+        "impl": {
+          "branch": "impl/develop/yummy-blade-spoof"
+        }
       }
     },
     "261110-feat-ws-tracker-daemon-event-hook": {
