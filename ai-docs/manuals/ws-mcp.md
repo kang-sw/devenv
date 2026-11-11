@@ -279,6 +279,23 @@ session to clean up unused worktrees, then the pool as text, cut at 48 KiB
 with a `... N more worktrees` line (singular for one). The dashboard never
 removes or releases a worktree itself.
 
+Every session page carries the session rail (`internal/wsdashboard/rail.go`,
+`pageview_rail.go`): the listed sessions grouped by repository (or plain
+folder) and worktree. It is one shared render (region `rail`, keyed by
+language and theme, no reply-id) that each session stream sends beside its
+page with a broker subscription of its own, so a session's change renders
+the rail once for all open pages and no other session's page. A session's
+repository comes from the registration's `git_common_dir` (ws-mcp's one
+`rev-parse --git-common-dir` at first registration), else from its root's
+`.git` on disk. The worktree rows come from `git worktree list --porcelain`
+through the source's optional `RepoWorktreeSource` (pooled worktrees under
+the `worktree_pool` roots show only while they hold a session), read only
+while a page streams the rail: on the first such stream, every 3 minutes,
+for a newly shown repository alone, and on `POST /rail/refresh` (own Origin;
+409 with no streaming page). Change counts come from the newest session
+snapshot in the worktree; the rail never reads a working tree. Drafts,
+stars, and collapsed workspaces are browser-local (`assets/rail.js`).
+
 On the served board and in the conversation's lead
 replies, a file link renders as an action link (`data-wl="file"`, titled with
 its repo-relative path) and an http(s) link is marked `data-wl="url"`: a
@@ -594,6 +611,59 @@ cache's `<kind>_cache_hits` and `<kind>_cache_misses` (a miss reads the
 file): `snapshot` (the daemon's pages), `source_snapshot` (session
 re-reads), `record`, `reply_registry`, and `scope_store`.
 
+Session holders: a holder is a small Python process (standard library only,
+3.10 or newer) that owns one child process, over pipes or a PTY (ConPTY on
+Windows), and outlives the daemon, so the child survives a daemon restart.
+The script is embedded in `ws-mcp` (`internal/wsholder/holder.py`, whose
+module docstring is the descriptor and protocol reference) and staged to
+`<dashboard dir>/holders/bin/holder-<content hash>.py` before a holder
+starts; a running holder keeps the file it started from, and at start the
+daemon removes staged scripts that no live holder's descriptor names. Each
+holder has its own directory `<dashboard dir>/holders/<holder id>/` with
+`descriptor.json` (owner-only; PID, loopback port, attach token, protocol
+version, start time (wall clock, plus boot-clock ticks on Linux), script
+hash, restart-safe flag, and the consumer's
+session description) and `holder.log`. The holder rewrites a deleted
+descriptor within a minute, removes its directory when it exits, and exits
+on its own 24 hours after the last detach once its child has exited, never
+while the child lives.
+
+The daemon scans the holders directory at start and every 3 minutes,
+attaches to every holder over loopback TCP with the descriptor's token, and
+replays the holder's output ring (4 MiB, sequenced; a reattach within one
+daemon process continues after the last sequence it saw, a new daemon
+process replays the whole ring). The newest authenticated attach takes over,
+so a replaced daemon and its successor never both write to one child. A
+descriptor whose process is gone is removed with its directory, and so is
+one whose PID now belongs to another process (the endpoint does not answer
+and the process under the PID did not start when the descriptor says). A
+live holder stays unattached for one of three causes: its endpoint does not
+answer, its protocol is neither the daemon's version nor the one before it,
+or it refuses the token. `GET /holders` lists every holder with its state
+and cause, the recent holder start failures, and whether the viewer may
+stop one; the drawer's holders card shows the unattached holders, the ones
+marked not restart-safe (a Windows holder that could not leave its
+starter's job object), and the start failures, with a stop button on each
+unattached one. `POST /holders/<id>/stop`
+ends a holder and its child: through the protocol when attached, otherwise
+by killing the holder's process group (POSIX) or process tree (Windows),
+and only while the process under the PID is still the one the descriptor
+records, which guards against a reused PID (409 with the reason otherwise):
+on Linux the process's start in boot-clock ticks must equal the recorded
+`start_ticks`, because the creation time Linux reports is derived from the
+boot clock and moves with every wall-clock step; elsewhere the OS creation
+time must be within 2 seconds of the recorded wall-clock start. The stop route answers only a browser on this
+machine that sends the daemon's own Origin; a LAN viewer sees the card
+without the stop button. Closing the daemon detaches and ends no holder.
+
+The interpreter is `WS_MCP_HOLDER_PYTHON`, which the launcher sets to its
+own interpreter when it starts the daemon (the detached daemon inherits
+it); without it the daemon uses `python3` on PATH, and a holder that cannot
+start is reported on the card. Holder tests: `go test ./internal/wsholder/`
+runs real holders (skipped without Python 3.10 or newer on PATH), and
+`python3 -m unittest discover -s agents-plugin-tool/internal/wsholder/tests`
+runs the script's own tests.
+
 ## Plugin-Managed Startup
 
 Codex plugin bundles can reference plugin-local MCP configuration:
@@ -818,6 +888,7 @@ Current launcher inputs:
 | `WS_MCP_PROJECT_ROOT` | Project root default for root-aware tools and CLI commands when no higher-priority root exists. |
 | `WS_MCP_DASHBOARD_DEV_SOURCE` | Read by `ws-mcp dashboard`: the `agents-plugin-tool` source root the daemon serves dashboard and whiteboard page assets from instead of the embedded copies (see Dashboard daemon, Dev assets). Unset is off. |
 | `WS_MCP_DASHBOARD_PPROF` | Read by `ws-mcp dashboard`: `1`/`true`/`yes`/`on` serves `net/http/pprof` under `/debug/pprof/` to loopback viewers only, never to a LAN-token request (see Dashboard daemon, Profiling). Unset is off: the routes do not exist. |
+| `WS_MCP_HOLDER_PYTHON` | Read by `ws-mcp dashboard`: the Python interpreter that runs session holders (see Dashboard daemon, Session holders). The launcher sets it to its own interpreter on the daemon-start step unless it is already set; unset, the daemon uses `python3` on PATH. |
 | `WS_MCP_NO_AGENT` | Product-mode gate for agentless distributions such as wsflow. |
 | `WS_MCP_NO_DASHBOARD` | `1`/`true`/`yes`/`on` turns the dashboard off for this ws-mcp whatever `dashboard.enabled` resolves: no session registration, no prune (the daemon itself is started by the launcher, never by this ws-mcp). The agent runner sets it on the ws-mcp it attaches to a conversation. |
 | `WS_MCP_ALLOWED_TOOLS` | Comma list of ws tool names; when set, `tools/list` advertises and `tools/call` accepts only these. The agent runner sets it to a profile's ws tools. `tracker.show`, `tracker.ui`, and `git.search` are listed and callable only when it names them. |

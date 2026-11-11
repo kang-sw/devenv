@@ -86,9 +86,16 @@ type DaemonOptions struct {
 	// SupportRoutePrefix (the agent runner's per-store conversations); nil
 	// serves none.
 	Support http.Handler
+	// Holders is the session holder manager (holders.go): the daemon runs
+	// its scans and serves the holders routes; nil runs none.
+	Holders HolderHost
 	// Pprof serves net/http/pprof under /debug/pprof/ to loopback viewers
 	// only (pprof_route.go; PprofEnv); false serves no such route.
 	Pprof bool
+	// WorkspacesFile is the stored workspace list's file (workspaces.go),
+	// which belongs in the config home; empty keeps no stored workspace and
+	// serves no workspace route (workspace_routes.go).
+	WorkspacesFile string
 
 	// bindHost overrides the address the daemon binds, so a test runs LAN
 	// mode on loopback; empty derives it from LAN.
@@ -96,6 +103,13 @@ type DaemonOptions struct {
 	// openSystem replaces the system-open route's OS open command, so a
 	// test never starts a browser; nil runs systemOpen.
 	openSystem func(target string) error
+	// hostFiles replaces the host the file browser's host route acts on
+	// (fs_act_route.go), so a test never opens a window; nil is the host
+	// the daemon runs on.
+	hostFiles *hostFiles
+	// terminalShell replaces the shell a new terminal runs, so a test's
+	// shell does not depend on the machine's; nil picks daemonShell.
+	terminalShell func() terminalShell
 	// gitRead replaces the git handle's read, so a test never runs git; nil
 	// runs readGitBadge. noGitBadge turns the handle off: no read and no
 	// handle, for the tests that pin which regions a stream sends.
@@ -166,6 +180,14 @@ type Daemon struct {
 	contentHash string
 	// openSystem opens a system-open route's target (systemOpen).
 	openSystem func(target string) error
+	// hostFiles is the host the file browser's host route acts on
+	// (fs_act_route.go).
+	hostFiles *hostFiles
+	// fsCapOnce draws fsCapSecret, the key of the HTML preview's
+	// capabilities (fs_capability.go); fsNow replaces their clock in a test.
+	fsCapOnce   sync.Once
+	fsCapSecret []byte
+	fsNow       func() time.Time
 	// git reads the git handle of the roots open session pages show
 	// (gitbadge.go); nil when the handle is off.
 	git *gitWatcher
@@ -177,11 +199,29 @@ type Daemon struct {
 	// measures their worktrees' disk use (worktrees.go).
 	worktrees WorktreeSource
 	sizes     *sizeCache
+	// rail reads the session rail's worktree lists while a page shows the
+	// rail (railworktrees.go); railMsgs holds each session's last message
+	// for it (railmessages.go).
+	rail     *railLister
+	railMsgs *railMessages
+	// workspaces holds the stored workspaces, nil without them
+	// (workspaces.go); pathHost is the machine whose rules read a pasted
+	// folder path (workspacepath.go).
+	workspaces *workspaceStore
+	pathHost   pathHost
 	// files caches each session root's file list for the files route
 	// (files_route.go).
 	files *fileListCache
 	// support serves SupportRoutePrefix, nil without the routes.
 	support http.Handler
+	// holders is the session holder manager, nil without the routes
+	// (holders.go).
+	holders HolderHost
+	// terminals are the shells on holder PTYs the session pages show, nil
+	// unless the holder manager can host them (terminals.go); shell picks a
+	// new one's shell.
+	terminals *terminals
+	shell     func() terminalShell
 	// proxy builds the hosted MCP sessions (proxy.go), nil without the
 	// route; proxyConns are the open ones, proxyWG counts their
 	// goroutines, and proxyDraining refuses new ones once Close began.
@@ -286,10 +326,12 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 		contentHash:     opts.ContentHash,
 		proxy:           opts.Proxy,
 		openSystem:      opts.openSystem,
+		hostFiles:       opts.hostFiles,
 		worktrees:       opts.Worktrees,
 		sizes:           newSizeCache(),
 		files:           newFileListCache(),
 		support:         opts.Support,
+		holders:         opts.Holders,
 		stop:            make(chan struct{}),
 		done:            make(chan struct{}),
 		endpoint: Endpoint{
@@ -311,6 +353,18 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 	if d.openSystem == nil {
 		d.openSystem = systemOpen
 	}
+	if d.hostFiles == nil {
+		d.hostFiles = defaultHostFiles()
+	}
+	if host, ok := opts.Holders.(TerminalHost); ok {
+		// The terminals take the holders' events before the first scan
+		// (Run, below), so they see a predecessor's terminals attach.
+		d.terminals = newTerminals(host, logw)
+		host.AddSink(d.terminals)
+		if d.shell = opts.terminalShell; d.shell == nil {
+			d.shell = daemonShell
+		}
+	}
 	if !opts.noGitBadge {
 		read := opts.gitRead
 		if read == nil {
@@ -320,6 +374,17 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 			d.stats.WakeGit.Add(1)
 			d.broker.wake(gitDep(root))
 		}, d.stop)
+	}
+	var railRead func(string, []Registration) (RepoWorktrees, error)
+	if src, ok := opts.Worktrees.(RepoWorktreeSource); ok {
+		railRead = src.ReadRepoWorktrees
+	}
+	d.railMsgs = newRailMessages()
+	d.rail = newRailLister(railRead, func() { d.broker.wake(railListRepoKey) }, d.stop)
+	d.workspaces = openWorkspaceStore(opts.WorkspacesFile)
+	d.pathHost = daemonPathHost()
+	if d.workspaces != nil {
+		d.rail.sweep = d.workspaces.sweep
 	}
 	if d.lan {
 		// Mint the token now, so the localhost index shows it before any
@@ -354,6 +419,16 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 	}()
 	if d.index != nil {
 		go d.poll(opts.PollInterval)
+	}
+	// The holder scans start only now, under the single-instance lock: a
+	// predecessor has let go of its holders before this daemon attaches.
+	if d.holders != nil {
+		go func() {
+			if d.terminals != nil {
+				d.terminals.firstScan()
+			}
+			d.holders.Run()
+		}()
 	}
 	fmt.Fprintf(d.log, "dashboard: version %s listening on %s (lan %v, pid %d)\n", d.endpoint.Version, listener.Addr(), d.lan, d.endpoint.PID)
 	return d, nil
@@ -415,6 +490,7 @@ func (d *Daemon) sessionChanged(replyID string) {
 		if _, ok := d.index.Session(replyID); !ok {
 			d.entries.drop(replyID)
 			d.entryFiles.drop(replyID)
+			d.railMsgs.drop(replyID)
 			d.snapshots.Forget(d.dir, replyID)
 			if f, ok := d.source.(SessionForgetter); ok {
 				f.ForgetSession(replyID)
@@ -497,6 +573,10 @@ func (d *Daemon) Close() {
 		if d.agents != nil {
 			d.agents.Close()
 		}
+		// Detaches only: the holders and their children outlive the daemon.
+		if d.holders != nil {
+			d.holders.Close()
+		}
 		removeEndpointIfOwned(d.dir, d.endpoint.Token)
 		_ = d.lock.Unlock()
 		fmt.Fprintf(d.log, "dashboard: stopped (pid %d)\n", d.endpoint.PID)
@@ -513,8 +593,13 @@ func (d *Daemon) Close() {
 // (tracker_routes.go), and with a support handler the support POST routes
 // (a tracker store's support conversation: send, new, select) are the only
 // browser writes besides the git drawer's push, pull, and fetch routes
-// (gitpush.go), and its system-open route (sysopen_route.go) the only route
-// that runs a host command beside git and the agent runner's harnesses: a
+// (gitpush.go) and, with stored workspaces, the rail's workspace routes
+// (workspace_routes.go: the stored list, and git worktree add), and its
+// system-open route (sysopen_route.go) the only route
+// that runs a host command beside git and the agent runner's harnesses (with
+// a holder manager, the holder stop route, holders.go, ends a holder, and
+// the terminal routes, terminal_routes.go, run shells for a browser on this
+// machine): a
 // session stream keeps its root's git handle read, the git route
 // (gitbadge.go) asks for a read at once without running git itself, and the
 // git status route (gitdrawer.go) reads the root's changed files. With
@@ -530,6 +615,10 @@ func (d *Daemon) Handler() http.Handler {
 	mux.HandleFunc("/nudge", d.handleNudge)
 	mux.HandleFunc("/events", d.handleIndexEvents)
 	mux.HandleFunc("/s/", d.handleSessionRoutes)
+	mux.HandleFunc(railRoute, d.handleRailRefresh)
+	if d.workspaces != nil {
+		d.workspaceRoutes(mux)
+	}
 	if d.tracker != nil {
 		mux.HandleFunc("/tracker/", d.handleTracker)
 	}
@@ -541,6 +630,10 @@ func (d *Daemon) Handler() http.Handler {
 	if d.support != nil {
 		mux.Handle(SupportRoutePrefix, d.support)
 		mux.Handle(SupportRoutePrefix+"/", d.support)
+	}
+	if d.holders != nil {
+		mux.HandleFunc("/holders", d.handleHolders)
+		mux.HandleFunc("/holders/", d.handleHolders)
 	}
 	if d.pprof {
 		mux.Handle(pprofPrefix, pprofHandler(d.serveStreams))

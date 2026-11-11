@@ -9,6 +9,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: 205b275210c3f035
 sage-review-design-reviewed: 205b275210c3f035
+completed: 2026-11-10
 ---
 
 # Agents panel telemetry
@@ -164,6 +165,69 @@ Verification:
 - A browser check: stats inline on a panel wider than the threshold, in the
   hover card on a narrower one; the rate disappears when a subagent ends
   while model, effort, and context tokens stay.
+
+### Result (50a0ffd2e) - 2026-11-10
+
+Landed in 16b43fae8 (wslive), 953a29425 (Pi feed), d4d42f4eb (dashboard
+UI), c2fd2c998 (Claude mod + wsflow mirror), 7e103e246 (hooks.json feed
+description, both packages), 50a0ffd2e (hover-card CSS fix).
+
+- **Wire and state.** `wslive.Event` gains `model`, `effort`,
+  `contextTokens`, `outputTps` (numbers as `*float64`); `wslive.Agent`
+  carries them on the snapshot (omitempty). A present field replaces the
+  held value, an absent, blank, or out-of-range one keeps it, and the lead
+  refuses them. The state clears the rate when a subagent leaves running,
+  so an ended row keeps model, effort, and context but no rate.
+  `BatchView.Usage` stays `json:"-"`, pinned by a JSON-equality test.
+- **Peer branch.** `peerGroup` copies `Snapshot.Repo.Branch`/`Detached`
+  for any served peer, adapter or not; the chip draws through the session
+  page's `branchHandle` (goal/impl marks and last segment; a detached HEAD
+  by its commit under the detached title; nothing for a non-repository
+  root or an unserved peer).
+- **Claude source.** Model and effort come from each subagent request's
+  `turn.step` input (the actual per-request values); the spawn seeds them
+  only while still empty (the spawn result's model, effort from an
+  `effort-<level>` agent type). Context = latest usage input + cache read +
+  cache write.
+- **Threshold.** 560px of the agents panel's own width (`.r-tree` is the
+  `atree` inline-size container); below it the stats hide and a hover card
+  built like the git-graph tooltip shows one line per stat from the stats'
+  own titles, rebuilt across tree swaps by the row's data-key.
+- **Claude rate vs. Pi.** The Claude mod follows the Pi tracker's
+  no-reasoning-breakdown branch (Claude reports none): per request, all
+  output tokens over the summed span of every content block, excluding
+  pre-first-block latency and inter-block gaps; skip null usage, span under
+  250ms, or under 8 tokens; token-weighted over the last 8 eligible
+  requests; window reset on a model change. The one difference is span
+  measurement: Claude Code's hooks give per-index chunks but no block
+  start/end, so a block spans its first to last chunk arrival. That omits
+  the first chunk's decode time (a single-chunk block spans 0ms), so the
+  Claude rate reads somewhat higher than Pi's, most for short blocks;
+  requests made mostly of single-chunk blocks fall under the 250ms floor
+  and are skipped rather than inflating the rate.
+
+Verification:
+- Go (remote): `go test ./internal/wsrsrc/ ./internal/mcp/
+  ./internal/wsdashboard/ ./internal/wslive/ ./internal/wsi18n/` all ok
+  (wsrsrc covers the wsflow hooks mirror); `go vet` on wslive,
+  wsdashboard, mcp clean.
+- Claude mod: `claude plugin test agents-plugin` 696 pass, 0 fail (an
+  earlier run's engine-test timing flakes reproduce on unchanged HEAD);
+  `claude plugin validate` passes for both packages; `diff -r` of the two
+  claude-mod trees empty.
+- Pi: `node --test` dashboard-feed and output-rate, 65 pass; the full
+  suite's failures match a clean HEAD copy (environmental).
+- Browser: headless Chromium over a fully rendered session page (running
+  and ended subagent with telemetry, peer on an impl branch). At 900px the
+  stats show inline (`claude-opus-5-5 high 48.2k 62 t/s`; the ended row
+  `claude-sonnet-5 medium 9.0k`, no rate) and hovering shows no card; at
+  440px the stats compute `display: none` and hovering the row shows the
+  card with model, context, and output lines; the peer chip shows the
+  goal/impl marks and `feature-y`; no page errors. The check found the
+  card's lines flowing inline (selector specificity), fixed in 50a0ffd2e.
+- Lite review: no Critical or Important; Minor 1 fixed (above); Minor 2
+  left: `Event.Effort` is a JSON string, so an adapter sending a numeric
+  effort would fail the event (both adapters send strings).
 
 ## Sage Review Round 1 (2026-11-10)
 

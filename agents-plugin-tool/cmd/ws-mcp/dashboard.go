@@ -17,6 +17,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wsagent"
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdashboard"
+	"github.com/kang-sw/devenv/internal/wsholder"
 	"github.com/kang-sw/devenv/internal/wstrackerhost"
 )
 
@@ -86,10 +87,19 @@ func dashboardCommand(args []string) {
 		Log:         logw,
 		Proxy:       host,
 		Pprof:       wsdashboard.PprofEnabled(os.Getenv(wsdashboard.PprofEnv)),
-		Sessions:    sessions,
-		Worktrees:   sessions,
-		Agents:      agents,
-		Tracker:     &dashboardTracker{h: tracker, err: trackerErr},
+		// User-curated, so beside the config file rather than in the cache.
+		WorkspacesFile: wsdashboard.WorkspacesFilePath(configPath),
+		Sessions:       sessions,
+		Worktrees:      sessions,
+		Agents:         agents,
+		Tracker:        &dashboardTracker{h: tracker, err: trackerErr},
+		// The holders a predecessor left running are found in the state
+		// directory; the interpreter for a new one is the launcher's own.
+		Holders: wsholder.New(wsholder.Options{
+			Dir:    filepath.Join(dir, wsholder.DirName),
+			Python: os.Getenv(wsholder.PythonEnv),
+			Log:    logw,
+		}),
 		Support: wsagent.NewSupport(wsagent.SupportOptions{
 			Runner:    agents,
 			Dir:       dir,

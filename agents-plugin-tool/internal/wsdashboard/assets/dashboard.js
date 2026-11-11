@@ -29,24 +29,36 @@
     if (m < 60) return m + "m " + (s % 60) + "s";
     return Math.floor(m / 60) + "h " + (m % 60) + "m";
   }
+  // relAge is an age in one short unit: "now" under five seconds, then
+  // seconds, minutes, hours, days (the session rail's last tool call).
+  function relAge(ms) {
+    var s = Math.max(0, Math.floor(ms / 1000));
+    if (s < 5) return wsT("js.rel.now");
+    if (s < 60) return wsT("js.rel.s", s);
+    if (s < 3600) return wsT("js.rel.m", Math.floor(s / 60));
+    if (s < 86400) return wsT("js.rel.h", Math.floor(s / 3600));
+    return wsT("js.rel.d", Math.floor(s / 86400));
+  }
   // A clock or weekday time and every time's title never change while the
   // page shows them, so each element formats them once (wsFmt marks it with
   // the language it used; only a language change formats it again). The
-  // relative times ("since", "ago") follow the clock, and are written only
-  // when their text changed.
+  // relative times ("since", "ago", "rel") follow the clock, and are
+  // written only when their text changed.
   function fmtTime(t, now) {
     var ms = +t.getAttribute("data-ms");
     if (!ms) return;
-    var f = t.getAttribute("data-f"), rel = f === "since" || f === "ago";
+    var f = t.getAttribute("data-f"), rel = f === "since" || f === "ago" || f === "rel";
     if (rel) {
-      var s = f === "since" ? dur(now - ms) : wsT("js.ago", dur(now - ms));
+      var s = f === "since" ? dur(now - ms) : f === "rel" ? relAge(now - ms) : wsT("js.ago", dur(now - ms));
       if (t.textContent !== s) t.textContent = s;
     }
     if (t.wsFmt === wsI18n.lang) return;
     t.wsFmt = wsI18n.lang;
     if (f === "wd") t.textContent = new Date(ms).toLocaleDateString(wsI18n.lang, { weekday: "short" });
     else if (!rel) { var d = new Date(ms); t.textContent = two(d.getHours()) + ":" + two(d.getMinutes()); }
-    t.title = new Date(ms).toLocaleString(wsI18n.lang);
+    // data-tl names what the time is; the title leads with it.
+    var tl = t.getAttribute("data-tl");
+    t.title = (tl ? tl + " \u00b7 " : "") + new Date(ms).toLocaleString(wsI18n.lang);
   }
   // fmtTimes formats every time under el, for content just put on the page.
   function fmtTimes(el) {
@@ -75,7 +87,7 @@
   function tickTimes() {
     if (doc.hidden) return;
     var now = Date.now();
-    q('time[data-ms][data-f="since"], time[data-ms][data-f="ago"]').forEach(function (t) { fmtTime(t, now); });
+    q('time[data-ms][data-f="since"], time[data-ms][data-f="ago"], time[data-ms][data-f="rel"]').forEach(function (t) { fmtTime(t, now); });
     q("em.u-pace[data-reset]").forEach(function (e) { pace(e, now); });
   }
   setInterval(tickTimes, 1000);
@@ -153,10 +165,17 @@
   // TAB maps a region to the tab that shows it; PANE names the element whose
   // visibility tells whether a tab is shown in the current view. The panels
   // live in the drawer, whose handle carries their dot instead.
+  // The conversation column itself switches "Conversation | Files"
+  // (ctabs): its Files pane (files.js) stands in for the agents tree, the
+  // conversation, and the composer, which are only hidden meanwhile, so
+  // their scroll, the draft, and the tree's state survive the switch. The
+  // conversation tab counts as shown while either of the two shows.
   var TAB = { tree: "convo", entries: "convo", convlive: "convo", board: "board" };
   var PANE = { convo: "convo", board: "bcol" };
-  function tabShown(t) { return visible($(PANE[t])); }
+  var fpane = $("files"), filesSeen = false;
+  function tabShown(t) { return visible($(PANE[t])) || (t === "convo" && visible(fpane)); }
   function tabDot(t) { var b = doc.querySelector('#tabbar [data-tab="' + t + '"]'); return b && b.querySelector(".tdot"); }
+  function ctabDot() { return doc.querySelector('#ctabs [data-ctab="convo"] .tdot'); }
   function revealPanes() {
     PANES.forEach(function (id) {
       var el = $(id);
@@ -165,6 +184,15 @@
     pinConvo();
     nearTop(); // a conversation shown too short to scroll still loads older entries
     Object.keys(PANE).forEach(function (t) { var d = tabDot(t); if (d && tabShown(t)) d.classList.remove("on"); });
+    if (visible(convo) && ctabDot()) ctabDot().classList.remove("on");
+    // The Files pane hears each time it comes into view (a tab, a layout,
+    // or a resize showed it) and each time it leaves.
+    var fs = visible(fpane);
+    if (fs !== filesSeen && window.WsFiles) {
+      if (fs) window.WsFiles.shown();
+      else window.WsFiles.hidden();
+    }
+    filesSeen = fs;
   }
   function setLayout(v) {
     if (v !== "split" && v !== "tabs") v = "auto";
@@ -243,6 +271,14 @@
   function setTab(t) {
     grid.setAttribute("data-tab", t);
     q("#tabbar [data-tab]").forEach(function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-tab") === t)); });
+    revealPanes();
+  }
+  // setCtab switches the conversation column between the conversation and
+  // the Files pane; it is not kept across a reload.
+  function setCtab(t) {
+    if (t !== "files" || !fpane || !window.WsFiles) t = "convo";
+    grid.setAttribute("data-ctab", t);
+    q("#ctabs [data-ctab]").forEach(function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-ctab") === t)); });
     revealPanes();
   }
   if (live) {
@@ -383,6 +419,7 @@
     var pin = (name === "entries" || name === "convlive") && pinned();
     var scroll = scrollState();
     var answers = board ? readAnswers(el) : null;
+    var railTop = name === "rail" ? railScrollTop() : null;
     var frameH = board ? frameHeights(el) : null;
     var before = board && !still && !reducedMotion() ? topicHeights(el) : null;
     // The entries merge and the board morph prepare only the nodes they
@@ -423,11 +460,14 @@
       var dot = tabDot(TAB[name]);
       if (dot) dot.classList.add("on");
     }
+    if (live && TAB[name] === "convo" && !visible(convo) && visible(fpane) && ctabDot()) ctabDot().classList.add("on");
     if (name === "panels") drawerSwapped();
     if (name === "tree" || name === "convlive") drawerWait();
+    if (name === "tree") agentTipSwapped();
     if (TL_REGIONS[name]) { delete tlHeld[name]; tlCount(); }
     if (name === "convlive") syncBadge();
     if (name === "head" && !sseOn) connected(false);
+    if (name === "rail") { railMarks(); railScrollTo(railTop); }
   }
 
   // --- board morph: unchanged topics keep their nodes -------------------------
@@ -447,6 +487,30 @@
     var b = region("board");
     if (b) Array.prototype.forEach.call(b.children, function (n) { var k = topicKey(n); if (k !== null) boardSeen["t:" + k] = n.outerHTML; });
   })();
+  // --- board cards (cards.js): the page's own cards among the topics --------
+  // The framework mounts on the board region once, before any board swap,
+  // and restores the cards this browser kept for the session. Showing a
+  // card switches to the board tab where the view shows one column at a
+  // time.
+  // Terminal cards (terminal.js) exist only on a page the server marked
+  // data-term; their module adds the board column's header row.
+  var cardBoard = mode !== "index" && window.WsCards ? region("board") : null;
+  if (cardBoard) {
+    if (window.WsPreview) window.WsPreview.setup({ renderDiff: gwRender, post: post, toast: toast });
+    if (window.WsTerm) window.WsTerm.setup({ post: post, toast: toast });
+    window.WsCards.mount(cardBoard, {
+      key: "ws.dashboard.cards." + rid, load: load, save: save,
+      reveal: function () { if (live && !tabShown("board")) setTab("board"); }
+    });
+    if (window.WsTerm) window.WsTerm.mount($("bcol"));
+  }
+  // --- the Files pane (files.js): mounted once, loaded when first shown -------
+  if (live && fpane && window.WsFiles) {
+    window.WsFiles.mount(fpane, {
+      rid: rid, load: load, save: save, post: post, toast: toast, copy: copyText,
+      local: function () { return root.hasAttribute("data-sysopen"); }
+    });
+  }
   // morphBoard applies a board region event to el and returns the element
   // nodes it inserted, in order, for the caller to prepare.
   function morphBoard(el, html) {
@@ -498,15 +562,12 @@
       want.splice.apply(want, [want.indexOf(more), 1].concat(pages));
       ins.splice(ins.indexOf(more), 1);
     }
-    // Stale nodes go first, so the kept ones that stay in order are never
-    // moved: moving a frame reloads it.
-    var keep = new Set(want);
-    Array.prototype.slice.call(el.childNodes).forEach(function (n) { if (!keep.has(n)) el.removeChild(n); });
-    var cur = el.firstChild;
-    want.forEach(function (n) {
-      if (n === cur) cur = cur.nextSibling;
-      else el.insertBefore(n, cur);
-    });
+    // The page's own cards (cards.js) stand among the topics: they are
+    // woven into the wanted nodes at their places, and the board settles
+    // around them. Stale nodes go first, so the kept ones that stay in
+    // order are never moved (moving a frame reloads it), and a card is
+    // never moved at all.
+    window.WsCards.settle(el, window.WsCards.weave(want));
     return ins;
   }
   // Topic motion: a board swap's inserted topic sections grow from the
@@ -867,10 +928,11 @@
   }
   function grow() { ctext.style.height = "auto"; ctext.style.height = Math.min(160, ctext.scrollHeight) + "px"; }
   // post sends a write route's JSON body; done(ok, answer) gets the parsed
-  // answer, or the server's refusal text.
+  // answer, or the server's refusal text. A route is the session's own
+  // unless it starts with "/", a daemon-wide route.
   function post(route, body, done) {
     if (!window.fetch) { done(false, wsT("js.post.nobrowser")); return; }
-    fetch("/s/" + rid + "/" + route, {
+    fetch(route.charAt(0) === "/" ? route : "/s/" + rid + "/" + route, {
       method: "POST", credentials: "same-origin", cache: "no-store",
       headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
     }).then(function (r) {
@@ -1187,6 +1249,9 @@
         n.el.dispatchEvent(new Event("input", { bubbles: true }));
       });
       renderChips();
+      // The sent draft is gone; what was typed during the send is saved
+      // again as the next draft.
+      clearDraft();
       syncNote(wsT(res.merged ? "js.send.merged" : "js.send.ok"));
     });
   }
@@ -1437,6 +1502,8 @@
     if (b) { save(LAYOUT_KEY, b.getAttribute("data-layout")); setLayout(b.getAttribute("data-layout")); return; }
     b = t.closest("#tabbar [data-tab]");
     if (b) { setTab(b.getAttribute("data-tab")); return; }
+    b = t.closest("#ctabs [data-ctab]");
+    if (b) { setCtab(b.getAttribute("data-ctab")); return; }
   });
 
   // --- link actions: the menu a served page's marked links open ------------
@@ -1445,7 +1512,9 @@
   // no other anchor is touched. An image file link is also marked data-img;
   // an absolute image path outside the root is marked data-out, with the
   // image route as its href, which the daemon serves only to a browser on
-  // its own machine. A plain click opens the menu; Cmd/Ctrl+click on a link
+  // its own machine. A plain click opens the menu, or, on a file link the
+  // preview card can show (previews), the preview slot, with the menu on
+  // the right click and the keyboard activation instead; Cmd/Ctrl+click on a link
   // the page can open is left to the browser, which opens a new tab, and
   // opens the menu otherwise. The system-browser and native-app items show
   // only on a page the server marked data-sysopen (a browser on the daemon's
@@ -1486,12 +1555,22 @@
   function linkOpens(a) {
     return !!a.getAttribute("href") && (!a.hasAttribute("data-out") || root.hasAttribute("data-sysopen"));
   }
+  // previews reports a file link the preview card (preview.js) can show,
+  // decided from what the page already knows: a file inside the session
+  // root whose extension is not one no preview shows. What the server then
+  // finds binary or too large opens the card in its "not viewable" state.
+  function previews(a) {
+    var rel = a.getAttribute("data-rel");
+    return !!window.WsPreview && !!cardBoard && a.getAttribute("data-wl") === "file" && !!a.getAttribute("href") &&
+      !a.hasAttribute("data-out") && !!rel && window.WsPreview.takes(rel);
+  }
   function openLinkMenu(a, x, y) {
     closeLinkMenu(false);
     var kind = a.getAttribute("data-wl"), href = a.getAttribute("href");
     var rel = a.getAttribute("data-rel"), abs = a.getAttribute("data-abs"), url = a.href;
     var sys = root.hasAttribute("data-sysopen"), out = a.hasAttribute("data-out");
     var items = [];
+    if (previews(a)) items.push([wsT("js.menu.preview"), function () { window.WsPreview.open(rel); }]);
     if (linkOpens(a)) items.push([wsT("js.menu.newtab"), function () { window.open(url, "_blank", "noopener"); }]);
     if (href && sys && !out) {
       items.push([wsT("js.menu.sysopen"), function () {
@@ -1545,8 +1624,18 @@
     if (!a) return;
     if (linkOpens(a) && (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)) return;
     e.preventDefault();
+    // A pointer click on a link the preview can show opens the preview
+    // slot; its menu is on the right click and on the keyboard activation
+    // (a click event with no detail).
+    if (e.detail !== 0 && previews(a)) { window.WsPreview.open(a.getAttribute("data-rel")); return; }
     linkAt(a, e);
   }, true);
+  doc.addEventListener("contextmenu", function (e) {
+    var a = e.target && e.target.closest && e.target.closest("a[data-wl]");
+    if (!a || !previews(a)) return;
+    e.preventDefault();
+    openLinkMenu(a, e.clientX, e.clientY);
+  });
   // An image outside the session root (img[data-out]) loads only for a
   // browser on the daemon's machine; where it fails (a LAN viewer, a missing
   // file) its alt text and its absolute path, as a copy-only link, take its
@@ -1678,10 +1767,13 @@
     });
   }
   cardTab("worktrees");
+  cardTab("holders");
   cardTab("settings");
-  // The worktrees card's nodes (wtLoad, below): set here, ahead of the
-  // drawer's first drApply, which a drawer left open calls on load.
+  // The worktrees and holders cards' nodes (wtLoad, hdLoad, below): set
+  // here, ahead of the drawer's first drApply, which a drawer left open
+  // calls on load.
   var wtlist = $("wtlist"), wtcount = $("wtcount"), wtnote = $("wtnote"), wtclean = $("wtclean"), wtSeq = 0;
+  var hdlist = $("hdlist"), hdcount = $("hdcount"), hdnote = $("hdnote"), hdSeq = 0;
 
   function drPresent() { return drEntries.filter(function (t) { return !!t.content(); }); }
   // drawerSync re-reads the entries: each card kept open, the handle's
@@ -1823,12 +1915,13 @@
     ghSync();
     drTitle();
     drFill();
-    // Each opening of a sheet reads its data again: the worktree pool for
-    // the panels, the changed files for the git sheet.
+    // Each opening of a sheet reads its data again: the worktree pool and
+    // the session holders for the panels, the changed files for the git
+    // sheet.
     var shown = drOpen ? drMode : "";
     if (shown !== drShown) {
       drShown = shown;
-      if (shown === "panels") wtLoad();
+      if (shown === "panels") { wtLoad(); hdLoad(); }
       else if (shown === "git") gitOpened();
     }
   }
@@ -2206,6 +2299,154 @@
     });
   });
 
+  // --- session holders: the drawer card over the holders route ------------
+  // Each drawer opening reads the holders (holders.go): a row for each
+  // holder no daemon is attached to and each one that is not restart-safe,
+  // then an error row for each failed holder start. An unattached row has a
+  // stop button when the route lets this viewer stop one (a browser on this
+  // machine); it ends the holder and its child, then reads the list again.
+  // The daemon itself never ends a holder.
+  //
+  // On a page that offers terminals (terminal.js), the card also lists the
+  // live terminals whose opening session is gone from the index: attach
+  // opens one as a card on this page, stop ends it after a confirm.
+  var HD_CAUSE = { no_answer: "js.hd.cause.noanswer", protocol: "js.hd.cause.protocol", token: "js.hd.cause.token" };
+  function hdLoad() {
+    if (!hdlist || !window.fetch) return;
+    var seq = ++hdSeq;
+    if (!hdlist.firstChild) hdlist.textContent = wsT("js.hd.loading");
+    fetch("/holders", { credentials: "same-origin", cache: "no-store" }).then(function (r) {
+      return r.text().then(function (s) {
+        if (seq !== hdSeq) return;
+        if (!r.ok) { hdFail(s.trim() || "HTTP " + r.status); return; }
+        try { hdDraw(JSON.parse(s)); } catch (e) { hdFail("malformed answer"); return; }
+        hdTerms(seq);
+      });
+    }, function () { if (seq === hdSeq) hdFail(wsT("js.post.unreachable")); });
+  }
+  function hdTerms(seq) {
+    if (!window.WsTerm) return;
+    window.WsTerm.list(function (err, v) {
+      if (seq !== hdSeq || err || !v || !(v.orphans || []).length) return;
+      var box = mk("div", "hdterms");
+      box.appendChild(mk("div", "hdsub", wsT("js.hd.term.title")));
+      v.orphans.forEach(function (t) { box.appendChild(hdTermRow(t)); });
+      hdlist.appendChild(box);
+    });
+  }
+  function hdTermRow(t) {
+    var row = mk("div", "wtrow hdrow hdterm"), meta = mk("span", "hdmeta"), acts = mk("span", "hdbtns");
+    row.title = t.id;
+    row.appendChild(mk("span", "wtdot"));
+    var name = t.cwd ? t.cwd.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || t.cwd : t.id;
+    row.appendChild(mk("b", "wtname", name));
+    if (t.started_at) {
+      var age = mk("span", "wtage", wtAge(t.started_at));
+      age.title = wsT("js.hd.started", wtStamp(t.started_at));
+      row.appendChild(age);
+    }
+    var cwd = mk("span", "hdcwd", t.cwd || "");
+    cwd.title = t.cwd || "";
+    meta.appendChild(cwd);
+    if (t.state === "exited") meta.appendChild(mk("span", null, wsT("js.term.state.exited")));
+    row.appendChild(meta);
+    var at = mk("button", "btn hdstop", wsT("js.hd.term.attach"));
+    at.type = "button";
+    at.title = wsT("js.hd.term.attach.title");
+    at.addEventListener("click", function () { window.WsTerm.attach(t); });
+    var b = mk("button", "btn hdstop", wsT("js.hd.stop"));
+    b.type = "button";
+    b.title = wsT("js.hd.term.stop.title");
+    b.addEventListener("click", function () {
+      if (b.disabled || (t.state !== "exited" && !window.confirm(wsT("js.term.confirm")))) return;
+      b.disabled = true;
+      if (hdnote) hdnote.textContent = "";
+      post("terminals/" + encodeURIComponent(t.id) + "/close", {}, function (ok, res) {
+        b.disabled = false;
+        if (!ok) { if (hdnote) hdnote.textContent = wsT("js.hd.stopfail", res); return; }
+        hdLoad();
+      });
+    });
+    acts.appendChild(at);
+    acts.appendChild(b);
+    row.appendChild(acts);
+    return row;
+  }
+  function hdFail(msg) {
+    hdlist.textContent = "";
+    hdlist.appendChild(mk("div", "wtempty", wsT("js.hd.fail", msg)));
+  }
+  // hdLabel is a holder's session label, or its id without one.
+  function hdLabel(h) {
+    var l = h.session && typeof h.session.label === "string" ? h.session.label.trim() : "";
+    return l || h.id;
+  }
+  function hdRow(h, canStop) {
+    var row = mk("div", "wtrow hdrow" + (h.attached ? "" : " lost")), meta = mk("span", "hdmeta");
+    row.title = h.id;
+    row.appendChild(mk("span", "wtdot"));
+    row.appendChild(mk("b", "wtname", hdLabel(h)));
+    if (h.started_at) {
+      var age = mk("span", "wtage", wtAge(h.started_at));
+      age.title = wsT("js.hd.started", wtStamp(h.started_at));
+      row.appendChild(age);
+    }
+    meta.appendChild(mk("span", null, wsT("js.hd.pid", h.pid)));
+    if (!h.attached) meta.appendChild(mk("span", "hdcause", wsT(HD_CAUSE[h.cause] || "js.hd.cause.unknown", h.protocol)));
+    if (h.restart_safe === false) {
+      var rs = mk("span", "hdunsafe", wsT("js.hd.unsafe"));
+      rs.title = wsT("js.hd.unsafe.title");
+      meta.appendChild(rs);
+    }
+    row.appendChild(meta);
+    if (!h.attached && canStop) {
+      var b = mk("button", "btn hdstop", wsT("js.hd.stop"));
+      b.type = "button";
+      b.title = wsT("js.hd.stop.title");
+      b.addEventListener("click", function () { hdStop(h.id, b); });
+      row.appendChild(b);
+    }
+    return row;
+  }
+  function hdFailRow(f) {
+    var row = mk("div", "wtrow hdrow hdfail");
+    row.appendChild(mk("span", "wtdot"));
+    var msg = mk("span", "hdmsg", f.message);
+    msg.title = f.message;
+    row.appendChild(msg);
+    if (f.at) {
+      var age = mk("span", "wtage", wtAge(f.at));
+      age.title = wsT("js.hd.failed", wtStamp(f.at));
+      row.appendChild(age);
+    }
+    return row;
+  }
+  function hdDraw(list) {
+    var holders = list.holders || [], failures = list.failures || [], lost = 0;
+    hdlist.textContent = "";
+    holders.forEach(function (h) {
+      if (!h.attached) lost++;
+      if (!h.attached || h.restart_safe === false) hdlist.appendChild(hdRow(h, !!list.can_stop));
+    });
+    if (!lost) hdlist.insertBefore(mk("div", "wtempty", wsT("js.hd.empty")), hdlist.firstChild);
+    failures.forEach(function (f) { hdlist.appendChild(hdFailRow(f)); });
+    if (hdcount) {
+      hdcount.hidden = !lost;
+      hdcount.textContent = String(lost);
+      hdcount.title = wsTn("js.hd.count", lost);
+    }
+  }
+  function hdStop(id, b) {
+    if (b.disabled) return;
+    b.disabled = true;
+    if (hdnote) hdnote.textContent = "";
+    post("/holders/" + encodeURIComponent(id) + "/stop", {}, function (ok, res) {
+      b.disabled = false;
+      if (!ok) { if (hdnote) hdnote.textContent = wsT("js.hd.stopfail", res); return; }
+      hdLoad();
+    });
+  }
+
   // --- git drawer: the action panel over the git routes ---------------------
   // Each opening of the git sheet asks the daemon to read the handle again
   // and reads the changed files (gitdrawer.go): the standing line, then the
@@ -2541,6 +2782,50 @@
       });
     }, function () { if (seq === gl.seq) { gl.busy = false; glFail(wsT("js.post.unreachable"), append); } });
   }
+  // --- agent stats hover card ----------------------------------------------
+  // A narrow agents panel hides a subagent row's stats (template astat, its
+  // container query); hovering the row then shows them in a card built like
+  // the git graph's tooltip, one line per stat from its title. A tree swap
+  // rebuilds the card from the same agent's new row, so it keeps live values.
+  var atip = null, atipKey = null;
+  function agentTipHide() { if (atip) atip.hidden = true; atipKey = null; }
+  function agentTip(head) {
+    var st = head.querySelector(".astat"), key = head.parentNode.getAttribute("data-key");
+    if (!st || !key || getComputedStyle(st).display !== "none") { agentTipHide(); return; }
+    if (key === atipKey && atip && !atip.hidden) return;
+    if (!atip) { atip = mk("div", "gltip atip"); atip.hidden = true; doc.body.appendChild(atip); }
+    atipKey = key;
+    atip.textContent = "";
+    var name = head.querySelector(".aname");
+    atip.appendChild(mk("div", "ts", name ? name.textContent : ""));
+    var tm = mk("div", "tm");
+    Array.prototype.forEach.call(st.children, function (s) { tm.appendChild(mk("span", "", s.getAttribute("title") || s.textContent)); });
+    atip.appendChild(tm);
+    atip.hidden = false;
+    var r = head.getBoundingClientRect(), y = r.bottom + 4, th = atip.offsetHeight;
+    if (y + th > window.innerHeight - 8) y = r.top - th - 4;
+    atip.style.left = Math.max(8, Math.min(r.left + 20, window.innerWidth - atip.offsetWidth - 8)) + "px";
+    atip.style.top = y + "px";
+  }
+  function agentTipSwapped() {
+    if (!atipKey) return;
+    var key = atipKey, heads = doc.querySelectorAll("#r-tree details > summary.ahead");
+    atipKey = null;
+    for (var i = 0; i < heads.length; i++) {
+      if (heads[i].parentNode.getAttribute("data-key") === key) { agentTip(heads[i]); return; }
+    }
+    agentTipHide();
+  }
+  (function () {
+    var tree = $("r-tree");
+    if (!tree) return;
+    tree.addEventListener("mouseover", function (e) {
+      var head = e.target.closest && e.target.closest("summary.ahead");
+      if (head && head.querySelector(".astat")) agentTip(head); else agentTipHide();
+    });
+    tree.addEventListener("mouseleave", agentTipHide);
+    tree.addEventListener("scroll", agentTipHide);
+  })();
   // The tooltip: subject, refs, author, age, short hash, under the row.
   var gltip = null;
   function glTipHide() { if (gltip) gltip.hidden = true; gl.tipRow = null; }
@@ -3972,11 +4257,592 @@
     location.reload();
   }
 
+  // --- session rail ------------------------------------------------------------
+  // The rail (r-rail) is one render shared by every session page: the page
+  // marks its own row, pins the starred rows, and collapses the workspaces
+  // the user collapsed (rail.js keeps those in storage), and opens the add
+  // popovers (the next block). From 1600px the
+  // rail is a column; below it the top-left arrow slides it in over the
+  // page, and Esc, the scrim, or picking a session closes it. The arrow
+  // stays a link to the sessions index for a modified click.
+  var railEl = $("rail"), railBtn = $("railbtn"), rscrim = $("rscrim"), WsRail = window.WsRail;
+  var railStore = { load: load, save: save };
+  var starSet = WsRail ? WsRail.stars(railStore) : null, colSet = WsRail ? WsRail.collapsed(railStore) : null;
+  var RAIL_WIDE = window.matchMedia ? window.matchMedia("(min-width: 1600px)") : null;
+  var RAIL_SCROLL_KEY = "ws.dashboard.railscroll";
+  // rp is the open rail popover (next block): its controller P, kind, the
+  // workspace it concerns, and the + it hangs from.
+  var rp = { P: null, kind: "", ws: "", btn: null }, rpWs = null, rpWt = null, rpIds = 0;
+  function railWide() { return !!(RAIL_WIDE && RAIL_WIDE.matches); }
+  function railShown() { return root.classList.contains("rail-open"); }
+  function railOpen(open) {
+    if (!railEl) return;
+    root.classList.toggle("rail-open", !!open);
+    if (railBtn) railBtn.setAttribute("aria-expanded", String(!!open || railWide()));
+  }
+  function railScrollTop() { var l = $("rlist"); return l ? l.scrollTop : null; }
+  function railScrollTo(top) { var l = $("rlist"); if (l && top !== null && top !== undefined && l.scrollTop !== top) l.scrollTop = top; }
+  // railMarks applies the page's marks to the rail as rendered: after
+  // load and after every rail swap.
+  function railMarks() {
+    var r = region("rail");
+    if (!r || !WsRail) return;
+    q(".rsessions", r).forEach(function (box) { WsRail.pin(box, starSet); });
+    WsRail.markCurrent(q(".rs", r), rid);
+    q(".rws", r).forEach(function (ws) {
+      var col = colSet.has(ws.getAttribute("data-ws") || ""), tog = ws.querySelector(".wstog");
+      ws.classList.toggle("col", col);
+      if (tog) tog.setAttribute("aria-expanded", String(!col));
+    });
+    railPopSync();
+  }
+  if (railEl && WsRail) {
+    if (railBtn) railBtn.addEventListener("click", function (e) {
+      if (e.button || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      e.preventDefault();
+      railOpen(!railShown());
+    });
+    if (rscrim) rscrim.addEventListener("click", function () { railOpen(false); });
+    doc.addEventListener("keydown", function (e) { if (e.key === "Escape" && railShown()) railOpen(false); });
+    if (RAIL_WIDE && RAIL_WIDE.addEventListener) RAIL_WIDE.addEventListener("change", function () { railOpen(false); });
+    railEl.addEventListener("click", function (e) {
+      var t = e.target;
+      var star = t.closest && t.closest(".star");
+      if (star) {
+        e.preventDefault();
+        var row = star.closest(".rs");
+        if (row) starSet.toggle(row.getAttribute("data-rid") || "");
+        railMarks();
+        return;
+      }
+      var add = t.closest && t.closest(".radd");
+      if (add) {
+        e.preventDefault();
+        railPopOpen(add.getAttribute("data-add"), add);
+        return;
+      }
+      var forget = t.closest && t.closest(".rforget");
+      if (forget) {
+        e.preventDefault();
+        railForget(forget);
+        return;
+      }
+      // The whole bar toggles the workspace's collapse; its toggle button
+      // (.wstog) is the keyboard's way to it.
+      var bar = t.closest && t.closest(".wsbar");
+      if (bar) {
+        var ws = bar.closest(".rws");
+        if (ws) colSet.toggle(ws.getAttribute("data-ws") || "");
+        railMarks();
+        return;
+      }
+      var ref = t.closest && t.closest("#railref");
+      if (ref) {
+        if (!window.fetch || ref.classList.contains("busy")) return;
+        ref.classList.add("busy");
+        fetch("/rail/refresh", { method: "POST", credentials: "same-origin" }).then(function () { ref.classList.remove("busy"); }, function () { ref.classList.remove("busy"); });
+        return;
+      }
+      // Picking a session navigates; the draft is saved first and the
+      // overlay closes, so a back navigation finds the page as it was.
+      if (t.closest && t.closest("a[href]")) { saveDraft(); railOpen(false); }
+    });
+    // The rail list keeps its scroll across navigations.
+    var savedRailTop = parseInt(load(RAIL_SCROLL_KEY), 10);
+    window.addEventListener("pagehide", function () { var top = railScrollTop(); if (top !== null) save(RAIL_SCROLL_KEY, String(Math.round(top))); });
+    railMarks();
+    if (isFinite(savedRailTop)) railScrollTo(savedRailTop);
+    railOpen(false);
+  }
+
+  // --- rail popovers: add workspace, add worktree, forget ----------------------
+  // On a daemon that keeps stored workspaces the rail header's + adds a
+  // workspace and a repository bar's + adds a worktree, each in a popover;
+  // a stored workspace bar's forget takes it off the stored list at once
+  // (never its files). The rail region is replaced on every update, so the
+  // popovers live outside it: made once, placed fixed against the + that
+  // opened it, and kept open across a swap, re-anchored to the new + by
+  // railMarks. One popover at a time; Esc, an outside click, and cancel close
+  // it. A route's error text is already in the page's language; the rail
+  // shows what an add or a forget changed through the stream.
+  // railPost posts body to a rail route; done(status, answer, text) gets the
+  // HTTP status (0: the daemon was not reached), the parsed JSON answer of a
+  // success ({} when there is none), and the body text of a failure.
+  function railPost(route, body, done) {
+    if (!window.fetch) { done(0, {}, wsT("js.post.nobrowser")); return; }
+    fetch(route, {
+      method: "POST", credentials: "same-origin", cache: "no-store",
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
+    }).then(function (r) {
+      return r.text().then(function (s) {
+        var v = {};
+        if (r.ok) { try { v = s ? JSON.parse(s) : {}; } catch (e) { v = {}; } }
+        done(r.status, v && typeof v === "object" ? v : {}, r.ok ? "" : s.trim());
+      });
+    }, function () { done(0, {}, ""); });
+  }
+  // railErr is a failed rail route's line: its own text, except a 404, which
+  // names a workspace the rail no longer shows.
+  function railErr(status, text) {
+    if (status === 404) return wsT("js.rail.unknown");
+    return text || (status ? "HTTP " + status : wsT("js.post.unreachable"));
+  }
+  function rpId() { return "rpop-" + (++rpIds); }
+  function rpPop(title) {
+    var el = mk("div", "rpop");
+    el.hidden = true;
+    el.setAttribute("role", "dialog");
+    el.setAttribute("aria-label", title);
+    return el;
+  }
+  function rpBtn(cls, text) { var b = mk("button", cls, text); b.type = "button"; return b; }
+  function rpInput(cls, label) {
+    var i = mk("input", cls);
+    i.type = "text";
+    i.spellcheck = false;
+    i.setAttribute("autocomplete", "off");
+    if (label) i.setAttribute("aria-label", label);
+    return i;
+  }
+  // rpLive reports that popover P is still open as it was when gen was
+  // taken: an answer that comes later closes nothing, and shows as a toast.
+  function rpLive(P, gen) { return rp.P === P && P.gen === gen; }
+  function rpEnter(el, fn) { el.addEventListener("keydown", function (e) { if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); fn(); } }); }
+
+  // The add-workspace popover: a pasted absolute path, read by the daemon's
+  // preview while the user types (debounced; a stale answer is dropped).
+  // "Add" is off while the input is empty or the latest preview refuses it;
+  // a preview still on its way leaves it on, as the add reads the path again.
+  function rpWsMake() {
+    var P = { seq: 0, gen: 0, timer: 0, ok: null, busy: false };
+    var el = P.el = rpPop(wsT("js.rail.ws.title"));
+    el.appendChild(mk("div", "sphd", wsT("js.rail.ws.title")));
+    var sec = el.appendChild(mk("div", "spsec"));
+    var lbl = sec.appendChild(mk("label", "splbl", wsT("js.rail.ws.label")));
+    var line = sec.appendChild(mk("div", "spline"));
+    var inp = line.appendChild(rpInput("spq mono"));
+    var go = line.appendChild(rpBtn("pbtn go", wsT("js.rail.ws.add")));
+    var res = sec.appendChild(mk("div", "spres"));
+    inp.id = rpId();
+    lbl.htmlFor = inp.id;
+    inp.placeholder = wsT("js.rail.ws.placeholder");
+    res.id = rpId();
+    res.setAttribute("aria-live", "polite");
+    inp.setAttribute("aria-describedby", res.id);
+    function show(cls, parts) {
+      res.className = "spres" + (cls ? " " + cls : "");
+      res.textContent = "";
+      parts.forEach(function (p) { if (p) res.appendChild(p); });
+    }
+    function hint() { show("", [mk("span", "spnote", wsT("js.rail.ws.hint"))]); }
+    function bad(text) { show("bad", [mk("span", "k", text)]); }
+    function sync() { go.disabled = P.busy || !inp.value.trim() || P.ok === false; }
+    function preview() {
+      var text = inp.value, n = ++P.seq;
+      clearTimeout(P.timer);
+      P.ok = null;
+      if (!text.trim()) { hint(); sync(); return; }
+      sync();
+      P.timer = setTimeout(function () {
+        railPost("/rail/workspaces/preview", { path: text }, function (status, v, s) {
+          if (n !== P.seq) return;
+          if (status !== 200) bad(railErr(status, s));
+          else if (!v.ok) { P.ok = false; bad(String(v.note || "")); }
+          else {
+            P.ok = true;
+            show("", [mk("span", "k", wsT("js.rail.ws.will")), mk("code", null, String(v.root || v.path || "")), v.note ? mk("span", "spnote", String(v.note)) : null]);
+          }
+          sync();
+        });
+      }, 200);
+    }
+    function submit() {
+      sync();
+      if (go.disabled) return;
+      var gen = P.gen;
+      P.busy = true;
+      P.seq++;
+      clearTimeout(P.timer);
+      sync();
+      railPost("/rail/workspaces/add", { path: inp.value }, function (status, v, s) {
+        var live = rpLive(P, gen);
+        if (status === 200) {
+          if (live) railPopClose(false);
+          toast(String(v.message || ""));
+          return;
+        }
+        if (!live) { toast(railErr(status, s)); return; }
+        P.busy = false;
+        if (status === 409) P.ok = false;
+        bad(railErr(status, s));
+        sync();
+      });
+    }
+    inp.addEventListener("input", preview);
+    rpEnter(inp, submit);
+    go.addEventListener("click", submit);
+    P.open = function () { P.gen++; inp.value = ""; P.ok = null; P.busy = false; hint(); sync(); };
+    P.focus = function () { inp.focus(); };
+    P.close = function () { P.seq++; clearTimeout(P.timer); };
+    return P;
+  }
+
+  // The add-worktree popover for one repository workspace: a new branch
+  // (from a base, the root's current branch preselected) or an existing one
+  // no worktree has checked out, and the folder (the daemon's default, or a
+  // custom absolute path). The options load when it opens; a failure, and a
+  // refused or failed add, show in its error line and keep it open.
+  function rpWtMake() {
+    var P = { seq: 0, gen: 0, opts: null, mode: "new", pick: "", custom: false, busy: false, ws: "" };
+    var el = P.el = rpPop(wsT("js.rail.wt.title"));
+    var hd = el.appendChild(mk("div", "sphd", wsT("js.rail.wt.title")));
+    var ctx = hd.appendChild(mk("span", "spctx"));
+    var bsec = el.appendChild(mk("div", "spsec"));
+    bsec.appendChild(mk("div", "splbl", wsT("js.rail.wt.branch")));
+    var seg = bsec.appendChild(mk("div", "spseg"));
+    seg.setAttribute("role", "radiogroup");
+    seg.setAttribute("aria-label", wsT("js.rail.wt.branch"));
+    var modes = { "new": rpBtn("", wsT("js.rail.wt.new")), old: rpBtn("", wsT("js.rail.wt.old")) };
+    Object.keys(modes).forEach(function (k) { modes[k].setAttribute("role", "radio"); modes[k].setAttribute("data-mode", k); seg.appendChild(modes[k]); });
+    var lnew = bsec.appendChild(mk("div", "spline"));
+    var name = lnew.appendChild(rpInput("spq mono", wsT("js.rail.wt.name")));
+    lnew.appendChild(mk("span", "spfrom", wsT("js.rail.wt.from")));
+    var base = lnew.appendChild(mk("select", "spsel"));
+    base.setAttribute("aria-label", wsT("js.rail.wt.base"));
+    var lold = bsec.appendChild(mk("div", "spsec"));
+    var find = lold.appendChild(rpInput("spq mono", wsT("js.rail.wt.old")));
+    find.type = "search";
+    find.placeholder = wsT("js.rail.wt.search");
+    var list = lold.appendChild(mk("ul", "splist"));
+    list.id = rpId();
+    list.setAttribute("role", "listbox");
+    list.setAttribute("aria-label", wsT("js.rail.wt.old"));
+    find.setAttribute("aria-controls", list.id);
+    var fsec = el.appendChild(mk("div", "spsec"));
+    var flbl = fsec.appendChild(mk("div", "splbl", wsT("js.rail.wt.folder")));
+    var tog = flbl.appendChild(rpBtn("spreset", wsT("js.rail.wt.custom")));
+    var def = fsec.appendChild(mk("div", "spdir"));
+    var defPath = def.appendChild(mk("code"));
+    def.appendChild(mk("span", "spnote", wsT("js.rail.wt.default")));
+    var own = fsec.appendChild(mk("div", "spown"));
+    var folder = own.appendChild(rpInput("spq mono", wsT("js.rail.wt.folderpath")));
+    own.appendChild(mk("span", "spnote", wsT("js.rail.wt.customnote")));
+    var err = el.appendChild(mk("p", "spnote err"));
+    err.setAttribute("aria-live", "polite");
+    var row = el.appendChild(mk("div", "sprow"));
+    var status = row.appendChild(mk("span", "spnote"));
+    var cancel = row.appendChild(rpBtn("pbtn", wsT("js.rail.cancel")));
+    var go = row.appendChild(rpBtn("pbtn go", wsT("js.rail.wt.create")));
+    function setErr(text) { err.textContent = text || ""; err.hidden = !text; }
+    function sync() {
+      Object.keys(modes).forEach(function (k) { modes[k].setAttribute("aria-checked", String(P.mode === k)); });
+      lnew.hidden = P.mode !== "new";
+      lold.hidden = P.mode !== "old";
+      def.hidden = P.custom;
+      own.hidden = !P.custom;
+      tog.textContent = wsT(P.custom ? "js.rail.wt.usedefault" : "js.rail.wt.custom");
+      find.disabled = !P.opts || !P.opts.free.length;
+      go.disabled = P.busy || !P.opts || (P.mode === "new" ? !name.value.trim() : !P.pick);
+    }
+    // drawList lists the free branches matching the search, keeping the
+    // pick when it still matches, else picking the first match.
+    function drawList() {
+      var free = P.opts ? P.opts.free : [], hits = WsRail.matchBranches(free, find.value);
+      if (hits.indexOf(P.pick) < 0) P.pick = hits[0] || "";
+      list.textContent = "";
+      find.removeAttribute("aria-activedescendant");
+      if (P.opts && !hits.length) {
+        var none = list.appendChild(mk("li", "spnone", wsT(free.length ? "js.rail.wt.nomatch" : "js.rail.wt.nofree")));
+        none.setAttribute("aria-disabled", "true");
+      }
+      hits.forEach(function (b, i) {
+        var li = list.appendChild(mk("li", null, b));
+        li.id = list.id + "-" + i;
+        li.setAttribute("role", "option");
+        li.setAttribute("aria-selected", String(b === P.pick));
+        li.setAttribute("data-branch", b);
+        if (b === P.pick) find.setAttribute("aria-activedescendant", li.id);
+      });
+      sync();
+    }
+    function step(d) {
+      var hits = WsRail.matchBranches(P.opts ? P.opts.free : [], find.value), i = hits.indexOf(P.pick) + d;
+      if (!hits.length) return;
+      P.pick = hits[Math.max(0, Math.min(hits.length - 1, i))];
+      drawList();
+      var cur = list.querySelector('[aria-selected="true"]');
+      if (cur && cur.scrollIntoView) cur.scrollIntoView({ block: "nearest" });
+    }
+    // edited drops an earlier add's error once the form changed.
+    function edited() { if (!P.busy) setErr(""); sync(); }
+    function setMode(m) {
+      if (P.mode === m) return;
+      P.mode = m;
+      edited();
+      (m === "new" ? name : find).focus();
+    }
+    function submit() {
+      sync();
+      if (go.disabled) return;
+      var gen = P.gen;
+      P.busy = true;
+      setErr("");
+      sync();
+      var body = WsRail.worktreeBody(P.ws, { mode: P.mode, name: name.value, base: base.value, pick: P.pick, custom: P.custom, folder: folder.value });
+      railPost("/rail/worktrees/add", body, function (st, v, s) {
+        var live = rpLive(P, gen);
+        if (st === 200) {
+          if (live) railPopClose(false);
+          toast(String(v.message || ""));
+          return;
+        }
+        if (!live) { toast(railErr(st, s)); return; }
+        P.busy = false;
+        setErr(railErr(st, s));
+        sync();
+      });
+    }
+    seg.addEventListener("click", function (e) { var b = e.target.closest && e.target.closest("[data-mode]"); if (b && !b.disabled) setMode(b.getAttribute("data-mode")); });
+    name.addEventListener("input", edited);
+    rpEnter(name, submit);
+    find.addEventListener("input", function () { drawList(); edited(); });
+    find.addEventListener("keydown", function (e) {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); step(e.key === "ArrowDown" ? 1 : -1); }
+    });
+    rpEnter(find, submit);
+    list.addEventListener("click", function (e) {
+      var li = e.target.closest && e.target.closest("li[data-branch]");
+      if (!li) return;
+      P.pick = li.getAttribute("data-branch");
+      drawList();
+      edited();
+      find.focus();
+    });
+    tog.addEventListener("click", function () {
+      P.custom = !P.custom;
+      if (P.custom && !folder.value && P.opts) folder.value = P.opts.folder;
+      edited();
+      (P.custom ? folder : tog).focus();
+    });
+    folder.addEventListener("input", edited);
+    rpEnter(folder, submit);
+    cancel.addEventListener("click", function () { railPopClose(true); });
+    go.addEventListener("click", submit);
+    P.open = function (ws, label) {
+      var n = ++P.seq;
+      P.gen++;
+      P.ws = ws; P.opts = null; P.mode = "new"; P.pick = ""; P.custom = false; P.busy = false;
+      ctx.textContent = label || ws;
+      ctx.title = ws;
+      name.value = ""; find.value = ""; folder.value = "";
+      base.textContent = "";
+      defPath.textContent = "";
+      status.textContent = wsT("js.rail.wt.loading");
+      setErr("");
+      drawList();
+      railPost("/rail/worktrees/options", { workspace: ws }, function (st, v, s) {
+        if (n !== P.seq) return;
+        status.textContent = "";
+        if (st !== 200) { setErr(railErr(st, s)); sync(); return; }
+        var arr = function (x) { return Array.isArray(x) ? x.filter(function (b) { return typeof b === "string"; }) : []; };
+        P.opts = { current: String(v.current || ""), bases: arr(v.bases), free: arr(v.free), folder: String(v.folder || "") };
+        // A detached root has no current branch: the base then defaults to
+        // its HEAD, sent as an empty base.
+        if (!P.opts.current) base.appendChild(mk("option", null, wsT("js.rail.wt.head"))).value = "";
+        P.opts.bases.forEach(function (b) { base.appendChild(mk("option", null, b)).value = b; });
+        base.value = P.opts.current;
+        defPath.textContent = P.opts.folder;
+        drawList();
+        railPopPlace();
+      });
+    };
+    P.focus = function () { name.focus(); };
+    P.close = function () { P.seq++; };
+    return P;
+  }
+
+  // railPopBtn is the + the open popover belongs to: the one that opened it,
+  // or after a rail swap the + of the same kind and workspace (null when the
+  // rail shows none any more).
+  function railPopBtn() {
+    if (!rp.P) return null;
+    if (rp.btn && rp.btn.isConnected) return rp.btn;
+    var r = region("rail"), found = null;
+    if (r) q('.radd[data-add="' + rp.kind + '"]', r).forEach(function (b) {
+      var ws = b.closest(".rws");
+      if ((ws ? ws.getAttribute("data-ws") || "" : "") === rp.ws) found = b;
+    });
+    rp.btn = found;
+    return found;
+  }
+  function railPopPlace() {
+    var b = railPopBtn();
+    if (!b) return;
+    var el = rp.P.el, at = WsRail.popPlace(b.getBoundingClientRect(), el.offsetWidth, el.offsetHeight, root.clientWidth || window.innerWidth, root.clientHeight || window.innerHeight);
+    el.style.top = at.top + "px";
+    el.style.left = at.left + "px";
+  }
+  // railPopSync runs after a rail swap: the new + shows its popover open, and
+  // a popover whose + is gone (its workspace left the rail) closes.
+  function railPopSync() {
+    if (!rp.P) return;
+    var b = railPopBtn();
+    if (!b) { railPopClose(false); return; }
+    b.setAttribute("aria-expanded", "true");
+    railPopPlace();
+  }
+  function railPopClose(refocus) {
+    if (!rp.P) return;
+    var P = rp.P, b = railPopBtn();
+    P.close();
+    P.el.hidden = true;
+    rp = { P: null, kind: "", ws: "", btn: null };
+    if (b) {
+      b.setAttribute("aria-expanded", "false");
+      if (refocus) b.focus();
+    }
+  }
+  // railPopOpen opens kind's popover ("ws" or "wt") against the + btn; the
+  // open popover's own + closes it instead.
+  function railPopOpen(kind, btn) {
+    var bar = btn.closest(".rws"), ws = bar ? bar.getAttribute("data-ws") || "" : "";
+    if (rp.P && rp.kind === kind && rp.ws === ws) { railPopClose(true); return; }
+    railPopClose(false);
+    var P = kind === "wt" ? rpWt || (rpWt = rpWtMake()) : rpWs || (rpWs = rpWsMake());
+    if (!P.el.parentNode) doc.body.appendChild(P.el);
+    rp = { P: P, kind: kind, ws: ws, btn: btn };
+    btn.setAttribute("aria-expanded", "true");
+    var nm = bar && bar.querySelector(".nm");
+    P.open(ws, nm ? nm.textContent : ws);
+    P.el.hidden = false;
+    railPopPlace();
+    P.focus();
+  }
+  // railForget takes the bar's stored workspace off the list.
+  function railForget(btn) {
+    var bar = btn.closest(".rws"), path = bar ? bar.getAttribute("data-ws") || "" : "", nm = bar && bar.querySelector(".nm");
+    if (!path || btn.disabled) return;
+    btn.disabled = true;
+    railPost("/rail/workspaces/forget", { path: path }, function (status, v, s) {
+      btn.disabled = false;
+      toast(status >= 200 && status < 300 ? wsT("js.rail.forgot", nm ? nm.textContent : path) : railErr(status, s));
+    });
+  }
+  if (railEl && WsRail) {
+    // Escape closes the popover before anything else hears it (the rail
+    // overlay and the drawer would close on it too).
+    window.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && rp.P) { e.preventDefault(); e.stopPropagation(); railPopClose(true); }
+    }, true);
+    // A click outside the popover and its + closes it. Capture sees the
+    // target before the popover's own handlers redraw it.
+    doc.addEventListener("click", function (e) {
+      var t = e.target;
+      if (!rp.P || !t || !t.closest) return;
+      if (rp.P.el.contains(t) || t.closest(".radd")) return;
+      railPopClose(false);
+    }, true);
+    window.addEventListener("resize", railPopPlace);
+    doc.addEventListener("scroll", function () { if (rp.P) railPopPlace(); }, true);
+    if (RAIL_WIDE && RAIL_WIDE.addEventListener) RAIL_WIDE.addEventListener("change", function () { railPopClose(false); });
+  }
+
+  // --- per-session drafts ---------------------------------------------------------
+  // What the user typed or picked on this session's page and has not sent,
+  // and the page's view state around it, is kept per session in storage
+  // (rail.js drafts), so switching sessions in the rail and coming back
+  // finds it: the composer's text, mentions, and selection, the board
+  // answers and topic notes, the answer chips, the images that reference
+  // written attachments, the open details, and the tab. Pasted images are
+  // not kept: a restored draft says so, and while the page holds one,
+  // leaving it asks first (the browser's leave-page confirmation).
+  var draftStore = WsRail && rid ? WsRail.drafts(railStore) : null, draftTimer = null, restoring = false;
+  function readDraft() {
+    var b = region("board"), open = {};
+    Object.keys(openState).forEach(function (k) { if (openState[k]) open[k] = true; });
+    var d = {
+      text: ctext ? ctext.value : "",
+      mentions: mentions.map(function (m) { return { start: m.start, end: m.end, text: m.text }; }),
+      answers: b ? readAnswers(b) : {},
+      chips: chipList(),
+      refs: imgs.filter(function (p) { return !!p.ref; }).map(function (p) { return { ref: p.ref, name: p.name, n: p.n }; }),
+      lost: imgs.filter(function (p) { return !p.ref; }).map(function (p) { return p.n; }),
+      open: open,
+      tab: live ? grid.getAttribute("data-tab") || "" : ""
+    };
+    if (ctext && d.text) d.sel = [ctext.selectionStart, ctext.selectionEnd];
+    return d;
+  }
+  function saveDraft() {
+    if (!draftStore || restoring) return;
+    clearTimeout(draftTimer);
+    draftTimer = null;
+    draftStore.save(rid, readDraft());
+  }
+  function queueDraft() {
+    if (!draftStore || restoring) return;
+    clearTimeout(draftTimer);
+    draftTimer = setTimeout(saveDraft, 400);
+  }
+  function clearDraft() {
+    if (!draftStore) return;
+    draftStore.clear(rid);
+    queueDraft();
+  }
+  function restoreDraft() {
+    var d = draftStore && draftStore.load(rid);
+    if (!d) return;
+    restoring = true;
+    try {
+      if (d.open && typeof d.open === "object") {
+        Object.keys(d.open).forEach(function (k) { if (!Object.prototype.hasOwnProperty.call(openState, k)) openState[k] = true; });
+        restoreOpen(doc);
+      }
+      var b = region("board");
+      if (b && d.answers && typeof d.answers === "object") {
+        writeAnswers(b, d.answers);
+        if (window.wbForm) window.wbForm();
+      }
+      if (cchips && Array.isArray(d.chips)) {
+        d.chips.forEach(function (c) { if (c && c.id && !chips[c.id]) { putChip(c); setItem(c.id, c); } });
+        syncChips();
+      }
+      var lost = Array.isArray(d.lost) ? d.lost : [];
+      if (ctext && typeof d.text === "string" && d.text && !ctext.value) {
+        var s = WsRail.stripMarkers(d.text, Array.isArray(d.mentions) ? d.mentions : [], lost);
+        ctext.value = s.text;
+        mentions = s.mentions.filter(function (m) { return liveMention(m, s.text); });
+        mentionWas = ctext.value;
+        (Array.isArray(d.refs) ? d.refs : []).forEach(function (p) {
+          if (!p || !p.ref || !markerNums(s.text)[p.n]) return;
+          imgs.push({ name: p.name || p.ref, url: attachSrc(p.ref), data: null, ref: p.ref, n: p.n });
+          imgSeq = Math.max(imgSeq, p.n);
+        });
+        imgs.sort(function (a, b) { return a.n - b.n; });
+        grow();
+        paintMentions();
+        renderImgs();
+        if (Array.isArray(d.sel)) { try { ctext.setSelectionRange(d.sel[0], d.sel[1]); } catch (e) { /* out of range */ } }
+      }
+      if (live && d.tab === "board") setTab("board");
+      if (lost.length) syncNote(wsT("js.draft.imgslost", lost.length));
+    } finally {
+      restoring = false;
+    }
+  }
+  if (draftStore) {
+    ["input", "change", "click", "toggle"].forEach(function (t) { doc.addEventListener(t, queueDraft, true); });
+    window.addEventListener("pagehide", saveDraft);
+    doc.addEventListener("visibilitychange", function () { if (doc.hidden) saveDraft(); });
+    window.addEventListener("beforeunload", WsRail.leaveGuard(function () { return imgs.some(function (p) { return !p.ref; }); }));
+  }
+
   if (live) {
     setLayout(load(LAYOUT_KEY));
     setSplit(savedSplit());
     setInput(load(INPUT_KEY));
     setTab("convo");
+    setCtab("convo");
   }
   restoreOpen(doc);
   // A body frame that posted its height before the listener above existed
@@ -3984,6 +4850,7 @@
   q("iframe.doc-frame").forEach(function (f) { if (f.contentWindow) f.contentWindow.postMessage({ wbDoc: "size" }, "*"); });
   if (window.wbForm) window.wbForm();
   applySent();
+  restoreDraft();
   tlCount();
   syncBadge();
   fmtTimes(doc);

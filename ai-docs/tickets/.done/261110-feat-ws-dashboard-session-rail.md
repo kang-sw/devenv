@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 26a645c5c36fb444
 sage-review-completeness-reviewed: 26a645c5c36fb444
+completed: 2026-11-10
 ---
 
 # Dashboard session rail
@@ -318,6 +319,70 @@ Verification:
   scrim, and selection; a typed draft survives switching sessions and back;
   the badge ring and robot blink match a working lead and running
   subagents, and stop under reduced motion; rows match the mockup.
+
+### Result (42dbeb14b) - 2026-11-10
+
+Landed in fda6c7a1e (wsdashboard: rail, overlay, drafts, stars, i18n,
+ws-mcp.md), 7b2abe3fa (mcp: registration `git_common_dir`,
+`ReadRepoWorktrees`), and 42dbeb14b (review fixes, draft-glue tests).
+
+- Decisions 1, 5: region `rail` in every session page; from 1600px a 340px
+  column left of the grid (top-left arrow hidden), below it a fixed overlay
+  over a scrim, closed by Esc, the scrim, a row pick, or crossing 1600px.
+  The rail is one shared render (`railPageSource`, `pageKey{kind: "rail"}`,
+  nil deps, the index stamp) sent over each session stream as a side part
+  with its own broker subscription, so one session's change renders the
+  rail once for all pages and no other session page
+  (`TestSessionPagesShareOneRailRender`, `RailRenders` counter). Wake
+  folding now also runs without a min-interval wait so the page part always
+  renders before the rail on one wake.
+- Decision 3: drafts cover the composer text, mentions, and selection, the
+  board answers (topic notes included, `readAnswers` shape), the answer
+  chips, images that reference written attachments, the open details, and
+  the tab; saved 400 ms after an input/change/click/toggle and on
+  pagehide/hidden, cleared on a successful send, capped at 50 sessions
+  (oldest dropped). Pasted (unwritten) images are not kept: their markers
+  are stripped on restore and `js.draft.imgslost` says how many.
+- Decision 4: a `beforeunload` guard asks only while a pasted image is held.
+- Decisions 6, 7: rows as in mockup v14; working = live adapter and a phase
+  other than idle/permission; the robot counts level-1 running agents.
+  Observed `ParentID`: both the Claude adapter's snapshots and the Pi
+  adapter omit `parentId` for agents the lead spawns, so level 1 is an empty
+  parent id (an orphaned parent also counts, as `subagentCounts` does).
+- Decision 8: stars and collapsed workspaces in localStorage
+  (`ws.dashboard.stars`, `ws.dashboard.railcol`); starred rows pin first
+  within their list in server order, unstarring restores the place.
+- Decision 9: workspace = repository root from `git_common_dir` (one
+  `rev-parse` per session root per ws-mcp process, outside the dashboard
+  lock), else the root's `.git` on disk; a bare/submodule common dir is a
+  plain folder. Worktree rows from `git worktree list --porcelain` via the
+  optional `RepoWorktreeSource` (pooled worktrees under the owned pool
+  roots only while they hold a session; prunable ones hidden), read only
+  with a streaming viewer: first viewer (skipped within 3 min of the last
+  full read, so rail navigation does not reread), every 3 min, a newly
+  shown repository alone, `POST /rail/refresh`. Live rows newest
+  registration first (stable under activity); ended rows fold per worktree
+  by last seen. Change count from the newest snapshot of a session in the
+  worktree.
+- Decision 10: last tool time from the newest running call or finished
+  tool batch (stale snapshot included); last message from the newest
+  `RingUser`/`RingReply` (64-entry scan, keeps the last found; image lines
+  dropped), cached by index revision and newest ring name.
+- Decision 11: no add buttons.
+
+Verification (remote, ws-rgo): `go test ./internal/wsdashboard/
+./internal/mcp/ ./internal/wsi18n/ -count=1` ok; `go vet` on wsdashboard and
+mcp clean; rail/stream/WebSocket subsets ok over `-count=4`. Node cases
+(`TestRailScript`, `TestRailDraftRestore`) also run locally under node and pass. Two
+existing tests were adjusted for the new structure (no-harness head check
+cuts at the rail; the silent-peer test counts two subscriptions per
+session stream). Lite review: no Critical or Important findings; the
+cheap minors fixed in 42dbeb14b.
+
+Not done: the three-width browser check (needs a locally built daemon,
+which this machine's rule forbids); the `.git` fallback memo keeps a
+plain-folder answer for the daemon's lifetime (older ws-mcp registrations
+only).
 
 ## Sage Review Round 1 (2026-11-10)
 

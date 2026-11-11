@@ -80,6 +80,8 @@ function world(on: On, opts: { dashboard?: unknown; intake?: Intake } = {}) {
     recvAnswers: [] as { result: unknown; text: string }[],
     /** The chunks the next model request streams, and its result. */
     chunks: [] as unknown[],
+    /** Awaited before the model request streams its chunk at this position, so real time can pass between chunks. */
+    chunkWaits: new Map<number, () => Promise<void>>(),
     step: { answer: '', toolUses: [] as { name: string; input: unknown }[], usage: null as Record<string, unknown> | null },
     toolResult: { result: 'ok', text: 'ok' } as Record<string, unknown>,
     logs: [] as string[],
@@ -144,7 +146,10 @@ function world(on: On, opts: { dashboard?: unknown; intake?: Intake } = {}) {
   })
   on('turn.complete', ($, e) => ({ text: e.answer }))
   on('turn.step', async function* ($, e) {
-    for (const chunk of w.chunks) yield chunk as never
+    for (const [i, chunk] of w.chunks.entries()) {
+      await w.chunkWaits.get(i)?.()
+      yield chunk as never
+    }
     return { turnId: e.turnId, index: e.index, answer: w.step.answer, toolUses: w.step.toolUses, stopReason: 'end_turn', usage: w.step.usage } as never
   })
   on('session.compact', async () => {
@@ -280,11 +285,47 @@ test('a subagent is keyed by its native id and labelled from its spawn; its own 
     label: 'Probe files',
     sessionKey: 'dk-9',
     caption: 'Explore',
+    // What the spawn beneath resolved it to run on.
+    model: 'haiku',
     status: 'done',
     batches: [expect.objectContaining({ toolNames: [`mcp__plugin_${w.plugin}_${w.plugin}__workflow_manual`], callCount: 1, failed: 0 })],
   })
   // Its call's arguments never carry the key into a preview.
   expect(JSON.stringify(sent(w)).split('dk-9').length - 1).toBe(JSON.stringify(sent(w)).split('"sessionKey":"dk-9"').length - 1)
+})
+
+test('a subagent\'s request gives its event the model and effort it names, its context size, and its output rate; the lead\'s carries none', { timeoutMs: 20_000 }, async ($, on) => {
+  const w = world(on, { dashboard: true })
+  await start($, w)
+  await $.turn.start({ text: 'x', turnId: 't' })
+  await $.agent.spawn({ tool_use_id: 'u0', prompt: 'go', description: 'Probe files', subagentType: 'ws:effort-high' } as never)
+  await flush(w)
+  // Before its first request: the spawn's resolved model and the effort its type carries.
+  expect(sent(w).filter((e) => e.kind === 'agent' && e.agentId === 'a77').at(-1)).toMatchObject({ model: 'haiku', effort: 'high' })
+  await $.turn.start({ text: 'go', turnId: 's', agentId: 'a77' })
+  w.chunks = [
+    { kind: 'text', index: 0, text: 'Reading' },
+    { kind: 'text', index: 0, text: ' the files' },
+    { kind: 'stop', stopReason: 'end_turn', usage: null },
+  ]
+  // Block 0's two chunks arrive at least 300 ms apart in real time: the feed times blocks by arrival.
+  w.chunkWaits.set(1, () => new Promise((resolve) => setTimeout(resolve, 300)))
+  w.step = { answer: 'Reading the files', toolUses: [], usage: { input_tokens: 8, output_tokens: 90, cache_read_input_tokens: 20_000, cache_creation_input_tokens: 500, model: 'claude-opus-y' } }
+  for await (const _ of $.turn.step({ turnId: 's', index: 0, model: 'claude-opus-y', effort: 'max', messageCount: 1, agentId: 'a77' } as never)) void _
+  await flush(w)
+  const sub = sent(w).filter((e) => e.kind === 'agent' && e.agentId === 'a77').at(-1)
+  expect(sub).toMatchObject({ model: 'claude-opus-y', effort: 'max', contextTokens: 20_508 })
+  expect(typeof sub?.outputTps).toBe('number')
+  // 90 tokens over a span of at least 300 ms.
+  expect(sub!.outputTps as number).toBeGreaterThan(0)
+  expect(sub!.outputTps as number).toBeLessThanOrEqual(300)
+  // The lead's own request names a model and effort too, and its event still carries none of the fields.
+  w.chunkWaits.clear()
+  for await (const _ of $.turn.step({ turnId: 't', index: 0, model: 'claude-opus-y', effort: 'high', messageCount: 1 } as never)) void _
+  await flush(w)
+  for (const lead of sent(w).filter((e) => e.kind === 'agent' && e.agentId === undefined)) {
+    expect(['model', 'effort', 'contextTokens', 'outputTps'].filter((k) => k in lead)).toEqual([])
+  }
 })
 
 test('a turn and a tool call under an agent id no spawn announced send no agent event', async ($, on) => {

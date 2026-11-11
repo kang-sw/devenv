@@ -367,7 +367,7 @@ func TestGitHandleSitsLeftOfThePanelsHandle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	page, err := renderSessionPage(view, regions, false)
+	page, err := renderSessionPage(view, regions, false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -397,7 +397,7 @@ func TestGitHandleSitsLeftOfThePanelsHandle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if page, err = renderSessionPage(view, regions, false); err != nil {
+	if page, err = renderSessionPage(view, regions, false, ""); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(page, `id="gbody"`) || strings.Contains(page, `id="ghandle"`) {

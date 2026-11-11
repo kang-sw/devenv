@@ -818,3 +818,119 @@ func TestAgentsPanelSpinsOnlyOnToolRows(t *testing.T) {
 		t.Errorf("reduced-motion rule does not name .pulse")
 	}
 }
+
+// TestPeerRowBranch pins the peer row's branch chip: a served peer carries
+// its snapshot's branch (with or without a live adapter) and an unserved one
+// none; the chip draws a branch as the session page's git handle does (goal
+// and impl marks and the last segment, a detached HEAD by its commit under
+// the detached title), and a root that is no repository draws no chip.
+func TestPeerRowBranch(t *testing.T) {
+	now := testNow
+	withRepo := func(repo *wslive.Repo, adapter bool) *wslive.Snapshot {
+		snap := liveSnap(now, wslive.Lead{})
+		if !adapter {
+			snap.Adapter = ""
+		}
+		snap.Repo = repo
+		return snap
+	}
+	sessions := map[string]Session{
+		"impl":   liveSession("impl", "/p", now),
+		"plain":  liveSession("plain", "/p", now),
+		"detach": liveSession("detach", "/p", now),
+		"norepo": liveSession("norepo", "/p", now),
+	}
+	snaps := map[string]*wslive.Snapshot{
+		"impl":   withRepo(&wslive.Repo{Folder: "p", Branch: "impl/goal/develop/epic/leaf-stem"}, true),
+		"plain":  withRepo(&wslive.Repo{Folder: "p", Branch: "develop"}, false),
+		"detach": withRepo(&wslive.Repo{Folder: "p", Branch: "1a2b3c4d5e", Detached: true}, true),
+		"norepo": withRepo(&wslive.Repo{Folder: "p"}, true),
+	}
+	var contacts []Contact
+	for _, id := range []string{"impl", "plain", "detach", "norepo", "unserved"} {
+		contacts = append(contacts, Contact{Address: "id:" + id, ReplyID: id, LastExchange: now, PresenceLive: true})
+	}
+	v := buildSessionView(pageInputs{Session: liveSession("self", "/p", now), Snapshot: liveSnap(now, wslive.Lead{}), Now: now,
+		Page: PageContent{Contacts: contacts}, Lookup: lookupOf(sessions, snaps)})
+	rows := map[string]PeerRow{}
+	for _, r := range v.Tree.Peers.Rows() {
+		rows[r.ReplyID] = r
+	}
+	if r := rows["impl"]; r.Branch != "impl/goal/develop/epic/leaf-stem" || r.Detached {
+		t.Errorf("served peer branch = %q detached %v", r.Branch, r.Detached)
+	}
+	if r := rows["plain"]; r.Branch != "develop" {
+		t.Errorf("a served peer without an adapter lost its branch: %+v", r)
+	}
+	if r := rows["unserved"]; r.Branch != "" || r.Served {
+		t.Errorf("an unserved peer carries a branch: %+v", r)
+	}
+
+	chip := func(id string) string {
+		html := renderNamed(t, "peerrow", rows[id])
+		i := strings.Index(html, `<span class="pbr"`)
+		if i < 0 {
+			return ""
+		}
+		j := strings.Index(html[i:], `</span></span>`)
+		return html[i : i+j]
+	}
+	if c := chip("impl"); !strings.Contains(c, `title="impl/goal/develop/epic/leaf-stem"`) || !strings.Contains(c, `class="gh-goal"`) ||
+		!strings.Contains(c, `class="gh-impl"`) || !strings.Contains(c, `<span class="pbt">leaf-stem`) {
+		t.Errorf("impl chip = %s", c)
+	}
+	if c := chip("plain"); !strings.Contains(c, `#i-branch`) || !strings.Contains(c, `<span class="pbt">develop`) || strings.Contains(c, "gh-") {
+		t.Errorf("plain chip = %s", c)
+	}
+	if c := chip("detach"); !strings.Contains(c, `title="detached HEAD at 1a2b3c4d5e"`) || !strings.Contains(c, `<span class="pbt">1a2b3c4d5e`) {
+		t.Errorf("detached chip = %s", c)
+	}
+	for _, id := range []string{"norepo", "unserved"} {
+		if c := chip(id); c != "" {
+			t.Errorf("%s draws a branch chip: %s", id, c)
+		}
+	}
+}
+
+// TestAgentRowStats pins a subagent row's telemetry: model and effort,
+// compact context size with the exact count in its title, and the rounded
+// output rate; a value the adapter did not send leaves its stat out (no
+// placeholder), a row with none has no stats box, and an ended agent keeps
+// its model, effort, and context but shows no rate. The CSS moves the stats
+// into the hover card through a container query on the agents panel.
+func TestAgentRowStats(t *testing.T) {
+	full := wslive.Agent{ID: "a", Status: wslive.StatusRunning, Model: "claude-opus-5-5", Effort: "high", ContextTokens: 48_211, OutputTps: 61.6}
+	html := renderNamed(t, "agent", AgentNode{Agent: full})
+	for _, want := range []string{`<span class="astat">`, `<span class="amodel" title="model: claude-opus-5-5 high">claude-opus-5-5 high</span>`,
+		`<span class="actx" title="context: 48211 tokens">48.2k</span>`, `<span class="atps" title="output: 62 tokens/s">62 t/s</span>`} {
+		if !strings.Contains(html, want) {
+			t.Errorf("full row lacks %s: %s", want, html)
+		}
+	}
+
+	partial := wslive.Agent{ID: "b", Status: wslive.StatusRunning, Effort: "low"}
+	html = renderNamed(t, "agent", AgentNode{Agent: partial})
+	if !strings.Contains(html, `<span class="amodel" title="model: low">low</span>`) || strings.Contains(html, "actx") || strings.Contains(html, "atps") {
+		t.Errorf("partial row = %s", html)
+	}
+	if html = renderNamed(t, "agent", AgentNode{Agent: wslive.Agent{ID: "c", Status: wslive.StatusRunning}}); strings.Contains(html, "astat") {
+		t.Errorf("a row without telemetry has a stats box: %s", html)
+	}
+
+	ended := full
+	ended.Status, ended.EndedAt = wslive.StatusDone, testNow.UnixMilli()
+	html = renderNamed(t, "agent", AgentNode{Agent: ended})
+	if !strings.Contains(html, `class="amodel"`) || !strings.Contains(html, `class="actx"`) || strings.Contains(html, "atps") {
+		t.Errorf("ended row = %s", html)
+	}
+
+	css := mustAsset(t, "dashboard.css")
+	for _, want := range []string{".r-tree { container: atree / inline-size; }", "@container atree (max-width: 559px) { .ahead .astat { display: none; } }"} {
+		if !strings.Contains(css, want) {
+			t.Errorf("dashboard.css lacks %q", want)
+		}
+	}
+	if js := mustAsset(t, "dashboard.js"); !strings.Contains(js, "function agentTip(head)") || !strings.Contains(js, `if (name === "tree") agentTipSwapped();`) {
+		t.Errorf("dashboard.js lacks the stats hover card")
+	}
+}

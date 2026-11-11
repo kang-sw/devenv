@@ -1,22 +1,26 @@
 {{define "session"}}<!DOCTYPE html>
-<html data-mode="{{.Mode}}" data-rid="{{.ReplyID}}" data-wb-titlehost data-lang="{{lang}}" data-langpref="{{.LangPref}}"{{with .Theme}} data-theme="{{.}}"{{end}}{{if .SysOpen}} data-sysopen="1"{{end}}>
+<html data-mode="{{.Mode}}" data-rid="{{.ReplyID}}" data-wb-titlehost data-lang="{{lang}}" data-langpref="{{.LangPref}}"{{with .Theme}} data-theme="{{.}}"{{end}}{{if .SysOpen}} data-sysopen="1"{{end}}{{with .Terminal}} data-term="{{.}}"{{end}}>
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{.ReplyID}} - ws dashboard</title>
-<style>{{.Assets.WhiteboardCSS}}</style>
+<style>{{.Assets.WhiteboardCSS}}</style>{{if .Terminal}}
+<style>{{.Assets.XtermCSS}}</style>{{end}}
 <style>{{.Assets.CSS}}</style>
 <style>{{.Assets.TrackerCSS}}</style></head>
-<body class="dash {{.Mode}}">{{.Assets.WhiteboardSprite}}{{.Assets.Sprite}}<div class="dwrap">
-<div class="top"><a class="back" href="/" title="{{t "nav.sessions"}}" aria-label="{{t "nav.sessions"}}">{{icon "back"}}</a>{{region . "head"}}{{template "sse"}}{{template "qsslot"}}</div>
+<body class="dash {{.Mode}}">{{.Assets.WhiteboardSprite}}{{.Assets.Sprite}}{{.Assets.LucideSprite}}<div class="dwrap">
+<div class="top"><a class="back" id="railbtn" href="/" title="{{t "nav.sessions"}}" aria-label="{{t "nav.sessions"}}" aria-controls="rail" aria-expanded="false">{{icon "back"}}</a>{{region . "head"}}{{template "sse"}}{{template "qsslot"}}</div>
 {{template "drawer" .}}
 <div class="banner" id="dash-banner" hidden></div>
+<div class="dbody"><aside id="rail" class="rail" aria-label="{{t "rail.title"}}">{{region . "rail"}}</aside><div class="rscrim" id="rscrim"></div>
 <main id="grid" class="dgrid {{.Mode}}">
 {{if .Adapter}}<nav id="tabbar" class="tabbar"><button data-tab="convo" aria-pressed="true">{{icon "chat"}}{{t "tab.conversation"}}<span class="tdot"></span></button><button data-tab="board" aria-pressed="false">{{icon "board"}}{{t "tab.board"}}<span class="tdot"></span></button></nav>
+<nav id="ctabs" class="ctabs" aria-label="{{t "tab.column"}}"><button type="button" data-ctab="convo" aria-pressed="true">{{t "tab.conversation"}}<span class="tdot"></span></button><button type="button" data-ctab="files" aria-pressed="false">{{t "tab.files"}}</button></nav>
+<section id="files" class="fpane" aria-label="{{t "tab.files"}}"></section>
 {{region . "tree"}}
 <div id="splitter" class="splitter" role="separator" aria-orientation="horizontal" aria-label="{{t "splitter.label"}}" tabindex="0" title="{{t "splitter.title"}}"></div>
 <div id="convo" class="convo">{{region . "entries"}}{{region . "convlive"}}</div>
 <div id="composer" class="composer"><div class="cbadges"><button type="button" class="ibadge" id="ibadge" title="{{t "js.interrupt.title"}}" hidden><span class="istop"></span><span class="ilabel">{{t "js.interrupt"}}</span></button>{{template "subbadge"}}</div>{{region . "ctx"}}<div class="cimgs" id="cimgs"></div><div class="cchips" id="cchips"></div><div class="crow"><div class="cfield"><div class="chl" id="chl" aria-hidden="true"></div><textarea id="ctext" rows="1" aria-description="{{t "composer.aria"}}" placeholder="{{t "js.hint.enter"}}"></textarea></div><button type="button" class="csend" id="csend" title="{{t "composer.send"}}" aria-label="{{t "composer.send"}}">{{icon "send"}}</button></div>{{region . "sline"}}<div class="cnote" id="cnote"></div></div>
 {{end}}<div id="bcol" class="bcol">{{region . "board"}}</div>
-</main></div>
+</main></div></div>
 <script>{{i18n}}</script>
 <script>window.wbForm = function () {
 {{.Assets.FormScript}}};
@@ -27,6 +31,11 @@ window.wbMermaidFile = {{.Assets.MermaidFile}};</script>
 <script>{{.Assets.ToastScript}}</script>
 <script>{{.Assets.TrackerScript}}</script>
 <script>{{.Assets.MentionScript}}</script>
+<script>{{.Assets.RailScript}}</script>
+<script>{{.Assets.CardsScript}}</script>
+<script>{{.Assets.PreviewScript}}</script>
+<script>{{.Assets.FilesScript}}</script>{{if .Terminal}}
+<script>{{.Assets.TerminalScript}}</script>{{end}}
 <script>{{.Assets.Script}}</script>
 </body></html>
 {{end}}
@@ -67,11 +76,15 @@ and push; no commit action, and the graph is read-only. */}}
 {{define "gitbody"}}<div class="dr-body gbody" id="gbody" hidden><section class="glog" id="glog" aria-label="{{t "git.graph"}}"><div class="ghead">{{icon "branch"}}<span class="gtitle">{{t "git.graph.title"}}</span><span class="gsub">{{t "git.graph.sub"}}</span><span class="chip" id="glcount" hidden></span></div><div class="glscroll" id="glscroll"><div class="glcols"><span>{{t "git.graph.col.graph"}}</span><span>{{t "git.graph.col.subject"}}</span><span>{{t "git.graph.col.author"}}</span><span class="r">{{t "git.graph.col.when"}}</span><span class="r">{{t "git.graph.col.commit"}}</span></div><div class="glrows" id="glrows"></div></div></section><section class="gpanel" aria-label="{{t "git.drawer"}}"><div class="ghead">{{icon "branch"}}<span class="gref" id="gref"></span></div><div class="gacts"><button type="button" class="btn gact" data-git="fetch" data-busy="{{t "git.fetch.busy"}}" title="{{t "git.fetch.title"}}">{{icon "fetch"}}<span>{{t "git.fetch"}}</span></button><button type="button" class="btn gact" data-git="pull" data-busy="{{t "git.pull.busy"}}" title="{{t "git.pull.title"}}">{{icon "pull"}}<span>{{t "git.pull"}}</span></button><button type="button" class="btn gact" data-git="push" data-busy="{{t "git.push.busy"}}" title="{{t "git.push.title"}}">{{icon "push"}}<span>{{t "git.push.go"}}</span></button></div><div class="gmsg" id="gmsg" role="status" data-lost="{{t "git.lost"}}" hidden></div><div class="gfiles" id="gfiles"></div></section></div>{{end}}
 
 {{/* The drawer's own cards after the panels: the pooled worktrees, when
-the daemon reads pools, and the settings. They are no region: the page
-script fills the worktrees card from the worktrees route each time the
-drawer opens, and the cleanup button asks the session to clean the pool up
-(worktrees.go), which needs a live adapter. */}}
-{{define "drcards"}}{{if .Worktrees}}<details class="panel drcard wtcard" id="p-worktrees" open><summary>{{icon "branch"}}{{t "wt.title"}}<span class="chip" id="wtcount" hidden></span></summary><div class="body"><div class="wtlist" id="wtlist" aria-live="polite"></div><div class="wtfoot"><span class="wtnote" id="wtnote" role="status"></span><button type="button" class="btn wtclean" id="wtclean"{{if .Adapter}} title="{{t "wt.cleanup.title"}}"{{else}} disabled title="{{t "wt.cleanup.noadapter"}}"{{end}}>{{t "wt.cleanup"}}</button></div></div></details>{{end}}<details class="panel drcard setcard" id="p-settings" open><summary>{{icon "gear"}}{{t "drawer.settings"}}</summary><div class="body"><div class="gmenu gcard">{{template "gearitems" .Adapter}}</div></div></details>{{end}}
+the daemon reads pools, the session holders, when the daemon runs them, and
+the settings. They are no region: the page script fills the worktrees card
+from the worktrees route each time the drawer opens, and the cleanup button
+asks the session to clean the pool up (worktrees.go), which needs a live
+adapter. It fills the holders card from the holders route (holders.go) on
+the same openings: the holders no daemon is attached to, the ones not
+restart-safe, and the failed holder starts; a stop button on an unattached
+row, for a viewer the route lets stop one. */}}
+{{define "drcards"}}{{if .Worktrees}}<details class="panel drcard wtcard" id="p-worktrees" open><summary>{{icon "branch"}}{{t "wt.title"}}<span class="chip" id="wtcount" hidden></span></summary><div class="body"><div class="wtlist" id="wtlist" aria-live="polite"></div><div class="wtfoot"><span class="wtnote" id="wtnote" role="status"></span><button type="button" class="btn wtclean" id="wtclean"{{if .Adapter}} title="{{t "wt.cleanup.title"}}"{{else}} disabled title="{{t "wt.cleanup.noadapter"}}"{{end}}>{{t "wt.cleanup"}}</button></div></div></details>{{end}}{{if .Holders}}<details class="panel drcard hdcard" id="p-holders" open><summary>{{icon "agents"}}{{t "hd.title"}}<span class="chip" id="hdcount" hidden></span></summary><div class="body"><div class="wtlist" id="hdlist" aria-live="polite"></div><div class="wtfoot"><span class="wtnote" id="hdnote" role="status"></span></div></div></details>{{end}}<details class="panel drcard setcard" id="p-settings" open><summary>{{icon "gear"}}{{t "drawer.settings"}}</summary><div class="body"><div class="gmenu gcard">{{template "gearitems" .Adapter}}</div></div></details>{{end}}
 
 {{define "r-head"}}<span class="meta">{{.ProjectName}}</span><span class="meta">{{.ReplyID}}{{if .HasBoard}} · #{{.Seq}}{{end}}</span>{{with .Harness}}<span class="host sse" title="{{t "js.sse.title.on"}}"><span class="dot"></span>{{.}}</span>{{end}}{{if not .Live}}<span class="ended-chip" title="{{t "head.ended.title"}}">{{t "head.ended"}}</span>{{end}}{{if not .Adapter}}<span class="nolive" title="{{t "head.stores.title"}}">{{t "head.stores"}}</span>{{end}}<span class="counts">{{with .CountPolicy}}<span class="chip policy" title="{{t "chip.answer"}}">{{icon "ask"}}{{.}}</span>{{end}}{{with .CountAcks}}<span class="chip ok" title="{{t "chip.ack"}}">{{icon "check"}}{{.}}</span>{{end}}</span>{{end}}
 
@@ -111,13 +124,25 @@ The session index row keeps phase. */}}
 
 {{define "mark"}}{{if eq . "permission"}}{{icon "lock"}}{{else if or (eq . "idle") (eq . "")}}<span class="idle-dot"></span>{{else}}<span class="pulse"></span>{{end}}{{end}}
 
-{{define "agent"}}<div class="agent {{.Status}}"><details data-key="agent-{{.ID}}"><summary class="ahead"><span class="amk">{{if .IsRunning}}<span class="pulse"></span>{{else if eq .Status "failed"}}✗{{else}}✓{{end}}</span><span class="aname" title="{{or .Label .ID}}">{{if .Label}}{{.Label}}{{else}}{{t "agent.name" (shortID .ID)}}{{end}}</span>{{with .ReplyID}}{{if $.Linked}}<a class="arid" href="/s/{{.}}" title="{{t "agent.open" .}}">{{shortID .}}</a>{{else}}<span class="arid nob" title="{{.}}">{{shortID .}}</span>{{end}}{{end}}{{if .IsRunning}}{{template "tphase" .Phase}}{{end}}{{with .Caption}}<span class="acap" title="{{.}}">{{.}}</span>{{end}}<span class="am"><span class="ok" title="{{t "agent.done"}}">✓ {{.Done}}</span><span class="{{if .Failed}}f{{end}}" title="{{t "agent.failed"}}">✗ {{.Failed}}</span>{{if .IsRunning}}{{with .StartedAt}}<span>{{template "dur" .}}</span>{{end}}{{else}}{{with .EndedAt}}<span>{{template "ago" .}}</span>{{end}}{{end}}{{icon "chev"}}</span></summary><ol class="brows">{{range .Finished}}{{template "batch" .}}{{end}}</ol></details>{{if .IsRunning}}<ol class="brows live bguide">{{template "slots" .Slots}}</ol>{{end}}{{with .Children}}<div class="kids">{{range .}}{{template "agent" .}}{{end}}</div>{{end}}</div>{{end}}
+{{define "agent"}}<div class="agent {{.Status}}"><details data-key="agent-{{.ID}}"><summary class="ahead"><span class="amk">{{if .IsRunning}}<span class="pulse"></span>{{else if eq .Status "failed"}}✗{{else}}✓{{end}}</span><span class="aname" title="{{or .Label .ID}}">{{if .Label}}{{.Label}}{{else}}{{t "agent.name" (shortID .ID)}}{{end}}</span>{{with .ReplyID}}{{if $.Linked}}<a class="arid" href="/s/{{.}}" title="{{t "agent.open" .}}">{{shortID .}}</a>{{else}}<span class="arid nob" title="{{.}}">{{shortID .}}</span>{{end}}{{end}}{{if .IsRunning}}{{template "tphase" .Phase}}{{end}}{{with .Caption}}<span class="acap" title="{{.}}">{{.}}</span>{{end}}{{template "astat" .}}<span class="am"><span class="ok" title="{{t "agent.done"}}">✓ {{.Done}}</span><span class="{{if .Failed}}f{{end}}" title="{{t "agent.failed"}}">✗ {{.Failed}}</span>{{if .IsRunning}}{{with .StartedAt}}<span>{{template "dur" .}}</span>{{end}}{{else}}{{with .EndedAt}}<span>{{template "ago" .}}</span>{{end}}{{end}}{{icon "chev"}}</span></summary><ol class="brows">{{range .Finished}}{{template "batch" .}}{{end}}</ol></details>{{if .IsRunning}}<ol class="brows live bguide">{{template "slots" .Slots}}</ol>{{end}}{{with .Children}}<div class="kids">{{range .}}{{template "agent" .}}{{end}}</div>{{end}}</div>{{end}}
+
+{{/* astat is a subagent row's telemetry: model and effort, context size,
+and (while it runs) output rate, each left out while unknown. On a narrow
+agents panel a container query hides it and the page script shows the same
+stats, read from each stat's title, in a hover card (agentTip). */}}
+{{define "astat"}}{{if .HasStats}}<span class="astat">{{with .ModelText}}<span class="amodel" title="{{t "agent.model" .}}">{{.}}</span>{{end}}{{with .ContextText}}<span class="actx" title="{{t "agent.context" $.ContextTokens}}">{{.}}</span>{{end}}{{with .Rate}}<span class="atps" title="{{t "agent.rate" .}}">{{.}} t/s</span>{{end}}</span>{{end}}{{end}}
 
 {{define "peers"}}<div class="pgroup"><div class="pghead">{{icon "mail"}}{{t "peers.title"}}<span class="chip">{{len .Live}}</span>{{with .Ended}}<span class="chip">{{t "peers.ended" (len .)}}</span>{{end}}</div>{{range .Rows}}{{template "peer" .}}{{end}}{{with .HiddenEnded}}<div class="thidden">{{t "peers.hidden" .}}</div>{{end}}</div>{{end}}
 
 {{define "pfolder"}}{{with .Folder}}<span class="pfolder">{{.}}/</span>{{end}}{{end}}
 
-{{define "peerrow"}}<span class="amk">{{if and .Live .Adapter}}{{template "mark" .Lead.Phase}}{{else}}<span class="pdot"></span>{{end}}</span>{{if .Served}}<a class="pname" href="/s/{{.ReplyID}}"{{with .Path}} title="{{.}}"{{end}}>{{template "pfolder" .}}{{.Address}}</a>{{else}}<span class="pname"{{with .Path}} title="{{.}}"{{end}}>{{template "pfolder" .}}{{.Address}}</span>{{end}}{{if and .Harness .Live}}<span class="host sm">{{.Harness}}</span>{{end}}{{if not .Compact}}<span class="pline">{{if not .Live}}<span class="pstate">{{t "head.ended"}}</span>{{else if not .Served}}<span class="pstate">{{t "peer.unserved"}}</span>{{else if .Adapter}}{{template "tphase" .Lead.Phase}}{{with .Lead.Running}}<span class="ptool" title="{{.ToolName}}">{{toolName .ToolName}}</span>{{end}}{{end}}</span>{{end}}<span class="am">{{if .RunningAgents}}<span class="prun" title="{{tn "peer.running" .RunningAgents}}">{{icon "agents"}}{{.RunningAgents}}</span>{{end}}{{if and .Adapter (not .Compact)}}<span title="{{t "peer.subagents"}}">{{icon "agents"}}{{.AgentCount}}</span>{{end}}<span title="{{t "peer.lastmail"}}">{{icon "mail"}}{{template "ago" .LastExchange}}</span></span>{{end}}
+{{/* pbranch is a served peer's branch chip, drawn as the session page's git
+handle draws a branch: goal and impl branches by their last segment with
+their marks, a detached HEAD by its commit with the detached title, and no
+chip for a root that is no repository. */}}
+{{define "pbranch"}}{{with .BranchHandle}}{{if .Text}}<span class="pbr" title="{{if $.Detached}}{{t "git.detached" $.Branch}}{{else}}{{$.Branch}}{{end}}">{{if .Goal}}<span class="gh-goal">{{icon "trophy"}}</span>{{end}}{{if .Impl}}<span class="gh-impl">{{icon "hammer"}}</span>{{end}}{{if not (or .Goal .Impl)}}{{icon "branch"}}{{end}}<span class="pbt">{{.Text}}</span></span>{{end}}{{end}}{{end}}
+
+{{define "peerrow"}}<span class="amk">{{if and .Live .Adapter}}{{template "mark" .Lead.Phase}}{{else}}<span class="pdot"></span>{{end}}</span>{{if .Served}}<a class="pname" href="/s/{{.ReplyID}}"{{with .Path}} title="{{.}}"{{end}}>{{template "pfolder" .}}{{.Address}}</a>{{else}}<span class="pname"{{with .Path}} title="{{.}}"{{end}}>{{template "pfolder" .}}{{.Address}}</span>{{end}}{{template "pbranch" .}}{{if and .Harness .Live}}<span class="host sm">{{.Harness}}</span>{{end}}{{if not .Compact}}<span class="pline">{{if not .Live}}<span class="pstate">{{t "head.ended"}}</span>{{else if not .Served}}<span class="pstate">{{t "peer.unserved"}}</span>{{else if .Adapter}}{{template "tphase" .Lead.Phase}}{{with .Lead.Running}}<span class="ptool" title="{{.ToolName}}">{{toolName .ToolName}}</span>{{end}}{{end}}</span>{{end}}<span class="am">{{if .RunningAgents}}<span class="prun" title="{{tn "peer.running" .RunningAgents}}">{{icon "agents"}}{{.RunningAgents}}</span>{{end}}{{if and .Adapter (not .Compact)}}<span title="{{t "peer.subagents"}}">{{icon "agents"}}{{.AgentCount}}</span>{{end}}<span title="{{t "peer.lastmail"}}">{{icon "mail"}}{{template "ago" .LastExchange}}</span></span>{{end}}
 
 {{/* subbadge is the running-subagent badge on the composer's top border,
 beside the interrupt badge: the page script fills its label from a convlive
@@ -194,6 +219,20 @@ region. */}}
 {{define "r-sessions"}}<div class="totals"><span class="chip">{{t "index.live" .Live}}</span><span class="chip">{{t "index.working" .Busy}}</span></div>{{range .Projects}}<section class="project"><div class="pbar"><span class="pname">{{.Name}}</span><span class="ppath">{{.Path}}</span><span class="chip">{{len .Sessions}}</span></div>{{range .Sessions}}{{template "srow" .}}{{end}}{{if .Ended}}<div class="endedhead">{{t "head.ended"}}</div>{{range .Ended}}{{template "srow" .}}{{end}}{{end}}{{with .HiddenEnded}}<div class="thidden">{{t "index.hidden" .}}</div>{{end}}</section>{{else}}<div class="empty">{{t "index.empty"}}</div>{{end}}{{end}}
 
 {{define "srow"}}<a class="sess{{if not .Live}} ended{{end}}" href="/s/{{.ReplyID}}"><span class="who"><span class="rid">{{.ReplyID}}</span><span class="sub">{{if .Tool}}<span class="tn">{{.Tool}}</span>{{end}}{{with .RunningAgents}}<span class="agents-mini">{{t "srow.agents" .}}</span>{{end}}{{if not .HasBoard}}<span class="agents-mini">{{t "srow.noboard"}}</span>{{end}}</span></span>{{with .Harness}}<span class="host">{{.}}</span>{{else}}<span></span>{{end}}{{if .Adapter}}{{template "phase" .Phase}}{{else}}<span class="phase none" title="{{t "srow.nolive.title"}}">{{t "srow.nolive"}}</span>{{end}}<span class="qs">{{with .CountPolicy}}<span class="chip policy" title="{{t "chip.answer"}}">{{icon "ask"}}{{.}}</span>{{end}}</span><span class="when">{{template "ago" .LastSeen}}</span></a>{{end}}
+
+{{/* The session rail (pageview_rail.go): every session page's left card,
+one shared render without the viewed session (the page marks its own row,
+.cur, and pins starred rows, both on the client). A workspace is a
+repository, its sessions under its worktrees, or a plain folder; each row is
+two lines, the star outside the row's link. A workspace bar is a container,
+not a button: its collapse toggle (.wstog), the add-worktree + (a repository
+on a daemon that keeps stored workspaces), and forget (a stored workspace)
+are sibling buttons. */}}
+{{define "r-rail"}}<div class="rhd"><b class="rtitle">{{t "rail.title"}}</b>{{if .CanAdd}}<button type="button" class="radd" data-add="ws" title="{{t "rail.ws.add"}}" aria-label="{{t "rail.ws.add"}}" aria-haspopup="dialog" aria-expanded="false">{{icon "plus"}}</button>{{end}}<span class="rsp"></span><span class="chip" title="{{t "rail.live.title"}}">{{t "index.live" .Live}}</span>{{with .CountPolicy}}<span class="chip policy" title="{{t "chip.answer"}}">{{icon "ask"}}{{.}}</span>{{end}}<button type="button" class="rref" id="railref" title="{{t "rail.refresh"}}" aria-label="{{t "rail.refresh"}}">{{icon "reload"}}</button></div><div class="rlist" id="rlist">{{range .Workspaces}}<section class="rws" data-ws="{{.Path}}"><div class="wsbar"><button type="button" class="wstog" aria-expanded="true" title="{{.Path}}">{{if .Repo}}<span class="wsi" title="{{t "rail.repo"}}">{{icon "repo"}}</span>{{else}}<span class="wsi" title="{{t "rail.folder"}}">{{icon "wsfolder"}}</span>{{end}}<span class="nm">{{.Name}}</span><span class="pp">{{.Path}}</span></button>{{if and .Repo $.CanAdd}}<button type="button" class="radd" data-add="wt" title="{{t "rail.wt.add" .Name}}" aria-label="{{t "rail.wt.add" .Name}}" aria-haspopup="dialog" aria-expanded="false">{{icon "plus"}}</button>{{end}}{{if .Stored}}<button type="button" class="rforget" title="{{t "rail.ws.forget" .Name}}" aria-label="{{t "rail.ws.forget" .Name}}">{{icon "x"}}</button>{{end}}<span class="ct" title="{{t "rail.live.title"}}">{{.Live}}</span></div><div class="wsbody">{{if .Repo}}{{range .Worktrees}}<div class="rwt{{if .Empty}} empty{{end}}"><div class="wthd" title="{{.Path}}">{{icon "branch"}}<span class="br">{{if .Detached}}{{t "rail.detached"}}{{else}}{{.Branch}}{{end}}</span><span class="wf">· {{if .Root}}{{t "rail.root"}}{{else}}{{.Folder}}{{end}}</span>{{if .HasChanges}}<span class="gs" title="{{t "rail.changes"}}">±{{.Changes}}</span>{{end}}</div>{{template "rsessions" .}}</div>{{end}}{{else}}{{template "rsessions" .}}{{end}}</div></section>{{else}}<div class="empty">{{t "index.empty"}}</div>{{end}}</div><div class="rfoot"><a href="/">{{t "nav.sessions"}}</a></div>{{end}}
+
+{{define "rsessions"}}{{if or .Sessions .Ended}}<div class="rsessions">{{range .Sessions}}{{template "rrow" .}}{{end}}{{with .Ended}}<details class="rended" data-key="rended:{{$.Path}}"><summary>{{t "rail.ended" (len .)}}</summary><div class="rsessions">{{range .}}{{template "rrow" .}}{{end}}</div></details>{{end}}</div>{{end}}{{end}}
+
+{{define "rrow"}}<div class="rs{{if not .Live}} ended{{end}}" data-rid="{{.ReplyID}}"><button type="button" class="star" aria-pressed="false" title="{{t "rail.star"}}" aria-label="{{t "rail.star"}}">{{icon "pin"}}</button><a class="rl" href="/s/{{.ReplyID}}"><span class="s1"><span class="host sm hb{{if .Working}} run{{end}}" title="{{if .Working}}{{t "rail.working"}}{{else}}{{t "rail.waiting"}}{{end}}">{{with .Harness}}{{.}}{{else}}?{{end}}{{if .Working}}<svg class="ring" aria-hidden="true"><rect class="rtrk"/><rect class="rrun" pathLength="100"/></svg>{{end}}</span>{{with .Subagents}}<span class="bots" title="{{t "srow.agents" .}}">{{icon "robot"}}{{.}}</span>{{end}}<span class="rid">{{.ReplyID}}</span><span class="rsp"></span>{{with .CountPolicy}}<span class="chip policy" title="{{t "chip.answer"}}">{{icon "ask"}}{{.}}</span>{{end}}{{with .LastTool}}<time class="when t" data-ms="{{.}}" data-f="rel" data-tl="{{t "rail.lasttool"}}">{{clock .}}</time>{{end}}</span>{{with .Message}}<span class="s2">{{if $.User}}<b class="who">{{t "rail.you"}}</b>{{end}}{{.}}</span>{{end}}</a></div>{{end}}
 
 {{/* The file view's pages (file_route.go): a rendered markdown file, and the
 "not viewable" page that offers the path copies only. Neither is a region;

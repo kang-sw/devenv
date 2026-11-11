@@ -3,6 +3,7 @@ package wslive
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"reflect"
 	"regexp"
 	"slices"
@@ -24,7 +25,7 @@ const (
 	KindTurnEnd   = "turn_end"
 	// KindAgent updates the lead (no agentId) or one subagent: its batches,
 	// caption, and, for a subagent, its parent, label, delegate session key,
-	// and status.
+	// status, and telemetry (model, effort, context tokens, output rate).
 	KindAgent = "agent"
 	// KindPermission sets or (clear) ends a permission wait.
 	KindPermission = "permission"
@@ -93,6 +94,15 @@ type Event struct {
 	Context *UsageContext `json:"context,omitempty"`
 	Limits  []UsageLimit  `json:"limits,omitempty"`
 	Cost    *UsageCost    `json:"cost,omitempty"`
+	// Model, Effort, ContextTokens, and OutputTps are a subagent's
+	// telemetry on an agent event: each replaces the held value when
+	// present and keeps it when absent. A blank text or a negative or
+	// out-of-range number is ignored. Numbers are floats so a fractional
+	// count never fails the whole event.
+	Model         string   `json:"model,omitempty"`
+	Effort        string   `json:"effort,omitempty"`
+	ContextTokens *float64 `json:"contextTokens,omitempty"`
+	OutputTps     *float64 `json:"outputTps,omitempty"`
 }
 
 // Result is what one event changed.
@@ -122,6 +132,9 @@ type agentState struct {
 	activityState
 	id, parentID, label, replyID, status string
 	startedAt, endedAt, touched          int64
+	model, effort                        string
+	contextTokens                        int64
+	outputTps                            float64
 }
 
 // State is one session's live state: the reducer from adapter events to a
@@ -435,7 +448,7 @@ func (st *State) applyAgent(ev Event, at int64) error {
 		batches = st.normalizeBatches(ev.Batches)
 	}
 	if ev.AgentID == "" {
-		if ev.Status != "" || ev.ParentID != "" || ev.Label != "" || ev.SessionKey != "" {
+		if ev.Status != "" || ev.ParentID != "" || ev.Label != "" || ev.SessionKey != "" || hasTelemetry(ev) {
 			return fmt.Errorf("the lead takes only batches and caption; set agentId for a subagent")
 		}
 		st.setActivity(&st.lead, ev, batches)
@@ -457,6 +470,7 @@ func (st *State) applyAgent(ev Event, at int64) error {
 		a.replyID = wsmailbox.ReplyID(strings.TrimSpace(ev.SessionKey))
 	}
 	st.setActivity(&a.activityState, ev, batches)
+	st.setTelemetry(a, ev)
 	switch ev.Status {
 	case StatusRunning:
 		a.status, a.endedAt = StatusRunning, 0
@@ -468,7 +482,33 @@ func (st *State) applyAgent(ev Event, at int64) error {
 		a.permission = nil
 		closeBatches(&a.activityState, at)
 	}
+	if a.status != StatusRunning {
+		// An ended subagent produces no output, so it shows no rate.
+		a.outputTps = 0
+	}
 	return nil
+}
+
+// hasTelemetry reports an event that carries any subagent telemetry field.
+func hasTelemetry(ev Event) bool {
+	return ev.Model != "" || ev.Effort != "" || ev.ContextTokens != nil || ev.OutputTps != nil
+}
+
+// setTelemetry takes the event's telemetry fields that are present and
+// valid; the rest keep their held values.
+func (st *State) setTelemetry(a *agentState, ev Event) {
+	if m := cleanLine(st.scrub.scrub(ev.Model), ModelRunes); m != "" {
+		a.model = m
+	}
+	if e := cleanLine(st.scrub.scrub(ev.Effort), EffortRunes); e != "" {
+		a.effort = e
+	}
+	if n := ev.ContextTokens; n != nil && *n >= 0 && *n <= MaxContextTokens {
+		a.contextTokens = int64(math.Round(*n))
+	}
+	if r := ev.OutputTps; r != nil && *r >= 0 && *r <= MaxOutputTps {
+		a.outputTps = *r
+	}
 }
 
 func (st *State) setActivity(act *activityState, ev Event, batches []BatchView) {
@@ -719,6 +759,11 @@ func (st *State) Snapshot(now int64) Snapshot {
 			Status:    a.status,
 			StartedAt: a.startedAt,
 			EndedAt:   a.endedAt,
+
+			Model:         a.model,
+			Effort:        a.effort,
+			ContextTokens: a.contextTokens,
+			OutputTps:     a.outputTps,
 		})
 	}
 	sort.Slice(snap.Agents, func(i, j int) bool {

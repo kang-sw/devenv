@@ -1406,7 +1406,8 @@ export const register: Register = (on) => {
   // main loop's, with its model.
   // A main-thread request also tells the mailbox push that the steer rows
   // appended so far are read, so a turn end re-submits only unread ones.
-  // The dashboard feed observes the stream while it runs; off, the stream is
+  // The dashboard feed observes the stream while it runs, and a subagent's
+  // request gives it that subagent's model and effort; off, the stream is
   // forwarded as it was.
   on('turn.step', async function* ($, e, next) {
     if (e.agentId === undefined) {
@@ -1423,7 +1424,7 @@ export const register: Register = (on) => {
     }
     if (!dashboard.active()) return yield* next(e)
     const step = `${e.turnId}/${e.index}`
-    dashboard.stepBegan(e.agentId, step)
+    dashboard.stepBegan(e.agentId, step, { model: e.model, effort: e.effort })
     return yield* tapStep(next(e), {
       chunk: (c) => dashboard.stepChunk(e.agentId, step, c as Parameters<typeof dashboard.stepChunk>[2]),
       end: (r) => dashboard.stepEnded(e.agentId, step, r),
@@ -1455,11 +1456,11 @@ export const register: Register = (on) => {
     return res
   })
 
-  // A subagent's label and parent, for the dashboard feed's tree.
+  // A subagent's label, parent, and model, for the dashboard feed's tree.
   on('agent.spawn', async ($, e, next) => {
     const res = await next(e)
     if (res.agentId !== undefined) {
-      dashboard.agentSpawned({ agentId: res.agentId, parentId: e.parentAgentId, description: e.description, subagentType: e.subagentType })
+      dashboard.agentSpawned({ agentId: res.agentId, parentId: e.parentAgentId, description: e.description, subagentType: e.subagentType, model: res.model })
     }
     return res
   })

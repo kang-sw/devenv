@@ -201,6 +201,90 @@ Verification (announced, (115) ok):
   bars, forget, and the rail showing an added workspace and a created
   worktree at once.
 
+### Result (76a19c0af) - 2026-11-10
+
+Landed in 6c5fe1f2a (store, path reading, worktree add, routes, rail
+grouping, route strings), 2df881ff6 and 93ac75598 (rail markup, popovers,
+forget, page strings; the first holds only a test-file rename), and
+76a19c0af (preview wording).
+
+- Decision 7: `workspaces.go`. The list is
+  `<config home>/dashboard/workspaces.json` (`WorkspacesFilePath` beside the
+  global config file, wired in `cmd/ws-mcp/dashboard.go`), a versioned JSON
+  document of paths written atomically and owner-only. Whether an entry is a
+  repository is derived at each read, not stored. A daemon started without
+  `DaemonOptions.WorkspacesFile` keeps no store: no routes, no + buttons.
+- Decisions 1, 4: `workspacepath.go` reads a pasted path as a pure function
+  of a host value (WSL, native Windows, Linux and macOS rules, each
+  refusal). `locateWorkspace` resolves a folder to its workspace by the
+  nearest `.git` at or above it, without running git: a `.git` directory is
+  a root; a linked worktree's `.git` file leads to its root; any other
+  `.git` file (a submodule) leaves the folder a plain workspace, as the rail
+  shows a session rooted there. Results are `added`, `noop`, and `merged`.
+  A merge is also detected by a sweep that runs before each full
+  worktree-list read (the reread cadence) and rewrites the entry.
+- Decision 5: `railworktreeadd.go`. New branch from a base (default: the
+  root's current HEAD) or an existing branch no worktree has checked out;
+  default folder `<root>/../.ws-dashboard-worktrees/<root-dir-name>/<YYMMDD-HHMM>`
+  with `-2`, `-3` on a clash; a custom folder must be absolute and empty or
+  absent. The daemon refuses what git should not see (option-like or
+  invalid names, a taken or checked-out branch, a missing base) before it
+  runs git, under the one-git-action-per-root slot.
+- Decisions 10, 11 and the routes: `workspace_routes.go`. All are POST with
+  a JSON body behind `sameOrigin` only:
+  `/rail/workspaces/preview`, `/rail/workspaces/add`,
+  `/rail/workspaces/forget`, `/rail/worktrees/options`,
+  `/rail/worktrees/add`. The preview is a POST because the gate needs an
+  Origin header. The worktree routes act only on a repository the rail
+  shows (a stored one or a listed session's). Every answer text is in the
+  page's language. Add, forget, and a created worktree wake the rail at
+  once; a created worktree also rereads that one repository's list
+  (`railLister.reread`).
+- Decision 8: `buildRailView` takes the stored list. A session in no
+  repository joins the longest stored plain folder at or above its root; a
+  repository session stays under its repository; a stored and a derived
+  workspace of one root are one bar; a stored repository lists its
+  worktrees without a session.
+- Decisions 3, 9: the rail header's + (add workspace) and a repository
+  bar's + (add worktree) show only on a daemon that keeps stored
+  workspaces; a stored bar has forget; worktree rows and plain-folder bars
+  have no +. The workspace bar became a container holding the collapse
+  toggle and sibling buttons, since buttons cannot nest. The popovers live
+  outside the rail region and survive its swaps. The mockup's paste-example
+  buttons were left out as a demo aid.
+
+Verification:
+
+- `go test ./internal/wsdashboard/ ./internal/wsi18n/ ./cmd/ws-mcp/ -count=1`
+  and `go vet` on the same packages pass at 76a19c0af (run on the remote
+  build machine). Tests added: `TestNormalizeWorkspacePath`,
+  `TestLocateWorkspace`, `TestWorkspaceStoreAddResults`,
+  `TestWorkspaceStoreRoundTripAndForget`, `TestWorkspaceStoreSweep`,
+  `TestWorkspaceRoutesNeedTheDaemonsOrigin`,
+  `TestWorkspacePreviewAddAndForget`, `TestWorktreeAddRoute` (real git),
+  `TestAddWorktreeDefaultFolder`, `TestRailViewShowsStoredWorkspaces`,
+  `TestRailListerSweepsOnFullReadsAndRereadsOneRepository`,
+  `TestRailMarkupAddButtonsAndForget`,
+  `TestSessionPageOffersTheRailAddButtons`, and the five routes in
+  `TestLANModeGuardsEveryRoute`.
+- Browser check: run in headless Chromium at 1700px, 1200px, and 390px
+  against a rendered fixture page with the five routes stubbed; every
+  listed item was seen (both + buttons and their popovers, no + on worktree
+  rows or plain-folder bars, forget, the rail showing an added workspace
+  and a created worktree at once). Not seen in a browser: a real daemon
+  with real git behind the page (no daemon build on this machine; the Go
+  route tests cover that side), and a hover-capable pointer (headless
+  reports `hover: none`; the hover reveal was checked with that rule
+  removed).
+- Lite review: clean, two minor notes left as they are (an index-less
+  daemon renders an empty rail though the routes exist, unreachable in the
+  shipped wiring; quote stripping takes every leading and trailing quote
+  character, not one matching pair).
+
+Found on the way: the rail script tests had never run. Go reads the `_js`
+suffix of `rail_js_test.go` as a build constraint for the js platform; the
+file is now `railscript_test.go` and both tests run and pass.
+
 ### Phase 2: new session and conversation handoff
 
 Decisions 2, 3 (the new-session + buttons), and 6. Needs

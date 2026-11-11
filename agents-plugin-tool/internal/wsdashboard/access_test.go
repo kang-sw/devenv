@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kang-sw/devenv/internal/wsholder"
 	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
 
@@ -74,6 +75,11 @@ func serve(d *Daemon, v viewer, method, target, body string) *httptest.ResponseR
 	return rec
 }
 
+func xtermName() string {
+	name, _ := XtermAsset()
+	return name
+}
+
 // refusedByGuard reports whether the access guard refused the request, as
 // opposed to a route answering it.
 func refusedByGuard(rec *httptest.ResponseRecorder) bool {
@@ -94,6 +100,16 @@ func guardedRoutes() []struct{ method, path, body string } {
 		{http.MethodGet, "/s/livesession/image?path=shot.png", ""},
 		{http.MethodGet, "/s/livesession/file?path=shot.png", ""},
 		{http.MethodGet, "/s/livesession/history", ""},
+		// The file browser's reads, and its host route with an action the
+		// route refuses, so a passing request runs no host command. Its
+		// capability route is admitted by the capability, not the guard
+		// (TestFSCapabilityRoute).
+		{http.MethodGet, "/s/livesession/fs/list", ""},
+		{http.MethodGet, "/s/livesession/fs/preview?path=shot.png", ""},
+		{http.MethodGet, "/s/livesession/fs/raw?path=shot.png", ""},
+		{http.MethodGet, "/s/livesession/fs/find?q=shot", ""},
+		{http.MethodGet, "/s/livesession/fs/search?q=shot", ""},
+		{http.MethodPost, "/s/livesession/fs/act", `{"path":"shot.png","action":"guard"}`},
 		{http.MethodGet, "/s/livesession/attachment/0123456789abcdef-1.png", ""},
 		{http.MethodPost, "/s/livesession/message", `{"text":"from the guard test"}`},
 		{http.MethodPost, "/s/livesession/cancel", `{"id":"x"}`},
@@ -114,6 +130,14 @@ func guardedRoutes() []struct{ method, path, body string } {
 		// The pooled-worktree routes, served when the fixture reads pools.
 		{http.MethodGet, "/s/livesession/worktrees", ""},
 		{http.MethodPost, "/s/livesession/worktrees/cleanup", ""},
+		// The rail's workspace routes, served when the fixture keeps stored
+		// workspaces. Each body is one the route refuses or finds unknown,
+		// so a passing request stores nothing and runs no git.
+		{http.MethodPost, workspacePreviewRoute, `{"path":"relative/guard"}`},
+		{http.MethodPost, workspaceAddRoute, `{"path":"relative/guard"}`},
+		{http.MethodPost, workspaceForgetRoute, `{"path":"relative/guard"}`},
+		{http.MethodPost, worktreeOptionsRoute, `{"workspace":"relative/guard"}`},
+		{http.MethodPost, worktreeAddRoute, `{"workspace":"relative/guard","branch":"guard","new":true}`},
 		// The tracker routes, served when the fixture has a tracker host.
 		{http.MethodGet, "/tracker/stores", ""},
 		{http.MethodGet, "/tracker/stores/team/view", ""},
@@ -129,6 +153,20 @@ func guardedRoutes() []struct{ method, path, body string } {
 		{http.MethodGet, "/tracker/stores/team/wiki/notes/pages", ""},
 		{http.MethodGet, "/tracker/stores/team/wiki/notes/page?path=home", ""},
 		{http.MethodPost, "/tracker/stores/team/wiki/notes/save", `{"newWiki":true,"op":"write","path":"home","content":"x"}`},
+		// The holder routes, served when the fixture has a holder host; the
+		// fixture knows no holder, so a passing stop ends nothing.
+		{http.MethodGet, "/holders", ""},
+		{http.MethodPost, "/holders/guardtest/stop", ""},
+		// The terminal routes and the emulator script, served when the
+		// fixture's holder host can run terminals. No request starts a
+		// shell: the folder is refused and the terminal unknown. Which
+		// viewer a route then answers is its own gate's
+		// (TestTerminalRoutesAnswerOnlyTheDaemonsOwnLocalPage).
+		{http.MethodGet, "/s/" + xtermName(), ""},
+		{http.MethodGet, "/s/livesession/terminals", ""},
+		{http.MethodPost, "/s/livesession/terminals", `{"folder":"path","path":"not/absolute"}`},
+		{http.MethodPost, "/s/livesession/terminals/hguardtest/close", ""},
+		{http.MethodGet, "/s/livesession/terminals/hguardtest/ws", ""},
 		{http.MethodGet, "/tracker/profiles", ""},
 		{http.MethodPost, "/tracker/profiles", `{"given":"Ada"}`},
 		{http.MethodPost, "/tracker/register", `{"id":"new"}`},
@@ -172,7 +210,12 @@ func TestLANModeServesTheMermaidScriptToAll(t *testing.T) {
 // Host, need the token like any other request; the token passes by query
 // parameter or cookie, and the endpoint file's shutdown token does not.
 func TestLANModeGuardsEveryRoute(t *testing.T) {
-	f := startPageFixture(t, lanMode, withTracker(newFakeTracker()), func(o *DaemonOptions) { o.Worktrees = &fakeWorktrees{} })
+	f := startPageFixture(t, lanMode, withTracker(newFakeTracker()), withWorkspaces(t), func(o *DaemonOptions) {
+		o.Worktrees = &fakeWorktrees{}
+		// A real manager over an empty directory: it starts no holder, and
+		// with it the daemon serves the terminal routes.
+		o.Holders = wsholder.New(wsholder.Options{Dir: filepath.Join(t.TempDir(), wsholder.DirName)})
+	})
 	if err := os.WriteFile(filepath.Join(f.project, "shot.png"), []byte("png"), 0o644); err != nil {
 		t.Fatal(err)
 	}

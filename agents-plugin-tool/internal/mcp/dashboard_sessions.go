@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsdashboard"
+	"github.com/kang-sw/devenv/internal/wsgit"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
 )
 
@@ -61,6 +62,10 @@ type dashboardLink struct {
 	// empty means this process's, read live.
 	cacheHome string
 
+	// commonDirs memoizes dashboardCommonDir per session root, read before
+	// mu is taken so the registration's git call never holds it.
+	commonDirs sync.Map // root -> string
+
 	nudgeOnce sync.Once
 	nudges    chan wsdashboard.NudgeBody
 	// nudgesDone is closed when the nudge goroutine has exited (after
@@ -104,6 +109,32 @@ func (d *dashboardLink) stateDir() (string, error) {
 
 func dashboardStamp(t time.Time) string { return t.UTC().Format(time.RFC3339) }
 
+// dashboardCommonDirTimeout bounds the registration's one git read.
+const dashboardCommonDirTimeout = 2 * time.Second
+
+// dashboardCommonDir is root's git common directory, absolute, which a
+// registration carries so the dashboard's session rail groups a linked
+// worktree under its repository without running git per session; empty
+// when root is not in a repository or git fails. It runs once per
+// session root per process (dashboardLink.commonDirs), never under the
+// dashboard lock.
+func dashboardCommonDir(runner wsgit.Runner, root string) string {
+	if root == "" {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), dashboardCommonDirTimeout)
+	defer cancel()
+	out, err := runner.RunGit(ctx, root, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err != nil {
+		return ""
+	}
+	dir := strings.TrimSpace(string(out))
+	if !filepath.IsAbs(dir) {
+		return ""
+	}
+	return filepath.Clean(dir)
+}
+
 // dashboardSessionEnabled resolves dashboard.enabled for one session, with
 // its session-scope overlay. An undeclared key (no dashboard manifest
 // loaded) or a resolve error is off.
@@ -146,6 +177,11 @@ func (s *Server) dashboardTouch(sessionKey, root string, force bool) {
 		return // no dashboard manifest loaded: the dashboard is off
 	}
 	d := &s.dashboard
+	commonDir, cached := d.commonDirs.Load(root)
+	if !cached {
+		commonDir = dashboardCommonDir(s.gitRunner(), root)
+		d.commonDirs.Store(root, commonDir)
+	}
 	now := d.clock()
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -188,6 +224,7 @@ func (s *Server) dashboardTouch(sessionKey, root string, force bool) {
 	reg := sess.reg
 	if reg.ReplyID == "" {
 		reg = wsdashboard.Registration{ReplyID: sess.replyID, Project: sess.project, RegisteredAt: dashboardStamp(now)}
+		reg.GitCommonDir = commonDir.(string)
 	}
 	reg.Harness = s.currentHarness()
 	reg.HeartbeatAt = dashboardStamp(now)

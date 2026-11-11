@@ -34,7 +34,7 @@ args = sys.argv[1:]
 cache = os.environ["WS_CACHE_HOME"]
 daemon_dir = os.path.join(cache, "dashboard")
 with open(os.path.join(cache, "fake-runtime.log"), "a", encoding="utf-8") as log:
-    log.write(json.dumps({"exe": sys.argv[0], "args": args, "env_marker": os.environ.get("FAKE_MARKER", "")}) + "\\n")
+    log.write(json.dumps({"exe": sys.argv[0], "args": args, "env_marker": os.environ.get("FAKE_MARKER", ""), "holder_python": os.environ.get("WS_MCP_HOLDER_PYTHON")}) + "\\n")
 if args[:1] == ["daemon-start"]:
     try:
         target = json.load(open(os.path.join(cache, "fake-daemon.json"), encoding="utf-8"))
@@ -705,6 +705,29 @@ class LauncherProxyTest(unittest.TestCase):
         self.assertIsNotNone(lock, "DefaultLockWait not found in daemon.go")
         self.assertIsNotNone(extra, "DefaultStartWait not found in ensure.go")
         self.assertEqual(self.launcher.DAEMON_DEFAULT_START_WAIT, float(int(lock.group(1)) + int(extra.group(1))))
+
+    def daemon_start_entries(self):
+        log = self.cache / "fake-runtime.log"
+        entries = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+        return [e for e in entries if e.get("args", [])[:1] == ["daemon-start"]]
+
+    def test_daemon_start_gets_the_launcher_interpreter_for_session_holders(self):
+        daemon = self.daemon()
+        self.point_start_at(daemon)
+        before = dict(self.env)
+        self.assertTrue(self.link().start_daemon())
+        [entry] = self.daemon_start_entries()
+        self.assertEqual(entry["holder_python"], sys.executable)
+        self.assertEqual(entry["env_marker"], "from-launcher")
+        self.assertEqual(self.env, before, "only the daemon-start environment carries the interpreter")
+
+    def test_daemon_start_keeps_an_interpreter_already_chosen(self):
+        daemon = self.daemon()
+        self.point_start_at(daemon)
+        self.env["WS_MCP_HOLDER_PYTHON"] = "/opt/chosen/python3"
+        self.assertTrue(self.link().start_daemon())
+        [entry] = self.daemon_start_entries()
+        self.assertEqual(entry["holder_python"], "/opt/chosen/python3")
 
     def test_staging_writes_the_copy_once_and_leaves_other_entries_alone(self):
         # The other entry may be the running daemon's own executable, which

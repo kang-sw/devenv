@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: f5ee2f2e452c7bcc
 sage-review-completeness-reviewed: f5ee2f2e452c7bcc
+completed: 2026-11-10
 ---
 
 # Dashboard agent host: session holder
@@ -265,3 +266,105 @@ Verification (announced, (100) ok):
   outside the daemon that keeps its last sequence across the restart
   receives no duplicate (the daemon
   keeps no dedupe state of its own, Decision 17).
+
+### Result (057443ea6) - 2026-11-10
+
+Landed, base `bdd21be7c`:
+
+- `agents-plugin-tool/internal/wsholder/holder.py`: the holder. Standard
+  library only; pipes, POSIX PTY, and ConPTY through ctypes; a loopback TCP
+  endpoint with a per-holder token; protocol version 1 with the Decision 19
+  operations; a 4 MiB sequenced ring with replay and the gap report; the
+  descriptor (mode 0600) rewritten when missing; the 24-hour idle exit once
+  the child has exited; the newest authenticated attach takes over.
+- `agents-plugin-tool/internal/wsholder/` (Go): the embedded script staged
+  under its content hash and the prune of unreferenced staged scripts; the
+  attach client; the manager (scan at start and every 3 minutes, attach,
+  launch, stop, listing with the three unattached causes and the recent
+  start failures); the guarded kill; the detached start with the breakaway
+  fallback that marks a holder not restart-safe.
+- `agents-plugin-tool/internal/wsdashboard/`: the daemon runs the manager;
+  `GET /holders` and `POST /holders/<id>/stop`; the drawer's holders card
+  with its strings in all 11 language tables.
+- `agents-plugin/bin/ws-mcp-launcher.py` and its two mirrors: the launcher
+  passes its interpreter to the daemon as `WS_MCP_HOLDER_PYTHON`.
+- `ai-docs/manuals/ws-mcp.md`: the session-holder section and the
+  environment row.
+
+Decisions made while implementing:
+
+- The holder sends a banner first and the client names the version it
+  speaks in the attach request, so an N-1 client and an N holder agree
+  without a second round trip. The child's exit is a sequenced ring record,
+  so a client that reattaches later still receives it. Replay is its own
+  operation; from 0 it returns the whole ring without a gap report.
+- The routes are daemon-wide (`/holders`), not per session: holders belong
+  to the daemon. The stop route answers a non-local viewer 404, a local
+  request without the daemon's own Origin 403, and a refused kill 409 with
+  the reason.
+- The card lists a holder that is unattached or not restart-safe; the stop
+  button is on unattached rows only. It has no confirmation step, because
+  the page has no confirmation pattern for a destructive button.
+- The rescan cadence is 3 minutes, the worktree card's reread cadence; no
+  shared constant exists for it yet.
+- The environment variable is `WS_MCP_HOLDER_PYTHON`; a value already set
+  wins over the launcher's own interpreter.
+- Decision 16, refined on Linux: the holder also records its start in
+  boot-clock ticks (`start_ticks`), and the guarded kill matches on those
+  there. Linux keeps no stored creation time; the one derived from the boot
+  clock moves with every wall-clock step, and on a WSL2 host the wall clock
+  stepped 2.49 s inside 30 s, which refused the kill of any holder older
+  than about a minute. macOS and Windows store the creation time, so they
+  keep the 2-second wall-clock rule as decided.
+- The scan clears a descriptor whose PID now belongs to another process
+  (the endpoint does not answer and the start does not match). Without it a
+  holder that died without removing its directory stayed listed with a stop
+  that was refused every time (lite review, Important).
+- A log line racing the holder's exit could leave its directory behind on
+  Windows; the log and the removal now share a lock.
+- The kill helpers are local to `wsholder`: exporting the ones in
+  `internal/execjob` pulled that package's dependencies into the holder
+  package.
+
+Verification:
+
+- `go test ./... -count=1` on the Linux build host at `3e0e455a1`: every
+  package ok. At `057443ea6`: `./cmd/ws-mcp/ ./internal/wsholder/
+  ./internal/wsdashboard/ ./internal/wsi18n/` ok.
+- Native Windows `go test ./internal/wsholder/ -count=1 -v` at
+  `057443ea6`: 13 pass, 1 skip (the wall-clock-step test; Windows records no
+  boot-clock start).
+- `python3 -m unittest discover -s agents-plugin-tool/internal/wsholder/tests`:
+  23 OK on Linux; 23 OK with 1 POSIX-only skip on Windows.
+- Launcher: `agents-plugin/tests` 110 OK, `agents-plugin-wsflow/tests` 20
+  OK, the pi mirror's byte-identity test passes.
+- `go vet ./internal/wsholder/` clean for linux, windows, darwin, freebsd.
+- Browser check (headless Chromium, an isolated cache, a real session
+  page): the card listed the unattached holder with its PID and cause, and
+  its stop button ended the holder and its child and removed the directory;
+  a refusal showed its reason on the card; a viewer without `can_stop` saw
+  the row without the button.
+- Daemon restart with a live child, process level, a real `ws-mcp
+  dashboard` in an isolated cache, on Linux and on native Windows: daemon A
+  attached; daemon A was killed outright and the holder and child stayed
+  alive; daemon B attached to the same holder and child PID; an outside
+  client that kept its last sequence replayed from the next one and
+  received contiguous records with no gap and no duplicate; the stop route
+  refused a request without the daemon's Origin (403) and ended the holder
+  and child with it (204).
+
+Not done:
+
+- macOS: no host was available. The darwin code is cross-vetted only; the
+  daemon restart with a live child on macOS is unverified.
+- Windows: the full `ai-docs/manuals/windows-dogfood.md` procedure (plugin
+  reinstall and a Claude Code restart on the host) was not run, since it
+  replaces the host's installed plugin. The Windows evidence is the native
+  Go and Python suites and the process-level restart check above. The
+  dashboard package's holder tests ran on Linux only.
+- Lite review Minor findings, left as they are: after an outside client
+  takes a holder over, the entry shows `no_answer` until the next rescan,
+  which then takes the slot back; the listing's `child` is stale after a
+  spawn through the client until the next reattach; `Spawn` with only one
+  of rows or cols set is refused by the holder; `Stop` holds the manager's
+  operation lock for the whole wait.

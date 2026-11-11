@@ -30,12 +30,14 @@ import (
 // which follows the clock, contact liveness, and the files a page source
 // read that a writer may change without a nudge (PageContent.Watch).
 
-// pageKey names one shared page. replyID is empty for the sessions index.
+// pageKey names one shared page. replyID is empty for the sessions index
+// and the session rail; kind is empty but for the rail (regionRail), which
+// is a render of its own every session page's stream adds (railPageSource).
 // No region depends on the viewer class (a loopback or LAN viewer): what
 // differs per viewer stays outside the regions (sessionPageData.SysOpen,
 // indexPageData.LAN), so the key carries none.
 type pageKey struct {
-	replyID, lang, theme string
+	kind, replyID, lang, theme string
 }
 
 // refreshInputs are what a page's refresh stamp re-reads: the sessions its

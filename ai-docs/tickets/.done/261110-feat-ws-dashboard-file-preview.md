@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: 0c313a4b22992166
 sage-review-design-reviewed: 0c313a4b22992166
+completed: 2026-11-11
 ---
 
 # Dashboard file preview
@@ -333,6 +334,87 @@ Verification:
 - The vendored Lucide icons ship with Lucide's ISC license file
   (Decision 14).
 
+### Result (d9de23c54) - 2026-11-11
+
+Landed in `7f890500d`, `13d6c3c7d`, `434bfac25`, `e1f3e1519`, and the review
+fixes in `d9de23c54`:
+
+- Routes under `/s/<reply-id>/fs/`: `list`, `preview`, `raw`, `cap/<capability>/<path>`,
+  and `act` (`fs_routes.go`, `fs_capability.go`, `fs_act_route.go`). The
+  capability is a stateless HMAC over the reply-id, the session root, and the
+  expiry, under a key the daemon draws at start; the capability response
+  sandboxes itself through its own CSP, so the file opened in a tab of its own
+  is isolated too.
+- The shared board card framework (`assets/cards.js`, `window.WsCards`): this
+  ticket built it. It owns the header buttons, base height (260 px for every
+  kind unless a kind overrides it), the drag handle, the maximize sheet,
+  placement, and the browser-storage record. The board morph weaves the cards
+  into the topics and settles around them without moving a card.
+- The preview kind (`assets/preview.js`, `window.WsPreview.open(path, {root, line})`),
+  the conversation link behavior, the "Conversation | Files" switch, and the
+  explorer (`assets/files.js`): lazy tree, View popover, change root, collapse
+  all, refresh, row menu, keyboard, and name search.
+- Lucide icons vendored as unchanged `lucide-static` 1.71.0 files with the
+  package's license under `assets/lucide/`, served as one inline sprite.
+
+Verification:
+
+- `go test ./internal/wsdashboard/ ./internal/wsi18n/ ./internal/mcp/ -count=1`
+  on the remote builder: `ok` for all three; `go build ./...` and `go vet` of
+  the two changed packages clean. The Go tests cover every item of this
+  phase's Go list (containment and symlink escapes on every read route, the
+  capability's root, expiry, CSP, and LAN admission, Range, the per-OS and WSL
+  host commands, ignore marks, change root for a LAN viewer, and
+  `TestLANModeGuardsEveryRoute`).
+- Headless Chromium against a fixture daemon, all passing: 42 checks of the
+  cards and previews (sandbox isolation: parent, cookie, storage, a dashboard
+  route, the index, another origin, and a POST are all blocked while relative
+  assets load; video plays and seeks; slot replace, pin, and pinned-file
+  reopen; a board update lets a newer topic rise above an unpinned card while a
+  running frame and a playing video keep running; fold, base height, dragged
+  height, maximize and Escape; a reload restores cards, places, height, and
+  fold), 19 checks of link behavior, host actions, and the narrow layout, and
+  102 checks of the Files tab (state kept across the switch, View toggles
+  across a reload, row menu and its loopback-only host actions, keyboard,
+  name search, change root, split and tabs layouts, dark theme).
+
+Decisions taken under the delegation of small details:
+
+- `.git` is always marked ignored; ignore and status marks are asked from the
+  listed directory, so a nested repository answers by its own rules.
+- A keyboard activation of a previewable link opens the link menu (with a new
+  first entry, Preview) instead of the slot, so every link action stays
+  reachable by keyboard.
+- Unpinning a preview card makes it the slot and closes the other unpinned
+  preview card.
+- A card's open time is the later of the browser's clock and the newest topic
+  or card plus one, so a LAN browser whose clock runs behind still opens at the
+  head.
+- The Files tab choice is not kept across a reload; the View toggles (per
+  root, 24 roots at most) and a changed root (per session) are.
+- The changed root is typed as an absolute path; a browser has no folder
+  dialog that yields one.
+- Under a changed root Markdown renders without file links, and HTML or SVG
+  shows as source.
+- On WSL, `open` runs `explorer.exe` on the converted path, as reveal does.
+- "Open terminal here" is left out of the row menu until the terminal ticket
+  lands.
+
+Known limits:
+
+- A previewed HTML file can read any file under the session root through its
+  capability, and CSP does not govern a frame navigating itself, so such a
+  page could carry what it read to another origin. The dashboard token, cookie,
+  and routes stay out of its reach. Whether to narrow the capability (for
+  example to the file's own folder) is open with the user.
+- A capability lives 15 minutes and is renewed only when a card loads; a
+  frame left open longer can no longer fetch further assets until the card is
+  reopened.
+- Escape does not leave maximize while focus is inside a sandboxed frame; the
+  minimize button and the scrim do.
+- A symlink row and the "more entries" row are covered by the unit test only,
+  not in the browser.
+
 ### Phase 2: content search and git status marks
 
 Scope:
@@ -354,3 +436,45 @@ Verification:
   untracked, deleted, and folder roll-up.
 - Headless Chromium: a content match opens the slot scrolled to its line;
   marks show and refresh after a file changes and the refresh button runs.
+
+### Result (d9de23c54) - 2026-11-11
+
+Landed in `adac6e981` (routes), `e1f3e1519` (explorer UI), and `d9de23c54`
+(review fixes):
+
+- `GET /s/<reply-id>/fs/search` runs in-process over the cached file list
+  with RE2, reading each file through `openContained`; `fs/find` serves the
+  name search with the composer's ranking, also under a changed root;
+  `fs/preview?text=1` answers any text file as plain text so a match in a
+  Markdown or HTML file opens at its line.
+- `fs/list` entries carry `st` (`M`, `A`, `U`, `D`, and `*` on a folder that
+  holds changes) and `gone` for a deleted entry, read per listed directory.
+- The explorer's "Name | Content" switch with case and regex toggles, grouped
+  results with a "more" marker, and marks refreshed by the refresh button and
+  by reopening the Files tab.
+
+Verification:
+
+- Go tests (same run as Phase 1, `ok`): literal, case-sensitive, and regex
+  search, the binary and oversize skips, both caps and the deadline with
+  `more`, containment, a LAN viewer under another root, `TestStatusMarks`
+  (modified, added, intent-to-add, untracked, deleted, folder roll-up, an
+  untracked parent), `TestFSListCarriesGitMarks` on a real repository
+  (including a nested repository), and both routes in
+  `TestLANModeGuardsEveryRoute`.
+- Headless Chromium, within the 102 Files tab checks: a content match opens
+  the slot with the marked line in view; the case and regex toggles and a bad
+  expression's reason; marks show and change after a file is modified and
+  refresh runs, and after the tab is reopened.
+
+Decisions:
+
+- The search stops when its request ends, so a search-as-you-type client's
+  abort frees the daemon; a 10-second deadline also ends it with `more`.
+- A folder holding changes shows a dot, not a letter, since it may hold any
+  mix of changes; the mockup drew `M` there.
+- The case and regex toggles are icon buttons with translated titles.
+
+Review: one independent lite pass found no Critical or Important issue and
+four Minor ones; three are fixed in `d9de23c54`, and the fourth is the
+capability-scope limit recorded under Phase 1.

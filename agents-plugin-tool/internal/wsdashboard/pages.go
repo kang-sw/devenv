@@ -31,7 +31,7 @@ import (
 // (wswhiteboard.RenderRegions); the rest render from the view model
 // (pageview.go).
 
-//go:embed assets/dashboard.tmpl assets/dashboard.css assets/dashboard.js assets/sprite.svg assets/tracker.css assets/tracker.js assets/mention.js assets/toast.js
+//go:embed assets/dashboard.tmpl assets/dashboard.css assets/dashboard.js assets/sprite.svg assets/tracker.css assets/tracker.js assets/mention.js assets/toast.js assets/rail.js assets/cards.js assets/preview.js assets/files.js assets/terminal.js
 var dashboardFS embed.FS
 
 // Region names. The session page's regions in order; the index page has one.
@@ -105,6 +105,27 @@ type pageAssetsData struct {
 	// ToastScript is the shared toast stack (toast.js, window.WsToast),
 	// inlined ahead of the tracker and page scripts that both use it.
 	ToastScript template.JS
+	// RailScript is the session rail's browser-side state (rail.js,
+	// window.WsRail): per-session drafts, stars, and the rail's own
+	// toggles, which the session page's script uses.
+	RailScript template.JS
+	// CardsScript is the board card framework (cards.js, window.WsCards),
+	// PreviewScript its file preview kind (preview.js, window.WsPreview),
+	// and FilesScript the conversation column's file explorer (files.js,
+	// window.WsFiles); LucideSprite holds the vendored icons they draw
+	// (lucide.go). A session page loads them before its own script, which
+	// mounts them.
+	CardsScript   template.JS
+	PreviewScript template.JS
+	FilesScript   template.JS
+	// TerminalScript is the terminal card kind (terminal.js,
+	// window.WsTerm), which only a page that offers terminals carries
+	// (sessionPageData.Terminal).
+	TerminalScript template.JS
+	// XtermCSS is the vendored terminal emulator's stylesheet, which a
+	// page that offers terminals inlines (sessionPageData.Terminal).
+	XtermCSS     template.CSS
+	LucideSprite template.HTML
 }
 
 var (
@@ -163,6 +184,10 @@ func buildDashboardAssets(read func(name string) ([]byte, error)) (*dashboardAss
 		return nil, werr
 	}
 	mermaidName, _ := wswhiteboard.MermaidAsset()
+	lucide, lerr := lucideSprite()
+	if lerr != nil {
+		return nil, lerr
+	}
 	a := &dashboardAssets{data: pageAssetsData{
 		CSS:              template.CSS(get("dashboard.css")),
 		Script:           template.JS(get("dashboard.js")),
@@ -171,6 +196,13 @@ func buildDashboardAssets(read func(name string) ([]byte, error)) (*dashboardAss
 		TrackerScript:    template.JS(get("tracker.js")),
 		MentionScript:    template.JS(get("mention.js")),
 		ToastScript:      template.JS(get("toast.js")),
+		RailScript:       template.JS(get("rail.js")),
+		CardsScript:      template.JS(get("cards.js")),
+		PreviewScript:    template.JS(get("preview.js")),
+		FilesScript:      template.JS(get("files.js")),
+		TerminalScript:   template.JS(get("terminal.js")),
+		XtermCSS:         xtermStyle(),
+		LucideSprite:     lucide,
 		WhiteboardCSS:    wb.CSS,
 		WhiteboardSprite: wb.Sprite,
 		FormScript:       wb.FormScript,
@@ -442,7 +474,11 @@ type sessionPageData struct {
 	// page was asked for by a browser on this machine. It is outside every
 	// region, since regions are shared by every viewer's stream.
 	SysOpen bool
-	regions regionSet
+	// Terminal offers terminals: it is the emulator script's name beside
+	// the page (XtermAsset) when the daemon runs terminals and the page
+	// was asked for by a browser on this machine, and empty otherwise.
+	Terminal string
+	regions  regionSet
 }
 
 func (p sessionPageData) regionByName(name string) renderedRegion { return p.regions[name] }
@@ -515,14 +551,15 @@ func renderedEntries(entries []ConvEntry) string {
 }
 
 // renderSessionPage renders the whole session page around its regions;
-// sysOpen offers the system-open link action (sessionPageData.SysOpen).
-func renderSessionPage(view SessionView, regions regionSet, sysOpen bool) (string, error) {
+// sysOpen offers the system-open link action (sessionPageData.SysOpen), and
+// terminal, when not empty, terminals (sessionPageData.Terminal).
+func renderSessionPage(view SessionView, regions regionSet, sysOpen bool, terminal string) (string, error) {
 	a, err := loadDashboardAssets()
 	if err != nil {
 		return "", err
 	}
 	var buf bytes.Buffer
-	err = a.templateFor(view.Lang).ExecuteTemplate(&buf, "session", sessionPageData{SessionView: view, Assets: a.data, SysOpen: sysOpen, regions: regions})
+	err = a.templateFor(view.Lang).ExecuteTemplate(&buf, "session", sessionPageData{SessionView: view, Assets: a.data, SysOpen: sysOpen, Terminal: terminal, regions: regions})
 	return buf.String(), err
 }
 
@@ -826,10 +863,10 @@ func (d *Daemon) handleIndex(w http.ResponseWriter, r *http.Request) {
 
 // handleSessionRoutes serves everything under /s/: a session page, its SSE
 // stream, its image, file view, files, history, closed-topic, worktree pool,
-// git status, log, and commit, and attachment routes, its message, cancel,
-// steer, interrupt, system-open, git refresh, git push, pull, and fetch, and
-// worktree cleanup routes, and the shared assets a page loads by relative
-// path.
+// git status, log, and commit, attachment, and file browser routes, its
+// message, cancel, steer, interrupt, system-open, file browser host, git
+// refresh, git push, pull, and fetch, and worktree cleanup routes, and the
+// shared assets a page loads by relative path.
 func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 	rest := strings.TrimPrefix(r.URL.Path, "/s/")
 	if replyID, sub, _ := strings.Cut(rest, "/"); sub == "message" || sub == "cancel" || sub == "steer" || sub == "interrupt" {
@@ -837,6 +874,12 @@ func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 		return
 	} else if sub == "open" {
 		d.handleSystemOpen(w, r, replyID)
+		return
+	} else if sub == "terminals" || strings.HasPrefix(sub, "terminals/") {
+		d.handleTerminals(w, r, replyID, strings.TrimPrefix(sub, "terminals"))
+		return
+	} else if sub == "fs/act" {
+		d.handleFSAct(w, r, replyID)
 		return
 	} else if sub == "git" {
 		d.handleGitRefresh(w, r, replyID)
@@ -853,6 +896,10 @@ func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 	}
 	if name, _ := wswhiteboard.MermaidAsset(); rest == name {
 		serveMermaid(w)
+		return
+	}
+	if name, _ := XtermAsset(); rest == name {
+		serveXterm(w)
 		return
 	}
 	replyID, sub, slash := strings.Cut(rest, "/")
@@ -889,6 +936,8 @@ func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 		d.handleGitWorktreeDiff(w, r, replyID)
 	case strings.HasPrefix(sub, "attachment/"):
 		d.handleAttachment(w, r, replyID, strings.TrimPrefix(sub, "attachment/"))
+	case strings.HasPrefix(sub, "fs/"):
+		d.handleFSRoutes(w, r, replyID, strings.TrimPrefix(sub, "fs/"))
 	default:
 		http.NotFound(w, r)
 	}
@@ -904,10 +953,23 @@ func (d *Daemon) handleSessionPage(w http.ResponseWriter, r *http.Request, reply
 	view.Lang, view.LangPref, view.Theme = lang, pref, requestTheme(r)
 	view.Git = d.git.badge(view.Project)
 	view.Worktrees = d.worktrees != nil
+	view.Holders = d.holders != nil
 	regions, err := renderSessionRegions(view, d.entries)
 	if err == nil {
+		// The rail is rendered as its stream renders it, outside the
+		// session's own regions (railPageSource).
+		var rail renderedRegion
+		if rail, err = renderRailRegion(d.railView(d.pagesIn(lang)), lang); err == nil {
+			regions[regionRail] = rail
+		}
+	}
+	if err == nil {
 		var html string
-		if html, err = renderSessionPage(view, regions, localViewer(r)); err == nil {
+		terminal := ""
+		if d.offersTerminals(r) {
+			terminal, _ = XtermAsset()
+		}
+		if html, err = renderSessionPage(view, regions, localViewer(r), terminal); err == nil {
 			writeHTML(w, html)
 			return
 		}
