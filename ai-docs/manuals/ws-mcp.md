@@ -563,10 +563,11 @@ conversation:
   when none is named, then `mcp_reconnect {serverName}` and `mcp_status`
   for each. A server back as `connected` restarts nothing. One that is not
   is listed in the state's `mcp_broken` (and the snapshot's
-  `host.mcpBroken`); if this process had it connected, the process restarts
-  on the same backend session at the first idle point with no background
-  task (`stop` then a `--resume` start), else nothing restarts on its own.
-  `POST /agents/<id>/restart` restarts by hand. A typed failure on an
+  `host.mcpBroken`), and the process restarts on the same backend session
+  at the first idle point with no background task (`stop` then a
+  `--resume` start). A server an automatic restart was for that fails again
+  without having connected restarts nothing more until it connects (no
+  restart loop). `POST /agents/<id>/restart` restarts by hand. A typed failure on an
   assistant line (`error`: `authentication_failed`, `model_not_found`,
   `rate_limit`; `api_error: usage_limit_reached`, with the reset time from
   the refusal's or the last rejected `rate_limit_event`'s `resetsAt`) is a

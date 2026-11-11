@@ -112,12 +112,13 @@ func TestLeadMCPRestartsAtTheFirstIdlePoint(t *testing.T) {
 	}
 }
 
-// TestLeadMCPNeverConnectedRestartsByHand: a server that failed from the
-// process's start restarts nothing on its own (a restart would most likely
-// fail it the same way); the session shows it broken, and a restart from
-// this machine starts a new process on the same session, which a viewer on
-// another device cannot do.
-func TestLeadMCPNeverConnectedRestartsByHand(t *testing.T) {
+// TestLeadMCPRestartsOnceForAServerThatNeverConnects: a server that failed
+// from the process's start restarts it once at an idle point; when it
+// fails again in the new process without having connected, nothing
+// restarts on its own (a restart loop), the session shows it broken, and
+// a restart from this machine starts a new process on the same session,
+// which a viewer on another device cannot do.
+func TestLeadMCPRestartsOnceForAServerThatNeverConnects(t *testing.T) {
 	h := newLeadHarness(t)
 	var local, own bool
 	h.opts.Trusted = func(*http.Request) (bool, bool) { return local, own }
@@ -125,21 +126,26 @@ func TestLeadMCPNeverConnectedRestartsByHand(t *testing.T) {
 	h.holders.setControl("mcp_reconnect", "Failed to reconnect", "")
 	id, holder := h.runLead("one")
 	h.holders.out(holder, mcpTurn("u1", MCPFailed)...)
+	eventually(t, "the automatic restart", func() bool { return h.holders.opCount("stop "+holder) == 1 && h.holders.opCount("launch") == 2 })
+	eventually(t, "the new process", func() bool { return h.state(id).Process && h.holder(id) != holder })
+	second := h.holder(id)
+	h.send(id, "two")
+	h.holders.out(second, mcpTurn("u2", MCPFailed)...)
 	eventually(t, "the broken state", func() bool { return slices.Equal(h.state(id).MCPBroken, []string{wsServer}) })
 	h.idle(id)
-	h.sync(id, holder)
+	h.sync(id, second)
 	time.Sleep(100 * time.Millisecond)
-	if st := h.state(id); !st.Process || h.holders.opCount("stop") != 0 {
-		t.Fatalf("a server that never connected restarts nothing: %+v, holder calls %v", st, h.holders.opList())
+	if st := h.state(id); !st.Process || h.holders.opCount("stop") != 1 {
+		t.Fatalf("a server that failed again without connecting restarts nothing more: %+v, holder calls %v", st, h.holders.opList())
 	}
 	local, own = false, true
-	if r := h.route(localBrowser, http.MethodPost, "/agents/"+id+"/restart", nil); r.status != http.StatusNotFound || h.holders.opCount("stop") != 0 {
+	if r := h.route(localBrowser, http.MethodPost, "/agents/"+id+"/restart", nil); r.status != http.StatusNotFound || h.holders.opCount("stop") != 1 {
 		t.Fatalf("restart from another device = %d %s, holder calls %v", r.status, r.body, h.holders.opList())
 	}
 	local, own = true, true
 	r := h.route(localBrowser, http.MethodPost, "/agents/"+id+"/restart", nil)
 	st := decodeState(t, r)
-	if r.status != http.StatusOK || !st.Process || len(st.MCPBroken) != 0 || h.holders.opCount("stop "+holder) != 1 || h.holders.opCount("launch") != 2 {
+	if r.status != http.StatusOK || !st.Process || len(st.MCPBroken) != 0 || h.holders.opCount("stop "+second) != 1 || h.holders.opCount("launch") != 3 {
 		t.Fatalf("restart = %d %s, holder calls %v", r.status, r.body, h.holders.opList())
 	}
 }

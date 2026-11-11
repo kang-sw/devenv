@@ -813,12 +813,15 @@ type conv struct {
 	harnessState string
 	actionTimer  *time.Timer
 	// The process's MCP recovery (runner_recovery.go). mcpSeen are the
-	// servers it reported connected; mcpDown is set when one of them broke
-	// and did not come back in-stream: the process restarts at the next
-	// idle point. mcpChecking runs while a check is off the loop, and
-	// mcpAgain asks for one more after it, for mcpAgainNames.
+	// servers it reported connected; mcpDown is set when a server broke and
+	// did not come back in-stream: the process restarts at the next idle
+	// point. mcpRestarted outlives the process: the servers an automatic
+	// restart was for that have not connected since. mcpChecking runs
+	// while a check is off the loop, and mcpAgain asks for one more after
+	// it, for mcpAgainNames.
 	mcpSeen       map[string]bool
 	mcpDown       bool
+	mcpRestarted  map[string]bool
 	mcpChecking   bool
 	mcpAgain      bool
 	mcpAgainNames []string
