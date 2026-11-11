@@ -441,7 +441,17 @@
       "registered_at": "2026-11-11T07:52:19Z"
     },
     "261111-feat-ws-tracker-assignee-edit-and-body-merge": {
-      "registered_at": "2026-11-11T06:13:11Z"
+      "registered_at": "2026-11-11T06:13:11Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "28ef83e379b353cc",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-11T09:32:21Z",
+        "impl": {
+          "branch": "impl/develop/step-dude-ought"
+        }
+      }
     },
     "261111-feat-ws-tracker-cc-field": {
       "registered_at": "2026-11-11T06:17:16Z"
