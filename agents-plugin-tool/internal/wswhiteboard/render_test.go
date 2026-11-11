@@ -1066,13 +1066,18 @@ func TestTopicRailRailsHostItems(t *testing.T) {
 // view that the rest of the scroll cannot lift above the bottom stack's
 // line (a short last item at max scroll) gets no bottom capsule, which
 // would only cover it (and, with the bottom morph, shrink it into the
-// capsule).
+// capsule). The bottom wrapper's top margin is the board's bottom scroll
+// margin: the bottom stack's reserve (rail.js BOT) plus a gap, so the last
+// item can scroll fully clear of the stack.
 func TestTopicRailEndOfBoard(t *testing.T) {
 	assets, err := PageAssets()
 	if err != nil {
 		t.Fatal(err)
 	}
 	js := string(assets.FormScript)
+	if !strings.Contains(string(assets.CSS), ".wb-rail-wrap.dn { bottom: 0; margin-top: calc(14px + 2 * 17px + 3px + 4px + 16px); }") || !strings.Contains(js, "var CAP = 17, GAP = 3, PAD = 4, FADE = 14;") || !strings.Contains(js, "var BOT = FADE + 2 * CAP + GAP + PAD;") {
+		t.Error("the board's bottom scroll margin is not the bottom stack's reserve plus a gap")
+	}
 	for _, want := range []string{
 		"return Math.max(0, e.scrollHeight - e.clientHeight - e.scrollTop);",
 		"var line = vb - replyOff - BOT, below = [], rest = scrollRest();",

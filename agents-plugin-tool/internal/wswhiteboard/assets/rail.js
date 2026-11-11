@@ -28,7 +28,9 @@
   var CAP = 17, GAP = 3, PAD = 4, FADE = 14;
   function capH(n) { return n ? PAD + n * (CAP + GAP) : 0; }
   // The bottom stack's height with both capsules, fade included: a fixed
-  // reserve, so the line below does not move with the capsule count.
+  // reserve, so the line below does not move with the capsule count. The
+  // bottom wrapper's top margin (page.css), the board's bottom scroll
+  // margin, is built from it.
   var BOT = FADE + 2 * CAP + GAP + PAD;
 
   // The edge classes are up and dn, not top and bot: a bare .top is the

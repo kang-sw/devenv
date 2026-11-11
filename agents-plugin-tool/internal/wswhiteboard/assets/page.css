@@ -457,7 +457,10 @@ details.panel .body { container-type: inline-size; }
 .wb-rail .topic > details.tdoc > summary { z-index: 2; }
 .wb-rail-wrap { position: sticky; height: 0; z-index: 1; pointer-events: none; }
 .wb-rail-wrap.up { top: var(--wb-rail-inset, 0px); z-index: 3; }
-.wb-rail-wrap.dn { bottom: 0; }
+/* The bottom wrapper ends the board, so its top margin is the board's
+   bottom scroll margin: room for the last item to scroll fully clear of
+   the bottom stack (rail.js BOT: FADE + 2 CAP + GAP + PAD) with a 16px gap. */
+.wb-rail-wrap.dn { bottom: 0; margin-top: calc(14px + 2 * 17px + 3px + 4px + 16px); }
 .wb-rail-stack { position: absolute; left: 0; right: 0; display: flex; flex-direction: column; gap: 3px; }
 .wb-rail-stack[hidden] { display: none; }
 /* the copy of a bar or a capsule that morphs between the two (rail.js); fill:forwards on its children ends with it */
