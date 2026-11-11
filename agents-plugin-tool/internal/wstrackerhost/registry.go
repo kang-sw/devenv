@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/gofrs/flock"
 
@@ -50,7 +52,25 @@ type StoreEntry struct {
 	Dir string `json:"dir"`
 	// Member is this machine's member id in the store.
 	Member string `json:"member"`
+	// Hidden: the user hid the store on this machine (SetHidden). A viewer
+	// leaves it out of its store list; reads, writes, the poll, and the
+	// watch treat it as any other store.
+	Hidden bool `json:"hidden,omitempty"`
+	// Nonce identifies this registration: Register writes a fresh one, so
+	// an id unregistered and registered again differs from the entry a
+	// process still holds open. Empty for an entry written before the field
+	// existed.
+	Nonce string `json:"nonce,omitempty"`
 }
+
+// ErrNotRegistered: the registry holds no store under the id.
+var ErrNotRegistered = errors.New("tracker: no registered store")
+
+// ErrBadLabel: Relabel refused the label.
+var ErrBadLabel = errors.New("tracker: bad store label")
+
+// MaxLabelLen is the longest display label, in characters.
+const MaxLabelLen = 80
 
 // DisplayLabel is the label, or the id when there is none.
 func (e StoreEntry) DisplayLabel() string {
@@ -98,13 +118,13 @@ func readJSON(path string, v any) error {
 }
 
 // writeJSON replaces path atomically, so a concurrent reader sees the old
-// or the new file, never a partial one.
+// or the new file, never a partial one. It never creates path's directory:
+// a late write into a store directory Unregister removed fails instead of
+// leaving a stub that Register would then refuse as "already exists". The
+// root's writers create the root themselves (withRootLock).
 func writeJSON(path string, v any) error {
 	data, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
 	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp*")
@@ -162,7 +182,109 @@ func (h *Host) Entry(id string) (StoreEntry, error) {
 			return e, nil
 		}
 	}
-	return StoreEntry{}, fmt.Errorf("tracker: no registered store %q", id)
+	return StoreEntry{}, fmt.Errorf("%w %q", ErrNotRegistered, id)
+}
+
+// editEntry rewrites the registry entry id through edit under the root
+// lock and returns the entry as written; ErrNotRegistered when there is
+// none.
+func (h *Host) editEntry(id string, edit func(*StoreEntry) error) (StoreEntry, error) {
+	var out StoreEntry
+	err := h.withRootLock(func() error {
+		path := filepath.Join(h.root, registryFile)
+		doc := registryDoc{Version: 1}
+		if err := readJSON(path, &doc); err != nil {
+			return err
+		}
+		for i := range doc.Stores {
+			if doc.Stores[i].ID != id {
+				continue
+			}
+			if err := edit(&doc.Stores[i]); err != nil {
+				return err
+			}
+			out = doc.Stores[i]
+			doc.Version = 1
+			return writeJSON(path, doc)
+		}
+		return fmt.Errorf("%w %q", ErrNotRegistered, id)
+	})
+	return out, err
+}
+
+// Relabel sets store id's display label on this machine and returns the
+// entry as written. The label is machine-local: nothing is written to the
+// store. It is trimmed; an empty one clears the label back to the id, and
+// one holding a control character or longer than MaxLabelLen characters is
+// refused (ErrBadLabel).
+func (h *Host) Relabel(id, label string) (StoreEntry, error) {
+	label = strings.TrimSpace(label)
+	if utf8.RuneCountInString(label) > MaxLabelLen {
+		return StoreEntry{}, fmt.Errorf("%w: longer than %d characters", ErrBadLabel, MaxLabelLen)
+	}
+	if !utf8.ValidString(label) || strings.ContainsFunc(label, unicode.IsControl) {
+		return StoreEntry{}, fmt.Errorf("%w: it holds a control character", ErrBadLabel)
+	}
+	return h.editEntry(id, func(e *StoreEntry) error {
+		e.Label = label
+		return nil
+	})
+}
+
+// SetHidden hides or shows store id on this machine (StoreEntry.Hidden) and
+// returns the entry as written. Nothing is deleted and nothing is written
+// to the store.
+func (h *Host) SetHidden(id string, hidden bool) (StoreEntry, error) {
+	return h.editEntry(id, func(e *StoreEntry) error {
+		e.Hidden = hidden
+		return nil
+	})
+}
+
+// removeEntry takes entry id out of the registry when it is still the
+// registration nonce names, and returns its position.
+func (h *Host) removeEntry(id, nonce string) (int, error) {
+	at := -1
+	err := h.withRootLock(func() error {
+		path := filepath.Join(h.root, registryFile)
+		doc := registryDoc{Version: 1}
+		if err := readJSON(path, &doc); err != nil {
+			return err
+		}
+		for i, e := range doc.Stores {
+			if e.ID == id && e.Nonce == nonce {
+				at = i
+				doc.Stores = append(doc.Stores[:i], doc.Stores[i+1:]...)
+				doc.Version = 1
+				return writeJSON(path, doc)
+			}
+		}
+		return fmt.Errorf("%w %q", ErrNotRegistered, id)
+	})
+	return at, err
+}
+
+// restoreEntry puts e back at position at (or the end), unless the id was
+// registered again meanwhile.
+func (h *Host) restoreEntry(e StoreEntry, at int) error {
+	return h.withRootLock(func() error {
+		path := filepath.Join(h.root, registryFile)
+		doc := registryDoc{Version: 1}
+		if err := readJSON(path, &doc); err != nil {
+			return err
+		}
+		for _, have := range doc.Stores {
+			if have.ID == e.ID {
+				return nil
+			}
+		}
+		if at < 0 || at > len(doc.Stores) {
+			at = len(doc.Stores)
+		}
+		doc.Stores = append(doc.Stores[:at], append([]StoreEntry{e}, doc.Stores[at:]...)...)
+		doc.Version = 1
+		return writeJSON(path, doc)
+	})
 }
 
 // addEntry appends e to the registry; an id already there is refused.

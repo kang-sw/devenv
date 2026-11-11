@@ -210,8 +210,8 @@ func TestRegisterCreateJoinRoundTrip(t *testing.T) {
 	if !res.Creator || res.Profile != adaProfile {
 		t.Fatalf("ada's registration = %+v, want creator with her profile", res)
 	}
-	if want := (StoreEntry{ID: "team", Remote: w.remote, Dir: filepath.Join(a.Root(), "team"), Member: "ada"}); res.Entry != want {
-		t.Fatalf("entry = %+v, want %+v", res.Entry, want)
+	if want := (StoreEntry{ID: "team", Remote: w.remote, Dir: filepath.Join(a.Root(), "team"), Member: "ada", Nonce: res.Entry.Nonce}); res.Entry != want || res.Entry.Nonce == "" {
+		t.Fatalf("entry = %+v, want %+v with a registration nonce", res.Entry, want)
 	}
 
 	jon := wstracker.Profile{Org: "SW개발팀", Family: "홍", Given: "길동"}

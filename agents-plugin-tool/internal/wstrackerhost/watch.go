@@ -17,10 +17,13 @@ const DefaultWatchInterval = 2 * time.Second
 
 // StartWatch runs the store watch in this process: every interval it stamps
 // each registered store's ledger state (the journal files' sizes and times
-// and the repository's branch and push-known refs; no fold, no network) and calls
+// and the repository's branch and push-known refs; no fold, no network) and
+// its registry entry's label, hidden flag, and registration, and calls
 // onChange when a stamp, or the set of stores, changed since the last tick.
 // It re-reads the registry each tick, so a store registered later is
-// watched. Only what a write moves is stamped, never a file a read writes
+// watched, one another process unregistered is dropped (and this process's
+// handle on it retired), and a relabel or hide by another process reaches
+// the page. Only what a write moves is stamped, never a file a read writes
 // (host-sync.json, ui-seen.json, push state), so an idle store with an open
 // page causes no repeated calls; this process's own writes are seen too,
 // and a duplicate call is the caller's to absorb.
@@ -65,16 +68,27 @@ func (h *Host) StartWatch(interval time.Duration, onChange func()) (stop func())
 	}
 }
 
-// watchStamps stamps every registered store, by id; an unreadable registry
+// watchStamp is what the watch compares of one store: its ledger state
+// (storeStamp) and the registry fields a page shows or keys on.
+type watchStamp struct {
+	ledger uint64
+	label  string
+	hidden bool
+	nonce  string
+}
+
+// watchStamps stamps every registered store, by id, and retires this
+// process's handles on stores no longer registered; an unreadable registry
 // stamps none.
-func (h *Host) watchStamps() map[string]uint64 {
+func (h *Host) watchStamps() map[string]watchStamp {
 	stores, err := h.Stores()
 	if err != nil {
 		return nil
 	}
-	out := make(map[string]uint64, len(stores))
+	h.retireStale(stores)
+	out := make(map[string]watchStamp, len(stores))
 	for _, e := range stores {
-		out[e.ID] = storeStamp(e.Dir)
+		out[e.ID] = watchStamp{ledger: storeStamp(e.Dir), label: e.Label, hidden: e.Hidden, nonce: e.Nonce}
 	}
 	return out
 }

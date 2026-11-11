@@ -95,7 +95,9 @@ func (g *gitRepo) listRefs(ctx context.Context, prefix string) (map[string]strin
 }
 
 func (g *gitRepo) tempFile(data []byte) (string, error) {
-	if err := os.MkdirAll(g.tmp, 0o700); err != nil {
+	// Mkdir, not MkdirAll: a store directory another process removed is
+	// never recreated.
+	if err := os.Mkdir(g.tmp, 0o700); err != nil && !errors.Is(err, os.ErrExist) {
 		return "", err
 	}
 	f, err := os.CreateTemp(g.tmp, "obj-*")

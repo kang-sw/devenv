@@ -118,7 +118,8 @@ func (h *Host) StageAttachment(ctx context.Context, id, name string, data []byte
 // writeStaged writes the staged copy of oid atomically.
 func writeStaged(dir, oid string, data []byte) error {
 	path := stagedPath(dir, oid)
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	// Mkdir, not MkdirAll: a removed store directory is never recreated.
+	if err := os.Mkdir(filepath.Dir(path), 0o700); err != nil && !errors.Is(err, os.ErrExist) {
 		return err
 	}
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".tmp-*")
@@ -277,6 +278,9 @@ func (h *Host) withWriteLock(ctx context.Context, st *store, fn func() error) er
 		return fmt.Errorf("tracker: store write lock %s not acquired: %v", fl.Path(), err)
 	}
 	defer fl.Unlock() //nolint:errcheck
+	if err := h.checkRegistered(st); err != nil {
+		return err
+	}
 	return fn()
 }
 

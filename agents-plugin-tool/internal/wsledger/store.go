@@ -182,13 +182,25 @@ func (o Options) normalize() (Options, error) {
 	return o, nil
 }
 
-func newLedger(ctx context.Context, opts Options) (*Ledger, error) {
+// LockFile, in a store directory, is the file lock every call that reads or
+// moves the directory holds (withLock). A caller that only needs to know
+// whether a sync is in flight may probe it.
+const LockFile = "lock"
+
+// newLedger builds the Ledger of opts. create makes a missing store
+// directory; without it a missing directory is an error and stays missing,
+// so opening a store another process removed never leaves a stub behind.
+func newLedger(ctx context.Context, opts Options, create bool) (*Ledger, error) {
 	o, err := opts.normalize()
 	if err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll(o.Dir, 0o700); err != nil {
-		return nil, err
+	if create {
+		if err := os.MkdirAll(o.Dir, 0o700); err != nil {
+			return nil, err
+		}
+	} else if _, err := os.Stat(o.Dir); err != nil {
+		return nil, fmt.Errorf("ledger: store directory: %w", err)
 	}
 	if err := checkTools(ctx, o.Runner, o.Dir, func(name string) (string, error) { return wsexec.LookPath(name, o.Env) }); err != nil {
 		return nil, err
@@ -200,7 +212,7 @@ func newLedger(ctx context.Context, opts Options) (*Ledger, error) {
 	return &Ledger{
 		opts:     o,
 		git:      &gitRepo{runner: o.Runner, dir: o.RepoDir, tmp: filepath.Join(o.Dir, "tmp")},
-		lock:     flock.New(filepath.Join(o.Dir, "lock")),
+		lock:     flock.New(filepath.Join(o.Dir, LockFile)),
 		member:   o.Member,
 		keyPath:  keyPath,
 		pubKey:   pub,
@@ -218,7 +230,7 @@ func newLedger(ctx context.Context, opts Options) (*Ledger, error) {
 // ref): the genesis roles.json lists the creator as sole admin and a root,
 // and the creator's member.join and claim ref are written with it.
 func Create(ctx context.Context, opts Options) (*Ledger, error) {
-	l, err := newLedger(ctx, opts)
+	l, err := newLedger(ctx, opts, true)
 	if err != nil {
 		return nil, err
 	}
@@ -255,7 +267,7 @@ func Create(ctx context.Context, opts Options) (*Ledger, error) {
 // identity state already holds this key for the member id, it writes
 // nothing and just opens. ErrIDTaken means another join claimed the id.
 func Join(ctx context.Context, opts Options) (*Ledger, error) {
-	l, err := newLedger(ctx, opts)
+	l, err := newLedger(ctx, opts, true)
 	if err != nil {
 		return nil, err
 	}
@@ -274,9 +286,12 @@ func Join(ctx context.Context, opts Options) (*Ledger, error) {
 	return l, nil
 }
 
-// Open opens an existing store.
+// Open opens an existing store. When the repository lives in the store
+// directory (no Options.RepoDir), a missing directory holds no store: that
+// is an error, and the directory is not created. A writer given a shared
+// repository gets its own new directory as before.
 func Open(ctx context.Context, opts Options) (*Ledger, error) {
-	l, err := newLedger(ctx, opts)
+	l, err := newLedger(ctx, opts, opts.RepoDir != "")
 	if err != nil {
 		return nil, err
 	}
@@ -345,6 +360,75 @@ func (l *Ledger) withLock(ctx context.Context, fn func() error) error {
 	defer l.lock.Unlock() //nolint:errcheck
 	l.received = 0
 	return fn()
+}
+
+// ErrBusy: Exclusive gave up waiting for the store lock.
+var ErrBusy = errors.New("ledger: the store is busy")
+
+// Unpushed is what a clone holds that its remote does not (Exclusive).
+type Unpushed struct {
+	Pending PendingReport
+	// Wikis names, sorted, the wikis whose tip the remote is not known to
+	// hold; always empty with no remote.
+	Wikis []string
+}
+
+// Exclusive runs fn under the store lock with what this clone has not
+// pushed, read from the store directory as it is now (Reload's re-read, so
+// another process's appends are counted). Until fn returns, no other call
+// on this Ledger and no other process's Append, Sync, Fetch, Reload, or
+// idle push runs on the directory, which is what a caller about to remove
+// the directory needs: fn may rename it away. Exclusive waits at most wait
+// for the lock, this Ledger's own running call included, and then fails
+// with ErrBusy, having run nothing.
+func (l *Ledger) Exclusive(ctx context.Context, wait time.Duration, fn func(Unpushed) error) error {
+	deadline := time.Now().Add(wait)
+	for !l.mu.TryLock() {
+		if !time.Now().Before(deadline) {
+			return ErrBusy
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+	defer l.mu.Unlock()
+	locked, err := l.lock.TryLock()
+	if err == nil && !locked {
+		lockCtx, cancel := context.WithDeadline(ctx, deadline)
+		locked, err = l.lock.TryLockContext(lockCtx, 20*time.Millisecond)
+		cancel()
+		if !locked && ctx.Err() == nil && (err == nil || errors.Is(err, context.DeadlineExceeded)) {
+			return ErrBusy
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("ledger: store lock: %w", err)
+	}
+	defer l.lock.Unlock() //nolint:errcheck
+	l.received = 0
+	if err := l.refresh(ctx); err != nil {
+		return err
+	}
+	u := Unpushed{}
+	if l.hasRemote(ctx) {
+		if err := l.loadKnownOwn(ctx); err != nil {
+			return err
+		}
+		local, _, known, err := l.wikiRefs(ctx)
+		if err != nil {
+			return err
+		}
+		for ref, tip := range local {
+			if name, ok := wikiNameOf(ref); ok && known[ref] != tip {
+				u.Wikis = append(u.Wikis, name)
+			}
+		}
+		sort.Strings(u.Wikis)
+	}
+	u.Pending = l.pendingLocked()
+	return fn(u)
 }
 
 func randomID() string {

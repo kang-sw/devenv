@@ -206,7 +206,7 @@ func wantVerdict(t *testing.T, l *Ledger, id EventID, want Verdict) Event {
 func (w *world) forger(o Options) *Ledger {
 	w.t.Helper()
 	ctx := context.Background()
-	l, err := newLedger(ctx, o)
+	l, err := newLedger(ctx, o, true)
 	if err != nil {
 		w.t.Fatalf("forger %s: %v", o.Member, err)
 	}
