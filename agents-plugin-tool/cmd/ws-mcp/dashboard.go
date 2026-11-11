@@ -203,6 +203,9 @@ func trackerStoreRoot(h *wstrackerhost.Host, newErr error) func(id string) (stri
 			return "", redacted(newErr)
 		}
 		e, err := h.Entry(id)
+		if errors.Is(err, wstrackerhost.ErrNotRegistered) {
+			return "", fmt.Errorf("%w: %v", wsagent.ErrStoreUnregistered, redacted(err))
+		}
 		if err != nil {
 			return "", redacted(err)
 		}

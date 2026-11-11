@@ -96,7 +96,10 @@ type SupportOptions struct {
 	Dir string
 	// StoreRoot returns a tracker store's working root (its registry
 	// entry's directory, which the tracker gate pins the conversation's
-	// writes to); an error is an unknown store.
+	// writes to). A store that is not registered answers an error wrapping
+	// ErrStoreUnregistered; any other error means the registry could not be
+	// read, which a request reports as an unknown store too, but which
+	// never ends a conversation (CloseUnregistered).
 	StoreRoot func(id string) (string, error)
 	// Config is the base of the support profiles' resolution for the
 	// harness list (global and builtin layers only); zero uses the
@@ -105,6 +108,10 @@ type SupportOptions struct {
 	// Now is the clock; nil uses time.Now.
 	Now func() time.Time
 }
+
+// ErrStoreUnregistered is the SupportOptions.StoreRoot error of a store the
+// registry does not hold.
+var ErrStoreUnregistered = errors.New("tracker store is not registered")
 
 // Support keeps one ongoing support conversation per tracker store over
 // the runner, and the last harness, model, and effort selection.
@@ -463,7 +470,8 @@ func (s *Support) New(store string) (State, error) {
 }
 
 // CloseUnregistered closes the conversation of every mapped store that is
-// no longer registered (StoreRoot errors) and drops its mapping, so no agent
+// no longer registered (StoreRoot answers ErrStoreUnregistered; a registry
+// that could not be read closes nothing) and drops its mapping, so no agent
 // keeps running in the directory an unregister deleted, and returns the
 // stores it dropped. The daemon calls it after an unregister and on every
 // tracker store change, which is how an unregister by another process
@@ -479,7 +487,7 @@ func (s *Support) CloseUnregistered() []string {
 	s.mu.Unlock()
 	var dropped []string
 	for _, store := range mapped {
-		if _, err := s.opts.StoreRoot(store); err != nil && s.closeUnregistered(store) {
+		if _, err := s.opts.StoreRoot(store); errors.Is(err, ErrStoreUnregistered) && s.closeUnregistered(store) {
 			dropped = append(dropped, store)
 		}
 	}
@@ -492,7 +500,7 @@ func (s *Support) CloseUnregistered() []string {
 // next call.
 func (s *Support) closeUnregistered(store string) bool {
 	defer s.lockStore(store)()
-	if _, err := s.opts.StoreRoot(store); err == nil {
+	if _, err := s.opts.StoreRoot(store); !errors.Is(err, ErrStoreUnregistered) {
 		return false
 	}
 	s.mu.Lock()

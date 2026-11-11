@@ -42,8 +42,11 @@ type supportHarness struct {
 	*harness
 	claude, pi *fakeBackend
 	stores     map[string]string
-	support    *Support
-	now        time.Time
+	// rootErr, when set, is what storeRoot answers for an unlisted store
+	// in place of ErrStoreUnregistered: a registry that cannot be read.
+	rootErr error
+	support *Support
+	now     time.Time
 }
 
 func newSupportHarness(t *testing.T) *supportHarness {
@@ -66,7 +69,10 @@ func (sh *supportHarness) storeRoot(id string) (string, error) {
 	if root, ok := sh.stores[id]; ok {
 		return root, nil
 	}
-	return "", fmt.Errorf("no registered store %q", id)
+	if err := sh.rootErr; err != nil {
+		return "", err
+	}
+	return "", fmt.Errorf("%w: %q", ErrStoreUnregistered, id)
 }
 
 // restart replaces the runner and the Support with fresh ones over the
@@ -209,6 +215,12 @@ func TestSupportCloseUnregisteredEndsARemovedStoresConversation(t *testing.T) {
 	}
 
 	delete(sh.stores, "alpha")
+	// A registry that cannot be read says nothing about the store.
+	sh.rootErr = errors.New("registry unreadable")
+	if dropped := sh.support.CloseUnregistered(); len(dropped) != 0 || sh.state(alpha.ID).Status == StatusClosed {
+		t.Fatalf("an unreadable registry dropped %v", dropped)
+	}
+	sh.rootErr = nil
 	if dropped := sh.support.CloseUnregistered(); !reflect.DeepEqual(dropped, []string{"alpha"}) {
 		t.Fatalf("dropped %v, want [alpha]", dropped)
 	}
