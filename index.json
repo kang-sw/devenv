@@ -390,19 +390,6 @@
     "261110-feat-ws-git-commit-attribution-trailers": {
       "registered_at": "2026-11-10T14:07:46Z"
     },
-    "261110-feat-ws-tracker-daemon-event-hook": {
-      "registered_at": "2026-11-10T06:49:16Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-11T09:11:14Z",
-        "impl": {
-          "branch": "impl/develop/syrup-ashy-stunt"
-        }
-      }
-    },
     "261110-feat-ws-tracker-superior-settable-status-and-new-statuses": {
       "registered_at": "2026-11-10T06:18:04Z",
       "lease": {
@@ -454,7 +441,17 @@
       }
     },
     "261111-feat-ws-tracker-cc-field": {
-      "registered_at": "2026-11-11T06:17:16Z"
+      "registered_at": "2026-11-11T06:17:16Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "28ef83e379b353cc",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-11T09:56:41Z",
+        "impl": {
+          "branch": "impl/develop/cusp-shy-mud"
+        }
+      }
     }
   }
 }
