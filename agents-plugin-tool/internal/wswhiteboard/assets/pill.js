@@ -133,7 +133,7 @@
     show("bot", below);
     retitle();
     // Keep the bottom pill clear of the sticky reply bar and of the topic
-    // rail's bottom capsules (rail.js sets --wb-rail-bot on the host).
+    // rail's bottom capsules (rail.js sets --wb-rail-bot on this wrapper).
     var reply = host.querySelector(".reply");
     wraps.bot.style.bottom = "calc(" + (reply && reply.offsetHeight ? reply.offsetHeight + 18 : 10) + "px + var(--wb-rail-bot, 0px))";
   }

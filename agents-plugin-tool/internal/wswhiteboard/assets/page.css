@@ -430,7 +430,7 @@ details.panel .body { container-type: inline-size; }
 .reply .allok:has(input:checked) { color: var(--wb-fg); }
 .reply .hint { font-size: 12px; color: var(--wb-muted-fg); min-width: 14px; }
 
-/* open-question pill: a zero-height sticky wrapper at each end of the board's scroll area carries the pill, so showing it moves nothing; the bottom offset is set by pill.js to clear the reply bar */
+/* open-question pill: a zero-height sticky wrapper at each end of the board's scroll area carries the pill, so showing it moves nothing; the bottom offset is set by pill.js to clear the reply bar; rail.js sets --wb-rail-h and --wb-rail-bot on the wrappers themselves */
 .oq-wrap { position: sticky; height: 0; z-index: 4; pointer-events: none; text-align: center; }
 .oq-wrap.top { top: calc(10px + var(--wb-rail-h, 0px)); }
 .oq-wrap.bot { bottom: 10px; }
@@ -449,14 +449,16 @@ details.panel .body { container-type: inline-size; }
 .oq-seg:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 2px; }
 
 /* topic rail (rail.js): the current topic's bar sticks under the top capsules
-   (--wb-rail-top), and zero-height sticky wrappers at each end of the board
-   carry the jump capsules. A host that keeps a sticky row of its own at the
+   (--wb-rail-top, which rail.js sets on each bar itself: on the host it
+   would restyle the whole board on every redraw), and zero-height sticky
+   wrappers at each end of the board carry the jump capsules. A host that keeps a sticky row of its own at the
    top of its scroll area sets --wb-rail-inset to its height: the top
    capsules and the bar stick below it. The topic clips rather than hides its overflow, so
    it is no scroll container and its bar sticks to the board's scroller. The
    capsule height, gap, and paddings are mirrored in rail.js (CAP, GAP, PAD,
    FADE): change them together. A host that rails its own board nodes
-   (data-rail, rail.js) sticks their bars itself, at --wb-rail-top, and
+   (data-rail, rail.js) sticks their bars itself, at --wb-rail-top (set on
+   each data-rail-bar), and
    styles their .wb-stuck shadow. */
 .wb-rail .topic { overflow: hidden; overflow: clip; }
 .wb-rail .topic > .tbar { position: sticky; top: var(--wb-rail-top, 0px); z-index: 1; }
