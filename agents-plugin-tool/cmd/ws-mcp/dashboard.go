@@ -18,6 +18,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wsholder"
+	"github.com/kang-sw/devenv/internal/wstrackerhook"
 	"github.com/kang-sw/devenv/internal/wstrackerhost"
 	"github.com/kang-sw/devenv/internal/wswake"
 )
@@ -135,10 +136,17 @@ func dashboardCommand(args []string) {
 	}
 	trackerChanged.set(daemon.TrackerChanged)
 	host.live.Store(daemon)
-	stopPoll := startTrackerPoll(tracker, trackerErr, daemon.TrackerChanged, logw)
+	// The hooks read the stores on every change signal the page gets from
+	// the watch and the poll; the watch also sees the daemon's own writes.
+	nudgeHooks, stopHooks := startTrackerHooks(tracker, trackerErr, dir, daemon.Endpoint().Port, logw)
+	stopPoll := startTrackerPoll(tracker, trackerErr, func() {
+		daemon.TrackerChanged()
+		nudgeHooks()
+	}, logw)
 	stopWatch := startTrackerWatch(tracker, trackerErr, func() {
 		daemon.TrackerChanged()
 		support.CloseUnregistered()
+		nudgeHooks()
 	})
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
@@ -159,6 +167,7 @@ func dashboardCommand(args []string) {
 	host.wait()
 	stopWatch()
 	stopPoll()
+	stopHooks()
 	closeTracker()
 }
 
@@ -189,6 +198,20 @@ func startTrackerWatch(h *wstrackerhost.Host, newErr error, onChange func()) (st
 		return func() {}
 	}
 	return h.StartWatch(trackerWatchInterval, onChange)
+}
+
+// startTrackerHooks runs the tracker event hooks (wstrackerhook) on h, with
+// the hooks file and their state in the daemon's state directory dir and
+// each event's url on the daemon's loopback port. nudge asks for a read of
+// every store; stop kills a running hook and drops the queued ones. newErr
+// is h's creation error: no hook runs. The caller closes h after stop.
+func startTrackerHooks(h *wstrackerhost.Host, newErr error, dir string, port int, logw io.Writer) (nudge, stop func()) {
+	if newErr != nil {
+		return func() {}, func() {}
+	}
+	base := fmt.Sprintf("http://127.0.0.1:%d", port)
+	r := wstrackerhook.Start(wstrackerhook.Options{Dir: dir, Source: h, Log: logw, BaseURL: func() string { return base }})
+	return r.Nudge, r.Close
 }
 
 // startTrackerPoll runs the tracker's background poll in the daemon on h:
