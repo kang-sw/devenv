@@ -588,14 +588,21 @@ conversation:
   browser on this machine, 403 without the daemon's own `Origin`. A LAN
   viewer reads the session and may send and interrupt; the state's
   `can_control` tells the page which viewer it serves.
-- **Page.** The rail's "+ session" button (worktree rows and plain-folder
-  bars; a plain folder's spawn is refused by the route) opens the spawn
-  popover, with model and effort choices from `GET /support/choices`. A
-  hosted session's page reads `GET /agents/<id>` on load, on a head swap,
-  when the live region's permission line changes, and when its menu opens
-  (no timer): approval cards, the `action_needed` notice, and the harness
-  chip's menu (model, permission mode, effort, stop, close) come from that
-  state. The rail and index mark a hosted row and show its waiting approval
+- **Page.** The rail's "+ session" button (worktree rows only; a plain
+  folder's bar has none, since the spawn route takes only a Git worktree
+  root) opens the spawn popover, with model and effort choices from
+  `GET /support/choices`. A hosted session's page reads `GET /agents/<id>`
+  on load, on a head swap, when the live region's permission line changes,
+  and when its menu opens (no timer): approval cards, the `action_needed`
+  notice, and the harness chip's menu (model, permission mode, effort,
+  stop, restart while `mcp_broken` is non-empty, close; stop, restart, and
+  close confirm naming `background_tasks` when it is above zero) come from
+  that state. From the snapshot's `host` block the page draws an error ring
+  on the head's harness chip and the rail row plus a failure chip while
+  `failure` is set, an MCP-broken chip, a retry line in the live region,
+  and the background task count in the agents panel head and beside the
+  composer's subagent badge; `notice` ring lines and a failed compaction's
+  `text` render as failure lines in the conversation. The rail and index mark a hosted row and show its waiting approval
   from the live snapshot, which names the oldest pending prompt only. The
   local-viewer controls are hidden by CSS unless `<html>` carries
   `data-sysopen`; the routes refuse regardless. A tab asks for notification
