@@ -851,6 +851,48 @@ func TestLeadRejoinsItsProcessAfterADaemonRestart(t *testing.T) {
 	}
 }
 
+// TestLeadAnsweredPromptStaysAnsweredAcrossADaemonRestart: the answer to a
+// prompt goes to the process's input, which the holder's ring does not
+// hold, so the next daemon's replay shows the prompt's request with no sign
+// of its answer. The record keeps it answered: it does not wait again and
+// takes no second answer, and it is forgotten once its tool call returns.
+func TestLeadAnsweredPromptStaysAnsweredAcrossADaemonRestart(t *testing.T) {
+	h := newLeadHarness(t).start()
+	id, holder := h.runLead("one")
+	h.holders.out(holder, stateLine(HarnessRunning), initLine("sess-1", "auto"), toolUseLine("u1", "toolu_1"), stateLine(HarnessWaiting), canUseToolLine("req-1", "toolu_1"))
+	eventually(t, "the prompt", func() bool { return len(h.state(id).Approvals) == 1 })
+	if _, err := h.runner.AnswerApproval(id, "req-1", true, ""); err != nil {
+		t.Fatalf("AnswerApproval: %v", err)
+	}
+	// The tool runs on; the daemon restarts before its result.
+	h.holders.out(holder, stateLine(HarnessRunning))
+	h.sync(id, holder)
+	if got := h.record(id).Answered; !slices.Equal(got, []string{"req-1"}) {
+		t.Fatalf("answered ids in the record = %v", got)
+	}
+	h.restart()
+	eventually(t, "the rejoined turn", func() bool {
+		st := h.state(id)
+		return st.Process && st.Status == StatusRunning
+	})
+	eventually(t, "the rejoin to take answers again", func() bool {
+		_, err := h.runner.AnswerApproval(id, "req-1", true, "")
+		if err == nil {
+			t.Fatal("a prompt answered before the restart took a second answer")
+		}
+		return requestStatus(err) == 409 && strings.Contains(err.Error(), "not waiting")
+	})
+	if st := h.state(id); len(st.Approvals) != 0 {
+		t.Fatalf("the answered prompt waits again after the rejoin: %+v", st.Approvals)
+	}
+	if got := h.holders.inputs(holder, "control_response"); len(got) != 1 {
+		t.Fatalf("answers written = %q", got)
+	}
+	h.holders.out(holder, toolResultLine("toolu_1"), replyLine("u2", "done"), resultLine(), stateLine(HarnessIdle))
+	h.idle(id)
+	eventually(t, "the settled prompt to be forgotten", func() bool { return len(h.record(id).Answered) == 0 })
+}
+
 // TestLeadProcessThatExitedWhileNoDaemonRan: a harness that ended on its
 // own while no daemon ran left its exit in the holder's ring. The next
 // daemon's rejoin finds it at the replay's end: the turn and its prompt

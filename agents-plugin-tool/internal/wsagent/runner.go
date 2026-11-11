@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -1399,6 +1400,7 @@ func (c *conv) handle(ev Event) {
 		c.addApproval(*ev.Approval, quiet)
 	case ev.ApprovalDone != "":
 		c.dropApproval(ev.ApprovalDone, quiet)
+		c.forgetAnswered(ev.ApprovalDone)
 	case ev.PermissionMode != "":
 		if ev.PermissionMode != c.activeMode {
 			c.setStatus(func() { c.activeMode = ev.PermissionMode })
@@ -1488,6 +1490,10 @@ func (c *conv) addApproval(a ApprovalRequest, quiet bool) {
 			return
 		}
 	}
+	if slices.Contains(c.rec.Answered, a.ID) {
+		// A replay of a prompt an earlier daemon already answered.
+		return
+	}
 	c.setStatus(func() { c.approvals = append(c.approvals, a) })
 	c.checkAction(quiet)
 	c.showApprovals(quiet)
@@ -1551,9 +1557,25 @@ func (c *conv) dropApproval(id string, quiet bool) bool {
 	return false
 }
 
+// forgetAnswered drops a settled prompt from the record's answered list
+// ("" drops them all: their process is gone).
+func (c *conv) forgetAnswered(id string) {
+	if len(c.rec.Answered) == 0 || (id != "" && !slices.Contains(c.rec.Answered, id)) {
+		return
+	}
+	c.update(func(rec *Record) {
+		if id == "" {
+			rec.Answered = nil
+			return
+		}
+		rec.Answered = slices.DeleteFunc(slices.Clone(rec.Answered), func(have string) bool { return have == id })
+	})
+}
+
 // clearApprovals settles every waiting prompt with no answer: the process
 // they came from is gone.
 func (c *conv) clearApprovals() {
+	c.forgetAnswered("")
 	if len(c.approvals) == 0 {
 		return
 	}
@@ -1600,6 +1622,7 @@ func (c *conv) answerApproval(id string, allow bool, message string) error {
 		return conflict("that permission prompt is not waiting: it was answered, withdrawn, or its process ended")
 	}
 	c.dropApproval(id, false)
+	c.update(func(rec *Record) { rec.Answered = append(rec.Answered, id) })
 	if err := answerer.AnswerApproval(*req, allow, message); err != nil {
 		c.setStatus(func() { c.lastErr = "answer the permission prompt: " + err.Error() })
 		c.stopProcess("")

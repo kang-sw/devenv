@@ -56,6 +56,11 @@ type Record struct {
 	// whole: after a daemon restart the holder replays its ring, and
 	// records up to this one rebuild state without being written again.
 	HolderSeq uint64 `json:"holder_seq,omitempty"`
+	// Answered are the request ids of the tool permission prompts answered
+	// and not yet seen settled. The answer went to the process's input,
+	// which the holder's ring does not hold, so a replay shows such a
+	// prompt as still waiting; this list keeps it answered exactly once.
+	Answered []string `json:"answered,omitempty"`
 	// Mail holds the mailbox messages claimed for the session and not yet
 	// delivered as a turn, each as the text the model reads.
 	Mail []string `json:"mail,omitempty"`
