@@ -986,11 +986,13 @@ func TestTopicRailIsOnTheFullPageOnly(t *testing.T) {
 }
 
 // TestTopicRailBarCapsuleMotion pins the rail's bar-to-capsule motion
-// (rail.js morph): it runs only without reduced motion, reads its starting
-// boxes before a redraw and animates after it, a stuck bar draws above the
-// top capsule stack so the card's end pushes it over the stack, the copy
-// that morphs stands out of flow in the top wrapper, and the rail's
-// teardown drops it.
+// (rail.js morph): it runs only without reduced motion and never on a
+// run's first draw, reads its starting boxes before a redraw and animates
+// after it, a stuck bar draws above the top capsule stack so the card's end
+// pushes it over the stack, both edges morph (the bottom stack's near
+// capsule grows into a bar that leaves the stack, and a shown bar sinking
+// behind it shrinks into the capsule), the copy that morphs stands out of
+// flow in its edge's wrapper, and the rail's teardown drops both copies.
 func TestTopicRailBarCapsuleMotion(t *testing.T) {
 	assets, err := PageAssets()
 	if err != nil {
@@ -1000,8 +1002,13 @@ func TestTopicRailBarCapsuleMotion(t *testing.T) {
 	for _, want := range []string{
 		`function motion() { return !!d.body.animate && !(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches); }`,
 		`var pre = motion() ? before(s) : null;`,
-		`if (pre) after(pre);`,
-		`wraps.top.appendChild(el);`,
+		"if (pre) after(pre);\n    drawn = !!s;",
+		`if (!drawn || !s) return p;`,
+		`if (bnear && !s.down.some(function (i) { return topics[i] === bnear; })) p.bot = capGhost(slots.bot.near);`,
+		`else if (next && btns("bot").map(shown).indexOf(next) < 0) p.bot = barGhost(next, true);`,
+		`["top", "bot"].forEach(function (e) {`,
+		`var wrap = wraps[edge], w = wrap.getBoundingClientRect()`,
+		`wrap.appendChild(el);`,
 		"stuck = null;\n    dropGhost();\n  };",
 	} {
 		if !strings.Contains(js, want) {
@@ -1015,6 +1022,43 @@ func TestTopicRailBarCapsuleMotion(t *testing.T) {
 		if !strings.Contains(css, want) {
 			t.Errorf("the shared stylesheet lacks %q", want)
 		}
+	}
+}
+
+// TestTopicRailRailsHostItems pins the rail's generic item hook: besides
+// the topics it rails any board node the host marks with data-rail, in
+// board order, leaves out an item with no height, takes a marked node's
+// bar, capsule text, and capsule icon from data-rail-bar, data-rail-name,
+// and data-rail-icon, keys the draw by item key so a topic and a marked
+// node never collide, and keeps a marked node's name and icon through the
+// bar-to-capsule morph.
+func TestTopicRailRailsHostItems(t *testing.T) {
+	assets, err := PageAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	js, css := string(assets.FormScript), string(assets.CSS)
+	for _, want := range []string{
+		`var ITEMS = "section.topic[data-topic], [data-rail]";`,
+		`function barOf(t) { return t.querySelector(isTopic(t) ? ":scope > .tbar" : "[data-rail-bar]"); }`,
+		`function keyOf(t) { return isTopic(t) ? t.getAttribute("data-topic") : "\u0001" + t.getAttribute("data-rail"); }`,
+		`if (dirty) { found = Array.prototype.slice.call(box.querySelectorAll(ITEMS)); dirty = false; }`,
+		`if (r.height) { topics.push(t); rects.push(r); }`,
+		`var nm = t.querySelector("[data-rail-name]"), ic = t.querySelector("[data-rail-icon]");`,
+		`bar: cur >= 0 ? barOf(topics[cur]) : null,`,
+		`return topics[i] ? keyOf(topics[i]) : "";`,
+		`!c.hasAttribute("data-rail-name") && !c.hasAttribute("data-rail-icon")`,
+		`<span class="ci" hidden></span><span class="cn"></span>`,
+	} {
+		if !strings.Contains(js, want) {
+			t.Errorf("the rail script lacks %q", want)
+		}
+	}
+	if strings.Contains(js, `querySelector(":scope > .tbar") : null`) || strings.Contains(js, "b.children[1]") {
+		t.Error("the rail script still reads a topic's bar or a capsule's slots directly")
+	}
+	if !strings.Contains(css, ".wb-cap .ci { flex: none; display: inline-flex; }") {
+		t.Error("the shared stylesheet does not lay out a capsule's icon")
 	}
 }
 

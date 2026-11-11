@@ -3,6 +3,8 @@ package wsdashboard
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -177,11 +179,17 @@ func TestTerminalsAreOfferedToALocalViewerOnly(t *testing.T) {
 // TestTerminalSymbolsFont pins the terminal's symbols font: a page that
 // offers terminals declares its face under a content-hash name beside the
 // page, a LAN viewer's page does not, the font is served as woff2, cached
-// for good, and its license is embedded beside it.
+// for good, and its license is embedded beside it. The embedded bytes are
+// the ones the README records as fit.py's output, so the font in use is the
+// cell-fitted one (a 1em glyph shows cut in half in xterm's DOM renderer).
 func TestTerminalSymbolsFont(t *testing.T) {
 	name, data := TermSymbolsAsset()
 	if !strings.HasPrefix(name, "nerd-symbols-") || !strings.HasSuffix(name, ".woff2") || !bytes.HasPrefix(data, []byte("wOF2")) || len(data) > 2<<20 {
 		t.Fatalf("TermSymbolsAsset = %q (%d bytes), want a woff2 of at most 2 MiB under a hash name", name, len(data))
+	}
+	sum := sha256.Sum256(data)
+	if readme, err := os.ReadFile(filepath.Join("assets", "nerdfont", "README.md")); err != nil || !strings.Contains(string(readme), "`"+hex.EncodeToString(sum[:])+"`") || !strings.Contains(string(readme), "python fit.py SymbolsNerdFontMono-Regular.ttf WsNerdSymbols-Regular.woff2") {
+		t.Errorf("assets/nerdfont/README.md does not record the embedded font (sha256 %x) as fit.py's output: %v", sum, err)
 	}
 	if raw, err := termSymbolsLicense.ReadFile("assets/nerdfont/LICENSE"); err != nil || !strings.Contains(string(raw), "Ryan L McIntyre") || !strings.Contains(string(raw), "Permission is hereby granted, free of charge") {
 		t.Errorf("assets/nerdfont/LICENSE is not the Nerd Fonts MIT license: %v", err)

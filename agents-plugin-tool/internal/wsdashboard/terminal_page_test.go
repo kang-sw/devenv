@@ -68,11 +68,21 @@ func TestTerminalCardScriptMatchesTheRoutes(t *testing.T) {
 // is a fixed-height sticky row, the column sets the rail's inset to that
 // height only while it holds the row, and the rail (wswhiteboard rail.js,
 // page.css) sticks its top capsules and the current bar below the inset.
+// The row is opaque up to the column's top edge (its shadow fills the
+// column's top padding, above where it sticks), and a card's body is its
+// own stacking context, so nothing a card's body stacks shows through the
+// row.
 func TestBoardHeaderRowKeepsTheRailBelowIt(t *testing.T) {
 	css := mustAsset(t, "dashboard.css")
 	row := regexp.MustCompile(`(?m)^\.bhead \{[^}]*\}`).FindString(css)
 	if !strings.Contains(row, "position: sticky; top: 0;") || !strings.Contains(row, "height: 28px;") {
 		t.Errorf("the board header row is not a 28px sticky row: %q", row)
+	}
+	if !strings.Contains(row, "background: var(--wb-bg); box-shadow: 0 -8px 0 var(--wb-bg);") {
+		t.Errorf("the board header row does not fill the column's top padding above it: %q", row)
+	}
+	if !strings.Contains(css, "\n.bc-body, .bc-folded { isolation: isolate; }\n") {
+		t.Error("a board card's body is not its own stacking context")
 	}
 	if !strings.Contains(css, ".bcol:has(> .bhead) { --wb-rail-inset: 28px; }") {
 		t.Error("the board column does not set the rail's inset to the header row's height while it holds the row")
@@ -87,6 +97,37 @@ func TestBoardHeaderRowKeepsTheRailBelowIt(t *testing.T) {
 	for _, want := range []string{`getPropertyValue("--wb-rail-inset")`, `root.getBoundingClientRect().top + padTop + inset`, `host.style.setProperty("--wb-rail-top", inset + `, `host.style.setProperty("--wb-rail-h", inset + `} {
 		if !strings.Contains(string(wb.FormScript), want) {
 			t.Errorf("the rail script lacks %q", want)
+		}
+	}
+}
+
+// TestBoardCardsJoinTheTopicRail pins the board cards' place in the topic
+// rail (wswhiteboard rail.js's data-rail hook): every card is a rail item
+// whose header is its bar and whose header icon and name make its capsule,
+// and the card's header sticks at the rail's line with the stuck shadow, as
+// a topic's bar does, except in a maximized card's sheet. The card clips
+// rather than hides its overflow, so it is no scroll container for the
+// sticky header.
+func TestBoardCardsJoinTheTopicRail(t *testing.T) {
+	js := mustAsset(t, "cards.js")
+	for _, want := range []string{
+		`el.setAttribute("data-rail", c.id);`,
+		`head.setAttribute("data-rail-bar", "");`,
+		`c.icon.setAttribute("data-rail-icon", "");`,
+		`c.name.setAttribute("data-rail-name", "");`,
+	} {
+		if !strings.Contains(js, want) {
+			t.Errorf("cards.js lacks %q", want)
+		}
+	}
+	css := mustAsset(t, "dashboard.css")
+	for _, want := range []string{
+		"overflow: hidden; overflow: clip; display: flex; flex-direction: column; }",
+		".wb-rail .bcard:not([data-max]) .bc-hd { position: sticky; top: var(--wb-rail-top, 0px); z-index: 1; background: var(--wb-card);",
+		".wb-rail .bcard:not([data-max]) .bc-hd.wb-stuck { box-shadow: var(--wb-shadow); z-index: 3; }",
+	} {
+		if !strings.Contains(css, want) {
+			t.Errorf("dashboard.css lacks %q", want)
 		}
 	}
 }
