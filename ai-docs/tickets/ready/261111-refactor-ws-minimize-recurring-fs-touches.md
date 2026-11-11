@@ -288,3 +288,51 @@ Verification:
   `nice -n 19 claude plugin test agents-plugin` and the wsflow package.
 - Existing suites stay green: `go test ./...` remotely, plugin tests for ws
   and wsflow.
+
+### Result (82ca8f9e0) - 2026-11-11
+
+Implemented (140) through (145) in six commits (edb6f8a27, fdf968c02,
+8d43e769d, 271b76c6c, 84650b458, 82ca8f9e0).
+
+- (140) `mcp.ServerOptions.Live` (a `wsdashboard.LiveHost`, bound late in
+  `cmd/ws-mcp` through an atomic pointer on the proxy host) makes a hosted
+  server open a per-session `wsdashboard.HostedSlot`. Each debounced fire
+  publishes the snapshot in memory. The daemon serves that copy through
+  `SnapshotCache.SetLive` (and the session source's `LiveSnapshotHolder`).
+  A real change wakes pages with a live-only broker token (`live:<id>`); a
+  ring append uses `ring:<id>`. A live-only render reuses the previous
+  render's reads (`sessionReads`: page content, held, drained, and the ring
+  unless `ring:<id>` moved) and keeps the old refresh stamp. The index's
+  `SnapshotUpdatedAt` is patched with no Rev raise. The file flushes when
+  dirty once a heartbeat interval has passed, at turn end, and on
+  `Server.Close`, which also releases the slot. A failed flush restores the
+  flush clock. An idle heartbeat publishes a fresh `updatedAt` with no
+  write and no wake. Slots support takeover: the newer slot owns the copy.
+  A session directory the daemon does not serve stays on the direct path.
+- (141)/(145) A new `internal/wswake` hub. Hosted `mailbox wait` waits on
+  hard wakes (an in-process mailbox send, a daemon inbox write) and on
+  nudge wakes (`/nudge`, fired before the registration check; coalesced to
+  one recheck per second plus a trailing one), with a 10 s backstop. The
+  standalone CLI keeps 500 ms. A direct-path mailbox send posts `/nudge`
+  even when the sender is unregistered. The tracker watch is now 10 s
+  (with a cmd test seam). The band's git throttle is 10 s.
+- (142) `sessionStore` intake cache (root, scope, parent). The key's
+  existence is re-checked by one stat at most every 10 s. The cache serves
+  intake's handler, the live writer's active check, and intake's keyed-gate
+  pass only. The touch keeps `touchGuardWindow`.
+- (143) The band reads git only for model tool calls. The edit is mirrored
+  to wsflow.
+- (144) `wslive.State.BatchesEnded` gates the heartbeat repo refresh.
+
+Verification:
+- Remote `go test ./...` passes except `internal/wsrsrc`
+  `TestPiMirrorUpToDate`. That failure is already on the base (launcher copy
+  drift from 40da39aed) and this branch does not touch the file.
+- Hosted, direct-path, intake-cache, mailbox-wake, and live-only-render
+  tests are listed in the commits.
+- `claude plugin test` passes for agents-plugin and agents-plugin-wsflow
+  (698 each), and the wsflow python suite passes.
+
+Coverage note: a daemon restart is not tested end to end. It is covered by
+two tests together: the close-flush file check, and the slot-close test,
+which shows the file renders again once the copy is gone.
