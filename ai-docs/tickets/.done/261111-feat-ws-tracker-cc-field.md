@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: 9940211c702267ff
 sage-review-design-reviewed: 9940211c702267ff
+completed: 2026-11-11
 ---
 
 # Tracker: CC field
@@ -195,3 +196,48 @@ Verification:
   its add and remove control.
 - The three tracker playbook copies stay in parity, and `ko.json` holds the
   new UI keys.
+
+### Result (bcdd5eff9) - 2026-11-11
+
+Commits 3573e7493 (domain + engine + goldens), 035a91682 (MCP grammar,
+`related` scope, `cc:` search, playbooks), 10f1e25ab and 4c39b8c14
+(dashboard, i18n, mockup fixtures), and the develop merge bcdd5eff9.
+
+- Events `item.cc` / `item.uncc` with payload `{item, member}`, one member
+  per event, open to every member on a non-hidden item; `cc` needs a live
+  member, `uncc` also takes a removed one. A repeated add and a remove of a
+  member who is not CC'd apply as no-ops. One register per item and member,
+  so a concurrent add and remove fold by the register winner (golden case
+  `cc-concurrent`).
+- View: `items[id].cc` (live members, CC order), `my.related`
+  `{cc, mentioned, closed}` and `my.ccNotices` (a separate list, outside
+  `notices` and the badge). `closed` carries the done or dropped items
+  either section would hold, for the dashboard's recently-closed handling.
+- CC notices cover item.status / close / confirm / reject / reopen and
+  comment.add written after the viewer's CC, and leave out the viewer's own
+  events, items the viewer created or holds, and comments that mention the
+  viewer or reply to the viewer's comment (already in the feed).
+- `tracker.query` scope `related` renders the CC then the mentions section;
+  the item view prints a `cc:` line; `cc:<member>` / `cc:me` in the shared
+  search grammar (`cc:me` is the viewer first).
+- Dashboard: a list-only "related to me" chip after `mine` (count = both
+  sections), CC above Mentions, both open with counts; the item window's CC
+  list with add (member picker) and remove; CC feed entries keyed
+  `cc:<event>`; event sentences; 22 new keys in all 11 i18n tables.
+- After merging develop: an org superior's item.status names its assignee
+  in a CC notice's `to`, a dropped item moves to `closed` like a done one,
+  and a body mention dates from the body write the item's mentions come
+  from (three-way body merge); golden case `cc-wrapped`.
+- Verification: ws-rgo test of wstracker, wstrackerhook, mcp, wsdashboard,
+  wsi18n, wslive, wsrsrc all ok, vet clean; gen-golden.js: 284 reasons
+  cases agree; headless Chromium on the mockup confirmed the related chip,
+  CC above Mentions, and the item window's CC add/remove (pre-merge build).
+
+Forward:
+- The daemon hook's "mine" scope does not count CC (Decision 4 follow-up).
+- Involvement in `related` / CC notices is judged by the viewer's current
+  records, not as of each event: a CC'd member whose assignment later ended
+  sees CC notices for events from while they held it.
+- engine.js orders mention / CC dates by ts string compare, which misorders
+  mixed-precision RFC3339Nano strings; Go compares times. Goldens use uniform
+  precision, so parity cannot catch it (reference engine only).
