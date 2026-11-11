@@ -340,19 +340,6 @@
     "261110-bug-ws-tracker-item-window-drops-unsaved-edits": {
       "registered_at": "2026-11-10T13:38:46Z"
     },
-    "261110-bug-ws-tracker-store-lock-network-split": {
-      "registered_at": "2026-11-10T07:31:45Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-11T07:02:38Z",
-        "impl": {
-          "branch": "impl/develop/payee-brick-equal"
-        }
-      }
-    },
     "261110-bug-ws-whiteboard-option-quote-parse": {
       "registered_at": "2026-11-10T14:07:44Z"
     },
@@ -439,7 +426,17 @@
       }
     },
     "261110-feat-ws-whiteboard-item-field-html": {
-      "registered_at": "2026-11-10T11:16:39Z"
+      "registered_at": "2026-11-10T11:16:39Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "28ef83e379b353cc",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-11T08:03:12Z",
+        "impl": {
+          "branch": "impl/develop/pond-frail-hug"
+        }
+      }
     },
     "261110-research-ws-dashboard-agent-host-foundations": {
       "registered_at": "2026-11-09T15:09:40Z"
@@ -467,19 +464,6 @@
     },
     "261111-feat-ws-tracker-cc-field": {
       "registered_at": "2026-11-11T06:17:16Z"
-    },
-    "261111-feat-ws-tracker-store-settings-and-labels": {
-      "registered_at": "2026-11-11T05:22:54Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-11T07:01:20Z",
-        "impl": {
-          "branch": "impl/develop/cage-staff-cling"
-        }
-      }
     }
   }
 }
