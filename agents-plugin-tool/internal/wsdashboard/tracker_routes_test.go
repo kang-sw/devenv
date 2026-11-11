@@ -29,6 +29,7 @@ type fakeTracker struct {
 	checkErr  error
 	saveErr   error
 	regErr    error
+	unregErr  error // Unregister's error, when set; else the store leaves the list
 	renderErr error
 	events    []TrackerEvent
 	seen      TrackerSeen
@@ -174,6 +175,50 @@ func (f *fakeTracker) Register(_ context.Context, req TrackerRegisterRequest) (T
 		return TrackerRegisterResult{}, f.regErr
 	}
 	return TrackerRegisterResult{Store: req.ID, Creator: true, Profile: TrackerProfile{Given: "Ada"}}, nil
+}
+
+func (f *fakeTracker) Unregister(_ context.Context, id, confirm string) error {
+	f.record("unregister " + id + " " + confirm)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.unregErr != nil {
+		return f.unregErr
+	}
+	for i, st := range f.stores {
+		if st.ID == id {
+			f.stores = append(f.stores[:i:i], f.stores[i+1:]...)
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: %s", ErrTrackerUnknownStore, id)
+}
+
+// editStore rewrites the fake store id through edit and returns it.
+func (f *fakeTracker) editStore(id string, edit func(*TrackerStore)) (TrackerStore, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := range f.stores {
+		if f.stores[i].ID == id {
+			edit(&f.stores[i])
+			return f.stores[i], nil
+		}
+	}
+	return TrackerStore{}, fmt.Errorf("%w: %s", ErrTrackerUnknownStore, id)
+}
+
+// Relabel refuses a label holding a newline, as the host refuses a
+// control character.
+func (f *fakeTracker) Relabel(id, label string) (TrackerStore, error) {
+	f.record("label " + id + " " + label)
+	if strings.Contains(label, "\n") {
+		return TrackerStore{}, fmt.Errorf("%w: it holds a control character", ErrTrackerBadLabel)
+	}
+	return f.editStore(id, func(st *TrackerStore) { st.Label = label })
+}
+
+func (f *fakeTracker) SetHidden(id string, hidden bool) (TrackerStore, error) {
+	f.record("hidden " + id + " " + strconv.FormatBool(hidden))
+	return f.editStore(id, func(st *TrackerStore) { st.Hidden = hidden })
 }
 
 func (f *fakeTracker) Render(_ context.Context, id string, req TrackerRenderRequest) (string, error) {
@@ -627,6 +672,8 @@ func trackerPosts() []struct{ path, body string } {
 		{"/tracker/stores/team/seen", `{"badge":["b"]}`},
 		{"/tracker/profiles", `{"given":"Ada"}`},
 		{"/tracker/register", `{"id":"new"}`},
+		{"/tracker/stores/team/label", `{"label":"Team"}`},
+		{"/tracker/stores/team/hidden", `{"hidden":false}`},
 	}
 }
 
@@ -1013,5 +1060,124 @@ func TestTrackerWikiRoutes(t *testing.T) {
 	}
 	if got := fake.recorded(); len(got) != before {
 		t.Errorf("refused requests reached the host: %v", got[before:])
+	}
+}
+
+// TestTrackerRegistryRoutes pins the store registry writes: label and
+// hidden answer the store as written and bump the revision, the store list
+// carries the hidden flag (the page filters), a refused label is 400 and a
+// refused unregister 409 with its kind, neither bumping the revision, and
+// an unregistered store leaves the list, after which every route naming it
+// answers 404 as an unknown store.
+func TestTrackerRegistryRoutes(t *testing.T) {
+	fake := newFakeTracker()
+	fake.stores = append(fake.stores, TrackerStore{ID: "solo", Label: "solo", Member: "ada"})
+	d := startTrackerDaemon(t, fake)
+	rev := trackerRev(t, d)
+	bumped := func(what string, want bool) {
+		t.Helper()
+		now := trackerRev(t, d)
+		if (now > rev) != want {
+			t.Errorf("after %s the revision went %d -> %d; want bumped=%v", what, rev, now, want)
+		}
+		rev = now
+	}
+
+	code, body := call(d, http.MethodPost, "/tracker/stores/team/label", `{"label":"Renamed"}`)
+	if code != http.StatusOK || body != `{"id":"team","label":"Renamed","member":"ada","remote":"https://***@example.invalid/x.git"}`+"\n" {
+		t.Fatalf("label = %d %s", code, body)
+	}
+	bumped("a relabel", true)
+	code, body = call(d, http.MethodPost, "/tracker/stores/team/label", `{"label":"two\nlines"}`)
+	if code != http.StatusBadRequest || !strings.Contains(body, "bad store label") {
+		t.Fatalf("bad label = %d %s, want 400", code, body)
+	}
+	bumped("a refused label", false)
+
+	code, body = call(d, http.MethodPost, "/tracker/stores/solo/hidden", `{"hidden":true}`)
+	if code != http.StatusOK || body != `{"id":"solo","label":"solo","member":"ada","remote":"","hidden":true}`+"\n" {
+		t.Fatalf("hide = %d %s", code, body)
+	}
+	bumped("a hide", true)
+	code, body = call(d, http.MethodGet, "/tracker/stores", "")
+	if code != http.StatusOK || !strings.Contains(body, `{"id":"team","label":"Renamed","member":"ada","remote":"https://***@example.invalid/x.git"},{"id":"solo","label":"solo","member":"ada","remote":"","hidden":true}`) {
+		t.Fatalf("stores after the hide = %d %s; want every store listed, the hidden one marked", code, body)
+	}
+	// A hidden store's routes serve it as any other.
+	if code, body := call(d, http.MethodGet, "/tracker/stores/solo/view", ""); code != http.StatusOK {
+		t.Fatalf("view of a hidden store = %d %s", code, body)
+	}
+
+	// An absent field is malformed, not a clear or a show, and reaches no host.
+	before := len(fake.recorded())
+	for _, op := range []string{"label", "hidden"} {
+		if code, body := call(d, http.MethodPost, "/tracker/stores/team/"+op, `{}`); code != http.StatusBadRequest || !strings.Contains(body, op+" required") {
+			t.Errorf("%s with no field = %d %s, want 400", op, code, body)
+		}
+	}
+	if got := fake.recorded(); len(got) != before {
+		t.Fatalf("a body with no field reached the host: %v", got[before:])
+	}
+
+	fake.unregErr = &TrackerUnregisterRefusal{Kind: TrackerUnregisterUnpushed, Message: "The store team was not unregistered: sync the store first."}
+	code, body = call(d, http.MethodPost, "/tracker/stores/team/unregister", `{}`)
+	if code != http.StatusConflict || body != `{"error":"The store team was not unregistered: sync the store first.","kind":"unpushed"}`+"\n" {
+		t.Fatalf("refused unregister = %d %s", code, body)
+	}
+	bumped("a refused unregister", false)
+	fake.unregErr = fmt.Errorf("%w: removed by another process", ErrTrackerUnknownStore)
+	if code, body := call(d, http.MethodPost, "/tracker/stores/team/unregister", `{}`); code != http.StatusNotFound || body != `{"error":"unknown store"}`+"\n" {
+		t.Fatalf("unregister of a store removed meanwhile = %d %s, want 404", code, body)
+	}
+	fake.unregErr = nil
+
+	code, body = call(d, http.MethodPost, "/tracker/stores/solo/unregister", `{"confirm":"solo"}`)
+	if code != http.StatusNoContent || body != "" {
+		t.Fatalf("unregister = %d %s", code, body)
+	}
+	if got := fake.recorded(); got[len(got)-1] != "unregister solo solo" {
+		t.Fatalf("the confirm did not reach the host: %v", got)
+	}
+	bumped("an unregister", true)
+	if _, body := call(d, http.MethodGet, "/tracker/stores", ""); strings.Contains(body, `"solo"`) {
+		t.Fatalf("an unregistered store is still listed: %s", body)
+	}
+	before = len(fake.recorded())
+	for _, r := range []struct{ method, path, body string }{
+		{http.MethodGet, "/tracker/stores/solo/view", ""},
+		{http.MethodPost, "/tracker/stores/solo/sync", ""},
+		{http.MethodPost, "/tracker/stores/solo/seen", `{"badge":["b"]}`},
+		{http.MethodPost, "/tracker/stores/solo/unregister", `{"confirm":"solo"}`},
+		{http.MethodPost, "/tracker/stores/solo/label", `{"label":"x"}`},
+		{http.MethodPost, "/tracker/stores/solo/hidden", `{"hidden":false}`},
+	} {
+		if code, body := call(d, r.method, r.path, r.body); code != http.StatusNotFound || body != `{"error":"unknown store"}`+"\n" {
+			t.Errorf("%s %s after the unregister = %d %s, want 404 unknown store", r.method, r.path, code, body)
+		}
+	}
+	if got := fake.recorded(); len(got) != before {
+		t.Fatalf("a route naming the removed store reached the host: %v", got[before:])
+	}
+}
+
+// TestTrackerUnregisterRequiresTheDaemonsOwnOrigin: a cross-site unregister
+// reaches no host and leaves the store; trackerPosts covers label and
+// hidden, whose writes the other routes' checks need the store for.
+func TestTrackerUnregisterRequiresTheDaemonsOwnOrigin(t *testing.T) {
+	fake := newFakeTracker()
+	d := startTrackerDaemon(t, fake)
+	base := endpointURL(d.Endpoint(), "")
+	for _, origin := range []string{"", "null", "http://evil.example"} {
+		code, header, _ := postJSON(t, base+"/tracker/stores/team/unregister", origin, `{"confirm":"team"}`)
+		if code != http.StatusForbidden {
+			t.Errorf("unregister with Origin %q = %d, want 403", origin, code)
+		}
+		assertNoCORS(t, header)
+	}
+	if got := fake.recorded(); len(got) != 0 {
+		t.Fatalf("a cross-origin unregister reached the host: %v", got)
+	}
+	if code, _, body := postJSON(t, base+"/tracker/stores/team/unregister", base, `{"confirm":"team"}`); code != http.StatusNoContent {
+		t.Fatalf("same-origin unregister = %d %s", code, body)
 	}
 }

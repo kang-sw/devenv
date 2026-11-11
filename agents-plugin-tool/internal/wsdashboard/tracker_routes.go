@@ -26,6 +26,11 @@ import (
 //	POST /tracker/stores/<id>/sync       the sync report
 //	POST /tracker/stores/<id>/seen       {"badge", "read"} -> 204
 //	POST /tracker/stores/<id>/render     {"text", "attachments"} -> {"html"}: an editor's preview
+//	POST /tracker/stores/<id>/unregister {"confirm"} -> 204: the store leaves this machine, its
+//	                                     local clone deleted, the remote kept; a refusal is 409
+//	                                     with {"error", "kind"}
+//	POST /tracker/stores/<id>/label      {"label"} -> the store as written; a refused label is 400
+//	POST /tracker/stores/<id>/hidden     {"hidden"} -> the store as written
 //	POST /tracker/stores/<id>/attachments?name=<name>
 //	                                     raw image bytes -> {"oid", "name", "size", "mime"}
 //	GET  /tracker/stores/<id>/attachments/<oid>
@@ -53,6 +58,17 @@ import (
 //
 // "support" reports that the daemon serves the store chats
 // (SupportRoutePrefix), so the drawer shows each store's chat tab.
+//
+// The store list holds every registered store, a hidden one marked
+// "hidden": hiding is the page's to apply (it leaves the store out of its
+// handle row), and every store route serves a hidden store as any other.
+// Unregister, label, and hidden change only this machine's registry, never
+// the store. Unregister's confirm is the store id the user typed, which a
+// store with no remote (its only copy is the one deleted) requires; the
+// host ignores it for a store with a remote, whose refusal guards unpushed
+// writes instead. The refusal's kind is one of the TrackerUnregister*
+// kinds. A store removed meanwhile (by another process) answers 404 as an
+// unknown store does.
 //
 // The attachment upload stages an image for a later dispatch, whose event
 // names it by the returned oid; it reads a raw body (not JSON) under the
@@ -107,7 +123,37 @@ var (
 	// ErrTrackerBusy: a wiki or image read gave up waiting for the store,
 	// held by a fetch or push; the route answers 503 with Retry-After.
 	ErrTrackerBusy = errors.New("store busy")
+	// ErrTrackerBadLabel: a store label the host refuses (a control
+	// character, or longer than its limit); the label route answers 400.
+	ErrTrackerBadLabel = errors.New("bad store label")
+	// ErrTrackerUnknownStore: the store was unregistered after the route
+	// found it listed; the store routes that wrap it answer 404.
+	ErrTrackerUnknownStore = errors.New("unknown store")
 )
+
+// The kinds of a TrackerUnregisterRefusal.
+const (
+	// TrackerUnregisterConfirm: the store has no remote, and the confirm
+	// did not name it.
+	TrackerUnregisterConfirm = "confirm"
+	// TrackerUnregisterBusy: a check, sync, or write holds the store.
+	TrackerUnregisterBusy = "busy"
+	// TrackerUnregisterUnpushed: the clone holds writes its remote does not;
+	// a sync can push them.
+	TrackerUnregisterUnpushed = "unpushed"
+	// TrackerUnregisterStuck: the clone holds writes no sync can push.
+	TrackerUnregisterStuck = "stuck"
+)
+
+// TrackerUnregisterRefusal is an unregister the host refused, the store
+// left exactly as it was: Kind is one of the TrackerUnregister* kinds,
+// Message a full sentence the page shows.
+type TrackerUnregisterRefusal struct {
+	Kind    string
+	Message string
+}
+
+func (e *TrackerUnregisterRefusal) Error() string { return e.Message }
 
 // trackerBusyRetry is the Retry-After, in seconds, of a busy read's 503.
 const trackerBusyRetry = "1"
@@ -149,6 +195,18 @@ type TrackerHost interface {
 	SaveProfile(p TrackerProfile) error
 	// Register registers (and when new, creates) a store.
 	Register(ctx context.Context, req TrackerRegisterRequest) (TrackerRegisterResult, error)
+	// Unregister removes store id from this machine, its registration and
+	// its local clone, and keeps the remote. confirm is the store id the
+	// user typed, which a store with no remote requires. A refusal is a
+	// *TrackerUnregisterRefusal; the store is then as it was.
+	Unregister(ctx context.Context, id, confirm string) error
+	// Relabel sets store id's display label on this machine and returns
+	// the store as written; an empty label clears it back to the id. A
+	// label the host refuses wraps ErrTrackerBadLabel.
+	Relabel(id, label string) (TrackerStore, error)
+	// SetHidden hides or shows store id on this machine and returns the
+	// store as written.
+	SetHidden(id string, hidden bool) (TrackerStore, error)
 	// Render renders text written for store id the way the view renders
 	// an item body or comment text, so an editor's preview matches the
 	// saved view. It writes nothing.
@@ -281,11 +339,14 @@ type TrackerAttachment struct {
 }
 
 // TrackerStore is one registered store as the stores route lists it.
+// Hidden: the user hid it on this machine; the page leaves it out of its
+// handle row.
 type TrackerStore struct {
 	ID     string `json:"id"`
 	Label  string `json:"label"`
 	Member string `json:"member"`
 	Remote string `json:"remote"`
+	Hidden bool   `json:"hidden,omitempty"`
 }
 
 // TrackerSeen is what the viewer has seen on a store: the handle-badge
@@ -386,6 +447,9 @@ var trackerStoreOps = map[string]string{
 	"attachments": http.MethodPost,
 	"render":      http.MethodPost,
 	"wiki":        http.MethodGet,
+	"unregister":  http.MethodPost,
+	"label":       http.MethodPost,
+	"hidden":      http.MethodPost,
 }
 
 // trackerWikiOps are the operations of one wiki,
@@ -632,6 +696,8 @@ func (d *Daemon) handleTracker(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"html": html})
+	case op == "unregister" || op == "label" || op == "hidden":
+		d.trackerRegistryWrite(ctx, w, r, storeID, op)
 	case op == "attachments":
 		d.trackerStageAttachment(ctx, w, r, storeID)
 	case op == "attachment":
@@ -748,6 +814,60 @@ func (d *Daemon) trackerDispatch(ctx context.Context, w http.ResponseWriter, r *
 	}
 	d.TrackerChanged()
 	writeJSON(w, http.StatusOK, map[string]any{"ids": nonNil(ids)})
+}
+
+// trackerRegistryWrite serves the registry writes of store id: unregister,
+// label, and hidden. A refused unregister writes nothing, so it leaves the
+// revision; every write that landed bumps it.
+func (d *Daemon) trackerRegistryWrite(ctx context.Context, w http.ResponseWriter, r *http.Request, id, op string) {
+	var body struct {
+		Confirm string  `json:"confirm"`
+		Label   *string `json:"label"`
+		Hidden  *bool   `json:"hidden"`
+	}
+	if !decodeTrackerBody(w, r, &body) {
+		return
+	}
+	var store TrackerStore
+	var err error
+	switch op {
+	case "unregister":
+		err = d.tracker.Unregister(ctx, id, body.Confirm)
+	case "label":
+		// An absent label is a malformed request, not a clear: "" clears.
+		if body.Label == nil {
+			trackerError(w, http.StatusBadRequest, "label required")
+			return
+		}
+		store, err = d.tracker.Relabel(id, *body.Label)
+	case "hidden":
+		if body.Hidden == nil {
+			trackerError(w, http.StatusBadRequest, "hidden required")
+			return
+		}
+		store, err = d.tracker.SetHidden(id, *body.Hidden)
+	}
+	var refusal *TrackerUnregisterRefusal
+	switch {
+	case errors.As(err, &refusal):
+		writeJSON(w, http.StatusConflict, map[string]string{"error": refusal.Message, "kind": refusal.Kind})
+		return
+	case errors.Is(err, ErrTrackerUnknownStore):
+		trackerError(w, http.StatusNotFound, "unknown store")
+		return
+	case errors.Is(err, ErrTrackerBadLabel):
+		trackerError(w, http.StatusBadRequest, err.Error())
+		return
+	case err != nil:
+		trackerError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	d.TrackerChanged()
+	if op == "unregister" {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	writeJSON(w, http.StatusOK, store)
 }
 
 // trackerStageAttachment serves the attachment upload of store id. Staging
