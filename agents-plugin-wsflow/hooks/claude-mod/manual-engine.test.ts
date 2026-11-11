@@ -1,5 +1,6 @@
 import { expect, mock, test, type TestBody } from 'claude-code/testing'
 
+import { HOSTED_FLAG_ENV, HOSTED_KEY_ENV, missingKeyWarning } from './hosted'
 import { adoptionNotice, inlinedPointerText, KEY_STORE_PREFIX, KEY_WAIT_MS, MAILBOX_LINE, pointerText, preloadPointerLine, rowText } from './manual'
 import { KEY_PLACEHOLDER } from './preload'
 import { KNOB } from './register'
@@ -49,10 +50,12 @@ function world(
     sessionScoped?: boolean
     /** The start's mcp.connect answers not connected. */
     serverDown?: boolean
+    /** The session's environment variables (the hosted-session pair among them). */
+    env?: Record<string, string>
   } = {},
 ) {
   const clock = mock.clock(on, { now: 1_800_000_000_000 })
-  mock.env(on, {})
+  mock.env(on, opts.env ?? {})
   const w = {
     clock,
     /** The plugin's $.store. */
@@ -1072,4 +1075,99 @@ test('preload dedupe: a keyed lead-use-mailbox read between two expansions leave
   const args = { name: 'lead-use-mailbox', session_key: 'minted-1' }
   remember(w, 'playbook_read', args, seen(await read($, w, 'playbook_read', args))!)
   expect(await expand($, w, 'lead-use-mailbox', shim('Use Mailbox', 'lead-use-mailbox'))).toBe(first)
+})
+
+// Hosted-session mode (hosted.ts): the daemon minted the key and delivers
+// every input, so the conversation re-logs in with that key and never mints,
+// no mailbox wait runs at any arm, and the dashboard feed stays off.
+
+const HOSTED = { [HOSTED_FLAG_ENV]: '1', [HOSTED_KEY_ENV]: 'hosted-key' }
+const intakeCalls = (w: World) => w.mcpCalls.filter((c) => c.tool === 'dashboard_intake')
+const dashboardReads = (w: World) => w.configCalls.filter((a) => a.key === KNOB.dashboard)
+
+/** A main-thread turn start and end, then the feed's flush timer. */
+async function turn($: Engine, w: World) {
+  await $.turn.start({ text: 'x', turnId: 't' } as never)
+  await $.turn.complete({ answer: 'done', durationMs: 1, isAborted: false, turnId: 't', reason: 'answer' } as never)
+  await w.clock.advance(200)
+}
+
+test('hosted: the daemon key is re-logged in at start and nothing is minted; no wait runs and no mailbox_watch registers, with host commands', LIVE_CHILD, async ($, on) => {
+  const w = world(on, { knobs: ON, processOk: true, env: HOSTED })
+  w.known.add('hosted-key')
+  await start($, w)
+  expect(ferruleArgs(w)).toEqual([{ root: '/repo/sub', format: 'json', relogin_session_key: 'hosted-key' }])
+  expect(w.minted).toBe(0)
+  expect(w.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'hosted-key', at: 1_800_000_000_000 })
+  expect(watchTool(w)).toBe(false)
+  expect(w.spawns).toEqual([])
+  // The row names the daemon's key; no mailbox line, since the mod runs no push.
+  await expand($, w, 'lead-discuss', shim('Discuss', 'lead-discuss'))
+  expect(w.rows).toEqual([ROW(w, 'hosted-key')])
+  expect(w.rows[0]).not.toContain(MAILBOX_LINE)
+})
+
+test('hosted: a stored key from an earlier run loses to the daemon key', async ($, on) => {
+  const w = world(on, { knobs: ON, env: HOSTED, store: { [`${KEY_STORE_PREFIX}sess-1`]: { sessionKey: 'kept-key', at: 1_800_000_000_000 } } })
+  w.known.add('hosted-key')
+  w.known.add('kept-key')
+  await start($, w)
+  expect(ferruleArgs(w)).toEqual([{ root: '/repo/sub', format: 'json', relogin_session_key: 'hosted-key' }])
+  expect(w.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'hosted-key', at: 1_800_000_000_000 })
+})
+
+test('hosted: a refused re-login with the daemon key mints nothing, and expansions pass through', async ($, on) => {
+  const w = world(on, { knobs: ON, env: HOSTED })
+  await start($, w)
+  expect(ferruleArgs(w)).toEqual([{ root: '/repo/sub', format: 'json', relogin_session_key: 'hosted-key' }])
+  expect(w.minted).toBe(0)
+  const original = shim('Discuss', 'lead-discuss')
+  expect(await expand($, w, 'lead-discuss', original)).toBe(original)
+  expect(w.minted).toBe(0)
+  expect(w.rows).toEqual([])
+})
+
+test('hosted: a revive the server refuses adopts nothing and arms no wait; after /clear the next turn re-logs in with the daemon key', LIVE_CHILD, async ($, on) => {
+  const w = world(on, { knobs: ON, processOk: true, env: HOSTED })
+  w.known.add('hosted-key')
+  await start($, w)
+  // ws-mcp refuses a re-login with any other key under the flag: here, a key it does not know.
+  const res = await read($, w, 'workflow_manual', { session_key: 'other-key' })
+  expect(seen(res)).toBe(keyedResponse('other-key', '(no todos)'))
+  expect(w.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'hosted-key', at: 1_800_000_000_000 })
+  await clear($, w)
+  w.sessionId = 'sess-2'
+  await turnStart($, w)
+  expect(ferruleArgs(w).at(-1)).toEqual({ root: '/repo/sub', format: 'json', relogin_session_key: 'hosted-key' })
+  expect(w.minted).toBe(0)
+  expect(w.store.get(`${KEY_STORE_PREFIX}sess-2`)).toEqual({ sessionKey: 'hosted-key', at: 1_800_000_000_000 })
+  expect(w.spawns).toEqual([])
+})
+
+test('dashboard knob on: an ordinary session sends its turns to the intake under its key', async ($, on) => {
+  const w = world(on, { knobs: { ...ON, [KNOB.dashboard]: true } })
+  await start($, w)
+  await turn($, w)
+  expect(dashboardReads(w).length).toBe(1)
+  expect(intakeCalls(w).length).toBeGreaterThan(0)
+  expect(intakeCalls(w).every((c) => c.args.session_key === 'minted-1')).toBe(true)
+})
+
+test('hosted with the dashboard knob on: the knob is not read and nothing reaches the intake', async ($, on) => {
+  const w = world(on, { knobs: { ...ON, [KNOB.dashboard]: true }, env: HOSTED })
+  w.known.add('hosted-key')
+  await start($, w)
+  await turn($, w)
+  expect(dashboardReads(w)).toEqual([])
+  expect(intakeCalls(w)).toEqual([])
+})
+
+test('the flag without a key gates nothing: a transcript warning, a minted key, an automatic bind, and the feed', LIVE_CHILD, async ($, on) => {
+  const w = world(on, { knobs: { ...ON, [KNOB.dashboard]: true }, processOk: true, env: { [HOSTED_FLAG_ENV]: '1', [HOSTED_KEY_ENV]: '  ' } })
+  await start($, w)
+  expect(w.logs.filter((l) => l.to === 'transcript').map((l) => l.text)).toContain(missingKeyWarning(w.plugin))
+  expect(ferruleArgs(w)).toEqual([{ root: '/repo/sub', format: 'json' }])
+  expect(boundKeys(w)).toEqual(['minted-1'])
+  await turn($, w)
+  expect(intakeCalls(w).length).toBeGreaterThan(0)
 })

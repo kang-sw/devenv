@@ -40,7 +40,7 @@ function world(
     failDrain?: boolean
     /** The drain value is tuned at session scope only: a read without session_key finds it unset. */
     sessionScoped?: boolean
-    /** Delays (ms on the mock clock) for the next env reads, in call order. */
+    /** Delays (ms on the mock clock) for the next WS_MAILBOX reads, in call order; other variables answer at once. */
     envDelays?: number[]
     /** The caption switch (claude.display_summary_enabled) reads true. */
     captions?: boolean
@@ -48,9 +48,9 @@ function world(
 ) {
   const clock = mock.clock(on)
   const envDelays = [...(opts.envDelays ?? [])]
-  // mock.env's answers, with a delay a test can put on a read.
+  // mock.env's answers, with a delay a test can put on a WS_MAILBOX read.
   on('env.get', async ($, e) => {
-    const delay = envDelays.shift()
+    const delay = e.name === 'WS_MAILBOX' ? envDelays.shift() : undefined
     if (delay) await clock.sleep(delay)
     return { value: opts.env?.[e.name] }
   })
@@ -552,6 +552,26 @@ test('a start whose env read outlasts a newer start assigns no watcher of its ow
   expect(w.recvCalls).toEqual([{ key: 'k1', origin: w.plugin }])
   expect(w.prompts[0]).toContain('2 message(s) arrived for session_key k1')
   expect(w.spawns.length).toBe(2)
+})
+
+test('hosted session: no mailbox_watch tool, no wait, and no drain knob read, outside a ws project too', async ($, on) => {
+  const w = world(on, { drain: 'direct', env: { WS_HOSTED_SESSION: '1', WS_HOSTED_SESSION_KEY: 'hosted-key' } })
+  await start($, w)
+  expect(mailboxTools(w)).toEqual([])
+  expect(w.spawns).toEqual([])
+  expect(drainReads(w)).toEqual([])
+  // The reconnect and compaction levers register as everywhere.
+  expect(w.registered).toContain('request_compaction')
+  expect(w.registered).toContain('request_mcp_reconnect')
+})
+
+test('the hosted flag without a key changes nothing: the bind tool registers and binds a wait', async ($, on) => {
+  const w = world(on, { env: { WS_HOSTED_SESSION: '1' } })
+  await start($, w)
+  expect(mailboxTools(w)).toEqual(['mailbox_watch'])
+  await bind($, w, 'k1')
+  expect(w.spawns.length).toBe(1)
+  expect(transcript(w).some((line) => line.includes('WS_HOSTED_SESSION_KEY'))).toBe(true)
 })
 
 test('a slow server start does not hold session.start; the bind tool and the direct watcher come up once it connects', async ($, on) => {
