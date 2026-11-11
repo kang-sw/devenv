@@ -9,8 +9,9 @@ registered on this machine: personal stores, and team stores shared through a
 git repository. Only a top-level lead and a store's support conversation call
 the tracker tools; workers and subagents report progress to their lead. A
 support conversation writes to its own store alone, and only what the user
-asks for in its chat: the unasked recording below is a lead's, and
-`tk:register` and `tk:sync` are refused to it.
+asks for in its chat: the unasked recording below is a lead's, and the
+store commands (`tk:register`, `tk:sync`, `tk:unregister`, `tk:relabel`,
+`tk:hide`, `tk:unhide`) are refused to it.
 
 ## Calls
 
@@ -80,14 +81,14 @@ tracker.query payload: {store?, scope?, item?, kind?, status?, project?, text?, 
 
 Every tag carries the prefix `tk:` and follows the command syntax rules.
 `tk:store` is the group: its `name` names the store for every command
-inside it, which is every command except `tk:register` and `tk:sync`. A
-batch writes to one store, so it holds one `tk:store` group. `tk:register`
-and `tk:sync` reach the network, so each stands alone in its batch, outside
-any group.
+inside it, which is every command except the store commands `tk:register`,
+`tk:sync`, `tk:unregister`, `tk:relabel`, `tk:hide`, and `tk:unhide`. A
+batch writes to one store, so it holds one `tk:store` group. A store command
+cannot be rolled back, so each stands alone in its batch, outside any group.
 
 | command | attributes | content |
 |---|---|---|
-| `tk:store` | `name` | group of every command below but `tk:register` and `tk:sync` |
+| `tk:store` | `name` | group of every command below but the store commands |
 | `tk:item.create` | `kind`, `title`, `project?`, `due?`, `priority?`, `parent?`, `after?`, `mentions?`, `refs?` | the body |
 | `tk:item.edit` | `item`, `title?`, `project?`, `due?`, `priority?`, `mentions?`, `refs?`, `clear?` | a new body |
 | `tk:item.hide` | `item` | none |
@@ -111,6 +112,9 @@ any group.
 | `tk:roles.set_attachment_limit` | `max_bytes` | none |
 | `tk:register` | `store`, `member`, `remote?`, `label?`, `org?`, `family?`, `given?` | none |
 | `tk:sync` | `store?` | none |
+| `tk:unregister` | `store`, `confirm?` | none |
+| `tk:relabel` | `store`, `label` | none |
+| `tk:hide`, `tk:unhide` | `store` | none |
 
 ```xml
 <tk:store name="team">
@@ -203,6 +207,16 @@ Body text, markdown, written as is.
   The profile (`org`, `family`, `given`) is how others see the user. Before a
   register without `given`, offer the saved profiles the query lists or ask
   the user, since without `given` it uses the profile used last.
+- `tk:unregister`, `tk:relabel`, `tk:hide`, and `tk:unhide` change this
+  machine only and write nothing to the store. Send them only when the user
+  asks. `tk:unregister` removes the store from this machine and deletes its
+  local copy; the remote is left, so `tk:register` brings the store back. It
+  is refused while the copy holds writes not yet pushed: sync first. A store
+  with no remote holds its only copy here, so its data is lost for good, and
+  it is removed only with `confirm` set to the store id.
+- `tk:relabel` sets the display name; `label=""` clears it back to the
+  store id. `tk:hide` leaves the store out of the dashboard's store list;
+  the tracker tools still read and write it. `tk:unhide` lists it again.
 
 ## Sync
 
