@@ -137,9 +137,10 @@ type Item struct {
 	// time.
 	Settled int `json:"settled,omitempty"`
 	// ReaskedAt is the wall-clock time (RFC 3339, millisecond precision) of
-	// the item's latest re-ask: a patch that changed its class or options, or
-	// set it back to open from settled or assumed. Empty when it was never
-	// re-asked. The dashboard drops sent marks older than it (ReaskTimes).
+	// the item's latest re-ask: a patch that changed its title, class, or
+	// options and left it open, or set it back to open from settled or
+	// assumed. Empty when it was never re-asked. The dashboard drops sent
+	// marks older than it (ReaskTimes).
 	ReaskedAt string `json:"reasked_at,omitempty"`
 }
 
@@ -855,8 +856,10 @@ var patchClearValues = []string{"options", "links"}
 // patch's own status change applies, so one patch can reopen a settled item,
 // reclass it, and give it new options: a stored answer means something only
 // under the class and options it was given. A patch that really changes the
-// class or the options, or sets a settled or assumed item back to open, is a
-// re-ask and stamps ReaskedAt with now.
+// title, the class, or the options of an item open after the patch, or sets a
+// settled or assumed item back to open, is a re-ask and stamps ReaskedAt with
+// now: the title and the options carry the question, so a rewritten title asks
+// it again. A title fix on an item the patch leaves settled stamps nothing.
 func applyPatch(p *problems, work *State, cmd command, mark int, now time.Time) int {
 	before := len(p.List)
 	idx, id := -1, 0
@@ -945,7 +948,8 @@ func applyPatch(p *problems, work *State, cmd command, mark int, now time.Time) 
 			work.settle(&next)
 		}
 	}
-	if reopened || next.Class != prev.Class || !slices.Equal(next.Options, prev.Options) {
+	retitled := next.Status == StatusOpen && next.Title != prev.Title
+	if reopened || retitled || next.Class != prev.Class || !slices.Equal(next.Options, prev.Options) {
 		next.ReaskedAt = now.UTC().Format(reaskLayout)
 	}
 	work.Items[idx] = next
