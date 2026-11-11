@@ -805,8 +805,11 @@ export const register: Register = (on) => {
       // Hosted: the daemon delivers mail and dashboard messages, so no
       // watcher exists to arm or re-arm (a key change binds nothing), and
       // the bind tool stays unregistered.
+      // Push reads available all the same: the daemon's delivery is the push,
+      // so the manual row keeps telling the model to launch no mailbox wait
+      // (its own wait would race the daemon for the same mail).
       if ((await hostedRead).mode === 'hosted') {
-        settlePush(false)
+        settlePush(true)
         mailboxLog(`hosted session: the daemon delivers input; no mailbox wait runs and ${TOOL_NAME} is not registered`)
         return
       }

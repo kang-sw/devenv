@@ -509,10 +509,15 @@ export function createManual(): Manual {
     if (!server) throw new Error('the MCP server was not resolved')
     const [sessionId, root] = await Promise.all([e.sessionId(), e.root()])
     const entry = KEY_STORE_PREFIX + sessionId
-    const held = (await e.hostedKey?.()) ?? lateBound
+    const hosted = await e.hostedKey?.()
+    const held = hosted ?? lateBound
     const stored = held ?? storedKey(await e.store.get(entry))
     let key = stored !== undefined && (await relogin(e, server, root, stored)) ? stored : undefined
     if (key === undefined) {
+      if (hosted !== undefined) {
+        // Visible: a hosted conversation left keyless is the daemon's fault to fix, and nothing else says so.
+        e.log(`[${e.plugin}] the hosted session key ${hosted} (WS_HOSTED_SESSION_KEY) was refused; no key was minted, so the workflow manual is not delivered.`, 'transcript')
+      }
       if (held !== undefined) throw new Error(`the re-login with the held key ${held} was refused`)
       key = ferruleKey(await e.call(server, 'ferrule', { root, format: 'json' }))
       if (key === undefined) throw new Error('ferrule answered no session key')

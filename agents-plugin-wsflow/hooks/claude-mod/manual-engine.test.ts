@@ -1101,10 +1101,11 @@ test('hosted: the daemon key is re-logged in at start and nothing is minted; no 
   expect(w.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'hosted-key', at: 1_800_000_000_000 })
   expect(watchTool(w)).toBe(false)
   expect(w.spawns).toEqual([])
-  // The row names the daemon's key; no mailbox line, since the mod runs no push.
+  // The row names the daemon's key and keeps the mailbox line: the daemon's
+  // delivery is the push, so the model must launch no wait of its own.
   await expand($, w, 'lead-discuss', shim('Discuss', 'lead-discuss'))
-  expect(w.rows).toEqual([ROW(w, 'hosted-key')])
-  expect(w.rows[0]).not.toContain(MAILBOX_LINE)
+  expect(w.rows).toEqual([ROW(w, 'hosted-key', '(no todos)', true)])
+  expect(w.rows[0]).toContain(MAILBOX_LINE)
 })
 
 test('hosted: a stored key from an earlier run loses to the daemon key', async ($, on) => {
@@ -1116,11 +1117,12 @@ test('hosted: a stored key from an earlier run loses to the daemon key', async (
   expect(w.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'hosted-key', at: 1_800_000_000_000 })
 })
 
-test('hosted: a refused re-login with the daemon key mints nothing, and expansions pass through', async ($, on) => {
+test('hosted: a refused re-login with the daemon key mints nothing, says so in the transcript, and expansions pass through', async ($, on) => {
   const w = world(on, { knobs: ON, env: HOSTED })
   await start($, w)
   expect(ferruleArgs(w)).toEqual([{ root: '/repo/sub', format: 'json', relogin_session_key: 'hosted-key' }])
   expect(w.minted).toBe(0)
+  expect(w.logs.some((l) => l.to === 'transcript' && l.text.includes('hosted-key') && l.text.includes('WS_HOSTED_SESSION_KEY'))).toBe(true)
   const original = shim('Discuss', 'lead-discuss')
   expect(await expand($, w, 'lead-discuss', original)).toBe(original)
   expect(w.minted).toBe(0)
