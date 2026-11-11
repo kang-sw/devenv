@@ -434,12 +434,19 @@ details.panel .body { container-type: inline-size; }
 .oq-wrap { position: sticky; height: 0; z-index: 4; pointer-events: none; text-align: center; }
 .oq-wrap.top { top: calc(10px + var(--wb-rail-h, 0px)); }
 .oq-wrap.bot { bottom: 10px; }
-.oq-pill { position: absolute; left: 50%; transform: translateX(-50%); pointer-events: auto; cursor: pointer; border: 0; height: 28px; padding: 0 14px; border-radius: 999px; background: var(--wb-policy); color: var(--wb-on-policy); box-shadow: 0 0 0 2px var(--wb-bg), var(--wb-shadow-hi); font-size: 12.5px; font-weight: 700; line-height: 1; white-space: nowrap; }
-.oq-pill[hidden] { display: none; }
+.oq-pill { position: absolute; left: 50%; transform: translateX(-50%); pointer-events: auto; display: inline-flex; align-items: center; gap: 3px; height: 28px; padding: 0 3px 0 10px; border-radius: 999px; background: var(--wb-card); color: var(--wb-fg); box-shadow: 0 0 0 2px var(--wb-bg), var(--wb-shadow-hi); font-size: 12.5px; font-weight: 700; line-height: 1; white-space: nowrap; }
+.oq-pill[hidden], .oq-seg[hidden] { display: none; }
 .oq-wrap.top .oq-pill { top: 0; }
 .oq-wrap.bot .oq-pill { bottom: 0; }
-.oq-pill:hover { filter: brightness(1.1); }
-.oq-pill:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 2px; }
+/* one inset capsule per state (pill.js): open, answered, answered with a note */
+.oq-arr { color: var(--wb-muted-fg); margin-right: 3px; }
+.oq-seg { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 9px; border: 0; border-radius: 999px; font: inherit; line-height: 1; cursor: pointer; }
+.oq-seg.open { background: var(--wb-policy); color: var(--wb-on-policy); }
+.oq-seg.ans { background: var(--wb-announced); color: var(--wb-on-announced); }
+.oq-seg.nt { background: var(--wb-muted); color: var(--wb-muted-fg); font-weight: 600; }
+.oq-seg .n { font-variant-numeric: tabular-nums; }
+.oq-seg:hover { filter: brightness(1.1); }
+.oq-seg:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 2px; }
 
 /* topic rail (rail.js): the current topic's bar sticks under the top capsules
    (--wb-rail-top), and zero-height sticky wrappers at each end of the board
