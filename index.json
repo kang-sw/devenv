@@ -391,7 +391,17 @@
       "registered_at": "2026-11-10T14:07:46Z"
     },
     "261110-feat-ws-tracker-daemon-event-hook": {
-      "registered_at": "2026-11-10T06:49:16Z"
+      "registered_at": "2026-11-10T06:49:16Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "28ef83e379b353cc",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-11T09:09:42Z",
+        "impl": {
+          "branch": "impl/develop/syrup-ashy-stunt"
+        }
+      }
     },
     "261110-feat-ws-tracker-self-assign-claim": {
       "registered_at": "2026-11-10T06:54:56Z",
@@ -435,19 +445,6 @@
     },
     "261111-feat-ws-tracker-cc-field": {
       "registered_at": "2026-11-11T06:17:16Z"
-    },
-    "261111-feat-ws-whiteboard-topic-recap": {
-      "registered_at": "2026-11-11T08:31:25Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-11T08:51:57Z",
-        "impl": {
-          "branch": "impl/develop/hunk-canon-stout"
-        }
-      }
     }
   }
 }
