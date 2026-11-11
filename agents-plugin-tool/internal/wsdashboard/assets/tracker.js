@@ -289,6 +289,7 @@
     focus: null,          // { ev: event id, flash: true until its first paint } the item window scrolls to and marks; null: nothing
     mdet: {},             // "store|member id" -> true: the member's key and profile details are expanded in the org card (page lifetime)
     sel: null,            // the row selected by a tap: it shows the same actions and details a hover shows
+    msel: {},             // store -> { ids: { item id: true }, at: anchor row key } while the Items list is in selection mode (see mselClick)
     nrow: {},             // store -> { val, kind } while the Items list shows its "+ New" input row
     knew: {},             // store -> { val } while the "all" kanban's idea column shows its "+" input row
     sub: null,            // { item: parent, rk: the row it sits under, val } while an "add subtask" input row shows
@@ -473,6 +474,7 @@
           return wsT("js.tk.ev.field", fieldName(f), esc(v == null ? wsT("js.tk.ev.none") : String(v).slice(0, 80)));
         }).join(', ')) + extrasTxt(p);
       case 'item.hide': return wsT("js.tk.ev.hide", ref(p.item));
+      case 'item.move': return p.parent ? wsT("js.tk.ev.move", ref(p.item), itemRef(p.parent)) : wsT("js.tk.ev.move.top", ref(p.item));
       case 'item.assign':
         // a topic's assignment names its holder; the store keeps no completion for it
         return wsT(VS.items[p.item] && VS.items[p.item].kind === 'topic' ? "js.tk.ev.assign.topic" : "js.tk.ev.assign", ref(p.item), p.targets ? '<b>' + targetsText(p.targets, n.member) + '</b>' : p.mode === 'all' ? wsT("js.tk.ev.assign.all", esc(p.levels)) :
@@ -685,6 +687,104 @@
   // A subtask's parent is assigned to or created by its author.
   function canSplit(it) { return (!!mineLive(it) || it.author === VS.viewer.member) && it.kind !== 'topic' && !it.hidden; }
   function canStatus(it) { var r = !it.hidden && it.kind !== 'topic' && mineLive(it); return !!r && r.status !== 'done'; }
+  // item.move, as the store judges it (check.go checkMove): the item rule is the creator or a live
+  // assignee (an admin too once the creator was removed); only when the parent changes, the
+  // destination rule: not hidden, the viewer's (created or live-assigned), not a topic, and not the
+  // item or inside its own subtree. A same-parent reorder and a move to the top level take the item
+  // rule alone. moveWhy(id, dest) is '' when the store takes the move, else the reason; dest null is
+  // the top level. The dashboard offers no move the store would refuse.
+  function canMove(it) {
+    var gone = VS.viewer.admin && VS.members[it.author] && VS.members[it.author].removed;
+    return !it.hidden && (it.author === VS.viewer.member || !!mineLive(it) || !!gone);
+  }
+  function moveWhy(id, dest) {
+    var it = VS.items[id], d = dest ? VS.items[dest] : null;
+    if (!it || it.hidden) return wsT("js.tk.mv.why.hidden", it ? it.alias : alias(id));
+    if (!canMove(it)) return wsT("js.tk.mv.why.mine", it.alias);
+    if (!dest || dest === (it.parent || null)) return '';
+    if (!d || d.hidden) return wsT("js.tk.mv.why.hidden", d ? d.alias : alias(dest));
+    if (d.author !== VS.viewer.member && !mineLive(d)) return wsT("js.tk.mv.why.mine", d.alias);
+    if (d.kind === 'topic') return wsT("js.tk.mv.why.topic", d.alias);
+    for (var cur = d, n = 0; cur && n < 1000; cur = cur.parent ? VS.items[cur.parent] : null, n++) if (cur.id === id) return wsT("js.tk.mv.why.sub", it.alias);
+    return '';
+  }
+  // a parent's children in item order (hidden ones included); null: the top level
+  function sibsOf(parent) { return parent ? (VS.items[parent] ? VS.items[parent].children : []) : VS.itemOrder.filter(function (id) { return !VS.items[id].parent; }); }
+  // What moves of a set of items: the ones with no ancestor in the set (the rest travel with it), in tree order.
+  function moveRoots(ids) {
+    var set = {}, pos = {};
+    ids.forEach(function (id) { if (VS.items[id]) set[id] = true; });
+    VS.itemOrder.forEach(function (id, i) { pos[id] = i; });
+    return Object.keys(set).filter(function (id) {
+      for (var p = VS.items[id].parent, n = 0; p && VS.items[p] && n < 1000; p = VS.items[p].parent, n++) if (set[p]) return false;
+      return true;
+    }).sort(function (a, b) { return (a in pos ? pos[a] : 1e9) - (b in pos ? pos[b] : 1e9); });
+  }
+  // Roots placed at slot { parent, after } (after: an id, '' first, undefined last): one item.move per
+  // root the slot takes, each anchored after the one before, so they land together in tree order.
+  // refused: [[id, reason]] for the others, which stay.
+  function moveBatch(roots, slot) {
+    var evs = [], refused = [], prev = slot.after;
+    roots.forEach(function (id) {
+      var why = moveWhy(id, slot.parent || null);
+      if (why) { refused.push([id, why]); return; }
+      var p = { item: id, parent: slot.parent || null };
+      if (prev !== undefined) p.after = prev;
+      evs.push(['item.move', p]);
+      prev = id;
+    });
+    return { evs: evs, refused: refused };
+  }
+  // the move would leave the item where it is
+  function moveNoop(id, slot) {
+    var it = VS.items[id];
+    if (!it || (it.parent || null) !== (slot.parent || null)) return false;
+    var s = sibsOf(slot.parent || null), i = s.indexOf(id);
+    return slot.after === undefined ? i === s.length - 1 : slot.after === '' ? i === 0 : i > 0 && s[i - 1] === slot.after;
+  }
+  // The write: the refused roots are named (after the result toast, so they stay readable), the rest move.
+  function moveApply(roots, slot) {
+    var b = moveBatch(roots, slot), why = b.refused.map(function (x) { return wsT("js.tk.mv.stays", esc(VS.items[x[0]] ? VS.items[x[0]].alias : alias(x[0])), esc(x[1])); }).join('<br>');
+    if (!b.evs.length) { if (why) toast(why); return; }
+    commit(b.evs, why ? function () { toast(why); } : null);
+  }
+  // Checkbox selection in the Items list (ui.msel[store] = { ids: { item id: true }, at: the anchor
+  // row's key }). A row's checkbox shows on hover; clicking it enters selection mode, which lasts
+  // while anything is selected (Esc, or the header chip's x, clears it). There a plain row click
+  // selects that row alone, Ctrl/Cmd-click toggles, Shift-click selects the range from the anchor,
+  // and Shift+Ctrl-click adds that range; the item window opens from the menu or Enter. Ranges run
+  // over the rows shown, in their order, so a folded subtree's rows are not in one. A selection is
+  // by item: an item shown twice is selected in both places. Each panel draw keeps only what it
+  // drew (MSEEN), so a row a filter, a fold, or a scope change took away leaves the selection.
+  var MSEEN = null; // per panel draw: { item id: true } of the rows drawn
+  function mselOf() { return ui.msel[ui.store] || null; }
+  function mselHas(id) { var s = mselOf(); return !!s && !!s.ids[id]; }
+  function mselIds() { var s = mselOf(); return s ? Object.keys(s.ids) : []; }
+  function mselOn() { return mselIds().length > 0; }
+  function mselClear() { delete ui.msel[ui.store]; }
+  function mcbHtml(it, on) {
+    return '<button type="button" class="mcb" role="checkbox" aria-checked="' + on + '"' + attr('act', 'msel') + attr('item', it.id) + ' tabindex="-1" aria-label="' + esc(wsT("js.tk.sel.aria", it.title)) + '"' +
+      tipAttr(wsT("js.tk.sel.tip")) + '></button>';
+  }
+  // A click on a list row in selection mode, or on a row's checkbox (box: toggles, and enters the mode).
+  function mselClick(row, e, box) {
+    var area = row.closest('#card-items .cbody'), rows = area ? Array.prototype.slice.call(area.querySelectorAll('.irow')) : [row];
+    var id = row.getAttribute('data-item'), rk = row.getAttribute('data-rk'), s = ui.msel[ui.store] || (ui.msel[ui.store] = { ids: {}, at: null });
+    var ctrl = e.ctrlKey || e.metaKey, i = rows.indexOf(row), j = -1;
+    if (e.shiftKey && s.at) rows.some(function (x, k) { if (x.getAttribute('data-rk') === s.at) { j = k; return true; } return false; });
+    if (j >= 0 && i >= 0) {
+      if (!ctrl) s.ids = {};
+      rows.slice(Math.min(i, j), Math.max(i, j) + 1).forEach(function (x) { s.ids[x.getAttribute('data-item')] = true; });
+    } else if (ctrl || box) {
+      if (s.ids[id]) delete s.ids[id]; else s.ids[id] = true;
+      s.at = rk;
+    } else { s.ids = {}; s.ids[id] = true; s.at = rk; }
+    if (!mselOn()) mselClear();
+    render();
+    // the clicked row keeps focus, so Enter opens its item window
+    var back = document.querySelector('#card-items [data-rk="' + CSS.escape(rk) + '"]');
+    if (back) back.focus({ preventScroll: true });
+  }
   // The "⋯" button every menu-capable row, card, entry, and the item window header carries.
   function moreBtn(id, cls, tab) {
     return '<button type="button" class="ia mbtn' + (cls ? ' ' + cls : '') + '"' + attr('act', 'menu') + attr('item', id) + ' aria-haspopup="menu" aria-label="' + esc(wsT("js.tk.menu.more")) + '"' +
@@ -722,10 +822,14 @@
   // o: { rk (unique row key in the drawer), item, rec?, more?, depth?, closed? (greyed: done, in the "recently closed" section or kept in the tree),
   //      ctx? (a context row of a tree: an ancestor of a match, not a match itself), tw? (the tree's fold control, in place of the depth arrow), tsub? (the folded "N subtasks" chip) }
   // The row is the one row component every list and tree draws; data-item carries the item id.
+  // A row drags (a list drop moves it with its subtree, see mvDrop) when the viewer may move it, or
+  // when it is selected: then the selection moves.
   function irow(o) {
-    var it = VS.items[o.item], r = o.rec, st = stKey(it, r);
-    return '<div class="irow' + (ui.sel === o.rk ? ' sel' : '') + (o.closed ? ' closed' : '') + (o.ctx ? ' ctx' : '') + '" tabindex="0"' + attr('item', it.id) + attr('rk', o.rk) + (r ? attr('rec', r.id) : '') +
-      (o.depth ? ' style="--ind:' + o.depth + '"' : '') + '><div class="ir-main">' + (o.tw != null ? o.tw : o.depth ? '<span class="ind">&#8627;</span>' : '') + stBtn(st, it, r) +
+    var it = VS.items[o.item], r = o.rec, st = stKey(it, r), ms = mselHas(it.id);
+    if (MSEEN) MSEEN[it.id] = true;
+    return '<div class="irow' + (ui.sel === o.rk ? ' sel' : '') + (ms ? ' msel' : '') + (o.closed ? ' closed' : '') + (o.ctx ? ' ctx' : '') + '" tabindex="0"' + (ms || canMove(it) ? ' draggable="true"' : '') +
+      attr('item', it.id) + attr('rk', o.rk) + (r ? attr('rec', r.id) : '') +
+      (o.depth ? ' style="--ind:' + o.depth + '"' : '') + '><div class="ir-main">' + mcbHtml(it, ms) + (o.tw != null ? o.tw : o.depth ? '<span class="ind">&#8627;</span>' : '') + stBtn(st, it, r) +
       '<a class="title" href="#" tabindex="-1"' + attr('item', it.id) + '>' + esc(it.title) + '</a>' + (o.tsub || '') + warnHtml(it) + dotHtml(it) + '<span class="grow"></span>' +
       '<span class="ir-acts">' + moreBtn(it.id, '', true) + '</span>' + whoHtml(it) + priHtml(it) + dueHtml(it, st) + '</div>' +
       '<div class="ir-more">' + detailsHtml(it, r, o.more) + '</div></div>';
@@ -1190,6 +1294,7 @@
     } else searchFor(ui.store, '');
     FILT = !!(TF || SQ);
     CLOSED = m === 'list' ? { entries: [], older: 0 } : null;
+    MSEEN = {};
     var scopes = '<span class="scopes" role="tablist" aria-label="' + wsT("js.tk.panel.scope") + '">' + scopeList().map(function (x) {
       return '<button type="button" class="scp' + (x[0] === s ? ' on' : '') + '" role="tab" aria-selected="' + (x[0] === s) + '"' + attr('act', 'scope') + attr('scope', x[0]) + tipAttr(wsT(x[2])) + '>' + esc(wsT(x[1])) + '</button>';
     }).join('') + '</span>';
@@ -1203,9 +1308,15 @@
     // opens the input row in its place (the keyboard path; an empty list keeps only this one)
     var n = ui.nrow[ui.store], body = panelBody(s, m, v) + (n && !n.at ? newRowHtml() : newBtn()), closed = closedHtml();
     var serr = SERR ? '<div class="psearch-err" role="alert">' + esc(SERR) + '</div>' : '';
-    TF = null; SQ = ''; SIDS = null; SERR = ''; FILT = false; CLOSED = null;
-    return { title: wsT("js.tk.tab.items"), tools: scopes + '<span class="chip">' + esc(scopeChip(s)) + '</span><div class="prow2">' + modes + search + '</div>' + serr, body: '<div class="plist">' + body + '</div>' + closed, id: 'card-items', cls: 'panel',
-      attrs: attr('scope', s) + attr('view', m) };
+    // the selection keeps what this draw showed; the header chip counts it and clears it
+    var ms = mselOf();
+    if (ms) Object.keys(ms.ids).forEach(function (id) { if (!MSEEN[id]) delete ms.ids[id]; });
+    if (!mselOn()) mselClear();
+    var nsel = mselIds().length, mchip = nsel ? '<span class="chip mselc">' + esc(wsTn("js.tk.sel.n", nsel)) + '<button type="button" class="psx"' + attr('act', 'msel-clear') + ' aria-label="' + wsT("js.tk.sel.clear") + '"' +
+      tipAttr(wsT("js.tk.sel.clear")) + '><svg class="i"><use href="#tki-x"/></svg></button></span>' : '';
+    TF = null; SQ = ''; SIDS = null; SERR = ''; FILT = false; CLOSED = null; MSEEN = null;
+    return { title: wsT("js.tk.tab.items"), tools: scopes + '<span class="chip">' + esc(scopeChip(s)) + '</span>' + mchip + '<div class="prow2">' + modes + search + '</div>' + serr, body: '<div class="plist">' + body + '</div>' + closed, id: 'card-items', cls: 'panel',
+      attrs: attr('scope', s) + attr('view', m) + (nsel ? attr('msel', nsel) : '') };
   }
   // With the adapter's wiki, the title is the Items | Wiki switch (wkSwitch); the Today bar belongs to the items
   function panelHtml(p, withToday) {
@@ -3170,7 +3281,7 @@
     if (!VS || !VS.items[id]) return;
     opts = opts || {};
     if (MN && MN.kind === 'item' && anchor && $('tkmenu').contains(anchor)) {
-      MN.from = MN.step; MN.step = opts.step || 'main'; MN.op = opts.op || null; MN.who = opts.who || null; MN.q = ''; MN.as = null;
+      MN.from = MN.step; MN.step = opts.step || 'main'; MN.op = opts.op || null; MN.who = opts.who || null; MN.q = ''; MN.as = null; MN.mv = null;
       drawMenu(); return;
     }
     openMenu({ kind: 'item', item: id, step: opts.step || 'main', op: opts.op || null, who: opts.who || null, statusOnly: !!opts.statusOnly, from: null, q: '' }, anchor, pt);
@@ -3189,7 +3300,7 @@
   }
   function menuBack() {
     if (!MN.from) { closeMenu(true); return; }
-    MN.step = MN.from; MN.from = null; MN.op = null; MN.who = null; MN.q = ''; MN.as = null;
+    MN.step = MN.from; MN.from = null; MN.op = null; MN.who = null; MN.q = ''; MN.as = null; MN.mv = null;
     drawMenu();
   }
   function drawMenu() {
@@ -3257,6 +3368,7 @@
         '<div class="mrow">' + noteField(wsT("js.tk.form.note")) + btn('m-note-send', wsT("js.tk.dlg.note.submit"), {}, 'primary') + '</div>';
     }
     if (step === 'assign') return h + back + asgHtml(it);
+    if (step === 'move') return h + back + moveStepHtml(it);
     // the main step: the status part (radios that apply on click, a note that rides along), then the actions
     var parts = [];
     if (canStatus(it)) {
@@ -3285,6 +3397,8 @@
     // a topic's holder releases it: item.unassign of their own record
     if (mineR && !task && !it.hidden) more.push(mi('unassign', esc(wsT("js.tk.act.release")), { item: it.id, who: v }, { icon: 'withdraw' }));
     if (canAssign(it, v)) more.push(mi('assign', esc(wsT("js.tk.act.assign")), { item: it.id }, { icon: 'assign', sub: 1 }));
+    var mvr = mvMenuRoots(it.id);
+    if (mvr.some(function (r) { return canMove(VS.items[r]); })) more.push(mi('move', esc(mvr.length > 1 ? wsTn("js.tk.mv.menu.sel", mvr.length) : wsT("js.tk.mv.menu")), { item: it.id }, { icon: 'tree', sub: 1 }));
     if (more.length) parts.push(more.join(''));
     var last = [];
     if (edit) last.push(mi('edit', esc(it.author === v ? wsT("js.tk.act.edit") : wsT("js.tk.act.edit.admin")), { item: it.id }, { icon: 'pen' }));
@@ -3301,6 +3415,46 @@
     return ids.map(function (id) {
       return '<button type="button" class="mi" role="menuitem" data-mi' + attr('act', 'm-handoff') + attr('to', id) + '>' + avHtml(id) + '<span class="ml">' + whoName(id) + '</span><span class="mv">' + esc(id) + '</span></button>';
     }).join('');
+  }
+  // "Move to..." (ticket decision 8): the item menu's move step, the keyboard and touch path of the
+  // move drag. A searchable tree of the destinations the store takes (moveWhy) plus the top level;
+  // an item that takes none shows only as the context line of one that does, so the item's own
+  // subtree stays out. A pick puts what moves last under the choice. Opened from a selected list
+  // row it moves the selection's roots: a destination shows when it takes one of them, with "N of
+  // M" and the reasons when not all; the roots no destination takes are named up front.
+  function mvMenuRoots(id) {
+    var row = MN && MN.backEl && MN.backEl.closest && MN.backEl.closest('#card-items .irow');
+    return row && mselHas(id) ? moveRoots(mselIds()) : [id];
+  }
+  function moveStepHtml(it) {
+    var roots = MN.mv || (MN.mv = mvMenuRoots(it.id)), n = roots.length;
+    var stuck = roots.map(function (r) { return [r, moveWhy(r, VS.items[r] ? VS.items[r].parent || null : null)]; }).filter(function (x) { return x[1]; });
+    return '<div class="mtitle">' + (n > 1 ? esc(wsTn("js.tk.mv.title.sel", n)) : esc(wsT("js.tk.mv.title", it.alias))) + '</div><p class="mintro">' + wsT("js.tk.mv.intro") + '</p>' +
+      (stuck.length ? '<p class="mintro mvstuck">' + stuck.map(function (x) { return wsT("js.tk.mv.stays", esc(VS.items[x[0]] ? VS.items[x[0]].alias : alias(x[0])), esc(x[1])); }).join('<br>') + '</p>' : '') +
+      '<div class="mrow"><input type="text" id="tkmvq" data-mi data-autofocus autocomplete="off" spellcheck="false" placeholder="' + wsT("js.tk.mv.search") + '" aria-label="' + wsT("js.tk.mv.search") + '" value="' + esc(MN.q || '') + '"></div>' +
+      '<div class="mlist" role="group">' + moveList(roots) + '</div>';
+  }
+  function moveList(roots) {
+    var q = String(MN.q || '').trim().toLowerCase(), kids = {}, h = '';
+    function takes(dest) { return roots.filter(function (r) { return !moveWhy(r, dest); }); }
+    function hit(it) { return !q || [it.title, it.alias, it.id, it.project].some(function (x) { return String(x == null ? '' : x).toLowerCase().indexOf(q) >= 0; }); }
+    function opt(id, depth, label, ok) {
+      var cur = roots.every(function (r) { return (VS.items[r].parent || '') === id; }), part = ok.length < roots.length;
+      var tip = part ? roots.filter(function (r) { return ok.indexOf(r) < 0; }).map(function (r) { return wsT("js.tk.mv.stays", VS.items[r].alias, moveWhy(r, id || null)); }).join('; ') : '';
+      return '<button type="button" class="mi mvo" role="menuitem" data-mi' + attr('act', 'm-move') + attr('to', id) + ' style="--ind:' + depth + '"' + (tip ? tipAttr(tip) : '') + '><span class="ml">' + esc(label) + '</span>' +
+        '<span class="mv">' + [cur ? esc(wsT("js.tk.mv.cur")) : '', part ? esc(wsT("js.tk.mv.part", ok.length, roots.length)) : '', id ? esc(VS.items[id].alias) : ''].filter(Boolean).join(' &middot; ') + '</span></button>';
+    }
+    var top = takes(null);
+    if (top.length && (!q || wsT("js.tk.mv.top").toLowerCase().indexOf(q) >= 0)) h += opt('', 0, wsT("js.tk.mv.top"), top);
+    // hidden items, and so their subtrees, are left out, as the lists leave them
+    VS.itemOrder.forEach(function (id) { var it = VS.items[id]; if (it && !it.hidden) (kids[it.parent || ''] = kids[it.parent || ''] || []).push(id); });
+    function walk(id, depth) {
+      var it = VS.items[id], ok = takes(id), on = ok.length > 0 && hit(it), sub = (kids[id] || []).map(function (k) { return walk(k, depth + 1); }).join('');
+      if (!on && !sub) return '';
+      return (on ? opt(id, depth, it.title, ok) : '<div class="mvctx" style="--ind:' + depth + '">' + esc(it.title) + ' <span class="mv">' + esc(it.alias) + '</span></div>') + sub;
+    }
+    h += (kids[''] || []).map(function (id) { return walk(id, 0); }).join('');
+    return h || '<p class="mempty">' + wsT("js.tk.mv.none") + '</p>';
   }
   // The assign popover (530): the item menu's assign step, opened from the menu or anchored at
   // the Assignees "+" (openAssign). A search field over people and subtree rules, the picked
@@ -3533,6 +3687,11 @@
         return startSub(id, rk);
       }
       case 'm-open': closeMenu(false); return showItem(id);
+      case 'm-move': {
+        var mroots = MN.mv || mvMenuRoots(id), slot = { parent: a.getAttribute('data-to') || null, after: undefined };
+        if (mroots.length === 1 && moveNoop(mroots[0], slot)) return closeMenu(true);
+        return moveApply(mroots, slot);
+      }
     }
   }
   // The inline "add subtask" row under rk ('iw:<id>': the item window's Subtasks section).
@@ -3560,6 +3719,7 @@
       if (t.id === 'tkmnote' && MN.step === 'note') { e.preventDefault(); menuAct('m-note-send', t); return; }
       if (t.id === 'tkmdue') { e.preventDefault(); menuAct('m-due-set', t); return; }
       if (t.id === 'tkmq') { e.preventDefault(); var p1 = m.querySelector('[data-act="m-handoff"]'); if (p1) p1.click(); return; }
+      if (t.id === 'tkmvq') { e.preventDefault(); var p2 = m.querySelector('[data-act="m-move"]'); if (p2) p2.click(); return; }
       return; // a button: its click; a form field: the form's submit
     }
     var items = Array.prototype.filter.call(m.querySelectorAll('[data-mi]'), function (x) { return !x.disabled; }), at = items.indexOf(t);
@@ -3773,16 +3933,20 @@
   var HV = null; // the shown insert: { list, a, b, y, opts, pick }
   function rowDepth(el) { return el ? Number(el.style.getPropertyValue('--ind')) || 0 : 0; }
   function rowLike(el) { return el && el.matches && el.matches('.irow, .csum, .tmore') ? el : null; }
-  function insOpts(a, b) {
+  // ok(parent id, or null for the top level): may the place's parent take the item; a create's
+  // rule (canSplit) by default, the moved items' (mvOk) for a drop
+  function insOk(pid) { return !pid || (!!VS.items[pid] && canSplit(VS.items[pid])); }
+  function insOpts(a, b, ok) {
     var db = b ? rowDepth(b) : 0, out = [];
+    ok = ok || insOk;
     if (!a) return [{ depth: 0, parent: null, after: '' }]; // above the list's first row: the first root item
     var it = VS.items[a.getAttribute('data-item')], da = rowDepth(a);
     if (!it || !a.matches('.irow')) return out;
-    if (canSplit(it)) out.push({ depth: da + 1, parent: it.id, after: '' });
+    if (ok(it.id)) out.push({ depth: da + 1, parent: it.id, after: '' });
     // after a, or after one of its ancestors: the item lands below that ancestor's subtree, which ends at a
     for (var x = it, d = da; x && d >= db; d--) {
       var p = x.parent ? VS.items[x.parent] : null;
-      if (!x.parent || (p && canSplit(p))) out.push({ depth: d, parent: x.parent || null, after: x.id });
+      if (ok(x.parent || null)) out.push({ depth: d, parent: x.parent || null, after: x.id });
       x = p;
     }
     return out.sort(function (m, k) { return m.depth - k.depth; });
@@ -3842,6 +4006,163 @@
     render();
     if ($('tknew')) $('tknew').focus();
   }
+  // The move drag: a list row (or the selection, when a selected row is dragged) dropped on a row of
+  // the Items list moves there with its subtree (ticket decisions 4, 5, 7). A row's middle band makes
+  // it the row's last child, after the last child the list shows; the top and bottom bands make it
+  // the sibling before or after the row: the hover insert's places (insOpts) at the row's depth, or,
+  // on the bottom band of a row whose children show, its first child. In a filtered list `after`
+  // names the shown row above, so siblings the list leaves out keep their places. Several roots land
+  // one after another in tree order; the roots the drop refuses stay and are named (the indicator
+  // counts them before the drop), the others move. A drop the store would refuse for every root, or
+  // that would change nothing, is not offered. The kanban drag is apart: its cards carry data-drag
+  // and text/plain, the rows draggable and MV_TYPE.
+  var MV_TYPE = 'application/x-ws-tracker-move';
+  var MV = null;  // while a row drags: { roots }
+  var MVS = null; // the drop shown: { list, d (mvDrop's answer) }
+  function hasMv(e) { return !!MV && !!e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], MV_TYPE) >= 0; }
+  // does the item sit in root's subtree (root itself included)
+  function underRoot(id, root) {
+    for (var cur = id, n = 0; cur && VS.items[cur] && n < 1000; cur = VS.items[cur].parent, n++) if (cur === root) return true;
+    return false;
+  }
+  function mvOk(pid) { return MV.roots.some(function (r) { return !moveWhy(r, pid || null); }); }
+  // the input rows a list may hold between rows (an anchor scan steps over them)
+  function rowGap(x) { return x && x.matches && x.matches('.nrow, .subrow'); }
+  // the shown sibling above row r (same depth, same parent) whose item is not moving, '' when none shows
+  function mvPrevSib(r, moving) {
+    var d = rowDepth(r), par = VS.items[r.getAttribute('data-item')].parent || null;
+    for (var x = r.previousElementSibling; x; x = x.previousElementSibling) {
+      if (rowGap(x)) continue;
+      if (!rowLike(x) || rowDepth(x) < d) return '';
+      var xi = rowDepth(x) === d && x.matches('.irow') && VS.items[x.getAttribute('data-item')];
+      if (xi && (xi.parent || null) === par && !moving[xi.id]) return xi.id;
+    }
+    return '';
+  }
+  // the last child row shown under row whose item is not moving; undefined when none shows (then the item goes last)
+  function mvLastKid(row, moving) {
+    var d = rowDepth(row), last;
+    for (var x = row.nextElementSibling; x; x = x.nextElementSibling) {
+      if (rowGap(x)) continue;
+      if (!rowLike(x) || rowDepth(x) <= d) break;
+      if (rowDepth(x) === d + 1 && x.matches('.irow') && !moving[x.getAttribute('data-item')]) last = x.getAttribute('data-item');
+    }
+    return last;
+  }
+  // An anchor the drop's own roots hold moves with them: step up to the shown sibling above it.
+  // from: a row at or below the anchor's row (the nearest row of the item is the one meant).
+  function mvAnchor(from, after, moving) {
+    for (var r = from; after && moving[after];) {
+      while (r && !(r.matches && r.matches('.irow') && r.getAttribute('data-item') === after)) r = r.previousElementSibling;
+      after = r ? mvPrevSib(r, moving) : '';
+    }
+    return after;
+  }
+  // The place a band of row takes: { parent, after, depth (the indicator's indent), from }, or null.
+  function mvSlot(list, row, band) {
+    var d = rowDepth(row), opts, o, from = row;
+    if (band === 'mid') return { parent: row.getAttribute('data-item'), after: undefined, depth: d + 1, from: row };
+    if (band === 'top') {
+      var a = rowLike(row.previousElementSibling);
+      if (!a && list.querySelector('.irow') !== row) return null; // the top of a later section: no place to name (insGap's rule)
+      while (a && !a.matches('.irow')) a = rowLike(a.previousElementSibling); // past a "… N more" or "closed N" row
+      opts = insOpts(a, row, mvOk); from = a;
+      o = opts.filter(function (x) { return x.depth === d; })[0];
+    } else {
+      var b = row.nextElementSibling;
+      while (rowGap(b)) b = b.nextElementSibling;
+      opts = insOpts(row, rowLike(b), mvOk);
+      o = opts.filter(function (x) { return x.depth === d; })[0] || opts.filter(function (x) { return x.depth === d + 1; })[0];
+    }
+    return o ? { parent: o.parent, after: o.after, depth: o.depth, from: from } : null;
+  }
+  // The drop the pointer at clientY over row of list would make: { el, band, slot, n (roots it moves),
+  // total }, or null when it moves nothing.
+  function mvDrop(list, row, y) {
+    var id = row.getAttribute('data-item'), roots = MV.roots;
+    if (!VS.items[id] || roots.some(function (r) { return underRoot(id, r); })) return null; // onto what moves
+    var rc = row.getBoundingClientRect(), f = (y - rc.top) / (rc.height || 1), mid = mvOk(id);
+    var band = f < (mid ? 0.25 : 0.5) ? 'top' : f >= (mid ? 0.75 : 0.5) ? 'bot' : 'mid';
+    var slot = mvSlot(list, row, band);
+    if (!slot) return null;
+    var moving = {}, n = 0;
+    roots.forEach(function (r) { if (!moveWhy(r, slot.parent || null)) { moving[r] = true; n++; } });
+    if (!n) return null;
+    slot.after = band === 'mid' ? mvLastKid(row, moving) : mvAnchor(slot.from, slot.after, moving);
+    if (roots.length === 1 && moveNoop(roots[0], slot)) return null;
+    return { el: row, band: band, slot: { parent: slot.parent || null, after: slot.after, depth: slot.depth }, n: n, total: roots.length };
+  }
+  // The indicator: a line at the gap, indented to the place's depth, or the target row outlined
+  // for the middle band; "N of M move" when some roots stay.
+  function mvShow(list, d) {
+    if (MVS && MVS.list !== list) mvHide();
+    var s = list.querySelector(':scope > .mvdrop');
+    if (!s) {
+      list.insertAdjacentHTML('beforeend', '<div class="mvdrop" aria-hidden="true"><span class="hl"></span><span class="mvn"></span></div>');
+      s = list.querySelector(':scope > .mvdrop');
+    }
+    var lt = list.getBoundingClientRect().top, r = d.el.getBoundingClientRect(), mid = d.band === 'mid';
+    s.classList.toggle('in', mid);
+    s.style.top = Math.round((mid || d.band === 'top' ? r.top : r.bottom) - lt - (mid ? 0 : 1)) + 'px';
+    s.style.height = mid ? Math.round(r.height) + 'px' : '';
+    s.style.setProperty('--ind', mid ? rowDepth(d.el) : d.slot.depth);
+    s.querySelector('.mvn').textContent = d.n < d.total ? wsT("js.tk.mv.part", d.n, d.total) : '';
+    s.hidden = false;
+    MVS = { list: list, d: d };
+  }
+  function mvHide() {
+    if (!MVS) return;
+    var s = MVS.list.querySelector(':scope > .mvdrop');
+    if (s) s.hidden = true;
+    MVS = null;
+  }
+  function mvEnd() {
+    MV = null;
+    mvHide();
+    Array.prototype.forEach.call(document.querySelectorAll('.tk .mvsrc, .tk .mv-on'), function (x) { x.classList.remove('mvsrc', 'mv-on'); });
+  }
+  // dragstart on a row: the selection when the row is selected, else the row's item
+  function mvStart(e, row) {
+    var id = row.getAttribute('data-item'), roots = mselHas(id) ? moveRoots(mselIds()) : [id];
+    var stuck = roots.filter(function (r) { return !VS.items[r] || !canMove(VS.items[r]); });
+    if (!VS.items[id] || stuck.length === roots.length) {
+      e.preventDefault();
+      toast(stuck.map(function (r) { return wsT("js.tk.mv.stays", esc(VS.items[r] ? VS.items[r].alias : alias(r)), esc(moveWhy(r, null))); }).join('<br>'));
+      return;
+    }
+    MV = { roots: roots };
+    e.dataTransfer.setData(MV_TYPE, roots.join(' '));
+    e.dataTransfer.effectAllowed = 'move';
+    // the row is the drag image, also when the drag began on its title link
+    var rc = row.getBoundingClientRect();
+    if (e.dataTransfer.setDragImage) e.dataTransfer.setDragImage(row, Math.max(0, e.clientX - rc.left), Math.max(0, e.clientY - rc.top));
+    insHide(); hideTip();
+    var list = row.closest('#card-items');
+    // after the drag image is taken: the moving rows (subtrees included) dim, and the row previews stay shut
+    setTimeout(function () {
+      if (!MV || !list) return;
+      list.classList.add('mv-on');
+      Array.prototype.forEach.call(list.querySelectorAll('.irow'), function (x) { var xi = x.getAttribute('data-item'); if (roots.some(function (r) { return underRoot(xi, r); })) x.classList.add('mvsrc'); });
+    }, 0);
+  }
+  function mvOver(e) {
+    if (!hasMv(e)) return;
+    var t = e.target, list = own(t) && t.closest && t.closest('#card-items[data-view="list"] .plist'), row = list && t.closest('.irow');
+    var d = row && list.contains(row) && VS ? mvDrop(list, row, e.clientY) : null;
+    if (!d) { mvHide(); return; }
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    mvShow(list, d);
+  }
+  function mvDropped(e) {
+    if (!hasMv(e)) return;
+    e.preventDefault();
+    var t = e.target, list = own(t) && t.closest && t.closest('#card-items[data-view="list"] .plist'), row = list && t.closest('.irow');
+    var d = row && list.contains(row) && VS ? mvDrop(list, row, e.clientY) : null, roots = MV.roots;
+    mvEnd();
+    if (d) moveApply(roots, d.slot);
+  }
+
   // "Add subtask": an input row one level in, right under the row the menu opened from (or atop
   // the item window's Subtasks for the window header); ui.sub = { item: parent, rk: that row's
   // key, val }. Title + Enter creates a task under the parent, its creator's like any task made here
@@ -4477,7 +4798,7 @@
 
   var QUICK = { confirm: 1, unassign: 1, accept: 1, ihide: 1, chide: 1, comment: 1 };
   // the item menu's steps an action button opens (in the menu, or a menu anchored to the button)
-  var STEPS = { note: 1, handoff: 1, assign: 1, pri: 1, due: 1 };
+  var STEPS = { note: 1, handoff: 1, assign: 1, pri: 1, due: 1, move: 1 };
 
   // ------------------------------------------------------------- display state
 
@@ -4653,6 +4974,8 @@
         else if (k === 'cedit-x') endCedit();
         else if (k === 'create') openNewRow();
         else if (k === 'ins') insOpen();
+        else if (k === 'msel') { var mr = a.closest('.irow'); if (mr) mselClick(mr, e, true); }
+        else if (k === 'msel-clear') { mselClear(); render(); }
         else if (k === 'mdet') { var mk = ui.store + '|' + d.who; ui.mdet[mk] = !ui.mdet[mk]; render(); }
         else if (k === 'idcopy') copyId(a);
         else if (k === 'new-x') closeNewRow();
@@ -4707,6 +5030,9 @@
         else if (X.action) X.action(k, a, H);
         return;
       }
+      // selection mode: a click on a list row selects (mselClick) rather than opening the item window
+      var mrow = mselOn() && t.closest('#card-items .irow');
+      if (mrow) { e.preventDefault(); mselClick(mrow, e, false); return; }
       // touch: a tap selects a row, which shows its actions and details as a hover would;
       // a tap on the selected row (or on its title) opens the item window
       var row = t.closest('.irow');
@@ -4764,6 +5090,7 @@
       else if (t.id === 'tksub' && ui.sub) ui.sub.val = t.value;
       else if (t.id === 'tkaq' && MN && MN.step === 'assign') { var as = asgState(); as.q = t.value; as.idx = 0; asgDraw(); }
       else if (t.id === 'tkmq' && MN) { MN.q = t.value; var ml = $('tkmenu').querySelector('.mlist'); if (ml) ml.innerHTML = handoffList(VS.items[MN.item], MN.who || VS.viewer.member); }
+      else if (t.id === 'tkmvq' && MN && MN.mv) { MN.q = t.value; var mvl = $('tkmenu').querySelector('.mlist'); if (mvl) mvl.innerHTML = moveList(MN.mv); }
       else edKeep(t);
       if (mentionBox(t)) mentionSync(); // also mid-composition: the popup filters on the composing text
     });
@@ -4791,6 +5118,15 @@
     document.addEventListener('dragover', function (e) {
       if (own(e.target) && (e.target.closest('[data-kcol]') || (edDrop(e) && hasFiles(e)))) e.preventDefault();
     });
+    // the list's move drag (mvStart): its own listeners, apart from the kanban's above
+    document.addEventListener('dragstart', function (e) {
+      var row = own(e.target) && e.target.closest && e.target.closest('#card-items .irow[draggable="true"]');
+      if (row && VS) mvStart(e, row);
+    });
+    document.addEventListener('dragover', mvOver);
+    document.addEventListener('dragleave', function (e) { if (MVS && !(e.relatedTarget && MVS.list.contains(e.relatedTarget))) mvHide(); });
+    document.addEventListener('drop', mvDropped);
+    document.addEventListener('dragend', function () { if (MV) mvEnd(); });
     // an image pasted into an editor's textarea, or dropped on an editor (edImages); a paste that
     // also carries text (a copied web page) still pastes its text
     document.addEventListener('paste', function (e) {
@@ -4943,7 +5279,9 @@
       }
       // a host that handled this Esc itself (its own menu, say) marks it defaultPrevented
       if (e.key !== 'Escape' || e.defaultPrevented || $('tkdlg').open) return;
-      if (ui.win) closeItemWindow(); else if (ui.open) collapse();
+      if (ui.win) closeItemWindow();
+      else if ((ui.open || ui.page) && mselOn()) { e.preventDefault(); mselClear(); render(); }
+      else if (ui.open) collapse();
     });
     // the layout follows the width: re-render when it crosses a breakpoint, else refit
     window.addEventListener('resize', function () { if (MN) closeMenu(false); if (MP) mentionSync(); if (layoutOf() !== ui.layout) render(); else { if (!ui.page) fitDrawer(); measure(); } });
