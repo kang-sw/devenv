@@ -24,6 +24,12 @@ const (
 	// ActClosed: an assignment was closed or confirmed (item.close,
 	// item.confirm); Status says done or awaiting.
 	ActClosed = "closed"
+	// ActTakeRequest: a member asked for the live assignment its Target
+	// holds (item.request).
+	ActTakeRequest = "take_request"
+	// ActTakeDenied: a take request was denied; Target is its requester
+	// (item.deny). An approval is the requester's ActAssigned.
+	ActTakeDenied = "take_denied"
 )
 
 // Activity is one thing an applied event did that concerns members, judged
@@ -45,8 +51,11 @@ type Activity struct {
 	// Comment is the added comment's body (ActComment).
 	Comment string
 	// Concerns are the members the activity concerns, sorted: an
-	// assignment's target; otherwise the item's creator, the members
-	// holding a live assignment on it just before the event, and Target.
+	// assignment's target (with the opener a claim takes from, and the
+	// holder an approved take request takes from); a take request's
+	// holder and the item's creator; a denied request's requester;
+	// otherwise the item's creator, the members holding a live assignment
+	// on it just before the event, and Target.
 	Concerns []string
 }
 
@@ -54,7 +63,8 @@ type Activity struct {
 // settled is false while the event's verdict may still change to applied
 // (it is waiting, or this clone does not hold it): it then has no activity
 // yet. A flagged event is settled with none. Only item.* events other than
-// item.create, and comment.add, have activity.
+// item.create, and comment.add, have activity: item.open, item.unopen, and
+// item.unrequest have none.
 func (t *Tracker) Activity(id wsledger.EventID) (acts []Activity, settled bool) {
 	t.Refresh()
 	r := t.r
@@ -121,6 +131,33 @@ func (t *Tracker) Activity(id wsledger.EventID) (acts []Activity, settled bool) 
 			a.Kind, a.Status = ActStatus, "doing"
 		}
 		acts = append(acts, about(a))
+	case TypeItemRequest:
+		a := base
+		a.Kind, a.Target = ActTakeRequest, n.p.str("assignee")
+		a.Concerns = sortedSet([]string{a.Target, creator})
+		acts = append(acts, a)
+	case TypeItemDeny:
+		if q := S.reqs[n.p.str("request")]; q != nil && q.item == itemID && q.state == "pending" {
+			a := base
+			a.Kind, a.Target, a.Concerns = ActTakeDenied, q.by, []string{q.by}
+			acts = append(acts, a)
+		}
+	}
+
+	// Who else an assignment the event makes concerns: the opener a claim
+	// takes the task from, the holder an approval takes it from.
+	var from string
+	switch n.typ {
+	case TypeItemClaim:
+		if it := S.items[itemID]; it != nil {
+			if o := S.activeOpen(it); o != nil {
+				from = o.by
+			}
+		}
+	case TypeItemApprove:
+		if q := S.reqs[n.p.str("request")]; q != nil {
+			from = q.holder
+		}
 	}
 
 	// The assignments the event made: records new after it, the fallback
@@ -136,7 +173,7 @@ func (t *Tracker) Activity(id wsledger.EventID) (acts []Activity, settled bool) 
 		if x.state == "pending" || x.ruleRequest {
 			a.Kind = ActAssignPending
 		}
-		a.Concerns = []string{x.to}
+		a.Concerns = sortedSet([]string{x.to, from})
 		acts = append(acts, a)
 	}
 	return acts, true

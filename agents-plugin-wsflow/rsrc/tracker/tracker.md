@@ -308,14 +308,17 @@ The event:
 - `id`: the tracker event's id, `due:<item id>:<due date>` for `due_soon`.
   An event that assigns several members gives one event per member with the
   same `id`.
-- `kind`: `assigned`, `assign_pending` (a request or handoff awaiting
-  acceptance), `comment`, `status`, `closed`, `due_soon`. A script ignores a
-  kind it does not know; new kinds come without a `v` bump.
+- `kind`: `assigned` (also a claim, or an approved take request, for its
+  taker), `assign_pending` (a request or handoff awaiting acceptance),
+  `take_request` (a member asks for the assignment `target` holds),
+  `take_denied` (to the requester, `target`), `comment`, `status`,
+  `closed`, `due_soon`. A script ignores a kind it does not know; new kinds
+  come without a `v` bump.
 - `ts`: RFC 3339.
 - `store`: `{id, name}`; `item`: `{id, alias, title, kind}`.
 - `actor`: `{id, name}` of the member who acted; null for `due_soon`.
-- `target`: `{id, name}` of the member the event is aimed at (the assignee),
-  when there is one.
+- `target`: `{id, name}` of the member the event is aimed at (the assignee,
+  the holder asked, or the requester denied), when there is one.
 - `detail`: `status` (for `status` and `closed`), `comment` (its first 500
   characters), `due` (RFC 3339, when the item has a due date); absent fields
   are omitted.

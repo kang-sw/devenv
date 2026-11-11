@@ -104,3 +104,34 @@ func TestActivityFlaggedAndUnknownEvents(t *testing.T) {
 		t.Fatalf("unknown: settled %v, %v", settled, acts)
 	}
 }
+
+// Taking work: a claim is the claimer's assignment and concerns the opener;
+// a take request concerns the holder and the creator; an approval is the
+// requester's assignment and concerns the holder it takes from; a denial
+// goes back to the requester. On the reasons.json genesis ada leads maya;
+// maya leads lena and omar.
+func TestActivityClaimsAndTakeRequests(t *testing.T) {
+	got := activityOf(t, []step{
+		task("ada.pc", "Free"), // 1
+		{"ada.pc", "item.open", map[string]any{"item": "ada.pc#1", "scope": "team"}}, // 2
+		{"lena.pc", "item.claim", map[string]any{"item": "ada.pc#1"}},                // 3
+	})
+	wantActs(t, got, 2)
+	wantActs(t, got, 3, "assigned actor=lena target=lena status= concerns=ada,lena")
+
+	steps := append(append([]step(nil), held...), // omar.pc#1 asks for maya's assignment (step 4)
+		step{"ada.pc", "item.approve", map[string]any{"item": "ada.pc#1", "request": "omar.pc#1"}}) // 5
+	got = activityOf(t, steps)
+	wantActs(t, got, 4, "take_request actor=omar target=maya status= concerns=ada,maya")
+	wantActs(t, got, 5, "assigned actor=ada target=omar status= concerns=maya,omar")
+
+	got = activityOf(t, append(append([]step(nil), held...),
+		step{"maya.pc", "item.deny", map[string]any{"item": "ada.pc#1", "request": "omar.pc#1"}},      // 5
+		step{"ada.pc", "item.deny", map[string]any{"item": "ada.pc#1", "request": "omar.pc#1"}},       // 6: already answered
+		step{"omar.pc", "item.request", map[string]any{"item": "ada.pc#1", "assignee": "maya"}},       // 7
+		step{"omar.pc", "item.unrequest", map[string]any{"item": "ada.pc#1", "request": "omar.pc#2"}}, // 8
+	))
+	wantActs(t, got, 5, "take_denied actor=maya target=omar status= concerns=omar")
+	wantActs(t, got, 6)
+	wantActs(t, got, 8)
+}
