@@ -815,7 +815,6 @@
   "js.tk.mv.why.hidden": "{0} est masqué",
   "js.tk.mv.why.mine": "{0} n'a été ni créé par vous ni assigné à vous",
   "js.tk.mv.why.sub": "{0} irait dans son propre sous-arbre",
-  "js.tk.mv.why.topic": "{0} est un sujet ; un sujet ne prend pas d'enfants",
   "js.tk.new.aria": "Titre du nouvel élément",
   "js.tk.new.close": "Fermer (Esc)",
   "js.tk.new.due": "Échéance : {0}",

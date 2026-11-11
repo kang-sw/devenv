@@ -815,7 +815,6 @@
   "js.tk.mv.why.hidden": "{0} is hidden",
   "js.tk.mv.why.mine": "{0} is neither created by nor assigned to you",
   "js.tk.mv.why.sub": "{0} would go inside its own subtree",
-  "js.tk.mv.why.topic": "{0} is a topic; a topic takes no children",
   "js.tk.new.aria": "New item title",
   "js.tk.new.close": "Close (Esc)",
   "js.tk.new.due": "Due date: {0}",

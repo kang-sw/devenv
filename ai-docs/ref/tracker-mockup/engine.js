@@ -312,8 +312,8 @@
   }
   // item.move: the item rule (creator or live assignee, the creator-gone fallback
   // included), then, only when the parent changes, the destination rule
-  // (item.create's parent rules, and a topic takes no children), the subtree rule,
-  // and the after anchor.
+  // (item.create's parent rules; a topic takes children like any item), the
+  // subtree rule, and the after anchor.
   function checkMove(S, p, a) {
     var it = needItem(S, p.item);
     try { needCreatorOrAssignee(S, it, a, ''); } catch (e) { if (!(e instanceof Rej) || !creatorGone(S, it, a)) throw e; }
@@ -326,7 +326,6 @@
       var par = needItem(S, parent, 'parent');
       if (par.hidden) rej('parent ' + par.alias + ' is hidden');
       needCreatorOrAssignee(S, par, a, 'parent ');
-      if (par.kind === 'topic') rej('parent ' + par.alias + ' is a topic; a topic takes no children');
       if (underItem(S, par.id, it)) rej('parent ' + par.alias + ' is in ' + it.alias + '\'s own subtree');
     }
     if (p.after != null && typeof p.after !== 'string') rej('after must be a sibling item id');

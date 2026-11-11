@@ -67,8 +67,8 @@ func (s *state) underItem(id string, it *item) bool {
 
 // checkMove judges item.move: the item rule (creator or live assignee, the
 // creator-gone fallback included), then, only when the parent changes, the
-// destination rule (item.create's parent rules, and a topic takes no
-// children), the subtree rule, and the after anchor.
+// destination rule (item.create's parent rules; a topic takes children like
+// any item), the subtree rule, and the after anchor.
 func (s *state) checkMove(p obj, a string) rejection {
 	it, r := s.needItem(p.disp("item"), "item")
 	if r != "" {
@@ -100,9 +100,6 @@ func (s *state) checkMove(p obj, a string) rejection {
 		}
 		if r := s.needCreatorOrAssignee(par, a, "parent "); r != "" {
 			return r
-		}
-		if par.kind == "topic" {
-			return rejection("parent " + par.alias + " is a topic; a topic takes no children")
 		}
 		if s.underItem(par.id, it) {
 			return rejection("parent " + par.alias + " is in " + it.alias + "'s own subtree")

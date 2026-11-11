@@ -815,7 +815,6 @@
   "js.tk.mv.why.hidden": "{0} ist ausgeblendet",
   "js.tk.mv.why.mine": "{0} wurde weder von dir erstellt noch dir zugewiesen",
   "js.tk.mv.why.sub": "{0} käme in den eigenen Teilbaum",
-  "js.tk.mv.why.topic": "{0} ist ein Thema; ein Thema nimmt keine Untereinträge",
   "js.tk.new.aria": "Titel des neuen Eintrags",
   "js.tk.new.close": "Schließen (Esc)",
   "js.tk.new.due": "Fälligkeit: {0}",
