@@ -76,6 +76,10 @@ type SessionView struct {
 	Conversation ConversationView
 	// Band is the status band around the composer.
 	Band BandView
+	// Host is what the runner of a hosted session reports beyond the
+	// adapter's events (background tasks, a typed failure, broken MCP
+	// servers, an API retry); nil for an adapter-fed session.
+	Host *wslive.Host
 	// Git is the drawer's git handle for Project; nil shows none. Set per
 	// request from the daemon's own read (gitbadge.go), never by the
 	// builders.
@@ -435,6 +439,7 @@ func buildSessionView(in pageInputs) SessionView {
 	lookup := in.Lookup
 	v.Lead = leadView(in.Snapshot.Lead)
 	v.Band = bandView(in.Snapshot)
+	v.Host = in.Snapshot.Host
 	v.Tree.Agents = agentTree(in.Snapshot.Agents, lookup)
 	for _, a := range in.Snapshot.Agents {
 		switch a.Status {

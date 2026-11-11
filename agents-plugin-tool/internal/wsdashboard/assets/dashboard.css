@@ -1506,8 +1506,32 @@ html:not([data-sysopen]) .rail .rnew { display: none; }
 .apcard .apro .i, .apneed .i { width: 13px; height: 13px; flex: none; margin-top: 2px; }
 .apneed { background: color-mix(in srgb, var(--wb-ph-perm) 16%, var(--wb-card)); border-radius: 10px; color: inherit; font-size: 13px; }
 .apneed .i { color: var(--wb-perm-ink); }
+/* hosted-session recovery and failures: a typed failure's error ring on a
+   rail row's badge and on the head's harness chip, with the head's failure
+   chip; the head's MCP-broken chip; the notice and retry lines in the
+   conversation (a failed compaction's error shares the notice text); the
+   background-task count in the agents panel head and beside the composer's
+   subagent badge; and the session menu's restart, shown only while broken */
+.rail .hb.err { color: var(--wb-fail); }
+.rail .hb.err .rtrk { stroke: var(--wb-fail); }
+.host.sse.err { color: var(--wb-fail); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--wb-fail) 70%, transparent); }
+.chip.fail { background: color-mix(in srgb, var(--wb-fail) 14%, var(--wb-card)); color: var(--wb-fail); cursor: help; }
+.chip.mcpbad { background: color-mix(in srgb, var(--wb-warn) 16%, var(--wb-card)); color: var(--wb-warn-ink); cursor: help; }
+.sysline.fail, .sysline.retry { max-width: 92%; }
+.sysline .nt { min-width: 0; overflow-wrap: anywhere; }
+.sysline .nt .t { font-size: inherit; font-weight: inherit; }
+.sysline.notice b { font-weight: 800; color: var(--wb-fail); }
+.sysline.retry .mk { color: var(--wb-warn-ink); }
+.sysline.retry .spin { width: 10px; height: 10px; }
+.thead .chip.bgt { color: var(--wb-fg); }
+.sbwrap { grid-column: 3; justify-self: start; display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
+.bgbadge { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 10px 0 8px; border-radius: 999px; white-space: nowrap; flex: none; cursor: help; font-size: 11.5px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; color: var(--wb-muted-fg); background: var(--wb-card); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--wb-muted-fg) 35%, transparent), var(--wb-shadow-hi); animation: ibadge-rise .16s ease-out; }
+.bgbadge[hidden] { display: none; }
+.bgbadge .i { width: 13px; height: 13px; flex: none; }
+.rpop .spact[hidden] { display: none; }
 @media (prefers-reduced-motion: reduce) {
   .rail, .rail-open .rail, .rscrim { transition: none; }
+  .bgbadge { animation: none; }
   .rail .bots .i { animation: none; }
   .rail .hb .rrun { animation: none; background: var(--wb-primary); }
 }

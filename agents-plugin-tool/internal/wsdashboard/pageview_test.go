@@ -643,6 +643,96 @@ func TestIndexViewListsLiveAndRecentlyEndedSessions(t *testing.T) {
 	}
 }
 
+// TestHostedRecoveryAndFailures pins what a hosted session's page shows of
+// its runner's host state and typed failures. The head: an error ring on
+// the harness chip and a chip naming the failure's kind (the harness text
+// on hover) while a failure is set, and an MCP-broken chip naming the
+// servers on hover. The agents panel head: the background task count. The
+// live region: the count for the composer's badge (data-bg) and a retry
+// row, "attempt N/M" or "attempt N" when the maximum is unknown, with the
+// error after it. The conversation: a notice line per typed failure in its
+// own words, a usage limit with its reset time when known, the harness text
+// after it. A session with no host state shows none of these.
+func TestHostedRecoveryAndFailures(t *testing.T) {
+	now := testNow
+	reset := now.Add(3 * time.Hour).UnixMilli()
+	s := liveSession("hosted", "/a", now)
+	s.Hosted = true
+	ring := []wslive.RingRecord{
+		{RingEntry: wslive.RingEntry{Kind: wslive.RingNotice, Notice: &wslive.Notice{Kind: wslive.NoticeLogin, Text: "Please run /login"}}, Name: "20261107T000000.000000001Z-n1.json", At: now},
+		{RingEntry: wslive.RingEntry{Kind: wslive.RingNotice, Notice: &wslive.Notice{Kind: wslive.NoticeModel}}, Name: "20261107T000000.000000002Z-n2.json", At: now},
+		{RingEntry: wslive.RingEntry{Kind: wslive.RingNotice, Notice: &wslive.Notice{Kind: wslive.NoticeUsageLimit, Text: "Limit reached", ResetsAt: reset}}, Name: "20261107T000000.000000003Z-n3.json", At: now},
+		{RingEntry: wslive.RingEntry{Kind: wslive.RingNotice, Notice: &wslive.Notice{Kind: wslive.NoticeUsageLimit}}, Name: "20261107T000000.000000004Z-n4.json", At: now},
+	}
+	render := func(host *wslive.Host) regionSet {
+		t.Helper()
+		snap := liveSnap(now, wslive.Lead{})
+		snap.Host = host
+		v := buildSessionView(pageInputs{Session: s, Snapshot: snap, Ring: ring, Now: now, Lookup: lookupOf(nil, nil)})
+		regions, err := renderSessionRegions(v, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return regions
+	}
+	host := &wslive.Host{
+		BackgroundTasks: 2,
+		Failure:         &wslive.Notice{Kind: wslive.NoticeUsageLimit, Text: "Limit reached", ResetsAt: reset},
+		MCPBroken:       []string{"github", "plugin:ws:ws"},
+		Retry:           &wslive.Retry{Attempt: 2, MaxRetries: 10, Error: "overloaded", Status: 529},
+	}
+	regions := render(host)
+	head, tree, live, entries := string(regions[regionHead].HTML), string(regions[regionTree].HTML), string(regions[regionConvLive].HTML), string(regions[regionEntries].HTML)
+	for _, want := range []string{
+		`<span class="host sse err" title=`,
+		`<span class="chip fail" title="Limit reached">usage limit reached</span>`,
+		`<span class="chip mcpbad" title="MCP servers that did not reconnect: github, plugin:ws:ws">MCP broken</span>`,
+	} {
+		if !strings.Contains(head, want) {
+			t.Errorf("head lacks %s:\n%s", want, head)
+		}
+	}
+	if want := `<span class="chip bgt" title="background tasks the harness runs: shells, monitors, and background subagents">2 background tasks</span>`; !strings.Contains(tree, want) {
+		t.Errorf("agents panel head lacks %s:\n%s", want, tree)
+	}
+	for _, want := range []string{
+		` data-bg="2">`,
+		`<div class="sysline retry running"><span class="mk"><span class="spin"></span></span><span class="nt">retrying, attempt 2/10: overloaded</span></div>`,
+	} {
+		if !strings.Contains(live, want) {
+			t.Errorf("live region lacks %s:\n%s", want, live)
+		}
+	}
+	for _, want := range []string{
+		`<div class="sysline notice fail" data-entry="20261107T000000.000000001Z-n1.json" data-notice="login"><span class="mk">✗</span><span class="nt"><b>login needed</b>: Please run /login</span><time`,
+		`<div class="sysline notice fail" data-entry="20261107T000000.000000002Z-n2.json" data-notice="model"><span class="mk">✗</span><span class="nt"><b>model unavailable</b></span><time`,
+		`<div class="sysline notice fail" data-entry="20261107T000000.000000003Z-n3.json" data-notice="usage_limit"><span class="mk">✗</span><span class="nt"><b>usage limit reached</b> · resets <time class="t" data-ms="` + fmt.Sprint(reset) + `" data-f="dt">` + clockText(reset) + `</time>: Limit reached</span><time`,
+		`<div class="sysline notice fail" data-entry="20261107T000000.000000004Z-n4.json" data-notice="usage_limit"><span class="mk">✗</span><span class="nt"><b>usage limit reached</b></span><time`,
+	} {
+		if !strings.Contains(entries, want) {
+			t.Errorf("entries lack %s:\n%s", want, entries)
+		}
+	}
+
+	host.Failure, host.MCPBroken = nil, nil
+	host.BackgroundTasks = 0
+	host.Retry = &wslive.Retry{Attempt: 3}
+	regions = render(host)
+	if live := string(regions[regionConvLive].HTML); !strings.Contains(live, `<span class="nt">retrying, attempt 3</span>`) || !strings.Contains(live, ` data-bg="0">`) {
+		t.Errorf("a retry with no maximum or error, and no background task:\n%s", live)
+	}
+
+	regions = render(nil)
+	head, tree, live = string(regions[regionHead].HTML), string(regions[regionTree].HTML), string(regions[regionConvLive].HTML)
+	for name, html := range map[string]string{"head": head, "tree": tree, "live": live} {
+		for _, not := range []string{"sse err", "chip fail", "mcpbad", "chip bgt", "data-bg", "sysline retry"} {
+			if strings.Contains(html, not) {
+				t.Errorf("%s without host state shows %q:\n%s", name, not, html)
+			}
+		}
+	}
+}
+
 // TestHostedSessionMarks pins what a hosted session's page and index row
 // carry. The page: the hosted mark in the head and on <html> (which the
 // page script reads), the box its approval cards go in, and a permission
