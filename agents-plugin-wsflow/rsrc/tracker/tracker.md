@@ -94,7 +94,7 @@ cannot be rolled back, so each stands alone in its batch, outside any group.
 |---|---|---|
 | `tk:store` | `name` | group of every command below but the store commands |
 | `tk:item.create` | `kind`, `title`, `project?`, `labels?`, `due?`, `priority?`, `parent?`, `after?`, `mentions?`, `refs?` | the body |
-| `tk:item.edit` | `item`, `title?`, `project?`, `labels?`, `due?`, `priority?`, `mentions?`, `refs?`, `clear?` | a new body |
+| `tk:item.edit` | `item`, `title?`, `project?`, `labels?`, `due?`, `priority?`, `mentions?`, `refs?`, `clear?`, `base?` | a new body |
 | `tk:item.hide` | `item` | none |
 | `tk:item.move` | `item`, `parent`, `after?` | none |
 | `tk:item.assign` | `item`, `people?` and `rules?` (one or both), or `levels`; `completion?` | none |
@@ -175,7 +175,7 @@ Body text, markdown, written as is.
   assigns it with `tk:item.assign item="$N"`; the update prints that
   assignment under the create's position.
 - People are member IDs; `people`, `rules`, `mentions`, `refs`, `labels`,
-  `leads`, `names`, and `clear` are space-separated.
+  `leads`, `names`, `clear`, and `base` are space-separated.
 - Members form a lead tree; each member has at most one lead.
   `tk:roles.set_lead` sets `member`'s lead (`leads=""` for none).
 - Assignment lifecycle:
@@ -232,6 +232,12 @@ Body text, markdown, written as is.
     wins, and the later is flagged with a reason naming what took it first.
 - `clear` on `tk:item.edit`: `body`, `due`, or both
   (`clear="body due"`); an absent body leaves the body as it is.
+- `tk:item.edit` (the item's creator or a live assignee) writes the whole
+  new body. Set `base` to the item's `body revision` line from the query
+  you edited from, and the store merges it line by line with the edits
+  others made since: where both changed the same lines the later write wins
+  and both are marked as a conflict. Without `base` the body is replaced,
+  dropping those edits.
 - `origin`: `agent` (the user asked; the default) or `agent-auto` (recorded
   unasked, valid only on `tk:item.status` and `tk:item.close`; see Recording).
 - `tk:roles.*` and another member's `tk:member.profile` are admin commands.
