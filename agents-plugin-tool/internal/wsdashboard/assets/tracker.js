@@ -757,11 +757,11 @@
   }
   function canAnswer(it, q) { return q.state === 'pending' && (q.assignee === VS.viewer.member || isCreator(it)); }
   // A subtask's parent is assigned to or created by its author.
-  function canSplit(it) { return (!!mineLive(it) || it.author === VS.viewer.member) && it.kind !== 'topic' && !it.hidden; }
+  function canSplit(it) { return (!!mineLive(it) || it.author === VS.viewer.member) && !it.hidden; }
   function canStatus(it) { var r = !it.hidden && it.kind !== 'topic' && mineLive(it); return !!r && r.status !== 'done'; }
   // item.move, as the store judges it (check.go checkMove): the item rule is the creator or a live
   // assignee (an admin too once the creator was removed); only when the parent changes, the
-  // destination rule: not hidden, the viewer's (created or live-assigned), not a topic, and not the
+  // destination rule: not hidden, the viewer's (created or live-assigned; a topic too), and not the
   // item or inside its own subtree. A same-parent reorder and a move to the top level take the item
   // rule alone. moveWhy(id, dest) is '' when the store takes the move, else the reason; dest null is
   // the top level. The dashboard offers no move the store would refuse.
@@ -776,7 +776,6 @@
     if (!dest || dest === (it.parent || null)) return '';
     if (!d || d.hidden) return wsT("js.tk.mv.why.hidden", d ? d.alias : alias(dest));
     if (d.author !== VS.viewer.member && !mineLive(d)) return wsT("js.tk.mv.why.mine", d.alias);
-    if (d.kind === 'topic') return wsT("js.tk.mv.why.topic", d.alias);
     for (var cur = d, n = 0; cur && n < 1000; cur = cur.parent ? VS.items[cur.parent] : null, n++) if (cur.id === id) return wsT("js.tk.mv.why.sub", it.alias);
     return '';
   }

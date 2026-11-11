@@ -1,0 +1,99 @@
+{
+ "name": "move-topic",
+ "comment": "item.move under a topic: a topic takes children like any item. ada creates the topic T and the task X and makes maya T's holder; ada, T's creator, moves X under T, and maya, T's live holder, moves her own M under T after X. (A non-holder's move under T is the reasons.json case \"move under another's topic\".)",
+ "viewers": [
+  "ada.pc",
+  "maya.pc"
+ ],
+ "now": "2026-11-02T09:00:00Z",
+ "genesis": {
+  "admins": [
+   "ada"
+  ],
+  "members": [
+   {
+    "id": "ada",
+    "name": "Ada",
+    "keys": [
+     "ada-k1"
+    ],
+    "leads": []
+   },
+   {
+    "id": "maya",
+    "name": "Maya",
+    "keys": [
+     "maya-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   }
+  ]
+ },
+ "commits": {
+  "ada.pc": [
+   {
+    "ts": "2026-11-01T09:00:00Z",
+    "seen": {},
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "topic",
+       "title": "T"
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "X"
+      }
+     ],
+     [
+      "item.assign",
+      {
+       "item": "ada.pc#1",
+       "targets": [
+        "maya"
+       ]
+      }
+     ],
+     [
+      "item.move",
+      {
+       "item": "ada.pc#2",
+       "parent": "ada.pc#1"
+      }
+     ]
+    ]
+   }
+  ],
+  "maya.pc": [
+   {
+    "ts": "2026-11-01T09:10:00Z",
+    "seen": {
+     "ada.pc": 4
+    },
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "M"
+      }
+     ],
+     [
+      "item.move",
+      {
+       "item": "maya.pc#1",
+       "parent": "ada.pc#1",
+       "after": "ada.pc#2"
+      }
+     ]
+    ]
+   }
+  ]
+ }
+}

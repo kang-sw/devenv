@@ -815,7 +815,6 @@
   "js.tk.mv.why.hidden": "{0}은(는) 숨겨져 있습니다",
   "js.tk.mv.why.mine": "{0}은(는) 내가 만들지도, 내게 배정되지도 않았습니다",
   "js.tk.mv.why.sub": "{0}이(가) 자신의 하위 트리 안으로 들어가게 됩니다",
-  "js.tk.mv.why.topic": "{0}은(는) 주제이며, 주제는 하위 항목을 받지 않습니다",
   "js.tk.new.aria": "새 항목 제목",
   "js.tk.new.close": "닫기 (Esc)",
   "js.tk.new.due": "마감일: {0}",

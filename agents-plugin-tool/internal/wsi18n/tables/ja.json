@@ -815,7 +815,6 @@
   "js.tk.mv.why.hidden": "{0} は非表示です",
   "js.tk.mv.why.mine": "{0} はあなたが作成したものでも、あなたに割り当てられたものでもありません",
   "js.tk.mv.why.sub": "{0} が自身のサブツリーの中に入ってしまいます",
-  "js.tk.mv.why.topic": "{0} はトピックです。トピックは子項目を持てません",
   "js.tk.new.aria": "新しい項目のタイトル",
   "js.tk.new.close": "閉じる (Esc)",
   "js.tk.new.due": "期限: {0}",
