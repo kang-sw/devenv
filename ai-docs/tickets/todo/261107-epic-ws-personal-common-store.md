@@ -81,6 +81,11 @@ repository sized for 50-60 people, reached from the dashboard.
   branch in the store repository, outside the event protocol, any member
   edits, agent-driven recovery; after the core children (board (375) a,
   (376) b, (377) b).
+- `261111-feat-ws-tracker-store-unregister-relabel` (todo): unregister a
+  store from this machine (local clone deleted, remote kept, refused with
+  unpushed events), a non-destructive hide, and a machine-local relabel,
+  from both MCP commands and the dashboard card menu (board (150) b,
+  (157) b, (158) a).
 
 ## Cross-Child Decisions
 
