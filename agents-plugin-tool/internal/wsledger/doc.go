@@ -105,8 +105,12 @@
 // Sync re-issues their payloads as new events; only events this clone's
 // journal recorded are re-issued.
 //
-// Seq allocation, journal writes, batch close, Fetch, and Sync are
-// serialized across processes by a file lock in the store directory.
+// Seq allocation, journal writes, batch close, and every local step of
+// Fetch and Sync are serialized across processes by a file lock in the
+// store directory (LockFile). A second one (NetLockFile) is held by
+// whichever call is talking to the remote, so a fetch or push in flight
+// keeps other fetches and pushes of the directory waiting, but no append
+// and no read.
 //
 // # Remote
 //

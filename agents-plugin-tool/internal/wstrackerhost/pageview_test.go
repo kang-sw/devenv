@@ -4,7 +4,6 @@ import (
 	"context"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -13,30 +12,6 @@ import (
 
 	"github.com/kang-sw/devenv/internal/wstracker"
 )
-
-// blockingRunner is the real git runner whose fetches, once armed, wait
-// until released: a remote that hangs mid-fetch.
-type blockingRunner struct {
-	armed   atomic.Bool
-	entered chan struct{}
-	release chan struct{}
-}
-
-func newBlockingRunner() *blockingRunner {
-	return &blockingRunner{entered: make(chan struct{}, 16), release: make(chan struct{})}
-}
-
-func (r *blockingRunner) RunGit(ctx context.Context, root string, args ...string) ([]byte, error) {
-	if r.armed.Load() && slices.Contains(args, "fetch") {
-		r.entered <- struct{}{}
-		select {
-		case <-r.release:
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		}
-	}
-	return batchRunner{}.RunGit(ctx, root, args...)
-}
 
 const pageWait = 200 * time.Millisecond
 
@@ -54,65 +29,13 @@ func within(t *testing.T, h *Host, store string) *StoreView {
 	return v
 }
 
-// TestViewWithinServesLastStateWhileFetchBlocked: while the daemon's own
-// fetch holds the store, a bounded read returns the last folded state
-// within its bound, the change callback runs once the fetch is released,
-// and the next read is fresh.
-func TestViewWithinServesLastStateWhileFetchBlocked(t *testing.T) {
-	w := newWorld(t)
-	runner := newBlockingRunner()
-	daemon, err := New(Options{Root: filepath.Join(w.dir, "ada"), Clock: w.clock, Runner: runner})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer daemon.Close()
-	w.register(daemon, "team", "ada", &wstracker.Profile{Given: "Ada"})
-	other := sameRoot(t, w, "ada")
-	var changes counter
-	stop := daemon.StartWatch(time.Hour, changes.inc) // only the late-reload signal fires
-	defer stop()
-
-	first := within(t, daemon, "team") // no folded state yet: waits
-	id := createItem(t, other, "team", "written before the fetch")
-
-	runner.armed.Store(true)
-	checked := make(chan error, 1)
-	go func() {
-		_, err := daemon.Check(context.Background(), "team")
-		checked <- err
-	}()
-	<-runner.entered
-
-	stale := within(t, daemon, "team")
-	if hasItem(stale, id) {
-		t.Fatal("the blocked read must serve the last folded state, not a fresh one")
-	}
-	if len(stale.Items) != len(first.Items) {
-		t.Fatalf("stale view has %d items, the last folded state %d", len(stale.Items), len(first.Items))
-	}
-	if changes.get() != 0 {
-		t.Fatal("the change callback ran before the reload landed")
-	}
-
-	runner.armed.Store(false)
-	close(runner.release)
-	if err := <-checked; err != nil {
-		t.Fatalf("check: %v", err)
-	}
-	waitFor(t, 10*time.Second, "the change callback after the late reload", func() bool { return changes.get() > 0 })
-	time.Sleep(50 * time.Millisecond)
-	if n := changes.get(); n != 1 {
-		t.Fatalf("the late reload must call the change callback once, got %d", n)
-	}
-	if fresh := within(t, daemon, "team"); !hasItem(fresh, id) {
-		t.Fatal("the read after the change callback must be fresh")
-	}
-}
-
 // TestViewWithinReturnsWhileAnotherProcessHoldsTheStoreLock: another
-// process holding the store's ledger lock (a push or fetch of its own)
-// does not hold a bounded read past its bound, while an unbounded View
-// (the MCP path) waits and then returns fresh state.
+// process holding the store's ledger lock (a wiki save across its push)
+// does not hold a bounded read past its bound: the read serves the last
+// folded state, the change callback runs once the lock is released, and
+// the next read is fresh. An unbounded View (the MCP path) waits and then
+// returns fresh state. A fetch or push in flight does not hold that lock
+// (TestLocalReadsDoNotWaitForNetwork).
 func TestViewWithinReturnsWhileAnotherProcessHoldsTheStoreLock(t *testing.T) {
 	w := newWorld(t)
 	daemon := w.machine("ada")

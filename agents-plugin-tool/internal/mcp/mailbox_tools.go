@@ -154,7 +154,38 @@ func (s *Server) handleMailboxRecv(id json.RawMessage, args map[string]any) resp
 		return toolTextResponse(id, "", mailboxUnknownSessionError(tool))
 	}
 
-	var drained []wsmailbox.Envelope
+	drained, history, keys, err := s.claimMail(sessionKey, entry)
+	if err != nil {
+		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
+	}
+	s.recordLiveMail(sessionKey, history, keys)
+
+	if wantsJSON(args) {
+		return toolJSONResponse(id, drained, nil)
+	}
+	if len(drained) == 0 {
+		return toolTextResponse(id, "no unread mail\n", nil)
+	}
+	var b strings.Builder
+	for _, m := range drained {
+		handle := m.From
+		if handle == "" {
+			handle = m.ReplyTo
+		}
+		fmt.Fprintf(&b, "[%s] %s: %s\n", m.SentAt, handle, m.Content)
+	}
+	return toolTextResponse(id, b.String(), nil)
+}
+
+// claimMail removes every message waiting for sessionKey from the queues it
+// may drain (its owned named inbox and its own reply-id queue), oldest
+// first, and records the claim: the senders as correspondents and one
+// received entry per message in the session's mail history. history and
+// keys are those entries and their file names (recordMailboxHistory), for
+// the caller's mail lines in the conversation ring. mailbox.recv and the
+// dashboard daemon's delivery to a session it hosts (LeadMailbox) both
+// claim through it, so a message one of them took is gone for the other.
+func (s *Server) claimMail(sessionKey string, entry sessionEntry) (drained []wsmailbox.Envelope, history []mailboxHistoryEntry, keys []string, err error) {
 	var readErrs []error
 
 	// Named-inbox drain: only when this session currently holds the owner
@@ -220,7 +251,7 @@ func (s *Server) handleMailboxRecv(id json.RawMessage, args map[string]any) resp
 	// mail that *was* successfully retrieved.
 	if len(readErrs) > 0 {
 		if len(drained) == 0 {
-			return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, readErrs[0]))
+			return nil, nil, nil, readErrs[0]
 		}
 		for _, rerr := range readErrs {
 			s.debugEvent("mailbox.recv_partial_error", map[string]any{"error": rerr.Error()})
@@ -229,23 +260,8 @@ func (s *Server) handleMailboxRecv(id json.RawMessage, args map[string]any) resp
 
 	sort.SliceStable(drained, func(i, j int) bool { return drained[i].SentAt < drained[j].SentAt })
 	s.recordMailboxRecvContacts(sessionKey, entry.root, ownNamed, drained)
-	s.recordMailboxRecvHistory(sessionKey, drained)
-
-	if wantsJSON(args) {
-		return toolJSONResponse(id, drained, nil)
-	}
-	if len(drained) == 0 {
-		return toolTextResponse(id, "no unread mail\n", nil)
-	}
-	var b strings.Builder
-	for _, m := range drained {
-		handle := m.From
-		if handle == "" {
-			handle = m.ReplyTo
-		}
-		fmt.Fprintf(&b, "[%s] %s: %s\n", m.SentAt, handle, m.Content)
-	}
-	return toolTextResponse(id, b.String(), nil)
+	history, keys = s.recordMailboxRecvHistory(sessionKey, drained)
+	return drained, history, keys, nil
 }
 
 // recordMailboxRecvContacts records each drained envelope's counterparty
@@ -280,9 +296,10 @@ func (s *Server) recordMailboxRecvContacts(sessionKey, root, ownNamed string, dr
 // history ring, one entry per message in the order recv returns them (each
 // queue's order is kept: the SentAt sort is stable). drained holds only mail
 // whose drain write was confirmed. A failed ring write is logged inside, never
-// surfaced: the drained mail must still be returned. The same entries become
-// mail lines in the session's conversation ring (recordLiveMail).
-func (s *Server) recordMailboxRecvHistory(sessionKey string, drained []wsmailbox.Envelope) {
+// surfaced: the drained mail must still be returned. It returns the entries
+// and their history file names, which become mail lines in the session's
+// conversation ring.
+func (s *Server) recordMailboxRecvHistory(sessionKey string, drained []wsmailbox.Envelope) ([]mailboxHistoryEntry, []string) {
 	entries := make([]mailboxHistoryEntry, 0, len(drained))
 	for _, m := range drained {
 		handle := m.From
@@ -291,7 +308,7 @@ func (s *Server) recordMailboxRecvHistory(sessionKey string, drained []wsmailbox
 		}
 		entries = append(entries, mailboxHistoryEntry{Direction: mailboxHistoryRecv, Counterparty: handle, Body: m.Content})
 	}
-	s.recordLiveMail(sessionKey, entries, s.recordMailboxHistory(sessionKey, entries))
+	return entries, s.recordMailboxHistory(sessionKey, entries)
 }
 
 // mailboxPeerOut is lookup_peers' per-peer JSON/text shape.

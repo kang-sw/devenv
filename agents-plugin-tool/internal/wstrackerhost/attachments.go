@@ -152,34 +152,55 @@ func readStaged(dir, oid string) ([]byte, bool) {
 }
 
 // ReadAttachment returns the content of attachment oid of store id, or
-// ErrAttachmentNotFound. A blob this clone lacks is fetched from the remote
-// under networkTimeout, as a check is: the fetch holds the store's lock,
-// so a stalled transfer must not outlast it whatever the caller's context.
+// ErrAttachmentNotFound. A copy this clone holds (stored or staged) is
+// served under the store's lock alone, so it never waits for a fetch or
+// push in flight. A blob this clone lacks is fetched from the remote
+// outside that lock, under the store's network lock and networkTimeout: a
+// stalled transfer must not outlast the bound whatever the caller's
+// context, and a caller that bounds its lock wait (WithLockWait) is
+// answered ErrStoreBusy while another fetch or push holds the network.
 func (h *Host) ReadAttachment(ctx context.Context, id, oid string) ([]byte, error) {
 	if !wsledger.ValidAttachmentOID(oid) {
 		return nil, ErrAttachmentNotFound
 	}
 	var data []byte
+	author, fetch := "", false
 	err := h.with(ctx, id, func(st *store) error {
 		if _, err := st.ledger.Reload(ctx); err != nil {
 			return err
 		}
-		v := st.tracker.View(h.now(), 0)
-		fetchCtx, cancel := context.WithTimeout(ctx, networkTimeout)
-		defer cancel()
+		author = attachmentAuthor(st.tracker.View(h.now(), 0), oid)
 		var err error
-		data, err = st.ledger.ReadAttachment(fetchCtx, oid, attachmentAuthor(v, oid))
+		data, err = st.ledger.ReadLocalAttachment(ctx, oid, author)
 		if err == nil {
 			return nil
 		}
-		if !errors.Is(err, wsledger.ErrAttachmentNotFound) {
+		notLocal := errors.Is(err, wsledger.ErrAttachmentNotLocal)
+		if !notLocal && !errors.Is(err, wsledger.ErrAttachmentNotFound) {
 			return err
 		}
 		if staged, ok := readStaged(st.entry.Dir, oid); ok {
 			data = staged
 			return nil
 		}
+		if notLocal {
+			fetch = true
+			return nil
+		}
 		return fmt.Errorf("%w: %v", ErrAttachmentNotFound, err)
+	})
+	if err != nil || !fetch {
+		return data, err
+	}
+	err = h.withNet(ctx, id, func(ctx context.Context, st *store, e StoreEntry, l *wsledger.Ledger) error {
+		fetchCtx, cancel := context.WithTimeout(ctx, networkTimeout)
+		defer cancel()
+		var err error
+		data, err = l.ReadAttachment(fetchCtx, oid, author)
+		if errors.Is(err, wsledger.ErrAttachmentNotFound) {
+			return fmt.Errorf("%w: %v", ErrAttachmentNotFound, err)
+		}
+		return err
 	})
 	return data, err
 }

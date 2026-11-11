@@ -27,12 +27,15 @@ const dashboardUnregisterTimeout = time.Minute
 
 // dashboardViewWait bounds how long a page read waits for a store's reload
 // before it serves the last folded state (wstrackerhost.ViewWithin): a
-// reload can wait behind a push or fetch holding the store's lock.
+// reload can wait behind a wiki save or another process's write holding
+// the store's lock.
 const dashboardViewWait = 500 * time.Millisecond
 
 // dashboardLockWait bounds how long a page's wiki or image read waits for
-// its store's lock, which a fetch or push holds up to a network timeout;
-// past it the read answers wsdashboard.ErrTrackerBusy and the page retries.
+// its store's lock, which a wiki save holds up to a network timeout, and,
+// for an image this clone has yet to fetch, for the store's network lock,
+// which a fetch or push holds as long; past it the read answers
+// wsdashboard.ErrTrackerBusy and the page retries.
 const dashboardLockWait = 500 * time.Millisecond
 
 // pageRead bounds the store lock wait of the page reads run with it.

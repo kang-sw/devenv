@@ -121,6 +121,14 @@
 .tk .chip.you { background: var(--wb-primary); color: var(--wb-primary-fg); }
 .tk .chip.flag { background: color-mix(in srgb, var(--tk-fail) 16%, var(--wb-card)); color: var(--tk-fail); }
 .tk .chip.kind { background: transparent; box-shadow: inset 0 0 0 1px var(--wb-line); font-weight: 600; }
+/* a store label: the quiet outline chip, its store-defined colour only in the dot */
+.tk .chip.lbl { background: transparent; box-shadow: inset 0 0 0 1px var(--wb-line); color: var(--wb-fg); font-weight: 600; gap: 4px; }
+.tk button.chip.lbl { border: 0; font-family: inherit; cursor: pointer; }
+.tk button.chip.lbl:hover { background: var(--wb-muted); }
+.tk .chip.lbl.on { background: color-mix(in srgb, var(--wb-primary) 12%, var(--wb-card)); box-shadow: inset 0 0 0 1px var(--wb-primary); }
+.tk .ldot { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto; box-shadow: 0 0 0 1px color-mix(in srgb, var(--wb-fg) 18%, transparent); }
+.tk .irow .chip.lbl { margin-left: 4px; }
+.tk .lpick { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; margin: 6px 0; font-size: 12px; }
 .tk .btn.ghost { opacity: .6; }
 .tk .ts { font-family: var(--wb-mono); font-size: 11px; white-space: nowrap; }
 .tk .al { font-family: var(--wb-mono); font-size: 11px; color: var(--wb-muted-fg); margin-right: 2px; }
@@ -397,6 +405,12 @@ body.tk-paged .tk-drawer { display: none; }
 .tk .tg-head .av { margin-left: 0; }
 .tk .tg-head .nid { font-family: var(--wb-mono); font-size: 11px; color: var(--wb-muted-fg); }
 .tk .tg-head .cnt { font-size: 12px; color: var(--wb-muted-fg); }
+.tk .tg-head .tcn { font: inherit; border: 0; background: transparent; color: inherit; padding: 0 2px; border-radius: 5px; cursor: pointer; white-space: nowrap; }
+.tk .tg-head .tcn.err { color: var(--tk-fail); }
+.tk .tg-head .tcn:hover { background: color-mix(in srgb, var(--wb-primary) 14%, var(--wb-card)); color: var(--wb-primary); }
+.tk .tg-head .tcn.on { background: var(--wb-primary); color: var(--wb-primary-fg); }
+.tk .tg-head .tcn:focus-visible { outline: 1.5px solid var(--wb-primary); }
+.tk .tg > .muted { margin: 2px 4px 6px; font-size: 12px; }
 
 /* team tree */
 .tk .tree, .tk .tree ul { list-style: none; margin: 0; padding: 0; }
@@ -413,6 +427,20 @@ body.tk-paged .tk-drawer { display: none; }
 .tk .tree .kline { display: flex; align-items: center; gap: 6px; max-width: 100%; }
 .tk .tree .kline code { font-family: var(--wb-mono); font-size: 11px; color: var(--wb-muted-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tk .tree .kline.rev code { text-decoration: line-through; }
+
+/* store settings (Team tab) */
+.tk .tkset { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--wb-line); }
+.tk .tkset h3 { margin: 0 0 2px; font-size: 12px; font-weight: 800; color: var(--wb-muted-fg); text-transform: uppercase; letter-spacing: .04em; }
+.tk .tkset > p { margin: 0 0 6px; font-size: 12px; }
+.tk .tkset .srow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 3px 0; font-size: 12.5px; }
+.tk .tkset .slabel { color: var(--wb-muted-fg); min-width: 110px; }
+.tk .tkset .sval { flex: 1 1 0; min-width: 0; }
+.tk .fld.plevel input[type=radio] { flex: 0 0 auto; margin: 0; accent-color: var(--wb-primary); }
+.tk .tkset .slabels { list-style: none; margin: 2px 0 0; padding: 0 0 0 118px; display: flex; flex-direction: column; gap: 3px; }
+.tk .tkset .slabels li { display: flex; align-items: center; gap: 6px; }
+.tk .tkset .slabels .grow { flex: 1 1 0; }
+.tk .fld input[type=color] { width: 44px; height: 26px; padding: 0 2px; border: 1px solid var(--wb-line); border-radius: 6px; background: var(--wb-card); }
+@media (max-width: 520px) { .tk .tkset .slabels { padding-left: 0; } }
 
 /* activity */
 .tk .ev { padding: 4px 0; border-top: 1px solid var(--wb-muted); font-size: 12.5px; }

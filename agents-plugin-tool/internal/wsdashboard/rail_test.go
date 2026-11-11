@@ -273,6 +273,68 @@ func TestRailRowStatus(t *testing.T) {
 	}
 }
 
+// TestRailRowApproval pins the awaiting-approval state: a live hosted
+// session whose lead waits on a permission carries the tool and its
+// arguments, and does not count as working; a session the daemon does not
+// host (its wait is answered in its terminal), a stale snapshot, an ended
+// row, and a lead in any other phase carry none; the view and each
+// workspace count the waiting rows.
+func TestRailRowApproval(t *testing.T) {
+	now := time.Now()
+	ms := now.UnixMilli()
+	wait := wslive.Lead{Activity: wslive.Activity{Phase: wslive.PhasePermission, Permission: &wslive.Permission{ToolName: "Bash", ArgsPreview: "git push", StartedAt: ms}}}
+	snap := &wslive.Snapshot{Adapter: "claude", UpdatedAt: ms, HeartbeatMs: 30000, Lead: wait}
+	hosted := railSession("h", "/p", now, time.Time{})
+	hosted.Hosted = true
+	cli := railSession("c", "/p", now, time.Time{})
+
+	row := railRow(railInput{Session: hosted, Snapshot: snap}, true, now)
+	if !row.Hosted || row.Working || row.Approval == nil || *row.Approval != (ApprovalWait{Tool: "Bash", Args: "git push"}) {
+		t.Errorf("hosted waiting row = %+v (approval %+v), want the Bash wait", row, row.Approval)
+	}
+	if row := railRow(railInput{Session: hosted}, true, now); !row.Hosted || row.Approval != nil {
+		t.Errorf("hosted row without a snapshot = %+v, want the hosted mark and no wait", row)
+	}
+	if row := railRow(railInput{Session: cli, Snapshot: snap}, true, now); row.Hosted || row.Approval != nil {
+		t.Errorf("a session the daemon does not host = %+v, want no wait", row)
+	}
+	stale := *snap
+	stale.UpdatedAt = ms - time.Hour.Milliseconds()
+	if row := railRow(railInput{Session: hosted, Snapshot: &stale}, true, now); row.Approval != nil {
+		t.Errorf("a stale snapshot = %+v, want no wait", row.Approval)
+	}
+	if row := railRow(railInput{Session: hosted, Snapshot: snap}, false, now); row.Approval != nil {
+		t.Errorf("an ended row = %+v, want no wait", row.Approval)
+	}
+	busy := *snap
+	busy.Lead = wslive.Lead{Activity: wslive.Activity{Phase: wslive.PhaseTool}}
+	if row := railRow(railInput{Session: hosted, Snapshot: &busy}, true, now); row.Approval != nil || !row.Working {
+		t.Errorf("a working lead = %+v, want no wait", row)
+	}
+	bare := *snap
+	bare.Lead = wslive.Lead{Activity: wslive.Activity{Phase: wslive.PhasePermission}}
+	if row := railRow(railInput{Session: hosted, Snapshot: &bare}, true, now); row.Approval == nil || *row.Approval != (ApprovalWait{}) {
+		t.Errorf("a wait without its detail = %+v, want an empty wait", row.Approval)
+	}
+
+	other := railSession("o", "/q", now, time.Time{})
+	other.Hosted = true
+	view := buildRailView([]railInput{
+		{Session: hosted, Snapshot: snap},
+		{Session: cli, Snapshot: snap},
+		{Session: other, Snapshot: snap},
+		{Session: railSession("idle", "/q", now, time.Time{})},
+	}, nil, nil, now)
+	if view.Live != 4 || view.CountApproval != 2 {
+		t.Errorf("view live %d approvals %d, want 4 and 2", view.Live, view.CountApproval)
+	}
+	for _, ws := range view.Workspaces {
+		if ws.Approvals != 1 {
+			t.Errorf("workspace %s approvals = %d, want 1", ws.Path, ws.Approvals)
+		}
+	}
+}
+
 // TestRailRepoRoot pins how a session finds its repository: the registered
 // common directory's parent when it is a .git folder, a plain folder for a
 // bare or submodule common directory, and without one the session root's
@@ -635,5 +697,92 @@ func TestRailMarkupAddButtonsAndForget(t *testing.T) {
 	}
 	if strings.Contains(string(region.HTML), "radd") {
 		t.Errorf("a daemon without stored workspaces shows a +:\n%s", region.HTML)
+	}
+}
+
+// TestRailMarkupHostedSessions pins what the rail shows of hosted sessions.
+// On a daemon that hosts them, whether or not it keeps stored workspaces,
+// every worktree row and every plain folder's bar ends in the new-session
+// button, naming the folder a session would start in; a repository's bar
+// has none. A hosted row carries the hosted mark. A row waiting on an
+// approval has a still ring in place of the working one, the approve chip,
+// the tool and its arguments as its second line, and the attributes the
+// page's notification reads; its bar and the header count it.
+func TestRailMarkupHostedSessions(t *testing.T) {
+	wait := RailRow{ReplyID: "waits", Harness: "claude", Live: true, Hosted: true, Message: "last reply", Approval: &ApprovalWait{Tool: "mcp__ws__tracker_update", Args: "git push origin develop"}}
+	plain := RailRow{ReplyID: "plain", Harness: "pi", Live: true, Working: true, Message: "hi"}
+	view := RailView{CanSpawn: true, Live: 2, CountApproval: 1, Workspaces: []RailWorkspace{
+		{Name: "repo", Path: "/w/repo", Repo: true, Live: 2, Approvals: 1, Worktrees: []RailWorktree{
+			{Path: "/w/repo", Root: true, Folder: "repo", Branch: "main", HasChanges: true, Changes: 2, Sessions: []RailRow{wait, plain}},
+			{Path: "/w/repo-wt", Folder: "repo-wt", Detached: true},
+		}},
+		{Name: "folder", Path: "/w/folder"},
+	}}
+	region, err := renderRailRegion(view, "en")
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(region.HTML)
+	const chip = `<span class="chip perm" title="sessions awaiting approval">`
+	if head, _, _ := strings.Cut(html, `<div class="rlist"`); !strings.Contains(head, chip) {
+		t.Errorf("the rail header lacks the approvals count:\n%s", head)
+	}
+	bar, body, _ := strings.Cut(railSection(t, html, "/w/repo"), `<div class="wsbody">`)
+	if strings.Contains(bar, `class="rnew"`) || !strings.Contains(bar, chip) {
+		t.Errorf("a repository bar = %s, want the approvals count and no new-session button", bar)
+	}
+	for _, want := range []string{
+		`<button type="button" class="rnew" data-root="/w/repo" data-name="repo" data-branch="main" title="Start a session in main"`,
+		`<button type="button" class="rnew" data-root="/w/repo-wt" data-name="repo" data-branch="detached HEAD" title="Start a session in detached HEAD"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the worktree rows lack %s:\n%s", want, body)
+		}
+	}
+	if n := strings.Count(body, `class="rnew"`); n != 2 {
+		t.Errorf("new-session buttons under the repository = %d, want one per worktree row", n)
+	}
+	if bar, _, _ := strings.Cut(railSection(t, html, "/w/folder"), `<div class="wsbody">`); !strings.Contains(bar, `<button type="button" class="rnew" data-root="/w/folder" data-name="folder" title="Start a session in folder"`) || strings.Contains(bar, chip) {
+		t.Errorf("a plain folder's bar = %s, want the new-session button and no count", bar)
+	}
+	rowOf := func(id string) string {
+		_, rest, ok := strings.Cut(body, `data-rid="`+id+`"`)
+		if !ok {
+			t.Fatalf("no row for %s:\n%s", id, body)
+		}
+		row, _, _ := strings.Cut(rest, `</a></div>`)
+		return row
+	}
+	waits := rowOf("waits")
+	for _, want := range []string{
+		` data-ap="1" data-ap-tool="mcp__ws__tracker_update" data-ap-args="git push origin develop">`,
+		`<span class="host sm hb perm" title="awaiting approval">claude<svg class="ring" aria-hidden="true"><rect class="rtrk"/></svg></span>`,
+		`<span class="hosted" title="session the dashboard runs">`,
+		`<span class="chip perm" title="awaiting approval: tracker_update">`,
+		`<span class="s2 ap"><b class="who">tracker_update</b>git push origin develop</span>`,
+	} {
+		if !strings.Contains(waits, want) {
+			t.Errorf("the waiting row lacks %s:\n%s", want, waits)
+		}
+	}
+	if strings.Contains(waits, "rrun") || strings.Contains(waits, "last reply") {
+		t.Errorf("the waiting row shows a working ring or its last message:\n%s", waits)
+	}
+	other := rowOf("plain")
+	for _, not := range []string{"data-ap", `class="hosted"`, "chip perm", "hb perm"} {
+		if strings.Contains(other, not) {
+			t.Errorf("a session the daemon does not host shows %q:\n%s", not, other)
+		}
+	}
+	if !strings.Contains(other, "rrun") || !strings.Contains(other, `<span class="s2">hi</span>`) {
+		t.Errorf("the working row lost its ring or message:\n%s", other)
+	}
+
+	view.CanSpawn = false
+	if region, err = renderRailRegion(view, "en"); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(region.HTML), "rnew") {
+		t.Errorf("a daemon that hosts no sessions shows a new-session button:\n%s", region.HTML)
 	}
 }

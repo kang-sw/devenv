@@ -357,7 +357,7 @@
   function readAnswers(el) {
     var out = {};
     q(".card[data-id], .arow[data-id], .srow[data-id]", el).forEach(function (item) {
-      var s = {}, note = item.querySelector(".note"), box = item.querySelector(".ack input");
+      var s = {}, note = item.querySelector("textarea.note"), box = item.querySelector("label.ack > input");
       var pick = item.querySelector('.opt[data-opt][aria-pressed="true"], .btn[data-v][aria-pressed="true"]');
       if (pick) s.pick = pickKey(pick);
       if (note && note.value) s.note = note.value;
@@ -381,7 +381,7 @@
     q(".card[data-id], .arow[data-id], .srow[data-id]", el).forEach(function (item) {
       var s = saved[item.getAttribute("data-id")];
       if (!s) return;
-      var note = item.querySelector(".note"), box = item.querySelector(".ack input");
+      var note = item.querySelector("textarea.note"), box = item.querySelector("label.ack > input");
       if (s.pick) q(".opt[data-opt], .btn[data-v]", item).forEach(function (b) { if (pickKey(b) === s.pick) b.setAttribute("aria-pressed", "true"); });
       if (note && (s.note || s.noteOpen)) openNote(note, s);
       if (box && s.checked) box.checked = true;
@@ -487,6 +487,8 @@
     if (name === "entries") syncChead();
     if (name === "head" && !sseOn) connected(false);
     if (name === "rail") { railMarks(); railScrollTo(railTop); }
+    if (name === "head" || name === "convlive") leadSwapped(name);
+    if (name === "rail" || name === "sessions") apScan(el);
   }
 
   // --- board morph: unchanged topics keep their nodes -------------------------
@@ -869,7 +871,7 @@
   // readItem is a board item's answer as a chip; null when it has none.
   function readItem(item) {
     var pick = item.querySelector('.opt[data-opt][aria-pressed="true"], .btn[data-v][aria-pressed="true"]');
-    var box = item.querySelector(".ack input"), note = item.querySelector(".note");
+    var box = item.querySelector("label.ack > input"), note = item.querySelector("textarea.note");
     var c = { id: item.getAttribute("data-id"), answer: "", note: note ? note.value.trim() : "" };
     if (pick) c.answer = pick.getAttribute("data-opt") || pick.getAttribute("data-v");
     else if (box && box.checked) c.answer = "ok";
@@ -884,7 +886,7 @@
       var v = b.getAttribute("data-opt") || b.getAttribute("data-v");
       b.setAttribute("aria-pressed", String(!!c && v === c.answer));
     });
-    var box = item.querySelector(".ack input"), note = item.querySelector(".note");
+    var box = item.querySelector("label.ack > input"), note = item.querySelector("textarea.note");
     if (box) box.checked = !!c && c.answer === "ok";
     if (note) {
       note.value = c && c.note ? c.note : "";
@@ -4158,8 +4160,8 @@
   function tlRoot(name) { return tlHeld[name] ? tlHeld[name].root : region(name); }
   // tlDrafted: the pill's reply rule (a pick, a ticked ack, or a note).
   function tlDrafted(el) {
-    var box = el.querySelector(".ack input"), n = el.querySelector(".note");
-    return !!(el.querySelector('.opt[aria-pressed="true"]') || (box && box.checked) || (n && n.value.trim()));
+    var box = el.querySelector("label.ack > input"), n = el.querySelector("textarea.note");
+    return !!(el.querySelector('.opt[data-opt][aria-pressed="true"]') || (box && box.checked) || (n && n.value.trim()));
   }
   // tlHeldAsks counts a held board the pill's way without its DOM: its asks,
   // less those drafted in the live board and those the newest sent records
@@ -4312,6 +4314,7 @@
         delete hiddenRegions[ev.name];
         hiddenRegions[ev.name] = { hash: ev.hash, html: ev.html };
         tlHold(ev.name, ev.hash, ev.html);
+        if (ev.name === "rail" || ev.name === "sessions") apScan(frag(ev.html));
         return;
       }
       swap(ev.name, ev.hash, ev.html);
@@ -4370,9 +4373,10 @@
   var starSet = WsRail ? WsRail.stars(railStore) : null, colSet = WsRail ? WsRail.collapsed(railStore) : null;
   var RAIL_WIDE = window.matchMedia ? window.matchMedia("(min-width: 1600px)") : null;
   var RAIL_SCROLL_KEY = "ws.dashboard.railscroll";
-  // rp is the open rail popover (next block): its controller P, kind, the
-  // workspace it concerns, and the + it hangs from.
-  var rp = { P: null, kind: "", ws: "", btn: null }, rpWs = null, rpWt = null, rpIds = 0;
+  // rp is the open rail popover (the next blocks): its controller P, kind,
+  // what it concerns (ws: a workspace, the folder a new session starts in,
+  // or the viewed session), and the button it hangs from.
+  var rp = { P: null, kind: "", ws: "", btn: null }, rpWs = null, rpWt = null, rpLead = null, rpSess = null, rpIds = 0;
   function railWide() { return !!(RAIL_WIDE && RAIL_WIDE.matches); }
   function railShown() { return root.classList.contains("rail-open"); }
   function railOpen(open) {
@@ -4425,6 +4429,12 @@
       if (forget) {
         e.preventDefault();
         railForget(forget);
+        return;
+      }
+      var fresh = t.closest && t.closest(".rnew");
+      if (fresh) {
+        e.preventDefault();
+        railPopOpen("lead", fresh);
         return;
       }
       // The whole bar toggles the workspace's collapse; its toggle button
@@ -4761,16 +4771,24 @@
     return P;
   }
 
-  // railPopBtn is the + the open popover belongs to: the one that opened it,
-  // or after a rail swap the + of the same kind and workspace (null when the
-  // rail shows none any more).
+  // rpKey is what a popover of kind opened from btn concerns: the folder of
+  // a new session, the viewed session, else the button's workspace.
+  function rpKey(kind, btn) {
+    if (kind === "sess") return rid;
+    if (kind === "lead") return btn.getAttribute("data-root") || "";
+    var ws = btn.closest(".rws");
+    return ws ? ws.getAttribute("data-ws") || "" : "";
+  }
+  // railPopBtn is the button the open popover belongs to: the one that
+  // opened it, or after a swap the button of the same kind and concern
+  // (null when the page shows none any more).
   function railPopBtn() {
     if (!rp.P) return null;
     if (rp.btn && rp.btn.isConnected) return rp.btn;
-    var r = region("rail"), found = null;
-    if (r) q('.radd[data-add="' + rp.kind + '"]', r).forEach(function (b) {
-      var ws = b.closest(".rws");
-      if ((ws ? ws.getAttribute("data-ws") || "" : "") === rp.ws) found = b;
+    var r = region("rail"), h = region("head"), found = null;
+    if (rp.kind === "sess") found = h && h.querySelector(".host.hbtn");
+    else if (r) q(rp.kind === "lead" ? ".rnew" : '.radd[data-add="' + rp.kind + '"]', r).forEach(function (b) {
+      if (rpKey(rp.kind, b) === rp.ws) found = b;
     });
     rp.btn = found;
     return found;
@@ -4802,18 +4820,19 @@
       if (refocus) b.focus();
     }
   }
-  // railPopOpen opens kind's popover ("ws" or "wt") against the + btn; the
-  // open popover's own + closes it instead.
+  // railPopOpen opens kind's popover ("ws", "wt", "lead": a new session, or
+  // "sess": the viewed session's menu) against the button btn; the open
+  // popover's own button closes it instead.
   function railPopOpen(kind, btn) {
-    var bar = btn.closest(".rws"), ws = bar ? bar.getAttribute("data-ws") || "" : "";
+    var bar = btn.closest(".rws"), ws = rpKey(kind, btn);
     if (rp.P && rp.kind === kind && rp.ws === ws) { railPopClose(true); return; }
     railPopClose(false);
-    var P = kind === "wt" ? rpWt || (rpWt = rpWtMake()) : rpWs || (rpWs = rpWsMake());
+    var P = kind === "wt" ? rpWt || (rpWt = rpWtMake()) : kind === "lead" ? rpLead || (rpLead = rpLeadMake()) : kind === "sess" ? rpSess || (rpSess = rpSessMake()) : rpWs || (rpWs = rpWsMake());
     if (!P.el.parentNode) doc.body.appendChild(P.el);
     rp = { P: P, kind: kind, ws: ws, btn: btn };
     btn.setAttribute("aria-expanded", "true");
     var nm = bar && bar.querySelector(".nm");
-    P.open(ws, nm ? nm.textContent : ws);
+    P.open(ws, nm ? nm.textContent : ws, btn);
     P.el.hidden = false;
     railPopPlace();
     P.focus();
@@ -4839,12 +4858,579 @@
     doc.addEventListener("click", function (e) {
       var t = e.target;
       if (!rp.P || !t || !t.closest) return;
-      if (rp.P.el.contains(t) || t.closest(".radd")) return;
+      if (rp.P.el.contains(t) || t.closest(".radd, .rnew, .hbtn")) return;
       railPopClose(false);
     }, true);
     window.addEventListener("resize", railPopPlace);
     doc.addEventListener("scroll", function () { if (rp.P) railPopPlace(); }, true);
     if (RAIL_WIDE && RAIL_WIDE.addEventListener) RAIL_WIDE.addEventListener("change", function () { railPopClose(false); });
+  }
+
+  // --- daemon-hosted lead sessions ----------------------------------------------
+  // A lead session the daemon spawned and feeds (the lead routes under
+  // /agents) starts from the rail: the "+ session" at the end of a worktree
+  // row or a plain-folder bar opens the spawn popover, a rail popover like
+  // the two above. On such a session's page (the server marks it
+  // data-hosted) the page reads the session's state from GET
+  // /agents/<reply-id> on load, after a head update, and after a
+  // conversation update that changed the permission line (the daemon
+  // restamps that line on every approval change); no timer polls. From the
+  // state it draws the approval cards, in a box under the conversation and
+  // outside the regions so a card's typed deny message survives an update,
+  // and makes the head's harness chip the button of the session menu (a
+  // fourth rail popover). The controls show only when the state says this
+  // viewer holds them (can_control: a browser on the daemon's machine); the
+  // routes refuse anyone else whatever the page shows.
+  var hostedPage = mode !== "index" && root.hasAttribute("data-hosted");
+  var LEAD_MODES = ["auto", "default", "acceptEdits", "plan", "dontAsk", "bypassPermissions"];
+  var LEAD_MODE_NOTE = {
+    auto: "js.lead.mode.auto", "default": "js.lead.mode.default", acceptEdits: "js.lead.mode.acceptedits",
+    plan: "js.lead.mode.plan", dontAsk: "js.lead.mode.dontask", bypassPermissions: "js.lead.mode.bypass"
+  };
+  // The effort levels when the daemon's choices name none.
+  var LEAD_EFFORTS = { claude: ["low", "medium", "high", "xhigh", "max"], pi: ["off", "minimal", "low", "medium", "high", "xhigh", "max"] };
+  // lead is the viewed hosted session: its last read state, the read in
+  // flight, the permission line the state was last read for, and the
+  // approval cards by request id.
+  var lead = { st: null, busy: false, again: false, key: "", cards: {}, need: null };
+  // toolLabel is a tool's name as the server's rows show it: an MCP tool
+  // without its server prefix.
+  function toolLabel(name) {
+    var m = /^mcp__.*?__(.+)$/.exec(name);
+    return m ? m[1] : name;
+  }
+  function leadErr(status, text) { return text || (status ? "HTTP " + status : wsT("js.post.unreachable")); }
+  // leadChoices reads the harness choices the support chat's popover uses
+  // (its cache), then runs done.
+  function leadChoices(done) {
+    if (supChoices && !supChoices.error) { done(); return; }
+    tkFetch("/support/choices", undefined, function (status, v) {
+      if (status === 200 && Array.isArray(v.harnesses)) supChoices = v;
+      done();
+    });
+  }
+  function leadModels(harness) {
+    var h = supHarness(harness);
+    return ((h && h.models) || []).map(function (m) { return String(m.id); });
+  }
+  function leadEfforts(harness) {
+    var h = supHarness(harness);
+    return h && Array.isArray(h.efforts) && h.efforts.length ? h.efforts.map(String) : LEAD_EFFORTS[harness] || [];
+  }
+  // leadOptions lists "default" and list in sel with cur picked (added when
+  // the list lacks it). An unchanged list is left alone, so a redraw never
+  // closes an open select.
+  function leadOptions(sel, list, cur) {
+    var all = list.slice();
+    if (cur && all.indexOf(cur) < 0) all.push(cur);
+    var sig = all.join("\n");
+    if (sel.wsSig !== sig) {
+      sel.wsSig = sig;
+      sel.textContent = "";
+      sel.appendChild(mk("option", null, wsT("js.sup.default"))).value = "";
+      all.forEach(function (v) { sel.appendChild(mk("option", null, v)).value = v; });
+    }
+    if (sel.value !== (cur || "")) sel.value = cur || "";
+  }
+  // leadRows builds, under box, the three option rows the spawn popover and
+  // the session menu share (model, permission mode, effort; label left,
+  // control right); changed(select) runs on a pick.
+  function leadRows(box, changed) {
+    var R = {};
+    function row(label, cls) {
+      var r = box.appendChild(mk("div", "sprc")), l = r.appendChild(mk("label", null, label)), s = r.appendChild(mk("select", "spsm" + (cls ? " " + cls : "")));
+      s.id = rpId();
+      l.htmlFor = s.id;
+      s.addEventListener("change", function () { changed(s); });
+      return { row: r, sel: s };
+    }
+    var m = row(wsT("js.sup.model"), "mono");
+    var p = row(wsT("js.lead.mode"));
+    var pd = box.appendChild(mk("p", "spdesc"));
+    var e = row(wsT("js.sup.effort"));
+    var ed = box.appendChild(mk("p", "spdesc"));
+    LEAD_MODES.forEach(function (v) { p.sel.appendChild(mk("option", null, v)).value = v; });
+    pd.id = rpId();
+    p.sel.setAttribute("aria-describedby", pd.id);
+    R.model = m.sel; R.mode = p.sel; R.effort = e.sel;
+    // set shows harness's choices with v's model, effort, and mode picked.
+    // Only a Claude session has a permission mode.
+    R.set = function (harness, v) {
+      var claude = harness === "claude";
+      leadOptions(m.sel, leadModels(harness), v.model);
+      leadOptions(e.sel, leadEfforts(harness), v.effort);
+      p.row.classList.toggle("off", !claude);
+      p.sel.disabled = !claude;
+      p.sel.value = claude ? v.mode || "auto" : "";
+      R.notes(harness, v.active);
+    };
+    // notes writes the lines under the mode and the effort; active is the
+    // mode a running harness reported, named when it is not the picked one.
+    R.notes = function (harness, active) {
+      var claude = harness === "claude", mode = p.sel.value;
+      pd.textContent = !claude ? wsT("js.lead.mode.pi") : wsT(LEAD_MODE_NOTE[mode] || "js.lead.mode.auto") + (active && active !== mode ? " " + wsT("js.lead.mode.active", active) : "");
+      pd.classList.toggle("warn", claude && mode === "bypassPermissions");
+      ed.textContent = e.sel.value ? (claude ? "--effort " : "--thinking ") + e.sel.value : wsT("js.lead.effort.default");
+    };
+    return R;
+  }
+
+  // The spawn popover for one worktree or plain folder: the target as one
+  // read-only line (workspace, branch, path), the harness, and the option
+  // rows. Start spawns the session and opens its page; the first message
+  // is sent from that page's composer. A refused or failed spawn shows in
+  // the popover's error line and keeps it open.
+  function rpLeadMake() {
+    var P = { gen: 0, busy: false, root: "", harness: "claude" };
+    var el = P.el = rpPop(wsT("js.lead.title"));
+    el.appendChild(mk("div", "sphd", wsT("js.lead.title")));
+    var loc = el.appendChild(mk("div", "sploc"));
+    var hsec = el.appendChild(mk("div", "spsec"));
+    var seg = hsec.appendChild(mk("div", "spseg"));
+    seg.setAttribute("role", "radiogroup");
+    seg.setAttribute("aria-label", wsT("js.sup.harness"));
+    var hbtn = { claude: rpBtn("", "Claude"), pi: rpBtn("", "Pi") };
+    Object.keys(hbtn).forEach(function (k) { hbtn[k].setAttribute("role", "radio"); hbtn[k].setAttribute("data-harness", k); seg.appendChild(hbtn[k]); });
+    var rows = leadRows(el.appendChild(mk("div", "spopts")), edited);
+    var err = el.appendChild(mk("p", "spnote err"));
+    err.setAttribute("aria-live", "polite");
+    var row = el.appendChild(mk("div", "sprow"));
+    var status = row.appendChild(mk("span", "spnote"));
+    var cancel = row.appendChild(rpBtn("pbtn", wsT("js.rail.cancel")));
+    var go = row.appendChild(rpBtn("pbtn go", wsT("js.lead.start")));
+    function setErr(text) { err.textContent = text || ""; err.hidden = !text; }
+    function off(k) { var h = supHarness(k); return !!h && h.available === false; }
+    function sync() {
+      Object.keys(hbtn).forEach(function (k) {
+        var h = supHarness(k);
+        hbtn[k].setAttribute("aria-checked", String(P.harness === k));
+        hbtn[k].disabled = off(k);
+        hbtn[k].title = off(k) ? wsT("js.sup.unavail", k, h.error || "") : "";
+      });
+      go.disabled = P.busy || off(P.harness);
+    }
+    // edited drops an earlier spawn's error once the form changed.
+    function edited() {
+      if (!P.busy) setErr("");
+      rows.notes(P.harness);
+      sync();
+      railPopPlace();
+    }
+    function setHarness(k) {
+      if (P.harness === k) return;
+      P.harness = k;
+      rows.set(k, { model: "", effort: "", mode: "auto" });
+      edited();
+    }
+    function submit() {
+      sync();
+      if (go.disabled) return;
+      notifAsk();
+      var gen = P.gen;
+      P.busy = true;
+      setErr("");
+      status.textContent = wsT("js.lead.starting");
+      sync();
+      railPost("/agents/leads", WsRail.leadBody(P.root, { harness: P.harness, model: rows.model.value, effort: rows.effort.value, mode: rows.mode.value }), function (st, v, s) {
+        if (st === 201 && v.id) {
+          saveDraft();
+          location.href = "/s/" + encodeURIComponent(String(v.id));
+          return;
+        }
+        P.busy = false;
+        status.textContent = "";
+        if (!rpLive(P, gen)) { toast(leadErr(st, s)); return; }
+        setErr(leadErr(st, s));
+        sync();
+        railPopPlace();
+      });
+    }
+    seg.addEventListener("click", function (e) { var b = e.target.closest && e.target.closest("[data-harness]"); if (b && !b.disabled) setHarness(b.getAttribute("data-harness")); });
+    cancel.addEventListener("click", function () { railPopClose(true); });
+    go.addEventListener("click", submit);
+    P.open = function (key, label, btn) {
+      var gen = ++P.gen, name = btn.getAttribute("data-name") || label, branch = btn.getAttribute("data-branch") || "";
+      P.busy = false;
+      P.root = key;
+      P.harness = "claude";
+      loc.textContent = "";
+      loc.appendChild(gIcon(branch ? "repo" : "wsfolder"));
+      loc.appendChild(mk("span", null, name));
+      if (branch) { loc.appendChild(gIcon("branch")); loc.appendChild(mk("b", null, branch)); }
+      loc.appendChild(mk("code", null, key)).title = key;
+      setErr("");
+      status.textContent = "";
+      rows.set(P.harness, { model: "", effort: "", mode: "auto" });
+      sync();
+      leadChoices(function () {
+        if (!rpLive(P, gen)) return;
+        // Claude is the first pick; Pi when only Pi can run.
+        if (off(P.harness) && !off("pi")) P.harness = "pi";
+        rows.set(P.harness, { model: rows.model.value, effort: rows.effort.value, mode: rows.mode.value || "auto" });
+        sync();
+        railPopPlace();
+      });
+    };
+    P.focus = function () { (hbtn[P.harness].disabled ? cancel : hbtn[P.harness]).focus(); };
+    P.close = function () {};
+    return P;
+  }
+
+  // The session menu of the viewed hosted session, on the head's harness
+  // chip: model, permission mode, and effort (a pick is sent at once and
+  // applies from the next turn), stop (the process ends; the next message
+  // or mail starts it again), and close (the conversation ends for good,
+  // after a confirmation). A refused change shows in the menu's error line,
+  // and the rows return to what the session has.
+  function rpSessMake() {
+    var P = { gen: 0, busy: false };
+    var el = P.el = rpPop(wsT("js.lead.menu"));
+    el.appendChild(mk("div", "sphd", wsT("js.lead.menu")));
+    var rows = leadRows(el.appendChild(mk("div", "spopts")), function (sel) {
+      var body = {};
+      if (sel === rows.model) body.model = sel.value;
+      else if (sel === rows.effort) body.effort = sel.value;
+      else body.permission_mode = sel.value;
+      act("settings", body);
+    });
+    el.appendChild(mk("p", "spnote", wsT("js.lead.menu.note")));
+    var acts = el.appendChild(mk("div", "spacts"));
+    function actBtn(icon, cls, title) {
+      var b = acts.appendChild(rpBtn("spact" + cls));
+      b.appendChild(gIcon(icon));
+      var s = b.appendChild(mk("span", null, title));
+      return { b: b, note: s.appendChild(mk("span", "gs")) };
+    }
+    var stop = actBtn("stop", "", wsT("js.lead.stop")), close = actBtn("power", " danger", wsT("js.lead.close"));
+    close.note.textContent = wsT("js.lead.close.note");
+    var err = el.appendChild(mk("p", "spnote err"));
+    err.setAttribute("aria-live", "polite");
+    var failed = "";
+    function act(action, body) {
+      if (P.busy) return;
+      var gen = P.gen;
+      P.busy = true;
+      failed = "";
+      P.draw();
+      railPost("/agents/" + encodeURIComponent(rid) + "/" + action, body, function (st, v, s) {
+        P.busy = false;
+        if (st === 200 && v.id) {
+          lead.st = v;
+          if (action === "close" && rpLive(P, gen)) railPopClose(false);
+          leadDraw();
+          return;
+        }
+        if (rpLive(P, gen)) failed = leadErr(st, s);
+        else toast(leadErr(st, s));
+        leadDraw();
+        leadFetch();
+      });
+    }
+    stop.b.addEventListener("click", function () { act("stop", {}); });
+    close.b.addEventListener("click", function () { if (window.confirm(wsT("js.lead.close.confirm"))) act("close", {}); });
+    // draw shows the session's state; it runs when the menu opens and after
+    // every read of the state while it is open.
+    P.draw = function () {
+      var st = lead.st;
+      if (!st) return;
+      var text = failed || (st.error ? String(st.error) : "");
+      rows.set(String(st.backend || ""), { model: String(st.model || ""), effort: String(st.effort || ""), mode: String(st.permission_mode || ""), active: st.process ? String(st.active_mode || "") : "" });
+      rows.model.disabled = rows.effort.disabled = P.busy;
+      if (st.backend === "claude") rows.mode.disabled = P.busy;
+      stop.b.disabled = P.busy || !st.process;
+      stop.note.textContent = wsT(st.process ? "js.lead.stop.note" : "js.lead.stopped");
+      close.b.disabled = P.busy;
+      err.textContent = text;
+      err.hidden = !text;
+    };
+    P.open = function () {
+      var gen = ++P.gen;
+      P.busy = false;
+      failed = "";
+      P.draw();
+      leadChoices(function () { if (rpLive(P, gen)) { P.draw(); railPopPlace(); } });
+      leadFetch();
+    };
+    P.focus = function () { rows.model.focus(); };
+    P.close = function () {};
+    return P;
+  }
+
+  function leadCan() { var st = lead.st; return !!(st && st.can_control && st.status !== "closed"); }
+  // leadFetch reads the viewed session's state and draws it; a read asked
+  // for while one is in flight runs once after it.
+  function leadFetch() {
+    if (!hostedPage || !window.fetch) return;
+    if (lead.busy) { lead.again = true; return; }
+    lead.busy = true;
+    tkFetch("/agents/" + encodeURIComponent(rid), undefined, function (status, v) {
+      lead.busy = false;
+      // A daemon that no longer runs the session answers 404: the page then
+      // shows it as any session it only watches.
+      if (status === 200 && v.id) lead.st = v;
+      else if (status === 404) lead.st = null;
+      if (status === 200 || status === 404) leadDraw();
+      if (lead.again) { lead.again = false; leadFetch(); }
+    });
+  }
+  // leadChip makes the head's harness chip the session menu's button for a
+  // viewer who holds the controls. The head region is replaced on every
+  // update, so this runs again after each.
+  function leadChip() {
+    var h = region("head"), chip = h && h.querySelector(".host.sse"), can = leadCan();
+    if (!chip || can === chip.classList.contains("hbtn")) return;
+    chip.classList.toggle("hbtn", can);
+    if (can) {
+      chip.setAttribute("role", "button");
+      chip.setAttribute("tabindex", "0");
+      chip.setAttribute("aria-haspopup", "dialog");
+      chip.setAttribute("aria-label", wsT("js.lead.menu"));
+      chip.setAttribute("aria-expanded", String(!!rp.P && rp.kind === "sess"));
+      chip.appendChild(gIcon("chev"));
+    } else {
+      ["role", "tabindex", "aria-haspopup", "aria-label", "aria-expanded"].forEach(function (a) { chip.removeAttribute(a); });
+      q("svg", chip).forEach(function (s) { s.remove(); });
+    }
+  }
+  // apCard builds the card of approval request a: the tool, the request's
+  // description, a readable preview of the input, and Allow and Deny (Deny
+  // opens an optional message to send with it). A viewer without the
+  // controls (can false) gets the card with one line saying where it is
+  // answered. An answer that comes too late (409: another page answered, or
+  // the harness withdrew the request) only reads the state again.
+  function apCard(a, can) {
+    var C = { busy: false };
+    var el = C.el = mk("div", "apcard");
+    var h = el.appendChild(mk("div", "aph"));
+    h.appendChild(gIcon("lock"));
+    h.appendChild(mk("b", null, wsT("js.ap.title")));
+    h.appendChild(mk("code", null, toolLabel(String(a.tool || "")))).title = String(a.tool || "");
+    if (a.agent_id) h.appendChild(mk("span", "apsub", wsT("js.ap.agent")));
+    C.n = h.appendChild(mk("span", "apn"));
+    if (a.started_at) {
+      var t = h.appendChild(mk("time", "t"));
+      t.setAttribute("data-ms", String(a.started_at));
+      t.setAttribute("data-f", "since");
+    }
+    var b = el.appendChild(mk("div", "apb")), text = WsRail.approvalText(a.input);
+    if (a.description) b.appendChild(mk("div", "apdesc", String(a.description)));
+    if (text) b.appendChild(mk("pre", "apin", text));
+    if (!can) {
+      var ro = el.appendChild(mk("div", "apro"));
+      ro.appendChild(gIcon("lock"));
+      ro.appendChild(mk("span", null, wsT("js.ap.readonly")));
+      return C;
+    }
+    function btn(box, cls, icon, label) {
+      var x = box.appendChild(rpBtn(cls));
+      if (icon) x.appendChild(gIcon(icon));
+      x.appendChild(mk("span", null, label));
+      return x;
+    }
+    var act = el.appendChild(mk("div", "apact"));
+    var allow = btn(act, "btn allow", "check", wsT("js.ap.allow")), deny = btn(act, "btn deny", "x", wsT("js.ap.deny"));
+    deny.setAttribute("aria-expanded", "false");
+    var dn = el.appendChild(mk("div", "apdeny"));
+    dn.hidden = true;
+    var msg = dn.appendChild(mk("textarea", "apmsg"));
+    msg.rows = 2;
+    msg.placeholder = wsT("js.ap.deny.placeholder");
+    msg.setAttribute("aria-label", wsT("js.ap.deny.placeholder"));
+    var dr = dn.appendChild(mk("div", "aprow"));
+    dr.appendChild(mk("span", "apnote", wsT("js.ap.deny.note")));
+    var back = btn(dr, "btn", "", wsT("js.rail.cancel")), send = btn(dr, "btn go deny", "", wsT("js.ap.deny.send"));
+    var err = el.appendChild(mk("p", "aperr"));
+    err.hidden = true;
+    err.setAttribute("aria-live", "polite");
+    function sync() { [allow, deny, back, send, msg].forEach(function (x) { x.disabled = C.busy; }); }
+    function denying(on) {
+      var pin = pinned();
+      dn.hidden = !on;
+      act.hidden = on;
+      deny.setAttribute("aria-expanded", String(on));
+      (on ? msg : deny).focus();
+      if (pin) pinConvo();
+    }
+    function answer(behavior) {
+      if (C.busy) return;
+      notifAsk();
+      var body = { behavior: behavior }, why = msg.value.trim();
+      if (behavior === "deny" && why) body.message = why;
+      C.busy = true;
+      err.hidden = true;
+      sync();
+      railPost("/agents/" + encodeURIComponent(rid) + "/approvals/" + encodeURIComponent(String(a.id)), body, function (st, v, s) {
+        C.busy = false;
+        sync();
+        if (st === 200 && v.id) { lead.st = v; leadDraw(); return; }
+        if (st === 409) { leadFetch(); return; }
+        err.textContent = leadErr(st, s);
+        err.hidden = false;
+      });
+    }
+    allow.addEventListener("click", function () { answer("allow"); });
+    deny.addEventListener("click", function () { denying(true); });
+    back.addEventListener("click", function () { denying(false); });
+    send.addEventListener("click", function () { answer("deny"); });
+    msg.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !e.isComposing) { e.preventDefault(); answer("deny"); }
+      else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); denying(false); }
+    });
+    return C;
+  }
+  // leadDraw shows the read state: the chip, the open session menu, one
+  // card per waiting approval (oldest first, numbered when several wait),
+  // and, when the harness waits on an answer no card can give, a notice in
+  // their place. While the box shows anything, the conversation's own
+  // permission line (the same wait, as text) is hidden.
+  function leadDraw() {
+    var st = lead.st, box = $("apbox");
+    leadChip();
+    if (rp.P && rp.kind === "sess") {
+      if (leadCan()) rp.P.draw();
+      else railPopClose(false);
+    }
+    if (!box) return;
+    var open = !!st && st.status !== "closed", pin = pinned(), keep = {};
+    var list = open && Array.isArray(st.approvals) ? st.approvals.filter(function (a) { return a && a.id; }) : [];
+    var need = open && !list.length && st.action_needed ? String(st.action_needed) : "";
+    list.forEach(function (a) { keep[a.id] = true; });
+    Object.keys(lead.cards).forEach(function (id) {
+      if (keep[id]) return;
+      lead.cards[id].el.remove();
+      delete lead.cards[id];
+    });
+    list.forEach(function (a, i) {
+      var c = lead.cards[a.id] || (lead.cards[a.id] = apCard(a, !!st.can_control));
+      if (box.children[i] !== c.el) box.insertBefore(c.el, box.children[i] || null);
+      c.n.textContent = (i + 1) + "/" + list.length;
+      c.n.hidden = list.length < 2;
+    });
+    if (need && !lead.need) {
+      lead.need = mk("div", "apneed");
+      lead.need.appendChild(gIcon("lock"));
+      lead.need.appendChild(mk("span", null, wsT("js.ap.needed")));
+    }
+    if (lead.need) {
+      // the daemon's own wording, in English, stays readable on hover
+      lead.need.title = need;
+      if (need) box.appendChild(lead.need);
+      else lead.need.remove();
+    }
+    box.hidden = !list.length && !need;
+    if (convo) convo.classList.toggle("ap-on", !box.hidden);
+    fmtTimes(box);
+    if (pin) pinConvo();
+  }
+  // leadKey is the conversation's permission line as the state follows it:
+  // its tool, arguments, and stamp; empty when the session waits on none.
+  function leadKey() {
+    var c = region("convlive"), slot = c && c.querySelector(".apslot");
+    if (!slot) return "";
+    var t = slot.querySelector("time[data-ms]"), code = slot.querySelector("code"), args = slot.querySelector(".args");
+    return [t ? t.getAttribute("data-ms") : "", code ? code.title : "", args ? args.textContent : ""].join("\n");
+  }
+  // leadSwapped runs after an update of a region the state follows.
+  function leadSwapped(name) {
+    if (!hostedPage) return;
+    if (name === "head") {
+      leadChip();
+      if (rp.P && rp.kind === "sess") railPopSync();
+      leadFetch();
+      return;
+    }
+    var key = leadKey();
+    if (key === lead.key) return;
+    lead.key = key;
+    leadFetch();
+  }
+
+  // --- awaiting-approval notifications -----------------------------------------
+  // A row of the rail (the index's list on /) carries data-ap while its
+  // hosted session waits on a tool approval. Each read of those rows, from
+  // the live region or a hidden tab's held update, notifies of a wait the
+  // read before did not have; the first read only sets the baseline. The
+  // notification is the browser's when the user granted it (asked on a
+  // click that starts a session, answers an approval, or sends a message
+  // on a hosted page, never on load), else a toast once the tab shows. One
+  // tag per wait keeps several open tabs to one notification. A page not
+  // on the daemon's machine cannot answer, and its notification says so.
+  var apSeen = null, apHeld = [];
+  function notifAsk() {
+    try {
+      if (window.Notification && window.Notification.permission === "default") window.Notification.requestPermission();
+    } catch (e) { /* no notifications in this browser */ }
+  }
+  function apKey(r) { return r.rid + "\n" + r.tool + "\n" + r.args; }
+  function apRows(el) {
+    return q("[data-ap]", el).map(function (row) {
+      var g = row.closest(".rws, .project"), nm = g && g.querySelector(".nm, .pname");
+      return { rid: row.getAttribute("data-rid") || "", tool: row.getAttribute("data-ap-tool") || "", args: row.getAttribute("data-ap-args") || "", project: nm ? nm.textContent : "" };
+    });
+  }
+  function apScan(el) {
+    if (!el) return;
+    var now = {}, fresh = [];
+    apRows(el).forEach(function (r) {
+      var k = apKey(r);
+      if (apSeen && !apSeen[k] && !now[k]) fresh.push(r);
+      now[k] = true;
+    });
+    apSeen = now;
+    apHeld = apHeld.filter(function (r) { return now[apKey(r)]; });
+    fresh.forEach(apNotify);
+  }
+  // apText is a wait's notification: the session in the title; the tool,
+  // its arguments, and (away from the daemon's machine) where to answer in
+  // the body's lines.
+  function apText(r) {
+    var lines = [toolLabel(r.tool) + (r.tool && r.args ? " · " : "") + r.args];
+    if (!root.hasAttribute("data-sysopen")) lines.push(wsT("js.notif.lan"));
+    return { title: wsT("js.notif.title", (r.project ? r.project + "/" : "") + r.rid), lines: lines.filter(Boolean) };
+  }
+  function apGo(r) {
+    if (r.rid === rid) return;
+    saveDraft();
+    location.href = "/s/" + encodeURIComponent(r.rid);
+  }
+  function apNotify(r) {
+    // the viewed session's own wait, in a tab the user is looking at, is
+    // the card in front of them
+    if (r.rid === rid && !doc.hidden && (!doc.hasFocus || doc.hasFocus())) return;
+    var t = apText(r);
+    try {
+      if (window.Notification && window.Notification.permission === "granted") {
+        var n = new window.Notification(t.title, { body: t.lines.join("\n"), tag: "ws-approval:" + apKey(r) });
+        n.onclick = function () { window.focus(); n.close(); apGo(r); };
+        return;
+      }
+    } catch (e) { /* a browser that notifies only through a service worker */ }
+    if (doc.hidden) apHeld.push(r);
+    else apToast(r);
+  }
+  function apToast(r) {
+    if (!window.WsToast) return;
+    var t = apText(r);
+    window.WsToast.show([t.title].concat(t.lines).join(" · "), { kind: "notice", onClick: function () { apGo(r); } });
+  }
+  doc.addEventListener("visibilitychange", function () {
+    if (doc.hidden) return;
+    var held = apHeld;
+    apHeld = [];
+    held.forEach(apToast);
+  });
+  if (hostedPage) {
+    doc.addEventListener("click", function (e) {
+      var t = e.target, chip = t && t.closest && t.closest(".host.hbtn");
+      if (chip && railEl && WsRail) { e.preventDefault(); railPopOpen("sess", chip); }
+      else if (t && t.closest && t.closest("#csend")) notifAsk();
+    });
+    doc.addEventListener("keydown", function (e) {
+      var t = e.target;
+      if ((e.key !== "Enter" && e.key !== " ") || !t || !t.classList || !t.classList.contains("hbtn") || !railEl || !WsRail) return;
+      e.preventDefault();
+      railPopOpen("sess", t);
+    });
   }
 
   // --- per-session drafts ---------------------------------------------------------
@@ -4952,6 +5538,8 @@
   applySent();
   restoreDraft();
   tlCount();
+  apScan(region(mode === "index" ? "sessions" : "rail"));
+  if (hostedPage) { lead.key = leadKey(); leadFetch(); }
   syncBadge();
   fmtTimes(doc);
   mermaid();

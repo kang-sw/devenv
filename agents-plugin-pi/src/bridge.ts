@@ -983,7 +983,7 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
   // A hosted session (hosted-session.ts) runs under the daemon-minted key:
   // the owner lead re-logs in with it instead of reusing or minting, and a
   // refusal leaves the session keyless with a warning, never a fresh mint.
-  const hostedKey = ownsLeadKey ? hostedSessionKey(process.env) : undefined;
+  const hostedKey = ownsLeadKey ? await hostedSessionKey() : undefined;
   const reloginHostedKey = async (key: string): Promise<McpToolCallResult> => {
     const relogin = await reloginLeadKey((name, callArgs) => client.callTool(name, callArgs), opts.cwd, key);
     if (relogin.ok) return relogin.result;

@@ -173,10 +173,13 @@ and its hooks.
 10. **The spawn entry and form (user, (178) c, (183) a with note, (184) b,
     (188) a; technical, (185), (189)).** Settled from the mockup (session
     scratchpad `headless-spawn-mockup.html`; not kept). The "+ session" at
-    the end of a worktree row (and on a plain-folder workspace bar,
-    `261110-feat-ws-dashboard-workspaces` Decision 3) is the only spawn
-    entry. It shows on every worktree row and plain-folder bar the rail
-    lists, stored or derived from sessions, and does not depend on the
+    the end of a worktree row is the only spawn entry. It shows on every
+    worktree row the rail lists, stored or derived from sessions; a
+    plain-folder workspace bar (`261110-feat-ws-dashboard-workspaces`
+    Decision 3) does not show it, because a lead session key is minted
+    at a Git worktree root and the spawn route refuses any other root
+    (user, (290) a, reversing the earlier plain-folder entry). It does
+    not depend on the
     workspace store (`DaemonOptions.WorkspacesFile`), so a daemon without
     the store can still spawn; a LAN viewer does not see it (Decision 14).
     It opens a popover that shows the target as one read-only line
@@ -193,7 +196,9 @@ and its hooks.
     session" in the rail footer ((188) b), because the picker repeats the
     rail's own list; model and mode folded behind "more" ((183) c) or left
     to the session menu ((183) b); a first-message field ((184) a); building
-    the popover in both tickets.
+    the popover in both tickets; minting lead keys outside Git so a
+    plain folder can spawn ((290) b), since the key-issue rule is a larger
+    wsflow topic left for later.
 11. **Effort is a session option (user, on (183) and the mockup; technical,
     (187)).** It sits beside model and permission mode, in the spawn form
     and in the session header's harness chip menu. It maps to Claude's
@@ -436,9 +441,127 @@ Verification:
   the rail's widths, and of the awaiting-approval browser notification,
   including the LAN tab's "answer on the dashboard PC" line.
 
+### Result (9a18edefc) - 2026-11-11
+
+Landed on `impl/develop/down-gents-rally` (`7fa06f83b..9a18edefc`):
+
+- **Runner spine** (`internal/wsagent`): built-in `lead-claude` and
+  `lead-pi` profiles; `POST /agents/leads`; a holder-backed process
+  (`holder.go`) with rejoin, replay up to the holder's sequence, and the
+  applied sequence kept in the conversation record; the daemon-written
+  registration (`hosted`, `host_pid`); the hosted environment and lead-key
+  mint (`internal/mcp/agent_keys.go`).
+- **Turns and input**: `idle` ends a Claude turn once session-state lines
+  are seen (a `result` ends it only without them); unsolicited turns and
+  the compaction replay; steered inbox entries written to the running
+  process (Claude user line, Pi `steer`); mail claimed by the daemon
+  (`internal/mcp/lead_mail.go`) and submitted as a mail turn.
+- **Approvals**: `can_use_tool` to pending approvals keyed by request id,
+  the answer route, automatic denial of `AskUserQuestion`, `ExitPlanMode`,
+  and requests that need user interaction, the `action_needed` state, and
+  answered ids kept across a daemon restart.
+- **Settings**: model, effort, and permission mode in-stream; the record's
+  values on every resume.
+- **Hosted flag** (Decision 15): ws-mcp, the Claude mod, and the Pi
+  extension honour the flag only when the registration's `host_pid` is
+  their own harness process; the launcher states the harness PID. A ws-mcp
+  that is not the hosted harness leaves a `hosted` row alone.
+- **Gate** (Decision 14): spawn, settings, stop, close, and approval answers
+  need a browser on this machine with the daemon's own Origin.
+- **Page UI** (`internal/wsdashboard`): the rail's "+ session" button and
+  spawn popover, hosted mark, approval cards, awaiting-approval ring and
+  chip, harness chip menu, notification, `action_needed` notice, 40 strings
+  in all 11 tables.
+- **Manual**: `ai-docs/manuals/ws-mcp.md` (lead sessions, environment
+  table, an isolated probe daemon).
+
+Verification:
+
+- `ws-rgo -- test ./internal/wsagent/ ./internal/wsdashboard/
+  ./internal/wsholder/ ./internal/mcp/ ./internal/wsrsrc/ ./internal/wsi18n/
+  ./internal/wslive/ ./internal/wsinbox/ ./internal/wsmailbox/ ./cmd/...
+  -count=1`: all ok. `ws-rgo -- vet ./...`: clean.
+- Plugin tests for ws and wsflow, the launcher unit tests, and the Pi hosted
+  integration test (11/11) passed at the hosted-flag commit; no plugin file
+  changed after it.
+- Fixture tests cut from the probe logs: `can_use_tool` and its response,
+  an unsolicited `result`, a `num_turns: 0` result, the compaction replay,
+  session-state lines, a steer. Route tests refuse each control write from a
+  LAN request and pass it from loopback. Hosted-flag tests cover a differing
+  harness PID.
+- Live, against an isolated daemon built from this branch, with a real
+  `claude -p` (2.1.322) loading this branch's plugin through an `exec`
+  wrapper: spawn; composer message; allow and deny (with message) answers;
+  a second answer 409; control writes without Origin 403; `ferrule` held
+  the session to its minted key (no second key, one row); daemon stop with
+  a prompt pending, restart by the session's launcher, same pending prompt
+  answered, no duplicate ring entry, one process; mail from another session
+  became a mail turn; model, effort, and permission mode changed with the
+  same PID; a steered message joined a turn that was running a tool; stop,
+  then mail resumed the process with `--resume` and the recorded model,
+  effort, and mode, still hosted, no mailbox wait process; a nested
+  `claude -p` run by the lead minted its own key; close end-marked the row
+  and cleared the listening marker. A Pi spawn sent and received.
+- Browser (headless Chromium over CDP): with a stand-in harness, the
+  popover, one and two cards, the deny message, the LAN read-only view, the
+  chip menu, rail and index states, and the notification text for local and
+  LAN tabs at 1100 and 1700 px, light and dark; with the real harness, the
+  approval card rendered and its Allow button ran the tool.
+
+Decisions:
+
+- Strict PID equality for the hosted flag; a forking `claude` wrapper makes
+  the session ordinary. Accepting an ancestor was rejected: it re-admits the
+  nested harness.
+- Under the hosted flag the daemon row restores the page URL in
+  `whiteboard.update` and store-change nudges (an in-memory entry, no
+  write). Unlisting through `config.tune` is not restored: the daemon owns
+  the row.
+- Restart of the harness is the last resort for a settings change.
+- The page reads `GET /agents/<id>` on load and on the events the runner
+  already pushes; no timer.
+- Per-viewer controls are hidden by CSS under a local-viewer mark because
+  the rail region is one render for all viewers; the routes refuse
+  regardless.
+
+Forward notes (Orca benchmark, not adopted here): crash-safe claimed mail
+through the `--replay-user-messages` echo; a pre-assigned `--session-id`
+with a typed "No conversation found" refusal; process-group reap in the
+holder; no global `<synthetic>` filter or unknown-frame logging; dropping
+`ANTHROPIC_API_KEY` from the hosted environment.
+
+Review (lite, one pass): no Critical or Important finding; six Minor, left
+open below.
+
+Open after this phase:
+
+- A plain-folder bar shows "+ session" (Decision 10), but the spawn route
+  refuses a root outside a Git worktree, since a lead key is minted at a
+  worktree root; the popover shows the refusal.
+- `action_needed` reaches the live snapshot as a permission wait, so the
+  rail and the notification show it like an approval; only the page shows
+  the notice. The rail and notification name the oldest pending prompt
+  only.
+- A plain-http LAN tab cannot raise an OS notification; it shows a toast.
+- A daemon build without lead sessions started over the same state
+  directory rewrites a lead's row as an unlisted agent row; a build with
+  them restores it at start.
+- The turn-end ring entry written after a daemon restart carries no origin.
+- Review Minor: a holder call can time out while more than 256 output
+  lines wait unread; a steered message whose write fails is shown but not
+  returned; a settings request with a bad `permission_mode` applies its
+  model and effort before answering 400; a rejoin that fails before
+  attaching lets the next send end the still-running holder; an
+  auto-denied prompt can be denied twice after a daemon crash; a forking
+  `claude` or `pi` shim makes the session ordinary without a notice.
+- Not run: popover spawn against the real harness in a browser (the route
+  and the popover were each checked), an OS-level notification, and a live
+  Pi approval or mail turn.
+
 ### Phase 2: recovery, idle stop, and telemetry
 
-Scope: MCP recovery by in-stream reconnect with the restart fallback, the
+Scope: hiding the "+ session" entry on plain-folder bars (Decision 10,
+(290) a); MCP recovery by in-stream reconnect with the restart fallback, the
 MCP-broken state, and the header menu's manual restart behind the
 loopback gate (Decisions 5, 14); idle stop (Decision 6); the agents panel
 telemetry and background-task count from the stream (Constraints); the
@@ -460,4 +583,5 @@ background tasks confirm first and show the count; a browser check of the
 typed error rows and badge ring; a live checklist that a broken MCP
 server reconnects in-stream with the same harness PID, and that an
 idle-stopped Claude session resumes on mail, each resumed process still
-running hosted.
+running hosted. A UI test that a plain-folder bar shows no "+ session"
+while a worktree row does.

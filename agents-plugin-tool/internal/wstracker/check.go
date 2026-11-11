@@ -176,7 +176,70 @@ func (s *state) checkFields(p obj) rejection {
 			return rejection("priority must be a level 0.." + itoa(len(s.prio.names)-1) + " (" + strings.Join(s.prio.names, " / ") + ")")
 		}
 	}
+	if !p.null("labels") {
+		l, ok := p.list("labels")
+		if !ok {
+			return "labels must be a list of label ids"
+		}
+		seen := map[string]bool{}
+		for _, x := range l {
+			id := jsString(x)
+			if _, ok := x.(string); !ok || s.labels[id] == nil {
+				return rejection(`label "` + id + `" is not in the store's label list`)
+			}
+			if s.labels[id].removed != nil {
+				return rejection("label " + alias(id) + " (" + s.labels[id].name + ") was removed")
+			}
+			if seen[id] {
+				return rejection("label " + alias(id) + " is listed twice")
+			}
+			seen[id] = true
+		}
+	}
 	return ""
+}
+
+// isColor mirrors /^#[0-9a-f]{6}$/: a label colour.
+func isColor(v any) bool {
+	c, ok := v.(string)
+	if !ok || len(c) != 7 || c[0] != '#' {
+		return false
+	}
+	for _, r := range c[1:] {
+		if !(r >= '0' && r <= '9' || r >= 'a' && r <= 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+// checkLabelName: a label name is a non-blank string without surrounding
+// spaces, unique among the live labels other than except, ignoring case.
+func (s *state) checkLabelName(p obj, except string) rejection {
+	name, ok := p["name"].(string)
+	if !ok || strings.TrimSpace(name) == "" {
+		return "name must be a non-blank string"
+	}
+	if strings.TrimSpace(name) != name {
+		return "name has leading or trailing spaces"
+	}
+	if l := s.labelNamed(name, except); l != nil {
+		return rejection(`label "` + name + `" already exists (` + alias(l.id) + ")")
+	}
+	return ""
+}
+
+// needLabel is the live label p.label names.
+func (s *state) needLabel(p obj) (*label, rejection) {
+	id := p.disp("label")
+	l := s.labels[id]
+	if l == nil {
+		return nil, rejection(`label "` + id + `" is not in the store's label list`)
+	}
+	if l.removed != nil {
+		return nil, rejection("label " + alias(id) + " (" + l.name + ") was removed")
+	}
+	return l, ""
 }
 
 func hasOID(l []attachment, oid string) bool {
@@ -974,6 +1037,45 @@ func (s *state) check(n *node) rejection {
 		}
 		if _, ok := p.posIntOf("max_bytes"); !ok {
 			return "max_bytes must be a positive integer (bytes)"
+		}
+
+	case TypeAddLabel:
+		if r := s.needAdmin(a); r != "" {
+			return r
+		}
+		if r := s.checkLabelName(p, ""); r != "" {
+			return r
+		}
+		if !isColor(p["color"]) {
+			return "color must be #rrggbb in lowercase hex"
+		}
+
+	case TypeEditLabel:
+		if r := s.needAdmin(a); r != "" {
+			return r
+		}
+		l, r := s.needLabel(p)
+		if r != "" {
+			return r
+		}
+		if !p.has("name") && !p.has("color") {
+			return "nothing to edit (name, color)"
+		}
+		if p.has("name") {
+			if r := s.checkLabelName(p, l.id); r != "" {
+				return r
+			}
+		}
+		if p.has("color") && !isColor(p["color"]) {
+			return "color must be #rrggbb in lowercase hex"
+		}
+
+	case TypeRemoveLabel:
+		if r := s.needAdmin(a); r != "" {
+			return r
+		}
+		if _, r := s.needLabel(p); r != "" {
+			return r
 		}
 
 	default:

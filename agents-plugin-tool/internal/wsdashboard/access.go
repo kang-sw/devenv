@@ -145,6 +145,21 @@ func localViewer(r *http.Request) bool {
 	return loopbackPeer(r.RemoteAddr) && loopbackHost(r.Host)
 }
 
+// TrustedWrite is the gate of every write that carries execution authority
+// (a terminal, a holder stop, a hosted lead session's spawn, settings, stop,
+// close, and tool approval): local reports a browser on this machine
+// (localViewer; a caller answers 404 without it, as if the route did not
+// exist), and sameOrigin that the request carries the daemon's own Origin
+// (a caller answers 403 without it). The LAN token alone never passes.
+func TrustedWrite(r *http.Request) (local, own bool) {
+	return localViewer(r), sameOrigin(r)
+}
+
+// LocalViewer reports whether r comes from a browser on this machine
+// (localViewer), for a route outside this package that shows a control only
+// to such a viewer.
+func LocalViewer(r *http.Request) bool { return localViewer(r) }
+
 // loopbackPeer reports whether a request's remote address is a loopback IP.
 func loopbackPeer(remoteAddr string) bool {
 	host, _, err := net.SplitHostPort(remoteAddr)

@@ -37,6 +37,26 @@ var SupportWSTools = []string{"tracker.query", "tracker.update", "tracker.show",
 // outside the list is refused). Pi has no subagent tool and gets none.
 var SupportClaudeTools = []string{"Agent"}
 
+// Lead profiles: one builtin profile per harness for the hosted lead
+// sessions the dashboard spawns (Profile.Lead). A project or global
+// definition of the same name replaces one whole, as for any profile.
+const (
+	LeadProfileClaude = "lead-claude"
+	LeadProfilePi     = "lead-pi"
+)
+
+// LeadProfileFor is the builtin lead profile of a harness, "" for a harness
+// that has none.
+func LeadProfileFor(backend string) string {
+	switch backend {
+	case BackendClaude:
+		return LeadProfileClaude
+	case BackendPi:
+		return LeadProfilePi
+	}
+	return ""
+}
+
 //go:embed instructions/tracker-support.md
 var trackerSupportText string
 
@@ -80,6 +100,18 @@ func BuiltinProfiles() map[string]json.RawMessage {
 			WSTools:      SupportWSTools,
 			Instructions: BuiltinInstructionsPrefix + supportInstructions,
 		})
+		if err != nil {
+			panic(err)
+		}
+		out[ProfilePrefix+name] = raw
+	}
+	for name, p := range map[string]Profile{
+		LeadProfileClaude: {Backend: BackendClaude, PermissionMode: DefaultLeadPermissionMode},
+		LeadProfilePi:     {Backend: BackendPi},
+	} {
+		p.Lead = true
+		p.Description = fmt.Sprintf("Hosted lead session (%s): a headless session the dashboard spawns on a worktree, with the user's own harness setup.", p.Backend)
+		raw, err := json.Marshal(p)
 		if err != nil {
 			panic(err)
 		}

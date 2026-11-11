@@ -395,6 +395,49 @@ func TestTrackerUpdateWritesRawBodiesAndBatchReferences(t *testing.T) {
 	}
 }
 
+// The priority line names where the levels are changed, so an agent asked
+// "where do I change the priorities" can answer from the query alone.
+func TestTrackerQueryPriorityLineNamesWhereLevelsChange(t *testing.T) {
+	f := newTrackerLeadFixture(t)
+	f.trackerUpdate(t, trackerPersonal)
+	out := f.trackerQuery(t, map[string]any{"store": "me"})
+	want := "\npriority: 0 Notice, 1 Task (default), 2 Urgent; an admin changes the levels in the store settings of the dashboard's Team tab, or with tk:roles.set_priority_levels\n"
+	if !strings.Contains(out, want) {
+		t.Fatalf("priority line must carry the hint %q:\n%s", want, out)
+	}
+}
+
+// A store with labels prints them after the priority line, with how an item
+// takes one; rows and the item detail name an item's labels, and q's
+// label: filters by name.
+func TestTrackerQueryShowsLabels(t *testing.T) {
+	f := newTrackerLeadFixture(t)
+	f.trackerUpdate(t, trackerPersonal)
+	out := f.trackerUpdate(t, `<tk:store name="me">
+<tk:roles.add_label name="docs" color="#3366cc"/>
+<tk:roles.add_label name="bug" color="#d14343"/>
+<tk:item.create kind="task" title="Write guide" labels="$1 $2"/>
+<tk:item.create kind="task" title="Plain"/>
+</tk:store>`)
+	ids := trackerWrote(t, out)
+	docs, bug, guide, plain := trackerAlias(ids["1"]), trackerAlias(ids["2"]), ids["3"], ids["4"]
+	q := f.trackerQuery(t, map[string]any{"store": "me", "scope": "all"})
+	line := "\nlabels: " + docs + " docs #3366cc, " + bug + " bug #d14343; " + trackerLabelsHint + "\n"
+	if !strings.Contains(q, line) {
+		t.Fatalf("query must print the labels line %q:\n%s", line, q)
+	}
+	if !strings.Contains(q, "Write guide (labels docs, bug)") {
+		t.Fatalf("the row must name its labels:\n%s", q)
+	}
+	if one := f.trackerQuery(t, map[string]any{"store": "me", "item": guide}); !strings.Contains(one, ", labels docs, bug\n") {
+		t.Fatalf("the item detail must name its labels:\n%s", one)
+	}
+	got := f.trackerQuery(t, map[string]any{"store": "me", "scope": "all", "q": "label:BUG"})
+	if !strings.Contains(got, guide+" [") || strings.Contains(got, plain+" [") {
+		t.Fatalf("label:BUG must list only the labelled item:\n%s", got)
+	}
+}
+
 // payload.q takes the dashboard search grammar and AND-s with kind,
 // status, project, and text; text keeps its substring meaning; a malformed
 // known key is refused naming the token.

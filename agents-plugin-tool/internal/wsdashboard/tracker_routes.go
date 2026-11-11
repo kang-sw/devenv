@@ -120,8 +120,9 @@ var (
 	// name, path, or edit; a new wiki that exists; a page already there or
 	// gone; a pasted image whose staged copy expired); the message says why.
 	ErrTrackerWikiRefused = errors.New("wiki save refused")
-	// ErrTrackerBusy: a wiki or image read gave up waiting for the store,
-	// held by a fetch or push; the route answers 503 with Retry-After.
+	// ErrTrackerBusy: a wiki or image read gave up waiting for the store
+	// (held by a wiki save, or, for an image not fetched yet, the network
+	// held by a fetch or push); the route answers 503 with Retry-After.
 	ErrTrackerBusy = errors.New("store busy")
 	// ErrTrackerBadLabel: a store label the host refuses (a control
 	// character, or longer than its limit); the label route answers 400.
@@ -136,7 +137,8 @@ const (
 	// TrackerUnregisterConfirm: the store has no remote, and the confirm
 	// did not name it.
 	TrackerUnregisterConfirm = "confirm"
-	// TrackerUnregisterBusy: a check, sync, or write holds the store.
+	// TrackerUnregisterBusy: a write, or a local step of a check or sync,
+	// holds the store.
 	TrackerUnregisterBusy = "busy"
 	// TrackerUnregisterUnpushed: the clone holds writes its remote does not;
 	// a sync can push them.

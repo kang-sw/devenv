@@ -4062,6 +4062,7 @@
   "attachments": {
    "max_bytes": 10485760
   },
+  "labels": [],
   "members": {
    "ada": {
     "id": "ada",
@@ -4419,6 +4420,7 @@
     "title": "Ship search v2 (index + query path)",
     "body": "Replace the v1 indexer and the query path. Index format frozen on Wednesday.",
     "project": "search-service",
+    "labels": [],
     "due": "2026-11-20",
     "priority": 2,
     "priorityLevel": 2,
@@ -4484,6 +4486,7 @@
     "title": "Q4 priorities",
     "body": "Search v2 first, CI hygiene second, training by end of month.",
     "project": "",
+    "labels": [],
     "due": null,
     "priority": 1,
     "priorityLevel": 1,
@@ -4530,6 +4533,7 @@
     "title": "Index builder",
     "body": "Build the v2 index: layout, shard writer, tokenizer, compaction.",
     "project": "search-service",
+    "labels": [],
     "due": "2026-11-13",
     "priority": 2,
     "priorityLevel": 2,
@@ -4598,6 +4602,7 @@
     "title": "Query path rewrite",
     "body": "",
     "project": "search-service",
+    "labels": [],
     "due": "2026-11-18",
     "priority": 2,
     "priorityLevel": 2,
@@ -4653,6 +4658,7 @@
     "title": "Tokenizer",
     "body": "",
     "project": "",
+    "labels": [],
     "due": "2026-11-06",
     "priority": 1,
     "priorityLevel": 1,
@@ -4716,6 +4722,7 @@
     "title": "Shard writer docs",
     "body": "",
     "project": "",
+    "labels": [],
     "due": "2026-11-10",
     "priority": 1,
     "priorityLevel": 1,
@@ -4765,6 +4772,7 @@
     "title": "Rotate CI keys",
     "body": "",
     "project": "infra",
+    "labels": [],
     "due": "2026-11-03",
     "priority": 2,
     "priorityLevel": 2,
@@ -4813,6 +4821,7 @@
     "title": "Security training",
     "body": "Finish the module before the 30th.",
     "project": "",
+    "labels": [],
     "due": "2026-11-30",
     "priority": 0,
     "priorityLevel": 0,
@@ -4874,6 +4883,7 @@
     "title": "Book offsite venue",
     "body": "",
     "project": "",
+    "labels": [],
     "due": "2026-11-14",
     "priority": 0,
     "priorityLevel": 0,
@@ -4919,6 +4929,7 @@
     "title": "Approve GPU budget for index builds",
     "body": "Two more GPU nodes for nightly index builds, about 3k/month.",
     "project": "search-service",
+    "labels": [],
     "due": "2026-11-07",
     "priority": 1,
     "priorityLevel": 1,
@@ -4966,6 +4977,7 @@
     "title": "Benchmark harness",
     "body": "",
     "project": "",
+    "labels": [],
     "due": "2026-11-21",
     "priority": 1,
     "priorityLevel": 1,
@@ -5014,6 +5026,7 @@
     "title": "Review the query planner PR",
     "body": "PR #412: cost model for the new planner. Needs an index-side reviewer.",
     "project": "search-service",
+    "labels": [],
     "due": "2026-11-04",
     "priority": 1,
     "priorityLevel": 1,
@@ -5063,6 +5076,7 @@
     "title": "Cache layer",
     "body": "",
     "project": "",
+    "labels": [],
     "due": "2026-11-12",
     "priority": 2,
     "priorityLevel": 2,
@@ -5112,6 +5126,7 @@
     "title": "Load-test the cache layer",
     "body": "One afternoon with the load rig before the cache ships.",
     "project": "",
+    "labels": [],
     "due": "2026-11-12",
     "priority": 1,
     "priorityLevel": 1,
@@ -5159,6 +5174,7 @@
     "title": "Explain the tokenizer API to the query team",
     "body": "30 minutes, any day this week.",
     "project": "",
+    "labels": [],
     "due": "2026-11-07",
     "priority": 0,
     "priorityLevel": 0,
@@ -5206,6 +5222,7 @@
     "title": "Prepare Friday demo",
     "body": "",
     "project": "",
+    "labels": [],
     "due": "2026-11-06",
     "priority": 2,
     "priorityLevel": 2,
@@ -5250,6 +5267,7 @@
     "title": "Review the emoji tokenizer fix",
     "body": "Two-line change in the range table; needs a second pair of eyes before Friday.",
     "project": "search-service",
+    "labels": [],
     "due": "2026-11-07",
     "priority": 1,
     "priorityLevel": 1,
@@ -5296,6 +5314,7 @@
     "title": "Infra capacity plan",
     "body": "Plan node and storage capacity through Q1.",
     "project": "infra",
+    "labels": [],
     "due": "2026-11-27",
     "priority": 1,
     "priorityLevel": 1,
@@ -5354,6 +5373,7 @@
     "title": "Collect node metrics",
     "body": "",
     "project": "infra",
+    "labels": [],
     "due": "2026-11-14",
     "priority": 1,
     "priorityLevel": 1,
@@ -5400,6 +5420,7 @@
     "title": "Forecast storage growth",
     "body": "",
     "project": "infra",
+    "labels": [],
     "due": "2026-11-18",
     "priority": 2,
     "priorityLevel": 2,
@@ -5452,6 +5473,7 @@
     "title": "Review cooling budget",
     "body": "",
     "project": "infra",
+    "labels": [],
     "due": "2026-11-20",
     "priority": 0,
     "priorityLevel": 0,
@@ -5498,6 +5520,7 @@
     "title": "Pull 90-day disk usage",
     "body": "",
     "project": "infra",
+    "labels": [],
     "due": "2026-11-12",
     "priority": 2,
     "priorityLevel": 2,
@@ -5546,6 +5569,7 @@
     "title": "Renew TLS certificates",
     "body": "",
     "project": "infra",
+    "labels": [],
     "due": "2026-11-30",
     "priority": 1,
     "priorityLevel": 1,
@@ -5590,6 +5614,7 @@
     "title": "Refresh onboarding docs",
     "body": "Bring the new-hire guide up to date.",
     "project": "people-ops",
+    "labels": [],
     "due": "2026-11-25",
     "priority": 1,
     "priorityLevel": 1,
@@ -5640,6 +5665,7 @@
     "title": "Draft new-hire access list",
     "body": "",
     "project": "people-ops",
+    "labels": [],
     "due": "2026-11-16",
     "priority": 1,
     "priorityLevel": 1,
@@ -5685,6 +5711,7 @@
     "title": "Retro notes: search v2 sprint",
     "body": "@maya @raj please add your part's notes before Monday. The board export is attached.",
     "project": "",
+    "labels": [],
     "due": null,
     "priority": 1,
     "priorityLevel": 1,
@@ -11194,6 +11221,7 @@
     {
      "id": "maya",
      "depth": 1,
+     "outside": false,
      "open": [
       "ada.pc#2>maya",
       "ada.pc#7>maya",
@@ -11203,14 +11231,20 @@
       "ivy.pc#7>maya"
      ],
      "waiting": [],
-     "done": 0,
-     "blocked": 0,
+     "counts": {
+      "doing": 1,
+      "todo": 2
+     },
+     "load": 3,
      "stale": 0,
+     "overdue": 0,
+     "fallback": 0,
      "last": "2026-11-05T17:00:00Z"
     },
     {
      "id": "lena",
      "depth": 2,
+     "outside": false,
      "open": [
       "maya.pc#2>lena",
       "ada.pc#7>lena"
@@ -11219,28 +11253,40 @@
       "noa.pc#4>lena"
      ],
      "waiting": [],
-     "done": 0,
-     "blocked": 0,
+     "counts": {
+      "doing": 1,
+      "todo": 1
+     },
+     "load": 2,
      "stale": 0,
+     "overdue": 0,
+     "fallback": 0,
      "last": "2026-11-04T10:30:00Z"
     },
     {
      "id": "omar",
      "depth": 2,
+     "outside": false,
      "open": [
       "maya.pc#8>omar",
       "ada.pc#7>omar"
      ],
      "pending": [],
      "waiting": [],
-     "done": 0,
-     "blocked": 0,
+     "counts": {
+      "doing": 1,
+      "todo": 1
+     },
+     "load": 2,
      "stale": 0,
+     "overdue": 0,
+     "fallback": 0,
      "last": "2026-11-03T15:00:00Z"
     },
     {
      "id": "ivy",
      "depth": 2,
+     "outside": false,
      "open": [
       "ada.pc#7>ivy",
       "maya.pc#6>ivy"
@@ -11249,52 +11295,74 @@
      "waiting": [
       "ivy.pc#7>maya"
      ],
-     "done": 0,
-     "blocked": 0,
+     "counts": {
+      "awaiting": 1,
+      "doing": 1
+     },
+     "load": 1,
      "stale": 1,
+     "overdue": 0,
+     "fallback": 0,
      "last": "2026-11-05T16:00:00Z"
     },
     {
      "id": "jon",
      "depth": 2,
+     "outside": false,
      "open": [
       "ada.pc#7>jon"
      ],
      "pending": [],
      "waiting": [],
-     "done": 1,
-     "blocked": 0,
+     "counts": {
+      "done": 1,
+      "todo": 1
+     },
+     "load": 1,
      "stale": 0,
+     "overdue": 0,
+     "fallback": 0,
      "last": "2026-11-04T13:00:00Z"
     },
     {
      "id": "kai",
      "depth": 2,
+     "outside": false,
      "open": [],
      "pending": [],
      "waiting": [],
-     "done": 1,
-     "blocked": 0,
+     "counts": {
+      "done": 1
+     },
+     "load": 0,
      "stale": 0,
+     "overdue": 0,
+     "fallback": 0,
      "last": "2026-11-02T17:10:00Z"
     },
     {
      "id": "raj",
      "depth": 1,
+     "outside": false,
      "open": [
       "ada.pc#2>raj",
       "ada.pc#7>raj"
      ],
      "pending": [],
      "waiting": [],
-     "done": 0,
-     "blocked": 0,
+     "counts": {
+      "todo": 2
+     },
+     "load": 2,
      "stale": 0,
+     "overdue": 0,
+     "fallback": 0,
      "last": "2026-11-05T13:00:00Z"
     },
     {
      "id": "sven",
      "depth": 2,
+     "outside": false,
      "open": [
       "sven.pc#7>sven",
       "raj.pc#2>sven",
@@ -11305,14 +11373,21 @@
      ],
      "pending": [],
      "waiting": [],
-     "done": 0,
-     "blocked": 1,
+     "counts": {
+      "doing": 1,
+      "todo": 3,
+      "blocked": 1
+     },
+     "load": 5,
      "stale": 1,
+     "overdue": 0,
+     "fallback": 1,
      "last": "2026-11-05T17:30:00Z"
     },
     {
      "id": "tia",
      "depth": 2,
+     "outside": false,
      "open": [
       "raj.pc#2>tia",
       "raj.pc#12>tia",
@@ -11321,14 +11396,20 @@
      ],
      "pending": [],
      "waiting": [],
-     "done": 0,
-     "blocked": 0,
+     "counts": {
+      "doing": 2,
+      "todo": 1
+     },
+     "load": 3,
      "stale": 1,
+     "overdue": 0,
+     "fallback": 1,
      "last": "2026-11-05T16:40:00Z"
     },
     {
      "id": "noa",
      "depth": 2,
+     "outside": false,
      "open": [
       "ada.pc#7>noa",
       "raj.pc#14>noa",
@@ -11338,28 +11419,41 @@
      "waiting": [
       "noa.pc#4>lena"
      ],
-     "done": 0,
-     "blocked": 0,
+     "counts": {
+      "doing": 2,
+      "todo": 1
+     },
+     "load": 3,
      "stale": 1,
+     "overdue": 0,
+     "fallback": 0,
      "last": "2026-11-05T18:00:00Z"
     },
     {
      "id": "pia",
      "depth": 2,
+     "outside": false,
      "open": [
       "raj.pc#8>pia",
       "ada.pc#7>pia"
      ],
      "pending": [],
      "waiting": [],
-     "done": 1,
-     "blocked": 1,
+     "counts": {
+      "doing": 1,
+      "blocked": 1,
+      "done": 1
+     },
+     "load": 2,
      "stale": 0,
+     "overdue": 0,
+     "fallback": 0,
      "last": "2026-11-05T17:00:00Z"
     },
     {
      "id": "bo",
      "depth": 1,
+     "outside": false,
      "open": [
       "ada.pc#2>bo",
       "ada.pc#7>bo",
@@ -11367,23 +11461,34 @@
      ],
      "pending": [],
      "waiting": [],
-     "done": 0,
-     "blocked": 0,
+     "counts": {
+      "todo": 3
+     },
+     "load": 3,
      "stale": 0,
+     "overdue": 0,
+     "fallback": 0,
      "last": "2026-11-05T18:40:00Z"
     },
     {
      "id": "uma",
      "depth": 2,
+     "outside": false,
      "open": [
       "ada.pc#17>uma",
       "ada.pc#7>uma"
      ],
      "pending": [],
      "waiting": [],
-     "done": 1,
-     "blocked": 0,
+     "counts": {
+      "done": 1,
+      "todo": 1,
+      "doing": 1
+     },
+     "load": 2,
      "stale": 0,
+     "overdue": 0,
+     "fallback": 0,
      "last": "2026-11-05T21:00:00Z"
     }
    ],

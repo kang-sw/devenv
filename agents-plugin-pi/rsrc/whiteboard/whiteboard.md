@@ -100,15 +100,20 @@ Markdown up to the closing tag.
   followed by `: <why>`. On `wb:patch`, `clear="options"`, `clear="links"`,
   or `clear="options links"` empties those lists, and an empty
   `wb:recommend` or `wb:why` clears that field.
-- Markdown: `wb:title` takes inline markdown (bold, italic, code, links);
+- Markdown: `wb:title` takes inline markdown (bold, italic, code, links)
+  and the tags `<code>`, `<b>`, `<strong>`, `<i>`, `<em>`, `<kbd>`, and
+  `<br>` written without attributes; any other tag shows as text.
   `wb:option`, `wb:why`, and `wb:recommend` take block markdown with line
   breaks kept: lists, code blocks, tables, images, and a `` ```mermaid ``
-  fenced block drawn as a diagram. Item fields also render `<code>`, `<b>`,
-  `<strong>`, `<i>`, `<em>`, `<kbd>`, and `<br>` written without attributes;
-  any other tag shows as text. A link or image path is relative to the
-  session root or absolute; images are local files only, links may also be
-  http(s). An open technical or announced item shows its `wb:why` inline,
-  one line per reason.
+  fenced block drawn as a diagram, plus HTML such as `<img>`, `<table>`,
+  `<details>`, and simple inline SVG, shown as static markup with script,
+  style, frames, form controls, event attributes, and positioning removed;
+  text such as `Vec<T>` reads as an unknown tag and disappears unless it is
+  in backticks. A line that starts with a block tag follows the body's HTML
+  rule below. A link or image path, in markdown or in `href` and `src`, is
+  relative to the session root or absolute; images are local files only,
+  links may also be http(s). An open technical or announced item shows its `wb:why` inline,
+  one line per reason, with only the title's tags rendered.
 - `wb:why`: a technical or announced item's citation or reasoning, or a
   policy item's context. `wb:link`: one per link, such as a ticket stem, a
   commit, or `supersedes {{12}}`.
@@ -226,8 +231,10 @@ whiteboard.query payload: {topic?, ids?, id?, status?, text?, depth?, fields?, b
 - A topic line names a stemmed topic `topic <stem> "<label>"` and a
   stemless one `topic "<name>"`. Item fields, labels, and close results
   print `<code>` as backticks and `<br>` as a space, and drop the other
-  inline tags; the topic body and `answer_quote` print as stored, so a
-  `wb:edit` quote copies the body exactly.
+  inline tags; options, recommendations, and `wb:why` drop every tag and
+  keep its text, an image as its alt text, script and style as nothing. The
+  topic body and `answer_quote` print as stored, so a `wb:edit` quote
+  copies the body exactly.
 - Topics print in the order their first item was added, items in ID order.
   A last `omitted:` line counts what the defaults left out and names the
   filter that shows it.

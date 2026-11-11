@@ -91,9 +91,18 @@ type Host struct {
 }
 
 // store is one registered store as this process holds it. mu serializes
-// this process's operations on it; the ledger serializes across processes.
+// this process's local operations on it, and net its calls that talk to
+// the store's remote; the ledger serializes both across processes.
 type store struct {
+	// mu guards the fields below and the tracker, and is held across every
+	// local read and write of the store, never across a fetch or a push
+	// (a wiki save's and a registration's own excepted).
 	mu storeLock
+	// net is the network mutex (withNet): held by the one call of this
+	// process that is talking to the store's remote. It is taken before mu
+	// and never while holding it, because the ledger runs the local steps
+	// of a fetch or sync through applyGate, which takes mu.
+	net storeLock
 	// id and nonce name the registration the handle was made for
 	// (StoreEntry.ID and Nonce). They never change, so they are read
 	// without mu.
@@ -158,13 +167,40 @@ func (h *Host) Root() string { return h.root }
 
 func (h *Host) now() time.Time { return h.clock.Now().UTC() }
 
-func (h *Host) ledgerOptions(e StoreEntry, name string) wsledger.Options {
+func (h *Host) ledgerOptions(st *store, name string) wsledger.Options {
 	var env []string
 	if h.environ != nil {
 		env = h.environ()
 	}
+	e := st.entry
 	return wsledger.Options{Dir: e.Dir, Member: e.Member, Name: name, KeyDir: filepath.Join(h.root, keysDir),
-		Clock: h.clock, PushDelay: h.pushDelay, Runner: h.runner, Env: env}
+		Clock: h.clock, PushDelay: h.pushDelay, Runner: h.runner, Env: env, ApplyGate: h.applyGate(st)}
+}
+
+// applyGate is the wsledger.Options.ApplyGate of st's ledger. The ledger
+// talks to the remote holding neither st.mu nor its own store lock, so the
+// store can be unregistered meanwhile (and its id registered again); every
+// local step of a fetch or sync, the idle push's included, therefore runs
+// under st.mu after the registry entry is read again. A step whose
+// registration is gone does not run, which discards what was fetched, and
+// the handle is retired, which stops its ledger's idle push.
+func (h *Host) applyGate(st *store) func(step func() error) error {
+	return func(step func() error) error {
+		st.mu.Lock()
+		defer st.mu.Unlock()
+		cur, err := h.Entry(st.id)
+		switch {
+		case err == nil && cur.Nonce == st.nonce && !st.retired:
+			return step()
+		case err != nil && !errors.Is(err, ErrNotRegistered):
+			return err
+		}
+		h.retire(st)
+		if err != nil {
+			return err
+		}
+		return fmt.Errorf("tracker: store %q was unregistered and registered again during the call; retry", st.id)
+	}
 }
 
 // store returns this process's handle on the registered store id, creating
@@ -193,7 +229,7 @@ func (h *Host) open(ctx context.Context, st *store) error {
 	if st.ledger != nil {
 		return nil
 	}
-	l, err := wstracker.Open(ctx, h.ledgerOptions(st.entry, ""))
+	l, err := wstracker.Open(ctx, h.ledgerOptions(st, ""))
 	if err != nil {
 		return fmt.Errorf("tracker: open store %q: %w", st.entry.ID, err)
 	}
@@ -204,17 +240,22 @@ func (h *Host) open(ctx context.Context, st *store) error {
 }
 
 // ErrStoreBusy is the answer of a call whose context carries a lock wait
-// (WithLockWait) when its store's lock stayed held that long, as it is
-// across a fetch or push. Nothing was read or written; the call may be
+// (WithLockWait) when a lock it needs stayed held that long: its store's
+// lock, which a fetch or push no longer holds but a wiki save does across
+// its own, or, for a call that has to talk to the remote itself (a read of
+// an attachment this clone lacks), the store's network lock, which a fetch
+// or push in flight holds. Nothing was read or written; the call may be
 // retried.
 var ErrStoreBusy = errors.New("tracker: store busy")
 
 type lockWaitKey struct{}
 
 // WithLockWait returns ctx bounding how long a Host call run with it waits
-// for its store's lock: a call that waited d answers ErrStoreBusy. A call
-// whose context carries no bound waits until the lock is free, which is
-// up to a network timeout while a fetch or push holds it.
+// for each lock of its store it needs (the store's lock; for a call that
+// talks to the remote, the network lock in this process and across
+// processes too): a call that waited d for one answers ErrStoreBusy. A call
+// whose context carries no bound waits until the lock is free, which for
+// the network lock is up to a network timeout.
 func WithLockWait(ctx context.Context, d time.Duration) context.Context {
 	return context.WithValue(ctx, lockWaitKey{}, d)
 }
@@ -270,6 +311,107 @@ func (l *storeLock) lockWithin(ctx context.Context, d time.Duration) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+// lockCtx takes the lock unless ctx ends first (ctx's error).
+func (l *storeLock) lockCtx(ctx context.Context) error {
+	select {
+	case l.c() <- struct{}{}:
+		return nil
+	default:
+	}
+	select {
+	case l.c() <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// withNet runs fn for a call that talks to store id's remote: holding the
+// store's network mutex, with the store opened, and without its lock
+// (st.mu), so local reads and writes go on while fn waits on the network.
+// fn gets the registry entry and the ledger as read under the lock, and a
+// ctx that carries the caller's lock wait on to the ledger's network lock
+// (WithLockWait); it takes st.mu itself for a local step (locked), and the
+// ledger's Fetch and Sync take it through applyGate. An ErrStoreBusy is
+// either network lock held past the caller's bound.
+func (h *Host) withNet(ctx context.Context, id string, fn func(ctx context.Context, st *store, e StoreEntry, l *wsledger.Ledger) error) error {
+	wait, bounded := ctx.Value(lockWaitKey{}).(time.Duration)
+	busy := func() error { return fmt.Errorf("%w: %q", ErrStoreBusy, id) }
+	var st *store
+	var e StoreEntry
+	var l *wsledger.Ledger
+	for st == nil {
+		held, err := h.store(id)
+		if err != nil {
+			return err
+		}
+		if bounded {
+			err = held.net.lockWithin(ctx, wait)
+		} else {
+			err = held.net.lockCtx(ctx)
+		}
+		if errors.Is(err, ErrStoreBusy) {
+			return busy()
+		}
+		if err != nil {
+			return err
+		}
+		cur, err := h.lockStore(ctx, id, wait, bounded)
+		if err != nil {
+			held.net.Unlock()
+			return err
+		}
+		if cur != held {
+			// The id was registered again while this call waited: the
+			// network mutex to hold is the new handle's.
+			cur.mu.Unlock()
+			held.net.Unlock()
+			continue
+		}
+		if err := h.open(ctx, cur); err != nil {
+			if _, gone := h.Entry(id); errors.Is(gone, ErrNotRegistered) {
+				h.retire(cur)
+				err = gone
+			}
+			cur.mu.Unlock()
+			held.net.Unlock()
+			return err
+		}
+		st, e, l = cur, cur.entry, cur.ledger
+		cur.mu.Unlock()
+	}
+	defer st.net.Unlock()
+	if bounded {
+		ctx = wsledger.WithNetWait(ctx, wait)
+	}
+	err := fn(ctx, st, e, l)
+	if errors.Is(err, wsledger.ErrBusy) {
+		return busy()
+	}
+	if err != nil {
+		// A store unregistered while the call ran fails on its missing
+		// directory or at applyGate; the caller is told what happened.
+		if _, gone := h.Entry(id); errors.Is(gone, ErrNotRegistered) {
+			st.mu.Lock()
+			h.retire(st)
+			st.mu.Unlock()
+			return gone
+		}
+	}
+	return err
+}
+
+// locked runs fn holding st.mu, for a local step of a call inside withNet.
+// A handle retired meanwhile answers ErrNotRegistered.
+func (h *Host) locked(st *store, fn func() error) error {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if st.retired {
+		return fmt.Errorf("%w %q", ErrNotRegistered, st.id)
+	}
+	return fn()
 }
 
 // with runs fn on the opened store id under its lock, waiting for the lock
@@ -518,10 +660,14 @@ func (h *Host) Register(ctx context.Context, req RegisterRequest) (RegisterResul
 	// The store enters this process's map, locked, before anything is
 	// written, so a concurrent check that finds the new registry entry waits
 	// for this registration instead of opening a second ledger on the
-	// directory.
+	// directory. The network mutex is taken first, as everywhere, and held
+	// through the sync that publishes the profile.
 	st := &store{id: entry.ID, nonce: entry.Nonce, entry: entry}
+	st.net.Lock()
+	defer st.net.Unlock()
 	st.mu.Lock()
-	defer st.mu.Unlock()
+	unlock := sync.OnceFunc(st.mu.Unlock)
+	defer unlock()
 	h.mu.Lock()
 	if h.closed || h.stores[entry.ID] != nil {
 		closed := h.closed
@@ -536,7 +682,7 @@ func (h *Host) Register(ctx context.Context, req RegisterRequest) (RegisterResul
 	h.mu.Unlock()
 	pushed := false
 	err = func() error {
-		opts := h.ledgerOptions(entry, profile.Given)
+		opts := h.ledgerOptions(st, profile.Given)
 		var l *wsledger.Ledger
 		var err error
 		if entry.Remote == "" {
@@ -578,9 +724,13 @@ func (h *Host) Register(ctx context.Context, req RegisterRequest) (RegisterResul
 		}
 		return RegisterResult{}, err
 	}
+	l := st.ledger
+	// The registration is complete: its lock is released before the sync,
+	// whose local steps take it (applyGate).
+	unlock()
 	if entry.Remote != "" {
 		// Publish the profile now; a failure leaves it to the idle push.
-		_ = h.attempt(ctx, st, networkTimeout, st.ledger.Sync)
+		_ = h.attempt(ctx, st, networkTimeout, l.Sync)
 	}
 	res.Entry = entry
 	_ = h.SaveProfile(profile) // the store is registered; a lost profile save costs only the default
@@ -795,15 +945,17 @@ func (h *Host) view(ctx context.Context, id string, staleDays int, reading func(
 // for every process. A store with no remote only reloads.
 func (h *Host) Check(ctx context.Context, id string) (wsledger.SyncReport, error) {
 	var rep wsledger.SyncReport
-	err := h.with(ctx, id, func(st *store) error {
-		if st.entry.Remote == "" {
-			var err error
-			rep, err = st.ledger.Reload(ctx)
-			return err
+	err := h.withNet(ctx, id, func(ctx context.Context, st *store, e StoreEntry, l *wsledger.Ledger) error {
+		if e.Remote == "" {
+			return h.locked(st, func() error {
+				var err error
+				rep, err = l.Reload(ctx)
+				return err
+			})
 		}
 		return h.attempt(ctx, st, networkTimeout, func(ctx context.Context) (wsledger.SyncReport, error) {
 			var err error
-			rep, err = st.ledger.Fetch(ctx)
+			rep, err = l.Fetch(ctx)
 			return rep, err
 		})
 	})
@@ -816,15 +968,15 @@ func (h *Host) Check(ctx context.Context, id string) (wsledger.SyncReport, error
 // closes the batch.
 func (h *Host) Sync(ctx context.Context, id string) (wsledger.SyncReport, error) {
 	var rep wsledger.SyncReport
-	err := h.with(ctx, id, func(st *store) error {
-		if st.entry.Remote == "" {
+	err := h.withNet(ctx, id, func(ctx context.Context, st *store, e StoreEntry, l *wsledger.Ledger) error {
+		if e.Remote == "" {
 			var err error
-			rep, err = st.ledger.Sync(ctx)
+			rep, err = l.Sync(ctx)
 			return err
 		}
 		return h.attempt(ctx, st, networkTimeout, func(ctx context.Context) (wsledger.SyncReport, error) {
 			var err error
-			rep, err = st.ledger.Sync(ctx)
+			rep, err = l.Sync(ctx)
 			return rep, err
 		})
 	})
@@ -852,8 +1004,10 @@ const syncStateFile = "host-sync.json"
 
 // writeLockFile, in a store directory, serializes this machine's writes to
 // the store across processes (DispatchWith). Its holder can wait inside
-// Append for wsledger's store lock while another process syncs (a push and
-// a fetch, each up to networkTimeout), so a waiter waits that long.
+// Append for wsledger's store lock while another process holds it across
+// the network (a wiki save's fetch and push, each up to networkTimeout; a
+// fetch or sync holds it only for its local steps), so a waiter waits that
+// long.
 const (
 	writeLockFile = "write.lock"
 	writeLockWait = 2*networkTimeout + lockWait
@@ -878,11 +1032,20 @@ func readSyncState(dir string) syncState {
 }
 
 // attempt runs one network call on st within timeout and records its
-// outcome for every process. Callers hold st.mu.
+// outcome for every process. Callers hold st's network mutex and not
+// st.mu (withNet): the call takes st.mu for its local steps (applyGate),
+// and the outcome is recorded under it, unless the store was unregistered
+// while the call was on the network, whose directory is no longer st's to
+// write.
 func (h *Host) attempt(ctx context.Context, st *store, timeout time.Duration, call func(context.Context) (wsledger.SyncReport, error)) error {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	rep, err := call(ctx)
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if st.retired || h.checkRegistered(st) != nil {
+		return err
+	}
 	s := readSyncState(st.entry.Dir)
 	s.AttemptedAt = h.now()
 	s.WikiWarnings = wikiWarnings(rep.Warnings)

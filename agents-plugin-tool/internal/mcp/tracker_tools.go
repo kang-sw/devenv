@@ -133,8 +133,8 @@ func trackerEventSpec(kind wsxmlcmd.Kind, attrs ...string) wsxmlcmd.Spec {
 // the store commands. A body is the event's text field: the item body, the
 // comment, or the note.
 var trackerCommands = map[string]trackerCommandDef{
-	wstracker.TypeItemCreate: {trackerEventSpec(wsxmlcmd.Leaf, "kind", "title", "project", "due", "priority", "parent", "after", "mentions", "refs"), buildItemCreate},
-	wstracker.TypeItemEdit:   {trackerEventSpec(wsxmlcmd.Leaf, "item", "title", "project", "due", "priority", "mentions", "refs", "clear"), buildItemEdit},
+	wstracker.TypeItemCreate: {trackerEventSpec(wsxmlcmd.Leaf, "kind", "title", "project", "labels", "due", "priority", "parent", "after", "mentions", "refs"), buildItemCreate},
+	wstracker.TypeItemEdit:   {trackerEventSpec(wsxmlcmd.Leaf, "item", "title", "project", "labels", "due", "priority", "mentions", "refs", "clear"), buildItemEdit},
 	wstracker.TypeItemHide:   {trackerEventSpec(wsxmlcmd.Empty, "item"), buildItemOnly},
 	wstracker.TypeItemMove:   {trackerEventSpec(wsxmlcmd.Empty, "item", "parent", "after"), buildItemMove},
 	wstracker.TypeItemAssign: {trackerEventSpec(wsxmlcmd.Empty, "item", "people", "rules", "levels", "completion"), buildItemAssign},
@@ -217,6 +217,27 @@ var trackerCommands = map[string]trackerCommandDef{
 			ev.payload["max_bytes"] = n
 		}
 	}},
+	wstracker.TypeAddLabel: {trackerEventSpec(wsxmlcmd.Empty, "name", "color"), func(b *trackerBatch, cmd wsxmlcmd.Command, ev *trackerEvent) {
+		b.required(cmd, ev, "name")
+		if v, ok := wsxmlcmd.RequiredAttr(b.p, cmd, "color"); ok {
+			ev.payload["color"] = trackerColor(v)
+		}
+	}},
+	wstracker.TypeEditLabel: {trackerEventSpec(wsxmlcmd.Empty, "label", "name", "color"), func(b *trackerBatch, cmd wsxmlcmd.Command, ev *trackerEvent) {
+		b.labelRef(cmd, ev)
+		b.optional(cmd, ev, "name")
+		if v, ok := cmd.Attr("color"); ok {
+			ev.payload["color"] = trackerColor(v)
+		}
+		_, name := cmd.Attr("name")
+		_, color := cmd.Attr("color")
+		if !name && !color {
+			b.p.Add("%s: changes nothing; set name, color, or both", cmd.Label())
+		}
+	}},
+	wstracker.TypeRemoveLabel: {trackerEventSpec(wsxmlcmd.Empty, "label"), func(b *trackerBatch, cmd wsxmlcmd.Command, ev *trackerEvent) {
+		b.labelRef(cmd, ev)
+	}},
 	trackerRegister: {spec: wsxmlcmd.Spec{Kind: wsxmlcmd.Empty, Attrs: []string{"store", "member", "remote", "label", "org", "family", "given"}}},
 	trackerSync:     {spec: wsxmlcmd.Spec{Kind: wsxmlcmd.Empty, Attrs: []string{"store"}}},
 	// The machine-local store commands: they change this machine's registry
@@ -245,6 +266,7 @@ func buildItemCreate(b *trackerBatch, cmd wsxmlcmd.Command, ev *trackerEvent) {
 	}
 	b.required(cmd, ev, "title")
 	b.optional(cmd, ev, "project")
+	b.labelRefList(cmd, ev)
 	b.optional(cmd, ev, "due")
 	if n, ok := trackerLevelAttr(b.p, cmd, "priority", false); ok {
 		ev.payload["priority"] = n
@@ -276,6 +298,8 @@ func buildItemEdit(b *trackerBatch, cmd wsxmlcmd.Command, ev *trackerEvent) {
 	if v, ok := cmd.Attr("project"); ok {
 		ev.payload["project"] = v
 	}
+	// labels="" clears them; a list replaces them
+	b.labelRefList(cmd, ev)
 	if v, ok := cmd.Attr("due"); ok && wsxmlcmd.NonEmpty(b.p, cmd.At("due")+" (clear=\"due\" removes it)", v) {
 		ev.payload["due"] = v
 	}
@@ -546,18 +570,36 @@ func (b *trackerBatch) itemRef(cmd wsxmlcmd.Command, ev *trackerEvent, name stri
 // itemRefList reads an optional space-separated list of item IDs, each in
 // either form or $N; an empty list writes an empty field.
 func (b *trackerBatch) itemRefList(cmd wsxmlcmd.Command, ev *trackerEvent, name string) {
+	b.refList(cmd, ev, name, wstracker.TypeItemCreate, "item")
+}
+
+// labelRefList reads the labels attribute: label IDs as the query's labels
+// line prints them, or $N for a tk:roles.add_label earlier in the batch.
+func (b *trackerBatch) labelRefList(cmd wsxmlcmd.Command, ev *trackerEvent) {
+	b.refList(cmd, ev, "labels", wstracker.TypeAddLabel, "label")
+}
+
+func (b *trackerBatch) labelRef(cmd wsxmlcmd.Command, ev *trackerEvent) {
+	b.ref(cmd, ev, "label", wstracker.TypeAddLabel, "label")
+}
+
+func (b *trackerBatch) refList(cmd wsxmlcmd.Command, ev *trackerEvent, name, creator, noun string) {
 	v, ok := cmd.Attr(name)
 	if !ok {
 		return
 	}
 	list := []trackerListRef{}
 	for _, tok := range strings.Fields(v) {
-		if id, idx, ok := b.parseRef(cmd, name, tok, wstracker.TypeItemCreate, "item"); ok {
+		if id, idx, ok := b.parseRef(cmd, name, tok, creator, noun); ok {
 			list = append(list, trackerListRef{id: id, event: idx})
 		}
 	}
 	ev.refLists[name] = list
 }
+
+// trackerColor is a label colour as written: trimmed and lower-cased, so
+// #D14343 is the #d14343 the store requires.
+func trackerColor(v string) string { return strings.ToLower(strings.TrimSpace(v)) }
 
 func (b *trackerBatch) commentRef(cmd wsxmlcmd.Command, ev *trackerEvent, name string) {
 	b.ref(cmd, ev, name, wstracker.TypeCommentAdd, "comment")
@@ -600,7 +642,11 @@ func (b *trackerBatch) parseRef(cmd wsxmlcmd.Command, name, v, creator, noun str
 	}
 	id, err := parseTrackerID(v)
 	if err != nil {
-		b.p.Add("%s: must be an %s ID such as maya.pc-5, or $N; got %q", cmd.At(name), noun, v)
+		article := "a"
+		if noun == "item" {
+			article = "an"
+		}
+		b.p.Add("%s: must be %s %s ID such as maya.pc-5, or $N; got %q", cmd.At(name), article, noun, v)
 		return "", -1, false
 	}
 	return id, -1, true

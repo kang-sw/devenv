@@ -270,6 +270,7 @@
   "attachments": {
    "max_bytes": 10485760
   },
+  "labels": [],
   "members": {
    "ada": {
     "id": "ada",
@@ -696,34 +697,43 @@
     {
      "id": "lena",
      "depth": 1,
+     "outside": false,
      "open": [],
      "pending": [],
      "waiting": [],
-     "done": 0,
-     "blocked": 0,
+     "counts": {},
+     "load": 0,
      "stale": 0,
+     "overdue": 0,
+     "fallback": 0,
      "last": null
     },
     {
      "id": "omar",
      "depth": 1,
+     "outside": false,
      "open": [],
      "pending": [],
      "waiting": [],
-     "done": 0,
-     "blocked": 0,
+     "counts": {},
+     "load": 0,
      "stale": 0,
+     "overdue": 0,
+     "fallback": 0,
      "last": null
     },
     {
      "id": "jon",
      "depth": 1,
+     "outside": false,
      "open": [],
      "pending": [],
      "waiting": [],
-     "done": 0,
-     "blocked": 0,
+     "counts": {},
+     "load": 0,
      "stale": 0,
+     "overdue": 0,
+     "fallback": 0,
      "last": null
     }
    ],

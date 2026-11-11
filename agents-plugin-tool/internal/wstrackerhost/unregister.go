@@ -21,8 +21,9 @@ import (
 const removedPrefix = ".removed-"
 
 // unregisterWait bounds how long Unregister waits for each of the store's
-// locks before it refuses: long enough to outlast another reader's reload,
-// far short of a sync holding the lock across the network.
+// locks before it refuses: long enough to outlast another reader's reload
+// or a local step of a sync, far short of a wiki save holding the lock
+// across the network.
 var unregisterWait = 2 * time.Second
 
 // renameUnderLocks: Unregister renames the store directory away while it
@@ -38,7 +39,8 @@ const (
 	// UnregisterNeedsConfirm: the store has no remote and the confirmation
 	// did not name it.
 	UnregisterNeedsConfirm = "confirm"
-	// UnregisterBusy: a check, sync, or write holds the store.
+	// UnregisterBusy: a write, or a local step of a check or sync, holds
+	// the store.
 	UnregisterBusy = "busy"
 	// UnregisterUnpushed: the clone holds own events or wiki changes the
 	// remote does not, and a sync can push them.
@@ -117,11 +119,16 @@ func tryFlock(ctx context.Context, fl *flock.Flock) bool {
 // id again with the same member id finishes without a new join.
 //
 // A store with a remote is refused (an *UnregisterRefusal) while this clone
-// holds an own event or a wiki change the remote does not, or while a
-// check, sync, or write of it is in flight in any process; confirm is
-// ignored. A store with no remote holds its only copy here, so it is
-// removed only when confirm is the store id. A refusal leaves the store as
-// it was.
+// holds an own event or a wiki change the remote does not (a push in
+// flight included: what it sends counts as unpushed until it is recorded),
+// or while a write of it is in flight in any process; confirm is ignored.
+// A store with no remote holds its only copy here, so it is removed only
+// when confirm is the store id. A refusal leaves the store as it was.
+//
+// A fetch in flight, in any process, does not hold the store: it is on the
+// network under the network lock, and Unregister does not wait for it. The
+// store is removed under it, and the step that would apply what it fetched
+// finds the registration gone and applies nothing (applyGate).
 //
 // The removal is safe against the other processes sharing the root. It
 // holds the store's write lock and wsledger's store lock, read the unpushed
@@ -155,7 +162,7 @@ func (h *Host) Unregister(ctx context.Context, id, confirm string) error {
 	defer wl.Unlock() //nolint:errcheck
 	if st.ledger == nil {
 		// Opening waits for the store lock as long as ctx allows, so a lock
-		// another process holds across a sync is refused here first.
+		// another process holds across a wiki save is refused here first.
 		probe := flock.New(filepath.Join(e.Dir, wsledger.LockFile))
 		if !tryFlock(ctx, probe) {
 			return refuseBusy(id)

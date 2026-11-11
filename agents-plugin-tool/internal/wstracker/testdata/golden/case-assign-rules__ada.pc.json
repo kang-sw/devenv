@@ -469,6 +469,7 @@
   "attachments": {
    "max_bytes": 10485760
   },
+  "labels": [],
   "members": {
    "ada": {
     "id": "ada",
@@ -701,6 +702,7 @@
     "title": "Rollout",
     "body": "",
     "project": "",
+    "labels": [],
     "due": null,
     "priority": 1,
     "priorityLevel": 1,
@@ -746,6 +748,7 @@
     "title": "Audit",
     "body": "",
     "project": "",
+    "labels": [],
     "due": null,
     "priority": 1,
     "priorityLevel": 1,
@@ -794,6 +797,7 @@
     "title": "Cross-team",
     "body": "",
     "project": "",
+    "labels": [],
     "due": null,
     "priority": 1,
     "priorityLevel": 1,
@@ -844,6 +848,7 @@
     "title": "Legacy",
     "body": "",
     "project": "",
+    "labels": [],
     "due": null,
     "priority": 1,
     "priorityLevel": 1,
@@ -889,6 +894,7 @@
     "title": "Ask bo",
     "body": "",
     "project": "",
+    "labels": [],
     "due": null,
     "priority": 1,
     "priorityLevel": 1,
@@ -935,6 +941,7 @@
     "title": "Withdraw",
     "body": "",
     "project": "",
+    "labels": [],
     "due": null,
     "priority": 1,
     "priorityLevel": 1,
@@ -2201,6 +2208,7 @@
     {
      "id": "maya",
      "depth": 1,
+     "outside": false,
      "open": [
       "ada.pc#2~maya>maya",
       "ada.pc#5@maya.pc#3>maya",
@@ -2209,14 +2217,19 @@
      ],
      "pending": [],
      "waiting": [],
-     "done": 0,
-     "blocked": 0,
+     "counts": {
+      "todo": 1
+     },
+     "load": 1,
      "stale": 0,
+     "overdue": 0,
+     "fallback": 3,
      "last": "2026-11-01T09:21:00Z"
     },
     {
      "id": "lena",
      "depth": 2,
+     "outside": false,
      "open": [
       "maya.pc#2~maya>lena",
       "ada.pc#2~maya>lena",
@@ -2224,27 +2237,37 @@
      ],
      "pending": [],
      "waiting": [],
-     "done": 0,
-     "blocked": 0,
+     "counts": {
+      "todo": 3
+     },
+     "load": 3,
      "stale": 0,
+     "overdue": 0,
+     "fallback": 0,
      "last": "2026-11-01T09:05:00Z"
     },
     {
      "id": "pia",
      "depth": 3,
+     "outside": false,
      "open": [
       "ada.pc#2~maya>pia"
      ],
      "pending": [],
      "waiting": [],
-     "done": 0,
-     "blocked": 0,
+     "counts": {
+      "todo": 1
+     },
+     "load": 1,
      "stale": 0,
+     "overdue": 0,
+     "fallback": 0,
      "last": "2026-11-01T09:02:00Z"
     },
     {
      "id": "omar",
      "depth": 2,
+     "outside": false,
      "open": [
       "maya.pc#2~maya>omar",
       "ada.pc#2~maya>omar",
@@ -2252,55 +2275,73 @@
      ],
      "pending": [],
      "waiting": [],
-     "done": 0,
-     "blocked": 0,
+     "counts": {
+      "todo": 3
+     },
+     "load": 3,
      "stale": 0,
+     "overdue": 0,
+     "fallback": 0,
      "last": "2026-11-01T09:05:00Z"
     },
     {
      "id": "raj",
      "depth": 1,
+     "outside": false,
      "open": [],
      "pending": [],
      "waiting": [],
-     "done": 0,
-     "blocked": 0,
+     "counts": {},
+     "load": 0,
      "stale": 0,
+     "overdue": 0,
+     "fallback": 0,
      "last": "2026-11-01T09:21:00Z"
     },
     {
      "id": "sven",
      "depth": 2,
+     "outside": false,
      "open": [],
      "pending": [],
      "waiting": [],
-     "done": 0,
-     "blocked": 0,
+     "counts": {},
+     "load": 0,
      "stale": 0,
+     "overdue": 0,
+     "fallback": 0,
      "last": "2026-11-01T09:12:00Z"
     },
     {
      "id": "kai",
      "depth": 3,
+     "outside": false,
      "open": [],
      "pending": [],
      "waiting": [],
-     "done": 0,
-     "blocked": 0,
+     "counts": {},
+     "load": 0,
      "stale": 0,
+     "overdue": 0,
+     "fallback": 0,
      "last": "2026-11-01T09:14:00Z"
     },
     {
      "id": "bo",
      "depth": 1,
+     "outside": false,
      "open": [
       "ada.pc#2>bo"
      ],
      "pending": [],
      "waiting": [],
-     "done": 0,
-     "blocked": 0,
+     "counts": {
+      "todo": 1
+     },
+     "load": 1,
      "stale": 0,
+     "overdue": 0,
+     "fallback": 0,
      "last": "2026-11-01T09:21:00Z"
     }
    ],

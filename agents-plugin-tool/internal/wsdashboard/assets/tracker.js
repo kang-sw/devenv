@@ -377,6 +377,25 @@
     return '<span class="chip due' + (over ? ' over' : now ? ' now' : '') + '" title="' + (over ? wsT("js.tk.due.tip.over", esc(it.due)) : now ? wsT("js.tk.due.tip.now", esc(it.due)) : wsT("js.tk.due.on", esc(it.due))) + '">' +
       (now ? wsT("js.tk.due.today") : wsT("js.tk.due.on", esc(it.due.slice(5)))) + '</span>';
   }
+  // The store's label list (view.labels, live labels in add order); an item carries label ids.
+  function labelOf(id) { return (VS.labels || []).filter(function (l) { return l.id === id; })[0] || null; }
+  // A removed label is gone from view.labels; the activity log still names it, by its add
+  // event and its applied renames (EV, the events by id).
+  function labelName(id) {
+    var l = labelOf(id), n = EV[id] && EV[id].type === 'roles.add_label' ? EV[id].payload.name : null;
+    if (l) return l.name;
+    VS.events.forEach(function (e) { if (e.type === 'roles.edit_label' && e.status === 'applied' && e.payload.label === id && typeof e.payload.name === 'string') n = e.payload.name; });
+    return typeof n === 'string' ? n : alias(id);
+  }
+  // One label chip, its colour a dot; with act, a button (a row's chip searches label:"name").
+  function labelChip(l, act, extra) {
+    var inner = '<span class="ldot" style="background:' + esc(l.color) + '"></span>' + esc(l.name);
+    if (!act) return '<span class="chip lbl">' + inner + '</span>';
+    return '<button type="button" class="chip lbl"' + attr('act', act) + attr('label', l.id) + (extra || '') + ' tabindex="-1"' + tipAttr(wsT("js.tk.label.search", l.name)) + '>' + inner + '</button>';
+  }
+  function labelChips(it, act) {
+    return (it.labels || []).map(labelOf).filter(Boolean).map(function (l) { return labelChip(l, act); }).join('');
+  }
   function kindChip(it) {
     return '<span class="chip kind">' + esc(kindName(it.kind)) + '</span>' + (it.pending.length ? '<span class="chip req">' + wsT("js.tk.chip.pendingassign") + '</span>' : '') +
       (it.hidden ? '<span class="chip hid">' + wsT("js.tk.chip.hidden") + '</span>' : '');
@@ -446,11 +465,11 @@
   function byRank(a, b) { return RANK[a.status] - RANK[b.status]; }
   function A(id) { return VS.assignments[id]; }
 
-  var EDIT_FIELDS = ['title', 'body', 'project', 'due', 'priority'];
+  var EDIT_FIELDS = ['title', 'body', 'project', 'labels', 'due', 'priority'];
   function listOf(x) { return Array.isArray(x) ? x : []; }
   // Mentions and attachments a write carries, for one-line descriptions.
   // A field name the event sentences print: the table's, else the field itself.
-  var FIELD_KEY = { title: "js.tk.field.title", body: "js.tk.field.body", project: "js.tk.field.project", due: "js.tk.field.due", priority: "js.tk.field.priority",
+  var FIELD_KEY = { title: "js.tk.field.title", body: "js.tk.field.body", project: "js.tk.field.project", labels: "js.tk.field.labels", due: "js.tk.field.due", priority: "js.tk.field.priority",
     org: "js.tk.field.org", family: "js.tk.field.family", given: "js.tk.field.given" };
   function fieldName(f) { return FIELD_KEY[f] ? wsT(FIELD_KEY[f]) : f; }
   function extrasTxt(p) {
@@ -467,10 +486,11 @@
       case 'item.create':
         if (inThread === 'parent') return wsT("js.tk.ev.create.sub", itemRef(n.id), esc(p.title), VS.items[n.id] ? stChip(VS.items[n.id].status) : '');
         return wsT("js.tk.ev.create", esc(kindName(p.kind)), esc(p.title)) + (inThread ? '' : ' (' + itemRef(n.id) + ')') + (p.parent && !inThread ? ' ' + wsT("js.tk.ev.create.under", itemRef(p.parent)) : '') +
-          (p.due ? wsT("js.tk.ev.create.due", esc(p.due)) : '') + (p.priority != null ? wsT("js.tk.ev.create.priority", esc(VS.priority.names[p.priority] || p.priority)) : '') + extrasTxt(p);
+          (p.due ? wsT("js.tk.ev.create.due", esc(p.due)) : '') + (p.priority != null ? wsT("js.tk.ev.create.priority", esc(VS.priority.names[p.priority] || p.priority)) : '') +
+          (listOf(p.labels).length ? wsT("js.tk.ev.create.labels", esc(listOf(p.labels).map(labelName).join(', '))) : '') + extrasTxt(p);
       case 'item.edit':
         return wsT("js.tk.ev.edit", ref(p.item), EDIT_FIELDS.filter(function (f) { return f in p; }).map(function (f) {
-          var v = f === 'priority' ? (VS.priority.names[p[f]] || p[f]) : p[f];
+          var v = f === 'priority' ? (VS.priority.names[p[f]] || p[f]) : f === 'labels' ? (listOf(p[f]).map(labelName).join(', ') || null) : p[f];
           return wsT("js.tk.ev.field", fieldName(f), esc(v == null ? wsT("js.tk.ev.none") : String(v).slice(0, 80)));
         }).join(', ')) + extrasTxt(p);
       case 'item.hide': return wsT("js.tk.ev.hide", ref(p.item));
@@ -509,6 +529,12 @@
       case 'roles.remove_member': return wsT("js.tk.ev.removemember", esc(p.member));
       case 'roles.set_priority_levels': return wsT("js.tk.ev.prioritylevels", esc((p.names || []).join(' / ')), esc((p.names || [])[p.default]));
       case 'roles.set_attachment_limit': return Number.isInteger(p.max_bytes) ? wsT("js.tk.ev.attlimit.size", esc(p.max_bytes), fmtSize(p.max_bytes)) : wsT("js.tk.ev.attlimit", esc(p.max_bytes));
+      case 'roles.add_label': return wsT("js.tk.ev.addlabel", esc(p.name));
+      case 'roles.edit_label':
+        return wsT("js.tk.ev.editlabel", esc(labelName(p.label)), ['name', 'color'].filter(function (f) { return f in p; }).map(function (f) {
+          return wsT("js.tk.ev.field", wsT(f === 'name' ? "js.tk.field.name" : "js.tk.field.color"), esc(p[f]));
+        }).join(', '));
+      case 'roles.remove_label': return wsT("js.tk.ev.removelabel", esc(labelName(p.label)));
       default: return esc(n.type);
     }
   }
@@ -830,7 +856,7 @@
     return '<div class="irow' + (ui.sel === o.rk ? ' sel' : '') + (ms ? ' msel' : '') + (o.closed ? ' closed' : '') + (o.ctx ? ' ctx' : '') + '" tabindex="0"' + (ms || canMove(it) ? ' draggable="true"' : '') +
       attr('item', it.id) + attr('rk', o.rk) + (r ? attr('rec', r.id) : '') +
       (o.depth ? ' style="--ind:' + o.depth + '"' : '') + '><div class="ir-main">' + mcbHtml(it, ms) + (o.tw != null ? o.tw : o.depth ? '<span class="ind">&#8627;</span>' : '') + stBtn(st, it, r) +
-      '<a class="title" href="#" tabindex="-1"' + attr('item', it.id) + '>' + esc(it.title) + '</a>' + (o.tsub || '') + warnHtml(it) + dotHtml(it) + '<span class="grow"></span>' +
+      '<a class="title" href="#" tabindex="-1"' + attr('item', it.id) + '>' + esc(it.title) + '</a>' + (o.tsub || '') + labelChips(it, 'lsearch') + warnHtml(it) + dotHtml(it) + '<span class="grow"></span>' +
       '<span class="ir-acts">' + moreBtn(it.id, '', true) + '</span>' + whoHtml(it) + priHtml(it) + dueHtml(it, st) + '</div>' +
       '<div class="ir-more">' + detailsHtml(it, r, o.more) + '</div></div>';
   }
@@ -951,9 +977,10 @@
   // remembered per store in memory, like the side cards' modes, and never written.
 
   // The modes per scope and the "recently closed" fold are display state: they start from the stored values.
+  // today and drill (a team head's count) are display state too, never stored.
   function panelState() {
     var n = ui.store;
-    return (ui.panel[n] = ui.panel[n] || { scope: 'mine', modes: (ui.pmodes[n] = ui.pmodes[n] || {}), today: null, q: '', closedOpen: ui.closedOpen[n] !== false, treeOpen: {} });
+    return (ui.panel[n] = ui.panel[n] || { scope: 'mine', modes: (ui.pmodes[n] = ui.pmodes[n] || {}), today: null, drill: null, q: '', closedOpen: ui.closedOpen[n] !== false, treeOpen: {} });
   }
   function scopeList() { return SCOPES.filter(function (x) { return x[0] !== 'team' || VS.my.team.length; }); }
   function scopeOf() { var s = panelState().scope; return scopeList().some(function (x) { return x[0] === s; }) ? s : 'mine'; }
@@ -993,7 +1020,21 @@
   function matchItem(it) {
     if (!SQ) return true;
     if (SIDS) return !!SIDS[it.id];
-    return [it.title, it.body, it.project, it.id, it.alias].some(function (x) { return String(x == null ? '' : x).toLowerCase().indexOf(SQ) >= 0; });
+    // the plain-substring fallback still honours one label:<name> token, the query a label chip sets
+    var lq = /^label:"?([^"]*)"?$/.exec(SQ);
+    if (lq) return (it.labels || []).some(function (x) { var l = labelOf(x); return !!l && l.name.toLowerCase() === lq[1]; });
+    return [it.title, it.body, it.project, it.id, it.alias].concat((it.labels || []).map(labelName)).some(function (x) { return String(x == null ? '' : x).toLowerCase().indexOf(SQ) >= 0; });
+  }
+  // A label chip's click: the Items search becomes label:"<name>", set whole (no debounce).
+  function labelSearch(id) {
+    var l = labelOf(id);
+    if (!l) return;
+    if (ui.win) closeItemWindow();
+    panelState().q = 'label:"' + l.name + '"';
+    searchState(ui.store).now = true;
+    if (ui.layout === 'narrow') tabState().narrow = 'items';
+    ui.sel = null;
+    render();
   }
   // a store's search state: want / wantView, the query and view object the last request was
   // made for; seq, the request counter (an answer to an older request is dropped); q, ids, err,
@@ -1191,23 +1232,83 @@
     });
     return open.length ? treeRows(open, 'given:') : '<p class="muted">' + wsT("js.tk.list.given.none") + '</p>';
   }
-  // My team as a group-by-person view: each group header carries that person's roll-up counts.
-  // Under a Today filter a group with no matching row is left out.
+  // My team as a group-by-person view: each group header carries that person's roll-up counts:
+  // the load (live work neither idea nor done, a creator-fallback holding left out) with its
+  // per-status breakdown, stale and overdue (both inside the load), idea, fallback-held, done,
+  // unaccepted, and waiting on others. The viewer's subtree comes first; an admin's members
+  // outside it follow under their own heading, indented by depth from the org-tree root.
+  // Under a Today filter or a search a group with no matching row is left out.
+  // A count is a button: it narrows the list to that person's rows of that count (the drill,
+  // panelState().drill = { who, key }, list mode only), and the same count again clears it.
+  // The statuses a team row's load counts, in its breakdown's order (the view's roll-up counts
+  // the same ones); every other status but idea and done shows as its own count after stale
+  // and overdue, sorted.
+  var TEAM_LOAD = ['todo', 'doing', 'blocked'];
+  // The records a team head's count stands for, by the rules the view's counts use, so a count
+  // and its rows agree. key: a status, 'load', 'stale', 'overdue', 'fallback', 'unaccepted', or
+  // 'waiting'; recs: the assignment records by id; items: the items by id; day: today's date.
+  function teamDrillRecs(p, key, recs, items, day) {
+    if (key === 'unaccepted' || key === 'waiting') return (key === 'unaccepted' ? p.pending : p.waiting).map(function (id) { return recs[id]; }).filter(Boolean);
+    return Object.keys(recs).map(function (id) { return recs[id]; }).filter(function (r) {
+      var it = items[r.item];
+      if (r.to !== p.id || r.state !== 'live' || !it || it.hidden || it.kind === 'topic') return false;
+      if (key === 'fallback') return !!r.fallback && r.status !== 'done';
+      if (r.fallback) return false;
+      if (key !== 'load' && key !== 'stale' && key !== 'overdue') return r.status === key;
+      if (TEAM_LOAD.indexOf(r.status) < 0) return false;
+      return key === 'load' || (key === 'stale' ? !!r.stale : !!(day && it.due && it.due < day));
+    });
+  }
+  // The drill in effect: { p, key }, or null; a drill on a person no longer listed is dropped.
+  function teamDrill() {
+    var ps = panelState(), d = ps.drill, p = d && VS.my.team.filter(function (x) { return x.id === d.who; })[0];
+    if (d && !p) ps.drill = null;
+    return p ? { p: p, key: d.key } : null;
+  }
+  function teamCounts(p, on) {
+    function cnt(key, txt, tip, err) {
+      var sel = !!on && on.key === key;
+      return '<button type="button" class="tcn' + (err ? ' err' : '') + (sel ? ' on' : '') + '" aria-pressed="' + sel + '"' + attr('act', 'tdrill') + attr('who', p.id) + attr('set', key) + attr('fk', 'td:' + p.id + ':' + key) +
+        tipAttr((tip ? tip + '; ' : '') + wsT(sel ? "js.tk.team.drill.off" : "js.tk.team.drill.tip")) + '>' + txt + '</button>';
+    }
+    function st(s, n) { return cnt(s, wsT("js.tk.team.st", n, esc(SI.info(s).label)), '', s === 'blocked'); }
+    var c = [], seen = { idea: true, done: true }, br = [], other = [];
+    TEAM_LOAD.forEach(function (s) { if (p.counts[s]) br.push(st(s, p.counts[s])); seen[s] = true; });
+    Object.keys(p.counts).sort().forEach(function (s) { if (!seen[s] && p.counts[s]) other.push(st(s, p.counts[s])); });
+    if (p.load) c.push(cnt('load', wsT("js.tk.team.load", p.load), wsT("js.tk.team.load.tip")) + (br.length ? ' (' + br.join(' &middot; ') + ')' : ''));
+    if (p.stale) c.push(cnt('stale', wsT("js.tk.team.stale", p.stale), wsT("js.tk.team.stale.tip", STALE_DAYS), true));
+    if (p.overdue) c.push(cnt('overdue', wsT("js.tk.team.overdue", p.overdue), wsT("js.tk.team.overdue.tip"), true));
+    c = c.concat(other);
+    if (p.counts.idea) c.push(st('idea', p.counts.idea));
+    if (p.fallback) c.push(cnt('fallback', wsT("js.tk.team.fallback", p.fallback), wsT("js.tk.team.fallback.tip")));
+    if (p.counts.done) c.push(st('done', p.counts.done));
+    if (p.pending.length) c.push(cnt('unaccepted', wsT("js.tk.team.unaccepted", p.pending.length), ''));
+    if (p.waiting.length) c.push(cnt('waiting', wsT("js.tk.team.waiting", p.waiting.length), wsT("js.tk.team.waiting.tip")));
+    return c.join(' &middot; ');
+  }
   function listTeam() {
+    var dr = teamDrill(), outside = false;
     var h = VS.my.team.map(function (p) {
-      var m = VS.members[p.id], c = [wsT("js.tk.team.open", p.open.length)];
-      var work = p.open.concat(p.pending).filter(function (id) { return keepRec(A(id)); }), wait = p.waiting.filter(function (id) { return keepRec(A(id)); });
-      if (FILT && !work.length && !wait.length) return '';
-      if (p.done) c.push(wsT("js.tk.team.done", p.done));
-      if (p.blocked) c.push('<span class="err">' + wsT("js.tk.team.blocked", p.blocked) + '</span>');
-      if (p.stale) c.push('<span class="err">' + wsT("js.tk.team.stale", p.stale) + '</span>');
-      if (p.pending.length) c.push(wsT("js.tk.team.unaccepted", p.pending.length));
-      if (p.waiting.length) c.push('<span' + tipAttr(wsT("js.tk.team.waiting.tip")) + '>' + wsT("js.tk.team.waiting", p.waiting.length) + '</span>');
-      var g = '<div class="tg" style="--d:' + (p.depth - 1) + '"' + attr('person', p.id) + '><div class="tg-head">' + avHtml(p.id) + '<b>' + whoName(p.id) + '</b>' +
-        '<span class="nid">' + esc(p.id) + ' L' + p.depth + (m.children.length ? wsT("js.tk.team.islead") : '') + '</span><span class="cnt">' + c.join(' &middot; ') + '</span><span class="grow"></span>' +
-        '<span class="muted ts"' + tipAttr(wsT("js.tk.team.last.tip")) + '>' + esc(fmtTs(p.last)) + '</span></div>';
+      if (dr && dr.p !== p) return '';
+      var m = VS.members[p.id], on = dr && dr.key, work, wait;
+      if (dr) {
+        var pos = {}, got = teamDrillRecs(p, on, VS.assignments, VS.items, today()).filter(keepRec);
+        p.open.forEach(function (id, i) { pos[id] = i + 1; });
+        got = got.map(function (r, i) { return { r: r, i: i }; }).sort(function (a, b) { return (pos[a.r.id] || 1e9) - (pos[b.r.id] || 1e9) || a.i - b.i; }).map(function (x) { return x.r.id; });
+        work = on === 'waiting' ? [] : got; wait = on === 'waiting' ? got : [];
+      } else {
+        work = p.open.concat(p.pending).filter(function (id) { return keepRec(A(id)); }); wait = p.waiting.filter(function (id) { return keepRec(A(id)); });
+      }
+      if (FILT && !dr && !work.length && !wait.length) return ''; // a drilled group stays, with its clear control
+      var g = '';
+      if (p.outside && !outside) { outside = true; g += sub('<span' + tipAttr(wsT("js.tk.team.outside.tip")) + '>' + wsT("js.tk.team.outside") + '</span>', VS.my.team.filter(function (x) { return x.outside; }).length); }
+      g += '<div class="tg' + (p.outside ? ' out' : '') + '" style="--d:' + (p.outside ? p.depth : p.depth - 1) + '"' + attr('person', p.id) + '><div class="tg-head">' + avHtml(p.id) + '<b>' + whoName(p.id) + '</b>' +
+        '<span class="nid">' + esc(p.id) + (p.outside ? '' : ' L' + p.depth) + (m.children.length ? wsT("js.tk.team.islead") : '') + '</span><span class="cnt">' + teamCounts(p, dr) + '</span>' +
+        (dr ? '<button type="button" class="ia"' + attr('act', 'tdrill') + attr('who', p.id) + attr('set', '') + attr('fk', 'td:x') + ' aria-label="' + esc(wsT("js.tk.team.drill.clear")) + '"' + tipAttr(wsT("js.tk.team.drill.clear")) + '><svg class="i"><use href="#tki-x"/></svg></button>' : '') +
+        '<span class="grow"></span><span class="muted ts"' + tipAttr(wsT("js.tk.team.last.tip")) + '>' + esc(fmtTs(p.last)) + '</span></div>';
+      if (dr && !work.length && !wait.length) return g + '<p class="muted">' + wsT("js.tk.team.drill.none") + '</p></div>';
       // one tree per person
-      g += treeRows(work.map(function (id) { var r = A(id); return { rk: 'team:' + id, item: r.item, rec: r }; }).concat(wait.map(function (id) {
+      g += treeRows(work.map(function (id) { var r = A(id); return { rk: 'team:' + id, item: r.item, rec: r, closed: r.state === 'live' && r.status === 'done' }; }).concat(wait.map(function (id) {
         var r = A(id);
         return { rk: 'team:w:' + id, item: r.item, rec: r, more: r.handoffOf ? wsT("js.tk.team.sent.handoff", esc(nm(p.id)), esc(nm(r.to))) : wsT("js.tk.team.sent", esc(nm(p.id)), esc(nm(r.to))) };
       })), 'team:' + p.id + ':');
@@ -1269,9 +1370,10 @@
     if (s === 'received') return wsT("js.tk.scope.chip.pending", VS.my.received.pending.length);
     if (s === 'given') return wsTn("js.tk.scope.chip.items", VS.my.given.length) + (VS.my.today.confirms.length ? ', ' + wsT("js.tk.scope.chip.confirm", VS.my.today.confirms.length) : '');
     if (s === 'team') {
-      var t = { open: 0, blocked: 0, stale: 0, pending: 0 };
-      VS.my.team.forEach(function (p) { t.open += p.open.length; t.blocked += p.blocked; t.stale += p.stale; t.pending += p.pending.length; });
-      return wsT("js.tk.scope.chip.below", VS.my.team.length) + ', ' + wsT("js.tk.team.open", t.open) + (t.blocked ? ', ' + wsT("js.tk.team.blocked", t.blocked) : '') + (t.stale ? ', ' + wsT("js.tk.team.stale", t.stale) : '') + (t.pending ? ', ' + wsT("js.tk.team.unaccepted", t.pending) : '');
+      var t = { below: 0, outside: 0, load: 0, stale: 0, overdue: 0, pending: 0 };
+      VS.my.team.forEach(function (p) { t[p.outside ? 'outside' : 'below']++; t.load += p.load; t.stale += p.stale; t.overdue += p.overdue; t.pending += p.pending.length; });
+      return [t.below || !t.outside ? wsT("js.tk.scope.chip.below", t.below) : '', t.outside ? wsT("js.tk.scope.chip.outside", t.outside) : '', wsT("js.tk.team.load", t.load),
+        t.stale ? wsT("js.tk.team.stale", t.stale) : '', t.overdue ? wsT("js.tk.team.overdue", t.overdue) : '', t.pending ? wsT("js.tk.team.unaccepted", t.pending) : ''].filter(Boolean).join(', ');
     }
     return wsT("js.tk.scope.chip.of", allRows(panelMode('all') === 'kanban').length, Object.keys(VS.items).length);
   }
@@ -1805,13 +1907,28 @@
     else if (k === 'wk-full') { st.full = !st.full; render(); }
   }
 
+  // The store settings: the store-wide values that are not roles, apart from the roles-event
+  // dialog so they can be found. Every member reads them here; an admin's Edit opens the
+  // setting's own dialog.
+  function settingsHtml(admin) {
+    function row(label, value, act) {
+      return '<div class="srow"><span class="slabel">' + label + '</span><span class="sval">' + value + '</span>' + (admin ? btn(act, wsT("js.tk.act.edit"), {}) : '') + '</div>';
+    }
+    var prio = VS.priority.names.map(function (x, i) { return i === VS.priority.default ? wsT("js.tk.team.default", esc(x)) : esc(x); }).join(' &lt; ');
+    var ls = VS.labels || [];
+    var labels = '<div class="srow"><span class="slabel">' + wsT("js.tk.set.labels") + '</span><span class="sval">' + (ls.length ? '' : '<span class="muted">' + wsT("js.tk.set.labels.none") + '</span>') + '</span>' +
+      (admin ? btn('slabel', wsT("js.tk.set.labels.add"), {}) : '') + '</div>' + (ls.length ? '<ul class="slabels">' + ls.map(function (l) {
+        return '<li>' + labelChip(l) + (admin ? '<span class="grow"></span>' + btn('slabel', wsT("js.tk.act.edit"), { label: l.id }) + btn('slabel-rm', wsT("js.tk.set.labels.remove"), { label: l.id }) : '') + '</li>';
+      }).join('') + '</ul>' : '');
+    return '<div class="tkset"><h3>' + wsT("js.tk.set.title") + '</h3><p class="muted">' + (admin ? wsT("js.tk.set.intro.admin") : wsT("js.tk.set.intro.member")) + '</p>' +
+      row(wsT("js.tk.set.prio"), prio, 'sprio') + row(wsT("js.tk.set.att"), esc(fmtSize(VS.attachments.max_bytes)), 'satt') + labels + '</div>';
+  }
+
   function cardTeam(v) {
     var me = VS.members[v] || {}, R = VS.viewer.reach, levels = {}, seen = {};
     Object.keys(R).forEach(function (k) { levels[R[k]] = (levels[R[k]] || 0) + 1; });
     var summary = wsT("js.tk.team.summary", esc(VS.admins.join(', ')), VS.viewer.lead ? wsT("js.tk.team.lead", esc(VS.viewer.lead)) : wsT("js.tk.team.root"),
-      Object.keys(R).length ? wsT("js.tk.team.reach", Object.keys(levels).map(function (d) { return wsT("js.tk.team.reachat", levels[d], d); }).join(', ')) : wsT("js.tk.team.nofollowers"),
-      VS.priority.names.map(function (x, i) { return i === VS.priority.default ? wsT("js.tk.team.default", esc(x)) : esc(x); }).join(' &lt; '),
-      fmtSize(VS.attachments.max_bytes));
+      Object.keys(R).length ? wsT("js.tk.team.reach", Object.keys(levels).map(function (d) { return wsT("js.tk.team.reachat", levels[d], d); }).join(', ')) : wsT("js.tk.team.nofollowers"));
     function shortKey(k) {
       var w = String(k).split(/\s+/), b = w[1] || w[0];
       if (String(k).length <= 32) return String(k);
@@ -1847,6 +1964,7 @@
     if (lost.length) h += '<p class="err">' + wsT("js.tk.team.unreachable", esc(lost.join(', '))) + '</p>';
     h += '<div class="toolbar" style="margin-top:8px">' + btn('admin', wsT("js.tk.team.adminbtn"), {}) + (X.teamTools ? X.teamTools(ui.store, VS, H) : '') +
       '<span class="muted">' + (me.admin ? wsT("js.tk.team.isadmin") : wsT("js.tk.team.notadmin")) + '</span></div>';
+    h += settingsHtml(!!me.admin);
     var nMem = Object.keys(VS.members).filter(function (id) { return !VS.members[id].removed; }).length;
     return card(wsT("js.tk.tab.org"), wsTn("js.tk.team.members", nMem), h, '', 'card-org');
   }
@@ -2325,6 +2443,7 @@
       (topic ? '' : '<dt>' + wsT("js.tk.prop.due") + '</dt><dd>' + (it.due ? esc(it.due) : '<span class="muted">-</span>') + '</dd>') +
       '<dt>' + wsT("js.tk.prop.creator") + '</dt><dd>' + whoName(it.author) + (VS.members[it.author] && VS.members[it.author].admin ? ' <span class="chip admin">' + wsT("js.tk.team.admin") + '</span>' : '') + '</dd>' +
       '<dt>' + wsT("js.tk.prop.project") + '</dt><dd>' + (it.project ? esc(it.project) : '<span class="muted">-</span>') + '</dd>' +
+      '<dt>' + wsT("js.tk.prop.labels") + '</dt><dd>' + (labelChips(it) || '<span class="muted">-</span>') + '</dd>' +
       '<dt>' + wsT("js.tk.prop.parent") + '</dt><dd>' + (it.parent ? itemRef(it.parent) + ' ' + esc((VS.items[it.parent] || {}).title || '') : '<span class="muted">-</span>') + '</dd>' +
       '<dt>' + wsT("js.tk.prop.id") + '</dt><dd><code>' + esc(it.id) + '</code></dd>' +
       '<dt>' + wsT("js.tk.prop.dates") + '</dt><dd>' + wsT("js.tk.row.created", esc(fmtTs(it.ts))) + (it.edited ? '<br>' + wsT("js.tk.row.edited", esc(fmtTs(it.edited.ts))) : '') + '<br>' + wsT("js.tk.row.activity", esc(fmtTs(it.lastActivity))) + '</dd></dl></section>';
@@ -2444,10 +2563,10 @@
       (ed ? '<h2 id="iw-title" class="iw-edt"><input type="text" id="iw-etitle" data-keep autocomplete="off" value="' + esc(ed.title) + '" aria-label="' + wsT("js.tk.form.title") + '"></h2>' : '<h2 id="iw-title">' + esc(it.title) + '</h2>') +
       headActs(it) + moreBtn(it.id, 'iw-more', true) +
       '<button type="button" class="ia iw-x" data-act="win-close" aria-label="' + wsT("js.tk.win.close") + '"' + tipAttr(wsT("js.tk.win.close")) + '><svg class="i"><use href="#tki-x"/></svg></button></div>' +
-      '<div class="iw-chips">' + kindChip(it) + idCopyBtn(it) + (it.kind === 'topic' ? '' : stChip(it.status) + prChip(it) + dueChip(it) + rollupHtml(it)) + warnHtml(it) + '</div></div>';
+      '<div class="iw-chips">' + kindChip(it) + idCopyBtn(it) + (it.kind === 'topic' ? '' : stChip(it.status) + prChip(it) + dueChip(it) + rollupHtml(it)) + labelChips(it, 'lsearch') + warnHtml(it) + '</div></div>';
     h += '<div class="iw-grid"><div class="iw-main">';
     if (ed) h += '<div class="iw-body iw-edit">' + editorHtml('iw-ebody', { value: ed.body, rows: 5, label: wsT("js.tk.form.body"), pv: 'sh-body' }) +
-      '<input type="text" id="iw-eproj" data-keep autocomplete="off" value="' + esc(ed.project) + '" placeholder="' + wsT("js.tk.form.project") + '" aria-label="' + wsT("js.tk.form.project") + '">' +
+      '<input type="text" id="iw-eproj" data-keep autocomplete="off" value="' + esc(ed.project) + '" placeholder="' + wsT("js.tk.form.project") + '" aria-label="' + wsT("js.tk.form.project") + '">' + labelPickHtml(ed) +
       '<div class="tb">' + btn('iedit-save', wsT("js.tk.dlg.save"), {}, 'primary') + btn('iedit-x', wsT("js.tk.dlg.cancel"), {}) + '<span class="muted">' + wsT("js.tk.edit.hint") + '</span></div></div>';
     else if (it.body || it.mentions.length || it.attachments.length)
       h += '<div class="iw-body">' + (it.body ? textBlock('sh-body', 'items', it.id, it.body, attr('focus', 'body')) : '') + mentionChips(it.mentions) + attChips(it.attachments, true) + '</div>';
@@ -2876,11 +2995,22 @@
     pv.classList.toggle('warn', !pr.given);
     pv.textContent = pr.given ? (pr.org ? wsT("js.tk.profile.view.org", displayName(pr), pr.org, avatar(pr)) : wsT("js.tk.profile.view", displayName(pr), avatar(pr))) : wsT("js.tk.profile.required");
   }
-  var ROLE_TYPES = ['roles.add_member', 'roles.set_lead', 'roles.add_admin', 'roles.remove_admin', 'roles.add_key', 'roles.revoke_key', 'roles.remove_member', 'roles.set_priority_levels', 'roles.set_attachment_limit'];
+  // The roles-event dialog's types, each under its readable name. The store settings
+  // (priority levels, attachment limit) have their own dialogs (settingsHtml).
+  var ROLE_TYPES = ['roles.add_member', 'roles.set_lead', 'roles.add_admin', 'roles.remove_admin', 'roles.add_key', 'roles.revoke_key', 'roles.remove_member'];
+  var ROLE_NAME = { 'roles.add_member': "js.tk.rtype.addmember", 'roles.set_lead': "js.tk.rtype.setlead", 'roles.add_admin': "js.tk.rtype.addadmin", 'roles.remove_admin': "js.tk.rtype.removeadmin",
+    'roles.add_key': "js.tk.rtype.addkey", 'roles.revoke_key': "js.tk.rtype.revokekey", 'roles.remove_member': "js.tk.rtype.removemember" };
+  // a roles-event field, shown only while the type select names one of its types (rtypeShow)
+  function rfld(types, label, inner) { return '<div class="fld"' + attr('rt', types) + '><span>' + label + '</span>' + inner + '</div>'; }
+  function rtypeShow(form) {
+    var t = form.elements.rtype && form.elements.rtype.value;
+    if (!t) return;
+    Array.prototype.forEach.call(form.querySelectorAll('[data-rt]'), function (el) { el.style.display = el.getAttribute('data-rt').split(' ').indexOf(t) >= 0 ? '' : 'none'; });
+  }
 
   // the dialog kinds a data-act opens (a host adds its own through ext.dialogs); every item
   // action is the context menu's or inline, so only the store-wide forms stay modal
-  var DIALOGS = { profile: 1, admin: 1 };
+  var DIALOGS = { profile: 1, admin: 1, sprio: 1, satt: 1, slabel: 1 };
   function dialogHtml(kind, d) {
     if (kind === 'register') return formHtml(kind, d, registerT(d)); // these need no store view
     if (kind === 'relabel') return formHtml(kind, d, relabelT(d));
@@ -2895,16 +3025,40 @@
           profileFields(pm.profile) + '<input type="hidden" name="who" value="' + esc(pw) + '">', wsT("js.tk.dlg.save")];
         break;
       }
-      case 'admin':
+      case 'admin': {
+        var mt = 'roles.set_lead roles.add_admin roles.remove_admin roles.add_key roles.revoke_key roles.remove_member';
         T = [wsT("js.tk.dlg.admin.title"), wsT("js.tk.dlg.admin.intro", esc(viewerOf(ui.store))),
-          fld(wsT("js.tk.form.type"), '<select name="rtype">' + ROLE_TYPES.filter(function (t) { return CAPS.addMember || t !== 'roles.add_member'; }).map(function (t) { return '<option>' + t + '</option>'; }).join('') + '</select>') +
-          fld(wsT("js.tk.form.member"), '<select name="member">' + memberOpts('') + '</select>') +
-          fld(wsT("js.tk.form.lead"), '<select name="lead"><option value="">' + wsT("js.tk.form.lead.none") + '</option>' + memberOpts(v) + '</select>') +
-          fld(wsT("js.tk.form.key"), '<input type="text" name="key" placeholder="' + wsT("js.tk.form.key.ph") + '">') +
-          (CAPS.addMember ? fld(wsT("js.tk.form.newmember"), '<div class="fld inline"><input type="text" name="nid" placeholder="' + wsT("js.tk.prop.id") + '"><input type="text" name="norg" placeholder="' + wsT("js.tk.field.org") + '"><input type="text" name="nfamily" placeholder="' + wsT("js.tk.field.family") + '"><input type="text" name="ngiven" placeholder="' + wsT("js.tk.field.given") + '"></div>') : '') +
-          fld(wsT("js.tk.form.pnames"), '<input type="text" name="pnames" value="' + esc(VS.priority.names.join(', ')) + '">') +
-          fld(wsT("js.tk.form.pdefault"), '<input type="number" name="pdefault" min="0" value="' + VS.priority.default + '">') +
-          fld(wsT("js.tk.form.maxbytes"), '<input type="number" name="maxbytes" min="1" value="' + VS.attachments.max_bytes + '">'), wsT("js.tk.dlg.admin.submit")];
+          fld(wsT("js.tk.form.type"), '<select name="rtype">' + ROLE_TYPES.filter(function (t) { return CAPS.addMember || t !== 'roles.add_member'; }).map(function (t) { return '<option value="' + esc(t) + '">' + wsT(ROLE_NAME[t]) + '</option>'; }).join('') + '</select>') +
+          rfld(mt, wsT("js.tk.form.member"), '<select name="member">' + memberOpts('') + '</select>') +
+          rfld('roles.add_member roles.set_lead', wsT("js.tk.form.lead"), '<select name="lead"><option value="">' + wsT("js.tk.form.lead.none") + '</option>' + memberOpts(v) + '</select>') +
+          rfld('roles.add_member roles.add_key roles.revoke_key', wsT("js.tk.form.key"), '<input type="text" name="key" placeholder="' + wsT("js.tk.form.key.ph") + '">') +
+          (CAPS.addMember ? rfld('roles.add_member', wsT("js.tk.form.newmember"), '<div class="fld inline"><input type="text" name="nid" placeholder="' + wsT("js.tk.prop.id") + '"><input type="text" name="norg" placeholder="' + wsT("js.tk.field.org") + '"><input type="text" name="nfamily" placeholder="' + wsT("js.tk.field.family") + '"><input type="text" name="ngiven" placeholder="' + wsT("js.tk.field.given") + '"></div>') : ''),
+          wsT("js.tk.dlg.admin.submit")];
+        break;
+      }
+      case 'sprio': {
+        // one row per level, lowest first, plus blank rows up to the 9-level cap; blank rows
+        // are dropped on save, and the radio picks the default
+        var pn = VS.priority.names, rows = '';
+        for (var pi = 0; pi < Math.min(9, pn.length + 2); pi++) {
+          rows += '<div class="fld inline plevel"><input type="radio" name="pdef" value="' + pi + '"' + (pi === VS.priority.default ? ' checked' : '') + ' aria-label="' + esc(wsT("js.tk.form.pdefault", pi)) + '"' + tipAttr(wsT("js.tk.form.pdefault", pi)) + '>' +
+            '<input type="text" name="pname' + pi + '" value="' + esc(pn[pi] || '') + '" placeholder="' + esc(wsT("js.tk.form.plevel", pi)) + '" aria-label="' + esc(wsT("js.tk.form.plevel", pi)) + '"></div>';
+        }
+        T = [wsT("js.tk.dlg.prio.title"), wsT("js.tk.dlg.prio.intro"), rows, wsT("js.tk.dlg.save")];
+        break;
+      }
+      case 'slabel': {
+        // add (no label) or rename / recolour one; the colour input gives #rrggbb in lowercase
+        var el0 = d.label ? labelOf(d.label) : null;
+        T = [wsT(el0 ? "js.tk.dlg.label.edit" : "js.tk.dlg.label.add"), wsT("js.tk.dlg.label.intro"),
+          (el0 ? '<input type="hidden" name="label" value="' + esc(el0.id) + '">' : '') +
+          fld(wsT("js.tk.form.lname"), '<input type="text" name="lname" autocomplete="off" value="' + esc(el0 ? el0.name : '') + '">') +
+          fld(wsT("js.tk.form.lcolor"), '<input type="color" name="lcolor" value="' + esc(el0 ? el0.color : '#6b7280') + '">'), wsT("js.tk.dlg.save")];
+        break;
+      }
+      case 'satt':
+        T = [wsT("js.tk.dlg.att.title"), wsT("js.tk.dlg.att.intro", esc(fmtSize(VS.attachments.max_bytes))),
+          fld(wsT("js.tk.form.maxbytes"), '<input type="number" name="maxbytes" min="1" step="1" value="' + esc(VS.attachments.max_bytes) + '">'), wsT("js.tk.dlg.save")];
         break;
       default: {
         // a host dialog (ext.dialogs)
@@ -3137,6 +3291,7 @@
     dl.innerHTML = dialogHtml(kind, d || {});
     var f = dl.querySelector('form');
     profileView(f);
+    rtypeShow(f);
     if (kind === 'unregister') unregReady(f);
     if (!dl.open) dl.showModal();
     var first = f.querySelector('input[type="text"], textarea, select');
@@ -3207,14 +3362,44 @@
         var t = val('rtype'), rp = {};
         if (t === 'roles.add_member' && !CAPS.addMember) return;
         if (t === 'roles.add_member') rp.member = { id: val('nid'), profile: { org: val('norg'), family: val('nfamily'), given: val('ngiven') }, keys: val('key') ? [val('key')] : [], leads: val('lead') ? [val('lead')] : [] };
-        else if (t === 'roles.set_priority_levels') { rp.names = val('pnames').split(',').map(function (x) { return x.trim(); }).filter(Boolean); rp.default = Number(val('pdefault')); }
-        else if (t === 'roles.set_attachment_limit') rp.max_bytes = Number(val('maxbytes'));
         else {
           rp.member = val('member');
           if (t === 'roles.set_lead') rp.leads = val('lead') ? [val('lead')] : [];
           if (t === 'roles.add_key' || t === 'roles.revoke_key') rp.key = val('key');
         }
         evs.push([t, rp]);
+        break;
+      }
+      case 'sprio': {
+        var names = [], def = -1, picked = form.querySelector('input[name="pdef"]:checked');
+        for (var i = 0; el['pname' + i]; i++) {
+          var pname = val('pname' + i).trim();
+          if (!pname) continue;
+          if (picked && picked.value === String(i)) def = names.length;
+          names.push(pname);
+        }
+        if (!names.length) return toast(wsT("js.tk.toast.prio.none"));
+        if (def < 0) return toast(wsT("js.tk.toast.prio.default"));
+        if (names.join('\n') === VS.priority.names.join('\n') && def === VS.priority.default) { closeDialog(); return toast(wsT("js.tk.toast.unchanged")); }
+        evs.push(['roles.set_priority_levels', { names: names, default: def }]);
+        break;
+      }
+      case 'slabel': {
+        var lid = val('label'), ln = val('lname').trim(), lc = val('lcolor').toLowerCase(), cl = lid ? labelOf(lid) : null;
+        if (!ln) return toast(wsT("js.tk.toast.label.name"));
+        if (!lid) { evs.push(['roles.add_label', { name: ln, color: lc }]); break; }
+        if (!cl) { closeDialog(); return; }
+        var lp = { label: lid };
+        if (ln !== cl.name) lp.name = ln;
+        if (lc !== cl.color) lp.color = lc;
+        if (!('name' in lp) && !('color' in lp)) { closeDialog(); return toast(wsT("js.tk.toast.unchanged")); }
+        evs.push(['roles.edit_label', lp]);
+        break;
+      }
+      case 'satt': {
+        var mb = Number(val('maxbytes'));
+        if (mb === VS.attachments.max_bytes) { closeDialog(); return toast(wsT("js.tk.toast.unchanged")); }
+        evs.push(['roles.set_attachment_limit', { max_bytes: mb }]);
         break;
       }
       default: if (X.dialogs && X.dialogs[kind]) X.dialogs[kind].submit(ui.store, form, H); return;
@@ -4198,12 +4383,22 @@
     if (!s || !title) return;
     commit([['item.create', { kind: 'task', title: title, parent: s.item }]], null, function () { s.val = ''; });
   }
+  // The edit mode's label picker: every label of the store's list, each a toggle; the picked
+  // ids live in ui.iedit.labels so a re-render keeps them.
+  function labelPickHtml(ed) {
+    var ls = VS.labels || [];
+    if (!ls.length) return '';
+    return '<div class="lpick" role="group" aria-label="' + esc(wsT("js.tk.form.labels")) + '"><span class="muted">' + wsT("js.tk.form.labels") + '</span>' + ls.map(function (l) {
+      var on = ed.labels.indexOf(l.id) >= 0;
+      return '<button type="button" class="chip lbl' + (on ? ' on' : '') + '"' + attr('act', 'ilabel') + attr('label', l.id) + ' aria-pressed="' + on + '"><span class="ldot" style="background:' + esc(l.color) + '"></span>' + esc(l.name) + '</button>';
+    }).join('') + '</div>';
+  }
   // The item window's edit mode and a comment's edit in place.
   function startEdit(id) {
     var it = VS.items[id];
     if (!it) return;
     if (!(ui.win && ui.item === id)) showItem(id);
-    ui.iedit = { item: id, title: it.title, body: it.body || '', project: it.project || '', mpick: [] };
+    ui.iedit = { item: id, title: it.title, body: it.body || '', project: it.project || '', labels: (it.labels || []).slice(), mpick: [] };
     delete ui.edpv['iw-ebody']; delete ui.eatt['iw-ebody'];
     render();
     if ($('iw-etitle')) $('iw-etitle').focus();
@@ -4214,7 +4409,10 @@
     if (!it) return;
     var ep = { item: it.id }, cur = { title: $('iw-etitle').value, body: $('iw-ebody').value, project: $('iw-eproj').value };
     ['title', 'body', 'project'].forEach(function (f) { if (cur[f] !== (it[f] || '')) ep[f] = cur[f]; });
-    if (!('title' in ep) && !('body' in ep) && !('project' in ep)) { toast(wsT("js.tk.toast.unchanged")); return endEdit(); }
+    // labels the list no longer holds are dropped from the pick, so an edit never writes one
+    var picked = e.labels.filter(function (x) { return !!labelOf(x); });
+    if (picked.slice().sort().join(' ') !== (it.labels || []).slice().sort().join(' ')) ep.labels = picked;
+    if (!('title' in ep) && !('body' in ep) && !('project' in ep) && !('labels' in ep)) { toast(wsT("js.tk.toast.unchanged")); return endEdit(); }
     if ('body' in ep) {
       var km = keptMentions(withPicks(it.mentions, e.mpick), ep.body), ers = refsIn(ep.body);
       if (km.length) ep.mentions = km;
@@ -4961,7 +5159,7 @@
       var a = t.closest('[data-act]');
       if (a) {
         e.preventDefault(); e.stopPropagation();
-        var k = a.getAttribute('data-act'), d = { item: a.getAttribute('data-item'), who: a.getAttribute('data-who'), op: a.getAttribute('data-op'), cid: a.getAttribute('data-cid') };
+        var k = a.getAttribute('data-act'), d = { item: a.getAttribute('data-item'), who: a.getAttribute('data-who'), op: a.getAttribute('data-op'), cid: a.getAttribute('data-cid'), label: a.getAttribute('data-label') };
         if (k.indexOf('wk-') === 0) wkAct(k, a);
         else if (k === 'win-close') closeItemWindow();
         else if (k === 'page-back') leavePage();
@@ -4972,6 +5170,9 @@
         else if (STEPS[k]) itemMenu(d.item, a, null, { step: k, op: d.op, who: d.who });
         else if (k === 'edit') { closeMenu(false); startEdit(d.item); }
         else if (k === 'iedit-save') saveEdit();
+        else if (k === 'ilabel' && ui.iedit) { var il = ui.iedit.labels, ix = il.indexOf(d.label); if (ix >= 0) il.splice(ix, 1); else il.push(d.label); render(); }
+        else if (k === 'lsearch') labelSearch(d.label);
+        else if (k === 'slabel-rm') { var rl = labelOf(d.label); if (rl && window.confirm(wsT("js.tk.set.labels.confirm", rl.name))) commit([['roles.remove_label', { label: rl.id }]]); }
         else if (k === 'iedit-x') endEdit();
         else if (k === 'cedit') startCedit(d.cid);
         else if (k === 'cedit-save') saveCedit();
@@ -5000,6 +5201,11 @@
         else if (k === 'dlg-cancel') closeDialog();
         else if (k === 'open') showItem(d.item);
         else if (k === 'bref') showItem(d.item, a, d.cid);
+        else if (k === 'tdrill') { // a team head's count: drill to that person's rows of it; the same count again, or the clear control, clears it
+          var dps = panelState(), dset = a.getAttribute('data-set');
+          dps.drill = !dset || (dps.drill && dps.drill.who === d.who && dps.drill.key === dset) ? null : { who: d.who, key: dset };
+          ui.sel = null; render();
+        }
         else if (k === 'scope') { panelState().scope = a.getAttribute('data-scope'); ui.sel = null; render(); }
         else if (k === 'pmode') { panelState().modes[scopeOf()] = a.getAttribute('data-mode'); dsSave('panel.modes', ui.pmodes); render(); }
         else if (k === 'closed-toggle') { var cps = panelState(); cps.closedOpen = !cps.closedOpen; ui.closedOpen[ui.store] = cps.closedOpen; dsSave('closed', ui.closedOpen); render(); }
@@ -5082,6 +5288,7 @@
           var o = t.options[t.selectedIndex], sp = o && o.getAttribute('data-p');
           if (sp) { var pr = JSON.parse(sp); df.elements.org.value = pr.org; df.elements.family.value = pr.family; df.elements.given.value = pr.given; if (df.elements.nid) df.elements.nid.value = asciiId(pr.given); }
         }
+        if (t.name === 'rtype') rtypeShow(df);
         profileView(df);
       }
     });

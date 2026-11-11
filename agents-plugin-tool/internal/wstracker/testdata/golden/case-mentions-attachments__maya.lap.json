@@ -258,6 +258,7 @@
   "attachments": {
    "max_bytes": 4200
   },
+  "labels": [],
   "members": {
    "ada": {
     "id": "ada",
@@ -441,6 +442,7 @@
     "title": "Design",
     "body": "v2 from the laptop, no mentions",
     "project": "",
+    "labels": [],
     "due": null,
     "priority": 1,
     "priorityLevel": 1,
@@ -765,23 +767,29 @@
     {
      "id": "lena",
      "depth": 1,
+     "outside": false,
      "open": [],
      "pending": [],
      "waiting": [],
-     "done": 0,
-     "blocked": 0,
+     "counts": {},
+     "load": 0,
      "stale": 0,
+     "overdue": 0,
+     "fallback": 0,
      "last": null
     },
     {
      "id": "omar",
      "depth": 1,
+     "outside": false,
      "open": [],
      "pending": [],
      "waiting": [],
-     "done": 0,
-     "blocked": 0,
+     "counts": {},
+     "load": 0,
      "stale": 0,
+     "overdue": 0,
+     "fallback": 0,
      "last": null
     }
    ],

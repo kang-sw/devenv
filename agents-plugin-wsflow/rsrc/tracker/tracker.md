@@ -66,7 +66,8 @@ tracker.query payload: {store?, scope?, item?, kind?, status?, project?, text?, 
   `status:<status>` (the values of `status` above; the item's status, also
   in `mine`, whose rows are assignments), `assignee:<member>` (a live or
   pending assignee whose member ID or name contains it), `kind:task` or
-  `kind:topic`, `project:<project>` (exact), `due:<date>` and
+  `kind:topic`, `project:<project>` (exact), `label:<label name>` (exact),
+  `due:<date>` and
   `priority:<level>` (equality, or after `<`, `>`, `<=`, or `>=`; dates are
   `YYYY-MM-DD`; an item without a due date never matches a `due:` token).
   A word or `"quoted phrase"` matches the title, body, project, ID, alias,
@@ -89,8 +90,8 @@ cannot be rolled back, so each stands alone in its batch, outside any group.
 | command | attributes | content |
 |---|---|---|
 | `tk:store` | `name` | group of every command below but the store commands |
-| `tk:item.create` | `kind`, `title`, `project?`, `due?`, `priority?`, `parent?`, `after?`, `mentions?`, `refs?` | the body |
-| `tk:item.edit` | `item`, `title?`, `project?`, `due?`, `priority?`, `mentions?`, `refs?`, `clear?` | a new body |
+| `tk:item.create` | `kind`, `title`, `project?`, `labels?`, `due?`, `priority?`, `parent?`, `after?`, `mentions?`, `refs?` | the body |
+| `tk:item.edit` | `item`, `title?`, `project?`, `labels?`, `due?`, `priority?`, `mentions?`, `refs?`, `clear?` | a new body |
 | `tk:item.hide` | `item` | none |
 | `tk:item.move` | `item`, `parent`, `after?` | none |
 | `tk:item.assign` | `item`, `people?` and `rules?` (one or both), or `levels`; `completion?` | none |
@@ -111,6 +112,9 @@ cannot be rolled back, so each stands alone in its batch, outside any group.
 | `tk:roles.add_key`, `tk:roles.revoke_key` | `member`, `key` | none |
 | `tk:roles.set_priority_levels` | `names`, `default` | none |
 | `tk:roles.set_attachment_limit` | `max_bytes` | none |
+| `tk:roles.add_label` | `name`, `color` | none |
+| `tk:roles.edit_label` | `label`, `name?`, `color?` | none |
+| `tk:roles.remove_label` | `label` | none |
 | `tk:register` | `store`, `member`, `remote?`, `label?`, `org?`, `family?`, `given?` | none |
 | `tk:sync` | `store?` | none |
 | `tk:unregister` | `store`, `confirm?` | none |
@@ -144,6 +148,10 @@ Body text, markdown, written as is.
   `due`: `YYYY-MM-DD`. `priority`: a level number from the store view's
   priority line, larger is more urgent; without one an item gets the store
   default. A note is optional.
+- `labels`: the item's labels, label IDs from the store view's labels line
+  (shown once the store has labels), or `$N` for the label that
+  `tk:roles.add_label` command `N` of the same batch adds; an edit replaces the item's labels, and `labels=""`
+  removes them. Labels come only from the store's list.
 - A task always has a holder: while nobody else holds it, its creator does
   (an admin when the creator was removed), at todo, and that holder sets its
   status and closes it. Assigning anyone, the creator included, replaces
@@ -157,8 +165,8 @@ Body text, markdown, written as is.
 - A topic the batch creates is assigned to the user unless the same batch
   assigns it with `tk:item.assign item="$N"`; the update prints that
   assignment under the create's position.
-- People are member IDs; `people`, `rules`, `mentions`, `refs`, `leads`,
-  `names`, and `clear` are space-separated.
+- People are member IDs; `people`, `rules`, `mentions`, `refs`, `labels`,
+  `leads`, `names`, and `clear` are space-separated.
 - Members form a lead tree; each member has at most one lead.
   `tk:roles.set_lead` sets `member`'s lead (`leads=""` for none).
 - Assignment lifecycle:
@@ -200,7 +208,16 @@ Body text, markdown, written as is.
   unasked, valid only on `tk:item.status` and `tk:item.close`; see Recording).
 - `tk:roles.*` and another member's `tk:member.profile` are admin commands.
   `key`: an SSH public key line. `names`: the level names, lowest first;
-  `default`: a level number. `max_bytes`: a byte count.
+  `default`: a level number. `max_bytes`: a byte count. The priority levels
+  and the attachment limit are store settings: an admin changes them in the
+  store settings of the dashboard's Team tab, or with
+  `tk:roles.set_priority_levels` and `tk:roles.set_attachment_limit`.
+- The label list is a store setting too, kept the same way. `name` is
+  unique in the list, ignoring case; `color` is `#rrggbb`. `label` is a label
+  ID from the labels line, or `$N`. A rename or recolour shows on every item
+  that carries the label; a removed label leaves every item and `label:`,
+  and adding its name again makes a new label that those items do not get
+  back.
 - The store checks every command against the user's role and the item's
   state. If it refuses one, nothing is written and the refusal gives the
   reason: correct the batch and resend, or tell the user when the user's role

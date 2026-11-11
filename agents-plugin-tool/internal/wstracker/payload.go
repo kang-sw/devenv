@@ -34,6 +34,12 @@ const (
 	TypeSetPriorityLevels = "roles.set_priority_levels"
 	// TypeSetAttachmentLimit changes the store's attachments.max_bytes.
 	TypeSetAttachmentLimit = "roles.set_attachment_limit"
+	// The store's label list: an admin adds, renames or recolours, and
+	// removes labels; an item carries label ids in its labels field. A
+	// label's id is its roles.add_label event's id.
+	TypeAddLabel    = "roles.add_label"
+	TypeEditLabel   = "roles.edit_label"
+	TypeRemoveLabel = "roles.remove_label"
 )
 
 // Origins. An empty origin is human.
@@ -73,6 +79,7 @@ type ItemCreate struct {
 	Mentions    []string     `json:"mentions,omitempty"`
 	Attachments []Attachment `json:"attachments,omitempty"`
 	Refs        []string     `json:"refs,omitempty"`
+	Labels      []string     `json:"labels,omitempty"` // label ids from the store's list
 }
 
 // ItemMove is the payload of item.move: it places Item under Parent (nil:
@@ -187,6 +194,27 @@ type SetPriorityLevels struct {
 // SetAttachmentLimit is the payload of roles.set_attachment_limit.
 type SetAttachmentLimit struct {
 	MaxBytes int64 `json:"max_bytes"`
+}
+
+// AddLabel is the payload of roles.add_label. Name is unique in the list
+// (case-insensitive) and has no surrounding spaces; Color is #rrggbb in
+// lowercase hex.
+type AddLabel struct {
+	Name  string `json:"name"`
+	Color string `json:"color"`
+}
+
+// EditLabel is the payload of roles.edit_label: Label is the label's id,
+// and Name, Color, or both change.
+type EditLabel struct {
+	Label string `json:"label"`
+	Name  string `json:"name,omitempty"`
+	Color string `json:"color,omitempty"`
+}
+
+// RemoveLabel is the payload of roles.remove_label.
+type RemoveLabel struct {
+	Label string `json:"label"`
 }
 
 // obj is a decoded payload. Missing and null differ, as in JSON.

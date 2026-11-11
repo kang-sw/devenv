@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -43,7 +44,7 @@ func formatTrackerScope(v *wstrackerhost.StoreView, q trackerQuery) string {
 				continue
 			}
 			it := v.Items[id]
-			sb.WriteString(strings.Repeat("  ", trackerIndent(q.scope, it)) + "- " + formatTrackerItemRow(it) + "\n")
+			sb.WriteString(strings.Repeat("  ", trackerIndent(q.scope, it)) + "- " + formatTrackerItemRow(v, it) + "\n")
 			if withAssignments {
 				for _, aid := range it.Assignments {
 					if a, ok := v.Assignments[aid]; ok && a.Ended == nil {
@@ -68,13 +69,16 @@ func formatTrackerScope(v *wstrackerhost.StoreView, q trackerQuery) string {
 	case "team":
 		if len(v.My.Team) == 0 {
 			sb.WriteString("\nteam: no followers\n")
+		} else {
+			sb.WriteString("\nteam: " + trackerTeamLegend + "\n")
 		}
+		outside := false
 		for _, t := range v.My.Team {
-			head := fmt.Sprintf("%s (depth %d): %d done, %d blocked, %d stale", trackerPerson(v, t.ID), t.Depth, t.Done, t.Blocked, t.Stale)
-			if t.Last != nil {
-				head += ", last update " + *t.Last
+			if t.Outside && !outside {
+				outside = true
+				sb.WriteString("\noutside my subtree (shown to an admin; depth from the org-tree root):\n")
 			}
-			fmt.Fprintf(&sb, "\n%s\n", head)
+			fmt.Fprintf(&sb, "\n%s\n", formatTrackerTeamHead(v, t))
 			for _, group := range []struct {
 				label string
 				ids   []string
@@ -99,6 +103,50 @@ func formatTrackerScope(v *wstrackerhost.StoreView, q trackerQuery) string {
 	return sb.String()
 }
 
+// trackerTeamLegend opens a non-empty team scope: what each count of a
+// person's head line counts.
+const trackerTeamLegend = "load counts a person's live assignments at todo, doing, or blocked, broken down by status; " +
+	"stale and overdue (the due date passed) are part of the load; other statuses (awaiting, idea, done) count on their own; " +
+	"fallback-held counts tasks they hold only as the creator, because nobody else holds them, and is not load"
+
+// trackerLoadStatuses are the statuses a team row's load counts, in the
+// order of its breakdown (the view's team roll-up counts the same ones).
+var trackerLoadStatuses = []string{"todo", "doing", "blocked"}
+
+// formatTrackerTeamHead is one person's head line of the team scope: the
+// load with its per-status breakdown, stale and overdue, every other status
+// but idea and done (sorted), then idea, fallback-held, done, and the last
+// update.
+func formatTrackerTeamHead(v *wstrackerhost.StoreView, t wstracker.Team) string {
+	var load, other []string
+	seen := map[string]bool{"idea": true, "done": true}
+	for _, st := range trackerLoadStatuses {
+		if n := t.Counts[st]; n > 0 {
+			load = append(load, fmt.Sprintf("%s %d", st, n))
+		}
+		seen[st] = true
+	}
+	for st := range t.Counts {
+		if !seen[st] {
+			other = append(other, st)
+		}
+	}
+	sort.Strings(other)
+	head := fmt.Sprintf("%s (depth %d): load %d", trackerPerson(v, t.ID), t.Depth, t.Load)
+	if len(load) > 0 {
+		head += " (" + strings.Join(load, ", ") + ")"
+	}
+	head += fmt.Sprintf(", %d stale, %d overdue", t.Stale, t.Overdue)
+	for _, st := range other {
+		head += fmt.Sprintf(", %d %s", t.Counts[st], st)
+	}
+	head += fmt.Sprintf(", %d idea, %d fallback-held, %d done", t.Counts["idea"], t.Fallback, t.Counts["done"])
+	if t.Last != nil {
+		head += ", last update " + *t.Last
+	}
+	return head
+}
+
 // trackerIndent is an item row's tree depth in scope all, else 0.
 func trackerIndent(scope string, it wstracker.ItemView) int {
 	if scope == "all" {
@@ -107,8 +155,15 @@ func trackerIndent(scope string, it wstracker.ItemView) int {
 	return 0
 }
 
-// writeTrackerHeader writes the store, viewer, sync, priority, and today
-// lines every store view starts with.
+// trackerPriorityHint ends the priority line: where the levels are changed.
+const trackerPriorityHint = "an admin changes the levels in the store settings of the dashboard's Team tab, or with tk:roles.set_priority_levels"
+
+// trackerLabelsHint ends the labels line: how an item takes a label, and
+// where the list is changed.
+const trackerLabelsHint = "an item's labels attribute takes these IDs; an admin changes the list in the same store settings, or with tk:roles.add_label, tk:roles.edit_label, and tk:roles.remove_label"
+
+// writeTrackerHeader writes the store, viewer, sync, priority, labels (when
+// the store has any), and today lines every store view starts with.
 func writeTrackerHeader(sb *strings.Builder, v *wstrackerhost.StoreView) {
 	fmt.Fprintf(sb, "store %s", v.Store.Name)
 	if v.Store.Label != "" && v.Store.Label != v.Store.Name {
@@ -134,7 +189,16 @@ func writeTrackerHeader(sb *strings.Builder, v *wstrackerhost.StoreView) {
 			levels[i] += " (default)"
 		}
 	}
-	fmt.Fprintf(sb, "priority: %s\n", strings.Join(levels, ", "))
+	// The hint answers "where are the levels changed", which the levels
+	// alone left agents unable to tell the user.
+	fmt.Fprintf(sb, "priority: %s; %s\n", strings.Join(levels, ", "), trackerPriorityHint)
+	if len(v.Labels) > 0 {
+		labels := make([]string, len(v.Labels))
+		for i, l := range v.Labels {
+			labels[i] = fmt.Sprintf("%s %s %s", trackerAlias(l.ID), l.Name, l.Color)
+		}
+		fmt.Fprintf(sb, "labels: %s; %s\n", strings.Join(labels, ", "), trackerLabelsHint)
+	}
 	t := v.My.Today
 	fmt.Fprintf(sb, "today: my work %d, to answer %d, to confirm %d\n", len(t.Work), len(t.Pending), len(t.Confirms))
 	for _, p := range v.RolesProblems {
@@ -193,9 +257,22 @@ func trackerItemStatus(it wstracker.ItemView) string {
 	return *it.Status
 }
 
+// trackerLabelNames is the names of an item's labels, in its order.
+func trackerLabelNames(v *wstrackerhost.StoreView, it wstracker.ItemView) []string {
+	var out []string
+	for _, id := range it.Labels {
+		for _, l := range v.Labels {
+			if l.ID == id {
+				out = append(out, l.Name)
+			}
+		}
+	}
+	return out
+}
+
 // formatTrackerItemRow is one item on one line: alias, kind and status,
-// priority, title, then due and project.
-func formatTrackerItemRow(it wstracker.ItemView) string {
+// priority, title, then due, project, and labels.
+func formatTrackerItemRow(v *wstrackerhost.StoreView, it wstracker.ItemView) string {
 	tag := it.Kind
 	if s := trackerItemStatus(it); s != "" {
 		tag += " " + s
@@ -210,6 +287,9 @@ func formatTrackerItemRow(it wstracker.ItemView) string {
 	}
 	if it.Project != "" {
 		extra = append(extra, "project "+it.Project)
+	}
+	if names := trackerLabelNames(v, it); len(names) > 0 {
+		extra = append(extra, "labels "+strings.Join(names, ", "))
 	}
 	if it.Rollup.Total > 0 {
 		extra = append(extra, fmt.Sprintf("%d/%d subtasks done", it.Rollup.Counts["done"], it.Rollup.Total))
@@ -288,7 +368,7 @@ func trackerRuleLabel(r wstracker.RuleView) string {
 // line: an item's row, or a comment's alias and author with its item.
 func trackerRefRow(v *wstrackerhost.StoreView, id string) string {
 	if it, ok := v.Items[id]; ok {
-		return formatTrackerItemRow(it)
+		return formatTrackerItemRow(v, it)
 	}
 	if c, ok := v.Comments[id]; ok {
 		on := trackerAlias(c.Item)
@@ -329,6 +409,9 @@ func formatTrackerItem(v *wstrackerhost.StoreView, id string) string {
 	if it.Project != "" {
 		fields = append(fields, "project "+it.Project)
 	}
+	if names := trackerLabelNames(v, it); len(names) > 0 {
+		fields = append(fields, "labels "+strings.Join(names, ", "))
+	}
 	sb.WriteString(strings.Join(fields, ", ") + "\n")
 	fmt.Fprintf(&sb, "created by %s at %s", trackerPerson(v, it.Author), it.TS)
 	if it.Edited != nil {
@@ -368,7 +451,7 @@ func formatTrackerItem(v *wstrackerhost.StoreView, id string) string {
 		sb.WriteString("children:\n")
 		for _, cid := range it.Children {
 			if child, ok := v.Items[cid]; ok {
-				sb.WriteString("- " + formatTrackerItemRow(child) + "\n")
+				sb.WriteString("- " + formatTrackerItemRow(v, child) + "\n")
 			}
 		}
 	}

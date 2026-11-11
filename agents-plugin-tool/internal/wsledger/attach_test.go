@@ -384,10 +384,11 @@ func TestAttachAtomicPushRejectionMovesNeither(t *testing.T) {
 	args := rr.pushes[0]
 	ai, ei := -1, -1
 	for i, a := range args {
-		switch a {
-		case aref + ":" + aref:
+		// Each is pushed as the commit the sync read, not by name.
+		switch {
+		case strings.HasSuffix(a, ":"+aref) && !strings.HasPrefix(a, "--"):
 			ai = i
-		case own + ":" + own:
+		case strings.HasSuffix(a, ":"+own) && !strings.HasPrefix(a, "--"):
 			ei = i
 		}
 	}
