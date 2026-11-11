@@ -1311,6 +1311,8 @@
     })(it.id, 0);
     return { total: kids.length, counts: counts, blocked: blocked };
   }
+  // The statuses a team row's load counts (613 a): the work in the member's hands.
+  var TEAM_LOAD = ['todo', 'doing', 'blocked'];
   function daysBetween(a, b) { return (Date.parse(b) - Date.parse(a)) / 86400000; }
 
   // The one read path for a view: everything a viewer's page shows, as plain JSON
@@ -1470,22 +1472,56 @@
       if (r.state === 'returned' && (r.sender === v || (r.handoffOf && r.by === v)) && r.ended.by !== v) notices.push(Object.assign({ key: 'ret:' + r.id, kind: 'returned' }, b2));
     });
 
-    var R3 = reach(S.members, v, 3), team = [];
+    // (613 a) The team roll-up: a lead sees their whole subtree, in tree order with
+    // depth from the viewer; an admin also sees every other live member, after it, as
+    // the outside group (outside: true, depth from the org-tree root: a root is 0).
+    // Per member: the open, pending, and waiting lists; counts, the member's live
+    // assignments per status, a creator-fallback holding left out ((262 a): nobody took
+    // that work); load, those at todo, doing, or blocked (idea, awaiting, and done are
+    // not the member's work in hand); stale and overdue (the item's due
+    // date passed), subsets of load; fallback, the live fallback holdings not done.
+    var today = String(now).slice(0, 10), team = [], inTeam = {};
+    inTeam[v] = true;
+    function teamRow(id, depth, outside) {
+      inTeam[id] = true;
+      var recs = A.filter(function (r) { return r.to === id && visible(r) && notTopic(r); });
+      var open = recs.filter(function (r) { return r.state === 'live' && r.status !== 'done'; }).sort(byRank);
+      var pend = recs.filter(function (r) { return r.state === 'pending'; });
+      var waiting = A.filter(function (r) { return r.sender === id && r.to !== id && r.state === 'pending' && visible(r) && notTopic(r); });
+      var row = { id: id, depth: depth, outside: outside, open: ids(open), pending: ids(pend), waiting: ids(waiting),
+        counts: {}, load: 0, stale: 0, overdue: 0, fallback: 0, last: recs.map(function (r) { return r.lastUpdate; }).sort().pop() || null };
+      recs.forEach(function (r) {
+        if (r.state !== 'live') return;
+        if (r.fallback) { if (r.status !== 'done') row.fallback++; return; }
+        row.counts[r.status] = (row.counts[r.status] || 0) + 1;
+        if (TEAM_LOAD.indexOf(r.status) < 0) return;
+        row.load++;
+        if (r.stale) row.stale++;
+        var due = items[r.item].due;
+        if (today && due && due < today) row.overdue++;
+      });
+      team.push(row);
+    }
     (function walk(lead) {
       (g.children[lead] || []).forEach(function (id) {
-        if (!(id in R3)) return;
-        var recs = A.filter(function (r) { return r.to === id && visible(r) && notTopic(r); });
-        var open = recs.filter(function (r) { return r.state === 'live' && r.status !== 'done'; }).sort(byRank);
-        var pend = recs.filter(function (r) { return r.state === 'pending'; });
-        var waiting = A.filter(function (r) { return r.sender === id && r.to !== id && r.state === 'pending' && visible(r) && notTopic(r); });
-        team.push({ id: id, depth: R3[id], open: ids(open), pending: ids(pend), waiting: ids(waiting),
-          done: recs.filter(function (r) { return r.state === 'live' && r.status === 'done'; }).length,
-          blocked: open.filter(function (r) { return r.status === 'blocked'; }).length,
-          stale: open.filter(function (r) { return r.stale; }).length,
-          last: recs.map(function (r) { return r.lastUpdate; }).sort().pop() || null });
-        if (R3[id] < 3) walk(id);
+        if (inTeam[id] || !(id in R)) return;
+        teamRow(id, R[id], false);
+        walk(id);
       });
     })(v);
+    if (S.admins[v]) {
+      var outside = function (list, depth) {
+        list.forEach(function (id) {
+          if (inTeam[id]) return;
+          inTeam[id] = true; // a removed root is passed through, not shown
+          if (!S.members[id].removed) teamRow(id, depth, true);
+          outside(g.children[id] || [], depth + 1);
+        });
+      };
+      outside(Object.keys(S.members).filter(function (id) { return !(S.members[id].leads || []).length; }), 0);
+      // a member no root reaches (a lead chain through a removed lead) roots its own branch
+      Object.keys(S.members).forEach(function (id) { if (!S.members[id].removed) outside([id], 0); });
+    }
 
     var badge = [];
     mine.forEach(function (r) { if (r.by !== v && r.forced && r.status === 'todo' && notTopic(r)) badge.push('a:' + r.id); });

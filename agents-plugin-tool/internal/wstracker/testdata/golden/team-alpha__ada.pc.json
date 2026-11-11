@@ -11221,6 +11221,7 @@
     {
      "id": "maya",
      "depth": 1,
+     "outside": false,
      "open": [
       "ada.pc#2>maya",
       "ada.pc#7>maya",
@@ -11230,14 +11231,20 @@
       "ivy.pc#7>maya"
      ],
      "waiting": [],
-     "done": 0,
-     "blocked": 0,
+     "counts": {
+      "doing": 1,
+      "todo": 2
+     },
+     "load": 3,
      "stale": 0,
+     "overdue": 0,
+     "fallback": 0,
      "last": "2026-11-05T17:00:00Z"
     },
     {
      "id": "lena",
      "depth": 2,
+     "outside": false,
      "open": [
       "maya.pc#2>lena",
       "ada.pc#7>lena"
@@ -11246,28 +11253,40 @@
       "noa.pc#4>lena"
      ],
      "waiting": [],
-     "done": 0,
-     "blocked": 0,
+     "counts": {
+      "doing": 1,
+      "todo": 1
+     },
+     "load": 2,
      "stale": 0,
+     "overdue": 0,
+     "fallback": 0,
      "last": "2026-11-04T10:30:00Z"
     },
     {
      "id": "omar",
      "depth": 2,
+     "outside": false,
      "open": [
       "maya.pc#8>omar",
       "ada.pc#7>omar"
      ],
      "pending": [],
      "waiting": [],
-     "done": 0,
-     "blocked": 0,
+     "counts": {
+      "doing": 1,
+      "todo": 1
+     },
+     "load": 2,
      "stale": 0,
+     "overdue": 0,
+     "fallback": 0,
      "last": "2026-11-03T15:00:00Z"
     },
     {
      "id": "ivy",
      "depth": 2,
+     "outside": false,
      "open": [
       "ada.pc#7>ivy",
       "maya.pc#6>ivy"
@@ -11276,52 +11295,74 @@
      "waiting": [
       "ivy.pc#7>maya"
      ],
-     "done": 0,
-     "blocked": 0,
+     "counts": {
+      "awaiting": 1,
+      "doing": 1
+     },
+     "load": 1,
      "stale": 1,
+     "overdue": 0,
+     "fallback": 0,
      "last": "2026-11-05T16:00:00Z"
     },
     {
      "id": "jon",
      "depth": 2,
+     "outside": false,
      "open": [
       "ada.pc#7>jon"
      ],
      "pending": [],
      "waiting": [],
-     "done": 1,
-     "blocked": 0,
+     "counts": {
+      "done": 1,
+      "todo": 1
+     },
+     "load": 1,
      "stale": 0,
+     "overdue": 0,
+     "fallback": 0,
      "last": "2026-11-04T13:00:00Z"
     },
     {
      "id": "kai",
      "depth": 2,
+     "outside": false,
      "open": [],
      "pending": [],
      "waiting": [],
-     "done": 1,
-     "blocked": 0,
+     "counts": {
+      "done": 1
+     },
+     "load": 0,
      "stale": 0,
+     "overdue": 0,
+     "fallback": 0,
      "last": "2026-11-02T17:10:00Z"
     },
     {
      "id": "raj",
      "depth": 1,
+     "outside": false,
      "open": [
       "ada.pc#2>raj",
       "ada.pc#7>raj"
      ],
      "pending": [],
      "waiting": [],
-     "done": 0,
-     "blocked": 0,
+     "counts": {
+      "todo": 2
+     },
+     "load": 2,
      "stale": 0,
+     "overdue": 0,
+     "fallback": 0,
      "last": "2026-11-05T13:00:00Z"
     },
     {
      "id": "sven",
      "depth": 2,
+     "outside": false,
      "open": [
       "sven.pc#7>sven",
       "raj.pc#2>sven",
@@ -11332,14 +11373,21 @@
      ],
      "pending": [],
      "waiting": [],
-     "done": 0,
-     "blocked": 1,
+     "counts": {
+      "doing": 1,
+      "todo": 3,
+      "blocked": 1
+     },
+     "load": 5,
      "stale": 1,
+     "overdue": 0,
+     "fallback": 1,
      "last": "2026-11-05T17:30:00Z"
     },
     {
      "id": "tia",
      "depth": 2,
+     "outside": false,
      "open": [
       "raj.pc#2>tia",
       "raj.pc#12>tia",
@@ -11348,14 +11396,20 @@
      ],
      "pending": [],
      "waiting": [],
-     "done": 0,
-     "blocked": 0,
+     "counts": {
+      "doing": 2,
+      "todo": 1
+     },
+     "load": 3,
      "stale": 1,
+     "overdue": 0,
+     "fallback": 1,
      "last": "2026-11-05T16:40:00Z"
     },
     {
      "id": "noa",
      "depth": 2,
+     "outside": false,
      "open": [
       "ada.pc#7>noa",
       "raj.pc#14>noa",
@@ -11365,28 +11419,41 @@
      "waiting": [
       "noa.pc#4>lena"
      ],
-     "done": 0,
-     "blocked": 0,
+     "counts": {
+      "doing": 2,
+      "todo": 1
+     },
+     "load": 3,
      "stale": 1,
+     "overdue": 0,
+     "fallback": 0,
      "last": "2026-11-05T18:00:00Z"
     },
     {
      "id": "pia",
      "depth": 2,
+     "outside": false,
      "open": [
       "raj.pc#8>pia",
       "ada.pc#7>pia"
      ],
      "pending": [],
      "waiting": [],
-     "done": 1,
-     "blocked": 1,
+     "counts": {
+      "doing": 1,
+      "blocked": 1,
+      "done": 1
+     },
+     "load": 2,
      "stale": 0,
+     "overdue": 0,
+     "fallback": 0,
      "last": "2026-11-05T17:00:00Z"
     },
     {
      "id": "bo",
      "depth": 1,
+     "outside": false,
      "open": [
       "ada.pc#2>bo",
       "ada.pc#7>bo",
@@ -11394,23 +11461,34 @@
      ],
      "pending": [],
      "waiting": [],
-     "done": 0,
-     "blocked": 0,
+     "counts": {
+      "todo": 3
+     },
+     "load": 3,
      "stale": 0,
+     "overdue": 0,
+     "fallback": 0,
      "last": "2026-11-05T18:40:00Z"
     },
     {
      "id": "uma",
      "depth": 2,
+     "outside": false,
      "open": [
       "ada.pc#17>uma",
       "ada.pc#7>uma"
      ],
      "pending": [],
      "waiting": [],
-     "done": 1,
-     "blocked": 0,
+     "counts": {
+      "done": 1,
+      "todo": 1,
+      "doing": 1
+     },
+     "load": 2,
      "stale": 0,
+     "overdue": 0,
+     "fallback": 0,
      "last": "2026-11-05T21:00:00Z"
     }
    ],

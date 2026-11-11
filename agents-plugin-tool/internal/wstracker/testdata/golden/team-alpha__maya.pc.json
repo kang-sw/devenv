@@ -11212,6 +11212,7 @@
     {
      "id": "lena",
      "depth": 1,
+     "outside": false,
      "open": [
       "maya.pc#2>lena",
       "ada.pc#7>lena"
@@ -11220,28 +11221,40 @@
       "noa.pc#4>lena"
      ],
      "waiting": [],
-     "done": 0,
-     "blocked": 0,
+     "counts": {
+      "doing": 1,
+      "todo": 1
+     },
+     "load": 2,
      "stale": 0,
+     "overdue": 0,
+     "fallback": 0,
      "last": "2026-11-04T10:30:00Z"
     },
     {
      "id": "omar",
      "depth": 1,
+     "outside": false,
      "open": [
       "maya.pc#8>omar",
       "ada.pc#7>omar"
      ],
      "pending": [],
      "waiting": [],
-     "done": 0,
-     "blocked": 0,
+     "counts": {
+      "doing": 1,
+      "todo": 1
+     },
+     "load": 2,
      "stale": 0,
+     "overdue": 0,
+     "fallback": 0,
      "last": "2026-11-03T15:00:00Z"
     },
     {
      "id": "ivy",
      "depth": 1,
+     "outside": false,
      "open": [
       "ada.pc#7>ivy",
       "maya.pc#6>ivy"
@@ -11250,33 +11263,49 @@
      "waiting": [
       "ivy.pc#7>maya"
      ],
-     "done": 0,
-     "blocked": 0,
+     "counts": {
+      "awaiting": 1,
+      "doing": 1
+     },
+     "load": 1,
      "stale": 1,
+     "overdue": 0,
+     "fallback": 0,
      "last": "2026-11-05T16:00:00Z"
     },
     {
      "id": "jon",
      "depth": 1,
+     "outside": false,
      "open": [
       "ada.pc#7>jon"
      ],
      "pending": [],
      "waiting": [],
-     "done": 1,
-     "blocked": 0,
+     "counts": {
+      "done": 1,
+      "todo": 1
+     },
+     "load": 1,
      "stale": 0,
+     "overdue": 0,
+     "fallback": 0,
      "last": "2026-11-04T13:00:00Z"
     },
     {
      "id": "kai",
      "depth": 1,
+     "outside": false,
      "open": [],
      "pending": [],
      "waiting": [],
-     "done": 1,
-     "blocked": 0,
+     "counts": {
+      "done": 1
+     },
+     "load": 0,
      "stale": 0,
+     "overdue": 0,
+     "fallback": 0,
      "last": "2026-11-02T17:10:00Z"
     }
    ],

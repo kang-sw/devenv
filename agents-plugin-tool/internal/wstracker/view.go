@@ -317,16 +317,26 @@ type Received struct {
 	Sent     []string `json:"sent"`
 }
 
+// Team is one member's row of the team roll-up (613 a): a member of the
+// viewer's subtree, Depth from the viewer, or, for an admin viewer, a member
+// outside it (Outside, Depth from the org-tree root, a root being 0).
+// Counts are the member's live assignments per status, a creator-fallback
+// holding left out (262 a); Load is those at a teamLoad status; Stale and
+// Overdue (the item's due date passed) are subsets of Load; Fallback is the
+// live fallback holdings not done. Topic holdings are in no list or count.
 type Team struct {
-	ID      string   `json:"id"`
-	Depth   int      `json:"depth"`
-	Open    []string `json:"open"`
-	Pending []string `json:"pending"`
-	Waiting []string `json:"waiting"`
-	Done    int      `json:"done"`
-	Blocked int      `json:"blocked"`
-	Stale   int      `json:"stale"`
-	Last    *string  `json:"last"`
+	ID       string         `json:"id"`
+	Depth    int            `json:"depth"`
+	Outside  bool           `json:"outside"`
+	Open     []string       `json:"open"`
+	Pending  []string       `json:"pending"`
+	Waiting  []string       `json:"waiting"`
+	Counts   map[string]int `json:"counts"`
+	Load     int            `json:"load"`
+	Stale    int            `json:"stale"`
+	Overdue  int            `json:"overdue"`
+	Fallback int            `json:"fallback"`
+	Last     *string        `json:"last"`
 }
 
 type Stats struct {
@@ -794,6 +804,11 @@ func orEmpty(l []string) []string {
 	return l
 }
 
+// teamLoad are the statuses a team row's Load counts (613 a): the work in
+// the member's hands; idea, awaiting (closed, waiting on the assigner's
+// confirm), and done are not.
+var teamLoad = map[string]bool{"todo": true, "doing": true, "blocked": true}
+
 var rank = map[string]int{"blocked": 0, "doing": 1, "todo": 2, "idea": 3, "awaiting": 4, "done": 5}
 
 func ids(l []*Assignment) []string {
@@ -919,50 +934,98 @@ func (r *replayed) viewerLists(vw *View, A []*Assignment, v string, children map
 		}
 	}
 
-	R3 := reachMap(r.S.reach(v, 3))
+	// The team roll-up: the viewer's subtree in tree order, then for an admin
+	// every other live member, walked from the org-tree roots.
+	today := ""
+	if vw.Now != "" {
+		today = vw.Now[:10]
+	}
+	R := vw.Viewer.Reach
+	inTeam := map[string]bool{v: true}
+	teamRow := func(id string, depth int, outside bool) {
+		inTeam[id] = true
+		recs := filter(A, func(a *Assignment) bool { return a.To == id && visible(a) && notTopic(a) })
+		open := filter(recs, func(a *Assignment) bool { return a.State == "live" && a.Status != "done" })
+		byRank(open)
+		pend := filter(recs, func(a *Assignment) bool { return a.State == "pending" })
+		waiting := filter(A, func(a *Assignment) bool {
+			return a.Sender == id && a.To != id && a.State == "pending" && visible(a) && notTopic(a)
+		})
+		t := Team{ID: id, Depth: depth, Outside: outside, Open: ids(open), Pending: ids(pend), Waiting: ids(waiting),
+			Counts: map[string]int{}}
+		var last time.Time
+		for _, a := range recs {
+			if a.lastUpdate.After(last) {
+				last = a.lastUpdate
+			}
+			if a.State != "live" {
+				continue
+			}
+			if a.Fallback {
+				if a.Status != "done" {
+					t.Fallback++
+				}
+				continue
+			}
+			t.Counts[a.Status]++
+			if !teamLoad[a.Status] {
+				continue
+			}
+			t.Load++
+			if a.Stale {
+				t.Stale++
+			}
+			if due := items[a.Item].Due; today != "" && due != nil && *due != "" && *due < today {
+				t.Overdue++
+			}
+		}
+		if len(recs) > 0 {
+			s := ts(last)
+			t.Last = &s
+		}
+		my.Team = append(my.Team, t)
+	}
 	var walk func(lead string)
 	walk = func(lead string) {
 		for _, id := range children[lead] {
-			d, ok := R3[id]
-			if !ok {
+			d, ok := R[id]
+			if inTeam[id] || !ok {
 				continue
 			}
-			recs := filter(A, func(a *Assignment) bool { return a.To == id && visible(a) && notTopic(a) })
-			open := filter(recs, func(a *Assignment) bool { return a.State == "live" && a.Status != "done" })
-			byRank(open)
-			pend := filter(recs, func(a *Assignment) bool { return a.State == "pending" })
-			waiting := filter(A, func(a *Assignment) bool {
-				return a.Sender == id && a.To != id && a.State == "pending" && visible(a) && notTopic(a)
-			})
-			t := Team{ID: id, Depth: d, Open: ids(open), Pending: ids(pend), Waiting: ids(waiting)}
-			var last time.Time
-			for _, a := range recs {
-				if a.State == "live" && a.Status == "done" {
-					t.Done++
-				}
-				if a.lastUpdate.After(last) {
-					last = a.lastUpdate
-				}
-			}
-			for _, a := range open {
-				if a.Status == "blocked" {
-					t.Blocked++
-				}
-				if a.Stale {
-					t.Stale++
-				}
-			}
-			if len(recs) > 0 {
-				s := ts(last)
-				t.Last = &s
-			}
-			my.Team = append(my.Team, t)
-			if d < 3 {
-				walk(id)
-			}
+			teamRow(id, d, false)
+			walk(id)
 		}
 	}
 	walk(v)
+	if r.S.admins[v] {
+		var outside func(list []string, depth int)
+		outside = func(list []string, depth int) {
+			for _, id := range list {
+				if inTeam[id] {
+					continue
+				}
+				inTeam[id] = true // a removed root is passed through, not shown
+				if r.S.liveMember(id) {
+					teamRow(id, depth, true)
+				}
+				outside(children[id], depth+1)
+			}
+		}
+		var roots []string
+		for _, id := range r.S.morder {
+			if len(r.S.members[id].leads) == 0 {
+				roots = append(roots, id)
+			}
+		}
+		outside(roots, 0)
+		// a member no root reaches (a lead chain through a removed lead) roots
+		// its own branch
+		for _, id := range r.S.morder {
+			if r.S.liveMember(id) {
+				outside([]string{id}, 0)
+			}
+		}
+	}
 
 	for _, a := range mine {
 		if a.By != v && a.Forced && a.Status == "todo" && notTopic(a) {

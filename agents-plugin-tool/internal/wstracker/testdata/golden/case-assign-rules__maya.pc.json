@@ -2236,6 +2236,7 @@
     {
      "id": "lena",
      "depth": 1,
+     "outside": false,
      "open": [
       "maya.pc#2~maya>lena",
       "ada.pc#2~maya>lena",
@@ -2243,27 +2244,37 @@
      ],
      "pending": [],
      "waiting": [],
-     "done": 0,
-     "blocked": 0,
+     "counts": {
+      "todo": 3
+     },
+     "load": 3,
      "stale": 0,
+     "overdue": 0,
+     "fallback": 0,
      "last": "2026-11-01T09:05:00Z"
     },
     {
      "id": "pia",
      "depth": 2,
+     "outside": false,
      "open": [
       "ada.pc#2~maya>pia"
      ],
      "pending": [],
      "waiting": [],
-     "done": 0,
-     "blocked": 0,
+     "counts": {
+      "todo": 1
+     },
+     "load": 1,
      "stale": 0,
+     "overdue": 0,
+     "fallback": 0,
      "last": "2026-11-01T09:02:00Z"
     },
     {
      "id": "omar",
      "depth": 1,
+     "outside": false,
      "open": [
       "maya.pc#2~maya>omar",
       "ada.pc#2~maya>omar",
@@ -2271,9 +2282,13 @@
      ],
      "pending": [],
      "waiting": [],
-     "done": 0,
-     "blocked": 0,
+     "counts": {
+      "todo": 3
+     },
+     "load": 3,
      "stale": 0,
+     "overdue": 0,
+     "fallback": 0,
      "last": "2026-11-01T09:05:00Z"
     }
    ],

@@ -2188,23 +2188,29 @@
     {
      "id": "sven",
      "depth": 1,
+     "outside": false,
      "open": [],
      "pending": [],
      "waiting": [],
-     "done": 0,
-     "blocked": 0,
+     "counts": {},
+     "load": 0,
      "stale": 0,
+     "overdue": 0,
+     "fallback": 0,
      "last": "2026-11-01T09:12:00Z"
     },
     {
      "id": "kai",
      "depth": 2,
+     "outside": false,
      "open": [],
      "pending": [],
      "waiting": [],
-     "done": 0,
-     "blocked": 0,
+     "counts": {},
+     "load": 0,
      "stale": 0,
+     "overdue": 0,
+     "fallback": 0,
      "last": "2026-11-01T09:14:00Z"
     }
    ],

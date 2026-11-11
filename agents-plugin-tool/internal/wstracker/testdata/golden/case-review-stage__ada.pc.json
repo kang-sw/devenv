@@ -2147,72 +2147,96 @@
     {
      "id": "maya",
      "depth": 1,
+     "outside": false,
      "open": [
       "ada.pc#12>maya"
      ],
      "pending": [],
      "waiting": [],
-     "done": 1,
-     "blocked": 1,
+     "counts": {
+      "blocked": 1,
+      "done": 1
+     },
+     "load": 1,
      "stale": 0,
+     "overdue": 0,
+     "fallback": 0,
      "last": "2026-11-01T09:50:00Z"
     },
     {
      "id": "lena",
      "depth": 2,
+     "outside": false,
      "open": [],
      "pending": [],
      "waiting": [],
-     "done": 0,
-     "blocked": 0,
+     "counts": {},
+     "load": 0,
      "stale": 0,
+     "overdue": 0,
+     "fallback": 0,
      "last": null
     },
     {
      "id": "omar",
      "depth": 2,
+     "outside": false,
      "open": [],
      "pending": [],
      "waiting": [],
-     "done": 0,
-     "blocked": 0,
+     "counts": {},
+     "load": 0,
      "stale": 0,
+     "overdue": 0,
+     "fallback": 0,
      "last": null
     },
     {
      "id": "raj",
      "depth": 1,
+     "outside": false,
      "open": [
       "ada.lap#1>raj",
       "ada.lap#2>raj"
      ],
      "pending": [],
      "waiting": [],
-     "done": 1,
-     "blocked": 0,
+     "counts": {
+      "done": 1,
+      "todo": 2
+     },
+     "load": 2,
      "stale": 0,
+     "overdue": 0,
+     "fallback": 0,
      "last": "2026-11-01T09:21:00Z"
     },
     {
      "id": "sven",
      "depth": 2,
+     "outside": false,
      "open": [],
      "pending": [],
      "waiting": [],
-     "done": 0,
-     "blocked": 0,
+     "counts": {},
+     "load": 0,
      "stale": 0,
+     "overdue": 0,
+     "fallback": 0,
      "last": null
     },
     {
      "id": "bo",
      "depth": 1,
+     "outside": false,
      "open": [],
      "pending": [],
      "waiting": [],
-     "done": 0,
-     "blocked": 0,
+     "counts": {},
+     "load": 0,
      "stale": 0,
+     "overdue": 0,
+     "fallback": 0,
      "last": null
     }
    ],

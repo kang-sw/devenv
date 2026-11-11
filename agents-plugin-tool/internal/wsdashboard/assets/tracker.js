@@ -873,9 +873,10 @@
   // remembered per store in memory, like the side cards' modes, and never written.
 
   // The modes per scope and the "recently closed" fold are display state: they start from the stored values.
+  // today and drill (a team head's count) are display state too, never stored.
   function panelState() {
     var n = ui.store;
-    return (ui.panel[n] = ui.panel[n] || { scope: 'mine', modes: (ui.pmodes[n] = ui.pmodes[n] || {}), today: null, q: '', closedOpen: ui.closedOpen[n] !== false, treeOpen: {} });
+    return (ui.panel[n] = ui.panel[n] || { scope: 'mine', modes: (ui.pmodes[n] = ui.pmodes[n] || {}), today: null, drill: null, q: '', closedOpen: ui.closedOpen[n] !== false, treeOpen: {} });
   }
   function scopeList() { return SCOPES.filter(function (x) { return x[0] !== 'team' || VS.my.team.length; }); }
   function scopeOf() { var s = panelState().scope; return scopeList().some(function (x) { return x[0] === s; }) ? s : 'mine'; }
@@ -1127,23 +1128,83 @@
     });
     return open.length ? treeRows(open, 'given:') : '<p class="muted">' + wsT("js.tk.list.given.none") + '</p>';
   }
-  // My team as a group-by-person view: each group header carries that person's roll-up counts.
-  // Under a Today filter a group with no matching row is left out.
+  // My team as a group-by-person view: each group header carries that person's roll-up counts:
+  // the load (live work neither idea nor done, a creator-fallback holding left out) with its
+  // per-status breakdown, stale and overdue (both inside the load), idea, fallback-held, done,
+  // unaccepted, and waiting on others. The viewer's subtree comes first; an admin's members
+  // outside it follow under their own heading, indented by depth from the org-tree root.
+  // Under a Today filter or a search a group with no matching row is left out.
+  // A count is a button: it narrows the list to that person's rows of that count (the drill,
+  // panelState().drill = { who, key }, list mode only), and the same count again clears it.
+  // The statuses a team row's load counts, in its breakdown's order (the view's roll-up counts
+  // the same ones); every other status but idea and done shows as its own count after stale
+  // and overdue, sorted.
+  var TEAM_LOAD = ['todo', 'doing', 'blocked'];
+  // The records a team head's count stands for, by the rules the view's counts use, so a count
+  // and its rows agree. key: a status, 'load', 'stale', 'overdue', 'fallback', 'unaccepted', or
+  // 'waiting'; recs: the assignment records by id; items: the items by id; day: today's date.
+  function teamDrillRecs(p, key, recs, items, day) {
+    if (key === 'unaccepted' || key === 'waiting') return (key === 'unaccepted' ? p.pending : p.waiting).map(function (id) { return recs[id]; }).filter(Boolean);
+    return Object.keys(recs).map(function (id) { return recs[id]; }).filter(function (r) {
+      var it = items[r.item];
+      if (r.to !== p.id || r.state !== 'live' || !it || it.hidden || it.kind === 'topic') return false;
+      if (key === 'fallback') return !!r.fallback && r.status !== 'done';
+      if (r.fallback) return false;
+      if (key !== 'load' && key !== 'stale' && key !== 'overdue') return r.status === key;
+      if (TEAM_LOAD.indexOf(r.status) < 0) return false;
+      return key === 'load' || (key === 'stale' ? !!r.stale : !!(day && it.due && it.due < day));
+    });
+  }
+  // The drill in effect: { p, key }, or null; a drill on a person no longer listed is dropped.
+  function teamDrill() {
+    var ps = panelState(), d = ps.drill, p = d && VS.my.team.filter(function (x) { return x.id === d.who; })[0];
+    if (d && !p) ps.drill = null;
+    return p ? { p: p, key: d.key } : null;
+  }
+  function teamCounts(p, on) {
+    function cnt(key, txt, tip, err) {
+      var sel = !!on && on.key === key;
+      return '<button type="button" class="tcn' + (err ? ' err' : '') + (sel ? ' on' : '') + '" aria-pressed="' + sel + '"' + attr('act', 'tdrill') + attr('who', p.id) + attr('set', key) + attr('fk', 'td:' + p.id + ':' + key) +
+        tipAttr((tip ? tip + '; ' : '') + wsT(sel ? "js.tk.team.drill.off" : "js.tk.team.drill.tip")) + '>' + txt + '</button>';
+    }
+    function st(s, n) { return cnt(s, wsT("js.tk.team.st", n, esc(SI.info(s).label)), '', s === 'blocked'); }
+    var c = [], seen = { idea: true, done: true }, br = [], other = [];
+    TEAM_LOAD.forEach(function (s) { if (p.counts[s]) br.push(st(s, p.counts[s])); seen[s] = true; });
+    Object.keys(p.counts).sort().forEach(function (s) { if (!seen[s] && p.counts[s]) other.push(st(s, p.counts[s])); });
+    if (p.load) c.push(cnt('load', wsT("js.tk.team.load", p.load), wsT("js.tk.team.load.tip")) + (br.length ? ' (' + br.join(' &middot; ') + ')' : ''));
+    if (p.stale) c.push(cnt('stale', wsT("js.tk.team.stale", p.stale), wsT("js.tk.team.stale.tip", STALE_DAYS), true));
+    if (p.overdue) c.push(cnt('overdue', wsT("js.tk.team.overdue", p.overdue), wsT("js.tk.team.overdue.tip"), true));
+    c = c.concat(other);
+    if (p.counts.idea) c.push(st('idea', p.counts.idea));
+    if (p.fallback) c.push(cnt('fallback', wsT("js.tk.team.fallback", p.fallback), wsT("js.tk.team.fallback.tip")));
+    if (p.counts.done) c.push(st('done', p.counts.done));
+    if (p.pending.length) c.push(cnt('unaccepted', wsT("js.tk.team.unaccepted", p.pending.length), ''));
+    if (p.waiting.length) c.push(cnt('waiting', wsT("js.tk.team.waiting", p.waiting.length), wsT("js.tk.team.waiting.tip")));
+    return c.join(' &middot; ');
+  }
   function listTeam() {
+    var dr = teamDrill(), outside = false;
     var h = VS.my.team.map(function (p) {
-      var m = VS.members[p.id], c = [wsT("js.tk.team.open", p.open.length)];
-      var work = p.open.concat(p.pending).filter(function (id) { return keepRec(A(id)); }), wait = p.waiting.filter(function (id) { return keepRec(A(id)); });
-      if (FILT && !work.length && !wait.length) return '';
-      if (p.done) c.push(wsT("js.tk.team.done", p.done));
-      if (p.blocked) c.push('<span class="err">' + wsT("js.tk.team.blocked", p.blocked) + '</span>');
-      if (p.stale) c.push('<span class="err">' + wsT("js.tk.team.stale", p.stale) + '</span>');
-      if (p.pending.length) c.push(wsT("js.tk.team.unaccepted", p.pending.length));
-      if (p.waiting.length) c.push('<span' + tipAttr(wsT("js.tk.team.waiting.tip")) + '>' + wsT("js.tk.team.waiting", p.waiting.length) + '</span>');
-      var g = '<div class="tg" style="--d:' + (p.depth - 1) + '"' + attr('person', p.id) + '><div class="tg-head">' + avHtml(p.id) + '<b>' + whoName(p.id) + '</b>' +
-        '<span class="nid">' + esc(p.id) + ' L' + p.depth + (m.children.length ? wsT("js.tk.team.islead") : '') + '</span><span class="cnt">' + c.join(' &middot; ') + '</span><span class="grow"></span>' +
-        '<span class="muted ts"' + tipAttr(wsT("js.tk.team.last.tip")) + '>' + esc(fmtTs(p.last)) + '</span></div>';
+      if (dr && dr.p !== p) return '';
+      var m = VS.members[p.id], on = dr && dr.key, work, wait;
+      if (dr) {
+        var pos = {}, got = teamDrillRecs(p, on, VS.assignments, VS.items, today()).filter(keepRec);
+        p.open.forEach(function (id, i) { pos[id] = i + 1; });
+        got = got.map(function (r, i) { return { r: r, i: i }; }).sort(function (a, b) { return (pos[a.r.id] || 1e9) - (pos[b.r.id] || 1e9) || a.i - b.i; }).map(function (x) { return x.r.id; });
+        work = on === 'waiting' ? [] : got; wait = on === 'waiting' ? got : [];
+      } else {
+        work = p.open.concat(p.pending).filter(function (id) { return keepRec(A(id)); }); wait = p.waiting.filter(function (id) { return keepRec(A(id)); });
+      }
+      if (FILT && !dr && !work.length && !wait.length) return ''; // a drilled group stays, with its clear control
+      var g = '';
+      if (p.outside && !outside) { outside = true; g += sub('<span' + tipAttr(wsT("js.tk.team.outside.tip")) + '>' + wsT("js.tk.team.outside") + '</span>', VS.my.team.filter(function (x) { return x.outside; }).length); }
+      g += '<div class="tg' + (p.outside ? ' out' : '') + '" style="--d:' + (p.outside ? p.depth : p.depth - 1) + '"' + attr('person', p.id) + '><div class="tg-head">' + avHtml(p.id) + '<b>' + whoName(p.id) + '</b>' +
+        '<span class="nid">' + esc(p.id) + (p.outside ? '' : ' L' + p.depth) + (m.children.length ? wsT("js.tk.team.islead") : '') + '</span><span class="cnt">' + teamCounts(p, dr) + '</span>' +
+        (dr ? '<button type="button" class="ia"' + attr('act', 'tdrill') + attr('who', p.id) + attr('set', '') + attr('fk', 'td:x') + ' aria-label="' + esc(wsT("js.tk.team.drill.clear")) + '"' + tipAttr(wsT("js.tk.team.drill.clear")) + '><svg class="i"><use href="#tki-x"/></svg></button>' : '') +
+        '<span class="grow"></span><span class="muted ts"' + tipAttr(wsT("js.tk.team.last.tip")) + '>' + esc(fmtTs(p.last)) + '</span></div>';
+      if (dr && !work.length && !wait.length) return g + '<p class="muted">' + wsT("js.tk.team.drill.none") + '</p></div>';
       // one tree per person
-      g += treeRows(work.map(function (id) { var r = A(id); return { rk: 'team:' + id, item: r.item, rec: r }; }).concat(wait.map(function (id) {
+      g += treeRows(work.map(function (id) { var r = A(id); return { rk: 'team:' + id, item: r.item, rec: r, closed: r.state === 'live' && r.status === 'done' }; }).concat(wait.map(function (id) {
         var r = A(id);
         return { rk: 'team:w:' + id, item: r.item, rec: r, more: r.handoffOf ? wsT("js.tk.team.sent.handoff", esc(nm(p.id)), esc(nm(r.to))) : wsT("js.tk.team.sent", esc(nm(p.id)), esc(nm(r.to))) };
       })), 'team:' + p.id + ':');
@@ -1205,9 +1266,10 @@
     if (s === 'received') return wsT("js.tk.scope.chip.pending", VS.my.received.pending.length);
     if (s === 'given') return wsTn("js.tk.scope.chip.items", VS.my.given.length) + (VS.my.today.confirms.length ? ', ' + wsT("js.tk.scope.chip.confirm", VS.my.today.confirms.length) : '');
     if (s === 'team') {
-      var t = { open: 0, blocked: 0, stale: 0, pending: 0 };
-      VS.my.team.forEach(function (p) { t.open += p.open.length; t.blocked += p.blocked; t.stale += p.stale; t.pending += p.pending.length; });
-      return wsT("js.tk.scope.chip.below", VS.my.team.length) + ', ' + wsT("js.tk.team.open", t.open) + (t.blocked ? ', ' + wsT("js.tk.team.blocked", t.blocked) : '') + (t.stale ? ', ' + wsT("js.tk.team.stale", t.stale) : '') + (t.pending ? ', ' + wsT("js.tk.team.unaccepted", t.pending) : '');
+      var t = { below: 0, outside: 0, load: 0, stale: 0, overdue: 0, pending: 0 };
+      VS.my.team.forEach(function (p) { t[p.outside ? 'outside' : 'below']++; t.load += p.load; t.stale += p.stale; t.overdue += p.overdue; t.pending += p.pending.length; });
+      return [t.below || !t.outside ? wsT("js.tk.scope.chip.below", t.below) : '', t.outside ? wsT("js.tk.scope.chip.outside", t.outside) : '', wsT("js.tk.team.load", t.load),
+        t.stale ? wsT("js.tk.team.stale", t.stale) : '', t.overdue ? wsT("js.tk.team.overdue", t.overdue) : '', t.pending ? wsT("js.tk.team.unaccepted", t.pending) : ''].filter(Boolean).join(', ');
     }
     return wsT("js.tk.scope.chip.of", allRows(panelMode('all') === 'kanban').length, Object.keys(VS.items).length);
   }
@@ -4812,6 +4874,11 @@
         else if (k === 'dlg-cancel') closeDialog();
         else if (k === 'open') showItem(d.item);
         else if (k === 'bref') showItem(d.item, a, d.cid);
+        else if (k === 'tdrill') { // a team head's count: drill to that person's rows of it; the same count again, or the clear control, clears it
+          var dps = panelState(), dset = a.getAttribute('data-set');
+          dps.drill = !dset || (dps.drill && dps.drill.who === d.who && dps.drill.key === dset) ? null : { who: d.who, key: dset };
+          ui.sel = null; render();
+        }
         else if (k === 'scope') { panelState().scope = a.getAttribute('data-scope'); ui.sel = null; render(); }
         else if (k === 'pmode') { panelState().modes[scopeOf()] = a.getAttribute('data-mode'); dsSave('panel.modes', ui.pmodes); render(); }
         else if (k === 'closed-toggle') { var cps = panelState(); cps.closedOpen = !cps.closedOpen; ui.closedOpen[ui.store] = cps.closedOpen; dsSave('closed', ui.closedOpen); render(); }

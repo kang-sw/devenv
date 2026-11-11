@@ -54,14 +54,14 @@ func TestScenario2LeadFindsStuckWork(t *testing.T) {
 	if len(lena.Pending) != 1 || asg(t, maya, lena.Pending[0]).By != "noa" {
 		t.Fatalf("lena's unaccepted = %v, want noa's request", lena.Pending)
 	}
-	wantEq(t, "omar blocked (his late commit wins over maya's reject)", teamRow(t, maya, "omar").Blocked, 1)
+	wantEq(t, "omar blocked (his late commit wins over maya's reject)", teamRow(t, maya, "omar").Counts["blocked"], 1)
 	wantEq(t, "ivy stale", teamRow(t, maya, "ivy").Stale, 1)
 
 	raj := tm.view("raj.pc")
 	for _, m := range []string{"sven", "tia", "noa"} {
 		wantEq(t, m+" stale", teamRow(t, raj, m).Stale, 1)
 	}
-	wantEq(t, "pia blocked", teamRow(t, raj, "pia").Blocked, 1)
+	wantEq(t, "pia blocked", teamRow(t, raj, "pia").Counts["blocked"], 1)
 	// V2: a follower's own pending assignment to others shows as waiting.
 	wantEq(t, "noa waiting on others", len(teamRow(t, raj, "noa").Waiting), 1)
 
@@ -70,7 +70,7 @@ func TestScenario2LeadFindsStuckWork(t *testing.T) {
 		teamRow(t, ada, m)
 	}
 	wantEq(t, "ada sees lena at depth", teamRow(t, ada, "lena").Depth, 2)
-	wantEq(t, "ada sees omar blocked", teamRow(t, ada, "omar").Blocked, 1)
+	wantEq(t, "ada sees omar blocked", teamRow(t, ada, "omar").Counts["blocked"], 1)
 
 	// M1 (284): the stale threshold is a caller option.
 	wantEq(t, "ivy stale at 10 days", tm.clone("maya.pc").View(tm.now, 10).My.Team[2].Stale, 0)

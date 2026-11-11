@@ -111,7 +111,7 @@ func TestHeldTopicShowsInMineOnly(t *testing.T) {
 	wantNotIn(t, "raj's team pending", teamRow(t, ada, "raj").Pending, hand)
 	wantNotIn(t, "maya's team waiting", teamRow(t, ada, "maya").Waiting, hand)
 	steps = append(steps, step{"maya.pc", "item.close", map[string]any{"item": "ada.pc#3"}})
-	wantEq(t, "maya's team done", teamRow(t, topicView(t, "ada.pc", steps), "maya").Done, 1)
+	wantEq(t, "maya's team done", teamRow(t, topicView(t, "ada.pc", steps), "maya").Counts["done"], 1)
 }
 
 func TestTodoCreateFoldsAsTask(t *testing.T) {
