@@ -193,8 +193,54 @@ func TestHostedLiveIdleHeartbeatWritesNothing(t *testing.T) {
 	if last.UpdatedAt-first.UpdatedAt < 3*40_000 {
 		t.Fatalf("idle heartbeats moved updatedAt %d -> %d, want it to follow the clock", first.UpdatedAt, last.UpdatedAt)
 	}
-	if last.Stale(time.UnixMilli(last.UpdatedAt)) {
-		t.Fatal("the idle hosted copy reads as stale")
+	// Judged at the clock's time now, well past StaleAfterBeats heartbeats
+	// after the only file write, the copy is fresh: it is the last publish.
+	at := time.UnixMilli(clock.Load())
+	if !first.Stale(at) || last.Stale(at) {
+		t.Fatalf("at %d: the first copy (updatedAt %d) should read stale and the last (%d) fresh", at.UnixMilli(), first.UpdatedAt, last.UpdatedAt)
+	}
+}
+
+// TestHostedLiveBusyTurnFlushesEachHeartbeat pins the recovery bound of a
+// long turn: while changes keep arriving, the file is written once a
+// heartbeat interval passed since the last write, with no turn end.
+func TestHostedLiveBusyTurnFlushesEachHeartbeat(t *testing.T) {
+	f := newLiveFixture(t, true)
+	fastLive(t, 5*time.Millisecond)
+	host := &fakeLiveHost{serve: true}
+	f.server.live.host = host
+	writes := countWrites(t)
+	var clock atomic.Int64
+	clock.Store(time.Now().UnixMilli())
+	setLiveSeams(func(s *liveSeams) {
+		// The heartbeat timer itself never fires within the test; the
+		// injected clock decides when an interval passed.
+		s.heartbeat = time.Hour
+		s.now = func() time.Time { return time.UnixMilli(clock.Load()) }
+	})
+	t.Cleanup(func() { f.server.Close() })
+
+	directIntake(t, f.server, f.keyA, map[string]any{"kind": "turn_start"})
+	waitFor(t, "the first snapshot write", func() bool { return writes.Load() == 1 })
+	slot := host.slot(t)
+	change := func(caption string) {
+		t.Helper()
+		n := len(slot.published())
+		directIntake(t, f.server, f.keyA, map[string]any{"kind": "agent", "caption": caption})
+		waitFor(t, "a published change", func() bool { return len(slot.published()) > n })
+	}
+	change("a")
+	clock.Add((30 * time.Minute).Milliseconds())
+	change("b")
+	if n := writes.Load(); n != 1 {
+		t.Fatalf("%d writes within one heartbeat interval of a busy turn, want 1", n)
+	}
+	clock.Add((30 * time.Minute).Milliseconds())
+	change("c")
+	waitFor(t, "the busy turn's heartbeat flush", func() bool { return writes.Load() == 2 })
+	snap, err := wslive.ReadSnapshot(wslive.SnapshotPath(f.sessionDir(f.replyA)))
+	if err != nil || snap.Lead.Caption != "c" {
+		t.Fatalf("flushed snapshot caption = %q, %v; want the newest change", snap.Lead.Caption, err)
 	}
 }
 

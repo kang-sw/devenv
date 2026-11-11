@@ -116,6 +116,10 @@ func setLiveSeams(change func(*liveSeams)) liveSeams {
 type liveHub struct {
 	mu       sync.Mutex
 	sessions map[string]*liveSession
+	// closed is set by close: a session created after it (an intake still
+	// running when its server closed) opens no hosted slot, which nothing
+	// would release.
+	closed bool
 
 	// enabledMu guards enabled, each session's last resolved
 	// dashboard.enabled (liveDashboardEnabled).
@@ -206,7 +210,7 @@ func (h *liveHub) session(key, dir, root string, nudge func(), active func() boo
 	}
 	state := wslive.NewState(key)
 	ls = &liveSession{dir: dir, root: root, replyID: state.ReplyID(), nudge: nudge, active: active, debug: debug, state: state}
-	if h.host != nil {
+	if h.host != nil && !h.closed {
 		if slot, ok := h.host.OpenHostedSlot(dir); ok {
 			ls.slot = slot
 		}
@@ -274,6 +278,7 @@ func (h *liveHub) close() {
 		sessions = append(sessions, ls)
 	}
 	h.sessions = nil
+	h.closed = true
 	h.mu.Unlock()
 	for _, ls := range sessions {
 		ls.finish()
@@ -559,10 +564,14 @@ func (ls *liveSession) fire() {
 	}
 	snap := ls.state.Snapshot(now.UnixMilli())
 	write := true
+	// The flush clock before this write, restored when it fails.
+	wasFlushNow, wasLastFlush := ls.flushNow, ls.lastFlush
 	if ls.slot != nil {
 		ls.dirty = ls.dirty || repoChanged
 		write = ls.flushNow || (ls.dirty && now.Sub(ls.lastFlush) >= seams.heartbeat)
 		if write {
+			// Cleared before the write, so a change landing during it
+			// marks the state dirty again.
 			ls.dirty, ls.flushNow, ls.lastFlush = false, false, now
 		}
 	}
@@ -583,10 +592,14 @@ func (ls *liveSession) fire() {
 	switch {
 	case err != nil:
 		ls.debug("dashboard.snapshot_write_error", map[string]any{"error": err.Error()})
-		if ls.slot != nil {
+		if ls.slot != nil && write {
 			// Not on disk yet: the next fire or heartbeat tries again.
 			ls.mu.Lock()
 			ls.dirty = true
+			ls.flushNow = ls.flushNow || wasFlushNow
+			if ls.lastFlush.Equal(now) {
+				ls.lastFlush = wasLastFlush
+			}
 			ls.mu.Unlock()
 		}
 	case write && ls.slot == nil:
