@@ -19,6 +19,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wsholder"
 	"github.com/kang-sw/devenv/internal/wstrackerhost"
+	"github.com/kang-sw/devenv/internal/wswake"
 )
 
 // dashboardCommand runs the machine-wide dashboard daemon in the foreground.
@@ -91,6 +92,7 @@ func dashboardCommand(args []string) {
 		WorkspacesFile: wsdashboard.WorkspacesFilePath(configPath),
 		Sessions:       sessions,
 		Worktrees:      sessions,
+		MailWake:       wswake.Mailbox,
 		Agents:         agents,
 		Tracker:        &dashboardTracker{h: tracker, err: trackerErr},
 		// The holders a predecessor left running are found in the state

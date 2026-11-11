@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/kang-sw/devenv/internal/wsmailbox"
+	"github.com/kang-sw/devenv/internal/wswake"
 )
 
 // mailbox_tools.go implements the three host-neutral MCP tools
@@ -113,6 +114,14 @@ func (s *Server) handleMailboxSend(id json.RawMessage, args map[string]any) resp
 		}); werr != nil {
 			return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, werr))
 		}
+	}
+
+	// The send is enqueued: wake the mailbox waits. One this process hosts
+	// (a daemon-hosted server) sees the in-process signal; on the direct
+	// path the daemon's waits learn of it only from the nudge.
+	wswake.Mailbox.Wake()
+	if s.live.host == nil {
+		s.dashboardMailNudge(sessionKey, entry.root)
 	}
 
 	// The send is enqueued: record it in the caller's history ring. A failed

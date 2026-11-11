@@ -21,6 +21,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wsinbox"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
 	"github.com/kang-sw/devenv/internal/wsstate"
+	"github.com/kang-sw/devenv/internal/wswake"
 )
 
 // mailbox.go implements the host-neutral wake CLI
@@ -87,7 +88,7 @@ func mailboxWait(args []string) {
 		})
 		cancelOnParentExit()
 	})
-	os.Exit(runMailboxWait(ctx, args, os.Stdout, os.Stderr, "", os.Getpid(), nil, os.Getenv))
+	os.Exit(runMailboxWait(ctx, args, os.Stdout, os.Stderr, "", os.Getpid(), nil, os.Getenv, nil))
 }
 
 // runMailboxWait is `mailbox wait` as a function: the flags in args, the
@@ -98,8 +99,11 @@ func mailboxWait(args []string) {
 // this process's otherwise), environ is the caller's environment the
 // stores and their git resolve under (nil means this process's), and getenv
 // reads it. A ctx that ends cancels the wait at once and clears the marker,
-// as a signal does.
-func runMailboxWait(ctx context.Context, args []string, stdout, stderr io.Writer, cwd string, ownerPID int, environ []string, getenv func(string) string) int {
+// as a signal does. wake is the hub of a wait the dashboard daemon runs,
+// whose mailbox and inbox writes and nudges signal it, so the wait rechecks
+// on those and polls only as a backstop; nil (a standalone process, which
+// receives no such signal) keeps the short poll.
+func runMailboxWait(ctx context.Context, args []string, stdout, stderr io.Writer, cwd string, ownerPID int, environ []string, getenv func(string) string, wake *wswake.Hub) int {
 	fs := flag.NewFlagSet("mailbox wait", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	root := fs.String("root", ".", "caller's own worktree/clone root; only needed to resolve a worktree/clone-scope --slug")
@@ -187,7 +191,7 @@ func runMailboxWait(ctx context.Context, args []string, stdout, stderr io.Writer
 	// name (a wait launched through the shim re-arms through it).
 	rearmCmd := buildMailboxWaitRearmCommand(mcp.CLICommandNameFrom(getenv), *sessionKey, target.Slug, *timeout, boardFlags(*boardInbox, *boardSteer, *boardInterrupt))
 
-	result, err := wsmailbox.Wait(target, wsmailbox.WaitOptions{Timeout: *timeout, Done: ctx.Done()})
+	result, err := wsmailbox.Wait(target, wsmailbox.WaitOptions{Timeout: *timeout, Done: ctx.Done(), Wake: wake})
 	if errors.Is(err, wsmailbox.ErrWaitCancelled) {
 		fmt.Fprintln(stderr, "ws-mcp mailbox wait: interrupted")
 		return mailboxWaitExitInterrupted

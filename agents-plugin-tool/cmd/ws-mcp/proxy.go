@@ -19,6 +19,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wsrsrc"
+	"github.com/kang-sw/devenv/internal/wswake"
 )
 
 // hostedCallLinger bounds how long the daemon process stays, after it has
@@ -235,7 +236,7 @@ func (s *proxyCLISession) Serve(ctx context.Context, stream io.ReadWriteCloser) 
 	}
 	var stdout bytes.Buffer
 	stderr := &frameWriter{emit: func(data string) { writeFrame(wsdashboard.ProxyCLIFrame{Stream: "stderr", Data: data}) }}
-	code := runMailboxWait(ctx, s.args, &stdout, stderr, s.cwd, s.ownerPID, s.environ, s.getenv)
+	code := runMailboxWait(ctx, s.args, &stdout, stderr, s.cwd, s.ownerPID, s.environ, s.getenv, wswake.Mailbox)
 	writeFrame(wsdashboard.ProxyCLIFrame{Final: true, ExitCode: code, Data: stdout.String()})
 }
 

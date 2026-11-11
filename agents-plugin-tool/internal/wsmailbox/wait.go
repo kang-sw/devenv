@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsinbox"
+	"github.com/kang-sw/devenv/internal/wswake"
 )
 
 // wait.go implements the host-neutral half of the wake path
@@ -93,6 +94,17 @@ func (r WaitResult) Woke() bool { return r.Total() > 0 || r.Board > 0 || r.Inter
 // is unset. Implementation-chosen default, not a cross-ticket contract.
 const DefaultWaitPoll = 500 * time.Millisecond
 
+// WakeBackstopPoll is the recheck interval of a Wait whose WaitOptions.Wake
+// is set and Poll unset: the wakes carry the arrivals, and this backstop
+// covers a lost one.
+const WakeBackstopPoll = 10 * time.Second
+
+// WakeNudgeInterval is the least time between two nudge-driven rechecks of
+// one Wait. A nudge names no store, and nudges for unrelated stores can
+// arrive many times a second, so a nudge inside the interval defers to one
+// trailing recheck at the interval's end.
+const WakeNudgeInterval = time.Second
+
 // WaitOptions configures one Wait call. Now/Sleep are the injectable
 // clock/sleep (mirroring mailbox_runtime.go's mailboxNow convention) so
 // tests exercise the full blocking-then-wakes-on-arrival path without real
@@ -102,12 +114,20 @@ type WaitOptions struct {
 	// block until mail arrives (no deadline).
 	Timeout time.Duration
 	// Poll is the internal recheck interval; <= 0 defaults to
-	// DefaultWaitPoll.
+	// DefaultWaitPoll, or to WakeBackstopPoll when Wake is set.
 	Poll time.Duration
 	// Now defaults to time.Now.
 	Now func() time.Time
-	// Sleep defaults to time.Sleep.
+	// Sleep defaults to time.Sleep. A wait with Wake set never sleeps; it
+	// waits on After instead.
 	Sleep func(time.Duration)
+	// Wake, when set, also ends a wait between polls: a hard wake rechecks
+	// at once, a nudge at most once per WakeNudgeInterval plus one trailing
+	// recheck for nudges that land inside it. Nil polls alone.
+	Wake *wswake.Hub
+	// After is a Wake wait's timer: it returns a channel that receives once
+	// d has passed. Nil uses a real timer.
+	After func(d time.Duration) <-chan time.Time
 	// Done, when set, ends the wait early: Wait returns ErrWaitCancelled
 	// once it closes, within one Poll. A wait the dashboard daemon hosts
 	// for a launcher sets it to the stream's end.
@@ -125,6 +145,24 @@ var ErrWaitCancelled = errors.New("mailbox wait cancelled")
 // arrival event), otherwise blocking in Poll-sized increments until mail
 // arrives or Timeout elapses.
 func Wait(target WaitTarget, opts WaitOptions) (WaitResult, error) {
+	// Resolve once, outside the loop: for a worktree/clone Slug,
+	// PathForScope resolves through wsnote/wsstate, which shells out to git
+	// and rewrites project/worktree metadata (see ai-docs/manuals/ws-mcp.md
+	// on why process cwd alone cannot stand in for this). Re-resolving on
+	// every poll tick would spawn a git process and rewrite metadata every
+	// DefaultWaitPoll for the whole armed-wait lifetime (unbounded with
+	// Timeout == 0), and would also mean one transient resolution failure
+	// hours into an idle wait kills the wake path outright. Only the cheap
+	// Load/LoadReplyStore disk reads repeat per tick below.
+	resolved, err := resolveWaitTarget(target)
+	if err != nil {
+		return WaitResult{}, err
+	}
+	return waitLoop(resolved.peek, opts)
+}
+
+// waitLoop is Wait's recheck loop over peek.
+func waitLoop(peek func() (WaitResult, error), opts WaitOptions) (WaitResult, error) {
 	now := opts.Now
 	if now == nil {
 		now = time.Now
@@ -153,6 +191,9 @@ func Wait(target WaitTarget, opts WaitOptions) (WaitResult, error) {
 	poll := opts.Poll
 	if poll <= 0 {
 		poll = DefaultWaitPoll
+		if opts.Wake != nil {
+			poll = WakeBackstopPoll
+		}
 	}
 
 	hasDeadline := opts.Timeout > 0
@@ -160,19 +201,8 @@ func Wait(target WaitTarget, opts WaitOptions) (WaitResult, error) {
 	if hasDeadline {
 		deadline = now().Add(opts.Timeout)
 	}
-
-	// Resolve once, outside the loop: for a worktree/clone Slug,
-	// PathForScope resolves through wsnote/wsstate, which shells out to git
-	// and rewrites project/worktree metadata (see ai-docs/manuals/ws-mcp.md
-	// on why process cwd alone cannot stand in for this). Re-resolving on
-	// every poll tick would spawn a git process and rewrite metadata every
-	// DefaultWaitPoll for the whole armed-wait lifetime (unbounded with
-	// Timeout == 0), and would also mean one transient resolution failure
-	// hours into an idle wait kills the wake path outright. Only the cheap
-	// Load/LoadReplyStore disk reads repeat per tick below.
-	resolved, err := resolveWaitTarget(target)
-	if err != nil {
-		return WaitResult{}, err
+	if opts.Wake != nil {
+		return wakeLoop(peek, opts, now, poll, hasDeadline, deadline)
 	}
 
 	for {
@@ -183,7 +213,7 @@ func Wait(target WaitTarget, opts WaitOptions) (WaitResult, error) {
 			default:
 			}
 		}
-		result, err := resolved.peek()
+		result, err := peek()
 		if err != nil {
 			return WaitResult{}, err
 		}
@@ -203,6 +233,89 @@ func Wait(target WaitTarget, opts WaitOptions) (WaitResult, error) {
 		} else {
 			sleep(poll)
 		}
+	}
+}
+
+// wakeLoop is waitLoop with opts.Wake set: between rechecks it waits on
+// the poll timer, the hub's signals, and Done together. A nudge rechecks at
+// once when the last nudge-driven recheck is WakeNudgeInterval old or
+// older; otherwise it arms one trailing recheck at that interval's end and
+// stops listening for nudges until then, so a burst costs one recheck per
+// interval plus the trailing one.
+func wakeLoop(peek func() (WaitResult, error), opts WaitOptions, now func() time.Time, poll time.Duration, hasDeadline bool, deadline time.Time) (WaitResult, error) {
+	timer := func(d time.Duration) (<-chan time.Time, func()) {
+		if opts.After != nil {
+			return opts.After(d), func() {}
+		}
+		t := time.NewTimer(d)
+		return t.C, func() { t.Stop() }
+	}
+	sub := opts.Wake.Subscribe()
+	defer sub.Close()
+	var lastNudge time.Time
+	var trailing <-chan time.Time
+	stopTrailing := func() {}
+	defer func() { stopTrailing() }()
+
+	for {
+		if opts.Done != nil {
+			select {
+			case <-opts.Done:
+				return WaitResult{}, ErrWaitCancelled
+			default:
+			}
+		}
+		result, err := peek()
+		if err != nil {
+			return WaitResult{}, err
+		}
+		if result.Woke() {
+			return result, nil
+		}
+		d := poll
+		if hasDeadline {
+			remaining := deadline.Sub(now())
+			if remaining <= 0 {
+				return WaitResult{TimedOut: true}, nil
+			}
+			if remaining < d {
+				d = remaining
+			}
+		}
+		tick, stopTick := timer(d)
+	block:
+		for {
+			nudge := sub.Nudge()
+			if trailing != nil {
+				nudge = nil
+			}
+			select {
+			case <-tick:
+				break block
+			case <-sub.Hard():
+				break block
+			case <-trailing:
+				trailing = nil
+				// The trailing recheck covers every nudge that came since.
+				select {
+				case <-sub.Nudge():
+				default:
+				}
+				lastNudge = now()
+				break block
+			case <-nudge:
+				t := now()
+				if t.Sub(lastNudge) >= WakeNudgeInterval {
+					lastNudge = t
+					break block
+				}
+				trailing, stopTrailing = timer(lastNudge.Add(WakeNudgeInterval).Sub(t))
+			case <-opts.Done:
+				stopTick()
+				return WaitResult{}, ErrWaitCancelled
+			}
+		}
+		stopTick()
 	}
 }
 

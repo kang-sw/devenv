@@ -180,7 +180,10 @@ under `<cache root>/dashboard/`:
   ws-mcp serves it and it has no session record.
 
 After a store write the serving ws-mcp sends `POST /nudge {reply_id,
-project}`; the daemon also re-reads every session every 30 seconds, except
+project}`. A mailbox send by a ws-mcp outside the daemon (the direct path)
+nudges too, registered or not, because the daemon wakes every `mailbox wait`
+it hosts on each nudge before it checks the named session (at most one
+recheck per wait per second, plus a trailing one). The daemon also re-reads every session every 30 seconds, except
 an ended one it already read since it ended (a nudge or a resume still
 re-reads it). A re-read compares a fingerprint taken from metadata (the
 session record, live-store and mailbox-history entry names, the ticket
@@ -871,7 +874,10 @@ launcher writes them as UTF-8 bytes to its own stderr and stdout and exits
 with `exit_code`, so the mod and the Pi waiter see the same output and codes
 as from the direct CLI; closing the connection (the launcher exits, or the
 daemon drains) cancels the wait at once and clears its listening marker
-(`exit_code` 130, "interrupted").
+(`exit_code` 130, "interrupted"). A hosted wait rechecks on an in-process
+signal (a mailbox send by a server the daemon hosts, a board-answer inbox
+write, or a nudge) with a 10 s backstop poll; the direct CLI wait polls
+every 500 ms.
 
 ## Launcher Environment
 
