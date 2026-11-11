@@ -3879,6 +3879,64 @@
    "verdict": "valid"
   },
   {
+   "member": "raj",
+   "clone": "pc",
+   "seq": 22,
+   "ts": "2026-11-05T19:30:00Z",
+   "type": "item.cc",
+   "payload": {
+    "item": "raj.pc#11",
+    "member": "maya"
+   },
+   "seen": {
+    "ada.pc": 15,
+    "bo.pc": 8,
+    "ivy.pc": 8,
+    "jon.pc": 8,
+    "kai.pc": 4,
+    "lena.pc": 5,
+    "mallory.pc": 1,
+    "maya.lap": 4,
+    "maya.pc": 21,
+    "noa.pc": 5,
+    "omar.pc": 3,
+    "pia.pc": 3,
+    "sven.pc": 8,
+    "tia.pc": 7,
+    "uma.pc": 5
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "raj",
+   "clone": "pc",
+   "seq": 23,
+   "ts": "2026-11-05T19:30:00Z",
+   "type": "item.cc",
+   "payload": {
+    "item": "raj.pc#7",
+    "member": "maya"
+   },
+   "seen": {
+    "ada.pc": 15,
+    "bo.pc": 8,
+    "ivy.pc": 8,
+    "jon.pc": 8,
+    "kai.pc": 4,
+    "lena.pc": 5,
+    "mallory.pc": 1,
+    "maya.lap": 4,
+    "maya.pc": 21,
+    "noa.pc": 5,
+    "omar.pc": 3,
+    "pia.pc": 3,
+    "sven.pc": 8,
+    "tia.pc": 7,
+    "uma.pc": 5
+   },
+   "verdict": "valid"
+  },
+  {
    "member": "bo",
    "clone": "pc",
    "seq": 9,
@@ -3949,6 +4007,65 @@
     "raj.pc": 10,
     "sven.pc": 5,
     "tia.pc": 5
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "tia",
+   "clone": "pc",
+   "seq": 8,
+   "ts": "2026-11-05T20:40:00Z",
+   "type": "comment.add",
+   "payload": {
+    "item": "raj.pc#11",
+    "body": "Capacity numbers for the search cluster are in; the plan draft follows tomorrow."
+   },
+   "seen": {
+    "ada.pc": 15,
+    "bo.pc": 8,
+    "ivy.pc": 8,
+    "jon.pc": 8,
+    "kai.pc": 4,
+    "lena.pc": 5,
+    "mallory.pc": 1,
+    "maya.lap": 4,
+    "maya.pc": 21,
+    "noa.pc": 5,
+    "omar.pc": 3,
+    "pia.pc": 3,
+    "raj.pc": 23,
+    "sven.pc": 8,
+    "uma.pc": 5
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "pia",
+   "clone": "pc",
+   "seq": 4,
+   "ts": "2026-11-05T20:50:00Z",
+   "type": "item.status",
+   "payload": {
+    "item": "raj.pc#7",
+    "status": "blocked",
+    "note": "still waiting on the cache vendor's quota"
+   },
+   "seen": {
+    "ada.pc": 15,
+    "bo.pc": 8,
+    "ivy.pc": 8,
+    "jon.pc": 8,
+    "kai.pc": 4,
+    "lena.pc": 5,
+    "mallory.pc": 1,
+    "maya.lap": 4,
+    "maya.pc": 21,
+    "noa.pc": 5,
+    "omar.pc": 3,
+    "raj.pc": 23,
+    "sven.pc": 8,
+    "tia.pc": 7,
+    "uma.pc": 5
    },
    "verdict": "valid"
   },
@@ -5141,7 +5258,7 @@
      "counts": {},
      "blocked": []
     },
-    "lastActivity": "2026-11-05T11:00:00Z",
+    "lastActivity": "2026-11-05T20:50:00Z",
     "started": null,
     "children": [],
     "assignments": [
@@ -5153,7 +5270,9 @@
      "raj.pc#8",
      "pia.pc#2",
      "tia.pc#5",
-     "bo.pc#8"
+     "bo.pc#8",
+     "raj.pc#23",
+     "pia.pc#4"
     ],
     "concurrent": 0,
     "depth": 2,
@@ -5169,7 +5288,9 @@
     "open": null,
     "claimable": false,
     "requests": [],
-    "cc": []
+    "cc": [
+     "maya"
+    ]
    },
    "tia.pc#3": {
     "id": "tia.pc#3",
@@ -5405,7 +5526,7 @@
       "sven.pc#6"
      ]
     },
-    "lastActivity": "2026-11-05T16:40:00Z",
+    "lastActivity": "2026-11-05T20:40:00Z",
     "started": "2026-11-05T16:40:00Z",
     "children": [
      "raj.pc#13",
@@ -5422,7 +5543,9 @@
      "raj.pc#13",
      "raj.pc#15",
      "raj.pc#17",
-     "tia.pc#7"
+     "tia.pc#7",
+     "raj.pc#22",
+     "tia.pc#8"
     ],
     "concurrent": 0,
     "depth": 0,
@@ -5436,7 +5559,9 @@
     "open": null,
     "claimable": false,
     "requests": [],
-    "cc": []
+    "cc": [
+     "maya"
+    ]
    },
    "raj.pc#13": {
     "id": "raj.pc#13",
@@ -6877,7 +7002,7 @@
     "state": "live",
     "forced": true,
     "status": "blocked",
-    "note": "waiting for the redis cluster approval",
+    "note": "still waiting on the cache vendor's quota",
     "noteBy": "pia",
     "via": "raj.pc#8",
     "ts": "2026-11-03T09:30:00Z",
@@ -6898,7 +7023,7 @@
     "depth": 1,
     "statusOrigin": "human",
     "statusBy": "pia",
-    "lastUpdate": "2026-11-03T10:10:00Z",
+    "lastUpdate": "2026-11-05T20:50:00Z",
     "stale": false
    },
    "maya.pc#11@sven.pc#3>sven": {
@@ -7655,6 +7780,19 @@
       "mime": "image/png"
      }
     ],
+    "refs": []
+   },
+   "tia.pc#8": {
+    "id": "tia.pc#8",
+    "item": "raj.pc#11",
+    "author": "tia",
+    "body": "Capacity numbers for the search cluster are in; the plan draft follows tomorrow.",
+    "reply_to": null,
+    "ts": "2026-11-05T20:40:00Z",
+    "edited": null,
+    "hidden": null,
+    "mentions": [],
+    "attachments": [],
     "refs": []
    },
    "maya.pc#22": {
@@ -11156,6 +11294,54 @@
     "late": false
    },
    {
+    "id": "raj.pc#22",
+    "alias": "raj.pc-22",
+    "stream": "raj.pc",
+    "member": "raj",
+    "seq": 22,
+    "ts": "2026-11-05T19:30:00Z",
+    "type": "item.cc",
+    "origin": "human",
+    "payload": {
+     "item": "raj.pc#11",
+     "member": "maya"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "raj.pc#11",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "raj.pc#23",
+    "alias": "raj.pc-23",
+    "stream": "raj.pc",
+    "member": "raj",
+    "seq": 23,
+    "ts": "2026-11-05T19:30:00Z",
+    "type": "item.cc",
+    "origin": "human",
+    "payload": {
+     "item": "raj.pc#7",
+     "member": "maya"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "raj.pc#7",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
     "id": "bo.pc#9",
     "alias": "bo.pc-9",
     "stream": "bo.pc",
@@ -11214,6 +11400,55 @@
     "markers": [],
     "superseded": [],
     "thread": "bo.pc#9",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "tia.pc#8",
+    "alias": "tia.pc-8",
+    "stream": "tia.pc",
+    "member": "tia",
+    "seq": 8,
+    "ts": "2026-11-05T20:40:00Z",
+    "type": "comment.add",
+    "origin": "human",
+    "payload": {
+     "item": "raj.pc#11",
+     "body": "Capacity numbers for the search cluster are in; the plan draft follows tomorrow."
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "raj.pc#11",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "pia.pc#4",
+    "alias": "pia.pc-4",
+    "stream": "pia.pc",
+    "member": "pia",
+    "seq": 4,
+    "ts": "2026-11-05T20:50:00Z",
+    "type": "item.status",
+    "origin": "human",
+    "payload": {
+     "item": "raj.pc#7",
+     "status": "blocked",
+     "note": "still waiting on the cache vendor's quota"
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "raj.pc#7",
     "parentThread": null,
     "local": false,
     "open": false,
@@ -11553,7 +11788,7 @@
      "stale": 0,
      "overdue": 0,
      "fallback": 0,
-     "last": "2026-11-05T17:00:00Z"
+     "last": "2026-11-05T20:50:00Z"
     },
     {
      "id": "bo",
@@ -11613,15 +11848,15 @@
    "ccNotices": []
   },
   "stats": {
-   "events": 138,
-   "commits": 108,
+   "events": 142,
+   "commits": 111,
    "flagged": 17,
    "concurrent": 2
   },
   "heads": {
    "ada.pc": 19,
    "maya.pc": 22,
-   "raj.pc": 21,
+   "raj.pc": 23,
    "bo.pc": 9,
    "lena.pc": 7,
    "omar.pc": 3,
@@ -11629,10 +11864,10 @@
    "jon.pc": 8,
    "kai.pc": 4,
    "sven.pc": 8,
-   "tia.pc": 7,
+   "tia.pc": 8,
    "noa.pc": 5,
    "uma.pc": 7,
-   "pia.pc": 3,
+   "pia.pc": 4,
    "mallory.pc": 1,
    "maya.lap": 4
   },
