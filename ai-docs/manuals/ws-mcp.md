@@ -492,6 +492,86 @@ and starts one at its next send. An attached ws-mcp gets
 `WS_MCP_ALLOWED_TOOLS` (the profile's ws tools) and `WS_MCP_NO_DASHBOARD`,
 and no mailbox identity.
 
+The runner also hosts lead sessions: a headless Claude Code or Pi process
+that loads the user's own harness setup (no profile allowlist, plugins, or
+system prompt of the runner's), started from the built-in `lead-claude` or
+`lead-pi` profile. `POST /agents` refuses a lead profile; a lead is spawned
+by `POST /agents/leads {root, harness: "claude"|"pi", model?, effort?,
+permission_mode?}` (201 with the state; `root` must be inside git, since the
+session key is minted at the canonical root). Differences from a support
+conversation:
+
+- **Process.** The harness runs under a session holder (`internal/wsholder`,
+  pipe mode), not as the daemon's child, so it outlives the daemon. The
+  record (`agent.json`) keeps the holder id, the harness PID, and the last
+  holder record sequence applied. A starting daemon rejoins each lead's
+  holder, replays its ring up to the holder's current sequence, and applies
+  only records past the recorded one: no entry is written twice, and a
+  permission prompt that waited across the restart waits again. It never
+  starts a `--resume` process while the holder's process runs. A lead holder
+  no conversation runs under is ended after the first scan. A daemon that
+  stops is restarted by the hosted session's own launcher at its ws-mcp
+  reconnect (Daemon-Hosted MCP below).
+- **Identity.** The daemon mints the session's lead key at spawn and writes
+  the registration itself (`hosted: true`, `host_pid`), heartbeats it, and
+  end-marks it at close. The harness gets `WS_HOSTED_SESSION`,
+  `WS_HOSTED_SESSION_KEY`, and `WS_HOSTED_SESSION_ROW` (Environment below);
+  the daemon's own `CLAUDE*`, `WS_MAILBOX*`, `WS_MCP_*`, `WS_RSRC*`,
+  `WS_HOSTED_*`, and `WS_PI_*` variables are not passed on. A ws-mcp that is
+  not the hosted harness's never writes, heartbeats, removes, or end-marks a
+  row that carries `hosted: true`, whatever key it is given.
+- **Input.** Every input is the daemon's. A composer message is held in the
+  inbox and submitted at the turn's end; a steered one is written to the
+  running process at once (Claude: a user message mid-turn, Pi: RPC
+  `steer`). The daemon watches the lead key's mailbox (`LeadMail`, in
+  `internal/mcp/lead_mail.go`), claims what arrives into the record, and
+  submits it as a turn whose text is what the mailbox wait hands a session;
+  the session arms no wait of its own. A turn no send started (a background
+  task's result) and a compaction's replayed assistant line are handled as
+  the stream reports them.
+- **Turns.** With `CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1` the CLI reports
+  `session_state_changed`; once one is seen, only `idle` ends a turn and
+  releases held sends (a `result` does not: background work may still run).
+  Without those lines a `result` ends the turn.
+- **Approvals.** Claude runs with `--permission-prompt-tool stdio`. A
+  `can_use_tool` request becomes a pending approval in the state
+  (`approvals[]`, keyed by request id; several may wait, a subagent's with
+  `agent_id`), shown on the page as a card, and is answered by `POST
+  /agents/<id>/approvals/<request-id> {behavior: "allow"|"deny", message?}`
+  once (a later or unknown answer is 409). `AskUserQuestion`,
+  `ExitPlanMode`, and any request that needs user interaction are denied at
+  once with a message telling the model to ask in chat. A harness that
+  reports `requires_action` with no prompt pending for two seconds shows
+  `action_needed` in the state. An answered id is kept in the record, so a
+  restart does not ask again.
+- **Settings.** `POST /agents/<id>/settings {model?, effort?,
+  permission_mode?}` applies in-stream where the harness has a control
+  (Claude: `set_model`, `apply_flag_settings` for effort,
+  `set_permission_mode`; Pi: `set_model`, `set_thinking_level`) and keeps
+  the process; a restart on the same backend session is the last resort.
+  The record holds the current values, and every resume launches with them.
+  Permission modes: `auto` (the default), `default`, `acceptEdits`, `plan`,
+  `dontAsk`, `bypassPermissions`; a Pi lead has none.
+- **Access.** Spawn, settings, stop, close, and an approval answer take the
+  trusted gate (`wsdashboard.TrustedWrite`): 404 to any viewer that is not a
+  browser on this machine, 403 without the daemon's own `Origin`. A LAN
+  viewer reads the session and may send and interrupt; the state's
+  `can_control` tells the page which viewer it serves.
+- **Page.** The rail's "+ session" button (worktree rows and plain-folder
+  bars; a plain folder's spawn is refused by the route) opens the spawn
+  popover, with model and effort choices from `GET /support/choices`. A
+  hosted session's page reads `GET /agents/<id>` on load, on a head swap,
+  when the live region's permission line changes, and when its menu opens
+  (no timer): approval cards, the `action_needed` notice, and the harness
+  chip's menu (model, permission mode, effort, stop, close) come from that
+  state. The rail and index mark a hosted row and show its waiting approval
+  from the live snapshot, which names the oldest pending prompt only. The
+  local-viewer controls are hidden by CSS unless `<html>` carries
+  `data-sysopen`; the routes refuse regardless. A tab asks for notification
+  permission on Start or a composer send and raises one notification when a
+  session starts waiting (a toast without permission, which is every
+  plain-http LAN tab).
+
 A tracker store's support conversation is an ordinary runner conversation
 on a support profile whose working root is the store's registry `Dir`; the
 daemon keeps one per store under `/support` (`internal/wsagent/support.go`,
@@ -617,6 +697,17 @@ stay embedded. A running daemon keeps its mode, so shut it down first
 `WS_MCP_DASHBOARD_DEV_SOURCE=$PWD/agents-plugin-tool ws-mcp dashboard`; a
 half-edited template answers 500 (the error is in `dashboard.log`) and the next
 request retries.
+
+An isolated probe daemon needs both `WS_CACHE_HOME` (state directory, session
+keys, mailboxes) and `WS_CONFIG_HOME` (global config, the stored workspace
+list, which sits beside the config file) pointed at scratch directories, and
+its own `-port`: with only the cache home moved, the rail's workspace routes
+write the real `~/.ws/dashboard/workspaces.json`. A harness the probe daemon
+hosts loads the installed plugin, whose launcher may start the installed
+runtime as the daemon when the probe daemon stops; put a `claude` first on
+`PATH` that `exec`s the real one with the plugin under test (an `exec`
+keeps the PID the hosted-session check compares) and
+`WS_MCP_BOOTSTRAP_BINARY` set to the probe binary.
 
 Profiling: with `WS_MCP_DASHBOARD_PPROF=1` (also `true`/`yes`/`on`) in the
 environment of `ws-mcp dashboard`, the daemon serves `net/http/pprof` under
