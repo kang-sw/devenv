@@ -393,19 +393,6 @@
     "261110-feat-ws-tracker-daemon-event-hook": {
       "registered_at": "2026-11-10T06:49:16Z"
     },
-    "261110-feat-ws-tracker-item-move-reparent": {
-      "registered_at": "2026-11-09T15:09:01Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-11T07:45:08Z",
-        "impl": {
-          "branch": "impl/develop/sheet-cash-expel"
-        }
-      }
-    },
     "261110-feat-ws-tracker-self-assign-claim": {
       "registered_at": "2026-11-10T06:54:56Z",
       "lease": {
@@ -438,7 +425,17 @@
       "registered_at": "2026-11-11T07:02:07Z"
     },
     "261111-bug-ws-whiteboard-title-patch-reask": {
-      "registered_at": "2026-11-11T08:22:41Z"
+      "registered_at": "2026-11-11T08:22:41Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "28ef83e379b353cc",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-11T08:41:06Z",
+        "impl": {
+          "branch": "impl/develop/tulip-scone-stoke"
+        }
+      }
     },
     "261111-feat-ws-dashboard-hosted-usage-limit-continue": {
       "registered_at": "2026-11-11T04:19:25Z"
