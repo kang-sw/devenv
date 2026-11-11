@@ -160,6 +160,10 @@ button.closed-more { display: flex; margin: 0 auto 16px; }
 .new { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--wb-primary); flex: none; align-self: center; }
 .cbar .new { background: currentColor; }
 .ctx { margin: 0 0 8px; color: var(--wb-muted-fg); font-size: 13px; overflow-wrap: anywhere; }
+/* item block fields hold sanitized HTML whose inline style may still paint
+   outside its box (no position, but margins, transforms, shadows): clip each
+   field container, as the finished reply bubble is */
+.opt, .ctx, .rec-line { contain: paint; }
 
 /* markdown in item fields: inline code everywhere, blocks inside .md */
 :not(pre) > code { font-size: .92em; background: var(--wb-muted); border-radius: 4px; padding: 0 4px; }

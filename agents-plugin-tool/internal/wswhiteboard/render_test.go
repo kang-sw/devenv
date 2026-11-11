@@ -309,6 +309,11 @@ func TestRenderPageEmbedMarksANewBody(t *testing.T) {
 	wantAll(t, full, `data-key="doc:fresh" open>`, `data-key="doc:stale" open>`)
 }
 
+// TestRenderPageEscapesItemTextButNotTopicBody pins what reaches a page as
+// markup: a title, topic name, link, answer quote, and panel text escape
+// every tag; option, rationale, and recommendation text keep only what the
+// reply sanitizer keeps (<u> stays, a script, an event attribute, and a
+// javascript: link do not); a topic body is written as is.
 func TestRenderPageEscapesItemTextButNotTopicBody(t *testing.T) {
 	st := &State{Seq: 2, Topics: []TopicDoc{{Name: "t", Body: `<b id="doc-raw">raw <i>doc</i></b>`}}}
 	st.Items = []Item{
@@ -320,7 +325,7 @@ func TestRenderPageEscapesItemTextButNotTopicBody(t *testing.T) {
 	panels := []Panel{{ID: `x"><script>p()</script>`, Title: "<script>pt()</script>", Icon: `"><script>`, Rows: []PanelRow{{State: `"><b>`, Label: "<l>", Text: "<script>pr()</script>"}}}}
 	for name, layout := range layouts() {
 		out := render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r", Panels: panels}))
-		for _, raw := range []string{"<script>alert(1)", "<script>t()", "<img src=x", "<script>r()", "<u>why</u>", `href="javascript`, "<script>q()", "<script>p()", "<script>pt()", "<script>pr()", "<tag>"} {
+		for _, raw := range []string{"<script>alert(1)", "<script>t()", "alert(2)", "<script>r()", `href="javascript`, "<script>q()", "<script>p()", "<script>pt()", "<script>pr()", "<tag>"} {
 			if strings.Contains(out, raw) {
 				t.Errorf("%s: item text %q is not escaped", name, raw)
 			}
@@ -330,6 +335,9 @@ func TestRenderPageEscapesItemTextButNotTopicBody(t *testing.T) {
 			if !strings.Contains(out, escaped) {
 				t.Errorf("%s: escaped text %q missing", name, escaped)
 			}
+		}
+		if !strings.Contains(out, `<div class="rec-line md" title="recommendation"><b><svg class="i" aria-hidden="true"><use href="#i-star"/></svg>a</b> <u>why</u></div>`) {
+			t.Errorf("%s: a kept tag in the recommendation is not kept", name)
 		}
 		if !strings.Contains(out, `<b id="doc-raw">raw <i>doc</i></b>`) {
 			t.Errorf("%s: topic body is not written unescaped", name)

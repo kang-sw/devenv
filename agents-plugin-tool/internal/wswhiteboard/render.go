@@ -571,8 +571,30 @@ func (d itemData) Expandable() bool {
 	return len(d.Options) > 0 || d.Rationale != ""
 }
 
+// OptionHTML, RationaleHTML, and RecHTML render the item's block fields
+// through itemField, each salted with its place on the page so identical
+// texts never share a footnote or SVG id prefix.
+func (d itemData) OptionHTML(o OptionView) template.HTML {
+	return d.Page.itemField(o.Text, fmt.Sprintf("%d/option/%s", d.ID, o.Letter))
+}
+
+func (d itemData) RationaleHTML() template.HTML {
+	return d.Page.itemField(d.Rationale, fmt.Sprintf("%d/why", d.ID))
+}
+
+func (d itemData) RecHTML() template.HTML {
+	return d.Page.itemField(d.RecText, fmt.Sprintf("%d/recommend", d.ID))
+}
+
+// PickedChip is the picked option's chip text: its first line as inline
+// markdown, with the HTML an option may hold dropped to its text (PlainHTML),
+// since the chip sits in one line of the settled row's summary.
+func (d itemData) PickedChip(o OptionView) template.HTML {
+	return d.Page.FirstLine(PlainHTML(o.Text))
+}
+
 // Stacked reports whether the item's options render as stacked cards: any
-// option holds block markdown.
+// option holds block content (IsBlock).
 func (d itemData) Stacked() bool {
 	for _, o := range d.Options {
 		if d.Page.IsBlock(o.Text) {

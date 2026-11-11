@@ -14,8 +14,9 @@ import (
 	"golang.org/x/net/html/atom"
 )
 
-// A finished lead reply renders markdown with raw HTML (TextTargets.HTML),
-// and this file is the whole trust boundary on that HTML. The served pages
+// A finished lead reply (TextTargets.HTML) and an item's option, rationale,
+// and recommendation text (itemField) render markdown with raw HTML, and
+// this file is the whole trust boundary on that HTML. The served pages
 // send no CSP, so markup that slips through runs in the daemon origin, which
 // accepts message and steer posts. The rendered fragment is therefore parsed
 // and re-serialized, so a stray closing tag stays inside the reply and the
@@ -33,16 +34,18 @@ import (
 //   - An inline style keeps only declarations free of url(, image-set(, src(,
 //     expression(, @import, and backslash escapes, and loses position, so no
 //     reply fetches through CSS or lays a layer over the page; the finished
-//     bubble's contain: paint keeps the rest inside it.
+//     bubble's and the item field containers' contain: paint keeps the rest
+//     inside them.
 //   - A footnote's sup and li keep their id when it has the shape
 //     footnoteIDPrefix writes and carries this text's own prefix, and no other
 //     element keeps one, so a reply cannot claim a page id or another
 //     message's footnote id; a task-list checkbox is the one form control,
 //     always a disabled checkbox.
 //   - SVG keeps shapes, text, markers, and gradients: an id is prefixed with
-//     svgIDPrefix and a hash of the reply, so it collides neither with a page
-//     id nor with another reply's same-named id, and a presentation value may
-//     reference only such a local id through url(#...).
+//     svgIDPrefix and a hash of the text and its salt, so it collides neither
+//     with a page id nor with another text's same-named id, and a
+//     presentation value may reference only such a local id through
+//     url(#...).
 
 // trustAttr carries a writeTrustRef index on a link or image the markdown
 // renderer resolved.
@@ -138,9 +141,11 @@ func init() {
 	}
 }
 
-// sanitizeReply parses the raw pipeline's output for a finished reply and
-// writes back only what the allow-lists keep.
-func (p *pageData) sanitizeReply(fragment string) template.HTML {
+// sanitizeReply parses the raw pipeline's output for a finished reply or an
+// item field and writes back only what the allow-lists keep. salt goes into
+// the SVG id prefix with the fragment, as footnoteIDPrefix takes it: empty
+// for a reply, the field's place on the page for an item field.
+func (p *pageData) sanitizeReply(fragment, salt string) template.HTML {
 	context := &xhtml.Node{Type: xhtml.ElementNode, Data: "div", DataAtom: atom.Div}
 	nodes, err := xhtml.ParseFragment(strings.NewReader(fragment), context)
 	if err != nil {
@@ -152,6 +157,10 @@ func (p *pageData) sanitizeReply(fragment string) template.HTML {
 		root.AppendChild(n)
 	}
 	h := fnv.New32a()
+	if salt != "" {
+		h.Write([]byte(salt))
+		h.Write([]byte{0})
+	}
 	h.Write([]byte(fragment))
 	p.svgIDs = fmt.Sprintf("%s%08x-", svgIDPrefix, h.Sum32())
 	p.sanitizeChildren(root)
@@ -474,4 +483,70 @@ func filterStyle(style string) string {
 		kept = append(kept, name+": "+value)
 	}
 	return strings.Join(kept, "; ")
+}
+
+// PlainHTML renders an item's option, rationale, or recommendation text as
+// plain text for a reader of text output (whiteboard.query), by the rule
+// Plain applies to the inline tags, widened to the HTML itemField keeps:
+// every tag is dropped and its text kept, <code> becomes backticks and <br>
+// a space, an image prints its alt text, and the elements the sanitizer
+// drops with their content (replyDropped, replySVGDropped) print nothing.
+// Text with no tag and no entity is returned as stored.
+func PlainHTML(s string) string {
+	if !strings.ContainsAny(s, "<&") {
+		return s
+	}
+	context := &xhtml.Node{Type: xhtml.ElementNode, Data: "div", DataAtom: atom.Div}
+	nodes, err := xhtml.ParseFragment(strings.NewReader(s), context)
+	if err != nil {
+		return Plain(s)
+	}
+	var sb strings.Builder
+	for _, n := range nodes {
+		writePlain(&sb, n)
+	}
+	return strings.TrimRight(sb.String(), " ")
+}
+
+// writePlain writes n's text as PlainHTML prints it. A table cell, row, or
+// other block element ends with a space when its text did not, so the text
+// of adjacent cells stays apart.
+func writePlain(sb *strings.Builder, n *xhtml.Node) {
+	switch n.Type {
+	case xhtml.TextNode:
+		sb.WriteString(n.Data)
+		return
+	case xhtml.ElementNode:
+	default:
+		return
+	}
+	name := strings.ToLower(n.Data)
+	if (n.Namespace == "" && replyDropped[name]) || (n.Namespace == "svg" && replySVGDropped[name]) {
+		return
+	}
+	if n.Namespace == "" {
+		switch name {
+		case "br":
+			sb.WriteByte(' ')
+			return
+		case "img":
+			for _, a := range n.Attr {
+				if a.Key == "alt" {
+					sb.WriteString(a.Val)
+				}
+			}
+			return
+		case "code":
+			sb.WriteByte('`')
+			defer sb.WriteByte('`')
+		}
+	}
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		writePlain(sb, c)
+	}
+	if n.Namespace == "" && !phrasingTags[name] && name != "code" {
+		if out := sb.String(); out != "" && !strings.HasSuffix(out, " ") && !strings.HasSuffix(out, "\n") {
+			sb.WriteByte(' ')
+		}
+	}
 }

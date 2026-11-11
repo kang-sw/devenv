@@ -35,8 +35,9 @@
           btn.setAttribute("aria-pressed", on ? "false" : "true");
           build();
         }
-        // A link inside an option follows the link and picks nothing.
-        btn.addEventListener("click", function (e) { if (!e.target.closest("a")) pick(); });
+        // A link inside an option follows the link and picks nothing; a
+        // summary inside one toggles its details and picks nothing.
+        btn.addEventListener("click", function (e) { if (!e.target.closest("a, summary")) pick(); });
         // A stacked option card is a role="button" element, not a native
         // button, so it takes Enter and Space itself.
         if (btn.getAttribute("role") === "button") btn.addEventListener("keydown", function (e) {

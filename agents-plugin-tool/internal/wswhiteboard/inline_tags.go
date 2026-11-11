@@ -213,7 +213,8 @@ var inlineTagAny = regexp.MustCompile(`(?i)<(/?)(code|b|strong|i|em|kbd|br)[ \t]
 // Plain renders the allowlisted inline tags as plain text for a reader of
 // text output (whiteboard.query): <code> and </code> become a backtick, <br>
 // a space, and the other tags are dropped keeping their text. A tag with an
-// attribute, and every other tag, stays as written.
+// attribute, and every other tag, stays as written, since a title shows it
+// as text; the block fields, which render HTML, print through PlainHTML.
 func Plain(s string) string {
 	if !strings.Contains(s, "<") {
 		return s
