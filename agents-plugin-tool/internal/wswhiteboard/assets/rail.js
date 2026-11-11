@@ -76,6 +76,11 @@
   // the rail.
   var topics = [], found = [], dirty = true, last = "", stuck = null, raf = 0, inset = 0;
   function readInset() { inset = root ? parseFloat(getComputedStyle(host).getPropertyValue("--wb-rail-inset")) || 0 : 0; }
+  // scrollRest is how far the scroller can still scroll down, in px.
+  function scrollRest() {
+    var e = root || d.scrollingElement || d.documentElement;
+    return Math.max(0, e.scrollHeight - e.clientHeight - e.scrollTop);
+  }
   function viewTop() { return root ? root.getBoundingClientRect().top + padTop + inset : 0; }
 
   // The rail's items are the board's topics and any other node the host
@@ -141,10 +146,13 @@
     // Bottom: the next topics whose bar's top edge is at or below the
     // bottom stack's top edge (over the reply bar, when it shows), i.e.
     // hidden behind the stack or further down. A bar that shows above the
-    // stack gets no capsule, so the stack may hold fewer than two.
+    // stack gets no capsule, so the stack may hold fewer than two. Nor does
+    // a bar in view that the rest of the scroll cannot lift above the line
+    // (a short last item at the end of the board): it is as high as it will
+    // ever go, and a capsule would only cover it.
     var reply = box.querySelector(".reply"), replyOff = reply && reply.offsetHeight ? reply.offsetHeight + 14 : 0;
-    var line = vb - replyOff - BOT, below = [];
-    for (k = above + (cur >= 0 ? 1 : 0); k < n; k++) if (rects[k].top >= line) below.push(k);
+    var line = vb - replyOff - BOT, below = [], rest = scrollRest();
+    for (k = above + (cur >= 0 ? 1 : 0); k < n; k++) if (rects[k].top >= line && !(rects[k].top < vb && rects[k].top - rest >= line)) below.push(k);
     draw({
       top: top,
       cur: cur,

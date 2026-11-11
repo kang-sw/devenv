@@ -1062,6 +1062,28 @@ func TestTopicRailRailsHostItems(t *testing.T) {
 	}
 }
 
+// TestTopicRailEndOfBoard pins the rail at the end of the board: a bar in
+// view that the rest of the scroll cannot lift above the bottom stack's
+// line (a short last item at max scroll) gets no bottom capsule, which
+// would only cover it (and, with the bottom morph, shrink it into the
+// capsule).
+func TestTopicRailEndOfBoard(t *testing.T) {
+	assets, err := PageAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	js := string(assets.FormScript)
+	for _, want := range []string{
+		"return Math.max(0, e.scrollHeight - e.clientHeight - e.scrollTop);",
+		"var line = vb - replyOff - BOT, below = [], rest = scrollRest();",
+		"if (rects[k].top >= line && !(rects[k].top < vb && rects[k].top - rest >= line)) below.push(k);",
+	} {
+		if !strings.Contains(js, want) {
+			t.Errorf("the rail script lacks %q", want)
+		}
+	}
+}
+
 // A standalone page renders in the language its view names: the static text
 // (tooltips, the folded count) comes from the language's table, the board's
 // own content (titles, panel rows) stays as written, and the page carries the
