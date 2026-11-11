@@ -191,6 +191,54 @@ func TestSupportNewConversationClosesTheOld(t *testing.T) {
 	}
 }
 
+// TestSupportCloseUnregisteredEndsARemovedStoresConversation: a store that
+// is no longer registered has its conversation closed and its mapping
+// dropped, also on disk; a registered store keeps its conversation; with no
+// store mapped nothing is read.
+func TestSupportCloseUnregisteredEndsARemovedStoresConversation(t *testing.T) {
+	sh := newSupportHarness(t)
+	reads := 0
+	sh.support.opts.StoreRoot = func(id string) (string, error) { reads++; return sh.storeRoot(id) }
+	if dropped := sh.support.CloseUnregistered(); len(dropped) != 0 || reads != 0 {
+		t.Fatalf("with no store mapped: dropped %v after %d store reads, want none and none", dropped, reads)
+	}
+	alpha := sh.send("alpha", "hello")
+	beta := sh.send("beta", "hi")
+	if dropped := sh.support.CloseUnregistered(); len(dropped) != 0 {
+		t.Fatalf("with every store registered, dropped %v", dropped)
+	}
+
+	delete(sh.stores, "alpha")
+	if dropped := sh.support.CloseUnregistered(); !reflect.DeepEqual(dropped, []string{"alpha"}) {
+		t.Fatalf("dropped %v, want [alpha]", dropped)
+	}
+	if st := sh.state(alpha.ID); st.Status != StatusClosed {
+		t.Fatalf("the unregistered store's conversation is %s, want closed", st.Status)
+	}
+	if st := sh.state(beta.ID); st.Status == StatusClosed {
+		t.Fatal("a registered store's conversation was closed")
+	}
+	if c := sh.storeConv("beta"); c == nil || c.ID != beta.ID {
+		t.Fatalf("beta maps %+v, want %s", c, beta.ID)
+	}
+	raw, err := os.ReadFile(filepath.Join(sh.dir, supportFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var saved supportState
+	if err := json.Unmarshal(raw, &saved); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := saved.Stores["alpha"]; ok || saved.Stores["beta"] != beta.ID {
+		t.Fatalf("support.json maps %v, want beta alone", saved.Stores)
+	}
+	// A store registered again under the id starts a fresh conversation.
+	sh.stores["alpha"] = t.TempDir()
+	if st := sh.send("alpha", "back"); st.ID == alpha.ID {
+		t.Fatalf("the re-registered store reopened the closed conversation %s", st.ID)
+	}
+}
+
 func TestSupportHarnessSwitchReplacesTheConversation(t *testing.T) {
 	sh := newSupportHarness(t)
 	old := sh.send("alpha", "hello")

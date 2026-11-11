@@ -76,6 +76,14 @@ func dashboardCommand(args []string) {
 	var trackerChanged lateFunc
 	agents := newAgentRunner(dir, logw, trackerChanged.call)
 	host := &proxyHost{dir: dir, port: *port, lan: *lan, buildTime: *buildTime, contentHash: contentHash, logw: logw, configPath: filepath.Clean(configPath)}
+	// A store's support conversation runs in the store's clone, so an
+	// unregister ends it: right after the dashboard's own, and on the store
+	// watch's change for one another process ran (tk:unregister).
+	support := wsagent.NewSupport(wsagent.SupportOptions{
+		Runner:    agents,
+		Dir:       dir,
+		StoreRoot: trackerStoreRoot(tracker, trackerErr),
+	})
 	daemon, err := wsdashboard.StartDaemon(wsdashboard.DaemonOptions{
 		Dir:         dir,
 		Port:        *port,
@@ -92,7 +100,7 @@ func dashboardCommand(args []string) {
 		Sessions:       sessions,
 		Worktrees:      sessions,
 		Agents:         agents,
-		Tracker:        &dashboardTracker{h: tracker, err: trackerErr},
+		Tracker:        &dashboardTracker{h: tracker, err: trackerErr, unregistered: func() { support.CloseUnregistered() }},
 		// The holders a predecessor left running are found in the state
 		// directory; the interpreter for a new one is the launcher's own.
 		Holders: wsholder.New(wsholder.Options{
@@ -100,11 +108,7 @@ func dashboardCommand(args []string) {
 			Python: os.Getenv(wsholder.PythonEnv),
 			Log:    logw,
 		}),
-		Support: wsagent.NewSupport(wsagent.SupportOptions{
-			Runner:    agents,
-			Dir:       dir,
-			StoreRoot: trackerStoreRoot(tracker, trackerErr),
-		}),
+		Support: support,
 	})
 	if errors.Is(err, wsdashboard.ErrLocked) {
 		closeTracker()
@@ -123,7 +127,10 @@ func dashboardCommand(args []string) {
 	}
 	trackerChanged.set(daemon.TrackerChanged)
 	stopPoll := startTrackerPoll(tracker, trackerErr, daemon.TrackerChanged, logw)
-	stopWatch := startTrackerWatch(tracker, trackerErr, daemon.TrackerChanged)
+	stopWatch := startTrackerWatch(tracker, trackerErr, func() {
+		daemon.TrackerChanged()
+		support.CloseUnregistered()
+	})
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
 	select {

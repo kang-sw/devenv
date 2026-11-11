@@ -462,6 +462,58 @@ func (s *Support) New(store string) (State, error) {
 	return s.open(store, root, s.selection(hs), hs)
 }
 
+// CloseUnregistered closes the conversation of every mapped store that is
+// no longer registered (StoreRoot errors) and drops its mapping, so no agent
+// keeps running in the directory an unregister deleted, and returns the
+// stores it dropped. The daemon calls it after an unregister and on every
+// tracker store change, which is how an unregister by another process
+// arrives; with no store mapped it reads nothing. Each store is handled
+// under its lock and checked again there, so a store registered again
+// meanwhile keeps its conversation.
+func (s *Support) CloseUnregistered() []string {
+	s.mu.Lock()
+	mapped := make([]string, 0, len(s.state.Stores))
+	for store := range s.state.Stores {
+		mapped = append(mapped, store)
+	}
+	s.mu.Unlock()
+	var dropped []string
+	for _, store := range mapped {
+		if _, err := s.opts.StoreRoot(store); err != nil && s.closeUnregistered(store) {
+			dropped = append(dropped, store)
+		}
+	}
+	return dropped
+}
+
+// closeUnregistered closes and unmaps store's conversation when the store
+// is still unregistered under its lock; it reports whether it dropped the
+// mapping. A close or save failure is logged and leaves the mapping for the
+// next call.
+func (s *Support) closeUnregistered(store string) bool {
+	defer s.lockStore(store)()
+	if _, err := s.opts.StoreRoot(store); err == nil {
+		return false
+	}
+	s.mu.Lock()
+	id := s.state.Stores[store]
+	s.mu.Unlock()
+	if id == "" {
+		return false
+	}
+	if st, err := s.opts.Runner.Get(id); err == nil && st.Status != StatusClosed {
+		if _, err := s.opts.Runner.CloseConversation(id); err != nil {
+			fmt.Fprintf(s.opts.Runner.opts.Log, "support: close the conversation of unregistered store %q: %v\n", store, err)
+			return false
+		}
+	}
+	if err := s.update(func(state *supportState) { delete(state.Stores, store) }); err != nil {
+		fmt.Fprintf(s.opts.Runner.opts.Log, "support: forget unregistered store %q: %v\n", store, err)
+		return false
+	}
+	return true
+}
+
 type selectRequest struct {
 	Harness *string `json:"harness"`
 	Model   *string `json:"model"`
