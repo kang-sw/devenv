@@ -164,9 +164,6 @@ func (c *conv) mcpChecked(proc Process, status []MCPServer, recovered map[string
 				slices.Sort(c.mcpBroken)
 			})
 		}
-		if c.mcpSeen[name] || !c.mcpRestarted[name] {
-			c.mcpDown = true
-		}
 	}
 	c.syncHost(false)
 	c.changed(false)
@@ -190,10 +187,23 @@ func mcpStatusOf(status []MCPServer, server string) string {
 	return ""
 }
 
+// mcpRestartDue reports whether a broken server asks for a restart: one
+// this process had connected, or one no automatic restart was for yet. It
+// is read from the broken list each time, so a server that came back
+// (mcpConnected) asks for none.
+func (c *conv) mcpRestartDue() bool {
+	for _, name := range c.mcpBroken {
+		if c.mcpSeen[name] || !c.mcpRestarted[name] {
+			return true
+		}
+	}
+	return false
+}
+
 // restartIfDue restarts the process when a broken MCP connection asked for
 // it and the session stands at an idle point with no background task.
 func (c *conv) restartIfDue() {
-	if !c.mcpDown || c.proc == nil || !c.idleNow() {
+	if !c.mcpRestartDue() || c.proc == nil || !c.idleNow() {
 		return
 	}
 	fmt.Fprintf(c.r.opts.Log, "agent %s: restart for MCP servers %v\n", c.rec.ReplyID, c.mcpBroken)

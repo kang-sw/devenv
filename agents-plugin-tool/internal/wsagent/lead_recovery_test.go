@@ -112,6 +112,32 @@ func TestLeadMCPRestartsAtTheFirstIdlePoint(t *testing.T) {
 	}
 }
 
+// TestLeadMCPServerBackRestartsNothing: a reconnect that failed while a
+// background task ran defers the restart; when the server is reported
+// connected again before the task list empties, the empty list restarts
+// nothing.
+func TestLeadMCPServerBackRestartsNothing(t *testing.T) {
+	h := newLeadHarness(t).start()
+	h.holders.setControl("mcp_reconnect", "Failed to reconnect", "")
+	id, holder := h.runLead("one")
+	h.holders.out(holder, mcpTurn("u1", MCPConnected)...)
+	h.idle(id)
+	h.send(id, "two")
+	h.holders.out(holder, stateLine(HarnessRunning), mcpInitLine(MCPFailed), tasksLine(1), replyLine("u2", "started"), resultLine(), stateLine(HarnessIdle))
+	eventually(t, "the broken state", func() bool { return slices.Equal(h.state(id).MCPBroken, []string{wsServer}) })
+	h.idle(id)
+	h.send(id, "three")
+	h.holders.out(holder, mcpTurn("u3", MCPConnected)...)
+	eventually(t, "the server back", func() bool { return len(h.state(id).MCPBroken) == 0 })
+	h.idle(id)
+	h.holders.out(holder, tasksLine(0))
+	eventually(t, "the empty task list", func() bool { return h.state(id).BackgroundTasks == 0 })
+	h.sync(id, holder)
+	if st := h.state(id); !st.Process || h.holders.opCount("stop") != 0 || h.holders.opCount("launch") != 1 {
+		t.Fatalf("a server that came back restarts nothing: %+v, holder calls %v", st, h.holders.opList())
+	}
+}
+
 // TestLeadMCPRestartsOnceForAServerThatNeverConnects: a server that failed
 // from the process's start restarts it once at an idle point; when it
 // fails again in the new process without having connected, nothing

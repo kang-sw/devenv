@@ -813,14 +813,14 @@ type conv struct {
 	harnessState string
 	actionTimer  *time.Timer
 	// The process's MCP recovery (runner_recovery.go). mcpSeen are the
-	// servers it reported connected; mcpDown is set when a server broke and
-	// did not come back in-stream: the process restarts at the next idle
-	// point. mcpRestarted outlives the process: the servers an automatic
+	// servers it reported connected; mcpBroken (above) are those that broke
+	// and did not come back in-stream, and a restart is due at the next
+	// idle point (mcpRestartDue). mcpRestarted outlives the process: the
+	// servers an automatic
 	// restart was for that have not connected since. mcpChecking runs
 	// while a check is off the loop, and mcpAgain asks for one more after
 	// it, for mcpAgainNames.
 	mcpSeen       map[string]bool
-	mcpDown       bool
 	mcpRestarted  map[string]bool
 	mcpChecking   bool
 	mcpAgain      bool
@@ -1747,7 +1747,7 @@ func (c *conv) processEnded() {
 	c.harnessState = ""
 	c.checkAction(false)
 	c.setStatus(func() { c.activeMode, c.bgTasks, c.mcpBroken = "", 0, nil })
-	c.mcpSeen, c.mcpDown, c.mcpChecking, c.mcpAgain, c.mcpAgainNames = nil, false, false, false, nil
+	c.mcpSeen, c.mcpChecking, c.mcpAgain, c.mcpAgainNames = nil, false, false, nil
 	c.retry, c.alerted = nil, false
 	c.syncHost(true)
 	c.live.endAgents()
