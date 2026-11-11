@@ -394,6 +394,12 @@ body.tk-paged .tk-drawer { display: none; }
 .tk .tg-head .av { margin-left: 0; }
 .tk .tg-head .nid { font-family: var(--wb-mono); font-size: 11px; color: var(--wb-muted-fg); }
 .tk .tg-head .cnt { font-size: 12px; color: var(--wb-muted-fg); }
+.tk .tg-head .tcn { font: inherit; border: 0; background: transparent; color: inherit; padding: 0 2px; border-radius: 5px; cursor: pointer; white-space: nowrap; }
+.tk .tg-head .tcn.err { color: var(--tk-fail); }
+.tk .tg-head .tcn:hover { background: color-mix(in srgb, var(--wb-primary) 14%, var(--wb-card)); color: var(--wb-primary); }
+.tk .tg-head .tcn.on { background: var(--wb-primary); color: var(--wb-primary-fg); }
+.tk .tg-head .tcn:focus-visible { outline: 1.5px solid var(--wb-primary); }
+.tk .tg > .muted { margin: 2px 4px 6px; font-size: 12px; }
 
 /* team tree */
 .tk .tree, .tk .tree ul { list-style: none; margin: 0; padding: 0; }
