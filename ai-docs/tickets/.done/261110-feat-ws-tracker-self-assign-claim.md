@@ -9,6 +9,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 1399950f881604c3
 sage-review-completeness-reviewed: 1399950f881604c3
+completed: 2026-11-11
 ---
 
 # Tracker: self-assign claim and take request
