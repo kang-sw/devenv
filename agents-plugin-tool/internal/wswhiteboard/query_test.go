@@ -364,3 +364,41 @@ func TestPlain(t *testing.T) {
 		}
 	}
 }
+
+// TestQueryPrintsItemFieldHTMLAsText pins whiteboard.query over the HTML
+// the block fields keep: no tag is left, script and style content print
+// nothing, and image alt, SVG, and table cell text stay.
+func TestQueryPrintsItemFieldHTMLAsText(t *testing.T) {
+	st := &State{}
+	mustApply(t, st, `<wb:topic name="h"><wb:add class="policy"><wb:title>html <code>q</code></wb:title>`+
+		`<wb:option>see <img src="a.png" alt="shot"><script>s()</script><style>.x{}</style></wb:option>`+
+		`<wb:option><table><tr><td>c1</td><td>c2</td></tr></table></wb:option>`+
+		`<wb:recommend>b: <svg viewBox="0 0 9 9"><text>svgtext</text><script>v()</script></svg></wb:recommend>`+
+		`<wb:why><details><summary>sum</summary><b>bold</b> &amp; more</details></wb:why></wb:add></wb:topic>`)
+	mustApply(t, st, `<wb:answer id="1" value="a">a</wb:answer>`)
+	full := queryText(t, st, `{"status": "answered", "depth": "full"}`)
+	wantText(t, "full", full,
+		[]string{"a) see shot", "b) c1 c2", "recommendation: b: svgtext", "rationale: sum bold & more", "[policy] html `q`"},
+		[]string{"<", "s()", ".x{}", "v()"})
+	summary := queryText(t, st, `{"status": "answered", "depth": "summary"}`)
+	wantText(t, "summary", summary, []string{"answer: a: see shot"}, []string{"<", "s()"})
+}
+
+func TestPlainHTML(t *testing.T) {
+	for in, want := range map[string]string{
+		"no tags, R&D":                                  "no tags, R&D",
+		"<code>x</code> a<br>b":                         "`x` a b",
+		`<img alt="pic" src="p.png"> tail`:              "pic tail",
+		"<ul><li>one</li><li>two</li></ul>":             "one two",
+		"a &lt;b&gt; &amp; c":                           "a <b> & c",
+		"keep<!-- c -->s":                               "keeps",
+		"<noscript>n</noscript><template>t</template>x": "x",
+		"Use `<details>` and `a&amp;b`, not <u>u</u>":   "Use `<details>` and `a&amp;b`, not u",
+		"```html\n<script>s()</script>\n```":            "```html\n<script>s()</script>\n```",
+		"    <b>indented</b>":                           "    <b>indented</b>",
+	} {
+		if got := PlainHTML(in); got != want {
+			t.Errorf("PlainHTML(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

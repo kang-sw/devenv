@@ -36,7 +36,7 @@ func TestWhiteboardMarkdownFileLinks(t *testing.T) {
 </wb:add></wb:topic>`)
 	full := readWhiteboardPage(t, filepath.Join(f.dir(), f.replyID()+".html"))
 	for _, want := range []string{
-		`<img src="../../img/shot%20one.png" alt="shot">`,
+		`<img src="../../img/shot%20one.png" alt="shot"/>`,
 		`<a href="../../docs/notes.md">notes</a>`,
 		`<a href="https://example.com/" target="_blank" rel="noopener noreferrer">web</a>`,
 	} {
@@ -56,7 +56,7 @@ func TestWhiteboardMarkdownFileLinks(t *testing.T) {
 		return (&url.URL{Scheme: "file", Path: p}).String()
 	}
 	for _, want := range []string{
-		`<img src="` + fileURL(filepath.Join(f.root, "img", "shot one.png")) + `" alt="shot">`,
+		`<img src="` + fileURL(filepath.Join(f.root, "img", "shot one.png")) + `" alt="shot"/>`,
 		`<a href="` + fileURL(abs) + `">notes</a>`,
 	} {
 		if !strings.Contains(page, want) {

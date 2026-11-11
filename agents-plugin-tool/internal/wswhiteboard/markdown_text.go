@@ -43,11 +43,11 @@ type TextTargets struct {
 	HTML bool
 }
 
-// RenderText renders s as block markdown outside a whiteboard page, through
-// the same pipeline and escaping boundary as an item's block text: a tag
+// RenderText renders s as block markdown outside a whiteboard page: a tag
 // the author types is escaped text, and every destination goes through
 // resolveTarget's allow-list. With t.HTML the tag is kept instead, inside
-// the sanitizer's allow-list and with its URLs resolved by the same rule.
+// the sanitizer's allow-list and with its URLs resolved by the same rule,
+// the pipeline an item's block text renders through (itemField).
 // Item references stay literal text.
 func RenderText(s string, t TextTargets) template.HTML {
 	fileText := t.FileText
@@ -59,5 +59,5 @@ func RenderText(s string, t TextTargets) template.HTML {
 		return p.Block(s)
 	}
 	p.trusted = &[]trustedTarget{}
-	return p.sanitizeReply(string(p.convert(p.rawMarkdown(), s)))
+	return p.sanitizeReply(string(p.convert(p.rawMarkdown(), s)), "")
 }

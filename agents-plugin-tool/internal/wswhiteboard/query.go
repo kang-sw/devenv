@@ -310,8 +310,10 @@ func (f queryFilter) matches(item Item) ([]string, bool) {
 // line, its body between marker lines when printed, then an indented line
 // per item and its detail lines (depth summary or full); a last line names
 // what the defaults left out. Item fields, the topic label, and the close
-// result print board markup as plain text (Plain); the body and an answer
-// quote print as stored.
+// result print board markup as plain text: the title, links, label, result,
+// and answer through Plain, options, recommendation, and rationale through
+// PlainHTML, matching what the page renders as markup in each; the body and
+// an answer quote print as stored.
 func FormatQuery(r QueryResult) string {
 	var sb strings.Builder
 	if len(r.Topics) == 0 {
@@ -400,14 +402,14 @@ func writeDetails(sb *strings.Builder, item Item, fields []string, quoted map[[2
 	}
 	if want("options") {
 		for i, option := range item.Options {
-			writeIndented(sb, "    ", OptionLetterFor(i)+") "+Plain(option))
+			writeIndented(sb, "    ", OptionLetterFor(i)+") "+PlainHTML(option))
 		}
 	}
 	if want("recommendation") {
-		detail("recommendation", Plain(item.Recommendation))
+		detail("recommendation", PlainHTML(item.Recommendation))
 	}
 	if want("rationale") {
-		detail("rationale", Plain(item.Rationale))
+		detail("rationale", PlainHTML(item.Rationale))
 	}
 	if want("answer") {
 		detail("answer", Plain(item.Answer))
@@ -455,7 +457,7 @@ func writeSummary(sb *strings.Builder, item Item, quoted map[[2]string]int) {
 func decodedAnswer(item Item) string {
 	if item.Class == ClassPolicy && len(item.Options) > 0 {
 		if letter, note := SplitLetter(item.Answer, len(item.Options)); letter != "" {
-			out := letter + ": " + Plain(item.Options[letter[0]-'a'])
+			out := letter + ": " + PlainHTML(item.Options[letter[0]-'a'])
 			if note != "" {
 				out += " - " + Plain(note)
 			}

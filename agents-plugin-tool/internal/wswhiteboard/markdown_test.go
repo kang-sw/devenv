@@ -1,6 +1,7 @@
 package wswhiteboard
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 	"testing"
@@ -70,30 +71,140 @@ func TestMarkdownBlockFields(t *testing.T) {
 		"<ul>\n<li>one</li>\n<li>two</li>\n</ul>",
 		`<pre><code class="language-go">x := 1`+"\n</code></pre>",
 		"<th>k</th>", "<td>1</td>",
-		`<img src="L/img/d.png" alt="diagram">`,
+		`<img src="L/img/d.png" alt="diagram"/>`,
 		`<div class="rec-line md" title="recommendation"><b>`,
 		`<div class="ctx md">`,
 	)
 }
 
-// TestMarkdownRawHTMLIsEscaped pins the escaping boundary: no tag the lead
-// types reaches the page as markup, inline or at the start of a line, and a
-// leading tag does not swallow the markdown after it.
-func TestMarkdownRawHTMLIsEscaped(t *testing.T) {
-	out := mdBoard(t, LayoutFull, Item{ID: 1, Class: ClassPolicy, Topic: "t", Title: "Option<T> <u>bold</u>",
-		Options:        []string{`<img src=x onerror=alert(1)>`, "<script>o()</script>"},
-		Recommendation: "a: <iframe src=x></iframe>",
-		Rationale:      "<div onclick=x>block</div>\n**after**\n<!-- comment -->",
-		Status:         StatusOpen})
-	wantAll(t, out,
-		"Option&lt;T&gt; &lt;u&gt;bold&lt;/u&gt;",
-		"&lt;img src=x onerror=alert(1)&gt;",
-		"&lt;script&gt;o()&lt;/script&gt;",
-		"&lt;iframe src=x&gt;&lt;/iframe&gt;",
-		"&lt;div onclick=x&gt;block&lt;/div&gt;<br>\n<strong>after</strong>",
-		"&lt;!-- comment --&gt;",
+// TestMarkdownItemFieldHTML pins the block fields' HTML: an option, the
+// rationale, and the recommendation keep what the reply sanitizer keeps
+// (an image, a table, details, a small SVG with its ids prefixed) and drop
+// script, style, iframe, event attributes, and javascript: URLs; a stray
+// closing tag stays inside its field; item references, markdown images, and
+// mermaid fences still render. The title and an ack row's reasons still
+// escape every tag outside the inline allowlist, and each block field's
+// container clips its paint.
+func TestMarkdownItemFieldHTML(t *testing.T) {
+	kept := `<img src="shots/k.png" alt="kimg" onerror="x()"> <table><tr><td onclick="y()">cell</td></tr></table>` +
+		"\n\n<details><summary>more</summary>hidden</details>\n\n" +
+		`<svg viewBox="0 0 10 10"><defs><marker id="m"><path d="M0 0"/></marker></defs><path d="M0 0L9 9" marker-end="url(#m)"/></svg>`
+	dropped := `<script>s1()</script><style>.x{}</style><iframe src="https://e.example/"></iframe>` +
+		`<b onmouseover="z()">bold</b> <a href="javascript:alert(1)">js</a>`
+	refs := "see {{90}} and ![md](shots/m.png)\n\n```mermaid\ngraph TD\nA-->B\n```"
+	for name, layout := range layouts() {
+		t.Run(name, func(t *testing.T) {
+			out := mdBoard(t, layout,
+				Item{ID: 1, Class: ClassPolicy, Topic: "t", Title: "Option<T> <u>bold</u>", Status: StatusOpen,
+					Options:        []string{kept, dropped, "a</div></div><b>open", refs},
+					Recommendation: "a: " + dropped,
+					Rationale:      kept},
+				Item{ID: 2, Class: ClassPolicy, Topic: "t", Title: "q2", Options: []string{"x", "y"}, Status: StatusOpen,
+					Rationale: dropped, Recommendation: "b: " + kept},
+				Item{ID: 3, Class: ClassTechnical, Topic: "t", Title: "ack", Status: StatusOpen,
+					Rationale: "<img src=a.png> <u>u</u>\n<b>ok</b>"},
+			)
+			for _, field := range []string{"option", "rationale", "recommendation"} {
+				t.Run(field, func(t *testing.T) {
+					var keptOut, droppedOut string
+					switch field {
+					case "option":
+						keptOut, droppedOut = optionHTML(t, out, 1, "a"), optionHTML(t, out, 1, "b")
+					case "rationale":
+						keptOut, droppedOut = between(t, out, `id="item-1"`, `<div class="ctx md">`, "</div><div class=\"opts"), between(t, out, `id="item-2"`, `<div class="ctx md">`, "</div><div class=\"opts")
+					case "recommendation":
+						keptOut, droppedOut = between(t, out, `id="item-2"`, `<div class="rec-line md"`, "\n  <textarea"), between(t, out, `id="item-1"`, `<div class="rec-line md"`, "\n  <textarea")
+					}
+					wantAll(t, keptOut, `<img src="L/shots/k.png" alt="kimg"/>`, "<table><tbody><tr><td>cell</td></tr></tbody></table>",
+						"<details><summary>more</summary>hidden</details>", `<svg viewBox="0 0 10 10">`, `<marker id="wbr-`, `marker-end="url(#wbr-`)
+					wantNone(t, keptOut, "onerror", "onclick", `id="m"`, "url(#m)")
+					wantAll(t, droppedOut, "<b>bold</b> <a>js</a>")
+					wantNone(t, droppedOut, "<script", "s1()", "<style", ".x{}", "<iframe", "onmouseover", "javascript:")
+				})
+			}
+			wantAll(t, optionHTML(t, out, 1, "c"), `a<b>open</b>`)
+			wantAll(t, optionHTML(t, out, 1, "d"), `see <a href="#item-90">(90)</a> and <img src="L/shots/m.png" alt="md"/>`, "<pre class=\"mermaid\">graph TD\nA--&gt;B\n</pre>")
+			if !UsesMermaid(out) {
+				t.Errorf("a mermaid fence in an option does not load mermaid")
+			}
+			// The stray closing tags close nothing outside option c: option d
+			// follows it inside the same stack.
+			wantAll(t, out, `a<b>open</b></div></div><div class="opt" role="button" tabindex="0" data-opt="d"`)
+			wantAll(t, out, `<span class="title">Option&lt;T&gt; &lt;u&gt;bold&lt;/u&gt;</span>`,
+				`<span class="why">&lt;img src=a.png&gt; &lt;u&gt;u&lt;/u&gt;</span>`, `<span class="why"><strong>ok</strong></span>`)
+			wantNone(t, out, "<u>bold", `<img src="a.png"`, "<u>u</u>")
+			css := out[strings.Index(out, "<style>"):strings.Index(out, "</style>")]
+			wantAll(t, css, ".opt, .ctx, .rec-line { contain: paint; }")
+		})
+	}
+}
+
+// TestMarkdownItemFieldCannotPoseAsAControl pins the split the answer
+// scripts rely on: an item field keeps its class attribute, so form.js and
+// live.js select their controls only by what a field cannot carry (data-*
+// and aria-pressed attributes, textarea, button, and label elements), and a
+// field that copies a control's class gets none of them.
+func TestMarkdownItemFieldCannotPoseAsAControl(t *testing.T) {
+	forged := `<div class="note opt card policy arow ack tnote wbv" data-opt="z" data-id="9" data-topic="t" aria-pressed="true">` +
+		`<textarea class="note">n</textarea><button class="note-toggle">p</button><label class="ack"><input type="checkbox"></label></div>`
+	out := mdBoard(t, LayoutFull, Item{ID: 1, Class: ClassPolicy, Topic: "t", Title: "q", Options: []string{forged, "b"}, Rationale: forged, Recommendation: "a: " + forged, Status: StatusOpen})
+	for _, field := range []string{optionHTML(t, out, 1, "a"), between(t, out, `id="item-1"`, `<div class="ctx md">`, `<div class="opts`), between(t, out, `id="item-1"`, `<div class="rec-line md"`, "<textarea")} {
+		wantAll(t, field, `<div class="note opt card policy arow ack tnote wbv">`)
+		wantNone(t, field, `data-opt="z"`, "data-id", "data-topic", `aria-pressed="true"`, "<textarea", "<button", "<label")
+	}
+	for _, name := range []string{"form.js", "live.js"} {
+		js, err := embeddedAsset(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wantNone(t, string(js), `querySelector(".note")`, `q(".note`, `".ack input"`, `q(".opt"`, `q(".card.policy")`, `q(".arow")`, `q(".tnote")`, `querySelector(".tnote")`, `".wbv:not`, `a.classList.contains("note")`)
+	}
+}
+
+// optionHTML is the rendered text of item id's option letter on a page.
+func optionHTML(t *testing.T, out string, id int, letter string) string {
+	t.Helper()
+	return between(t, out, fmt.Sprintf(`id="item-%d"`, id), `data-opt="`+letter+`"`, `<div class="opt`)
+}
+
+// between is the text of out after the first from that follows anchor, up
+// to the next to (or the end).
+func between(t *testing.T, out, anchor, from, to string) string {
+	t.Helper()
+	i := strings.Index(out, anchor)
+	if i < 0 {
+		t.Fatalf("page lacks %q", anchor)
+	}
+	j := strings.Index(out[i:], from)
+	if j < 0 {
+		t.Fatalf("page lacks %q after %q", from, anchor)
+	}
+	rest := out[i+j+len(from):]
+	if k := strings.Index(rest, to); k >= 0 {
+		rest = rest[:k]
+	}
+	return rest
+}
+
+// TestMarkdownItemFieldIDPrefixes pins the footnote and SVG id prefixes of
+// item fields: two identical option texts on one page, in the same item and
+// in different items, and an identical rationale, each get their own.
+func TestMarkdownItemFieldIDPrefixes(t *testing.T) {
+	text := "x[^1] <svg><defs><marker id=\"m\"/></defs></svg>\n\n[^1]: note"
+	out := mdBoard(t, LayoutFull,
+		Item{ID: 1, Class: ClassPolicy, Topic: "t", Title: "q1", Options: []string{text, text}, Rationale: text, Status: StatusOpen},
+		Item{ID: 2, Class: ClassPolicy, Topic: "t", Title: "q2", Options: []string{text, "y"}, Status: StatusOpen},
 	)
-	wantNone(t, out, "<img src=x", "<script>o()", "<iframe", "<div onclick", "<u>bold", "<!-- comment", "raw HTML omitted")
+	for _, pattern := range []string{`<li id="(wbf-[0-9a-f]{8}-)fn:1">`, `<marker id="(wbr-[0-9a-f]{8}-)m">`} {
+		seen := map[string]bool{}
+		matches := regexp.MustCompile(pattern).FindAllStringSubmatch(out, -1)
+		for _, m := range matches {
+			seen[m[1]] = true
+		}
+		if len(matches) != 4 || len(seen) != 4 {
+			t.Errorf("%s: want four distinct prefixes, got %v", pattern, matches)
+		}
+	}
 }
 
 // TestMarkdownInlineTagAllowlist pins the inline tags item fields render:
@@ -124,8 +235,9 @@ func TestMarkdownInlineTagAllowlist(t *testing.T) {
 		})
 	}
 
-	// Block fields read the same tags, a <br> included; a topic body keeps
-	// its own raw HTML.
+	// Block fields keep the same tags as HTML, a <br> included, and every
+	// other tag the reply sanitizer keeps (a <span> without its unparsable
+	// style); a topic body keeps its own raw HTML.
 	st := &State{Seq: 2, Topics: []TopicDoc{{Name: "t", Body: `<b class="keep">raw</b>`}}}
 	st.Items = []Item{{ID: 1, Class: ClassPolicy, Topic: "t", Title: "q",
 		Options:        []string{"<code>a</code><br>next", "- <em>item</em>"},
@@ -134,10 +246,10 @@ func TestMarkdownInlineTagAllowlist(t *testing.T) {
 		Status:         StatusOpen}}
 	out := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
 	wantAll(t, out,
-		"<code>a</code><br>\nnext",
+		"<code>a</code><br/>next",
 		"<li><em>item</em></li>",
 		"<strong>why</strong>",
-		`<em>context</em> &lt;span style=&quot;x&quot;&gt;s&lt;/span&gt;`,
+		`<i>context</i> <span>s</span>`,
 		`<b class="keep">raw</b>`,
 	)
 }
@@ -200,15 +312,15 @@ func TestMarkdownLinkAndImageTargets(t *testing.T) {
 		`<a href="L//srv/f.md">fileurl</a>`,
 		`<a href="https://example.com/x?a=1&amp;b=2" target="_blank" rel="noopener noreferrer">web</a>`,
 		`<a href="#item-90">frag</a>`,
-		`<a href="L/docs/q.md" title="t&quot; onmouseover=&quot;x">quote</a>`,
+		`<a href="L/docs/q.md" title="t&#34; onmouseover=&#34;x">quote</a>`,
 		`<a href="L/docs/a_b.md">esc</a>`,
-		"<br>\njs<br>\njsmixed<br>\njsentity<br>\ndata<br>\nvb<br>\nnet<br>\nremotefile<br>\n",
+		"<br/>\njs<br/>\njsmixed<br/>\njsentity<br/>\ndata<br/>\nvb<br/>\nnet<br/>\nremotefile<br/>\n",
 		`<a href="https://auto.example/" target="_blank" rel="noopener noreferrer">https://auto.example/</a>`,
 		"javascript:alert(2)", "mailto:a@b.c", "a@b.c",
-		`<img src="L/shots/a.png" alt="imgrel">`,
-		`<img src="L//srv/b.png" alt="imgabs">`,
-		`<img src="L//srv/c.png" alt="imgfile">`,
-		"<br>\nremote<br>\ndataimg<br>\nfragimg",
+		`<img src="L/shots/a.png" alt="imgrel"/>`,
+		`<img src="L//srv/b.png" alt="imgabs"/>`,
+		`<img src="L//srv/c.png" alt="imgfile"/>`,
+		"<br/>\nremote<br/>\ndataimg<br/>\nfragimg",
 	)
 	wantNone(t, out, "javascript:alert(1)", `href="javascript`, `href="JaVa`, `href="data:`, `href="vbscript`, "evil.example",
 		`href="mailto`, `src="https://`, `src="data:`, `src="#`, `onmouseover="x"`)
@@ -240,7 +352,7 @@ func TestMarkdownFileHrefCannotBecomeAScheme(t *testing.T) {
 func TestMarkdownRationaleHardWraps(t *testing.T) {
 	out := mdBoard(t, LayoutFull, Item{ID: 1, Class: ClassPolicy, Topic: "t", Title: "q", Options: []string{"x", "y"},
 		Rationale: "first reason\nsecond reason\nthird *reason*", Status: StatusOpen})
-	wantAll(t, out, `<div class="ctx md">first reason<br>`+"\nsecond reason<br>\nthird <em>reason</em></div>")
+	wantAll(t, out, `<div class="ctx md">first reason<br/>`+"\nsecond reason<br/>\nthird <em>reason</em></div>")
 }
 
 // TestMarkdownAckReasonsAreInline pins an ack row: one .why per rationale
@@ -263,7 +375,7 @@ func TestMarkdownAckReasonsAreInline(t *testing.T) {
 // options, even with inline markdown or a hard-wrapped second line, keep the
 // inline buttons. A stacked option is a focusable role="button" element.
 func TestMarkdownOptionStacking(t *testing.T) {
-	inline := []string{"plain", "with **bold** and [a link](docs/a.md)", "two\nlines"}
+	inline := []string{"plain", "with **bold** and [a link](docs/a.md)", "two\nlines", "with <b>raw</b> <code>tags</code>"}
 	block := map[string]string{
 		"list":       "- a\n- b",
 		"ordered":    "1. a\n2. b",
@@ -275,12 +387,16 @@ func TestMarkdownOptionStacking(t *testing.T) {
 		"paragraphs": "one\n\ntwo",
 		"quote":      "> quoted",
 		"heading":    "# heading",
+		"raw image":  `<img src="s.png" alt="i">`,
+		"raw table":  "<table><tr><td>1</td></tr></table>",
+		"inline img": `see <img src="s.png" alt="i">`,
+		"inline svg": `a <svg viewBox="0 0 1 1"></svg>`,
 	}
 	st := &State{Seq: 2}
 	st.Items = []Item{{ID: 1, Class: ClassPolicy, Topic: "t", Title: "inline", Options: inline, Status: StatusOpen}}
 	out := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
 	wantAll(t, out, `<div class="opts"><button class="opt" data-opt="a" aria-pressed="false"><span class="k">a</span><span>plain</span></button>`,
-		`<span>two<br>`+"\nlines</span></button>")
+		`<span>two<br/>`+"\nlines</span></button>")
 	wantNone(t, out, "opts stack", `role="button" tabindex`)
 
 	for name, opt := range block {
@@ -292,6 +408,23 @@ func TestMarkdownOptionStacking(t *testing.T) {
 			wantNone(t, out, `<button class="opt`)
 		})
 	}
+}
+
+// TestMarkdownSettledRowWidenedFields pins a settled row's expanded body:
+// its rationale and static options keep the HTML an open card keeps, and
+// the picked chip in its summary shows the option's first line with its
+// tags dropped (an image as its alt text), as whiteboard.query prints it.
+func TestMarkdownSettledRowWidenedFields(t *testing.T) {
+	st := &State{Seq: 2, SettleSeq: 1}
+	st.Items = []Item{{ID: 1, Class: ClassPolicy, Topic: "t", Title: "q", Status: StatusAnswered, Answer: "a", AnswerQuote: "q", Settled: 1,
+		Options:   []string{`<img src="s.png" alt="shot"> <b>kept</b><script>x()</script>`, "<table><tr><td>cell</td></tr></table>"},
+		Rationale: "<details><summary>why</summary>body</details>"}}
+	out := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
+	body := between(t, out, `<details class="sx"`, `<div class="sbody">`, "</div></details>")
+	wantAll(t, body, `<div class="ctx md"><details><summary>why</summary>body</details>`,
+		`<div class="opts stack"><div class="opt static picked">`, `<img src="s.png" alt="shot"/> <b>kept</b>`, "<td>cell</td>")
+	wantNone(t, out, "<script>x()", "x()")
+	wantAll(t, out, `<span class="pt">shot kept</span>`)
 }
 
 // TestMarkdownPickedChipShowsFirstLine pins a settled row's picked-option
@@ -329,7 +462,7 @@ func TestMarkdownMermaidBlock(t *testing.T) {
 			out := mdBoard(t, layout, Item{ID: 1, Class: ClassPolicy, Topic: "t", Title: "diagram", Options: []string{"x", "y"}, Status: StatusOpen,
 				Rationale: "```mermaid\ngraph LR\n  A[\"<b>lead</b>\"] --> B:::store\n```"})
 			wantAll(t, out,
-				"<pre class=\"mermaid\">graph LR\n  A[&quot;&lt;b&gt;lead&lt;/b&gt;&quot;] --&gt; B:::store\n</pre>",
+				"<pre class=\"mermaid\">graph LR\n  A[&#34;&lt;b&gt;lead&lt;/b&gt;&#34;] --&gt; B:::store\n</pre>",
 				`<script src="`+name+`"></script>`,
 			)
 			if !UsesMermaid(out) {
@@ -393,7 +526,7 @@ func TestMarkdownBoardTaskListAndFootnotes(t *testing.T) {
 		Options:   []string{"- [ ] a\n- [x] b", "x[^1]\n\n[^1]: one"},
 		Rationale: "y[^1]\n\n[^1]: two",
 		Status:    StatusOpen})
-	wantAll(t, out, `<input disabled="" type="checkbox"> a`, `<input checked="" disabled="" type="checkbox"> b`)
+	wantAll(t, out, `<input type="checkbox" disabled=""/> a`, `<input type="checkbox" disabled="" checked=""/> b`)
 	ids := regexp.MustCompile(`<li id="(wbf-[0-9a-f]{8}-fn:1)">`).FindAllStringSubmatch(out, -1)
 	if len(ids) != 2 || ids[0][1] == ids[1][1] {
 		t.Errorf("want two distinct footnote ids, got %v", ids)
