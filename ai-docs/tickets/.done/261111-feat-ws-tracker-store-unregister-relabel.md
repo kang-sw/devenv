@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: 904116e347c56364
 sage-review-design-reviewed: 904116e347c56364
+completed: 2026-11-11
 ---
 
 # Tracker: unregister, hide, and relabel a store on this machine
@@ -228,3 +229,71 @@ Today a store can only be removed by hand: drop its entry from
   - Remote run:
     `~/.local/bin/ws-rgo -C agents-plugin-tool -m 15 -- test ./internal/wstrackerhost/ ./internal/mcp/ ./internal/wsdashboard/`.
   - `node --check` on edited JS.
+
+### Result (132cced23) - 2026-11-11
+
+Landed in seven commits on `impl/develop/croak-vowed-deuce`
+(`8721b4aa2..132cced23`):
+
+- `wstrackerhost`: `Host.Unregister(ctx, id, confirm)`, `Relabel`,
+  `SetHidden`; `StoreEntry` gains `hidden` and a per-registration `nonce`;
+  every host call re-checks the registry entry under the store mutex and
+  writes re-check after taking `write.lock`; the watch stamp covers label,
+  hidden, and nonce; leftovers named `.removed-<id>-<unix nanoseconds>` are
+  swept at `New` and after each unregister.
+- `wsledger`: `Ledger.Exclusive` (bounded wait on the ledger file lock, a
+  re-read, and the unpushed report handed to the callback under the lock),
+  `LockFile`, `ErrBusy`; `Open` on the default layout no longer creates a
+  missing store directory.
+- MCP: `tk:unregister`, `tk:relabel`, `tk:hide`, `tk:unhide`, with the
+  tracker manual text and its two mirrors.
+- Dashboard: `POST /tracker/stores/<id>/unregister|label|hidden`, the
+  daemon adapter, a store menu, a hidden list, relabel and unregister
+  dialogs, and support conversation pruning for a removed store.
+
+Decisions taken during implementation:
+
+- Decision 5 names `Ledger.Reload` under both locks; `Reload` takes the
+  same file lock, so the check runs through the new `Ledger.Exclusive`
+  instead.
+- Decision 6 assumes nothing recreates a removed directory. `wsledger`
+  `Open`, the git temp-file helper, attachment staging, and the registry
+  JSON writer all did; each now fails on a missing directory. `Open` with a
+  shared `RepoDir` still creates its directory, since that layout's callers
+  rely on it.
+- Unregister waits up to two seconds for each lock before answering busy,
+  rather than a bare try-lock, so a sibling's ordinary write does not
+  refuse it.
+- A stuck store with nothing unpushed is removed; one with unpushed work is
+  refused with its state named.
+- A failed directory rename restores the registry entry.
+- On Windows the lock files are released before the rename, because an
+  open file blocks a directory rename there. That path is not tested.
+- Store commands must be the sole command of their batch, and a support
+  conversation is refused all store commands.
+- A support conversation ends only when the registry answers that the
+  store is not registered; an unreadable registry closes nothing.
+
+Verification:
+
+- `ws-rgo ... test ./internal/wstrackerhost/ ./internal/mcp/ ./internal/wsdashboard/ ./internal/wsagent/ ./cmd/ws-mcp/ ./internal/wsledger/ ./internal/wsi18n/`:
+  all ok at `132cced23`.
+- `ws-rgo ... test -race -count=1 ./internal/wsledger/ ./internal/wstrackerhost/`:
+  ok at `922d5931f`.
+- `ws-rgo ... vet` of the touched packages: clean.
+- `node --check` on `tracker.js` and `dashboard.js`: ok.
+- Review (lite, one pass): no Critical or Important findings.
+
+Not verified: the page UI in a real browser; the Windows rename path; the
+ten non-English string tables (machine-written, unreviewed).
+
+Left open (Minor, from review):
+
+- Hiding a store leaves its page or card before the request answers, so a
+  failed hide has already moved the user.
+- The dashboard drops an open support chat whenever its store is missing
+  from the store list, which a transient store-list error also causes.
+- `Register` answers "already registered" when a stale handle for the same
+  id is busy at that instant; a retry succeeds.
+- A store unregistered and registered again within one watch tick keeps
+  its earlier support conversation.
