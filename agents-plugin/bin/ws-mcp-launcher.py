@@ -983,6 +983,12 @@ def compare_daemon_versions(a: str, b: str) -> int:
     return -1 if pa[1] < pb[1] else 1
 
 
+def same_core(a: str, b: str) -> bool:
+    pa = parse_daemon_version(a)
+    pb = parse_daemon_version(b)
+    return pa is not None and pb is not None and pa[0] == pb[0]
+
+
 def same_minor(a: str, b: str) -> bool:
     pa = parse_daemon_version(a)
     pb = parse_daemon_version(b)
@@ -1292,9 +1298,15 @@ class DaemonLink:
         and a replacement drains every session on the machine. The build time
         breaks the tie only when the hashes differ (or the daemon reports
         none).
+
+        An equal numeric core counts as the same version whatever the
+        suffixes: runtime_version is the contract's plugin_version
+        ("0.48.17"), while a local-devenv build reports "0.48.17-dev", so
+        the suffix order would hide every rebuild at that core.
         """
-        order = compare_daemon_versions(str(health.get("version", "")), self.runtime_version)
-        if order != 0:
+        version = str(health.get("version", ""))
+        order = compare_daemon_versions(version, self.runtime_version)
+        if order != 0 and not same_core(version, self.runtime_version):
             return order < 0
         build_time = health.get("build_time")
         if not (isinstance(build_time, int) and 0 < self.build_time and build_time < self.build_time):
@@ -1362,10 +1374,13 @@ class DaemonLink:
             endpoint, health = self.wait_healthy(self.start_budget)
             if health is None or endpoint is None:
                 raise ProxyFallback(f"no daemon answered within {self.start_budget:.0f}s of starting one")
-            if self.needs_start(health):
+            if self.needs_start(health) and compare_daemon_versions(str(health.get("version", "")), self.runtime_version) <= 0:
                 # daemon-start reported a daemon, but the one answering is
                 # still the older one (it refused to stop, or won the lock
-                # race): never settle on it.
+                # race): never settle on it. A same-core daemon whose suffix
+                # sorts after runtime_version is one daemon-start keeps by
+                # design (wsdashboard.keepRunning: a release binary never
+                # replaces a "-dev" daemon of its core), so it is used.
                 raise ProxyFallback(f"daemon {health.get('version', '')} (build {health.get('build_time', 0)}) is older than this plugin's runtime and was not replaced")
         version = str(health.get("version", ""))
         if not same_minor(version, self.runtime_version):
