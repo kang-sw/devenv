@@ -9,9 +9,14 @@ import (
 )
 
 var (
-	kinds    = []string{"task", "todo", "topic"}
-	settable = []string{"idea", "todo", "doing", "blocked"}
-	origins  = []string{OriginHuman, OriginAgent, OriginAgentAuto}
+	kinds = []string{"task", "todo", "topic"}
+	// settable are the statuses an assignee writes on their own assignment
+	// (done goes through item.close); superiorSettable those an org superior
+	// of the assignee writes on it, the superior's wrap-up: done is final, no
+	// review step.
+	settable         = []string{"idea", "todo", "doing", "blocked", "in-review", "dropped"}
+	superiorSettable = []string{"blocked", "done", "dropped"}
+	origins          = []string{OriginHuman, OriginAgent, OriginAgentAuto}
 	// itemFields are the item.edit fields, in the engine's order. stage is
 	// retired: only older events carry it (see apply), so editFields, the
 	// list a refusal names, leaves it out.
@@ -28,6 +33,11 @@ var defaultPriority = priority{names: []string{"Notice", "Task", "Urgent"}, def:
 
 // DefaultAttachmentMax is attachments.max_bytes when genesis sets none.
 const DefaultAttachmentMax = 10 << 20
+
+// wrapped reports a done or dropped assignment status: the assignment is
+// wrapped up, so it takes no status write, handoff, or take request until it
+// is reopened, and it no longer counts as work in anyone's hands.
+func wrapped(st string) bool { return st == "done" || st == "dropped" }
 
 func contains(l []string, s string) bool {
 	for _, x := range l {
@@ -1473,8 +1483,8 @@ func (s *state) apply(n *node) {
 		}
 	case TypeItemStatus, TypeItemClose, TypeItemConfirm, TypeItemReject, TypeItemReopen:
 		who := a
-		if n.typ != TypeItemStatus && n.typ != TypeItemClose && p.truthy("assignee") {
-			who = p.str("assignee")
+		if n.typ != TypeItemClose && p.truthy("assignee") {
+			who = p.str("assignee") // item.status: an org superior's write on who's assignment
 		}
 		item := p.str("item")
 		r := s.liveRec(item, who)
@@ -1494,7 +1504,7 @@ func (s *state) apply(n *node) {
 		case TypeItemClose:
 			v = "done"
 			if r.completion == "assigner" {
-				v = "awaiting"
+				v = "in-review"
 			}
 		case TypeItemConfirm:
 			v = "done"

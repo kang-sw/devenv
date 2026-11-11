@@ -14,7 +14,7 @@ import (
 // roll-up uses. A status key takes the person's live, non-fallback records of
 // that status on a visible, non-topic item; load takes those at todo, doing,
 // or blocked (TEAM_LOAD); stale and overdue are subsets of load; fallback takes the live
-// fallback holdings not done; unaccepted and waiting are the row's own
+// fallback holdings not wrapped up (done or dropped); unaccepted and waiting are the row's own
 // pending and waiting lists. It also pins that listTeam reads the drill and
 // that the header's counts and the clear control dispatch through data-act.
 // The cases execute under node when it is installed.
@@ -44,7 +44,12 @@ func TestTrackerTeamDrillMatchesTheCounts(t *testing.T) {
 	if load == "" {
 		t.Fatal("tracker.js holds no TEAM_LOAD")
 	}
-	fn = load + fn
+	// and tells a wrapped-up record (done or dropped) by wrapped()
+	wrapped := regexp.MustCompile(`(?m)^  function wrapped\(s\) \{[^\n]*\}\n`).FindString(js)
+	if wrapped == "" {
+		t.Fatal("tracker.js holds no one-line wrapped()")
+	}
+	fn = load + wrapped + fn
 	node, err := exec.LookPath("node")
 	if err != nil {
 		t.Skip("node not installed; teamDrillRecs cases not executed")
@@ -73,6 +78,8 @@ func TestTrackerTeamDrillMatchesTheCounts(t *testing.T) {
 		{"done>m", "t5", "m", "live", "done", false, false},
 		{"fb-todo>m", "t6", "m", "live", "todo", true, false},
 		{"fb-done>m", "t7", "m", "live", "done", true, false},
+		{"fb-drop>m", "t7b", "m", "live", "dropped", true, false},
+		{"drop>m", "t10", "m", "live", "dropped", false, false},
 		{"fb-idea>m", "t4b", "m", "live", "idea", true, false},
 		{"topic>m", "topic", "m", "live", "todo", false, false},
 		{"hidden>m", "gone", "m", "live", "todo", false, false},
@@ -83,14 +90,15 @@ func TestTrackerTeamDrillMatchesTheCounts(t *testing.T) {
 		{"over>m", "past2", "m", "live", "blocked", false, false},
 		{"over-idea>m", "past3", "m", "live", "idea", false, false},
 		{"over-fb>m", "past4", "m", "live", "todo", true, false},
-		{"over-await>m", "past5", "m", "live", "awaiting", false, false},
+		{"over-review>m", "past5", "m", "live", "in-review", false, false},
+		{"over-drop>m", "past6", "m", "live", "dropped", false, false},
 	} {
 		recs[r.ID] = r
 	}
 	items := map[string]item{
-		"t1": {}, "t2": {Due: day("2026-11-11")}, "t3": {Due: day("2026-11-12")}, "t4": {}, "t4b": {}, "t5": {}, "t6": {}, "t7": {}, "t8": {}, "t9": {},
+		"t1": {}, "t2": {Due: day("2026-11-11")}, "t3": {Due: day("2026-11-12")}, "t4": {}, "t4b": {}, "t5": {}, "t6": {}, "t7": {}, "t7b": {}, "t10": {}, "t8": {}, "t9": {},
 		"topic": {Kind: "topic"}, "gone": {Hidden: true},
-		"past": {Due: day("2026-11-01")}, "past2": {Due: day("2026-11-10")}, "past3": {Due: day("2026-11-01")}, "past4": {Due: day("2026-11-01")}, "past5": {Due: day("2026-11-01")},
+		"past": {Due: day("2026-11-01")}, "past2": {Due: day("2026-11-10")}, "past3": {Due: day("2026-11-01")}, "past4": {Due: day("2026-11-01")}, "past5": {Due: day("2026-11-01")}, "past6": {Due: day("2026-11-01")},
 	}
 	person := map[string]any{"id": "m", "pending": []string{"pending>m"}, "waiting": []string{"sent>x"}}
 	recs["sent>x"] = rec{"sent>x", "t1", "x", "pending", "todo", false, false}
@@ -104,15 +112,16 @@ func TestTrackerTeamDrillMatchesTheCounts(t *testing.T) {
 		{"blocked", "2026-11-11", []string{"blocked>m", "over>m"}},
 		{"idea", "2026-11-11", []string{"idea>m", "over-idea>m"}},
 		{"done", "2026-11-11", []string{"done>m", "over-done>m"}},
-		{"awaiting", "2026-11-11", []string{"over-await>m"}},
-		// load: todo, doing, or blocked (not idea, awaiting, or done), no fallback holding
+		{"in-review", "2026-11-11", []string{"over-review>m"}},
+		{"dropped", "2026-11-11", []string{"drop>m", "over-drop>m"}},
+		// load: todo, doing, or blocked (not idea, in review, done, or dropped), no fallback holding
 		{"load", "2026-11-11", []string{"todo>m", "doing>m", "blocked>m", "over>m"}},
 		{"stale", "2026-11-11", []string{"doing>m"}},
-		// overdue: due strictly before today, inside the load (a done, idea, awaiting, or fallback record is not)
+		// overdue: due strictly before today, inside the load (a done, dropped, idea, in-review, or fallback record is not)
 		{"overdue", "2026-11-11", []string{"over>m"}},
 		{"overdue", "2026-11-13", []string{"doing>m", "blocked>m", "over>m"}},
 		{"overdue", "", []string{}},
-		// fallback: live fallback holdings not done, idea included
+		// fallback: live fallback holdings not done or dropped, idea included
 		{"fallback", "2026-11-11", []string{"fb-todo>m", "fb-idea>m", "over-fb>m"}},
 		{"unaccepted", "2026-11-11", []string{"pending>m"}},
 		{"waiting", "2026-11-11", []string{"sent>x"}},

@@ -4561,7 +4561,7 @@
     "rollup": {
      "total": 2,
      "counts": {
-      "awaiting": 1,
+      "in-review": 1,
       "doing": 1
      },
      "blocked": []
@@ -4690,7 +4690,7 @@
     "ts": "2026-11-02T11:10:00Z",
     "hidden": false,
     "edited": null,
-    "status": "awaiting",
+    "status": "in-review",
     "counted": true,
     "rollup": {
      "total": 0,
@@ -6190,7 +6190,7 @@
     "completion": "assigner",
     "state": "live",
     "forced": true,
-    "status": "awaiting",
+    "status": "in-review",
     "note": "emoji ranges fixed",
     "noteBy": "ivy",
     "via": "maya.pc#6",
@@ -11422,7 +11422,7 @@
       "ivy.pc#7>maya"
      ],
      "counts": {
-      "awaiting": 1,
+      "in-review": 1,
       "doing": 1
      },
      "load": 1,

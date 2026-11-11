@@ -17,8 +17,9 @@ import (
 // filter value may be quoted (project:"two words"). Keys and values are
 // case-insensitive.
 //
-//	status:<s>    the item's derived status, or open (not done) or hidden;
-//	              one of QueryStatuses
+//	status:<s>    the item's derived status, or open (neither done nor
+//	              dropped) or hidden; one of QueryStatuses (awaiting, the
+//	              older name of in-review, is accepted as its alias)
 //	assignee:<m>  a live or pending assignee whose member id or display
 //	              name contains m
 //	kind:<k>      one of QueryKinds
@@ -38,8 +39,22 @@ import (
 // token; nothing is filtered then.
 
 // QueryStatuses are the values status: and tracker.query's status filter
-// take: open (not done) and hidden, then an item's derived statuses.
-var QueryStatuses = []string{"open", "hidden", "idea", "todo", "doing", "blocked", "awaiting", "done", "pending"}
+// take: open (neither done nor dropped) and hidden, then an item's derived
+// statuses.
+var QueryStatuses = []string{"open", "hidden", "idea", "todo", "doing", "blocked", "in-review", "done", "dropped", "pending"}
+
+// queryStatusAlias maps an older status name to the one it became, so a
+// saved query or a copied instruction that still sends it keeps working.
+var queryStatusAlias = map[string]string{"awaiting": "in-review"}
+
+// NormQueryStatus returns the QueryStatuses value v names, an alias
+// resolved, and whether it names one. v is compared as given.
+func NormQueryStatus(v string) (string, bool) {
+	if a, ok := queryStatusAlias[v]; ok {
+		v = a
+	}
+	return v, containsString(QueryStatuses, v)
+}
 
 // QueryKinds are the values kind: and tracker.query's kind filter take. A
 // todo create folds as a task, so todo is not one.
@@ -151,10 +166,11 @@ func parseQueryToken(tok queryToken) (queryTerm, error) {
 	}
 	switch key {
 	case "status":
-		if !containsString(QueryStatuses, v) {
+		st, ok := NormQueryStatus(v)
+		if !ok {
 			return refuse("status takes one of " + strings.Join(QueryStatuses, ", "))
 		}
-		return queryTerm{key: key, value: v}, nil
+		return queryTerm{key: key, value: st}, nil
 	case "kind":
 		if !containsString(QueryKinds, v) {
 			return refuse("kind takes one of " + strings.Join(QueryKinds, ", "))
@@ -249,7 +265,7 @@ func (t queryTerm) match(v *View, it ItemView) bool {
 		case "hidden":
 			return it.Hidden
 		case "open":
-			return !it.Hidden && status != "done"
+			return !it.Hidden && !wrapped(status)
 		}
 		return !it.Hidden && status == t.value
 	case "kind":

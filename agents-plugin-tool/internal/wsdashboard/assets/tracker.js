@@ -238,9 +238,11 @@
       todo:       { label: "js.tk.st.todo", desc: "js.tk.st.todo.desc", tone: 'wb-primary', svg: RING },
       doing:      { label: "js.tk.st.doing", desc: "js.tk.st.doing.desc", tone: 'wb-primary', svg: RING + '<path d="M8 2.4a5.6 5.6 0 0 1 0 11.2z" fill="currentColor"/>' },
       blocked:    { label: "js.tk.st.blocked", desc: "js.tk.st.blocked.desc", tone: 'tk-fail', svg: RING + '<path d="M4.1 4.1l7.8 7.8"/>' },
-      awaiting:   { label: "js.tk.st.awaiting", desc: "js.tk.st.awaiting.desc", tone: 'tk-warn',
+      'in-review': { label: "js.tk.st.inreview", desc: "js.tk.st.inreview.desc", tone: 'tk-warn',
         svg: '<path d="M4.5 2.4h7M4.5 13.6h7M5.4 2.4c0 3.2 5.2 3.4 5.2 5.6s-5.2 2.4-5.2 5.6M10.6 2.4c0 3.2-5.2 3.4-5.2 5.6s5.2 2.4 5.2 5.6"/>' },
       done:       { label: "js.tk.st.done", desc: "js.tk.st.done.desc", tone: 'tk-ok', svg: '<circle cx="8" cy="8" r="6" fill="currentColor" stroke="none"/><path d="M5.3 8.2l1.9 1.9 3.6-3.8" stroke="var(--wb-card)"/>' },
+      // wrapped up like done (the filled disc) without being finished (a dash, not a check)
+      dropped:    { label: "js.tk.st.dropped", desc: "js.tk.st.dropped.desc", tone: 'wb-muted-fg', svg: '<circle cx="8" cy="8" r="6" fill="currentColor" stroke="none"/><path d="M5.2 8h5.6" stroke="var(--wb-card)"/>' },
       pending:    { label: "js.tk.st.pending", desc: "js.tk.st.pending.desc", tone: 'tk-teal',
         svg: '<circle cx="8" cy="8" r="5.6" stroke-dasharray="2.2 1.9"/><path d="M6.5 6.6a1.55 1.55 0 1 1 2.2 1.4c-.5.25-.7.6-.7 1.1M8 10.9v.05"/>' },
       unassigned: { label: "js.tk.st.unassigned", desc: "js.tk.st.unassigned.desc", tone: 'wb-muted-fg', svg: '<circle cx="8" cy="8" r="5.6" stroke-dasharray="0.8 2.2"/>' },
@@ -374,7 +376,7 @@
   }
   function dueChip(it) {
     if (!it || !it.due) return '';
-    var over = it.due < today() && it.status !== 'done', now = it.due === today() && it.status !== 'done';
+    var over = it.due < today() && !wrapped(it.status), now = it.due === today() && !wrapped(it.status);
     return '<span class="chip due' + (over ? ' over' : now ? ' now' : '') + '" title="' + (over ? wsT("js.tk.due.tip.over", esc(it.due)) : now ? wsT("js.tk.due.tip.now", esc(it.due)) : wsT("js.tk.due.on", esc(it.due))) + '">' +
       (now ? wsT("js.tk.due.today") : wsT("js.tk.due.on", esc(it.due.slice(5)))) + '</span>';
   }
@@ -470,8 +472,12 @@
       return '<button class="btn mini' + (modeOf(key) === m[0] ? ' primary' : '') + '"' + attr('act', 'cmode') + attr('card', key) + attr('mode', m[0]) + '>' + wsT(m[1]) + '</button>';
     }).join('') + '</span>';
   }
-  var RANK = { blocked: 0, doing: 1, todo: 2, awaiting: 3, done: 4 };
+  // the view's rank (view.go rank, engine.js RANK)
+  var RANK = { blocked: 0, doing: 1, todo: 2, idea: 3, 'in-review': 4, done: 5, dropped: 6 };
   function byRank(a, b) { return RANK[a.status] - RANK[b.status]; }
+  // A done or dropped assignment is wrapped up: no status write, handoff, or take request until
+  // it is reopened (check.go wrapped).
+  function wrapped(s) { return s === 'done' || s === 'dropped'; }
   function A(id) { return VS.assignments[id]; }
 
   var EDIT_FIELDS = ['title', 'body', 'project', 'labels', 'due', 'priority'];
@@ -513,7 +519,8 @@
       case 'item.decline': return wsT("js.tk.ev.decline", ref(p.item)) + tail(p.note);
       case 'item.return': return wsT("js.tk.ev.return", esc(p.assignee), ref(p.item)) + tail(p.note);
       case 'item.unassign': return wsT("js.tk.ev.unassign", p.root ? wsT("js.tk.ev.unassign.rule", esc(p.root)) : esc(p.assignee || wsT("js.tk.ev.unassign.all")), ref(p.item));
-      case 'item.status': return wsT("js.tk.ev.status", stChip(p.status), ref(p.item)) + tail(p.note);
+      // with assignee: an org superior's wrap-up (or the assigner's drop) on that member's assignment
+      case 'item.status': return (p.assignee && p.assignee !== n.member ? wsT("js.tk.ev.status.of", esc(p.assignee), stChip(p.status), ref(p.item)) : wsT("js.tk.ev.status", stChip(p.status), ref(p.item))) + tail(p.note);
       case 'item.close': return wsT("js.tk.ev.close", ref(p.item)) + tail(p.note);
       case 'item.confirm': return wsT("js.tk.ev.confirm", esc(p.assignee), ref(p.item)) + tail(p.note);
       case 'item.reject': return wsT("js.tk.ev.reject", esc(p.assignee), ref(p.item)) + tail(p.note);
@@ -671,7 +678,7 @@
       (it.priority !== lv ? ' ' + wsT("js.tk.pri.stored", it.priority) : '')) + '>' + esc(it.priorityName) + '</span>';
   }
   // Due: D-N within 7 days, D-day today, D+N past due (danger colour), else a short date.
-  var ENDED = { done: 1, declined: 1, returned: 1, handed: 1, withdrawn: 1 };
+  var ENDED = { done: 1, dropped: 1, declined: 1, returned: 1, handed: 1, withdrawn: 1 };
   function dueHtml(it, st) {
     if (!it || !it.due || it.kind === 'topic') return '<span class="due2"></span>';
     var n = dayNum(it.due) - dayNum(today()), t, c, tip;
@@ -712,9 +719,10 @@
     if (recs.some(function (r) { return r.to === v && r.state === 'pending'; }))
       out.push(['accept', 'accept', wsT("js.tk.act.accept"), { item: id }, 1], ['note', 'decline', wsT("js.tk.act.decline"), { item: id, op: 'item.decline' }]);
     recs.forEach(function (r) {
-      var lead = VS.members[r.to] && VS.members[r.to].leads[0];
-      if (r.state === 'live' && r.by === v && r.status === 'awaiting')
+      var lead = VS.members[r.to] && VS.members[r.to].leads[0], wr = wrapAuth(it, r);
+      if (canReview(r))
         out.push(['confirm', 'confirm', wsT("js.tk.act.confirm", nm(r.to)), { item: id, who: r.to }, 1], ['note', 'reject', wsT("js.tk.act.reject", nm(r.to)), { item: id, who: r.to, op: 'item.reject' }]);
+      if (wr) out.push(['wrap', wr === 'sup' ? 'status' : 'x', wsT(wr === 'sup' ? "js.tk.act.wrap" : "js.tk.act.drop", nm(r.to)), { item: id, who: r.to }]);
       if (r.state === 'live' && r.accepted && lead === v) out.push(['note', 'return', wsT("js.tk.act.return", nm(r.to)), { item: id, who: r.to, op: 'item.return' }]);
       // a rule request is withdrawn as its one rule, not as a person (the store refuses that)
       if (r.state === 'pending' && (r.by === v || r.sender === v) && r.to !== v) out.push(['unassign', 'withdraw', wsT("js.tk.act.withdraw", nm(r.to)), r.ruleRequest ? { item: id, root: r.to, rule: r.rule } : { item: id, who: r.to }]);
@@ -725,6 +733,36 @@
       if (q.state === 'pending' && q.by === v) out.push(['unrequest', 'withdraw', wsT("js.tk.act.unrequest", nm(q.assignee)), { item: id, req: q.id }]);
     });
     return out;
+  }
+  // Resolving an in-review record (check.go item.confirm / item.reject): its assigner or any org
+  // superior of its assignee, on any completion mode; a self-assigned one is its holder's.
+  function canReview(r) {
+    var v = VS.viewer.member;
+    return r.state === 'live' && r.status === 'in-review' && (r.by === v || !!VS.viewer.reach[r.to]);
+  }
+  // A status write on another member's assignment (check.go item.status with assignee): 'sup' when
+  // the viewer is an org superior of the assignee (blocked, done with no review, or dropped), 'drop'
+  // when the viewer is only its assigner (dropped alone), else ''. Only on a live, not wrapped-up
+  // task record (a creator-fallback holding included), never a pending one.
+  var WRAP_SET = { sup: ['blocked', 'done', 'dropped'], drop: ['dropped'] };
+  function wrapAuth(it, r) {
+    var v = VS.viewer.member;
+    if (!it || it.hidden || it.kind === 'topic' || !r || r.to === v || r.state !== 'live' || wrapped(r.status)) return '';
+    return VS.viewer.reach[r.to] ? 'sup' : r.by === v ? 'drop' : '';
+  }
+  // The status choices on the viewer's own live assignment r (check.go item.status / item.close):
+  // [{ s, label, dis, why }]. done is item.close, "request done" when the assigner confirms, and
+  // refused while such a close is in review; dropped is the assignee's own only when they close it
+  // themselves (completion assignee) or assigned it to themselves.
+  var OWN_SET = ['idea', 'todo', 'doing', 'blocked', 'in-review', 'done', 'dropped'];
+  function ownStatusOpts(r) {
+    var v = VS.viewer.member, gate = r.completion === 'assigner';
+    return OWN_SET.map(function (s) {
+      var o = { s: s, label: s === 'done' && gate ? wsT("js.tk.menu.reqdone") : stLabel(s), dis: false, why: '' };
+      if (s === 'done' && gate && r.status === 'in-review') { o.dis = true; o.why = wsT("js.tk.menu.inreview.why", nm(r.by)); }
+      if (s === 'dropped' && gate && r.by !== v) { o.dis = true; o.why = wsT("js.tk.menu.drop.why", nm(r.by)); }
+      return o;
+    });
   }
   // The viewer's own live assignment on the item, if any.
   function mineLive(it) { var v = VS.viewer.member; return it.assignments.map(A).filter(function (r) { return r.to === v && r.state === 'live'; })[0]; }
@@ -748,7 +786,7 @@
   function canOpen(it) {
     if (!isCreator(it) || it.hidden || it.kind === 'topic' || it.open) return false;
     var fb = fallbackRec(it);
-    return !!fb && fb.status !== 'done' && !it.assignments.map(A).some(function (r) { return (r.state === 'live' || r.state === 'pending') && !r.fallback && !r.ruleRequest; });
+    return !!fb && !wrapped(fb.status) && !it.assignments.map(A).some(function (r) { return (r.state === 'live' || r.state === 'pending') && !r.fallback && !r.ruleRequest; });
   }
   function canUnopen(it) { return !!it.open && isCreator(it); }
   function reqsOf(it) { var all = VS.requests || {}; return listOf(it.requests).map(function (id) { return all[id]; }).filter(Boolean); }
@@ -756,12 +794,12 @@
     var v = VS.viewer.member, asked = {};
     if (it.hidden || !VS.viewer.isMember || holdsOn(it, v)) return [];
     reqsOf(it).forEach(function (q) { if (q.by === v && q.state === 'pending') asked[q.assignment] = true; });
-    return it.assignments.map(A).filter(function (r) { return r.state === 'live' && !r.fallback && !r.ruleRequest && r.status !== 'done' && r.to !== v && !asked[r.id]; });
+    return it.assignments.map(A).filter(function (r) { return r.state === 'live' && !r.fallback && !r.ruleRequest && !wrapped(r.status) && r.to !== v && !asked[r.id]; });
   }
   function canAnswer(it, q) { return q.state === 'pending' && (q.assignee === VS.viewer.member || isCreator(it)); }
   // A subtask's parent is assigned to or created by its author.
   function canSplit(it) { return (!!mineLive(it) || it.author === VS.viewer.member) && !it.hidden; }
-  function canStatus(it) { var r = !it.hidden && it.kind !== 'topic' && mineLive(it); return !!r && r.status !== 'done'; }
+  function canStatus(it) { var r = !it.hidden && it.kind !== 'topic' && mineLive(it); return !!r && !wrapped(r.status); }
   // item.move, as the store judges it (check.go checkMove): the item rule is the creator or a live
   // assignee (an admin too once the creator was removed); only when the parent changes, the
   // destination rule: not hidden, the viewer's (created or live-assigned; a topic too), and not the
@@ -917,13 +955,14 @@
   // actions live on the item's row in the Items panel. Read state is local
   // UI state per viewer clone, like the handle badge's `seen`; no event is written
   // (in the product the daemon keeps it per clone on the local filesystem).
-  var NK = { assigned: "js.tk.nk.assigned", pending: "js.tk.nk.pending", answer: "js.tk.nk.answer", reference: "js.tk.nk.reference", done: "js.tk.nk.done", blocked: "js.tk.nk.blocked",
+  var NK = { assigned: "js.tk.nk.assigned", pending: "js.tk.nk.pending", answer: "js.tk.nk.answer", reference: "js.tk.nk.reference", done: "js.tk.nk.done", blocked: "js.tk.nk.blocked", dropped: "js.tk.nk.dropped",
     confirm: "js.tk.nk.confirm", reply: "js.tk.nk.reply", due: "js.tk.nk.due", mention: "js.tk.nk.mention", request: "js.tk.nk.request" };
   function snippet(s) { s = String(s || ''); return '&ldquo;' + esc(s.length > 80 ? s.slice(0, 77) + '...' : s) + '&rdquo;'; }
   // Every entry also carries `ev`, the event it is about (none for a due date, which has
   // none), so a click can open the item window at what the entry refers to (focusTarget).
   var STATUS_EV = { 'item.status': 1, 'item.close': 1, 'item.confirm': 1, 'item.reject': 1, 'item.reopen': 1 };
-  function assigneeOf(e) { return e.type === 'item.status' || e.type === 'item.close' ? e.member : e.payload.assignee || e.member; }
+  // item.status carries assignee when an org superior (or the assigner) wrote another member's assignment
+  function assigneeOf(e) { return e.type === 'item.close' ? e.member : e.payload.assignee || e.member; }
   // the assignment record's latest status-side event: the one written at its lastUpdate, else the last one
   function statusEv(r) {
     var l = VS.events.filter(function (e) { return STATUS_EV[e.type] && e.status === 'applied' && e.payload.item === r.item && assigneeOf(e) === r.to; });
@@ -941,7 +980,7 @@
       // new forced assignments: the same rule as the handle badge's "a:" keys
       if (r.by !== v && r.forced && r.status === 'todo') add('a:' + r.id, 'assigned', r.item, r.ts, r.inherited && r.ruleLevels != null ? wsT("js.tk.feed.assigned.all", esc(nm(r.by)), esc(r.ruleLevels)) : wsT("js.tk.feed.assigned", esc(nm(r.by))), r.via);
       // near the due date, as the due chip computes it
-      if (it.due && it.due <= t && r.status !== 'done' && it.status !== 'done')
+      if (it.due && it.due <= t && !wrapped(r.status) && !wrapped(it.status))
         add('d:' + r.id + ':' + (it.due < t ? 'over' : 'today'), 'due', r.item, it.due + 'T00:00:00Z', it.due < t ? wsT("js.tk.feed.overdue", esc(it.due)) : wsT("js.tk.due.today"));
     });
     VS.my.received.pending.map(A).forEach(function (r) {
@@ -952,11 +991,13 @@
       var q = (VS.requests || {})[id];
       if (q) add('q:' + id, 'request', q.item, q.ts, (q.assignee === v ? wsT("js.tk.feed.request", esc(nm(q.by))) : wsT("js.tk.feed.request.of", esc(nm(q.by)), esc(nm(q.assignee)))) + (q.note ? wsT("js.tk.ev.tail", snippet(q.note)) : ''), id);
     });
-    // the model's derived notices; done / blocked: work I assigned, set by someone else
+    // the model's derived notices; done / blocked / dropped: work I assigned, set by someone else
+    // (the assignee, or an org superior of theirs)
     VS.notices.forEach(function (x) {
       var r = A(x.assignment), txt;
-      if (x.kind === 'done' || x.kind === 'blocked') {
-        add(x.key, x.kind, x.item, x.ts, (x.kind === 'done' ? wsT("js.tk.feed.finished", esc(nm(x.to))) : wsT("js.tk.feed.blocked", esc(nm(x.to)))) + (r.note ? wsT("js.tk.ev.tail", snippet(r.note)) : ''), statusEv(r));
+      if (x.kind === 'done' || x.kind === 'blocked' || x.kind === 'dropped') {
+        txt = x.kind === 'done' ? wsT("js.tk.feed.finished", esc(nm(x.to))) : x.kind === 'blocked' ? wsT("js.tk.feed.blocked", esc(nm(x.to))) : wsT("js.tk.feed.dropped", esc(nm(x.to)), esc(nm(r.statusBy || x.to)));
+        add(x.key, x.kind, x.item, x.ts, txt + (r.note ? wsT("js.tk.ev.tail", snippet(r.note)) : ''), statusEv(r));
         return;
       }
       if (x.kind === 'declined') txt = wsT("js.tk.feed.declined", esc(nm(x.to)));
@@ -1153,7 +1194,7 @@
   // its done column, the timelines mute ended rows).
   var CLOSED_DAYS = 14, CLOSED = null;
   function closeTs(it) {
-    var t = it.assignments.map(A).filter(function (r) { return r.state === 'live' && r.status === 'done'; }).map(function (r) { return String(r.lastUpdate); }).sort().pop();
+    var t = it.assignments.map(A).filter(function (r) { return r.state === 'live' && wrapped(r.status); }).map(function (r) { return String(r.lastUpdate); }).sort().pop();
     return t || String(it.lastActivity);
   }
   function addClosed(ts, n, html) {
@@ -1251,7 +1292,7 @@
   function keepKind(id) { return kindFilter(VS.items[id]); }
 
   function listMine() {
-    var mine = VS.my.assignments.map(A).filter(keepRec), open = mine.filter(function (r) { return r.status !== 'done'; }), done = mine.filter(function (r) { return r.status === 'done'; });
+    var mine = VS.my.assignments.map(A).filter(keepRec), open = mine.filter(function (r) { return !wrapped(r.status); }), done = mine.filter(function (r) { return wrapped(r.status); });
     var created = VS.my.created.filter(keepItem);
     done.forEach(function (r) { addClosed(String(r.lastUpdate), 1, irow({ rk: 'mine:' + r.id, item: r.item, rec: r, closed: true })); });
     if (FILT && !mine.length && !created.length) return filterEmpty();
@@ -1289,22 +1330,22 @@
         return '<b>' + esc(nm(r.to)) + '</b>' + (r.depth ? ' <span class="muted">L' + r.depth + '</span>' : '') + ' ' + esc(SI.info(stKey(VS.items[id], r)).label) + (r.forced ? '' : ' <span class="muted">' + (r.handoffOf ? wsT("js.tk.list.given.handoff") : wsT("js.tk.list.given.sent")) + '</span>') +
           (r.note ? ' &ldquo;' + esc(r.note) + '&rdquo;' : '');
       });
-      if (VS.items[id].status === 'done') return addClosed(closeTs(VS.items[id]), 1, irow({ rk: 'given:' + id, item: id, more: lines.join('<br>'), closed: true }));
+      if (wrapped(VS.items[id].status)) return addClosed(closeTs(VS.items[id]), 1, irow({ rk: 'given:' + id, item: id, more: lines.join('<br>'), closed: true }));
       open.push({ rk: 'given:' + id, item: id, more: lines.join('<br>') });
     });
     return open.length ? treeRows(open, 'given:') : '<p class="muted">' + wsT("js.tk.list.given.none") + '</p>';
   }
   // My team as a group-by-person view: each group header carries that person's roll-up counts:
-  // the load (live work neither idea nor done, a creator-fallback holding left out) with its
-  // per-status breakdown, stale and overdue (both inside the load), idea, fallback-held, done,
-  // unaccepted, and waiting on others. The viewer's subtree comes first; an admin's members
+  // the load (live work at todo, doing, or blocked, a creator-fallback holding left out) with its
+  // per-status breakdown, stale and overdue (both inside the load), in review, idea, fallback-held,
+  // done, dropped, unaccepted, and waiting on others. The viewer's subtree comes first; an admin's members
   // outside it follow under their own heading, indented by depth from the org-tree root.
   // Under a Today filter or a search a group with no matching row is left out.
   // A count is a button: it narrows the list to that person's rows of that count (the drill,
   // panelState().drill = { who, key }, list mode only), and the same count again clears it.
   // The statuses a team row's load counts, in its breakdown's order (the view's roll-up counts
-  // the same ones); every other status but idea and done shows as its own count after stale
-  // and overdue, sorted.
+  // the same ones); every other status but idea, done, and dropped (in-review) shows as its own
+  // count after stale and overdue, sorted.
   var TEAM_LOAD = ['todo', 'doing', 'blocked'];
   // The records a team head's count stands for, by the rules the view's counts use, so a count
   // and its rows agree. key: a status, 'load', 'stale', 'overdue', 'fallback', 'unaccepted', or
@@ -1314,7 +1355,7 @@
     return Object.keys(recs).map(function (id) { return recs[id]; }).filter(function (r) {
       var it = items[r.item];
       if (r.to !== p.id || r.state !== 'live' || !it || it.hidden || it.kind === 'topic') return false;
-      if (key === 'fallback') return !!r.fallback && r.status !== 'done';
+      if (key === 'fallback') return !!r.fallback && !wrapped(r.status);
       if (r.fallback) return false;
       if (key !== 'load' && key !== 'stale' && key !== 'overdue') return r.status === key;
       if (TEAM_LOAD.indexOf(r.status) < 0) return false;
@@ -1334,7 +1375,7 @@
         tipAttr((tip ? tip + '; ' : '') + wsT(sel ? "js.tk.team.drill.off" : "js.tk.team.drill.tip")) + '>' + txt + '</button>';
     }
     function st(s, n) { return cnt(s, wsT("js.tk.team.st", n, esc(SI.info(s).label)), '', s === 'blocked'); }
-    var c = [], seen = { idea: true, done: true }, br = [], other = [];
+    var c = [], seen = { idea: true, done: true, dropped: true }, br = [], other = [];
     TEAM_LOAD.forEach(function (s) { if (p.counts[s]) br.push(st(s, p.counts[s])); seen[s] = true; });
     Object.keys(p.counts).sort().forEach(function (s) { if (!seen[s] && p.counts[s]) other.push(st(s, p.counts[s])); });
     if (p.load) c.push(cnt('load', wsT("js.tk.team.load", p.load), wsT("js.tk.team.load.tip")) + (br.length ? ' (' + br.join(' &middot; ') + ')' : ''));
@@ -1344,6 +1385,7 @@
     if (p.counts.idea) c.push(st('idea', p.counts.idea));
     if (p.fallback) c.push(cnt('fallback', wsT("js.tk.team.fallback", p.fallback), wsT("js.tk.team.fallback.tip")));
     if (p.counts.done) c.push(st('done', p.counts.done));
+    if (p.counts.dropped) c.push(st('dropped', p.counts.dropped));
     if (p.pending.length) c.push(cnt('unaccepted', wsT("js.tk.team.unaccepted", p.pending.length), ''));
     if (p.waiting.length) c.push(cnt('waiting', wsT("js.tk.team.waiting", p.waiting.length), wsT("js.tk.team.waiting.tip")));
     return c.join(' &middot; ');
@@ -1370,7 +1412,7 @@
         '<span class="grow"></span><span class="muted ts"' + tipAttr(wsT("js.tk.team.last.tip")) + '>' + esc(fmtTs(p.last)) + '</span></div>';
       if (dr && !work.length && !wait.length) return g + '<p class="muted">' + wsT("js.tk.team.drill.none") + '</p></div>';
       // one tree per person
-      g += treeRows(work.map(function (id) { var r = A(id); return { rk: 'team:' + id, item: r.item, rec: r, closed: r.state === 'live' && r.status === 'done' }; }).concat(wait.map(function (id) {
+      g += treeRows(work.map(function (id) { var r = A(id); return { rk: 'team:' + id, item: r.item, rec: r, closed: r.state === 'live' && wrapped(r.status) }; }).concat(wait.map(function (id) {
         var r = A(id);
         return { rk: 'team:w:' + id, item: r.item, rec: r, more: r.handoffOf ? wsT("js.tk.team.sent.handoff", esc(nm(p.id)), esc(nm(r.to))) : wsT("js.tk.team.sent", esc(nm(p.id)), esc(nm(r.to))) };
       })), 'team:' + p.id + ':');
@@ -1398,7 +1440,7 @@
     order.forEach(function (id) { var par = base[id].parent; if (par && base[par]) (kids[par] = kids[par] || []).push(id); });
     function kidsOf(id) { return kids[id] || []; }
     function isOpen(id) { return itemFilter(base[id]); }
-    function isClosed(id) { return base[id].kind !== 'topic' && base[id].status === 'done'; }
+    function isClosed(id) { return base[id].kind !== 'topic' && wrapped(base[id].status); }
     function hasOpen(id) { if (!(id in openBelow)) openBelow[id] = kidsOf(id).some(function (k) { return isOpen(k) || hasOpen(k); }); return openBelow[id]; }
     function inTree(id) { return isOpen(id) || (isClosed(id) && hasOpen(id)); }   // open, or closed with something open below
     function isUnit(id) { return isClosed(id) && !hasOpen(id); }                  // closed, and so is everything below
@@ -1428,7 +1470,7 @@
       '<div class="empty">' + wsT("js.tk.list.all.none") + '</div>');
   }
   function scopeChip(s) {
-    if (s === 'mine') return wsT("js.tk.team.open", VS.my.assignments.map(A).filter(function (r) { return r.status !== 'done' && VS.items[r.item].kind !== 'topic'; }).length);
+    if (s === 'mine') return wsT("js.tk.team.open", VS.my.assignments.map(A).filter(function (r) { return !wrapped(r.status) && VS.items[r.item].kind !== 'topic'; }).length);
     if (s === 'received') return wsT("js.tk.scope.chip.pending", VS.my.received.pending.length);
     if (s === 'given') return wsTn("js.tk.scope.chip.items", VS.my.given.length) + (VS.my.today.confirms.length ? ', ' + wsT("js.tk.scope.chip.confirm", VS.my.today.confirms.length) : '');
     if (s === 'team') {
@@ -2037,8 +2079,8 @@
     var s = it.status;
     if (ui.status === 'hidden') return it.hidden;
     if (it.hidden) return false;
-    if (ui.status === 'open') return s !== 'done';
-    if (ui.status === 'done') return s === 'done';
+    if (ui.status === 'open') return !wrapped(s);
+    if (ui.status === 'done' || ui.status === 'in-review' || ui.status === 'dropped') return s === ui.status;
     if (ui.status === 'blocked') return s === 'blocked' || it.rollup.blocked.length;
     if (ui.status === 'idea') return s === 'idea';
     return true;
@@ -2051,7 +2093,7 @@
   }
   function itemFilterBar(kindOnly) {
     return wsT("js.tk.filter.kind") + ' ' + sel('f-kind', ui.kind, [['all', wsT("js.tk.filter.all")], ['task', kindName('task')], ['topic', kindName('topic')], ['request', wsT("js.tk.filter.request")], ['claimable', wsT("js.tk.filter.claimable")]]) +
-      (kindOnly ? '' : ' ' + wsT("js.tk.filter.status") + ' ' + sel('f-status', ui.status, [['all', wsT("js.tk.filter.all")], ['open', wsT("js.tk.filter.open")], ['idea', stLabel('idea')], ['blocked', stLabel('blocked')], ['done', stLabel('done')], ['hidden', wsT("js.tk.chip.hidden")]]));
+      (kindOnly ? '' : ' ' + wsT("js.tk.filter.status") + ' ' + sel('f-status', ui.status, [['all', wsT("js.tk.filter.all")], ['open', wsT("js.tk.filter.open")], ['idea', stLabel('idea')], ['blocked', stLabel('blocked')], ['in-review', stLabel('in-review')], ['done', stLabel('done')], ['dropped', stLabel('dropped')], ['hidden', wsT("js.tk.chip.hidden")]]));
   }
   function cardActivity() {
     var chip = wsT("js.tk.activity.chip", VS.stats.events, VS.stats.flagged) + (VS.stats.concurrent ? ', ' + wsT("js.tk.row.nconcurrent", VS.stats.concurrent) : ''), m = modeOf('activity');
@@ -2106,8 +2148,8 @@
   // pending column); "all": cards are items by item status, whose idea column's header "+"
   // opens an input row atop it (knewRowHtml). Dragging moves only the viewer's own
   // live assignment (item.status, or item.close on the done column).
-  var KCOLS = { assign: ['pending', 'idea', 'todo', 'doing', 'blocked', 'awaiting', 'done'],
-    items: ['pending', 'idea', 'todo', 'doing', 'blocked', 'awaiting', 'done'] };
+  var KCOLS = { assign: ['pending', 'idea', 'todo', 'doing', 'blocked', 'in-review', 'done', 'dropped'],
+    items: ['pending', 'idea', 'todo', 'doing', 'blocked', 'in-review', 'done', 'dropped'] };
   function kanbanBody(key, v) {
     var cols = KCOLS[key === 'all' ? 'items' : 'assign'], buckets = {};
     cols.forEach(function (c) { buckets[c] = []; });
@@ -2117,14 +2159,14 @@
         // the columns already are the statuses, so the status filter would only empty them: kind filter only
         if (it.hidden || it.kind === 'topic' || !buckets[it.status] || !kindFilter(it) || !keepItem(id)) return;
         var mineR = it.assignments.map(A).filter(function (r) { return r.to === v && r.state === 'live'; })[0];
-        buckets[it.status].push({ item: id, drag: mineR && mineR.status !== 'done' ? id : null,
+        buckets[it.status].push({ item: id, drag: mineR && !wrapped(mineR.status) ? id : null,
           sub: (it.assignments.map(A).filter(function (r) { return r.state === 'live' || r.state === 'pending'; }).map(function (r) { return r.to + (r.state === 'pending' ? '?' : ''); }).join(', ') || wsT("js.tk.common.nobody")) });
       });
     } else {
       assignRecs(key, v).forEach(function (r) {
         var col = r.state === 'pending' ? 'pending' : r.status;
         if (!buckets[col]) return;
-        buckets[col].push({ item: r.item, rec: r, drag: r.to === v && r.state === 'live' && r.status !== 'done' ? r.item : null,
+        buckets[col].push({ item: r.item, rec: r, drag: r.to === v && r.state === 'live' && !wrapped(r.status) ? r.item : null,
           who: key !== 'mine' ? r.to : null, sub: (key !== 'mine' ? esc(nm(r.to)) + ' &middot; ' : '') + source(r) });
       });
     }
@@ -2216,7 +2258,7 @@
       '<div class="gantt"><div class="grow-axis"><div class="glabel"></div><div class="gtrack axis">' + axis + '</div></div>';
     // x: the dueRows entry of a match, null for a context row; c: the fold control; sm: draw the summary bar
     function row(e, x, c, sm) {
-      var it = VS.items[e.id], st = x ? x.status : stKey(it), r = own(e.id), s = sm && e.n ? sub(e.id) : null, over = it.due && it.due < today() && st !== 'done';
+      var it = VS.items[e.id], st = x ? x.status : stKey(it), r = own(e.id), s = sm && e.n ? sub(e.id) : null, over = it.due && it.due < today() && !wrapped(st);
       return '<div class="grow-row click' + (ENDED[st] ? ' ended' : '') + (x ? '' : ' ctx') + '"' + attr('item', it.id) + attr('rk', 'g:' + it.id) + '><div class="glabel" style="--ind:' + e.depth + '">' + c.tw + stBtn(st, it, x && x.rec) + titleRef(it.id) + c.sub + (x ? whoTag(x) : '') + priHtml(it) + moreBtn(it.id, 'gmore', true) + '</div>' +
         '<div class="gtrack"><span class="gnow" style="left:' + pct(t0) + '"></span>' +
         (r ? '<span class="gbar st-' + esc(st) + (over ? ' over' : '') + '" style="left:' + pct(r[0]) + ';width:' + wid(r) + '" title="' +
@@ -2488,7 +2530,7 @@
     var hs = holders(it), c = {}, parts = [];
     if (!hs.length) return '<span class="muted">' + wsT("js.tk.row.unassigned") + '</span>';
     hs.forEach(function (r) { var k = r.state === 'pending' ? 'pending' : r.status; c[k] = (c[k] || 0) + 1; });
-    ['blocked', 'doing', 'awaiting', 'done', 'pending'].forEach(function (k) { if (c[k]) parts.push(esc(SI.info(k).label) + ' ' + c[k]); });
+    ['blocked', 'doing', 'in-review', 'done', 'dropped', 'pending'].forEach(function (k) { if (c[k]) parts.push(esc(SI.info(k).label) + ' ' + c[k]); });
     return '<b>' + hs.length + '</b>' + parts.map(function (x) { return ' <span class="muted">&middot;</span> ' + x; }).join('');
   }
   function ancestorsOf(it) {
@@ -2564,11 +2606,14 @@
         // the holder releases the topic (unassigns their own record) or hands it off
         if (!it.hidden) b += btn('unassign', wsT("js.tk.act.release"), { item: r.item, who: v }) + btn('handoff', esc(wsT("js.tk.act.handoff")), { item: r.item });
       } else if (r.state === 'live') {
-        if ((r.by === v || r.to === v) && r.status === 'done') b += btn('note', wsT("js.tk.asg.reopen"), { item: r.item, who: r.to, op: 'item.reopen' });
+        if ((r.by === v || r.to === v) && wrapped(r.status)) b += btn('note', wsT("js.tk.asg.reopen"), { item: r.item, who: r.to, op: 'item.reopen' });
+        if (!it.hidden && canReview(r)) b += btn('confirm', esc(wsT("js.tk.act.confirm", nm(r.to))), { item: r.item, who: r.to }, 'primary') + btn('note', esc(wsT("js.tk.act.reject", nm(r.to))), { item: r.item, who: r.to, op: 'item.reject' });
+        var wa = wrapAuth(it, r);
+        if (wa) b += btn('wrap', esc(wsT(wa === 'sup' ? "js.tk.act.wrap" : "js.tk.act.drop", nm(r.to))), { item: r.item, who: r.to });
         var departed = (VS.members[r.to] || {}).removed || (VS.members[r.by] || {}).removed;
         // a fallback holding (nobody else holds the task) is not unassigned or handed off: assign instead
         if (!r.fallback && (r.by === v || (departed && VS.viewer.admin))) rm = rmBadge(r.by === v ? wsT("js.tk.asg.unassign") : wsT("js.tk.asg.unassign.admin"), r);
-        if (VS.viewer.admin && r.to !== v && r.status !== 'done' && !r.fallback && !it.hidden) b += btn('handoff', wsT("js.tk.asg.handoff.admin"), { item: r.item, who: r.to });
+        if (VS.viewer.admin && r.to !== v && !wrapped(r.status) && !r.fallback && !it.hidden) b += btn('handoff', wsT("js.tk.asg.handoff.admin"), { item: r.item, who: r.to });
         if (reqT[r.id]) b += btn('request', esc(wsT("js.tk.asg.request")), { item: r.item, who: r.to });
       } else if (r.state === 'pending' && r.to === v && (r.by === v || r.sender === v)) rm = rmBadge(wsT("js.tk.asg.withdraw"), r);
       var note = r.note || r.answerNote, diff = [];
@@ -2624,7 +2669,7 @@
       return VS.items[id].children.map(function (k) {
         var ki = VS.items[k], key = ui.store + '|' + k, open = !!ki.children.length && (key in ui.wfold ? ui.wfold[key] : depth === 0);
         var c = foldCtl({ id: k, n: ki.children.length, open: open, to: '' }, 'wfold', 'w:');
-        return '<div class="srow' + (ki.status === 'done' ? ' gone' : '') + '"' + attr('item', k) + attr('rk', 'w:' + k) + ' style="--ind:' + depth + '">' + c.tw + stBtn(stKey(ki), ki) + titleRef(k) + c.sub + (ki.hidden ? '<span class="chip hid">' + wsT("js.tk.chip.hidden") + '</span>' : '') +
+        return '<div class="srow' + (wrapped(ki.status) ? ' gone' : '') + '"' + attr('item', k) + attr('rk', 'w:' + k) + ' style="--ind:' + depth + '">' + c.tw + stBtn(stKey(ki), ki) + titleRef(k) + c.sub + (ki.hidden ? '<span class="chip hid">' + wsT("js.tk.chip.hidden") + '</span>' : '') +
           '<span class="grow"></span>' + rollupHtml(ki) + whoHtml(ki) + '</div>' + (open ? rows(k, depth + 1) : '');
       }).join('');
     }
@@ -2693,15 +2738,15 @@
   function headActs(it) {
     var mine = !it.hidden && mineLive(it), r = canStatus(it) && mine, h = '';
     if (r) {
-      var cur = r.status === 'awaiting' ? 'done' : r.status;
-      h += '<div class="iw-seg" role="group" aria-label="' + wsT("js.tk.prop.status") + '">' + ['idea', 'todo', 'doing', 'blocked', 'done'].map(function (s) {
-        var label = s === 'done' && r.completion === 'assigner' ? wsT("js.tk.menu.reqdone") : stLabel(s), dis = s === 'done' && r.status === 'awaiting';
-        return '<button type="button" class="sg"' + attr('act', 'hstatus') + attr('item', it.id) + attr('status', s) + ' aria-pressed="' + (s === cur) + '" aria-label="' + esc(label) + '"' + tipAttr(label) + (dis ? ' disabled' : '') + '>' +
-          SI.svg(s) + '<span class="sl">' + esc(label) + '</span></button>';
+      h += '<div class="iw-seg" role="group" aria-label="' + wsT("js.tk.prop.status") + '">' + ownStatusOpts(r).map(function (o) {
+        // a disabled button shows no tooltip of its own, so the reason rides on a wrapper
+        var b = '<button type="button" class="sg"' + attr('act', 'hstatus') + attr('item', it.id) + attr('status', o.s) + ' aria-pressed="' + (o.s === r.status) + '" aria-label="' + esc(o.label) + '"' + (o.dis ? ' disabled' : tipAttr(o.label)) + '>' +
+          SI.svg(o.s) + '<span class="sl">' + esc(o.label) + '</span></button>';
+        return o.dis ? '<span class="sgw"' + tipAttr(o.label + ': ' + o.why) + '>' + b + '</span>' : b;
       }).join('') + '</div>';
     }
     if (canSplit(it)) h += '<button type="button" class="ia"' + attr('act', 'hsub') + attr('item', it.id) + ' aria-label="' + esc(wsT("js.tk.menu.sub")) + '"' + tipAttr(wsT("js.tk.menu.sub")) + '><svg class="i"><use href="#tki-plus"/></svg></button>';
-    if (mine && mine.status !== 'done' && !mine.fallback) h += '<button type="button" class="ia"' + attr('act', 'handoff') + attr('item', it.id) + ' aria-haspopup="menu" aria-label="' + esc(wsT("js.tk.act.handoff")) + '"' + tipAttr(wsT("js.tk.act.handoff")) + '><svg class="i"><use href="#tki-handoff"/></svg></button>';
+    if (mine && !wrapped(mine.status) && !mine.fallback) h += '<button type="button" class="ia"' + attr('act', 'handoff') + attr('item', it.id) + ' aria-haspopup="menu" aria-label="' + esc(wsT("js.tk.act.handoff")) + '"' + tipAttr(wsT("js.tk.act.handoff")) + '><svg class="i"><use href="#tki-handoff"/></svg></button>';
     return h ? '<div class="iw-acts">' + h + '</div>' : '';
   }
   // The item window's id button: "<kind> ID" copies the item's id (its tooltip) and says so for a moment.
@@ -3654,6 +3699,15 @@
           return '<button type="button" class="mi" role="menuitem" data-mi' + attr('act', 'm-request') + attr('to', r.to) + '>' + avHtml(r.to) + '<span class="ml">' + whoName(r.to) + '</span><span class="mv">' + esc(stLabel(r.status)) + '</span></button>';
         }).join('') : '<p class="mempty">' + wsT("js.tk.menu.nobody") + '</p>') + '</div>' + noteField(wsT("js.tk.form.note.opt"));
     }
+    if (step === 'wrap') {
+      // another member's assignment: an org superior's wrap-up set, or the assigner's drop (wrapAuth)
+      var wrec = it.assignments.map(A).filter(function (r) { return r.to === MN.who && r.state === 'live'; })[0], wa = wrapAuth(it, wrec);
+      if (!wa) return h + back + '<p class="mempty">' + wsT("js.tk.win.noacts", esc(nm(v))) + '</p>';
+      return h + back + '<div class="mtitle">' + wsT("js.tk.dlg.wrap.title", esc(nm(MN.who)), esc(it.alias)) + '</div><p class="mintro">' + wsT(wa === 'sup' ? "js.tk.dlg.wrap.intro" : "js.tk.dlg.wrap.intro.drop", esc(nm(MN.who))) + '</p>' +
+        noteField(wsT("js.tk.form.note.opt")) + '<div role="group">' + WRAP_SET[wa].map(function (s, i) {
+          return '<button type="button" class="mi" role="menuitem" data-mi' + attr('act', 'm-wrap') + attr('status', s) + (i ? '' : ' data-autofocus') + '>' + SI.svg(s) + '<span class="ml">' + esc(stLabel(s)) + '</span></button>';
+        }).join('') + '</div>';
+    }
     if (step === 'note') {
       var L = { 'item.reject': ["js.tk.dlg.reject.title", "js.tk.dlg.reject.intro"], 'item.reopen': ["js.tk.dlg.reopen.title", "js.tk.dlg.reopen.intro"],
         'item.decline': ["js.tk.dlg.decline.title", "js.tk.dlg.decline.intro"], 'item.return': ["js.tk.dlg.return.title", "js.tk.dlg.return.intro"],
@@ -3666,18 +3720,19 @@
     // the main step: the status part (radios that apply on click, a note that rides along), then the actions
     var parts = [];
     if (canStatus(it)) {
-      var cur = mineR.status === 'awaiting' ? 'done' : mineR.status, pick = MN.pick || cur;
-      parts.push('<div class="mst" role="group" aria-label="' + wsT("js.tk.prop.status") + '">' + ['idea', 'todo', 'doing', 'blocked', 'done'].map(function (s) {
-        var on = s === cur, label = s === 'done' && mineR.completion === 'assigner' ? wsT("js.tk.menu.reqdone") : stLabel(s), dis = s === 'done' && mineR.status === 'awaiting';
-        return '<button type="button" class="mr' + (s === pick && !on ? ' pick' : '') + '" role="menuitemradio" aria-checked="' + on + '" data-mi' + attr('act', 'm-status') + attr('status', s) + (dis ? ' disabled' : '') + (on ? ' data-autofocus' : '') + '>' +
-          SI.svg(s) + '<span>' + esc(label) + '</span></button>';
-      }).join('') + '</div>' + noteField(wsT("js.tk.menu.note")));
+      var cur = mineR.status, pick = MN.pick || cur, whys = [];
+      parts.push('<div class="mst" role="group" aria-label="' + wsT("js.tk.prop.status") + '">' + ownStatusOpts(mineR).map(function (o) {
+        var on = o.s === cur;
+        if (o.dis) whys.push(o.why);
+        return '<button type="button" class="mr' + (o.s === pick && !on ? ' pick' : '') + '" role="menuitemradio" aria-checked="' + on + '" data-mi' + attr('act', 'm-status') + attr('status', o.s) + (o.dis ? ' disabled' : '') + (on ? ' data-autofocus' : '') + '>' +
+          SI.svg(o.s) + '<span>' + esc(o.label) + '</span></button>';
+      }).join('') + '</div>' + (whys.length ? '<p class="mintro mwhy">' + whys.map(esc).join('<br>') + '</p>' : '') + noteField(wsT("js.tk.menu.note")));
     }
     if (MN.statusOnly) return h + (parts.join('') || '<p class="mempty">' + wsT("js.tk.win.noacts", esc(nm(v))) + '</p>');
     var acts = actList(it).map(function (x) {
       return mi(x[0], esc(x[2]), x[3], { icon: x[1], cls: x[4] ? 'go' : '' });
     });
-    if (mineR && mineR.status === 'done' && !it.hidden) acts.push(mi('note', esc(wsT("js.tk.asg.reopen")), { item: it.id, who: v, op: 'item.reopen' }, { icon: 'return' }));
+    if (mineR && wrapped(mineR.status) && !it.hidden) acts.push(mi('note', esc(wsT("js.tk.asg.reopen")), { item: it.id, who: v, op: 'item.reopen' }, { icon: 'return' }));
     if (acts.length) parts.push(acts.join(''));
     // the item window's own header menu: "add subtask" and "hand off" sit in the header beside it
     var inWin = ui.win && ui.item === it.id && MN.backEl && MN.backEl.closest && !!MN.backEl.closest('.iw-head');
@@ -3687,7 +3742,7 @@
       more.push(mi('pri', wsT("js.tk.menu.pri"), { item: it.id }, { icon: 'flag', sub: 1, val: esc(it.priorityName) }));
       more.push(mi('due', wsT("js.tk.menu.due"), { item: it.id }, { icon: 'calendar', sub: 1, val: it.due ? esc(it.due) : '' }));
     }
-    if (mineR && mineR.status !== 'done' && !mineR.fallback && !it.hidden && !inWin) more.push(mi('handoff', esc(wsT("js.tk.act.handoff")), { item: it.id }, { icon: 'handoff', sub: 1 }));
+    if (mineR && !wrapped(mineR.status) && !mineR.fallback && !it.hidden && !inWin) more.push(mi('handoff', esc(wsT("js.tk.act.handoff")), { item: it.id }, { icon: 'handoff', sub: 1 }));
     // a topic's holder releases it: item.unassign of their own record
     if (mineR && !task && !it.hidden) more.push(mi('unassign', esc(wsT("js.tk.act.release")), { item: it.id, who: v }, { icon: 'withdraw' }));
     if (canAssign(it, v)) more.push(mi('assign', esc(wsT("js.tk.act.assign")), { item: it.id }, { icon: 'assign', sub: 1 }));
@@ -3768,12 +3823,39 @@
   // A topic takes one holder: people only, picking one replaces the last, and no completion
   // mode (the store keeps none for a topic; the payload still carries the derived one).
   function asgState() { return MN.as || (MN.as = { q: '', sel: [], compl: null, idx: 0, opts: [] }); }
-  // The completion mode shown and written: the user's pick once they touched the radio, else
-  // assignee when the viewer is the only target, assigner when any target (a rule always) is
-  // someone else, and assigner while nothing is picked.
+  // The default completion of one target (the writers' rule, as the MCP writer's completionClasses):
+  // a member below the viewer in the org tree, or a rule rooted at the viewer or below them, takes
+  // assigner, so a close goes through review; the viewer themself or a peer takes assignee.
+  function complClass(o) {
+    var id = o.t === 'r' ? o.root : o.id;
+    return (o.t === 'r' && id === VS.viewer.member) || VS.viewer.reach[id] ? 'assigner' : 'assignee';
+  }
+  // The picked targets as the item.assign events they write: one with compl when the user picked a
+  // completion, else one per default class, the first target's class first, each with its
+  // completion stored explicitly. Within an event, people come first, then rules ({root, levels?};
+  // the whole subtree without levels).
+  function asgEvents(item, sel, compl) {
+    var groups = [], by = {};
+    sel.forEach(function (o) {
+      var c = compl || complClass(o);
+      if (!by[c]) groups.push(by[c] = { c: c, sel: [] });
+      by[c].sel.push(o);
+    });
+    return groups.map(function (g) {
+      var people = g.sel.filter(function (o) { return o.t === 'p'; }).map(function (o) { return o.id; });
+      var rules = g.sel.filter(function (o) { return o.t === 'r'; }).map(function (o) { return o.levels == null ? { root: o.root } : { root: o.root, levels: o.levels }; });
+      return ['item.assign', { item: item, targets: people.concat(rules), completion: g.c }];
+    });
+  }
+  // The completion mode the radio shows: the user's pick once they touched it, else the picks'
+  // default class (complClass); 'mixed' when they fall in both (written as one assign per class),
+  // null while nothing is picked.
   function asgCompl(S) {
-    var v = VS.viewer.member;
-    return S.compl || (S.sel.length && S.sel.every(function (o) { return o.t === 'p' && o.id === v; }) ? 'assignee' : 'assigner');
+    if (S.compl) return S.compl;
+    var cs = {};
+    S.sel.forEach(function (o) { cs[complClass(o)] = true; });
+    var k = Object.keys(cs);
+    return k.length > 1 ? 'mixed' : k[0] || null;
   }
   // everyone below root (removed members left out), by depth
   function subtreeOf(root) {
@@ -3869,7 +3951,7 @@
       '<ul class="ap-list" id="tkalist" role="listbox" aria-multiselectable="' + !topic + '" aria-label="' + esc(wsT("js.tk.act.assign")) + '">' + list + '</ul>' +
       '<div class="ap-foot">' + (topic ? '<span class="muted">' + wsT("js.tk.ap.topic") + '</span>' : '<span class="ap-cm" role="radiogroup" aria-label="' + wsT("js.tk.form.completion") + '">' + ['assignee', 'assigner'].map(function (c) {
         return '<button type="button" role="radio" aria-checked="' + (asgCompl(S) === c) + '"' + attr('act', 'm-acm') + attr('c', c) + '>' + esc(complText(c)) + '</button>';
-      }).join('') + '</span>') + '<button type="button" class="btn primary" id="tkaapply"' + attr('act', 'm-aapply') + (S.sel.length ? '' : ' disabled') + '>' + wsT("js.tk.dlg.assign.submit") + '</button></div></div>';
+      }).join('') + '</span><span class="ap-mix muted" id="tkamix"' + tipAttr(wsT("js.tk.ap.compl.mixed.tip")) + (asgCompl(S) === 'mixed' ? '' : ' hidden') + '>' + wsT("js.tk.ap.compl.mixed") + '</span>') + '<button type="button" class="btn primary" id="tkaapply"' + attr('act', 'm-aapply') + (S.sel.length ? '' : ' disabled') + '>' + wsT("js.tk.dlg.assign.submit") + '</button></div></div>';
   }
   // the list, the chips, and the apply button again; the search field (and an IME composition in it) stays
   function asgDraw() {
@@ -3882,6 +3964,7 @@
     var on = $('tkalist').querySelector('.aopt.on');
     if (on) on.scrollIntoView({ block: 'nearest' });
     Array.prototype.forEach.call(document.querySelectorAll('#tkmenu .ap-cm [role="radio"]'), function (b) { b.setAttribute('aria-checked', String(b.getAttribute('data-c') === asgCompl(S))); });
+    if ($('tkamix')) $('tkamix').hidden = asgCompl(S) !== 'mixed';
   }
   function asgToggle(i) {
     var S = asgState(), o = S.opts.filter(function (x) { return !x.g && !x.off; })[i];
@@ -3893,15 +3976,13 @@
     S.idx = i;
     asgDraw();
   }
-  // people first, then rules ({root, levels?}; whole subtree without levels), as one item.assign
+  // the picks as item.assign events (asgEvents): one, or one per completion class
   function asgApply() {
     var S = asgState(), it = mnItem();
     if (!it || !S.sel.length) return;
     // a chip's picker: the picks go to the row, sent with its create
     if (it.draft) { var n = ui.nrow[ui.store]; n.who = S.sel.map(function (o) { return o.id; }); n.compl = S.compl; return newPicked(); }
-    var people = S.sel.filter(function (o) { return o.t === 'p'; }).map(function (o) { return o.id; });
-    var rules = S.sel.filter(function (o) { return o.t === 'r'; }).map(function (o) { return o.levels == null ? { root: o.root } : { root: o.root, levels: o.levels }; });
-    commit([['item.assign', { item: it.id, targets: people.concat(rules), completion: asgCompl(S) }]]);
+    commit(asgEvents(it.id, S.sel, S.compl));
   }
   function asgMenuKey(e) {
     var t = e.target, S = asgState(), k = e.key;
@@ -3930,7 +4011,7 @@
     var origin = CAPS.origin && $('corigin') ? $('corigin').value : 'human';
     var r = it && mineLive(it);
     if (!r) return false;
-    if (s === (r.status === 'awaiting' ? 'done' : r.status) && !note) return false;
+    if (s === r.status && !note) return false;
     var p = { item: it.id };
     if (note) p.note = note;
     if (s === 'done') commit([['item.close', p, origin]]);
@@ -3979,6 +4060,11 @@
         return commit([[MN.op, np]]);
       }
       case 'm-opening': return commit([['item.open', { item: id, scope: a.getAttribute('data-scope') }]]);
+      case 'm-wrap': {
+        var wp = { item: id, assignee: MN.who, status: a.getAttribute('data-status') }, wn = menuNote();
+        if (wn) wp.note = wn;
+        return commit([['item.status', wp]]);
+      }
       case 'm-request': {
         var rp = { item: id, assignee: a.getAttribute('data-to') }, rn = menuNote();
         if (rn) rp.note = rn;
@@ -4020,7 +4106,7 @@
       return;
     }
     if (k === 'Enter' && !e.isComposing) {
-      if (t.id === 'tkmnote' && MN.step === 'main') { e.preventDefault(); applyStatus(MN.pick || (VS.items[MN.item] && (function (r) { return r ? (r.status === 'awaiting' ? 'done' : r.status) : ''; })(mineLive(VS.items[MN.item])))); return; }
+      if (t.id === 'tkmnote' && MN.step === 'main') { e.preventDefault(); applyStatus(MN.pick || (VS.items[MN.item] && (function (r) { return r ? r.status : ''; })(mineLive(VS.items[MN.item])))); return; }
       if (t.id === 'tkmnote' && MN.step === 'note') { e.preventDefault(); menuAct('m-note-send', t); return; }
       if (t.id === 'tkmnote' && MN.step === 'request') { e.preventDefault(); var p0 = m.querySelector('[data-act="m-request"]'); if (p0) p0.click(); return; }
       if (t.id === 'tkmdue') { e.preventDefault(); menuAct('m-due-set', t); return; }
@@ -4076,16 +4162,29 @@
     return nrowFill(n);
   }
   function nrowMine(n) { return n.who.length === 1 && n.who[0] === VS.viewer.member; }
-  // The status chip shows only while the viewer alone is the assignee: item.status writes only its
-  // author's own assignment, so anyone else starts in the store's own state (todo for someone
-  // within reach, pending otherwise). A topic has no status or due: only its one holder shows.
+  // The status chip's choices: the creator's own statuses while the viewer alone is the assignee
+  // (sent as item.status on the store's fallback holding); the wrap-up set when the viewer is an
+  // org superior of every picked assignee, none of them the viewer (one item.status per assignee
+  // after the assign, which is live at once for a subordinate), todo standing for no status write
+  // (the live assignment's own start); none otherwise, where anyone else starts in the store's own
+  // state (todo within reach, pending outside it). A topic has no status or due: only its one
+  // holder shows.
+  var NROW_ST = { own: ['idea', 'todo', 'doing', 'blocked'], wrap: ['todo', 'blocked', 'done', 'dropped'] };
+  function nrowStMode(n) {
+    var v = VS.viewer.member;
+    if (n.kind === 'topic') return '';
+    if (nrowMine(n)) return 'own';
+    return n.who.length && n.who.every(function (id) { return id !== v && !!VS.viewer.reach[id]; }) ? 'wrap' : '';
+  }
+  // the chip's status as the mode reads it: a pick the mode does not offer falls back to its first
+  function nrowSt(n) { var m = nrowStMode(n); return !m ? '' : NROW_ST[m].indexOf(n.st) >= 0 ? n.st : NROW_ST[m][0]; }
   function nrowChips(n) {
-    var topic = n.kind === 'topic', h = '';
+    var topic = n.kind === 'topic', h = '', st = nrowSt(n);
     function chip(id, step, label, inner, dflt) {
       return '<button type="button" class="nch' + (dflt ? ' dflt' : '') + '" id="' + id + '"' + attr('act', 'nchip') + attr('step', step) +
         ' aria-haspopup="' + (step === 'assign' ? 'dialog' : 'menu') + '" aria-expanded="false" aria-label="' + esc(label) + '"' + tipAttr(label) + '>' + inner + '</button>';
     }
-    if (!topic && nrowMine(n)) h += chip('tknst', 'status', wsT("js.tk.new.st", stLabel(n.st)), SI.svg(n.st) + '<span>' + esc(stLabel(n.st)) + '</span>', n.st === 'idea');
+    if (st) h += chip('tknst', 'status', wsT("js.tk.new.st", stLabel(st)), SI.svg(st) + '<span>' + esc(stLabel(st)) + '</span>', st === NROW_ST[nrowStMode(n)][0]);
     var one = n.who.length === 1, wl = one ? nm(n.who[0]) : wsTn("js.tk.ap.n", n.who.length);
     h += chip('tknwho', 'assign', wsT("js.tk.new.who", wl), one ? avHtml(n.who[0]) + '<span>' + esc(wl) + '</span>' :
       '<svg class="i"><use href="#tki-assign"/></svg><span>' + esc(wl) + '</span>', nrowMine(n));
@@ -4131,8 +4230,9 @@
     if (!n) return '';
     var h = '<div class="mh"><b>' + esc(d.title) + '</b></div>';
     if (MN.step === 'status') {
-      return h + '<div class="mst" role="group" aria-label="' + wsT("js.tk.prop.status") + '">' + ['idea', 'todo', 'doing', 'blocked'].map(function (s) {
-        var on = s === n.st;
+      var nst = nrowSt(n);
+      return h + '<div class="mst" role="group" aria-label="' + wsT("js.tk.prop.status") + '">' + (NROW_ST[nrowStMode(n)] || []).map(function (s) {
+        var on = s === nst;
         return '<button type="button" class="mr" role="menuitemradio" aria-checked="' + on + '" data-mi' + attr('act', 'm-status') + attr('status', s) + (on ? ' data-autofocus' : '') + '>' + SI.svg(s) + '<span>' + esc(stLabel(s)) + '</span></button>';
       }).join('') + '</div>';
     }
@@ -4189,9 +4289,14 @@
     if (cp.kind === 'topic') b = heldTopic(cp, n.who.length === 1 ? n.who[0] : v);
     else {
       if (n.due) cp.due = n.due;
-      // anyone but the viewer alone: one assign, no status; the completion is the picker's, else
-      // assigner (asgCompl's rule: a target other than the viewer)
-      b = nrowMine(n) ? asIdea(cp, n.st) : [['item.create', cp], ['item.assign', { item: '$1', targets: n.who.slice(), completion: n.compl || 'assigner' }]];
+      // anyone but the viewer alone: the assign (one per completion class unless the picker set
+      // one, asgEvents), then for a superior's wrap-up pick one status per assignee
+      var st = nrowSt(n);
+      if (nrowMine(n)) b = asIdea(cp, st);
+      else {
+        b = [['item.create', cp]].concat(asgEvents('$1', n.who.map(function (id) { return { t: 'p', id: id }; }), n.compl));
+        if (nrowStMode(n) === 'wrap' && st !== 'todo') n.who.forEach(function (id) { b.push(['item.status', { item: '$1', assignee: id, status: st }]); });
+      }
     }
     commit(b, null, function (res) {
       n.val = '';
@@ -4575,14 +4680,18 @@
     commit([['comment.edit', cep]], null, function () { ui.cedit = null; });
   }
 
-  // Kanban drop: only the viewer's own live assignment moves.
+  // Kanban drop: only the viewer's own live assignment moves, by the own status menu's rules
+  // (ownStatusOpts: done closes, a refused choice says why); an org superior's wrap-up of someone
+  // else's card goes through that card's menu.
   function dropOn(item, col) {
     var v = memberOf(viewerOf(ui.store)), r = VS.items[item] && VS.items[item].assignments.map(A).filter(function (x) { return x.to === v && x.state === 'live'; })[0];
     if (!r) return toast(wsT("js.tk.toast.notmine"));
     if (col === r.status || VS.items[item].kind === 'topic') return; // a topic has no status to move
-    if (col === 'idea' || col === 'todo' || col === 'doing' || col === 'blocked') return commit([['item.status', { item: item, status: col }]]);
+    var o = ownStatusOpts(r).filter(function (x) { return x.s === col; })[0];
+    if (!o) return toast(wsT("js.tk.toast.notstatus", esc(stLabel(col))));
+    if (o.dis) return toast(esc(o.why));
     if (col === 'done') return commit([['item.close', { item: item }]]);
-    toast(wsT("js.tk.toast.notstatus", esc(stLabel(col))));
+    commit([['item.status', { item: item, status: col }]]);
   }
 
   // --------------------------------------------------------------- sync actions
@@ -5147,7 +5256,7 @@
 
   var QUICK = { confirm: 1, unassign: 1, accept: 1, ihide: 1, chide: 1, comment: 1, claim: 1, unopen: 1, approve: 1, unrequest: 1 };
   // the item menu's steps an action button opens (in the menu, or a menu anchored to the button)
-  var STEPS = { note: 1, handoff: 1, assign: 1, pri: 1, due: 1, move: 1, opening: 1, request: 1 };
+  var STEPS = { note: 1, handoff: 1, assign: 1, pri: 1, due: 1, move: 1, opening: 1, request: 1, wrap: 1 };
 
   // ------------------------------------------------------------- display state
 

@@ -116,6 +116,11 @@ const (
 	trackerUnhide     = "unhide"
 )
 
+// trackerSetStatuses are the statuses tk:item.status takes: the
+// assignee's own (done goes through tk:item.close) and an org superior's
+// wrap-up (blocked, done, dropped) together.
+var trackerSetStatuses = []string{"idea", "todo", "doing", "blocked", "in-review", "done", "dropped"}
+
 // trackerEventAttrs are the attributes every event command takes besides
 // its own.
 var trackerEventAttrs = []string{"origin"}
@@ -158,11 +163,15 @@ var trackerCommands = map[string]trackerCommandDef{
 			}
 		}
 	}},
-	wstracker.TypeItemStatus: {trackerEventSpec(wsxmlcmd.Leaf, "item", "status"), func(b *trackerBatch, cmd wsxmlcmd.Command, ev *trackerEvent) {
+	// assignee names another member's assignment (an org superior's
+	// wrap-up, or the assigner's drop); the store judges which statuses
+	// apply to whom, so the parser only holds the status set.
+	wstracker.TypeItemStatus: {trackerEventSpec(wsxmlcmd.Leaf, "item", "status", "assignee"), func(b *trackerBatch, cmd wsxmlcmd.Command, ev *trackerEvent) {
 		b.itemRef(cmd, ev, "item")
-		if v, ok := wsxmlcmd.EnumAttr(b.p, cmd, "status", []string{"idea", "todo", "doing", "blocked"}); ok {
+		if v, ok := wsxmlcmd.EnumAttr(b.p, cmd, "status", trackerSetStatuses); ok {
 			ev.payload["status"] = v
 		}
+		b.optional(cmd, ev, "assignee")
 		b.note(cmd, ev)
 	}},
 	wstracker.TypeItemClose:   {trackerEventSpec(wsxmlcmd.Leaf, "item"), buildItemNote},
@@ -564,6 +573,10 @@ type trackerEvent struct {
 	// selfAssign marks the creator self-assignment the writer adds right
 	// after the item.create of cmd (writerDefaults); it has no command.
 	selfAssign bool
+	// splitOff marks the second item.assign of cmd, holding the targets
+	// whose default completion differs from its first target's
+	// (completionClasses).
+	splitOff bool
 }
 
 // trackerListRef is one entry of an ID list: id when given, else the batch
@@ -762,7 +775,11 @@ func trackerAlias(id string) string { return strings.Replace(id, "#", "-", 1) }
 // planTrackerBatch parses commands and validates the batch against the
 // registered stores, recording every problem in p. A batch with a problem
 // writes nothing.
-func planTrackerBatch(p *wsxmlcmd.Problems, commands string, registered []wstrackerhost.StoreEntry) *trackerBatch {
+//
+// reach returns the members below a store's member writer in its org tree
+// (member id -> depth) as the store holds it now; writerDefaults reads it
+// to pick an item.assign's default completion.
+func planTrackerBatch(p *wsxmlcmd.Problems, commands string, registered []wstrackerhost.StoreEntry, reach func(store string) (map[string]int, error)) *trackerBatch {
 	b := &trackerBatch{p: p, byPos: map[int]wsxmlcmd.Command{}, eventOf: map[int]int{}}
 	b.cmds = wsxmlcmd.Parse(p, trackerGrammar, commands)
 	if len(b.cmds) == 0 && len(p.List) == 0 {
@@ -853,8 +870,8 @@ func planTrackerBatch(p *wsxmlcmd.Problems, commands string, registered []wstrac
 		b.events = append(b.events, ev)
 	}
 	for _, e := range registered {
-		if e.ID == b.store && e.Member != "" {
-			b.writerDefaults(e.Member)
+		if e.ID == b.store && e.Member != "" && len(p.List) == 0 {
+			b.writerDefaults(e.Member, func() (map[string]int, error) { return reach(e.ID) })
 		}
 	}
 	return b
@@ -862,35 +879,51 @@ func planTrackerBatch(p *wsxmlcmd.Problems, commands string, registered []wstrac
 
 // writerDefaults fills what the writer, member writer of the batch's
 // store, decides for an agent as the dashboard does for a person. An
-// item.assign without completion gets it stored explicitly: assignee when
-// the writer is its only target, else assigner (a rule or levels always
-// covers someone else, since the store refuses one that covers nobody); the
-// fold's absent-means-assignee rule stays for old events. A topic created
-// that no item.assign of the batch names by $N is self-assigned (people =
-// the writer) by an item.assign inserted right after its create, so the
-// writer holds it, as on the dashboard; every event index is renumbered to
-// match. A task needs none: the store holds it for its creator until
-// someone else holds it.
-func (b *trackerBatch) writerDefaults(writer string) {
+// item.assign without completion gets it stored explicitly, by the
+// writer's relationship to each target (completionClasses); targets of both
+// classes are written as one item.assign per class, the second right after
+// the first. The fold's absent-means-assignee rule stays for old events. A
+// topic created that no item.assign of the batch names by $N is
+// self-assigned (people = the writer) by an item.assign inserted right after
+// its create, so the writer holds it, as on the dashboard. Every event index
+// is renumbered to match an inserted event. A task needs no self-assignment:
+// the store holds it for its creator until someone else holds it.
+//
+// reach returns the members below the writer in the store's org tree (any
+// depth); it is read once, and only for an assign that names someone other
+// than the writer.
+func (b *trackerBatch) writerDefaults(writer string, reach func() (map[string]int, error)) {
+	var below map[string]int
+	readErr, read := error(nil), false
+	subordinate := func(id string) bool {
+		if id == writer {
+			return false
+		}
+		if !read {
+			read = true
+			below, readErr = reach()
+		}
+		_, ok := below[id]
+		return ok
+	}
 	assigned := map[int]bool{}
-	for _, ev := range b.events {
+	split := map[int]*trackerEvent{} // the event split off right after event i
+	for i, ev := range b.events {
 		if ev.typ != wstracker.TypeItemAssign {
 			continue
 		}
 		if idx, ok := ev.refs["item"]; ok {
 			assigned[idx] = true
 		}
-		if _, ok := ev.payload["completion"]; !ok {
-			ev.payload["completion"] = "assigner"
-			if people, ok := ev.payload["people"].([]string); ok && ev.payload["mode"] == "chosen" && len(people) > 0 {
-				self := true
-				for _, person := range people {
-					self = self && person == writer
-				}
-				if self {
-					ev.payload["completion"] = "assignee"
-				}
-			}
+		if _, ok := ev.payload["completion"]; ok {
+			continue
+		}
+		if x := completionClasses(ev, writer, subordinate); x != nil {
+			split[i] = x
+		}
+		if readErr != nil {
+			b.p.Add("%s: the org tree, which picks the default completion, could not be read (%s); set completion explicitly", ev.cmd.Label(), wstrackerhost.RedactCredentials(readErr.Error()))
+			return
 		}
 	}
 	events := make([]*trackerEvent, 0, len(b.events))
@@ -898,6 +931,9 @@ func (b *trackerBatch) writerDefaults(writer string) {
 	for i, ev := range b.events {
 		moved[i] = len(events)
 		events = append(events, ev)
+		if x := split[i]; x != nil {
+			events = append(events, x)
+		}
 		if ev.typ != wstracker.TypeItemCreate || ev.payload["kind"] != "topic" || assigned[i] {
 			continue
 		}
@@ -927,6 +963,86 @@ func (b *trackerBatch) writerDefaults(writer string) {
 		b.eventOf[pos] = moved[idx]
 	}
 	b.events = events
+}
+
+// completionClasses stores the default completion of an item.assign that
+// sets none, which follows the writer's relationship to each target: a
+// member below the writer in the org tree, or a rule rooted at the writer
+// or below them (levels is one rooted at the writer), takes assigner, so a
+// close goes through review; the writer themself, a peer, or a rule rooted
+// elsewhere takes assignee, closing directly. When the targets fall in both
+// classes, ev keeps the class of its first target and the rest are moved to
+// the event it returns, which carries the same command, origin, and item;
+// otherwise it returns nil.
+func completionClasses(ev *trackerEvent, writer string, subordinate func(string) bool) *trackerEvent {
+	class := func(target any) string {
+		id, _ := target.(string)
+		if rule, ok := target.(map[string]any); ok {
+			if id, _ = rule["root"].(string); id == writer {
+				return "assigner"
+			}
+		}
+		if subordinate(id) {
+			return "assigner"
+		}
+		return "assignee"
+	}
+	field := "targets"
+	var targets []any
+	switch {
+	case ev.payload["mode"] == "all":
+		ev.payload["completion"] = "assigner"
+		return nil
+	case ev.payload["mode"] == "chosen":
+		field = "people"
+		people, _ := ev.payload["people"].([]string)
+		for _, p := range people {
+			targets = append(targets, p)
+		}
+	default:
+		targets, _ = ev.payload["targets"].([]any)
+	}
+	if len(targets) == 0 {
+		return nil
+	}
+	first := class(targets[0])
+	var keep, rest []any
+	for _, t := range targets {
+		if class(t) == first {
+			keep = append(keep, t)
+		} else {
+			rest = append(rest, t)
+		}
+	}
+	ev.payload["completion"] = first
+	if len(rest) == 0 {
+		return nil
+	}
+	list := func(l []any) any {
+		if field != "people" {
+			return l
+		}
+		out := make([]string, len(l))
+		for i, x := range l {
+			out[i] = x.(string)
+		}
+		return out
+	}
+	ev.payload[field] = list(keep)
+	x := &trackerEvent{cmd: ev.cmd, typ: ev.typ, origin: ev.origin, splitOff: true,
+		payload: map[string]any{}, refs: map[string]int{}, refLists: map[string][]trackerListRef{}}
+	for k, v := range ev.payload {
+		x.payload[k] = v
+	}
+	for k, v := range ev.refs {
+		x.refs[k] = v
+	}
+	x.payload[field] = list(rest)
+	x.payload["completion"] = "assignee"
+	if first == "assignee" {
+		x.payload["completion"] = "assigner"
+	}
+	return x
 }
 
 // newEvents builds the batch's events for a store whose next event gets
@@ -990,7 +1106,13 @@ func (s *Server) handleTrackerUpdate(ctx context.Context, id json.RawMessage, ar
 		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
 	}
 	var problems wsxmlcmd.Problems
-	b := planTrackerBatch(&problems, commands, registered)
+	b := planTrackerBatch(&problems, commands, registered, func(store string) (map[string]int, error) {
+		v, err := h.View(ctx, store, 0)
+		if err != nil {
+			return nil, err
+		}
+		return v.Viewer.Reach, nil
+	})
 	if support != nil {
 		supportPinProblems(&problems, b, support.store)
 	}
@@ -1020,8 +1142,11 @@ func (s *Server) handleTrackerUpdate(ctx context.Context, id json.RawMessage, ar
 		if errors.As(err, &refusal) && refusal.Index >= 0 && refusal.Index < len(b.events) {
 			ev := b.events[refusal.Index]
 			what := "this write"
-			if ev.selfAssign {
+			switch {
+			case ev.selfAssign:
 				what = "the self-assignment written with this create"
+			case ev.splitOff:
+				what = fmt.Sprintf("the targets of this assign split off with completion %v", ev.payload["completion"])
 			}
 			return toolErrorTextResponse(id, s.trackerRefusal(tool, []string{
 				fmt.Sprintf("%s: the store would flag %s: %s", ev.cmd.Label(), what, refusal.Reason),
@@ -1035,6 +1160,8 @@ func (s *Server) handleTrackerUpdate(ctx context.Context, id json.RawMessage, ar
 				case i >= len(b.events):
 				case b.events[i].selfAssign:
 					fmt.Fprintf(&sb, "%d %s%s %s (self-assignment)\n", b.events[i].cmd.Pos, trackerPrefix, wstracker.TypeItemAssign, trackerAlias(eventID.String()))
+				case b.events[i].splitOff:
+					fmt.Fprintf(&sb, "%d %s %s (split off: completion %v)\n", b.events[i].cmd.Pos, b.events[i].cmd.Tag, trackerAlias(eventID.String()), b.events[i].payload["completion"])
 				default:
 					fmt.Fprintf(&sb, "%d %s %s\n", b.events[i].cmd.Pos, b.events[i].cmd.Tag, trackerAlias(eventID.String()))
 				}
@@ -1238,8 +1365,8 @@ var (
 	// todo is not a filter value: the store folds a todo create as a task.
 	trackerKinds = wstracker.QueryKinds
 	// trackerStatuses are the status filter's values, shared with the
-	// search grammar's status: key: open (not done) and hidden, then an
-	// item's derived statuses.
+	// search grammar's status: key: open (neither done nor dropped) and
+	// hidden, then an item's derived statuses.
 	trackerStatuses = wstracker.QueryStatuses
 )
 
@@ -1297,7 +1424,11 @@ func parseTrackerQuery(rawPayload, rawFormat any) (trackerQuery, []string) {
 	}
 	enum("scope", q.scope, trackerScopes)
 	enum("kind", q.kind, trackerKinds)
-	enum("status", q.status, trackerStatuses)
+	if st, ok := wstracker.NormQueryStatus(q.status); ok {
+		q.status = st // awaiting, the older name of in-review, is its alias
+	} else {
+		enum("status", q.status, trackerStatuses)
+	}
 	if search, err := wstracker.ParseQuery(q.q); err != nil {
 		add("payload.q: %v", err)
 	} else {

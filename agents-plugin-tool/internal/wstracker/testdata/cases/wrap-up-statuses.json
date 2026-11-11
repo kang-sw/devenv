@@ -1,0 +1,1139 @@
+{
+ "name": "wrap-up-statuses",
+ "comment": "Superior wrap-up statuses, in-review, and dropped. ada leads maya (who leads lena) and raj; bo is a second root. 1: raj (a peer) assigns lena; ada, her indirect superior, sets done: final, no review, and raj gets a done notice. 2: maya blocks lena's assignment, lena leaves it with doing; ada blocks it, then drops it: the item shows dropped. 3: maya closes under completion assigner: in-review, ada confirms. 4: lena closes bo's ask; maya (her superior, not the assigner) rejects it to doing. 5: lena's close of bo's second ask waits in bo's confirm list. 6: lena puts her self-assigned task in review and confirms it as its assigner; another she leaves with doing; raj enters in-review voluntarily on ada's ask (ada's confirm list). 7: on Mixed maya closes and raj drops: the item is done; raj drops and reopens Reopened: doing. 8: Parent's dropped child stays out of its roll-up, the done child counts; ada gets a dropped notice. 9: an assign without completion keeps the assignee default, so maya's close is done. 10: maya's done and lena's doing are concurrent; one register, the later write shown. 11: maya blocks the fallback record of lena's own task.",
+ "viewers": [
+  "ada.pc",
+  "lena.pc",
+  "raj.pc",
+  "bo.pc"
+ ],
+ "now": "2026-11-02T09:00:00Z",
+ "genesis": {
+  "admins": [
+   "ada"
+  ],
+  "members": [
+   {
+    "id": "ada",
+    "name": "Ada",
+    "keys": [
+     "ada-k1"
+    ],
+    "leads": []
+   },
+   {
+    "id": "maya",
+    "name": "Maya",
+    "keys": [
+     "maya-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "lena",
+    "name": "Lena",
+    "keys": [
+     "lena-k1"
+    ],
+    "leads": [
+     "maya"
+    ]
+   },
+   {
+    "id": "raj",
+    "name": "Raj",
+    "keys": [
+     "raj-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "bo",
+    "name": "Bo",
+    "keys": [
+     "bo-k1"
+    ],
+    "leads": []
+   }
+  ]
+ },
+ "commits": {
+  "raj.pc": [
+   {
+    "ts": "2026-11-01T09:01:00Z",
+    "seen": {},
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Peer ask"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:02:00Z",
+    "seen": {},
+    "events": [
+     [
+      "item.assign",
+      {
+       "item": "raj.pc#1",
+       "targets": [
+        "lena"
+       ],
+       "completion": "assignee"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:34:00Z",
+    "seen": {
+     "lena.pc": 14,
+     "ada.pc": 8,
+     "maya.pc": 5,
+     "bo.pc": 4
+    },
+    "events": [
+     [
+      "item.status",
+      {
+       "item": "ada.pc#7",
+       "status": "in-review"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:38:00Z",
+    "seen": {
+     "lena.pc": 14,
+     "ada.pc": 10,
+     "maya.pc": 6,
+     "bo.pc": 4
+    },
+    "events": [
+     [
+      "item.status",
+      {
+       "item": "ada.pc#9",
+       "status": "dropped",
+       "note": "not needed"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:41:00Z",
+    "seen": {
+     "lena.pc": 14,
+     "ada.pc": 12,
+     "maya.pc": 6,
+     "bo.pc": 4
+    },
+    "events": [
+     [
+      "item.status",
+      {
+       "item": "ada.pc#11",
+       "status": "dropped"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:42:00Z",
+    "seen": {
+     "lena.pc": 14,
+     "ada.pc": 12,
+     "maya.pc": 6,
+     "bo.pc": 4
+    },
+    "events": [
+     [
+      "item.reopen",
+      {
+       "item": "ada.pc#11"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:49:00Z",
+    "seen": {
+     "lena.pc": 14,
+     "ada.pc": 17,
+     "maya.pc": 7,
+     "bo.pc": 4
+    },
+    "events": [
+     [
+      "item.close",
+      {
+       "item": "ada.pc#16"
+      }
+     ]
+    ]
+   }
+  ],
+  "lena.pc": [
+   {
+    "ts": "2026-11-01T09:03:00Z",
+    "seen": {
+     "raj.pc": 2
+    },
+    "events": [
+     [
+      "item.accept",
+      {
+       "item": "raj.pc#1"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:08:00Z",
+    "seen": {
+     "raj.pc": 2,
+     "ada.pc": 1,
+     "maya.pc": 3
+    },
+    "events": [
+     [
+      "item.status",
+      {
+       "item": "maya.pc#1",
+       "status": "doing"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:17:00Z",
+    "seen": {
+     "raj.pc": 2,
+     "ada.pc": 6,
+     "maya.pc": 4,
+     "bo.pc": 2
+    },
+    "events": [
+     [
+      "item.accept",
+      {
+       "item": "bo.pc#1"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:18:00Z",
+    "seen": {
+     "raj.pc": 2,
+     "ada.pc": 6,
+     "maya.pc": 4,
+     "bo.pc": 2
+    },
+    "events": [
+     [
+      "item.close",
+      {
+       "item": "bo.pc#1"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:22:00Z",
+    "seen": {
+     "raj.pc": 2,
+     "ada.pc": 6,
+     "maya.pc": 5,
+     "bo.pc": 4
+    },
+    "events": [
+     [
+      "item.accept",
+      {
+       "item": "bo.pc#3"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:23:00Z",
+    "seen": {
+     "raj.pc": 2,
+     "ada.pc": 6,
+     "maya.pc": 5,
+     "bo.pc": 4
+    },
+    "events": [
+     [
+      "item.close",
+      {
+       "item": "bo.pc#3"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:24:00Z",
+    "seen": {
+     "raj.pc": 2,
+     "ada.pc": 6,
+     "maya.pc": 5,
+     "bo.pc": 4
+    },
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Self review"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:25:00Z",
+    "seen": {
+     "raj.pc": 2,
+     "ada.pc": 6,
+     "maya.pc": 5,
+     "bo.pc": 4
+    },
+    "events": [
+     [
+      "item.assign",
+      {
+       "item": "lena.pc#7",
+       "targets": [
+        "lena"
+       ],
+       "completion": "assignee"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:26:00Z",
+    "seen": {
+     "raj.pc": 2,
+     "ada.pc": 6,
+     "maya.pc": 5,
+     "bo.pc": 4
+    },
+    "events": [
+     [
+      "item.status",
+      {
+       "item": "lena.pc#7",
+       "status": "in-review"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:27:00Z",
+    "seen": {
+     "raj.pc": 2,
+     "ada.pc": 6,
+     "maya.pc": 5,
+     "bo.pc": 4
+    },
+    "events": [
+     [
+      "item.confirm",
+      {
+       "item": "lena.pc#7",
+       "assignee": "lena"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:28:00Z",
+    "seen": {
+     "raj.pc": 2,
+     "ada.pc": 6,
+     "maya.pc": 5,
+     "bo.pc": 4
+    },
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Left review"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:29:00Z",
+    "seen": {
+     "raj.pc": 2,
+     "ada.pc": 6,
+     "maya.pc": 5,
+     "bo.pc": 4
+    },
+    "events": [
+     [
+      "item.assign",
+      {
+       "item": "lena.pc#11",
+       "targets": [
+        "lena"
+       ],
+       "completion": "assignee"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:30:00Z",
+    "seen": {
+     "raj.pc": 2,
+     "ada.pc": 6,
+     "maya.pc": 5,
+     "bo.pc": 4
+    },
+    "events": [
+     [
+      "item.status",
+      {
+       "item": "lena.pc#11",
+       "status": "in-review"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:31:00Z",
+    "seen": {
+     "raj.pc": 2,
+     "ada.pc": 6,
+     "maya.pc": 5,
+     "bo.pc": 4
+    },
+    "events": [
+     [
+      "item.status",
+      {
+       "item": "lena.pc#11",
+       "status": "doing"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:55:00Z",
+    "seen": {
+     "raj.pc": 7,
+     "ada.pc": 19,
+     "maya.pc": 10,
+     "bo.pc": 4
+    },
+    "events": [
+     [
+      "item.status",
+      {
+       "item": "maya.pc#9",
+       "status": "doing"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:57:00Z",
+    "seen": {
+     "raj.pc": 7,
+     "ada.pc": 19,
+     "maya.pc": 11,
+     "bo.pc": 4
+    },
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Fallback"
+      }
+     ]
+    ]
+   }
+  ],
+  "ada.pc": [
+   {
+    "ts": "2026-11-01T09:04:00Z",
+    "seen": {
+     "raj.pc": 2,
+     "lena.pc": 1
+    },
+    "events": [
+     [
+      "item.status",
+      {
+       "item": "raj.pc#1",
+       "assignee": "lena",
+       "status": "done"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:09:00Z",
+    "seen": {
+     "raj.pc": 2,
+     "lena.pc": 2,
+     "maya.pc": 3
+    },
+    "events": [
+     [
+      "item.status",
+      {
+       "item": "maya.pc#1",
+       "assignee": "lena",
+       "status": "blocked"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:10:00Z",
+    "seen": {
+     "raj.pc": 2,
+     "lena.pc": 2,
+     "maya.pc": 3
+    },
+    "events": [
+     [
+      "item.status",
+      {
+       "item": "maya.pc#1",
+       "assignee": "lena",
+       "status": "dropped"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:11:00Z",
+    "seen": {
+     "raj.pc": 2,
+     "lena.pc": 2,
+     "maya.pc": 3
+    },
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Reviewed"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:12:00Z",
+    "seen": {
+     "raj.pc": 2,
+     "lena.pc": 2,
+     "maya.pc": 3
+    },
+    "events": [
+     [
+      "item.assign",
+      {
+       "item": "ada.pc#4",
+       "targets": [
+        "maya"
+       ],
+       "completion": "assigner"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:14:00Z",
+    "seen": {
+     "raj.pc": 2,
+     "lena.pc": 2,
+     "maya.pc": 4
+    },
+    "events": [
+     [
+      "item.confirm",
+      {
+       "item": "ada.pc#4",
+       "assignee": "maya"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:32:00Z",
+    "seen": {
+     "raj.pc": 2,
+     "lena.pc": 14,
+     "maya.pc": 5,
+     "bo.pc": 4
+    },
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Asked review"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:33:00Z",
+    "seen": {
+     "raj.pc": 2,
+     "lena.pc": 14,
+     "maya.pc": 5,
+     "bo.pc": 4
+    },
+    "events": [
+     [
+      "item.assign",
+      {
+       "item": "ada.pc#7",
+       "targets": [
+        "raj"
+       ],
+       "completion": "assignee"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:35:00Z",
+    "seen": {
+     "raj.pc": 3,
+     "lena.pc": 14,
+     "maya.pc": 5,
+     "bo.pc": 4
+    },
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Mixed"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:36:00Z",
+    "seen": {
+     "raj.pc": 3,
+     "lena.pc": 14,
+     "maya.pc": 5,
+     "bo.pc": 4
+    },
+    "events": [
+     [
+      "item.assign",
+      {
+       "item": "ada.pc#9",
+       "targets": [
+        "maya",
+        "raj"
+       ],
+       "completion": "assignee"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:39:00Z",
+    "seen": {
+     "raj.pc": 4,
+     "lena.pc": 14,
+     "maya.pc": 6,
+     "bo.pc": 4
+    },
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Reopened"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:40:00Z",
+    "seen": {
+     "raj.pc": 4,
+     "lena.pc": 14,
+     "maya.pc": 6,
+     "bo.pc": 4
+    },
+    "events": [
+     [
+      "item.assign",
+      {
+       "item": "ada.pc#11",
+       "targets": [
+        "raj"
+       ],
+       "completion": "assignee"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:43:00Z",
+    "seen": {
+     "raj.pc": 6,
+     "lena.pc": 14,
+     "maya.pc": 6,
+     "bo.pc": 4
+    },
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Parent"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:44:00Z",
+    "seen": {
+     "raj.pc": 6,
+     "lena.pc": 14,
+     "maya.pc": 6,
+     "bo.pc": 4
+    },
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Dropped child",
+       "parent": "ada.pc#13"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:45:00Z",
+    "seen": {
+     "raj.pc": 6,
+     "lena.pc": 14,
+     "maya.pc": 6,
+     "bo.pc": 4
+    },
+    "events": [
+     [
+      "item.assign",
+      {
+       "item": "ada.pc#14",
+       "targets": [
+        "maya"
+       ],
+       "completion": "assignee"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:47:00Z",
+    "seen": {
+     "raj.pc": 6,
+     "lena.pc": 14,
+     "maya.pc": 7,
+     "bo.pc": 4
+    },
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Done child",
+       "parent": "ada.pc#13"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:48:00Z",
+    "seen": {
+     "raj.pc": 6,
+     "lena.pc": 14,
+     "maya.pc": 7,
+     "bo.pc": 4
+    },
+    "events": [
+     [
+      "item.assign",
+      {
+       "item": "ada.pc#16",
+       "targets": [
+        "raj"
+       ],
+       "completion": "assignee"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:50:00Z",
+    "seen": {
+     "raj.pc": 7,
+     "lena.pc": 14,
+     "maya.pc": 7,
+     "bo.pc": 4
+    },
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Legacy"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:51:00Z",
+    "seen": {
+     "raj.pc": 7,
+     "lena.pc": 14,
+     "maya.pc": 7,
+     "bo.pc": 4
+    },
+    "events": [
+     [
+      "item.assign",
+      {
+       "item": "ada.pc#18",
+       "targets": [
+        "maya"
+       ]
+      }
+     ]
+    ]
+   }
+  ],
+  "maya.pc": [
+   {
+    "ts": "2026-11-01T09:05:00Z",
+    "seen": {
+     "raj.pc": 2,
+     "lena.pc": 1,
+     "ada.pc": 1
+    },
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Blocked twice"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:06:00Z",
+    "seen": {
+     "raj.pc": 2,
+     "lena.pc": 1,
+     "ada.pc": 1
+    },
+    "events": [
+     [
+      "item.assign",
+      {
+       "item": "maya.pc#1",
+       "targets": [
+        "lena"
+       ],
+       "completion": "assigner"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:07:00Z",
+    "seen": {
+     "raj.pc": 2,
+     "lena.pc": 1,
+     "ada.pc": 1
+    },
+    "events": [
+     [
+      "item.status",
+      {
+       "item": "maya.pc#1",
+       "assignee": "lena",
+       "status": "blocked",
+       "note": "wait for infra"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:13:00Z",
+    "seen": {
+     "raj.pc": 2,
+     "lena.pc": 2,
+     "ada.pc": 5
+    },
+    "events": [
+     [
+      "item.close",
+      {
+       "item": "ada.pc#4",
+       "note": "please look"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:19:00Z",
+    "seen": {
+     "raj.pc": 2,
+     "lena.pc": 4,
+     "ada.pc": 6,
+     "bo.pc": 2
+    },
+    "events": [
+     [
+      "item.reject",
+      {
+       "item": "bo.pc#1",
+       "assignee": "lena",
+       "note": "tests missing"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:37:00Z",
+    "seen": {
+     "raj.pc": 3,
+     "lena.pc": 14,
+     "ada.pc": 10,
+     "bo.pc": 4
+    },
+    "events": [
+     [
+      "item.close",
+      {
+       "item": "ada.pc#9"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:46:00Z",
+    "seen": {
+     "raj.pc": 6,
+     "lena.pc": 14,
+     "ada.pc": 15,
+     "bo.pc": 4
+    },
+    "events": [
+     [
+      "item.status",
+      {
+       "item": "ada.pc#14",
+       "status": "dropped"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:52:00Z",
+    "seen": {
+     "raj.pc": 7,
+     "lena.pc": 14,
+     "ada.pc": 19,
+     "bo.pc": 4
+    },
+    "events": [
+     [
+      "item.close",
+      {
+       "item": "ada.pc#18"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:53:00Z",
+    "seen": {
+     "raj.pc": 7,
+     "lena.pc": 14,
+     "ada.pc": 19,
+     "bo.pc": 4
+    },
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Concurrent"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:54:00Z",
+    "seen": {
+     "raj.pc": 7,
+     "lena.pc": 14,
+     "ada.pc": 19,
+     "bo.pc": 4
+    },
+    "events": [
+     [
+      "item.assign",
+      {
+       "item": "maya.pc#9",
+       "targets": [
+        "lena"
+       ],
+       "completion": "assignee"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:56:00Z",
+    "seen": {
+     "raj.pc": 7,
+     "lena.pc": 14,
+     "ada.pc": 19,
+     "bo.pc": 4
+    },
+    "events": [
+     [
+      "item.status",
+      {
+       "item": "maya.pc#9",
+       "assignee": "lena",
+       "status": "done"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:58:00Z",
+    "seen": {
+     "raj.pc": 7,
+     "lena.pc": 16,
+     "ada.pc": 19,
+     "bo.pc": 4
+    },
+    "events": [
+     [
+      "item.status",
+      {
+       "item": "lena.pc#16",
+       "assignee": "lena",
+       "status": "blocked"
+      }
+     ]
+    ]
+   }
+  ],
+  "bo.pc": [
+   {
+    "ts": "2026-11-01T09:15:00Z",
+    "seen": {
+     "raj.pc": 2,
+     "lena.pc": 2,
+     "ada.pc": 6,
+     "maya.pc": 4
+    },
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Rejected"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:16:00Z",
+    "seen": {
+     "raj.pc": 2,
+     "lena.pc": 2,
+     "ada.pc": 6,
+     "maya.pc": 4
+    },
+    "events": [
+     [
+      "item.assign",
+      {
+       "item": "bo.pc#1",
+       "targets": [
+        "lena"
+       ],
+       "completion": "assigner"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:20:00Z",
+    "seen": {
+     "raj.pc": 2,
+     "lena.pc": 4,
+     "ada.pc": 6,
+     "maya.pc": 5
+    },
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Waiting review"
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:21:00Z",
+    "seen": {
+     "raj.pc": 2,
+     "lena.pc": 4,
+     "ada.pc": 6,
+     "maya.pc": 5
+    },
+    "events": [
+     [
+      "item.assign",
+      {
+       "item": "bo.pc#3",
+       "targets": [
+        "lena"
+       ],
+       "completion": "assigner"
+      }
+     ]
+    ]
+   }
+  ]
+ }
+}

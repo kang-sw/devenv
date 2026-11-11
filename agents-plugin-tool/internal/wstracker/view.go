@@ -430,7 +430,9 @@ func memberOf(stream string) string {
 // fallback included, so a task always has one (todo in a store with no
 // holder to fall back on). A pending rule request holds nothing, so it does
 // not make the item pending. idea only when every live holder is at idea:
-// it ranks below todo.
+// it ranks below todo. A dropped assignment is outside the roll-up: the
+// item derives from the rest, done when those are all done (a mix of done
+// and dropped is done), and dropped only when every live one is dropped.
 func (r *replayed) itemStatus(it *item) string {
 	if it.kind == "topic" {
 		return ""
@@ -451,12 +453,21 @@ func (r *replayed) itemStatus(it *item) string {
 		}
 		return "todo"
 	}
-	all, idea, blocked, awaiting, doing := true, true, false, false, false
+	var kept []*rec
 	for _, x := range live {
+		if x.status != "dropped" {
+			kept = append(kept, x)
+		}
+	}
+	if len(kept) == 0 {
+		return "dropped"
+	}
+	all, idea, blocked, review, doing := true, true, false, false, false
+	for _, x := range kept {
 		all = all && x.status == "done"
 		idea = idea && x.status == "idea"
 		blocked = blocked || x.status == "blocked"
-		awaiting = awaiting || x.status == "awaiting"
+		review = review || x.status == "in-review"
 		doing = doing || x.status == "doing" || x.status == "done"
 	}
 	switch {
@@ -464,8 +475,8 @@ func (r *replayed) itemStatus(it *item) string {
 		return "done"
 	case blocked:
 		return "blocked"
-	case awaiting:
-		return "awaiting"
+	case review:
+		return "in-review"
 	case doing:
 		return "doing"
 	case idea:
@@ -476,9 +487,9 @@ func (r *replayed) itemStatus(it *item) string {
 
 // counted: pending assignments are excluded from status and roll-up, so an
 // item whose only assignments are pending is not counted; nor is an item
-// at idea.
+// at idea, nor a dropped one.
 func (r *replayed) counted(it *item, st string) bool {
-	return it.kind != "topic" && st != "pending" && st != "idea"
+	return it.kind != "topic" && st != "pending" && st != "idea" && st != "dropped"
 }
 
 func (r *replayed) view(stream string, now time.Time, staleDays int) *View {
@@ -898,11 +909,11 @@ func orEmpty(l []string) []string {
 }
 
 // teamLoad are the statuses a team row's Load counts (613 a): the work in
-// the member's hands; idea, awaiting (closed, waiting on the assigner's
-// confirm), and done are not.
+// the member's hands; idea, in-review (waiting on a reviewer), done, and
+// dropped are not.
 var teamLoad = map[string]bool{"todo": true, "doing": true, "blocked": true}
 
-var rank = map[string]int{"blocked": 0, "doing": 1, "todo": 2, "idea": 3, "awaiting": 4, "done": 5}
+var rank = map[string]int{"blocked": 0, "doing": 1, "todo": 2, "idea": 3, "in-review": 4, "done": 5, "dropped": 6}
 
 func ids(l []*Assignment) []string {
 	out := make([]string, len(l))
@@ -957,8 +968,10 @@ func (r *replayed) viewerLists(vw *View, A []*Assignment, v string, children map
 		return a.To == v && !a.Forced && a.State != "pending" && (a.Accepted != nil || a.State == "declined") && visible(a)
 	})
 	sent := filter(A, func(a *Assignment) bool { return a.Sender == v && a.To != v && !a.Forced && visible(a) })
+	// the assigner's review list; a self-assigned in-review is its holder's
+	// to resolve as its assigner. An org superior resolves one from the item.
 	confirms := filter(A, func(a *Assignment) bool {
-		return a.By == v && a.To != v && a.State == "live" && a.Status == "awaiting"
+		return a.By == v && a.State == "live" && a.Status == "in-review"
 	})
 	my := My{Given: []string{}, Created: []string{}, Team: []Team{}, Badge: []string{},
 		Requests: MyReqs{Incoming: []string{}, Outgoing: []string{}}}
@@ -997,8 +1010,9 @@ func (r *replayed) viewerLists(vw *View, A []*Assignment, v string, children map
 
 	// Notices are derived, never events. accepted: to the accepter's lead at
 	// accept time; handoff: to the original assigner when a handoff is
-	// accepted; done / blocked: to the assigner when someone else set that
-	// status on a live assignment (an awaiting one is in the confirm list);
+	// accepted; done / blocked / dropped: to the assigner when someone else
+	// set that status on a live assignment (an in-review one is in the
+	// confirm list);
 	// declined / returned (285): to the sender, and for a returned handoff
 	// also to the original assigner (291).
 	vw.Notices = []Notice{}
@@ -1015,7 +1029,7 @@ func (r *replayed) viewerLists(vw *View, A []*Assignment, v string, children map
 				vw.Notices = append(vw.Notices, nt)
 			}
 		}
-		if a.By == v && a.To != v && a.State == "live" && (a.Status == "done" || a.Status == "blocked") &&
+		if a.By == v && a.To != v && a.State == "live" && (wrapped(a.Status) || a.Status == "blocked") &&
 			a.StatusBy != nil && *a.StatusBy != v {
 			nt := base
 			nt.TS, nt.Kind = a.LastUpdate, a.Status
@@ -1051,7 +1065,7 @@ func (r *replayed) viewerLists(vw *View, A []*Assignment, v string, children map
 	teamRow := func(id string, depth int, outside bool) {
 		inTeam[id] = true
 		recs := filter(A, func(a *Assignment) bool { return a.To == id && visible(a) && notTopic(a) })
-		open := filter(recs, func(a *Assignment) bool { return a.State == "live" && a.Status != "done" })
+		open := filter(recs, func(a *Assignment) bool { return a.State == "live" && !wrapped(a.Status) })
 		byRank(open)
 		pend := filter(recs, func(a *Assignment) bool { return a.State == "pending" })
 		waiting := filter(A, func(a *Assignment) bool {
@@ -1068,7 +1082,7 @@ func (r *replayed) viewerLists(vw *View, A []*Assignment, v string, children map
 				continue
 			}
 			if a.Fallback {
-				if a.Status != "done" {
+				if !wrapped(a.Status) {
 					t.Fallback++
 				}
 				continue
@@ -1153,7 +1167,7 @@ func (r *replayed) viewerLists(vw *View, A []*Assignment, v string, children map
 	// urgency-sorted list.
 	byRank(mine)
 	my.Assignments = ids(mine)
-	work := filter(mine, func(a *Assignment) bool { return a.Status != "done" && a.Status != "awaiting" && notTopic(a) })
+	work := filter(mine, func(a *Assignment) bool { return !wrapped(a.Status) && a.Status != "in-review" && notTopic(a) })
 	byUrgency(work)
 	byUrgency(pendingToMe)
 	my.Today = Today{Work: ids(work), Pending: ids(pendingToMe), Confirms: ids(confirms)}

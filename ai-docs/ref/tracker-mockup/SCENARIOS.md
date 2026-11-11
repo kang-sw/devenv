@@ -215,7 +215,7 @@ concurrent writes to ivy's status by two members: both get a "concurrent
 change" box, and ivy's later ts is the display winner (`blocked`).
 
 Snags: none. The reject losing to ivy's later status is the settled (203)
-rule, and a status write while awaiting already withdraws the close (202).
+rule, and a status write while in review already withdraws the close (202).
 
 ## 7. One member edits the same body from two clones
 

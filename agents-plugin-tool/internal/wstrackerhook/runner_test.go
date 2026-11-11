@@ -447,13 +447,14 @@ func TestDueSoonFiresOnceAtTheThreshold(t *testing.T) {
 	v.Items["maya.pc#1"] = wstracker.ItemView{ID: "maya.pc#1", Alias: "a1", Title: "Index", Kind: "task", Due: ptr("2026-11-12"),
 		Assignments: []string{"x>ada", "x>cy"}}
 	v.Items["maya.pc#2"] = wstracker.ItemView{ID: "maya.pc#2", Title: "Other", Kind: "task", Due: ptr("2026-11-12"), Assignments: []string{"y>cy"}}
-	v.Items["maya.pc#3"] = wstracker.ItemView{ID: "maya.pc#3", Title: "Done", Kind: "task", Due: ptr("2026-11-12"), Assignments: []string{"z>ada"}}
+	v.Items["maya.pc#3"] = wstracker.ItemView{ID: "maya.pc#3", Title: "Done", Kind: "task", Due: ptr("2026-11-12"), Assignments: []string{"z>ada", "z>cy"}}
 	v.ItemOrder = []string{"maya.pc#1", "maya.pc#2", "maya.pc#3"}
 	v.Assignments = map[string]wstracker.Assignment{
 		"x>ada": {ID: "x>ada", To: "ada", State: "live", Status: "doing"},
 		"x>cy":  {ID: "x>cy", To: "cy", State: "live", Status: "done"},
 		"y>cy":  {ID: "y>cy", To: "cy", State: "live", Status: "todo"},
 		"z>ada": {ID: "z>ada", To: "ada", State: "live", Status: "done"},
+		"z>cy":  {ID: "z>cy", To: "cy", State: "live", Status: "dropped"},
 	}
 	w.now = time.Date(2026, 11, 11, 17, 0, 0, 0, time.UTC) // 7 h before
 	w.start()
