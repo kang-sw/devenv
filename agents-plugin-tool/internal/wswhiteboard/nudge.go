@@ -23,11 +23,11 @@ const (
 	staleNudgeNames = 5
 )
 
-// stampChanges records now as the change time of every item and body the
-// batch changed (Changed == mark). An item or body with no change time, from
-// a store written before the field, is stamped too: its age is unknown, so it
-// counts from the first update that sees it rather than reading as stale at
-// once.
+// stampChanges records now as the change time of every item, body, and
+// recap the batch changed (Changed == mark, or RecapChanged == mark for a
+// recap). An item, body, or recap with no change time, from a store written
+// before the field, is stamped too: its age is unknown, so it counts from the
+// first update that sees it rather than reading as stale at once.
 func (s *State) stampChanges(mark int, now time.Time) {
 	at := now.UTC().Format(time.RFC3339)
 	for i := range s.Items {
@@ -36,8 +36,12 @@ func (s *State) stampChanges(mark int, now time.Time) {
 		}
 	}
 	for i := range s.Topics {
-		if s.Topics[i].Changed == mark || s.Topics[i].ChangedAt == "" {
-			s.Topics[i].ChangedAt = at
+		d := &s.Topics[i]
+		if d.Body != "" && (d.Changed == mark || d.ChangedAt == "") {
+			d.ChangedAt = at
+		}
+		if d.Recap != "" && (d.RecapChanged == mark || d.RecapAt == "") {
+			d.RecapAt = at
 		}
 	}
 }
@@ -45,8 +49,8 @@ func (s *State) stampChanges(mark int, now time.Time) {
 // staleNudge returns the nudge line for the board at now and records it as
 // the last nudge, or returns "" and records nothing. A topic is stale when it
 // is open, none of its items is open (an assumed item reads as settled), and
-// neither its items nor its body changed for staleNudgeAge; the stalest are
-// listed first.
+// neither its items nor its body or recap changed for staleNudgeAge; the
+// stalest are listed first.
 func (s *State) staleNudge(now time.Time) string {
 	if last, err := time.Parse(time.RFC3339, s.LastNudgeAt); err == nil && now.Sub(last) < staleNudgeInterval {
 		return ""
@@ -72,6 +76,9 @@ func (s *State) staleNudge(now time.Time) string {
 	}
 	for _, doc := range s.Topics {
 		touch(doc.Name, doc.ChangedAt)
+		if doc.RecapAt != "" {
+			touch(doc.Name, doc.RecapAt)
+		}
 	}
 	open := 0
 	var stale []string

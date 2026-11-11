@@ -5,10 +5,10 @@ kind: print
 # Whiteboard
 
 The session whiteboard is a top-level lead's board for its user. The server
-keeps the items you ask (IDs, statuses, verbatim answers) and topic bodies,
-and renders them with the session's todos, agendas, ready and todo tickets,
-and mailbox into a full page beside the terminal and an embed snapshot for a
-host that shows HTML inline. Workers and subagents do not use it.
+keeps the items you ask (IDs, statuses, verbatim answers), topic bodies, and
+topic recaps, and renders them with the session's todos, agendas, ready and
+todo tickets, and mailbox into a full page beside the terminal and an embed
+snapshot for a host that shows HTML inline. Workers and subagents do not use it.
 
 ## Calls
 
@@ -35,17 +35,18 @@ host that shows HTML inline. Workers and subagents do not use it.
 
 ## Commands
 
-Write board text (titles, options, rationale, recommendations, answer readings, and topic bodies) in the conversation language, the `workflow.lang` value when set; IDs, class and status tags, `ok`/`no` answers, and option letters stay as written.
+Write board text (titles, options, rationale, recommendations, answer readings, topic bodies, and recaps) in the conversation language, the `workflow.lang` value when set; IDs, class and status tags, `ok`/`no` answers, and option letters stay as written.
 
 Every tag carries the prefix `wb:` and follows the command syntax rules.
 `wb:topic` is the group: its `name` names the topic once for the
-`wb:body`, `wb:edit`, `wb:add`, and `wb:close` inside it. A batch may hold
-several `wb:topic` groups.
+`wb:body`, `wb:recap`, `wb:edit`, `wb:add`, and `wb:close` inside it. A
+batch may hold several `wb:topic` groups.
 
 | command | attributes | content |
 |---|---|---|
-| `wb:topic` | `name`, `label?` | group of `wb:body`, `wb:edit`, `wb:add`, `wb:close`; none with `label` |
+| `wb:topic` | `name`, `label?` | group of `wb:body`, `wb:recap`, `wb:edit`, `wb:add`, `wb:close`; none with `label` |
 | `wb:body` | none | the topic's body, replaced whole; empty clears it |
+| `wb:recap` | none | the topic's recap, replaced whole; empty clears it |
 | `wb:edit` | `replace_all?` | fields `wb:old`, `wb:new` |
 | `wb:add` | `id?`, `class` | fields `wb:title`, `wb:option`..., `wb:recommend?`, `wb:why?`, `wb:link`... |
 | `wb:close` | `result` | none |
@@ -60,6 +61,7 @@ several `wb:topic` groups.
 ## Context
 Markdown up to the closing tag.
 </wb:body>
+<wb:recap>In review: parser branch, waiting on CI</wb:recap>
 <wb:add class="policy">
 <wb:title>Ship the <code>parser</code> before the renderer?</wb:title>
 <wb:option>Parser first</wb:option>
@@ -103,9 +105,9 @@ Markdown up to the closing tag.
 - Markdown: `wb:title` takes inline markdown (bold, italic, code, links)
   and the tags `<code>`, `<b>`, `<strong>`, `<i>`, `<em>`, `<kbd>`, and
   `<br>` written without attributes; any other tag shows as text.
-  `wb:option`, `wb:why`, and `wb:recommend` take block markdown with line
-  breaks kept: lists, code blocks, tables, images, and a `` ```mermaid ``
-  fenced block drawn as a diagram, plus HTML such as `<img>`, `<table>`,
+  `wb:option`, `wb:why`, `wb:recommend`, and `wb:recap` take block markdown
+  with line breaks kept: lists, code blocks, tables, images, and a
+  `` ```mermaid `` fenced block drawn as a diagram, plus HTML such as `<img>`, `<table>`,
   `<details>`, and simple inline SVG, shown as static markup with script,
   style, frames, form controls, event attributes, and positioning removed;
   text such as `Vec<T>` reads as an unknown tag and disappears unless it is
@@ -150,18 +152,19 @@ Markdown up to the closing tag.
   that only edits `wb:why`, `wb:recommend`, or links, or resends the current
   title, class, or options, is not a re-ask; a title fix on an item the
   patch leaves settled stamps nothing.
-- `wb:close` collapses a topic's settled items and its body; the topic needs
-  an item or a body. `result` is required: one sentence saying how the topic
-  ended, shown dimmed beside the closed topic's name. Closing withdraws every
-  item of the topic still `open`, with `result` as the reason, and an
-  `info:` line names them; an `assumed` item stays assumed. Put a batch's
-  answers to the topic's items before its `wb:close`, since an answer after
-  the close finds the item withdrawn. Adding an item to a closed topic, or
-  changing its body, reopens it and hides the result, but does not restore
-  the withdrawn items; the next close replaces the result. Closed topics with
-  nothing waiting on the user go last, most recently closed first; past 30,
-  the dashboard page loads the rest on request and the file page and embed
-  print how many are left out.
+- `wb:close` collapses a topic's settled items, its body, and its recap; the
+  topic needs an item, a body, or a recap. `result` is required: one
+  sentence saying how the topic ended, shown dimmed beside the closed
+  topic's name. Closing withdraws every item of the topic still `open`, with
+  `result` as the reason, and an `info:` line names them; an `assumed` item
+  stays assumed. Put a batch's answers to the topic's items before its
+  `wb:close`, since an answer after the close finds the item withdrawn.
+  Adding an item to a closed topic, or changing its body or recap, reopens
+  it and hides the result, but does not restore the withdrawn items; the
+  next close replaces the result. Closed topics with nothing waiting on the
+  user go last, most recently closed first; past 30, the dashboard page
+  loads the rest on request and the file page and embed print how many are
+  left out.
 - Topic body: one per topic, rendered above its items, for context that
   outlasts a chat reply: background, the shape of a decision, a diagram; a
   topic may hold a body and no items. `wb:body` replaces the body whole,
@@ -185,6 +188,15 @@ Markdown up to the closing tag.
   markdown after it, and keep blank lines out of HTML, since an indented
   line after one becomes a code block. A line that starts with an inline tag
   such as `<b>` is markdown text, whose line breaks render as `<br>`.
+- Topic recap: one or two lines at the top of the topic, above its body,
+  with its own update time, for state that spans turns, such as
+  `READY · reviewed · in implementation: <branch>`. Give a topic that is in
+  implementation, waiting on an answer, or blocked a recap, refresh it
+  whenever that state changes, and keep it to one or two lines; a stale
+  recap misleads more than none. `wb:recap` replaces it whole, an empty one
+  clears it, and the same recap again is no change and keeps its time. A
+  changed recap counts as a change to the topic, as a body change does;
+  clearing it reopens nothing.
 - `wb:floor` raises the ID counter so the next minted ID is one past `id`; a
   floor at or below the counter is ignored. `wb:embed-dir`: see Host embed
   folder.
@@ -204,8 +216,8 @@ whiteboard.query payload: {topic?, ids?, id?, status?, text?, depth?, fields?, b
   matching item line ends with `[match: <fields>]`.
 - `depth`: `topics` prints one line per topic: open or closed, its item
   counts by status, its body length, its last change, and its close result
-  when closed. `items` adds a line per item under its topic: ID, status,
-  class, title. `summary` adds, under an open item, its full ask, and under
+  when closed; at every depth a recap line with its update time follows.
+  `items` adds a line per item under its topic: ID, status, class, title. `summary` adds, under an open item, its full ask, and under
   an answered or assumed item one decoded answer line (`answer: b: <option
   text> - <note>`, ` (assumed)` appended); a withdrawn or superseded item
   keeps only its line. `full` adds every detail; `fields`, a list from
@@ -234,8 +246,8 @@ whiteboard.query payload: {topic?, ids?, id?, status?, text?, depth?, fields?, b
   print `<code>` as backticks and `<br>` as a space, and drop the other
   inline tags; options, recommendations, and `wb:why` drop every tag and
   keep its text, an image as its alt text, script and style as nothing. The
-  topic body and `answer_quote` print as stored, so a `wb:edit` quote
-  copies the body exactly.
+  topic body, the recap, and `answer_quote` print as stored, so a `wb:edit`
+  quote copies the body exactly.
 - Topics print in the order their first item was added, items in ID order.
   A last `omitted:` line counts what the defaults left out and names the
   filter that shows it.
