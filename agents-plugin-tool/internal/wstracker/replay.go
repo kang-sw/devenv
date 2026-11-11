@@ -28,6 +28,7 @@ type node struct {
 
 	status, reason       string // applied | flagged | waiting
 	ignored              bool
+	clash                bool // flagged only by the fold-order label-name clash; still in later causal-past checks
 	markers              []marker
 	superseded           []supersession
 	thread, parentThread string
@@ -274,7 +275,7 @@ func (r *replayed) verdicts(all []*node) {
 					n.status, n.reason = "flagged", string(rej)
 				} else if isLabelList(n.typ) {
 					if rej := lf.labelClash(n); rej != "" {
-						n.status, n.reason = "flagged", string(rej)
+						n.status, n.reason, n.clash = "flagged", string(rej), true
 					} else {
 						lf.apply(n)
 					}
@@ -307,7 +308,8 @@ func (r *replayed) verdicts(all []*node) {
 // roles and identity events, the threads and comments n names (its refs
 // included), and every item.assign as a trigger of the live rules on those
 // threads. Nothing else can change what check reads, so this equals folding
-// the whole past.
+// the whole past. A label add or rename flagged only by the fold-order name
+// clash folds here too: n's writer saw it, and only the list drops it.
 func (r *replayed) stateBefore(n *node) *state {
 	rel := map[string]bool{}
 	var lists [][]int
@@ -349,7 +351,7 @@ func (r *replayed) stateBefore(n *node) *state {
 		}
 		last = pos
 		x := r.order[pos]
-		if x.status != "applied" {
+		if x.status != "applied" && !x.clash {
 			continue
 		}
 		if x.typ == TypeItemAssign && !rel[x.p.str("item")] {

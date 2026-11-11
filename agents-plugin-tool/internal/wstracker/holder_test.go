@@ -266,7 +266,7 @@ func TestCheckTimeFoldSettlesAfterAnotherThreadsAssign(t *testing.T) {
 	for _, n := range r.order {
 		S := newState(r.g, r.hb, false)
 		for _, x := range r.order[:n.pos] {
-			if x.status == "applied" && r.hb(x, n) {
+			if (x.status == "applied" || x.clash) && r.hb(x, n) {
 				S.apply(x)
 			}
 		}

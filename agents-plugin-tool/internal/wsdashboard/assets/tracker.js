@@ -390,7 +390,7 @@
   function labelChip(l, act, extra) {
     var inner = '<span class="ldot" style="background:' + esc(l.color) + '"></span>' + esc(l.name);
     if (!act) return '<span class="chip lbl">' + inner + '</span>';
-    return '<button type="button" class="chip lbl"' + attr('act', act) + attr('label', l.id) + (extra || '') + ' tabindex="-1"' + tipAttr(wsT("js.tk.label.search", esc(l.name))) + '>' + inner + '</button>';
+    return '<button type="button" class="chip lbl"' + attr('act', act) + attr('label', l.id) + (extra || '') + ' tabindex="-1"' + tipAttr(wsT("js.tk.label.search", l.name)) + '>' + inner + '</button>';
   }
   function labelChips(it, act) {
     return (it.labels || []).map(labelOf).filter(Boolean).map(function (l) { return labelChip(l, act); }).join('');
@@ -4024,7 +4024,7 @@
     ['title', 'body', 'project'].forEach(function (f) { if (cur[f] !== (it[f] || '')) ep[f] = cur[f]; });
     // labels the list no longer holds are dropped from the pick, so an edit never writes one
     var picked = e.labels.filter(function (x) { return !!labelOf(x); });
-    if (picked.join(' ') !== (it.labels || []).join(' ')) ep.labels = picked;
+    if (picked.slice().sort().join(' ') !== (it.labels || []).slice().sort().join(' ')) ep.labels = picked;
     if (!('title' in ep) && !('body' in ep) && !('project' in ep) && !('labels' in ep)) { toast(wsT("js.tk.toast.unchanged")); return endEdit(); }
     if ('body' in ep) {
       var km = keptMentions(withPicks(it.mentions, e.mpick), ep.body), ers = refsIn(ep.body);

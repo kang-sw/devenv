@@ -1,6 +1,6 @@
 {
  "name": "labels-concurrent-name",
- "comment": "Store labels. ada adds bug and bo concurrently adds Bug: the first in fold order (ada's) keeps the name and bo's add is flagged. ada labels her task bug and ui. bo renames ui to design while ada, concurrently, renames bug to Design: bo's rename is first in fold order, so ada's is flagged. ada removes bug, which leaves the task; bo re-adds bug as a new label the task does not regain and puts it on a new task. Concurrent recolours of ui merge as a register (bo's later write wins, both marked).",
+ "comment": "Store labels. ada adds bug and bo concurrently adds Bug: the first in fold order (ada's) keeps the name and bo's add is flagged. ada labels her task bug and ui. bo renames ui to design while ada, concurrently, renames bug to Design: bo's rename is first in fold order, so ada's is flagged. ada removes bug, which leaves the task; bo re-adds bug as a new label the task does not regain and puts it on a new task. Concurrent recolours of ui merge as a register (bo's later write wins, both marked). maya, having seen only bo's add, creates a task labelled with it and edits its title and labels: both stay applied (the clash flag governs the list only), and the view drops the lost label from the task.",
  "viewers": [
   "ada.pc"
  ],
@@ -234,6 +234,36 @@
       {
        "label": "ada.pc#3",
        "color": "#445566"
+      }
+     ]
+    ]
+   }
+  ],
+  "maya.pc": [
+   {
+    "ts": "2026-11-01T09:10:00Z",
+    "seen": {
+     "bo.pc": 1
+    },
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Polish",
+       "labels": [
+        "bo.pc#1"
+       ]
+      }
+     ],
+     [
+      "item.edit",
+      {
+       "item": "maya.pc#1",
+       "title": "Polish UI",
+       "labels": [
+        "bo.pc#1"
+       ]
       }
      ]
     ]

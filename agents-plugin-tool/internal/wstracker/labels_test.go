@@ -103,9 +103,12 @@ func TestItemLabelsFollowTheLabelList(t *testing.T) {
 }
 
 // TestConcurrentLabelNameKeepsTheFirstInFoldOrder: two admins add one name
-// concurrently, and a third renames to it concurrently; each passes its
-// causal check, the first in fold order keeps the name, and the later ones
-// are flagged naming the holder.
+// concurrently; each passes its causal check, the first in fold order keeps
+// the name, and the later one is flagged naming the holder. The flagged add
+// still counts for later checks of those who saw it: its writer's own
+// rename to the name is a plain duplicate (the concurrent-rename clash is
+// the labels-concurrent-name golden case). An item written by one who saw only a
+// flagged add stays, and the view drops the lost label from it.
 func TestConcurrentLabelNameKeepsTheFirstInFoldOrder(t *testing.T) {
 	at := func(m int) time.Time { return time.Date(2026, 11, 1, 10, m, 0, 0, time.UTC) }
 	ev := func(member string, seq, m int, typ string, p map[string]any, seen map[string]int) wsledger.Event {
@@ -118,6 +121,9 @@ func TestConcurrentLabelNameKeepsTheFirstInFoldOrder(t *testing.T) {
 		ev("bo", 1, 1, TypeAddLabel, map[string]any{"name": "Bug", "color": "#d14343"}, map[string]int{"ada.pc": 1}),
 		ev("ada", 2, 2, TypeAddLabel, map[string]any{"name": "bug", "color": "#000000"}, map[string]int{}),
 		ev("ada", 3, 3, TypeEditLabel, map[string]any{"label": "ada.pc#1", "name": "BUG"}, map[string]int{}),
+		// maya saw only ada's flagged add: her writes carrying it stay applied
+		ev("maya", 1, 4, TypeItemCreate, map[string]any{"kind": "task", "title": "Docs", "labels": []string{"ada.pc#2"}}, map[string]int{"ada.pc": 2}),
+		ev("maya", 2, 5, TypeItemEdit, map[string]any{"item": "maya.pc#1", "title": "Docs v2", "labels": []string{"ada.pc#2"}}, map[string]int{"ada.pc": 2, "maya.pc": 1}),
 	}
 	v := Derive(newMemSource(loadReasonCases(t).Genesis, "ada.pc", evs), "ada.pc", time.Time{}, 0)
 	got := map[string]string{}
@@ -128,12 +134,18 @@ func TestConcurrentLabelNameKeepsTheFirstInFoldOrder(t *testing.T) {
 		"ada.pc#1": "applied ",
 		"bo.pc#1":  "applied ",
 		"ada.pc#2": `flagged label "bug" already exists (bo.pc-1, written concurrently; the first in fold order keeps the name)`,
-		"ada.pc#3": `flagged label "BUG" already exists (bo.pc-1, written concurrently; the first in fold order keeps the name)`,
+		// ada saw her own add of bug, flagged or not: her rename is a plain duplicate
+		"ada.pc#3": `flagged label "BUG" already exists (ada.pc-2)`,
+		"maya.pc#1": "applied ",
+		"maya.pc#2": "applied ",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("verdicts %v, want %v", got, want)
 	}
 	if want := []LabelView{{"ada.pc#1", "ui", "#3366cc"}, {"bo.pc#1", "Bug", "#d14343"}}; !reflect.DeepEqual(v.Labels, want) {
 		t.Fatalf("label list %v, want %v", v.Labels, want)
+	}
+	if it, ok := v.Items["maya.pc#1"]; !ok || it.Title != "Docs v2" || len(it.Labels) != 0 {
+		t.Fatalf("the item carrying the lost label: %+v", it)
 	}
 }

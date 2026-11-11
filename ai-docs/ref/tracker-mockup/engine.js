@@ -1189,10 +1189,11 @@
     // Verdicts. A pass repeats only when the revocation rule ignores a new event.
     for (var pass = 0; pass < 4; pass++) {
       order.forEach(function (n) {
-        n.status = 'applied'; n.reason = null; n.revokedLate = false;
+        n.status = 'applied'; n.reason = null; n.revokedLate = false; n.clash = false;
         if (ignored[n.id]) { n.status = 'flagged'; n.reason = ignored[n.id]; n.revokedLate = true; return; }
         var S = genesis(st.roles);
-        for (var i = 0; order[i] !== n; i++) if (order[i].status === 'applied' && hb(order[i], n)) apply(S, order[i], null);
+        // an add or rename flagged only by the label-name clash still counts for later checks: their writers saw it
+        for (var i = 0; order[i] !== n; i++) if ((order[i].status === 'applied' || order[i].clash) && hb(order[i], n)) apply(S, order[i], null);
         try { check(S, n); } catch (e) {
           if (!(e instanceof Rej)) throw e;
           n.status = 'flagged'; n.reason = e.reason;
@@ -1202,7 +1203,7 @@
           var L = genesis(st.roles);
           for (var j = 0; order[j] !== n; j++) if (order[j].status === 'applied' && LABEL_LIST.indexOf(order[j].type) >= 0) apply(L, order[j], null);
           var clash = labelClash(L, n);
-          if (clash) { n.status = 'flagged'; n.reason = clash; }
+          if (clash) { n.status = 'flagged'; n.reason = clash; n.clash = true; }
         }
       });
       var more = false;

@@ -120,6 +120,42 @@
    "verdict": "valid"
   },
   {
+   "member": "maya",
+   "clone": "pc",
+   "seq": 1,
+   "ts": "2026-11-01T09:10:00Z",
+   "type": "item.create",
+   "payload": {
+    "kind": "task",
+    "title": "Polish",
+    "labels": [
+     "bo.pc#1"
+    ]
+   },
+   "seen": {
+    "bo.pc": 1
+   },
+   "verdict": "valid"
+  },
+  {
+   "member": "maya",
+   "clone": "pc",
+   "seq": 2,
+   "ts": "2026-11-01T09:10:00Z",
+   "type": "item.edit",
+   "payload": {
+    "item": "maya.pc#1",
+    "title": "Polish UI",
+    "labels": [
+     "bo.pc#1"
+    ]
+   },
+   "seen": {
+    "bo.pc": 1
+   },
+   "verdict": "valid"
+  },
+  {
    "member": "ada",
    "clone": "pc",
    "seq": 3,
@@ -297,11 +333,6 @@
     "id": "ada.pc#3",
     "name": "design",
     "color": "#445566"
-   },
-   {
-    "id": "bo.pc#3",
-    "name": "bug",
-    "color": "#ff8800"
    }
   ],
   "members": {
@@ -530,25 +561,26 @@
     "refs": [],
     "backrefs": []
    },
-   "bo.pc#4": {
-    "id": "bo.pc#4",
-    "alias": "bo.pc-4",
+   "maya.pc#1": {
+    "id": "maya.pc#1",
+    "alias": "maya.pc-1",
     "kind": "task",
-    "title": "Fix",
+    "title": "Polish UI",
     "body": "",
     "project": "",
-    "labels": [
-     "bo.pc#3"
-    ],
+    "labels": [],
     "due": null,
     "priority": 1,
     "priorityLevel": 1,
     "priorityName": "Task",
     "parent": null,
-    "author": "bo",
-    "ts": "2026-11-01T11:30:00Z",
+    "author": "maya",
+    "ts": "2026-11-01T09:10:00Z",
     "hidden": false,
-    "edited": null,
+    "edited": {
+     "id": "maya.pc#2",
+     "ts": "2026-11-01T09:10:00Z"
+    },
     "status": "todo",
     "counted": true,
     "rollup": {
@@ -556,20 +588,21 @@
      "counts": {},
      "blocked": []
     },
-    "lastActivity": "2026-11-01T11:30:00Z",
+    "lastActivity": "2026-11-01T09:10:00Z",
     "started": null,
     "children": [],
     "assignments": [
-     "bo.pc#4@bo.pc#4>bo"
+     "maya.pc#1@maya.pc#1>maya"
     ],
     "pending": [],
     "thread": [
-     "bo.pc#4"
+     "maya.pc#1",
+     "maya.pc#2"
     ],
     "concurrent": 0,
     "depth": 0,
     "chain": [
-     "bo"
+     "maya"
     ],
     "mentions": [],
     "attachments": [],
@@ -579,7 +612,7 @@
   },
   "itemOrder": [
    "ada.pc#2",
-   "bo.pc#4"
+   "maya.pc#1"
   ],
   "assignments": {
    "ada.pc#2@ada.pc#2>ada": {
@@ -616,20 +649,20 @@
     "lastUpdate": "2026-11-01T09:00:00Z",
     "stale": false
    },
-   "bo.pc#4@bo.pc#4>bo": {
-    "id": "bo.pc#4@bo.pc#4>bo",
-    "item": "bo.pc#4",
-    "to": "bo",
-    "by": "bo",
-    "sender": "bo",
+   "maya.pc#1@maya.pc#1>maya": {
+    "id": "maya.pc#1@maya.pc#1>maya",
+    "item": "maya.pc#1",
+    "to": "maya",
+    "by": "maya",
+    "sender": "maya",
     "completion": "assignee",
     "state": "live",
     "forced": true,
     "status": "todo",
     "note": null,
     "noteBy": null,
-    "via": "bo.pc#4",
-    "ts": "2026-11-01T11:30:00Z",
+    "via": "maya.pc#1",
+    "ts": "2026-11-01T09:10:00Z",
     "inherited": false,
     "ruleLevels": null,
     "rule": null,
@@ -647,7 +680,7 @@
     "depth": 0,
     "statusOrigin": null,
     "statusBy": null,
-    "lastUpdate": "2026-11-01T11:30:00Z",
+    "lastUpdate": "2026-11-01T09:10:00Z",
     "stale": false
    }
   },
@@ -721,6 +754,60 @@
     "markers": [],
     "superseded": [],
     "thread": null,
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "maya.pc#1",
+    "alias": "maya.pc-1",
+    "stream": "maya.pc",
+    "member": "maya",
+    "seq": 1,
+    "ts": "2026-11-01T09:10:00Z",
+    "type": "item.create",
+    "origin": "human",
+    "payload": {
+     "kind": "task",
+     "title": "Polish",
+     "labels": [
+      "bo.pc#1"
+     ]
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "maya.pc#1",
+    "parentThread": null,
+    "local": false,
+    "open": false,
+    "late": false
+   },
+   {
+    "id": "maya.pc#2",
+    "alias": "maya.pc-2",
+    "stream": "maya.pc",
+    "member": "maya",
+    "seq": 2,
+    "ts": "2026-11-01T09:10:00Z",
+    "type": "item.edit",
+    "origin": "human",
+    "payload": {
+     "item": "maya.pc#1",
+     "title": "Polish UI",
+     "labels": [
+      "bo.pc#1"
+     ]
+    },
+    "status": "applied",
+    "reason": null,
+    "ignored": false,
+    "markers": [],
+    "superseded": [],
+    "thread": "maya.pc#1",
     "parentThread": null,
     "local": false,
     "open": false,
@@ -861,8 +948,8 @@
      "name": "bug",
      "color": "#ff8800"
     },
-    "status": "applied",
-    "reason": null,
+    "status": "flagged",
+    "reason": "label \"bug\" already exists (bo.pc-1)",
     "ignored": false,
     "markers": [],
     "superseded": [],
@@ -888,8 +975,8 @@
       "bo.pc#3"
      ]
     },
-    "status": "applied",
-    "reason": null,
+    "status": "flagged",
+    "reason": "label \"bo.pc#3\" is not in the store's label list",
     "ignored": false,
     "markers": [],
     "superseded": [],
@@ -991,13 +1078,15 @@
     {
      "id": "maya",
      "depth": 1,
-     "open": [],
+     "open": [
+      "maya.pc#1@maya.pc#1>maya"
+     ],
      "pending": [],
      "waiting": [],
      "done": 0,
      "blocked": 0,
      "stale": 0,
-     "last": null
+     "last": "2026-11-01T09:10:00Z"
     },
     {
      "id": "lena",
@@ -1046,28 +1135,27 @@
     {
      "id": "bo",
      "depth": 1,
-     "open": [
-      "bo.pc#4@bo.pc#4>bo"
-     ],
+     "open": [],
      "pending": [],
      "waiting": [],
      "done": 0,
      "blocked": 0,
      "stale": 0,
-     "last": "2026-11-01T11:30:00Z"
+     "last": null
     }
    ],
    "badge": []
   },
   "stats": {
-   "events": 12,
-   "commits": 9,
-   "flagged": 2,
+   "events": 14,
+   "commits": 10,
+   "flagged": 4,
    "concurrent": 2
   },
   "heads": {
    "ada.pc": 7,
-   "bo.pc": 5
+   "bo.pc": 5,
+   "maya.pc": 2
   },
   "now": "2026-11-02T09:00:00Z"
  }
