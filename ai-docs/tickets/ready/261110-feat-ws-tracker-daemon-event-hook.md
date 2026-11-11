@@ -148,7 +148,7 @@ over SSE, and nothing reaches an outside program.
 | scope.surface | public-interface | a new user-configured hook command and its stdin event JSON are a downstream-facing contract |
 | scope.new_public_symbol | yes | the hooks file format (Decision 3); file name chosen in planning |
 | scope.new_type_contract | yes | the versioned event JSON (Decisions 4, 9) and the hooks file shape |
-| scope.test_surface | new | hook runner tests with a fake command beside agents-plugin-tool/internal/wsdashboard/*_test.go |
+| scope.test_surface | new-files | hook runner tests with a fake command beside agents-plugin-tool/internal/wsdashboard/*_test.go |
 | complexity.reuse_points | confirmed | wsledger Ledger.Events(after Cursor) and Cursor (store.go#L1282, types.go#L134); tracker change signal TrackerChanged in wsdashboard/sse.go |
 | complexity.side_effect_risk | high | the daemon spawns an external process with its own environment and privileges on store-driven events |
 | risk.correctness | high | per-stream cursor dedup, once-only due events, epoch changes, and catch-up after downtime (Decisions 5, 6, 8) |
