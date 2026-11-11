@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -537,6 +538,8 @@ type leadHarness struct {
 	log     *logBuffer
 	runner  *Runner
 	syncs   int
+	// notes counts the runner's page notifications.
+	notes atomic.Int64
 }
 
 // leadDaemonEnv is the daemon's own environment in a lead test: a harness
@@ -573,7 +576,7 @@ func newLeadHarness(t *testing.T) *leadHarness {
 // daemon start does.
 func (h *leadHarness) start() *leadHarness {
 	h.runner = NewRunner(h.opts)
-	h.runner.Start(nil)
+	h.runner.Start(func(string, string) { h.notes.Add(1) })
 	h.t.Cleanup(h.runner.Close)
 	return h
 }

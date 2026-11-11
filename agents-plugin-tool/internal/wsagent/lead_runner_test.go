@@ -462,6 +462,10 @@ func TestLeadMailIsDeliveredAsATurn(t *testing.T) {
 
 	h.holders.set(func() { h.holders.spawnErr = nil })
 	h.restart()
+	// A daemon that ends stops its watch, which clears its listening marker.
+	if got := h.mail.stopped(); got != 1 {
+		t.Fatalf("mailbox watches stopped by the daemon's end = %d, want 1", got)
+	}
 	holder := h.holder(id)
 	eventually(t, "the mail turn", func() bool { return slices.Equal(h.userInputs(holder), []string{"From a@x: ping"}) })
 	eventually(t, "the record to drop the delivered mail", func() bool { return len(h.record(id).Mail) == 0 })
@@ -494,7 +498,38 @@ func TestLeadMailIsDeliveredAsATurn(t *testing.T) {
 	if _, err := h.runner.CloseConversation(id); err != nil {
 		t.Fatal(err)
 	}
-	eventually(t, "the mailbox watch to end", func() bool { return h.mail.stopped() == 1 })
+	eventually(t, "the mailbox watch to end", func() bool { return h.mail.stopped() == 2 })
+}
+
+// TestLeadMailClaimedDuringATurnTellsThePage: mail claimed while a turn
+// runs is not submitted until the turn ends, so the claim itself must tell
+// the page: its mail history and held count changed.
+func TestLeadMailClaimedDuringATurnTellsThePage(t *testing.T) {
+	h := newLeadHarness(t)
+	h.opts.heartbeat = time.Hour // no heartbeat notification in this test
+	h.start()
+	id := h.lead(BackendClaude, LeadOptions{}).ID
+	key := h.record(id).WSKey
+	h.send(id, "question")
+	holder := h.holder(id)
+	h.holders.out(holder, stateLine(HarnessRunning), initLine("sess-1", "auto"))
+	h.sync(id, holder)
+	// Let the notifications of the lines above settle.
+	settled := h.notes.Load()
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); {
+		time.Sleep(30 * time.Millisecond)
+		now := h.notes.Load()
+		if now == settled {
+			break
+		}
+		settled = now
+	}
+	h.mail.deliver(key, "From b@x: more")
+	eventually(t, "the claim to be held", func() bool { return h.state(id).Held == 1 })
+	eventually(t, "the page to be told of the claim", func() bool { return h.notes.Load() > settled })
+	if got := h.userInputs(holder); !slices.Equal(got, []string{"question"}) {
+		t.Fatalf("mail claimed during a turn waits for its end: %q", got)
+	}
 }
 
 // TestLeadMailWaitsForTheRejoin: mail the session holds, and mail that

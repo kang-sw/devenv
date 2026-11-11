@@ -838,6 +838,10 @@ func (c *conv) mailChanged() {
 	}
 	if len(texts) > 0 {
 		c.update(func(rec *Record) { rec.Mail = append(rec.Mail, texts...) })
+		// The claim changed the session's mail history and held count. A
+		// turn that runs submits nothing now, so nothing else would tell
+		// the page.
+		c.r.notify(c.rec.ReplyID, c.rec.Root)
 	}
 	// Mail claimed earlier and not yet delivered (a start that failed, a
 	// daemon that ended) goes with it: nothing else would submit it.
@@ -939,6 +943,11 @@ func (c *conv) loop() {
 			}
 		case <-c.r.quit:
 			c.letGo()
+			// The watch's listening marker names this process: left behind,
+			// it would name a dead one until the next daemon's watch.
+			if c.stopMail != nil {
+				c.stopMail()
+			}
 			return
 		}
 		if c.closed {
