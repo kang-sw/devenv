@@ -2,7 +2,7 @@
 title: "Dashboard agent host: workspaces (root worktree or plain folder), per-workspace sessions, and conversation handoff between CLI and daemon"
 parent: 261110-epic-ws-dashboard-agent-host
 related:
-  261110-feat-ws-dashboard-headless-lead-sessions: "prerequisite of Phase 2 only (new session, conversation handoff)"
+  261110-feat-ws-dashboard-headless-lead-sessions: "prerequisite of Phase 2 only (conversation handoff needs its Phase 1); it builds the new-session + buttons and popover ((189))"
   261110-research-ws-dashboard-agent-host-foundations: "Topic 4 (multi-session and workspace management)"
   261110-feat-ws-dashboard-session-rail: "owns the rail's workspace and worktree grouping; this ticket adds user-added workspaces and the + buttons on top"
 sage-review-design: completed
@@ -47,7 +47,7 @@ call), and no endpoint that starts a lead session (Explore, 2026-11-10).
    take over a Claude or Pi session that a CLI process started, once that
    process has exited, and resume it headless; a daemon session can be
    handed to the terminal by stopping its process and giving the user a
-   `claude --resume <id>` command. One session ID is never held by two
+   `claude --resume <id>` command (for Pi, `pi --session <id>`). One session ID is never held by two
    processes at once: before a handoff the previous process must have
    exited.
    Rejected: CLI to daemon only ((15) b); daemon sessions only ((15) c).
@@ -57,7 +57,9 @@ call), and no endpoint that starts a lead session (Explore, 2026-11-10).
    rail header's "sessions +" adds a workspace; a workspace bar's
    "<path> +" adds a worktree (on a plain folder it opens the new-session
    popover instead); a worktree row's "<branch> · <folder> +" opens the
-   new-session popover for that worktree.
+   new-session popover for that worktree. The two new-session + buttons
+   are built by `261110-feat-ws-dashboard-headless-lead-sessions`
+   Decision 10 ((189)); this ticket built the other two.
 4. **Adding a workspace takes a pasted absolute path only (user, (55) c;
    technical, (60) ok).** No folder dialog: a dialog opened by the daemon
    would appear on the daemon's screen, the wrong PC for a LAN viewer, and a
@@ -98,8 +100,10 @@ call), and no endpoint that starts a lead session (Explore, 2026-11-10).
 6. **The new-session popover reuses the tracker support chat's selection
    popover (announced, (57) ok).** Harness, model search, and effort knob
    come from `supDrawPop` (`assets/dashboard.js`) and `GET /support/choices`,
-   plus a line naming the target worktree and a start button. Rejected:
-   a second picker.
+   plus a line naming the target worktree and a start button. The popover
+   is built, with a permission-mode row, by
+   `261110-feat-ws-dashboard-headless-lead-sessions` Decision 10 ((189)).
+   Rejected: a second picker.
 7. **Stored list in the config home (technical, (110) ok).** The list lives
    at `<config home>/dashboard/workspaces.json`, beside the tracker's
    per-machine store registry (`wstrackerhost`). Rejected: the cache root
@@ -142,8 +146,10 @@ call), and no endpoint that starts a lead session (Explore, 2026-11-10).
 - The rail's grouping, row content, and worktree listing belong to
   `261110-feat-ws-dashboard-session-rail`; this ticket does not build a
   second list (2026-11-10 whiteboard, (36) ok, (62) a).
-- To settle at Phase 2 promotion: stopping and archiving sessions; how the
-  agents panel and the session page scale to many sessions.
+- Stopping and closing sessions belong to
+  `261110-feat-ws-dashboard-headless-lead-sessions` Decision 8 and its
+  header chip menu ((191) b). How the agents panel and the session page
+  scale to many sessions is settled at Phase 2 promotion.
 - Manuals: `ai-docs/manuals/shipped-surface-boundary.md`.
 - Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for `agents-plugin/`, `agents-plugin-wsflow/`, `agents-plugin-tool/`)
 
@@ -287,6 +293,17 @@ file is now `railscript_test.go` and both tests run and pass.
 
 ### Phase 2: new session and conversation handoff
 
-Decisions 2, 3 (the new-session + buttons), and 6. Needs
-`261110-feat-ws-dashboard-headless-lead-sessions` done first. Scope and
-verification are settled at promotion.
+Decision 2 (conversation handoff). Needs
+`261110-feat-ws-dashboard-headless-lead-sessions` Phase 1 (spawn and the
+holder-backed runner) landed first. The
+new-session + buttons of Decision 3 and the popover of Decision 6 are built
+by that ticket's Phase 1 instead (technical, (189) ok: one owner for the
+popover, and its spawn UI is unusable without an entry point). Scope and
+verification are settled at promotion: the ticket went back to todo until
+then ((193) a). That promotion also settles the many-session scaling line
+(Constraints) and the handoff choices the 2026-11-11 design review listed:
+on a takeover, whether the daemon reuses the CLI session's key, row, and
+page URL or mints a new lead key (`261110-feat-ws-hosted-session-mode-flag`
+Decision 7); how the daemon confirms the CLI process has exited; and which
+sessions can be handed off, from where in the UI.
+

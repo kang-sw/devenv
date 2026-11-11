@@ -49,7 +49,8 @@ preview at any time. Sequence (user, 2026-11-10, (68) a; announced, (70)):
    `261110-feat-ws-dashboard-terminal` in parallel. The research
    verifications finish before headless-lead-sessions is promoted to
    `ready/` ((70)).
-5. `261110-feat-ws-dashboard-workspaces` Phase 2.
+5. `261110-feat-ws-dashboard-workspaces` Phase 2 (conversation handoff),
+   after headless-lead-sessions Phase 1.
 
 `261110-feat-ws-dashboard-file-preview` fills gaps at any point.
 
@@ -59,12 +60,12 @@ preview at any time. Sequence (user, 2026-11-10, (68) a; announced, (70)):
   hands input delivery and the dashboard feed to the daemon in the Claude
   mod and the Pi extension.
 - `261110-feat-ws-dashboard-headless-lead-sessions` - track A: spawn,
-  input injection, approval, recovery, idle stop. After the holder and the
-  flag.
+  input injection, approval, recovery, idle stop, and the new-session +
+  buttons and popover ((189)). After the holder and the flag.
 - `261110-feat-ws-dashboard-workspaces` - track A: stored workspaces and
-  the rail's + buttons. Phase 1 (add workspace, add worktree) has no
-  prerequisite; Phase 2 (new session, CLI/daemon handoff) comes after the
-  headless leads ((69) a).
+  the rail's add-workspace and add-worktree + buttons. Phase 1 (add
+  workspace, add worktree) has no prerequisite; Phase 2 (CLI/daemon
+  handoff) comes after headless-lead-sessions Phase 1 ((69) a, (189)).
 - `261110-feat-ws-dashboard-terminal` - track B: browser terminal on holder
   PTYs. After the holder.
 - `261110-feat-ws-dashboard-file-preview` - track B: read-only browser and
