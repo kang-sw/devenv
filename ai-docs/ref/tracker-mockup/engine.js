@@ -220,7 +220,7 @@
   // ------------------------------------------------------------------ state
 
   function genesis(roles) {
-    var S = { members: {}, admins: {}, items: {}, asg: {}, rules: {}, comments: {}, reg: {}, prio: normPriority(roles.priority),
+    var S = { members: {}, admins: {}, items: {}, place: [], asg: {}, rules: {}, comments: {}, reg: {}, prio: normPriority(roles.priority),
       att: normAttachments(roles.attachments) };
     (roles.members || []).forEach(function (m) {
       S.members[m.id] = { id: m.id, profile: normProfile(m, m.id), keys: (m.keys || []).slice(), revoked: {}, leads: (m.leads || []).slice(), removed: null, joined: null };
@@ -292,6 +292,47 @@
   }
   // (208, 292) An admin stands in for a removed creator: assign, unassign, edit, hide.
   function creatorGone(S, it, a) { var cr = S.members[it.author]; return !!(S.admins[a] && cr && cr.removed); }
+  // The creator-or-live-assignee rule: a created it or holds a live assignment on it
+  // (the fallback included). what prefixes the item ('parent ' on a destination).
+  function needCreatorOrAssignee(S, it, a, what) {
+    if (it.author !== a && !liveRec(S, it.id, a)) rej((what || '') + it.alias + ' is neither assigned to nor created by ' + a);
+  }
+  // id is it or sits in its subtree, walking parents up from id.
+  function underItem(S, id, it) {
+    for (var cur = id, n = 0; cur && n <= Object.keys(S.items).length; n++) {
+      if (cur === it.id) return true;
+      var x = S.items[cur];
+      if (!x) return false;
+      cur = x.parent;
+    }
+    return false;
+  }
+  // item.move: the item rule (creator or live assignee, the creator-gone fallback
+  // included), then, only when the parent changes, the destination rule
+  // (item.create's parent rules, and a topic takes no children), the subtree rule,
+  // and the after anchor.
+  function checkMove(S, p, a) {
+    var it = needItem(S, p.item);
+    try { needCreatorOrAssignee(S, it, a, ''); } catch (e) { if (!(e instanceof Rej) || !creatorGone(S, it, a)) throw e; }
+    if (it.hidden) rej(it.alias + ' is hidden');
+    if (!has(p, 'parent')) rej('parent required (an item id, or null for top level)');
+    if (p.parent != null && typeof p.parent !== 'string') rej('parent must be an item id, or null for top level');
+    var parent = p.parent || null;
+    if (parent && parent !== it.parent) {
+      if (parent === it.id) rej(it.alias + ' cannot move under itself');
+      var par = needItem(S, parent, 'parent');
+      if (par.hidden) rej('parent ' + par.alias + ' is hidden');
+      needCreatorOrAssignee(S, par, a, 'parent ');
+      if (par.kind === 'topic') rej('parent ' + par.alias + ' is a topic; a topic takes no children');
+      if (underItem(S, par.id, it)) rej('parent ' + par.alias + ' is in ' + it.alias + '\'s own subtree');
+    }
+    if (p.after != null && typeof p.after !== 'string') rej('after must be a sibling item id');
+    if (p.after) {
+      if (p.after === it.id) rej(it.alias + ' cannot follow itself');
+      var sib = needItem(S, p.after, 'after');
+      if (sib.parent !== parent) rej('after ' + sib.alias + ' is not a child of ' + (parent ? alias(parent) : 'the top level'));
+    }
+  }
   function needAdmin(S, a) { if (!S.admins[a]) rej('roles events are admin-only (' + a + ' is not an admin)'); }
   function keyInUse(S, key) {
     return vals(S.members).some(function (m) { return m.keys.indexOf(key) >= 0 || m.revoked[key]; });
@@ -458,11 +499,15 @@
         if (p.parent) {
           var par = needItem(S, p.parent, 'parent');
           if (par.hidden) rej('parent ' + par.alias + ' is hidden');
-          if (par.author !== a && !liveRec(S, p.parent, a)) rej('parent ' + par.alias + ' is neither assigned to nor created by ' + a);
+          needCreatorOrAssignee(S, par, a, 'parent ');
         }
         // (528) the sibling it follows; null or "" = first. An anchor that is not a
         // sibling when the view is built falls back to the end (deriveViewState).
         if (p.after != null && typeof p.after !== 'string') rej('after must be a sibling item id');
+        break;
+
+      case 'item.move':
+        checkMove(S, p, a);
         break;
 
       case 'item.edit':
@@ -707,6 +752,8 @@
   function show(v) {
     if (v === null || v === undefined) return '(none)';
     if (v && typeof v === 'object' && !Array.isArray(v)) {
+      if (v.move) return (v.parent ? 'under ' + alias(v.parent) : 'top level') + ', ' +
+        (v.after === undefined ? 'last' : v.after === null ? 'first' : 'after ' + alias(v.after));
       if (v.names) return v.names.join(' / ') + ' (default ' + v.names[v.default] + ')';
       return v.status + (v.note ? ' ("' + v.note + '")' : '');
     }
@@ -763,6 +810,10 @@
   }
   // The register's shown write: mentions, attachments and refs follow the body write that won.
   function regWinner(S, key) { return winner(S.reg[key]).n; }
+  // The value write(S, key, _, n, v) would show, without writing.
+  function peek(S, key, n, v) {
+    return winner([{ n: n, v: v }].concat((S.reg[key] || []).filter(function (h) { return !hb(h.n, n); }))).v;
+  }
 
   // A record's id is "<via>><member>" unless extra.id names it (a rule's records
   // and its request).
@@ -870,9 +921,9 @@
     });
     var parent = S.items[r.item];
     vals(S.items).forEach(function (it) {
-      if (it.parent !== r.item || it.author !== r.to || !parent || parent.author === r.to || hb(it.node, n)) return;
-      mark(it.node, n, 'subtask', 'subtask under ' + alias(r.item), { winner: n.id });
-      mark(n, it.node, 'subtask', 'subtask under ' + alias(r.item), { winner: n.id });
+      if (it.parent !== r.item || it.parentBy.author !== r.to || !parent || parent.author === r.to || hb(it.parentBy, n)) return;
+      mark(it.parentBy, n, 'subtask', 'subtask under ' + alias(r.item), { winner: n.id });
+      mark(n, it.parentBy, 'subtask', 'subtask under ' + alias(r.item), { winner: n.id });
     });
   }
   // A write folded onto a record a concurrent event already ended.
@@ -904,6 +955,34 @@
     return q;
   }
 
+  // item.move folds into the item's position register: concurrent moves of one item
+  // keep the register's winner, the other marked. A move whose shown place would sit
+  // in the item's own subtree, which only a concurrent move can cause, is flagged and
+  // ignored, the later in fold order losing. A parent change by an assignee
+  // concurrent with the end of their assignment on the new parent is marked as a
+  // subtask, as endRec marks a create.
+  function applyMove(S, n, C) {
+    var p = n.p, it = S.items[p.item];
+    if (!it) return;
+    var key = 'it:' + it.id + ':place', v = { move: true, parent: p.parent || null, after: has(p, 'after') ? (p.after || null) : undefined };
+    if (underItem(S, peek(S, key, n, v).parent, it)) {
+      if (C) { n.status = 'flagged'; n.reason = 'moving ' + it.alias + ' under ' + alias(v.parent) + ' would close a cycle with a concurrent move; ignored'; }
+      return;
+    }
+    var w = write(S, key, 'position of ' + it.alias, n, v, C), wn = regWinner(S, key);
+    if (wn === it.placedBy) return;
+    if (w.parent !== it.parent) it.parentBy = wn;
+    it.parent = w.parent; it.after = w.after; it.placedBy = wn;
+    S.place.push({ id: it.id, parent: w.parent, after: w.after });
+    var par = S.items[it.parent];
+    if (!C || wn !== n || it.parentBy !== n || !par || par.author === n.author) return;
+    recsOn(S, par.id).forEach(function (r) {
+      if (r.to !== n.author || !r.ended || r.fallback || hb(r.ended, n)) return;
+      mark(n, r.ended, 'subtask', 'subtask under ' + alias(par.id), { winner: r.ended.id });
+      mark(r.ended, n, 'subtask', 'subtask under ' + alias(par.id), { winner: r.ended.id });
+    });
+  }
+
   function apply(S, n, C) {
     var p = n.p, a = n.author, it, q, m, r;
     switch (n.type) {
@@ -913,6 +992,11 @@
           due: p.due || null, priority: p.priority != null ? p.priority : S.prio.default,
           parent: p.parent || null, after: has(p, 'after') ? (p.after || null) : undefined, author: a, ts: n.ts, hidden: false, edited: null, node: n,
           mentions: mentionsOf(p), attachments: attachmentsOf(p), refs: refsOf(p) };
+        S.items[n.id].placedBy = S.items[n.id].parentBy = n;
+        S.place.push({ id: n.id, parent: S.items[n.id].parent, after: S.items[n.id].after });
+        break;
+      case 'item.move':
+        applyMove(S, n, C);
         break;
       case 'item.edit':
         it = S.items[p.item]; if (!it) break;
@@ -1273,13 +1357,23 @@
     // before it existed) or the anchor is not a sibling placed so far. A hidden
     // anchor keeps its place, so hiding a row moves no other row. Concurrent
     // inserts after one anchor: the later in fold order lands nearer the anchor.
+    var slots = {}, where = {};
+    S.place.forEach(function (pl) {
+      if (has(where, pl.id)) {
+        var o = slots[where[pl.id]].filter(function (x) { return x.id === pl.id && !x.gone; })[0];
+        if (o) o.gone = true;
+      }
+      var key = pl.parent && S.items[pl.parent] ? pl.parent : '', l = slots[key] = slots[key] || [], at = -1;
+      if (pl.after != null) for (var i = 0; i < l.length; i++) if (l[i].id === pl.after) { at = i; if (!l[i].gone) break; }
+      var x = { id: pl.id, gone: false };
+      if (pl.after === null) l.unshift(x);
+      else if (at < 0) l.push(x);
+      else l.splice(at + 1, 0, x);
+      where[pl.id] = key;
+    });
     var sib = {};
-    vals(S.items).forEach(function (it) {
-      var key = it.parent && S.items[it.parent] ? it.parent : '', l = sib[key] = sib[key] || [];
-      var at = it.after == null ? -1 : l.indexOf(it.after);
-      if (it.after === null) l.unshift(it.id);
-      else if (at < 0) l.push(it.id);
-      else l.splice(at + 1, 0, it.id);
+    Object.keys(slots).forEach(function (key) {
+      sib[key] = slots[key].filter(function (x) { return !x.gone; }).map(function (x) { return x.id; });
     });
     // (531) Backlinks: the shown items, then the shown comments on shown items, that
     // reference an item, each once, in fold order; an item's own thread excluded.

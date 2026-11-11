@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,7 +16,12 @@ import (
 // refreshing what it has seen now and then (so writes are often
 // concurrent), with creates, self-assignments, "everyone within N" rules,
 // status writes, closes, edits, comments, and lead changes. Deterministic.
-func scaleStore(n int) (json.RawMessage, []wsledger.Event) {
+func scaleStore(n int) (json.RawMessage, []wsledger.Event) { return scaleStoreWith(n, false) }
+
+// scaleStoreWith is scaleStore, with item.move writes in place of some
+// reopens and edits when moves is set (the rest of the store is unchanged
+// when it is not).
+func scaleStoreWith(n int, moves bool) (json.RawMessage, []wsledger.Event) {
 	rng := rand.New(rand.NewSource(1))
 	type mem struct {
 		id, lead string
@@ -84,6 +90,18 @@ func scaleStore(n int) (json.RawMessage, []wsledger.Event) {
 			emit(m, TypeItemStatus, map[string]any{"item": it, "status": statuses[rng.Intn(3)], "note": "progress"})
 		case r < 62:
 			emit(m, TypeItemClose, map[string]any{"item": own[m.id][rng.Intn(len(own[m.id]))]})
+		case moves && r >= 62 && r < 72:
+			p := map[string]any{"item": own[m.id][rng.Intn(len(own[m.id]))], "parent": nil}
+			switch rng.Intn(3) {
+			case 1:
+				p["parent"] = own[m.id][rng.Intn(len(own[m.id]))]
+			case 2:
+				p["parent"] = items[rng.Intn(len(items))]
+			}
+			if rng.Intn(2) == 0 {
+				p["after"] = ""
+			}
+			emit(m, TypeItemMove, p)
 		case r < 67:
 			emit(m, TypeItemReopen, map[string]any{"item": own[m.id][rng.Intn(len(own[m.id]))]})
 		case r < 75:
@@ -124,6 +142,29 @@ func TestScale(t *testing.T) {
 // event's whole causal past, then judge.
 func TestVerdictsEqualFullReplay(t *testing.T) {
 	genesis, evs := scaleStore(1500)
+	verdictsEqualFullReplay(t, genesis, evs)
+}
+
+// TestMoveVerdictsEqualFullReplay is the same pin over a store with
+// item.move writes, whose check folds the whole item tree. A move the final
+// fold flags for closing a concurrent cycle passed its own check, so it is
+// compared as applied.
+func TestMoveVerdictsEqualFullReplay(t *testing.T) {
+	genesis, evs := scaleStoreWith(1500, true)
+	moves := 0
+	for _, ev := range evs {
+		if ev.Type == TypeItemMove {
+			moves++
+		}
+	}
+	if moves < 50 {
+		t.Fatalf("only %d moves generated", moves)
+	}
+	verdictsEqualFullReplay(t, genesis, evs)
+}
+
+func verdictsEqualFullReplay(t *testing.T, genesis json.RawMessage, evs []wsledger.Event) {
+	t.Helper()
 	src := newMemSource(genesis, "root.pc", evs)
 	r := replay(evs, genesis, src.Concurrent)
 	for _, n := range r.order {
@@ -141,6 +182,9 @@ func TestVerdictsEqualFullReplay(t *testing.T) {
 			want = "flagged: " + string(rej)
 		}
 		got := n.status
+		if got == "flagged" && n.typ == TypeItemMove && strings.HasSuffix(n.reason, "would close a cycle with a concurrent move; ignored") {
+			got = "applied"
+		}
 		if got == "flagged" {
 			got += ": " + n.reason
 		}

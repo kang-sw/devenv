@@ -100,6 +100,7 @@ type replayed struct {
 	heads map[string]int
 
 	rolesPos, assignPos   []int
+	structPos             []int // item.create and item.move: the item tree
 	threadPos, commentPos map[string][]int
 	rolesOnly             bool // judge and fold only roles and identity events
 }
@@ -239,6 +240,9 @@ func (r *replayed) linearize(all []*node, streams map[string]map[int]*node) {
 		case n.typ == TypeItemAssign:
 			r.assignPos = append(r.assignPos, n.pos)
 		}
+		if n.typ == TypeItemCreate || n.typ == TypeItemMove {
+			r.structPos = append(r.structPos, n.pos)
+		}
 		if n.typ == TypeItemCreate {
 			r.threadPos[n.id] = append(r.threadPos[n.id], n.pos)
 		} else if it := n.p.str("item"); it != "" {
@@ -295,12 +299,16 @@ func (r *replayed) verdicts(all []*node) {
 // stateBefore folds the part of n's causal past that n's rules read: the
 // roles and identity events, the threads and comments n names (its refs
 // included), and every item.assign as a trigger of the live rules on those
-// threads. Nothing else can change what check reads, so this equals folding
-// the whole past.
+// threads; an item.move also reads the whole item tree (every create and
+// move) for its subtree rule and after anchor. Nothing else can change what
+// check reads, so this equals folding the whole past.
 func (r *replayed) stateBefore(n *node) *state {
 	rel := map[string]bool{}
 	var lists [][]int
 	lists = append(lists, r.rolesPos, r.assignPos)
+	if n.typ == TypeItemMove {
+		lists = append(lists, r.structPos)
+	}
 	ids := []string{n.p.str("item"), n.p.str("parent")}
 	for _, x := range n.p.strList("refs") {
 		ids = append(ids, x)
