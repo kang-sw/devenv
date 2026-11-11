@@ -77,7 +77,7 @@ func (f *trackerSupportFixture) as(key string, args map[string]any) map[string]a
 
 // TestTrackerSupportConversationPassesGateWithPinnedWrites: the support
 // conversation of store "me" reads every store, writes to "me", and is
-// refused a write to another store and the register and sync commands.
+// refused a write to another store and every store command.
 func TestTrackerSupportConversationPassesGateWithPinnedWrites(t *testing.T) {
 	f := newTrackerSupportFixture(t)
 	if out := toolText(t, f.call(t, "tracker.query", f.as(f.support, map[string]any{}))); !strings.Contains(out, "me") || !strings.Contains(out, "other") {
@@ -101,10 +101,18 @@ func TestTrackerSupportConversationPassesGateWithPinnedWrites(t *testing.T) {
 			t.Errorf("%s: a write outside the pinned store must be refused naming it: %s", name, text)
 		}
 	}
-	for _, commands := range []string{`<tk:sync store="me"/>`, `<tk:sync/>`, `<tk:register store="third" member="ada" given="Ada"/>`} {
+	// The conversation runs in its store's clone, so it may not remove,
+	// rename, or hide a store either.
+	for _, commands := range []string{`<tk:sync store="me"/>`, `<tk:sync/>`, `<tk:register store="third" member="ada" given="Ada"/>`,
+		`<tk:unregister store="me" confirm="me"/>`, `<tk:unregister store="other" confirm="other"/>`, `<tk:relabel store="me" label="x"/>`, `<tk:hide store="me"/>`, `<tk:unhide store="me"/>`} {
 		text := f.trackerRefused(t, "tracker.update", f.as(f.support, map[string]any{"commands": commands}))
-		if !strings.Contains(text, "cannot register or sync") {
+		if !strings.Contains(text, "cannot register, sync, unregister, relabel, hide, or unhide a store") {
 			t.Errorf("%s must be refused for the support key: %s", commands, text)
+		}
+	}
+	for _, store := range []string{"me", "other"} {
+		if e, ok := f.trackerEntry(t, store); !ok || e.Label != "" || e.Hidden {
+			t.Fatalf("a refused store command must leave %s as it was: %+v %v", store, e, ok)
 		}
 	}
 	if out := f.trackerQuery(t, map[string]any{"store": "other", "scope": "all"}); strings.Contains(out, "smuggled") {
