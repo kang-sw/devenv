@@ -576,3 +576,108 @@ Verification:
   exits, the daemon takes it over and continues the same transcript, hands
   it back, and `claude --resume` continues it in the terminal; record it as
   not run otherwise.
+
+### Result (f2a6fbab5) - 2026-11-12
+
+Landed in 907d3b859 (runner moves, routes, rail data, prune), 6dd41e687
+(hand-off retries a leftover holder), cf90d9887 (page mark for a handed-off
+session), f80a0b2ad (page UI and strings), and f2a6fbab5 (review fixes).
+Every surface this phase and Phase 2 touch is additive (new routes, new
+optional row, record, and key-record fields, two unadvertised `ferrule`
+arguments): compatibility tier T0.
+
+- Decisions 12, 14, 17 (takeover): `Runner.TakeOver`
+  (`internal/wsagent/handoff.go`), `POST /agents/<id>/takeover`. It finds
+  the key behind the row (`AgentKeyStore.LeadSession`), keeps it, and
+  resumes the harness conversation the key record names in the directory
+  that harness ran in; both stay on the agent record (`cwd`,
+  `session_file`), so later starts run there too. Pi runs on the reported
+  session file without `--session-dir`. Under the row lock it is refused
+  while `Registration.HarnessMayRun`: a recorded harness PID alive, or no
+  PID on a row with no `ended_at`. Also refused: a hosted row, an agent
+  conversation, a harness other than claude and pi, no lead key at a git
+  root, no recorded conversation, a directory or Pi file that is gone.
+- Decisions 16, 17 (hand to terminal): `Runner.HandOff`,
+  `POST /agents/<id>/handoff`. The process ends (a leftover holder is
+  retried and a failure fails the move), the row becomes an ended terminal
+  row with no PIDs, the record is released as in Phase 2, and the state
+  carries `resume_command`: `cd <dir> && claude --resume <id>` or
+  `cd <dir> && pi --session <file>`. The `cd` is added to the decision's Pi
+  command so project context loads as in the daemon's run. The command is
+  answered to a `can_control` viewer only, since it names local paths.
+- Decision 18 (revive): `Runner.Reopen`, `POST /agents/<id>/reopen`,
+  refused once the row is a terminal's and for a handed-off record. The
+  rail's ended list has no 24-hour cut (the index page keeps its own);
+  `RailRow.Revive` and `ReviveBlocked` say how a row comes back. Prune ages
+  a closed or handed-off lead by its row; every other agent record keeps
+  the runner's lifetime.
+- All three routes sit behind the trusted gate for every id (a takeover
+  names a session the runner does not hold yet).
+- Page: an ended row carries Take over or Reopen beside its link (disabled
+  with its reason when the key record names no conversation); the chip
+  menu has Hand to terminal; a handed-off session shows a notice with the
+  resume command and a copy button, also after a reload (`data-handed`,
+  set while the row is an ended terminal row and the record is handed
+  off). The PID block is answered at the click (409 text), not precomputed
+  on the rail.
+- A terminal ws-mcp re-reads the row under the lock before each row write
+  and stops once the row is hosted, so a server that outlived its harness
+  cannot write a taken-over row back.
+- Lite review: two important findings, both fixed in f2a6fbab5.
+  - An accepted re-login to a row that is not hosted now marks it as the
+    terminal's at once (`harness_pid`, no `ended_at`, fresh heartbeat),
+    whatever the dashboard key says. Before, a session handed to a
+    terminal whose dashboard key was off kept the hand-off's ended row,
+    and a takeover would have run beside the terminal.
+  - Prune keeps one retired lead: a handed-off Pi session whose session
+    file is inside its session directory, because the terminal's Pi runs
+    on that file. This narrows Decision 18's "handed-off records are
+    pruned" for that one case to avoid deleting a conversation the user
+    still holds; such rows stay in the ended list. It wants the user's
+    confirmation.
+  - Minor notes left: a hosted session's own login is accepted by PID
+    match even if that PID were stale and reused (as Decision 15 states);
+    the runner keeps a closed record in memory after another process
+    pruned its directory, so a reopen then fails on the record write
+    instead of answering unknown.
+
+Verification:
+
+- `go vet ./...`: clean. `go test ./... -count=1` at f2a6fbab5: every
+  package ok.
+- Tests by the plan's list: the PID block
+  (`TestTakeoverWaitsForTheTerminalHarnessToExit`); adoption, `--resume`,
+  the directory, and restarts keeping it
+  (`TestTakeoverAdoptsTheKeyAndResumesWhereTheHarnessRan`,
+  `TestTakeoverOfAPiSessionRunsOnItsOwnSessionFile`,
+  `TestTakeoverRefusals`); hand to terminal, mail not resuming, the row,
+  and a restart not reclaiming it
+  (`TestHandOffGivesTheSessionToTheTerminal`,
+  `TestHandOffThroughTheRoute`, `TestHandOffNeedsTheProcessEnded`,
+  `TestResumeCommand`); key continuity
+  (`TestReloginAfterAHandOffKeepsTheKey`,
+  `TestReloginMarksTheRowAsHeldByTheTerminal`; the Claude mod's hosted
+  start stores the daemon key under the session id and a later start
+  re-logs in with a stored key, each pinned in `manual-engine.test.ts`; Pi
+  in `lead-key-hosted.test.ts` and `lead-key-resume.test.ts`); reopen and
+  its refusal (`TestReopenOpensAClosedHostedSession`); the ended list past
+  24 h and the row entries (`rail_test.go`, `TestRailRowRevive`,
+  `TestRailMarkupRevive`); the prune
+  (`TestPruneRegistrationsAgesRetiredLeadsByTheirRow`); the routes in
+  `TestLANModeGuardsEveryRoute` and the lead-control gate
+  (`lead_http_test.go`); the page mark (`TestHandedOffSessionMark`,
+  `TestPageMarksASessionHandedToATerminal`); the row guard
+  (`TestTerminalServerLeavesARowTheDaemonTookOver`).
+- Browser check: headless Chromium at 1700px, 1200px, and 390px against
+  rendered fixture pages with the routes stubbed. Seen at each width: the
+  Take over and Reopen entries in an ended list, the disabled entry with
+  its reason (a click posts nothing), a refusal text after a failed
+  takeover, Hand to terminal in the chip menu, the notice with the command
+  and its copy button after a hand-off and on a page loaded with
+  `data-handed`. Not seen: a real daemon behind the page, the notice going
+  away again, the reload branch of a revive on the session's own page, and
+  the hand-off confirmation with background tasks.
+- Live round trip (terminal Claude lead, takeover, hand back,
+  `claude --resume`): not run; no daemon build on this machine.
+- `TestHostedReconnectAdoptsOnlyLiveSamePIDRecords` failed in some full
+  runs for the reason recorded under Phase 2 and passed in the last one.
