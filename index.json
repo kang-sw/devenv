@@ -428,7 +428,14 @@
       "registered_at": "2026-11-12T07:07:22Z"
     },
     "261112-feat-ws-mcp-pi-spawn-claude-lead-path": {
-      "registered_at": "2026-11-12T14:07:03Z"
+      "registered_at": "2026-11-12T14:07:03Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-12T14:49:19Z"
+      }
     },
     "261112-feat-ws-mcp-pi-spawn-recursion": {
       "registered_at": "2026-11-12T14:32:11Z"
