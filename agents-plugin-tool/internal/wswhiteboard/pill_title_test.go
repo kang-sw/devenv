@@ -67,7 +67,7 @@ check("hosted: the count goes to the hook", got.slice(-1), [2]);
 check("hosted: title untouched", title, "(9) Board - x");
 process.stdout.write(bad.join("\n"));`,
 	} {
-		out, err := exec.Command(node, "-e", script).CombinedOutput()
+		out, err := nodeScript(node, script).CombinedOutput()
 		if err != nil {
 			t.Fatalf("%s: node: %v\n%s", name, err, out)
 		}

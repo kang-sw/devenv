@@ -6,6 +6,15 @@ import (
 	"testing"
 )
 
+// nodeScript runs script under node, fed on stdin rather than with -e:
+// Windows caps a command line at 32767 characters, and the scripts embed
+// whole assets.
+func nodeScript(node, script string) *exec.Cmd {
+	cmd := exec.Command(node, "-")
+	cmd.Stdin = strings.NewReader(script)
+	return cmd
+}
+
 // railPrelude is a page for rail.js under node: a mini DOM whose elements
 // answer the compound selectors the rail uses (tag, classes, attributes,
 // descendant and child combinators, :scope), a board column that scrolls,
@@ -110,7 +119,7 @@ ta.children[0].h = 52; writes = []; ro(); frame();
 check("a taller bar moves its note", na.props["--wb-rail-note"], "96px");
 check("only the note is written", writes.filter(function (w) { return /^--wb-rail/.test(w[1]); }).map(function (w) { return w[0]; }), ["note-a"]);
 process.stdout.write(bad.join("\n"));`
-	out, err := exec.Command(node, "-e", script).CombinedOutput()
+	out, err := nodeScript(node, script).CombinedOutput()
 	if err != nil {
 		t.Fatalf("node: %v\n%s", err, out)
 	}

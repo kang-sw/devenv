@@ -58,7 +58,7 @@ pending["/tracker/stores/fast/view"](200, { view: { v: "new" } });
 check("unmounted, both landed", log, ["listed:200", "done"]);
 process.stdout.write(bad.join("\n"));
 `
-	out, err := exec.Command(node, "-e", script).CombinedOutput()
+	out, err := nodeScript(node, script).CombinedOutput()
 	if err != nil {
 		t.Fatalf("node: %v\n%s", err, out)
 	}

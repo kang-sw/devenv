@@ -52,7 +52,7 @@ var other = new E(["tag"]), plain = new E(["policy"]);
 hover(other); hover(plain);
 check("no title off a class tag", [other.hasAttribute("title"), plain.hasAttribute("title")], [false, false]);
 process.stdout.write(bad.join("\n"));`
-	out, err := exec.Command(node, "-e", script).CombinedOutput()
+	out, err := nodeScript(node, script).CombinedOutput()
 	if err != nil {
 		t.Fatalf("node: %v\n%s", err, out)
 	}
