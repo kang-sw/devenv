@@ -418,18 +418,8 @@
     "261112-feat-ws-dashboard-search-palette": {
       "registered_at": "2026-11-12T08:16:38Z"
     },
-    "261112-feat-ws-dashboard-slash-commands": {
-      "registered_at": "2026-11-12T06:15:32Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-12T06:59:29Z",
-        "impl": {
-          "branch": "impl/develop/rebel-zen-sprig"
-        }
-      }
+    "261112-feat-ws-dashboard-session-rewind": {
+      "registered_at": "2026-11-12T08:40:41Z"
     },
     "261112-feat-ws-mailbox-undelivered-notice": {
       "registered_at": "2026-11-12T07:07:22Z"
