@@ -152,26 +152,30 @@ func TestFSOutsideMintsOnlyForALinkTheSessionShows(t *testing.T) {
 		}
 	}
 	for why, path := range map[string]string{
-		"a path nothing links":             unlinked,
-		"a path a reply only mentions":     mentioned,
-		"a path another session links":     other,
-		"a path inside the root":           inside,
-		"a relative path":                  "board.txt",
-		"an empty path":                    "",
-		"a path that does not exist":       filepath.Join(o.away, "missing.txt"),
-		"the linked file's folder":         o.away,
-		"a path past the linked one":       board + string(filepath.Separator) + "x",
-		"a network path":                   "//server/share/board.txt",
-		"the linked path under a dot step": filepath.Join(o.away, "..", "site", "unlinked.txt"),
+		"a path nothing links":         unlinked,
+		"a path a reply only mentions": mentioned,
+		"a path another session links": other,
+		"a path inside the root":       inside,
+		"a relative path":              "board.txt",
+		"an empty path":                "",
+		"a path that does not exist":   filepath.Join(o.away, "missing.txt"),
+		"the linked file's folder":     o.away,
+		"a path past the linked one":   board + string(filepath.Separator) + "x",
+		"a network path":               "//server/share/board.txt",
 	} {
 		if code, a := o.open(t, o.local, path); code != http.StatusNotFound {
 			t.Errorf("%s: mint %q = %d %+v, want 404", why, path, code, a)
 		}
 	}
-	// The path matches as the renderer resolved it, in either slash
-	// direction and uncleaned.
-	if code, _ := o.open(t, o.local, filepath.Join(o.away, "..", "site", "board.txt")); code != http.StatusOK {
+	// The posted path is cleaned before it is matched: the linked file
+	// spelled through a dot step and a doubled separator still opens, and
+	// the same spelling of an unlinked file does not.
+	sep := string(filepath.Separator)
+	if code, _ := o.open(t, o.local, o.away+sep+".."+sep+"site"+sep+sep+"board.txt"); code != http.StatusOK {
 		t.Errorf("mint of the linked path spelled through a dot step = %d, want 200", code)
+	}
+	if code, _ := o.open(t, o.local, o.away+sep+".."+sep+"site"+sep+sep+"unlinked.txt"); code != http.StatusNotFound {
+		t.Errorf("mint of an unlinked path spelled through a dot step = %d, want 404", code)
 	}
 
 	// A LAN viewer holding the token is refused as if the route did not
@@ -401,7 +405,6 @@ func TestFSOutsideNeverOpensAnAlwaysDeniedPath(t *testing.T) {
 	} {
 		o.refused(t, "an always-denied path", o.write(t, o.home, name, "SECRET-DENIED"))
 	}
-	o.refused(t, "an always-denied path in another case", filepath.Join(o.home, ".SSH", "config"))
 	// Near misses open: the list is those folders, not their names.
 	for _, name := range []string{".sshx/notes.txt", ".config/other/notes.txt", "work/.ssh-notes/notes.txt", ".netrc.d/notes.txt"} {
 		if a := o.linked(t, o.write(t, o.home, name, "TEXT-NEAR")); a.Kind != "text" || a.Text != "TEXT-NEAR" {
@@ -424,6 +427,16 @@ func TestFSOutsideNeverOpensAnAlwaysDeniedPath(t *testing.T) {
 		if code, a := o.open(t, o.local, plain); code != http.StatusNotFound {
 			t.Errorf("mint of the path a denied link resolves to = %d %+v, want 404", code, a)
 		}
+		// The link itself is refused by the path as written alone: the
+		// file it resolves to is under no denied folder.
+		o.refused(t, "a denied path as written that resolves to a plain file", filepath.Join(o.home, ".ssh", "plain.txt"))
+		// The same file under a link written elsewhere opens, so the
+		// refusals above are the written path's, not the file's.
+		if os.Symlink(plain, filepath.Join(o.away, "elsewhere.txt")) == nil {
+			if a := o.linked(t, filepath.Join(o.away, "elsewhere.txt")); a.Text != "SECRET-PLAIN" {
+				t.Errorf("mint of the same file under a link written elsewhere = %+v, want its text", a)
+			}
+		}
 		o.refused(t, "a path through a symlinked denied folder", filepath.Join(folder, "id.txt"))
 	}
 	// A denied folder that is itself a symlink: the path as written under
@@ -436,14 +449,17 @@ func TestFSOutsideNeverOpensAnAlwaysDeniedPath(t *testing.T) {
 		o.refused(t, "the folder a denied folder resolves to", filepath.Join(vault, "token.txt"))
 	}
 
-	// A granted folder never serves a denied path either: the check runs
-	// on every read, not only on the link.
+	// The rule itself, which the mint and every read under a capability
+	// apply.
 	homes := []string{o.home}
 	for path, want := range map[string]bool{
-		filepath.Join(o.home, ".ssh"):                   true,
-		filepath.Join(o.home, ".ssh", "id_rsa"):         true,
-		filepath.Join(o.home, ".config", "gh", "x"):     true,
-		filepath.Join(o.home, ".netrc"):                 true,
+		filepath.Join(o.home, ".ssh"):               true,
+		filepath.Join(o.home, ".ssh", "id_rsa"):     true,
+		filepath.Join(o.home, ".config", "gh", "x"): true,
+		filepath.Join(o.home, ".netrc"):             true,
+		// Without regard to case: a case-insensitive volume reads it as
+		// the same folder.
+		filepath.Join(o.home, ".SSH", "id_rsa"):         true,
 		filepath.Join(o.home, ".config", "git", "x"):    false,
 		filepath.Join(o.home, ".cache", "x"):            false,
 		filepath.Join(o.away, ".ssh", "id_rsa"):         false,
@@ -474,6 +490,7 @@ func TestFSOutsideExemptsOnlyTheLinkedFile(t *testing.T) {
 		"page.html":        "<h1>HTML-PROJ</h1>",
 		"style.css":        "CSS-PROJ",
 		".report.html":     "<h1>HTML-DOT</h1>",
+		"sub/.report.html": "<h1>SECRET-NESTED</h1>",
 		".env":             "SECRET-ENV",
 		".secrets/key.css": "SECRET-KEY",
 		"debug.log":        "SECRET-LOG",
@@ -511,7 +528,9 @@ func TestFSOutsideExemptsOnlyTheLinkedFile(t *testing.T) {
 	if rec := o.read(dot.Frame); dot.Kind != "frame" || rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "HTML-DOT") {
 		t.Fatalf("mint of a dot-named linked file = %+v, GET = %d", dot, rec.Code)
 	}
-	siblings("a dot-named linked file", dot, []string{".report.html", "style.css"}, hidden)
+	// The exemption is the linked file's own path: a file of the same name
+	// further down stays refused.
+	siblings("a dot-named linked file", dot, []string{".report.html", "style.css"}, append([]string{"sub/.report.html"}, hidden...))
 	if env := o.linked(t, filepath.Join(proj, ".env")); env.Kind != "text" || env.Text != "SECRET-ENV" {
 		t.Errorf("mint of a dot-named text file the lead linked = %+v, want its text", env)
 	}
