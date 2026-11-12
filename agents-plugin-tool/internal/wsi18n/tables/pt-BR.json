@@ -24,6 +24,8 @@
   "chip.ack": "para confirmar",
   "chip.answer": "para responder",
   "chip.assumed": "presumido",
+  "chip.bulk.ack": "para confirmar · clique: tudo OK",
+  "chip.bulk.policy": "para responder · clique: escolher a recomendação em todos",
   "chip.fresh": "novo desde o embed anterior",
   "composer.aria": "Tab insere recuo. Pressione Escape e depois Tab para sair da caixa de mensagem.",
   "composer.send": "enviar",

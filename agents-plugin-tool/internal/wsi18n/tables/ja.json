@@ -24,6 +24,8 @@
   "chip.ack": "確認が必要",
   "chip.answer": "回答が必要",
   "chip.assumed": "仮定",
+  "chip.bulk.ack": "確認が必要 · クリック: すべて OK",
+  "chip.bulk.policy": "回答が必要 · クリック: すべて推奨案を選択",
   "chip.fresh": "前回の埋め込み以降の新規項目",
   "composer.aria": "Tab はインデントです。メッセージ欄から出るには Escape を押してから Tab を押してください。",
   "composer.send": "送信",

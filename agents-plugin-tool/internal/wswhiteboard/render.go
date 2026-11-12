@@ -373,6 +373,12 @@ type pageData struct {
 // a framed body's own frame script starts its own (doc-frame.js).
 const chgWire = "\nArray.prototype.forEach.call(document.querySelectorAll('.doc-body:not(.framed)'), wbWatchChanges);\n"
 
+// BulkChips reports that a topic bar's count chips render as buttons that
+// answer every item they count (form.js, button[data-bulk]): only on the
+// dashboard's board (RenderRegions, the framed render), where a staged answer
+// is sent; the static page and the embed keep them plain counts.
+func (p *pageData) BulkChips() bool { return p.DocFramed }
+
 // MermaidFile is the shared mermaid script's name, beside the page.
 func (p *pageData) MermaidFile() string {
 	name, _ := MermaidAsset()

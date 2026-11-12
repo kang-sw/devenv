@@ -2,6 +2,7 @@ package wswhiteboard
 
 import (
 	"fmt"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -268,5 +269,98 @@ func TestStemmedTopicPageNamesItsKey(t *testing.T) {
 	}
 	if !strings.Contains(string(formJS), `topic: n.getAttribute("data-topic")`) {
 		t.Fatalf("form.js no longer builds topic-note lines from data-topic")
+	}
+}
+
+// TestTopicCountChipsAreBulkButtonsOnTheDashboard pins where a topic bar's
+// count chips answer everything they count: on the dashboard board
+// (RenderRegions) each is a button naming its action; the static page and
+// the embed keep them plain counts with no bulk control.
+func TestTopicCountChipsAreBulkButtonsOnTheDashboard(t *testing.T) {
+	st := &State{}
+	mustApply(t, st, `<wb:topic name="t"><wb:add class="policy"><wb:title>p</wb:title><wb:option>x</wb:option><wb:option>y</wb:option><wb:recommend>b</wb:recommend></wb:add></wb:topic>`+addXML(ClassTechnical, "t", "a"))
+	regions, err := RenderRegions(BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantAll(t, string(regions.Board),
+		`<button type="button" class="chip policy bulk" data-bulk="policy" title="to answer · click: pick every recommendation"><svg class="i" aria-hidden="true"><use href="#i-ask"/></svg>1</button>`,
+		`<button type="button" class="chip ok bulk" data-bulk="ack" title="to acknowledge · click: mark all OK"><svg class="i" aria-hidden="true"><use href="#i-check"/></svg>1</button>`)
+	for name, layout := range layouts() {
+		out := render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r"}))
+		wantNone(t, out, `data-bulk=`, `class="chip policy bulk"`)
+		start := strings.Index(out, `<div class="tbar">`)
+		if start < 0 {
+			t.Fatalf("%s: no topic bar", name)
+		}
+		wantAll(t, out[start:], `<span class="chip policy" title="to answer">`, `<span class="chip ok" title="to acknowledge">`)
+	}
+}
+
+// bulkPrelude is a minimal board for form.js under node: elements answer
+// querySelectorAll and closest from fixed tables, the document hands out the
+// bulk chips alone, and the reply bar is absent, so build() returns early.
+const bulkPrelude = `
+var bad = [];
+function check(what, got, want) { if (JSON.stringify(got) !== JSON.stringify(want)) bad.push(what + ": got " + JSON.stringify(got) + ", want " + JSON.stringify(want)); }
+function E(cls, attrs, sel, up) { var me = this; this.attrs = attrs || {}; this.cls = cls || []; this.sel = sel || {}; this.up = up || {}; this.on = {};
+  this.classList = { contains: function (c) { return me.cls.indexOf(c) >= 0; } }; }
+E.prototype.getAttribute = function (k) { return k in this.attrs ? this.attrs[k] : null; };
+E.prototype.setAttribute = function (k, v) { this.attrs[k] = String(v); };
+E.prototype.querySelectorAll = function (s) { return this.sel[s] || []; };
+E.prototype.closest = function (s) { return this.up[s] || null; };
+E.prototype.addEventListener = function (type, fn) { (this.on[type] = this.on[type] || []).push(fn); };
+function opt(letter, rec, pressed) { return new E(["opt"].concat(rec ? ["rec"] : []), { "data-opt": letter, "aria-pressed": pressed ? "true" : "false" }); }
+function card(opts) { return new E(["card", "policy"], {}, { ".opt[data-opt]": opts }); }
+function pressed(c) { return c.sel[".opt[data-opt]"].filter(function (b) { return b.attrs["aria-pressed"] === "true"; }).map(function (b) { return b.attrs["data-opt"]; }); }
+function click(el) { (el.on.click || []).forEach(function (fn) { fn({ target: el }); }); }
+// Topic a: a card to pick by its recommendation, one the user already
+// picked otherwise, one with no recommendation; two acknowledgements, one
+// checked. Topic b: one of each, which a's chips must not touch.
+var a1 = card([opt("a"), opt("b", true)]), a2 = card([opt("a", true), opt("b"), opt("c", false, true)]), a3 = card([opt("a"), opt("b")]);
+var ak1 = { checked: false }, ak2 = { checked: true };
+var ta = new E(["topic"], {}, { ".card.policy[data-id]": [a1, a2, a3], ".arow[data-id] label.ack > input": [ak1, ak2] });
+var b1 = card([opt("a", true)]), bk1 = { checked: false };
+var tb = new E(["topic"], {}, { ".card.policy[data-id]": [b1], ".arow[data-id] label.ack > input": [bk1] });
+var pol = new E(["chip"], { "data-bulk": "policy" }, {}, { ".topic": ta }), ack = new E(["chip"], { "data-bulk": "ack" }, {}, { ".topic": ta });
+var document = { getElementById: function () { return null; },
+  querySelectorAll: function (s) { return s === "button[data-bulk]" ? [pol, ack] : []; },
+  addEventListener: function () {} };
+var window = {};
+`
+
+// TestTopicCountChipsStageEveryAnswer runs form.js's bulk chips under node:
+// the policy chip picks each open card's recommended option, leaves a card
+// the user already picked and a card with no recommendation alone, the ack
+// chip checks every acknowledgement, both stay inside their topic, a second
+// click changes nothing, and a second run of the script (a dashboard board
+// swap) wires no chip twice.
+func TestTopicCountChipsStageEveryAnswer(t *testing.T) {
+	data, err := assetFS.ReadFile("assets/form.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed; bulk chip cases not executed")
+	}
+	form := "(function () {\n" + string(data) + "})();\n"
+	script := bulkPrelude + form + form + `
+check("one click handler per chip across runs", [(pol.on.click || []).length, (ack.on.click || []).length], [1, 1]);
+click(pol);
+check("policy picks", [pressed(a1), pressed(a2), pressed(a3)], [["b"], ["c"], []]);
+check("acks untouched by the policy chip", [ak1.checked, ak2.checked], [false, true]);
+click(ack);
+check("ack checks", [ak1.checked, ak2.checked], [true, true]);
+check("other topic untouched", [pressed(b1), bk1.checked], [[], false]);
+click(pol);
+check("a second click", [pressed(a1), pressed(a2), pressed(a3)], [["b"], ["c"], []]);
+process.stdout.write(bad.join("\n"));`
+	out, err := exec.Command(node, "-e", script).CombinedOutput()
+	if err != nil {
+		t.Fatalf("node: %v\n%s", err, out)
+	}
+	if s := strings.TrimSpace(string(out)); s != "" {
+		t.Errorf("bulk chip cases failed:\n%s", s)
 	}
 }

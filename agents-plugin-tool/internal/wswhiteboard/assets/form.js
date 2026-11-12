@@ -65,6 +65,9 @@
         n.hidden = !n.hidden; if (!n.hidden) { grow(n); n.focus(); }
       });
     });
+    q("button[data-bulk]", root).forEach(function (chip) {
+      if (once(chip)) chip.addEventListener("click", function () { bulkAnswer(chip); });
+    });
     q("textarea.note, label.ack > input", root).forEach(function (el) {
       if (!once(el)) return;
       if (el.classList.contains("note")) el.addEventListener("input", function () { grow(el); });
@@ -72,6 +75,27 @@
       el.addEventListener("change", build);
     });
     inPageLinks(root);
+  }
+  // A topic bar's count chip, where it is a button (the dashboard board),
+  // answers every open item of its topic that it counts, as if each control
+  // were pressed: the ack chip checks each acknowledgement, the policy chip
+  // picks each card's recommended option. It only stages, like any pick; a
+  // card already picked keeps its pick, and a card with no recommendation
+  // is left for a real choice.
+  function bulkAnswer(chip) {
+    var topic = chip.closest(".topic");
+    if (!topic) return;
+    if (chip.getAttribute("data-bulk") === "ack") {
+      q(".arow[data-id] label.ack > input", topic).forEach(function (c) { c.checked = true; });
+    } else {
+      q(".card.policy[data-id]", topic).forEach(function (card) {
+        var opts = q(".opt[data-opt]", card);
+        if (opts.some(function (b) { return b.getAttribute("aria-pressed") === "true"; })) return;
+        var rec = opts.filter(function (b) { return b.classList.contains("rec"); })[0];
+        if (rec) rec.setAttribute("aria-pressed", "true");
+      });
+    }
+    build();
   }
   // Size a note textarea to its content; scrollHeight is 0 while hidden.
   function grow(n) { n.style.height = "auto"; if (n.scrollHeight) n.style.height = n.scrollHeight + "px"; }

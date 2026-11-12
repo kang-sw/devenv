@@ -24,6 +24,8 @@
   "chip.ack": "to acknowledge",
   "chip.answer": "to answer",
   "chip.assumed": "assumed",
+  "chip.bulk.ack": "to acknowledge · click: mark all OK",
+  "chip.bulk.policy": "to answer · click: pick every recommendation",
   "chip.fresh": "new since the previous embed",
   "composer.aria": "Tab indents. Press Escape, then Tab, to leave the message box.",
   "composer.send": "send",

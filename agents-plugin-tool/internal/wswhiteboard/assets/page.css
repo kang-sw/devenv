@@ -116,6 +116,12 @@ a { color: var(--wb-primary); }
 .chip.ok { background: var(--wb-technical); color: var(--wb-on-technical); }
 .chip.fresh { background: var(--wb-now); color: var(--wb-on-now); }
 .chip.fresh .new { background: currentColor; }
+/* A topic bar's count chip on the dashboard board is a button that answers
+   every item it counts (form.js bulkAnswer). */
+button.chip.bulk { border: 0; cursor: pointer; transition: filter .12s, box-shadow .12s; }
+button.chip.bulk:hover { filter: brightness(1.12); box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 35%, transparent); }
+button.chip.bulk:active { filter: brightness(.95); }
+button.chip.bulk:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 2px; }
 
 /* layout */
 .grid { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 18px; align-items: start; }
