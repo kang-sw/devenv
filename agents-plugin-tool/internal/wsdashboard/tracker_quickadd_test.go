@@ -174,7 +174,7 @@ func TestTrackerPropertyCardLabelPicker(t *testing.T) {
 	}
 	act := trackerFn(t, `function menuAct\(k, a\)`, false)
 	for _, want := range []string{
-		"case 'm-label': MN.lab = a.getAttribute('data-label'); return commit([['item.edit', { item: id, labels: labelToggled(it.labels, MN.lab) }]]);",
+		"case 'm-label': MN.lab = a.getAttribute('data-label'); return labelWrite(it, MN.lab);",
 		"case 'm-ladd': closeMenu(false); return openDialog('slabel', {});",
 	} {
 		if !strings.Contains(act, want) {
@@ -194,7 +194,7 @@ func TestTrackerPropertyCardLabelPicker(t *testing.T) {
 		trackerFn(t, `function dataAttrs\(data\)`, false) + trackerFn(t, `function mi\(act, label, data, o\)`, false) + trackerFn(t, `function msep\(\)`, true) +
 		trackerFn(t, `function labelOf\(id\)`, true) + trackerFn(t, `function labelChip\(l, act, extra\)`, false) + trackerFn(t, `function labelChips\(it, act\)`, false) +
 		trackerFn(t, `function labelsProp\(it\)`, false) + trackerFn(t, `function labelToggle\(l, on, act, aria\)`, false) +
-		trackerFn(t, `function labelStepHtml\(it\)`, false) + trackerFn(t, `function labelToggled\(cur, lid\)`, false)
+		trackerFn(t, `var LW = `, true) + trackerFn(t, `function labelStepHtml\(it\)`, false) + trackerFn(t, `function labelToggled\(cur, lid\)`, false)
 	runTrackerCases(t, "property card labels", trackerCheckJS+`
 var VS = { viewer: { member: 'me', admin: false }, labels: [{ id: 'L1', name: 'docs', color: '#111111' }, { id: 'L2', name: 'dev', color: '#222222' }] }, editor = true;
 function wsT(k) { return k; }
@@ -213,10 +213,57 @@ check('the step lists every label as a toggle chip, the picked one on, focus on 
 check('a toggle adds in list order', labelToggled(['L2'], 'L1'), ['L1', 'L2']);
 check('a toggle removes', labelToggled(['L1', 'L2'], 'L1'), ['L2']);
 check('a toggle drops labels the list no longer holds', labelToggled(['gone', 'L1'], 'L2'), ['L1', 'L2']);
+LW = { item: 'i1', labels: ['L1', 'L2'], dirty: false };
+check('the step draws the pick still being written', has(labelStepHtml(it), 'class="chip lbl on" data-act="m-label" data-label="L1"'), true);
+LW = null;
 VS.labels = [];
 check('an empty store says so, no add for a non-admin', labelStepHtml(it), '<p class="mempty">js.tk.labels.empty</p>');
 VS.viewer.admin = true;
 check('an admin gets the label dialog', has(labelStepHtml(it), 'data-act="m-ladd"'), true);
+done();
+`)
+}
+
+// TestTrackerLabelStepQuickToggles pins the labels step's writes
+// (tracker.js labelWrite, labelFlush): a toggle while an earlier write is
+// in flight builds on that write's pick, not on the item's lagging labels,
+// and goes as one write of the latest pick once the earlier one returns, so
+// quick toggles accumulate in order; a refused write drops the pick and the
+// next toggle builds on the item again.
+func TestTrackerLabelStepQuickToggles(t *testing.T) {
+	runTrackerCases(t, "label step quick toggles", trackerCheckJS+`
+var VS = { labels: [{ id: 'L1' }, { id: 'L2' }, { id: 'L3' }] }, MN = { kind: 'item', step: 'labels' }, sent = [], redraws = 0;
+function commit(events, then, prep, fail) { sent.push({ labels: events[0][1].labels, then: then, fail: fail }); }
+function labelStepRedraw() { redraws++; }
+`+trackerFn(t, `function labelToggled\(cur, lid\)`, false)+trackerFn(t, `var LW = `, true)+trackerFn(t, `function labelWrite\(it, lid\)`, false)+trackerFn(t, `function labelFlush\(w\)`, false)+`
+function labels() { return sent.map(function (x) { return x.labels; }); }
+var it = { id: 'i1', labels: [] };
+labelWrite(it, 'L1');
+check('the first toggle writes at once', labels(), [['L1']]);
+labelWrite(it, 'L2');
+labelWrite(it, 'L3');
+check('toggles while it is in flight wait, each drawn', [labels().length, redraws, LW.labels], [1, 2, ['L1', 'L2', 'L3']]);
+it.labels = ['L1'];
+sent[0].then();
+check('then they go as one write of the latest pick', labels(), [['L1'], ['L1', 'L2', 'L3']]);
+labelWrite(it, 'L1');
+check('a toggle during that write builds on its pick', LW.labels, ['L2', 'L3']);
+it.labels = ['L1', 'L2', 'L3'];
+sent[1].then();
+it.labels = ['L2', 'L3'];
+sent[2].then();
+check('every pick written in order, nothing pending after', [labels(), LW], [[['L1'], ['L1', 'L2', 'L3'], ['L2', 'L3']], null]);
+labelWrite(it, 'L1');
+labelWrite(it, 'L2');
+redraws = 0;
+sent[3].fail();
+check('a refused write drops the pick and draws the item again', [labels().length, LW, redraws], [4, null, 1]);
+labelWrite(it, 'L3');
+check('the next toggle builds on the item', sent[4].labels, ['L2']);
+labelWrite({ id: 'i2', labels: ['L1'] }, 'L2');
+check('another item writes at once on its own labels', sent[5].labels, ['L1', 'L2']);
+sent[4].then();
+check('the earlier item\'s return leaves the newer pick alone', LW && LW.item, 'i2');
 done();
 `)
 }

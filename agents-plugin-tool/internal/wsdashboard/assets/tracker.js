@@ -3590,9 +3590,9 @@
   // resolves it. `then(results)` runs after a written batch; a refused one keeps the
   // dialog, the menu, or the inline input open and toasts why.
   // `prep(results)` runs on success before the re-render (the composer drafts clear only then).
-  function commit(events, then, prep) {
+  function commit(events, then, prep, fail) {
     AD.dispatch(ui.store, events.map(function (e) { return { type: e[0], payload: e[1], origin: e[2] || 'human' }; }), function (res) {
-      if (!res || !res.ok) { toast(esc((res && res.error) || wsT("js.tk.toast.refused"))); return; }
+      if (!res || !res.ok) { toast(esc((res && res.error) || wsT("js.tk.toast.refused"))); if (fail) fail(); return; }
       if (prep) prep(res.results || []);
       wrote(res.results || []);
       if (then) then(res.results || []);
@@ -4220,7 +4220,7 @@
         return commit([['item.edit', { item: id, due: dv }]]);
       }
       case 'm-due-clear': return commit([['item.edit', { item: id, due: null }]]);
-      case 'm-label': MN.lab = a.getAttribute('data-label'); return commit([['item.edit', { item: id, labels: labelToggled(it.labels, MN.lab) }]]);
+      case 'm-label': MN.lab = a.getAttribute('data-label'); return labelWrite(it, MN.lab);
       case 'm-ladd': closeMenu(false); return openDialog('slabel', {});
       case 'm-cc': return commit([['item.cc', { item: id, member: a.getAttribute('data-to') }]]);
       case 'm-handoff': {
@@ -4904,7 +4904,7 @@
   // (wrote -> labelStepRedraw). With no labels in the store it says so, and an admin gets the store
   // settings' label dialog. The edit mode's picker keeps its own draft and save.
   function labelStepHtml(it) {
-    var ls = VS.labels || [], cur = it.labels || [];
+    var ls = VS.labels || [], cur = LW && LW.item === it.id ? LW.labels : it.labels || [];
     if (!ls.length) return '<p class="mempty">' + wsT("js.tk.labels.empty") + '</p>' + (VS.viewer.admin ? msep() + mi('m-ladd', esc(wsT("js.tk.new.labels.add")), {}, { icon: 'plus' }) : '');
     return '<div class="lpick mlpick" role="group" aria-label="' + esc(wsT("js.tk.form.labels")) + '">' + ls.map(function (l, i) {
       var on = cur.indexOf(l.id) >= 0;
@@ -4915,6 +4915,28 @@
   function labelToggled(cur, lid) {
     var has = (cur || []).indexOf(lid) >= 0;
     return (VS.labels || []).map(function (l) { return l.id; }).filter(function (x) { return x === lid ? !has : (cur || []).indexOf(x) >= 0; });
+  }
+  // The labels step's writes. A toggle builds on the pick still being written (LW), not on
+  // it.labels, which lags until the write returns: built on it.labels, a second quick toggle would
+  // write a list without the first and undo it. While one write is in flight the next toggles only
+  // move the pick (the step draws it) and go as one write of the latest pick once it returns, so the
+  // writes stay in order. A refused write drops the pick, and the step draws the item again.
+  var LW = null;
+  function labelWrite(it, lid) {
+    if (LW && LW.item === it.id) { LW.labels = labelToggled(LW.labels, lid); LW.dirty = true; return labelStepRedraw(); }
+    LW = { item: it.id, labels: labelToggled(it.labels, lid), dirty: false };
+    labelFlush(LW);
+  }
+  function labelFlush(w) {
+    w.dirty = false;
+    commit([['item.edit', { item: w.item, labels: w.labels }]], function () {
+      if (LW !== w) return;
+      if (w.dirty) labelFlush(w); else LW = null;
+    }, null, function () {
+      if (LW !== w) return;
+      LW = null;
+      if (MN && MN.kind === 'item' && MN.step === 'labels') labelStepRedraw();
+    });
   }
   // The labels step after a write: the property card drew again, so the step re-anchors on its new
   // button, redraws over the written item, and keeps focus on the toggled chip. It closes when the
