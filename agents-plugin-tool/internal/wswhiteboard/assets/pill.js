@@ -17,14 +17,17 @@
 
   // An item's draft state, read from the same form controls form.js builds
   // the reply from: a pick, a ticked ack, or a non-empty note is a reply
-  // segment ("responded"); a note alone also counts as "noted".
+  // segment ("responded"); a note alone also counts as "noted". Item fields
+  // keep their class attribute, so each control is selected by what a field
+  // cannot carry (a data-* attribute, a textarea or label element), as
+  // form.js does.
   function noted(el) {
-    var n = el.querySelector(".note");
+    var n = el.querySelector("textarea.note");
     return !!(n && n.value.trim());
   }
   function responded(el) {
-    var box = el.querySelector(".ack input");
-    return !!(el.querySelector('.opt[aria-pressed="true"]') || (box && box.checked) || noted(el));
+    var box = el.querySelector("label.ack > input");
+    return !!(el.querySelector('.opt[data-opt][aria-pressed="true"]') || (box && box.checked) || noted(el));
   }
   // The dashboard marks an item it already sent, or holds, a reply for with
   // sent-sent / sent-held; that item is no longer open either. A standalone

@@ -35,8 +35,8 @@ function IntersectionObserver(cb) { fire = cb; this.observe = function () {}; th
 function getComputedStyle() { return { overflowY: "visible" }; }
 function wsT(k) { return k; }
 function item(id, top, state) { var e = new E("div"); e.attrs.id = id; e.top = top;
-  if (state === "pick" || state === "note") e.q['.opt[aria-pressed="true"]'] = [new E("button")];
-  if (state === "note") { var n = new E("textarea"); n.value = "x"; e.q[".note"] = [n]; }
+  if (state === "pick" || state === "note") e.q['.opt[data-opt][aria-pressed="true"]'] = [new E("button")];
+  if (state === "note") { var n = new E("textarea"); n.value = "x"; e.q["textarea.note"] = [n]; }
   return e; }
 // Above the view: open a1, answered with a note a2, open a3. Below: answered
 // b1, open b2.

@@ -140,10 +140,10 @@ func TestMarkdownItemFieldHTML(t *testing.T) {
 }
 
 // TestMarkdownItemFieldCannotPoseAsAControl pins the split the answer
-// scripts rely on: an item field keeps its class attribute, so form.js and
-// live.js select their controls only by what a field cannot carry (data-*
-// and aria-pressed attributes, textarea, button, and label elements), and a
-// field that copies a control's class gets none of them.
+// scripts rely on: an item field keeps its class attribute, so form.js,
+// live.js, and pill.js select their controls only by what a field cannot
+// carry (data-* and aria-pressed attributes, textarea, button, and label
+// elements), and a field that copies a control's class gets none of them.
 func TestMarkdownItemFieldCannotPoseAsAControl(t *testing.T) {
 	forged := `<div class="note opt card policy arow ack tnote wbv" data-opt="z" data-id="9" data-topic="t" aria-pressed="true">` +
 		`<textarea class="note">n</textarea><button class="note-toggle">p</button><label class="ack"><input type="checkbox"></label></div>`
@@ -152,12 +152,12 @@ func TestMarkdownItemFieldCannotPoseAsAControl(t *testing.T) {
 		wantAll(t, field, `<div class="note opt card policy arow ack tnote wbv">`)
 		wantNone(t, field, `data-opt="z"`, "data-id", "data-topic", `aria-pressed="true"`, "<textarea", "<button", "<label")
 	}
-	for _, name := range []string{"form.js", "live.js"} {
+	for _, name := range []string{"form.js", "live.js", "pill.js"} {
 		js, err := embeddedAsset(name)
 		if err != nil {
 			t.Fatal(err)
 		}
-		wantNone(t, string(js), `querySelector(".note")`, `q(".note`, `".ack input"`, `q(".opt"`, `q(".card.policy")`, `q(".arow")`, `q(".tnote")`, `querySelector(".tnote")`, `".wbv:not`, `a.classList.contains("note")`)
+		wantNone(t, string(js), `querySelector(".note")`, `'.opt[aria-pressed`, `q(".note`, `".ack input"`, `q(".opt"`, `q(".card.policy")`, `q(".arow")`, `q(".tnote")`, `querySelector(".tnote")`, `".wbv:not`, `a.classList.contains("note")`)
 	}
 }
 
