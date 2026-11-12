@@ -2,11 +2,9 @@
  * Lead session key persistence across resume, and adoption of the key a lead
  * revives with (261007, bridge.ts "Lead key persistence").
  *
- * The production `startBridge` runs against a fake ws-mcp launcher (a Python
- * stdio JSON-RPC loop) that mints `minted-<n>` keys, accepts a configured set
- * of keys for ferrule's hidden `relogin_session_key`, refuses every other
- * re-login, and journals every tools/call so a test can assert which keys
- * were re-logged in, minted, or forwarded. The trigger for reuse is the
+ * The production `startBridge` runs against the fake ws-mcp launcher of
+ * fixtures/lead-key-bridge.ts, which journals every tools/call so a test can
+ * assert which keys were re-logged in, minted, or forwarded. The trigger for reuse is the
  * `ws-pi-lead-key` session entry, not `SessionStartEvent.reason`: a reopened
  * file (`pi -c`, `-r`, `--session`) starts with `reason: "startup"`,
  * `/reload` re-runs the bootstrap in the same session, and an in-process
@@ -15,135 +13,21 @@
  */
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, writeFileSync, existsSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
+  HOSTED_SESSION_HELD_MARKER,
   LEAD_KEY_ENTRY,
   buildDefaultKeyChangedLine,
+  harnessSessionArgs,
   reloginLeadKey,
   restoreLeadKey,
   revivedKeyToAdopt,
-  startBridge,
-  type BridgeOptions,
 } from "../src/bridge.ts";
 import { ADAPTER_MESSAGE_LABEL } from "../src/adapter-label.ts";
 import { buildLeadCompactionSummary, renderLeadProse } from "../src/lead-compaction.ts";
-import { DELEGATION_ENV } from "../src/delegation-policy.ts";
 import type { McpToolCallResult } from "../src/mcp-stdio-client.ts";
+import { boot, heldRefusal, leadKeyEntry, type Call, type Harness } from "./fixtures/lead-key-bridge.ts";
 
-const TEST_DIR = dirname(fileURLToPath(import.meta.url));
-const RUNTIME_JSON = join(TEST_DIR, "..", "runtime.json");
-const BUNDLED_RUNTIME = JSON.parse(readFileSync(RUNTIME_JSON, "utf8")) as { plugin_version: string };
 const SENTINEL = "obsidian-latch";
-
-interface LauncherConfig {
-  /** Keys ferrule's re-login accepts; every other re-login is refused. */
-  accept?: string[];
-  /** Keys whose workflow_manual call fails. */
-  failManual?: string[];
-  /** When true, playbook.read fails so the bridge takes the verbatim workflow_manual path. */
-  noSnapshot?: boolean;
-}
-
-interface Call { name: string; args: Record<string, unknown> }
-
-function writeLauncher(directory: string, config: LauncherConfig): { launcher: string; calls: () => Call[] } {
-  const launcher = join(directory, "launcher.py");
-  const callsFile = join(directory, "calls.jsonl");
-  const countFile = join(directory, "mint-count.txt");
-  writeFileSync(launcher, `import json,sys,os
-accept=set(${JSON.stringify(config.accept ?? [])})
-fail_manual=set(${JSON.stringify(config.failManual ?? [])})
-no_snapshot=${config.noSnapshot ? "True" : "False"}
-calls_file=${JSON.stringify(callsFile)}
-count_file=${JSON.stringify(countFile)}
-def ok(t): return {'isError':False,'content':[{'type':'text','text':t}]}
-def err(t): return {'isError':True,'content':[{'type':'text','text':t}]}
-for line in sys.stdin:
- q=json.loads(line); m=q['method']
- if m=='initialize': r={'serverInfo':{'version':${JSON.stringify(BUNDLED_RUNTIME.plugin_version)}},'capabilities':{}}
- elif m=='tools/list': r={'tools':[{'name':n,'description':n,'inputSchema':{'type':'object','properties':{'session_key':{'type':'string'}},'required':['session_key']}} for n in ['ferrule','workflow_manual','playbook.read','config.resolve_agent']]}
- elif m=='tools/call':
-  n=q['params']['name']; a=q['params'].get('arguments') or {}
-  with open(calls_file,'a') as f: f.write(json.dumps({'name':n,'args':a})+'\\n')
-  if n=='ferrule':
-   k=a.get('relogin_session_key')
-   if k is not None: r=ok(json.dumps({'session_key':k})) if k in accept else err('session bootstrap: relogin_session_key %r is not a known session key'%k)
-   else:
-    c=int(open(count_file).read()) if os.path.exists(count_file) else 0
-    c+=1; open(count_file,'w').write(str(c)); r=ok(json.dumps({'session_key':'minted-%d'%c}))
-  elif n=='playbook.read': r=err('no snapshot') if no_snapshot else ok('# Workflow Manual\\nstatic body')
-  elif n=='config.resolve_agent': r=ok(json.dumps({'resolved_from':'default'}))
-  elif n=='workflow_manual':
-   k=a.get('session_key')
-   r=err('unknown_session') if k in fail_manual else ok('# Workflow Manual\\nstatic body\\n\\n## Session Key\\n%s\\n\\n## Session State\\n### Todos\\n(no todos)'%k)
-  else: r=err('unknown tool')
- print(json.dumps({'jsonrpc':'2.0','id':q['id'],'result':r}),flush=True)
-`);
-  return {
-    launcher,
-    calls: () => (existsSync(callsFile) ? readFileSync(callsFile, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l) as Call) : []),
-  };
-}
-
-const leadKeyEntry = (sessionId: string, key: string) => ({ type: "custom", customType: LEAD_KEY_ENTRY, data: { sessionId, key } });
-
-interface Harness {
-  handle: Awaited<ReturnType<typeof startBridge>>;
-  tools: Map<string, any>;
-  appended: Array<{ type: string; customType: string; data: unknown }>;
-  notices: Array<{ message: string; level: string }>;
-  calls: () => Call[];
-  relogins: () => string[];
-  mints: () => number;
-  restore: () => void;
-}
-
-async function boot(config: LauncherConfig, options: Partial<BridgeOptions> & { entries?: unknown[]; sessionId?: string; policy?: Record<string, unknown> }, reuse?: { directory: string; calls: () => Call[]; launcher: string }): Promise<Harness> {
-  const directory = reuse?.directory ?? mkdtempSync(join(tmpdir(), "ws-pi-lead-key-"));
-  const { launcher, calls } = reuse ?? writeLauncher(directory, config);
-  const tools = new Map<string, any>();
-  const appended: Harness["appended"] = [];
-  const notices: Harness["notices"] = [];
-  const pi = {
-    registerTool: (definition: any) => tools.set(definition.name, definition),
-    on() {},
-    appendEntry: (customType: string, data: unknown) => appended.push({ type: "custom", customType, data }),
-  } as unknown as ExtensionAPI;
-  const oldRole = process.env.WS_PI_SPAWN_ROLE;
-  const oldPolicy = process.env[DELEGATION_ENV];
-  delete process.env.WS_PI_SPAWN_ROLE;
-  if (options.policy) process.env[DELEGATION_ENV] = JSON.stringify(options.policy); else delete process.env[DELEGATION_ENV];
-  const restore = () => {
-    if (oldRole === undefined) delete process.env.WS_PI_SPAWN_ROLE; else process.env.WS_PI_SPAWN_ROLE = oldRole;
-    if (oldPolicy === undefined) delete process.env[DELEGATION_ENV]; else process.env[DELEGATION_ENV] = oldPolicy;
-  };
-  const before = calls().length;
-  try {
-    const handle = await startBridge(pi, {
-      launcherPath: launcher,
-      pluginDir: directory,
-      runtimeJsonPath: RUNTIME_JSON,
-      cwd: directory,
-      toolPreviewTuiRef: { current: undefined },
-      ui: { notify: (message: string, level = "info") => notices.push({ message, level }) } as never,
-      sessionEntries: options.entries,
-      sessionId: options.sessionId,
-    });
-    const sinceBoot = () => calls().slice(before);
-    return {
-      handle, tools, appended, notices, calls: sinceBoot, restore,
-      relogins: () => sinceBoot().filter((c) => c.name === "ferrule" && "relogin_session_key" in c.args).map((c) => c.args.relogin_session_key as string),
-      mints: () => sinceBoot().filter((c) => c.name === "ferrule" && !("relogin_session_key" in c.args)).length,
-    };
-  } catch (error) {
-    restore();
-    throw error;
-  }
-}
 
 const ctx = { sessionManager: { buildContextEntries: () => [] } };
 const texts = (content: any[]): string[] => content.filter((item) => item.type === "text").map((item) => item.text as string);
@@ -200,12 +84,35 @@ describe("reloginLeadKey", () => {
     assert.equal(same.ok, true);
     assert.deepEqual(seen, [["ferrule", { root: "/root", format: "json", relogin_session_key: "k" }]]);
     const refused = await reloginLeadKey(async () => ({ isError: true, content: [{ type: "text", text: "nope" }] }), "/root", "k");
-    assert.deepEqual(refused, { ok: false, reason: "nope" });
+    assert.deepEqual(refused, { ok: false, reason: "nope", held: false });
     const threw = await reloginLeadKey(async () => { throw new Error("transport down"); }, "/root", "k");
-    assert.deepEqual(threw, { ok: false, reason: "transport down" });
+    assert.deepEqual(threw, { ok: false, reason: "transport down", held: false });
     const other = await reloginLeadKey(async () => ok(JSON.stringify({ session_key: "z" })), "/root", "k");
     assert.equal(other.ok, false);
     assert.match((other as { reason: string }).reason, /returned z instead of k/);
+    assert.equal((other as { held: boolean }).held, false);
+  });
+
+  test("a refusal carrying the hosted-session marker is held, from an error result or a thrown call", async () => {
+    const text = heldRefusal("k");
+    assert.ok(text.includes(HOSTED_SESSION_HELD_MARKER));
+    assert.deepEqual(await reloginLeadKey(async () => ({ isError: true, content: [{ type: "text", text }] }), "/root", "k"), { ok: false, reason: text, held: true });
+    assert.deepEqual(await reloginLeadKey(async () => { throw new Error(text); }, "/root", "k"), { ok: false, reason: text, held: true });
+  });
+
+  test("the harness report rides along with the re-login arguments", async () => {
+    const seen: Array<Record<string, unknown>> = [];
+    await reloginLeadKey(async (_name, args) => { seen.push(args); return ok(JSON.stringify({ session_key: "k" })); }, "/root", "k", { harness_session: "/s/a.jsonl", harness_cwd: "/root/sub" });
+    assert.deepEqual(seen, [{ root: "/root", format: "json", relogin_session_key: "k", harness_session: "/s/a.jsonl", harness_cwd: "/root/sub" }]);
+  });
+});
+
+describe("harnessSessionArgs", () => {
+  test("both fields with a session file and an absolute directory, neither otherwise", () => {
+    assert.deepEqual(harnessSessionArgs("/s/a.jsonl", "/work/app"), { harness_session: "/s/a.jsonl", harness_cwd: "/work/app" });
+    assert.deepEqual(harnessSessionArgs(undefined, "/work/app"), {});
+    assert.deepEqual(harnessSessionArgs("", "/work/app"), {});
+    assert.deepEqual(harnessSessionArgs("/s/a.jsonl", "work/app"), {});
   });
 });
 
@@ -290,6 +197,91 @@ describe("lead key persistence at bootstrap", () => {
       assert.equal(mint?.args.capability, "delegate");
       assert.equal(mint?.args.parent_session_key, "lead-key");
       assert.deepEqual(h.appended, []);
+    } finally { h.handle.shutdown(); h.restore(); }
+  });
+});
+
+const SESSION_FILE = "/sessions/2026/lead-session-1.jsonl";
+const ferruleArgs = (calls: Call[]) => calls.filter((c) => c.name === "ferrule").map((c) => c.args);
+
+describe("harness session report at login", () => {
+  test("the fresh mint, the recorded-key re-login, and the revive re-login each carry the session file and the harness directory", async () => {
+    const fresh = await boot({}, { entries: [], sessionId: "sess-1", sessionFile: SESSION_FILE });
+    try {
+      assert.notEqual(fresh.cwd, SESSION_FILE);
+      assert.deepEqual(ferruleArgs(fresh.calls()), [{ root: fresh.cwd, format: "json", harness_session: SESSION_FILE, harness_cwd: fresh.cwd }]);
+    } finally { fresh.handle.shutdown(); fresh.restore(); }
+
+    const resumed = await boot({ accept: ["original-key", "revived-key"] }, { entries: [leadKeyEntry("sess-1", "original-key")], sessionId: "sess-1", sessionFile: SESSION_FILE });
+    try {
+      await resumed.tools.get("ws__workflow_manual").execute("one", { session_key: "revived-key" }, undefined, undefined, ctx);
+      assert.equal(resumed.handle.defaultSessionKeyRef.current, "revived-key");
+      assert.deepEqual(ferruleArgs(resumed.calls()), [
+        { root: resumed.cwd, format: "json", relogin_session_key: "original-key", harness_session: SESSION_FILE, harness_cwd: resumed.cwd },
+        { root: resumed.cwd, format: "json", relogin_session_key: "revived-key", harness_session: SESSION_FILE, harness_cwd: resumed.cwd },
+      ]);
+    } finally { resumed.handle.shutdown(); resumed.restore(); }
+  });
+
+  test("without a session file no login carries either field", async () => {
+    const h = await boot({ accept: ["original-key"] }, { entries: [leadKeyEntry("sess-1", "stale-key")], sessionId: "sess-1" });
+    try {
+      assert.deepEqual(ferruleArgs(h.calls()), [
+        { root: h.cwd, format: "json", relogin_session_key: "stale-key" },
+        { root: h.cwd, format: "json" },
+      ]);
+    } finally { h.handle.shutdown(); h.restore(); }
+  });
+
+  test("a child process minting under its policy sends exactly its policy arguments, never the harness session", async () => {
+    const policy = { version: 1, depth: 1, maxDepth: 2, tools: ["ws__workflow_manual"], authority: "delegate", parentSessionKey: "lead-key" };
+    const h = await boot({}, { entries: [], sessionId: "sess-1", sessionFile: SESSION_FILE, policy });
+    try {
+      assert.deepEqual(ferruleArgs(h.calls()), [{ root: h.cwd, format: "json", capability: "delegate", parent_session_key: "lead-key" }]);
+    } finally { h.handle.shutdown(); h.restore(); }
+  });
+});
+
+describe("a session the dashboard hosted", () => {
+  test("resumed in a terminal, it re-logs in with the hosted key its entry recorded and mints nothing", async () => {
+    // The entry a hosted bootstrap appends (lead-key-hosted.test.ts); no hosted variables are set here.
+    const h = await boot({ accept: ["hosted-key"] }, { entries: [leadKeyEntry("sess-1", "hosted-key")], sessionId: "sess-1", sessionFile: SESSION_FILE });
+    try {
+      assert.equal(h.handle.defaultSessionKeyRef.current, "hosted-key");
+      assert.deepEqual(h.relogins(), ["hosted-key"]);
+      assert.equal(h.mints(), 0);
+      assert.deepEqual(h.appended, []);
+    } finally { h.handle.shutdown(); h.restore(); }
+  });
+});
+
+describe("a recorded key held by a hosted session", () => {
+  test("mints nothing, appends nothing, leaves the session keyless, and warns once with ws-mcp's refusal", async () => {
+    const h = await boot({ held: ["hosted-key"] }, { entries: [leadKeyEntry("sess-1", "hosted-key")], sessionId: "sess-1", sessionFile: SESSION_FILE });
+    try {
+      assert.equal(ferruleArgs(h.calls()).length, 1, "exactly the one re-login");
+      assert.deepEqual(h.relogins(), ["hosted-key"]);
+      assert.equal(h.mints(), 0);
+      assert.deepEqual(h.appended, [], "the recorded entry stays the session's newest");
+      assert.equal(h.handle.defaultSessionKeyRef.current, undefined);
+      assert.ok(!h.calls().some((c) => c.name === "workflow_manual"), "a keyless bootstrap fetches no snapshot");
+      const warnings = h.notices.filter((n) => n.level === "warning");
+      assert.equal(warnings.length, 1, warnings.map((w) => w.message).join(" | "));
+      assert.ok(warnings[0]!.message.includes(heldRefusal("hosted-key")), warnings[0]!.message);
+      assert.match(warnings[0]!.message, /No key was minted\.$/);
+    } finally { h.handle.shutdown(); h.restore(); }
+  });
+
+  test("a revive with a held key adopts nothing and warns with ws-mcp's refusal", async () => {
+    const h = await boot({ held: ["hosted-key"] }, { entries: [], sessionId: "sess-1" });
+    try {
+      const revived = await h.tools.get("ws__workflow_manual").execute("one", { session_key: "hosted-key" }, undefined, undefined, ctx);
+      assert.ok(!texts(revived.content).some((t) => t.startsWith(ADAPTER_MESSAGE_LABEL)));
+      assert.equal(h.handle.defaultSessionKeyRef.current, "minted-1");
+      assert.equal(h.appended.length, 1, "only the bootstrap mint was recorded");
+      const warnings = h.notices.filter((n) => n.level === "warning");
+      assert.equal(warnings.length, 1);
+      assert.ok(warnings[0]!.message.includes(heldRefusal("hosted-key")), warnings[0]!.message);
     } finally { h.handle.shutdown(); h.restore(); }
   });
 });
