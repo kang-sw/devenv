@@ -174,14 +174,41 @@ func TestStreamAndHistoryFollowTheCookie(t *testing.T) {
 
 func TestGoBuiltStringsFollowTheLanguage(t *testing.T) {
 	usage := &wslive.TokenUsage{Input: 1200, Output: 300, CacheRead: 5000}
-	if got := tokenText("en", usage); got != "in 1.2k · out 300 · cache 5.0k" {
+	if got := tokenText("en", 1, usage); got != "prompt 6.2k · output 300" {
 		t.Fatalf("tokenText en = %q", got)
 	}
-	if got := tokenText("ko", usage); got != "입력 1.2k · 출력 300 · 캐시 5.0k" {
+	if got := tokenText("ko", 1, usage); got != "프롬프트 6.2k · 출력 300" {
 		t.Fatalf("tokenText ko = %q", got)
 	}
-	if got := tokenText("xx", usage); got != tokenText("en", usage) {
+	if got := tokenText("xx", 1, usage); got != tokenText("en", 1, usage) {
 		t.Fatalf("an unsupported language renders English, got %q", got)
+	}
+	if got := tokenText("en", 1, nil); got != "" {
+		t.Fatalf("tokenText nil = %q", got)
+	}
+	if got := tokenTitle("en", 6, nil); got != "" {
+		t.Fatalf("tokenTitle nil = %q", got)
+	}
+	// Several requests lead with their count; a cache write trails the
+	// prompt as +N, and the title names every part with exact counts.
+	written := &wslive.TokenUsage{Input: 14, Output: 1_402, CacheRead: 708_800, CacheWrite: 11_698}
+	if got := tokenText("ko", 6, written); got != "호출 6 · 프롬프트 721k +11.7k · 출력 1.4k" {
+		t.Fatalf("tokenText ko with calls = %q", got)
+	}
+	if got := tokenText("en", 6, written); got != "6 calls · prompt 721k +11.7k · output 1.4k" {
+		t.Fatalf("tokenText en with calls = %q", got)
+	}
+	if got := tokenTitle("ko", 6, written); got != "모델 호출 6회 · 프롬프트 720,512 (입력 14 · 캐시 읽기 708,800 · 캐시 쓰기 11,698) · 출력 1,402" {
+		t.Fatalf("tokenTitle ko = %q", got)
+	}
+	if got := tokenTitle("en", 1, written); got != "prompt 720,512 (14 input · 708,800 cache read · 11,698 cache write) · output 1,402" {
+		t.Fatalf("tokenTitle en single = %q", got)
+	}
+	if got := summaryRequests(&wslive.ToolSummary{Batches: make([]wslive.ToolBatch, 2), BatchesOmitted: 3}); got != 5 {
+		t.Fatalf("summaryRequests = %d, want the listed and omitted batches", got)
+	}
+	if got := batchMeta("ko", wslive.ToolBatch{Calls: 1, Tools: []wslive.ToolTally{{Name: "Read", Calls: 1}}, DurationMs: 900, Usage: written}); got != "0.9s · 프롬프트 721k +11.7k · 출력 1.4k" {
+		t.Fatalf("batchMeta ko with usage = %q", got)
 	}
 	b := wslive.ToolBatch{Calls: 3, Failed: 1, DurationMs: 1500}
 	if got := batchMeta("en", b); got != "3 calls · 1.5s · 1 failed" {
