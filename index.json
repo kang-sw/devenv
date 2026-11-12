@@ -434,7 +434,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-12T14:49:19Z"
+        "touched_at": "2026-11-12T14:50:37Z",
+        "impl": {
+          "branch": "impl/develop/plank-jump-echo"
+        }
       }
     },
     "261112-feat-ws-mcp-pi-spawn-recursion": {
