@@ -9,6 +9,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 22885b1e53fed13d
 sage-review-completeness-reviewed: 22885b1e53fed13d
+completed: 2026-11-12
 ---
 
 # Dashboard workspaces
