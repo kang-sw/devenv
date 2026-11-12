@@ -207,8 +207,10 @@
 
   // worktreeBody is the add-worktree request for the repository workspace
   // ws from the form f: mode "new" (name, from base; an empty base is the
-  // root's current HEAD) or "old" (pick, an existing branch), and the folder
-  // when custom is set (empty takes the daemon's default).
+  // root's current HEAD) or "old" (pick, an existing branch), and the folder:
+  // the custom one when custom is set, else the default the form shows
+  // (shown). The default names the current minute, so the daemon's own
+  // default at add time can differ from the one the form showed.
   function worktreeBody(ws, f) {
     var isNew = f.mode === "new";
     return {
@@ -216,7 +218,7 @@
       branch: isNew ? String(f.name || "").trim() : String(f.pick || ""),
       "new": isNew,
       base: isNew ? String(f.base || "") : "",
-      folder: f.custom ? String(f.folder || "").trim() : ""
+      folder: String((f.custom ? f.folder : f.shown) || "").trim()
     };
   }
 

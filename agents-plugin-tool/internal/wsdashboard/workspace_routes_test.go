@@ -277,10 +277,11 @@ func TestWorktreeAddRoute(t *testing.T) {
 		return out
 	}
 	// A new branch starts from the root's current branch, in the default
-	// folder.
-	made := add(worktreeAddRequest{Branch: "feat/new", New: true})
-	if filepath.Dir(made.Path) != pool || headBranch(t, made.Path) != "feat/new" || revParse(t, made.Path, "HEAD") != revParse(t, root, "main") || !strings.Contains(made.Message, "feat/new") {
-		t.Errorf("new-branch add = %+v, want feat/new at main's commit under %s", made, pool)
+	// folder the options showed, which the form sends back as is: the add
+	// lands there even once the minute it names has passed.
+	made := add(worktreeAddRequest{Branch: "feat/new", New: true, Folder: opts.Folder})
+	if made.Path != opts.Folder || headBranch(t, made.Path) != "feat/new" || revParse(t, made.Path, "HEAD") != revParse(t, root, "main") || !strings.Contains(made.Message, "feat/new") {
+		t.Errorf("new-branch add = %+v, want feat/new at main's commit in %s", made, opts.Folder)
 	}
 	waitRegionHolding(t, live, regionRail, "feat/new")
 	// An existing branch, in a folder the user named: absent, and so made.

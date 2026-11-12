@@ -5041,7 +5041,7 @@
       P.busy = true;
       setErr("");
       sync();
-      var body = WsRail.worktreeBody(P.ws, { mode: P.mode, name: name.value, base: base.value, pick: P.pick, custom: P.custom, folder: folder.value });
+      var body = WsRail.worktreeBody(P.ws, { mode: P.mode, name: name.value, base: base.value, pick: P.pick, custom: P.custom, folder: folder.value, shown: P.opts.folder });
       railPost("/rail/worktrees/add", body, function (st, v, s) {
         var live = rpLive(P, gen);
         if (st === 200) {
