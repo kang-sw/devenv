@@ -434,7 +434,14 @@
       "registered_at": "2026-11-12T07:07:16Z"
     },
     "261112-feat-ws-whiteboard-check-items": {
-      "registered_at": "2026-11-12T13:59:45Z"
+      "registered_at": "2026-11-12T13:59:45Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-12T14:15:41Z"
+      }
     },
     "261112-feat-ws-whiteboard-refuse-sibling-open-tag-in-field-body": {
       "registered_at": "2026-11-12T06:04:00Z"
