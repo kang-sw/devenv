@@ -465,6 +465,33 @@ func (p *piProcess) Steer(text string) error {
 	return p.writeLine(map[string]any{"type": "steer", "message": text})
 }
 
+// ClearSteered is pi's clear_queue command: it drops the steered messages
+// pi queued and no run took, once the run that would have taken them
+// ended.
+func (p *piProcess) ClearSteered() error {
+	return p.request("clear_queue", map[string]any{"type": "clear_queue"})
+}
+
+// piUserText is a user message's text, as pi matches a queued message to
+// the one its run took: a string content, or its text blocks joined.
+func piUserText(raw json.RawMessage) string {
+	var text string
+	if json.Unmarshal(raw, &text) == nil {
+		return text
+	}
+	var blocks []piBlock
+	if json.Unmarshal(raw, &blocks) != nil {
+		return ""
+	}
+	var parts []string
+	for _, b := range blocks {
+		if b.Type == "text" {
+			parts = append(parts, b.Text)
+		}
+	}
+	return strings.Join(parts, "")
+}
+
 // Interrupt aborts the running prompt. Pi answers abort only once the run
 // settles, so it is sent without waiting; the turn ends at agent_settled.
 func (p *piProcess) Interrupt() error {
@@ -644,8 +671,20 @@ func (m *piMapper) mapLine(line []byte, replies lineReplies) []Event {
 				return m.endTurn(now, errText)
 			}
 		case "steer":
-			// The message was taken from the inbox already; a refusal is
-			// all that is left of it.
+			// A non-lead process steers a child's report, which the runner
+			// sends as a turn instead when pi refuses it (children.go).
+			if m.spec.Lead == nil {
+				answer := SteerAnswer{}
+				if !l.Success {
+					answer.Refusal = l.Error
+					if answer.Refusal == "" {
+						answer.Refusal = "refused"
+					}
+				}
+				return []Event{{SteerAnswer: &answer}}
+			}
+			// A lead's message was taken from the inbox already; a refusal
+			// is all that is left of it.
 			if !l.Success {
 				return []Event{{Notice: "pi refused a steered message: " + l.Error}}
 			}
@@ -794,6 +833,14 @@ func (m *piMapper) message(raw json.RawMessage, now int64) []Event {
 		return nil
 	}
 	switch msg.Role {
+	case "user":
+		// A non-lead run took this message: a steered child's report it
+		// took is not sent again (children.go).
+		if m.spec.Lead == nil {
+			if text := piUserText(msg.Content); text != "" {
+				return []Event{{UserTaken: text}}
+			}
+		}
 	case "system":
 		var added []string
 		for _, t := range msg.ToolsAdded {

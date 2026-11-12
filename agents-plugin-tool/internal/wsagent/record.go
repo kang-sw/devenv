@@ -96,6 +96,27 @@ type Record struct {
 	// turns runs: a daemon that exits mid-turn leaves it set, and the next
 	// daemon reports that turn as interrupted when it loads the record.
 	TurnOpen bool `json:"turn_open,omitempty"`
+	// Tier is the capability tier its spawner chose (small, medium, large,
+	// or xlarge); a conversation it spawns may ask for no higher one.
+	// Empty for a conversation spawned without one, which spawns none.
+	Tier string `json:"tier,omitempty"`
+	// PendingReports are the reported turns of a conversation whose parent
+	// is a conversation (ParentConversation) that the runner has not handed
+	// to that parent yet, oldest first: a report's absence is its
+	// "delivered" mark. A report whose parent is closed stays here.
+	PendingReports []PendingReport `json:"pending_reports,omitempty"`
+	// Reports are its own children's reports the runner handed to this
+	// conversation and no turn has taken yet, oldest first: they go with
+	// its next turn, as a lead's claimed Mail does.
+	Reports []string `json:"reports,omitempty"`
+}
+
+// PendingReport is a settled turn's report waiting for its conversation
+// parent (Record.PendingReports). ID tells one report from another, so
+// the wait that answers with a turn takes that turn's report alone.
+type PendingReport struct {
+	ID     string     `json:"id"`
+	Result TurnResult `json:"result"`
 }
 
 // Parent kinds a ParentRef names.
@@ -103,12 +124,16 @@ const (
 	// ParentLead is a lead session, reached through its mailbox reply-id:
 	// its child's turn reports arrive as mail.
 	ParentLead = "lead"
+	// ParentConversation is a conversation of this runner (a spawned Pi
+	// worker), reached by its id: the runner delivers its child's turn
+	// reports into it itself (children.go).
+	ParentConversation = "conversation"
 )
 
 // ParentRef names the session that spawned a conversation. It holds the
 // parent's reply-id, never its ws session key, so no credential of the
 // parent's lands in the child's record; Kind says how the parent is
-// reached (ParentLead).
+// reached (ParentLead, ParentConversation).
 type ParentRef struct {
 	Kind    string `json:"kind"`
 	ReplyID string `json:"reply_id"`

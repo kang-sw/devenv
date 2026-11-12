@@ -76,6 +76,11 @@ type SpawnSpec struct {
 	// Parent is the session the settled turns are reported to; nil
 	// reports none.
 	Parent *ParentRef
+	// Tier is the capability tier the model was chosen by (small, medium,
+	// large, or xlarge): the cap of the tiers the conversation's own
+	// spawns may ask for (children.go). Empty records none, and such a
+	// conversation spawns nothing.
+	Tier string
 }
 
 // apply sets the spawn's choices on a new conversation's record.
@@ -90,6 +95,7 @@ func (spec *SpawnSpec) apply(rec *Record) {
 		rec.Effort = spec.Effort
 	}
 	rec.Label = spec.Label
+	rec.Tier = spec.Tier
 	if spec.Parent != nil {
 		parent := *spec.Parent
 		rec.Parent = &parent
@@ -115,6 +121,9 @@ func (r *Runner) Spawn(spec SpawnSpec) (State, error) {
 	}
 	if p := spec.Parent; p != nil && (strings.TrimSpace(p.Kind) == "" || !wsdashboard.ValidReplyID(p.ReplyID)) {
 		return State{}, badRequest("parent must name a kind and a valid reply-id")
+	}
+	if spec.Tier != "" && tierRank(spec.Tier) == 0 {
+		return State{}, badRequest("tier must be small, medium, large, or xlarge; got %q", spec.Tier)
 	}
 	spec.Root = strings.TrimSpace(spec.Root)
 	if !filepath.IsAbs(spec.Root) {
@@ -178,28 +187,71 @@ func (c *conv) lastError() string {
 }
 
 // settleTurn records a settled turn whose messages covered mark sends, wakes
-// the waits, and reports it to the parent. The loop calls it.
+// the waits, and reports it to the parent. A done turn of a conversation
+// whose children's reports it still waits for is held instead (holdsReport,
+// children.go): neither reported nor a wait's answer, until a later turn
+// settles, or releaseHeld finds nothing left to wait for. The loop calls
+// it.
 func (c *conv) settleTurn(status, errText string, mark uint64) {
 	res := TurnResult{ID: c.rec.ReplyID, Status: status, Error: errText, mark: mark}
 	if status == TurnDone || status == TurnFailed {
 		res.Message = c.reply
 	}
 	c.reply = ""
-	c.mu.Lock()
-	res.n = c.settled.n + 1
-	c.settled = res
-	c.mu.Unlock()
-	c.signalSettled()
-	if c.rec.TurnOpen {
-		c.update(func(rec *Record) { rec.TurnOpen = false })
+	if status == TurnDone && c.holdsReport() {
+		c.heldRes = &res
+		if c.rec.TurnOpen {
+			c.update(func(rec *Record) { rec.TurnOpen = false })
+		}
+		c.watched()
+		return
 	}
+	c.heldRes = nil
+	c.publish(res)
+}
+
+// publish records res as the conversation's last settled turn and reports
+// it: to Options.Report, and to a conversation parent through
+// Record.PendingReports, unless that parent's own wait took it (wait). The
+// settle, the turn-open mark's clearing, and the pending report are one
+// record update, so a parent never reads its child between them.
+func (c *conv) publish(res TurnResult) {
 	parent := c.rec.Parent
+	toConv := parent != nil && parent.Kind == ParentConversation
+	waited := false
+	settle := func() {
+		res.n = c.settled.n + 1
+		c.settled = res
+		c.settledReport = ""
+	}
+	if parent == nil && !c.rec.TurnOpen {
+		c.mu.Lock()
+		settle()
+		c.mu.Unlock()
+	} else {
+		c.update(func(rec *Record) {
+			settle()
+			rec.TurnOpen = false
+			if !toConv {
+				return
+			}
+			if waited = c.parentWaitTakes(res.mark); !waited {
+				id := newReportID()
+				rec.PendingReports = append(rec.PendingReports, PendingReport{ID: id, Result: res})
+				c.settledReport = id
+			}
+		})
+	}
+	c.signalSettled()
 	if parent == nil {
 		return
 	}
 	st := c.state()
 	if report := c.r.opts.Report; report != nil {
 		report(TurnReport{Parent: *parent, Child: st, Result: res})
+	}
+	if toConv && !waited {
+		c.r.deliverLater(c.rec.ReplyID)
 	}
 	c.r.emit(st)
 }
@@ -278,39 +330,7 @@ func (r *Runner) Children(parent ParentRef) []State {
 // for a closed conversation. A turn the conversation's harness began on its
 // own holds no new message, so it never answers a wait for a sent one.
 func (r *Runner) Wait(ctx context.Context, id string, timeout time.Duration) (TurnResult, error) {
-	r.mu.Lock()
-	c, open := r.convs[id]
-	_, closed := r.closed[id]
-	r.mu.Unlock()
-	switch {
-	case closed:
-		return TurnResult{ID: id, Status: TurnClosed}, nil
-	case !open:
-		return TurnResult{}, errUnknown
-	}
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-	target := c.sendCount()
-	for {
-		c.mu.Lock()
-		res, ch, ended := c.settled, c.settleC, c.closed
-		c.mu.Unlock()
-		if res.n > 0 && res.mark >= target {
-			return res, nil
-		}
-		if ended {
-			return TurnResult{ID: id, Status: TurnClosed}, nil
-		}
-		select {
-		case <-ch:
-		case <-c.done:
-			return TurnResult{ID: id, Status: TurnClosed}, nil
-		case <-timer.C:
-			return TurnResult{ID: id, Status: TurnRunning}, nil
-		case <-ctx.Done():
-			return TurnResult{ID: id, Status: TurnRunning}, nil
-		}
-	}
+	return r.wait(ctx, id, timeout, false)
 }
 
 // Transcript reads conversation id's conversation ring, oldest first.

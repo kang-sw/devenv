@@ -421,6 +421,9 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 	// The runner takes its change hook before the first request can reach
 	// it.
 	if d.agents != nil {
+		if eh, ok := d.agents.(AgentEndpointHost); ok {
+			eh.SetEndpoint(endpointURL(d.endpoint, ""))
+		}
 		d.agents.Start(d.agentChanged)
 	}
 	if err := writeEndpoint(opts.Dir, d.endpoint); err != nil {

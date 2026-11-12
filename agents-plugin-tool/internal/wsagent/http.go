@@ -36,6 +36,13 @@ import (
 //	                              hosted one, once its harness has exited
 //	POST /agents/<id>/reopen      opens a closed hosted session again
 //
+// and, for a spawned Pi worker's attached ws-mcp (children.go):
+//
+//	POST /agents/by-token/<op>    a pi.* call (spawn, list, send, stop,
+//	                              transcript, wait) on the worker's
+//	                              capability token (Authorization: Bearer),
+//	                              from this machine only
+//
 // The routes sit behind the daemon's access guard. A POST must carry a JSON
 // body (Content-Type application/json) and either no Origin (a non-browser
 // client) or the daemon's own origin, so no other web page can drive an
@@ -110,6 +117,10 @@ func (r *Runner) serve(w http.ResponseWriter, req *http.Request) {
 	}
 	if req.Method == http.MethodPost && !writeAllowed(req) {
 		http.Error(w, "agent routes take a JSON body from this machine's clients or the dashboard's own pages", http.StatusForbidden)
+		return
+	}
+	if id == tokenRoute {
+		r.serveToken(w, req, action)
 		return
 	}
 	local, own := r.opts.Trusted(req)

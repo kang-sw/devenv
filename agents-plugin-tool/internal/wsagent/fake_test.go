@@ -30,6 +30,9 @@ type fakeBackend struct {
 	// failSends is how many of the next sends fail, as a write to a closed
 	// pipe does; negative fails every send.
 	failSends int
+	// steers makes its processes take a child's report mid-turn
+	// (reportSteerer).
+	steers bool
 }
 
 // takeSendFailure reports whether the next send fails (failSends).
@@ -125,6 +128,9 @@ func (b *fakeBackend) Start(_ context.Context, spec StartSpec) (Process, error) 
 	p := &fakeProc{backend: b, events: make(chan Event, 64), sent: make(chan string, 16), noModel: b.noModel}
 	b.starts = append(b.starts, spec)
 	b.procs = append(b.procs, p)
+	if b.steers {
+		return fakeSteerProc{p}, nil
+	}
 	return p, nil
 }
 
@@ -167,6 +173,36 @@ type fakeProc struct {
 	once       sync.Once
 	// closeGate, when set, holds Close until released (gateClose).
 	closeGate *gate
+	// steers are the texts a fakeSteerProc was steered, and cleared counts
+	// its ClearSteered calls.
+	steers  []string
+	cleared int
+}
+
+// fakeSteerProc is a fakeProc that takes a child's report mid-turn
+// (reportSteerer); the test answers each steer (SteerAnswer, UserTaken).
+type fakeSteerProc struct{ *fakeProc }
+
+func (p fakeSteerProc) Steer(text string) error {
+	p.mu.Lock()
+	p.steers = append(p.steers, text)
+	p.mu.Unlock()
+	return nil
+}
+
+func (p fakeSteerProc) ClearSteered() error {
+	p.mu.Lock()
+	p.cleared++
+	p.mu.Unlock()
+	return nil
+}
+
+// steered is what the process was steered, and how often it was asked to
+// drop its queued steers.
+func (p *fakeProc) steered() ([]string, int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]string(nil), p.steers...), p.cleared
 }
 
 // gateClose holds the process's Close until the gate is released.
@@ -311,6 +347,8 @@ type harness struct {
 	backend *fakeBackend
 	keys    *fakeKeys
 	runner  *Runner
+	// endpoint, when set, is the runner's SetEndpoint at each start.
+	endpoint string
 }
 
 // suiteBackend is the backend the runner suite's profiles name and the fake
@@ -357,6 +395,9 @@ func newHarness(t *testing.T, profiles map[string]string) *harness {
 // (re)start does.
 func (h *harness) start() {
 	h.runner = NewRunner(h.config)
+	if h.endpoint != "" {
+		h.runner.SetEndpoint(h.endpoint)
+	}
 	h.runner.Start(nil)
 	h.t.Cleanup(h.runner.Close)
 }

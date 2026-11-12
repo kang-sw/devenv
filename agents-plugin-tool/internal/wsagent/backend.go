@@ -142,6 +142,16 @@ type steerer interface {
 	Steer(text string) error
 }
 
+// reportSteerer is a steerer that can take a child's report into its
+// running turn (children.go): its events answer each steer (SteerAnswer)
+// and tell which user messages its run took (UserTaken), and ClearSteered
+// drops the steered messages it queued and no run took, so such a report
+// is sent once as a turn instead.
+type reportSteerer interface {
+	steerer
+	ClearSteered() error
+}
+
 // commandRunner is a Process that runs a dashboard slash command through a
 // mapping of its own (pi's /compact is its compact command); any other
 // Process gets the command's bare typed line as a turn.
@@ -269,6 +279,18 @@ type Event struct {
 	// Fatal ends the process with an error the conversation reports, such as
 	// a failed init check; the process exits after it.
 	Fatal error
+	// SteerAnswer is a non-lead process's answer to its next unanswered
+	// steer command (a child's report, children.go), in the order they
+	// were written; UserTaken is the text of a user message its run took
+	// (a prompt, or a steered message it worked in).
+	SteerAnswer *SteerAnswer
+	UserTaken   string
+}
+
+// SteerAnswer is how the harness answered a steer command: Refusal is
+// empty when it queued the message for its run.
+type SteerAnswer struct {
+	Refusal string
 }
 
 // harnessEnv returns env without the variables a parent harness session

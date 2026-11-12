@@ -148,6 +148,10 @@ type Options struct {
 	// this daemon's exit cut off. Closing the conversation reports nothing.
 	// It runs on the conversation's loop and must not block on the runner.
 	Report func(TurnReport)
+	// ChildCheck, when not nil, is asked before each call of the token
+	// route (children.go): an error refuses the call with its text (no
+	// usable Pi, say).
+	ChildCheck func() error
 	// heartbeat overrides wslive.HeartbeatInterval for tests.
 	heartbeat time.Duration
 }
@@ -174,6 +178,13 @@ type Runner struct {
 	// watchers are Watch's callbacks, by registration (watchMu).
 	watchMu  sync.Mutex
 	watchers map[*func(State)]struct{}
+
+	// The spawn tree (children.go), under mu: endpoint is the daemon's
+	// loopback base URL (SetEndpoint), tokens the capability tokens of
+	// the running processes by token, and tokenOf by conversation id.
+	endpoint string
+	tokens   map[string]string
+	tokenOf  map[string]string
 }
 
 // NewRunner returns a runner; Start loads its conversations.
@@ -239,6 +250,8 @@ func (r *Runner) Start(notify func(replyID, project string)) {
 			}
 		}
 	}
+	// A child loaded before its parent found no parent to report to.
+	r.deliverPending()
 	if r.opts.Holders == nil {
 		// No holder to wait for.
 		r.markScanned()
@@ -389,7 +402,7 @@ func (r *Runner) startConv(rec Record) *conv {
 		c.stopMail = r.opts.Mail.Watch(rec.Root, rec.WSKey, c.signalMail)
 		c.signalMail()
 	}
-	if len(rec.Queued) > 0 && !foreign {
+	if (len(rec.Queued) > 0 || len(rec.Reports) > 0) && !foreign {
 		// Drained input an earlier daemon queued: nothing else would send
 		// it before the next message. A rejoin's replay end sends it
 		// instead (kick waits for it).
@@ -739,8 +752,30 @@ func (r *Runner) SetPermissionMode(id, mode string) (State, error) {
 
 // CloseConversation ends the conversation for good: its process stops,
 // held messages are dropped, later sends are refused, and its session
-// directory stays readable.
+// directory stays readable. Its open descendants through conversation
+// parents (children.go) close first, deepest first. A conversation parent
+// whose done turn waited for this child's report is released.
 func (r *Runner) CloseConversation(id string) (State, error) {
+	if _, err := r.open(id); err != nil {
+		return State{}, err
+	}
+	for _, d := range r.descendants(id) {
+		_, _ = r.closeOne(d)
+	}
+	st, err := r.closeOne(id)
+	if err != nil {
+		return st, err
+	}
+	if rec, ok := r.recordOf(id); ok && rec.Parent != nil && rec.Parent.Kind == ParentConversation {
+		if parent := r.conv(rec.Parent.ReplyID); parent != nil {
+			parent.do(parent.releaseHeld)
+		}
+	}
+	return st, nil
+}
+
+// closeOne closes conversation id alone.
+func (r *Runner) closeOne(id string) (State, error) {
 	st, err := r.act(id, func(c *conv) error {
 		c.close()
 		return nil
@@ -884,6 +919,9 @@ type State struct {
 	Parent *ParentRef `json:"parent,omitempty"`
 	Label  string     `json:"label,omitempty"`
 	Cwd    string     `json:"cwd,omitempty"`
+	// Tier is a spawned conversation's capability tier, when its spawner
+	// chose the model by one.
+	Tier string `json:"tier,omitempty"`
 }
 
 // closedState is the state of a record no loop serves: closed, or handed
@@ -897,7 +935,7 @@ func (r *Runner) closedState(rec Record) State {
 }
 
 func closedState(rec Record) State {
-	st := State{ID: rec.ReplyID, Profile: rec.Profile, Backend: rec.Backend, Root: rec.Root, Status: StatusClosed, Model: rec.Model, Effort: rec.Effort, Page: "/s/" + rec.ReplyID, CreatedAt: rec.CreatedAt, ClosedAt: rec.ClosedAt, Lead: rec.Lead, PermissionMode: rec.PermissionMode, Label: rec.Label}
+	st := State{ID: rec.ReplyID, Profile: rec.Profile, Backend: rec.Backend, Root: rec.Root, Status: StatusClosed, Model: rec.Model, Effort: rec.Effort, Page: "/s/" + rec.ReplyID, CreatedAt: rec.CreatedAt, ClosedAt: rec.ClosedAt, Lead: rec.Lead, PermissionMode: rec.PermissionMode, Label: rec.Label, Tier: rec.Tier}
 	if rec.Parent != nil {
 		parent := *rec.Parent
 		st.Parent = &parent
@@ -1031,6 +1069,24 @@ type conv struct {
 	turnMark uint64
 	reply    string
 	quitting bool
+
+	// wmu orders the record writes of update, which other conversations'
+	// goroutines also make (children.go takes a delivered report).
+	wmu sync.Mutex
+
+	// The spawn tree (children.go). settledReport is the pending report id
+	// of the last settled turn, and parentWaits counts the conversation
+	// parent's waits by target; both under mu. Loop-owned: heldRes is a
+	// done turn held for its children's reports; steered are the
+	// children's reports steered into the running turn and not yet taken
+	// by it, steerSeq the steer commands the process was written and
+	// steerAnswers how many it answered.
+	settledReport string
+	parentWaits   map[uint64]int
+	heldRes       *TurnResult
+	steered       []steeredReport
+	steerSeq      int
+	steerAnswers  int
 }
 
 // do runs fn in the loop and waits for it; false when the loop has ended.
@@ -1241,7 +1297,7 @@ func (c *conv) state() State {
 		}
 	}
 	st.Process = c.proc != nil
-	st.Held = len(held) + len(c.rec.Mail) + len(c.rec.Queued)
+	st.Held = len(held) + len(c.rec.Mail) + len(c.rec.Queued) + len(c.rec.Reports)
 	st.Error = c.lastErr
 	if c.rec.Lead {
 		st.ActiveMode, st.BackgroundTasks, st.ActionNeeded = c.activeMode, c.bgTasks, c.actionNeeded
@@ -1261,8 +1317,11 @@ func (c *conv) record() Record {
 	return c.rec
 }
 
-// update changes the record under mu and persists it.
+// update changes the record under mu and persists it; wmu keeps the
+// writes in the order of the changes.
 func (c *conv) update(fn func(rec *Record)) {
+	c.wmu.Lock()
+	defer c.wmu.Unlock()
 	c.mu.Lock()
 	fn(&c.rec)
 	rec := c.rec
@@ -1435,7 +1494,10 @@ func (c *conv) kick() {
 	}
 	held, err := wsinbox.Held(c.inbox)
 	mail := c.rec.Mail
-	if (err != nil || len(held) == 0) && len(mail) == 0 && len(c.rec.Queued) == 0 {
+	// A child's reports (children.go) go with the next message turn, as
+	// mail does.
+	reports := c.rec.Reports
+	if (err != nil || len(held) == 0) && len(mail) == 0 && len(c.rec.Queued) == 0 && len(reports) == 0 {
 		return
 	}
 	if c.proc == nil {
@@ -1469,7 +1531,7 @@ func (c *conv) kick() {
 			queue = append(queue, QueuedInput{Text: text})
 		}
 	}
-	if len(queue) == 0 && len(mail) == 0 {
+	if len(queue) == 0 && len(mail) == 0 && len(reports) == 0 {
 		// A cancel took the message after the start: the process waits for
 		// input like after a turn.
 		c.armIdle()
@@ -1482,7 +1544,7 @@ func (c *conv) kick() {
 	}
 	cmd, parts, rest := nextTurn(queue)
 	if cmd != nil {
-		mail = nil
+		mail, reports = nil, nil
 	}
 	c.stopIdle()
 	c.setStatus(func() { c.turn, c.lastErr = true, "" })
@@ -1494,7 +1556,7 @@ func (c *conv) kick() {
 	if cmd != nil {
 		err = c.runCommand(*cmd)
 	} else {
-		err = c.proc.Send(strings.Join(append(parts, mail...), "\n\n"))
+		err = c.proc.Send(strings.Join(append(append(slices.Clone(parts), reports...), mail...), "\n\n"))
 	}
 	if err != nil {
 		// The turn never began: its process ends with no turn to close.
@@ -1505,7 +1567,7 @@ func (c *conv) kick() {
 		// a new process, through the loop's inbox signal rather than on
 		// this stack. A send that fails again leaves it for the next inbox
 		// or mail signal, so a send that always fails does not spin.
-		if (len(c.rec.Queued) > 0 || len(c.rec.Mail) > 0) && !c.sendRetried {
+		if (len(c.rec.Queued) > 0 || len(c.rec.Mail) > 0 || len(c.rec.Reports) > 0) && !c.sendRetried {
 			c.sendRetried = true
 			c.signalInbox()
 		} else {
@@ -1515,10 +1577,15 @@ func (c *conv) kick() {
 	}
 	c.sendRetried = false
 	c.turnMark, c.reply = covered, ""
+	// This turn's settle supersedes a done turn held for the children.
+	c.heldRes = nil
 	c.update(func(rec *Record) {
 		rec.Queued = rest
 		if len(mail) > 0 {
 			rec.Mail = nil
+		}
+		if len(reports) > 0 {
+			rec.Reports = nil
 		}
 		if rec.Parent != nil {
 			rec.TurnOpen = true
@@ -1528,7 +1595,7 @@ func (c *conv) kick() {
 	// the dashboard's own text is a user entry; a turn of mail alone is
 	// marked as mail's.
 	origin := wslive.OriginMail
-	text := strings.Join(parts, "\n\n")
+	text := strings.Join(append(slices.Clone(parts), reports...), "\n\n")
 	if cmd != nil {
 		text = cmd.Line()
 	}
@@ -1619,15 +1686,24 @@ func (c *conv) startProcess() error {
 		for _, name := range mailboxIdentityEnv {
 			env[name] = ""
 		}
+		// A spawned conversation that may spawn gets this start's
+		// capability token (children.go); any other gets both blank, so
+		// none is inherited.
+		env[EnvPiToken], env[EnvPiEndpoint] = "", ""
+		if mayHoldToken(rec, rp.Definition) {
+			env[EnvPiToken], env[EnvPiEndpoint] = c.r.issueToken(rec.ReplyID)
+		}
 		cmd.Env = env
 		spec.WSMCP = &cmd
 	}
 	proc, err := c.r.opts.Backends[rec.Backend].Start(context.Background(), spec)
 	if err != nil {
+		c.r.revokeToken(rec.ReplyID)
 		return err
 	}
 	c.setStatus(func() { c.proc = proc })
 	c.events = proc.Events()
+	c.steerSeq, c.steerAnswers = 0, 0
 	c.idleAfter = rp.Definition.IdleTimeout()
 	c.dirtyModel, c.dirtyEffort = false, false
 	if rp.Definition.ListInIndex != rec.Listed {
@@ -2006,6 +2082,14 @@ func (c *conv) handle(ev Event) {
 	case ev.HarnessState != "":
 		c.harnessState = ev.HarnessState
 		c.checkAction(quiet)
+	case ev.SteerAnswer != nil:
+		if !quiet {
+			c.steerAnswered(ev.SteerAnswer.Refusal)
+		}
+	case ev.UserTaken != "":
+		if !quiet {
+			c.steerTaken(ev.UserTaken)
+		}
 	case ev.Notice != "":
 		if !quiet {
 			fmt.Fprintf(c.r.opts.Log, "agent %s: %s\n", c.rec.ReplyID, ev.Notice)
@@ -2061,6 +2145,7 @@ func (c *conv) beginTurn(quiet bool) {
 		// Not the runner's send: the turn holds no new message, so it
 		// keeps the last turn's mark.
 		c.reply = ""
+		c.heldRes = nil
 		if c.rec.Parent != nil {
 			c.update(func(rec *Record) { rec.TurnOpen = true })
 		}
@@ -2097,6 +2182,9 @@ func (c *conv) endTurn(turnErr string, quiet bool) {
 		return
 	}
 	c.wrapHold = false
+	// A child's report steered into the turn that the turn did not take
+	// goes as the next one (children.go).
+	c.unsteer()
 	c.applySettings()
 	c.restartIfDue()
 	c.kick()
@@ -2308,6 +2396,12 @@ func (c *conv) processEnded() {
 			c.settleTurn(TurnFailed, c.lastError(), c.turnMark)
 		}
 	}
+	c.r.revokeToken(c.rec.ReplyID)
+	if c.requeueSteered() && !c.closed && !c.quitting {
+		// The steered reports the process took with it go as the next
+		// turn; nothing else would send them.
+		c.signalInbox()
+	}
 	c.clearApprovals()
 	c.harnessState = ""
 	c.checkAction(false)
@@ -2480,9 +2574,11 @@ func (c *conv) close() {
 		c.closed = true
 	})
 	c.stopProcess("")
-	if len(c.rec.Mail) > 0 {
-		c.update(func(rec *Record) { rec.Mail = nil })
+	if len(c.rec.Mail) > 0 || len(c.rec.Reports) > 0 {
+		c.update(func(rec *Record) { rec.Mail, rec.Reports = nil, nil })
 	}
+	c.r.revokeToken(c.rec.ReplyID)
+	c.heldRes = nil
 	c.dropHeld()
 	c.live.setAdapter("")
 	c.writeRegistration()
