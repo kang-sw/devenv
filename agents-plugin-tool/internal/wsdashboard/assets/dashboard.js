@@ -474,8 +474,8 @@
         writeAnswers(n, answers);
       });
       if (before) {
-        topicMotion(before, ins).forEach(function (m) { growTopic(m.n, m.from); });
-        slideBoard(el, before);
+        var moves = topicMotion(before, ins).map(function (m) { return growTopic(m.n, m.from); });
+        startMotion(moves.concat(slideBoard(el, before)));
         ins.forEach(function (n) { q("iframe.doc-frame", n).forEach(function (f) { f.wbGrow = true; }); });
       }
     } else {
@@ -665,15 +665,15 @@
   // A section clips its overflow itself (.topic), and a new one also fades
   // in with its bottom margin growing.
   function growTopic(n, from) {
-    if (!n.animate) return;
+    if (!n.animate) return null;
     var to = n.getBoundingClientRect().height;
-    if (Math.abs(to - from) < 1) return;
+    if (Math.abs(to - from) < 1) return null;
     var a = { height: from + "px" }, b = { height: to + "px" };
     if (!from) {
       a.opacity = 0; b.opacity = 1;
       a.marginBottom = "0px"; b.marginBottom = getComputedStyle(n).marginBottom;
     }
-    n.animate([a, b], { duration: 200, easing: "ease-out" });
+    return n.animate([a, b], { duration: 200, easing: "ease-out" });
   }
   // slideBoard moves each topic section and card standing in the board from
   // its spot before the swap to its place now (FLIP): the layout is
@@ -684,14 +684,35 @@
   // animation fills nothing, so no transform stays behind. A maximized card
   // stays put: a transform would anchor its fixed inner box to the card.
   function slideBoard(el, before) {
-    var top = el.getBoundingClientRect().top;
+    var top = el.getBoundingClientRect().top, out = [];
     Array.prototype.forEach.call(el.children, function (n) {
       var k = topicKey(n), card = k === null && n.hasAttribute("data-card");
       var b = k !== null ? before["t:" + k] : card ? before["c:" + n.getAttribute("data-card")] : null;
       if (!b || b.paged || !n.animate || (card && n.hasAttribute("data-max"))) return;
       var dy = b.y - (n.getBoundingClientRect().top - top);
       if (Math.abs(dy) < 1) return;
-      n.animate([{ transform: "translateY(" + dy + "px)" }, { transform: "none" }], { duration: 200, easing: "ease-out" });
+      out.push(n.animate([{ transform: "translateY(" + dy + "px)" }, { transform: "none" }], { duration: 200, easing: "ease-out" }));
+    });
+    return out;
+  }
+  // startMotion starts the swap's animations at the swap's first frame. An
+  // animation's start time is the timeline's time, which holds still at the
+  // last frame's through the tasks after it, up to the next frame's own
+  // callbacks; a board swap is a long task (a large board's parse and
+  // morph, its new topics' frames), so started as created the animations
+  // were over when the swap's first frame drew: it showed the old heights
+  // (a closing topic's whole open height, empty, and the board under it
+  // blank) and the next frame jumped to the end. The start is set to the
+  // clock at the first frame's callbacks instead, and until then (that
+  // frame itself, whose timeline time is older) the animations hold their
+  // first keyframe.
+  function startMotion(list) {
+    list = list.filter(Boolean);
+    if (!list.length) return;
+    list.forEach(function (a) { a.effect.updateTiming({ fill: "backwards" }); });
+    requestAnimationFrame(function () {
+      var t = performance.now();
+      list.forEach(function (a) { if (a.playState === "running") a.startTime = t; });
     });
   }
 
