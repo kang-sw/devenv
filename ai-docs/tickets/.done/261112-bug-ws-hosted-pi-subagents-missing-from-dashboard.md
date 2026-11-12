@@ -3,6 +3,7 @@ title: "Hosted Pi subagents run but are absent from the dashboard agents panel"
 related:
   261110-epic-ws-dashboard-agent-host: hosted Pi lead dogfood
   261111-research-ws-hosted-session-subagent-output-rate-source: adjacent hosted child telemetry research
+completed: 2026-11-12
 ---
 
 # Hosted Pi subagents are absent from the dashboard
@@ -82,3 +83,10 @@ any repair contract before implementation. Verification must distinguish
 running child execution, intermediate/final delivery to the parent, and
 agents-panel visibility. Preserve CLI-created Pi behavior and avoid duplicate
 feeds in hosted mode.
+
+
+## Resolution (2026-11-12)
+
+Fixed by merge 1006072df (395364cfe daemon Pi mapper decodes the reserved `ws-dashboard-agents` widget; ce5f45a60 hosted Pi extension emits child-only agent/permission events through it). Live recheck by the Pi lead on 2026-11-12 after a hosted session restart (new host PID): new native children showed running in both the registry and the session snapshot with model, effort, label, context tokens, output rate, and batches, then done with endedAt after settle; the four earlier children came back as done rows after the restart. The user's on-screen check was still pending at close; the snapshot is the panel's source.
+
+Observed, not judged a defect: rows revived from the sidecar at restart carry no model/effort, and the snapshot held 5 rows against 6 registry children (likely the completed-row cap).
