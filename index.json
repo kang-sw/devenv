@@ -395,7 +395,14 @@
       "registered_at": "2026-11-11T11:38:36Z"
     },
     "261112-bug-ws-hosted-pi-subagents-missing-from-dashboard": {
-      "registered_at": "2026-11-12T06:05:00Z"
+      "registered_at": "2026-11-12T06:05:00Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "28ef83e379b353cc",
+        "track": "develop",
+        "phase": "closed",
+        "touched_at": "2026-11-12T07:59:34Z"
+      }
     },
     "261112-bug-ws-hosted-windows-cmd-shim-host-pid-mismatch": {
       "registered_at": "2026-11-12T04:58:18Z"
