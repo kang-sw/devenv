@@ -1565,6 +1565,130 @@
     ctext.addEventListener("scroll", function () { if (chl) chl.scrollTop = ctext.scrollTop; });
     window.addEventListener("resize", paintMentions);
   }
+  // --- composer slash commands ---------------------------------------------
+  // A session whose adapter runs slash commands lists them in the composer's
+  // cmds region (one <i> each: data-name, data-desc, data-src, and data-layer
+  // when the host tells who may invoke the command), which the stream keeps
+  // current. Typing / in an empty message box opens their picker (mention.js
+  // with this token, row, and pick), filtered by the name prefix typed after
+  // the /; a session with no list gets no picker, and / is plain text. A pick
+  // makes the composer hold the command as a selection, the capsule before
+  // the message box, whose text is then the command's arguments; a send posts
+  // {command, args}, never text the daemon parses. A selection is sent alone:
+  // answer chips, topic notes, and board mentions stay in the composer for
+  // the next message, and a send with images attached is refused (the
+  // markers would read as arguments). Backspace in an empty box, or the
+  // capsule's x, removes the selection.
+  //
+  // A cancel or interrupt that returns a command restores it as the
+  // selection (restoreHeld): its arguments go to the message box when nothing
+  // else lands there; else they stay on the capsule (cmdSel.args a string),
+  // which sends them as they are and leaves the box's text for a later send.
+  var ccmd = $("ccmd"), cmdSel = null, slash = null, ctextHint = ctext ? ctext.getAttribute("placeholder") || "" : "";
+  function commandList() {
+    var r = region("cmds");
+    return (r ? q("i[data-name]", r) : []).map(function (el) {
+      return { name: el.getAttribute("data-name"), description: el.getAttribute("data-desc") || "", source: el.getAttribute("data-src") || "", layer: el.getAttribute("data-layer") || "" };
+    });
+  }
+  // commandRows is the picker's rows for q: the commands whose name starts
+  // with q (case-insensitive), in the host's order; when any command names
+  // its layer, the user-layer ones, then the agent-layer ones, then the rest,
+  // each group under its heading.
+  function commandRows(list, q) {
+    var lq = q.toLowerCase(), rows = list.filter(function (c) { return c.name.toLowerCase().indexOf(lq) === 0; });
+    if (!list.some(function (c) { return c.layer; })) return rows;
+    var user = [], agent = [], other = [];
+    rows.forEach(function (c) { (c.layer === "user" ? user : c.layer === "agent" ? agent : other).push(c); });
+    var out = [];
+    [[user, wsT("js.cmd.group.user")], [agent, wsT("js.cmd.group.agent")], [other, wsT("js.cmd.group.rest")]].forEach(function (g) {
+      g[0].forEach(function (c) { out.push({ name: c.name, description: c.description, source: c.source, layer: c.layer, group: g[1] }); });
+    });
+    return out;
+  }
+  // slashToken is the picker's token: the whole message box while it is a /
+  // and the name typed after it, the caret past the /, no command selected,
+  // and the session listing commands.
+  function slashToken(v, caret) {
+    if (cmdSel || !/^\/\S*$/.test(v) || caret < 1 || !commandList().length) return null;
+    return { start: 0, end: v.length, q: v.slice(1, caret) };
+  }
+  function commandRow(li, c) {
+    var name = doc.createElement("span"), desc = doc.createElement("span");
+    name.className = "wsm-name";
+    name.textContent = "/" + c.name;
+    desc.className = "wsm-desc";
+    desc.textContent = c.description;
+    li.appendChild(name);
+    li.appendChild(desc);
+    if (c.source) {
+      var src = doc.createElement("span");
+      src.className = "wsm-src";
+      src.textContent = c.source;
+      li.appendChild(src);
+    }
+    li.title = "/" + c.name + (c.description ? " \u2014 " + c.description : "");
+  }
+  // renderCmd shows the selection: the capsule, its fixed arguments when it
+  // holds them, and the message box's hint.
+  function renderCmd() {
+    if (!ccmd) return;
+    var fixed = !!cmdSel && typeof cmdSel.args === "string", name = ccmd.querySelector(".ccmd-name"), args = ccmd.querySelector(".ccmd-args");
+    ccmd.hidden = !cmdSel;
+    ccmd.parentNode.classList.toggle("hascmd", !!cmdSel);
+    if (name) name.textContent = cmdSel ? "/" + cmdSel.name : "";
+    if (args) { args.textContent = fixed ? cmdSel.args : ""; args.hidden = !fixed || !cmdSel.args; }
+    ctext.setAttribute("placeholder", cmdSel && !fixed ? wsT("js.cmd.args", cmdSel.name) : ctextHint);
+  }
+  // setCommand selects command name; args, when a string, stays on the
+  // capsule, and otherwise the message box holds the arguments.
+  function setCommand(name, args) {
+    cmdSel = { name: name, args: typeof args === "string" ? args : null };
+    renderCmd();
+  }
+  function clearCommand() {
+    cmdSel = null;
+    renderCmd();
+  }
+  // uncommand is Backspace in an empty message box: a capsule holding its
+  // arguments puts them in the box to edit, an empty one goes.
+  function uncommand() {
+    var a = cmdSel.args;
+    if (typeof a === "string" && a) {
+      cmdSel.args = null;
+      editText(0, ctext.value.length, a);
+      renderCmd();
+    } else clearCommand();
+  }
+  // sendCommand posts the selection; what else the composer holds stays.
+  function sendCommand() {
+    var sel = cmdSel, fixed = typeof sel.args === "string";
+    if (!fixed && imgs.length) { noteWarn(wsT("js.cmd.images")); return; }
+    var raw = ctext.value, args = fixed ? sel.args : sendText().trim();
+    sending = true;
+    post("message", { command: sel.name, args: args }, function (ok, res) {
+      sending = false;
+      if (!ok) { noteWarn(wsT("js.send.fail", res)); return; }
+      if (cmdSel === sel) clearCommand();
+      if (!fixed && ctext.value === raw) { ctext.value = ""; grow(); clearMentions(); }
+      clearDraft();
+    });
+  }
+  if (ctext && rid && ccmd && window.wsMention) {
+    slash = window.wsMention.attach(ctext, {
+      label: wsT("js.cmd.label"),
+      max: 500,
+      token: slashToken,
+      source: function (q, done) { done(commandRows(commandList(), q)); },
+      render: commandRow,
+      exact: function (c, q) { return c.name === q; },
+      choose: function (c, at) {
+        setCommand(c.name);
+        editText(at.start, at.end, "");
+        queueDraft();
+      }
+    });
+  }
   // --- board mentions: selected board text added to the message ------------
   // On the live board, selecting text inside one topic card shows a floating
   // mention button by the selection's end; clicking it adds a mention
@@ -1695,6 +1819,7 @@
   }
   function sendMessage() {
     if (sending) return;
+    if (cmdSel) { sendCommand(); return; }
     var raw = ctext.value.trim(), t = sendText().trim(), list = chipList(), pics = imgs.slice(), notes = topicNotes(), said = bmentions.slice();
     if (!t && !list.length && !pics.length && !notes.length && !said.length) { noteWarn(wsT("js.send.empty")); return; }
     if (pics.some(function (p) { return !p.ref && p.data === null; })) { noteWarn(wsT("js.send.reading")); return; }
@@ -1753,7 +1878,19 @@
   // reference the written files, with their markers in the returned text. Each
   // message's numbers move above the highest the draft and the messages
   // before it use, the markers with them, as the server numbers a merge.
+  //
+  // A returned command becomes the composer's selection (see the slash
+  // commands section). Only one fits: a second, or one returned while
+  // another is selected, comes back as its typed line, with a warning.
   function restoreHeld(list) {
+    var cmd = null, astext = 0;
+    list = list.map(function (res) {
+      var c = res.command;
+      if (!c || !c.name) return res;
+      if (!cmdSel && !cmd) { cmd = c; return {}; }
+      astext++;
+      return { text: "/" + c.name + (c.args ? " " + c.args : "") };
+    });
     var cur = ctext.value.trim(), top = imgSeq, backs = [], back;
     // The draft's mentions move with it, past its leading whitespace's trim.
     var lead = ctext.value.length - ctext.value.replace(/^\s+/, "").length;
@@ -1796,6 +1933,11 @@
     bmentions = held.concat(bmentions);
     renderChips();
     renderImgs();
+    if (cmd) {
+      if (ctext.value.trim()) setCommand(cmd.name, cmd.args || "");
+      else { ctext.value = cmd.args || ""; grow(); clearMentions(); setCommand(cmd.name); }
+    }
+    if (astext) noteWarn(wsT("js.cmd.astext"));
   }
   // restoreTopics puts returned topic notes back on their topics' notes,
   // after any text a note holds now, through the input path a typed edit
@@ -1992,7 +2134,8 @@
       // While the file popup shows, it takes Up/Down, Tab and Enter (which
       // pick, never send), and Escape (which closes it without arming
       // Tab-out).
-      if (mention && mention.key(e)) { tabOut = false; return; }
+      if ((mention && mention.key(e)) || (slash && slash.key(e))) { tabOut = false; return; }
+      if (e.key === "Backspace" && cmdSel && !ctext.value) { e.preventDefault(); uncommand(); queueDraft(); return; }
       if (e.key === "Tab") {
         if (e.ctrlKey || e.metaKey || e.altKey) return;
         if (tabOut) { tabOut = false; return; }
@@ -2030,6 +2173,7 @@
     if (t.closest("[data-wbmention]")) { addMention(); return; }
     u = t.closest("[data-tchip]");
     if (u) { focusTopicNote(u.getAttribute("data-tchip")); return; }
+    if (t.closest("#ccmd [data-uncmd]")) { clearCommand(); ctext.focus(); return; }
     u = t.closest("[data-unimg]");
     if (u) { unattach(imgs[+u.getAttribute("data-unimg")]); return; }
     u = t.closest("#r-board button.closed-more[data-closed-next]");
@@ -5106,7 +5250,7 @@
   }
   // holdsDraft reports unsent work a reload would drop: composer text,
   // answers picked on the board, or an attached image.
-  function holdsDraft() { return !!((ctext && ctext.value) || boardAnswers() || imgs.length || topicNotes().length); }
+  function holdsDraft() { return !!((ctext && ctext.value) || cmdSel || boardAnswers() || imgs.length || topicNotes().length); }
   function modeChanged(next) {
     // The other mode has other regions, and a reload renders them; text typed
     // in the composer or answers picked on the board are never dropped for it.
@@ -6476,8 +6620,8 @@
   // What the user typed or picked on this session's page and has not sent,
   // and the page's view state around it, is kept per session in storage
   // (rail.js drafts), so switching sessions in the rail and coming back
-  // finds it: the composer's text, mentions, and selection, the board
-  // answers and topic notes, the answer chips, the images that reference
+  // finds it: the composer's text, mentions, and selection, its slash
+  // command selection, the board answers and topic notes, the answer chips, the images that reference
   // written attachments, the open details, and the tab. Pasted images are
   // not kept: a restored draft says so, and while the page holds one,
   // leaving it asks first (the browser's leave-page confirmation).
@@ -6487,6 +6631,7 @@
     Object.keys(openState).forEach(function (k) { if (openState[k]) open[k] = true; });
     var d = {
       text: ctext ? ctext.value : "",
+      cmd: cmdSel ? { name: cmdSel.name, args: cmdSel.args } : null,
       mentions: mentions.map(function (m) { return { start: m.start, end: m.end, text: m.text }; }),
       answers: b ? boardRead(readAnswers) : {},
       chips: chipList(),
@@ -6537,6 +6682,7 @@
         bmentions = validMentions(d.bmentions);
         renderChips();
       }
+      if (ccmd && !cmdSel && d.cmd && typeof d.cmd.name === "string" && d.cmd.name) setCommand(d.cmd.name, d.cmd.args);
       var lost = Array.isArray(d.lost) ? d.lost : [];
       if (ctext && typeof d.text === "string" && d.text && !ctext.value) {
         var s = WsRail.stripMarkers(d.text, Array.isArray(d.mentions) ? d.mentions : [], lost);

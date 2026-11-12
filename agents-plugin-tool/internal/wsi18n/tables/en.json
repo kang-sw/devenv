@@ -1581,5 +1581,15 @@
   "js.lead.handoff.confirm.other": "Hand this session to a terminal? Its {0} running background tasks end with the process.",
   "js.lead.handed": "This session was handed to a terminal.",
   "js.lead.handed.resume": "Resume it there with",
-  "js.lead.handed.copy": "Copy the command"
+  "js.lead.handed.copy": "Copy the command",
+  "composer.cmd.title": "slash command: sent alone; board answers and notes stay for the next message",
+  "composer.cmd.remove": "remove the command",
+  "entry.command.terminal": "no text output: it opens in the terminal",
+  "js.cmd.label": "Slash commands: Up/Down moves, Tab or Enter picks, Escape closes",
+  "js.cmd.group.user": "user commands",
+  "js.cmd.group.agent": "agent commands",
+  "js.cmd.group.rest": "other commands",
+  "js.cmd.args": "Arguments for /{0} (optional)",
+  "js.cmd.images": "A slash command is sent alone and carries no images: remove the images, or remove the command.",
+  "js.cmd.astext": "A returned slash command came back as text, since the composer holds another command: pick it again from / to run it."
 }

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsdashboard"
+	"github.com/kang-sw/devenv/internal/wsinbox"
 	"github.com/kang-sw/devenv/internal/wslive"
 )
 
@@ -78,6 +79,18 @@ type Record struct {
 	// Mail holds the mailbox messages claimed for the session and not yet
 	// delivered as a turn, each as the text the model reads.
 	Mail []string `json:"mail,omitempty"`
+	// Queued holds what a drain took from the inbox and no turn has sent
+	// yet, oldest first: a slash command runs as a turn of its own, so the
+	// messages and commands drained after it wait here across turn ends,
+	// although the inbox already shows them received.
+	Queued []QueuedInput `json:"queued,omitempty"`
+}
+
+// QueuedInput is one drained dashboard input waiting for its turn: a
+// message's text, or a slash command.
+type QueuedInput struct {
+	Text    string           `json:"text,omitempty"`
+	Command *wsinbox.Command `json:"command,omitempty"`
 }
 
 // workDir is the directory the conversation's process runs in.
@@ -186,6 +199,12 @@ func newLiveWriter(dir, key, adapter string, now func() time.Time, log io.Writer
 	st.SetAdapter(adapter)
 	if prev, err := wslive.ReadSnapshot(wslive.SnapshotPath(dir)); err == nil {
 		st.SeedFinished(prev)
+		// The command list too: a session whose process is not running
+		// reports it again only at its next turn (claude) or start (pi),
+		// and the page offers commands only while the list is there.
+		if len(prev.Commands) > 0 {
+			_, _ = st.Apply(wslive.Event{Kind: wslive.KindCommands, Commands: prev.Commands}, now().UnixMilli())
+		}
 	}
 	return &liveWriter{dir: dir, st: st, now: now, log: log}
 }

@@ -1581,5 +1581,15 @@
   "js.lead.handoff.confirm.other": "このセッションをターミナルに渡しますか? 実行中のバックグラウンドタスク {0} 件がプロセスとともに終了します。",
   "js.lead.handed": "このセッションはターミナルに渡されました。",
   "js.lead.handed.resume": "ターミナルで再開するコマンド",
-  "js.lead.handed.copy": "コマンドをコピー"
+  "js.lead.handed.copy": "コマンドをコピー",
+  "composer.cmd.title": "スラッシュコマンド: 単独で送信され、ボードの回答とメモは次のメッセージに残ります",
+  "composer.cmd.remove": "コマンドを外す",
+  "entry.command.terminal": "テキスト出力なし: ターミナルで開きます",
+  "js.cmd.label": "スラッシュコマンド: 上下で移動、Tab または Enter で選択、Escape で閉じる",
+  "js.cmd.group.user": "ユーザーコマンド",
+  "js.cmd.group.agent": "エージェントコマンド",
+  "js.cmd.group.rest": "その他のコマンド",
+  "js.cmd.args": "/{0} の引数 (任意)",
+  "js.cmd.images": "スラッシュコマンドは単独で送信され、画像を含められません: 画像を外すか、コマンドを外してください。",
+  "js.cmd.astext": "入力欄に別のコマンドがあるため、戻ってきたスラッシュコマンドはテキストとして戻しました: 実行するには / から選び直してください。"
 }

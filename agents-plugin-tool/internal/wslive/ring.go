@@ -43,6 +43,10 @@ const (
 	// RingUI is a dashboard UI command a store's support conversation sent
 	// (UICommand): its chat moves the tracker view once, live (see UICommand).
 	RingUI = "ui"
+	// RingCommand is a slash command an adapter ran for the session: Command
+	// is its typed line and Text the output it showed as text, empty when it
+	// showed none (a terminal panel).
+	RingCommand = "command"
 )
 
 // Mail directions.
@@ -56,7 +60,8 @@ const ringStampLayout = "20060102T150405.000000000Z"
 
 // RingEntry is one ring file.
 type RingEntry struct {
-	// Kind is user, reply, turn, mail, compact, tools, card, ui, or notice.
+	// Kind is user, reply, turn, mail, compact, tools, card, ui, command, or
+	// notice.
 	Kind string `json:"kind"`
 	// Origin tags a user message (terminal, whiteboard) or a turn summary
 	// (terminal, whiteboard, mail; empty when unknown).
@@ -89,6 +94,8 @@ type RingEntry struct {
 	UI *UICommand `json:"ui,omitempty"`
 	// Notice is a notice line's typed failure.
 	Notice *Notice `json:"notice,omitempty"`
+	// Command is a command line's typed command ("/name args").
+	Command string `json:"command,omitempty"`
 }
 
 // CardRef is a tracker item a conversation showed as a card: the store it

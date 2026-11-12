@@ -42,6 +42,14 @@ const (
 	// KindCompact marks a main-conversation compaction: phase start shows
 	// the lead compacting, and end or failed settles it into a ring entry.
 	KindCompact = "compact"
+	// KindCommands replaces the slash commands the session's adapter can
+	// run for the page (Commands); an empty list clears them, and so does
+	// reset, so an adapter re-sends its list after a reset.
+	KindCommands = "commands"
+	// KindCommand is a slash command the adapter ran from a page command
+	// entry: Command its typed line, Text the output it showed as text
+	// (empty when it showed none). It writes a command ring entry.
+	KindCommand = "command"
 )
 
 // Compaction phases a compact event carries.
@@ -61,7 +69,7 @@ const (
 // OptionalKinds are the event kinds an older ws-mcp refuses: the intake
 // result names them in an "accepts:" line, and an adapter sends one only
 // while the latest result it received names it.
-var OptionalKinds = []string{KindStatus, KindCompact}
+var OptionalKinds = []string{KindStatus, KindCompact, KindCommands, KindCommand}
 
 // Event is one adapter event. Clocks are epoch milliseconds; an absent At
 // is the intake time.
@@ -105,6 +113,10 @@ type Event struct {
 	Effort        string   `json:"effort,omitempty"`
 	ContextTokens *float64 `json:"contextTokens,omitempty"`
 	OutputTps     *float64 `json:"outputTps,omitempty"`
+	// Commands is a commands event's list. Command is a command event's
+	// typed line ("/name args"), its output in Text.
+	Commands []SlashCommand `json:"commands,omitempty"`
+	Command  string         `json:"command,omitempty"`
 }
 
 // Result is what one event changed.
@@ -162,6 +174,8 @@ type State struct {
 
 	agents map[string]*agentState
 	usage  *Usage
+	// commands is the adapter's slash command list (KindCommands).
+	commands []SlashCommand
 	// host is what a host that runs the harness itself reports (SetHost);
 	// an adapter's reset keeps it.
 	host *Host
@@ -352,6 +366,24 @@ func (st *State) Apply(ev Event, now int64) (Result, error) {
 			return Result{}, fmt.Errorf("compact phase must be %q, %q, or %q", CompactStart, CompactEnd, CompactFailed)
 		}
 		res.Changed = true
+	case KindCommands:
+		if ev.AgentID != "" {
+			return Result{}, fmt.Errorf("commands are the session's only; omit agentId")
+		}
+		commands := normalizeCommands(ev.Commands)
+		res.Changed = !reflect.DeepEqual(commands, st.commands)
+		st.commands = commands
+	case KindCommand:
+		if ev.AgentID != "" {
+			return Result{}, fmt.Errorf("command is the main conversation's only; omit agentId")
+		}
+		line := cleanLine(st.scrub.scrub(ev.Command), CommandLineRunes)
+		if !strings.HasPrefix(line, "/") || len(line) < 2 {
+			return Result{}, fmt.Errorf("command must be the typed line, /name or /name args")
+		}
+		text, truncated := capText(st.scrub.scrub(ev.Text))
+		st.flushTools(&res)
+		res.Ring = append(res.Ring, RingEntry{Kind: RingCommand, Command: line, Text: text, Truncated: truncated})
 	case "":
 		return Result{}, fmt.Errorf("event kind is required")
 	default:
@@ -819,6 +851,7 @@ func (st *State) Snapshot(now int64) Snapshot {
 	snap.Lead.ToolGap = st.gap.summary()
 	snap.Usage = st.usage.clone()
 	snap.Host = st.host.clone()
+	snap.Commands = append([]SlashCommand(nil), st.commands...)
 	for _, a := range st.agents {
 		snap.Agents = append(snap.Agents, Agent{
 			Activity:  a.view(),
@@ -1137,6 +1170,35 @@ func (u *Usage) clone() *Usage {
 	if u.Cost != nil {
 		c := *u.Cost
 		out.Cost = &c
+	}
+	return out
+}
+
+// commandNamePattern is a slash command's name without its slash, as the
+// board-answer inbox takes it.
+var commandNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:-]{0,199}$`)
+
+// normalizeCommands keeps the commands whose name (one leading slash
+// dropped) is a valid name, the first of each name, at most CommandCap,
+// with text capped and an unknown layer cleared; nil when none is left.
+func normalizeCommands(in []SlashCommand) []SlashCommand {
+	var out []SlashCommand
+	seen := map[string]bool{}
+	for _, c := range in {
+		if len(out) == CommandCap {
+			break
+		}
+		c.Name = strings.TrimPrefix(strings.TrimSpace(c.Name), "/")
+		if !commandNamePattern.MatchString(c.Name) || seen[c.Name] {
+			continue
+		}
+		seen[c.Name] = true
+		c.Description = cleanLine(c.Description, CommandDescriptionRunes)
+		c.Source = cleanLine(c.Source, 32)
+		if c.Layer != LayerUser && c.Layer != LayerAgent {
+			c.Layer = ""
+		}
+		out = append(out, c)
 	}
 	return out
 }

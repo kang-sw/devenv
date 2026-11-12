@@ -36,6 +36,23 @@ function world(on: On, opts: { dashboard?: unknown; intake?: Intake } = {}) {
     acceptsStatus: false,
     /** Whether an applied intake's result names `compact` on its accepts line. */
     acceptsCompact: false,
+    /** Whether an applied intake's result names `commands` and `command` on its accepts line. */
+    acceptsCommands: false,
+    /** What `$.command.list` answers. */
+    commands: [
+      { name: 'compact', description: 'Clear the history but keep a summary', source: 'builtin' },
+      { name: 'context', description: 'Show context usage', source: 'builtin' },
+      { name: 'config', description: 'Open the settings panel', source: 'builtin' },
+      { name: 'review', description: 'Review a branch', source: 'plugin', plugin: 'tools' },
+    ] as Record<string, unknown>[],
+    /** How many times the command list was read. */
+    commandLists: 0,
+    /** Every slash command run beneath, as its typed line; `/compact` included. */
+    commandRuns: [] as string[],
+    /** What a run of a listed command answers: its output text; unnamed ones answer no text. */
+    commandAnswers: new Map<string, { text?: string }>(),
+    /** The prompts submitted and the commands run, in order, as `prompt <text>` and `run <line>`. */
+    order: [] as string[],
     /** How the compaction beneath answers: it lands, is vetoed, or throws. */
     compact: 'land' as 'land' | 'skip' | 'throw',
     /** While set, the compaction beneath waits on it, so a test can look at the feed mid-compaction. */
@@ -55,8 +72,8 @@ function world(on: On, opts: { dashboard?: unknown; intake?: Intake } = {}) {
     prompts: [] as string[],
     /** Each submitted prompt's origin, as the hooks beneath saw it. */
     origins: [] as unknown[],
-    /** The board-answer inbox: one text per held message; a drain claims them all. */
-    inbox: [] as string[],
+    /** The board-answer inbox: one text per held message, or a command entry; a drain claims them all. */
+    inbox: [] as (string | { name: string; args: string })[],
     /** Held messages promoted to steering: a steer-only drain claims these alone, a full drain claims them too. */
     steered: [] as string[],
     /** Every full inbox drain call's arguments. */
@@ -102,7 +119,7 @@ function world(on: On, opts: { dashboard?: unknown; intake?: Intake } = {}) {
       if (w.intake === 'throw') throw new Error('server gone')
       if (w.intake === 'error') return text('unknown session_key', true)
       if (w.intake === 'off') return text('dashboard off: nothing recorded\n')
-      const accepts = [...(w.acceptsStatus ? ['status'] : []), ...(w.acceptsCompact ? ['compact'] : [])]
+      const accepts = [...(w.acceptsStatus ? ['status'] : []), ...(w.acceptsCompact ? ['compact'] : []), ...(w.acceptsCommands ? ['commands', 'command'] : [])]
       return text(`ok: 1 of 1 events applied\n${accepts.length > 0 ? `accepts: ${accepts.join(', ')}\n` : ''}`)
     }
     if (e.tool === INBOX_DRAIN_TOOL && e.args.interrupt_only === true) {
@@ -115,8 +132,16 @@ function world(on: On, opts: { dashboard?: unknown; intake?: Intake } = {}) {
       if (!steerOnly) w.interrupts.splice(0)
       ;(steerOnly ? w.steerDrains : w.inboxDrains).push({ ...e.args })
       if (steerOnly && w.hangSteer) return new Promise<never>(() => {})
-      const claimed = steerOnly ? w.steered.splice(0) : [...w.inbox.splice(0), ...w.steered.splice(0)]
-      return text(JSON.stringify({ messages: claimed.map((t, i) => ({ id: `m${i}`, sent_at: 1, text: t, parts: [t], chips: [] })) }))
+      const claimed: (string | { name: string; args: string })[] = steerOnly ? w.steered.splice(0) : [...w.inbox.splice(0), ...w.steered.splice(0)]
+      return text(
+        JSON.stringify({
+          messages: claimed.map((t, i) =>
+            typeof t === 'string'
+              ? { id: `m${i}`, sent_at: 1, text: t, parts: [t], chips: [] }
+              : { id: `m${i}`, sent_at: 1, text: t.args === '' ? `/${t.name}` : `/${t.name} ${t.args}`, parts: [], chips: [], command: t },
+          ),
+        }),
+      )
     }
     if (e.tool !== 'config_get') return text(`no ${e.tool} here`, true)
     if (e.args.key === KNOB.dashboard && opts.dashboard === 'unreadable') return text('ws-mcp is unhealthy', true)
@@ -163,10 +188,20 @@ function world(on: On, opts: { dashboard?: unknown; intake?: Intake } = {}) {
     return { messages: [{ role: 'user', text: 'summary', toolUses: [] }] } as never
   })
   // `/compact` compacts as a typed one does: a manual compaction through every plugin's session.compact hook.
-  on('command.run', async ($, e) => {
-    if (e.command !== 'compact') return {}
+  // A name the list does not hold is left to the engine beneath, which answers none, so the run rejects.
+  on('command.run', async ($, e, next) => {
+    const line = e.args === '' ? `/${e.command}` : `/${e.command} ${e.args}`
+    w.commandRuns.push(line)
+    w.order.push(`run ${line}`)
+    if (!w.commands.some((c) => c.name === e.command)) return next(e)
+    const answer = w.commandAnswers.get(e.command)
+    if (e.command !== 'compact') return answer ?? {}
     await w.engine!.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: 'long', toolUses: [] }] } as never)
-    return {}
+    return answer ?? {}
+  })
+  on('command.list', () => {
+    w.commandLists += 1
+    return { value: structuredClone(w.commands) as never }
   })
   on('tool.check', () => ({ decision: w.check, reason: 'the world decides' }) as never)
   on('agent.spawn', () => ({ model: 'haiku', agentId: 'a77' }) as never)
@@ -193,6 +228,7 @@ function world(on: On, opts: { dashboard?: unknown; intake?: Intake } = {}) {
       return { drop: 'dropped by the test' }
     }
     w.prompts.push(e.text)
+    w.order.push(`prompt ${e.text}`)
     w.origins.push(e.origin)
     return { text: e.text }
   })
@@ -1009,4 +1045,152 @@ test('knob on: a message held through the compaction lever\'s own compaction fol
   await w.clock.advance(CONTINUATION_WINDOW_MS)
   await w.clock.advance(50)
   expect(w.prompts).toEqual([resumeText(w.plugin), labelWhiteboard(w.plugin, 'pick B')])
+})
+
+// ---- Slash commands ------------------------------------------------------
+
+const commandLists = (w: World) => sent(w).filter((e) => e.kind === 'commands')
+const commandLines = (w: World) => sent(w).filter((e) => e.kind === 'command')
+const cmd = (name: string, args = '') => ({ name, args })
+
+test('the command list is never sent while the intake results do not name commands', async ($, on) => {
+  const w = world(on, { dashboard: true })
+  w.acceptsStatus = true
+  await start($, w)
+  await flush(w)
+  await $.turn.start({ text: 'x', turnId: 't' })
+  await $.turn.complete({ answer: 'hi', durationMs: 1, isAborted: false, turnId: 't', reason: 'answer' } as never)
+  await flush(w)
+  await flush(w)
+  expect(w.commandLists).toBeGreaterThan(0)
+  expect(commandLists(w)).toEqual([])
+})
+
+test('the command list goes once a result names commands, as name, description, and source; a turn end sends it again only when it changed, and a resync sends it behind its reset', { timeoutMs: 20_000 }, async ($, on) => {
+  const w = world(on, { dashboard: true })
+  w.acceptsCommands = true
+  await start($, w)
+  await flush(w)
+  expect(commandLists(w)).toEqual([
+    {
+      kind: 'commands',
+      commands: [
+        { name: 'compact', description: 'Clear the history but keep a summary', source: 'builtin' },
+        { name: 'context', description: 'Show context usage', source: 'builtin' },
+        { name: 'config', description: 'Open the settings panel', source: 'builtin' },
+        { name: 'review', description: 'Review a branch', source: 'plugin' },
+      ],
+    },
+  ])
+  // An unchanged list at a turn end is read but not sent again.
+  const reads = w.commandLists
+  await $.turn.start({ text: 'x', turnId: 't' })
+  await $.turn.complete({ answer: 'hi', durationMs: 1, isAborted: false, turnId: 't', reason: 'answer' } as never)
+  await flush(w)
+  expect(w.commandLists).toBe(reads + 1)
+  expect(commandLists(w).length).toBe(1)
+  // A command added during the next turn goes at its end.
+  w.commands.push({ name: 'deploy', description: 'Ship it', source: 'user' })
+  await $.turn.start({ text: 'y', turnId: 't2' })
+  await $.turn.complete({ answer: 'hi', durationMs: 1, isAborted: false, turnId: 't2', reason: 'answer' } as never)
+  await flush(w)
+  expect(commandLists(w).length).toBe(2)
+  expect((commandLists(w).at(-1)!.commands as unknown[]).at(-1)).toEqual({ name: 'deploy', description: 'Ship it', source: 'user' })
+  // A failed call resyncs: the list follows the reset again, once the resync's answer names commands.
+  w.intake = 'error'
+  await $.turn.start({ text: 'z', turnId: 't3' })
+  await flush(w)
+  w.intake = 'ok'
+  await w.clock.advance(2500)
+  await w.clock.advance(2500)
+  const resync = w.intakes.findLastIndex((c) => c.events[0]?.kind === 'reset')
+  expect(resync).toBeGreaterThan(0)
+  expect(w.intakes.slice(resync).flatMap((c) => c.events).filter((e) => e.kind === 'commands').length).toBe(1)
+})
+
+test('knob on: an idle drain of text, a command, and text submits the first text, runs the command as typed, and submits the last text only after the run; the command is never labelled or joined', async ($, on) => {
+  const w = world(on, { dashboard: true })
+  w.acceptsCommands = true
+  w.commandAnswers.set('context', { text: 'Context: 12k of 200k' })
+  await start($, w)
+  w.inbox.push('A', cmd('context', 'all'), 'B')
+  w.exits.at(-1)!(0, ['board'])
+  await w.clock.settle()
+  await w.clock.settle()
+  expect(w.order).toEqual([`prompt ${labelWhiteboard(w.plugin, 'A')}`, 'run /context all', `prompt ${labelWhiteboard(w.plugin, 'B')}`])
+  expect(w.prompts.some((p) => p.includes('/context'))).toBe(false)
+  expect(w.rows).toEqual([])
+  await flush(w)
+  expect(commandLines(w)).toEqual([{ kind: 'command', command: '/context all', text: 'Context: 12k of 200k', at: expect.any(Number) }])
+  // The text messages enter the ring as whiteboard messages; the command only as its own line.
+  expect(sent(w).filter((e) => e.kind === 'user').map((e) => e.text)).toEqual(['A', 'B'])
+})
+
+test('knob on: a run with no text sends the command line without text; a refused run sends the refusal as its text', async ($, on) => {
+  const w = world(on, { dashboard: true })
+  w.acceptsCommands = true
+  await start($, w)
+  await flush(w)
+  w.inbox.push(cmd('config'), cmd('nosuch'), 'after')
+  w.exits.at(-1)!(0, ['board'])
+  await w.clock.settle()
+  await w.clock.settle()
+  await flush(w)
+  expect(w.commandRuns).toEqual(['/config', '/nosuch'])
+  expect(commandLines(w)).toEqual([
+    { kind: 'command', command: '/config', at: expect.any(Number) },
+    // Nothing beneath answers an unknown command, so the engine rejects the run.
+    { kind: 'command', command: '/nosuch', text: expect.stringMatching(/^The command did not run: ./), at: expect.any(Number) },
+  ])
+  expect(w.logs.some((l) => l.includes('/nosuch failed'))).toBe(true)
+  // The message after the refused command still goes.
+  expect(w.prompts).toEqual([labelWhiteboard(w.plugin, 'after')])
+})
+
+test('knob on: a command\'s outcome reaches the intake only while it names command', async ($, on) => {
+  const w = world(on, { dashboard: true })
+  w.commandAnswers.set('context', { text: 'Context: 12k' })
+  await start($, w)
+  await flush(w)
+  w.inbox.push(cmd('context'))
+  w.exits.at(-1)!(0, ['board'])
+  await w.clock.settle()
+  await flush(w)
+  expect(w.commandRuns).toEqual(['/context'])
+  expect(commandLines(w)).toEqual([])
+})
+
+test('knob on: a command sent while the lead\'s turn runs waits for the turn end, a tool boundary included', async ($, on) => {
+  const w = world(on, { dashboard: true })
+  await start($, w)
+  await $.turn.start({ text: 'x', turnId: 't' })
+  w.inbox.push(cmd('context'))
+  w.exits.at(-1)!(0, ['board'])
+  await w.clock.advance(50)
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'u1', command: 'ls' } as never)
+  await w.clock.advance(50)
+  expect(w.commandRuns).toEqual([])
+  expect(w.rows).toEqual([])
+  await $.turn.complete({ answer: 'done', durationMs: 1, isAborted: false, turnId: 't', reason: 'answer' } as never)
+  await w.clock.advance(50)
+  expect(w.commandRuns).toEqual(['/context'])
+  expect(w.prompts).toEqual([])
+})
+
+test('knob on: a command sent during a main compaction runs once the compaction settled', { timeoutMs: 20_000 }, async ($, on) => {
+  const w = world(on, { dashboard: true })
+  await start($, w)
+  let open!: () => void
+  w.compactGate = new Promise<void>((resolve) => (open = resolve))
+  const running = compact($, 'auto')
+  await w.clock.advance(50)
+  w.inbox.push(cmd('context'), 'B')
+  w.exits.at(-1)!(0, ['board'])
+  await w.clock.advance(50)
+  expect(w.commandRuns).toEqual([])
+  expect(w.prompts).toEqual([])
+  open()
+  await running
+  await w.clock.advance(50)
+  expect(w.order).toEqual(['run /context', `prompt ${labelWhiteboard(w.plugin, 'B')}`])
 })

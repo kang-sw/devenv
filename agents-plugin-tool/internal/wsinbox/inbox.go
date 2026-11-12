@@ -22,6 +22,9 @@
 //     for steering under a new name, and removes the claim. A steered entry
 //     is still held (cancel still takes it), but no later send merges into
 //     it, so a promoted message never absorbs text the user did not promote.
+//     The new name keeps the entry's stamp (only its random suffix changes),
+//     so a steered entry a full drain takes keeps its place in order: text
+//     sent before a held command still reaches the session before it.
 //   - Interrupt claims every held message entry, steered or not, removes
 //     them, and writes an interrupt entry, returning the claimed messages so
 //     the page can put them back in its composer.
@@ -30,6 +33,17 @@
 // carries only its creation time (SentAt) and is never a message: no send
 // merges into it, it counts toward no image cap, Held and MessageNames leave
 // it out, and Cancel and Steer refuse it.
+//
+// A command entry holds one slash command the user picked in the composer
+// (Command): its name and arguments, never text the inbox parses. It carries
+// nothing else, so the adapter runs it natively instead of submitting it as
+// text. It is a held message (Held, MessageNames, Cancel, Interrupt, and
+// Drain treat it as one), but no send merges into it and a command send
+// never merges into another entry, and Steer refuses it: a command waits for
+// the turn end, as one typed in the terminal does. A drain returns it in
+// order among the messages; the adapter splits its batch there, so text
+// before a command reaches the session before it runs and text after it,
+// after.
 //
 // Held means undrained: an entry in the inbox directory. A reader tells a
 // held entry from a drained one by the directory it sits in. A full drain
@@ -112,6 +126,9 @@ var (
 	// ErrInvalid reports a send that breaks a limit or carries a malformed
 	// answer; its wrapped text says which.
 	ErrInvalid = errors.New("invalid message")
+	// ErrCommand reports a steer of a command entry, which only runs at the
+	// turn end.
+	ErrCommand = errors.New("a slash command runs when the turn ends; it cannot be steered")
 
 	entryNamePattern = regexp.MustCompile(`^[0-9]{8}T[0-9]{6}\.[0-9]{9}Z-[0-9a-f]{8}\.json$`)
 	chipIDPattern    = regexp.MustCompile(`^[0-9]{1,6}$`)
@@ -120,6 +137,10 @@ var (
 	// imageLinePattern is an ImageLine.
 	imageLinePattern = regexp.MustCompile(`^Image #([1-9][0-9]{0,5}): (.+)$`)
 	answerPattern    = regexp.MustCompile(`^[A-Za-z0-9]{1,16}$`)
+	// commandNamePattern is a slash command's name without its slash: a
+	// built-in (compact), a namespaced plugin or skill command (ws:lead-run,
+	// skill:name), or an MCP prompt (mcp__server__prompt).
+	commandNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:-]{0,199}$`)
 	// attachmentNamePattern is <upload-id>-<n>.<ext>: a 16-hex upload id
 	// minted per message request, the image's 1-based index in it, and the
 	// extension of its sniffed type.
@@ -172,6 +193,24 @@ type Entry struct {
 	// Interrupt marks an interrupt entry (Interrupt): a request to stop the
 	// session's running turn, never a message. It carries no other content.
 	Interrupt bool `json:"interrupt,omitempty"`
+	// Command marks a command entry: one slash command for the adapter to
+	// run natively. It carries no other content but SentAt.
+	Command *Command `json:"command,omitempty"`
+}
+
+// Command is a slash command as the composer picked it: the name without
+// its slash, and everything after the name as the user typed it.
+type Command struct {
+	Name string `json:"name"`
+	Args string `json:"args,omitempty"`
+}
+
+// Line is the command as typed in a terminal: "/name" or "/name args".
+func (c Command) Line() string {
+	if c.Args == "" {
+		return "/" + c.Name
+	}
+	return "/" + c.Name + " " + c.Args
 }
 
 // Record is an entry read from disk with its file name.
@@ -272,8 +311,13 @@ func NameForID(id string) (string, bool) {
 
 // Text is the message the session receives: the answer block (AnswerBlock)
 // first, then the mentions (MentionBlock), then each part as its own
-// paragraph, then one ImageLine per image.
+// paragraph, then one ImageLine per image. A command entry's text is its
+// typed line (Command.Line), which a host that runs a bare "/name args"
+// message as the command takes as it is.
 func (e Entry) Text() string {
+	if e.Command != nil {
+		return e.Command.Line()
+	}
 	var paras []string
 	if block := AnswerBlock(e.Chips, e.Topics); block != "" {
 		paras = append(paras, block)
@@ -306,8 +350,12 @@ func (e Entry) Text() string {
 // unique and at most maxImageNum, and an image numbered 0 (or every image,
 // when ImageNums is empty) gets the next number above the highest. The
 // result always numbers its images. It returns ErrEmpty when nothing is left
-// to send and an ErrInvalid error for a malformed one.
+// to send and an ErrInvalid error for a malformed one. A command entry
+// (normalizeCommand) carries its command alone.
 func Normalize(e Entry) (Entry, error) {
+	if e.Command != nil {
+		return normalizeCommand(e)
+	}
 	out := Entry{SchemaVersion: SchemaVersion, SentAt: e.SentAt}
 	size := 0
 	for _, p := range e.Parts {
@@ -424,6 +472,29 @@ func Normalize(e Entry) (Entry, error) {
 		return Entry{}, ErrEmpty
 	}
 	return out, nil
+}
+
+// normalizeCommand checks a command send: a name (one leading slash
+// dropped) that commandNamePattern accepts, arguments trimmed and within
+// the text limit, and no other content, since a command is never joined
+// with a message.
+func normalizeCommand(e Entry) (Entry, error) {
+	c := Command{Name: strings.TrimPrefix(strings.TrimSpace(e.Command.Name), "/"), Args: strings.TrimSpace(e.Command.Args)}
+	if !commandNamePattern.MatchString(c.Name) {
+		return Entry{}, fmt.Errorf("%w: command name %q", ErrInvalid, c.Name)
+	}
+	if len(c.Args) > maxTextBytes {
+		return Entry{}, fmt.Errorf("%w: command arguments are longer than %d bytes", ErrInvalid, maxTextBytes)
+	}
+	for _, p := range e.Parts {
+		if strings.TrimSpace(p) != "" {
+			return Entry{}, fmt.Errorf("%w: a command carries no text", ErrInvalid)
+		}
+	}
+	if len(e.Chips) > 0 || len(e.Topics) > 0 || len(e.Mentions) > 0 || len(e.Images) > 0 || e.Steer || e.Interrupt {
+		return Entry{}, fmt.Errorf("%w: a command carries no answers, mentions, or images", ErrInvalid)
+	}
+	return Entry{SchemaVersion: SchemaVersion, SentAt: e.SentAt, Command: &c}, nil
 }
 
 // putChip replaces the chip for c.ID in place, or appends c.
@@ -586,6 +657,12 @@ func randomHex(n int) (string, error) {
 // writeEntry commits entry under a fresh name in dir through temp+rename, so
 // no reader sees a partial entry.
 func writeEntry(dir string, entry Entry) (string, error) {
+	return writeEntryAt(dir, entry, nextStamp().Format(stampLayout))
+}
+
+// writeEntryAt is writeEntry under the given stamp with a fresh random
+// suffix, so the entry sorts where an entry of that stamp does.
+func writeEntryAt(dir string, entry Entry, stamp string) (string, error) {
 	raw, err := json.Marshal(entry)
 	if err != nil {
 		return "", err
@@ -594,7 +671,7 @@ func writeEntry(dir string, entry Entry) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	name := nextStamp().Format(stampLayout) + "-" + suffix + ".json"
+	name := stamp + "-" + suffix + ".json"
 	tmp, err := os.CreateTemp(dir, ".tmp-*")
 	if err != nil {
 		return "", fmt.Errorf("create inbox temp file: %w", err)
@@ -649,7 +726,8 @@ func claim(dir, name, op string) (string, error) {
 // Send holds add in the inbox at dir: merged into the newest held entry that
 // is not steered when there is one, or as a new entry. It returns the
 // resulting entry's name and whether it merged. add is normalized first
-// (Normalize); its SentAt is set from now when zero.
+// (Normalize); its SentAt is set from now when zero. A command send is
+// always a new entry.
 func Send(dir string, add Entry, now time.Time) (name string, merged bool, err error) {
 	if add.SentAt == 0 {
 		add.SentAt = now.UnixMilli()
@@ -664,6 +742,10 @@ func Send(dir string, add Entry, now time.Time) (name string, merged bool, err e
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", false, fmt.Errorf("create inbox dir: %w", err)
+	}
+	if add.Command != nil {
+		name, err = writeEntry(dir, add)
+		return name, false, err
 	}
 	rec, ok, err := MergeTarget(dir)
 	if err != nil {
@@ -684,7 +766,7 @@ func Send(dir string, add Entry, now time.Time) (name string, merged bool, err e
 		return "", false, err
 	}
 	base, err := readEntry(claimed)
-	if err != nil || base.Steer {
+	if err != nil || base.Steer || base.Command != nil {
 		// Leave an unreadable entry where it was; this send stands alone. A
 		// steered one cannot be here unless it was steered after the target
 		// was chosen, and it accepts no merge either.
@@ -703,8 +785,11 @@ func Send(dir string, add Entry, now time.Time) (name string, merged bool, err e
 }
 
 // MergeTarget is the held entry a send at dir would merge into: the newest
-// message that is not steered (never an interrupt entry); false when there
-// is none. An entry that cannot be read is skipped. A caller that caps what
+// message that is not steered (never an interrupt entry) and that no held
+// command entry follows; false when there is none. A command entry is never
+// a target, and a send after one starts a new entry rather than joining an
+// older message, so text sent after a command still reaches the session
+// after it. An entry that cannot be read is skipped. A caller that caps what
 // one entry may carry counts the target's share through it.
 func MergeTarget(dir string) (Record, bool, error) {
 	names, err := Names(dir)
@@ -715,6 +800,9 @@ func MergeTarget(dir string) (Record, bool, error) {
 		e, err := readEntry(filepath.Join(dir, names[i]))
 		if err != nil {
 			continue
+		}
+		if e.Command != nil {
+			break
 		}
 		if !e.Steer && !e.Interrupt {
 			return Record{Name: names[i], Entry: e}, true, nil
@@ -727,8 +815,8 @@ func MergeTarget(dir string) (Record, bool, error) {
 // and writes the same entry with Steer set under a fresh name, so entry files
 // stay never rewritten. It returns the steered entry's name; an entry already
 // steered is left as it is and its own name returned. It returns ErrGone
-// when the entry is no longer held, or is an interrupt entry, which it
-// leaves in place.
+// when the entry is no longer held, or is an interrupt entry, and
+// ErrCommand for a command entry; it leaves either in place.
 func Steer(dir, name string) (string, error) {
 	if !entryNamePattern.MatchString(name) {
 		return "", ErrGone
@@ -742,6 +830,10 @@ func Steer(dir, name string) (string, error) {
 		_ = rename(claimed, filepath.Join(dir, name))
 		return "", ErrGone
 	}
+	if err == nil && entry.Command != nil {
+		_ = rename(claimed, filepath.Join(dir, name))
+		return "", ErrCommand
+	}
 	if err != nil || entry.Steer {
 		// Leave an unreadable or already steered entry held as it was.
 		_ = rename(claimed, filepath.Join(dir, name))
@@ -751,7 +843,8 @@ func Steer(dir, name string) (string, error) {
 		return name, nil
 	}
 	entry.Steer = true
-	steered, err := writeEntry(dir, entry)
+	// The same stamp keeps the entry's place among the held entries.
+	steered, err := writeEntryAt(dir, entry, name[:strings.LastIndexByte(name, '-')])
 	if err != nil {
 		// Put the claimed entry back so the message is not lost.
 		_ = rename(claimed, filepath.Join(dir, name))

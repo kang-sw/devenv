@@ -1581,5 +1581,15 @@
   "js.lead.handoff.confirm.other": "將此工作階段交給終端機？正在執行的 {0} 個背景工作會隨處理程序結束。",
   "js.lead.handed": "此工作階段已交給終端機。",
   "js.lead.handed.resume": "在終端機中繼續的指令",
-  "js.lead.handed.copy": "複製指令"
+  "js.lead.handed.copy": "複製指令",
+  "composer.cmd.title": "斜線命令：單獨傳送；看板回答與備註留給下一則訊息",
+  "composer.cmd.remove": "移除命令",
+  "entry.command.terminal": "無文字輸出：它在終端機中開啟",
+  "js.cmd.label": "斜線命令：上/下移動，Tab 或 Enter 選擇，Escape 關閉",
+  "js.cmd.group.user": "使用者命令",
+  "js.cmd.group.agent": "代理命令",
+  "js.cmd.group.rest": "其他命令",
+  "js.cmd.args": "/{0} 的引數（選填）",
+  "js.cmd.images": "斜線命令單獨傳送，不能附帶圖片：請移除圖片，或移除命令。",
+  "js.cmd.astext": "輸入框已有另一個命令，退回的斜線命令以文字形式返回：要執行它，請從 / 重新選擇。"
 }

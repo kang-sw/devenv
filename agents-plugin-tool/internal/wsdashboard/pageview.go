@@ -83,6 +83,9 @@ type SessionView struct {
 	Conversation ConversationView
 	// Band is the status band around the composer.
 	Band BandView
+	// Commands are the slash commands the session's adapter runs from a
+	// composer command entry (the snapshot's list); none offers no picker.
+	Commands []wslive.SlashCommand
 	// Host is what the runner of a hosted session reports beyond the
 	// adapter's events (background tasks, a typed failure, broken MCP
 	// servers, an API retry); nil for an adapter-fed session.
@@ -489,6 +492,7 @@ func buildSessionView(in pageInputs) SessionView {
 	lookup := in.Lookup
 	v.Lead = leadView(in.Snapshot.Lead)
 	v.Band = bandView(in.Snapshot)
+	v.Commands = in.Snapshot.Commands
 	v.Host = in.Snapshot.Host
 	v.Tree.Agents = agentTree(in.Snapshot.Agents, lookup)
 	for _, a := range in.Snapshot.Agents {

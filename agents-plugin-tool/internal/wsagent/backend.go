@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/kang-sw/devenv/internal/wsinbox"
 	"github.com/kang-sw/devenv/internal/wslive"
 )
 
@@ -135,6 +136,13 @@ const (
 // harness works it in at its next step, inside the same turn.
 type steerer interface {
 	Steer(text string) error
+}
+
+// commandRunner is a Process that runs a dashboard slash command through a
+// mapping of its own (pi's /compact is its compact command); any other
+// Process gets the command's bare typed line as a turn.
+type commandRunner interface {
+	RunCommand(cmd wsinbox.Command) error
 }
 
 // ErrUnsupported is a Process's answer to a control it has no in-stream

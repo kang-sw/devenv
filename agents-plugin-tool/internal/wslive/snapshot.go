@@ -151,6 +151,40 @@ type Snapshot struct {
 	// Host is what a host that runs the session's harness itself (the
 	// agent runner) reports about it; absent for an adapter-fed session.
 	Host *Host `json:"host,omitempty"`
+	// Commands is the slash commands the session's adapter runs from a page
+	// command entry, in the host's own order (a commands event); absent
+	// when the adapter reports none, and then the page sends it no command.
+	Commands []SlashCommand `json:"commands,omitempty"`
+}
+
+// Command list caps.
+const (
+	// CommandCap bounds a commands event's list; the rest are dropped.
+	CommandCap = 500
+	// CommandNameRunes, CommandDescriptionRunes, and CommandLineRunes cap a
+	// command's name, its description, and a command line's typed line.
+	CommandNameRunes        = 200
+	CommandDescriptionRunes = 300
+	CommandLineRunes        = 2000
+)
+
+// Command layers: who may invoke a command, when the host's listing tells.
+const (
+	LayerUser  = "user"
+	LayerAgent = "agent"
+)
+
+// SlashCommand is one command an adapter reports. Source names where it
+// comes from as the host labels it (builtin, plugin, user, mcp; extension,
+// prompt, skill); the page shows it muted. Layer is LayerUser or
+// LayerAgent when the host's listing tells a command only the user, or only
+// the agent, may invoke; empty when it cannot tell, and then the page shows
+// one list.
+type SlashCommand struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Source      string `json:"source,omitempty"`
+	Layer       string `json:"layer,omitempty"`
 }
 
 // Usage limit kinds: the plan's rolling 5-hour and weekly limits.

@@ -1,10 +1,11 @@
-import type { AgentInfo, HookStream, ProcessSpawnChunk, ProcessSpawnResult, Register, SessionUsage, ToolCallResult } from 'claude-code'
+import type { AgentInfo, CommandInfo, HookStream, ProcessSpawnChunk, ProcessSpawnResult, Register, SessionUsage, ToolCallResult } from 'claude-code'
 
 import { createBand, drawBand, readGit, type Mailbox } from './band'
 import { appendOwn, createCaptions, drawCall, drawEmpty, drawRun, groupUnit, submitOwn, toolUseUnit, type OwnDeliveryEdges } from './captions'
 import { createCompaction } from './compaction'
 import {
   callArgs,
+  commandList,
   createDashboard,
   INBOX_DRAIN_TOOL,
   INTAKE_TOOL,
@@ -90,7 +91,15 @@ import {
 //   ends, unless the user promoted it to steering, which is appended into
 //   the running turn at the next main-thread tool call's result; while the
 //   main conversation compacts, held until it settles and any compaction
-//   continuation the lever queued has gone first. The same
+//   continuation the lever queued has gone first. The feed also reports the
+//   session's slash commands ($.command.list(), read at the feed's start and
+//   at each main-thread turn end, sent when the list changed), so the page
+//   offers its command picker; a command entry the page sent drains in its
+//   place among the messages and is run through $.command.run as if typed,
+//   never joined with text or labelled: the messages before it are submitted
+//   first, it runs once the session is idle, and the messages after it wait
+//   in the mod until its run settles; its output (or the refusal) goes to the
+//   page as a command event. The same
 //   wait wakes on the page's interrupt, which aborts the running
 //   main-thread turn through $.turn.abort when that turn started before the
 //   click, and holds what the cut turn leaves behind as rows rather than
@@ -576,6 +585,10 @@ export const register: Register = (on) => {
   let dashUsage: (() => Promise<SessionUsage>) | undefined
   /** The session's agent list for the feed's subagent tree, set at session.start; undefined before, which reads as a failed read. */
   let dashAgents: (() => Promise<AgentInfo[]>) | undefined
+  /** The session's slash command list for the feed, set at session.start; undefined before. */
+  let dashCommands: (() => Promise<CommandInfo[]>) | undefined
+  /** Bumped by every command list read: only the newest read's answer reaches the feed. */
+  let dashCommandReads = 0
   /** The feed's usage read: one at a time, a request during it leaving one trailing read. */
   let dashUsageBusy = false
   let dashUsageAgain = false
@@ -690,6 +703,21 @@ export const register: Register = (on) => {
         dashUsageBusy = false
       }
     })()
+  }
+
+  /** Reads the slash command list and hands it to the feed, while the feed runs; the feed sends it only when it changed. */
+  const feedCommands = () => {
+    const read = dashCommands
+    if (!read || !dashboard.active()) return
+    const seq = ++dashCommandReads
+    void Promise.resolve()
+      .then(read)
+      .then(
+        (list) => {
+          if (seq === dashCommandReads && dashboard.active()) dashboard.commands(commandList(list))
+        },
+        (err) => dashLog(`command list read failed: ${String(err)}`),
+      )
   }
 
   on('session.start', async ($, e, next) => {
@@ -945,10 +973,18 @@ export const register: Register = (on) => {
           },
           // Promoted messages: claimed at a main-thread tool boundary and
           // appended into the running turn, as mailbox steer appends mail.
+          // A steer-only drain never returns a command entry; one that did is
+          // shown to the user rather than steered as text or lost.
           drainSteer: async (key) => {
             await serverResolved
             if (!server) throw new Error('MCP server not resolved')
-            return parseInboxDrain(await callText(server, INBOX_DRAIN_TOOL, { session_key: key, steer_only: true, format: 'json' }))
+            const items = parseInboxDrain(await callText(server, INBOX_DRAIN_TOOL, { session_key: key, steer_only: true, format: 'json' }))
+            const texts: string[] = []
+            for (const item of items) {
+              if (typeof item === 'string') texts.push(item)
+              else $.ui.log(`${label}: a steered dashboard drain returned the command ${item.text}; it was not run`)
+            }
+            return texts
           },
           steer: async (texts) => {
             const text = texts.join('\n\n')
@@ -956,6 +992,27 @@ export const register: Register = (on) => {
             if (res.deny !== undefined) throw new Error(`row refused: ${res.deny}`)
             dashboard.whiteboardSteered(text)
           },
+          // A command entry: run as if typed, from outside any hook (the host
+          // refuses a command from a hook the turn waits on, and a turn end's
+          // flush starts in one), its output or refusal sent to the page.
+          run: (item) =>
+            new Promise<void>((resolve, reject) => {
+              $.clock.after(0, () => {
+                Promise.resolve()
+                  .then(() => $.command.run({ command: item.command.name, args: item.command.args }))
+                  .then(
+                    (res) => {
+                      const text = typeof res?.text === 'string' && res.text.trim() !== '' ? res.text : undefined
+                      dashboard.commandRan(item.text, text)
+                      resolve()
+                    },
+                    (err) => {
+                      dashboard.commandRan(item.text, `The command did not run: ${err instanceof Error ? err.message : String(err)}`)
+                      reject(err)
+                    },
+                  )
+              })
+            }),
           // The page's interrupt: its entries claimed alone, never a message.
           drainInterrupt: async (key) => {
             await serverResolved
@@ -1021,6 +1078,7 @@ export const register: Register = (on) => {
     }
     dashUsage = () => $.session.usage({ breakdown: 'summary' })
     dashAgents = () => $.agent.list()
+    dashCommands = () => $.command.list()
     boardOn = false
     // Hosted: the daemon reads the session's output itself, so the feed stays off unread.
     void hostedRead
@@ -1034,8 +1092,9 @@ export const register: Register = (on) => {
         boardOn = value === true
         if (value === true) {
           dashboard.start()
-          // Figures from the start, not only after the first measure.
+          // Figures and the command list from the start, not only after the first measure or turn end.
           feedStatus()
+          feedCommands()
         } else dashboard.stop()
         // A wait armed before the read settled takes the board flag now.
         watcher?.boardChanged()
@@ -1602,6 +1661,8 @@ export const register: Register = (on) => {
       // The feed's turn end too: a turn left open would ignore every later turn start.
       dashboard.turnCompleted(e.agentId, e.answer, e.reason)
     }
+    // A plugin or MCP server may have added or dropped commands during the turn.
+    if (e.agentId === undefined) feedCommands()
     try {
       compaction.turnComplete(e.agentId, e.reason)
     } catch (err) {

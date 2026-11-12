@@ -45,6 +45,14 @@ import (
 // ones (wsinbox.Merge), under d.inboxMu, so the page never numbers across
 // sends. A steer rewrites the entry whole, so a steered entry keeps its image
 // paths and numbers.
+//
+// A message may instead be a slash command the composer picked: the body's
+// command and args fields, never text the daemon parses. It is held as its
+// own command entry (wsinbox.Command), which no send merges with and steer
+// refuses, and is offered only for a session whose adapter reports a command
+// list in its snapshot, so an adapter that cannot run one never drains one.
+// A cancel or interrupt answers a command entry with its command, so the
+// page puts it back as a command selection.
 
 const (
 	// inboxBodyLimit bounds a write route's request body, and a message's
@@ -74,6 +82,11 @@ type messageRequest struct {
 	Images  []imageUpload `json:"images"`
 	Refs    []string      `json:"refs"`
 	RefNums []int         `json:"refNums"`
+	// Command, when set, makes the message a slash command: its name
+	// without the slash, and Args everything after it. It carries nothing
+	// else.
+	Command string `json:"command"`
+	Args    string `json:"args"`
 }
 
 // imageUpload is one new image: the browser's file name, used only in
@@ -214,7 +227,7 @@ func (d *Daemon) handleInboxWrite(w http.ResponseWriter, r *http.Request, replyI
 	var status int
 	var answer any
 	if route == "message" {
-		status, answer = d.messageWrite(dir, raw, now)
+		status, answer = d.messageWrite(dir, replyID, raw, now)
 	} else {
 		d.inboxMu.Lock()
 		status, answer = d.inboxWrite(dir, route, raw, now)
@@ -226,7 +239,7 @@ func (d *Daemon) handleInboxWrite(w http.ResponseWriter, r *http.Request, replyI
 // messageWrite performs the message route against the inbox at dir. It
 // parses and checks the body, decoding and sniffing every new image, before
 // it takes d.inboxMu for the writes.
-func (d *Daemon) messageWrite(dir string, raw []byte, now time.Time) (int, any) {
+func (d *Daemon) messageWrite(dir, replyID string, raw []byte, now time.Time) (int, any) {
 	var req messageRequest
 	if err := json.Unmarshal(raw, &req); err != nil {
 		return http.StatusBadRequest, "malformed message"
@@ -245,9 +258,35 @@ func (d *Daemon) messageWrite(dir string, raw []byte, now time.Time) (int, any) 
 		}
 		images = append(images, img)
 	}
+	if req.Command != "" {
+		return d.sendCommand(dir, replyID, req, now)
+	}
 	d.inboxMu.Lock()
 	defer d.inboxMu.Unlock()
 	return d.sendMessage(dir, req, images, now)
+}
+
+// sendCommand holds one slash command in the inbox at dir as its own entry,
+// refused unless the session's adapter reports a command list.
+func (d *Daemon) sendCommand(dir, replyID string, req messageRequest, now time.Time) (int, any) {
+	if len(req.Images) > 0 || len(req.Refs) > 0 {
+		return http.StatusBadRequest, "a slash command carries no images"
+	}
+	if snap := d.pages().readSnapshot(replyID); snap == nil || len(snap.Commands) == 0 {
+		return http.StatusConflict, "this session's host adapter runs no slash commands from the dashboard"
+	}
+	entry := wsinbox.Entry{Parts: []string{req.Text}, Chips: req.Chips, Topics: req.Topics, Mentions: req.Mentions, Command: &wsinbox.Command{Name: req.Command, Args: req.Args}}
+	d.inboxMu.Lock()
+	name, _, err := wsinbox.Send(dir, entry, now)
+	d.inboxMu.Unlock()
+	if err != nil {
+		if errors.Is(err, wsinbox.ErrEmpty) || errors.Is(err, wsinbox.ErrInvalid) {
+			return http.StatusBadRequest, err.Error()
+		}
+		fmt.Fprintf(d.log, "dashboard: inbox send: %v\n", err)
+		return http.StatusInternalServerError, "could not hold the command"
+	}
+	return http.StatusOK, map[string]any{"id": wsinbox.Record{Name: name}.ID(), "merged": false}
 }
 
 // decodeImage checks one new image: valid base64, at most maxImageBytes
@@ -387,7 +426,8 @@ func removeFiles(paths []string) {
 // the names and numbers of its images inside the inbox's attachments
 // directory. The images stay on disk:
 // the page shows them as chips that reference the files, and a re-send
-// references them.
+// references them. A command entry's copy also carries its command
+// ({name, args}), which the page restores as a command selection.
 func heldAnswer(dir string, entry wsinbox.Entry) map[string]any {
 	// A chip's send time is the inbox's own record (Send sets it on the
 	// re-send), so the page's copy leaves it out.
@@ -407,7 +447,11 @@ func heldAnswer(dir string, entry wsinbox.Entry) map[string]any {
 	}
 	topics := append([]wsinbox.TopicNote{}, entry.Topics...)
 	mentions := append([]wsinbox.Mention{}, entry.Mentions...)
-	return map[string]any{"text": strings.Join(entry.Parts, "\n\n"), "chips": chips, "topics": topics, "mentions": mentions, "images": images, "nums": nums}
+	out := map[string]any{"text": strings.Join(entry.Parts, "\n\n"), "chips": chips, "topics": topics, "mentions": mentions, "images": images, "nums": nums}
+	if entry.Command != nil {
+		out["command"] = *entry.Command
+	}
+	return out
 }
 
 // inboxWrite performs the cancel, steer, and interrupt routes against the
@@ -446,6 +490,9 @@ func (d *Daemon) inboxWrite(dir, route string, raw []byte, now time.Time) (int, 
 		steered, err := wsinbox.Steer(dir, name)
 		if errors.Is(err, wsinbox.ErrGone) {
 			return http.StatusConflict, "the session already received this message"
+		}
+		if errors.Is(err, wsinbox.ErrCommand) {
+			return http.StatusConflict, err.Error()
 		}
 		if err != nil {
 			fmt.Fprintf(d.log, "dashboard: inbox steer: %v\n", err)

@@ -1581,5 +1581,15 @@
   "js.lead.handoff.confirm.other": "将此会话交给终端？正在运行的 {0} 个后台任务会随进程结束。",
   "js.lead.handed": "此会话已交给终端。",
   "js.lead.handed.resume": "在终端中恢复的命令",
-  "js.lead.handed.copy": "复制命令"
+  "js.lead.handed.copy": "复制命令",
+  "composer.cmd.title": "斜杠命令：单独发送；看板回答和备注留给下一条消息",
+  "composer.cmd.remove": "移除命令",
+  "entry.command.terminal": "无文本输出：它在终端中打开",
+  "js.cmd.label": "斜杠命令：上/下移动，Tab 或 Enter 选择，Escape 关闭",
+  "js.cmd.group.user": "用户命令",
+  "js.cmd.group.agent": "代理命令",
+  "js.cmd.group.rest": "其他命令",
+  "js.cmd.args": "/{0} 的参数（可选）",
+  "js.cmd.images": "斜杠命令单独发送，不能附带图片：请移除图片，或移除命令。",
+  "js.cmd.astext": "输入框已有另一个命令，退回的斜杠命令以文本形式返回：要运行它，请从 / 重新选择。"
 }

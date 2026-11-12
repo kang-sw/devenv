@@ -374,6 +374,12 @@ func (r *Runner) startConv(rec Record) *conv {
 		c.stopMail = r.opts.Mail.Watch(rec.Root, rec.WSKey, c.signalMail)
 		c.signalMail()
 	}
+	if len(rec.Queued) > 0 && !foreign {
+		// Drained input an earlier daemon queued: nothing else would send
+		// it before the next message. A rejoin's replay end sends it
+		// instead (kick waits for it).
+		c.signalInbox()
+	}
 	return c
 }
 
@@ -613,6 +619,9 @@ func (r *Runner) Send(id, text string) (State, error) {
 
 // Interrupt stops the running turn, if any, and takes back the held
 // messages, returning their text, as the session page's interrupt does.
+// What a drain already took and queued behind a slash command (Record.Queued)
+// is not held: the inbox shows it received, so it stays and is sent after
+// the interrupted turn ends, as the page's interrupt leaves it too.
 func (r *Runner) Interrupt(id string) (State, []string, error) {
 	var returned []string
 	st, err := r.act(id, func(c *conv) error {
@@ -1168,7 +1177,7 @@ func (c *conv) state() State {
 		}
 	}
 	st.Process = c.proc != nil
-	st.Held = len(held) + len(c.rec.Mail)
+	st.Held = len(held) + len(c.rec.Mail) + len(c.rec.Queued)
 	st.Error = c.lastErr
 	if c.rec.Lead {
 		st.ActiveMode, st.BackgroundTasks, st.ActionNeeded = c.activeMode, c.bgTasks, c.actionNeeded
@@ -1319,8 +1328,12 @@ func (c *conv) release() {
 }
 
 // dropHeld drops the dashboard messages held for a conversation that takes
-// no more turns, and its pending interrupt requests.
+// no more turns, the ones drained and still queued, and its pending
+// interrupt requests.
 func (c *conv) dropHeld() {
+	if len(c.rec.Queued) > 0 {
+		c.update(func(rec *Record) { rec.Queued = nil })
+	}
 	if held, err := wsinbox.Held(c.inbox); err == nil {
 		for _, rec := range held {
 			_, _ = wsinbox.Cancel(c.inbox, rec.Name)
@@ -1342,16 +1355,23 @@ func (c *conv) apply(ev wslive.Event, quiet ...bool) {
 	}
 }
 
-// kick submits the held messages, and a lead's claimed mail, as the next
-// turn when no turn runs, starting the process first when there is none. A
-// failed start leaves them held.
+// kick submits the next turn when no turn runs, starting the process first
+// when there is none. A failed start leaves everything held.
+//
+// The turn is taken from the drained inbox, in order, behind what earlier
+// drains queued (Record.Queued): the messages up to the first slash command
+// are joined into one turn with a lead's claimed mail, and a command at the
+// front runs alone, as its bare typed line, so the harness runs it as a
+// command. What follows the turn's part stays queued for the turns after
+// it, which each turn end submits; mail waits for the next message turn, or
+// goes alone once nothing is queued.
 func (c *conv) kick() {
 	if c.closed || c.turn || c.replaying {
 		return
 	}
 	held, err := wsinbox.Held(c.inbox)
 	mail := c.rec.Mail
-	if (err != nil || len(held) == 0) && len(mail) == 0 {
+	if (err != nil || len(held) == 0) && len(mail) == 0 && len(c.rec.Queued) == 0 {
 		return
 	}
 	if c.proc == nil {
@@ -1369,18 +1389,30 @@ func (c *conv) kick() {
 			return
 		}
 	}
-	recs, err := wsinbox.Drain(c.inbox)
-	var parts []string
+	recs, _ := wsinbox.Drain(c.inbox)
+	queue := slices.Clone(c.rec.Queued)
 	for _, rec := range recs {
-		if text := strings.TrimSpace(rec.Entry.Text()); text != "" {
-			parts = append(parts, text)
+		if cmd := rec.Entry.Command; cmd != nil {
+			cmd := *cmd
+			queue = append(queue, QueuedInput{Command: &cmd})
+		} else if text := strings.TrimSpace(rec.Entry.Text()); text != "" {
+			queue = append(queue, QueuedInput{Text: text})
 		}
 	}
-	if (err != nil || len(parts) == 0) && len(mail) == 0 {
+	if len(queue) == 0 && len(mail) == 0 {
 		// A cancel took the message after the start: the process waits for
 		// input like after a turn.
 		c.armIdle()
 		return
+	}
+	if len(recs) > 0 {
+		// Drained entries are no longer in the inbox: until a turn sent
+		// them, the record holds them.
+		c.update(func(rec *Record) { rec.Queued = queue })
+	}
+	cmd, parts, rest := nextTurn(queue)
+	if cmd != nil {
+		mail = nil
 	}
 	c.stopIdle()
 	c.setStatus(func() { c.turn, c.lastErr = true, "" })
@@ -1388,19 +1420,61 @@ func (c *conv) kick() {
 	// the dashboard's own text is a user entry; a turn of mail alone is
 	// marked as mail's.
 	origin := wslive.OriginMail
-	if len(parts) > 0 {
+	text := strings.Join(parts, "\n\n")
+	if cmd != nil {
+		text = cmd.Line()
+	}
+	if text != "" {
 		origin = wslive.OriginWhiteboard
-		c.apply(wslive.Event{Kind: wslive.KindUser, Origin: origin, Text: strings.Join(parts, "\n\n")})
+		c.apply(wslive.Event{Kind: wslive.KindUser, Origin: origin, Text: text})
 	}
 	c.apply(wslive.Event{Kind: wslive.KindTurnStart, Origin: origin})
-	if err := c.proc.Send(strings.Join(append(parts, mail...), "\n\n")); err != nil {
+	if cmd != nil {
+		err = c.runCommand(*cmd)
+	} else {
+		err = c.proc.Send(strings.Join(append(parts, mail...), "\n\n"))
+	}
+	if err != nil {
 		c.setStatus(func() { c.lastErr = "send turn: " + err.Error() })
 		c.stopProcess("")
 		return
 	}
-	if len(mail) > 0 {
-		c.update(func(rec *Record) { rec.Mail = nil })
+	c.update(func(rec *Record) {
+		rec.Queued = rest
+		if len(mail) > 0 {
+			rec.Mail = nil
+		}
+	})
+}
+
+// nextTurn splits queue at its first slash command: a command at the front
+// is the turn (cmd), else the texts before the first command are (parts).
+// rest is what waits for the turns after it; nil when nothing does.
+func nextTurn(queue []QueuedInput) (cmd *wsinbox.Command, parts []string, rest []QueuedInput) {
+	n := 0
+	if len(queue) > 0 && queue[0].Command != nil {
+		cmd, n = queue[0].Command, 1
+	} else {
+		for n < len(queue) && queue[n].Command == nil {
+			parts = append(parts, queue[n].Text)
+			n++
+		}
 	}
+	if n < len(queue) {
+		rest = slices.Clone(queue[n:])
+	}
+	return cmd, parts, rest
+}
+
+// runCommand sends a slash command as its own turn: through the process's
+// own mapping when it has one (commandRunner), else as the bare typed line,
+// which a harness that reads a message starting with a slash as a command
+// runs as one.
+func (c *conv) runCommand(cmd wsinbox.Command) error {
+	if cr, ok := c.proc.(commandRunner); ok {
+		return cr.RunCommand(cmd)
+	}
+	return c.proc.Send(cmd.Line())
 }
 
 // startProcess resolves the profile again (it may have changed since the

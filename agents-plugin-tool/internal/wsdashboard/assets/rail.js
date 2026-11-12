@@ -26,7 +26,8 @@
 
   // A draft is one session's unsent input and view state: text and
   // mentions ({start, end, text}) of the composer, sel its selection
-  // ([start, end]), answers the board answers by item (readAnswers' shape,
+  // ([start, end]), cmd its slash command selection ({name, args}: args a
+  // string when the capsule holds them, else null), answers the board answers by item (readAnswers' shape,
   // topic notes among them), chips the answer chips, bmentions the board
   // mentions ({topic, id?, text}), refs the images that
   // reference written attachment files ({ref, name, n}), lost the numbers
@@ -34,7 +35,7 @@
   // the tab shown. emptyDraft reports one that holds nothing to restore.
   function emptyDraft(d) {
     if (!d || typeof d !== "object") return true;
-    return !d.text && !(d.chips && d.chips.length) && !(d.bmentions && d.bmentions.length) && !keys(d.answers).length && !(d.refs && d.refs.length) &&
+    return !d.text && !d.cmd && !(d.chips && d.chips.length) && !(d.bmentions && d.bmentions.length) && !keys(d.answers).length && !(d.refs && d.refs.length) &&
       !(d.lost && d.lost.length) && !keys(d.open).length && (!d.tab || d.tab === "convo");
   }
 

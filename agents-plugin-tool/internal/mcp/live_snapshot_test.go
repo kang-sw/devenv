@@ -553,8 +553,8 @@ func TestDashboardIntakeReportsAcceptedKindsAndStatus(t *testing.T) {
 		"context": map[string]any{"tokens": 50_000, "window": 200_000, "cacheHit": 91.5},
 		"limits":  []any{map[string]any{"kind": "five_hour", "percent": 42, "resetsAt": 1_800_000_000_000}},
 		"cost":    map[string]any{"usd": 1.25, "estimate": true}})
-	if !strings.Contains(out, "ok: 1 of 1 events applied\n") || !strings.Contains(out, "\naccepts: status, compact\n") {
-		t.Fatalf("intake reply = %q, want an accepts: status, compact line", out)
+	if !strings.Contains(out, "ok: 1 of 1 events applied\n") || !strings.Contains(out, "\naccepts: status, compact, commands, command\n") {
+		t.Fatalf("intake reply = %q, want an accepts: status, compact, commands, command line", out)
 	}
 	path := wslive.SnapshotPath(f.sessionDir(f.replyA))
 	waitFor(t, "the usage in the snapshot", func() bool {
