@@ -321,14 +321,14 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .composer { position: relative; background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow-hi); padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
 /* composer badges: a row centred on the 10px gap between the conversation and
    the composer, out of flow, so showing a badge moves neither. The interrupt
-   badge is the middle column, centred on the border, and the page script
-   shows it while the lead works on a turn; the subagent badge starts the
-   right column, beside it, and shows while subagents run. A hidden interrupt
-   badge keeps its space, so the subagent badge never moves sideways when the
-   lead starts or stops working. */
-.cbadges { position: absolute; z-index: 3; left: 10px; right: 10px; top: -5px; transform: translateY(-50%); display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); column-gap: 8px; align-items: center; pointer-events: none; }
+   badge is the left column; the page script shows it while the lead works on
+   a turn. The badge group (subagent, background) is the right column, pushed
+   to the right end, and shrinks before it can overlap the interrupt badge. A
+   hidden interrupt badge keeps its space, so the group never moves sideways
+   when the lead starts or stops working. */
+.cbadges { position: absolute; z-index: 3; left: 10px; right: 10px; top: -5px; transform: translateY(-50%); display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 8px; align-items: center; pointer-events: none; }
 .cbadges > * { pointer-events: auto; }
-.ibadge { grid-column: 2; display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 12px 0 10px; border: 0; border-radius: 999px; cursor: pointer; white-space: nowrap; font-size: 11.5px; font-weight: 800; letter-spacing: .03em; line-height: 1; color: var(--wb-fail); background: var(--wb-card); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--wb-fail) 55%, transparent), var(--wb-shadow-hi); }
+.ibadge { grid-column: 1; justify-self: start; display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 12px 0 10px; border: 0; border-radius: 999px; cursor: pointer; white-space: nowrap; font-size: 11.5px; font-weight: 800; letter-spacing: .03em; line-height: 1; color: var(--wb-fail); background: var(--wb-card); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--wb-fail) 55%, transparent), var(--wb-shadow-hi); }
 .ibadge:not([hidden]) { animation: ibadge-rise .16s ease-out; }
 .ibadge[hidden] { display: inline-flex; visibility: hidden; }
 .ibadge:hover:not(:disabled) { background: color-mix(in srgb, var(--wb-fail) 12%, var(--wb-card)); }
@@ -337,7 +337,7 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .ibadge.busy { cursor: default; color: color-mix(in srgb, var(--wb-fail) 60%, var(--wb-muted-fg)); }
 .ibadge.busy .istop { width: 9px; height: 9px; border-radius: 50%; background: transparent; border: 2px solid currentColor; border-right-color: transparent; animation: dash-spin .8s linear infinite; }
 /* subagent badge: the running-agent look of the peer rows (spinner, robot) */
-.sbadge { grid-column: 3; justify-self: start; min-width: 0; max-width: 100%; display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 11px 0 9px; border-radius: 999px; white-space: nowrap; overflow: hidden; font-size: 11.5px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; color: var(--wb-primary); background: var(--wb-card); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--wb-primary) 45%, transparent), var(--wb-shadow-hi); animation: ibadge-rise .16s ease-out; }
+.sbadge { grid-column: 2; justify-self: end; min-width: 0; max-width: 100%; display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 11px 0 9px; border-radius: 999px; white-space: nowrap; overflow: hidden; font-size: 11.5px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; color: var(--wb-primary); background: var(--wb-card); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--wb-primary) 45%, transparent), var(--wb-shadow-hi); animation: ibadge-rise .16s ease-out; }
 .sbadge[hidden] { display: none; }
 .sbadge .spin { width: 10px; height: 10px; }
 .sbadge .i { width: 13px; height: 13px; }
@@ -1523,7 +1523,7 @@ html:not([data-sysopen]) .rail .rnew { display: none; }
 .sysline.retry .mk { color: var(--wb-warn-ink); }
 .sysline.retry .spin { width: 10px; height: 10px; }
 .thead .chip.bgt { color: var(--wb-fg); }
-.sbwrap { grid-column: 3; justify-self: start; display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
+.sbwrap { grid-column: 2; justify-self: end; display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
 .bgbadge { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 10px 0 8px; border-radius: 999px; white-space: nowrap; flex: none; cursor: help; font-size: 11.5px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; color: var(--wb-muted-fg); background: var(--wb-card); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--wb-muted-fg) 35%, transparent), var(--wb-shadow-hi); animation: ibadge-rise .16s ease-out; }
 .bgbadge[hidden] { display: none; }
 .bgbadge .i { width: 13px; height: 13px; flex: none; }
