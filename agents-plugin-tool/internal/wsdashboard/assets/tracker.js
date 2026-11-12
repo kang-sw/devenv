@@ -675,33 +675,52 @@
   function holders(it) { return it.assignments.map(A).filter(function (r) { return r.state === 'live' || r.state === 'pending'; }); }
   // A topic's holder in markup (a pending handoff names its receiver as pending), '' when nobody holds it.
   function holderNames(it) { return holders(it).map(function (r) { return r.state === 'pending' ? wsT("js.tk.row.assignee.pending", whoName(r.to)) : whoName(r.to); }).join(', '); }
-  function whoHtml(it) {
-    var as = holders(it);
-    if (!as.length) return '<span class="who"></span>';
+  // A list row's assignee, priority, or due part: a plain span (tooltip only), or, when step names
+  // the item menu step the viewer may open from it (irow), a button that opens that step through
+  // the click handler's STEPS dispatch, the pickers the quick-add row's chips and the item menu use.
+  function partHtml(cls, tip, inner, it, step) {
+    if (!step) return '<span class="' + cls + '"' + (tip ? tipAttr(tip) : '') + '>' + inner + '</span>';
+    return '<button type="button" class="' + cls + ' rp"' + attr('act', step) + attr('item', it.id) + ' tabindex="-1" aria-haspopup="' + (step === 'assign' ? 'dialog' : 'menu') + '" aria-label="' + esc(tip) + '"' + tipAttr(tip) + '>' + inner + '</button>';
+  }
+  // an empty part's dim icon (.rpe), shown on the row's hover, focus, or tap-selection
+  function partIcon(icon) { return '<svg class="i"><use href="#tki-' + icon + '"/></svg>'; }
+  // ed: the viewer may assign (canAssign); the group then opens the assign step, an empty one as the dim icon
+  function whoHtml(it, ed) {
+    var as = holders(it), step = ed ? 'assign' : null;
+    if (!as.length) return ed ? partHtml('who rpe', wsT("js.tk.act.assign"), partIcon('assign'), it, step) : '<span class="who"></span>';
     var shown = as.slice(0, 3), more = as.length - shown.length;
     // the avatars fill the group, so the group tooltip names each relation instead of one per avatar
     var tip = wsT("js.tk.row.assignees", as.map(function (r) { var n = wsT("js.tk.av.who", nmo(r.to), avRel(r.to).t); return r.state === 'pending' ? wsT("js.tk.row.assignee.pending", n) : n; }).join(', '));
-    return '<span class="who"' + tipAttr(tip) + '>' + shown.map(function (r) {
+    return partHtml('who', tip, shown.map(function (r) {
       return avHtml(r.to, r.state === 'pending', false);
-    }).join('') + (more ? '<i class="av more">+' + more + '</i>' : '') + '</span>';
+    }).join('') + (more ? '<i class="av more">+' + more + '</i>' : ''), it, step);
   }
-  function priHtml(it) {
+  // ed: the viewer may edit the task (canEdit); the level then opens the priority step
+  function priHtml(it, ed) {
     if (!it || it.kind === 'topic') return '<span class="pri"></span>';
     var lv = it.priorityLevel, d = VS.priority.default;
-    return '<span class="pri' + (lv > d ? ' hi' : lv < d ? ' lo' : '') + '"' + tipAttr(wsT("js.tk.pri.tip.name", lv, VS.priority.names.length - 1, it.priorityName) +
-      (it.priority !== lv ? ' ' + wsT("js.tk.pri.stored", it.priority) : '')) + '>' + esc(it.priorityName) + '</span>';
+    return partHtml('pri' + (lv > d ? ' hi' : lv < d ? ' lo' : ''), wsT("js.tk.pri.tip.name", lv, VS.priority.names.length - 1, it.priorityName) +
+      (it.priority !== lv ? ' ' + wsT("js.tk.pri.stored", it.priority) : ''), esc(it.priorityName), it, ed ? 'pri' : null);
   }
   // Due: D-N within 7 days, D-day today, D+N past due (danger colour), else a short date.
   var ENDED = { done: 1, dropped: 1, declined: 1, returned: 1, handed: 1, withdrawn: 1 };
-  function dueHtml(it, st) {
-    if (!it || !it.due || it.kind === 'topic') return '<span class="due2"></span>';
+  // ed: the viewer may edit the task (canEdit); the date then opens the due step, an empty one as the dim icon
+  function dueHtml(it, st, ed) {
+    if (!it || it.kind === 'topic') return '<span class="due2"></span>';
+    if (!it.due) return ed ? partHtml('due2 rpe', wsT("js.tk.menu.due"), partIcon('calendar'), it, 'due') : '<span class="due2"></span>';
     var n = dayNum(it.due) - dayNum(today()), t, c, tip;
     if (ENDED[st]) { t = it.due.slice(5); c = 'ended'; tip = wsT("js.tk.due.tip.ended", it.due, SI.info(st).label); }
     else if (n < 0) { t = wsT("js.tk.due.dplus", -n); c = 'over'; tip = wsTn("js.tk.due.tip.overby", -n, it.due); }
     else if (n === 0) { t = wsT("js.tk.due.dday"); c = 'now'; tip = wsT("js.tk.due.tip.today", it.due); }
     else if (n <= 7) { t = wsT("js.tk.due.dminus", n); c = 'soon'; tip = wsTn("js.tk.due.tip.in", n, it.due); }
     else { t = it.due.slice(5); c = ''; tip = wsT("js.tk.due.on", it.due); }
-    return '<span class="due2' + (c ? ' ' + c : '') + '"' + tipAttr(tip) + '>' + esc(t) + '</span>';
+    return partHtml('due2' + (c ? ' ' + c : ''), tip, esc(t), it, ed ? 'due' : null);
+  }
+  // A list row's label icon: an editor's way to the labels step (the chips themselves search,
+  // lsearch); with the store's list empty only an admin, who can add a label there, gets it.
+  function labelEdHtml(it) {
+    if (!canEdit(it) || !((VS.labels || []).length || VS.viewer.admin)) return '';
+    return partHtml('rlab rpe', wsT("js.tk.prop.labels.edit"), partIcon('tag'), it, 'labels');
   }
   var FLAGGED = {}, UNREAD = {}; // per render: item -> flagged writes in its own thread; item -> unread notification entries
   function warnHtml(it) {
@@ -927,6 +946,14 @@
     var back = document.querySelector('#card-items [data-rk="' + CSS.escape(rk) + '"]');
     if (back) back.focus({ preventScroll: true });
   }
+  // A click on a list row that no control of it took (a part's picker, the status icon, the "⋯"
+  // menu dispatch by data-act first): the title opens the item window (true: the caller goes on to
+  // open it), anywhere else only focuses the row, where Enter opens it.
+  function rowClick(row, t) {
+    if (t.closest('a.title')) return true;
+    row.focus({ preventScroll: true });
+    return false;
+  }
   // The "⋯" button every menu-capable row, card, entry, and the item window header carries.
   function moreBtn(id, cls, tab) {
     return '<button type="button" class="ia mbtn' + (cls ? ' ' + cls : '') + '"' + attr('act', 'menu') + attr('item', id) + ' aria-haspopup="menu" aria-label="' + esc(wsT("js.tk.menu.more")) + '"' +
@@ -964,16 +991,18 @@
   // o: { rk (unique row key in the drawer), item, rec?, more?, depth?, closed? (greyed: done, in the "recently closed" section or kept in the tree),
   //      ctx? (a context row of a tree: an ancestor of a match, not a match itself), tw? (the tree's fold control, in place of the depth arrow), tsub? (the folded "N subtasks" chip) }
   // The row is the one row component every list and tree draws; data-item carries the item id.
+  // Only its title opens the item window (rowClick); each part the viewer may change opens its own
+  // picker (partHtml, labelEdHtml), the status icon the status menu (stBtn).
   // A row drags (a list drop moves it with its subtree, see mvDrop) when the viewer may move it, or
   // when it is selected: then the selection moves.
   function irow(o) {
-    var it = VS.items[o.item], r = o.rec, st = stKey(it, r), ms = mselHas(it.id);
+    var it = VS.items[o.item], r = o.rec, st = stKey(it, r), ms = mselHas(it.id), ed = canEdit(it) && it.kind !== 'topic';
     if (MSEEN) MSEEN[it.id] = true;
     return '<div class="irow' + (ui.sel === o.rk ? ' sel' : '') + (ms ? ' msel' : '') + (o.closed ? ' closed' : '') + (o.ctx ? ' ctx' : '') + '" tabindex="0"' + (ms || canMove(it) ? ' draggable="true"' : '') +
       attr('item', it.id) + attr('rk', o.rk) + (r ? attr('rec', r.id) : '') +
       (o.depth ? ' style="--ind:' + o.depth + '"' : '') + '><div class="ir-main">' + mcbHtml(it, ms) + (o.tw != null ? o.tw : o.depth ? '<span class="ind">&#8627;</span>' : '') + stBtn(st, it, r) +
-      '<a class="title" href="#" tabindex="-1"' + attr('item', it.id) + '>' + esc(it.title) + '</a>' + (o.tsub || '') + openChip(it) + labelChips(it, 'lsearch') + warnHtml(it) + dotHtml(it) + '<span class="grow"></span>' +
-      '<span class="ir-acts">' + moreBtn(it.id, '', true) + '</span>' + whoHtml(it) + priHtml(it) + dueHtml(it, st) + '</div>' +
+      '<a class="title" href="#" tabindex="-1"' + attr('item', it.id) + '>' + esc(it.title) + '</a>' + (o.tsub || '') + openChip(it) + labelChips(it, 'lsearch') + warnHtml(it) + dotHtml(it) + labelEdHtml(it) + '<span class="grow"></span>' +
+      '<span class="ir-acts">' + moreBtn(it.id, '', true) + '</span>' + whoHtml(it, canAssign(it, VS.viewer.member)) + priHtml(it, ed) + dueHtml(it, st, ed) + '</div>' +
       '<div class="ir-more">' + detailsHtml(it, r, o.more) + '</div></div>';
   }
   function sub(label, n) { return '<div class="sub">' + label + (n != null ? ' <span class="subn">' + n + '</span>' : '') + '</div>'; }
@@ -3713,6 +3742,13 @@
     }
     openMenu({ kind: 'item', item: id, step: opts.step || 'main', op: opts.op || null, who: opts.who || null, req: opts.req || null, statusOnly: !!opts.statusOnly, from: null, q: '' }, anchor, pt);
   }
+  // Whether the item menu's opener left the place the menu was put at: gone, or moved. A render's
+  // scroll restore fires a scroll with the redrawn opener where it was, which keeps the menu (the
+  // labels step, open across toggles, redraws its list row under it).
+  function openerMoved() {
+    var el = MN.backEl, r = el && el.isConnected ? el.getBoundingClientRect() : null;
+    return !r || !MN.rect || Math.abs(r.top - MN.rect.top) > 1 || Math.abs(r.left - MN.rect.left) > 1;
+  }
   function closeMenu(refocus) {
     if (!MN) return;
     var m = MN, el = m.backEl && m.backEl.isConnected ? m.backEl : m.back && document.querySelector(m.back);
@@ -4866,10 +4902,13 @@
   // button, redraws over the written item, and keeps focus on the toggled chip. It closes when the
   // item or the viewer's edit right is gone.
   function labelStepRedraw() {
-    var bk = $('iw-plabels'), it = VS.items[MN.item];
+    // the opener drew again: the property card's #iw-plabels, or a list row's label icon inside the row MN.back names
+    var it = VS.items[MN.item], bk = MN.back && document.querySelector(MN.back);
+    if (bk && !bk.matches('[data-act="labels"]')) bk = bk.querySelector('[data-act="labels"]');
     if (!bk || !it || !canEdit(it)) return closeMenu(false);
-    MN.backEl = bk; MN.back = '#iw-plabels'; MN.rect = bk.getBoundingClientRect();
+    // expanded first: a row's label icon shows only while hovered or expanded, and the rect needs it shown
     bk.setAttribute('aria-expanded', 'true');
+    MN.backEl = bk; MN.rect = bk.getBoundingClientRect();
     $('tkmenu').innerHTML = menuHtml();
     placeMenu();
     var f = (MN.lab && $('tkmenu').querySelector('[data-act="m-label"][data-label="' + CSS.escape(MN.lab) + '"]')) || $('tkmenu').querySelector('[data-mi]');
@@ -5687,7 +5726,10 @@
       if (a) {
         e.preventDefault(); e.stopPropagation();
         var k = a.getAttribute('data-act'), d = { item: a.getAttribute('data-item'), who: a.getAttribute('data-who'), op: a.getAttribute('data-op'), req: a.getAttribute('data-req'), cid: a.getAttribute('data-cid'), label: a.getAttribute('data-label') };
-        if (k.indexOf('wk-') === 0) wkAct(k, a);
+        // selection mode: a row part's picker (partHtml) gives way to the row's own click, as the part did before it had one
+        var prow = mselOn() && a.classList.contains('rp') && a.closest('#card-items .irow');
+        if (prow) mselClick(prow, e);
+        else if (k.indexOf('wk-') === 0) wkAct(k, a);
         else if (k === 'win-close') closeItemWindow();
         else if (k === 'page-back') leavePage();
         else if (k === 'afold') { ui.aopen = ui.aopen === ui.item ? null : ui.item; render(); }
@@ -5774,11 +5816,12 @@
       var mrow = mselOn() && t.closest('#card-items .irow');
       if (mrow) { e.preventDefault(); mselClick(mrow, e); return; }
       // touch: a tap selects a row, which shows its actions and details as a hover would;
-      // a tap on the selected row (or on its title) opens the item window
+      // a tap on its title opens the item window
       var row = t.closest('.irow');
       if (row && lastPointer === 'touch' && !t.closest('a.title') && ui.sel !== row.getAttribute('data-rk')) {
         e.preventDefault(); ui.sel = row.getAttribute('data-rk'); render(); return;
       }
+      if (row && !rowClick(row, t)) { e.preventDefault(); return; }
       var nk = t.closest('[data-nkey]');
       if (nk) markRead([nk.getAttribute('data-nkey')]); // a feed entry is read once clicked
       var it = t.closest('[data-item]');
@@ -5908,7 +5951,7 @@
     document.addEventListener('scroll', function (e) {
       if (tipFor) hideTip(); placeShownMore(); insHide();
       if (MP) mentionSync();
-      if (MN && MN.kind === 'item' && !(e.target.nodeType === 1 && $('tkmenu').contains(e.target))) closeMenu(false); // an item menu does not follow a scrolled row
+      if (MN && MN.kind === 'item' && !(e.target.nodeType === 1 && $('tkmenu').contains(e.target)) && openerMoved()) closeMenu(false); // an item menu does not follow a scrolled row
     }, true);
     // a right-click on a row, card, entry, or the item window header opens its menu at the pointer
     document.addEventListener('contextmenu', function (e) {
