@@ -1716,11 +1716,11 @@ func (c *conv) checkReattach() {
 
 // replayDone ends a rejoin: the state the holder's records rebuilt is
 // written, and the conversation takes input again. A replay that lost
-// records (lost: the ring began past the record the runner applied last;
-// or a gap during it) and showed no turn boundary after them cannot tell
-// whether a turn runs: the turn is taken as running, and nothing is
-// submitted until the harness ends one (wrapHold), since a message sent
-// into a running turn may be refused.
+// records (lost: the ring dropped records, even ones an earlier daemon
+// applied; or a gap during it) and showed no turn boundary after them
+// cannot tell whether a turn runs: the turn is taken as running, and
+// nothing is submitted until the harness ends one (wrapHold), since a
+// message sent into a running turn may be refused.
 func (c *conv) replayDone(lost bool) {
 	lost = lost || c.replayGap
 	boundary := c.replayBoundary

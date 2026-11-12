@@ -943,6 +943,52 @@ func TestLeadRejoinOfAWrappedRingHoldsInput(t *testing.T) {
 	}
 }
 
+// TestLeadRejoinOfARingThatWrappedWhileAttachedHoldsInput: a long turn
+// pushes its own start out of the ring while the daemon is still attached,
+// so the next daemon's rejoin finds the ring beginning no later than the
+// record after the one the record names: nothing left it unseen, yet the
+// replay shows no turn boundary. The rejoin takes the turn as running: a
+// message sent meanwhile waits for the harness's next turn end, then goes
+// once.
+func TestLeadRejoinOfARingThatWrappedWhileAttachedHoldsInput(t *testing.T) {
+	h := newLeadHarness(t).start()
+	id, holder := h.runLead("one")
+	h.holders.out(holder, turnLines("sess-1", "u1", "first")...)
+	h.idle(id)
+	h.send(id, "two")
+	h.holders.out(holder, stateLine(HarnessRunning), initLine("sess-1", "auto"), toolResultLine("toolu_1"), toolResultLine("toolu_2"))
+	h.sync(id, holder)
+	h.holders.trim(holder, h.holders.records(holder)-1)
+	h.runner.Close()
+	first, applied := uint64(h.holders.records(holder)), h.record(id).HolderSeq
+	if first <= 1 || first > applied+1 {
+		t.Fatalf("the ring should begin past 1 and no later than the record after %d, begins at %d", applied, first)
+	}
+	h.holders.restart()
+	h.start()
+	eventually(t, "the rejoin to take the turn as running", func() bool {
+		st := h.state(id)
+		return st.Process && st.Status == StatusRunning
+	})
+	h.send(id, "three")
+	h.sync(id, holder)
+	if got := h.userInputs(holder); !slices.Equal(got, []string{"one", "two"}) || h.state(id).Held != 1 {
+		t.Fatalf("the message waits for the turn's end: written %q, state %+v", got, h.state(id))
+	}
+	if n := strings.Count(h.log.String(), "with no turn boundary after them"); n != 1 {
+		t.Fatalf("the loss should be logged once, logged %d times:\n%s", n, h.log.String())
+	}
+
+	h.holders.out(holder, replyLine("u2", "second"), resultLine(), stateLine(HarnessIdle))
+	eventually(t, "the held message as the next turn", func() bool {
+		return slices.Equal(h.userInputs(holder), []string{"one", "two", "three"})
+	})
+	h.sync(id, holder)
+	if got := h.userInputs(holder); len(got) != 3 || h.state(id).Held != 0 {
+		t.Fatalf("the held message goes once: written %q, state %+v", got, h.state(id))
+	}
+}
+
 // TestLeadRejoinOfAWrappedRingTrustsATurnBoundary: when the records after
 // the loss show the turn's end, the rejoin takes the state they show, and a
 // message sent after it goes at once.
