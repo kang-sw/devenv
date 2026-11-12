@@ -1027,3 +1027,60 @@ func TestDashboardReadSessionCountsOpenPolicyItems(t *testing.T) {
 		t.Fatalf("the rendered board counts %d, ReadSession %d", page.Board.CountPolicy, data.CountPolicy)
 	}
 }
+
+// TestDashboardReadOutsideLinksListsTheBoardsTargetsOutsideTheRoot pins the
+// list the dashboard's outside-link route checks a click against: the
+// absolute path of every file target outside the session root that the
+// board links, from a topic body, an item, an image, and a closed topic
+// past the board's cap, each as the page's own link carries it (data-abs);
+// a target inside the root, a URL, and a path the board only carries inside
+// a code span (no link on the page) are not on it; a session without a board lists nothing, and an
+// unknown session is not read.
+func TestDashboardReadOutsideLinksListsTheBoardsTargetsOutsideTheRoot(t *testing.T) {
+	f := newWhiteboardFixture(t)
+	src := dashboardPageSource(t, nil)
+	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
+	if _, ok := src.ReadOutsideLinks(wsdashboard.Registration{ReplyID: "nosuchsession", Project: f.root}); ok {
+		t.Fatal("ReadOutsideLinks read an unknown reply-id")
+	}
+	if links, ok := src.ReadOutsideLinks(reg); !ok || len(links) != 0 {
+		t.Fatalf("a session without a board = %v %v, want an empty list", links, ok)
+	}
+
+	away := t.TempDir()
+	abs := func(name string) string { return filepath.Join(away, name) }
+	slash := func(name string) string { return filepath.ToSlash(abs(name)) }
+	var cmds strings.Builder
+	fmt.Fprintf(&cmds, `<wb:topic name="t"><wb:body>a [report](%s) and [inside](./docs/in.md) and [site](https://example.com/x.html), not `+"`cat %s`"+`</wb:body>`, slash("report.html"), slash("mentioned.txt"))
+	fmt.Fprintf(&cmds, `<wb:add class="policy"><wb:title>q</wb:title><wb:option>a</wb:option><wb:option>b</wb:option><wb:why>see [notes](%s), ![shot](%s), and [up](../sibling/up.md)</wb:why></wb:add></wb:topic>`, slash("notes.md"), slash("shot.png"))
+	// 31 closed topics: the oldest closed one falls past the board's cap.
+	for i := 1; i <= wswhiteboard.ClosedCap+1; i++ {
+		fmt.Fprintf(&cmds, `<wb:topic name="c%d"><wb:body>old [log](%s)</wb:body></wb:topic><wb:topic name="c%d"><wb:close result="Done."/></wb:topic>`, i, slash(fmt.Sprintf("log%d.txt", i)), i)
+	}
+	f.update(t, cmds.String())
+
+	links, ok := src.ReadOutsideLinks(reg)
+	if !ok {
+		t.Fatal("ReadOutsideLinks found no session")
+	}
+	got := map[string]bool{}
+	for _, l := range links {
+		got[l] = true
+	}
+	want := []string{abs("report.html"), abs("notes.md"), abs("shot.png"), filepath.Join(filepath.Dir(f.root), "sibling", "up.md"), abs("log1.txt"), abs(fmt.Sprintf("log%d.txt", wswhiteboard.ClosedCap+1))}
+	for _, w := range want {
+		if !got[w] {
+			t.Errorf("the list lacks %s: %v", w, links)
+		}
+	}
+	for l := range got {
+		if strings.HasPrefix(l, f.root+string(filepath.Separator)) || strings.Contains(l, "mentioned") || strings.Contains(l, "example.com") {
+			t.Errorf("the list holds %s", l)
+		}
+	}
+	// The list is the page's own: each path is one a served link carries.
+	page := readPageOK(t, src, reg)
+	if board := string(page.Board.Board); !strings.Contains(board, `data-abs="`+abs("notes.md")+`"`) {
+		t.Errorf("the served board does not carry the listed path as a link's data-abs:\n%.600s", board)
+	}
+}

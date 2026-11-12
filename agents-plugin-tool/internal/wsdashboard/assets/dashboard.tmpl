@@ -327,3 +327,36 @@ both inline the board's stylesheet for its colours and markdown rules. */}}
   });
 })();</script></body></html>
 {{end}}
+
+{{/* The re-mint page (fs_outside.go): what a tab on an outside HTML file
+shows when its capability no longer verifies. Its script posts the mint for
+the path the URL named and replaces the page with the fresh URL, at most
+once in a few seconds per tab; a refused mint shows the note. */}}
+{{define "file-remint"}}<!DOCTYPE html>
+<html{{with .Theme}} data-theme="{{.}}"{{end}}><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Abs}}</title>
+<style>{{.WhiteboardCSS}}</style>
+<style>{{template "filecss"}}</style></head>
+<body class="fileview" data-mint="{{.Mint}}" data-base="{{.Base}}" data-abs="{{.Abs}}" data-rel="{{.Rel}}"><div class="fwrap"><div class="fhead"><code class="fpath">{{.Abs}}</code></div>
+<p class="fnone" id="fgone" hidden>{{t "file.outside.gone"}}</p></div>
+<script nonce="{{.Nonce}}">(function () {
+  var b = document.body, key = "ws.outside.remint", now = Date.now();
+  function gone() { document.getElementById("fgone").hidden = false; }
+  try {
+    if (now - (+sessionStorage.getItem(key) || 0) < 5000) { gone(); return; }
+    sessionStorage.setItem(key, String(now));
+  } catch (e) {}
+  if (!window.fetch) { gone(); return; }
+  fetch(b.getAttribute("data-mint"), {
+    method: "POST", credentials: "same-origin", cache: "no-store",
+    headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: b.getAttribute("data-abs") })
+  }).then(function (r) {
+    if (!r.ok) throw r.status;
+    return r.json();
+  }).then(function (v) {
+    var view = v && typeof v.view === "string" ? v.view : "";
+    if (view.indexOf(b.getAttribute("data-base")) !== 0) { gone(); return; }
+    location.replace(view.slice(0, view.lastIndexOf("/") + 1) + b.getAttribute("data-rel"));
+  }).catch(gone);
+})();</script></body></html>
+{{end}}

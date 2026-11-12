@@ -137,6 +137,15 @@ func (s agentSessions) ReadClosedTopics(reg Registration, lang string, from, n i
 	return "", false
 }
 
+// ReadOutsideLinks forwards to the configured source; an agent conversation
+// has no board, so its board links nothing.
+func (s agentSessions) ReadOutsideLinks(reg Registration) ([]string, bool) {
+	if ls, ok := s.inner.(OutsideLinkSource); ok && !reg.Agent {
+		return ls.ReadOutsideLinks(reg)
+	}
+	return nil, false
+}
+
 // HashLiveStores folds the live stores of session replyID under stateDir
 // into h and returns the snapshot's updatedAt, reading every file afresh
 // (SnapshotCache.HashLiveStores with no cache).

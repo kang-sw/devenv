@@ -29,6 +29,9 @@ import (
 //	GET  /s/<reply-id>/fs/cap/<capability>/<p>            the sandboxed HTML preview (fs_capability.go)
 //	GET  /s/<reply-id>/fs/view/<capability>/<p>           the file view's sandboxed HTML page (fs_capability.go)
 //	POST /s/<reply-id>/fs/act                             open or reveal on the host (fs_act_route.go)
+//	POST /s/<reply-id>/fs/outside                         what an outside-root file link opens (fs_outside.go)
+//	GET  /s/<reply-id>/fs/ocap/<capability>/<p>           an outside link's sandboxed frame and files (fs_outside.go)
+//	GET  /s/<reply-id>/fs/oview/<capability>/<p>          an outside HTML file as a page (fs_outside.go)
 //
 // The browsing root is the session's project root, the root the file view,
 // the file-link check, and the files route use. Every viewer the access
@@ -431,6 +434,10 @@ func (d *Daemon) handleFSRoutes(w http.ResponseWriter, r *http.Request, replyID,
 		d.handleFSCapability(w, r, replyID, strings.TrimPrefix(sub, "cap/"), false)
 	case strings.HasPrefix(sub, "view/"):
 		d.handleFSCapability(w, r, replyID, strings.TrimPrefix(sub, "view/"), true)
+	case strings.HasPrefix(sub, "ocap/"):
+		d.handleFSOutsideCapability(w, r, replyID, strings.TrimPrefix(sub, "ocap/"), false)
+	case strings.HasPrefix(sub, "oview/"):
+		d.handleFSOutsideCapability(w, r, replyID, strings.TrimPrefix(sub, "oview/"), true)
 	default:
 		http.NotFound(w, r)
 	}

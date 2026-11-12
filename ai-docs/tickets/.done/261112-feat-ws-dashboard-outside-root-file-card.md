@@ -7,6 +7,7 @@ related:
   261109-feat-ws-dashboard-open-out-of-root-images: predecessor; owns the viewer-independent outside-image link markup this ticket extends
 sage-review-design-reviewed: b32bd5967321e05a
 sage-review-completeness-reviewed: b32bd5967321e05a
+completed: 2026-11-12
 ---
 
 # Dashboard opens outside-root file links on the same machine
@@ -197,3 +198,78 @@ Implement per `## Decisions`. Verification:
   and an outside markdown file opening in the card; relative images and
   links in outside markdown render as path text, as out-of-root markdown
   does today, so the check does not expect them to resolve.
+
+### Result (dc91726f8) - 2026-11-12
+
+Landed in `cfbbaef2f` (routes and grant policy), `701cf55a9` (page side),
+and `dc91726f8` (review follow-up, tests only).
+
+- `POST /s/<reply-id>/fs/outside {"path"}` is the only way in: loopback,
+  same-origin, and only a path the session's board or a lead reply in the
+  live ring (or the streaming reply) links outside the root. It answers the
+  preview card and mints the capability. `GET /fs/ocap/<cap>/<path>` and
+  `/fs/oview/<cap>/<path>` serve the granted folder to a loopback viewer
+  only, under the in-root capability route's sandbox policy.
+- The card, the link menu, the HTML new-tab item, and the re-mint page are
+  in `preview.js`, `dashboard.js`, and the `file-remint` template. A LAN
+  page keeps the copy-path menu.
+
+Decisions taken in the phase:
+
+- Text, markdown, and a patch come back inline in the mint's answer
+  instead of through a capability-scoped sub-route on the preview and raw
+  routes: no route then hands an outside file's bytes to a fetch, and the
+  card needs one round trip. Frame, image, and video bytes go through the
+  capability route. This departs from the wording "a sibling sub-route or a
+  capability argument" in the outside-read decision.
+- The capability carries the granted folder, the linked file's name, and a
+  folder-or-file mode under the MAC, so the serving route keeps no grant
+  table. Its route parts (`ocap`, `oview`) are not among those LAN mode
+  admits by shape: a LAN peer without the token meets the guard, and a
+  token holder gets the handler's 404.
+- Membership is decided on the path the renderer resolved, by rendering the
+  board (closed topics past the cap included) and the replies under the
+  served link rule with a recorder. A bare path the renderer links is a
+  link; a path in a code span with other text is not. An inline image in a
+  field the board renders inline is not a link either.
+- The mint also accepts the path a link resolves to, because the re-mint
+  page knows only the resolved folder. A link that is always-denied as
+  written stays closed under its resolved name.
+- The always-deny list is placed under the home, matched without regard to
+  case, on the written and the resolved path, and on the folder a denied
+  folder itself resolves to. With no resolvable home, those names are
+  refused anywhere and every folder counts as wide.
+- A folder directly under a volume root is wide, so a link to
+  `/tmp/report.html` opens that file alone, without its relative files.
+- The new tab opens blank inside the click and is navigated after the
+  answer, with its opener cut, and only to a URL under this session's
+  `oview` route. The re-mint page keeps a five-second guard in
+  `sessionStorage` so a fresh URL that fails again does not loop.
+- The agent-conversation source has no board; an agent session qualifies by
+  its replies only.
+
+Verification:
+
+- `go test ./internal/wsdashboard/ ./internal/wsi18n/ ./internal/wswhiteboard/ -count=1`
+  on the build host: all three `ok`. `go vet ./internal/wsdashboard/ ./internal/mcp/`: clean.
+- `go test ./internal/mcp/ -count=1`: the new
+  `TestDashboardReadOutsideLinksListsTheBoardsTargetsOutsideTheRoot` passes;
+  the one failure is `TestDashboardReadPageServesTheBoard`, which fails on
+  `develop` without this change.
+- Route tests (`fs_outside_test.go`) cover each item of the phase's list.
+  Node-executed tests (`preview_outside_test.go`) cover the card, the click
+  path, and the re-mint page's script; they ran, not skipped, on the build
+  host.
+- Lite review: no Critical, one Important (no test failed when the
+  written-path deny check was removed). Fixed, and confirmed by removing
+  that check: the new assertion fails, and passes with the check back.
+- Headless check: not run against the daemon. This machine's rule forbids
+  a local Go build, and the build host returns no binary. In its place,
+  headless Chromium loaded a sample page from a stand-in server that sends
+  the capability route's policy string and refusal rule on a URL with a
+  capability of the real spelling: the relative style sheet and image
+  resolved both as a tab and inside a `sandbox="allow-scripts"` frame, the
+  document's origin was opaque, and its own `fetch` was blocked. Outside
+  markdown in the card was not seen in a browser; the node test draws it
+  from a stubbed answer. The real check against a running daemon is still
+  owed.

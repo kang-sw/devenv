@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -371,14 +372,22 @@ func (d *Daemon) handleFSCapability(w http.ResponseWriter, r *http.Request, repl
 		fsNotFound(w)
 		return
 	}
+	d.serveCapabilityFile(w, r, f, rel, info, "http://"+r.Host+"/s/"+replyID+part+capability+"/", view)
+}
+
+// serveCapabilityFile writes the opened file f, at rel under its root with
+// stat info, as the capability route serves one, or with view as the page
+// route does, under the policy for the path prefix prefix (see the file
+// comment). The in-root routes and the outside-link routes (fs_outside.go)
+// share it once each has checked its own capability and refusals.
+func (d *Daemon) serveCapabilityFile(w http.ResponseWriter, r *http.Request, f io.ReadSeeker, rel string, info os.FileInfo, prefix string, view bool) {
 	ext := strings.ToLower(filepath.Ext(rel))
 	ctype, ok := capTypes[ext]
 	if !ok {
 		ctype = "application/octet-stream"
 	}
-	prefix := "http://" + r.Host + "/s/" + replyID + part + capability + "/"
 	csp := fsCapabilityCSP(prefix)
-	var content io.ReadSeeker = f
+	content := f
 	if view {
 		if _, image := imageType(rel); image {
 			csp = imageContentSecurityPolicy
