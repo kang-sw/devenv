@@ -177,6 +177,23 @@
     });
   }
 
+  // --- class tag tooltips ----------------------------------------------
+  // An item's class tag (policy / technical / announced) says what that
+  // class asks of the reader in a native tooltip. The title is set on first
+  // hover rather than rendered, so the text ships once in the client table
+  // instead of on every row. One handler on the document covers tags a live
+  // update or a board swap inserts later; the dashboard re-runs this script
+  // on every board swap, so the handler attaches once.
+  if (window.wsT && !window.wbTagTips) {
+    window.wbTagTips = true;
+    var tagKeys = { policy: "js.wb.tag.policy", technical: "js.wb.tag.technical", announced: "js.wb.tag.announced" };
+    doc.addEventListener("mouseover", function (e) {
+      var el = e.target;
+      if (!el || !el.classList || !el.classList.contains("tag") || el.hasAttribute("title")) return;
+      for (var c in tagKeys) if (el.classList.contains(c)) { el.setAttribute("title", wsT(tagKeys[c])); return; }
+    });
+  }
+
   bind(doc);
   window.wbBindBoard = bind;
   build();
