@@ -2071,7 +2071,9 @@
       }
       var label = typeof ans.label === "string" ? ans.label : v;
       sn.setAttribute("data-label", label);
-      sn.querySelector(".snm").textContent = label || root.getAttribute("data-rid") || "";
+      var nm = sn.querySelector(".snm");
+      nm.textContent = label || root.getAttribute("data-rid") || "";
+      nm.classList.toggle("lbl", !!label);
       labelEnd(sn);
     });
   }

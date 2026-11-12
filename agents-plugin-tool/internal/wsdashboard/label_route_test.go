@@ -71,7 +71,7 @@ func TestLabelRouteSavesShowsAndResets(t *testing.T) {
 		`<title>Build bot - ws dashboard</title>`,
 		`data-label="Build bot" data-max="64" data-title="Build bot - ws dashboard"`,
 		`data-copy="(mailbox) id:livesession" title="livesession&#10;click to copy">Build bot</button>`,
-		`<span class="rid" title="livesession">Build bot</span>`,
+		`<span class="rid lbl" title="livesession">Build bot</span>`,
 	} {
 		if !strings.Contains(page, want) {
 			t.Errorf("labelled page lacks %q", want)
@@ -82,7 +82,7 @@ func TestLabelRouteSavesShowsAndResets(t *testing.T) {
 		t.Errorf("the label replaced the reply-id outside the display")
 	}
 	_, index := get(t, f.base+"/")
-	if !strings.Contains(index, `<span class="rid" title="livesession">Build bot</span>`) {
+	if !strings.Contains(index, `<span class="rid lbl" title="livesession">Build bot</span>`) {
 		t.Errorf("index list lacks the label")
 	}
 
@@ -196,6 +196,8 @@ function check(what, got, want) { if (JSON.stringify(got) !== JSON.stringify(wan
 function El(tag, cls, attrs) {
   this.tagName = tag.toUpperCase(); this.className = cls || ""; this.attrs = attrs || {}; this.children = []; this.parentNode = null;
   this.hidden = false; this.textContent = ""; this.value = ""; this.on = {}; this.focused = 0;
+  var self = this;
+  this.classList = { toggle: function (c, on) { var l = self.className.split(" ").filter(function (x) { return x && x !== c; }); if (on) l.push(c); self.className = l.join(" "); } };
 }
 El.prototype.has = function (c) { return (" " + this.className + " ").indexOf(" " + c + " ") >= 0; };
 El.prototype.getAttribute = function (k) { return k in this.attrs ? this.attrs[k] : null; };
@@ -272,6 +274,7 @@ key("Enter");
 check("a second Enter while saving posts nothing", posts.length, 1);
 answer(true, { label: "Build bot" });
 check("saved: the name shows the label", [nm.textContent, sn.getAttribute("data-label"), inp(), nm.hidden, pen.hidden, labelEditing()], ["Build bot", "Build bot", null, false, false, false]);
+check("saved: the name takes the label's body face", nm.has("lbl"), true);
 
 // Escape cancels: nothing posted, the name kept.
 labelClick(pen);
@@ -308,6 +311,7 @@ key("Enter");
 check("empty posts an empty label", posts[posts.length - 1], ["label", { label: "" }]);
 answer(true, { label: "" });
 check("reset: the name shows the reply-id", [nm.textContent, sn.getAttribute("data-label"), inp()], ["sess", "", null]);
+check("reset: the reply-id keeps the mono face", nm.has("lbl"), false);
 
 // A head swap held while the input was open lands when it closes.
 labelClick(pen);
@@ -335,7 +339,8 @@ process.stdout.write(bad.join("\n"));
 // labelStart, labelKey, labelSave, labelEnd): the name copies the mailbox
 // address; the pencil opens a one-line input; Enter saves the trimmed value
 // through the label route, Escape and a blur cancel, an empty value resets
-// to the reply-id, a refusal keeps the input open, and a head swap held
+// to the reply-id, the name carries lbl (the label's body face) exactly
+// while it shows a label, a refusal keeps the input open, and a head swap held
 // while it was open lands when it closes. The cases execute under node when
 // it is installed.
 func TestHeadRenameScript(t *testing.T) {
@@ -357,4 +362,34 @@ func TestHeadRenameScript(t *testing.T) {
 		}
 	}
 	runNode(t, "head rename", labelJSPrelude+src+labelJSCases)
+}
+
+// TestSessionLabelBodyFace pins the manual label's face: a session with a
+// label marks its name lbl (the body face, dashboard.css) in the head, the
+// rail row, and the sessions index row; a bare reply-id keeps the mono face.
+func TestSessionLabelBodyFace(t *testing.T) {
+	cases := []struct {
+		name          string
+		labeled, bare any
+		mark          string
+	}{
+		{"sname", SessionView{ReplyID: "s", Label: "빌드 봇"}, SessionView{ReplyID: "s"}, `class="snm lbl"`},
+		{"rrow", RailRow{ReplyID: "s", Label: "빌드 봇", Live: true}, RailRow{ReplyID: "s", Live: true}, `class="rid lbl"`},
+		{"srow", IndexRow{ReplyID: "s", Label: "빌드 봇", Live: true}, IndexRow{ReplyID: "s", Live: true}, `class="rid lbl"`},
+	}
+	for _, c := range cases {
+		if got := renderNamed(t, c.name, c.labeled); !strings.Contains(got, c.mark) || !strings.Contains(got, "빌드 봇") {
+			t.Errorf("%s with a label lacks %s:\n%s", c.name, c.mark, got)
+		}
+		if got := renderNamed(t, c.name, c.bare); strings.Contains(got, " lbl") {
+			t.Errorf("%s without a label carries lbl:\n%s", c.name, got)
+		}
+	}
+	css := mustAsset(t, "dashboard.css")
+	for _, sel := range []string{".sname .snm.lbl {", ".sess .rid.lbl {", ".rail .rid.lbl {"} {
+		i := strings.Index(css, sel)
+		if i < 0 || !strings.Contains(css[i:i+strings.Index(css[i:], "}")], "font-family: var(--wb-sans); font-weight: 600;") {
+			t.Errorf("dashboard.css: %s does not set the body face at 600", sel)
+		}
+	}
 }
