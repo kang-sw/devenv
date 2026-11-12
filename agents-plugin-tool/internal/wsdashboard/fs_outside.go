@@ -55,11 +55,12 @@ import (
 //   - a path at or under an always-denied folder (outsideDenied: ~/.ssh,
 //     ~/.gnupg, ~/.aws, ~/.config/gh, ~/.netrc, ~/.docker) never opens, by
 //     the path as written or as resolved, whatever links it;
-//   - below the granted folder, a path with a dot-named segment and a file
-//     git ignores are refused as the in-root capability route refuses them
-//     (capDenied), except the linked file itself, which the lead named: it
-//     opens dot-named or ignored. The folder's own position is not judged,
-//     so a link into ~/.cache/proj opens;
+//   - below the granted folder, a path with a dot-named segment is refused
+//     as the in-root capability route refuses it for a browser on this
+//     machine (framedDenied, which every viewer of these routes is), so a
+//     file git ignores is served, except the linked file itself, which the
+//     lead named: it opens dot-named too. The folder's own position is not
+//     judged, so a link into ~/.cache/proj opens;
 //   - every read stays inside the granted folder once resolved, and a
 //     symlinked file is refused (openContained).
 //
@@ -531,8 +532,8 @@ func (d *Daemon) handleFSOutsideCapability(w http.ResponseWriter, r *http.Reques
 	}
 	defer f.Close()
 	// The linked file is the one path the lead named: it alone is served
-	// dot-named or ignored, and it is all a file-only grant serves.
-	if rel != g.Name && (g.Only || capDenied(g.Root, rel)) {
+	// dot-named, and it is all a file-only grant serves.
+	if rel != g.Name && (g.Only || framedDenied(r, g.Root, rel)) {
 		fsNotFound(w)
 		return
 	}

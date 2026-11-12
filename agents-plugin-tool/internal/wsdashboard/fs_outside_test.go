@@ -477,9 +477,10 @@ func TestFSOutsideNeverOpensAnAlwaysDeniedPath(t *testing.T) {
 
 // TestFSOutsideExemptsOnlyTheLinkedFile pins the dot and gitignore rules
 // below a granted folder: the linked file itself opens when it is
-// dot-named or ignored, since the lead named it, while its dot-named and
-// ignored siblings answer 404 on both routes, as the in-root capability
-// route refuses them.
+// dot-named or ignored, since the lead named it, while its dot-named
+// siblings answer 404 on both routes and its ignored siblings are served,
+// as the in-root capability route treats a browser on this machine, the
+// only viewer these routes serve.
 func TestFSOutsideExemptsOnlyTheLinkedFile(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")
@@ -493,9 +494,9 @@ func TestFSOutsideExemptsOnlyTheLinkedFile(t *testing.T) {
 		"sub/.report.html": "<h1>SECRET-NESTED</h1>",
 		".env":             "SECRET-ENV",
 		".secrets/key.css": "SECRET-KEY",
-		"debug.log":        "SECRET-LOG",
+		"debug.log":        "LOG-IGNORED",
 		"build/page.html":  "<h1>HTML-BUILD</h1>",
-		"build/out.css":    "SECRET-BUILT",
+		"build/out.css":    "CSS-BUILT",
 		"build/notes.txt":  "TEXT-BUILD",
 	} {
 		o.write(t, proj, name, body)
@@ -518,10 +519,11 @@ func TestFSOutsideExemptsOnlyTheLinkedFile(t *testing.T) {
 			}
 		}
 	}
-	hidden := []string{".env", ".secrets/key.css", ".gitignore", "debug.log", "build/out.css", "build/page.html"}
+	hidden := []string{".env", ".secrets/key.css", ".gitignore"}
+	ignored := []string{"debug.log", "build/out.css", "build/page.html"}
 
 	plain := o.linked(t, filepath.Join(proj, "page.html"))
-	siblings("a plain linked file", plain, []string{"page.html", "style.css"}, append([]string{".report.html"}, hidden...))
+	siblings("a plain linked file", plain, append([]string{"page.html", "style.css"}, ignored...), append([]string{".report.html"}, hidden...))
 
 	// A dot-named linked file opens; the other dot names stay refused.
 	dot := o.linked(t, filepath.Join(proj, ".report.html"))
@@ -535,17 +537,17 @@ func TestFSOutsideExemptsOnlyTheLinkedFile(t *testing.T) {
 		t.Errorf("mint of a dot-named text file the lead linked = %+v, want its text", env)
 	}
 
-	// An ignored linked file opens; its ignored siblings stay refused, at
-	// the accepted cost of its own assets.
+	// An ignored linked file opens, and so do its ignored siblings, its own
+	// assets.
 	built := o.linked(t, filepath.Join(proj, "build", "page.html"))
 	if rec := o.read(built.Frame); built.Kind != "frame" || rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "HTML-BUILD") {
 		t.Fatalf("mint of an ignored linked file = %+v, GET = %d", built, rec.Code)
 	}
-	siblings("an ignored linked file", built, []string{"page.html"}, []string{"out.css", "notes.txt"})
+	siblings("an ignored linked file", built, []string{"page.html", "out.css", "notes.txt"}, nil)
 	if text := o.linked(t, filepath.Join(proj, "build", "notes.txt")); text.Kind != "text" || text.Text != "TEXT-BUILD" {
 		t.Errorf("mint of an ignored text file the lead linked = %+v, want its text", text)
 	}
-	if log := o.linked(t, filepath.Join(proj, "debug.log")); log.Kind != "text" || log.Text != "SECRET-LOG" {
+	if log := o.linked(t, filepath.Join(proj, "debug.log")); log.Kind != "text" || log.Text != "LOG-IGNORED" {
 		t.Errorf("mint of an ignored log the lead linked = %+v, want its text", log)
 	}
 }

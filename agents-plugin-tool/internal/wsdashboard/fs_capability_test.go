@@ -336,11 +336,12 @@ func TestFSCapabilityURLEscapesThePath(t *testing.T) {
 // TestFSCapabilityRefusesDotAndIgnoredPaths pins that the capability route
 // keeps the whole root as its read scope, so a document's asset in a parent
 // folder loads, but refuses through a valid capability a path with a
-// dot-named segment (as written or through a symlink) and one git ignores;
+// dot-named segment (as written or through a symlink) to every viewer, and
+// one git ignores to a LAN viewer while a browser on this machine reads it;
 // that a root in no repository has no ignored set and refuses dot paths
-// only; that a failed ignore check inside a repository refuses the read;
-// and that the preview route mints no capability for a refused file and
-// shows its source instead.
+// only; that a failed ignore check inside a repository refuses a LAN
+// viewer's read; and that the preview route mints no capability for a file
+// it refuses the viewer and shows its source instead.
 func TestFSCapabilityRefusesDotAndIgnoredPaths(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")
@@ -364,21 +365,30 @@ func TestFSCapabilityRefusesDotAndIgnoredPaths(t *testing.T) {
 
 	frame := capFrame(t, f, lan, "livesession", "docs/sub/page.html")
 	prefix := strings.TrimSuffix(frame, "docs/sub/page.html")
-	read := func(stage string, path string, want int) {
+	readAs := func(v viewer, stage string, path string, want int) {
 		t.Helper()
-		rec := serve(f.d, local, http.MethodGet, prefix+path, "")
+		rec := serve(f.d, v, http.MethodGet, prefix+path, "")
 		if rec.Code != want || (want != http.StatusOK && strings.Contains(rec.Body.String(), "SECRET")) {
-			t.Errorf("%s: capability read of %s = %d %q, want %d", stage, path, rec.Code, rec.Body.String(), want)
+			t.Errorf("%s: capability read of %s as %s = %d %q, want %d", stage, path, v.name, rec.Code, rec.Body.String(), want)
 		}
 	}
-	preview := func(stage, path string) fsPreviewAnswer {
+	read := func(stage string, path string, want int) {
 		t.Helper()
-		rec := serve(f.d, lan, http.MethodGet, "/s/livesession/fs/preview?path="+path, "")
+		readAs(local, stage, path, want)
+		readAs(lan, stage, path, want)
+	}
+	previewAs := func(v viewer, stage, path string) fsPreviewAnswer {
+		t.Helper()
+		rec := serve(f.d, v, http.MethodGet, "/s/livesession/fs/preview?path="+path, "")
 		var a fsPreviewAnswer
 		if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &a) != nil {
 			t.Fatalf("%s: preview %s = %d %s", stage, path, rec.Code, rec.Body.String())
 		}
 		return a
+	}
+	preview := func(stage, path string) fsPreviewAnswer {
+		t.Helper()
+		return previewAs(lan, stage, path)
 	}
 	sourceOnly := func(stage, path, body string) {
 		t.Helper()
@@ -400,19 +410,32 @@ func TestFSCapabilityRefusesDotAndIgnoredPaths(t *testing.T) {
 	}
 	sourceOnly(stage, ".hidden/page.html", "<h1>SECRET-HIDDEN</h1>")
 
-	// Inside a repository, a path git ignores is refused too; a file in an
-	// ignored folder is ignored with it.
+	// Inside a repository, a path git ignores is refused to a LAN viewer
+	// too; a file in an ignored folder is ignored with it. A browser on
+	// this machine reads it, and its preview frames it.
 	gitRun(t, f.project, "init", "-q")
 	writeFile(t, filepath.Join(f.project, ".gitignore"), "build/\n*.log\n")
 	stage = "repository"
 	for _, path := range []string{"docs/sub/page.html", "docs/sub/app.js", "docs/style.css"} {
 		read(stage, path, http.StatusOK)
 	}
-	for _, path := range []string{".env", ".secrets/key.txt", ".hidden/page.html", ".gitignore", "build/out.css", "build/page.html", "debug.log"} {
+	for _, path := range []string{".env", ".secrets/key.txt", ".hidden/page.html", ".gitignore"} {
 		read(stage, path, http.StatusNotFound)
+	}
+	for _, path := range []string{"build/out.css", "build/page.html", "debug.log"} {
+		readAs(lan, stage, path, http.StatusNotFound)
+		readAs(local, stage, path, http.StatusOK)
 	}
 	sourceOnly(stage, ".hidden/page.html", "<h1>SECRET-HIDDEN</h1>")
 	sourceOnly(stage, "build/page.html", "<h1>IGNORED-PAGE</h1>")
+	if a := previewAs(local, stage, ".hidden/page.html"); a.Frame != "" || !a.Source {
+		t.Errorf("%s: local preview of a dot path = %+v, want its source and no capability", stage, a)
+	}
+	if a := previewAs(local, stage, "build/page.html"); a.Kind != "frame" || a.Frame == "" {
+		t.Errorf("%s: local preview of an ignored document = %+v, want a capability frame", stage, a)
+	} else if rec := serve(f.d, local, http.MethodGet, a.Frame, ""); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "IGNORED-PAGE") {
+		t.Errorf("%s: local read of the ignored document's frame = %d %q", stage, rec.Code, rec.Body.String())
+	}
 	if a := preview(stage, "docs/sub/page.html"); a.Kind != "frame" || a.Frame == "" {
 		t.Errorf("%s: preview of a served document = %+v, want a capability frame", stage, a)
 	}
@@ -423,7 +446,8 @@ func TestFSCapabilityRefusesDotAndIgnoredPaths(t *testing.T) {
 		t.Fatal(err)
 	}
 	stage = "failed ignore check"
-	read(stage, "docs/style.css", http.StatusNotFound)
+	readAs(lan, stage, "docs/style.css", http.StatusNotFound)
+	readAs(local, stage, "docs/style.css", http.StatusOK)
 	if a := preview(stage, "docs/sub/page.html"); a.Frame != "" || !a.Source {
 		t.Errorf("%s: preview of a document = %+v, want its source and no capability", stage, a)
 	}
