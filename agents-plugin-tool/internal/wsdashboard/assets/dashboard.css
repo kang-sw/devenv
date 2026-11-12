@@ -478,6 +478,12 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
    pressure (.hi) stays. */
 .r-ctx:empty, .r-sline:empty { display: none; }
 .r-sline { container-type: inline-size; }
+/* the composer's last row: the sline region, and on a page that offers
+   terminals the terminal slot beside it (outside the region, so a swap
+   keeps the slot); the row collapses with an empty region and no slot */
+.cfoot { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.cfoot > .r-sline { flex: 1 1 auto; min-width: 0; }
+.cfoot:has(> .r-sline:empty):not(:has(> .tslot)) { display: none; }
 .sb { display: flex; align-items: center; flex-wrap: wrap; gap: 3px 12px; min-width: 0; font-size: 12.5px; line-height: 1.3; padding: 0 2px; }
 .sb .i { width: 13px; height: 13px; }
 .sb-top { flex-wrap: nowrap; padding-top: 2px; }
@@ -628,20 +634,23 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .tm-end .btn { flex: none; height: 24px; font-size: 12px; font-weight: 700; color: var(--wb-fg); }
 .bcard[data-exited] .bc-kind { background: color-mix(in srgb, var(--wb-fail) 14%, var(--wb-card)); color: var(--wb-fail); }
 .tm-fold { overflow: hidden; text-overflow: ellipsis; white-space: pre; }
-/* the board column's header row (terminal.js): its own sticky row at the
-   column's top, right-aligned. The topic rail's capsules and the current
-   topic's bar stick below it (--wb-rail-inset, page.css), so its height is
-   fixed and the two values change together; it draws over the capsule
-   stack's top fill. A page without terminals has no such row and no inset.
-   A sticky row sticks at the column's padding edge, so the column's top
-   padding is a strip above the stuck row that the cards scroll through: the
-   row's shadow fills it, as the capsule stack's does. */
-.bhead { position: sticky; top: 0; z-index: 4; display: flex; align-items: center; justify-content: flex-end; gap: 6px; height: 28px; margin: -2px -4px 6px -2px; padding: 1px 4px 1px 2px; background: var(--wb-bg); box-shadow: 0 -8px 0 var(--wb-bg); }
-.bcol:has(> .bhead) { --wb-rail-inset: 28px; }
-.bnew { height: 26px; gap: 5px; padding: 0 11px 0 8px; font-size: 12.5px; font-weight: 700; color: var(--wb-fg); }
-.bnew .li { width: 13px; height: 13px; }
-.bnew[aria-expanded="true"] { background: var(--wb-primary); color: var(--wb-primary-fg); }
-.tpop { position: absolute; top: calc(100% + 2px); right: 4px; z-index: 20; width: 340px; max-width: calc(100% - 8px); background: var(--wb-card); color: var(--wb-fg); border-radius: 10px; box-shadow: var(--wb-shadow-hi); padding: 8px; }
+/* the "+ Terminal" button (terminal.js) in its slot at the right end of the
+   composer's status line (dashboard.tmpl cfoot): an icon button whose
+   negative margin keeps the line's height, so showing it moves nothing. A
+   page without a composer fixes the slot at its bottom right (.tfix), and
+   its board's sticky copy-answers bar keeps clear of it. The
+   folder popover opens above the button, right-aligned to it; terminal.js
+   moves it right while its left edge would leave the viewport. */
+.tslot { position: relative; flex: none; display: flex; margin-left: auto; }
+.tslot.tfix { position: fixed; right: 16px; bottom: 16px; z-index: 30; }
+.tnew { width: 24px; height: 22px; margin: -3px -2px -3px 0; padding: 0; background: transparent; color: var(--wb-muted-fg); }
+.tnew:hover, .tnew:focus-visible { background: var(--wb-muted); color: var(--wb-fg); }
+.tnew .li { width: 15px; height: 15px; }
+.tnew[aria-expanded="true"] { background: var(--wb-primary); color: var(--wb-primary-fg); }
+.tfix .tnew { width: 36px; height: 36px; margin: 0; background: var(--wb-card); color: var(--wb-fg); box-shadow: var(--wb-shadow-hi); }
+.tfix .tnew .li { width: 18px; height: 18px; }
+body:has(> .tfix) .r-board .reply { margin-right: 44px; }
+.tpop { position: absolute; bottom: calc(100% + 8px); right: 0; z-index: 20; width: 340px; max-width: calc(100vw - 16px); background: var(--wb-card); color: var(--wb-fg); border-radius: 10px; box-shadow: var(--wb-shadow-hi); padding: 8px; }
 .tpop[hidden] { display: none; }
 .tpop .lb { font-size: 11px; font-weight: 800; color: var(--wb-muted-fg); margin: 2px 4px 6px; }
 .tpop .lb + .topts { margin-bottom: 8px; }

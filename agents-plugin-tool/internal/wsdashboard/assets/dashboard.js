@@ -564,7 +564,8 @@
   // kept for the session. Showing a card switches to the board tab where
   // the view shows one column at a time.
   // Terminal cards (terminal.js) exist only on a page the server marked
-  // data-term; their module adds the board column's header row.
+  // data-term; their module adds the "+ Terminal" button at the end of
+  // the composer's status line (or fixed at the page's corner without one).
   // The pinned column (bpcol) is the page body's last column: from 1600px,
   // while anything is pinned, unless the layout menu says "tabs" (one
   // column at a time, where the pins stand atop the board). The root's
