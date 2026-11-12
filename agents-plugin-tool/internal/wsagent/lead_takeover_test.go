@@ -300,7 +300,7 @@ func TestHandOffGivesTheSessionToTheTerminal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "cd " + h.root + " && claude --resume sess-1"
+	want := "cd " + shellQuote(h.root) + " && claude --resume sess-1"
 	if st.Status != StatusHandedOff || st.Process || st.ResumeCommand != want {
 		t.Fatalf("handed-off state = %+v, want the resume command %q", st, want)
 	}
@@ -367,7 +367,7 @@ func TestHandOffThroughTheRoute(t *testing.T) {
 	h.holders.out(holder, turnLines("sess 1", "u1", "done")...)
 	h.idle(id)
 	r := h.route(localBrowser, http.MethodPost, "/agents/"+id+"/handoff", nil)
-	if st := decodeState(t, r); r.status != http.StatusOK || st.Status != StatusHandedOff || st.ResumeCommand != "cd "+h.root+" && claude --resume 'sess 1'" {
+	if st := decodeState(t, r); r.status != http.StatusOK || st.Status != StatusHandedOff || st.ResumeCommand != "cd "+shellQuote(h.root)+" && claude --resume 'sess 1'" {
 		t.Fatalf("handoff = %d %s", r.status, r.body)
 	}
 	if r := h.route(localBrowser, http.MethodPost, "/agents/"+id+"/handoff", nil); r.status != http.StatusConflict {
