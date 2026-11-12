@@ -427,6 +427,9 @@
     "261112-feat-ws-mcp-pi-spawn-claude-lead-path": {
       "registered_at": "2026-11-12T14:07:03Z"
     },
+    "261112-feat-ws-mcp-pi-spawn-recursion": {
+      "registered_at": "2026-11-12T14:32:11Z"
+    },
     "261112-feat-ws-mixed-version-compat-guards": {
       "registered_at": "2026-11-12T01:58:07Z"
     },
