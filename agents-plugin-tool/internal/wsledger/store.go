@@ -501,10 +501,11 @@ type Unpushed struct {
 // step of a Sync, Fetch, or idle push, runs on the directory, which is
 // what a caller about to remove the directory needs: fn may rename it
 // away, except on Windows, which refuses to rename a directory while the
-// lock file in it is open; there the rename follows Exclusive. A fetch or push already talking to the remote is not waited for:
-// it holds the network lock, not this one, and writes only objects and
-// remote-tracking refs meanwhile; the step that would apply its result
-// comes after fn, and Options.ApplyGate is where the caller refuses it.
+// lock file in it is open; there the rename follows Exclusive. A fetch or
+// push already talking to the remote is not waited for: it holds the
+// network lock, not this one, and writes only objects and remote-tracking
+// refs meanwhile; the step that would apply its result comes after fn,
+// and Options.ApplyGate is where the caller refuses it.
 // Exclusive waits at most wait for the lock, this Ledger's own running
 // step included, and then fails with ErrBusy, having run nothing.
 func (l *Ledger) Exclusive(ctx context.Context, wait time.Duration, fn func(Unpushed) error) error {

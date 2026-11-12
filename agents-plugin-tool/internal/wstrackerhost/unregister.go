@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -31,15 +32,23 @@ var unregisterWait = 2 * time.Second
 // directory in between. Windows cannot rename a directory that holds an
 // open file, so there the lock files close first; a call another process
 // already had waiting on the store lock can then run on the directory in
-// the moment before the rename. A call on the network (a fetch, in any
-// process) holds the network lock file open in the directory throughout,
-// so there the rename can still fail; the directory is then left to that
-// call, which moves it away when it ends (removeLeftover).
+// the moment before the rename, and a call on the network (a fetch, in any
+// process) holds the network lock file open in the directory throughout.
+// There the rename is retried while refused (renameWindow).
 var renameUnderLocks = runtime.GOOS != "windows"
 
 // renameDir renames a store directory away; a test replaces it to refuse
 // the rename as Windows does while a file in the directory is open.
 var renameDir = os.Rename
+
+// renameWindow bounds how long Unregister, renaming after the locks'
+// release, retries a rename refused because a file in the directory is
+// open: long enough to outlast a background check's fetch. A rename still
+// refused then puts the registry entry back, and Unregister fails.
+var renameWindow = 5 * time.Second
+
+// renameRetryEvery is the pause between two attempts within renameWindow.
+const renameRetryEvery = 50 * time.Millisecond
 
 // The kinds of an UnregisterRefusal.
 const (
@@ -133,9 +142,10 @@ func tryFlock(ctx context.Context, fl *flock.Flock) bool {
 // when confirm is the store id. A refusal leaves the store as it was.
 //
 // A fetch in flight, in any process, does not hold the store: it is on the
-// network under the network lock, and Unregister does not wait for it. The
-// store is removed under it, and the step that would apply what it fetched
-// finds the registration gone and applies nothing (applyGate).
+// network under the network lock, and Unregister does not refuse for it
+// (but where the rename follows the locks' release, below). The store is
+// removed under it, and the step that would apply what it fetched finds
+// the registration gone and applies nothing (applyGate).
 //
 // The removal is safe against the other processes sharing the root. It
 // holds the store's write lock and wsledger's store lock, read the unpushed
@@ -148,29 +158,59 @@ func tryFlock(ctx context.Context, fl *flock.Flock) bool {
 // directory. Nothing recreates the directory afterwards, and every Host
 // re-checks the registration before it reuses an open store (lockStore).
 //
-// Where the rename follows the locks' release (renameUnderLocks false) and
-// a call on the network still holds a file in the directory, the rename is
-// refused; the registration is gone already, so Unregister succeeds and
-// the directory stays until that call ends and moves it away
-// (removeLeftover).
+// Where the rename follows the locks' release (renameUnderLocks false), a
+// file another call holds open in the directory refuses it: a fetch's
+// network lock file, or a reader's. The rename is then retried for up to
+// renameWindow, holding no lock of the store, so a fetch in flight can end
+// meanwhile. A rename still refused then, or failing otherwise, puts the
+// registry entry back and Unregister fails, telling the user to try again.
+// The store is then registered as before: a process that found it gone
+// meanwhile and dropped its handle opens a fresh one on its next call
+// (lockStore), and no directory is ever left without an entry, which
+// Register would refuse.
 func (h *Host) Unregister(ctx context.Context, id, confirm string) error {
 	h.sweepRemoved()
-	st, err := h.lockStore(ctx, id, unregisterWait, true)
-	if errors.Is(err, ErrStoreBusy) {
-		return refuseBusy(id)
-	}
+	e, at, aside, err := h.removeRegistration(ctx, id, confirm)
 	if err != nil {
 		return err
+	}
+	if !renameUnderLocks {
+		if err := renameRetrying(ctx, e.Dir, aside); err != nil {
+			_ = h.restoreEntry(e, at)
+			if !errors.Is(err, fs.ErrPermission) {
+				return fmt.Errorf("tracker: unregister store %q: %w", id, err)
+			}
+			return fmt.Errorf("tracker: store %q was not unregistered: its directory is in use; try again when the check, sync, or program using it has finished: %w", id, err)
+		}
+	}
+	// A failed delete leaves a hidden directory the next sweep removes.
+	_ = os.RemoveAll(aside)
+	return nil
+}
+
+// removeRegistration is Unregister up to the rename that follows the
+// locks' release: it refuses, or takes store id's entry out of the
+// registry, renames the directory to aside when renameUnderLocks, and
+// retires this process's handle. It returns the entry, its registry
+// position, and aside, holding no lock of the store.
+func (h *Host) removeRegistration(ctx context.Context, id, confirm string) (StoreEntry, int, string, error) {
+	fail := func(err error) (StoreEntry, int, string, error) { return StoreEntry{}, -1, "", err }
+	st, err := h.lockStore(ctx, id, unregisterWait, true)
+	if errors.Is(err, ErrStoreBusy) {
+		return fail(refuseBusy(id))
+	}
+	if err != nil {
+		return fail(err)
 	}
 	defer st.mu.Unlock()
 	e := st.entry
 	if e.Remote == "" && confirm != id {
-		return &UnregisterRefusal{Store: id, Kind: UnregisterNeedsConfirm,
-			Reason: "it has no remote, so this machine holds its only copy and unregistering deletes its data permanently; confirm by giving the store id"}
+		return fail(&UnregisterRefusal{Store: id, Kind: UnregisterNeedsConfirm,
+			Reason: "it has no remote, so this machine holds its only copy and unregistering deletes its data permanently; confirm by giving the store id"})
 	}
 	wl := flock.New(filepath.Join(e.Dir, writeLockFile))
 	if !tryFlock(ctx, wl) {
-		return refuseBusy(id)
+		return fail(refuseBusy(id))
 	}
 	defer wl.Unlock() //nolint:errcheck
 	if st.ledger == nil {
@@ -178,28 +218,20 @@ func (h *Host) Unregister(ctx context.Context, id, confirm string) error {
 		// another process holds across a wiki save is refused here first.
 		probe := flock.New(filepath.Join(e.Dir, wsledger.LockFile))
 		if !tryFlock(ctx, probe) {
-			return refuseBusy(id)
+			return fail(refuseBusy(id))
 		}
 		probe.Unlock() //nolint:errcheck
 		if err := h.open(ctx, st); err != nil {
-			return err
+			return fail(err)
 		}
 	}
-	// Held around the entry's removal and the rename, so a seen mark of
-	// this process (MarkSeen) cannot land in between.
+	// Held around the entry's removal, and the rename under the locks, so
+	// a seen mark of this process (MarkSeen) reads the entry before it is
+	// gone and is written before the directory moves, or finds it gone.
 	h.seenMu.Lock()
 	defer h.seenMu.Unlock()
-	aside := h.asidePath(id)
+	aside := filepath.Join(h.root, fmt.Sprintf("%s%s-%d", removedPrefix, id, time.Now().UnixNano()))
 	at := -1
-	moveAside := func() error {
-		if err := renameDir(e.Dir, aside); err != nil {
-			// The store stays registered rather than leaving a directory
-			// with no entry, which Register would refuse.
-			_ = h.restoreEntry(e, at)
-			return fmt.Errorf("tracker: unregister store %q: %w", id, err)
-		}
-		return nil
-	}
 	err = st.ledger.Exclusive(ctx, unregisterWait, func(u wsledger.Unpushed) error {
 		if e.Remote != "" {
 			if err := unpushedRefusal(id, u); err != nil {
@@ -210,72 +242,43 @@ func (h *Host) Unregister(ctx context.Context, id, confirm string) error {
 		if at, err = h.removeEntry(id, e.Nonce); err != nil {
 			return err
 		}
-		if renameUnderLocks {
-			return moveAside()
+		if !renameUnderLocks {
+			return nil
+		}
+		if err := renameDir(e.Dir, aside); err != nil {
+			// The store stays registered rather than leaving a directory
+			// with no entry, which Register would refuse.
+			_ = h.restoreEntry(e, at)
+			return fmt.Errorf("tracker: unregister store %q: %w", id, err)
 		}
 		return nil
 	})
 	if errors.Is(err, wsledger.ErrBusy) {
-		return refuseBusy(id)
+		return fail(refuseBusy(id))
 	}
 	if err != nil {
-		return err
+		return fail(err)
 	}
 	h.retire(st)
-	wl.Unlock() //nolint:errcheck
-	if !renameUnderLocks {
-		if err := renameDir(e.Dir, aside); err != nil {
-			// The registration is gone, and every call finds it so before
-			// its next step; the call holding the directory moves it away
-			// when it ends (removeLeftover). Restoring the entry instead
-			// would refuse every unregister during a check on Windows.
-			return nil
+	return e, at, aside, nil
+}
+
+// renameRetrying renames a store directory from to to, retrying while the
+// rename is refused for a file open in it (Windows reports it as a
+// permission error), for up to renameWindow or until ctx ends. It returns
+// the last attempt's error.
+func renameRetrying(ctx context.Context, from, to string) error {
+	deadline := time.Now().Add(renameWindow)
+	for {
+		err := renameDir(from, to)
+		if err == nil || !errors.Is(err, fs.ErrPermission) || !time.Now().Before(deadline) {
+			return err
 		}
-	}
-	// A failed delete leaves a hidden directory the next sweep removes.
-	_ = os.RemoveAll(aside)
-	return nil
-}
-
-// asidePath is a fresh name to rename store id's directory to before it is
-// deleted.
-func (h *Host) asidePath(id string) string {
-	return filepath.Join(h.root, fmt.Sprintf("%s%s-%d", removedPrefix, id, time.Now().UnixNano()))
-}
-
-// statDir is dir's FileInfo with its identity read now, nil when dir
-// cannot be read. On Windows os.Stat defers reading the file id to the
-// first os.SameFile, which would read whatever directory is at the path by
-// then.
-func statDir(dir string) os.FileInfo {
-	fi, err := os.Stat(dir)
-	if err != nil {
-		return nil
-	}
-	os.SameFile(fi, fi)
-	return fi
-}
-
-// removeLeftover moves st's directory away and deletes it when an
-// Unregister left it in place (renameUnderLocks false: the rename was
-// refused while this call's network lock file was open in it). A call on
-// the network runs it once it ended and found its registration gone,
-// holding st.mu. Only the directory st opened is moved, never one a later
-// registration of the id created.
-func (h *Host) removeLeftover(st *store) {
-	if renameUnderLocks || st.dirInfo == nil {
-		return
-	}
-	if _, err := h.Entry(st.id); !errors.Is(err, ErrNotRegistered) {
-		return
-	}
-	cur, err := os.Stat(st.entry.Dir)
-	if err != nil || !os.SameFile(cur, st.dirInfo) {
-		return
-	}
-	aside := h.asidePath(st.id)
-	if renameDir(st.entry.Dir, aside) == nil {
-		_ = os.RemoveAll(aside)
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(renameRetryEvery):
+		}
 	}
 }
 
