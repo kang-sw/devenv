@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -13,7 +14,8 @@ import (
 
 // Each package (ws, wsflow, Pi) ships a "dashboard."-namespace manifest beside
 // its own manifest and lists both in WS_MCP_CONFIG_MANIFESTS. The three
-// declare the same keys and differ only in dashboard.enabled's default.
+// declare the same keys and may differ only in dashboard.enabled's default
+// (today all three default it on).
 
 var dashboardPackages = []struct {
 	name      string
@@ -22,8 +24,30 @@ var dashboardPackages = []struct {
 	enabled   bool
 }{
 	{"ws", claudeManifestPath, filepath.Join("..", "..", "..", "agents-plugin", "dashboard-config-manifest.json"), true},
-	{"wsflow", wsflowClaudeManifestPath, filepath.Join("..", "..", "..", "agents-plugin-wsflow", "dashboard-config-manifest.json"), false},
+	{"wsflow", wsflowClaudeManifestPath, filepath.Join("..", "..", "..", "agents-plugin-wsflow", "dashboard-config-manifest.json"), true},
 	{"pi", filepath.Join("..", "..", "..", "agents-plugin-pi", "config-manifest.json"), filepath.Join("..", "..", "..", "agents-plugin-pi", "dashboard-config-manifest.json"), true},
+}
+
+// dashboardOffManifest writes a copy of the ws dashboard manifest whose
+// dashboard.enabled defaults off, for fixtures that need the opt-out path
+// now that every shipped package defaults it on.
+func dashboardOffManifest(t *testing.T) string {
+	t.Helper()
+	m := readManifestJSON(t, dashboardPackages[0].dashboard)
+	for _, k := range manifestKeyObjects(t, dashboardPackages[0].dashboard, m) {
+		if k["key"] == DashboardEnabledKey {
+			k["default"] = false
+		}
+	}
+	body, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "dashboard-config-manifest.json")
+	if err := os.WriteFile(path, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
 
 // dashboardServer builds a server whose launcher listed manifestList, with

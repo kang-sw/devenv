@@ -5,7 +5,7 @@
     {
       "key": "dashboard.enabled",
       "type": "boolean",
-      "default": false,
+      "default": true,
       "description": "When true, this MCP server lists the top-level lead session it serves on the machine's dashboard (one daemon per OS environment, serving local web pages for the workflow sessions on it) and opens the browser for it; when false, it does neither. The daemon itself runs either way: the plugin launcher starts it when none runs and keeps it current, since the daemon also hosts every session's MCP server, so this key never starts, stops, or replaces it. Whether a session is listed is read for that session, a session-scope tune included: the session's own tune applies at once, any other change at the session's next tool call a minute or more later, and turning it off also applies within a few minutes without one. A session whose value is false is never listed, and this server sends the daemon nothing about it. MCP tools behave the same either way. When this key's manifest fails to load, the dashboard stays off."
     },
     {

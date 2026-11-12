@@ -39,7 +39,7 @@ func newLiveFixture(t *testing.T, enabled bool) liveFixture {
 	t.Setenv(envMailboxAuto, "")
 	pkg := dashboardPackages[0]
 	if !enabled {
-		pkg = dashboardPackages[1]
+		pkg.dashboard = dashboardOffManifest(t)
 	}
 	t.Setenv(envConfigManifests, pkg.own+";"+pkg.dashboard)
 	root := t.TempDir()

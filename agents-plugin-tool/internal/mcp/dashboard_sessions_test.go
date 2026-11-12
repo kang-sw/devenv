@@ -44,13 +44,13 @@ func dashboardGitRoot(t *testing.T) string {
 }
 
 // dashboardSessionServer builds a server whose launcher listed the ws
-// manifest beside the shipped ws (enabled) or wsflow (disabled) dashboard
-// manifest, and logs a top-level lead session in at root.
+// manifest beside the shipped ws dashboard manifest (enabled) or an
+// off-by-default copy of it (disabled), and logs a top-level lead session in at root.
 func dashboardSessionServer(t *testing.T, root string, enabled bool) (s *Server, key, loginRoot string) {
 	t.Helper()
 	dashboard := dashboardPackages[0].dashboard
 	if !enabled {
-		dashboard = dashboardPackages[1].dashboard
+		dashboard = dashboardOffManifest(t)
 	}
 	t.Setenv(envConfigManifests, claudeManifestPath+";"+dashboard)
 	s = NewServer(root, "test")
