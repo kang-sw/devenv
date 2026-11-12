@@ -41,8 +41,10 @@ const (
 		"The whiteboard is your primary channel for what you ask the user. Every item\n" +
 		"you ask of the user (discussion items and Open Decision Queue items) goes on\n" +
 		"the whiteboard through `{{ns}}/whiteboard.update`, and context that outlasts\n" +
-		"a reply goes in its topic's body. Progress and explanations stay in the\n" +
-		"terminal or chat, which never repeats what the board holds.\n\n" +
+		"a reply goes in its topic's body. While the user is watching the board (the\n" +
+		"playbook's Each turn rule says when), progress and explanations go on it\n" +
+		"too and the chat does not repeat what the board holds; otherwise the chat\n" +
+		"carries them as usual.\n\n" +
 		"- Asks a skill or the project reserves for the user (the next-step handoff\n" +
 		"  of `{{ns}}:lead-review`, the publish confirmation of `{{ns}}:lead-ship`,\n" +
 		"  Approval Protocol asks) remain asks, shown on the whiteboard.\n" +

@@ -268,7 +268,7 @@ Whiteboard: <full> - (102), (103)
 When the host's instructions give an embed syntax, emit the host's embed line
 for the returned `embed:` in place of the `Whiteboard:` line.
 
-**Never repeat in the terminal or chat what the update wrote on the board: items and topic bodies stay on the board, and the terminal or chat carries only progress, explanations, that pointer (or embed) line, and any fixed-format lines a playbook mandates.**
+**While the user is watching the board, put as much of the conversation as practical on it, and do not repeat what the update wrote there in the terminal or chat. The user is watching when their current message starts with `[user message from the {{.McpNamespace}} whiteboard]` or carries a `<wb:answers>` block or `<wb:mention>` elements, when the host embeds the board inline in the conversation, or when they say they are watching. Otherwise the chat carries the conversation as usual.**
 
 ## Host embed folder
 
