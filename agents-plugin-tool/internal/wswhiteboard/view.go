@@ -138,6 +138,11 @@ type TopicView struct {
 	// DocMarks are the change marks of the body's latest edit, in the block
 	// numbering of bodyUnits.
 	DocMarks []BlockMark
+	// DocStale marks the body's change marks as no longer fresh: an item of
+	// the topic changed after the body's latest edit (Item.Changed above
+	// the body's Changed; a recap change does not count). The marks stay,
+	// dimmed, until the next body edit.
+	DocStale bool
 	// DocNew marks a body changed since the previous embed (embed only).
 	DocNew bool
 	// Recap is the topic's recap, rendered by the item block-field rule;
@@ -403,6 +408,7 @@ func BuildView(state *State, in ViewInput) View {
 
 	var order []string
 	blocks := map[string]*TopicView{}
+	itemsChanged := map[string]int{} // newest Item.Changed per topic
 	blockOf := func(topic string) *TopicView {
 		block, ok := blocks[topic]
 		if !ok {
@@ -415,6 +421,7 @@ func BuildView(state *State, in ViewInput) View {
 	for _, item := range state.Items {
 		block := blockOf(item.Topic)
 		iv := itemView(item)
+		itemsChanged[item.Topic] = max(itemsChanged[item.Topic], item.Changed)
 		if in.Layout == LayoutEmbed && item.Changed > state.LastEmbedSeq {
 			iv.New = true
 			block.Fresh++
@@ -441,6 +448,7 @@ func BuildView(state *State, in ViewInput) View {
 		block := blockOf(doc.Name)
 		block.Doc = doc.Body
 		block.DocMarks = doc.Marks
+		block.DocStale = itemsChanged[doc.Name] > doc.Changed
 		block.DocNew = in.Layout == LayoutEmbed && doc.Body != "" && doc.Changed > state.LastEmbedSeq
 		block.Recap = doc.Recap
 	}

@@ -442,7 +442,7 @@ func newPageData(view View, a *pageAssets, framed bool) *pageData {
 		if framed {
 			// The frame loads mermaid for its own blocks; the page loads it
 			// only for a block outside every frame.
-			html = p.framedDoc(t.Name, html, p.Mermaid, p.relays, a)
+			html = p.framedDoc(t.Name, html, t.DocStale, p.Mermaid, p.relays, a)
 			p.Mermaid = false
 		}
 		p.Mermaid = p.Mermaid || page
@@ -486,11 +486,11 @@ const frameCSS = "html, body { background: transparent; overflow: hidden; }"
 // hands the frame the image (doc-frame.js and the dashboard script).
 // The frame carries its topic name as data-doc, so the host can keep each
 // frame's height across a board swap.
-func (p *pageData) framedDoc(topic string, body template.HTML, mermaid bool, relays []string, a *pageAssets) template.HTML {
+func (p *pageData) framedDoc(topic string, body template.HTML, stale, mermaid bool, relays []string, a *pageAssets) template.HTML {
 	var doc strings.Builder
 	doc.WriteString(frameDocStart + `<head><meta charset="utf-8"><base target="_blank"><style>`)
 	doc.WriteString(string(a.css))
-	doc.WriteString("\n" + frameCSS + `</style></head><body class="doc-frame"><div class="doc-body md">`)
+	doc.WriteString("\n" + frameCSS + `</style></head><body class="doc-frame"><div class="doc-body md` + staleClass(stale) + `">`)
 	doc.WriteString(string(body))
 	doc.WriteString(`</div><script>` + a.docFrame + `</script>`)
 	if mermaid {
@@ -503,6 +503,15 @@ func (p *pageData) framedDoc(topic string, body template.HTML, mermaid bool, rel
 	}
 	return template.HTML(`<iframe class="doc-frame" title="` + template.HTMLEscapeString(topic) + `" data-doc="` + template.HTMLEscapeString(topic) + `"` + relay + ` sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox" srcdoc="` +
 		template.HTMLEscapeString(doc.String()) + `"></iframe>`)
+}
+
+// staleClass is the class a topic body carries once its change marks are
+// stale (TopicView.DocStale); chg.js dims the bars from it.
+func staleClass(stale bool) string {
+	if stale {
+		return " chg-stale"
+	}
+	return ""
 }
 
 // frameDocStart opens every topic-body frame's document (framedDoc), the
@@ -530,6 +539,17 @@ func ThemeFrames(board template.HTML, theme string) template.HTML {
 type topicData struct {
 	TopicView
 	Page *pageData
+}
+
+// DocClass is the class list of the topic's body box: framed or md, and
+// chg-stale once its change marks are stale (TopicView.DocStale), which
+// chg.js dims the bars from.
+func (d topicData) DocClass() string {
+	class := "md"
+	if d.Page.DocFramed {
+		class = "framed"
+	}
+	return class + staleClass(d.DocStale)
 }
 
 // TopicOf pairs a topic with the page for the topic template.
