@@ -71,17 +71,21 @@ topic `conv-events`.
   this, because an older daemon rejects an unknown origin.
 - **Out of scope:** auto-collapsing the agents panel
   (`261112-feat-ws-dashboard-agent-panel-autocollapse`, board 349 a) and the
-  strip's left/right arrangement (delegated separately, board 354).
-
-## Open Decision Queue
-
-Last ID: (361)
-
-(360) [open] [technical] Carry a wake cause as a new optional event kind `wake` (cause kind, source label, one-line caption, full text) that the daemon turns into a ring entry, over new `turn_start` fields
-- A separate kind is negotiated through the existing `accepts:` mechanism and can arrive before the turn it causes (the harness injects the notification, then the turn starts); new `turn_start` fields would tie cause and turn in one event that some adapters cannot assemble.
-
-(361) [open] [technical] Carry background and monitor counts as optional fields on the existing `status` event (`background`, `monitors`), with the hosted runner splitting its one count by task type where stream-json exposes it, over a new event kind
-- `status` already carries per-session live numbers and is already `accepts:`-gated; a count is state, not an occurrence.
+  strip's left/right arrangement (delegated separately, board 354; merged
+  278bd56b0).
+- **Wake event wire shape (board 360).** A wake cause travels as a new
+  optional event kind `wake` (cause kind, source label, one-line caption, full
+  text) that the daemon turns into a ring entry. It is negotiated through the
+  existing `accepts:` line and may arrive before the turn it causes (the
+  harness injects the notification, then the turn starts).
+  Rejected: new `turn_start` fields - they tie cause and turn into one event
+  that some adapters cannot assemble.
+- **Count wire shape (board 361).** Background and monitor counts travel as
+  optional fields `background` and `monitors` on the existing `status` event;
+  the hosted runner splits its one count by task type where stream-json
+  exposes it. `status` already carries per-session live numbers and is
+  already `accepts:`-gated, and a count is state, not an occurrence.
+  Rejected: a new event kind for counts.
 
 ## Constraints
 
@@ -100,7 +104,7 @@ Last ID: (361)
 
 ### Phase 1: Wake events end to end
 
-- wslive: the optional wake kind and its ring entry; intake `accepts:`
+- wslive: the optional `wake` kind and its ring entry; intake `accepts:`
   lists it.
 - Claude mod: classify non-person prompts in `prompt.submit` (task
   notification: subagent report/complete/fail, background shell exit,
@@ -118,7 +122,7 @@ Last ID: (361)
 
 ### Phase 2: Background and monitor badges
 
-- `status` count fields per (361); Claude mod counts `run_in_background`
+- `status` count fields `background` and `monitors`; Claude mod counts `run_in_background`
   shells and Monitor tasks from `tool.call` and their completion
   notifications; Pi samples `countBackgroundTasks()` at flush; the hosted
   runner splits its count.
