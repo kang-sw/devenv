@@ -497,10 +497,11 @@ type wireBatch struct {
 }
 
 type wireCall struct {
-	Name      string `json:"name"`
-	StartedAt int64  `json:"startedAt"`
-	EndedAt   int64  `json:"endedAt,omitempty"`
-	Failed    bool   `json:"failed,omitempty"`
+	Name        string `json:"name"`
+	StartedAt   int64  `json:"startedAt"`
+	EndedAt     int64  `json:"endedAt,omitempty"`
+	Failed      bool   `json:"failed,omitempty"`
+	ArgsPreview string `json:"argsPreview,omitempty"`
 }
 
 // event is the lead's batch list holding the current batch: running while
@@ -515,7 +516,7 @@ func (t *batchTracker) event() Event {
 		if !contains(w.ToolNames, c.name) {
 			w.ToolNames = append(w.ToolNames, c.name)
 		}
-		w.Calls = append(w.Calls, wireCall{Name: c.name, StartedAt: c.startedAt, EndedAt: c.endedAt, Failed: c.failed})
+		w.Calls = append(w.Calls, wireCall{Name: c.name, StartedAt: c.startedAt, EndedAt: c.endedAt, Failed: c.failed, ArgsPreview: c.args})
 		switch {
 		case c.endedAt == 0:
 			open++

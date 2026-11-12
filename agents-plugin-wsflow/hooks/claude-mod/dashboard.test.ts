@@ -2,6 +2,7 @@ import { describe, expect, test } from 'claude-code/testing'
 
 import {
   ADAPTER,
+  ARGS_PREVIEW_CAP,
   argsPreview,
   BATCH_CALL_CAP,
   BATCH_CAP,
@@ -360,11 +361,11 @@ describe('the feed', () => {
       failed: 0,
       startedAt: expect.any(Number),
       endedAt: expect.any(Number),
-      calls: [{ name: 'Bash', startedAt: expect.any(Number), endedAt: expect.any(Number), failed: false }],
+      calls: [{ name: 'Bash', startedAt: expect.any(Number), endedAt: expect.any(Number), failed: false, argsPreview: 'command: ls' }],
     })
   })
 
-  test('a finished batch carries each call\'s name, clocks, and failed flag and the step\'s tokens; a running one neither', async () => {
+  test('a finished batch carries each call\'s name, clocks, failed flag, and argument preview and the step\'s tokens; a running one neither', async () => {
     const { h, dash, after } = await started()
     dash.turnStarted(undefined)
     dash.stepBegan(undefined, 't/0')
@@ -392,15 +393,30 @@ describe('the feed', () => {
     const t3 = h.now
     events = await after(() => dash.toolEnded(undefined, 'u3', false))
     view = batches(lastLead(events))[0] as View & { calls?: unknown; usage?: unknown }
+    // A call with no arguments sends no preview, so the server's row stays as an older adapter's.
     expect(view.calls).toEqual([
-      { name: 'Read', startedAt: t0, endedAt: t0, failed: false },
+      { name: 'Read', startedAt: t0, endedAt: t0, failed: false, argsPreview: 'file_path: /secret' },
       { name: 'Read', startedAt: t0, endedAt: t0, failed: true },
-      { name: 'Bash', startedAt: t0, endedAt: t3, failed: false },
+      { name: 'Bash', startedAt: t0, endedAt: t3, failed: false, argsPreview: 'command: rm -rf x' },
     ])
     expect(view.usage).toEqual({ input: 5, output: 60, cacheRead: 9000, cacheWrite: 0 })
-    const payload = JSON.stringify(h.calls.at(-1))
-    expect(payload.includes('/secret')).toBe(false)
-    expect(payload.includes('rm -rf')).toBe(false)
+  })
+
+  test('a finished call\'s argument preview is capped like the running one and never carries a session key', async () => {
+    const { dash, after } = await started()
+    dash.turnStarted(undefined)
+    dash.stepBegan(undefined, 't/0')
+    const long = 'x'.repeat(ARGS_PREVIEW_CAP * 2)
+    const events = await after(() => {
+      dash.stepEnded(undefined, 't/0', { answer: '', toolUses: [{ name: 'Write', input: { session_key: KEY, content: long } }], usage: null })
+      dash.turnCompleted(undefined, '', 'answer')
+    })
+    const view = batches(lastLead(events))[0] as View & { calls?: { argsPreview?: string }[] }
+    const preview = view.calls?.[0]?.argsPreview ?? ''
+    expect([...preview].length).toBe(ARGS_PREVIEW_CAP)
+    expect(preview.startsWith('content: xxx')).toBe(true)
+    expect(preview.endsWith('…')).toBe(true)
+    expect(preview.includes(KEY)).toBe(false)
   })
 
   test('the calls a finished batch lists are capped; a step with no usage sends none', async () => {
