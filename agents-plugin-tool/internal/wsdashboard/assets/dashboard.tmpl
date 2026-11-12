@@ -7,7 +7,7 @@
 <style>{{.Assets.CSS}}</style>
 <style>{{.Assets.TrackerCSS}}</style></head>
 <body class="dash {{.Mode}}">{{.Assets.WhiteboardSprite}}{{.Assets.Sprite}}{{.Assets.LucideSprite}}<div class="dwrap">
-<div class="top"><a class="back" id="railbtn" href="/" title="{{t "nav.sessions"}}" aria-label="{{t "nav.sessions"}}" aria-controls="rail" aria-expanded="false">{{icon "back"}}</a>{{region . "head"}}{{template "sse"}}{{template "qsslot"}}</div>
+<div class="top"><a class="back" id="railbtn" href="/" title="{{t "nav.sessions"}} (Ctrl+`)" aria-label="{{t "nav.sessions"}} (Ctrl+`)" aria-controls="rail" aria-expanded="false">{{icon "back"}}</a>{{region . "head"}}{{template "sse"}}{{template "qsslot"}}</div>
 {{template "drawer" .}}
 <div class="banner" id="dash-banner" hidden></div>
 <div class="dbody"><aside id="rail" class="rail" aria-label="{{t "rail.title"}}">{{region . "rail"}}</aside><div class="rscrim" id="rscrim"></div>
