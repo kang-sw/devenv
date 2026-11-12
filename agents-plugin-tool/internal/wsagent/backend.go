@@ -180,9 +180,15 @@ type Event struct {
 	Seq     uint64
 	Replay  bool
 	LineEnd bool
-	// ReplayDone (no other part): every record the holder held when the
-	// daemon attached again has been delivered.
+	// ReplayDone (no other part but ReplayLost): every record the holder
+	// held when the daemon attached again has been delivered. ReplayLost
+	// marks a replay whose ring no longer began right after the records the
+	// runner applied under an earlier daemon.
 	ReplayDone bool
+	ReplayLost bool
+	// ReplayGap (no other part): records left the holder's ring before
+	// they reached this daemon, at this point of the stream.
+	ReplayGap bool
 	// TurnStart: the harness began a turn. A lead's backend sends it for
 	// every turn, since a turn may start with no send (a background task's
 	// completion, a compaction, a pushed batch); the runner starts one
