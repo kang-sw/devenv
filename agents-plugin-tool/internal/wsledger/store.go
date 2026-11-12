@@ -500,7 +500,8 @@ type Unpushed struct {
 // on this Ledger and no other process's Append or Reload, and no local
 // step of a Sync, Fetch, or idle push, runs on the directory, which is
 // what a caller about to remove the directory needs: fn may rename it
-// away. A fetch or push already talking to the remote is not waited for:
+// away, except on Windows, which refuses to rename a directory while the
+// lock file in it is open; there the rename follows Exclusive. A fetch or push already talking to the remote is not waited for:
 // it holds the network lock, not this one, and writes only objects and
 // remote-tracking refs meanwhile; the step that would apply its result
 // comes after fn, and Options.ApplyGate is where the caller refuses it.
