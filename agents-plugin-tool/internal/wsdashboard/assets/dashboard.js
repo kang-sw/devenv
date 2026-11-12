@@ -2126,6 +2126,35 @@
     return !!window.WsPreview && !!cardBoard && a.getAttribute("data-wl") === "file" && !!a.getAttribute("href") &&
       !a.hasAttribute("data-out") && !!rel && window.WsPreview.takes(rel);
   }
+  // outsideOpens reports a link to a file outside the session root that
+  // the preview card can show: a file link with an absolute path and no
+  // path under the root, on a data-sysopen page (the outside-link route
+  // answers a browser on the daemon's machine only, so any other page keeps
+  // the copy-path menu). The daemon decides on the click whether the board
+  // or a reply really links the path.
+  function outsideOpens(a) {
+    var abs = a.getAttribute("data-abs");
+    return !!window.WsPreview && !!cardBoard && root.hasAttribute("data-sysopen") && a.getAttribute("data-wl") === "file" &&
+      !a.getAttribute("data-rel") && !!abs && window.WsPreview.takes(abs);
+  }
+  // openOutsideTab opens an outside HTML file as a page in a tab of its own.
+  // The tab opens blank inside the click, since the URL comes from a POST
+  // (the outside-link route mints its capability) and a tab opened after
+  // the answer may be blocked; it is cut from this page before it goes to
+  // the file, and closed when the route refuses.
+  function openOutsideTab(abs) {
+    var w = window.open("", "_blank");
+    if (w) w.opener = null;
+    post("fs/outside", { path: abs }, function (ok, v) {
+      var view = ok && v && typeof v.view === "string" && v.view.indexOf("/s/" + rid + "/fs/oview/") === 0 ? v.view : "";
+      if (view && w) w.location.replace(view);
+      else if (view) window.open(view, "_blank", "noopener");
+      else {
+        if (w) w.close();
+        toast(wsT("js.preview.gone"));
+      }
+    });
+  }
   function openLinkMenu(a, x, y) {
     closeLinkMenu(false);
     var kind = a.getAttribute("data-wl"), href = a.getAttribute("href");
@@ -2133,6 +2162,10 @@
     var sys = root.hasAttribute("data-sysopen"), out = a.hasAttribute("data-out");
     var items = [];
     if (previews(a)) items.push([wsT("js.menu.preview"), function () { window.WsPreview.open(rel); }]);
+    else if (outsideOpens(a)) {
+      items.push([wsT("js.menu.preview"), function () { window.WsPreview.open(abs, { out: true }); }]);
+      if (/\.html?$/i.test(abs)) items.push([wsT("js.menu.newtab"), function () { openOutsideTab(abs); }]);
+    }
     if (linkOpens(a)) items.push([wsT("js.menu.newtab"), function () { window.open(url, "_blank", "noopener"); }]);
     if (href && sys && !out) {
       items.push([wsT("js.menu.sysopen"), function () {
@@ -2190,11 +2223,12 @@
     // slot; its menu is on the right click and on the keyboard activation
     // (a click event with no detail).
     if (e.detail !== 0 && previews(a)) { window.WsPreview.open(a.getAttribute("data-rel")); return; }
+    if (e.detail !== 0 && outsideOpens(a)) { window.WsPreview.open(a.getAttribute("data-abs"), { out: true }); return; }
     linkAt(a, e);
   }, true);
   doc.addEventListener("contextmenu", function (e) {
     var a = e.target && e.target.closest && e.target.closest("a[data-wl]");
-    if (!a || !previews(a)) return;
+    if (!a || !(previews(a) || outsideOpens(a))) return;
     e.preventDefault();
     openLinkMenu(a, e.clientX, e.clientY);
   });

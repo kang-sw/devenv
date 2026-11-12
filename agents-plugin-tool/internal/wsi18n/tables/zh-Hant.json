@@ -343,6 +343,7 @@
   "js.post.nobrowser": "此瀏覽器無法傳送",
   "js.post.unreachable": "無法連線至儀表板",
   "js.preview.failed": "無法載入預覽",
+  "js.preview.gone": "此檔案已無法使用。請從看板重新開啟。",
   "js.preview.kind.diff": "diff",
   "js.preview.kind.frame": "HTML · 沙箱",
   "js.preview.kind.image": "圖片",

@@ -300,6 +300,17 @@ func TestFSOutsideGrantsTheLinkedFilesFolder(t *testing.T) {
 		if a := o.linked(t, alias); a.Kind != "frame" || a.Abs != page || !strings.HasSuffix(a.Frame, "/page.html") {
 			t.Errorf("mint of a symlinked link = %+v, want the resolved file", a)
 		}
+		// The path a link resolves to opens too: it names the same file,
+		// and it is the one the re-mint page posts.
+		target := o.write(t, o.away, "sub/target.txt", "TEXT-TARGET")
+		written := filepath.Join(filepath.Dir(o.away), "written.txt")
+		if err := os.Symlink(target, written); err != nil {
+			t.Fatal(err)
+		}
+		o.src.link("livesession", written)
+		if code, a := o.open(t, o.local, target); code != http.StatusOK || a.Text != "TEXT-TARGET" {
+			t.Errorf("mint of the path a link resolves to = %d %+v, want its text", code, a)
+		}
 	}
 }
 
@@ -403,6 +414,16 @@ func TestFSOutsideNeverOpensAnAlwaysDeniedPath(t *testing.T) {
 	folder := filepath.Join(o.away, "keys")
 	if os.Symlink(filepath.Join(o.home, ".ssh", "id.txt"), into) == nil && os.Symlink(filepath.Join(o.home, ".ssh"), folder) == nil {
 		o.refused(t, "a symlink into a denied folder", into)
+		// A denied path as written stays closed under the name it resolves
+		// to, which nothing else links.
+		plain := o.write(t, o.away, "plain.txt", "SECRET-PLAIN")
+		if err := os.Symlink(plain, filepath.Join(o.home, ".ssh", "plain.txt")); err != nil {
+			t.Fatal(err)
+		}
+		o.src.link("livesession", filepath.Join(o.home, ".ssh", "plain.txt"))
+		if code, a := o.open(t, o.local, plain); code != http.StatusNotFound {
+			t.Errorf("mint of the path a denied link resolves to = %d %+v, want 404", code, a)
+		}
 		o.refused(t, "a path through a symlinked denied folder", filepath.Join(folder, "id.txt"))
 	}
 	// A denied folder that is itself a symlink: the path as written under

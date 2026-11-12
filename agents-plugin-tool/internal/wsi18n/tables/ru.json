@@ -343,6 +343,7 @@
   "js.post.nobrowser": "этот браузер не может отправлять",
   "js.post.unreachable": "панель недоступна",
   "js.preview.failed": "Не удалось загрузить предпросмотр",
+  "js.preview.gone": "Этот файл больше недоступен. Откройте его снова с доски.",
   "js.preview.kind.diff": "diff",
   "js.preview.kind.frame": "HTML · песочница",
   "js.preview.kind.image": "Изображение",

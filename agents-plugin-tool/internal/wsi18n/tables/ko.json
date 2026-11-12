@@ -343,6 +343,7 @@
   "js.post.nobrowser": "이 브라우저는 전송할 수 없습니다",
   "js.post.unreachable": "대시보드에 연결할 수 없습니다",
   "js.preview.failed": "미리보기를 불러오지 못했습니다",
+  "js.preview.gone": "이 파일은 더 이상 열 수 없습니다. 보드에서 다시 여세요.",
   "js.preview.kind.diff": "diff",
   "js.preview.kind.frame": "HTML · 격리",
   "js.preview.kind.image": "이미지",

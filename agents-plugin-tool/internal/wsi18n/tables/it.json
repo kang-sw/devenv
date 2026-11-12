@@ -343,6 +343,7 @@
   "js.post.nobrowser": "questo browser non può inviare",
   "js.post.unreachable": "la dashboard non è raggiungibile",
   "js.preview.failed": "Impossibile caricare l'anteprima",
+  "js.preview.gone": "Questo file non è più disponibile. Riaprilo dalla lavagna.",
   "js.preview.kind.diff": "diff",
   "js.preview.kind.frame": "HTML · sandbox",
   "js.preview.kind.image": "Immagine",

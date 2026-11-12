@@ -343,6 +343,7 @@
   "js.post.nobrowser": "このブラウザーでは送信できません",
   "js.post.unreachable": "ダッシュボードに接続できません",
   "js.preview.failed": "プレビューを読み込めませんでした",
+  "js.preview.gone": "このファイルはもう利用できません。ボードから開き直してください。",
   "js.preview.kind.diff": "diff",
   "js.preview.kind.frame": "HTML · サンドボックス",
   "js.preview.kind.image": "画像",

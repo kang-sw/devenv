@@ -343,6 +343,7 @@
   "js.post.nobrowser": "此浏览器无法发送",
   "js.post.unreachable": "无法连接到仪表盘",
   "js.preview.failed": "无法加载预览",
+  "js.preview.gone": "此文件已不可用。请从看板重新打开。",
   "js.preview.kind.diff": "diff",
   "js.preview.kind.frame": "HTML · 沙箱",
   "js.preview.kind.image": "图片",

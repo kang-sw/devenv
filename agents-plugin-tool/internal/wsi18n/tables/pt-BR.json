@@ -343,6 +343,7 @@
   "js.post.nobrowser": "este navegador não pode enviar",
   "js.post.unreachable": "o painel não está acessível",
   "js.preview.failed": "Não foi possível carregar a pré-visualização",
+  "js.preview.gone": "Este arquivo não está mais disponível. Reabra-o pelo quadro.",
   "js.preview.kind.diff": "diff",
   "js.preview.kind.frame": "HTML · isolado",
   "js.preview.kind.image": "Imagem",

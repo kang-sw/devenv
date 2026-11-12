@@ -350,7 +350,9 @@ func (d *Daemon) outsideReplyLinks(s Session) []string {
 
 // outsideLinked reports whether the session links the absolute path abs
 // outside its root, on its board or in a lead reply: the mint's membership
-// check, on the path the renderer resolved, never on markdown text.
+// check, on the path the renderer resolved, never on markdown text. abs is
+// a link's path as the page carries it, or the path that link resolves to
+// through its symlinks.
 func (d *Daemon) outsideLinked(s Session, abs string) bool {
 	if abs == "" || strings.ContainsRune(abs, 0) {
 		return false
@@ -359,6 +361,20 @@ func (d *Daemon) outsideLinked(s Session, abs string) bool {
 	has := func(links []string) bool {
 		for _, l := range links {
 			if filepath.Clean(l) == want {
+				return true
+			}
+		}
+		// The path a link resolves to names the same file, and it is the
+		// only one the re-mint page knows (the capability holds the resolved
+		// folder). A link that is always-denied as written stays closed
+		// under its resolved name too, and a link on no plain volume is
+		// never resolved.
+		for _, l := range links {
+			c := filepath.Clean(l)
+			if !filepath.IsAbs(c) || networkPath(l) || !driveOrRootPath(c) || deviceElement(c) {
+				continue
+			}
+			if real, err := filepath.EvalSymlinks(c); err == nil && real == want && !alwaysDenied(c, homeDirs()) {
 				return true
 			}
 		}

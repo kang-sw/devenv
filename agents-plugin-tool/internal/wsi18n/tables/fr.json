@@ -343,6 +343,7 @@
   "js.post.nobrowser": "ce navigateur ne peut pas envoyer",
   "js.post.unreachable": "le tableau de bord est inaccessible",
   "js.preview.failed": "Impossible de charger l'aperçu",
+  "js.preview.gone": "Ce fichier n'est plus disponible. Rouvrez-le depuis le tableau.",
   "js.preview.kind.diff": "diff",
   "js.preview.kind.frame": "HTML · bac à sable",
   "js.preview.kind.image": "Image",
