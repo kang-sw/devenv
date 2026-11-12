@@ -251,6 +251,7 @@ import { registerWebTools } from "./web-tools.ts";
 import { publishSubtree, SubtreeUpstream } from "./subtree-lifecycle.ts";
 import { MISSING_HOSTED_KEY_WARNING, hostedMode, unconfirmedHostedWarning, type HostedMode } from "./hosted-session.ts";
 import { createDashboardFeed, dashboardAgentEntries, dashboardStatus, registerDashboardLeadEvents, resolveDashboardEnabled, type DashboardFeed } from "./dashboard-feed.ts";
+import { createHostedAgentRows, type HostedAgentRows } from "./hosted-agent-rows.ts";
 import { whiteboardSubmissionText } from "./adapter-label.ts";
 
 // This is the exact physical entry module Pi loaded (whether from `-e`, an
@@ -634,6 +635,9 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
   // owner-lead session_start and stopped on shutdown; the lead events are
   // subscribed once here and reach whichever feed is current.
   let dashboardFeed: DashboardFeed | undefined;
+  // A hosted owner lead's stand-in for the feed's subagent part
+  // (hosted-agent-rows.ts), with the feed's lifetime.
+  let hostedAgentRows: HostedAgentRows | undefined;
   registerDashboardLeadEvents(pi as unknown as Parameters<typeof registerDashboardLeadEvents>[0], () => dashboardFeed);
   // 260914 (pi native mailbox push): the session-bound background waiter that
   // drives `ws-mcp mailbox wait` and actively steers arriving mail into the
@@ -924,9 +928,12 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     rpcRegistryRef.current = agentTools.rpcRegistry;
     dashboardFeed?.stop();
     dashboardFeed = undefined;
+    hostedAgentRows?.stop();
+    hostedAgentRows = undefined;
     agentDashboardRefreshRef.current = undefined;
     // Hosted session (hosted-session.ts): the daemon feeds the lead and reads
-    // its output, so neither the feed nor the mailbox waiter below runs.
+    // its output, so neither the feed nor the mailbox waiter below runs; only
+    // the subagent rows reach the daemon, through a widget it reads.
     if (hosted.mode === "missing-key") ctx.ui.notify(MISSING_HOSTED_KEY_WARNING, "warning");
     if (hosted.mode === "unconfirmed" && !unconfirmedHostedWarned) {
       unconfirmedHostedWarned = true;
@@ -948,6 +955,18 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
       dashboardFeed = feed;
       agentDashboardRefreshRef.current = () => { feed.agentsChanged(); };
       feed.start();
+    }
+    if (readSpawnRole(process.env) === undefined && hosted.mode === "hosted") {
+      const rowsRegistry = agentTools.rpcRegistry;
+      // ctx.ui is read per update: a context left stale by a reload throws,
+      // and the reload's own session_start replaces this channel.
+      const rows = createHostedAgentRows({
+        setWidget: (key, lines) => { ctx.ui.setWidget(key, lines); },
+        agents: () => dashboardAgentEntries(rowsRegistry),
+      });
+      hostedAgentRows = rows;
+      agentDashboardRefreshRef.current = () => { rows.agentsChanged(); };
+      rows.start();
     }
     registerExecuteGateway(pi, handle, agentTools.rpcRegistry, {
       cwd: ctx.cwd,
@@ -1136,6 +1155,8 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     recoveredRegistry = applySessionStartAgentRetention(readSpawnRole(process.env), dispatchStorage.root, retentionConfig, recoveredRegistry);
     if (recoveredRegistry.length > 0) reviveSessionOrphans(pi, agentTools.rpcRegistry, recoveredRegistry, onApprovalPending);
     publishSubtree(agentTools.rpcRegistry);
+    // Revival marks nothing dirty, and the rows' first sample ran before it.
+    if (recoveredRegistry.length > 0) hostedAgentRows?.agentsChanged();
     // A hop with a parent reports its descendant usage. After a restart the
     // value is rebuilt here from the revived records and the checkpoint.
     const usageRegistry = agentTools.rpcRegistry;
@@ -1377,6 +1398,8 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
       batchSummarizer = undefined;
       dashboardFeed?.stop();
       dashboardFeed = undefined;
+      hostedAgentRows?.stop();
+      hostedAgentRows = undefined;
       agentDashboardRefreshRef.current = undefined;
       applySessionShutdownAgentFooter(agentFooterLifecycle);
       agentWidgetRefreshRef.current = undefined;
