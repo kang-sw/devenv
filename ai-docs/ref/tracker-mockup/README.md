@@ -569,10 +569,13 @@ while an oid the author had not yet seen there counts as new.
 past (a hidden one included). The writer derives `refs` from the text, so an
 edit keeps a ref only while its `#<alias>` (or `#<id>`) stays in the text as
 a whole token. All three lists ride with the body: a
-body write replaces them (absent means empty). The shown attachments and refs
-are the union over the body writes whose lines survive in the folded body
-(fold order, each oid or id once), and the shown mentions the latest such
-write's.
+body write replaces them (absent means empty). The shown attachments fold with
+the body value: a replace sets the write's list, and a merging edit merges it
+three-way by oid from its base value (one that either side removed is gone,
+one that either side added is kept; the folded list's order, then the edit's
+additions). The shown refs are the union over the body writes whose lines
+survive in the folded body (fold order, each id once), and the shown mentions
+the latest such write's.
 Only metadata is modelled; storing and fetching the content is a later
 ledger ticket (337). Agent-authored writes may mention.
 

@@ -1286,7 +1286,7 @@ func (s *state) apply(n *node) {
 		}
 		// The create is the item's first body write: the register's first
 		// head, and every line's source until an edit replaces it.
-		f := &bodyFold{writes: []*node{n}, lines: linesFrom(bodyText(n), n), base: map[string][]bline{}}
+		f := &bodyFold{writes: []*node{n}, val: replaceVal(n), base: map[string]bodyVal{}}
 		s.bodies[n.id] = f
 		s.reg["it:"+n.id+":body"] = []head{{n, bodyText(n)}}
 		s.bodyExtras(it, f)
