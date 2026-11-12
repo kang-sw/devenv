@@ -91,8 +91,8 @@ func TestLeadSpawnRunsUnderAHolder(t *testing.T) {
 			t.Fatalf("env %s=%q must not reach a lead's harness", name, v)
 		}
 	}
-	if rec.WSKey == "" || rec.WSKey == "the-daemons-own" || !slices.Contains(h.keys.ensured, rec.WSKey) {
-		t.Fatalf("the lead should run on its own minted key, kept usable: %q, ensured %v", rec.WSKey, h.keys.ensured)
+	if rec.WSKey == "" || rec.WSKey == "the-daemons-own" || !slices.Contains(h.ensured(), rec.WSKey) {
+		t.Fatalf("the lead should run on its own minted key, kept usable: %q, ensured %v", rec.WSKey, h.ensured())
 	}
 	var session holderSession
 	for _, info := range h.holders.List().Holders {
@@ -103,7 +103,7 @@ func TestLeadSpawnRunsUnderAHolder(t *testing.T) {
 	if session.Kind != "lead" || session.ReplyID != st.ID || session.Cwd != h.root {
 		t.Fatalf("holder descriptor = %+v", session)
 	}
-	reg, err = wsdashboard.ReadRegistration(h.dir, st.ID)
+	reg, err = h.row(st.ID), nil
 	if err != nil || !reg.Hosted || reg.Agent || reg.HostPID == 0 || reg.HostPID != rec.HostPID || rec.HolderID != holder {
 		t.Fatalf("the row should name the spawned process: %+v (%v), record holder %q pid %d", reg, err, rec.HolderID, rec.HostPID)
 	}
@@ -229,7 +229,7 @@ func TestLeadApprovalIsAnsweredOnce(t *testing.T) {
 	if len(st.Approvals) != 0 || st.Process || st.Status != StatusIdle || rec.HolderID != "" || rec.HostPID != 0 || h.holders.opCount("stop "+holder) != 1 {
 		t.Fatalf("after a stop: %+v, record holder %q, holder calls %v", st, rec.HolderID, h.holders.opList())
 	}
-	if reg, _ := wsdashboard.ReadRegistration(h.dir, id); reg.HostPID != 0 || !reg.Hosted {
+	if reg := h.row(id); reg.HostPID != 0 || !reg.Hosted {
 		t.Fatalf("a stopped session's row names no process: %+v", reg)
 	}
 	if h.snapshot(id).Lead.Permission != nil {
@@ -464,6 +464,9 @@ func TestLeadMailIsDeliveredAsATurn(t *testing.T) {
 		t.Fatalf("claimed mail waits in the record: %+v", rec)
 	}
 
+	// The mail is delivered by the next daemon, not by a second check of
+	// this one after the failure is cleared.
+	h.mailSettled(id)
 	h.holders.set(func() { h.holders.spawnErr = nil })
 	h.restart()
 	// A daemon that ends stops its watch, which clears its listening marker.
@@ -878,7 +881,7 @@ func TestLeadRejoinsItsProcessAfterADaemonRestart(t *testing.T) {
 	if st := h.state(id); st.Status != StatusIdle || len(st.Approvals) != 0 {
 		t.Fatalf("after the holder vanished: %+v", st)
 	}
-	if reg, _ := wsdashboard.ReadRegistration(h.dir, id); reg.HostPID != 0 {
+	if reg := h.row(id); reg.HostPID != 0 {
 		t.Fatalf("the row names no process: %+v", reg)
 	}
 	h.send(id, "four")

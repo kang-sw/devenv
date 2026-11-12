@@ -89,6 +89,14 @@ func TestDaemonRestartReattachesToARunningHolder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Spawn: %v", err)
 	}
+	// Whether the holder could leave the test's job object is the
+	// environment's (a GitHub Windows runner's job forbids it, and the
+	// holder then starts marked not restart-safe); the second daemon must
+	// list what the holder was started with.
+	started := first.List().Holders
+	if len(started) != 1 || started[0].ID != id {
+		t.Fatalf("first daemon's holders = %+v, want %s", started, id)
+	}
 	f1.d.Close()
 	if first.Client(id) != nil {
 		t.Fatal("the closed daemon still holds the holder's attach")
@@ -107,8 +115,8 @@ func TestDaemonRestartReattachesToARunningHolder(t *testing.T) {
 		listed = list.Holders[0]
 		return true
 	})
-	if listed.ID != id || listed.Child == nil || listed.Child.State != "running" || listed.Child.PID != child.PID || !listed.RestartSafe {
-		t.Fatalf("listed holder = %+v (child %+v), want %s with child %d still running", listed, listed.Child, id, child.PID)
+	if listed.ID != id || listed.Child == nil || listed.Child.State != "running" || listed.Child.PID != child.PID || listed.RestartSafe != started[0].RestartSafe {
+		t.Fatalf("listed holder = %+v (child %+v), want %s with child %d still running, restart-safe %v", listed, listed.Child, id, child.PID, started[0].RestartSafe)
 	}
 	if !strings.Contains(string(listed.Session), "restart check") {
 		t.Errorf("session = %s, want the descriptor the holder was started with", listed.Session)

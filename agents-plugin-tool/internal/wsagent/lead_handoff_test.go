@@ -20,10 +20,7 @@ func (h *leadHarness) terminalTakes(id string) wsdashboard.Registration {
 		h.t.Fatal(err)
 	}
 	defer unlock()
-	row, err := wsdashboard.ReadRegistration(h.dir, id)
-	if err != nil {
-		h.t.Fatal(err)
-	}
+	row := readEventually(h.t, "read the row", func() (wsdashboard.Registration, error) { return wsdashboard.ReadRegistration(h.dir, id) })
 	if !row.Hosted || row.HostMayRun(func(int) bool { return true }) {
 		h.t.Fatalf("a terminal login would be refused on this row: %+v", row)
 	}
@@ -37,11 +34,7 @@ func (h *leadHarness) terminalTakes(id string) wsdashboard.Registration {
 
 func (h *leadHarness) row(id string) wsdashboard.Registration {
 	h.t.Helper()
-	row, err := wsdashboard.ReadRegistration(h.dir, id)
-	if err != nil {
-		h.t.Fatal(err)
-	}
-	return row
+	return readEventually(h.t, "read the row", func() (wsdashboard.Registration, error) { return wsdashboard.ReadRegistration(h.dir, id) })
 }
 
 // TestLeadRowSaysWhetherAProcessMayRun: the row a terminal login reads is
@@ -92,6 +85,7 @@ func TestLeadHandedToATerminalIsLetGo(t *testing.T) {
 	eventually(t, "the claimed mail to wait in the record", func() bool {
 		return slices.Equal(h.record(id).Mail, []string{"From a@x: ping"}) && h.row(id).HostStopped
 	})
+	h.mailSettled(id)
 	h.holders.set(func() { h.holders.spawnErr = nil })
 	spawns, launches := h.holders.opCount("spawn"), h.holders.opCount("launch")
 

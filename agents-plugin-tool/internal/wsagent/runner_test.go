@@ -202,7 +202,7 @@ func TestRecordSurvivesDaemonRestart(t *testing.T) {
 	if got := h.backend.waitProc(t, 1).nextSent(t); got != "held over\n\nnew" {
 		t.Fatalf("the held send should merge with the next one, got %q", got)
 	}
-	rec, _ := readRecord(wsdashboard.SessionDir(h.dir, id))
+	rec := readEventually(t, "read the record", func() (Record, error) { return readRecord(wsdashboard.SessionDir(h.dir, id)) })
 	instr, _ := os.ReadFile(spec.Instructions)
 	if !strings.Contains(string(instr), rec.WSKey) {
 		t.Fatalf("the agent should get its ws session key in its instructions")
@@ -264,6 +264,13 @@ func TestStopKeepsHeldAndResumes(t *testing.T) {
 	p := h.backend.waitProc(t, 0)
 	p.nextSent(t)
 	p.events <- Event{SessionID: "s1"}
+	// The event is buffered: the loop picks between it and the stop below
+	// at random when both are ready, and a stop handled first ends the
+	// process with the event unread.
+	eventually(t, "session id", func() bool {
+		rec, _ := readRecord(wsdashboard.SessionDir(h.dir, id))
+		return rec.SessionID == "s1"
+	})
 	h.runner.Send(id, "two")
 	st, err := h.runner.Stop(id)
 	if err != nil {

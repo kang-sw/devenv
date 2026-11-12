@@ -682,16 +682,25 @@ func TestRefusedBreakawayStartsAHolderMarkedNotRestartSafe(t *testing.T) {
 	}
 
 	// A start that leaves the job, or needs no breakaway, is restart-safe.
-	plain := testManager(t, dir, nil)
-	id, err = plain.Launch(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if holders := plain.List().Holders; len(holders) != 1 || !holders[0].RestartSafe {
-		t.Fatalf("holders = %+v, want %s restart-safe", holders, id)
-	}
-	if err := plain.Stop(id); err != nil {
-		t.Fatalf("Stop: %v", err)
+	// Both are injected: the test's own job may forbid breakaway (a GitHub
+	// Windows runner's does), which would take the fallback above.
+	for name, applies := range map[string]bool{"granted breakaway": true, "no breakaway": false} {
+		plain := testManager(t, dir, nil, func(o *Options) {
+			o.breakaway = &applies
+			o.start = func(exe string, args []string, cwd string, _ bool) (*exec.Cmd, error) {
+				return startDetached(exe, args, cwd, false)
+			}
+		})
+		id, err = plain.Launch(nil)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if holders := plain.List().Holders; len(holders) != 1 || !holders[0].RestartSafe {
+			t.Fatalf("%s: holders = %+v, want %s restart-safe", name, holders, id)
+		}
+		if err := plain.Stop(id); err != nil {
+			t.Fatalf("%s: Stop: %v", name, err)
+		}
 	}
 }
 

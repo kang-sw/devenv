@@ -706,6 +706,11 @@ var leadDaemonEnv = []string{
 func newLeadHarness(t *testing.T) *leadHarness {
 	t.Helper()
 	h := &leadHarness{t: t, dir: t.TempDir(), root: t.TempDir(), holders: newFakeHolders(), keys: &fakeLeadKeys{}, mail: newFakeMail(), log: &logBuffer{}}
+	// The backends' commands name no real file. On Windows harnessCommand
+	// resolves even a set command through lookPath (to find a .cmd shim to
+	// unwrap), which a missing file fails; the holders are fakes, so
+	// nothing ever runs the command.
+	setLookPath(t, func(file string) (string, error) { return file, nil })
 	restore := environ
 	environ = func() []string { return slices.Clone(leadDaemonEnv) }
 	t.Cleanup(func() { environ = restore })
@@ -786,15 +791,34 @@ func (h *leadHarness) send(id, text string) {
 	if _, err := h.runner.Send(id, text); err != nil {
 		h.t.Fatalf("Send: %v", err)
 	}
+	// Send returns before the loop takes the message; the loop takes an
+	// inbox change before the next request, so once a request ran, the
+	// message was submitted or held. A harness line the test writes next
+	// would otherwise race the message: an idle line handled first ends
+	// no turn, and the message's turn then never ends.
+	h.quiesce(id)
 }
 
 func (h *leadHarness) record(id string) Record {
 	h.t.Helper()
-	rec, err := readRecord(wsdashboard.SessionDir(h.dir, id))
-	if err != nil {
-		h.t.Fatalf("read the record: %v", err)
+	return readEventually(h.t, "read the record", func() (Record, error) { return readRecord(wsdashboard.SessionDir(h.dir, id)) })
+}
+
+// quiesce waits until the conversation's loop finished the step it is in.
+// A step writes the record, the row, the ring, and the snapshot one after
+// the other, and sends to the process in between, so what a test saw of
+// one (a record naming the holder, a turn's input, an idle state) does not
+// mean the rest is written yet; on Windows, where each replace is slower,
+// a read in that gap is common.
+func (h *leadHarness) quiesce(id string) {
+	h.t.Helper()
+	c := h.runner.conv(id)
+	if c == nil {
+		return
 	}
-	return rec
+	done := make(chan struct{})
+	go func() { c.do(func() {}); close(done) }()
+	wait(h.t, "the conversation's loop to finish its step", done)
 }
 
 // holder waits for the conversation to run under a holder and returns its
@@ -807,16 +831,35 @@ func (h *leadHarness) holder(id string) string {
 		holder = rec.HolderID
 		return err == nil && holder != "" && rec.HostPID != 0
 	})
+	h.quiesce(id)
 	return holder
+}
+
+// mailSettled waits until no mail check of the conversation is pending.
+// A delivery can cause two: the conversation's first check (startConv) may
+// meet it, and the delivery's own signal then checks again, kicking a
+// start for the claimed, undelivered mail. Both signals are sent before
+// deliver returns, so once none is pending no check, and no start for that
+// mail, comes before the next signal. A test that makes a start fail and
+// then clears the failure waits for this first, or the second check may
+// start a process it did not expect.
+func (h *leadHarness) mailSettled(id string) {
+	h.t.Helper()
+	c := h.runner.conv(id)
+	eventually(h.t, "the mail checks to settle", func() bool {
+		pending := true
+		c.do(func() { pending = len(c.mailC) > 0 })
+		return !pending
+	})
 }
 
 // ring is the conversation's ring file, oldest entry first.
 func (h *leadHarness) ring(id string) []wslive.RingEntry {
 	h.t.Helper()
-	recs, err := wslive.ReadRing(wslive.RingDir(wsdashboard.SessionDir(h.dir, id)))
-	if err != nil {
-		h.t.Fatalf("read the ring: %v", err)
-	}
+	h.quiesce(id)
+	recs := readEventually(h.t, "read the ring", func() ([]wslive.RingRecord, error) {
+		return wslive.ReadRing(wslive.RingDir(wsdashboard.SessionDir(h.dir, id)))
+	})
 	var out []wslive.RingEntry
 	for _, rec := range recs {
 		out = append(out, rec.RingEntry)
@@ -826,11 +869,10 @@ func (h *leadHarness) ring(id string) []wslive.RingEntry {
 
 func (h *leadHarness) snapshot(id string) wslive.Snapshot {
 	h.t.Helper()
-	snap, err := wslive.ReadSnapshot(wslive.SnapshotPath(wsdashboard.SessionDir(h.dir, id)))
-	if err != nil {
-		h.t.Fatalf("read the snapshot: %v", err)
-	}
-	return snap
+	h.quiesce(id)
+	return readEventually(h.t, "read the snapshot", func() (wslive.Snapshot, error) {
+		return wslive.ReadSnapshot(wslive.SnapshotPath(wsdashboard.SessionDir(h.dir, id)))
+	})
 }
 
 // sync waits until the runner applied every line written to the holder so
@@ -933,6 +975,7 @@ func (h *leadHarness) runLead(text string) (id, holder string) {
 func (h *leadHarness) idle(id string) {
 	h.t.Helper()
 	eventually(h.t, "the turn to end", func() bool { return h.state(id).Status == StatusIdle })
+	h.quiesce(id)
 }
 
 // globalProfile writes a profile into the user's (global) config.

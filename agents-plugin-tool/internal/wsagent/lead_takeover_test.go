@@ -65,6 +65,14 @@ func (h *leadHarness) minted() int {
 	return h.keys.n
 }
 
+// ensured is every key the runner kept usable so far; a start running
+// beside the test appends to it.
+func (h *leadHarness) ensured() []string {
+	h.keys.mu.Lock()
+	defer h.keys.mu.Unlock()
+	return slices.Clone(h.keys.ensured)
+}
+
 // TestTakeoverWaitsForTheTerminalHarnessToExit: a takeover is refused while
 // the terminal harness the row names runs, allowed once it is gone, and
 // for a row that names no process allowed only when the session ended
@@ -151,8 +159,8 @@ func TestTakeoverAdoptsTheKeyAndResumesWhereTheHarnessRan(t *testing.T) {
 	if rec.WSKey != key || rec.SessionID != "sess-term" || rec.Cwd != sub || rec.SessionFile != "" || !rec.Lead {
 		t.Fatalf("record = %+v", rec)
 	}
-	if h.minted() != 0 || !slices.Contains(h.keys.ensured, key) {
-		t.Fatalf("the session keeps its key (minted %d, ensured %v)", h.minted(), h.keys.ensured)
+	if h.minted() != 0 || !slices.Contains(h.ensured(), key) {
+		t.Fatalf("the session keeps its key (minted %d, ensured %v)", h.minted(), h.ensured())
 	}
 	// Mail that waited is delivered to the resumed conversation.
 	holder := h.holder(id)
@@ -300,7 +308,7 @@ func TestHandOffGivesTheSessionToTheTerminal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "cd " + h.root + " && claude --resume sess-1"
+	want := "cd " + shellQuote(h.root) + " && claude --resume sess-1"
 	if st.Status != StatusHandedOff || st.Process || st.ResumeCommand != want {
 		t.Fatalf("handed-off state = %+v, want the resume command %q", st, want)
 	}
@@ -367,7 +375,7 @@ func TestHandOffThroughTheRoute(t *testing.T) {
 	h.holders.out(holder, turnLines("sess 1", "u1", "done")...)
 	h.idle(id)
 	r := h.route(localBrowser, http.MethodPost, "/agents/"+id+"/handoff", nil)
-	if st := decodeState(t, r); r.status != http.StatusOK || st.Status != StatusHandedOff || st.ResumeCommand != "cd "+h.root+" && claude --resume 'sess 1'" {
+	if st := decodeState(t, r); r.status != http.StatusOK || st.Status != StatusHandedOff || st.ResumeCommand != "cd "+shellQuote(h.root)+" && claude --resume 'sess 1'" {
 		t.Fatalf("handoff = %d %s", r.status, r.body)
 	}
 	if r := h.route(localBrowser, http.MethodPost, "/agents/"+id+"/handoff", nil); r.status != http.StatusConflict {
@@ -461,7 +469,9 @@ func TestResumeCommand(t *testing.T) {
 	if err := os.WriteFile(own, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := resumeCommand(Record{Lead: true, Backend: BackendPi, Root: "/w/repo"}, dir), "cd /w/repo && pi --session "+own; got != want {
+	// The temp directory is plain on Linux but holds backslashes (and an
+	// 8.3 "~") on Windows, which a POSIX shell must see quoted.
+	if got, want := resumeCommand(Record{Lead: true, Backend: BackendPi, Root: "/w/repo"}, dir), "cd /w/repo && pi --session "+shellQuote(own); got != want {
 		t.Errorf("a daemon-started pi session = %q, want %q", got, want)
 	}
 }
