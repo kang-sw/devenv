@@ -1006,20 +1006,21 @@ func TestDashboardBoardMemoFullReplacesItsOwnKey(t *testing.T) {
 	}
 }
 
-// TestDashboardReadSessionCountsOpenPolicyItems: the index's board count
-// comes with the session read, without rendering the board.
-func TestDashboardReadSessionCountsOpenPolicyItems(t *testing.T) {
+// TestDashboardReadSessionCountsOpenAskItems: the index's board count, its
+// open policy and check items, comes with the session read, without
+// rendering the board.
+func TestDashboardReadSessionCountsOpenAskItems(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	src := dashboardPageSource(t, nil)
 	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
-	f.update(t, `<wb:topic name="t"><wb:add class="policy"><wb:title>p1</wb:title><wb:option>a</wb:option><wb:option>b</wb:option></wb:add><wb:add class="policy"><wb:title>p2</wb:title><wb:option>a</wb:option><wb:option>b</wb:option></wb:add><wb:add class="technical"><wb:title>q</wb:title></wb:add></wb:topic>`)
+	f.update(t, `<wb:topic name="t"><wb:add class="policy"><wb:title>p1</wb:title><wb:option>a</wb:option><wb:option>b</wb:option></wb:add><wb:add class="policy"><wb:title>p2</wb:title><wb:option>a</wb:option><wb:option>b</wb:option></wb:add><wb:add class="technical"><wb:title>q</wb:title></wb:add><wb:add class="check"><wb:title>c1</wb:title></wb:add><wb:add class="check"><wb:title>c2</wb:title></wb:add></wb:topic><wb:answer id="5" value="ok">5=ok</wb:answer>`)
 	before := boardRenders(src)
 	data, ok := src.ReadSession(reg)
 	if !ok {
 		t.Fatal("ReadSession failed")
 	}
-	if !data.HasBoard || data.CountPolicy != 2 {
-		t.Fatalf("ReadSession = %+v, want a board with 2 open policy items", data)
+	if !data.HasBoard || data.CountPolicy != 3 {
+		t.Fatalf("ReadSession = %+v, want a board with 2 open policy items and 1 open check", data)
 	}
 	if boardRenders(src) != before {
 		t.Fatal("ReadSession rendered the board")

@@ -46,9 +46,10 @@ Use the project's terminology and communication style.
 
 ### Asking the user
 
-Every item you put to the user, in discussion or in a ticket's Open Decision
-Queue, is one of three classes, so the user answers only the choices that
-depend on their preferences and can review the rest at the depth they choose.
+Every decision item you put to the user, in discussion or in a ticket's Open
+Decision Queue, is one of three classes, so the user answers only the choices
+that depend on their preferences and can review the rest at the depth they
+choose.
 
 - **Announced default**: the item has one answer, and you can cite the reason
   its alternatives lose. The citation is one of: a language or platform
@@ -64,6 +65,13 @@ depend on their preferences and can review the rest at the depth they choose.
   priorities, or product direction, such as the audience or scale a default
   assumes, scope in or out, cost or risk tolerance, or a trade-off in
   downstream-observable behavior.
+- **Check** (a fourth kind of ask, a gate rather than a decision class, for
+  asks outside a ticket's Open Decision Queue, which keeps the three
+  classes): you ask the user to look at, verify, or approve
+  something, such as "OK this draft and I'll proceed". It is the user's
+  judgment, not a choice among options and not your own call, so it is never
+  an announced default or a technical call, and the user answers each check
+  individually.
 - An item you raise that reverses a prior decision is a policy question, even
   when you can cite a reason for the reversal; a reversal the user states is
   their answer, not a new question.

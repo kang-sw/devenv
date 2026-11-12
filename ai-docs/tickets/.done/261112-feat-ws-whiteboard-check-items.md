@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 2e094e752c6e07aa
 sage-review-completeness-reviewed: 2e094e752c6e07aa
+completed: 2026-11-12
 ---
 
 # Whiteboard `check` items
@@ -200,3 +201,62 @@ Verification:
   states, staging `ok`/`no`/note into the reply bar, and the bulk ack
   control leaving checks unticked; no page errors.
 - Existing whiteboard, mcp, and wsrsrc test suites.
+
+### Result (f8a44350f) - 2026-11-12
+
+Landed in 71d882a02 (shipped text), 003958695 (implementation), and
+f8a44350f (review fixes).
+
+- Store: `ClassCheck` is accepted by `wb:add` / `wb:patch` with the ack-class
+  answers and the non-policy options warning. `OpenPolicyCount` was renamed
+  `OpenAskCount` and counts open checks; the dashboard session, rail, and
+  index chips read it. The dashboard's `CountPolicy` fields keep their names
+  and only their docs changed.
+- View and page: each topic has a `Checks` list (open, answered, and assumed
+  checks, in add order). It renders under the recap with a "check" header
+  and an "answered n / m" count. Answered rows are locked and stamped: `ok`,
+  or `no` with a red x and the user's words. Assumed rows keep a pen.
+  Withdrawn and superseded checks settle. A closed topic folds the list into
+  its settled details. `recentSettled` skips check-list checks. Open checks
+  rank with policy asks (`bumpRank`) and join the amber count in the topic
+  bar, page header, and `Regions.CountPolicy`. The ack chip, the all-ok box,
+  and the bulk ack button skip checks, and a checks-only topic's amber chip
+  is a plain count.
+- Markup: check rows are `div.crow` / `label.ck`, not `.arow` / `label.ack`.
+  Open and assumed rows carry `data-id`, and assumed rows also carry
+  `data-assumed`.
+- Scripts: form.js stages `ok` (box), `no` (x toggle), and notes. The
+  dashboard's answer carry-over, composer chips, and tab-label count
+  (`TL_ASK`) read check rows, and so does pill.js. Three i18n keys were added
+  in every table.
+- Stamp: `ok` or `no` stamps only when the word stands alone or is followed
+  by punctuation. Any other answer shows as text on a ticked row.
+- Query: a check lists like any item. No change was needed.
+- Shipped text: the playbook's `class`, `wb:answer`, `wb:why`, and recap
+  bullets; the workflow manual's `### Asking the user` Check bullet; and
+  lead-discuss. All are mirrored to wsflow and Pi, and the manifests were
+  regenerated.
+- Decision: the manual scopes Check to "asks outside a ticket's Open
+  Decision Queue" rather than naming the whiteboard, since
+  `TestWhiteboardWorkflowTextFollowsKnob` forbids whiteboard text in the
+  manual when the knob is off.
+- Decision: the embed size budget test moves from 40% to 42% of 512 KiB
+  (the stress embed measures 215 KB).
+
+Verification:
+- `go test ./... -count=1` passes, except
+  `cmd/ws-mcp TestHostedConnectionSeeingALANChangeReplacesTheDaemon`. That
+  test expects "master" in git status and gets "main" on this machine, which
+  is unrelated to this change.
+- New tests: `check_test.go` (store, query, view, counts, chips, row states,
+  closed fold, rank, stamp rule), `check_form_test.go` (node:
+  answers.js+form.js staging over the rendered board), and
+  `wsdashboard/check_answers_test.go` (node: board-swap carry-over).
+- `python3 -m unittest discover agents-plugin-wsflow/tests` is OK.
+- Headless Chromium (cached Playwright) ran over a four-state board, full
+  page and embed. Staging produced `03=ok`, `03=no^note`, the all-ok box
+  left the check unticked, and the assumed note produced `06=^note`. There
+  were no page errors.
+- Lite review: one Important finding (no client-side test) and two Minor
+  findings (`no problem` read as no; no free-text render test). All three
+  were fixed in f8a44350f.

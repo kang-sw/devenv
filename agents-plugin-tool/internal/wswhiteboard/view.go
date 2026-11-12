@@ -161,6 +161,12 @@ type TopicView struct {
 	// collapse.
 	Policy []ItemView
 	Acks   []ItemView
+	// Checks are the topic's check items, open, answered, or assumed, in the
+	// order they were added: the check list under the recap, where an
+	// answered or assumed check stays, locked, instead of moving to the
+	// settled items. A withdrawn or superseded check is a settled item like
+	// any other. In a closed topic the list folds with the settled items.
+	Checks []ItemView
 	// Expanded holds settled items shown inside the block (an assumed item
 	// among them, ordered by its settle order like the rest): on the full page
 	// the topic's share of the most recent settled items board-wide, on the
@@ -209,10 +215,41 @@ func (t TopicView) RecapFolded() bool { return t.Recap != "" && t.Closed }
 // or a recap folded into it.
 func (t TopicView) HasFold() bool { return t.Doc != "" || t.RecapFolded() }
 
-// SettledCount is the topic's settled total, the count chip's number.
+// SettledCount is the topic's settled total, the count chip's number; a
+// closed topic's checks fold with its settled items and count among them.
 func (t TopicView) SettledCount() int {
-	return len(t.Expanded) + len(t.Collapsed)
+	n := len(t.Expanded) + len(t.Collapsed)
+	if t.Closed {
+		n += len(t.Checks)
+	}
+	return n
 }
+
+// ChecksShown reports whether the check list shows under the recap: the
+// topic has checks and is open.
+func (t TopicView) ChecksShown() bool { return len(t.Checks) > 0 && !t.Closed }
+
+// OpenChecks counts the topic's checks still waiting on the user.
+func (t TopicView) OpenChecks() int {
+	n := 0
+	for _, c := range t.Checks {
+		if c.Status == StatusOpen {
+			n++
+		}
+	}
+	return n
+}
+
+// AnsweredChecks counts the topic's checks the user answered, or the lead
+// assumed an answer for: the check list's progress count.
+func (t TopicView) AnsweredChecks() int { return len(t.Checks) - t.OpenChecks() }
+
+// AskCount is the topic bar's amber "answer needed" count: its open policy
+// items and open checks.
+func (t TopicView) AskCount() int { return len(t.Policy) + t.OpenChecks() }
+
+// waiting reports whether anything in the topic waits on the user.
+func (t TopicView) waiting() bool { return t.AskCount() > 0 || len(t.Acks) > 0 }
 
 // ItemView is one item as a page shows it.
 type ItemView struct {
@@ -427,6 +464,8 @@ func BuildView(state *State, in ViewInput) View {
 			block.Fresh++
 		}
 		switch {
+		case inCheckList(item):
+			block.Checks = append(block.Checks, iv)
 		case item.Status == StatusOpen && item.Class == ClassPolicy:
 			block.Policy = append(block.Policy, iv)
 		case item.Status == StatusOpen:
@@ -469,7 +508,7 @@ func BuildView(state *State, in ViewInput) View {
 	// Quiet follows what the page shows, so an unread body that stays folded
 	// (the embed, an unchanged body) does not make a topic look active.
 	quiet := func(t *TopicView) bool {
-		return len(t.Policy) == 0 && len(t.Acks) == 0 && len(t.Expanded) == 0 && !t.DocOpen(in.Layout == LayoutEmbed) && !t.RecapOpen()
+		return !t.waiting() && len(t.Expanded) == 0 && !t.ChecksShown() && !t.DocOpen(in.Layout == LayoutEmbed) && !t.RecapOpen()
 	}
 	for _, name := range order {
 		block := blocks[name]
@@ -479,7 +518,7 @@ func BuildView(state *State, in ViewInput) View {
 		if len(block.Acks) > 0 {
 			view.BulkAck = true
 		}
-		if len(block.Policy) > 0 || len(block.Acks) > 0 {
+		if block.waiting() {
 			view.Answerable = true
 		}
 	}
@@ -507,10 +546,9 @@ func BuildView(state *State, in ViewInput) View {
 	for i, topic := range state.ClosedTopics {
 		closedAt[topic] = i
 	}
-	waiting := func(t *TopicView) bool { return len(t.Policy) > 0 || len(t.Acks) > 0 }
 	var shown, capped []string
 	for _, name := range order {
-		if blocks[name].Closed && !waiting(blocks[name]) {
+		if blocks[name].Closed && !blocks[name].waiting() {
 			capped = append(capped, name)
 		} else {
 			shown = append(shown, name)
@@ -534,7 +572,7 @@ func BuildView(state *State, in ViewInput) View {
 
 // Why a topic rose at its latest activity mark, strongest first.
 const (
-	bumpPolicy = iota // a policy item asked (added or re-asked) and still open
+	bumpPolicy = iota // a policy or check item asked (added or re-asked) and still open
 	bumpAck           // a technical or announced item asked and still open
 	bumpDoc           // the topic body or recap changed
 	bumpOther         // anything else: an answer, a close, an edit that asks nothing
@@ -557,7 +595,7 @@ func bumpRank(state *State, activity map[string]int) map[string]int {
 		switch {
 		case item.Asked == 0 || item.Asked != item.Changed || item.Status != StatusOpen:
 			bump(item.Topic, bumpOther)
-		case item.Class == ClassPolicy:
+		case item.Class == ClassPolicy || item.Class == ClassCheck:
 			bump(item.Topic, bumpPolicy)
 		default:
 			bump(item.Topic, bumpAck)
@@ -613,12 +651,13 @@ func stampUpdated(state *State, blocks map[string]*TopicView, loc *time.Location
 
 // recentSettled returns the IDs of the ExpandedSettled most recently settled
 // items outside closed topics, counted board-wide. An assumed item rotates
-// with them: the page shows it as a settled row.
+// with them: the page shows it as a settled row. A check that stays in its
+// topic's check list (inCheckList) takes no place among them.
 func recentSettled(state *State) []int {
 	type entry struct{ id, order int }
 	var settled []entry
 	for _, item := range state.Items {
-		if (IsSettled(item.Status) || item.Status == StatusAssumed) && !state.topicClosed(item.Topic) {
+		if (IsSettled(item.Status) || item.Status == StatusAssumed) && !inCheckList(item) && !state.topicClosed(item.Topic) {
 			settled = append(settled, entry{item.ID, state.settleOrder(item)})
 		}
 	}
@@ -631,6 +670,19 @@ func recentSettled(state *State) []int {
 		ids[i] = e.id
 	}
 	return ids
+}
+
+// inCheckList reports whether item belongs to its topic's check list
+// (TopicView.Checks): a check that is open, answered, or assumed.
+func inCheckList(item Item) bool {
+	if item.Class != ClassCheck {
+		return false
+	}
+	switch item.Status {
+	case StatusOpen, StatusAnswered, StatusAssumed:
+		return true
+	}
+	return false
 }
 
 func itemView(item Item) ItemView {

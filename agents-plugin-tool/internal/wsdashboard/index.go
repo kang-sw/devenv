@@ -19,8 +19,9 @@ const DefaultPollInterval = 30 * time.Second
 type SessionData struct {
 	// HasBoard reports whether the session has a whiteboard.
 	HasBoard bool
-	// CountPolicy is the board's open policy items, which the sessions
-	// index shows beside the board link; zero without a board.
+	// CountPolicy is the board's open policy and check items (the amber
+	// "answer needed" count), which the sessions index shows beside the
+	// board link; zero without a board.
 	CountPolicy int
 	// Fingerprint changes whenever anything the source read changed, so the
 	// index can tell a re-read that found a change from one that did not.

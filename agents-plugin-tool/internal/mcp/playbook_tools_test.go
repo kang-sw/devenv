@@ -2248,7 +2248,8 @@ func TestPlaybookPrintGoldenLeadWorkflowManualAskingTheUser(t *testing.T) {
 	}
 	normalized := strings.Join(strings.Fields(section), " ")
 	for _, want := range []string{
-		"Every item you put to the user, in discussion or in a ticket's Open Decision Queue, is one of three classes",
+		"Every decision item you put to the user, in discussion or in a ticket's Open Decision Queue, is one of three classes",
+		"**Check** (a fourth kind of ask, a gate rather than a decision class",
 		"**Announced default**: the item has one answer, and you can cite the reason its alternatives lose",
 		"a language or platform constraint; a prior commit or ticket decision; an established project convention; a direct consequence of an already-confirmed decision.",
 		"**Technical decision**: the item has no such citation, and its answer does not hinge on the user's preferences or priorities: you pick it on technical reasoning",

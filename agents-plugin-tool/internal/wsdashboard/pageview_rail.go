@@ -40,7 +40,7 @@ const railMessageRunes = 160
 type RailView struct {
 	Workspaces []RailWorkspace
 	// Live counts the live sessions; CountPolicy sums their open policy
-	// items, and CountApproval counts those waiting on a tool approval
+	// and check items, and CountApproval counts those waiting on a tool approval
 	// (RailRow.Approval).
 	Live, CountPolicy, CountApproval int
 	// CanAdd reports a daemon that keeps stored workspaces: the page then
@@ -113,7 +113,7 @@ type RailRow struct {
 	// Subagents counts the running agents the lead itself spawned (level 1),
 	// zero without a live adapter.
 	Subagents int
-	// CountPolicy is the board's open policy items.
+	// CountPolicy is the board's open policy and check items.
 	CountPolicy int
 	// LastTool is the time of the lead's last tool call (epoch ms; 0 when
 	// unknown). An ended session's stale snapshot still supplies it.

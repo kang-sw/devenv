@@ -19,6 +19,8 @@
   --wb-technical: #2457c5;   --wb-on-technical: #ffffff;
   --wb-announced: #1d7348;   --wb-on-announced: #ffffff;
   --wb-accent-assumed: #b0245a;
+  --wb-ck-ok: var(--wb-announced);
+  --wb-ck-no: #c0262d;
   --wb-accent-policy: #b25000;
   --wb-on-accent-policy: #ffffff;
   --wb-opt: color-mix(in srgb, var(--wb-policy) 5%, var(--wb-card));
@@ -50,6 +52,8 @@
     --wb-technical: #26385e;   --wb-on-technical: #d2dcf6;
     --wb-announced: #1f4433;   --wb-on-announced: #c6ead6;
     --wb-accent-assumed: #e48aae;
+    --wb-ck-ok: #6cc39a;
+    --wb-ck-no: #f0797e;
     --wb-accent-policy: #e0a36c;
     --wb-on-accent-policy: #1f150b;
     --wb-opt: color-mix(in srgb, var(--wb-policy) 20%, var(--wb-card));
@@ -74,6 +78,8 @@
   --wb-technical: #26385e;   --wb-on-technical: #d2dcf6;
   --wb-announced: #1f4433;   --wb-on-announced: #c6ead6;
   --wb-accent-assumed: #e48aae;
+  --wb-ck-ok: #6cc39a;
+  --wb-ck-no: #f0797e;
   --wb-accent-policy: #e0a36c;
   --wb-on-accent-policy: #1f150b;
   --wb-opt: color-mix(in srgb, var(--wb-policy) 20%, var(--wb-card));
@@ -166,7 +172,7 @@ button.closed-more { display: flex; margin: 0 auto 16px; }
 .cbar .id { font-size: 12px; font-weight: 700; opacity: .85; }
 .cbar .cls { font-size: 10.5px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; opacity: .8; }
 .cbar .title { font-weight: 700; }
-.cbar .new, .ack .new, .srow .new { vertical-align: middle; }
+.cbar .new, .ack .new, .ck .new, .srow .new { vertical-align: middle; }
 .cbar .btn { background: rgb(255 255 255 / .16); color: inherit; border: 0; flex: none; }
 .cbody { padding: 8px 10px 10px; }
 .new { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--wb-primary); flex: none; align-self: center; }
@@ -271,6 +277,48 @@ button.closed-more { display: flex; margin: 0 auto 16px; }
 .ack .atext { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: 0 8px; align-items: baseline; line-height: 1.5; padding-top: 1px; overflow-wrap: anywhere; }
 .ack .head .title { font-weight: 600; }
 .ack .why { font-size: 12px; color: var(--wb-muted-fg); }
+
+/* check list: the ack list's recessed surface, right under the recap, with a
+   header and progress count in place of class tags; each row is answered on
+   its own (ok box, no x, or a note), and an answered row is locked and stamped */
+.checks { margin: 8px 10px 0; border-radius: 10px; overflow: hidden; background: var(--wb-bg); }
+.checks:last-child { margin-bottom: 10px; }
+details.settled .checks { margin: 0 0 6px; }
+.chead { display: flex; align-items: center; gap: 6px; padding: 6px 10px 3px; font-size: 10.5px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--wb-muted-fg); }
+.chead .i { width: 12px; height: 12px; }
+.chead .prog { margin-left: auto; font-variant-numeric: tabular-nums; letter-spacing: 0; text-transform: none; font-size: 11.5px; font-weight: 700; }
+.crow { display: flex; flex-wrap: wrap; align-items: flex-start; padding-right: 8px; }
+.crow + .crow { border-top: 1px solid var(--wb-muted); }
+.crow > .btn.mini { margin-top: 6px; flex: none; }
+.crow > .btn.mini + .btn.mini { margin-left: 2px; }
+.crow > .note { flex-basis: 100%; width: auto; margin: 0 10px 8px 34px; }
+.ck { flex: 1; min-width: 0; display: flex; gap: 8px; padding: 7px 10px; align-items: flex-start; line-height: 21px; }
+label.ck { cursor: pointer; }
+.ck > :not(.atext) { flex: none; }
+.ck input { margin: 4px 0 0; accent-color: var(--wb-primary); }
+.ck input:disabled { opacity: 1; accent-color: var(--wb-ck-ok); }
+.ck .atext { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: 0 8px; align-items: baseline; line-height: 1.5; padding-top: 1px; overflow-wrap: anywhere; }
+.ck .head > :not(.title) { margin-right: 6px; }
+.ck .id { font-size: 12px; font-weight: 700; color: var(--wb-muted-fg); }
+.ck .title { font-weight: 600; }
+.ck .why { font-size: 12px; color: var(--wb-muted-fg); }
+.ck .ans { font-size: 12.5px; color: var(--wb-muted-fg); }
+.ck .amark { font-size: 10.5px; font-weight: 700; line-height: 1.5; padding: 0 7px; border-radius: 999px; white-space: nowrap; background: color-mix(in srgb, var(--wb-accent-assumed) 18%, transparent); color: color-mix(in srgb, var(--wb-accent-assumed) 75%, var(--wb-muted-fg)); }
+.crow.done .title, .crow.no .title { font-weight: 500; color: var(--wb-muted-fg); }
+.cbox { flex: none; width: 13px; height: 13px; margin: 4px 0 0; border-radius: 3px; display: inline-flex; align-items: center; justify-content: center; background: var(--wb-ck-no); color: #fff; }
+.cbox .i { width: 10px; height: 10px; stroke-width: 2.4; }
+.crow .stamp { font-size: 10.5px; font-weight: 800; letter-spacing: .05em; padding: 0 7px; border-radius: 999px; line-height: 16px; align-self: center; }
+.crow.done .stamp { color: var(--wb-ck-ok); background: color-mix(in srgb, var(--wb-ck-ok) 16%, transparent); }
+.crow.no .stamp { color: var(--wb-ck-no); background: color-mix(in srgb, var(--wb-ck-no) 14%, transparent); }
+/* the user's words on a "no", quoted under the row */
+.crow .said { flex-basis: 100%; margin: 1px 0 0; padding: 3px 9px; font-size: 12.5px; color: var(--wb-muted-fg); border-left: 2px solid var(--wb-ck-no); border-radius: 0 6px 6px 0; background: color-mix(in srgb, var(--wb-ck-no) 6%, transparent); }
+/* the no toggle beside the pen: pressed stages "no" */
+.no-toggle { background: transparent; color: var(--wb-muted-fg); opacity: .8; }
+.no-toggle:hover { opacity: 1; }
+.no-toggle[aria-pressed="true"] { background: var(--wb-ck-no); color: #fff; opacity: 1; }
+.crow[data-no] .ck input { accent-color: var(--wb-muted-fg); opacity: .45; }
+/* a row holding a staged answer or note */
+.crow.staged { box-shadow: inset 3px 0 0 var(--wb-primary); }
 
 /* settled: collapsed tonal chip */
 details.settled { font-size: 13px; }
