@@ -457,6 +457,19 @@ type fakeLeadKeys struct {
 	n       int
 	ensured []string
 	rootErr error
+	// sessions are the terminal lead sessions LeadSession finds, by
+	// reply-id.
+	sessions map[string]LeadSession
+}
+
+func (k *fakeLeadKeys) LeadSession(root, replyID string) (LeadSession, bool) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	ls, ok := k.sessions[replyID]
+	if !ok || ls.Root != root {
+		return LeadSession{}, false
+	}
+	return ls, true
 }
 
 func (k *fakeLeadKeys) LeadRoot(root string) (string, error) {

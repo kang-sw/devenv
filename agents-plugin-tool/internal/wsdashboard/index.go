@@ -28,6 +28,10 @@ type SessionData struct {
 	// SnapshotUpdatedAt is the live snapshot's updatedAt (its writer's last
 	// write or heartbeat); zero when the session has no readable snapshot.
 	SnapshotUpdatedAt time.Time
+	// Resumable reports a session whose record names the harness
+	// conversation behind it (its harness reported one at login), which
+	// the daemon needs to take the session over from a terminal.
+	Resumable bool
 }
 
 // SessionSource reads a registered session's on-disk stores. ok is false
@@ -53,6 +57,8 @@ type Session struct {
 	HasBoard bool
 	// CountPolicy is SessionData.CountPolicy as of the last read.
 	CountPolicy int
+	// Resumable is SessionData.Resumable as of the last read.
+	Resumable bool
 	// SnapshotUpdatedAt ages the session's live snapshot (SessionData). A
 	// change of it alone is a heartbeat, not a session change: it does not
 	// raise Rev.
@@ -372,7 +378,7 @@ func (x *Index) apply(replyID string, reg *Registration) bool {
 		fmt.Fprintf(x.opts.Log, "dashboard: session %s removed (project %s)\n", replyID, entry.session.Project)
 		return true
 	}
-	next := Session{Registration: *reg, Live: reg.Live(now), HasBoard: data.HasBoard, CountPolicy: data.CountPolicy, SnapshotUpdatedAt: data.SnapshotUpdatedAt}
+	next := Session{Registration: *reg, Live: reg.Live(now), HasBoard: data.HasBoard, CountPolicy: data.CountPolicy, Resumable: data.Resumable, SnapshotUpdatedAt: data.SnapshotUpdatedAt}
 	if !known {
 		next.Rev = 1
 		x.sessions[replyID] = &indexEntry{session: next, fingerprint: data.Fingerprint}

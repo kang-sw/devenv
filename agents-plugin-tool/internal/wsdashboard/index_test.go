@@ -165,6 +165,76 @@ func TestPruneRegistrationsDropsOnlyExpiredSessions(t *testing.T) {
 	}
 }
 
+// A lead session the runner serves no more (its record closed, or handed to
+// a terminal) is pruned once its row is past retention, as any ended
+// session; an open lead, a retired one whose row is recent, and every other
+// agent record (the tracker's support agent keeps the runner's lifetime,
+// closed or not) stay.
+func TestPruneRegistrationsAgesRetiredLeadsByTheirRow(t *testing.T) {
+	dir := t.TempDir()
+	old := testNow.Add(-RegistryRetention - time.Hour)
+	recent := testNow.Add(-time.Hour)
+	record := func(id, raw string) {
+		t.Helper()
+		sessionDir := SessionDir(dir, id)
+		if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(sessionDir, AgentRecordFileName), []byte(raw), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	row := func(id string, at time.Time, edit func(reg *Registration)) {
+		t.Helper()
+		reg := Registration{ReplyID: id, Project: "/p", Harness: "claude", RegisteredAt: stampFor(at), HeartbeatAt: stampFor(at)}
+		edit(&reg)
+		if err := WriteRegistration(dir, reg); err != nil {
+			t.Fatal(err)
+		}
+	}
+	hosted := func(reg *Registration) { reg.Hosted = true }
+	closedRow := func(reg *Registration) { reg.Hosted, reg.EndedAt = true, reg.HeartbeatAt }
+	terminal := func(reg *Registration) { reg.EndedAt = reg.HeartbeatAt }
+	agent := func(reg *Registration) { reg.Agent = true }
+
+	row("closedold", old, closedRow)
+	record("closedold", `{"lead":true,"closed_at":"2026-10-01T00:00:00Z"}`)
+	row("handedold", old, terminal)
+	record("handedold", `{"lead":true,"handed_off_at":"2026-10-01T00:00:00Z"}`)
+	row("closedrecent", recent, closedRow)
+	record("closedrecent", `{"lead":true,"closed_at":"2026-11-06T11:00:00Z"}`)
+	// Handed off long ago, and the terminal still ran it an hour ago.
+	row("handedrecent", recent, terminal)
+	record("handedrecent", `{"lead":true,"handed_off_at":"2026-10-01T00:00:00Z"}`)
+	row("openold", old, hosted)
+	record("openold", `{"lead":true}`)
+	row("supportold", old, agent)
+	record("supportold", `{"closed_at":"2026-10-01T00:00:00Z"}`)
+	// A closed agent conversation whose row lost its flag is still no lead.
+	row("agentnoflag", old, terminal)
+	record("agentnoflag", `{"closed_at":"2026-10-01T00:00:00Z"}`)
+	row("unreadable", old, closedRow)
+	record("unreadable", `{"lead":`)
+	// A retired lead with no row to age it by.
+	record("norow", `{"lead":true,"closed_at":"2026-10-01T00:00:00Z"}`)
+	if err := os.Chtimes(SessionDir(dir, "norow"), old, old); err != nil {
+		t.Fatal(err)
+	}
+
+	if n := PruneRegistrations(dir, testNow, RegistryRetention); n != 2 {
+		t.Errorf("pruned %d, want 2", n)
+	}
+	for id, want := range map[string]bool{
+		"closedold": false, "handedold": false,
+		"closedrecent": true, "handedrecent": true, "openold": true, "supportold": true, "agentnoflag": true, "unreadable": true, "norow": true,
+	} {
+		_, err := os.Stat(SessionDir(dir, id))
+		if exists := err == nil; exists != want {
+			t.Errorf("%s exists = %v, want %v", id, exists, want)
+		}
+	}
+}
+
 // An agent conversation outlives the prune window while the daemon is down:
 // its directory (agent.json, held sends, the backend session) belongs to the
 // runner, so prune spares it by registration flag or by its record file.

@@ -261,7 +261,7 @@ func (d *Daemon) railRepository(path string, now time.Time) (string, bool) {
 	}
 	for _, s := range d.index.Sessions() {
 		reg := s.Registration
-		if s.Unlisted || (!reg.Live(now) && now.Sub(reg.LastSeen()) > endedSessionWindow) {
+		if s.Unlisted {
 			continue
 		}
 		if root := railRepoRoot(reg); root != "" && filepath.Clean(root) == path {

@@ -69,8 +69,8 @@ type RailWorkspace struct {
 	// them waiting on a tool approval.
 	Live, Approvals int
 	Worktrees       []RailWorktree
-	// Sessions are the live sessions, Ended the ended ones still inside
-	// endedSessionWindow, of a plain folder.
+	// Sessions are the live sessions, Ended the ended ones, of a plain
+	// folder.
 	Sessions, Ended []RailRow
 }
 
@@ -91,8 +91,7 @@ type RailWorktree struct {
 	// shows no count. The rail never reads a working tree itself.
 	Changes    int
 	HasChanges bool
-	// Sessions are the live sessions, Ended the ended ones still inside
-	// endedSessionWindow.
+	// Sessions are the live sessions, Ended the ended ones.
 	Sessions, Ended []RailRow
 }
 
@@ -130,6 +129,46 @@ type RailRow struct {
 	// usage limit) that keeps a hosted session from working until a turn
 	// succeeds, as its runner reports it (wslive.Host); nil when none.
 	Failure *wslive.Notice
+	// Revive is how the dashboard brings an ended session back, on a daemon
+	// that hosts lead sessions: ReviveReopen for a closed hosted session,
+	// ReviveTakeover for a session a terminal harness ran, empty when it
+	// offers neither (a live session, a plain-folder session, a harness the
+	// daemon does not host). ReviveBlocked names why the entry is shown
+	// disabled (ReviveNoSession), empty when it is not.
+	Revive, ReviveBlocked string
+}
+
+const (
+	// ReviveReopen and ReviveTakeover are RailRow.Revive's values; each is
+	// the agent route the entry posts to (/agents/<id>/<value>).
+	ReviveReopen   = "reopen"
+	ReviveTakeover = "takeover"
+	// ReviveNoSession blocks a takeover of a session whose record names no
+	// harness conversation: its harness never reported one.
+	ReviveNoSession = "nosession"
+)
+
+// railRevive is how an ended session comes back (RailRow.Revive). Whether
+// a terminal session's harness has exited is asked when the entry is used:
+// the route refuses a takeover while it may run.
+func railRevive(in railInput) (revive, blocked string) {
+	reg := in.Session.Registration
+	switch {
+	case !in.CanRevive || reg.Agent:
+		return "", ""
+	case reg.Hosted:
+		if reg.EndedAt == "" {
+			return "", ""
+		}
+		return ReviveReopen, ""
+	case in.Repo == "" || (reg.Harness != "claude" && reg.Harness != "pi"):
+		// A lead key lives at a git root, and the daemon hosts these two
+		// harnesses alone.
+		return "", ""
+	case !in.Session.Resumable:
+		return ReviveTakeover, ReviveNoSession
+	}
+	return ReviveTakeover, ""
 }
 
 // ApprovalWait is the tool approval a hosted session waits on, as a row
@@ -165,6 +204,9 @@ type railInput struct {
 	Repo    string
 	Linked  bool
 	Message railMessage
+	// CanRevive reports a daemon that hosts lead sessions: an ended row
+	// then carries how it comes back (railRevive).
+	CanRevive bool
 }
 
 // railMessage is a session's last conversation message as the rail shows it.
@@ -192,11 +234,12 @@ type railWorktreeEntry struct {
 	Prunable bool
 }
 
-// buildRailView groups the listed sessions by workspace and worktree. A
-// session is listed while live or while it was last seen inside
-// endedSessionWindow. repos holds the worktree lists read so far, by
-// repository root; a repository without one shows the worktrees its
-// sessions are rooted in.
+// buildRailView groups the listed sessions by workspace and worktree. An
+// ended session stays listed as long as the index holds it (while its
+// registry directory and session record exist), past the index page's
+// endedSessionWindow: the ended list is where a session is brought back
+// from. repos holds the worktree lists read so far, by repository root; a
+// repository without one shows the worktrees its sessions are rooted in.
 //
 // stored are the stored workspaces. A session in a repository always sits
 // under its repository, which is one workspace with a stored one of the
@@ -224,9 +267,6 @@ func buildRailView(sessions []railInput, repos map[string]railRepo, stored []sto
 	for _, in := range sessions {
 		reg := in.Session.Registration
 		live := reg.Live(now)
-		if !live && now.Sub(reg.LastSeen()) > endedSessionWindow {
-			continue
-		}
 		row := railRow(in, live, now)
 		key := filepath.Clean(reg.Project)
 		if in.Repo != "" {
@@ -425,6 +465,9 @@ func railRow(in railInput, live bool, now time.Time) RailRow {
 		Message:     in.Message.Text,
 		User:        in.Message.User,
 		Hosted:      reg.Hosted,
+	}
+	if !live {
+		row.Revive, row.ReviveBlocked = railRevive(in)
 	}
 	snap := in.Snapshot
 	if snap == nil {

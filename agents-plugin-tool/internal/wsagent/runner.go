@@ -21,6 +21,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wsinbox"
 	"github.com/kang-sw/devenv/internal/wslive"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
+	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
 // KeyStore mints and keeps the ws session key of each conversation. The
@@ -45,6 +46,23 @@ type LeadKeyStore interface {
 	// EnsureLead keeps the lead key usable for its canonical root, as
 	// KeyStore.Ensure does for a conversation key.
 	EnsureLead(canonical, key string) error
+	// LeadSession finds the lead key behind a registered session (the
+	// parent-less lead key rooted at root whose reply-id is replyID) with
+	// the harness conversation its last login reported, so the daemon can
+	// take the session over under the same key. ok is false when no such
+	// key is left.
+	LeadSession(root, replyID string) (session LeadSession, ok bool)
+}
+
+// LeadSession is a terminal lead session as its ws key record describes it.
+type LeadSession struct {
+	// Key is the session's lead key and Root its canonical git root.
+	Key, Root string
+	// Harness is the harness that last logged in with the key, Session its
+	// own name for the conversation (a claude session id, a pi session
+	// file path), and Cwd the directory it ran in. All three are empty for
+	// a key whose logins reported none.
+	Harness, Session, Cwd string
 }
 
 // LeadMail is a hosted lead session's ws mailbox as the runner uses it: the
@@ -110,6 +128,10 @@ type Options struct {
 	Holders  HolderHost
 	LeadKeys LeadKeyStore
 	Mail     LeadMail
+	// Alive reports whether a process of this machine runs: what refuses a
+	// takeover of a session whose terminal harness has not exited. nil is
+	// wsstate.ProcessAlive.
+	Alive func(pid int) bool
 	// Trusted is the gate of a lead conversation's control writes (spawn,
 	// settings, stop, close, approval answers); nil is
 	// wsdashboard.TrustedWrite: a browser on this machine that sends the
@@ -153,6 +175,9 @@ func NewRunner(opts Options) *Runner {
 	}
 	if opts.Trusted == nil {
 		opts.Trusted = wsdashboard.TrustedWrite
+	}
+	if opts.Alive == nil {
+		opts.Alive = wsstate.ProcessAlive
 	}
 	r := &Runner{opts: opts, convs: map[string]*conv{}, closed: map[string]Record{}, quit: make(chan struct{}), notify: func(string, string) {}}
 	if opts.Holders != nil {
@@ -482,7 +507,7 @@ func (r *Runner) Get(id string) (State, error) {
 	case open:
 		return c.state(), nil
 	case closed:
-		return closedState(rec), nil
+		return r.closedState(rec), nil
 	}
 	return State{}, errUnknown
 }
@@ -496,7 +521,7 @@ func (r *Runner) List() []State {
 		convs = append(convs, c)
 	}
 	for _, rec := range r.closed {
-		out = append(out, closedState(rec))
+		out = append(out, r.closedState(rec))
 	}
 	r.mu.Unlock()
 	for _, c := range convs {
@@ -770,10 +795,22 @@ type State struct {
 	// CanControl reports whether the asking viewer may use the lead control
 	// routes (a browser on this machine); the routes set it per request.
 	CanControl bool `json:"can_control,omitempty"`
+	// ResumeCommand is the shell command that resumes a handed-off lead
+	// session's conversation in a terminal. It names paths of this
+	// machine, so the routes answer it to a viewer with CanControl alone.
+	ResumeCommand string `json:"resume_command,omitempty"`
 }
 
 // closedState is the state of a record no loop serves: closed, or handed
 // to a terminal.
+func (r *Runner) closedState(rec Record) State {
+	st := closedState(rec)
+	if st.Status == StatusHandedOff {
+		st.ResumeCommand = resumeCommand(rec, wsdashboard.SessionDir(r.opts.Dir, rec.ReplyID))
+	}
+	return st
+}
+
 func closedState(rec Record) State {
 	st := State{ID: rec.ReplyID, Profile: rec.Profile, Backend: rec.Backend, Root: rec.Root, Status: StatusClosed, Model: rec.Model, Effort: rec.Effort, Page: "/s/" + rec.ReplyID, CreatedAt: rec.CreatedAt, ClosedAt: rec.ClosedAt, Lead: rec.Lead, PermissionMode: rec.PermissionMode}
 	if rec.ClosedAt == "" && rec.HandedOffAt != "" {
@@ -1077,6 +1114,7 @@ func (c *conv) state() State {
 		st.Status, st.ClosedAt = StatusClosed, c.rec.ClosedAt
 		if c.rec.ClosedAt == "" && c.rec.HandedOffAt != "" {
 			st.Status, st.HandedOffAt = StatusHandedOff, c.rec.HandedOffAt
+			st.ResumeCommand = resumeCommand(c.rec, c.dir)
 		}
 	}
 	st.Process = c.proc != nil
@@ -1380,7 +1418,7 @@ func (c *conv) startProcess() error {
 // reads it early waits rather than misreading an older PID.
 func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 	host := c.r.opts.Holders
-	holder := &holderChild{host: host, table: &c.r.holders, session: holderSession{Kind: holderKindLead, ReplyID: rec.ReplyID, Cwd: rec.Root, Label: rec.Profile}}
+	holder := &holderChild{host: host, table: &c.r.holders, session: holderSession{Kind: holderKindLead, ReplyID: rec.ReplyID, Cwd: rec.workDir(), Label: rec.Profile}}
 	if attach {
 		holder.id, holder.skipTo = rec.HolderID, rec.HolderSeq
 	} else {
@@ -1406,13 +1444,15 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 		}
 	}
 	spec := StartSpec{
-		Root:      rec.Root,
-		Dir:       c.dir,
-		Profile:   def,
-		Model:     rec.Model,
-		Effort:    rec.Effort,
-		SessionID: rec.SessionID,
-		Env:       environ(),
+		Root:        rec.Root,
+		Dir:         c.dir,
+		Profile:     def,
+		Model:       rec.Model,
+		Effort:      rec.Effort,
+		SessionID:   rec.SessionID,
+		Cwd:         rec.Cwd,
+		SessionFile: rec.SessionFile,
+		Env:         environ(),
 		Lead: &LeadSpec{
 			PermissionMode: rec.PermissionMode,
 			Holder:         holder,

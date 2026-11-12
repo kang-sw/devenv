@@ -309,11 +309,17 @@ func RemoveRegistration(dir, replyID string) error {
 // PruneRegistrations deletes the directory of every session last seen more
 // than retention before now, and of every directory without a readable
 // registration that has not changed for as long. It returns how many it
-// deleted. An agent conversation (registration Agent, or a directory holding
-// AgentRecordFileName) is never pruned: it heartbeats only while the daemon
-// runs, so a daemon down past retention would otherwise lose its record,
-// held sends, and backend session before the runner re-registers it; its
-// lifetime is the runner's.
+// deleted.
+//
+// A conversation the daemon's agent runner hosts (registration Agent, or a
+// directory holding AgentRecordFileName) is not pruned while the runner may
+// serve it: it heartbeats only while the daemon runs, so a daemon down past
+// retention would otherwise lose its record, held sends, and backend
+// session before the runner re-registers it. The exception is a lead
+// session the runner no longer serves (its record is closed, or handed to
+// a terminal): its row is no longer the runner's to refresh, so it ages
+// as any ended session's, measured from the row. Every other agent record
+// (the tracker's support agent among them) keeps the runner's lifetime.
 func PruneRegistrations(dir string, now time.Time, retention time.Duration) int {
 	entries, err := os.ReadDir(filepath.Join(dir, sessionsDirName))
 	if err != nil {
@@ -324,7 +330,8 @@ func PruneRegistrations(dir string, now time.Time, retention time.Duration) int 
 		if !entry.IsDir() || !ValidReplyID(entry.Name()) {
 			continue
 		}
-		if _, err := os.Stat(filepath.Join(SessionDir(dir, entry.Name()), AgentRecordFileName)); err == nil {
+		record, hosted := readAgentRecordEnd(SessionDir(dir, entry.Name()))
+		if hosted && !record.retired() {
 			continue
 		}
 		last := time.Time{}
@@ -333,6 +340,10 @@ func PruneRegistrations(dir string, now time.Time, retention time.Duration) int 
 				continue
 			}
 			last = reg.LastSeen()
+		} else if hosted {
+			// A retired lead with no readable row to age it by is left to
+			// the runner.
+			continue
 		}
 		if last.IsZero() {
 			info, err := entry.Info()
@@ -349,4 +360,33 @@ func PruneRegistrations(dir string, now time.Time, retention time.Duration) int 
 		}
 	}
 	return pruned
+}
+
+// agentRecordEnd is what the registry reads of the agent runner's record
+// (AgentRecordFileName, written by internal/wsagent): whether it is a lead
+// session's, and whether the runner still serves it.
+type agentRecordEnd struct {
+	Lead        bool   `json:"lead"`
+	ClosedAt    string `json:"closed_at"`
+	HandedOffAt string `json:"handed_off_at"`
+}
+
+// retired reports a lead session the runner serves no more: closed, or
+// handed to a terminal.
+func (r agentRecordEnd) retired() bool {
+	return r.Lead && (r.ClosedAt != "" || r.HandedOffAt != "")
+}
+
+// readAgentRecordEnd reads sessionDir's agent record; hosted is false when
+// the directory holds none. An unreadable record is hosted and not
+// retired, so it is never pruned.
+func readAgentRecordEnd(sessionDir string) (record agentRecordEnd, hosted bool) {
+	raw, err := os.ReadFile(filepath.Join(sessionDir, AgentRecordFileName))
+	if errors.Is(err, os.ErrNotExist) {
+		return agentRecordEnd{}, false
+	}
+	if err != nil || json.Unmarshal(raw, &record) != nil {
+		return agentRecordEnd{}, true
+	}
+	return record, true
 }

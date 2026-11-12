@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kang-sw/devenv/internal/wsagent"
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
 )
@@ -352,5 +353,124 @@ func TestLeadMailboxReturnsClaimedMailToTheInbox(t *testing.T) {
 	}
 	if err := mail.Return(root, leadKey, nil); err != nil {
 		t.Fatalf("Return of nothing: %v", err)
+	}
+}
+
+// TestAgentKeyStoreFindsTheLeadSessionBehindARow: the daemon finds a
+// terminal session's lead key by the row's root and reply-id, with the
+// harness conversation the session's last login reported, and the
+// dashboard's session source reads the same record as resumable.
+func TestAgentKeyStoreFindsTheLeadSessionBehindARow(t *testing.T) {
+	root, server := hostedLoginEnv(t)
+	server.sessionHarness = "claude"
+	sub := filepath.Join(root, "pkg")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	key, loginRoot := parseLoginResponse(t, callLogin(t, server, 1, sub, map[string]any{"harness_session": "claude-session-1", "harness_cwd": sub}))
+	plain, _ := parseLoginResponse(t, callLogin(t, server, 2, root, nil))
+	store := NewAgentKeyStore()
+	got, ok := store.LeadSession(loginRoot, wsmailbox.ReplyID(key))
+	want := wsagent.LeadSession{Key: key, Root: loginRoot, Harness: "claude", Session: "claude-session-1", Cwd: sub}
+	if !ok || got != want {
+		t.Fatalf("LeadSession = %+v (%v), want %+v", got, ok, want)
+	}
+	if got, ok := store.LeadSession(loginRoot, wsmailbox.ReplyID(plain)); !ok || got.Key != plain || got.Session != "" || got.Cwd != "" {
+		t.Fatalf("a session that reported no conversation = %+v (%v)", got, ok)
+	}
+	if _, ok := store.LeadSession(t.TempDir(), wsmailbox.ReplyID(key)); ok {
+		t.Fatal("a key rooted elsewhere was found")
+	}
+	if _, ok := store.LeadSession(loginRoot, "nosuchsession"); ok {
+		t.Fatal("an unknown reply-id was found")
+	}
+	// A delegate key has no row of its own and is never a lead session.
+	delegate, err := store.Mint(loginRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := store.LeadSession(loginRoot, wsmailbox.ReplyID(delegate)); ok {
+		t.Fatal("a delegate key was found as a lead session")
+	}
+
+	src := NewDashboardSessionSource()
+	for k, resumable := range map[string]bool{key: true, plain: false} {
+		data, ok := src.ReadSession(wsdashboard.Registration{ReplyID: wsmailbox.ReplyID(k), Project: loginRoot})
+		if !ok || data.Resumable != resumable {
+			t.Fatalf("ReadSession(%s): resumable %v (found %v), want %v", k, data.Resumable, ok, resumable)
+		}
+	}
+}
+
+// TestTerminalServerLeavesARowTheDaemonTookOver: once the daemon made a
+// terminal session a hosted one, a ws-mcp that outlived the session's
+// harness writes its row no more: no heartbeat, no re-registration, and no
+// end mark, any of which the daemon would read as a terminal taking the
+// session back.
+func TestTerminalServerLeavesARowTheDaemonTookOver(t *testing.T) {
+	dir := dashboardSessionEnv(t)
+	root := dashboardGitRoot(t)
+	t.Setenv(envHarnessPID, strconv.Itoa(terminalHarnessPID))
+	s, key, _ := dashboardSessionServer(t, root, true)
+	dashCall(t, s, "todo.list", map[string]any{"session_key": key})
+	row, ok := readRegistration(t, dir, key)
+	if !ok || row.Hosted {
+		t.Fatalf("precondition: the terminal's own row: %+v (%v)", row, ok)
+	}
+	taken := row
+	taken.Hosted, taken.HostStopped, taken.HarnessPID, taken.EndedAt = true, true, 0, ""
+	taken.HeartbeatAt = dashboardStamp(time.Now().Add(time.Minute))
+	if err := wsdashboard.WriteRegistration(dir, taken); err != nil {
+		t.Fatal(err)
+	}
+	taken, _ = readRegistration(t, dir, key)
+
+	s.dashboardHeartbeat()
+	dashCall(t, s, "todo.list", map[string]any{"session_key": key})
+	s.dashboardHeartbeat()
+	s.DashboardEnd()
+	if got, _ := readRegistration(t, dir, key); got != taken {
+		t.Fatalf("the daemon's row was rewritten:\n got %+v\nwant %+v", got, taken)
+	}
+}
+
+// TestReloginAfterAHandOffKeepsTheKey: the row the daemon leaves when it
+// hands a session to the terminal (unhosted, ended, naming no process)
+// refuses nothing: the terminal harness re-logs in with the session's own
+// key, no key is minted, and its next keyed call makes the row its own.
+func TestReloginAfterAHandOffKeepsTheKey(t *testing.T) {
+	dir := dashboardSessionEnv(t)
+	root := dashboardGitRoot(t)
+	_, key, loginRoot := dashboardSessionServer(t, root, true)
+	stubHostedProcessAlive(t)
+	stamp := dashboardStamp(time.Now().Add(-time.Minute))
+	handed := wsdashboard.Registration{SchemaVersion: 1, ReplyID: wsmailbox.ReplyID(key), Project: loginRoot, Harness: "claude", RegisteredAt: stamp, HeartbeatAt: stamp, EndedAt: stamp}
+	if err := wsdashboard.WriteRegistration(dir, handed); err != nil {
+		t.Fatal(err)
+	}
+	record := filepath.Join(wsdashboard.SessionDir(dir, handed.ReplyID), wsdashboard.AgentRecordFileName)
+	if err := os.WriteFile(record, []byte(`{"lead":true,"handed_off_at":"`+stamp+`"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s := terminalServer(t, root)
+	keys := sessionKeyFileCount(t, s)
+	resp := callLogin(t, s, 1, root, map[string]any{"relogin_session_key": key, "harness_session": "claude-session-1", "harness_cwd": root})
+	if toolIsError(t, resp) {
+		t.Fatalf("the re-login was refused: %s", resp)
+	}
+	if got, _ := parseLoginResponse(t, resp); got != key {
+		t.Fatalf("re-login returned %q, want %q", got, key)
+	}
+	if got := sessionKeyFileCount(t, s); got != keys {
+		t.Fatalf("the re-login minted a key: %d records, want %d", got, keys)
+	}
+	if rec := keyRecordForTest(t, s, key); rec.HarnessSession != "claude-session-1" {
+		t.Fatalf("the key record should name the terminal's conversation: %+v", rec.sessionKeyRecord)
+	}
+	dashCall(t, s, "todo.list", map[string]any{"session_key": key})
+	got, ok := readRegistration(t, dir, key)
+	if !ok || got.Hosted || got.EndedAt != "" || got.HarnessPID != terminalHarnessPID || !got.Live(time.Now()) {
+		t.Fatalf("the row should be the terminal's live one: %+v (%v)", got, ok)
 	}
 }

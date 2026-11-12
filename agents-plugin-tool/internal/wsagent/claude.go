@@ -321,7 +321,7 @@ func (b ClaudeBackend) Start(ctx context.Context, spec StartSpec) (Process, erro
 		return nil, err
 	}
 	cmd := exec.Command(command, args...)
-	cmd.Dir = spec.Root
+	cmd.Dir = spec.workDir()
 	cmd.Env = claudeEnv(spec.Env)
 	if spec.Lead != nil {
 		cmd.Env = claudeLeadEnv(spec)

@@ -261,13 +261,41 @@ func (s *Server) dashboardTouch(sessionKey, root string, force bool) {
 	reg.HarnessPID = s.harnessPID()
 	reg.HeartbeatAt = dashboardStamp(now)
 	reg.EndedAt = ""
-	if err := wsdashboard.WriteRegistration(dir, reg); err != nil {
+	if written, err := dashboardWriteRow(dir, sess, reg); err != nil {
 		s.debugEvent("dashboard.register_failed", map[string]any{"error": err.Error()})
 		return
+	} else if !written {
+		return
 	}
-	sess.reg = reg
 	sess.idle = false
 	s.queueDashboardNudge(sess)
+}
+
+// dashboardWriteRow writes reg as sess's row and keeps it as the row this
+// server heartbeats, unless the dashboard daemon holds the row by now: the
+// daemon took the session over once its terminal harness had exited, and a
+// server that outlived that harness must not write the row back (the
+// daemon would read it as a terminal taking the session and let its own
+// process go). Then nothing is written and this server stops writing the
+// row for good. The read and the write are one step under the row's lock,
+// as the daemon's takeover is. The caller holds d.mu.
+func dashboardWriteRow(dir string, sess *dashboardSession, reg wsdashboard.Registration) (written bool, err error) {
+	unlock, err := wsdashboard.LockRegistration(dir, reg.ReplyID)
+	if err != nil {
+		return false, err
+	}
+	defer unlock()
+	if row, err := wsdashboard.ReadRegistration(dir, reg.ReplyID); err == nil && row.Hosted {
+		sess.daemonRow = true
+		sess.reg = wsdashboard.Registration{}
+		sess.servedPort = 0
+		return false, nil
+	}
+	if err := wsdashboard.WriteRegistration(dir, reg); err != nil {
+		return false, err
+	}
+	sess.reg = reg
+	return true, nil
 }
 
 // dashboardUnregister takes a session whose dashboard key resolves off out
@@ -333,11 +361,9 @@ func (s *Server) dashboardHeartbeat() {
 		}
 		reg := sess.reg
 		reg.HeartbeatAt = dashboardStamp(now)
-		if err := wsdashboard.WriteRegistration(dir, reg); err != nil {
+		if _, err := dashboardWriteRow(dir, sess, reg); err != nil {
 			s.debugEvent("dashboard.heartbeat_failed", map[string]any{"error": err.Error()})
-			continue
 		}
-		sess.reg = reg
 	}
 }
 
@@ -358,8 +384,7 @@ func (s *Server) dashboardEnd() {
 		}
 		reg := sess.reg
 		reg.EndedAt = dashboardStamp(now)
-		if err := wsdashboard.WriteRegistration(dir, reg); err == nil {
-			sess.reg = reg
+		if written, err := dashboardWriteRow(dir, sess, reg); err == nil && written {
 			sess.idle = true
 		}
 	}
@@ -721,6 +746,7 @@ func (src *DashboardSessionSource) ReadSession(reg wsdashboard.Registration) (ws
 	return wsdashboard.SessionData{
 		HasBoard:          record.Whiteboard != nil,
 		CountPolicy:       record.Whiteboard.OpenPolicyCount(),
+		Resumable:         record.HarnessSession != "" && record.HarnessCwd != "",
 		Fingerprint:       fp,
 		SnapshotUpdatedAt: updatedAt,
 	}, true

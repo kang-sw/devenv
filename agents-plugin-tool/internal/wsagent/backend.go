@@ -39,6 +39,11 @@ type StartSpec struct {
 	Effort string
 	// SessionID is the backend session to resume; empty starts a new one.
 	SessionID string
+	// Cwd is the child's working directory when it is not Root, and
+	// SessionFile the session file a lead conversation runs on in place of
+	// its own (Record.Cwd, Record.SessionFile).
+	Cwd         string
+	SessionFile string
 	// Instructions is the composed instruction file to append to the
 	// harness's own system prompt; empty appends none.
 	Instructions string
@@ -302,3 +307,11 @@ var lookPath = exec.LookPath
 
 // environ is the environment a child starts from; a test replaces it.
 var environ = os.Environ
+
+// workDir is the child's working directory.
+func (s StartSpec) workDir() string {
+	if s.Cwd != "" {
+		return s.Cwd
+	}
+	return s.Root
+}

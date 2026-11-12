@@ -29,6 +29,12 @@ import (
 //	POST /agents/<id>/approvals/<request-id>
 //	                              {behavior: "allow"|"deny", message?}
 //	                              answers a waiting tool permission prompt
+//	POST /agents/<id>/handoff     hands the session to the terminal: its
+//	                              process ends and the answer carries the
+//	                              command that resumes it there
+//	POST /agents/<id>/takeover    makes the terminal lead session <id> a
+//	                              hosted one, once its harness has exited
+//	POST /agents/<id>/reopen      opens a closed hosted session again
 //
 // The routes sit behind the daemon's access guard. A POST must carry a JSON
 // body (Content-Type application/json) and either no Origin (a non-browser
@@ -38,11 +44,14 @@ import (
 //
 // A lead session runs with the user's own tools and permissions, so the
 // writes that decide what it may do take the stricter trusted gate
-// (Options.Trusted) on top: its spawn, a settings change, stop, close, and
-// an approval answer are answered 404 to anyone but a browser on this
-// machine, and 403 without the daemon's own Origin. A LAN viewer with the
-// token reads a lead session and may send and interrupt, as in any
-// session; State.CanControl tells a page which viewer it serves.
+// (Options.Trusted) on top: its spawn, a settings change, stop, close, an
+// approval answer, and a move between the daemon and a terminal (handoff,
+// takeover, reopen) are answered 404 to anyone but a browser on this
+// machine, and 403 without the daemon's own Origin. A takeover names a
+// session that is no conversation of the runner yet, so the three moves
+// take the gate for every id. A LAN viewer with the token reads a lead
+// session and may send and interrupt, as in any session; State.CanControl
+// tells a page which viewer it serves.
 const RoutePrefix = "/agents"
 
 // leadsRoute is the id segment the lead spawn route takes; no conversation
@@ -108,9 +117,12 @@ func (r *Runner) serve(w http.ResponseWriter, req *http.Request) {
 	// controls.
 	view := func(st State) State {
 		st.CanControl = st.Lead && local
+		if !st.CanControl {
+			st.ResumeCommand = ""
+		}
 		return st
 	}
-	if req.Method == http.MethodPost && (id == leadsRoute || (r.IsLead(id) && leadControl(action))) {
+	if req.Method == http.MethodPost && (id == leadsRoute || leadMove(action) || (r.IsLead(id) && leadControl(action))) {
 		if !local {
 			http.Error(w, "unknown agent route", http.StatusNotFound)
 			return
@@ -182,6 +194,15 @@ func (r *Runner) serve(w http.ResponseWriter, req *http.Request) {
 			st, err = r.SetPermissionMode(id, *body.PermissionMode)
 		}
 		writeAnswer(w, http.StatusOK, view(st), err)
+	case action == "handoff":
+		st, err := r.HandOff(id)
+		writeAnswer(w, http.StatusOK, view(st), err)
+	case action == "takeover":
+		st, err := r.TakeOver(id)
+		writeAnswer(w, http.StatusOK, view(st), err)
+	case action == "reopen":
+		st, err := r.Reopen(id)
+		writeAnswer(w, http.StatusOK, view(st), err)
 	case strings.HasPrefix(action, "approvals/"):
 		var body approvalRequest
 		if !decode(w, req, &body) {
@@ -202,6 +223,12 @@ func (r *Runner) serve(w http.ResponseWriter, req *http.Request) {
 // writes, which take the trusted gate; send and interrupt do not.
 func leadControl(action string) bool {
 	return action == "stop" || action == "restart" || action == "close" || action == "settings" || strings.HasPrefix(action, "approvals/")
+}
+
+// leadMove reports whether action moves a lead session between the daemon
+// and a terminal. These take the trusted gate whatever id they name.
+func leadMove(action string) bool {
+	return action == "handoff" || action == "takeover" || action == "reopen"
 }
 
 // writeAllowed is the POST rule: a JSON body, and no Origin or the
