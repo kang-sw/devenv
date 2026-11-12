@@ -398,7 +398,14 @@
       "registered_at": "2026-11-12T04:23:31Z"
     },
     "261112-bug-ws-dashboard-interrupt-badge-stuck-on-back-to-back-turn": {
-      "registered_at": "2026-11-12T02:58:04Z"
+      "registered_at": "2026-11-12T02:58:04Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "28ef83e379b353cc",
+        "track": "develop",
+        "phase": "closed",
+        "touched_at": "2026-11-12T04:31:01Z"
+      }
     },
     "261112-bug-ws-dashboard-open-tab-keeps-stale-assets-after-daemon-upgrade": {
       "registered_at": "2026-11-12T04:20:54Z"
