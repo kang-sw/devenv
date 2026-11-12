@@ -206,9 +206,14 @@ func TestSessionHeadLeadsWithTheProjectAndLightsTheHarnessBadge(t *testing.T) {
 	f := startPageFixture(t)
 	_, page := get(t, f.base+"/s/livesession")
 	name := filepath.Base(f.project)
-	head := `<span class="meta">` + name + `</span><span class="meta">livesession · #3</span><span class="host sse" title="live updates"><span class="dot"></span>claude</span>`
-	if !strings.Contains(page, head) {
-		t.Errorf("session head lacks %q", head)
+	for _, head := range []string{
+		`<span class="meta">` + name + `</span><span class="meta sname"`,
+		`>livesession</button>`,
+		`<span class="sseq"> · #3</span></span><span class="host sse" title="live updates"><span class="dot"></span>claude</span>`,
+	} {
+		if !strings.Contains(page, head) {
+			t.Errorf("session head lacks %q", head)
+		}
 	}
 	if !strings.Contains(page, `<span class="sse" id="sse" title="live updates"><span class="dot"></span></span>`) {
 		t.Errorf("session page lacks the bare stream dot")
