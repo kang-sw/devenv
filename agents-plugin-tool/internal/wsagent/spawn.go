@@ -43,6 +43,11 @@ type TurnResult struct {
 	// a failed or interrupted turn.
 	Message string `json:"message,omitempty"`
 	Error   string `json:"error,omitempty"`
+	// Delivered marks a conversation parent's wait answered with a turn
+	// whose report had already reached that parent (steered into its turn
+	// or kept for its next one): Message and Error are left out, since
+	// the parent read them there.
+	Delivered bool `json:"delivered,omitempty"`
 	// n counts the conversation's settles so far (0: none yet), and mark
 	// is the Runner.Send count the settled turn's messages covered.
 	n, mark uint64
@@ -199,15 +204,27 @@ func (c *conv) settleTurn(status, errText string, mark uint64) {
 	}
 	c.reply = ""
 	if status == TurnDone && c.holdsReport() {
-		c.heldRes = &res
-		if c.rec.TurnOpen {
-			c.update(func(rec *Record) { rec.TurnOpen = false })
+		c.hold(&res)
+		if c.rec.TurnOpen || c.rec.LastTurn != nil {
+			// A wait after a restart waits for this turn's release, not
+			// the turn reported before it.
+			c.update(func(rec *Record) { rec.TurnOpen, rec.LastTurn = false, nil })
 		}
 		c.watched()
 		return
 	}
-	c.heldRes = nil
+	c.hold(nil)
 	c.publish(res)
+}
+
+// hold sets the done turn held for the children (heldRes), nil for none,
+// and mirrors whether one is held under mu for openChildOf. It runs in the
+// loop.
+func (c *conv) hold(res *TurnResult) {
+	c.heldRes = res
+	c.mu.Lock()
+	c.holding = res != nil
+	c.mu.Unlock()
 }
 
 // publish records res as the conversation's last settled turn and reports
@@ -232,13 +249,15 @@ func (c *conv) publish(res TurnResult) {
 		c.update(func(rec *Record) {
 			settle()
 			rec.TurnOpen = false
-			if !toConv {
-				return
+			if toConv {
+				if waited = c.parentWaitTakes(res.mark); !waited {
+					id := newReportID()
+					rec.PendingReports = append(rec.PendingReports, PendingReport{ID: id, Result: res})
+					c.settledReport = id
+				}
 			}
-			if waited = c.parentWaitTakes(res.mark); !waited {
-				id := newReportID()
-				rec.PendingReports = append(rec.PendingReports, PendingReport{ID: id, Result: res})
-				c.settledReport = id
+			if parent != nil {
+				rec.LastTurn = &PendingReport{ID: c.settledReport, Result: res}
 			}
 		})
 	}

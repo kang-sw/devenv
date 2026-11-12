@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsdashboard"
+	"github.com/kang-sw/devenv/internal/wsinbox"
 )
 
 // reports collects Options.Report's calls.
@@ -347,5 +348,46 @@ func TestPiVersionRunsPi(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	if _, err := PiVersion(context.Background()); err == nil {
 		t.Fatalf("a missing pi fails")
+	}
+}
+
+// TestCommandTurnDoesNotAnswerAWaitForTheTextBehindIt: a leading slash
+// command drained with a sent message runs as its own turn, which covers
+// none of that message: the wait for it takes the text's turn.
+func TestCommandTurnDoesNotAnswerAWaitForTheTextBehindIt(t *testing.T) {
+	h, _ := spawnHarness(t)
+	id := h.spawn("first", leadParent).ID
+	p := h.backend.waitProc(t, 0)
+	p.nextSent(t)
+	p.reply("one")
+	eventually(t, "the first turn settled", func() bool { return h.state(id).Status == StatusIdle })
+
+	inbox := wsinbox.Dir(wsdashboard.SessionDir(h.dir, id))
+	if _, _, err := wsinbox.Send(inbox, wsinbox.Entry{Command: &wsinbox.Command{Name: "compact"}}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.runner.Send(id, "the text"); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan TurnResult, 1)
+	go func() {
+		res, _ := h.runner.Wait(context.Background(), id, 5*time.Second)
+		done <- res
+	}()
+	if got := p.nextSent(t); got != "/compact" {
+		t.Fatalf("the command's turn = %q", got)
+	}
+	p.reply("compacted")
+	select {
+	case res := <-done:
+		t.Fatalf("the command's turn answered the wait for the text: %+v", res)
+	case <-time.After(100 * time.Millisecond):
+	}
+	if got := p.nextSent(t); got != "the text" {
+		t.Fatalf("the text's turn = %q", got)
+	}
+	p.reply("answered")
+	if res := <-done; res.Message != "answered" {
+		t.Fatalf("the wait takes the text's turn: %+v", res)
 	}
 }

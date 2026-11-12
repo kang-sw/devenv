@@ -109,6 +109,12 @@ type Record struct {
 	// conversation and no turn has taken yet, oldest first: they go with
 	// its next turn, as a lead's claimed Mail does.
 	Reports []string `json:"reports,omitempty"`
+	// LastTurn is the last reported turn of a conversation with a Parent,
+	// with the id of the pending report it made (empty when its parent's
+	// wait took it instead): the next daemon answers a wait with it at
+	// once, since the settles a wait reads are not persisted. Nil before
+	// the first report and while a done turn is held for the children.
+	LastTurn *PendingReport `json:"last_turn,omitempty"`
 }
 
 // PendingReport is a settled turn's report waiting for its conversation
@@ -144,6 +150,9 @@ type ParentRef struct {
 type QueuedInput struct {
 	Text    string           `json:"text,omitempty"`
 	Command *wsinbox.Command `json:"command,omitempty"`
+	// after is the Runner.Send count the drains before the one that took
+	// it covered (conv.drained); not persisted, as that count is not.
+	after uint64
 }
 
 // workDir is the directory the conversation's process runs in.

@@ -243,11 +243,8 @@ func (r *Runner) Start(notify func(replyID, project string)) {
 		} else {
 			// A lead whose process may still run under its holder rejoins
 			// it there, before the scan below replays the holder's records.
-			c := r.startConv(rec)
-			if rec.Parent != nil && rec.TurnOpen {
-				// The last daemon exited while this turn ran.
-				c.do(c.interrupted)
-			}
+			// A turn the last daemon's exit cut off settles there too.
+			r.startConv(rec)
 		}
 	}
 	// A child loaded before its parent found no parent to report to.
@@ -378,6 +375,12 @@ func (r *Runner) startConv(rec Record) *conv {
 		done:    make(chan struct{}),
 		settleC: make(chan struct{}),
 	}
+	if last := rec.LastTurn; last != nil {
+		// The send count starts again at 0, so a wait now takes the last
+		// reported turn at once, as it did before the restart.
+		c.settled, c.settledReport = last.Result, last.ID
+		c.settled.n, c.settled.mark = 1, 0
+	}
 	c.writeRegistration()
 	// A row a terminal login took while no daemon ran: the loop lets the
 	// session go before it takes anything else (settle), and nothing below
@@ -397,6 +400,12 @@ func (r *Runner) startConv(rec Record) *conv {
 	r.wg.Add(1)
 	go c.loop()
 	r.mu.Unlock()
+	if rec.Parent != nil && rec.TurnOpen {
+		// The last daemon exited while this turn ran. It settles as
+		// interrupted before the inbox signal below can start the next
+		// turn: settled after it, it would settle that new turn instead.
+		c.do(c.interrupted)
+	}
 	if rec.Lead && r.opts.Mail != nil && !foreign {
 		// Mail that waited while no daemon ran is found by the first check.
 		c.stopMail = r.opts.Mail.Watch(rec.Root, rec.WSKey, c.signalMail)
@@ -1059,13 +1068,17 @@ type conv struct {
 
 	// Turn settles (spawn.go). sends counts Runner.Send's messages and
 	// settled is the last settled turn, settleC closed and replaced at each
-	// settle and at close; all three under mu. turnMark is the sends the
-	// running turn's drain covered, and reply its last reply text; both
-	// loop-owned. quitting is set at the daemon's shutdown, whose cut-off
-	// turn the next daemon reports instead.
+	// settle and at close; voided is the sends no turn will take, since
+	// the page cancelled them before a drain (voidCancelled); all four
+	// under mu. drained is the sends the last drain covered, turnMark the
+	// sends the running turn's messages covered, and reply its last reply
+	// text; all three loop-owned. quitting is set at the daemon's
+	// shutdown, whose cut-off turn the next daemon reports instead.
 	sends    uint64
 	settled  TurnResult
 	settleC  chan struct{}
+	voided   uint64
+	drained  uint64
 	turnMark uint64
 	reply    string
 	quitting bool
@@ -1076,13 +1089,15 @@ type conv struct {
 
 	// The spawn tree (children.go). settledReport is the pending report id
 	// of the last settled turn, and parentWaits counts the conversation
-	// parent's waits by target; both under mu. Loop-owned: heldRes is a
+	// parent's waits by target, and holding mirrors heldRes != nil; all
+	// three under mu. Loop-owned: heldRes is a
 	// done turn held for its children's reports; steered are the
 	// children's reports steered into the running turn and not yet taken
 	// by it, steerSeq the steer commands the process was written and
 	// steerAnswers how many it answered.
 	settledReport string
 	parentWaits   map[uint64]int
+	holding       bool
 	heldRes       *TurnResult
 	steered       []steeredReport
 	steerSeq      int
@@ -1498,6 +1513,7 @@ func (c *conv) kick() {
 	// mail does.
 	reports := c.rec.Reports
 	if (err != nil || len(held) == 0) && len(mail) == 0 && len(c.rec.Queued) == 0 && len(reports) == 0 {
+		c.voidCancelled()
 		return
 	}
 	if c.proc == nil {
@@ -1522,18 +1538,21 @@ func (c *conv) kick() {
 	recs, _ := wsinbox.Drain(c.inbox)
 	covered := c.sends
 	c.mu.Unlock()
+	from := c.drained
+	c.drained = covered
 	queue := slices.Clone(c.rec.Queued)
 	for _, rec := range recs {
 		if cmd := rec.Entry.Command; cmd != nil {
 			cmd := *cmd
-			queue = append(queue, QueuedInput{Command: &cmd})
+			queue = append(queue, QueuedInput{Command: &cmd, after: from})
 		} else if text := strings.TrimSpace(rec.Entry.Text()); text != "" {
-			queue = append(queue, QueuedInput{Text: text})
+			queue = append(queue, QueuedInput{Text: text, after: from})
 		}
 	}
 	if len(queue) == 0 && len(mail) == 0 && len(reports) == 0 {
 		// A cancel took the message after the start: the process waits for
 		// input like after a turn.
+		c.voidCancelled()
 		c.armIdle()
 		return
 	}
@@ -1545,6 +1564,14 @@ func (c *conv) kick() {
 	cmd, parts, rest := nextTurn(queue)
 	if cmd != nil {
 		mail, reports = nil, nil
+	}
+	// The turn covers the sends its messages hold: all the drain took
+	// when nothing waits behind it, else only those before the drain that
+	// took the first input left waiting (a leading slash command's turn
+	// leaves the text drained with it for the next turn).
+	mark := covered
+	if len(rest) > 0 {
+		mark = rest[0].after
 	}
 	c.stopIdle()
 	c.setStatus(func() { c.turn, c.lastErr = true, "" })
@@ -1571,14 +1598,14 @@ func (c *conv) kick() {
 			c.sendRetried = true
 			c.signalInbox()
 		} else {
-			c.settleTurn(TurnFailed, c.lastError(), covered)
+			c.settleTurn(TurnFailed, c.lastError(), mark)
 		}
 		return
 	}
 	c.sendRetried = false
-	c.turnMark, c.reply = covered, ""
+	c.turnMark, c.reply = mark, ""
 	// This turn's settle supersedes a done turn held for the children.
-	c.heldRes = nil
+	c.hold(nil)
 	c.update(func(rec *Record) {
 		rec.Queued = rest
 		if len(mail) > 0 {
@@ -1605,6 +1632,25 @@ func (c *conv) kick() {
 	}
 	c.apply(wslive.Event{Kind: wslive.KindTurnStart, Origin: origin})
 	c.watched()
+}
+
+// voidCancelled counts the sends no drain took as voided when kick finds
+// nothing to send with no turn running: every send a drain took went in a
+// turn, so one the inbox no longer holds was cancelled from the page, and
+// no turn will ever cover it. A conversation parent whose done turn waited
+// for this child (openChildOf) is released. It runs in the loop.
+func (c *conv) voidCancelled() {
+	c.mu.Lock()
+	held, err := wsinbox.Held(c.inbox)
+	grew := err == nil && len(held) == 0 && c.sends > max(c.voided, c.settled.mark)
+	if grew {
+		c.voided = c.sends
+	}
+	parent := c.rec.Parent
+	c.mu.Unlock()
+	if grew && parent != nil && parent.Kind == ParentConversation {
+		c.r.releaseLater(parent.ReplyID)
+	}
 }
 
 // nextTurn splits queue at its first slash command: a command at the front
@@ -2145,7 +2191,7 @@ func (c *conv) beginTurn(quiet bool) {
 		// Not the runner's send: the turn holds no new message, so it
 		// keeps the last turn's mark.
 		c.reply = ""
-		c.heldRes = nil
+		c.hold(nil)
 		if c.rec.Parent != nil {
 			c.update(func(rec *Record) { rec.TurnOpen = true })
 		}
@@ -2578,7 +2624,7 @@ func (c *conv) close() {
 		c.update(func(rec *Record) { rec.Mail, rec.Reports = nil, nil })
 	}
 	c.r.revokeToken(c.rec.ReplyID)
-	c.heldRes = nil
+	c.hold(nil)
 	c.dropHeld()
 	c.live.setAdapter("")
 	c.writeRegistration()

@@ -569,7 +569,11 @@ the daemon's exit cut off, which the record's `turn_open` marks, settled
 when the next daemon loads it). A settle of a conversation with a parent
 goes to the runner's `Options.Report`; closing one settles nothing.
 `Runner.Wait` waits for a turn that took every message sent before the
-wait; `Runner.Watch` reports each change of a conversation with a parent.
+wait (a message the page cancelled before a drain counts for no turn, and
+a slash command's turn covers none of the text drained behind it); the
+last reported turn is kept in the record (`last_turn`), so after a daemon
+restart a wait on a conversation that settled before it answers at once.
+`Runner.Watch` reports each change of a conversation with a parent.
 The built-in `pi-worker` profile is Pi's coding tools plus ws's
 `git.status`, `git.diff`, `git.log`, `git.merge_base`, `git.commit`, and the
 six `pi.*` tools, with no instruction file. A spawn records its `tier`
@@ -635,14 +639,18 @@ owns the whole tree:
   once: when the parent is idle or its process stopped, or when the steer
   was refused or the run ended before taking it (`clear_queue` then drops
   it from Pi's queue). A parent blocked in `pi.wait` on that child takes
-  the turn as the wait's answer instead, with nothing steered. A report to
-  a Claude lead still goes by mail.
+  the turn as the wait's answer instead, with nothing steered; a wait on a
+  turn whose report was already handed over answers with its status alone
+  (`delivered: true`, no message). A report to a Claude lead still goes by
+  mail.
 - **Holds.** A worker's done turn is not reported upstream (no report, no
   wait answer) while a child of its own is open: from a message it was sent
   until its report has reached the worker, or it closes. A failed or
   interrupted turn goes up at once. Pending and kept reports are in the
   records, so a daemon restart delivers them; a child the restart
-  interrupted reports that, which resumes its parent.
+  interrupted reports that, which resumes its parent. The interrupted turn
+  settles before the restart sends the input the record kept for the next
+  turn, so that next turn stays open.
 - **Close.** Closing a conversation closes its open descendants first,
   deepest first. A process stop (the stop route, an idle stop, a settings
   change) does not cascade, and a child's report resumes the stopped
