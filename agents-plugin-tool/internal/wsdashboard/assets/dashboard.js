@@ -454,8 +454,11 @@
     var el = region(name);
     if (!el) return;
     var board = name === "board";
-    if (el.getAttribute("data-h") === hash) { if (board) deferred = null; return; }
+    if (el.getAttribute("data-h") === hash) { if (board) deferred = null; if (name === "rail") railHeld = null; return; }
     if (board && editing()) { deferred = { hash: hash, html: html }; return; }
+    // A rail swap waits while a row is dragged in the rail, and lands when
+    // the drag ends (rdEnd).
+    if (name === "rail" && rdrag && rdrag.on) { railHeld = { hash: hash, html: html }; return; }
     if (name === "head") {
       if (labelEditing()) { headHeld = { hash: hash, html: html }; return; }
       headHeld = null;
@@ -4981,15 +4984,20 @@
 
   // --- session rail ------------------------------------------------------------
   // The rail (r-rail) is one render shared by every session page: the page
-  // marks its own row, pins the starred rows, and collapses the workspaces
-  // the user collapsed (rail.js keeps those in storage), and opens the add
-  // popovers (the next block). From 1600px the
+  // marks its own row, pins the starred rows, puts the sessions and
+  // workspaces in the order the user dragged them to, and collapses the
+  // workspaces the user collapsed (rail.js keeps those in storage), and
+  // opens the add popovers (the blocks after the drag's). From 1600px the
   // rail is a column; below it the top-left arrow slides it in over the
   // page, and Esc, the scrim, or picking a session closes it. The arrow
   // stays a link to the sessions index for a modified click.
   var railEl = $("rail"), railBtn = $("railbtn"), rscrim = $("rscrim"), WsRail = window.WsRail;
   var railStore = { load: load, save: save };
   var starSet = WsRail ? WsRail.stars(railStore) : null, colSet = WsRail ? WsRail.collapsed(railStore) : null;
+  var sessOrder = WsRail ? WsRail.sessionOrder(railStore) : null, wsOrd = WsRail ? WsRail.wsOrder(railStore) : null;
+  // rdrag is the press or drag in the rail (the drag block below), railHeld
+  // the rail swap held back while it drags.
+  var rdrag = null, railHeld = null;
   var RAIL_WIDE = window.matchMedia ? window.matchMedia("(min-width: 1600px)") : null;
   var RAIL_SCROLL_KEY = "ws.dashboard.railscroll";
   // rp is the open rail popover (the next blocks): its controller P, kind,
@@ -5012,11 +5020,14 @@
   function railScrollTop() { var l = $("rlist"); return l ? l.scrollTop : null; }
   function railScrollTo(top) { var l = $("rlist"); if (l && top !== null && top !== undefined && l.scrollTop !== top) l.scrollTop = top; }
   // railMarks applies the page's marks to the rail as rendered: after
-  // load and after every rail swap.
+  // load and after every rail swap. The drag order applies to the live
+  // rows; the ended fold's keep the server's order.
   function railMarks() {
     var r = region("rail");
     if (!r || !WsRail) return;
-    q(".rsessions", r).forEach(function (box) { WsRail.pin(box, starSet); });
+    var order = sessOrder.list(), list = $("rlist");
+    q(".rsessions", r).forEach(function (box) { WsRail.pin(box, starSet, box.parentNode.closest(".rended") ? null : order); });
+    if (list) WsRail.arrange(list, wsOrd.list());
     WsRail.markCurrent(q(".rs", r), rid);
     WsRail.markRevive(q(".rs", r), revBusy);
     q(".rws", r).forEach(function (ws) {
@@ -5104,6 +5115,156 @@
     railMarks();
     if (isFinite(savedRailTop)) railScrollTo(savedRailTop);
     railOpen(false);
+  }
+
+  // --- rail drag: sessions within their group, workspaces among themselves ---
+  // A live session row drags among the live rows of its own group (its
+  // worktree or folder workspace) on its side of the stars; a workspace
+  // section drags by its bar among the sections. A line shows where it
+  // lands, and the drop stores the group's new order (WsRail.sessionOrder,
+  // wsOrder), which railMarks applies after every swap. A press that never
+  // moves past RD_SLOP stays a click; a touch drags only after holding
+  // still for RD_HOLD, so a swipe still scrolls the list. No drag starts
+  // from a button in a row or bar (star, revive, +, forget); the bar's own
+  // toggle is the bar. The rows are links, whose native drag would take the
+  // pointer away, so it is cancelled.
+  var RD_SLOP = 5, RD_HOLD = 380, RD_EDGE = 28;
+  var rdragged = false, rdLineEl = null, rdRaf = 0;
+  function rdPeers(item) {
+    var ws = item.classList.contains("rws");
+    return Array.prototype.filter.call(item.parentNode.children, function (c) {
+      return ws ? c.classList.contains("rws") : c.classList.contains("rs") && !c.classList.contains("ended") && !!c.wsStar === !!item.wsStar;
+    });
+  }
+  function rdLine(box) {
+    if (!box) { if (rdLineEl) rdLineEl.hidden = true; return; }
+    if (!rdLineEl) {
+      rdLineEl = doc.body.appendChild(doc.createElement("div"));
+      rdLineEl.className = "rdrop";
+      rdLineEl.setAttribute("aria-hidden", "true");
+    }
+    rdLineEl.style.left = box.left + "px";
+    rdLineEl.style.width = box.width + "px";
+    rdLineEl.style.top = box.top + "px";
+    rdLineEl.hidden = false;
+  }
+  // rdOver places the drop at the pointer's y: before the first peer whose
+  // middle is below it, else after the last. A drop that would leave the
+  // item where it stands shows no line. Near the list's top or bottom edge
+  // the list scrolls, and keeps scrolling while the pointer stays there.
+  function rdOver(y) {
+    var d = rdrag, list = $("rlist");
+    if (!d || !d.on) return;
+    d.y = y;
+    var peers = rdPeers(d.item), at = peers.length, i;
+    for (i = 0; i < peers.length; i++) {
+      var r = peers[i].getBoundingClientRect();
+      if (y < r.top + r.height / 2) { at = i; break; }
+    }
+    var me = peers.indexOf(d.item);
+    d.noop = at === me || at === me + 1;
+    d.ref = at < peers.length ? peers[at] : peers[peers.length - 1];
+    d.after = at === peers.length;
+    var lr = list ? list.getBoundingClientRect() : null;
+    d.edge = lr ? (y < lr.top + RD_EDGE ? -1 : y > lr.bottom - RD_EDGE ? 1 : 0) : 0;
+    if (d.edge && !rdRaf) rdRaf = requestAnimationFrame(rdScroll);
+    if (d.noop) { rdLine(null); return; }
+    var rr = d.ref.getBoundingClientRect(), top = d.after ? rr.bottom : rr.top;
+    if (!d.after && at > 0) top = (peers[at - 1].getBoundingClientRect().bottom + rr.top) / 2;
+    if (lr && (top < lr.top || top > lr.bottom)) { rdLine(null); return; }
+    rdLine({ left: rr.left, width: rr.width, top: Math.round(top - 1) });
+  }
+  function rdScroll() {
+    rdRaf = 0;
+    var d = rdrag, list = $("rlist");
+    if (!d || !d.on || !d.edge || !list) return;
+    var was = list.scrollTop;
+    list.scrollTop += d.edge * 8;
+    if (list.scrollTop === was) return;
+    rdOver(d.y);
+  }
+  function rdStart(e) {
+    if (rdrag || !e.isPrimary || (e.button !== undefined && e.button !== 0)) return;
+    var t = e.target, b = t.closest && t.closest("button");
+    if (!t.closest || (b && !b.classList.contains("wstog"))) return;
+    var item = t.closest(".rs, .wsbar");
+    if (!item || !railEl.contains(item)) return;
+    if (item.classList.contains("wsbar")) item = item.closest(".rws");
+    else if (item.classList.contains("ended") || item.parentNode.closest(".rended")) return;
+    if (!item || rdPeers(item).length < 2) return;
+    rdrag = { item: item, id: e.pointerId, x0: e.clientX, y0: e.clientY, y: e.clientY, on: false, touch: e.pointerType === "touch", timer: 0, ref: null, after: false, noop: true, edge: 0 };
+    if (rdrag.touch) rdrag.timer = setTimeout(function () { if (rdrag && !rdrag.on) rdBegin(); }, RD_HOLD);
+  }
+  function rdBegin() {
+    var d = rdrag;
+    if (!d.item.isConnected) { rdrag = null; return; }
+    d.on = true;
+    try { d.item.setPointerCapture(d.id); } catch (x) { /* no capture: the moves still land on the document */ }
+    d.item.classList.add("rdrag");
+    root.classList.add("rdragging");
+    var sel = window.getSelection && window.getSelection();
+    if (sel && sel.removeAllRanges) sel.removeAllRanges();
+    rdOver(d.y);
+  }
+  function rdMove(e) {
+    var d = rdrag;
+    if (!d || e.pointerId !== d.id) return;
+    // A mouse move with the button up is a release this page never heard.
+    if (e.pointerType === "mouse" && e.buttons !== undefined && (e.buttons & 1) === 0) { rdEnd(null); return; }
+    if (!d.on) {
+      if (Math.abs(e.clientX - d.x0) <= RD_SLOP && Math.abs(e.clientY - d.y0) <= RD_SLOP) return;
+      // A touch that moves before its hold is a scroll.
+      if (d.touch) { rdEnd(null); return; }
+      d.y = e.clientY;
+      rdBegin();
+      if (!rdrag) return;
+    }
+    e.preventDefault();
+    rdOver(e.clientY);
+  }
+  // rdEnd ends the press or drag; only a release drops (a cancel, or a
+  // release this page never heard, leaves the rail as it stood). A drag's
+  // click is swallowed (the capture listener below), and the rail swap
+  // held during it lands.
+  function rdEnd(e) {
+    var d = rdrag;
+    if (!d || (e && e.pointerId !== d.id)) return;
+    rdrag = null;
+    clearTimeout(d.timer);
+    if (!d.on) return;
+    d.item.classList.remove("rdrag");
+    root.classList.remove("rdragging");
+    rdLine(null);
+    rdragged = true;
+    setTimeout(function () { rdragged = false; }, 0);
+    if (e && e.type === "pointerup" && !d.noop && d.item.isConnected && WsRail.drop(d.item, d.ref, d.after)) rdSave(d.item);
+    var h = railHeld;
+    railHeld = null;
+    if (h) swap("rail", h.hash, h.html);
+    else railMarks();
+  }
+  function rdSave(item) {
+    var r = region("rail");
+    if (!r) return;
+    function rid(c) { return c.getAttribute("data-rid") || ""; }
+    if (item.classList.contains("rws")) {
+      var paths = q(".rws", r).map(function (w) { return w.getAttribute("data-ws") || ""; });
+      wsOrd.place(paths, paths);
+      return;
+    }
+    var group = Array.prototype.filter.call(item.parentNode.children, function (c) { return c.classList.contains("rs") && !c.classList.contains("ended"); });
+    sessOrder.place(group.map(rid), q(".rs", r).map(rid));
+  }
+  if (railEl && WsRail) {
+    railEl.addEventListener("pointerdown", rdStart);
+    doc.addEventListener("pointermove", rdMove);
+    doc.addEventListener("pointerup", rdEnd);
+    doc.addEventListener("pointercancel", rdEnd);
+    railEl.addEventListener("click", function (e) { if (rdragged) { e.preventDefault(); e.stopPropagation(); } }, true);
+    railEl.addEventListener("dragstart", function (e) { if (e.target.closest && e.target.closest(".rs, .wsbar")) e.preventDefault(); });
+    // A held touch is a drag, not a scroll or the long-press menu.
+    railEl.addEventListener("touchmove", function (e) { if (rdrag && rdrag.on) e.preventDefault(); }, { passive: false });
+    railEl.addEventListener("contextmenu", function (e) { if (rdrag && rdrag.touch) e.preventDefault(); });
   }
 
   // --- rail popovers: add workspace, add worktree, forget ----------------------

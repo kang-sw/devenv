@@ -109,6 +109,78 @@ stars.toggle("r1");
 check("stars persist", R.stars(ss).has("r1"), true);
 check("collapsed workspaces persist", [R.collapsed(ss).toggle("/w/repo"), R.collapsed(ss).has("/w/repo")], [true, true]);
 
+// drag order: a group's live rows follow the stored order, a session new
+// since the last drag on top, stars still first with the order inside each
+// part; the ended fold's rows keep the server's order; stale ids are pruned
+// on the next save; a drop never leaves its group or its side of the stars.
+function group(ids, ended) {
+  var b = new El("rsessions");
+  ids.forEach(function (id) { b.appendChild(row(id)); });
+  if (ended) {
+    var f = new El("rended"), inner = new El("rsessions");
+    ended.forEach(function (id) { var r = row(id); r.classList.add("ended"); inner.appendChild(r); });
+    f.appendChild(inner); b.appendChild(f);
+    b.inner = inner;
+  }
+  return b;
+}
+function ids(b) { return b.children.map(function (c) { return c.getAttribute("data-rid") || c.getAttribute("data-ws") || c.className; }); }
+var os = memStore(), so = R.sessionOrder(os), none = R.stars(memStore());
+var ga = group(["a1", "a2", "a3"], ["e1", "e2"]), gb = group(["b1", "b2"]);
+R.pin(ga, none, so.list());
+check("no stored order keeps the server's", ids(ga), ["a1", "a2", "a3", "rended"]);
+check("drop moves a row within its group", R.drop(ga.children[2], ga.children[0], false), true);
+check("the row moved", ids(ga), ["a3", "a1", "a2", "rended"]);
+check("a drop into another group is refused", [R.drop(ga.children[0], gb.children[0], false), ids(ga), ids(gb)], [false, ["a3", "a1", "a2", "rended"], ["b1", "b2"]]);
+check("an ended row neither drags nor takes a drop", [R.drop(ga.inner.children[0], ga.inner.children[1], true), R.drop(ga.children[0], ga.inner.children[0], false)], [false, false]);
+check("a drop on itself is refused", R.drop(ga.children[0], ga.children[0], true), false);
+so.place(["a3", "a1", "a2"], ["a1", "a2", "a3", "b1", "b2", "e1", "e2"]);
+check("the group's order is stored", JSON.parse(os.load("ws.dashboard.railorder")), ["a3", "a1", "a2"]);
+so.place(["b2", "b1"], ["a1", "a2", "a3", "b1", "b2"]);
+check("another group's order joins it", JSON.parse(os.load("ws.dashboard.railorder")), ["a3", "a1", "a2", "b2", "b1"]);
+// A swap renders the server's order again; the stored order comes back.
+var ga2 = group(["a4", "a1", "a2", "a3"], ["e2", "e1"]);
+R.pin(ga2, none, so.list());
+R.pin(ga2.inner, none, null);
+check("after a swap: the new session on top, then the stored order", ids(ga2), ["a4", "a3", "a1", "a2", "rended"]);
+check("the ended rows keep the server's order", ids(ga2.inner), ["e2", "e1"]);
+var st2 = memStore(), sr = R.stars(st2);
+sr.toggle("a2"); sr.toggle("a1");
+var ga3 = group(["a4", "a1", "a2", "a3"]);
+R.pin(ga3, sr, so.list());
+check("stars first, the order inside each part", ids(ga3), ["a1", "a2", "a4", "a3"]);
+check("a drop across the stars is refused", [R.drop(ga3.children[3], ga3.children[0], false), ids(ga3)], [false, ["a1", "a2", "a4", "a3"]]);
+check("a drop inside the starred part", [R.drop(ga3.children[1], ga3.children[0], false), ids(ga3)], [true, ["a2", "a1", "a4", "a3"]]);
+so.place(["a4", "a1"], ["a1", "a4", "b1"]);
+check("stale ids are pruned on the next save", JSON.parse(os.load("ws.dashboard.railorder")), ["b1", "a4", "a1"]);
+check("a stale id in the stored order is ignored", (function () { var g = group(["a1", "a4"]); R.pin(g, none, ["gone", "a4", "a1"]); return ids(g); })(), ["a4", "a1"]);
+// Storage that throws: no order, nothing kept, the server's order.
+var boom = { load: function () { throw new Error("denied"); }, save: function () { throw new Error("denied"); } }, bo = R.sessionOrder(boom);
+check("a throwing store reads as no order", bo.list(), []);
+check("a throwing store keeps nothing and does not throw", bo.place(["a2", "a1"], ["a1", "a2"]), ["a2", "a1"]);
+var gt = group(["a1", "a2"]);
+R.pin(gt, none, bo.list());
+check("a throwing store leaves the server's order", ids(gt), ["a1", "a2"]);
+// Workspaces: the stored ones first in their order, the rest after in the
+// server's order; a section and a row never trade places.
+function wsList(paths) { var l = new El("rlist"); paths.forEach(function (p) { l.appendChild(new El("rws", { "data-ws": p })); }); return l; }
+var wo = R.wsOrder(os), wl = wsList(["/a", "/b", "/c"]);
+R.arrange(wl, wo.list());
+check("no workspace order keeps the server's", ids(wl), ["/a", "/b", "/c"]);
+check("a workspace drops among the workspaces", [R.drop(wl.children[2], wl.children[0], false), ids(wl)], [true, ["/c", "/a", "/b"]]);
+check("a workspace does not drop on a row", R.drop(wl.children[0], (function () { var r = row("x"); wl.appendChild(r); return r; })(), false), false);
+wl.children.pop().parentNode = null;
+wo.place(ids(wl), ids(wl));
+var wl2 = wsList(["/a", "/b", "/c", "/d", "/0"]);
+R.arrange(wl2, wo.list());
+check("unknown workspaces go after the ordered ones, in server order", ids(wl2), ["/c", "/a", "/b", "/d", "/0"]);
+check("the workspace order is its own", [JSON.parse(os.load("ws.dashboard.wsorder")), JSON.parse(os.load("ws.dashboard.railorder"))[0]], [["/c", "/a", "/b"], "b1"]);
+// settle leaves rows already in order where they stand.
+var gs = group(["s1", "s2"]), moved = 0, ib = gs.insertBefore;
+gs.insertBefore = function (c, r) { moved++; return ib.call(this, c, r); };
+R.pin(gs, none, null);
+check("rows already in order are not moved", moved, 0);
+
 // markCurrent marks only the viewed row.
 var rows = box.children.slice(0, 3);
 R.markCurrent(rows, "r2");
@@ -180,9 +252,11 @@ if (bad.length) console.log(bad.join("\n"));
 // TestRailScript runs rail.js under node: per-session drafts with their
 // cap, the stripping of lost image markers, the leave guard, starred-row
 // pinning and its undo, the persisted stars and collapsed workspaces, the
-// viewed row's mark, the add popovers' placement, branch filter, and
-// add-worktree request, the spawn request, the revive route and entry
-// mark, the hand-off notice, and an approval card's input preview.
+// drag order of the sessions and workspaces (its drops, storage, and
+// pruning), the viewed row's mark, the add popovers' placement, branch
+// filter, and add-worktree request, the spawn request, the revive route
+// and entry mark, the hand-off notice, and an approval card's input
+// preview.
 func TestRailScript(t *testing.T) {
 	data, err := dashboardFS.ReadFile("assets/rail.js")
 	if err != nil {
