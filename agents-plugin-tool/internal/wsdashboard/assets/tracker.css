@@ -152,7 +152,7 @@
    width (0 when it has none); the renderer sets --tkhw on the root to this row's
    width plus the 6px gap, so the host header can pad clear of both. */
 .tk.tk-drawer { position: fixed; top: 0; left: 0; right: 0; height: 0; z-index: 40; pointer-events: none;
-  --tktop: 48px; --tkh: 60vh; --tkext: var(--tkh); } /* the renderer sets --tktop (the header's bottom edge) and --tkh (the dragged height, else the content height, capped at 60vh); --tkext is the pointer's extent during a drag */
+  --tktop: 48px; --tkh: 60vh; --tkext: var(--tkh); } /* the renderer sets --tktop (the header's bottom edge) and --tkh (the one drawer height every store shares, capped at 60vh); --tkext is the pointer's extent during a drag */
 .tk .tk-dr-in { position: relative; max-width: var(--tkmaxw, 1680px); margin: 0 auto; }
 .tk .tk-dr-clip { position: absolute; top: var(--tktop); left: var(--dpad, 16px); right: var(--dpad, 16px); height: 0; overflow: hidden; pointer-events: auto; visibility: hidden; border-radius: 0 0 var(--wb-radius) var(--wb-radius); box-shadow: var(--wb-shadow-hi); transition: height .18s ease-out, visibility 0s linear .18s; }
 .tk.tk-drawer.open .tk-dr-clip { height: var(--tkext); visibility: visible; transition: height .18s ease-out, visibility 0s; }
@@ -189,12 +189,6 @@ body.tk-paged .tk-drawer { display: none; }
 .tk .tk-zones[data-layout="narrow"] { grid-template-columns: minmax(0, 1fr); }
 .tk .tk-col { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .tk .tk-col > .card { flex: 1 1 auto; min-height: 0; max-height: 100%; }
-/* fitDrawer: one synchronous layout at natural height, every cap lifted */
-.tk.tk-measure .tk-dr-sheet { height: auto; }
-.tk.tk-measure .tk-dr-body, .tk.tk-measure .tk-zones { flex: none; }
-.tk.tk-measure .tk-zones { grid-template-rows: auto; }
-.tk.tk-measure .tk-col > .card { max-height: none; }
-.tk.tk-measure .tk-col > .card > .cbody { overflow: visible; flex: none; }
 .tk .tk-title { display: flex; align-items: center; gap: 8px; margin: 0 2px 8px; font-size: 13px; color: var(--wb-muted-fg); }
 .tk .tk-title b { color: var(--wb-fg); font-size: 14px; }
 @media (max-width: 640px) {
