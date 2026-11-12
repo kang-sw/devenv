@@ -4,8 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"regexp"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -318,6 +322,81 @@ func stopChild(cmd *exec.Cmd, closeInput func() error, exited <-chan struct{}) {
 
 // lookPath resolves a harness command; a test replaces it.
 var lookPath = exec.LookPath
+
+// hostWindows gates the cmd-shim unwrap in harnessCommand; a test
+// replaces it.
+var hostWindows = runtime.GOOS == "windows"
+
+// harnessCommand resolves the program and leading arguments a harness
+// start runs: command when set, else name from PATH. On Windows an npm
+// cmd-shim (.cmd/.bat) is unwrapped to node and its script, because
+// Windows runs a .cmd through cmd.exe: the started PID would be cmd.exe's,
+// not the harness's, and a hosted session's host PID must be the harness
+// process itself (ws-mcp and the Pi extension compare it with their own
+// parent / own PID). Elsewhere a set command passes through untouched.
+func harnessCommand(command, name string) (string, []string, error) {
+	if command == "" || hostWindows {
+		if command == "" {
+			command = name
+		}
+		path, err := lookPath(command)
+		if err != nil {
+			return "", nil, err
+		}
+		command = path
+	}
+	if !hostWindows {
+		return command, nil, nil
+	}
+	switch strings.ToLower(filepath.Ext(command)) {
+	case ".cmd", ".bat":
+	default:
+		return command, nil, nil
+	}
+	text, err := os.ReadFile(command)
+	if err != nil {
+		return "", nil, fmt.Errorf("read %s: %w", command, err)
+	}
+	return cmdShimArgv(command, string(text), fileExists)
+}
+
+// fileExists reports whether path names an existing file.
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
+}
+
+// cmdShimLine is the launch line of an npm cmd-shim (npm's cmd-shim
+// generator): `"%_prog%"  "%dp0%\<script>" %*`, the script relative to the
+// shim's directory.
+var cmdShimLine = regexp.MustCompile(`(?m)"%_prog%"\s+"%dp0%\\([^"]+)"\s+%\*\s*$`)
+
+// cmdShimNode is the shim's node fallback, which names node as the program;
+// a shim for another interpreter does not have it.
+var cmdShimNode = regexp.MustCompile(`(?m)^\s*SET "_prog=node"\s*$`)
+
+// cmdShimArgv unwraps the npm cmd-shim at shim, whose content is text, to
+// the program and leading arguments it runs: node.exe beside the shim when
+// exists says it is there, else node from PATH, then the script. A .cmd that
+// is not a node cmd-shim is refused rather than run through cmd.exe.
+func cmdShimArgv(shim, text string, exists func(string) bool) (string, []string, error) {
+	m := cmdShimLine.FindStringSubmatch(text)
+	if m == nil || !cmdShimNode.MatchString(text) {
+		return "", nil, fmt.Errorf("%s is not an npm cmd-shim for node; a .cmd would run under cmd.exe, whose PID is not the harness's", shim)
+	}
+	dir := filepath.Dir(shim)
+	// %dp0% ends in a separator and the shim adds another; Join cleans both.
+	script := filepath.Join(dir, filepath.FromSlash(strings.ReplaceAll(m[1], `\`, "/")))
+	node := filepath.Join(dir, "node.exe")
+	if !exists(node) {
+		path, err := lookPath("node")
+		if err != nil {
+			return "", nil, fmt.Errorf("%s runs node, which is not beside it or on PATH: %w", shim, err)
+		}
+		node = path
+	}
+	return node, []string{script}, nil
+}
 
 // environ is the environment a child starts from; a test replaces it.
 var environ = os.Environ

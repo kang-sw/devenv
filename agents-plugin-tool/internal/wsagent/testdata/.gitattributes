@@ -1,0 +1,2 @@
+# A verbatim npm cmd-shim: its CRLF line endings are part of the fixture.
+*.cmd -text

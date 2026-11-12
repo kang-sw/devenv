@@ -333,13 +333,9 @@ func (b PiBackend) Start(ctx context.Context, spec StartSpec) (Process, error) {
 	if err := checkPiToolEntries(spec.Profile); err != nil {
 		return nil, err
 	}
-	command := b.Command
-	if command == "" {
-		path, err := lookPath("pi")
-		if err != nil {
-			return nil, fmt.Errorf("pi backend: %w", err)
-		}
-		command = path
+	command, pre, err := harnessCommand(b.Command, "pi")
+	if err != nil {
+		return nil, fmt.Errorf("pi backend: %w", err)
 	}
 	if err := os.MkdirAll(piDir(spec.Dir), 0o700); err != nil {
 		return nil, err
@@ -354,7 +350,7 @@ func (b PiBackend) Start(ctx context.Context, spec StartSpec) (Process, error) {
 			return nil, err
 		}
 	}
-	cmd := exec.Command(command, piArgs(spec, bridge)...)
+	cmd := exec.Command(command, append(pre, piArgs(spec, bridge)...)...)
 	cmd.Dir = spec.Root
 	cmd.Env = piEnv(spec.Env)
 	m := newPiMapper(spec)
@@ -368,18 +364,14 @@ func (b PiBackend) Start(ctx context.Context, spec StartSpec) (Process, error) {
 // startLead launches (or, with a holder to attach to, rejoins) the pi
 // process of a lead conversation.
 func (b PiBackend) startLead(spec StartSpec) (Process, error) {
-	command := b.Command
-	if command == "" {
-		path, err := lookPath("pi")
-		if err != nil {
-			return nil, fmt.Errorf("pi backend: %w", err)
-		}
-		command = path
+	command, pre, err := harnessCommand(b.Command, "pi")
+	if err != nil {
+		return nil, fmt.Errorf("pi backend: %w", err)
 	}
 	if err := os.MkdirAll(piDir(spec.Dir), 0o700); err != nil {
 		return nil, err
 	}
-	cmd := exec.Command(command, piLeadArgs(spec)...)
+	cmd := exec.Command(command, append(pre, piLeadArgs(spec)...)...)
 	cmd.Dir = spec.workDir()
 	cmd.Env = piLeadEnv(spec)
 	m := newPiMapper(spec)
