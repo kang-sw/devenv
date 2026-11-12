@@ -32,6 +32,10 @@ type HeldView struct {
 	Mentions []wsinbox.Mention
 	// Images are the entry's attached images.
 	Images []AttachmentView
+	// Command is a command entry's slash command; the bubble shows its
+	// typed line and offers no steer control, since a command waits for the
+	// turn end.
+	Command *wsinbox.Command
 }
 
 // Answers are the held message's chips and topic notes as the capsules a
@@ -146,7 +150,7 @@ type SentMark struct {
 func heldViews(held []wsinbox.Record, attachDir, replyID string) []HeldView {
 	out := make([]HeldView, 0, len(held))
 	for _, r := range held {
-		v := HeldView{ID: r.ID(), Steer: r.Entry.Steer, At: r.Entry.SentAt, Parts: r.Entry.Parts, Chips: r.Entry.Chips, Topics: r.Entry.Topics, Mentions: r.Entry.Mentions}
+		v := HeldView{ID: r.ID(), Steer: r.Entry.Steer, At: r.Entry.SentAt, Parts: r.Entry.Parts, Chips: r.Entry.Chips, Topics: r.Entry.Topics, Mentions: r.Entry.Mentions, Command: r.Entry.Command}
 		nums := r.Entry.Nums()
 		for i, path := range r.Entry.Images {
 			v.Images = append(v.Images, attachmentView(attachDir, replyID, nums[i], path))

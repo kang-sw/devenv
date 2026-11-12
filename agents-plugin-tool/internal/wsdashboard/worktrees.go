@@ -247,7 +247,7 @@ func (d *Daemon) handleWorktreeCleanup(w http.ResponseWriter, r *http.Request, r
 	}
 	lang, _ := requestLang(r)
 	raw, _ := json.Marshal(messageRequest{Text: wsi18n.T(lang, "worktree.cleanup.ask") + "\n\n" + pool.text(worktreeTextMax)})
-	status, answer := d.messageWrite(sessionInbox(d.dir, replyID), raw, now)
+	status, answer := d.messageWrite(sessionInbox(d.dir, replyID), replyID, raw, now)
 	d.inboxAnswered(w, s, status, answer)
 }
 

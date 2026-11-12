@@ -34,6 +34,11 @@ type dashboardInboxMessage struct {
 	Mentions []wsinbox.Mention `json:"mentions"`
 	// Interrupt marks an interrupt entry, which carries no text.
 	Interrupt bool `json:"interrupt,omitempty"`
+	// Command is a command entry's slash command ({name, args}), which the
+	// adapter runs natively; Text is then its typed line. A drained batch
+	// splits at a command: the messages before it reach the session first,
+	// then it runs, then the messages after it.
+	Command *wsinbox.Command `json:"command,omitempty"`
 }
 
 // sessionInboxDir is the board-answer inbox of the session behind
@@ -96,7 +101,7 @@ func (s *Server) handleDashboardInboxDrain(id json.RawMessage, args map[string]a
 			if mentions == nil {
 				mentions = []wsinbox.Mention{}
 			}
-			messages = append(messages, dashboardInboxMessage{ID: r.ID(), SentAt: e.SentAt, Text: e.Text(), Parts: parts, Chips: chips, Topics: topics, Mentions: mentions, Interrupt: e.Interrupt})
+			messages = append(messages, dashboardInboxMessage{ID: r.ID(), SentAt: e.SentAt, Text: e.Text(), Parts: parts, Chips: chips, Topics: topics, Mentions: mentions, Interrupt: e.Interrupt, Command: e.Command})
 		}
 		return toolJSONResponse(id, map[string]any{"messages": messages}, nil)
 	}
@@ -104,7 +109,8 @@ func (s *Server) handleDashboardInboxDrain(id json.RawMessage, args map[string]a
 }
 
 // formatDashboardInboxDrain is the compact text output: "inbox empty", or
-// "drained N" and one "message <id> <time>" block per message.
+// "drained N" and one "message <id> <time>" block per message, a command
+// entry's block headed "command" instead.
 func formatDashboardInboxDrain(records []wsinbox.Record) string {
 	if len(records) == 0 {
 		return "inbox empty\n"
@@ -116,7 +122,11 @@ func formatDashboardInboxDrain(records []wsinbox.Record) string {
 		if r.Entry.SentAt > 0 {
 			sent = " " + time.UnixMilli(r.Entry.SentAt).UTC().Format(time.RFC3339)
 		}
-		fmt.Fprintf(&b, "message %s%s\n%s\n\n", r.ID(), sent, r.Entry.Text())
+		head := "message"
+		if r.Entry.Command != nil {
+			head = "command"
+		}
+		fmt.Fprintf(&b, "%s %s%s\n%s\n\n", head, r.ID(), sent, r.Entry.Text())
 	}
 	return b.String()
 }

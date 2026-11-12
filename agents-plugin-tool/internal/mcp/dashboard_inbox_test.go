@@ -401,3 +401,43 @@ func TestDashboardInboxDrainRefusesSteerOnlyWithInterruptOnly(t *testing.T) {
 		t.Fatalf("a refused drain took %v", names)
 	}
 }
+
+// TestDashboardInboxDrainCarriesACommandInOrder pins the command field: a
+// drained command entry keeps its place among the messages, its text is the
+// typed line, its JSON record carries {name, args}, a text message carries
+// no command field, and the text output heads its block "command".
+func TestDashboardInboxDrainCarriesACommandInOrder(t *testing.T) {
+	f := newLiveFixture(t, true)
+	dir := f.inboxDir(f.replyA)
+	sendBoard(t, dir, "A")
+	if _, _, err := wsinbox.Send(dir, wsinbox.Entry{Command: &wsinbox.Command{Name: "compact", Args: "keep the plan"}}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	sendBoard(t, dir, "B")
+	out := callToolWithKey(t, f.server, 3, f.keyA, dashboardInboxDrainTool, map[string]any{"format": "json"})
+	var got struct {
+		Messages []struct {
+			Text    string           `json:"text"`
+			Command *wsinbox.Command `json:"command"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("json: %v\n%s", err, out)
+	}
+	if len(got.Messages) != 3 || got.Messages[0].Text != "A" || got.Messages[0].Command != nil ||
+		got.Messages[1].Command == nil || *got.Messages[1].Command != (wsinbox.Command{Name: "compact", Args: "keep the plan"}) || got.Messages[1].Text != "/compact keep the plan" ||
+		got.Messages[2].Text != "B" || got.Messages[2].Command != nil {
+		t.Fatalf("messages = %s", out)
+	}
+	if strings.Count(out, `"command"`) != 1 {
+		t.Fatalf("command field outside the command record: %s", out)
+	}
+
+	if _, _, err := wsinbox.Send(dir, wsinbox.Entry{Command: &wsinbox.Command{Name: "context"}}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	out = callToolWithKey(t, f.server, 4, f.keyA, dashboardInboxDrainTool, nil)
+	if !strings.HasPrefix(out, "drained 1\ncommand ") || !strings.HasSuffix(out, "\n/context\n\n") {
+		t.Fatalf("command drain text = %q", out)
+	}
+}
