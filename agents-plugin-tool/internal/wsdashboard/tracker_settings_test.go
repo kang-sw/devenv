@@ -102,3 +102,31 @@ func TestTrackerLabelsInTheDashboard(t *testing.T) {
 		}
 	}
 }
+
+// TestTrackerPriorityDialogRows pins the priority-levels dialog: labels
+// count from 1 while the radio value and field name stay 0-based, and
+// typing into the last row appends the next blank row up to the 9 cap.
+func TestTrackerPriorityDialogRows(t *testing.T) {
+	data, err := dashboardFS.ReadFile("assets/tracker.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	js := string(data)
+	row := regexp.MustCompile(`function prioRow\(pi, name, checked\) \{\n[\s\S]*?\n  \}\n`).FindString(js)
+	if row == "" {
+		t.Fatal("tracker.js holds no prioRow")
+	}
+	if n := strings.Count(row, "pi + 1)"); n != 4 {
+		t.Errorf("prioRow numbers %d label sites from 1, want 4", n)
+	}
+	for _, want := range []string{`value="' + pi + '"`, `name="pname' + pi + '"`} {
+		if !strings.Contains(row, want) {
+			t.Errorf("prioRow lacks the 0-based %q", want)
+		}
+	}
+	for _, want := range []string{"var PRIO_MAX = 9;", "Math.min(PRIO_MAX, pn.length + 2)", `form[data-kind="sprio"]`, "if (e.target.name !== 'pname' + (pn - 1) || pn >= PRIO_MAX) return;", "prioRow(pn, '', false)"} {
+		if !strings.Contains(js, want) {
+			t.Errorf("tracker.js lacks %q", want)
+		}
+	}
+}
