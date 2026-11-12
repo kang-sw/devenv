@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 6c103b7a493e1790
 sage-review-completeness-reviewed: 6c103b7a493e1790
+completed: 2026-11-13
 ---
 
 # ws MCP pi.* recursion (child 1b)
@@ -280,3 +281,57 @@ Verification:
   Decision 8 text and `## Child Tickets` are updated in the same branch.
 - A real run: a Claude lead spawns a Pi worker that spawns a Pi grandchild;
   the grandchild's report reaches the worker, the worker's reaches the lead.
+
+### Result (7b1e9f7ef) - 2026-11-13
+
+Landed (e09e620a6, 1d3fe308a, 39379cfe4, 7b1e9f7ef):
+- `internal/wsagent/children.go`: capability token (`WS_MCP_PI_TOKEN`,
+  `WS_MCP_PI_ENDPOINT`) for a `Runner.Spawn` conversation with a parent, a
+  recorded tier, and a `pi.*` profile tool, drawn per process start, never
+  persisted, void on process end or close; loopback-only
+  `POST /agents/by-token/<op>` (spawn, list, send, stop, transcript, wait)
+  scoped to the holder's children; `ParentConversation` parent kind; depth
+  cap 2; tier capped at the holder's (tierless holder refused); steer or
+  prompt delivery of `pending_reports`; held upstream report while a child
+  is open; deepest-first close cascade.
+- `spawn.go`/`runner.go`/`pi.go`/`record.go`: `SpawnSpec.Tier`,
+  `Record.tier`/`pending_reports`/`reports`, `State.Tier`; settle split into
+  hold and `publish`; steer answers counted per process so `clear_queue`
+  runs only after every steer is answered; reports joined into the next
+  turn like held mail; `pi-worker` lists the six `pi.*` tools.
+- `internal/mcp/pi_forward.go` + keyed gate: a runner-less ws-mcp with the
+  token and endpoint lists `pi.*` with worker descriptions and forwards to
+  the token route; the delegate key passes the gate for `pi.*` only. The
+  daemon's `ChildCheck` is `mcp.PiReady`; the tier refusal and report text
+  moved to `wsagent` (`PiTierRefusal`, `ReportText`).
+- `ws-mcp.md` spawn-tree block and env rows; epic Decision 8 amended and
+  `## Child Tickets` updated.
+
+Verification: `go test -count=1 ./...` in `agents-plugin-tool` passes every
+package except `cmd/ws-mcp` `TestHostedConnectionSeeingALANChangeReplacesTheDaemon`,
+which fails identically on base e2ac4f603 (the test expects git's `master`;
+this machine's `init.defaultBranch` is `main`). After the review fixes:
+`go test -race ./internal/wsagent/` and `go test -run 'TestPi|Forward'
+./internal/mcp/` pass. New tests: `children_test.go` (token issue and
+voiding, parent and tier recording, forged/missing/stale/remote refusals,
+own-children scope, depth and tier caps, steer mid-turn, prompt when idle,
+steer fallback, parent wait as delivery, failed turn not held, restart
+survival, cascade order, stop not cascading, closed parent keeps the
+report, release on child close, a settle right after a wait's check),
+`pi_forward_test.go`, and Pi mapper/process steer tests. The real
+Claude lead -> Pi worker -> Pi grandchild run was not performed.
+
+Decisions:
+- Kept branch `impl/develop/pi-spawn-recursion` (lead-named) over the
+  route's `impl/develop/musky-grunt-pep`.
+- Compatibility T0: new optional record fields, a new parent kind, a new
+  route, and new env names; nothing renamed or removed.
+- Lite review: two Important findings fixed in 7b1e9f7ef (a wait's
+  lost wakeup between its check and its channel read; untested Pi-side
+  steer mapping). Minor, not fixed: a report steered into a running Pi
+  turn lives only in memory and Pi's queue until taken, so a daemon exit in
+  that window loses it.
+- Known limits: after a restart a child's in-memory send count resets, so
+  a held-but-undrained inbox message does not keep the parent's report
+  held; a parent wait that starts after a report was delivered returns
+  that turn again.

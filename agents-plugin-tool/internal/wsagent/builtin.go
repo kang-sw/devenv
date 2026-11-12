@@ -68,9 +68,11 @@ const PiWorkerProfile = "pi-worker"
 var PiWorkerTools = []string{"read", "bash", "edit", "write", "grep", "find", "ls"}
 
 // PiWorkerWSTools are the ws tools the pi-worker profile allows: the commit
-// an implementation prompt ends with, and the git reads a commit and a
-// diff review need. No pi.* tool: a worker spawns no worker of its own.
-var PiWorkerWSTools = []string{"git.status", "git.diff", "git.log", "git.merge_base", "git.commit"}
+// an implementation prompt ends with, the git reads a commit and a diff
+// review need, and the pi.* tools a spawning playbook needs. A worker's
+// pi.* calls go to the daemon on its capability token (children.go), which
+// caps the spawn tree's depth and tier.
+var PiWorkerWSTools = []string{"git.status", "git.diff", "git.log", "git.merge_base", "git.commit", "pi.spawn", "pi.send", "pi.list", "pi.stop", "pi.transcript", "pi.wait"}
 
 //go:embed instructions/tracker-support.md
 var trackerSupportText string
@@ -121,7 +123,7 @@ func BuiltinProfiles() map[string]json.RawMessage {
 		out[ProfilePrefix+name] = raw
 	}
 	raw, err := json.Marshal(Profile{
-		Description: "Pi subagent (pi): a headless Pi worker a session spawns with a prompt and steers by its id; it reads, edits, and runs commands in its working directory, and commits through ws.",
+		Description: "Pi subagent (pi): a headless Pi worker a session spawns with a prompt and steers by its id; it reads, edits, and runs commands in its working directory, commits through ws, and may spawn Pi subagents of its own within the daemon's depth and tier caps.",
 		Backend:     BackendPi,
 		Tools:       PiWorkerTools,
 		WSTools:     PiWorkerWSTools,

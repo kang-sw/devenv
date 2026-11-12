@@ -63,7 +63,7 @@ func TestBuiltinSupportProfilesResolve(t *testing.T) {
 // TestBuiltinPiWorkerProfileResolves: the pi-worker profile runs Pi with
 // its built-in coding tools and the ws commit and git reads, composes no
 // instruction text (the spawner's prompt is the first message), stays off
-// the session index, and allows no pi.* tool.
+// the session index, and allows the pi.* tools (a spawning playbook's).
 func TestBuiltinPiWorkerProfileResolves(t *testing.T) {
 	opts := testConfig(t)
 	root := t.TempDir()
@@ -81,10 +81,15 @@ func TestBuiltinPiWorkerProfileResolves(t *testing.T) {
 	if !slices.Contains(p.WSTools, "git.commit") || !slices.Contains(p.WSTools, "git.diff") {
 		t.Errorf("pi-worker ws_tools %v lack the commit or the diff read", p.WSTools)
 	}
+	var pi []string
 	for _, tool := range p.WSTools {
 		if strings.HasPrefix(tool, "pi.") {
-			t.Errorf("pi-worker allows %s; a worker spawns no worker", tool)
+			pi = append(pi, tool)
 		}
+	}
+	slices.Sort(pi)
+	if want := []string{"pi.list", "pi.send", "pi.spawn", "pi.stop", "pi.transcript", "pi.wait"}; !slices.Equal(pi, want) {
+		t.Errorf("pi-worker pi.* tools = %v, want %v", pi, want)
 	}
 	if p.Instructions != "" || p.InstructionsPath(root) != "" || p.ListInIndex || p.Skills || len(p.MCPServers) != 0 || len(p.Plugins) != 0 {
 		t.Errorf("pi-worker should append no instructions, load no server, plugin, or skill, and stay off the index: %+v", p)

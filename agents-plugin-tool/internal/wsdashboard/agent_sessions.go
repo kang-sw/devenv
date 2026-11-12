@@ -29,6 +29,13 @@ type AgentHost interface {
 	Close()
 }
 
+// AgentEndpointHost is an AgentHost whose conversations call back on the
+// daemon's routes: the daemon gives it its loopback base URL
+// ("http://127.0.0.1:<port>") before Start.
+type AgentEndpointHost interface {
+	SetEndpoint(baseURL string)
+}
+
 // AgentRoutePrefix is where the daemon mounts AgentHost.Handler.
 const AgentRoutePrefix = "/agents"
 

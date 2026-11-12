@@ -571,8 +571,9 @@ goes to the runner's `Options.Report`; closing one settles nothing.
 `Runner.Wait` waits for a turn that took every message sent before the
 wait; `Runner.Watch` reports each change of a conversation with a parent.
 The built-in `pi-worker` profile is Pi's coding tools plus ws's
-`git.status`, `git.diff`, `git.log`, `git.merge_base`, and `git.commit`,
-with no instruction file.
+`git.status`, `git.diff`, `git.log`, `git.merge_base`, `git.commit`, and the
+six `pi.*` tools, with no instruction file. A spawn records its `tier`
+(`SpawnSpec.Tier`, `Record.tier`; an unknown name is refused).
 
 The `pi.*` tools (`internal/mcp/pi_tools.go`, lead-only) put this on a
 session: `pi.spawn {prompt, tier, cwd?, label?}` (model and effort from the
@@ -595,6 +596,57 @@ session the server creates, or one an adapter resets, gets its open
 children's rows again, so they come back after a reconnect. A session whose
 dashboard feed is off gets no row. The agents panel shows a running Pi row
 with a blinking `pi` badge in place of the pulse.
+
+A spawned Pi worker spawns Pi subagents of its own through the daemon
+(`internal/wsagent/children.go`, `internal/mcp/pi_forward.go`); the daemon
+owns the whole tree:
+
+- **Token.** A conversation `Runner.Spawn` started with a parent and a
+  recorded tier, whose profile allows a `pi.*` tool, gets a capability token
+  (`WS_MCP_PI_TOKEN`) and the daemon's loopback base URL
+  (`WS_MCP_PI_ENDPOINT`, set by `ws-mcp dashboard` through
+  `Runner.SetEndpoint` before `Start`) in its attached ws-mcp's environment.
+  The token is drawn at every process start, never written to disk, and void
+  once that process ends or the conversation closes. A conversation opened
+  through `POST /agents`, or spawned with no tier, gets none. Its session key
+  stays a parent-less delegate key: the token authorizes `pi.*` alone, so
+  every other lead-only tool stays refused.
+- **Forwarding.** A ws-mcp with no runner and both variables set lists the
+  `pi.*` tools with the worker's descriptions and forwards each call to
+  `POST /agents/by-token/<op>` (`spawn`, `list`, `send`, `stop`,
+  `transcript`, `wait`) with the token as a bearer credential; the keyed
+  gate lets a delegate key through for `pi.*` there only. The route answers
+  only this machine (404 otherwise) and 401 for a missing, forged, or void
+  token, and scopes every op to the holder's own children (404 for any other
+  id). `dashboard.pi_spawn_enabled` is checked only at the root, on the
+  lead's `pi.spawn`; the Pi version is the daemon's check on every call
+  (`Options.ChildCheck`, the version probed once per daemon process). The
+  worker's own server checks neither.
+- **Caps.** A spawn records the holder as the child's parent (`parent.kind:
+  "conversation"`). The lead is depth 0, its Pi worker depth 1, and that
+  worker's child depth 2, which is refused a spawn with the cap named. The
+  child's tier resolves in the `pi` bucket alone and may not rank above the
+  holder's own (`small` < `medium` < `large`); a holder with no recorded tier
+  is refused.
+- **Reports.** A child's settled turn waits in its record
+  (`pending_reports`) until the runner hands it to the parent. A running
+  parent turn gets it as a Pi `steer`. Otherwise it is kept in the parent's
+  record (`reports`) and sent as the parent's next turn, which starts at
+  once: when the parent is idle or its process stopped, or when the steer
+  was refused or the run ended before taking it (`clear_queue` then drops
+  it from Pi's queue). A parent blocked in `pi.wait` on that child takes
+  the turn as the wait's answer instead, with nothing steered. A report to
+  a Claude lead still goes by mail.
+- **Holds.** A worker's done turn is not reported upstream (no report, no
+  wait answer) while a child of its own is open: from a message it was sent
+  until its report has reached the worker, or it closes. A failed or
+  interrupted turn goes up at once. Pending and kept reports are in the
+  records, so a daemon restart delivers them; a child the restart
+  interrupted reports that, which resumes its parent.
+- **Close.** Closing a conversation closes its open descendants first,
+  deepest first. A process stop (the stop route, an idle stop, a settings
+  change) does not cascade, and a child's report resumes the stopped
+  parent. A report to a closed parent stays in the child's record.
 
 The runner also hosts lead sessions: a headless Claude Code or Pi process
 that loads the user's own harness setup (no profile allowlist, plugins, or
@@ -1227,6 +1279,8 @@ Current launcher inputs:
 | `WS_HOSTED_SESSION_ROW` | Absolute path of the hosted session's `registration.json`. Its `host_pid` is the one harness process the flag holds for: equal to the reader's harness PID, hosted; another nonzero PID, an ordinary session, silently (a nested harness, a CLI call from the session's shell); 0, absent, or unreadable, read again about every 100 ms for about 3 s, then an ordinary session with one warning. Unset (an older daemon, a stray flag) is not hosted. The harness PID is `WS_MCP_HARNESS_PID` for ws-mcp, the mod's own process (read as the parent of a host command) for Claude, and the extension's process for Pi. |
 | `WS_MCP_HARNESS_PID` | Set by the launcher on every start to its own parent PID, over any inherited value: the harness that started this ws-mcp. It reaches the runtime on both paths (the direct child's environment, and the hello's `env` for a daemon-hosted connection, so it is per caller). A ws-mcp started without the launcher has none and is never hosted; `ws-mcp dashboard` drops it, with the three `WS_HOSTED_SESSION*` variables, from its own environment at start, so the conversations it spawns inherit no session's. |
 | `WS_MCP_ALLOWED_TOOLS` | Comma list of ws tool names; when set, `tools/list` advertises and `tools/call` accepts only these. The agent runner sets it to a profile's ws tools. `tracker.show`, `tracker.ui`, and `git.search` are listed and callable only when it names them. |
+| `WS_MCP_PI_TOKEN` | Set by the agent runner on the ws-mcp of a spawned conversation that may spawn Pi subagents: its capability token for the daemon's `POST /agents/by-token/<op>` route, drawn at each process start and void when that process ends. With `WS_MCP_PI_ENDPOINT` and no runner of its own, this ws-mcp forwards `pi.*` to that route (see Dashboard daemon, the Pi spawn tree). Unset, `pi.*` is lead-only. |
+| `WS_MCP_PI_ENDPOINT` | Set beside `WS_MCP_PI_TOKEN`: the dashboard daemon's loopback base URL, for example `http://127.0.0.1:29417`. |
 | `WS_MCP_NAMESPACE` | User-facing MCP namespace text override; empty or unset defaults to `ws`. |
 | `WS_MCP_SETUP_TOOL` | Advertised setup tool name override; empty or unset defaults to `ws.setup`. |
 | `WS_MCP_CONFIG_MANIFESTS` | Adapter config key manifests, separated by the platform path-list separator (`:` POSIX, `;` Windows); `;` is accepted on every platform, which the static launcher configs use. Declared keys become `config.tune`-writable, cataloged by `config.list`, and typed in `config.get`; a rejected manifest is logged to stderr and listed by `config.list`. The ws and wsflow packages each ship their own `config-manifest.json` (namespace `claude.`; the same keys, differing only in `default`, pinned by `TestShippedClaudeManifestsDifferOnlyInDefaults`) and set it in both launch configs: `.mcp.json` (Codex) as `./config-manifest.json`, resolved against `cwd: "."` (the plugin root), and `.claude-plugin/plugin.json` as `${CLAUDE_PLUGIN_ROOT}/config-manifest.json`. Each package (ws, wsflow, Pi) also lists its `dashboard-config-manifest.json` (namespace `dashboard.`: `dashboard.enabled`, default on in every package; `dashboard.port`, default 29417; `dashboard.lan_enabled`, global-only and default off in every package) beside its own manifest; the Pi bridge joins the two with the platform separator. A path that does not resolve fails nothing: the keys stay undeclared, so check `config.list` after changing either. |
