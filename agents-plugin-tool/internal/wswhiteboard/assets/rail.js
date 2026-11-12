@@ -177,9 +177,10 @@
     last = key;
     // The motion's reads are skipped when no capsule can move: the same
     // items in the same slots (a change of the stuck shadow or a "+N"
-    // count alone).
+    // count alone), and on a run that re-queried the board (fresh: a size
+    // changed), whose items moved under the rail rather than by a scroll.
     var member = s ? [inset, s.replyOff, names(s.up), names(s.down), names([s.cur])].join("|") : "";
-    var pre = motion() && member !== moved ? before(s) : null;
+    var pre = motion() && !fresh && member !== moved ? before(s) : null;
     moved = member;
     var bar = s && s.bar, shadow = s && s.stuck ? bar : null;
     if (stuck !== shadow) {
@@ -253,9 +254,14 @@
   // Capsules that stay in a stack slide from their old slot to their new
   // one. The copies stand in their edge's wrapper, out of flow, so nothing
   // below moves, and leave when their motion ends; nothing on the board
-  // keeps an animated style. None of it runs under reduced motion, on a
-  // run's first draw (a load or a board swap), or on the first draw after
-  // the board was hidden.
+  // keeps an animated style. It follows scrolling only: none of it runs
+  // under reduced motion, on a run's first draw (a load or a board swap),
+  // on the first draw after the board was hidden, or on a draw after a
+  // size change in the board. A board swap's own motion (the dashboard's
+  // topics growing and shrinking) moves item after item across a stack's
+  // line, and each crossing turned a bar into a copy aimed at where the
+  // bar stood that frame while the bar itself hid: closed topics pouring
+  // in showed as blank rows, one after another.
   var DUR = 180, EASE = "ease-out", curTopic = null, drawn = false, ghosts = { top: null, bot: null };
   function motion() { return !!d.body.animate && !(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches); }
   function btns(edge) { return [slots[edge].far, slots[edge].near]; }

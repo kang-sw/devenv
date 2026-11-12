@@ -1019,7 +1019,7 @@ func TestTopicRailBarCapsuleMotion(t *testing.T) {
 	js, css := string(assets.FormScript), string(assets.CSS)
 	for _, want := range []string{
 		`function motion() { return !!d.body.animate && !(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches); }`,
-		`var pre = motion() && member !== moved ? before(s) : null;`,
+		`var pre = motion() && !fresh && member !== moved ? before(s) : null;`,
 		"if (pre) after(pre);\n    drawn = !!s;",
 		`if (!drawn || !s) return p;`,
 		`if (bnear && !s.down.some(function (i) { return topics[i] === bnear; })) p.bot = capGhost(slots.bot.near);`,
