@@ -31,6 +31,13 @@ type liveFixture struct {
 func newLiveFixture(t *testing.T, enabled bool) liveFixture {
 	t.Helper()
 	setupMailboxTestEnv(t)
+	// The cache root exists before it is resolved, as it does for the
+	// server's own resolution later: the state dir resolves symlinks only
+	// once the root exists, and on Windows that also turns a temp dir's 8.3
+	// short name (RUNNER~1) into the long one.
+	if err := os.MkdirAll(os.Getenv("WS_CACHE_HOME"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	stateDir, err := wsdashboard.Dir("")
 	if err != nil {
 		t.Fatal(err)
