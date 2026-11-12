@@ -424,7 +424,7 @@
         "email": "ki6080@gmail.com",
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
-        "phase": "active",
+        "phase": "closed",
         "touched_at": "2026-11-12T06:59:29Z",
         "impl": {
           "branch": "impl/develop/rebel-zen-sprig"
