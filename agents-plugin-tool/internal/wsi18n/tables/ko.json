@@ -1576,5 +1576,15 @@
   "js.lead.handoff.confirm.other": "이 세션을 터미널로 넘길까요? 실행 중인 백그라운드 작업 {0}개가 프로세스와 함께 종료됩니다.",
   "js.lead.handed": "이 세션은 터미널로 넘겨졌습니다.",
   "js.lead.handed.resume": "터미널에서 이어가는 명령",
-  "js.lead.handed.copy": "명령 복사"
+  "js.lead.handed.copy": "명령 복사",
+  "composer.cmd.title": "슬래시 명령: 단독으로 전송되며, 보드 답변과 메모는 다음 메시지를 위해 남습니다",
+  "composer.cmd.remove": "명령 제거",
+  "entry.command.terminal": "텍스트 출력 없음: 터미널에서 열립니다",
+  "js.cmd.label": "슬래시 명령: 위/아래로 이동, Tab 또는 Enter로 선택, Escape로 닫기",
+  "js.cmd.group.user": "사용자 명령",
+  "js.cmd.group.agent": "에이전트 명령",
+  "js.cmd.group.rest": "기타 명령",
+  "js.cmd.args": "/{0}의 인자 (선택)",
+  "js.cmd.images": "슬래시 명령은 단독으로 전송되며 이미지를 담지 않습니다: 이미지를 제거하거나 명령을 제거하세요.",
+  "js.cmd.astext": "작성창에 이미 다른 명령이 있어 돌아온 슬래시 명령을 텍스트로 되돌렸습니다: 실행하려면 /에서 다시 고르세요."
 }

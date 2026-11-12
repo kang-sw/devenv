@@ -239,7 +239,15 @@ weekly usage limits (each with its reset and its
 pace, which the page computes), and the cost (`~$` for an estimate, a
 trailing `+` when calls of unknown price were left out). A part with no
 figure is left out; context and limits warn at 80% and turn critical at 95%;
-below a 360px band only the limit under more pressure stays.
+below a 360px band only the limit under more pressure stays. The composer also
+holds the `cmds` region, the snapshot's `commands` as hidden data: typing `/`
+in an empty message box opens a picker over them (grouped under user and
+agent headings when any command names its `layer`), and a pick becomes a
+command selection whose box text is its arguments, sent as `{command, args}`
+alone (answer chips and notes stay for the next send; images refuse it). A
+session with no list renders the region empty and gets no picker. A
+`command` ring entry shows its typed line and output text, or an "opens in
+the terminal" note when the text is empty.
 
 The session page's drawer frame (not the `/` hub) carries a git handle left
 of the panels handle: the session root's branch, abbreviated (an

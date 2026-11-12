@@ -1576,5 +1576,15 @@
   "js.lead.handoff.confirm.other": "Diese Sitzung an ein Terminal übergeben? Ihre {0} laufenden Hintergrundaufgaben enden mit dem Prozess.",
   "js.lead.handed": "Diese Sitzung wurde an ein Terminal übergeben.",
   "js.lead.handed.resume": "Dort fortsetzen mit",
-  "js.lead.handed.copy": "Befehl kopieren"
+  "js.lead.handed.copy": "Befehl kopieren",
+  "composer.cmd.title": "Slash-Befehl: wird allein gesendet; Board-Antworten und Notizen bleiben für die nächste Nachricht",
+  "composer.cmd.remove": "Befehl entfernen",
+  "entry.command.terminal": "keine Textausgabe: öffnet sich im Terminal",
+  "js.cmd.label": "Slash-Befehle: Auf/Ab bewegt, Tab oder Enter wählt, Escape schließt",
+  "js.cmd.group.user": "Benutzerbefehle",
+  "js.cmd.group.agent": "Agentenbefehle",
+  "js.cmd.group.rest": "weitere Befehle",
+  "js.cmd.args": "Argumente für /{0} (optional)",
+  "js.cmd.images": "Ein Slash-Befehl wird allein gesendet und trägt keine Bilder: Entferne die Bilder oder den Befehl.",
+  "js.cmd.astext": "Ein zurückgegebener Slash-Befehl kam als Text zurück, da der Editor schon einen anderen Befehl hält: Wähle ihn erneut über /, um ihn auszuführen."
 }

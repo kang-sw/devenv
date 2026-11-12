@@ -1576,5 +1576,15 @@
   "js.lead.handoff.confirm.other": "¿Pasar esta sesión a una terminal? Sus {0} tareas en segundo plano en ejecución terminan con el proceso.",
   "js.lead.handed": "Esta sesión se pasó a una terminal.",
   "js.lead.handed.resume": "Reanúdala allí con",
-  "js.lead.handed.copy": "Copiar el comando"
+  "js.lead.handed.copy": "Copiar el comando",
+  "composer.cmd.title": "comando de barra: se envía solo; las respuestas y notas del tablero quedan para el siguiente mensaje",
+  "composer.cmd.remove": "quitar el comando",
+  "entry.command.terminal": "sin salida de texto: se abre en la terminal",
+  "js.cmd.label": "Comandos de barra: Arriba/Abajo mueve, Tab o Enter elige, Escape cierra",
+  "js.cmd.group.user": "comandos del usuario",
+  "js.cmd.group.agent": "comandos del agente",
+  "js.cmd.group.rest": "otros comandos",
+  "js.cmd.args": "Argumentos para /{0} (opcional)",
+  "js.cmd.images": "Un comando de barra se envía solo y no lleva imágenes: quita las imágenes o quita el comando.",
+  "js.cmd.astext": "Un comando de barra devuelto volvió como texto, porque el editor ya tiene otro comando: elígelo de nuevo desde / para ejecutarlo."
 }

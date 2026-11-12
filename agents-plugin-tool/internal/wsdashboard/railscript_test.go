@@ -266,8 +266,8 @@ func TestRailScript(t *testing.T) {
 }
 
 // railDraftPrelude stubs what dashboard.js's per-session drafts block reads
-// from the rest of the page script: the composer (text, mentions, images),
-// the board answers, the chips, the board mentions, the open details, the
+// from the rest of the page script: the composer (text, mentions, images,
+// slash command selection), the board answers, the chips, the board mentions, the open details, the
 // tab, the notice, and a virtual clock.
 const railDraftPrelude = `
 var now = 0, timers = [], tid = 0;
@@ -281,6 +281,8 @@ var WsRail = window.WsRail, rid = "sess1", live = true, railStore = memStore();
 var grid = new El("grid", { "data-tab": "convo" });
 var ctext = { value: "", selectionStart: 0, selectionEnd: 0, setSelectionRange: function (a, b) { this.selectionStart = a; this.selectionEnd = b; } };
 var mentions = [], mentionWas = "", imgs = [], imgSeq = 0, chips = {}, cchips = {}, items = {}, openState = {}, boardAnswers = {}, notes = [], bmentions = [];
+var ccmd = {}, cmdSel = null;
+function setCommand(name, args) { cmdSel = { name: name, args: typeof args === "string" ? args : null }; }
 function validMentions(l) { return Array.isArray(l) ? l.filter(function (m) { return m && m.topic && m.text; }) : []; }
 function renderChips() {}
 var MARKER = "\\[Image #([1-9][0-9]{0,5})\\]";
@@ -361,6 +363,15 @@ check("the restore itself saved nothing", timers.length, 0);
 // a typed composer is not overwritten by a later restore
 ctext.value = "typed"; restoreDraft();
 check("a non-empty composer keeps its text", ctext.value, "typed");
+
+// a slash command selection alone is a draft, kept with its arguments
+ctext.value = ""; imgs = []; chips = {}; boardAnswers = {}; openState = {}; bmentions = []; grid.setAttribute("data-tab", "convo");
+cmdSel = { name: "compact", args: "keep the plan" };
+listeners.input(); advance(400);
+check("the saved command", JSON.parse(railStore.load("ws.dashboard.draft.sess1")).cmd, { name: "compact", args: "keep the plan" });
+cmdSel = null; restoreDraft();
+check("the command comes back as the selection", cmdSel, { name: "compact", args: "keep the plan" });
+cmdSel = null;
 
 // a send clears the draft; what is left is saved again as the next draft
 ctext.value = ""; imgs = []; chips = {}; boardAnswers = {}; openState = {}; bmentions = []; grid.setAttribute("data-tab", "convo");

@@ -7,6 +7,11 @@
   // keeps its focus and caret. It binds no fixed element id: attach takes
   // the textarea and its options, and the popup element is its own.
   //
+  // The trigger, the row, and the pick are the file mention's by default;
+  // a caller replaces them (attach's token, render, and choose options) to
+  // run another popup on the same listbox, keys, and placement, such as the
+  // composer's slash-command picker. One textarea may carry several.
+  //
   // A mention is `@path`, or, when the path holds whitespace (or starts
   // with a backtick), `@` and the path as a markdown code span: a backtick
   // run one longer than the path's longest, so the reader sees one path.
@@ -91,11 +96,23 @@
   //   onPick({start, end, text, path, dir}): after a pick inserted a mention
   //     at [start, end);
   //   label: the listbox's accessible name.
+  // A popup other than the file mention's replaces these defaults:
+  //   token(value, caret): the token the caret is in, {start, end, q}, or
+  //     null (default: tokenAt, the @ mention token);
+  //   render(li, item): fills an option row (default: a path's name and
+  //     directory);
+  //   choose(item, {start, end}): a pick, in place of inserting a mention;
+  //     the popup then closes;
+  //   exact(item, q): true when item is exactly what q names, so a typed
+  //     space picks it;
+  //   max: the rows kept of an answer (default 50).
+  // An item with a group (a heading's text) is listed under that heading,
+  // written where the group changes from the row before.
   // It returns {key(e), close(), sync()}: the caller's keydown handler calls
   // key(e) first after its IME guard, and stops when it returns true.
   function attach(input, opts) {
     var id = "wsm" + (++popSeq), pop = doc.createElement("ul");
-    var st = null, ask = 0, timer = 0;
+    var st = null, ask = 0, timer = 0, token = opts.token || tokenAt, max = opts.max || 50;
     pop.className = "wsm-pop";
     pop.id = id;
     pop.setAttribute("role", "listbox");
@@ -103,7 +120,7 @@
     pop.hidden = true;
     doc.body.appendChild(pop);
     input.setAttribute("aria-autocomplete", "list");
-    input.setAttribute("aria-controls", id);
+    if (!input.getAttribute("aria-controls")) input.setAttribute("aria-controls", id);
     input.setAttribute("aria-expanded", "false");
     var insert = opts.insert || function (start, end, text) {
       input.setRangeText(text, start, end, "end");
@@ -111,7 +128,10 @@
     };
 
     function shown() { return !!st && st.items.length > 0 && !pop.hidden; }
+    // hide leaves the textarea's state alone unless this popup showed, so
+    // another popup on the same textarea keeps its own.
     function hide() {
+      if (pop.hidden) return;
       pop.hidden = true;
       input.setAttribute("aria-expanded", "false");
       input.removeAttribute("aria-activedescendant");
@@ -124,7 +144,7 @@
     }
     // sync follows the text and caret: opens, refilters, or closes.
     function sync() {
-      var tok = doc.activeElement === input && input.selectionStart === input.selectionEnd && tokenAt(input.value, input.selectionStart);
+      var tok = doc.activeElement === input && input.selectionStart === input.selectionEnd && token(input.value, input.selectionStart);
       if (!tok) { close(); return; }
       var keep = st && st.start === tok.start;
       // The rows of the last answer stay up while the next is asked for;
@@ -139,7 +159,7 @@
       timer = setTimeout(function () {
         opts.source(q, function (items) {
           if (n !== ask || !st) return;
-          st.items = (items || []).slice(0, 50);
+          st.items = (items || []).slice(0, max);
           st.itemsQ = q;
           st.idx = 0;
           if (!st.items.length) { hide(); return; }
@@ -148,26 +168,41 @@
         });
       }, delay);
     }
+    // pathRow is the file mention's row: the name, then its directory.
+    function pathRow(li, it) {
+      var name = doc.createElement("span"), dir = doc.createElement("span");
+      var p = String(it.path || ""), cut = p.lastIndexOf("/") + 1;
+      name.className = "wsm-name";
+      name.textContent = p.slice(cut) + (it.dir ? "/" : "");
+      dir.className = "wsm-dir";
+      dir.textContent = p.slice(0, cut);
+      li.appendChild(name);
+      li.appendChild(dir);
+      li.title = p + (it.dir ? "/" : "");
+    }
     function draw() {
       pop.textContent = "";
+      var group = "";
       st.items.forEach(function (it, i) {
-        var li = doc.createElement("li"), name = doc.createElement("span"), dir = doc.createElement("span");
-        var p = String(it.path || ""), cut = p.lastIndexOf("/") + 1;
+        if (it.group && it.group !== group) {
+          var head = doc.createElement("li");
+          head.className = "wsm-head";
+          head.setAttribute("role", "presentation");
+          head.textContent = it.group;
+          pop.appendChild(head);
+        }
+        group = it.group || "";
+        var li = doc.createElement("li");
         li.className = "wsm-opt" + (i === st.idx ? " on" : "");
         li.id = id + "-" + i;
         li.setAttribute("role", "option");
         li.setAttribute("aria-selected", String(i === st.idx));
         li.setAttribute("data-i", String(i));
-        name.className = "wsm-name";
-        name.textContent = p.slice(cut) + (it.dir ? "/" : "");
-        dir.className = "wsm-dir";
-        dir.textContent = p.slice(0, cut);
-        li.appendChild(name);
-        li.appendChild(dir);
-        li.title = p + (it.dir ? "/" : "");
+        (opts.render || pathRow)(li, it);
         pop.appendChild(li);
       });
       pop.hidden = false;
+      input.setAttribute("aria-controls", id);
       input.setAttribute("aria-expanded", "true");
       input.setAttribute("aria-activedescendant", id + "-" + st.idx);
       place();
@@ -187,6 +222,12 @@
     function pick(i) {
       var it = st && st.items[i];
       if (!it) return;
+      if (opts.choose) {
+        var at = { start: st.start, end: st.end };
+        close();
+        opts.choose(it, at);
+        return;
+      }
       var path = String(it.path || "");
       if (it.dir && path.slice(-1) !== "/") path += "/";
       var parts = mentionParts(path), start = st.start, end = st.end, v = input.value;
@@ -217,6 +258,11 @@
         return true;
       }
       if (k === "Escape") { e.preventDefault(); close(); return true; }
+      if (k === " " && opts.exact && st.itemsQ === st.q) {
+        for (var i = 0; i < st.items.length; i++) {
+          if (opts.exact(st.items[i], st.q)) { e.preventDefault(); pick(i); return true; }
+        }
+      }
       return false;
     }
     input.addEventListener("input", sync);

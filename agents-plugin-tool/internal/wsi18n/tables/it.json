@@ -1576,5 +1576,15 @@
   "js.lead.handoff.confirm.other": "Passare questa sessione a un terminale? Le sue {0} attività in background in esecuzione terminano con il processo.",
   "js.lead.handed": "Questa sessione è stata passata a un terminale.",
   "js.lead.handed.resume": "Riprendila lì con",
-  "js.lead.handed.copy": "Copia il comando"
+  "js.lead.handed.copy": "Copia il comando",
+  "composer.cmd.title": "comando slash: inviato da solo; risposte e note della lavagna restano per il prossimo messaggio",
+  "composer.cmd.remove": "rimuovi il comando",
+  "entry.command.terminal": "nessun output di testo: si apre nel terminale",
+  "js.cmd.label": "Comandi slash: Su/Giù sposta, Tab o Invio sceglie, Esc chiude",
+  "js.cmd.group.user": "comandi dell'utente",
+  "js.cmd.group.agent": "comandi dell'agente",
+  "js.cmd.group.rest": "altri comandi",
+  "js.cmd.args": "Argomenti per /{0} (facoltativi)",
+  "js.cmd.images": "Un comando slash viene inviato da solo e non porta immagini: rimuovi le immagini o rimuovi il comando.",
+  "js.cmd.astext": "Un comando slash restituito è tornato come testo, perché il compositore contiene già un altro comando: sceglilo di nuovo da / per eseguirlo."
 }

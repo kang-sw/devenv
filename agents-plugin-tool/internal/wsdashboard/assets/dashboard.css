@@ -322,6 +322,15 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
    whether the chat acted on it live or met it in history */
 .sysline.uiline { max-width: 92%; font-weight: 500; overflow-wrap: anywhere; }
 .sysline.uiline .mk { color: var(--wb-primary); }
+/* a slash command an adapter ran: its typed line, then the output it showed
+   as text, whitespace kept, or a note when it opened in the terminal */
+.cmdrun { align-self: stretch; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.cmdecho { display: flex; align-items: baseline; gap: 6px; font-size: 12px; color: var(--wb-muted-fg); min-width: 0; }
+.cmdecho .mk { color: var(--wb-primary); font-weight: 800; }
+.cmdecho code { font-family: var(--wb-mono); font-weight: 600; color: var(--wb-fg); overflow-wrap: anywhere; min-width: 0; }
+.cmdecho .t { font-size: 11px; font-variant-numeric: tabular-nums; }
+.cmdout { margin: 0; padding: 7px 10px; background: var(--wb-card); border-radius: 8px; box-shadow: var(--wb-shadow); font: 12px/1.45 var(--wb-mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 360px; overflow: auto; }
+.cmdnote { padding-left: 18px; font-size: 11.5px; font-style: italic; color: var(--wb-muted-fg); }
 .caret { display: inline-block; width: 7px; height: 13px; background: currentColor; vertical-align: -2px; margin-left: 2px; animation: dash-blink 1s steps(1) infinite; }
 @keyframes dash-blink { 50% { opacity: 0; } }
 .permwait { display: flex; gap: 8px; align-items: center; background: color-mix(in srgb, var(--wb-ph-perm) 16%, var(--wb-card)); border-radius: 10px; padding: 7px 11px; font-size: 13px; }
@@ -398,6 +407,20 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .wsm-opt.on { background: color-mix(in srgb, var(--wb-primary) 14%, var(--wb-card)); }
 .wsm-name { flex: none; max-width: 65%; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wsm-dir { min-width: 0; font-size: 11.5px; color: var(--wb-muted-fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* the slash-command picker's rows: /name, the description, the source muted;
+   a heading over each layer when the host tells who may invoke a command */
+.wsm-head { padding: 6px 8px 2px; font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--wb-muted-fg); }
+.wsm-desc { flex: 1 1 auto; min-width: 0; font: 11.5px system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif; color: var(--wb-muted-fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wsm-src { flex: none; margin-left: auto; font-size: 10.5px; color: var(--wb-muted-fg); opacity: .8; }
+/* the composer's slash-command selection: a capsule before the message box,
+   whose text is then the command's arguments */
+.r-cmds { display: none; }
+.crow.hascmd { grid-template-columns: auto minmax(0, 1fr) auto; }
+.ccmd { align-self: start; display: inline-flex; align-items: center; gap: 4px; max-width: 40vw; min-height: 38px; padding: 0 3px 0 10px; border-radius: 10px; font: 600 12.5px/1.2 var(--wb-mono); color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 14%, var(--wb-card)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-primary) 35%, transparent); }
+.ccmd[hidden] { display: none; }
+.ccmd-name { white-space: nowrap; }
+.ccmd-args { min-width: 0; font-weight: 400; color: var(--wb-fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ccmd-args[hidden] { display: none; }
 .csend { display: inline-flex; align-items: center; justify-content: center; width: 34px; padding: 0; border: 0; border-radius: 10px; cursor: pointer; color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 14%, var(--wb-card)); }
 .csend:hover { background: color-mix(in srgb, var(--wb-primary) 24%, var(--wb-card)); }
 .csend:focus-visible { outline: 1.5px solid var(--wb-primary); }
@@ -444,6 +467,8 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .btn.mini.hcancel, .btn.mini.hsteer { width: auto; height: 20px; font-size: 11px; gap: 3px; padding: 0 7px; flex: none; white-space: nowrap; }
 .msg.held .mh { flex-wrap: wrap; row-gap: 3px; }
 .hcancel .i, .hsteer .i { width: 11px; height: 11px; }
+/* a held slash command: its typed line */
+.cmdtyped { font-family: var(--wb-mono); font-size: 12.5px; font-weight: 600; }
 .pdiv { border: 0; border-top: 1px solid color-mix(in srgb, var(--wb-primary) 30%, transparent); margin: 6px 0; }
 /* a message's answer capsules lead its bubble, above the text */
 .hchips { display: flex; flex-wrap: wrap; gap: 4px; white-space: normal; }

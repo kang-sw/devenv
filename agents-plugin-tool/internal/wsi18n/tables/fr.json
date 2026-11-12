@@ -1576,5 +1576,15 @@
   "js.lead.handoff.confirm.other": "Passer cette session à un terminal ? Ses {0} tâches de fond en cours se terminent avec le processus.",
   "js.lead.handed": "Cette session a été passée à un terminal.",
   "js.lead.handed.resume": "La reprendre là-bas avec",
-  "js.lead.handed.copy": "Copier la commande"
+  "js.lead.handed.copy": "Copier la commande",
+  "composer.cmd.title": "commande slash : envoyée seule ; les réponses et notes du tableau restent pour le message suivant",
+  "composer.cmd.remove": "retirer la commande",
+  "entry.command.terminal": "aucune sortie texte : elle s'ouvre dans le terminal",
+  "js.cmd.label": "Commandes slash : Haut/Bas déplace, Tab ou Entrée choisit, Échap ferme",
+  "js.cmd.group.user": "commandes de l'utilisateur",
+  "js.cmd.group.agent": "commandes de l'agent",
+  "js.cmd.group.rest": "autres commandes",
+  "js.cmd.args": "Arguments de /{0} (facultatif)",
+  "js.cmd.images": "Une commande slash est envoyée seule et ne porte pas d'images : retirez les images, ou retirez la commande.",
+  "js.cmd.astext": "Une commande slash rendue est revenue sous forme de texte, car le compositeur contient déjà une autre commande : choisissez-la de nouveau depuis / pour l'exécuter."
 }
