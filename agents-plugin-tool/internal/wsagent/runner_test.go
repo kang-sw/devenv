@@ -264,6 +264,13 @@ func TestStopKeepsHeldAndResumes(t *testing.T) {
 	p := h.backend.waitProc(t, 0)
 	p.nextSent(t)
 	p.events <- Event{SessionID: "s1"}
+	// The event is buffered: the loop picks between it and the stop below
+	// at random when both are ready, and a stop handled first ends the
+	// process with the event unread.
+	eventually(t, "session id", func() bool {
+		rec, _ := readRecord(wsdashboard.SessionDir(h.dir, id))
+		return rec.SessionID == "s1"
+	})
 	h.runner.Send(id, "two")
 	st, err := h.runner.Stop(id)
 	if err != nil {
