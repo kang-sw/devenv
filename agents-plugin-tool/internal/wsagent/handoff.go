@@ -200,8 +200,10 @@ func (c *conv) handOff() error {
 		return conflict("the session has no conversation yet, so there is nothing to resume in a terminal; close it instead")
 	}
 	c.stopProcess("")
-	if c.rec.HolderID != "" {
-		return fmt.Errorf("the session's process could not be ended, so it was not handed over: %s", c.lastErr)
+	// A holder an earlier stop could not end is tried once more: the
+	// terminal must be the conversation's only process.
+	if err := c.retireHolder(); err != nil {
+		return fmt.Errorf("the session was not handed over: %w", err)
 	}
 	unlock, ok := c.lockRow()
 	if !ok {

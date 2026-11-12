@@ -2,6 +2,7 @@ package wsagent
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -462,5 +463,27 @@ func TestResumeCommand(t *testing.T) {
 	}
 	if got, want := resumeCommand(Record{Lead: true, Backend: BackendPi, Root: "/w/repo"}, dir), "cd /w/repo && pi --session "+own; got != want {
 		t.Errorf("a daemon-started pi session = %q, want %q", got, want)
+	}
+}
+
+// TestHandOffNeedsTheProcessEnded: a session whose process could not be
+// ended is not handed over, since the terminal would run beside it; the
+// hand-off goes through once the holder ends.
+func TestHandOffNeedsTheProcessEnded(t *testing.T) {
+	h := newLeadHarness(t).start()
+	id, holder := h.runLead("one")
+	h.holders.out(holder, turnLines("sess-1", "u1", "done")...)
+	h.idle(id)
+	h.holders.set(func() { h.holders.stopErr = errors.New("holder busy") })
+	if _, err := h.runner.HandOff(id); err == nil || isConflict(err) || !strings.Contains(err.Error(), "not handed over") {
+		t.Fatalf("HandOff with a holder that cannot be ended = %v", err)
+	}
+	if st, row := h.state(id), h.row(id); st.Status == StatusHandedOff || !row.Hosted || h.record(id).HandedOffAt != "" {
+		t.Fatalf("a failed hand-off moved the session: state %+v, row %+v", st, row)
+	}
+	h.holders.set(func() { h.holders.stopErr = nil })
+	st, err := h.runner.HandOff(id)
+	if err != nil || st.Status != StatusHandedOff || h.row(id).Hosted {
+		t.Fatalf("HandOff once the holder ends = %+v, %v", st, err)
 	}
 }
