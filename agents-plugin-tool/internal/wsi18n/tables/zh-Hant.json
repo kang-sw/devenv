@@ -24,6 +24,8 @@
   "chip.ack": "待確認",
   "chip.answer": "待回答",
   "chip.assumed": "已假設",
+  "chip.bulk.ack": "待確認 · 點擊：全部 OK",
+  "chip.bulk.policy": "待回答 · 點擊：全部選擇推薦項",
   "chip.fresh": "自上次嵌入後的新內容",
   "composer.aria": "Tab 鍵用於縮排。按 Escape，再按 Tab，即可離開訊息輸入框。",
   "composer.send": "傳送",

@@ -24,6 +24,8 @@
   "chip.ack": "à acquitter",
   "chip.answer": "à répondre",
   "chip.assumed": "supposé",
+  "chip.bulk.ack": "à acquitter · clic : tout OK",
+  "chip.bulk.policy": "à répondre · clic : choisir partout la recommandation",
   "chip.fresh": "nouveau depuis l'embed précédent",
   "composer.aria": "Tab insère une tabulation. Appuyez sur Échap, puis sur Tab, pour quitter la zone de message.",
   "composer.send": "envoyer",

@@ -24,6 +24,8 @@
   "chip.ack": "da confermare",
   "chip.answer": "da rispondere",
   "chip.assumed": "presunto",
+  "chip.bulk.ack": "da confermare · clic: tutto OK",
+  "chip.bulk.policy": "da rispondere · clic: scegliere ovunque la raccomandazione",
   "chip.fresh": "nuovo dall'embed precedente",
   "composer.aria": "Tab inserisce un rientro. Premi Esc, poi Tab, per uscire dalla casella del messaggio.",
   "composer.send": "invia",

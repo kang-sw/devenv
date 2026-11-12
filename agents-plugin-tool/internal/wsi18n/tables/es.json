@@ -24,6 +24,8 @@
   "chip.ack": "por confirmar",
   "chip.answer": "por responder",
   "chip.assumed": "supuesto",
+  "chip.bulk.ack": "por confirmar · clic: todo OK",
+  "chip.bulk.policy": "por responder · clic: elegir la recomendación en todas",
   "chip.fresh": "nuevo desde el embed anterior",
   "composer.aria": "Tab inserta sangría. Pulsa Escape y luego Tab para salir del cuadro de mensaje.",
   "composer.send": "enviar",

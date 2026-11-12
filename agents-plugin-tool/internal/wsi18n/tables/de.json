@@ -24,6 +24,8 @@
   "chip.ack": "zur Kenntnisnahme",
   "chip.answer": "zu beantworten",
   "chip.assumed": "angenommen",
+  "chip.bulk.ack": "zur Kenntnisnahme · Klick: alle OK",
+  "chip.bulk.policy": "zu beantworten · Klick: überall die Empfehlung wählen",
   "chip.fresh": "neu seit dem vorherigen Embed",
   "composer.aria": "Tab rückt ein. Drücke Escape und dann Tab, um das Nachrichtenfeld zu verlassen.",
   "composer.send": "senden",
