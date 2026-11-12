@@ -41,7 +41,9 @@ func (c *Client) CloneID(ctx context.Context) (string, error) {
 			continue
 		}
 		if time.Now().After(deadline) {
-			return "", fmt.Errorf("generate clone id: lock %s is held", lock)
+			// On Windows the last error may be a real permission error,
+			// not the lock, so it is reported as well.
+			return "", fmt.Errorf("generate clone id: lock %s is held (last attempt: %w)", lock, err)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
