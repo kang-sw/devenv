@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -29,7 +30,10 @@ func (c *Client) CloneID(ctx context.Context) (string, error) {
 			_ = f.Close()
 			break
 		}
-		if !errors.Is(err, os.ErrExist) {
+		// Windows refuses the create with Access is denied, not "exists",
+		// while another caller's lock file is still pending deletion; that
+		// is the lock being held too, so wait for it the same way.
+		if !errors.Is(err, os.ErrExist) && !(runtime.GOOS == "windows" && errors.Is(err, os.ErrPermission)) {
 			return "", err
 		}
 		if info, statErr := os.Stat(lock); statErr == nil && time.Since(info.ModTime()) > 10*time.Second {
