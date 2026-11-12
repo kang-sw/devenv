@@ -9,6 +9,7 @@ import (
 
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsreview"
+	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
 
 // freshOnlyStart and freshOnlyEnd are the dedicated mode-gating marker tokens
@@ -100,7 +101,8 @@ func agendaSizeNote(agenda map[string]json.RawMessage) string {
 }
 
 // renderSessionState builds the ## Session State section from a session record.
-// It renders agenda blobs (keyed alphabetically) followed by the todo summary.
+// It renders agenda blobs (keyed alphabetically), open whiteboard topics'
+// recaps, then the todo summary.
 // Only scaffolding strings are handler-owned here; no manual prose.
 func renderSessionState(rec sessionRecord) string {
 	var sb strings.Builder
@@ -138,12 +140,43 @@ func renderSessionState(rec sessionRecord) string {
 		}
 	}
 
+	sb.WriteString(renderWhiteboardRecaps(rec.Whiteboard))
+
 	// Todo summary.
 	sb.WriteString("\n### Todos\n")
 	sb.WriteString(renderTodos(rec.Todos, false))
 	sb.WriteString("\n")
 
 	return sb.String()
+}
+
+// renderWhiteboardRecaps lists each open whiteboard topic's recap, one line
+// per topic in the board's topic order, so a revived lead sees where each
+// topic stands without a separate whiteboard.query. Closed topics and topics
+// without a recap are skipped; with none left it renders nothing.
+func renderWhiteboardRecaps(board *wswhiteboard.State) string {
+	// Depth topics with no target lists only open topics (closed ones fold).
+	res, problems := wswhiteboard.Query(board, map[string]any{"depth": wswhiteboard.DepthTopics})
+	if len(problems) > 0 {
+		return ""
+	}
+	var lines strings.Builder
+	for _, t := range res.Topics {
+		if t.Closed || t.Recap == "" {
+			continue
+		}
+		name := t.Stem
+		if name == "" {
+			name = t.Name
+		}
+		// Continuation lines are indented (as wswhiteboard.FormatQuery does),
+		// so a multi-line recap never reads as a heading or list item.
+		lines.WriteString("- " + name + ": " + strings.ReplaceAll(t.Recap, "\n", "\n  ") + "\n")
+	}
+	if lines.Len() == 0 {
+		return ""
+	}
+	return "\n### Whiteboard recaps\n" + lines.String()
 }
 
 // injectSessionKeyLine finds the first blockquote line containing
@@ -248,7 +281,7 @@ func (s *Server) handleWorkflowState(id json.RawMessage, args map[string]any) re
 
 	// 2. Reuse workflow_manual's fail-loud notice verbatim for any unresolvable
 	//    key (including the sentinel, which is never a stored record). NEVER mint.
-	rec, recOK := s.sessions.readState(key, partAgenda|partTodos)
+	rec, recOK := s.sessions.readState(key, partAgenda|partTodos|partWhiteboard)
 	if !recOK {
 		notice := fmt.Sprintf("## Session State\n(no restorable state for session key %q; this key resolves to no stored session record — do not assume prior agenda/todo. If you are the lead recovering after compaction, re-run lead-revive to restore your session.)", key)
 		return toolTextResponse(id, notice+"\n", nil)
@@ -301,7 +334,7 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 	//    gate via lookup-miss, so a non-lead caller reaching this path could read
 	//    that mention to discover the escalation. Return only a no-restore notice
 	//    naming lead-revive (a skill, not the ferrule/sentinel surface). NEVER mint.
-	rec, recOK := s.sessions.readState(key, partAgenda|partTodos)
+	rec, recOK := s.sessions.readState(key, partAgenda|partTodos|partWhiteboard)
 	if key != freshBootstrapKey && !recOK {
 		notice := fmt.Sprintf("## Session State\n(no restorable state for session key %q; this key resolves to no stored session record — do not assume prior agenda/todo. If you are the lead recovering after compaction, re-run lead-revive to restore your session.)", key)
 		return toolTextResponse(id, notice+"\n", nil)
