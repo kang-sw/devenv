@@ -200,6 +200,65 @@ func TestTreeRetainsRunningAndLastFiveFinished(t *testing.T) {
 	}
 }
 
+// TestSeedFinishedKeepsEndedAgentsOnly pins seeding from an earlier
+// writer's snapshot: done and failed agents come back with their fields,
+// running ones and another session's snapshot seed nothing, and retain's
+// FinishedAgentCap still bounds what was seeded.
+func TestSeedFinishedKeepsEndedAgentsOnly(t *testing.T) {
+	prev := NewState(ownerKey)
+	mustApply(t, prev, Event{Kind: KindAgent, AgentID: "run", Label: "still going"}, 100)
+	mustApply(t, prev, Event{Kind: KindAgent, AgentID: "ok", Label: "worker", Batches: batchesJSON(t, finished(1, 3, 1, "Read"))}, 110)
+	mustApply(t, prev, Event{Kind: KindAgent, AgentID: "ok", Status: StatusDone}, 1000)
+	mustApply(t, prev, Event{Kind: KindAgent, AgentID: "bad"}, 120)
+	mustApply(t, prev, Event{Kind: KindAgent, AgentID: "bad", Status: StatusFailed}, 1001)
+	snap := prev.Snapshot(2000)
+
+	other := NewState("delta-echo-foxtrot")
+	other.SeedFinished(snap)
+	if n := len(other.Snapshot(3000).Agents); n != 0 {
+		t.Fatalf("another session's snapshot seeded %d agents", n)
+	}
+
+	st := NewState(ownerKey)
+	st.SeedFinished(snap)
+	byID := map[string]Agent{}
+	for _, a := range st.Snapshot(3000).Agents {
+		byID[a.ID] = a
+	}
+	if _, ok := byID["run"]; ok || len(byID) != 2 {
+		t.Fatalf("seed should keep done and failed only: %+v", byID)
+	}
+	if a := byID["ok"]; a.Status != StatusDone || a.Label != "worker" || a.EndedAt != 1000 || a.Done != 2 || a.Failed != 1 || len(a.Batches) != 1 {
+		t.Fatalf("done agent: %+v", a)
+	}
+	if a := byID["bad"]; a.Status != StatusFailed || a.EndedAt != 1001 {
+		t.Fatalf("failed agent: %+v", a)
+	}
+
+	many := NewState(ownerKey)
+	for i := 0; i < FinishedAgentCap+3; i++ {
+		id := fmt.Sprintf("fin%d", i)
+		mustApply(t, many, Event{Kind: KindAgent, AgentID: id}, int64(100+i))
+		mustApply(t, many, Event{Kind: KindAgent, AgentID: id, Status: StatusDone}, int64(1000+i))
+	}
+	full := many.Snapshot(2000)
+	// The cap applies to the seed itself, not only to the writer that left it.
+	for i := 0; i < 3; i++ {
+		full.Agents = append(full.Agents, Agent{ID: fmt.Sprintf("old%d", i), Status: StatusDone, EndedAt: int64(10 + i)})
+	}
+	seeded := NewState(ownerKey)
+	seeded.SeedFinished(full)
+	got := seeded.Snapshot(3000).Agents
+	if len(got) != FinishedAgentCap {
+		t.Fatalf("%d agents seeded, want %d", len(got), FinishedAgentCap)
+	}
+	for _, a := range got {
+		if strings.HasPrefix(a.ID, "old") {
+			t.Fatalf("an older finished agent survived the cap: %+v", a)
+		}
+	}
+}
+
 // TestLateEventsDoNotRecreateEvictedAgents pins the evicted-agent rule: once
 // retain dropped a finished subagent, a permission clear or an agent event
 // short of status running for it changes nothing (no phantom running agent),

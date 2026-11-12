@@ -178,9 +178,15 @@ type liveWriter struct {
 	log io.Writer
 }
 
+// newLiveWriter starts from the finished subagents of the snapshot an
+// earlier daemon left in dir: the first write replaces that snapshot, and
+// nothing else remembers them. A missing or unreadable one seeds nothing.
 func newLiveWriter(dir, key, adapter string, now func() time.Time, log io.Writer) *liveWriter {
 	st := wslive.NewState(key)
 	st.SetAdapter(adapter)
+	if prev, err := wslive.ReadSnapshot(wslive.SnapshotPath(dir)); err == nil {
+		st.SeedFinished(prev)
+	}
 	return &liveWriter{dir: dir, st: st, now: now, log: log}
 }
 
