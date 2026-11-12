@@ -17,7 +17,7 @@
     "lead-audit-doc/lead-audit-doc.md": "fd1c71db3a0b0d5a505d1c18d0fe8a6d390a309afc33cd7e53c29b30b7739deb",
     "lead-bootstrap/lead-bootstrap.md": "3d54a1fa50934fd4895623555371a8f5cd51920b17395ac67f842711debdfd23",
     "lead-check-blockers/lead-check-blockers.md": "76ed9be9cc75929bd90304d7918c73f6db7d59ac898c5c568ce5e8f1e7058ecc",
-    "lead-coauthor-paged-document/lead-coauthor-paged-document.md": "fad69f90ee56be508b60c48fe421866056952d281b3a8033bc5b82708cdb72e9",
+    "lead-coauthor-paged-document/lead-coauthor-paged-document.md": "45ca8a346c55663f6fb5bd59674f257324119f4640d5532d89fe31813e3147df",
     "lead-delegate/lead-delegate.md": "6854e994acf8e5ae34ac7c37e265bd220490b485ac3b4153a15acfeb461e2156",
     "lead-discuss/lead-discuss.md": "7f3bdcd6bc979885089931c613aa91454d25c849717b300f6591ddbb91851b2e",
     "lead-review/lead-review.md": "87460eee7f786233a8ceea12d37ee86563f74b21e85f0da0d30f3cf614b47e0f",
@@ -49,7 +49,7 @@
     "ticket-worker-elevated/ticket-worker-elevated.md": "066bbca91712d90f99a686b8f7f9ba7119203a04ee61df5a70efe1cd2f1a8866",
     "ticket-worker/ticket-worker.md": "558322907db3f72affbcaf79668a37f4143ca4d71729c90f94f29a3f6b95fb9f",
     "tracker/tracker.md": "054d2d2ba9a72a66fc9c2ab79ed22b3c614f3b0249259e2c927aef8f50c807e7",
-    "whiteboard/whiteboard.md": "5206234802b406e5c606fce54d6dfcfd4e096d0542dd608eacdd161728f8c58f",
+    "whiteboard/whiteboard.md": "1dd02d6c5889e05d45674a2d6aea416cead9d4b8918af4bcb6a5ba5afa91cad9",
     "worker-stop-protocol.md": "a41c2a5d3ea2f4e310213e32821ac289ca51471139fb617ebd06fd27e55582a3"
   }
 }
