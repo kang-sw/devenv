@@ -91,8 +91,8 @@ func TestLeadSpawnRunsUnderAHolder(t *testing.T) {
 			t.Fatalf("env %s=%q must not reach a lead's harness", name, v)
 		}
 	}
-	if rec.WSKey == "" || rec.WSKey == "the-daemons-own" || !slices.Contains(h.keys.ensured, rec.WSKey) {
-		t.Fatalf("the lead should run on its own minted key, kept usable: %q, ensured %v", rec.WSKey, h.keys.ensured)
+	if rec.WSKey == "" || rec.WSKey == "the-daemons-own" || !slices.Contains(h.ensured(), rec.WSKey) {
+		t.Fatalf("the lead should run on its own minted key, kept usable: %q, ensured %v", rec.WSKey, h.ensured())
 	}
 	var session holderSession
 	for _, info := range h.holders.List().Holders {
