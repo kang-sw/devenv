@@ -98,6 +98,17 @@
   doc.addEventListener("visibilitychange", tickTimes);
 
   function region(name) { return $("r-" + name); }
+  // boardBoxes are the elements holding the board's topics: the board
+  // region and, while the pinned column shows, the pin list there
+  // (cards.js), whose topics are the board's as much as the region's.
+  // boardQ queries both; inBoard tells whether a node is in either.
+  function boardBoxes() {
+    var b = region("board"), p = window.WsCards && window.WsCards.pinList ? window.WsCards.pinList() : null;
+    return (b ? [b] : []).concat(p && p.isConnected && !(b && b.contains(p)) ? [p] : []);
+  }
+  function boardQ(sel) { return boardBoxes().reduce(function (a, b) { return a.concat(q(sel, b)); }, []); }
+  function inBoard(n) { return !!n && boardBoxes().some(function (b) { return b.contains(n); }); }
+  function boardRead(read) { var out = {}; boardBoxes().forEach(function (b) { var r = read(b); Object.keys(r).forEach(function (k) { out[k] = r[k]; }); }); return out; }
   function visible(el) { return !!el && el.getClientRects().length > 0; }
 
   // --- open details: data-key and panel state in memory, peers in storage ---
@@ -140,7 +151,7 @@
   // The drawer's body (drbody) is only clipped while the drawer is closed
   // (hidden only while the frame shows the git sheet), so a panels swap
   // keeps its offset whether the drawer is open or closed.
-  var PANES = ["bcol", "r-tree", "convo", "drbody"];
+  var PANES = ["bcol", "bpins", "r-tree", "convo", "drbody"];
   // A scroll only marks its pane; the offset is read once per frame, in a
   // frame callback beside the board rail's, so the visibility check and
   // the scrollTop read share the frame's layout rather than force one of
@@ -235,6 +246,7 @@
     grid.setAttribute("data-layout", v);
     q(".gmenu [data-layout]").forEach(function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-layout") === v)); });
     revealPanes();
+    if (cardBoard) window.WsCards.relayout();
   }
   // The tree and the conversation share their column at a fixed ratio; the
   // saved value is the tree's share. The grid reads it as two fr shares, so a
@@ -422,8 +434,8 @@
   // lands when the focus leaves it.
   var deferred = null;
   function editing() {
-    var a = doc.activeElement, b = region("board");
-    return !!(a && b && b.contains(a) && (a.tagName === "INPUT" || a.tagName === "TEXTAREA"));
+    var a = doc.activeElement;
+    return !!(a && inBoard(a) && (a.tagName === "INPUT" || a.tagName === "TEXTAREA"));
   }
   doc.addEventListener("focusout", function () {
     if (!deferred) return;
@@ -456,6 +468,7 @@
     var board = name === "board";
     if (el.getAttribute("data-h") === hash) { if (board) deferred = null; if (name === "rail") railHeld = null; return; }
     if (board && editing()) { deferred = { hash: hash, html: html }; return; }
+    if (board && window.WsCards && window.WsCards.dragging && window.WsCards.dragging()) { boardDragHeld = { hash: hash, html: html }; return; }
     // A rail swap waits while a row is dragged in the rail, and lands when
     // the drag ends (rdEnd).
     if (name === "rail" && rdrag && rdrag.on) { railHeld = { hash: hash, html: html }; return; }
@@ -466,9 +479,9 @@
     if (board) deferred = null;
     var pin = (name === "entries" || name === "convlive") && pinned();
     var scroll = scrollState();
-    var answers = board ? readAnswers(el) : null;
+    var answers = board ? boardRead(readAnswers) : null;
     var railTop = name === "rail" ? railScrollTop() : null;
-    var frameH = board ? frameHeights(el) : null;
+    var frameH = board ? boardRead(frameHeights) : null;
     var before = board && !still && !reducedMotion() ? boardSpots(el) : null;
     // The entries merge and the board morph prepare only the nodes they
     // insert; any other region is replaced whole. A finished reply's mermaid
@@ -547,20 +560,64 @@
   })();
   // --- board cards (cards.js): the page's own cards among the topics --------
   // The framework mounts on the board region once, before any board swap,
-  // and restores the cards this browser kept for the session. Showing a
-  // card switches to the board tab where the view shows one column at a
-  // time.
+  // and restores the cards and the pinned or hand-moved topics this browser
+  // kept for the session. Showing a card switches to the board tab where
+  // the view shows one column at a time.
   // Terminal cards (terminal.js) exist only on a page the server marked
   // data-term; their module adds the board column's header row.
+  // The pinned column (bpcol) is the page body's last column: from 1600px,
+  // while anything is pinned, unless the layout menu says "tabs" (one
+  // column at a time, where the pins stand atop the board). The root's
+  // data-pincol carries it to the stylesheet and the session rail (railWide):
+  // below 2200px the column takes the rail's place and the rail overlays.
+  // A board swap waits while a card or topic is dragged (boardDragHeld), and
+  // lands at the drag's end.
   var cardBoard = mode !== "index" && window.WsCards ? region("board") : null;
+  var PIN_WIDE = window.matchMedia ? window.matchMedia("(min-width: 1600px)") : null, boardDragHeld = null;
+  function pinColumnFits(n) {
+    return n > 0 && !!(PIN_WIDE && PIN_WIDE.matches) && !(live && (grid.getAttribute("data-layout") || load(LAYOUT_KEY)) === "tabs");
+  }
   if (cardBoard) {
     if (window.WsPreview) window.WsPreview.setup({ renderDiff: gwRender, post: post, toast: toast });
     if (window.WsTerm) window.WsTerm.setup({ post: post, toast: toast });
+    var bpcol = null, dbody = cardBoard.closest(".dbody");
+    if (dbody) {
+      bpcol = doc.createElement("aside");
+      bpcol.id = "bpcol";
+      bpcol.className = "bpcol";
+      bpcol.setAttribute("aria-label", wsT("js.pins.title"));
+      dbody.appendChild(bpcol);
+    }
     window.WsCards.mount(cardBoard, {
       key: "ws.dashboard.cards." + rid, load: load, save: save,
-      reveal: function () { if (live && !tabShown("board")) setTab("board"); }
+      reveal: function () { if (live && !tabShown("board")) setTab("board"); },
+      column: bpcol, shows: pinColumnFits,
+      layout: function (on) {
+        if (on) root.setAttribute("data-pincol", ""); else root.removeAttribute("data-pincol");
+        railOpen(false);
+      },
+      closed: function (from, done) {
+        if (!window.fetch) { done(null); return; }
+        fetch("/s/" + rid + "/closed?from=" + from, { credentials: "same-origin", cache: "no-store" }).then(function (r) {
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          return r.json();
+        }).then(function (res) { done(frag(res.html || "").firstElementChild); }, function () { done(null); });
+      },
+      adopted: function (n) {
+        restoreOpen(n);
+        if (window.wbBindBoard) window.wbBindBoard(n);
+        if (window.wbAgo) window.wbAgo(n);
+        mermaid([n]);
+      },
+      drag: function (on) {
+        if (on) return;
+        var h = boardDragHeld;
+        boardDragHeld = null;
+        if (h) swap("board", h.hash, h.html, true);
+      }
     });
     if (window.WsTerm) window.WsTerm.mount($("bcol"));
+    if (PIN_WIDE && PIN_WIDE.addEventListener) PIN_WIDE.addEventListener("change", function () { window.WsCards.relayout(); });
   }
   // --- the Files pane (files.js): mounted once, loaded when first shown -------
   if (live && fpane && window.WsFiles) {
@@ -574,11 +631,15 @@
   // nodes it inserted, in order, for the caller to prepare.
   function morphBoard(el, html) {
     var src = frag(html), seen = {}, want = [], ins = [], live = {}, liveClosed = [], pages = [], more = null, grafts = [];
+    var pinBox = window.WsCards.pinList();
     Array.prototype.forEach.call(el.children, function (n) {
       var k = topicKey(n);
       if (k !== null) { live["t:" + k] = n; if (n.classList.contains("closed")) liveClosed.push(n); }
       else if (n.classList.contains("closed-page")) pages.push(n);
     });
+    // The pinned topics (cards.js) stand in the pin list: atop the board or
+    // in the pinned column.
+    if (pinBox) Array.prototype.forEach.call(pinBox.children, function (n) { var k = topicKey(n); if (k !== null) live["t:" + k] = n; });
     Array.prototype.slice.call(src.childNodes).forEach(function (n) {
       var k = topicKey(n);
       if (k === null) {
@@ -638,13 +699,18 @@
     // keeps that section and its body frame (frameGraft); where the browser
     // has Element.moveBefore, a kept node moves without reloading its
     // frames, so every changed topic keeps its old section (frameGrafts).
-    var woven = window.WsCards.weave(want);
-    frameGrafts(el, woven, grafts).forEach(function (g) {
+    // The pinned topics are woven into the pin list, where an update moves
+    // none of them, so a changed one whose old section stands there keeps
+    // it.
+    var plan = window.WsCards.weave(want), woven = plan.board;
+    var pinGrafts = grafts.filter(function (g) { return plan.pins.indexOf(g.n) >= 0 && g.old.parentNode === pinBox; });
+    frameGrafts(el, woven, grafts.filter(function (g) { return plan.pins.indexOf(g.n) < 0; })).concat(pinGrafts).forEach(function (g) {
       frameGraft(g);
-      woven[woven.indexOf(g.n)] = g.old;
+      var list = woven.indexOf(g.n) >= 0 ? woven : plan.pins;
+      list[list.indexOf(g.n)] = g.old;
       ins[ins.indexOf(g.n)] = g.old;
     });
-    window.WsCards.settle(el, woven);
+    window.WsCards.settle(el, plan);
     return ins;
   }
   // --- a changed topic's body frame, double-buffered --------------------------
@@ -782,10 +848,11 @@
   function reducedMotion() { return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches); }
   // boardSpots reads each topic section's height and offset from the
   // board's top, keyed "t:" + its topic, and each card's offset, keyed
-  // "c:" + its id.
+  // "c:" + its id. A pinned topic (the pin list, atop the board or in the
+  // pinned column) counts as paged: an update never moves it.
   function boardSpots(el) {
     var h = {}, top = el.getBoundingClientRect().top;
-    q("section.topic[data-topic]", el).forEach(function (n) {
+    boardQ("section.topic[data-topic]").forEach(function (n) {
       var r = n.getBoundingClientRect();
       h["t:" + n.getAttribute("data-topic")] = { h: r.height, y: r.top - top, paged: n.parentNode !== el };
     });
@@ -1027,6 +1094,8 @@
       // names (a topic closed or reopened): the page fetched may not follow
       // what shows now, and the control is clicked again.
       if (!btn.parentNode || !page || +btn.getAttribute("data-closed-next") !== from) { btn.disabled = false; return; }
+      // A topic pinned here (cards.js) already stands in the pin list.
+      q("section.topic[data-topic]", page).forEach(function (t) { if (window.WsCards && window.WsCards.pinnedTopic(t.getAttribute("data-topic"))) t.parentNode.removeChild(t); });
       btn.parentNode.replaceChild(page, btn);
       restoreOpen(page);
       if (window.wbBindBoard) window.wbBindBoard(page);
@@ -1049,8 +1118,7 @@
   function putChip(c) { if (!chips[c.id]) chipOrder.push(c.id); chips[c.id] = c; }
   function dropChip(id) { delete chips[id]; chipOrder = chipOrder.filter(function (x) { return x !== id; }); }
   function boardItem(id) {
-    var b = region("board");
-    return b ? b.querySelector('.card[data-id="' + id + '"], .arow[data-id="' + id + '"], .srow[data-id="' + id + '"]') : null;
+    return boardQ('.card[data-id="' + id + '"], .arow[data-id="' + id + '"], .srow[data-id="' + id + '"]')[0] || null;
   }
   // readItem is a board item's answer as a chip; null when it has none.
   function readItem(item) {
@@ -1081,9 +1149,8 @@
   }
   // syncChips takes the answers of the items on the board into the chips.
   function syncChips() {
-    var b = region("board");
-    if (!b || !cchips) return;
-    q(".card[data-id], .arow[data-id], .srow[data-id]", b).forEach(function (item) {
+    if (!region("board") || !cchips) return;
+    boardQ(".card[data-id], .arow[data-id], .srow[data-id]").forEach(function (item) {
       var c = readItem(item), id = item.getAttribute("data-id");
       if (c) putChip(c); else if (chips[id]) dropChip(id);
     });
@@ -1151,8 +1218,7 @@
   // topicNote is the board's note for a topic, matched by attribute value so
   // a topic name needs no selector escaping.
   function topicNote(name) {
-    var b = region("board");
-    return (b ? q(".tnote[data-topic]", b) : []).filter(function (el) { return el.getAttribute("data-topic") === name; })[0] || null;
+    return boardQ(".tnote[data-topic]").filter(function (el) { return el.getAttribute("data-topic") === name; })[0] || null;
   }
   // clearTopicNote empties a topic's note through the input path a typed
   // edit takes, so the reply line, the chips, and holdsDraft follow.
@@ -1166,8 +1232,7 @@
   // stays, and the note's chip or pen opens it again. A focused note is
   // blurred first, so a board swap deferred while it was edited lands.
   function closeTopicNotes() {
-    var b = region("board");
-    (b ? q(".tnote[data-topic]", b) : []).forEach(function (el) {
+    boardQ(".tnote[data-topic]").forEach(function (el) {
       if (el.hidden) return;
       if (doc.activeElement === el) el.blur();
       el.hidden = true;
@@ -1505,11 +1570,11 @@
   // hostMention is the pending mention of this page's own selection, null
   // unless it lies in one topic card of the board, outside a form field.
   function hostMention() {
-    var sel = window.getSelection ? window.getSelection() : null, b = region("board");
-    if (!b || !sel || sel.isCollapsed || !sel.rangeCount) return null;
+    var sel = window.getSelection ? window.getSelection() : null;
+    if (!region("board") || !sel || sel.isCollapsed || !sel.rangeCount) return null;
     var a = selEl(sel.anchorNode), f = selEl(sel.focusNode), act = doc.activeElement;
-    if (!a || !f || !b.contains(a) || !b.contains(f)) return null;
-    if (act && /^(TEXTAREA|INPUT)$/.test(act.tagName) && b.contains(act)) return null;
+    if (!a || !f || !inBoard(a) || !inBoard(f)) return null;
+    if (act && /^(TEXTAREA|INPUT)$/.test(act.tagName) && inBoard(act)) return null;
     var ta = a.closest("section.topic[data-topic]");
     if (!ta || ta !== f.closest("section.topic[data-topic]")) return null;
     var m = mentionOf(ta.getAttribute("data-topic"), itemIdAt(sel.anchorNode), itemIdAt(sel.focusNode), sel.toString());
@@ -1594,8 +1659,7 @@
   // the item answers; they are no item's answer, so they are no answer
   // chip, and renderChips shows each as a topic-note chip.
   function topicNotes() {
-    var b = region("board");
-    return (b ? q(".tnote[data-topic]", b) : []).map(function (el) {
+    return boardQ(".tnote[data-topic]").map(function (el) {
       return { el: el, topic: el.getAttribute("data-topic"), value: el.value };
     }).filter(function (n) { return n.value.trim(); });
   }
@@ -1841,8 +1905,8 @@
     }).join("\u0002");
     if (!force && sig === sentSig) return;
     sentSig = sig;
-    q(".sentmark", b).forEach(function (m) { m.parentNode.removeChild(m); });
-    q(".sent-sent, .sent-held", b).forEach(function (el) { el.classList.remove("sent-sent", "sent-held"); });
+    boardQ(".sentmark").forEach(function (m) { m.parentNode.removeChild(m); });
+    boardQ(".sent-sent, .sent-held").forEach(function (el) { el.classList.remove("sent-sent", "sent-held"); });
     q(".sentdata i[data-id]").forEach(function (i) {
       var item = boardItem(i.getAttribute("data-id")), head = item && item.querySelector(".head, .stext");
       if (!head) return;
@@ -1916,7 +1980,7 @@
     // time an event bubbles here.
     ["input", "change"].forEach(function (type) {
       doc.addEventListener(type, function (e) {
-        if (!e.target.closest || !e.target.closest("#r-board")) return;
+        if (!inBoard(e.target)) return;
         syncChips();
       });
     });
@@ -1926,7 +1990,7 @@
   doc.addEventListener("click", function (e) {
     var t = e.target;
     if (!t || !t.closest) return;
-    if (cchips && t.closest("#r-board")) syncChips();
+    if (cchips && inBoard(t)) syncChips();
     var u = t.closest("[data-unchip]");
     if (u) { var uid = u.getAttribute("data-unchip"); dropChip(uid); setItem(uid, null); renderChips(); return; }
     u = t.closest("[data-untchip]");
@@ -4783,7 +4847,7 @@
   function tlHeldAsks() {
     var b = tlRoot("board"), live = region("board"), c = tlRoot("convlive"), drafted = {}, sent = {};
     if (!b) return 0;
-    if (live) q(TL_ASK, live).forEach(function (el) { if (tlDrafted(el)) drafted[el.getAttribute("data-id")] = 1; });
+    if (live) boardQ(TL_ASK).forEach(function (el) { if (tlDrafted(el)) drafted[el.getAttribute("data-id")] = 1; });
     if (c) q(".sentdata i[data-id]", c).forEach(function (i) { sent[i.getAttribute("data-id")] = 1; });
     return q(TL_ASK, b).filter(function (el) { var id = el.getAttribute("data-id"); return !drafted[id] && !sent[id]; }).length;
   }
@@ -4995,7 +5059,9 @@
   // workspaces in the order the user dragged them to, and collapses the
   // workspaces the user collapsed (rail.js keeps those in storage), and
   // opens the add popovers (the blocks after the drag's). From 1600px the
-  // rail is a column; below it the top-left arrow slides it in over the
+  // rail is a column, except below 2200px while the pinned column shows
+  // (data-pincol on the root, the board cards block): the pinned column
+  // takes its place. Otherwise the top-left arrow slides it in over the
   // page, and Esc, the scrim, or picking a session closes it. The arrow
   // stays a link to the sessions index for a modified click.
   var railEl = $("rail"), railBtn = $("railbtn"), rscrim = $("rscrim"), WsRail = window.WsRail;
@@ -5006,15 +5072,16 @@
   // the rail swap held back while it drags.
   var rdrag = null, railHeld = null;
   var RAIL_WIDE = window.matchMedia ? window.matchMedia("(min-width: 1600px)") : null;
+  var RAIL_XWIDE = window.matchMedia ? window.matchMedia("(min-width: 2200px)") : null;
   var RAIL_SCROLL_KEY = "ws.dashboard.railscroll";
   // rp is the open rail popover (the next blocks): its controller P, kind,
   // what it concerns (ws: a workspace, the folder a new session starts in,
   // or the viewed session), and the button it hangs from.
   var rp = { P: null, kind: "", ws: "", btn: null }, rpWs = null, rpWt = null, rpLead = null, rpSess = null, rpIds = 0;
-  function railWide() { return !!(RAIL_WIDE && RAIL_WIDE.matches); }
+  function railWide() { return !!(RAIL_WIDE && RAIL_WIDE.matches) && (!root.hasAttribute("data-pincol") || !!(RAIL_XWIDE && RAIL_XWIDE.matches)); }
   function railShown() { return root.classList.contains("rail-open"); }
   // railKey is Ctrl+`: from the page or a topic body frame, it toggles the
-  // overlay rail, and below 1600px only.
+  // overlay rail, and only while the rail overlays (railWide).
   function railKey() {
     if (!railEl || !WsRail || railWide()) return;
     railOpen(!railShown());
@@ -5052,8 +5119,8 @@
     });
     if (rscrim) rscrim.addEventListener("click", function () { railOpen(false); });
     doc.addEventListener("keydown", function (e) { if (e.key === "Escape" && railShown()) railOpen(false); });
-    // Ctrl+` (the physical key, so any layout) toggles the overlay rail; at
-    // 1600px and up the rail is a permanent column and the key is left alone.
+    // Ctrl+` (the physical key, so any layout) toggles the overlay rail;
+    // while the rail is a permanent column the key is left alone.
     // A topic body frame holding the focus hands the key over ({wbDoc:
     // "rail"}, the frame listener above).
     doc.addEventListener("keydown", function (e) {
@@ -5061,7 +5128,7 @@
       e.preventDefault();
       railKey();
     });
-    if (RAIL_WIDE && RAIL_WIDE.addEventListener) RAIL_WIDE.addEventListener("change", function () { railOpen(false); });
+    [RAIL_WIDE, RAIL_XWIDE].forEach(function (m) { if (m && m.addEventListener) m.addEventListener("change", function () { railOpen(false); }); });
     railEl.addEventListener("click", function (e) {
       var t = e.target;
       var star = t.closest && t.closest(".star");
@@ -6357,7 +6424,7 @@
     var d = {
       text: ctext ? ctext.value : "",
       mentions: mentions.map(function (m) { return { start: m.start, end: m.end, text: m.text }; }),
-      answers: b ? readAnswers(b) : {},
+      answers: b ? boardRead(readAnswers) : {},
       chips: chipList(),
       bmentions: bmentions.slice(),
       refs: imgs.filter(function (p) { return !!p.ref; }).map(function (p) { return { ref: p.ref, name: p.name, n: p.n }; }),
@@ -6395,7 +6462,7 @@
       }
       var b = region("board");
       if (b && d.answers && typeof d.answers === "object") {
-        writeAnswers(b, d.answers);
+        boardBoxes().forEach(function (box) { writeAnswers(box, d.answers); });
         if (window.wbForm) window.wbForm();
       }
       if (cchips && Array.isArray(d.chips)) {

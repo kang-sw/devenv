@@ -1361,6 +1361,66 @@ a[data-wl="file"]:not([href]) { color: inherit; }
   .rscrim { display: block; position: fixed; inset: 0; z-index: 44; background: var(--scrim); opacity: 0; pointer-events: none; transition: opacity .22s; }
   .rail-open .rscrim { opacity: 1; pointer-events: auto; }
 }
+/* ===== pinned column (cards.js, dashboard.js board cards) =====
+   Pinned topics and cards stand in the pin list (.bpins). It is the board
+   region's first node, a "Pinned" group, unless the pinned column shows:
+   from 1600px, while anything is pinned and the layout menu is not
+   "tabs", the page sets data-pincol on the root and the list moves into
+   the column (.bpcol), the page body's last grid column. Below 2200px the
+   column takes the session rail's place and the rail overlays as it does
+   below 1600px (the arrow and Ctrl+` open it); from 2200px both show. The
+   store page (.tk-spage) takes the hidden grid's cell in every one of
+   these grids. The column scrolls on its own; the handle on its left edge
+   drags its width (--pinw, kept by cards.js). */
+.bpcol { display: none; }
+.bpins:empty { display: none; }
+.r-board > .bpins { margin-bottom: 16px; padding-bottom: 6px; border-bottom: 1px dashed var(--wb-line); }
+.r-board > .bpins::before { content: attr(data-label); display: block; padding: 0 2px 6px; font-size: 11px; font-weight: 800; color: var(--wb-muted-fg); }
+.bp-hd { flex: none; display: flex; align-items: center; gap: 6px; padding: 4px 6px 8px 4px; font-size: 12px; font-weight: 800; color: var(--wb-muted-fg); }
+.bp-hd .li { width: 13px; height: 13px; }
+.bp-ct { font-size: 11px; font-weight: 700; padding: 0 7px; border-radius: 999px; background: var(--wb-muted); }
+.bpcol > .bpins { flex: 1 1 0; min-height: 0; overflow: auto; padding: 2px 4px 40px 2px; }
+.bp-edge { position: absolute; top: 0; bottom: 0; left: -12px; width: 9px; cursor: col-resize; touch-action: none; z-index: 2; }
+.bp-edge::after { content: ""; position: absolute; top: 50%; left: 3px; width: 3px; height: 36px; margin-top: -18px; border-radius: 2px; background: var(--wb-muted); transition: background .15s; }
+.bp-edge:hover::after, .bp-edge.drag::after { background: var(--wb-primary); }
+@media (min-width: 1600px) {
+  :root[data-pincol] .bpcol { display: flex; flex-direction: column; position: relative; min-height: 0; min-width: 0; grid-row: 1; grid-column: 2; }
+  :root[data-pincol] .dbody { grid-template-columns: minmax(0, 1fr) var(--pinw, 480px); }
+  :root[data-pincol] .dbody > .dgrid, :root[data-pincol] .dbody > .tk-spage { grid-column: 1; grid-row: 1; }
+  .dash:not(.live) .bpcol { position: sticky; top: 12px; max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px); }
+}
+@media (min-width: 1600px) and (max-width: 2199.98px) {
+  :root[data-pincol] .rail { position: fixed; z-index: 45; top: 12px; bottom: 12px; left: 12px; width: 340px; max-width: calc(100vw - 24px); max-height: none; box-shadow: var(--wb-shadow-hi); transform: translateX(calc(-100% - 20px)); visibility: hidden; transition: transform .22s cubic-bezier(.2, .7, .3, 1), visibility 0s linear .22s; }
+  :root[data-pincol].rail-open .rail { transform: none; visibility: visible; transition: transform .22s cubic-bezier(.2, .7, .3, 1); }
+  :root[data-pincol] .rscrim { display: block; position: fixed; inset: 0; z-index: 44; background: var(--scrim); opacity: 0; pointer-events: none; transition: opacity .22s; }
+  :root[data-pincol].rail-open .rscrim { opacity: 1; pointer-events: auto; }
+  :root[data-pincol] .top > .back { display: inline-flex; }
+}
+@media (min-width: 2200px) {
+  :root[data-pincol] .dbody { grid-template-columns: 340px minmax(0, 1fr) var(--pinw, 480px); }
+  :root[data-pincol] .dbody > .rail { grid-column: 1; grid-row: 1; }
+  :root[data-pincol] .dbody > .dgrid, :root[data-pincol] .dbody > .tk-spage { grid-column: 2; }
+  :root[data-pincol] .bpcol { grid-column: 3; }
+}
+/* the pin button in a topic's title bar, and dragging a topic or card by
+   its header: the dragged one dims, a line shows where it lands, and the
+   drop zones show while a drag runs (data-bdrag on the root): the empty
+   pin group atop the board ("group"), or the zone along the right edge
+   where a first pin opens the pinned column ("edge"). */
+.tbar .tpin { color: inherit; opacity: .45; }
+.tbar:hover .tpin, .tbar .tpin:focus-visible { opacity: .9; }
+.tbar .tpin[aria-pressed="true"] { opacity: 1; color: var(--wb-primary); }
+.tbar .tpin[aria-pressed="true"] .li, .bc-pin[aria-pressed="true"] .li { fill: color-mix(in srgb, var(--wb-primary) 25%, transparent); }
+.r-board section.topic > .tbar, .bpins section.topic > .tbar, .bc-hd { cursor: grab; }
+:root[data-bdrag], :root[data-bdrag] * { cursor: grabbing !important; -webkit-user-select: none; user-select: none; }
+.bdrag { opacity: .4; }
+.bdrop { position: fixed; z-index: 46; height: 3px; border-radius: 2px; background: var(--wb-primary); pointer-events: none; }
+.bdrop[hidden] { display: none; }
+:root[data-bdrag="group"] .r-board > .bpins:empty { display: block; position: sticky; top: var(--wb-rail-inset, 0px); z-index: 5; min-height: 54px; padding: 0; border: 1.5px dashed var(--wb-primary); border-radius: var(--wb-radius); background: color-mix(in srgb, var(--wb-primary) 6%, var(--wb-bg)); }
+:root[data-bdrag="group"] .r-board > .bpins:empty::before { content: attr(data-drop); padding: 18px 12px; text-align: center; color: var(--wb-primary); }
+.bpzone { position: fixed; z-index: 40; top: 64px; bottom: 16px; right: 12px; width: min(380px, 24vw); display: none; place-items: center; padding: 12px; border: 2px dashed var(--wb-primary); border-radius: var(--wb-radius); background: color-mix(in srgb, var(--wb-primary) 8%, var(--wb-bg)); color: var(--wb-primary); font-weight: 800; font-size: 13px; text-align: center; pointer-events: none; }
+:root[data-bdrag="edge"] .bpzone { display: grid; }
+.bpzone.over { background: color-mix(in srgb, var(--wb-primary) 18%, var(--wb-bg)); }
 .rail .rhd { flex: none; display: flex; align-items: center; gap: 6px; padding: 8px 8px 8px 12px; font-size: 12px; font-weight: 800; color: var(--wb-muted-fg); }
 .rail .rsp { flex: 1; }
 .rail .chip { height: 18px; font-size: 11px; padding: 0 7px; flex: none; }

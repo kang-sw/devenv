@@ -10,8 +10,10 @@ import (
 // the frame hands the key to the host as {wbDoc: "rail"} (wswhiteboard
 // TestDocFrameHandsRailKey), and the host's frame listener, which answers
 // only its own body frames (docFrame), runs railKey, the page keydown's own
-// path: it toggles the overlay rail below 1600px and leaves the permanent
-// column alone. The cases execute under node when it is installed.
+// path: it toggles the overlay rail below 1600px, and below 2200px while
+// the pinned column takes the rail's place (data-pincol on the root), and
+// leaves the permanent column alone. The cases execute under node when it
+// is installed.
 func TestRailKeyFromDocFrame(t *testing.T) {
 	js := mustAsset(t, "dashboard.js")
 	if !strings.Contains(js, "e.shiftKey || e.isComposing || railWide()) return;\n      e.preventDefault();\n      railKey();") {
@@ -35,10 +37,10 @@ func TestRailKeyFromDocFrame(t *testing.T) {
 	runNode(t, "rail key from a doc frame", `
 var bad = [];
 function check(what, got, want) { if (JSON.stringify(got) !== JSON.stringify(want)) bad.push(what + ": got " + JSON.stringify(got) + ", want " + JSON.stringify(want)); }
-var cls = {};
-var root = { classList: { contains: function (c) { return !!cls[c]; }, toggle: function (c, on) { cls[c] = !!on; } } };
+var cls = {}, attrs = {};
+var root = { classList: { contains: function (c) { return !!cls[c]; }, toggle: function (c, on) { cls[c] = !!on; } }, hasAttribute: function (a) { return !!attrs[a]; } };
 var railEl = {}, railBtn = { setAttribute: function () {} }, WsRail = {};
-var RAIL_WIDE = { matches: false };
+var RAIL_WIDE = { matches: false }, RAIL_XWIDE = { matches: false };
 var frameWin = {}, otherWin = {}, frameEl = { tag: "iframe.doc-frame" };
 function docFrame(win) { return win === frameWin ? frameEl : undefined; }
 var handler = null;
@@ -54,6 +56,13 @@ check("a window that is no doc frame is ignored", !!cls["rail-open"], false);
 RAIL_WIDE.matches = true;
 send(frameWin, { wbDoc: "rail" });
 check("at 1600px and up the key is left alone", !!cls["rail-open"], false);
+attrs["data-pincol"] = true;
+send(frameWin, { wbDoc: "rail" });
+check("at 1800px with a pin the key opens the overlay", !!cls["rail-open"], true);
+send(frameWin, { wbDoc: "rail" });
+RAIL_XWIDE.matches = true;
+send(frameWin, { wbDoc: "rail" });
+check("from 2200px the rail is a column again, pin or not", !!cls["rail-open"], false);
 process.stdout.write(bad.join("\n"));
 `)
 }

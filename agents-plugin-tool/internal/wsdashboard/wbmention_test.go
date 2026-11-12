@@ -33,6 +33,7 @@ func TestBoardMentionFromSelection(t *testing.T) {
 		}
 		src.WriteString(block)
 	}
+	src.WriteString(boardBoxSrc(t, js))
 	runNode(t, "board mention", `
 function El(tag, cls, attrs) { this.tagName = tag.toUpperCase(); this.nodeType = 1; this.className = cls || ""; this.attrs = attrs || {}; this.parentNode = null; this.children = []; }
 El.prototype.add = function (c) { c.parentNode = this; this.children.push(c); return c; };
