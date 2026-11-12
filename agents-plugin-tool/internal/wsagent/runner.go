@@ -157,9 +157,10 @@ type Runner struct {
 	quit   chan struct{}
 	wg     sync.WaitGroup
 	once   sync.Once
-	// scanned is closed once the holder manager's first scan returned
-	// (scanDone).
-	scanned chan struct{}
+	// scanned is closed once the holder manager's first scan returned, or
+	// at Start when there is no manager (scanDone); scanOnce closes it.
+	scanned  chan struct{}
+	scanOnce sync.Once
 
 	// holders routes the session holders' events to the lead processes.
 	holders holderTable
@@ -224,15 +225,23 @@ func (r *Runner) Start(notify func(replyID, project string)) {
 			r.startConv(rec)
 		}
 	}
-	if r.opts.Holders != nil {
-		r.wg.Add(1)
-		go func() {
-			defer r.wg.Done()
-			r.opts.Holders.Scan()
-			close(r.scanned)
-			r.holdersScanned()
-		}()
+	if r.opts.Holders == nil {
+		// No holder to wait for.
+		r.markScanned()
+		return
 	}
+	r.wg.Add(1)
+	go func() {
+		defer r.wg.Done()
+		r.opts.Holders.Scan()
+		r.markScanned()
+		r.holdersScanned()
+	}()
+}
+
+// markScanned closes scanned, once however often it is called.
+func (r *Runner) markScanned() {
+	r.scanOnce.Do(func() { close(r.scanned) })
 }
 
 // holdersScanned follows the first holder scan of this daemon: each

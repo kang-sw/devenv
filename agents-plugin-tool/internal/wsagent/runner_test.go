@@ -459,3 +459,22 @@ func TestRunnerSuiteOnPi(t *testing.T) {
 		t.Run(name, test)
 	}
 }
+
+// TestRunnerWithoutHoldersIsScannedAtStart: with no holder manager there is
+// no first scan to wait for, so Start marks it done at once, and a second
+// Start does not close it again.
+func TestRunnerWithoutHoldersIsScannedAtStart(t *testing.T) {
+	r := NewRunner(Options{Dir: t.TempDir()})
+	t.Cleanup(r.Close)
+	if r.scanDone() {
+		t.Fatal("scanned before Start")
+	}
+	r.Start(nil)
+	if !r.scanDone() {
+		t.Fatal("a runner with no holder manager waits for a scan that never comes")
+	}
+	r.Start(nil)
+	if !r.scanDone() {
+		t.Fatal("scanned no longer reads done")
+	}
+}
