@@ -695,6 +695,50 @@ func TestRefusedBreakawayStartsAHolderMarkedNotRestartSafe(t *testing.T) {
 	}
 }
 
+// TestLaunchRingBytes pins the ring size a start asks of a holder: a
+// launch's own RingBytes, else the manager's, else none (the holder's own
+// default).
+func TestLaunchRingBytes(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		manager, spec int
+		want          string
+	}{
+		{"holder default", 0, 0, ""},
+		{"manager default", 512, 0, "512"},
+		{"per launch", 512, 4096, "4096"},
+		{"per launch only", 0, 4096, "4096"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var got []string
+			applies := false
+			m := New(Options{
+				Dir:       testHoldersDir(t),
+				Python:    "python3",
+				RingBytes: tc.manager,
+				breakaway: &applies,
+				start: func(exe string, args []string, cwd string, breakaway bool) (*exec.Cmd, error) {
+					got = args
+					return nil, errors.New("not started")
+				},
+			})
+			t.Cleanup(m.Close)
+			if _, err := m.LaunchWith(LaunchSpec{RingBytes: tc.spec}); err == nil {
+				t.Fatal("LaunchWith with a failing start succeeded")
+			}
+			ring := ""
+			for i, arg := range got {
+				if arg == "--ring-bytes" && i+1 < len(got) {
+					ring = got[i+1]
+				}
+			}
+			if ring != tc.want {
+				t.Fatalf("--ring-bytes = %q, want %q (args %q)", ring, tc.want, got)
+			}
+		})
+	}
+}
+
 // TestAttachSpeaksTheHoldersOlderProtocol pins version tolerance from the
 // daemon's side: a daemon one version ahead still attaches to the holder,
 // speaking the holder's version.

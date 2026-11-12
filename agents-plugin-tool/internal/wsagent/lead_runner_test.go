@@ -890,6 +890,121 @@ func TestLeadRejoinsItsProcessAfterADaemonRestart(t *testing.T) {
 	}
 }
 
+// TestLeadRejoinOfAWrappedRingHoldsInput: a lead's holder keeps a ring
+// larger than the manager's default, and a rejoin whose ring no longer
+// holds the turn's start (its first record is past the one the record
+// names) takes the turn as running: a message and mail sent meanwhile wait
+// for the harness's next turn end, then go once.
+func TestLeadRejoinOfAWrappedRingHoldsInput(t *testing.T) {
+	h := newLeadHarness(t).start()
+	id, holder := h.runLead("one")
+	if got := h.holders.launchRing(holder); got != leadRingBytes {
+		t.Fatalf("a lead's holder ring = %d bytes, want %d", got, leadRingBytes)
+	}
+	key := h.record(id).WSKey
+	h.holders.out(holder, turnLines("sess-1", "u1", "first")...)
+	h.idle(id)
+	h.send(id, "two")
+	h.holders.out(holder, stateLine(HarnessRunning), initLine("sess-1", "auto"))
+	h.sync(id, holder)
+	h.runner.Close()
+	h.holders.restart()
+
+	// The turn works on while no daemon runs, and its ring drops all but
+	// the last record: a tool result, which tells nothing of the turn.
+	h.holders.out(holder, toolResultLine("toolu_1"), toolResultLine("toolu_2"))
+	h.holders.trim(holder, h.holders.records(holder)-1)
+	h.start()
+	eventually(t, "the rejoin to take the turn as running", func() bool {
+		st := h.state(id)
+		return st.Process && st.Status == StatusRunning
+	})
+	h.send(id, "three")
+	h.mail.deliver(key, "From a@x: ping")
+	eventually(t, "the mail to be claimed", func() bool { return slices.Equal(h.record(id).Mail, []string{"From a@x: ping"}) })
+	h.sync(id, holder)
+	if got := h.userInputs(holder); !slices.Equal(got, []string{"one", "two"}) || h.state(id).Held != 2 {
+		t.Fatalf("input waits for the turn's end: written %q, state %+v", got, h.state(id))
+	}
+	if n := strings.Count(h.log.String(), "with no turn boundary after them"); n != 1 {
+		t.Fatalf("the loss should be logged once, logged %d times:\n%s", n, h.log.String())
+	}
+
+	h.holders.out(holder, replyLine("u2", "second"), resultLine(), stateLine(HarnessIdle))
+	eventually(t, "the held input as the next turn", func() bool {
+		return slices.Equal(h.userInputs(holder), []string{"one", "two", "three\n\nFrom a@x: ping"})
+	})
+	h.sync(id, holder)
+	if got := h.userInputs(holder); len(got) != 3 || h.state(id).Held != 0 {
+		t.Fatalf("the held input goes once: written %q, state %+v", got, h.state(id))
+	}
+	if strings.Count(h.log.String(), "left its ring") != 1 {
+		t.Fatalf("the loss should be logged once:\n%s", h.log.String())
+	}
+}
+
+// TestLeadRejoinOfAWrappedRingTrustsATurnBoundary: when the records after
+// the loss show the turn's end, the rejoin takes the state they show, and a
+// message sent after it goes at once.
+func TestLeadRejoinOfAWrappedRingTrustsATurnBoundary(t *testing.T) {
+	h := newLeadHarness(t).start()
+	id, holder := h.runLead("one")
+	h.holders.out(holder, stateLine(HarnessRunning), initLine("sess-1", "auto"))
+	h.sync(id, holder)
+	h.runner.Close()
+	h.holders.restart()
+	h.holders.out(holder, toolResultLine("toolu_1"), replyLine("u1", "first"), resultLine(), stateLine(HarnessIdle))
+	h.holders.trim(holder, h.holders.records(holder)-2)
+	h.start()
+	eventually(t, "the rejoined session to be idle", func() bool {
+		st := h.state(id)
+		return st.Process && st.Status == StatusIdle
+	})
+	h.send(id, "two")
+	eventually(t, "the message to go at once", func() bool { return slices.Equal(h.userInputs(holder), []string{"one", "two"}) })
+	if log := h.log.String(); !strings.Contains(log, "the turn state is the one the records after them show") || strings.Contains(log, "with no turn boundary after them") {
+		t.Fatalf("the loss should be logged as covered by a turn boundary:\n%s", log)
+	}
+}
+
+// TestLeadRejoinGapHoldsInputAndDropsAPartialLine: records that leave the
+// ring while the replay streams arrive as a gap. A line in progress before
+// it is dropped, not spliced onto the line after it; and the turn boundary
+// before the gap (an idle state) does not count, so the turn is taken as
+// running until the harness ends one.
+func TestLeadRejoinGapHoldsInputAndDropsAPartialLine(t *testing.T) {
+	h := newLeadHarness(t).start()
+	id, holder := h.runLead("one")
+	h.holders.out(holder, turnLines("sess-1", "u1", "first")...)
+	h.idle(id)
+	h.sync(id, holder)
+	h.runner.Close()
+	h.holders.restart()
+
+	// While no daemon runs: a line read in two parts, then a turn starts;
+	// all of it but the line's first part leaves the ring mid-replay.
+	h.holders.outRaw(holder, `{"type":"assistant","uuid":"u9","mess`, true)
+	partial := uint64(h.holders.records(holder))
+	h.holders.outRaw(holder, `age":{"id":"msg-u9","content":[]}}`+"\n", false)
+	h.holders.out(holder, stateLine(HarnessRunning), initLine("sess-1", "auto"), tasksLine(7))
+	h.holders.gapOnReplay(holder, partial+1, partial+4)
+	h.start()
+	eventually(t, "the line after the gap and the turn taken as running", func() bool {
+		st := h.state(id)
+		return st.Process && st.BackgroundTasks == 7 && st.Status == StatusRunning
+	})
+	h.send(id, "two")
+	h.sync(id, holder)
+	if got := h.userInputs(holder); !slices.Equal(got, []string{"one"}) || h.state(id).Held != 1 {
+		t.Fatalf("the message waits for the turn's end: written %q, state %+v", got, h.state(id))
+	}
+	if n := strings.Count(h.log.String(), "with no turn boundary after them"); n != 1 {
+		t.Fatalf("the loss should be logged once, logged %d times:\n%s", n, h.log.String())
+	}
+	h.holders.out(holder, replyLine("u2", "second"), resultLine(), stateLine(HarnessIdle))
+	eventually(t, "the held message as the next turn", func() bool { return slices.Equal(h.userInputs(holder), []string{"one", "two"}) })
+}
+
 // TestLeadAnsweredPromptStaysAnsweredAcrossADaemonRestart: the answer to a
 // prompt goes to the process's input, which the holder's ring does not
 // hold, so the next daemon's replay shows the prompt's request with no sign

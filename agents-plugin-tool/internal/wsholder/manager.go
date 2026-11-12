@@ -509,17 +509,32 @@ func (m *Manager) python() (string, error) {
 	return path, nil
 }
 
+// LaunchSpec is one holder start.
+type LaunchSpec struct {
+	// Session is a JSON object the holder records in its descriptor, nil
+	// for none.
+	Session json.RawMessage
+	// RingBytes is the size of this holder's output ring; zero is
+	// Options.RingBytes.
+	RingBytes int
+}
+
 // Launch starts a new holder for session (a JSON object the holder records
 // in its descriptor, nil for none), waits for its descriptor, and attaches.
 // A failure is also kept for the listing.
 func (m *Manager) Launch(session json.RawMessage) (string, error) {
+	return m.LaunchWith(LaunchSpec{Session: session})
+}
+
+// LaunchWith is Launch for a holder the spec tunes.
+func (m *Manager) LaunchWith(spec LaunchSpec) (string, error) {
 	m.opMu.Lock()
 	defer m.opMu.Unlock()
-	id, err := m.launch(session)
+	id, err := m.launch(spec)
 	if err != nil {
 		m.logf("holder start failed: %v", err)
 		m.mu.Lock()
-		m.failures = append(m.failures, StartFailure{At: time.Now().UnixMilli(), Message: err.Error(), Session: session})
+		m.failures = append(m.failures, StartFailure{At: time.Now().UnixMilli(), Message: err.Error(), Session: spec.Session})
 		if len(m.failures) > maxFailures {
 			m.failures = m.failures[len(m.failures)-maxFailures:]
 		}
@@ -529,10 +544,11 @@ func (m *Manager) Launch(session json.RawMessage) (string, error) {
 	return id, nil
 }
 
-func (m *Manager) launch(session json.RawMessage) (string, error) {
+func (m *Manager) launch(spec LaunchSpec) (string, error) {
 	if m.isClosed() {
 		return "", errors.New("the holder manager is closed")
 	}
+	session := spec.Session
 	if len(session) == 0 {
 		session = json.RawMessage("{}")
 	}
@@ -554,8 +570,12 @@ func (m *Manager) launch(session json.RawMessage) (string, error) {
 		return "", err
 	}
 	args := []string{scriptPath, "--dir", dir, "--id", id, "--session", string(session)}
-	if m.opts.RingBytes > 0 {
-		args = append(args, "--ring-bytes", strconv.Itoa(m.opts.RingBytes))
+	ring := spec.RingBytes
+	if ring <= 0 {
+		ring = m.opts.RingBytes
+	}
+	if ring > 0 {
+		args = append(args, "--ring-bytes", strconv.Itoa(ring))
 	}
 	args = append(args, m.opts.holderArgs...)
 	// The holder runs in the holders directory, not its own, so it can

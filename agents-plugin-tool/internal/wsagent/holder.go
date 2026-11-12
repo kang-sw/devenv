@@ -29,9 +29,9 @@ type HolderHost interface {
 	// Scan attaches to every holder not attached yet.
 	Scan()
 	List() wsholder.Listing
-	// Launch starts a holder that records session in its descriptor and
-	// returns its id.
-	Launch(session json.RawMessage) (string, error)
+	// LaunchWith starts a holder that records spec.Session in its
+	// descriptor and returns its id.
+	LaunchWith(spec wsholder.LaunchSpec) (string, error)
 	Spawn(id string, spec wsholder.SpawnSpec) (wsholder.ChildStatus, error)
 	Input(id string, data []byte, eof bool) error
 	Status(id string) (wsholder.AttachInfo, error)
@@ -69,6 +69,13 @@ func (h ManagerHost) Status(id string) (wsholder.AttachInfo, error) {
 // holderKindLead is the kind a lead conversation's holder records in its
 // descriptor.
 const holderKindLead = "lead"
+
+// leadRingBytes is the output ring of a lead conversation's holder. A
+// rejoin rebuilds the turn state from the ring, so it holds a long turn's
+// output whole: one agentic turn echoing large tool results outgrows the
+// holder's 4 MiB default. The holder fills it as output comes. Terminal
+// holders keep the manager's default.
+const leadRingBytes = 32 << 20
 
 // holderSession is the descriptor a lead conversation's holder records.
 type holderSession struct {
@@ -139,7 +146,11 @@ type holderChild struct {
 	replaying bool
 	target    uint64
 	targetSet bool
-	stopErr   error
+	// wrapped is set by replayUntil when the holder's ring no longer held
+	// the record after skipTo: the records between left it while no daemon
+	// was attached.
+	wrapped bool
+	stopErr error
 }
 
 // start makes h the child of p: it attaches to the holder h.id names, or
@@ -156,7 +167,7 @@ func (h *holderChild) start(p *streamProcess, cmd *exec.Cmd) error {
 	if err != nil {
 		return err
 	}
-	id, err := h.host.Launch(raw)
+	id, err := h.host.LaunchWith(wsholder.LaunchSpec{Session: raw, RingBytes: leadRingBytes})
 	if err != nil {
 		return fmt.Errorf("start a session holder: %w", err)
 	}
@@ -228,6 +239,14 @@ func (h *holderChild) event(ev wsholder.Event) {
 				h.proc.feed(line, ev.Seq, ev.Seq <= h.skipTo)
 			}
 		}
+	case "gap":
+		// The records From..To-1 left the ring before they reached this
+		// daemon: a line in progress lost its middle and is no line.
+		h.partial = nil
+		if ev.To > 0 {
+			h.seen(ev.To - 1)
+		}
+		h.proc.deliver(Event{ReplayGap: true})
 	case "exit":
 		h.seen(ev.Seq)
 		var err error
@@ -251,12 +270,14 @@ func (h *holderChild) seen(seq uint64) {
 	h.mu.Unlock()
 }
 
-// replayUntil tells an attached process the last record sequence the holder
-// held when the daemon attached: once it has been delivered the process
-// sends ReplayDone.
-func (h *holderChild) replayUntil(target uint64) {
+// replayUntil tells an attached process the first and the last record
+// sequence the holder held when the daemon attached: once the last has been
+// delivered the process sends ReplayDone, marked ReplayLost when the first
+// is past the record after skipTo.
+func (h *holderChild) replayUntil(first, target uint64) {
 	h.mu.Lock()
 	h.target, h.targetSet = target, true
+	h.wrapped = first > h.skipTo+1
 	h.mu.Unlock()
 	h.checkReplayed()
 }
@@ -267,9 +288,10 @@ func (h *holderChild) checkReplayed() {
 	if done {
 		h.replaying = false
 	}
+	wrapped := h.wrapped
 	h.mu.Unlock()
 	if done {
-		h.proc.deliver(Event{ReplayDone: true})
+		h.proc.deliver(Event{ReplayDone: true, ReplayLost: wrapped})
 	}
 }
 
@@ -284,9 +306,9 @@ func (p *streamProcess) HolderInfo() (id string, pid int, ok bool) {
 }
 
 // ReplayUntil is holderChild.replayUntil for a process under a holder.
-func (p *streamProcess) ReplayUntil(target uint64) {
+func (p *streamProcess) ReplayUntil(first, target uint64) {
 	if p.holder != nil {
-		p.holder.replayUntil(target)
+		p.holder.replayUntil(first, target)
 	}
 }
 
@@ -305,7 +327,7 @@ func (p *streamProcess) StopError() error {
 // claudeProcess and piProcess have it through their streamProcess.
 type holderProcess interface {
 	HolderInfo() (id string, pid int, ok bool)
-	ReplayUntil(target uint64)
+	ReplayUntil(first, target uint64)
 	StopError() error
 	Detach() bool
 }

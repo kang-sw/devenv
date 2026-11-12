@@ -919,6 +919,15 @@ type conv struct {
 	// replay is what tells whether one runs.
 	replaying   bool
 	replayAsked bool
+	// replayGap is set when records left the holder's ring during the
+	// replay, and replayBoundary when the replay showed a turn begin or
+	// end after the last such loss. wrapHold is set from a rejoin that lost
+	// records with no turn boundary after them (replayDone) until the
+	// harness's next turn end: the turn is taken as running, since its
+	// start may be among the lost records, and nothing is submitted.
+	replayGap      bool
+	replayBoundary bool
+	wrapHold       bool
 	// seq is the last holder record sequence applied whole; seqDirty that
 	// the record does not hold it yet, and ringDirty that a ring entry was
 	// written since, which makes the next line end persist it at once.
@@ -1026,9 +1035,10 @@ func (c *conv) inboxChanged() {
 // the user marked them to reach the harness now, not at the turn's end.
 // They join the running turn, so no turn starts. Messages not marked stay
 // held, with no turn running a marked one is an ordinary send (kick), and
-// a backend that takes no message mid-turn keeps it held.
+// a backend that takes no message mid-turn, or a rejoin that cannot tell
+// whether the turn runs (wrapHold), keeps it held.
 func (c *conv) steer() {
-	if !c.rec.Lead || !c.turn || c.proc == nil || c.replaying || c.closed {
+	if !c.rec.Lead || !c.turn || c.proc == nil || c.replaying || c.wrapHold || c.closed {
 		return
 	}
 	st, ok := c.proc.(steerer)
@@ -1626,14 +1636,30 @@ func (c *conv) checkReattach() {
 			c.do(func() { c.replayAsked = false })
 			return
 		}
-		hp.ReplayUntil(st.NextSeq - 1)
+		hp.ReplayUntil(st.FirstSeq, st.NextSeq-1)
 	}()
 }
 
 // replayDone ends a rejoin: the state the holder's records rebuilt is
-// written, and the conversation takes input again.
-func (c *conv) replayDone() {
-	c.replaying, c.replayAsked = false, false
+// written, and the conversation takes input again. A replay that lost
+// records (lost: the ring began past the record the runner applied last;
+// or a gap during it) and showed no turn boundary after them cannot tell
+// whether a turn runs: the turn is taken as running, and nothing is
+// submitted until the harness ends one (wrapHold), since a message sent
+// into a running turn may be refused.
+func (c *conv) replayDone(lost bool) {
+	lost = lost || c.replayGap
+	boundary := c.replayBoundary
+	c.replaying, c.replayAsked, c.replayGap, c.replayBoundary = false, false, false, false
+	if lost {
+		if boundary {
+			fmt.Fprintf(c.r.opts.Log, "agent %s: records of holder %s left its ring before this daemon replayed them; the turn state is the one the records after them show\n", c.rec.ReplyID, c.rec.HolderID)
+		} else {
+			fmt.Fprintf(c.r.opts.Log, "agent %s: records of holder %s left its ring before this daemon replayed them, with no turn boundary after them; the turn is taken as running and nothing is submitted until the harness ends one\n", c.rec.ReplyID, c.rec.HolderID)
+			c.wrapHold = true
+			c.beginTurn(false)
+		}
+	}
 	c.checkAction(false)
 	c.live.writeSnapshot()
 	c.r.notify(c.rec.ReplyID, c.rec.Root)
@@ -1709,7 +1735,11 @@ func (c *conv) handle(ev Event) {
 	case ev.LineEnd:
 		c.lineEnd(ev.Seq)
 	case ev.ReplayDone:
-		c.replayDone()
+		c.replayDone(ev.ReplayLost)
+	case ev.ReplayGap:
+		if c.replaying {
+			c.replayGap, c.replayBoundary = true, false
+		}
 	case ev.SessionID != "":
 		if ev.SessionID != c.rec.SessionID {
 			c.update(func(rec *Record) { rec.SessionID = ev.SessionID })
@@ -1738,8 +1768,10 @@ func (c *conv) handle(ev Event) {
 		fmt.Fprintf(c.r.opts.Log, "agent %s: %v\n", c.rec.ReplyID, ev.Fatal)
 		c.stopProcess("")
 	case ev.TurnStart:
+		c.replayBoundary = c.replayBoundary || c.replaying
 		c.beginTurn(quiet)
 	case ev.TurnEnd:
+		c.replayBoundary = c.replayBoundary || c.replaying
 		c.endTurn(ev.TurnError, quiet)
 	case ev.Approval != nil:
 		c.addApproval(*ev.Approval, quiet)
@@ -1834,6 +1866,7 @@ func (c *conv) endTurn(turnErr string, quiet bool) {
 	if c.replaying {
 		return
 	}
+	c.wrapHold = false
 	c.applySettings()
 	c.restartIfDue()
 	c.kick()
@@ -2034,6 +2067,7 @@ func (c *conv) processGone() {
 // prompts, and what it last reported.
 func (c *conv) processEnded() {
 	c.stopIdle()
+	c.wrapHold = false
 	if c.turn {
 		c.setStatus(func() { c.turn = false })
 		c.apply(wslive.Event{Kind: wslive.KindTurnEnd})
