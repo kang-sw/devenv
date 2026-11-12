@@ -105,7 +105,8 @@ func TestTopicBarShowsItsLatestChange(t *testing.T) {
 // TestTopicBarCarriesANotePen pins the topic note's markup: every topic bar
 // on both layouts ends with a pen, the topic holds a hidden note box keyed by
 // its name, the reply bar renders (hidden) even on a board with nothing to
-// answer, and the form script builds the "[topic] text" line from it.
+// answer, and the form script hands it to the answer block (answers.js,
+// inlined on both layouts) as a topic note.
 func TestTopicBarCarriesANotePen(t *testing.T) {
 	st := &State{}
 	mustApply(t, st, `<wb:topic name='say "hi"'><wb:body>body</wb:body></wb:topic>`+addXML(ClassTechnical, "asks", "x"))
@@ -115,7 +116,7 @@ func TestTopicBarCarriesANotePen(t *testing.T) {
 		wantAll(t, out, pen,
 			`<textarea class="note tnote" data-topic="say &#34;hi&#34;" rows="1" placeholder="✎" title="note on this topic" hidden></textarea>`,
 			`<textarea class="note tnote" data-topic="asks"`,
-			`"[" + n.getAttribute("data-topic") + "] " + note`)
+			`topic: n.getAttribute("data-topic"), note: n.value`, `window.wbAnswers = (function () {`)
 		if strings.Count(out, pen) != 2 {
 			t.Errorf("%s: %d topic pens, want 2", name, strings.Count(out, pen))
 		}
@@ -248,7 +249,7 @@ func TestClosedTopicCapRenders(t *testing.T) {
 
 // TestStemmedTopicPageNamesItsKey pins how a stemmed topic renders: the
 // section's and the topic note's data-topic carry the key (the stem), which
-// the page's "[<topic>] text" note lines are built from, and the visible
+// the page's "[<topic>]^text" note lines are built from, and the visible
 // name is the label; a stemless topic's key is its label.
 func TestStemmedTopicPageNamesItsKey(t *testing.T) {
 	st := &State{}
@@ -265,7 +266,7 @@ func TestStemmedTopicPageNamesItsKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(formJS), `"[" + n.getAttribute("data-topic") + "] "`) {
+	if !strings.Contains(string(formJS), `topic: n.getAttribute("data-topic")`) {
 		t.Fatalf("form.js no longer builds topic-note lines from data-topic")
 	}
 }

@@ -24,10 +24,24 @@ type HeldView struct {
 	// At is the first send's time (epoch ms).
 	At int64
 	// Parts are the merged sends' texts; the bubble divides them.
-	Parts []string
-	Chips []wsinbox.Chip
+	Parts  []string
+	Chips  []wsinbox.Chip
+	Topics []wsinbox.TopicNote
 	// Images are the entry's attached images.
 	Images []AttachmentView
+}
+
+// Answers are the held message's chips and topic notes as the capsules a
+// delivered message's answer block shows (ConvEntry.Answers), one per chip.
+func (h HeldView) Answers() []wsinbox.AnswerLine {
+	var out []wsinbox.AnswerLine
+	for _, c := range h.Chips {
+		out = append(out, wsinbox.AnswerLine{IDs: c.ID, Value: c.Answer, Note: c.Note})
+	}
+	for _, t := range h.Topics {
+		out = append(out, wsinbox.AnswerLine{Topic: t.Topic, Note: t.Note})
+	}
+	return out
 }
 
 // AttachmentView is one image a message carries. Src is the attachment
@@ -70,12 +84,17 @@ func regularFile(path string) bool {
 	return err == nil && info.Mode().IsRegular()
 }
 
-// userEntryImages takes each user entry's attached images out of its text
-// (userImages).
-func userEntryImages(entries []ConvEntry, attachDir, replyID string) {
+// splitUserEntries takes each user entry's answer block
+// (wsinbox.ParseAnswerBlock) and attached images (userImages) out of its
+// text; a malformed block stays in the text.
+func splitUserEntries(entries []ConvEntry, attachDir, replyID string) {
 	for i, e := range entries {
 		if e.Kind == wslive.RingUser {
-			entries[i].Text, entries[i].Images = userImages(e.Text, attachDir, replyID)
+			text := e.Text
+			if lines, rest, ok := wsinbox.ParseAnswerBlock(text); ok {
+				entries[i].Answers, text = lines, rest
+			}
+			entries[i].Text, entries[i].Images = userImages(text, attachDir, replyID)
 		}
 	}
 }
@@ -122,7 +141,7 @@ type SentMark struct {
 func heldViews(held []wsinbox.Record, attachDir, replyID string) []HeldView {
 	out := make([]HeldView, 0, len(held))
 	for _, r := range held {
-		v := HeldView{ID: r.ID(), Steer: r.Entry.Steer, At: r.Entry.SentAt, Parts: r.Entry.Parts, Chips: r.Entry.Chips}
+		v := HeldView{ID: r.ID(), Steer: r.Entry.Steer, At: r.Entry.SentAt, Parts: r.Entry.Parts, Chips: r.Entry.Chips, Topics: r.Entry.Topics}
 		nums := r.Entry.Nums()
 		for i, path := range r.Entry.Images {
 			v.Images = append(v.Images, attachmentView(attachDir, replyID, nums[i], path))

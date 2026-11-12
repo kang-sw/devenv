@@ -23,11 +23,12 @@ const dashboardInboxDrainTool = "dashboard.inbox_drain"
 
 // dashboardInboxMessage is one drained message in the JSON output.
 type dashboardInboxMessage struct {
-	ID     string         `json:"id"`
-	SentAt int64          `json:"sent_at"`
-	Text   string         `json:"text"`
-	Parts  []string       `json:"parts"`
-	Chips  []wsinbox.Chip `json:"chips"`
+	ID     string              `json:"id"`
+	SentAt int64               `json:"sent_at"`
+	Text   string              `json:"text"`
+	Parts  []string            `json:"parts"`
+	Chips  []wsinbox.Chip      `json:"chips"`
+	Topics []wsinbox.TopicNote `json:"topics"`
 	// Interrupt marks an interrupt entry, which carries no text.
 	Interrupt bool `json:"interrupt,omitempty"`
 }
@@ -79,14 +80,17 @@ func (s *Server) handleDashboardInboxDrain(id json.RawMessage, args map[string]a
 		messages := make([]dashboardInboxMessage, 0, len(records))
 		for _, r := range records {
 			e := r.Entry
-			parts, chips := e.Parts, e.Chips
+			parts, chips, topics := e.Parts, e.Chips, e.Topics
 			if parts == nil {
 				parts = []string{}
 			}
 			if chips == nil {
 				chips = []wsinbox.Chip{}
 			}
-			messages = append(messages, dashboardInboxMessage{ID: r.ID(), SentAt: e.SentAt, Text: e.Text(), Parts: parts, Chips: chips, Interrupt: e.Interrupt})
+			if topics == nil {
+				topics = []wsinbox.TopicNote{}
+			}
+			messages = append(messages, dashboardInboxMessage{ID: r.ID(), SentAt: e.SentAt, Text: e.Text(), Parts: parts, Chips: chips, Topics: topics, Interrupt: e.Interrupt})
 		}
 		return toolJSONResponse(id, map[string]any{"messages": messages}, nil)
 	}

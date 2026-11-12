@@ -99,7 +99,7 @@ func TestMessageRouteAttachesSniffedImages(t *testing.T) {
 		}
 		lines = append(lines, "Image #"+strconv.Itoa([]int{1, 2, 4, 5}[i])+": "+path)
 	}
-	if got, want := held[0].Entry.Text(), "look [Image #1][Image #2] [Image #4] [Image #5]\n\n"+strings.Join(lines, "\n")+"\n\n(03) a"; got != want {
+	if got, want := held[0].Entry.Text(), "<wb:answers>\n03=a\n</wb:answers>\n\nlook [Image #1][Image #2] [Image #4] [Image #5]\n\n"+strings.Join(lines, "\n"); got != want {
 		t.Fatalf("delivered text = %q, want %q", got, want)
 	}
 

@@ -12,8 +12,11 @@ import (
 // from the board's current DOM on every render; its × empties the note
 // through an input event that bubbles (the path a typed edit takes); its
 // body opens a closed note through the topic's pen and focuses an open one.
-// The send line topicNotes builds stays "[topic] text". The cases execute
-// under node when it is installed.
+// topicNotes gives each note's topic and text, which a send carries as its
+// topics; restoreTopics puts a cancelled message's notes back on their
+// topics through the same input path and returns a "[topic] note" line for a
+// topic no longer on the board. The cases execute under node when it is
+// installed.
 func TestComposerShowsTopicNoteChips(t *testing.T) {
 	data, err := dashboardFS.ReadFile("assets/dashboard.js")
 	if err != nil {
@@ -29,8 +32,16 @@ func TestComposerShowsTopicNoteChips(t *testing.T) {
 	if notes == "" {
 		t.Fatal("dashboard.js holds no topicNotes")
 	}
+	restore := regexp.MustCompile(`(?s)\n  function restoreTopics\(list\) \{.*?\n  \}\n`).FindString(js)
+	if restore == "" {
+		t.Fatal("dashboard.js holds no restoreTopics")
+	}
+	open := regexp.MustCompile(`(?s)\n  function openNote\(note, s\) \{.*?\n  \}\n`).FindString(js)
+	if open == "" {
+		t.Fatal("dashboard.js holds no openNote")
+	}
 	runNode(t, "topic-note chip", `
-function El(tag) { this.tagName = tag.toUpperCase(); this.children = []; this.parentNode = null; this.attrs = {}; this.className = ""; this.textContent = ""; this.title = ""; this.hidden = false; this.value = ""; this.events = []; }
+function El(tag) { this.tagName = tag.toUpperCase(); this.children = []; this.parentNode = null; this.attrs = {}; this.className = ""; this.textContent = ""; this.title = ""; this.hidden = false; this.value = ""; this.events = []; this.style = {}; }
 El.prototype.setAttribute = function (k, v) { this.attrs[k] = String(v); };
 El.prototype.getAttribute = function (k) { return k in this.attrs ? this.attrs[k] : null; };
 El.prototype.appendChild = function (c) { c.parentNode = this; this.children.push(c); return c; };
@@ -62,14 +73,14 @@ function topic(name, value, hidden) {
   s.appendChild(pen); s.appendChild(n); board.appendChild(s);
   return n;
 }
-`+notes+chips+`
+`+notes+chips+restore+open+`
 var a = topic("Plan \"x\"", "  first note  ", false), b = topic("Empty", "   ", true), c = topic("Later", "closed text", true);
 renderChips();
 function row() { return cchips.children.map(function (el) { return el.className + "|" + el.children.map(function (k) { return k.textContent; }).join("|"); }); }
 check("answer chip first, then one chip per non-empty note", row(), ["achip|(03)| A|×", "achip tchip|[Plan \"x\"]|first note|×", "achip tchip|[Later]|closed text|×"]);
 var t1 = cchips.children[1];
 check("chip carries its topic", [t1.getAttribute("data-tchip"), t1.children[2].getAttribute("data-untchip"), t1.children[2].title, t1.title], ["Plan \"x\"", "Plan \"x\"", "js.chip.tnote.remove", "js.chip.tnote.open"]);
-check("send lines unchanged", topicNotes().map(function (n) { return n.line; }), ["[Plan \"x\"] first note", "[Later] closed text"]);
+check("a send's topics", topicNotes().map(function (n) { return [n.topic, n.value]; }), [["Plan \"x\"", "  first note  "], ["Later", "closed text"]]);
 a.value = "edited";
 renderChips();
 check("a render reads the current note", row()[1], "achip tchip|[Plan \"x\"]|edited|×");
@@ -85,6 +96,10 @@ check("an open note is focused", log, ["scroll:Later", "focus:Later"]);
 log = [];
 focusTopicNote("Gone"); clearTopicNote("Gone");
 check("a topic no longer on the board is a no-op", log, []);
+var e = topic("Empty2", "", true), l = topic("Keep", "mine", false);
+var stray = restoreTopics([{ topic: "Empty2", note: "back" }, { topic: "Keep", note: "theirs" }, { topic: "Keep", note: "mine" }, { topic: "Gone", note: "lost?" }, { topic: "Empty2", note: " " }]);
+check("restored notes open on their topics", [e.value, e.hidden, e.events, l.value, l.events], ["back", false, ["input/bubbles"], "mine\ntheirs", ["input/bubbles"]]);
+check("a topic off the board comes back as a line", stray, ["[Gone] lost?"]);
 process.stdout.write(bad.join("\n"));
 `)
 }

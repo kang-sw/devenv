@@ -58,7 +58,7 @@
       });
     });
     // A topic's pen opens the note under its bar: a comment or question on
-    // the topic as a whole, which the reply carries as "[topic] text".
+    // the topic as a whole, which the reply carries as a "[topic]^text" line.
     q("button.tnote-toggle", root).forEach(function (t) {
       if (once(t)) t.addEventListener("click", function () {
         var n = t.closest(".topic").querySelector("textarea.tnote");
@@ -90,49 +90,35 @@
     all.indeterminate = on > 0 && on < total;
   }
 
-  // Reply grammar: "(nn) <option>[, note: <text>]" per answered item,
-  // acknowledgements grouped as "(nn), (mm) ok", parts joined by "; ", then
-  // one "[topic] text" line per topic note.
+  // The reply is the answer block (answers.js) of the answered items, in
+  // board order, and the topic notes.
   function build() {
     replyEls();
     if (!ta) return;
-    var parts = [], acked = [];
+    var items = [];
     q(".card.policy[data-id]").forEach(function (card) {
-      var id = card.getAttribute("data-id");
       var pick = card.querySelector('.opt[data-opt][aria-pressed="true"]');
       var noteEl = card.querySelector("textarea.note");
-      var note = noteEl ? noteEl.value.trim() : "";
-      var s = "";
-      if (pick) s = "(" + id + ") " + pick.getAttribute("data-opt");
-      if (note) s = (s || "(" + id + ")") + (s ? ", " : " ") + "note: " + note;
-      if (s) parts.push(s);
+      items.push({ id: card.getAttribute("data-id"), answer: pick ? pick.getAttribute("data-opt") : "", note: noteEl ? noteEl.value : "" });
     });
-    // An acknowledgement with a note leaves the group: "(nn) ok, note: ..." or "(nn) note: ...".
+    // An acknowledgement is "ok"; with a note it leaves the ok group.
     q(".arow[data-id]").forEach(function (row) {
-      var id = row.getAttribute("data-id");
       var on = row.querySelector("label.ack > input").checked;
-      var note = row.querySelector("textarea.note").value.trim();
-      if (note) parts.push("(" + id + ") " + (on ? "ok, " : "") + "note: " + note);
-      else if (on) acked.push("(" + id + ")");
+      items.push({ id: row.getAttribute("data-id"), answer: on ? "ok" : "", note: row.querySelector("textarea.note").value });
     });
     // An assumed item reads as settled; its pen still takes a veto or a
-    // comment, sent as "(nn) note: ...".
+    // comment, sent as a note alone.
     q(".srow[data-id]").forEach(function (row) {
-      var note = row.querySelector("textarea.note").value.trim();
-      if (note) parts.push("(" + row.getAttribute("data-id") + ") note: " + note);
+      items.push({ id: row.getAttribute("data-id"), answer: "", note: row.querySelector("textarea.note").value });
     });
-    if (acked.length) parts.push(acked.join(", ") + " ok");
-    // Topic notes follow the item segments, one line each: "[topic] text".
     var topics = q("textarea.tnote").map(function (n) {
-      var note = n.value.trim();
-      return note ? "[" + n.getAttribute("data-topic") + "] " + note : "";
-    }).filter(Boolean);
-    var text = parts.join("; ");
-    if (topics.length) text += (text ? "\n" : "") + topics.join("\n");
+      return { topic: n.getAttribute("data-topic"), note: n.value };
+    });
+    var text = window.wbAnswers.block(items, topics);
     // A changed reply is no longer the copied one.
     if (text !== ta.value) copied = false;
     ta.value = text;
-    // Topic note lines make the reply several lines tall.
+    // The block makes the reply several lines tall.
     ta.style.height = "";
     if (text.indexOf("\n") >= 0) grow(ta);
     hint.textContent = "";

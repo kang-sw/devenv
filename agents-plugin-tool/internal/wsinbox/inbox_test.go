@@ -23,33 +23,16 @@ func send(t *testing.T, dir, text string, chips ...Chip) (string, bool) {
 	return name, merged
 }
 
-func TestAnswerBlockMatchesTheBoardReplyGrammar(t *testing.T) {
-	cases := []struct {
-		chips []Chip
-		want  string
-	}{
-		{[]Chip{{ID: "03", Answer: "a"}, {ID: "04", Answer: "ok"}}, "(03) a; (04) ok"},
-		{[]Chip{{ID: "01", Answer: "ok"}, {ID: "02", Answer: "b"}, {ID: "05", Answer: "ok"}}, "(02) b; (01), (05) ok"},
-		{[]Chip{{ID: "03", Answer: "a", Note: "but later"}}, "(03) a, note: but later"},
-		{[]Chip{{ID: "07", Answer: "ok", Note: "seen"}}, "(07) ok, note: seen"},
-		{[]Chip{{ID: "08", Note: "why?"}}, "(08) note: why?"},
-		{[]Chip{{ID: "09", Answer: "no", Note: "use b"}}, "(09) no, note: use b"},
-		{nil, ""},
-	}
-	for _, c := range cases {
-		if got := AnswerBlock(c.chips); got != c.want {
-			t.Errorf("AnswerBlock(%+v) = %q, want %q", c.chips, got, c.want)
-		}
-	}
-}
-
-func TestEntryTextKeepsEachSendAsAParagraph(t *testing.T) {
-	e := Entry{Parts: []string{"first", "second\nline"}, Chips: []Chip{{ID: "03", Answer: "a"}}}
-	if got, want := e.Text(), "first\n\nsecond\nline\n\n(03) a"; got != want {
+func TestEntryTextLeadsWithTheAnswerBlock(t *testing.T) {
+	e := Entry{Parts: []string{"first", "second\nline"}, Chips: []Chip{{ID: "03", Answer: "a"}}, Topics: []TopicNote{{Topic: "ship", Note: "why?"}}}
+	if got, want := e.Text(), "<wb:answers>\n03=a\n[ship]^why?\n</wb:answers>\n\nfirst\n\nsecond\nline"; got != want {
 		t.Fatalf("Text = %q, want %q", got, want)
 	}
-	if got := (Entry{Chips: []Chip{{ID: "01", Answer: "ok"}}}).Text(); got != "(01) ok" {
+	if got := (Entry{Chips: []Chip{{ID: "01", Answer: "ok"}}}).Text(); got != "<wb:answers>\n01=ok\n</wb:answers>" {
 		t.Fatalf("chips-only Text = %q", got)
+	}
+	if got := (Entry{Parts: []string{"just text"}}).Text(); got != "just text" {
+		t.Fatalf("text-only Text = %q", got)
 	}
 }
 
@@ -69,6 +52,21 @@ func TestNormalizeRejectsEmptyAndMalformed(t *testing.T) {
 	if len(e.Chips) != 1 || e.Chips[0].Answer != "b" || e.Parts[0] != "hi" {
 		t.Fatalf("normalized = %+v", e)
 	}
+	for _, tn := range []TopicNote{{Topic: "", Note: "x"}, {Topic: "a\nb", Note: "x"}, {Topic: "a]^b", Note: "x"}, {Topic: strings.Repeat("t", maxTopicLen+1), Note: "x"}, {Topic: "t", Note: strings.Repeat("n", maxNoteBytes+1)}} {
+		if _, err := Normalize(Entry{Topics: []TopicNote{tn}}); !errors.Is(err, ErrInvalid) {
+			t.Errorf("topic note %q accepted", tn.Topic)
+		}
+	}
+	e, err = Normalize(Entry{Topics: []TopicNote{{Topic: " ship ", Note: "a"}, {Topic: "ship", Note: " b "}, {Topic: "empty", Note: "  "}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(e.Topics) != 1 || e.Topics[0] != (TopicNote{Topic: "ship", Note: "b"}) {
+		t.Fatalf("normalized topics = %+v", e.Topics)
+	}
+	if _, err := Normalize(Entry{Topics: []TopicNote{{Topic: "empty", Note: " "}}}); !errors.Is(err, ErrEmpty) {
+		t.Fatalf("blank topic note only: %v, want ErrEmpty", err)
+	}
 }
 
 func TestSendWritesThenMergesIntoTheHeldEntry(t *testing.T) {
@@ -86,7 +84,7 @@ func TestSendWritesThenMergesIntoTheHeldEntry(t *testing.T) {
 		t.Fatalf("held = %+v, %v", held, err)
 	}
 	e := held[0].Entry
-	if got, want := e.Text(), "hello\n\nand more\n\n(03) b, note: changed; (04) ok"; got != want {
+	if got, want := e.Text(), "<wb:answers>\n03=b^changed\n04=ok\n</wb:answers>\n\nhello\n\nand more"; got != want {
 		t.Fatalf("merged text = %q, want %q", got, want)
 	}
 	if len(e.Parts) != 2 {
@@ -98,7 +96,7 @@ func TestCancelReturnsTheHeldEntry(t *testing.T) {
 	dir := Dir(t.TempDir())
 	name, _ := send(t, dir, "hello", Chip{ID: "03", Answer: "a"})
 	e, err := Cancel(dir, name)
-	if err != nil || e.Text() != "hello\n\n(03) a" {
+	if err != nil || e.Text() != "<wb:answers>\n03=a\n</wb:answers>\n\nhello" {
 		t.Fatalf("Cancel = %+v, %v", e, err)
 	}
 	if names, _ := Names(dir); len(names) != 0 {
@@ -296,11 +294,11 @@ func TestDrainAndMergeRaceLosesNothing(t *testing.T) {
 		if merged {
 			// The merge won: nothing of the first send was drained on its own.
 			for _, r := range drained {
-				if r.Entry.Text() == "one\n\n(03) a" {
+				if r.Entry.Text() == "<wb:answers>\n03=a\n</wb:answers>\n\none" {
 					t.Fatalf("run %d: merged entry also drained alone", i)
 				}
 			}
-		} else if len(drained) != 1 || drained[0].Entry.Text() != "one\n\n(03) a" {
+		} else if len(drained) != 1 || drained[0].Entry.Text() != "<wb:answers>\n03=a\n</wb:answers>\n\none" {
 			t.Fatalf("run %d: send did not merge, but the drain got %+v", i, drained)
 		}
 	}
@@ -337,7 +335,7 @@ func TestSteerRewritesTheEntryMarkedUnderAFreshName(t *testing.T) {
 	if err != nil || len(held) != 1 || held[0].Name != steered {
 		t.Fatalf("held after steer = %+v, %v", held, err)
 	}
-	if e := held[0].Entry; !e.Steer || e.Text() != "hello\n\n(03) a" || e.SentAt == 0 {
+	if e := held[0].Entry; !e.Steer || e.Text() != "<wb:answers>\n03=a\n</wb:answers>\n\nhello" || e.SentAt == 0 {
 		t.Fatalf("steered entry = %+v", e)
 	}
 	// Steering it again leaves it as it is.
@@ -490,7 +488,7 @@ func TestInterruptClaimsEveryHeldMessageAndWritesTheEntry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Interrupt: %v", err)
 	}
-	if len(held) != 2 || held[0].Name != steered || held[1].Name != second || held[0].Entry.Text() != "promoted" || held[1].Entry.Text() != "follow-up\n\n(03) a" {
+	if len(held) != 2 || held[0].Name != steered || held[1].Name != second || held[0].Entry.Text() != "promoted" || held[1].Entry.Text() != "<wb:answers>\n03=a\n</wb:answers>\n\nfollow-up" {
 		t.Fatalf("Interrupt held = %+v", held)
 	}
 	names, _ := Names(dir)

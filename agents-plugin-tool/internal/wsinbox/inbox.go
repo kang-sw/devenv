@@ -94,13 +94,16 @@ const (
 	maxTextBytes = 64 << 10
 	maxChips     = 100
 	maxNoteBytes = 4 << 10
+	maxTopics    = 100
+	maxTopicLen  = 200
 	// maxImageNum bounds an image number a send names; a merge may number
 	// past it.
 	maxImageNum = 9999
 )
 
 var (
-	// ErrEmpty reports a send with no text and no chips.
+	// ErrEmpty reports a send with no text, no chips, no topic notes, and no
+	// images.
 	ErrEmpty = errors.New("empty message: no text and no answers")
 	// ErrGone reports that an entry is no longer held: a drain delivered it,
 	// or a cancel or merge already took it.
@@ -144,6 +147,10 @@ type Entry struct {
 	// Chips holds one answer per board item; a later send's chip for the
 	// same item replaced the earlier one in place.
 	Chips []Chip `json:"chips,omitempty"`
+	// Topics holds one note per board topic, kept as Chips are. An entry
+	// written before the field carries its topic notes as "[topic] text"
+	// lines in Parts, delivered as they are.
+	Topics []TopicNote `json:"topics,omitempty"`
 	// Images holds the absolute paths of the attached image files, in send
 	// order; a path is listed once.
 	Images []string `json:"images,omitempty"`
@@ -259,10 +266,13 @@ func NameForID(id string) (string, bool) {
 	return name, entryNamePattern.MatchString(name)
 }
 
-// Text is the message the session receives: each part as its own paragraph,
-// then one ImageLine per image, then the answer block.
+// Text is the message the session receives: the answer block (AnswerBlock)
+// first, then each part as its own paragraph, then one ImageLine per image.
 func (e Entry) Text() string {
 	var paras []string
+	if block := AnswerBlock(e.Chips, e.Topics); block != "" {
+		paras = append(paras, block)
+	}
 	for _, p := range e.Parts {
 		if p = strings.TrimSpace(p); p != "" {
 			paras = append(paras, p)
@@ -276,47 +286,12 @@ func (e Entry) Text() string {
 		}
 		paras = append(paras, strings.Join(lines, "\n"))
 	}
-	if block := AnswerBlock(e.Chips); block != "" {
-		paras = append(paras, block)
-	}
 	return strings.Join(paras, "\n\n")
 }
 
-// AnswerBlock renders chips in the board's reply grammar, the one the static
-// page's copy-answers builds: "(nn) <answer>[, note: <text>]" per item, a
-// note-only item as "(nn) note: <text>", the items answered ok without a note
-// grouped last as "(nn), (mm) ok", and the parts joined by "; ".
-func AnswerBlock(chips []Chip) string {
-	var parts, acked []string
-	for _, c := range chips {
-		note := strings.TrimSpace(c.Note)
-		if note == "" && c.Answer == "ok" {
-			acked = append(acked, "("+c.ID+")")
-			continue
-		}
-		s := ""
-		if c.Answer != "" {
-			s = "(" + c.ID + ") " + c.Answer
-		}
-		if note != "" {
-			if s == "" {
-				s = "(" + c.ID + ") note: " + note
-			} else {
-				s += ", note: " + note
-			}
-		}
-		if s != "" {
-			parts = append(parts, s)
-		}
-	}
-	if len(acked) > 0 {
-		parts = append(parts, strings.Join(acked, ", ")+" ok")
-	}
-	return strings.Join(parts, "; ")
-}
-
 // Normalize trims and checks one send: empty parts are dropped, chips are
-// validated, a later chip for an item replaces an earlier one, and a repeated
+// validated, a later chip for an item (or note for a topic) replaces an
+// earlier one, an empty topic note is dropped, and a repeated
 // image path is dropped with its number. An image counts as content. Image
 // numbers are optional: ImageNums is empty or parallel to Images, a number is
 // unique and at most maxImageNum, and an image numbered 0 (or every image,
@@ -358,6 +333,25 @@ func Normalize(e Entry) (Entry, error) {
 		}
 		out.Chips = putChip(out.Chips, c)
 	}
+	if len(e.Topics) > maxTopics {
+		return Entry{}, fmt.Errorf("%w: more than %d topic notes", ErrInvalid, maxTopics)
+	}
+	for _, tn := range e.Topics {
+		tn.Topic = strings.TrimSpace(tn.Topic)
+		tn.Note = strings.TrimSpace(tn.Note)
+		// A topic key is one answer-block line's bracketed head, so it
+		// holds no line break and no "]^", which ends the head.
+		if tn.Topic == "" || len(tn.Topic) > maxTopicLen || strings.ContainsAny(tn.Topic, "\r\n") || strings.Contains(tn.Topic, "]^") {
+			return Entry{}, fmt.Errorf("%w: topic %q", ErrInvalid, tn.Topic)
+		}
+		if len(tn.Note) > maxNoteBytes {
+			return Entry{}, fmt.Errorf("%w: note for topic %s is longer than %d bytes", ErrInvalid, tn.Topic, maxNoteBytes)
+		}
+		if tn.Note == "" {
+			continue
+		}
+		out.Topics = putTopic(out.Topics, tn)
+	}
 	if len(e.ImageNums) != 0 && len(e.ImageNums) != len(e.Images) {
 		return Entry{}, fmt.Errorf("%w: %d image numbers for %d images", ErrInvalid, len(e.ImageNums), len(e.Images))
 	}
@@ -398,7 +392,7 @@ func Normalize(e Entry) (Entry, error) {
 		}
 		out.ImageNums = nums
 	}
-	if len(out.Parts) == 0 && len(out.Chips) == 0 && len(out.Images) == 0 {
+	if len(out.Parts) == 0 && len(out.Chips) == 0 && len(out.Topics) == 0 && len(out.Images) == 0 {
 		return Entry{}, ErrEmpty
 	}
 	return out, nil
@@ -413,6 +407,17 @@ func putChip(chips []Chip, c Chip) []Chip {
 		}
 	}
 	return append(chips, c)
+}
+
+// putTopic replaces the note for t.Topic in place, or appends t.
+func putTopic(topics []TopicNote, t TopicNote) []TopicNote {
+	for i := range topics {
+		if topics[i].Topic == t.Topic {
+			topics[i] = t
+			return topics
+		}
+	}
+	return append(topics, t)
 }
 
 func indexOf(list []string, s string) int {
@@ -443,8 +448,9 @@ func maxInt(list []int) int {
 	return m
 }
 
-// Merge appends add's parts and images to base's and lays add's chips over
-// base's: the later chip for an item wins. base's first-send time is kept.
+// Merge appends add's parts and images to base's and lays add's chips and
+// topic notes over base's: the later chip for an item, and the later note for
+// a topic, wins. base's first-send time is kept.
 // add's images are renumbered to continue base's, each number raised by
 // base's highest, and every marker in add's parts naming one of add's images
 // is rewritten to its new number; an image base already lists takes base's
@@ -460,6 +466,13 @@ func Merge(base, add Entry) Entry {
 			c.SentAt = add.SentAt
 		}
 		out.Chips = putChip(out.Chips, c)
+	}
+	out.Topics = append([]TopicNote{}, base.Topics...)
+	for _, t := range add.Topics {
+		out.Topics = putTopic(out.Topics, t)
+	}
+	if len(out.Topics) == 0 {
+		out.Topics = nil
 	}
 	baseNums := base.Nums()
 	for i, path := range base.Images {

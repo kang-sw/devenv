@@ -78,7 +78,7 @@ func TestDashboardInboxDrainTextAndJSONOutput(t *testing.T) {
 	sent := time.UnixMilli(rec[0].Entry.SentAt).UTC().Format(time.RFC3339)
 
 	out := callToolWithKey(t, f.server, 5, f.keyA, dashboardInboxDrainTool, nil)
-	want := "drained 1\nmessage " + id + " " + sent + "\nfirst\n\nsecond\n\n(3) b\n\n"
+	want := "drained 1\nmessage " + id + " " + sent + "\n<wb:answers>\n3=b\n</wb:answers>\n\nfirst\n\nsecond\n\n"
 	if out != want {
 		t.Fatalf("drain text = %q, want %q", out, want)
 	}
@@ -106,7 +106,7 @@ func TestDashboardInboxDrainTextAndJSONOutput(t *testing.T) {
 		t.Fatalf("messages = %+v", got)
 	}
 	m := got.Messages[0]
-	if m.ID == "" || m.SentAt == 0 || m.Text != "again\n\n(7) ok, note: fine" || len(m.Parts) != 1 || m.Parts[0] != "again" || len(m.Chips) != 1 || m.Chips[0].Note != "fine" {
+	if m.ID == "" || m.SentAt == 0 || m.Text != "<wb:answers>\n7=ok^fine\n</wb:answers>\n\nagain" || len(m.Parts) != 1 || m.Parts[0] != "again" || len(m.Chips) != 1 || m.Chips[0].Note != "fine" {
 		t.Fatalf("message = %+v", m)
 	}
 
@@ -115,7 +115,7 @@ func TestDashboardInboxDrainTextAndJSONOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 	out = callToolWithKey(t, f.server, 8, f.keyA, dashboardInboxDrainTool, map[string]any{"format": "json"})
-	if !strings.Contains(out, `"parts":[]`) || strings.Contains(out, "null") {
+	if !strings.Contains(out, `"parts":[]`) || !strings.Contains(out, `"topics":[]`) || strings.Contains(out, "null") {
 		t.Fatalf("chip-only json = %q", out)
 	}
 }

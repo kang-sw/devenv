@@ -896,22 +896,6 @@
   function chipList() { return chipOrder.map(function (id) { return chips[id]; }); }
   function putChip(c) { if (!chips[c.id]) chipOrder.push(c.id); chips[c.id] = c; }
   function dropChip(id) { delete chips[id]; chipOrder = chipOrder.filter(function (x) { return x !== id; }); }
-  // Reply grammar, as the board's copy-answers line and the server's answer
-  // block build it: "(nn) <answer>[, note: <text>]", a note alone as
-  // "(nn) note: <text>", items answered ok without a note grouped last as
-  // "(nn), (mm) ok", parts joined by "; ".
-  function answerBlock(list) {
-    var parts = [], acked = [];
-    list.forEach(function (c) {
-      var note = (c.note || "").trim(), s = "";
-      if (!note && c.answer === "ok") { acked.push("(" + c.id + ")"); return; }
-      if (c.answer) s = "(" + c.id + ") " + c.answer;
-      if (note) s = s ? s + ", note: " + note : "(" + c.id + ") note: " + note;
-      if (s) parts.push(s);
-    });
-    if (acked.length) parts.push(acked.join(", ") + " ok");
-    return parts.join("; ");
-  }
   function boardItem(id) {
     var b = region("board");
     return b ? b.querySelector('.card[data-id="' + id + '"], .arow[data-id="' + id + '"], .srow[data-id="' + id + '"]') : null;
@@ -1020,8 +1004,10 @@
     if (n.hidden && pen) pen.click();
     else n.focus();
   }
+  // boardAnswers is the answer block the chips make (answers.js, the
+  // grammar the board's copy-answers and the server's delivered message use).
   function boardAnswers() {
-    if (cchips) return answerBlock(chipList());
+    if (cchips) return window.wbAnswers.block(chipList(), []);
     var b = region("board"), r = b && b.querySelector("#reply-text");
     return r ? r.value.trim() : "";
   }
@@ -1306,14 +1292,13 @@
   }
   var sending = false;
   // topicNotes are the board's non-empty topic notes. A send carries them
-  // as "[topic] text" lines after the typed text, the lines the board's
-  // copy-answers adds; they are no item's answer, so they are no answer
+  // as its topics, which the delivered message's answer block lists after
+  // the item answers; they are no item's answer, so they are no answer
   // chip, and renderChips shows each as a topic-note chip.
   function topicNotes() {
     var b = region("board");
     return (b ? q(".tnote[data-topic]", b) : []).map(function (el) {
-      var topic = el.getAttribute("data-topic");
-      return { el: el, topic: topic, value: el.value, line: "[" + topic + "] " + el.value.trim() };
+      return { el: el, topic: el.getAttribute("data-topic"), value: el.value };
     }).filter(function (n) { return n.value.trim(); });
   }
   function sendMessage() {
@@ -1321,8 +1306,7 @@
     var raw = ctext.value.trim(), t = sendText().trim(), list = chipList(), pics = imgs.slice(), notes = topicNotes();
     if (!t && !list.length && !pics.length && !notes.length) { syncNote(wsT("js.send.empty")); return; }
     if (pics.some(function (p) { return !p.ref && p.data === null; })) { syncNote(wsT("js.send.reading")); return; }
-    var lines = notes.map(function (n) { return n.line; }).join("\n");
-    var body = { text: t + (t && lines ? "\n\n" : "") + lines, chips: list };
+    var body = { text: t, chips: list, topics: notes.map(function (n) { return { topic: n.topic, note: n.value.trim() }; }) };
     var up = pics.filter(function (p) { return !p.ref; }), refs = pics.filter(function (p) { return !!p.ref; });
     if (up.length) body.images = up.map(function (p) { return { name: p.name, data: p.data, n: p.n }; });
     if (refs.length) {
@@ -1360,8 +1344,9 @@
   }
   // restoreHeld puts held messages a cancel or an interrupt took back into
   // the composer, oldest first, ahead of the draft: their texts joined as
-  // paragraphs, their answer chips, and their images as chips that reference
-  // the written files, with their markers in the returned text. Each
+  // paragraphs, their answer chips, their topic notes back on the board's
+  // topics (restoreTopics), and their images as chips that reference the
+  // written files, with their markers in the returned text. Each
   // message's numbers move above the highest the draft and the messages
   // before it use, the markers with them, as the server numbers a merge.
   function restoreHeld(list) {
@@ -1384,6 +1369,8 @@
       var marked = markerNums(text), missing = [];
       names.forEach(function (name, i) { var n = renum[nums[i] || i + 1]; if (!marked[n]) missing.push(marker(n)); });
       if (missing.length) text += (text ? "\n" : "") + missing.join(" ");
+      var stray = restoreTopics(res.topics || []);
+      if (stray.length) text += (text ? "\n\n" : "") + stray.join("\n");
       if (text) backs.push(text);
     });
     imgSeq = top;
@@ -1401,6 +1388,23 @@
     order.forEach(function (id) { if (!chips[id]) { putChip(got[id]); setItem(id, got[id]); } });
     renderChips();
     renderImgs();
+  }
+  // restoreTopics puts returned topic notes back on their topics' notes,
+  // after any text a note holds now, through the input path a typed edit
+  // takes; it returns a "[topic] note" line for each topic no longer on the
+  // board, which the caller keeps in the composer text so no note is lost.
+  function restoreTopics(list) {
+    var stray = [];
+    list.forEach(function (tn) {
+      var n = topicNote(tn.topic), note = (tn.note || "").trim();
+      if (!note) return;
+      if (!n) { stray.push("[" + tn.topic + "] " + note); return; }
+      var cur = n.value.trim();
+      if (cur === note || cur.indexOf(note) >= 0) return;
+      openNote(n, { note: cur ? cur + "\n" + note : note });
+      n.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    return stray;
   }
   function cancelHeld(btn) {
     btn.disabled = true;

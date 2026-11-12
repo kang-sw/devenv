@@ -401,8 +401,11 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .msg.held .mh { flex-wrap: wrap; row-gap: 3px; }
 .hcancel .i, .hsteer .i { width: 11px; height: 11px; }
 .pdiv { border: 0; border-top: 1px solid color-mix(in srgb, var(--wb-primary) 30%, transparent); margin: 6px 0; }
-.hchips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; white-space: normal; }
+/* a message's answer capsules lead its bubble, above the text */
+.hchips { display: flex; flex-wrap: wrap; gap: 4px; white-space: normal; }
+.hchips:not(:last-child) { margin-bottom: 6px; }
 .hchips .achip { padding-right: 9px; }
+.hchips .achip.tchip { cursor: default; }
 .sentmark { font-size: 10px; font-weight: 800; letter-spacing: .03em; padding: 0 6px; border-radius: 4px; white-space: nowrap; background: var(--wb-muted); color: var(--wb-muted-fg); }
 .srow .stext > .sentmark { margin-right: 6px; }
 .sentmark.held { background: var(--wb-ph-perm); color: var(--wb-on-ph-perm); }

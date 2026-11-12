@@ -26,7 +26,7 @@ import (
 // full page's stamp script and, when it holds a mermaid block, the shared
 // mermaid script (MermaidAsset).
 //
-//go:embed assets/page.tmpl assets/page.css assets/chg.js assets/form.js assets/live.js assets/pill.js assets/rail.js assets/ago.js assets/mermaid-init.js assets/doc-frame.js assets/viewer.js assets/svg-view.js assets/sprite.svg
+//go:embed assets/page.tmpl assets/page.css assets/chg.js assets/answers.js assets/form.js assets/live.js assets/pill.js assets/rail.js assets/ago.js assets/mermaid-init.js assets/doc-frame.js assets/viewer.js assets/svg-view.js assets/sprite.svg
 var assetFS embed.FS
 
 type pageAssets struct {
@@ -35,8 +35,11 @@ type pageAssets struct {
 	tmpl  *template.Template
 	tmpls map[string]*template.Template
 	css   template.CSS
-	form  string
-	live  string
+	// answers builds the answer block (window.wbAnswers), which form.js
+	// and the dashboard composer read.
+	answers string
+	form    string
+	live    string
 	// pill is the open-question pill, shared by the full page and the dashboard.
 	pill string
 	// rail sticks the current topic's bar and shows the jump capsules, on the
@@ -124,6 +127,7 @@ func buildAssets(read func(name string) ([]byte, error)) (*pageAssets, error) {
 	chg := get("chg.js")
 	a := &pageAssets{
 		css:         template.CSS(get("page.css")),
+		answers:     get("answers.js"),
 		form:        get("form.js"),
 		live:        get("live.js"),
 		pill:        get("pill.js"),
@@ -281,10 +285,14 @@ func RenderClosedTopics(view View) (template.HTML, error) {
 // reply bar (a function body: run it inside a function scope, as RenderPage
 // does), and the mermaid theme script that runs after MermaidAsset.
 type SharedAssets struct {
-	CSS         template.CSS
-	Sprite      template.HTML
-	FormScript  template.JS
-	MermaidInit template.JS
+	CSS        template.CSS
+	Sprite     template.HTML
+	FormScript template.JS
+	// AnswersScript defines window.wbAnswers, the answer-block builder
+	// FormScript calls; a self-contained script for the page to inline once,
+	// ahead of the first FormScript run.
+	AnswersScript template.JS
+	MermaidInit   template.JS
 	// ViewerScript is the image viewer, a self-contained script for the page
 	// to inline once, outside any region (it listens on the document).
 	ViewerScript template.JS
@@ -296,7 +304,7 @@ func PageAssets() (SharedAssets, error) {
 	if err != nil {
 		return SharedAssets{}, fmt.Errorf("whiteboard page assets: %w", err)
 	}
-	return SharedAssets{CSS: a.css, Sprite: a.sprite, FormScript: template.JS(a.form + "\n" + a.pill + "\n" + a.rail + "\n" + a.ago), MermaidInit: a.mermaidInit, ViewerScript: template.JS(a.viewer)}, nil
+	return SharedAssets{CSS: a.css, Sprite: a.sprite, FormScript: template.JS(a.form + "\n" + a.pill + "\n" + a.rail + "\n" + a.ago), AnswersScript: template.JS(a.answers), MermaidInit: a.mermaidInit, ViewerScript: template.JS(a.viewer)}, nil
 }
 
 // pageData is what the page template executes on: the view plus the inlined
@@ -375,7 +383,7 @@ func (p *pageData) MermaidFile() string {
 // body inside a sandboxed frame (framedDoc).
 func newPageData(view View, a *pageAssets, framed bool) *pageData {
 	full := view.Layout != LayoutEmbed
-	script := a.form
+	script := a.answers + a.form
 	if full {
 		// The viewer is for the standalone page; the embed is a chat
 		// snapshot with a size budget and runs only the answer form.

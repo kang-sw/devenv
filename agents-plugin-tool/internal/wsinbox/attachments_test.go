@@ -41,9 +41,9 @@ func sendImages(t *testing.T, dir, text string, images ...string) (string, bool)
 	return name, merged
 }
 
-func TestTextListsImagesAfterThePartsAndBeforeTheAnswers(t *testing.T) {
+func TestTextListsImagesAfterTheAnswersAndTheParts(t *testing.T) {
 	e := Entry{Parts: []string{"look [Image #1]", "and this [Image #3]"}, Images: []string{"/s/a/1.png", "/s/a/2.jpg"}, ImageNums: []int{1, 3}, Chips: []Chip{{ID: "03", Answer: "a"}}}
-	want := "look [Image #1]\n\nand this [Image #3]\n\nImage #1: /s/a/1.png\nImage #3: /s/a/2.jpg\n\n(03) a"
+	want := "<wb:answers>\n03=a\n</wb:answers>\n\nlook [Image #1]\n\nand this [Image #3]\n\nImage #1: /s/a/1.png\nImage #3: /s/a/2.jpg"
 	if got := e.Text(); got != want {
 		t.Fatalf("Text = %q, want %q", got, want)
 	}
