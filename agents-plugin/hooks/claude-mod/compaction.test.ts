@@ -69,6 +69,8 @@ function harness(opts: { window?: Partial<CompactionWindow> | null; readAdvisory
     lives: [] as (() => boolean)[],
     /** The next submits that reject. */
     rejectSubmits: 0,
+    /** Set, a submit settles only once it resolves, as a submit resolves only as its turn starts. */
+    submitGate: undefined as Promise<void> | undefined,
     /** The next after() calls that throw. */
     afterThrows: 0,
     window: opts.window === null ? null : ({ ...WINDOW, ...opts.window } as CompactionWindow),
@@ -88,6 +90,7 @@ function harness(opts: { window?: Partial<CompactionWindow> | null; readAdvisory
   const edges: CompactionEdges = {
     submit: async ({ text }, live) => {
       h.lives.push(live)
+      if (h.submitGate) await h.submitGate
       const answer = h.submitAnswers.shift()
       if (answer === 'busy') return { busy: true }
       if (answer === 'stale') return { stale: true }
@@ -1358,5 +1361,98 @@ describe('a submit that found a main-thread turn started first (captions on)', (
     expect(live!()).toBe(true)
     c.end('clear')
     expect(live!()).toBe(false)
+  })
+})
+
+describe('continuation', () => {
+  /** Whether `p` has settled after the microtasks run. */
+  const settledYet = async (p: Promise<void>) => {
+    let done = false
+    void p.then(() => (done = true))
+    await tick()
+    return done
+  }
+
+  test('resolves at once when no resume prompt is owed, a pending request without the flag among them', async () => {
+    const { c, turnEnd } = harness()
+    expect(await settledYet(c.continuation())).toBe(true)
+    c.lever(undefined, false)
+    await turnEnd()
+    expect(await settledYet(c.continuation())).toBe(true)
+  })
+
+  test("the lever's own compaction with the flag: pending through the command, the window, and the resume submit, then resolved", async () => {
+    const { h, c, turnEnd, closeWindow } = harness()
+    const gate = deferred<void>()
+    h.compactGate = gate.promise
+    c.lever(undefined, true)
+    await turnEnd()
+    // Asked for while the compaction runs, as the mailbox push asks at its end.
+    const p = c.continuation()
+    c.compacted('manual', undefined, { messages: [] })
+    expect(await settledYet(p)).toBe(false)
+    gate.resolve()
+    await tick()
+    expect(h.delayed.map((t) => t.ms)).toEqual([CONTINUATION_WINDOW_MS])
+    expect(await settledYet(p)).toBe(false)
+    const submitted = deferred<void>()
+    h.submitGate = submitted.promise
+    await closeWindow()
+    expect(await settledYet(p)).toBe(false)
+    submitted.resolve()
+    expect(await settledYet(p)).toBe(true)
+    expect(h.submits).toEqual([RESUME_TEXT])
+  })
+
+  test('a turn started within the window resolves it: that turn carries the work on', async () => {
+    const { c, turnEnd, turnStart } = harness()
+    c.lever(undefined, true)
+    await turnEnd()
+    const p = c.continuation()
+    expect(await settledYet(p)).toBe(false)
+    turnStart()
+    expect(await settledYet(p)).toBe(true)
+  })
+
+  test('a veto with the flag stays pending for its noted resume prompt; one without the flag resolves at the step end', async () => {
+    const a = harness()
+    const gate = deferred<void>()
+    a.h.compactGate = gate.promise
+    a.c.lever(undefined, true)
+    await a.turnEnd()
+    const pa = a.c.continuation()
+    a.c.compacted('manual', undefined, { skip: 'blocked by policy' })
+    gate.resolve()
+    expect(await settledYet(pa)).toBe(false)
+    await a.closeWindow()
+    expect(await settledYet(pa)).toBe(true)
+    expect(a.h.submits).toEqual([vetoedResumeText('ws', 'blocked by policy')])
+
+    const b = harness()
+    const gateB = deferred<void>()
+    b.h.compactGate = gateB.promise
+    b.c.lever(undefined, false)
+    await b.turnEnd()
+    const pb = b.c.continuation()
+    b.c.compacted('manual', undefined, { skip: 'blocked by policy' })
+    gateB.resolve()
+    expect(await settledYet(pb)).toBe(true)
+  })
+
+  test('a lost resume prompt and a session end resolve it too', async () => {
+    const a = harness()
+    a.c.lever(undefined, true)
+    await a.turnEnd()
+    const pa = a.c.continuation()
+    a.h.rejectSubmits = 1
+    await a.closeWindow()
+    expect(await settledYet(pa)).toBe(true)
+
+    const b = harness()
+    b.c.lever(undefined, true)
+    await b.turnEnd()
+    const pb = b.c.continuation()
+    b.c.end('clear')
+    expect(await settledYet(pb)).toBe(true)
   })
 })

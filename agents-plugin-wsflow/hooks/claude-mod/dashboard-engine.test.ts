@@ -1,7 +1,9 @@
 import { expect, mock, test, type TestBody } from 'claude-code/testing'
 
 import { acceptedKinds, ADAPTER, INBOX_DRAIN_TOOL, INTAKE_TOOL, labelWhiteboard, statusFigures, type DashboardEvent } from './dashboard'
+import { CONTINUATION_WINDOW_MS, SETTLE_MS } from './compaction'
 import { intakeResult, KNOB } from './register'
+import { resumeText } from './timing'
 import { STEER_DRAIN_WAIT_MS } from './watcher'
 
 type Engine = Parameters<TestBody>[0]
@@ -89,6 +91,8 @@ function world(on: On, opts: { dashboard?: unknown; intake?: Intake } = {}) {
     check: 'allow' as 'allow' | 'ask',
     /** What `$.agent.list` answers: the session's subagents and teammates. */
     agentList: [] as Record<string, unknown>[],
+    /** The test's engine, bound by the test: the `/compact` command raises its compaction through it. */
+    engine: undefined as Engine | undefined,
   }
   const text = (t: string, isError = false) => ({ value: { content: [{ type: 'text', text: t }], isError } })
   on('mcp.connect', ($, e) => ({ value: { isConnected: true, server: `plugin:${e.server}:${e.server}` } }))
@@ -157,6 +161,12 @@ function world(on: On, opts: { dashboard?: unknown; intake?: Intake } = {}) {
     if (w.compact === 'throw') throw new Error('summarizer failed')
     if (w.compact === 'skip') return { skip: 'vetoed by the test' }
     return { messages: [{ role: 'user', text: 'summary', toolUses: [] }] } as never
+  })
+  // `/compact` compacts as a typed one does: a manual compaction through every plugin's session.compact hook.
+  on('command.run', async ($, e) => {
+    if (e.command !== 'compact') return {}
+    await w.engine!.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: 'long', toolUses: [] }] } as never)
+    return {}
   })
   on('tool.check', () => ({ decision: w.check, reason: 'the world decides' }) as never)
   on('agent.spawn', () => ({ model: 'haiku', agentId: 'a77' }) as never)
@@ -932,4 +942,71 @@ test('a resync while a compaction runs sends its start again behind the reset', 
   // The feed's retry gap runs on the wall clock, so it may still hold the end back.
   await w.clock.advance(2500)
   expect(compacts(w).at(-1)).toEqual({ kind: 'compact', phase: 'end', trigger: 'auto', at: expect.any(Number) })
+})
+
+for (const outcome of ['land', 'skip', 'throw'] as const) {
+  test(`knob on: a board wake during a main compaction holds the message; the compaction's end (${outcome}) submits it`, { timeoutMs: 20_000 }, async ($, on) => {
+    const w = world(on, { dashboard: true })
+    await start($, w)
+    let open!: () => void
+    w.compact = outcome
+    w.compactGate = new Promise<void>((resolve) => (open = resolve))
+    const running = compact($, 'auto').catch(() => undefined)
+    await w.clock.advance(50)
+    w.inbox.push('pick B')
+    w.exits.at(-1)!(0, ['board'])
+    await w.clock.advance(50)
+    expect(w.inboxDrains).toEqual([])
+    expect(w.prompts).toEqual([])
+    expect(w.inbox).toEqual(['pick B'])
+    expect(w.argvs.at(-1)).not.toContain(BOARD_FLAG)
+    open()
+    await running
+    await w.clock.advance(50)
+    expect(w.inboxDrains.length).toBe(1)
+    expect(w.prompts).toEqual([labelWhiteboard(w.plugin, 'pick B')])
+    expect(w.argvs.at(-1)).toContain(BOARD_FLAG)
+  })
+}
+
+test('knob on: a subagent\'s compaction holds nothing', { timeoutMs: 20_000 }, async ($, on) => {
+  const w = world(on, { dashboard: true })
+  await start($, w)
+  let open!: () => void
+  w.compactGate = new Promise<void>((resolve) => (open = resolve))
+  const running = compact($, 'auto', 'a77')
+  await w.clock.advance(50)
+  w.inbox.push('pick B')
+  w.exits.at(-1)!(0, ['board'])
+  await w.clock.advance(50)
+  expect(w.prompts).toEqual([labelWhiteboard(w.plugin, 'pick B')])
+  open()
+  await running
+})
+
+test('knob on: a message held through the compaction lever\'s own compaction follows its resume prompt', { timeoutMs: 20_000 }, async ($, on) => {
+  const w = world(on, { dashboard: true })
+  w.engine = $
+  await start($, w)
+  await $.turn.start({ text: 'x', turnId: 't' })
+  await $.tool.call({ tool: `mcp__${w.plugin}__request_compaction`, continue: true } as never)
+  let open!: () => void
+  w.compactGate = new Promise<void>((resolve) => (open = resolve))
+  await $.turn.complete({ answer: 'done', durationMs: 1, isAborted: false, turnId: 't', reason: 'answer' } as never)
+  // The compact step runs and its compaction waits beneath; the turn end's own drain claimed nothing.
+  await w.clock.settle()
+  await w.clock.advance(SETTLE_MS)
+  const drains = w.inboxDrains.length
+  w.inbox.push('pick B')
+  w.exits.at(-1)!(0, ['board'])
+  await w.clock.advance(50)
+  expect(w.inboxDrains.length).toBe(drains)
+  expect(w.prompts).toEqual([])
+  open()
+  await w.clock.advance(50)
+  // The resume window is open: the held message does not start a turn that would cancel it.
+  expect(w.prompts).toEqual([])
+  await w.clock.advance(CONTINUATION_WINDOW_MS)
+  await w.clock.advance(50)
+  expect(w.prompts).toEqual([resumeText(w.plugin), labelWhiteboard(w.plugin, 'pick B')])
 })
