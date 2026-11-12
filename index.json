@@ -411,7 +411,14 @@
       "registered_at": "2026-11-12T04:20:54Z"
     },
     "261112-bug-ws-hosted-context-window-ignores-compaction-window": {
-      "registered_at": "2026-11-12T03:52:57Z"
+      "registered_at": "2026-11-12T03:52:57Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "28ef83e379b353cc",
+        "track": "develop",
+        "phase": "closed",
+        "touched_at": "2026-11-12T04:31:08Z"
+      }
     },
     "261112-bug-ws-hosted-finished-subagents-lost-on-idle-resume": {
       "registered_at": "2026-11-12T02:58:08Z",
