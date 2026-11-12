@@ -27,6 +27,26 @@ type fakeBackend struct {
 	exe string
 	// startGate, when set, holds every Start until released (gateStarts).
 	startGate *gate
+	// failSends is how many of the next sends fail, as a write to a closed
+	// pipe does; negative fails every send.
+	failSends int
+}
+
+// takeSendFailure reports whether the next send fails (failSends).
+func (b *fakeBackend) takeSendFailure() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.failSends > 0 {
+		b.failSends--
+		return true
+	}
+	return b.failSends < 0
+}
+
+func (b *fakeBackend) setFailSends(n int) {
+	b.mu.Lock()
+	b.failSends = n
+	b.mu.Unlock()
 }
 
 // gate holds the calls of a fake until released, announcing each on
@@ -102,7 +122,7 @@ func (b *fakeBackend) Start(_ context.Context, spec StartSpec) (Process, error) 
 	if b.startErr != nil {
 		return nil, b.startErr
 	}
-	p := &fakeProc{events: make(chan Event, 64), sent: make(chan string, 16), noModel: b.noModel}
+	p := &fakeProc{backend: b, events: make(chan Event, 64), sent: make(chan string, 16), noModel: b.noModel}
 	b.starts = append(b.starts, spec)
 	b.procs = append(b.procs, p)
 	return p, nil
@@ -135,6 +155,7 @@ func (b *fakeBackend) waitProc(t *testing.T, i int) *fakeProc {
 }
 
 type fakeProc struct {
+	backend *fakeBackend
 	events  chan Event
 	sent    chan string
 	noModel bool
@@ -164,6 +185,9 @@ func (p *fakeProc) gateClose(t *testing.T) *gate {
 func (p *fakeProc) Events() <-chan Event { return p.events }
 
 func (p *fakeProc) Send(text string) error {
+	if p.backend != nil && p.backend.takeSendFailure() {
+		return errors.New("write |1: broken pipe")
+	}
 	p.sent <- text
 	return nil
 }
