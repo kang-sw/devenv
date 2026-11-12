@@ -415,6 +415,9 @@
     "261112-feat-ws-dashboard-lead-wake-events": {
       "registered_at": "2026-11-12T02:03:05Z"
     },
+    "261112-feat-ws-hosted-lead-turn-names-subagents-a-process-end-killed": {
+      "registered_at": "2026-11-12T04:20:57Z"
+    },
     "261112-feat-ws-mixed-version-compat-guards": {
       "registered_at": "2026-11-12T01:58:07Z"
     }
