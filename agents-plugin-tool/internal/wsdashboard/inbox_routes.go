@@ -12,10 +12,12 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsinbox"
+	"github.com/kang-sw/devenv/internal/wslive"
 )
 
 // The browser write routes: POST /s/<reply-id>/message holds a message the
@@ -227,7 +229,7 @@ func (d *Daemon) handleInboxWrite(w http.ResponseWriter, r *http.Request, replyI
 	var status int
 	var answer any
 	if route == "message" {
-		status, answer = d.messageWrite(dir, replyID, raw, now)
+		status, answer = d.messageWrite(dir, replyID, raw, localViewer(r), now)
 	} else {
 		d.inboxMu.Lock()
 		status, answer = d.inboxWrite(dir, route, raw, now)
@@ -238,8 +240,9 @@ func (d *Daemon) handleInboxWrite(w http.ResponseWriter, r *http.Request, replyI
 
 // messageWrite performs the message route against the inbox at dir. It
 // parses and checks the body, decoding and sniffing every new image, before
-// it takes d.inboxMu for the writes.
-func (d *Daemon) messageWrite(dir, replyID string, raw []byte, now time.Time) (int, any) {
+// it takes d.inboxMu for the writes. local reports a browser on this machine
+// (localViewer), the only viewer a slash command is held from.
+func (d *Daemon) messageWrite(dir, replyID string, raw []byte, local bool, now time.Time) (int, any) {
 	var req messageRequest
 	if err := json.Unmarshal(raw, &req); err != nil {
 		return http.StatusBadRequest, "malformed message"
@@ -259,21 +262,31 @@ func (d *Daemon) messageWrite(dir, replyID string, raw []byte, now time.Time) (i
 		images = append(images, img)
 	}
 	if req.Command != "" {
-		return d.sendCommand(dir, replyID, req, now)
+		return d.sendCommand(dir, replyID, req, local, now)
 	}
 	d.inboxMu.Lock()
 	defer d.inboxMu.Unlock()
 	return d.sendMessage(dir, req, images, now)
 }
 
-// sendCommand holds one slash command in the inbox at dir as its own entry,
-// refused unless the session's adapter reports a command list.
-func (d *Daemon) sendCommand(dir, replyID string, req messageRequest, now time.Time) (int, any) {
+// sendCommand holds one slash command in the inbox at dir as its own entry.
+// The adapter runs a held command with no model turn and no approval, so it
+// is refused unless local reports a browser on this machine (the gate of the
+// terminals; a LAN token viewer never passes), the session's adapter reports
+// a command list, and the name is one of that list's.
+func (d *Daemon) sendCommand(dir, replyID string, req messageRequest, local bool, now time.Time) (int, any) {
+	if !local {
+		return http.StatusForbidden, "slash commands run only from a browser on this machine"
+	}
 	if len(req.Images) > 0 || len(req.Refs) > 0 {
 		return http.StatusBadRequest, "a slash command carries no images"
 	}
-	if snap := d.pages().readSnapshot(replyID); snap == nil || len(snap.Commands) == 0 {
+	snap := d.pages().readSnapshot(replyID)
+	if snap == nil || len(snap.Commands) == 0 {
 		return http.StatusConflict, "this session's host adapter runs no slash commands from the dashboard"
+	}
+	if !slices.ContainsFunc(snap.Commands, func(c wslive.SlashCommand) bool { return c.Name == req.Command }) {
+		return http.StatusBadRequest, fmt.Sprintf("/%s is not a command this session runs", req.Command)
 	}
 	entry := wsinbox.Entry{Parts: []string{req.Text}, Chips: req.Chips, Topics: req.Topics, Mentions: req.Mentions, Command: &wsinbox.Command{Name: req.Command, Args: req.Args}}
 	d.inboxMu.Lock()

@@ -369,7 +369,13 @@ symlink (404 otherwise), to a loopback viewer and a LAN token holder alike:
 an image inline, markdown rendered in the board's escaped mode with relative
 links resolved against the file's own directory, other UTF-8 text as
 `text/plain`, and a binary or over-2-MiB file as a page offering the path
-copies. A file outside the root offers the copies only, not the file view,
+copies. A preview card shows an HTML or SVG file inside the session's own
+root in a sandboxed frame, through a 15-minute capability on
+`/s/<reply-id>/fs/cap/`; for a viewer on this machine the capability route
+refuses only a dot-named path, and for a LAN viewer a dot-named or
+git-ignored path (failing closed when the ignore check fails), and a file it
+refuses previews as its source (`internal/wsdashboard/fs_capability.go`
+states the rules). A file outside the root offers the copies only, not the file view,
 with two exceptions. For a viewer on this machine, a link to one on the
 board or in a lead reply the live ring still holds opens in the preview
 card, and an HTML file also in a sandboxed tab of its own: the click posts
@@ -380,8 +386,9 @@ folder, served to this machine only on `/s/<reply-id>/fs/ocap/` and
 `/fs/oview/`. A volume root, the home, or a folder directly under either
 grants the linked file alone; `~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.config/gh`,
 `~/.netrc`, and `~/.docker` never open; below the granted folder a
-dot-named or git-ignored path is refused, the linked file itself excepted
-(`internal/wsdashboard/fs_outside.go` states the rules). A card re-mints on
+dot-named path is refused, the linked file itself excepted, while a
+git-ignored one is served, as the in-root capability route serves it to this
+machine (`internal/wsdashboard/fs_outside.go` states the rules). A card re-mints on
 every load, and a tab whose capability expired lands on a page that re-posts
 the mint. The other exception is an image
 written as an absolute path in a lead reply, a board item field, or (through
@@ -903,7 +910,9 @@ while the child lives.
 
 The daemon scans the holders directory at start and every 3 minutes,
 attaches to every holder over loopback TCP with the descriptor's token, and
-replays the holder's output ring (4 MiB, sequenced; a reattach within one
+replays the holder's output ring (sequenced; 4 MiB for a terminal holder,
+32 MiB for a hosted lead conversation's holder, `leadRingBytes`, so a rejoin
+rebuilds a long turn whole; a reattach within one
 daemon process continues after the last sequence it saw, a new daemon
 process replays the whole ring). The newest authenticated attach takes over,
 so a replaced daemon and its successor never both write to one child. A
@@ -1174,7 +1183,7 @@ Current launcher inputs:
 | `WS_MCP_ALLOWED_TOOLS` | Comma list of ws tool names; when set, `tools/list` advertises and `tools/call` accepts only these. The agent runner sets it to a profile's ws tools. `tracker.show`, `tracker.ui`, and `git.search` are listed and callable only when it names them. |
 | `WS_MCP_NAMESPACE` | User-facing MCP namespace text override; empty or unset defaults to `ws`. |
 | `WS_MCP_SETUP_TOOL` | Advertised setup tool name override; empty or unset defaults to `ws.setup`. |
-| `WS_MCP_CONFIG_MANIFESTS` | Adapter config key manifests, separated by the platform path-list separator (`:` POSIX, `;` Windows); `;` is accepted on every platform, which the static launcher configs use. Declared keys become `config.tune`-writable, cataloged by `config.list`, and typed in `config.get`; a rejected manifest is logged to stderr and listed by `config.list`. The ws and wsflow packages each ship their own `config-manifest.json` (namespace `claude.`; the same keys, differing only in `default`, pinned by `TestShippedClaudeManifestsDifferOnlyInDefaults`) and set it in both launch configs: `.mcp.json` (Codex) as `./config-manifest.json`, resolved against `cwd: "."` (the plugin root), and `.claude-plugin/plugin.json` as `${CLAUDE_PLUGIN_ROOT}/config-manifest.json`. Each package (ws, wsflow, Pi) also lists its `dashboard-config-manifest.json` (namespace `dashboard.`: `dashboard.enabled`, default on in ws and Pi, off in wsflow; `dashboard.port`, default 29417; `dashboard.lan_enabled`, global-only and default off in every package) beside its own manifest; the Pi bridge joins the two with the platform separator. A path that does not resolve fails nothing: the keys stay undeclared, so check `config.list` after changing either. |
+| `WS_MCP_CONFIG_MANIFESTS` | Adapter config key manifests, separated by the platform path-list separator (`:` POSIX, `;` Windows); `;` is accepted on every platform, which the static launcher configs use. Declared keys become `config.tune`-writable, cataloged by `config.list`, and typed in `config.get`; a rejected manifest is logged to stderr and listed by `config.list`. The ws and wsflow packages each ship their own `config-manifest.json` (namespace `claude.`; the same keys, differing only in `default`, pinned by `TestShippedClaudeManifestsDifferOnlyInDefaults`) and set it in both launch configs: `.mcp.json` (Codex) as `./config-manifest.json`, resolved against `cwd: "."` (the plugin root), and `.claude-plugin/plugin.json` as `${CLAUDE_PLUGIN_ROOT}/config-manifest.json`. Each package (ws, wsflow, Pi) also lists its `dashboard-config-manifest.json` (namespace `dashboard.`: `dashboard.enabled`, default on in every package; `dashboard.port`, default 29417; `dashboard.lan_enabled`, global-only and default off in every package) beside its own manifest; the Pi bridge joins the two with the platform separator. A path that does not resolve fails nothing: the keys stay undeclared, so check `config.list` after changing either. |
 | `WS_MCP_CLI_NAME` | Command name that printed agent-runnable CLI commands (the rendered `mailbox wait` command and its re-arm line) start with; empty or unset uses the invoked binary path (`os.Args[0]`). Set by the `ws-cli`/`wsflow-cli` shims and by the Claude manifests' `mcpServers.<name>.env`, where plugin `bin/` is on the agent's Bash PATH; left unset for Codex, which does not put plugin `bin/` on PATH. |
 
 Launcher diagnostics must go to stderr. Stdout belongs to the MCP JSON-RPC

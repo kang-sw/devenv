@@ -78,7 +78,8 @@ func TestDashboardReadPageServesTheBoard(t *testing.T) {
 	}
 
 	// A board without file targets: the regions are what the static full
-	// page shows.
+	// page shows, but for the topic bar's count chips, bulk-answer buttons
+	// on the served page only (wswhiteboard.StaticCountChips).
 	f.call(t, "todo.add", map[string]any{"key": "step", "title": "a step"})
 	f.update(t, `<wb:topic name="t"><wb:add class="technical"><wb:title>a question</wb:title><wb:why>plain reason</wb:why></wb:add></wb:topic>`)
 	page = readPageOK(t, src, reg)
@@ -86,7 +87,7 @@ func TestDashboardReadPageServesTheBoard(t *testing.T) {
 		t.Fatalf("board page = %+v", page)
 	}
 	static := f.fullPage(t)
-	if !strings.Contains(static, string(page.Board.Board)) {
+	if !strings.Contains(static, wswhiteboard.StaticCountChips(string(page.Board.Board))) {
 		t.Errorf("the static page does not hold the served board:\n%.600s", page.Board.Board)
 	}
 	if !strings.Contains(static, string(page.Board.Panels)) {
