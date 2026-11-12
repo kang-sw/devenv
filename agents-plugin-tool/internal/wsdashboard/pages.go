@@ -281,7 +281,9 @@ func pageFuncs(lang string, icons map[string]bool) template.FuncMap {
 		"tokenText":  func(requests int, u *wslive.TokenUsage) string { return tokenText(lang, requests, u) },
 		"tokenTitle": func(requests int, u *wslive.TokenUsage) string { return tokenTitle(lang, requests, u) },
 		"requests":   summaryRequests,
-		"batchMeta":  func(b wslive.ToolBatch) string { return batchMeta(lang, b) },
+		"batchNums":  func(b wslive.ToolBatch) []batchNum { return batchNums(lang, b) },
+		"batchArgs":  batchArgs,
+		"argsList":   batchArgsList,
 		"phaseWord":  func(phase string) string { return phaseWord(lang, phase) },
 		"flagText":   func(flag string) string { return flagText(lang, flag) },
 		"limitName":  func(name string) string { return limitName(lang, name) },
@@ -460,29 +462,72 @@ func summaryRequests(s *wslive.ToolSummary) int {
 	return len(s.Batches) + s.BatchesOmitted
 }
 
-// batchMeta is a tool summary batch line's trailing text: its duration,
-// failed calls, and the request's tokens. A batch without per-call tools
-// (an older adapter's) leads with its call count, which its chips cannot
-// show; so does one whose calls outnumber those it named.
-func batchMeta(lang string, b wslive.ToolBatch) string {
-	var parts []string
+// batchNum is one number on a tool summary batch line: its text, a title
+// naming it with the exact value, the separator before it, and an optional
+// class.
+type batchNum struct {
+	Sep, Text, Title, Class string
+}
+
+// batchNums is a tool summary batch line's trailing numbers, unlabelled:
+// its duration, failed calls, and the request's prompt (input plus cache
+// reads and writes, the cache-write part as a trailing +N) and output, each
+// with its own title. A batch without per-call tools (an older adapter's)
+// leads with its call count, which its chips cannot show; so does one whose
+// calls outnumber those it named.
+func batchNums(lang string, b wslive.ToolBatch) []batchNum {
+	var nums []batchNum
+	add := func(sep, text, title, class string) {
+		if len(nums) == 0 {
+			sep = ""
+		}
+		nums = append(nums, batchNum{Sep: sep, Text: text, Title: title, Class: class})
+	}
 	named := 0
 	for _, t := range b.Tools {
 		named += t.Calls
 	}
 	if named < b.Calls {
-		parts = append(parts, wsi18n.Plural(lang, "batch.calls", b.Calls))
+		add(" · ", "×"+strconv.Itoa(b.Calls), wsi18n.Plural(lang, "batch.calls", b.Calls), "")
 	}
 	if b.DurationMs > 0 {
-		parts = append(parts, batchSpanText(b.DurationMs))
+		add(" · ", batchSpanText(b.DurationMs), wsi18n.T(lang, "batch.duration", commafy(b.DurationMs)), "")
 	}
 	if b.Failed > 0 {
-		parts = append(parts, wsi18n.T(lang, "count.failed", b.Failed))
+		add(" · ", "✗"+strconv.Itoa(b.Failed), wsi18n.T(lang, "count.failed", b.Failed), "bf")
 	}
-	if b.Usage != nil {
-		parts = append(parts, tokenText(lang, 1, b.Usage))
+	if u := b.Usage; u != nil {
+		prompt := u.Input + u.CacheRead + u.CacheWrite
+		add(" · ", compactTokens(prompt), wsi18n.T(lang, "tok.title.prompt", commafy(prompt), commafy(u.Input), commafy(u.CacheRead), commafy(u.CacheWrite)), "")
+		if u.CacheWrite > 0 {
+			add(" ", "+"+compactTokens(u.CacheWrite), wsi18n.T(lang, "tok.title.cachewrite", commafy(u.CacheWrite)), "")
+		}
+		add(" · ", compactTokens(u.Output), wsi18n.T(lang, "tok.out", commafy(u.Output)), "")
 	}
-	return strings.Join(parts, " · ")
+	return nums
+}
+
+// batchArgs is a one-call batch's argument preview, shown after its tool
+// name; empty for a batch of several calls or one that carried none.
+func batchArgs(b wslive.ToolBatch) string {
+	if b.Calls != 1 || len(b.CallArgs) != 1 {
+		return ""
+	}
+	return b.CallArgs[0].ArgsPreview
+}
+
+// batchArgsList is a batch of several calls' "name args" lines, one per
+// carried call, for the row's title; empty for a one-call batch (its args
+// show inline) or one that carried no argument preview.
+func batchArgsList(b wslive.ToolBatch) string {
+	if b.Calls < 2 || len(b.CallArgs) == 0 {
+		return ""
+	}
+	lines := make([]string, len(b.CallArgs))
+	for i, c := range b.CallArgs {
+		lines[i] = strings.TrimSpace(toolName(c.Name) + " " + c.ArgsPreview)
+	}
+	return strings.Join(lines, "\n")
 }
 
 // renderedRegion is one region's HTML and its content hash.

@@ -297,6 +297,17 @@ func TestClaudeMapperToolTurn(t *testing.T) {
 	if tools == nil || turn == nil || turn.Done != 1 || turn.Failed != 1 {
 		t.Fatalf("two Read calls, one failing, should count done 1 failed 1: tools %+v turn %+v", tools, turn)
 	}
+	// Each finished call keeps the argument preview the mapper took when it
+	// added the call, so the hosted tools row shows it as the mod's does.
+	var callArgs []string
+	for _, b := range tools.Tools.Batches {
+		for _, c := range b.CallArgs {
+			callArgs = append(callArgs, c.Name+" "+c.ArgsPreview)
+		}
+	}
+	if got := strings.Join(callArgs, "|"); got != "Read /work/notes.txt|Read /work/missing.txt" {
+		t.Fatalf("hosted call args = %q", got)
+	}
 	snap := st.Snapshot(2_000_000)
 	if snap.Usage == nil || snap.Usage.Context == nil || snap.Usage.Context.Window != 1_000_000 || snap.Usage.Cost == nil || len(snap.Usage.Limits) != 1 || snap.Usage.Limits[0].Kind != wslive.LimitSevenDay {
 		t.Fatalf("usage should carry context, window, cost, and the weekly limit: %+v", snap.Usage)

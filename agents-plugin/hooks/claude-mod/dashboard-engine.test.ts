@@ -258,8 +258,8 @@ test('knob on: the lead\'s turn reaches the intake tool under the bound key, by 
     failed: 0,
     startedAt: expect.any(Number),
     endedAt: expect.any(Number),
-    // The step result's usage and the call's own clocks ride on the finished batch; its arguments never do.
-    calls: [{ name: 'Bash', startedAt: expect.any(Number), endedAt: expect.any(Number), failed: false }],
+    // The step result's usage, the call's own clocks, and its capped argument preview ride on the finished batch.
+    calls: [{ name: 'Bash', startedAt: expect.any(Number), endedAt: expect.any(Number), failed: false, argsPreview: 'command: ls' }],
     usage: { input: 12, output: 340, cacheRead: 45000, cacheWrite: 1200 },
   })
   expect(kinds(w).at(-1)).toBe('turn_end')

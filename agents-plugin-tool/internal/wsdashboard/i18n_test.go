@@ -207,15 +207,25 @@ func TestGoBuiltStringsFollowTheLanguage(t *testing.T) {
 	if got := summaryRequests(&wslive.ToolSummary{Batches: make([]wslive.ToolBatch, 2), BatchesOmitted: 3}); got != 5 {
 		t.Fatalf("summaryRequests = %d, want the listed and omitted batches", got)
 	}
-	if got := batchMeta("ko", wslive.ToolBatch{Calls: 1, Tools: []wslive.ToolTally{{Name: "Read", Calls: 1}}, DurationMs: 900, Usage: written}); got != "0.9s · 프롬프트 721k +11.7k · 출력 1.4k" {
-		t.Fatalf("batchMeta ko with usage = %q", got)
+	// A batch line's numbers carry no labels; each one's title names it.
+	nums := func(lang string, b wslive.ToolBatch) (text, titles string) {
+		var ts []string
+		for _, n := range batchNums(lang, b) {
+			text += n.Sep + n.Text
+			ts = append(ts, n.Title)
+		}
+		return text, strings.Join(ts, " | ")
+	}
+	text, titles := nums("ko", wslive.ToolBatch{Calls: 1, Tools: []wslive.ToolTally{{Name: "Read", Calls: 1}}, DurationMs: 900, Usage: written})
+	if text != "0.9s · 721k +11.7k · 1.4k" || titles != "소요 시간 900 ms | 프롬프트 720,512 (입력 14 · 캐시 읽기 708,800 · 캐시 쓰기 11,698) | 캐시 쓰기 11,698 | 출력 1,402" {
+		t.Fatalf("batchNums ko with usage = %q / %q", text, titles)
 	}
 	b := wslive.ToolBatch{Calls: 3, Failed: 1, DurationMs: 1500}
-	if got := batchMeta("en", b); got != "3 calls · 1.5s · 1 failed" {
-		t.Fatalf("batchMeta en = %q", got)
+	if text, titles := nums("en", b); text != "×3 · 1.5s · ✗1" || titles != "3 calls | duration 1,500 ms | 1 failed" {
+		t.Fatalf("batchNums en = %q / %q", text, titles)
 	}
-	if got := batchMeta("ko", b); got != "호출 3회 · 1.5s · 실패 1" {
-		t.Fatalf("batchMeta ko = %q", got)
+	if text, titles := nums("ko", b); text != "×3 · 1.5s · ✗1" || titles != "호출 3회 | 소요 시간 1,500 ms | 실패 1" {
+		t.Fatalf("batchNums ko = %q / %q", text, titles)
 	}
 	if got := phaseWord("ko", "thinking"); got != "생각 중" {
 		t.Fatalf("phaseWord = %q", got)
