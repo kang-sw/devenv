@@ -332,10 +332,10 @@ engine at runtime, and selects no feature by package name: every feature but
 the reconnect and compaction request levers is switched by a `claude.*` config
 key, and the only per-package difference is each key's `default` in the
 package's own `config-manifest.json` (ws: the compaction advisory, manual
-injection, the direct mailbox drain, the status band, and the MCP watchdog on;
-wsflow: all off but manual injection, and the drain `notice`; captions off
-in both; the watchdog
-interval 10 minutes in both). `TestShippedClaudeManifestsDifferOnlyInDefaults`
+injection, the direct mailbox drain, the status band, the dashboard feed, and
+the MCP watchdog on; wsflow: all off but manual injection and the dashboard
+feed, and the drain `notice`; captions off in both; the watchdog interval
+10 minutes in both). `TestShippedClaudeManifestsDifferOnlyInDefaults`
 pins that the two manifests declare the same keys with every field but
 `default` identical, so a shared description never states a package's
 default. This supersedes the earlier package-name gates
