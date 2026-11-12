@@ -1128,6 +1128,55 @@ func TestPiLeadRejoinOfAWrappedRingAsksWhetherATurnRuns(t *testing.T) {
 	}
 }
 
+// TestPiLeadRejoinProbeIdleAnswerAfterATurnStartKeepsTheHold: a turn that
+// starts after the ask (its start may follow pi's answer on the stream)
+// overrides an idle answer; the turn's own end releases the held message,
+// once.
+func TestPiLeadRejoinProbeIdleAnswerAfterATurnStartKeepsTheHold(t *testing.T) {
+	h, id, holder, ask := piHeldRejoin(t)
+	h.holders.out(holder, `{"type":"agent_start"}`,
+		string(piWidgetLine(piAgentsWidgetKey, `{"kind":"agent","agentId":"sync-1","label":"sync","status":"running","caption":"worker","batches":[]}`)))
+	// The widget's row shows once the loop handled the turn start before it.
+	eventually(t, "the turn start to be handled", func() bool {
+		for _, a := range h.snapshot(id).Agents {
+			if a.ID == "sync-1" {
+				return true
+			}
+		}
+		return false
+	})
+	h.holders.out(holder, piStateAnswer(ask, false))
+	eventually(t, "the answer to be taken", func() bool { return strings.Contains(h.log.String(), "the harness reports") })
+	h.runner.conv(id).do(func() {})
+	if got := piPrompts(h, holder); !slices.Equal(got, []string{"one"}) || h.state(id).Held != 1 || h.state(id).Status != StatusRunning || !strings.Contains(h.log.String(), "but one started since") {
+		t.Fatalf("the message stays held: prompts %q, state %+v, log:\n%s", got, h.state(id), h.log.String())
+	}
+	h.holders.out(holder, `{"type":"agent_settled"}`)
+	eventually(t, "the held message at the turn's end", func() bool { return slices.Equal(piPrompts(h, holder), []string{"one", "two"}) })
+	h.holders.out(holder, `{"type":"agent_start"}`, `{"type":"agent_settled"}`)
+	h.idle(id)
+	if got := piPrompts(h, holder); len(got) != 2 || h.state(id).Held != 0 {
+		t.Fatalf("the held message goes once: prompts %q, state %+v", got, h.state(id))
+	}
+}
+
+// TestPiLeadRejoinProbeAnswerForAnotherProcessIsDropped: an answer that
+// arrives for a process the conversation no longer runs changes nothing;
+// the current process's own answer still releases the hold.
+func TestPiLeadRejoinProbeAnswerForAnotherProcessIsDropped(t *testing.T) {
+	h, id, holder, ask := piHeldRejoin(t)
+	c := h.runner.conv(id)
+	c.do(func() { c.wrapProbed(&fakeProc{}, false, nil) })
+	if got := piPrompts(h, holder); !slices.Equal(got, []string{"one"}) || h.state(id).Held != 1 || h.state(id).Status != StatusRunning {
+		t.Fatalf("a stale answer keeps the hold: prompts %q, state %+v", got, h.state(id))
+	}
+	if strings.Contains(h.log.String(), "the harness reports") {
+		t.Fatalf("a stale answer is not taken:\n%s", h.log.String())
+	}
+	h.holders.out(holder, piStateAnswer(ask, false))
+	eventually(t, "the held message as the next turn", func() bool { return slices.Equal(piPrompts(h, holder), []string{"one", "two"}) })
+}
+
 // TestPiLeadRejoinProbeThatSaysRunningOrFailsKeepsTheHold: a running answer
 // or a refused ask keeps the message held until pi ends the turn.
 func TestPiLeadRejoinProbeThatSaysRunningOrFailsKeepsTheHold(t *testing.T) {
@@ -1147,6 +1196,9 @@ func TestPiLeadRejoinProbeThatSaysRunningOrFailsKeepsTheHold(t *testing.T) {
 				log := h.log.String()
 				return strings.Contains(log, "the harness reports a turn running") || strings.Contains(log, "ask the harness whether a turn runs")
 			})
+			// The log line comes first in the loop step that takes the
+			// answer; a round trip lets that step finish.
+			h.runner.conv(id).do(func() {})
 			if got := piPrompts(h, holder); !slices.Equal(got, []string{"one"}) || h.state(id).Held != 1 || h.state(id).Status != StatusRunning {
 				t.Fatalf("the message stays held: prompts %q, state %+v", got, h.state(id))
 			}
@@ -1708,6 +1760,9 @@ func TestLeadFailedMailOnlySendRetriesOnce(t *testing.T) {
 	c.do(func() {})
 	if n := h.holders.opCount("spawn"); n != spawns+1 || !slices.Equal(h.record(id).Mail, []string{"From a@x: again"}) {
 		t.Fatalf("a send that always fails is retried once: %d spawns after %d, mail %q", n, spawns, h.record(id).Mail)
+	}
+	if st := h.state(id); st.Status == StatusRunning {
+		t.Fatalf("a failed send runs no turn: %+v", st)
 	}
 }
 
