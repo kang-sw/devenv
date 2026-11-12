@@ -154,6 +154,73 @@ func TestTrackerPriorityChipAndLabelPicker(t *testing.T) {
 	}
 }
 
+// TestTrackerPropertyCardLabelPicker pins the property card's label row: an
+// editor's row is a button that opens the item menu's labels step (anyone
+// else's only shows the chips, an empty set as "-"; an editor's empty set a
+// muted "add a label"); the step lists the store's labels as toggle chips
+// and a toggle writes the item's labels at once (in the store's list order)
+// with the step kept open; an empty store says so and, for an admin only,
+// offers the store settings' label dialog. Escape on the step closes it,
+// focus back on the row.
+func TestTrackerPropertyCardLabelPicker(t *testing.T) {
+	if !strings.Contains(trackerFn(t, `function propertyCard\(it\)`, false), "'</dt><dd>' + labelsProp(it) + '</dd>'") {
+		t.Error("the property card's label row is not labelsProp")
+	}
+	if !strings.Contains(trackerFn(t, `var STEPS = `, true), "labels: 1") {
+		t.Error("the labels act does not open an item menu step")
+	}
+	if !strings.Contains(trackerFn(t, `function menuHtml\(\)`, false), "if (step === 'labels') return h + back + labelStepHtml(it);") {
+		t.Error("the item menu has no labels step")
+	}
+	act := trackerFn(t, `function menuAct\(k, a\)`, false)
+	for _, want := range []string{
+		"case 'm-label': MN.lab = a.getAttribute('data-label'); return commit([['item.edit', { item: id, labels: labelToggled(it.labels, MN.lab) }]]);",
+		"case 'm-ladd': closeMenu(false); return openDialog('slabel', {});",
+	} {
+		if !strings.Contains(act, want) {
+			t.Errorf("menuAct lacks %q", want)
+		}
+	}
+	wr := trackerFn(t, `function wrote\(results\)`, false)
+	for _, want := range []string{"var keep = !!(MN && MN.kind === 'item' && MN.step === 'labels');", "if (MN && MN.kind === 'item' && !keep) closeMenu(false);", "if (keep && MN) labelStepRedraw();"} {
+		if !strings.Contains(wr, want) {
+			t.Errorf("wrote lacks %q", want)
+		}
+	}
+	if !strings.Contains(trackerFn(t, `function menuKey\(e\)`, false), "if (k === 'Escape') { e.preventDefault(); e.stopPropagation(); if (MN.from) menuBack(); else closeMenu(true); return; }") {
+		t.Error("Escape on a first menu step no longer closes it with focus back")
+	}
+	src := trackerFn(t, `function esc\(s\)`, false) + trackerFn(t, `function attr\(k, v\)`, true) + trackerFn(t, `function tipAttr\(text\)`, true) +
+		trackerFn(t, `function dataAttrs\(data\)`, false) + trackerFn(t, `function mi\(act, label, data, o\)`, false) + trackerFn(t, `function msep\(\)`, true) +
+		trackerFn(t, `function labelOf\(id\)`, true) + trackerFn(t, `function labelChip\(l, act, extra\)`, false) + trackerFn(t, `function labelChips\(it, act\)`, false) +
+		trackerFn(t, `function labelsProp\(it\)`, false) + trackerFn(t, `function labelToggle\(l, on, act, aria\)`, false) +
+		trackerFn(t, `function labelStepHtml\(it\)`, false) + trackerFn(t, `function labelToggled\(cur, lid\)`, false)
+	runTrackerCases(t, "property card labels", trackerCheckJS+`
+var VS = { viewer: { member: 'me', admin: false }, labels: [{ id: 'L1', name: 'docs', color: '#111111' }, { id: 'L2', name: 'dev', color: '#222222' }] }, editor = true;
+function wsT(k) { return k; }
+function canEdit(it) { return editor; }
+`+src+`
+function has(s, x) { return s.indexOf(x) >= 0; }
+var it = { id: 'i1', labels: ['L2'] };
+var b = labelsProp(it);
+check('an editor gets the row button opening the labels step', [has(b, '<button type="button" class="plab" id="iw-plabels" data-act="labels" data-item="i1" aria-haspopup="menu"'), has(b, '>dev</span>')], [true, true]);
+check('an editor with no labels gets the add placeholder', has(labelsProp({ id: 'i2', labels: [] }), '<span class="muted">js.tk.prop.labels.add</span>'), true);
+editor = false;
+check('a viewer without the edit right sees the chips only', labelsProp(it), '<span class="chip lbl"><span class="ldot" style="background:#222222"></span>dev</span>');
+check('a viewer without the edit right sees "-" for no labels', labelsProp({ id: 'i2', labels: [] }), '<span class="muted">-</span>');
+var st = labelStepHtml(it);
+check('the step lists every label as a toggle chip, the picked one on, focus on the first', [has(st, 'class="chip lbl" data-act="m-label" data-label="L1" role="menuitemcheckbox" aria-checked="false" data-mi data-autofocus'), has(st, 'class="chip lbl on" data-act="m-label" data-label="L2" role="menuitemcheckbox" aria-checked="true" data-mi')], [true, true]);
+check('a toggle adds in list order', labelToggled(['L2'], 'L1'), ['L1', 'L2']);
+check('a toggle removes', labelToggled(['L1', 'L2'], 'L1'), ['L2']);
+check('a toggle drops labels the list no longer holds', labelToggled(['gone', 'L1'], 'L2'), ['L1', 'L2']);
+VS.labels = [];
+check('an empty store says so, no add for a non-admin', labelStepHtml(it), '<p class="mempty">js.tk.labels.empty</p>');
+VS.viewer.admin = true;
+check('an admin gets the label dialog', has(labelStepHtml(it), 'data-act="m-ladd"'), true);
+done();
+`)
+}
+
 // TestTrackerInsertDepthMarkers pins the hover insert's depth markers: every
 // level slot from the root to one under the row above, but the badge's own,
 // carries a marker; a tick where a place is (insOpts), an x where none is.

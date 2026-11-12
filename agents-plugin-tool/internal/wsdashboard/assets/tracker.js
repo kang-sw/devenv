@@ -2600,6 +2600,15 @@
     while (cur && VS.items[cur] && out.length < 50) { out.unshift(cur); cur = VS.items[cur].parent; }
     return out;
   }
+  // The property card's labels: an editor's are a button that opens the item menu's labels step
+  // (labelStepHtml), where a toggle writes at once; anyone else's only show.
+  function labelsProp(it) {
+    var cs = labelChips(it);
+    if (!canEdit(it)) return cs || '<span class="muted">-</span>';
+    var names = (it.labels || []).map(labelOf).filter(Boolean).map(function (l) { return l.name; }).join(', '), t = wsT("js.tk.prop.labels.edit");
+    return '<button type="button" class="plab" id="iw-plabels"' + attr('act', 'labels') + attr('item', it.id) + ' aria-haspopup="menu" aria-label="' + esc(names ? t + ': ' + names : t) + '"' + tipAttr(t) + '>' +
+      (cs || '<span class="muted">' + wsT("js.tk.prop.labels.add") + '</span>') + '</button>';
+  }
   function propertyCard(it) {
     var hs = holders(it), topic = it.kind === 'topic';
     return '<section class="pcard" aria-label="' + wsT("js.tk.prop.aria") + '"><h3>' + wsT("js.tk.prop.title") + '</h3><dl>' +
@@ -2611,7 +2620,7 @@
       (topic ? '' : '<dt>' + wsT("js.tk.prop.due") + '</dt><dd>' + (it.due ? esc(it.due) : '<span class="muted">-</span>') + '</dd>') +
       '<dt>' + wsT("js.tk.prop.creator") + '</dt><dd>' + whoName(it.author) + (VS.members[it.author] && VS.members[it.author].admin ? ' <span class="chip admin">' + wsT("js.tk.team.admin") + '</span>' : '') + '</dd>' +
       '<dt>' + wsT("js.tk.prop.project") + '</dt><dd>' + (it.project ? esc(it.project) : '<span class="muted">-</span>') + '</dd>' +
-      '<dt>' + wsT("js.tk.prop.labels") + '</dt><dd>' + (labelChips(it) || '<span class="muted">-</span>') + '</dd>' +
+      '<dt>' + wsT("js.tk.prop.labels") + '</dt><dd>' + labelsProp(it) + '</dd>' +
       '<dt>' + wsT("js.tk.prop.parent") + '</dt><dd>' + (it.parent ? itemRef(it.parent) + ' ' + esc((VS.items[it.parent] || {}).title || '') : '<span class="muted">-</span>') + '</dd>' +
       '<dt>' + wsT("js.tk.prop.id") + '</dt><dd><code>' + esc(it.id) + '</code></dd>' +
       '<dt>' + wsT("js.tk.prop.dates") + '</dt><dd>' + wsT("js.tk.row.created", esc(fmtTs(it.ts))) + (it.edited ? '<br>' + wsT("js.tk.row.edited", esc(fmtTs(it.edited.ts))) : '') + '<br>' + wsT("js.tk.row.activity", esc(fmtTs(it.lastActivity))) + '</dd></dl></section>';
@@ -3546,9 +3555,12 @@
   function wrote(results) {
     ui.last = results;
     closeDialog();
-    var mb = MN && MN.kind === 'item' ? MN.back : null; // an item menu closes; focus goes back to its row once redrawn
-    if (MN && MN.kind === 'item') closeMenu(false);
+    // the labels step stays open across toggles: it draws again over the written item
+    var keep = !!(MN && MN.kind === 'item' && MN.step === 'labels');
+    var mb = MN && MN.kind === 'item' && !keep ? MN.back : null; // an item menu closes; focus goes back to its row once redrawn
+    if (MN && MN.kind === 'item' && !keep) closeMenu(false);
     render();
+    if (keep && MN) labelStepRedraw();
     var me = mb && document.querySelector(mb);
     if (me && !me.matches('a[href], button, input, [tabindex]')) me = me.querySelector('button, a[href], [tabindex]');
     if (me && !(document.activeElement && document.activeElement.hasAttribute('data-keep'))) me.focus({ preventScroll: true });
@@ -3760,6 +3772,7 @@
     var back = MN.from ? mi('m-back', wsT("js.tk.menu.back"), {}, { icon: 'back', cls: 'mback' }) + msep() : '';
     var mineR = mineLive(it), step = MN.step;
     if (step === 'pri') return h + back + priGroup(it.priority);
+    if (step === 'labels') return h + back + labelStepHtml(it);
     if (step === 'due') {
       return h + back + '<div class="mrow"><input type="date" id="tkmdue" data-mi data-autofocus value="' + esc(it.due || '') + '" aria-label="' + wsT("js.tk.menu.due") + '">' +
         btn('m-due-set', wsT("js.tk.menu.due.set"), {}, 'primary') + '</div>' + (it.due ? mi('m-due-clear', wsT("js.tk.menu.due.clear"), {}, { icon: 'x' }) : '');
@@ -4146,6 +4159,8 @@
         return commit([['item.edit', { item: id, due: dv }]]);
       }
       case 'm-due-clear': return commit([['item.edit', { item: id, due: null }]]);
+      case 'm-label': MN.lab = a.getAttribute('data-label'); return commit([['item.edit', { item: id, labels: labelToggled(it.labels, MN.lab) }]]);
+      case 'm-ladd': closeMenu(false); return openDialog('slabel', {});
       case 'm-cc': return commit([['item.cc', { item: id, member: a.getAttribute('data-to') }]]);
       case 'm-handoff': {
         var hp = { item: id, to: a.getAttribute('data-to') }, note = menuNote();
@@ -4816,8 +4831,42 @@
     if (!ls.length) return '';
     return '<div class="lpick" role="group" aria-label="' + esc(wsT("js.tk.form.labels")) + '"><span class="muted">' + wsT("js.tk.form.labels") + '</span>' + ls.map(function (l) {
       var on = ed.labels.indexOf(l.id) >= 0;
-      return '<button type="button" class="chip lbl' + (on ? ' on' : '') + '"' + attr('act', 'ilabel') + attr('label', l.id) + ' aria-pressed="' + on + '"><span class="ldot" style="background:' + esc(l.color) + '"></span>' + esc(l.name) + '</button>';
+      return labelToggle(l, on, 'ilabel', ' aria-pressed="' + on + '"');
     }).join('') + '</div>';
+  }
+  // One label toggle chip (the edit mode's and the labels step's); aria is its state attribute.
+  function labelToggle(l, on, act, aria) {
+    return '<button type="button" class="chip lbl' + (on ? ' on' : '') + '"' + attr('act', act) + attr('label', l.id) + aria + '><span class="ldot" style="background:' + esc(l.color) + '"></span>' + esc(l.name) + '</button>';
+  }
+  // The item menu's labels step (the property card's labels button): the store's labels as the
+  // edit mode's chips, each a toggle that writes the item's labels at once and keeps the step open
+  // (wrote -> labelStepRedraw). With no labels in the store it says so, and an admin gets the store
+  // settings' label dialog. The edit mode's picker keeps its own draft and save.
+  function labelStepHtml(it) {
+    var ls = VS.labels || [], cur = it.labels || [];
+    if (!ls.length) return '<p class="mempty">' + wsT("js.tk.labels.empty") + '</p>' + (VS.viewer.admin ? msep() + mi('m-ladd', esc(wsT("js.tk.new.labels.add")), {}, { icon: 'plus' }) : '');
+    return '<div class="lpick mlpick" role="group" aria-label="' + esc(wsT("js.tk.form.labels")) + '">' + ls.map(function (l, i) {
+      var on = cur.indexOf(l.id) >= 0;
+      return labelToggle(l, on, 'm-label', ' role="menuitemcheckbox" aria-checked="' + on + '" data-mi' + (i ? '' : ' data-autofocus'));
+    }).join('') + '</div>';
+  }
+  // An item's labels with lid toggled, in the store's list order (labels no longer listed drop).
+  function labelToggled(cur, lid) {
+    var has = (cur || []).indexOf(lid) >= 0;
+    return (VS.labels || []).map(function (l) { return l.id; }).filter(function (x) { return x === lid ? !has : (cur || []).indexOf(x) >= 0; });
+  }
+  // The labels step after a write: the property card drew again, so the step re-anchors on its new
+  // button, redraws over the written item, and keeps focus on the toggled chip. It closes when the
+  // item or the viewer's edit right is gone.
+  function labelStepRedraw() {
+    var bk = $('iw-plabels'), it = VS.items[MN.item];
+    if (!bk || !it || !canEdit(it)) return closeMenu(false);
+    MN.backEl = bk; MN.back = '#iw-plabels'; MN.rect = bk.getBoundingClientRect();
+    bk.setAttribute('aria-expanded', 'true');
+    $('tkmenu').innerHTML = menuHtml();
+    placeMenu();
+    var f = (MN.lab && $('tkmenu').querySelector('[data-act="m-label"][data-label="' + CSS.escape(MN.lab) + '"]')) || $('tkmenu').querySelector('[data-mi]');
+    if (f) f.focus({ preventScroll: true });
   }
   // The item window's edit mode and a comment's edit in place.
   function startEdit(id) {
@@ -5467,7 +5516,7 @@
 
   var QUICK = { confirm: 1, unassign: 1, accept: 1, ihide: 1, chide: 1, comment: 1, claim: 1, unopen: 1, approve: 1, unrequest: 1, uncc: 1 };
   // the item menu's steps an action button opens (in the menu, or a menu anchored to the button)
-  var STEPS = { note: 1, handoff: 1, assign: 1, pri: 1, due: 1, move: 1, opening: 1, request: 1, wrap: 1, cc: 1 };
+  var STEPS = { note: 1, handoff: 1, assign: 1, pri: 1, due: 1, labels: 1, move: 1, opening: 1, request: 1, wrap: 1, cc: 1 };
 
   // ------------------------------------------------------------- display state
 
