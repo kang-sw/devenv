@@ -9,6 +9,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 2bedce42c04972d2
 sage-review-completeness-reviewed: 2bedce42c04972d2
+completed: 2026-11-13
 ---
 
 # ws MCP pi.* tools (Claude-lead path)
@@ -258,3 +259,30 @@ Verification:
   a tuned tier, receives the mailbox report, reads the transcript, and the
   agents panel shows the `pi` badge (headless Chromium screenshot).
 - Existing `mcp`, `wsagent`, `wslive`, `wsdashboard`, and `wsrsrc` suites.
+
+### Result (fa9d1f061) - 2026-11-13
+
+Implemented in 7f40e8110 (runner spawn spec, parent link, turn reports,
+waits, `pi-worker` profile, `agentKind` in live state), 543481e8b (the six
+`pi.*` tools on `ServerOptions.Agents`, exposure gate, daemon-side mailbox
+report, live-row feed and replay, `pi` badge, `dashboard.pi_spawn_enabled`
+in the three dashboard manifests, runtime inventories), and fa9d1f061
+(knob scope test after review). Compatibility: T0 (additive tools, knob,
+and optional snapshot/event field).
+
+- The live event and snapshot field shipped as the JSON key `agentKind`
+  (camelCase, matching `sessionKey` and `parentId`), not `agent_kind`.
+- Senderless report mail reads `system` in `mailbox.recv`, history, and the
+  badge; the Claude mod's pinned batch formatter still labels it `unknown`,
+  and the body's `[Pi subagent <id> "<label>"]` prefix names the source.
+- The session page links agent rows (`Linked` covers agent registrations),
+  since a runner conversation has no whiteboard.
+- Real run (isolated dev daemon on Pi 1.0.4, the global pi bucket
+  unchanged): tier `medium` (`gpt-6.1-sol`, unprefixed) was accepted; the
+  child ran `bash`, its report reached the lead's mailbox as `system`,
+  `pi.transcript` and `pi.wait` returned the turn, the agents panel showed
+  the `pi` badge while it ran and a check after, and `pi.stop` closed it.
+- Lite review: one Important (knob ignores project scope) rejected with
+  evidence, since the project scope is the cache-root file a keyless read
+  resolves; fa9d1f061 pins it. One Minor (field name differs from ticket
+  text) recorded above.
