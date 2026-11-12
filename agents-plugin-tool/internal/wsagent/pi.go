@@ -493,8 +493,9 @@ func (p *piProcess) SetEffort(effort string) error {
 // piMapper maps Pi's RPC output to runner events: the tool loadout of each
 // system message to the tool check, assistant text to final replies, tool
 // calls to the lead's batch (one per assistant message), compaction to
-// compact events, agent_settled to the turn's end, and session statistics
-// (asked for after each turn) to usage and the session id.
+// compact events, agent_settled to the turn's end, session statistics
+// (asked for after each turn) to usage and the session id, and the hosted
+// lead's subagent widget (piAgentsWidgetKey) to subagent rows.
 type piMapper struct {
 	spec    StartSpec
 	surface piSurface
@@ -528,6 +529,10 @@ type piLine struct {
 	IsError bool            `json:"isError"`
 	Reason  string          `json:"reason"`
 	Method  string          `json:"method"`
+	// WidgetKey and WidgetLines are a setWidget request's. The lines stay
+	// raw so a widget of another shape cannot fail the line's decode.
+	WidgetKey   string          `json:"widgetKey"`
+	WidgetLines json.RawMessage `json:"widgetLines"`
 }
 
 type piMessage struct {
@@ -656,9 +661,41 @@ func (m *piMapper) mapLine(line []byte, replies lineReplies) []Event {
 		switch l.Method {
 		case "select", "confirm", "input", "editor":
 			replies.send(map[string]any{"type": "extension_ui_response", "id": l.ID, "cancelled": true})
+		case "setWidget":
+			if l.WidgetKey == piAgentsWidgetKey {
+				return piAgentEvents(l.WidgetLines)
+			}
 		}
 	}
 	return nil
+}
+
+// piAgentsWidgetKey is the widget a hosted Pi lead's ws extension sets to
+// report its native subagents: each line is one JSON live event, the
+// agent and permission events its dashboard feed sends outside a hosted
+// session. RPC mode carries an extension's output to stdout only as UI
+// requests, and a widget passes string lines through unchanged.
+const piAgentsWidgetKey = "ws-dashboard-agents"
+
+// piAgentEvents decodes the subagent widget's lines. Only agent and
+// permission events naming a subagent are taken: the lead, its turns, and
+// a reset stay the runner's own. A line that does not decode is skipped.
+func piAgentEvents(raw json.RawMessage) []Event {
+	var lines []string
+	if json.Unmarshal(raw, &lines) != nil {
+		return nil
+	}
+	var out []Event
+	for _, line := range lines {
+		var ev wslive.Event
+		if json.Unmarshal([]byte(line), &ev) != nil || ev.AgentID == "" {
+			continue
+		}
+		if ev.Kind == wslive.KindAgent || ev.Kind == wslive.KindPermission {
+			out = append(out, Event{Live: &ev})
+		}
+	}
+	return out
 }
 
 func (m *piMapper) endTurn(now int64, turnErr string) []Event {

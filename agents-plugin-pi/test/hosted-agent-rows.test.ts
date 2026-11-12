@@ -1,0 +1,182 @@
+/**
+ * Unit tests for hosted-agent-rows.ts: the hosted lead's subagent rows, sent
+ * as JSON event lines through one reserved widget. Driven with a fake clock
+ * and scheduler and a recording `setWidget`, so every update is explicit.
+ */
+
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { AGENT_POLL_MS, FLUSH_INTERVAL_MS, type DashboardAgentEntry, type DashboardEvent } from "../src/dashboard-feed.ts";
+import { FULL_RESEND_MS, HOSTED_AGENTS_WIDGET_KEY, createHostedAgentRows, type HostedAgentRowsOptions } from "../src/hosted-agent-rows.ts";
+
+const entry = (agentId: string, over: Partial<DashboardAgentEntry> = {}): DashboardAgentEntry => ({
+  agentId,
+  label: agentId,
+  status: "running",
+  caption: "worker",
+  batches: [],
+  ...over,
+});
+
+function harness(overrides: Partial<HostedAgentRowsOptions> = {}) {
+  let clock = 10_000;
+  let nextId = 0;
+  const timers = new Map<number, { at: number; fn: () => void }>();
+  const widgets: { key: string; lines: string[] }[] = [];
+  const tree = { entries: [] as DashboardAgentEntry[] };
+  const rows = createHostedAgentRows({
+    setWidget: (key, lines) => { widgets.push({ key, lines }); },
+    agents: () => tree.entries,
+    now: () => clock,
+    schedule: (fn, ms) => {
+      const id = nextId++;
+      timers.set(id, { at: clock + ms, fn });
+      return () => { timers.delete(id); };
+    },
+    ...overrides,
+  });
+  function advance(ms: number): void {
+    const until = clock + ms;
+    for (;;) {
+      const due = [...timers].filter(([, timer]) => timer.at <= until).sort((a, b) => a[1].at - b[1].at)[0];
+      if (!due) break;
+      timers.delete(due[0]);
+      clock = Math.max(clock, due[1].at);
+      due[1].fn();
+    }
+    clock = until;
+  }
+  /** Every event sent so far, decoded from the widget lines. */
+  const events = (): DashboardEvent[] => widgets.flatMap((w) => w.lines.map((line) => JSON.parse(line) as DashboardEvent));
+  return { rows, widgets, events, tree, advance, timers };
+}
+
+test("every update is the reserved widget, its lines child agent and permission events only", () => {
+  const h = harness();
+  h.tree.entries = [entry("a", { sessionKey: "sk-a", model: "m", effort: "high", contextTokens: 10, outputTps: 3 }), entry("b", { parentId: "a", permission: { tool: "ws-worker-exec", args: { command: "ls" } } })];
+  h.rows.start();
+  h.advance(0);
+  assert.equal(h.widgets.length, 1);
+  assert.equal(h.widgets[0]!.key, HOSTED_AGENTS_WIDGET_KEY);
+  assert.deepEqual(h.events(), [
+    { kind: "agent", agentId: "a", label: "a", sessionKey: "sk-a", status: "running", caption: "worker", batches: [], model: "m", effort: "high", contextTokens: 10, outputTps: 3 },
+    { kind: "agent", agentId: "b", parentId: "a", label: "b", status: "running", caption: "worker", batches: [] },
+    { kind: "permission", agentId: "b", tool: "ws-worker-exec", args: { command: "ls" } },
+  ]);
+  // Run every timer the channel keeps (poll, resend) through several cycles, with changes.
+  h.tree.entries = [entry("a", { status: "done" })];
+  h.rows.agentsChanged();
+  h.advance(FULL_RESEND_MS * 2 + 1);
+  for (const event of h.events()) {
+    assert.ok(event.kind === "agent" || event.kind === "permission", `kind ${event.kind}`);
+    assert.equal(typeof event.agentId, "string");
+    assert.ok((event.agentId as string).length > 0);
+  }
+});
+
+test("only changes are sent; a child that left the tree while running ends as done", () => {
+  const h = harness();
+  h.tree.entries = [entry("a"), entry("b")];
+  h.rows.start();
+  h.advance(0);
+  h.widgets.length = 0;
+  h.rows.agentsChanged();
+  h.advance(FLUSH_INTERVAL_MS);
+  assert.deepEqual(h.widgets, [], "an unchanged tree sends nothing");
+  h.tree.entries = [entry("a", { contextTokens: 50 })];
+  h.rows.agentsChanged();
+  h.advance(FLUSH_INTERVAL_MS);
+  assert.deepEqual(h.events(), [
+    { kind: "agent", agentId: "a", label: "a", status: "running", caption: "worker", batches: [], contextTokens: 50 },
+    { kind: "agent", agentId: "b", status: "done" },
+  ]);
+  h.widgets.length = 0;
+  h.tree.entries = [entry("a", { status: "done" })];
+  h.rows.agentsChanged();
+  h.advance(FLUSH_INTERVAL_MS);
+  h.widgets.length = 0;
+  h.tree.entries = [];
+  h.rows.agentsChanged();
+  h.advance(FLUSH_INTERVAL_MS);
+  assert.deepEqual(h.widgets, [], "a finished child leaving the tree sends nothing");
+});
+
+test("dirty marks coalesce at most once per flush interval; the tree is polled while a child runs", () => {
+  const h = harness();
+  let reads = 0;
+  h.tree.entries = [entry("a")];
+  const rows = createHostedAgentRows({ setWidget: () => {}, agents: () => { reads++; return h.tree.entries; }, now: () => 0, schedule: () => () => {} });
+  rows.agentsChanged();
+  assert.equal(reads, 0, "a stopped channel reads nothing");
+
+  h.rows.start();
+  h.advance(0);
+  assert.equal(h.widgets.length, 1);
+  h.tree.entries = [entry("a", { contextTokens: 1 })];
+  h.rows.agentsChanged();
+  h.advance(10);
+  h.tree.entries = [entry("a", { contextTokens: 2 })];
+  h.rows.agentsChanged();
+  h.advance(FLUSH_INTERVAL_MS - 20);
+  assert.equal(h.widgets.length, 1, "inside the interval nothing is sent");
+  h.advance(10);
+  assert.equal(h.widgets.length, 2, "one update at the interval's end");
+  assert.equal((JSON.parse(h.widgets[1]!.lines[0]!) as DashboardEvent).contextTokens, 2);
+
+  // No dirty mark: the poll still picks up a change while the child runs.
+  h.tree.entries = [entry("a", { contextTokens: 3 })];
+  h.advance(AGENT_POLL_MS);
+  assert.equal(h.widgets.length, 3);
+  // Once nothing runs, the poll stops.
+  h.tree.entries = [entry("a", { status: "done" })];
+  h.advance(AGENT_POLL_MS);
+  assert.equal(h.widgets.length, 4);
+  h.tree.entries = [entry("a", { status: "done", caption: "changed" })];
+  h.advance(AGENT_POLL_MS * 5);
+  assert.equal(h.widgets.length, 4, "no poll while nothing runs");
+});
+
+test("while any child exists the whole tree is sent again without batches; with none, nothing", () => {
+  const h = harness();
+  const batch = { epoch: "e", seq: 1, toolNames: ["read"], callCount: 1, failed: 0, startedAt: 1, endedAt: 2 };
+  h.tree.entries = [entry("a", { status: "done", batches: [batch as never] }), entry("b", { permission: { tool: "ws-worker-exec", args: { command: "x" } } })];
+  h.rows.start();
+  h.advance(0);
+  h.tree.entries = [entry("a", { status: "done", batches: [batch as never] }), entry("b", { status: "done" })];
+  h.rows.agentsChanged();
+  h.advance(FLUSH_INTERVAL_MS);
+  h.widgets.length = 0;
+  h.advance(FULL_RESEND_MS);
+  assert.equal(h.widgets.length, 1);
+  assert.deepEqual(h.events(), [
+    { kind: "agent", agentId: "a", label: "a", status: "done", caption: "worker" },
+    { kind: "permission", agentId: "a", clear: true },
+    { kind: "agent", agentId: "b", label: "b", status: "done", caption: "worker" },
+    { kind: "permission", agentId: "b", clear: true },
+  ]);
+  h.advance(FULL_RESEND_MS);
+  assert.equal(h.widgets.length, 2, "the resend repeats");
+  h.tree.entries = [];
+  h.advance(FULL_RESEND_MS * 3);
+  assert.equal(h.widgets.length, 2, "an empty tree is not resent");
+  assert.equal(h.timers.size, 0, "and nothing stays armed");
+});
+
+test("a throwing setWidget is swallowed and the next change sends every child; stop sends nothing more", () => {
+  let fail = true;
+  const sent: string[][] = [];
+  const h = harness({ setWidget: (_key, lines) => { if (fail) throw new Error("stale ctx"); sent.push(lines); } });
+  h.tree.entries = [entry("a"), entry("b")];
+  h.rows.start();
+  h.advance(0);
+  fail = false;
+  h.tree.entries = [entry("a"), entry("b", { contextTokens: 1 })];
+  h.rows.agentsChanged();
+  h.advance(FLUSH_INTERVAL_MS);
+  assert.deepEqual(sent.flat().map((line) => (JSON.parse(line) as DashboardEvent).agentId), ["a", "b"]);
+  h.rows.stop();
+  assert.equal(h.timers.size, 0);
+  h.rows.agentsChanged();
+  h.advance(FULL_RESEND_MS * 2);
+  assert.equal(sent.length, 1);
+});

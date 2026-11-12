@@ -378,6 +378,91 @@ func TestPiMapperPromptAnswersAndDialogs(t *testing.T) {
 	}
 }
 
+// piWidgetLine is the RPC line a hosted Pi lead's setWidget call writes.
+func piWidgetLine(key string, lines ...string) []byte {
+	raw, _ := json.Marshal(map[string]any{"type": "extension_ui_request", "id": "w", "method": "setWidget", "widgetKey": key, "widgetLines": lines})
+	return raw
+}
+
+// TestPiMapperAgentsWidget: the hosted lead's subagent widget maps each
+// line to the agent or permission event it carries, with the fields a CLI
+// session's dashboard feed sends; a line with no agent id, of another kind,
+// or that does not decode is skipped, as are other widgets, other UI
+// requests, and widget lines of another shape.
+func TestPiMapperAgentsWidget(t *testing.T) {
+	m := newPiMapper(StartSpec{Root: "/work", Dir: "/sess", Profile: Profile{Backend: BackendPi, Lead: true}, Lead: &LeadSpec{}})
+	r := &recordedReplies{}
+	st := wslive.NewState("widget-test-key")
+	apply := func(evs []Event) {
+		t.Helper()
+		for _, ev := range evs {
+			if ev.Live == nil {
+				t.Fatalf("a widget maps to live events only: %+v", ev)
+			}
+			if _, err := st.Apply(*ev.Live, 1_000); err != nil {
+				t.Fatalf("apply %+v: %v", *ev.Live, err)
+			}
+		}
+	}
+	running := `{"kind":"agent","agentId":"child-1","label":"audit","sessionKey":"sk-child","status":"running","caption":"worker","batches":[{"epoch":"e","seq":1,"toolNames":["read"],"callCount":1,"failed":0,"startedAt":900,"running":{"toolName":"read","startedAt":900}}],"model":"gpt-x","effort":"high","contextTokens":1200,"outputTps":40}`
+	nested := `{"kind":"agent","agentId":"grandchild","parentId":"child-1","label":"probe","status":"running","caption":"explore"}`
+	evs := m.mapLine(piWidgetLine(piAgentsWidgetKey,
+		running,
+		nested,
+		`{"kind":"agent","status":"running","batches":[]}`,
+		`{"kind":"reset"}`,
+		`{"kind":"turn_start","agentId":"child-1"}`,
+		`{"kind":"reply","agentId":"child-1","text":"x"}`,
+		`not json`,
+		`{"kind":"permission","agentId":"child-1","tool":"ws-worker-exec","args":{"command":"go test"}}`,
+	), r)
+	if len(evs) != 3 {
+		t.Fatalf("widget events = %+v, want two agents and a permission", evs)
+	}
+	apply(evs)
+	agents := map[string]wslive.Agent{}
+	for _, a := range st.Snapshot(2_000).Agents {
+		agents[a.ID] = a
+	}
+	a := agents["child-1"]
+	if len(agents) != 2 || a.Status != wslive.StatusRunning || a.Label != "audit" || a.Model != "gpt-x" || a.Effort != "high" || a.ContextTokens != 1200 || a.OutputTps != 40 ||
+		a.ReplyID == "" || a.Caption != "worker" || len(a.Batches) != 1 || a.Permission == nil || a.Permission.ToolName != "ws-worker-exec" {
+		t.Fatalf("child row = %+v", a)
+	}
+	if g := agents["grandchild"]; g.ParentID != "child-1" || g.Label != "probe" || g.Status != wslive.StatusRunning {
+		t.Fatalf("nested row = %+v", g)
+	}
+
+	apply(m.mapLine(piWidgetLine(piAgentsWidgetKey,
+		`{"kind":"permission","agentId":"child-1","clear":true}`,
+		`{"kind":"agent","agentId":"grandchild","status":"done"}`,
+	), r))
+	for _, a := range st.Snapshot(3_000).Agents {
+		if a.ID == "child-1" && (a.Permission != nil || a.Status != wslive.StatusRunning) {
+			t.Fatalf("a cleared permission leaves the row running: %+v", a)
+		}
+		if a.ID == "grandchild" && a.Status != wslive.StatusDone {
+			t.Fatalf("a done event ends the row: %+v", a)
+		}
+	}
+
+	for _, line := range [][]byte{
+		piWidgetLine("ws-agents", running),
+		piWidgetLine("", running),
+		[]byte(`{"type":"extension_ui_request","id":"w","method":"setStatus","statusKey":"ws-dashboard-agents","statusText":"x"}`),
+		[]byte(`{"type":"extension_ui_request","id":"w","method":"setWidget","widgetKey":"ws-dashboard-agents"}`),
+		[]byte(`{"type":"extension_ui_request","id":"w","method":"setWidget","widgetKey":"ws-dashboard-agents","widgetLines":"` + "x" + `"}`),
+		[]byte(`{"type":"extension_ui_request","id":"w","method":"setWidget","widgetKey":"ws-dashboard-agents","widgetLines":[{"kind":"agent","agentId":"c"}]}`),
+	} {
+		if evs := m.mapLine(line, r); len(evs) != 0 {
+			t.Fatalf("%s mapped to %+v", line, evs)
+		}
+	}
+	if len(r.sent) != 0 {
+		t.Fatalf("a widget is answered by nothing: %v", r.sent)
+	}
+}
+
 // piResponder is a stand-in pi that answers every command with an id and
 // logs each line it reads.
 const piResponder = `import sys, json
