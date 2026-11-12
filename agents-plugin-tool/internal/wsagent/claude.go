@@ -315,19 +315,15 @@ func checkClaudeInit(init claudeInit, spec StartSpec) error {
 
 // Start launches the claude process for spec.
 func (b ClaudeBackend) Start(ctx context.Context, spec StartSpec) (Process, error) {
-	command := b.Command
-	if command == "" {
-		path, err := lookPath("claude")
-		if err != nil {
-			return nil, fmt.Errorf("claude backend: %w", err)
-		}
-		command = path
+	command, pre, err := harnessCommand(b.Command, "claude")
+	if err != nil {
+		return nil, fmt.Errorf("claude backend: %w", err)
 	}
 	args, err := claudeArgs(spec)
 	if err != nil {
 		return nil, err
 	}
-	cmd := exec.Command(command, args...)
+	cmd := exec.Command(command, append(pre, args...)...)
 	cmd.Dir = spec.workDir()
 	cmd.Env = claudeEnv(spec.Env)
 	if spec.Lead != nil {
