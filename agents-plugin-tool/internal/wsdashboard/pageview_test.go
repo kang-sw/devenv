@@ -1114,8 +1114,9 @@ func TestPeerRowBranch(t *testing.T) {
 // compact context size with the exact count in its title, and the rounded
 // output rate; a value the adapter did not send leaves its stat out (no
 // placeholder), a row with none has no stats box, and an ended agent keeps
-// its model, effort, and context but shows no rate. The CSS moves the stats
-// into the hover card through a container query on the agents panel.
+// its model, effort, and context but shows no rate. The leading items sit in
+// an aline wrapper, and the CSS moves the stats to a second line under the
+// name through a container query on the agents panel.
 func TestAgentRowStats(t *testing.T) {
 	full := wslive.Agent{ID: "a", Status: wslive.StatusRunning, Model: "claude-opus-5-5", Effort: "high", ContextTokens: 48_211, OutputTps: 61.6}
 	html := renderNamed(t, "agent", AgentNode{Agent: full})
@@ -1142,14 +1143,22 @@ func TestAgentRowStats(t *testing.T) {
 		t.Errorf("ended row = %s", html)
 	}
 
+	if !strings.Contains(html, `<summary class="ahead"><span class="aline">`) || !strings.Contains(html, `</span><span class="astat">`) {
+		t.Errorf("the stats are not a sibling after the aline wrapper: %s", html)
+	}
+
 	css := mustAsset(t, "dashboard.css")
-	for _, want := range []string{".r-tree { container: atree / inline-size; }", "@container atree (max-width: 559px) { .ahead .astat { display: none; } }"} {
+	for _, want := range []string{".r-tree { container: atree / inline-size; }", ".aline { display: contents; }", "@container atree (max-width: 559px) {",
+		".ahead:has(> .aline) { flex-wrap: wrap;", ".ahead > .astat { order: 1; flex: 0 0 100%;"} {
 		if !strings.Contains(css, want) {
 			t.Errorf("dashboard.css lacks %q", want)
 		}
 	}
-	if js := mustAsset(t, "dashboard.js"); !strings.Contains(js, "function agentTip(head)") || !strings.Contains(js, `if (name === "tree") agentTipSwapped();`) {
-		t.Errorf("dashboard.js lacks the stats hover card")
+	if strings.Contains(css, ".ahead .astat { display: none; }") {
+		t.Errorf("dashboard.css still hides the stats on a narrow panel")
+	}
+	if js := mustAsset(t, "dashboard.js"); strings.Contains(js, "agentTip") {
+		t.Errorf("dashboard.js still carries the stats hover card")
 	}
 }
 
