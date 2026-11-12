@@ -461,7 +461,9 @@ func TestResumeCommand(t *testing.T) {
 	if err := os.WriteFile(own, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := resumeCommand(Record{Lead: true, Backend: BackendPi, Root: "/w/repo"}, dir), "cd /w/repo && pi --session "+own; got != want {
+	// The temp directory is plain on Linux but holds backslashes (and an
+	// 8.3 "~") on Windows, which a POSIX shell must see quoted.
+	if got, want := resumeCommand(Record{Lead: true, Backend: BackendPi, Root: "/w/repo"}, dir), "cd /w/repo && pi --session "+shellQuote(own); got != want {
 		t.Errorf("a daemon-started pi session = %q, want %q", got, want)
 	}
 }
