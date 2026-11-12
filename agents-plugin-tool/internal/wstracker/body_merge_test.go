@@ -2,6 +2,7 @@ package wstracker
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -221,6 +222,93 @@ func TestBodyMergeFold(t *testing.T) {
 			if !reflect.DeepEqual(superseded, c.superseded) {
 				t.Errorf("superseded = %v, want %v", superseded, c.superseded)
 			}
+		})
+	}
+}
+
+// att is a test attachment whose oid repeats c.
+func att(c string) map[string]any {
+	return map[string]any{"oid": strings.Repeat(c, 64), "name": c + ".txt", "mime": "text/plain", "size": 1}
+}
+
+// TestBodyMergeAttachments pins the three-way attachment merge: from the
+// base value, an oid either side removed is gone and one either side added
+// is kept, whether or not the adding write's lines survive.
+func TestBodyMergeAttachments(t *testing.T) {
+	const base = "L1\nL2\nL3\nL4\nL5"
+	create := []any{"ada.pc#1"}
+	withAtts := func(s step, atts ...string) step {
+		p := s[2].(map[string]any)
+		l := []any{}
+		for _, c := range atts {
+			l = append(l, att(c))
+		}
+		p["attachments"] = l
+		return s
+	}
+	for _, c := range []struct {
+		name  string
+		steps []step
+		want  string
+	}{
+		{
+			name: "a merging edit that removes an attachment keeps the removal",
+			steps: []step{
+				withAtts(edit("ada.pc", "L1 ada\nL2\nL3\nL4\nL5", create, "", fromCreate), "a", "b"),
+				withAtts(edit("maya.pc", "L1\nL2\nL3\nL4\nL5 maya", create, "", fromCreate), "a"),
+			},
+			want: "a",
+		},
+		{
+			name: "a removal folded first stays removed under a later merge that kept it",
+			steps: []step{
+				withAtts(edit("maya.pc", "L1\nL2\nL3\nL4\nL5 maya", create, "", fromCreate), "a"),
+				withAtts(edit("ada.pc", "L1 ada\nL2\nL3\nL4\nL5", create, "", fromCreate), "a", "b"),
+			},
+			want: "a",
+		},
+		{
+			name: "a text-neutral merging edit keeps the attachment it adds",
+			steps: []step{
+				withAtts(edit("ada.pc", "L1 ada\nL2\nL3\nL4\nL5", create, "", fromCreate), "a", "b"),
+				withAtts(edit("maya.pc", base, create, "", fromCreate), "a", "b", "c"),
+			},
+			want: "abc",
+		},
+		{
+			name: "both sides add: cur's order, then the merging edit's",
+			steps: []step{
+				withAtts(edit("ada.pc", "L1 ada\nL2\nL3\nL4\nL5", create, "", fromCreate), "a", "b", "d"),
+				withAtts(edit("maya.pc", "L1\nL2\nL3\nL4\nL5 maya", create, "", fromCreate), "e", "a", "b"),
+			},
+			want: "abde",
+		},
+		{
+			name: "an addition whose lines an overlap overwrote is kept",
+			steps: []step{
+				withAtts(edit("ada.pc", "L1 ada\nL2\nL3\nL4\nL5", create, "", fromCreate), "a", "b", "d"),
+				withAtts(edit("maya.pc", "L1 maya\nL2\nL3\nL4\nL5", create, "", fromCreate), "a", "b"),
+			},
+			want: "abd",
+		},
+		{
+			name: "a plain replace sets its own list",
+			steps: []step{
+				withAtts(edit("ada.pc", "one", create, "", nil), "a", "b"),
+				withAtts(edit("maya.pc", "two", []any{"ada.pc#3"}, "", nil), "c"),
+			},
+			want: "c",
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			steps := bodyItem(base)
+			steps[0] = withAtts(steps[0], "a", "b")
+			v := topicView(t, "ada.pc", append(steps, c.steps...))
+			got := ""
+			for _, a := range v.Items["ada.pc#1"].Attachments {
+				got += a.OID[:1]
+			}
+			wantEq(t, "attachments", got, c.want)
 		})
 	}
 }

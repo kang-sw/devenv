@@ -30,11 +30,20 @@ the peer session; traced in code on 2026-11-12, not run on a Windows host.
 
 Claude's native installer yields `claude.exe`, which is unaffected.
 
-## Open Decision Queue
+## Decisions
 
-Last ID: (27)
-
-(27) [open] [technical] On Windows, wsagent resolves a `.cmd`/`.bat` npm cmd-shim before spawning (parse its `"%_prog%" "%dp0%\<script>" %*` line; run `<shim dir>\node.exe` or `node` from PATH with `<script>` and the original arguments; refuse the start with a clear error when the parse fails), in one helper beside `lookPath` used by all three call sites including a user-set `Command`, over matching an ancestor PID in ws-mcp and the Pi extension or looking up cmd.exe's child after spawn - an ancestor match lets a nested harness pass as hosted and needs Windows parent-PID lookups on two sides, a post-spawn lookup races the shim's startup, and resolving also keeps prompt arguments out of cmd.exe metacharacter handling. T0.
+- On Windows, wsagent resolves a `.cmd`/`.bat` npm cmd-shim before spawning:
+  parse its `"%_prog%" "%dp0%\<script>" %*` line and run `<shim dir>\node.exe`
+  (or `node` from PATH) with `<script>` and the original arguments, in one
+  helper beside `lookPath` used by all three call sites including a
+  user-set `Command`; a shim that does not parse refuses the start with a
+  clear error. User board (27).
+  Rejected: matching an ancestor PID in ws-mcp and the Pi extension (a nested
+  harness would pass as hosted; Windows parent-PID lookups on two sides);
+  looking up cmd.exe's child after the spawn (races the shim's startup).
+- The shim line format comes from npm's `cmd-shim` generator; the
+  implementation pins it with a fixture of a real generated shim and verifies
+  on a Windows host before closing (user asked whether the pattern is proven).
 
 ## Constraints
 

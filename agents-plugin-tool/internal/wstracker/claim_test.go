@@ -219,3 +219,25 @@ func TestRequestOnAMultiAssigneeItemNamesOneAssignment(t *testing.T) {
 	wantEq(t, "raj's stays", v.Assignments["ada.pc#2>raj"].State, "live")
 	wantEq(t, "omar's", v.Assignments["lena.pc#1>omar"].State, "live")
 }
+
+// A wrap-up leaves the record live, so a pending request on it stays
+// pending: an approval is refused (it would hand over finished work), a
+// denial still answers it, and a reopen makes it approvable again.
+func TestARequestOnAWrappedAssignment(t *testing.T) {
+	done := append(append([]step(nil), held...),
+		step{"ada.pc", "item.status", map[string]any{"item": "ada.pc#1", "assignee": "maya", "status": "done"}})
+	v := stepsView(t, "omar.pc", append(append([]step(nil), done...),
+		step{"ada.pc", "item.approve", map[string]any{"item": "ada.pc#1", "request": "omar.pc#1"}}))
+	wantEq(t, "approval refused", lastVerdict(v), "flagged maya's assignment on ada.pc-1 is done; nothing to take")
+	wantEq(t, "maya's stays", v.Assignments["ada.pc#2>maya"].State+" "+v.Assignments["ada.pc#2>maya"].Status, "live done")
+	wantEq(t, "still pending", v.Requests["omar.pc#1"].State, "pending")
+
+	v = topicView(t, "omar.pc", append(append([]step(nil), done...),
+		step{"maya.pc", "item.deny", map[string]any{"item": "ada.pc#1", "request": "omar.pc#1"}}))
+	wantEq(t, "denied", v.Requests["omar.pc#1"].State, "denied")
+
+	v = topicView(t, "omar.pc", append(append([]step(nil), done...),
+		step{"maya.pc", "item.reopen", map[string]any{"item": "ada.pc#1"}},
+		step{"ada.pc", "item.approve", map[string]any{"item": "ada.pc#1", "request": "omar.pc#1"}}))
+	wantEq(t, "reopened, then handed", v.Assignments["ada.pc#2>maya"].State, "handed")
+}

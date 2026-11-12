@@ -14,13 +14,25 @@ type bline struct {
 	src  *node
 }
 
+// bodyVal is a folded body: its lines and its attachments.
+type bodyVal struct {
+	lines []bline
+	atts  []attachment
+}
+
 // bodyFold is one item's body as folded: its applied body writes in fold
 // order (the item.create first), its value, and each merging write's base
-// text, which depends only on the write and the causal structure.
+// value, which depends only on the write and the causal structure.
 type bodyFold struct {
 	writes []*node
-	lines  []bline
-	base   map[string][]bline
+	val    bodyVal
+	base   map[string]bodyVal
+}
+
+// replaceVal is the value a body write sets by itself: its text and its
+// attachments.
+func replaceVal(w *node) bodyVal {
+	return bodyVal{linesFrom(bodyText(w), w), attachmentsOf(w.p)}
 }
 
 // bodyText is the body a write carries: item.create's when truthy, an
@@ -277,14 +289,15 @@ type rival struct{ x, win *node }
 // A base whose closure holds every prior write is a plain replace. A
 // base-less (or unknown-base) write is a whole replace, which overlaps
 // every concurrent write. Otherwise the write merges three-way from its
-// base text, and each overlapping group names its rivals: the concurrent
+// base value, and each overlapping group names its rivals: the concurrent
 // writes whose lines cur holds there, or, when cur only dropped base lines
 // there (no line tells who), every concurrent write. An overlap goes to w,
 // the later in fold order, except that an agent write loses a group to a
-// concurrent human write of its own member among that group's rivals.
-func (s *state) bodyStep(f *bodyFold, prior []*node, cur []bline, w *node) (out []bline, rivals []rival, lostTo *node) {
+// concurrent human write of its own member among that group's rivals. A
+// replace sets w's attachments, a merge merges them three-way (mergeAtts).
+func (s *state) bodyStep(f *bodyFold, prior []*node, cur bodyVal, w *node) (out bodyVal, rivals []rival, lostTo *node) {
 	if w.typ == TypeItemCreate {
-		return linesFrom(bodyText(w), w), nil, nil
+		return replaceVal(w), nil, nil
 	}
 	var conc []*node
 	for _, x := range prior {
@@ -302,7 +315,7 @@ func (s *state) bodyStep(f *bodyFold, prior []*node, cur []bline, w *node) (out 
 	}
 	heads := s.baseHeads(prior, w)
 	if len(heads) == 0 {
-		out = linesFrom(bodyText(w), w)
+		out = replaceVal(w)
 		if human != nil {
 			out, lostTo = cur, human
 		}
@@ -324,7 +337,7 @@ func (s *state) bodyStep(f *bodyFold, prior []*node, cur []bline, w *node) (out 
 		}
 	}
 	if len(sub) == len(prior) {
-		return linesFrom(bodyText(w), w), nil, nil
+		return replaceVal(w), nil, nil
 	}
 	base, ok := f.base[w.id]
 	if !ok {
@@ -352,7 +365,8 @@ func (s *state) bodyStep(f *bodyFold, prior []*node, cur []bline, w *node) (out 
 		}
 		return wins
 	}
-	out = merge3(base, cur, splitLines(bodyText(w)), w, settle)
+	out.lines = merge3(base.lines, cur.lines, splitLines(bodyText(w)), w, settle)
+	out.atts = mergeAtts(base.atts, cur.atts, attachmentsOf(w.p))
 	for _, x := range conc {
 		if hit[x] {
 			win := w
@@ -365,6 +379,24 @@ func (s *state) bodyStep(f *bodyFold, prior []*node, cur []bline, w *node) (out 
 	return out, rivals, lostTo
 }
 
+// mergeAtts merges attachment lists three-way by oid from base: one that
+// either side removed is gone, one that either side added is kept; cur's
+// order, then mine's additions.
+func mergeAtts(base, cur, mine []attachment) []attachment {
+	out := []attachment{}
+	for _, a := range cur {
+		if !hasOID(base, a.oid) || hasOID(mine, a.oid) {
+			out = append(out, a)
+		}
+	}
+	for _, a := range mine {
+		if !hasOID(base, a.oid) && !hasOID(out, a.oid) {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
 func hasSrc(l []bline, x *node) bool {
 	for _, b := range l {
 		if b.src == x {
@@ -375,24 +407,24 @@ func hasSrc(l []bline, x *node) bool {
 }
 
 // foldBody is the value of writes, a causally closed run in fold order.
-func (s *state) foldBody(f *bodyFold, writes []*node) []bline {
-	var cur []bline
+func (s *state) foldBody(f *bodyFold, writes []*node) bodyVal {
+	var cur bodyVal
 	for i, w := range writes {
 		cur, _, _ = s.bodyStep(f, writes[:i], cur, w)
 	}
 	return cur
 }
 
-// applyBody folds item.edit n's body: the merged value, the body revision
-// (the register's heads), the markers of an overlap, and the attachments
-// and refs (the union over the writes whose lines survive) and mentions
-// (the latest such write's).
+// applyBody folds item.edit n's body: the merged value (its lines and
+// attachments), the body revision (the register's heads), the markers of an
+// overlap, and the refs (the union over the writes whose lines survive) and
+// mentions (the latest such write's).
 func (s *state) applyBody(it *item, n *node) {
 	f := s.bodies[it.id]
 	key, label := "it:"+it.id+":body", "body of "+it.alias
-	out, rivals, lostTo := s.bodyStep(f, f.writes, f.lines, n)
+	out, rivals, lostTo := s.bodyStep(f, f.writes, f.val, n)
 	f.writes = append(f.writes, n)
-	f.lines = out
+	f.val = out
 	var heads []head
 	for _, h := range s.reg[key] {
 		if !s.hb(h.n, n) {
@@ -422,14 +454,20 @@ func (s *state) applyBody(it *item, n *node) {
 }
 
 // bodyExtras sets the item's body and the lists that follow it from the
-// folded lines.
+// folded value: its attachments (each oid once), and the refs and mentions
+// of the writes whose lines survive.
 func (s *state) bodyExtras(it *item, f *bodyFold) {
-	it.body = joinLines(f.lines)
+	it.body = joinLines(f.val.lines)
 	in := map[*node]bool{}
-	for _, l := range f.lines {
+	for _, l := range f.val.lines {
 		in[l.src] = true
 	}
 	it.mentions, it.attachments, it.refs = []string{}, []attachment{}, []string{}
+	for _, a := range f.val.atts {
+		if !hasOID(it.attachments, a.oid) {
+			it.attachments = append(it.attachments, a)
+		}
+	}
 	var last *node
 	defer func() { it.mentionsAt = last }()
 	for _, w := range f.writes {
@@ -437,11 +475,6 @@ func (s *state) bodyExtras(it *item, f *bodyFold) {
 			continue
 		}
 		last = w
-		for _, a := range attachmentsOf(w.p) {
-			if !hasOID(it.attachments, a.oid) {
-				it.attachments = append(it.attachments, a)
-			}
-		}
 		for _, r := range refsOf(w.p) {
 			if !contains(it.refs, r) {
 				it.refs = append(it.refs, r)

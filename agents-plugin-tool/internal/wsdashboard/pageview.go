@@ -42,6 +42,9 @@ const (
 // SessionView is what the session page renders.
 type SessionView struct {
 	ReplyID string
+	// Label is the session's display label (Session.Label), which the head
+	// and the tab title show in place of ReplyID; empty when it has none.
+	Label string
 	// Project is the session root; ProjectName its base name.
 	Project, ProjectName string
 	Harness              string
@@ -95,6 +98,16 @@ type SessionView struct {
 	// adds the drawer's holders card. Set per request, like Git.
 	Holders bool
 }
+
+// MailboxRef is what a click on the head's name copies: the session's
+// mailbox address, marked as one.
+func (v SessionView) MailboxRef() string {
+	return "(mailbox) " + wsmailbox.ReplyIDPrefix + v.ReplyID
+}
+
+// LabelMax is the longest label the label route accepts, in characters,
+// which the head's rename input takes as its limit.
+func (SessionView) LabelMax() int { return maxLabelRunes }
 
 // ThemedBoard is Board with its topic-body frames pinned to Theme.
 func (v SessionView) ThemedBoard() template.HTML { return wswhiteboard.ThemeFrames(v.Board, v.Theme) }
@@ -432,6 +445,7 @@ func buildSessionView(in pageInputs) SessionView {
 	reg := in.Session.Registration
 	v := SessionView{
 		ReplyID:     reg.ReplyID,
+		Label:       in.Session.Label,
 		Project:     reg.Project,
 		ProjectName: filepath.Base(reg.Project),
 		Harness:     reg.Harness,
@@ -816,6 +830,9 @@ type ProjectGroup struct {
 // IndexRow is one session on /.
 type IndexRow struct {
 	ReplyID string
+	// Label is the session's display label, shown in place of ReplyID;
+	// empty when it has none.
+	Label   string
 	Harness string
 	Live    bool
 	// Adapter, Phase, and Tool come from a live snapshot; Phase is empty
@@ -855,6 +872,7 @@ func buildIndexView(sessions []indexInput, now time.Time, version string) IndexV
 		}
 		row := IndexRow{
 			ReplyID:     reg.ReplyID,
+			Label:       in.Session.Label,
 			Harness:     reg.Harness,
 			Live:        reg.Live(now),
 			HasBoard:    in.Session.HasBoard,

@@ -313,3 +313,142 @@ done();
 		t.Error("tracker.css lacks the parent outline")
 	}
 }
+
+// trackerTakeJS is the take-rule copies of tracker.js with the helpers they
+// read, for node cases over a hand-built VS.
+func trackerTakeJS(t *testing.T) string {
+	return trackerFn(t, `function wrapped\(s\)`, true) + trackerFn(t, `function A\(id\)`, true) + trackerFn(t, `function listOf\(x\)`, true) +
+		trackerFn(t, `function isCreator\(it\)`, false) + trackerFn(t, `function canAnswer\(it, q\)`, true) + trackerFn(t, `function canApprove\(it, q\)`, true) +
+		trackerFn(t, `function fallbackRec\(it\)`, true) + trackerFn(t, `function holdsOn\(it, who\)`, true) + trackerFn(t, `function canOpen\(it\)`, false) +
+		trackerFn(t, `function canUnopen\(it\)`, true) + trackerFn(t, `function reqsOf\(it\)`, true) + trackerFn(t, `function reqTargets\(it\)`, false)
+}
+
+// TestTrackerTakeRules pins the dashboard's copies of the store's take rules
+// (check.go item.approve / item.deny): the holder of the named assignment
+// or the creator (an admin once the creator was removed) answers a pending
+// request; approving also needs that assignment not done or dropped
+// (check.go takeWrapped), while a denial stays open.
+func TestTrackerTakeRules(t *testing.T) {
+	runTrackerCases(t, "take rules", trackerCheckJS+trackerTakeJS(t)+`
+var VS = { viewer: { member: 'me', admin: false, isMember: true }, members: { ada: {}, me: {}, kim: {}, gone: { removed: true } }, assignments: {} };
+function rec(id, to, status, o) { var r = { id: id, to: to, status: status, state: 'live', fallback: false, ruleRequest: false }; Object.keys(o || {}).forEach(function (k) { r[k] = o[k]; }); VS.assignments[id] = r; return r; }
+var it = { id: 'I', author: 'ada' };
+rec('I>me', 'me', 'doing');
+var q = { id: 'Q', by: 'kim', assignee: 'me', assignment: 'I>me', state: 'pending' };
+check('the holder answers and approves', [canAnswer(it, q), canApprove(it, q)], [true, true]);
+check('another member does not', [canAnswer({ id: 'I', author: 'ada' }, { by: 'kim', assignee: 'ada', assignment: 'I>ada', state: 'pending' })], [false]);
+check('the creator does', canAnswer({ id: 'I', author: 'me' }, { by: 'kim', assignee: 'ada', assignment: 'I>ada', state: 'pending' }), true);
+VS.viewer.admin = true;
+check('an admin once the creator was removed', canAnswer({ id: 'I', author: 'gone' }, { by: 'kim', assignee: 'ada', assignment: 'I>ada', state: 'pending' }), true);
+check('not while the creator stays', canAnswer({ id: 'I', author: 'ada' }, { by: 'kim', assignee: 'ada', assignment: 'I>ada', state: 'pending' }), false);
+VS.viewer.admin = false;
+check('an answered request is not answered again', canAnswer(it, { by: 'kim', assignee: 'me', assignment: 'I>me', state: 'denied' }), false);
+VS.assignments['I>me'].status = 'done';
+check('a done assignment: deny only', [canAnswer(it, q), canApprove(it, q)], [true, false]);
+VS.assignments['I>me'].status = 'dropped';
+check('a dropped assignment: deny only', [canAnswer(it, q), canApprove(it, q)], [true, false]);
+VS.assignments['I>me'].status = 'in-review';
+check('in review is not wrapped up', canApprove(it, q), true);
+done();
+`)
+}
+
+// TestTrackerOpenAndRequestRules pins the dashboard's copies of the store's
+// opening and take-request rules. canOpen copies check.go item.open: the
+// creator (an admin once the creator was removed) opens a task, not hidden,
+// not already open, that nobody but its fallback holds (a rule request
+// holds nothing), the fallback not done or dropped. canUnopen copies
+// item.unopen: the creator withdraws an open opening. reqTargets copies
+// item.request: the live, explicit (not fallback), not wrapped-up
+// assignments of others on a shown item, none while the viewer holds a live
+// or pending record there, and not one the viewer already asked for.
+func TestTrackerOpenAndRequestRules(t *testing.T) {
+	runTrackerCases(t, "open and request rules", trackerCheckJS+trackerTakeJS(t)+`
+var VS = { viewer: { member: 'me', admin: false, isMember: true }, members: { ada: {}, me: {}, kim: {}, lee: {}, gone: { removed: true } }, assignments: {}, requests: {} };
+function rec(id, to, state, status, o) { var r = { id: id, to: to, state: state, status: status, fallback: false, ruleRequest: false }; Object.keys(o || {}).forEach(function (k) { r[k] = o[k]; }); VS.assignments[id] = r; return id; }
+function item(author, recs, o) { var it = { id: 'I', author: author, kind: 'task', hidden: false, open: null, assignments: recs, requests: [] }; Object.keys(o || {}).forEach(function (k) { it[k] = o[k]; }); return it; }
+var fb = rec('fb', 'me', 'live', 'todo', { fallback: true }), fbDone = rec('fbDone', 'me', 'live', 'done', { fallback: true });
+check('open: the creator, a task held only by its fallback', canOpen(item('me', [fb])), true);
+check('open: not another member', canOpen(item('ada', [rec('fbA', 'ada', 'live', 'todo', { fallback: true })])), false);
+VS.viewer.admin = true;
+check('open: an admin once the creator was removed', canOpen(item('gone', [rec('fbG', 'gone', 'live', 'todo', { fallback: true })])), true);
+check('open: not an admin while the creator stays', canOpen(item('ada', ['fbA'])), false);
+VS.viewer.admin = false;
+check('open: not hidden', canOpen(item('me', [fb], { hidden: true })), false);
+check('open: not a topic', canOpen(item('me', [fb], { kind: 'topic' })), false);
+check('open: not already open', canOpen(item('me', [fb], { open: { by: 'me', scope: 'team' } })), false);
+check('open: not while someone else holds it', canOpen(item('me', [rec('kimLive', 'kim', 'live', 'doing')])), false);
+check('open: not while a record is pending', canOpen(item('me', [fb, rec('kimPend', 'kim', 'pending', 'todo')])), false);
+check('open: a pending rule request holds nothing', canOpen(item('me', [fb, rec('rr', 'kim', 'pending', 'todo', { ruleRequest: true })])), true);
+check('open: not a done fallback', canOpen(item('me', [fbDone])), false);
+
+check('unopen: the creator, while open', canUnopen(item('me', [fb], { open: { by: 'me' } })), true);
+check('unopen: not while not open', canUnopen(item('me', [fb])), false);
+check('unopen: not another member', canUnopen(item('ada', ['fbA'], { open: { by: 'ada' } })), false);
+VS.viewer.admin = true;
+check('unopen: an admin once the creator was removed', canUnopen(item('gone', ['fbG'], { open: { by: 'gone' } })), true);
+VS.viewer.admin = false;
+
+function ids(l) { return l.map(function (r) { return r.id; }); }
+var kim = rec('kim', 'kim', 'live', 'doing'), lee = rec('lee', 'lee', 'live', 'done'), leeDrop = rec('leeDrop', 'lee', 'live', 'dropped');
+check('request: a live assignment of someone else', ids(reqTargets(item('ada', [kim]))), ['kim']);
+check('request: not a done or dropped one', ids(reqTargets(item('ada', [kim, lee]))).concat(ids(reqTargets(item('ada', [leeDrop])))), ['kim']);
+check('request: not a pending one', ids(reqTargets(item('ada', [rec('kimP', 'kim', 'pending', 'todo')]))), []);
+check('request: not a fallback holding', ids(reqTargets(item('ada', [rec('fbA2', 'ada', 'live', 'todo', { fallback: true })]))), []);
+check('request: not the viewer own', ids(reqTargets(item('ada', [rec('meLive', 'me', 'live', 'doing')]))), []);
+check('request: none while the viewer holds a live record', ids(reqTargets(item('ada', [kim, 'meLive']))), []);
+check('request: none while the viewer holds a pending record', ids(reqTargets(item('ada', [kim, rec('meP', 'me', 'pending', 'todo')]))), []);
+check('request: a rule request to the viewer holds nothing', ids(reqTargets(item('ada', [kim, rec('meRR', 'me', 'pending', 'todo', { ruleRequest: true })]))), ['kim']);
+check('request: not on a hidden item', ids(reqTargets(item('ada', [kim], { hidden: true }))), []);
+VS.viewer.isMember = false;
+check('request: not by a non-member', ids(reqTargets(item('ada', [kim]))), []);
+VS.viewer.isMember = true;
+VS.requests = { Q1: { id: 'Q1', by: 'me', assignee: 'kim', assignment: 'kim', state: 'pending' }, Q2: { id: 'Q2', by: 'me', assignee: 'kim', assignment: 'kim', state: 'denied' }, Q3: { id: 'Q3', by: 'ada', assignee: 'kim', assignment: 'kim', state: 'pending' } };
+check('request: not one the viewer already asked for', ids(reqTargets(item('ada', [kim], { requests: ['Q1'] }))), []);
+check('request: an answered request or another member pending one does not block', ids(reqTargets(item('ada', [kim], { requests: ['Q2', 'Q3'] }))), ['kim']);
+done();
+`)
+}
+
+// TestTrackerMoveRules pins the dashboard's copy of the store's move rule
+// (check.go checkMove): the item rule is the creator or a live assignee (the
+// fallback included; an admin too once the creator was removed); only when
+// the parent changes, the destination must be shown, the viewer's (created
+// or live-assigned, with no removed-creator fallback), and not the item or
+// inside its subtree. A same-parent reorder and a move to the top level take
+// the item rule alone. It also pins moveRoots: the members of a selection
+// with no ancestor in it, in tree order.
+func TestTrackerMoveRules(t *testing.T) {
+	src := trackerFn(t, `function alias\(id\)`, true) + trackerFn(t, `function A\(id\)`, true) + trackerFn(t, `function mineLive\(it\)`, true) +
+		trackerFn(t, `function canMove\(it\)`, false) + trackerFn(t, `function moveWhy\(id, dest\)`, false) + trackerFn(t, `function moveRoots\(ids\)`, false)
+	runTrackerCases(t, "move rules", trackerCheckJS+src+`
+function wsT(k, a) { return k.replace('js.tk.mv.why.', '') + ':' + a; }
+var VS = { viewer: { member: 'me', admin: false }, members: { me: {}, kim: {}, gone: { removed: true } }, items: {}, itemOrder: [],
+  assignments: { cMe: { to: 'me', state: 'live' }, fbMe: { to: 'me', state: 'live', fallback: true }, dPend: { to: 'me', state: 'pending' } } };
+function it(id, author, parent, o) { var x = { id: id, alias: id, author: author, parent: parent || null, hidden: false, assignments: [] }; Object.keys(o || {}).forEach(function (k) { x[k] = o[k]; }); VS.items[id] = x; VS.itemOrder.push(id); }
+// A (me) > A1 (me) > A1a (kim); B (kim); C (kim, me live); F (kim, me as fallback); P (kim, me pending); H (me, hidden); G (removed creator)
+it('A', 'me'); it('A1', 'me', 'A'); it('A1a', 'kim', 'A1'); it('B', 'kim'); it('C', 'kim', null, { assignments: ['cMe'] });
+it('F', 'kim', null, { assignments: ['fbMe'] }); it('P', 'kim', null, { assignments: ['dPend'] }); it('H', 'me', null, { hidden: true }); it('G', 'gone');
+check('to the top level: the item rule alone', moveWhy('A1', null), '');
+check('a same-parent reorder: the item rule alone', moveWhy('A1', 'A'), '');
+check('not an item the viewer neither created nor holds', moveWhy('B', null), 'mine:B');
+check('a pending assignee does not hold it', moveWhy('P', null), 'mine:P');
+check('a live assignee moves it', moveWhy('C', 'A'), '');
+check('the fallback holder moves it', moveWhy('F', 'A'), '');
+check('not a hidden item', moveWhy('H', null), 'hidden:H');
+check('not under a hidden parent', moveWhy('A1', 'H'), 'hidden:H');
+check('not under an unknown parent', moveWhy('A1', 'x#9'), 'hidden:x-9');
+check('not under a parent the viewer neither created nor holds', moveWhy('A1', 'B'), 'mine:B');
+check('under a parent the viewer holds live', moveWhy('A1', 'C'), '');
+check('not under itself', moveWhy('A', 'A'), 'sub:A');
+check('not into its own subtree', moveWhy('A', 'A1'), 'sub:A');
+check('a removed creator item: not for a member', moveWhy('G', null), 'mine:G');
+VS.viewer.admin = true;
+check('a removed creator item: an admin moves it', moveWhy('G', 'A'), '');
+check('a removed creator item is no destination even for an admin', moveWhy('A1', 'G'), 'mine:G');
+VS.viewer.admin = false;
+check('roots: an ancestor in the set carries its subtree; unknown ids drop', moveRoots(['A1a', 'B', 'A', 'zz']), ['A', 'B']);
+check('roots: in tree order, not selection order', moveRoots(['C', 'A1a', 'A1']), ['A1', 'C']);
+done();
+`)
+}

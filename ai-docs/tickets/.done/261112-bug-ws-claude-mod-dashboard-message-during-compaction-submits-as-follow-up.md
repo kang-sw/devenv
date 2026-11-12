@@ -2,6 +2,7 @@
 title: A dashboard message sent during a Claude mod session's compaction is submitted at once as a follow-up
 related:
   261018-research-claude-mod-mid-turn-steer: the ledger behind the hold-while-running and steer delivery paths
+completed: 2026-11-12
 ---
 
 # A dashboard message sent during a Claude mod session's compaction is submitted at once as a follow-up
@@ -32,3 +33,8 @@ settled follow-up ("컨텍스트 압축 중에 메시지 보내면 항상 follow
 Treat a running compaction like a running turn for dashboard messages: hold
 them (cancellable, promotable) and submit once the compaction settles, after
 any compaction continuation. Needs a decision before it becomes actionable.
+
+
+## Resolution (2026-11-12)
+
+Fixed by merge 295387249 (delegate commit 00860d041): the claude-mod watcher holds board wakes while a main-conversation compaction runs and releases them after the compaction continuation (10s cap). Live-host ordering not yet observed.
