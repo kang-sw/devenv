@@ -506,6 +506,29 @@ func ResolveAgentTierForHarness(opts Options, tier, harness string) (backend, mo
 	return backend, model, effort, source, nil
 }
 
+// HarnessTiers is the tiers harness's own bucket sets (a model given), by
+// tier, after the builtin < global < project overlay, with no fallback to
+// another harness's bucket: a tier the bucket leaves unset is absent.
+func HarnessTiers(opts Options, harness string) (map[string]AgentTier, error) {
+	cfg, err := LoadAgentTierConfig(opts)
+	if err != nil {
+		return nil, err
+	}
+	key := normalizedHarness(harness)
+	tiers := map[string]AgentTier{}
+	for tier, byHarness := range cfg.Agents.ModelAliases {
+		mapping, ok := byHarness[key]
+		if !ok || strings.TrimSpace(mapping.Model) == "" {
+			continue
+		}
+		mapping.Backend = strings.TrimSpace(mapping.Backend)
+		mapping.Model = strings.TrimSpace(mapping.Model)
+		mapping.Effort = strings.TrimSpace(mapping.Effort)
+		tiers[tier] = mapping
+	}
+	return tiers, nil
+}
+
 func ModelAlias(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "small", "light":

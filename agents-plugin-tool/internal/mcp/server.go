@@ -51,6 +51,8 @@ type Server struct {
 	dashboard dashboardLink
 	// tracker is this process's tracker host (tracker_host.go).
 	tracker trackerLink
+	// pi is the pi.* tools' daemon runner and live feed (pi_tools.go).
+	pi piHost
 	// env is the caller process's environment; nil reads this process's
 	// live (process_env.go). ownerPID is the caller's PID; zero means this
 	// process. debug is the caller's debug ring.
@@ -136,7 +138,7 @@ const bootstrapToolName = "ferrule"
 // preserved no-op, since the pre-rename tickets.sage_record was reachable by
 // a delegate-scoped key.
 func isLeadOnlyTool(name string) bool {
-	return name == bootstrapToolName || name == "workflow_manual" || name == "workflow_state" || name == "tickets.sage_stamp" || name == "tickets.index_init" || name == "git.merge" || name == "worktree.acquire" || name == "worktree.release" || name == "worktree.remove" || name == "worktree.list" || strings.HasPrefix(name, "lead.") || workflowPreferenceWriterTool(name)
+	return isPiTool(name) || name == bootstrapToolName || name == "workflow_manual" || name == "workflow_state" || name == "tickets.sage_stamp" || name == "tickets.index_init" || name == "git.merge" || name == "worktree.acquire" || name == "worktree.release" || name == "worktree.remove" || name == "worktree.list" || strings.HasPrefix(name, "lead.") || workflowPreferenceWriterTool(name)
 }
 
 func workflowPreferenceWriterTool(name string) bool {
@@ -2258,6 +2260,8 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		}
 		return toolTextResponse(req.ID, text+"\n", err)
 
+	case "pi.spawn", "pi.send", "pi.list", "pi.stop", "pi.transcript", "pi.wait":
+		return s.handlePiTool(ctx, req.ID, params.Name, params.Arguments)
 	case "mailbox.send":
 		return s.handleMailboxSend(req.ID, params.Arguments)
 	case "mailbox.recv":
@@ -5482,7 +5486,7 @@ func tools() []map[string]any {
 			},
 		},
 	}
-	return withSessionKeyToolSchemas(toolList)
+	return withSessionKeyToolSchemas(append(toolList, piToolDefinitions()...))
 }
 
 func withSessionKeyToolSchemas(toolList []map[string]any) []map[string]any {
@@ -5569,6 +5573,11 @@ func (s *Server) filteredTools() []map[string]any {
 		name, _ := tool["name"].(string)
 		name = advertisedToolName(name)
 		if permanentlyHiddenTool(name) {
+			continue
+		}
+		if isPiTool(name) && !s.piListed() {
+			// Listed only where they can run (piUnavailable); a call that
+			// comes anyway refuses with the reason.
 			continue
 		}
 		if s.toolAllowed(name) {

@@ -14,18 +14,25 @@ import (
 
 // Each package (ws, wsflow, Pi) ships a "dashboard."-namespace manifest beside
 // its own manifest and lists both in WS_MCP_CONFIG_MANIFESTS. The three
-// declare the same keys and may differ only in dashboard.enabled's default
-// (today all three default it on).
+// declare the same keys and may differ only in dashboard.enabled's and
+// dashboard.pi_spawn_enabled's defaults (today all three default the first
+// on; only ws defaults the second on).
 
 var dashboardPackages = []struct {
 	name      string
 	own       string // the package's existing manifest
 	dashboard string
 	enabled   bool
+	piSpawn   bool
 }{
-	{"ws", claudeManifestPath, filepath.Join("..", "..", "..", "agents-plugin", "dashboard-config-manifest.json"), true},
-	{"wsflow", wsflowClaudeManifestPath, filepath.Join("..", "..", "..", "agents-plugin-wsflow", "dashboard-config-manifest.json"), true},
-	{"pi", filepath.Join("..", "..", "..", "agents-plugin-pi", "config-manifest.json"), filepath.Join("..", "..", "..", "agents-plugin-pi", "dashboard-config-manifest.json"), true},
+	{"ws", claudeManifestPath, filepath.Join("..", "..", "..", "agents-plugin", "dashboard-config-manifest.json"), true, true},
+	{"wsflow", wsflowClaudeManifestPath, filepath.Join("..", "..", "..", "agents-plugin-wsflow", "dashboard-config-manifest.json"), true, false},
+	{"pi", filepath.Join("..", "..", "..", "agents-plugin-pi", "config-manifest.json"), filepath.Join("..", "..", "..", "agents-plugin-pi", "dashboard-config-manifest.json"), true, false},
+}
+
+// perPackageDefault is a dashboard key whose default differs by package.
+func perPackageDefault(key any) bool {
+	return key == DashboardEnabledKey || key == DashboardPiSpawnKey
 }
 
 // dashboardOffManifest writes a copy of the ws dashboard manifest whose
@@ -71,12 +78,16 @@ func TestShippedDashboardManifestsLoadBesideEachPackageManifest(t *testing.T) {
 				t.Fatalf("rejected: %v", declared.rejected)
 			}
 			own := loadDeclaredConfig(pkg.own)
-			if len(declared.keys) != len(own.keys)+3 {
-				t.Fatalf("%d keys loaded, want the package's %d plus 3 dashboard keys", len(declared.keys), len(own.keys))
+			if len(declared.keys) != len(own.keys)+4 {
+				t.Fatalf("%d keys loaded, want the package's %d plus 4 dashboard keys", len(declared.keys), len(own.keys))
 			}
 			enabled, ok := declared.lookup(DashboardEnabledKey)
 			if !ok || enabled.DefaultValue != pkg.enabled {
 				t.Fatalf("%s = %+v (declared %v), want default %v", DashboardEnabledKey, enabled.DefaultValue, ok, pkg.enabled)
+			}
+			piSpawn, ok := declared.lookup(DashboardPiSpawnKey)
+			if !ok || piSpawn.DefaultValue != pkg.piSpawn {
+				t.Fatalf("%s = %+v (declared %v), want default %v", DashboardPiSpawnKey, piSpawn.DefaultValue, ok, pkg.piSpawn)
 			}
 			port, ok := declared.lookup(DashboardPortKey)
 			if !ok || port.DefaultValue != int64(wsdashboard.DefaultPort) {
@@ -97,7 +108,7 @@ func TestShippedDashboardManifestsLoadBesideEachPackageManifest(t *testing.T) {
 	}
 }
 
-func TestShippedDashboardManifestsDifferOnlyInTheEnabledDefault(t *testing.T) {
+func TestShippedDashboardManifestsDifferOnlyInPerPackageDefaults(t *testing.T) {
 	ws := readManifestJSON(t, dashboardPackages[0].dashboard)
 	wsKeys := manifestKeyObjects(t, dashboardPackages[0].dashboard, ws)
 	for _, pkg := range dashboardPackages[1:] {
@@ -114,7 +125,7 @@ func TestShippedDashboardManifestsDifferOnlyInTheEnabledDefault(t *testing.T) {
 		for i := range wsKeys {
 			a, b := wsKeys[i], otherKeys[i]
 			for field := range a {
-				if field == "default" && a["key"] == DashboardEnabledKey {
+				if field == "default" && perPackageDefault(a["key"]) {
 					continue
 				}
 				if !reflect.DeepEqual(a[field], b[field]) {
@@ -127,8 +138,8 @@ func TestShippedDashboardManifestsDifferOnlyInTheEnabledDefault(t *testing.T) {
 		}
 	}
 	for _, k := range wsKeys {
-		if desc, _ := k["description"].(string); k["key"] == DashboardEnabledKey && strings.Contains(strings.ToLower(desc), "default") {
-			t.Errorf("%s's default differs between packages, so its shared description must not mention a default", DashboardEnabledKey)
+		if desc, _ := k["description"].(string); perPackageDefault(k["key"]) && strings.Contains(strings.ToLower(desc), "default") {
+			t.Errorf("%s's default differs between packages, so its shared description must not mention a default", k["key"])
 		}
 	}
 }

@@ -351,7 +351,7 @@ func (b PiBackend) Start(ctx context.Context, spec StartSpec) (Process, error) {
 		}
 	}
 	cmd := exec.Command(command, append(pre, piArgs(spec, bridge)...)...)
-	cmd.Dir = spec.Root
+	cmd.Dir = spec.workDir()
 	cmd.Env = piEnv(spec.Env)
 	m := newPiMapper(spec)
 	p, err := startChild(spec, cmd, m, piProtocol{})
@@ -855,4 +855,42 @@ func (m *piMapper) stats(raw json.RawMessage) []Event {
 		return out
 	}
 	return append(out, Event{Live: &ev})
+}
+
+// piVersionPattern finds a dotted version in `pi --version` output.
+var piVersionPattern = regexp.MustCompile(`(\d+)\.(\d+)(?:\.\d+)?`)
+
+// PiVersion runs `pi --version` (pi looked up on PATH, as PiBackend does
+// with no Command) and returns its first dotted version, such as "1.0.4".
+// It fails when pi is missing, does not exit within the context, or prints
+// no version.
+func PiVersion(ctx context.Context) (string, error) {
+	command, pre, err := harnessCommand("", "pi")
+	if err != nil {
+		return "", err
+	}
+	cmd := exec.CommandContext(ctx, command, append(pre, "--version")...)
+	cmd.Env = piEnv(environ())
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("pi --version: %w", err)
+	}
+	version := piVersionPattern.FindString(string(out))
+	if version == "" {
+		return "", fmt.Errorf("pi --version printed no version: %q", strings.TrimSpace(string(out)))
+	}
+	return version, nil
+}
+
+// VersionAtLeast reports whether version's major and minor numbers (its
+// first dotted pair) are at least major.minor; a version it cannot read is
+// not.
+func VersionAtLeast(version string, major, minor int) bool {
+	m := piVersionPattern.FindStringSubmatch(version)
+	if m == nil {
+		return false
+	}
+	gotMajor, _ := strconv.Atoi(m[1])
+	gotMinor, _ := strconv.Atoi(m[2])
+	return gotMajor > major || (gotMajor == major && gotMinor >= minor)
 }

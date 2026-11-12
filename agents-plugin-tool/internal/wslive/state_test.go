@@ -200,6 +200,43 @@ func TestTreeRetainsRunningAndLastFiveFinished(t *testing.T) {
 	}
 }
 
+// TestAgentKindRoundTrips pins the agent marker: it lands on the row from
+// the event's "agentKind", stays across later events that omit it, reaches
+// the snapshot's JSON, and survives a restarted writer's seed.
+func TestAgentKindRoundTrips(t *testing.T) {
+	st := NewState(ownerKey)
+	var ev Event
+	if err := json.Unmarshal([]byte(`{"kind":"agent","agentId":"pi:child","label":"worker","agentKind":"pi"}`), &ev); err != nil {
+		t.Fatal(err)
+	}
+	if ev.Kind != KindAgent || ev.AgentKind != AgentKindPi {
+		t.Fatalf("event = %+v", ev)
+	}
+	mustApply(t, st, ev, 100)
+	mustApply(t, st, Event{Kind: KindAgent, AgentID: "pi:child", Status: StatusDone}, 200)
+	mustApply(t, st, Event{Kind: KindAgent, AgentID: "native"}, 150)
+	snap := st.Snapshot(300)
+	byID := map[string]Agent{}
+	for _, a := range snap.Agents {
+		byID[a.ID] = a
+	}
+	if byID["pi:child"].AgentKind != AgentKindPi || byID["native"].AgentKind != "" {
+		t.Fatalf("agents = %+v", byID)
+	}
+	raw, err := json.Marshal(snap)
+	if err != nil || !strings.Contains(string(raw), `"agentKind":"pi"`) || strings.Count(string(raw), `"agentKind"`) != 1 {
+		t.Fatalf("snapshot JSON should carry the marker on the pi row only: %s, %v", raw, err)
+	}
+	if _, err := st.Apply(Event{Kind: KindAgent, AgentID: "x", AgentKind: "other"}, 400); err == nil {
+		t.Fatalf("an unknown agent kind is refused")
+	}
+	seeded := NewState(ownerKey)
+	seeded.SeedFinished(snap)
+	if a := seeded.Snapshot(500).Agents; len(a) != 1 || a[0].AgentKind != AgentKindPi {
+		t.Fatalf("the seed keeps the marker: %+v", a)
+	}
+}
+
 // TestSeedFinishedKeepsEndedAgentsOnly pins seeding from an earlier
 // writer's snapshot: done and failed agents come back with their fields,
 // running ones and another session's snapshot seed nothing, and retain's

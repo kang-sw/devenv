@@ -142,6 +142,12 @@ type Options struct {
 	// daemon re-reads its tracker stores. It may be called from any
 	// goroutine.
 	TrackerChanged func()
+	// Report, when not nil, receives each settled turn of a conversation
+	// with a parent (Runner.Spawn): a turn's end, a failed start, a process
+	// lost mid-turn, and, when the next daemon loads the record, a turn
+	// this daemon's exit cut off. Closing the conversation reports nothing.
+	// It runs on the conversation's loop and must not block on the runner.
+	Report func(TurnReport)
 	// heartbeat overrides wslive.HeartbeatInterval for tests.
 	heartbeat time.Duration
 }
@@ -164,6 +170,10 @@ type Runner struct {
 
 	// holders routes the session holders' events to the lead processes.
 	holders holderTable
+
+	// watchers are Watch's callbacks, by registration (watchMu).
+	watchMu  sync.Mutex
+	watchers map[*func(State)]struct{}
 }
 
 // NewRunner returns a runner; Start loads its conversations.
@@ -222,7 +232,11 @@ func (r *Runner) Start(notify func(replyID, project string)) {
 		} else {
 			// A lead whose process may still run under its holder rejoins
 			// it there, before the scan below replays the holder's records.
-			r.startConv(rec)
+			c := r.startConv(rec)
+			if rec.Parent != nil && rec.TurnOpen {
+				// The last daemon exited while this turn ran.
+				c.do(c.interrupted)
+			}
 		}
 	}
 	if r.opts.Holders == nil {
@@ -340,15 +354,16 @@ func (r *Runner) conv(replyID string) *conv {
 func (r *Runner) startConv(rec Record) *conv {
 	dir := wsdashboard.SessionDir(r.opts.Dir, rec.ReplyID)
 	c := &conv{
-		r:      r,
-		dir:    dir,
-		inbox:  wsinbox.Dir(dir),
-		rec:    rec,
-		live:   newLiveWriter(dir, rec.WSKey, rec.Backend, r.opts.Now, r.opts.Log),
-		reqs:   make(chan func()),
-		inboxC: make(chan struct{}, 1),
-		mailC:  make(chan struct{}, 1),
-		done:   make(chan struct{}),
+		r:       r,
+		dir:     dir,
+		inbox:   wsinbox.Dir(dir),
+		rec:     rec,
+		live:    newLiveWriter(dir, rec.WSKey, rec.Backend, r.opts.Now, r.opts.Log),
+		reqs:    make(chan func()),
+		inboxC:  make(chan struct{}, 1),
+		mailC:   make(chan struct{}, 1),
+		done:    make(chan struct{}),
+		settleC: make(chan struct{}),
 	}
 	c.writeRegistration()
 	// A row a terminal login took while no daemon ran: the loop lets the
@@ -421,7 +436,7 @@ type LeadOptions struct {
 // refused: its conversations open through CreateLead, behind the trusted
 // gate.
 func (r *Runner) Create(profile, root string) (State, error) {
-	return r.create(profile, root, nil)
+	return r.create(profile, root, nil, nil)
 }
 
 // CreateLead opens a hosted lead session of harness backend on root, with
@@ -441,10 +456,12 @@ func (r *Runner) CreateLead(backend, root string, opts LeadOptions) (State, erro
 	if opts.PermissionMode != "" && !ValidLeadPermissionMode(opts.PermissionMode) {
 		return State{}, badRequest("permission_mode %q must be one of %s", opts.PermissionMode, strings.Join(LeadPermissionModes, ", "))
 	}
-	return r.create(profile, root, &opts)
+	return r.create(profile, root, &opts, nil)
 }
 
-func (r *Runner) create(profile, root string, lead *LeadOptions) (State, error) {
+// create opens a conversation; lead is a lead's spawn choices, spawn a
+// spawned conversation's (Runner.Spawn), at most one of them set.
+func (r *Runner) create(profile, root string, lead *LeadOptions, spawn *SpawnSpec) (State, error) {
 	root = strings.TrimSpace(root)
 	if !filepath.IsAbs(root) {
 		return State{}, badRequest("root must be an absolute path; got %q", root)
@@ -504,6 +521,9 @@ func (r *Runner) create(profile, root string, lead *LeadOptions) (State, error) 
 			rec.PermissionMode = ""
 		}
 	}
+	if spawn != nil {
+		spawn.apply(&rec)
+	}
 	if !wsdashboard.ValidReplyID(rec.ReplyID) {
 		return State{}, fmt.Errorf("minted key gives an invalid reply-id %q", rec.ReplyID)
 	}
@@ -514,7 +534,11 @@ func (r *Runner) create(profile, root string, lead *LeadOptions) (State, error) 
 	if err := writeRecord(dir, rec); err != nil {
 		return State{}, err
 	}
-	return r.startConv(rec).state(), nil
+	c := r.startConv(rec)
+	if spawn != nil {
+		return r.spawned(c, spawn.Prompt)
+	}
+	return c.state(), nil
 }
 
 // resolve resolves profile through root and checks everything a launch
@@ -609,6 +633,11 @@ func (r *Runner) Send(id, text string) (State, error) {
 		return State{}, err
 	}
 	_, _, err = wsinbox.Send(c.inbox, wsinbox.Entry{Parts: []string{text}}, r.opts.Now())
+	if err == nil {
+		// After the write, under the lock kick drains with: a turn whose
+		// drain counted this send holds its message (Wait).
+		c.sends++
+	}
 	c.mu.Unlock()
 	if err != nil {
 		return State{}, err
@@ -848,6 +877,13 @@ type State struct {
 	// session's conversation in a terminal. It names paths of this
 	// machine, so the routes answer it to a viewer with CanControl alone.
 	ResumeCommand string `json:"resume_command,omitempty"`
+
+	// Parent, Label, and Cwd are a spawned conversation's (Runner.Spawn):
+	// the session its turns are reported to, its one-line name, and the
+	// directory its process runs in when that is not Root.
+	Parent *ParentRef `json:"parent,omitempty"`
+	Label  string     `json:"label,omitempty"`
+	Cwd    string     `json:"cwd,omitempty"`
 }
 
 // closedState is the state of a record no loop serves: closed, or handed
@@ -861,7 +897,15 @@ func (r *Runner) closedState(rec Record) State {
 }
 
 func closedState(rec Record) State {
-	st := State{ID: rec.ReplyID, Profile: rec.Profile, Backend: rec.Backend, Root: rec.Root, Status: StatusClosed, Model: rec.Model, Effort: rec.Effort, Page: "/s/" + rec.ReplyID, CreatedAt: rec.CreatedAt, ClosedAt: rec.ClosedAt, Lead: rec.Lead, PermissionMode: rec.PermissionMode}
+	st := State{ID: rec.ReplyID, Profile: rec.Profile, Backend: rec.Backend, Root: rec.Root, Status: StatusClosed, Model: rec.Model, Effort: rec.Effort, Page: "/s/" + rec.ReplyID, CreatedAt: rec.CreatedAt, ClosedAt: rec.ClosedAt, Lead: rec.Lead, PermissionMode: rec.PermissionMode, Label: rec.Label}
+	if rec.Parent != nil {
+		parent := *rec.Parent
+		st.Parent = &parent
+	}
+	if !rec.Lead {
+		// A lead's Cwd is a taken-over terminal's, not a spawn choice.
+		st.Cwd = rec.Cwd
+	}
 	if rec.ClosedAt == "" && rec.HandedOffAt != "" {
 		st.Status, st.HandedOffAt = StatusHandedOff, rec.HandedOffAt
 	}
@@ -974,6 +1018,19 @@ type conv struct {
 	// retry (kick) and cleared by the next send that succeeds; a send that
 	// fails again meanwhile waits for the next inbox or mail signal.
 	sendRetried bool
+
+	// Turn settles (spawn.go). sends counts Runner.Send's messages and
+	// settled is the last settled turn, settleC closed and replaced at each
+	// settle and at close; all three under mu. turnMark is the sends the
+	// running turn's drain covered, and reply its last reply text; both
+	// loop-owned. quitting is set at the daemon's shutdown, whose cut-off
+	// turn the next daemon reports instead.
+	sends    uint64
+	settled  TurnResult
+	settleC  chan struct{}
+	turnMark uint64
+	reply    string
+	quitting bool
 }
 
 // do runs fn in the loop and waits for it; false when the loop has ended.
@@ -1393,10 +1450,16 @@ func (c *conv) kick() {
 			fmt.Fprintf(c.r.opts.Log, "agent %s: start: %v\n", c.rec.ReplyID, err)
 			c.live.writeSnapshot()
 			c.r.notify(c.rec.ReplyID, c.rec.Root)
+			c.settleTurn(TurnFailed, err.Error(), c.sendCount())
 			return
 		}
 	}
+	// Under mu, as Send writes: every send counted here is in the drain
+	// (Wait's turn marks).
+	c.mu.Lock()
 	recs, _ := wsinbox.Drain(c.inbox)
+	covered := c.sends
+	c.mu.Unlock()
 	queue := slices.Clone(c.rec.Queued)
 	for _, rec := range recs {
 		if cmd := rec.Entry.Command; cmd != nil {
@@ -1445,14 +1508,20 @@ func (c *conv) kick() {
 		if (len(c.rec.Queued) > 0 || len(c.rec.Mail) > 0) && !c.sendRetried {
 			c.sendRetried = true
 			c.signalInbox()
+		} else {
+			c.settleTurn(TurnFailed, c.lastError(), covered)
 		}
 		return
 	}
 	c.sendRetried = false
+	c.turnMark, c.reply = covered, ""
 	c.update(func(rec *Record) {
 		rec.Queued = rest
 		if len(mail) > 0 {
 			rec.Mail = nil
+		}
+		if rec.Parent != nil {
+			rec.TurnOpen = true
 		}
 	})
 	// Mail shows on the page through the session's mail history, so only
@@ -1468,6 +1537,7 @@ func (c *conv) kick() {
 		c.apply(wslive.Event{Kind: wslive.KindUser, Origin: origin, Text: text})
 	}
 	c.apply(wslive.Event{Kind: wslive.KindTurnStart, Origin: origin})
+	c.watched()
 }
 
 // nextTurn splits queue at its first slash command: a command at the front
@@ -1529,6 +1599,7 @@ func (c *conv) startProcess() error {
 		Model:        rec.Model,
 		Effort:       rec.Effort,
 		SessionID:    rec.SessionID,
+		Cwd:          rec.Cwd,
 		Instructions: instructions,
 		Env:          environ(),
 	}
@@ -1883,6 +1954,9 @@ func (c *conv) handle(ev Event) {
 			c.update(func(rec *Record) { rec.SessionID = ev.SessionID })
 		}
 	case ev.Live != nil:
+		if !quiet && ev.Live.Kind == wslive.KindReply && ev.Live.Final {
+			c.reply = ev.Live.Text
+		}
 		c.apply(*ev.Live, quiet)
 	case ev.Card != nil:
 		if !quiet && c.live.card(*ev.Card) {
@@ -1983,6 +2057,15 @@ func (c *conv) beginTurn(quiet bool) {
 		}
 	})
 	c.apply(wslive.Event{Kind: wslive.KindTurnStart}, quiet)
+	if !quiet {
+		// Not the runner's send: the turn holds no new message, so it
+		// keeps the last turn's mark.
+		c.reply = ""
+		if c.rec.Parent != nil {
+			c.update(func(rec *Record) { rec.TurnOpen = true })
+		}
+		c.watched()
+	}
 }
 
 // endTurn closes the running turn, applies settings changed during it, and
@@ -1991,6 +2074,7 @@ func (c *conv) endTurn(turnErr string, quiet bool) {
 	if !c.turn && !c.rec.Lead {
 		return
 	}
+	ran := c.turn
 	if c.turn {
 		c.setStatus(func() { c.turn = false })
 		c.apply(wslive.Event{Kind: wslive.KindTurnEnd}, quiet)
@@ -1998,6 +2082,13 @@ func (c *conv) endTurn(turnErr string, quiet bool) {
 	c.turnSettled(turnErr, quiet)
 	if quiet {
 		return
+	}
+	if ran {
+		status := TurnDone
+		if turnErr != "" {
+			status = TurnFailed
+		}
+		c.settleTurn(status, turnErr, c.turnMark)
 	}
 	if turnErr != "" {
 		c.setStatus(func() { c.lastErr = turnErr })
@@ -2210,6 +2301,12 @@ func (c *conv) processEnded() {
 	if c.turn {
 		c.setStatus(func() { c.turn = false })
 		c.apply(wslive.Event{Kind: wslive.KindTurnEnd})
+		// A turn the process took with it. A close settles none (its
+		// parent ended it), and the daemon's exit leaves it to the next
+		// daemon (interrupted).
+		if !c.closed && !c.quitting {
+			c.settleTurn(TurnFailed, c.lastError(), c.turnMark)
+		}
 	}
 	c.clearApprovals()
 	c.harnessState = ""
@@ -2260,6 +2357,7 @@ func (c *conv) stopProcess(string) {
 // holder, with the sequence applied so far in the record for the next
 // daemon's rejoin; any other process ends.
 func (c *conv) letGo() {
+	c.quitting = true
 	c.finishLine()
 	if hp, ok := c.proc.(holderProcess); ok && c.rec.Lead {
 		c.persistSeq()
@@ -2388,4 +2486,9 @@ func (c *conv) close() {
 	c.dropHeld()
 	c.live.setAdapter("")
 	c.writeRegistration()
+	if c.rec.TurnOpen {
+		c.update(func(rec *Record) { rec.TurnOpen = false })
+	}
+	c.signalSettled()
+	c.watched()
 }

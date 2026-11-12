@@ -55,8 +55,42 @@ func TestBuiltinSupportProfilesResolve(t *testing.T) {
 	}
 	resolver := wsconfig.NewResolver(opts, nil, nil, nil)
 	all, err := ResolveProfiles(&resolver)
-	if err != nil || len(all) != 4 {
-		t.Fatalf("ResolveProfiles with no config should list the builtin support and lead profiles: %+v, %v", all, err)
+	if err != nil || len(all) != 5 {
+		t.Fatalf("ResolveProfiles with no config should list the builtin support, lead, and pi-worker profiles: %+v, %v", all, err)
+	}
+}
+
+// TestBuiltinPiWorkerProfileResolves: the pi-worker profile runs Pi with
+// its built-in coding tools and the ws commit and git reads, composes no
+// instruction text (the spawner's prompt is the first message), stays off
+// the session index, and allows no pi.* tool.
+func TestBuiltinPiWorkerProfileResolves(t *testing.T) {
+	opts := testConfig(t)
+	root := t.TempDir()
+	rp, err := ResolveProfile(opts, root, PiWorkerProfile)
+	if err != nil {
+		t.Fatalf("ResolveProfile(%s): %v", PiWorkerProfile, err)
+	}
+	p := rp.Definition
+	if rp.Scope != wsconfig.ScopeBuiltin || p.Backend != BackendPi || p.Lead {
+		t.Fatalf("pi-worker should resolve from the builtin floor as a non-lead pi profile: %+v (scope %s)", p, rp.Scope)
+	}
+	if want := []string{"read", "bash", "edit", "write", "grep", "find", "ls"}; !slices.Equal(p.Tools, want) {
+		t.Errorf("pi-worker tools = %v, want %v", p.Tools, want)
+	}
+	if !slices.Contains(p.WSTools, "git.commit") || !slices.Contains(p.WSTools, "git.diff") {
+		t.Errorf("pi-worker ws_tools %v lack the commit or the diff read", p.WSTools)
+	}
+	for _, tool := range p.WSTools {
+		if strings.HasPrefix(tool, "pi.") {
+			t.Errorf("pi-worker allows %s; a worker spawns no worker", tool)
+		}
+	}
+	if p.Instructions != "" || p.InstructionsPath(root) != "" || p.ListInIndex || p.Skills || len(p.MCPServers) != 0 || len(p.Plugins) != 0 {
+		t.Errorf("pi-worker should append no instructions, load no server, plugin, or skill, and stay off the index: %+v", p)
+	}
+	if err := checkPiToolEntries(p); err != nil {
+		t.Errorf("pi-worker tools should be whole pi tools: %v", err)
 	}
 }
 
