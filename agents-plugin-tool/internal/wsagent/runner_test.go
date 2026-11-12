@@ -202,7 +202,7 @@ func TestRecordSurvivesDaemonRestart(t *testing.T) {
 	if got := h.backend.waitProc(t, 1).nextSent(t); got != "held over\n\nnew" {
 		t.Fatalf("the held send should merge with the next one, got %q", got)
 	}
-	rec, _ := readRecord(wsdashboard.SessionDir(h.dir, id))
+	rec := readEventually(t, "read the record", func() (Record, error) { return readRecord(wsdashboard.SessionDir(h.dir, id)) })
 	instr, _ := os.ReadFile(spec.Instructions)
 	if !strings.Contains(string(instr), rec.WSKey) {
 		t.Fatalf("the agent should get its ws session key in its instructions")

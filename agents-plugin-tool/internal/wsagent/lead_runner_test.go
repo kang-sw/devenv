@@ -103,7 +103,7 @@ func TestLeadSpawnRunsUnderAHolder(t *testing.T) {
 	if session.Kind != "lead" || session.ReplyID != st.ID || session.Cwd != h.root {
 		t.Fatalf("holder descriptor = %+v", session)
 	}
-	reg, err = wsdashboard.ReadRegistration(h.dir, st.ID)
+	reg, err = h.row(st.ID), nil
 	if err != nil || !reg.Hosted || reg.Agent || reg.HostPID == 0 || reg.HostPID != rec.HostPID || rec.HolderID != holder {
 		t.Fatalf("the row should name the spawned process: %+v (%v), record holder %q pid %d", reg, err, rec.HolderID, rec.HostPID)
 	}
@@ -229,7 +229,7 @@ func TestLeadApprovalIsAnsweredOnce(t *testing.T) {
 	if len(st.Approvals) != 0 || st.Process || st.Status != StatusIdle || rec.HolderID != "" || rec.HostPID != 0 || h.holders.opCount("stop "+holder) != 1 {
 		t.Fatalf("after a stop: %+v, record holder %q, holder calls %v", st, rec.HolderID, h.holders.opList())
 	}
-	if reg, _ := wsdashboard.ReadRegistration(h.dir, id); reg.HostPID != 0 || !reg.Hosted {
+	if reg := h.row(id); reg.HostPID != 0 || !reg.Hosted {
 		t.Fatalf("a stopped session's row names no process: %+v", reg)
 	}
 	if h.snapshot(id).Lead.Permission != nil {
@@ -878,7 +878,7 @@ func TestLeadRejoinsItsProcessAfterADaemonRestart(t *testing.T) {
 	if st := h.state(id); st.Status != StatusIdle || len(st.Approvals) != 0 {
 		t.Fatalf("after the holder vanished: %+v", st)
 	}
-	if reg, _ := wsdashboard.ReadRegistration(h.dir, id); reg.HostPID != 0 {
+	if reg := h.row(id); reg.HostPID != 0 {
 		t.Fatalf("the row names no process: %+v", reg)
 	}
 	h.send(id, "four")

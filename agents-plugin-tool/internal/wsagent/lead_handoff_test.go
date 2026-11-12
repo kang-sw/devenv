@@ -20,10 +20,7 @@ func (h *leadHarness) terminalTakes(id string) wsdashboard.Registration {
 		h.t.Fatal(err)
 	}
 	defer unlock()
-	row, err := wsdashboard.ReadRegistration(h.dir, id)
-	if err != nil {
-		h.t.Fatal(err)
-	}
+	row := readEventually(h.t, "read the row", func() (wsdashboard.Registration, error) { return wsdashboard.ReadRegistration(h.dir, id) })
 	if !row.Hosted || row.HostMayRun(func(int) bool { return true }) {
 		h.t.Fatalf("a terminal login would be refused on this row: %+v", row)
 	}
@@ -37,11 +34,7 @@ func (h *leadHarness) terminalTakes(id string) wsdashboard.Registration {
 
 func (h *leadHarness) row(id string) wsdashboard.Registration {
 	h.t.Helper()
-	row, err := wsdashboard.ReadRegistration(h.dir, id)
-	if err != nil {
-		h.t.Fatal(err)
-	}
-	return row
+	return readEventually(h.t, "read the row", func() (wsdashboard.Registration, error) { return wsdashboard.ReadRegistration(h.dir, id) })
 }
 
 // TestLeadRowSaysWhetherAProcessMayRun: the row a terminal login reads is

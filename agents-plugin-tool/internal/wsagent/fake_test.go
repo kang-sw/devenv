@@ -391,6 +391,25 @@ func eventually(t *testing.T, what string, cond func() bool) {
 	}
 }
 
+// readEventually returns read's first success within a few seconds and
+// fails the test with its last error after that. On Windows a read that
+// meets the runner's replace of the file in flight fails (a sharing
+// violation); the next attempt does not meet it.
+func readEventually[T any](t *testing.T, what string, read func() (T, error)) T {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		v, err := read()
+		if err == nil {
+			return v
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s: %v", what, err)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 // nopReplies drops a mapper's answers and lines.
 type nopReplies struct{}
 
