@@ -397,6 +397,9 @@
     "261112-bug-ws-dashboard-interrupt-badge-stuck-on-back-to-back-turn": {
       "registered_at": "2026-11-12T02:58:04Z"
     },
+    "261112-bug-ws-dashboard-open-tab-keeps-stale-assets-after-daemon-upgrade": {
+      "registered_at": "2026-11-12T04:20:54Z"
+    },
     "261112-bug-ws-hosted-context-window-ignores-compaction-window": {
       "registered_at": "2026-11-12T03:52:57Z"
     },
