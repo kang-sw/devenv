@@ -77,7 +77,7 @@ check("jumps", jumped, ["a3", "a2", "a2", "b2", "b1"]);
 fire(items.map(function (el) { return { isIntersecting: true, target: el }; }));
 check("all in view hides both pills", [top.hidden, bot.hidden], [true, true]);
 process.stdout.write(bad.join("\n"));`
-	out, err := exec.Command(node, "-e", script).CombinedOutput()
+	out, err := nodeScript(node, script).CombinedOutput()
 	if err != nil {
 		t.Fatalf("node: %v\n%s", err, out)
 	}

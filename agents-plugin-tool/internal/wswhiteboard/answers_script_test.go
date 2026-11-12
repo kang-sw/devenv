@@ -54,7 +54,7 @@ cases.forEach(function (c, i) {
   if (got !== c.want) bad.push("case " + i + ": js " + JSON.stringify(got) + ", go " + JSON.stringify(c.want));
 });
 process.stdout.write(bad.join("\n"));`
-	out, err := exec.Command(node, "-e", script).CombinedOutput()
+	out, err := nodeScript(node, script).CombinedOutput()
 	if err != nil {
 		t.Fatalf("node: %v\n%s", err, out)
 	}

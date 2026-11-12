@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -65,9 +66,14 @@ func wantGone(t *testing.T, h *Host, id string) {
 // TestUnregisterSyncedStore: a synced store with a remote is removed from
 // the machine (registry entry and directory), the remote is untouched, and
 // registering it again under the same member brings it back. The second
-// run renames after releasing the lock files, the order Windows needs.
+// run renames after releasing the lock files, the order Windows needs; the
+// first cannot run there, since Windows refuses to rename a directory with
+// a lock file open in it.
 func TestUnregisterSyncedStore(t *testing.T) {
 	for _, underLocks := range []bool{true, false} {
+		if underLocks && runtime.GOOS == "windows" {
+			continue
+		}
 		was := renameUnderLocks
 		renameUnderLocks = underLocks
 		t.Cleanup(func() { renameUnderLocks = was })

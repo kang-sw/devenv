@@ -8,6 +8,15 @@ import (
 	"testing"
 )
 
+// nodeScript runs script under node, fed on stdin rather than with -e:
+// Windows caps a command line at 32767 characters, and the scripts embed
+// whole assets.
+func nodeScript(node, script string) *exec.Cmd {
+	cmd := exec.Command(node, "-")
+	cmd.Stdin = strings.NewReader(script)
+	return cmd
+}
+
 // runNode runs script under node and fails on any output (each case
 // prints its failed checks); it skips when node is not installed.
 func runNode(t *testing.T, what, script string) {
@@ -16,7 +25,7 @@ func runNode(t *testing.T, what, script string) {
 	if err != nil {
 		t.Skipf("node not installed; %s cases not executed", what)
 	}
-	out, err := exec.Command(node, "-e", script).CombinedOutput()
+	out, err := nodeScript(node, script).CombinedOutput()
 	if err != nil {
 		t.Fatalf("node: %v\n%s", err, out)
 	}

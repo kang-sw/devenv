@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -32,7 +33,9 @@ func TestOpenDoesNotCreateTheStoreDirectory(t *testing.T) {
 // TestExclusive: fn runs under the store lock with the clone's unpushed
 // state as the directory holds it, another process's append included; a
 // lock held elsewhere is ErrBusy and fn does not run; and a call after fn
-// renamed the directory away fails without recreating it.
+// renamed the directory away fails without recreating it. Windows refuses
+// to rename a directory with the lock file open in it, so there the rename
+// follows Exclusive, as wstrackerhost's Unregister does.
 func TestExclusive(t *testing.T) {
 	w := newWorld(t)
 	o := w.remoteOpts("ada", "c1")
@@ -77,7 +80,14 @@ func TestExclusive(t *testing.T) {
 	fl.Unlock()
 
 	aside := o.Dir + ".removed"
-	if err := l.Exclusive(ctx, time.Second, func(Unpushed) error { return os.Rename(o.Dir, aside) }); err != nil {
+	if runtime.GOOS == "windows" {
+		if err := l.Exclusive(ctx, time.Second, func(Unpushed) error { return nil }); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Rename(o.Dir, aside); err != nil {
+			t.Fatalf("renaming the directory away after the lock: %v", err)
+		}
+	} else if err := l.Exclusive(ctx, time.Second, func(Unpushed) error { return os.Rename(o.Dir, aside) }); err != nil {
 		t.Fatalf("renaming the directory away under the lock: %v", err)
 	}
 	if _, err := l.Sync(ctx); err == nil {

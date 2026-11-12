@@ -86,7 +86,7 @@ sent[5].done({ ok: true, ids: ['y'] });
 check('state after the dropped answer', ui.psr.A, null);
 if (bad.length) { console.log(bad.join('\n')); process.exit(1); }
 `
-	out, err := exec.Command(node, "-e", script).CombinedOutput()
+	out, err := nodeScript(node, script).CombinedOutput()
 	if err != nil {
 		t.Fatalf("search request cases failed: %v\n%s", err, strings.TrimSpace(string(out)))
 	}

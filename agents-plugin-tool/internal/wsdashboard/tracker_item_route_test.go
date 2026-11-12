@@ -80,7 +80,7 @@ check("unknown store toast", toasts.length, 1);
 check("unknown store page", ui.page, null);
 process.stdout.write(bad.join("\n"));
 `
-	out, err := exec.Command(node, "-e", script).CombinedOutput()
+	out, err := nodeScript(node, script).CombinedOutput()
 	if err != nil {
 		t.Fatalf("node: %v\n%s", err, out)
 	}

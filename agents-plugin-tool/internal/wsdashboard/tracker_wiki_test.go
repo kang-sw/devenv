@@ -117,7 +117,7 @@ check('settled', [kinds(), s.doc.content], ['', 'newer']);
 
 process.stdout.write(bad.join("\n"));
 `
-	out, err := exec.Command(node, "-e", script).CombinedOutput()
+	out, err := nodeScript(node, script).CombinedOutput()
 	if err != nil {
 		t.Fatalf("node: %v\n%s", err, out)
 	}
@@ -228,7 +228,7 @@ check('after save: asked', asked, 0);
 
 process.stdout.write(bad.join("\n"));
 `
-	out, err := exec.Command(node, "-e", script).CombinedOutput()
+	out, err := nodeScript(node, script).CombinedOutput()
 	if err != nil {
 		t.Fatalf("node: %v\n%s", err, out)
 	}

@@ -32,10 +32,12 @@ func railIDs(rows []RailRow) []string {
 	return ids
 }
 
+// railWT finds the worktree at path, a slash-form fixture path: the rail
+// cleans every path to the OS form, so on Windows it reports \w\repo.
 func railWT(t *testing.T, ws RailWorkspace, path string) RailWorktree {
 	t.Helper()
 	for _, w := range ws.Worktrees {
-		if w.Path == path {
+		if filepath.ToSlash(w.Path) == path {
 			return w
 		}
 	}
@@ -64,7 +66,7 @@ func TestRailViewGroupsSessionsByWorkspaceAndWorktree(t *testing.T) {
 			Snapshot: &wslive.Snapshot{UpdatedAt: now.UnixMilli(), Repo: &wslive.Repo{Branch: "topic/fresh"}}},
 		{Session: railSession("folder", "/w/plain", now.Add(-time.Minute), time.Time{})},
 	}
-	repos := map[string]railRepo{repo: {Read: true, Pools: []string{pool}, Entries: []railWorktreeEntry{
+	repos := map[string]railRepo{filepath.FromSlash(repo): {Read: true, Pools: []string{pool}, Entries: []railWorktreeEntry{
 		{Path: repo, Branch: "develop"},
 		{Path: "/w/feature", Branch: "feat/x"},
 		{Path: "/w/idle", Detached: true},
@@ -80,7 +82,7 @@ func TestRailViewGroupsSessionsByWorkspaceAndWorktree(t *testing.T) {
 		t.Errorf("live = %d, want 5", view.Live)
 	}
 	plain, ws := view.Workspaces[0], view.Workspaces[1]
-	if plain.Path != "/w/plain" || plain.Repo || len(plain.Worktrees) != 0 || len(plain.Sessions) != 1 {
+	if filepath.ToSlash(plain.Path) != "/w/plain" || plain.Repo || len(plain.Worktrees) != 0 || len(plain.Sessions) != 1 {
 		t.Errorf("plain folder = %+v", plain)
 	}
 	if ws.Name != "repo" || !ws.Repo || ws.Live != 4 {
@@ -88,7 +90,7 @@ func TestRailViewGroupsSessionsByWorkspaceAndWorktree(t *testing.T) {
 	}
 	var paths []string
 	for _, w := range ws.Worktrees {
-		paths = append(paths, w.Path)
+		paths = append(paths, filepath.ToSlash(w.Path))
 	}
 	want := []string{repo, pool + "/busy", "/w/feature", "/w/fresh", "/w/idle"}
 	if strings.Join(paths, " ") != strings.Join(want, " ") {
@@ -128,7 +130,7 @@ func TestRailViewWithoutAListShowsTheSessionRoots(t *testing.T) {
 		{Session: railSession("a", "/r/sub/dir", now, time.Time{}), Repo: "/r"},
 		{Session: railSession("b", "/r/.ws-worktrees/w", now, time.Time{}), Repo: "/r", Linked: true},
 	}, nil, nil, now)
-	if wts := sub.Workspaces[0].Worktrees; len(wts) != 2 || wts[0].Path != "/r" || len(wts[0].Sessions) != 1 || wts[0].Sessions[0].ReplyID != "a" || wts[1].Path != "/r/.ws-worktrees/w" {
+	if wts := sub.Workspaces[0].Worktrees; len(wts) != 2 || filepath.ToSlash(wts[0].Path) != "/r" || len(wts[0].Sessions) != 1 || wts[0].Sessions[0].ReplyID != "a" || filepath.ToSlash(wts[1].Path) != "/r/.ws-worktrees/w" {
 		t.Errorf("worktrees = %+v, want a under the root and b on its own", wts)
 	}
 	if !view.Workspaces[0].Worktrees[0].Root {
@@ -161,7 +163,7 @@ func TestRailViewShowsStoredWorkspaces(t *testing.T) {
 		{Session: railSession("stray", "/w/elsewhere", now, time.Time{})},
 		{Session: railSession("underrepo", "/w/idle-repo/docs", now, time.Time{})},
 	}
-	repos := map[string]railRepo{"/w/idle-repo": {Read: true, Pools: []string{"/w/.ws-worktrees/idle-repo"}, Entries: []railWorktreeEntry{
+	repos := map[string]railRepo{filepath.FromSlash("/w/idle-repo"): {Read: true, Pools: []string{"/w/.ws-worktrees/idle-repo"}, Entries: []railWorktreeEntry{
 		{Path: "/w/idle-repo", Branch: "main"},
 		{Path: "/w/idle-wt", Branch: "feat/idle"},
 		{Path: "/w/.ws-worktrees/idle-repo/spare", Detached: true},
@@ -170,8 +172,8 @@ func TestRailViewShowsStoredWorkspaces(t *testing.T) {
 	byPath := map[string]RailWorkspace{}
 	var paths []string
 	for _, ws := range view.Workspaces {
-		byPath[ws.Path] = ws
-		paths = append(paths, ws.Path)
+		byPath[filepath.ToSlash(ws.Path)] = ws
+		paths = append(paths, filepath.ToSlash(ws.Path))
 	}
 	want := []string{"/w/busy-repo", "/w/elsewhere", "/w/empty-folder", "/w/idle-repo", "/w/idle-repo/docs", "/w/projects", "/w/projects/app", "/w/projects/notes"}
 	if strings.Join(paths, " ") != strings.Join(want, " ") {
@@ -185,7 +187,7 @@ func TestRailViewShowsStoredWorkspaces(t *testing.T) {
 	}
 	idle := byPath["/w/idle-repo"]
 	if !idle.Repo || idle.Live != 0 || len(idle.Worktrees) != 2 || !idle.Worktrees[0].Root || idle.Worktrees[0].Branch != "main" ||
-		idle.Worktrees[1].Path != "/w/idle-wt" || idle.Worktrees[1].Branch != "feat/idle" || !idle.Worktrees[1].Empty() {
+		filepath.ToSlash(idle.Worktrees[1].Path) != "/w/idle-wt" || idle.Worktrees[1].Branch != "feat/idle" || !idle.Worktrees[1].Empty() {
 		t.Errorf("stored repository without a session = %+v, want its root and its unpooled worktree, both empty", idle)
 	}
 	if busy := byPath["/w/busy-repo"]; !busy.Repo || busy.Live != 1 || len(busy.Worktrees) != 1 {
@@ -222,7 +224,7 @@ func TestRailWorktreeChangesComeFromTheNewestSnapshot(t *testing.T) {
 		{Session: railSession("a", "/r", now, time.Time{}), Repo: "/r", Snapshot: older},
 		{Session: railSession("b", "/r", now, time.Time{}), Repo: "/r", Snapshot: newer},
 		{Session: railSession("c", "/r2", now, time.Time{}), Repo: "/r", Snapshot: &wslive.Snapshot{UpdatedAt: now.UnixMilli()}},
-	}, map[string]railRepo{"/r": {Read: true, Entries: []railWorktreeEntry{{Path: "/r"}, {Path: "/r2"}}}}, nil, now)
+	}, map[string]railRepo{filepath.FromSlash("/r"): {Read: true, Entries: []railWorktreeEntry{{Path: "/r"}, {Path: "/r2"}}}}, nil, now)
 	ws := view.Workspaces[0]
 	if w := railWT(t, ws, "/r"); !w.HasChanges || w.Changes != 6 {
 		t.Errorf("root = %+v, want 6 changes from the newer snapshot", w)
@@ -365,7 +367,7 @@ func TestRailRowApproval(t *testing.T) {
 // bare or submodule common directory, and without one the session root's
 // .git read from disk (a linked worktree's main repository, or the root).
 func TestRailRepoRoot(t *testing.T) {
-	if got := railRepoRoot(Registration{Project: "/x/wt", GitCommonDir: "/x/main/.git"}); got != "/x/main" {
+	if got := railRepoRoot(Registration{Project: "/x/wt", GitCommonDir: "/x/main/.git"}); got != filepath.FromSlash("/x/main") {
 		t.Errorf("common dir root = %q", got)
 	}
 	if got := railRepoRoot(Registration{Project: "/x/wt", GitCommonDir: "/x/bare.git"}); got != "" {
@@ -448,10 +450,11 @@ func (f *railFakeRead) read(repo string, _ []Registration) (RepoWorktrees, error
 	return RepoWorktrees{Worktrees: []RepoWorktree{{Path: repo, Branch: "main"}, {Path: repo + "-wt", Branch: fmt.Sprintf("branch-read-%d", f.reads[repo])}}}, nil
 }
 
+// count takes a slash-form repo; the lister reads the cleaned OS form.
 func (f *railFakeRead) count(repo string) int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.reads[repo]
+	return f.reads[filepath.Clean(repo)]
 }
 
 // TestRailListerReadsOnlyWhilePagesShowTheRail pins the lister's cadence:
