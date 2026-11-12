@@ -745,7 +745,7 @@ func (src *DashboardSessionSource) ReadSession(reg wsdashboard.Registration) (ws
 	}
 	return wsdashboard.SessionData{
 		HasBoard:          record.Whiteboard != nil,
-		CountPolicy:       record.Whiteboard.OpenPolicyCount(),
+		CountPolicy:       record.Whiteboard.OpenAskCount(),
 		Resumable:         record.HarnessSession != "" && record.HarnessCwd != "",
 		Fingerprint:       fp,
 		SnapshotUpdatedAt: updatedAt,

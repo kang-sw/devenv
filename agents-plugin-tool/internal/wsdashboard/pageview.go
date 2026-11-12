@@ -73,7 +73,8 @@ type SessionView struct {
 
 	HasBoard bool
 	Seq      int
-	// CountPolicy and CountAcks are the board's open items.
+	// CountPolicy and CountAcks are the board's open items: policy and
+	// check items, then technical and announced ones.
 	CountPolicy, CountAcks int
 	Board, Panels          template.HTML
 	Mermaid                bool

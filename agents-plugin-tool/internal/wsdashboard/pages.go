@@ -948,7 +948,7 @@ func (r pageReader) history(replyID, before string, n int) (ConversationView, ws
 }
 
 // indexView builds the / view. It reads no session page: what it shows of
-// a board (whether there is one, its open policy items) comes with the
+// a board (whether there is one, its open policy and check items) comes with the
 // session from the index (SessionData.CountPolicy).
 func (r pageReader) indexView() IndexView {
 	var inputs []indexInput

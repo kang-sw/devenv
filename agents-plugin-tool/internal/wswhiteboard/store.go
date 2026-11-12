@@ -23,11 +23,15 @@ import (
 	"github.com/yuin/goldmark/text"
 )
 
-// Item classes, the workflow manual's asking classes.
+// Item classes, the workflow manual's asking classes. A check is a gate, not
+// a decision: a request that the user look at, verify, or approve something.
+// The page lists a topic's checks under its recap, each answered on its own
+// (ok, no, or a note), and counts an open one with the open policy items.
 const (
 	ClassPolicy    = "policy"
 	ClassTechnical = "technical"
 	ClassAnnounced = "announced"
+	ClassCheck     = "check"
 )
 
 // Item statuses. Answered, withdrawn, and superseded items are settled; open
@@ -57,7 +61,7 @@ const (
 )
 
 var (
-	classValues       = []string{ClassPolicy, ClassTechnical, ClassAnnounced}
+	classValues       = []string{ClassPolicy, ClassTechnical, ClassAnnounced, ClassCheck}
 	statusValues      = []string{StatusOpen, StatusAnswered, StatusAssumed, StatusWithdrawn, StatusSuperseded}
 	patchStatusValues = []string{StatusOpen, StatusWithdrawn, StatusSuperseded}
 	// fullDocumentPattern detects a whole HTML document where a topic body
@@ -153,17 +157,17 @@ type Item struct {
 // precision of the dashboard inbox's send times it is compared with.
 const reaskLayout = "2006-01-02T15:04:05.000Z07:00"
 
-// OpenPolicyCount is the number of open policy items, the count the full
-// page's header shows (pageData.CountPolicy): every open policy item renders,
-// since a topic that waits on one is never cut by the closed-topic cap. A nil
-// state has none.
-func (s *State) OpenPolicyCount() int {
+// OpenAskCount is the number of open policy and check items, the amber
+// "answer needed" count the full page's header shows (pageData.CountPolicy):
+// every such item renders, since a topic that waits on one is never cut by
+// the closed-topic cap. A nil state has none.
+func (s *State) OpenAskCount() int {
 	if s == nil {
 		return 0
 	}
 	n := 0
 	for _, item := range s.Items {
-		if item.Status == StatusOpen && item.Class == ClassPolicy {
+		if item.Status == StatusOpen && (item.Class == ClassPolicy || item.Class == ClassCheck) {
 			n++
 		}
 	}

@@ -51,9 +51,30 @@
         });
       });
     });
+    // A check row answers one way at a time: its x stages "no" and clears
+    // the box, opening the note for the reason; ticking the box stages "ok"
+    // and releases the x.
+    q(".crow[data-id] button.no-toggle", root).forEach(function (b) {
+      if (once(b)) b.addEventListener("click", function () {
+        var row = b.closest(".crow"), on = b.getAttribute("aria-pressed") !== "true";
+        setNo(row, on);
+        if (on) {
+          var box = row.querySelector("label.ck > input"), n = row.querySelector("textarea.note");
+          if (box) box.checked = false;
+          if (n) { n.hidden = false; grow(n); n.focus(); }
+        }
+        build();
+      });
+    });
+    q(".crow[data-id] label.ck > input", root).forEach(function (c) {
+      if (once(c)) c.addEventListener("change", function () {
+        if (c.checked) setNo(c.closest(".crow"), false);
+        build();
+      });
+    });
     q("button.note-toggle", root).forEach(function (t) {
       if (once(t)) t.addEventListener("click", function () {
-        var n = t.closest(".card, .arow, .srow").querySelector("textarea.note");
+        var n = t.closest(".card, .arow, .crow, .srow").querySelector("textarea.note");
         n.hidden = !n.hidden; if (!n.hidden) { grow(n); n.focus(); }
       });
     });
@@ -97,6 +118,13 @@
     }
     build();
   }
+  // setNo presses or releases a check row's x; the row carries data-no while
+  // it stages "no".
+  function setNo(row, on) {
+    var b = row.querySelector("button.no-toggle");
+    if (b) b.setAttribute("aria-pressed", on ? "true" : "false");
+    if (on) row.setAttribute("data-no", ""); else row.removeAttribute("data-no");
+  }
   // Size a note textarea to its content; scrollHeight is 0 while hidden.
   function grow(n) { n.style.height = "auto"; if (n.scrollHeight) n.style.height = n.scrollHeight + "px"; }
   // Bulk acknowledge: checks every ack row. Policy items stay manual.
@@ -124,6 +152,15 @@
       var pick = card.querySelector('.opt[data-opt][aria-pressed="true"]');
       var noteEl = card.querySelector("textarea.note");
       items.push({ id: card.getAttribute("data-id"), answer: pick ? pick.getAttribute("data-opt") : "", note: noteEl ? noteEl.value : "" });
+    });
+    // A check is "ok" by its box or "no" by its x, one at a time; an assumed
+    // check, locked like a settled row, sends its note alone.
+    q(".crow[data-id]").forEach(function (row) {
+      var box = row.querySelector("label.ck > input"), noteEl = row.querySelector("textarea.note");
+      var answer = row.hasAttribute("data-no") ? "no" : box && box.checked ? "ok" : "";
+      var note = noteEl ? noteEl.value : "";
+      row.classList.toggle("staged", !!(answer || note.trim()));
+      items.push({ id: row.getAttribute("data-id"), answer: answer, note: note });
     });
     // An acknowledgement is "ok"; with a note it leaves the ok group.
     q(".arow[data-id]").forEach(function (row) {

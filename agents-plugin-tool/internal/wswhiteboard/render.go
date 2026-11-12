@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"unicode"
 
 	"github.com/kang-sw/devenv/internal/wsdevassets"
 	"github.com/kang-sw/devenv/internal/wsi18n"
@@ -225,7 +226,9 @@ type Regions struct {
 	// frames, so the page loads the shared mermaid script (MermaidAsset) and
 	// MermaidInitScript; a frame loads them itself for a block in its body.
 	Mermaid bool
-	// CountPolicy and CountAcks are the header's counts.
+	// CountPolicy and CountAcks are the header's counts: open policy and
+	// check items (the amber "answer needed" chip), then open technical and
+	// announced items.
 	CountPolicy, CountAcks int
 }
 
@@ -413,10 +416,10 @@ func newPageData(view View, a *pageAssets, framed bool) *pageData {
 		p.StampFile = ""
 	}
 	for _, t := range view.Topics {
-		p.CountPolicy += len(t.Policy)
+		p.CountPolicy += t.AskCount()
 		p.CountAcks += len(t.Acks)
 		p.CountFresh += t.Fresh
-		for _, list := range [][]ItemView{t.Policy, t.Acks, t.Expanded, t.Collapsed} {
+		for _, list := range [][]ItemView{t.Policy, t.Acks, t.Checks, t.Expanded, t.Collapsed} {
 			for _, iv := range list {
 				p.onPage[iv.ID] = true
 			}
@@ -642,6 +645,49 @@ func (d itemData) Stacked() bool {
 		}
 	}
 	return false
+}
+
+// checkWord splits a check's answer at its first word: the word, lowered,
+// when it is "ok" or "no", and the text after it with the joining spaces and
+// punctuation trimmed; an answer starting with neither returns "" and the
+// whole answer, trimmed.
+func checkWord(answer string) (word, rest string) {
+	a := strings.TrimSpace(answer)
+	end := strings.IndexFunc(a, func(r rune) bool { return !unicode.IsLetter(r) })
+	if end < 0 {
+		end = len(a)
+	}
+	switch w := strings.ToLower(a[:end]); w {
+	case "ok", "no":
+		return w, strings.TrimLeftFunc(a[end:], func(r rune) bool { return unicode.IsSpace(r) || unicode.IsPunct(r) })
+	}
+	return "", a
+}
+
+// CheckVerdict is an answered or assumed check's stamp, "ok" or "no", when
+// its answer starts with that word (case aside); "" for any other answer and
+// for an open check.
+func (d itemData) CheckVerdict() string {
+	if d.Status == StatusOpen {
+		return ""
+	}
+	word, _ := checkWord(d.Answer)
+	return word
+}
+
+// CheckNo reports a check answered no, which its row marks with a red x and
+// the user's words.
+func (d itemData) CheckNo() bool { return d.CheckVerdict() == "no" }
+
+// CheckReading is the part of a check's answer its stamp does not show: the
+// text after ok or no ("no, use the other one"), or the whole answer when it
+// starts with neither. Empty for an open check.
+func (d itemData) CheckReading() string {
+	if d.Status == StatusOpen {
+		return ""
+	}
+	_, rest := checkWord(d.Answer)
+	return rest
 }
 
 // Reading is the lead's reading of the answer beyond a picked option: the

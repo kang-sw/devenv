@@ -894,8 +894,9 @@ func TestRenderPageEmbedSizeBudget(t *testing.T) {
 	// items, 100 ready tickets), and the embed has no truncation to fall back
 	// on. 35% left the topic bar's pen, note box, and updated time room;
 	// 40% adds the settled rows' expanded bodies (each settled item's
-	// rationale and options ride in the snapshot so it unfolds without script).
-	if len(out) > budget*40/100 {
+	// rationale and options ride in the snapshot so it unfolds without script);
+	// 42% adds the check list's styles and answer staging.
+	if len(out) > budget*42/100 {
 		t.Errorf("populated embed is %d bytes, not well under 512 KiB", len(out))
 	}
 }

@@ -393,14 +393,15 @@
   function pickKey(b) { return (b.getAttribute("data-opt") || "") + "|" + (b.getAttribute("data-v") || ""); }
   function readAnswers(el) {
     var out = {};
-    q(".card[data-id], .arow[data-id], .srow[data-id]", el).forEach(function (item) {
-      var s = {}, note = item.querySelector("textarea.note"), box = item.querySelector("label.ack > input");
+    q(".card[data-id], .arow[data-id], .crow[data-id], .srow[data-id]", el).forEach(function (item) {
+      var s = {}, note = item.querySelector("textarea.note"), box = item.querySelector("label.ack > input, label.ck > input");
       var pick = item.querySelector('.opt[data-opt][aria-pressed="true"], .btn[data-v][aria-pressed="true"]');
       if (pick) s.pick = pickKey(pick);
       if (note && note.value) s.note = note.value;
       if (note && !note.hidden) s.noteOpen = true;
       if (box && box.checked) s.checked = true;
-      if (s.pick || s.note || s.noteOpen || s.checked) out[item.getAttribute("data-id")] = s;
+      if (item.hasAttribute("data-no")) s.no = true;
+      if (s.pick || s.note || s.noteOpen || s.checked || s.no) out[item.getAttribute("data-id")] = s;
     });
     // A topic note carries over by topic name, keyed apart from item numbers.
     q(".tnote[data-topic]", el).forEach(function (note) {
@@ -414,14 +415,23 @@
     note.style.height = "auto";
     if (note.scrollHeight) note.style.height = note.scrollHeight + "px";
   }
+  // setCheckNo presses or releases a check row's x, as the whiteboard form
+  // script does: the row carries data-no while it stages "no".
+  function setCheckNo(item, on) {
+    var b = item.querySelector("button.no-toggle");
+    if (!b) return;
+    b.setAttribute("aria-pressed", on ? "true" : "false");
+    if (on) item.setAttribute("data-no", ""); else item.removeAttribute("data-no");
+  }
   function writeAnswers(el, saved) {
-    q(".card[data-id], .arow[data-id], .srow[data-id]", el).forEach(function (item) {
+    q(".card[data-id], .arow[data-id], .crow[data-id], .srow[data-id]", el).forEach(function (item) {
       var s = saved[item.getAttribute("data-id")];
       if (!s) return;
-      var note = item.querySelector("textarea.note"), box = item.querySelector("label.ack > input");
+      var note = item.querySelector("textarea.note"), box = item.querySelector("label.ack > input, label.ck > input");
       if (s.pick) q(".opt[data-opt], .btn[data-v]", item).forEach(function (b) { if (pickKey(b) === s.pick) b.setAttribute("aria-pressed", "true"); });
       if (note && (s.note || s.noteOpen)) openNote(note, s);
       if (box && s.checked) box.checked = true;
+      if (s.no) setCheckNo(item, true);
     });
     q(".tnote[data-topic]", el).forEach(function (note) {
       var s = saved["t:" + note.getAttribute("data-topic")];
@@ -1147,14 +1157,15 @@
   function putChip(c) { if (!chips[c.id]) chipOrder.push(c.id); chips[c.id] = c; }
   function dropChip(id) { delete chips[id]; chipOrder = chipOrder.filter(function (x) { return x !== id; }); }
   function boardItem(id) {
-    return boardQ('.card[data-id="' + id + '"], .arow[data-id="' + id + '"], .srow[data-id="' + id + '"]')[0] || null;
+    return boardQ('.card[data-id="' + id + '"], .arow[data-id="' + id + '"], .crow[data-id="' + id + '"], .srow[data-id="' + id + '"]')[0] || null;
   }
   // readItem is a board item's answer as a chip; null when it has none.
   function readItem(item) {
     var pick = item.querySelector('.opt[data-opt][aria-pressed="true"], .btn[data-v][aria-pressed="true"]');
-    var box = item.querySelector("label.ack > input"), note = item.querySelector("textarea.note");
+    var box = item.querySelector("label.ack > input, label.ck > input"), note = item.querySelector("textarea.note");
     var c = { id: item.getAttribute("data-id"), answer: "", note: note ? note.value.trim() : "" };
     if (pick) c.answer = pick.getAttribute("data-opt") || pick.getAttribute("data-v");
+    else if (item.hasAttribute("data-no")) c.answer = "no";
     else if (box && box.checked) c.answer = "ok";
     return c.answer || c.note ? c : null;
   }
@@ -1167,8 +1178,9 @@
       var v = b.getAttribute("data-opt") || b.getAttribute("data-v");
       b.setAttribute("aria-pressed", String(!!c && v === c.answer));
     });
-    var box = item.querySelector("label.ack > input"), note = item.querySelector("textarea.note");
+    var box = item.querySelector("label.ack > input, label.ck > input"), note = item.querySelector("textarea.note");
     if (box) box.checked = !!c && c.answer === "ok";
+    setCheckNo(item, !!c && c.answer === "no");
     if (note) {
       note.value = c && c.note ? c.note : "";
       if (note.value) note.hidden = false;
@@ -1179,7 +1191,7 @@
   // syncChips takes the answers of the items on the board into the chips.
   function syncChips() {
     if (!region("board") || !cchips) return;
-    boardQ(".card[data-id], .arow[data-id], .srow[data-id]").forEach(function (item) {
+    boardQ(".card[data-id], .arow[data-id], .crow[data-id], .srow[data-id]").forEach(function (item) {
       var c = readItem(item), id = item.getAttribute("data-id");
       if (c) putChip(c); else if (chips[id]) dropChip(id);
     });
@@ -1711,7 +1723,7 @@
   // itemIdAt is the ID of the item card n lies in, "" outside every card; the
   // card's element id carries it on every kind (a settled row has no data-id).
   function itemIdAt(n) {
-    var el = selEl(n), item = el && el.closest && el.closest(".card[id], .arow[id], .srow[id]");
+    var el = selEl(n), item = el && el.closest && el.closest(".card[id], .arow[id], .crow[id], .srow[id]");
     var m = item && /^item-([0-9]{1,6})$/.exec(item.getAttribute("id") || "");
     return m ? m[1] : "";
   }
@@ -4976,7 +4988,7 @@
   // parsed detached instead, once per new hash (tlHeld), and the counts read
   // it in place of the live region until the tab shows again.
   var TL_REGIONS = mode === "index" ? { sessions: 1 } : { board: 1, convlive: 1, tree: 1 };
-  var TL_ASK = '.card.policy[id^="item-"], .arow[id^="item-"]';
+  var TL_ASK = '.card.policy[id^="item-"], .arow[id^="item-"], .crow[data-id]:not([data-assumed])';
   var tlHeld = {}, tlPill = 0, tlTk = 0, tlAsks = -1, tlPerm = 0, tlN = -1, tlBase = null;
   function tlRetitle() {
     var n = tlTk + tlPerm + (tlAsks >= 0 ? tlAsks : tlPill);
@@ -5001,8 +5013,8 @@
   function tlRoot(name) { return tlHeld[name] ? tlHeld[name].root : region(name); }
   // tlDrafted: the pill's reply rule (a pick, a ticked ack, or a note).
   function tlDrafted(el) {
-    var box = el.querySelector("label.ack > input"), n = el.querySelector("textarea.note");
-    return !!(el.querySelector('.opt[data-opt][aria-pressed="true"]') || (box && box.checked) || (n && n.value.trim()));
+    var box = el.querySelector("label.ack > input, label.ck > input"), n = el.querySelector("textarea.note");
+    return !!(el.querySelector('.opt[data-opt][aria-pressed="true"]') || (box && box.checked) || el.hasAttribute("data-no") || (n && n.value.trim()));
   }
   // tlHeldAsks counts a held board the pill's way without its DOM: its asks,
   // less those drafted in the live board and those the newest sent records
