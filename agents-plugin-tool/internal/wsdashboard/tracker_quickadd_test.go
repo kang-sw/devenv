@@ -709,10 +709,14 @@ done();
 		".tk :where(button.rp) { font: inherit; color: inherit; border: 0; background: none; margin: 0; padding: 0; }",
 		".tk .irow:is(:hover, :focus-within, .sel) .rpe, .tk .rpe[aria-expanded=\"true\"] { visibility: visible; }",
 		".tk .irow:is(:hover, :focus-within, .sel) .rlab, .tk .rlab[aria-expanded=\"true\"] { display: inline-flex; }",
+		".tk .irow:is(:hover, :focus-visible, :has(:focus-visible)) > .ir-more { visibility: visible; }",
 	} {
 		if !strings.Contains(string(css), want) {
 			t.Errorf("tracker.css lacks %q", want)
 		}
+	}
+	if strings.Contains(string(css), ":focus-within, .sel) > .ir-more") {
+		t.Error("a clicked row keeps its preview after the pointer leaves: the preview shows on hover and keyboard focus only")
 	}
 	if strings.Contains(string(css), "border-radius: 6px; cursor: pointer; }\n.tk .ir-main .title") {
 		t.Error("the whole row still shows the pointer though only its title opens the item window")

@@ -273,7 +273,9 @@ body.tk-paged .tk-drawer { display: none; }
 /* the one state for hovered, focused, and selected */
 .tk .irow:is(:hover, :focus-within, .sel) > .ir-main { background: color-mix(in srgb, var(--wb-muted) 60%, transparent); }
 .tk .irow:is(:hover, :focus-within, .sel) .ir-acts { display: inline-flex; }
-.tk .irow:is(:hover, :focus-within, .sel) > .ir-more { visibility: visible; }
+/* the preview follows the pointer and keyboard focus only: a mouse click focuses and selects the
+   row, and the preview kept by that focus would stay after the pointer left */
+.tk .irow:is(:hover, :focus-visible, :has(:focus-visible)) > .ir-more { visibility: visible; }
 /* the row the shown insert would land under (insPar): a quiet outline, no layout shift; the focus
    and selection outline below wins on the same row */
 .tk .irow.hpar > .ir-main { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-primary) 45%, transparent); }
