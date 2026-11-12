@@ -193,10 +193,14 @@ Markdown up to the closing tag.
   `READY · reviewed · in implementation: <branch>`. Give a topic that is in
   implementation, waiting on an answer, or blocked a recap, refresh it
   whenever that state changes, and keep it to one or two lines; a stale
-  recap misleads more than none. `wb:recap` replaces it whole, an empty one
-  clears it, and the same recap again is no change and keeps its time. A
-  changed recap counts as a change to the topic, as a body change does;
-  clearing it reopens nothing.
+  recap misleads more than none. A recap, like a topic body, states status
+  and never asks the user anything: anything that waits on the user's
+  confirmation, "OK this draft and I'll proceed" included, is a `wb:add`
+  item (`announced` or `technical` for a plain confirmation, `policy` for a
+  choice), so it shows as waiting on the user. `wb:recap` replaces it whole,
+  an empty one clears it, and the same recap again is no change and keeps
+  its time. A changed recap counts as a change to the topic, as a body
+  change does; clearing it reopens nothing.
 - `wb:floor` raises the ID counter so the next minted ID is one past `id`; a
   floor at or below the counter is ignored. `wb:embed-dir`: see Host embed
   folder.
