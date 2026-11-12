@@ -195,3 +195,54 @@ done();
 		}
 	}
 }
+
+// TestTrackerInsertParentOutline pins the hover insert's parent outline:
+// the row that would parent the badge's place (the nearest row above the gap
+// one level shallower, when it shows the place's parent) carries .hpar; a
+// root place outlines nothing; a depth change moves the outline; hiding the
+// insert clears it, and so does a re-render.
+func TestTrackerInsertParentOutline(t *testing.T) {
+	if show := trackerFn(t, `function insShow\(list, g, x\)`, false); !strings.Contains(show, "insPar(insParRow(g.a, o));") {
+		t.Errorf("insShow does not outline the place's parent:\n%s", show)
+	}
+	if n := strings.Count(trackerBlock(t, `\n  function render\(`, `\n  function `), "insPar(null); HV = null;"); n != 2 {
+		t.Errorf("render clears the parent outline at %d of its 2 insert resets", n)
+	}
+	src := trackerFn(t, `function rowDepth\(el\)`, true) + trackerFn(t, `function insParRow\(a, o\)`, false) +
+		trackerFn(t, `function insPar\(el\)`, false) + trackerFn(t, `function insHide\(\)`, false)
+	runTrackerCases(t, "insert parent outline", trackerCheckJS+`
+var HV = null, HP = null;
+`+src+`
+function row(id, d, cls) {
+  var c = {};
+  return { id: id, cls: cls || 'irow', style: { getPropertyValue: function () { return String(d); } },
+    getAttribute: function () { return id; }, matches: function (q) { return q === '.' + this.cls; },
+    classList: { add: function (k) { c[k] = true; }, remove: function (k) { delete c[k]; }, has: function (k) { return !!c[k]; } } };
+}
+// A > A1 > A1a, A > A2, a section head, B
+var rows = [row('A', 0), row('A1', 1), row('A1a', 2), row('A2', 1), row('h', 0, 'sub'), row('B', 0)];
+rows.forEach(function (r, i) { r.previousElementSibling = rows[i - 1] || null; });
+function outlined() { return rows.filter(function (r) { return r.classList.has('hpar'); }).map(function (r) { return r.id; }); }
+function at(a, depth, parent) { insPar(insParRow(rows[a], { depth: depth, parent: parent })); return outlined(); }
+check('first child of A1a: A1a', at(2, 3, 'A1a'), ['A1a']);
+check('after A1a under A1: A1', at(2, 2, 'A1'), ['A1']);
+check('after A1 under A: A, past the deeper row', at(2, 1, 'A'), ['A']);
+check('a root place: none', at(2, 0, null), []);
+check('after A2 under A: A, past its sibling', at(3, 1, 'A'), ['A']);
+check('a row the place does not name: none', at(3, 1, 'X'), []);
+check('first child of B past a section head: B', at(5, 1, 'B'), ['B']);
+check('above the first row: none', (insPar(insParRow(null, { depth: 0, parent: null })), outlined()), []);
+at(2, 2, 'A1');
+HV = { list: { classList: { remove: function () {} }, querySelector: function () { return { hidden: false }; } } };
+insHide();
+check('hiding the insert clears the outline', [outlined(), HP, HV], [[], null, null]);
+done();
+`)
+	css, err := dashboardFS.ReadFile("assets/tracker.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(css), ".tk .irow.hpar > .ir-main { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-primary) 45%, transparent); }") {
+		t.Error("tracker.css lacks the parent outline")
+	}
+}

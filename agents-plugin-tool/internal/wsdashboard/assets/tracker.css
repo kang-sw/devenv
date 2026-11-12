@@ -270,6 +270,9 @@ body.tk-paged .tk-drawer { display: none; }
 .tk .irow:is(:hover, :focus-within, .sel) > .ir-main { background: color-mix(in srgb, var(--wb-muted) 60%, transparent); }
 .tk .irow:is(:hover, :focus-within, .sel) .ir-acts { display: inline-flex; }
 .tk .irow:is(:hover, :focus-within, .sel) > .ir-more { visibility: visible; }
+/* the row the shown insert would land under (insPar): a quiet outline, no layout shift; the focus
+   and selection outline below wins on the same row */
+.tk .irow.hpar > .ir-main { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-primary) 45%, transparent); }
 .tk .irow:focus-visible > .ir-main, .tk .irow:has(.ia:focus-visible) > .ir-main, .tk .irow.sel > .ir-main { box-shadow: inset 0 0 0 1.5px var(--wb-primary); }
 /* the selection checkbox (renderer mselClick): its column is kept, the box shows on hover, focus, or
    tap-selection, and on every row while anything is selected (selection mode) */
