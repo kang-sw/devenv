@@ -27,6 +27,7 @@
   --wb-shadow-hi: 0 2px 4px rgb(0 0 0 / .16), 0 6px 18px rgb(0 0 0 / .10);
   --wb-radius: 12px;
   --wb-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --wb-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif;
   color-scheme: light dark;
 }
 /* Dark palette. The OS preference applies it unless the page pins light
@@ -96,7 +97,7 @@
 * { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--wb-fg) 24%, transparent) transparent; }
 *:hover { scrollbar-color: color-mix(in srgb, var(--wb-fg) 42%, transparent) transparent; }
 html, body { margin: 0; background: var(--wb-bg); color: var(--wb-fg); }
-body { font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif; }
+body { font: 14px/1.5 var(--wb-sans); }
 .id, code { font-family: var(--wb-mono); }
 button { font: inherit; color: inherit; }
 a { color: var(--wb-primary); }

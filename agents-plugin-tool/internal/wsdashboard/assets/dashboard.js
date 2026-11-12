@@ -2071,7 +2071,9 @@
       }
       var label = typeof ans.label === "string" ? ans.label : v;
       sn.setAttribute("data-label", label);
-      sn.querySelector(".snm").textContent = label || root.getAttribute("data-rid") || "";
+      var nm = sn.querySelector(".snm");
+      nm.textContent = label || root.getAttribute("data-rid") || "";
+      nm.classList.toggle("lbl", !!label);
       labelEnd(sn);
     });
   }
@@ -2808,6 +2810,8 @@
       relayImage(f, m);
     } else if (m.wbDoc === "sel") {
       if (cchips) frameMention(f, str(m.text), num(m.x), num(m.y));
+    } else if (m.wbDoc === "rail") {
+      railKey();
     }
   });
   // A swap re-creates a changed topic's frame (or loads its next one beside
@@ -4994,6 +4998,12 @@
   var rp = { P: null, kind: "", ws: "", btn: null }, rpWs = null, rpWt = null, rpLead = null, rpSess = null, rpIds = 0;
   function railWide() { return !!(RAIL_WIDE && RAIL_WIDE.matches); }
   function railShown() { return root.classList.contains("rail-open"); }
+  // railKey is Ctrl+`: from the page or a topic body frame, it toggles the
+  // overlay rail, and below 1600px only.
+  function railKey() {
+    if (!railEl || !WsRail || railWide()) return;
+    railOpen(!railShown());
+  }
   function railOpen(open) {
     if (!railEl) return;
     root.classList.toggle("rail-open", !!open);
@@ -5026,10 +5036,12 @@
     doc.addEventListener("keydown", function (e) { if (e.key === "Escape" && railShown()) railOpen(false); });
     // Ctrl+` (the physical key, so any layout) toggles the overlay rail; at
     // 1600px and up the rail is a permanent column and the key is left alone.
+    // A topic body frame holding the focus hands the key over ({wbDoc:
+    // "rail"}, the frame listener above).
     doc.addEventListener("keydown", function (e) {
       if (e.code !== "Backquote" || !e.ctrlKey || e.altKey || e.metaKey || e.shiftKey || e.isComposing || railWide()) return;
       e.preventDefault();
-      railOpen(!railShown());
+      railKey();
     });
     if (RAIL_WIDE && RAIL_WIDE.addEventListener) RAIL_WIDE.addEventListener("change", function () { railOpen(false); });
     railEl.addEventListener("click", function (e) {
