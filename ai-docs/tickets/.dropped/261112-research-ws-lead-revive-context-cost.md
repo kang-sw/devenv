@@ -1,5 +1,6 @@
 ---
 title: Cut the context a lead session spends on post-compaction revive
+dropped: 2026-11-12
 ---
 
 # Cut the context a lead session spends on post-compaction revive
@@ -44,6 +45,15 @@ blobs, one of which had grown to a multi-KB history log.
   harness re-attaches every skill used earlier, not only the active one?
 - Which other ws contributors (skill descriptions in the listing, manual
   list, notes) are worth trimming?
+
+## Conclusion (2026-11-12, board 364)
+
+Nothing on the ws side is worth cutting. A session that uses the whiteboard
+reads the whiteboard playbook anyway, so moving it out of `workflow_manual`
+would only shift the cost to a `ws/playbook.read` call. The agenda already
+warns on write past 8192 characters (`agendaSizeNudgeThreshold`,
+`internal/mcp/workflow_manual.go:78`). The rest of the baseline is harness
+re-attachment. Dropped.
 
 ## Out of scope
 
