@@ -1,6 +1,7 @@
 package wsagent
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -216,6 +217,42 @@ func TestRecordSurvivesDaemonRestart(t *testing.T) {
 	}
 	if len(h.keys.ensured) != 2 || h.keys.ensured[1] != rec.WSKey {
 		t.Fatalf("every start should keep the same key usable: %v", h.keys.ensured)
+	}
+}
+
+// TestFinishedAgentsSurviveDaemonRestart pins that a restarted daemon keeps
+// the finished subagents of the snapshot the previous one left, and drops
+// the ones it showed running.
+func TestFinishedAgentsSurviveDaemonRestart(t *testing.T) {
+	h := newHarness(t, map[string]string{"chat": chatProfile})
+	id := h.create("chat").ID
+	h.runner.Close()
+
+	path := wslive.SnapshotPath(wsdashboard.SessionDir(h.dir, id))
+	snap, err := wslive.ReadSnapshot(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap.Agents = []wslive.Agent{
+		{ID: "fin", Label: "worker", Status: wslive.StatusDone, StartedAt: 100, EndedAt: 200},
+		{ID: "run", Label: "killed", Status: wslive.StatusRunning, StartedAt: 150},
+	}
+	raw, err := json.Marshal(snap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	h.start()
+	h.state(id)
+	after, err := wslive.ReadSnapshot(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after.Agents) != 1 || after.Agents[0].ID != "fin" || after.Agents[0].Status != wslive.StatusDone || after.Agents[0].Label != "worker" {
+		t.Fatalf("the restarted daemon should keep the finished agent only: %+v", after.Agents)
 	}
 }
 

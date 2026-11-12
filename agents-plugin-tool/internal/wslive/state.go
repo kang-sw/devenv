@@ -747,6 +747,54 @@ func (st *State) retain() {
 	}
 }
 
+// SeedFinished takes the finished subagents (done or failed) of prev, a
+// snapshot an earlier writer left for this session, so a restarted writer
+// does not lose them; retain still bounds them. A snapshot of another
+// session, an agent the state already holds, and an agent prev shows
+// running are skipped: no end will come for a running one.
+func (st *State) SeedFinished(prev Snapshot) {
+	if prev.ReplyID != st.replyID {
+		return
+	}
+	for _, p := range prev.Agents {
+		if p.Status != StatusDone && p.Status != StatusFailed {
+			continue
+		}
+		if _, ok := st.agents[p.ID]; ok || !agentIDPattern.MatchString(p.ID) {
+			continue
+		}
+		a := &agentState{
+			id:            p.ID,
+			label:         cleanLine(st.scrub.scrub(p.Label), LabelRunes),
+			replyID:       p.ReplyID,
+			status:        p.Status,
+			startedAt:     p.StartedAt,
+			endedAt:       p.EndedAt,
+			touched:       p.EndedAt,
+			model:         cleanLine(st.scrub.scrub(p.Model), ModelRunes),
+			effort:        cleanLine(st.scrub.scrub(p.Effort), EffortRunes),
+			contextTokens: p.ContextTokens,
+		}
+		if p.ParentID != p.ID && agentIDPattern.MatchString(p.ParentID) {
+			a.parentID = p.ParentID
+		}
+		a.caption = cleanLine(st.scrub.scrub(p.Caption), CaptionRunes)
+		a.phase, a.phaseStartedAt = PhaseIdle, p.PhaseStartedAt
+		a.done, a.failed = p.Done, p.Failed
+		a.counted = map[string]bool{}
+		for _, b := range p.Batches {
+			if b.Running != nil || b.Generating != nil {
+				continue
+			}
+			a.batches = append(a.batches, b.clone())
+			a.counted[batchKey(b)] = true
+		}
+		st.agents[a.id] = a
+		st.evicted = slices.DeleteFunc(st.evicted, func(e string) bool { return e == a.id })
+	}
+	st.retain()
+}
+
 // Snapshot is the state as a snapshot, stamped with now (epoch ms).
 func (st *State) Snapshot(now int64) Snapshot {
 	snap := Snapshot{

@@ -34,6 +34,20 @@ disappear. A short subagent that finishes before the user looks, followed by
 an idle stop, leaves no trace on the page. Not yet ruled out: the page simply
 missed a 13 s run, with no restart involved.
 
+## Corrected cause (2026-11-12)
+
+The title and the hypothesis above are outdated. An idle stop and resume
+keeps the same per-session live state: `processEnded` marks running agents
+failed through `endAgents`, and the conversation's live writer survives. The
+rows are lost on a daemon restart (for example a dev rebuild replacing it):
+`Runner.Start` calls `startConv`, which builds a fresh `newLiveWriter` and
+writes the snapshot at once, overwriting the previous `snapshot.json`, which
+nothing read back. Fix: the new live writer seeds the previous snapshot's
+done and failed agents (`wslive.State.SeedFinished`) before its first write;
+agents the old snapshot showed running are left out, and `retain` /
+`FinishedAgentCap` still apply. Compatibility tier: T0 (reads an existing
+file; snapshot and record shapes unchanged).
+
 ## Questions
 
 - Does the daemon carry `agents[]` over a resume (from the previous
