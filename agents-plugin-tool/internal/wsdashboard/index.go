@@ -59,6 +59,9 @@ type Session struct {
 	CountPolicy int
 	// Resumable is SessionData.Resumable as of the last read.
 	Resumable bool
+	// Label is the session's display label as of the last read
+	// (label_route.go), empty when it has none.
+	Label string
 	// SnapshotUpdatedAt ages the session's live snapshot (SessionData). A
 	// change of it alone is a heartbeat, not a session change: it does not
 	// raise Rev.
@@ -362,8 +365,10 @@ func (x *Index) apply(replyID string, reg *Registration) bool {
 			keep = false // the project root was removed
 		}
 	}
+	var label string
 	if keep {
 		data, keep = x.opts.Source.ReadSession(*reg)
+		label = readSessionLabel(SessionDir(x.opts.Dir, replyID))
 	}
 	now := x.opts.Now()
 
@@ -378,7 +383,7 @@ func (x *Index) apply(replyID string, reg *Registration) bool {
 		fmt.Fprintf(x.opts.Log, "dashboard: session %s removed (project %s)\n", replyID, entry.session.Project)
 		return true
 	}
-	next := Session{Registration: *reg, Live: reg.Live(now), HasBoard: data.HasBoard, CountPolicy: data.CountPolicy, Resumable: data.Resumable, SnapshotUpdatedAt: data.SnapshotUpdatedAt}
+	next := Session{Registration: *reg, Live: reg.Live(now), HasBoard: data.HasBoard, CountPolicy: data.CountPolicy, Resumable: data.Resumable, Label: label, SnapshotUpdatedAt: data.SnapshotUpdatedAt}
 	if !known {
 		next.Rev = 1
 		x.sessions[replyID] = &indexEntry{session: next, fingerprint: data.Fingerprint}

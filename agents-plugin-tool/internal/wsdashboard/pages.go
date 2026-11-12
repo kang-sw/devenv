@@ -937,8 +937,8 @@ func (d *Daemon) handleIndex(w http.ResponseWriter, r *http.Request) {
 // stream, its image, file view, files, history, closed-topic, worktree pool,
 // git status, log, and commit, attachment, and file browser routes, its
 // message, cancel, steer, interrupt, system-open, file browser host, git
-// refresh, git push, pull, and fetch, and worktree cleanup routes, and the
-// shared assets a page loads by relative path.
+// refresh, git push, pull, and fetch, worktree cleanup, and display label
+// routes, and the shared assets a page loads by relative path.
 func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 	rest := strings.TrimPrefix(r.URL.Path, "/s/")
 	if replyID, sub, _ := strings.Cut(rest, "/"); sub == "message" || sub == "cancel" || sub == "steer" || sub == "interrupt" {
@@ -961,6 +961,9 @@ func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 		return
 	} else if sub == "worktrees/cleanup" {
 		d.handleWorktreeCleanup(w, r, replyID)
+		return
+	} else if sub == "label" {
+		d.handleSessionLabel(w, r, replyID)
 		return
 	}
 	if !readMethod(w, r) {
