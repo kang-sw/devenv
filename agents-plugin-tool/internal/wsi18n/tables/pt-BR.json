@@ -1477,7 +1477,6 @@
   "js.tk.toast.unreg": "Armazenamento {0} removido.",
   "rail.ws.preview.root": "A pasta colada está dentro de um repositório; a raiz {0} será adicionada",
   "rail.ws.preview.merged": "{0} é um worktree de {1}; será exibido em {1}",
-  "rail.new": "sessão",
   "rail.new.title": "Iniciar uma sessão em {0}",
   "rail.hosted": "sessão executada pelo painel",
   "rail.approve": "aprovar",

@@ -1477,7 +1477,6 @@
   "js.tk.toast.unreg": "Unregistered the store {0}.",
   "rail.ws.preview.root": "The pasted folder is inside a repository; its root {0} will be added",
   "rail.ws.preview.merged": "{0} is a worktree of {1}; it will show under {1}",
-  "rail.new": "session",
   "rail.new.title": "Start a session in {0}",
   "rail.hosted": "session the dashboard runs",
   "rail.approve": "approve",

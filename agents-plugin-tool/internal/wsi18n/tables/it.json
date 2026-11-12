@@ -1477,7 +1477,6 @@
   "js.tk.toast.unreg": "Archivio {0} rimosso.",
   "rail.ws.preview.root": "La cartella incollata si trova in un repository; verrà aggiunta la sua radice {0}",
   "rail.ws.preview.merged": "{0} è un worktree di {1}; verrà mostrato sotto {1}",
-  "rail.new": "sessione",
   "rail.new.title": "Avvia una sessione in {0}",
   "rail.hosted": "sessione eseguita dalla dashboard",
   "rail.approve": "approva",

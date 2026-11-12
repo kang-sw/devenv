@@ -1477,7 +1477,6 @@
   "js.tk.toast.unreg": "ストア {0} の登録を解除しました。",
   "rail.ws.preview.root": "貼り付けたフォルダーはリポジトリ内にあります。そのルート {0} を追加します",
   "rail.ws.preview.merged": "{0} は {1} の Worktree です。{1} の下に表示されます",
-  "rail.new": "セッション",
   "rail.new.title": "{0} でセッションを開始",
   "rail.hosted": "ダッシュボードが実行するセッション",
   "rail.approve": "承認",

@@ -1477,7 +1477,6 @@
   "js.tk.toast.unreg": "저장소 {0}의 등록을 해제했습니다.",
   "rail.ws.preview.root": "붙여넣은 폴더는 저장소 안에 있습니다. 저장소 루트 {0}을(를) 추가합니다",
   "rail.ws.preview.merged": "{0}은(는) {1}의 워크트리입니다. {1} 아래에 표시됩니다",
-  "rail.new": "세션",
   "rail.new.title": "{0}에서 세션 시작",
   "rail.hosted": "대시보드가 실행하는 세션",
   "rail.approve": "승인",

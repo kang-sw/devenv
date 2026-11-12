@@ -1477,7 +1477,6 @@
   "js.tk.toast.unreg": "Store {0} abgemeldet.",
   "rail.ws.preview.root": "Der eingefügte Ordner liegt in einem Repository; dessen Stammverzeichnis {0} wird hinzugefügt",
   "rail.ws.preview.merged": "{0} ist ein Worktree von {1} und wird unter {1} angezeigt",
-  "rail.new": "Sitzung",
   "rail.new.title": "Sitzung in {0} starten",
   "rail.hosted": "Sitzung, die das Dashboard ausführt",
   "rail.approve": "freigeben",

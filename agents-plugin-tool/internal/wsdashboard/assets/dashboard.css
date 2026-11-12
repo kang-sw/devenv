@@ -1308,15 +1308,15 @@ a[data-wl="file"]:not([href]) { color: inherit; }
 .rail .wsbar .pp { font-family: var(--wb-mono); font-size: 11px; opacity: .65; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 auto; }
 .rail .wsbar .ct { margin-left: auto; font-size: 11px; font-weight: 700; padding: 0 7px; border-radius: 999px; background: rgb(127 127 127 / .28); flex: none; }
 .rail .rws.col .wsbody { display: none; }
-/* the + buttons and forget: quiet until their line is hovered or they are
-   focused (faint always on touch screens), full on hover and while their
-   popover is open */
-.rail .radd, .rail .rforget { width: 18px; height: 18px; flex: none; display: inline-grid; place-items: center; border: 0; padding: 0; border-radius: 5px; background: transparent; color: inherit; opacity: 0; cursor: pointer; transition: opacity .12s; }
-.rail .radd .i, .rail .rforget .i { width: 13px; height: 13px; stroke-width: 1.8; }
-.rail .rhd:hover .radd, .rail .wsbar:hover .radd, .rail .wsbar:hover .rforget, .rail .radd:focus-visible, .rail .rforget:focus-visible { opacity: .7; }
-@media (hover: none) { .rail .radd, .rail .rforget { opacity: .5; } }
-.rail .rhd .radd:hover, .rail .wsbar .radd:hover, .rail .wsbar .rforget:hover, .rail .rhd .radd[aria-expanded="true"], .rail .wsbar .radd[aria-expanded="true"] { opacity: 1; background: rgb(127 127 127 / .22); }
-.rail .radd:focus-visible, .rail .rforget:focus-visible { outline: 1.5px solid currentColor; outline-offset: 1px; }
+/* the + buttons (a worktree row's new session among them) and forget: quiet
+   until their line is hovered or they are focused (faint always on touch
+   screens), full on hover and while their popover is open */
+.rail .radd, .rail .rforget, .rail .rnew { width: 18px; height: 18px; flex: none; display: inline-grid; place-items: center; border: 0; padding: 0; border-radius: 5px; background: transparent; color: inherit; opacity: 0; cursor: pointer; transition: opacity .12s; }
+.rail .radd .i, .rail .rforget .i, .rail .rnew .i { width: 13px; height: 13px; stroke-width: 1.8; }
+.rail .rhd:hover .radd, .rail .wsbar:hover .radd, .rail .wsbar:hover .rforget, .rail .wthd:hover .rnew, .rail .radd:focus-visible, .rail .rforget:focus-visible, .rail .rnew:focus-visible { opacity: .7; }
+@media (hover: none) { .rail .radd, .rail .rforget, .rail .rnew { opacity: .5; } }
+.rail .rhd .radd:hover, .rail .wsbar .radd:hover, .rail .wsbar .rforget:hover, .rail .rhd .radd[aria-expanded="true"], .rail .wsbar .radd[aria-expanded="true"], .rail .rnew:hover, .rail .rnew[aria-expanded="true"] { opacity: 1; background: rgb(127 127 127 / .22); }
+.rail .radd:focus-visible, .rail .rforget:focus-visible, .rail .rnew:focus-visible { outline: 1.5px solid currentColor; outline-offset: 1px; }
 .rail .rforget:disabled { cursor: progress; }
 .rail .wsbody { padding-top: 2px; }
 .rail .rwt { padding: 4px 0 2px; }
@@ -1426,8 +1426,8 @@ a[data-wl="file"]:not([href]) { color: inherit; }
 .rpop .pbtn:disabled { opacity: .45; cursor: default; }
 .rpop .pbtn:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: 1px; }
 /* daemon-hosted lead sessions: the hosted mark beside a harness badge; the
-   new-session button at the end of a worktree row and a plain-folder bar,
-   which only a browser on the daemon's machine sees (the spawn route
+   new-session button after a worktree row's label (styled with the + buttons
+   above), which only a browser on the daemon's machine sees (the spawn route
    refuses any other); the awaiting-approval ring, chip, and second line of
    a rail row; the spawn popover's rows, which the header chip's session
    menu shares; and the approval cards under the conversation */
@@ -1438,13 +1438,6 @@ a[data-wl="file"]:not([href]) { color: inherit; }
 .rail .hb.perm { color: var(--wb-perm-ink); }
 .rail .hb.perm .rtrk { stroke: var(--wb-perm-ink); }
 .rail .s2.ap .who { color: var(--wb-perm-ink); }
-.rail .rnew { margin-left: auto; flex: none; display: inline-flex; align-items: center; gap: 2px; height: 18px; padding: 0 6px 0 4px; border: 0; border-radius: 5px; font: inherit; font-size: 11px; font-weight: 700; white-space: nowrap; background: transparent; color: var(--wb-muted-fg); cursor: pointer; opacity: .7; }
-.rail .rnew .i { width: 11px; height: 11px; stroke-width: 2; }
-.rail .rnew:hover, .rail .rnew[aria-expanded="true"] { opacity: 1; color: var(--wb-primary); background: var(--wb-muted); }
-.rail .rnew:focus-visible { outline: 1.5px solid currentColor; outline-offset: 1px; }
-.rail .wthd .gs + .rnew { margin-left: 0; }
-.rail .wsbar .rnew { margin-left: 0; color: inherit; }
-.rail .wsbar .rnew:hover, .rail .wsbar .rnew[aria-expanded="true"] { color: inherit; background: rgb(127 127 127 / .22); }
 .rail .wsbar .chip.perm + .ct { margin-left: 0; }
 .rail .wsbar .chip.perm { margin-left: auto; }
 html:not([data-sysopen]) .rail .rnew { display: none; }
