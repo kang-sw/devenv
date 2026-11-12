@@ -538,6 +538,33 @@ func TestPeerWorktreeCompactAndOrder(t *testing.T) {
 	}
 }
 
+// TestPeerRowLabeledClass pins the markup the stylesheet's collapse order
+// keys on: a row whose name is a manual label carries the labeled class on
+// its peer element, in both the expanding and the compact shape, while a row
+// showing its id: address does not; and the harness badge sits in its phost
+// wrapper, which collapses whole.
+func TestPeerRowLabeledClass(t *testing.T) {
+	render := func(row PeerRow) string {
+		v := SessionView{}
+		v.Tree.Peers.Live = []PeerRow{row}
+		return renderTree(t, v)
+	}
+	base := PeerRow{Address: "id:peer", ReplyID: "peer", Served: true, Live: true, Adapter: true, Harness: "claude"}
+	labeled := base
+	labeled.Label = "main work"
+	if html := render(labeled); !strings.Contains(html, `<details class="peer live labeled"`) || !strings.Contains(html, `<span class="phost"><span class="host sm">claude</span></span>`) {
+		t.Errorf("labeled row lacks the labeled class or the harness wrapper: %s", html)
+	}
+	compact := labeled
+	compact.Compact = true
+	if html := render(compact); !strings.Contains(html, `class="peer live compact labeled"`) {
+		t.Errorf("labeled compact row lacks the labeled class: %s", html)
+	}
+	if html := render(base); strings.Contains(html, "labeled") || !strings.Contains(html, `<details class="peer live"`) {
+		t.Errorf("id-named row carries the labeled class: %s", html)
+	}
+}
+
 func TestPeerRunningSubagentSpinner(t *testing.T) {
 	now := testNow
 	agents := []wslive.Agent{

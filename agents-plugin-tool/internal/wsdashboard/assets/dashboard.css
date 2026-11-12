@@ -251,6 +251,18 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .peer .pbr .i { width: 11px; height: 11px; flex: none; }
 .peer .pbr .pbt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--wb-mono); }
 .peer .pline { min-width: 0; display: inline-flex; gap: 6px; align-items: center; overflow: hidden; white-space: nowrap; }
+.peer .phost { flex: none; display: inline-flex; min-width: 0; }
+/* A labeled row keeps its name whole longest. Flex shrink is shared in
+   proportion to factor x width, so any finite ratio bleeds a fraction of a
+   pixel into the next part, and that is enough to ellipsize it early; the
+   factors sit five orders of magnitude apart, the least that measured
+   clean in Chromium. The parts give way one after another: the harness
+   badge, then the tool line (its tool text before its phase pill, which
+   cannot shrink and is clipped last), then the branch chip down to its
+   padding, then the name. */
+.peer.labeled .phost { flex: 0 1e15 auto; overflow: hidden; }
+.peer.labeled .pline { flex: 0 1e10 auto; }
+.peer.labeled .pbr { flex-shrink: 1e5; }
 .peer .ptool { font-family: var(--wb-mono); font-size: 11.5px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; }
 .peer .pstate { font-size: 11.5px; color: var(--wb-muted-fg); font-style: italic; overflow: hidden; text-overflow: ellipsis; }
 .peer .am { margin-left: auto; font-size: 11.5px; color: var(--wb-muted-fg); display: inline-flex; gap: 9px; white-space: nowrap; flex: none; font-variant-numeric: tabular-nums; }
