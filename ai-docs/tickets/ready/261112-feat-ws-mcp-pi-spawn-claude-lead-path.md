@@ -5,6 +5,10 @@ related:
   261110-epic-ws-dashboard-agent-host: wsagent Runner and PiBackend this builds on
   261110-feat-ws-mcp-daemon-hosted-proxy-launcher: daemon-hosted MCP server and its direct fallback
   261112-bug-ws-hosted-pi-subagents-missing-from-dashboard: hosted Pi child visibility
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: 2bedce42c04972d2
+sage-review-completeness-reviewed: 2bedce42c04972d2
 ---
 
 # ws MCP pi.* tools (Claude-lead path)
@@ -47,9 +51,12 @@ Facts gathered 2026-11-12 (paths under `agents-plugin-tool/internal/`):
   daemon and resumes lazily on the next send from its persisted session
   file; idle processes stop after `DefaultIdleTimeout` (10 minutes).
 - `wsconfig.ResolveAgentTierForHarness(opts, tier, "pi")` looks up the pi
-  bucket, then default, then codex; no pi bucket is seeded
-  (`config_test.go` notes it), so an untuned Pi spawn resolves to a codex
-  model Pi cannot run.
+  bucket, then default, then codex; the shipped manifests seed no pi bucket
+  (`config_test.go` notes it), so on a machine without a tuned pi bucket a
+  Pi spawn resolves to a codex model Pi cannot run. This machine's global
+  config (`~/.ws/config.json`) already has a pi bucket: small
+  `openai-codex/gpt-5.6-luna` high, medium/large/xlarge `gpt-6.1-sol`
+  medium/high/xhigh (the last three without a provider prefix).
 - `mcp/mailbox_tools.go` `handleMailboxSend` is the only queue writer
   (`wsmailbox.AppendQueue` under `WithReplyLock`, then
   `wswake.Mailbox.Wake()`); its `from:` stamp needs an owner check. Nothing
@@ -87,12 +94,16 @@ Facts gathered 2026-11-12 (paths under `agents-plugin-tool/internal/`):
    a client (only helps when a daemon exists but refused the hello); running
    the child inside the direct process (dies with it; a second code path).
 4. **Spawn spec.** `Runner.Create` gains a spec form carrying model, effort,
-   first prompt, cwd, and the parent lead key, recorded on `Record` as
-   optional fields. cwd is honoured for non-lead children: default the
+   first prompt, cwd, and a parent reference, recorded on `Record` as
+   optional fields. The parent reference is the parent lead's mailbox
+   reply-id (`wsmailbox.ReplyID(key)`), not the raw session key, so no
+   credential lands on disk; it is a typed reference child 1b can also point
+   at a runner conversation. cwd is honoured for non-lead children: default the
    caller's root, relative paths resolve against it, absolute paths are
    allowed so worktrees outside the root work. Rejected: chaining
    `POST /agents` + `/settings` + `/send` - one call keeps spawn atomic, and
-   the parent key is what `pi.list`, the report, and the dashboard row need.
+   the parent reference is what `pi.list`, the report, and the dashboard
+   row need.
 5. **`pi-worker` profile.** A new builtin profile with Pi's built-in coding
    tools (read, bash, edit, write, grep, find, ls) plus the ws tools the
    `delegate-implementer` floor and the worker playbooks name (enumerated by
@@ -101,7 +112,8 @@ Facts gathered 2026-11-12 (paths under `agents-plugin-tool/internal/`):
    Rejected: built-in tools only (the floor's `ws/git.commit` step would
    fail); every ws tool the delegate role allows (largest list; Pi context
    cost). Giving Pi workers `pi.*` (recursion) is child 1b's change, not this
-   ticket's.
+   ticket's. The profile's appended system prompt is empty: the rendered
+   playbook prompt is the child's first message.
 6. **Tier resolution, partial tiers allowed.** `pi.spawn` resolves its tier
    from the pi bucket only, with no fallback to the default or codex buckets.
    The bucket may define any subset of the four tiers. A spawn on an unset
@@ -115,19 +127,26 @@ Facts gathered 2026-11-12 (paths under `agents-plugin-tool/internal/`):
    child fails, the daemon appends a mail to the parent lead's reply-id queue
    as a system sender (empty `from`, a new `wsmailbox` helper) and wakes it;
    the mail carries the child id, status, and the final assistant message.
+   A `pi.stop` from the parent sends no mail. A turn cut off by the daemon
+   exiting is reported as failed (status `interrupted`) when the daemon next
+   starts and loads the record.
    Rejected: routing through `handleMailboxSend` - it requires a sender owner
    check a daemon-side writer has no identity for.
 8. **The mail is the primary turn trigger; `pi.wait` is the fallback.** On a
    host with mailbox push the lead's next turn starts when the mail arrives,
    as a native subagent's completion notice does. `pi.wait(id, timeout_s?)`
-   blocks until the child's turn ends or fails, default 300 s, capped at
-   1800 s, returning status and the final assistant message. Both tool
-   descriptions say which is primary. Rejected: an unbounded wait (an MCP
+   blocks until a turn that started after the caller's last `pi.send` (or
+   the spawn) ends or fails, so it never returns the previous turn's
+   message; default 300 s, capped at 1800 s, returning status and the final
+   assistant message. Both tool descriptions say which is primary; the
+   `pi.wait` description says the host may cut a long call off sooner (Codex
+   `tool_timeout_sec` is 600 in `agents-plugin/.mcp.json`) and that the
+   completion mail still arrives after a wait collected the result. Rejected: an unbounded wait (an MCP
    host can time out a call that never returns); a Claude Code mod for hosts
    without push in this ticket (mailbox push already starts an idle lead's
    turn).
 9. **Scoping and lifecycle.** `pi.list` shows only the calling lead's
-   children (by the recorded parent key); `pi.stop` closes the child (stops
+   children (by the recorded parent reference); `pi.stop` closes the child (stops
    the process; the record is kept and readable through `pi.transcript`),
    mirroring the extension's lifecycle set. Rejected: listing every runner
    conversation - other leads' and dashboard-started agents are not this
@@ -137,23 +156,38 @@ Facts gathered 2026-11-12 (paths under `agents-plugin-tool/internal/`):
     blinking blue circle, driven by a new optional `agent_kind:"pi"` on
     agent events and snapshots; `Event.Kind` already carries the event type
     under JSON `kind`) opens the child's conversation; the child is kept out of the
-    session rail's top-level list. Rejected: listing it in the rail like any
+    session rail's top-level list. The parent lead's own per-connection
+    server feeds the row: it subscribes to runner state changes for children
+    whose parent reference matches its session and emits `agent` events
+    into its own `wslive.State` (replayed after a reconnect); the runner
+    never opens a second hosted slot for the lead's session. With the lead's
+    dashboard feed off there is no row. Rejected: listing it in the rail like any
     session (a lead with several workers floods the rail); not registering
     it (no conversation page).
-11. **Exposure gate at `tools/list`.** `pi.*` is listed only when a new knob
-    `pi_spawn_enabled` (same key in the ws and wsflow config manifests, true
-    in ws and false in wsflow, as `status_band_enabled`) is on for the
-    server's root and harness, and `pi --version` (run once per server
-    process, cached) reports 1.0 or later. A knob change takes effect on
+11. **Exposure gate at `tools/list`.** `pi.*` is listed only when the
+    knob `dashboard.pi_spawn_enabled` (in the `dashboard-config-manifest.json`
+    of ws, default true; wsflow, default false; Pi, default false, so
+    Pi-package sessions do not list it at builtin scope; full Pi-harness
+    hiding is child 3's) reads on from the project, global, or builtin
+    scope; the server holds a daemon handle (a call that still finds none refuses per Decision 3); and
+    `pi --version` (run once per server process, cached) reports 1.0 or
+    later. A knob change takes effect on
     reconnect. Rejected: listing always and refusing at call time - an
     unusable tool in every wsflow session costs context and invites a failing
-    call, and child 3 needs the same harness-aware listing.
-12. **Pi tier models for the real run.** The lead sets the pi bucket with
-    `config.tune` when this ticket goes ready, mirroring the codex bucket
-    through the openai-codex provider: small gpt-5.6-luna, medium gpt-6-sol,
-    large gpt-5.6-sol, xlarge gpt-6-astra, all effort high. The worker does
-    not change these; partial-tier behaviour (Decision 6) is covered by Go
-    tests.
+    call, and child 3 needs the same harness-aware listing. Knob family
+    (624): rejected `claude.pi_spawn_enabled` (that namespace means "Claude
+    Code only", but Codex leads load the same manifest), a new namespace
+    manifest (new file plus `WS_MCP_CONFIG_MANIFESTS` edits in both packages),
+    and a builtin Go key (cannot differ between ws and wsflow); a manifest
+    key must start with its manifest's namespace (`mcp/config_manifest.go`).
+12. **Pi tier models for the real run.** The real run uses this machine's
+    existing global pi bucket as is; the lead does not retune it. The
+    worker does not change it either. If Pi rejects the unprefixed
+    `gpt-6.1-sol` names, the real run uses the small tier and the worker
+    reports the rejection rather than editing config. Partial-tier
+    behaviour (Decision 6) is covered by Go tests. Rejected: overwriting the
+    bucket with a mirror of the codex bucket (the user's own values are
+    current).
 
 ## Constraints
 
@@ -208,14 +242,18 @@ Facts gathered 2026-11-12 (paths under `agents-plugin-tool/internal/`):
   `pi.wait`; the daemon handle on `ServerOptions`; the exposure gate.
 - Mailbox completion report; dashboard row with `agent_kind:"pi"` and the blinking
   `pi` badge where an agent row shows the blinking blue circle.
-- Config manifests (ws, wsflow) for the knob; mirrors and manifest
+- `dashboard.pi_spawn_enabled` in the three dashboard config manifests; mirrors and manifest
   regeneration as `ai-docs/manuals/wsflow-mirroring.md` requires.
 
 Verification:
 - Go tests: spawn spec recorded with parent and cwd; tier refusal message;
   `pi.list` scoping; mailbox report written to the parent's queue and wake
-  fired; `pi.wait` timeout; exposure gate (knob off, Pi missing, Pi below
-  1.0, all hide); `agent_kind` round-trips through live state.
+  fired; `pi.wait` timeout; `pi.wait` after `pi.send` waits for the new
+  turn rather than returning the previous message; no mail after
+  `pi.stop`; an `interrupted` mail after a daemon restart cuts a turn off;
+  exposure gate (knob off, Pi missing, Pi below 1.0, no daemon handle, all
+  hide) and a call with no daemon handle refuses; `agent_kind` round-trips
+  through live state and rows replay after a reconnect.
 - A real run on this machine (Pi 1.0.4): a Claude lead spawns a Pi child at
   a tuned tier, receives the mailbox report, reads the transcript, and the
   agents panel shows the `pi` badge (headless Chromium screenshot).

@@ -60,6 +60,11 @@ Facts gathered 2026-11-12 (paths under `agents-plugin-tool/internal/`):
 
 - Lands after child 1; builds on its spawn spec parent field and report
   path.
+- Settle how `pi-worker`'s explicit `WS_MCP_ALLOWED_TOOLS` listing of
+  `pi.*` meets child 1's exposure gates (`dashboard.pi_spawn_enabled`, Pi
+  version, daemon handle): the attached ws-mcp has no daemon handle and may
+  read the knob from a different manifest set (design review of child 1,
+  2026-11-12).
 - Read `ai-docs/manuals/shipped-surface-boundary.md`,
   `ai-docs/manuals/ws-mcp.md`, `ai-docs/manuals/release-compatibility.md`,
   and `ai-docs/manuals/wsflow-mirroring.md` before editing.
