@@ -197,6 +197,29 @@ func TestConvLiveCarriesSubagentCounts(t *testing.T) {
 	}
 }
 
+// TestConvLiveCarriesTurnStamp: while a turn runs, the convlive region
+// carries its start stamp as data-turn, the boundary the interrupt badge
+// resets on when the next turn starts with no idle phase between; an idle
+// lead carries none.
+func TestConvLiveCarriesTurnStamp(t *testing.T) {
+	render := func(lead wslive.Lead) string {
+		v := buildSessionView(pageInputs{Session: liveSession("self", "/p", testNow), Snapshot: liveSnap(testNow, lead), Now: testNow})
+		set, err := renderSessionRegions(v, newEntryCache())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(set[regionConvLive].HTML)
+	}
+	started := testNow.Add(-2 * time.Second).UnixMilli()
+	working := wslive.Lead{Activity: wslive.Activity{Phase: wslive.PhaseThinking, PhaseStartedAt: started}, TurnStartedAt: started}
+	if html, want := render(working), fmt.Sprintf(`data-subdeep="0" data-turn="%d">`, started); !strings.Contains(html, want) {
+		t.Errorf("a working lead's convlive lacks %s:\n%s", want, html)
+	}
+	if html := render(wslive.Lead{}); strings.Contains(html, "data-turn") {
+		t.Errorf("an idle lead's convlive carries a turn stamp:\n%s", html)
+	}
+}
+
 func TestPeerGroupMergesResolvesAndRetains(t *testing.T) {
 	now := testNow
 	at := func(min int) time.Time { return now.Add(-time.Duration(min) * time.Minute) }
