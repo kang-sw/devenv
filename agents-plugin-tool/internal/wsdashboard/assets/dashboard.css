@@ -1269,7 +1269,8 @@ a[data-wl="file"]:not([href]) { color: inherit; }
    the top-left arrow hides. Below it the rail is an overlay the arrow
    slides in from the left over a scrim (rail-open on the root). The rail
    is one shared render; the page script marks the viewed row (.cur), pins
-   starred rows, and collapses workspaces (.col). */
+   starred rows, and collapses workspaces (.col). A store page (tk-paged)
+   mounts inside .dbody and takes the hidden grid's column, one window tall. */
 :root { --scrim: rgb(0 0 0 / .28); --star: #c98a00; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --scrim: rgb(0 0 0 / .5); --star: #f2b632; } }
 :root[data-theme="dark"] { --scrim: rgb(0 0 0 / .5); --star: #f2b632; }
@@ -1281,6 +1282,8 @@ a[data-wl="file"]:not([href]) { color: inherit; }
   .dbody { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 0 16px; align-items: start; }
   .dash.live .dbody { flex: 1 1 0; min-height: 0; align-items: stretch; }
   .dash.live .dbody > .dgrid.live { min-height: 0; }
+  body.tk-paged .dbody { flex: 1 1 0; min-height: 0; align-items: stretch; }
+  .dbody > .tk-spage { grid-column: 2; grid-row: 1; }
   .dash:not(.live) .rail { position: sticky; top: 12px; max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px); }
   .top > .back { display: none; }
 }

@@ -3649,13 +3649,16 @@
     caps: { origin: false, attach: false, addMember: false }
   };
   // The drawer hangs from the header and its handle row sits left of the
-  // session drawer's handle; the store page takes the page's place.
+  // session drawer's handle; the store page takes the page's place. On a
+  // session page it goes into the body beside the rail, where it takes the
+  // hidden grid's column; appended to the wrap instead, it would stack below
+  // the rail's column on a wide screen.
   function tkMount() {
     var header = doc.querySelector(".dwrap > .top"), slot = $("qsslot"), wrap = doc.querySelector(".dwrap");
     if (!header || !slot || !wrap) return;
     header.classList.add("tk-room");
     if (tkSupport) tkAdapter.ext = supExt();
-    tkApi = window.WsTracker.mount(tkAdapter, { header: header, qsSlot: slot, pageParent: wrap, storagePrefix: "ws.tracker.", onRender: tlTracker });
+    tkApi = window.WsTracker.mount(tkAdapter, { header: header, qsSlot: slot, pageParent: wrap.querySelector(":scope > .dbody") || wrap, storagePrefix: "ws.tracker.", onRender: tlTracker });
   }
   function trackerStart() {
     if (window.WsTracker && window.fetch) tkReload();
