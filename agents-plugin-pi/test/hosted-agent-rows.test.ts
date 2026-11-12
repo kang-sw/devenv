@@ -7,7 +7,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { AGENT_POLL_MS, FLUSH_INTERVAL_MS, type DashboardAgentEntry, type DashboardEvent } from "../src/dashboard-feed.ts";
-import { BATCH_COALESCE_MS, FULL_RESEND_MS, HOSTED_AGENTS_WIDGET_KEY, createHostedAgentRows, type HostedAgentRowsOptions } from "../src/hosted-agent-rows.ts";
+import { PROGRESS_COALESCE_MS, FULL_RESEND_MS, HOSTED_AGENTS_WIDGET_KEY, createHostedAgentRows, type HostedAgentRowsOptions } from "../src/hosted-agent-rows.ts";
 
 const entry = (agentId: string, over: Partial<DashboardAgentEntry> = {}): DashboardAgentEntry => ({
   agentId,
@@ -83,11 +83,11 @@ test("only changes are sent; a child that left the tree while running ends as do
   h.rows.agentsChanged();
   h.advance(FLUSH_INTERVAL_MS);
   assert.deepEqual(h.widgets, [], "an unchanged tree sends nothing");
-  h.tree.entries = [entry("a", { contextTokens: 50 })];
+  h.tree.entries = [entry("a", { caption: "changed" })];
   h.rows.agentsChanged();
   h.advance(FLUSH_INTERVAL_MS);
   assert.deepEqual(h.events(), [
-    { kind: "agent", agentId: "a", label: "a", status: "running", caption: "worker", batches: [], contextTokens: 50 },
+    { kind: "agent", agentId: "a", label: "a", status: "running", caption: "changed", batches: [] },
     { kind: "agent", agentId: "b", status: "done" },
   ]);
   h.widgets.length = 0;
@@ -112,19 +112,19 @@ test("dirty marks coalesce at most once per flush interval; the tree is polled w
   h.rows.start();
   h.advance(0);
   assert.equal(h.widgets.length, 1);
-  h.tree.entries = [entry("a", { contextTokens: 1 })];
+  h.tree.entries = [entry("a", { caption: "c1" })];
   h.rows.agentsChanged();
   h.advance(10);
-  h.tree.entries = [entry("a", { contextTokens: 2 })];
+  h.tree.entries = [entry("a", { caption: "c2" })];
   h.rows.agentsChanged();
   h.advance(FLUSH_INTERVAL_MS - 20);
   assert.equal(h.widgets.length, 1, "inside the interval nothing is sent");
   h.advance(10);
   assert.equal(h.widgets.length, 2, "one update at the interval's end");
-  assert.equal((JSON.parse(h.widgets[1]!.lines[0]!) as DashboardEvent).contextTokens, 2);
+  assert.equal((JSON.parse(h.widgets[1]!.lines[0]!) as DashboardEvent).caption, "c2");
 
   // No dirty mark: the poll still picks up a change while the child runs.
-  h.tree.entries = [entry("a", { contextTokens: 3 })];
+  h.tree.entries = [entry("a", { caption: "c3" })];
   h.advance(AGENT_POLL_MS);
   assert.equal(h.widgets.length, 3);
   // Once nothing runs, the poll stops.
@@ -198,7 +198,7 @@ test("streaming character growth alone sends nothing, polled or marked", () => {
     h.rows.agentsChanged();
     h.advance(FLUSH_INTERVAL_MS);
   }
-  h.advance(BATCH_COALESCE_MS * 3);
+  h.advance(PROGRESS_COALESCE_MS * 3);
   assert.equal(h.widgets.length, 1, "chars growth is no change, even after the batch window");
   // A later real change carries the current count.
   h.tree.entries = [entry("a", { status: "done", batches: [generating(2000)] })];
@@ -218,7 +218,7 @@ test("a batch-only change goes out once per coalesce window however many arrive"
   let seq = 1;
   const sendTimes: number[] = [];
   let elapsed = 0;
-  while (elapsed < BATCH_COALESCE_MS * 3) {
+  while (elapsed < PROGRESS_COALESCE_MS * 3) {
     h.tree.entries = [entry("a", { batches: [finished(seq++)] }), entry("b")];
     h.rows.agentsChanged();
     const before = h.widgets.length;
@@ -226,7 +226,7 @@ test("a batch-only change goes out once per coalesce window however many arrive"
     elapsed += FLUSH_INTERVAL_MS;
     if (h.widgets.length > before) sendTimes.push(elapsed);
   }
-  assert.deepEqual(sendTimes, [BATCH_COALESCE_MS, BATCH_COALESCE_MS * 2, BATCH_COALESCE_MS * 3], "one send per window, at its end");
+  assert.deepEqual(sendTimes, [PROGRESS_COALESCE_MS, PROGRESS_COALESCE_MS * 2, PROGRESS_COALESCE_MS * 3], "one send per window, at its end");
   // Each send is only the changed child's agent event, with the newest batches.
   const last = h.widgets.at(-1)!.lines.map((line) => JSON.parse(line) as DashboardEvent);
   assert.equal(last.length, 1);
@@ -234,7 +234,7 @@ test("a batch-only change goes out once per coalesce window however many arrive"
   assert.deepEqual(last[0]!.batches, [finished(seq - 1)]);
 
   // A held change with no further marks still goes out when the window ends.
-  h.advance(BATCH_COALESCE_MS * 2);
+  h.advance(PROGRESS_COALESCE_MS * 2);
   const count = h.widgets.length;
   h.tree.entries = [entry("a", { status: "done", batches: [finished(100)] }), entry("b", { status: "done" })];
   h.rows.agentsChanged();
@@ -244,7 +244,7 @@ test("a batch-only change goes out once per coalesce window however many arrive"
   h.rows.agentsChanged();
   h.advance(FLUSH_INTERVAL_MS);
   assert.equal(h.widgets.length, count + 1, "held inside the window");
-  h.advance(BATCH_COALESCE_MS);
+  h.advance(PROGRESS_COALESCE_MS);
   assert.equal(h.widgets.length, count + 2, "sent by the window timer, no poll or mark needed");
   assert.deepEqual(h.events().at(-1)!.batches, [finished(100), finished(101)]);
 });
@@ -255,7 +255,7 @@ test("status, permission, label, and model changes go out at the next flush insi
   h.rows.start();
   h.advance(0);
   // Open a window with a batch-only send.
-  h.advance(BATCH_COALESCE_MS);
+  h.advance(PROGRESS_COALESCE_MS);
   h.tree.entries = [entry("a", { batches: [finished(2)] })];
   h.rows.agentsChanged();
   h.advance(FLUSH_INTERVAL_MS);
@@ -287,7 +287,7 @@ test("the full resend and a done for a vanished child still go out while batches
   h.tree.entries = [entry("a", { batches: [finished(1)] }), entry("b")];
   h.rows.start();
   h.advance(0);
-  h.advance(BATCH_COALESCE_MS);
+  h.advance(PROGRESS_COALESCE_MS);
   h.tree.entries = [entry("a", { batches: [finished(2)] }), entry("b")];
   h.rows.agentsChanged();
   h.advance(FLUSH_INTERVAL_MS);
@@ -302,4 +302,37 @@ test("the full resend and a done for a vanished child still go out while batches
   h.advance(FULL_RESEND_MS);
   assert.deepEqual(h.events().at(-1), { kind: "permission", agentId: "a", clear: true });
   assert.ok(h.events().some((event) => event.kind === "agent" && event.agentId === "a" && event.batches === undefined), "the resend still carries no batches");
+});
+
+test("contextTokens and outputTps changing every flush interval go out only on the coalesce windows", () => {
+  const h = harness();
+  h.tree.entries = [entry("a", { model: "m", effort: "high", contextTokens: 0, outputTps: 0 })];
+  h.rows.start();
+  h.advance(0);
+  assert.equal(h.widgets.length, 1);
+  const sendTimes: number[] = [];
+  let elapsed = 0;
+  let tick = 0;
+  while (elapsed < PROGRESS_COALESCE_MS * 3) {
+    tick++;
+    h.tree.entries = [entry("a", { model: "m", effort: "high", contextTokens: tick * 100, outputTps: 40 + (tick % 7) })];
+    h.rows.agentsChanged();
+    const before = h.widgets.length;
+    h.advance(FLUSH_INTERVAL_MS);
+    elapsed += FLUSH_INTERVAL_MS;
+    if (h.widgets.length > before) sendTimes.push(elapsed);
+  }
+  assert.deepEqual(sendTimes, [PROGRESS_COALESCE_MS, PROGRESS_COALESCE_MS * 2, PROGRESS_COALESCE_MS * 3], "one send per window, at its end");
+  assert.equal(h.events().at(-1)!.contextTokens, tick * 100, "each send carries the newest values");
+  // Tokens alone and batches alone share one window: a batch change right after a tokens send is held too.
+  h.tree.entries = [entry("a", { model: "m", effort: "high", contextTokens: tick * 100, outputTps: 40 + (tick % 7), batches: [finished(1)] })];
+  h.rows.agentsChanged();
+  h.advance(FLUSH_INTERVAL_MS);
+  assert.equal(h.widgets.length, 4, "held inside the shared window");
+  // An immediate field (effort) goes out at once inside the window, carrying the current tokens, rate, and batches.
+  h.tree.entries = [entry("a", { model: "m", effort: "low", contextTokens: 99_999, outputTps: 1, batches: [finished(1)] })];
+  h.rows.agentsChanged();
+  h.advance(FLUSH_INTERVAL_MS);
+  assert.equal(h.widgets.length, 5);
+  assert.deepEqual(h.events().at(-1), { kind: "agent", agentId: "a", label: "a", status: "running", caption: "worker", batches: [finished(1)], model: "m", effort: "low", contextTokens: 99_999, outputTps: 1 });
 });
