@@ -361,19 +361,6 @@
     "261110-epic-ws-tracker-team-feedback": {
       "registered_at": "2026-11-10T06:49:09Z"
     },
-    "261110-feat-ws-dashboard-workspaces": {
-      "registered_at": "2026-11-10T10:36:07Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "goal/develop/amber-ladle-orbit",
-        "phase": "closed",
-        "touched_at": "2026-11-12T01:29:25Z",
-        "impl": {
-          "branch": "impl/goal/develop/amber-ladle-orbit/abide-thee-knee"
-        }
-      }
-    },
     "261110-feat-ws-git-commit-attribution-trailers": {
       "registered_at": "2026-11-10T14:07:46Z"
     },
@@ -409,6 +396,9 @@
     },
     "261112-bug-ws-dashboard-interrupt-badge-stuck-on-back-to-back-turn": {
       "registered_at": "2026-11-12T02:58:04Z"
+    },
+    "261112-bug-ws-hosted-context-window-ignores-compaction-window": {
+      "registered_at": "2026-11-12T03:52:57Z"
     },
     "261112-bug-ws-hosted-finished-subagents-lost-on-idle-resume": {
       "registered_at": "2026-11-12T02:58:08Z"
