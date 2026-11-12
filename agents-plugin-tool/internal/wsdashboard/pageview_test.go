@@ -1032,8 +1032,41 @@ func TestAgentsPanelSpinsOnlyOnToolRows(t *testing.T) {
 	}
 	// Reduced motion stops the pulse as it stops the spinner.
 	css := mustAsset(t, "dashboard.css")
-	if !strings.Contains(css, "@media (prefers-reduced-motion: reduce) { .spin, .caret, .pulse { animation: none; } }") {
-		t.Errorf("reduced-motion rule does not name .pulse")
+	if !strings.Contains(css, "@media (prefers-reduced-motion: reduce) { .spin, .caret, .pulse, .pibadge { animation: none; } }") {
+		t.Errorf("reduced-motion rule does not name .pulse and .pibadge")
+	}
+}
+
+// TestPiAgentRowBlinksAPiBadgeAndLinks pins a Pi subagent's row: while it
+// runs, a blinking "pi" badge stands where another running row pulses; a
+// finished one shows its outcome as any row does; and its reply-id links to
+// the conversation the agent runner hosts, which has a page and no board.
+func TestPiAgentRowBlinksAPiBadgeAndLinks(t *testing.T) {
+	now := testNow
+	snap := liveSnap(now, wslive.Lead{},
+		wslive.Agent{ID: "pi:childone", Label: "pi worker", Status: wslive.StatusRunning, AgentKind: wslive.AgentKindPi, ReplyID: "childone"},
+		wslive.Agent{ID: "pi:childtwo", Label: "pi done", Status: wslive.StatusDone, AgentKind: wslive.AgentKindPi, ReplyID: "childtwo"},
+		wslive.Agent{ID: "native", Label: "native", Status: wslive.StatusRunning},
+	)
+	runner := liveSession("childone", "/p", now)
+	runner.HasBoard, runner.Agent, runner.Unlisted = false, true, true
+	v := buildSessionView(pageInputs{Session: liveSession("self", "/p", now), Snapshot: snap, Now: now, Lookup: lookupOf(map[string]Session{"childone": runner}, nil)})
+	html := renderTree(t, v)
+	if n := strings.Count(html, `<span class="pibadge"`); n != 1 {
+		t.Fatalf("pi badges = %d, want the running pi row's alone: %s", n, html)
+	}
+	if n := strings.Count(html, `<span class="pulse"></span>`); n != 1 {
+		t.Fatalf("pulses = %d, want the native running row's alone: %s", n, html)
+	}
+	if !strings.Contains(html, `href="/s/childone"`) {
+		t.Fatalf("the pi row should link its runner conversation: %s", html)
+	}
+	if strings.Contains(html, `href="/s/childtwo"`) {
+		t.Fatalf("a reply-id this daemon does not serve must not link: %s", html)
+	}
+	css := mustAsset(t, "dashboard.css")
+	if !strings.Contains(css, ".pibadge {") || !strings.Contains(css, "animation: dash-pulse") {
+		t.Fatalf("the pi badge should blink as the pulse does")
 	}
 }
 

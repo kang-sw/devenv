@@ -5,6 +5,7 @@
   "agent.model": "Modell: {0}",
   "agent.name": "Agent {0}",
   "agent.open": "Seite dieses Delegaten öffnen ({0})",
+  "agent.pi": "Pi-Subagent, läuft",
   "agent.rate": "Ausgabe: {0} Tokens/s",
   "band.cache": "CH {0}",
   "band.cache.title": "Prompt-Cache-Trefferquote der letzten Antwort",

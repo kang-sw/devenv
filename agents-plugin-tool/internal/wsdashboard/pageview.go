@@ -160,7 +160,8 @@ type TreeView struct {
 type AgentNode struct {
 	wslive.Agent
 	// Linked reports that the delegate's reply-id is a session this daemon
-	// serves with a board, so its label links to that page.
+	// serves with a page (a board, or an agent runner's conversation), so
+	// its label links to that page.
 	Linked     bool
 	Running    *wslive.RunningView
 	Generating *wslive.GeneratingView
@@ -603,7 +604,9 @@ func agentTree(agents []wslive.Agent, lookup sessionLookup) []AgentNode {
 				node.Slots = liveSlots(node.Permission, node.Finished, node.Running, node.Generating)
 			}
 			if a.ReplyID != "" {
-				if s, ok := lookup.get(a.ReplyID); ok && s.HasBoard {
+				// A conversation the agent runner hosts (a spawned Pi
+				// subagent) has a page and no board.
+				if s, ok := lookup.get(a.ReplyID); ok && (s.HasBoard || s.Agent) {
 					node.Linked = true
 				}
 			}

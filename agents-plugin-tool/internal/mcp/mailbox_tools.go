@@ -168,11 +168,7 @@ func (s *Server) handleMailboxRecv(id json.RawMessage, args map[string]any) resp
 	}
 	var b strings.Builder
 	for _, m := range drained {
-		handle := m.From
-		if handle == "" {
-			handle = m.ReplyTo
-		}
-		fmt.Fprintf(&b, "[%s] %s: %s\n", m.SentAt, handle, m.Content)
+		fmt.Fprintf(&b, "[%s] %s: %s\n", m.SentAt, mailboxSender(m), m.Content)
 	}
 	return toolTextResponse(id, b.String(), nil)
 }
@@ -302,11 +298,7 @@ func (s *Server) recordMailboxRecvContacts(sessionKey, root, ownNamed string, dr
 func (s *Server) recordMailboxRecvHistory(sessionKey string, drained []wsmailbox.Envelope) ([]mailboxHistoryEntry, []string) {
 	entries := make([]mailboxHistoryEntry, 0, len(drained))
 	for _, m := range drained {
-		handle := m.From
-		if handle == "" {
-			handle = m.ReplyTo
-		}
-		entries = append(entries, mailboxHistoryEntry{Direction: mailboxHistoryRecv, Counterparty: handle, Body: m.Content})
+		entries = append(entries, mailboxHistoryEntry{Direction: mailboxHistoryRecv, Counterparty: mailboxSender(m), Body: m.Content})
 	}
 	return entries, s.recordMailboxHistory(sessionKey, entries)
 }
@@ -626,14 +618,27 @@ func (s *Server) mailboxPiggybackBadge(sessionKey string) string {
 	return formatMailboxBadge(unread, senders)
 }
 
+// mailboxSystemSender labels a message the ws runtime posted itself
+// (wsmailbox.PostSystem): one with neither a From nor a ReplyTo, which has
+// no address to answer.
+const mailboxSystemSender = "system"
+
+// mailboxSender is the handle a message is shown under: its sender's
+// address, else its reply handle, else mailboxSystemSender.
+func mailboxSender(m wsmailbox.Envelope) string {
+	switch {
+	case m.From != "":
+		return m.From
+	case m.ReplyTo != "":
+		return m.ReplyTo
+	}
+	return mailboxSystemSender
+}
+
 func mailboxSenderLabels(queue []wsmailbox.Envelope) []string {
 	out := make([]string, 0, len(queue))
 	for _, m := range queue {
-		handle := m.From
-		if handle == "" {
-			handle = m.ReplyTo
-		}
-		out = append(out, handle)
+		out = append(out, mailboxSender(m))
 	}
 	return out
 }

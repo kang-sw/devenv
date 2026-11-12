@@ -5,6 +5,7 @@
   "agent.model": "模型：{0}",
   "agent.name": "智能体 {0}",
   "agent.open": "打开此委派智能体的页面（{0}）",
+  "agent.pi": "Pi 子智能体，运行中",
   "agent.rate": "输出：{0} token/秒",
   "band.cache": "CH {0}",
   "band.cache.title": "上一次响应的提示缓存命中率",

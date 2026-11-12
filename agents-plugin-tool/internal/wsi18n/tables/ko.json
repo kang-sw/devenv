@@ -5,6 +5,7 @@
   "agent.model": "모델: {0}",
   "agent.name": "에이전트 {0}",
   "agent.open": "이 위임 에이전트의 페이지 열기 ({0})",
+  "agent.pi": "Pi 하위 에이전트, 실행 중",
   "agent.rate": "출력: {0} 토큰/초",
   "band.cache": "CH {0}",
   "band.cache.title": "마지막 응답의 프롬프트 캐시 적중률",

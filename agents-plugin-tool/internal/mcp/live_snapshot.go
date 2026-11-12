@@ -195,7 +195,9 @@ type liveSession struct {
 	repoEnds uint64
 }
 
-func (h *liveHub) session(key, dir, root string, nudge func(), active func() bool, debug func(string, map[string]any)) *liveSession {
+// session is key's live session, created (created true) when the hub has
+// none running in dir.
+func (h *liveHub) session(key, dir, root string, nudge func(), active func() bool, debug func(string, map[string]any)) (ls *liveSession, created bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.sessions == nil {
@@ -203,7 +205,7 @@ func (h *liveHub) session(key, dir, root string, nudge func(), active func() boo
 	}
 	ls, ok := h.sessions[key]
 	if ok && ls.dir == dir && !ls.isStopped() {
-		return ls
+		return ls, false
 	}
 	if ok {
 		ls.stop()
@@ -215,10 +217,10 @@ func (h *liveHub) session(key, dir, root string, nudge func(), active func() boo
 			ls.slot = slot
 		}
 	}
-	created := ls
-	ls.onStop = func() { h.drop(key, created) }
+	made := ls
+	ls.onStop = func() { h.drop(key, made) }
 	h.sessions[key] = ls
-	return ls
+	return ls, true
 }
 
 // existing is the session's live state, nil when this process has none.
@@ -427,7 +429,12 @@ func (s *Server) handleDashboardIntake(id json.RawMessage, args map[string]any) 
 		return toolTextResponse(id, "dashboard off: nothing recorded\n", nil)
 	}
 
-	ls := s.live.session(key, dir, entry.root, func() { s.dashboardNudge(key) }, func() bool { return s.liveSessionActive(key, dir) }, s.debugEvent)
+	ls, created := s.live.session(key, dir, entry.root, func() { s.dashboardNudge(key) }, func() bool { return s.liveSessionActive(key, dir) }, s.debugEvent)
+	if created {
+		// A new state (this server's first intake, or one after a
+		// reconnect): the session's Pi subagents' rows come from the runner.
+		s.piSeed(ls)
+	}
 	now := currentLiveSeams().now().UnixMilli()
 	var (
 		ring     []wslive.RingEntry
@@ -437,6 +444,8 @@ func (s *Server) handleDashboardIntake(id json.RawMessage, args map[string]any) 
 		urgent   bool
 		// agentOnly stays true while every change is a subagent's own.
 		agentOnly bool
+		// reset is set by a reset event, which clears the Pi rows too.
+		reset bool
 	)
 	ls.mu.Lock()
 	changed = ls.state.SetAdapter(adapter)
@@ -457,6 +466,7 @@ func (s *Server) handleDashboardIntake(id json.RawMessage, args map[string]any) 
 					// A flush point of the hosted file (liveSession.fire).
 					ls.flushNow = true
 				}
+				reset = reset || ev.Kind == wslive.KindReset
 				ring = append(ring, res.Ring...)
 				continue
 			}
@@ -481,6 +491,11 @@ func (s *Server) handleDashboardIntake(id json.RawMessage, args map[string]any) 
 		s.appendLiveRing(key, ls.dir, ls.slot, ring)
 	}
 	ls.ringMu.Unlock()
+	if reset {
+		// The adapter's reset cleared the tree; the runner still holds the
+		// Pi subagents it fed.
+		s.piSeed(ls)
+	}
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "ok: %d of %d events applied\n", applied, len(rawEvents))

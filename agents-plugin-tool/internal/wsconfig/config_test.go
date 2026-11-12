@@ -1214,3 +1214,30 @@ func TestHasProjectAgentsTierLeafDoesNotCountHarnessFallback(t *testing.T) {
 		t.Fatalf("pi fallback = model %q from %q, want project-default from default", model, resolvedFrom)
 	}
 }
+
+// TestHarnessTiersReadsOnlyTheHarnessBucket pins that a harness's tiers come
+// from its own bucket alone: the default and codex buckets every tier has
+// do not fill the gaps, and a project leaf joins the global ones.
+func TestHarnessTiersReadsOnlyTheHarnessBucket(t *testing.T) {
+	opts := Options{
+		CacheHome:  filepath.Join(t.TempDir(), "cache"),
+		ConfigHome: filepath.Join(t.TempDir(), "global"),
+	}
+	tiers, err := HarnessTiers(opts, "pi")
+	if err != nil || len(tiers) != 0 {
+		t.Fatalf("no pi bucket gives no tiers: %#v, %v", tiers, err)
+	}
+	if _, err := SetGlobalAgentsTierForHarness(opts, "small", "pi", "global-pi", "pi", "low"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := SetAgentsTierForHarness(opts, "large", "", "project-pi", "pi", "high"); err != nil {
+		t.Fatal(err)
+	}
+	tiers, err = HarnessTiers(opts, "pi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tiers) != 2 || tiers["small"].Model != "global-pi" || tiers["small"].Effort != "low" || tiers["large"].Model != "project-pi" {
+		t.Fatalf("pi tiers = %#v, want small and large only", tiers)
+	}
+}

@@ -89,7 +89,7 @@ func dashboardCommand(args []string) {
 		Log:    logw,
 	})
 	agents := newAgentRunner(dir, logw, trackerChanged.call, holders)
-	host := &proxyHost{dir: dir, port: *port, lan: *lan, buildTime: *buildTime, contentHash: contentHash, logw: logw, configPath: filepath.Clean(configPath)}
+	host := &proxyHost{dir: dir, port: *port, lan: *lan, buildTime: *buildTime, contentHash: contentHash, logw: logw, configPath: filepath.Clean(configPath), agents: agents}
 	// A store's support conversation runs in the store's clone, so an
 	// unregister ends it: right after the dashboard's own, and on the store
 	// watch's change for one another process ran (tk:unregister).
@@ -275,6 +275,8 @@ func newAgentRunner(dir string, logw io.Writer, trackerChanged func(), holders *
 		},
 		Log:            logw,
 		TrackerChanged: trackerChanged,
+		// A spawned Pi subagent's settled turns go to its lead's mailbox.
+		Report: mcp.PiTurnReporter(logw),
 	})
 }
 

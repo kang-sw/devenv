@@ -558,6 +558,44 @@ and starts one at its next send. An attached ws-mcp gets
 `WS_MCP_ALLOWED_TOOLS` (the profile's ws tools) and `WS_MCP_NO_DASHBOARD`,
 and no mailbox identity.
 
+A spawned conversation (`internal/wsagent/spawn.go`) is a non-lead
+conversation another session opens with its first message (`Runner.Spawn`:
+profile, root, optional cwd, model, effort, label, and parent `{kind,
+reply_id}`) and steers by its id; its record keeps `cwd`, `label`, and
+`parent`, and it is unlisted like a support conversation. Each turn settles
+once: done, failed (the harness's error, its process ending under it, or a
+process that could not start or take the message), or interrupted (a turn
+the daemon's exit cut off, which the record's `turn_open` marks, settled
+when the next daemon loads it). A settle of a conversation with a parent
+goes to the runner's `Options.Report`; closing one settles nothing.
+`Runner.Wait` waits for a turn that took every message sent before the
+wait; `Runner.Watch` reports each change of a conversation with a parent.
+The built-in `pi-worker` profile is Pi's coding tools plus ws's
+`git.status`, `git.diff`, `git.log`, `git.merge_base`, and `git.commit`,
+with no instruction file.
+
+The `pi.*` tools (`internal/mcp/pi_tools.go`, lead-only) put this on a
+session: `pi.spawn {prompt, tier, cwd?, label?}` (model and effort from the
+tier's entry in the `pi` harness bucket of `agents.tier`, which only the
+user's `config.tune` sets; an unset tier is refused with that key named;
+`cwd` relative to the session's root), `pi.send`, `pi.list` (the caller's
+own children), `pi.stop` (closes; the record stays), `pi.transcript`, and
+`pi.wait` (default 300 s, at most 1800 s, for the turn after the last
+send). The daemon mails each settled turn to the parent lead's reply-id
+queue with no sender (`mailbox.recv` shows `system`) and wakes the mailbox
+waits; nothing is mailed after `pi.stop`. `tools/list` shows the tools only
+when `dashboard.pi_spawn_enabled` is on (ws on, wsflow and Pi off; read
+once per server, so a change applies at the next reconnect), the server is
+hosted by the daemon (`ServerOptions.Agents` is the daemon's runner; a
+direct-path ws-mcp has none and a call is refused naming the daemon), and
+`pi --version`, probed once per process, is 1.0 or later. Each hosted
+server watches the runner and feeds a child's row (`pi:<id>`, `agentKind:
+"pi"`, linked to the child's page) into its parent's live state; a live
+session the server creates, or one an adapter resets, gets its open
+children's rows again, so they come back after a reconnect. A session whose
+dashboard feed is off gets no row. The agents panel shows a running Pi row
+with a blinking `pi` badge in place of the pulse.
+
 The runner also hosts lead sessions: a headless Claude Code or Pi process
 that loads the user's own harness setup (no profile allowlist, plugins, or
 system prompt of the runner's), started from the built-in `lead-claude` or

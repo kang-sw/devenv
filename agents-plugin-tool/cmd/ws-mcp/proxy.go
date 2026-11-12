@@ -60,6 +60,10 @@ type proxyHost struct {
 	// memory (mcp.ServerOptions.Live). A connection accepted before the
 	// binding writes its snapshot files as a ws-mcp of its own would.
 	live atomic.Pointer[wsdashboard.Daemon]
+	// agents is the daemon's agent runner, where a hosted session's pi.*
+	// tools spawn its Pi subagents (mcp.ServerOptions.Agents); nil leaves
+	// them refusing.
+	agents mcp.PiAgents
 }
 
 // wait blocks until the replacement goroutine, if any, has ended.
@@ -92,6 +96,9 @@ func (h *proxyHost) Accept(hello wsdashboard.ProxyHello) (wsdashboard.ProxySessi
 		}
 		if d := h.live.Load(); d != nil {
 			opts.Live = d
+		}
+		if h.agents != nil {
+			opts.Agents = h.agents
 		}
 		server := mcp.NewServerWithOptions(opts)
 		h.applyLANChange(server)

@@ -80,7 +80,13 @@
     "worktree.release": ">=0.49.0-dev <0.50.0",
     "worktree.remove": ">=0.49.0-dev <0.50.0",
     "worktree.list": ">=0.49.0-dev <0.50.0",
-    "api.list": ">=0.49.0-dev <0.50.0"
+    "api.list": ">=0.49.0-dev <0.50.0",
+    "pi.spawn": ">=0.49.0-dev <0.50.0",
+    "pi.send": ">=0.49.0-dev <0.50.0",
+    "pi.list": ">=0.49.0-dev <0.50.0",
+    "pi.stop": ">=0.49.0-dev <0.50.0",
+    "pi.transcript": ">=0.49.0-dev <0.50.0",
+    "pi.wait": ">=0.49.0-dev <0.50.0"
   },
   "commands": {
     "runtime.info": ">=0.49.0-dev <0.50.0",
