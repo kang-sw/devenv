@@ -791,6 +791,12 @@ func (h *leadHarness) send(id, text string) {
 	if _, err := h.runner.Send(id, text); err != nil {
 		h.t.Fatalf("Send: %v", err)
 	}
+	// Send returns before the loop takes the message; the loop takes an
+	// inbox change before the next request, so once a request ran, the
+	// message was submitted or held. A harness line the test writes next
+	// would otherwise race the message: an idle line handled first ends
+	// no turn, and the message's turn then never ends.
+	h.quiesce(id)
 }
 
 func (h *leadHarness) record(id string) Record {
