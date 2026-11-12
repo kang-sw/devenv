@@ -4485,6 +4485,13 @@
     });
     if (rscrim) rscrim.addEventListener("click", function () { railOpen(false); });
     doc.addEventListener("keydown", function (e) { if (e.key === "Escape" && railShown()) railOpen(false); });
+    // Ctrl+` (the physical key, so any layout) toggles the overlay rail; at
+    // 1600px and up the rail is a permanent column and the key is left alone.
+    doc.addEventListener("keydown", function (e) {
+      if (e.code !== "Backquote" || !e.ctrlKey || e.altKey || e.metaKey || e.shiftKey || e.isComposing || railWide()) return;
+      e.preventDefault();
+      railOpen(!railShown());
+    });
     if (RAIL_WIDE && RAIL_WIDE.addEventListener) RAIL_WIDE.addEventListener("change", function () { railOpen(false); });
     railEl.addEventListener("click", function (e) {
       var t = e.target;
