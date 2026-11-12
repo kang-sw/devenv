@@ -1,0 +1,317 @@
+<!doctype html><html lang="ko" data-theme="dark"><head><meta charset="utf-8"><title>Agents panel stats line mockup</title><style>
+/* ---- copied verbatim from wswhiteboard/assets/page.css (tokens, base, .chip, .i) ---- */
+:root {
+  --wb-bg: var(--background, #f3f3f0);
+  --wb-fg: var(--foreground, #1b1d21);
+  --wb-card: var(--card, #ffffff);
+  --wb-muted: var(--muted, #e9e8e3);
+  --wb-muted-fg: var(--muted-foreground, #5f646b);
+  --wb-primary: var(--primary, #2b62d9);
+  --wb-primary-fg: var(--primary-foreground, #ffffff);
+  --wb-topic: #2c3038;
+  --wb-on-topic: #ffffff;
+  --wb-now: var(--wb-primary);
+  --wb-on-now: var(--wb-primary-fg);
+  --wb-line: color-mix(in srgb, var(--wb-fg) 16%, transparent);
+  --wb-wash: color-mix(in srgb, var(--wb-fg) 6%, transparent);
+  --wb-policy: #b25000;      --wb-on-policy: #ffffff;
+  --wb-technical: #2457c5;   --wb-on-technical: #ffffff;
+  --wb-announced: #1d7348;   --wb-on-announced: #ffffff;
+  --wb-accent-assumed: #b0245a;
+  --wb-accent-policy: #b25000;
+  --wb-on-accent-policy: #ffffff;
+  --wb-opt: color-mix(in srgb, var(--wb-policy) 5%, var(--wb-card));
+  --wb-opt-hover: color-mix(in srgb, var(--wb-policy) 10%, var(--wb-card));
+  --wb-shadow: 0 1px 2px rgb(0 0 0 / .14), 0 2px 6px rgb(0 0 0 / .06);
+  --wb-shadow-hi: 0 2px 4px rgb(0 0 0 / .16), 0 6px 18px rgb(0 0 0 / .10);
+  --wb-radius: 12px;
+  --wb-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --wb-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif;
+  color-scheme: light dark;
+}
+/* Dark palette. The OS preference applies it unless the page pins light
+   (data-theme="light"); data-theme="dark" applies it whatever the OS says.
+   The two blocks hold the same variables: change them together. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --wb-bg: var(--background, #141518);
+    --wb-fg: var(--foreground, #e7e7e4);
+    --wb-card: var(--card, #1e2024);
+    --wb-muted: var(--muted, #2b2d32);
+    --wb-muted-fg: var(--muted-foreground, #a2a6ad);
+    --wb-primary: var(--primary, #7aa2ff);
+    --wb-primary-fg: var(--primary-foreground, #0c1424);
+    --wb-topic: #2a2d33;
+    --wb-on-topic: #e4e5e8;
+    --wb-now: #243457;
+    --wb-on-now: #d3defb;
+    --wb-policy: #5b3a1c;      --wb-on-policy: #f6d9bd;
+    --wb-technical: #26385e;   --wb-on-technical: #d2dcf6;
+    --wb-announced: #1f4433;   --wb-on-announced: #c6ead6;
+    --wb-accent-assumed: #e48aae;
+    --wb-accent-policy: #e0a36c;
+    --wb-on-accent-policy: #1f150b;
+    --wb-opt: color-mix(in srgb, var(--wb-policy) 20%, var(--wb-card));
+    --wb-opt-hover: color-mix(in srgb, var(--wb-policy) 34%, var(--wb-card));
+    --wb-shadow: 0 1px 2px rgb(0 0 0 / .5), 0 2px 8px rgb(0 0 0 / .3);
+    --wb-shadow-hi: 0 2px 4px rgb(0 0 0 / .55), 0 8px 22px rgb(0 0 0 / .4);
+  }
+}
+:root[data-theme="dark"] {
+  --wb-bg: var(--background, #141518);
+  --wb-fg: var(--foreground, #e7e7e4);
+  --wb-card: var(--card, #1e2024);
+  --wb-muted: var(--muted, #2b2d32);
+  --wb-muted-fg: var(--muted-foreground, #a2a6ad);
+  --wb-primary: var(--primary, #7aa2ff);
+  --wb-primary-fg: var(--primary-foreground, #0c1424);
+  --wb-topic: #2a2d33;
+  --wb-on-topic: #e4e5e8;
+  --wb-now: #243457;
+  --wb-on-now: #d3defb;
+  --wb-policy: #5b3a1c;      --wb-on-policy: #f6d9bd;
+  --wb-technical: #26385e;   --wb-on-technical: #d2dcf6;
+  --wb-announced: #1f4433;   --wb-on-announced: #c6ead6;
+  --wb-accent-assumed: #e48aae;
+  --wb-accent-policy: #e0a36c;
+  --wb-on-accent-policy: #1f150b;
+  --wb-opt: color-mix(in srgb, var(--wb-policy) 20%, var(--wb-card));
+  --wb-opt-hover: color-mix(in srgb, var(--wb-policy) 34%, var(--wb-card));
+  --wb-shadow: 0 1px 2px rgb(0 0 0 / .5), 0 2px 8px rgb(0 0 0 / .3);
+  --wb-shadow-hi: 0 2px 4px rgb(0 0 0 / .55), 0 8px 22px rgb(0 0 0 / .4);
+}
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+* { box-sizing: border-box; }
+/* Scrollbars, for every scroller of the board, its body frames, and the embed: thin,
+   a transparent track, and a thumb of the text colour, a little stronger under the
+   pointer, so the OS's wide opaque bars (Windows) read as part of either theme;
+   overlay bars (macOS) stay overlay. Standard properties only: Chromium 121+ ignores
+   ::-webkit-scrollbar on an element whose scrollbar-color is set, and the engines
+   that still read those rules (Safari, older Chromium) would swap macOS overlay bars
+   for always-shown ones. Set on every element rather than inherited from :root, so
+   :hover strengthens the scrollers under the pointer and not the ones nested inside
+   them; hover changes the colour only, never the width, so nothing reflows. The
+   dashboard declares the same pair for its own page. */
+* { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--wb-fg) 24%, transparent) transparent; }
+*:hover { scrollbar-color: color-mix(in srgb, var(--wb-fg) 42%, transparent) transparent; }
+html, body { margin: 0; background: var(--wb-bg); color: var(--wb-fg); }
+body { font: 14px/1.5 var(--wb-sans); }
+.id, code { font-family: var(--wb-mono); }
+.chip { display: inline-flex; align-items: center; gap: 3px; height: 20px; font-size: 12px; font-weight: 700; line-height: 1; padding: 0 9px; border-radius: 999px; background: var(--wb-muted); color: var(--wb-muted-fg); white-space: nowrap; }
+.i { width: 14px; height: 14px; flex: none; display: block; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.chip .i, details.settled .i { width: 12px; height: 12px; stroke-width: 2; }
+/* ---- copied verbatim from wsdashboard/assets/dashboard.css (dark tokens; phases, spin; batch rows; agent tree) ---- */
+:root {
+  --wb-ph-think: #6a4fc4;  --wb-on-ph-think: #ffffff;
+  --wb-ph-reply: #0e7a83;  --wb-on-ph-reply: #ffffff;
+  --wb-ph-tool: #2457c5;   --wb-on-ph-tool: #ffffff;
+  --wb-ph-perm: #a35f00;   --wb-on-ph-perm: #ffffff;
+  --wb-ph-compact: #9a3a73; --wb-on-ph-compact: #ffffff;
+  --wb-perm-ink: var(--wb-ph-perm);
+  --wb-compact-ink: var(--wb-ph-compact);
+  --wb-ok: #1d7348; --wb-fail: #c0262d;
+  --wb-warn: #c27a00; --wb-warn-ink: #a35f00;
+  /* the warning tone on a toast, whose surface is the inverted text colour */
+  --wb-toast-warn: #f2c06b;
+}
+/* Dark variants: the same OS-or-pinned rule as the whiteboard sheet. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --wb-ph-think: #3d2f6b;  --wb-on-ph-think: #ddd3fb;
+    --wb-ph-reply: #1b4a4f;  --wb-on-ph-reply: #c5ecef;
+    --wb-ph-tool: #26385e;   --wb-on-ph-tool: #d2dcf6;
+    --wb-ph-perm: #55400f;   --wb-on-ph-perm: #f6dfae;
+    --wb-ph-compact: #4f2342; --wb-on-ph-compact: #f5d2e7;
+    --wb-perm-ink: var(--wb-on-ph-perm);
+    --wb-compact-ink: var(--wb-on-ph-compact);
+    --wb-ok: #6cc39a; --wb-fail: #f0797e;
+    --wb-warn: #e0a36c; --wb-warn-ink: #e0a36c;
+    --wb-toast-warn: #9a5a00;
+  }
+}
+:root[data-theme="dark"] {
+  --wb-ph-think: #3d2f6b;  --wb-on-ph-think: #ddd3fb;
+  --wb-ph-reply: #1b4a4f;  --wb-on-ph-reply: #c5ecef;
+  --wb-ph-tool: #26385e;   --wb-on-ph-tool: #d2dcf6;
+  --wb-ph-perm: #55400f;   --wb-on-ph-perm: #f6dfae;
+  --wb-ph-compact: #4f2342; --wb-on-ph-compact: #f5d2e7;
+  --wb-perm-ink: var(--wb-on-ph-perm);
+  --wb-compact-ink: var(--wb-on-ph-compact);
+  --wb-ok: #6cc39a; --wb-fail: #f0797e;
+  --wb-warn: #e0a36c; --wb-warn-ink: #e0a36c;
+  --wb-toast-warn: #9a5a00;
+}
+
+
+/* ===== chips, phases, spinners ===== */
+.chip .i, .pghead .i { width: 12px; height: 12px; stroke-width: 2; }
+.phase { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px 0 8px; border-radius: 999px; font-size: 12px; font-weight: 800; white-space: nowrap; flex: none; }
+.phase .i { width: 12px; height: 12px; }
+.phase.thinking { background: var(--wb-ph-think); color: var(--wb-on-ph-think); }
+.phase.replying { background: var(--wb-ph-reply); color: var(--wb-on-ph-reply); }
+.phase.tool { background: var(--wb-ph-tool); color: var(--wb-on-ph-tool); }
+.phase.permission { background: var(--wb-ph-perm); color: var(--wb-on-ph-perm); }
+.phase.compacting { background: var(--wb-ph-compact); color: var(--wb-on-ph-compact); }
+.phase.idle { background: var(--wb-muted); color: var(--wb-muted-fg); }
+.phase.none { background: transparent; color: var(--wb-muted-fg); box-shadow: inset 0 0 0 1px var(--wb-muted); font-weight: 600; }
+.ahead .phase, .peer .phase, .sess .phase { height: 18px; font-size: 11px; padding: 0 7px 0 6px; gap: 5px; }
+.spin { width: 11px; height: 11px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: dash-spin .8s linear infinite; flex: none; display: inline-block; }
+.sess .spin, .activity .spin, .brow .mk .spin { width: 10px; height: 10px; }
+@keyframes dash-spin { to { transform: rotate(360deg); } }
+.idle-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; opacity: .55; flex: none; display: inline-block; }
+/* the agents panel's running-agent mark: a pulsing dot, never rotating, so
+   it reads apart from a live tool row's spinner */
+.pulse { width: 8px; height: 8px; border-radius: 50%; background: currentColor; flex: none; display: inline-block; animation: dash-pulse 1.6s ease-in-out infinite; }
+@keyframes dash-pulse { 50% { opacity: .3; } }
+@media (prefers-reduced-motion: reduce) { .spin, .caret, .pulse { animation: none; } }
+.args { font-family: var(--wb-mono); font-size: 12px; color: var(--wb-muted-fg); }
+code.fpath { font-size: 11.5px; color: var(--wb-muted-fg); overflow-wrap: anywhere; }
+.empty { margin: 8px 0; padding: 18px 14px; text-align: center; font-size: 13px; color: var(--wb-muted-fg); border: 1px dashed var(--wb-muted-fg); border-radius: var(--wb-radius); }
+
+/* ===== boxes with a sticky title bar: tree and conversation ===== */
+.r-tree, .convo { background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); }
+.convo { background: color-mix(in srgb, var(--wb-muted) 45%, var(--wb-bg)); }
+/* the conversation's two regions lay out as the #convo wrapper's own
+   children, so its sticky title bar sticks across both */
+.r-entries, .r-convlive { display: contents; }
+.thead { padding: 4px 8px 4px 12px; min-height: 30px; display: flex; gap: 8px; align-items: center; font-weight: 700; font-size: 13px; background: var(--wb-muted); position: sticky; top: 0; z-index: 1; }
+.thead .sum { margin-left: auto; display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+.thead .chip { background: var(--wb-card); }
+
+/* ===== batch rows ===== */
+.brows { list-style: none; margin: 0; padding: 0; font-size: 12px; }
+.brow { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 6px; align-items: baseline; padding: 1px 0; }
+.brow .mk { font-weight: 800; color: var(--wb-muted-fg); display: inline-flex; justify-content: center; align-self: center; }
+.brow .mk .i { width: 12px; height: 12px; }
+.brow.fail .mk { color: var(--wb-fail); }
+.brow .bp { min-width: 0; overflow: hidden; display: flex; gap: 4px; flex-wrap: nowrap; align-items: baseline; white-space: nowrap; }
+.brow .bm { font-size: 11.5px; color: var(--wb-muted-fg); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.brow.done .bp, .brow.fail .bp { color: var(--wb-muted-fg); }
+.brow .tool { font-family: var(--wb-mono); font-size: 11.5px; padding: 0 6px; border-radius: 4px; background: var(--wb-muted); flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.brow.live { font-weight: 600; }
+.brow.live .mk .spin { color: var(--wb-primary); }
+.brow.perm .mk { color: var(--wb-perm-ink); }
+.brow.ph .mk { opacity: .5; }
+.brow.live .args { font-size: 11.5px; font-weight: 400; flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+/* ===== agent tree ===== */
+.tree { padding: 2px 10px 6px; }
+/* div: the tracker renderer marks agent-written events (li.agent) too */
+div.agent + div.agent { border-top: 1px solid var(--wb-muted); }
+.agent .kids { margin-left: 16px; padding-left: 10px; border-left: 2px solid var(--wb-muted); }
+.agent .kids .agent { border-top: 0; }
+.agent.root > .kids { margin-left: 7px; }
+summary.ahead { list-style: none; }
+summary.ahead::-webkit-details-marker { display: none; }
+.ahead { display: flex; align-items: center; gap: 6px; flex-wrap: nowrap; min-width: 0; padding: 3px 0; cursor: pointer; }
+/* the board's .tree summary rule (baseline) reaches these rows; centring keeps
+   an agent row one height whatever its phase pill holds */
+.tree summary.ahead { align-items: center; }
+.ahead .amk { width: 16px; display: inline-flex; justify-content: center; font-weight: 800; flex: none; }
+.ahead .amk .i { width: 12px; height: 12px; }
+.agent.running > details > .ahead .amk, .agent.root > details > .ahead .amk { color: var(--wb-primary); }
+.agent.done > details > .ahead .amk { color: var(--wb-ok); }
+.agent.failed > details > .ahead .amk { color: var(--wb-fail); }
+.agent.root.idle > details > .ahead .amk { color: var(--wb-muted-fg); }
+.agent.root.permission > details > .ahead .amk { color: var(--wb-perm-ink); }
+.ahead .aname { font-weight: 700; font-size: 12.5px; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent.root > details > .ahead .aname { font-size: 13px; flex: none; }
+.ahead .arid { font-family: var(--wb-mono); font-size: 10px; padding: 0 5px; border-radius: 4px; background: color-mix(in srgb, var(--wb-primary) 10%, var(--wb-card)); color: var(--wb-primary); text-decoration: none; flex: none; opacity: .85; }
+.ahead a.arid:hover { text-decoration: underline; }
+.ahead .arid.nob { background: var(--wb-muted); color: var(--wb-muted-fg); }
+.ahead .am { margin-left: auto; font-size: 11.5px; color: var(--wb-muted-fg); display: inline-flex; gap: 7px; align-items: center; font-variant-numeric: tabular-nums; white-space: nowrap; flex: none; }
+.ahead .am .f { color: var(--wb-fail); font-weight: 700; }
+.ahead .am .ok { color: var(--wb-ok); font-weight: 700; }
+.ahead .am > .i { width: 12px; height: 12px; transition: transform .15s; }
+details[open] > .ahead .am > .i { transform: rotate(180deg); }
+.ahead .acap { flex: 1 1 0; min-width: 0; font-size: 11px; color: var(--wb-muted-fg); font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* the lead row's live detail: the running or approval-waiting tool, one line */
+/* a subagent's telemetry (template astat); the agents panel is the
+   container, so a narrow panel (a side column, the session rail's three
+   columns) moves the stats into the hover card (agentTip) whatever the
+   viewport is */
+.r-tree { container: atree / inline-size; }
+.ahead .astat { flex: none; display: inline-flex; gap: 7px; align-items: center; font-size: 11px; color: var(--wb-muted-fg); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ahead .astat .amodel { font-family: var(--wb-mono); font-size: 10.5px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
+.ahead .astat .atps { color: var(--wb-primary); font-weight: 700; }
+@container atree (max-width: 559px) { .ahead .astat { display: none; } }
+.gltip.atip .tm { display: grid; gap: 2px; }
+.ahead .ldet { flex: 1 1 0; min-width: 0; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ahead .ldet .tn { font-family: var(--wb-mono); font-weight: 700; font-size: 11.5px; }
+.ahead .ldet .args { font-size: 11.5px; }
+.agent .brows { margin-left: 23px; }
+/* a running agent's fixed live rows hang from its mark on a guide line; every
+   row keeps one height so a placeholder holds the slot */
+.agent > .brows.bguide { margin-left: 7px; padding-left: 14px; border-left: 2px solid var(--wb-muted); }
+.brows.bguide > .brow { min-height: 20px; align-items: center; box-sizing: border-box; }
+.agent.done > details > .brows, .agent.failed > details > .brows { opacity: .8; }
+.agent.done > details > .ahead { opacity: .7; }
+.agent.failed > details > .ahead { opacity: .85; }
+.gltip { position: fixed; z-index: 60; max-width: 420px; padding: 8px 10px; border-radius: 8px; background: var(--wb-card); box-shadow: var(--wb-shadow-hi), 0 0 0 1px var(--wb-line); font-size: 12.5px; pointer-events: none; display: grid; gap: 5px; }
+.gltip[hidden] { display: none; }
+.gltip .ts { font-weight: 700; overflow-wrap: anywhere; }
+.gltip .tr { display: flex; flex-wrap: wrap; gap: 4px; }
+.gltip .tm { display: flex; gap: 6px; flex-wrap: wrap; color: var(--wb-muted-fg); font-size: 12px; }
+.gltip .tm code { color: var(--wb-fg); }
+.gltip.atip .tm { display: grid; gap: 2px; }
+/* ---- mockup-only ---- */
+body { padding: 20px 24px 40px; width: 1160px; }
+h1 { font-size: 17px; margin: 0 0 4px; }
+.lede { margin: 0 0 18px; color: var(--wb-muted-fg); font-size: 12.5px; max-width: 900px; }
+.lede code { font-size: 11.5px; }
+.row { display: flex; gap: 24px; align-items: flex-start; margin-bottom: 26px; }
+figure { margin: 0; }
+figcaption { display: grid; gap: 1px; margin-bottom: 6px; font-size: 12px; max-width: 520px; }
+figcaption span { color: var(--wb-muted-fg); }
+.tipnote { margin: 10px 0 4px; font-size: 11px; color: var(--wb-muted-fg); }
+.gltip.static { position: static; display: grid; width: max-content; }
+.r-tree { overflow: hidden; }
+.thead { position: static; }
+.thead { flex-wrap: nowrap; }
+.thead .sum { flex-wrap: nowrap; }
+
+/* ===== option (a): the one proposed change =====
+   Markup: a subagent summary wraps its leading items (mark, name, phase, caption)
+   in <span class="arow">, which is display: contents (a no-op) except in the
+   narrow query. Narrow: the summary wraps; arow takes the first line with the
+   trailing .am (flex-basis 0, so it never forces a break and keeps today's
+   shrink/ellipsis behaviour), and .astat takes a full-width second line. */
+.arow { display: contents; }
+@container atree (max-width: 559px) {
+  .va .ahead { flex-wrap: wrap; row-gap: 0; }
+  .va .arow { display: flex; align-items: center; gap: 6px; flex: 1 1 0; min-width: 0; }
+  .va .ahead .astat { display: inline-flex; order: 1; flex: 0 0 100%; min-width: 0; padding: 0 0 2px 22px; gap: 0; overflow: hidden; }
+  .va .ahead .astat > span + span::before { content: "\00b7"; margin: 0 6px; opacity: .7; }
+  .va .ahead .astat .amodel { flex: 0 1 auto; min-width: 0; max-width: none; }
+  .va .ahead .astat .actx, .va .ahead .astat .atps { flex: none; }
+}
+</style></head><body><svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<symbol id="i-send" viewBox="0 0 16 16"><path d="M2.5 8L13.5 2.8 10.6 13.4 7.6 9.1z"/><path d="M7.6 9.1l5.9-6.3"/></symbol>
+<symbol id="i-clock" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.8"/><path d="M8 4.8V8l2.2 1.4"/></symbol>
+<symbol id="i-agents" viewBox="0 0 16 16"><rect x="3" y="5.6" width="10" height="7.4" rx="2"/><path d="M8 5.6V3.4M1.6 8.6v2M14.4 8.6v2M6.2 11h3.6"/><circle cx="8" cy="2.6" r="0.8"/><circle cx="6" cy="8.6" r="0.7"/><circle cx="10" cy="8.6" r="0.7"/></symbol>
+<symbol id="i-chev" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></symbol>
+<symbol id="i-menu" viewBox="0 0 16 16"><path d="M2.8 4.2h10.4M2.8 8h10.4M2.8 11.8h10.4"/></symbol>
+<symbol id="i-back" viewBox="0 0 16 16"><path d="M10 3.5L5.5 8l4.5 4.5"/></symbol>
+<symbol id="i-image" viewBox="0 0 16 16"><rect x="2" y="3" width="12" height="10" rx="1.6"/><circle cx="6" cy="6.6" r="1.2"/><path d="M2.5 12l3.6-3.4 2.4 2.2 2-1.8 3 3"/></symbol>
+<symbol id="i-lock" viewBox="0 0 16 16"><rect x="3" y="7" width="10" height="7" rx="1.6"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/></symbol>
+<symbol id="i-chat" viewBox="0 0 16 16"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z"/></symbol>
+<symbol id="i-gear" viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.1"/><circle cx="8" cy="8" r="4.6"/><path d="M8 1.5v1.9M8 12.6v1.9M1.5 8h1.9M12.6 8h1.9M3.4 3.4l1.3 1.3M11.3 11.3l1.3 1.3M3.4 12.6l1.3-1.3M11.3 4.7l1.3-1.3"/></symbol>
+<symbol id="i-folder" viewBox="0 0 16 16"><path d="M2 4.2h4l1.4 1.6H14v6.7H2z"/></symbol>
+<symbol id="i-branch" viewBox="0 0 16 16"><circle cx="4.5" cy="3.6" r="1.5"/><circle cx="4.5" cy="12.4" r="1.5"/><circle cx="11.5" cy="6" r="1.5"/><path d="M4.5 5.1v5.8M11.5 7.5c0 2.6-3.2 2.4-7 3.4"/></symbol>
+<symbol id="i-hammer" viewBox="0 0 16 16"><path d="M8.6 6.4l-6 6a1.1 1.1 0 0 0 1.5 1.5l6-6"/><path d="M6.6 4.4l2.6-2.2c1.6-.6 3.2-.2 4.4 1l-1.4.6 1.6 1.6-2.6 2.6-1.6-1.6-.4.4z"/></symbol>
+<symbol id="i-trophy" viewBox="0 0 16 16"><path d="M4.6 2.4h6.8v3.4a3.4 3.4 0 0 1-6.8 0z"/><path d="M4.6 3.6H2.4c0 2 .9 3.2 2.5 3.4M11.4 3.6h2.2c0 2-.9 3.2-2.5 3.4M8 9.2v2.6M5.4 13.6h5.2M6.2 11.8h3.6v1.8H6.2z"/></symbol>
+<symbol id="i-fetch" viewBox="0 0 16 16"><path d="M13 8a5 5 0 0 1-8.6 3.5M3 8a5 5 0 0 1 8.6-3.5"/><path d="M11.8 2v2.7H9.1M4.2 14v-2.7h2.7"/></symbol>
+<symbol id="i-pull" viewBox="0 0 16 16"><path d="M8 2.5v8M4.6 7.2L8 10.6l3.4-3.4M3 13.5h10"/></symbol>
+<symbol id="i-push" viewBox="0 0 16 16"><path d="M8 13.5v-8M4.6 8.8L8 5.4l3.4 3.4M3 2.5h10"/></symbol>
+<symbol id="i-repo" viewBox="0 0 16 16"><path d="M3.5 2.5h8.5v9H5a1.5 1.5 0 0 0-1.5 1.5z"/><path d="M3.5 13a1.5 1.5 0 0 0 1.5 1.5h7v-3"/><path d="M6 5h4"/></symbol>
+<symbol id="i-wsfolder" viewBox="0 0 16 16"><path d="M2 4.5a1 1 0 0 1 1-1h3.2l1.4 1.5H13a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z"/></symbol>
+<symbol id="i-robot" viewBox="0 0 16 16"><path d="M8 2.2v2"/><circle cx="8" cy="1.8" r=".9" fill="currentColor" stroke="none"/><rect x="2.8" y="4.6" width="10.4" height="8.4" rx="2.4"/><circle cx="6" cy="8.6" r="1.05" fill="currentColor" stroke="none"/><circle cx="10" cy="8.6" r="1.05" fill="currentColor" stroke="none"/><path d="M1.2 8v2.2M14.8 8v2.2"/></symbol>
+<symbol id="i-plus" viewBox="0 0 16 16"><path d="M8 3.5v9M3.5 8h9"/></symbol>
+<symbol id="i-pin" viewBox="0 0 16 16"><path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .7 4.3L8 11.6l-3.8 2 .7-4.3-3.1-3 4.3-.6z"/></symbol>
+<symbol id="i-hosted" viewBox="0 0 16 16"><rect x="2.5" y="2.8" width="11" height="4.4" rx="1.2"/><rect x="2.5" y="8.8" width="11" height="4.4" rx="1.2"/><path d="M5 5h.01M5 11h.01"/></symbol>
+<symbol id="i-stop" viewBox="0 0 16 16"><rect x="4" y="4" width="8" height="8" rx="1.4"/></symbol>
+<symbol id="i-pencil" viewBox="0 0 16 16"><path d="M10.9 2.7a1.4 1.4 0 0 1 2 2L5.4 12.2l-2.9.8.8-2.9z"/><path d="M9.6 4l2 2"/></symbol>
+<symbol id="i-power" viewBox="0 0 16 16"><path d="M8 2.2v5.2"/><path d="M4.6 4.4a5 5 0 1 0 6.8 0"/></symbol>
+</svg>
+<h1>Agents panel: subagent stats on a second line (option a)</h1><p class="lede">Real dashboard CSS (copied verbatim), dark theme. The only change is the <code>.va</code> block at the end of the stylesheet, active inside the same <code>@container atree (max-width: 559px)</code> query that hides the stats today.</p><div class="row"><figure><figcaption><b>1 · Today, narrow (520px)</b><span>stats hidden; reachable only through a hover card</span></figcaption><div class="r-tree " style="width:520px"><div class="thead"><svg class="i"><use href="#i-agents"/></svg>에이전트<span class="sum"><span class="chip">실행 중 1</span><span class="chip">완료 1</span><span class="chip">실패 0</span><span class="chip"><svg class="i"><use href="#i-chat"/></svg>0</span></span></div><div class="tree"><div class="agent root tool"><details><summary class="ahead"><span class="amk"><span class="pulse"></span></span><span class="aname">리드</span><span class="phase tool">도구</span><span class="ldet"><span class="tn">Agent</span> <span class="args">description: Whiteboard watching-output rule</span></span><span class="am"><span>2m 31s</span><span>배치 42</span><svg class="i"><use href="#i-chev"/></svg></span></summary><ol class="brows"></ol></details><div class="kids"><div class="agent running"><details><summary class="ahead"><span class="arow"><span class="amk"><span class="pulse"></span></span><span class="aname" title="Whiteboard watching-output rule">Whiteboard watching-output rule</span><span class="phase tool">도구</span><span class="acap" title="ws:effort-high">ws:effort-high</span></span><span class="astat"><span class="amodel" title="model claude-sonnet-5-5 high">claude-sonnet-5-5 high</span><span class="actx" title="context 48.2k">48.2k</span><span class="atps" title="62 t/s">62 t/s</span></span><span class="am"><span class="ok">✓ 13</span><span class="">✗ 0</span><span>2m 24s</span><svg class="i"><use href="#i-chev"/></svg></span></summary><ol class="brows"></ol></details><ol class="brows live bguide"><li class="brow live"><span class="mk"><span class="spin"></span></span><span class="bp"><span class="tool">Bash</span><span class="args">command: cd /Users/kang-sw/devenv &amp;&amp; go test ./agents-plugin-tool/...</span></span><span class="bm">1m 37s</span></li></ol></div><div class="agent done"><details><summary class="ahead"><span class="arow"><span class="amk">✓</span><span class="aname" title="Review pass d56caca..e7ef18a">Review pass d56caca..e7ef18a</span><span class="acap" title="ws:effort-medium">ws:effort-medium</span></span><span class="astat"><span class="amodel" title="model claude-opus-4-7 medium">claude-opus-4-7 medium</span><span class="actx" title="context 112k">112k</span></span><span class="am"><span class="ok">✓ 7</span><span class="f">✗ 1</span><span>4m</span><svg class="i"><use href="#i-chev"/></svg></span></summary><ol class="brows"></ol></details></div></div></div></div></div><div class="tipnote">hover card, shown on pointer-over:</div><div class="gltip atip static"><div class="ts">Whiteboard watching-output rule</div><div class="tm"><span>model claude-sonnet-5-5 high</span><span>context 48,213 tokens</span><span>62 t/s</span></div></div></figure><figure><figcaption><b>2 · Option (a), narrow (520px)</b><span>stats on a muted second line, effort kept in the stats</span></figcaption><div class="r-tree va" style="width:520px"><div class="thead"><svg class="i"><use href="#i-agents"/></svg>에이전트<span class="sum"><span class="chip">실행 중 1</span><span class="chip">완료 1</span><span class="chip">실패 0</span><span class="chip"><svg class="i"><use href="#i-chat"/></svg>0</span></span></div><div class="tree"><div class="agent root tool"><details><summary class="ahead"><span class="amk"><span class="pulse"></span></span><span class="aname">리드</span><span class="phase tool">도구</span><span class="ldet"><span class="tn">Agent</span> <span class="args">description: Whiteboard watching-output rule</span></span><span class="am"><span>2m 31s</span><span>배치 42</span><svg class="i"><use href="#i-chev"/></svg></span></summary><ol class="brows"></ol></details><div class="kids"><div class="agent running"><details><summary class="ahead"><span class="arow"><span class="amk"><span class="pulse"></span></span><span class="aname" title="Whiteboard watching-output rule">Whiteboard watching-output rule</span><span class="phase tool">도구</span><span class="acap" title="ws:effort-high">ws:effort-high</span></span><span class="astat"><span class="amodel" title="model claude-sonnet-5-5 high">claude-sonnet-5-5 high</span><span class="actx" title="context 48.2k">48.2k</span><span class="atps" title="62 t/s">62 t/s</span></span><span class="am"><span class="ok">✓ 13</span><span class="">✗ 0</span><span>2m 24s</span><svg class="i"><use href="#i-chev"/></svg></span></summary><ol class="brows"></ol></details><ol class="brows live bguide"><li class="brow live"><span class="mk"><span class="spin"></span></span><span class="bp"><span class="tool">Bash</span><span class="args">command: cd /Users/kang-sw/devenv &amp;&amp; go test ./agents-plugin-tool/...</span></span><span class="bm">1m 37s</span></li></ol></div><div class="agent done"><details><summary class="ahead"><span class="arow"><span class="amk">✓</span><span class="aname" title="Review pass d56caca..e7ef18a">Review pass d56caca..e7ef18a</span><span class="acap" title="ws:effort-medium">ws:effort-medium</span></span><span class="astat"><span class="amodel" title="model claude-opus-4-7 medium">claude-opus-4-7 medium</span><span class="actx" title="context 112k">112k</span></span><span class="am"><span class="ok">✓ 7</span><span class="f">✗ 1</span><span>4m</span><svg class="i"><use href="#i-chev"/></svg></span></summary><ol class="brows"></ol></details></div></div></div></div></div></figure></div><div class="row"><figure><figcaption><b>2b · Option (a), de-duplicated</b><span><code>ws:effort-*</code> type already names the effort, so the stats line omits it</span></figcaption><div class="r-tree va" style="width:520px"><div class="thead"><svg class="i"><use href="#i-agents"/></svg>에이전트<span class="sum"><span class="chip">실행 중 1</span><span class="chip">완료 1</span><span class="chip">실패 0</span><span class="chip"><svg class="i"><use href="#i-chat"/></svg>0</span></span></div><div class="tree"><div class="agent root tool"><details><summary class="ahead"><span class="amk"><span class="pulse"></span></span><span class="aname">리드</span><span class="phase tool">도구</span><span class="ldet"><span class="tn">Agent</span> <span class="args">description: Whiteboard watching-output rule</span></span><span class="am"><span>2m 31s</span><span>배치 42</span><svg class="i"><use href="#i-chev"/></svg></span></summary><ol class="brows"></ol></details><div class="kids"><div class="agent running"><details><summary class="ahead"><span class="arow"><span class="amk"><span class="pulse"></span></span><span class="aname" title="Whiteboard watching-output rule">Whiteboard watching-output rule</span><span class="phase tool">도구</span><span class="acap" title="ws:effort-high">ws:effort-high</span></span><span class="astat"><span class="amodel" title="model claude-sonnet-5-5">claude-sonnet-5-5</span><span class="actx" title="context 48.2k">48.2k</span><span class="atps" title="62 t/s">62 t/s</span></span><span class="am"><span class="ok">✓ 13</span><span class="">✗ 0</span><span>2m 24s</span><svg class="i"><use href="#i-chev"/></svg></span></summary><ol class="brows"></ol></details><ol class="brows live bguide"><li class="brow live"><span class="mk"><span class="spin"></span></span><span class="bp"><span class="tool">Bash</span><span class="args">command: cd /Users/kang-sw/devenv &amp;&amp; go test ./agents-plugin-tool/...</span></span><span class="bm">1m 37s</span></li></ol></div><div class="agent done"><details><summary class="ahead"><span class="arow"><span class="amk">✓</span><span class="aname" title="Review pass d56caca..e7ef18a">Review pass d56caca..e7ef18a</span><span class="acap" title="ws:effort-medium">ws:effort-medium</span></span><span class="astat"><span class="amodel" title="model claude-opus-4-7">claude-opus-4-7</span><span class="actx" title="context 112k">112k</span></span><span class="am"><span class="ok">✓ 7</span><span class="f">✗ 1</span><span>4m</span><svg class="i"><use href="#i-chev"/></svg></span></summary><ol class="brows"></ol></details></div></div></div></div></div></figure><figure><figcaption><b>2c · Option (a), stress: 360px, long title</b><span>the title ellipsizes on line 1; the stats line never wraps</span></figcaption><div class="r-tree va" style="width:360px"><div class="thead"><svg class="i"><use href="#i-agents"/></svg>에이전트<span class="sum"><span class="chip">실행 중 1</span><span class="chip">완료 1</span><span class="chip">실패 0</span><span class="chip"><svg class="i"><use href="#i-chat"/></svg>0</span></span></div><div class="tree"><div class="agent root tool"><details><summary class="ahead"><span class="amk"><span class="pulse"></span></span><span class="aname">리드</span><span class="phase tool">도구</span><span class="ldet"><span class="tn">Agent</span> <span class="args">description: Whiteboard watching-output rule</span></span><span class="am"><span>2m 31s</span><span>배치 42</span><svg class="i"><use href="#i-chev"/></svg></span></summary><ol class="brows"></ol></details><div class="kids"><div class="agent running"><details><summary class="ahead"><span class="arow"><span class="amk"><span class="pulse"></span></span><span class="aname" title="Whiteboard watching-output rule: capture agent stats on a second line">Whiteboard watching-output rule: capture agent stats on a second line</span><span class="phase tool">도구</span><span class="acap" title="ws:effort-high">ws:effort-high</span></span><span class="astat"><span class="amodel" title="model claude-sonnet-5-5 high">claude-sonnet-5-5 high</span><span class="actx" title="context 48.2k">48.2k</span><span class="atps" title="62 t/s">62 t/s</span></span><span class="am"><span class="ok">✓ 13</span><span class="">✗ 0</span><span>2m 24s</span><svg class="i"><use href="#i-chev"/></svg></span></summary><ol class="brows"></ol></details><ol class="brows live bguide"><li class="brow live"><span class="mk"><span class="spin"></span></span><span class="bp"><span class="tool">Bash</span><span class="args">command: cd /Users/kang-sw/devenv &amp;&amp; go test ./agents-plugin-tool/...</span></span><span class="bm">1m 37s</span></li></ol></div><div class="agent done"><details><summary class="ahead"><span class="arow"><span class="amk">✓</span><span class="aname" title="Review pass d56caca..e7ef18a">Review pass d56caca..e7ef18a</span><span class="acap" title="ws:effort-medium">ws:effort-medium</span></span><span class="astat"><span class="amodel" title="model claude-opus-4-7 medium">claude-opus-4-7 medium</span><span class="actx" title="context 112k">112k</span></span><span class="am"><span class="ok">✓ 7</span><span class="f">✗ 1</span><span>4m</span><svg class="i"><use href="#i-chev"/></svg></span></summary><ol class="brows"></ol></details></div></div></div></div></div></figure></div><div class="row"><figure><figcaption><b>3 · Wide (900px), unchanged</b><span>stats inline on the row, as today; option (a) adds nothing at this width</span></figcaption><div class="r-tree va" style="width:900px"><div class="thead"><svg class="i"><use href="#i-agents"/></svg>에이전트<span class="sum"><span class="chip">실행 중 1</span><span class="chip">완료 1</span><span class="chip">실패 0</span><span class="chip"><svg class="i"><use href="#i-chat"/></svg>0</span></span></div><div class="tree"><div class="agent root tool"><details><summary class="ahead"><span class="amk"><span class="pulse"></span></span><span class="aname">리드</span><span class="phase tool">도구</span><span class="ldet"><span class="tn">Agent</span> <span class="args">description: Whiteboard watching-output rule</span></span><span class="am"><span>2m 31s</span><span>배치 42</span><svg class="i"><use href="#i-chev"/></svg></span></summary><ol class="brows"></ol></details><div class="kids"><div class="agent running"><details><summary class="ahead"><span class="arow"><span class="amk"><span class="pulse"></span></span><span class="aname" title="Whiteboard watching-output rule">Whiteboard watching-output rule</span><span class="phase tool">도구</span><span class="acap" title="ws:effort-high">ws:effort-high</span></span><span class="astat"><span class="amodel" title="model claude-sonnet-5-5 high">claude-sonnet-5-5 high</span><span class="actx" title="context 48.2k">48.2k</span><span class="atps" title="62 t/s">62 t/s</span></span><span class="am"><span class="ok">✓ 13</span><span class="">✗ 0</span><span>2m 24s</span><svg class="i"><use href="#i-chev"/></svg></span></summary><ol class="brows"></ol></details><ol class="brows live bguide"><li class="brow live"><span class="mk"><span class="spin"></span></span><span class="bp"><span class="tool">Bash</span><span class="args">command: cd /Users/kang-sw/devenv &amp;&amp; go test ./agents-plugin-tool/...</span></span><span class="bm">1m 37s</span></li></ol></div><div class="agent done"><details><summary class="ahead"><span class="arow"><span class="amk">✓</span><span class="aname" title="Review pass d56caca..e7ef18a">Review pass d56caca..e7ef18a</span><span class="acap" title="ws:effort-medium">ws:effort-medium</span></span><span class="astat"><span class="amodel" title="model claude-opus-4-7 medium">claude-opus-4-7 medium</span><span class="actx" title="context 112k">112k</span></span><span class="am"><span class="ok">✓ 7</span><span class="f">✗ 1</span><span>4m</span><svg class="i"><use href="#i-chev"/></svg></span></summary><ol class="brows"></ol></details></div></div></div></div></div></figure></div></body></html>
