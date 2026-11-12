@@ -727,8 +727,9 @@ func TestRailMarkupAddButtonsAndForget(t *testing.T) {
 
 // TestRailMarkupHostedSessions pins what the rail shows of hosted sessions.
 // On a daemon that hosts them, whether or not it keeps stored workspaces,
-// every worktree row ends in the new-session button, naming the folder a
-// session would start in; a repository's bar and a plain folder's bar have
+// every worktree row carries the icon-only new-session button right after
+// its label (before the change count), naming the folder a session would
+// start in; a repository's bar and a plain folder's bar have
 // none, since a lead session starts only at a Git worktree root. A hosted
 // row carries the hosted mark. A row waiting on an approval has a still
 // ring in place of the working one, the approve chip, the tool and its
@@ -766,6 +767,9 @@ func TestRailMarkupHostedSessions(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("the worktree rows lack %s:\n%s", want, body)
 		}
+	}
+	if !strings.Contains(body, `<span class="wf">· root</span><button type="button" class="rnew"`) || !strings.Contains(body, `aria-expanded="false"><svg`) || !strings.Contains(body, `</svg></button><span class="gs"`) {
+		t.Errorf("the new-session button must be the icon alone, between the row's label and its change count:\n%s", body)
 	}
 	if n := strings.Count(body, `class="rnew"`); n != 2 {
 		t.Errorf("new-session buttons under the repository = %d, want one per worktree row", n)

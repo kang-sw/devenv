@@ -588,9 +588,10 @@ conversation:
   browser on this machine, 403 without the daemon's own `Origin`. A LAN
   viewer reads the session and may send and interrupt; the state's
   `can_control` tells the page which viewer it serves.
-- **Page.** The rail's "+ session" button (worktree rows only; a plain
-  folder's bar has none, since the spawn route takes only a Git worktree
-  root) opens the spawn popover, with model and effort choices from
+- **Page.** The rail's new-session "+" (right after a worktree row's label,
+  quiet until the row is hovered like the other rail "+" buttons; worktree
+  rows only, a plain folder's bar has none, since the spawn route takes only
+  a Git worktree root) opens the spawn popover, with model and effort choices from
   `GET /support/choices`. A hosted session's page reads `GET /agents/<id>`
   on load, on a head swap, when the live region's permission line changes,
   and when its menu opens (no timer): approval cards, the `action_needed`

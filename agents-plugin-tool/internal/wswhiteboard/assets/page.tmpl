@@ -25,10 +25,11 @@
 {{define "tago"}}{{with .UpdatedAt}}<time class="tago" datetime="{{.}}" title="{{t "wb.updated"}}"{{if $.Page.Full}} data-at="{{$.UpdatedMs}}"{{end}}>{{$.UpdatedClock}}</time>{{end}}{{end}}
 
 {{/* recap is the topic's recap line: its text by the item block-field rule,
-then its update time in the topic bar's notation, the local date and time as
-the hover title. It shows above the body while the topic is open and inside
-the body's fold once it is closed. */}}
-{{define "recap"}}<div class="trecap"><div class="rtext md">{{.Page.RecapHTML .TopicView}}</div>{{with .RecapAt}}<time class="tago" datetime="{{.}}" title="{{$.RecapStamp}}"{{if $.Page.Full}} data-at="{{$.RecapMs}}"{{end}}>{{$.RecapClock}}</time>{{end}}</div>{{end}}
+then "recap <time>" with its update time in the topic bar's notation (relative
+where ago.js runs, through data-at), the local date and time as the hover
+title. It shows above the body while the topic is open and inside the body's
+fold once it is closed. */}}
+{{define "recap"}}<div class="trecap"><div class="rtext md">{{.Page.RecapHTML .TopicView}}</div>{{with .RecapAt}}<span class="rat" title="{{$.RecapStamp}}">{{t "wb.recap"}} <time class="tago" datetime="{{.}}"{{if $.Page.Full}} data-at="{{$.RecapMs}}"{{end}}>{{$.RecapClock}}</time></span>{{end}}</div>{{end}}
 
 {{define "doc"}}{{if .HasFold}}<details class="tdoc" data-key="doc:{{.Name}}"{{if .DocOpen .Page.Embed}} open{{end}}><summary title="{{t "wb.doc"}}">{{icon "book"}}{{if and .Page.Embed .DocNew}}<span class="new" title="{{t "chip.fresh"}}"></span>{{end}}</summary>{{if .RecapFolded}}{{template "recap" .}}{{end}}{{if .Doc}}<div class="doc-body {{if .Page.DocFramed}}framed{{else}}md{{end}}">{{.Page.DocHTML .Name}}</div>{{end}}</details>{{end}}{{end}}
 

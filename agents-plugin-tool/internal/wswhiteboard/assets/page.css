@@ -298,14 +298,15 @@ details.sx > summary > .stext { flex: 1; min-width: 0; }
 .opt.static:not(.picked) { opacity: .75; }
 .srow.void .stext > b { font-weight: 400; text-decoration: line-through; color: var(--wb-muted-fg); }
 
-/* topic recap: a short status line at the top of the topic card, its update
-   time on the right in the topic bar's notation; inside a closed topic's fold
-   it sits above the body */
-.trecap { display: flex; align-items: baseline; gap: 10px; padding: 7px 14px; font-size: 13px; background: var(--wb-wash); }
-.trecap:not(:last-child) { border-bottom: 1px solid var(--wb-line); }
+/* topic recap: a short status block inset at the top of the topic card, in
+   the item gutter, "recap <time>" on the right; inside a closed topic's fold it
+   sits above the body */
+.trecap { display: flex; align-items: baseline; gap: 10px; margin: 10px 10px 0; padding: 7px 10px; font-size: 13px; background: var(--wb-wash); border-left: 3px solid var(--wb-accent-policy); border-radius: 0 8px 8px 0; }
+/* last in its box (a closed fold's summary takes no room): keep the gutter below */
+.trecap:last-child, .trecap:has(+ details.tdoc:not([open]):last-child) { margin-bottom: 10px; }
 /* the recap is an item block field: clipped like .opt, .ctx, and .rec-line */
 .trecap .rtext { flex: 1; min-width: 0; overflow-wrap: anywhere; contain: paint; }
-.trecap .tago { flex: none; font-size: 11.5px; color: var(--wb-muted-fg); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.trecap .rat { flex: none; font-size: 11px; color: var(--wb-muted-fg); white-space: nowrap; font-variant-numeric: tabular-nums; }
 
 /* topic body: block markdown above the topic's items, folded under its own summary */
 /* The summary is the topic bar's button: it is taken out of the details' flow
