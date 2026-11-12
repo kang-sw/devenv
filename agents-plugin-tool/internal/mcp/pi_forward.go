@@ -84,7 +84,11 @@ func (s *Server) piCall(ctx context.Context, tool string, body map[string]any, t
 // handlePiForward runs a pi.* call of a Pi subagent through the daemon.
 func (s *Server) handlePiForward(ctx context.Context, id json.RawMessage, tool string, args map[string]any) response {
 	fail := func(err error) response {
-		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
+		// The daemon's refusals already name the tool.
+		if !strings.HasPrefix(err.Error(), tool+": ") {
+			err = fmt.Errorf("%s: %w", tool, err)
+		}
+		return toolTextResponse(id, "", err)
 	}
 	key, _ := args["session_key"].(string)
 	if strings.TrimSpace(key) == "" {
