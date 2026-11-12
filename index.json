@@ -395,7 +395,14 @@
       "registered_at": "2026-11-11T11:38:36Z"
     },
     "261112-bug-ws-claude-mod-dashboard-message-during-compaction-submits-as-follow-up": {
-      "registered_at": "2026-11-12T04:23:31Z"
+      "registered_at": "2026-11-12T04:23:31Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "28ef83e379b353cc",
+        "track": "develop",
+        "phase": "closed",
+        "touched_at": "2026-11-12T05:05:42Z"
+      }
     },
     "261112-bug-ws-dashboard-open-tab-keeps-stale-assets-after-daemon-upgrade": {
       "registered_at": "2026-11-12T04:20:54Z"
