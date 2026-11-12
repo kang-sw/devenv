@@ -200,6 +200,32 @@ func TestLeadQueuedInputDropsWithTheConversation(t *testing.T) {
 	}
 }
 
+// TestLeadStopKeepsTheQueueWithoutARestart: a stop by the user ends the
+// process with input still queued, and no process starts until the next
+// message.
+func TestLeadStopKeepsTheQueueWithoutARestart(t *testing.T) {
+	h := newLeadHarness(t).start()
+	id, holder := h.runLead("one")
+	eventually(t, "the first turn", func() bool { return slices.Equal(h.userInputs(holder), []string{"one"}) })
+	h.holders.out(holder, stateLine(HarnessRunning), initLine("sess-1", "auto"))
+	h.sync(id, holder)
+	h.send(id, "two")
+	h.sendCommand(id, "compact", "")
+	h.send(id, "three")
+	h.holders.out(holder, replyLine("u1", "first"), resultLine(), stateLine(HarnessIdle))
+	eventually(t, "the text before the command", func() bool { return len(h.userInputs(holder)) == 2 })
+	eventually(t, "the rest to be queued", func() bool { return len(h.record(id).Queued) == 2 })
+
+	if _, err := h.runner.Stop(id); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	st, rec := h.state(id), h.record(id)
+	if st.Process || len(rec.Queued) != 2 || h.holders.opCount("launch") != 1 {
+		t.Fatalf("a stop starts no process and keeps the queue: state %+v, queue %+v, holder calls %v", st, rec.Queued, h.holders.opList())
+	}
+}
+
 // TestPiLeadCommands: a pi lead asks for its commands at start and after
 // each turn, and lists them with each one's source and the compact command
 // pi leaves out; a held command goes as a prompt of its typed line at the

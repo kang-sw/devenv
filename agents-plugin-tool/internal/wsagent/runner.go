@@ -967,6 +967,10 @@ type conv struct {
 	// turn brought a typed failure, so its end clears none.
 	retry   *wslive.Retry
 	alerted bool
+	// sendRetried is set when a turn's failed send armed its one automatic
+	// retry (kick) and cleared by the next send that succeeds; a send that
+	// fails again meanwhile waits for the next inbox or mail signal.
+	sendRetried bool
 }
 
 // do runs fn in the loop and waits for it; false when the loop has ended.
@@ -1437,8 +1441,18 @@ func (c *conv) kick() {
 	if err != nil {
 		c.setStatus(func() { c.lastErr = "send turn: " + err.Error() })
 		c.stopProcess("")
+		// The turn stays queued, and nothing else would submit it before
+		// an unrelated signal: it is retried once on a new process, through
+		// the loop's inbox signal rather than on this stack. A send that
+		// fails again leaves it for the next inbox or mail signal, so a
+		// send that always fails does not spin.
+		if len(c.rec.Queued) > 0 && !c.sendRetried {
+			c.sendRetried = true
+			c.signalInbox()
+		}
 		return
 	}
+	c.sendRetried = false
 	c.update(func(rec *Record) {
 		rec.Queued = rest
 		if len(mail) > 0 {
@@ -1716,11 +1730,11 @@ func (c *conv) checkReattach() {
 
 // replayDone ends a rejoin: the state the holder's records rebuilt is
 // written, and the conversation takes input again. A replay that lost
-// records (lost: the ring began past the record the runner applied last;
-// or a gap during it) and showed no turn boundary after them cannot tell
-// whether a turn runs: the turn is taken as running, and nothing is
-// submitted until the harness ends one (wrapHold), since a message sent
-// into a running turn may be refused.
+// records (lost: the ring dropped records, even ones an earlier daemon
+// applied; or a gap during it) and showed no turn boundary after them
+// cannot tell whether a turn runs: the turn is taken as running, and
+// nothing is submitted until the harness ends one (wrapHold), since a
+// message sent into a running turn may be refused.
 func (c *conv) replayDone(lost bool) {
 	lost = lost || c.replayGap
 	boundary := c.replayBoundary

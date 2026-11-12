@@ -434,6 +434,72 @@ func TestFailuresSurfaceInState(t *testing.T) {
 	})
 }
 
+// TestFailedSendRetriesOnceOnANewProcess: a turn whose send fails stays
+// queued and goes on a new process with no further inbox signal.
+func TestFailedSendRetriesOnceOnANewProcess(t *testing.T) {
+	h := newHarness(t, map[string]string{"chat": chatProfile})
+	id := h.create("chat").ID
+	h.backend.setFailSends(1)
+	h.runner.Send(id, "one")
+	first := h.backend.waitProc(t, 0)
+	if got := h.backend.waitProc(t, 1).nextSent(t); got != "one" {
+		t.Fatalf("the retried turn = %q", got)
+	}
+	if !first.isClosed() || h.backend.startCount() != 2 {
+		t.Fatalf("the failed send ends its process and one new one starts: %d starts", h.backend.startCount())
+	}
+	select {
+	case s := <-first.sent:
+		t.Fatalf("the failed process took %q", s)
+	default:
+	}
+	eventually(t, "the turn to run with nothing held", func() bool {
+		st := h.state(id)
+		return st.Status == StatusRunning && st.Held == 0 && st.Error == ""
+	})
+}
+
+// TestFailingSendRestartsOnceAndStops: a send that always fails restarts
+// the process once, then waits for the next inbox signal, which gets one
+// more attempt and no retry; the next send that goes through takes it all
+// and arms the retry again.
+func TestFailingSendRestartsOnceAndStops(t *testing.T) {
+	h := newHarness(t, map[string]string{"chat": chatProfile})
+	id := h.create("chat").ID
+	h.backend.setFailSends(-1)
+	h.runner.Send(id, "one")
+	eventually(t, "the retry's start", func() bool { return h.backend.startCount() == 2 })
+	eventually(t, "the retry's process to end", func() bool { return h.backend.proc(1).isClosed() })
+	time.Sleep(200 * time.Millisecond)
+	st := h.state(id)
+	if n := h.backend.startCount(); n != 2 || st.Process || st.Held != 1 || !strings.Contains(st.Error, "send turn") {
+		t.Fatalf("one retry, then nothing: %d starts, state %+v", n, st)
+	}
+
+	h.runner.Send(id, "two")
+	eventually(t, "the next signal's attempt", func() bool { return h.backend.startCount() == 3 })
+	eventually(t, "its process to end", func() bool { return h.backend.proc(2).isClosed() })
+	time.Sleep(200 * time.Millisecond)
+	if n := h.backend.startCount(); n != 3 || h.state(id).Held != 2 {
+		t.Fatalf("a spent retry is not armed again by a failed send: %d starts, state %+v", n, h.state(id))
+	}
+
+	h.backend.setFailSends(0)
+	h.runner.Send(id, "three")
+	if got := h.backend.waitProc(t, 3).nextSent(t); got != "one\n\ntwo\n\nthree" {
+		t.Fatalf("the queued turn = %q", got)
+	}
+	h.backend.proc(3).reply("done")
+	eventually(t, "idle", func() bool { return h.state(id).Status == StatusIdle })
+
+	// The send that went through armed the retry again.
+	h.backend.setFailSends(1)
+	h.runner.Send(id, "four")
+	if got := h.backend.waitProc(t, 4).nextSent(t); got != "four" {
+		t.Fatalf("the retried turn = %q", got)
+	}
+}
+
 func ptr(s string) *string { return &s }
 
 // TestRunnerSuiteOnPi runs the runner suite again with every profile on

@@ -146,9 +146,9 @@ type holderChild struct {
 	replaying bool
 	target    uint64
 	targetSet bool
-	// wrapped is set by replayUntil when the holder's ring no longer held
-	// the record after skipTo: the records between left it while no daemon
-	// was attached.
+	// wrapped is set by replayUntil when the holder's ring has dropped
+	// records, whether while no daemon was attached or before the earlier
+	// daemon let go.
 	wrapped bool
 	stopErr error
 }
@@ -272,12 +272,15 @@ func (h *holderChild) seen(seq uint64) {
 
 // replayUntil tells an attached process the first and the last record
 // sequence the holder held when the daemon attached: once the last has been
-// delivered the process sends ReplayDone, marked ReplayLost when the first
-// is past the record after skipTo.
+// delivered the process sends ReplayDone, marked ReplayLost when the ring
+// has dropped records (its first is past 1). That covers a ring that
+// wrapped while the earlier daemon was still attached, whose first is not
+// past the record after skipTo: the replay rebuilds the turn state from the
+// ring alone, so a turn start that left it is lost all the same.
 func (h *holderChild) replayUntil(first, target uint64) {
 	h.mu.Lock()
 	h.target, h.targetSet = target, true
-	h.wrapped = first > h.skipTo+1
+	h.wrapped = first > 1
 	h.mu.Unlock()
 	h.checkReplayed()
 }

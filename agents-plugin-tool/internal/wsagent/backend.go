@@ -190,8 +190,8 @@ type Event struct {
 	LineEnd bool
 	// ReplayDone (no other part but ReplayLost): every record the holder
 	// held when the daemon attached again has been delivered. ReplayLost
-	// marks a replay whose ring no longer began right after the records the
-	// runner applied under an earlier daemon.
+	// marks a replay whose ring has dropped records (its first is past 1),
+	// so the turn state it rebuilds may miss a turn boundary.
 	ReplayDone bool
 	ReplayLost bool
 	// ReplayGap (no other part): records left the holder's ring before
