@@ -5,6 +5,8 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+
+	"github.com/kang-sw/devenv/internal/wsi18n"
 )
 
 // codeBody is a topic body with a three-line block, a one-line block, and a
@@ -52,8 +54,9 @@ func TestCodeBlocksScriptReachesEveryPageAndFrame(t *testing.T) {
 // rendered topic body: a multi-line block gets a gutter with one number per
 // line, a one-line block gets none, both get a copy button, a diagram is left
 // alone, a second run wires nothing twice, the copy action takes the code
-// text without numbers and shows the done label before returning, and a
-// board bound later (wbBindBoard) is wired too.
+// text without numbers and shows the done label before returning, both in the
+// page's language, and a board bound later (wbBindBoard) is wired too, with
+// the English fallback where the page has no wsT.
 func TestCodeBlocksGetNumbersAndCopyUnderNode(t *testing.T) {
 	node, err := exec.LookPath("node")
 	if err != nil {
@@ -65,7 +68,9 @@ func TestCodeBlocksGetNumbersAndCopyUnderNode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	script := "var BOARD = " + string(board) + ";\n" + formPrelude + `
+	script := "var BOARD = " + string(board) + ";\n" + formPrelude + string(wsi18n.SubsetScript("ko", codeKeyPrefix)) + `
+// A page's wsT is a global as well as window.wsT.
+var wsT = window.wsT;
 // What code.js needs beyond the form's mini DOM: building and moving nodes,
 // a body to hang the scratch textarea on, and a copy that records what the
 // textarea held.
@@ -96,7 +101,7 @@ check("the gutter is hidden from readers", multi.querySelector("span.ln").getAtt
 check("a one-line block has no gutter", [single.classList.contains("cb-ln"), single.querySelectorAll("span.ln").length], [false, 0]);
 check("the pre sits in its wrapper before the button", [multi.children[0].tag, multi.children[1].tag], ["pre", "button"]);
 var btn = multi.querySelector("button.cb-copy");
-check("the button copies, in Korean", [btn.getAttribute("title"), btn.getAttribute("aria-label")], ["복사", "복사"]);
+check("the button copies, in the page's language", [btn.getAttribute("title"), btn.getAttribute("aria-label")], ["복사", "복사"]);
 check("a one-line block has its button", single.querySelectorAll("button.cb-copy").length, 1);
 
 // A second pass over the same nodes wires nothing again.
@@ -119,6 +124,9 @@ check("a failed copy does not claim success", [cur.className, timers.length], ["
 check("no scratch textarea is left behind", document.body.children.length, 0);
 
 // A board bound later: a later wbBindBoard wires it and still binds the form.
+// This run has no wsT (a page without the client table), so the button takes
+// the English fallback.
+delete window.wsT;
 var later = new E("div", { "class": "md" }), lp = new E("pre"), lc = new E("code");
 lc.textContent = "a\nb\n"; lp.appendChild(lc); later.appendChild(lp); root.appendChild(later);
 var bound = [];
@@ -127,6 +135,7 @@ window.wbBindBoard = function (r) { bound.push(r); };
 window.wbBindBoard(later);
 check("the form binding still runs", [bound.length, bound[0] === later], [1, true]);
 check("the later board is wired", [later.querySelectorAll(".cb-ln").length, later.querySelector("span.ln").textContent], [1, "1\n2"]);
+check("without wsT the button reads the fallback", later.querySelector("button.cb-copy").getAttribute("title"), "Copy");
 })();
 if (bad.length) { console.log(bad.join("\n")); process.exit(1); }
 console.log("ok");

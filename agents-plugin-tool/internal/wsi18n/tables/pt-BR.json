@@ -1316,6 +1316,8 @@
   "js.wb.ago.hour": "há {0} h",
   "js.wb.ago.min": "há {0} min",
   "js.wb.ago.now": "agora mesmo",
+  "js.wb.copy": "Copiar",
+  "js.wb.copy.done": "Copiado",
   "js.wb.tag.announced": "Padrão anunciado — tem uma única resposta, que decorre de restrições existentes, decisões anteriores ou convenções do projeto; basta confirmar.",
   "js.wb.tag.policy": "Pergunta de diretriz — depende das suas preferências, prioridades ou direção do produto; escolha uma opção.",
   "js.wb.tag.technical": "Decisão técnica — escolha do agente por motivos técnicos, independente das suas preferências; a justificativa está no item; responda ok, a menos que discorde.",
