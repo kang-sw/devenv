@@ -22,6 +22,9 @@
 //     for steering under a new name, and removes the claim. A steered entry
 //     is still held (cancel still takes it), but no later send merges into
 //     it, so a promoted message never absorbs text the user did not promote.
+//     The new name keeps the entry's stamp (only its random suffix changes),
+//     so a steered entry a full drain takes keeps its place in order: text
+//     sent before a held command still reaches the session before it.
 //   - Interrupt claims every held message entry, steered or not, removes
 //     them, and writes an interrupt entry, returning the claimed messages so
 //     the page can put them back in its composer.
@@ -654,6 +657,12 @@ func randomHex(n int) (string, error) {
 // writeEntry commits entry under a fresh name in dir through temp+rename, so
 // no reader sees a partial entry.
 func writeEntry(dir string, entry Entry) (string, error) {
+	return writeEntryAt(dir, entry, nextStamp().Format(stampLayout))
+}
+
+// writeEntryAt is writeEntry under the given stamp with a fresh random
+// suffix, so the entry sorts where an entry of that stamp does.
+func writeEntryAt(dir string, entry Entry, stamp string) (string, error) {
 	raw, err := json.Marshal(entry)
 	if err != nil {
 		return "", err
@@ -662,7 +671,7 @@ func writeEntry(dir string, entry Entry) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	name := nextStamp().Format(stampLayout) + "-" + suffix + ".json"
+	name := stamp + "-" + suffix + ".json"
 	tmp, err := os.CreateTemp(dir, ".tmp-*")
 	if err != nil {
 		return "", fmt.Errorf("create inbox temp file: %w", err)
@@ -834,7 +843,8 @@ func Steer(dir, name string) (string, error) {
 		return name, nil
 	}
 	entry.Steer = true
-	steered, err := writeEntry(dir, entry)
+	// The same stamp keeps the entry's place among the held entries.
+	steered, err := writeEntryAt(dir, entry, name[:strings.LastIndexByte(name, '-')])
 	if err != nil {
 		// Put the claimed entry back so the message is not lost.
 		_ = rename(claimed, filepath.Join(dir, name))

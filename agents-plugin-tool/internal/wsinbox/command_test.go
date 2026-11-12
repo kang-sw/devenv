@@ -2,6 +2,7 @@ package wsinbox
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -136,5 +137,25 @@ func TestDrainKeepsACommandInOrder(t *testing.T) {
 	}
 	if recs[0].Entry.Text() != "A" || recs[1].Entry.Command == nil || recs[1].Entry.Text() != "/compact" || recs[2].Entry.Text() != "B" {
 		t.Fatalf("drained order = %q %q %q", recs[0].Entry.Text(), recs[1].Entry.Text(), recs[2].Entry.Text())
+	}
+}
+
+// TestSteeredTextKeepsItsPlaceBeforeACommand pins that a steer keeps the
+// entry's stamp: text sent before a held command, steered but not taken
+// mid-turn, still drains ahead of the command.
+func TestSteeredTextKeepsItsPlaceBeforeACommand(t *testing.T) {
+	dir := t.TempDir()
+	a, _ := send(t, dir, "A")
+	sendCommand(t, dir, "compact", "")
+	steered, err := Steer(dir, a)
+	if err != nil || steered == a {
+		t.Fatalf("Steer = %s, %v", steered, err)
+	}
+	if steered[:strings.LastIndexByte(steered, '-')] != a[:strings.LastIndexByte(a, '-')] {
+		t.Fatalf("steered name %s lost the stamp of %s", steered, a)
+	}
+	recs, err := Drain(dir)
+	if err != nil || len(recs) != 2 || recs[0].Name != steered || recs[1].Entry.Command == nil {
+		t.Fatalf("Drain = %+v, %v; want the steered text first", recs, err)
 	}
 }
