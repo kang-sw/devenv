@@ -150,6 +150,26 @@ var fresh = card("Cf", 45);
 el = boardOf([t60, t40, t10]);
 settle(el, order([t60, t40, t10], [fresh], at), isCard);
 check("a new card enters at its place", names(el.kids), ["T60", "Cf", "T40", "T10"]);
+// Where the browser has Element.moveBefore, a kept node moves with it (its
+// frames stay loaded) and a new node still enters with insertBefore, which
+// moveBefore refuses for a node from outside the board; a moveBefore that
+// throws falls back to insertBefore.
+El.prototype.moveBefore = function (n, ref) {
+  if (n.parentNode !== this) throw new Error("moveBefore: not a child");
+  if (this.refuse) throw new Error("moveBefore: refused");
+  this.kids.splice(this.kids.indexOf(n), 1); this.moved.push(n.name);
+  this.kids.splice(ref ? this.kids.indexOf(ref) : this.kids.length, 0, n);
+};
+var t30 = new N("T30");
+el = boardOf([t40, t10, a.el]); el.moved = [];
+settle(el, [t10, t30, a.el, t40], isCard);
+check("with moveBefore the board settles the same", names(el.kids), ["T10", "T30", "Ca", "T40"]);
+check("kept topics move with moveBefore", el.moved, ["T10", "T40"]);
+check("and the new one enters with insertBefore", el.moves, []);
+el = boardOf([t40, t10]); el.moved = []; el.refuse = true;
+settle(el, [t10, t40], isCard);
+check("a refused moveBefore falls back to insertBefore", [names(el.kids), el.moved, el.moves], [["T10", "T40"], [], ["T10"]]);
+delete El.prototype.moveBefore;
 process.stdout.write(bad.join("\n"));
 `)
 }

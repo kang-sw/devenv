@@ -90,19 +90,28 @@
   // first, so the kept ones that stay in order are never moved (moving a
   // frame reloads it). A fixed node already in el is never moved either:
   // the nodes standing before it that are wanted after it move past it.
+  // A node already in el moves with Element.moveBefore where the browser
+  // has it, which keeps its frames loaded; a new node, or a browser
+  // without it, takes insertBefore. Either way the same nodes move.
   function settle(el, want, fixed) {
     var keep = new Set(want);
+    function put(n, ref) {
+      if (el.moveBefore && n.parentNode === el) {
+        try { el.moveBefore(n, ref); return; } catch (e) { /* insertBefore below */ }
+      }
+      el.insertBefore(n, ref);
+    }
     Array.prototype.slice.call(el.childNodes).forEach(function (n) { if (!keep.has(n)) el.removeChild(n); });
     var cur = el.firstChild;
     want.forEach(function (n) {
       if (n === cur) { cur = cur.nextSibling; return; }
       if (fixed(n) && n.parentNode === el) {
         var after = n.nextSibling;
-        while (cur !== n) { var next = cur.nextSibling; el.insertBefore(cur, after); cur = next; }
+        while (cur !== n) { var next = cur.nextSibling; put(cur, after); cur = next; }
         cur = n.nextSibling;
         return;
       }
-      el.insertBefore(n, cur);
+      put(n, cur);
     });
   }
   // headTime is an open time that puts a card at the head of the unpinned
