@@ -4494,8 +4494,11 @@
   // last one) shows a "+" badge at the left edge with a guide line. The places a new item can
   // take there (insOpts) run from b's depth (the row below must stay below) to one level under
   // a (its first child); the pointer's x over the left gutter picks the one whose badge is
-  // nearest, left to right = shallow to deep. Dim ticks at each shallower level's indent (.hdep,
-  // drawn from --ind alone) show which level the badge lands under. A click opens the input row in the gap.
+  // nearest, left to right = shallow to deep. A marker at every other level slot from the root to
+  // one under a (.hdep, insMarks) shows where the badge can move: a dim tick where a place is, a
+  // small x where none is (above b's depth, or under a parent that cannot take the item); the slots
+  // deeper than the badge are drawn too, and the guide line starts past the deepest. A click opens
+  // the input row in the gap.
   var IND = 16, INS_EDGE = 5; // a level's indent (tracker.css .ir-main, .hins), the gap's half height
   var HV = null; // the shown insert: { list, a, b, y, opts, pick }
   function rowDepth(el) { return el ? Number(el.style.getPropertyValue('--ind')) || 0 : 0; }
@@ -4523,6 +4526,17 @@
     opts.forEach(function (o, i) { if (Math.abs(rel - (12 + o.depth * IND)) < Math.abs(rel - (12 + opts[best].depth * IND))) best = i; });
     return best;
   }
+  // the depth markers' markup for the shown insert: one per level slot 0..max but the badge's
+  var INS_X = '<svg viewBox="0 0 8 8"><path d="M1.5 1.5l5 5M6.5 1.5l-5 5"/></svg>';
+  function insMarks(opts, pick, max) {
+    var h = '';
+    for (var d = 0; d <= max; d++) {
+      if (d === pick) continue;
+      var ok = opts.some(function (o) { return o.depth === d; });
+      h += '<span class="' + (ok ? 'hk' : 'hx') + '" style="--d:' + d + '">' + (ok ? '' : INS_X) + '</span>';
+    }
+    return h;
+  }
   function insWidth(opts) { return 4 + opts[opts.length - 1].depth * IND + 40; } // the gutter: past the deepest badge by a little
   // pointer at (x, y) over row el in list: the gap it is near, or null
   function insGap(list, el, y) {
@@ -4544,9 +4558,12 @@
         '<button type="button" class="hhit" tabindex="-1"' + attr('act', 'ins') + ' aria-label="' + wsT("js.tk.ins.aria") + '"></button></div>');
       s = list.querySelector(':scope > .hins');
     }
-    var o = opts[HV.pick];
+    var o = opts[HV.pick], max = g.a ? rowDepth(g.a) + 1 : 0, marks = insMarks(opts, o.depth, max), dep = s.querySelector('.hdep');
     s.style.top = Math.round(g.y - INS_EDGE) + 'px';
     s.style.setProperty('--ind', o.depth);
+    s.style.setProperty('--hmax', max);
+    s.classList.toggle('hdeep', max > o.depth);
+    if (dep.innerHTML !== marks) dep.innerHTML = marks;
     s.querySelector('.hhit').style.width = insWidth(opts) + 'px';
     s.hidden = false;
     list.classList.add('hins-on');

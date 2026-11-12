@@ -154,18 +154,44 @@ func TestTrackerPriorityChipAndLabelPicker(t *testing.T) {
 	}
 }
 
-// TestTrackerInsertDepthMarkers pins the hover insert's depth markers: the
-// indicator carries a tick strip drawn from its --ind alone (one dim tick
-// per shallower level), visual only, beside the badge and the line.
+// TestTrackerInsertDepthMarkers pins the hover insert's depth markers: every
+// level slot from the root to one under the row above, but the badge's own,
+// carries a marker; a tick where a place is (insOpts), an x where none is.
+// The guide line starts past the deepest slot when the badge is shallower.
 func TestTrackerInsertDepthMarkers(t *testing.T) {
-	if show := trackerFn(t, `function insShow\(list, g, x\)`, false); !strings.Contains(show, `'<div class="hins" aria-hidden="true"><span class="hdep"></span><span class="hl"></span>`) {
-		t.Errorf("insShow draws no depth markers:\n%s", show)
+	show := trackerFn(t, `function insShow\(list, g, x\)`, false)
+	for _, want := range []string{
+		`'<div class="hins" aria-hidden="true"><span class="hdep"></span><span class="hl"></span>`,
+		`max = g.a ? rowDepth(g.a) + 1 : 0, marks = insMarks(opts, o.depth, max)`,
+		`s.style.setProperty('--hmax', max);`,
+		`s.classList.toggle('hdeep', max > o.depth);`,
+	} {
+		if !strings.Contains(show, want) {
+			t.Errorf("insShow lacks %q:\n%s", want, show)
+		}
 	}
+	runTrackerCases(t, "insert depth markers", trackerCheckJS+"var INS_X = 'X';\n"+trackerFn(t, `function insMarks\(opts, pick, max\)`, false)+`
+function o(ds) { return ds.map(function (d) { return { depth: d }; }); }
+check('shallower ticks, deeper x where a parent cannot take the item', insMarks(o([0, 2, 3]), 0, 3),
+  '<span class="hx" style="--d:1">X</span><span class="hk" style="--d:2"></span><span class="hk" style="--d:3"></span>');
+check('levels above the row below are blocked', insMarks(o([1, 2]), 2, 2),
+  '<span class="hx" style="--d:0">X</span><span class="hk" style="--d:1"></span>');
+check('the top of the list: only the badge slot, no markers', insMarks(o([0]), 0, 0), '');
+done();
+`)
 	css, err := dashboardFS.ReadFile("assets/tracker.css")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(css), ".tk .hins .hdep { position: absolute; top: 4px; height: 2px; left: 8px; width: calc(var(--ind, 0) * 16px); pointer-events: none;") {
-		t.Error("tracker.css lacks the depth markers' strip (one 16px slot per shallower level, no pointer events)")
+	for _, want := range []string{
+		".tk .hins.hdeep .hl { left: calc(4px + var(--hmax, 0) * 16px + 16px); }",
+		".tk .hins .hdep { position: absolute; inset: 0; pointer-events: none; }",
+		".tk .hins .hk, .tk .hins .hx { position: absolute; left: calc(8px + var(--d, 0) * 16px); width: 8px; }",
+		"background: color-mix(in srgb, var(--wb-fg) 34%, transparent)",
+		"color: color-mix(in srgb, var(--wb-fail) 60%, transparent)",
+	} {
+		if !strings.Contains(string(css), want) {
+			t.Errorf("tracker.css lacks the depth markers' %q", want)
+		}
 	}
 }
