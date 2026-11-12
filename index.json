@@ -416,7 +416,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-12T06:58:49Z"
+        "touched_at": "2026-11-12T06:59:30Z",
+        "impl": {
+          "branch": "impl/develop/bunt-puppy-hulk"
+        }
       }
     },
     "261112-feat-ws-dashboard-pin-column": {
