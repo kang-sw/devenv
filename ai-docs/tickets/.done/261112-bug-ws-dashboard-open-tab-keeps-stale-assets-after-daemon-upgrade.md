@@ -2,6 +2,7 @@
 title: "Dashboard: an open tab keeps running the old page script after a daemon upgrade"
 related:
   261112-bug-ws-dashboard-interrupt-badge-stuck-on-back-to-back-turn: the fix looked broken live because the tab ran the old script
+completed: 2026-11-12
 ---
 
 # Dashboard: an open tab keeps running the old page script after a daemon upgrade
@@ -46,3 +47,8 @@ otherwise.
 - Dev asset mode (`internal/wsdashboard/devassets.go`) must not reload tabs in
   a loop; the identity there follows the served files.
 - Heavy Go builds and tests run through `~/.local/bin/ws-rgo` on this machine.
+
+
+## Resolution (2026-11-12)
+
+Fixed in 978c3d79a (merge b6d4baf9d): every stream connect first sends the content hash of the page assets, and a page rendered with another one reloads, or banners while holdsDraft() holds unsent work, with a per-tab sessionStorage guard against reload loops. Covered by Go tests and a node-run page test. A live auto reload after an asset-changing daemon replacement was not confirmed; the user judged it unimportant and accepted closing (board (30)).
