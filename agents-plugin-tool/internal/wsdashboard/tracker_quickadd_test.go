@@ -453,6 +453,180 @@ done();
 `)
 }
 
+// TestTrackerRowPartsOpenTheirPickers pins the list row's click targets:
+// only the title opens the item window; a click elsewhere on the row only
+// focuses it (Enter on the focused row still opens it); the assignee
+// avatars, the priority, and the due date open the item menu's assign,
+// pri, and due steps when the viewer may change them (canAssign, canEdit on
+// a task) and stay plain read-only spans otherwise; an empty assignee or
+// due slot the viewer may set holds a dim icon, and an editor gets a label
+// icon opening the labels step while the label chips keep searching. In
+// selection mode a part's click stays the row's selection toggle, and the
+// labels step opened from a row re-anchors on that row's icon after a
+// toggle redraws the list; the scroll a render's restore fires keeps the
+// item menu while its opener stays put.
+func TestTrackerRowPartsOpenTheirPickers(t *testing.T) {
+	irow := trackerFn(t, `function irow\(o\)`, false)
+	for _, want := range []string{
+		"ed = canEdit(it) && it.kind !== 'topic'",
+		"labelChips(it, 'lsearch') + warnHtml(it) + dotHtml(it) + labelEdHtml(it) + '<span class=\"grow\"></span>'",
+		"whoHtml(it, canAssign(it, VS.viewer.member)) + priHtml(it, ed) + dueHtml(it, st, ed)",
+	} {
+		if !strings.Contains(irow, want) {
+			t.Errorf("irow lacks %q", want)
+		}
+	}
+	steps := trackerFn(t, `var STEPS = `, true)
+	for _, k := range []string{"assign: 1", "pri: 1", "due: 1", "labels: 1"} {
+		if !strings.Contains(steps, k) {
+			t.Errorf("STEPS lacks %q, so a row part's act opens no item menu step", k)
+		}
+	}
+	click := trackerBlock(t, `document\.addEventListener\('click', function \(e\) \{`, `\n    document\.addEventListener\('submit'`)
+	for _, want := range []string{
+		"else if (STEPS[k]) itemMenu(d.item, a, null, { step: k, op: d.op, who: d.who, req: d.req });",
+		"var prow = mselOn() && a.classList.contains('rp') && a.closest('#card-items .irow');\n        if (prow) mselClick(prow, e);",
+		"if (row && !rowClick(row, t)) { e.preventDefault(); return; }",
+	} {
+		if !strings.Contains(click, want) {
+			t.Errorf("the click handler lacks %q", want)
+		}
+	}
+	if i, j := strings.Index(click, "rowClick(row, t)"), strings.Index(click, "var it = t.closest('[data-item]');"); i < 0 || j < 0 || i > j {
+		t.Error("a row click does not stop before the [data-item] fallback that opens the item window")
+	}
+	if !strings.Contains(trackerBlock(t, `// keyboard: a focused row shows`, `\n`+"      // ArrowRight"), "if (e.key === 'Enter' && e.target.classList && e.target.classList.contains('irow') && own(e.target)) { e.preventDefault(); showItem(e.target.getAttribute('data-item')); return; }") {
+		t.Error("Enter on a focused row no longer opens its item window")
+	}
+
+	src := trackerFn(t, `function esc\(s\)`, false) + trackerFn(t, `function attr\(k, v\)`, true) + trackerFn(t, `function tipAttr\(text\)`, true) +
+		trackerFn(t, `function labelOf\(id\)`, true) + trackerFn(t, `function labelChip\(l, act, extra\)`, false) + trackerFn(t, `function labelChips\(it, act\)`, false) +
+		trackerFn(t, `function partHtml\(cls, tip, inner, it, step\)`, false) + trackerFn(t, `function partIcon\(icon\)`, true) +
+		trackerFn(t, `function whoHtml\(it, ed\)`, false) + trackerFn(t, `function priHtml\(it, ed\)`, false) + trackerFn(t, `var ENDED = `, true) +
+		trackerFn(t, `function dueHtml\(it, st, ed\)`, false) + trackerFn(t, `function labelEdHtml\(it\)`, false) + trackerFn(t, `function dayNum\(d\)`, true) +
+		trackerFn(t, `function today\(\)`, true) + irow + trackerFn(t, `function rowClick\(row, t\)`, false) + trackerFn(t, `function labelStepRedraw\(\)`, false) +
+		trackerFn(t, `function openerMoved\(\)`, false)
+	if !strings.Contains(trackerBlock(t, `document\.addEventListener\('scroll', function \(e\) \{`, `\n    \}, true\);`), "&& openerMoved()) closeMenu(false);") {
+		t.Error("a scroll closes the item menu whether or not its opener moved")
+	}
+	runTrackerCases(t, "row parts", trackerCheckJS+`
+var VS = { now: '2026-11-12T09:00:00Z', viewer: { member: 'me', admin: false }, priority: { names: ['low', 'mid', 'high'], default: 1 },
+  labels: [{ id: 'L1', name: 'docs', color: '#111111' }], items: {} };
+var ui = { sel: null }, MSEEN = null, edit = {}, assign = {};
+function wsT(k) { return k; }
+function wsTn(k) { return k; }
+var SI = { info: function (s) { return { label: s }; } };
+function holders(it) { return it.hs; }
+function avHtml(id) { return '<i class="av">' + id + '</i>'; }
+function avRel() { return { t: '' }; }
+function nmo(id) { return id; }
+function stKey(it) { return it.status; }
+function mselHas() { return false; }
+function canMove() { return false; }
+function canEdit(it) { return !!edit[it.id]; }
+function canAssign(it) { return !!assign[it.id]; }
+function mcbHtml() { return ''; }
+function stBtn() { return '<st>'; }
+function openChip() { return ''; }
+function warnHtml() { return ''; }
+function dotHtml() { return ''; }
+function moreBtn() { return '<more>'; }
+function detailsHtml() { return ''; }
+`+src+`
+function has(s, x) { return s.indexOf(x) >= 0; }
+function item(id, o) { var x = { id: id, title: 'T ' + id, kind: 'task', status: 'todo', hs: [], labels: [], priority: 1, priorityLevel: 1, priorityName: 'mid', due: '' }; Object.keys(o || {}).forEach(function (k) { x[k] = o[k]; }); VS.items[id] = x; return x; }
+item('a', { hs: [{ to: 'kim', state: 'live' }], due: '2026-11-15', labels: ['L1'] });
+edit.a = assign.a = true;
+var ra = irow({ rk: 'r:a', item: 'a' });
+check('the title is the item window link', has(ra, '<a class="title" href="#" tabindex="-1" data-item="a">T a</a>'), true);
+check('the avatars open the assign step', has(ra, '<button type="button" class="who rp" data-act="assign" data-item="a" tabindex="-1" aria-haspopup="dialog"'), true);
+check('the priority opens the pri step', has(ra, '<button type="button" class="pri rp" data-act="pri" data-item="a" tabindex="-1" aria-haspopup="menu"'), true);
+check('the due date opens the due step', has(ra, '<button type="button" class="due2 soon rp" data-act="due" data-item="a" tabindex="-1" aria-haspopup="menu"'), true);
+check('a label chip still searches', has(ra, 'class="chip lbl" data-act="lsearch" data-label="L1"'), true);
+check('the label icon opens the labels step', has(ra, '<button type="button" class="rlab rpe rp" data-act="labels" data-item="a"'), true);
+check('filled slots carry no dim icon', [has(ra, 'who rpe'), has(ra, 'due2 rpe')], [false, false]);
+
+item('b');
+edit.b = assign.b = true;
+var rb = irow({ rk: 'r:b', item: 'b' });
+check('an empty assignee slot the viewer may set: the dim assign icon', has(rb, '<button type="button" class="who rpe rp" data-act="assign" data-item="b"') && has(rb, '#tki-assign'), true);
+check('an empty due slot the viewer may set: the dim calendar icon', has(rb, '<button type="button" class="due2 rpe rp" data-act="due" data-item="b"') && has(rb, '#tki-calendar'), true);
+
+item('c', { hs: [{ to: 'kim', state: 'live' }], due: '2026-12-24', labels: ['L1'] });
+var rc = irow({ rk: 'r:c', item: 'c' });
+check('no right: every part a plain span with its tooltip, no picker', [has(rc, '<span class="who" data-tip='), has(rc, '<span class="pri" data-tip='), has(rc, '<span class="due2" data-tip='), has(rc, 'data-act="assign"'), has(rc, 'data-act="pri"'), has(rc, 'data-act="due"'), has(rc, 'data-act="labels"'), has(rc, ' rp"')], [true, true, true, false, false, false, false, false]);
+item('d');
+var rd = irow({ rk: 'r:d', item: 'd' });
+check('no right, empty slots: quiet, no icon', [has(rd, '<span class="who"></span>'), has(rd, '<span class="due2"></span>'), has(rd, 'rpe')], [true, true, false]);
+edit.c = true;
+check('an editor who may not assign: priority and due open, the avatars stay inert', [has(irow({ rk: 'r:c', item: 'c' }), '<span class="who" data-tip='), has(irow({ rk: 'r:c', item: 'c' }), 'data-act="pri"')], [true, true]);
+
+item('t', { kind: 'topic', priorityName: '' });
+edit.t = assign.t = true;
+var rt = irow({ rk: 'r:t', item: 't' });
+check('a topic: the holder slot opens assign; no priority or due', [has(rt, 'data-act="assign"'), has(rt, 'data-act="pri"'), has(rt, 'data-act="due"'), has(rt, 'data-act="labels"')], [true, false, false, true]);
+VS.labels = [];
+check('no labels in the store: no label icon for a member', has(irow({ rk: 'r:a', item: 'a' }), 'data-act="labels"'), false);
+VS.viewer.admin = true;
+check('no labels in the store: an admin, who can add one, gets it', has(irow({ rk: 'r:a', item: 'a' }), 'data-act="labels"'), true);
+
+// rowClick over a fake row: the title goes on to open the item window, anything else only focuses the row
+var focused = 0, row = { focus: function () { focused++; } };
+function tgt(title) { return { closest: function (q) { return q === 'a.title' && title ? {} : null; } }; }
+check('a title click goes on to open the item window', [rowClick(row, tgt(true)), focused], [true, 0]);
+check('an empty-space click only focuses the row', [rowClick(row, tgt(false)), focused], [false, 1]);
+
+// the labels step opened from a row re-anchors on the redrawn row's label icon; from the property card on its button
+var closed = 0, drawn = 0, btn = null, MN, box = { innerHTML: '', querySelector: function () { return null; } };
+function closeMenu() { closed++; }
+function menuHtml() { drawn++; return ''; }
+function placeMenu() {}
+function $(id) { return id === 'tkmenu' ? box : null; }
+var CSS = { escape: function (s) { return s; } };
+function mkBtn(n) { return { n: n, attrs: {}, matches: function (q) { return q === '[data-act="labels"]'; }, setAttribute: function (k, v) { this.attrs[k] = v; }, getBoundingClientRect: function () { return { n: n }; } }; }
+var rowBtn = mkBtn('row'), cardBtn = mkBtn('card');
+var rowEl = { matches: function () { return false; }, querySelector: function (q) { return q === '[data-act="labels"]' ? rowBtn : null; } };
+var document = { querySelector: function (q) { return q === '[data-rk="r:a"]' ? rowEl : q === '#iw-plabels' ? cardBtn : null; } };
+VS.labels = [{ id: 'L1', name: 'docs', color: '#111111' }];
+MN = { item: 'a', back: '[data-rk="r:a"]' };
+labelStepRedraw();
+check('from a row: anchored on the row icon, kept open', [MN.backEl && MN.backEl.n, MN.rect.n, rowBtn.attrs['aria-expanded'], closed, drawn], ['row', 'row', 'true', 0, 1]);
+MN = { item: 'a', back: '#iw-plabels' };
+labelStepRedraw();
+check('from the property card: anchored on its button', [MN.backEl && MN.backEl.n, closed], ['card', 0]);
+edit.a = false;
+labelStepRedraw();
+check('the edit right gone: the step closes', closed, 1);
+
+function opener(top, left, on) { return { isConnected: on !== false, getBoundingClientRect: function () { return { top: top, left: left }; } }; }
+MN = { backEl: opener(100, 40), rect: { top: 100, left: 40 } };
+check('a scroll with the opener in place keeps the menu', openerMoved(), false);
+MN.backEl = opener(80, 40);
+check('a scroll that moved the opener closes it', openerMoved(), true);
+MN.backEl = opener(100, 40, false);
+check('a detached opener closes it', openerMoved(), true);
+MN = { backEl: null, rect: null };
+check('no opener closes it', openerMoved(), true);
+done();
+`)
+	css, err := dashboardFS.ReadFile("assets/tracker.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		".tk :where(button.rp) { font: inherit; color: inherit; border: 0; background: none; margin: 0; padding: 0; }",
+		".tk .irow:is(:hover, :focus-within, .sel) .rpe, .tk .rpe[aria-expanded=\"true\"] { visibility: visible; }",
+		".tk .irow:is(:hover, :focus-within, .sel) .rlab, .tk .rlab[aria-expanded=\"true\"] { display: inline-flex; }",
+	} {
+		if !strings.Contains(string(css), want) {
+			t.Errorf("tracker.css lacks %q", want)
+		}
+	}
+	if strings.Contains(string(css), "border-radius: 6px; cursor: pointer; }\n.tk .ir-main .title") {
+		t.Error("the whole row still shows the pointer though only its title opens the item window")
+	}
+}
+
 // TestTrackerAssignCompletionBelowTheViewer pins the assign popover's
 // completion for a target below the viewer (the store's write-time rule,
 // check.go checkWrite): such a target is always written with completion

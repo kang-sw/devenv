@@ -262,7 +262,7 @@ body.tk-paged .tk-drawer { display: none; }
 .tk .irow { position: relative; border-top: 1px solid var(--wb-muted); }
 .tk .irow:first-child, .tk .sub + .irow, .tk .tg-head + .irow, .tk .toolbar + .irow { border-top: 0; }
 .tk .irow:focus { outline: none; }
-.tk .ir-main { display: flex; align-items: center; gap: 7px; min-height: 30px; padding: 2px 4px 2px calc(4px + var(--ind, 0) * 16px); border-radius: 6px; cursor: pointer; }
+.tk .ir-main { display: flex; align-items: center; gap: 7px; min-height: 30px; padding: 2px 4px 2px calc(4px + var(--ind, 0) * 16px); border-radius: 6px; }
 .tk .ir-main .title { font-weight: 600; color: var(--wb-fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1 auto; }
 .tk .ir-main .ind { color: var(--wb-muted-fg); margin-right: -3px; }
 .tk .ir-acts { display: none; gap: 1px; flex: none; }
@@ -287,6 +287,7 @@ body.tk-paged .tk-drawer { display: none; }
 .tk .mcb[aria-checked="true"]::after { content: ""; position: absolute; left: 3px; top: 0; width: 3px; height: 7px; border: solid var(--wb-primary-fg); border-width: 0 1.5px 1.5px 0; transform: rotate(45deg); }
 .tk .irow.msel > .ir-main { background: color-mix(in srgb, var(--wb-primary) 10%, transparent); }
 .tk #card-items[data-msel] .irow { user-select: none; }
+.tk #card-items[data-msel] .ir-main { cursor: pointer; }
 /* the selection badge: centred atop the Items list, sticky in its scrolling body over a strip of
    its own (so at rest it covers no row), riding over the rows only while they scroll under it */
 .tk .mselbar { position: sticky; top: 0; z-index: 6; display: flex; justify-content: center; height: 22px; margin: -4px 0 2px; pointer-events: none; }
@@ -324,6 +325,20 @@ body.tk-paged .tk-drawer { display: none; }
 .tk .due2.now { color: var(--tk-warn); font-weight: 700; }
 .tk .due2.over { color: var(--tk-fail); font-weight: 700; }
 .tk .due2.ended { opacity: .6; }
+/* a row part the viewer may change (tracker.js partHtml): a button opening its own picker, laid out
+   as the read-only part it stands for (the reset stays below the part's own rules); an empty one is
+   a dim icon (.rpe) that shows on the row's hover, focus, or tap-selection and while its picker is
+   open; the label icon (.rlab) takes no room until then */
+.tk :where(button.rp) { font: inherit; color: inherit; border: 0; background: none; margin: 0; padding: 0; }
+.tk button.rp { height: 22px; align-items: center; border-radius: 5px; cursor: pointer; }
+.tk button.rp:hover, .tk button.rp[aria-expanded="true"] { background: color-mix(in srgb, var(--wb-primary) 10%, transparent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--wb-primary) 10%, transparent); }
+.tk button.rp:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: 1px; }
+.tk .rpe { visibility: hidden; color: var(--wb-muted-fg); }
+.tk .rpe .i { width: 13px; height: 13px; vertical-align: -2px; }
+.tk .rpe:hover, .tk .rpe[aria-expanded="true"] { color: var(--wb-primary); }
+.tk .irow:is(:hover, :focus-within, .sel) .rpe, .tk .rpe[aria-expanded="true"] { visibility: visible; }
+.tk .rlab { display: none; flex: none; width: 18px; justify-content: center; }
+.tk .irow:is(:hover, :focus-within, .sel) .rlab, .tk .rlab[aria-expanded="true"] { display: inline-flex; }
 .tk .wicon { display: inline-flex; flex: none; color: var(--tk-conc); }
 .tk .wicon.flag { color: var(--tk-fail); }
 .tk .udot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--wb-primary); }
