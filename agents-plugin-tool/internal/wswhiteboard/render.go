@@ -13,6 +13,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/kang-sw/devenv/internal/wsdevassets"
 	"github.com/kang-sw/devenv/internal/wsi18n"
@@ -648,14 +649,19 @@ func (d itemData) Stacked() bool {
 }
 
 // checkWord splits a check's answer at its first word: the word, lowered,
-// when it is "ok" or "no", and the text after it with the joining spaces and
-// punctuation trimmed; an answer starting with neither returns "" and the
-// whole answer, trimmed.
+// when it is "ok" or "no" standing alone or followed by punctuation ("no,
+// use A", "ok - one typo"), and the text after it with the joining spaces and punctuation
+// trimmed. Any other answer, "no problem" included, returns "" and the whole
+// answer, trimmed.
 func checkWord(answer string) (word, rest string) {
 	a := strings.TrimSpace(answer)
 	end := strings.IndexFunc(a, func(r rune) bool { return !unicode.IsLetter(r) })
 	if end < 0 {
 		end = len(a)
+	}
+	after := strings.TrimLeftFunc(a[end:], unicode.IsSpace)
+	if next, _ := utf8.DecodeRuneInString(after); after != "" && !unicode.IsPunct(next) {
+		return "", a
 	}
 	switch w := strings.ToLower(a[:end]); w {
 	case "ok", "no":

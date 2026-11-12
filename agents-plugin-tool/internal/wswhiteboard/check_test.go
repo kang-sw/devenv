@@ -184,6 +184,32 @@ func TestCheckRowsRenderTheirStates(t *testing.T) {
 	}
 }
 
+func TestCheckStampReadsALoneOkOrNo(t *testing.T) {
+	cases := map[string][2]string{
+		"ok":                   {"ok", ""},
+		"No":                   {"no", ""},
+		"no, use A":            {"no", "use A"},
+		"ok - minor typo":      {"ok", "minor typo"},
+		"no problem, ship it":  {"", "no problem, ship it"},
+		"okay":                 {"", "okay"},
+		"looks right, ship it": {"", "looks right, ship it"},
+	}
+	for answer, want := range cases {
+		d := itemData{ItemView: ItemView{Status: StatusAnswered, Answer: answer}}
+		if got := [2]string{d.CheckVerdict(), d.CheckReading()}; got != want {
+			t.Errorf("%q: verdict and reading %q, want %q", answer, got, want)
+		}
+	}
+	// A free-text answer renders as a ticked row with the text and no stamp.
+	st := &State{}
+	mustApply(t, st, addXML(ClassCheck, "t", "look")+`<wb:answer id="1" value="no problem, ship it">fine</wb:answer>`)
+	page := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
+	row := regexp.MustCompile(`<div class="crow[^"]*" id="item-1".*?</div>`).FindString(page)
+	if !strings.Contains(row, `class="crow done"`) || strings.Contains(row, `class="stamp"`) || !strings.Contains(row, `no problem, ship it</span>`) {
+		t.Fatalf("free-text answered check row:\n%s", row)
+	}
+}
+
 func TestClosedTopicFoldsItsChecksWithTheSettledItems(t *testing.T) {
 	st := checkBoard(t)
 	mustApply(t, st, `<wb:answer id="1" value="a">a</wb:answer><wb:answer id="2" value="ok">ok</wb:answer><wb:answer id="3" value="ok">ok</wb:answer><wb:topic name="t"><wb:close result="done"/></wb:topic>`)
