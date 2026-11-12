@@ -12,7 +12,8 @@
   // an image outside the session root, a request for its bytes
   // ({wbDoc: "img"}, see relay below); and a text selection, which the
   // dashboard's live board offers to add to the message as a mention
-  // ({wbDoc: "sel"}, see below).
+  // ({wbDoc: "sel"}, see below); and the host's rail key, Ctrl+`
+  // ({wbDoc: "rail"}, see the end).
   // A plain link needs no help: <base target="_blank"> opens it in a new tab.
   var d = document, body = d.querySelector(".doc-body");
 
@@ -178,5 +179,13 @@
   d.addEventListener("keydown", function (e) {
     var a = e.target && e.target.closest && e.target.closest("a[data-wl]:not([href])");
     if (a && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); link(a, e); }
+  });
+  // Ctrl+` (the host's rail key, same test): a key pressed in this frame
+  // reaches only this document, so the frame hands it to the host
+  // ({wbDoc: "rail"}), which decides whether the rail toggles.
+  d.addEventListener("keydown", function (e) {
+    if (e.code !== "Backquote" || !e.ctrlKey || e.altKey || e.metaKey || e.shiftKey || e.isComposing) return;
+    e.preventDefault();
+    post({ wbDoc: "rail" });
   });
 })();
