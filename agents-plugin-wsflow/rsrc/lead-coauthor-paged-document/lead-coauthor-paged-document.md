@@ -22,11 +22,11 @@ Authorship
   answer before passing one.
 
 Plan file
-- `plan.md` in the working folder is the authority for the outline, the
-  confirmed decisions with their `(nn)` IDs, the page-number map, and the
-  review-pending list. Record every user correction there as a decision.
-  After compaction, reread it before resuming, because the conversation no
-  longer holds that state.
+- `plan.md` in the working folder is the authority for the steps, the
+  confirmed decisions with their `(nn)` IDs, the page-number map of the pages
+  built so far, and the review-pending list. Record every user correction
+  there as a decision. After compaction, reread it before resuming, because
+  the conversation no longer holds that state.
 
 Tracking
 - `plan.md` and `document.html` share one fate, and the folder's own
@@ -51,7 +51,9 @@ Style
 A request to make a reusable template, rather than a document, takes
 `On: template`; every other request follows these steps.
 
-1. Discuss the topic: audience, purpose, and length or talk time.
+1. Discuss the topic: audience, purpose, and any length or talk-time limit.
+   Record a limit in `plan.md` as a reference only: it fixes no page count,
+   and you tell the user when the finished document exceeds it.
 2. Settle the form: a slide deck (16:9 landscape) or an A4 document
    (portrait); the structural elements (cover, part dividers, appendix, and
    so on); text density; and any reference document the user supplies.
@@ -69,12 +71,15 @@ A request to make a reusable template, rather than a document, takes
    `document.html` rather than linking the file, because the document must
    stand alone for PDF baking and when moved; record the template's name and
    location in `plan.md`.
-5. Discuss the overall order and direction of the document; once the user
-   confirms it, record it in `plan.md`.
-6. After the user confirms, build the document from the front, one or two
-   sections per round: write the pages, render-check each new page,
-   regenerate the progress section, and stop for the user's review. Apply the
-   corrections, record each in `plan.md`, and repeat.
+5. Discuss the document's steps: an ordered list of sections, each with its
+   purpose and the content it carries, and no page count; once the user
+   confirms them, record them in `plan.md`.
+6. Build the document from the front, one step per round: decide the step's
+   pages as you write them, render-check each new page, regenerate the
+   progress section, and stop for the user's review. When a step is large
+   enough that its split into pages is itself a question, propose the split
+   first and wait for the user. Apply the corrections, including splitting or
+   merging pages, record each in `plan.md`, and repeat.
 7. When the document is complete, ask whether to bake a PDF, and where and
    under what file name.
 8. Without a template, ask whether to save the document's look as a
@@ -154,13 +159,12 @@ Progress section
 - The document's last part, not formatted as a page and allowed to be long.
   Regenerate it from `plan.md` after each round. Write its labels in the
   document's language. Its structure, in order:
-  1. Eyebrow: `<checklist label> · <stage> (<done>/<total>)`, followed by a
-     small muted note that the section is hidden in print and presentation.
+  1. Eyebrow: `<checklist label> · <stage> (<done>/<total> steps)`, counting
+     steps, followed by a small muted note that the section is hidden in print and presentation.
   2. Title: one line such as "Overall structure and planned content".
-  3. A two-column list with one row per planned page (per section for an A4
-     document): the status marker, a bold label carrying the on-screen page
-     number once the page exists (none for an unbuilt page), and one line of
-     planned content. There are exactly three markers: `✓` done (green),
+  3. A two-column list with one row per step: the status marker, a bold
+     step label followed by the on-screen page range of its built pages (none
+     for an unbuilt step), and one line of the step's planned content. There are exactly three markers: `✓` done (green),
      `◐` under review (amber), `☐` not started (gray).
   4. Footer: a "Review pending" line naming pages by on-screen number and an
      "Open questions" line naming items by `(nn)` ID; omit a line that would
@@ -200,12 +204,12 @@ Progress section
   </style>
 
   <div class="progress">
-    <div class="p-eyebrow">Checklist · Drafting (2/4)<span>Hidden in print and presentation</span></div>
+    <div class="p-eyebrow">Checklist · Drafting (2/4 steps)<span>Hidden in print and presentation</span></div>
     <div class="p-title">Overall structure and planned content</div>
     <ul class="p-list">
       <li class="done"><span class="m">✓</span><span class="l">Cover<span class="pg">1</span></span><span>Title, audience, date</span></li>
       <li class="done"><span class="m">✓</span><span class="l">Agenda<span class="pg">2</span></span><span>Three parts and an appendix</span></li>
-      <li class="review"><span class="m">◐</span><span class="l">Part 1<span class="pg">3</span></span><span>Why the change</span></li>
+      <li class="review"><span class="m">◐</span><span class="l">Part 1<span class="pg">3–5</span></span><span>Why the change</span></li>
       <li class="todo"><span class="m">☐</span><span class="l">Part 2</span><span>How to apply it</span></li>
     </ul>
     <div class="p-foot">
