@@ -508,6 +508,26 @@ func (p *piProcess) SetEffort(effort string) error {
 	return nil
 }
 
+// TurnRunning asks pi's get_state whether a run is under way: isStreaming
+// stays set until agent_settled (a retry, a compaction, and a queued
+// continuation included), and isCompacting covers a compact command, whose
+// answer ends the runner's turn. An answer without isStreaming is an
+// error, not an idle harness.
+func (p *piProcess) TurnRunning() (bool, error) {
+	body, err := p.requestBody("get_state", map[string]any{"type": "get_state"}, controlTimeout)
+	if err != nil {
+		return false, err
+	}
+	var d struct {
+		IsStreaming  *bool `json:"isStreaming"`
+		IsCompacting bool  `json:"isCompacting"`
+	}
+	if json.Unmarshal(body, &d) != nil || d.IsStreaming == nil {
+		return false, fmt.Errorf("pi's get_state answer reports no isStreaming: %.200s", body)
+	}
+	return *d.IsStreaming || d.IsCompacting, nil
+}
+
 // piMapper maps Pi's RPC output to runner events: the tool loadout of each
 // system message to the tool check, assistant text to final replies, tool
 // calls to the lead's batch (one per assistant message), compaction to
@@ -590,7 +610,7 @@ func (m *piMapper) mapLine(line []byte, replies lineReplies) []Event {
 	switch l.Type {
 	case "response":
 		if l.ID != "" {
-			replies.answer(l.ID, controlAnswer{ok: l.Success, err: l.Error})
+			replies.answer(l.ID, controlAnswer{ok: l.Success, err: l.Error, body: l.Data})
 		}
 		switch l.Command {
 		case "prompt":

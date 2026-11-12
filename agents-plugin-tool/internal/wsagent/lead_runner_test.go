@@ -941,6 +941,9 @@ func TestLeadRejoinOfAWrappedRingHoldsInput(t *testing.T) {
 	if strings.Count(h.log.String(), "left its ring") != 1 {
 		t.Fatalf("the loss should be logged once:\n%s", h.log.String())
 	}
+	if strings.Contains(h.log.String(), "whether a turn runs") || len(h.holders.inputs(holder, "get_state")) != 0 {
+		t.Fatalf("a claude lead is not asked whether a turn runs:\n%s", h.log.String())
+	}
 }
 
 // TestLeadRejoinOfARingThatWrappedWhileAttachedHoldsInput: a long turn
@@ -1049,6 +1052,108 @@ func TestLeadRejoinGapHoldsInputAndDropsAPartialLine(t *testing.T) {
 	}
 	h.holders.out(holder, replyLine("u2", "second"), resultLine(), stateLine(HarnessIdle))
 	eventually(t, "the held message as the next turn", func() bool { return slices.Equal(h.userInputs(holder), []string{"one", "two"}) })
+}
+
+// piHeldRejoin runs a pi lead through one turn, restarts the daemon while
+// the idle lead's subagent widget resends push every turn boundary out of
+// the ring, and rejoins: the rejoin takes the turn as running, a message
+// sent then is held, and the rejoin asks pi whether a turn runs. It
+// returns the get_state ask's request id.
+func piHeldRejoin(t *testing.T) (h *leadHarness, id, holder, ask string) {
+	t.Helper()
+	h = newLeadHarness(t).start()
+	id = h.lead(BackendPi, LeadOptions{}).ID
+	h.send(id, "one")
+	holder = h.holder(id)
+	h.holders.out(holder, `{"type":"agent_start"}`,
+		`{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"hi"}],"stopReason":"stop"}}`,
+		`{"type":"agent_settled"}`)
+	h.idle(id)
+	h.runner.Close()
+	h.holders.restart()
+	resend := string(piWidgetLine(piAgentsWidgetKey, `{"kind":"agent","agentId":"child-1","label":"audit","status":"done","caption":"worker"}`))
+	h.holders.out(holder, resend, resend, resend)
+	h.holders.trim(holder, h.holders.records(holder)-2)
+	h.start()
+	eventually(t, "the rejoin to take the turn as running", func() bool {
+		st := h.state(id)
+		return st.Process && st.Status == StatusRunning
+	})
+	h.send(id, "two")
+	eventually(t, "the get_state ask", func() bool { return len(h.holders.inputs(holder, "get_state")) == 1 })
+	var d struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal([]byte(h.holders.inputs(holder, "get_state")[0]), &d); err != nil || d.ID == "" {
+		t.Fatalf("get_state ask = %s", h.holders.inputs(holder, "get_state")[0])
+	}
+	if got := piPrompts(h, holder); !slices.Equal(got, []string{"one"}) || h.state(id).Held != 1 {
+		t.Fatalf("the message waits for the answer: prompts %q, state %+v", got, h.state(id))
+	}
+	return h, id, holder, d.ID
+}
+
+// piPrompts are the messages of the prompt lines written to the holder's
+// child.
+func piPrompts(h *leadHarness, holder string) []string {
+	var out []string
+	for _, line := range h.holders.inputs(holder, "prompt") {
+		var d struct {
+			Message string `json:"message"`
+		}
+		_ = json.Unmarshal([]byte(line), &d)
+		out = append(out, d.Message)
+	}
+	return out
+}
+
+func piStateAnswer(ask string, streaming bool) string {
+	return jsonLine(map[string]any{"type": "response", "id": ask, "command": "get_state", "success": true, "data": map[string]any{"isStreaming": streaming, "isCompacting": false, "messageCount": 2}})
+}
+
+// TestPiLeadRejoinOfAWrappedRingAsksWhetherATurnRuns: a pi lead's rejoin
+// that cannot tell from its replay whether a turn runs asks pi, and an idle
+// answer ends the held turn: the held message goes once.
+func TestPiLeadRejoinOfAWrappedRingAsksWhetherATurnRuns(t *testing.T) {
+	h, id, holder, ask := piHeldRejoin(t)
+	h.holders.out(holder, piStateAnswer(ask, false))
+	eventually(t, "the held message as the next turn", func() bool { return slices.Equal(piPrompts(h, holder), []string{"one", "two"}) })
+	h.holders.out(holder, `{"type":"agent_start"}`, `{"type":"agent_settled"}`)
+	h.idle(id)
+	if got := piPrompts(h, holder); len(got) != 2 || h.state(id).Held != 0 || len(h.holders.inputs(holder, "get_state")) != 1 {
+		t.Fatalf("the held message goes once, and pi is asked once: prompts %q, state %+v", got, h.state(id))
+	}
+	if !strings.Contains(h.log.String(), "the harness reports no turn running") {
+		t.Fatalf("the answer should be logged:\n%s", h.log.String())
+	}
+}
+
+// TestPiLeadRejoinProbeThatSaysRunningOrFailsKeepsTheHold: a running answer
+// or a refused ask keeps the message held until pi ends the turn.
+func TestPiLeadRejoinProbeThatSaysRunningOrFailsKeepsTheHold(t *testing.T) {
+	for name, answer := range map[string]func(ask string) string{
+		"running": func(ask string) string { return piStateAnswer(ask, true) },
+		"refused": func(ask string) string {
+			return jsonLine(map[string]any{"type": "response", "id": ask, "command": "get_state", "success": false, "error": "boom"})
+		},
+		"no run state": func(ask string) string {
+			return jsonLine(map[string]any{"type": "response", "id": ask, "command": "get_state", "success": true, "data": map[string]any{"messageCount": 2}})
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h, id, holder, ask := piHeldRejoin(t)
+			h.holders.out(holder, answer(ask))
+			eventually(t, "the answer to be taken", func() bool {
+				log := h.log.String()
+				return strings.Contains(log, "the harness reports a turn running") || strings.Contains(log, "ask the harness whether a turn runs")
+			})
+			if got := piPrompts(h, holder); !slices.Equal(got, []string{"one"}) || h.state(id).Held != 1 || h.state(id).Status != StatusRunning {
+				t.Fatalf("the message stays held: prompts %q, state %+v", got, h.state(id))
+			}
+			h.holders.out(holder, `{"type":"agent_settled"}`)
+			eventually(t, "the held message at the turn's end", func() bool { return slices.Equal(piPrompts(h, holder), []string{"one", "two"}) })
+		})
+	}
 }
 
 // TestLeadAnsweredPromptStaysAnsweredAcrossADaemonRestart: the answer to a

@@ -896,12 +896,16 @@ func turnLines(session, uuid, text string) []string {
 }
 
 // runLead creates a claude lead, sends its first message, and returns the
-// conversation and the holder its process runs under.
+// conversation and the holder its process runs under once the message is
+// written: the holder is recorded before the message is taken from the
+// inbox, so a message sent before then would join the first turn.
 func (h *leadHarness) runLead(text string) (id, holder string) {
 	h.t.Helper()
 	id = h.lead(BackendClaude, LeadOptions{}).ID
 	h.send(id, text)
-	return id, h.holder(id)
+	holder = h.holder(id)
+	eventually(h.t, "the first message", func() bool { return slices.Equal(h.userInputs(holder), []string{text}) })
+	return id, holder
 }
 
 // idle waits for the conversation to run no turn.

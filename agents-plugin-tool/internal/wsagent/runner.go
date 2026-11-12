@@ -933,10 +933,13 @@ type conv struct {
 	// end after the last such loss. wrapHold is set from a rejoin that lost
 	// records with no turn boundary after them (replayDone) until the
 	// harness's next turn end: the turn is taken as running, since its
-	// start may be among the lost records, and nothing is submitted.
+	// start may be among the lost records, and nothing is submitted. A
+	// harness that can tell is asked whether a turn runs (probeWrapHold);
+	// wrapTurnSeen marks a turn start seen since the ask.
 	replayGap      bool
 	replayBoundary bool
 	wrapHold       bool
+	wrapTurnSeen   bool
 	// seq is the last holder record sequence applied whole; seqDirty that
 	// the record does not hold it yet, and ringDirty that a ring entry was
 	// written since, which makes the next line end persist it at once.
@@ -1746,6 +1749,7 @@ func (c *conv) replayDone(lost bool) {
 			fmt.Fprintf(c.r.opts.Log, "agent %s: records of holder %s left its ring before this daemon replayed them, with no turn boundary after them; the turn is taken as running and nothing is submitted until the harness ends one\n", c.rec.ReplyID, c.rec.HolderID)
 			c.wrapHold = true
 			c.beginTurn(false)
+			c.probeWrapHold()
 		}
 	}
 	c.checkAction(false)
@@ -1759,6 +1763,46 @@ func (c *conv) replayDone(lost bool) {
 		if !c.turn {
 			c.armIdle()
 		}
+	}
+}
+
+// probeWrapHold asks a harness that can tell (turnProber) whether a turn
+// runs, so a rejoin's hold does not wait for a turn end an idle harness
+// never sends. The ask runs off the loop, whose events it may wait behind;
+// its answer comes back to the loop (wrapProbed).
+func (c *conv) probeWrapHold() {
+	tp, ok := c.proc.(turnProber)
+	if !ok {
+		return
+	}
+	proc := c.proc
+	c.wrapTurnSeen = false
+	go func() {
+		running, err := tp.TurnRunning()
+		c.do(func() { c.wrapProbed(proc, running, err) })
+	}()
+}
+
+// wrapProbed takes the harness's answer to probeWrapHold. An idle answer
+// ends the held turn as the harness's own turn end would, submitting what
+// waited; unless the hold ended already, the process is another, or a turn
+// started since the ask (its start may follow the answer on the stream,
+// and its end releases the hold). A running answer, or an ask that failed,
+// keeps the hold until the harness ends a turn.
+func (c *conv) wrapProbed(proc Process, running bool, err error) {
+	if c.closed || proc != c.proc || !c.wrapHold {
+		return
+	}
+	switch {
+	case err != nil:
+		fmt.Fprintf(c.r.opts.Log, "agent %s: ask the harness whether a turn runs: %v; the turn stays taken as running until the harness ends one\n", c.rec.ReplyID, err)
+	case running:
+		fmt.Fprintf(c.r.opts.Log, "agent %s: the harness reports a turn running; input waits for its end\n", c.rec.ReplyID)
+	case c.wrapTurnSeen:
+		fmt.Fprintf(c.r.opts.Log, "agent %s: the harness reports no turn running, but one started since; input waits for its end\n", c.rec.ReplyID)
+	default:
+		fmt.Fprintf(c.r.opts.Log, "agent %s: the harness reports no turn running; the held turn ends\n", c.rec.ReplyID)
+		c.endTurn("", false)
 	}
 }
 
@@ -1857,6 +1901,7 @@ func (c *conv) handle(ev Event) {
 		c.stopProcess("")
 	case ev.TurnStart:
 		c.replayBoundary = c.replayBoundary || c.replaying
+		c.wrapTurnSeen = c.wrapTurnSeen || (c.wrapHold && !quiet)
 		c.beginTurn(quiet)
 	case ev.TurnEnd:
 		c.replayBoundary = c.replayBoundary || c.replaying
