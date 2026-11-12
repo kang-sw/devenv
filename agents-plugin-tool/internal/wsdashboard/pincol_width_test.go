@@ -9,12 +9,18 @@ import (
 // page wrapper grows by the column (--pinw, user-resizable) so the board
 // keeps its no-pin width, instead of the column and the board splitting the
 // wrapper's fixed cap. Below 2200px the column replaces the rail, so the
-// growth is the column less the rail and its gap.
+// growth is the column less the rail and its gap. Both drawers (the
+// session drawer's .dr-in, the tracker's through --tkmaxw) grow with the
+// page, so their handles stay at its right edge.
 func TestPinnedColumnWidensThePage(t *testing.T) {
 	css := mustAsset(t, "dashboard.css")
 	for _, want := range []string{
 		":root[data-pincol] .dwrap:not(.narrow) { max-width: calc(1680px - 340px + var(--pinw, 480px)); }",
 		":root[data-pincol] .dwrap:not(.narrow) { max-width: calc(1680px + 16px + var(--pinw, 480px)); }",
+		":root[data-pincol] .dr-in { max-width: calc(1680px - 340px + var(--pinw, 480px)); }",
+		":root[data-pincol] .tk-drawer { --tkmaxw: calc(1680px - 340px + var(--pinw, 480px)); }",
+		":root[data-pincol] .dr-in { max-width: calc(1680px + 16px + var(--pinw, 480px)); }",
+		":root[data-pincol] .tk-drawer { --tkmaxw: calc(1680px + 16px + var(--pinw, 480px)); }",
 	} {
 		if !strings.Contains(css, want) {
 			t.Errorf("dashboard.css lacks %q", want)

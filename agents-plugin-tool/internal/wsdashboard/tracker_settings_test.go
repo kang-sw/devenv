@@ -103,30 +103,58 @@ func TestTrackerLabelsInTheDashboard(t *testing.T) {
 	}
 }
 
-// TestTrackerPriorityDialogRows pins the priority-levels dialog: labels
-// count from 1 while the radio value and field name stay 0-based, and
-// typing into the last row appends the next blank row up to the 9 cap.
+// TestTrackerPriorityDialogRows pins the priority-levels dialog (tracker.js
+// prioRow, the sprio dialog's rows, and the input listener that appends a
+// row), executed under node when it is installed: labels count from 1
+// while the radio value and the field name stay 0-based; the dialog shows
+// the levels plus two blank rows, up to 9; typing into the last row appends
+// the next blank row, and the rows stop at 9.
 func TestTrackerPriorityDialogRows(t *testing.T) {
-	data, err := dashboardFS.ReadFile("assets/tracker.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	js := string(data)
-	row := regexp.MustCompile(`function prioRow\(pi, name, checked\) \{\n[\s\S]*?\n  \}\n`).FindString(js)
-	if row == "" {
-		t.Fatal("tracker.js holds no prioRow")
-	}
-	if n := strings.Count(row, "pi + 1)"); n != 4 {
-		t.Errorf("prioRow numbers %d label sites from 1, want 4", n)
-	}
-	for _, want := range []string{`value="' + pi + '"`, `name="pname' + pi + '"`} {
-		if !strings.Contains(row, want) {
-			t.Errorf("prioRow lacks the 0-based %q", want)
-		}
-	}
-	for _, want := range []string{"var PRIO_MAX = 9;", "Math.min(PRIO_MAX, pn.length + 2)", `form[data-kind="sprio"]`, "if (e.target.name !== 'pname' + (pn - 1) || pn >= PRIO_MAX) return;", "prioRow(pn, '', false)"} {
-		if !strings.Contains(js, want) {
-			t.Errorf("tracker.js lacks %q", want)
-		}
-	}
+	row := trackerBlock(t, `\n  var PRIO_MAX = 9;`, `\n  var DIALOGS = `)
+	rows := trackerBlock(t, `\n        var pn = VS.priority.names, rows = '';`, `\n        T = \[wsT\("js.tk.dlg.prio.title"\)`)
+	grow := trackerBlock(t, `\n    // typing into the last priority row`, `\n    document.addEventListener\('input', function \(e\) \{\n      var f = `)
+	runTrackerCases(t, "priority dialog rows", trackerCheckJS+`
+function wsT(k, n) { return k + ':' + n; }
+function esc(s) { return String(s); }
+function tipAttr(s) { return ' data-tip="' + s + '"'; }
+var onInput = null, document = { addEventListener: function (t, fn) { if (t === 'input') onInput = fn; } };
+`+row+`
+function dialogRows(VS) {`+rows+`
+  return rows;
+}
+`+grow+`
+// form parses rows into a dialog form: its pname fields, each with the row
+// it stands in, which takes the appended row's markup after it.
+function form(html) {
+  var f = { html: html, elements: {} };
+  f.closest = function (sel) { return sel === '#tkdlg form[data-kind="sprio"]' ? f : null; };
+  function field(name) {
+    return { name: name, value: '', closest: f.closest, parentNode: { insertAdjacentHTML: function (where, h) { f.html += h; scan(h); } } };
+  }
+  function scan(h) { (h.match(/name="pname\d+"/g) || []).forEach(function (m) { var n = m.slice(6, -1); f.elements[n] = field(n); }); }
+  scan(html);
+  return f;
+}
+function type(f, name, text) { var e = f.elements[name]; e.value = text; onInput({ target: e }); }
+function count(f) { return Object.keys(f.elements).length; }
+
+var two = dialogRows({ priority: { names: ['low', 'high'], default: 1 } });
+check('two levels show four rows, the level names first', [two.match(/name="pname\d+" value="[^"]*"/g)], [['name="pname0" value="low"', 'name="pname1" value="high"', 'name="pname2" value=""', 'name="pname3" value=""']]);
+check('radio values stay 0-based', two.match(/name="pdef" value="\d+"/g), ['name="pdef" value="0"', 'name="pdef" value="1"', 'name="pdef" value="2"', 'name="pdef" value="3"']);
+check('the default level is checked', two.match(/value="\d+" checked/g), ['value="1" checked']);
+check('level labels count from 1', two.match(/placeholder="js\.tk\.form\.plevel:\d+"/g), ['placeholder="js.tk.form.plevel:1"', 'placeholder="js.tk.form.plevel:2"', 'placeholder="js.tk.form.plevel:3"', 'placeholder="js.tk.form.plevel:4"']);
+check('default labels count from 1', two.match(/aria-label="js\.tk\.form\.pdefault:\d+"/g), ['aria-label="js.tk.form.pdefault:1"', 'aria-label="js.tk.form.pdefault:2"', 'aria-label="js.tk.form.pdefault:3"', 'aria-label="js.tk.form.pdefault:4"']);
+check('eight levels show the 9 cap', count(form(dialogRows({ priority: { names: ['1', '2', '3', '4', '5', '6', '7', '8'], default: 0 } }))), 9);
+
+var f = form(two);
+type(f, 'pname2', 'mid');
+check('typing into a row before the last appends nothing', count(f), 4);
+type(f, 'pname3', '   ');
+check('blank text in the last row appends nothing', count(f), 4);
+type(f, 'pname3', 'top');
+check('typing into the last row appends the next blank row', [count(f), /name="pname4" value=""/.test(f.html), /placeholder="js\.tk\.form\.plevel:5"/.test(f.html), /name="pdef" value="4"/.test(f.html)], [5, true, true, true]);
+for (var i = 4; i < 12; i++) if (f.elements['pname' + i]) type(f, 'pname' + i, 'x' + i);
+check('the rows stop at 9', [count(f), !!f.elements.pname8, !!f.elements.pname9], [9, true, false]);
+done();
+`)
 }
