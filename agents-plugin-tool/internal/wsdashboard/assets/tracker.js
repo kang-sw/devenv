@@ -397,6 +397,12 @@
     if (!act) return '<span class="chip lbl">' + inner + '</span>';
     return '<button type="button" class="chip lbl"' + attr('act', act) + attr('label', l.id) + (extra || '') + ' tabindex="-1"' + tipAttr(wsT("js.tk.label.search", l.name)) + '>' + inner + '</button>';
   }
+  // An admin removes a label from the store's list (the store settings and the quick-add picker):
+  // it leaves every item, so the viewer confirms first. then runs after the write.
+  function labelRemove(id, then) {
+    var l = labelOf(id);
+    if (l && window.confirm(wsT("js.tk.set.labels.confirm", l.name))) commit([['roles.remove_label', { label: l.id }]], then);
+  }
   function labelChips(it, act) {
     return (it.labels || []).map(labelOf).filter(Boolean).map(function (l) { return labelChip(l, act); }).join('');
   }
@@ -865,12 +871,13 @@
   }
   // Checkbox selection in the Items list (ui.msel[store] = { ids: { item id: true }, at: the anchor
   // row's key }). A row's checkbox shows on hover; clicking it enters selection mode, which lasts
-  // while anything is selected (Esc, or the header chip's x, clears it). There a plain row click
-  // selects that row alone, Ctrl/Cmd-click toggles, Shift-click selects the range from the anchor,
-  // and Shift+Ctrl-click adds that range; the item window opens from the menu or Enter. Ranges run
-  // over the rows shown, in their order, so a folded subtree's rows are not in one. A selection is
-  // by item: an item shown twice is selected in both places. Each panel draw keeps only what it
-  // drew (MSEEN), so a row a filter, a fold, or a scope change took away leaves the selection.
+  // while anything is selected (Esc, or the x of the badge atop the list, clears it). Selection
+  // mode is multi-select: a plain row click toggles that row (and makes it the anchor), and
+  // Shift-click adds the range from the anchor, keeping the rest; Ctrl/Cmd change nothing. The
+  // item window opens from the menu or Enter. Ranges run over the rows shown, in their order, so a
+  // folded subtree's rows are not in one. A selection is by item: an item shown twice is selected
+  // in both places. Each panel draw keeps only what it drew (MSEEN), so a row a filter, a fold, or
+  // a scope change took away leaves the selection.
   var MSEEN = null; // per panel draw: { item id: true } of the rows drawn
   function mselOf() { return ui.msel[ui.store] || null; }
   function mselHas(id) { var s = mselOf(); return !!s && !!s.ids[id]; }
@@ -881,19 +888,28 @@
     return '<button type="button" class="mcb" role="checkbox" aria-checked="' + on + '"' + attr('act', 'msel') + attr('item', it.id) + ' tabindex="-1" aria-label="' + esc(wsT("js.tk.sel.aria", it.title)) + '"' +
       tipAttr(wsT("js.tk.sel.tip")) + '></button>';
   }
-  // A click on a list row in selection mode, or on a row's checkbox (box: toggles, and enters the mode).
-  function mselClick(row, e, box) {
-    var area = row.closest('#card-items .cbody'), rows = area ? Array.prototype.slice.call(area.querySelectorAll('.irow')) : [row];
-    var id = row.getAttribute('data-item'), rk = row.getAttribute('data-rk'), s = ui.msel[ui.store] || (ui.msel[ui.store] = { ids: {}, at: null });
-    var ctrl = e.ctrlKey || e.metaKey, i = rows.indexOf(row), j = -1;
-    if (e.shiftKey && s.at) rows.some(function (x, k) { if (x.getAttribute('data-rk') === s.at) { j = k; return true; } return false; });
+  // The pick on selection s ({ ids, at }) over the rows shown (keys: [item id, row key] in order)
+  // for a click on row i: Shift with an anchor shown adds the range between them, anything else
+  // toggles row i and makes it the anchor.
+  function mselPick(s, keys, i, shift) {
+    var j = -1;
+    if (shift && s.at) keys.some(function (x, k) { if (x[1] === s.at) { j = k; return true; } return false; });
     if (j >= 0 && i >= 0) {
-      if (!ctrl) s.ids = {};
-      rows.slice(Math.min(i, j), Math.max(i, j) + 1).forEach(function (x) { s.ids[x.getAttribute('data-item')] = true; });
-    } else if (ctrl || box) {
-      if (s.ids[id]) delete s.ids[id]; else s.ids[id] = true;
-      s.at = rk;
-    } else { s.ids = {}; s.ids[id] = true; s.at = rk; }
+      keys.slice(Math.min(i, j), Math.max(i, j) + 1).forEach(function (x) { s.ids[x[0]] = true; });
+      return s;
+    }
+    var id = keys[i] ? keys[i][0] : null;
+    if (!id) return s;
+    if (s.ids[id]) delete s.ids[id]; else s.ids[id] = true;
+    s.at = keys[i][1];
+    return s;
+  }
+  // A click on a list row in selection mode, or on a row's checkbox (which enters the mode); both
+  // act alike (mselPick).
+  function mselClick(row, e) {
+    var area = row.closest('#card-items .cbody'), rows = area ? Array.prototype.slice.call(area.querySelectorAll('.irow')) : [row];
+    var rk = row.getAttribute('data-rk'), s = ui.msel[ui.store] || (ui.msel[ui.store] = { ids: {}, at: null });
+    mselPick(s, rows.map(function (x) { return [x.getAttribute('data-item'), x.getAttribute('data-rk')]; }), rows.indexOf(row), e.shiftKey);
     if (!mselOn()) mselClear();
     render();
     // the clicked row keeps focus, so Enter opens its item window
@@ -1552,14 +1568,15 @@
     // opens the input row in its place (the keyboard path; an empty list keeps only this one)
     var n = ui.nrow[ui.store], body = panelBody(s, m, v) + (n && !n.at ? newRowHtml() : newBtn()), closed = closedHtml();
     var serr = SERR ? '<div class="psearch-err" role="alert">' + esc(SERR) + '</div>' : '';
-    // the selection keeps what this draw showed; the header chip counts it and clears it
+    // the selection keeps what this draw showed; a badge pinned atop the list (sticky in the
+    // scrolling body, over a strip of its own so it never sits on the first row) counts it and clears it
     var ms = mselOf();
     if (ms) Object.keys(ms.ids).forEach(function (id) { if (!MSEEN[id]) delete ms.ids[id]; });
     if (!mselOn()) mselClear();
-    var nsel = mselIds().length, mchip = nsel ? '<span class="chip mselc">' + esc(wsTn("js.tk.sel.n", nsel)) + '<button type="button" class="psx"' + attr('act', 'msel-clear') + ' aria-label="' + wsT("js.tk.sel.clear") + '"' +
-      tipAttr(wsT("js.tk.sel.clear")) + '><svg class="i"><use href="#tki-x"/></svg></button></span>' : '';
+    var nsel = mselIds().length, mbar = nsel ? '<div class="mselbar" role="status"><span class="chip mselc">' + esc(wsTn("js.tk.sel.n", nsel)) + '<button type="button" class="psx"' + attr('act', 'msel-clear') + ' aria-label="' + wsT("js.tk.sel.clear") + '"' +
+      tipAttr(wsT("js.tk.sel.clear")) + '><svg class="i"><use href="#tki-x"/></svg></button></span></div>' : '';
     TF = null; SQ = ''; SIDS = null; SERR = ''; FILT = false; CLOSED = null; MSEEN = null;
-    return { title: wsT("js.tk.tab.items"), tools: scopes + '<span class="chip">' + esc(scopeChip(s)) + '</span>' + mchip + '<div class="prow2">' + modes + search + '</div>' + serr, body: '<div class="plist">' + body + '</div>' + closed, id: 'card-items', cls: 'panel',
+    return { title: wsT("js.tk.tab.items"), tools: scopes + '<span class="chip">' + esc(scopeChip(s)) + '</span><div class="prow2">' + modes + search + '</div>' + serr, body: mbar + '<div class="plist">' + body + '</div>' + closed, id: 'card-items', cls: 'panel',
       attrs: attr('scope', s) + attr('view', m) + (nsel ? attr('msel', nsel) : '') };
   }
   // With the adapter's wiki, the title is the Items | Wiki switch (wkSwitch); the Today bar belongs to the items
@@ -2752,7 +2769,7 @@
       (ed ? '<h2 id="iw-title" class="iw-edt"><input type="text" id="iw-etitle" data-keep autocomplete="off" value="' + esc(ed.title) + '" aria-label="' + wsT("js.tk.form.title") + '"></h2>' : '<h2 id="iw-title">' + esc(it.title) + '</h2>') +
       headActs(it) + moreBtn(it.id, 'iw-more', true) +
       '<button type="button" class="ia iw-x" data-act="win-close" aria-label="' + wsT("js.tk.win.close") + '"' + tipAttr(wsT("js.tk.win.close")) + '><svg class="i"><use href="#tki-x"/></svg></button></div>' +
-      '<div class="iw-chips">' + kindChip(it) + idCopyBtn(it) + (it.kind === 'topic' ? '' : stChip(it.status) + prChip(it) + dueChip(it) + rollupHtml(it)) + openChip(it) + labelChips(it, 'lsearch') + warnHtml(it) + '</div></div>';
+      '<div class="iw-chips">' + kindChip(it) + idCopyBtn(it) + (it.kind === 'topic' ? '' : stChip(it.status) + (canEdit(it) ? '' : prChip(it)) + dueChip(it) + rollupHtml(it)) + openChip(it) + labelChips(it, 'lsearch') + warnHtml(it) + '</div></div>';
     h += '<div class="iw-grid"><div class="iw-main">';
     if (ed) h += '<div class="iw-body iw-edit">' + editorHtml('iw-ebody', { value: ed.body, rows: 5, label: wsT("js.tk.form.body"), pv: 'sh-body' }) +
       '<input type="text" id="iw-eproj" data-keep autocomplete="off" value="' + esc(ed.project) + '" placeholder="' + wsT("js.tk.form.project") + '" aria-label="' + wsT("js.tk.form.project") + '">' + labelPickHtml(ed) +
@@ -2786,8 +2803,9 @@
     return h;
   }
   // The header's common actions, left of the "⋯" menu: the viewer's status as a segmented control
-  // (applies on click, no note; the menu keeps the status-with-note part), then "add subtask" and
-  // "hand off" as icon buttons. Each shows under the same condition the menu uses.
+  // (applies on click, no note; the menu keeps the status-with-note part), the priority chip (it
+  // opens the menu's priority step; the chip row's read-only priority chip gives way to it), then
+  // "add subtask" and "hand off" as icon buttons. Each shows under the same condition the menu uses.
   function headActs(it) {
     var mine = !it.hidden && mineLive(it), r = canStatus(it) && mine, h = '';
     if (r) {
@@ -2797,6 +2815,11 @@
           SI.svg(o.s) + '<span class="sl">' + esc(o.label) + '</span></button>';
         return o.dis ? '<span class="sgw"' + tipAttr(o.label + ': ' + o.why) + '>' + b + '</span>' : b;
       }).join('') + '</div>';
+    }
+    if (canEdit(it) && it.kind !== 'topic') {
+      var lv = it.priorityLevel, d = VS.priority.default, pt = wsT("js.tk.win.pri", it.priorityName) + priStored(it);
+      h += '<button type="button" class="hpri' + (lv > d ? ' hi' : lv < d ? ' lo' : '') + '"' + attr('act', 'pri') + attr('item', it.id) + ' aria-haspopup="menu" aria-label="' + esc(pt) + '"' + tipAttr(pt) + '>' +
+        '<svg class="i"><use href="#tki-flag"/></svg><span>' + esc(it.priorityName) + '</span></button>';
     }
     if (canSplit(it)) h += '<button type="button" class="ia"' + attr('act', 'hsub') + attr('item', it.id) + ' aria-label="' + esc(wsT("js.tk.menu.sub")) + '"' + tipAttr(wsT("js.tk.menu.sub")) + '><svg class="i"><use href="#tki-plus"/></svg></button>';
     if (mine && !wrapped(mine.status) && !mine.fallback) h += '<button type="button" class="ia"' + attr('act', 'handoff') + attr('item', it.id) + ' aria-haspopup="menu" aria-label="' + esc(wsT("js.tk.act.handoff")) + '"' + tipAttr(wsT("js.tk.act.handoff")) + '><svg class="i"><use href="#tki-handoff"/></svg></button>';
@@ -3714,6 +3737,14 @@
       (o.val ? '<span class="mv">' + o.val + '</span>' : '') + (o.sub ? '<svg class="i mch"><use href="#tki-chev"/></svg>' : '') + '</button>';
   }
   function msep() { return '<div class="msep" role="separator"></div>'; }
+  // the priority step's radios (an item's, or the quick-add row's draft), cur the checked level
+  function priGroup(cur) {
+    return '<div role="group" aria-label="' + wsT("js.tk.menu.pri") + '">' + VS.priority.names.map(function (x, i) {
+      var on = i === cur;
+      return '<button type="button" class="mi mr" role="menuitemradio" aria-checked="' + on + '" data-mi' + attr('act', 'm-pri') + attr('p', i) + (on ? ' data-autofocus' : '') + '><span class="rdo"></span><span class="ml">' + esc(x) + '</span>' +
+        (i === VS.priority.default ? '<span class="mv">' + wsT("js.tk.menu.default") + '</span>' : '') + '</button>';
+    }).join('') + '</div>';
+  }
   function noteField(ph) {
     return '<label class="mnote"><input type="text" id="tkmnote" data-mi autocomplete="off" placeholder="' + esc(ph) + '" aria-label="' + esc(wsT("js.tk.form.note.opt")) + '"><span class="mk" aria-hidden="true">&#9166;</span></label>';
   }
@@ -3723,13 +3754,7 @@
     h += '<div class="mh">' + idCopyBtn(it) + '<b>' + esc(it.title) + '</b></div>';
     var back = MN.from ? mi('m-back', wsT("js.tk.menu.back"), {}, { icon: 'back', cls: 'mback' }) + msep() : '';
     var mineR = mineLive(it), step = MN.step;
-    if (step === 'pri') {
-      return h + back + '<div role="group" aria-label="' + wsT("js.tk.menu.pri") + '">' + VS.priority.names.map(function (x, i) {
-        var on = i === it.priority;
-        return '<button type="button" class="mi mr" role="menuitemradio" aria-checked="' + on + '" data-mi' + attr('act', 'm-pri') + attr('p', i) + (on ? ' data-autofocus' : '') + '><span class="rdo"></span><span class="ml">' + esc(x) + '</span>' +
-          (i === VS.priority.default ? '<span class="mv">' + wsT("js.tk.menu.default") + '</span>' : '') + '</button>';
-      }).join('') + '</div>';
-    }
+    if (step === 'pri') return h + back + priGroup(it.priority);
     if (step === 'due') {
       return h + back + '<div class="mrow"><input type="date" id="tkmdue" data-mi data-autofocus value="' + esc(it.due || '') + '" aria-label="' + wsT("js.tk.menu.due") + '">' +
         btn('m-due-set', wsT("js.tk.menu.due.set"), {}, 'primary') + '</div>' + (it.due ? mi('m-due-clear', wsT("js.tk.menu.due.clear"), {}, { icon: 'x' }) : '');
@@ -4216,19 +4241,21 @@
   // `at`: it appends a root item); the hover insert opens it in a gap between rows (`at` names the
   // row it sits against, and `parent` / `after` place the item where the row shows). Title + Enter
   // creates the item; the row stays for the next one, which then goes after the one just made;
-  // Esc closes it. Priority is set afterwards from the new item's menu.
-  // The row's chips set status, assignee, and due before Enter (nrowChips, newMenu). Left at
-  // their defaults (idea, the viewer, none) the row sends the create plus the creator's status
+  // Esc closes it. The icon toggle at its left edge switches the kind (task <-> topic).
+  // The row's chips set status, assignee, priority, due, and labels before Enter (nrowChips,
+  // newMenu); a topic has no status, priority, or due. Left at their defaults (idea, the viewer,
+  // the store's default level, none, none) the row sends the create plus the creator's status
   // idea (asIdea), or for a topic the create plus the creator's assign (heldTopic). The chips keep
   // their values across creates while the row stays open; closing it restores the defaults.
+  // n.pri is a level index (null: the store's default, sent as no priority); n.labels label ids.
   function nrowFill(n) {
-    if (!n.who) { n.st = 'idea'; n.who = [VS.viewer.member]; n.compl = null; n.due = ''; }
+    if (!n.who) { n.st = 'idea'; n.who = [VS.viewer.member]; n.compl = null; n.due = ''; n.pri = null; n.labels = []; }
     return n;
   }
   // a row opened from another (the hover insert moving it) keeps its text, kind, and chips
   function nrowNew(o, place) {
     var n = { val: o ? o.val : '', kind: o ? o.kind : 'task' };
-    if (o && o.who) { n.st = o.st; n.who = o.who; n.compl = o.compl; n.due = o.due; }
+    if (o && o.who) { n.st = o.st; n.who = o.who; n.compl = o.compl; n.due = o.due; n.pri = o.pri; n.labels = o.labels; }
     Object.keys(place || {}).forEach(function (k) { n[k] = place[k]; });
     return nrowFill(n);
   }
@@ -4249,6 +4276,10 @@
   }
   // the chip's status as the mode reads it: a pick the mode does not offer falls back to its first
   function nrowSt(n) { var m = nrowStMode(n); return !m ? '' : NROW_ST[m].indexOf(n.st) >= 0 ? n.st : NROW_ST[m][0]; }
+  // the chip's level: the pick while the store's levels still hold it, else the store's default
+  function nrowPri(n) { return n.pri != null && n.pri >= 0 && n.pri < VS.priority.names.length ? n.pri : VS.priority.default; }
+  // the picked labels the store's list still holds, in the list's order
+  function nrowLabels(n) { return (VS.labels || []).filter(function (l) { return (n.labels || []).indexOf(l.id) >= 0; }); }
   function nrowChips(n) {
     var topic = n.kind === 'topic', h = '', st = nrowSt(n);
     function chip(id, step, label, inner, dflt) {
@@ -4259,26 +4290,39 @@
     var one = n.who.length === 1, wl = one ? nm(n.who[0]) : wsTn("js.tk.ap.n", n.who.length);
     h += chip('tknwho', 'assign', wsT("js.tk.new.who", wl), one ? avHtml(n.who[0]) + '<span>' + esc(wl) + '</span>' :
       '<svg class="i"><use href="#tki-assign"/></svg><span>' + esc(wl) + '</span>', nrowMine(n));
-    if (!topic) h += chip('tkndue', 'due', wsT("js.tk.new.due", n.due || wsT("js.tk.new.due.none")), '<svg class="i"><use href="#tki-calendar"/></svg>' + (n.due ? '<span>' + esc(n.due) + '</span>' : ''), !n.due);
+    if (!topic) {
+      var pv = nrowPri(n), pn = VS.priority.names[pv];
+      h += chip('tknpri', 'pri', wsT("js.tk.new.pri", pn), '<svg class="i"><use href="#tki-flag"/></svg><span>' + esc(pn) + '</span>', pv === VS.priority.default);
+      h += chip('tkndue', 'due', wsT("js.tk.new.due", n.due || wsT("js.tk.new.due.none")), '<svg class="i"><use href="#tki-calendar"/></svg>' + (n.due ? '<span>' + esc(n.due) + '</span>' : ''), !n.due);
+    }
+    // labels (any kind: a label is orthogonal to the kind); with an empty list only an admin, who can add one, sees the chip
+    var ls = nrowLabels(n);
+    if ((VS.labels || []).length || VS.viewer.admin) {
+      var ln = ls.map(function (l) { return l.name; }).join(', ') || wsT("js.tk.new.labels.none");
+      h += chip('tknlab', 'labels', wsT("js.tk.new.labels", ln), '<svg class="i"><use href="#tki-tag"/></svg>' + ls.slice(0, 3).map(function (l) { return '<span class="ldot" style="background:' + esc(l.color) + '"></span>'; }).join('') +
+        (ls.length ? '<span>' + esc(ls.length === 1 ? ls[0].name : wsTn("js.tk.new.labels.n", ls.length)) + '</span>' : ''), !ls.length);
+    }
     return h;
   }
   function newRowHtml() {
     var n = ui.nrow[ui.store];
     if (!n) return '';
     nrowFill(n);
-    return '<div class="nrow"' + (n.depth ? ' style="--ind:' + n.depth + '"' : '') + '><svg class="i"><use href="#tki-plus"/></svg><input type="text" id="tknew" data-keep autocomplete="off" value="' + esc(n.val) + '" placeholder="' + wsT("js.tk.new.ph") + '" aria-label="' + wsT("js.tk.new.aria") + '">' +
+    var kl = wsT(n.kind === 'topic' ? "js.tk.new.kind.topic" : "js.tk.new.kind.task");
+    return '<div class="nrow"' + (n.depth ? ' style="--ind:' + n.depth + '"' : '') + '><button type="button" class="nkind" id="tknkind"' + attr('act', 'nkind') + ' aria-label="' + esc(kl) + '"' + tipAttr(kl) + '>' + SI.svg(n.kind === 'topic' ? 'topic' : 'todo') + '</button>' +
+      '<input type="text" id="tknew" data-keep autocomplete="off" value="' + esc(n.val) + '" placeholder="' + wsT("js.tk.new.ph") + '" aria-label="' + wsT("js.tk.new.aria") + '">' +
       nrowChips(n) +
-      '<select id="tknewkind" aria-label="' + wsT("js.tk.form.kind") + '">' + ['task', 'topic'].map(function (k) { return '<option value="' + k + '"' + (k === n.kind ? ' selected' : '') + '>' + esc(kindName(k)) + '</option>'; }).join('') + '</select>' +
       '<button type="button" class="ia"' + attr('act', 'new-x') + ' aria-label="' + wsT("js.tk.dlg.cancel") + '"' + tipAttr(wsT("js.tk.new.close")) + '><svg class="i"><use href="#tki-x"/></svg></button></div>';
   }
-  // The kind select: a topic takes one holder, so several picked people fall back to the viewer.
+  // The kind toggle (task <-> topic): a topic takes one holder, so several picked people fall back
+  // to the viewer; its status, priority, and due chips hide (createNew leaves them out).
   function nrowKind(kind) {
     var n = ui.nrow[ui.store];
     if (!n) return;
     nrowFill(n).kind = kind;
     if (kind === 'topic' && n.who.length !== 1) n.who = [VS.viewer.member];
     render();
-    if ($('tknewkind')) $('tknewkind').focus({ preventScroll: true });
+    if ($('tknkind')) $('tknkind').focus({ preventScroll: true });
   }
   // A chip's picker: the item menu's own step (MN.kind 'new') over the row's draft instead of an item.
   function newMenu(step, anchor) {
@@ -4311,16 +4355,54 @@
       return h + '<div class="mrow"><input type="date" id="tkmdue" data-mi data-autofocus value="' + esc(n.due) + '" aria-label="' + wsT("js.tk.menu.due") + '">' +
         btn('m-due-set', wsT("js.tk.menu.due.set"), {}, 'primary') + '</div>' + (n.due ? mi('m-due-clear', wsT("js.tk.menu.due.clear"), {}, { icon: 'x' }) : '');
     }
+    if (MN.step === 'pri') return h + priGroup(nrowPri(n));
+    if (MN.step === 'labels') return h + newLabelsHtml(n);
     return h + asgHtml(d);
+  }
+  // The label chip's picker: the store's labels as toggles (the menu stays open across picks).
+  // An admin also adds, renames, and removes labels here, through the store settings' own label
+  // dialog and remove path (labelRemove), which change the list for every item.
+  function newLabelsHtml(n) {
+    var ls = VS.labels || [], admin = !!VS.viewer.admin;
+    var rows = ls.map(function (l) {
+      var on = (n.labels || []).indexOf(l.id) >= 0;
+      return '<div class="mlrow"><button type="button" class="mi mr" role="menuitemcheckbox" aria-checked="' + on + '" data-mi' + attr('act', 'm-ltog') + attr('label', l.id) + '><span class="cbx"></span>' +
+        '<span class="ldot" style="background:' + esc(l.color) + '"></span><span class="ml">' + esc(l.name) + '</span></button>' +
+        (admin ? '<button type="button" class="ia" data-mi' + attr('act', 'm-ledit') + attr('label', l.id) + ' aria-label="' + esc(wsT("js.tk.new.labels.edit", l.name)) + '"' + tipAttr(wsT("js.tk.new.labels.edit", l.name)) + '><svg class="i"><use href="#tki-pen"/></svg></button>' +
+          '<button type="button" class="ia danger" data-mi' + attr('act', 'm-lrm') + attr('label', l.id) + ' aria-label="' + esc(wsT("js.tk.new.labels.rm", l.name)) + '"' + tipAttr(wsT("js.tk.new.labels.rm", l.name)) + '><svg class="i"><use href="#tki-x"/></svg></button>' : '') + '</div>';
+    }).join('');
+    return '<div role="group" aria-label="' + esc(wsT("js.tk.set.labels")) + '">' + (rows || '<p class="mempty">' + wsT("js.tk.set.labels.none") + '</p>') + '</div>' +
+      (admin ? msep() + mi('m-ladd', esc(wsT("js.tk.new.labels.add")), {}, { icon: 'plus' }) : '');
   }
   function newAct(k, a) {
     var n = ui.nrow[ui.store];
     if (!n) return closeMenu(false);
     if (k === 'm-status') n.st = a.getAttribute('data-status');
+    else if (k === 'm-pri') n.pri = Number(a.getAttribute('data-p'));
     else if (k === 'm-due-set') n.due = $('tkmdue').value || '';
     else if (k === 'm-due-clear') n.due = '';
+    else if (k === 'm-ltog') {
+      var lid = a.getAttribute('data-label'), ls = n.labels = (n.labels || []).slice(), li = ls.indexOf(lid);
+      if (li >= 0) ls.splice(li, 1); else ls.push(lid);
+      return newLabelsRedraw(lid);
+    } else if (k === 'm-ladd' || k === 'm-ledit') {
+      closeMenu(false);
+      return openDialog('slabel', k === 'm-ledit' ? { label: a.getAttribute('data-label') } : {});
+    } else if (k === 'm-lrm') return labelRemove(a.getAttribute('data-label'), function () { newLabelsRedraw(null); });
     else return;
     newPicked();
+  }
+  // the label picker after a toggle or a removal: the row's chip and the open picker redraw, and
+  // focus stays on the toggled label (the first item when gone)
+  function newLabelsRedraw(lid) {
+    render();
+    if (!MN || MN.kind !== 'new' || MN.step !== 'labels') return;
+    var bk = MN.backEl && MN.backEl.id && $(MN.backEl.id);
+    if (bk) { MN.backEl = bk; bk.setAttribute('aria-expanded', 'true'); }
+    $('tkmenu').innerHTML = newMenuHtml();
+    placeMenu();
+    var f = (lid && $('tkmenu').querySelector('[data-act="m-ltog"][data-label="' + CSS.escape(lid) + '"]')) || $('tkmenu').querySelector('[data-mi]');
+    if (f) f.focus({ preventScroll: true });
   }
   // a chip's pick lands: the row draws again and focus goes back to the chip (the title when gone)
   function newPicked() {
@@ -4354,12 +4436,14 @@
     var n = ui.nrow[ui.store], title = $('tknew').value.trim(), v = VS.viewer.member;
     if (!n || !title) return;
     nrowFill(n);
-    var cp = { kind: n.kind, title: title }, b;
+    var cp = { kind: n.kind, title: title }, b, ls = nrowLabels(n);
     if (n.parent) cp.parent = n.parent;
     if (n.after != null) cp.after = n.after;
+    if (ls.length) cp.labels = ls.map(function (l) { return l.id; });
     if (cp.kind === 'topic') b = heldTopic(cp, n.who.length === 1 ? n.who[0] : v);
     else {
       if (n.due) cp.due = n.due;
+      if (nrowPri(n) !== VS.priority.default) cp.priority = nrowPri(n);
       // anyone but the viewer alone: the assign (one per completion class unless the picker set
       // one, asgEvents), then for a superior's wrap-up pick one status per assignee
       var st = nrowSt(n);
@@ -4410,7 +4494,8 @@
   // last one) shows a "+" badge at the left edge with a guide line. The places a new item can
   // take there (insOpts) run from b's depth (the row below must stay below) to one level under
   // a (its first child); the pointer's x over the left gutter picks the one whose badge is
-  // nearest, left to right = shallow to deep. A click opens the input row in the gap.
+  // nearest, left to right = shallow to deep. Dim ticks at each shallower level's indent (.hdep,
+  // drawn from --ind alone) show which level the badge lands under. A click opens the input row in the gap.
   var IND = 16, INS_EDGE = 5; // a level's indent (tracker.css .ir-main, .hins), the gap's half height
   var HV = null; // the shown insert: { list, a, b, y, opts, pick }
   function rowDepth(el) { return el ? Number(el.style.getPropertyValue('--ind')) || 0 : 0; }
@@ -4455,7 +4540,7 @@
     HV = { list: list, a: g.a, b: g.b, y: g.y, opts: opts, pick: insPick(opts, rel) };
     var s = list.querySelector(':scope > .hins');
     if (!s) {
-      list.insertAdjacentHTML('beforeend', '<div class="hins" aria-hidden="true"><span class="hl"></span><span class="hb"><svg class="i"><use href="#tki-plus"/></svg></span>' +
+      list.insertAdjacentHTML('beforeend', '<div class="hins" aria-hidden="true"><span class="hdep"></span><span class="hl"></span><span class="hb"><svg class="i"><use href="#tki-plus"/></svg></span>' +
         '<button type="button" class="hhit" tabindex="-1"' + attr('act', 'ins') + ' aria-label="' + wsT("js.tk.ins.aria") + '"></button></div>');
       s = list.querySelector(':scope > .hins');
     }
@@ -5374,6 +5459,7 @@
     '<symbol id="tki-more" viewBox="0 0 16 16"><circle cx="3.4" cy="8" r="1.3" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.3" fill="currentColor" stroke="none"/><circle cx="12.6" cy="8" r="1.3" fill="currentColor" stroke="none"/></symbol>' +
     '<symbol id="tki-send" viewBox="0 0 16 16"><path d="M2.5 8L13.5 2.8 10.6 13.4 7.6 9.1z"/><path d="M7.6 9.1l5.9-6.3"/></symbol>' +
     '<symbol id="tki-flag" viewBox="0 0 16 16"><path d="M3.6 14V2.6M3.6 3h8.4l-1.8 3 1.8 3H3.6"/></symbol>' +
+    '<symbol id="tki-tag" viewBox="0 0 16 16"><path d="M2.6 2.6h5.2l5.8 5.8-5.2 5.2-5.8-5.8z"/><circle cx="5.6" cy="5.6" r="1.1"/></symbol>' +
     '<symbol id="tki-pen" viewBox="0 0 16 16"><path d="M10.6 2.8l2.6 2.6-7.6 7.6-3.2.6.6-3.2z"/></symbol>' +
     '<symbol id="tki-copy" viewBox="0 0 16 16"><rect x="5.5" y="5.5" width="8" height="8" rx="1.2"/><path d="M10.5 3.5v-.3a.7.7 0 0 0-.7-.7H3.2a.7.7 0 0 0-.7.7v6.6a.7.7 0 0 0 .7.7h.3"/></symbol>' +
     '<symbol id="tki-page" viewBox="0 0 16 16"><path d="M9.5 2.5h4v4M13.5 2.5L8 8M11.5 9.5v3.2a.8.8 0 0 1-.8.8H3.3a.8.8 0 0 1-.8-.8V5.3a.8.8 0 0 1 .8-.8h3.2"/></symbol>' +
@@ -5500,19 +5586,20 @@
         else if (k === 'ilabel' && ui.iedit) { var il = ui.iedit.labels, ix = il.indexOf(d.label); if (ix >= 0) il.splice(ix, 1); else il.push(d.label); render(); }
         else if (k === 'lsearch') labelSearch(d.label);
         else if (k === 'claimf') claimableFilter();
-        else if (k === 'slabel-rm') { var rl = labelOf(d.label); if (rl && window.confirm(wsT("js.tk.set.labels.confirm", rl.name))) commit([['roles.remove_label', { label: rl.id }]]); }
+        else if (k === 'slabel-rm') labelRemove(d.label);
         else if (k === 'iedit-x') endEdit();
         else if (k === 'cedit') startCedit(d.cid);
         else if (k === 'cedit-save') saveCedit();
         else if (k === 'cedit-x') endCedit();
         else if (k === 'create') openNewRow();
         else if (k === 'ins') insOpen();
-        else if (k === 'msel') { var mr = a.closest('.irow'); if (mr) mselClick(mr, e, true); }
+        else if (k === 'msel') { var mr = a.closest('.irow'); if (mr) mselClick(mr, e); }
         else if (k === 'msel-clear') { mselClear(); render(); }
         else if (k === 'mdet') { var mk = ui.store + '|' + d.who; ui.mdet[mk] = !ui.mdet[mk]; render(); }
         else if (k === 'idcopy') copyId(a);
         else if (k === 'new-x') closeNewRow();
         else if (k === 'nchip') newMenu(a.getAttribute('data-step'), a);
+        else if (k === 'nkind') { var nk0 = ui.nrow[ui.store]; if (nk0) nrowKind(nk0.kind === 'topic' ? 'task' : 'topic'); }
         else if (k === 'knew') openKnew();
         else if (k === 'knew-x') closeKnew();
         else if (k === 'sub-x') closeSub();
@@ -5569,9 +5656,9 @@
         else if (X.action) X.action(k, a, H);
         return;
       }
-      // selection mode: a click on a list row selects (mselClick) rather than opening the item window
+      // selection mode: a click on a list row toggles it, Shift adds a range (mselClick), rather than opening the item window
       var mrow = mselOn() && t.closest('#card-items .irow');
-      if (mrow) { e.preventDefault(); mselClick(mrow, e, false); return; }
+      if (mrow) { e.preventDefault(); mselClick(mrow, e); return; }
       // touch: a tap selects a row, which shows its actions and details as a hover would;
       // a tap on the selected row (or on its title) opens the item window
       var row = t.closest('.irow');
@@ -5610,7 +5697,6 @@
       else if (t.id === 'f-status') { ui.status = t.value; render(); }
       else if (t.id === 'a-family') { ui.act.family = t.value; render(); }
       else if (t.id === 'a-member') { ui.act.member = t.value; render(); }
-      else if (t.id === 'tknewkind') nrowKind(t.value);
       else if (t.closest('#tkdlg form')) {
         var df = t.closest('form');
         if (t.name === 'saved') { // picking a saved profile fills the fields

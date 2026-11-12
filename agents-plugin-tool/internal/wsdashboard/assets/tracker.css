@@ -280,7 +280,11 @@ body.tk-paged .tk-drawer { display: none; }
 .tk .mcb[aria-checked="true"]::after { content: ""; position: absolute; left: 3px; top: 0; width: 3px; height: 7px; border: solid var(--wb-primary-fg); border-width: 0 1.5px 1.5px 0; transform: rotate(45deg); }
 .tk .irow.msel > .ir-main { background: color-mix(in srgb, var(--wb-primary) 10%, transparent); }
 .tk #card-items[data-msel] .irow { user-select: none; }
-.tk .chip.mselc { padding-right: 2px; background: color-mix(in srgb, var(--wb-primary) 12%, var(--wb-card)); color: var(--wb-primary); }
+/* the selection badge: centred atop the Items list, sticky in its scrolling body over a strip of
+   its own (so at rest it covers no row), riding over the rows only while they scroll under it */
+.tk .mselbar { position: sticky; top: 0; z-index: 6; display: flex; justify-content: center; height: 22px; margin: -4px 0 2px; pointer-events: none; }
+.tk .chip.mselc { height: 20px; padding-right: 2px; background: color-mix(in srgb, var(--wb-primary) 12%, var(--wb-card)); color: var(--wb-primary); pointer-events: auto;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--wb-primary) 28%, transparent), 0 2px 6px color-mix(in srgb, var(--wb-fg) 14%, transparent); }
 .tk .chip.mselc .psx { width: 16px; height: 16px; color: inherit; }
 .tk .sti { display: inline-flex; flex: none; width: 16px; height: 16px; }
 .tk .sti-svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
@@ -490,6 +494,13 @@ body.tk-paged .tk-drawer { display: none; }
 .tk .iw-seg .sg:disabled { opacity: .45; cursor: default; }
 /* a disabled choice's reason sits on its wrapper, which takes the hover the button no longer does */
 .tk .iw-seg .sgw { display: inline-flex; }
+/* the header's priority chip (opens the menu's priority step), the quick-add chips' pill */
+.tk .hpri { flex: none; display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; border-radius: 999px; border: 1px solid var(--wb-line); background: var(--wb-card); color: var(--wb-fg); font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer; }
+.tk .hpri .i { width: 13px; height: 13px; color: var(--wb-muted-fg); }
+.tk .hpri.hi { color: var(--tk-fail); font-weight: 700; }
+.tk .hpri.hi .i { color: inherit; }
+.tk .hpri.lo { color: var(--wb-muted-fg); }
+.tk .hpri:hover, .tk .hpri[aria-expanded="true"], .tk .hpri:focus-visible { border-color: var(--wb-primary); outline: none; }
 .tk .iw-seg .sgw .sg:disabled { pointer-events: none; }
 @container iw (max-width: 759px) {
   .tk .iw-seg .sg { padding: 0 5px; }
@@ -801,6 +812,13 @@ dialog.tk-dlg .btn:disabled { opacity: .45; cursor: default; }
 body.tk-menuon .tk .ir-more { visibility: hidden !important; }
 .tk-menu .mr .rdo { flex: none; width: 12px; height: 12px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--wb-muted-fg); }
 .tk-menu .mr[aria-checked="true"] .rdo { box-shadow: inset 0 0 0 4px var(--wb-primary); }
+/* the quick-add label picker: a checkbox row per label, an admin's rename and remove beside it */
+.tk-menu .mlrow { display: flex; align-items: center; gap: 2px; }
+.tk-menu .mlrow .mi { flex: 1 1 auto; min-width: 0; width: auto; }
+.tk-menu .mlrow .ia.danger:hover, .tk-menu .mlrow .ia.danger:focus-visible { color: var(--tk-fail); }
+.tk-menu .mr .cbx { flex: none; position: relative; width: 12px; height: 12px; border-radius: 3px; box-shadow: inset 0 0 0 1.5px var(--wb-muted-fg); }
+.tk-menu .mr[aria-checked="true"] .cbx { background: var(--wb-primary); box-shadow: none; }
+.tk-menu .mr[aria-checked="true"] .cbx::after { content: ""; position: absolute; left: 4px; top: 1px; width: 3px; height: 7px; border: solid var(--wb-primary-fg); border-width: 0 1.5px 1.5px 0; transform: rotate(45deg); }
 .tk-menu .mnote { display: flex; align-items: center; gap: 4px; margin: 2px 4px 4px; padding: 0 6px 0 8px; border-radius: 8px; background: var(--wb-muted); flex: 1 1 auto; }
 .tk-menu .mnote:focus-within { box-shadow: inset 0 0 0 1.5px var(--wb-primary); }
 .tk-menu .mnote input { flex: 1 1 auto; min-width: 0; height: 26px; border: 0; outline: 0; background: transparent; color: var(--wb-fg); font: inherit; font-size: 12.5px; }
@@ -879,7 +897,12 @@ body.tk-menuon .tk .ir-more { visibility: hidden !important; }
 .tk .nrow .nch.dflt { color: var(--wb-muted-fg); }
 .tk .nrow .nch.dflt .i { color: inherit; }
 .tk .nrow .nch:hover, .tk .nrow .nch[aria-expanded="true"], .tk .nrow .nch:focus-visible { border-color: var(--wb-primary); outline: none; }
-.tk .nrow select { font: inherit; font-size: 11.5px; height: 22px; border-radius: 6px; border: 1px solid var(--wb-line); background: var(--wb-card); color: var(--wb-fg); }
+.tk .nrow .nch .ldot { margin-right: -2px; }
+/* the quick-add row's kind toggle at its left edge: the current kind's icon (a task's status ring,
+   a topic's bubble); a click switches the kind */
+.tk .nrow .nkind { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; margin-left: -3px; padding: 0; border: 0; border-radius: 6px; background: transparent; cursor: pointer; }
+.tk .nrow .nkind .sti-svg { width: 15px; height: 15px; }
+.tk .nrow .nkind:hover, .tk .nrow .nkind:focus-visible { background: var(--wb-card); box-shadow: inset 0 0 0 1px var(--wb-primary); outline: none; }
 .tk .srows > .subrow { margin: 4px 0; }
 .tk .grow-row + .subrow { margin-left: 0; }
 /* the "+" that ends the Items list (a new root item; the keyboard path) */
@@ -887,11 +910,16 @@ body.tk-menuon .tk .ir-more { visibility: hidden !important; }
 .tk .nadd:hover, .tk .nadd:focus-visible { opacity: 1; background: var(--wb-primary); color: var(--wb-primary-fg); outline: none; }
 .tk .nadd .i { width: 12px; height: 12px; }
 /* the hover insert between list rows: a badge at the depth's indent, a guide line on to the right
-   edge, and a hit strip over the left gutter (width set by the renderer's insWidth) */
+   edge, dim ticks at the shallower levels' indents, and a hit strip over the left gutter (width
+   set by the renderer's insWidth) */
 .tk .plist { position: relative; }
 .tk .hins { position: absolute; left: 0; right: 0; height: 10px; z-index: 4; pointer-events: none; }
 .tk .hins[hidden] { display: none; }
 .tk .hins .hl { position: absolute; top: 4px; height: 2px; left: calc(4px + var(--ind, 0) * 16px + 8px); right: 4px; border-radius: 1px; background: var(--wb-primary); }
+/* the depth markers: an 8px dim tick centred under each shallower level's badge slot (levels
+   0..depth-1), so the insert's level reads against its ancestors; visual only */
+.tk .hins .hdep { position: absolute; top: 4px; height: 2px; left: 8px; width: calc(var(--ind, 0) * 16px); pointer-events: none;
+  background: repeating-linear-gradient(to right, color-mix(in srgb, var(--wb-primary) 40%, transparent) 0 8px, transparent 8px 16px); }
 .tk .hins .hb { position: absolute; top: -3px; left: calc(4px + var(--ind, 0) * 16px); width: 16px; height: 16px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: var(--wb-primary); color: var(--wb-primary-fg); box-shadow: 0 0 0 2px var(--wb-card); }
 .tk .hins .hb .i { width: 11px; height: 11px; stroke-width: 2.2; }
 .tk .hins .hhit { position: absolute; top: 0; left: 0; height: 10px; padding: 0; border: 0; background: transparent; cursor: copy; pointer-events: auto; }
