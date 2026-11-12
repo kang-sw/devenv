@@ -16,15 +16,18 @@ import (
 //   - relogin_session_key is the bootstrap tool's deliberately unadvertised
 //     re-login input for harness adapters (see handleLeadRelogin); declaring
 //     it would advertise it, refusing it would break adapter re-entry.
+//   - harness_session and harness_cwd are the same adapters' report of the
+//     harness conversation a login belongs to (recordHarnessSession),
+//     unadvertised for the same reason: an agent has nothing to put there.
 //   - sparse_paths, spec_stem, and whiteboard.update's payload are retired
 //     names whose handlers answer with a specific migration hint (profile,
 //     ticket_stem, commands) that a generic unknown-argument refusal would
 //     lose.
 //
-// Add a name here only for one of those two reasons; a real caller-facing
+// Add a name here only for one of those reasons; a real caller-facing
 // input belongs in the tool's inputSchema instead.
 var handlerOwnedArguments = map[string][]string{
-	bootstrapToolName:      {"relogin_session_key"},
+	bootstrapToolName:      {"relogin_session_key", "harness_session", "harness_cwd"},
 	"worktree.acquire":     {"sparse_paths"},
 	"tickets.query":        {"spec_stem"},
 	"tickets.close":        {"spec_stem"},

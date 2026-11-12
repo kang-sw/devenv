@@ -239,11 +239,7 @@ func (s *Server) dashboardTouch(sessionKey, root string, force bool) {
 		if sess.reg.ReplyID != "" || !known {
 			// Off from the first call too: a registration a key-on run of
 			// this session left behind must not keep it listed.
-			if err := wsdashboard.RemoveRegistration(dir, sess.replyID); err != nil {
-				s.debugEvent("dashboard.unregister_failed", map[string]any{"error": err.Error()})
-			}
-			sess.reg = wsdashboard.Registration{}
-			sess.servedPort = 0
+			s.dashboardUnregister(dir, sess)
 		}
 		return
 	}
@@ -260,6 +256,9 @@ func (s *Server) dashboardTouch(sessionKey, root string, force bool) {
 		reg.GitCommonDir = commonDir.(string)
 	}
 	reg.Harness = s.currentHarness()
+	// Recorded so the daemon refuses to take the session over while its
+	// harness still runs; it never makes the session live.
+	reg.HarnessPID = s.harnessPID()
 	reg.HeartbeatAt = dashboardStamp(now)
 	reg.EndedAt = ""
 	if err := wsdashboard.WriteRegistration(dir, reg); err != nil {
@@ -269,6 +268,23 @@ func (s *Server) dashboardTouch(sessionKey, root string, force bool) {
 	sess.reg = reg
 	sess.idle = false
 	s.queueDashboardNudge(sess)
+}
+
+// dashboardUnregister takes a session whose dashboard key resolves off out
+// of the registry: its row is removed and this server stops writing it. The
+// row of a session the dashboard daemon has hosted (its directory holds the
+// runner's record) stays as it is instead: the daemon reads that row to
+// learn the session moved to a terminal, and with the row gone it would
+// write its own again and resume a conversation this harness holds. The
+// caller holds d.mu.
+func (s *Server) dashboardUnregister(dir string, sess *dashboardSession) {
+	if _, err := os.Stat(filepath.Join(wsdashboard.SessionDir(dir, sess.replyID), wsdashboard.AgentRecordFileName)); err != nil {
+		if err := wsdashboard.RemoveRegistration(dir, sess.replyID); err != nil {
+			s.debugEvent("dashboard.unregister_failed", map[string]any{"error": err.Error()})
+		}
+	}
+	sess.reg = wsdashboard.Registration{}
+	sess.servedPort = 0
 }
 
 // dashboardTouchHosted records the hosted session's keyed call: its first
@@ -312,11 +328,7 @@ func (s *Server) dashboardHeartbeat() {
 		sess.enabled = s.dashboardSessionEnabled(key)
 		sess.checkedAt = now
 		if !sess.enabled {
-			if err := wsdashboard.RemoveRegistration(dir, sess.replyID); err != nil {
-				s.debugEvent("dashboard.unregister_failed", map[string]any{"error": err.Error()})
-			}
-			sess.reg = wsdashboard.Registration{}
-			sess.servedPort = 0
+			s.dashboardUnregister(dir, sess)
 			continue
 		}
 		reg := sess.reg

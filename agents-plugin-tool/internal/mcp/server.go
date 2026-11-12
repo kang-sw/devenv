@@ -2345,6 +2345,7 @@ func (s *Server) handleLeadLogin(id json.RawMessage, arguments map[string]any) r
 			return toolTextResponse(id, "", fmt.Errorf("session bootstrap: this session is hosted and its session key is fixed, but %s %q %s", envHostedSessionKey, hosted, reason))
 		}
 		s.rebindMailboxOwnerAtFerrule(hosted, "", roleLead, canonical)
+		s.recordHarnessSession(hosted, arguments)
 		return s.leadLoginResponse(id, arguments, hosted, canonical)
 	}
 	if parentKey != "" {
@@ -2366,6 +2367,7 @@ func (s *Server) handleLeadLogin(id json.RawMessage, arguments map[string]any) r
 	// runs the tracker's session-start check as the FRESH manual path does.
 	if parentKey == "" && scope == roleLead {
 		s.startTrackerSessionCheck()
+		s.recordHarnessSession(key, arguments)
 	}
 	return s.leadLoginResponse(id, arguments, key, canonical)
 }
@@ -2401,7 +2403,11 @@ func (s *Server) handleLeadRelogin(id json.RawMessage, arguments map[string]any,
 	if reason := s.leadKeyRefusal(key, canonical); reason != "" {
 		return toolTextResponse(id, "", fmt.Errorf("session bootstrap: relogin_session_key %q %s", key, reason))
 	}
+	if err := s.hostedLoginGuard(key, canonical); err != nil {
+		return toolTextResponse(id, "", err)
+	}
 	s.rebindMailboxOwnerAtFerrule(key, "", roleLead, canonical)
+	s.recordHarnessSession(key, arguments)
 	return s.leadLoginResponse(id, arguments, key, canonical)
 }
 

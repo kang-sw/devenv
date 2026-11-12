@@ -41,6 +41,11 @@ type Record struct {
 	CreatedAt string `json:"created_at"`
 	ClosedAt  string `json:"closed_at,omitempty"`
 
+	// HandedOffAt is when a lead session was handed to a terminal harness
+	// (conv.release): the daemon serves it no more, as it serves no closed
+	// one, until a takeover clears it.
+	HandedOffAt string `json:"handed_off_at,omitempty"`
+
 	// Lead marks a hosted lead session (Profile.Lead when it was opened):
 	// WSKey is a lead key, Root its canonical git root, and the fields
 	// below apply.

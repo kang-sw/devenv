@@ -116,7 +116,8 @@ under `<cache root>/dashboard/`:
   2 minutes (a session the daemon hosts under `WS_HOSTED_SESSION` is
   registered by the daemon, not by the serving ws-mcp: its row carries
   `hosted: true` and `host_pid`, the session's harness process, 0 until the
-  daemon has started it), and one per agent
+  daemon has started it, with `host_stopped: true` while it has no process
+  and starts none), and one per agent
   runner conversation (below), written by the runner with `agent: true`
   (and `unlisted: true` when its profile keeps it off the index page) while
   the daemon runs. A session counts as live while
@@ -524,6 +525,30 @@ conversation:
   `WS_HOSTED_*`, and `WS_PI_*` variables are not passed on. A ws-mcp that is
   not the hosted harness's never writes, heartbeats, removes, or end-marks a
   row that carries `hosted: true`, whatever key it is given.
+- **One holder.** A conversation is the daemon's or a terminal harness's,
+  never both, and the registration row says which. The adapters report the
+  harness conversation at login (`ferrule`'s unadvertised `harness_session`
+  and `harness_cwd`, stored on the key record as `harness`,
+  `harness_session`, `harness_cwd`; the directory is the harness's own, not
+  the record's root), and a terminal ws-mcp writes its harness process on
+  its row (`harness_pid`). Neither PID makes a session live; each only
+  refuses a change of holder. A terminal re-login (`relogin_session_key`)
+  to a key whose row is hosted is refused with the marker
+  `hosted-session-held` while the row's process may run: `host_pid` alive,
+  or no `host_pid` on a row that is neither `host_stopped` nor ended (a
+  spawn under way). The adapter then stays keyless and shows the refusal
+  instead of minting. The hosted harness's own login (the hosted flag, or a
+  harness PID equal to `host_pid`) is accepted. Any other re-login to a
+  hosted row takes it: the row becomes the terminal's (`hosted` cleared,
+  `harness_pid` set), and the daemon lets the session go when it next reads
+  the row - its record is marked `handed_off_at`, its mail watch and
+  heartbeat end, mail it had claimed and not delivered goes back to the
+  key's reply queue, and no later daemon start serves it. The daemon reads
+  the row under `registration.json.lock` before every row write, mail
+  claim, and spawn, and the login takes the same lock, so the two cannot
+  both decide they hold the session. A terminal ws-mcp whose dashboard key
+  turns off leaves such a row in place (its directory holds `agent.json`)
+  rather than removing it.
 - **Input.** Every input is the daemon's. A composer message is held in the
   inbox and submitted at the turn's end; a steered one is written to the
   running process at once (Claude: a user message mid-turn, Pi: RPC
