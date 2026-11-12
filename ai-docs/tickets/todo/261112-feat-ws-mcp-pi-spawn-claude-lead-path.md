@@ -40,8 +40,9 @@ Facts gathered 2026-11-12 (paths under `agents-plugin-tool/internal/`):
   through a stdio ws-mcp child with `WS_MCP_ALLOWED_TOOLS` set to the
   profile's `WSTools` (`runner.go` `startProcess`); `toolAllowed`
   (`mcp/server.go`) honours that explicit allowlist, so a child sees no
-  `pi.*` unless listed. Builtin profiles are only `tracker-support-pi`,
-  `lead-claude`, and `lead-pi` (`wsagent/builtin.go`).
+  `pi.*` unless listed. Builtin profiles are only `tracker-support-claude`,
+  `tracker-support-pi`, `lead-claude`, and `lead-pi`
+  (`wsagent/builtin.go#L89-L115`).
 - A non-lead Pi child is the daemon's own `exec.Cmd` child: it dies with the
   daemon and resumes lazily on the next send from its persisted session
   file; idle processes stop after `DefaultIdleTimeout` (10 minutes).
@@ -55,20 +56,24 @@ Facts gathered 2026-11-12 (paths under `agents-plugin-tool/internal/`):
   posts mail on a child's completion today.
 - Agents-panel rows come from `wslive.State` subagents fed by `agent`
   events (`wslive/state.go`); `Event.SessionKey` links a row to a child's
-  own session. There is no kind field. A Runner conversation also registers
+  own session. The `Agent` snapshot struct has no kind field
+  (`wslive/snapshot.go#L295-L315`), but `Event` already has `Kind`, JSON key
+  `kind`, which is the event type (`agent`, `status`, ...;
+  `wslive/state.go#L75-L77`), so a new agent marker cannot reuse the `kind`
+  key on an event. A Runner conversation also registers
   itself as a top-level dashboard session (`runner.go`
   `writeRegistration`).
 - No code checks a Pi version; installed `pi --version` prints `1.0.4`.
 - `tools/list` is not knob-aware: `filteredTools` takes no session key and
   filters through env flags, static hides, and the allowlist.
-- Per-package knob defaults precedent: `status_band_enabled` is true in
-  `agents-plugin/config-manifest.json` and false in
-  `agents-plugin-wsflow/config-manifest.json`.
+- Per-package knob defaults precedent: `claude.status_band_enabled` is true
+  in `agents-plugin/config-manifest.json#L41-L43` and false in
+  `agents-plugin-wsflow/config-manifest.json#L41-L43`.
 
 ## Decisions
 
-1. **Compatibility tier T0.** New tools, an optional `kind` field on agent
-   events and snapshots, and a new config key are all additive
+1. **Compatibility tier T0.** New tools, an optional `agent_kind` field on
+   agent events and snapshots, and a new config key are all additive
    (`ai-docs/manuals/release-compatibility.md`).
 2. **Children live in the daemon's runner.** Pi children run in the daemon's
    `wsagent.Runner`, reached through a new daemon handle on
@@ -129,8 +134,9 @@ Facts gathered 2026-11-12 (paths under `agents-plugin-tool/internal/`):
    lead's to steer.
 10. **Dashboard.** The runner's dashboard registration is kept, so the
     agents-panel row (with a blinking `pi` badge where an agent row shows the
-    blinking blue circle, driven by a new optional `kind:"pi"` on agent
-    events) opens the child's conversation; the child is kept out of the
+    blinking blue circle, driven by a new optional `agent_kind:"pi"` on
+    agent events and snapshots; `Event.Kind` already carries the event type
+    under JSON `kind`) opens the child's conversation; the child is kept out of the
     session rail's top-level list. Rejected: listing it in the rail like any
     session (a lead with several workers floods the rail); not registering
     it (no conversation page).
@@ -155,12 +161,42 @@ Facts gathered 2026-11-12 (paths under `agents-plugin-tool/internal/`):
   `ai-docs/manuals/ws-mcp.md`, `ai-docs/manuals/release-compatibility.md`,
   and `ai-docs/manuals/wsflow-mirroring.md` before editing; tool
   descriptions are shipped text.
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for agents-plugin/, agents-plugin-wsflow/, agents-plugin-tool/)
+- Convention: ai-docs/manuals/wsflow-mirroring.md (declared for agents-plugin-wsflow/)
+- Convention: ai-docs/manuals/ws-mcp.md (declared for agents-plugin-tool/internal/mcp/)
+- Convention: ai-docs/manuals/release-compatibility.md (declared for agents-plugin-tool/internal/)
 - Out of scope: `tune-pi`, hiding `pi.*` from Pi-harness sessions (later
   epic children), and the Pi extension's own `ws-agent-*` tools.
 - Out of scope: recursion (Pi workers spawning Pi children through `pi.*`).
   It is child 1b, ticketed separately and run after this ticket lands; the
   parent record (Decision 4) and the report path (Decision 7) are what it
   builds on, so keep them general enough for a Pi parent.
+
+## Prior Decisions
+
+- 261112-feat-ws-mcp-pi-spawn-recursion (2026-11-12, Decisions): "Completion to a Pi parent is steered ... A Claude lead parent still gets child 1's mailbox mail." — bearing: constrains
+- 261112-bug-ws-hosted-pi-subagents-missing-from-dashboard (2026-11-12, commit): "Rejected (ticket decisions): deriving rows from spawn results / settled pushes; routing child events through `dashboard.intake`." — bearing: constrains
+- 261108-feat-ws-daemon-agent-runner (2026-11-08, Result): "`WS_MCP_ALLOWED_TOOLS` (comma-separated ws tool names) limits the attached ws-mcp's `tools/list` and `tools/call`. `WS_MCP_NO_DASHBOARD=1` stops it ensuring a dashboard" — bearing: supports
+- dab9f6c3 (2026-11-08, commit): "WS_MAILBOX blanking: a daemon started from a lead's ws-mcp inherits that lead's mailbox identity, and an attached ws-mcp with it would register presence for the lead's inbox." — bearing: constrains
+- 907d3b85 (2026-11-12, commit): "Takeover resumes the conversation the key record names (harness_session, harness_cwd from Phase 2) and keeps both on the agent record (cwd, session_file), so every later start runs where the terminal harness ran." — bearing: constrains
+- 260926-bug-pi-execute-worker-steals-mailbox-owner (2026-09-26, Decisions): "the execute-worker spawn carries the lead's session key ... so the child's bootstrap `ferrule` carries `parent_session_key`." — bearing: supports
+- 261109-feat-ws-dashboard-subagent-badge (2026-11-09, Decisions): "the builtin support profiles allow Claude's `Agent` tool. Subagents must stay inside the same tool limit ... the Pi profile is unaffected because Pi has no subagent tool." — bearing: supports
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | wsagent/runner.go, wsagent/record.go, wsagent/builtin.go, wsagent/backend.go, mcp/process_env.go, mcp/server.go, mcp/mailbox_tools.go, wslive/state.go, wslive/snapshot.go, wsmailbox, cmd/ws-mcp/proxy.go, both config-manifest.json files |
+| scope.surface | cross-module | new MCP tools pi.*, Runner spawn spec, Record fields, mailbox writer helper, live event field, config key across wsagent, mcp, wsmailbox, wslive, wsdashboard, cmd/ws-mcp |
+| scope.new_public_symbol | yes | pi.spawn, pi.send, pi.list, pi.stop, pi.transcript, pi.wait, pi_spawn_enabled, a Runner spawn-spec constructor, a wsmailbox system-sender helper |
+| scope.new_type_contract | yes | Runner spawn spec, optional Record parent/cwd fields, ServerOptions daemon handle, optional agent marker on Event and wslive.Agent |
+| scope.test_surface | existing | agents-plugin-tool/internal/wsagent/runner_test.go, pi_test.go, wslive/state_test.go, mcp tests exist; new test files not confirmed |
+| complexity.reuse_points | confirmed | wsagent.Runner and PiBackend, wsconfig.ResolveAgentTierForHarness, wsmailbox.AppendQueue and WithReplyLock, wswake.Mailbox.Wake, status_band_enabled manifest precedent all read |
+| complexity.side_effect_risk | high | daemon-owned child processes, daemon-side mailbox writes and wake, per-connection MCP server wiring to a daemon handle |
+| risk.correctness | high | async completion report, pi.wait timeouts, parent scoping, and daemon restart resume are concurrent paths |
+| risk.fit | moderate | Event already uses the kind JSON key for the event type, so the planned kind:"pi" needs another name; Runner.Create signature grows a spec form |
+| risk.test | high | the acceptance run needs a real Pi 1.0.4 child, mailbox wake, and headless Chromium; Go tests need fake backends |
+| risk.security_or_contract | high | non-lead child gets bash/edit/write with caller-chosen absolute cwd, a daemon-side system-sender mail path, and a T0 contract claim on new event/snapshot fields |
 
 ## Phases
 
@@ -170,7 +206,7 @@ Facts gathered 2026-11-12 (paths under `agents-plugin-tool/internal/`):
   builtin profile.
 - MCP: `pi.spawn`, `pi.send`, `pi.list`, `pi.stop`, `pi.transcript`,
   `pi.wait`; the daemon handle on `ServerOptions`; the exposure gate.
-- Mailbox completion report; dashboard row with `kind:"pi"` and the blinking
+- Mailbox completion report; dashboard row with `agent_kind:"pi"` and the blinking
   `pi` badge where an agent row shows the blinking blue circle.
 - Config manifests (ws, wsflow) for the knob; mirrors and manifest
   regeneration as `ai-docs/manuals/wsflow-mirroring.md` requires.
@@ -179,7 +215,7 @@ Verification:
 - Go tests: spawn spec recorded with parent and cwd; tier refusal message;
   `pi.list` scoping; mailbox report written to the parent's queue and wake
   fired; `pi.wait` timeout; exposure gate (knob off, Pi missing, Pi below
-  1.0, all hide); `kind` round-trips through live state.
+  1.0, all hide); `agent_kind` round-trips through live state.
 - A real run on this machine (Pi 1.0.4): a Claude lead spawns a Pi child at
   a tuned tier, receives the mailbox report, reads the transcript, and the
   agents panel shows the `pi` badge (headless Chromium screenshot).
