@@ -187,3 +187,81 @@ Implement per `## Decisions`. Verification:
   listing tells, one list where it cannot; no picker for a session whose
   adapter reports no list; no steer action on a command bubble.
 - A headless check of the picker and a command's output row.
+
+### Result (49e0da567) - 2026-11-12
+
+Landed in five commits on impl/develop/rebel-zen-sprig:
+
+- Spine (34c00c561): `wsinbox.Entry.Command {name, args}` is a command entry
+  whose `Text()` is its typed line. A command send is always a new entry.
+  `MergeTarget` stops at a command entry: it does not skip past it, so text
+  sent after a command never joins text sent before it. `Steer` refuses a
+  command with `ErrCommand` (409). The message route takes
+  `{command, args}` only when the session snapshot lists commands (else
+  409). Cancel and interrupt return `command`. `dashboard.inbox_drain`
+  carries `command` in order (text output heads the block `command`).
+  `wslive` adds the optional kinds `commands` (the snapshot's `commands`
+  list, cleared by reset) and `command` (a `command` ring line with the
+  typed line and its output), both announced on intake `accepts`.
+- claude-mod (c4e68fc3e): reports `$.command.list()` as `commands` at feed
+  start, after every reset, when accepted, and at each turn end when the
+  list changed. The drain split submits A, runs C through `$.command.run`
+  (dispatched via `$.clock.after(0)`), and holds B (and anything drained
+  while C runs) in a watcher backlog. The backlog obeys the existing
+  turn-end and compaction holds. A `command` event carries the output text,
+  or no text when the run returned none; a refused run sends its error as
+  text. The wsflow mirror is resynced.
+- wsagent (f460afb7b): hosted Claude captures `init.slash_commands` and
+  leaves out `terminal_slash_commands`. Hosted Pi calls `get_commands` at
+  lead start and at each settle (mapped in the event stream, so a holder
+  replay rebuilds it), labels each command with its source, and adds
+  `compact`. `kick` splits the drain: text plus mail goes as one turn, a
+  command goes alone and bare (Claude) or as RPC `compact`/`prompt` (Pi),
+  and mail never rides with a command. The not-yet-sent remainder is kept
+  in the optional `Record.Queued` field, so it survives a daemon restart.
+  An interrupt keeps it; close and hand-off drop it.
+- Page (625708d53): the `/` picker reuses the generalized `mention.js`
+  popup. Rows group by user/agent layer when any command has one, else one
+  list. There is no picker without a list. Picking makes a command capsule
+  and the box text becomes the args. While a command is selected, chips,
+  notes and mentions stay in the composer and images block the send with a
+  toast. The held command bubble has no steer control. The `command` ring
+  row shows the echo and output, or the "opens in the terminal" note. i18n
+  covers all 11 languages.
+- Review fix (49e0da567): a steered entry keeps its stamp, so text steered
+  but not taken mid-turn still drains ahead of a later command.
+
+Verification:
+- `ws-rgo -- test ./internal/wsinbox ./internal/wslive ./internal/wsagent
+  ./internal/wsdashboard ./internal/wsmailbox ./internal/wsrsrc
+  ./internal/mcp`: all ok except the known pre-existing
+  `TestDashboardReadPageServesTheBoard`.
+- `claude plugin test .` in agents-plugin and agents-plugin-wsflow: 773
+  pass each.
+- `claude plugin validate agents-plugin`: passed.
+- A headless chrome check against an isolated probe daemon covered the
+  grouped and flat picker, filtering, the capsule, the held bubble without
+  steer, cancel restoring the selection, the command output row and the
+  terminal note, and no picker without a list.
+- Lite review: one Important finding, fixed in 49e0da567.
+
+Decisions taken:
+- `MergeTarget` stops at a command rather than skipping it, to keep drain
+  order.
+- Steer of a command gets its own error, not the misleading "already
+  received".
+- Hosted queued input is persisted, not held in memory.
+- Pi `get_commands` is handled in the mapper rather than through
+  `requestBody`, so it can be replayed.
+- Only lead sessions report a command list.
+
+Open:
+- A terminal Claude command whose `$.command.run` never settles (a panel
+  left open) holds later board messages until it does. No timeout was
+  added.
+- The agent HTTP `interrupt` action returns a held command as its typed
+  line (`[]string`), so resending it through `send` makes it text. The page
+  route keeps it a command.
+- `startConv`'s queued re-send for a non-rejoining restart has no test.
+- Per (431), the hosted part merges only after mail to the peer lead that
+  owns wsagent / wsholder / wslive.
