@@ -10,12 +10,15 @@
   //   content  text by default; opts.html: true sets it as HTML instead, for
   //            callers that already escaped what they pass
   //   opts.kind      "info" (default), "notice" (a tracker notification: a
-  //                  bar on its left), or "summary" (a dot before its text)
-  //   opts.duration  ms before it leaves; default 4000, 8000 for "notice"
+  //                  bar on its left), "summary" (a dot before its text), or
+  //                  "warn" (a failure or warning: a warning-coloured bar and
+  //                  mark)
+  //   opts.duration  ms before it leaves; default 4000, 6000 for "warn",
+  //                  8000 for "notice" and "summary"
   //   opts.onClick   makes the toast a button: a click (or Enter / Space)
   //                  runs it and closes the toast
   if (window.WsToast) return;
-  var doc = document, MAX = 3, DURATION = { info: 4000, notice: 8000, summary: 8000 };
+  var doc = document, MAX = 3, DURATION = { info: 4000, warn: 6000, notice: 8000, summary: 8000 };
   var box = null, live = []; // live: the shown toasts' close functions, oldest first
 
   function stack() {

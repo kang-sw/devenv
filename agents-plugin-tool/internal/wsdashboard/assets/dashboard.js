@@ -501,7 +501,6 @@
       if (window.wbForm) window.wbForm();
       mermaid(ins);
       syncChips();
-      syncNote();
       // A mention button over a body frame the swap removed has nothing left
       // to add.
       if (mpend && mpend.frame && !doc.contains(mpend.frame)) hideMention();
@@ -1041,7 +1040,7 @@
   // answer chip per board item. Clicking an option, ok/no, or an
   // acknowledgement on a card attaches (or replaces) that item's chip; the
   // chips live here, so a chip outlives its card leaving the board.
-  var ctext = $("ctext"), cnote = $("cnote"), cchips = $("cchips");
+  var ctext = $("ctext"), cchips = $("cchips");
   var chips = {}, chipOrder = [];
   // bmentions are the board mentions the composer holds, in the order added
   // (board mentions, below).
@@ -1192,18 +1191,10 @@
     var b = region("board"), r = b && b.querySelector("#reply-text");
     return r ? r.value.trim() : "";
   }
-  // syncNote shows text in the composer's note line, or clears it. A note
-  // given ttl (ms), a success, clears itself after that long unless another
-  // note replaced it; a failure or warning stays until the next change.
-  var noteTimer = 0;
-  function syncNote(text, ttl) {
-    if (!cnote) return;
-    clearTimeout(noteTimer);
-    noteTimer = 0;
-    cnote.textContent = text || "";
-    if (text && ttl) noteTimer = setTimeout(function () { noteTimer = 0; cnote.textContent = ""; }, ttl);
-  }
-  var NOTE_OK = 3000;
+  // The composer's outcomes show as toasts, so the composer keeps no row
+  // for them: noteWarn for a failure or warning, noteOk for a success.
+  function noteWarn(text) { if (window.WsToast) window.WsToast.show(text, { kind: "warn" }); }
+  function noteOk(text) { if (window.WsToast) window.WsToast.show(text); }
   function grow() { ctext.style.height = "auto"; ctext.style.height = Math.min(160, ctext.scrollHeight) + "px"; }
   // post sends a write route's JSON body; done(ok, answer) gets the parsed
   // answer, or the server's refusal text. A route is the session's own
@@ -1293,12 +1284,12 @@
       added.push(it.n);
       var rd = new FileReader();
       rd.onload = function () { var v = String(rd.result); it.data = v.slice(v.indexOf(",") + 1); };
-      rd.onerror = function () { dropImg(it); release(it); deleteMarkers(it.n); renderImgs(); syncNote(wsT("js.img.readfail", it.name)); };
+      rd.onerror = function () { dropImg(it); release(it); deleteMarkers(it.n); renderImgs(); noteWarn(wsT("js.img.readfail", it.name)); };
       rd.readAsDataURL(f);
     });
     renderImgs();
     insertMarkers(added);
-    syncNote(refused ? wsT("js.img.refused", refused) : "");
+    if (refused) noteWarn(wsT("js.img.refused", refused));
   }
   function dropImg(it) {
     var i = imgs.indexOf(it);
@@ -1570,7 +1561,6 @@
     if (p.frame) { if (p.frame.contentWindow) p.frame.contentWindow.postMessage({ wbDoc: "unsel" }, "*"); }
     else if (window.getSelection) window.getSelection().removeAllRanges();
     renderChips();
-    syncNote();
   }
   // frameMention takes a body frame's selection report: its text and where
   // its end stands inside the frame.
@@ -1612,8 +1602,8 @@
   function sendMessage() {
     if (sending) return;
     var raw = ctext.value.trim(), t = sendText().trim(), list = chipList(), pics = imgs.slice(), notes = topicNotes(), said = bmentions.slice();
-    if (!t && !list.length && !pics.length && !notes.length && !said.length) { syncNote(wsT("js.send.empty")); return; }
-    if (pics.some(function (p) { return !p.ref && p.data === null; })) { syncNote(wsT("js.send.reading")); return; }
+    if (!t && !list.length && !pics.length && !notes.length && !said.length) { noteWarn(wsT("js.send.empty")); return; }
+    if (pics.some(function (p) { return !p.ref && p.data === null; })) { noteWarn(wsT("js.send.reading")); return; }
     var body = { text: t, chips: list, topics: notes.map(function (n) { return { topic: n.topic, note: n.value.trim() }; }), mentions: said };
     var up = pics.filter(function (p) { return !p.ref; }), refs = pics.filter(function (p) { return !!p.ref; });
     if (up.length) body.images = up.map(function (p) { return { name: p.name, data: p.data, n: p.n }; });
@@ -1624,7 +1614,7 @@
     sending = true;
     post("message", body, function (ok, res) {
       sending = false;
-      if (!ok) { syncNote(wsT("js.send.fail", res)); return; }
+      if (!ok) { noteWarn(wsT("js.send.fail", res)); return; }
       if (ctext.value.trim() === raw) { ctext.value = ""; grow(); clearMentions(); }
       pics.forEach(function (p) { dropImg(p); release(p); });
       clearTrash();
@@ -1650,10 +1640,9 @@
       renderChips();
       // The sent draft is gone; what was typed during the send is saved
       // again as the next draft.
+      // No toast on success: the held bubble in the conversation is the
+      // confirmation.
       clearDraft();
-      // No note on success: the held bubble in the conversation is the
-      // confirmation, so a "sent" line only took a composer row.
-      syncNote();
     });
   }
   // validMentions keeps the well-formed mentions of a list a cancel or a
@@ -1734,9 +1723,9 @@
   function cancelHeld(btn) {
     btn.disabled = true;
     post("cancel", { id: btn.getAttribute("data-cancel") }, function (ok, res) {
-      if (!ok) { btn.disabled = false; syncNote(wsT("js.cancel.fail", res)); return; }
+      if (!ok) { btn.disabled = false; noteWarn(wsT("js.cancel.fail", res)); return; }
       restoreHeld([res]);
-      syncNote(wsT("js.cancel.ok"), NOTE_OK);
+      noteOk(wsT("js.cancel.ok"));
       ctext.focus();
     });
   }
@@ -1818,11 +1807,11 @@
     interruptedTurn = leadTurn();
     syncBadge();
     post("interrupt", {}, function (ok, res) {
-      if (!ok) { interrupting = false; syncBadge(); syncNote(wsT("js.interrupt.fail", res)); return; }
+      if (!ok) { interrupting = false; syncBadge(); noteWarn(wsT("js.interrupt.fail", res)); return; }
       var list = res.held || [];
-      if (!list.length) { syncNote(wsT("js.interrupt.ok"), NOTE_OK); return; }
+      if (!list.length) { noteOk(wsT("js.interrupt.ok")); return; }
       restoreHeld(list);
-      syncNote(wsT("js.interrupt.restored"), 2 * NOTE_OK);
+      noteOk(wsT("js.interrupt.restored"));
       ctext.focus();
     });
   }
@@ -1832,8 +1821,8 @@
   function steerHeld(btn) {
     btn.disabled = true;
     post("steer", { id: btn.getAttribute("data-steer") }, function (ok, res) {
-      if (!ok) { btn.disabled = false; syncNote(wsT("js.steer.fail", res)); return; }
-      syncNote(wsT("js.steer.ok"), NOTE_OK);
+      if (!ok) { btn.disabled = false; noteWarn(wsT("js.steer.fail", res)); return; }
+      noteOk(wsT("js.steer.ok"));
     });
   }
   // applySent marks each board item the session was sent an answer for, or
@@ -1896,7 +1885,7 @@
   if (ctext) {
     var csend = $("csend");
     if (csend) csend.addEventListener("click", function () { sendMessage(); ctext.focus(); });
-    ctext.addEventListener("input", function () { grow(); syncNote(); syncMarkers(); trackMentions(); paintMentions(); });
+    ctext.addEventListener("input", function () { grow(); syncMarkers(); trackMentions(); paintMentions(); });
     // Tab indents rather than leaving the composer; Escape, then Tab,
     // leaves it (the keyboard way out).
     var tabOut = false;
@@ -1929,7 +1918,6 @@
       doc.addEventListener(type, function (e) {
         if (!e.target.closest || !e.target.closest("#r-board")) return;
         syncChips();
-        syncNote();
       });
     });
   }
@@ -1938,18 +1926,18 @@
   doc.addEventListener("click", function (e) {
     var t = e.target;
     if (!t || !t.closest) return;
-    if (cnote && t.closest("#r-board")) { syncChips(); syncNote(); }
+    if (cchips && t.closest("#r-board")) syncChips();
     var u = t.closest("[data-unchip]");
-    if (u) { var uid = u.getAttribute("data-unchip"); dropChip(uid); setItem(uid, null); renderChips(); syncNote(); return; }
+    if (u) { var uid = u.getAttribute("data-unchip"); dropChip(uid); setItem(uid, null); renderChips(); return; }
     u = t.closest("[data-untchip]");
-    if (u) { clearTopicNote(u.getAttribute("data-untchip")); renderChips(); syncNote(); return; }
+    if (u) { clearTopicNote(u.getAttribute("data-untchip")); renderChips(); return; }
     u = t.closest("[data-unmchip]");
-    if (u) { bmentions.splice(+u.getAttribute("data-unmchip"), 1); renderChips(); syncNote(); return; }
+    if (u) { bmentions.splice(+u.getAttribute("data-unmchip"), 1); renderChips(); return; }
     if (t.closest("[data-wbmention]")) { addMention(); return; }
     u = t.closest("[data-tchip]");
     if (u) { focusTopicNote(u.getAttribute("data-tchip")); return; }
     u = t.closest("[data-unimg]");
-    if (u) { unattach(imgs[+u.getAttribute("data-unimg")]); syncNote(); return; }
+    if (u) { unattach(imgs[+u.getAttribute("data-unimg")]); return; }
     u = t.closest("#r-board button.closed-more[data-closed-next]");
     if (u) { loadClosed(u); return; }
     u = t.closest("#r-convlive [data-cancel]");
@@ -6427,7 +6415,7 @@
         if (Array.isArray(d.sel)) { try { ctext.setSelectionRange(d.sel[0], d.sel[1]); } catch (e) { /* out of range */ } }
       }
       if (live && d.tab === "board") setTab("board");
-      if (lost.length) syncNote(wsT("js.draft.imgslost", lost.length));
+      if (lost.length) noteWarn(wsT("js.draft.imgslost", lost.length));
     } finally {
       restoring = false;
     }
