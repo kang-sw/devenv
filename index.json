@@ -410,6 +410,9 @@
     "261112-bug-ws-dashboard-interrupt-badge-stuck-on-back-to-back-turn": {
       "registered_at": "2026-11-12T02:58:04Z"
     },
+    "261112-bug-ws-hosted-finished-subagents-lost-on-idle-resume": {
+      "registered_at": "2026-11-12T02:58:08Z"
+    },
     "261112-bug-ws-launcher-fingerprint-skips-embedded-assets": {
       "registered_at": "2026-11-12T01:42:39Z"
     },
