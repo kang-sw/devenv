@@ -415,26 +415,13 @@
     "261112-feat-ws-dashboard-lead-wake-events": {
       "registered_at": "2026-11-12T02:03:05Z"
     },
-    "261112-feat-ws-dashboard-outside-root-file-card": {
-      "registered_at": "2026-11-12T05:55:12Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-12T06:59:30Z",
-        "impl": {
-          "branch": "impl/develop/bunt-puppy-hulk"
-        }
-      }
-    },
     "261112-feat-ws-dashboard-pin-column": {
       "registered_at": "2026-11-12T06:51:53Z",
       "lease": {
         "email": "ki6080@gmail.com",
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
-        "phase": "active",
+        "phase": "closed",
         "touched_at": "2026-11-12T07:01:30Z",
         "impl": {
           "branch": "impl/develop/await-steam-nylon"
