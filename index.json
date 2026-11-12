@@ -423,7 +423,14 @@
       }
     },
     "261112-feat-ws-dashboard-pin-column": {
-      "registered_at": "2026-11-12T06:51:53Z"
+      "registered_at": "2026-11-12T06:51:53Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "28ef83e379b353cc",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-12T07:00:53Z"
+      }
     },
     "261112-feat-ws-dashboard-slash-commands": {
       "registered_at": "2026-11-12T06:15:32Z",
