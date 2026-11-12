@@ -16,7 +16,7 @@ var bulkCountChip = regexp.MustCompile(`<button type="button" class="chip (polic
 // language. The count chips are the one difference between a served board
 // region and the static page that holds no topic body, so a test in this or
 // another package compares the two through it, and every such comparison
-// follows one rule.
+// follows one rule. It is test support only: no production path calls it.
 func StaticCountChips(board string) string {
 	return bulkCountChip.ReplaceAllStringFunc(board, func(m string) string {
 		g := bulkCountChip.FindStringSubmatch(m)

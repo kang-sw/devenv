@@ -213,9 +213,10 @@ check('the step lists every label as a toggle chip, the picked one on, focus on 
 check('a toggle adds in list order', labelToggled(['L2'], 'L1'), ['L1', 'L2']);
 check('a toggle removes', labelToggled(['L1', 'L2'], 'L1'), ['L2']);
 check('a toggle drops labels the list no longer holds', labelToggled(['gone', 'L1'], 'L2'), ['L1', 'L2']);
-LW = { item: 'i1', labels: ['L1', 'L2'], dirty: false };
+LW = { i1: { item: 'i1', labels: ['L1', 'L2'], dirty: false } };
 check('the step draws the pick still being written', has(labelStepHtml(it), 'class="chip lbl on" data-act="m-label" data-label="L1"'), true);
-LW = null;
+check('another item\'s pick leaves this item drawn from its labels', has(labelStepHtml({ id: 'i3', labels: ['L2'] }), 'class="chip lbl" data-act="m-label" data-label="L1"'), true);
+LW = {};
 VS.labels = [];
 check('an empty store says so, no add for a non-admin', labelStepHtml(it), '<p class="mempty">js.tk.labels.empty</p>');
 VS.viewer.admin = true;
@@ -229,7 +230,8 @@ done();
 // in flight builds on that write's pick, not on the item's lagging labels,
 // and goes as one write of the latest pick once the earlier one returns, so
 // quick toggles accumulate in order; a refused write drops the pick and the
-// next toggle builds on the item again.
+// next toggle builds on the item again. Picks are kept per item, so a toggle
+// on another item never drops toggles still queued on the first.
 func TestTrackerLabelStepQuickToggles(t *testing.T) {
 	runTrackerCases(t, "label step quick toggles", trackerCheckJS+`
 var VS = { labels: [{ id: 'L1' }, { id: 'L2' }, { id: 'L3' }] }, MN = { kind: 'item', step: 'labels' }, sent = [], redraws = 0;
@@ -242,28 +244,45 @@ labelWrite(it, 'L1');
 check('the first toggle writes at once', labels(), [['L1']]);
 labelWrite(it, 'L2');
 labelWrite(it, 'L3');
-check('toggles while it is in flight wait, each drawn', [labels().length, redraws, LW.labels], [1, 2, ['L1', 'L2', 'L3']]);
+check('toggles while it is in flight wait, each drawn', [labels().length, redraws, LW.i1.labels], [1, 2, ['L1', 'L2', 'L3']]);
 it.labels = ['L1'];
 sent[0].then();
 check('then they go as one write of the latest pick', labels(), [['L1'], ['L1', 'L2', 'L3']]);
 labelWrite(it, 'L1');
-check('a toggle during that write builds on its pick', LW.labels, ['L2', 'L3']);
+check('a toggle during that write builds on its pick', LW.i1.labels, ['L2', 'L3']);
 it.labels = ['L1', 'L2', 'L3'];
 sent[1].then();
 it.labels = ['L2', 'L3'];
 sent[2].then();
-check('every pick written in order, nothing pending after', [labels(), LW], [[['L1'], ['L1', 'L2', 'L3'], ['L2', 'L3']], null]);
+check('every pick written in order, nothing pending after', [labels(), LW], [[['L1'], ['L1', 'L2', 'L3'], ['L2', 'L3']], {}]);
 labelWrite(it, 'L1');
 labelWrite(it, 'L2');
 redraws = 0;
 sent[3].fail();
-check('a refused write drops the pick and draws the item again', [labels().length, LW, redraws], [4, null, 1]);
+check('a refused write drops the pick and draws the item again', [labels().length, LW, redraws], [4, {}, 1]);
 labelWrite(it, 'L3');
 check('the next toggle builds on the item', sent[4].labels, ['L2']);
-labelWrite({ id: 'i2', labels: ['L1'] }, 'L2');
+var it2 = { id: 'i2', labels: ['L1'] };
+labelWrite(it2, 'L2');
 check('another item writes at once on its own labels', sent[5].labels, ['L1', 'L2']);
+check('both picks are kept, one per item', Object.keys(LW).sort(), ['i1', 'i2']);
+it.labels = ['L2'];
 sent[4].then();
-check('the earlier item\'s return leaves the newer pick alone', LW && LW.item, 'i2');
+check('the earlier item\'s return leaves the other item\'s pick alone', Object.keys(LW), ['i2']);
+labelWrite(it, 'L1');
+labelWrite(it2, 'L3');
+labelWrite(it, 'L2');
+check('toggles on two items while both are in flight wait per item', [labels().length, LW.i1.labels, LW.i2.labels], [7, ['L1'], ['L1', 'L2', 'L3']]);
+it.labels = ['L1', 'L2'];
+sent[6].then();
+check('the first item\'s queued toggle is still written after a toggle on another item', sent[7].labels, ['L1']);
+labelWrite(it2, 'L1');
+it2.labels = ['L1', 'L2'];
+sent[5].then();
+check('the second item\'s queued toggles go as its latest pick', sent[8].labels, ['L2', 'L3']);
+sent[7].then();
+sent[8].then();
+check('nothing pending once both return', LW, {});
 done();
 `)
 }

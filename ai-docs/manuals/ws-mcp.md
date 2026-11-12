@@ -180,10 +180,15 @@ under `<cache root>/dashboard/`:
   `--board-inbox` or `--board-steer`), counted as `interrupt` (its own
   `kinds` value), never as `board`. A command entry (`command: {name,
   args}`) is one slash command the page sent, only to a session whose
-  snapshot lists `commands`: it is never merged with another entry (a send
+  snapshot lists `commands`, only from a browser on this machine (403 to any
+  other viewer, a LAN token holder included), and only with a name that
+  list holds (400 otherwise): it is never merged with another entry (a send
   after one starts a new entry), steer refuses it, and a drain returns it in
   order with a `command` field, where the adapter splits its batch and runs
-  it natively.
+  it natively. A hosted backend passes a plain message verbatim and runs a
+  leading-slash line as a command, so a message from any viewer not on this
+  machine whose text, trimmed of leading whitespace, starts with `/` is
+  refused too (403); a slash later in the text is held as usual.
 - `sessions/<reply-id>/agent.json`, `instructions.md`, and `pi/` - an agent
   runner conversation's own files (`internal/wsagent`): the owner-only
   record a process start needs after a daemon restart (profile, backend,
@@ -240,7 +245,9 @@ pace, which the page computes), and the cost (`~$` for an estimate, a
 trailing `+` when calls of unknown price were left out). A part with no
 figure is left out; context and limits warn at 80% and turn critical at 95%;
 below a 360px band only the limit under more pressure stays. The composer also
-holds the `cmds` region, the snapshot's `commands` as hidden data: typing `/`
+holds the `cmds` region, the snapshot's `commands` as hidden data, rendered
+for a viewer on this machine only (a LAN viewer's page has no region and no
+picker): typing `/`
 in an empty message box opens a picker over them (grouped under user and
 agent headings when any command names its `layer`), and a pick becomes a
 command selection whose box text is its arguments, sent as `{command, args}`
@@ -711,8 +718,9 @@ conversation:
 - **Access.** Spawn, settings, stop, restart, close, and an approval answer take the
   trusted gate (`wsdashboard.TrustedWrite`): 404 to any viewer that is not a
   browser on this machine, 403 without the daemon's own `Origin`. A LAN
-  viewer reads the session and may send and interrupt; the state's
-  `can_control` tells the page which viewer it serves.
+  viewer reads the session and may send messages and interrupt, but not slash
+  commands: a command entry, or a message whose text starts with `/`, is 403
+  to it; the state's `can_control` tells the page which viewer it serves.
 - **Page.** The rail's new-session "+" (right after a worktree row's label,
   quiet until the row is hovered like the other rail "+" buttons; worktree
   rows only, a plain folder's bar has none, since the spawn route takes only

@@ -27,3 +27,23 @@ func TestPinnedColumnWidensThePage(t *testing.T) {
 		}
 	}
 }
+
+// TestEdgePinZoneFitsTheStripRightOfThePage pins the first-pin edge zone's
+// width: it fills the strip right of the 1680px page, at least 48px and at
+// most 380px, so it leaves the board column to its own reorder drops; below
+// 1880px, where that strip is narrow, its label runs vertically.
+func TestEdgePinZoneFitsTheStripRightOfThePage(t *testing.T) {
+	css := mustAsset(t, "dashboard.css")
+	zone := ""
+	for _, line := range strings.Split(css, "\n") {
+		if strings.HasPrefix(line, ".bpzone {") {
+			zone = line
+		}
+	}
+	if want := "width: clamp(48px, calc((100vw - 1680px) / 2 + 4px), 380px);"; !strings.Contains(zone, want) {
+		t.Errorf("the .bpzone rule lacks %q: %q", want, zone)
+	}
+	if want := "@media (max-width: 1879.98px) { .bpzone { writing-mode: vertical-rl; padding: 12px 4px; } }"; !strings.Contains(css, want) {
+		t.Errorf("dashboard.css lacks %q", want)
+	}
+}
