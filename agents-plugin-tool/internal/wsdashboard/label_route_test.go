@@ -9,6 +9,9 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/kang-sw/devenv/internal/wslive"
 )
 
 // labelPost posts a label body to session id's label route with the
@@ -32,7 +35,7 @@ func (f *pageFixture) waitLabel(t *testing.T, id, label string) {
 // the trimmed label in the session directory and answers it; the session
 // page's head, tab title, and rail row, and the index list, then show it in
 // place of the reply-id, with the reply-id in the tooltip and the mailbox
-// address as the name's copy text. A session without a live adapter takes
+// address naming the label as the name's copy text. A session without a live adapter takes
 // a label too. An empty label removes the file and shows the reply-id
 // again.
 func TestLabelRouteSavesShowsAndResets(t *testing.T) {
@@ -70,7 +73,7 @@ func TestLabelRouteSavesShowsAndResets(t *testing.T) {
 	for _, want := range []string{
 		`<title>Build bot - ws dashboard</title>`,
 		`data-label="Build bot" data-max="64" data-title="Build bot - ws dashboard"`,
-		`data-copy="(mailbox) id:livesession" title="livesession&#10;click to copy">Build bot</button>`,
+		`data-copy="(mailbox, label &#34;Build bot&#34;) id:livesession" title="livesession&#10;click to copy">Build bot</button>`,
 		`<span class="rid lbl" title="livesession">Build bot</span>`,
 	} {
 		if !strings.Contains(page, want) {
@@ -275,6 +278,7 @@ check("a second Enter while saving posts nothing", posts.length, 1);
 answer(true, { label: "Build bot" });
 check("saved: the name shows the label", [nm.textContent, sn.getAttribute("data-label"), inp(), nm.hidden, pen.hidden, labelEditing()], ["Build bot", "Build bot", null, false, false, false]);
 check("saved: the name takes the label's body face", nm.has("lbl"), true);
+check("saved: the name copies the address naming the label", nm.getAttribute("data-copy"), "(mailbox, label \"Build bot\") id:sess");
 
 // Escape cancels: nothing posted, the name kept.
 labelClick(pen);
@@ -312,6 +316,7 @@ check("empty posts an empty label", posts[posts.length - 1], ["label", { label: 
 answer(true, { label: "" });
 check("reset: the name shows the reply-id", [nm.textContent, sn.getAttribute("data-label"), inp()], ["sess", "", null]);
 check("reset: the reply-id keeps the mono face", nm.has("lbl"), false);
+check("reset: the name copies the bare address", nm.getAttribute("data-copy"), "(mailbox) id:sess");
 
 // A head swap held while the input was open lands when it closes.
 labelClick(pen);
@@ -322,6 +327,11 @@ labelClick(pen);
 inp().fire("keydown", { key: "Enter", isComposing: true });
 check("an IME Enter neither saves nor closes", [posts.length, !!inp()], [3, true]);
 key("Escape");
+
+// The copy text, as pageview.go mailboxRef builds it.
+check("no label: the bare address", mailboxRef("sess", ""), "(mailbox) id:sess");
+check("a label is quoted", mailboxRef("sess", "메인 세션"), "(mailbox, label \"메인 세션\") id:sess");
+check("a quote or backslash in it is escaped", mailboxRef("sess", "a\"b\\c"), "(mailbox, label \"a\\\"b\\\\c\") id:sess");
 
 // The value the route stores: one line, trimmed, at most max characters.
 check("control characters become spaces", labelClean("a\nb\tc\u2028d", 64), "a b c d");
@@ -337,7 +347,8 @@ process.stdout.write(bad.join("\n"));
 
 // TestHeadRenameScript pins the head's rename (dashboard.js labelClick,
 // labelStart, labelKey, labelSave, labelEnd): the name copies the mailbox
-// address; the pencil opens a one-line input; Enter saves the trimmed value
+// address, which a save or reset rebuilds (mailboxRef) to name the label or
+// not; the pencil opens a one-line input; Enter saves the trimmed value
 // through the label route, Escape and a blur cancel, an empty value resets
 // to the reply-id, the name carries lbl (the label's body face) exactly
 // while it shows a label, a refusal keeps the input open, and a head swap held
@@ -346,7 +357,7 @@ process.stdout.write(bad.join("\n"));
 func TestHeadRenameScript(t *testing.T) {
 	js := mustAsset(t, "dashboard.js")
 	var src string
-	for _, name := range []string{"labelEditing", "labelClean", "labelClick", "labelStart", "labelKey", "labelSave", "labelEnd", "labelSwapped"} {
+	for _, name := range []string{"labelEditing", "labelClean", "mailboxRef", "labelClick", "labelStart", "labelKey", "labelSave", "labelEnd", "labelSwapped"} {
 		f := regexp.MustCompile(`(?s)\n  function ` + name + `\(.*?\n  \}\n`).FindString(js)
 		if f == "" {
 			t.Fatalf("dashboard.js holds no %s", name)
@@ -391,5 +402,107 @@ func TestSessionLabelBodyFace(t *testing.T) {
 		if i < 0 || !strings.Contains(css[i:i+strings.Index(css[i:], "}")], "font-family: var(--wb-sans); font-weight: 600;") {
 			t.Errorf("dashboard.css: %s does not set the body face at 600", sel)
 		}
+	}
+}
+
+// TestMailboxRef pins the head name's copy text: the bare mailbox address
+// without a label, and with one the label quoted, a quote or backslash in it
+// backslash-escaped.
+func TestMailboxRef(t *testing.T) {
+	for _, c := range []struct{ label, want string }{
+		{"", `(mailbox) id:sess`},
+		{"메인 세션", `(mailbox, label "메인 세션") id:sess`},
+		{`a"b\c`, `(mailbox, label "a\"b\\c") id:sess`},
+	} {
+		if got := (SessionView{ReplyID: "sess", Label: c.label}).MailboxRef(); got != c.want {
+			t.Errorf("MailboxRef(label %q) = %q, want %q", c.label, got, c.want)
+		}
+	}
+}
+
+// labelledPeers is the sessions a labelled-peer view looks up: "named" with
+// a label that must be escaped, "plain" with none.
+func labelledPeers(now time.Time) map[string]Session {
+	named := liveSession("named", "/q", now)
+	named.Label = `<b>메인 & "x"</b>`
+	return map[string]Session{"named": named, "plain": liveSession("plain", "/r", now)}
+}
+
+// TestMailRowsShowPeerLabels pins the conversation's mail rows: a served
+// peer named by its id: address shows its label, HTML-escaped, with the
+// address in the tooltip; an unlabelled or unserved peer shows its address,
+// and a named address stays the name even when its owner has a label. A
+// rename re-renders the cached row.
+func TestMailRowsShowPeerLabels(t *testing.T) {
+	now := testNow
+	mail := func(name, peer string) wslive.RingRecord {
+		return wslive.RingRecord{Name: name, At: now, RingEntry: wslive.RingEntry{Kind: wslive.RingMail, Direction: wslive.MailRecv, Peer: peer, Title: "hi"}}
+	}
+	ring := []wslive.RingRecord{mail("m1", "id:named"), mail("m2", "id:plain"), mail("m3", "lead@machine"), mail("m4", "id:gone")}
+	cache := newEntryCache()
+	render := func(sessions map[string]Session) string {
+		v := buildSessionView(pageInputs{Session: liveSession("self", "/p", now), Snapshot: liveSnap(now, wslive.Lead{}), Ring: ring, Now: now,
+			Page:   PageContent{Contacts: []Contact{{Address: "lead@machine", ReplyID: "named", LastExchange: now}}},
+			Lookup: lookupOf(sessions, nil)})
+		set, err := renderSessionRegions(v, cache)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(set[regionEntries].HTML)
+	}
+	sessions := labelledPeers(now)
+	html := render(sessions)
+	for _, want := range []string{
+		`<a class="mpeer" href="/s/named" title="id:named">&lt;b&gt;메인 &amp; &#34;x&#34;&lt;/b&gt;</a>`,
+		`<a class="mpeer" href="/s/plain">id:plain</a>`,
+		`<a class="mpeer" href="/s/named">lead@machine</a>`,
+		`<span class="mpeer">id:gone</span>`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("mail rows lack %s:\n%s", want, html)
+		}
+	}
+	if strings.Contains(html, "<b>메인") {
+		t.Errorf("a label rendered unescaped:\n%s", html)
+	}
+
+	renamed := sessions["named"]
+	renamed.Label = "빌드 봇"
+	sessions["named"] = renamed
+	if html := render(sessions); !strings.Contains(html, `title="id:named">빌드 봇</a>`) {
+		t.Errorf("a rename did not re-render the cached row:\n%s", html)
+	}
+}
+
+// TestPeerRowsShowPeerLabels pins the agents panel's peer rows: a served
+// peer known by its id: address shows its label, HTML-escaped, with the
+// address and folder in the tooltip; an unlabelled peer shows its address
+// with the folder alone in the tooltip; a peer reached by a named address
+// keeps the name.
+func TestPeerRowsShowPeerLabels(t *testing.T) {
+	now := testNow
+	sessions := labelledPeers(now)
+	byName := liveSession("byname", "/s", now)
+	byName.Label = "unused"
+	sessions["byname"] = byName
+	v := buildSessionView(pageInputs{Session: liveSession("self", "/p", now), Snapshot: liveSnap(now, wslive.Lead{}), Now: now,
+		Page: PageContent{Contacts: []Contact{
+			{Address: "id:named", ReplyID: "named", LastExchange: now},
+			{Address: "id:plain", ReplyID: "plain", LastExchange: now.Add(-time.Minute)},
+			{Address: "lead@machine", ReplyID: "byname", LastExchange: now.Add(-2 * time.Minute)},
+		}},
+		Lookup: lookupOf(sessions, nil)})
+	html := renderNamed(t, "peers", v.Tree.Peers)
+	for _, want := range []string{
+		`<a class="pname" href="/s/named" title="id:named` + "\n" + `/q"><span class="pfolder">q/</span>&lt;b&gt;메인 &amp; &#34;x&#34;&lt;/b&gt;</a>`,
+		`<a class="pname" href="/s/plain" title="/r"><span class="pfolder">r/</span>id:plain</a>`,
+		`<a class="pname" href="/s/byname" title="/s"><span class="pfolder">s/</span>lead@machine</a>`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("peer rows lack %s:\n%s", want, html)
+		}
+	}
+	if strings.Contains(html, "unused") {
+		t.Errorf("a named address gave way to its owner's label:\n%s", html)
 	}
 }

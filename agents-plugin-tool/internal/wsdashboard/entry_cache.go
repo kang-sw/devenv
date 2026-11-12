@@ -40,15 +40,16 @@ func newEntryCache() *entryCache { return &entryCache{sessions: map[string]*sess
 
 // entryCacheKey is the entry's name plus every other input its HTML depends
 // on. A mail line's HTML also depends on whether its body is still in the
-// mailbox history and whether this daemon serves its peer, and a user line's
-// on which of its attachment files still exist (attachmentView), so a body
-// leaving that ring, a peer leaving the index, or an attachment removed
-// renders anew instead of freezing the old line into every later render. The
+// mailbox history, whether this daemon serves its peer, and the peer's
+// label, and a user line's on which of its attachment files still exist
+// (attachmentView), so a body leaving that ring, a peer leaving the index or
+// renamed, or an attachment removed renders anew instead of freezing the old
+// line into every later render. The
 // language is an input too: viewers in two languages must not be handed each
 // other's entries.
 func entryCacheKey(e ConvEntry) string {
 	var b strings.Builder
-	b.WriteString(e.Lang + "\x00" + e.Key + "\x00" + strconv.FormatBool(e.HasBody) + "\x00" + strconv.FormatBool(e.PeerLinked) + "\x00" + e.PeerReplyID)
+	b.WriteString(e.Lang + "\x00" + e.Key + "\x00" + strconv.FormatBool(e.HasBody) + "\x00" + strconv.FormatBool(e.PeerLinked) + "\x00" + e.PeerReplyID + "\x00" + e.PeerLabel)
 	for _, img := range e.Images {
 		b.WriteString("\x00" + img.Src)
 	}

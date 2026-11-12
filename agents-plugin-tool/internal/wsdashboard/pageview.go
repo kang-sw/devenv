@@ -100,10 +100,23 @@ type SessionView struct {
 }
 
 // MailboxRef is what a click on the head's name copies: the session's
-// mailbox address, marked as one.
-func (v SessionView) MailboxRef() string {
-	return "(mailbox) " + wsmailbox.ReplyIDPrefix + v.ReplyID
+// mailbox address, marked as one, naming the session's label when it has
+// one (mailboxRef).
+func (v SessionView) MailboxRef() string { return mailboxRef(v.ReplyID, v.Label) }
+
+// mailboxRef is the mailbox address of replyID marked as one:
+// `(mailbox) id:<rid>`, or `(mailbox, label "<label>") id:<rid>` with label
+// quoted, a `"` or `\` in it backslash-escaped. dashboard.js mailboxRef builds
+// the same text after a rename, before the head re-renders.
+func mailboxRef(replyID, label string) string {
+	if label == "" {
+		return "(mailbox) " + wsmailbox.ReplyIDPrefix + replyID
+	}
+	return `(mailbox, label "` + labelQuoter.Replace(label) + `") ` + wsmailbox.ReplyIDPrefix + replyID
 }
+
+// labelQuoter escapes a label for mailboxRef's quotes.
+var labelQuoter = strings.NewReplacer(`\`, `\\`, `"`, `\"`)
 
 // LabelMax is the longest label the label route accepts, in characters,
 // which the head's rename input takes as its limit.
@@ -235,6 +248,10 @@ type PeerRow struct {
 	Detached bool
 	// ReplyID is the peer session; empty for a named address with no owner.
 	ReplyID string
+	// Label is a served peer's display label (Session.Label), which the row
+	// shows in place of an id: Address; empty when it has none or Address is
+	// a named address.
+	Label string
 	// Served reports that this daemon indexes the peer, so the row links to
 	// its page and shows its live state.
 	Served bool
@@ -384,6 +401,10 @@ type ConvEntry struct {
 	// PeerReplyID links a mail line's peer to its page when PeerLinked.
 	PeerReplyID string
 	PeerLinked  bool
+	// PeerLabel is the display label of a served peer the line names by its
+	// id: address, shown in place of Peer (which stays the tooltip); empty
+	// when the peer has none, is not served, or is a named address.
+	PeerLabel string
 	// Lang is the language the entry renders in; the entry cache keys on it.
 	Lang string
 }
@@ -652,6 +673,9 @@ func peerGroup(contacts []Contact, project string, lookup sessionLookup, now tim
 			if s, ok := lookup.get(row.ReplyID); ok {
 				row.Served = true
 				row.Live = s.Live
+				if !m.named {
+					row.Label = s.Label
+				}
 				row.Harness = s.Harness
 				if s.Project != "" {
 					row.Path = s.Project
@@ -703,6 +727,27 @@ func peerGroup(contacts []Contact, project string, lookup sessionLookup, now tim
 		group.Ended = group.Ended[:endedPeerCap]
 	}
 	return group
+}
+
+// Name is the row's name: Label when set, else Address.
+func (r PeerRow) Name() string {
+	if r.Label != "" {
+		return r.Label
+	}
+	return r.Address
+}
+
+// Title is the row name's tooltip: the id: Address when Label stands in for
+// it, then Path, one per line; empty when neither applies.
+func (r PeerRow) Title() string {
+	var lines []string
+	if r.Label != "" {
+		lines = append(lines, r.Address)
+	}
+	if r.Path != "" {
+		lines = append(lines, r.Path)
+	}
+	return strings.Join(lines, "\n")
 }
 
 // BranchHandle is the row's branch chip label, as the session page's git
@@ -797,8 +842,11 @@ func conversation(lead wslive.Lead, ring []wslive.RingRecord, bodies map[string]
 				rid = r.Peer[len(wsmailbox.ReplyIDPrefix):]
 			}
 			if rid != "" {
-				if _, ok := lookup.get(rid); ok {
+				if s, ok := lookup.get(rid); ok {
 					e.PeerReplyID, e.PeerLinked = rid, true
+					if hasReplyIDPrefix(r.Peer) {
+						e.PeerLabel = s.Label
+					}
 				}
 			}
 		}
