@@ -219,3 +219,81 @@ Verification:
   `file://` or daemon page) whose outcome the Result records.
 - Existing board tests (`board_motion_test.go`, `board_frame_graft_test.go`,
   `rail_test.go`, `rail_hotkey_test.go`) stay green.
+
+### Result (71c26a5ab) - 2026-11-12
+
+Landed (3e922446b, 71c26a5ab):
+
+- `cards.js`: topics are units of the placement engine beside cards. A
+  topic bar gets a lucide `pin` button before its note pen; pinned topics
+  and cards share one pin list (`#bpins`) in pin order; an unpinned topic or
+  card dragged by its header lands in the open flow and stays until a topic
+  updated later rises above it (its own update or close ends the move); a
+  closed unpinned topic dropped in the flow returns to the closed section.
+  Drag thresholds 5px / touch hold 380ms; buttons, links, and fields in a
+  header never start a drag. Storage per session is now
+  `{cards, topics, w}`; the old bare card array is still read. A pinned
+  topic the board lacks after a reload is fetched page by page through the
+  closed route; when the route ends without it, the pin is dropped; a failed
+  fetch keeps it. New API: `weave` returns `{pins, board}`, `settle(el,
+  plan)`, `pinList`, `pinnedTopic`, `relayout`, `dragging`, `move`,
+  `decorate`.
+- `dashboard.js`: mounts the pinned column `aside#bpcol` in `.dbody`;
+  `pinColumnFits` (>= 1600px, a pin, layout not "tabs") drives
+  `data-pincol` on the root; `railWide` docks the rail below 2200px only
+  without `data-pincol`, so Ctrl+` and the arrow open the overlay there.
+  morphBoard reads and grafts pinned topics in the pin list; board-scoped
+  reads (answers, chips, topic notes, mentions, held asks, drafts) go
+  through `boardBoxes`; a board swap waits while a drag runs; closed pages
+  keep a hidden `closed-slot` where a pinned topic stands, so the show-more
+  index stays the server's.
+- `dashboard.css`: the 1600-2199 and >= 2200 pinned-column grids, the rail
+  overlay under `data-pincol` below 2200, the column's own scroll, the
+  left-edge width handle (`--pinw`, kept in storage, double-click resets),
+  drag line, right-edge zone, empty-group zone, pin button states.
+- i18n: `js.pins.title`, `js.pins.drop`, `js.pins.width` in all 11 tables.
+
+Verification:
+
+- Node harness: `TestBoardTopicPins` runs the whole of cards.js over a
+  minimal DOM and covers every case the plan lists (pin order among cards,
+  hand move undone by a later bump, updated pinned topic keeps index and
+  update mark, graft keeps the pressed pin, closed pinned topic stays,
+  past-cap pinned topic kept and refetched after reload, gone pin dropped,
+  reload restores pins/order/moves) plus the fetched-page decoration and
+  the pending-pin order. `TestBoardPinnedClosedPagesCount` runs morphBoard
+  with cards.js and fails on 3e922446b (index 2 instead of 3; 3 instead
+  of 4). `rail_hotkey_test.go` gains the 1800px-with-pin and 2200px cases.
+- `go test ./...` (remote, ws-rgo): all green except the known
+  pre-existing `internal/mcp TestDashboardReadPageServesTheBoard`;
+  `go vet` clean on `wsdashboard` and `wsi18n`.
+- Headless Chromium against a fixture page (6 topics), driven over CDP:
+  1500px: no column, pins atop the board in the labeled group, rail
+  overlaid; 1800px no pin: rail docked; 1800px with a pin: column at the
+  right (480px), rail overlaid, Ctrl+` opens and closes it; 2400px with a
+  pin: rail, board, and column all docked, Ctrl+` left alone; "tabs" layout
+  at 1800px: no column. Width drag to 600px survived a reload, as did pins
+  and a hand move. Drag into the column pinned at the drop index; a header
+  drag to the top of the flow moved the topic there; a press on the note
+  pen dragged nothing; at 1800px with no pin the right-edge zone showed and
+  a drop there opened the column; at 1200px and 1500px the empty group zone
+  showed and a drop there pinned. The store page took the grid's cell in
+  all six grids (with and without a pin at 1500/1800/2400). No page errors.
+
+Decisions:
+
+- The pinned column sits at the `.dbody` level, as in the mockup, so the
+  topic rail (bound to `#bcol`) never sees it; one movable pin list is the
+  only node that changes parents on a layout switch.
+- Pin button and header drag live in `cards.js`, not `dashboard.js` as the
+  plan suggested: cards.js already owns placement and card headers, so
+  both kinds share one drag path.
+- The pinned column also applies to an ended session page (the same width
+  rule; only a live page has the "tabs" menu).
+- An unpinned closed topic seats at the head of the closed section; the
+  next board swap puts it where the board keeps it.
+
+Review (lite): two Important findings (pages index undercount, fetched
+pages without pin buttons) fixed in 71c26a5ab. Unfixed minor: a drop
+between two neighbours with equal times lands one slot above, since the
+placement rule orders by time.
