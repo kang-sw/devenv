@@ -213,14 +213,24 @@ details[open] > .ahead .am > .i { transform: rotate(180deg); }
 /* the lead row's live detail: the running or approval-waiting tool, one line */
 /* a subagent's telemetry (template astat); the agents panel is the
    container, so a narrow panel (a side column, the session rail's three
-   columns) moves the stats into the hover card (agentTip) whatever the
-   viewport is */
+   columns) moves the stats from the row's end to a muted second line under
+   its name, whatever the viewport is. Wide, aline is display: contents (a
+   no-op). Narrow, the summary wraps: aline takes the first line with the
+   trailing .am (flex-basis 0, so it never forces a break and keeps the
+   one-line shrink/ellipsis behaviour) and .astat a full-width second line. */
 .r-tree { container: atree / inline-size; }
+.aline { display: contents; }
 .ahead .astat { flex: none; display: inline-flex; gap: 7px; align-items: center; font-size: 11px; color: var(--wb-muted-fg); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .ahead .astat .amodel { font-family: var(--wb-mono); font-size: 10.5px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
 .ahead .astat .atps { color: var(--wb-primary); font-weight: 700; }
-@container atree (max-width: 559px) { .ahead .astat { display: none; } }
-.gltip.atip .tm { display: grid; gap: 2px; }
+@container atree (max-width: 559px) {
+  .ahead:has(> .aline) { flex-wrap: wrap; row-gap: 0; }
+  .ahead > .aline { display: flex; align-items: center; gap: 6px; flex: 1 1 0; min-width: 0; }
+  .ahead > .astat { order: 1; flex: 0 0 100%; min-width: 0; padding: 0 0 2px 22px; gap: 0; overflow: hidden; }
+  .ahead > .astat > span + span::before { content: "\00b7"; margin: 0 6px; opacity: .7; }
+  .ahead > .astat .amodel { flex: 0 1 auto; min-width: 0; max-width: none; }
+  .ahead > .astat .actx, .ahead > .astat .atps { flex: none; }
+}
 .ahead .ldet { flex: 1 1 0; min-width: 0; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ahead .ldet .tn { font-family: var(--wb-mono); font-weight: 700; font-size: 11.5px; }
 .ahead .ldet .args { font-size: 11.5px; }
@@ -495,11 +505,11 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .srow .stext > .sentmark { margin-right: 6px; }
 .sentmark.held { background: var(--wb-ph-perm); color: var(--wb-on-ph-perm); }
 /* an item whose answer was sent (or is held) grays its answer area until the board records the answer, and dims its title lightly, so the largest text shows the state too; the ID chip, class tag, and mark stay full brightness, and focusing a control in it (to revise the answer) brings the area and title back */
-.card.sent-sent > .cbody > :not(.note), .arow.sent-sent .why, .arow.sent-sent input { opacity: .4; transition: opacity .15s; }
-.card.sent-held > .cbody > :not(.note), .arow.sent-held .why, .arow.sent-held input { opacity: .65; transition: opacity .15s; }
-.card.sent-sent .cbar .head .title, .arow.sent-sent .head .title { opacity: .7; transition: opacity .15s; }
-.card.sent-held .cbar .head .title, .arow.sent-held .head .title { opacity: .85; transition: opacity .15s; }
-.card:is(.sent-sent, .sent-held):focus-within > .cbody > *, .card:is(.sent-sent, .sent-held):focus-within .cbar .head .title, .arow:is(.sent-sent, .sent-held):focus-within :is(.why, input, .head .title) { opacity: 1; }
+.card.sent-sent > .cbody > :not(.note), .aline.sent-sent .why, .aline.sent-sent input { opacity: .4; transition: opacity .15s; }
+.card.sent-held > .cbody > :not(.note), .aline.sent-held .why, .aline.sent-held input { opacity: .65; transition: opacity .15s; }
+.card.sent-sent .cbar .head .title, .aline.sent-sent .head .title { opacity: .7; transition: opacity .15s; }
+.card.sent-held .cbar .head .title, .aline.sent-held .head .title { opacity: .85; transition: opacity .15s; }
+.card:is(.sent-sent, .sent-held):focus-within > .cbody > *, .card:is(.sent-sent, .sent-held):focus-within .cbar .head .title, .aline:is(.sent-sent, .sent-held):focus-within :is(.why, input, .head .title) { opacity: 1; }
 /* status band: the context bar above the message box (ctx), the folder,
    usage limits, and cost below it (sline). An empty region
    collapses. sline is a size container inside the composer's 10px padding:
