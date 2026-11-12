@@ -63,10 +63,11 @@ function check(what, got, want) { if (JSON.stringify(got) !== JSON.stringify(wan
 
 // TestToastStack pins the shared toast stack (toast.js, window.WsToast): at
 // most three toasts, newest on top, a fourth dropping the oldest; an info
-// toast leaves after 4 s and a notice after 8 s; a hover pauses the timer and
-// leaving resumes it with the time left; a clickable toast is a button whose
-// click runs its action and closes it; content is text unless the caller asks
-// for HTML. The cases execute under node when it is installed.
+// toast leaves after 4 s, a warn toast after 6 s, and a notice after 8 s; a
+// hover pauses the timer and leaving resumes it with the time left; a
+// clickable toast is a button whose click runs its action and closes it;
+// content is text unless the caller asks for HTML. The cases execute under
+// node when it is installed.
 func TestToastStack(t *testing.T) {
 	data, err := dashboardFS.ReadFile("assets/toast.js")
 	if err != nil {
@@ -111,6 +112,12 @@ check("html on request", [document.body.children[0].children[0].children[0].inne
 W.show("s", { kind: "summary" });
 check("summary kind", document.body.children[0].children[0].className, "wstoast summary");
 advance(100000);
+W.show("w", { kind: "warn" });
+check("warn kind", document.body.children[0].children[0].className, "wstoast warn");
+advance(5999);
+check("a warn toast stays until 6 s", texts(), ["w"]);
+advance(1);
+check("a warn toast leaves at 6 s", texts(), []);
 check("no timers left", timers.length, 0);
 process.stdout.write(bad.join("\n"));
 `)

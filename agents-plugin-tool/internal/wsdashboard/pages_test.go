@@ -255,7 +255,7 @@ func TestSessionPagesCarryScriptHooks(t *testing.T) {
 		`<div id="bcol" class="bcol"><div id="r-board" class="region r-board" data-region="board"`,
 		`id="tabbar"`, `data-tab="convo"`, `data-tab="board"`, `<span class="tdot"></span>`,
 		`class="gmenu gcard"`, `data-layout="auto"`, `data-layout="split"`, `data-layout="tabs"`,
-		`id="ctext"`, `id="cnote"`, `id="csend"`, `aria-label="send"`, `id="sse"`, `id="dash-banner"`,
+		`id="ctext"`, `id="csend"`, `aria-label="send"`, `id="sse"`, `id="dash-banner"`,
 		`<div id="composer" class="composer"><div class="cbadges"><button type="button" class="ibadge" id="ibadge"`, `<span class="ilabel">Interrupt</span>`,
 		`</button><span class="sbwrap"><span class="sbadge" id="sbadge" title="running subagents: the lead&#39;s own, and (&#43;) those they started" hidden><span class="spin"></span><svg class="i" aria-hidden="true"><use href="#i-agents"/></svg><span class="slabel"></span></span><span class="bgbadge" id="bgbadge" title="background tasks the harness runs: shells, monitors, and background subagents" hidden><svg class="i" aria-hidden="true"><use href="#i-clock"/></svg><span class="blabel"></span></span></span></div>`,
 		`<div class="conv clive" data-phase="replying" data-sub="0" data-subdeep="0">`,

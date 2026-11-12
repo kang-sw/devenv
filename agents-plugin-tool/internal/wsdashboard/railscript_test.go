@@ -297,7 +297,7 @@ function restoreOpen() {}
 function attachSrc(ref) { return "/s/sess1/attachment/" + ref; }
 function grow() {} function paintMentions() {} function renderImgs() {}
 function setTab(t) { grid.setAttribute("data-tab", t); }
-function syncNote(s) { notes.push(s); }
+function noteWarn(s) { notes.push(s); }
 function wsT(k, n) { return k + ":" + n; }
 `
 
@@ -322,7 +322,7 @@ func TestRailDraftRestore(t *testing.T) {
 		t.Fatal("dashboard.js holds no per-session drafts block ending before if (live)")
 	}
 	block = strings.TrimSuffix(block, "if (live) {")
-	if !regexp.MustCompile(`clearDraft\(\);\s*\n\s*(?://[^\n]*\n\s*)*syncNote\(\);`).MatchString(src) {
+	if !regexp.MustCompile(`(?s)\n  function sendMessage\(\) \{.*?post\("message", body, function \(ok, res\) \{\n[^\n]*\n      if \(!ok\) \{[^\n]*return; \}\n.*?\n      clearDraft\(\);\n    \}\);\n  \}\n`).MatchString(src) {
 		t.Error("a successful send no longer clears the draft")
 	}
 	runNode(t, "draft restore", railJSHarness+string(rail)+railDraftPrelude+block+`

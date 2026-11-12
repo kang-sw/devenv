@@ -12,6 +12,8 @@
   --wb-compact-ink: var(--wb-ph-compact);
   --wb-ok: #1d7348; --wb-fail: #c0262d;
   --wb-warn: #c27a00; --wb-warn-ink: #a35f00;
+  /* the warning tone on a toast, whose surface is the inverted text colour */
+  --wb-toast-warn: #f2c06b;
 }
 /* Dark variants: the same OS-or-pinned rule as the whiteboard sheet. */
 @media (prefers-color-scheme: dark) {
@@ -25,6 +27,7 @@
     --wb-compact-ink: var(--wb-on-ph-compact);
     --wb-ok: #6cc39a; --wb-fail: #f0797e;
     --wb-warn: #e0a36c; --wb-warn-ink: #e0a36c;
+    --wb-toast-warn: #9a5a00;
   }
 }
 :root[data-theme="dark"] {
@@ -37,6 +40,7 @@
   --wb-compact-ink: var(--wb-on-ph-compact);
   --wb-ok: #6cc39a; --wb-fail: #f0797e;
   --wb-warn: #e0a36c; --wb-warn-ink: #e0a36c;
+  --wb-toast-warn: #9a5a00;
 }
 
 /* Scrollbars, for every scroller of the dashboard and the tracker: thin, a transparent
@@ -489,8 +493,6 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 @container (max-width: 560px) { .sb { column-gap: 9px; } .sb-foot .sb-tail { margin-left: 0; } }
 @container (max-width: 340px) { .sb-use.both:not(.hi) { display: none; } }
 @media (max-width: 560px) { .sb-flag { display: none; } }
-.cnote { font-size: 11.5px; color: var(--wb-muted-fg); }
-.cnote:empty { display: none; }
 
 /* ===== tabs ===== */
 .tabbar { display: flex; gap: 3px; background: var(--wb-muted); border-radius: 999px; padding: 3px; width: fit-content; }
@@ -1250,6 +1252,9 @@ a[data-wl="file"]:not([href]) { color: inherit; }
 .wstoast.notice { padding-left: 15px; overflow: hidden; }
 .wstoast.notice::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--wb-policy); }
 .wstoast.summary .wst-body::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--wb-primary); margin-right: 7px; vertical-align: 1px; }
+.wstoast.warn { padding-left: 15px; overflow: hidden; }
+.wstoast.warn::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--wb-toast-warn); }
+.wstoast.warn .wst-body::before { content: "!"; display: inline-block; width: 15px; height: 15px; border-radius: 50%; background: var(--wb-toast-warn); color: var(--wb-fg); font-size: 11px; font-weight: 800; line-height: 15px; text-align: center; margin-right: 7px; vertical-align: 1px; }
 
 /* conversation images open in the viewer (viewer.js) */
 .thumbs img, .bub img { cursor: zoom-in; }
