@@ -1392,7 +1392,7 @@ a[data-wl="file"]:not([href]) { color: inherit; }
 .bp-hd .li { width: 13px; height: 13px; }
 .bp-ct { font-size: 11px; font-weight: 700; padding: 0 7px; border-radius: 999px; background: var(--wb-muted); }
 .bpcol > .bpins { flex: 1 1 0; min-height: 0; overflow: auto; padding: 2px 4px 40px 2px; }
-.bp-edge { position: absolute; top: 0; bottom: 0; left: -12px; width: 9px; cursor: col-resize; touch-action: none; z-index: 2; }
+.bp-edge { position: absolute; top: 0; bottom: 0; right: -12px; width: 9px; cursor: col-resize; touch-action: none; z-index: 2; }
 .bp-edge::after { content: ""; position: absolute; top: 50%; left: 3px; width: 3px; height: 36px; margin-top: -18px; border-radius: 2px; background: var(--wb-muted); transition: background .15s; }
 .bp-edge:hover::after, .bp-edge.drag::after { background: var(--wb-primary); }
 @media (min-width: 1600px) {

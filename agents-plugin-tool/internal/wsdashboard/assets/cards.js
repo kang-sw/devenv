@@ -741,7 +741,7 @@
 
   // --- the pinned column ----------------------------------------------------------
   // The page hands an empty element (opt.column's host); the framework
-  // fills it: a header with the pin count, the width handle on its left
+  // fills it: a header with the pin count, the width handle on its right
   // edge (dragged, its width is kept with the pins; double click goes back
   // to the stylesheet's), and the pin list while the column shows.
   function setWidth(w) {
@@ -768,7 +768,7 @@
       e.preventDefault();
     });
     edge.addEventListener("pointermove", function (e) {
-      if (from) setWidth(Math.min(from.w + from.x - e.clientX, window.innerWidth * 0.5));
+      if (from) setWidth(Math.min(from.w + e.clientX - from.x, window.innerWidth * 0.5));
     });
     function end() { if (!from) return; from = null; edge.classList.remove("drag"); persist(); }
     edge.addEventListener("pointerup", end);
