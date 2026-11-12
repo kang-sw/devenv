@@ -2,8 +2,8 @@
   // The session rail's browser-side state, window.WsRail, for the session
   // page's script (dashboard.js): per-session drafts, the starred sessions,
   // the collapsed workspaces, and the rail's client-side marks (the viewed
-  // session's row, the starred rows pinned first, the revive entry in
-  // flight). The stored state is in localStorage under ws.dashboard.,
+  // session's row, the starred rows pinned first, the drag order of the
+  // sessions and workspaces, the revive entry in flight). The stored state is in localStorage under ws.dashboard.,
   // through the store the caller passes ({ load(key), save(key, value or
   // null) }, which must not throw), so the page works the same with storage
   // absent; nothing reaches the server. The DOM helpers touch only the
@@ -12,6 +12,7 @@
   // them, are pure.
   var DRAFT = "ws.dashboard.draft.", DRAFTS = "ws.dashboard.drafts";
   var STARS = "ws.dashboard.stars", COLLAPSED = "ws.dashboard.railcol";
+  var ORDER = "ws.dashboard.railorder", WSORDER = "ws.dashboard.wsorder";
   // DRAFT_CAP bounds the sessions whose drafts are kept; the oldest saved
   // goes first.
   var DRAFT_CAP = 50;
@@ -108,31 +109,101 @@
   function stars(store) { return stringSet(store, STARS); }
   function collapsed(store) { return stringSet(store, COLLAPSED); }
 
+  // orderList is a drag order: ids kept as one JSON array. list() reads it;
+  // place(group, present) stores group (the ids of one group, in their new
+  // order) in place of that group's ids and drops each stored id present
+  // (every id the rail shows) does not hold, returning what it stored. The
+  // groups' ids never overlap, so one array holds every group's order. A
+  // store that throws reads as no order and keeps nothing: the rail shows
+  // the server's order.
+  function orderList(store, key) {
+    function list() { try { return strings(parse(store.load(key), [])); } catch (e) { return []; } }
+    return {
+      list: list,
+      place: function (group, present) {
+        var g = strings(group), keep = Object.create(null);
+        strings(present).forEach(function (x) { keep[x] = true; });
+        var l = list().filter(function (x) { return keep[x] && g.indexOf(x) < 0; }).concat(g);
+        try { store.save(key, l.length ? JSON.stringify(l) : null); } catch (e) { /* not kept: the server's order stands */ }
+        return l;
+      }
+    };
+  }
+  // sessionOrder is the sessions' drag order by reply-id, wsOrder the
+  // workspaces' by path.
+  function sessionOrder(store) { return orderList(store, ORDER); }
+  function wsOrder(store) { return orderList(store, WSORDER); }
+
   function hasClass(el, c) { return (" " + (el.className || "") + " ").indexOf(" " + c + " ") >= 0; }
-  function rowsOf(box) {
-    return Array.prototype.slice.call(box.children).filter(function (el) { return hasClass(el, "rs"); });
+  function kids(box, c) {
+    return Array.prototype.slice.call(box.children).filter(function (el) { return hasClass(el, c); });
+  }
+  // settle puts els (box's children, sorted) in their order before after,
+  // touching nothing when they already stand in it: a moved node loses the
+  // focus, and the rail re-sorts on every click that marks it.
+  function settle(box, els, after) {
+    var same = true;
+    for (var i = 1; i < els.length && same; i++) same = els[i - 1].nextSibling === els[i];
+    if (same && (els[els.length - 1].nextSibling || null) === after) return;
+    els.forEach(function (el) { box.insertBefore(el, after); });
+  }
+  function ord(el, i) {
+    if (el.getAttribute("data-ord") === null) el.setAttribute("data-ord", String(i));
+    return +el.getAttribute("data-ord");
   }
 
   // pin marks each row of box (a rail sessions list) starred or not from
-  // starred (a stars set) and orders the starred rows first, each part in
-  // the order the server sent (data-ord, set on first sight); unstarring a
-  // row returns it to its place. Anything after the rows (the ended fold)
-  // stays after them.
-  function pin(box, starred) {
-    var rows = rowsOf(box);
+  // starred (a stars set) and orders the starred rows first. Within each
+  // part the rows follow order (the drag order's ids, for a list of live
+  // rows): a row it does not hold (a session new since the last drag)
+  // first, then the rest as it lists them; without order, and among the
+  // new rows, in the order the server sent (data-ord, set on first sight).
+  // Unstarring a row returns it to its place. Anything after the rows (the
+  // ended fold) stays after them.
+  function pin(box, starred, order) {
+    var rows = kids(box, "rs");
     if (!rows.length) return;
     var after = rows[rows.length - 1].nextSibling || null;
     rows.forEach(function (r, i) {
-      if (r.getAttribute("data-ord") === null) r.setAttribute("data-ord", String(i));
-      var s = starred.has(r.getAttribute("data-rid") || "");
+      var id = r.getAttribute("data-rid") || "", s = starred.has(id);
+      r.wsOrd = ord(r, i);
+      r.wsRank = order ? order.indexOf(id) : -1;
       r.wsStar = s;
       var b = r.querySelector(".star");
       if (b) b.setAttribute("aria-pressed", String(s));
     });
-    rows.sort(function (a, b) {
-      return (b.wsStar - a.wsStar) || (+a.getAttribute("data-ord") - +b.getAttribute("data-ord"));
+    rows.sort(function (a, b) { return (b.wsStar - a.wsStar) || (a.wsRank - b.wsRank) || (a.wsOrd - b.wsOrd); });
+    settle(box, rows, after);
+  }
+
+  // arrange orders the workspace sections of list (the rail's list) by
+  // order (the drag order's paths); a section it does not hold goes after
+  // the ordered ones, in the order the server sent (data-ord). Anything
+  // after the sections stays after them.
+  function arrange(list, order) {
+    var ws = kids(list, "rws");
+    if (!ws.length) return;
+    var after = ws[ws.length - 1].nextSibling || null;
+    ws.forEach(function (w, i) {
+      var k = (order || []).indexOf(w.getAttribute("data-ws") || "");
+      w.wsOrd = ord(w, i);
+      w.wsRank = k < 0 ? Infinity : k;
     });
-    rows.forEach(function (r) { box.insertBefore(r, after); });
+    ws.sort(function (a, b) { return (a.wsRank - b.wsRank) || (a.wsOrd - b.wsOrd); });
+    settle(list, ws, after);
+  }
+
+  // drop moves item (a live session row or a workspace section) next to
+  // ref, a sibling of its kind, before it or (after) after it, and reports
+  // whether it moved. It refuses a ref in another list (a session never
+  // leaves its own group), a ref of another kind or on the other side of
+  // the stars, an ended row, and the item itself.
+  function drop(item, ref, after) {
+    if (!item || !ref || item === ref || !item.parentNode || ref.parentNode !== item.parentNode) return false;
+    var kind = hasClass(item, "rws") ? "rws" : "rs";
+    if (!hasClass(ref, kind) || hasClass(item, "ended") || hasClass(ref, "ended") || !!item.wsStar !== !!ref.wsStar) return false;
+    item.parentNode.insertBefore(item, after ? ref.nextSibling : ref);
+    return true;
   }
 
   // markCurrent marks the row of the viewed session rid among rows: the
@@ -264,7 +335,11 @@
     stripMarkers: stripMarkers,
     stars: stars,
     collapsed: collapsed,
+    sessionOrder: sessionOrder,
+    wsOrder: wsOrder,
     pin: pin,
+    arrange: arrange,
+    drop: drop,
     markCurrent: markCurrent,
     reviveRoute: reviveRoute,
     markRevive: markRevive,

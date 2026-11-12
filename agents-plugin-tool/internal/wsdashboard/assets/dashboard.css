@@ -1395,6 +1395,14 @@ a[data-wl="file"]:not([href]) { color: inherit; }
 .rail .rs:hover { background: color-mix(in srgb, var(--wb-primary) 6%, var(--wb-card)); }
 .rail .rs.cur { background: color-mix(in srgb, var(--wb-primary) 12%, var(--wb-card)); }
 .rail .rs.ended { opacity: .75; }
+/* drag to reorder (dashboard.js, rail drag): a row or a workspace bar
+   selects no text and opens no long-press menu, so a held press drags;
+   the dragged one dims and a line shows where it lands */
+.rail .rs { -webkit-user-select: none; user-select: none; }
+.rail .rs, .rail .wsbar { -webkit-touch-callout: none; }
+.rail .rs.rdrag, .rail .rws.rdrag { opacity: .45; }
+.rdragging, .rdragging * { cursor: grabbing !important; }
+.rdrop { position: fixed; z-index: 46; height: 2px; border-radius: 1px; background: var(--wb-primary); opacity: .7; pointer-events: none; }
 .rail .star { width: 16px; height: 16px; margin: 6px 5px 0 4px; flex: none; display: inline-grid; place-items: center; border: 0; padding: 0; background: transparent; border-radius: 4px; color: var(--wb-muted-fg); cursor: pointer; transition: opacity .12s; }
 .rail .star .i { width: 13px; height: 13px; stroke-width: 1.4; }
 .rail .star:hover { background: var(--wb-muted); }
