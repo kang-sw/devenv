@@ -2185,10 +2185,10 @@
     drTop = drHeaderBottom();
     drawer.style.setProperty("--drtop", drTop + "px");
   }
-  // drMax is the tallest sheet: 60% of the window, and short of the
+  // drMax is the tallest sheet: 80% of the window, and short of the
   // composer with the handle below it.
   function drMax() {
-    var m = Math.round(window.innerHeight * 0.6), c = $("composer");
+    var m = Math.round(window.innerHeight * 0.8), c = $("composer");
     if (visible(c)) m = Math.min(m, Math.round(c.getBoundingClientRect().top) - drTop - drhandle.offsetHeight - 6);
     return Math.max(0, m);
   }

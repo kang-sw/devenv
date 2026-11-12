@@ -4927,13 +4927,13 @@
     $('tkdrawer').style.setProperty('--tktop', Math.max(0, Math.round(O.header.getBoundingClientRect().bottom)) + 'px');
   }
   // The drawer's height is the user's, and one for every store: dragging any store's
-  // handle sets it, clamped between DR_MIN and 60% of the window like the dashboard drawer
+  // handle sets it, clamped between DR_MIN and 80% of the window like the dashboard drawer
   // when it shows. It is the host's drawer height when the host gives opts.drawerHeight
   // (so the host's drawers and every store open alike), else this renderer's own, kept as
   // display state; never set, it is DR_DEF, not the content's height, so a fresh browser
   // shows one height too. Panels scroll inside whatever the height is.
   var DR_MIN = 160, DR_DEF = 320, DR_SHUT = 80;
-  function drMax() { return Math.round(window.innerHeight * 0.6); }
+  function drMax() { return Math.round(window.innerHeight * 0.8); }
   function drClamp(h) { var hi = drMax(); return Math.max(Math.min(DR_MIN, hi), Math.min(hi, h)); }
   function drHeight() { var h = O.drawerHeight ? +O.drawerHeight.get() : ui.drh; return h > 0 ? h : DR_DEF; }
   function drSetHeight(h) {
