@@ -414,6 +414,9 @@
     },
     "261112-feat-ws-mixed-version-compat-guards": {
       "registered_at": "2026-11-12T01:58:07Z"
+    },
+    "261112-feat-ws-whiteboard-refuse-sibling-open-tag-in-field-body": {
+      "registered_at": "2026-11-12T06:04:00Z"
     }
   }
 }
