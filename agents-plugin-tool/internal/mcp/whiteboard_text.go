@@ -43,8 +43,8 @@ const (
 		"the whiteboard through `{{ns}}/whiteboard.update`, and context that outlasts\n" +
 		"a reply goes in its topic's body. While the user is watching the board (the\n" +
 		"playbook's Each turn rule says when), progress and explanations go on it\n" +
-		"too; otherwise they stay in the terminal or chat. Either way the chat never\n" +
-		"repeats what the board holds.\n\n" +
+		"too and the chat does not repeat what the board holds; otherwise the chat\n" +
+		"carries them as usual.\n\n" +
 		"- Asks a skill or the project reserves for the user (the next-step handoff\n" +
 		"  of `{{ns}}:lead-review`, the publish confirmation of `{{ns}}:lead-ship`,\n" +
 		"  Approval Protocol asks) remain asks, shown on the whiteboard.\n" +
