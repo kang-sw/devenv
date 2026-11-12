@@ -218,8 +218,8 @@ Body text, markdown, written as is.
     (final, no review), or `dropped`; its assigner, when not their
     superior, sets only `dropped`. The holder drops their own only under
     `completion="assignee"` or when they assigned it. A done or dropped
-    assignment takes no status, handoff, take request, or approval of a
-    pending one until reopened.
+    assignment takes no status, handoff, take request, approval of a
+    pending one, or acceptance of its pending handoff until reopened.
   - `tk:item.handoff` passes the user's live assignment to `to`, pending
     until `to` accepts; an admin hands off another member's by naming them as
     `assignee`.

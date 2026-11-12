@@ -241,3 +241,31 @@ func TestARequestOnAWrappedAssignment(t *testing.T) {
 		step{"ada.pc", "item.approve", map[string]any{"item": "ada.pc#1", "request": "omar.pc#1"}}))
 	wantEq(t, "reopened, then handed", v.Assignments["ada.pc#2>maya"].State, "handed")
 }
+
+// A wrap-up leaves the record live, so a pending handoff of it stays
+// pending: accepting it is refused (it would take over finished work), a
+// decline still answers it, and a reopen makes it acceptable again.
+func TestAHandoffOfAWrappedAssignment(t *testing.T) {
+	handed := []step{
+		task("ada.pc", "Index"),
+		{"ada.pc", "item.assign", map[string]any{"item": "ada.pc#1", "targets": []any{"maya"}}},
+		{"maya.pc", "item.status", map[string]any{"item": "ada.pc#1", "status": "doing"}},
+		{"maya.pc", "item.handoff", map[string]any{"item": "ada.pc#1", "to": "omar"}},
+		{"maya.pc", "item.close", map[string]any{"item": "ada.pc#1"}},
+	}
+	v := stepsView(t, "omar.pc", append(append([]step(nil), handed...),
+		step{"omar.pc", "item.accept", map[string]any{"item": "ada.pc#1"}}))
+	wantEq(t, "accept refused", lastVerdict(v), "flagged maya's assignment on ada.pc-1 is done; nothing to accept")
+	wantEq(t, "maya's stays", v.Assignments["ada.pc#2>maya"].State+" "+v.Assignments["ada.pc#2>maya"].Status, "live done")
+	wantEq(t, "still pending", v.Assignments["maya.pc#2>omar"].State, "pending")
+
+	v = topicView(t, "omar.pc", append(append([]step(nil), handed...),
+		step{"omar.pc", "item.decline", map[string]any{"item": "ada.pc#1"}}))
+	wantEq(t, "declined", v.Assignments["maya.pc#2>omar"].State, "declined")
+
+	v = topicView(t, "omar.pc", append(append([]step(nil), handed...),
+		step{"maya.pc", "item.reopen", map[string]any{"item": "ada.pc#1"}},
+		step{"omar.pc", "item.accept", map[string]any{"item": "ada.pc#1"}}))
+	wantEq(t, "reopened, then handed", v.Assignments["ada.pc#2>maya"].State, "handed")
+	wantEq(t, "omar's", v.Assignments["maya.pc#2>omar"].State, "live")
+}

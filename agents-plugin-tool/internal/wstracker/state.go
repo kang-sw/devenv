@@ -1388,6 +1388,12 @@ func (s *state) apply(n *node) {
 			s.onEnded(p.str("item"), a, n)
 			break
 		}
+		// a handoff whose original an earlier event in fold order wrapped up
+		// is flagged, and the accept takes no effect
+		if r := s.handoffWrapped(p.str("item"), a); r != "" {
+			s.foldFlag(n, r+concurrently)
+			break
+		}
 		for _, r := range acc {
 			r.accepted, r.answerNote, r.last = n, p.str("note"), n
 			if m := s.members[a]; m != nil {
