@@ -236,9 +236,10 @@ func recapBlock(t *testing.T, out, name string) string {
 
 // TestRecapRendersAtTheTopOfTheTopic pins the recap line: above the body and
 // the items while the topic is open, on both layouts, its text by the item
-// block-field rule (markdown, an image, and sanitized HTML), its time in the
-// topic bar's notation with the local date and time as the hover title
-// (relative on the full page through data-at, the HH:MM alone on the embed).
+// block-field rule (markdown, an image, and sanitized HTML), then "recap"
+// and its time in the topic bar's notation with the local date and time as
+// the hover title (relative on the full page through data-at, the HH:MM alone
+// on the embed).
 // A closed topic folds the recap with its body, and the close result stands
 // in its place; a closed recap-only topic gets the fold to hold it.
 func TestRecapRendersAtTheTopOfTheTopic(t *testing.T) {
@@ -258,11 +259,11 @@ func TestRecapRendersAtTheTopOfTheTopic(t *testing.T) {
 		}
 		wantAll(t, block, `<div class="rtext md"><strong>READY</strong> · see <img`, `shot.png`, `<u>kept</u>`)
 		wantNone(t, block, "<script>alert")
-		at := `<time class="tago" datetime="2026-11-04T09:00:00Z" title="2026-11-04 18:00"`
+		at := `<span class="rat" title="2026-11-04 18:00">recap <time class="tago" datetime="2026-11-04T09:00:00Z"`
 		if layout == LayoutFull {
-			wantAll(t, block, fmt.Sprintf(`%s data-at="%d">18:00</time></div>`, at, testNow.UnixMilli()))
+			wantAll(t, block, fmt.Sprintf(`%s data-at="%d">18:00</time></span></div>`, at, testNow.UnixMilli()))
 		} else {
-			wantAll(t, block, at+`>18:00</time></div>`)
+			wantAll(t, block, at+`>18:00</time></span></div>`)
 		}
 		// The topic bar's own time comes first, so the board reads the bar's.
 		if bar := strings.Index(block, `title="last change"`); bar < 0 || bar > recap {
