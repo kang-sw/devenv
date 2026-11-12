@@ -133,6 +133,7 @@
   "js.banner.appeared": "The session's live state appeared. Reload to update the layout.",
   "js.banner.gone": "The dashboard no longer serves this session.",
   "js.banner.lang": "The language changed. Reload to apply it.",
+  "js.banner.updated": "The dashboard was updated. Reload to run the new version.",
   "js.banner.wentaway": "The session's live state went away. Reload to update the layout.",
   "js.cancel.fail": "Not cancelled: {0}",
   "js.cancel.ok": "Cancelled: the message is back in the composer.",

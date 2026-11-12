@@ -133,6 +133,7 @@
   "js.banner.appeared": "L'état en direct de la session est apparu. Rechargez pour mettre à jour la disposition.",
   "js.banner.gone": "Le tableau de bord ne sert plus cette session.",
   "js.banner.lang": "La langue a changé. Rechargez pour l'appliquer.",
+  "js.banner.updated": "Le tableau de bord a été mis à jour. Rechargez pour exécuter la nouvelle version.",
   "js.banner.wentaway": "L'état en direct de la session a disparu. Rechargez pour mettre à jour la disposition.",
   "js.cancel.fail": "Non annulé : {0}",
   "js.cancel.ok": "Annulé : le message est revenu dans la zone de saisie.",

@@ -133,6 +133,7 @@
   "js.banner.appeared": "Der Live-Status der Sitzung ist erschienen. Neu laden, um das Layout zu aktualisieren.",
   "js.banner.gone": "Das Dashboard stellt diese Sitzung nicht mehr bereit.",
   "js.banner.lang": "Die Sprache wurde geändert. Neu laden, um sie anzuwenden.",
+  "js.banner.updated": "Das Dashboard wurde aktualisiert. Neu laden, um die neue Version auszuführen.",
   "js.banner.wentaway": "Der Live-Status der Sitzung ist verschwunden. Neu laden, um das Layout zu aktualisieren.",
   "js.cancel.fail": "Nicht abgebrochen: {0}",
   "js.cancel.ok": "Abgebrochen: Die Nachricht ist wieder im Eingabefeld.",

@@ -548,6 +548,11 @@ func nextRegion(t *testing.T, events <-chan sseEvent, timeout time.Duration) (re
 		if !ok {
 			t.Fatal("stream closed")
 		}
+		// Every stream's first event names the assets identity, which
+		// assets_id_test.go pins; region readers skip it.
+		if ev.name == "assets" {
+			return nextRegion(t, events, timeout)
+		}
 		if ev.name != "region" {
 			return regionEvent{Name: "event:" + ev.name}, true
 		}

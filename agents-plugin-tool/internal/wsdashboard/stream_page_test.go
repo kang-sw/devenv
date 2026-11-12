@@ -163,3 +163,75 @@ process.stdout.write(bad.join("\n"));
 })();
 `)
 }
+
+// TestPageReloadsOnOtherAssets pins the page side of the assets identity
+// (dashboard.js connect's onAssets): the same identity, none from the
+// daemon, or none on the page does nothing; another one reloads, or banners
+// while a draft is held; and a second reload for the same identity in one
+// tab banners instead, so a page never reloads in a loop. The cases execute
+// under node when it is installed.
+func TestPageReloadsOnOtherAssets(t *testing.T) {
+	data, err := dashboardFS.ReadFile("assets/dashboard.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	js := string(data)
+	block := func(what, pattern string) string {
+		t.Helper()
+		got := regexp.MustCompile(pattern).FindString(js)
+		if got == "" {
+			t.Fatalf("dashboard.js holds no %s", what)
+		}
+		return got
+	}
+	open := block("openStream", `(?s)\n  function openStream\(path, on\) \{.*?\n  \}\n`)
+	connect := block("connected ... connect", `(?s)\n  var sseOn = true;\n.*?\n  // showRegions applies`)
+
+	runNode(t, "assets identity", "(function () {\n"+streamPageHarness+`
+var mode = "session", rid = "rid1", hiddenRegions = {}, modeHash = "", liveMode = false;
+function held() { return ""; }
+function trackerLost() {}
+function trackerNudge() {}
+function swap() {}
+function tlHold() {}
+function modeChanged() {}
+function syncBadge() {}
+function banner(text) { log.push("banner:" + text); }
+var draft = false;
+function holdsDraft() { return draft; }
+var mine = "aaa";
+var root = { getAttribute: function (k) { return k === "data-assets" ? mine : null; } };
+var stored = {};
+window.sessionStorage = {
+  getItem: function (k) { return Object.prototype.hasOwnProperty.call(stored, k) ? stored[k] : null; },
+  setItem: function (k, v) { stored[k] = String(v); }
+};
+location.reload = function () { log.push("reload"); };
+`+open+connect+`
+connect();
+var s = sockets[0];
+s.msg("assets", { id: "aaa" });
+check("the same assets do nothing", log, []);
+s.msg("assets", {});
+check("a daemon naming none does nothing", log, []);
+s.msg("assets", { id: "bbb" });
+check("other assets reload", log, ["reload"]);
+log = [];
+s.msg("assets", { id: "bbb" });
+check("a second reload for the same assets banners instead", log, ["banner:js.banner.updated"]);
+log = [];
+s.msg("assets", { id: "ccc" });
+check("newer assets reload again", log, ["reload"]);
+log = [];
+draft = true;
+s.msg("assets", { id: "ddd" });
+check("a held draft banners", log, ["banner:js.banner.updated"]);
+log = [];
+draft = false;
+mine = null;
+s.msg("assets", { id: "eee" });
+check("a page rendered without an identity does nothing", log, []);
+process.stdout.write(bad.join("\n"));
+})();
+`)
+}
