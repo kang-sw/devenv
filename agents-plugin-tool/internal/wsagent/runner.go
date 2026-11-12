@@ -237,16 +237,17 @@ func (r *Runner) Start(notify func(replyID, project string)) {
 // second process of a session stays behind a crash between a spawn and its
 // record.
 func (r *Runner) holdersScanned() {
+	// Listed before the conversations are taken and asked: a conversation
+	// opened after the listing launched no holder in it, and a holder a
+	// start launched meanwhile is in its record by the time the
+	// conversation's loop answers.
+	listed := r.opts.Holders.List().Holders
 	r.mu.Lock()
 	convs := make([]*conv, 0, len(r.convs))
 	for _, c := range r.convs {
 		convs = append(convs, c)
 	}
 	r.mu.Unlock()
-	// Listed before the conversations are asked: a holder a start launched
-	// meanwhile is in its record by the time the conversation's loop
-	// answers.
-	listed := r.opts.Holders.List().Holders
 	owned := map[string]bool{}
 	for _, c := range convs {
 		c.do(func() {
@@ -255,6 +256,15 @@ func (r *Runner) holdersScanned() {
 				owned[id] = true
 			}
 		})
+	}
+	select {
+	case <-r.quit:
+		// The daemon closes: a loop that ended on it let its process go
+		// under its holder for the next daemon (letGo) and answered nothing
+		// above, so its holder would read as no conversation's. The next
+		// daemon's first scan sweeps instead.
+		return
+	default:
 	}
 	for _, info := range listed {
 		var meta holderSession

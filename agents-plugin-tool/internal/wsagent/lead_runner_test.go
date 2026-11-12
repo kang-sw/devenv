@@ -1088,6 +1088,42 @@ func TestLeadOrphanHolderIsEndedAfterTheFirstScan(t *testing.T) {
 	}
 }
 
+// TestLeadShutdownDuringTheFirstScanEndsNoHolder: a daemon that closes
+// while its first holder scan runs lets each lead's process go under its
+// holder for the next daemon, so the conversation's loop has ended by the
+// time the scan returns. The sweep after the scan must not read those
+// holders as owned by no conversation and end them.
+func TestLeadShutdownDuringTheFirstScanEndsNoHolder(t *testing.T) {
+	h := newLeadHarness(t).start()
+	id, holder := h.runLead("one")
+	h.holders.out(holder, turnLines("sess-1", "u1", "first")...)
+	h.idle(id)
+	h.runner.Close()
+	h.holders.restart()
+	entered, release := h.gateScan()
+	defer release()
+	h.start()
+	wait(t, "the first scan", entered)
+
+	c := h.runner.conv(id)
+	closed := make(chan struct{})
+	go func() { h.runner.Close(); close(closed) }()
+	wait(t, "the conversation to be let go", c.done)
+	release()
+	wait(t, "the daemon to close", closed)
+	if n := h.holders.opCount("stop"); n != 0 {
+		t.Fatalf("a closing daemon ended a running lead's holder: %v", h.holders.opList())
+	}
+
+	h.holders.restart()
+	h.start()
+	h.send(id, "two")
+	eventually(t, "the next daemon to rejoin the process", func() bool { return slices.Equal(h.userInputs(holder), []string{"one", "two"}) })
+	if h.holders.opCount("launch") != 1 || h.holders.opCount("stop") != 0 {
+		t.Fatalf("the session keeps its one process: %v", h.holders.opList())
+	}
+}
+
 // TestLeadIdleStopWaitsForBackgroundTasks: the idle timer does not stop a
 // process whose harness reports a running background task, whose work the
 // stop would end; it does once the list empties.

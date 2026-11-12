@@ -108,6 +108,9 @@ type fakeHolders struct {
 	// of a subtype carries (raw JSON); setControl changes both while a
 	// runner runs.
 	bodies map[string]string
+	// scanHook, when set, runs at the start of each Scan, before it takes
+	// the lock (gateScan).
+	scanHook func()
 }
 
 func newFakeHolders() *fakeHolders {
@@ -159,6 +162,12 @@ func (f *fakeHolders) appendLocked(h *fakeHolder, ev wsholder.Event) {
 }
 
 func (f *fakeHolders) Scan() {
+	f.mu.Lock()
+	hook := f.scanHook
+	f.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	for _, id := range f.order {
@@ -646,6 +655,29 @@ func (h *leadHarness) start() *leadHarness {
 	h.runner.Start(func(string, string) { h.notes.Add(1) })
 	h.t.Cleanup(h.runner.Close)
 	return h
+}
+
+// gateScan holds the next runner's first holder scan until release is
+// called; entered is closed once the scan waits. A test defers release, so
+// a failure before it does not leave the runner's Close waiting on the
+// scan.
+func (h *leadHarness) gateScan() (entered <-chan struct{}, release func()) {
+	in, gate := make(chan struct{}), make(chan struct{})
+	var first, released sync.Once
+	h.holders.set(func() {
+		h.holders.scanHook = func() { first.Do(func() { close(in); <-gate }) }
+	})
+	return in, func() { released.Do(func() { close(gate) }) }
+}
+
+// wait fails the test unless ch is closed within a few seconds.
+func wait(t *testing.T, what string, ch <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-ch:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("timed out waiting for %s", what)
+	}
 }
 
 // restart ends the daemon (its conversations' processes run on under
