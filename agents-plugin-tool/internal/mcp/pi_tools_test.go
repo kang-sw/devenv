@@ -242,6 +242,40 @@ func TestPiToolsGate(t *testing.T) {
 	}
 }
 
+// TestPiToolsKnobReadsTheProjectAndGlobalValues: the knob resolves through
+// the machine-local project and global files over the package default, so
+// a wsflow project opts in, and a ws user opts out, by a tune.
+func TestPiToolsKnobReadsTheProjectAndGlobalValues(t *testing.T) {
+	wsflow := dashboardPackages[1]
+	for _, tc := range []struct {
+		name      string
+		manifests string
+		scope     wsconfig.Scope
+		value     string
+		listed    bool
+	}{
+		{name: "wsflow project on", manifests: wsflow.own + ";" + wsflow.dashboard, scope: wsconfig.ScopeProject, value: "true", listed: true},
+		{name: "wsflow global on", manifests: wsflow.own + ";" + wsflow.dashboard, scope: wsconfig.ScopeGlobal, value: "true", listed: true},
+		{name: "ws project off", manifests: wsManifests(), scope: wsconfig.ScopeProject, value: "false"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setPiVersion(t, "1.0.4", nil)
+			f := newPiFixture(t, tc.manifests, newFakePiAgents())
+			r := wsconfig.NewResolver(wsconfig.Options{}, nil, nil, nil)
+			if err := r.Set(DashboardPiSpawnKey, tc.value, wsconfig.SetOptions{ExplicitScope: tc.scope}); err != nil {
+				t.Fatal(err)
+			}
+			if got := len(listedPiTools(f.server)) > 0; got != tc.listed {
+				t.Fatalf("listed = %v, want %v", got, tc.listed)
+			}
+			out := callToolWithKey(t, f.server, 2, f.key, "pi.list", nil)
+			if refused := strings.Contains(out, " is off"); refused == tc.listed {
+				t.Fatalf("pi.list = %q, want refused %v", out, !tc.listed)
+			}
+		})
+	}
+}
+
 func TestPiToolsRefuseANonLeadKey(t *testing.T) {
 	setPiVersion(t, "1.0.4", nil)
 	f := newPiFixture(t, wsManifests(), newFakePiAgents())
