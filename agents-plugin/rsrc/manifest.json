@@ -19,7 +19,7 @@
     "lead-check-blockers/lead-check-blockers.md": "76ed9be9cc75929bd90304d7918c73f6db7d59ac898c5c568ce5e8f1e7058ecc",
     "lead-coauthor-paged-document/lead-coauthor-paged-document.md": "45ca8a346c55663f6fb5bd59674f257324119f4640d5532d89fe31813e3147df",
     "lead-delegate/lead-delegate.md": "6854e994acf8e5ae34ac7c37e265bd220490b485ac3b4153a15acfeb461e2156",
-    "lead-discuss/lead-discuss.md": "7f3bdcd6bc979885089931c613aa91454d25c849717b300f6591ddbb91851b2e",
+    "lead-discuss/lead-discuss.md": "282fdf0da2f5d2c3c93dd5c8ae04f463a0254a10133f9ad75f110d3443ac7de7",
     "lead-review/lead-review.md": "87460eee7f786233a8ceea12d37ee86563f74b21e85f0da0d30f3cf614b47e0f",
     "lead-run/lead-run.md": "1c41967b7a34a79e33e39c7d4ea47d8748cc4a3f2f962c7e402ff55217c0ceff",
     "lead-ship/lead-ship.md": "040956778692d47ae6242c198ad9ca38f35964111c42a0e2b2c304dc8083b322",
@@ -30,7 +30,7 @@
     "lead-use-mailbox/arm-the-wait.pi.md": "fce77e67ab83ae06a1698df262c7f51f7f20ef662b64a90e5e1bdbe08807480a",
     "lead-use-mailbox/lead-use-mailbox.md": "bfe85d55a84ac29a45a5f053181d0b40c2362dba7d1718a348028a8111d629db",
     "lead-workflow-manual/command-syntax.md": "e921542693430ba83f5fa21adf14afe13f2e87e318bfa2b2a89a14708fda0d6d",
-    "lead-workflow-manual/lead-workflow-manual.md": "62bee45e94ce647a374e24f4da9cb48370fcbe158705d0fa85dbeada28ba0005",
+    "lead-workflow-manual/lead-workflow-manual.md": "654106d4cbfe53ba21b8cbcf23d92be955af118971dc430b27c09e36024c9f21",
     "lead-workflow-manual/native-spawn-binding.claude.md": "fc7258226abd15ad2baef2ef8a361f6777d8390868a595853f61812def0cf310",
     "lead-workflow-manual/native-spawn-binding.codex.md": "ea1977984de016a95df292c3384e93982aa67b12bbd5e8850c7ed792acbdf284",
     "lead-workflow-manual/native-spawn-binding.md": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -49,7 +49,7 @@
     "ticket-worker-elevated/ticket-worker-elevated.md": "066bbca91712d90f99a686b8f7f9ba7119203a04ee61df5a70efe1cd2f1a8866",
     "ticket-worker/ticket-worker.md": "558322907db3f72affbcaf79668a37f4143ca4d71729c90f94f29a3f6b95fb9f",
     "tracker/tracker.md": "054d2d2ba9a72a66fc9c2ab79ed22b3c614f3b0249259e2c927aef8f50c807e7",
-    "whiteboard/whiteboard.md": "a506c7f1222de1076b2848195a0bcfb716a329e561e61fd0c75b8a2790bea0f3",
+    "whiteboard/whiteboard.md": "57ea921deca1d4add8eefe8fa66b827b3bacd18573048fa4e24b5143eb862569",
     "worker-stop-protocol.md": "a41c2a5d3ea2f4e310213e32821ac289ca51471139fb617ebd06fd27e55582a3"
   }
 }

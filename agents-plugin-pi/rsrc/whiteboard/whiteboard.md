@@ -90,9 +90,13 @@ Markdown up to the closing tag.
   first, then a stemless topic's name, then a stemmed topic's label, so an
   old title still reaches an adopted topic. Stems and labels are one
   namespace: a stem or label another topic already uses is refused.
-- `class`: `policy`, `technical`, or `announced`, the classes of the workflow
-  manual's `### Asking the user`. An item belongs to its group's topic,
-  which groups items on the page; `wb:title` is one line.
+- `class`: `policy`, `technical`, `announced`, or `check`, the kinds of ask
+  in the workflow manual's `### Asking the user`. A `check` is a gate, not a
+  decision class: a request that the user look at, verify, or approve
+  something ("OK this draft and I'll proceed", "verify on your machine"). It
+  renders as a checklist under the topic recap, and the user answers each
+  one individually: `ok`, `no`, or a note. An item belongs to its group's
+  topic, which groups items on the page; `wb:title` is one line.
 - `id` on `wb:add`: omitted, the server mints one past the highest ID it has
   minted, adopted, or been floored to; a number adopts an ID from outside the
   board, such as a ticket queue's. An ID the store holds is refused.
@@ -115,9 +119,10 @@ Markdown up to the closing tag.
   rule below. A link or image path, in markdown or in `href` and `src`, is
   relative to the session root or absolute; images are local files only,
   links may also be http(s). An open technical or announced item shows its `wb:why` inline,
-  one line per reason, with only the title's tags rendered.
-- `wb:why`: a technical or announced item's citation or reasoning, or a
-  policy item's context. `wb:link`: one per link, such as a ticket stem, a
+  one line per reason, with only the title's tags rendered; a check's
+  `wb:why` shows the same way under its row.
+- `wb:why`: a technical or announced item's citation or reasoning, a
+  policy item's context, or a check's note on what to look at. `wb:link`: one per link, such as a ticket stem, a
   commit, or `supersedes {{12}}`.
 - Item references: write `{{12}}` in an item field, the markdown text of a
   topic body (never inside its HTML), or the reading part of an answer
@@ -126,12 +131,13 @@ Markdown up to the closing tag.
   reference is never refused. A plain `(12)` is literal text, and a
   `wb:answer` body, the user's verbatim words, is never resolved.
 - `wb:answer`: `value` is, for a policy item, its option letter, optionally
-  followed by `, <text>`; for a technical or announced item, `ok`, `no`, or
-  short text. A later answer replaces an earlier one. The body, required, is
+  followed by `, <text>`; for a technical, announced, or check item, `ok`,
+  `no`, or short text. A later answer replaces an earlier one. The body, required, is
   the user's verbatim words for this item. `ids="14 15"` records the same
   value and words on each listed item. `assumed="true"` records your reading
   of a vague reply; the page shows the item as a settled row marked assumed,
-  with a note pen the user can veto or comment through. Record the user's
+  with a note pen the user can veto or comment through (an assumed check
+  stays in its topic's check list). Record the user's
   later confirming or correcting words as another `wb:answer` on that ID
   without `assumed`.
 - Status: an item starts `open`; `wb:answer` sets `answered`, or `assumed`
@@ -191,13 +197,12 @@ Markdown up to the closing tag.
 - Topic recap: one or two lines at the top of the topic, above its body,
   with its own update time, for state that spans turns, such as
   `READY · reviewed · in implementation: <branch>`. Give a topic that is in
-  implementation, waiting on an answer, or blocked a recap, refresh it
-  whenever that state changes, and keep it to one or two lines; a stale
-  recap misleads more than none. A recap, like a topic body, states status
-  and never asks the user anything: anything that waits on the user's
-  confirmation, "OK this draft and I'll proceed" included, is a `wb:add`
-  item (`announced` or `technical` for a plain confirmation, `policy` for a
-  choice), so it shows as waiting on the user. `wb:recap` replaces it whole,
+  implementation or blocked a recap, refresh it whenever that state
+  changes, and keep it to one or two lines; a stale recap misleads more
+  than none. A recap, like a topic body, states status and never asks the
+  user anything: anything waiting on the user is an item, not recap text.
+  "OK this draft and I'll proceed" is a `wb:add` item (`check` for a plain
+  confirmation, `policy` for a choice), so it shows as waiting on the user. `wb:recap` replaces it whole,
   an empty one clears it, and the same recap again is no change and keeps
   its time. A changed recap counts as a change to the topic, as a body
   change does; clearing it reopens nothing.
