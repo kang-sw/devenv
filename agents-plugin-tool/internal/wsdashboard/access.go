@@ -38,7 +38,8 @@ import (
 //     view's page route, the same route for an HTML file opened in a tab.
 //     It is admitted by the short-lived, root-scoped capability its path
 //     carries instead: the guard passes the route by its shape and the
-//     route answers 404 without a valid capability.
+//     route answers 404 without a valid capability, and to a fetch or
+//     another origin's request with one (capRefused).
 //
 // The LAN token is not the endpoint file's shutdown token and is never
 // written to the endpoint file, so a LAN browser never holds the shutdown

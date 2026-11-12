@@ -1046,6 +1046,7 @@ func (d *Daemon) handleSessionPage(w http.ResponseWriter, r *http.Request, reply
 			terminal, _ = XtermAsset()
 		}
 		if html, err = renderSessionPage(view, regions, localViewer(r), terminal); err == nil {
+			w.Header().Set("Content-Security-Policy", sessionPageCSP)
 			writeHTML(w, html)
 			return
 		}
@@ -1183,6 +1184,13 @@ func readMethod(w http.ResponseWriter, r *http.Request) bool {
 // guards on the write routes would pass a clickjacked board answer, message,
 // steer, cancel, interrupt, or system open; only refusing the frame stops it.
 const frameAncestorsNone = "frame-ancestors 'none'"
+
+// sessionPageCSP is the session page's policy: frameAncestorsNone, and
+// frame-src 'self', so no frame on the page (a preview's sandboxed
+// document, a topic body) can navigate itself to another origin, where a
+// preview's document would carry its capability (fs_capability.go). A topic
+// body's srcdoc frame loads under it.
+const sessionPageCSP = "frame-src 'self'; " + frameAncestorsNone
 
 // writeHTML writes a daemon HTML page. A caller that sets its own
 // Content-Security-Policy includes frameAncestorsNone in it; without one the

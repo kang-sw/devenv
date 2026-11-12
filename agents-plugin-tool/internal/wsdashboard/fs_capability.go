@@ -54,29 +54,49 @@ import (
 //   - sandboxes the document itself ("sandbox allow-scripts"), so the file
 //     opened outside the card's frame, in a tab of its own, still runs in
 //     an opaque origin and never in the daemon's;
-//   - limits every fetch directive to the capability's own path prefix (and
-//     data: or blob: where a document makes its own), so the frame can
-//     request neither another origin nor any other dashboard route;
+//   - limits every load directive to the capability's own path prefix (and
+//     data: or blob: where a document makes its own), so the document loads
+//     nothing from another origin or any other dashboard route, and allows
+//     no fetch at all (connect-src 'none');
 //   - allows no form target and no base URL change.
 //
-// Access-Control-Allow-Origin is "*": a module script or a fetch from the
-// frame's opaque origin is a CORS request, and the capability in the path,
-// not the origin, is what admits a read. Every refusal answers 404.
+// A capability is a bearer secret, and the document it serves can read it:
+// a script sees it in location.href and can carry it off, by navigating its
+// tab to another origin or by a channel no policy closes (WebRTC, a DNS
+// prefetch). So the route keeps a file's bytes from a script whoever holds
+// the capability, not only from the document:
+//
+//   - a request with Sec-Fetch-Dest: empty (fetch, XMLHttpRequest, a
+//     beacon) is refused, whoever makes it, as the policy refuses the
+//     document's own (capRefused);
+//   - a request whose Origin is another origin's is refused (capRefused);
+//   - Access-Control-Allow-Origin is "null", and only on a request from an
+//     opaque origin (Origin: null) for a module script, a style sheet, or a
+//     font (Sec-Fetch-Dest script, style, or font): the CORS loads an opaque
+//     document needs for its own files (capCORS). A page gets those only as
+//     code it runs, rules it applies, and a face it draws, and nosniff with
+//     the route's own types keeps any other file from loading as one;
+//   - the session page's policy (frame-src 'self', sessionPageCSP) stops a
+//     preview's frame from navigating itself to another origin; a document
+//     in a tab of its own still can.
+//
+// What another origin holding a capability still gets is what any page gets
+// from a cross-origin load: a script run for its side effects, a style
+// sheet's rules, an image or a frame it cannot read, never a file's bytes.
+// Sec-Fetch-Site cannot tell the document from that page: Chromium marks
+// every request an opaque-origin document makes cross-site, as it marks
+// another site's, and a sandboxed frame on another site sends Origin "null"
+// too. Every refusal answers 404.
 //
 // The file view's page route:
 //
 //	GET /s/<reply-id>/fs/view/<capability>/<path>
 //
 // is the same route for an HTML file the file view opens as a page in a tab
-// of its own (handleFile redirects to it), with the same containment and a
-// capability of the same shape, which verifies on its own route only (the
-// MAC covers the route), and five differences:
+// of its own (handleFile redirects to it), with the same containment,
+// policy, and checks and a capability of the same shape, which verifies on
+// its own route only (the MAC covers the route), and four differences:
 //
-//   - its policy allows no fetch at all (connect-src 'none'): a page in a
-//     tab can navigate itself anywhere, so a script that could read the
-//     root's files could carry them off in the URL; it still loads its
-//     style sheets, scripts, images, fonts, media, and frames from the
-//     prefix;
 //   - an image is served under the image route's policy, so an SVG runs no
 //     script even opened on its own;
 //   - an HTML file must be UTF-8 text without NUL bytes and at most
@@ -92,7 +112,7 @@ import (
 //     restart, is redirected to the file view of the same path, which mints
 //     a fresh one behind the access guard.
 //
-// Neither policy carries frame-ancestors: the board never frames the file
+// The policy carries no frame-ancestors: the board never frames the file
 // view (it opens a tab), the sandboxed document's own requests carry an
 // opaque Origin every write route refuses, and Chromium blocks every
 // frame-ancestors source, even *, for a frame whose parent is opaque, so
@@ -187,8 +207,8 @@ func (d *Daemon) mintFSCapability(replyID, root string) string {
 
 // mintCapability mints a capability for the route part, the session
 // replyID, and its project root root; empty when the daemon has no key. A
-// capability verifies on its own route only, so a page cannot carry its
-// capability to the capability route, whose policy allows fetches.
+// capability verifies on its own route only, so a preview's capability
+// cannot read a file git ignores, which the page route serves.
 func (d *Daemon) mintCapability(part, replyID, root string) string {
 	key := d.fsCapKey()
 	if key == nil {
@@ -246,7 +266,8 @@ func (d *Daemon) capabilityURL(part, capability, replyID, rel string) string {
 // route by its shape alone: the session routes LAN mode serves without the
 // token, since the sandboxed document they serve sends no cookie. The route
 // itself checks the capability (handleFSCapability) and answers 404 without
-// a valid one.
+// a valid one, and to a fetch or another origin's request (capRefused) in
+// LAN mode as on loopback.
 func previewCapability(r *http.Request) bool {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		return false
@@ -260,27 +281,41 @@ func previewCapability(r *http.Request) bool {
 		(strings.HasPrefix(sub, strings.TrimPrefix(fsCapRoutePart, "/")) || strings.HasPrefix(sub, strings.TrimPrefix(fsViewRoutePart, "/")))
 }
 
+// capRefused reports a request the capability and page routes refuse
+// whatever capability it carries (see the file comment): a fetch
+// (Sec-Fetch-Dest: empty), whose answer a script reads, or one whose Origin
+// is neither the daemon's own nor an opaque document's ("null").
+func capRefused(r *http.Request) bool {
+	if origin := r.Header.Get("Origin"); origin != "" && origin != "null" && !sameOrigin(r) {
+		return true
+	}
+	return r.Header.Get("Sec-Fetch-Dest") == "empty"
+}
+
+// capCORS reports a request the routes answer with
+// Access-Control-Allow-Origin: null: an opaque document's CORS load of a
+// module script, a style sheet, or a font, which it cannot load without
+// one. A fetch is refused (capRefused), and an image, media, or a JSON
+// module gets no grant, so no page reads their bytes (see the file comment).
+func capCORS(r *http.Request) bool {
+	if r.Header.Get("Origin") != "null" {
+		return false
+	}
+	switch r.Header.Get("Sec-Fetch-Dest") {
+	case "script", "style", "font":
+		return true
+	}
+	return false
+}
+
 // capHost admits the Host values the capability route writes into its
 // policy: a host name or address with an optional port, and nothing a
 // policy would read as a separator.
 var capHost = regexp.MustCompile(`^[A-Za-z0-9.\-\[\]:]+$`)
 
-// fsCapabilityCSP is the capability route's policy for the path prefix
-// prefix (an absolute URL ending in a slash); see the file comment.
+// fsCapabilityCSP is the capability and page routes' policy for the path
+// prefix prefix (an absolute URL ending in a slash); see the file comment.
 func fsCapabilityCSP(prefix string) string {
-	return "sandbox allow-scripts; default-src " + prefix +
-		"; script-src " + prefix + " 'unsafe-inline'" +
-		"; style-src " + prefix + " 'unsafe-inline'" +
-		"; img-src " + prefix + " data: blob:" +
-		"; media-src " + prefix + " data: blob:" +
-		"; font-src " + prefix + " data:" +
-		"; connect-src " + prefix +
-		"; object-src 'none'; base-uri 'none'; form-action 'none'"
-}
-
-// fsViewCSP is the page route's policy for the path prefix prefix: the
-// capability route's, with no fetch at all (see the file comment).
-func fsViewCSP(prefix string) string {
 	return "sandbox allow-scripts; default-src " + prefix +
 		"; script-src " + prefix + " 'unsafe-inline'" +
 		"; style-src " + prefix + " 'unsafe-inline'" +
@@ -295,7 +330,7 @@ func fsViewCSP(prefix string) string {
 // the file's path.
 func (d *Daemon) handleFSCapability(w http.ResponseWriter, r *http.Request, replyID, rest string, view bool) {
 	capability, path, ok := strings.Cut(rest, "/")
-	if !ok || path == "" || d.index == nil || !ValidReplyID(replyID) || !capHost.MatchString(r.Host) {
+	if !ok || path == "" || capRefused(r) || d.index == nil || !ValidReplyID(replyID) || !capHost.MatchString(r.Host) {
 		fsNotFound(w)
 		return
 	}
@@ -345,7 +380,6 @@ func (d *Daemon) handleFSCapability(w http.ResponseWriter, r *http.Request, repl
 	csp := fsCapabilityCSP(prefix)
 	var content io.ReadSeeker = f
 	if view {
-		csp = fsViewCSP(prefix)
 		if _, image := imageType(rel); image {
 			csp = imageContentSecurityPolicy
 		}
@@ -366,7 +400,9 @@ func (d *Daemon) handleFSCapability(w http.ResponseWriter, r *http.Request, repl
 	h.Set("Content-Type", ctype)
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Content-Security-Policy", csp)
-	h.Set("Access-Control-Allow-Origin", "*")
+	if capCORS(r) {
+		h.Set("Access-Control-Allow-Origin", "null")
+	}
 	h.Set("Cache-Control", "no-store")
 	h.Set("Referrer-Policy", "no-referrer")
 	http.ServeContent(w, r, "", info.ModTime(), content)
@@ -375,8 +411,8 @@ func (d *Daemon) handleFSCapability(w http.ResponseWriter, r *http.Request, repl
 // capDenied reports a file inside root, at rel, that the capability route
 // still refuses: one dotDenied refuses, or one git reports ignored. The
 // whole root stays the read scope, so a document's assets in a parent
-// folder load, but a framed document's script cannot fetch a secret from
-// where secrets usually live. It fails closed: when the ignore check fails
+// folder load, but a framed document cannot load a secret from where
+// secrets usually live, even as a script or a style sheet. It fails closed: when the ignore check fails
 // inside a repository the file is refused; only a root in no repository
 // has no ignored set.
 func capDenied(root, rel string) bool {

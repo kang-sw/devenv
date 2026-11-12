@@ -52,7 +52,8 @@ func capFrame(t *testing.T, f *pageFixture, v viewer, session, path string) stri
 // TestFSCapabilityRoute pins the HTML preview's capability route: a valid
 // capability serves the document and its relative assets to anyone holding
 // it, a LAN peer with no token included, with the policy that sandboxes
-// the document and limits every fetch to the capability's own prefix; a
+// the document, limits every load to the capability's own prefix, and
+// allows no fetch; a
 // missing, altered, foreign-session, foreign-root, or expired capability
 // answers 404; and a capability reads nothing outside its root.
 func TestFSCapabilityRoute(t *testing.T) {
@@ -83,7 +84,7 @@ func TestFSCapabilityRoute(t *testing.T) {
 		csp := h.Get("Content-Security-Policy")
 		origin := "http://" + v.host + prefix
 		for _, want := range []string{
-			"sandbox allow-scripts;", "default-src " + origin + ";", "connect-src " + origin + ";", "img-src " + origin + " data: blob:;",
+			"sandbox allow-scripts;", "default-src " + origin + ";", "connect-src 'none';", "img-src " + origin + " data: blob:;",
 			"script-src " + origin + " 'unsafe-inline';", "style-src " + origin + " 'unsafe-inline';", "media-src " + origin + " data: blob:;",
 			"font-src " + origin + " data:;", "object-src 'none'", "base-uri 'none'", "form-action 'none'",
 		} {
@@ -96,7 +97,7 @@ func TestFSCapabilityRoute(t *testing.T) {
 				t.Errorf("%s: policy carries %q: %s", v.name, bad, csp)
 			}
 		}
-		if h.Get("X-Content-Type-Options") != "nosniff" || h.Get("Cache-Control") != "no-store" || h.Get("Access-Control-Allow-Origin") != "*" || len(rec.Result().Cookies()) != 0 {
+		if h.Get("X-Content-Type-Options") != "nosniff" || h.Get("Cache-Control") != "no-store" || h.Get("Access-Control-Allow-Origin") != "" || len(rec.Result().Cookies()) != 0 {
 			t.Errorf("%s: capability headers = %v", v.name, h)
 		}
 	}
@@ -187,6 +188,106 @@ func TestFSCapabilityRoute(t *testing.T) {
 		t.Error("a preview after the expiry carries the expired capability")
 	} else if rec := serve(f.d, bare, http.MethodGet, fresh, ""); rec.Code != http.StatusOK {
 		t.Errorf("a fresh capability = %d, want 200", rec.Code)
+	}
+}
+
+// capShape is the Origin and fetch metadata of a request to the capability
+// or page route, as Chromium sends them (see the cases).
+type capShape struct {
+	origin, site, mode, dest string
+}
+
+// capFetch requests target as v with the shape's headers; ":daemon" in its
+// origin stands for v's own origin.
+func capFetch(f *pageFixture, v viewer, target string, s capShape) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodGet, target, nil)
+	req.RemoteAddr, req.Host = v.peer, v.host
+	for k, val := range map[string]string{"Origin": strings.ReplaceAll(s.origin, ":daemon", "http://"+v.host), "Sec-Fetch-Site": s.site, "Sec-Fetch-Mode": s.mode, "Sec-Fetch-Dest": s.dest} {
+		if val != "" {
+			req.Header.Set(k, val)
+		}
+	}
+	rec := httptest.NewRecorder()
+	f.d.Handler().ServeHTTP(rec, req)
+	return rec
+}
+
+// TestFSCapabilityRefusesOtherOrigins pins that a capability yields no
+// file's bytes to a script on any origin (see the fs_capability.go file
+// comment). The request shapes are Chromium's: a sandboxed document's own
+// loads are cross-site, with Origin "null" when they are CORS, exactly as
+// a sandboxed frame's on another site, so the route tells them apart by
+// what is loaded, not by Sec-Fetch-Site. On both routes, for a LAN peer
+// without the token (the guard admits the routes by their shape) as for a
+// loopback viewer: the document's navigation, its no-cors loads, and its
+// CORS module scripts, style sheets, and fonts are served, the CORS ones
+// with Access-Control-Allow-Origin: null; any fetch, the document's own
+// included, and any request with another origin's Origin answer 404; and
+// an opaque document's CORS image gets no grant.
+func TestFSCapabilityRefusesOtherOrigins(t *testing.T) {
+	f := startPageFixture(t, lanMode)
+	local, _ := fsViewers(t, f)
+	bare := viewer{name: "LAN peer, no token", peer: "192.168.7.31:50000", host: "192.168.7.20:" + strconv.Itoa(f.d.Endpoint().Port)}
+	writeFile(t, filepath.Join(f.project, "docs", "page.html"), "<h1>HTML-INSIDE</h1>")
+	writeFile(t, filepath.Join(f.project, "shot.png"), "PNG-INSIDE")
+	writeFile(t, filepath.Join(f.project, "docs", "app.mjs"), "export default 'MODULE-INSIDE'")
+	writeFile(t, filepath.Join(f.project, "docs", "style.css"), "body{color:red}/*CSS-INSIDE*/")
+	writeFile(t, filepath.Join(f.project, "docs", "face.woff2"), "WOFF2-INSIDE")
+	const (
+		fetchFromNull = "a fetch from an opaque origin (the document's own, or another site's sandboxed frame)"
+		evil          = "http://evil.test:46173"
+	)
+	served := map[string]struct {
+		path  string
+		shape capShape
+		acao  string
+	}{
+		"the preview frame's navigation":       {"docs/page.html", capShape{"", "same-origin", "navigate", "iframe"}, ""},
+		"the page's navigation from the board": {"docs/page.html", capShape{"", "same-origin", "navigate", "document"}, ""},
+		"the page typed or reloaded":           {"docs/page.html", capShape{"", "none", "navigate", "document"}, ""},
+		"a style sheet":                        {"docs/style.css", capShape{"", "cross-site", "no-cors", "style"}, ""},
+		"an image":                             {"shot.png", capShape{"", "cross-site", "no-cors", "image"}, ""},
+		"a classic script":                     {"docs/app.mjs", capShape{"", "cross-site", "no-cors", "script"}, ""},
+		"a module script":                      {"docs/app.mjs", capShape{"null", "cross-site", "cors", "script"}, "null"},
+		"a crossorigin style sheet":            {"docs/style.css", capShape{"null", "cross-site", "cors", "style"}, "null"},
+		"a font":                               {"docs/face.woff2", capShape{"null", "cross-site", "cors", "font"}, "null"},
+		"a crossorigin image":                  {"shot.png", capShape{"null", "cross-site", "cors", "image"}, ""},
+		"the daemon's own CORS load":           {"docs/app.mjs", capShape{":daemon", "same-origin", "cors", "script"}, ""},
+		"a client with no fetch metadata":      {"docs/style.css", capShape{}, ""},
+	}
+	refused := map[string]struct {
+		path  string
+		shape capShape
+	}{
+		fetchFromNull:                       {"docs/style.css", capShape{"null", "cross-site", "cors", "empty"}},
+		"a fetch from another site":         {"docs/style.css", capShape{evil, "cross-site", "cors", "empty"}},
+		"a no-cors fetch from another site": {"docs/style.css", capShape{"", "cross-site", "no-cors", "empty"}},
+		"a fetch from another port":         {"docs/style.css", capShape{"http://127.0.0.1:46173", "same-site", "cors", "empty"}},
+		"a fetch from the daemon's origin":  {"docs/style.css", capShape{":daemon", "same-origin", "cors", "empty"}},
+		"another site's crossorigin image":  {"shot.png", capShape{evil, "cross-site", "cors", "image"}},
+		"another site's module script":      {"docs/app.mjs", capShape{evil, "cross-site", "cors", "script"}},
+		"an Origin the page cannot carry":   {"docs/page.html", capShape{"http://evil.test", "", "", ""}},
+	}
+	for _, route := range []string{"cap", "view"} {
+		capability := f.d.mintFSCapability("livesession", f.project)
+		if route == "view" {
+			capability = f.d.mintCapability(fsViewRoutePart, "livesession", f.project)
+		}
+		prefix := "/s/livesession/fs/" + route + "/" + capability + "/"
+		for _, v := range []viewer{bare, local} {
+			for name, c := range served {
+				rec := capFetch(f, v, prefix+c.path, c.shape)
+				if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "INSIDE") || rec.Header().Get("Access-Control-Allow-Origin") != c.acao {
+					t.Errorf("%s route, %s, %s = %d ACAO %q, want 200 ACAO %q", route, v.name, name, rec.Code, rec.Header().Get("Access-Control-Allow-Origin"), c.acao)
+				}
+			}
+			for name, c := range refused {
+				rec := capFetch(f, v, prefix+c.path, c.shape)
+				if rec.Code != http.StatusNotFound || strings.Contains(rec.Body.String(), "INSIDE") || rec.Header().Get("Access-Control-Allow-Origin") != "" {
+					t.Errorf("%s route, %s, %s = %d %v, want 404", route, v.name, name, rec.Code, rec.Header())
+				}
+			}
+		}
 	}
 }
 
