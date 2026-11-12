@@ -7,9 +7,6 @@ import (
 	"testing"
 )
 
-// bulkChip is a topic bar's bulk-answer count chip, as the regions render it.
-var bulkChip = regexp.MustCompile(`<button type="button" class="chip (policy|ok) bulk" data-bulk="\w+" title="[^"]*">(.*?)</button>`)
-
 // TestRenderRegionsMatchThePage pins the dashboard's reuse contract: the
 // board and panel fragments are exactly what the full page renders for the
 // same view, so a served page cannot drift from the static one. A topic body
@@ -17,7 +14,7 @@ var bulkChip = regexp.MustCompile(`<button type="button" class="chip (policy|ok)
 // (TestServedTopicBodyRendersInASandboxedFrame), so this board has none; the
 // topic bar's count chips are the other, bulk-answer buttons in the regions
 // (TestTopicCountChipsAreBulkButtonsOnTheDashboard), which the comparison
-// turns back into the page's plain counts.
+// turns back into the page's plain counts (StaticCountChips).
 func TestRenderRegionsMatchThePage(t *testing.T) {
 	view := sampleView(LayoutFull)
 	page := render(t, view)
@@ -28,11 +25,7 @@ func TestRenderRegionsMatchThePage(t *testing.T) {
 	if regions.Board == "" || regions.Panels == "" {
 		t.Fatalf("empty regions: %+v", regions)
 	}
-	board := bulkChip.ReplaceAllStringFunc(string(regions.Board), func(m string) string {
-		g := bulkChip.FindStringSubmatch(m)
-		title := map[string]string{"policy": "to answer", "ok": "to acknowledge"}[g[1]]
-		return `<span class="chip ` + g[1] + `" title="` + title + `">` + g[2] + `</span>`
-	})
+	board := StaticCountChips(string(regions.Board))
 	if !strings.Contains(page, board) {
 		t.Errorf("the page does not hold the board fragment:\n%.400s", regions.Board)
 	}
