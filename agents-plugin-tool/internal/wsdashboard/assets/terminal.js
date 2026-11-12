@@ -489,12 +489,26 @@
     return Math.max(20, Math.min(400, Math.floor((w - 40) / 7.8)));
   }
 
-  // --- the board header row: "+ Terminal" and its folder popover ---------------
+  // --- the "+ Terminal" button and its folder popover -------------------------
+  // The button ends the composer's status line, in the slot beside the sline
+  // region (dashboard.tmpl tslot) rather than inside it: a region swap
+  // replaces the region's contents whole, and the slot keeps the button and
+  // an open popover through it. A page that offers terminals without a
+  // composer (no live adapter) gets the slot fixed at the page's bottom
+  // right. The popover opens above the button, right-aligned to it.
   function closePop(refocus) {
     if (!ui.pop || ui.pop.hidden) return;
     ui.pop.hidden = true;
     ui.btn.setAttribute("aria-expanded", "false");
     if (refocus) ui.btn.focus();
+  }
+  // placePop keeps the open popover inside the viewport: it is anchored at
+  // the button's right edge, and moves right as far as its left edge is out.
+  function placePop() {
+    var pop = ui.pop;
+    pop.style.right = "";
+    var out = 8 - pop.getBoundingClientRect().left;
+    if (out > 0) pop.style.right = (parseFloat(window.getComputedStyle(pop).right) || 0) - out + "px";
   }
   function optRow(label, path, run) {
     var b = mk("button", "topt");
@@ -530,21 +544,26 @@
     ui.in.value = "";
     drawOpts();
     ui.pop.hidden = false;
+    placePop();
     ui.btn.setAttribute("aria-expanded", "true");
     var first = ui.opts.querySelector("button");
     if (first) first.focus();
     list(function (err) { if (!err && !ui.pop.hidden) { var a = doc.activeElement, i = Array.prototype.indexOf.call(ui.opts.children, a); drawOpts(); if (i >= 0 && ui.opts.children[i]) ui.opts.children[i].focus(); } });
   }
-  function header(col) {
-    var head = mk("div", "bhead");
-    ui.btn = mk("button", "btn bnew");
+  function button() {
+    var slot = doc.getElementById("tslot");
+    if (!slot) {
+      slot = mk("div", "tslot tfix");
+      doc.body.appendChild(slot);
+    }
+    ui.btn = mk("button", "btn tnew");
     ui.btn.type = "button";
-    ui.btn.innerHTML = cards.icon("plus");
-    ui.btn.appendChild(mk("span", null, wsT("js.term.new")));
+    ui.btn.innerHTML = cards.icon("square-terminal");
     ui.btn.title = wsT("js.term.new.title");
+    ui.btn.setAttribute("aria-label", wsT("js.term.new"));
     ui.btn.setAttribute("aria-haspopup", "dialog");
     ui.btn.setAttribute("aria-expanded", "false");
-    head.appendChild(ui.btn);
+    slot.appendChild(ui.btn);
     var pop = ui.pop = mk("div", "tpop");
     pop.setAttribute("role", "dialog");
     pop.setAttribute("aria-label", wsT("js.term.pop.label"));
@@ -568,8 +587,7 @@
     ui.err = mk("div", "ferr");
     ui.err.setAttribute("role", "alert");
     pop.appendChild(ui.err);
-    head.appendChild(pop);
-    col.insertBefore(head, col.firstChild);
+    slot.appendChild(pop);
 
     ui.btn.addEventListener("click", function () { if (pop.hidden) openPop(); else closePop(true); });
     ui.go.addEventListener("click", function () {
@@ -590,12 +608,12 @@
     // setup hands the kind the page's own pieces: post (a session write
     // route, which passes a refusal's text through) and toast.
     setup: function (h) { hooks = h || {}; },
-    // mount adds the board header row to the board column col and reads
-    // the daemon's list, again each time the page becomes visible. The
-    // page mounts the card framework first.
+    // mount adds the "+ Terminal" button for the cards in the board column
+    // col and reads the daemon's list, again each time the page becomes
+    // visible. The page mounts the card framework first.
     mount: function (col) {
       if (ui.btn || !col) return;
-      header(col);
+      button();
       reconcile();
       doc.addEventListener("visibilitychange", function () {
         if (doc.hidden) return;

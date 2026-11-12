@@ -1373,6 +1373,45 @@ func TestPiLeadTurnsAndCompact(t *testing.T) {
 	}
 }
 
+// TestPiLeadSubagentRows: the subagent widget a hosted pi lead sets
+// reaches the session's snapshot as subagent rows, through the runner's
+// own projection, and the rows still running end failed when the lead's
+// process exits, as a claude lead's subagents do.
+func TestPiLeadSubagentRows(t *testing.T) {
+	h := newLeadHarness(t).start()
+	id := h.lead(BackendPi, LeadOptions{}).ID
+	h.send(id, "hello")
+	holder := h.holder(id)
+	h.holders.out(holder, `{"type":"agent_start"}`,
+		string(piWidgetLine(piAgentsWidgetKey,
+			`{"kind":"agent","agentId":"child-1","label":"audit","status":"running","caption":"worker","batches":[],"model":"gpt-x","effort":"high"}`,
+			`{"kind":"agent","agentId":"child-2","label":"probe","status":"running","caption":"explore","batches":[]}`,
+			`{"kind":"reset"}`,
+		)),
+		string(piWidgetLine(piAgentsWidgetKey, `{"kind":"agent","agentId":"child-2","status":"done"}`)),
+		`{"type":"agent_settled"}`)
+	h.idle(id)
+	rows := func() map[string]wslive.Agent {
+		out := map[string]wslive.Agent{}
+		for _, a := range h.snapshot(id).Agents {
+			out[a.ID] = a
+		}
+		return out
+	}
+	got := rows()
+	// The widget's reset line was skipped: it would have dropped both rows.
+	if a := got["child-1"]; len(got) != 2 || a.Status != wslive.StatusRunning || a.Label != "audit" || a.Model != "gpt-x" || a.Effort != "high" || got["child-2"].Status != wslive.StatusDone {
+		t.Fatalf("subagent rows = %+v", got)
+	}
+
+	h.holders.exit(holder, 0)
+	eventually(t, "the process's end", func() bool { return !h.state(id).Process })
+	got = rows()
+	if got["child-1"].Status != wslive.StatusFailed || got["child-2"].Status != wslive.StatusDone {
+		t.Fatalf("rows after the process ended = %+v", got)
+	}
+}
+
 // TestPiLeadMapper pins what a pi lead's mapper does differently from a
 // profile conversation's.
 func TestPiLeadMapper(t *testing.T) {

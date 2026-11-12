@@ -261,6 +261,36 @@ func (src *DashboardSessionSource) ReadClosedTopics(reg wsdashboard.Registration
 	return html, true
 }
 
+var _ wsdashboard.OutsideLinkSource = (*DashboardSessionSource)(nil)
+
+// ReadOutsideLinks lists the files outside the session root that the board
+// of the session reg names links (wsdashboard.OutsideLinkSource): it renders
+// the board, and the closed topics the board leaves past its cap, under the
+// served page's link rule with a recorder on it, so the list holds the paths
+// the page's own links carry. It runs on a click, not on a page render, and
+// inlines no image. false when the session is gone.
+func (src *DashboardSessionSource) ReadOutsideLinks(reg wsdashboard.Registration) ([]string, bool) {
+	_, _, record, ok := src.lookupRecord(reg)
+	if !ok {
+		return nil, false
+	}
+	if record.Whiteboard == nil {
+		return nil, true
+	}
+	var links []string
+	in := servedViewInput(record, reg.ReplyID)
+	in.DocImageSrc = nil
+	in.FileActions, in.OutsideImage = wsdashboard.RecordOutsideLinks(in.FileActions, in.OutsideImage, func(abs string) { links = append(links, abs) })
+	if _, err := wswhiteboard.RenderRegions(wswhiteboard.BuildView(record.Whiteboard, in)); err != nil {
+		appendDebugEvent("dashboard.page_render_failed", map[string]any{"error": err.Error()})
+	}
+	in.Closed = &wswhiteboard.ClosedWindow{From: wswhiteboard.ClosedCap, N: len(record.Whiteboard.ClosedTopics)}
+	if _, err := wswhiteboard.RenderClosedTopics(wswhiteboard.BuildView(record.Whiteboard, in)); err != nil {
+		appendDebugEvent("dashboard.page_render_failed", map[string]any{"error": err.Error()})
+	}
+	return links, true
+}
+
 // servedViewInput is the served page's view input for a session record,
 // without its panels: a full layout under the served page's link rule.
 func servedViewInput(record sessionRecord, replyID string) wswhiteboard.ViewInput {

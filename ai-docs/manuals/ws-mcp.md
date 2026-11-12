@@ -369,9 +369,23 @@ symlink (404 otherwise), to a loopback viewer and a LAN token holder alike:
 an image inline, markdown rendered in the board's escaped mode with relative
 links resolved against the file's own directory, other UTF-8 text as
 `text/plain`, and a binary or over-2-MiB file as a page offering the path
-copies. A file outside the root offers the copies only, except an image
+copies. A file outside the root offers the copies only, not the file view,
+with two exceptions. For a viewer on this machine, a link to one on the
+board or in a lead reply the live ring still holds opens in the preview
+card, and an HTML file also in a sandboxed tab of its own: the click posts
+`POST /s/<reply-id>/fs/outside {"path"}`, which answers only a loopback,
+same-origin POST naming a path the page links (404 otherwise, a LAN token
+holder included) and mints a 15-minute capability for the linked file's
+folder, served to this machine only on `/s/<reply-id>/fs/ocap/` and
+`/fs/oview/`. A volume root, the home, or a folder directly under either
+grants the linked file alone; `~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.config/gh`,
+`~/.netrc`, and `~/.docker` never open; below the granted folder a
+dot-named or git-ignored path is refused, the linked file itself excepted
+(`internal/wsdashboard/fs_outside.go` states the rules). A card re-mints on
+every load, and a tab whose capability expired lands on a page that re-posts
+the mint. The other exception is an image
 written as an absolute path in a lead reply, a board item field, or (through
-the relay below) a topic body, not the file view. A board image inside
+the relay below) a topic body. A board image inside
 the root loads through `GET /s/<reply-id>/image?path=<root-relative path>`,
 which serves only an image-extension file under the same containment, and
 any other image renders as its path, with that one exception: an absolute

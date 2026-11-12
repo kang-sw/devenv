@@ -401,10 +401,12 @@ func TestFileViewRendersHTMLPage(t *testing.T) {
 
 // TestFileViewPageServesAnIgnoredFolder pins that the page route serves a
 // document and its assets in a folder git ignores whole, where a paged
-// document's working folder usually lives (its .gitignore holds "*"),
-// while the preview's capability route keeps refusing them: the page
-// cannot fetch, so the ignored set is not the secret store it is for a
-// framed preview. A dot-named path stays refused.
+// document's working folder usually lives (its .gitignore holds "*"): the
+// page cannot fetch, so the ignored set is not the secret store it is for a
+// framed preview. The preview's capability route serves them to a browser
+// on this machine as well (a LAN viewer's refusal is pinned by
+// TestFSCapabilityRefusesDotAndIgnoredPaths). A dot-named path stays
+// refused.
 func TestFileViewPageServesAnIgnoredFolder(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")
@@ -423,7 +425,10 @@ func TestFileViewPageServesAnIgnoredFolder(t *testing.T) {
 			t.Errorf("page route read of %s = %d, want %d", path, rec.Code, want)
 		}
 	}
-	if rec := serve(f.d, local, http.MethodGet, f.d.fsCapabilityURL("livesession", f.project, "paged/doc/style.css"), ""); rec.Code != http.StatusNotFound {
-		t.Errorf("capability route read of an ignored file = %d, want 404", rec.Code)
+	if rec := serve(f.d, local, http.MethodGet, f.d.fsCapabilityURL("livesession", f.project, "paged/doc/style.css"), ""); rec.Code != http.StatusOK {
+		t.Errorf("local capability route read of an ignored file = %d, want 200", rec.Code)
+	}
+	if rec := serve(f.d, local, http.MethodGet, f.d.fsCapabilityURL("livesession", f.project, "paged/doc/.gitignore"), ""); rec.Code != http.StatusNotFound {
+		t.Errorf("local capability route read of a dot path = %d, want 404", rec.Code)
 	}
 }

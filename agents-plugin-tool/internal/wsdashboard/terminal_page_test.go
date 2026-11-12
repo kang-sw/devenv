@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/kang-sw/devenv/internal/wsholder"
-	"github.com/kang-sw/devenv/internal/wswhiteboard"
+	"github.com/kang-sw/devenv/internal/wslive"
 )
 
 // TestTerminalCardScriptRidesOnlyAPageThatOffersTerminals pins where the
@@ -28,7 +28,7 @@ func TestTerminalCardScriptRidesOnlyAPageThatOffersTerminals(t *testing.T) {
 	if at < 0 || cardsAt < 0 || mountAt < 0 || !(cardsAt < at && at < mountAt) {
 		t.Errorf("a local viewer's page lacks the terminal kind between the card framework and the page script (kind %d, framework %d, mount %d)", at, cardsAt, mountAt)
 	}
-	if !strings.Contains(page, `<symbol id="l-square-terminal" viewBox="0 0 24 24">`) || !strings.Contains(page, `<symbol id="l-plus" viewBox="0 0 24 24">`) {
+	if !strings.Contains(page, `<symbol id="l-square-terminal" viewBox="0 0 24 24">`) {
 		t.Error("the session page lacks the terminal card's icons")
 	}
 	if page := serve(f.d, lan, "GET", "/s/livesession", "").Body.String(); strings.Contains(page, kind) || !strings.Contains(page, "window.WsCards = {") {
@@ -63,41 +63,57 @@ func TestTerminalCardScriptMatchesTheRoutes(t *testing.T) {
 	}
 }
 
-// TestBoardHeaderRowKeepsTheRailBelowIt pins the board column's header row
-// (terminal.js .bhead) and the topic rail sharing the column's top: the row
-// is a fixed-height sticky row, the column sets the rail's inset to that
-// height only while it holds the row, and the rail (wswhiteboard rail.js,
-// page.css) sticks its top capsules and the current bar below the inset.
-// The row is opaque up to the column's top edge (its shadow fills the
-// column's top padding, above where it sticks), and a card's body is its
-// own stacking context, so nothing a card's body stacks shows through the
-// row.
-func TestBoardHeaderRowKeepsTheRailBelowIt(t *testing.T) {
-	css := mustAsset(t, "dashboard.css")
-	row := regexp.MustCompile(`(?m)^\.bhead \{[^}]*\}`).FindString(css)
-	if !strings.Contains(row, "position: sticky; top: 0;") || !strings.Contains(row, "height: 28px;") {
-		t.Errorf("the board header row is not a 28px sticky row: %q", row)
-	}
-	if !strings.Contains(row, "background: var(--wb-bg); box-shadow: 0 -8px 0 var(--wb-bg);") {
-		t.Errorf("the board header row does not fill the column's top padding above it: %q", row)
-	}
-	if !strings.Contains(css, "\n.bc-body, .bc-folded { isolation: isolate; }\n") {
-		t.Error("a board card's body is not its own stacking context")
-	}
-	if !strings.Contains(css, ".bcol:has(> .bhead) { --wb-rail-inset: 28px; }") {
-		t.Error("the board column does not set the rail's inset to the header row's height while it holds the row")
-	}
-	wb, err := wswhiteboard.PageAssets()
+// TestTerminalButtonEndsTheStatusLine pins where the "+ Terminal" button
+// sits: in a slot at the right end of the composer's status line, beside the
+// sline region rather than inside it, so a region swap (which replaces the
+// region's contents) keeps the button and an open popover. Only a page that
+// offers terminals has the slot; a page without a composer gets one fixed at
+// its corner from terminal.js. The board column has no header row of its own.
+func TestTerminalButtonEndsTheStatusLine(t *testing.T) {
+	now := testNow
+	snap := liveSnap(now, wslive.Lead{})
+	snap.Usage = &wslive.Usage{Context: &wslive.UsageContext{Tokens: i64p(1), Window: 10}}
+	view := buildSessionView(pageInputs{Session: liveSession("self", "/p", now), Snapshot: snap, Now: now})
+	regions, err := renderSessionRegions(view, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(wb.CSS), ".wb-rail-wrap.up { top: var(--wb-rail-inset, 0px);") {
-		t.Error("the rail's top capsules do not stick below the host's inset")
+	const slot = `<span class="tslot" id="tslot"></span></div></div>`
+	page, err := renderSessionPage(view, regions, true, "xterm.js")
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, want := range []string{`getPropertyValue("--wb-rail-inset")`, `root.getBoundingClientRect().top + padTop + inset`, `vals.top = inset + (s ? s.top : 0) + "px";`, `vals.h = inset + (s ? s.top + barH : 0) + "px";`, `put(barOf(t), "--wb-rail-top", vals.top);`, `put(host.querySelector(".oq-wrap.top"), "--wb-rail-h", vals.h);`} {
-		if !strings.Contains(string(wb.FormScript), want) {
-			t.Errorf("the rail script lacks %q", want)
+	foot, sline, at := strings.Index(page, `<div class="cfoot">`), strings.Index(page, `data-region="sline"`), strings.Index(page, slot)
+	if foot < 0 || !(foot < sline && sline < at) || strings.Index(page, `id="composer"`) > foot {
+		t.Errorf("the terminal slot does not end the composer's status line (foot %d, sline %d, slot %d)", foot, sline, at)
+	}
+	if page, err = renderSessionPage(view, regions, true, ""); err != nil || strings.Contains(page, `id="tslot"`) || !strings.Contains(page, `<div class="cfoot">`) {
+		t.Errorf("a page that offers no terminals has a terminal slot (err %v)", err)
+	}
+	js := mustAsset(t, "terminal.js")
+	for _, want := range []string{
+		`var slot = doc.getElementById("tslot");`,
+		`slot = mk("div", "tslot tfix");`,
+		`ui.btn.setAttribute("aria-label", wsT("js.term.new"));`,
+		`slot.appendChild(pop);`,
+	} {
+		if !strings.Contains(js, want) {
+			t.Errorf("terminal.js lacks %q", want)
 		}
+	}
+	css := mustAsset(t, "dashboard.css")
+	for _, want := range []string{
+		".cfoot > .r-sline { flex: 1 1 auto; min-width: 0; }",
+		".cfoot:has(> .r-sline:empty):not(:has(> .tslot)) { display: none; }",
+		".tslot.tfix { position: fixed; right: 16px; bottom: 16px;",
+		".tpop { position: absolute; bottom: calc(100% + 8px); right: 0;",
+	} {
+		if !strings.Contains(css, want) {
+			t.Errorf("dashboard.css lacks %q", want)
+		}
+	}
+	if strings.Contains(js, "bhead") || strings.Contains(css, ".bhead") {
+		t.Error("the board column still has a header row for the terminal button")
 	}
 }
 

@@ -29,21 +29,46 @@
   // card.paint (draws the view state again: a kind whose base height
   // changed calls it).
   //
-  // Placement is one rule for every kind. Pinned cards stand first, in the
-  // order they were pinned. An unpinned card enters at the head of the
-  // unpinned flow when it opens (bump counts as an open); after that it
-  // only moves down, as a topic updated after the card opened rises above
-  // it. A card's open time is kept with its view state, so a reload puts it
-  // back where it stood among the topics.
+  // The board's topics take part in the same placement as the cards. A
+  // topic is the board's own node (the whiteboard's section, never rebuilt
+  // here); the framework adds a pin button to its title bar, and a topic is
+  // pinned, unpinned, and dragged like a card. Only a topic pinned or moved
+  // by hand has a record.
+  //
+  // Placement is one rule for cards and topics. Pinned ones stand first, in
+  // pin order, in the pin list: the head of the board column, or the pinned
+  // column beside it where the page shows one (opt.column). An unpinned
+  // card enters at the head of the unpinned flow when it opens (bump counts
+  // as an open); after that it only moves down, as a topic updated after
+  // the card opened rises above it. A card's open time is kept with its
+  // view state, so a reload puts it back where it stood among the topics.
+  // Topics otherwise keep the board's own order. Dragging a header moves a
+  // card or a topic: within the pin list it reorders the pins, into the
+  // board's open flow it unpins and stands where it was dropped (a time
+  // between its new neighbours'), into the pin list it pins. A topic moved
+  // by hand keeps that time until the topic itself next updates; a closed
+  // topic stands only in the closed section or the pin list. A pinned topic
+  // keeps its place when it updates or closes, and the page keeps its last
+  // node when the board stops serving it (past the closed-topic cap); after
+  // a reload such a topic is fetched through the closed route (opt.closed),
+  // and one the store no longer holds loses its pin.
   //
   // A card's node is never moved by a board update: the board morph weaves
   // the cards into the nodes it wants (weave) and settles the board around
   // them (settle), so a frame or a video in a card keeps running. Only the
   // card the user pins, unpins, or reopens moves, and where the browser has
-  // Element.moveBefore even that move keeps the card's state.
+  // Element.moveBefore even that move keeps the card's state; a move between
+  // the board and the pinned column takes it too.
   var doc = document;
-  var BASE = 260, MIN = 72, STEP = 24;
-  var kinds = {}, cards = [], board = null, opt = null, maxed = null, scrim = null, seq = 0;
+  var BASE = 260, MIN = 72, STEP = 24, PINW_MIN = 280;
+  // A press drags past SLOP px; a touch drags after holding HOLD ms (the
+  // session rail's drag thresholds), and EDGE px from a list's edge scrolls it.
+  var SLOP = 5, HOLD = 380, EDGE = 28;
+  var kinds = {}, cards = [], topics = {}, board = null, opt = null, maxed = null, scrim = null, seq = 0;
+  // pins is the pin list: the board region's first node, or the pinned
+  // column's list while the page shows that column (colOn). pinw is the
+  // column's width as the user dragged it (0: the stylesheet's).
+  var pins = null, col = null, colOn = false, pinw = 0, zone = null, count = null;
 
   function licon(name) { return '<svg class="li" aria-hidden="true"><use href="#l-' + name + '"/></svg>'; }
   function mk(tag, cls, text) {
@@ -61,6 +86,11 @@
     return b;
   }
   function isCard(n) { return !!n && n.nodeType === 1 && n.hasAttribute("data-card"); }
+  // fixedNode is what a board update never moves: a card, and the pin list.
+  function fixedNode(n) { return isCard(n) || (!!pins && n === pins); }
+  function topicName(n) {
+    return n && n.nodeType === 1 && n.tagName === "SECTION" && n.classList.contains("topic") && n.hasAttribute("data-topic") ? n.getAttribute("data-topic") : null;
+  }
 
   // topicAt is an open topic's last update (epoch ms), the time in its bar
   // (a recap line carries a time of its own), or null for any other node: a
@@ -91,17 +121,20 @@
   // frame reloads it). A fixed node already in el is never moved either:
   // the nodes standing before it that are wanted after it move past it.
   // A node already in el moves with Element.moveBefore where the browser
-  // has it, which keeps its frames loaded; a new node, or a browser
-  // without it, takes insertBefore. Either way the same nodes move.
-  function settle(el, want, fixed) {
+  // has it, which keeps its frames loaded; so does a node moving in from
+  // another container on the page (the pin list and the board). A new
+  // node, or a browser without it, takes insertBefore. Either way the same
+  // nodes move. A child in skip is not stale: another container wants it
+  // and takes it from here.
+  function settle(el, want, fixed, skip) {
     var keep = new Set(want);
     function put(n, ref) {
-      if (el.moveBefore && n.parentNode === el) {
+      if (el.moveBefore && (n.parentNode === el || (n.isConnected && el.isConnected))) {
         try { el.moveBefore(n, ref); return; } catch (e) { /* insertBefore below */ }
       }
       el.insertBefore(n, ref);
     }
-    Array.prototype.slice.call(el.childNodes).forEach(function (n) { if (!keep.has(n)) el.removeChild(n); });
+    Array.prototype.slice.call(el.childNodes).forEach(function (n) { if (!keep.has(n) && !(skip && skip.has(n))) el.removeChild(n); });
     var cur = el.firstChild;
     want.forEach(function (n) {
       if (n === cur) { cur = cur.nextSibling; return; }
@@ -120,39 +153,199 @@
   function headTime() {
     var t = Date.now();
     if (board) Array.prototype.forEach.call(board.children, function (n) { var a = isCard(n) ? null : topicAt(n); if (a !== null && a >= t) t = a + 1; });
-    cards.forEach(function (c) { if (!c.pinned && c.at >= t) t = c.at + 1; });
+    units().forEach(function (c) { if (!c.pinned && c.at >= t) t = c.at + 1; });
     return t;
   }
 
-  function weave(base) { return order(base, cards, topicAt); }
-  function baseNodes() { return Array.prototype.filter.call(board.childNodes, function (n) { return !isCard(n); }); }
-  // arrange puts the cards in their places. moved is the one card whose
-  // place changed: it alone moves, with its state kept where the browser
-  // can keep it.
+  // --- topics among the units ---------------------------------------------------
+  // A topic's record: name, pinned (its pin order, 0 when unpinned), at (a
+  // hand-moved topic's place in the flow, 0 for none), bar (its bar time
+  // when it was moved, so its own update ends the move), el (its node: the
+  // last one the board served, kept while pinned).
+  function topicRec(name) { return topics[name] || (topics[name] = { name: name, pinned: 0, at: 0, bar: 0, el: null }); }
+  function tidy(r) { if (!r.pinned && !r.at && topics[r.name] === r) delete topics[r.name]; }
+  // units are the cards and the topics that place themselves: pinned, or
+  // moved by hand into the flow.
+  function units() {
+    var list = cards.slice();
+    Object.keys(topics).forEach(function (k) { var r = topics[k]; if (r.el && (r.pinned || r.at)) list.push(r); });
+    return list;
+  }
+  function pinned() { return units().filter(function (u) { return u.pinned; }).sort(function (a, b) { return a.pinned - b.pinned; }); }
+  function claimed(n) {
+    var name = topicName(n), r = name !== null ? topics[name] : null;
+    return !!r && r.el === n && !!(r.pinned || r.at);
+  }
+  function unitOf(n) {
+    if (isCard(n)) return cards.filter(function (c) { return c.el === n; })[0] || null;
+    var name = topicName(n);
+    return name === null ? null : topics[name] && topics[name].el === n ? topics[name] : { name: name, pinned: 0, at: 0, bar: 0, el: n, loose: true };
+  }
+
+  // claim reads the board's own nodes (a board update's): each pinned or
+  // hand-moved topic takes its node from them, a hand move whose topic
+  // updated or closed (or left the board) lapses, and the rest stay in the
+  // board's order. A pinned topic the board no longer serves keeps the node
+  // it had.
+  function claim(base) {
+    var seen = {};
+    var rest = base.filter(function (n) {
+      var name = topicName(n), r = name !== null ? topics[name] : null;
+      if (!r) return true;
+      seen[name] = true;
+      r.el = n;
+      if (r.pinned) return false;
+      if (r.at && topicAt(n) === r.bar) return false;
+      r.at = 0;
+      tidy(r);
+      return true;
+    });
+    Object.keys(topics).forEach(function (k) { var r = topics[k]; if (!seen[k] && !r.pinned) { r.at = 0; tidy(r); } });
+    return rest;
+  }
+  // split is the placement of base, the board's own nodes less the claimed
+  // topics: the pin list's nodes and the board column's.
+  function split(base) {
+    var flow = units().filter(function (u) { return !u.pinned; });
+    var out = order(base, flow, topicAt);
+    return { pins: pinned().map(function (u) { return u.el; }), board: colOn ? out : [pins].concat(out) };
+  }
+  function weave(base) {
+    var rest = claim(base);
+    relayout();
+    return split(rest);
+  }
+  // seat puts a topic that leaves the pin list without a place of its own
+  // back among the board's nodes: an open one above the first open topic
+  // older than it, a closed one at the head of the closed section (the next
+  // board update puts it where the board keeps it).
+  function seat(base, n) {
+    var i = base.indexOf(n);
+    if (i >= 0) base.splice(i, 1);
+    var t = topicAt(n);
+    for (i = 0; i < base.length; i++) {
+      if (base[i].nodeType !== 1) continue;
+      var a = topicAt(base[i]);
+      if (a === null || (t !== null && a < t)) break;
+    }
+    base.splice(i, 0, n);
+  }
+  // arrange puts the cards and topics in their places. moved is the one
+  // unit whose place changed: it alone moves, with its state kept where the
+  // browser can keep it.
   function arrange(moved) {
     if (!board) return;
-    var want = weave(baseNodes());
-    if (moved && moved.el.parentNode === board) {
-      var ref = want[want.indexOf(moved.el) + 1] || null;
+    relayout();
+    if (moved && moved.el && !isCard(moved.el)) leaveSlot(moved.el);
+    var base = Array.prototype.filter.call(board.childNodes, function (n) { return !fixedNode(n) && !claimed(n); });
+    if (moved && moved.el && !isCard(moved.el) && !claimed(moved.el) && moved.el.parentNode !== board) seat(base, moved.el);
+    var p = split(base), box = moved && moved.el ? (p.pins.indexOf(moved.el) >= 0 ? pins : board) : null;
+    if (box && moved.el.parentNode === box) {
+      var want = box === pins ? p.pins : p.board, ref = want[want.indexOf(moved.el) + 1] || null;
       if (moved.el.nextSibling !== ref) {
-        try { if (board.moveBefore) board.moveBefore(moved.el, ref); else board.insertBefore(moved.el, ref); }
-        catch (e) { board.insertBefore(moved.el, ref); }
+        try { if (box.moveBefore) box.moveBefore(moved.el, ref); else box.insertBefore(moved.el, ref); }
+        catch (e) { box.insertBefore(moved.el, ref); }
       }
     }
-    settle(board, want, function () { return false; });
+    place(p, function (n) { return n === pins; });
+  }
+  // place settles the pin list, then the board (fixed: what the board's
+  // settle never moves): a node pinned from the board moves into the list
+  // before the board lets it go, and one unpinned moves out of the list
+  // into the board. The pin list itself moves to the pinned column first
+  // when the page shows one, so the board never lets it go either.
+  function place(p, fixed) {
+    if (colOn && pins.parentNode !== col) {
+      try { if (col.moveBefore && pins.isConnected) col.moveBefore(pins, null); else col.appendChild(pins); }
+      catch (e) { col.appendChild(pins); }
+    }
+    settle(pins, p.pins, function () { return false; }, new Set(p.board));
+    settle(board, p.board, fixed, new Set(p.pins));
+    p.pins.concat(p.board).forEach(function (n) { var name = topicName(n); if (name !== null && topics[name]) topics[name].el = n; });
+    decorate();
+  }
+  // relayout asks the page whether it shows the pinned column for the pins
+  // there are, and tells it when that changes.
+  function relayout() {
+    var n = pinned().length, on = !!(col && opt && opt.shows && opt.shows(n));
+    if (count) count.textContent = String(n);
+    if (on === colOn) return;
+    colOn = on;
+    if (opt.layout) opt.layout(on);
+  }
+  // decorate gives every topic on the board a pin button in its title bar,
+  // before the note pen, pressed while the topic is pinned. A board update
+  // brings a changed topic's bar anew (a new section, or the old one with
+  // the new bar's content), so this runs after every settle.
+  function decorate() {
+    [board, colOn ? pins : null].forEach(function (box) {
+      if (!box) return;
+      Array.prototype.forEach.call(box.querySelectorAll("section.topic[data-topic]"), function (sec) {
+        var bar = child(sec, "tbar");
+        if (!bar) return;
+        var r = topics[sec.getAttribute("data-topic")], on = !!(r && r.pinned && r.el === sec);
+        var b = child(bar, "tpin");
+        if (!b) {
+          b = ibtn("tpin", "pin", wsT("js.card.pin"));
+          bar.insertBefore(b, child(bar, "tnote-toggle"));
+        }
+        b.setAttribute("aria-pressed", String(on));
+        if (on) sec.setAttribute("data-pinned", ""); else sec.removeAttribute("data-pinned");
+      });
+    });
+  }
+  // leaveSlot marks the place of a topic that leaves a fetched closed page
+  // (dashboard.js loadClosed) for the pin list or the board: the page's
+  // show-more index counts it as the server does (dashboard.js
+  // morphBoard), so the next page neither skips a topic nor shows one
+  // twice.
+  function leaveSlot(n) {
+    var p = n.parentNode, name = topicName(n);
+    if (!p || name === null || !p.classList || !p.classList.contains("closed-page")) return;
+    var s = mk("span", "closed-slot");
+    s.hidden = true;
+    s.setAttribute("data-slot", name);
+    p.insertBefore(s, n);
+  }
+  function child(el, cls) {
+    for (var n = el.firstElementChild; n; n = n.nextElementSibling) if (n.classList.contains(cls)) return n;
+    return null;
+  }
+  function pinTopic(sec, on) {
+    var name = topicName(sec);
+    if (name === null) return;
+    var r = topicRec(name);
+    r.el = sec;
+    r.pinned = on ? Date.now() : 0;
+    r.at = 0;
+    tidy(r);
+    arrange(r);
+    persist();
   }
 
   // --- storage ----------------------------------------------------------------
+  // The record is {cards, topics, w}: the cards' view state, the topics
+  // pinned or moved by hand, and the pinned column's width. A record from
+  // before topics joined is the cards' list alone.
   function persist() {
     if (!opt) return;
-    opt.save(opt.key, cards.length ? JSON.stringify(cards.map(function (c) {
+    var ts = Object.keys(topics).map(function (k) { return topics[k]; }).filter(function (r) { return r.pinned || r.at; }).map(function (r) {
+      return { n: r.name, p: r.pinned, a: r.at, b: r.bar };
+    });
+    opt.save(opt.key, cards.length || ts.length || pinw ? JSON.stringify({ cards: cards.map(function (c) {
       return { id: c.id, kind: c.kind, pinned: c.pinned, at: c.at, fold: c.folded, h: c.h, data: c.data };
-    })) : null);
+    }), topics: ts, w: pinw }) : null);
   }
   function stored() {
     var v = null;
-    try { v = JSON.parse(opt.load(opt.key) || "[]"); } catch (e) { v = null; }
-    return Array.isArray(v) ? v.filter(function (r) { return r && typeof r.kind === "string" && kinds[r.kind]; }) : [];
+    try { v = JSON.parse(opt.load(opt.key) || "null"); } catch (e) { v = null; }
+    if (Array.isArray(v)) v = { cards: v };
+    if (!v || typeof v !== "object") v = {};
+    return {
+      cards: (Array.isArray(v.cards) ? v.cards : []).filter(function (r) { return r && typeof r.kind === "string" && kinds[r.kind]; }),
+      topics: (Array.isArray(v.topics) ? v.topics : []).filter(function (r) { return r && typeof r.n === "string" && (+r.p || +r.a); }),
+      w: +v.w || 0
+    };
   }
 
   // --- a card -------------------------------------------------------------------
@@ -281,6 +474,7 @@
     cards.splice(i, 1);
     if (this.k.close) this.k.close(this);
     if (this.el.parentNode) this.el.parentNode.removeChild(this.el);
+    if (this.pinned) arrange(null);
     persist();
   };
   // The handle under the body drags its height; the pointer is captured, so
@@ -357,6 +551,266 @@
     maximize(null);
   });
 
+  // --- dropping a moved card or topic -----------------------------------------
+  // eff is a flow node's place in time: a card's open time, a hand-moved
+  // topic's time, another open topic's bar time; null for anything else.
+  function eff(n) {
+    var u = unitOf(n);
+    return u && !u.loose && !u.pinned && (u.at || isCard(n)) ? u.at : topicAt(n);
+  }
+  // drop places unit u: to.pin pins it at index to.index of the pin list;
+  // otherwise it stands in the board's open flow between to.after and
+  // to.before (either null at an end), or, a closed topic, back in the
+  // closed section.
+  function drop(u, to) {
+    var was = !!u.pinned, topic = !isCard(u.el);
+    if (topic && u.loose) { var el = u.el; u = topicRec(u.name); u.el = el; }
+    if (to.pin) {
+      // to.index counts the pins that show; a pinned topic still being
+      // fetched (fetchMissing) keeps its order among them.
+      var shown = pinned().filter(function (x) { return x !== u; }), at = shown[to.index];
+      var list = cards.concat(Object.keys(topics).map(function (k) { return topics[k]; })).filter(function (x) { return x.pinned && x !== u; }).sort(function (a, b) { return a.pinned - b.pinned; });
+      list.splice(at ? list.indexOf(at) : list.length, 0, u);
+      list.forEach(function (x, i) { x.pinned = i + 1; });
+      if (topic) u.at = 0;
+    } else {
+      u.pinned = 0;
+      if (topic && topicAt(u.el) === null) u.at = 0;
+      else {
+        var ta = to.after ? eff(to.after) : null, tb = to.before ? eff(to.before) : null;
+        u.at = ta === null ? Math.max(headTime(), tb === null ? 0 : tb + 1) : tb === null ? ta - 1 : ta > tb ? (ta + tb) / 2 : ta;
+        if (topic) u.bar = topicAt(u.el);
+      }
+    }
+    if (!topic) u.paint();
+    arrange(u);
+    if (topic) tidy(u);
+    persist();
+    if (!topic && was !== !!u.pinned && u.k.pinned) u.k.pinned(u);
+  }
+
+  // --- dragging a header ----------------------------------------------------------
+  // A topic's title bar or a card's header drags the topic or card; a
+  // button, link, or field in it does not. While a drag runs the page holds
+  // its board updates (opt.drag) and the root carries data-bdrag: "col"
+  // with the pinned column shown, "edge" where a first pin would open it
+  // (a drop zone along the right edge), "group" where pins stand atop the
+  // board (the empty pin list shows as a drop zone).
+  var dg = null, dragged = false, line = null, raf = 0;
+  function rectOf(el) { return el && el.getClientRects().length ? el.getBoundingClientRect() : null; }
+  function inside(r, x, y) { return !!r && x >= r.left && x < r.right && y >= r.top && y < r.bottom; }
+  function drawLine(box) {
+    if (!box) { if (line) line.hidden = true; return; }
+    if (!line) {
+      line = doc.body.appendChild(mk("div", "bdrop"));
+      line.setAttribute("aria-hidden", "true");
+    }
+    line.style.left = box.left + "px";
+    line.style.width = box.width + "px";
+    line.style.top = Math.round(box.top - 1) + "px";
+    line.hidden = false;
+  }
+  // slot finds where y falls among peers: the index of the first whose
+  // middle is below it, and the line between it and the one before.
+  function slot(peers, y, box) {
+    var at = peers.length, i;
+    for (i = 0; i < peers.length; i++) {
+      var r = peers[i].getBoundingClientRect();
+      if (y < r.top + r.height / 2) { at = i; break; }
+    }
+    var top;
+    if (!peers.length) top = box.top + 4;
+    else if (at === peers.length) top = peers[at - 1].getBoundingClientRect().bottom + 4;
+    else if (at === 0) top = peers[0].getBoundingClientRect().top - 4;
+    else top = (peers[at - 1].getBoundingClientRect().bottom + peers[at].getBoundingClientRect().top) / 2;
+    return { at: at, line: { left: box.left, width: box.width, top: top } };
+  }
+  function scroller(el) {
+    for (var n = el; n && n !== doc.body; n = n.parentNode) if (n.nodeType === 1 && /auto|scroll/.test(getComputedStyle(n).overflowY)) return n;
+    return null;
+  }
+  // over reads the drop at the pointer: the pin list (the pinned column, or
+  // the pin group atop the board), the right-edge zone, or the board's open
+  // flow. A drop that leaves the item where it stands shows no line.
+  function over(x, y) {
+    var d = dg;
+    d.x = x; d.y = y;
+    var to = null, pr = rectOf(pins), zr = d.mode === "edge" ? rectOf(zone) : null, scr = null;
+    if (zr && inside(zr, x, y)) to = { pin: true, index: 0, line: null };
+    else if (pr && (inside(pr, x, y) || (colOn && inside(rectOf(col), x, y)))) {
+      var peers = Array.prototype.filter.call(pins.children, function (n) { return n !== d.el; }), s = slot(peers, y, pr);
+      var me = d.unit.pinned ? pinned().indexOf(d.unit) : -1;
+      to = { pin: true, index: s.at, line: me >= 0 && (s.at === me) ? null : s.line };
+      scr = colOn ? pins : scroller(board);
+    } else if (inside(rectOf(scroller(board) || board), x, y)) {
+      scr = scroller(board);
+      if (topicAt(d.el) === null) to = d.unit.pinned ? { pin: false, line: null } : null;
+      else {
+        var flow = Array.prototype.filter.call(board.children, function (n) { return n !== d.el && (isCard(n) ? !n.hasAttribute("data-pinned") : topicAt(n) !== null); });
+        var br = rectOf(board), f = slot(flow, y, br), after = flow[f.at - 1] || null, before = flow[f.at] || null;
+        var still = !d.unit.pinned && d.el.parentNode === board && flowNext(d.el, -1) === after && flowNext(d.el, 1) === before;
+        to = { pin: false, after: after, before: before, line: still ? null : f.line };
+      }
+    }
+    d.to = to;
+    if (zone) zone.classList.toggle("over", !!(to && to.pin && zr && inside(zr, x, y)));
+    drawLine(to && to.line);
+    d.scr = scr;
+    var sr = rectOf(scr);
+    d.edge = sr ? (y < sr.top + EDGE ? -1 : y > sr.bottom - EDGE ? 1 : 0) : 0;
+    if (d.edge && !raf) raf = requestAnimationFrame(autoScroll);
+  }
+  // flowNext is the open-flow node beside n in the board (dir -1: above).
+  function flowNext(n, dir) {
+    for (var m = dir < 0 ? n.previousElementSibling : n.nextElementSibling; m; m = dir < 0 ? m.previousElementSibling : m.nextElementSibling) {
+      if (isCard(m) ? !m.hasAttribute("data-pinned") : topicAt(m) !== null) return m;
+    }
+    return null;
+  }
+  function autoScroll() {
+    raf = 0;
+    var d = dg;
+    if (!d || !d.on || !d.edge || !d.scr) return;
+    var was = d.scr.scrollTop;
+    d.scr.scrollTop += d.edge * 8;
+    if (d.scr.scrollTop !== was) over(d.x, d.y);
+  }
+  function dragStart(e) {
+    if (dg || !e.isPrimary || (e.button !== undefined && e.button !== 0)) return;
+    var t = e.target;
+    if (!t.closest || t.closest("button, a, input, textarea, select, summary, label")) return;
+    var head = t.closest(".tbar, .bc-hd");
+    if (!head) return;
+    var el = head.classList.contains("bc-hd") ? head.closest(".bcard") : head.parentNode;
+    if (!el || el.hasAttribute("data-max") || !(isCard(el) || topicName(el) !== null)) return;
+    var u = unitOf(el);
+    if (!u) return;
+    dg = { el: el, head: head, unit: u, id: e.pointerId, x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY, on: false, touch: e.pointerType === "touch", timer: 0, to: null, edge: 0, scr: null, mode: "" };
+    if (dg.touch) dg.timer = setTimeout(function () { if (dg && !dg.on) dragBegin(); }, HOLD);
+  }
+  function dragBegin() {
+    var d = dg;
+    if (!d.el.isConnected) { dg = null; return; }
+    d.on = true;
+    d.mode = colOn ? "col" : col && opt.shows && opt.shows(pinned().length + (d.unit.pinned ? 0 : 1)) ? "edge" : "group";
+    try { d.head.setPointerCapture(d.id); } catch (x) { /* no capture: the moves still land on the document */ }
+    d.el.classList.add("bdrag");
+    doc.documentElement.setAttribute("data-bdrag", d.mode);
+    if (opt.drag) opt.drag(true);
+    var sel = window.getSelection && window.getSelection();
+    if (sel && sel.removeAllRanges) sel.removeAllRanges();
+    over(d.x, d.y);
+  }
+  function dragMove(e) {
+    var d = dg;
+    if (!d || e.pointerId !== d.id) return;
+    // A mouse move with the button up is a release this page never heard.
+    if (e.pointerType === "mouse" && e.buttons !== undefined && (e.buttons & 1) === 0) { dragEnd(null); return; }
+    if (!d.on) {
+      if (Math.abs(e.clientX - d.x0) <= SLOP && Math.abs(e.clientY - d.y0) <= SLOP) return;
+      // A touch that moves before its hold is a scroll.
+      if (d.touch) { dragEnd(null); return; }
+      d.x = e.clientX; d.y = e.clientY;
+      dragBegin();
+      if (!dg) return;
+    }
+    e.preventDefault();
+    over(e.clientX, e.clientY);
+  }
+  // dragEnd ends the press or drag; only a release drops (a cancel leaves
+  // everything where it stood). A drag's click is swallowed.
+  function dragEnd(e) {
+    var d = dg;
+    if (!d || (e && e.pointerId !== d.id)) return;
+    dg = null;
+    clearTimeout(d.timer);
+    if (!d.on) return;
+    d.el.classList.remove("bdrag");
+    doc.documentElement.removeAttribute("data-bdrag");
+    drawLine(null);
+    if (zone) zone.classList.remove("over");
+    dragged = true;
+    setTimeout(function () { dragged = false; }, 0);
+    var to = d.to;
+    if (e && e.type === "pointerup" && to && d.el.isConnected && (to.line || to.pin !== !!d.unit.pinned)) {
+      to.el = d.el;
+      drop(d.unit, to);
+    }
+    if (opt.drag) opt.drag(false);
+  }
+
+  // --- the pinned column ----------------------------------------------------------
+  // The page hands an empty element (opt.column's host); the framework
+  // fills it: a header with the pin count, the width handle on its right
+  // edge (dragged, its width is kept with the pins; double click goes back
+  // to the stylesheet's), and the pin list while the column shows.
+  function setWidth(w) {
+    pinw = w ? Math.max(PINW_MIN, Math.round(w)) : 0;
+    if (pinw) doc.documentElement.style.setProperty("--pinw", pinw + "px");
+    else doc.documentElement.style.removeProperty("--pinw");
+  }
+  function buildCol() {
+    var hd = mk("div", "bp-hd"), edge = mk("div", "bp-edge"), from = null;
+    hd.innerHTML = licon("pin");
+    hd.appendChild(mk("span", "", wsT("js.pins.title")));
+    count = hd.appendChild(mk("span", "bp-ct", "0"));
+    edge.setAttribute("role", "separator");
+    edge.setAttribute("aria-orientation", "vertical");
+    edge.title = wsT("js.pins.width");
+    edge.setAttribute("aria-label", wsT("js.pins.width"));
+    col.appendChild(hd);
+    col.appendChild(edge);
+    edge.addEventListener("pointerdown", function (e) {
+      if (e.button !== undefined && e.button !== 0) return;
+      from = { x: e.clientX, w: col.getBoundingClientRect().width };
+      edge.classList.add("drag");
+      try { edge.setPointerCapture(e.pointerId); } catch (x) { /* no capture: the move still lands */ }
+      e.preventDefault();
+    });
+    edge.addEventListener("pointermove", function (e) {
+      if (from) setWidth(Math.min(from.w + e.clientX - from.x, window.innerWidth * 0.5));
+    });
+    function end() { if (!from) return; from = null; edge.classList.remove("drag"); persist(); }
+    edge.addEventListener("pointerup", end);
+    edge.addEventListener("pointercancel", end);
+    edge.addEventListener("dblclick", function () { setWidth(0); persist(); });
+  }
+  // fetchMissing finds the pinned topics the served board lacks (closed
+  // past its cap) through the closed route, page by page from the board's
+  // show-more control, until each is found or the route ends: one the
+  // route ends without is gone from the store, and its pin with it. A
+  // failed fetch keeps the pins for the next load.
+  function fetchMissing() {
+    function missing() { return Object.keys(topics).filter(function (k) { return topics[k].pinned && !topics[k].el; }); }
+    function gone(list) { list.forEach(function (k) { delete topics[k]; }); persist(); }
+    function next(box) {
+      var b = box.querySelector("button.closed-more[data-closed-next]");
+      return b ? +b.getAttribute("data-closed-next") : 0;
+    }
+    function page(from) {
+      opt.closed(from, function (box) {
+        if (!box) return;
+        var got = [];
+        Array.prototype.forEach.call(box.querySelectorAll("section.topic[data-topic]"), function (t) {
+          var r = topics[t.getAttribute("data-topic")];
+          if (r && r.pinned && !r.el) { r.el = t; got.push(t); }
+        });
+        if (got.length) {
+          arrange(null);
+          if (opt.adopted) got.forEach(opt.adopted);
+        }
+        var left = missing(), n = next(box);
+        if (!left.length) return;
+        if (n) page(n); else gone(left);
+      });
+    }
+    var miss = missing();
+    if (!miss.length) return;
+    var from = next(board);
+    if (!from) gone(miss);
+    else if (opt.closed) page(from);
+  }
+
   // --- the module -----------------------------------------------------------------
   function add(kind, rec) {
     var c = new Card(kind, rec);
@@ -369,15 +823,54 @@
     icon: licon,
     register: function (name, kind) { kinds[name] = kind; },
     // mount starts the framework on the board region el and restores the
-    // stored cards. o: key (the storage key), load and save (the page's
-    // guarded storage), reveal (shows the board column where the layout
-    // shows one column at a time).
+    // stored cards and topics. o: key (the storage key), load and save (the
+    // page's guarded storage), reveal (shows the board column where the
+    // layout shows one column at a time), and for the pinned column:
+    // column (the empty element it fills; optional), shows(n) (whether the
+    // page shows the column for n pins), layout(on) (the column shows or
+    // hides), closed(from, done) (fetches the closed-topic page from index
+    // from and hands its root to done, or null on a failure), adopted(node)
+    // (a topic node the closed route brought, now placed), and drag(on) (a
+    // drag starts or ends: board updates wait meanwhile).
     mount: function (el, o) {
       board = el;
       opt = o;
-      stored().forEach(function (r) { add(r.kind, r); });
-      arrange(null);
+      col = o.column || null;
+      pins = mk("div", "bpins");
+      pins.id = "bpins";
+      pins.setAttribute("data-pins", "");
+      pins.setAttribute("data-label", wsT("js.pins.title"));
+      pins.setAttribute("data-drop", wsT("js.pins.drop"));
+      if (col) {
+        buildCol();
+        zone = doc.body.appendChild(mk("div", "bpzone", wsT("js.pins.drop")));
+        zone.setAttribute("aria-hidden", "true");
+      }
+      var s = stored();
+      setWidth(s.w);
+      s.topics.forEach(function (r) { topics[r.n] = { name: r.n, pinned: +r.p || 0, at: +r.a || 0, bar: +r.b || 0, el: null }; });
+      s.cards.forEach(function (r) { add(r.kind, r); });
+      // The pin list enters the page before anything moves into it, so a
+      // topic pinned on the board moves into it with its frames kept.
+      board.insertBefore(pins, board.firstChild);
+      place(weave(Array.prototype.filter.call(board.childNodes, function (n) { return !fixedNode(n); })), fixedNode);
       persist();
+      [board, col].forEach(function (box) {
+        if (!box) return;
+        box.addEventListener("pointerdown", dragStart);
+        box.addEventListener("click", function (e) {
+          var b = e.target.closest && e.target.closest(".tpin");
+          if (b && b.parentNode.classList.contains("tbar")) pinTopic(b.parentNode.parentNode, b.getAttribute("aria-pressed") !== "true");
+        });
+        box.addEventListener("contextmenu", function (e) { if (dg && dg.touch) e.preventDefault(); });
+      });
+      doc.addEventListener("pointermove", dragMove);
+      doc.addEventListener("pointerup", dragEnd);
+      doc.addEventListener("pointercancel", dragEnd);
+      doc.addEventListener("click", function (e) { if (dragged) { e.preventDefault(); e.stopPropagation(); } }, true);
+      // A held touch is a drag, not a scroll.
+      doc.addEventListener("touchmove", function (e) { if (dg && dg.on) e.preventDefault(); }, { passive: false });
+      fetchMissing();
     },
     // open adds a card of a registered kind at the head of the unpinned
     // flow; data is the kind's record. at, when given, is the card's open
@@ -392,10 +885,25 @@
     },
     list: function (kind) { return cards.filter(function (c) { return !kind || c.kind === kind; }); },
     // weave and settle are the board morph's two steps (dashboard.js
-    // morphBoard): the cards woven into the nodes the board wants, and the
-    // board settled around the cards.
+    // morphBoard): weave takes the nodes the board wants and returns the
+    // placement, {pins, board} (the pin list's nodes and the board
+    // region's, in order); settle settles both around the cards.
     weave: weave,
-    settle: function (el, want) { settle(el, want, isCard); },
+    settle: function (el, p) { place(p, fixedNode); persist(); },
+    // pinList is the pin list's node; pinnedTopic tells whether a topic
+    // name is pinned on this page (its node stands in the pin list).
+    pinList: function () { return pins; },
+    pinnedTopic: function (name) { var r = topics[name]; return !!(r && r.pinned && r.el); },
+    // relayout places everything again after the page's layout changed
+    // (a width crossing, the layout menu).
+    relayout: function () { if (board) arrange(null); },
+    dragging: function () { return !!(dg && dg.on); },
+    // move places a topic's or card's node as a drop does (to: pin and
+    // index, or after and before in the open flow).
+    move: function (n, to) { var u = unitOf(n); if (u) drop(u, to); },
+    // decorate gives topics the page added outside a board update (a
+    // fetched closed page) their pin buttons.
+    decorate: function () { if (board) decorate(); },
     is: isCard
   };
 })();

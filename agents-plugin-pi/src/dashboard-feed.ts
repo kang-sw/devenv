@@ -233,7 +233,8 @@ export function dashboardStatus(
   return out.context || out.cost ? out : undefined;
 }
 
-function defaultSchedule(fn: () => void, ms: number): () => void {
+/** An unref'd `setTimeout` that returns its cancel. */
+export function defaultSchedule(fn: () => void, ms: number): () => void {
   const timer = setTimeout(fn, ms);
   timer.unref?.();
   return () => clearTimeout(timer);
@@ -362,10 +363,83 @@ function telemetryOf(display: SubtreeDescendant["display"]): Pick<DashboardAgent
   };
 }
 
+/** One subagent's `agent` event; with `batches: false` its batches are left out, so the held ones stand. */
+export function dashboardAgentEvent(entry: DashboardAgentEntry, options: { batches: boolean } = { batches: true }): DashboardEvent {
+  return {
+    kind: "agent",
+    agentId: entry.agentId,
+    ...(entry.parentId ? { parentId: entry.parentId } : {}),
+    label: entry.label,
+    ...(entry.sessionKey ? { sessionKey: entry.sessionKey } : {}),
+    status: entry.status,
+    caption: entry.caption,
+    ...(options.batches ? { batches: entry.batches } : {}),
+    ...(entry.model ? { model: entry.model } : {}),
+    ...(entry.effort ? { effort: entry.effort } : {}),
+    ...(entry.contextTokens !== undefined ? { contextTokens: entry.contextTokens } : {}),
+    ...(entry.outputTps !== undefined ? { outputTps: entry.outputTps } : {}),
+  };
+}
+
+/** One subagent's `permission` event: its wait, or a clear when it waits on nothing. */
+export function dashboardPermissionEvent(entry: DashboardAgentEntry): DashboardEvent {
+  return entry.permission
+    ? { kind: "permission", agentId: entry.agentId, tool: entry.permission.tool, args: entry.permission.args }
+    : { kind: "permission", agentId: entry.agentId, clear: true };
+}
+
 interface SentAgent {
   key: string;
   status: DashboardAgentEntry["status"];
   permission: string;
+}
+
+/**
+ * What was last sent of each subagent, and the events that bring the
+ * receiver from there to the current tree: an `agent` event per subagent
+ * whose fields changed, a `permission` event per changed wait, and a `done`
+ * for one that left the tree while last sent as running.
+ */
+export interface AgentEventDiff {
+  /** The changed subagents' events; records them as sent. */
+  events(entries: DashboardAgentEntry[]): DashboardEvent[];
+  /** Whether any subagent was last sent as running. */
+  anyRunning(): boolean;
+  /** Forgets everything sent, so the next `events` sends every subagent. */
+  clear(): void;
+}
+
+export function createAgentEventDiff(): AgentEventDiff {
+  let sentAgents = new Map<string, SentAgent>();
+  return {
+    events(entries) {
+      const out: DashboardEvent[] = [];
+      const seen = new Set<string>();
+      for (const entry of entries) {
+        seen.add(entry.agentId);
+        const event = dashboardAgentEvent(entry);
+        const key = JSON.stringify(event);
+        const permission = entry.permission ? JSON.stringify(entry.permission) : "";
+        const sent = sentAgents.get(entry.agentId);
+        if (sent?.key !== key) out.push(event);
+        if ((sent?.permission ?? "") !== permission) out.push(dashboardPermissionEvent(entry));
+        sentAgents.set(entry.agentId, { key, status: entry.status, permission });
+      }
+      for (const [agentId, sent] of sentAgents) {
+        if (seen.has(agentId)) continue;
+        // Gone from the registry: one that was still running ends as done.
+        if (sent.status === "running") out.push({ kind: "agent", agentId, status: "done" });
+        sentAgents.delete(agentId);
+      }
+      return out;
+    },
+    anyRunning() {
+      return [...sentAgents.values()].some((sent) => sent.status === "running");
+    },
+    clear() {
+      sentAgents = new Map();
+    },
+  };
 }
 
 export function createDashboardFeed(options: DashboardFeedOptions): DashboardFeed {
@@ -377,7 +451,7 @@ export function createDashboardFeed(options: DashboardFeedOptions): DashboardFee
   let lead: AgentBatchBuffer = createBatchBuffer({ retainUndelivered: true });
   let leadDirty = false;
   let agentsDirty = false;
-  let sentAgents = new Map<string, SentAgent>();
+  const sentAgents = createAgentEventDiff();
   let streamMessage: unknown;
   let lastStreamText: string | undefined;
   let turnOpen = false;
@@ -472,40 +546,7 @@ export function createDashboardFeed(options: DashboardFeedOptions): DashboardFee
     } catch {
       return [];
     }
-    const out: DashboardEvent[] = [];
-    const seen = new Set<string>();
-    for (const entry of entries) {
-      seen.add(entry.agentId);
-      const event: DashboardEvent = {
-        kind: "agent",
-        agentId: entry.agentId,
-        ...(entry.parentId ? { parentId: entry.parentId } : {}),
-        label: entry.label,
-        ...(entry.sessionKey ? { sessionKey: entry.sessionKey } : {}),
-        status: entry.status,
-        caption: entry.caption,
-        batches: entry.batches,
-        ...(entry.model ? { model: entry.model } : {}),
-        ...(entry.effort ? { effort: entry.effort } : {}),
-        ...(entry.contextTokens !== undefined ? { contextTokens: entry.contextTokens } : {}),
-        ...(entry.outputTps !== undefined ? { outputTps: entry.outputTps } : {}),
-      };
-      const key = JSON.stringify(event);
-      const permission = entry.permission ? JSON.stringify(entry.permission) : "";
-      const sent = sentAgents.get(entry.agentId);
-      if (sent?.key !== key) out.push(event);
-      if ((sent?.permission ?? "") !== permission) {
-        out.push(entry.permission ? { kind: "permission", agentId: entry.agentId, tool: entry.permission.tool, args: entry.permission.args } : { kind: "permission", agentId: entry.agentId, clear: true });
-      }
-      sentAgents.set(entry.agentId, { key, status: entry.status, permission });
-    }
-    for (const [agentId, sent] of sentAgents) {
-      if (seen.has(agentId)) continue;
-      // Gone from the registry: one that was still running ends as done.
-      if (sent.status === "running") out.push({ kind: "agent", agentId, status: "done" });
-      sentAgents.delete(agentId);
-    }
-    return out;
+    return sentAgents.events(entries);
   }
 
   /** A running compaction's start, when ws-mcp does not hold it yet. */
@@ -552,7 +593,7 @@ export function createDashboardFeed(options: DashboardFeedOptions): DashboardFee
   /** The feed reached nobody: what ws-mcp holds is stale, so resend everything once it does. */
   function markResync(): void {
     resyncDue = true;
-    sentAgents = new Map();
+    sentAgents.clear();
     lastStreamText = undefined;
     leadDirty = true;
     agentsDirty = options.agents !== undefined;
@@ -577,7 +618,7 @@ export function createDashboardFeed(options: DashboardFeedOptions): DashboardFee
   }
 
   function armPoll(): void {
-    if (stopped || cancelPoll || ![...sentAgents.values()].some((sent) => sent.status === "running")) return;
+    if (stopped || cancelPoll || !sentAgents.anyRunning()) return;
     cancelPoll = schedule(() => {
       cancelPoll = undefined;
       agentsChanged();
@@ -761,7 +802,7 @@ export function createDashboardFeed(options: DashboardFeedOptions): DashboardFee
     lead = createBatchBuffer({ retainUndelivered: true });
     leadDirty = false;
     agentsDirty = false;
-    sentAgents = new Map();
+    sentAgents.clear();
     streamMessage = undefined;
     lastStreamText = undefined;
     turnOpen = false;

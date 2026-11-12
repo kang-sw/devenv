@@ -804,8 +804,14 @@ type replyRender struct {
 // fences code blocks, since it re-renders every tick and a half-closed tag
 // would shake the layout and a diagram would redraw with it.
 func replyMarkdown(root, replyID string) replyRender {
-	streaming := servedTargets(root, replyID)
-	finished := servedTargets(root, replyID)
+	return replyRenderUnder(servedTargets(root, replyID))
+}
+
+// replyRenderUnder is replyMarkdown under the link rule targets: the
+// outside-link route renders the same replies with a recorder on the rule
+// (outsideReplyLinks), so both resolve a target the same way.
+func replyRenderUnder(targets wswhiteboard.TextTargets) replyRender {
+	streaming, finished := targets, targets
 	finished.Mermaid = true
 	finished.HTML = true
 	return replyRender{

@@ -60,6 +60,7 @@ function Event(type, o) { this.type = type; this.bubbles = !!(o && o.bubbles); }
 var doc = { createElement: function (t) { return new El(t); }, createTextNode: function (s) { var e = new El("#text"); e.textContent = s; return e; } };
 var board = new El("div"), cchips = new El("div"), log = [], bad = [], live = false;
 function region(name) { return name === "board" ? board : null; }
+var window = {};
 function q(sel, root) { return root.all().filter(function (e) { return e.has("tnote") && e.getAttribute("data-topic") !== null; }); }
 function wsT(k) { return k; }
 function tabShown() { return true; }
@@ -75,7 +76,7 @@ function topic(name, value, hidden) {
   s.appendChild(pen); s.appendChild(n); board.appendChild(s);
   return n;
 }
-`+notes+chips+restore+open+`
+`+boardBoxSrc(t, js)+notes+chips+restore+open+`
 var a = topic("Plan \"x\"", "  first note  ", false), b = topic("Empty", "   ", true), c = topic("Later", "closed text", true);
 renderChips();
 function row() { return cchips.children.map(function (el) { return el.className + "|" + el.children.map(function (k) { return k.textContent; }).join("|"); }); }

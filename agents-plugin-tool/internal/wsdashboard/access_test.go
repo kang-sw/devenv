@@ -110,6 +110,12 @@ func guardedRoutes() []struct{ method, path, body string } {
 		{http.MethodGet, "/s/livesession/fs/find?q=shot", ""},
 		{http.MethodGet, "/s/livesession/fs/search?q=shot", ""},
 		{http.MethodPost, "/s/livesession/fs/act", `{"path":"shot.png","action":"guard"}`},
+		// The outside-link routes: a path no board links, and a capability
+		// that verifies nowhere, so a passing request reads no file. They
+		// answer a loopback viewer only (TestFSOutsideIsLoopbackOnly).
+		{http.MethodPost, "/s/livesession/fs/outside", `{"path":"/guard/not-linked.txt"}`},
+		{http.MethodGet, "/s/livesession/fs/ocap/guard/page.html", ""},
+		{http.MethodGet, "/s/livesession/fs/oview/guard/page.html", ""},
 		{http.MethodGet, "/s/livesession/attachment/0123456789abcdef-1.png", ""},
 		{http.MethodPost, "/s/livesession/message", `{"text":"from the guard test"}`},
 		{http.MethodPost, "/s/livesession/cancel", `{"id":"x"}`},

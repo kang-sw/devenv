@@ -18,7 +18,7 @@
 <div id="splitter" class="splitter" role="separator" aria-orientation="horizontal" aria-label="{{t "splitter.label"}}" tabindex="0" title="{{t "splitter.title"}}"></div>
 <div id="chead" class="thead chead"><nav id="ctabs" class="ctabs" aria-label="{{t "tab.column"}}"><button type="button" data-ctab="convo" aria-pressed="true">{{icon "chat"}}{{t "tab.conversation"}}<span class="tdot"></span></button><button type="button" data-ctab="files" aria-pressed="false">{{icon "folder"}}{{t "tab.files"}}</button></nav><span class="csum"></span><span class="fsum"></span></div>
 <div id="convo" class="convo">{{region . "entries"}}{{region . "convlive"}}{{if .Hosted}}<div class="apbox" id="apbox" hidden></div>{{end}}</div>
-<div id="composer" class="composer"><div class="cbadges"><button type="button" class="ibadge" id="ibadge" title="{{t "js.interrupt.title"}}" hidden><span class="istop"></span><span class="ilabel">{{t "js.interrupt"}}</span></button>{{template "subbadge"}}</div>{{region . "ctx"}}{{region . "cmds"}}<div class="cimgs" id="cimgs"></div><div class="cchips" id="cchips"></div><div class="crow"><span class="ccmd" id="ccmd" title="{{t "composer.cmd.title"}}" hidden><b class="ccmd-name"></b><span class="ccmd-args" hidden></span><button type="button" class="unchip" data-uncmd title="{{t "composer.cmd.remove"}}" aria-label="{{t "composer.cmd.remove"}}">×</button></span><div class="cfield"><div class="chl" id="chl" aria-hidden="true"></div><textarea id="ctext" rows="1" aria-description="{{t "composer.aria"}}" placeholder="{{t "js.hint.enter"}}"></textarea></div><button type="button" class="csend" id="csend" title="{{t "composer.send"}}" aria-label="{{t "composer.send"}}">{{icon "send"}}</button></div>{{region . "sline"}}</div>
+<div id="composer" class="composer"><div class="cbadges"><button type="button" class="ibadge" id="ibadge" title="{{t "js.interrupt.title"}}" hidden><span class="istop"></span><span class="ilabel">{{t "js.interrupt"}}</span></button>{{template "subbadge"}}</div>{{region . "ctx"}}{{region . "cmds"}}<div class="cimgs" id="cimgs"></div><div class="cchips" id="cchips"></div><div class="crow"><span class="ccmd" id="ccmd" title="{{t "composer.cmd.title"}}" hidden><b class="ccmd-name"></b><span class="ccmd-args" hidden></span><button type="button" class="unchip" data-uncmd title="{{t "composer.cmd.remove"}}" aria-label="{{t "composer.cmd.remove"}}">×</button></span><div class="cfield"><div class="chl" id="chl" aria-hidden="true"></div><textarea id="ctext" rows="1" aria-description="{{t "composer.aria"}}" placeholder="{{t "js.hint.enter"}}"></textarea></div><button type="button" class="csend" id="csend" title="{{t "composer.send"}}" aria-label="{{t "composer.send"}}">{{icon "send"}}</button></div><div class="cfoot">{{region . "sline"}}{{if .Terminal}}<span class="tslot" id="tslot"></span>{{end}}</div></div>
 {{end}}<div id="bcol" class="bcol">{{region . "board"}}</div>
 </main></div></div>
 <script>{{i18n}}</script>
@@ -157,7 +157,12 @@ their marks, a detached HEAD by its commit with the detached title, and no
 chip for a root that is no repository. */}}
 {{define "pbranch"}}{{with .BranchHandle}}{{if .Text}}<span class="pbr" title="{{if $.Detached}}{{t "git.detached" $.Branch}}{{else}}{{$.Branch}}{{end}}">{{if .Goal}}<span class="gh-goal">{{icon "trophy"}}</span>{{end}}{{if .Impl}}<span class="gh-impl">{{icon "hammer"}}</span>{{end}}{{if not (or .Goal .Impl)}}{{icon "branch"}}{{end}}<span class="pbt">{{.Text}}</span></span>{{end}}{{end}}{{end}}
 
-{{define "peerrow"}}<span class="amk">{{if and .Live .Adapter}}{{template "mark" .Lead.Phase}}{{else}}<span class="pdot"></span>{{end}}</span>{{if .Served}}<a class="pname" href="/s/{{.ReplyID}}"{{with .Title}} title="{{.}}"{{end}}>{{template "pfolder" .}}{{.Name}}</a>{{else}}<span class="pname"{{with .Title}} title="{{.}}"{{end}}>{{template "pfolder" .}}{{.Name}}</span>{{end}}{{template "pbranch" .}}{{if and .Harness .Live}}<span class="host sm">{{.Harness}}</span>{{end}}{{if not .Compact}}<span class="pline">{{if not .Live}}<span class="pstate">{{t "head.ended"}}</span>{{else if not .Served}}<span class="pstate">{{t "peer.unserved"}}</span>{{else if .Adapter}}{{template "tphase" .Lead.Phase}}{{with .Lead.Running}}<span class="ptool" title="{{.ToolName}}">{{toolName .ToolName}}</span>{{end}}{{end}}</span>{{end}}<span class="am">{{if .RunningAgents}}<span class="prun" title="{{tn "peer.running" .RunningAgents}}">{{icon "agents"}}{{.RunningAgents}}</span>{{end}}{{if and .Adapter (not .Compact)}}<span title="{{t "peer.subagents"}}">{{icon "agents"}}{{.AgentCount}}</span>{{end}}<span title="{{t "peer.lastmail"}}">{{icon "mail"}}{{template "ago" .LastExchange}}</span></span>{{end}}
+{{/* peerrow is a peer's one-line row. A row whose name is a manual label
+(PeerRow.Label) carries the labeled class on its peer element, and the
+stylesheet then gives way in a fixed order as the row narrows: the harness
+badge (phost, which wraps it so the badge's padding collapses too), the tool
+text, the phase pill, the branch chip, and the name last. */}}
+{{define "peerrow"}}<span class="amk">{{if and .Live .Adapter}}{{template "mark" .Lead.Phase}}{{else}}<span class="pdot"></span>{{end}}</span>{{if .Served}}<a class="pname" href="/s/{{.ReplyID}}"{{with .Title}} title="{{.}}"{{end}}>{{template "pfolder" .}}{{.Name}}</a>{{else}}<span class="pname"{{with .Title}} title="{{.}}"{{end}}>{{template "pfolder" .}}{{.Name}}</span>{{end}}{{template "pbranch" .}}{{if and .Harness .Live}}<span class="phost"><span class="host sm">{{.Harness}}</span></span>{{end}}{{if not .Compact}}<span class="pline">{{if not .Live}}<span class="pstate">{{t "head.ended"}}</span>{{else if not .Served}}<span class="pstate">{{t "peer.unserved"}}</span>{{else if .Adapter}}{{template "tphase" .Lead.Phase}}{{with .Lead.Running}}<span class="ptool" title="{{.ToolName}}">{{toolName .ToolName}}</span>{{end}}{{end}}</span>{{end}}<span class="am">{{if .RunningAgents}}<span class="prun" title="{{tn "peer.running" .RunningAgents}}">{{icon "agents"}}{{.RunningAgents}}</span>{{end}}{{if and .Adapter (not .Compact)}}<span title="{{t "peer.subagents"}}">{{icon "agents"}}{{.AgentCount}}</span>{{end}}<span title="{{t "peer.lastmail"}}">{{icon "mail"}}{{template "ago" .LastExchange}}</span></span>{{end}}
 
 {{/* subbadge is the running-subagent badge on the composer's top border,
 beside the interrupt badge: the page script fills its label from a convlive
@@ -167,7 +172,7 @@ support chat card builds the same markup, without the id, in script
 (supChat). */}}
 {{define "subbadge"}}<span class="sbwrap"><span class="sbadge" id="sbadge" title="{{t "js.subagents.title"}}" hidden><span class="spin"></span>{{icon "agents"}}<span class="slabel"></span></span><span class="bgbadge" id="bgbadge" title="{{t "tree.bg.title"}}" hidden>{{icon "clock"}}<span class="blabel"></span></span></span>{{end}}
 
-{{define "peer"}}{{if and .Served .Adapter (not .Compact)}}<details class="peer {{if .Live}}live{{else}}ended{{end}}" data-peer="{{.ReplyID}}"><summary>{{template "peerrow" .}}</summary><div class="ptree"><ol class="brows">{{range .Lead.Finished}}{{template "batch" .}}{{end}}{{template "liverows" .Lead}}</ol>{{with .Agents}}<div class="kids">{{range .}}{{template "agent" .}}{{end}}</div>{{end}}</div></details>{{else}}<div class="peer {{if .Live}}{{if .Compact}}live compact{{if not .Adapter}} nophase{{end}}{{else if .Served}}live nophase{{else}}unserved{{end}}{{else}}ended{{end}}">{{template "peerrow" .}}</div>{{end}}{{end}}
+{{define "peer"}}{{if and .Served .Adapter (not .Compact)}}<details class="peer {{if .Live}}live{{else}}ended{{end}}{{if .Label}} labeled{{end}}" data-peer="{{.ReplyID}}"><summary>{{template "peerrow" .}}</summary><div class="ptree"><ol class="brows">{{range .Lead.Finished}}{{template "batch" .}}{{end}}{{template "liverows" .Lead}}</ol>{{with .Agents}}<div class="kids">{{range .}}{{template "agent" .}}{{end}}</div>{{end}}</div></details>{{else}}<div class="peer {{if .Live}}{{if .Compact}}live compact{{if not .Adapter}} nophase{{end}}{{else if .Served}}live nophase{{else}}unserved{{end}}{{else}}ended{{end}}{{if .Label}} labeled{{end}}">{{template "peerrow" .}}</div>{{end}}{{end}}
 
 {{/* The conversation's two regions share the #convo scroll wrapper. entries
 holds the finished messages, each keyed by data-entry (its ring entry name);
@@ -328,5 +333,38 @@ both inline the board's stylesheet for its colours and markdown rules. */}}
     if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(text).then(function () { done(true); }, function () { fallback(text); });
     else fallback(text);
   });
+})();</script></body></html>
+{{end}}
+
+{{/* The re-mint page (fs_outside.go): what a tab on an outside HTML file
+shows when its capability no longer verifies. Its script posts the mint for
+the path the URL named and replaces the page with the fresh URL, at most
+once in a few seconds per tab; a refused mint shows the note. */}}
+{{define "file-remint"}}<!DOCTYPE html>
+<html{{with .Theme}} data-theme="{{.}}"{{end}}><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Abs}}</title>
+<style>{{.WhiteboardCSS}}</style>
+<style>{{template "filecss"}}</style></head>
+<body class="fileview" data-mint="{{.Mint}}" data-base="{{.Base}}" data-abs="{{.Abs}}" data-rel="{{.Rel}}"><div class="fwrap"><div class="fhead"><code class="fpath">{{.Abs}}</code></div>
+<p class="fnone" id="fgone" hidden>{{t "file.outside.gone"}}</p></div>
+<script nonce="{{.Nonce}}">(function () {
+  var b = document.body, key = "ws.outside.remint", now = Date.now();
+  function gone() { document.getElementById("fgone").hidden = false; }
+  try {
+    if (now - (+sessionStorage.getItem(key) || 0) < 5000) { gone(); return; }
+    sessionStorage.setItem(key, String(now));
+  } catch (e) {}
+  if (!window.fetch) { gone(); return; }
+  fetch(b.getAttribute("data-mint"), {
+    method: "POST", credentials: "same-origin", cache: "no-store",
+    headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: b.getAttribute("data-abs") })
+  }).then(function (r) {
+    if (!r.ok) throw r.status;
+    return r.json();
+  }).then(function (v) {
+    var view = v && typeof v.view === "string" ? v.view : "";
+    if (view.indexOf(b.getAttribute("data-base")) !== 0) { gone(); return; }
+    location.replace(view.slice(0, view.lastIndexOf("/") + 1) + b.getAttribute("data-rel"));
+  }).catch(gone);
 })();</script></body></html>
 {{end}}
