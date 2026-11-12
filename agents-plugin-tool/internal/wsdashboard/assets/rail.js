@@ -2,13 +2,14 @@
   // The session rail's browser-side state, window.WsRail, for the session
   // page's script (dashboard.js): per-session drafts, the starred sessions,
   // the collapsed workspaces, and the rail's client-side marks (the viewed
-  // session's row, the starred rows pinned first). Everything is in
-  // localStorage under ws.dashboard., through the store the caller passes
-  // ({ load(key), save(key, value or null) }, which must not throw), so the
-  // page works the same with storage absent; nothing reaches the server.
-  // The DOM helpers touch only the elements they are given; the popover
-  // helpers at the end, and the approval card's input preview after them,
-  // are pure.
+  // session's row, the starred rows pinned first, the revive entry in
+  // flight). The stored state is in localStorage under ws.dashboard.,
+  // through the store the caller passes ({ load(key), save(key, value or
+  // null) }, which must not throw), so the page works the same with storage
+  // absent; nothing reaches the server. The DOM helpers touch only the
+  // elements they are given; the revive route and hand-off notice, the
+  // popover helpers at the end, and the approval card's input preview after
+  // them, are pure.
   var DRAFT = "ws.dashboard.draft.", DRAFTS = "ws.dashboard.drafts";
   var STARS = "ws.dashboard.stars", COLLAPSED = "ws.dashboard.railcol";
   // DRAFT_CAP bounds the sessions whose drafts are kept; the oldest saved
@@ -143,6 +144,36 @@
     });
   }
 
+  // REVIVE_MOVES are the ways an ended row brings its session back (its
+  // revive entry's data-revive); each is the session's route of that name.
+  var REVIVE_MOVES = { takeover: true, reopen: true };
+  // reviveRoute is the route the revive entry for move posts to for the
+  // session rid; empty for a move the rail does not know or no session.
+  function reviveRoute(move, rid) {
+    if (!REVIVE_MOVES.hasOwnProperty(move) || !rid) return "";
+    return "/agents/" + encodeURIComponent(rid) + "/" + move;
+  }
+  // markRevive marks the revive entry of the row of session rid among rows
+  // as posting (the .busy class and aria-busy); every other entry loses
+  // both. An empty rid marks none.
+  function markRevive(rows, rid) {
+    rows.forEach(function (r) {
+      var b = r.querySelector(".rrev");
+      if (!b) return;
+      var on = !!rid && r.getAttribute("data-rid") === rid;
+      if (on) { b.classList.add("busy"); b.setAttribute("aria-busy", "true"); }
+      else { b.classList.remove("busy"); b.removeAttribute("aria-busy"); }
+    });
+  }
+  // handedNotice is the hand-off notice a session state st calls for: null
+  // unless the session was handed to a terminal, else { command }, the shell
+  // command that resumes it there (empty when the state carries none, as
+  // for a viewer who does not hold the controls).
+  function handedNotice(st) {
+    if (!st || typeof st !== "object" || st.status !== "handed_off") return null;
+    return { command: typeof st.resume_command === "string" ? st.resume_command.trim() : "" };
+  }
+
   // leaveGuard is a beforeunload listener that asks the browser to confirm
   // leaving while holds() reports input the draft store cannot keep (pasted
   // images), and does nothing otherwise.
@@ -232,6 +263,9 @@
     collapsed: collapsed,
     pin: pin,
     markCurrent: markCurrent,
+    reviveRoute: reviveRoute,
+    markRevive: markRevive,
+    handedNotice: handedNotice,
     leaveGuard: leaveGuard,
     popPlace: popPlace,
     matchBranches: matchBranches,

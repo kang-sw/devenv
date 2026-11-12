@@ -1546,5 +1546,17 @@
   "js.lead.restart.confirm.one": "이 세션을 재시작할까요? 실행 중인 백그라운드 작업 {0}개가 프로세스와 함께 종료됩니다.",
   "js.lead.restart.confirm.other": "이 세션을 재시작할까요? 실행 중인 백그라운드 작업 {0}개가 프로세스와 함께 종료됩니다.",
   "js.lead.close.confirm.bg.one": "이 세션을 닫을까요? 프로세스와 실행 중인 백그라운드 작업 {0}개가 종료되고 대화를 이어갈 수 없습니다.",
-  "js.lead.close.confirm.bg.other": "이 세션을 닫을까요? 프로세스와 실행 중인 백그라운드 작업 {0}개가 종료되고 대화를 이어갈 수 없습니다."
+  "js.lead.close.confirm.bg.other": "이 세션을 닫을까요? 프로세스와 실행 중인 백그라운드 작업 {0}개가 종료되고 대화를 이어갈 수 없습니다.",
+  "rail.takeover": "이어받기",
+  "rail.takeover.title": "이 세션을 대시보드에서 이어서 진행",
+  "rail.reopen": "다시 열기",
+  "rail.reopen.title": "닫힌 이 세션을 대시보드에서 다시 열기",
+  "rail.revive.nosession": "이 세션의 하네스가 이어갈 대화를 알리지 않았습니다 (마지막으로 이전 ws 플러그인으로 실행됨)",
+  "js.lead.handoff": "터미널로 넘기기",
+  "js.lead.handoff.note": "여기서 프로세스를 끝냅니다. 그다음 페이지가 터미널에서 대화를 이어가는 명령을 보여 줍니다.",
+  "js.lead.handoff.confirm.one": "이 세션을 터미널로 넘길까요? 실행 중인 백그라운드 작업 {0}개가 프로세스와 함께 종료됩니다.",
+  "js.lead.handoff.confirm.other": "이 세션을 터미널로 넘길까요? 실행 중인 백그라운드 작업 {0}개가 프로세스와 함께 종료됩니다.",
+  "js.lead.handed": "이 세션은 터미널로 넘겨졌습니다.",
+  "js.lead.handed.resume": "터미널에서 이어가는 명령",
+  "js.lead.handed.copy": "명령 복사"
 }

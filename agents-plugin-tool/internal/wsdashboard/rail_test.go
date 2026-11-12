@@ -825,6 +825,49 @@ func TestRailMarkupHostedSessions(t *testing.T) {
 	}
 }
 
+// TestRailMarkupRevive pins an ended row's revive entry: a button after
+// the row's link (never inside it) carrying its move, worded "Take over" or
+// "Reopen"; a blocked takeover shown but not operable, its reason its
+// tooltip and accessible name; and no entry on a row with no move.
+func TestRailMarkupRevive(t *testing.T) {
+	take := RailRow{ReplyID: "taken", Harness: "claude", Revive: ReviveTakeover}
+	reopen := RailRow{ReplyID: "closed", Harness: "claude", Hosted: true, Revive: ReviveReopen}
+	blocked := RailRow{ReplyID: "stuck", Harness: "claude", Revive: ReviveTakeover, ReviveBlocked: ReviveNoSession}
+	plain := RailRow{ReplyID: "gone", Harness: "codex"}
+	view := RailView{Workspaces: []RailWorkspace{{Name: "repo", Path: "/w/repo", Repo: true, Worktrees: []RailWorktree{
+		{Path: "/w/repo", Root: true, Folder: "repo", Branch: "main", Ended: []RailRow{take, reopen, blocked, plain}},
+	}}}}
+	region, err := renderRailRegion(view, "en")
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(region.HTML)
+	rowOf := func(id string) string {
+		_, rest, ok := strings.Cut(html, `<div class="rs ended" data-rid="`+id+`">`)
+		if !ok {
+			t.Fatalf("no ended row for %s:\n%s", id, html)
+		}
+		row, _, _ := strings.Cut(rest, `<div class="rs`)
+		return row
+	}
+	const reason = `This session&#39;s harness reported no conversation to resume (it last ran with an older ws plugin)`
+	for id, want := range map[string]string{
+		"taken":  `</a><button type="button" class="rrev" data-revive="takeover" title="Continue this session in the dashboard">Take over</button></div>`,
+		"closed": `</a><button type="button" class="rrev" data-revive="reopen" title="Open this closed session again in the dashboard">Reopen</button></div>`,
+		"stuck":  `</a><button type="button" class="rrev" data-revive="takeover" aria-disabled="true" title="` + reason + `" aria-label="` + reason + `">Take over</button></div>`,
+	} {
+		if row := rowOf(id); !strings.Contains(row, want) {
+			t.Errorf("row %s lacks %s:\n%s", id, want, row)
+		}
+	}
+	if row := rowOf("gone"); strings.Contains(row, "rrev") || strings.Contains(row, "data-revive") {
+		t.Errorf("a row with no move carries a revive entry:\n%s", row)
+	}
+	if n := strings.Count(html, `class="rrev"`); n != 3 {
+		t.Errorf("revive entries = %d, want 3", n)
+	}
+}
+
 // TestRailRowRevive pins how an ended row comes back: a closed hosted
 // session reopens, a claude or pi session a terminal ran in a repository is
 // taken over (shown blocked while its record names no harness

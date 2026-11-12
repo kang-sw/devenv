@@ -2742,6 +2742,12 @@
     s.appendChild(svgEl("use", { href: "#i-" + name }));
     return s;
   }
+  // luIcon is a vendored Lucide icon (the page's l- sprite), sized as gIcon's.
+  function luIcon(name) {
+    var s = svgEl("svg", { "class": "i li", "aria-hidden": "true" });
+    s.appendChild(svgEl("use", { href: "#l-" + name }));
+    return s;
+  }
   function glX(col) { return GL_X0 + col * GL_DX; }
   function glY(i) { return i * GL_ROW + GL_ROW / 2; }
   function glLane(color) { return "var(--gl-" + (color % 8) + ")"; }
@@ -4463,6 +4469,7 @@
     if (!r || !WsRail) return;
     q(".rsessions", r).forEach(function (box) { WsRail.pin(box, starSet); });
     WsRail.markCurrent(q(".rs", r), rid);
+    WsRail.markRevive(q(".rs", r), revBusy);
     q(".rws", r).forEach(function (ws) {
       var col = colSet.has(ws.getAttribute("data-ws") || ""), tog = ws.querySelector(".wstog");
       ws.classList.toggle("col", col);
@@ -4499,6 +4506,12 @@
       if (forget) {
         e.preventDefault();
         railForget(forget);
+        return;
+      }
+      var rev = t.closest && t.closest(".rrev");
+      if (rev) {
+        e.preventDefault();
+        railRevive(rev);
         return;
       }
       var fresh = t.closest && t.closest(".rnew");
@@ -4907,6 +4920,31 @@
     railPopPlace();
     P.focus();
   }
+  // railRevive brings an ended row's session back by its entry's move (take
+  // over a session a terminal ran, reopen a closed hosted one) and opens its
+  // page. One post at a time: revBusy is the session posting, kept across
+  // the rail's updates (railMarks marks its entry), and kept after a success
+  // until the page goes. A blocked entry (aria-disabled) posts nothing; a
+  // refusal shows the route's own text.
+  var revBusy = "";
+  function railRevive(btn) {
+    var row = btn.closest(".rs"), id = row ? row.getAttribute("data-rid") || "" : "";
+    var route = WsRail.reviveRoute(btn.getAttribute("data-revive") || "", id);
+    if (!route || revBusy || btn.getAttribute("aria-disabled") === "true") return;
+    revBusy = id;
+    railMarks();
+    railPost(route, {}, function (status, v, s) {
+      if (status === 200) {
+        saveDraft();
+        if (id === rid) window.location.reload();
+        else window.location.href = "/s/" + encodeURIComponent(id);
+        return;
+      }
+      revBusy = "";
+      railMarks();
+      toast(leadErr(status, s));
+    });
+  }
   // railForget takes the bar's stored workspace off the list.
   function railForget(btn) {
     var bar = btn.closest(".rws"), path = bar ? bar.getAttribute("data-ws") || "" : "", nm = bar && bar.querySelector(".nm");
@@ -4950,8 +4988,13 @@
   // and makes the head's harness chip the button of the session menu (a
   // fourth rail popover). The controls show only when the state says this
   // viewer holds them (can_control: a browser on the daemon's machine); the
-  // routes refuse anyone else whatever the page shows.
+  // routes refuse anyone else whatever the page shows. A session handed to
+  // a terminal (status handed_off) has no process here: it shows no
+  // controls, only a notice with the command that resumes it there. The
+  // server marks the page of such a session nothing runs now data-handed;
+  // that page reads the state too, on load and after a head update.
   var hostedPage = mode !== "index" && root.hasAttribute("data-hosted");
+  var handedPage = mode !== "index" && root.hasAttribute("data-handed");
   var LEAD_MODES = ["auto", "default", "acceptEdits", "plan", "dontAsk", "bypassPermissions"];
   var LEAD_MODE_NOTE = {
     auto: "js.lead.mode.auto", "default": "js.lead.mode.default", acceptEdits: "js.lead.mode.acceptedits",
@@ -5150,9 +5193,11 @@
   // chip: model, permission mode, and effort (a pick is sent at once and
   // applies from the next turn), stop (the process ends; the next message
   // or mail starts it again), restart (shown while an MCP server stays
-  // broken: the process ends and a new one resumes the conversation), and
-  // close (the conversation ends for good, after a confirmation). Stop and
-  // restart confirm first while the harness runs background tasks, which
+  // broken: the process ends and a new one resumes the conversation), hand
+  // to terminal (the process ends and the page gives the command that
+  // resumes the conversation in a terminal), and close (the conversation
+  // ends for good, after a confirmation). Stop, restart, and hand to
+  // terminal confirm first while the harness runs background tasks, which
   // they end, and close's confirmation then names their count too. A
   // refused change shows in the menu's error line, and the rows return to
   // what the session has.
@@ -5171,11 +5216,13 @@
     var acts = el.appendChild(mk("div", "spacts"));
     function actBtn(icon, cls, title) {
       var b = acts.appendChild(rpBtn("spact" + cls));
-      b.appendChild(gIcon(icon));
+      b.appendChild(typeof icon === "string" ? gIcon(icon) : icon);
       var s = b.appendChild(mk("span", null, title));
       return { b: b, note: s.appendChild(mk("span", "gs")) };
     }
-    var stop = actBtn("stop", "", wsT("js.lead.stop")), restart = actBtn("reload", "", wsT("js.lead.restart")), close = actBtn("power", " danger", wsT("js.lead.close"));
+    var stop = actBtn("stop", "", wsT("js.lead.stop")), restart = actBtn("reload", "", wsT("js.lead.restart"));
+    var handoff = actBtn(luIcon("square-terminal"), "", wsT("js.lead.handoff")), close = actBtn("power", " danger", wsT("js.lead.close"));
+    handoff.note.textContent = wsT("js.lead.handoff.note");
     close.note.textContent = wsT("js.lead.close.note");
     // bgTasks is the background task count of the last read state.
     function bgTasks() { return Number(lead.st && lead.st.background_tasks) || 0; }
@@ -5210,6 +5257,10 @@
       var n = bgTasks();
       if (n < 1 || window.confirm(wsTn("js.lead.restart.confirm", n))) act("restart", {});
     });
+    handoff.b.addEventListener("click", function () {
+      var n = bgTasks();
+      if (n < 1 || window.confirm(wsTn("js.lead.handoff.confirm", n))) act("handoff", {});
+    });
     close.b.addEventListener("click", function () {
       var n = bgTasks();
       if (window.confirm(n > 0 ? wsTn("js.lead.close.confirm.bg", n) : wsT("js.lead.close.confirm"))) act("close", {});
@@ -5228,6 +5279,7 @@
       var broken = Array.isArray(st.mcp_broken) ? st.mcp_broken.map(String) : [];
       restart.b.hidden = !broken.length;
       restart.b.disabled = P.busy;
+      handoff.b.disabled = P.busy;
       restart.note.textContent = broken.length ? wsT("js.lead.restart.note", broken.join(", ")) : "";
       close.b.disabled = P.busy;
       err.textContent = text;
@@ -5246,11 +5298,14 @@
     return P;
   }
 
-  function leadCan() { var st = lead.st; return !!(st && st.can_control && st.status !== "closed"); }
+  // leadGone reports a state with no process to control: closed for good,
+  // or handed to a terminal.
+  function leadGone(st) { return !st || st.status === "closed" || st.status === "handed_off"; }
+  function leadCan() { var st = lead.st; return !!(st && st.can_control && !leadGone(st)); }
   // leadFetch reads the viewed session's state and draws it; a read asked
   // for while one is in flight runs once after it.
   function leadFetch() {
-    if (!hostedPage || !window.fetch) return;
+    if ((!hostedPage && !handedPage) || !window.fetch) return;
     if (lead.busy) { lead.again = true; return; }
     lead.busy = true;
     tkFetch("/agents/" + encodeURIComponent(rid), undefined, function (status, v) {
@@ -5380,8 +5435,9 @@
       if (leadCan()) rp.P.draw();
       else railPopClose(false);
     }
+    handedDraw(st);
     if (!box) return;
-    var open = !!st && st.status !== "closed", pin = pinned(), keep = {};
+    var open = !leadGone(st), pin = pinned(), keep = {};
     var list = open && Array.isArray(st.approvals) ? st.approvals.filter(function (a) { return a && a.id; }) : [];
     var need = open && !list.length && st.action_needed ? String(st.action_needed) : "";
     list.forEach(function (a) { keep[a.id] = true; });
@@ -5412,6 +5468,38 @@
     fmtTimes(box);
     if (pin) pinConvo();
   }
+  // handedDraw shows, while st says the session was handed to a terminal,
+  // the notice that says so under the banner, with the command that resumes
+  // it there and its copy button when the state carries one; any other
+  // state takes the notice away. The notice is outside the regions, so an
+  // update leaves it.
+  var handedEl = null;
+  function handedDraw(st) {
+    var n = WsRail ? WsRail.handedNotice(st) : null;
+    if (!n) { if (handedEl) { handedEl.remove(); handedEl = null; } return; }
+    if (handedEl && handedEl.wsKey === n.command) return;
+    var banner = $("dash-banner");
+    if (!banner) return;
+    var el = mk("div", "handed");
+    el.wsKey = n.command;
+    el.setAttribute("role", "status");
+    el.appendChild(luIcon("square-terminal"));
+    var body = el.appendChild(mk("div", "hdbody"));
+    body.appendChild(mk("span", "hdtext", wsT("js.lead.handed")));
+    if (n.command) {
+      body.appendChild(mk("span", "hdlbl", wsT("js.lead.handed.resume")));
+      var line = body.appendChild(mk("span", "hdcmd"));
+      line.appendChild(mk("code", null, n.command));
+      var copy = line.appendChild(rpBtn("hdcopy"));
+      copy.title = wsT("js.lead.handed.copy");
+      copy.setAttribute("aria-label", wsT("js.lead.handed.copy"));
+      copy.appendChild(gIcon("copy"));
+      copy.addEventListener("click", function () { copyText(n.command); });
+    }
+    if (handedEl) handedEl.remove();
+    banner.parentNode.insertBefore(el, banner.nextSibling);
+    handedEl = el;
+  }
   // leadKey is the conversation's permission line as the state follows it:
   // its tool, arguments, and stamp; empty when the session waits on none.
   function leadKey() {
@@ -5422,6 +5510,10 @@
   }
   // leadSwapped runs after an update of a region the state follows.
   function leadSwapped(name) {
+    if (handedPage && !hostedPage) {
+      if (name === "head") leadFetch();
+      return;
+    }
     if (!hostedPage) return;
     if (name === "head") {
       leadChip();
@@ -5630,6 +5722,7 @@
   tlCount();
   apScan(region(mode === "index" ? "sessions" : "rail"));
   if (hostedPage) { lead.key = leadKey(); leadFetch(); }
+  else if (handedPage) leadFetch();
   syncBadge();
   fmtTimes(doc);
   mermaid();

@@ -1546,5 +1546,17 @@
   "js.lead.restart.confirm.one": "重启此会话？正在运行的 {0} 个后台任务将随进程一同结束。",
   "js.lead.restart.confirm.other": "重启此会话？正在运行的 {0} 个后台任务将随进程一同结束。",
   "js.lead.close.confirm.bg.one": "关闭此会话？其进程及正在运行的 {0} 个后台任务将结束，对话无法继续。",
-  "js.lead.close.confirm.bg.other": "关闭此会话？其进程及正在运行的 {0} 个后台任务将结束，对话无法继续。"
+  "js.lead.close.confirm.bg.other": "关闭此会话？其进程及正在运行的 {0} 个后台任务将结束，对话无法继续。",
+  "rail.takeover": "接管",
+  "rail.takeover.title": "在仪表盘中继续此会话",
+  "rail.reopen": "重新打开",
+  "rail.reopen.title": "在仪表盘中重新打开这个已关闭的会话",
+  "rail.revive.nosession": "此会话的 harness 没有报告可恢复的对话（它上次运行时使用的是较旧的 ws 插件）",
+  "js.lead.handoff": "交给终端",
+  "js.lead.handoff.note": "在此结束进程。随后页面会给出在终端中恢复对话的命令。",
+  "js.lead.handoff.confirm.one": "将此会话交给终端？正在运行的 {0} 个后台任务会随进程结束。",
+  "js.lead.handoff.confirm.other": "将此会话交给终端？正在运行的 {0} 个后台任务会随进程结束。",
+  "js.lead.handed": "此会话已交给终端。",
+  "js.lead.handed.resume": "在终端中恢复的命令",
+  "js.lead.handed.copy": "复制命令"
 }

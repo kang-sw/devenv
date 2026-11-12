@@ -143,6 +143,24 @@ check("picked options", R.leadBody("/w/r", { harness: "claude", model: "opus", e
   { root: "/w/r", harness: "claude", model: "opus", effort: "high", permission_mode: "plan" });
 check("pi takes no permission mode", R.leadBody("/w/r", { harness: "pi", model: "m", effort: "off", mode: "auto" }), { root: "/w/r", harness: "pi", model: "m", effort: "off" });
 
+// reviveRoute: a known move of a named session, its id escaped.
+check("takeover route", R.reviveRoute("takeover", "a b"), "/agents/a%20b/takeover");
+check("reopen route", R.reviveRoute("reopen", "s1"), "/agents/s1/reopen");
+check("unknown move or no session", [R.reviveRoute("close", "s1"), R.reviveRoute("toString", "s1"), R.reviveRoute("takeover", "")], ["", "", ""]);
+
+// markRevive: only the posting session's entry is busy; an empty id clears.
+var rv1 = row("r1"), rv2 = row("r2"), rv3 = row("r3");
+rv1.appendChild(new El("rrev")); rv2.appendChild(new El("rrev"));
+R.markRevive([rv1, rv2, rv3], "r2");
+check("posting entry busy", [rv1.querySelector(".rrev").className, rv2.querySelector(".rrev").className, rv2.querySelector(".rrev").getAttribute("aria-busy")], ["rrev", "rrev busy", "true"]);
+R.markRevive([rv1, rv2, rv3], "");
+check("cleared", [rv2.querySelector(".rrev").className, rv2.querySelector(".rrev").getAttribute("aria-busy")], ["rrev", null]);
+
+// handedNotice: only a handed-off state, with its resume command when any.
+check("handed off with a command", R.handedNotice({ status: "handed_off", resume_command: " cd /w && claude --resume x " }), { command: "cd /w && claude --resume x" });
+check("handed off without one", R.handedNotice({ status: "handed_off" }), { command: "" });
+check("other states", [R.handedNotice({ status: "closed", resume_command: "x" }), R.handedNotice({ status: "running" }), R.handedNotice(null)], [null, null, null]);
+
 // approvalText: the readable part of a tool input.
 check("a shell command", R.approvalText({ command: "git push origin develop", description: "push" }), "git push origin develop");
 check("an edit", R.approvalText({ file_path: "/w/a.go", old_string: "a\nb", new_string: "c" }), "/w/a.go\n- a\n- b\n+ c");
@@ -160,8 +178,8 @@ if (bad.length) console.log(bad.join("\n"));
 // cap, the stripping of lost image markers, the leave guard, starred-row
 // pinning and its undo, the persisted stars and collapsed workspaces, the
 // viewed row's mark, the add popovers' placement, branch filter, and
-// add-worktree request, the spawn request, and an approval card's input
-// preview.
+// add-worktree request, the spawn request, the revive route and entry
+// mark, the hand-off notice, and an approval card's input preview.
 func TestRailScript(t *testing.T) {
 	data, err := dashboardFS.ReadFile("assets/rail.js")
 	if err != nil {
