@@ -29,7 +29,11 @@ import (
 // "event: tracker" with data {"rev": N} on both pages' streams whenever the
 // tracker revision (TrackerChanged) differs from what that stream last
 // sent, including once right after connect; the page then re-reads the
-// tracker routes. A daemon without one never sends it.
+// tracker routes. A daemon without one never sends it. Every stream first
+// sends "event: assets" with data {"id"}: the identity of the page assets
+// the daemon serves now (assetID), which a page compares with the one it was
+// rendered with, so a tab opened before a daemon replacement learns on
+// reconnect that it runs other assets than the daemon serves.
 //
 // A session stream may name the regions it wants (?regions=entries,convlive):
 // it then sends only those, no mode pseudo-region unless named, and watches
@@ -210,6 +214,11 @@ type regionEvent struct {
 	Name string `json:"name"`
 	Hash string `json:"hash"`
 	HTML string `json:"html"`
+}
+
+// assetsEvent is an "event: assets" payload.
+type assetsEvent struct {
+	ID string `json:"id"`
 }
 
 // parseHeld reads the ?h= list of region hashes a page holds.
@@ -428,6 +437,14 @@ func (d *Daemon) stream(w http.ResponseWriter, r *http.Request, src pageSource, 
 		// sentRev is the tracker revision this stream last sent; the
 		// sentinel -1 sends revision 0 on connect too.
 		sentRev := int64(-1)
+		// The assets identity goes first, before any region of a new
+		// daemon's markup reaches a page that may run an old script.
+		if a, err := loadDashboardAssets(); err == nil {
+			payload, _ := json.Marshal(assetsEvent{ID: a.data.ID})
+			if sink.event("assets", payload) != nil || sink.flush() != nil {
+				return
+			}
+		}
 		send := func(pr pageRender, at uint64) bool {
 			d.broker.follow(sub, pr.deps, at)
 			if !pr.ok {

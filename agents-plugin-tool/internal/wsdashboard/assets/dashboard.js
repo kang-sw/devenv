@@ -4598,6 +4598,7 @@
     };
     return { close: function () { over = true; try { ws.close(); } catch (x) {} } };
   }
+  var ASSETS_TRIED = "ws.dashboard.assetsreload";
   function connect() {
     if (!window.WebSocket) return;
     var path = mode === "index" ? "/events" : "/s/" + rid + "/events";
@@ -4610,7 +4611,7 @@
         trackerLost();
         setTimeout(connect, 3000);
       },
-      events: { region: onRegion, tracker: onTracker, gone: onGone }
+      events: { assets: onAssets, region: onRegion, tracker: onTracker, gone: onGone }
     });
     function onRegion(ev) {
       if (!ev) return;
@@ -4635,6 +4636,20 @@
     }
     function onTracker(ev) {
       if (ev && typeof ev.rev === "number") trackerNudge(ev.rev);
+    }
+    // Every (re)connect first names the page assets the daemon serves now:
+    // other ones than this page runs (a replaced daemon) reload it, as
+    // modeChanged does, or banner while a draft is held. A daemon that names
+    // none, or a page rendered without one, never acts. A reload already
+    // tried for the same assets (per tab) banners instead, so a page can
+    // never reload in a loop.
+    function onAssets(ev) {
+      var mine = root.getAttribute("data-assets"), tried = null;
+      if (!ev || !ev.id || !mine || ev.id === mine) return;
+      try { tried = window.sessionStorage.getItem(ASSETS_TRIED); } catch (x) {}
+      if (holdsDraft() || tried === ev.id) { banner(wsT("js.banner.updated")); return; }
+      try { window.sessionStorage.setItem(ASSETS_TRIED, ev.id); } catch (x) {}
+      location.reload();
     }
     // The session left: the close that follows is final.
     function onGone() {

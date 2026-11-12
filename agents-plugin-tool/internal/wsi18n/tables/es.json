@@ -133,6 +133,7 @@
   "js.banner.appeared": "Apareció el estado en vivo de la sesión. Recarga para actualizar el diseño.",
   "js.banner.gone": "El panel ya no atiende esta sesión.",
   "js.banner.lang": "El idioma cambió. Recarga para aplicarlo.",
+  "js.banner.updated": "El panel se actualizó. Recarga para ejecutar la nueva versión.",
   "js.banner.wentaway": "El estado en vivo de la sesión desapareció. Recarga para actualizar el diseño.",
   "js.cancel.fail": "No se canceló: {0}",
   "js.cancel.ok": "Cancelado: el mensaje volvió al cuadro de mensaje.",

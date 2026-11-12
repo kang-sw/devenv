@@ -127,6 +127,10 @@ type pageAssetsData struct {
 	// page that offers terminals inlines (sessionPageData.Terminal).
 	XtermCSS     template.CSS
 	LucideSprite template.HTML
+	// ID is the assets' identity (assetID), which the page roots carry
+	// (data-assets) and every stream sends first (sse.go), so an open page
+	// can tell that the daemon now serves different assets than it runs.
+	ID string `json:"-"`
 }
 
 var (
@@ -222,6 +226,7 @@ func buildDashboardAssets(read func(name string) ([]byte, error)) (*dashboardAss
 			icons[m[1]] = true
 		}
 	}
+	a.data.ID = assetID(a.data, source)
 	a.tmpls = map[string]*template.Template{}
 	for _, l := range wsi18n.Languages() {
 		// The file's template is "dashboard.tmpl" under the root
@@ -234,6 +239,25 @@ func buildDashboardAssets(read func(name string) ([]byte, error)) (*dashboardAss
 	}
 	a.tmpl = a.tmpls[wsi18n.Default]
 	return a, nil
+}
+
+// assetID is the content hash of everything a dashboard page inlines: the
+// asset data (every inlined script, stylesheet, and sprite), the template
+// source, and every language's client string table. It is a content hash, not
+// the build time, so a daemon replacement that leaves the assets unchanged
+// keeps it; and it covers every language alike, so a page and its stream
+// agree whatever language each was rendered in. With dev assets on it follows
+// the files read for the build, so a page and the stream it opens disagree
+// only while a file changed in between, and the reload converges.
+func assetID(data pageAssetsData, source string) string {
+	h := sha256.New()
+	raw, _ := json.Marshal(data)
+	h.Write(raw)
+	h.Write([]byte(source))
+	for _, l := range wsi18n.Languages() {
+		h.Write([]byte(wsi18n.Script(l.Code)))
+	}
+	return hex.EncodeToString(h.Sum(nil))[:16]
 }
 
 // pageFuncs is the template FuncMap for one language: the page helpers and

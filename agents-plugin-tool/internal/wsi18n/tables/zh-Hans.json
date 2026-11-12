@@ -133,6 +133,7 @@
   "js.banner.appeared": "该会话的实时状态已出现。请重新加载以更新布局。",
   "js.banner.gone": "仪表盘不再为此会话提供服务。",
   "js.banner.lang": "语言已更改。请重新加载以应用。",
+  "js.banner.updated": "仪表盘已更新。请重新加载以运行新版本。",
   "js.banner.wentaway": "该会话的实时状态已消失。请重新加载以更新布局。",
   "js.cancel.fail": "未能取消：{0}",
   "js.cancel.ok": "已取消：消息已放回输入框。",

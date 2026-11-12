@@ -126,8 +126,8 @@ func handshake(t *testing.T, base, path, host string, headers map[string]string)
 
 // TestWebSocketStreamsSendWhatSSESends pins the WebSocket framing against
 // the SSE stream: for the same page state, a WebSocket stream sends the same
-// events with the same data, on connect (the regions, the tracker revision
-// sentinel), with ?h= (held regions skipped) and ?regions= (only those), on
+// events with the same data, on connect (the assets identity first, the
+// regions, the tracker revision sentinel), with ?h= (held regions skipped) and ?regions= (only those), on
 // the sessions index, after a change, and when the session leaves the index
 // ("gone", then the connection ends).
 func TestWebSocketStreamsSendWhatSSESends(t *testing.T) {
@@ -174,6 +174,11 @@ func TestWebSocketStreamsSendWhatSSESends(t *testing.T) {
 
 	for i, p := range pairs {
 		got := names(compare("connect", p))
+		if len(got) == 0 || !strings.HasPrefix(got[0], "assets:") {
+			t.Errorf("connect %s sent %v, want the assets identity first", p.path, got)
+		} else {
+			got = got[1:]
+		}
 		if !slices.Contains(got, `tracker:{"rev":0}`) {
 			t.Errorf("connect %s sent no tracker sentinel: %v", p.path, got)
 		}

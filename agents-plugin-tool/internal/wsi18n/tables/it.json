@@ -133,6 +133,7 @@
   "js.banner.appeared": "È apparso lo stato live della sessione. Ricarica per aggiornare il layout.",
   "js.banner.gone": "La dashboard non serve più questa sessione.",
   "js.banner.lang": "La lingua è cambiata. Ricarica per applicarla.",
+  "js.banner.updated": "La dashboard è stata aggiornata. Ricarica per eseguire la nuova versione.",
   "js.banner.wentaway": "Lo stato live della sessione è scomparso. Ricarica per aggiornare il layout.",
   "js.cancel.fail": "Non annullato: {0}",
   "js.cancel.ok": "Annullato: il messaggio è tornato nella casella di scrittura.",
