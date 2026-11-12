@@ -280,33 +280,82 @@ func TestAppendDuringHeldFetchSurvivesAndIsPushed(t *testing.T) {
 	}
 }
 
+// refusedRename is the error renameDir answers in place of a rename that
+// Windows refuses while a file in the directory is open.
+func refusedRename(from, to string) error {
+	return &os.LinkError{Op: "rename", Old: from, New: to, Err: os.ErrPermission}
+}
+
+// dirTree lists every path under dir, relative to it, sorted, but the
+// write lock file, which an unregister creates when it takes the lock.
+func dirTree(t *testing.T, dir string) []string {
+	t.Helper()
+	var paths []string
+	err := filepath.WalkDir(dir, func(path string, _ os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(dir, path)
+		if rel != writeLockFile {
+			paths = append(paths, rel)
+		}
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return paths
+}
+
 // TestUnregisterDuringHeldFetchDiscardsTheResult: a check in flight does
-// not make an unregister wait or refuse. The store is removed under the
-// check, by this process or another, and the check's apply step, finding
-// the registration gone, applies nothing: the check answers
-// ErrNotRegistered, the handle is dropped, and nothing of the store's
-// directory comes back. Where the rename follows the locks' release and is
-// refused while the fetch holds a file in the directory (Windows; the last
-// case refuses it on every OS), the unregister still succeeds and the
-// check moves the directory away when it ends.
+// not make an unregister refuse. The store is removed under the check, by
+// this process or another, and the check's apply step, finding the
+// registration gone, applies nothing: the check answers ErrNotRegistered,
+// the handle is dropped, and nothing of the store's directory comes back.
+//
+// Where the rename follows the locks' release (Windows), the fetch's
+// network lock file refuses it until the check ends, so the unregister
+// retries it; each case releases the fetch at the first refused rename. The
+// last two cases refuse the rename on every OS: until the fetch is
+// released, which the unregister outlasts, or past the retry window, when
+// the unregister fails, the store is registered as before, and the
+// released check applies what it fetched.
 func TestUnregisterDuringHeldFetchDiscardsTheResult(t *testing.T) {
-	for _, who := range []string{"this process", "another process", "another process, rename refused"} {
+	for _, who := range []string{"this process", "another process",
+		"another process, rename refused until the fetch ends", "another process, rename refused past the window"} {
 		t.Run(who, func(t *testing.T) {
 			w := newWorld(t)
 			runner := newHoldRunner(isWikiFetch)
 			runner.after = true
-			if strings.HasSuffix(who, "rename refused") {
-				wasUnder, wasRename := renameUnderLocks, renameDir
-				t.Cleanup(func() { renameUnderLocks, renameDir = wasUnder, wasRename })
+			wasUnder, wasRename, wasWindow := renameUnderLocks, renameDir, renameWindow
+			t.Cleanup(func() { renameUnderLocks, renameDir, renameWindow = wasUnder, wasRename, wasWindow })
+			rename := wasRename
+			pastWindow := strings.HasSuffix(who, "past the window")
+			switch {
+			case pastWindow:
+				renameUnderLocks, renameWindow = false, 300*time.Millisecond
+				rename = refusedRename
+			case strings.HasSuffix(who, "until the fetch ends"):
 				renameUnderLocks = false
-				renameDir = func(from, to string) error {
+				rename = func(from, to string) error {
 					select {
 					case <-runner.release:
 						return wasRename(from, to)
 					default:
-						return &os.LinkError{Op: "rename", Old: from, New: to, Err: errors.New("access is denied")}
+						return refusedRename(from, to)
 					}
 				}
+			}
+			refused := make(chan struct{}, 1)
+			renameDir = func(from, to string) error {
+				err := rename(from, to)
+				if err != nil {
+					select {
+					case refused <- struct{}{}:
+					default:
+					}
+				}
+				return err
 			}
 			a := hostWith(t, w, "a", runner)
 			b := w.machine("b")
@@ -316,7 +365,7 @@ func TestUnregisterDuringHeldFetchDiscardsTheResult(t *testing.T) {
 			if _, err := a.Check(ctx, "team"); err != nil {
 				t.Fatal(err)
 			}
-			createItem(t, b, "team", "fetched, never applied")
+			fetched := createItem(t, b, "team", "fetched, never applied")
 			syncStore(t, b, "team")
 			remover := a
 			if who != "this process" {
@@ -330,11 +379,52 @@ func TestUnregisterDuringHeldFetchDiscardsTheResult(t *testing.T) {
 				checked <- err
 			}()
 			<-runner.entered
+			before := dirTree(t, res.Entry.Dir)
 
-			if err := remover.Unregister(ctx, "team", ""); err != nil {
+			unregistered := make(chan error, 1)
+			go func() { unregistered <- remover.Unregister(ctx, "team", "") }()
+			var err error
+			released := false
+			select {
+			case err = <-unregistered:
+			case <-refused:
+				if !pastWindow {
+					close(runner.release)
+					released = true
+				}
+				err = <-unregistered
+			}
+			if !released {
+				close(runner.release)
+			}
+
+			if pastWindow {
+				if err == nil || !errors.Is(err, os.ErrPermission) || !strings.Contains(err.Error(), "in use") {
+					t.Fatalf("unregister with the rename refused past the window = %v, want the in-use error", err)
+				}
+				if e, err := a.Entry("team"); err != nil || e.Nonce != res.Entry.Nonce {
+					t.Fatalf("entry after the failed unregister = %+v, %v, want the registration back", e, err)
+				}
+				if after := dirTree(t, res.Entry.Dir); !slices.Equal(after, before) {
+					t.Fatalf("the store directory after the failed unregister = %v, want %v", after, before)
+				}
+				if err := <-checked; err != nil {
+					t.Fatalf("check of the store registered again: %v", err)
+				}
+				if !hasItem(view(t, a, "team"), fetched) || !hasItem(view(t, remover, "team"), fetched) {
+					t.Fatal("the check's fetched item is missing once the store was registered again")
+				}
+				renameDir = wasRename
+				if err := remover.Unregister(ctx, "team", ""); err != nil {
+					t.Fatalf("unregister once the rename is allowed: %v", err)
+				}
+				wantGone(t, a, "team")
+				return
+			}
+
+			if err != nil {
 				t.Fatalf("unregister under a held fetch: %v", err)
 			}
-			close(runner.release)
 			if err := <-checked; !errors.Is(err, ErrNotRegistered) {
 				t.Fatalf("check of a store unregistered during its fetch = %v, want ErrNotRegistered", err)
 			}

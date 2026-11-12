@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -338,6 +339,83 @@ func TestUnregisterSeenByAnotherProcess(t *testing.T) {
 	other.PollOnce(ctx)
 	other.CheckAll(ctx)
 	wantGone(t, a, "team")
+}
+
+// TestUnregisterRefusedRenameRestoresTheStore: where the rename follows the
+// locks' release, a file another program holds open in the store directory
+// (no network call involved) refuses it, and the unregister retries it for
+// the retry window; a rename failing otherwise is not retried. Either way
+// the unregister fails (the in-use error for a refusal) and the store is
+// registered as before with its directory untouched: a process that found
+// it gone meanwhile and dropped its handle opens it again on its next call
+// and writes to it, and an unregister once the directory is free removes
+// it.
+func TestUnregisterRefusedRenameRestoresTheStore(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		fail    error
+		inUse   bool
+		retried bool
+	}{
+		{"refused", os.ErrPermission, true, true},
+		{"failed otherwise", errors.New("the device is not ready"), false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			wasUnder, wasRename, wasWindow := renameUnderLocks, renameDir, renameWindow
+			t.Cleanup(func() { renameUnderLocks, renameDir, renameWindow = wasUnder, wasRename, wasWindow })
+			renameUnderLocks, renameWindow = false, 300*time.Millisecond
+			w := newWorld(t)
+			a := w.machine("ada")
+			res := w.register(a, "team", "ada", &wstracker.Profile{Given: "Ada"})
+			kept := createItem(t, a, "team", "kept")
+			syncStore(t, a, "team")
+			other := sameRoot(t, w, "ada")
+			_ = view(t, other, "team")
+			held := other.stores["team"]
+			ctx := context.Background()
+			before := dirTree(t, res.Entry.Dir)
+
+			attempts := 0
+			var inGap error
+			renameDir = func(from, to string) error {
+				if attempts++; attempts == 1 {
+					// The registration is gone while the rename is retried.
+					_, inGap = other.View(ctx, "team", 0)
+				}
+				return &os.LinkError{Op: "rename", Old: from, New: to, Err: tc.fail}
+			}
+			err := a.Unregister(ctx, "team", "")
+			if err == nil || !errors.Is(err, tc.fail) || strings.Contains(err.Error(), "in use") != tc.inUse {
+				t.Fatalf("unregister with the rename %s = %v", tc.name, err)
+			}
+			if (attempts > 1) != tc.retried {
+				t.Fatalf("rename attempts = %d, retried want %v", attempts, tc.retried)
+			}
+			if !errors.Is(inGap, ErrNotRegistered) || !held.retired {
+				t.Fatalf("view in the other process during the rename = %v (handle retired %v), want ErrNotRegistered", inGap, held.retired)
+			}
+			if e, err := a.Entry("team"); err != nil || e.Nonce != res.Entry.Nonce {
+				t.Fatalf("entry after the failed unregister = %+v, %v, want the registration back", e, err)
+			}
+			if after := dirTree(t, res.Entry.Dir); !slices.Equal(after, before) {
+				t.Fatalf("the store directory after the failed unregister = %v, want %v", after, before)
+			}
+
+			if !hasItem(view(t, other, "team"), kept) || !hasItem(view(t, a, "team"), kept) {
+				t.Fatal("the store registered again must read as before")
+			}
+			written := createItem(t, other, "team", "after the failed unregister")
+			if !hasItem(view(t, a, "team"), written) {
+				t.Fatal("a write after the failed unregister must land in the store")
+			}
+			syncStore(t, other, "team")
+			renameDir = wasRename
+			if err := a.Unregister(ctx, "team", ""); err != nil {
+				t.Fatalf("unregister once the rename is allowed: %v", err)
+			}
+			wantGone(t, a, "team")
+		})
+	}
 }
 
 // TestUnregisterThenReRegisterElsewhere: a second Host that holds the store

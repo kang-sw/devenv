@@ -119,10 +119,6 @@ type store struct {
 	// lastSweep is when the staged-attachment sweep last ran
 	// (attachments.go).
 	lastSweep time.Time
-	// dirInfo is the store directory as it was when this handle opened or
-	// created it (statDir), so removeLeftover moves only that directory.
-	// Guarded by mu.
-	dirInfo os.FileInfo
 
 	// viewMu guards ViewWithin's state, apart from mu so a waiting read
 	// never holds mu: snap is the view the last reload folded, cur the
@@ -239,7 +235,6 @@ func (h *Host) open(ctx context.Context, st *store) error {
 	}
 	st.ledger = l
 	st.tracker = wstracker.New(l, l.MemberID()+"."+l.CloneID())
-	st.dirInfo = statDir(st.entry.Dir)
 	h.trySweep(st)
 	return nil
 }
@@ -401,7 +396,6 @@ func (h *Host) withNet(ctx context.Context, id string, fn func(ctx context.Conte
 		if _, gone := h.Entry(id); errors.Is(gone, ErrNotRegistered) {
 			st.mu.Lock()
 			h.retire(st)
-			h.removeLeftover(st)
 			st.mu.Unlock()
 			return gone
 		}
@@ -668,7 +662,7 @@ func (h *Host) Register(ctx context.Context, req RegisterRequest) (RegisterResul
 	// for this registration instead of opening a second ledger on the
 	// directory. The network mutex is taken first, as everywhere, and held
 	// through the sync that publishes the profile.
-	st := &store{id: entry.ID, nonce: entry.Nonce, entry: entry, dirInfo: statDir(entry.Dir)}
+	st := &store{id: entry.ID, nonce: entry.Nonce, entry: entry}
 	st.net.Lock()
 	defer st.net.Unlock()
 	st.mu.Lock()
